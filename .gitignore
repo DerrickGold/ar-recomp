@@ -1,0 +1,42 @@
+# ROM files (user must supply their own)
+*.sfc
+*.smc
+*.srm
+
+# Build output
+build/
+*.o
+*.exe
+*.out
+
+# snesrecomp generated output
+src/generated/*.c
+src/generated/*.h
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Dependencies (cloned repos)
+third_party/
+
+# Test artifacts
+tests/golden/*.png
+tests/replays/*.bin
+
+# Trace logs (too large for git)
+*.trace
+*.cdl
+*.log
