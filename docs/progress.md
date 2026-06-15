@@ -15,10 +15,10 @@
 - [x] macOS build script created (tools/build-macos.sh)
 - [ ] Install Mesen2 emulator/debugger
 - [ ] Install DiztinGUIsh disassembler
-- [ ] Install SDL2 and build dependencies
-- [ ] Create remaining bank configs (banks 01-1C)
-- [ ] Create game-specific runtime files (main.c, cpu_infra.c, etc.)
-- [ ] Create CMakeLists.txt
+- [x] Install SDL2 and build dependencies
+- [x] Create remaining bank configs (banks 01-1C)
+- [x] Create game-specific runtime files (main.c, cpu_infra.c, etc.)
+- [x] Create CMakeLists.txt
 
 ## Phase 2: ROM Analysis & Trace Generation
 - [x] ROM map documented (docs/rom-map.md)
@@ -31,9 +31,9 @@
 
 ## Phase 3: Automated Recompilation
 - [x] Bank 00 recompilation successful (proof of concept)
-- [ ] Create configs for remaining code banks
-- [ ] Full recompilation of all banks
-- [ ] First compile of generated C
+- [x] Create configs for remaining code banks
+- [x] Full recompilation of all banks (29 banks, 44 stubs for indirect dispatch)
+- [x] First compile of generated C (builds and runs without crashes)
 - [ ] Title screen rendering
 - [ ] First level playable
 

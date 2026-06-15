@@ -36,7 +36,7 @@ if [ ! -d "src/gen" ] || [ -z "$(ls -A src/gen/ 2>/dev/null)" ]; then
 fi
 
 echo "=== Building ActRaiser Recompiled ($CONFIG) ==="
-cmake -S . -B build -G Ninja \
+cmake -S . -B build -G "Unix Makefiles" \
   -DCMAKE_BUILD_TYPE="$CONFIG" \
   -DCMAKE_PREFIX_PATH="$(brew --prefix 2>/dev/null || echo /usr/local)"
 
