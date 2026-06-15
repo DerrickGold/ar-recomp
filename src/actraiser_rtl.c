@@ -10,8 +10,6 @@
 #include <stdbool.h>
 #include <ucontext.h>
 #include <stdlib.h>
-#include <signal.h>
-#include <unistd.h>
 
 extern int snes_frame_counter;
 
@@ -26,26 +24,8 @@ void ActRaiser_YieldToHost(void) {
   swapcontext(&g_game_ctx, &g_host_ctx);
 }
 
-static volatile int g_trace_active;
-
-static void trace_alarm_handler(int sig) {
-  (void)sig;
-  extern const char *g_last_recomp_func;
-  extern const char *g_recomp_stack[];
-  extern int g_recomp_stack_top;
-  fprintf(stderr, "[TRACE] stuck in: %s\n", g_last_recomp_func ? g_last_recomp_func : "(null)");
-  fprintf(stderr, "[TRACE] call stack (depth=%d):\n", g_recomp_stack_top);
-  for (int i = g_recomp_stack_top - 1; i >= 0 && i >= g_recomp_stack_top - 10; i--)
-    fprintf(stderr, "  [%d] %s\n", g_recomp_stack_top - 1 - i, g_recomp_stack[i]);
-  g_trace_active = 0;
-}
-
 static void game_coroutine(void) {
   cpu_state_init(&g_cpu, g_ram);
-
-  signal(SIGALRM, trace_alarm_handler);
-  g_trace_active = 1;
-  alarm(30);
 
   ResetHandler_M1X1(&g_cpu);
   for (;;)
@@ -103,5 +83,11 @@ void RunOneFrameOfGame(void) {
   g_snes->forceNmi = false;
 
   g_snes->inNmi = true;
+  /* NmiHandler ends in RTI, which pops a hardware interrupt frame
+   * (P/PC/PB). Push the matching frame first — otherwise the RTI
+   * over-pops the stack and loads garbage into cpu->P, corrupting the
+   * M/X width flags of the interrupted game code. Symmetric to the
+   * IRQ path in ActRaiserDrawPpuFrame. */
+  cpu_push_interrupt_frame(&g_cpu);
   NmiHandler_M1X1(&g_cpu);
 }

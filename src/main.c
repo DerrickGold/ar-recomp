@@ -217,6 +217,18 @@ int main(int argc, char **argv) {
     }
 
     uint32 inputs = g_input_state;
+    {
+      /* TEMP DEBUG: force a button after N frames to auto-advance the
+       * intro without a real keypress, for headless crash repro. */
+      static const char *force_env;
+      static int force_after = -2;
+      if (force_after == -2) { force_env = getenv("AR_FORCE_INPUT_AFTER");
+        force_after = force_env ? atoi(force_env) : -1; }
+      if (force_after >= 0) {
+        extern int snes_frame_counter;
+        if (snes_frame_counter >= force_after) inputs |= 0x0001; /* B */
+      }
+    }
     RtlApuLock();
     bool r = RtlRunFrame(inputs);
     (void)r;
