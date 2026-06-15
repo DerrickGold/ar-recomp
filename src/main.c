@@ -21,6 +21,7 @@
 #include "snes/snes.h"
 #include "cpu_trace.h"
 #include "debug_server.h"
+#include "framedump.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 static SDL_Window *g_window;
@@ -93,6 +94,44 @@ static void RtlDrawPpuFrame(void) {
   g_rtl_game_info->draw_ppu_frame();
 }
 
+/* Differential-oracle capture: emit per-frame WRAM changes as JSONL in the
+ * exact shape snesref (tools/oracle) emits, so the two traces can be diffed
+ * to find the first divergence (frame + WRAM byte). Enabled by AR_WRAM_TRACE
+ * (output path); range via AR_TRACE_LO/HI (default full 128KB). */
+static FILE *g_wram_trace;
+static uint8_t g_wram_prev[0x20000];
+static bool g_wram_primed;
+static uint32_t g_wram_lo = 0x00000, g_wram_hi = 0x1ffff;
+
+static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
+  if (!g_wram_primed) {
+    memcpy(g_wram_prev + g_wram_lo, wram + g_wram_lo, g_wram_hi - g_wram_lo + 1);
+    g_wram_primed = true;
+    return;
+  }
+  for (uint32_t a = g_wram_lo; a <= g_wram_hi; a++) {
+    if (wram[a] != g_wram_prev[a]) {
+      fprintf(g_wram_trace, "{\"f\":%u,\"adr\":\"0x%05x\",\"old\":\"0x%02x\",\"val\":\"0x%02x\"}\n",
+              frame, a, g_wram_prev[a], wram[a]);
+      g_wram_prev[a] = wram[a];
+    }
+  }
+  if ((frame % 30) == 0) fflush(g_wram_trace);
+}
+
+static void WramTraceInit(void) {
+  const char *path = getenv("AR_WRAM_TRACE");
+  if (!path || !path[0]) return;
+  const char *v;
+  if ((v = getenv("AR_TRACE_LO")) && v[0]) g_wram_lo = (uint32_t)strtoul(v, NULL, 0);
+  if ((v = getenv("AR_TRACE_HI")) && v[0]) g_wram_hi = (uint32_t)strtoul(v, NULL, 0);
+  if (g_wram_hi > 0x1ffff) g_wram_hi = 0x1ffff;
+  g_wram_trace = fopen(path, "w");
+  if (!g_wram_trace) { fprintf(stderr, "AR_WRAM_TRACE: cannot open %s\n", path); return; }
+  g_framedump_callback = WramTraceCallback;
+  fprintf(stderr, "[wram-trace] -> %s  range=[0x%05x,0x%05x]\n", path, g_wram_lo, g_wram_hi);
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
@@ -128,30 +167,41 @@ int main(int argc, char **argv) {
   }
   fprintf(stderr, "Loaded ROM: %s (%zu bytes)\n", rom_path, rom_size);
 
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
+  /* Headless mode for the differential-oracle harness: no window/renderer,
+   * run uncapped. PPU emulation still runs (HDMA/IRQ timing affects game
+   * state); only the on-screen present is skipped. Parallels snesref's
+   * SNESREF_HEADLESS. */
+  bool headless = getenv("AR_HEADLESS") && getenv("AR_HEADLESS")[0]
+                  && getenv("AR_HEADLESS")[0] != '0';
+
+  Uint32 sdl_flags = SDL_INIT_AUDIO;
+  if (!headless) sdl_flags |= SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER;
+  if (SDL_Init(sdl_flags) != 0) {
     fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return 1;
   }
 
-  int scale = g_config.window_scale ? g_config.window_scale : 3;
-  g_window = SDL_CreateWindow(
-    kWindowTitle,
-    SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-    g_snes_width * scale, g_snes_height * scale,
-    SDL_WINDOW_RESIZABLE
-  );
-  if (!g_window) Die("SDL_CreateWindow failed");
+  if (!headless) {
+    int scale = g_config.window_scale ? g_config.window_scale : 3;
+    g_window = SDL_CreateWindow(
+      kWindowTitle,
+      SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+      g_snes_width * scale, g_snes_height * scale,
+      SDL_WINDOW_RESIZABLE
+    );
+    if (!g_window) Die("SDL_CreateWindow failed");
 
-  g_renderer = SDL_CreateRenderer(g_window, -1,
-    SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-  if (!g_renderer) Die("SDL_CreateRenderer failed");
+    g_renderer = SDL_CreateRenderer(g_window, -1,
+      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!g_renderer) Die("SDL_CreateRenderer failed");
 
-  g_texture = SDL_CreateTexture(g_renderer,
-    SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-    g_snes_width, g_snes_height);
-  if (!g_texture) Die("SDL_CreateTexture failed");
+    g_texture = SDL_CreateTexture(g_renderer,
+      SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+      g_snes_width, g_snes_height);
+    if (!g_texture) Die("SDL_CreateTexture failed");
 
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
+    SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
+  }
 
   g_spc_player = ActRaiserSpcPlayer_Create();
 
@@ -160,6 +210,42 @@ int main(int argc, char **argv) {
   if (!snes) Die("SnesInit failed");
 
   PpuBeginDrawing(g_ppu, g_pixels, g_snes_width * 4, 0);
+
+  /* Power-on WRAM fill. The SNES does not clear WRAM at power-on; snes9x (our
+   * reference emulator) fills it with the 0x55 pattern, and ActRaiser's title
+   * sequence depends on that — with zero-filled WRAM the title's per-frame loop
+   * takes a path that underflows the SNES stack and crashes into the $2100
+   * open-bus reads (bank_02_AF86). Match snes9x: fill g_ram with 0x55 before
+   * boot so uninitialized-RAM reads agree with the reference. AR_WRAM_INIT
+   * overrides with an exact dump (used by the differential harness). */
+  {
+    extern uint8 g_ram[0x20000];
+    const char *fenv = getenv("AR_WRAM_FILL");
+    int fill = fenv ? (int)strtoul(fenv, NULL, 0) : 0x55;
+    memset(g_ram, fill, 0x20000);
+    const char *wp0 = getenv("AR_WRAM_INIT");
+    if (wp0 && wp0[0]) {
+      FILE *f = fopen(wp0, "rb");
+      if (f) { size_t n = fread(g_ram, 1, 0x20000, f); fclose(f);
+        fprintf(stderr, "[wram-init] seeded %zu bytes from %s\n", n, wp0); }
+      else fprintf(stderr, "AR_WRAM_INIT: cannot open %s\n", wp0);
+    }
+  }
+
+  /* Power-on battery SRAM fill. A never-written cartridge battery is NOT zero;
+   * snes9x (our reference) powers SRAM up to the 0x60 pattern, and ActRaiser
+   * validates its save data — an all-zero SRAM is misread as a corrupt/level-0
+   * save (the "must be level 1" symptom) instead of "blank -> new game". Match
+   * the reference so the save-validity check behaves identically. Only applies
+   * to a fresh cart (cart_load zero-fills it); a real .sav load overrides. */
+  {
+    extern uint8 *g_sram; extern int g_sram_size;
+    const char *senv = getenv("AR_SRAM_FILL");
+    int sfill = senv ? (int)strtoul(senv, NULL, 0) : 0x60;
+    if (g_sram && g_sram_size > 0) memset(g_sram, sfill, g_sram_size);
+  }
+
+  WramTraceInit();
 
   g_audio_mutex = SDL_CreateMutex();
   if (g_config.enable_audio) {
@@ -222,12 +308,26 @@ int main(int argc, char **argv) {
        * intro without a real keypress, for headless crash repro. */
       static const char *force_env;
       static int force_after = -2;
+      static unsigned force_mask = 0;
+      static int pulse_frames[16]; static int n_pulses = -1;
       if (force_after == -2) { force_env = getenv("AR_FORCE_INPUT_AFTER");
-        force_after = force_env ? atoi(force_env) : -1; }
-      if (force_after >= 0) {
-        extern int snes_frame_counter;
-        if (snes_frame_counter >= force_after) inputs |= 0x0001; /* B */
+        force_after = force_env ? atoi(force_env) : -1;
+        const char *m = getenv("AR_FORCE_INPUT_MASK");
+        force_mask = m ? (unsigned)strtoul(m, NULL, 0) : 0x0001; /* default B */ }
+      if (n_pulses == -1) { n_pulses = 0;
+        /* AR_FORCE_PULSES="150,210,...": press force_mask for 4 frames as an
+         * EDGE (press+release) starting at each listed frame, to drive menus
+         * that need distinct button presses (e.g. B skip-swirl, then B select). */
+        const char *p = getenv("AR_FORCE_PULSES");
+        if (p) for (; *p && n_pulses < 16; ) {
+          pulse_frames[n_pulses++] = atoi(p);
+          while (*p && *p != ',') p++; if (*p == ',') p++; }
       }
+      extern int snes_frame_counter;
+      if (force_after >= 0 && snes_frame_counter >= force_after) inputs |= force_mask;
+      for (int i = 0; i < n_pulses; i++)
+        if (snes_frame_counter >= pulse_frames[i] && snes_frame_counter < pulse_frames[i] + 4)
+          inputs |= force_mask;
     }
     RtlApuLock();
     bool r = RtlRunFrame(inputs);
@@ -236,12 +336,20 @@ int main(int argc, char **argv) {
 
     RtlDrawPpuFrame();
 
-    SDL_UpdateTexture(g_texture, NULL, g_pixels, g_snes_width * 4);
-    SDL_RenderClear(g_renderer);
-    SDL_RenderCopy(g_renderer, g_texture, NULL, NULL);
-    SDL_RenderPresent(g_renderer);
+    if (!headless) {
+      SDL_UpdateTexture(g_texture, NULL, g_pixels, g_snes_width * 4);
+      SDL_RenderClear(g_renderer);
+      SDL_RenderCopy(g_renderer, g_texture, NULL, NULL);
+      SDL_RenderPresent(g_renderer);
+    }
 
-    if (!g_turbo) {
+    if (headless) {
+      extern int snes_frame_counter;
+      static int quit_frames = -2;
+      if (quit_frames == -2) { const char *q = getenv("AR_QUIT_FRAMES");
+        quit_frames = q ? atoi(q) : -1; }
+      if (quit_frames > 0 && snes_frame_counter >= quit_frames) running = false;
+    } else if (!g_turbo) {
       uint32 now = SDL_GetTicks();
       uint32 elapsed = now - last_tick;
       if (elapsed < 16)
