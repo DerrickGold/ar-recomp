@@ -102,6 +102,39 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
     if (f18 >= 0) { extern uint8 g_ram[0x20000]; g_ram[0x18] = (uint8)f18; }
   }
 
+  /* AR_FRAMELOG=1: at each vblank yield, report how much game code ran since the
+   * previous yield (push delta) plus the key action-engine RAM bytes. A large,
+   * steady push delta with $E6 (time) ticking = engine running. A tiny push delta
+   * = the main loop is spinning on the vblank wait WITHOUT running per-frame logic
+   * (dispatch/gate problem). $E6 frozen while pushes are large = logic runs but a
+   * pause/timer gate is suppressing advancement. */
+  if (getenv("AR_FRAMELOG")) {
+    extern unsigned long g_recomp_push_count;
+    extern uint8 g_ram[0x20000];
+    static unsigned long last_push;
+    /* return frame is at pre-pop S (we already did S+=2 above) */
+    uint16 sp = (uint16)(cpu->S - 2);
+    uint16 ret = (uint16)(((g_ram[(uint16)(sp + 2)] << 8) | g_ram[(uint16)(sp + 1)]) + 1);
+    fprintf(stderr,
+      "[frame] f=%d push+%lu callsite=%02x:%04x A=%04x m=%d $18=%02x $19=%02x $1A=%02x $1B=%02x $F4=%02x $F5=%02x $FB=%02x time$E6=%02x%02x HP$1D=%02x\n",
+      snes_frame_counter, g_recomp_push_count - last_push, cpu->PB, ret,
+      cpu->A, cpu->m_flag,
+      g_ram[0x18], g_ram[0x19], g_ram[0x1A], g_ram[0x1B],
+      g_ram[0xF4], g_ram[0xF5], g_ram[0xFB], g_ram[0xE7], g_ram[0xE6], g_ram[0x1D]);
+    last_push = g_recomp_push_count;
+  }
+
+  /* AR_CTACTION=1: one-shot full call trace of a single stuck action-mode frame.
+   * State machine: arm tracing for the next inter-yield batch the first time we
+   * see $18==1, then disarm at the following yield. Captures exactly the ~45
+   * functions of the frozen action loop. */
+  if (getenv("AR_CTACTION")) {
+    /* End of an inter-yield batch: flush it if it contained the corrupting
+     * 8465_M0X0, else discard and start fresh. Captures the exact m=1->0 frame. */
+    extern void RecompBatchYield(void);
+    RecompBatchYield();
+  }
+
   ActRaiser_YieldToHost();
   return RECOMP_RETURN_NORMAL;
 }
@@ -151,6 +184,7 @@ void RunOneFrameOfGame(void) {
   }
 
   g_snes->forceNmi = true;
+  g_snes->nmiAvail = true;   /* fresh RDNMI ($4210 bit7) vblank token this frame */
   swapcontext(&g_host_ctx, &g_game_ctx);
   g_snes->forceNmi = false;
 

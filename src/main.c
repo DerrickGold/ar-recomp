@@ -52,6 +52,49 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs) {
   (void)funcs;
 }
 
+/* Diagnostic state dump (hotkey F9, and automatically on exit). Writes the
+ * live execution state to saves/ so a frozen/buggy moment can be handed off
+ * for analysis without re-navigating menus: full WRAM + battery SRAM as raw
+ * binaries, plus a human-readable summary (CPU regs, frame, current function,
+ * recomp call stack, and a few documented game-state bytes). */
+void DumpDiagState(const char *tag) {
+  extern uint8 g_ram[0x20000];
+  extern uint8 *g_sram; extern int g_sram_size;
+  extern CpuState g_cpu;
+  extern int snes_frame_counter;
+  extern const char *g_last_recomp_func;
+  extern const char *g_recomp_stack[]; extern int g_recomp_stack_top;
+#ifndef _WIN32
+  mkdir("saves", 0755);
+#endif
+  FILE *f = fopen("saves/dump_wram.bin", "wb");
+  if (f) { fwrite(g_ram, 1, 0x20000, f); fclose(f); }
+  if (g_sram && g_sram_size > 0) {
+    f = fopen("saves/dump_sram.bin", "wb");
+    if (f) { fwrite(g_sram, 1, (size_t)g_sram_size, f); fclose(f); }
+  }
+  f = fopen("saves/dump_state.txt", "w");
+  if (f) {
+    fprintf(f, "=== ActRaiser recomp state dump (%s) ===\n", tag ? tag : "");
+    fprintf(f, "frame=%d  last_func=%s\n", snes_frame_counter,
+            g_last_recomp_func ? g_last_recomp_func : "(none)");
+    fprintf(f, "A=%04x X=%04x Y=%04x S=%04x D=%04x DB=%02x PB=%02x P=%02x"
+            " m=%d x=%d\n", g_cpu.A, g_cpu.X, g_cpu.Y, g_cpu.S, g_cpu.D,
+            g_cpu.DB, g_cpu.PB, g_cpu.P, g_cpu.m_flag, g_cpu.x_flag);
+    fprintf(f, "recomp call stack (innermost first), depth=%d:\n",
+            g_recomp_stack_top);
+    for (int i = g_recomp_stack_top - 1; i >= 0; i--)
+      fprintf(f, "  [%d] %s\n", g_recomp_stack_top - 1 - i,
+              g_recomp_stack[i] ? g_recomp_stack[i] : "?");
+    /* A few documented WRAM bytes (see docs/ram-map.md). */
+    fprintf(f, "game-state: $18=%02x $19=%02x  town-level $0291=%04x\n",
+            g_ram[0x18], g_ram[0x19], g_ram[0x0291] | (g_ram[0x0292] << 8));
+    fclose(f);
+  }
+  fprintf(stderr, "[dump] wrote saves/dump_{wram.bin,sram.bin,state.txt} (%s)\n",
+          tag ? tag : "");
+}
+
 void RtlApuLock(void) {
   if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
 }
@@ -245,6 +288,9 @@ int main(int argc, char **argv) {
     if (g_sram && g_sram_size > 0) memset(g_sram, sfill, g_sram_size);
   }
 
+  /* Load persisted battery save (overrides the fresh-cart fill if present). */
+  RtlReadSram();
+
   WramTraceInit();
 
   g_audio_mutex = SDL_CreateMutex();
@@ -287,6 +333,8 @@ int main(int argc, char **argv) {
           } else if (event.key.keysym.sym == SDLK_F7) {
             RtlSaveLoad(kSaveLoad_Load, 0);
             fprintf(stderr, "State loaded.\n");
+          } else if (event.key.keysym.sym == SDLK_F9) {
+            DumpDiagState("hotkey");
           } else {
             HandleInput(event.key.keysym.sym, true);
           }
@@ -334,6 +382,25 @@ int main(int argc, char **argv) {
     (void)r;
     RtlApuUnlock();
 
+    /* Auto-persist battery SRAM the moment the game writes a save, so progress
+     * survives a freeze/force-quit (the clean-exit RtlWriteSram never runs if
+     * the game hangs). Cheap: only writes when the 8KB SRAM actually changes. */
+    {
+      extern uint8 *g_sram; extern int g_sram_size;
+      static uint8 *sram_shadow; static int shadow_size;
+      if (g_sram && g_sram_size > 0) {
+        if (!sram_shadow || shadow_size != g_sram_size) {
+          free(sram_shadow);
+          sram_shadow = malloc(g_sram_size); shadow_size = g_sram_size;
+          if (sram_shadow) memcpy(sram_shadow, g_sram, g_sram_size);
+        } else if (memcmp(sram_shadow, g_sram, g_sram_size) != 0) {
+          memcpy(sram_shadow, g_sram, g_sram_size);
+          RtlWriteSram();
+          fprintf(stderr, "[saves] battery SRAM changed -> wrote saves/save.srm\n");
+        }
+      }
+    }
+
     RtlDrawPpuFrame();
 
     if (!headless) {
@@ -357,6 +424,10 @@ int main(int argc, char **argv) {
       last_tick = SDL_GetTicks();
     }
   }
+
+  /* Persist battery save and dump diagnostic state on exit. */
+  RtlWriteSram();
+  DumpDiagState("exit");
 
   SDL_CloseAudio();
   SDL_DestroyMutex(g_audio_mutex);
