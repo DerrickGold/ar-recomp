@@ -128,6 +128,22 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * State machine: arm tracing for the next inter-yield batch the first time we
    * see $18==1, then disarm at the following yield. Captures exactly the ~45
    * functions of the frozen action loop. */
+  /* AR_PPULOG=1: per-frame display state — INIDISP (brightness + forced-blank),
+   * BG mode, and main/sub screen layer-enable masks. A black screen with the
+   * game running (no freeze) is usually forced-blank set, brightness 0, or all
+   * main-screen layers disabled. */
+  if (getenv("AR_PPULOG")) {
+    extern Ppu *g_ppu;
+    static int lf = -1;
+    if (snes_frame_counter != lf) {
+      lf = snes_frame_counter;
+      fprintf(stderr, "[ppu] f=%d inidisp=%02x bright=%d fblank=%d bgmode=%02x main=%02x sub=%02x\n",
+              snes_frame_counter, g_ppu->inidisp, g_ppu->inidisp & 0xf,
+              (g_ppu->inidisp & 0x80) ? 1 : 0, g_ppu->bgmode,
+              g_ppu->screenEnabled[0], g_ppu->screenEnabled[1]);
+    }
+  }
+
   if (getenv("AR_CTACTION")) {
     /* End of an inter-yield batch: flush it if it contained the corrupting
      * 8465_M0X0, else discard and start fresh. Captures the exact m=1->0 frame. */
