@@ -398,25 +398,40 @@ int main(int argc, char **argv) {
         if (snes_frame_counter >= pulse_frames[i] && snes_frame_counter < pulse_frames[i] + 4)
           inputs |= force_mask;
     }
-    /* Differential-oracle input record/replay (frame-indexed, SNES 12-bit
-     * layout == libretro JOYPAD id order, so the same file drives snesref).
-     * AR_INPUT_RECORD=path: append the final per-frame `inputs` (uint32 LE).
-     * AR_INPUT_REPLAY=path: override `inputs` from the file by frame index. */
+    /* Differential-oracle input record/replay, keyed by the GAME's logical
+     * frame counter $7E:0088 (g_ram[0x88], 16-bit) instead of the host frame.
+     * The game-frame advances identically in the recomp and the snes9x oracle
+     * for identical input, so a recording made here replays frame-exact in the
+     * oracle regardless of how many host frames each spent booting (the old
+     * host-frame + offset scheme never aligned because boot timing differs).
+     * SNES 12-bit button layout == libretro JOYPAD id order, so one file drives
+     * both. File format: repeating 8-byte LE records {uint32 gframe; uint32 inputs}.
+     * AR_INPUT_RECORD=path: append one record per host frame.
+     * AR_INPUT_REPLAY=path: override `inputs` with the value recorded for the
+     * current game-frame (last writer wins when a game-frame repeats). */
     {
-      extern int snes_frame_counter;
+      extern uint8 g_ram[];
+      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
       static FILE *rec; static int rec_init;
-      static uint32 *rep; static long rep_n; static int rep_init;
+      static uint32 *rep; static long rep_max = -1; static int rep_init;
       if (!rep_init) { rep_init = 1; const char *p = getenv("AR_INPUT_REPLAY");
         if (p && p[0]) { FILE *f = fopen(p, "rb");
           if (f) { fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-            rep_n = n / 4; rep = (uint32 *)malloc((size_t)rep_n * 4);
-            if (rep) { size_t got = fread(rep, 4, (size_t)rep_n, f); (void)got; }
-            fclose(f); fprintf(stderr, "[input-replay] %ld frames from %s\n", rep_n, p); } } }
-      if (rep && snes_frame_counter >= 0 && snes_frame_counter < rep_n)
-        inputs = rep[snes_frame_counter];
+            long nrec = n / 8; uint32 *raw = (uint32 *)malloc((size_t)nrec * 8);
+            if (raw && fread(raw, 8, (size_t)nrec, f) == (size_t)nrec) {
+              for (long i = 0; i < nrec; i++) if ((long)raw[i*2] > rep_max) rep_max = (long)raw[i*2];
+              if (rep_max >= 0) { rep = (uint32 *)calloc((size_t)rep_max + 1, 4);
+                if (rep) for (long i = 0; i < nrec; i++) rep[raw[i*2]] = raw[i*2+1]; } }
+            free(raw); fclose(f);
+            fprintf(stderr, "[input-replay] %ld records, max gf=%ld from %s\n", nrec, rep_max, p); } } }
+      if (rep && (long)gf <= rep_max) inputs = rep[gf];
       if (!rec_init) { rec_init = 1; const char *p = getenv("AR_INPUT_RECORD");
         if (p && p[0]) { rec = fopen(p, "wb"); fprintf(stderr, "[input-record] -> %s\n", p); } }
-      if (rec) { uint32 v = inputs; fwrite(&v, 4, 1, rec); fflush(rec); }
+      if (rec) { uint32 v[2] = { (uint32)gf, (uint32)inputs }; fwrite(v, 4, 2, rec); fflush(rec); }
+      /* Report Act-1 entry game-frame, to compare against the oracle's. */
+      { static int seen_act = 0;
+        if (!seen_act && g_ram[0x18] == 0x01) { seen_act = 1;
+          fprintf(stderr, "[act-enter] $18=01 at game-frame %u\n", gf); } }
     }
     RtlApuLock();
     bool r = RtlRunFrame(inputs);

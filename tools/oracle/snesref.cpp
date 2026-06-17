@@ -173,21 +173,37 @@ static size_t cb_audio_batch(const int16_t* data, size_t frames) {
 }
 static void  cb_input_poll(void) {}
 
-// Frame-indexed input replay (SNESREF_INPUT_REPLAY=<file>, recomp AR_INPUT_RECORD
-// format: uint32 LE per frame, SNES 12-bit layout == libretro JOYPAD id order).
-// SNESREF_INPUT_OFFSET=<N> shifts the index to align the recomp/oracle boot frame
-// counts (replay frame = g_frame - offset).
-static uint32_t* g_replay = nullptr;
-static long g_replay_n = 0;
-static long g_replay_off = 0;
+// Game-frame-indexed input replay (SNESREF_INPUT_REPLAY=<file>; recomp
+// AR_INPUT_RECORD format: repeating 8-byte LE records {uint32 gframe; uint32 inputs},
+// SNES 12-bit layout == libretro JOYPAD id order). Keyed by the game's logical
+// frame counter $7E:0088 (WRAM offset 0x88, 16-bit), which advances identically
+// here and in the recomp for identical input — so the recording aligns frame-exact
+// without any host-frame offset.
+static uint32_t* g_replay = nullptr;   // dense, indexed by game-frame
+static long g_replay_max = -1;
+static const uint8_t* g_sysram = nullptr;
+static long g_recomp_entry_gf = -1;    // SNESREF_ENTRY_GF: recomp's $18==01 gf
+static long g_oracle_entry_gf = -1;    // this run's $18==01 gf (detected)
 
 static int16_t cb_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
     (void)index;
     if (port!=0 || device!=RETRO_DEVICE_JOYPAD) return 0;
     if (g_replay) {
-        long fi = (long)g_frame - g_replay_off;
-        if (fi >= 0 && fi < g_replay_n && id < 12)
-            return (g_replay[fi] >> id) & 1;
+        if (!g_sysram) g_sysram = (const uint8_t*)p_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
+        if (g_sysram && id < 12) {
+            long gf = (long)((unsigned)g_sysram[0x88] | ((unsigned)g_sysram[0x89] << 8));
+            // Re-anchor at action-stage entry: the recomp and snes9x do NOT share
+            // an absolute $0088 clock through boot/menus (different boot lengths +
+            // menu timing), so pre-entry replay is best-effort by absolute gf —
+            // enough to navigate into the stage. Once $18==01 is reached, translate
+            // to the recording's stage-relative frame so gameplay input lands
+            // frame-exact. SNESREF_ENTRY_GF = the recomp's entry gf (its [act-enter]).
+            if (g_recomp_entry_gf >= 0) {
+                if (g_oracle_entry_gf < 0 && g_sysram[0x18] == 0x01) g_oracle_entry_gf = gf;
+                if (g_oracle_entry_gf >= 0) gf = g_recomp_entry_gf + (gf - g_oracle_entry_gf);
+            }
+            if (gf >= 0 && gf <= g_replay_max) return (g_replay[gf] >> id) & 1;
+        }
         return 0;
     }
     // scripted B press (matches recomp AR_FORCE_INPUT_AFTER)
@@ -225,14 +241,17 @@ int main(int argc, char** argv) {
       if ((v=getenv("SNESREF_FORCE_B_AFTER")) && v[0]) g_force_b_after = atol(v);
       if ((v=getenv("SNESREF_TRACE_LO"))      && v[0]) g_trace_lo = (uint32_t)strtoul(v,nullptr,0);
       if ((v=getenv("SNESREF_TRACE_HI"))      && v[0]) g_trace_hi = (uint32_t)strtoul(v,nullptr,0);
-      if ((v=getenv("SNESREF_INPUT_OFFSET"))  && v[0]) g_replay_off = atol(v);
+      if ((v=getenv("SNESREF_ENTRY_GF"))      && v[0]) g_recomp_entry_gf = atol(v);
       if ((v=getenv("SNESREF_INPUT_REPLAY"))  && v[0]) {
           FILE* f=fopen(v,"rb");
           if (f) { fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET);
-              g_replay_n=n/4; g_replay=(uint32_t*)malloc((size_t)g_replay_n*4);
-              if (g_replay) { size_t got=fread(g_replay,4,(size_t)g_replay_n,f); (void)got; }
-              fclose(f);
-              printf("[input-replay] %ld frames from %s (offset %ld)\n", g_replay_n, v, g_replay_off); }
+              long nrec=n/8; uint32_t* raw=(uint32_t*)malloc((size_t)nrec*8);
+              if (raw && fread(raw,8,(size_t)nrec,f)==(size_t)nrec) {
+                  for (long i=0;i<nrec;i++) if ((long)raw[i*2]>g_replay_max) g_replay_max=(long)raw[i*2];
+                  if (g_replay_max>=0) { g_replay=(uint32_t*)calloc((size_t)g_replay_max+1,4);
+                      if (g_replay) for (long i=0;i<nrec;i++) g_replay[raw[i*2]]=raw[i*2+1]; } }
+              free(raw); fclose(f);
+              printf("[input-replay] %ld records, max gf=%ld from %s\n", nrec, g_replay_max, v); }
           else fprintf(stderr,"[input-replay] cannot open %s\n", v);
       }
     }
@@ -349,6 +368,14 @@ int main(int argc, char** argv) {
         p_retro_run();
         g_frame++;
         trace_tick();
+        /* Report when the action stage ($7E:0018==01) is first entered, with the
+         * game-frame $0088 — lets a round-trip confirm the recomp/oracle share the
+         * same gf clock (gf-keyed input replay only aligns if they do). */
+        { static int seen_act = 0;
+          if (!g_sysram) g_sysram = (const uint8_t*)p_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
+          if (!seen_act && g_sysram && g_sysram[0x18] == 0x01) { seen_act = 1;
+            unsigned gf = (unsigned)g_sysram[0x88] | ((unsigned)g_sysram[0x89] << 8);
+            fprintf(stderr, "[act-enter] $18=01 at game-frame %u (host frame %u)\n", gf, g_frame); } }
         if (quit_frames > 0 && g_frame >= (uint32_t)quit_frames) running = false;
         if (!g_headless) {
             for (;;) {
