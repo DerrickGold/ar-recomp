@@ -162,6 +162,15 @@ static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
     FILE *df = fopen("saves/recomp_act1.bin", "wb");
     if (df) { fwrite(wram, 1, 0x20000, df); fclose(df); }
   }
+  /* AR_DUMP_AT_GF=N: dump full WRAM exactly when game-frame $0088==N, to
+   * saves/recomp_at.bin — for frame-exact recomp-vs-oracle diffing. */
+  static long dump_at_gf = -2;
+  if (dump_at_gf == -2) { const char *e = getenv("AR_DUMP_AT_GF"); dump_at_gf = e ? atol(e) : -1; }
+  if (dump_at_gf >= 0) {
+    unsigned gf = (unsigned)wram[0x88] | ((unsigned)wram[0x89] << 8);
+    if ((long)gf == dump_at_gf) { FILE *gf_f = fopen("saves/recomp_at.bin", "wb");
+      if (gf_f) { fwrite(wram, 1, 0x20000, gf_f); fclose(gf_f);
+        fprintf(stderr, "[dump-at-gf] gf=%u -> recomp_at.bin\n", gf); } } }
   if (!g_wram_trace) return;
   if (!g_wram_primed) {
     memcpy(g_wram_prev + g_wram_lo, wram + g_wram_lo, g_wram_hi - g_wram_lo + 1);
@@ -181,7 +190,7 @@ static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
 static void WramTraceInit(void) {
   const char *path = getenv("AR_WRAM_TRACE");
   /* AR_DUMP_ACT alone also needs the per-frame callback registered. */
-  if ((!path || !path[0]) && getenv("AR_DUMP_ACT")) {
+  if ((!path || !path[0]) && (getenv("AR_DUMP_ACT") || getenv("AR_DUMP_AT_GF"))) {
     g_framedump_callback = WramTraceCallback;
     return;
   }

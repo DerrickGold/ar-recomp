@@ -376,6 +376,16 @@ int main(int argc, char** argv) {
           if (!seen_act && g_sysram && g_sysram[0x18] == 0x01) { seen_act = 1;
             unsigned gf = (unsigned)g_sysram[0x88] | ((unsigned)g_sysram[0x89] << 8);
             fprintf(stderr, "[act-enter] $18=01 at game-frame %u (host frame %u)\n", gf, g_frame); } }
+        /* SNESREF_DUMP_AT_GF=N: dump full WRAM when $0088==N -> oracle_at.bin. */
+        { static long dump_gf = -2; static int dumped = 0;
+          if (dump_gf == -2) { const char* e = getenv("SNESREF_DUMP_AT_GF"); dump_gf = e ? atol(e) : -1; }
+          if (dump_gf >= 0 && !dumped) {
+            if (!g_sysram) g_sysram = (const uint8_t*)p_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
+            if (g_sysram) { long gf = (long)((unsigned)g_sysram[0x88] | ((unsigned)g_sysram[0x89] << 8));
+              if (gf == dump_gf) { dumped = 1;
+                const char* out = getenv("SNESREF_DUMP_AT_FILE"); if (!out) out = "tools/oracle/oracle_at.bin";
+                FILE* f = fopen(out, "wb"); if (f) { fwrite(g_sysram, 1, 0x20000, f); fclose(f);
+                  fprintf(stderr, "[dump-at-gf] gf=%ld -> %s\n", gf, out); } } } } }
         if (quit_frames > 0 && g_frame >= (uint32_t)quit_frames) running = false;
         if (!g_headless) {
             for (;;) {
