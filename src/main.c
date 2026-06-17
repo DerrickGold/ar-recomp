@@ -147,6 +147,22 @@ static bool g_wram_primed;
 static uint32_t g_wram_lo = 0x00000, g_wram_hi = 0x1ffff;
 
 static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
+  /* AR_DUMP_ACT=1: each action-stage frame ($18==01), overwrite a full 128KB
+   * WRAM snapshot to saves/recomp_act1.bin. After the walk-off crash the file
+   * holds the LAST pre-crash action frame's object table — for oracle diffing
+   * without needing to know the exact crash frame number. */
+  static int dump_act = -1;
+  if (dump_act == -1) dump_act = getenv("AR_DUMP_ACT") ? 1 : 0;
+  if (dump_act && wram[0x18] == 0x01) {
+    static int first_done;
+    if (!first_done) { first_done = 1;
+      FILE *ff = fopen("saves/recomp_act1_first.bin", "wb");
+      if (ff) { fwrite(wram, 1, 0x20000, ff); fclose(ff);
+        fprintf(stderr, "[dump-act] FIRST action frame %u -> recomp_act1_first.bin\n", frame); } }
+    FILE *df = fopen("saves/recomp_act1.bin", "wb");
+    if (df) { fwrite(wram, 1, 0x20000, df); fclose(df); }
+  }
+  if (!g_wram_trace) return;
   if (!g_wram_primed) {
     memcpy(g_wram_prev + g_wram_lo, wram + g_wram_lo, g_wram_hi - g_wram_lo + 1);
     g_wram_primed = true;
@@ -164,6 +180,11 @@ static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
 
 static void WramTraceInit(void) {
   const char *path = getenv("AR_WRAM_TRACE");
+  /* AR_DUMP_ACT alone also needs the per-frame callback registered. */
+  if ((!path || !path[0]) && getenv("AR_DUMP_ACT")) {
+    g_framedump_callback = WramTraceCallback;
+    return;
+  }
   if (!path || !path[0]) return;
   const char *v;
   if ((v = getenv("AR_TRACE_LO")) && v[0]) g_wram_lo = (uint32_t)strtoul(v, NULL, 0);
@@ -376,6 +397,26 @@ int main(int argc, char **argv) {
       for (int i = 0; i < n_pulses; i++)
         if (snes_frame_counter >= pulse_frames[i] && snes_frame_counter < pulse_frames[i] + 4)
           inputs |= force_mask;
+    }
+    /* Differential-oracle input record/replay (frame-indexed, SNES 12-bit
+     * layout == libretro JOYPAD id order, so the same file drives snesref).
+     * AR_INPUT_RECORD=path: append the final per-frame `inputs` (uint32 LE).
+     * AR_INPUT_REPLAY=path: override `inputs` from the file by frame index. */
+    {
+      extern int snes_frame_counter;
+      static FILE *rec; static int rec_init;
+      static uint32 *rep; static long rep_n; static int rep_init;
+      if (!rep_init) { rep_init = 1; const char *p = getenv("AR_INPUT_REPLAY");
+        if (p && p[0]) { FILE *f = fopen(p, "rb");
+          if (f) { fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+            rep_n = n / 4; rep = (uint32 *)malloc((size_t)rep_n * 4);
+            if (rep) { size_t got = fread(rep, 4, (size_t)rep_n, f); (void)got; }
+            fclose(f); fprintf(stderr, "[input-replay] %ld frames from %s\n", rep_n, p); } } }
+      if (rep && snes_frame_counter >= 0 && snes_frame_counter < rep_n)
+        inputs = rep[snes_frame_counter];
+      if (!rec_init) { rec_init = 1; const char *p = getenv("AR_INPUT_RECORD");
+        if (p && p[0]) { rec = fopen(p, "wb"); fprintf(stderr, "[input-record] -> %s\n", p); } }
+      if (rec) { uint32 v = inputs; fwrite(&v, 4, 1, rec); fflush(rec); }
     }
     RtlApuLock();
     bool r = RtlRunFrame(inputs);

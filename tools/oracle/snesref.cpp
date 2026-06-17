@@ -173,9 +173,23 @@ static size_t cb_audio_batch(const int16_t* data, size_t frames) {
 }
 static void  cb_input_poll(void) {}
 
+// Frame-indexed input replay (SNESREF_INPUT_REPLAY=<file>, recomp AR_INPUT_RECORD
+// format: uint32 LE per frame, SNES 12-bit layout == libretro JOYPAD id order).
+// SNESREF_INPUT_OFFSET=<N> shifts the index to align the recomp/oracle boot frame
+// counts (replay frame = g_frame - offset).
+static uint32_t* g_replay = nullptr;
+static long g_replay_n = 0;
+static long g_replay_off = 0;
+
 static int16_t cb_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
     (void)index;
     if (port!=0 || device!=RETRO_DEVICE_JOYPAD) return 0;
+    if (g_replay) {
+        long fi = (long)g_frame - g_replay_off;
+        if (fi >= 0 && fi < g_replay_n && id < 12)
+            return (g_replay[fi] >> id) & 1;
+        return 0;
+    }
     // scripted B press (matches recomp AR_FORCE_INPUT_AFTER)
     if (id==RETRO_DEVICE_ID_JOYPAD_B && g_force_b_after>=0 && (long)g_frame>=g_force_b_after) return 1;
     if (g_headless) return 0;
@@ -211,6 +225,16 @@ int main(int argc, char** argv) {
       if ((v=getenv("SNESREF_FORCE_B_AFTER")) && v[0]) g_force_b_after = atol(v);
       if ((v=getenv("SNESREF_TRACE_LO"))      && v[0]) g_trace_lo = (uint32_t)strtoul(v,nullptr,0);
       if ((v=getenv("SNESREF_TRACE_HI"))      && v[0]) g_trace_hi = (uint32_t)strtoul(v,nullptr,0);
+      if ((v=getenv("SNESREF_INPUT_OFFSET"))  && v[0]) g_replay_off = atol(v);
+      if ((v=getenv("SNESREF_INPUT_REPLAY"))  && v[0]) {
+          FILE* f=fopen(v,"rb");
+          if (f) { fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET);
+              g_replay_n=n/4; g_replay=(uint32_t*)malloc((size_t)g_replay_n*4);
+              if (g_replay) { size_t got=fread(g_replay,4,(size_t)g_replay_n,f); (void)got; }
+              fclose(f);
+              printf("[input-replay] %ld frames from %s (offset %ld)\n", g_replay_n, v, g_replay_off); }
+          else fprintf(stderr,"[input-replay] cannot open %s\n", v);
+      }
     }
 
     g_core = dlopen(corePath, RTLD_NOW | RTLD_LOCAL);
