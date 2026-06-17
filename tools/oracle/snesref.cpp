@@ -256,6 +256,20 @@ int main(int argc, char** argv) {
     if (!p_retro_load_game(&gi)) { fprintf(stderr,"retro_load_game failed\n"); return 4; }
     p_retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
 
+    /* SNESREF_SRAM_IN=<file>: load a battery SRAM image into the core's SAVE_RAM
+     * (valid only after retro_load_game) so the oracle starts from the SAME saved
+     * game as the recomp (saves/save.srm). Lets the reference reach Act 1 from the
+     * user's save for object-table / WRAM diffing. */
+    if (const char* sin = getenv("SNESREF_SRAM_IN")) {
+        uint8_t* sram = (uint8_t*)p_retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
+        size_t sz = p_retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+        FILE* f = fopen(sin, "rb");
+        if (f && sram && sz) {
+            size_t rd = fread(sram, 1, sz, f); fclose(f);
+            printf("[sram-in] loaded %zu/%zu bytes from %s\n", rd, sz, sin);
+        } else { fprintf(stderr, "[sram-in] FAILED to load %s\n", sin); if (f) fclose(f); }
+    }
+
     /* Dump the power-on WRAM so the recomp can init g_ram identically (its
      * g_ram starts at 0x00, snes9x uses a fill pattern — without matching,
      * the game's RAM-clear shows as a huge spurious diff). */
