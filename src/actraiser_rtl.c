@@ -59,8 +59,20 @@ static void ActRaiser_RestoreRegs(CpuState *c, const CpuRegSnapshot *s) {
  * The stack-drift tripwire reads this to ignore handler-internal imbalance. */
 volatile int g_ar_in_interrupt = 0;
 
+/* ActRaiser BRK syscall. The ROM's BRK vector ($00:852F) is:
+ *   PHP; SEP #$20; STA $00035B; PLP; RTI
+ * i.e. it stores A's low byte to $035B (the sound-effect request port) and
+ * resumes at PC+2 — registers/flags otherwise unchanged. The game uses
+ * `LDA #id; BRK` as a compact "play sound id" call throughout (e.g. enemy-death
+ * SFX in the object/OAM loops). Generated code invokes this at every BRK site
+ * via g_cpu_brk_hook, then falls through to the next instruction. */
+static void ActRaiser_BrkHook(CpuState *cpu) {
+  cpu_write8(cpu, 0x00, 0x035B, (uint8)(cpu->A & 0xFF));
+}
+
 static void game_coroutine(void) {
   cpu_state_init(&g_cpu, g_ram);
+  g_cpu_brk_hook = ActRaiser_BrkHook;
 
   ResetHandler_M1X1(&g_cpu);
   for (;;)
