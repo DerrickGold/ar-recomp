@@ -2,6 +2,9 @@
 *.sfc
 *.smc
 *.srm
+*.png
+*.ppm
+*.wav
 
 # Build output
 build/
@@ -12,6 +15,8 @@ build/
 # snesrecomp generated output
 src/generated/*.c
 src/generated/*.h
+
+build-trace/
 
 # IDE
 .claude/

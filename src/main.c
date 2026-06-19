@@ -211,6 +211,18 @@ int main(int argc, char **argv) {
 
   cpu_trace_init();
 
+  /* AR_DRIFT_FRAME=N: arm the stack-drift tripwire to fire on the first
+   * NORMAL function exit at/after frame N whose exit S != entry S (the
+   * unbalanced push/pop leaker). Diagnostic only. */
+#if SNESRECOMP_TRACE
+  { const char *v = getenv("AR_DRIFT_FRAME");
+    if (v && v[0]) {
+      extern void cpu_trace_arm_stack_drift_tripwire(int32_t);
+      cpu_trace_arm_stack_drift_tripwire((int32_t)strtol(v, NULL, 0));
+      fprintf(stderr, "[AR_DRIFT_FRAME] stack-drift tripwire armed at frame %s\n", v);
+    } }
+#endif
+
   const char *rom_path = NULL;
   const char *config_path = NULL;
 
@@ -423,20 +435,44 @@ int main(int argc, char **argv) {
       unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
       static FILE *rec; static int rec_init;
       static uint32 *rep; static long rep_max = -1; static int rep_init;
+      /* End-of-replay marker: the game-frame of the LAST record (the frame the
+       * user closed the window / pressed ESC on). The recording itself stores
+       * no stop event, so we auto-quit when replay reaches this frame — without
+       * it, replay runs off the end of the recording with empty live input.
+       * rep_started gates the check past the boot frame (gf == 0x5555 fill
+       * before $0088 is initialised inflates the value space). */
+      static long rep_last_gf = -1; static int rep_started = 0;
       if (!rep_init) { rep_init = 1; const char *p = getenv("AR_INPUT_REPLAY");
         if (p && p[0]) { FILE *f = fopen(p, "rb");
           if (f) { fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
             long nrec = n / 8; uint32 *raw = (uint32 *)malloc((size_t)nrec * 8);
             if (raw && fread(raw, 8, (size_t)nrec, f) == (size_t)nrec) {
               for (long i = 0; i < nrec; i++) if ((long)raw[i*2] > rep_max) rep_max = (long)raw[i*2];
+              if (nrec > 0) rep_last_gf = (long)raw[(nrec - 1) * 2];
               if (rep_max >= 0) { rep = (uint32 *)calloc((size_t)rep_max + 1, 4);
                 if (rep) for (long i = 0; i < nrec; i++) rep[raw[i*2]] = raw[i*2+1]; } }
             free(raw); fclose(f);
-            fprintf(stderr, "[input-replay] %ld records, max gf=%ld from %s\n", nrec, rep_max, p); } } }
+            fprintf(stderr, "[input-replay] %ld records, max gf=%ld last gf=%ld from %s\n",
+                    nrec, rep_max, rep_last_gf, p); } } }
       if (rep && (long)gf <= rep_max) inputs = rep[gf];
+      /* Auto-stop at the end of the recording. */
+      if (rep && rep_last_gf >= 0) {
+        if ((long)gf <= rep_last_gf) rep_started = 1;
+        if (rep_started && (long)gf >= rep_last_gf) {
+          fprintf(stderr, "[input-replay] reached end of recording at gf=%u — stopping\n", gf);
+          running = false;
+        }
+      }
       if (!rec_init) { rec_init = 1; const char *p = getenv("AR_INPUT_RECORD");
         if (p && p[0]) { rec = fopen(p, "wb"); fprintf(stderr, "[input-record] -> %s\n", p); } }
       if (rec) { uint32 v[2] = { (uint32)gf, (uint32)inputs }; fwrite(v, 4, 2, rec); fflush(rec); }
+      /* AR_GFLOG=1: log (host_frame, gf) every N host frames to compare
+       * $0088 advance rate vs the oracle. */
+      if (getenv("AR_GFLOG")) {
+        extern int snes_frame_counter;
+        if ((snes_frame_counter % 100) == 0)
+          fprintf(stderr, "[gflog] host=%d gf=%u\n", snes_frame_counter, gf);
+      }
       /* Report Act-1 entry game-frame, to compare against the oracle's. */
       { static int seen_act = 0;
         if (!seen_act && g_ram[0x18] == 0x01) { seen_act = 1;
@@ -467,6 +503,44 @@ int main(int argc, char **argv) {
     }
 
     RtlDrawPpuFrame();
+
+    /* Framebuffer capture to PPM (works headless — g_pixels is always populated).
+     * AR_SHOT_AT_GF=N      : one shot to saves/shot.ppm at game-frame >= N.
+     * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.ppm every N game-frames,
+     *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
+     *   state vs bug state frame by frame. */
+    { extern uint8 g_ram[];
+      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      const char *sg = getenv("AR_SHOT_AT_GF");
+      const char *se = getenv("AR_SHOT_EVERY");
+      int want = 0; char fname[64]; fname[0] = 0;
+      static int shot_done = 0;
+      if (sg && sg[0] && !shot_done && gf >= (unsigned)strtoul(sg, NULL, 0)) {
+        shot_done = 1; want = 1; snprintf(fname, sizeof(fname), "saves/shot.ppm");
+      } else if (se && se[0]) {
+        unsigned every = (unsigned)strtoul(se, NULL, 0); if (!every) every = 1;
+        const char *sf = getenv("AR_SHOT_FROM"); const char *st = getenv("AR_SHOT_TO");
+        unsigned lo = sf ? (unsigned)strtoul(sf, NULL, 0) : 0;
+        unsigned hi = st ? (unsigned)strtoul(st, NULL, 0) : 0xffffffffu;
+        if (gf >= lo && gf <= hi && (gf % every) == 0) {
+          want = 1; snprintf(fname, sizeof(fname), "saves/shot_%u.ppm", gf);
+        }
+      }
+      if (want) {
+        FILE *pf = fopen(fname, "wb");
+        if (pf) {
+          fprintf(pf, "P6\n%d %d\n255\n", g_snes_width, g_snes_height);
+          for (int i = 0; i < g_snes_width * g_snes_height; i++) {
+            fputc(g_pixels[i*4+2], pf); /* R */
+            fputc(g_pixels[i*4+1], pf); /* G */
+            fputc(g_pixels[i*4+0], pf); /* B */
+          }
+          fclose(pf);
+          fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d)\n",
+                  fname, gf, g_snes_width, g_snes_height);
+        }
+      }
+    }
 
     if (!headless) {
       SDL_UpdateTexture(g_texture, NULL, g_pixels, g_snes_width * 4);

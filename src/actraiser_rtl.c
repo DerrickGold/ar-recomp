@@ -54,6 +54,11 @@ static void ActRaiser_RestoreRegs(CpuState *c, const CpuRegSnapshot *s) {
   c->_flag_C = s->fC; c->_flag_I = s->fI; c->_flag_D = s->fD;
 }
 
+/* Set while an NMI/IRQ handler is executing on the host stack (the calls
+ * below are bracketed by SaveRegs/RestoreRegs, so cpu->S is restored after).
+ * The stack-drift tripwire reads this to ignore handler-internal imbalance. */
+volatile int g_ar_in_interrupt = 0;
+
 static void game_coroutine(void) {
   cpu_state_init(&g_cpu, g_ram);
 
@@ -124,6 +129,28 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
     last_push = g_recomp_push_count;
   }
 
+  /* AR_OBJLOG=1: per-frame action-stage object-table + timer health. Logs the
+   * game-frame, timer ($E6/$E7), player HP ($1D), and the first few object
+   * slots' status word ($06A0 stride $40) + handler ptr ($12). Reveals the
+   * exact frame the object table is wiped / timer goes non-BCD (the "sprites
+   * vanish + timer '?'" corruption). */
+  if (getenv("AR_OBJLOG")) {
+    extern uint8 g_ram[0x20000];
+    if (g_ram[0x18] == 0x01) {
+      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      int active = 0;
+      for (int i = 0; i < 24; i++) {
+        unsigned b = 0x06A0 + i * 0x40;
+        unsigned sw = g_ram[b] | (g_ram[b + 1] << 8);
+        if (!(sw & 0x8000) && !(sw & 0x4000)) active++;
+      }
+      unsigned o0 = g_ram[0x06A0] | (g_ram[0x06A1] << 8);
+      unsigned o0h = g_ram[0x06B2] | (g_ram[0x06B3] << 8);
+      fprintf(stderr, "[obj] gf=%u timer=%02x%02x HP=%02x active=%d obj0.sw=%04x obj0.h=%04x\n",
+              gf, g_ram[0xE7], g_ram[0xE6], g_ram[0x1D], active, o0, o0h);
+    }
+  }
+
   /* AR_CTACTION=1: one-shot full call trace of a single stuck action-mode frame.
    * State machine: arm tracing for the next inter-yield batch the first time we
    * see $18==1, then disarm at the following yield. Captures exactly the ~45
@@ -177,7 +204,9 @@ void ActRaiserDrawPpuFrame(void) {
       CpuRegSnapshot snap;
       ActRaiser_SaveRegs(&g_cpu, &snap);
       cpu_push_interrupt_frame(&g_cpu);
+      g_ar_in_interrupt = 1;
       IrqHandler_M1X1(&g_cpu);
+      g_ar_in_interrupt = 0;
       ActRaiser_RestoreRegs(&g_cpu, &snap);
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
@@ -214,7 +243,9 @@ void RunOneFrameOfGame(void) {
     CpuRegSnapshot snap;
     ActRaiser_SaveRegs(&g_cpu, &snap);
     cpu_push_interrupt_frame(&g_cpu);
+    g_ar_in_interrupt = 1;
     NmiHandler_M1X1(&g_cpu);
+    g_ar_in_interrupt = 0;
     ActRaiser_RestoreRegs(&g_cpu, &snap);
   }
 }
