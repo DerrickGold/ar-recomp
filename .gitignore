@@ -46,3 +46,5 @@ tests/replays/*.bin
 *.trace
 *.cdl
 *.log
+tools/oracle/harte_cache/
+build/opcode_diff/

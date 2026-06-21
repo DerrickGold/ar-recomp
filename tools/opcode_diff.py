@@ -313,8 +313,10 @@ def gather(op, mode, count):
         pc = ini['pc'] & 0xFFFF
         bank = ini['pbr'] & 0xFF
         ramd = {a: v for (a, v) in ini['ram']}
-        flatpc = (bank << 16) | pc
-        opbytes = [ramd.get((flatpc + k) & 0xFFFFFF, 0) for k in range(4)]
+        # Instruction fetch wraps the low 16 bits within the program bank
+        # (PC is a 16-bit counter); it does NOT carry into the next bank.
+        opbytes = [ramd.get((bank << 16) | ((pc + k) & 0xFFFF), 0)
+                   for k in range(4)]
         res = emit_for_insn(op, m, x, opbytes, pc, bank)
         if res is None:
             skipped += 1
@@ -368,7 +370,9 @@ def main():
         print("no records gathered", file=sys.stderr)
         return 2
 
-    csrc = build_c(records, args.max_show)
+    # Emit all failure lines (Python aggregates per-opcode below); the raw
+    # dump is not printed, so an uncapped count just feeds the summary.
+    csrc = build_c(records, len(records))
     workdir = REPO / 'build' / 'opcode_diff'
     workdir.mkdir(parents=True, exist_ok=True)
     cpath = workdir / 'harness.c'
@@ -385,9 +389,34 @@ def main():
         return 2
 
     run = subprocess.run([str(bpath)], capture_output=True, text=True)
-    print(run.stdout, end='')
     if run.stderr:
         print(run.stderr, file=sys.stderr)
+
+    # per-opcode aggregation from "FAIL op=XX ..." lines
+    import re as _re
+    from collections import Counter
+    fail_by_op = Counter()
+    sample = {}
+    for line in run.stdout.splitlines():
+        mm = _re.match(r'FAIL op=([0-9A-Fa-f]+) ', line)
+        if mm:
+            op = int(mm.group(1), 16)
+            fail_by_op[op] += 1
+            sample.setdefault(op, line)
+        elif line.startswith('RESULT'):
+            result_line = line
+
+    tested = {r['opcode'] for r in records}
+    if fail_by_op:
+        print(f"=== FAILING OPCODES ({len(fail_by_op)} of {len(tested)} tested) ===")
+        for op, c in sorted(fail_by_op.items(), key=lambda kv: -kv[1]):
+            mnem = S._OPCODES.get(op, ('?',))[0]
+            print(f"  op={op:02X} {mnem:<5} {c} fail(s)  e.g. {sample[op][len('FAIL '):][:90]}")
+    else:
+        print(f"All {len(tested)} tested opcodes clean.")
+    for line in run.stdout.splitlines():
+        if line.startswith('RESULT'):
+            print(line)
 
     if not args.keep:
         try:
