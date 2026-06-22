@@ -176,10 +176,12 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
     static int lf = -1;
     if (snes_frame_counter != lf) {
       lf = snes_frame_counter;
-      fprintf(stderr, "[ppu] f=%d inidisp=%02x bright=%d fblank=%d bgmode=%02x main=%02x sub=%02x\n",
+      extern uint8 g_snesrecomp_last_hdmaen;
+      fprintf(stderr, "[ppu] f=%d inidisp=%02x bright=%d fblank=%d bgmode=%02x main=%02x sub=%02x hdmaen=%02x\n",
               snes_frame_counter, g_ppu->inidisp, g_ppu->inidisp & 0xf,
               (g_ppu->inidisp & 0x80) ? 1 : 0, g_ppu->bgmode,
-              g_ppu->screenEnabled[0], g_ppu->screenEnabled[1]);
+              g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
+              g_snesrecomp_last_hdmaen);
     }
   }
 
@@ -195,22 +197,27 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
 }
 
 void ActRaiserDrawPpuFrame(void) {
-  SimpleHdma hdma_chans[3];
+  /* Process ALL 8 HDMA channels, not a fixed subset. ActRaiser drives its
+   * per-scanline effects (e.g. the Mode-7 title matrix animation) on channels
+   * 2/3 — the old code only ran 5/6/7 (a stale assumption carried over from
+   * another game's port), so those HDMA tables were started by HDMAEN but
+   * never applied, leaving the title raster effect dead. SimpleHdma_Init
+   * early-returns on inactive channels, so iterating 0..7 is a safe no-op for
+   * channels the game isn't using this frame. */
+  SimpleHdma hdma_chans[8];
   Dma *dma = g_dma;
 
   dma_startDma(dma, g_snesrecomp_last_hdmaen, true);
 
-  SimpleHdma_Init(&hdma_chans[0], &dma->channel[5]);
-  SimpleHdma_Init(&hdma_chans[1], &dma->channel[6]);
-  SimpleHdma_Init(&hdma_chans[2], &dma->channel[7]);
+  for (int ch = 0; ch < 8; ch++)
+    SimpleHdma_Init(&hdma_chans[ch], &dma->channel[ch]);
 
   int trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
 
   for (int i = 0; i <= 224; i++) {
     ppu_runLine(g_ppu, i);
-    SimpleHdma_DoLine(&hdma_chans[0]);
-    SimpleHdma_DoLine(&hdma_chans[1]);
-    SimpleHdma_DoLine(&hdma_chans[2]);
+    for (int ch = 0; ch < 8; ch++)
+      SimpleHdma_DoLine(&hdma_chans[ch]);
     if (i == trigger) {
       g_snes->inIrq = true;
       CpuRegSnapshot snap;

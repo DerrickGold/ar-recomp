@@ -89,6 +89,17 @@ void DumpDiagState(const char *tag) {
     /* A few documented WRAM bytes (see docs/ram-map.md). */
     fprintf(f, "game-state: $18=%02x $19=%02x  town-level $0291=%04x\n",
             g_ram[0x18], g_ram[0x19], g_ram[0x0291] | (g_ram[0x0292] << 8));
+    /* Recent executed-block PCs (oldest-first) — reveals an infinite
+     * loop's block cycle when the watchdog trips. */
+    {
+      extern int ar_block_history2(uint32_t *, uint32_t *, int);
+      uint32_t hist[256], aux[256];
+      int n = ar_block_history2(hist, aux, 256);
+      fprintf(f, "block history (last %d, oldest-first) pc m X:\n", n);
+      for (int i = 0; i < n; i++)
+        fprintf(f, "  %06X m=%u X=%04X\n", hist[i],
+                (aux[i] >> 16) & 1, aux[i] & 0xFFFF);
+    }
     fclose(f);
   }
   fprintf(stderr, "[dump] wrote saves/dump_{wram.bin,sram.bin,state.txt} (%s)\n",
@@ -258,6 +269,11 @@ int main(int argc, char **argv) {
    * SNESREF_HEADLESS. */
   bool headless = getenv("AR_HEADLESS") && getenv("AR_HEADLESS")[0]
                   && getenv("AR_HEADLESS")[0] != '0';
+
+  /* AR_MXCHECK=1: enable the per-function-entry m/x invariant check
+   * (validates the emitter's static m/x analysis on every direct call). */
+  { extern int g_ar_mx_check; const char *e = getenv("AR_MXCHECK");
+    g_ar_mx_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
 
   Uint32 sdl_flags = SDL_INIT_AUDIO;
   if (!headless) sdl_flags |= SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER;
