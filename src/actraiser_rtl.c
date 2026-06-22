@@ -70,9 +70,23 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
   cpu_write8(cpu, 0x00, 0x035B, (uint8)(cpu->A & 0xFF));
 }
 
+/* ActRaiser COP syscall — the SECOND software interrupt, structurally identical
+ * to BRK. The ROM's COP vector ($00:FFE4 -> $8526) is:
+ *   PHP; SEP #$20; STA $00035A; PLP; RTI
+ * i.e. it stores A's low byte to $035A (a request port distinct from BRK's
+ * $035B) and resumes at PC+2. The game posts events via `LDA #id; COP` — e.g.
+ * the post-miniboss platform/event trigger does `LDA #$07; COP`. Without this
+ * hook g_cpu_cop_hook stayed NULL, so every COP was an effect-free continue and
+ * $035A was never written → the event/platform never fired. Symmetric to the
+ * BRK hook; found via the oracle writing $035A 90x while the recomp wrote it 0x. */
+static void ActRaiser_CopHook(CpuState *cpu) {
+  cpu_write8(cpu, 0x00, 0x035A, (uint8)(cpu->A & 0xFF));
+}
+
 static void game_coroutine(void) {
   cpu_state_init(&g_cpu, g_ram);
   g_cpu_brk_hook = ActRaiser_BrkHook;
+  g_cpu_cop_hook = ActRaiser_CopHook;
 
   ResetHandler_M1X1(&g_cpu);
   for (;;)
