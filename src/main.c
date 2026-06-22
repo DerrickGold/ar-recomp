@@ -274,6 +274,11 @@ int main(int argc, char **argv) {
    * (validates the emitter's static m/x analysis on every direct call). */
   { extern int g_ar_mx_check; const char *e = getenv("AR_MXCHECK");
     g_ar_mx_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
+  /* AR_MXHIST=1: per-PC runtime m/x histogram + live misdecode anomaly trap. */
+  { extern int g_ar_mxhist; extern void ar_mxhist_dump(void);
+    const char *e = getenv("AR_MXHIST");
+    g_ar_mxhist = (e && e[0] && e[0] != '0') ? 1 : 0;
+    if (g_ar_mxhist) atexit(ar_mxhist_dump); }
 
   Uint32 sdl_flags = SDL_INIT_AUDIO;
   if (!headless) sdl_flags |= SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER;
