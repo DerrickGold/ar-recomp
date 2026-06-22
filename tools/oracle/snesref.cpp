@@ -125,7 +125,9 @@ static void ensure_texture(unsigned w, unsigned h) {
     g_tex = SDL_CreateTexture(g_ren, sf, SDL_TEXTUREACCESS_STREAMING, w, h);
     g_tex_w=w; g_tex_h=h;
 }
+static void maybe_shot(const void* data, unsigned w, unsigned h, size_t pitch);
 static void cb_video(const void* data, unsigned w, unsigned h, size_t pitch) {
+    maybe_shot(data, w, h, pitch);
     if (g_headless || !g_ren) return;
     if (data && w && h) {
         ensure_texture(w,h);
@@ -184,6 +186,37 @@ static long g_replay_max = -1;
 static const uint8_t* g_sysram = nullptr;
 static long g_recomp_entry_gf = -1;    // SNESREF_ENTRY_GF: recomp's $18==01 gf
 static long g_oracle_entry_gf = -1;    // this run's $18==01 gf (detected)
+
+/* SNESREF_SHOT_AT_GF=N: dump the framebuffer to a PPM once game-frame ($7E:0088)
+ * reaches N — works headless, so we can compare the oracle's actual screen vs the
+ * recomp's for VRAM/PPU-rendering bugs the WRAM oracle can't see. */
+static void maybe_shot(const void* data, unsigned w, unsigned h, size_t pitch) {
+    static long target = -2; static int done = 0;
+    if (target == -2) { const char* e = getenv("SNESREF_SHOT_AT_GF"); target = (e && e[0]) ? atol(e) : -1; }
+    if (target < 0 || done || !data || !g_sysram) return;
+    long gf = (long)((unsigned)g_sysram[0x88] | ((unsigned)g_sysram[0x89] << 8));
+    if (gf < target) return;
+    done = 1;
+    const char* path = getenv("SNESREF_SHOT_FILE"); if (!path || !path[0]) path = "oracle_shot.ppm";
+    FILE* f = fopen(path, "wb"); if (!f) return;
+    fprintf(f, "P6\n%u %u\n255\n", w, h);
+    for (unsigned y = 0; y < h; y++) {
+        const uint8_t* rowp = (const uint8_t*)data + y * pitch;
+        for (unsigned x = 0; x < w; x++) {
+            uint8_t r,g,b;
+            if (g_fmt == RETRO_PIXEL_FORMAT_XRGB8888) {
+                uint32_t p = ((const uint32_t*)rowp)[x]; r=(p>>16)&0xff; g=(p>>8)&0xff; b=p&0xff;
+            } else if (g_fmt == RETRO_PIXEL_FORMAT_RGB565) {
+                uint16_t p = ((const uint16_t*)rowp)[x]; r=((p>>11)&0x1f)<<3; g=((p>>5)&0x3f)<<2; b=(p&0x1f)<<3;
+            } else {
+                uint16_t p = ((const uint16_t*)rowp)[x]; r=((p>>10)&0x1f)<<3; g=((p>>5)&0x1f)<<3; b=(p&0x1f)<<3;
+            }
+            fputc(r,f); fputc(g,f); fputc(b,f);
+        }
+    }
+    fclose(f);
+    fprintf(stderr, "[shot] oracle framebuffer at gf=%ld -> %s (%ux%u)\n", gf, path, w, h);
+}
 
 static int16_t cb_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
     (void)index;
