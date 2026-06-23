@@ -398,6 +398,38 @@ int main(int argc, char **argv) {
             fprintf(stderr, "State loaded.\n");
           } else if (event.key.keysym.sym == SDLK_F9) {
             DumpDiagState("hotkey");
+          } else if (event.key.keysym.sym == SDLK_F2) {
+            /* On-demand FULL snapshot — each press writes a unique set of files
+             * tagged with the game-frame: WRAM + VRAM + CGRAM + OAM (via
+             * ActRaiser_FullSnapshot) plus a .ppm screenshot. Lets several
+             * moments be grabbed while driving the game manually so the
+             * internals (esp. VRAM, where the bridge tiles live) can be watched
+             * change over time alongside the picture. */
+            extern uint8 g_ram[0x20000];
+            extern void ActRaiser_FullSnapshot(const char *prefix);
+            static int snap_n = 0;
+#ifndef _WIN32
+            mkdir("saves", 0755);
+            mkdir("saves/snapshots", 0755);  /* keep snapshots out of the
+                                              * normal saves/dump_* run data */
+#endif
+            unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+            char prefix[80];
+            snprintf(prefix, sizeof prefix, "saves/snapshots/snap_%02d_gf%u",
+                     snap_n++, gf);
+            ActRaiser_FullSnapshot(prefix);
+            char ppm[80]; snprintf(ppm, sizeof ppm, "%s.ppm", prefix);
+            FILE *pf = fopen(ppm, "wb");
+            if (pf) {
+              fprintf(pf, "P6\n%d %d\n255\n", g_snes_width, g_snes_height);
+              for (int i = 0; i < g_snes_width * g_snes_height; i++) {
+                fputc(g_pixels[i*4+2], pf); fputc(g_pixels[i*4+1], pf);
+                fputc(g_pixels[i*4+0], pf);
+              }
+              fclose(pf);
+            }
+            fprintf(stderr, "[snap] F2 -> %s.{wram,vram,cgram,oam,ppm} (gf=%u)\n",
+                    prefix, gf);
           } else {
             HandleInput(event.key.keysym.sym, true);
           }

@@ -41,6 +41,7 @@ third_party/
 # Test artifacts
 tests/golden/*.png
 tests/replays/*.bin
+saves/snapshots/*
 
 # Trace logs (too large for git)
 *.trace

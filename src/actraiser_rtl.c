@@ -83,6 +83,28 @@ static void ActRaiser_CopHook(CpuState *cpu) {
   cpu_write8(cpu, 0x00, 0x035A, (uint8)(cpu->A & 0xFF));
 }
 
+/* Dump the full internal state (everything but the framebuffer, which the
+ * caller writes as a .ppm) so an on-demand snapshot captures both the picture
+ * AND the internals: WRAM, plus the PPU memory the WRAM dump can't see — VRAM
+ * (BG tilemaps + tiles), CGRAM (palette), OAM (sprites). Critical for the
+ * bridge bug, whose tiles live in VRAM, invisible to any WRAM-only diff.
+ * Writes <prefix>.{wram,vram,cgram,oam}.bin. */
+void ActRaiser_FullSnapshot(const char *prefix) {
+  extern Ppu *g_ppu;
+  char path[96];
+  FILE *f;
+  snprintf(path, sizeof path, "%s.wram.bin", prefix);
+  f = fopen(path, "wb"); if (f) { fwrite(g_ram, 1, 0x20000, f); fclose(f); }
+  if (g_ppu) {
+    snprintf(path, sizeof path, "%s.vram.bin", prefix);
+    f = fopen(path, "wb"); if (f) { fwrite(g_ppu->vram, 2, 0x8000, f); fclose(f); }
+    snprintf(path, sizeof path, "%s.cgram.bin", prefix);
+    f = fopen(path, "wb"); if (f) { fwrite(g_ppu->cgram, 2, 0x100, f); fclose(f); }
+    snprintf(path, sizeof path, "%s.oam.bin", prefix);
+    f = fopen(path, "wb"); if (f) { fwrite(g_ppu->oam, 2, 0x100, f); fclose(f); }
+  }
+}
+
 static void game_coroutine(void) {
   cpu_state_init(&g_cpu, g_ram);
   g_cpu_brk_hook = ActRaiser_BrkHook;
