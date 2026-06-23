@@ -17,6 +17,7 @@ src/generated/*.c
 src/generated/*.h
 
 build-trace/
+tools/oracle/oracle_trace.jsonl
 
 # IDE
 .claude/
