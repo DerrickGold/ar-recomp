@@ -280,6 +280,12 @@ int main(int argc, char **argv) {
     g_ar_mxhist = (e && e[0] && e[0] != '0') ? 1 : 0;
     if (g_ar_mxhist) atexit(ar_mxhist_dump); }
 
+  /* AR_TRAPFN=<substring>: dump the recomp call stack the first time a matching
+   * function is entered (finds the dispatch chain into a misdecode variant). */
+  { extern const char *g_ar_trapfn;
+    const char *e = getenv("AR_TRAPFN");
+    g_ar_trapfn = (e && e[0]) ? e : 0; }
+
   Uint32 sdl_flags = SDL_INIT_AUDIO;
   if (!headless) sdl_flags |= SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER;
   if (SDL_Init(sdl_flags) != 0) {

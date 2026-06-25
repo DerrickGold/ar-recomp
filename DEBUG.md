@@ -40,10 +40,23 @@ inert by default**, so it's safe to leave the instrumentation in the build.
 | **Suspect a single opcode is wrong** | `tools/opcode_diff.py` (Tom Harte differential, §5) | — |
 | **Per-frame game-state progression** | `AR_FRAMELOG=1` (callsite, work delta, mode `$18/$19`, timer, HP) | `AR_OBJLOG=1` for the object table |
 | **Is the CPU layer even the problem?** | `AR_MXCHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
+| **Crash on a mode/level TRANSITION; SNES stack corrupted (`S` walks to `$FFxx`/`$42xx`/I-O); `ppu_write`/`ppu_read` abort** | Check stderr for **`[dispatch-miss]`** (default-on tripwire) — it names the unresolved RTS-trick/computed target. Then `AR_SCHECK=1` (S-drift + impending-underflow path) | confirm with `AR_RTSLOG=0x<rts_pc>`; register the popped target as a cfg `func` (see §7.7) |
 
 **Golden rule:** on any "stuck / garbage / disappearing" bug, run **`AR_MXHIST=1` first**. In one
 run it tells you misdecode-vs-not and where the M flag leaked — this is what turned multi-hour
 hunts into minutes.
+
+**Golden rule 2 (learned the hard way):** when a variant looks like a misdecode, **trust the
+emitted gen, not a hand ROM disassembly.** The instant, unambiguous "this variant is garbage"
+check is `grep -c brk_hook` on the two variants — e.g. `bank_03_AC8E_M0X0` had **0** BRK calls
+(real m=0 code) vs `bank_03_AC8E_M1X0`'s **7** (the m=1 misdecode splits `CMP #$0004` into
+`CMP #$04` + `BRK`). Hand-decoding the bytes wastes time and mis-aligns; the recompiler already
+did the decode correctly. Use the ROM only to *confirm*, never to *discover*.
+
+**Golden rule 3:** ActRaiser **legitimately relocates its stack to high pages** (page `$05` via
+`$057F`; **page `$1F` via `LDA #$1FFF; TCS` at `$03:9176`** for the act→sim transition). So a high
+`S` is NOT corruption. The real corruption signatures are (a) `S` *draining down* and wrapping
+`$0000→$FFxx` (underflow), and (b) a `[dispatch-miss]`. Don't waste a cycle flagging high pages.
 
 ---
 
@@ -75,9 +88,54 @@ handler to register** in the cfg (`func bank_XX_TARGET TARGET entry_mx:0,0`). Re
 log: `AR_DISPMISS=1` ($8965/$8966-gated, also shows BRA/BRL-follow resolution); `AR_ANCLOG=1`
 (RTS-return-to-ancestor resolution).
 
+### `[dispatch-miss]` — RTS-trick / computed-dispatch tripwire  *(default ON, the root-event finder)*
+Printed by `cpu_dispatch_pc_from` (`cpu_state.c`) whenever an RTS/RTL/computed dispatch pops a
+`(PB:PC)` that is **not a registered function entry**, so the runtime host-unwinds to the lexical
+caller:
+```
+[dispatch-miss] 039B59 -> 039B22 has no entry; host-unwinding (m=1 x=0 S=1AB9 f=7735).
+                If control/flags are wrong after this, register 039B22 as a cfg `func` ...
+```
+Host-unwinding is **correct for an ordinary mid-caller return**, but it is *also* exactly how an
+**RTS-trick to an intra-function label goes silently wrong** (see §7.7): the unwind resumes the
+wrong PC carrying whatever m/x the trick left set. This tripwire **names the offending computed
+target on the first run** — it is the single signal that would have collapsed the multi-tool
+act→sim hunt into one step (the symptoms — stack underflow, `AR_MXHIST` misdecode, the `BRK`
+decode — were all downstream of this one miss). By default it flags only the **dangerous subset**:
+a miss while the SNES stack is **relocated out of page 0/1** (`S >= $0200`) — the RTS-trick
+signature — so ordinary mid-caller returns (which unwind here too, but with `S` in page 1) don't
+bury the signal. Deduped per `(source,target)` and capped at 128. **`AR_DISPWARN=1`** removes the
+`S` gate (shows *every* miss) **and** adds the recomp call stack; `AR_NODISPWARN=1` silences it.
+Unlike `AR_DISPMISSALL` (action-stage `$18==01` only), this fires in **all** game states (the
+transition is `$18==$27`).
+
+### `AR_SCHECK=1` — SNES stack-pointer corruption tracer
+In `cpu_trace_block` (`cpu_trace.h`). Two outputs: `[scheck]` logs each new high-water page of
+`S`; **`[scheck-d]`** logs every block where `S` *jumps* > `$100` (a `TCS`/`TXS` relocation or the
+corruption); and a one-shot **32-block path dump at the impending underflow** (`S < $0040`) so the
+ring shows the routine draining the stack. Use for stack-corruption crashes. (Remember Golden
+rule 3: high `S` is often a legit relocation — the underflow + `[dispatch-miss]` are the real
+signals.)
+
+### `AR_RTSLOG=0x<hex pc>` — RTS-dispatch chain tracer
+In `cpu_dispatch_pc_from`. For a given RTS site, logs each dispatch hop's target PC + m/x + S +
+the final result. `AR_RTSLOG=0x039b59` is what proved `$9156`'s RTS-trick dispatches to the
+unregistered `$9B22` and host-unwinds (`final r=0`). Reach for it after `[dispatch-miss]` names a
+suspicious RTS site, to see the whole chain and where it bails.
+
+### `AR_TRAPFN=<substring>` — entry call-stack + block-path dump
+In `ar_entry_mx_check`/`ar_entry_trapfn` (`common_cpu_infra.c`). The first time a function whose
+name contains the substring is entered, dumps the **recomp call stack** + a **40-block pc/m ring**.
+`AR_TRAPFN=bank_03_AC8E_M1X0` named the caller (`bank_03_8053`) and the m-flip path into a garbage
+misdecode variant. Use to find *who* dispatched into a known-bad variant.
+
 ### Standard misdecode/m-leak pipeline
 `AR_MXHIST` (locate the leak boundary) → `AR_DISPMISSALL | grep -v 00896f` (name the missed
 handler) → register it in `recomp/<bank>.cfg` → `tools/regen.sh` → rebuild.
+
+For a **transition/stack-corruption crash**, the faster pipeline is: read **`[dispatch-miss]`**
+(already in stderr) → `AR_RTSLOG=0x<that source pc>` to confirm the chain → register the popped
+target as a cfg `func ... entry_mx:m,x` → regen → rebuild.
 
 ---
 
@@ -247,6 +305,41 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
    (`AR_DRIFT_FRAME`/`AR_DRIFT_LOG`).
 5. **BRK inline-syscall continuation** — BRK is a 2-byte syscall that must continue at PC+2;
    the decoder now trial-validates the continuation.
+7. **RTS-trick dispatch to an intra-function label** (act→sim transition crash, 2026-06-25) —
+   the broadest *transition* crash class. Some shared engine routines hand-roll a computed RTS:
+   they relocate the SNES stack (`LDA #$1FFF; TCS`), push **continuation addresses** built at
+   runtime (`LDY #$9B21; PHY` …), then `SEP/REP #$20; RTS` to thread through them. Those targets
+   are **intra-function labels the static decoder never sees** (computed pushes), so the recomp's
+   trampoline RTS-dispatch (`cpu_dispatch_pc_from`) finds no entry, returns `NORMAL`, and
+   **host-unwinds to the lexical caller carrying the wrong m/x** the trick left set. Downstream:
+   the caller's next `JSR` enters an m=0 routine at m=1 → garbage misdecode variant → SNES stack
+   underflow → `$2133` PPU-reg scribble → `ppu_write` abort. *Concrete case:* `$03:9156`'s RTS at
+   `$9B59` dispatched to the unregistered `$9B22`; host-unwound to `$03:8053:$80B6` at m=1; `JSR
+   $AC8E` ran its 7-`BRK` `M1X0` garbage → underflow. *Find:* the **`[dispatch-miss]`** tripwire
+   (§2) names the target on the first run; `AR_RTSLOG=0x<rts_pc>` confirms the chain; `AR_SCHECK`
+   shows the underflow.
+   *DEAD-END (do NOT do this):* registering the RTS-chain targets as standalone cfg `func`s
+   resolves the dispatch but **breaks the hand-rolled stack accounting across the function
+   boundary** — each `func` gets its own `_entry_s` baseline, so the chain's net stack effect comes
+   out wrong. Observed escalation: `$9B22`/`$9B4A` alone → infinite chain re-thread (S oscillates
+   `$1AB9↔$1FFF`); adding the terminal `$9195` → chain terminates but S **over-pops to `$2001`** →
+   garbage RTS targets → `B90D` m-misdecode watchdog hang. These are stateful coroutine fragments
+   sharing the parent's relocated frame; they can't be sliced into separate functions.
+   ***Fix = the `rts_dispatch` cfg directive*** (in-function dispatch). `rts_dispatch <rts_pc16>
+   <target1> <target2> ...` tells the recompiler to decode the targets as blocks **inside** the
+   enclosing function and emit the RTS as a `switch(popped+1){ case T: goto L_T; }` that preserves
+   `cpu->S` across the whole chain. The targets decode at the RTS's `(m,x)`; the chain's terminal
+   continuation (`$9195`'s `REP` → m=0 → its own normal RTS via the `$7D1B`-restored stack) is the
+   true exit, so exit-mx analysis reports the correct m=0 to callers. For `$9156`:
+   `rts_dispatch 9B59 9B22 9B4A 9195`. Implemented across `cfg_loader.py` (parse →
+   `BankCfg.rts_dispatch`), `tools/v2_regen.py` (folds into the `indirect_dispatch` map with an
+   `'rts_trick'` marker), `decoder.py` (in-function successors + `insn.rts_dispatch`; exit-mx
+   analysis skips the dispatching RTS), `emit_function.py` (the `switch`/`goto` at the `Return`).
+   *Proactive (Option A):* the targets are all the **immediate-push signature** (`$9195`
+   `LDA #$9194;PHA`, `$9B22`/`$9B4A` `LDY #imm;PHY`; target = imm+1). An autoroute that detects
+   `LD{A,X,Y} #imm`/`PEA #imm` feeding a reachable `RTS`/`RTL` (coherent-code guard, like
+   `find_handler_chain --field14`) can **auto-generate `rts_dispatch` directives** for all 8 acts
+   at regen time — build it once act 1 is confirmed working with the manual directive.
 6. **Unconverted spawn/state object handler** — an object's per-frame `$12` handler is reached
    only by **runtime dispatch** (from spawn-data records or the `JSR $8657` yield idiom), so the
    static decoder never converts it → dispatch miss → m-leak/misdecode → **freeze or hard crash**
@@ -380,6 +473,11 @@ thing left for the per-occurrence loop (F2 snapshot → object-table scan → `f
 
 ```
 AR_MXHIST=1            misdecode? where did m/x leak?            (run this FIRST on garbage/stuck/crash)
+[dispatch-miss]        DEFAULT-ON: RTS-trick/computed target had no entry -> host-unwound (§7.7)
+                       AR_DISPWARN=1 adds stack; AR_NODISPWARN=1 silences. Read it on TRANSITION crashes.
+AR_RTSLOG=0x<pc>       trace an RTS site's dispatch chain (target/m/x/S per hop)   (confirm §7.7)
+AR_SCHECK=1            SNES stack corruption: S-drift + underflow path  (high S is often LEGIT, §GR3)
+AR_TRAPFN=<fnsubstr>   who entered this (garbage) variant: call stack + 40-block m-path
 AR_DISPMISSALL=1       unregistered handler (grep -v 00896f)     (then register in cfg + regen)
 AR_MXCHECK=1           emitter m/x analysis wrong on direct calls
 AR_WATCHOBJ=<addr>     who writes this object slot
