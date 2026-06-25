@@ -508,14 +508,22 @@ int main(int argc, char **argv) {
             fprintf(stderr, "[input-replay] %ld records, max gf=%ld last gf=%ld from %s\n",
                     nrec, rep_max, rep_last_gf, p); } } }
       if (rep && (long)gf <= rep_max) inputs = rep[gf];
-      /* Auto-stop at the end of the recording. */
-      if (rep && rep_last_gf >= 0) {
+      /* Auto-stop at the end of the recording. AR_REPLAY_NOSTOP=1 disables
+       * this so replay runs PAST the last recorded game-frame (holding the
+       * last recorded input). Needed to reproduce an in-frame infinite spin:
+       * such a freeze never advances $0088, so it is never recorded — the
+       * recording ends one frame *before* the hang, and the auto-stop would
+       * quit right before the freezing frame executes. */
+      static int nostop = -1;
+      if (nostop < 0) nostop = getenv("AR_REPLAY_NOSTOP") ? 1 : 0;
+      if (rep && rep_last_gf >= 0 && !nostop) {
         if ((long)gf <= rep_last_gf) rep_started = 1;
         if (rep_started && (long)gf >= rep_last_gf) {
           fprintf(stderr, "[input-replay] reached end of recording at gf=%u — stopping\n", gf);
           running = false;
         }
       }
+      if (rep && nostop && (long)gf > rep_max) inputs = rep_last_gf >= 0 ? rep[rep_last_gf] : 0;
       if (!rec_init) { rec_init = 1; const char *p = getenv("AR_INPUT_RECORD");
         if (p && p[0]) { rec = fopen(p, "wb"); fprintf(stderr, "[input-record] -> %s\n", p); } }
       if (rec) { uint32 v[2] = { (uint32)gf, (uint32)inputs }; fwrite(v, 4, 2, rec); fflush(rec); }
@@ -535,10 +543,19 @@ int main(int argc, char **argv) {
     bool r = RtlRunFrame(inputs);
     (void)r;
     RtlApuUnlock();
+    /* Complete the SPC engine's resident uploader once it enters the $CC-wait,
+     * for the case where the CPU's HLEd $9A56 ran before the engine got there
+     * (takes its own APU lock — must be outside the lock above). */
+    { extern void ar_uploader_complete_tick(void); ar_uploader_complete_tick(); }
 
     /* Auto-persist battery SRAM the moment the game writes a save, so progress
      * survives a freeze/force-quit (the clean-exit RtlWriteSram never runs if
-     * the game hangs). Cheap: only writes when the 8KB SRAM actually changes. */
+     * the game hangs). Cheap: only writes when the 8KB SRAM actually changes.
+     * SKIPPED during input replay: a replay is keyed on the game-frame counter
+     * from a fixed boot state, so letting the replayed run overwrite save.srm
+     * mid-playthrough would change the boot state for the NEXT replay and break
+     * the frame alignment (the recording then no longer reaches the same spot). */
+    if (!getenv("AR_INPUT_REPLAY"))
     {
       extern uint8 *g_sram; extern int g_sram_size;
       static uint8 *sram_shadow; static int shadow_size;
@@ -608,6 +625,18 @@ int main(int argc, char **argv) {
       if (quit_frames == -2) { const char *q = getenv("AR_QUIT_FRAMES");
         quit_frames = q ? atoi(q) : -1; }
       if (quit_frames > 0 && snes_frame_counter >= quit_frames) running = false;
+      /* AR_PACE=1: throttle headless to ~60fps so the emulated SPC (advanced
+       * in real time by the audio thread) stays in sync with the game thread —
+       * a faithful reproduction of normal play, vs. the default headless turbo
+       * which runs the game thread uncapped and confounds APU-handshake timing. */
+      static int pace = -2;
+      if (pace == -2) pace = getenv("AR_PACE") ? 1 : 0;
+      if (pace) {
+        uint32 now = SDL_GetTicks();
+        uint32 elapsed = now - last_tick;
+        if (elapsed < 16) SDL_Delay(16 - elapsed);
+        last_tick = SDL_GetTicks();
+      }
     } else if (!g_turbo) {
       uint32 now = SDL_GetTicks();
       uint32 elapsed = now - last_tick;
@@ -617,8 +646,10 @@ int main(int argc, char **argv) {
     }
   }
 
-  /* Persist battery save and dump diagnostic state on exit. */
-  RtlWriteSram();
+  /* Persist battery save and dump diagnostic state on exit. Skip the SRAM
+   * write during replay so a replayed run never mutates save.srm (see the
+   * auto-persist note above — it would break the next replay's frame align). */
+  if (!getenv("AR_INPUT_REPLAY")) RtlWriteSram();
   DumpDiagState("exit");
 
   SDL_CloseAudio();

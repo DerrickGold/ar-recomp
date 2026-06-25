@@ -28,6 +28,12 @@ for f in glob.glob('src/gen/*.c'):
         emitted.add(int(m.group(1),16))
 
 YIELDS={0x8657,0x8668,0x8669}  # JSR targets that yield (return addr -> $1E resume handler)
+# $12-yield helpers: routines that write their JSR return address into the object's
+# $12 (PRIMARY dispatch) field — the $12 analog of the $8657 $1E-yield. `JSR <helper>`
+# makes the instruction right after the JSR the object's next MAIN handler, so each
+# such continuation is a dispatch entry (this is how the boss-clear / score-tally
+# state chain $A1FC->$A22F->... advances). Auto-populated by detect_d12_yields().
+YIELDS12=set()
 # 65816 length by addressing mode; immediate adjusts with m (A ops) / x (idx ops)
 # We run m=0,x=0 -> 16-bit immediates (3-byte) for both.
 def insn_len(op, a):
@@ -50,6 +56,7 @@ def insn_len(op, a):
         return (2,'seq',None)
     if b==0x20:  # JSR abs
         t=rd16(a+1)
+        if t in YIELDS12: return (3,'call12yield', t)
         return (3,'call8657' if t in YIELDS else 'call', t)
     if b==0x22:  # JSL long
         return (4,'call', rd16(a+1))  # bank ignored (assume same/bank2 helper returns)
@@ -62,10 +69,41 @@ def insn_len(op, a):
     if b in THREE: return (3,'seq',None)
     FOUR={0x0F,0x2F,0x4F,0x6F,0x8F,0xAF,0xCF,0xEF,0x1F,0x3F,0x5F,0x7F,0x9F,0xBF,0xDF,0xFF}  # long abs,(X)
     if b in FOUR: return (4,'seq',None)
-    TWO={0x05,0x06,0x25,0x26,0x45,0x46,0x65,0x66,0x85,0x86,0x84,0xA5,0xA6,0xA4,0xC5,0xC6,0xE5,0xE6,0x04,0x14,0x15,0x16,0x24,0x35,0x36,0x55,0x56,0x75,0x76,0x95,0x94,0x96,0xB5,0xB6,0xB4,0xD5,0xD6,0xF5,0xF6,0x01,0x11,0x12,0x21,0x31,0x32,0x41,0x51,0x52,0x61,0x71,0x72,0x81,0x91,0x92,0xA1,0xB1,0xB2,0xC1,0xD1,0xD2,0xE1,0xF1,0xF2,0xE2,0xC2,0x07,0x17,0x27,0x37,0x47,0x57,0x67,0x77,0x87,0x97,0xA7,0xB7,0xC7,0xD7,0xE7,0xF7,0xD4,0x62,0x44,0x54,0xF4,0xD0}
+    TWO={0x05,0x06,0x25,0x26,0x45,0x46,0x65,0x66,0x85,0x86,0x84,0xA5,0xA6,0xA4,0xC5,0xC6,0xE5,0xE6,0x04,0x14,0x15,0x16,0x24,0x35,0x36,0x55,0x56,0x75,0x76,0x95,0x94,0x96,0xB5,0xB6,0xB4,0xD5,0xD6,0xF5,0xF6,0x01,0x11,0x12,0x21,0x31,0x32,0x41,0x51,0x52,0x61,0x71,0x72,0x81,0x91,0x92,0xA1,0xB1,0xB2,0xC1,0xD1,0xD2,0xE1,0xF1,0xF2,0xE2,0xC2,0x07,0x17,0x27,0x37,0x47,0x57,0x67,0x77,0x87,0x97,0xA7,0xB7,0xC7,0xD7,0xE7,0xF7,0xD4,0x62,0x44,0x54,0xF4,0xD0,
+         0x03,0x23,0x43,0x63,0x83,0xA3,0xC3,0xE3}  # stack-relative (sr,S) ops are 2-byte
     if b in TWO: return (2,'seq',None)
     # implied 1-byte
     return (1,'seq',None)
+
+def detect_d12_yields():
+    """Find the $12-yield helper routines (see YIELDS12). A helper is a small
+    JSR-target routine in the engine region that reads the pushed return address
+    off the stack (LDA $01,S = opcode $A3, or PLA = $68) and stores it (usually
+    +1) into the object's $12 field (`STA $12,X` = 9D 12 00), then RTSs. Calling
+    it makes the post-JSR instruction the next MAIN handler. Detected by decoding
+    each JSR target; this generalises the hand-found $8623/$86FA across the ROM."""
+    jsr_tgts=set()
+    for off in range(0, 0x8000):
+        if rom[off]==0x20:                      # JSR abs
+            t=rom[off+1]|(rom[off+2]<<8)
+            if 0x8000<=t<=0x8FFF: jsr_tgts.add(t)   # engine/helper region
+    out=set()
+    for e in jsr_tgts:
+        pc=e; saw_ret=False
+        for _ in range(24):
+            op=rd(pc)
+            # return addr is the just-pushed JSR frame: LDA $01..$03,S, or PLA.
+            # (A deep stack read like LDA $82,S is a saved local, NOT the return.)
+            if op==0xA3 and rd(pc+1) in (0x01,0x02,0x03): saw_ret=True
+            if op==0x68: saw_ret=True                      # PLA pulls the return low byte
+            if op==0x9D and rd(pc+1)==0x12 and rd(pc+2)==0x00 and saw_ret:
+                out.add(e); break
+            res=insn_len(op,pc)
+            if res[1]=='stop': break
+            pc+=res[0]
+    return out
+
+YIELDS12.update(detect_d12_yields())
 
 def scan(seeds):
     """Return only REGISTERABLE dispatch entries = seeds + their `JSR $8657`
@@ -92,10 +130,15 @@ def scan(seeds):
                     break
                 if kind=='call': pc+=ln; continue   # subroutine returns; keep going
                 if kind=='call8657':
-                    cont=pc+ln                        # yield: continuation is a new dispatch entry
+                    cont=pc+ln                        # $1E-yield: continuation is a new dispatch entry
                     if 0x8000<=cont<=0xFFFF and cont not in entries:
                         entries.add(cont); work.append(cont)
                     break
+                if kind=='call12yield':
+                    cont=pc+ln                        # $12-yield: continuation is the next MAIN handler
+                    if 0x8000<=cont<=0xFFFF and cont not in entries:
+                        entries.add(cont); work.append(cont)
+                    pc+=ln; continue                  # ...and execution also continues here this frame
                 if kind=='stop': break
     return entries
 
