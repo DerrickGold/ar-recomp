@@ -84,8 +84,16 @@ These RAM addresses recur across all the debugging; keep `ram-map.md` authoritat
 
 | Addr | Meaning |
 |---|---|
-| `$18`/`$19` | game-mode byte(s) (act index / sub-mode); `$18==01` = action stage, `$27` = transition |
-| `$1A`/`$1B` | transition dest / sub-state |
+| `$18` | mode / region: `00`=intro/overworld, `01`–`07`=action stage region N (Fillmore=`01`), `08`=sim, `$20+`=transitions |
+| `$19` | sub-mode (act within region — act 1 vs 2) |
+| `$1A`/`$1B` | transition **destination** (`$1B`→`$18`, `$1A`→`$19`, applied by the mode-switch `$00:8269`) |
+| `$FB` | bit `0x80` = transition-request flag (set with `$1A`/`$1B` to stage a mode change; game consumes+clears it) |
+
+**Level warp** (`ActRaiser_Warp`, F6 hotkey, `AR_WARP=<reghex><acthex>` e.g. `0202`): stages the
+game's own sim→act transition — sets `$1B`=region, `$1A`=act, `$FB|=0x80` — so the game does the
+full fade + level-load + switch itself. Trigger from the intro (`$18==00`, which works), bypassing
+the broken post-act sim cascade. Observed: Fillmore act 1 entry = `$1B=01,$1A=01,$FB=80` (f=994) →
+`$18` flips `00→01` (f=997) → act live (f=1004).
 | `$1D` | player HP |
 | `$E6`/`$E7` | action-stage timer (BCD) |
 | `$0088`/`$0089` | game-frame counter (16-bit) |
@@ -113,23 +121,35 @@ promote a row to a real address once confirmed (a wrong cheat address is worse t
 
 | Seam | Where (RAM / routine) | Mod use | Kind | Status / how to find |
 |---|---|---|---|---|
-| Player HP (current) | `$1D` | infinite health (pin), god-mode | 🅥 | **KNOWN** (`$1D`, from B127 debugging). Infinite = clamp `$1D` in a per-frame hook or freeze the damage writer. |
+| Player HP (current) | `$1D` | infinite health (pin), god-mode | 🅥 | **WIRED** — `AR_INF_HP=1` (high-water auto-pin) or `=<n>`; per-frame in `ActRaiser_ApplyCheats` (actraiser_rtl.c). |
 | Player max HP / bar size | TBD | bigger/smaller health bar | 🅥/🅒 | find the HP-init constant (new-game / stage-entry sets `$1D` to max) — `AR_WATCHOBJ`/`AR_WATCH16` on `$1D` at stage start; the writer's immediate is max. |
-| Player damage taken (per hit) | routine that writes `$1D` down | invuln, harder/easier | 🅒 | the damage applier — `AR_WATCH16`/watch `$1D` decreasing on a hit → names the routine + the per-hit amount. |
+| Invincibility frames (i-frames) | i-frame timer `$08C6` (+$26); **invuln flag = `$08D0` bit `0x2000`** (the gate) | **no-knockback / invuln** (speedrun "ignore hits") | 🅥 | **WIRED** — `AR_NO_KNOCKBACK=1` pins timer `$08C6`=0xFF AND sets flag `$08D0\|=0x2000` each frame -> invuln from frame ONE. (Hit-check gates on the FLAG; the game sets it on a hit and clears it when the timer hits 0 — so pin timer + set flag = permanent, no first-hit needed. `=26` alone only worked after one hit.) On hit: handler -> `$9C64` (hurt), knockback into `$08A6/$08A8`. |
 | Player lives | TBD (RAM or SRAM) | infinite / set N lives | 🅥 | watch the lives display value, `AR_WATCH16` on it; the death routine decrements it. |
 | Player sword damage (dealt) | routine that subtracts enemy HP | one-hit kills, weak sword | 🅒 | `AR_WATCHOBJ` on an enemy slot's HP field while you hit it → the writer is the damage routine; the amount is its operand. |
 | Player sword length / reach | TBD (hitbox/collision calc) | double reach | 🅒 | the sword-vs-enemy hit test — the attack hitbox extent (a constant offset from player X). Hardest (geometry); find via the attack-frame collision routine. |
-| Player jump velocity / gravity | player object `$08A0` velocity field (offset TBD) | moonjump, low-grav | 🅒/🅥 | the jump-button handler sets a Y-velocity in the player object; gravity decrements it per frame. Find the Y-vel field (`AR_WATCHOBJ` on `$08A0` during a jump) + the jump-init routine. |
+| Player fly / moonjump | Y-**position** = `$08A4` (+$04) | moonjump / fly | 🅥 | **WIRED** — `AR_MOONJUMP=1` (default 6 px/frame) or `=<n>`; `AR_MOONJUMP_BTN=<mask>` (def `0x8000`=B). Moves Y-pos up while B held (`ActRaiser_ApplyCheats`). NOTE: uses Y-pos, NOT Y-vel `$08A8` — `$08A8` is "Y-velocity" only in the AIR state (polymorphic field); writing it while grounded did nothing. |
 | Boss HP / health bar | boss object slot HP field (offset TBD) | set boss HP, instant-kill | 🅥/🅒 | boss HP lives in the boss object's slot (we have `saves/act1-boss*.bin` snapshots). `AR_WATCHOBJ` on the boss slot while damaging it → the HP field + the boss-damage writer. |
 | Enemy HP (general) | object slot HP field (offset TBD) | — | 🅥 | same as boss — a per-object HP field in the `$06A0` table (offset not yet mapped). |
 | Act score / population | TBD (likely SRAM, per-act) | force score thresholds → sim gating | 🅥/🅒 | the routine that compares act score/population to a threshold to gate sim-mode progression — `AR_WATCH16` on the displayed score; find the threshold-compare site. |
-| Action-stage timer | `$E6`/`$E7` (BCD) | freeze timer / infinite time | 🅥 | **KNOWN** (`$E6`/`$E7`). Freeze = pin in a per-frame hook. |
+| Action-stage timer | `$E6`/`$E7` (BCD) | freeze timer / infinite time | 🅥 | **WIRED** — `AR_FREEZE_TIMER=1` pins `$E6/$E7` (per-frame in `ActRaiser_ApplyCheats`). |
 
-> **Anchor:** most player mechanics (HP via `$1D`, jump/velocity, position) hang off the **player
-> object `$08A0`** (slot 8 of the `$06A0` table) and the action-engine ZP. As we map the player
-> object's fields (velocity, state, invuln timer), add them to `ram-map.md` and promote the TBD
-> rows here. The object **HP field offset** (boss/enemy/player) is the single highest-value unknown
-> — find it once and it unlocks boss-HP, enemy-HP, and damage seams together.
+> **Anchor:** most player mechanics hang off the **player object `$08A0`** (slot 8 of the `$06A0`
+> table). Mapped so far (via `AR_WATCHOBJ=08A0`, 2026-06-25):
+>
+> | Offset | Addr | Field |
+> |---|---|---|
+> | +$02 | `$08A2` | X position |
+> | +$04 | `$08A4` | Y position |
+> | +$06 | `$08A6` | **X velocity** (signed; knockback fallback target) |
+> | +$08 | `$08A8` | **Y velocity** (signed, neg=up; gravity +1/frame — moonjump target) |
+> | +$12 | `$08B2` | handler ptr (state machine: `$9832` ground, `$98D9`/`$993F` jump, `$9884` walk, `$9A07`, `$9C64` **hurt**) |
+> | +$24 | `$08C4` | frame/anim counter |
+> | +$26 | `$08C6` | **i-frame timer** (set 0x20 on hit, counts down) |
+> | +$30 | `$08D0` | flags — bit `0x2000` = invuln (set during i-frames) |
+>
+> Still TBD and highest-value: the **HP field offset** (player/boss/enemy share the `$06A0`-table
+> layout) — find once → unlocks boss-HP, enemy-HP, and damage seams together. Keep promoting these
+> into `ram-map.md`.
 
 ---
 

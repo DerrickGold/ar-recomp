@@ -404,6 +404,16 @@ int main(int argc, char **argv) {
             fprintf(stderr, "State loaded.\n");
           } else if (event.key.keysym.sym == SDLK_F9) {
             DumpDiagState("hotkey");
+          } else if (event.key.keysym.sym == SDLK_F6) {
+            /* Level warp: stage the game's own sim->act transition to the act
+             * named by AR_WARP=<region_hex><act_hex> (e.g. 0202 = region 2 act 2;
+             * default 0101 = Fillmore act 1). Press from a transition-capable
+             * state (the intro/overworld, $18==00, which works). See
+             * ActRaiser_Warp / docs/SEAMS.md. */
+            extern void ActRaiser_Warp(unsigned region, unsigned act);
+            const char *w = getenv("AR_WARP");
+            unsigned v = (w && w[0]) ? (unsigned)strtoul(w, NULL, 16) : 0x0101;
+            ActRaiser_Warp((v >> 8) & 0xFF, v & 0xFF);
           } else if (event.key.keysym.sym == SDLK_F2) {
             /* On-demand FULL snapshot — each press writes a unique set of files
              * tagged with the game-frame: WRAM + VRAM + CGRAM + OAM (via

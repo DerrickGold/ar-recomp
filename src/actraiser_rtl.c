@@ -268,6 +268,121 @@ void ActRaiserDrawPpuFrame(void) {
   }
 }
 
+/* Host-side cheat hooks (debug-menu scaffold). All env-gated, default OFF, so
+ * they never affect a normal run / the rts_dispatch transition test. Applied
+ * once per frame at the START of RunOneFrameOfGame (before the game's frame
+ * logic), so a value pinned here is what the frame sees -> effective for death
+ * prevention (HP) and physics override (moonjump). RAM is g_ram (WRAM): low
+ * direct-page addrs map 1:1 ($1D player HP, $E6/$E7 timer, player object $08A0).
+ * This is the framework the planned debug menu plugs into — see
+ * docs/SEAMS.md "Gameplay / Tunable seams" + memory debug-menu-warp-roadmap. */
+void ActRaiser_ApplyCheats(void) {
+  extern uint8 g_ram[0x20000];
+  /* Action-stage ($18==01) gameplay tweaks only. */
+  if (g_ram[0x18] != 0x01) return;
+
+  /* AR_INF_HP: infinite health. =1 -> auto: pin player HP ($1D) to the
+   * high-water max seen this stage (self-calibrates to "full" once you've been
+   * at full, so we needn't know max HP statically). =<n> -> pin to literal n. */
+  {
+    static int en = -1; static unsigned forced;
+    if (en < 0) { const char *e = getenv("AR_INF_HP");
+      if (!e || !e[0] || e[0] == '0') en = 0;
+      else { en = 1; forced = (unsigned)strtoul(e, NULL, 0); } }
+    if (en) {
+      if (forced > 1) { g_ram[0x1D] = (uint8)forced; }
+      else { static unsigned hi; unsigned hp = g_ram[0x1D];
+        if (hp > hi && hp <= 0xFF) hi = hp;
+        if (hi) g_ram[0x1D] = (uint8)hi; }
+    }
+  }
+
+  /* AR_FREEZE_TIMER=1: pin the action-stage timer ($E6/$E7, BCD) to its first
+   * captured value -> infinite time. */
+  {
+    static int en = -1; static uint8 fe6, fe7; static int got;
+    if (en < 0) { const char *e = getenv("AR_FREEZE_TIMER");
+      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
+    if (en) {
+      if (!got) { fe6 = g_ram[0xE6]; fe7 = g_ram[0xE7]; got = 1; }
+      g_ram[0xE6] = fe6; g_ram[0xE7] = fe7;
+    }
+  }
+
+  /* AR_MOONJUMP=1: hold the jump button to FLY UP. We move the player
+   * Y-POSITION ($08A4, +$04) directly rather than the Y-velocity ($08A8, +$08) —
+   * object fields are polymorphic by state, so $08A8 is "Y-velocity" only in the
+   * AIR state; while grounded it means something else (writing it there didn't
+   * launch and leaked into other movement). Position is always position, so
+   * decrementing $08A4 (screen-Y grows downward, so −Y = up) is a reliable
+   * state-independent fly. =<n> sets up-speed in pixels/frame (default 6).
+   *   AR_MOONJUMP_BTN=<hexmask> -> button mask vs the auto-joypad word
+   *      (default 0x8000 = B; SwapInputBits order). Override without a rebuild
+   *      if B isn't jump (verify bits with AR_JOYLOG=1). */
+  {
+    static int en = -1; static int spd; static unsigned btnmask;
+    if (en < 0) { const char *e = getenv("AR_MOONJUMP");
+      if (!e || !e[0] || e[0] == '0') en = 0;
+      else { en = 1;
+        spd = (e[0] == '1' && !e[1]) ? 6 : (int)strtoul(e, NULL, 0);
+        const char *b = getenv("AR_MOONJUMP_BTN");
+        btnmask = b && b[0] ? (unsigned)strtoul(b, NULL, 16) : 0x8000u; } }
+    if (en) {
+      extern Snes *g_snes;
+      uint16 buttons = SwapInputBits(g_snes->input1_currentState);
+      if (buttons & btnmask) {                  /* jump (B) held */
+        uint16 y = (uint16)(g_ram[0x08A4] | (g_ram[0x08A5] << 8));
+        y = (uint16)(y - spd);                  /* −Y = up */
+        g_ram[0x08A4] = (uint8)(y & 0xFF);
+        g_ram[0x08A5] = (uint8)((y >> 8) & 0xFF);
+      }
+    }
+  }
+
+  /* AR_NO_KNOCKBACK=1: permanent invuln -> no hit registers -> no damage, no
+   * knockback, no hitstun (speedrun "ignore hits"), using the game's own
+   * i-frames. The hit-check gates on the INVULN FLAG ($08D0 bit 0x2000, +$30),
+   * which the game sets on a hit and clears when the i-frame TIMER ($08C6, +$26)
+   * counts down to 0. So we (a) pin the timer to 0xFF so the game never clears
+   * the flag, and (b) SET the flag ourselves each frame so invuln is active from
+   * frame one (without needing a first hit to bootstrap it — that was the
+   * "works only after getting hit once" gap). Offsets found via AR_WATCHOBJ=08A0
+   * while taking a hit. AR_NO_KNOCKBACK=<hexoff> (other than 1) instead raw-pins
+   * $08A0+off to 0xFF for experimentation. */
+  {
+    static int en = -1; static int full; static unsigned off;
+    if (en < 0) { const char *e = getenv("AR_NO_KNOCKBACK");
+      if (!e || !e[0] || e[0] == '0') en = 0;
+      else if (e[0] == '1' && !e[1]) { en = 1; full = 1; }
+      else { en = 1; full = 0; off = (unsigned)(strtoul(e, NULL, 16) & 0x3F); } }
+    if (en) {
+      if (full) {
+        g_ram[0x08C6] = 0xFF;     /* pin i-frame timer (+$26) so flag never clears */
+        g_ram[0x08D1] |= 0x20;    /* set invuln flag $08D0 bit 0x2000 (+$30) */
+      } else {
+        g_ram[0x08A0 + off] = 0xFF;
+      }
+    }
+  }
+}
+
+/* Level-warp: stage the game's OWN sim->act transition to a chosen region/act,
+ * bypassing the (broken) sim-mode UI. The intro/overworld stages an act entry by
+ * writing the transition-DEST vars + a request flag, which the transition
+ * processor then consumes (full fade + level-load + mode switch). Observed entry
+ * into Fillmore act 1: $1B=01 (-> $18 region), $1A=01 (-> $19 act), $FB|=0x80
+ * (request). We replicate that. Best triggered from a transition-capable state
+ * (the intro, $18==00, which WORKS — unlike the post-act sim cascade). Hooked to
+ * F6 in main.c with the target from AR_WARP=<region_hex><act_hex> (e.g. 0202). */
+void ActRaiser_Warp(unsigned region, unsigned act) {
+  extern uint8 g_ram[0x20000];
+  g_ram[0x1B] = (uint8)region;   /* -> $18 (region/mode) on the switch */
+  g_ram[0x1A] = (uint8)act;      /* -> $19 (act within region) */
+  g_ram[0xFB] |= 0x80;           /* transition-request flag */
+  fprintf(stderr, "[warp] staged region=$%02X act=$%02X ($1B/$1A/$FB set); "
+          "transition processor should pick it up.\n", region & 0xFF, act & 0xFF);
+}
+
 void RunOneFrameOfGame(void) {
   if (!g_game_started) {
     g_game_started = true;
@@ -282,6 +397,8 @@ void RunOneFrameOfGame(void) {
     g_game_ctx.uc_link = &g_host_ctx;
     makecontext(&g_game_ctx, game_coroutine, 0);
   }
+
+  ActRaiser_ApplyCheats();   /* host-side cheats (env-gated, default off) */
 
   g_snes->forceNmi = true;
   g_snes->nmiAvail = true;   /* fresh RDNMI ($4210 bit7) vblank token this frame */
