@@ -75,6 +75,23 @@ against the recomp's per-block m/x, and the first divergence is the exact leakin
 Then fix with the override directives the recomp already has: `exit_mx_at`, `force_variant_at`,
 `rts_dispatch`.
 
+> **RESOLVED (2026-06-26) — and the lesson is a CORRECTION to the above: the act→sim "perfect
+> storm" was mechanism #2 (stack misalignment), NOT a flag-tracking bug, and was found WITHOUT the
+> oracle.** The apparent "x-leak" was a *symptom*: a **−1 SNES stack-pointer drift** made a `PLP`
+> read the slot *next to* its own saved `P`, loading a byte with x=1. So x looked misdecoded, but
+> m/x tracking was fine — `cpu->S` was off by one. Root: an **unconverted jump-table RTS-trick**
+> (`bank_01_B898` `$B8C0: LDA $01B8D0,X; PHA; RTS` with a `PHY`-pushed return to `$B8C2`) — the
+> recomp's generic RTS couldn't resolve the computed target and host-unwound `S` by −1 *per call*,
+> which ratcheted up over a loop until the over-pop. **Diagnostic lesson: before assuming an m/x
+> leak, RULE OUT a stack-pointer leak first.** A 1-byte `S` drift is indistinguishable from a flag
+> misdecode at block granularity (the dispatch *and* a downstream `PLP` both go wrong). The tool
+> that settles it is **`AR_STRACE`** (per-instruction `S`, scoped to a PC window) + the per-block
+> `S` now in the diag dump: watch `S` across each call in the suspect routine — the one call that
+> returns with `S` off is the bug, no oracle needed. Fixed with the new `indirect_dispatch …
+> ret:<pc>` directive (jump-table CALL; §7.7). The CPU-flag oracle (§6) WAS built and is real, but
+> it has a frame-granularity ceiling (can't see the crash frame, shows sampling noise) — the
+> instruction-level `S` trace is what actually cracked this.
+
 ---
 
 ## 1. DECISION GUIDE — symptom → tool
@@ -429,6 +446,24 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
    `LD{A,X,Y} #imm`/`PEA #imm` feeding a reachable `RTS`/`RTL` (coherent-code guard, like
    `find_handler_chain --field14`) can **auto-generate `rts_dispatch` directives** for all 8 acts
    at regen time — build it once act 1 is confirmed working with the manual directive.
+   ***Jump-table CALL variant (2026-06-26) — the act→sim ROOT, the `indirect_dispatch … ret:`
+   directive.*** A data-driven cousin of the above: `bank_01_B898 $B8C0` does
+   `LDA $01B8D0,X; PHA; RTS` (computed handler from a 16-entry ROM table) with a return address
+   pushed FIRST (`LDY #$B8C1; PHY`) — so it's a **CALL** through the table (each handler `RTS`es
+   back to the in-function continuation `$B8C2`), not a terminal tail-call. The recomp's generic RTS
+   couldn't resolve the computed target and host-unwound `S` by **−1 per call**, which ratcheted up
+   over `bank_03_B20C`'s loop until the over-pop → the entire boss→sim hang (the "x-leak" was a
+   downstream symptom; see §0 RESOLVED). *Find:* `AR_STRACE` (per-instruction `S`, scoped to the
+   loop's PC window) → the one call that returns with `S` off names the culprit. *Fix:* the existing
+   `indirect_dispatch <PHA_pc> <count> idx:<X|Y> tables:<addr>` directive, **extended with
+   `ret:<pc16>`** — when present, the PHA jump-table is emitted as a call-with-return (dispatch each
+   handler, no synthetic frame push since the `PHY` already pushed the return, then `goto` the
+   in-function `ret` label), keeping the continuation in-function (no `func`-split). For `$B898`:
+   `indirect_dispatch B8C0 16 idx:X tables:B8D0 ret:B8C2` (bank01.cfg). Implemented: `snes65816.py`
+   (`dispatch_ret` slot), `cfg_loader.py` (`ret:` parse), `decoder.py` (PHA block: `+1` the table
+   words = handler-1 idiom, non-terminal, decode handlers + ret block as successors at the call's
+   m/x), `codegen.py` `_emit_indirect_dispatch` (`is_call_ret` branch). NOTE the decoder `+1`: the
+   table stores `handler-1` (RTS adds one); without it the labels are off by one.
 6. **Unconverted spawn/state object handler** — an object's per-frame `$12` handler is reached
    only by **runtime dispatch** (from spawn-data records or the `JSR $8657` yield idiom), so the
    static decoder never converts it → dispatch miss → m-leak/misdecode → **freeze or hard crash**
@@ -569,6 +604,8 @@ AR_SCHECK=1            SNES stack corruption: S-drift + underflow path  (high S 
 AR_STACKPROV=1         bad-RTS: who PUSHED the corrupt return frame (or NEVER-PUSHED = wrong-S, not bad-push)
 AR_XFLIP_GF=<gframe>   the block where x flips 0->1 during game-frame N (N from the snes9x m/x oracle)
 AR_XTRACE=1            x-flip ring auto-dumped at the first x=1 garbage variant -> the real fault's x history (no frame guess)
+AR_STRACE=1            per-instruction cpu->S in a PC window (AR_STRACE_LO/HI, def $03B200-$03B260): find the call that returns with S off = the stack leak  (THE tool that root-caused act->sim)
+(diag dump now shows per-block S — watch S drift across a call to spot an unbalanced subroutine)
 SNESREF_MX_OUT / AR_MX_OUT + tools/oracle/diff_mx.py  snes9x CPU m/x ground-truth diff (finds the leak FRAME)
 AR_TRAPFN=<fnsubstr>   who entered this (garbage) variant: call stack + 40-block m-path
 AR_DISPMISSALL=1       unregistered handler (grep -v 00896f)     (then register in cfg + regen)

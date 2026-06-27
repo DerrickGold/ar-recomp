@@ -92,13 +92,14 @@ void DumpDiagState(const char *tag) {
     /* Recent executed-block PCs (oldest-first) — reveals an infinite
      * loop's block cycle when the watchdog trips. */
     {
-      extern int ar_block_history2(uint32_t *, uint32_t *, int);
-      uint32_t hist[256], aux[256];
-      int n = ar_block_history2(hist, aux, 256);
-      fprintf(f, "block history (last %d, oldest-first) pc m X:\n", n);
+      extern int ar_block_history3(uint32_t *, uint32_t *, uint16_t *, int);
+      uint32_t hist[256], aux[256]; uint16_t srec[256];
+      int n = ar_block_history3(hist, aux, srec, 256);
+      fprintf(f, "block history (last %d, oldest-first) pc m x S X  "
+                 "(watch S drift across a call to find the unbalanced subroutine):\n", n);
       for (int i = 0; i < n; i++)
-        fprintf(f, "  %06X m=%u X=%04X\n", hist[i],
-                (aux[i] >> 16) & 1, aux[i] & 0xFFFF);
+        fprintf(f, "  %06X m=%u x=%u S=%04X X=%04X\n", hist[i],
+                (aux[i] >> 16) & 1, (aux[i] >> 17) & 1, srec[i], aux[i] & 0xFFFF);
     }
     fclose(f);
   }
