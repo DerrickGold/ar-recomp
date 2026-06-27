@@ -167,7 +167,7 @@ renamed in the cfg (see below); this is the candidate list.
 | `$00:8526`/`852F` | COP / BRK syscall entry (audio events) |
 | `$00:9557` | spawn dispatcher (reads `$18`, indexes per-act handler table at `$95DD`) |
 | `$03:9156` | **act→sim transition handler dispatcher** (relocates stack to `$1FFF`, RTS-trick chain through `$9B22`/`$9B4A`/`$9195`) |
-| `$03:8053` | per-frame act→sim transition init (sequence of `JSR`s incl. `$9156`, `$AC8E`) |
+| `$03:8053` | **enter-sim SETUP** (runs on ANY entry to `$18=00`, incl. act→sim AND a warp to `$18=00`). Sequence of `JSR`s (`$9156` [fixed], `$AC8E`, …). **The act→sim cascade lives HERE** — m/x drift past the `$9156` fix (§DEBUG.md §0 "perfect storm"). Post-act sim target = `$18=00` (same mode as the *working* intro overworld → sim **steady-state is sound**; only this setup is broken). Fix path: CPU-flag ground-truth diff, or HLE this setup. |
 | `$03:AC8E` | transition state-machine step (counter loop, calls `$97B0`) |
 
 ---

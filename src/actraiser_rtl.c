@@ -278,8 +278,13 @@ void ActRaiserDrawPpuFrame(void) {
  * docs/SEAMS.md "Gameplay / Tunable seams" + memory debug-menu-warp-roadmap. */
 void ActRaiser_ApplyCheats(void) {
   extern uint8 g_ram[0x20000];
-  /* Action-stage ($18==01) gameplay tweaks only. */
-  if (g_ram[0x18] != 0x01) return;
+  /* Action-stage gameplay tweaks only. $18 = region/mode: 01-07 = an action
+   * stage (region N); 00 = intro/overworld, 08 = sim, $20+ = transitions. Gate
+   * on the whole action range so cheats persist across ALL regions, not just
+   * Fillmore ($18==01) — that bug disabled them after warping to region 2+. The
+   * player object/HP/timer fields are shared by the action engine across every
+   * region, so the same writes apply everywhere. */
+  if (g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07) return;
 
   /* AR_INF_HP: infinite health. =1 -> auto: pin player HP ($1D) to the
    * high-water max seen this stage (self-calibrates to "full" once you've been

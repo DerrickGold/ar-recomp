@@ -8,6 +8,13 @@ All `AR_*` env vars are read by the recomp binary (`build/ActRaiserRecomp`). All
 env vars are read by the oracle (`tools/oracle/snesref`). Almost every tool is **env-gated and
 inert by default**, so it's safe to leave the instrumentation in the build.
 
+**Config-file shortcut:** every `AR_*`/`SNESREF_*` var can also be set in the `.ini` config
+(`config.c` exports any such key via `setenv`), so you don't have to type them each run. Use
+**`./build/ActRaiserRecomp ar.sfc --config dev-config.ini`** — `dev-config.ini` ships with the
+cheat kit on and the common debug flags listed (commented). Precedence is **env > config**, so a
+command-line `env AR_X=…` still overrides a value in the file. (Section headers and `#` comments
+in the `.ini` are ignored; inline `# comments` after a value are stripped.)
+
 ---
 
 ## 0. Mental model (read once)
@@ -24,6 +31,49 @@ inert by default**, so it's safe to leave the instrumentation in the build.
 - Two layers can be wrong: **(a) the emitter/CPU layer** (opcode semantics, addressing, M/X
   tracking, stack ABI) and **(b) the hand-written runtime** (PPU/DMA, NMI/IRQ, BRK/COP syscalls,
   vblank-wait HLE, SPC). Different tools target each — see below.
+
+### What actually causes m/x drift (read this before chasing a misdecode)
+
+The single most important mental model, learned the hard way (the act→sim cascade):
+
+> **Opcode correctness and decode-time WIDTH correctness are orthogonal.** A clean `opcode_diff.py`
+> (Tom Harte, §5) does NOT mean "no misdecodes." Tom Harte tests each opcode with *known input
+> flags* ("given m=1, does `SEP #$20` work?"). It can NEVER test "did the **decoder** correctly
+> *assume* m=1 at this PC" — which byte-width it gave the instruction and which variant it emitted.
+> That's a whole-program control/data-flow inference, and ALL our drift lives there.
+
+So a misdecode is almost never "wrong opcode" or "unregistered handler." It's **right handler,
+WRONG VARIANT**: the recomp emits one variant per `(routine × m/x)` and **dispatches by *runtime*
+m/x**. One leaked flag bit → dispatch faithfully picks a wrong-width variant whose body is garbage
+(the `CMP #$0004`→`CMP #$04`+`BRK` splits). The opcodes are fine; the m/x **input** to the dispatch
+is wrong. **Four ways runtime m/x goes wrong even with perfect opcodes:**
+
+1. **`PLP`/`RTI` restoring a runtime-determined `P`.** The decoder tracks m/x via SEP/REP/PHP/PLP
+   (a per-function P-stack). Balanced *local* PHP/PLP works; but a PHP/PLP straddling a **call
+   boundary**, or a **relocated stack** (`TCS`), breaks the model → the decoder *guesses* the
+   restored m/x → every following byte decodes at the wrong width.
+2. **Stack misalignment.** A `PHX`/`PHY`/`PHP` run at the wrong width pushes the wrong byte count →
+   the SNES stack desyncs → a later `PLP`/`RTS` reads adjacent bytes → loads a garbage `P` →
+   runtime m/x flips. (This is the x=1 cascade: wrong-width index pushes → misaligned stack.)
+3. **Wrong exit-m/x propagation.** A callee returns at a different width than the decoder assumed,
+   so the caller's *post-call* code is decoded at the wrong m/x — the `$9156` class. Override with
+   cfg `exit_mx_at` / handle the RTS-trick with `rts_dispatch`.
+4. **Computed dispatch** reaching a PC at a runtime m/x the decoder never decoded that target for.
+
+A routine that hits *all four at once* (stack relocation + RTS-tricks + nested cross-function
+PHP/PLP) is a "perfect storm" the static decoder can't track — e.g. `$03:8053` (the act→sim
+enter-sim setup). The decoder guesses at every hop; on a *rare* code path (most of the game never
+runs it) some guess is wrong and cascades.
+
+**Why this is hard to pin, and the fix:** from inside the recomp, "m=0 here" looks identical whether
+it's a correct rare path or a leaked guess (we burned a whole trace on `$02C206`, which actually
+self-normalizes). `AR_MXCHECK` proved the *direct-call* layer clean; the leaks live in the
+*dispatch + PLP-restore + stack-relocation* layer, invisible to per-opcode tests and any purely
+static check. **Only a real-hardware CPU-flag reference can say which** — that's the (still-unbuilt)
+ground-truth diff: serialize snes9x (`retro_serialize` savestates carry the CPU `P`), diff its m/x
+against the recomp's per-block m/x, and the first divergence is the exact leaking PLP/push/dispatch.
+Then fix with the override directives the recomp already has: `exit_mx_at`, `force_variant_at`,
+`rts_dispatch`.
 
 ---
 
@@ -109,6 +159,23 @@ bury the signal. Deduped per `(source,target)` and capped at 128. **`AR_DISPWARN
 Unlike `AR_DISPMISSALL` (action-stage `$18==01` only), this fires in **all** game states (the
 transition is `$18==$27`).
 
+### `[garbage-variant]` — split-immediate misdecode trap  *(default ON, closest-to-root, no oracle)*
+Printed by `ar_garbage_variant_trap` (`common_cpu_infra.c`), emitted into the prologue of any
+function variant the recompiler detected as a **split-immediate misdecode** at regen time
+(`_detect_garbage_variant`, `emit_function.py`): a variant whose decode contains a `BRK` at a PC
+that a *valid sibling* variant decodes as **mid-instruction** — i.e. the `BRK` is the high byte of a
+16-bit immediate the wrong (narrow) width split off (`LDA #$0007`@m=0 → `LDA #$07`+`BRK`@m=1). Such
+a variant is **never legitimately reached**, so entering it means **a leaked m/x flag dispatched us
+into garbage** — and the trap fires at that *exact entry*, which is **far closer to the misdecode
+root than the eventual downstream crash, and needs no oracle**. Logs the caller + runtime m/x +
+frame, deduped per `(caller, variant)`. `AR_GARBAGE_STACK=1` adds the recomp call stack + block
+ring; `AR_GARBAGE_ABORT=1` stops at the first hit; `AR_NOGARBAGEWARN=1` silences. This is the
+sharpest tool we have for the m/x-drift class (§0): it turns "somewhere in this cascade m/x leaked"
+into "the leak put us in a garbage variant **here**." (Complement to `[dispatch-miss]`: that catches
+RTS-trick/computed misses; this catches wrong-*variant* dispatches.) *Known limitation:* a real
+`LDA #id; BRK` syscall reached at both m could over-flag — rare, non-fatal, recognizable (it'd fire
+during *normal* play, not a cascade).
+
 ### `AR_SCHECK=1` — SNES stack-pointer corruption tracer
 In `cpu_trace_block` (`cpu_trace.h`). Two outputs: `[scheck]` logs each new high-water page of
 `S`; **`[scheck-d]`** logs every block where `S` *jumps* > `$100` (a `TCS`/`TXS` relocation or the
@@ -116,6 +183,25 @@ corruption); and a one-shot **32-block path dump at the impending underflow** (`
 ring shows the routine draining the stack. Use for stack-corruption crashes. (Remember Golden
 rule 3: high `S` is often a legit relocation — the underflow + `[dispatch-miss]` are the real
 signals.)
+
+### `AR_STACKPROV=1` — stack pusher-provenance  *(who pushed the corrupt return frame)*
+In `cpu_write8` (records) + the `[dispatch-miss]` site (reads), `cpu_state.c`. A shadow array
+(`g_stack_pusher[0x10000]`, `common_cpu_infra.c`) stamps, for each bank-0 stack byte, the recomp
+block-PC that last **pushed** there (detected by `bank==0 && addr==cpu->S` — the byte is written
+before `S` decrements). On a bad-RTS `[dispatch-miss]` it dumps `[stackprov]` lines for the slots
+around `S`, marking the two `<- return frame` bytes and naming `pushed-by PC $xxxxxx (f=N)`. The key
+discriminator: a slot tagged **`NEVER PUSHED`** means the RTS read stale memory it never wrote ⇒
+**`S` itself is wrong** (bad relocation/unwind), *not* a bad push — the opposite fix. Reach for it
+when `[dispatch-miss]` shows a garbage target (e.g. `929D -> 010004`): `[scheck]`/`AR_RTSLOG` show
+*where* `S` is, this shows *who put the bytes there*. Runner-only, ~256KB, gated.
+Companion **`[overpop]`** (same flag, in `cpu_read8`): flags the FIRST pull/RTS that reads a
+never-pushed slot (`addr==cpu->S` after the `S++`, `g_stack_pusher==0`) — i.e. the actual
+unbalanced pop that drains the stack, *upstream* of the downstream garbage-return. Deduped by
+block-PC, capped 64. This names the routine to fix; the `[dispatch-miss]`/`[stackprov]` pair is just
+where the drain finally surfaces. If x is set at the over-pop, it also walks the block ring back to
+the block where **x last flipped 0→1** (`aux` bit17, recorded in `cpu_trace_block`) and prints
+`x flipped 0->1: block $A -> $B` — `$A` holds the `SEP`/`PLP` that leaked x and selected the garbage
+(wrong-width) variant upstream of the drain. That line is the actual fix target for an x-leak crash.
 
 ### `AR_RTSLOG=0x<hex pc>` — RTS-dispatch chain tracer
 In `cpu_dispatch_pc_from`. For a given RTS site, logs each dispatch hop's target PC + m/x + S +
@@ -180,6 +266,9 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   `--opcodes`, `--mode native|emu`. 227 single-opcodes verified clean; gaps remain in
   emulation-mode `.e` vectors, MVN/MVP/PER, and (by nature) cross-instruction bugs (stack ABI,
   M/X-tracking) which single-opcode tests can't catch.
+  > **A clean `opcode_diff` does NOT mean "no misdecodes."** It validates opcode *behavior* given
+  > known flags, never the decoder's *width assumption* at a PC. Decode-time m/x drift is a
+  > separate, whole-program problem — see §0 "What actually causes m/x drift."
 - **`tools/link_audit.py`** — **Layer A**. Static call-graph audit over `src/gen`: orphan
   (dead-carved) functions, per-PC variant coverage, trap-site live/dead classification.
 - **`tools/stub_census.py`** — scans `src/gen` for unresolved trap markers
@@ -477,6 +566,10 @@ AR_MXHIST=1            misdecode? where did m/x leak?            (run this FIRST
                        AR_DISPWARN=1 adds stack; AR_NODISPWARN=1 silences. Read it on TRANSITION crashes.
 AR_RTSLOG=0x<pc>       trace an RTS site's dispatch chain (target/m/x/S per hop)   (confirm §7.7)
 AR_SCHECK=1            SNES stack corruption: S-drift + underflow path  (high S is often LEGIT, §GR3)
+AR_STACKPROV=1         bad-RTS: who PUSHED the corrupt return frame (or NEVER-PUSHED = wrong-S, not bad-push)
+AR_XFLIP_GF=<gframe>   the block where x flips 0->1 during game-frame N (N from the snes9x m/x oracle)
+AR_XTRACE=1            x-flip ring auto-dumped at the first x=1 garbage variant -> the real fault's x history (no frame guess)
+SNESREF_MX_OUT / AR_MX_OUT + tools/oracle/diff_mx.py  snes9x CPU m/x ground-truth diff (finds the leak FRAME)
 AR_TRAPFN=<fnsubstr>   who entered this (garbage) variant: call stack + 40-block m-path
 AR_DISPMISSALL=1       unregistered handler (grep -v 00896f)     (then register in cfg + regen)
 AR_MXCHECK=1           emitter m/x analysis wrong on direct calls

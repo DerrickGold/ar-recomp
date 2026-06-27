@@ -31,6 +31,21 @@ void ParseConfigFile(const char *path) {
     else if (strcmp(key, "AudioSamples") == 0) g_config.audio_samples = (uint16)atoi(val);
     else if (strcmp(key, "EnableAudio") == 0) g_config.enable_audio = atoi(val) != 0;
     else if (strcmp(key, "LinearFiltering") == 0) g_config.linear_filtering = atoi(val) != 0;
+    /* Debug/cheat env-var bridge: any AR_* / SNESREF_* key in the config is
+     * exported to the environment so the getenv()-based debug flags and cheats
+     * pick it up — no command-line env needed (e.g. a dev-config.ini). This is
+     * parsed before the AR_* init reads + the game loop, so it reaches every
+     * flag. overwrite=0 -> an explicit command-line env still WINS (env > config),
+     * so you can override one without editing the file. e.g. in the .ini:
+     *   AR_INF_HP = 1 / AR_NO_KNOCKBACK = 1 / AR_WARP = 0201 / AR_GARBAGE_STACK = 1 */
+    else if (strncmp(key, "AR_", 3) == 0 || strncmp(key, "SNESREF_", 8) == 0) {
+#ifndef _WIN32
+      setenv(key, val, 0);
+#else
+      if (!getenv(key)) { char b[160];
+        snprintf(b, sizeof b, "%s=%s", key, val); _putenv(b); }
+#endif
+    }
   }
   fclose(f);
 }

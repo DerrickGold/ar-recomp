@@ -264,6 +264,70 @@ static int16_t cb_input_state(unsigned port, unsigned device, unsigned index, un
     return 0;
 }
 
+// ---- CPU M/X-flag oracle (reads snes9x internal globals via dlsym) ----
+// The dylib exports ICPU + the four width-specific opcode tables. ICPU.Opcodes
+// points at whichever table matches the current M/X width, so we scan the ICPU
+// struct for a pointer equal to one of the four table bases: that slot IS the
+// Opcodes field, and *which* table it equals gives (m,x). Self-calibrating, so
+// no snes9x struct header / version-matched offsets are needed. Emits one line
+// per game-frame ($0088): "gframe m x tableidx" to SNESREF_MX_OUT, for the
+// recomp-vs-oracle m/x diff that catches the first decode-time flag divergence.
+static FILE*      g_mxlog = nullptr;
+static uintptr_t  g_optbl[5];            // M0X0,M0X1,M1X0,M1X1,E1
+static const int  g_optbl_m[5] = {0,0,1,1,1};
+static const int  g_optbl_x[5] = {0,1,0,1,1};
+static uintptr_t* g_icpu = nullptr;
+static int        g_opcodes_slot = -2;   // word index of ICPU.Opcodes (-2 uncal, -1 failed)
+
+static void mx_init() {
+    const char* mo = getenv("SNESREF_MX_OUT");
+    if (!mo || !mo[0]) return;
+    g_icpu     = (uintptr_t*)dlsym(g_core, "ICPU");
+    g_optbl[0] = (uintptr_t)dlsym(g_core, "S9xOpcodesM0X0");
+    g_optbl[1] = (uintptr_t)dlsym(g_core, "S9xOpcodesM0X1");
+    g_optbl[2] = (uintptr_t)dlsym(g_core, "S9xOpcodesM1X0");
+    g_optbl[3] = (uintptr_t)dlsym(g_core, "S9xOpcodesM1X1");
+    g_optbl[4] = (uintptr_t)dlsym(g_core, "S9xOpcodesE1");
+    if (!g_icpu || !g_optbl[0] || !g_optbl[3]) {
+        fprintf(stderr, "[mx] dlsym ICPU/opcode-tables failed -> no CPU oracle\n");
+        return;
+    }
+    g_mxlog = fopen(mo, "w");
+    if (!g_mxlog) { fprintf(stderr, "[mx] cannot open %s\n", mo); return; }
+    fprintf(stderr, "[mx] CPU M/X oracle armed -> %s (ICPU=%p tbl=%p..%p)\n",
+            mo, (void*)g_icpu, (void*)g_optbl[0], (void*)g_optbl[3]);
+}
+
+static int mx_lookup() {  // -> index 0..4, or -1 if unresolved
+    if (!g_icpu) return -1;
+    if (g_opcodes_slot >= 0) {
+        uintptr_t p = g_icpu[g_opcodes_slot];
+        for (int i = 0; i < 5; i++) if (p == g_optbl[i]) return i;
+        // pointer no longer matches (SA1/changed) -> fall through to recalibrate
+    }
+    for (int s = 0; s < 128; s++) {
+        uintptr_t p = g_icpu[s];
+        for (int i = 0; i < 5; i++) if (p == g_optbl[i]) { g_opcodes_slot = s; return i; }
+    }
+    return -1;
+}
+
+static void mx_tick() {
+    if (!g_mxlog) return;
+    if (!g_sysram) g_sysram = (const uint8_t*)p_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
+    if (!g_sysram) return;
+    unsigned gf = (unsigned)g_sysram[0x88] | ((unsigned)g_sysram[0x89] << 8);
+    int idx = mx_lookup();
+    int m = idx >= 0 ? g_optbl_m[idx] : -1;
+    int x = idx >= 0 ? g_optbl_x[idx] : -1;
+    /* Also log $18 (game-mode) + $1A (transition-dest sub-mode) so the differ can
+     * auto-anchor on the boss->sim transition in EACH run independently — works
+     * even when oracle and recomp are played as separate sessions (no shared
+     * $0088 clock). Format: "gframe m x idx g18 g1a". */
+    fprintf(g_mxlog, "%u %d %d %d %u %u\n", gf, m, x, idx,
+            g_sysram[0x18], g_sysram[0x1a]);
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) { fprintf(stderr,"usage: snesref <core.dylib> <rom.sfc>\n"); return 1; }
     const char* corePath = argv[1];
@@ -311,6 +375,7 @@ int main(int argc, char** argv) {
 
     p_retro_set_environment(cb_environment);
     p_retro_init();
+    mx_init();   /* arm CPU M/X-flag oracle (SNESREF_MX_OUT) after core init */
 
     retro_system_info si; memset(&si,0,sizeof si); p_retro_get_system_info(&si);
     printf("core: %s %s  need_fullpath=%d\n", si.library_name?si.library_name:"?",
@@ -401,6 +466,7 @@ int main(int argc, char** argv) {
         p_retro_run();
         g_frame++;
         trace_tick();
+        mx_tick();   /* per-game-frame M/X capture for the recomp diff */
         /* Report when the action stage ($7E:0018==01) is first entered, with the
          * game-frame $0088 — lets a round-trip confirm the recomp/oracle share the
          * same gf clock (gf-keyed input replay only aligns if they do). */

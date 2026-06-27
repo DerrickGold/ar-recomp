@@ -5,6 +5,8 @@
 *.png
 *.ppm
 *.wav
+*.bin
+*.rec
 
 # Build output
 build/
@@ -50,3 +52,4 @@ saves/snapshots/*
 *.log
 tools/oracle/harte_cache/
 build/opcode_diff/
+snesref

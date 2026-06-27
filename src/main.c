@@ -182,6 +182,25 @@ static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
     if ((long)gf == dump_at_gf) { FILE *gf_f = fopen("saves/recomp_at.bin", "wb");
       if (gf_f) { fwrite(wram, 1, 0x20000, gf_f); fclose(gf_f);
         fprintf(stderr, "[dump-at-gf] gf=%u -> recomp_at.bin\n", gf); } } }
+  /* AR_MX_OUT=<file>: per-game-frame CPU m/x capture for the snes9x CPU-flag
+   * oracle (tools/oracle/diff_mx.py). Emits "gframe m x" from the SNES cpu state
+   * at the frame-end yield, compared against snesref's SNESREF_MX_OUT (read from
+   * snes9x's ICPU.Opcodes) to catch the first decode-time m/x divergence in the
+   * boss->sim transition. Keyed on game-frame $0088 to align with the oracle. */
+  {
+    static FILE *mxf = NULL; static int mx_tried;
+    if (!mx_tried) { mx_tried = 1; const char *p = getenv("AR_MX_OUT");
+      if (p && p[0]) mxf = fopen(p, "w"); }
+    if (mxf) {
+      extern CpuState g_cpu;
+      unsigned gf = (unsigned)wram[0x88] | ((unsigned)wram[0x89] << 8);
+      /* "gframe m x g18 g1a" — $18/$1A let the differ auto-anchor on the
+       * boss->sim transition independently in each run (no shared $0088). */
+      fprintf(mxf, "%u %d %d %u %u\n", gf, g_cpu.m_flag & 1, g_cpu.x_flag & 1,
+              wram[0x18], wram[0x1a]);
+      if ((frame % 30) == 0) fflush(mxf);
+    }
+  }
   if (!g_wram_trace) return;
   if (!g_wram_primed) {
     memcpy(g_wram_prev + g_wram_lo, wram + g_wram_lo, g_wram_hi - g_wram_lo + 1);
@@ -200,8 +219,9 @@ static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
 
 static void WramTraceInit(void) {
   const char *path = getenv("AR_WRAM_TRACE");
-  /* AR_DUMP_ACT alone also needs the per-frame callback registered. */
-  if ((!path || !path[0]) && (getenv("AR_DUMP_ACT") || getenv("AR_DUMP_AT_GF"))) {
+  /* AR_DUMP_ACT / AR_DUMP_AT_GF / AR_MX_OUT alone also need the callback. */
+  if ((!path || !path[0]) &&
+      (getenv("AR_DUMP_ACT") || getenv("AR_DUMP_AT_GF") || getenv("AR_MX_OUT"))) {
     g_framedump_callback = WramTraceCallback;
     return;
   }
