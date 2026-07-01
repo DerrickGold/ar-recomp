@@ -92,6 +92,45 @@ Then fix with the override directives the recomp already has: `exit_mx_at`, `for
 > it has a frame-granularity ceiling (can't see the crash frame, shows sampling noise) — the
 > instruction-level `S` trace is what actually cracked this.
 
+### Gotchas that have each burned a full investigation (read before building new instrumentation)
+
+These aren't bugs — they're properties of the runtime/ROM that look like bugs until you know them.
+Each one below cost real time (some cost days) before being understood; check this list before
+adding a new probe.
+
+1. **Direct-page addressing is `D`-relative, not literal.** `LDA $19` in decoded/generated code
+   reads `cpu_read8(cpu, 0x7E, cpu->D + 0x0019)`, NOT literal WRAM offset `$0019`. `D` happens to be
+   `0` in most of the code paths debugged so far (confirmed via `AR_SIMTRACE`'s printed `D=` field
+   for the ResetHandler main-loop context), but **never assume it** — a watch pointed at a literal
+   address can miss the real target entirely if `D != 0` at that call site. Always check `D` before
+   trusting a watch's silence as "nothing writes here."
+2. **Direct-page scratch bytes are reused across unrelated subsystems.** `$0014-$0017` is used as a
+   16-bit ADD/XOR accumulator by the save-checksum routine (`$02:84F3`) AND as a message-type
+   parameter by the dialog-draw dispatcher (`$02:BF60`) — two completely unrelated systems sharing
+   the same 4 bytes. An oracle diff or watch hit on a low DP address does NOT mean "the SAME logical
+   value differs" — check what's CURRENTLY using that address at the specific PC/frame in question
+   before concluding anything about its "meaning." Assume DP scratch is polymorphic until proven
+   otherwise (mirrors the object-table field-`$14` polymorphism in §11).
+3. **There are (at least) three distinct WRAM write paths, and a watch only covers what it hooks.**
+   `cpu_write8`/`cpu_write16` (`cpu_state.c`) is the direct-store path; `IndirWriteByte`/
+   `IndirWriteWord` (`common_rtl.h`) is the indexed/indirect-store path (`STA (dp),Y` etc.); `snes_write`
+   (`snes.c`, used by `dma_transferByte`) is the DMA path — DMA writes go straight into `g_ram`
+   completely bypassing both CPU-instruction paths. `AR_WATCHOBJ`/`AR_WATCH16` originally only
+   hooked the first path; both gaps were closed 2026-07-01 (see §3's coverage note and the
+   `[wobj-dma]`/`[watch16-dma]` tags), but if you ever add a FOURTH write mechanism to the runtime,
+   it needs its own hook too — a watch's silence is only as good as its coverage.
+4. **A CPU register's value at a sampling point doesn't mean what you think it means without an
+   explicit verification step.** A whole investigation (2026-07-01, the "`A=0x00A1`" chase) was
+   built on the unverified assumption that `cpu->A`, sampled via `AR_FRAMELOG` at a vblank-wait
+   yield point, reflected a specific memory read (`$0019`) executed earlier that frame. It didn't —
+   `A` was legitimate, transient CPU state left over from an entirely unrelated `LDA #$A1` a few
+   instructions earlier (`$00:8465`, a hardware-register-setup routine, same pattern as the
+   NMITIMEN write at `$008051`). Ten rounds of write/read/DMA instrumentation correctly found no
+   corruption, because there wasn't any — the bug was the initial assumed *link* between the
+   register and the memory address, never checked before building on top of it. **Before chasing a
+   suspicious register/memory value across multiple probes, spend one probe confirming the causal
+   chain that made you suspicious of it in the first place.**
+
 ---
 
 ## 1. DECISION GUIDE — symptom → tool
@@ -108,6 +147,8 @@ Then fix with the override directives the recomp already has: `exit_mx_at`, `for
 | **Per-frame game-state progression** | `AR_FRAMELOG=1` (callsite, work delta, mode `$18/$19`, timer, HP) | `AR_OBJLOG=1` for the object table |
 | **Is the CPU layer even the problem?** | `AR_MXCHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
 | **Crash on a mode/level TRANSITION; SNES stack corrupted (`S` walks to `$FFxx`/`$42xx`/I-O); `ppu_write`/`ppu_read` abort** | Check stderr for **`[dispatch-miss]`** (default-on tripwire) — it names the unresolved RTS-trick/computed target. Then `AR_SCHECK=1` (S-drift + impending-underflow path) | confirm with `AR_RTSLOG=0x<rts_pc>`; register the popped target as a cfg `func` (see §7.7) |
+| **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Check the regen console output's three silent-drop report sections: **`JSR (abs,X) SUPPRESSED`** (cfg-required-dispatch-or-kill), **`DISPATCH TARGET SUPPRESSED BY DATA_REGION`**, **`Rejected JSR/JSL targets`** — grep the report for the bank/address range of the code you suspect. If none of those name the site, it's probably a genuine logic/state bug (e.g. a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `AR_INDIRLOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (§2 `AR_SAVECHECK`-style targeted branch probe) |
+| **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | Check the regen console's **`PROVEN-EQUIVALENT VARIANT ROUTING`** report section for the address — a `<== DIFFERS FROM CANONICAL/DEFAULT GUESS` entry means the OLD "nearest survivor" heuristic and the NEW proof disagree; a regen should already route it correctly. If the address is missing from the report entirely, `_find_equivalent_variants` couldn't prove any survivor equivalent (genuinely no safe target — see §7 "wrong-width dispatch, no provable target") | `AR_MXCHECK`/`AR_CALLMX` first to confirm it's actually reached at the wrong width at runtime (don't assume from static inspection alone — see gotcha #4 above) |
 
 **Golden rule:** on any "stuck / garbage / disappearing" bug, run **`AR_MXHIST=1` first**. In one
 run it tells you misdecode-vs-not and where the M flag leaked — this is what turned multi-hour
@@ -201,6 +242,38 @@ ring shows the routine draining the stack. Use for stack-corruption crashes. (Re
 rule 3: high `S` is often a legit relocation — the underflow + `[dispatch-miss]` are the real
 signals.)
 
+### `AR_SIMTRACE=1` — sim-mode per-frame dispatch path watcher  *(2026-07-01, targeted probe)*
+In `cpu_trace_block` (`cpu_trace.h`). Watches which of bank 0's sim-mode dispatch branch targets
+executes each frame: `$008125` (skip the rest of the per-frame update — everything downstream of
+the `$01:8000` building/icon call gets bypassed), `$0080F6` (continue — full per-frame update
+runs), `$008066` (the action-stage path — should never fire while `$18==0`), `$0080E5` (sim-dispatch
+entry, confirms the outer `$18` gate is even reached). Logs `[simtrace] gf=.. f=.. pc=$.. <tag>
+A=.. X=..`, capped at 600 hits. Added to chase a sim-mode freeze where nearly all of WRAM stopped
+changing frame-to-frame (F2 snapshot diff showed only 11 bytes changing over 545 frames) despite
+the menu/save subsystems still working — i.e. the *movement/object-update* path specifically, not
+a global hang. Pair with the `AR_FRAMELOG` joypad field (below) to see whether input is even
+reaching this code when the skip path fires.
+
+> **Update (2026-07-01):** the sim-mode freeze this probe was built for was NOT actually caused by
+> the `$018000` skip gate — a static trace of `$018000` predicted (correctly, confirmed via
+> `AR_SIMTRACE` itself) that it returns carry CLEAR under the observed conditions, so `$0080F6`
+> (continue) DOES run. The graphics corruption's actual root is still open; see `AR_SAVECHECK` below
+> and the sim-mode dispatch structure notes in `docs/SEAMS.md`.
+
+### `AR_SAVECHECK=1` — save-data checksum gate outcome  *(2026-07-01, targeted probe)*
+In `cpu_trace_block` (`cpu_trace.h`). Watches which branch `bank_02_A622`'s save-validity gate
+(`$02A70D: BCC $A72F`) takes: `$02A72F` = checksum PASSED ("continue saved game" title-screen
+flow — 3 dialog messages, sets `$0336=1`), `$02A70F` = checksum FAILED ("no valid save / new game"
+flow — 2 messages, `$0336` untouched). Logs `[savecheck] gf=.. f=.. pc=$.. PASS/FAIL`. Neither
+branch is a crash handler — both are normal title-screen dialogs (see `docs/SEAMS.md` "Save /
+persistence" for the checksum algorithm and caller chain) — so a divergence here doesn't crash
+anything directly, but it does mean state ONE branch is responsible for setting up (like `$0336`)
+would be missing/wrong if the WRONG branch fires relative to what the save file represents. Used to
+rule out (2026-07-01 investigation: checksum correctly PASSED, so this was NOT the cause of that
+session's graphics corruption) a wrong-branch theory quickly rather than re-deriving the outcome
+from noisy DP-scratch history (`$0014-$0017` is shared with an unrelated subsystem — see the
+gotchas list in §0).
+
 ### `AR_STACKPROV=1` — stack pusher-provenance  *(who pushed the corrupt return frame)*
 In `cpu_write8` (records) + the `[dispatch-miss]` site (reads), `cpu_state.c`. A shadow array
 (`g_stack_pusher[0x10000]`, `common_cpu_infra.c`) stamps, for each bank-0 stack byte, the recomp
@@ -232,6 +305,35 @@ name contains the substring is entered, dumps the **recomp call stack** + a **40
 `AR_TRAPFN=bank_03_AC8E_M1X0` named the caller (`bank_03_8053`) and the m-flip path into a garbage
 misdecode variant. Use to find *who* dispatched into a known-bad variant.
 
+### `AR_CALLMX=1` — per-call-site m/x invariant check  *(2026-06-30)*
+Set once at startup from env (`src/main.c`), read by `ar_call_mx_check` (inlined in every emitted
+JSR/JSL, `cpu_state.h`). Unlike `AR_MXCHECK` (checks a function's *entry*), this fires at every
+**call site**, comparing the decoder's static assumed `(m,x)` for that JSR/JSL against the runtime
+CPU state right before the call. Prints `[call-mx] <fn> call-site $<pc>: runtime m=.. x=.. but
+decoder assumed m=.. x=.. here -> (m,x) corrupted between fn entry and this call`. Narrows a leak
+to a specific mid-function call site rather than just "somewhere in this function." Deduped by
+call site.
+
+### `AR_MXCHECK_BT=<fn-substring>` — real host C call-stack backtrace  *(2026-06-30)*
+In `ar_entry_mx_fail` (`common_cpu_infra.c`), fires once (first hit) when a function whose name
+contains the substring fails its entry `AR_MXCHECK` invariant. Captures the actual host
+`backtrace()`/`backtrace_symbols_fd()` — the REAL C call stack, not the `g_recomp_stack`-based
+approximation every other diagnostic relies on. Ground truth when a misdecode's caller chain is
+in doubt; this is what finally proved `$01:933C_M1X0 -> $01:B898_M1X1`'s exact caller during the
+2026-06-30/07-01 investigation.
+
+### `AR_INDIRLOG=1` — suppressed `JSR (abs,X)` inspection  *(2026-07-01)*
+In `ar_indirect_suppressed_log` (`cpu_state.c`), called from every codegen-emitted
+`Call indirect SUPPRESSED` site (an unauthorised `JSR (abs,X)` the decoder severed — see
+`_STUB_MARKERS`/`indirect_call_table`). Logs the site, table base, and effective address
+(`table_base + X`), then classifies it: **WRAM** (prints the live table entry — a genuine
+runtime-populated table, candidate for `indirect_call_table`/`indirect_dispatch` authorisation),
+**SNES hardware-register space** (`$2000-$5FFF` — almost certainly NOT a real table; the "JSR
+(abs,X)" itself is likely a decode artifact from a wrong entry m/x, the same bug class as
+`$01:B898`), or **ROM** (prints the static table entry directly). Deduped per site, capped at 128
+unique sites. Reach for this whenever the `JSR (abs,X) SUPPRESSED` regen-report section lists a
+site you're trying to resolve.
+
 ### Standard misdecode/m-leak pipeline
 `AR_MXHIST` (locate the leak boundary) → `AR_DISPMISSALL | grep -v 00896f` (name the missed
 handler) → register it in `recomp/<bank>.cfg` → `tools/regen.sh` → rebuild.
@@ -253,6 +355,16 @@ target as a cfg `func ... entry_mx:m,x` → regen → rebuild.
   (e.g. a corrupt handler pointer) back to its writer.
 - **`AR_WATCH18=1`** — logs changes to `$7E:0018` (game-mode byte).
 
+> **Coverage note (fixed 2026-07-01):** both watches originally only hooked `cpu_write8`/
+> `cpu_write16` (`cpu_state.c`). Any store through an indexed/indirect addressing mode (`STA
+> (dp),Y`, `STA [dp],Y`, `STA abs,X` when the effective address lands in the watched range) goes
+> through `IndirWriteByte`/`IndirWriteWord` (`common_rtl.h`) instead, which wrote straight to
+> `g_ram` with **zero instrumentation** — a real blind spot where a value only ever written
+> indirectly was invisible to both watches no matter what you set them to. Found chasing a
+> sim-mode freeze: `AR_WATCHOBJ=0` caught nothing on `$0019` despite other evidence proving it
+> was being written every frame. Both watches now also fire from the indirect-write path, tagged
+> `[wobj-ind]`/`[watch16-ind]` so you can tell which store form actually hit.
+
 ---
 
 ## 4. Per-frame observation logs
@@ -260,9 +372,11 @@ target as a cfg `func ... entry_mx:m,x` → regen → rebuild.
 All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 
 - **`AR_FRAMELOG=1`** — `[frame] f=N push+DELTA callsite=BB:PPPP A=.. m=.. $18 $19 $1A $1B $F4 $F5
-  $FB time$E6 HP$1D`. A steady push-delta with the timer ticking = engine running; tiny delta =
-  spinning on a wait; frozen timer with large delta = a pause/gate. The callsite is the main
-  loop's current vblank-wait point.
+  $FB time$E6 HP$1D joy=.. (raw=..)`. A steady push-delta with the timer ticking = engine running;
+  tiny delta = spinning on a wait; frozen timer with large delta = a pause/gate. The callsite is
+  the main loop's current vblank-wait point. `joy`/`raw` (added 2026-07-01) is the
+  `SwapInputBits`'d / raw joypad word — pair with `AR_SIMTRACE` to see whether input is reaching a
+  stuck code path at all.
 - **`AR_OBJLOG=1`** — action-stage object table: game-frame, timer, HP, active object count, and
   object-0 status word ($06A0 stride $40) + handler ptr. Reveals the frame an object table is
   wiped or a handler goes bad.
@@ -286,6 +400,41 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   > **A clean `opcode_diff` does NOT mean "no misdecodes."** It validates opcode *behavior* given
   > known flags, never the decoder's *width assumption* at a PC. Decode-time m/x drift is a
   > separate, whole-program problem — see §0 "What actually causes m/x drift."
+- **Proven-equivalent variant routing** *(2026-07-01, `tools/v2_regen.py` + `recompiler/v2/codegen.py`
+  + `recompiler/v2/emit_function.py`)* — the emit-truth prune pass (which drops a wrong-width
+  variant when a "clean" sibling proves the bytes are real code at that width) has to decide, for
+  every PRUNED dispatch case, which SURVIVING variant to route callers to. The original heuristic
+  (`_nearest_survivor` in `codegen.py`) just picked whichever survivor was numerically "closest" in
+  `(m,x)` — a guess with no proof behind it, and the exact bug that misrouted `$01:B898`'s pruned
+  `M1X0` dispatch case to the wrong-width `M1X1` body (see §7). The fix:
+  `emit_function._find_equivalent_variants` decodes a candidate variant against all three other
+  widths and does a byte-for-byte instruction-shape comparison (same `(pc16, mnemonic, operand
+  length)` at every shared PC) — a real proof, not a distance guess. `codegen._route_pruned_variant`
+  now checks, in order: (1) a variant PROVEN equivalent via this check, (2) the cfg-declared
+  canonical width, (3) the `(1,1)` SNES-reset default, (4) the old distance heuristic as a last
+  resort. Run `tools/regen.sh` and read the console's `=== PROVEN-EQUIVALENT VARIANT ROUTING ===`
+  section: it lists every pruned-variant routing decision that came from tier 1, flagging any that
+  `<== DIFFERS FROM CANONICAL/DEFAULT GUESS` (i.e. a case the old heuristic would have gotten
+  wrong). **Not every wrong-width variant has a provable answer** — if `_find_equivalent_variants`
+  can't match a pruned variant's decode to ANY surviving sibling (a genuine divergence, not just
+  "never checked"), it's absent from the report and the routing falls back to tiers 2-4 exactly as
+  before; that's not a bug in the checker, it means the ROM genuinely has no safe substitute for
+  that dispatch case and the underlying caller-side leak needs its own investigation (`AR_CALLMX`/
+  `AR_MXCHECK` to find who dispatches there with the wrong width).
+  > **Regen fixpoint-convergence bug (found + fixed 2026-07-01).** The regen loop is an iterative
+  > fixpoint: each pass re-emits every bank, stopping once nothing new is found. Equivalence facts
+  > discovered DURING a pass only get applied to dispatch-switch routing starting the NEXT pass —
+  > but if the pass that discovers a new fact is ALSO the one where every other convergence
+  > condition is satisfied, the loop broke immediately, writing that pass's (stale-by-one-pass)
+  > results as final. The end-of-run report (built separately, from the fully-accumulated data)
+  > showed the fix correctly; the actual generated `.c` code never got the corresponding
+  > re-emission. **Symptom: the console report says a routing case is "proven," but the generated
+  > code still has the old "nearest survivor" comment.** Fixed by requiring the convergence check to
+  > also confirm no new equivalence facts appeared during the pass before allowing the loop to
+  > break (`equivalences_grew_this_pass` in `tools/v2_regen.py`). If you ever see report/generated-code
+  > disagreement like this again for ANY report section (not just this one), suspect the same class
+  > of bug: something computed during a pass whose effect is deferred to the NEXT pass, combined
+  > with a convergence check that doesn't know to wait for it.
 - **`tools/link_audit.py`** — **Layer A**. Static call-graph audit over `src/gen`: orphan
   (dead-carved) functions, per-PC variant coverage, trap-site live/dead classification.
 - **`tools/stub_census.py`** — scans `src/gen` for unresolved trap markers
@@ -355,6 +504,17 @@ AR_HEADLESS=1 AR_QUIT_FRAMES=4300 AR_INPUT_REPLAY=saves/<rec>.bin \
 # Compare:
 python3 tools/oracle/diff_seq.py /tmp/o.jsonl /tmp/r.jsonl --lo 0x200 --hi 0x1fff
 ```
+
+> **Confirmed working end-to-end (2026-07-01).** This exact recipe (fresh `AR_INPUT_RECORD` from a
+> save-loaded session, `SNESREF_SRAM_IN` on the oracle side, `--lo`/`--hi` narrowed to the specific
+> byte range under suspicion) was run for a real investigation and produced a clean, actionable
+> diff on the first try. `--lo 0x0000 --hi 0x0040` (instead of the general `$0200-$1FFF` sweep) is
+> a good move when you already have a specific low-DP address range in mind — narrows the
+> `common(kept)` set to something you can read the whole output of directly, rather than skimming a
+> "top 40" table. One real caveat found: **the WRAM tracer does not cover SRAM (bank `$70+`)** —
+> addresses above `$1FFFF` never appear in either JSONL, so a checksum/save-data bug living in
+> SRAM itself won't show up in this diff at all; you'd need a direct byte-level comparison of the
+> `.srm` file / a raw SRAM dump instead.
 
 ### Three diff tools (pick by question)
 - **`diff_seq.py`** — *value-SEQUENCE* diff (**use this**). Compares each address's ordered
@@ -475,6 +635,36 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
    See §11 for the full object/spawn model. Computed handlers (e.g. `$AC11 = recordBase+0x0F`)
    never appear as literal ROM bytes, so they're invisible to byte/pointer scans — only the
    table-derivation or a runtime snapshot finds them.
+8. **Wrong-width dispatch routing (the "nearest survivor" class)** — DIFFERENT from a misdecode:
+   the ROM bytes decode correctly at each width, but when the emit-truth prune drops a wrong-width
+   variant, the runtime dispatch switch has to route that case to SOME surviving variant, and the
+   original heuristic just guessed the numerically-closest one rather than proving equivalence.
+   Symptom: a caller genuinely reaching a dispatch case at the "pruned" width gets routed into a
+   body that was never proven equivalent to what should have run there — silent wrong behavior
+   (not necessarily a crash), hard to distinguish from an ordinary misdecode by symptom alone.
+   *Concrete cases:* `$01:B898` (session-long chase, root-caused via `AR_MXCHECK_BT` real
+   backtrace + direct instruction-shape comparison), `$00:8465`, `$00:845F`, `$00:A3E1`,
+   `$02:AB05`, and 11 more addresses found by the same static check in one pass (see §5's
+   proven-equivalent-routing entry). *Find:* the regen report's `PROVEN-EQUIVALENT VARIANT
+   ROUTING` section, or `AR_MXCHECK`/`AR_CALLMX` catching the wrong-width entry live. *Fix:* the
+   proven-equivalence pass now routes automatically wherever it CAN prove an answer; for the
+   residual cases with no provable target, a manual cfg `entry_mx:` pin (like `$01:B898`'s
+   `entry_mx:0,0`) is still needed — the static prover can only report "no answer," not invent one.
+9. **Silent suppression (a feature/menu/effect that never runs, no crash, no garbage)** — a
+   DIFFERENT failure shape from BOTH of the above: not wrong code running, but INTENDED code never
+   running at all, invisibly. Three regen-time mechanisms can produce this: an unauthorised `JSR
+   (abs,X)` gets its call site severed entirely (`Call indirect SUPPRESSED`, "cfg-required-
+   dispatch-or-kill"); a dispatch-table entry whose target lands in a cfg `data_region` gets
+   dropped from that ONE table slot; a `JSL`/`JSR` target the decoder judged out-of-LoROM (garbage
+   operand past an unrelated `RTS`) gets its call skipped. All three are loud at REGEN time (the
+   console report names every site) but completely silent at RUNTIME — no trap, no log, nothing to
+   catch with the misdecode toolkit (§2), because nothing wrong-width ever dispatches; the call
+   simply doesn't happen. *Find:* grep the regen console output for the address range you suspect,
+   or `AR_INDIRLOG=1` for a specific suppressed `JSR (abs,X)` site (classifies the table base as
+   WRAM/genuine-table, SNES-hardware-register-space/likely-decode-artifact, or ROM/genuine-table).
+   *Fix:* author `indirect_call_table`/`indirect_dispatch` cfg directives once the real table shape
+   is known (§7.7's `indirect_dispatch … ret:` directive is the same mechanism, just for the
+   RTS-trick shape instead of the suppressed-call shape).
 
 ---
 
@@ -519,6 +709,25 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
 
 These are narrow, one-bug probes left in `cpu_trace.h` / various sources. They're env-gated and
 inert, but are **not** part of the permanent toolkit — prune them once their bug is closed.
+
+**Closed 2026-07-01 (the "`A=0x00A1`" false alarm — see §0 gotcha #4):** `AR_WATCH0019` (`cpu_state.c`
+`cpu_write8`/`cpu_write16`, unconditional write watch on `$0019`), `AR_READ0019` (`cpu_state.c`
+`cpu_read8`, unconditional read watch on `$0019`), `AR_TRACEA`/`AR_TRACEA_GF` (`cpu_state.h`
+`cpu_write_a8`/`cpu_write_a16`, every write to the CPU `A` register from a given game-frame
+onward — this is the one that actually settled it: `A` was legitimately loaded via `LDA #$A1` by
+`$00:8465`, unrelated to `$0019`). All four proved their respective layers clean (no bug at that
+layer) before the investigation found the real explanation (a transient, correct register value,
+not memory corruption at all) — safe to remove whenever `cpu_state.c`/`cpu_state.h` next gets
+cleaned up, or leave them (inert unless the env var is set) if another investigation might reuse
+the pattern.
+
+**Still open (2026-07-01, the sim-mode graphics-corruption investigation):** `AR_SIMTRACE` (see §2 —
+ruled out the `$018000` skip gate as the cause, kept for its general "which branch fired" utility),
+`AR_SAVECHECK` (see §2 — ruled out the save-checksum gate as the cause). `AR_INDIRLOG` (see §2,
+originally for the sim-mode `$2920`/`$208E` suppressed-dispatch theory — confirmed those sites
+never fire in the corrupted playthrough, so that specific theory is also closed, but the tool
+itself is general-purpose and worth keeping armed for any future suppressed-dispatch site).
+
 Current crop (this debugging arc): `AR_B90D_CATCH`, `AR_B127_CATCH`, `AR_896E_CATCH`,
 `AR_8A3C_CATCH`, `AR_8664_CATCH`, `AR_STRACE`, `AR_EVTRACE`. Legacy from prior arcs:
 `AR_CALLTRACE(_GF)`, `AR_CTACTION`, `AR_FUNCLOG`, `AR_MLOG`, `AR_SPAWNLOG`, `AR_8966X(_GF)`,
@@ -606,14 +815,21 @@ AR_XFLIP_GF=<gframe>   the block where x flips 0->1 during game-frame N (N from 
 AR_XTRACE=1            x-flip ring auto-dumped at the first x=1 garbage variant -> the real fault's x history (no frame guess)
 AR_STRACE=1            per-instruction cpu->S in a PC window (AR_STRACE_LO/HI, def $03B200-$03B260): find the call that returns with S off = the stack leak  (THE tool that root-caused act->sim)
 (diag dump now shows per-block S — watch S drift across a call to spot an unbalanced subroutine)
+AR_CALLMX=1            per-CALL-SITE m/x invariant (narrower than AR_MXCHECK's entry-only check)
+AR_MXCHECK_BT=<fn>     real host backtrace() on the first AR_MXCHECK failure matching <fn> (ground truth, not g_recomp_stack)
+AR_INDIRLOG=1          inspect a suppressed JSR (abs,X): WRAM table / HW-register decode-artifact / ROM table
 SNESREF_MX_OUT / AR_MX_OUT + tools/oracle/diff_mx.py  snes9x CPU m/x ground-truth diff (finds the leak FRAME)
 AR_TRAPFN=<fnsubstr>   who entered this (garbage) variant: call stack + 40-block m-path
 AR_DISPMISSALL=1       unregistered handler (grep -v 00896f)     (then register in cfg + regen)
 AR_MXCHECK=1           emitter m/x analysis wrong on direct calls
-AR_WATCHOBJ=<addr>     who writes this object slot
-AR_WATCH16=<val>       who writes this 16-bit value
+AR_WATCHOBJ=<addr>     who writes this object slot (also fires on indirect + DMA writes, tagged [wobj-ind]/[wobj-dma])
+AR_WATCH16=<val>       who writes this 16-bit value (also fires on indirect + DMA writes, tagged [watch16-ind]/[watch16-dma])
+AR_SIMTRACE=1          sim-mode dispatch: which branch fired this frame at a set of watched PCs (edit cpu_trace.h to retarget)
+AR_SAVECHECK=1         save-checksum gate outcome: PASS (continue) vs FAIL (new game) — see §2
+regen report           "PROVEN-EQUIVALENT VARIANT ROUTING" section: wrong-width dispatch routing, proven not guessed (§5)
+regen report           "JSR (abs,X) SUPPRESSED" / "Rejected JSR/JSL" / "DISPATCH TARGET SUPPRESSED" sections: silent-drop audit (§7.9)
 AR_PPULOG=1            rendering: bgmode/bright/fblank/layers/hdmaen
-AR_FRAMELOG=1          per-frame mode/timer/HP/callsite
+AR_FRAMELOG=1          per-frame mode/timer/HP/callsite/joypad
 AR_OBJLOG=1            object-table health
 AR_SHOT_AT_GF=N        recomp screenshot -> saves/shot.ppm
 F2 (windowed)          full snapshot WRAM+VRAM+CGRAM+OAM+ppm -> saves/snapshots/  (VRAM-visible!)

@@ -53,6 +53,26 @@ if(NOT MSVC)
         -w -Wno-implicit-function-declaration)
 endif()
 
+# AR_SANITIZE: AddressSanitizer + UndefinedBehaviorSanitizer opt-in build.
+# 2026-06-30: added chasing a CpuState->x_flag corruption where runtime
+# instrumentation proved the flag reads differently one C statement apart
+# with ZERO emitted code in between (a switch-case selecting a variant by
+# x_flag==1, then that variant's own first statement reading x_flag==0) --
+# a signature of a stray/out-of-bounds write elsewhere landing on memory
+# that happens to alias the CpuState struct, not a decode-time bug. ASan
+# catches the actual corrupting write with a full stack trace; printf-based
+# instrumentation can only observe the symptom. Off by default (real perf
+# cost — ASan is typically 2-3x slower, tractable for one repro run but not
+# for normal play). Enable with -DAR_SANITIZE=ON.
+option(AR_SANITIZE "Build with ASan + UBSan (debug corruption bugs)" OFF)
+if(AR_SANITIZE AND NOT MSVC)
+    target_compile_options(ActRaiserRecomp PRIVATE
+        -fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    target_link_options(ActRaiserRecomp PRIVATE
+        -fsanitize=address,undefined)
+    message(STATUS "ActRaiserRecomp: AR_SANITIZE on — ASan+UBSan enabled")
+endif()
+
 target_link_libraries(ActRaiserRecomp PRIVATE
     ${SDL2_LIBRARIES}
     m

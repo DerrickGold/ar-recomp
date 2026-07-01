@@ -164,16 +164,24 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
   if (getenv("AR_FRAMELOG")) {
     extern unsigned long g_recomp_push_count;
     extern uint8 g_ram[0x20000];
+    extern Snes *g_snes;
     static unsigned long last_push;
     /* return frame is at pre-pop S (we already did S+=2 above) */
     uint16 sp = (uint16)(cpu->S - 2);
     uint16 ret = (uint16)(((g_ram[(uint16)(sp + 2)] << 8) | g_ram[(uint16)(sp + 1)]) + 1);
+    /* joypad raw + SwapInputBits'd (same order AR_MOONJUMP reads) -- added
+     * 2026-07-01 for the sim-mode freeze investigation: correlates whether
+     * input is even reaching the frame against which per-frame path fires
+     * (see AR_SIMTRACE in cpu_trace.h). */
+    uint16 joy_raw = g_snes->input1_currentState;
+    uint16 joy = SwapInputBits(joy_raw);
     fprintf(stderr,
-      "[frame] f=%d push+%lu callsite=%02x:%04x A=%04x m=%d $18=%02x $19=%02x $1A=%02x $1B=%02x $F4=%02x $F5=%02x $FB=%02x time$E6=%02x%02x HP$1D=%02x\n",
+      "[frame] f=%d push+%lu callsite=%02x:%04x A=%04x m=%d $18=%02x $19=%02x $1A=%02x $1B=%02x $F4=%02x $F5=%02x $FB=%02x time$E6=%02x%02x HP$1D=%02x joy=%04x(raw=%04x)\n",
       snes_frame_counter, g_recomp_push_count - last_push, cpu->PB, ret,
       cpu->A, cpu->m_flag,
       g_ram[0x18], g_ram[0x19], g_ram[0x1A], g_ram[0x1B],
-      g_ram[0xF4], g_ram[0xF5], g_ram[0xFB], g_ram[0xE7], g_ram[0xE6], g_ram[0x1D]);
+      g_ram[0xF4], g_ram[0xF5], g_ram[0xFB], g_ram[0xE7], g_ram[0xE6], g_ram[0x1D],
+      joy, joy_raw);
     last_push = g_recomp_push_count;
   }
 
@@ -303,14 +311,40 @@ void ActRaiser_ApplyCheats(void) {
   }
 
   /* AR_FREEZE_TIMER=1: pin the action-stage timer ($E6/$E7, BCD) to its first
-   * captured value -> infinite time. */
+   * captured value -> infinite time.
+   *
+   * Backs off automatically once the boss-defeat point-tally sequence starts
+   * draining the timer: normal countdown never drops the BCD value by more
+   * than 1 (roughly once per real-time second), so any single-frame drop
+   * bigger than that can only be the drain script deliberately driving the
+   * timer down, not the stage clock. When that happens, stop re-pinning and
+   * let the game own the timer for the rest of THIS stage -- otherwise the
+   * frozen timer blocks the drain and the boss->sim transition never
+   * completes. No separate "boss defeated" flag needed; the abnormal
+   * decrement rate IS the signal (2026-07-01). Latch resets on region change
+   * ($18) so a fresh stage re-arms the freeze instead of staying stuck off
+   * from a previous boss fight. */
   {
     static int en = -1; static uint8 fe6, fe7; static int got;
+    static int latched_off; static uint8 last_region = 0xFF;
     if (en < 0) { const char *e = getenv("AR_FREEZE_TIMER");
       en = (e && e[0] && e[0] != '0') ? 1 : 0; }
     if (en) {
+      if (g_ram[0x18] != last_region) {
+        last_region = g_ram[0x18]; got = 0; latched_off = 0;
+      }
       if (!got) { fe6 = g_ram[0xE6]; fe7 = g_ram[0xE7]; got = 1; }
-      g_ram[0xE6] = fe6; g_ram[0xE7] = fe7;
+      if (!latched_off) {
+        int pinned = (fe6 & 0x0F) + ((fe6 >> 4) & 0x0F) * 10
+                   + ((fe7 & 0x0F) + ((fe7 >> 4) & 0x0F) * 10) * 100;
+        int cur = (g_ram[0xE6] & 0x0F) + ((g_ram[0xE6] >> 4) & 0x0F) * 10
+                + ((g_ram[0xE7] & 0x0F) + ((g_ram[0xE7] >> 4) & 0x0F) * 10) * 100;
+        if (pinned - cur > 1) {
+          latched_off = 1;   /* drain detected -- let the game own it from here */
+        } else {
+          g_ram[0xE6] = fe6; g_ram[0xE7] = fe7;
+        }
+      }
     }
   }
 

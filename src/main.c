@@ -316,6 +316,13 @@ int main(int argc, char **argv) {
     g_ar_exit_mx_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
   { extern int g_ar_exit_s_check; const char *e = getenv("AR_EXITS");
     g_ar_exit_s_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
+  /* AR_CALLMX=1: per-CALL-SITE m/x invariant check — fires at every JSR/JSL
+   * when runtime (m,x) disagrees with what the decoder statically knew at
+   * that exact instruction. Catches (m,x) corruption from ANYWHERE upstream
+   * of a call (not just decode-time mistakes AR_MXCHECK/AR_EXITMX cover),
+   * narrowed to the first call site downstream of the corruption. */
+  { extern int g_ar_call_mx_check; const char *e = getenv("AR_CALLMX");
+    g_ar_call_mx_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
 
   /* AR_TRAPFN=<substring>: dump the recomp call stack the first time a matching
    * function is entered (finds the dispatch chain into a misdecode variant). */
