@@ -103,8 +103,15 @@ void DumpDiagState(const char *tag) {
     }
     fclose(f);
   }
-  fprintf(stderr, "[dump] wrote saves/dump_{wram.bin,sram.bin,state.txt} (%s)\n",
-          tag ? tag : "");
+  {
+    /* Post-mortem dispatch ring: last DISPATCH_LOG_CAP runtime dispatches
+     * (pc24, source, func, m/x, found/miss, frame) feeding into the exit/crash.
+     * The offline equivalent of the TCP `dispatch_log_get` command. */
+    extern void CpuDispatchLogWriteFile(const char *path);
+    CpuDispatchLogWriteFile("saves/dump_dispatch_log.json");
+  }
+  fprintf(stderr, "[dump] wrote saves/dump_{wram.bin,sram.bin,state.txt,"
+          "dispatch_log.json} (%s)\n", tag ? tag : "");
 }
 
 void RtlApuLock(void) {
@@ -300,6 +307,15 @@ int main(int argc, char **argv) {
     const char *e = getenv("AR_MXHIST");
     g_ar_mxhist = (e && e[0] && e[0] != '0') ? 1 : 0;
     if (g_ar_mxhist) atexit(ar_mxhist_dump); }
+  /* AR_EXITMX=1: per-function EXIT m/x check — fires when a function's runtime
+   * exit (m,x) differs from what the emitter told its callers (exit-mx
+   * misdecode, e.g. $03:9156). AR_EXITS=1: per-function EXIT stack-balance
+   * check — fires when a paired frame's RTS/RTL drifts S (e.g. $01:B8CF).
+   * Symmetric twins of AR_MXCHECK; name the culprit at its own return. */
+  { extern int g_ar_exit_mx_check; const char *e = getenv("AR_EXITMX");
+    g_ar_exit_mx_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
+  { extern int g_ar_exit_s_check; const char *e = getenv("AR_EXITS");
+    g_ar_exit_s_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
 
   /* AR_TRAPFN=<substring>: dump the recomp call stack the first time a matching
    * function is entered (finds the dispatch chain into a misdecode variant). */
