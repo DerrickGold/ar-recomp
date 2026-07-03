@@ -130,6 +130,26 @@ adding a new probe.
    register and the memory address, never checked before building on top of it. **Before chasing a
    suspicious register/memory value across multiple probes, spend one probe confirming the causal
    chain that made you suspicious of it in the first place.**
+5. **A previously-documented, deliberately-accepted workaround can silently become the live bug
+   the moment its original blocker is fixed — and nobody notices unless they go looking.**
+   `$01:B898`'s `indirect_dispatch B8C0 … count=16` was capped below its real size (26) in an
+   EARLIER arc (2026-06-26), with an explicit, correctly-reasoned comment: *"object types 16-26
+   silently no-op instead of crashing — an acceptable gap, not a regression."* That comment was
+   accurate **at the time**. Months later (2026-07-02), chasing the sim-mode actor-spawn bug, the
+   label-emission bug that forced the cap got fixed as an unrelated side effect of a different
+   fix — which silently turned "acceptable gap for types we don't use yet" into "the exact types
+   the new feature needs." Nothing about the cap itself changed, and nothing flagged that its
+   justification had quietly expired. It took **three full rounds** of registering dispatch
+   targets, watching the census, and still seeing zero battery calls before anyone thought to grep
+   the existing cfg comments and find the answer already written down. **Rule: before treating a
+   silent no-op / dead dispatch / "nothing happens here" bug as newly discovered, grep
+   `recomp/*.cfg` (and this file) for existing directives and comments touching the same address
+   range FIRST** — a prior arc may have already characterized the exact gap you're staring at, and
+   any accepted workaround is a candidate for having silently rotted since. This is also why
+   `cpu_trace_dispatch_oob` was made loud-by-default in the same fix (§7, "dispatch-OOB
+   tripwire") — process discipline (check first) is necessary but not sufficient; the tooling
+   should also make this class of gap impossible to stay silent for long, so a future rotted
+   workaround surfaces on its own instead of needing someone to remember to look.
 
 ---
 
@@ -364,6 +384,53 @@ target as a cfg `func ... entry_mx:m,x` → regen → rebuild.
 > sim-mode freeze: `AR_WATCHOBJ=0` caught nothing on `$0019` despite other evidence proving it
 > was being written every frame. Both watches now also fire from the indirect-write path, tagged
 > `[wobj-ind]`/`[watch16-ind]` so you can tell which store form actually hit.
+
+- **`blkpc=` in `[wobj]` (added 2026-07-01)** — `AR_WATCHOBJ`'s log line now also prints the most
+  recently executed block PC (from the same ring buffer `AR_TRAPFN` uses:
+  `g_ar_blk_ring[(g_ar_blk_idx-1)&1023]`) plus `X=`/`DB=`. Plain `cur=<func>` only names the C
+  function; when a function is hundreds of lines with many internal labels/gotos, `blkpc=` tells
+  you the *exact instruction* (65816 address) that did the store — the difference between "some
+  code in `bank_01_ADAD` wrote this" and "line 81635, specifically."
+
+### Live debugging with lldb (added 2026-07-01)
+
+For a bug that needs *inspecting* state (registers, a real backtrace, evaluating an expression on
+demand) rather than just logging a fixed set of fields, lldb on the Debug-mode build
+(`CMAKE_BUILD_TYPE=Debug`, already the default — full `-g` symbols) beats another
+print-statement-and-rebuild round trip. Recipe that worked (chasing the sim-mode decoration-OAM
+bug, §10):
+
+1. `cd` to the project root, `lldb ./build/ActRaiserRecomp`, then
+   `settings set target.run-args ar.sfc --config dev-config.ini`.
+2. **Don't set breakpoints yet — `run` first** and play up to the point the bug is visible on
+   screen, then **Ctrl+C** in the terminal to interrupt. This avoids wading through boot/title/menu
+   noise for a scratch byte or code path that's touched everywhere early on.
+3. *Now* set breakpoints. A few gotchas specific to this codebase:
+   - **Prefer `breakpoint set -f <file> -l <line>` over a name+condition on a hot generic function**
+     like `cpu_write8`/`cpu_write16`. Those are called for *every* WRAM write in the whole game;
+     evaluating a condition on every single call is slow enough to make the game appear hung. A
+     line breakpoint inside the *specific* `bank_BB_PPPP_MmXn` variant you care about is unconditional
+     and cheap.
+   - `uint16`/`uint8` casts inside an lldb expression are **ambiguous** (multiple typedefs across
+     translation units) — `error: reference to 'uint16' is ambiguous`. Use the builtin C types
+     (`unsigned short`, `uint8_t`) instead, or read raw memory via `cpu->ram[...]` directly rather
+     than calling through a function whose prototype uses the ambiguous typedef.
+   - `strncmp`/other libc calls in a breakpoint **condition** need an explicit function-pointer cast
+     (`((int(*)(const char*,const char*,unsigned long))strncmp)(...)`) or lldb refuses to parse the
+     call ("unknown return type"). Simpler: compare `g_last_recomp_func[i]` bytes directly instead
+     of calling `strncmp` at all.
+   - `watchpoint set expression -- <ptr-expr>` defaults to **8-byte width** (pointer-size) —
+     it will fire on writes to *neighboring* bytes/variables sharing that 8-byte-aligned region, not
+     just the one you meant. Use `-s <bytes>` (e.g. `-s 2` for a 16-bit DP variable) to narrow it.
+   - `g_ar_blk_ring`/`g_ar_blk_idx` (the same block-history ring `AR_TRAPFN` and the `blkpc=` field
+     above use) are real globals — printable directly from lldb
+     (`p/x g_ar_blk_ring[(g_ar_blk_idx-1)&1023]`) to see the last N executed 65816 block addresses,
+     which is often more precise than a C-level `bt` for pinpointing which internal label of a large
+     function actually ran.
+4. `bt` at any stop gives the **real recompiled C call chain** — genuinely independent of
+   `g_recomp_stack`/`AR_CALLMX`/every other stack-bookkeeping-based diagnostic, useful as a
+   cross-check if you ever suspect our own instrumentation's bookkeeping (see `mxcheck-bt` memory
+   entry for a prior case where this distinction mattered).
 
 ---
 
@@ -665,6 +732,24 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
    *Fix:* author `indirect_call_table`/`indirect_dispatch` cfg directives once the real table shape
    is known (§7.7's `indirect_dispatch … ret:` directive is the same mechanism, just for the
    RTS-trick shape instead of the suppressed-call shape).
+10. **Destination-cursor collision across sub-calls of a per-object loop** — a per-frame "rebuild
+    the whole OAM list from scratch" routine (normal SNES practice, NOT itself a bug) calls a
+    per-object sub-function once per active object; that sub-function writes several consecutive
+    destination slots (one decoration icon = multiple tiles) and is supposed to **save its ending
+    cursor back to a shared DP variable** so the next object's sub-call continues from there. If a
+    caller has **two separate scan-loop segments** (two different call sites into the same
+    sub-function, e.g. for two decoration categories) and they don't consistently share/persist that
+    cursor, objects from the two segments collide on the same starting slot and overwrite each
+    other — genuinely-correct per-object data ends up visually stacked/garbled. Symptom looks like
+    "random garbage sprites," but every individual computation is provably correct in isolation;
+    only the destination **allocation** is wrong. *Find:* this took a live lldb session (see
+    `[watch14]`/blkpc-augmented `AR_WATCHOBJ` in §3, and the general lldb recipe in §3) — a
+    conditional breakpoint at the destination-write call site plus a real backtrace was what
+    finally distinguished "many different source objects, all landing on the same destination"
+    from "the same object being reprocessed." A static-only read of the generated C repeatedly gave
+    a *plausible-looking but wrong* theory (see the sim-mode case study below) until live register/
+    backtrace inspection settled it. *Status 2026-07-01:* root-caused to this mechanism (see case
+    study), exact broken hand-off between the two `ACD9` scan segments not yet pinned — open.
 
 ---
 
@@ -727,6 +812,557 @@ ruled out the `$018000` skip gate as the cause, kept for its general "which bran
 originally for the sim-mode `$2920`/`$208E` suppressed-dispatch theory — confirmed those sites
 never fire in the corrupted playthrough, so that specific theory is also closed, but the tool
 itself is general-purpose and worth keeping armed for any future suppressed-dispatch site).
+`AR_ADADTRACE` (`common_cpu_infra.c`, every `bank_01_ADAD*` entry — X/DB/D + the 3 source words),
+`AR_WATCH14` (`cpu_state.c` `cpu_write16`, traces the `$0014`/`$0016` position-scratch writes inside
+`ADAD`). Both were added for the case study below and are safe to leave armed (inert unless set).
+
+### Case study: sim-mode decoration-icon corruption (root cause chain, 2026-07-01, still open)
+
+**Symptom:** entering sim mode, decoration-icon sprites render as a garbled overlapping mess near
+the HUD instead of correct/hidden placement; persists through the whole sim-mode session; the
+sim-menu and save both still work fine (this is a rendering-data bug, not a hang/freeze).
+
+**Root-cause chain, in the order it was actually established (many wrong turns included on
+purpose — the wrong turns are as instructive as the right ones):**
+
+1. **F2 snapshots looked clean at first glance** — 4 `.ppm` screenshots taken at narrative points
+   (cutscene start/mid/end, sim-menu-open) all rendered correctly to the eye. The bug is *not*
+   full-frame corruption; it's confined to a small icon cluster near the top-left HUD that's easy
+   to miss without zooming (`magick ... -filter point -resize 400%`).
+2. **OAM dump revealed the smoking gun:** ~40-70 consecutive sprite records in the `.oam.bin`
+   snapshot held the *identical* value (`x=77,y=44,tile=0x55,attr=0x75`) — real games never
+   legitimately stack dozens of sprites at one point with one tile.
+3. **Traced to WRAM `$7E:03E8-$047F`** (a fixed 46-slot decoration-icon table) via byte-pattern
+   search across the `.wram.bin` snapshot.
+4. **Oracle (real snes9x) proved this is a genuine recomp bug, not ROM behavior:** ran `snesref`
+   manually with the user's real save (`SNESREF_SRAM_IN=saves/save.srm`), windowed, driven live —
+   real ActRaiser renders this exact scene with zero corruption (two full people in the circle
+   scene, no stray icons). Then the WRAM trace (`SNESREF_TRACE_FILE`) showed the real hardware
+   initializes `$03E8-$047F` **once** (hide-fill, `Y=0xE0` sentinel) and **never touches it again**
+   for the rest of a 3400+-frame trace. Our recomp re-enters and rewrites this table repeatedly.
+5. **First (wrong) theory — "X register frozen":** `AR_WATCHOBJ` showed the *destination* write
+   walking sequentially through the table (`$03E8, $03EC, $03F0...`) with the *same* literal value
+   (`4D 2C 55 75`) at every slot, in one single frame. Looked like a stuck loop-index.
+6. **Correlating game-frame counters across separate captures is unreliable** — `snes_frame_counter`
+   (host frames since boot) varies run-to-run based on how fast the user navigates the title
+   screen; two different `dump*.txt` sessions showing "healthy" vs. "corrupted" at overlapping frame
+   numbers are **not directly comparable** unless captured in the *same continuous run*. (The F2
+   snapshot tool's `gf` filename suffix is `$7E:0088`, the shared logical game-frame both engines
+   use — a better cross-engine anchor, but still not directly comparable to `snes_frame_counter`
+   across separate host runs.)
+7. **Live lldb (not static reading) was what actually resolved the ambiguity** — see the lldb
+   recipe in §3. Breaking at the exact destination-write line
+   (`bank01_v2.c:81635`, inside `bank_01_ADAD_M0X0`, the `cpu_write8(...0x0380+X...)` call) and
+   inspecting `cpu->X`/the computed value live, across many continues:
+   - The per-object **source** computation (`$0014`/`$0016` position scratch, fed from
+     `DB:$000a+X`/`DB:$000c+X` where `X` is the *large* per-object index like `$0AE4`) is
+     **correct** — genuinely different, correctly-computed values per object, confirmed via a
+     memory **watchpoint** on `cpu->ram+0x14` (`-s 2`) proving *only* `ADAD` ever writes there
+     (rules out a stray clobber from elsewhere).
+   - Later in the *same* function, `X` gets **reassigned** (`LDX D:$0098`) to a *small* destination
+     index used for the actual OAM-table write — this is normal/intended (X pulls double duty).
+   - An inner per-tile sub-loop (`L_AE45`: four unconditional `INX`s, `CPX #$0200` exit check, loop
+     back through `L_ADCC`) correctly advances this small `X` by 4 per tile **when watched within
+     one object's own multi-tile icon** (`$00,$04,$08,$0C,$10...` — confirmed live).
+   - But across **different objects in the same frame**, the destination write repeatedly restarts
+     from the *same* base slot (`$0380+$68 = $03E8`) — i.e. the **inter-object** cursor hand-off is
+     broken, not the intra-object tile loop. `D:$0098` (which `L_AE6B`, the loop-exit block, saves
+     the ending `X` back into so the *next* object continues from there) sometimes shows correct
+     progression (`$10→$14→$3C→$54` across objects) and sometimes doesn't — the backtraces show
+     **two different call sites** inside `bank_01_ACD9_M1X0` reaching `ADAD`
+     (`bank01_v2.c:19184` and `bank01_v2.c:19597`), i.e. **two separate per-object scan-loop
+     segments** (likely two decoration categories) that may not consistently share/persist the
+     cursor between them.
+8. **regen1.txt cross-reference (a good general method, inconclusive for this specific bug):** the
+   regen console log's `CONSTANT-Z BRANCH FOLDS` section (decoder statically proved a `BEQ`/`BNE`'s
+   flag state from an immediately-preceding `LDA #imm`/`LDX #imm`/`LDY #imm` and rewrote it to an
+   unconditional fall-through) flags exactly `$01:8E29` and `$01:8000` — both in this bug's live
+   call stack — but only for the `M0X1`/`M1X1` variants. The actually-executing variant here is
+   `M1X0`, which was checked directly and has **no corresponding block at all** at the flagged
+   label (`$018F53`) — that variant's control flow diverges earlier and doesn't go through the
+   folded branch. So this specific lead didn't pan out, but **the method is sound**: whenever a
+   loop is suspected, grep `regen1.txt` for `CONSTANT-Z BRANCH FOLDS` / `JSR (abs,X) SUPPRESSED` /
+   `UNRESOLVED INDIRECT DISPATCH` near the suspect address range *and check whether the flagged
+   variant is the one actually executing* before spending time on it.
+
+9. **"Rebuild stops after frame 665" was a MIRAGE (oracle-trace-is-change-only artifact) — the
+   later-session correction.** Reconstructing the oracle WRAM at various frames and re-checking the
+   *whole* destination region `$0380-$047F` (not just the `$03E8` byte) showed real HW writes that
+   region **every frame** (2 bytes/frame after the initial 129-byte build at f=503, continuing to
+   f=3423). The `oracle_*.jsonl` trace logs only **changed** bytes, so "2 bytes/frame" means real HW
+   rebuilds all objects every frame but produces **stable/idempotent** output — only the ~1
+   genuinely-moving object's 2 bytes actually change; `$03E8` specifically was rarely in the
+   "changed" set because its object is static. **This kills the "find the gate that stops the
+   rebuild" theory entirely** and *confirms* the destination-cursor collision as the real bug: real
+   HW rebuilds-every-frame with stable output (each object → its own slot); we rebuild-every-frame
+   with churning output (objects collide on shared slots). *General lesson:* a change-only WRAM trace
+   showing "address X stopped being written" does NOT mean "the code that writes X stopped running" —
+   it can mean "the code still runs but now writes the same value." Always check whether the
+   surrounding region is still active before concluding a subsystem turned off.
+10. **`$19` (sim-mode phase byte) is NOT stuck** — reading it from our F2 snapshots shows it reaches
+    the interactive values (`01` and `08`), matching the oracle's post-transition sequence
+    (`07→09→07→01→08→01`). So the frozen angel is **not** a stuck-phase problem, and the every-frame
+    rebuild is **not** because we're re-running an entry phase. (Killed a tempting unifying theory —
+    verified before building on it.)
+11. **The `$0098` cursor logic is statically SOUND — so the collision is a runtime control-flow
+    divergence INSIDE `ADAD`'s internal loop, not a missing/extra cursor write.** Exhaustive grep:
+    `$0098` has exactly **two** writers (`ACD9` segment-1 init `=0` at `bank01_v2.c:18943`; `ADAD`'s
+    exit-save at `:82014`) and one reader (`ADAD` entry load at `:81530`). `AC70` (called between the
+    active-check and `ADAD`) touches **none** of `$0098`/`$0094`/`$0096`/`$0380`. The two scan
+    segments are: seg1 `L_ACEF` (X=`$6A0`, stride `$12`, count `$30`=48; inits cursor=0), seg2
+    `L_AD71` (X=`$0A00`; does *not* re-init the cursor — correctly continues seg1's). So under correct
+    execution the cursor load→advance→save round-trip **must** chain across objects. The observed
+    collision (many objects writing dest slot `$68`=`$03E8`) therefore comes from `ADAD` taking a
+    **wrong internal branch/exit** for some objects — e.g. an exit path that skips the `:82014` save
+    (so the next object re-reads the un-advanced cursor), or its internal tile loop (`L_AE45` INX×4 /
+    `CPX #$0200`, `L_AE5E` `DEC $000e`) mis-terminating. **This is the likely codegen/decode locus**
+    (a miscompiled loop back-edge or exit branch), which is why static reading of the *cursor* logic
+    looked clean — the bug is in *which path ADAD takes*, not in the cursor arithmetic.
+
+12. **RESOLVED to root cause (2026-07-01, later same session): a single missing init write to one
+    object field.** The lldb `$0098`-cursor trace (ENTRY/SAVE per ADAD call, one frame) DISPROVED the
+    cursor-hand-off theory — the cursor chains correctly (`$00→$10→$14→$3C→$54` across objects). The
+    corruption is **one specific object, `scanX=$0BA2`**, whose ADAD call floods ~36 OAM slots
+    (writes byte `$03E8` 17× then strides the `4d 2c` = X 77/Y 44 = Town-Hall-position pattern across
+    `$03E8-$0425`). Comparing its ADAD internal loop-count `$000E` to a healthy object nailed it:
+    healthy `$083E` has `$000E=$0004` (4 tiles); broken `$0BA2` has `$000E=$00D8` (**216 tiles**).
+    Reason: ADAD derives the tile count by reading *through* the object's `$0008` field (a
+    tile-data ROM pointer): `LDY $0008+X ; ... LDA $01:0000+Y`. Healthy `$083E` has `$0008=$DD4B`
+    (valid ROM ptr → reads a real 4-tile table); broken `$0BA2` has `$0008=$0000` (**null**) → ADAD
+    reads garbage from low WRAM `$7E:0000` → bogus count `$D8` → flood. **Oracle confirms the fix
+    target exactly:** on real HW `$7E:0BAA` (= `$0008 + $0BA2`, the field) holds `$E6CA` (valid ROM
+    ptr), written ONCE at frame 813 (sim-mode entry) and never again; the object's *other* fields
+    (`$0BAC=$0058`, `$0BAE=$0048`) match ours exactly — **only the `$0008` pointer is wrong (0 vs
+    `$E6CA`).** So the entire graphics corruption reduces to: **the one-time write that should set
+    `$7E:0BAA=$E6CA` during sim-mode setup never happens (or computes 0) in our recomp.**
+
+13. **Traced one level upstream — the copy loop is FAITHFUL; the bug is in its SOURCE buffer.**
+    `AR_WATCHOBJ=ba0` showed the `$0BA2` record is populated by `bank_03_813F_M0X0` (called from
+    `bank_01_AA56`), which at `L_8157` (`$03:8157`) runs a copy loop: `LDA $7F0000,X ; STA $0B30,Y ;
+    INX ; INY ; CPY #$0130 ; BNE`. The writes landed at ODD offsets (`$0bab`,`$0bad`) which *looked*
+    like a misalignment bug — but decoding the ROM at `$03:8140` cleared the recomp: `$8141 REP #$20`
+    puts A in 16-bit with NO subsequent SEP, so the loop genuinely does **16-bit** stores while
+    advancing X/Y by **1**. That's a deliberate SNES **overlapping-byte-copy idiom** — each store's
+    high byte is immediately overwritten by the next store's low byte, netting a clean byte copy of
+    `$0B30+Y = source_byte[X_start+Y]`. `cpu_write16` reproduces it exactly. So `bank_03_813F` is
+    correct. The `$0BAA=$00` therefore comes from the **source**: `$7F:0000 + X` (a WRAM bank-`$7F`
+    staging buffer) holds `$00` at the tile-pointer offset where real HW holds `$CA` (low byte of
+    `$E6CA`). Specificity confirms it: ONLY the 2 tile-pointer bytes differ; every neighboring field
+    copied correctly, so the staging buffer is right everywhere except that one field. `X_start` is
+    derived via `$7F:7BFB → ROM table $03:8111 → X`, then the copy reads `$7F:0000 + X`.
+
+14. **Staging-buffer hypothesis DISPROVEN — the real writer is a separate, missing frame-813
+    record-init.** Computed the copy's source offset (`$7F:7BFB=$0000` → `X_start=ROM[$03:8111]=$97DA`
+    → tile-ptr byte comes from `$7F:97DA+$7A = $7F:9854`) and checked it: `$7F:9854` is `$00` in BOTH
+    our recomp AND the oracle (only the boot RAM-clear ever writes it). Yet the oracle's `$0BAA` ends
+    up `$E6CA`. **Contradiction → `bank_03_813F`'s `$7F→$0B30` copy is NOT the source of the correct
+    tile pointer** (it only writes the `$00`-based staging values; the `$0BAC=$58`/`$0BAE=$48` matches
+    were coincidental — those offsets happened to be non-zero in the `$7F` block). The oracle's write
+    timing shows the truth: the ENTIRE `$0BA2` record (`$0BA8=$0818`, `$0BAA=$E6CA`, `$0BAC=$0058`,
+    `$0BAE=$0048`) is written together **at frame 813** by ONE routine — a proper record-init that
+    supplies the real `$E6CA` pointer from somewhere other than the `$7F` staging buffer. In our
+    recomp that frame-813 init never runs (or runs incompletely); only the earlier (frame-627)
+    staging copy runs, leaving `$0BAA=$00`. *Lesson (again):* don't declare a source "the culprit"
+    from a static offset computation without checking the actual byte — the computed source was `$00`
+    on both sides, so it was never the origin.
+
+15. **RESOLVED to origin via object-table scan: 4 cutscene-actor objects are never spawned.** Rather
+    than watch a write that never happens, scanned all active ADAD objects' `$08` sprite-ptr fields
+    (our F2 `.wram.bin` vs oracle-reconstructed). Result: a clean **cohort of 4 consecutive objects**
+    `$0B30, $0B56, $0B7C, $0BA2` (stride `$26`) ALL have `$08=$0000` in ours vs valid `$01:Exxx`
+    pointers in the oracle; every other active object has a non-zero `$08` (differences there are
+    just animation-frame drift). Full-record dump confirms these 4 are **almost entirely
+    uninitialized** in ours — only the position fields `+0A/+0C/+0E` (written by `bank_03_813F`'s
+    staging copy) are set; the "live object" fields are all null: `+00/+02` (data ptrs), `+06`
+    (type), `+08` (sprite ptr), `+12` (status word, oracle `$8001`=active). So it's not one field —
+    **the entire spawn of these 4 objects never runs.** Their real `+00` values (`$DDC2/$DEDD/$DEEE/
+    $DF3C`) point at sprite/animation DATA (verified: `$01:DDC2` = `03 08 00 00 04 08...`, structured
+    records, NOT code), and their def data lives in ROM pointer-tables at `$01:E09B` (behavior/anim
+    ptrs) and `$01:E7E1` (sprite ptrs). **No converted code reads those tables** → the spawn routine
+    that reads the def-tables and populates these object records is **unconverted** (reached only via
+    runtime spawn-dispatch the static decoder never followed) — same class as the Fillmore
+    bridge-spawn (memory `bridge-spawn-data-handlers`), but at the spawn level.
+
+16. **`A83A`'s SRAM-restore proven faithful — the save file itself is blank here (not a recomp bug),
+    which reframes the whole search.** Traced `A83A`'s body fully: it's a **save-restore** routine
+    (`bank_02_A622`, the title-continue state machine, calls it), not a ROM-template spawn as first
+    guessed. Its inner loop (`$03:A9E3`, `X` from `$71F` down to `0`) copies **1824 bytes byte-for-
+    byte from SRAM `$70:1633+X` into the `$7F:97DA+X` staging buffer** — i.e. it restores previously
+    -saved sim-mode object state from the save file. Checked the RAW `save.srm` bytes at that exact
+    SRAM offset (not our runtime state — the file itself): **they match our recomp's copy byte-for-
+    byte**, AND the save file **genuinely has zero** at the relative offsets corresponding to
+    `+00/+06/+08/+12` (behavior/type/sprite/status) for these objects. So `A83A` is completely
+    innocent — it faithfully copies blank data because the source data IS blank. Since the oracle
+    (same save file) still ends up with real values (`$E3FA` etc.) after loading, real hardware must
+    run an *additional* step after this raw restore. **Reframing:** these 4 objects are most likely
+    **cutscene actors** (not persistent world state) — that would explain why the save file never
+    had their data serialized in the first place; they're probably (re-)spawned fresh by the
+    cutscene/dialog EVENT system each time it plays, via a completely different code path than the
+    continue-load flow.
+17. **Two follow-up traces came back negative (useful eliminations, not progress toward the fix):**
+    (a) `A83A` calls `bank_03_AAFC` right before its own return — traced `AAFC` fully; it dispatches
+    into `bank_03_9156`/`AC8E`/`97B0` etc., the **already-solved act↔sim transition state machine**
+    (see `$03:9156`/`$03:AC8E` in "Function roles discovered", SEAMS.md) — unrelated to object
+    records, no writes to `$0Bxx`, no reference to the template tables. (b) checked `$02:BF60` (the
+    dialog/message-box dispatcher, already mapped) and its direct sub-calls (`BED3`/`C0DF`/`C118`/
+    `BFF6`/`C127`) for any reference to `$0B30` or the `$01:E09B`/`E7E1` tables — none found. Neither
+    is proof the cutscene-event hypothesis is wrong (BF60 draws dialogue boxes; the ACTOR SPAWN would
+    more likely be triggered by whatever decides *which* dialogue to show / advances the cutscene
+    script, which hasn't been located), but static call-chain-following from these two entry points
+    didn't find it directly.
+
+18. **2026-07-02 fresh-eyes pass — the whole picture reframed (fn-census + trace-diff session).**
+    New tooling: `AR_FNCENSUS=1` (rides the AR_MXHIST table; dumps EVERY function-entry PC +
+    per-(m,x) counts to `saves/fn_census.txt` at exit — the decisive tool for never-runs bugs).
+    Chain of findings, each verified:
+    (a) **"cutscene actor" theory dead; the objects are the town's blinking lair/decoration
+    records.** Real oracle spawn is at oracle f=901 (not 813) — part of a ~131-frame periodic
+    "town tick" that also toggles a large blink family: the stride-`$12` table's `+10` words
+    (`$06B0,$06C2..$0818`) AND the `+10` status words of stride-`$26` records based `$0AE4`
+    (record 0 = `$0AF4`, records 2-5 = the broken `$0B40/66/8C/B2`, record 20 = `$0DEC/$0DEE`).
+    (b) **The spawner is CONVERTED and never runs.** `$01:D072` = init-by-type (writes `+00` from
+    behavior-ptr table `$01:E099,X` — earlier `$E09B` guess was off by 2, which is why the ROM
+    byte-searches found nothing). 56 `JSR $D072` sites form a spawn-setup battery at
+    `$01:BA23-$C793`. `AR_TRAPFN=bank_01_BFAA` stayed silent; census confirms the whole battery
+    plus the `$01:D08F` script-stepper never enter. Sprite half: unconverted code at
+    `$01:D0F5-D127` reads type→`$01:E7D9,X`→`+08`; placement records (stride 6: type,?,x,y) at
+    `$01:D128+`.
+    (c) **The generated "caller" of BFAA is a decode artifact** — `bank_01_8A75`'s emitted
+    `JSR ($84FC,X)` dispatch at `$01:E289` decodes DATA as code (`$E250-E288` is a record table;
+    `$84FC` is mid-instruction). BFAA's real caller is runtime-dispatched and invisible statically.
+    (d) **`bank_02_C3DA` never runs — and that's NORMAL.** Its only caller `bank_01_8A62` sits
+    behind `$19==7 && $0216==0` in `bank_01_8000` (the sim phase dispatcher), and `$0216` is 1
+    before phase 7 begins in BOTH engines (oracle trace verified). Closes the old COP-fix loose end.
+    (e) **Control flow is otherwise IDENTICAL:** `$19` phase sequence (0→7→9→7→1→8→1), `$0216`,
+    COP-7 posts (`$035A`), frame counters (`$0088`, `$7F:9752`) all match oracle 1:1 (frame offsets
+    differ; our phases run ~20% shorter — snes9x lag frames pad the oracle's timeline).
+    (f) **Surgical trace diff** (oracle init burst f=895-905 vs our full-session write set): the
+    ONLY object-region bytes the oracle writes that we never do = the 4 broken records' `+00-09`/
+    `+10-14` + record 20's `$0DEE` word. Everything else in town init matches.
+    (g) The blink/refresh routine itself RUNS in our engine — at phase transitions it writes
+    `$0AF4`/`$0DEC` (records 0/20) correctly, skipping the EMPTY records 2-5. On the oracle the
+    same tick also **(re)spawns empty lair records** (f=901 writes the full template `+00=$DF07`,
+    `+08=$E6CA` into records 2 and 5 — same type in two slots, then animates `+08` through the
+    frame table at `$01:E838` and blinks every ~131f). So the missing piece is narrowed to: **the
+    periodic town-tick trigger fires on the oracle but never in our recomp** (our writes at
+    f=748/842 are phase-INIT only, never periodic).
+
+19. **2026-07-02 (cont.) — the spawn-list engine found; divergence isolated to one missing list
+    invocation.** The `AR_WATCHOBJ=af4` run (dump12) caught the refresh chain red-handed:
+    `bank_00_8325` (main loop) `L_83BF→L_83C3`: `bank_01_AA56` (staging restore) then
+    `bank_01_8029` → `bank_01_B1C7` → { `bank_01_CFF2` + `bank_01_AC70` }. `B1C7` is a thin wrapper;
+    `CFF2(A)` stores A into **`$033C/$033D` (the spawn-list selector)** then calls `bank_01_AC36`
+    (the list-runner, runs constantly). Callers load the list id from a record's `+0E` field
+    (`LDA $000E,X; STA $033C; JSR $AC36` at `$01:8E11/8E22`; other writers at `$01:914E/B593/
+    B5A4/B5ED/B652/B732/C8BB/B7F1`). **Trace comparison of `$033C`:** oracle town-init runs lists
+    `$13` (f=763) → **`$1C` (f=900)** → `$03` (f=901); ours runs `$13` (f=562) → `$03` (f=642),
+    **skipping list `$1C` — the list that spawns the 4 broken records**. The oracle also cycles
+    `$033D` `0→1→2→3` every ~180f afterwards (periodic town re-run); ours goes quiet.
+    Dead ends eliminated en route (all verified in BOTH engines' traces, so genuinely-equal
+    behavior, not bugs): `bank_03_C147` (gated on `$7F:9750`==0, true in both → never runs);
+    `bank_03_E092`'s tick block `F479→B1C7→9314` (gated on carry from `bank_03_E19C` = "find
+    open-but-unspawned lair in per-town masks `$7E:9107+`/scratch `$914F`" — masks are all-zero in
+    both engines → always SEC → never fires); `$7E/$7F:9750`/`$9202` boot-state all equal.
+    Also mapped: `$03:E19C` search loop (candidates 0-$1F vs pointer tables `$03:DCA2/$DCAE` →
+    WRAM mask cells `$9107+4*town`/`$911F+4*town`, per-town data table `$03:E66E`), `bank_03_F46E/
+    F479/F484` = mask test/set/clear via `$03:F497` (bit-compute, scratch `$914F`).
+
+20. **2026-07-02 (cont.) — sweep protocol fully decoded (dump13, `AR_WATCHOBJ=33c`); divergence
+    now one write from the root cause.** The stride-`$12` entries are SCRIPT PROCESSES. Protocol:
+    (a) town-entry sweep `bank_01_AA56` → per entry: `CFF2(id from entry.+0E)` → `AC36` assigns
+    `entry.+02/+06 = ROM[$01:A227[id*2] + $033D*2]` (script ptr), `+04=0`, `+00=1`.
+    `AC36` disasm (25 bytes at `$01:AC36`): PHP/PHB/REP#$30; DB=$01 via 8519; Y=$033C*2;
+    `LDA $A227,Y`; +`$033D*2` → `LDA $0000,Y`; STA `+02`/`+06`; STZ `+04`; `+00=1`; RTS.
+    (b) `$033D` = cycle sub-variant 0-3 (oracle rotates it every ~180f = the periodic re-sweep /
+    blink); `B1C7` wrapper ends each sweep with a `sub=4` special pass on the stride-26 base
+    `$0AE4`. (c) per-frame `bank_01_9193` (blkpc `$0191A6`) re-runs list `$03` on main process
+    `$083E` — in BOTH engines. (d) `$01:8E11/8E22` etc. are event-driven one-shot list runners
+    (COP-7 posts from `bank_01_901C` blkpc `$01902D` correlate).
+    **KEY RESULT: our engine DOES issue list `$1C` sub 0 for process `$0742`** (f=751, f=950 —
+    id had advanced `13→1C` in `+0E` just like the oracle) → script `$A3E5` assigned, whose body
+    (`00 9a d1 | fd | 00 af d1 | fd ...`) = "spawn placement `$D19A`/`$D1AF`/... , yield" — the
+    exact 4 broken records. Oracle 1 frame later: cursor `+02=$A3E8` (one cmd consumed),
+    `+08=$D19A`, spawn done. OURS at exit: `+02=+06=$A4C5` — a script ptr that belongs to list
+    `$18` sub 3 / list `$19` sub 1, NEITHER ever issued for this process in the entire log.
+    So after a correct assignment, something OVERWRITES process `$0742`'s script with a wrong
+    pointer (executor failure-path jump? wrong-X write from a neighboring assignment? X-width
+    misdecode?). Whoever writes `$A4C5` is the bug or its immediate symptom.
+
+21. **2026-07-02 (cont., dump14) — stride-12 layer FULLY EXONERATED; the bug is the stride-26
+    records' missing battery invocation at sweep time.** Findings:
+    (a) `bank_01_AC70` disassembled = the per-frame ANIMATION-SCRIPT stepper for stride-12
+    processes: `+00`=frame timer (DEC each call; negative normal — free-runs between assignments),
+    on expiry read script at `+02`: default op = `[delay, frameptr16]` (writes `+08`, `+10|=1`);
+    `$FD`=hide (`+10&=~1`); `$FE`=DEC `+04`, loop to `+06` unless 0; `$FF`=set loop count `+04` +
+    loop target `+06`. It does NOT spawn anything.
+    (b) OUR ENGINE RUNS THE `$1C` SPAWN SCRIPT CORRECTLY: at f=630/954 process `$0742` gets
+    `+06=$A3E5`, executor consumes cmd 1 → `+08=$D19A`, cursor `$A3E8` — byte-identical to the
+    oracle's post-901 state. The earlier "bogus `$A4C5`" is BENIGN: `bank_01_B52F` = "switch all
+    decorations to variant N" pass (assigns the same script to several processes; oracle does it
+    too). `bank_01_B6AE` = hide-all pass (`+10=$8001`). `$033E`=1 event: posted once in BOTH
+    engines (equal). Stride-26 record 0 (`$0AE4`): alive and animating IDENTICALLY in both
+    (script `$A5BD` via list `$00` sub 4 from `B1C7`'s tail pass).
+    (c) **THE ACTUAL GAP:** stride-26 records use the SAME two-tier design with their own engine:
+    `$01:D072` = the records' AC36-analog (writes `+00`=script ptr from table `$01:E099,X` — the
+    `$DF07` the oracle writes to `$0B30` at f=901!), and the UNCONVERTED `$01:D0F5-D127` = the
+    records' AC70-analog (writes `+08`=frame from table `$01:E7D9,X` — the `$E6CA`!). The battery
+    (`$01:BA23-$C793`, 56 `JSR $D072` sites) = per-TYPE spawn-setup, invoked at sweep time for
+    stride-26 records 1+ using their save-restored `+0E` ids (`$0D/$12/$13...`, visible in our
+    WRAM). The oracle's f=901 init burst calls it; OUR sweep processes stride-26 record 0 only
+    (B1C7 tail: single `CFF2(X=$0AE4)`) and never iterates records 1-5.
+    (d) `$01:8819`: `LDA $033E; ASL; ADC #$F223; TAX` — an event-id jump table at `$01:F223`;
+    `$01:8840` a second consumer. Possibly the record-sweep trigger path. Not yet traced.
+
+22. **2026-07-02 (cont., dump15) — `bank_03_F5BE`: an entire per-town handler subsystem silently
+    dead (RTS-trick double-push misdecode); caught by the new call-mx block-ring dump.** The
+    `[call-mx]` failure at `$0381EB` is NOT just an m-leak. `ar_call_mx_fail` now dumps the block
+    ring (added this session, `common_cpu_infra.c`), and it shows execution going `03F5DA →
+    0381DA` — straight from F5BE's dispatch block back to the CALLER. F5BE's real structure
+    (ROM disasm):
+    `PHP;PHB;REP;DB=$7F` → `LDX $7BFB; LDA $03F5ED,X` (per-town handler-list ptr) → loop:
+    `LDA $030000,X; CMP #$FFFF; BEQ exit; PHX; LDY #$F5E2; PHY; PHA; SEP #$20; RTS` (RTS-trick
+    into handler, which returns to `$F5E3: REP; PLX; INX;INX; BRA loop`); exit `PLB;PLP;RTS`
+    (flag-transparent on real HW). Handler lists live at `$03:F5F9+` (per town, `$FFFF`-terminated,
+    entries `$F6xx-$F8xx`). The handlers are the LAIR/TOWN-EVENT logic: they call `F46E` with the
+    `$DCA2/$DCAE` mask tables and read `$7F:91xx` lair state — the machinery §21's E19C analysis
+    found "inert with all-zero masks" is inert BECAUSE its writers here never run.
+    **Our decoder folds the `PHY #ret / PHA handler / SEP / RTS` double-push trick into F5BE's
+    function exit: no handler ever executes, and the `SEP #$20` leaks m=1 to the caller** (the
+    once-per-window call-mx hit; on frames where the branch isn't taken, no symptom — silent).
+    Same family as the `$03:9156` exit-MX blindspot but a DIFFERENT idiom (push-computed-address
+    dispatch, not table-JSR): the engine's build_indirect_dispatch_map/rts_dispatch handling must
+    learn it (check exit_mx_autoroute + decoder for PHA/PHY-before-RTS pattern), then regen and
+    census-diff to see what else comes alive.
+
+23. **2026-07-02 — FIX IMPLEMENTED for the F5BE handler subsystem.** Extended the
+    `indirect_dispatch` directive with two options and used them in bank03.cfg:
+    - `idx:A` — value-keyed PHA/RTS dispatch: switch on the PHA'd A value (the handler-1 word)
+      against the enumerated table words, instead of an X/Y table index. Needed because F5BE's
+      X holds an absolute ROM pointer (per-town two-level walk), not an index. Decoder nulls
+      entries whose +1 lands < `$8000` (the `$FFFF` terminators inside the enumeration window).
+    - `sep:<mask>` — the real code executes `SEP #<mask>` between the PHA and the dispatching
+      RTS (both replaced by the emitted switch), so the emitter applies the SEP before the
+      switch and the decoder decodes handlers + ret continuation at the SEP'd (m,x).
+    Directive: `indirect_dispatch F5DF 20 idx:A tables:F5F9 ret:F5E3 sep:20` (bank03.cfg, fully
+    commented). Engine files: cfg_loader.py (parse), decoder.py (PHA path: sep flags + terminator
+    guard), codegen.py (idx:A branch, suffix honors dispatch_sep, sanitizer accepts 'A'),
+    snes65816.py (dispatch_sep slot). Handlers become real functions (auto-promoted); each RTSes
+    back via the pre-pushed PHY frame (host-return) and the switch `goto`s `L_F5E3` — stack-
+    neutral by construction, same contract as bank01's `B8C0 ... ret:B8C2` precedent.
+    Validated: synthetic emit smoke test (value switch, SEP, terminator skip, PHY-undo default,
+    M1X0 ret label) + full recompiler suites — top-level 57/58 and v2 186/198, both EXACTLY the
+    committed tree's baselines (all failures pre-existing; the width lint was already failing
+    with 4 pre-existing `_saved_pb` hits — my 5th copies the same sibling-emitter idiom).
+    NOTE: first regen after this change ran BEFORE the codegen sanitizer fix (idx 'A' was coerced
+    to 'X' → always-OOB switch) — a RE-REGEN is required. Also added a temporary env-gated
+    trampoline probe `AR_F5BE_HANDLERS=1` (cpu_state.c) from the pre-fix investigation; harmless,
+    remove with the next probe sweep. Hygiene same session: UBSan header-probe shifts clamped
+    (`snes_other.c`), `B898` mxcheck hit analyzed benign (self-normalizing; pruned-variant
+    fallback safe), NmiHandler f=0 call-mx = known benign wrapper.
+    **SECOND engine bug found + fixed during the first post-fix rebuild** (build errors: `use of
+    undeclared label 'L_F5E3_M1X0'`). Root cause: `cfg.py`'s `_identify_leaders()` only promotes
+    an instruction's successors to "needs a block/label" when the SOURCE instruction's mnemonic is
+    a hardcoded block-ender (RTS/JMP/branches/...) — but the dispatch is stamped on `PHA` (matching
+    the existing `B8C0 ret:B8C2` precedent's own convention), which isn't in that set. `$F5E3` (the
+    `ret:` continuation) decoded fine but got no label, so the emitted `goto L_F5E3_M1X0;` pointed
+    nowhere. Fix (one line, `_identify_leaders`): also treat `len(di.successors) != 1` as
+    leader-triggering, mirroring the check `_build_blocks` already used to stop the SOURCE block
+    there. Verified via direct `emit_function()` harness call (label now present) + both full
+    suites again (186/198 v2, 57/58 top-level — same baselines, zero new failures). This is a
+    GENERAL engine fix (not ActRaiser-specific) and should hold for any future PHA/RTS-dispatch
+    cfg use with a `ret:` continuation.
+    **Verification for the next run: DONE, see finding #24 below** — census confirmed
+    `bank_03_F621/F671/F68A` executing (town 0's 3 handlers; other towns' handlers untested since
+    this playthrough never left Fillmore), `[call-mx]` at `$0381EB` confirmed gone. Records did
+    NOT spawn — the fix was correct but not sufficient. Do not re-open this item; continue at #24.
+
+24. **2026-07-02 (dump16, post-regen) — fix CONFIRMED partially correct; root cause NOT this.**
+    Re-ran after the `cfg.py _identify_leaders` bugfix (see item below) forced a second regen.
+    **Confirmed working, don't re-litigate:**
+    - Census: `bank_03_F5BE M0X0=53`, `bank_03_F621/F671/F68A M1X0=53` each — a perfect 1:1
+      match. F5BE dispatches ALL 3 of town 0's handlers, every single call, correctly. Town
+      selection (`$7F:7BFB=0`, matching `$7E:0291=1`/Fillmore) is correct.
+    - `[call-mx]` at `$0381EB` is GONE (grep confirms zero hits in dump16; only the pre-existing
+      benign boot-frame `NmiHandler` hit remains). The m=1 leak this whole thread started from is
+      fixed.
+    - The handlers do REAL, ORACLE-MATCHING work: `$7F:9101/9102/910A/913A/914F` now get written
+      by our engine with the SAME values at the SAME addresses as the oracle (lair-mask
+      test/set/clear via `$03:F46E/F479`, previously totally inert — all-zero — in every prior
+      dump this session).
+    **Still broken — graphics corruption + freeze UNCHANGED:**
+    - `$0B30/$0B56/$0B7C/$0BA2` still never populate (`AR_WATCHOBJ=b30` shows nothing but the
+      already-understood `813F` staging-restore + `CFB3` hide-sweep — no NEW template write).
+    - Root cause: **`$01:AC70`'s script format is animation-only, not a spawn mechanism.** Full
+      ROM disassembly this session (`$01:AC70-ACD0`, byte-exact) confirms the ONLY opcodes are
+      `$FD`=hide (`+10&=~1`), `$FE`=loop (`DEC +04`, branch to `+06`), `$FF`=set-loop-count+target,
+      and a DEFAULT op = `[delay_byte, frameptr16]` writing `+00`(re-armed timer)/`+08`(frame
+      ptr)/`+02`(cursor). **There is no "spawn an actor" opcode.** So list `$1C` running to
+      completion on process `$0742` (proven correct in BOTH engines back in dump13/14 — the
+      cursor advances identically) does NOT by itself populate the stride-26 records. The
+      earlier "list $1C is the spawn trigger" theory (finding #20-21) is DISPROVEN as the
+      *complete* mechanism — it's necessary scaffolding (assigns the process) but not sufficient.
+    - **The real oracle event is a single massive one-shot burst, not periodic.** Pulled the FULL
+      write-list for oracle frame 901 (322 writes, one line = one byte) and it is enormous: zero
+      page `$00-$28`, the STACK PAGE `$01D9-$01FD` (36+ bytes — a deep call chain or big
+      push-heavy routine, NOT normal per-frame churn), the full OAM shadow `$0380-$03A3`, ~10
+      stride-12 process records (`$06B1` through `$0818`), process `$0742` fully assigned,
+      stride-26 record 0 (`$0AE4`), ALL FOUR broken records fully populated in one shot, a small
+      table at `$00DDC-$00DEF` (includes the `$0DEE/$0DEF` status word from finding #18), plus
+      `$17CA1` and `$19752`. This is NOT F5BE's per-frame tick (which touches a handful of mask
+      bytes) — it's a **separate, much bigger, one-time "town-entry finalize" event** that has
+      not yet been located. `$033C: 0x1C->0x03` (the spawn-list handoff) happens INSIDE this
+      SAME burst, not as an isolated event — meaning whatever triggers list `$1C`'s assignment
+      also triggers this whole cascade, and OUR engine's version of that trigger either doesn't
+      fire, fires without cascading, or fires via a different (broken) path.
+
+**Status for a fresh session — START HERE:** the F5BE fix is DONE, verified, and should NOT be
+revisited. The remaining bug is a **separate, unlocated one-shot town-entry event** that on real
+hardware fires around oracle frame ~900 (our engine's equivalent frame differs — use `$033C`
+transitioning `->$1C` or blkpc on the FIRST write to `$0AE4`/`$0B30` as the anchor, not a frame
+number). Concrete next steps, in order of promise:
+1. **Find what calls list `$1C`'s assignment in the first place.** We know `CFF2(A)` stores A into
+   `$033C/D` then calls `AC36`; find the CALLER that passes `A=$1C` for process `$0742` specifically
+   (dump13/14's blkpc showed `bank_01_CFF2_M0X0` called from `bank_01_AA56_M1X0` at town-entry sweep
+   time — but AA56's sweep reads the id from `entry.+0E`, meaning `+0E` was ALREADY `$1C` before the
+   sweep ran, i.e. save-restored. On real HW something must ALSO be calling a SEPARATE, one-shot
+   "spawn now" routine when a fresh (non-restored) actor needs to appear — this is likely NOT AA56
+   at all). Grep ROM for `JSR $D072` battery call sites once more, but this time trace BACKWARD from
+   the battery entries to find what triggers them contextually (event code? `$033E`? a counter?).
+2. **Watch `$01D9-$01FD` (the stack-page writes)** during a live run — an `AR_STRACE`-style probe on
+   that PC/S window during the SAME burst would show which subroutine chain is executing, since a
+   36-byte stack footprint at one instant is unusual and diagnostic.
+3. **Do NOT re-chase**: `$01:AC70`'s opcode format (exhaustively disassembled, confirmed
+   animation-only), the F5BE handler dispatch (fixed + verified), the stride-12 process
+   assignment/cursor mechanics (fully correct in both engines).
+
+25. **2026-07-02 (same session, post-#24): ROOT CAUSE FOUND AND FIX LANDED — dispatch-miss on the
+    actor-behavior RTS-trick family.** Finding #24's "unlocated one-shot burst" framing was a red
+    herring in two ways, both worth remembering:
+    - **The stack-page writes were noise.** The oracle trace is a per-frame WRAM *diff*
+      (address-sorted snapshot comparison, NOT temporal write order), so the `$01D9-$01FD` bytes
+      were just leftover stack residue from a deep call chain that frame — return addresses
+      (`$AC7A`, `$816F`, `$82B9`…), not a push-heavy spawn routine. Step 2 above (the `1d9` watch)
+      was never needed.
+    - **The burst is not "unlocated" and not special.** It's the tail of the town-entry LOAD
+      sequence (oracle f≈891-901 is heavy load churn; the idle counter `$88` only starts ticking
+      f=903). Our engine HAS the equivalent burst (trace f=642, matching `$0580/$0581` marker
+      writes) and even writes the records **partially**: the type fields (+0A/+0C/+0D/+0E, values
+      byte-identical to oracle) arrive via `$03:813F`'s staging copy (staging buffer `$7F:97DA`
+      confirmed byte-identical between engines). What's missing is the per-type INIT that fills
+      +00..+09 (behavior-script ptr from `$01:E099`, sprite ptr from `$01:E7D9`, position) — i.e.
+      the spawn battery `$BA23-$C793` → `$01:D072`.
+    - **The actual mechanism, straight from `saves/dump_dispatch_log.json`:** four unique
+      `found=0` dispatch-miss pairs, repeating every frame — `01D062 -> 01B252/01B429`,
+      `038711 -> 03871D`, `03E1EB -> 03E927`. `$01:D04E` is the actor-behavior dispatcher
+      (`selector = record.+12 & $7FFF`, table ptr passed in **Y** by each caller, `PHA` table
+      word, `RTS` at `$D062`). 24 call sites / 24 tables in bank01 (incl. the whole spawn
+      battery); `$03:8700` (table `$8713`, 5 entries) and `$03:E1D2` (F5BE-shaped two-level walk,
+      `$03:E66E` → 6 per-town tables of exactly 32 entries, continuation `$E1EC`) are the same
+      idiom in bank03. None of the ~189 unique targets were decoded as functions, so the runtime
+      trampoline computed the right pc24 every frame and the graceful-fallback silently skipped
+      it. **Records got types but never behavior/position/sprite init — the 4 corrupt actors.**
+    - **Fix:** registered all targets as `func … entry_mx:0,0` (dispatch log shows mx:0 for all)
+      in `recomp/bank01.cfg` (106) and `recomp/bank03.cfg` (83, incl. the `$E1EC` continuation).
+      No engine changes needed — the runtime dispatch already worked, only the targets were
+      missing (same fix shape as the ~685-handler action-level registration). All 189 verified
+      emit-clean via the direct `emit_function()` harness before handoff.
+    - **Lesson for future misses:** check `saves/dump_dispatch_log.json` for `found: 0` entries
+      FIRST when any subsystem silently no-ops. It names the source PC, target PC, enclosing
+      function, m/x, and frame — this bug was fully identified by that log alone, after two
+      sessions of oracle-diff archaeology pointed everywhere else.
+    - **Round 2 (dump17, same day):** the registrations WORKED (freeze gone, town runs, map/HUD
+      render) but exposed the next layer: three new per-frame misses (`01B429->01B22A`,
+      `01B2DE->01B227`, `038759->03877F`). Two causes: (a) several D04E callers are TAIL
+      dispatches (`LDY #table; BRL $D04E` inside a JSR'd helper), so the handler's RTS pops the
+      OUTER caller's JSR-return — a mid-caller continuation, not a function -> host-unwind
+      dropped the rest of the actor tick (incl. the `JSR $B41A` battery path — which is why
+      record `$0B30` STILL only had `813F`'s type fields in dump17, and why it was choppy);
+      (b) handler `$03:873C` contains its own PHA/RTS mini-dispatcher (18-entry inline table
+      `$03:875B`, targets `877F/896A/879F`, pushed continuation `$8759`->`$875A`). Fixed by
+      registering the systematically-enumerated set: every `JSR` return into the family
+      (`bank_01_B227/B22A/C82A`) + the `873C` targets (`bank_03_875A/877F/879F/896A`). A scan
+      for further `LDA table,X; PHA; RTS` dispatchers in banks 01/03 found none — any residue
+      will show up as fresh `found:0` log entries.
+    - **Round 3 (dump18): the REAL spawn blocker was the B8C0 table cap.** dump18's census
+      proved the round-2 fix worked (the full actor tick `B23B→B227→B41A→B429→B22A` runs 219×
+      = every frame, town handlers `873C/875A/879F/896A` all live) — but the battery still
+      never fired, because it's reached per-TYPE through `$01:B898`'s `indirect_dispatch B8C0
+      … tables:B8D0`, whose count was **deliberately capped at 16** (old comment: entries like
+      `$B92E/$B905` decode-wandered and broke the `ret:B8C2` label). Town actor types are
+      `0x12/0x13` = **18/19** — above the cap, OOB-skipped every frame. The label-breakage
+      class was fixed by the `cfg.py _identify_leaders` change, verified: `B898` + all 26
+      table handlers emit clean with `count=26`. Bumped to 26 (real bound: first handler
+      `$B904` at B8D0+0x34). Two lessons: (a) **grep existing cfg directives for intentional
+      caps/gaps when a subsystem's dispatch chain dead-ends** — the answer was written down in
+      a comment; (b) old workarounds become load-bearing bugs after the blocker they dodge is
+      fixed.
+    - **Round 4 (dump19): count=26 landed but was inert — the idx:X model itself is broken at
+      this site.** dump19 showed the regen HAD picked up `_disp_n = 26`, the runner RTS-follow
+      HAD compiled in (the residual `found:0` lines are silent-but-correct mid-caller unwinds —
+      the follow only logs `found:1` when a chain lands on a function entry), and yet census
+      still showed zero battery entries. Reading the EMITTED dispatch revealed why: the ROM
+      wraps the table read in `PHX($B8AE) .. PLX($B8BB)`, so at the `PHA/RTS` site X has been
+      restored to the RECORD POINTER; the idx:X emitter computes `_idx = cpu->X / 2` AT the
+      dispatch — `0x0B30/2 = 0x598 >= 26` — **OOB-skip on every typed record since the
+      directive was first written** (the action stages never noticed: their objects dispatch
+      through the bank00 `$8915` loop, not B8C0). Fix: switched the directive to the
+      value-keyed `idx:A` form (keys the switch on the PHA'd table word, immune to PLX; the
+      capability built for F5BE). Verified all 4 variants emit with `B9EC`/`BE4F` present.
+      Lesson: when a dispatch "works" but its targets never appear in census, READ THE EMITTED
+      C at the site — the decode/emit model can be wrong in ways no runtime log shows (OOB
+      traces existed but only via `cpu_trace_dispatch_oob`, which nothing was watching).
+    - **Round 3b: generic RTS/RTL-follow in the runner** (`_cpu_dispatch_once`, cpu_state.c).
+      dump18's remaining misses (~94/frame, the progressive slowdown) were all bare-RTS
+      continuation hops: `$03:86FD` passes its continuation in A (`#$8711`), so handler chains
+      return through 1-byte RTS stubs (`$8712`, `$86FC`) that aren't function entries.
+      Registering each is whack-a-mole; instead the miss path now emulates RTS/RTL chains
+      (pop, retry lookup, hop-capped at 8, pops undone by the absolute S-restore on failure)
+      — the generalization of the existing `$8965` BRA/BRL-follow. Flags untouched by RTS/RTL
+      so it's semantically exact. Resolved follows are logged as `found:1` with the original
+      source.
+    - **Round 5: `cpu_trace_dispatch_oob` was compiling to a silent no-op in non-trace builds**
+      — the exact reason round 4's OOB skip produced zero diagnostic output for as long as it
+      did. Wired it to an always-on, deduped, capped tripwire (`ar_dispatch_oob_warn` in
+      `common_cpu_infra.c`, `[dispatch-oob]` prefix) instead of a trace-only stub. Any future
+      `indirect_dispatch` site that misindexes will now say so on the first hit — site, index,
+      register state, calling function — rather than silently degrading. `AR_NOOOBWARN=1` to
+      silence if it ever gets noisy.
+    - **CONFIRMED FIXED IN-GAME (2026-07-02, post-round-5 build):** user report — actors spawn
+      correctly, freeze is gone, `[dispatch-oob]`/`[dispatch-miss]` are both silent in a live
+      run. This closes the sim-mode actor-spawn arc (findings #18-25).
+
+**New, separate, open issue (2026-07-02): progressive slowdown in the "direct the people" path-
+tracing sim-mode screen.** User-confirmed repro conditions rule out several tempting
+hypotheses before any investigation starts:
+- **NOT the round-3b dispatch-miss churn** — that's gone (0 `[dispatch-miss]`/`[dispatch-oob]`
+  lines in the post-fix log). Don't re-suspect the dispatch machinery.
+- **NOT actor/population-count-driven** — user confirmed it slows down specifically while using
+  the path-tracing cursor tool (drawing where townsfolk should build next) with NO enemies and
+  NO other people on screen, just the player and the map. So it's cursor/path-tracing-specific
+  code, not a per-object per-frame cost that scales with population.
+- **First hypothesis tried and DISPROVEN by static scan:** suspected this might be the same
+  CLASS as the earlier angel-menu/mode7-spiral 1/3-speed bug ([[post-boss-four-issues]] — a
+  `$4210` RDNMI spin-wait whose 3-read pattern wasn't recognized as a single logical wait,
+  multiplying host-frame yields). Scanned the entire newly-registered actor-spawn code
+  (battery `$BA23-D128`, both town dispatchers `$03:8700`/`$E1D2` regions) for inline `LDA
+  $4210` or calls to the known un-HLE'd wait routine `$01:9284` — zero hits. That specific
+  mechanism is not present in the code this session touched, so if it's the SAME BUG CLASS
+  (a host-frame-yield multiplier, not real added CPU work), the offending wait/spin site must
+  be somewhere in the path-tracing screen's OWN code, not the actor-spawn fix — likely a
+  different, not-yet-found un-HLE'd copy of a wait loop, or some other yield-triggering
+  pattern specific to that UI mode.
+- **Next steps for a fresh investigation:** (1) find the path-tracing/cursor code (likely
+  bank01 or bank03, a `$033x`-family mode distinct from the `$18` action-stage byte — check
+  what mode/state byte this screen sets); (2) `AR_VBLOG=1` while in that screen to check for
+  the same "3 host frames per logical frame" fingerprint the mode7-spiral bug had; (3) if VBL
+  yields aren't it, check whether path length/waypoint count correlates with frame cost (an
+  O(n) or O(n²) rescan of the traced path each frame would explain get-worse-as-you-draw
+  behavior, if that's what's actually observed — confirm with the user whether it worsens as
+  the path gets longer or is roughly constant once you're in the mode).
+- Snapshots exist at two points during the slowdown plus one after — note snapshots capture a
+  single frame's WRAM/PPU/OAM state, not timing, so they won't show the slowdown directly;
+  compare them for something that GREW (counter, table, path buffer) between the three, not
+  for visual differences.
 
 Current crop (this debugging arc): `AR_B90D_CATCH`, `AR_B127_CATCH`, `AR_896E_CATCH`,
 `AR_8A3C_CATCH`, `AR_8664_CATCH`, `AR_STRACE`, `AR_EVTRACE`. Legacy from prior arcs:
