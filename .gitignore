@@ -14,9 +14,15 @@ build/
 *.exe
 *.out
 
-# snesrecomp generated output
+# snesrecomp generated output — mechanically derived from the copyrighted ROM
+# (one C function per recompiled 65816 routine). We can't distribute this;
+# users must supply their own verified ar.sfc and run tools/regen.sh, which
+# writes exactly these paths. recomp/*.cfg is fine to keep tracked — it's our
+# own hand-written addresses/directives/commentary, not translated ROM code.
+src/gen/*.c
 src/generated/*.c
 src/generated/*.h
+recomp/funcs.h
 
 build-trace/
 tools/oracle/oracle_trace.jsonl
