@@ -1,0 +1,43 @@
+Scope
+-----
+
+This license covers the original source in this repository: the hand-written
+runtime (`src/*.c`/`*.h` outside `src/gen/`), the recompiler-directive files
+(`recomp/*.cfg`), tooling (`tools/`), and documentation (`docs/`, `DEBUG.md`,
+`README.md`).
+
+It does **not** cover, and grants no rights to:
+
+- The ActRaiser ROM, or any content derived from it.
+- `src/gen/*.c` and `recomp/funcs.h` — code mechanically recompiled from the
+  ROM. These are never committed to this repository (see `.gitignore` and
+  the README's "What can (and can't) be committed here" section); you
+  generate them yourself, locally, from your own legally obtained ROM, and
+  they remain subject to the original game's copyright regardless of this
+  license.
+- `third_party/snesrecomp` (the recompiler engine, a separate repository)
+  and its own dependencies, which carry their own licensing terms
+  independent of this one.
+
+MIT License
+-----------
+
+Copyright (c) 2026 Derrick Gold
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

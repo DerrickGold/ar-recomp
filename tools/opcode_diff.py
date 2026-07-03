@@ -164,6 +164,16 @@ C_PREAMBLE = r'''
  * trace hooks compile to nothing. */
 #include "cpu_trace.h"
 
+/* cpu_state.h's typed-write inlines (cpu_write_a8/a16/...) unconditionally
+ * reference these three globals from their AR_TRACEA debug path (gated by
+ * getenv() at runtime, but still referenced at compile time, so the linker
+ * needs a definition even though this standalone harness never sets
+ * AR_TRACEA). The real runner provides these in common_cpu_infra.c/main.c;
+ * this harness links no runner .c files, so stub them here. */
+int snes_frame_counter;
+const char *g_last_recomp_func;
+uint8_t g_ram[0x20000];
+
 /* Flat 24-bit memory with the SNES low-WRAM mirror: the emit routes
  * direct-page / low accesses to bank $7E, while Harte uses bank $00.
  * Aliasing $00 <-> $7E reconciles them. */
