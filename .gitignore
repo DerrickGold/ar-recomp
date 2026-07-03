@@ -2,6 +2,7 @@
 *.sfc
 *.smc
 *.srm
+*.srm.bak
 *.png
 *.ppm
 *.wav
@@ -50,12 +51,26 @@ third_party/
 # Test artifacts
 tests/golden/*.png
 tests/replays/*.bin
-saves/snapshots/*
 
-# Trace logs (too large for git)
+# saves/ is purely runtime output (WRAM/SRAM dumps, snapshots, replays) — the
+# runner writes here (src/main.c), nothing reads a committed file from here as
+# a build/test fixture. Blanket-ignore rather than chase individual extensions
+# (some prior dumps evaded the *.bin/*.srm/*.rec rules above by filename, e.g.
+# "save.srm - pre act 1" doesn't literally end in .srm).
+saves/*
+
+# Trace logs (too large for git, and derived from running the actual ROM)
 *.trace
 *.cdl
 *.log
+*.jsonl
 tools/oracle/harte_cache/
 build/opcode_diff/
 snesref
+
+# Prebuilt libretro cores (e.g. snes9x_libretro.dylib) — platform-specific
+# compiled binaries, not something we build or maintain; users fetch their own
+# from buildbot.libretro.com per tools/oracle/README.md.
+tools/oracle/*.dylib
+tools/oracle/*.so
+tools/oracle/*.dll
