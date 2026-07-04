@@ -28,15 +28,50 @@ identity are the perishable, expensive-to-rederive parts.
 
 | Seam | Routine / address | Hardware | Intent | Logical ID / table | Status |
 |---|---|---|---|---|---|
-| Music / event | `LDA #id; COP` → `$035A`; COP vector `$FFE4→$8526`; hook `ActRaiser_CopHook` | APU ports `$2140-43` | "play music / fire event N" | event/song id (A → `$035A`) — **song table TBD** | 🟢 |
+| Music / event | `LDA #id; COP` → `$035A`; COP vector `$FFE4→$8526`; hook `ActRaiser_CopHook` | APU ports `$2140-43` | "play music / fire event N" | event/song id (A → `$035A`) — song images via the `$02:C7E5` pointer table + inline script pointers (see below) | 🟢 |
 | Sound effect | `LDA #id; BRK` → `$035B`; BRK vector `$FFE6→$852F`; hook `ActRaiser_BrkHook` | APU ports | "play SFX N" | sfx id (A → `$035B`) | 🟢 |
-| SPC driver/sample upload | `RtlUploadSpcImageFromDp` (HLE; src ptr at DP+`$A5`, ActRaiser's `LDA [$A5],Y`) | APU ports + ARAM | "upload sound driver + BRR samples to APU" | DP+`$A5` source block; resident IPL uploader in ARAM `$0F0E` | 🟡 |
+| Song upload (image identity) | `$02:9964` HLE — stage 1 (`$9A56` block image) + stage 2 (BRR streaming) | APU ports + ARAM | "load song N's sequence + instruments" | image src addr = song identity (e.g. `06:AC00` title, `1A:94B8` song 7); song table `$02:C7E5` (17 entries, 3-byte ptrs); more pointers inline in the `[$A2]` command scripts read via `$02:B4C0` | 🟢 |
+| **BRR sample bank (per-sample!)** | stage 2 of the `$9964` HLE (`RtlUploadSpcImageFromDpInternal`, common_rtl.c) | ARAM `$3000-$6E67` (common) / `$795F+` (per-song) | "install instrument waveforms" | chunk pool at ROM `$08:8000` — length-prefixed `[len16][BRR data]` chunks, selected by index; script = image terminator's target word (lo byte = count, hi byte onward = chunk indices); dest base = WRAM `$0358` | 🟢 |
+| Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
+| Final PCM out | `RtlRenderAudio` (common_rtl.c) → `dsp_getSamples` → SDL `AudioCallback` | host audio | "the mixed stereo stream" | — | 🟢 |
 | Raw APU port write | `RtlApuWrite` (`$2140-$2143`) | APU I/O | low-level handshake / param | — | 🔴 |
 
 > Audio is the highest-payoff first HAL target: the `$035A`/`$035B` events are already ID-based.
-> **Next capture:** the song-id → ROM table mapping (which id = which track), so an enhanced
-> backend can map id → modern audio. Found while fixing the boss-music handshake (memory:
-> `spc-upload-dp-pointer-fix`, `cop-syscall-hook-fix`, `post-boss-four-issues`).
+> Found while fixing the boss-music handshake and the silent-DSP bug (memory:
+> `spc-upload-dp-pointer-fix`, `cop-syscall-hook-fix`, `post-boss-four-issues`; DEBUG.md §7.11).
+
+### Audio swap/enhancement points (mapped 2026-07-03 while fixing the silent-DSP bug)
+
+The whole sample pipeline is now understood end-to-end, which gives four distinct
+quality/replacement tiers, from least to most invasive:
+
+1. **Track-level replacement (stream swap).** Song identity is visible at the moment of
+   upload: the stage-1 image source address (logged by `AR_APULOG`) uniquely names the track
+   (`06:AC00` = title, `1A:94B8` = song 7, the 17-entry table at `$02:C7E5` = the rest of the
+   soundtrack; a few more arrive via inline script pointers through `$02:B4C0`). A HAL backend
+   can key "now playing" off that address in the `$9964` HLE, mute the DSP mix in
+   `RtlRenderAudio`, and stream a modern recording instead — no ROM or SPC changes. Playback
+   *commands* after upload (start/stop/fade) arrive as port writes; those still need a small
+   command-level capture before full music replacement is seamless (the `$02:B63B`/`$B66C`
+   command consumer is the place to instrument).
+2. **Instrument-level replacement (per-sample HD swap).** Stage 2 of the HLE installs each
+   instrument as a discrete, identifiable unit: chunk index N from the `$08:8000` pool → known
+   ARAM range → known `srcn` via the `$2C00` directory. Because our code performs the copy, it
+   can substitute a different BRR chunk (or tag `srcn` → external hi-fi sample for a custom
+   mixer) per instrument. The chunk index is a stable, ROM-wide instrument ID.
+3. **SFX-level replacement.** Already the cleanest seam: `$035B` (BRK hook) carries the SFX id
+   before any APU involvement. Map id → modern sample in the hook, suppress the port write.
+4. **Output-quality tier.** All mixed audio funnels through `dsp_getSamples` inside
+   `RtlRenderAudio` (44.1 kHz stereo S16 by default, `AudioFreq`/`AudioSamples` in
+   config.ini). Resampling quality, interpolation upgrades (the DSP's gaussian filter lives in
+   `dsp.c` `dsp_getSample`), reverb/echo behavior (`dsp.c` echoWrites/FIR), and any
+   post-processing belong here. MSU-1-style streaming already has scaffolding in
+   `runner/src/snes/msu1.{c,h}` (mix point documented there as `RtlRenderAudio`'s locked
+   region).
+
+Diagnostics for all of it: `AR_APULOG=1` (uploads incl. per-chunk stage-2 lines + port
+traffic), `AR_AUDIODBG=1` (DSP health: mvol/mute/peak/cyc-rate), `AR_KONLOG=1` (per-voice
+key-on state: srcn/pitch/volumes/ADSR + first BRR bytes — all-zero BRR = samples missing).
 
 ---
 

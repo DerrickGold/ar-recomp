@@ -67,13 +67,29 @@ void DumpDiagState(const char *tag) {
 #ifndef _WIN32
   mkdir("saves", 0755);
 #endif
-  FILE *f = fopen("saves/dump_wram.bin", "wb");
+  /* Hotkey dumps get frame-unique filenames so a mid-bug F9 snapshot isn't
+   * clobbered by the automatic exit dump (or by a second F9). Exit keeps the
+   * fixed names existing tooling expects. */
+  int hotkey = tag && strcmp(tag, "hotkey") == 0;
+  char p_wram[64], p_sram[64], p_state[64], p_disp[64];
+  if (hotkey) {
+    snprintf(p_wram, sizeof p_wram, "saves/dump_f%d_wram.bin", snes_frame_counter);
+    snprintf(p_sram, sizeof p_sram, "saves/dump_f%d_sram.bin", snes_frame_counter);
+    snprintf(p_state, sizeof p_state, "saves/dump_f%d_state.txt", snes_frame_counter);
+    snprintf(p_disp, sizeof p_disp, "saves/dump_f%d_dispatch_log.json", snes_frame_counter);
+  } else {
+    snprintf(p_wram, sizeof p_wram, "saves/dump_wram.bin");
+    snprintf(p_sram, sizeof p_sram, "saves/dump_sram.bin");
+    snprintf(p_state, sizeof p_state, "saves/dump_state.txt");
+    snprintf(p_disp, sizeof p_disp, "saves/dump_dispatch_log.json");
+  }
+  FILE *f = fopen(p_wram, "wb");
   if (f) { fwrite(g_ram, 1, 0x20000, f); fclose(f); }
   if (g_sram && g_sram_size > 0) {
-    f = fopen("saves/dump_sram.bin", "wb");
+    f = fopen(p_sram, "wb");
     if (f) { fwrite(g_sram, 1, (size_t)g_sram_size, f); fclose(f); }
   }
-  f = fopen("saves/dump_state.txt", "w");
+  f = fopen(p_state, "w");
   if (f) {
     fprintf(f, "=== ActRaiser recomp state dump (%s) ===\n", tag ? tag : "");
     fprintf(f, "frame=%d  last_func=%s\n", snes_frame_counter,
@@ -108,10 +124,10 @@ void DumpDiagState(const char *tag) {
      * (pc24, source, func, m/x, found/miss, frame) feeding into the exit/crash.
      * The offline equivalent of the TCP `dispatch_log_get` command. */
     extern void CpuDispatchLogWriteFile(const char *path);
-    CpuDispatchLogWriteFile("saves/dump_dispatch_log.json");
+    CpuDispatchLogWriteFile(p_disp);
   }
-  fprintf(stderr, "[dump] wrote saves/dump_{wram.bin,sram.bin,state.txt,"
-          "dispatch_log.json} (%s)\n", tag ? tag : "");
+  fprintf(stderr, "[dump] wrote %s + wram/sram/dispatch_log (%s)\n",
+          p_state, tag ? tag : "");
 }
 
 void RtlApuLock(void) {
@@ -599,10 +615,42 @@ int main(int argc, char **argv) {
         if (!seen_act && g_ram[0x18] == 0x01) { seen_act = 1;
           fprintf(stderr, "[act-enter] $18=01 at game-frame %u\n", gf); } }
     }
+    /* AR_PERF=1: once-per-second frame-time budget line. Separates the two
+     * "it feels slow" classes in one run: host-bound (fps < 60, run-ms high —
+     * profile what the frame is doing, e.g. an APU-port spin cycling the SPC
+     * under the lock shows up as a big apu-catchup delta) vs. pacing (fps=60,
+     * run-ms tiny, but the on-screen action crawls — logical updates are being
+     * spread over extra host frames; see the $4210 3-read-wait class). */
+    static int perf_on = -1;
+    if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
+    uint32 perf_t0 = perf_on ? SDL_GetTicks() : 0;
     RtlApuLock();
     bool r = RtlRunFrame(inputs);
     (void)r;
     RtlApuUnlock();
+    if (perf_on) {
+      extern void snes_catchup_stats(uint64_t *calls, uint64_t *cycles);
+      extern uint8 g_ram[];
+      static uint32 win_start, run_ms_sum, run_ms_max; static int win_frames;
+      static uint64_t last_cu_calls, last_cu_cycles; static unsigned last_gf;
+      uint32 t1 = SDL_GetTicks();
+      uint32 dt = t1 - perf_t0;
+      run_ms_sum += dt; if (dt > run_ms_max) run_ms_max = dt;
+      win_frames++;
+      if (!win_start) win_start = t1;
+      if (t1 - win_start >= 1000) {
+        uint64_t cc, cy; snes_catchup_stats(&cc, &cy);
+        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+        fprintf(stderr, "[perf] fps=%d run-ms avg=%.1f max=%u gf+=%u "
+                "apu-catchup calls=%llu cyc=%llu $18=%02x\n",
+                win_frames, (double)run_ms_sum / win_frames, run_ms_max,
+                (unsigned)(uint16)(gf - last_gf),
+                (unsigned long long)(cc - last_cu_calls),
+                (unsigned long long)(cy - last_cu_cycles), g_ram[0x18]);
+        last_cu_calls = cc; last_cu_cycles = cy; last_gf = gf;
+        win_start = t1; run_ms_sum = 0; run_ms_max = 0; win_frames = 0;
+      }
+    }
     /* Complete the SPC engine's resident uploader once it enters the $CC-wait,
      * for the case where the CPU's HLEd $9A56 ran before the engine got there
      * (takes its own APU lock — must be outside the lock above). */

@@ -64,6 +64,12 @@ saves/*
 *.cdl
 *.log
 *.jsonl
+
+# Ad-hoc debug-session stderr captures and regen console output at repo root
+# (dumpN.txt / regenN.txt convention used during bug hunts)
+/dump*.txt
+/regen*.txt
+/slow*.txt
 tools/oracle/harte_cache/
 build/opcode_diff/
 snesref

@@ -163,6 +163,7 @@ adding a new probe.
 | **Missing object / event / spawn (logic)** | First check it's not an **unconverted spawn-data handler** (§11): F2 snapshot → object-table scan (**scan ≥64 slots, not 24**) for an active slot with an un-converted `$12`. Else differential oracle: `diff_seq.py` + oracle-only analysis (**must load SRAM** — see §6) | trace the spawn trigger / gate condition |
 | **Rendering wrong (no text, no HBlank, missing BG, black screen)** | `AR_PPULOG=1` (bgmode, brightness, forced-blank, layer enables, HDMAEN) + **oracle screenshots** (`AR_SHOT_AT_GF` vs `SNESREF_SHOT_AT_GF`) | audit the PPU/DMA runtime (`ActRaiserDrawPpuFrame`); WRAM oracle is **blind** to VRAM |
 | **Missing/extra sound or music** | check **BRK/COP syscall hooks** (§7) — `$035B`=SFX (BRK), `$035A`=music/event (COP) | `AR_WATCH16` on the request port |
+| **Game runs at exactly 1/2 or 1/3 speed in ONE mode/screen (smooth elsewhere, audio fine)** | This is the **pacing/yield-multiplication class**, not host performance — smooth audio alone proves the host loop is healthy. Confirm + count in one shot: quit (or F9) **while the mode is slow**, then in the dump's block ring **count `02ABF0` (NMI-handler) entries per game-loop iteration** — each entry = one host-frame yield; N entries per iteration = 1/N speed, and the ring block *preceding* each entry names the yield site. Cross-check with any per-frame `[wobj]`/`[frame]` log: updates at delta=N host frames. Known causes so far: a non-HLE'd `$4210` wait yielding per read (§7 the `$9284` fix), and spin-detector false pairing on a twice-per-frame ack helper (§7.12 `$93CB`) | `AR_PERF=1` separates the two classes numerically (fps<60 = host-bound; fps=60 + crawling = pacing). `env AR_FRAMELOG=1 AR_VBLOG=1` names every yield's callsite/block live. NOTE: static `$4210` scans must include the long form `AF 10 42 00`, not just `AD 10 42` |
 | **Suspect a single opcode is wrong** | `tools/opcode_diff.py` (Tom Harte differential, §5) | — |
 | **Per-frame game-state progression** | `AR_FRAMELOG=1` (callsite, work delta, mode `$18/$19`, timer, HP) | `AR_OBJLOG=1` for the object table |
 | **Is the CPU layer even the problem?** | `AR_MXCHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
@@ -458,6 +459,35 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 
 ## 5. Static analysis (no run needed)
 
+- **`tools/find_yield_points.py`** — **yield-point / pacing census** *(2026-07-04, built after
+  §7.12)*. Host-frame yields can only come from three places: cfg-HLE'd wait routines, the
+  runtime `$4210` spin detector (snes.c), and the idle coroutine — so "verify pacing" reduces
+  to enumerating and classifying every `$4210`/`$4212` read in the ROM. The tool scans ALL
+  addressing forms (`AD` abs, **`AF` long — the form every historical scan missed**, `2C` BIT,
+  `CD` CMP) and classifies each site by local shape: **SPIN** (read + BPL/BMI back to itself —
+  the only shape allowed to yield, exactly once per wait), **CLEAR** / **POST** (the canonical
+  3-read wait's bracket reads), **ACK** (isolated read — must NEVER yield; both historical
+  pacing bugs, `$8465` and `$93CB`, were ACKs the spin heuristic false-paired), **OTHER**
+  (unrecognized → exits nonzero, review by hand). Cross-references cfg-HLE'd routines (whose
+  reads never execute). Current ground truth for ActRaiser (30 sites, zero OTHER):
+  **7 live SPINs** = the complete legit runtime yield set (`01:9293` intro/menu wait,
+  `01:92AA` the `$929E` long-form effect-loop wait, `02:87F3` fade helper, `02:9AC4` the
+  boot-time APU bring-up wait, `02:BEBF` sound-code wait, `03:B013`, `03:E535`) and
+  **3 live ACKs** (`00:8465`, `01:93CF`, and `03:AF58` — the last has not bitten yet; if a new
+  mode shows 1/N-speed, check `[vbl]` for it first). Re-run after any cfg HLE change or on any
+  new pacing symptom and diff the SPIN set.
+  **Hardening LANDED (2026-07-04, after the §7.12 adjacency fix was user-confirmed in-game):**
+  the runtime heuristic is now REPLACED by this static whitelist (snes.c `case 0x4210`,
+  `kSpinBlocks[]`) — yield iff the reading block PC is one of the 7 SPIN sites (all are
+  self-branch targets, hence block leaders, hence exactly the ring's block PCs); one yield on
+  the first read, `0x82` returned to break the BPL. Pacing is deterministic and immune to both
+  false-pair classes by construction; a spin missing from the list busy-spins into the
+  watchdog (loud, block named in the dump) instead of running silently slow. **Census gotcha
+  from landing this:** `$02:9AC1` sits inside the HLE'd `$9964`/`$9A56` upload's address range
+  but is ALSO called natively by the reset-time APU bring-up (`JSR $9AC1` ×7 from
+  `$02:98E0-990D`) — the first census marked it HLE'd-only and boot hung in its spin. Address
+  containment proves nothing; only whole-routine `hle_func` coverage removes a site.
+
 - **`tools/opcode_diff.py`** — **Layer B**. Differential-tests the emitter's C output for each
   opcode against the Tom Harte SingleStepTests/65816 vectors (20k tests/opcode). Use when you
   suspect a single opcode's *semantics* (flags, decimal mode, addressing width). `--all`,
@@ -750,6 +780,50 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
     a *plausible-looking but wrong* theory (see the sim-mode case study below) until live register/
     backtrace inspection settled it. *Status 2026-07-01:* root-caused to this mechanism (see case
     study), exact broken hand-off between the two `ACD9` scan segments not yet pinned — open.
+
+11. **Total silence with a healthy-looking sound engine — a *partially* HLE'd routine (the
+    "stage 2" class).** *(FIXED 2026-07-03.)* Symptom: no audio ever, but every layer you probe
+    looks alive: SPC runs at the right speed (~1024 cyc/ms), master volume set, mute off, the
+    driver keys voices on constantly (`AR_KONLOG=1` shows KON writes on every beat), yet DSP
+    output peak stays 0 (`AR_AUDIODBG=1`). Diagnosis chain that worked, each step one layer
+    deeper: SDL device → `RtlRenderAudio` peak (0) → KON writes (present!) → per-voice state at
+    key-on (`[konapply]`, temporary log in `dsp.c`): volumes/pitch/ADSR all sane, but the BRR
+    bytes at each voice's sample pointer were **all zeros** — the DSP was faithfully playing
+    empty sample RAM. Root cause: the game's `$02:9964` upload routine is TWO uploads: the
+    `$9A56` block-image (sequence data + sample *directory* — which we HLE'd), then a second
+    stage that re-handshakes and streams the actual BRR chunks from a length-prefixed pool at
+    ROM `$08:8000` into ARAM (`$0358` = running dest; the image terminator's "final PC" word is
+    really the stage-2 script: low byte = segment count, high byte onward = chunk indices). Our
+    `hle_spc_upload` implemented stage 1 only, so every DIR entry pointed at zero-filled ARAM.
+    Proof method worth remembering: simulate the suspected protocol in a 20-line Python script
+    and check the predicted ARAM layout against the uploaded sample directory — title segments
+    landed at `$3000/$3B01/…/$6E4C` = srcn `00-0B` starts *exactly*, song-7 at `$795F/…/$B89E` =
+    srcn `0C-12` exactly. Fix: stage 2 added to `RtlUploadSpcImageFromDpInternal`
+    (common_rtl.c), gated on the `9964` wrapper via `g_last_recomp_func` (the direct-`$9A56`
+    boot mini-driver upload has no stage 2); it must also write back DP `$00/$02/$08` because
+    the boot caller computes the next `$0358` from them. **Lesson (rhymes with the B8C0 gotcha):
+    when you HLE a routine, diff your HLE against the FULL native disassembly to its final
+    RTS/RTL — the first handshake loop you recognize is not necessarily the whole routine.**
+
+12. **Mode-specific, exact-1/N-speed slowdown — spurious yield from the `$4210` spin
+    detector's pairing rule (round 2).** *(FIXED 2026-07-04.)* Symptom: sim-mode effect
+    screens (lightning strike, "direct the people") ran at exactly 1/2 speed; audio smooth
+    (host at 60fps — that alone rules out host-bound and proves the pacing class). Diagnosis
+    chain worth reusing: (1) `[wobj]` frame cadence in the user's log quantified it — object
+    updates at delta=2 host frames inside the effect window, delta=1 outside; (2) user Esc'd
+    MID-effect so the exit dump's 256-block ring captured the slow loop; counting NMI-handler
+    entries (`02ABF0`) in the ring = counting yields per iteration → two, and the ring names
+    the block preceding each. Culprit: `$01:93CB` — the NMI ack/re-enable bracket (single
+    long-form `LDA $004210` + `$4200=#$A1`), called TWICE per frame by the effect path (end of
+    the `$01:9460` iteration + again by its caller). Two same-block reads in one host frame →
+    the spin detector's same-frame pairing rule (§ the `$8465` fix) classified it as a
+    busy-wait → one spurious yield per frame → exactly 1/2 speed. Fix (snes.c `case 0x4210`):
+    a spin must now also be RING-ADJACENT — block-ring index advanced ≤2 between the two reads
+    (a self-looping spin re-records its block every lap; a twice-called helper has dozens of
+    blocks in between). Gotchas recorded: static `$4210` scans MUST include the long form
+    `AF 10 42 00` ($929E/$93CB/bank-03 waits all use it — an `AD 10 42`-only scan missed all
+    of them); and the ROM has a second full wait-routine family at `$01:929E` (long-form clone
+    of `$9284`) used by the effect loops.
 
 ---
 
@@ -1464,6 +1538,12 @@ AR_SIMTRACE=1          sim-mode dispatch: which branch fired this frame at a set
 AR_SAVECHECK=1         save-checksum gate outcome: PASS (continue) vs FAIL (new game) — see §2
 regen report           "PROVEN-EQUIVALENT VARIANT ROUTING" section: wrong-width dispatch routing, proven not guessed (§5)
 regen report           "JSR (abs,X) SUPPRESSED" / "Rejected JSR/JSL" / "DISPATCH TARGET SUPPRESSED" sections: silent-drop audit (§7.9)
+AR_PERF=1              once-per-second frame budget: fps / run-ms / gf-advance / apu-catchup — separates host-bound (fps<60) from pacing (fps=60 but game crawls). CAVEAT: gf is NMI-driven, always 1:1 — it can NOT detect the pacing class; use the ring trick below
+F9 mid-bug + ring      exact-1/N-speed in one mode? quit/F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
+find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
+AR_AUDIODBG=1          DSP health: mvol/mute/output peak/SPC cyc-per-ms/pending KON  (peak=0 = silence GENERATED, not a device problem)
+AR_KONLOG=1            DSP key-on writes + per-voice state at key-on (vol/pitch/ADSR/BRR first-bytes — all-zero BRR = samples never uploaded, §7.11)
+AR_APULOG=1            APU port traffic + SPC upload blocks (+ stage2 sample-chunk streaming)
 AR_PPULOG=1            rendering: bgmode/bright/fblank/layers/hdmaen
 AR_FRAMELOG=1          per-frame mode/timer/HP/callsite/joypad
 AR_OBJLOG=1            object-table health
