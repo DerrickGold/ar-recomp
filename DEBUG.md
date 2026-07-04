@@ -825,6 +825,55 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
     of them); and the ROM has a second full wait-routine family at `$01:929E` (long-form clone
     of `$9284`) used by the effect loops.
 
+
+13. **Sim-mode development cycle never fires / fires with corrupt output — a THREE-layer
+    nested RTS-trick dispatch web, each layer invisible until the previous one was
+    registered.** *(Registered 2026-07-04; in-game verification pending.)* Symptom
+    evolution: (a) hourglass drains + refreshes but development never triggers, silently —
+    zero dispatch-miss/oob output; (b) after layer 1 was fixed: development triggers but
+    tiles land corrupted/misplaced + people/houses never appear + m=1 garbage variants in
+    the town master loop. The chain (all in bank 03, docs/SEAMS.md has the full map):
+    - **Layer 1 — the trigger:** `$91AE/$91BC` plant handler-1 words in WRAM `$7C45/$7C47`;
+      the consumer loop does `LDA #$9315; PHA; LDA $7C4x; PHA; RTS` at `$9285/$92B5` →
+      handlers `$9390/$944B/$9505/$95B3` (the four development-mode attempts, gating on
+      population `$6B26,X` vs threshold `$021C,X`). Unregistered → the graceful RTS-follow
+      silently skipped the whole step each cycle. **Found via the differential oracle in
+      one run** (§6 recipe): user recorded ~78s of sim idling; oracle replay showed "Town
+      Under Construction" + population 2→10 while our replay sat still; the trace diff
+      named the missing chain (recomp never posts COP `$9C`, never activates spawn-list 6,
+      never writes eligibility `$7F:9758`); the exit dispatch-log then named the exact site
+      (`039285 -> 039390 found=0`).
+    - **Layer 1 model lesson (repeat of the `$9156` class):** plain `func` registration of
+      the four handlers made development RUN but corrupted tiles — their exit RTS returns
+      to `$9316`, a MID-LOOP continuation doing `PLX/PLY` of loop registers. Separate-func
+      slicing skips those pops on the miss-unwind → stack drift + m leak. `rts_dispatch`
+      (in-function decode, S preserved, popped-value-guarded `goto`) is the required model
+      whenever the continuation is stateful. Also fixed en route: the rts_dispatch emitter
+      now guards `goto` emission on the target label existing in that VARIANT (wrong-width
+      siblings reach the RTS without decoding the continuation → undeclared-label build
+      error otherwise).
+    - **Layer 2/3 — the build-step web:** the master loop's `JSR $9DE4` scans development
+      records; per record it pushes continuation `$9E31`/`$9EC4` and `BRL`s to one of 7
+      outer handlers (`$A011..$A35E`), each `LDY #table; BRL $9ED3`; `$9ED3` dispatches
+      AGAIN via `PHA #$9EF3; PHA table-word; RTS` at `$9EF3` through per-type tables
+      (7 tables × 8 words, 49 unique build-step handlers, entered m=1 x=0). The
+      unregistered pop unwound the whole scan with a `SEP #$20` still open → the m=1 leak
+      into `$8193` (→ `B97F`/`B1B7` garbage variants → misplaced tile writes) AND every
+      build-step skipped. Registered as `rts_dispatch 9EF3 <49 targets>` + blanket
+      `rts_dispatch <every RTS byte in $9EF5-$A4C8> 9EF4` + `rts_dispatch 9EF4 9E32 9EC5`
+      — over-listing is SAFE (the guard falls through to a normal return when the popped
+      word doesn't match), under-listing silently skips a step.
+    - **Tools that cracked it:** `AR_GARBAGE_HIST=<n>` (garbage-trap ring dump now depth-
+      configurable with S — 24 blocks couldn't reach the flip, 1000 could and showed the
+      whole frame); `AR_SIMDEV=1` (gate-branch probe in cpu_trace.h); `AR_RTSDISP_MISS=1`
+      (names any continuation the rts_dispatch list doesn't cover — the round-2 stragglers
+      `$92E0/$9651` it reported turned out to be BENIGN normal-return fall-throughs, i.e.
+      JSR returns through a blanket-mapped RTS; expect those, they're not faults).
+    - **Class summary for next time:** this town engine nests pushed-continuation RTS
+      dispatch arbitrarily deep. When a sim subsystem silently no-ops: dispatch_log
+      `found:0` first (§ the heuristic above), then expect the fix to be `rts_dispatch`
+      (stateful mid-loop continuation) not `func`, then re-run with `AR_RTSDISP_MISS=1`
+      and expect one more nested layer.
 ---
 
 ## 8. Build & regen workflow
@@ -1541,6 +1590,9 @@ regen report           "JSR (abs,X) SUPPRESSED" / "Rejected JSR/JSL" / "DISPATCH
 AR_PERF=1              once-per-second frame budget: fps / run-ms / gf-advance / apu-catchup — separates host-bound (fps<60) from pacing (fps=60 but game crawls). CAVEAT: gf is NMI-driven, always 1:1 — it can NOT detect the pacing class; use the ring trick below
 F9 mid-bug + ring      exact-1/N-speed in one mode? quit/F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
 find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
+AR_RTSDISP_MISS=1      names any continuation a `rts_dispatch` list doesn't cover (site + popped target); benign JSR-return fall-throughs also print — check the popped value before adding a mapping
+AR_GARBAGE_HIST=<n>    garbage-trap block-ring depth (default 24, max 1000) incl. per-block S — 1000 spans a whole sim frame; how the dev-cycle m-leak origin was found (§7.13)
+AR_SIMDEV=1            dev-cycle gate-branch probe (cpu_trace.h; retarget its PC list per hunt — the reusable "which branch fired" pattern)
 AR_AUDIODBG=1          DSP health: mvol/mute/output peak/SPC cyc-per-ms/pending KON  (peak=0 = silence GENERATED, not a device problem)
 AR_KONLOG=1            DSP key-on writes + per-voice state at key-on (vol/pitch/ADSR/BRR first-bytes — all-zero BRR = samples never uploaded, §7.11)
 AR_APULOG=1            APU port traffic + SPC upload blocks (+ stage2 sample-chunk streaming)

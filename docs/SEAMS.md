@@ -400,6 +400,41 @@ two tiers as structs). The ROM data tables (`$03:F5ED+` handler lists, `$01:A227
 `$01:E099/$E7D9` type identities, `$01:D128+` placement records, `$01:E838` frame lists) are the
 **level/asset script seam** — a future editor or HD-asset pipeline replaces THESE, not code.
 
+### 5. The development cycle (hourglass → town growth), mapped 2026-07-04
+
+The whole chain, from timer to tiles (DEBUG.md §7.13 has the debugging story):
+
+1. **Attempt** — each hourglass expiry, the consumer loop in the `$8Fxx` scan pushes
+   continuation `$9315` + a handler-1 word planted in WRAM `$7C45/$7C47` (by `$91AE/$91BC`)
+   and RTS-dispatches to one of FOUR development-mode handlers: `$9390 / $944B / $9505 /
+   $95B3`. Each gates on `$7C37` (attempts remaining) and compares town population
+   `$6B26,X` against the per-town threshold table at WRAM `$021C,X` (different +offset per
+   mode — these four ARE the "grow / grow-more / shrink / clamp" development flavors).
+2. **Scheduling** — on a pass: allocate a development record (`$9D9F`, per-town list from
+   table `$03:DC74`), pick the target site (`$8D18` + direction tables `$03:8D82+`,
+   landmark-relative via `$7C9D/$7C9F`), write the map-marker bytes (`$8C84`→`$8CF9`:
+   eligibility slot `$7F:9758+X` = target coords <<4 from `$7D3F/$7D41`, coord tables
+   `$03:D2FA/$D306`), post **COP event `$9C`** and activate **spawn-list 6** (`$033C`) —
+   that list spawns the builder/people actors (records at `$0E02+`).
+3. **Execution** — while construction is active (`$7CFB` nonzero) the master loop `$8193`
+   swaps its per-frame call to `$89F7`: an 8-frame-tick step machine that walks a step
+   table at `$03:8A7E` and runs the scanner `$9DE4/$9E5A` over development records. Each
+   record dispatches (pushed continuation `$9E31/$9EC4`) through 7 outer handlers
+   (`$A011/$A0CB/$A19B/$A237/$A296/$A2EF/$A35E`, one per development kind), each of which
+   re-dispatches through its per-type table (`LDY #table; BRL $9ED3`; dispatch RTS at
+   `$9EF3`; 7 tables × 8 types = 49 build-step handlers in `$A004-$A4B8`) — the routines
+   that write house/road tiles into the `$7F:2000+` town map and stage the visual updates.
+   Chain continuations: handler RTS → `$9EF4` → `$9E32/$9EC5` (loop resume).
+4. **Completion** — `$839C` (dev-eligible census over `$7F:9758`) and `$83EF+` (the
+   `$8440`-family consumers) apply the 2×2 house-tile marks (`$08`/`$E0` bytes at
+   `$7F:2000,Y`) and retire the slot (`$9758,X = $FFFF`).
+
+**Decomp seam value:** the four mode handlers + the 49 build-step handlers + their tables
+are the complete "town growth ruleset" — a `development.c` with the step tables as data.
+The population thresholds at `$021C` and the step table at `$03:8A7E` are the obvious
+balance/mod knobs. Every layer of this is pushed-continuation RTS dispatch — cfg model
+notes (why `rts_dispatch`, not `func`) live in bank03.cfg comments + DEBUG.md §7.13.
+
 ---
 
 ## Frame / timing  (mostly already HLE'd — the model is understood)
