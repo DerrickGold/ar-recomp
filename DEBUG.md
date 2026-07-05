@@ -459,6 +459,31 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 
 ## 5. Static analysis (no run needed)
 
+- **`tools/find_rts_webs.py`** — **pushed-continuation RTS-dispatch census** *(2026-07-04,
+  built after §7.13's three-round hand-hunt)*. The town/scene engine nests this idiom
+  arbitrarily deep and every layer used to cost one in-game repro + regen to find. The idiom
+  is byte-stereotyped, so the whole class is statically enumerable in ONE pass: a continuation
+  push is `A9 lo hi 48` (`LDA #imm16; PHA`) or `A0 lo hi 5A` (`LDY #imm16; PHY`) with `imm16+1`
+  a plausible in-bank code address; a dispatch is `48 60` (`PHA; RTS`). The tool lists every
+  hit per bank, cross-references the cfgs (`rts_dispatch` target lists, `indirect_dispatch
+  ret:`, `func` entries), and marks each `[ok]`/`[UNC]` with a decode-score. It reconstructs
+  every layer we found by hand ($9315/$9E31/$9D3B/$9B21/$F5E2 all `[ok]`), which is the
+  regression guard: after any cfg edit, re-run and confirm no *known* web regressed to `[UNC]`.
+  **What it does and doesn't give you:** it statically nails every dispatch SITE and
+  CONTINUATION (fully enumerable from bytes) — that's the "which handful of sites" answer that
+  used to take a repro each. It does NOT give the HANDLER TARGETS of a *RAM-pointer* dispatcher
+  (e.g. `$03:CDAC` reads the handler from WRAM `$9220`; `$03:F97C` from `$030004,X`) — those,
+  like `$8700`/`$E1D2`, still need one runtime `dispatch_log found:0` to enumerate, then plain
+  `func` registration + the trampoline. **Known false-positive classes (so the signal stays
+  trustworthy):** (1) a PHA;RTS site covered by `func`-registered targets (not a directive on
+  the RTS pc) prints `UNC` — the tool only sees `rts_dispatch`/`indirect_dispatch` site
+  coverage, so `$8711`/`$8759`/`$E1EB` are false-UNC; (2) low decode-scores (2-3) in
+  action-stage banks are data bytes that happen to match the push opcodes. Triage by the
+  printed decode preview: a continuation doing `PLA`/`PLX`/`PLY` of loop state needs
+  `rts_dispatch` (NOT `func` — §7.13's model lesson), a bare dispatch needs the site + targets.
+  `--bank NN` narrows to one bank (and then also lists the `[ok]` hits, useful as a coverage
+  audit of a single subsystem).
+
 - **`tools/find_yield_points.py`** — **yield-point / pacing census** *(2026-07-04, built after
   §7.12)*. Host-frame yields can only come from three places: cfg-HLE'd wait routines, the
   runtime `$4210` spin detector (snes.c), and the idle coroutine — so "verify pacing" reduces
@@ -873,7 +898,13 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
       dispatch arbitrarily deep. When a sim subsystem silently no-ops: dispatch_log
       `found:0` first (§ the heuristic above), then expect the fix to be `rts_dispatch`
       (stateful mid-loop continuation) not `func`, then re-run with `AR_RTSDISP_MISS=1`
-      and expect one more nested layer.
+      and expect one more nested layer. **`tools/find_rts_webs.py` (§5) now enumerates
+      every dispatch site + continuation in the class statically — run it FIRST to see
+      the whole backlog and register in one batch, instead of one regen per layer; it
+      can't give RAM-pointer handler targets (still need one runtime `found:0`), but it
+      names exactly which sites to watch.** Sites it flags uncovered in bank 03 as of
+      2026-07-04: `$CDAC`/`$CE56` (RAM-ptr from `$9220`) and `$F97C`/`$F989` (RAM-ptr
+      from `$030004,X`) — not yet traced to a subsystem/repro.
 ---
 
 ## 8. Build & regen workflow
@@ -1590,6 +1621,7 @@ regen report           "JSR (abs,X) SUPPRESSED" / "Rejected JSR/JSL" / "DISPATCH
 AR_PERF=1              once-per-second frame budget: fps / run-ms / gf-advance / apu-catchup — separates host-bound (fps<60) from pacing (fps=60 but game crawls). CAVEAT: gf is NMI-driven, always 1:1 — it can NOT detect the pacing class; use the ring trick below
 F9 mid-bug + ring      exact-1/N-speed in one mode? quit/F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
 find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
+find_rts_webs.py       static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
 AR_RTSDISP_MISS=1      names any continuation a `rts_dispatch` list doesn't cover (site + popped target); benign JSR-return fall-throughs also print — check the popped value before adding a mapping
 AR_GARBAGE_HIST=<n>    garbage-trap block-ring depth (default 24, max 1000) incl. per-block S — 1000 spans a whole sim frame; how the dev-cycle m-leak origin was found (§7.13)
 AR_SIMDEV=1            dev-cycle gate-branch probe (cpu_trace.h; retarget its PC list per hunt — the reusable "which branch fired" pattern)
