@@ -155,6 +155,92 @@ adding a new probe.
 
 ## 1. DECISION GUIDE — symptom → tool
 
+### STEP 0 (ALWAYS FIRST): capture a unified `AR_TRACE` and read it before toggling anything
+
+Do **not** start by reaching for a per-symptom flag. Almost every flag below is now folded into the
+one-run **`AR_TRACE`** stream (§2), so the first move on *any* bug is: get a deterministic repro,
+find the **host frame** of the symptom, and capture a windowed trace. This replaces the old
+"guess a probe, run, discover it saw the wrong layer, re-run" loop that cost this project dozens of
+runs.
+
+```
+# 1. deterministic repro (record once, then replay frame-exact):
+AR_HEADLESS=1 AR_INPUT_RECORD=saves/bug.rec ./build/ActRaiserRecomp ar.sfc     # play to the bug
+# 2. find the symptom's host frame (screenshots are cheap):
+AR_HEADLESS=1 AR_INPUT_REPLAY=saves/bug.rec AR_SHOT_EVERY=10 ./build/ActRaiserRecomp ar.sfc
+# 3. capture ALL layers over a tight window around it:
+AR_HEADLESS=1 AR_INPUT_REPLAY=saves/bug.rec \
+  AR_TRACE=/tmp/bug.jsonl AR_TRACE_HF_LO=<hf-2> AR_TRACE_HF_HI=<hf> ./build/ActRaiserRecomp ar.sfc
+```
+
+**Then read the trace in this fixed order — it classifies the bug before you touch a flag:**
+
+1. **`trace_slice.py /tmp/bug.jsonl --summary`** — the triage line. It reports **m/x LEAKS**,
+   **DISPATCH-MISSES**, and **GARBAGE-VARIANTS**. This alone tells you the *class*:
+   - LEAKS > 0 → **misdecode** (an m/x leak). Go to `--leaks`.
+   - DISPATCH-MISSES > 0 → **unregistered RTS-trick/computed target** (register a cfg `func`).
+   - GARBAGE-VARIANTS > 0 → execution already ran a known-garbage variant (leak happened upstream).
+   - All zero → **not the misdecode/dispatch class** → it's a logic/state/runtime bug; read the
+     symptom's own channel (below) or fall through to §11 (silent-drop reports).
+2. **`--leaks`** — names the exact call site where runtime m/x diverged from the decoder's
+   expectation (**the leak boundary**). Walk back to the previous clean call site to bracket the
+   leaking callee; that callee is your `exit_mx_at` target. (This is how the lair-seal `$9D4D` fix
+   was found in one run.)
+3. **The symptom's own channel** — confirm the *mechanism* and the culprit function, seq-correlated
+   with the m/x/S/DB on every line:
+
+| Symptom | Read these channels first |
+|---|---|
+| Garbled/wrong tiles, black BG | `--vram <addr>` (who wrote it, via which path) + `--vmadd` (crossed pointer?) + `reg` (forced-blank/screen-enable) |
+| Wrong palette / colors | `ppumem` (CGRAM writes) |
+| Missing/garbled sprites | `ppumem` (OAM writes) |
+| Corrupt WRAM value / buffer | `--wram <range>` (all write paths incl. indirect + DMA) |
+| Hang / freeze / spin | `hwread` (what `$4210`/`$4212`/APU value the loop keyed on) + `frame` (are NMIs still firing?) |
+| Stack/transition crash (`S` walks off) | `stack` (the pushes) + watch **`S` in every prefix** for the drift point |
+| Runs at 1/N speed | `frame` markers per game-loop iteration (N per iter = 1/N speed) |
+| Wrong m/x width at a call | `--leaks` / `call` channel |
+
+**The m/x-leak decision tree (run `--diagnose`, but understand it).** A `--leaks` hit is a
+*symptom*, not the root cause — and the two root causes need OPPOSITE fixes, so **never apply
+`exit_mx_at` on a leak alone** (that mistake cost a full round on the lair-seal `$9D8E` bug):
+
+1. Is there a **`dispmiss`** in the window whose **target lands inside the leaking callee's
+   function**? → **unregistered RTS-trick continuation.** A handler was reached via a manual
+   "push return addr; branch" (`LDY #ret; PHY; BRL h` or `PHA;…;RTS`), and its RTS to the pushed
+   address hit no registered entry → host-unwind → the SEP/REP that would restore m is skipped.
+   **Fix:** `func bank_BB_TTTT TTTT entry_mx:m,x` (m,x = the width the continuation runs at — read
+   `mnow/xnow` at the miss + the surrounding SEP/REP). *This class is INVISIBLE to the stderr
+   `[dispatch-miss]` tripwire when `S<$0200`* — always trust the trace `dispmiss` channel, and
+   watch `--summary`'s "HIDDEN by the stderr tripwire" callout.
+2. **No** dispmiss near the leak? → likely an **ambiguous decoded exit** (a callee with two static
+   exit paths at different m; the auto-router picked wrong). **Confirm before fixing:** decode the
+   leaked region from the ROM at the decoder's EXPECTED m — **garbage/BRK ⇒ decode bug ⇒
+   `exit_mx_at <callee> <m> <x>`**; **coherent ⇒ it's NOT exit-mx** (a runtime/value/branch
+   divergence — keep digging, e.g. a mis-read RTS-trick as in #1, or a wrong dispatch value).
+3. A **`goto`/comment "tail-call past end into <fn>"** in the emitted gen for the leaking function
+   is a **red flag for #1** — the decoder ran off a function's end into a pushed-continuation
+   handler. (`tools/find_tailcall_past_end.py` censuses these statically.)
+
+**Always verify a cfg m/x fix with a re-trace** — `--vmadd`/`--leaks` must actually flip — *before*
+declaring it fixed.
+
+**Only reach for a targeted flag AFTER the trace has localized the site** — and only when you need
+something the trace genuinely doesn't carry: a **single address's history across a whole run**
+(wider than a practical window) → `AR_WATCHOBJ`/`AR_WATCH16`; **opcode-level** correctness →
+`tools/opcode_diff.py`; a **real-hardware cross-check** → the oracle (§6); **whole-run leak
+boundary without knowing the window** → `AR_MXHIST=1` (still the right first pass when you can't
+yet name the host frame). The per-symptom table below is now mostly the *fall-through* detail for
+those cases.
+
+> **Why the stderr tripwire hid this (design note).** The default `[dispatch-miss]` stderr tripwire
+> gates on `S>=$0200` (the relocated-stack / RTS-trick danger signature) to keep live stderr
+> readable. But a page-1-stack RTS-trick miss (`$9D8E`, `S=$01F2`) slips through that gate. The fix
+> is NOT to ungate stderr (it would flood live runs) — it's that the **trace `dispmiss` channel is
+> ungated and complete**, and `--summary`/`--diagnose` surface the `S<$0200` class explicitly. The
+> stderr tripwire stays as a zero-setup *live* alert; the trace is the source of truth.
+
+---
+
 | Symptom | First tool(s) | Then |
 |---|---|---|
 | **Hang / freeze / watchdog SIGSEGV** | `saves/dump_state.txt` (auto-written by watchdog: call stack + **block-history ring** with PC/m/X) | `AR_MXHIST=1` to check for a misdecode leak; trace the looping block |
@@ -171,9 +257,12 @@ adding a new probe.
 | **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Check the regen console output's three silent-drop report sections: **`JSR (abs,X) SUPPRESSED`** (cfg-required-dispatch-or-kill), **`DISPATCH TARGET SUPPRESSED BY DATA_REGION`**, **`Rejected JSR/JSL targets`** — grep the report for the bank/address range of the code you suspect. If none of those name the site, it's probably a genuine logic/state bug (e.g. a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `AR_INDIRLOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (§2 `AR_SAVECHECK`-style targeted branch probe) |
 | **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | Check the regen console's **`PROVEN-EQUIVALENT VARIANT ROUTING`** report section for the address — a `<== DIFFERS FROM CANONICAL/DEFAULT GUESS` entry means the OLD "nearest survivor" heuristic and the NEW proof disagree; a regen should already route it correctly. If the address is missing from the report entirely, `_find_equivalent_variants` couldn't prove any survivor equivalent (genuinely no safe target — see §7 "wrong-width dispatch, no provable target") | `AR_MXCHECK`/`AR_CALLMX` first to confirm it's actually reached at the wrong width at runtime (don't assume from static inspection alone — see gotcha #4 above) |
 
-**Golden rule:** on any "stuck / garbage / disappearing" bug, run **`AR_MXHIST=1` first**. In one
-run it tells you misdecode-vs-not and where the M flag leaked — this is what turned multi-hour
-hunts into minutes.
+**Golden rule:** capture an **`AR_TRACE`** window first and read `--summary` → `--leaks` (STEP 0
+above) before toggling any per-symptom flag. One windowed run classifies the bug (misdecode /
+dispatch-miss / garbage / logic) *and* carries every layer (VRAM/WRAM/PPU/DMA/stack/hwread) with
+`m/x/S/DB` on every line. Reach for `AR_MXHIST=1` only when you can't yet pin the host frame to
+window on (it scans the whole run for the leak boundary); reach for single-address `AR_WATCH*`
+only after the trace has named the site.
 
 **Golden rule 2 (learned the hard way):** when a variant looks like a misdecode, **trust the
 emitted gen, not a hand ROM disassembly.** The instant, unambiguous "this variant is garbage"
@@ -354,6 +443,65 @@ runtime-populated table, candidate for `indirect_call_table`/`indirect_dispatch`
 `$01:B898`), or **ROM** (prints the static table entry directly). Deduped per site, capped at 128
 unique sites. Reach for this whenever the `JSR (abs,X) SUPPRESSED` regen-report section lists a
 site you're trying to resolve.
+
+### `AR_TRACE=<file.jsonl>` — unified single-run trace  *(2026-07-05, the one-run-sees-everything tool)*
+The answer to "why did that take a dozen small runs that each missed a layer." ONE windowed run
+emits a correlated JSONL stream across **every** layer, so you never again enable one probe, miss
+the path that mattered, and re-run. Channels:
+- **`call`** — every JSR/JSL site (from `ar_call_mx_check`) with the DECODER-expected m/x vs
+  runtime m/x; `leak:1` when they differ. **This is the misdecode finder** (`AR_CALLMX` folded in):
+  it catches a self-consistent m-leak that `func` cannot (the lair-seal `$9D4D` case). Walk the
+  flagged site back to the previous clean call site to bracket the leaking callee.
+- **`func`** — every function entry with runtime + the DISPATCHED variant's m/x. Note its
+  `misdecode` is ~always 0 (the call switch picks the variant by runtime m/x) — only IRQ/NMI-style
+  entries trip it. Use `call`/`leak`, not `func`/`misdecode`, to hunt m-leaks.
+- **`vram`** — ALL write paths: byte `$2118`/`$2119`, the atomic `WriteVramWord` "word" path that
+  bypasses the byte handlers, and DMA.
+- **`vmadd`** — `$2116` sets + issuing func (catches a crossed VRAM pointer directly).
+- **`reg`** — screen/BG control: INIDISP+forced-blank (`$2100`), BGMODE (`$2105`), mosaic (`$2106`),
+  BG SC/NBA, main/sub screen enable (`$212C/D`) → answers "why is the screen black/wrong" in-trace.
+- **`dma`** — channel triggers · **`dispmiss`** — computed-dispatch miss (`[dispatch-miss]` folded
+  in — the RTS-trick / unregistered-handler root event) · **`garbage`** — entered a known-misdecode
+  variant (`[garbage-variant]` folded in).
+- **`wram`** — WRAM writes (range-gated `AR_TRACE_WLO/WHI`), across **all four** write paths:
+  `cpu_write8/16`, indirect `STA [dp],Y` (IndirWrite), AND DMA-driven writes — so "who wrote this
+  WRAM address" is complete in one run (subsumes `AR_WATCHOBJ`/`AR_WATCH*`/`AR_WRAM_TRACE`).
+- **`stack`** — writes into the stack page (`$0100-$01FF`) = pushes, with value + who (the
+  "who pushed the corrupt return frame" question; pairs with `S` in the prefix showing the drift).
+- **`hwread`** — the control-flow-gating hardware reads: `$4210`(RDNMI)/`$4212`(HVBJOY) vblank
+  spins, `$4016-7`/`$4218-F` joypad, `$2140-3` APU handshake — the value a spin/branch keyed on.
+- **`ppumem`** — CGRAM (palette) + OAM (sprite) writes — the PPU memories `vram` doesn't cover.
+- **`frame`** — `nmi` / `vblank` boundary markers (attribute writes to NMI vs main thread).
+Every event carries a **monotonic `seq`** (survives the non-monotonic `$0088` clock), `hf` (host
+frame), `gf`, `fn`, last block PC, and the **live `mnow`/`xnow`/`S`/`DB`/`PB`** — so an m-flip, a
+stack drift (`S`), and a wrong data/program bank (`DB`/`PB`) are all visible on every line.
+`trace_slice.py` adds `--wram <lo-hi>` alongside `--vram`.
+- Enable + window (ALWAYS window — a full run is huge):
+  `AR_TRACE=/tmp/t.jsonl AR_TRACE_HF_LO=5089 AR_TRACE_HF_HI=5089` (host frames).
+- **`AR_TRACE_WATCH=<prefix>` — ALWAYS-ON anomaly capture (no window, no replay needed).** For deep
+  manual play where a replay is infeasible: keeps a rolling in-memory RING of the last N trace lines
+  and **auto-dumps `<prefix>_hf<frame>_<kind><n>.jsonl`** (the ring + the next `AR_TRACE_POST` lines)
+  the instant an anomaly fires — a **dispatch-miss with S<$0200** (the tripwire-hidden RTS-trick
+  class), a **garbage-variant**, or an **m/x leak**; the **watchdog** also flushes the ring on a
+  hang. Dedups per anomaly. Lean default channels (func/call/dispmiss/garbage/frame/vmadd/reg);
+  widen with `AR_TRACE_CH`. Knobs: `AR_TRACE_RING` (default 4096), `AR_TRACE_POST` (default 400).
+  Just play with it on; when something breaks, the window is already on disk → `trace_slice.py
+  <dump> --diagnose`.
+- Narrow: `AR_TRACE_CH=func,vram,vmadd` · `AR_TRACE_VLO/VHI` (vram word-addr) · `AR_TRACE_FUNC=<sub>`.
+- Slice locally with **`tools/trace_slice.py t.jsonl`**: `--summary` (reports m/x LEAKS by site) ·
+  `--leaks` (the m-leak boundary — the misdecode finder) · `--misdecodes` · `--vmadd` ·
+  `--vram 0000-00ff` (who wrote it) · `--fn 8053` · `--around <seq> --window N` (causal neighbours —
+  e.g. VMADD=$0000 at seq N immediately followed by the junk writes at N+1…).
+- **The lair-seal in one run:** `AR_TRACE_CH=call,vmadd,vram` then `--leaks` → the leak surfaces at
+  `$8053` sites `$80BF/$80C2/$80C5` (m=1, expected m=0); the previous clean call `$80BC` calls
+  `$9D4D` → `$9D4D` is the ambiguous-exit culprit. Fix = `exit_mx_at 039D4D 0 0`.
+- Choke points live in `ar_trace.c`/`.h` (build list `runner.cmake`), wired at `ar_entry_mx_check`
+  (`cpu_state.h`, always-on — the `SNESRECOMP_TRACE` cpu_trace hooks are OFF in the fast build),
+  ppu `WriteReg`/`$2139`, `WriteVramWord` (`common_rtl.c`), `dma_startDma`.
+- Caveat: the `func` `misdecode` flag only catches **entry-variant** mismatches (runtime m/x ≠ the
+  variant's expected). An INTERNAL m-flip after a clean entry (the lair-seal case: `$8053` enters
+  m=1 legitimately, an internal REP fails to bring m→0 by `$80C9`) won't flag on `func` — but the
+  `vmadd`/`vram` channels catch the *consequence* (VMADD=`$0000`, junk write) directly.
 
 ### Standard misdecode/m-leak pipeline
 `AR_MXHIST` (locate the leak boundary) → `AR_DISPMISSALL | grep -v 00896f` (name the missed
@@ -905,6 +1053,70 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
       names exactly which sites to watch.** Sites it flags uncovered in bank 03 as of
       2026-07-04: `$CDAC`/`$CE56` (RAM-ptr from `$9220`) and `$F97C`/`$F989` (RAM-ptr
       from `$030004,X`) — not yet traced to a subsystem/repro.
+
+14. **Town people (dev-cycle walkers AND the church-cutscene pair) spawn but never MOVE —
+    a missing ACTOR-SCRIPT-COMMAND dispatch.** *(FIXED + user-confirmed 2026-07-04.)* This
+    was the last layer of the town-people bug and a different mechanism than §13's dispatch
+    web — zero garbage-variant / dispatch-miss, so NOT a decode or found:0 problem; a pure
+    behavior-state stall. Full trace chain (reusable for any "actor exists but is frozen"):
+    - Actors spawn fine (status `4→8`), but the recomp HIDES them ~22 frames later while the
+      oracle holds them ~238 frames — the actor's walk *animation is racing ~17x too fast*, so
+      "development" completes almost instantly and retires the people before they visibly move.
+    - `AR_WATCHOBJ=<recordbase>` named the per-frame processor: the actor's behavior state
+      (`record+$12`, e.g. `$0E14`) selects a handler via the `$D04E` dispatch
+      (`$01:CD0C: LDY #$CD12; BRL $D04E`, table `$CD12`): state 0 → `CD22` (PACED, `JSR $AC70`
+      decrements the pacing timer), state 1 → `CD35` (UNPACED, advances the walk script every
+      frame). The recomp was **stuck in state 1** — `$0E14` never advanced to 3 (`CEFA`, the
+      real paced walk), so it raced.
+    - `AR_SIMWALK` (block probe on `$01:CD41`/`$CD5E`) showed `CD35` reads a script byte via
+      `CFC7` (from a `$7F:xxxx` stream), and for a non-`$7F` byte dispatches it through table
+      `$CD6F` (`$CD5E: LDY #$CD6B; PHY; PHX; ASL; TAX; LDA $01CD6F,X; PLX; PHA; RTS`). Byte 3's
+      handler `$CDCC` sets `$001E,X` (walk counter) + `LDA #$3; STA $0012,X` (state=3). But
+      `find_rts_webs.py` had flagged `PHA;RTS @01:cd6b` UNCOVERED, and the handlers `$CDCC`
+      etc. had **0 emitted blocks** — so the dispatch silently no-op'd and state=3 never wrote.
+    - Fix: `indirect_dispatch CD6A 18 idx:A tables:CD6F ret:CD6C` (bank01.cfg) — same idx:A /
+      PHX-PLX / ret shape as `B8C0`. People now walk.
+    - **Two lessons:** (1) a frozen-but-spawned actor whose per-frame processor DOES run but
+      the state never advances = look for a script-command dispatch the state-machine needs;
+      the script is byte-stereotyped so `find_rts_webs.py` finds it. (2) The engine's animation
+      pacing is data-driven per-script-step, NOT a fixed delay — the "17x too fast" was the
+      whole script being consumed at 1 byte/frame instead of honoring per-step delays that the
+      script-command handlers install. Tools added: `AR_SIMWALK`, `AR_SIMDEV2`.
+
+15. **Sim-mode lair-seal graphics corruption — FIXED 2026-07-05** (`func bank_03_9D8E 9D8E
+    entry_mx:1,0` in bank03.cfg; user-confirmed). Symptom: sealing a lair garbled a broad set of
+    shared BG1 tiles (map edges/rock, trees, river, lair, TEXT-BOX borders); persistent.
+    **Root cause: an unregistered RTS-trick CONTINUATION.** `$03:8053` calls the actor dispatcher
+    `$03:9D4D` at `$80BC` and must get m=0 back. `9D4D` is a table loop (`SEP #$20`; per entry
+    `BPL $9D8E` to loop-continue, else `LDY #$9D8D; PHY; BRL <handler→$A4F7>` — PUSH return `$9D8D`,
+    branch to handler which RTSes back to **`$9D8E`** to resume the loop; the loop ends `REP #$20;
+    RTS` at `$9D9C/E` returning m=0). The decoder mis-read the `BRL`→`$A4F7` as a "tail-call past
+    end", so the handler's RTS to `$9D8E` hit **no registered entry → host-unwind → returned to
+    `$8053` at m=1**. Then `$8053`'s upload setup at `$80C9` (`A9 00 60` = LDA #$6000; STA $2116)
+    ran at m=1 → LDA loaded only `$00` → **VMADD=`$0000` not `$6000`** → the `$8100` loop uploaded
+    the tilemap's tile-INDICES into BG1 char VRAM `$0000` (`bgTileAdr=$0500`) = garbage tiles.
+    ROM decode of `$80C9` proved it is coherent ONLY at m=0 → hardware's `9D4D` loop MUST complete
+    to its m=0 RTS. **Fix:** register `$9D8E` as a dispatch target at its runtime width (m=1 after
+    the SEP, x=0) so the handler RTS resumes the loop.
+    **WATCH OUT — two false starts on this bug (both now guarded):**
+    (a) `exit_mx_at 039D4D 0 0` was tried FIRST and did **nothing** — `exit_mx_at` steers only
+    *decode-time* m; here the decode was already correct (m=0) and the leak was a *runtime*
+    host-unwind. **An m/x leak is NOT automatically an exit-mx bug** — see the §1 decision tree.
+    (b) The `[dispatch-miss]` stderr tripwire **hid** the root event because it gates on `S>=$0200`
+    and this miss had `S=$01F2`; the ungated `AR_TRACE dispmiss` channel (`03A590 -> 039D8E`) is
+    what found it. `tools/find_tailcall_past_end.py` flags the `9D4D→A4F7 ×7` fingerprint statically
+    (and a whole `→$9FCD` sibling family — likely the same class, watch for missing-actor bugs).
+    **The trap that cost ~10 runs on the *background* half (now permanently solved — see `AR_TRACE`):**
+    the tilemap indices reach VRAM via the per-frame `AF3D` DMA whose source buffer `$7F:BB00` was
+    filled by `BAF5`'s `$2139` readback of the (already-corrupt) VRAM `$0000` — a self-copy loop that
+    PERPETUATES but doesn't inject. The injecting writes used atomic 16-bit `STA $2118` →
+    `WriteRegWord`/`WriteVramWord` → direct `ppu->vram[]`, which
+    **bypasses the `$2118`/`$2119` byte handlers** every VRAM watch hooked, so byte-level watches
+    (`AR_VRAMWATCH`, ppu case `0x18`) never saw it. Also the game-frame `$0088` clock is
+    NON-MONOTONIC near cutscenes → gate probes on **host frame** (`snes_frame_counter`), not `$0088`.
+    Repro: `saves/lairseal.rec` (corrupt onset host-frame ~5089). Oracle still blocked (can't seed
+    snes9x from a coroutine savestate; `AR_LOADSTATE` renders state but logic won't advance — the
+    coroutine host-stack isn't restorable). Found in ONE run with `AR_TRACE` (below).
 ---
 
 ## 8. Build & regen workflow
@@ -1624,7 +1836,11 @@ find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long for
 find_rts_webs.py       static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
 AR_RTSDISP_MISS=1      names any continuation a `rts_dispatch` list doesn't cover (site + popped target); benign JSR-return fall-throughs also print — check the popped value before adding a mapping
 AR_GARBAGE_HIST=<n>    garbage-trap block-ring depth (default 24, max 1000) incl. per-block S — 1000 spans a whole sim frame; how the dev-cycle m-leak origin was found (§7.13)
-AR_SIMDEV=1            dev-cycle gate-branch probe (cpu_trace.h; retarget its PC list per hunt — the reusable "which branch fired" pattern)
+AR_SIMDEV=1 / AR_SIMDEV2=1   dev-cycle gate-branch probes (cpu_trace.h; retarget the PC list per hunt — the reusable "which branch fired" pattern)
+AR_SIMWALK=1           town-actor script executor: script byte + behavior state ($+12) + script ptr ($+16) at $01:CD41/$CD5E — "actor spawns but is frozen" (§7.14)
+AR_VRAMWATCH=1         BG-tilemap VRAM-write tracer: who writes a VRAM region + game func, gated AR_VW_LO/HI (game-frame) + AR_VW_VLO/VHI (vram addr) — graphics-corruption hunts (§7.15)
+AR_LAIRDMA=1           logs each VRAM-targeting DMA's source ($7E/$7F buffer + first bytes) + dest + size (dma.c) — finds the garbage tilemap/tile-gfx SOURCE behind a corrupt strip (§7.15)
+AR_LOADSTATE=<slot>    boot-time savestate load (main.c). CAVEAT: renders the state but game LOGIC won't advance (coroutine host-stack not restored) — not usable to resume/instrument from a captured moment
 AR_AUDIODBG=1          DSP health: mvol/mute/output peak/SPC cyc-per-ms/pending KON  (peak=0 = silence GENERATED, not a device problem)
 AR_KONLOG=1            DSP key-on writes + per-voice state at key-on (vol/pitch/ADSR/BRR first-bytes — all-zero BRR = samples never uploaded, §7.11)
 AR_APULOG=1            APU port traffic + SPC upload blocks (+ stage2 sample-chunk streaming)

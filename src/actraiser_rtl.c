@@ -439,6 +439,8 @@ void RunOneFrameOfGame(void) {
 
   ActRaiser_ApplyCheats();   /* host-side cheats (env-gated, default off) */
 
+  { extern int ar_trace_active(void); extern void ar_trace_frame(const char *);
+    if (ar_trace_active()) ar_trace_frame("vblank"); }  /* frame boundary marker */
   g_snes->forceNmi = true;
   g_snes->nmiAvail = true;   /* fresh RDNMI ($4210 bit7) vblank token this frame */
   swapcontext(&g_host_ctx, &g_game_ctx);
@@ -455,6 +457,8 @@ void RunOneFrameOfGame(void) {
     ActRaiser_SaveRegs(&g_cpu, &snap);
     cpu_push_interrupt_frame(&g_cpu);
     g_ar_in_interrupt = 1;
+    { extern int ar_trace_active(void); extern void ar_trace_frame(const char *);
+      if (ar_trace_active()) ar_trace_frame("nmi"); }
     NmiHandler_M1X1(&g_cpu);
     g_ar_in_interrupt = 0;
     ActRaiser_RestoreRegs(&g_cpu, &snap);

@@ -435,6 +435,67 @@ The population thresholds at `$021C` and the step table at `$03:8A7E` are the ob
 balance/mod knobs. Every layer of this is pushed-continuation RTS dispatch — cfg model
 notes (why `rts_dispatch`, not `func`) live in bank03.cfg comments + DEBUG.md §7.13.
 
+### 6. Town actor behavior + animation system (bank $01, mapped 2026-07-04)
+
+The people/builders/effect sprites (dev-cycle walkers, church-cutscene pair, etc.) are
+tier-2 actor records (`$0E02`+, stride `$26`). Their per-frame life-cycle is a small
+data-driven VM:
+
+- **Behavior-state dispatch** — `$01:CD0C` (`LDY #$CD12; BRL $D04E`) selects the per-frame
+  handler by the actor's state field `record+$12` via the `$D04E` PHA/RTS dispatcher. Table
+  `$01:CD12`: state 0 → `CD22` (spawn/idle, *paced*), 1 → `CD35` (walk-script executor,
+  *unpaced advance*), 2 → `CEEB`, 3 → `CEFA` (paced walk), 4-6 → `CF09`, 7 → `CFAA`.
+- **The animation SCRIPT** — each actor walks a byte stream at `$7F:xxxx` (pointer in
+  `record+$16`). `$01:CFC7` reads one byte per tick, gated by a per-actor delay so a step can
+  hold for N frames (this is what paces the walk — it is NOT a fixed frame rate). `CD35` then
+  dispatches a non-`$7F` byte through table **`$01:CD6F`** (18 command handlers `$CD93..$CEE5`,
+  RTS at `$CD6B`, ret continuation `$CD6C` → `BRL $AC70`): byte handlers set position,
+  advance the behavior state (`$CDCC` etc. do `LDA #$3; STA $0012,X` → enter the paced walk),
+  install delays, spawn OAM, etc. A `$7F` byte is the segment-end command.
+- **cfg:** the `$CD6F` dispatch needs `indirect_dispatch CD6A 18 idx:A tables:CD6F ret:CD6C`
+  (bank01.cfg). Without it the handlers are undecoded and the actor spawns but never advances
+  its state → frozen sprite. See DEBUG.md §7.14.
+- **Decomp seam:** table `$CD6F` = the "actor script opcode table"; the `$7F` byte streams are
+  the per-actor animation programs. A future editor edits the streams; the 18 handlers are the
+  opcode implementations (`actor_vm.c`).
+
+---
+
+## Sim-mode town-map GRAPHICS pipeline (VRAM seam, mapped 2026-07-05)
+
+The town map reaches the PPU through two WRAM→VRAM DMAs — **the seam an HD/replacement tile
+backend hooks**:
+
+| What | WRAM source | VRAM dest | DMA'd by | Notes |
+|---|---|---|---|---|
+| BG tilemap (32×32 tile-index grid) | `$7F:1000` | VRAM `$6800` | `bank_02_AEBB` | full-map upload, size $800 words; the map's tile *layout* |
+| Animated tile GRAPHICS (bitplanes) | `$7F:BA00` | VRAM `$0000` | `bank_02_AF3D`/`AF42` | column-stride mode-1 DMA (`$2116` dest = `$D3`, src `$D2:$D0`, size `$D5`); the tile *pixels* for animated/scrolled tiles |
+
+The `$7F:1000` tilemap buffer is built from town map data; `$7F:BA00` holds
+decompressed/animated tile character data (written by `bank_02_BAF5`). A modern backend can
+intercept at either the WRAM buffer (replace tile indices / graphics) or the DMA (redirect to
+a hi-res path).
+
+**Confirmed BG register layout for the sim town map** (2026-07-05, `AR_TRACE reg` channel):
+`bgmode=$09` (mode 1, BG3 priority), `bgTileAdr=$0500` → **BG1 char/tiles base = VRAM `$0000`**,
+BG3 char base `$5000`; `bgXsc=[$63,$73,$58,$00]` → BG1 map `$6000`, BG2 map `$7000`, BG3 map `$5800`.
+So BG1 (the town playfield) reads its **graphics from `$0000`** and its **tilemap from `$6000`** —
+this is the layer a replacement-tile HAL must match.
+
+**The sim-mode graphics-upload orchestrator is `bank_03_8053`** (called from the master loop). It
+sets `$2116` and streams: the town **tilemap → VRAM `$6000`** (its `$8100` byte-copy loop, source
+`[DB:$0000]`) and **tile graphics → VRAM `$0000`** via the upload primitive **`bank_02_B28E`→`B6C8`**
+(reads ROM `$05:8000`, byte-extract `& $FF`). **`bank_02_BAF5`** is the inverse — a VRAM→WRAM
+*readback* (save) of `$0000` through the `$2139` read port into `$7F:B800`, later re-DMA'd back;
+this save/restore loop *perpetuates* whatever is in `$0000` frame-to-frame.
+
+**Lair-seal corruption — ROOT-CAUSED (DEBUG.md §7.15, fix `exit_mx_at 039D4D 0 0`):** it was not a
+graphics-pipeline bug at all — `bank_03_8053` ran its `LDA #$6000; STA $2116` at m=1 (an exit-mx
+leak from `$9D4D`), so the tilemap upload's VMADD truncated to `$0000` and dumped tilemap indices
+into BG1's *character* VRAM. Lesson for this seam: a "graphics corruption" here can originate in the
+**m/x width** of the upload's address setup, not in the tile data — check `AR_TRACE --vmadd/--leaks`
+before suspecting the buffers.
+
 ---
 
 ## Frame / timing  (mostly already HLE'd — the model is understood)
@@ -444,6 +505,53 @@ notes (why `rts_dispatch`, not `func`) live in bank03.cfg comments + DEBUG.md §
 | VBlank wait | `$00:8418`, `$02:A85E` (HLE → `ActRaiser_WaitForVblank`); `$01:9284` (inline) | RDNMI `$4210` | "wait one frame" | RDNMI modeled as once-per-frame token; inline waits spin-detected (`snes.c`) | 🟢 |
 | NMI handler | `$8520` (`NmiHandler`) | NMI | "per-frame vblank service" | game frame `$0088` bumped here | 🟢 |
 | Frame coroutine | `RunOneFrameOfGame` (`actraiser_rtl.c`) | — | host frame ↔ game frame mapping | coroutine yields at vblank-wait | 🟢 |
+
+---
+
+## Frame-rate decoupling — high-refresh presentation WITHOUT changing pacing (forward-looking seam map)
+
+**The hard constraint first.** ActRaiser's entire notion of time is the **60 Hz (NTSC) logic tick**:
+every timer, event trigger, physics step, animation-script advance, and the `$0088` game-frame
+counter is keyed to one tick == one `NmiHandler` == one `RunOneFrameOfGame`. You therefore **cannot
+speed up the logic** to get smoothness — that *is* the pacing. The only correct way to a higher
+refresh rate is the classic **fixed-timestep logic + interpolated presentation** split: keep ticking
+logic at exactly 60 Hz, and render *extra, interpolated* frames between ticks at the monitor's rate.
+
+**The tick boundary (the seam you must preserve).** `RunOneFrameOfGame` = one atomic 60 Hz logic
+tick (host yields to the game coroutine, which runs until its next vblank-wait, then NMI services
+the frame). The `AR_TRACE` **`frame`** channel marks both edges (`vblank` = tick about to run,
+`nmi` = tick serviced) — use it to *verify the tick cadence is clean* before building on it (a mode
+that yields N times per tick — the 1/N-speed pacing-bug class, DEBUG.md §7.12/§7.13 — would break a
+naïve accumulator; those must be fixed first).
+
+**The presentable-state seams to interpolate** (all live in `g_ppu`, read by `RtlDrawPpuFrame` →
+`g_pixels`; snapshot each at tick N-1 and N, lerp for in-between presents), in order of visible payoff:
+
+| Seam | PPU state | Registers | Payoff | Caveats |
+|---|---|---|---|---|
+| **Sprite positions** | `ppu->oam[]` (rebuilt each tick by `bank_01_ACD9`/`ADAD`, §"per-frame OAM rebuild") | OAM via `$2104` | Biggest — smooth moving characters/enemies/effects | Must match sprites across ticks by slot/id; **snap (don't lerp) on spawn/despawn/teleport** (large Δ) or you smear |
+| **BG scroll** | `ppu->hScroll[layer]` / `ppu->vScroll[layer]` | BGnHOFS/VOFS `$210D-$2114` | Smooth scrolling of the action-stage playfield | Per-layer; parallax layers scroll at different rates — lerp each independently |
+| **Mode 7 matrix** | `ppu->m7matrix[0..7]` (`[6]/[7]`=scroll, `[4]/[5]`=center) | `$211B-$2120` | Smooth act→sim spiral + overworld map rotate/zoom | Interpolate the matrix, not the projected pixels |
+| **Palette fades** | `ppu->cgram[]` | CGDATA `$2122` | Smooth fades (act-entry, INIDISP brightness ramps) | Lower priority; lerp in RGB, watch for wrap |
+
+**Do NOT interpolate** (discrete — interpolating blurs/garbles): VRAM tile graphics, tilemap
+indices, and anything the game *logic* reads. HUD/text layers usually look fine snapped — consider
+interpolating world BG layers + sprites only.
+
+**Where the hooks go.** The present loop is `src/main.c` (`RtlDrawPpuFrame` → `SDL_UpdateTexture`
+→ `SDL_RenderCopy` → `SDL_RenderPresent`, ~line 737-781). The staged plan:
+1. **Present-rate decouple (free, low-risk):** drive an accumulator so `RunOneFrameOfGame` fires at
+   a fixed 60 Hz while `SDL_RenderPresent` runs at monitor Hz (vsync). No interpolation yet — just
+   removes host-frame/logic-frame judder and validates the fixed-timestep loop. `AR_PACE`/`AR_PERF`
+   already prove the 60 Hz cadence is separable from present.
+2. **Sprite (OAM) interpolation** — snapshot OAM each tick, lerp positions, render the interpolated
+   OAM for in-between presents. Biggest win.
+3. **BG scroll interpolation** — the scrolling stages.
+4. **Mode 7 + palette** — the sim overworld and fades.
+
+Each phase re-runs the PPU rasteriser (`RtlDrawPpuFrame`) with the interpolated `g_ppu` fields
+temporarily swapped in, then restores the true tick-N state so logic is never perturbed. The whole
+scheme is **presentation-only**: `$0088`, timers, and logic never see the extra frames.
 
 ---
 

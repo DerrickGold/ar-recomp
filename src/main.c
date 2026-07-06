@@ -206,6 +206,47 @@ static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
     if ((long)gf == dump_at_gf) { FILE *gf_f = fopen("saves/recomp_at.bin", "wb");
       if (gf_f) { fwrite(wram, 1, 0x20000, gf_f); fclose(gf_f);
         fprintf(stderr, "[dump-at-gf] gf=%u -> recomp_at.bin\n", gf); } } }
+  /* AR_VRAMDUMP_GF=g1,g2,...: headless FULL snapshot (WRAM+VRAM+CGRAM+OAM) at
+   * each listed game-frame, from a single replay run. This is the recomp-internal
+   * VRAM diff engine for the lair-seal corruption: capture a clean pre-seal frame
+   * and the corrupt frame in ONE run, then diff the .vram.bin files — no
+   * scene-divergence or scratch-noise confound (unlike the snes9x oracle).
+   * Writes saves/snapshots/vd_gf<N>.{wram,vram,cgram,oam}.bin. */
+  {
+    static const char *vd_list = (const char *)-1;
+    if (vd_list == (const char *)-1) vd_list = getenv("AR_VRAMDUMP_GF");
+    if (vd_list && vd_list[0]) {
+      unsigned gf = (unsigned)wram[0x88] | ((unsigned)wram[0x89] << 8);
+      /* scan the comma list for a match; dump once per frame value */
+      const char *p = vd_list;
+      while (*p) {
+        unsigned want = (unsigned)strtoul(p, NULL, 0);
+        if (want == gf) {
+          static unsigned last_dumped = 0xffffffffu;
+          if (gf != last_dumped) {
+            last_dumped = gf;
+#ifndef _WIN32
+            mkdir("saves", 0755); mkdir("saves/snapshots", 0755);
+#endif
+            extern void ActRaiser_FullSnapshot(const char *prefix);
+            char pfx[80];
+            snprintf(pfx, sizeof pfx, "saves/snapshots/vd_gf%u", gf);
+            ActRaiser_FullSnapshot(pfx);
+            { extern Ppu *g_ppu;
+              if (g_ppu) fprintf(stderr, "[ppureg] gf=%u bgmode=$%02x bgsc=[%02x %02x %02x %02x] bgTileAdr=$%04x\n",
+                gf, g_ppu->bgmode, g_ppu->bgXsc[0], g_ppu->bgXsc[1],
+                g_ppu->bgXsc[2], g_ppu->bgXsc[3], g_ppu->bgTileAdr); }
+            fprintf(stderr, "[vramdump] gf=%u -> %s.{wram,vram,cgram,oam}.bin\n",
+                    gf, pfx);
+          }
+          break;
+        }
+        const char *comma = strchr(p, ',');
+        if (!comma) break;
+        p = comma + 1;
+      }
+    }
+  }
   /* AR_MX_OUT=<file>: per-game-frame CPU m/x capture for the snes9x CPU-flag
    * oracle (tools/oracle/diff_mx.py). Emits "gframe m x" from the SNES cpu state
    * at the frame-end yield, compared against snesref's SNESREF_MX_OUT (read from
@@ -245,7 +286,8 @@ static void WramTraceInit(void) {
   const char *path = getenv("AR_WRAM_TRACE");
   /* AR_DUMP_ACT / AR_DUMP_AT_GF / AR_MX_OUT alone also need the callback. */
   if ((!path || !path[0]) &&
-      (getenv("AR_DUMP_ACT") || getenv("AR_DUMP_AT_GF") || getenv("AR_MX_OUT"))) {
+      (getenv("AR_DUMP_ACT") || getenv("AR_DUMP_AT_GF") || getenv("AR_MX_OUT") ||
+       getenv("AR_VRAMDUMP_GF"))) {
     g_framedump_callback = WramTraceCallback;
     return;
   }
@@ -438,6 +480,18 @@ int main(int argc, char **argv) {
   }
 
   mkdir("saves", 0755);
+
+  /* AR_LOADSTATE=<slot>: load a savestate at boot (before the main loop), so a
+   * headless/instrumented run can start from a captured moment instead of
+   * replaying from power-on. Runs a few frames first so the game reaches a
+   * stable frame boundary, then loads — matches the F7 hotkey path. */
+  { const char *ls = getenv("AR_LOADSTATE");
+    if (ls && ls[0]) {
+      int slot = atoi(ls);
+      for (int i = 0; i < 4; i++) { RtlApuLock(); RtlRunFrame(0); RtlApuUnlock(); }
+      RtlSaveLoad(kSaveLoad_Load, slot);
+      fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
+    } }
 
   bool running = true;
   uint32 last_tick = SDL_GetTicks();
