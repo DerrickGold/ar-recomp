@@ -627,6 +627,74 @@ the broken post-act sim cascade. Observed: Fillmore act 1 entry = `$1B=01,$1A=01
 
 ---
 
+## Object & spawn-handler model (moved from DEBUG.md §11, 2026-07-06)
+
+The most common in-level crash/freeze class (§7.6) comes from this system, so it's worth knowing.
+
+### Object table
+- Base **`$06A0`**, stride **`$40`**, and it has **more than 24 slots** — active objects appear at
+  least through slot ~49 (`$12E0`); the Fillmore bridge segments live in slots 36–49. `AR_OBJLOG`
+  only scans 24 — **scan ≥64 slots** when hunting a missing/late object.
+- Per-slot fields (offset from slot base): `+$00` **status word** (high bits `0x4000`/`0x8000` set
+  ⇒ inactive/free), `+$02` X (16-bit world), `+$04` Y, `+$12` **handler pointer** (`$12` — the main
+  per-frame dispatch target), `+$14` **secondary handler** (field `$14`), `+$16/$18/$28/$30` spawn
+  params, `+$30` flags (e.g. bit `0x0400`), `+$34/$36` spawn-X/Y source, `+$1E` nested-dispatch
+  resume handler. Player = slot 8 (`$08A0`). Game-frame = `$0088/$0089` (16-bit).
+
+### Dispatch
+- The **`$8915` object loop** iterates slots, dispatching each active object's `$12` via push-RTS
+  (`$895C: LDA $12,X; DEC; PHA; RTS`); the handler's RTS lands at the `$8966` continuation; the
+  loop exits at `$896E` (`PLP; RTS`, restoring M). `$896F` returns to the per-frame update routines
+  `$8078`/`$80B4` — those `->008078/->0080b4 from 00896f` "dispatch misses" happen **every frame
+  and are normal** (filter them out).
+- Nested dispatch `$8664: LDA $1E,X; PHA; RTS` runs the field-`$1E` secondary handler.
+- **`JSR $8657` / `$8668` / `$8669`** = coroutine yields: each stores its own return address as the
+  object's `$1E` resume handler and dispatches it (`$8669` also takes a param in A → field `$38`) —
+  so **the instruction right after each such `JSR` is itself a handler entry**, resumed next frame
+  via the nested `$1E` dispatch (`$8664`/`$868F`). These form chains. `find_handler_chain.py
+  --all-yields` (§5) closes the whole class. A miss on one of these (`->… from 00868f`) leaks m=0 →
+  `B127` misdecode → `B90D` crash.
+
+### Per-level handler tables + spawn dispatcher
+- Spawn dispatcher **`$9557`** reads game-mode `$18` (act index) → indexes the 8-pointer list at
+  **`$95DD`** → that act's **handler table**:
+
+  | act table | `$96AF` | `$A8F6` | `$B449` | `$C11E` | `$CD9B` | `$D928` | `$E722` | `$F39A` |
+  |---|---|---|---|---|---|---|---|---|
+  | (Fillmore = `$A8F6`) |
+
+- Each table is indexed by **object type** → a **record base `B`**. The dispatcher (`$95ED`) then:
+  copies spawn X/Y (`$34/$36`→`$02/$04`); reads record params (`rec[0]→$16`, `rec[2]→$18/$28`,
+  `rec[4]→$30`, **`rec[0x0A]→$14`**); and sets the handler:
+  - normal object: **`$12 = B + 0x0C`** (always an init `JSR`); after the one-time init the
+    steady-state handler is **`B + 0x0F`**.
+  - special (`field $38 == $FF`): `$12 = B` directly.
+
+### Why handlers go unconverted (the crash class)
+- All 209 `B+0x0C` init handlers are statically reachable from the tables → converted.
+- **`B+0x0F`** (steady state) and **field-`$14`** secondary handlers are reached *only* by runtime
+  dispatch → the static decoder never converts them → dispatch miss → m-leak/misdecode → crash.
+- The computed values (e.g. `$AC11 = $AC0E+3`) **never appear as literal bytes** in the ROM, so
+  byte/pointer scans can't find them — only the table-derivation or a runtime snapshot can.
+
+### Deriving them (the anti-whack-a-mole)
+- `tools/find_handler_chain.py --tables` walks all 8 tables, emits each JSR-gated `B+0x0F` and
+  follows its `JSR $8657` chains → `func` lines for every unconverted handler, all acts at once.
+- **Field-`$14` secondary handlers** (`rec[0x0A]`, e.g. the bridge's `$ACEA`) are *polymorphic* — a
+  handler for some object types, plain data (counter/coord/velocity) for others — so they can't be
+  derived by value. `find_handler_chain.py --field14` handles them via the data signature instead
+  (drop consecutive-address clusters + require handler-shaped coherent decode); it deliberately
+  skips ambiguous (`COP`/`BNE`/`BRK`-led) values, which fall back to runtime discovery.
+
+**Coverage:** the three modes together — `--tables` (`B+0x0C/+0x0F`), `--all-yields` (the three
+yield helpers' continuations), `--field14` — cover all three handler-reach mechanisms. The only
+thing left for the per-occurrence loop (F2 snapshot → object-table scan → `find_handler_chain.py
+<seed>`) is a value the `--field14` heuristic conservatively skipped.
+
+---
+
+---
+
 ## Gameplay / Tunable seams  (cheats, rebalance, mods)
 
 A second class of seam: the **value-clamp and mechanic-intercept points** where game logic reads/
