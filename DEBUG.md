@@ -407,38 +407,6 @@ ring shows the routine draining the stack. Use for stack-corruption crashes. (Re
 rule 3: high `S` is often a legit relocation — the underflow + `[dispatch-miss]` are the real
 signals.)
 
-### `AR_SIMTRACE=1` — sim-mode per-frame dispatch path watcher  *(2026-07-01, targeted probe)*
-In `cpu_trace_block` (`cpu_trace.h`). Watches which of bank 0's sim-mode dispatch branch targets
-executes each frame: `$008125` (skip the rest of the per-frame update — everything downstream of
-the `$01:8000` building/icon call gets bypassed), `$0080F6` (continue — full per-frame update
-runs), `$008066` (the action-stage path — should never fire while `$18==0`), `$0080E5` (sim-dispatch
-entry, confirms the outer `$18` gate is even reached). Logs `[simtrace] gf=.. f=.. pc=$.. <tag>
-A=.. X=..`, capped at 600 hits. Added to chase a sim-mode freeze where nearly all of WRAM stopped
-changing frame-to-frame (F2 snapshot diff showed only 11 bytes changing over 545 frames) despite
-the menu/save subsystems still working — i.e. the *movement/object-update* path specifically, not
-a global hang. Pair with the `AR_FRAMELOG` joypad field (below) to see whether input is even
-reaching this code when the skip path fires.
-
-> **Update (2026-07-01):** the sim-mode freeze this probe was built for was NOT actually caused by
-> the `$018000` skip gate — a static trace of `$018000` predicted (correctly, confirmed via
-> `AR_SIMTRACE` itself) that it returns carry CLEAR under the observed conditions, so `$0080F6`
-> (continue) DOES run. (The graphics corruption chased here was later RESOLVED — the F5BE handler
-> subsystem, §10 case-study archive / §7.13.)
-
-### `AR_SAVECHECK=1` — save-data checksum gate outcome  *(2026-07-01, targeted probe)*
-In `cpu_trace_block` (`cpu_trace.h`). Watches which branch `bank_02_A622`'s save-validity gate
-(`$02A70D: BCC $A72F`) takes: `$02A72F` = checksum PASSED ("continue saved game" title-screen
-flow — 3 dialog messages, sets `$0336=1`), `$02A70F` = checksum FAILED ("no valid save / new game"
-flow — 2 messages, `$0336` untouched). Logs `[savecheck] gf=.. f=.. pc=$.. PASS/FAIL`. Neither
-branch is a crash handler — both are normal title-screen dialogs (see `docs/SEAMS.md` "Save /
-persistence" for the checksum algorithm and caller chain) — so a divergence here doesn't crash
-anything directly, but it does mean state ONE branch is responsible for setting up (like `$0336`)
-would be missing/wrong if the WRONG branch fires relative to what the save file represents. Used to
-rule out (2026-07-01 investigation: checksum correctly PASSED, so this was NOT the cause of that
-session's graphics corruption) a wrong-branch theory quickly rather than re-deriving the outcome
-from noisy DP-scratch history (`$0014-$0017` is shared with an unrelated subsystem — see the
-gotchas list in §0).
-
 ### `AR_STACKPROV=1` — stack pusher-provenance  *(tier two — the trace `stack` channel covers windowed pushes; this one maps pusher-PC per byte whole-run)*
 In `cpu_write8` (records) + the `[dispatch-miss]` site (reads), `cpu_state.c`. A shadow array
 (`g_stack_pusher[0x10000]`, `common_cpu_infra.c`) stamps, for each bank-0 stack byte, the recomp
@@ -1012,7 +980,10 @@ The full sim-mode bring-up arc narrative (2026-07-01→04) lives in
 Current crop (this debugging arc): `AR_B90D_CATCH`, `AR_B127_CATCH`, `AR_896E_CATCH`,
 `AR_8A3C_CATCH`, `AR_8664_CATCH`, `AR_STRACE`, `AR_EVTRACE`. Legacy from prior arcs:
 `AR_CALLTRACE(_GF)`, `AR_CTACTION`, `AR_FUNCLOG`, `AR_MLOG`, `AR_SPAWNLOG`, `AR_8966X(_GF)`,
-`AR_92CBLOG`, `AR_B127LOG`, `AR_DISP8465`, `AR_TRAP8465`, `AR_1EHIT`. Grep the source for
+`AR_92CBLOG`, `AR_B127LOG`, `AR_DISP8465`, `AR_TRAP8465`, `AR_1EHIT`, `AR_SIMTRACE` (4-PC
+sim-dispatch branch probe; the reusable "which branch fired" pattern — retarget the PC list in
+cpu_trace.h), `AR_SAVECHECK` (save-checksum gate PASS/FAIL; gate semantics documented in
+SEAMS "Save / persistence"). Grep the source for
 specifics if one looks relevant; otherwise ignore.
 
 ---
@@ -1059,8 +1030,6 @@ AR_DISPMISSALL=1       unregistered handler (grep -v 00896f)     (then register 
 AR_MXCHECK=1           emitter m/x analysis wrong on direct calls
 AR_WATCHOBJ=<addr>     who writes this object slot (also fires on indirect + DMA writes, tagged [wobj-ind]/[wobj-dma])
 AR_WATCH16=<val>       who writes this 16-bit value (also fires on indirect + DMA writes, tagged [watch16-ind]/[watch16-dma])
-AR_SIMTRACE=1          sim-mode dispatch: which branch fired this frame at a set of watched PCs (edit cpu_trace.h to retarget)
-AR_SAVECHECK=1         save-checksum gate outcome: PASS (continue) vs FAIL (new game) — see §2
 regen report           "PROVEN-EQUIVALENT VARIANT ROUTING" section: wrong-width dispatch routing, proven not guessed (§5)
 regen report           "JSR (abs,X) SUPPRESSED" / "Rejected JSR/JSL" / "DISPATCH TARGET SUPPRESSED" sections: silent-drop audit (§7.9)
 AR_PERF=1              once-per-second frame budget: fps / run-ms / gf-advance / apu-catchup — separates host-bound (fps<60) from pacing (fps=60 but game crawls). CAVEAT: gf is NMI-driven, always 1:1 — it can NOT detect the pacing class; use the ring trick below

@@ -346,3 +346,27 @@ if archaeology is ever needed. The distilled outcomes:
   writes (this lesson is now §0 gotcha material).
 - Methodology extracted into: §1 THE DEBUG LOOP, the m/x decision tree, §5 static tools
   (`find_rts_webs`, `find_yield_points`, `find_handler_chain`), and the AR_TRACE channels.
+
+---
+
+## Methodology learnings (wrong turns worth remembering)
+
+Process lessons folded out of statement-then-correction text elsewhere; the docs now state final
+truths, and the journey that earned them lives here.
+
+- **Flag symptoms are often stack symptoms.** The act→sim hang (§7.7 era) was framed for days as
+  an m/x "perfect storm"; the root was a 1-byte-per-call SNES stack leak — a shifted stack slot
+  makes `PLP` read garbage, so flag corruption appeared DOWNSTREAM of the real bug. Found by
+  per-instruction `S` tracing (`AR_STRACE`), not the oracle. When flags look haunted, check `S`
+  drift across calls first.
+- **A 4-PC branch probe beats re-deriving gate logic.** `AR_SIMTRACE` settled "does the sim
+  update run or get skipped?" in one run by tagging the four branch targets — after WRAM-history
+  analysis had gone in circles. The pattern (tag each candidate branch PC, run once) is the
+  cheap decisive form for any "which path fired" question; the trace `func`/`call` channels now
+  give it for free.
+- **Binary-outcome probes rule theories out fast.** `AR_SAVECHECK` killed the "wrong save-gate
+  branch" theory in one run (checksum PASSED). Cost: one env var. The alternative being pursued
+  was reconstructing the outcome from shared DP scratch history — noisy and slow.
+- **An oracle WRAM diff is address-sorted, not temporal.** The "322-write one-shot spawn burst"
+  spanning the stack page was call-chain residue in a snapshot diff, not a write sequence —
+  step-planning against it wasted a round (ledger §7.24-25 narrative).

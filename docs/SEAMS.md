@@ -117,12 +117,9 @@ $00810C  JSL $2BEFC; JSR $845F; JSL $38193; JSL $19193; JSR $88D6; JSL $2C206; J
 $008125  PLB; BRL $8059                ; back to the main loop (re-yields at the vblank wait)
 ```
 
-**Both `BCS $8125` gates were investigated and ruled out as the cause of the 2026-07-01
-graphics-corruption bug** — `AR_SIMTRACE` confirmed the sim-mode update runs to completion (neither
-skip fires) in the affected playthrough, and `$0019`'s real value never diverged from the oracle.
-The actual corruption is still open as of this writing; whoever picks it up next should look
-**downstream of `$008122`'s `JSR $8465`** (the last call before the frame's normal exit) or inside
-`$01:8000`'s own body, not at these two gates.
+**Both `BCS $8125` gates are ruled out as corruption sources** (`AR_SIMTRACE` confirmed the
+sim-mode update runs to completion; `$0019` matched the oracle). The 2026-07-01 corruption they
+were checked for was the `$03:F5BE` per-town handler subsystem, since fixed — bug-ledger §7.13.
 
 **`$01:8000`** (bank 1) is the sim-mode building/icon updater itself. Its own entry does a similar
 region-gated early-exit (`LDA $19; CMP #7`/`#8` at the top decides whether to even enter the deep
@@ -587,19 +584,10 @@ These RAM addresses recur across all the debugging; keep `ram-map.md` authoritat
 
 | Addr | Meaning |
 |---|---|
-| `$18` | mode / region: `00`=**intro/overworld AND sim mode both** (see correction below), `01`–`07`=action stage region N (Fillmore=`01`), `$20+`=transitions |
+| `$18` | mode / region: `00`=**intro/overworld AND sim mode both** (what distinguishes the two beyond `$18==0` is unidentified — the dispatcher `$00805F` branches to the sim handler whenever `$18==0`; check `$19` first), `01`–`07`=action stage region N (Fillmore=`01`), `$20+`=transitions |
 | `$19` | sub-mode (act within region — act 1 vs 2 in action stages; region/sub-flow selector in sim mode, e.g. region `9` branches to a separate sim sub-flow at `$008129`) |
 | `$1A`/`$1B` | transition **destination** (`$1B`→`$18`, `$1A`→`$19`, applied by the mode-switch `$00:8269`) |
 | `$FB` | bit `0x80` = transition-request flag (set with `$1A`/`$1B` to stage a mode change; game consumes+clears it) |
-
-> **Correction (2026-07-01):** the `08`=sim mapping above was never actually observed — real captures
-> during confirmed sim-mode play consistently show `$18==0`. `ResetHandler`'s own dispatch (`$00805F:
-> LDA $18; BNE $8066 [action]; BRL $80E5 [sim-mode dispatcher]`) branches to the sim-mode handler
-> specifically WHEN `$18==0`, which is the actual ground truth this table should have reflected —
-> `$18==0` is a shared bucket for BOTH intro/overworld AND sim mode; something else (not yet
-> identified — check `$19` or another byte first) must distinguish which of those two the game is
-> actually in. Don't trust old assumptions about this byte without re-verifying against a live
-> capture; see the sim-mode dispatch structure section above for the actual branch logic.
 
 **Level warp** (`ActRaiser_Warp`, F6 hotkey, `AR_WARP=<reghex><acthex>` e.g. `0202`): stages the
 game's own sim→act transition — sets `$1B`=region, `$1A`=act, `$FB|=0x80` — so the game does the
@@ -759,7 +747,7 @@ renamed in the cfg (see below); this is the candidate list.
 | `$00:8526`/`852F` | COP / BRK syscall entry (audio events) |
 | `$00:9557` | spawn dispatcher (reads `$18`, indexes per-act handler table at `$95DD`) |
 | `$03:9156` | **act→sim transition handler dispatcher** (relocates stack to `$1FFF`, RTS-trick chain through `$9B22`/`$9B4A`/`$9195`) |
-| `$03:8053` | **enter-sim SETUP** (runs on ANY entry to `$18=00`, incl. act→sim AND a warp to `$18=00`). Sequence of `JSR`s (`$9156` [fixed], `$AC8E`, …) → `$8193` → `$C147` → `$B20C`/`$B21F`. **ROOT-CAUSED + FIXED (2026-06-26):** the act→sim cascade was NOT an m/x flag-drift (the §0 "perfect storm" framing was a red herring) — it was a **1-byte SNES-stack-pointer leak** from one unconverted jump-table RTS-trick, `$01:B898` `$B8C0: LDA $01B8D0,X; PHA; RTS` (call-with-return to `$B8C2`). The −1/call ratcheted `S` up over `$B20C`'s `JSR $B21F` loop → over-pop → hang; the "x-leak" was a downstream `PLP`-reads-shifted-slot symptom. Found via per-instruction `S` trace (`AR_STRACE`), not the oracle. Fix: `indirect_dispatch B8C0 16 idx:X tables:B8D0 ret:B8C2` (bank01.cfg) — see DEBUG.md §7.7 jump-table CALL variant + §0 RESOLVED. |
+| `$03:8053` | **enter-sim SETUP** (runs on ANY entry to `$18=00`, incl. act→sim AND a warp to `$18=00`). Sequence of `JSR`s (`$9156`, `$AC8E`, …) → `$8193` → `$C147` → `$B20C`/`$B21F`. The 2026-06-26 act→sim hang in this cascade was a 1-byte SNES-stack leak per call in `$01:B898`'s jump-table RTS-trick, fixed via `indirect_dispatch B8C0 … ret:B8C2` (bank01.cfg) — see the `$01:B898` row below and bug-ledger §7.7. |
 | `$01:B898` | **per-record per-type dispatcher, called once per active actor record every frame** (from the `$8193` master loop — see the sim-mode town architecture section above for the full chain into the spawn battery). `$B8C0` PHA-dispatches through the handler table at `$01:B8D0` keyed by object type, returns to `$B8C2`. History of THREE separate bugs found at this one site, in order: (1) a 1-byte SNES-stack leak that hung the act→sim transition (fixed 2026-06-26, see `$03:8053` above); (2) the table's `count` was left capped at 16 as a workaround for a since-fixed label-emission bug, but town actor types are 18/19 — above the cap, so their class handlers never dispatched (fixed 2026-07-02: bumped to the real bound, 26); (3) even at count=26, `idx:X` was wrong AT THIS SITE specifically — the ROM wraps the table read in `PHX($B8AE)/PLX($B8BB)`, so by the `PHA/RTS` dispatch X has been restored to the RECORD POINTER, not the type index (fixed 2026-07-02: switched to the value-keyed `idx:A` form, which reads the PHA'd table word instead of a register). This is the site responsible for the sim-mode actor-spawn corruption/freeze (`DEBUG.md` #18-25) — NOT the earlier stack-leak hang, a different bug at the same address. |
 | `$03:AC8E` | transition state-machine step (counter loop, calls `$97B0`) |
 | `$00:80E5` (label inside `ResetHandler`) | **sim-mode per-frame dispatch entry** — reached when `$18==0`; see "Sim-mode dispatch structure" above. |
