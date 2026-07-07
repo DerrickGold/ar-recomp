@@ -66,27 +66,90 @@ def fmt(e):
         return f"{base} ---- {e['what'].upper()} ----"
     return base
 
-def diagnose(ev):
+def load_meta(explicit=None):
+    """gen_meta.json sidecar (tools/gen_metadata.py) — static decode facts."""
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    cands = ([explicit] if explicit else []) + [
+        os.path.join(here, '..', 'saves', 'gen_meta.json'),
+        'saves/gen_meta.json',
+    ]
+    for c in cands:
+        if c and os.path.exists(c):
+            return json.load(open(c))
+    return None
+
+
+def _meta_note(meta, tgt, m, x, sources=()):
+    """Static-fact annotation + suggested cfg line for a dispmiss target."""
+    bank, addr = tgt[:2], tgt[2:]
+    suggest = f"func bank_{bank}_{addr} {addr} entry_mx:{m},{x}"
+    if not meta:
+        return [f"SUGGESTED FIX:  {suggest}   (no gen_meta.json — run tools/gen_metadata.py to verify)"]
+    out = []
+    # ── mid-loop-continuation guard (the B8C2 stack-overflow class) ──
+    # If the target is the `ret:` of a cfg indirect_dispatch, the miss is the
+    # construct working via benign host-unwind; registering it makes the
+    # handler-RTS re-ENTER the live construct nested per record -> overflow.
+    for d in meta.get('cfg', {}).get('indirect_dispatch', []):
+        if f"RET:{addr.upper()}" in d['text'].upper() and d['bank'] == bank:
+            return [f"DO NOT REGISTER: ${addr} is the `ret:` continuation of an ACTIVE "
+                    f"dispatch construct (bank{d['bank']}.cfg:{d['line']}: {d['text']}). "
+                    f"The miss is the construct's benign host-unwind — registering it "
+                    f"causes nested re-entry per record (stack overflow; DEBUG.md §1 ⚠️). "
+                    f"If m/x at the miss ({m},{x}) matches the loop width, nothing leaks."]
+    # Heuristic for the same trap without a cfg marker: every miss source sits
+    # inside the target's own web (within ±$200) → likely a mid-loop return.
+    near_srcs = [s for s in sources
+                 if s[:2] == bank and abs(int(s[2:], 16) - int(addr, 16)) <= 0x200]
+    if sources and len(near_srcs) == len(sources):
+        out.append(f"CAUTION: all miss sources sit within ±$200 of the target — "
+                   f"possible mid-loop continuation (the B8C2 class). Verify the target is "
+                   f"single-shot (runs to its own RTS / plain trampoline) BEFORE registering; "
+                   f"see DEBUG.md §1 ⚠️.")
+    variants = meta['functions'].get(tgt)
+    want = f"_M{m}X{x}"
+    if variants:
+        if want in variants:
+            out.append(f"ALREADY REGISTERED as func with variant {want} — this miss should be "
+                       f"impossible with the CURRENT gen; the trace likely predates the last "
+                       f"regen, OR the miss is benign (post-fix unwind at a caller continuation).")
+        else:
+            out.append(f"registered func but variant {want} MISSING (has: {', '.join(variants)}) "
+                       f"→ width mismatch; verify the continuation's SEP/REP and add the variant:")
+            out.append(f"SUGGESTED FIX:  {suggest}")
+    else:
+        out.append(f"NOT registered → unregistered RTS-trick continuation (the $9D8E class).")
+        out.append(f"SUGGESTED FIX:  {suggest}")
+    hosts = meta['labels'].get(tgt, [])
+    if hosts:
+        out.append(f"target is a local label inside: {', '.join(hosts[:4])}"
+                   + (" …" if len(hosts) > 4 else "")
+                   + "  (the continuation of that function's dispatch web)")
+    return out
+
+
+def diagnose(ev, meta=None):
     """Correlate the root-event channels into a ranked hypothesis.
 
-    The m-leak decision tree, mechanized: an m/x LEAK (call site where runtime
-    m/x != decoder-expected) is a SYMPTOM. Its cause is usually one of:
-      (a) an unregistered RTS-trick continuation — a `dispmiss` (host-unwind)
-          just before the leak whose target lands inside a function → the RTS
-          skipped a SEP/REP → register the target as a cfg `func`. The stderr
-          tripwire HIDES this class when S<$0200 (the $9D8E lair-seal bug).
-      (b) an ambiguous decoded exit — no dispmiss near the leak → the callee has
-          two static exits at different m → `exit_mx_at`. (Verify by decoding the
-          leaked region from ROM at the expected m: garbage=exit-mx, coherent=other.)
+    The m-leak decision tree, mechanized (DEBUG.md §1). Two independent root
+    classes, both handled first-class:
+      (a) dispatch-miss (with or without a visible leak) — an RTS-trick
+          continuation the recomp can't resume → register a cfg `func`. The
+          stderr tripwire HIDES this class when S<$0200 (the $9D8E bug).
+      (b) m/x leak with NO nearby miss — ambiguous decoded exit → `exit_mx_at`
+          (verify by decoding the leaked region from ROM at the expected m:
+          garbage=exit-mx, coherent=keep digging).
+    Static facts come from the gen_meta.json sidecar when present.
     """
-    # NMI/IRQ handler entries trip the leak flag benignly (interrupt wrappers
-    # run with a fixed x that differs from the interrupted variant) — filter them.
     leaks = [e for e in ev if e['ch'] == 'call' and e.get('leak')
              and 'Handler' not in e.get('fn', '')]
     dm    = [e for e in ev if e['ch'] == 'dispmiss']
     gb    = [e for e in ev if e['ch'] == 'garbage']
     print(f"=== DIAGNOSE ({len(ev)} events, hf {ev[0]['hf']}..{ev[-1]['hf']}) ===")
-    print(f"  m/x leaks: {len(leaks)} | dispatch-misses: {len(dm)} | garbage-variants: {len(gb)}\n")
+    print(f"  m/x leaks: {len(leaks)} | dispatch-misses: {len(dm)} | garbage-variants: {len(gb)}"
+          + ("" if meta else "   [no gen_meta.json — run tools/gen_metadata.py for static joins]")
+          + "\n")
 
     if not leaks and not dm and not gb:
         print("  No leak/dispmiss/garbage signals → NOT the misdecode/dispatch class.")
@@ -94,39 +157,57 @@ def diagnose(ev):
         return
 
     ranked = []  # (score, text)
-    # Pair each leak with the nearest PRECEDING dispmiss (the likely root event).
+    end_seq = ev[-1]['seq']
+
+    # ── (a) dispatch-misses, aggregated per target — first-class, no leak needed ──
+    by_tgt = collections.defaultdict(list)
+    for d in dm:
+        by_tgt[d['to']].append(d)
+    for tgt, hits in by_tgt.items():
+        n = len(hits)
+        first, last = hits[0], hits[-1]
+        # modal runtime (m,x) at the miss = the width the continuation runs at
+        mx = collections.Counter((h.get('mnow'), h.get('xnow')) for h in hits).most_common(1)[0][0]
+        m, x = mx if mx != (None, None) else ('?', '?')
+        hidden = any(int(h.get('S', 'FFFF'), 16) < 0x200 for h in hits)
+        near_end = (end_seq - last['seq']) < max(50, len(ev) // 20)
+        srcs = sorted({h['from'] for h in hits})
+        score = 40 + min(n, 40) + (50 if hidden else 0) + (30 if near_end else 0)
+        lines = [
+            f"DISPATCH-MISS target {tgt}  x{n}  (m={m} x={x} at the miss; "
+            f"sources: {', '.join(srcs[:3])}{' …' if len(srcs) > 3 else ''})"
+            + ("   <-- HIDDEN by stderr tripwire (S<$0200)" if hidden else "")
+            + ("   <-- LAST events before capture end (watchdog/crash proximity)" if near_end else ""),
+        ]
+        lines += [f"    {t}" for t in _meta_note(meta, tgt, m, x, sources=srcs)]
+        ranked.append((score, "\n  ".join(lines)))
+
+    # ── leak ↔ nearest-preceding-miss pairing (correlation strengthens (a)) ──
     for lk in leaks:
         prior = [d for d in dm if d['seq'] < lk['seq']]
         near = prior[-1] if prior else None
         if near:
-            tgt = near['to']; bank = tgt[:2]; addr = tgt[2:]
-            s = int(near.get('S', 'FFFF'), 16)
-            hidden = s < 0x200
-            m = near.get('mnow', near.get('m', '?')); x = near.get('xnow', near.get('x', '?'))
-            score = 100 - (lk['seq'] - near['seq'])  # closer = stronger
-            if hidden: score += 50
+            score = 100 - min(99, lk['seq'] - near['seq'])
             ranked.append((score,
-                f"RTS-trick continuation (register a cfg func):\n"
-                f"    leak at {lk['fn']} site ${lk['site']} (runtime m={lk['m']} != expected m={lk['em']})\n"
-                f"    caused by dispatch-miss  {near['from']} -> {tgt}  (S=${near.get('S','?')}"
-                + ("  <-- HIDDEN by stderr tripwire (S<$0200)" if hidden else "") + ")\n"
-                f"    SUGGESTED FIX:  func bank_{bank}_{addr} {addr} entry_mx:{m},{x}\n"
-                f"    (verify: the RTS target ${tgt} should resume its function's loop/REP;\n"
-                f"     confirm the continuation runs at m={m},x={x} from the surrounding SEP/REP)"))
+                f"LEAK↔MISS correlation: leak at {lk['fn']} site ${lk['site']} "
+                f"(runtime m={lk['m']} != expected m={lk['em']}) follows dispatch-miss "
+                f"{near['from']} -> {near['to']} by {lk['seq']-near['seq']} events — "
+                f"the miss above is the root; fix that target first."))
         else:
-            ranked.append((10,
+            # ── (b) leak with no miss → ambiguous decoded exit candidate ──
+            ranked.append((25,
                 f"Ambiguous decoded exit (candidate for exit_mx_at):\n"
                 f"    leak at {lk['fn']} site ${lk['site']} (runtime m={lk['m']} != expected m={lk['em']})\n"
                 f"    NO dispatch-miss precedes it → the callee likely has two static exits at\n"
                 f"    different m. DECODE the leaked region from ROM at the EXPECTED m first:\n"
-                f"    garbage/BRK → exit_mx_at <callee> <m> <x>;  coherent → keep digging."))
+                f"    garbage/BRK → exit_mx_at <callee> <m> <x>;  coherent → NOT exit-mx, keep digging."))
     for g in gb:
         ranked.append((30,
             f"Entered a known-garbage variant: {g['variant']} @ {g['pc']} (m={g['m']} x={g['x']})\n"
             f"    → a flag leaked BEFORE this dispatch; walk back to the last clean call site."))
 
     ranked.sort(key=lambda t: -t[0])
-    for i, (_, txt) in enumerate(ranked[:8], 1):
+    for i, (_, txt) in enumerate(ranked[:10], 1):
         print(f"  [{i}] {txt}\n")
 
 
@@ -137,6 +218,7 @@ def main():
     ap.add_argument('--misdecodes', action='store_true', help='func entries where runtime m/x != expected')
     ap.add_argument('--leaks', action='store_true', help='call sites where runtime m/x != decoder expectation (the m-leak boundary)')
     ap.add_argument('--diagnose', action='store_true', help='ranked root-cause hypothesis correlating leaks x dispmiss x garbage, with a suggested cfg fix')
+    ap.add_argument('--meta', help='path to gen_meta.json (default: saves/gen_meta.json if present)')
     ap.add_argument('--vram', help='VRAM word-addr or lo-hi range (hex), show writers')
     ap.add_argument('--wram', help='WRAM g_ram-offset or lo-hi range (hex), show writers (incl. indirect + DMA-adjacent)')
     ap.add_argument('--vmadd', action='store_true', help='show VMADD ($2116) sets')
@@ -178,7 +260,7 @@ def main():
         return
 
     if args.diagnose:
-        diagnose(ev); return
+        diagnose(ev, load_meta(args.meta)); return
 
     sel = ev
     if args.ch:

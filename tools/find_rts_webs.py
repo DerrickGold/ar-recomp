@@ -34,6 +34,17 @@ args = [a for a in sys.argv[1:]]
 bank_filter = None
 if '--bank' in args:
     i = args.index('--bank'); bank_filter = int(args[i+1], 16); del args[i:i+2]
+# --suggest: for each UNCOVERED continuation push, emit a shape-classified cfg
+# candidate line (the "closure loop" driver: regen -> census --suggest ->
+# append accepted lines -> regen ... until the delta is empty). Classification:
+#   * target == `ret:` of a cfg indirect_dispatch  -> DO NOT REGISTER (B8C2
+#     class: the miss is the live construct's benign unwind; registering it
+#     nests per record -> stack overflow).
+#   * otherwise -> suggest `func ... entry_mx:m,0` with m from whichever width
+#     decodes coherently at the continuation (plausible() tracks SEP/REP).
+#     STILL a human decision — verify single-shot shape per DEBUG.md §1 ⚠️.
+suggest = '--suggest' in args
+if suggest: args.remove('--suggest')
 ROM = args[0] if args else 'ar.sfc'
 rom = open(ROM, 'rb').read()
 NBANKS = len(rom) // 0x8000
@@ -102,6 +113,9 @@ for b in banks:
     for o in range(base, base + 0x8000 - 4):
         pc = (o & 0x7fff) | 0x8000
         b0, b1, b2, b3 = rom[o], rom[o+1], rom[o+2], rom[o+3]
+        # (PEA F4 was tried as a third push idiom 2026-07-06 and reverted:
+        # F4 is too common as a data byte — 47 -> 935 UNC false positives.
+        # Every web found so far pushes via LDA#/PHA or LDY#/PHY.)
         if (b0 == 0xA9 and b3 == 0x48) or (b0 == 0xA0 and b3 == 0x5A):
             imm = b1 | (b2 << 8)
             tgt = (imm + 1) & 0xffff
@@ -133,6 +147,20 @@ for b in banks:
         mark = 'ok ' if covered else 'UNC'
         print(f"   [{mark}] PHA;RTS dispatch @{b:02x}:{rts_pc:04x}")
     total_unc_push += len(unc_p); total_unc_site += len(unc_s)
+    if suggest and unc_p:
+        print(f"   -- suggestions (bank {b:02x}) --")
+        for pc, imm, tgt, sc, _cov in unc_p:
+            if tgt in rets:
+                print(f"   SKIP  ${tgt:04X}: `ret:` of a cfg indirect_dispatch "
+                      f"(B8C2 class) — benign unwind, registering it recurses. "
+                      f"DO NOT register.")
+                continue
+            s1 = plausible(b, tgt, 1, 0)
+            s0 = plausible(b, tgt, 0, 0)
+            em = 1 if s1 >= s0 else 0
+            print(f"   func bank_{b:02X}_{tgt:04X} {tgt:04X} entry_mx:{em},0"
+                  f"   # push @{b:02x}:{pc:04x}; decode m1={s1} m0={s0}; "
+                  f"VERIFY single-shot shape (DEBUG.md §1 ⚠️) before applying")
 
 print(f"\nTOTAL uncovered: {total_unc_push} continuation pushes, "
       f"{total_unc_site} PHA;RTS sites")
