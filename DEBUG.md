@@ -902,12 +902,14 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
 
 18. **OPEN — CRITICAL: magic scrolls / MP counter dead (2026-07-06).** By Bloodpool the player
     should hold 2 scrolls earned in act mode; entering act mode shows none, so the unlocked
-    spell can't be used or verified. Candidates: the scroll-award write (event/pickup side),
-    the persistence across act→sim→act transitions, or the act-mode HUD/consume read. First
-    moves: find the scroll/MP WRAM address (oracle save or RAM map), then one watch-mode act
-    run with `--wram <addr>` to see whether the award write ever happens vs happens-and-is-lost
-    (the SRAM checksum gate §"Save/persistence" and the $7F staging restore are prior suspects
-    for cross-mode state loss).
+    spell can't be used or verified. **Addresses KNOWN (cheat-derived map, docs/ram-map.md):
+    `$7E:0021` = MP/scroll count; `$7E:0299-$029C` = Fire/Stardust/Aura/Light unlock flags.**
+    Plan: (1) `AR_PIN=7E00210A,7E029901` — if scrolls render + Fire casts, the display/consume
+    side is fine and the bug is the AWARD/PERSIST side; (2) targeted trace with
+    `AR_TRACE_WLO=0x21 AR_TRACE_WHI=0x21` (+ `0x299-0x29C` run) across a scroll pickup and an
+    act→sim→act cycle — award never written vs written-then-cleared, and by whom (`fn` on the
+    write). Prior suspects for cross-mode loss: the SRAM checksum gate ("Save/persistence"
+    SEAMS) and the `$7F:97DA` staging restore.
 ---
 
 ## 8. Build & regen workflow
@@ -999,6 +1001,7 @@ AR_TRACE_WATCH=saves/anom   always-on anomaly capture (ON via dev-config): auto-
 trace_slice.py <dump> --diagnose   ranked verdicts + paste-ready cfg lines (needs gen_meta.json)
 AR_TRACE=<f> + HF_LO/HI     targeted windowed capture (beats watch mode when both set)
 tools/gen_metadata.py       ~1s static sidecar refresh (auto-run by regen.sh)
+AR_PIN=<par8>[,..]          generic PAR-code pinner (codes.txt catalogue -> instant debug cheat / state probe)
 find_rts_webs.py --suggest  shape-classified cfg candidates for uncovered continuation pushes
 regen.sh census delta       "NEW uncovered continuations" printed per regen — triage BEFORE playing
 [dispatch-recursion]        DEFAULT-ON: >24 live dispatches of one target -> self-healing unwind;

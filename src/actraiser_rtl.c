@@ -286,6 +286,46 @@ void ActRaiserDrawPpuFrame(void) {
  * docs/SEAMS.md "Gameplay / Tunable seams" + memory debug-menu-warp-roadmap. */
 void ActRaiser_ApplyCheats(void) {
   extern uint8 g_ram[0x20000];
+
+  /* AR_PIN=<parcode>[,<parcode>...] — generic PAR/ZSNES cheat-code pinner
+   * (2026-07-06). Each code is the standard 8-hex-digit PAR form BBAAAAVV
+   * (bank $7E/$7F, 16-bit addr, byte value), applied every frame in EVERY
+   * mode (unlike the mode-gated hand cheats below). Turns the whole
+   * ./codes.txt catalogue (flamingspinach's 88 engineered codes — see
+   * docs/ram-map.md "Cheat-derived WRAM map") into ready-made debug cheats
+   * AND address-mapping probes with zero per-cheat C. Example:
+   *   AR_PIN=7E00210A,7E029901   (INF MP + HAVE FIRE — the §7.18 kit)
+   * Bad tokens are reported once and skipped. Max 32 pins. */
+  {
+    static int n = -2;
+    static struct { uint32 off; uint8 val; } pins[32];
+    if (n == -2) {
+      n = 0;
+      const char *e = getenv("AR_PIN");
+      if (e && e[0]) {
+        const char *p = e;
+        while (*p && n < 32) {
+          char tok[16] = {0};
+          int len = 0;
+          while (*p && *p != ',' && len < 15) tok[len++] = *p++;
+          if (*p == ',') p++;
+          uint32 code = (uint32)strtoul(tok, NULL, 16);
+          uint8 bank = (uint8)(code >> 24);
+          uint16 addr = (uint16)(code >> 8);
+          if (len == 8 && (bank == 0x7E || bank == 0x7F)) {
+            pins[n].off = ((uint32)(bank & 1) << 16) | addr;
+            pins[n].val = (uint8)code;
+            n++;
+          } else {
+            fprintf(stderr, "AR_PIN: bad token '%s' (want 8-hex PAR 7Exxxxvv/7Fxxxxvv)\n", tok);
+          }
+        }
+        if (n) fprintf(stderr, "AR_PIN: %d pin(s) active\n", n);
+      }
+    }
+    for (int i = 0; i < n; i++) g_ram[pins[i].off] = pins[i].val;
+  }
+
   /* Action-stage gameplay tweaks only. $18 = region/mode: 01-07 = an action
    * stage (region N); 00 = intro/overworld, 08 = sim, $20+ = transitions. Gate
    * on the whole action range so cheats persist across ALL regions, not just

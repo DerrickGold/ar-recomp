@@ -179,3 +179,34 @@ Two-byte entries per town tracking accumulated growth from monster defeats and l
 - Most platformer-side numeric values use BCD encoding
 - Save data is stored in 8KB battery-backed SRAM
 - The game mode byte at $7E:0018 is the primary state machine driver
+
+## Cheat-derived WRAM map (from ./codes.txt — flamingspinach's PAR codes, parsed 2026-07-06)
+
+Independently-engineered address ground truth; every row doubles as a debug cheat via the
+generic pinner: `AR_PIN=<8-hex PAR>[,...]` (applies every frame, all modes; see
+actraiser_rtl.c). Pin VALUES are the cheat's pin, not a semantic constant. NOTE from the
+source doc: many counters are stored as decimal-looking hex (screen "28" = $28).
+
+| Addr | Label (pin value) | Notes |
+|---|---|---|
+| `$7E:001D` | INF HP ($08) | player HP (matches our AR_INF_HP cheat) |
+| `$7E:001C` | INF LIVES ($01) |  |
+| `$7E:00E6` | INF TIME ($01) |  |
+| `$7E:08D1` | INVULNERABILITY ($20) |  |
+| `$7E:0BCC` | NO BOSS HEALTH 1 ($00) |  |
+| `$7E:134C` | NO BOSS HEALTH 2 ($00) |  |
+| `$7E:0CCC` | NO BOSS HEALTH 3 ($00) |  |
+| `$7E:130C` | NO BOSS HEALTH 4 ($00) |  |
+| `$7E:0ECC` | NO BOSS HEALTH 5 ($00) |  |
+| `$7E:0021` | INF MP ($0A) | **MP / magic-scroll count** — the §7.18 bug's primary address |
+| `$7E:0282` | INF SP ($FF) | SP is 16-bit ($0282/$0283) |
+| `$7E:00E4` | RANGED SWORD ($80) |  |
+| `$7E:001F` | MAX SCORE ($99) |  |
+| `$7E:0020` | MAX SCORE ($99) |  |
+| `$7E:00C3` | ROOM ALWAYS LIT ($00) |  |
+| `$7E:02A2-$02A9` | item slots 1-8 (item ids) | 16 item ids exist; 8 story-critical (codes 16-23 pin the useful set) |
+| `$7E:0286` | INF HP [SIM] ($08) |  |
+| `$7E:022E` | MAX QUALITY 1 ($03) | town quality, stride 2, six towns ($022E..$0238) |
+| `$7F:9EFA-$9F04` | INF SOUL POINTS 1-6 (40) | per-town soul/population points, stride 2 (codes 31-36) |
+| `$7E:0299-$029C` | HAVE FIRE/STARDUST/AURA/LIGHT (01/02/03/04) | spell-unlock flags, one byte each: Fire/Stardust/Aura/Light (§7.18 secondary) |
+| `$7F:96B8-$96E7` | SAFE <town> 1-4 (00) | **lair-sealed state array**: 2 bytes/lair × 4 lairs × 6 towns, town order Fillmore/Bloodpool/Kasandora/Aitos/Marahna/Northwall (codes 41-88) |
