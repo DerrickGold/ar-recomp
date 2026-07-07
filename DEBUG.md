@@ -100,7 +100,7 @@ adding a new probe.
 
 1. **Direct-page addressing is `D`-relative, not literal.** `LDA $19` in decoded/generated code
    reads `cpu_read8(cpu, 0x7E, cpu->D + 0x0019)`, NOT literal WRAM offset `$0019`. `D` happens to be
-   `0` in most of the code paths debugged so far (confirmed via `AR_SIMTRACE`'s printed `D=` field
+   `0` in most of the code paths debugged so far (confirmed via the sim branch probe's printed `D=` field
    for the ResetHandler main-loop context), but **never assume it** — a watch pointed at a literal
    address can miss the real target entirely if `D != 0` at that call site. Always check `D` before
    trusting a watch's silence as "nothing writes here."
@@ -295,7 +295,7 @@ those cases.
 | **Per-frame game-state progression** | `AR_FRAMELOG=1` (callsite, work delta, mode `$18/$19`, timer, HP) | `AR_OBJLOG=1` for the object table |
 | **Is the CPU layer even the problem?** | `AR_MXCHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
 | **Crash on a mode/level TRANSITION; SNES stack corrupted (`S` walks to `$FFxx`/`$42xx`/I-O); `ppu_write`/`ppu_read` abort** | Check stderr for **`[dispatch-miss]`** (default-on tripwire) — it names the unresolved RTS-trick/computed target. Then `AR_SCHECK=1` (S-drift + impending-underflow path) | confirm with `AR_RTSLOG=0x<rts_pc>`; register the popped target as a cfg `func` (see §7.7) |
-| **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Check the regen console output's three silent-drop report sections: **`JSR (abs,X) SUPPRESSED`** (cfg-required-dispatch-or-kill), **`DISPATCH TARGET SUPPRESSED BY DATA_REGION`**, **`Rejected JSR/JSL targets`** — grep the report for the bank/address range of the code you suspect. If none of those name the site, it's probably a genuine logic/state bug (e.g. a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `AR_INDIRLOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (§2 `AR_SAVECHECK`-style targeted branch probe) |
+| **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Check the regen console output's three silent-drop report sections: **`JSR (abs,X) SUPPRESSED`** (cfg-required-dispatch-or-kill), **`DISPATCH TARGET SUPPRESSED BY DATA_REGION`**, **`Rejected JSR/JSL targets`** — grep the report for the bank/address range of the code you suspect. If none of those name the site, it's probably a genuine logic/state bug (e.g. a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `AR_INDIRLOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (a targeted branch probe — the 4-PC "which branch fired" pattern, bug-ledger "Methodology learnings") |
 | **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | Check the regen console's **`PROVEN-EQUIVALENT VARIANT ROUTING`** report section for the address — a `<== DIFFERS FROM CANONICAL/DEFAULT GUESS` entry means the OLD "nearest survivor" heuristic and the NEW proof disagree; a regen should already route it correctly. If the address is missing from the report entirely, `_find_equivalent_variants` couldn't prove any survivor equivalent (genuinely no safe target — see §7 "wrong-width dispatch, no provable target") | `AR_MXCHECK`/`AR_CALLMX` first to confirm it's actually reached at the wrong width at runtime (don't assume from static inspection alone — see gotcha #4 above) |
 
 **Golden rule:** capture an **`AR_TRACE`** window first and read `--summary` → `--leaks` (STEP 0
@@ -626,7 +626,7 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   $FB time$E6 HP$1D joy=.. (raw=..)`. A steady push-delta with the timer ticking = engine running;
   tiny delta = spinning on a wait; frozen timer with large delta = a pause/gate. The callsite is
   the main loop's current vblank-wait point. `joy`/`raw` (added 2026-07-01) is the
-  `SwapInputBits`'d / raw joypad word — pair with `AR_SIMTRACE` to see whether input is reaching a
+  `SwapInputBits`'d / raw joypad word — pair with a branch probe (§10 legacy inventory) to see whether input is reaching a
   stuck code path at all.
 - **`AR_OBJLOG=1`** — action-stage object table: game-frame, timer, HP, active object count, and
   object-0 status word ($06A0 stride $40) + handler ptr. Reveals the frame an object table is
@@ -963,15 +963,10 @@ not memory corruption at all) — safe to remove whenever `cpu_state.c`/`cpu_sta
 cleaned up, or leave them (inert unless the env var is set) if another investigation might reuse
 the pattern.
 
-**Still open (2026-07-01, the sim-mode graphics-corruption investigation):** `AR_SIMTRACE` (see §2 —
-ruled out the `$018000` skip gate as the cause, kept for its general "which branch fired" utility),
-`AR_SAVECHECK` (see §2 — ruled out the save-checksum gate as the cause). `AR_INDIRLOG` (see §2,
-originally for the sim-mode `$2920`/`$208E` suppressed-dispatch theory — confirmed those sites
-never fire in the corrupted playthrough, so that specific theory is also closed, but the tool
-itself is general-purpose and worth keeping armed for any future suppressed-dispatch site).
-`AR_ADADTRACE` (`common_cpu_infra.c`, every `bank_01_ADAD*` entry — X/DB/D + the 3 source words),
-`AR_WATCH14` (`cpu_state.c` `cpu_write16`, traces the `$0014`/`$0016` position-scratch writes inside
-`ADAD`). Both were added for the case study below and are safe to leave armed (inert unless set).
+**From the resolved 2026-07-01 sim-mode arc** (all theories they tested are closed; the probes
+remain inert-unless-set): `AR_SIMTRACE`/`AR_SAVECHECK` (see the legacy inventory below +
+bug-ledger "Methodology learnings"), `AR_INDIRLOG` (general-purpose — worth keeping for any
+future suppressed-dispatch site), `AR_ADADTRACE`, `AR_WATCH14`.
 
 ### Case study archive
 The full sim-mode bring-up arc narrative (2026-07-01→04) lives in
