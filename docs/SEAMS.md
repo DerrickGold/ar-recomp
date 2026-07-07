@@ -495,11 +495,57 @@ before suspecting the buffers.
 
 ---
 
+## Story-event system — the `$03:F921` event VM (mapped 2026-07-06, the rock-zap/fire arc)
+
+The sim-mode scripted events (rock zap, house fires, quakes, town-specific story beats) run
+through one table-driven dispatcher. Fully mapped and registered (bug-ledger §7.16); this is
+both a decomp target (`event_vm.c`) and a clean mod seam (the record table is pure data).
+
+**Dispatcher `$03:F921`:** `PHP; PHB; REP #$20; LDA #$007F; JSL $008519` (DB←`$7F`), computes the
+event's grid coords `$7C11/$7C13` from pixel coords `$90E1/$90E5 >> 2` (or `$7C11=$FFFF` when the
+event type carries no position), then walks the **record table at `$03:F99A–$F9F4`** from `$F951`:
+
+- 6-byte records `[event_type, town, grid_x, grid_y, handler-1 (word)]`, `$FF`-terminated.
+- Match: `rec[0]` vs **`$90EB`** (event type), `rec[1]` vs **`$7BF9`** (current town),
+  `rec[2]/rec[3]` vs **`$7C11`/`$7C13`** (grid coords; skipped when `$7C11` is negative).
+- On match: `PHX` (record ptr), `LDY #$F989; PHY` (push continuation), `LDA $030004,X; PHA;
+  SEP #$20; RTS` — PHA/RTS dispatch to the record's handler at **m=1, x=0**.
+- Handler RTSes back to `$F98A`: `PLX; X += 6; BRA $F951` — the loop CONTINUES, so multiple
+  records may fire for one event. Loop end: `REP; PLB; PLP; RTL` at `$F997`.
+- 15 records → 11 unique handlers (`$F9F5 $FA2A $FA5F $FAB8 $FAF8 $FB3C $FB5F $FB8F $FBD1
+  $FBD7 $FC1B`), all registered in bank03.cfg. `$FA5F` = the Fillmore rock-zap; the `$FB5F`
+  family (×5 records) is the shared per-town story-beat handler.
+
+| Event WRAM | Meaning |
+|---|---|
+| `$90EB` | pending event type (record `rec[0]` key; gate `< 4` selects the coord-bearing class) |
+| `$90E1` / `$90E5` | event X / Y in pixels (zap target); `>>2` → grid coords |
+| `$7C11` / `$7C13` | derived grid coords compared against `rec[2]/rec[3]`; `$FFFF` = no position |
+| `$7BF9` | current town id (record `rec[1]` key) |
+| `$90F7` | set to 1 by handlers on event accept (event-active flag) |
+| `$7CC9,X` / `$7CD5,X` / `$7CE1,X` | per-town event state / timer-reload / timer (driven by the `$03:8700` sub-dispatcher table `$8713`; `$872A` decrements `$7CE1`, reloads from `$7CD5`, advances state via `$7CC9`) |
+
+**Modding note:** adding/removing/re-positioning a scripted event = editing a 6-byte record in
+the `$F99A` table (plus a handler if it's a new behavior). The handler set is closed and small.
+
+**Known-unmapped sub-seam (risk):** ~45 sites across `$03:E0xx–$F9xx` (inside the event handlers'
+own bodies) dispatch via **runtime WRAM JMP vectors `($6E20)` and `($7920)`** — currently emitted
+as trap stubs (regen report "UNRESOLVED INDIRECT DISPATCH"). No event exercised them yet in play;
+whichever event first walks into one will `[dispatch-oob]` loudly. Closing this needs the vector
+WRITERS traced once (who stores to `$6E20`/`$7920`), then a cfg/indirect-vector authorization —
+it cannot be closed statically.
+
+**Related open thread:** the `$03:9FCD` dispatcher family (`$A21A/$A27F/$A498/$A4A8/$A4B8`, ×4
+tail-calls each, same `PHY;BRL` idiom as `$9D4D`) is statically censused but untriaged — prime
+suspect for the one-of-N cutscene actor sprites (DEBUG.md §7.17).
+
+---
+
 ## Frame / timing  (mostly already HLE'd — the model is understood)
 
 | Seam | Routine / address | Hardware | Intent | Notes | Status |
 |---|---|---|---|---|---|
-| VBlank wait | `$00:8418`, `$02:A85E` (HLE → `ActRaiser_WaitForVblank`); `$01:9284` (inline) | RDNMI `$4210` | "wait one frame" | RDNMI modeled as once-per-frame token; inline waits spin-detected (`snes.c`) | 🟢 |
+| VBlank wait | `$00:8418`, `$02:A85E` (HLE → `ActRaiser_WaitForVblank`); inline 3-read spins (`$01:9284` et al) | RDNMI `$4210` | "wait one frame" | Three-tier model (`snes.c`): HLE'd routines yield; the 7 statically-whitelisted inline spin blocks (`kSpinBlocks`, from `find_yield_points.py`) yield once per read in the coroutine; in NON-yieldable contexts (NMI/IRQ — e.g. the mode-`$85` story-event wait chain `$01:9270→8C43→9284`) whitelisted spins FAST-EXIT bit7=1, unpaced (a hang there is otherwise unbreakable — bug-ledger §7.16); `[4210-wedge]` tripwire names the refusing gate if a spin ever sticks 4096 reads | 🟢 |
 | NMI handler | `$8520` (`NmiHandler`) | NMI | "per-frame vblank service" | game frame `$0088` bumped here | 🟢 |
 | Frame coroutine | `RunOneFrameOfGame` (`actraiser_rtl.c`) | — | host frame ↔ game frame mapping | coroutine yields at vblank-wait | 🟢 |
 
@@ -588,6 +634,7 @@ These RAM addresses recur across all the debugging; keep `ram-map.md` authoritat
 | `$19` | sub-mode (act within region — act 1 vs 2 in action stages; region/sub-flow selector in sim mode, e.g. region `9` branches to a separate sim sub-flow at `$008129`) |
 | `$1A`/`$1B` | transition **destination** (`$1B`→`$18`, `$1A`→`$19`, applied by the mode-switch `$00:8269`) |
 | `$FB` | bit `0x80` = transition-request flag (set with `$1A`/`$1B` to stage a mode change; game consumes+clears it) |
+| `$0100` | game-mode byte (watchdog dumps print it): observed `$85` during story-event cutscenes (rock-zap/seal wait chain); full value map not yet derived |
 
 **Level warp** (`ActRaiser_Warp`, F6 hotkey, `AR_WARP=<reghex><acthex>` e.g. `0202`): stages the
 game's own sim→act transition — sets `$1B`=region, `$1A`=act, `$FB|=0x80` — so the game does the
