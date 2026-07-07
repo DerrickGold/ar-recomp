@@ -212,6 +212,17 @@ AR_HEADLESS=1 AR_INPUT_REPLAY=saves/bug.rec \
    `mnow/xnow` at the miss + the surrounding SEP/REP). *This class is INVISIBLE to the stderr
    `[dispatch-miss]` tripwire when `S<$0200`* — always trust the trace `dispmiss` channel, and
    watch `--summary`'s "HIDDEN by the stderr tripwire" callout.
+   **⚠️ BUT check the continuation's SHAPE before registering (2026-07-06, the B8C2 crash):**
+   a dispmiss target is only registrable as `func` when it's a **single-shot** continuation
+   (a loop-continue like `$9D8E` that runs to its own RTS, or a plain RTS trampoline like
+   `$03:8712`). If the target is the **`ret:` continuation of a dispatch construct whose frame
+   is STILL ACTIVE at the miss** (miss sources = handlers *called by* that construct; target =
+   an `indirect_dispatch … ret:` / mid-record-loop address like `$01:B8C2`) → the miss is
+   **BENIGN** (host-unwind lands back in the live construct and the loop continues; check that
+   `mnow/xnow` at the miss == the loop's width — if so nothing even leaks). Registering it
+   converts the benign unwind into **nested re-entry per record → stack overflow** (sim-mode
+   crash, dump3/4). Quick discriminator: is the target already a `ret:` in a cfg
+   `indirect_dispatch`, or do the miss sources sit *inside* the target's own dispatch web?
 2. **No** dispmiss near the leak? → likely an **ambiguous decoded exit** (a callee with two static
    exit paths at different m; the auto-router picked wrong). **Confirm before fixing:** decode the
    leaked region from the ROM at the decoder's EXPECTED m — **garbage/BRK ⇒ decode bug ⇒
@@ -471,6 +482,9 @@ the path that mattered, and re-run. Channels:
 - **`hwread`** — the control-flow-gating hardware reads: `$4210`(RDNMI)/`$4212`(HVBJOY) vblank
   spins, `$4016-7`/`$4218-F` joypad, `$2140-3` APU handshake — the value a spin/branch keyed on.
 - **`ppumem`** — CGRAM (palette) + OAM (sprite) writes — the PPU memories `vram` doesn't cover.
+  Covers **DMA uploads too** (verified 2026-07-06: `dma_transferByte → snes_writeBBus → ppu_write`
+  hits the same `$2104`/`$2122` cases), so "did the actor emit OAM this frame" is one `--ch ppumem`
+  query — attribution via `fn` = the function that triggered the DMA.
 - **`frame`** — `nmi` / `vblank` boundary markers (attribute writes to NMI vs main thread).
 Every event carries a **monotonic `seq`** (survives the non-monotonic `$0088` clock), `hf` (host
 frame), `gf`, `fn`, last block PC, and the **live `mnow`/`xnow`/`S`/`DB`/`PB`** — so an m-flip, a
@@ -490,8 +504,18 @@ stack drift (`S`), and a wrong data/program bank (`DB`/`PB`) are all visible on 
 - Narrow: `AR_TRACE_CH=func,vram,vmadd` · `AR_TRACE_VLO/VHI` (vram word-addr) · `AR_TRACE_FUNC=<sub>`.
 - Slice locally with **`tools/trace_slice.py t.jsonl`**: `--summary` (reports m/x LEAKS by site) ·
   `--leaks` (the m-leak boundary — the misdecode finder) · `--misdecodes` · `--vmadd` ·
-  `--vram 0000-00ff` (who wrote it) · `--fn 8053` · `--around <seq> --window N` (causal neighbours —
-  e.g. VMADD=$0000 at seq N immediately followed by the junk writes at N+1…).
+  `--vram 0000-00ff` (who wrote it) · `--wram <range>` · `--fn 8053` · `--around <seq> --window N`
+  (causal neighbours — e.g. VMADD=$0000 at seq N immediately followed by the junk writes at N+1…).
+- **`--diagnose` + the `gen_meta.json` sidecar (2026-07-06): the auto-fix-suggester.** Run
+  **`tools/gen_metadata.py` once after every regen** (~1s: scrapes all registered func entries,
+  every decoder-created local label, tail-call-past-end sites, and the cfg directives into
+  `saves/gen_meta.json`). `--diagnose` then joins runtime facts against static decode facts and
+  prints, per dispatch-miss target: hit count + modal runtime (m,x) at the miss + tripwire-hidden
+  flag + capture-end proximity (watchdog suspects), and the verdict — **NOT registered → the exact
+  `func bank_BB_TTTT TTTT entry_mx:m,x` line to paste**; registered-but-variant-missing → width
+  mismatch; already-registered-with-variant → stale trace or benign post-fix unwind. Plus which
+  function(s) contain the target as a local label (names the dispatch web it belongs to). Works
+  first-class for pure-miss captures (no leak needed — the case the old diagnose under-served).
 - **The lair-seal in one run:** `AR_TRACE_CH=call,vmadd,vram` then `--leaks` → the leak surfaces at
   `$8053` sites `$80BF/$80C2/$80C5` (m=1, expected m=0); the previous clean call `$80BC` calls
   `$9D4D` → `$9D4D` is the ambiguous-exit culprit. Fix = `exit_mx_at 039D4D 0 0`.
@@ -606,6 +630,35 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 ---
 
 ## 5. Static analysis (no run needed)
+
+- **`tools/gen_metadata.py`** — **gen/cfg metadata sidecar** *(2026-07-06)*. Run once after every
+  regen (~1s). Scrapes `src/gen/*.c` + `recomp/*.cfg` into `saves/gen_meta.json`: every registered
+  func entry (pc24 → variants), every decoder-created local label (pc24 → containing functions),
+  every tail-call-past-end site, and all cfg directives. This is the static half of
+  `trace_slice.py --diagnose`'s join — it's what turns a raw dispatch-miss target into "NOT
+  registered, paste this `func` line" vs "registered but variant missing" without grepping 41MB
+  of generated C. Keep it fresh: a stale sidecar makes `--diagnose` mislabel new registrations.
+
+- **The STATIC CLOSURE LOOP** *(2026-07-06 — how to stop discovering dispatch webs one
+  playtest-hang at a time)*. The regen is already a fixpoint over PROVABLE edges (JSR/JSL/detected
+  dispatches — that's what the auto-promote passes are), but pushed-continuation webs and
+  data-table handlers are invisible to it (`autoroute_pha_rts` only knows the zelda3 canonical
+  byte pattern — 0 hits on ActRaiser's `BF table,X` / `LDY #cont; PHY` idioms). Close the gap by
+  iterating the census against the regen until quiescent:
+  1. regen (`tools/regen.sh` — now auto-runs the census and prints the **UNC delta**: every cfg
+     round makes new code reachable whose pushes were always statically visible).
+  2. `tools/find_rts_webs.py --suggest` — emits shape-classified cfg candidates per uncovered
+     push: auto-SKIPs `ret:`-of-construct targets (the B8C2 recursion class), suggests
+     `func … entry_mx:m,0` with m inferred from which width decodes coherently. **Each suggestion
+     still needs the §1 ⚠️ single-shot shape check by eye** — never blind-append.
+  3. Where a dispatcher reads handlers from a ROM **data table** (the `$03:F99A` event-record
+     table: 6-byte records w/ embedded `handler-1` words), walk the table once and register ALL
+     handlers in one batch — 10 of 11 event handlers were missing when the rock-zap hang finally
+     pointed there; the table walk would have caught every one of them (incl. the fire event)
+     with zero playtests.
+  4. Append accepted lines → regen → repeat until the UNC delta is empty.
+  Truly runtime-computed dispatch (WRAM JMP vectors like `$6E20`/`$7920` in the event VM) cannot
+  be closed statically — trace the vector writers once, then authorize via cfg.
 
 - **`tools/find_rts_webs.py`** — **pushed-continuation RTS-dispatch census** *(2026-07-04,
   built after §7.13's three-round hand-hunt)*. The town/scene engine nests this idiom
@@ -1117,6 +1170,42 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
     Repro: `saves/lairseal.rec` (corrupt onset host-frame ~5089). Oracle still blocked (can't seed
     snes9x from a coroutine savestate; `AR_LOADSTATE` renders state but logic won't advance — the
     coroutine host-stack isn't restorable). Found in ONE run with `AR_TRACE` (below).
+
+16. **Story-event system (rock-zap hang + fire event + the whole $F921 web) — FIXED 2026-07-06.**
+    Three stacked fixes: (a) `func bank_03_FA5F/F98A` — the event dispatcher's pushed continuation
+    chain, found link-by-link via `AR_TRACE_WATCH` + `--diagnose` (each registration exposed the
+    next handler's RTS target); (b) the **static table walk** that ended the link-by-link cycle:
+    the dispatcher's record table (`$03:F99A–$F9F4`, 6-byte records w/ embedded `handler-1`
+    words) enumerated ALL 11 handlers — 10 were unregistered, batch-registered in one round
+    (fire/quake/etc.); (c) the `$4210` non-yieldable-context fast-exit + `[4210-wedge]` tripwire
+    in snes.c (the miss's host-unwind had left S +2 in the mode-$85 wait chain → the $9293 spin
+    wedged). CONFIRMED 2026-07-06: rock-zap completes, fire event animates, Fillmore cleared
+    end-to-end (act1→sim→act2→sim), Bloodpool act1 + sim transition clean.
+    **Runner hardening from this arc:** the dispatch **recursion guard** (`cpu_state.c`
+    `_cpu_dispatch_once`): >24 live dispatches of the same target → unwind + one-shot
+    `[dispatch-recursion]` warning naming the bad cfg line, instead of C-stack overflow. This
+    makes a wrong `func` registration self-healing, which is what allows the §5 static closure
+    loop (`find_rts_webs --suggest`) to run without the manual shape check being fatal-if-wrong.
+
+17. **OPEN — partial actor sprites in sim cutscenes (2026-07-06).** Two sightings, likely one
+    cause: (a) lair-sealing shows ONLY the energy-ball person; the others that "attack" the lair
+    never appear; (b) Bloodpool post-act1 lightning cutscene spawns 2 people (2 bolts) but only
+    the LEFT one is visible. Pattern: multi-actor spawns render exactly ONE actor. Prior partial
+    finding likely related: the **`$9FCD` dispatcher family** (`A21A/A27F/A498/A4A8/A4B8 →
+    $9FCD ×4 each`, same `PHY;BRL` idiom as `$9D4D` — `find_tailcall_past_end.py`) was never
+    registered/triaged. First moves: play the cutscene with watch mode on (any dispmiss →
+    `--diagnose`); if silent, `AR_TRACE_CH=...,ppumem` + `--ch ppumem` to see whether actors 2..N
+    ever write OAM (allocated-but-invisible vs never-spawned), then `find_rts_webs --suggest`
+    entries for the `$9FCD` family.
+
+18. **OPEN — CRITICAL: magic scrolls / MP counter dead (2026-07-06).** By Bloodpool the player
+    should hold 2 scrolls earned in act mode; entering act mode shows none, so the unlocked
+    spell can't be used or verified. Candidates: the scroll-award write (event/pickup side),
+    the persistence across act→sim→act transitions, or the act-mode HUD/consume read. First
+    moves: find the scroll/MP WRAM address (oracle save or RAM map), then one watch-mode act
+    run with `--wram <addr>` to see whether the award write ever happens vs happens-and-is-lost
+    (the SRAM checksum gate §"Save/persistence" and the $7F staging restore are prior suspects
+    for cross-mode state loss).
 ---
 
 ## 8. Build & regen workflow
