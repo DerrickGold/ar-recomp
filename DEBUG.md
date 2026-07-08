@@ -160,17 +160,26 @@ adding a new probe.
 Every issue goes through the same eight steps. The rest of this document is reference detail for
 individual steps — this box is the process:
 
+0. **`tools/cycle.sh` is steps 1-2-5-6 in one command** (2026-07-07): regen-iff-cfg-changed →
+   build → run with dev-config → on exit auto-diagnoses every NEW anom capture AND runs
+   `tools/resolve_miss.py` (the mechanized version of steps 2-3) → `saves/cycle_report.txt`
+   ends with a PROPOSED CFG PATCH. Apply with `resolve_miss.py <files> --apply`, review via
+   git diff, `tools/cycle.sh` again. The manual steps below remain the reference for what
+   the automation is doing (and for the classes it marks AMBIGUOUS).
 1. **Play with watch mode on** (`--config dev-config.ini` keeps `AR_TRACE_WATCH` always-on). When
    anything breaks, the lead-up window is ALREADY on disk (`saves/anom_hf<frame>_<kind>.jsonl`;
    the watchdog auto-flushes on hangs). No replay, no flag guessing.
 2. **`tools/trace_slice.py <dump> --diagnose`** — needs a fresh `saves/gen_meta.json` (regen.sh
    auto-refreshes it). Read the ranked verdicts: most give a paste-ready cfg line or an explicit
    DO-NOT-REGISTER.
-3. **Classify via the m/x-leak decision tree below** — the one judgment call the tools flag but
-   don't fully decide is the ⚠️ continuation SHAPE check (single-shot → `func`; ret-of-live-
-   construct → benign, do NOT register). Wrong registrations no longer crash (the runner's
-   dispatch recursion guard unwinds + prints `[dispatch-recursion]` naming the bad line) — but
-   still do the check; the guard is a net, not a license.
+3. **Classify via the m/x-leak decision tree below** — the judgment calls the tools now flag
+   AUTOMATICALLY: construct-ret (B8C2 nested-reentry), paired JSR/JSL-return (§7.17
+   double-execution), and continuation SHAPE (single-shot/loop-continue → `func`; suspect →
+   manual). For anything AMBIGUOUS, decode it yourself with `tools/dis65.py` (m/x-tracked
+   disassembly with registration marks) + `tools/romxref.py` (who calls/branches there).
+   Wrong registrations no longer crash (the runner's dispatch recursion guard unwinds +
+   prints `[dispatch-recursion]` naming the bad line) — but still do the check; the guard
+   is a net, not a license.
 4. **No trace signal at all?** → not the misdecode/dispatch class. Go by symptom: the channel
    table below (vram/wram/ppumem/hwread/stack/frame), then §5 static tools, then §6 oracle.
 5. **Apply the fix** — cfg directive (regen required) or runner/`src` change (rebuild only, §8).
@@ -696,6 +705,36 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   `--bank NN` narrows to one bank (and then also lists the `[ok]` hits, useful as a coverage
   audit of a single subsystem).
 
+- **THE CORE TOOLKIT (2026-07-07, built after §7.17's paired-resume arc — use these INSTEAD
+  of ad-hoc python heredocs):** all share `tools/ar_lib.py` (LoROM mapping, gen_meta loader,
+  ram-map.md symbol table, full 65816 disassembler with m/x tracking, and the canonical
+  hazard guards: `paired_return_site` / `construct_ret_guard`).
+  - **`tools/dis65.py BB:AAAA [--mx m,x] [-n N | --until-flow] [--raw]`** — disassembler
+    with SEP/REP width tracking; inline gen_meta marks (`FUNC[...]`, `label`, `->FUNC`)
+    show registration state while reading. Replaces eyeball hex decode (which misattributed
+    a caller once during §7.17).
+  - **`tools/romxref.py <addr> --kind write|read|call|branch|word`** — alignment-validated
+    xref: decodes at each candidate site + forward-sanity + gen_meta proximity, so no more
+    raw-byte-grep false positives (`82 88` / `85 A0` class). Long-form aware (found the
+    `STA $00:0295` reward-grant write that every `8D`-form grep missed). WRAM targets match
+    bank $00/$7E long mirrors automatically.
+  - **`tools/wram.py get|diff|scan|syms`** — snapshot/dump inspector with ram-map.md names;
+    `diff` = the bracket-snapshot protocol in one command (low page annotated, high WRAM
+    clustered).
+  - **`tools/resolve_miss.py <anom_*.jsonl|dump_dispatch_log.json> [--apply]`** — the
+    mechanized §1 registration decision tree: construct-ret guard (B8C2) → paired-return
+    guard (§7.17) → already-registered check → shape classification (single-shot /
+    loop-continue / suspect-data) → handler-table evidence → SAFE `func` line or DO-NOT
+    verdict. `--apply` appends SAFE lines to `recomp/bankXX.cfg` with evidence comments
+    (AMBIGUOUS never auto-applies). Validation: reproduced all 9 §7.17 verdicts blind, and
+    its first live run found `$03:CE57` (the third `$9220` coroutine sibling, closing
+    ledger #13's untraced `$CE56` loose end).
+  - **`tools/cycle.sh [--no-run|--triage]`** — the loop driver: regen-iff-cfg-changed →
+    build → run with dev-config (watch mode on) → auto-diagnose every NEW anom capture +
+    resolve_miss dry-run → `saves/cycle_report.txt` ending in a proposed cfg patch. The
+    full bug loop is: `tools/cycle.sh` → repro → quit → read report → `resolve_miss --apply`
+    → `tools/cycle.sh` again.
+
 - **`tools/find_yield_points.py`** — **yield-point / pacing census** *(2026-07-04, built after
   §7.12)*. Host-frame yields can only come from three places: cfg-HLE'd wait routines, the
   runtime `$4210` spin detector (snes.c), and the idle coroutine — so "verify pacing" reduces
@@ -899,17 +938,107 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
     `--diagnose`); if silent, `AR_TRACE_CH=...,ppumem` + `--ch ppumem` to see whether actors 2..N
     ever write OAM (allocated-but-invisible vs never-spawned), then `find_rts_webs --suggest`
     entries for the `$9FCD` family.
+    **PARTIAL FIX + MAJOR LESSON (2026-07-07):** dump14's watch captures around the seal
+    events (~gf5009) named 11 dropped RETURN continuations; registering ALL of them fixed
+    the seal-cutscene actors (user-confirmed) **but introduced double-execution regressions**
+    (sim enemies/animations 2x speed, spawn-anim stall, one Fillmore lair stopped spawning).
+    **NEW DO-NOT-REGISTER CLASS — the PAIRED-RESUME DOUBLE (3rd cfg hazard class, after
+    B8C2 nested-reentry):** never `func`-register a MID-FUNCTION JSR/JSL-return continuation
+    of a PAIRED host-C call site. The emitted call site restores S (`cpu->S = _call_s`) when
+    the nested chain returns NORMAL and then FALLS THROUGH — so a registered return target
+    runs the continuation twice: once nested via dispatch, once via the natural C resume
+    (cpu_state.c "Not-found" comment: the miss path IS unwind-and-resume, exactly once,
+    i.e. those misses were BENIGN). Reverted as poison: $03:80B3/$80BF (frame-tail after
+    `JSR $9CFB`/`JSR $9D4D` — this pair alone doubles the whole sim actor tick
+    `$BB94/$89F0/$B90D`), $01:B9F2/$BE55/$C1C6 (`JSR $D04E` returns), $01:C073,
+    $01:9829 (`JSL $03F921` return), $03:8270/$86FC (bare-RTS returns — double one level
+    up via re-pop). KEPT: $03:CA7A/$03:CDAD (coroutine resumes via slot $9220 — dispatch-
+    only, no paired site falls into them; the likely real actor fix) and the reward web
+    (§18b — TAIL dispatch, containing fn ends at the RTS; single-execution PROVEN by
+    dump15 $0295=01 after one grant). Registration decision tree: TAIL dispatch or
+    dispatch-only entry → register; mid-function paired return → NEVER (benign miss);
+    construct ret: → indirect_dispatch directive. **VERIFIED 2026-07-07 (post-revert
+    regen, two playthroughs): seal-cutscene actors ALL render, Bloodpool lightning
+    cutscene shows BOTH people, enemy speed/animations normal (double-processing gone).**
+    The kept fix = the $9220 coroutine resumes (CA7A/CDAD/+CE57). If a related loss ever
+    resurfaces, the fix is ENGINE-level (cpu_resolve_ancestor_skip should match the
+    paired boundary frame itself → single natural resume), not cfg. trace_slice
+    --diagnose now DETECTS this class (2026-07-07): if the miss target is site+3/+4 of a
+    ROM JSR/JSL whose callee is a known function AND the target is a live label inside a
+    decoded function, it prints DO NOT REGISTER (paired-resume double) instead of a
+    SUGGESTED FIX. Verified against all dump14/15 captures: flags all 9 poisons + the
+    act-mode $00:896F trio ($80B4/$82ED/$8078 = `JSR $8915` returns — benign, never
+    register), still suggests the safe ones (CA7A/CDAD), keeps the B8C2 ret: guard.
+    $01:B8C2 misses (×27-76/event) remain BENIGN — do not register. The $9FCD family
+    may still need entries; re-capture the cutscene post-regen.
 
-18. **OPEN — CRITICAL: magic scrolls / MP counter dead (2026-07-06).** By Bloodpool the player
-    should hold 2 scrolls earned in act mode; entering act mode shows none, so the unlocked
-    spell can't be used or verified. **Addresses KNOWN (cheat-derived map, docs/ram-map.md):
-    `$7E:0021` = MP/scroll count; `$7E:0299-$029C` = Fire/Stardust/Aura/Light unlock flags.**
-    Plan: (1) `AR_PIN=7E00210A,7E029901` — if scrolls render + Fire casts, the display/consume
-    side is fine and the bug is the AWARD/PERSIST side; (2) targeted trace with
-    `AR_TRACE_WLO=0x21 AR_TRACE_WHI=0x21` (+ `0x299-0x29C` run) across a scroll pickup and an
-    act→sim→act cycle — award never written vs written-then-cleared, and by whom (`fn` on the
-    write). Prior suspects for cross-mode loss: the SRAM checksum gate ("Save/persistence"
-    SEAMS) and the `$7F:97DA` staging restore.
+18. **RESOLVED (2026-07-07, verify pending): magic casting dead — blocked by our own
+    AR_NO_KNOCKBACK cheat, not a recomp bug.** Full chain proven healthy by static decode +
+    F2 snapshots: equip menu writes `$02AC` (selected magic, from `$0299,X` HAVE flags via
+    `$01:915D`); NMI joypad shadow `$00A0 = $4218 & $F4` at `$02:AC4E`; player handler
+    `$00:9832` tests `$A0` BIT `#$00C0` at `$00:9843` → `BRL $9DE1` cast gate:
+    `$F8`==0 (no cast in progress) → `$02AC`!=0 (magic equipped) → `$0030,X` (player state
+    `$08D0`) BIT `#$2008` must be CLEAR → `$21` (MP) >0 → cast. Snapshots showed every gate
+    passing (`$02AC`=01, `$21`=0A, `$F8`=00, `$A0`=40 while holding s) EXCEPT
+    `$08D0`=$2003: bit `$2000` = the game's invuln flag, pinned ON every frame by
+    `AR_NO_KNOCKBACK=1` (dev-config default since before magic was ever tested — why "it
+    never worked"). The gate refuses to cast while hurt/invulnerable. Fix: the cheat is now
+    MAGIC-SAFE (actraiser_rtl.c) — it lifts the invuln pin for frames where a cast button is
+    held (`$00A0 & $C0`, the same held-A/X byte the $9843 trigger tests; 1-frame NMI lag is
+    fine since the trigger is level-sensitive), re-pins otherwise; side effect: hits can
+    register while holding the cast button. Lesson: when a game feature is dead with zero
+    trace/dispatch signal and all WRAM state looks right, audit ACTIVE CHEATS for state
+    bits the gating code reads — cheats are part of the system under test.
+    (The earlier scroll-award/persist question — scrolls earned in act mode not carrying
+    into the next act — was masked by AR_PIN during this arc; root-caused as #18b below.)
+
+18b. **FIX PENDING VERIFY (2026-07-07): sim-mode reward grants silently dropped — entire
+    reward-handler web unregistered.** Repro (dump14, unpinned run): user received a magic
+    scroll in Fillmore sim; before/after F2 snapshots (gf22129/gf22913) show `$21`, `$0295`,
+    and the whole `$0290` stats block UNCHANGED — the grant wrote nothing. The watch-mode
+    capture between the snapshots (anom_hf22391) held exactly one dispatch-miss:
+    `$01:9C82 → $01:9CD6`. Decoded: `$01:9C6F` is an RTS-trick REWARD DISPATCHER
+    (fall-through code, itself never an entry): `REP; (id-1)*2 → X; LDA long $019C94,X`
+    (20-entry handler-1 table `$9C94-$9CBB`); `LDX #$9C82; PHX; PHA; SEP #$20; RTS`.
+    `$9CD6` IS the MP-scroll grant: `INC long $0295` (persistent MP) + `INC long $0021`
+    (working copy) + message (`LDY #$8994; JSR $93A8`) + sound + BRK syscall → RTS.
+    None of the 17 unique handlers (nor the shared `$9C83` PLP;RTS continuation) were
+    decoded → EVERY sim reward type silently host-unwound. Fix: 18 `func ... entry_mx:1,0`
+    registrations in bank01.cfg (single-shot class per §1 — handlers are linear to their
+    own RTS; `$9C83` is an `$03:8712`-style trampoline; NOT the B8C2 mid-loop kind).
+    WRAM model learned: `$0295` = PERSISTENT MP (part of the `$0290` save-stats block:
+    $0291 level, $0293 HP, $0295 MP, $0297 next-level pop, $0299+ HAVE flags); `$21` =
+    act/working copy, loaded from `$0295` at `$02:84E0` (`LDA $0295; STA $21`); act-mode
+    pickups INC only `$21` ($00:887E via the $00:87BD item dispatch). Grep found NO
+    direct writer of `$0295` anywhere in ROM other than new-game STZ ($02:BE69) and this
+    long-addressed handler — future stats-block bugs: suspect event/reward handlers with
+    `AF/8F ... 00` long addressing, not `8D`-form stores. Verify: re-trigger any sim
+    reward → `$0295`/`$21` increment + scroll usable in next act, no new dispmiss.
+    **VERIFIED 2026-07-07 (dump15/17):** scroll granted, `$0295`=01 (exactly once — also
+    the proof the reward web's TAIL-dispatch shape single-executes), persists across
+    modes, castable in the next act.
+
+19. **OPEN — NEW (2026-07-07, dump17 f≈25.8-26.2k): `bank_00_B8AB_M0X0` garbage-variant
+    ×3 in act mode — first bug in the NEWLY-OPENED magic/projectile path.** Context: this
+    was the first session where casting works at all (#18), the first with
+    AR_RANGED_SWORD, and the user was testing spells in act stages — code that has never
+    executed before. Signal: `[garbage-variant] entered MISDECODE variant bank_00_B8AB_M0X0
+    (m=0 x=0)` from callers `bank_00_B82E/B842/B868` (a sibling family — plausibly
+    per-spell/projectile spawn handlers); capture saved (anom_hf25833_garbage11.jsonl).
+    Static check (tools/dis65.py): the m=0 decode of $B8AB is COHERENT
+    (`JSR $853D; LDA #$B8E9; STA $0012,Y` — plants a handler pointer — `LDA #$FFE0;
+    JSR $8709` — velocity setup) while m=1 decodes to garbage — so the RUNTIME width
+    (m=0) is right and the emitted M0X0 variant is a mis-synthesized wrong-width sibling
+    (decoder assumed the entry is m=1). Likely fix shape: `func bank_00_B8AB B8AB
+    entry_mx:0,0` (or an entry_mx correction on the containing decode) — but VERIFY the
+    visible symptom first (which spell/effect misbehaves?) and check the B82E/B842/B868
+    callers' own decode assumptions before touching cfg (§1 decision tree; NOT obviously
+    a paired-return — the callers dispatch it, garbage-variant not dispatch-miss).
+    Same-session dumps also show the recurring act-mode `$00:896F` object-loop misses
+    ($8078/$80B4/$82ED ×~25/frame-window) now correctly auto-classified DO-NOT-REGISTER
+    (paired-returns of `JSR $8915`); their residual m/x-leak-on-unwind is the suspected
+    feeder of the B8AB wrong-width dispatch — if #19 needs an engine fix, that's the
+    thread to pull (ancestor-skip carrying restored m/x).
 ---
 
 ## 8. Build & regen workflow

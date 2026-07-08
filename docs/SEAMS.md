@@ -535,9 +535,64 @@ whichever event first walks into one will `[dispatch-oob]` loudly. Closing this 
 WRITERS traced once (who stores to `$6E20`/`$7920`), then a cfg/indirect-vector authorization —
 it cannot be closed statically.
 
-**Related open thread:** the `$03:9FCD` dispatcher family (`$A21A/$A27F/$A498/$A4A8/$A4B8`, ×4
-tail-calls each, same `PHY;BRL` idiom as `$9D4D`) is statically censused but untriaged — prime
-suspect for the one-of-N cutscene actor sprites (DEBUG.md §7.17).
+**Resolved thread (2026-07-07):** the one-of-N cutscene actor sprites (DEBUG.md §7.17 —
+lair-seal attackers, Bloodpool lightning pair) were fixed by registering the **`$9220`
+coroutine-resume family**, NOT the `$9FCD` dispatcher family (which remains statically
+censused but symptom-free). The town-event code yields via a resume slot: a trampoline
+does `LDA #<resume-1>; PHA; LDA $9220; PHA; RTS` and the counterpart stores the next
+resume-1 into `$9220`. Three known members, all dispatch-only entries (no C fall-through):
+`$03:CA7A` (JSL $01B790; RTS), `$03:CDAD` and `$03:CE57` (PLX; BRL loop-resume). CE57 was
+found by tools/resolve_miss.py's first run, closing bug-ledger #13's untraced `$CE56`.
+
+---
+
+## Sim-mode REWARD-GRANT web — `$01:9C6F` (mapped 2026-07-07, the lost-scroll arc, DEBUG.md #18b)
+
+All sim rewards (scroll grants, extra-life/max-stat gifts, town offerings' effects) go through
+one RTS-trick dispatcher — a clean `rewards.c` decomp target and the model example of the
+SAFE-to-register TAIL-dispatch shape (the containing function ENDS at the dispatch RTS, so
+handlers single-execute; proven by `$0295`=01 after one grant):
+
+- **`$01:9C6F`**: `REP #$20; AND #$00FF; DEC; ASL; TAX; LDA $019C94,X; LDX #$9C82; PHX; PHA;
+  SEP #$20; RTS` — reward id (1-based) indexes the 20-entry handler-1 table `$01:9C94-$9CBB`;
+  every handler enters **m=1 x=0** and RTSes to the shared `$9C83` (`PLP; RTS`).
+- 17 unique handlers `$9CBC-$A02F`, all registered in bank01.cfg. Known semantics:
+  `$9CBC` = no-op (ids 1-4), `$9CBD` = +1 max-stat `$02AB`, **`$9CD6` = +1 magic scroll**
+  (`INC long $0295` persistent + `INC long $0021` working + message `LDY #$8994; JSR $93A8`
+  + sound + BRK syscall $0D).
+
+**MP/scroll persistence model (DEBUG.md #18b):** `$0295` (in the `$0290` save-stats block:
+$0291 level, $0293 HP, $0295 MP, $0297 next-level pop, $0299+ HAVE flags, $02A2+ items,
+$02AB lives) is the PERSISTENT count; `$21` is the act-mode WORKING copy, loaded at
+`$02:84E0` (`LDA $0295; STA $21`) — MP refills to the persistent max each act by design.
+Act-mode pickups INC only `$21` ($00:887E via the $00:87BD item dispatch); sim grants INC
+both. The stats block has NO `8D`-form direct writers — event/reward handlers use `AF/8F`
+long addressing (grep lesson; `tools/romxref.py` handles this).
+
+---
+
+## Magic system — full wiring map (2026-07-07, the "magic dead" arc, DEBUG.md #18)
+
+End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
+
+1. **Unlock**: HAVE flags `$0299-$029C` = 01/02/03/04 (Fire/Stardust/Aura/Light), granted by
+   reward web / act pickups; persisted in the `$0290` stats block.
+2. **Equip** (sim/menu): `$01:915D` derives the SELECTED-magic byte **`$02AC`** from
+   `$0299,X` (`AND #$7F`).
+3. **Input**: NMI joypad shadow at `$02:AC4E`: **`$00A0` = `$4218` & `$F4`** (held byte:
+   bit7=A, bit6=X; `$F4` is an input-enable mask the cast STZs) — `$00A1` = the `$4219`
+   byte (B/Y/Select/Start/dpad). LEVEL-sensitive, not edge.
+4. **Trigger**: player-object handler `$00:9832` (obj base `$08A0`, handler ptr `$08B2`)
+   tests `$A0` `BIT #$00C0` at `$00:9843` → `BRL $00:9DE1`. (Y-attack test on `$A1` sits
+   7 bytes earlier in the same handler — if sword works, the gate is being reached.)
+5. **Gate** `$00:9DE1` (all four must pass; each failure BRLs to the shared bail `$00:984E`):
+   `$F8`==0 (no cast in progress) → `$02AC`!=0 (equipped) → player state `$08D0`
+   `BIT #$2008` CLEAR (not hurt/INVULN — the AR_NO_KNOCKBACK interaction, see dev-config) →
+   `$21`>0 (MP).
+6. **Cast**: `DEC $21`; `$08D0 |= $0010`; `INC $F9`; `STZ $F4`; `JSR $862A/$8E2F/$8623`
+   (effect spawn chain). The spell-projectile objects run in the bank-0 object system —
+   **first-ever-executed 2026-07-07; `$00:B8AB` garbage-variant is the open item there
+   (DEBUG.md #19)**.
 
 ---
 
@@ -602,7 +657,7 @@ scheme is **presentation-only**: `$0088`, timers, and logic never see the extra 
 
 | Seam | Routine / address | Hardware | Intent | Status |
 |---|---|---|---|---|
-| Joypad read | auto-joypad enable `$4200` bit0; `$4218-$421F` | controller | "read player input" | 🟡 (TBD: where logic consumes it) |
+| Joypad read | auto-joypad enable `$4200` bit0; `$4218-$421F` | controller | "read player input" | 🟢 consumers mapped 2026-07-07: NMI shadow `$02:AC4E` → `$00A0` = `$4218`&`$F4` (A/X/L/R held) and `$00A1` = the `$4219` byte; game logic reads the SHADOWS (cast trigger `$00:9843`, attack test on `$A1`), never the ports. Only other direct port reads: `$00:8151` combo check + bank-2 `$4219` menu readers. See "Magic system" §3 |
 
 ---
 

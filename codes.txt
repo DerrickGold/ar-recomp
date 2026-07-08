@@ -1,0 +1,366 @@
+
+
+------------------------------------------------------------------------------
+
+   ZSNES/PAR codes for
+
+   Act Raiser
+
+   Engineered by flamingspinach – http://genesisreality.dyndns.org/
+
+------------------------------------------------------------------------------
+
+This file is adapted from the readme for a .CHT file submission to Zophar’s
+Domain (http://www.zophar.net/). All these codes have been engineered by me,
+flamingspinach, and are not supported by the makers of the game (namely, Enix
+and Quintet). I’m following GameFAQs (http://www.gamefaqs.com/) convention in
+terms of the width of this document (79 characters). I have found a surprising
+number of working cheats for Act Raiser, and may think of more to look for
+later; therefore, this is not a final version.
+
+   ---------------------------------------------------------------------------
+      Code Table (ZSNES/PAR format)
+   ---------------------------------------------------------------------------
+
+NOTE: Since there are so many codes, I’ve split them up into four sections.
+The first two sections apply to the [ACT] mode, when you’re walking around
+killing monsters, jumping, walking through doors etc. The last two sections
+apply to the [SIM] mode, when you’re flying around shooting bats, dragons,
+devils, and giant heads, as well as helping the people build their houses. The
+first and third sections are codes you will have to turn off from time to
+time. The second and fourth sections are codes that you can just leave on
+forever. Just FYI. :)
+
+1)  7E001D08 INF HP
+2)  7E001C01 INF LIVES
+3)  7E00E601 INF TIME
+4)  7E08D120 INVULNERABILITY
+5)  7E0BCC00 NO BOSS HEALTH 1
+6)  7E134C00 NO BOSS HEALTH 2
+7)  7E0CCC00 NO BOSS HEALTH 3
+8)  7E130C00 NO BOSS HEALTH 4
+9)  7E0ECC00 NO BOSS HEALTH 5
+
+10) 7E00210A INF MP
+11) 7E0282FF INF SP
+12) 7E00E480 RANGED SWORD
+13) 7E001F99 MAX SCORE
+14) 7E002099 MAX SCORE
+15) 7E00C300 ROOM ALWAYS LIT
+
+16) 7E02A208 1ST ITEM WHEAT
+17) 7E02A30E 2ND ITEM SKULL
+18) 7E02A409 3RD ITEM HERB
+19) 7E02A50A 4TH ITEM BRIDGE
+20) 7E02A60B 5TH ITEM MUSIC
+21) 7E02A70D 6TH ITEM TABLET
+22) 7E02A80F 7TH ITEM FLEECE
+23) 7E02A907 8TH ITEM BREAD
+
+24) 7E028608 INF HP [SIM]
+25) 7E022E03 MAX QUALITY 1
+26) 7E023003 MAX QUALITY 2
+27) 7E023203 MAX QUALITY 3
+28) 7E023403 MAX QUALITY 4
+29) 7E023603 MAX QUALITY 5
+30) 7E023803 MAX QUALITY 6
+31) 7F9EFA40 INF SOUL POINTS 1
+32) 7F9EFC40 INF SOUL POINTS 2
+33) 7F9EFE40 INF SOUL POINTS 3
+34) 7F9F0040 INF SOUL POINTS 4
+35) 7F9F0240 INF SOUL POINTS 5
+36) 7F9F0440 INF SOUL POINTS 6
+37) 7E029901 HAVE FIRE
+38) 7E029A02 HAVE STARDUST
+39) 7E029B03 HAVE AURA
+40) 7E029C04 HAVE LIGHT
+41) 7F96B800 SAFE FILLMORE 1
+42) 7F96B900 SAFE FILLMORE 1
+43) 7F96BA00 SAFE FILLMORE 2
+44) 7F96BB00 SAFE FILLMORE 2
+45) 7F96BC00 SAFE FILLMORE 3
+46) 7F96BD00 SAFE FILLMORE 3
+47) 7F96BE00 SAFE FILLMORE 4
+48) 7F96BF00 SAFE FILLMORE 4
+49) 7F96C000 SAFE BLOODPOOL 1
+50) 7F96C100 SAFE BLOODPOOL 1
+51) 7F96C200 SAFE BLOODPOOL 2
+52) 7F96C300 SAFE BLOODPOOL 2
+53) 7F96C400 SAFE BLOODPOOL 3
+54) 7F96C500 SAFE BLOODPOOL 3
+55) 7F96C600 SAFE BLOODPOOL 4
+56) 7F96C700 SAFE BLOODPOOL 4
+57) 7F96C800 SAFE KASANDORA 1
+58) 7F96C900 SAFE KASANDORA 1
+59) 7F96CA00 SAFE KASANDORA 2
+60) 7F96CB00 SAFE KASANDORA 2
+61) 7F96CC00 SAFE KASANDORA 3
+62) 7F96CD00 SAFE KASANDORA 3
+63) 7F96CE00 SAFE KASANDORA 4
+64) 7F96CF00 SAFE KASANDORA 4
+65) 7F96D000 SAFE AITOS 1
+66) 7F96D100 SAFE AITOS 1
+67) 7F96D200 SAFE AITOS 2
+68) 7F96D300 SAFE AITOS 2
+69) 7F96D400 SAFE AITOS 3
+70) 7F96D500 SAFE AITOS 3
+71) 7F96D600 SAFE AITOS 4
+72) 7F96D700 SAFE AITOS 4
+73) 7F96D800 SAFE MARAHNA 1
+74) 7F96D900 SAFE MARAHNA 1
+75) 7F96DA00 SAFE MARAHNA 2
+76) 7F96DB00 SAFE MARAHNA 2
+77) 7F96DC00 SAFE MARAHNA 3
+78) 7F96DD00 SAFE MARAHNA 3
+79) 7F96DE00 SAFE MARAHNA 4
+80) 7F96DF00 SAFE MARAHNA 4
+81) 7F96E000 SAFE NORTHWALL 1
+82) 7F96E100 SAFE NORTHWALL 1
+83) 7F96E200 SAFE NORTHWALL 2
+84) 7F96E300 SAFE NORTHWALL 2
+85) 7F96E400 SAFE NORTHWALL 3
+86) 7F96E500 SAFE NORTHWALL 3
+87) 7F96E600 SAFE NORTHWALL 4
+88) 7F96E700 SAFE NORTHWALL 4
+
+   ---------------------------------------------------------------------------
+      Code Descriptions
+   ---------------------------------------------------------------------------
+
+NOTE: For this section, I’m going to deviate a bit from my normal system and
+clump similar codes into one description. If I didn’t, this section would be
+incredibly long. :)
+
+IMPORTANT NOTE: Beating the bosses (except the ones in Death Heim) will cause
+the game to crash if you have certain codes on. HERE IS HOW TO BEAT A LEVEL
+WITHOUT CRASHING THE GAME: When the boss appears, save state. Then turn off
+codes 1, 2, 3, and 4 (if they’re not already off). Then turn on either code 5,
+6, 7, 8, or 9, depending on the boss (see the descriptions of those codes for
+details). Only turn on one of these! By now, your health bar and the boss’s
+health bar may look screwed up. Load the state you just saved. Now attack the
+boss once. Try not to die – I mean come on, how hard is it to hit a boss once
+without dying!? :) Now the boss will start exploding. When it’s gone, your
+character will raise his sword in a victory stance. Notice that the game is
+taking your lives and seconds on the timer and converting them into points.
+This is why you don’t want to leave codes 2 and 3 on. After that’s done, the
+game heals your character. This is why you don’t want to leave code 1 on. :)
+As soon as you’re back in [SIM] mode, you can turn codes 1, 2, 3, and 4 back
+on again if you want. Make sure to turn off codes 5, 6, 7, 8, and 9! And
+that’s all. Sorry it’s that hard, but this game is STRANGELY CODED! Let me say
+that again. STRANGELY CODED! :) REMEMBER! THIS WHOLE PROCESS DOESN’T APPLY IN
+DEATH HEIM – there, just turn on all the codes 5-9, and defeat the bosses.
+Why? Because in Death Heim, beating the bosses isn’t beating a level, and you
+just get transported back to the main room.
+
+NOTE: If you want to modify any of these codes, keep this in mind: Many of the
+values in this game are stored in a strange way. For instance, if on the
+screen the number says 28, the value will be stored as 28 IN HEXADECIMAL!
+Which is 40 in decimal. So if you’re stuck, try searching in hexadecimal for
+decimal numbers... o_O
+
+IMPORTANT NOTE: -- This note was removed because it applies to the .CHT file
+that originally went with this document. Go to http://www.zophar.net/zsnes/cht
+to see it. --
+
+1) INF HP – Fixes your HP at 8. Why 8? Because if your HP is higher than your
+      max HP, the health bar looks screwed up. And in the beginning of the
+      game, your max HP is 8. Later on it will look like you’re low on health,
+      but don’t worry, it will stay at 8. It just looks ugly that’s all. Live
+      with it! :)
+
+2) INF LIVES – Fixes your lives at 1. Why 1? Because at the end of the level
+      the game converts all your lives to points, and nobody wants to wait for
+      99 lives to scroll down to 0. :D
+
+3) INF TIME – Fixes your remaining time at 1. Why 1? See above (#2).
+
+4) INVULNERABILITY – This is the most annoying-looking code ever. It makes you
+      flash red and white really fast. Not for the epileptic. However, it does
+      get the job done (i.e. makes you invulnerable to enemies and attacks).
+      There are some problems, though – for example, jumping onto a moving
+      platform will cause you to lose control of the character until you turn
+      off the code – so I’d keep this turned off unless you really need it
+      (i.e. when enemies are swarming you).
+
+5-9) NO BOSS HEALTH 1-5 – MAKE SURE TO READ THE VERY IMPORTANT NOTE ABOVE!
+      These codes will turn bosses into wimps. :) One hit will kill them.
+      However, different bosses have different codes. Here is a list:
+
+            For Boss:           Use Code:
+
+            Fillmore Boss #1    NO BOSS HEALTH 1
+            Fillmore Boss #2    NO BOSS HEALTH 2
+            Bloodpool Boss #1   NO BOSS HEALTH 3
+            Bloodpool Boss #2   NO BOSS HEALTH 4
+            Kasandora Boss #1   NO BOSS HEALTH 5
+            Kasandora Boss #2   NO BOSS HEALTH 4
+            Aitos Boss #1       NO BOSS HEALTH 4
+            Aitos Boss #2       NO BOSS HEALTH 4
+            Marahna Boss #1     NO BOSS HEALTH 4
+            Marahna Boss #2     NO BOSS HEALTH 4
+            Northwall Boss #1   NO BOSS HEALTH 4
+            Northwall Boss #2   NO BOSS HEALTH 1
+            Tanzra              Use all the codes when facing Tanzra and all
+                                  the other bosses in Death Heim.
+
+10) INF MP – Lets you use your magic attack as many times as you want by
+      fixing your MP at 10 (0A in hex).
+
+11) INF SP – Lets you cause “Miracles” in [SIM] mode as many times as you want
+      by fixing your SP at 255 (FF in hex). NOTE: Later on in the game, this
+      will look like 511 (01FF in hex), because (as I found out a while after
+      I made the code) this value is two bytes long... but there’s no real
+      reason to go back and fix it, and besides, it’s a good thing, right? :D
+
+12) RANGED SWORD – Exactly ONCE in the game, you’ll find a powerup that looks
+      a bit like a lightsaber. ONCE! And it expires after you leave the room.
+      I don’t even know why Enix/Quintet put this in the game, but I’m sure
+      glad they did, because now I’ve hacked it so that you can use this
+      super-rare powerup... ALL THE TIME! *crazy maniacal laughter* Yeah. So,
+      what does the Ranged Sword (I made that up) do? It causes crescent
+      shockwaves to fly forward when you swing your sword, which allows you to
+      kill enemies across the screen! Cool, no? Again, I have no idea why they
+      even made this.
+
+13-14) MAX SCORE – Just what it sounds like. Your score is always 99990. Why
+      the 0? Because you only get points in units of 10! How ridiculous. So
+      the max score is actually 9999, it just shows up as 99990 because the
+      programmers apparently thought it would look cooler. :)
+
+15) ROOM ALWAYS LIT – There’s ONE room in one of the dungeons where the
+      lighting slowly goes from bright to dark back to bright again (remember
+      those rooms with fireflies in Super Metroid?). Yes, ONE room in the
+      entire game. See my rant in #12. :) This code keeps the light level at
+      full so you can see what you’re doing.
+
+16-23) The ITEM codes – There are exactly 16 items in the game. You can hold
+      up to 8 items at a time. Luckily, only 8 of the items are even necessary
+      for advancing the story (Wheat, Magic Skull, Herb, Bridge, Harmonious
+      Music, Ancient Tablet, Sheep’s Fleece, and Loaf of Bread). So, I made
+      codes so that you’re always holding the 8 important items! Cool, no? :)
+      As for the other 8 items... four of them are the magic powers (which I
+      made codes for anyway), two are items to increase your stats (which I
+      also made codes for), and the remaining two are the bomb which kills
+      flying enemies (which don’t even exist anymore, thanks to the SAFE
+      codes) and a duplicate Ancient Tablet which doesn’t work (!?). NOTE:
+      when selecting an item, GO BY THE NAMES, NOT THE PICTURES! For some
+      reason the pictures might be mixed around... o_O IMPORTANT NOTE: Don’t
+      use your infinite magic skulls to seal random Monster’s Lairs – the
+      Monster’s Lairs are important to the advancement of the story, so if you
+      seal them before the people do, there could be problems. Only use the
+      skull on the one Monster’s Lair it was originally intended for – the
+      devils’ Lair in the southwest area of Bloodpool.
+
+24) INF HP [SIM] – This infinite HP code works on the angel (looks more like a
+      cherub to me) in [SIM] mode. Apart from that it’s the same as code #1.
+
+25-30) MAX QUALITY 1-6 – These codes maximize the quality of housing in all 6
+      cities. Normally, the houses get better and better depending on the
+      number of Monster’s Lairs you seal, and if you want all the houses to be
+      top quality, you have to destroy the lower quality ones with
+      earthquakes. Unfortunately, that often destroys farms, ranches, etc., so
+      this code is a cool alternative! :) Each code works on a different city.
+
+31-36) INF SOUL POINTS 1-6 – You may not know this, but every time you shoot
+      and kill a flying enemy in [SIM] mode, you get a “soul point”. Did you
+      notice that when you kill a monster, it turns into a small white orb and
+      flies to the temple in the city? That’s what I call a “soul point”. I
+      don’t know what it’s really called, because your “soul points” aren’t
+      displayed anywhere, as far as I know. Why do I call it a “soul point”?
+      Notice that Enix and Quintet, the makers of this game, also made Soul
+      Blazer, Illusion of Gaia, and Terranigma (my favorite SNES game!). Also
+      notice that the music in Act Raiser is similar to that in Soul Blazer,
+      and that the sound effects are almost identical between Act Raiser and
+      Soul Blazer. Also remember that in Soul Blazer, Illusion of Gaia, and
+      Terranigma, souls are represented by glowing white orbs. Aha! These must
+      be souls too! :) Anyway, what do “soul points” do? Whenever a villager
+      leaves the temple and builds a house, you use up a “soul point”. You can
+      only get “soul points” by killing monsters. Since the SAFE codes got rid
+      of all the monsters, there’s no way to get “soul points”, and you can
+      never build houses! Hence these codes. Each code acts on a different
+      city, and sets the “soul points” for that city to 64 (for some reason if
+      you set it higher it doesn’t work).
+
+37-40) The HAVE -------- codes – These four codes give you all four magic
+      attacks before you’re supposed to get them. The four attacks are Magical
+      Fire, Magical Stardust, Magical Aura, and Magical Light, with Fire being
+      the least powerful and Light the most.
+
+41-88) The SAFE codes - I put these last on the list because there’s so @#&$
+      many of them! What do they do? Every two codes get rid of the monsters
+      from one Monster’s Lair. There are four Lairs per city, so there are 8
+      codes per city. And there are six cities. So there are 48 codes. Simple.
+      Now aren’t you glad there isn’t an entry for each code? Heh. :)
+
+   ---------------------------------------------------------------------------
+      Codes Planned for Later Updates
+   ---------------------------------------------------------------------------
+
+- A better invulnerability code! This one annoys me.
+
+- Fix the item codes so the images don’t move around, maybe... I have no idea
+      how I’d go about this one though.
+
+- There are way too many SAFE codes, but I don’t know what I can do about
+      that.
+
+- Invulnerability in [SIM] mode, maybe... not really necessary though.
+
+Any suggestions? Contact me – see the contact section below.
+
+   ----------------------------------------------------------------------------
+      Terms of Use                                                             
+   ----------------------------------------------------------------------------
+
+Here’s what you need to know about this file, legally speaking. Don’t be 
+offended by the all caps text, please. I fully capitalized it not to seem as if 
+I were shouting at you but rather just to draw attention to it, and to make 
+sure that people actually read it. Thanks to Sayain for pointing out that some 
+people might see it otherwise. :)
+
+I, FLAMINGSPINACH, OWN ALL RIGHTS TO THIS DOCUMENT, INCLUDING DISTRIBUTION, 
+MODIFICATION, ETC. BY USING THIS DOCUMENT IN ANY WAY, YOU AGREE TO THESE TERMS 
+OF USE: 1) YOU MAY NOT DISTRIBUTE OR REDISTRIBUTE THIS DOCUMENT UNLESS YOU HAVE 
+OBTAINED EXPLICIT, WILLING CONSENT FROM ME, FLAMINGSPINACH. 2) YOU MAY NOT 
+MODIFY THIS DOCUMENT AND REDISTRIBUTE IT, EVER. 3) YOU MAY NOT CLAIM THIS 
+DOCUMENT OR ANY RECOGNIZABLE PART THEREOF TO BE THE PROPERTY OF ANYONE 
+EXCEPTING MYSELF, FLAMINGSPINACH.
+
+ALL REGISTERED TRADEMARKS AND COPYRIGHTED WORDS/PHRASES ARE PROPERTY OF THEIR 
+RESPECTIVE OWNERS.
+
+Websites whose owners have explicit, willing consent from me to distribute 
+and/or redistribute this document:
+
+- http://www.gamefaqs.com/
+
+Simple enough, no?
+
+   ----------------------------------------------------------------------------
+      Contact                                                                  
+   ----------------------------------------------------------------------------
+
+You can contact me, flamingspinach, with questions, comments, suggestions, or
+whatever (no spam please :) ) at:
+
+   AIM:    flamingspinach
+   YIM:    flamingspinach
+   MSN:    flamiSUPERBLEARYngspinach@@@lycos.com
+   ICQ:    214673046
+   IRC:    flamingspinach on sorcery.net
+   Jabber: flamingspinach on jabber.org (if I can get it to work... o_O)
+   Email:  genesDECAFFEINATEDisreality@@@genesisreality.dynVORTEXdns.org
+
+Some guidelines for talking to me (@_@): Don’t ask me to add you to my buddy 
+list, if you’re the one who contacted me. I won’t do it. After all, the reason 
+I’ve put this contact info up here is so that people can talk to me about my 
+guides, not for lonely people to bombard me with small talk. :) I don’t mind 
+talking to my readers on IM, but this contact section is not a Personals ad. If 
+you talk to me on IM after reading this FAQ, I expect that you want to talk to 
+me about my FAQ. That makes sense, doesn’t it? Thanks.
+
+Of course, remove the ALL CAPS stuff and extra @'s, they're antispam... à la 
+Slashdot. o_O
+
+-EOF-
+

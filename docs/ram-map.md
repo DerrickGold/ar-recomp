@@ -91,11 +91,11 @@ Two-byte entries per town.
 | $7E:0288 | 9 | Name |
 | $7E:0291 | 2 | Level |
 | $7E:0293 | 2 | HP |
-| $7E:0295 | 2 | Magic points |
+| $7E:0295 | 2 | Magic points — PERSISTENT copy. `$21` is the act/working copy, loaded from here at `$02:84E0` (`LDA $0295; STA $21`); act-mode pickups INC only `$21` ($00:887E); sim reward grants INC BOTH via long addressing (`$01:9CD6`, DEBUG.md #18b). New-game STZ at $02:BE69. No other direct writers in ROM — stats-block writes use `AF/8F`-form long addressing |
 | $7E:0297 | 2 | Population needed for next level |
 | $7E:0299 | 9 | Magic inventory |
 | $7E:02A2 | 9 | Offerings inventory |
-| $7E:02AB | 1 | Number of lives |
+| $7E:02AB | 1 | Number of lives (max-HP-style grant handler `$01:9CBD` INCs it) |
 
 ### Platformer Score Records ($7E:02B3+)
 24 entries (6 towns x 2 acts x 2 bytes each).
@@ -198,7 +198,7 @@ source doc: many counters are stored as decimal-looking hex (screen "28" = $28).
 | `$7E:0CCC` | NO BOSS HEALTH 3 ($00) |  |
 | `$7E:130C` | NO BOSS HEALTH 4 ($00) |  |
 | `$7E:0ECC` | NO BOSS HEALTH 5 ($00) |  |
-| `$7E:0021` | INF MP ($0A) | **MP / magic-scroll count** — the §7.18 bug's primary address |
+| `$7E:0021` | INF MP ($0A) | **MP / magic-scroll count** — WORKING copy of persistent `$0295` (see Master block above); pinning this gives castable MP but does not persist |
 | `$7E:0282` | INF SP ($FF) | SP is 16-bit ($0282/$0283) |
 | `$7E:00E4` | RANGED SWORD ($80) |  |
 | `$7E:001F` | MAX SCORE ($99) |  |
