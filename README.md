@@ -59,16 +59,19 @@ out, a native recompilation is far more portable and maintainable than either.
 
 ### Current status
 
-**Actively in development — expect bugs.** Rough state as of this writing:
+**Actively in development — expect bugs.**
+**[`docs/progress.md`](docs/progress.md) is the authoritative, kept-current
+status tracker** — per-action-stage / per-sim-town playability tables plus
+automated codebase metrics; update it whenever a stage/town is actually played.
+Snapshot as of 2026-07-07:
 
-- **Action stages**: playable. Multiple levels load, combat and boss fights work,
-  level transitions function.
-- **Sim mode** (the town simulation half of the game): a major corruption/freeze
-  bug in the actor-spawn system was just fixed, but sim mode has **not** been
-  fully verified end-to-end yet. Known open issue: a progressive slowdown in the
-  "direct the people" path-tracing screen, not yet root-caused.
-- Both halves still have open graphical, audio, and timing bugs. See
-  [`DEBUG.md`](DEBUG.md) for the full, current bug list and investigation state.
+- **Fillmore (kingdom 1)**: full clean round — act 1 → sim mode → act 2 —
+  including development cycles, story events, lair-seal cutscenes, reward
+  grants, and magic casting.
+- **Bloodpool (kingdom 2)**: act 1 plays clean and transitions into sim mode;
+  the rest of its sim round and act 2 are not yet verified.
+- **Kingdoms 3-6**: untested.
+- Open bugs and investigation state live in [`DEBUG.md`](DEBUG.md).
 
 ## AI disclosure
 
@@ -140,11 +143,13 @@ ActRaiserRecomp/
                                    replays) — NOT committed, purely local
 ```
 
-`DEBUG.md` and `docs/SEAMS.md` are the two documents worth reading before diving
-into the code: `DEBUG.md` tells you *how to diagnose* a problem (which tool,
-which env var, which known gotcha), and `SEAMS.md` tells you *what the game's
-internal architecture actually is* (object systems, dispatch tables, subsystem
-boundaries), as reverse-engineered so far.
+`DEBUG.md`, `docs/SEAMS.md`, and `docs/progress.md` are the three documents worth
+reading before diving into the code: `DEBUG.md` tells you *how to diagnose* a
+problem (which tool, which env var, which known gotcha), `SEAMS.md` tells you
+*what the game's internal architecture actually is* (object systems, dispatch
+tables, subsystem boundaries) as reverse-engineered so far, and `progress.md`
+tells you *what actually works today* (playability per stage/town + codebase
+metrics).
 
 ## Build instructions
 
@@ -252,7 +257,7 @@ see `HandleInput()` in `src/main.c`:
 | `X`, `A`, `S`, `Q`, `W`, Return, Right Shift | remaining face/shoulder buttons and Start/Select — exact SNES button-to-key mapping isn't documented here yet; see `HandleInput()` for the precise bit values |
 | `Esc` | quit |
 | `P` | pause |
-| `T` | turbo |
+| `T` | turbo — fast-forward at 8 game frames per rendered frame (`AR_TURBO_MULT` to change) |
 | `F5` / `F7` | save / load state |
 | `F6` | level warp (see `AR_WARP` below) |
 | `F2` | full diagnostic snapshot (WRAM/VRAM/CGRAM/OAM + screenshot) |
@@ -266,8 +271,15 @@ exported as an environment variable, which is how these are read):
 | `AR_INF_HP=1` | pins player HP — infinite health |
 | `AR_FREEZE_TIMER=1` | freezes the action-stage countdown timer. **Currently still buggy** — has an auto-release heuristic for the boss-defeat drain sequence that isn't fully reliable yet |
 | `AR_MOONJUMP=1` (or `=<n>` for px/frame) | hold the jump button to fly upward |
-| `AR_NO_KNOCKBACK=1` | permanent invincibility — no damage, no hitstun |
+| `AR_NO_KNOCKBACK=1` | permanent invincibility — no damage, no hitstun. Magic-aware: invulnerability drops only for the 1-2 frames where a spell cast actually fires |
+| `AR_ALL_MAGIC=1` | unlocks all four spells in the equip menu |
+| `AR_RANGED_SWORD=1` | sword fires a projectile |
+| `AR_INF_MP=1` (or `=<n>`) | infinite magic scrolls (pins the working count; never written to the save file) |
+| `AR_INF_SP=1` | sim mode: infinite SP (miracle points), self-calibrating to your max |
+| `AR_ANGEL_HP=1` | sim mode: infinite angel health, self-calibrating to your max |
+| `AR_PIN=<8-hex-PAR>[,...]` | generic Pro Action Replay code pinner (e.g. `7E00210A`); catalogue in `codes.txt` / `docs/ram-map.md` |
 | `AR_WARP=<region_hex><act_hex>` | sets the `F6` warp target (default `0101` = Fillmore act 1); only takes effect from a transition-capable state |
+| `AR_TURBO_MULT=<n>` | game frames per rendered frame while `T` turbo is on (default 8) |
 
 Everything else in `dev-config.ini`'s `[Debug]` section is diagnostic
 instrumentation for active bug-hunting, documented in `DEBUG.md` — not
