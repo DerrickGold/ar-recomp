@@ -332,6 +332,70 @@ void ActRaiser_ApplyCheats(void) {
    * Fillmore ($18==01) — that bug disabled them after warping to region 2+. The
    * player object/HP/timer fields are shared by the action engine across every
    * region, so the same writes apply everywhere. */
+  /* ── ALL-MODE cheats (above the action-stage gate: they feed the sim-mode
+   * equip menu / angel, so they must pin in every mode) ─────────────────── */
+
+  /* AR_ALL_MAGIC=1: unlock all four spells. HAVE flags $0299-$029C = 01/02/03/04
+   * (cheat-map values, docs/ram-map.md). Pinned in ALL modes so the sim-mode
+   * equip menu lists them; SELECTING one still goes through the menu (the equip
+   * routine $01:915D derives $02AC from these). DEBUG.md #18 has the full
+   * magic wiring map. */
+  {
+    static int en = -1;
+    if (en < 0) { const char *e = getenv("AR_ALL_MAGIC");
+      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
+    if (en) {
+      g_ram[0x0299] = 0x01;   /* Magical Fire */
+      g_ram[0x029A] = 0x02;   /* Magical Stardust */
+      g_ram[0x029B] = 0x03;   /* Magical Aura */
+      g_ram[0x029C] = 0x04;   /* Magical Light */
+    }
+  }
+
+  /* AR_RANGED_SWORD=1: sword fires a projectile ($E4 = $80, PAR 7E00E480). */
+  {
+    static int en = -1;
+    if (en < 0) { const char *e = getenv("AR_RANGED_SWORD");
+      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
+    if (en) g_ram[0x00E4] = 0x80;
+  }
+
+  /* AR_INF_MP: infinite magic scrolls. =1 -> pin the WORKING count $21 to 10
+   * (PAR 7E00210A); =<n> -> pin to n. Deliberately does NOT touch the
+   * PERSISTENT count $0295 (DEBUG.md #18b: $21 is the act-mode working copy,
+   * loaded from $0295 at $02:84E0) so the cheat never bakes into save.srm. */
+  {
+    static int en = -1; static unsigned val;
+    if (en < 0) { const char *e = getenv("AR_INF_MP");
+      if (!e || !e[0] || e[0] == '0') en = 0;
+      else { en = 1; val = (e[0] == '1' && !e[1]) ? 0x0A
+                         : (unsigned)strtoul(e, NULL, 0); } }
+    if (en) g_ram[0x21] = (uint8)val;
+  }
+
+  /* AR_INF_SP=1: infinite sim-mode SP (miracle points). Self-calibrating: pins
+   * current SP $0282/16 to max SP $0284/16 once max is known (vs the PAR code's
+   * blunt $FF, which over-fills early-game maxima). */
+  {
+    static int en = -1;
+    if (en < 0) { const char *e = getenv("AR_INF_SP");
+      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
+    if (en && (g_ram[0x0284] | g_ram[0x0285])) {
+      g_ram[0x0282] = g_ram[0x0284];
+      g_ram[0x0283] = g_ram[0x0285];
+    }
+  }
+
+  /* AR_ANGEL_HP=1: infinite sim-mode angel health. Self-calibrating: pins
+   * current HP $0286 to max HP $0287 (the PAR code 7E028608 hardcodes 8, which
+   * would UNDER-fill after level-ups raise the max). */
+  {
+    static int en = -1;
+    if (en < 0) { const char *e = getenv("AR_ANGEL_HP");
+      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
+    if (en && g_ram[0x0287]) g_ram[0x0286] = g_ram[0x0287];
+  }
+
   if (g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07) return;
 
   /* AR_INF_HP: infinite health. =1 -> auto: pin player HP ($1D) to the
@@ -437,7 +501,28 @@ void ActRaiser_ApplyCheats(void) {
     if (en) {
       if (full) {
         g_ram[0x08C6] = 0xFF;     /* pin i-frame timer (+$26) so flag never clears */
-        g_ram[0x08D1] |= 0x20;    /* set invuln flag $08D0 bit 0x2000 (+$30) */
+        /* MAGIC EXCEPTION (2026-07-07, DEBUG.md #18): the cast gate ($00:9843 ->
+         * $00:9DE1) does BIT #$2008 on player state $08D0 and refuses to cast
+         * while the invuln flag ($2000) is set -- pinning it unconditionally made
+         * magic permanently dead. Lift the pin ONLY when a cast will actually
+         * fire this frame, i.e. when every condition of the game's own gate
+         * holds: cast button held ($00A0 & $C0 -- the NMI joypad shadow of
+         * $4218&$F4, bit7=A bit6=X, level-sensitive so the 1-frame NMI lag is
+         * fine), no cast in progress ($F8==0), magic equipped ($02AC!=0), and
+         * MP available ($21>0). The instant the cast starts the game sets $F8
+         * nonzero -> the pin snaps back ON for the whole cast animation.
+         * Residual vulnerability: only the 1-2 frames between press and cast
+         * start; holding the button with no magic/MP no longer drops invuln
+         * at all (the old version was vulnerable the entire time the button
+         * was held). */
+        int cast_imminent = (g_ram[0x00A0] & 0xC0) != 0
+                         && g_ram[0xF8] == 0
+                         && g_ram[0x02AC] != 0
+                         && g_ram[0x21] != 0;
+        if (cast_imminent)
+          g_ram[0x08D1] &= (uint8)~0x20;
+        else
+          g_ram[0x08D1] |= 0x20;  /* set invuln flag $08D0 bit 0x2000 (+$30) */
       } else {
         g_ram[0x08A0 + off] = 0xFF;
       }

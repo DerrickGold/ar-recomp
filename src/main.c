@@ -510,6 +510,7 @@ int main(int argc, char **argv) {
             g_paused = !g_paused;
           } else if (event.key.keysym.sym == SDLK_t) {
             g_turbo = !g_turbo;
+            fprintf(stderr, "[turbo] %s\n", g_turbo ? "ON (8x, AR_TURBO_MULT to change)" : "off");
           } else if (event.key.keysym.sym == SDLK_F5) {
             RtlSaveLoad(kSaveLoad_Save, 0);
             fprintf(stderr, "State saved.\n");
@@ -681,6 +682,19 @@ int main(int argc, char **argv) {
     RtlApuLock();
     bool r = RtlRunFrame(inputs);
     (void)r;
+    /* TURBO ('t' toggle): the renderer is created with PRESENTVSYNC, so
+     * RenderPresent blocks at 60Hz regardless of the SDL_Delay skip below —
+     * which made the original turbo a no-op. Real fast-forward = run extra
+     * game frames per RENDERED frame while inside the vsync'd loop. 8x by
+     * default (AR_TURBO_MULT overrides). Same input word each sub-frame
+     * (level-held buttons repeat; fine for skipping sim waits). Cheats/pins
+     * apply inside RtlRunFrame, so they hold during the skipped frames too. */
+    if (g_turbo) {
+      static int mult = -1;
+      if (mult < 0) { const char *e = getenv("AR_TURBO_MULT");
+        mult = (e && e[0]) ? atoi(e) : 8; if (mult < 2) mult = 2; }
+      for (int tf = 1; tf < mult; tf++) RtlRunFrame(inputs);
+    }
     RtlApuUnlock();
     if (perf_on) {
       extern void snes_catchup_stats(uint64_t *calls, uint64_t *cycles);
