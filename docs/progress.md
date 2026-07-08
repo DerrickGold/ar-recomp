@@ -26,8 +26,8 @@ follows the game's internal order (`$18`/`$19` in WRAM — see `docs/SEAMS.md`
 
 | Region | Act 1 | Act 2 |
 |---|---|---|
-| 1 — Fillmore | 🟡 loads, combat works, boss fought (see `DEBUG.md` for open bugs) | ⬜ Untested |
-| 2 — Bloodpool | ⬜ Untested | ⬜ Untested |
+| 1 — Fillmore | ✅ clean full playthrough (2026-07-07) | ✅ clean full playthrough (2026-07-07) |
+| 2 — Bloodpool | ✅ clean playthrough incl. act→sim transition (2026-07-07) | ⬜ Untested (sim→act-2 transition not yet reached) |
 | 3 — Kasandora | ⬜ Untested | ⬜ Untested |
 | 4 — Aitos | ⬜ Untested | ⬜ Untested |
 | 5 — Marahna | ⬜ Untested | ⬜ Untested |
@@ -41,8 +41,8 @@ identified/confirmed in the recomp yet. Untested either way.
 
 | Town | Status |
 |---|---|
-| Fillmore | 🟡 major actor-spawn corruption/freeze bug just fixed (2026-07-02); not yet fully verified — known open issue: slowdown in the "direct the people" path-tracing screen (see `DEBUG.md`) |
-| Bloodpool | ⬜ Untested |
+| Fillmore | ✅ clean full round (act1 → sim → act2, 2026-07-07): development cycles, story events (rock zap/fire), lair sealing with all cutscene actors, reward grants (scroll persists), offerings |
+| Bloodpool | 🟡 enters cleanly from act 1 (2026-07-07); lightning cutscene shows both people; full sim playability + sim→act-2 transition NOT yet verified |
 | Kasandora | ⬜ Untested |
 | Aitos | ⬜ Untested |
 | Marahna | ⬜ Untested |
@@ -60,14 +60,17 @@ someone actually plays them.
 |---|---|---|
 | Boot / title screen | ✅ | |
 | Save / load (in-game state) | ✅ | Checksum-gated continue path confirmed (`AR_SAVECHECK`) |
-| Action-stage combat | 🟡 | Core loop works; see `DEBUG.md` for open bug classes |
-| Sim-mode town simulation | 🟡 | See above — recent major fix, needs broader verification |
+| Action-stage combat | 🟡 | Core loop solid through Fillmore 1+2 / Bloodpool 1; open: `$00:B8AB` garbage-variant in the spell-projectile path (`DEBUG.md` #19) |
+| Magic casting | 🟡 | WORKS as of 2026-07-07 (was dead — blocked by our own knockback cheat, `DEBUG.md` #18); Fire verified in-stage; other 3 spells' effects pending validation (`AR_ALL_MAGIC` cheat added for exactly this) |
+| Sim-mode town simulation | 🟡 | Fillmore ✅ end-to-end (dev cycles, events, sealing, rewards); other towns pending. Reward-grant web + multi-actor cutscenes fixed 2026-07-07 (`DEBUG.md` #18b/§7.17) |
+| Scroll/MP persistence | ✅ | `$0295` persistent / `$21` working-copy model mapped + grant verified across modes (2026-07-07) |
 | Audio (music/SPC) | 🟡 | SPC upload handshake and boss-music playback fixed; a narrower "voice/SFX key-on" gap was reported and its current status isn't confirmed — verify before marking ✅ |
 | Mode 7 (overworld/menus) | 🟡 | Frame-pacing bug (1/3 speed) fixed; not otherwise deeply verified |
-| Input | 🟡 | Hardcoded keyboard mapping works (see README); no gamepad support yet |
-| Cheats | 🟡 | Most work as documented in the README; `AR_FREEZE_TIMER` known buggy |
+| Input | 🟡 | Hardcoded keyboard mapping works (see README); no gamepad support yet. Consumer side fully mapped (SEAMS "Input" + "Magic system") |
+| Cheats | 🟡 | Named cheat kit 2026-07-07: `AR_ALL_MAGIC`/`AR_RANGED_SWORD`/`AR_INF_MP`/`AR_INF_SP`/`AR_ANGEL_HP` + magic-safe `AR_NO_KNOCKBACK` + generic `AR_PIN`; real 8x turbo on `t`. `AR_FREEZE_TIMER` auto-backoff added, still unverified |
+| Debug tooling | ✅ | 2026-07-07 toolkit: `dis65`/`romxref`/`wram`/`resolve_miss`/`cycle.sh` — anomaly capture → auto-triage → proposed cfg patch loop (`DEBUG.md` §1) |
 
-## Codebase metrics (objective, automated — last measured 2026-07-03)
+## Codebase metrics (objective, automated — last measured 2026-07-07)
 
 These come from static analysis and reference-vector testing, not manual
 play, so they're a different kind of signal than the tables above: they say
@@ -78,17 +81,17 @@ it go stale — same discipline as the playability tables.
 
 | Metric | Value | How to reproduce |
 |---|---|---|
-| Hand-authored recompiler directives (`recomp/*.cfg`) | 2,184 lines | `wc -l recomp/*.cfg` |
-| → generated C output (`src/gen/*.c`) | 1,405,372 lines | `wc -l src/gen/*.c` (after `tools/regen.sh`) |
-| Hand-written game runtime (`src/*.c`/`*.h`, excl. shared engine) | 1,381 lines | `wc -l src/*.c src/*.h` |
+| Hand-authored recompiler directives (`recomp/*.cfg`) | 2,532 lines | `wc -l recomp/*.cfg` |
+| → generated C output (`src/gen/*.c`) | 2,111,037 lines | `wc -l src/gen/*.c` (after `tools/regen.sh`) |
+| Hand-written game runtime (`src/*.c`/`*.h`, excl. shared engine) | 1,626 lines | `wc -l src/*.c src/*.h` |
 | Bank coverage | 29 of 32 possible SNES banks | `ls recomp/bank*.cfg \| wc -l` |
-| Recompiled functions (unique ROM addresses) | 2,304 | `grep -c "^    { 0x" src/gen/dispatch_v2.c` |
-| Recompiled functions (× m/x width variants) | 4,308 | `python3 tools/link_audit.py` |
-| Static reachability | 4,308/4,308 (100%) — 0 orphans, 0 unreferenced variants | `python3 tools/link_audit.py` |
-| Unresolved trap sites | 54 logical sites / 102 variant emissions (~2.4% of all variants; everything else fully resolved, not silently stubbed) | `python3 tools/stub_census.py` |
+| Recompiled functions (unique ROM addresses) | 2,394 | `grep -c "^    { 0x" src/gen/dispatch_v2.c` |
+| Recompiled functions (× m/x width variants) | 4,557 | `python3 tools/link_audit.py` |
+| Static reachability | 4,557/4,557 (100%) — 0 orphans, 0 unreferenced variants | `python3 tools/link_audit.py` |
+| Unresolved trap sites | 75 logical sites / 167 variant emissions (~3.7% of all variants: 21 goto-trap + 54 indirect-oob; count GREW with coverage — newly decoded webs expose new frontier, same as the function counts) | `python3 tools/stub_census.py` |
 | Opcode correctness vs. Tom Harte 65816 reference vectors | 227/227 opcodes clean, 14,528/14,528 vectors passed | `python3 tools/opcode_diff.py --all` |
 | Framework regression suite (`tests/v2/`) | 186/198 passed | `python3 third_party/snesrecomp/tests/v2/run_tests.py` |
-| Framework regression suite (top-level) | 57/58 passed | `python3 third_party/snesrecomp/tests/run_tests.py` — **currently blocked by a failing lint gate** (`lint_codegen_widths`, 5 violations); see `DEBUG.md`/ask a fresh session to look at it |
+| Framework regression suite (top-level) | still blocked by the `lint_codegen_widths` gate (5 violations, aborts the loop; last clean measure 57/58 on 2026-07-03) | `python3 third_party/snesrecomp/tests/run_tests.py` — see `DEBUG.md`/ask a fresh session to look at it |
 
 ## What "done" looks like
 
