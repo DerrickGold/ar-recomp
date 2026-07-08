@@ -80,6 +80,15 @@ def load_meta(explicit=None):
     return None
 
 
+def _paired_return_site(tgt):
+    """Canonical guard lives in ar_lib (shared with resolve_miss.py)."""
+    try:
+        from ar_lib import paired_return_site, load_rom
+        return paired_return_site(tgt, load_rom())
+    except (ImportError, SystemExit):
+        return None   # no ROM / lib -> guard degrades, suggestions still print
+
+
 def _meta_note(meta, tgt, m, x, sources=()):
     """Static-fact annotation + suggested cfg line for a dispmiss target."""
     bank, addr = tgt[:2], tgt[2:]
@@ -87,6 +96,33 @@ def _meta_note(meta, tgt, m, x, sources=()):
     if not meta:
         return [f"SUGGESTED FIX:  {suggest}   (no gen_meta.json — run tools/gen_metadata.py to verify)"]
     out = []
+    # ── paired-resume-double guard (3rd hazard class, DEBUG.md §7.17 2026-07-07) ──
+    # If the target is the RETURN address of a decoded JSR/JSL (site+3 / site+4)
+    # with live C fall-through (it's a label inside a decoded function), the miss
+    # is the engine's BENIGN unwind-and-resume: the paired call site restores S
+    # and falls through, running the continuation exactly once. Registering it
+    # runs the continuation TWICE (nested dispatch + natural resume) — this
+    # double-executed the sim actor tick (enemies 2x) before being caught.
+    pr = _paired_return_site(tgt)
+    if pr:
+        kind, site, callee = pr
+        callee_disp = f"{callee[:2]}:{callee[2:]}" if kind == 'JSL' else callee[2:]
+        hosts_pr = meta['labels'].get(tgt, [])
+        callee_known = (callee in meta['functions'] or callee in meta['labels'])
+        if hosts_pr and callee_known:
+            return [f"DO NOT REGISTER: ${addr} is the {kind}-return of the decoded call "
+                    f"`${bank}:{site:04X} {kind} ${callee_disp}` inside "
+                    f"{hosts_pr[0]} — a PAIRED host-C call site. The miss is the "
+                    f"engine's benign unwind-and-resume (single execution); registering "
+                    f"it DOUBLE-EXECUTES the continuation (nested dispatch + natural "
+                    f"fall-through; the paired-resume-double class, DEBUG.md §7.17 ⚠️). "
+                    f"If work is genuinely lost here, the fix is engine-level "
+                    f"(ancestor-skip), not a cfg reg."]
+        out.append(f"CAUTION: byte before target decodes as `{kind} ${callee_disp}` "
+                   f"(site ${bank}:{site:04X}) — if that is a real decoded call, this is "
+                   f"the paired-resume-double class (DEBUG.md §7.17): registering "
+                   f"double-executes the continuation. Verify the site is code, not data, "
+                   f"before registering.")
     # ── mid-loop-continuation guard (the B8C2 stack-overflow class) ──
     # If the target is the `ret:` of a cfg indirect_dispatch, the miss is the
     # construct working via benign host-unwind; registering it makes the
