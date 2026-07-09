@@ -347,6 +347,10 @@ int main(int argc, char **argv) {
   else
     ParseConfigFile("config.ini");
 
+  /* Now that config-file AR_* values are env-bridged, point bare output
+   * filenames into the per-run dir (see run_dir.h). */
+  RunDirRebaseEnvOutputs();
+
   if (!rom_path) {
     fprintf(stderr, "Usage: %s <rom.sfc> [--config config.ini]\n", argv[0]);
     return 1;

@@ -12,12 +12,17 @@
  * AR_NO_RUN_DIR=1 opts out (paths fall back to the legacy saves/ layout —
  * for the launcher/production or quick throwaway runs). */
 
-/* Create the run dir, tee the console, export AR_RUN_DIR, apply env-var
- * defaults (AR_TRACE_WATCH into the run dir; bare-filename AR_TRACE /
- * AR_INPUT_RECORD / AR_DRIFT_LOG / AR_MX_OUT rewritten into it), write
- * run_info.txt, update the runs/latest symlink. Call once, first thing in
- * main() — before anything prints or reads AR_* paths. */
+/* Create the run dir, tee the console, export AR_RUN_DIR, default
+ * AR_TRACE_WATCH on, write run_info.txt, update the runs/latest symlink.
+ * Call once, first thing in main() — before anything prints. */
 void RunDirInit(int argc, char **argv);
+
+/* Rebase bare-filename output env vars (AR_TRACE_WATCH / AR_TRACE /
+ * AR_INPUT_RECORD / AR_DRIFT_LOG / AR_MX_OUT / AR_WRAM_TRACE) into the run
+ * dir — call once right after ParseConfigFile so ini-provided values (e.g.
+ * `AR_TRACE_WATCH = anom` in dev-config.ini) are covered too. Values
+ * containing '/' are left alone. */
+void RunDirRebaseEnvOutputs(void);
 
 /* The run directory ("runs/<ts>"), or "saves" when opted out/unavailable.
  * No trailing slash. Always a usable prefix. */

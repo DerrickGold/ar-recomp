@@ -15,6 +15,13 @@ extern char **environ;
 static char g_run_dir[256] = "saves";
 static int g_enabled;
 
+/* Exit note: point at the one folder that holds every diagnostic from this
+ * run, ready to zip and hand over for investigation. */
+static void print_artifact_hint(void) {
+  fprintf(stderr, "[run-dir] all diagnostics from this run: %s/  "
+                  "(share with: zip -r report.zip %s)\n", g_run_dir, g_run_dir);
+}
+
 const char *RunDirPath(void) { return g_run_dir; }
 
 void RunDirFile(char *buf, size_t n, const char *fmt, ...) {
@@ -99,18 +106,12 @@ void RunDirInit(int argc, char **argv) {
   /* Engine-side writers (fn_census, crash dispatch log) key off this. */
   setenv("AR_RUN_DIR", g_run_dir, 1);
 
-  /* Default the always-on anomaly capture into the run dir. overwrite=0:
-   * a real env var still wins; config.ini's setenv(...,0) runs later so
-   * this default also beats a stale saves/anom line in dev-config.ini.
-   * A deliberate AR_TRACE=<file> windowed capture disables watch mode in
-   * ar_trace.c, so the default is harmless in that case too. */
+  /* Default the always-on anomaly capture on. overwrite=0: a real env var
+   * or a config-file AR_TRACE_WATCH line still wins; the bare name is
+   * rebased into the run dir by RunDirRebaseEnvOutputs() after config
+   * parsing. A deliberate AR_TRACE=<file> windowed capture disables watch
+   * mode in ar_trace.c, so the default is harmless in that case too. */
   setenv("AR_TRACE_WATCH", "anom", 0);
-  rebase_bare_env("AR_TRACE_WATCH");
-  rebase_bare_env("AR_TRACE");
-  rebase_bare_env("AR_INPUT_RECORD");
-  rebase_bare_env("AR_DRIFT_LOG");
-  rebase_bare_env("AR_MX_OUT");
-  rebase_bare_env("AR_WRAM_TRACE");
 
   write_run_info(argc, argv);
 
@@ -119,9 +120,25 @@ void RunDirInit(int argc, char **argv) {
 
   fprintf(stderr, "[run-dir] %s (console.log + dumps ringfenced here; "
                   "AR_NO_RUN_DIR=1 for legacy saves/ layout)\n", g_run_dir);
+  atexit(print_artifact_hint);
   (void)g_enabled;
+}
+
+void RunDirRebaseEnvOutputs(void) {
+  /* Called after ParseConfigFile so ini-provided values (env-bridged via
+   * setenv) get the same treatment as command-line env vars. Bare names
+   * land in the run dir — or under saves/ when the run dir is disabled
+   * (RunDirPath falls back to "saves"), so a dev-config.ini line like
+   * `AR_TRACE_WATCH = anom` does the right thing in both layouts. */
+  rebase_bare_env("AR_TRACE_WATCH");
+  rebase_bare_env("AR_TRACE");
+  rebase_bare_env("AR_INPUT_RECORD");
+  rebase_bare_env("AR_DRIFT_LOG");
+  rebase_bare_env("AR_MX_OUT");
+  rebase_bare_env("AR_WRAM_TRACE");
 }
 
 #else /* _WIN32: no tee/symlink plumbing — keep the legacy layout. */
 void RunDirInit(int argc, char **argv) { (void)argc; (void)argv; }
+void RunDirRebaseEnvOutputs(void) {}
 #endif
