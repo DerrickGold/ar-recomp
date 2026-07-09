@@ -161,13 +161,20 @@ Every issue goes through the same eight steps. The rest of this document is refe
 individual steps — this box is the process:
 
 0. **`tools/cycle.sh` is steps 1-2-5-6 in one command** (2026-07-07): regen-iff-cfg-changed →
-   build → run with dev-config → on exit auto-diagnoses every NEW anom capture AND runs
-   `tools/resolve_miss.py` (the mechanized version of steps 2-3) → `saves/cycle_report.txt`
+   build → run via `tools/run.sh` → on exit auto-diagnoses every anom capture AND runs
+   `tools/resolve_miss.py` (the mechanized version of steps 2-3) → `runs/latest/cycle_report.txt`
    ends with a PROPOSED CFG PATCH. Apply with `resolve_miss.py <files> --apply`, review via
    git diff, `tools/cycle.sh` again. The manual steps below remain the reference for what
    the automation is doing (and for the classes it marks AMBIGUOUS).
+   **All per-run artifacts live in `runs/<timestamp>/`** (2026-07-08, NATIVE via `src/run_dir.c` —
+   plain `./build/ActRaiserRecomp ar.sfc --config dev-config.ini` gets it too, no wrapper needed):
+   console.log (full stdout+stderr, tee'd through a child process so it survives crashes),
+   run_info.txt (cmd + AR_* env), anom captures, F2 snapshots, F9/exit dumps, screenshots.
+   `runs/latest` symlinks the newest; older runs stay intact for parallel analysis.
+   Battery SRAM/save-states stay in `saves/`. `AR_NO_RUN_DIR=1` restores the flat legacy layout.
+   Bare filenames in AR_TRACE/AR_INPUT_RECORD/AR_WRAM_TRACE/etc. are placed inside the run dir.
 1. **Play with watch mode on** (`--config dev-config.ini` keeps `AR_TRACE_WATCH` always-on). When
-   anything breaks, the lead-up window is ALREADY on disk (`saves/anom_hf<frame>_<kind>.jsonl`;
+   anything breaks, the lead-up window is ALREADY on disk (`runs/<ts>/anom_hf<frame>_<kind>.jsonl`;
    the watchdog auto-flushes on hangs). No replay, no flag guessing.
 2. **`tools/trace_slice.py <dump> --diagnose`** — needs a fresh `saves/gen_meta.json` (regen.sh
    auto-refreshes it). Read the ranked verdicts: most give a paste-ready cfg line or an explicit
@@ -730,8 +737,9 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
     its first live run found `$03:CE57` (the third `$9220` coroutine sibling, closing
     ledger #13's untraced `$CE56` loose end).
   - **`tools/cycle.sh [--no-run|--triage]`** — the loop driver: regen-iff-cfg-changed →
-    build → run with dev-config (watch mode on) → auto-diagnose every NEW anom capture +
-    resolve_miss dry-run → `saves/cycle_report.txt` ending in a proposed cfg patch. The
+    build → run via `tools/run.sh` (watch mode on, everything into `runs/<ts>/`) →
+    auto-diagnose every anom capture in the run dir +
+    resolve_miss dry-run → `runs/latest/cycle_report.txt` ending in a proposed cfg patch. The
     full bug loop is: `tools/cycle.sh` → repro → quit → read report → `resolve_miss --apply`
     → `tools/cycle.sh` again.
 
@@ -1125,7 +1133,10 @@ unconverted-handler crash class + `find_handler_chain.py` derivation recipe are 
 
 ```
 == TIER ONE — the loop (§1): ==
-AR_TRACE_WATCH=saves/anom   always-on anomaly capture (ON via dev-config): auto-dumps the lead-up
+runs/<ts>/ (NATIVE)         every invocation ringfences console.log + run_info.txt + all dumps
+                            (src/run_dir.c); runs/latest symlink; AR_NO_RUN_DIR=1 = legacy layout
+AR_TRACE_WATCH              always-on anomaly capture (defaults into the run dir; dev-config's
+                            saves/anom line = legacy fallback): auto-dumps the lead-up
                             window on hidden dispmiss / garbage-variant / m-x leak / watchdog hang
 trace_slice.py <dump> --diagnose   ranked verdicts + paste-ready cfg lines (needs gen_meta.json)
 AR_TRACE=<f> + HF_LO/HI     targeted windowed capture (beats watch mode when both set)

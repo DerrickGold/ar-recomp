@@ -80,3 +80,5 @@ snesref
 tools/oracle/*.dylib
 tools/oracle/*.so
 tools/oracle/*.dll
+# Per-run artifact folders (tools/run.sh)
+runs/

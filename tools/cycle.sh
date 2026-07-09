@@ -3,15 +3,17 @@
 #
 #   tools/cycle.sh              regen-if-needed -> build -> run -> auto-triage
 #   tools/cycle.sh --no-run     just regen-if-needed + build
-#   tools/cycle.sh --triage     skip regen/build/run; triage newest artifacts only
+#   tools/cycle.sh --triage     skip regen/build/run; triage runs/latest only
 #
 # The loop:
 #   1. If any recomp/*.cfg is newer than the generated sources -> tools/regen.sh
 #   2. cmake --build build -j8
-#   3. Run the game with dev-config (AR_TRACE_WATCH always-on anomaly capture),
-#      teeing stderr+stdout to dump_cycle.txt. Play/repro, then quit (or F9).
-#   4. Post-run: for every NEW saves/anom_*.jsonl (and the exit dispatch log),
-#      run trace_slice --diagnose + resolve_miss dry-run -> saves/cycle_report.txt
+#   3. Run via tools/run.sh: every run gets its own timestamped runs/<ts>/
+#      folder holding console.log (stdout+stderr), anomaly captures, and any
+#      F2/F9/exit dumps — so parallel analysis of older runs never gets
+#      clobbered. Play/repro, then quit (or F9).
+#   4. Post-run: for every anom_*.jsonl in the run dir (and its dispatch log),
+#      run trace_slice --diagnose + resolve_miss dry-run -> <run>/cycle_report.txt
 #      ending with a PROPOSED CFG PATCH (apply via resolve_miss --apply, review
 #      with git diff, then re-run cycle.sh).
 set -u
@@ -38,33 +40,34 @@ if [ "$BUILD" = 1 ]; then
   cmake --build build -j8 || exit 1
 fi
 
-MARKER=$(mktemp)
 if [ "$RUN" = 1 ]; then
-  # 3. run (dev-config carries AR_TRACE_WATCH; env still overrides per-run)
+  # 3. run (run.sh creates runs/<ts>/, captures console, sweeps artifacts)
   echo "[cycle] running — repro the bug, then quit (F9 dumps state)"
-  ./build/ActRaiserRecomp ar.sfc --config dev-config.ini 2>&1 | tee dump_cycle.txt
+  bash tools/run.sh
 fi
 
-# 4. post-run triage of everything new
-REPORT=saves/cycle_report.txt
-NEW_ANOMS=$(find saves -maxdepth 1 -name 'anom_*.jsonl' -newer "$MARKER" 2>/dev/null | sort)
-rm -f "$MARKER"
-[ "$RUN" = 0 ] && NEW_ANOMS=$(ls -t saves/anom_*.jsonl 2>/dev/null | head -8 | sort)
+# 4. post-run triage of the newest run's artifacts
+RUN_DIR=$(readlink runs/latest 2>/dev/null)
+RUN_DIR="runs/${RUN_DIR:-latest}"
+[ -d "$RUN_DIR" ] || { echo "[cycle] no runs/ to triage"; exit 1; }
+REPORT="$RUN_DIR/cycle_report.txt"
+ANOMS=$(ls "$RUN_DIR"/anom_*.jsonl 2>/dev/null | sort)
+DISPLOG=$(ls "$RUN_DIR"/dump_*dispatch_log.json 2>/dev/null | head -1)
 
 {
-  echo "=== cycle report $(date '+%F %T') ==="
-  if [ -z "$NEW_ANOMS" ]; then
-    echo "no new anomaly captures"
+  echo "=== cycle report $(date '+%F %T')  [$RUN_DIR] ==="
+  if [ -z "$ANOMS" ]; then
+    echo "no anomaly captures in this run"
   else
-    for f in $NEW_ANOMS; do
+    for f in $ANOMS; do
       echo; echo "--- $f ---"
       python3 tools/trace_slice.py "$f" --diagnose 2>&1
     done
   fi
-  if [ -n "$NEW_ANOMS" ] || [ -f saves/dump_dispatch_log.json ]; then
+  if [ -n "$ANOMS" ] || [ -n "$DISPLOG" ]; then
     echo; echo "--- resolve_miss (dry run) ---"
     # shellcheck disable=SC2086
-    python3 tools/resolve_miss.py $NEW_ANOMS saves/dump_dispatch_log.json 2>&1
+    python3 tools/resolve_miss.py $ANOMS $DISPLOG 2>&1
   fi
 } | tee "$REPORT"
 

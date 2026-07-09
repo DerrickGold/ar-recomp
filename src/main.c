@@ -16,6 +16,7 @@
 #include "actraiser_rtl.h"
 #include "common_cpu_infra.h"
 #include "config.h"
+#include "run_dir.h"
 #include "util.h"
 #include "actraiser_spc_player.h"
 #include "snes/snes.h"
@@ -71,17 +72,17 @@ void DumpDiagState(const char *tag) {
    * clobbered by the automatic exit dump (or by a second F9). Exit keeps the
    * fixed names existing tooling expects. */
   int hotkey = tag && strcmp(tag, "hotkey") == 0;
-  char p_wram[64], p_sram[64], p_state[64], p_disp[64];
+  char p_wram[320], p_sram[320], p_state[320], p_disp[320];
   if (hotkey) {
-    snprintf(p_wram, sizeof p_wram, "saves/dump_f%d_wram.bin", snes_frame_counter);
-    snprintf(p_sram, sizeof p_sram, "saves/dump_f%d_sram.bin", snes_frame_counter);
-    snprintf(p_state, sizeof p_state, "saves/dump_f%d_state.txt", snes_frame_counter);
-    snprintf(p_disp, sizeof p_disp, "saves/dump_f%d_dispatch_log.json", snes_frame_counter);
+    RunDirFile(p_wram, sizeof p_wram, "dump_f%d_wram.bin", snes_frame_counter);
+    RunDirFile(p_sram, sizeof p_sram, "dump_f%d_sram.bin", snes_frame_counter);
+    RunDirFile(p_state, sizeof p_state, "dump_f%d_state.txt", snes_frame_counter);
+    RunDirFile(p_disp, sizeof p_disp, "dump_f%d_dispatch_log.json", snes_frame_counter);
   } else {
-    snprintf(p_wram, sizeof p_wram, "saves/dump_wram.bin");
-    snprintf(p_sram, sizeof p_sram, "saves/dump_sram.bin");
-    snprintf(p_state, sizeof p_state, "saves/dump_state.txt");
-    snprintf(p_disp, sizeof p_disp, "saves/dump_dispatch_log.json");
+    RunDirFile(p_wram, sizeof p_wram, "dump_wram.bin");
+    RunDirFile(p_sram, sizeof p_sram, "dump_sram.bin");
+    RunDirFile(p_state, sizeof p_state, "dump_state.txt");
+    RunDirFile(p_disp, sizeof p_disp, "dump_dispatch_log.json");
   }
   FILE *f = fopen(p_wram, "wb");
   if (f) { fwrite(g_ram, 1, 0x20000, f); fclose(f); }
@@ -190,11 +191,14 @@ static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
   if (dump_act == -1) dump_act = getenv("AR_DUMP_ACT") ? 1 : 0;
   if (dump_act && wram[0x18] == 0x01) {
     static int first_done;
+    char pth[320];
     if (!first_done) { first_done = 1;
-      FILE *ff = fopen("saves/recomp_act1_first.bin", "wb");
+      RunDirFile(pth, sizeof pth, "recomp_act1_first.bin");
+      FILE *ff = fopen(pth, "wb");
       if (ff) { fwrite(wram, 1, 0x20000, ff); fclose(ff);
         fprintf(stderr, "[dump-act] FIRST action frame %u -> recomp_act1_first.bin\n", frame); } }
-    FILE *df = fopen("saves/recomp_act1.bin", "wb");
+    RunDirFile(pth, sizeof pth, "recomp_act1.bin");
+    FILE *df = fopen(pth, "wb");
     if (df) { fwrite(wram, 1, 0x20000, df); fclose(df); }
   }
   /* AR_DUMP_AT_GF=N: dump full WRAM exactly when game-frame $0088==N, to
@@ -203,7 +207,9 @@ static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
   if (dump_at_gf == -2) { const char *e = getenv("AR_DUMP_AT_GF"); dump_at_gf = e ? atol(e) : -1; }
   if (dump_at_gf >= 0) {
     unsigned gf = (unsigned)wram[0x88] | ((unsigned)wram[0x89] << 8);
-    if ((long)gf == dump_at_gf) { FILE *gf_f = fopen("saves/recomp_at.bin", "wb");
+    if ((long)gf == dump_at_gf) {
+      char pth[320]; RunDirFile(pth, sizeof pth, "recomp_at.bin");
+      FILE *gf_f = fopen(pth, "wb");
       if (gf_f) { fwrite(wram, 1, 0x20000, gf_f); fclose(gf_f);
         fprintf(stderr, "[dump-at-gf] gf=%u -> recomp_at.bin\n", gf); } } }
   /* AR_VRAMDUMP_GF=g1,g2,...: headless FULL snapshot (WRAM+VRAM+CGRAM+OAM) at
@@ -225,12 +231,13 @@ static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
           static unsigned last_dumped = 0xffffffffu;
           if (gf != last_dumped) {
             last_dumped = gf;
-#ifndef _WIN32
-            mkdir("saves", 0755); mkdir("saves/snapshots", 0755);
-#endif
             extern void ActRaiser_FullSnapshot(const char *prefix);
-            char pfx[80];
-            snprintf(pfx, sizeof pfx, "saves/snapshots/vd_gf%u", gf);
+            char pfx[320], snapdir[320];
+            RunDirFile(snapdir, sizeof snapdir, "snapshots");
+#ifndef _WIN32
+            mkdir(snapdir, 0755);
+#endif
+            RunDirFile(pfx, sizeof pfx, "snapshots/vd_gf%u", gf);
             ActRaiser_FullSnapshot(pfx);
             { extern Ppu *g_ppu;
               if (g_ppu) fprintf(stderr, "[ppureg] gf=%u bgmode=$%02x bgsc=[%02x %02x %02x %02x] bgTileAdr=$%04x\n",
@@ -305,6 +312,10 @@ static void WramTraceInit(void) {
 int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
+
+  /* Per-run artifact ringfence (runs/<ts>/): must run before anything prints
+   * (console tee) or reads an AR_* output path. See run_dir.h. */
+  RunDirInit(argc, argv);
 
   cpu_trace_init();
 
@@ -539,17 +550,18 @@ int main(int argc, char **argv) {
             extern uint8 g_ram[0x20000];
             extern void ActRaiser_FullSnapshot(const char *prefix);
             static int snap_n = 0;
+            char snapdir[320];
+            RunDirFile(snapdir, sizeof snapdir, "snapshots");
 #ifndef _WIN32
-            mkdir("saves", 0755);
-            mkdir("saves/snapshots", 0755);  /* keep snapshots out of the
-                                              * normal saves/dump_* run data */
+            mkdir(snapdir, 0755);  /* keep snapshots out of the
+                                    * normal dump_* run data */
 #endif
             unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-            char prefix[80];
-            snprintf(prefix, sizeof prefix, "saves/snapshots/snap_%02d_gf%u",
-                     snap_n++, gf);
+            char prefix[336];
+            RunDirFile(prefix, sizeof prefix, "snapshots/snap_%02d_gf%u",
+                       snap_n++, gf);
             ActRaiser_FullSnapshot(prefix);
-            char ppm[80]; snprintf(ppm, sizeof ppm, "%s.ppm", prefix);
+            char ppm[344]; snprintf(ppm, sizeof ppm, "%s.ppm", prefix);
             FILE *pf = fopen(ppm, "wb");
             if (pf) {
               fprintf(pf, "P6\n%d %d\n255\n", g_snes_width, g_snes_height);
@@ -759,17 +771,17 @@ int main(int argc, char **argv) {
       unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
       const char *sg = getenv("AR_SHOT_AT_GF");
       const char *se = getenv("AR_SHOT_EVERY");
-      int want = 0; char fname[64]; fname[0] = 0;
+      int want = 0; char fname[320]; fname[0] = 0;
       static int shot_done = 0;
       if (sg && sg[0] && !shot_done && gf >= (unsigned)strtoul(sg, NULL, 0)) {
-        shot_done = 1; want = 1; snprintf(fname, sizeof(fname), "saves/shot.ppm");
+        shot_done = 1; want = 1; RunDirFile(fname, sizeof(fname), "shot.ppm");
       } else if (se && se[0]) {
         unsigned every = (unsigned)strtoul(se, NULL, 0); if (!every) every = 1;
         const char *sf = getenv("AR_SHOT_FROM"); const char *st = getenv("AR_SHOT_TO");
         unsigned lo = sf ? (unsigned)strtoul(sf, NULL, 0) : 0;
         unsigned hi = st ? (unsigned)strtoul(st, NULL, 0) : 0xffffffffu;
         if (gf >= lo && gf <= hi && (gf % every) == 0) {
-          want = 1; snprintf(fname, sizeof(fname), "saves/shot_%u.ppm", gf);
+          want = 1; RunDirFile(fname, sizeof(fname), "shot_%u.ppm", gf);
         }
       }
       if (want) {
