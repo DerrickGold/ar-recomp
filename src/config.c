@@ -11,6 +11,7 @@ Config g_config = {
   .audio_freq = 44100,
   .audio_channels = 2,
   .audio_samples = 2048,
+  .aspect_par_43 = true,
 };
 
 void ParseConfigFile(const char *path) {
@@ -31,6 +32,17 @@ void ParseConfigFile(const char *path) {
     else if (strcmp(key, "AudioSamples") == 0) g_config.audio_samples = (uint16)atoi(val);
     else if (strcmp(key, "EnableAudio") == 0) g_config.enable_audio = atoi(val) != 0;
     else if (strcmp(key, "LinearFiltering") == 0) g_config.linear_filtering = atoi(val) != 0;
+    else if (strcmp(key, "IgnoreAspectRatio") == 0) g_config.ignore_aspect_ratio = atoi(val) != 0;
+    else if (strcmp(key, "ExtendedAspectRatio") == 0) {
+      /* "16:9", "16:10", ... — anything unparsable (e.g. "off") disables. */
+      unsigned ax = 0, ay = 0;
+      g_config.extend_aspect_x = g_config.extend_aspect_y = 0;
+      if (sscanf(val, "%u:%u", &ax, &ay) == 2 && ax && ay && ax < 256 && ay < 256) {
+        g_config.extend_aspect_x = (uint8)ax;
+        g_config.extend_aspect_y = (uint8)ay;
+      }
+    }
+    else if (strcmp(key, "AspectPAR") == 0) g_config.aspect_par_43 = strcmp(val, "square") != 0;
     /* Debug/cheat env-var bridge: any AR_* / SNESREF_* key in the config is
      * exported to the environment so the getenv()-based debug flags and cheats
      * pick it up — no command-line env needed (e.g. a dev-config.ini). This is

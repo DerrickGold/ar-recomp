@@ -1,0 +1,109 @@
+# Widescreen Mode Survey (Phase 2)
+
+> **2026-07-09 correction (user-reported):** the first pass of this survey
+> mis-verified several modes as "clean wide" — those screenshots were in fact
+> pillarboxed (dark content next to pure-black margins misread visually; only
+> the action stage truly rendered margins). Root cause: ActRaiser's sim/menu
+> engine keeps a full-width hardware window enabled, and the SNES 8-bit window
+> coordinates can't express the margins → everything outside [0,255] hit the
+> composite's clip-to-black path. Fixed in the engine (ppu.c
+> PpuWindows_Calc): window edges pinned at 0/255 are read as "to the screen
+> border" and extend into the active margins. After the fix the verdicts below
+> hold for real (re-verified pixel-numerically via simdev.rec replay, and
+> always verify margins NUMERICALLY, not by eyeballing dark PNGs).
+
+Catalogue of per-mode behavior with raw symmetric margins (`AR_WS_SURVEY=1`,
+16:9 / 43 extra columns per side). Source: user play session
+`runs/20260709-045204/snapshots/` (F2 snapshots incl. WRAM/VRAM/OAM sidecars).
+Read each snapshot's `$18`/`$19` from its `.wram.bin` (offsets 0x18/0x19).
+
+## Mode table ($18 = main mode, $19 = sub-mode)
+
+| $18 | $19 | Screen | Wide verdict | Evidence |
+|-----|-----|--------|--------------|----------|
+| 00 | 00 | Title / menu | clean (black BG) but **pillarbox** — $19=00 likely covers other screens (intro etc.) we haven't sampled | snap_00 |
+| 00 | 01 | Sim mode, town view | world tilemap fills margins cleanly in static shot; **pillarbox until Phase 3** — needs scroll/map-edge clamp + people-sprite cull/OAM widening | snap_05 |
+| 00 | 07 | Sky palace (angel hub) | **WIDE — validated.** Columns + cloud plane extend naturally; menus/dialog centered fine | snap_01, snap_03 |
+| 00 | 08 | Temple interior / dialog scenes | **WIDE — validated.** Bounded scene on black backdrop, margins show backdrop | snap_04 |
+| 00 | 09 | Mode 7 world map | **WIDE — validated.** M7 plane fills full width; snap_02 shows a few black columns at extreme left at some scroll positions (map edge = backdrop) — acceptable | snap_02, snap_06 |
+| 01-07 | * | Action stage (act = $19) | world layers (BG1/BG2 parallax) extend beautifully; **pillarbox until Phase 3**. Artifacts: (a) at level edge (cam_x=0) left margin shows WRAPPED BG1 columns from the far end of the 512-wide tilemap → needs level-bound clamp via PpuSetExtraSideSpace; (b) BG3 HUD rows wrap in margins (repeated left-HUD tiles, the "«««" junk under SCORE) → PpuSetWidescreenBg3Widen(hud_height) or HudSplit; (c) sprite draw/cull windows still authentic (no pop-in observed in static shot; expected when enemies cross ±0/256 while moving) | snap_07 (Bloodpool act 1, $18=02 $19=01) |
+| ≥20 | * | Transitions | unsampled — pillarbox | — |
+
+Unsampled yet: intro cinematic, name entry, act-select spin (which $19?),
+boss fights, professional mode select, sim menus over town view, ending.
+Default policy for anything unsampled: pillarbox (safe).
+
+## Artifact classes → plan phase
+
+1. Level-edge wrapped BG columns (action, presumably sim map edges too) → Phase 3.5 camera/level-bound clamp.
+2. BG3 HUD wrap in margins (action; sim HUD rows looked clean in snap_05 — its
+   HUD band is backed by... verify while implementing) → Phase 4 HUD policy;
+   cheap interim: Bg3Widen(from_y=16).
+3. Mid-level tilemap streaming staleness: NOT yet observed (need a walking
+   capture mid-stage; Bloodpool act 1 start shows none) → Phase 3.4.
+4. Sprite pop-in at old window edges: not observable in static shots → Phase 3.1-3.3.
+
+## Sky palace ($19=07) layer analysis (2026-07-09)
+
+Isolated each BG (AR_WS_ONLYBG=N) + tilemap dumps at dialog/no-dialog frames:
+- **BG1** (32-wide): sky + clouds. Repeating pattern, genuinely wide + clean.
+- **BG2** (64-wide): pillars AND the dialog/menu box, same layer. Pillars are
+  genuinely wide; the box's full-width border rows bleed into the margins.
+  PROVEN dialog-only: BG2 margins are 0 bleed cells with no dialog up, 84 bleed
+  cells the instant a box appears (gf372 clean vs gf400/560 bleed).
+- **BG3** (32-wide): HUD (engine-default clamped).
+- Tile-index classification REJECTED: box shares fill tile 0x0ff + 0x0ee/0x11
+  with pillars, so fingerprinting misfires.
+
+**KEY DISCOVERY (user-diagnosed): offscreen tilemap staging.** ActRaiser's
+UI engine uses BG2's offscreen tilemap columns as a construction/staging area
+for dialog and menu boxes — redrawn per UI state (box frames, fills parked in
+the columns adjacent to the visible screen; content changes when opening e.g.
+the message-speed screen). Invisible on hardware; exposed by widescreen
+margins as "extra text box edges" / black slabs. Sampling further out
+(margin-gap 48px) proved the offscreen area is staging/scratch ALL the way —
+there is NO pillar-continuation content. Detection approaches that failed:
+y-band from box-frame tiles (staging is tall side columns, not a band),
+tile fingerprinting (box shares tiles 0x0ff/0x0ee with pillars), dispatcher
+hook `$02:BF60` (fires sporadically; hle_func can't wrap; geometry varies).
+
+**Sky palace mechanism (traced):** the game double-buffers UI in BG2's
+offscreen tilemap half. `$02:ADA8` is the SOLE BG2 tilemap writer — a whole
+64x32 map upload (4096 words) from a WRAM compose buffer (`[$76]`, bank $7E),
+re-run per UI state. Box-free states (message-speed submenu) leave the pillar
+continuation in the offscreen columns; dialog states STAGE A SECOND (taller)
+BOX there instead — verified per-row at a dialog frame: offscreen cols hold
+box interior fill $011 (rows 5-22) + borders $017/$018 (rows 24-27), not
+pillars. So the offscreen pillar tiles DO exist (submenu draws them), they're
+just clobbered by box-staging in dialog states. (Correcting an earlier wrong
+claim that "no pillar source exists".)
+
+**Sky palace verdict: cache + substitute** (`ActRaiser_SkyPalaceWideColonnade`,
+src/actraiser_rtl.c): each frame, cache the sampled offscreen columns from any
+box-free frame; on boxed frames, write the cached pillars back into those
+offscreen VRAM columns before render so the margins show the full colonnade
+(safe: BG tilemap is render-only; next $02:ADA8 upload overwrites the patch;
+hScroll=0 here so columns are stable). Cold cache (before any box-free frame
+seen) -> clamp BG2 fallback (clean, centered). Warms from the message-speed
+submenu or any box-free state, persists for the session. VERIFIED: cold path +
+faithful byte-identical; warm/substitution path is LIVE-ONLY (simdev.rec never
+opens the submenu) — needs in-game validation. Box detected via frame tiles
+$017/$018; a box variant using other border tiles would bleed -> add its tiles.
+Upfront warm (no submenu) would need the compose-buffer layout ([$76] bank $7E,
+NOT row-major-64 — quadrant/interleaved, unresolved) to read the pillar source
+at load; deferred.
+
+**Engine widescreen primitives built along the way** (all game-agnostic,
+inert unless set, reset per frame by the extra-space setters):
+- `PpuSetWidescreenLayerClamp(ppu, mask)` — whole-layer 256 clamp.
+- `PpuSetWidescreenLayerClampBand(ppu, layer, y0, y1)` — clamp one layer only
+  on a scanline band ("BG2.5" overlay; for wide-layer + bounded-UI-band).
+- `PpuSetWidescreenLayerMarginGap(ppu, layer, l_px, r_px)` — margins skip the
+  first N offscreen pixels (staging strip) and sample beyond (4bpp/2bpp paths;
+  for games whose offscreen area DOES continue — check first!).
+
+## Policy implemented after this survey
+
+`ActRaiser_ApplyWidescreenPolicy` (src/actraiser_rtl.c): wide for
+$18==0 && $19 ∈ {07, 08, 09}; pillarbox everything else until Phase 3/4.
+`AR_WS_SURVEY=1` still forces raw wide everywhere for continued surveying.

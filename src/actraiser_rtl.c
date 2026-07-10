@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <ucontext.h>
 #include <stdlib.h>
+#include <string.h>
 
 extern int snes_frame_counter;
 
@@ -240,7 +241,213 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
   return RECOMP_RETURN_NORMAL;
 }
 
+/* Wide-colonnade support for the sky palace. The game double-buffers UI in
+ * BG2's offscreen tilemap half: box-free states (e.g. the message-speed submenu)
+ * leave the pillar continuation there, dialog states stage a box there instead
+ * (verified: offscreen rows fill with box tiles $011/$017/$018 while a box is
+ * up). So the pillar tiles for the margin columns DO exist — just not every
+ * frame. Cache them from any box-free frame, and on boxed frames write the
+ * cached pillars back into the sampled offscreen VRAM columns so the margins
+ * show the colonnade. Safe: the BG tilemap is render-only (nothing reads it
+ * back) and the game's next full-map upload ($02:ADA8) overwrites our patch.
+ * hScroll is 0 in this scene, so the sampled columns are stable. Returns 1 if
+ * the margins are colonnade-safe this frame (cached or naturally clean), 0 if
+ * the cache is still cold and the caller should clamp instead. */
+static int ActRaiser_SkyPalaceWideColonnade(int extra) {
+  // TODO:
+  // This doesn't actually work - the tile detection is broken so it never manages to cache anything
+  enum { ROWS = 32, MAXC = (95 + 7) / 8 };  /* up to kWsExtraMax cols/side */
+  static uint16 cacheL[ROWS][MAXC], cacheR[ROWS][MAXC];
+  static int warm = 0;
+  int base = (g_ppu->bgXsc[1] & 0xfc) << 8;
+  if (!(g_ppu->bgXsc[1] & 1)) return 1;   /* 32-wide: margins just wrap, safe */
+  int tiles = (extra + 7) >> 3;
+  if (tiles > MAXC) tiles = MAXC;
+  int hs = g_ppu->hScroll[1];
+
+  /* Is a box staged in the sampled offscreen columns? (box frame tiles) */
+  int boxed = 0;
+  for (int r = 0; r < ROWS && !boxed; r++)
+    for (int i = 0; i < tiles; i++) {
+      int cr = ((hs >> 3) + 32 + i) & 63, cl = ((hs >> 3) + 63 - i) & 63;
+      uint16 tr = g_ppu->vram[(base + (cr & 32 ? 0x400 : 0) + r * 32 + (cr & 31)) & 0x7fff] & 0x3ff;
+      uint16 tl = g_ppu->vram[(base + (cl & 32 ? 0x400 : 0) + r * 32 + (cl & 31)) & 0x7fff] & 0x3ff;
+      if (tr == 0x17 || tr == 0x18 || tl == 0x17 || tl == 0x18) { boxed = 1; break; }
+    }
+      
+  fprintf(stderr, "Found boxed env, will draw from cache: %d\n", boxed);
+
+  for (int r = 0; r < ROWS; r++)
+    for (int i = 0; i < tiles; i++) {
+      int cr = ((hs >> 3) + 32 + i) & 63, cl = ((hs >> 3) + 63 - i) & 63;
+      int ar = (base + (cr & 32 ? 0x400 : 0) + r * 32 + (cr & 31)) & 0x7fff;
+      int al = (base + (cl & 32 ? 0x400 : 0) + r * 32 + (cl & 31)) & 0x7fff;
+      if (!boxed) {                       /* clean frame -> refresh the cache */
+        cacheR[r][i] = g_ppu->vram[ar];
+        cacheL[r][i] = g_ppu->vram[al];
+      } else if (warm) {                  /* boxed -> substitute cached pillars */
+        g_ppu->vram[ar] = cacheR[r][i];
+        g_ppu->vram[al] = cacheL[r][i];
+      }
+    }
+  if (!boxed) warm = 1;
+  return !boxed || warm;
+}
+
+/* Per-frame widescreen policy — the single seam where game mode decides how
+ * much of the extra-column budget (g_ws_extra, set at startup from
+ * ExtendedAspectRatio) is visible this frame. Phase 1: pillarbox everywhere
+ * (authentic 256 columns centered); later phases widen per mode via
+ * $18/$19 and clamp per camera/level bounds with PpuSetExtraSideSpace.
+ * Must run every frame: ppu_reset zeroes the PPU margin fields.
+ * AR_WS_SURVEY=1 forces raw symmetric margins in EVERY mode — the Phase-2
+ * artifact-survey knob (stale tiles/pop-in expected; not for normal play). */
+static void ActRaiser_ApplyWidescreenPolicy(void) {
+  extern bool g_ws_active;
+  extern int g_ws_extra;
+  if (!g_ws_active) return;
+  static int survey = -1;
+  if (survey < 0) {
+    const char *e = getenv("AR_WS_SURVEY");
+    survey = (e && e[0] && e[0] != '0') ? 1 : 0;
+  }
+  /* Per-mode widescreen policy (docs/widescreen-survey.md). Two knobs per
+   * mode: (1) does it use the wide view at all, and (2) a per-layer clamp
+   * mask (bit L keeps BG(L+1) at 256) for scenes that mix wide world layers
+   * with 256-wide UI/dialog layers whose offscreen tilemap data must not tile
+   * into the margins. We keep the classification explicit here (not an
+   * auto-heuristic) so we don't touch game code while proving the base recomp
+   * accurate — a mis-widened layer is a policy line, not a decode bug.
+   * BG3 (layer 2, the HUD) is already margin-clamped by the engine default. */
+  int wide = survey;
+  uint8 clamp = 0;
+  int bg2_gap = 0;  /* margin source gap px/side for BG2 (UI staging strip) */
+  if (!survey && g_ram[0x18] == 0x00) {
+    switch (g_ram[0x19]) {
+      case 0x07:            /* sky palace hub. BG1 = sky/clouds (wide, clean).
+                               BG2 = pillars — but the game constructs dialog/
+                               menu boxes in BG2's offscreen tilemap columns (a
+                               scratch canvas, redrawn per UI state), and while
+                               a box exists there is NO box-free pillar source
+                               anywhere in the map (box cols 3-27; the free
+                               cols 28-31/0-2 hold no shafts). So: DYNAMIC —
+                               BG2 wide while its staging strip is empty (full
+                               wide colonnade), clamped while UI is staged
+                               (colonnade centers during dialogs; sky always
+                               wide). BG3 = HUD + text (default clamped). */
+        wide = 1;
+        /* Substitute cached pillars into the offscreen margin columns while a
+         * box is staged there, so the colonnade stays wide during dialogs.
+         * Falls back to clamping BG2 only until the cache is warm (before any
+         * box-free frame — e.g. the message-speed submenu — has been seen). */
+        //if (ActRaiser_SkyPalaceWideColonnade(g_ws_extra))
+        //  clamp = 0x02;
+        break;
+
+      case 0x09:            /* Mode 7 world map: fully wide, no UI layers. */
+        wide = 1; 
+        break;
+      
+      case 0x00: 
+        // Title is always not wide screen since the backdrop is black
+        wide = 0;
+        break;
+    
+      case 0x01: 
+      // Sim town can be wide
+      // TODO:
+      // * fix enemy sprite occlusion and culling based on new screen space
+      // * fix camera boundaries so town map wrapping isn't visible (or we make the tilemap larger [extra colums])
+      //   and insert blank tile spaces so it just looks black
+        wide = 1;
+        break;
+
+      case 0x08:
+      // Temple cut scenes don't need wide screen support
+      // background is black
+        wide = 0;
+        break;
+
+      default:              /* title(00), sim town(01), temple cutscene(08),
+                               transitions, unknown: pillarbox (the temple is a
+                               black backdrop with no wide-worthy layer). */
+        wide = 0;
+        break;
+    }
+  } else if (!survey && g_ram[0x18] == 0x01) {
+    // Action mode wide screen
+    // TODO:
+    // * fix tile streaming to account for the new screen width 
+    // * fix enemy and level sprite occlusion/culling based on new screen boundaries
+    //wide = 1;
+  }
+  /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
+   * main-screen enable to just that layer so a snapshot shows exactly which
+   * layer carries the sky / dialog / pillars. Temporary Phase-4 probe. */
+  { const char *ob = getenv("AR_WS_ONLYBG");
+    if (ob && ob[0]) {
+      int L = atoi(ob) - 1;
+      if (L >= 0 && L < 4) g_ppu->screenEnabled[0] = (uint8)(1u << L);
+      wide = 1; clamp = 0;  /* raw wide so a bleeding layer is visible */
+    } }
+  /* AR_WS_CLAMP=<hex mask>: override the per-layer clamp for tuning. */
+  { const char *cm = getenv("AR_WS_CLAMP");
+    if (cm && cm[0]) { wide = 1; clamp = (uint8)strtoul(cm, NULL, 16); } }
+  if (wide) {
+    PpuSetExtraSpace(g_ppu, (uint8)g_ws_extra);
+    PpuSetWidescreenLayerClamp(g_ppu, clamp);
+    if (bg2_gap)
+      PpuSetWidescreenLayerMarginGap(g_ppu, 1, (uint8)bg2_gap, (uint8)bg2_gap);
+  } else {
+    PpuSetExtraSpaceCentered(g_ppu, (uint8)g_ws_extra);
+    PpuSetWidescreenLayerClamp(g_ppu, 0);
+  }
+  /* One line per policy flip — cheap, and makes "why isn't this screen
+   * wide?" diagnosable from any console.log (mode bytes included). */
+  static int last_wide = -1;
+  if (wide != last_wide) {
+    last_wide = wide;
+    fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s\n",
+            (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8)),
+            g_ram[0x18], g_ram[0x19], wide ? "WIDE" : "pillarbox");
+  }
+  /* AR_WS_LAYERS=1: dump per-frame PPU layer/tilemap state — which BG a
+   * margin artifact lives on, and whether that BG's tilemap is 32-wide (wraps
+   * into the margin) or 64-wide (real content). Temporary Phase-4 probe. */
+  if (getenv("AR_WS_LAYERS")) {
+    static int lf = -1;
+    unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
+    if ((int)gf != lf) {
+      lf = (int)gf;
+      fprintf(stderr, "[ws-layers] gf=%u mode=%d main=%02x sub=%02x wsel=%06x cgwsel=%02x cgadsub=%02x",
+              gf, g_ppu->bgmode & 7, g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
+              g_ppu->windowsel, g_ppu->cgwsel, g_ppu->cgadsub);
+      for (int L = 0; L < 4; L++)
+        fprintf(stderr, " BG%d[w%d h%02x hs=%d]", L + 1,
+                (g_ppu->bgXsc[L] & 1), (g_ppu->bgXsc[L] & 0xfc),
+                g_ppu->hScroll[L]);
+      fprintf(stderr, " win1=[%d,%d] win2=[%d,%d]\n",
+              g_ppu->window1left, g_ppu->window1right,
+              g_ppu->window2left, g_ppu->window2right);
+    }
+  }
+  /* The compositor only writes the ACTIVE window each line; when the visible
+   * margins shrink (wide -> pillarbox transition, later per-side clamps), the
+   * vacated columns would keep last frame's pixels. Blank the framebuffer on
+   * any margin change — transitions are rare, and every visible row is
+   * rewritten this same frame. */
+  static int last_l = -1, last_r = -1;
+  int l = g_ppu->extraLeftCur, r = g_ppu->extraRightCur;
+  if (l != last_l || r != last_r) {
+    last_l = l;
+    last_r = r;
+    if (g_ppu->renderBuffer)
+      memset(g_ppu->renderBuffer, 0, (size_t)g_ppu->renderPitch * 224);
+  }
+}
+
 void ActRaiserDrawPpuFrame(void) {
+  ActRaiser_ApplyWidescreenPolicy();
   /* Process ALL 8 HDMA channels, not a fixed subset. ActRaiser drives its
    * per-scanline effects (e.g. the Mode-7 title matrix animation) on channels
    * 2/3 — the old code only ran 5/6/7 (a stale assumption carried over from

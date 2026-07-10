@@ -23,6 +23,13 @@ typedef struct Config {
   bool enable_gamepad[2];
   int gamepad_deadzone;
   bool skip_launcher;
+  /* Widescreen: target display aspect as a ratio (e.g. 16:9). 0:0 = off
+   * (authentic 4:3). The extra rendered columns per side are derived from
+   * this at startup — see main.c. */
+  uint8 extend_aspect_x, extend_aspect_y;
+  /* true = preserve the CRT 4:3 pixel stretch (7:6 PAR) in the widescreen
+   * math and present; false = square pixels (crisper, needs wider margins). */
+  bool aspect_par_43;
 } Config;
 
 extern Config g_config;

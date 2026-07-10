@@ -23,6 +23,7 @@
 #include "cpu_trace.h"
 #include "debug_server.h"
 #include "framedump.h"
+#include "widescreen.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 static SDL_Window *g_window;
@@ -31,7 +32,18 @@ static SDL_Texture *g_texture;
 static uint8 g_paused, g_turbo;
 static uint32 g_input_state;
 static int g_snes_width = 256, g_snes_height = 224;
-static uint8_t g_pixels[256 * 4 * 240];
+/* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
+ * width can be chosen at startup without reallocation; faithful runs still
+ * render/present only the leading 256*4 bytes per row via g_snes_width. */
+static uint8_t g_pixels[kPpuBufWidth * 4 * 240];
+
+/* Widescreen master switch + per-side extra-column budget — the definitions
+ * for the runner's widescreen.h externs (each game defines them; 0/false =
+ * authentic 256-wide, all PPU margin machinery inert). Set once at startup
+ * from ExtendedAspectRatio/AspectPAR in config.ini; per-frame policy lives in
+ * ActRaiser_ApplyWidescreenPolicy (actraiser_rtl.c). */
+bool g_ws_active;
+int g_ws_extra;
 
 extern Snes *g_snes;
 extern Ppu *g_ppu;
@@ -371,6 +383,30 @@ int main(int argc, char **argv) {
   bool headless = getenv("AR_HEADLESS") && getenv("AR_HEADLESS")[0]
                   && getenv("AR_HEADLESS")[0] != '0';
 
+  /* Widescreen budget from config. internal_width = 224 * (ax/ay) display
+   * units, divided by the 7:6 pixel stretch when the 4:3-corrected look is
+   * on (AspectPAR=4:3, default): 16:9 -> 342 px (extra=43/side), 16:10 -> 308
+   * (26); square pixels: 399 (72) / 359 (52). Headless (oracle/differential)
+   * runs force authentic geometry so comparisons never see wide framebuffers. */
+  if (!headless && g_config.extend_aspect_x && g_config.extend_aspect_y) {
+    long num = 224L * g_config.extend_aspect_x * (g_config.aspect_par_43 ? 6 : 7);
+    long den = 7L * g_config.extend_aspect_y;
+    int internal_w = (int)((num + den - 1) / den);
+    int extra = internal_w > 256 ? (internal_w - 256 + 1) / 2 : 0;
+    if (extra > kWsExtraMax) extra = kWsExtraMax;
+    g_ws_extra = extra;
+    g_ws_active = extra > 0;
+    g_snes_width = 256 + 2 * extra;
+    if (g_ws_active && !g_config.new_renderer)
+      fprintf(stderr, "[widescreen] NewRenderer=0 unsupported with ExtendedAspectRatio; forcing new PPU\n");
+    fprintf(stderr, "[widescreen] %u:%u %s -> %d extra columns/side (render width %d)\n",
+            g_config.extend_aspect_x, g_config.extend_aspect_y,
+            g_config.aspect_par_43 ? "4:3-PAR" : "square-PAR", g_ws_extra, g_snes_width);
+  }
+  /* NewRenderer knob (previously parsed but never applied): honor it, except
+   * widescreen needs the new PPU path (HUD split/BG3 widen exist only there). */
+  g_new_ppu = g_config.new_renderer || g_ws_active;
+
   /* AR_MXCHECK=1: enable the per-function-entry m/x invariant check
    * (validates the emitter's static m/x analysis on every direct call). */
   { extern int g_ar_mx_check; const char *e = getenv("AR_MXCHECK");
@@ -412,10 +448,18 @@ int main(int argc, char **argv) {
 
   if (!headless) {
     int scale = g_config.window_scale ? g_config.window_scale : 3;
+    /* Window sized to the DISPLAY aspect: with the 4:3-corrected PAR the
+     * rendered width (e.g. 342) is narrower than the displayed width (16:9 of
+     * the height), so derive the window from the target ratio, not the
+     * framebuffer. Faithful mode keeps the historical g_snes_width*scale. */
+    int win_w = g_snes_width * scale;
+    if (g_ws_active && g_config.aspect_par_43)
+      win_w = (g_snes_height * scale * g_config.extend_aspect_x
+               + g_config.extend_aspect_y / 2) / g_config.extend_aspect_y;
     g_window = SDL_CreateWindow(
       kWindowTitle,
       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-      g_snes_width * scale, g_snes_height * scale,
+      win_w, g_snes_height * scale,
       SDL_WINDOW_RESIZABLE
     );
     if (!g_window) Die("SDL_CreateWindow failed");
@@ -423,6 +467,18 @@ int main(int argc, char **argv) {
     g_renderer = SDL_CreateRenderer(g_window, -1,
       SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!g_renderer) Die("SDL_CreateRenderer failed");
+
+    /* Aspect-correct letterboxing via SDL's logical size (widescreen only, so
+     * faithful mode keeps the historical stretch-to-window behavior).
+     * 4:3-PAR: logical w:h = (render_w*7):(224*6) encodes the 7:6 pixel
+     * stretch; square: the raw framebuffer dimensions. IgnoreAspectRatio=1
+     * restores plain stretching. */
+    if (g_ws_active && !g_config.ignore_aspect_ratio) {
+      if (g_config.aspect_par_43)
+        SDL_RenderSetLogicalSize(g_renderer, g_snes_width * 7, g_snes_height * 6);
+      else
+        SDL_RenderSetLogicalSize(g_renderer, g_snes_width, g_snes_height);
+    }
 
     g_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
@@ -439,6 +495,11 @@ int main(int argc, char **argv) {
   if (!snes) Die("SnesInit failed");
 
   PpuBeginDrawing(g_ppu, g_pixels, g_snes_width * 4, 0);
+  /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
+   * centered in the wide framebuffer). Re-applied every frame by
+   * ActRaiser_ApplyWidescreenPolicy since ppu_reset zeroes these fields. */
+  if (g_ws_active)
+    PpuSetExtraSpaceCentered(g_ppu, (uint8_t)g_ws_extra);
 
   /* Power-on WRAM fill. The SNES does not clear WRAM at power-on; snes9x (our
    * reference emulator) fills it with the 0x55 pattern, and ActRaiser's title
@@ -798,8 +859,9 @@ int main(int argc, char **argv) {
             fputc(g_pixels[i*4+0], pf); /* B */
           }
           fclose(pf);
-          fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d)\n",
-                  fname, gf, g_snes_width, g_snes_height);
+          fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d\n",
+                  fname, gf, g_snes_width, g_snes_height,
+                  g_ppu->extraLeftCur, g_ppu->extraRightCur);
         }
       }
     }

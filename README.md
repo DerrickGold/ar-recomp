@@ -3,6 +3,8 @@
 A native, static-recompilation port of **ActRaiser (SNES, USA release)** to modern
 desktop platforms.
 
+![title screen](/assets/title.png)
+
 ## What is ActRaiser?
 
 *ActRaiser* is a 1990 Quintet-developed, Enix-published SNES game that alternates
@@ -72,6 +74,17 @@ Snapshot as of 2026-07-07:
   the rest of its sim round and act 2 are not yet verified.
 - **Kingdoms 3-6**: untested.
 - Open bugs and investigation state live in [`DEBUG.md`](DEBUG.md).
+
+
+Extra features WIP:
+* Proper-ish Widescreen support
+
+#### Screenshots
+
+![menu](/assets/menu.png)
+![mode7](/assets/mode7.png)
+![fillmore boss](/assets/fillmore-boss.png)
+![fillmore sim](/assets/sim.png)
 
 ## AI disclosure
 
