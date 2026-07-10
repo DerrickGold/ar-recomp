@@ -360,6 +360,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       // * fix camera boundaries so town map wrapping isn't visible (or we make the tilemap larger [extra colums])
       //   and insert blank tile spaces so it just looks black
         wide = 1;
+        // clamp the dialog layer to prevent wrapping corruption. Nothing else is on layer
+        // 2 that we want to preserve here.
+        clamp = 0x02;
         break;
 
       case 0x08:
