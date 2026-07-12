@@ -308,12 +308,13 @@ VRAM `$2000-$3FFF` only after establishing the OAM group result.
    `AR_WS_HEADLESS=1` geometry opt-in was restored as test infrastructure only;
    it does not alter the normal oracle/differential path. User report: sprites
    remained correct with none of the prior extra/partial boundary symptoms.
-2. **Stage B (current; awaiting direct test)**: true-content BG margin refresh
-   only, while keeping the original OAM and streamer paths. `AR_WS_BGREFRESH=0`
-   returns byte-for-byte to Stage A in the same binary. Like Stage A, this
-   checkpoint enables region `$18=01` only; broaden to `$02-$07` after it passes.
-3. **Stage C**: widen only per-sprite emission for already-authentically-active
-   objects. Do not widen `$0400` object activation yet.
+2. **Stage B (validated and landed on main 2026-07-12)**: true-content BG
+   margin refresh only, while keeping the original OAM and streamer paths.
+   `AR_WS_BGREFRESH=0` returns byte-for-byte to Stage A in the same binary.
+   Direct user testing confirmed both the wide BG and sprites remain correct.
+   Region `$18=01` is enabled; broaden to `$02-$07` after the sprite phase.
+3. **Stage C (current focus)**: widen only per-sprite emission for already-
+   authentically-active objects. Do not widen `$0400` object activation yet.
 4. **Stage D**: widen object activation/cull last, with object/sheet-transition
    logging around the old 256px boundaries.
 
@@ -370,5 +371,7 @@ Deterministic gates using `saves/level1-action.rec` at gf=2500:
 
 The refreshed capture replaces the stale right-edge forest seam with a
 continuous cliff/foliage margin and reconstructs the left-side stump/ground
-continuation. Automated gates prove game/OAM-state identity; direct movement
-testing is still required to validate the original reported boundary cases.
+continuation. Automated gates prove game/OAM-state identity, and subsequent
+direct movement/boundary testing confirmed the implementation works without
+the historical extra or partial sprite failures. Stage B was fast-forwarded
+onto main after that confirmation.

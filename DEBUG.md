@@ -667,8 +667,8 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   without rebuilding.
 - **`AR_WS_SURVEY=1`** — force raw symmetric wide margins in EVERY mode (the Phase-2
   survey knob; artifacts expected).
-- **`AR_WS_ACTION=0`** — on `widescreen-investigation`, restore the pillarboxed
-  action-stage baseline in the same binary.
+- **`AR_WS_ACTION=0`** — restore the pillarboxed action-stage baseline in the
+  same binary.
 - **`AR_WS_BGREFRESH=0`** — restore investigation Stage A: raw wide action
   renderer with stale/wrapped margins. Unset/nonzero selects Stage B: isolated
   true-content BG1/BG2 margin refresh. Both modes retain the original recompiled

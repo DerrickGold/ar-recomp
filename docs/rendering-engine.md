@@ -280,9 +280,9 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
 | Routine | Status |
 |---|---|
 | `$00:8418` / `$02:A85E` vblank wait | hle (host yield) |
-| `$00:8C98` cull + `$00:8D68` builder | original recompiled path on `widescreen-investigation`; hle port only on the two earlier experimental branches |
-| `$02:B158` col-strip builder | original recompiled path on `widescreen-investigation`; Stage B separately reuses `$B825` transactionally for margin-only VRAM writes |
-| `$02:B1AF` row-strip builder | original recompiled path on `widescreen-investigation`; experimental hle port is not used |
+| `$00:8C98` cull + `$00:8D68` builder | original recompiled path on main; hle port only on the two historical experimental branches |
+| `$02:B158` col-strip builder | original recompiled path on main; validated BG refresh separately reuses `$B825` transactionally for margin-only VRAM writes |
+| `$02:B1AF` row-strip builder | original recompiled path on main; experimental hle port is not used |
 | `$02:BED3/$B825/$B8A0/$B90D/$B95A`, drain chain, OAM DMA, camera `$B091` | recompiled |
 
 ## 13. Widescreen design constraints (read before the next implementation)
@@ -349,7 +349,7 @@ The earlier `widescreen-bg` implementation proved the map-decoding idea but
 did not isolate it: that branch also hle-replaced `$8C98/$8D68`, hle-wrapped
 both streamers, and restored only selected DP scratch after calling `$B825`.
 
-`widescreen-investigation` keeps all four original routines and places the
+Main keeps all four original routines and places the validated
 margin decoder in `src/actraiser_widescreen_bg.c`. Static audit of
 `$B825->$B90D` shows only upload-record WRAM writes, DP `$0E`, and `$BED3`
 multiply-register use; there are no PPU/OAM/CGRAM writes. The host wrapper
