@@ -78,20 +78,18 @@ pillars. So the offscreen pillar tiles DO exist (submenu draws them), they're
 just clobbered by box-staging in dialog states. (Correcting an earlier wrong
 claim that "no pillar source exists".)
 
-**Sky palace verdict: cache + substitute** (`ActRaiser_SkyPalaceWideColonnade`,
-src/actraiser_rtl.c): each frame, cache the sampled offscreen columns from any
-box-free frame; on boxed frames, write the cached pillars back into those
-offscreen VRAM columns before render so the margins show the full colonnade
-(safe: BG tilemap is render-only; next $02:ADA8 upload overwrites the patch;
-hScroll=0 here so columns are stable). Cold cache (before any box-free frame
-seen) -> clamp BG2 fallback (clean, centered). Warms from the message-speed
-submenu or any box-free state, persists for the session. VERIFIED: cold path +
-faithful byte-identical; warm/substitution path is LIVE-ONLY (simdev.rec never
-opens the submenu) — needs in-game validation. Box detected via frame tiles
-$017/$018; a box variant using other border tiles would bleed -> add its tiles.
-Upfront warm (no submenu) would need the compose-buffer layout ([$76] bank $7E,
-NOT row-major-64 — quadrant/interleaved, unresolved) to read the pillar source
-at load; deferred.
+**Sky palace verdict (FINAL, user decision 2026-07-10): plain full-wide,
+staging artifacts accepted.** The wide-colonnade first impression outweighs
+transient box-staging tiles in the margins during dialogs; every mitigation
+tried was worse (whole-layer clamp kills the pillars; dynamic clamps trigger
+too often since submenus keep other boxes staged; 48px margin-gap samples more
+staging; 32px margin-limit + bottom band rejected). The cache+substitute
+approach (`ActRaiser_SkyPalaceWideColonnade`, parked/commented in
+src/actraiser_rtl.c) is the most promising future fix but its cache never
+warms in normal flows — no fully box-free frame exists; the correct warm
+source is the compose buffer at `[$76]` BEFORE box-draw (layout NOT
+row-major-64 — quadrant/interleaved, unresolved), revisit in a
+game-code-modification phase.
 
 **Engine widescreen primitives built along the way** (all game-agnostic,
 inert unless set, reset per frame by the extra-space setters):
@@ -107,3 +105,149 @@ inert unless set, reset per frame by the extra-space setters):
 `ActRaiser_ApplyWidescreenPolicy` (src/actraiser_rtl.c): wide for
 $18==0 && $19 ∈ {07, 08, 09}; pillarbox everything else until Phase 3/4.
 `AR_WS_SURVEY=1` still forces raw wide everywhere for continued surveying.
+
+## Phase 3: action-stage sprite pipeline (mapped + ported 2026-07-10)
+
+Full chain: `$00:8C98` per-frame cull → `$00:8D68` per-object sprite builder →
+`$00:923A` leading entries (from the `$06:A800` bank-6 table) → `$02:ACA6`
+OAM DMA (544 bytes: `$0380-$057F` entries + `$0580-$059F` high table).
+Ported to C in `src/actraiser_widescreen.c` via `hle_func 8C98
+ActRaiser_ObjectVisibilityScan` (bank00.cfg); `8D68` is a static helper inside
+the port. Wide branches key off the LIVE PPU margins (`extraLeftCur/RightCur`)
+so they are inert (bit-exact) whenever margins are 0 — no separate mode wiring.
+
+**$0380 shadow bit-8 answer** (the plan's "fiddliest detail"): the high table
+packs 2 bits/sprite (bit0 = x bit 8, bit1 = size) via `XBA; LSR; ROR $00`
+after the 16-bit screen-x store — i.e. bit 8 is taken from the true 16-bit x,
+which is ALREADY correct 9-bit OAM encoding for margin sprites (negative x →
+$1C0-$1FF region, right-margin x stays in $100-$12A). Composes with the
+engine's moved wrap threshold with no extra work.
+
+Port subtleties (bit-exactness traps, all replicated):
+- The y store runs `SBC #$0010` with carry CLEAR → stores y-0x11 (x path's
+  `SBC #$000F` → x-0x10). Asymmetric on purpose (OAM y is displayed +1).
+- x-reject AFTER the y bytes were written must restore `$E080` into the slot
+  WITHOUT advancing the cursor.
+- The 16-bit y store scribbles the tile byte, which the following tile/attr
+  word store overwrites — order matters.
+- Builder full (cursor hits $0200) returns carry SET → the cull exits early,
+  SKIPPING the final partial high-table flush ($8D5A epilogue).
+- `$8F` attr bias: `TSB #$0E00` per object with `$30 & $2008`, `TRB` at every
+  builder exit; other `$8F` bits persist across objects.
+- `$923A` is invoked from C with the generated paired-call protocol (push
+  $8CDD return frame, `host_return_valid=1`, NLR propagation, `S` restore).
+
+Cull windows (wide): x accept becomes `(x0+extL) < 0x100+extL+extR` (same
+two-edge unsigned structure as the ROM); builder draw window
+`(x+extL) < 0x110+extL+extR`. Y windows untouched.
+
+Still open for Phase 3: tilemap column-streaming margin (locate streamer via
+AR_TRACE vram while walking a stage), level-edge clamp (camera $22 bounds →
+PpuSetExtraSideSpace), and the action-mode wide policy switch itself
+(action stays pillarboxed until those land; the hle wide branches follow the
+margins automatically once the policy widens).
+
+## Phase 3.4/3.5 landed (2026-07-10): action-stage margin policy
+
+Measured with saves/level1-action.rec (AR_TRACE vram $6000-67FF, writer =
+$02:ADA8 strip DMAs):
+- Column streamer uploads a 2-col strip at camera+257..273 every 16px of
+  scroll -> the leading margin is only guaranteed ~16px past the authentic
+  edge; beyond that = stale/wrapped columns (the visible "streaming" the
+  user reported). Trailing content stays resident a full 512px wrap.
+- Strips carry FILLER in their top rows (BG1 tile $04E — most rows in sparse
+  sections; BG2 tile $18A rows 0-5), hidden behind the opaque HUD on hardware.
+- The "«««" row under SCORE is AUTHENTIC HUD art (present in the faithful
+  256-wide frame) — only its margin continuation was an artifact.
+
+Policy (ActRaiser_ApplyWidescreenPolicy action branch, $18=01-07):
+- Camera-range margin clamp: per-side visible margin = distance to the
+  camera-range boundary seen this scroll segment (+16px stream lead once that
+  side has led); >64px camera jump resets the segment. Fixes streaming pop AND
+  level-start/end wrapped columns with NO per-level bounds data. Margins ramp
+  4px/frame (easing, not popping). Applied via PpuSetExtraSideSpace.
+- HUD band: PpuSetWidescreenLayerClampBand(BG1/BG2, 0, 48) — filler rows
+  clamped, HUD gets black side panels, world wide below y=48.
+
+**White-player "corruption" = PRE-EXISTING cheat interplay, NOT widescreen**:
+player always uses sprite palette 7; the hit flash WHITENS CGRAM row 7 and
+restores it when invuln ends; AR_NO_KNOCKBACK pins the invuln flag ($08D0
+bit $2000) so after the first real hit the restore never fires -> player
+solid white ($77BD row) from then on. Proven: old pre-port build wrote the
+SAME OAM attrs (pal7); old "red" snapshot predates any hit; faithful headless
+run shows the white player too. Fix idea (cheat-side, later): drop the pin
+for 1 frame periodically so the game's own restore runs, or pin the invuln
+timer instead of the flag.
+
+## Phase 3.4 revision (2026-07-11): the streaming is TWO-TIER
+
+Correction to the earlier note ("the cam+0..46 bursts are tile animation,
+not a problem" — WRONG). The action BG streaming has two tiers:
+
+1. **Strip prefetch** — `$02:B158` (now hle'd: `ActRaiser_StreamStripH`,
+   src/actraiser_widescreen.c): 2-column strip at camera+256 (right) /
+   camera+0 (left), 16px-aligned, fired on each 16px camera crossing;
+   marshals into `JSR $BED3` (multiply) + `JSR $B825` (build/upload via the
+   `[$76]` record chain). Strip TOP ROWS are filler (BG1 `$04E`, BG2 `$18A`
+   rows 0-5 — hidden behind the HUD on hardware). The port widens both
+   offsets by ±64px while widescreen is active in an action stage, so strips
+   land beyond the 43px margin (invisible arrival).
+2. **Visible-window refresh bursts** — 8-column groups sweeping camera+0..62
+   over ~3 frames, periodically. These are the AUTHORITATIVE pass: they
+   redraw full detail INCLUDING the filler top rows (animated canopy etc.).
+   The initiator routine is NOT yet identified (open item — trace the burst
+   frames' func channel). Consequence: the LEADING margin only ever holds
+   tier-1 strip content -> missing canopy tops / detail tiles there (seen as
+   "holes in the spooky tree" in the user's gf4547 snapshot). The TRAILING
+   margin is complete because every trailing column was burst-refreshed
+   while on-screen.
+
+Also fixed along the way:
+- **Level-entry hole**: the initial map draw covers only ~entry+272; widened
+  strips start at crossing+320, so [entry+272, entry+336) is never streamed
+  going right. The policy grants the leading margin only after 96px of
+  progress into the segment (`lead_r/l` gate in ActRaiser_ApplyWidescreenPolicy).
+- **Stale-gap ghost strips**: the margin gap blackout is now an unconditional
+  per-frame clear of the unrendered edge strips — change-detection was
+  insufficient (steady clamps never repainted; ghosts of previous modes
+  lingered at the framebuffer edges).
+- **NoSpriteLimits wired for real**: the config knob existed but was never
+  honored (PpuBeginDrawing ignored render_flags). Now plumbed
+  (ppu->renderFlags; gates the 32-sprites and 34-tiles per-scanline caps).
+  config.ini defaults it to 0 (hardware-authentic + keeps the faithful pixel
+  gate exact); dev-config.ini keeps 1 for enhanced play — wide lines carry
+  more sprites and hit the authentic caps earlier.
+- **OAM budget ruled out** for the tree-hole corruption: the snapshot at the
+  corrupted frame shows 40/128 shadow entries used (check recipe: count
+  entries at $0380 with y byte != $E0).
+
+Census closures: `$00:9258` = HUD sprite builder ($06:A800 table, FIXED
+screen positions, no camera math, no cull window) — widescreen-safe, stays
+centered. `$00:B1BB` = fixed map-ZONE trigger ($05F0/$0220 constants), not
+screen culling — leave authentic.
+
+## Phase 3 knowledge collection COMPLETE (2026-07-11)
+
+Per the "collect everything upfront, design once" directive, the whole
+rendering engine was mapped in one pass (static disasm of the bank-02 video
+core + whole-level faithful traces + user-snapshot forensics). **The
+authoritative reference is now [rendering-engine.md](rendering-engine.md)** —
+including §13, the design-constraints list the next implementation must
+satisfy. Highlights that supersede parts of this doc's earlier notes:
+
+- The "tier-2 burst" initiator IS `$02:B1AF` (row strips, walk-bob-fired);
+  there is no third mechanism. All tilemap words flow through four
+  one-record buffers (capacity: 1 record/buffer/frame in gameplay).
+- The V-strip widened band start was REVERTED ($B8A0 page-keyed decode
+  requires 256-aligned spans). Margin fix = host-side record patching or a
+  C metatile rebuild for out-of-span columns (§13.2).
+- Camera bounds are authoritative in WRAM (`$2E/$30` = level dims; camera
+  clamped to `[0, $2E-$100]`): replaces the heuristic 96px camera-range
+  margin gate, and correctly explains the level-start black margins.
+- Snapshot artifact catalog (runs/20260711-092516) fully explained:
+  black staircase = BG1 filler `$04E` from a stale vertical window;
+  missing-trunk holes = row-strip span re-wrap on bad camera phases;
+  "17-glyphs" = BG2 filler `$17F` (BG2 row strips never fire in act 1);
+  sprites = NON-problem (OAM <= 60/128 wide, sheets static, margins draw
+  correctly; "sprite corruption" reports were these BG gaps + the known
+  red/white hit-flash player from the AR_NO_KNOCKBACK pin).

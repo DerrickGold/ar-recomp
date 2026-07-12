@@ -654,6 +654,58 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   "what is the main loop doing frame to frame."
 - **`AR_GFLOG=1`** — logs the game-frame counter per frame.
 
+### 4b. Widescreen / rendering probes (added 2026-07-09, policy fn in actraiser_rtl.c)
+
+- **`AR_WS_LAYERS=1`** — per game-frame PPU layer state: BG mode, main/sub enables,
+  `windowsel`, `cgwsel/cgadsub`, and per-BG tilemap width (`w0`=32/`w1`=64 tiles),
+  tilemap base, hScroll, plus window1/2 edges. THE first probe for "which layer is
+  this artifact on / is its tilemap wide enough to have margin content."
+- **`AR_WS_ONLYBG=N`** (1..4) — masks the main screen to a single BG layer and forces
+  raw wide margins: capture per-layer screenshots to attribute artifacts to a layer
+  (how BG1=sky vs BG2=pillars+dialog was separated in the sky palace).
+- **`AR_WS_CLAMP=<hex>`** — override the per-layer widescreen clamp mask for tuning
+  without rebuilding.
+- **`AR_WS_SURVEY=1`** — force raw symmetric wide margins in EVERY mode (the Phase-2
+  survey knob; artifacts expected).
+- **`AR_WS_HEADLESS=1`** — opt in to WIDE geometry under `AR_HEADLESS=1` (normally
+  headless forces authentic 256-wide so the oracle/differential harness never sees a
+  wide framebuffer). THE flag for headless widescreen visual-regression: replay +
+  `AR_SHOT_*` writes 342-wide PPMs with no window. The oracle harness leaves it unset.
+  Action-stage side margins are filled by `ActRaiser_WidescreenMarginRefresh`
+  (src/actraiser_widescreen.c) — host-side true-content streaming, see
+  docs/rendering-engine.md §13.
+
+### 4c. Visual-regression harness (widescreen work, generalizes to any rendering change)
+
+1. **Deterministic replay**: `AR_INPUT_REPLAY=saves/simdev.rec` (or record a new one,
+   §9) drives the exact same frames every run.
+2. **Screenshots at fixed game-frames**: `AR_SHOT_AT_GF=N` / `AR_SHOT_EVERY=N` —
+   PPMs land in `runs/<ts>/`. `AR_VRAMDUMP_GF=g1,g2,...` adds headless FULL
+   snapshots (wram+vram+cgram+oam) at exact game-frames — no window needed.
+3. **Compare NUMERICALLY, never by eye**: slice pixel rows/columns in python
+   (`px[(y*w+x)*3]`...). HARD LESSON: pillarboxed shots with dark world content were
+   repeatedly misread as widescreen when eyeballing PNGs — a whole survey phase was
+   mis-verified that way. Margin checks = count nonblack margin rows + spot-sample
+   exact pixel values at the seam columns (x = extra-1, extra, extra+256-1, ...).
+4. **Faithful byte-identity gate** for any renderer/engine change: capture the
+   deterministic attract frame (`AR_HEADLESS=1 AR_QUIT_FRAMES=1300 AR_SHOT_AT_GF=900`)
+   before and after; `cmp` must be identical when the feature is off. (The WRAM
+   oracle is blind to rendering — this PPM compare is the pixel-side gate.)
+5. **Tilemap forensics**: dump VRAM, decode `| $7000+r*32+c |` words, and classify
+   content per column/row (occupancy maps). This is how the dialog-box staging in
+   BG2's offscreen half was proven (and how the "no clean pillar source during
+   dialogs" conclusion was reached — see docs/widescreen-survey.md).
+6. **OAM budget check** (is sprite loss = 128-entry exhaustion?): in a WRAM dump,
+   count `$0380` shadow entries whose y byte (`$0381+i*4`) != `$E0` — the shadow
+   is cleared to y=$E0 each frame, so non-$E0 = a real entry. 40/128 at a
+   corrupted frame ruled exhaustion OUT for the missing-tree-tiles bug (which
+   turned out to be the two-tier streaming gap, see widescreen-survey.md).
+7. **Framebuffer-gap hygiene**: anything that renders less than the full wide
+   framebuffer (asymmetric margin clamps) must CLEAR the unrendered edge strips
+   EVERY frame. Change-detection is not enough — a steady clamp never repaints,
+   and ghosts of the previous mode linger at the edges (the "stale strip at the
+   screen edge" bug class).
+
 ---
 
 ## 5. Static analysis (no run needed)
@@ -1060,6 +1112,12 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
 - Constraints: **no stubs, ever** (a stub is a hard build error — close the recompiler gap).
   Edit only the emitter, runner, `src/main.c`, `src/actraiser_rtl.c`, `recomp/*.cfg`, and
   `tools/`. Commit/push only when asked.
+- **`hle_func` semantics (fixed 2026-07-10)**: the replaced function's REAL body is still
+  decoded + fed through codegen during regen (its text discarded, the forwarding stub emitted
+  instead) so callees reachable only through it keep getting auto-promoted/emitted. Before this,
+  hle'ing a function silently dropped its exclusive callees from emission (e.g. `$00:923A` via
+  `hle_func 8C98` → undefined-symbol link error). Register-everything-first, then substitute.
+  An undecodable hle body falls back to stub-only, as before.
 
 ---
 

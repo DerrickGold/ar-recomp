@@ -23,6 +23,51 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:0021 | 1 | Magic points | |
 | $7E:00E6 | 2 | Time remaining | BCD format |
 
+### Camera / Scroll (action + sim playfield) — full model in rendering-engine.md §4/§6
+| Address | Size | Description |
+|---------|------|-------------|
+| $7E:0022 | 2 | Camera X = BG1 H scroll (world px; writer $02:B091, clamped to [0, $2E-$100]; all 6 scroll regs uploaded from $22-$2D by $02:ADC3, 10-bit) |
+| $7E:0024 | 2 | Camera Y = BG1 V scroll (clamped to [0, $30-$E1]) |
+| $7E:0026/$0028 | 2+2 | BG2 H/V scroll (parallax, $02:B9D5/$02:BA0B from ratio nibbles $3A-$45) |
+| $7E:002A/$002C | 2+2 | BG3 H/V scroll ($2C pinned $FFFC: HUD up 4px) |
+| $7E:002E/$0030 | 2+2 | **BG1 layer = LEVEL pixel width/height** (Fillmore act1: 4096x768) — the camera clamp bounds |
+| $7E:0032/$0034 | 2+2 | BG2 layer width/height (scroll clamps only if width >= $300, else wraps) |
+| $7E:003A-$0045 | 12 | per-plane parallax ratio nibbles (from section config table $02:893E+7..12) |
+| $7E:005E/$0060/$0062/$0064 | 2 ea | record-buffer cursors: BG1col $3900 / BG1row $3A02 / BG2col $3B04 / BG2row $3C06 |
+| $7E:007C/$007E | 2+2 | camera H/V delta this frame (16-bit signed; strip triggers) |
+| $7E:008E | 1 | parallax disable bits (bit0 BG2H, bit1 BG2V = script-driven) |
+| $7E:0093 | 1 | strip-request flags: $80 BG1col $40 BG1row $20 BG2col $10 BG2row (set by $02:B091 on 16px crossings, TRB-consumed by dispatcher $02:B127) |
+
+### OAM shadow + sprite-build working vars (rebuilt per frame by $00:8C98/$00:8D68; DMA'd whole by $02:ACA6, 544 bytes)
+| Address | Size | Description |
+|---------|------|-------------|
+| $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill |
+| $7E:0580 | 32 | OAM high table shadow: 2 bits/sprite (bit0 = x bit 8, bit1 = size), packed 4 sprites/byte |
+| $7E:0000 | 1 | (during sprite build) high-table bit accumulator — bits ROR'd in from the top, flushed every 4 sprites |
+| $7E:000C | 2 | (during sprite build) sprites remaining in current object's def list |
+| $7E:0014 | 2 | (during sprite build) object screen-x + 16 (draw-window bias) |
+| $7E:0016 | 2 | (during sprite build) object screen-y + 16 |
+| $7E:008F | 2 | sprite attr OR-bias; $0E00 TSB'd while object has $30&$2008, TRB'd at builder exit |
+| $7E:0094 | 2 | camera X - 16 (sprite draw origin, set by $00:8C98 prologue) |
+| $7E:0096 | 2 | camera Y - 16 |
+| $7E:009A | 2 | high-table write cursor (starts $0580) |
+| $7E:009C | 2 | high-table bit slots remaining in current byte (4..1) |
+| $7E:009E | 2 | current object's flip/attr word (obj+$28 ^ $0100) |
+
+### Upload records + NMI descriptors (rendering-engine.md §2/§3/§7/§10)
+| Address | Size | Description |
+|---------|------|-------------|
+| $7E:0076/$0079 (+banks $78/$7B) | 2+1 ea | NMI record-drain pointers — reset EVERY NMI by $02:ACC8 to $3900/$3A02 then $3B04/$3C06 (game-side reads see the resting values; not a game variable) |
+| $7E:3900/$3A02/$3B04/$3C06 | $102 ea | the four one-record upload buffers (BG1 col/row, BG2 col/row): +0 header = VRAM base word (0=empty, zeroed after drain), data = 4x64B chunks at +2/+$42/+$82/+$C2 |
+| $7E:00C4-$00CA | — | fade gate/config + BG2SC page-flip anim counters ($C5 arm, $C7 page) |
+| $7E:00CB/$00CD/$00CE/$00CF | 2+1+1+1 | CGRAM upload descriptor: src addr/bank, CGADD, row count ($02:AE75) |
+| $7E:00D0-$00D6 | 7 | VRAM DMA descriptor slot 0: src16/bank/VMADD/size (size=0 idle; $02:AF30) |
+| $7E:00D7-$00DD | 7 | VRAM DMA descriptor slot 1 = tile-anim upload (armed by $02:BC56; frames at [$D9]:$D7 = $7F:B800+n*$E1) |
+| $7E:00DE-$00E1 | 1+1+1+2 | tile-anim: tick period mask / frame count-1 / frame index / frame stride (bytes); $FF/$FF/-/0 = disabled |
+| $7E:00F1 | 1 | one-shot flag: re-stream BG3 map rows 4-26 ($7F:B100 -> VRAM $5880) next NMI |
+| $7F:B000-$B6BF | 1728 | HUD/BG3 tilemap compose buffer (rows 0-3 streamed every frame to VRAM $5800; rows 4-26 on $F1) |
+| $7F:B800+ | var | tile-anim frame buffers (action default; sim uses ROM $0A directly) |
+
 ### Mode 7 / World Map
 | Address | Size | Description |
 |---------|------|-------------|

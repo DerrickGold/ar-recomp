@@ -77,10 +77,20 @@ key-on state: srcn/pitch/volumes/ADSR + first BRR bytes — all-zero BRR = sampl
 
 ## Graphics / PPU  (low-level; intent lives in the *loaders*, not the *draws*)
 
+> Deep-dive companion: **[rendering-engine.md](rendering-engine.md)** — the
+> consolidated decomp-style reference for the drawing machinery (complete
+> NMI chain, the 4-buffer upload-record system, tilemap-ring streaming,
+> per-section video config table, camera/parallax/bounds, tile animation,
+> char loading + VRAM layout, OAM pipeline, palette paths, and the §13
+> widescreen design constraints), with per-routine addresses and evidence.
+
 | Seam | Routine / address | Hardware | Intent | Logical ID / table | Status |
 |---|---|---|---|---|---|
 | Per-frame display build / DMA | NMI path; `ActRaiserDrawPpuFrame`; DMA descriptors in ZP `$D0-$D5` | VRAM/OAM/CGRAM DMA, `$2100`-bus | "blit this frame's tiles/sprites/palette" | DMA descriptor tables | 🔴 |
 | Sprite (OAM) build | object loop `$8915` → OAM | OAM | "place object's sprite" | `$06A0` object struct (X/Y/handler) | 🟡 |
+| **Action OAM pipeline (fully mapped 2026-07-10)** | `$00:8C98` per-frame cull (obj vs 256×224 window keyed on camera `$22/$24`; sets/clears offscreen bit `$0400` in obj+`$30`) → `$00:8D68` sprite builder (walks 7-byte sprite defs at bank obj+`$18`, ptr obj+`$20`+5; draw window x∈[-16,256) y∈[-16,224); writes `$0380` shadow + packed high-table bits via `$00/$9A/$9C`) → `$00:923A`→`$9258` **HUD sprites** (from the `$06:A800` bank-6 table: FIXED screen positions, no camera math, no cull — widescreen-safe/centered) → OAM DMA `$02:ACA6` (544B `$0380`→`$2104`) | OAM | "which objects are visible + build their hardware sprites" | see ram-map.md "OAM shadow + sprite-build working vars" | 🟢 **hle'd**: `hle_func 8C98 ActRaiser_ObjectVisibilityScan` (src/actraiser_widescreen.c) — bit-exact port + widescreen window widening keyed on live PPU margins |
+| **Action BG streaming (FULLY mapped 2026-07-11 — rendering-engine.md §3/§4)** | Camera `$02:B091` (clamp vs level dims `$2E/$30`) sets 16px-crossing flags in `$93` → dispatcher `$02:B127` (TRB per bit) → `$02:B158` column strips (2 cols × 64 rows) / `$02:B1AF` row strips (2 rows × 64 cols, span `[cam&~$FF,+512)` — 256-aligned, page-keyed decode) per layer (X=0 BG1, X=4 BG2) → ONE record into the layer's fixed buffer (`$3900/$3A02/$3B04/$3C06`, capacity 1/frame) → NMI drain `$02:ACC8/$ACE5` → `$02:ADA8` 64B chunks. 64×64-tile ring per layer (BG1 `$6000`, BG2 `$7000`); entry draw = inline mega-burst (full ring, one frame). The old "tier-2 burst" = `$B1AF` row strips (walk bob). | VRAM BG1/BG2 tilemaps | "keep the resident 512×512px tilemap ring fed as the camera moves" | level map decode via section config `$02:893E` + metatile tables | 🟡 both builders **hle'd** (`ActRaiser_StreamStripH` +64px wide lead / `ActRaiser_StreamStripV` faithful — widened start REVERTED, page-keyed); margin staleness root-caused, fix design = rendering-engine.md §13 |
+| UI/dialog tilemap compose+upload (sim engine) | compose buffer at `[$76]` (WRAM, e.g. `$3B04`) → `$02:ADA8` whole-map DMA (64×32 words, per UI-state change); box draw dispatcher `$02:BF60` | VRAM BG2 tilemap | "replace the whole UI screen state" | message-type IDs via `$14` (see Save/persistence note on `$14` reuse) | 🟡 mapped; offscreen half doubles as box staging (widescreen margins expose it — see docs/widescreen-survey.md) |
 | BG mode / layers | `$2105` BGMODE, `$212C/2D` main/sub, scroll regs | PPU | "set up background layers/scroll" | — | 🔴 |
 | HDMA (raster fx, HBlank) | HDMAEN `$420C`; ActRaiser drives ch 2/3 (and others) | HDMA | "per-scanline effect" | HDMA tables | 🔴 |
 | Mode 7 (overworld / transitions) | m7matrix; `$2134` multiply; the act-select spin | PPU mode 7 | "rotate/zoom the world map" | m7 transform params | 🔴 |
