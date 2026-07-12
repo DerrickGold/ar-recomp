@@ -25,6 +25,7 @@ add_executable(ActRaiserRecomp
     src/gen_stubs.c
     src/actraiser_cpu_infra.c
     src/actraiser_rtl.c
+    src/actraiser_widescreen_bg.c
     src/actraiser_spc_player.c
     # recompiled banks (generated)
     ${ACTRAISER_GEN_SOURCES}

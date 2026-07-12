@@ -322,6 +322,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   int wide = survey;
   uint8 clamp = 0;
   int bg2_gap = 0;  /* margin source gap px/side for BG2 (UI staging strip) */
+  int action_margins = 0;
   if (!survey && g_ram[0x18] == 0x00) {
     switch (g_ram[0x19]) {
       case 0x07:            /* sky palace hub. BG1 = sky/clouds (wide, clean).
@@ -378,18 +379,16 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
         break;
     }
   } else if (!survey && g_ram[0x18] == 0x01) {
-    /* Investigation stage A: widen only the renderer's sampling window.
-     * Deliberately leave the ROM's tile streaming ($02:B158/$02:B1AF), object
-     * visibility scan ($00:8C98), and OAM builder ($00:8D68) untouched. Stale
-     * or wrapped BG margin tiles are expected at this stage; the purpose is to
-     * establish whether merely rendering a wide action frame changes sprite
-     * behavior before any game-side BG/OAM port is introduced.
+    /* Investigation stage B: keep the original recompiled tile streamers,
+     * object visibility scan, and OAM builder untouched. A separate host-side
+     * transaction refreshes only BG tilemap VRAM margins with true map data.
      *
      * AR_WS_ACTION=0 restores the pillarboxed action baseline in the same
-     * binary for direct A/B testing. Any other value (or unset) enables this
-     * raw-wide stage on the investigation branch. */
+     * binary. AR_WS_BGREFRESH=0 returns exactly to Stage A (raw wide renderer,
+     * stale/wrapped margin BG) without changing the action geometry. */
     const char *aw = getenv("AR_WS_ACTION");
     wide = !(aw && aw[0] == '0');
+    action_margins = wide && ActRaiser_WidescreenBgRefreshEnabled();
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
    * main-screen enable to just that layer so a snapshot shows exactly which
@@ -408,6 +407,19 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     PpuSetWidescreenLayerClamp(g_ppu, clamp);
     if (bg2_gap)
       PpuSetWidescreenLayerMarginGap(g_ppu, 1, (uint8)bg2_gap, (uint8)bg2_gap);
+    if (action_margins) {
+      /* Clamp each side to real BG1 world space. The refresh fills every
+       * granted margin column this frame; outside [0,width) stays black. */
+      int cam = (int)(uint16)(g_ram[0x22] | (g_ram[0x23] << 8));
+      int width = (int)(uint16)(g_ram[0x2E] | (g_ram[0x2F] << 8));
+      int room_l = cam;
+      int room_r = width - 256 - cam;
+      if (room_l < 0) room_l = 0;
+      if (room_r < 0) room_r = 0;
+      int ml = room_l < g_ws_extra ? room_l : g_ws_extra;
+      int mr = room_r < g_ws_extra ? room_r : g_ws_extra;
+      PpuSetExtraSideSpace(g_ppu, ml, mr, 0);
+    }
   } else {
     PpuSetExtraSpaceCentered(g_ppu, (uint8)g_ws_extra);
     PpuSetWidescreenLayerClamp(g_ppu, 0);
@@ -441,14 +453,28 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
               g_ppu->window2left, g_ppu->window2right);
     }
   }
-  /* The compositor only writes the ACTIVE window each line; when the visible
-   * margins shrink (wide -> pillarbox transition, later per-side clamps), the
-   * vacated columns would keep last frame's pixels. Blank the framebuffer on
-   * any margin change — transitions are rare, and every visible row is
-   * rewritten this same frame. */
+  /* The compositor writes only the active window. Stage B's bounded margins
+   * can leave steady gap strips at the framebuffer edges, so clear those gaps
+   * every frame. Other modes retain Stage A's change-triggered full clear. */
   static int last_l = -1, last_r = -1;
   int l = g_ppu->extraLeftCur, r = g_ppu->extraRightCur;
-  if (l != last_l || r != last_r) {
+  if (action_margins && g_ppu->renderBuffer) {
+    int budget = g_ppu->extraLeftRight;
+    int gap_l = budget - l;
+    int gap_r = budget - r;
+    size_t pitch = g_ppu->renderPitch;
+    if (gap_l > 0)
+      for (int y = 0; y < 224; y++)
+        memset(g_ppu->renderBuffer + (size_t)y * pitch, 0,
+               (size_t)gap_l * 4);
+    if (gap_r > 0)
+      for (int y = 0; y < 224; y++)
+        memset(g_ppu->renderBuffer + (size_t)y * pitch +
+                   ((size_t)budget + 256 + r) * 4,
+               0, (size_t)gap_r * 4);
+    last_l = l;
+    last_r = r;
+  } else if (l != last_l || r != last_r) {
     last_l = l;
     last_r = r;
     if (g_ppu->renderBuffer)
@@ -458,6 +484,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
 
 void ActRaiserDrawPpuFrame(void) {
   ActRaiser_ApplyWidescreenPolicy();
+  /* Stage B: populate BG1/BG2 margin tilemap cells transactionally before
+   * scanline rendering. No-op under AR_WS_BGREFRESH=0 and outside action. */
+  ActRaiser_WidescreenMarginRefresh();
   /* Process ALL 8 HDMA channels, not a fixed subset. ActRaiser drives its
    * per-scanline effects (e.g. the Mode-7 title matrix animation) on channels
    * 2/3 — the old code only ran 5/6/7 (a stale assumption carried over from

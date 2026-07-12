@@ -301,14 +301,17 @@ VRAM `$2000-$3FFF` only after establishing the OAM group result.
 
 ### Controlled implementation ladder
 
-1. **Stage A (current)**: raw wide action renderer only. `$8C98/$8D68`,
+1. **Stage A (passed direct testing 2026-07-12)**: raw wide action renderer only. `$8C98/$8D68`,
    `$B158/$B1AF`, OAM DMA, and all game WRAM behavior remain original
    recompiled code. Stale/wrapped BG margins are expected. `AR_WS_ACTION=0`
    returns to the pillarboxed baseline in the same binary. The headless
    `AR_WS_HEADLESS=1` geometry opt-in was restored as test infrastructure only;
-   it does not alter the normal oracle/differential path.
-2. **Stage B**: restore true-content BG margin refresh only, while keeping the
-   original OAM path. Give the refresh its own same-binary off switch.
+   it does not alter the normal oracle/differential path. User report: sprites
+   remained correct with none of the prior extra/partial boundary symptoms.
+2. **Stage B (current; awaiting direct test)**: true-content BG margin refresh
+   only, while keeping the original OAM and streamer paths. `AR_WS_BGREFRESH=0`
+   returns byte-for-byte to Stage A in the same binary. Like Stage A, this
+   checkpoint enables region `$18=01` only; broaden to `$02-$07` after it passes.
 3. **Stage C**: widen only per-sprite emission for already-authentically-active
    objects. Do not widen `$0400` object activation yet.
 4. **Stage D**: widen object activation/cull last, with object/sheet-transition
@@ -335,3 +338,37 @@ paired-resume misses. The exit OAM shadow is contiguous (12 live slots 0-11,
 116 parked) with no margin-origin entries, as expected from the untouched ROM
 builder. This gate cannot reproduce motion-correlated boundary symptoms, so
 manual stage-A play plus an F2 snapshot at the exact symptom remains required.
+
+### Stage B: audited BG-only refresh
+
+The useful strategy from `widescreen-bg` is retained: build 16px margin
+columns with the game's exact `$02:B825->$02:B90D` level/metatile decoder and
+copy the resulting column record into tilemap VRAM before scanline rendering.
+The sprite-related and state-risking parts are removed:
+
+- no `recomp/*.cfg` changes and no regeneration;
+- no `$8C98/$8D68` OAM port;
+- no `$B158/$B1AF` hle wrappers—the original generated streamers still run;
+- complete CPU + 128 KiB WRAM + SNES math-unit snapshot/restore around every
+  frame's batch, instead of restoring only `$00-$17/$A5-$A6`;
+- fixed-buffer validation (`$3900` BG1, `$3B04` BG2) and per-layer destination
+  validation: BG1 writes cannot leave `$6000-$6FFF`, BG2 cannot leave
+  `$7000-$7FFF`, so OBJ chars `$2000-$3FFF` and OAM are unreachable;
+- authoritative BG1 camera/level bounds limit visible margins at level edges;
+  steady unused framebuffer gaps are cleared every frame.
+
+Deterministic gates using `saves/level1-action.rec` at gf=2500:
+
+- Stage-B-off `runs/20260712-114134/shot.ppm` is byte-identical to the prior
+  Stage-A `runs/20260712-112054/shot.ppm`.
+- Stage B `runs/20260712-114226/shot.ppm` changes 8,653 margin pixels while
+  the authentic center 256x224 has zero differing pixels.
+- Stage-A and Stage-B exit WRAM and SRAM dumps are byte-identical (including
+  OAM shadow/object state); both complete without ASan/UBSan findings.
+- `AR_WS_BGDBG=1` run `runs/20260712-114712/` built 10-14 accepted strips per
+  action frame with `(state restored)` and no rejected cursor or VRAM target.
+
+The refreshed capture replaces the stale right-edge forest seam with a
+continuous cliff/foliage margin and reconstructs the left-side stump/ground
+continuation. Automated gates prove game/OAM-state identity; direct movement
+testing is still required to validate the original reported boundary cases.

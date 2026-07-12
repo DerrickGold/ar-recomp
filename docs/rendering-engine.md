@@ -281,8 +281,8 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
 |---|---|
 | `$00:8418` / `$02:A85E` vblank wait | hle (host yield) |
 | `$00:8C98` cull + `$00:8D68` builder | original recompiled path on `widescreen-investigation`; hle port only on the two earlier experimental branches |
-| `$02:B158` col-strip builder | original recompiled path on `widescreen-investigation`; experimental hle port existed earlier |
-| `$02:B1AF` row-strip builder | original recompiled path on `widescreen-investigation`; experimental hle port existed earlier |
+| `$02:B158` col-strip builder | original recompiled path on `widescreen-investigation`; Stage B separately reuses `$B825` transactionally for margin-only VRAM writes |
+| `$02:B1AF` row-strip builder | original recompiled path on `widescreen-investigation`; experimental hle port is not used |
 | `$02:BED3/$B825/$B8A0/$B90D/$B95A`, drain chain, OAM DMA, camera `$B091` | recompiled |
 
 ## 13. Widescreen design constraints (read before the next implementation)
@@ -342,6 +342,22 @@ Facts the next design must satisfy (all trace/disasm-proven above):
 9. **Every drawing path is now known**: any wide-mode VRAM the game won't
    supply can be host-written safely during the NMI window as long as it
    stays out of the four record buffers' way.
+
+### 13.1 Stage-B implementation refinement (2026-07-12)
+
+The earlier `widescreen-bg` implementation proved the map-decoding idea but
+did not isolate it: that branch also hle-replaced `$8C98/$8D68`, hle-wrapped
+both streamers, and restored only selected DP scratch after calling `$B825`.
+
+`widescreen-investigation` keeps all four original routines and places the
+margin decoder in `src/actraiser_widescreen_bg.c`. Static audit of
+`$B825->$B90D` shows only upload-record WRAM writes, DP `$0E`, and `$BED3`
+multiply-register use; there are no PPU/OAM/CGRAM writes. The host wrapper
+therefore snapshots/restores the full `CpuState`, all 128 KiB WRAM, and SNES
+math state. It validates the fixed record cursor and every destination against
+the owning 4 KiB tilemap before directly copying to VRAM. Consequently its
+only persistent state is BG1/BG2 tilemap content. `AR_WS_BGREFRESH=0` removes
+the transaction entirely for a byte-identical Stage-A A/B run.
 
 ## 14. Open questions (all remaining, none blocks the §13 design)
 
