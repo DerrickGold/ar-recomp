@@ -667,13 +667,17 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   without rebuilding.
 - **`AR_WS_SURVEY=1`** — force raw symmetric wide margins in EVERY mode (the Phase-2
   survey knob; artifacts expected).
+- **`AR_WS_ACTION=0`** — on `widescreen-investigation`, restore the pillarboxed
+  action-stage baseline in the same binary. Unset/nonzero selects investigation
+  stage A: raw wide renderer window with the original recompiled BG streamers and
+  OAM builder still untouched. Stale/wrapped BG margin tiles are expected in A.
 - **`AR_WS_HEADLESS=1`** — opt in to WIDE geometry under `AR_HEADLESS=1` (normally
   headless forces authentic 256-wide so the oracle/differential harness never sees a
   wide framebuffer). THE flag for headless widescreen visual-regression: replay +
   `AR_SHOT_*` writes 342-wide PPMs with no window. The oracle harness leaves it unset.
-  Action-stage side margins are filled by `ActRaiser_WidescreenMarginRefresh`
-  (src/actraiser_widescreen.c) — host-side true-content streaming, see
-  docs/rendering-engine.md §13.
+  The experimental branches used `ActRaiser_WidescreenMarginRefresh` for action-stage
+  true-content streaming; the investigation branch deliberately has not reintroduced
+  it in stage A (see docs/widescreen-survey.md).
 
 ### 4c. Visual-regression harness (widescreen work, generalizes to any rendering change)
 

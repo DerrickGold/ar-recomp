@@ -387,8 +387,13 @@ int main(int argc, char **argv) {
    * units, divided by the 7:6 pixel stretch when the 4:3-corrected look is
    * on (AspectPAR=4:3, default): 16:9 -> 342 px (extra=43/side), 16:10 -> 308
    * (26); square pixels: 399 (72) / 359 (52). Headless (oracle/differential)
-   * runs force authentic geometry so comparisons never see wide framebuffers. */
-  if (!headless && g_config.extend_aspect_x && g_config.extend_aspect_y) {
+   * runs force authentic geometry so comparisons never see wide framebuffers,
+   * unless AR_WS_HEADLESS=1 explicitly opts a visual-regression run into the
+   * configured wide geometry. The oracle harness leaves it unset. */
+  bool ws_headless = getenv("AR_WS_HEADLESS") && getenv("AR_WS_HEADLESS")[0]
+                     && getenv("AR_WS_HEADLESS")[0] != '0';
+  if ((!headless || ws_headless) &&
+      g_config.extend_aspect_x && g_config.extend_aspect_y) {
     long num = 224L * g_config.extend_aspect_x * (g_config.aspect_par_43 ? 6 : 7);
     long den = 7L * g_config.extend_aspect_y;
     int internal_w = (int)((num + den - 1) / den);

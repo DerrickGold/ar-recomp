@@ -378,11 +378,18 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
         break;
     }
   } else if (!survey && g_ram[0x18] == 0x01) {
-    // Action mode wide screen
-    // TODO:
-    // * fix tile streaming to account for the new screen width 
-    // * fix enemy and level sprite occlusion/culling based on new screen boundaries
-    //wide = 1;
+    /* Investigation stage A: widen only the renderer's sampling window.
+     * Deliberately leave the ROM's tile streaming ($02:B158/$02:B1AF), object
+     * visibility scan ($00:8C98), and OAM builder ($00:8D68) untouched. Stale
+     * or wrapped BG margin tiles are expected at this stage; the purpose is to
+     * establish whether merely rendering a wide action frame changes sprite
+     * behavior before any game-side BG/OAM port is introduced.
+     *
+     * AR_WS_ACTION=0 restores the pillarboxed action baseline in the same
+     * binary for direct A/B testing. Any other value (or unset) enables this
+     * raw-wide stage on the investigation branch. */
+    const char *aw = getenv("AR_WS_ACTION");
+    wide = !(aw && aw[0] == '0');
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
    * main-screen enable to just that layer so a snapshot shows exactly which

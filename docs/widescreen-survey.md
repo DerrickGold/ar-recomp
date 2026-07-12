@@ -248,6 +248,90 @@ satisfy. Highlights that supersede parts of this doc's earlier notes:
   black staircase = BG1 filler `$04E` from a stale vertical window;
   missing-trunk holes = row-strip span re-wrap on bad camera phases;
   "17-glyphs" = BG2 filler `$17F` (BG2 row strips never fire in act 1);
-  sprites = NON-problem (OAM <= 60/128 wide, sheets static, margins draw
-  correctly; "sprite corruption" reports were these BG gaps + the known
-  red/white hit-flash player from the AR_NO_KNOCKBACK pin).
+  those captures did not show OAM exhaustion (<=60/128), while some apparent
+  corruption was BG gaps or the known red/white hit-flash player from the
+  AR_NO_KNOCKBACK pin. This did **not** close the later sprite-boundary bugs;
+  see the 2026-07-12 investigation restart below.
+
+## Investigation restart (2026-07-12)
+
+### Clean baseline: `runs/20260712-100958/` on `main`
+
+- Action mode stays pillarboxed inside the 342x224 framebuffer. The gf=3254
+  snapshot shows complete multi-tile enemies and no extra boundary sprites.
+- WRAM `$0380-$059F` has 37 live OAM entries, exactly contiguous in slots
+  0-36; all 91 remaining entries are parked at x=$80/y=$E0. Two visible enemy
+  groups occupy complete six-entry runs (slots 24-29 and 30-35). The separate
+  `.oam.bin` capture is only 512 bytes and omits the 32-byte high table, so use
+  the WRAM snapshot when checking x-bit-8/size bits.
+- Both anomaly captures diagnose only the known benign paired-resume misses
+  (`$82ED`, then `$80B4/$8078/$82ED`): zero m/x leaks and zero garbage variants.
+  They are the same class seen in the earlier wide runs and provide no sprite-
+  corruption signal.
+- The console does reveal a real renderer bug: UBSan reports index 5 into the
+  four-entry `wsClampY0/wsClampY1` arrays. `PpuWindows_Calc` uses logical layer
+  5 for the color-math window, but `PpuLayerExtra` assumed every caller was
+  BG1-BG4. Pillarbox usually masks the bad read; wide composition may not. The
+  investigation branch now guards BG-only clamp metadata with `layer < 4`.
+
+### Why the earlier branches did not isolate backgrounds
+
+`widescreen-bg` is based on `widescreen-sprites-wip` and still hle-replaces
+the whole `$00:8C98/$00:8D68` OAM build, even after reverting its acceptance
+windows to authentic bounds. Therefore a sprite symptom on `widescreen-bg`
+cannot yet be assigned to BG streaming, priority, or the OAM port. It also
+changes `NoSpriteLimits` and cheat defaults, adding avoidable test variables.
+
+The historical source suggests two plausible but not yet capture-proven sprite
+mechanisms:
+
+1. Widening the object cull changes `$0400` activation state, so a margin
+   object can begin logic or sheet-loading earlier and can toggle at the old
+   boundary. This fits extra/junk sprites correlated with clipping boundaries.
+2. The per-sprite definition window independently decides which members of a
+   multi-tile object reach OAM. An authentic window inside a wide framebuffer
+   can legitimately emit only the definitions whose origins cross the old
+   boundary. This fits partial groups better than BG priority does. Priority
+   can hide pixels, but it cannot remove entries from the OAM shadow.
+
+At the next symptom capture, first inspect the owning object's expected OAM
+group. Missing entries means cull/builder/limits; complete entries with missing
+pixels means renderer priority/windowing or OBJ character data. Also compare
+VRAM `$2000-$3FFF` only after establishing the OAM group result.
+
+### Controlled implementation ladder
+
+1. **Stage A (current)**: raw wide action renderer only. `$8C98/$8D68`,
+   `$B158/$B1AF`, OAM DMA, and all game WRAM behavior remain original
+   recompiled code. Stale/wrapped BG margins are expected. `AR_WS_ACTION=0`
+   returns to the pillarboxed baseline in the same binary. The headless
+   `AR_WS_HEADLESS=1` geometry opt-in was restored as test infrastructure only;
+   it does not alter the normal oracle/differential path.
+2. **Stage B**: restore true-content BG margin refresh only, while keeping the
+   original OAM path. Give the refresh its own same-binary off switch.
+3. **Stage C**: widen only per-sprite emission for already-authentically-active
+   objects. Do not widen `$0400` object activation yet.
+4. **Stage D**: widen object activation/cull last, with object/sheet-transition
+   logging around the old 256px boundaries.
+
+Stop after each stage for a direct user run. No stage requires a recomp regen
+unless a `recomp/*.cfg` change is deliberately introduced; regeneration remains
+user-owned.
+
+### Stage A automated gate
+
+Deterministic `saves/level1-action.rec` runs at gf=2500:
+
+- `runs/20260712-111910/shot.ppm`: 256x224 headless baseline (wide headless
+  geometry not opted in for that run).
+- `runs/20260712-112054/shot.ppm`: 342x224, margins=43/43, stage A raw wide.
+
+Cropping columns 43-298 from the wide frame produces a byte-identical copy of
+the complete baseline PPM raster: zero differing bytes/pixels, including every
+sprite pixel. The wide frame shows the expected stale/wrapped BG seam outside
+the authentic viewport. The run completed without the prior layer-5 UBSan
+error; its two action-entry trace captures still contain only the known benign
+paired-resume misses. The exit OAM shadow is contiguous (12 live slots 0-11,
+116 parked) with no margin-origin entries, as expected from the untouched ROM
+builder. This gate cannot reproduce motion-correlated boundary symptoms, so
+manual stage-A play plus an F2 snapshot at the exact symptom remains required.

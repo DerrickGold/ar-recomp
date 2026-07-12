@@ -275,14 +275,14 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
 - Sky palace policy: plain full-wide, staging artifacts accepted (FINAL,
   per user decision — see widescreen-survey.md).
 
-## 12. Conversion status (what's C now)
+## 12. Conversion status
 
 | Routine | Status |
 |---|---|
 | `$00:8418` / `$02:A85E` vblank wait | hle (host yield) |
-| `$00:8C98` cull + `$00:8D68` builder | hle port (widescreen windows) |
-| `$02:B158` col-strip builder | hle port (+64px lead while wide) |
-| `$02:B1AF` row-strip builder | hle port (FAITHFUL band start — widened start reverted) |
+| `$00:8C98` cull + `$00:8D68` builder | original recompiled path on `widescreen-investigation`; hle port only on the two earlier experimental branches |
+| `$02:B158` col-strip builder | original recompiled path on `widescreen-investigation`; experimental hle port existed earlier |
+| `$02:B1AF` row-strip builder | original recompiled path on `widescreen-investigation`; experimental hle port existed earlier |
 | `$02:BED3/$B825/$B8A0/$B90D/$B95A`, drain chain, OAM DMA, camera `$B091` | recompiled |
 
 ## 13. Widescreen design constraints (read before the next implementation)
@@ -328,10 +328,14 @@ Facts the next design must satisfy (all trace/disasm-proven above):
    `cam+320` exceed `B+512` when `B = cam&~$FF` is low — their detail
    rows re-wrap on the next row strip. If record patching (#2) lands,
    reduce/remove the +64 lead: margins then stay true without it.
-7. **Sprites are a non-problem**: OAM <=60/128 wide, sheets static, cull
-   windows already widened, x-bit-8 correct. The "sprite corruption"
-   reports = BG tile gaps + cheat palette effects (red/white player =
-   hit-flash + AR_NO_KNOCKBACK pin).
+7. **Sprite status is OPEN again (2026-07-12)**: earlier captures proved only
+   that OAM capacity was not exhausted (<=60/128) and that some apparent
+   corruption was BG gaps or the hit-flash cheat interaction. Later direct
+   testing found extra boundary sprites and partial multi-tile enemies. Both
+   experimental "BG" branches still replaced `$8C98/$8D68`, so they never
+   isolated BG widening from the OAM port. The investigation must keep the ROM
+   OAM path intact through raw-wide and BG-refresh stages before widening any
+   sprite window.
 8. **HUD (BG3)**: 32-tile-wide compose in `$7F:B000`, streamed per frame;
    margins under the HUD stay clamped (current policy) or need a host
    compose extension later.
