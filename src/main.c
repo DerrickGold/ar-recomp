@@ -747,17 +747,20 @@ int main(int argc, char **argv) {
         if ((snes_frame_counter % 100) == 0)
           fprintf(stderr, "[gflog] host=%d gf=%u\n", snes_frame_counter, gf);
       }
-      /* Report Act-1 entry game-frame, to compare against the oracle's. */
+      /* Report the first action-region entry game-frame. */
       { static int seen_act = 0;
-        if (!seen_act && g_ram[0x18] == 0x01) { seen_act = 1;
-          fprintf(stderr, "[act-enter] $18=01 at game-frame %u\n", gf); } }
+        if (!seen_act && g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
+          seen_act = 1;
+          fprintf(stderr, "[act-enter] $18=%02X $19=%02X at game-frame %u\n",
+                  g_ram[0x18], g_ram[0x19], gf); } }
     }
-    /* AR_PERF=1: once-per-second frame-time budget line. Separates the two
-     * "it feels slow" classes in one run: host-bound (fps < 60, run-ms high —
-     * profile what the frame is doing, e.g. an APU-port spin cycling the SPC
-     * under the lock shows up as a big apu-catchup delta) vs. pacing (fps=60,
-     * run-ms tiny, but the on-screen action crawls — logical updates are being
-     * spread over extra host frames; see the $4210 3-read-wait class). */
+    /* AR_PERF=1: once-per-second frame-time budget lines. Separates the two
+     * "it feels slow" classes in one run: host-bound (fps < 60; inspect both
+     * run-ms here and draw-ms below) vs. pacing (fps=60, both budgets tiny, but
+     * on-screen action crawls because logical updates span extra host frames;
+     * see the $4210 3-read-wait class). An APU-port spin cycling the SPC under
+     * the lock appears here as run-ms plus a large apu-catchup delta; host
+     * widescreen/compositor work appears in [draw-perf]. */
     static int perf_on = -1;
     if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
     uint32 perf_t0 = perf_on ? SDL_GetTicks() : 0;
@@ -830,7 +833,28 @@ int main(int argc, char **argv) {
       }
     }
 
+    uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
     RtlDrawPpuFrame();
+    if (perf_on) {
+      static uint32 draw_win_start, draw_ms_sum, draw_ms_max;
+      static int draw_win_frames;
+      uint32 now = SDL_GetTicks();
+      uint32 dt = now - perf_draw_t0;
+      draw_ms_sum += dt;
+      if (dt > draw_ms_max) draw_ms_max = dt;
+      draw_win_frames++;
+      if (!draw_win_start) draw_win_start = now;
+      if (now - draw_win_start >= 1000) {
+        fprintf(stderr,
+                "[draw-perf] frames=%d draw-ms avg=%.1f max=%u $18=%02x $19=%02x\n",
+                draw_win_frames, (double)draw_ms_sum / draw_win_frames,
+                draw_ms_max, g_ram[0x18], g_ram[0x19]);
+        draw_win_start = now;
+        draw_ms_sum = 0;
+        draw_ms_max = 0;
+        draw_win_frames = 0;
+      }
+    }
 
     /* Framebuffer capture to PPM (works headless — g_pixels is always populated).
      * AR_SHOT_AT_GF=N      : one shot to saves/shot.ppm at game-frame >= N.

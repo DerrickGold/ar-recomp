@@ -2,7 +2,8 @@
 # Regen pipeline driver for ActRaiserRecomp.
 #
 # Regenerates src/gen/*.c from the recomp/bank_*.cfg configs over a verified
-# ar.sfc, then syncs recomp/funcs.h.
+# ar.sfc, splitting large banks into stable parallel-build translation units,
+# then syncs recomp/funcs.h.
 #
 # Flags:
 #   --no-tests   skip the framework test suite (default: run it).

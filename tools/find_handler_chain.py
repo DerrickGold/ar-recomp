@@ -13,7 +13,9 @@ not yet emitted as functions so they can be registered in recomp/bank00.cfg.
 
 Yield model: `JSR $8657` does NOT return to site+3 in this invocation — site+3
 becomes a separate handler entry (next-frame resume). So we STOP linear decode
-there and add site+3 as a new seed.
+there and add site+3 as a new seed. Helpers such as `$8623`, `$86FA`, and
+`$A66A` similarly copy their JSR return address into object field `$12`; their
+post-JSR instruction is therefore a next-frame PRIMARY-handler entry.
 """
 import sys, re, glob
 
@@ -81,12 +83,13 @@ def detect_d12_yields():
     off the stack (LDA $01,S = opcode $A3, or PLA = $68) and stores it (usually
     +1) into the object's $12 field (`STA $12,X` = 9D 12 00), then RTSs. Calling
     it makes the post-JSR instruction the next MAIN handler. Detected by decoding
-    each JSR target; this generalises the hand-found $8623/$86FA across the ROM."""
+    every bank-0 ROM JSR target; this generalises the hand-found $8623/$86FA and
+    also finds helpers outside the low engine region, notably Bloodpool's $A66A."""
     jsr_tgts=set()
-    for off in range(0, 0x8000):
+    for off in range(0, 0x7FFE):                 # leave room for opcode + abs16 operand
         if rom[off]==0x20:                      # JSR abs
             t=rom[off+1]|(rom[off+2]<<8)
-            if 0x8000<=t<=0x8FFF: jsr_tgts.add(t)   # engine/helper region
+            if 0x8000<=t<=0xFFFF: jsr_tgts.add(t)   # any bank-0 ROM helper
     out=set()
     for e in jsr_tgts:
         pc=e; saw_ret=False
@@ -146,22 +149,90 @@ def scan(seeds):
 # else the bridge defaults. Tip: get seeds from a crash snapshot by scanning the
 # object table ($06A0 stride $40, >=64 slots) for active objs whose $12 handler
 # isn't an emitted bank_00_* function.
+def derive_snapshot_seeds(paths):
+    """Live primary/nested handler roots from one or more 128 KiB WRAM dumps.
+
+    The object loop dispatches field $12 as the exact target (it DECs before
+    PHA/RTS). Field $1E is different: yield helpers store the JSR return address
+    (target-1), and the nested dispatcher PHA/RTSes without a DEC, so the actual
+    code entry is field-$1E + 1. This distinction matters for snapshots such as
+    BB15 -> BB16 and avoids proposing one-byte-early functions.
+
+    Field $14 is deliberately excluded because it is polymorphic; use
+    --field14's code-shape filters for that population instead.
+    """
+    out=set()
+    expanded=[]
+    for pattern in paths:
+        expanded.extend(sorted(glob.glob(pattern)) or [pattern])
+    for path in expanded:
+        data=open(path,'rb').read()
+        if len(data)<0x2000:
+            raise ValueError(f"{path}: too short for a WRAM snapshot ({len(data)} bytes)")
+        for slot in range(64):
+            base=0x06A0 + slot*0x40
+            status=data[base] | (data[base+1]<<8)
+            if status & 0xC000:                 # inactive/free object slot
+                continue
+            h12=data[base+0x12] | (data[base+0x13]<<8)
+            if 0x8000<=h12<=0xFFFF:
+                out.add(h12)
+            h1e=data[base+0x1E] | (data[base+0x1F]<<8)
+            nested=(h1e+1)&0xFFFF
+            if h1e>=0x8000 and 0x8000<=nested<=0xFFFF:
+                out.add(nested)
+    return out
+
+TABLES=[0x96AF,0xA8F6,0xB449,0xC11E,0xCD9B,0xD928,0xE722,0xF39A]
+
+def iter_handler_table(base):
+    """Yield every nonzero pointer in one object-type table.
+
+    The tables have no explicit count. Their first record/code target marks an
+    upper bound, and any nearer target encountered while walking tightens it;
+    this stops exactly where table words give way to the pointed-to payload.
+    Zero is a valid unused type slot, NOT an end marker. That distinction matters
+    for Bloodpool's $B449 table: slots $19-$1D are empty, then $1E-$27 contain ten
+    more records (including $BB19 -> live handler $BB25).
+
+    `is_record` identifies the ordinary 12-byte spawn descriptor used by tables
+    $01-$07. Other entries are direct code targets (including table $00's special
+    cases) and are still valid primary-dispatch seeds at B itself.
+    """
+    a=base
+    end=0x10000
+    hard_end=min(0x10000, base+0x100)  # corruption guard; real tables are <= $50 bytes
+    while a<end and a<hard_end:
+        B=rd16(a)
+        a+=2
+        if B==0:
+            continue
+        if not (base<B<=0xFFFF):
+            break
+        end=min(end,B)
+        is_record=(rd(B)==0x00 and rd(B+2) in (0x7E,0x7F))
+        yield B,is_record
+
 def derive_table_seeds():
     """Seeds from the 8 per-level handler tables ($9557's $95DD dispatch list).
-    Each table entry is a per-object RECORD base B; the spawn dispatcher sets the
-    object handler $12 = B+0x0C (an init `JSR`), and after the one-time init the
-    steady-state handler is B+0x0F. base+0x0C are all already converted; the
-    JSR-gated base+0x0F continuations are the gap. Returns those not yet emitted."""
-    tables=[0x96AF,0xA8F6,0xB449,0xC11E,0xCD9B,0xD928,0xE722,0xF39A]
+
+    For an ordinary descriptor B, the spawn dispatcher installs the exact primary
+    handler B+0x0C. If that entry begins JSR/JSL, B+0x0F is also a dispatch entry
+    after the one-time init. Direct-code table values are installed as B. Include
+    exact roots even when already emitted so `scan()` can find later coroutine
+    continuations; assuming those roots were already converted hid BB25 and three
+    Stage-3 continuations from the earlier "comprehensive" pass.
+    """
     out=set()
-    for base in tables:
-        a=base
-        for _ in range(80):
-            B=rd16(a)
-            if not (0x8000<=B<=0xFFFF): break
-            if rd(B+0x0C) in (0x20,0x22):      # base+0xC is JSR/JSL -> +0xF is a valid entry
+    for base in TABLES:
+        for B,is_record in iter_handler_table(base):
+            if not is_record:
+                out.add(B)
+                continue
+            root=(B+0x0C)&0xFFFF
+            out.add(root)
+            if rd(root) in (0x20,0x22):         # init call returns to +0x0F next frame
                 out.add((B+0x0F)&0xFFFF)
-            a+=2
     return out
 
 def derive_field14_seeds():
@@ -180,16 +251,13 @@ def derive_field14_seeds():
     discovery (F2 snapshot + a single-seed run)."""
     HSTART={0x08,0xA9,0xBD,0x9E,0x9D,0x9C,0xE2,0xC2,0x20,0x22,0xFE,0xA0,0xA2,0x98,
             0xBC,0xAD,0xB9,0xAE,0x64,0x74,0xDA,0x5A,0xA5,0xA6,0xA4}
-    tables=[0x96AF,0xA8F6,0xB449,0xC11E,0xCD9B,0xD928,0xE722,0xF39A]
     raw=set()
-    for base in tables:
-        a=base
-        for _ in range(80):
-            B=rd16(a)
-            if not (0x8000<=B<=0xFFFF): break
+    for base in TABLES:
+        for B,is_record in iter_handler_table(base):
+            if not is_record:
+                continue
             v=rd16(B+0x0A)
             if 0x8000<=v<=0xFFFF: raw.add(v)
-            a+=2
     def coherent(v):
         pc=v
         for _ in range(120):
@@ -214,6 +282,12 @@ def derive_field14_seeds():
 if __name__=='__main__':
     if '--field14' in sys.argv:
         seeds=sorted(derive_field14_seeds())
+    elif '--snapshot' in sys.argv:
+        i=sys.argv.index('--snapshot')
+        paths=[a for a in sys.argv[i+1:] if not a.startswith('--')]
+        if not paths:
+            raise SystemExit('usage: find_handler_chain.py --snapshot <wram.bin> [...]')
+        seeds=sorted(derive_snapshot_seeds(paths))
     elif '--all-yields' in sys.argv:
         # Comprehensive: seed from EVERY converted handler and follow all $8657/$8669
         # yields. Catches every JSR-$8657/$8669 continuation that isn't itself an

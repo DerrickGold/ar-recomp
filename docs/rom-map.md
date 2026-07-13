@@ -43,6 +43,34 @@
 - **0x1B432-0x1B455**: Experience level max SP values
 - **0x1B825-0x1B8FC**: Lair enemy data
 
+### Sprite identity and action OBJ assets
+
+| SNES address | File range | Meaning |
+|---|---:|---|
+| `$00:95DD-$95EC` | `0x015DD-0x015EC` | Eight action handler-table pointers: `$96AF,$A8F6,$B449,$C11E,$CD9B,$D928,$E722,$F39A` for `$18=$00-$07` |
+| `$01:E099+` | `0x0E099+` | Town world-object type → behavior/animation-data pointer table |
+| `$01:E7D9+` | `0x0E7D9+` | Parallel town world-object type → sprite-frame pointer table; frame lists continue around `$01:E838` |
+| `$06:A000+` | `0x32000+` | Dynamic action magic/effect overlay sources selected from object `$38`; uploaded to VRAM `$2D80` |
+| `$06:A400+` | `0x32400+` | Action magic-selection table/source used by `$02:BC9E`; uploaded to VRAM `$2D40` |
+| `$07:8000-$9FFF` | `0x38000-0x39FFF` | Common action OBJ atlas, 8192 bytes copied to VRAM `$2000-$2FFF` at level entry |
+| `$07:D040-$D09F` | `0x3D040-0x3D09F` | Action OBJ palettes, 96 bytes copied to CGRAM `$C0-$EF` |
+
+The bank-0 action handler tables are sparse object-type arrays with no explicit
+count. Walk until the nearest forward pointer target (the payload boundary), and
+treat zero words as unused type slots rather than termination. `$00:B449` is the
+important proof: types `$19-$1D` are zero, while `$1E-$27` resume with ten valid
+records; type `$21` points to record `$BB19` and exact handler `$BB25`.
+Tables `$A8F6-$E722` correspond to the six ordinary two-act kingdom regions.
+`$F39A` is Death Heim's distinct no-act boss-rush/final-boss table; `$19` changes
+within that flow still need an instrumented capture to name its internal maps.
+
+These are different identity layers. The action object handler and composition
+pointer select behavior/layout within a common resident atlas; the small bank-6
+uploads replace reserved effect tiles. Town type tables select behavior and
+frame composition, while the ROM-character upload that makes those frame tile
+numbers resident in VRAM remains a separate seam to map. A decompilation should
+not collapse any of these to raw OAM tile numbers.
+
 ### Town Building Data (0x1DCFA-0x1DFF9)
 128 bytes per town, 6 towns:
 | Town | Offset |

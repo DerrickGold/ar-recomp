@@ -63,7 +63,7 @@ the current debugging process; this file is the case law.
    *Proactive (Option A):* the targets are all the **immediate-push signature** (`$9195`
    `LDA #$9194;PHA`, `$9B22`/`$9B4A` `LDY #imm;PHY`; target = imm+1). An autoroute that detects
    `LD{A,X,Y} #imm`/`PEA #imm` feeding a reachable `RTS`/`RTL` (coherent-code guard, like
-   `find_handler_chain --field14`) can **auto-generate `rts_dispatch` directives** for all 8 acts
+   `find_handler_chain --field14`) can **auto-generate `rts_dispatch` directives** for all 8 region tables
    at regen time — build it once act 1 is confirmed working with the manual directive.
    ***Jump-table CALL variant (2026-06-26) — the act→sim ROOT, the `indirect_dispatch … ret:`
    directive.*** A data-driven cousin of the above: `bank_01_B898 $B8C0` does
@@ -90,10 +90,58 @@ the current debugging process; this file is the case law.
    that wouldn't extend, and the **evil-tree** enemies that crashed, were both this). *Find:* F2
    full-snapshot (§9) → scan the object table (≥64 slots) for an active slot with an un-converted
    `$12`. *Fix:* `tools/find_handler_chain.py` (§5) → register the emitted `func` lines → regen.
-   *Bulk fix:* `find_handler_chain.py --tables` registers all acts' steady-state handlers at once.
+   *Bulk fix:* `find_handler_chain.py --tables` registers all action regions' table handlers at once.
    See §11 for the full object/spawn model. Computed handlers (e.g. `$AC11 = recordBase+0x0F`)
    never appear as literal ROM bytes, so they're invisible to byte/pointer scans — only the
    table-derivation or a runtime snapshot finds them.
+   **Bloodpool act 2 recurrence (2026-07-12, fix pending regen):** enemies were active and
+   killable but never ticked; moving platforms stayed fixed while their chain tiles animated.
+   `runs/20260712-193357/dump_dispatch_log.json` decisively listed six object-loop targets from
+   `$00:8965` with `found:0` every frame: `$B990/$B9BC/$BAF1/$BB84/$BCC1/$BCCF`. Expanding those
+   live roots found 12 safe main-handler/yield-continuation entries. `$B990/$B9BC` are
+   post-`JSR $A66A` field-`$12` yields, which exposed an audit blind spot: yield-helper detection had been
+   artificially limited to `$8000-$8FFF`. It now scans all bank-0 ROM JSR targets. Reusable lesson:
+   exit/F9's dispatch ring can prove a silent no-op even when default console logging showed no
+   miss; static table/yield/field-`$14` closure still needs a live `found:0` census for runtime roots.
+   **Full Bloodpool act 2 follow-up (2026-07-12, second fix pending regen):** the first batch fixed
+   the initial enemies/platforms, but later objects and the boss remained inert. The three saved
+   WRAM snapshots exposed exact `$12` roots `$BD82`, `$BD36/$BBB4`, and `$BE0B`; the final exit
+   ring retained `$BE0B found:0` on every one of its 204 boss frames. Their yield closure adds 12
+   entries (`BBB4 BBDB BBE9 BBFD BC66 BD36 BD45 BD56 BD6A BD82 BE0B BE7E`). The durable tooling
+   fix is `find_handler_chain.py --snapshot`, which reads 64 live object slots and understands that
+   `$1E` snapshot values are target-1, unlike exact-target `$12`. This closes evidence that a ring
+   alone is insufficient for a long stage: its last 1,024 events had already overwritten the
+   earlier-room misses, while deliberately spaced F2 snapshots retained them.
+   A later, deliberately timed F9 in `runs/20260712-202151/` reached another exact `$12` root,
+   `$BD90`, absent from all three earlier snapshots. Its four-entry closure is
+   `BD90 BD9F BDA5 BDAE`; it was included in the same regeneration batch.
+   **Bloodpool final straggler + tooling root cause (2026-07-12, next batch pending regen):** after
+   regenerating the earlier sets, a full playthrough reached and defeated the boss with every
+   enemy except one behaving. `runs/20260712-205842/snapshots/snap_00_gf6378.wram.bin` contains
+   two live objects at exact root `$BB25`; its record `$BB19` is type `$21` in the `$B449` table.
+   That table has zero holes at types `$19-$1D` followed by valid types `$1E-$27`; the old
+   `--tables` loop incorrectly treated the first zero as end-of-table. It also seeded only `B+0F`
+   call continuations, so it could not traverse an already-converted exact `B+0C` root to find a
+   later yield. The walker now bounds the table by its nearest forward payload pointer, skips zero
+   slots without stopping, and seeds exact `B+0C`, gated `B+0F`, and direct-`B` roots. The corrected
+   all-act scan finds 25 safe cfg additions, including `$BB25` and Stage-3 continuations
+   `$C48A/$C653/$C90E`, ready for one regeneration after runtime testing is batched.
+   The first Stage-3 run (`runs/20260712-211830`) then contributes four runtime-state entries the
+   table cannot enumerate: exact primary roots `$C7FA/$C7FF/$C804` plus `$C804`'s `$8657`
+   continuation `$C80A`. Six live slots hold the three roots, while the exit ring records 94
+   misses per root from `$8965`; all four are included in the same handler batch.
+   **Regions 4-7 preflight (2026-07-12):** walking every sparse table slot (a superset of both
+   ordinary acts), scanning field `$14`, closing all literal `$12` roots, and rerunning the global
+   yield pass leaves no statically recognizable root unconfigured. Regions 4/5/6 add no extra
+   state-root gaps beyond their already-queued table closures. Death Heim adds 13 `$86FA`
+   continuations (`F674 F684 F69C F6A7 F6B2 FA5F FAB3 FAD7 FB07 FB3A FB4C FB5E FB8A`);
+   Stage 1 also contributes the analogous `$A66A` continuation `$AD35`. All 14 are exact
+   next-frame `$12` entries and bring the handler batch to 43 unique functions.
+   This closes derivable forms, not runtime-installed computed roots; retain per-act exit rings
+   and F2 snapshots during direct testing.
+   **Current generation status:** the local generated build now includes all 43 entries and links
+   cleanly. `--tables`, `--all-yields`, `--field14`, and the Stage-3 snapshot scan each report zero
+   unconverted entries; direct regression/playthrough coverage is the remaining gate.
 8. **Wrong-width dispatch routing (the "nearest survivor" class)** — DIFFERENT from a misdecode:
    the ROM bytes decode correctly at each width, but when the emit-truth prune drops a wrong-width
    variant, the runtime dispatch switch has to route that case to SOME surviving variant, and the
@@ -124,15 +172,16 @@ the current debugging process; this file is the case law.
    *Fix:* author `indirect_call_table`/`indirect_dispatch` cfg directives once the real table shape
    is known (§7.7's `indirect_dispatch … ret:` directive is the same mechanism, just for the
    RTS-trick shape instead of the suppressed-call shape).
-10. **Destination-cursor collision across sub-calls of a per-object loop** — a per-frame "rebuild
+10. **Suspected destination-cursor collision across sub-calls of a per-object loop (DISPROVED in
+    the sim case study)** — a per-frame "rebuild
     the whole OAM list from scratch" routine (normal SNES practice, NOT itself a bug) calls a
     per-object sub-function once per active object; that sub-function writes several consecutive
     destination slots (one decoration icon = multiple tiles) and is supposed to **save its ending
     cursor back to a shared DP variable** so the next object's sub-call continues from there. If a
     caller has **two separate scan-loop segments** (two different call sites into the same
     sub-function, e.g. for two decoration categories) and they don't consistently share/persist that
-    cursor, objects from the two segments collide on the same starting slot and overwrite each
-    other — genuinely-correct per-object data ends up visually stacked/garbled. Symptom looks like
+    cursor, objects from the two segments would collide on the same starting slot and overwrite each
+    other — genuinely-correct per-object data would end up visually stacked/garbled. Symptom looks like
     "random garbage sprites," but every individual computation is provably correct in isolation;
     only the destination **allocation** is wrong. *Find:* this took a live lldb session (see
     `[watch14]`/blkpc-augmented `AR_WATCHOBJ` in §3, and the general lldb recipe in §3) — a
@@ -140,8 +189,12 @@ the current debugging process; this file is the case law.
     finally distinguished "many different source objects, all landing on the same destination"
     from "the same object being reprocessed." A static-only read of the generated C repeatedly gave
     a *plausible-looking but wrong* theory (see the sim-mode case study below) until live register/
-    backtrace inspection settled it. *Status 2026-07-01:* root-caused to this mechanism (see case
-    study), exact broken hand-off between the two `ACD9` scan segments not yet pinned — open.
+    backtrace inspection settled it. *Status corrected 2026-07-12:* `$01:ADAD/$01:AE6F` save the
+    advanced cursor to `$98`, and both `ACD9` scan segments share it correctly. The flood came from
+    an uninitialized world-object cohort: a bad/null record `+08` frame pointer supplied a bogus
+    definition-count byte, so one emitter call filled the remaining OAM table. Treat cursor
+    collision as a diagnostic hypothesis, not the root cause; validate source record, pointed-to
+    count, and cursor hand-off independently.
 
 11. **Total silence with a healthy-looking sound engine — a *partially* HLE'd routine (the
     "stage 2" class).** *(FIXED 2026-07-03.)* Symptom: no audio ever, but every layer you probe
@@ -186,6 +239,11 @@ the current debugging process; this file is the case law.
     `AF 10 42 00` ($929E/$93CB/bank-03 waits all use it — an `AD 10 42`-only scan missed all
     of them); and the ROM has a second full wait-routine family at `$01:929E` (long-form clone
     of `$9284`) used by the effect loops.
+    **2026-07-12 diagnostic correction (no pacing change):** `[4210-wedge]` separately counted
+    4,096 same-PC reads without checking whether other blocks ran between them, so `$00:8465`'s
+    legitimate once-per-frame ACK eventually printed a false wedge in a long action stage. The
+    warning counter now requires block-ring adjacency; the static seven-SPIN yield whitelist is
+    unchanged. A `$8465` wedge line from an older run is not evidence of an extra yield.
 
 
 13. **Sim-mode development cycle never fires / fires with corrupt output — a THREE-layer

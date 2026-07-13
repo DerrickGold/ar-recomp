@@ -15,6 +15,48 @@ if(NOT ACTRAISER_GEN_SOURCES)
         "at the repo root before building.")
 endif()
 
+# CMake updates the target when regeneration replaces bankXX_v2.c with
+# bankXX_partNN_v2.c, but Make/Ninja leave the removed source's old .o/.d files
+# on disk. They are not linked, yet the large debug objects can waste hundreds
+# of MiB and make build inspection misleading. On every configure, remove only
+# generated-bank artifacts whose matching source basename no longer exists;
+# active incremental objects are deliberately preserved.
+set(_AR_GEN_SOURCE_NAMES)
+foreach(_src IN LISTS ACTRAISER_GEN_SOURCES)
+    get_filename_component(_name "${_src}" NAME)
+    list(APPEND _AR_GEN_SOURCE_NAMES "${_name}")
+endforeach()
+
+set(_AR_GEN_OBJ_DIR
+    "${CMAKE_BINARY_DIR}/CMakeFiles/ActRaiserRecomp.dir/src/gen")
+if(IS_DIRECTORY "${_AR_GEN_OBJ_DIR}")
+    file(GLOB _AR_GEN_OBJECT_ARTIFACTS
+        "${_AR_GEN_OBJ_DIR}/bank*_v2.c.o"
+        "${_AR_GEN_OBJ_DIR}/bank*_v2.c.o.d"
+        "${_AR_GEN_OBJ_DIR}/bank*_v2.c.obj")
+    set(_AR_STALE_COUNT 0)
+    set(_AR_STALE_BYTES 0)
+    foreach(_artifact IN LISTS _AR_GEN_OBJECT_ARTIFACTS)
+        get_filename_component(_artifact_name "${_artifact}" NAME)
+        string(REGEX REPLACE "\\.(o|obj)(\\.d)?$" ""
+            _source_name "${_artifact_name}")
+        if(NOT _source_name IN_LIST _AR_GEN_SOURCE_NAMES)
+            file(SIZE "${_artifact}" _artifact_size)
+            math(EXPR _AR_STALE_BYTES
+                "${_AR_STALE_BYTES} + ${_artifact_size}")
+            math(EXPR _AR_STALE_COUNT "${_AR_STALE_COUNT} + 1")
+            file(REMOVE "${_artifact}")
+        endif()
+    endforeach()
+    if(_AR_STALE_COUNT GREATER 0)
+        math(EXPR _AR_STALE_MIB
+            "(${_AR_STALE_BYTES} + 1048575) / 1048576")
+        message(STATUS
+            "ActRaiserRecomp: removed ${_AR_STALE_COUNT} stale generated "
+            "build artifact(s), ${_AR_STALE_MIB} MiB")
+    endif()
+endif()
+
 add_executable(ActRaiserRecomp
     ${SNESRECOMP_RUNNER_SOURCES}
     # game-specific runtime
@@ -26,6 +68,7 @@ add_executable(ActRaiserRecomp
     src/actraiser_cpu_infra.c
     src/actraiser_rtl.c
     src/actraiser_widescreen_bg.c
+    src/actraiser_widescreen_sprites.c
     src/actraiser_spc_player.c
     # recompiled banks (generated)
     ${ACTRAISER_GEN_SOURCES}

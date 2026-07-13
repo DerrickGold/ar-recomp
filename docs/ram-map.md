@@ -8,8 +8,8 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 ### Game Mode & Navigation
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0018 | 1 | Game mode (0x00=Non-Platformer/Sim, 0x01=Platformer) |
-| $7E:0019 | 1 | Current map number (second byte of map ID) |
+| $7E:0018 | 1 | Mode/region group: `$00` non-action (town/world/UI); `$01-$06` six two-act kingdom action regions; `$07` Death Heim boss-rush/final-boss action region (no ordinary acts) |
+| $7E:0019 | 1 | Current map/sub-flow number (second byte of map ID); act selector in `$01-$06`, boss-arena/sub-flow value to capture through Death Heim `$07` |
 | $7E:001A | 1 | Destination map number |
 | $7E:001B | 1 | Destination map group (first byte of map ID) |
 
@@ -22,12 +22,14 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:001F | 2 | Score | BCD format |
 | $7E:0021 | 1 | Magic points | |
 | $7E:00E6 | 2 | Time remaining | BCD format |
+| $7E:08BC | 1 | Player **Crest** walking-cycle phase | TAS terminology; interacts with Boost to determine normal/pre-jump movement cadence. Player object `$08A0 + $1C`. |
+| $7E:08C4 | 1 | Player **Boost** walking-speed countdown | Can produce temporary 3 px/frame movement; player object `$08A0 + $24`. Extended `AR_FRAMELOG=1` records both fields with input and position delta. |
 
-### Camera / Scroll (action + sim playfield) — full model in rendering-engine.md §4/§6
+### Camera / Scroll — full model in rendering-engine.md §4/§6/§11.1
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0022 | 2 | Camera X = BG1 H scroll (world px; writer $02:B091, clamped to [0, $2E-$100]; all 6 scroll regs uploaded from $22-$2D by $02:ADC3, 10-bit) |
-| $7E:0024 | 2 | Camera Y = BG1 V scroll (clamped to [0, $30-$E1]) |
+| $7E:0022 | 2 | BG1/camera X. Action writer `$02:B091`, clamp `[0,$2E-$100]`; town writer `$01:B4C6`, clamp `[0,$0100]`. All six scroll regs upload from `$22-$2D` via `$02:ADC3` (10-bit). |
+| $7E:0024 | 2 | BG1/camera Y. Action clamp `[0,$30-$E1]`; town writer `$01:B4C6`, clamp `[0,$011F]`. |
 | $7E:0026/$0028 | 2+2 | BG2 H/V scroll (parallax, $02:B9D5/$02:BA0B from ratio nibbles $3A-$45) |
 | $7E:002A/$002C | 2+2 | BG3 H/V scroll ($2C pinned $FFFC: HUD up 4px) |
 | $7E:002E/$0030 | 2+2 | **BG1 layer = LEVEL pixel width/height** (Fillmore act1: 4096x768) — the camera clamp bounds |
@@ -38,13 +40,16 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:008E | 1 | parallax disable bits (bit0 BG2H, bit1 BG2V = script-driven) |
 | $7E:0093 | 1 | strip-request flags: $80 BG1col $40 BG1row $20 BG2col $10 BG2row (set by $02:B091 on 16px crossings, TRB-consumed by dispatcher $02:B127) |
 
-### OAM shadow + sprite-build working vars (rebuilt per frame by $00:8C98/$00:8D68; DMA'd whole by $02:ACA6, 544 bytes)
+### OAM shadow + sprite-build working vars
+
+The 544-byte shadow and DMA are common, but action (`$00:8C98/$00:8D68`)
+and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill |
 | $7E:0580 | 32 | OAM high table shadow: 2 bits/sprite (bit0 = x bit 8, bit1 = size), packed 4 sprites/byte |
 | $7E:0000 | 1 | (during sprite build) high-table bit accumulator — bits ROR'd in from the top, flushed every 4 sprites |
-| $7E:000C | 2 | (during sprite build) sprites remaining in current object's def list |
+| $7E:000C/$000E | 2 ea | sprite-build counters/scratch; exact ownership is routine-specific. Town `ADAD/AE6F` obtains the part count from byte 0 of the frame definition, not from world record `+0E`. |
 | $7E:0014 | 2 | (during sprite build) object screen-x + 16 (draw-window bias) |
 | $7E:0016 | 2 | (during sprite build) object screen-y + 16 |
 | $7E:008F | 2 | sprite attr OR-bias; $0E00 TSB'd while object has $30&$2008, TRB'd at builder exit |
@@ -54,11 +59,22 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:009C | 2 | high-table bit slots remaining in current byte (4..1) |
 | $7E:009E | 2 | current object's flip/attr word (obj+$28 ^ $0100) |
 
+### Town simulation render records and camera auxiliaries
+
+| Address | Size | Description |
+|---------|------|-------------|
+| $7E:06A0-$09FF | 48 × $12 | Fixed-screen/overlay animation records. `$01:ACD9` tests `+10 & $8000`, runs `$01:AC70`, and emits with camera-independent origins. |
+| $7E:0A00+ | 44 × $26 | Town world-object records. Known render fields: `+08` frame-composition pointer, `+0A/+0C` world X/Y, `+10` render status (`$C000` = skip), `+25` delay/timer. `+12` is a behavior dispatch selector outside the OAM leaf. |
+| $7E:0AEE/$0AF0 | 2+2 | Town camera-follow target X/Y read by `$01:B4C6`; camera derives `$22=$0AEE-$80`, `$24=$0AF0-$70` before clamping. |
+| $7F:9752 | 1+ | bit 1 selects town alternate OAM emitter `$01:AE6F` for the world segment. |
+| $7F:9754 | 1+ | nonzero reduces the normal 44-record town world scan to one record. |
+| $7F:9F65/$9F67 | 2+2 | transient town camera shake X/Y. Applied only if resulting camera remains inside `$22<=$0100`, `$24<=$011F`, then cleared. |
+
 ### Upload records + NMI descriptors (rendering-engine.md §2/§3/§7/§10)
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:0076/$0079 (+banks $78/$7B) | 2+1 ea | NMI record-drain pointers — reset EVERY NMI by $02:ACC8 to $3900/$3A02 then $3B04/$3C06 (game-side reads see the resting values; not a game variable) |
-| $7E:3900/$3A02/$3B04/$3C06 | $102 ea | the four one-record upload buffers (BG1 col/row, BG2 col/row): +0 header = VRAM base word (0=empty, zeroed after drain), data = 4x64B chunks at +2/+$42/+$82/+$C2 |
+| $7E:3900/$3A02/$3B04/$3C06 | $102 ea | the four one-record upload buffers (BG1 col/row, BG2 col/row): +0 header = VRAM base word (0=empty, zeroed after drain), data = 4x64B chunks at +2/+$42/+$82/+$C2. Column records use VMAIN=$81 and target `base,+1,+$800,+$801` (32 words, stride `$20`); row records use VMAIN=$80 and target `base,+$20,+$400,+$420` (32 contiguous words). |
 | $7E:00C4-$00CA | — | fade gate/config + BG2SC page-flip anim counters ($C5 arm, $C7 page) |
 | $7E:00CB/$00CD/$00CE/$00CF | 2+1+1+1 | CGRAM upload descriptor: src addr/bank, CGADD, row count ($02:AE75) |
 | $7E:00D0-$00D6 | 7 | VRAM DMA descriptor slot 0: src16/bank/VMADD/size (size=0 idle; $02:AF30) |

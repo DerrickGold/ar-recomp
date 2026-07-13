@@ -1,4 +1,14 @@
-# Widescreen Mode Survey (Phase 2)
+# Widescreen Mode Survey and Implementation Record
+
+> **Current status (2026-07-12):** the early Phase-2/Phase-3 text below is
+> retained as an evidence trail, not the current design. Action mode `$18=$01`
+> has validated true-content BG margins and sprite handling through Stage D2;
+> the same path is now enabled for `$18=$01-$07` pending direct region tests.
+> The current implementation is split between
+> `src/actraiser_widescreen_bg.c` and the audited `$8C98/$8D68` HLE seams; it
+> does not use the historical monolithic `src/actraiser_widescreen.c` strategy.
+> See “Investigation restart” and “Remaining task queue” for authoritative
+> status.
 
 > **2026-07-09 correction (user-reported):** the first pass of this survey
 > mis-verified several modes as "clean wide" — those screenshots were in fact
@@ -102,11 +112,18 @@ inert unless set, reset per frame by the extra-space setters):
 
 ## Policy implemented after this survey
 
-`ActRaiser_ApplyWidescreenPolicy` (src/actraiser_rtl.c): wide for
-$18==0 && $19 ∈ {07, 08, 09}; pillarbox everything else until Phase 3/4.
-`AR_WS_SURVEY=1` still forces raw wide everywhere for continued surveying.
+Historical survey policy was wide only for `$18==0 && $19∈{07,08,09}`.
+Current `ActRaiser_ApplyWidescreenPolicy` grants action margins for the full
+`$18=$01-$07` range. BG refresh, object drawing, component emission, and
+activation all use that shared range. `AR_WS_SURVEY=1` still forces raw wide
+everywhere for continued surveying.
 
 ## Phase 3: action-stage sprite pipeline (mapped + ported 2026-07-10)
+
+> **Historical/superseded implementation.** This first monolithic port is the
+> branch that failed to isolate sprite state from BG work. Do not use it as the
+> template for new code; the controlled Stage A-D1 ladder later in this file
+> records the corrected implementation.
 
 Full chain: `$00:8C98` per-frame cull → `$00:8D68` per-object sprite builder →
 `$00:923A` leading entries (from the `$06:A800` bank-6 table) → `$02:ACA6`
@@ -214,9 +231,11 @@ Also fixed along the way:
 - **NoSpriteLimits wired for real**: the config knob existed but was never
   honored (PpuBeginDrawing ignored render_flags). Now plumbed
   (ppu->renderFlags; gates the 32-sprites and 34-tiles per-scanline caps).
-  config.ini defaults it to 0 (hardware-authentic + keeps the faithful pixel
-  gate exact); dev-config.ini keeps 1 for enhanced play — wide lines carry
-  more sprites and hit the authentic caps earlier.
+  Both `config.ini` and `dev-config.ini` currently set it to 1. This lifts the
+  32-sprite and 34-OBJ-tile per-scanline limits, but not the 128-entry OAM
+  capacity. Fidelity/pressure testing must explicitly run both
+  `NoSpriteLimits=0` and `NoSpriteLimits=1`; earlier direct wide validation was
+  performed with the lifted-limit configuration.
 - **OAM budget ruled out** for the tree-hole corruption: the snapshot at the
   corrupted frame shows 40/128 shadow entries used (check recipe: count
   entries at $0380 with y byte != $E0).
@@ -299,6 +318,17 @@ group. Missing entries means cull/builder/limits; complete entries with missing
 pixels means renderer priority/windowing or OBJ character data. Also compare
 VRAM `$2000-$3FFF` only after establishing the OAM group result.
 
+The controlled ladder resolved the attribution: **background widening did not
+break sprites.** The old `widescreen-bg` branch inherited a coupled HLE of the
+entire `$8C98->$8D68` OAM path. That port both changed activation/emission at
+once and failed to reproduce native exit state exactly: it represented
+`PHP/PLP` as host locals and omitted the ROM's two `LSR`s for each unused
+high-table slot, leaving the wrong A low byte on the normal exit. The isolated
+Stage-B background transaction preserves CPU, all WRAM, math state, OAM, and
+OBJ VRAM and has been directly validated. This is why future rendering work
+must name the persistent state it is allowed to change and leave unrelated
+native/HLE seams untouched.
+
 ### Controlled implementation ladder
 
 1. **Stage A (passed direct testing 2026-07-12)**: raw wide action renderer only. `$8C98/$8D68`,
@@ -313,10 +343,17 @@ VRAM `$2000-$3FFF` only after establishing the OAM group result.
    `AR_WS_BGREFRESH=0` returns byte-for-byte to Stage A in the same binary.
    Direct user testing confirmed both the wide BG and sprites remain correct.
    Region `$18=01` is enabled; broaden to `$02-$07` after the sprite phase.
-3. **Stage C (current focus)**: widen only per-sprite emission for already-
-   authentically-active objects. Do not widen `$0400` object activation yet.
-4. **Stage D**: widen object activation/cull last, with object/sheet-transition
-   logging around the old 256px boundaries.
+3. **Stage C (validated 2026-07-12)**: widen only per-sprite emission for
+   already-authentically-active objects. `$0400` activation remains authentic.
+   A full direct-play pass of Fillmore act 1 with `AR_WS_SPRDBG=1` found no
+   corrupt, partial, or boundary sprites. `runs/20260712-121751/` recorded
+   2,035 intentional wide-only definitions from 30 objects across x=-59..298,
+   exercising both 9-bit OAM sides without sanitizer/runtime findings.
+4. **Stage D1 (validated 2026-07-12)**: fully margin-resident initialized
+   objects draw, while `$0400` and gameplay activation retain the authentic
+   boundary. Direct testing confirmed correct sprites and that enemies still
+   activate only on entering the old screen space. Stage D2 will isolate
+   proper margin activation rather than coupling it to drawing again.
 
 Stop after each stage for a direct user run. No stage requires a recomp regen
 unless a `recomp/*.cfg` change is deliberately introduced; regeneration remains
@@ -350,6 +387,10 @@ The sprite-related and state-risking parts are removed:
 - no `recomp/*.cfg` changes and no regeneration;
 - no `$8C98/$8D68` OAM port;
 - no `$B158/$B1AF` hle wrappers—the original generated streamers still run;
+- fast vertical motion needs host margin rows at the native 16px cadence: the
+  first cached refresher used `$24&$FF00`, producing 75-90px stale intervals in
+  `runs/20260712-205507`. The source-only repair reuses `$B8A0` row records at
+  `$24&$FFF0` while keeping the expensive `$B825` column window page-aligned;
 - complete CPU + 128 KiB WRAM + SNES math-unit snapshot/restore around every
   frame's batch, instead of restoring only `$00-$17/$A5-$A6`;
 - fixed-buffer validation (`$3900` BG1, `$3B04` BG2) and per-layer destination
@@ -375,3 +416,261 @@ continuation. Automated gates prove game/OAM-state identity, and subsequent
 direct movement/boundary testing confirmed the implementation works without
 the historical extra or partial sprite failures. Stage B was fast-forwarded
 onto main after that confirmation.
+
+### Stage C: isolated `$8D68`, preserved `$8C98` (validated)
+
+The historical port replaced the whole `$8C98->$8D68` pipeline. Stage C instead
+hle-replaces only `$8D68`, leaving the generated `$8C98` object scan unchanged:
+
+- `$0400` activation, object logic, spawn timing, and sheet loading remain tied
+  to the authentic 256px window;
+- only definitions belonging to an already-accepted object can enter a margin;
+- the emission test changes from biased `x < $110` to
+  `(x+left) < $110+left+right`, covering screen-x
+  `[-16-left, 256+right)`—exactly one maximum 16px OAM tile beyond the visible
+  left edge, not the old experimental fixed-64 overreach;
+- the ROM's y-$11 store, reject-after-write re-parking, packed x-bit-8/size
+  high table, `$8F` bias clearing, OAM-full carry, and RTS ABI are preserved;
+- `AR_WS_SPRITES=0` selects authentic bounds in the same regenerated binary;
+  `AR_WS_SPRDBG=1` attributes every wide-only emitted definition.
+
+`hle_func 8D68 ActRaiser_BuildObjectSprites` was regenerated and a complete
+Fillmore act-1 direct-play pass validated the wide path. The subsequent
+host-only activation probe supplied the candidate evidence used by Stage D1.
+
+### Stage D1: widen drawing, not activation (validated)
+
+The full `level1-action.rec` probe in `runs/20260712-122509/` observed 114
+margin-candidate intervals across 40 object slots, balanced across both sides.
+Thirty-five in-margin handler/definition changes show that many candidates are
+already initialized and continue to animate while `$0400` is set.
+
+Stage D1 therefore separates the decisions: authentic visibility continues to
+set/clear `$0400`, while authentic-or-margin visibility decides whether `$8D68`
+emits OAM. Status gates and vertical visibility remain original, and
+`AR_WS_MARGIN_OBJECTS=0` restores authentic draw coverage for comparison.
+
+This requires hle-replacing `$8C98`, but does not reuse the historical port.
+That port modeled PHP/PLP only as host locals and skipped the ROM's two LSRs per
+unused high-table slot, leaving the wrong low byte in `A` on normal exit. The
+audited port keeps the live stack byte and preserves the distinct normal-flush
+versus OAM-full exit state. That cfg change was regenerated before the direct
+Stage-D1 test below.
+
+After regeneration, direct action-stage testing (`runs/20260712-125747/`)
+confirmed complete/correct sprites and the intended gameplay split: enemies
+are visible in the margins but activate when they enter the authentic screen.
+The run completed without sanitizer/runtime findings.
+
+Two full `AR_WS_MARGIN_OBJECTS=0` replays (`runs/20260712-130051/` and
+`runs/20260712-130342/`) completed cleanly with identical SRAM. Raw final-WRAM
+identity is not claimed: the two nominally identical fidelity runs themselves
+differ in six transient object-position bytes, so this recording is not a
+stable whole-WRAM oracle at exit. Use focused OAM/object traces for the next
+gate rather than treating a final object-table permutation as scan divergence.
+
+### Stage D2 validated and default-on
+
+Stage D2 widens only the `$0400` horizontal decision and remains independent of
+`AR_WS_MARGIN_OBJECTS`. Vertical coverage, status gates, D1 drawing, OAM
+emission, and exit machine state are unchanged. Direct Fillmore testing
+confirmed correct sprites and activation, so wide activation is now default-on;
+`AR_WS_MARGIN_ACTIVATION=0` restores the authentic boundary.
+`AR_WS_ACTDBG=1` logs every `$0400` transition with authentic/draw/activation
+results, handler, type, definition, span, and margins.
+
+Cheat-matched deterministic runs through game-frame 3000 completed cleanly:
+off `runs/20260712-135146/`, on `runs/20260712-135219/`. At gf=2500 the PPM
+and SRAM are byte-identical; 15 transient WRAM bytes differ, expected from
+earlier object state. Diagnostic run `runs/20260712-135329/` captured real
+margin activation (for example gf=1802, slot 33, right span `[297,321]`,
+`$0400 1→0` while `authentic=0`, `draw=1`, `active=1`). The user then directly
+validated movement, combat, sprites, and boundary behavior with Stage D2 on.
+After making Stage D2 default-on, cheat-matched replay
+`runs/20260712-191359/` was byte-identical in PPM, SRAM, and WRAM to the prior
+explicit-on run `runs/20260712-135219/` at the same game-frame.
+
+## Action-region and asset conclusions (2026-07-12)
+
+- `$00:9557` indexes `$00:95DD` with `$18`; the eight table pointers are
+  `$96AF,$A8F6,$B449,$C11E,$CD9B,$D928,$E722,$F39A`. All action regions
+  `$01-$07` converge on the same `$8C98->$8D68` OAM machinery. `$07` is Death
+  Heim, a user-confirmed no-act boss-rush flow that teleports through the six
+  act-2 boss arenas before the final boss. Its exact `$19` sequence still needs
+  an instrumented runtime capture.
+- `$02:BC9E` loads one common 8 KiB action OBJ atlas from `$07:8000` to VRAM
+  `$2000-$2FFF` and sprite palettes `$07:D040-$D09F` to CGRAM `$C0-$EF`.
+  It also selects a 256-byte magic overlay rooted at `$06:A400` for `$2D40`.
+- `$00:96C3-$96F5` is the previously unknown descriptor-slot-0 armer. Object
+  `$38` selects a bank-6 effect source rooted at `$06:A000`; the descriptor
+  writes 128 bytes to `$2D80`. This is bounded magic/effect replacement, not
+  a general per-enemy sheet allocator.
+- Therefore Stage D2's main risk is changing gameplay timing/state for
+  `$0400`-gated objects, not exhausting a region-specific sprite cache. Still
+  trace `$D0-$D5` and effect selectors around magic/bosses because those are
+  the one dynamic action OBJ path now known.
+
+## Town simulation preparation (Phase 4 static map)
+
+Town sprites use a separate bank-1 pipeline:
+
+- `$01:B4C6` follows `$0AEE/$0AF0`, deriving camera `$22/$24` and clamping to
+  `$0000-$0100` horizontally and `$0000-$011F` vertically. This proves a
+  512×512-pixel town world. `$7F:9F65/$9F67` are transient shake offsets.
+- `$01:ACD9` rebuilds OAM every frame. It first scans 48 fixed `$12`-byte
+  records at `$06A0` with fixed-screen origins, then 44 world `$26`-byte
+  records at `$0A00` with camera-relative origins. These are two record
+  formats, not one universal object array.
+- World render fields are `+08` frame pointer, `+0A/+0C` world X/Y, `+10`
+  status, and `+25` delay/timer. The frame definition begins with a count byte
+  followed by five-byte components. Record `+0E` is not the tile count.
+- `$01:ADAD` and `$01:AE6F` are the leaf composition emitters. `AE6F` uses the
+  same geometry but rewrites palette/attribute bits; `$7F:9752 & 2` selects it.
+  There is no action-style `$0400` activation decision in `ACD9`: active world
+  records are already submitted, and per-component horizontal clipping is the
+  widescreen bottleneck.
+- The safe future seam is to widen `ADAD/AE6F` only for world records at
+  `$0A00+`, using live asymmetric margins. Fixed records must remain authentic
+  or UI/overlay sprites may leak into margins. At town map edges cap margins to
+  `left<=cameraX`, `right<=$0100-cameraX` and use the same cap for BG and OBJ.
+- The existing partial-town-actor issue (`DEBUG.md` open item #17) must be
+  captured in authentic geometry first. Do not attribute or “fix” it as a
+  widescreen regression without that baseline.
+
+For a future decompilation, keep spawn/type identity (`$01:E099/$01:E7D9`),
+live behavior/update, frame composition (`ADAD/AE6F`), and graphics upload/VRAM
+identity as separate modules. That structure permits replacing assets or the
+renderer without silently changing simulation behavior.
+
+## Remaining task queue (execute in order)
+
+Each item is deliberately bounded so it can be implemented, rebuilt, and
+direct-tested before the next begins. Regeneration is user-owned: stop and hand
+off whenever a cfg/emitter change makes it necessary.
+
+1. **Action Stage D2 — COMPLETE.** D1 drawing is unchanged; wide activation is
+   default-on and `AR_WS_MARGIN_ACTIVATION=0` retains the same-binary fidelity
+   gate. Direct Fillmore movement/combat and boundary behavior are clean.
+2. **All-action policy — IMPLEMENTED; direct gate pending.** The runtime policy
+   now enables the already-shared BG/sprite paths for `$18=$01-$07`.
+3. **Cross-region and hardware-limit matrix.** Test warp pairs `0201/0202` through
+   `0601/0602`, then one `0701` Death Heim boss-rush/final-boss pass (there is no
+   ordinary `0702`). For each: stage start, mid-stage scroll, dense encounter,
+   boss, and transition; capture both old
+   edges. Use `NoSpriteLimits=1` for the main pass and repeat at least one dense
+   encounter with `=0` to separate authentic scanline pressure from OAM bugs.
+4. **Dynamic OBJ/effect validation.** Exercise all magic selectors and several
+   boss/effect paths while tracing `$D0-$D5`, `$02AC`, object `$38`, OAM count,
+   and VRAM `$2D40-$2DBF`. Catalogue selectors to named assets for decomp use.
+5. **Town authentic baseline corpus.** Before any town widening, replay
+   `simdev.rec`, `lairseal.rec`, and `auto_sim.rec` at left/center/right camera
+   positions; capture dialogs, builders/people, lair sealing, rewards, and
+   multi-actor cutscenes. Resolve or precisely freeze the existing partial-
+   actor symptom as a baseline.
+6. **Town BG/map-edge widening.** Implement town margins from the `$B4C6`
+   camera bounds, with a same-binary off switch. Verify no 512px map wrap and
+   preserve the existing policies for sky palace `$19=07`, temple `$08`, and
+   world map `$09`.
+7. **Town world-sprite emission.** Widen only the `ADAD/AE6F` horizontal leaf
+   predicate for `$0A00+` records; keep the `$06A0` fixed segment and vertical
+   predicate authentic. Add planned diagnostics only when implemented (suggested
+   names: `AR_WS_SIM_SPRITES`, `AR_WS_SIM_SPRDBG`; these flags do not exist yet).
+8. **Polish and special cases.** Audit action HUD side panels, boss HDMA/window
+   effects, iris wipes, town dialog staging, and unsampled intro/name-entry/
+   ending screens. Treat each as an explicit policy choice, not a side effect
+   of widening another mode.
+
+### Cross-region findings: first pass (2026-07-12)
+
+- Fillmore act 1: clean. Fillmore act 2: completed, but character movement
+  slowed; the action→action F6 path is now the leading suspect rather than
+  widescreen. That run entered `$00:B122_M0X0` garbage twice.
+- Bloodpool act 1: clean despite its BG2 declaring width `$0100`.
+- Bloodpool act 2: gf1915/gf2574 snapshots in
+  `runs/20260712-192126/` show camera, object records, and OAM continuing to
+  update (29 then 24 live entries). No full right-margin OAM entries exist;
+  the frozen sprite-like graphics far into the margin are tilemap content.
+  BG2 declares `$32=$0100`, so the host refresh correctly skipped it but policy
+  incorrectly exposed its stale offscreen half. Action policy now clamps BG2
+  whenever `$32<$0200`; the next run confirmed the clamp. The change is inert on Fillmore
+  act 1: replay `runs/20260712-193101/` is byte-identical in PPM, WRAM, and
+  SRAM to pre-change `runs/20260712-191359/` at gf2500.
+- Bloodpool act 2 BG2 clamp was visually confirmed in `runs/20260712-193357/`.
+  The same test exposed a separate recompilation-coverage failure: enemies were
+  present and killable but inert, and the next room's platforms did not move
+  although their chain tiles animated. Snapshot gf4073 (`$18=02,$19=03`) showed
+  active object slots with the `$0400` cull bit clear, ruling out wide activation.
+  `dump_dispatch_log.json` then showed live object-loop calls from `$00:8965` to
+  `$B990/$B9BC/$BAF1/$BB84/$BCC1/$BCCF`, all `found:0`. `$B990/$B9BC` directly
+  update platform Y and `$BAF1` is an enemy tick, so their non-execution exactly
+  explains the symptom; the chain animation is an independent tile animation.
+  The six roots expand to a 12-entry handler web in `bank00.cfg`; regeneration
+  and a direct retest are pending. This failure is independent of the warp and
+  widescreen policies—the wider view merely opened the first test of this code.
+- Narrow-BG2 presentation follow-up: instead of exposing invalid tilemap data,
+  the renderer can reflect the already-decoded authentic BG2 into the margins.
+  This is pixel-accurate across sub-tile scroll, preserves the layer's priority/
+  transparency/color-math identity, and does not write VRAM. It is now the
+  default for action `$32<$0200`; `AR_WS_BG2_MIRROR=0` restores the confirmed
+  clamp for the Bloodpool handler retest and for visual A/B comparison.
+- Full Bloodpool act 2 run `runs/20260712-200334/`: mirror fill is visually
+  confirmed. The first handler batch restored early enemies/platforms. Later
+  F2 captures found four more live `$12` roots (`$BD82`, `$BD36`, `$BBB4`,
+  `$BE0B`), expanding to 12 entries; `$BE0B` is also `found:0` on all 204 boss
+  frames in the exit ring. These cfg registrations were pending at this capture;
+  they are included in the current generated build, with direct retest remaining.
+- **Movement slowdown resolved to draw-side BG refresh cost:** the deliberately
+  paired captures in `runs/20260712-202151/` separate the symptom cleanly. Normal
+  F9 is host frame 3298/game frame 3318 in map `$19=03`; slow F9 is host 4303/game
+  4323 in map `$19=05`. The constant +20 offset proves one game frame per host
+  frame—no extra yield—and the player remains on `$9884`, with ordinary position
+  deltas while input is held. Host cadence falls from 60/61 to a stable 47 fps,
+  while measured `RtlRunFrame` remains only 4.6–5.0 ms. This rules out water,
+  collision, warp timing, and player-state logic as the cause.
+  Map `$03` has only wide BG1 (BG2 is `$0100×$0100`); map `$05` declares both BG1
+  and BG2 as `$0700×$0400`. Its slow dump's block ring is consequently dominated
+  by repeated `$02:B825/$B90D/$B914` BG2 record builds (`$3B04/$3B86`). The host
+  margin refresher was rebuilding every required BG1+BG2 strip every scanout,
+  after `AR_PERF`'s old `run-ms` timer. It now caches the complete aligned-camera/
+  map descriptor and rebuilds only at the original streamer's 16px/map-page
+  cadence; partial builds retry. `AR_PERF` also emits `[draw-perf]` so the next
+  run measures this previously hidden phase directly. This source-only fix does
+  not require regeneration.
+- The same slow F9 dispatch ring discovered one additional live ungenerated
+  object root, `$BD90`; its closure is `$BD90/$BD9F/$BDA5/$BDAE`. It is separate
+  from the slowdown—missing dispatches return immediately—but has been added to
+  the handler batch so later Bloodpool objects are not left inert; it is now
+  generated and awaits direct retest.
+- **Bloodpool full retest after regeneration:** the boss and all previously inert later objects
+  now work. One enemy remained drawable, collidable, and killable but did not tick. Snapshot
+  `runs/20260712-205842/snapshots/snap_00_gf6378.wram.bin` identifies its exact handler as `$BB25`
+  (record `$BB19`, `$B449` type `$21`). This is another recompilation-coverage issue, not a
+  widescreen cull/activation/rendering fault: `$BB25` contains the object's movement, proximity,
+  and yield logic, while the graceful missing-handler fallback leaves drawing/collision intact.
+  The root was absent from the original bulk scan because `$B449` has zero holes `$19-$1D` before
+  its live `$1E-$27` tail. The corrected static audit also queues Stage-3 table continuations
+  `$C48A/$C653/$C90E` before that region's runtime pass, reducing regeneration rounds.
+- Stage-3 act-1 capture `runs/20260712-211830/` adds exact runtime roots
+  `$C7FA/$C7FF/$C804` and yield continuation `$C80A`. Six live objects hold those roots and the
+  exit dispatch ring counts 94 misses per root. They are object-handler coverage, not evidence of
+  a new widescreen rendering failure; visual/object identity awaits the player's report.
+- **Regions 4-7 static preflight:** both acts in a kingdom share one `$18` handler table, so a
+  complete sparse-table walk covers every declared object type regardless of which act spawns it.
+  Aitos, Marahna, and Northwall add no state/yield gaps beyond the table entries already queued.
+  Death Heim's distinct `$F39A` flow adds 13 primary `$12` continuations, each immediately after
+  `JSR $86FA`; all are included. With one analogous Stage-1 `$A66A` continuation, the generated
+  batch is 43 unique handlers and all table/field-`$14`/literal-`$12`/yield scans report zero gaps.
+  Runtime playthroughs remain mandatory for computed state roots and visual widescreen behavior.
+- **Fast vertical stale rows isolated and repaired:** in Stage 1 Act 2 run
+  `runs/20260712-205507`, the opening fall advances about 5px/frame while the
+  cached host refresh fires at gf1885, 1903, 1918, 1933, and 1949—15-18-frame
+  (roughly 75-90px) gaps. The full `$B825` margin-column window must remain
+  `$24&$FF00`; changing it to 16px cadence would redo 18 columns every few
+  frames and risk restoring the draw slowdown. The source-only fix instead
+  calls the already-emitted `$B8A0` row builder at `$24&$FFF0`. Its current
+  page record is drained normally; if a margin lies outside that 512px band,
+  the neighboring page is decoded but only the missing margin columns are
+  copied, preserving the opposite half of the aliased 64-column ring.
+- The console's lone `$8465` `4210-wedge` was a false diagnostic accumulated
+  across 4,096 ordinary once-per-frame ACK reads, not a yield; the detector now
+  requires adjacent block-ring reads.

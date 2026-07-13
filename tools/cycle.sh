@@ -29,8 +29,11 @@ for a in "$@"; do
 done
 
 if [ "$BUILD" = 1 ]; then
-  # 1. regen iff cfg newer than generated code
-  if [ -n "$(find recomp -name '*.cfg' -newer src/gen/bank00_v2.c 2>/dev/null)" ]; then
+  # 1. regen iff cfg newer than the last successful generation. Large banks
+  # may be split into bankXX_partNN_v2.c files, so do not key freshness to a
+  # monolithic bank00_v2.c filename.
+  GEN_STAMP=src/gen/.v2_regen_stamp
+  if [ ! -f "$GEN_STAMP" ] || [ -n "$(find recomp -name '*.cfg' -newer "$GEN_STAMP" 2>/dev/null)" ]; then
     echo "[cycle] cfg changed -> regen"
     bash tools/regen.sh || exit 1
   else

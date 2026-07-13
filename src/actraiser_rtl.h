@@ -12,5 +12,6 @@ void RunOneFrameOfGame(void);
  * OAM builder or normal tile streamers. */
 int ActRaiser_WidescreenBgRefreshEnabled(void);
 void ActRaiser_WidescreenMarginRefresh(void);
+void ActRaiser_WidescreenSpriteActivationProbe(void);
 
 #endif  // ACTRAISER_RTL_H

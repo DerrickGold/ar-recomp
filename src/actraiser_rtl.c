@@ -161,7 +161,9 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * steady push delta with $E6 (time) ticking = engine running. A tiny push delta
    * = the main loop is spinning on the vblank wait WITHOUT running per-frame logic
    * (dispatch/gate problem). $E6 frozen while pushes are large = logic runs but a
-   * pause/timer gate is suppressing advancement. */
+   * pause/timer gate is suppressing advancement. Action fields also expose the
+   * actual movement result: position delta, velocity, current player handler/
+   * flags, and the walking-cycle Crest/Boost counters ($08BC/$08C4). */
   if (getenv("AR_FRAMELOG")) {
     extern unsigned long g_recomp_push_count;
     extern uint8 g_ram[0x20000];
@@ -176,13 +178,33 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
      * (see AR_SIMTRACE in cpu_trace.h). */
     uint16 joy_raw = g_snes->input1_currentState;
     uint16 joy = SwapInputBits(joy_raw);
+    uint16 gf = (uint16)(g_ram[0x88] | (g_ram[0x89] << 8));
+    uint16 px = (uint16)(g_ram[0x08A2] | (g_ram[0x08A3] << 8));
+    uint16 py = (uint16)(g_ram[0x08A4] | (g_ram[0x08A5] << 8));
+    int16 pvx = (int16)(g_ram[0x08A6] | (g_ram[0x08A7] << 8));
+    int16 pvy = (int16)(g_ram[0x08A8] | (g_ram[0x08A9] << 8));
+    uint16 ph = (uint16)(g_ram[0x08B2] | (g_ram[0x08B3] << 8));
+    uint16 ps = (uint16)(g_ram[0x08D0] | (g_ram[0x08D1] << 8));
+    static uint16 last_px, last_py;
+    static uint8 last_region, last_map;
+    int dx = 0, dy = 0;
+    if (g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07 &&
+        last_region == g_ram[0x18] && last_map == g_ram[0x19]) {
+      dx = (int16)(px - last_px);
+      dy = (int16)(py - last_py);
+    }
     fprintf(stderr,
-      "[frame] f=%d push+%lu callsite=%02x:%04x A=%04x m=%d $18=%02x $19=%02x $1A=%02x $1B=%02x $F4=%02x $F5=%02x $FB=%02x time$E6=%02x%02x HP$1D=%02x joy=%04x(raw=%04x)\n",
-      snes_frame_counter, g_recomp_push_count - last_push, cpu->PB, ret,
+      "[frame] f=%d gf=%u push+%lu callsite=%02x:%04x A=%04x m=%d $18=%02x $19=%02x $1A=%02x $1B=%02x $F4=%02x $F5=%02x $FB=%02x time$E6=%02x%02x HP$1D=%02x joy=%04x(raw=%04x) pos=%04x,%04x d=%+d,%+d vel=%+d,%+d h=%04x state=%04x boost=%02x crest=%02x\n",
+      snes_frame_counter, gf, g_recomp_push_count - last_push, cpu->PB, ret,
       cpu->A, cpu->m_flag,
       g_ram[0x18], g_ram[0x19], g_ram[0x1A], g_ram[0x1B],
       g_ram[0xF4], g_ram[0xF5], g_ram[0xFB], g_ram[0xE7], g_ram[0xE6], g_ram[0x1D],
-      joy, joy_raw);
+      joy, joy_raw, px, py, dx, dy, pvx, pvy, ph, ps,
+      g_ram[0x08C4], g_ram[0x08BC]);
+    last_px = px;
+    last_py = py;
+    last_region = g_ram[0x18];
+    last_map = g_ram[0x19];
     last_push = g_recomp_push_count;
   }
 
@@ -193,7 +215,7 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * vanish + timer '?'" corruption). */
   if (getenv("AR_OBJLOG")) {
     extern uint8 g_ram[0x20000];
-    if (g_ram[0x18] == 0x01) {
+    if (g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
       unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
       int active = 0;
       for (int i = 0; i < 24; i++) {
@@ -321,6 +343,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * BG3 (layer 2, the HUD) is already margin-clamped by the engine default. */
   int wide = survey;
   uint8 clamp = 0;
+  uint8 mirror = 0;
   int bg2_gap = 0;  /* margin source gap px/side for BG2 (UI staging strip) */
   int action_margins = 0;
   if (!survey && g_ram[0x18] == 0x00) {
@@ -378,10 +401,11 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
         wide = 0;
         break;
     }
-  } else if (!survey && g_ram[0x18] == 0x01) {
-    /* Investigation stage B: keep the original recompiled tile streamers,
-     * object visibility scan, and OAM builder untouched. A separate host-side
-     * transaction refreshes only BG tilemap VRAM margins with true map data.
+  } else if (!survey && g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
+    /* Validated action-wide path, shared by all seven action-region handler
+     * tables. Original tile streamers remain active; a separate host-side
+     * transaction refreshes only BG tilemap VRAM margins with true map data,
+     * while the audited $8C98/$8D68 seams widen drawing and activation.
      *
      * AR_WS_ACTION=0 restores the pillarboxed action baseline in the same
      * binary. AR_WS_BGREFRESH=0 returns exactly to Stage A (raw wide renderer,
@@ -389,6 +413,27 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     const char *aw = getenv("AR_WS_ACTION");
     wide = !(aw && aw[0] == '0');
     action_margins = wide && ActRaiser_WidescreenBgRefreshEnabled();
+
+    /* Some action sections declare BG2 as a single 256x256 screen
+     * ($32/$34=$0100) while BG1 is the scrolling world. There is no BG2 world
+     * data to decode into side margins, and its offscreen tilemap half is
+     * scratch/stale storage. The margin refresher therefore skips it; clamp
+     * that layer instead of exposing frozen tiles (Bloodpool act 2). */
+    uint16 bg2_width = (uint16)(g_ram[0x32] | (g_ram[0x33] << 8));
+    if (bg2_width < 0x0200) {
+      /* A 256-wide decorative BG2 has no real margin data. By default reflect
+       * its authentic rendered edges into the margins; AR_WS_BG2_MIRROR=0
+       * restores the proven clamp for A/B testing in the same binary. */
+      static int bg2_mirror = -1;
+      if (bg2_mirror < 0) {
+        const char *bm = getenv("AR_WS_BG2_MIRROR");
+        bg2_mirror = !(bm && bm[0] == '0');
+      }
+      if (bg2_mirror)
+        mirror |= 0x02;
+      else
+        clamp |= 0x02;
+    }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
    * main-screen enable to just that layer so a snapshot shows exactly which
@@ -397,14 +442,17 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (ob && ob[0]) {
       int L = atoi(ob) - 1;
       if (L >= 0 && L < 4) g_ppu->screenEnabled[0] = (uint8)(1u << L);
-      wide = 1; clamp = 0;  /* raw wide so a bleeding layer is visible */
+      wide = 1; clamp = 0; mirror = 0;  /* raw wide: expose real tilemap data */
     } }
   /* AR_WS_CLAMP=<hex mask>: override the per-layer clamp for tuning. */
   { const char *cm = getenv("AR_WS_CLAMP");
-    if (cm && cm[0]) { wide = 1; clamp = (uint8)strtoul(cm, NULL, 16); } }
+    if (cm && cm[0]) {
+      wide = 1; clamp = (uint8)strtoul(cm, NULL, 16); mirror = 0;
+    } }
   if (wide) {
     PpuSetExtraSpace(g_ppu, (uint8)g_ws_extra);
     PpuSetWidescreenLayerClamp(g_ppu, clamp);
+    PpuSetWidescreenLayerMirror(g_ppu, mirror);
     if (bg2_gap)
       PpuSetWidescreenLayerMarginGap(g_ppu, 1, (uint8)bg2_gap, (uint8)bg2_gap);
     if (action_margins) {
@@ -484,6 +532,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
 
 void ActRaiserDrawPpuFrame(void) {
   ActRaiser_ApplyWidescreenPolicy();
+  /* Stage D reconnaissance: read-only classification of objects that intersect
+   * a live side margin but remain outside the authentic activation window. */
+  ActRaiser_WidescreenSpriteActivationProbe();
   /* Stage B: populate BG1/BG2 margin tilemap cells transactionally before
    * scanline rendering. No-op under AR_WS_BGREFRESH=0 and outside action. */
   ActRaiser_WidescreenMarginRefresh();
@@ -732,7 +783,9 @@ void ActRaiser_ApplyCheats(void) {
    * knockback, no hitstun (speedrun "ignore hits"), using the game's own
    * i-frames. The hit-check gates on the INVULN FLAG ($08D0 bit 0x2000, +$30),
    * which the game sets on a hit and clears when the i-frame TIMER ($08C6, +$26)
-   * counts down to 0. So we (a) pin the timer to 0xFF so the game never clears
+   * counts down to 0. This authentic invulnerability state also suppresses
+   * water drag; disable the cheat for movement/terrain-physics validation.
+   * So we (a) pin the timer to 0xFF so the game never clears
    * the flag, and (b) SET the flag ourselves each frame so invuln is active from
    * frame one (without needing a first hit to bootstrap it — that was the
    * "works only after getting hit once" gap). Offsets found via AR_WATCHOBJ=08A0
@@ -786,11 +839,18 @@ void ActRaiser_ApplyCheats(void) {
  * F6 in main.c with the target from AR_WARP=<region_hex><act_hex> (e.g. 0202). */
 void ActRaiser_Warp(unsigned region, unsigned act) {
   extern uint8 g_ram[0x20000];
+  uint8 from_region = g_ram[0x18];
+  uint8 from_map = g_ram[0x19];
   g_ram[0x1B] = (uint8)region;   /* -> $18 (region/mode) on the switch */
   g_ram[0x1A] = (uint8)act;      /* -> $19 (act within region) */
   g_ram[0xFB] |= 0x80;           /* transition-request flag */
-  fprintf(stderr, "[warp] staged region=$%02X act=$%02X ($1B/$1A/$FB set); "
-          "transition processor should pick it up.\n", region & 0xFF, act & 0xFF);
+  fprintf(stderr, "[warp] from $18=$%02X $19=$%02X staged region=$%02X "
+          "act=$%02X ($1B/$1A/$FB set); transition processor should pick it up.\n",
+          from_region, from_map, region & 0xFF, act & 0xFF);
+  if (from_region >= 0x01 && from_region <= 0x07) {
+    fprintf(stderr, "[warp] WARNING: action->action is not a naturally observed "
+            "transition; inherited timing/object state may affect fidelity.\n");
+  }
 }
 
 void RunOneFrameOfGame(void) {

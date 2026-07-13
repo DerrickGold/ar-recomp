@@ -65,14 +65,19 @@ out, a native recompilation is far more portable and maintainable than either.
 **[`docs/progress.md`](docs/progress.md) is the authoritative, kept-current
 status tracker** — per-action-stage / per-sim-town playability tables plus
 automated codebase metrics; update it whenever a stage/town is actually played.
-Snapshot as of 2026-07-07:
+Snapshot as of 2026-07-12:
 
 - **Fillmore (kingdom 1)**: full clean round — act 1 → sim mode → act 2 —
-  including development cycles, story events, lair-seal cutscenes, reward
-  grants, and magic casting.
-- **Bloodpool (kingdom 2)**: act 1 plays clean and transitions into sim mode;
-  the rest of its sim round and act 2 are not yet verified.
-- **Kingdoms 3-6**: untested.
+  including development cycles, story events, lair-seal cutscenes, rewards,
+  magic, and widescreen action-stage rendering.
+- **Bloodpool (kingdom 2)**: both action stages and the act-2 boss have been
+  completed in widescreen; its sim entry/lightning event is confirmed, while
+  the full town round remains.
+- **Kasandora (kingdom 3)**: an instrumented act-1 widescreen pass is captured;
+  act 2 and its simulation town remain unverified.
+- **Aitos, Marahna, Northwall, and Death Heim**: static action-handler preflight
+  is complete, but direct playthroughs remain. The current local generated build
+  includes the 43-entry handler batch needed for that matrix.
 - Open bugs and investigation state live in [`DEBUG.md`](DEBUG.md).
 
 

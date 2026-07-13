@@ -227,18 +227,23 @@ Fillmore act 1 arrives with `$DE/$DF=$FF, $E1=0` — tile anim disabled.
 | VRAM words | Contents | Writer |
 |---|---|---|
 | `$0000-$1FFF` | BG1+BG2 chars (BG12NBA=$00) | `$02:B28E`+`$02:B475` decompressor pair (force-blank port loops) |
-| `$2000-$3FFF` | OBJ chars (OBSEL=$01, 8x8/16x16) | level-entry one-shot `$02:BC9E` (act1: 4224 words) |
+| `$2000-$2FFF` | common action OBJ atlas (OBSEL=$01, 8x8/16x16) | `$02:BC9E`: 4096 words from ROM `$07:8000-$07:9FFF` |
+| `$2D40-$2DBF` | reserved OBJ magic/effect overlays inside the common atlas | `$02:BC9E` writes 128 words to `$2D40`; `$00:96C3-$96F5` can arm 128-byte slot-0 upload to `$2D80` |
+| `$3000-$3FFF` | OBJ address space reachable through OBSEL name selection; resident contents/consumers not yet catalogued | `?` |
 | `$4000-$4FFF` | extra char bank (user `?` — B28E loads it; no NBA points there in-game) | `$02:B28E` |
 | `$5000-$57FF` | BG3 chars 2bpp (BG34NBA=$05) | decompressor |
 | `$5800-$5BFF` | BG3 map (BG3SC=$58, 32x32) — THE HUD | `$02:AEEB` per-frame stream from `$7F:B000` |
 | `$6000-$6FFF` | BG1 map 64x64 ring | record drain only |
 | `$7000-$7FFF` | BG2 map 64x64 ring | record drain only |
 
-Base regs set once by `$02:C6B5` (in-game) / zeroed by `$02:C6EE` (video
-off). **OBJ chars are fully static during an action level** — descriptor
-slot 0 (`$D0-$D5`) exists but NEVER fires in Fillmore act 1 (whole-level
-trace); its armer is unknown (`?` — likely boss/effect one-shots in other
-levels). There is no per-object sheet allocator to exhaust.
+Base regs are set by `$02:C6B5` (in-game) / zeroed by `$02:C6EE` (video
+off). `$02:BC9E` also uploads the action sprite palettes from `$07:D040-$D09F`
+to CGRAM `$C0-$EF`, then selects a magic overlay rooted at `$06:A400` for
+VRAM `$2D40`. Descriptor slot 0's later armer is `$00:96C3-$96F5`: when
+object `$30 & $0040` and `$D5==0`, object `$38` selects a source rooted at
+`$06:A000`, target `$2D80`, size `$0080`. It then advances paired object
+states. Thus the **regular action atlas is static/common**, with small dynamic
+magic/effect replacements; there is no per-enemy sheet allocator to exhaust.
 
 ## 9. OAM / sprite pipeline (action)
 
@@ -275,15 +280,77 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
 - Sky palace policy: plain full-wide, staging artifacts accepted (FINAL,
   per user decision — see widescreen-survey.md).
 
+### 11.1 Town camera and OAM pipeline
+
+Town simulation uses a separate bank-1 sprite system from action mode:
+
+```
+$01:B4C6 camera follow/clamp
+  camera $22 = clamp($0AEE-$80, 0, $0100)
+  camera $24 = clamp($0AF0-$70, 0, $011F)
+  optional shake $7F:9F65/$9F67, accepted only inside those bounds
+
+$01:ACD9 per-frame OAM driver
+  fixed segment: 48 records, $06A0, stride $12, fixed-screen origin
+  world segment: 44 records, $0A00, stride $26, camera-relative origin
+    -> $01:ADAD normal composition emitter
+    -> $01:AE6F alternate-attribute emitter when $7F:9752 & 2
+  -> OAM shadow $0380-$059F -> common NMI DMA
+```
+
+The fixed array occupies `$06A0-$09FF` exactly; the world array starts at
+`$0A00`. `$ACD9` already submits every active world record, so there is no
+action-style `$0400` activation gate to widen. Each world record points at a
+frame composition through `+08`: count byte followed by five-byte parts
+(`flags/size`, signed x, signed y, tile/attributes). `ADAD/AE6F` apply the
+authentic horizontal `<$0110` and vertical `<$00F0` biased bounds while packing
+x-high/size into the OAM high table.
+
+For a future decompilation, preserve four layers rather than merging them:
+type/spawn identity (`$01:E099/$E7D9`), live record update/behavior, pure
+composition emission (`ADAD/AE6F`), and ROM graphics upload/VRAM asset identity.
+For widescreen, change only the world-segment horizontal predicate; keep the
+fixed segment authentic. Town world width/height is 512×512 px, so usable
+side margins are asymmetric: `left <= cameraX`, `right <= $0100-cameraX`.
+Apply the same margins to town BG and world sprites to prevent map wrap.
+
 ## 12. Conversion status
 
 | Routine | Status |
 |---|---|
 | `$00:8418` / `$02:A85E` vblank wait | hle (host yield) |
-| `$00:8C98` cull + `$00:8D68` builder | original recompiled path on main; hle port only on the two historical experimental branches |
+| `$00:8C98` cull + `$00:8D68` builder | `widescreen-sprites-v2`: regenerated and direct-play validated Stage C/D1; wide drawing with authentic activation |
 | `$02:B158` col-strip builder | original recompiled path on main; validated BG refresh separately reuses `$B825` transactionally for margin-only VRAM writes |
 | `$02:B1AF` row-strip builder | original recompiled path on main; experimental hle port is not used |
 | `$02:BED3/$B825/$B8A0/$B90D/$B95A`, drain chain, OAM DMA, camera `$B091` | recompiled |
+
+### 12a. Fast-vertical-motion margin repair (2026-07-12)
+
+Run `runs/20260712-205507` exposed a second cadence requirement in the host
+margin refresher. During the Stage 1 Act 2 opening fall, player/camera motion
+advanced about 5px/frame, but the host's full-column cache keyed vertical
+position only at `$24 & $FF00`. Refreshes therefore occurred at game frames
+1885, 1903, 1918, 1933, and 1949: gaps of 15-18 frames, or roughly 75-90px
+of fall, during which newly visible margin rows could retain stale ring data.
+Horizontal 16px crossings occasionally refreshed the columns sooner, which
+explains why the corruption eventually self-corrected.
+
+The fix preserves the page-aligned column decode: `$B825` intentionally needs
+`world_y = camera_y & $FF00` to populate its 512px vertical ring window. It
+does **not** rebuild every margin column at each 16px vertical crossing (18
+column decodes in the captured room, enough to risk the prior draw slowdown).
+Instead the host transaction now reuses `$02:B8A0`, marshalled exactly like
+`$02:B1AF`, for each newly exposed two-tile row. Its record drains as four
+32-word horizontal chunks to `base`, `base+$20`, `base+$400`, and
+`base+$420`. The normal `$24 & $FFF0` crossing refreshes the authentic
+`camera_x & $FF00` 512px band; if a live wide margin is outside that fixed
+band, one neighboring 256px-aligned band is decoded too. Because the two bands
+alias the same 64-column VRAM ring, only the tile columns intersecting the
+missing margin are drained from the neighboring record; draining all 64 would
+repair one edge by corrupting the opposite visible half with data 512px away.
+All CPU, WRAM, and math-unit state is restored, and only range-checked words in
+that layer's 4KiB tilemap persist. This is source-only and uses already-emitted
+routines; no regeneration is required.
 
 ## 13. Widescreen design constraints (read before the next implementation)
 
@@ -328,20 +395,36 @@ Facts the next design must satisfy (all trace/disasm-proven above):
    `cam+320` exceed `B+512` when `B = cam&~$FF` is low — their detail
    rows re-wrap on the next row strip. If record patching (#2) lands,
    reduce/remove the +64 lead: margins then stay true without it.
-7. **Sprite status is OPEN again (2026-07-12)**: earlier captures proved only
-   that OAM capacity was not exhausted (<=60/128) and that some apparent
-   corruption was BG gaps or the hit-flash cheat interaction. Later direct
-   testing found extra boundary sprites and partial multi-tile enemies. Both
-   experimental "BG" branches still replaced `$8C98/$8D68`, so they never
-   isolated BG widening from the OAM port. The investigation must keep the ROM
-   OAM path intact through raw-wide and BG-refresh stages before widening any
-   sprite window.
+7. **Action sprite isolation is validated through Stage D1 (2026-07-12).**
+   Raw-wide, BG-only refresh, definition widening, and initialized margin-object
+   drawing were each tested separately. The historical failures came from the
+   coupled replacement of `$8C98/$8D68`, including an inaccurate normal-exit
+   machine-state model, not from the background decoder. Stage D2 widens
+   `$0400`-gated activation separately and is directly validated in Fillmore;
+   `AR_WS_MARGIN_ACTIVATION=0` restores authentic activation. Regions/effects
+   still need testing with hardware scanline limits enabled and lifted.
 8. **HUD (BG3)**: 32-tile-wide compose in `$7F:B000`, streamed per frame;
    margins under the HUD stay clamped (current policy) or need a host
    compose extension later.
 9. **Every drawing path is now known**: any wide-mode VRAM the game won't
    supply can be host-written safely during the NMI window as long as it
    stays out of the four record buffers' way.
+10. **Narrow action layers must not be world-refreshed.** If BG2 declares
+    width `$32<$0200` (observed `$0100` in Bloodpool acts), it has no horizontal
+    world data for margins and the refresh skips it. Its offscreen tilemap half
+    may contain stale/scratch graphics. Bloodpool act 2 directly confirmed that
+    centering/clamping this layer is safe in `runs/20260712-193357/`. The normal
+    presentation now uses that same authentic 256px render as a source and
+    mirror-fills only BG2's margins at pixel precision; `AR_WS_BG2_MIRROR=0`
+    restores the centered clamp. Neither policy changes VRAM or game state.
+    Its simultaneous inert-enemy/platform symptom was
+    not a rendering or clamp side effect: the dispatch ring records six live
+    `$8915` object-loop targets as `found:0` (see SEAMS, “Object & spawn-handler
+    model”), while the chain graphics continue through independent tile animation.
+    The full retest later reduced this to one inert-but-drawable enemy at `$BB25`;
+    its missing behavior handler was hidden after zero holes in the `$B449` type
+    table. This further confirms that mirror/clamp and object behavior are separate
+    seams: host BG2 presentation never writes object state or handler pointers.
 
 ### 13.1 Stage-B implementation refinement (2026-07-12)
 
@@ -359,17 +442,48 @@ the owning 4 KiB tilemap before directly copying to VRAM. Consequently its
 only persistent state is BG1/BG2 tilemap content. `AR_WS_BGREFRESH=0` removes
 the transaction entirely for a byte-identical Stage-A A/B run.
 
+The decoder is intentionally scheduled at the authentic streamer's tile
+cadence, not at scanout cadence. A host-only key contains the action room,
+current margins, each camera rounded to its 16px column (vertical position to
+its 256px map page), dimensions, and every layer descriptor marshalled into
+`$B825`. An unchanged key means all required tilemap words already exist in
+VRAM, so the draw skips the transaction. A rejected/partial build is never
+cached. This matters for two-wide-layer rooms: `runs/20260712-202151/` proved
+that invoking every BG1 and BG2 margin decoder every rendered frame can consume
+the presentation budget even though game logic itself remains inexpensive.
+
+### 13.2 Narrow-layer mirror presentation (2026-07-12)
+
+`PpuSetWidescreenLayerMirror` is a renderer capability for decorative layers
+that contain a real 256px image but no valid offscreen world columns. The normal
+BG renderer first decodes the authentic layer into an isolated priority buffer;
+the compositor merges the center normally and reflects source `-x` into left
+destination `x<0`, and source `510-x` into right destination `x>=256`. Thus the
+edge pixel is not duplicated (`…3,2,1,2,3…`). At the current 48px/side aspect
+only the nearest 48 pixels (six tiles) are reused, never the center of the image.
+
+Isolation is required for correctness: mirroring the live composite buffer
+would also duplicate BG1 and sprites visible through transparent BG2 pixels.
+The isolated z/color words instead preserve BG2 transparency, priority, palette
+animation, windowing, mosaic, main/sub-screen identity, and later color math.
+This is a presentation enhancement, not recovered/decompiled level data, and it
+performs no PPU VRAM writes. Narrow action BG2 opts in by default; the original
+clamp remains the same-binary fidelity/fallback path.
+
 ## 14. Open questions (all remaining, none blocks the §13 design)
 
 1. `$7F:B800` action-anim frame composer (find on an animated level:
    wram trace off 0x1B800-0x1BFFF during load; Fillmore act 1 idles).
-2. Descriptor slot-0 (`$D0-$D5`) armer — never fires in act 1.
+2. Map `$02AC` and object `$38` selector values to named magic/effect assets;
+   the slot-0 armer itself is `$00:96C3-$96F5`.
 3. VRAM `$4000-$4FFF` char bank consumer (loaded but unreferenced by the
    in-game NBA regs; another section's OBSEL/NBA values `?`).
 4. BG2 filler tile id per section (`$17F` seen in act 1, `$18A` earlier
    in another context) — confirm from `$B825`'s filler constant per layer.
 5. Boss-arena window/HDMA effects vs margins (survey doc has the known
    full-width-window fix; iris wipes stay 256-centered — audit per boss).
-6. Sim-mode (Phase 4): bank-01 camera writers `$01:B1F8/$B7E9/$CE69/
-   $CEEB`; sim streaming; `$02:AFCB` `$47F0` upload; `$02:8384`.
+6. Sim-mode (Phase 4): widen town BG coverage and the world-only `ADAD/AE6F`
+   predicate; map `$02:AFCB` `$47F0` upload and `$02:8384`. The earlier
+   `$01:B1F8/$B7E9/$CE69/$CEEB` camera candidates were object-field writes;
+   the town camera writer is `$01:B4C6`.
 7. Section config +27 -> `$F2` meaning; `$6A/$6E/$72` $2000-flag meaning.

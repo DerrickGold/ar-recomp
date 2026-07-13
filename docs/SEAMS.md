@@ -88,23 +88,24 @@ key-on state: srcn/pitch/volumes/ADSR + first BRR bytes — all-zero BRR = sampl
 |---|---|---|---|---|---|
 | Per-frame display build / DMA | NMI path; `ActRaiserDrawPpuFrame`; DMA descriptors in ZP `$D0-$D5` | VRAM/OAM/CGRAM DMA, `$2100`-bus | "blit this frame's tiles/sprites/palette" | DMA descriptor tables | 🔴 |
 | Sprite (OAM) build | object loop `$8915` → OAM | OAM | "place object's sprite" | `$06A0` object struct (X/Y/handler) | 🟡 |
-| **Action OAM pipeline (fully mapped 2026-07-10)** | `$00:8C98` per-frame cull (obj vs 256×224 window keyed on camera `$22/$24`; sets/clears offscreen bit `$0400` in obj+`$30`) → `$00:8D68` sprite builder (walks 7-byte sprite defs at bank obj+`$18`, ptr obj+`$20`+5; draw window x∈[-16,256) y∈[-16,224); writes `$0380` shadow + packed high-table bits via `$00/$9A/$9C`) → `$00:923A`→`$9258` **HUD sprites** (from the `$06:A800` bank-6 table: FIXED screen positions, no camera math, no cull — widescreen-safe/centered) → OAM DMA `$02:ACA6` (544B `$0380`→`$2104`) | OAM | "which objects are visible + build their hardware sprites" | see ram-map.md "OAM shadow + sprite-build working vars" | 🟡 mapped; main deliberately retains original `$8C98/$8D68`. The old whole-pipeline hle port remains only on historical experimental branches; the next sprite phase must isolate per-sprite emission from object activation. |
-| **Action BG streaming (FULLY mapped 2026-07-11 — rendering-engine.md §3/§4)** | Camera `$02:B091` (clamp vs level dims `$2E/$30`) sets 16px-crossing flags in `$93` → dispatcher `$02:B127` (TRB per bit) → `$02:B158` column strips (2 cols × 64 rows) / `$02:B1AF` row strips (2 rows × 64 cols, span `[cam&~$FF,+512)` — 256-aligned, page-keyed decode) per layer (X=0 BG1, X=4 BG2) → ONE record into the layer's fixed buffer (`$3900/$3A02/$3B04/$3C06`, capacity 1/frame) → NMI drain `$02:ACC8/$ACE5` → `$02:ADA8` 64B chunks. 64×64-tile ring per layer (BG1 `$6000`, BG2 `$7000`); entry draw = inline mega-burst (full ring, one frame). The old "tier-2 burst" = `$B1AF` row strips (walk bob). | VRAM BG1/BG2 tilemaps | "keep the resident 512×512px tilemap ring fed as the camera moves" | level map decode via section config `$02:893E` + metatile tables | 🟡 original recompiled builders remain active. Investigation Stage B adds a separate transactional margin refresh (`actraiser_widescreen_bg.c`) that restores all CPU/WRAM/math state and persists only range-checked writes inside BG1 `$6000-$6FFF` or BG2 `$7000-$7FFF`. |
+| **Action OAM pipeline (fully mapped 2026-07-10)** | `$00:8C98` per-frame cull (obj vs 256×224 window keyed on camera `$22/$24`; sets/clears offscreen bit `$0400` in obj+`$30`) → `$00:8D68` sprite builder (walks 7-byte sprite defs at bank obj+`$18`, ptr obj+`$20`+5; draw window x∈[-16,256) y∈[-16,224); writes `$0380` shadow + packed high-table bits via `$00/$9A/$9C`) → `$00:923A`→`$9258` **HUD sprites** (from the `$06:A800` bank-6 table: FIXED screen positions, no camera math, no cull — widescreen-safe/centered) → OAM DMA `$02:ACA6` (544B `$0380`→`$2104`) | OAM | "which objects are visible + build their hardware sprites" | see ram-map.md "OAM shadow + sprite-build working vars" | 🟡 Stages C/D1/D2 are directly validated in Fillmore. Wide activation is default-on; `AR_WS_MARGIN_ACTIVATION=0` is the fidelity gate. Shared policy is enabled for `$18=$01-$07`; cross-region testing pending. |
+| **Action BG streaming (FULLY mapped 2026-07-12 — rendering-engine.md §3/§4/§12a)** | Camera `$02:B091` (clamp vs level dims `$2E/$30`) sets 16px-crossing flags in `$93` → dispatcher `$02:B127` (TRB per bit) → `$02:B158` column strips (2 cols × 64 rows) / `$02:B1AF` row strips (2 rows × 64 cols, span `[cam&~$FF,+512)` — 256-aligned, page-keyed decode) per layer (X=0 BG1, X=4 BG2) → ONE record into the layer's fixed buffer (`$3900/$3A02/$3B04/$3C06`, capacity 1/frame) → NMI drain `$02:ACC8/$ACE5` → `$02:ADA8` 64B chunks. 64×64-tile ring per layer (BG1 `$6000`, BG2 `$7000`); entry draw = inline mega-burst (full ring, one frame). The old "tier-2 burst" = `$B1AF` row strips (walk bob). | VRAM BG1/BG2 tilemaps | "keep the resident 512×512px tilemap ring fed as the camera moves" | level map decode via section config `$02:893E` + metatile tables | 🟡 original recompiled builders remain active. Stage B transactionally refreshes valid world margins while restoring CPU/WRAM/math state. Full margin columns remain cached on `$24&$FF00`; newly exposed vertical rows use `$B8A0` at `$24&$FFF0`, selectively draining neighboring-band columns when the 342px view straddles the row decoder's 512px page span. Narrow `$32<$0200` BG2 is never refreshed: the presentation layer mirror-fills from an isolated authentic render, or clamps with `AR_WS_BG2_MIRROR=0`; neither path changes game VRAM/state. |
 | UI/dialog tilemap compose+upload (sim engine) | compose buffer at `[$76]` (WRAM, e.g. `$3B04`) → `$02:ADA8` whole-map DMA (64×32 words, per UI-state change); box draw dispatcher `$02:BF60` | VRAM BG2 tilemap | "replace the whole UI screen state" | message-type IDs via `$14` (see Save/persistence note on `$14` reuse) | 🟡 mapped; offscreen half doubles as box staging (widescreen margins expose it — see docs/widescreen-survey.md) |
 | BG mode / layers | `$2105` BGMODE, `$212C/2D` main/sub, scroll regs | PPU | "set up background layers/scroll" | — | 🔴 |
 | HDMA (raster fx, HBlank) | HDMAEN `$420C`; ActRaiser drives ch 2/3 (and others) | HDMA | "per-scanline effect" | HDMA tables | 🔴 |
 | Mode 7 (overworld / transitions) | m7matrix; `$2134` multiply; the act-select spin | PPU mode 7 | "rotate/zoom the world map" | m7 transform params | 🔴 |
 | Brightness / forced blank | `$2100` INIDISP | PPU | "fade in/out, blank during build" | — | 🔴 |
 | Palette load | CGRAM writes | CGRAM (15-bit ×256) | "set palette N" | **palette id / table TBD** | 🔴→🟡 |
-| Sprite-sheet / tile load (action-stage) | ROM→VRAM copy loaders (**TBD — not yet located**) | VRAM DMA | "load anim sheet / tileset" | **sheet/frame index — the key asset-identity seam** | 🔴 |
-| Sim-mode object sprite/behavior identity | ROM tables `$01:E09B` (behavior/anim data ptrs) + `$01:E7E1` (sprite-graphics ptrs), one 16-bit entry per object slot — see "Sim-mode object/sprite spawn & OAM-build system" below | not VRAM directly — feeds object record `+00`/`+08`, which downstream OAM code (`ADAD`) reads | "this object slot's sprite/behavior asset" | **located 2026-07-01** — the per-object-type asset-identity seam for sim-mode decorations/actors | 🟡 (tables located + confirmed live; the spawn routine that COPIES table→object-record is unconverted — see below) |
+| **Action OBJ atlas + effect overlays** | `$02:BC9E`: ROM `$07:8000-$07:9FFF` → VRAM `$2000-$2FFF`, palette `$07:D040-$D09F` → CGRAM `$C0-$EF`, then magic-selected `$06:A400+` → VRAM `$2D40` (128 words). `$00:96C3-$96F5`: object `$38` selects `$06:A000+` → descriptor slot 0 → VRAM `$2D80` (128 bytes). | VRAM/CGRAM | "load the shared action atlas and replace the reserved magic/effect tiles" | common atlas plus magic/effect selector; **not a per-enemy sheet allocator** | 🟡 loaders and destinations mapped; individual selector-to-effect names still need cataloguing |
+| Sim-mode object sprite/behavior identity | ROM tables `$01:E099` (behavior/anim data ptrs) + `$01:E7D9` (sprite-frame ptrs), one 16-bit entry per object type — see "Sim-mode object/sprite spawn & OAM-build system" below | not VRAM directly — feeds world record `+00`/`+08`, which downstream OAM code (`ADAD`/`AE6F`) reads | "this object type's behavior and frame-composition asset" | **located 2026-07-01; bases corrected 2026-07-02** | 🟡 identity/assigner/emitter chain mapped; ROM character-upload identity remains to be catalogued |
 | Sim-mode per-frame building/icon update | `$01:8000` (bank 1) — see "Sim-mode dispatch structure" below | VRAM/OAM (downstream, not yet traced) | "update this frame's city/building/icon visuals" | region (`$19`) gates which sub-block runs; several `JSR (abs,X)` tables (`$2920`, `$208E`, `$B420`) select per-building/icon variants | 🔴 (dispatch structure mapped; the actual VRAM writes inside the deep `$018170+` body not yet traced) |
 
 > **The asset-substitution seam is the loaders, not the draws.** When you find the routines that
 > copy graphics ROM→VRAM and select animation frames, capture the table index they use — that
-> index is the logical sprite/tileset identity. For **sim-mode objects** this is now located (see
-> row above + the detailed section below) — the action-stage equivalent is still TBD; F2 snapshots
-> dump VRAM/CGRAM/OAM when hunting these — see `DEBUG.md` §9.
+> index is the logical sprite/tileset identity. For **sim-mode objects** the type→behavior/frame
+> tables are located. Action mode instead has a shared resident atlas plus small reserved effect
+> overlays; the object definition pointer identifies the composition inside that atlas. F2
+> snapshots dump VRAM/CGRAM/OAM when correlating logical identities with pixels — see `DEBUG.md` §9.
 
 ---
 
@@ -157,30 +158,40 @@ get from ROM to screen" anywhere in this codebase, action-stage included.
 
 ```
 ROM def-tables (per-object-type asset identity)
-  $01:E09B   behavior/anim-data pointer table (16-bit ptrs, one per object slot)
-  $01:E7E1   sprite-graphics pointer table    (16-bit ptrs, one per object slot)
+  $01:E099   behavior/anim-data pointer table (16-bit ptrs, one per object type)
+  $01:E7D9   sprite-frame pointer table       (16-bit ptrs, one per object type)
         │
-        ▼  (spawn — see "Missing spawn" below; reads these tables, populates a live object record)
-Live object record (WRAM $7E, 38-byte stride, base ~$06A0.."$0Fxx")
-  +00/+02  data/behavior pointer (copy of the $01:E09B entry — points at small structured
-           records in ROM, e.g. "$01:DDC2 = 03 08 00 00 04 08 00 00 00 01 08 00..." — NOT code)
-  +06      object "type" word
-  +08      sprite/graphics pointer (copy of the $01:E7E1 entry, e.g. $01:E15E)
-  +0A/+0C  world position (X/Y), ALSO separately populated by the bank_03_813F staging copy
-           (see below) — this is why a broken object can still have correct position but a
-           null sprite/behavior
-  +0E      per-object tile/animation-frame count (read by ADAD to bound its OAM sub-loop —
-           see "OAM flood bug" below; this is what turns a null +08 into a 216-iteration loop)
-  +12      status word — bit $8000 SET = inactive/skip (tested by ACD9's scan, see below);
-           real HW shows e.g. $8001 for an active object (bit0 has some other meaning, TBD)
-  +14..+24 scratch / unused for the objects inspected so far
+        ▼  $01:D072 and the per-type dispatch/update web
+World object record (WRAM $7E:$0A00+, 44 records, stride $26)
+  +00/+02  behavior pointers/state derived from $01:E099
+  +06      object type
+  +08      current frame-composition pointer derived from $01:E7D9 / frame lists
+  +0A/+0C  world X/Y (also populated for one cohort by $03:813F staging copy)
+  +0E      list/type id used by update/animation code; NOT ADAD's tile count
+  +10      render status tested by ACD9 ($C000 set = skip)
+  +12      behavior dispatch selector used outside the OAM leaf
+  +25      delay/timer byte checked and decremented by ACD9 before drawing
         │
-        ▼  (per-frame, unconditionally — see bank_01_ACD9 below)
-Destination OAM table (WRAM $7E:$0380-$047F, ~46 fixed slots, DB=1)
+        ▼  per-frame $01:ACD9 → $01:ADAD or $01:AE6F
+Frame composition at record +08
+  byte 0     tile count
+  then N × 5-byte parts:
+    +0 flags/size, +1 signed X offset, +2 signed Y offset,
+    +3/+4 tile+attribute word
         │
-        ▼  (DMA, not yet traced — see Graphics/PPU table above)
-Real OAM → screen
+        ▼
+OAM shadow $7E:$0380-$059F (512-byte low table + 32-byte high table)
+        │  common NMI OAM DMA
+        ▼
+PPU OAM → screen
 ```
+
+There is also a distinct fixed/overlay record array at `$06A0`: 48 records,
+stride `$12`, ending exactly at `$0A00`. It is animated by `$01:AC70` and rendered
+through the same leaf emitters, but uses fixed screen origins rather than the town
+camera. Do not model `$06A0-$0Fxx` as one universal 38-byte object table in a
+decompilation: the `$12`-byte fixed records and `$26`-byte world records have
+different owners and field meanings.
 
 ### `bank_03_813F` — the position-staging copy (misleading at first glance, actually correct)
 
@@ -211,35 +222,61 @@ missing spawn below.
 
 `ACD9` runs unconditionally every sim-mode frame (called from `bank_01_9284`). It is **NOT** a
 one-time init despite superficially looking like one — real hardware ALSO rebuilds the entire
-decoration-OAM table from scratch every single frame (confirmed via oracle: `$0380-$047F` gets
+decoration-OAM table from scratch every single frame (confirmed via oracle: `$0380-$057F` gets
 writes every frame on real HW too, just with *stable* output since nothing moves). This is standard
 SNES practice — don't try to "fix" it into a one-shot.
 
 Per frame, `ACD9`:
-1. **Resets the destination cursor** `D:$0098 = 0` and hide-fills the OAM output range with
-   `Y=$E0` (off-screen sentinel) via a `PHA ×16` idiom.
-2. **Scans object candidates** in (at least) two separate segments — `L_ACEF` (X starts `$6A0`,
-   stride `$12`=18, fixed count `$30`=48 iterations) and `L_AD71` (X starts `$0A00`) — each testing
-   `[DB:$0010+X]` bit `$8000`; **bit SET = skip (inactive)**, bit CLEAR = active → calls `AC70` then
-   `ADAD` for that object.
-3. For each active object, **`ADAD`** re-derives the destination OAM write position from `D:$0098`
-   (loaded once at its own entry, into `X`), computes screen position via `$0014`/`$0016` scratch
-   (`source_word - D:$0094` camera-relative subtraction), and runs an inner tile sub-loop:
-   `INX ×4` (advances the dest cursor by 4 = one OAM record), `CPX #$0200` exit check, `DEC D:$000E`
-   (the per-object tile counter) as the other exit condition, looping back through `L_ADCC`. On
-   normal exit (`L_AE6B`) it **saves the advanced `X` back to `D:$0098`** so the next object's call
-   continues from where this one left off — this hand-off is correct and was extensively
-   lldb-verified (2026-07-01) to chain properly across objects (`$00→$10→$14→$3C→$54...`).
+1. **Initializes the shared destination state:** low-table cursor `$98=0`, high-table cursor
+   `$9A=$0580`, high-table mask `$9C=1`. It hide-fills the full 512-byte low table
+   `$0380-$057F` with `(x=$00,y=$E0)` words; the packed high table is maintained by the emitters.
+2. **Fixed/overlay scan:** origin `$94=$FFF0`, `$96=$FFEE`; set attribute bias `$8F|=$1000`;
+   scan 48 `$12`-byte records from `$06A0` to `$09FF`. Record `+10 & $8000` skips the entry;
+   otherwise call `$01:AC70`, then `$01:ADAD`. These coordinates are camera-independent and
+   must remain on the authentic screen in a widescreen implementation.
+3. **World scan:** origin `$94=$22-$10`, `$96=$24-$10`; clear `$8F&=~$1000`; scan 44
+   `$26`-byte records from `$0A00` (reduced to one record while `$7F:9754 != 0`).
+   Record `+10 & $C000` skips the entry. Byte `+25` is a delay/timer gate and is decremented
+   when nonzero. `$7F:9752 & 2` selects alternate emitter `$01:AE6F`; otherwise it calls
+   `$01:ADAD`.
+4. **Leaf emission:** `ADAD`/`AE6F` load the frame pointer from record `+08`; the first byte,
+   not a live-record field, is the tile count. Each following five-byte part supplies flags/size,
+   signed X/Y offsets, and the tile/attribute word. Accepted parts advance the low-table cursor
+   four bytes, pack x-high and size into `$0580+`, and stop at `$0200`. Rejected parts park
+   `Y=$E0` in the current slot without advancing it. On return the emitter saves the advanced
+   cursor to `$98`, so all scan segments share one allocation stream. This hand-off was
+   lldb-verified (`$00→$10→$14→$3C→$54...`).
+
+`ADAD` uses the frame word unchanged except for OR-ing `$8F`. `AE6F` applies
+`(attr & $F1FF) | $0600 | $8F`; this is an alternate attribute/palette path.
+The selection bit is known, but the gameplay meaning should remain unnamed until
+it is correlated with a captured event.
+
+For a decompilation, keep the emitter as a pure composition function with an
+explicit OAM allocator. Its native geometry is:
+
+- base X/Y = `record(+0A/+0C) - origin($94/$96)`;
+- component offsets are sign-extended for byte values `$81-$FF`; `$80` follows
+  the ROM's special non-negative comparison path and must not be simplified to
+  ordinary `int8_t` without proving equivalence;
+- horizontal biased coordinate must be `< $0110`; accepted x is stored minus 16;
+- vertical biased coordinate must be `< $00F0`; accepted y is stored minus 17;
+- component flag bit 0 becomes the OAM size bit, while x bit 8 is separately
+  packed into the high table.
+
+The natural widescreen seam is therefore the horizontal predicate in `ADAD` and
+`AE6F`, gated to the world-record scan (`record >= $0A00`). The fixed scan must
+retain the authentic predicate so fixed overlays do not leak into the margins.
 
 **The OAM-flood bug mechanism** (found 2026-07-01, root cause is upstream — see next section): if an
-object's `+0E` tile-count field is corrupt/garbage (in the traced case, `$00D8`=216 instead of a
-sane `$0004`), `ADAD`'s inner loop iterates 216 times instead of ~4, flooding ~36 OAM slots with a
+object has a null/bad frame pointer at `+08`, the first byte read at that address becomes a bogus
+definition count (in the traced case `$D8`=216 instead of a sane `$04`). `ADAD` then floods OAM with a
 repeating garbage pattern (`X=77,Y=44,tile=$55` — coincidentally the Town Hall's own position/tile)
 before hitting its `CPX #$0200` bound. This LOOKS like a cursor-collision or codegen bug (multiple
 "different" objects appear to write the same slots) but isn't — it's one object's own loop running
 far too long, stomping everything downstream of it in that frame's build. **If you see a destination
 address get many rapid, differently-valued writes within one object's processing, check that
-object's own `+0E`/`+08` fields before suspecting the loop/cursor logic.**
+object's `+08` frame pointer and its pointed-to count byte before suspecting the loop/cursor logic.**
 
 ### Root cause found: a whole spawn cohort is missing, not a single field
 
@@ -706,6 +743,16 @@ game's own sim→act transition — sets `$1B`=region, `$1A`=act, `$FB|=0x80` �
 full fade + level-load + switch itself. Trigger from the intro (`$18==00`, which works), bypassing
 the broken post-act sim cascade. Observed: Fillmore act 1 entry = `$1B=01,$1A=01,$FB=80` (f=994) →
 `$18` flips `00→01` (f=997) → act live (f=1004).
+
+**Fidelity limit (2026-07-12):** the current test workflow reaches Fillmore
+act 1 before pressing F6, producing an action→action request. Only the three
+destination/request bytes are staged; this transition shape has not been
+observed in natural progression and may inherit action timing/object state.
+The warp now logs its source `$18/$19` and warns. It remains useful for visual
+coverage, but timing anomalies require an authentic or pillarboxed A/B repro.
+
+| Addr | Meaning |
+|---|---|
 | `$1D` | player HP |
 | `$E6`/`$E7` | action-stage timer (BCD) |
 | `$0088`/`$0089` | game-frame counter (16-bit) |
@@ -754,42 +801,152 @@ The most common in-level crash/freeze class (§7.6) comes from this system, so i
   via the nested `$1E` dispatch (`$8664`/`$868F`). These form chains. `find_handler_chain.py
   --all-yields` (§5) closes the whole class. A miss on one of these (`->… from 00868f`) leaks m=0 →
   `B127` misdecode → `B90D` crash.
+- **Primary-field `$12` yields** use the same idea with a different destination. Helpers `$8623`,
+  `$86FA`, and `$A66A` read their caller's pushed return address and store the next instruction in
+  object field `$12`; that post-JSR instruction is therefore a next-frame MAIN-handler entry.
+  `$A66A` was found from Bloodpool act 2's moving-platform handlers (`$B990/$B9BC`). The handler
+  finder detects this instruction shape across all bank-0 ROM JSR targets rather than relying on
+  a hard-coded helper-address list.
 
 ### Per-level handler tables + spawn dispatcher
-- Spawn dispatcher **`$9557`** reads game-mode `$18` (act index) → indexes the 8-pointer list at
-  **`$95DD`** → that act's **handler table**:
+- Spawn dispatcher **`$9557`** reads game-mode `$18` (region index) → indexes the 8-pointer list at
+  **`$95DD`** → that region's **handler table**:
 
-  | act table | `$96AF` | `$A8F6` | `$B449` | `$C11E` | `$CD9B` | `$D928` | `$E722` | `$F39A` |
+  | `$18` index | `$00` | `$01` | `$02` | `$03` | `$04` | `$05` | `$06` | `$07` |
   |---|---|---|---|---|---|---|---|---|
-  | (Fillmore = `$A8F6`) |
+  | table | `$96AF` | `$A8F6` | `$B449` | `$C11E` | `$CD9B` | `$D928` | `$E722` | `$F39A` |
 
-- Each table is indexed by **object type** → a **record base `B`**. The dispatcher (`$95ED`) then:
+  `$01-$06` are the six kingdom action regions, each with acts 1 and 2. `$07` is
+  **Death Heim**, a distinct no-act final action flow: it teleports through the six
+  kingdoms' act-2 boss encounters as a boss rush, then transitions to the final boss.
+  This game structure was user-confirmed on 2026-07-12; an instrumented `$18=$07`
+  capture is still wanted to map its changing `$19` sub-flow values. `$00` is a
+  separate dispatcher case, not Fillmore.
+
+  `$19` chooses the act/map/sub-flow but does **not** participate in the `$95DD`
+  table lookup. Therefore walking every type in one `$18` table is a conservative
+  superset audit for both ordinary acts. It cannot enumerate handler roots installed
+  later by object state, which is why each act still needs a runtime ring/snapshot pass.
+
+- Each table is indexed by **object type** → a **record base `B`** (or, for a few special
+  entries, a direct code pointer). The dispatcher (`$95ED`) then:
   copies spawn X/Y (`$34/$36`→`$02/$04`); reads record params (`rec[0]→$16`, `rec[2]→$18/$28`,
   `rec[4]→$30`, **`rec[0x0A]→$14`**); and sets the handler:
-  - normal object: **`$12 = B + 0x0C`** (always an init `JSR`); after the one-time init the
-    steady-state handler is **`B + 0x0F`**.
+  - normal object: **`$12 = B + 0x0C`**, the exact primary-handler root. When that root starts
+    with `JSR`/`JSL`, the instruction at **`B + 0x0F`** is also a valid post-init dispatch entry;
+    many records instead begin their ordinary handler logic directly at `B+0x0C`.
   - special (`field $38 == $FF`): `$12 = B` directly.
+- The tables have no stored count. Their pointed-to payload begins immediately after the pointer
+  array, so the smallest forward target encountered while walking supplies the end bound. A zero
+  pointer is an unused **type slot**, not a terminator. Bloodpool table `$B449` proves this layout:
+  slots `$19-$1D` are zero, then slots `$1E-$27` contain ten valid records. A decompilation should
+  preserve those sparse type indices rather than compacting the table.
 
 ### Why handlers go unconverted (the crash class)
-- All 209 `B+0x0C` init handlers are statically reachable from the tables → converted.
-- **`B+0x0F`** (steady state) and **field-`$14`** secondary handlers are reached *only* by runtime
-  dispatch → the static decoder never converts them → dispatch miss → m-leak/misdecode → crash.
+- Exact **`B+0x0C`**, post-call **`B+0x0F`**, direct-`B`, and **field-`$14`** secondary handlers
+  are installed through data/runtime dispatch rather than ordinary static control-flow edges.
+  Any entry the static decoder does not happen to reach remains unconverted. Runtime dispatch to
+  such an entry then misses → m-leak/misdecode → freeze or crash.
 - The computed values (e.g. `$AC11 = $AC0E+3`) **never appear as literal bytes** in the ROM, so
   byte/pointer scans can't find them — only the table-derivation or a runtime snapshot can.
 
 ### Deriving them (the anti-whack-a-mole)
-- `tools/find_handler_chain.py --tables` walks all 8 tables, emits each JSR-gated `B+0x0F` and
-  follows its `JSR $8657` chains → `func` lines for every unconverted handler, all acts at once.
+- `tools/find_handler_chain.py --tables` walks all 8 bounded, potentially sparse tables; seeds
+  every exact descriptor root `B+0x0C`, JSR/JSL-gated `B+0x0F`, and direct-code `B`, then follows
+  `$1E`- and `$12`-yield chains → `func` lines for every unconverted handler, all regions at once.
 - **Field-`$14` secondary handlers** (`rec[0x0A]`, e.g. the bridge's `$ACEA`) are *polymorphic* — a
   handler for some object types, plain data (counter/coord/velocity) for others — so they can't be
   derived by value. `find_handler_chain.py --field14` handles them via the data signature instead
   (drop consecutive-address clusters + require handler-shaped coherent decode); it deliberately
   skips ambiguous (`COP`/`BNE`/`BRK`-led) values, which fall back to runtime discovery.
 
-**Coverage:** the three modes together — `--tables` (`B+0x0C/+0x0F`), `--all-yields` (the three
-yield helpers' continuations), `--field14` — cover all three handler-reach mechanisms. The only
-thing left for the per-occurrence loop (F2 snapshot → object-table scan → `find_handler_chain.py
-<seed>`) is a value the `--field14` heuristic conservatively skipped.
+**Coverage boundary:** the three modes together — `--tables` (`B+0x0C/+0x0F`), `--all-yields`
+(every detected `$1E`/`$12` yield continuation), and `--field14` — close the statically
+recognizable forms. They do **not** prove that every runtime-installed root value is enumerable.
+Bloodpool act 2 proved the residual class: `runs/20260712-193357/dump_dispatch_log.json` recorded
+`$B990/$B9BC/$BAF1/$BB84/$BCC1/$BCCF`, from object-loop source `$8965`, as `found:0` every frame.
+The first two are `$A66A` continuations and now appear in `--all-yields`; the other four require
+runtime roots. Feeding all six to `find_handler_chain.py` expands the complete 12-entry web
+(`B990 B9BC BAF1 BB08 BB16 BB84 BB93 BB99 BB9F BBA5 BCC1 BCCF`). Therefore the final closure
+pass remains: inspect `dump_dispatch_log.json` for non-benign `found:0`, or scan ≥64 object slots
+in an F2 snapshot. `find_handler_chain.py --snapshot <wram.bin> […]` automates the latter and
+fixpoints all captures together. Snapshot decoding must distinguish `$12` (exact handler value;
+the `$895C` dispatcher DECs before PHA/RTS) from `$1E` (stored JSR return address = target-1;
+the `$8664` nested dispatcher PHA/RTSes without a DEC, so seed `$1E+1`).
+
+**Bloodpool act 2 full-run extension (2026-07-12):** three F2 captures from
+`runs/20260712-200334/` supplied later-room roots `$BD82` (gf1876), `$BD36/$BBB4` (gf6013),
+and boss root `$BE0B` (gf9188). The exit ring independently records `$BE0B found:0` from `$8965`
+on all 204 retained boss frames. Their combined fixpoint is 12 entries:
+`BBB4 BBDB BBE9 BBFD BC66 BD36 BD45 BD56 BD6A BD82 BE0B BE7E`.
+The later slow-window F9 in `runs/20260712-202151/` exposed a still-later live root `$BD90`;
+its independently computed closure is `BD90 BD9F BDA5 BDAE`. This is why coverage remains a
+runtime census even after several well-spaced snapshots: object state can install a root that
+no earlier saved instant contained.
+
+**Bloodpool completion + sparse-table correction (2026-07-12):** the next regenerated build
+restored every later enemy and the boss; one enemy type remained present/killable but inert in
+`runs/20260712-205842/`. F2 snapshot `snap_00_gf6378` holds two live objects whose exact `$12`
+root is `$BB25` (record `$BB19`, table `$B449` type `$21`). `$BB25` performs offscreen gating,
+movement/proximity checks, and animation before yielding, so skipping it precisely explains an
+inert but still drawable/collidable enemy. The old table walker stopped at `$B449`'s first zero
+slot and never reached this sparse tail. Correct bounded sparse walking finds `$BB25` and, by
+seeding exact already-converted roots before following yields, 24 more safe gaps across all regions.
+For Stage 3 (`$C11E`) the static batch is `$C48A/$C653/$C90E`; runtime captures are still needed
+for roots installed later by state logic rather than directly by the table.
+
+The first Stage-3 act-1 exit capture (`runs/20260712-211830/`, `$18=03`) immediately supplies that
+runtime-only class. Slots 34-39 contain exact `$12` roots `$C7FA/$C7FF/$C804` (two objects per
+root), and the retained dispatch ring records 94 `found:0` calls to each from `$8965`. `$C804`
+executes `JSR $8657`, so `$C80A` is its next-frame nested continuation. These four entries are
+queued with the static batch. Their object identity is deliberately left unnamed until correlated
+with the playthrough report; the handler/state evidence itself is exact.
+
+**Remaining-region static preflight (2026-07-12):** the corrected table, field-`$14`, literal
+`STA $12`, and yield scans cover every statically recognizable root for regions `$04-$07`:
+
+| region | table shape | table/yield entries awaiting generation |
+|---|---|---|
+| `$04` Aitos | `$CD9B`: 31 slots, no holes; 24 descriptors + 7 direct roots | `C653 CF11 CFBD D24B` |
+| `$05` Marahna | `$D928`: 38 slots, one hole; 32 descriptors + 5 direct roots | `E44A E5DB E5DE E612` |
+| `$06` Northwall | `$E722`: 30 slots, no holes; 22 descriptors + 8 direct roots | `ECA5 ECED EE5A EEC1` |
+| `$07` Death Heim | `$F39A`: 23 slots, one hole; 18 descriptors + 4 direct roots | `E5DE F43C F44C F454 F5AF F609 F61C F74E F75D` |
+
+Death Heim has 13 additional primary-handler continuations outside the direct table closure:
+`F674 F684 F69C F6A7 F6B2 FA5F FAB3 FAD7 FB07 FB3A FB4C FB5E FB8A`. Each is immediately
+after `JSR $86FA`, which stores its caller return into object field `$12`; they are exact
+next-frame dispatch entries and are queued in `bank00.cfg`. The same final global pass found the
+analogous Stage-1 `$A66A` continuation `$AD35`. After including them, `--tables`, `--all-yields`,
+`--field14`, and direct literal-`$12` closures have no unconfigured results. This is static
+closure, not runtime proof: per-act playthroughs can still expose computed/state-table roots.
+
+### Action OBJ asset loading (decompilation boundary)
+
+Action objects select compositions, but do not allocate enemy sheets dynamically.
+The level-entry loader `$02:BC9E` establishes a common resident atlas:
+
+- set VMADD `$2000`, copy 4,096 words from ROM `$07:8000-$07:9FFF` to
+  VRAM `$2000-$2FFF`;
+- copy 96 palette bytes from `$07:D040-$07:D09F` to CGRAM `$C0-$EF`;
+- use magic selector `$02AC` with the bank-6 table/source rooted at `$06:A400`
+  and upload 128 words to reserved OBJ target `$2D40`.
+
+A later effect path at `$00:96C3-$96F5` is gated by object flag `$30 & $0040`
+and descriptor-idle `$D5==0`. It derives a bank-6 source from object `$38`
+(`$A000 + ((selector << 8) / 2)` in the ROM's word-address arithmetic), arms
+descriptor slot 0 for VRAM `$2D80`, size `$0080`, and then advances paired
+object handlers/states. This explains the observed slot-0 DMA: it replaces a
+small reserved magic/effect area, not a whole enemy atlas.
+
+For a decompilation, preserve four identities separately:
+
+1. region/object handler identity (`$18` → `$95DD` table → object record);
+2. sprite composition identity (object bank/pointer → seven-byte definitions);
+3. resident action atlas and palette identity (`$07:8000`, `$07:D040`);
+4. dynamic magic/effect selector (`$02AC`/object `$38` → `$2D40/$2D80`).
+
+Collapsing these into an OAM-level “sprite id” loses the seam needed for asset
+replacement and makes dynamic effect uploads look like object-sheet churn.
 
 ---
 
@@ -815,7 +972,7 @@ promote a row to a real address once confirmed (a wrong cheat address is worse t
 |---|---|---|---|---|
 | Player HP (current) | `$1D` | infinite health (pin), god-mode | 🅥 | **WIRED** — `AR_INF_HP=1` (high-water auto-pin) or `=<n>`; per-frame in `ActRaiser_ApplyCheats` (actraiser_rtl.c). |
 | Player max HP / bar size | TBD | bigger/smaller health bar | 🅥/🅒 | find the HP-init constant (new-game / stage-entry sets `$1D` to max) — `AR_WATCHOBJ`/`AR_WATCH16` on `$1D` at stage start; the writer's immediate is max. |
-| Invincibility frames (i-frames) | i-frame timer `$08C6` (+$26); **invuln flag = `$08D0` bit `0x2000`** (the gate) | **no-knockback / invuln** (speedrun "ignore hits") | 🅥 | **WIRED** — `AR_NO_KNOCKBACK=1` pins timer `$08C6`=0xFF AND sets flag `$08D0\|=0x2000` each frame -> invuln from frame ONE. (Hit-check gates on the FLAG; the game sets it on a hit and clears it when the timer hits 0 — so pin timer + set flag = permanent, no first-hit needed. `=26` alone only worked after one hit.) On hit: handler -> `$9C64` (hurt), knockback into `$08A6/$08A8`. |
+| Invincibility frames (i-frames) | i-frame timer `$08C6` (+$26); **invuln flag = `$08D0` bit `0x2000`** (the gate) | **no-knockback / invuln** (speedrun "ignore hits") | 🅥 | **WIRED** — `AR_NO_KNOCKBACK=1` pins timer `$08C6`=0xFF AND sets flag `$08D0\|=0x2000` each frame -> invuln from frame ONE. (Hit-check gates on the FLAG; the game sets it on a hit and clears it when the timer hits 0 — so pin timer + set flag = permanent, no first-hit needed. `=26` alone only worked after one hit.) On hit: handler -> `$9C64` (hurt), knockback into `$08A6/$08A8`. **Confirmed 2026-07-12:** this pinned authentic invulnerability state also suppresses water drag; disable it for terrain/movement-physics validation and timing-sensitive recordings. |
 | Player lives | TBD (RAM or SRAM) | infinite / set N lives | 🅥 | watch the lives display value, `AR_WATCH16` on it; the death routine decrements it. |
 | Player sword damage (dealt) | routine that subtracts enemy HP | one-hit kills, weak sword | 🅒 | `AR_WATCHOBJ` on an enemy slot's HP field while you hit it → the writer is the damage routine; the amount is its operand. |
 | Player sword length / reach | TBD (hitbox/collision calc) | double reach | 🅒 | the sword-vs-enemy hit test — the attack hitbox extent (a constant offset from player X). Hardest (geometry); find via the attack-frame collision routine. |
@@ -835,7 +992,8 @@ promote a row to a real address once confirmed (a wrong cheat address is worse t
 > | +$06 | `$08A6` | **X velocity** (signed; knockback fallback target) |
 > | +$08 | `$08A8` | **Y velocity** (signed, neg=up; gravity +1/frame — moonjump target) |
 > | +$12 | `$08B2` | handler ptr (state machine: `$9832` ground, `$98D9`/`$993F` jump, `$9884` walk, `$9A07`, `$9C64` **hurt**) |
-> | +$24 | `$08C4` | frame/anim counter |
+> | +$1C | `$08BC` | **Crest** walking-cycle phase; increments while beginning movement (TAS terminology) |
+> | +$24 | `$08C4` | **Boost** walking-speed countdown; cycles with Crest and can temporarily produce 3 px/frame movement |
 > | +$26 | `$08C6` | **i-frame timer** (set 0x20 on hit, counts down) |
 > | +$30 | `$08D0` | flags — bit `0x2000` = invuln (set during i-frames) |
 >
@@ -870,8 +1028,9 @@ renamed in the cfg (see below); this is the candidate list.
 | `$02:A88D` | **save-data validity checksum.** Computes a 16-bit ADD-sum and a 16-bit XOR-sum over SRAM `$700000-$701FEB` (calls `$02:84F3` to do the accumulation), compares against stored expected values at `$701FEC`/`$701FEE`. Returns pass/fail via carry (`CLC`=pass, `SEC`=fail). Confirmed correct 2026-07-01 (`AR_SAVECHECK`) — passes cleanly against a real mid-game save. |
 | `$02:84F3` | **checksum accumulator loop** — `LDX #0; loop: LDA $700000,X; ADC $14; STA $14; EOR $16; STA $16; INX INX; CPX #$1FEC; BNE loop`. `$14`/`$16` are its scratch accumulator — see the DP-scratch-reuse gotcha in `DEBUG.md` §0. Confirmed byte-identical across its `M0X0`/`M1X0` width variants (not a misdecode candidate despite an early `mxhist` flag). |
 | `$02:BF60` | **dialog/message-box draw dispatcher.** Takes a message-type ID via `A` (stored into the SAME `$14` DP scratch the checksum uses), branches on ID (`CMP #0/1/6/8/9/$B`) to different message-rendering sub-routines. Called by both `$02:A622` branches with different message sets. |
-| `$01:ACD9` | **per-frame decoration-OAM rebuild driver** (bank 1, sim mode). Runs unconditionally every frame (called from `$01:9284`); resets the `D:$0098` dest cursor + hide-fills `$0380-$047F`, then scans object candidates in ≥2 segments testing `[DB:$0010+X]` bit `$8000` (active/inactive), calling `AC70`+`ADAD` per active object. See "Sim-mode object/sprite spawn & OAM-build system" above for the full mechanism. |
-| `$01:ADAD` | **per-object OAM tile writer**, called from `ACD9`. Loads the dest cursor from `D:$0098`, writes one OAM record per tile (`INX ×4` per tile, `DEC D:$000E` = per-object tile counter as the loop bound), saves the advanced cursor back to `D:$0098` on exit (`L_AE6B`). Cursor hand-off verified correct via live lldb (2026-07-01) — do not re-suspect this without new evidence. |
+| `$01:ACD9` | **per-frame sim OAM rebuild driver** (called from `$01:9284`). Hide-fills `$0380-$057F`, initializes `$98/$9A/$9C`, scans 48 fixed `$12`-byte records at `$06A0` and 44 world `$26`-byte records at `$0A00`, then selects `ADAD` or `AE6F`. See the detailed sim OAM section above. |
+| `$01:ADAD` | **normal per-record composition emitter.** Count comes from byte 0 of the frame definition at record `+08`; each five-byte part writes one OAM component. Saves the advanced shared cursor to `$98`; cursor hand-off is verified correct. |
+| `$01:AE6F` | **alternate sim composition emitter.** Same geometry and OAM allocation as `ADAD`, but rewrites attributes as `(attr & $F1FF) | $0600 | $8F`; selected for world records when `$7F:9752 & 2`. |
 | `$01:AC70` | called by `ACD9` immediately before `ADAD` per active object; body is just `PHB;PHY;REP;JSL bank_00_8519` (a `PHA;PLB` DB-set idiom) + fallthrough — does NOT touch `$0098`/`$0094`/`$0096`/`$0380` (checked). Its role beyond the DB-set is not yet traced. |
 | `$00:8519` | trivial `PHP;SEP #$20;PHA;PLB;PLP;RTL` — the classic "`PLB` from A's low byte" idiom for setting the Data Bank register. Not a meaningful gate/hook; appears at several call sites across banks 0/1/3 wherever DB needs setting to a literal. |
 | `$03:813F` | **position-staging copy** for sim-mode object records — see "Sim-mode object/sprite spawn" above. Copies `$130` bytes from a `$7F`-bank staging buffer (selected via `$7F:7BFB` → ROM table `$03:8111`) into the live object table at `$0B30,Y`. The odd-offset 16-bit writes this produces are a CORRECT overlapping-byte-copy idiom, verified against ROM disasm — not a bug. Called from `$01:AA56`. |

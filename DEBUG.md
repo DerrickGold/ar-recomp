@@ -301,12 +301,12 @@ those cases.
 | Symptom | First tool(s) | Then |
 |---|---|---|
 | **Hang / freeze / watchdog SIGSEGV** | `saves/dump_state.txt` (auto-written by watchdog: call stack + **block-history ring** with PC/m/X) | `AR_MXHIST=1` to check for a misdecode leak; trace the looping block |
-| **Garbage / character disappears / stuck-but-animating / hard crash on an object** | `AR_MXHIST=1` (is it a misdecode? names the leak boundary) | if leak → either `AR_DISPMISSALL=1 \| grep -v 'from 00896f'`, **or** take an **F2 full-snapshot** (§9) and scan the object table for an active slot whose `$12` handler isn't a converted `bank_00_*` fn → feed it to `find_handler_chain.py` (§5) |
+| **Garbage / character disappears / stuck-but-animating / hard crash on an object** | On exit/F9 inspect `dump_dispatch_log.json` for non-benign `found:0` first (the ring is complete even when default stderr is silent); then `AR_MXHIST=1` if a misdecode/leak remains possible | feed live missing roots to `find_handler_chain.py` (§5); if the ring did not cover the onset, use `AR_DISPMISSALL=1 \| grep -v 'from 00896f'` or take an **F2 full-snapshot** (§9) and scan ≥64 object slots for an active `$12` with no converted `bank_00_*` fn |
 | **"Who corrupted this byte/value?"** | `AR_WATCHOBJ=<hexaddr>` (writes to an object slot) or `AR_WATCH16=<hexval>` (a specific 16-bit write) — both log the **writing function + stack + frame** | — |
 | **Missing object / event / spawn (logic)** | First check it's not an **unconverted spawn-data handler** (§11): F2 snapshot → object-table scan (**scan ≥64 slots, not 24**) for an active slot with an un-converted `$12`. Else differential oracle: `diff_seq.py` + oracle-only analysis (**must load SRAM** — see §6) | trace the spawn trigger / gate condition |
 | **Rendering wrong (no text, no HBlank, missing BG, black screen)** | `AR_PPULOG=1` (bgmode, brightness, forced-blank, layer enables, HDMAEN) + **oracle screenshots** (`AR_SHOT_AT_GF` vs `SNESREF_SHOT_AT_GF`) | audit the PPU/DMA runtime (`ActRaiserDrawPpuFrame`); WRAM oracle is **blind** to VRAM |
 | **Missing/extra sound or music** | check **BRK/COP syscall hooks** (§7) — `$035B`=SFX (BRK), `$035A`=music/event (COP) | `AR_WATCH16` on the request port |
-| **Game runs at exactly 1/2 or 1/3 speed in ONE mode/screen (smooth elsewhere, audio fine)** | This is the **pacing/yield-multiplication class**, not host performance — smooth audio alone proves the host loop is healthy. Confirm + count in one shot: quit (or F9) **while the mode is slow**, then in the dump's block ring **count `02ABF0` (NMI-handler) entries per game-loop iteration** — each entry = one host-frame yield; N entries per iteration = 1/N speed, and the ring block *preceding* each entry names the yield site. Cross-check with any per-frame `[wobj]`/`[frame]` log: updates at delta=N host frames. Known causes so far: a non-HLE'd `$4210` wait yielding per read (§7 the `$9284` fix), and spin-detector false pairing on a twice-per-frame ack helper (§7.12 `$93CB`) | `AR_PERF=1` separates the two classes numerically (fps<60 = host-bound; fps=60 + crawling = pacing). `env AR_FRAMELOG=1 AR_VBLOG=1` names every yield's callsite/block live. NOTE: static `$4210` scans must include the long form `AF 10 42 00`, not just `AD 10 42` |
+| **Game runs at exactly 1/2 or 1/3 speed in ONE mode/screen (smooth elsewhere, audio fine)** | This is usually the **pacing/yield-multiplication class**, not host performance. Confirm + count in one shot: quit (or F9) **while the mode is slow**, then in the dump's block ring **count `02ABF0` (NMI-handler) entries per game-loop iteration** — each entry = one host-frame yield; N entries per iteration = 1/N speed, and the ring block *preceding* each entry names the yield site. Cross-check with any per-frame `[wobj]`/`[frame]` log: updates at delta=N host frames. Known causes so far: a non-HLE'd `$4210` wait yielding per read (§7 the `$9284` fix), and spin-detector false pairing on a twice-per-frame ack helper (§7.12 `$93CB`) | `AR_PERF=1` separates the two classes numerically (fps<60 = host-bound; fps=60 + crawling = pacing). Its `run-ms` covers game execution; `[draw-perf]` covers `RtlDrawPpuFrame`, including host widescreen refresh. A low `run-ms` therefore does not by itself rule out draw-side load. `env AR_FRAMELOG=1 AR_VBLOG=1` names every yield's callsite/block live. NOTE: static `$4210` scans must include the long form `AF 10 42 00`, not just `AD 10 42` |
 | **Suspect a single opcode is wrong** | `tools/opcode_diff.py` (Tom Harte differential, §5) | — |
 | **Per-frame game-state progression** | `AR_FRAMELOG=1` (callsite, work delta, mode `$18/$19`, timer, HP) | `AR_OBJLOG=1` for the object table |
 | **Is the CPU layer even the problem?** | `AR_MXCHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
@@ -638,10 +638,12 @@ bug, §10):
 
 All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 
-- **`AR_FRAMELOG=1`** — `[frame] f=N push+DELTA callsite=BB:PPPP A=.. m=.. $18 $19 $1A $1B $F4 $F5
-  $FB time$E6 HP$1D joy=.. (raw=..)`. A steady push-delta with the timer ticking = engine running;
+- **`AR_FRAMELOG=1`** — `[frame] f=N gf=N push+DELTA callsite=BB:PPPP … joy=…
+  pos=X,Y d=DX,DY vel=VX,VY h=… state=… boost=… crest=…`. A steady push-delta with the timer ticking = engine running;
   tiny delta = spinning on a wait; frozen timer with large delta = a pause/gate. The callsite is
-  the main loop's current vblank-wait point. `joy`/`raw` (added 2026-07-01) is the
+  the main loop's current vblank-wait point. `f` vs `gf` exposes extra yields; `joy` vs `d`
+  exposes input-to-movement loss; Boost `$08C4` and Crest `$08BC` expose the authentic walking
+  speed cycle (documented by ActRaiser TAS research). `joy`/`raw` is the
   `SwapInputBits`'d / raw joypad word — pair with a branch probe (§10 legacy inventory) to see whether input is reaching a
   stuck code path at all.
 - **`AR_OBJLOG=1`** — action-stage object table: game-frame, timer, HP, active object count, and
@@ -673,9 +675,43 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   renderer with stale/wrapped margins. Unset/nonzero selects Stage B: isolated
   true-content BG1/BG2 margin refresh. Both modes retain the original recompiled
   BG streamers and OAM builder.
-- **`AR_WS_BGDBG=1`** — log Stage-B strip counts, accepted margins, and any
-  rejected record cursor/VRAM target. Every line ends in `(state restored)`;
-  rejects are safety stops and should be investigated, never bypassed.
+- **`AR_WS_BG2_MIRROR=0`** — for action sections whose BG2 declares only a
+  256px width (`$32<$0200`), disable the default renderer-side mirror fill and
+  restore the proven centered BG2 clamp. The default reflects only BG2's
+  authentic rendered edge pixels into the margins; it never copies BG1 or OBJ.
+  This is a startup-cached switch—set it before launching.
+- **`AR_WS_BGDBG=1`** — log Stage-B column-strip and vertical-row counts,
+  accepted margins, and any rejected record cursor/VRAM target. A fast vertical
+  traversal should produce `rows=N/N` at each 16px camera crossing; long gaps
+  while `$24` advances identify a stale-row cadence regression. Every line ends
+  in `(state restored)`; rejects are safety stops and should be investigated,
+  never bypassed.
+- **`AR_WS_SPRITES=0`** — after the Stage-C regeneration, keep the isolated
+  `$8D68` port on its authentic horizontal window for the fidelity gate. Unset/
+  nonzero widens only per-sprite emission; `$8C98` activation stays original.
+- **`AR_WS_SPRDBG=1`** — log every OAM definition emitted outside the authentic
+  x range, including owner object, definition address, coordinate, and tile.
+  Use with a short reproduction; it can be verbose.
+- **`AR_WS_ACTDBG=1`** — read-only Stage-D probe for object slots that intersect
+  a live side margin but remain outside `$8C98`'s authentic activation window.
+  Logs enter/exit and handler, `$30`, type, and sprite-definition changes; it
+  does not itself alter activation, object logic, graphics loading, or OAM.
+  With Stage D2 enabled it additionally logs exact `[ws-activation-state]`
+  `$0400` transitions, including authentic/draw/activation decisions.
+- **`AR_WS_MARGIN_OBJECTS=0`** — keep the validated Stage-D1 `$8C98` port on
+  authentic draw coverage. Unset/nonzero draws initialized margin-only objects
+  using the live margins. This draw decision is independent of the following
+  `$0400` activation switch.
+- **`AR_WS_MARGIN_ACTIVATION=0`** — restore the authentic `$0400` activation
+  boundary. Stage D2 is now default-on after direct Fillmore validation and
+  uses live horizontal margins while retaining authentic vertical coverage
+  and status gates. D1 drawing remains independently controlled by the prior
+  flag.
+- **Town/sim sprite flags are not implemented yet.** The reserved names in the
+  widescreen task plan are `AR_WS_SIM_SPRITES` and `AR_WS_SIM_SPRDBG`; do not
+  expect them to work until the Phase-4 leaf-emitter task lands. The intended
+  seam is `$01:ADAD/$01:AE6F` for `$0A00+` world records only. `$06A0-$09FF`
+  fixed/overlay records must stay authentic.
 - **`AR_WS_HEADLESS=1`** — opt in to WIDE geometry under `AR_HEADLESS=1` (normally
   headless forces authentic 256-wide so the oracle/differential harness never sees a
   wide framebuffer). THE flag for headless widescreen visual-regression: replay +
@@ -708,11 +744,50 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
    is cleared to y=$E0 each frame, so non-$E0 = a real entry. 40/128 at a
    corrupted frame ruled exhaustion OUT for the missing-tree-tiles bug (which
    turned out to be the two-tier streaming gap, see widescreen-survey.md).
+   Also test both `NoSpriteLimits=0` and `=1`: those select the hardware
+   32-sprite/34-OBJ-tile per-scanline limits and are independent of the
+   128-entry table. Both shipped config files currently use `1`, so a default
+   developer run does not exercise authentic scanline pressure.
 7. **Framebuffer-gap hygiene**: anything that renders less than the full wide
    framebuffer (asymmetric margin clamps) must CLEAR the unrendered edge strips
    EVERY frame. Change-detection is not enough — a steady clamp never repaints,
    and ghosts of the previous mode linger at the edges (the "stale strip at the
    screen edge" bug class).
+8. **OAM-first sprite triage:** identify the expected component group in
+   `$0380-$057F` and its high bits in `$0580-$059F`. Missing components point
+   to activation/composition/limits; a complete OAM group with invisible
+   pixels points to PPU priority/windowing or OBJ character data. Only then
+   compare action OBJ VRAM. The regular atlas is `$2000-$2FFF`; dynamic
+   magic/effect replacements are confined to `$2D40-$2DBF`, armed through
+   `$D0-$D5` by `$00:96C3-$96F5`.
+
+### 4d. Cross-region and town capture matrix
+
+- Action: warps `0201/0202` through `0601/0602`, then one `0701` Death Heim
+  boss-rush/final-boss pass. Region 7 has no ordinary acts and no `0702` test;
+  record its `$19` changes as it teleports through the six act-2 boss arenas.
+  Capture stage start, mid-scroll, dense encounter, boss/effect, and transition
+  with both old horizontal edges exercised. On an anomaly, pair
+  `AR_WS_SPRDBG=1` with `AR_WS_ACTDBG=1`, full
+  F2 snapshots or `AR_VRAMDUMP_GF`, OAM counts, `$D0-$D5`, and both
+  `NoSpriteLimits` settings. The normal pass needs neither verbose flag.
+- **Warp fidelity caveat (2026-07-12):** F6 currently stages only the game's
+  destination bytes `$1B/$1A` and request `$FB|=$80`. Invoking it after
+  Fillmore act 1 has already begun is an action→action path not observed in
+  normal progression, so timing/object state may be inherited. The console now
+  records the source `$18/$19` and warns for this case. Treat movement speed or
+  core gameplay anomalies as warp suspects until reproduced naturally or with
+  `AR_WS_ACTION=0`; do not automatically attribute them to widescreen.
+- Town authentic baseline, before widening: replay `simdev.rec`,
+  `lairseal.rec`, and `auto_sim.rec` at left/center/right camera positions;
+  exercise dialogs, builders/people, lair sealing, rewards, and multi-actor
+  cutscenes. Open bug #17 (partial actors) must be captured in 256-wide
+  geometry so it cannot be mistaken for a new widescreen regression.
+- Town internal attribution: `$01:ACD9` scans fixed records `$06A0` stride
+  `$12` and world records `$0A00` stride `$26`; world `+08` is the frame
+  pointer, `+0A/+0C` position, `+10` status, `+25` delay. The pointed-to frame
+  starts with the component count. A bad count is usually a bad `+08` pointer,
+  not record `+0E` and not an OAM cursor reset.
 
 ---
 
@@ -831,6 +906,11 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   but is ALSO called natively by the reset-time APU bring-up (`JSR $9AC1` ×7 from
   `$02:98E0-990D`) — the first census marked it HLE'd-only and boot hung in its spin. Address
   containment proves nothing; only whole-routine `hle_func` coverage removes a site.
+  **Diagnostic-only follow-up (2026-07-12):** the `[4210-wedge]` counter itself originally
+  compared only the reader block PC. A legitimate once-per-frame ACK at `$00:8465` therefore
+  accumulated 4,096 calls across a long Bloodpool playthrough and printed a false wedge despite
+  never yielding. It now also requires block-ring adjacency (same index or +1), so only a true
+  tight re-read grows the counter. This did not change the static yield whitelist or pacing.
 
 - **`tools/opcode_diff.py`** — **Layer B**. Differential-tests the emitter's C output for each
   opcode against the Tom Harte SingleStepTests/65816 vectors (20k tests/opcode). Use when you
@@ -883,19 +963,29 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   resolve each, never allowlist.
 - **`tools/find_handler_chain.py`** — **object handler-chain finder** (the spawn-handler tool).
   Object state handlers are reached only via runtime dispatch (handler pointers from spawn data +
-  the `JSR $8657` coroutine-yield idiom), so the static decoder can't follow them → dispatch miss
+  `$1E`/`$12` coroutine-yield idioms), so the static decoder can't follow them → dispatch miss
   → crash/freeze (see §11). Given seed handler addresses it does a 65816 (m0,x0) fixpoint that
-  follows control flow **including `JSR $8657` yields** (continuation = site+3 = a new entry),
+  follows control flow including `$8657/$8668/$8669` field-`$1E` yields and instruction-shaped
+  field-`$12` yield helpers (`$8623/$86FA/$A66A`; continuation = site+3 = a new entry),
   collecting only true *dispatch* entries (seeds + yield-continuations, not internal branch/jump
   targets), and prints ready-to-paste `func bank_00_… entry_mx:0,0` lines for the unconverted ones.
   - `find_handler_chain.py AC11 AC41 …` — expand specific seeds (from a crash snapshot).
-  - `find_handler_chain.py --tables` — **comprehensive, all 8 acts**: derives every `recordBase+0x0F`
-    steady-state handler from the per-level tables (§11) + their chains. This is how the whole
-    game's object handlers were registered in one batch (the `bank00.cfg` "COMPREHENSIVE" block)
-    instead of crashing room-by-room. (BRK/COP are treated as continuing, not terminal.)
+  - `find_handler_chain.py --snapshot <wram.bin> […]` — derive live roots directly from the
+    first 64 `$06A0` object slots in one or more F2/exit WRAM dumps, then close all yield chains.
+    It handles the dispatch asymmetry correctly: field `$12` is the exact target, while field
+    `$1E` stores `target-1`, so the nested seed is `$1E+1` (e.g. snapshot value `$BB15` means
+    entry `$BB16`). Field `$14` is excluded here because it is polymorphic; use `--field14`.
+  - `find_handler_chain.py --tables` — **comprehensive, all 8 region tables**: bounded-walks each sparse
+    per-level table (§11), treating zero as an unused type slot rather than a terminator. It seeds
+    exact descriptor roots `recordBase+0x0C`, JSR/JSL post-init roots `recordBase+0x0F`, and direct
+    code-table roots, then closes their yield chains. This is how the game's object handlers are
+    registered in batches instead of crashing room-by-room. Bloodpool's `$B449` slots `$19-$1D`
+    are zero but `$1E-$27` are live; the old stop-on-zero walk skipped `$BB25`. (BRK/COP are
+    treated as continuing, not terminal.)
   - `find_handler_chain.py --all-yields` — **the yield-continuation closure**: seeds from *every*
-    converted handler and follows all three yield helpers (`JSR $8657`/`$8668`/`$8669`), collecting
-    every continuation that isn't itself an entry. Catches handlers reached via the **nested `$1E`
+    converted handler and follows all three field-`$1E` helpers plus every detected field-`$12`
+    helper, collecting every continuation that isn't itself an entry. Catches handlers reached via
+    the **nested `$1E`
     dispatch (`$868F`)** that `--tables` can't (e.g. `$ABE5`, whose miss leaked m=0 → `B127`
     misdecode → `B90D` SIGSEGV). All results are immediately preceded by a yield `JSR` = valid
     entries; the scan fixpoints over chains, so one batch closes the class.
@@ -905,8 +995,11 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
     the detector takes code-range `record[0x0A]` values, **drops consecutive-address clusters** (the
     data signature, e.g. `$8502-$8506`), requires a **handler-shaped + coherent decode**, and adds
     their yield chains. Conservative — it skips ambiguous (`COP`/`BNE`/`BRK`-led) values rather than
-    register data as code; those fall back to runtime discovery. This is the residual tail that
-    `--tables`/`--all-yields` can't reach (e.g. the bridge's original `$ACEA`).
+    register data as code; those fall back to runtime discovery. This is one residual tail that
+    `--tables`/`--all-yields` can't reach (e.g. the bridge's original `$ACEA`). Runtime-installed
+    roots are another: Bloodpool act 2's exit dispatch ring supplied six roots, whose fixpoint was
+    12 entries. Always inspect `dump_dispatch_log.json` for non-benign `found:0` before declaring
+    the static closure complete.
 - **`tools/rom_info.py`**, **`tools/lzss_decompress.py`** — ROM header / LZSS data helpers.
 
 > **Static can't find everything.** M/X-tracking bugs are self-consistent in the emitted output;
@@ -1060,6 +1153,14 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
     (The earlier scroll-award/persist question — scrolls earned in act mode not carrying
     into the next act — was masked by AR_PIN during this arc; root-caused as #18b below.)
 
+    **Additional confirmed interaction (2026-07-12):** permanent invulnerability also
+    prevents the game from applying water drag. A Bloodpool movement comparison initially
+    looked like the water handler had been lost during regeneration; the slowdown returned
+    immediately when `AR_NO_KNOCKBACK` was disabled. Treat this as authentic game behavior
+    under the pinned `$08D0:$2000` state, not a recompilation or handler-coverage failure.
+    Disable the cheat when validating water, terrain, damage, knockback, or exact movement
+    timing. This also means cheat-assisted input recordings are not physics-neutral.
+
 18b. **FIX PENDING VERIFY (2026-07-07): sim-mode reward grants silently dropped — entire
     reward-handler web unregistered.** Repro (dump14, unpinned run): user received a magic
     scroll in Fillmore sim; before/after F2 snapshots (gf22129/gf22913) show `$21`, `$0295`,
@@ -1117,6 +1218,12 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
   (`recomp/*.cfg`) → **regenerate then rebuild**: `bash tools/regen.sh` (rewrites `src/gen/*.c`),
   then `cmake --build build -j8`. `src/gen` is generated — **never hand-edit it**; regenerate via
   `tools/regen.sh`.
+- Large generated banks are now split into stable
+  `bankXX_partNN_v2.c` translation units. Do not assume a monolithic
+  `bankXX_v2.c` exists when checking freshness or build artifacts;
+  `tools/cycle.sh` uses `src/gen/.v2_regen_stamp`, and CMake discovers all
+  `src/gen/*.c`. A configure also removes stale generated-bank objects whose
+  source basename no longer exists after a split/merge.
 - Constraints: **no stubs, ever** (a stub is a hard build error — close the recompiler gap).
   Edit only the emitter, runner, `src/main.c`, `src/actraiser_rtl.c`, `recomp/*.cfg`, and
   `tools/`. Commit/push only when asked.
@@ -1236,7 +1343,7 @@ AR_WATCHOBJ=<addr>     who writes this object slot (also fires on indirect + DMA
 AR_WATCH16=<val>       who writes this 16-bit value (also fires on indirect + DMA writes, tagged [watch16-ind]/[watch16-dma])
 regen report           "PROVEN-EQUIVALENT VARIANT ROUTING" section: wrong-width dispatch routing, proven not guessed (§5)
 regen report           "JSR (abs,X) SUPPRESSED" / "Rejected JSR/JSL" / "DISPATCH TARGET SUPPRESSED" sections: silent-drop audit (§7.9)
-AR_PERF=1              once-per-second frame budget: fps / run-ms / gf-advance / apu-catchup — separates host-bound (fps<60) from pacing (fps=60 but game crawls). CAVEAT: gf is NMI-driven, always 1:1 — it can NOT detect the pacing class; use the ring trick below
+AR_PERF=1              once-per-second game + draw budgets: [perf] fps/run-ms/gf/APU and [draw-perf] RtlDrawPpuFrame ms — separates host-bound (fps<60) from pacing (fps=60 but game crawls). CAVEAT: gf is NMI-driven, always 1:1 — it can NOT detect the pacing class; use the ring trick below
 F9 mid-bug + ring      exact-1/N-speed in one mode? quit/F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
 find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
 find_rts_webs.py       static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
@@ -1257,7 +1364,7 @@ AR_SHOT_AT_GF=N        recomp screenshot -> saves/shot.ppm
 F2 (windowed)          full snapshot WRAM+VRAM+CGRAM+OAM+ppm -> saves/snapshots/  (VRAM-visible!)
 diff_seq.py            timing-independent oracle value-divergence (LOAD SRAM!)
 oracle-only pass       missing object/event (oracle writes nonzero, recomp never)
-find_handler_chain.py  unconverted object handlers (<seeds> or --tables for all acts); see §11
+find_handler_chain.py  unconverted object handlers (<seeds> or --tables for all action regions); see §11
 opcode_diff.py         single-opcode semantics vs Tom Harte
 ```
 
