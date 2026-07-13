@@ -1,9 +1,13 @@
 # Widescreen Mode Survey and Implementation Record
 
 > **Current status (2026-07-12):** the early Phase-2/Phase-3 text below is
-> retained as an evidence trail, not the current design. Action mode `$18=$01`
-> has validated true-content BG margins and sprite handling through Stage D2;
-> the same path is now enabled for `$18=$01-$07` pending direct region tests.
+> retained as an evidence trail, not the current design. Every action level in
+> regions `$18=$01-$06` is directly confirmed fully playable with correct wide
+> BG streaming, sprites, activation, and observed raster effects. The shared
+> path is enabled for `$18=$01-$07`; Death Heim/`70X` currently reaches its
+> first boss arena and crashes. The one
+> known presentation gap for `$01-$06` is widescreen-aware camera/world-edge
+> clamping so finite map edges cannot enter the margins.
 > The current implementation is split between
 > `src/actraiser_widescreen_bg.c` and the audited `$8C98/$8D68` HLE seams; it
 > does not use the historical monolithic `src/actraiser_widescreen.c` strategy.
@@ -228,14 +232,13 @@ Also fixed along the way:
   per-frame clear of the unrendered edge strips — change-detection was
   insufficient (steady clamps never repainted; ghosts of previous modes
   lingered at the framebuffer edges).
-- **NoSpriteLimits wired for real**: the config knob existed but was never
-  honored (PpuBeginDrawing ignored render_flags). Now plumbed
-  (ppu->renderFlags; gates the 32-sprites and 34-tiles per-scanline caps).
-  Both `config.ini` and `dev-config.ini` currently set it to 1. This lifts the
-  32-sprite and 34-OBJ-tile per-scanline limits, but not the 128-entry OAM
-  capacity. Fidelity/pressure testing must explicitly run both
-  `NoSpriteLimits=0` and `NoSpriteLimits=1`; earlier direct wide validation was
-  performed with the lifted-limit configuration.
+- **NoSpriteLimits capability exists but ActRaiser wiring is missing.** The PPU
+  stores `renderFlags` and can gate the 32-sprite/34-OBJ-tile per-scanline caps,
+  but `src/main.c` currently calls `PpuBeginDrawing(..., 0)` regardless of the
+  parsed `g_config.no_sprite_limits`. Therefore the config key has no effect and
+  the completed direct action validation used authentic scanline limits. Wire
+  it deliberately through the runtime-settings work before treating `0/1` as
+  distinct test configurations.
 - **OAM budget ruled out** for the tree-hole corruption: the snapshot at the
   corrupted frame shows 40/128 shadow entries used (check recipe: count
   entries at $0380 with y byte != $E0).
@@ -342,7 +345,8 @@ native/HLE seams untouched.
    margin refresh only, while keeping the original OAM and streamer paths.
    `AR_WS_BGREFRESH=0` returns byte-for-byte to Stage A in the same binary.
    Direct user testing confirmed both the wide BG and sprites remain correct.
-   Region `$18=01` is enabled; broaden to `$02-$07` after the sprite phase.
+   The shared path is enabled for `$18=$01-$07`; regions `$01-$06` are directly
+   validated and `$07` remains blocked by the Death Heim first-boss crash.
 3. **Stage C (validated 2026-07-12)**: widen only per-sprite emission for
    already-authentically-active objects. `$0400` activation remains authentic.
    A full direct-play pass of Fillmore act 1 with `AR_WS_SPRDBG=1` found no
@@ -352,8 +356,9 @@ native/HLE seams untouched.
 4. **Stage D1 (validated 2026-07-12)**: fully margin-resident initialized
    objects draw, while `$0400` and gameplay activation retain the authentic
    boundary. Direct testing confirmed correct sprites and that enemies still
-   activate only on entering the old screen space. Stage D2 will isolate
-   proper margin activation rather than coupling it to drawing again.
+   activate only on entering the old screen space. Stage D2 subsequently
+   isolated and widened activation without coupling it back to drawing; the
+   final combined path is validated across regions `$01-$06`.
 
 Stop after each stage for a direct user run. No stage requires a recomp regen
 unless a `recomp/*.cfg` change is deliberately introduced; regeneration remains
@@ -396,8 +401,11 @@ The sprite-related and state-risking parts are removed:
 - fixed-buffer validation (`$3900` BG1, `$3B04` BG2) and per-layer destination
   validation: BG1 writes cannot leave `$6000-$6FFF`, BG2 cannot leave
   `$7000-$7FFF`, so OBJ chars `$2000-$3FFF` and OAM are unreachable;
-- authoritative BG1 camera/level bounds limit visible margins at level edges;
-  steady unused framebuffer gaps are cleared every frame.
+- authoritative BG1 camera/level bounds prevent the host refresher from reading
+  beyond real map data, and steady unused framebuffer gaps are cleared every
+  frame. This is a safety clamp on margin data, not yet a widened camera clamp:
+  the native 256px camera endpoint can still let a finite background edge enter
+  the wider viewport. That remaining presentation task is tracked below.
 
 Deterministic gates using `saves/level1-action.rec` at gf=2500:
 
@@ -551,14 +559,15 @@ off whenever a cfg/emitter change makes it necessary.
 1. **Action Stage D2 — COMPLETE.** D1 drawing is unchanged; wide activation is
    default-on and `AR_WS_MARGIN_ACTIVATION=0` retains the same-binary fidelity
    gate. Direct Fillmore movement/combat and boundary behavior are clean.
-2. **All-action policy — IMPLEMENTED; direct gate pending.** The runtime policy
-   now enables the already-shared BG/sprite paths for `$18=$01-$07`.
-3. **Cross-region and hardware-limit matrix.** Test warp pairs `0201/0202` through
-   `0601/0602`, then one `0701` Death Heim boss-rush/final-boss pass (there is no
-   ordinary `0702`). For each: stage start, mid-stage scroll, dense encounter,
-   boss, and transition; capture both old
-   edges. Use `NoSpriteLimits=1` for the main pass and repeat at least one dense
-   encounter with `=0` to separate authentic scanline pressure from OAM bugs.
+2. **All-action policy — IMPLEMENTED; regions `$01-$06` VALIDATED.** The runtime
+   enables the shared BG/sprite paths for `$18=$01-$07`. Every ordinary action
+   level is fully playable and renders correctly; Death Heim/`70X` reaches its
+   first boss arena and then crashes.
+3. **Action camera/world-edge clamp + final flow.** Map the native camera limits
+   and make them widescreen-aware so finite background edges do not scroll into
+   view. Separately diagnose the `0701` first-boss crash, then run the complete
+   Death Heim boss rush/final boss (there is no ordinary `0702`). Recheck
+   representative edges after the camera change.
 4. **Dynamic OBJ/effect validation.** Exercise all magic selectors and several
    boss/effect paths while tracing `$D0-$D5`, `$02AC`, object `$38`, OAM count,
    and VRAM `$2D40-$2DBF`. Catalogue selectors to named assets for decomp use.
@@ -582,6 +591,15 @@ off whenever a cfg/emitter change makes it necessary.
 
 ### Cross-region findings: first pass (2026-07-12)
 
+**Milestone resolution:** subsequent direct play completed every action level in
+regions `$01-$06`. All are fully playable and correctly render/activate sprites
+and backgrounds in widescreen, including the repaired fast fall, previously
+inert enemies/platforms, bosses, Aitos cloud bands, and Northwall cloud/snow
+bands. The bullets below retain the chronological discovery evidence; their
+intermediate “pending retest” states are superseded by this result. Death Heim
+and camera/world-edge presentation remain open as described above; Death Heim
+is broken at its first boss transition.
+
 - Fillmore act 1: clean. Fillmore act 2: completed, but character movement
   slowed; the action→action F6 path is now the leading suspect rather than
   widescreen. That run entered `$00:B122_M0X0` garbage twice.
@@ -604,8 +622,8 @@ off whenever a cfg/emitter change makes it necessary.
   `$B990/$B9BC/$BAF1/$BB84/$BCC1/$BCCF`, all `found:0`. `$B990/$B9BC` directly
   update platform Y and `$BAF1` is an enemy tick, so their non-execution exactly
   explains the symptom; the chain animation is an independent tile animation.
-  The six roots expand to a 12-entry handler web in `bank00.cfg`; regeneration
-  and a direct retest are pending. This failure is independent of the warp and
+  The six roots expand to a 12-entry handler web in `bank00.cfg`; later
+  regeneration and direct play confirmed the repair. This failure is independent of the warp and
   widescreen policies—the wider view merely opened the first test of this code.
 - Narrow-BG2 presentation follow-up: instead of exposing invalid tilemap data,
   the renderer can reflect the already-decoded authentic BG2 into the margins.
@@ -613,12 +631,33 @@ off whenever a cfg/emitter change makes it necessary.
   transparency/color-math identity, and does not write VRAM. It is now the
   default for action `$32<$0200`; `AR_WS_BG2_MIRROR=0` restores the confirmed
   clamp for the Bloodpool handler retest and for visual A/B comparison.
+- Aitos Act 1 (`0401`, continuing through raw maps `$19=02/$03`) also declares
+  BG2 `$32=$0100`, but its upper cloud bands exhibit parallax/raster-like
+  scrolling (the exact native HDMA/HBlank mechanism remains to be traced).
+  `runs/20260712-220525/snapshots/snap_00_gf2960.ppm` proves reflection is the
+  wrong presentation there: cloud slope and motion reverse at both 256px
+  boundaries. The renderer now cyclically repeats the isolated authentic BG2
+  scanline for those three maps instead. This preserves same-direction scroll
+  while retaining Bloodpool's visually successful reflection policy.
+- Northwall Act 1 entry `0601` exhibits the same narrow-BG2 cloud technique.
+  `runs/20260712-222626/` records BG1 width `$2E=$0A00`, BG2 width
+  `$32=$0100`, and the live `$00:E7BC` -> `$02:945E` -> `$02:96B6` path
+  configuring HDMA channel 2 for `$210F` (`BG2HOFS`). The mountains/clouds can
+  therefore scroll in scanline bands while the 256px BG2 source wraps; the
+  width declaration does not imply a stationary image. Raw map `0605` was
+  later confirmed to need the same treatment as `0601`: disabling reflection
+  removes its reversed-motion seam. The full observed range `$19=01-$05` now
+  shares Aitos's cyclic-repeat policy so internal transitions cannot silently
+  restore reflection. Boss map `0608` also uses a parallax-scrolling snow BG2
+  and explicitly selects cyclic repeat. Maps `0606/0607` remain on the default
+  policy; direct full-level testing found no equivalent seam there.
 - Full Bloodpool act 2 run `runs/20260712-200334/`: mirror fill is visually
   confirmed. The first handler batch restored early enemies/platforms. Later
   F2 captures found four more live `$12` roots (`$BD82`, `$BD36`, `$BBB4`,
   `$BE0B`), expanding to 12 entries; `$BE0B` is also `found:0` on all 204 boss
   frames in the exit ring. These cfg registrations were pending at this capture;
-  they are included in the current generated build, with direct retest remaining.
+  they are included in the current generated build and were confirmed by the
+  completed region pass.
 - **Movement slowdown resolved to draw-side BG refresh cost:** the deliberately
   paired captures in `runs/20260712-202151/` separate the symptom cleanly. Normal
   F9 is host frame 3298/game frame 3318 in map `$19=03`; slow F9 is host 4303/game
@@ -638,9 +677,8 @@ off whenever a cfg/emitter change makes it necessary.
   not require regeneration.
 - The same slow F9 dispatch ring discovered one additional live ungenerated
   object root, `$BD90`; its closure is `$BD90/$BD9F/$BDA5/$BDAE`. It is separate
-  from the slowdown—missing dispatches return immediately—but has been added to
-  the handler batch so later Bloodpool objects are not left inert; it is now
-  generated and awaits direct retest.
+  from the slowdown—missing dispatches return immediately—but was added to the
+  handler batch and confirmed by the completed Bloodpool pass.
 - **Bloodpool full retest after regeneration:** the boss and all previously inert later objects
   now work. One enemy remained drawable, collidable, and killable but did not tick. Snapshot
   `runs/20260712-205842/snapshots/snap_00_gf6378.wram.bin` identifies its exact handler as `$BB25`
@@ -653,14 +691,15 @@ off whenever a cfg/emitter change makes it necessary.
 - Stage-3 act-1 capture `runs/20260712-211830/` adds exact runtime roots
   `$C7FA/$C7FF/$C804` and yield continuation `$C80A`. Six live objects hold those roots and the
   exit dispatch ring counts 94 misses per root. They are object-handler coverage, not evidence of
-  a new widescreen rendering failure; visual/object identity awaits the player's report.
+  a new widescreen rendering failure; the completed Kasandora pass later confirmed them.
 - **Regions 4-7 static preflight:** both acts in a kingdom share one `$18` handler table, so a
   complete sparse-table walk covers every declared object type regardless of which act spawns it.
   Aitos, Marahna, and Northwall add no state/yield gaps beyond the table entries already queued.
   Death Heim's distinct `$F39A` flow adds 13 primary `$12` continuations, each immediately after
   `JSR $86FA`; all are included. With one analogous Stage-1 `$A66A` continuation, the generated
   batch is 43 unique handlers and all table/field-`$14`/literal-`$12`/yield scans report zero gaps.
-  Runtime playthroughs remain mandatory for computed state roots and visual widescreen behavior.
+  Runtime playthroughs subsequently validated regions `$04-$06`; Death Heim
+  remains the only broken/unvalidated region table.
 - **Fast vertical stale rows isolated and repaired:** in Stage 1 Act 2 run
   `runs/20260712-205507`, the opening fall advances about 5px/frame while the
   cached host refresh fires at gf1885, 1903, 1918, 1933, and 1949—15-18-frame

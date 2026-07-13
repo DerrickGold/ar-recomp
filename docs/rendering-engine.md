@@ -257,8 +257,10 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
   y/x window tests biased by `$94/$96` (camera-16), writes `$0380` entries
   + packed high-table bits (bit0 = x bit 8 — true 16-bit screen x).
 - `$8F` = attr OR-bias ($0E00 = palette-7 hit-flash while obj `$30&$2008`).
-- Upload `$02:ACA6`: 544B. Hardware caps (32 sprites/line, 34 tiles/line)
-  are gated by `NoSpriteLimits` (config; PPU `renderFlags`).
+- Upload `$02:ACA6`: 544B. The PPU can gate the hardware caps (32 sprites/line,
+  34 tiles/line) through `renderFlags`, but ActRaiser's current
+  `PpuBeginDrawing(..., 0)` leaves authentic caps active; parsed
+  `NoSpriteLimits` is not yet forwarded.
 - Budget reality (user snapshots, 16:9): max 60/128 entries live, margin
   sprites present and correct — **no OAM pressure in act 1 even wide**.
 
@@ -425,6 +427,13 @@ Facts the next design must satisfy (all trace/disasm-proven above):
     its missing behavior handler was hidden after zero holes in the `$B449` type
     table. This further confirms that mirror/clamp and object behavior are separate
     seams: host BG2 presentation never writes object state or handler pointers.
+11. **Action rendering is directly validated through region `$06`.** Complete
+    playthroughs of every ordinary action level confirm the streaming, sprite,
+    activation, mirror/repeat padding, and observed HDMA/parallax paths. The
+    remaining presentation task is not tile streaming: map the camera's finite
+    world-edge limits and make them widescreen-aware so background endpoints do
+    not scroll into the wider viewport. Death Heim/`70X` is a separate broken
+    flow that reaches its first boss arena and then crashes.
 
 ### 13.1 Stage-B implementation refinement (2026-07-12)
 
@@ -452,7 +461,7 @@ cached. This matters for two-wide-layer rooms: `runs/20260712-202151/` proved
 that invoking every BG1 and BG2 margin decoder every rendered frame can consume
 the presentation budget even though game logic itself remains inexpensive.
 
-### 13.2 Narrow-layer mirror presentation (2026-07-12)
+### 13.2 Narrow-layer presentation padding (2026-07-12)
 
 `PpuSetWidescreenLayerMirror` is a renderer capability for decorative layers
 that contain a real 256px image but no valid offscreen world columns. The normal
@@ -469,6 +478,35 @@ animation, windowing, mosaic, main/sub-screen identity, and later color math.
 This is a presentation enhancement, not recovered/decompiled level data, and it
 performs no PPU VRAM writes. Narrow action BG2 opts in by default; the original
 clamp remains the same-binary fidelity/fallback path.
+
+Aitos Act 1 (`$18=04`, raw maps `$19=01-$03`) demonstrates why reflection
+cannot be the only padding policy. Its `$0100`-wide BG2 contains several cloud
+bands observed moving at different apparent rates; whether the native game
+drives them through HDMA/HBlank or another raster path is not yet traced. Reflection
+reverses their slope and apparent motion at each authentic-screen edge, making
+the centered cloud field tear visibly from both margins. For this act,
+`PpuSetWidescreenLayerRepeat` uses the same isolated render but cyclically
+continues each authentic scanline: left `x<0` samples `256+x`, while right
+`x>=256` samples `x-256`. Because the copy happens after that scanline's tile
+decode/window/current scroll state, all bands keep the same direction and tile
+animation remains automatic. Bloodpool retains reflection; neither padding
+mode reads the stale offscreen tilemap half or mutates emulated state.
+
+Northwall (`$18=06`, raw maps `$19=01-$05`) uses the same narrow,
+parallax-cloud BG2 construction and therefore selects the same cyclic-repeat
+policy. Direct state evidence from `runs/20260712-222626/` shows BG1 logical
+width `$2E=$0A00`, BG2 logical width `$32=$0100`, and HDMA channel 2 active.
+The live `0601` callback `$00:E7BC` invokes `$02:945E`, which builds the
+scanline table at `$7E:6000`; common setup `$02:96B6` targets `$210F`
+(`BG2HOFS`). Thus `$0100` means 256 unique BG2 pixels, not a stationary layer:
+the PPU wraps those pixels while HDMA gives different scanline bands different
+horizontal offsets. `0605` was subsequently observed to use the same visual
+construction; leaving it outside the repeat range restored reflection and the
+same reversed-motion seam. Covering `$01-$05` prevents that mid-stage policy
+regression. Northwall raw map `$08` is the boss arena and has a similar
+parallax-scrolling snow BG2; it independently selects cyclic repeat. Maps
+`$06/$07` remain on the default policy; completed direct testing found no
+equivalent seam there.
 
 ## 14. Open questions (all remaining, none blocks the §13 design)
 
@@ -487,3 +525,8 @@ clamp remains the same-binary fidelity/fallback path.
    `$01:B1F8/$B7E9/$CE69/$CEEB` camera candidates were object-field writes;
    the town camera writer is `$01:B4C6`.
 7. Section config +27 -> `$F2` meaning; `$6A/$6E/$72` $2000-flag meaning.
+8. Native camera/world-edge clamp ownership and its presentation-aware wide
+   bounds. Distinguish changing the gameplay camera limit from merely hiding or
+   padding pixels outside finite BG data; verify both axes and parallax layers.
+9. Death Heim/`70X` first-boss crash, then boss-rush/final-boss rendering and
+   handler flow.

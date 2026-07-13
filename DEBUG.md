@@ -676,10 +676,14 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   true-content BG1/BG2 margin refresh. Both modes retain the original recompiled
   BG streamers and OAM builder.
 - **`AR_WS_BG2_MIRROR=0`** — for action sections whose BG2 declares only a
-  256px width (`$32<$0200`), disable the default renderer-side mirror fill and
+  256px width (`$32<$0200`), disable renderer-side presentation padding and
   restore the proven centered BG2 clamp. The default reflects only BG2's
-  authentic rendered edge pixels into the margins; it never copies BG1 or OBJ.
-  This is a startup-cached switch—set it before launching.
+  authentic rendered edge pixels into the margins, except Aitos Act 1 raw maps
+  `$01-$03`, Northwall maps `$01-$05`, and Northwall boss map `$08`, whose
+  parallax cloud/snow BG2 is cyclically repeated so its motion keeps the same
+  direction across the seam.
+  Both modes operate on an isolated BG2 render and never copy BG1 or OBJ. This
+  is a startup-cached switch—set it before launching.
 - **`AR_WS_BGDBG=1`** — log Stage-B column-strip and vertical-row counts,
   accepted margins, and any rejected record cursor/VRAM target. A fast vertical
   traversal should produce `rows=N/N` at each 16px camera crossing; long gaps
@@ -744,10 +748,11 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
    is cleared to y=$E0 each frame, so non-$E0 = a real entry. 40/128 at a
    corrupted frame ruled exhaustion OUT for the missing-tree-tiles bug (which
    turned out to be the two-tier streaming gap, see widescreen-survey.md).
-   Also test both `NoSpriteLimits=0` and `=1`: those select the hardware
-   32-sprite/34-OBJ-tile per-scanline limits and are independent of the
-   128-entry table. Both shipped config files currently use `1`, so a default
-   developer run does not exercise authentic scanline pressure.
+   The PPU has a render flag for lifting the 32-sprite/34-OBJ-tile limits, but
+   ActRaiser currently passes `PpuBeginDrawing(..., 0)` and does not forward the
+   parsed `NoSpriteLimits` config value. Current runs therefore always exercise
+   authentic scanline pressure; do not claim a `0/1` comparison until the
+   runtime-settings phase wires the field.
 7. **Framebuffer-gap hygiene**: anything that renders less than the full wide
    framebuffer (asymmetric margin clamps) must CLEAR the unrendered edge strips
    EVERY frame. Change-detection is not enough — a steady clamp never repaints,
@@ -763,14 +768,18 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 
 ### 4d. Cross-region and town capture matrix
 
-- Action: warps `0201/0202` through `0601/0602`, then one `0701` Death Heim
-  boss-rush/final-boss pass. Region 7 has no ordinary acts and no `0702` test;
-  record its `$19` changes as it teleports through the six act-2 boss arenas.
-  Capture stage start, mid-scroll, dense encounter, boss/effect, and transition
-  with both old horizontal edges exercised. On an anomaly, pair
+- **Action milestone (2026-07-12):** every action level in regions `$01-$06`
+  is fully playable and renders correctly in widescreen. The verified raw-map
+  warp targets are in the README and `docs/SEAMS.md`; do not assume the low byte
+  is an act number (`0303`, not `0302`, enters Kasandora Act 2). Remaining
+  action work is a presentation-aware camera/world-edge clamp. Death Heim
+  `0701` currently reaches the first boss arena and crashes; after repair,
+  record its `$19` changes through the six act-2 boss arenas and final boss.
+  For the camera change or crash, capture stage start, map edges, dense
+  encounter, boss/effect, and transition. On an anomaly, pair
   `AR_WS_SPRDBG=1` with `AR_WS_ACTDBG=1`, full
-  F2 snapshots or `AR_VRAMDUMP_GF`, OAM counts, `$D0-$D5`, and both
-  `NoSpriteLimits` settings. The normal pass needs neither verbose flag.
+  F2 snapshots or `AR_VRAMDUMP_GF`, OAM counts, and `$D0-$D5`. The normal pass
+  needs neither verbose flag.
 - **Warp fidelity caveat (2026-07-12):** F6 currently stages only the game's
   destination bytes `$1B/$1A` and request `$FB|=$80`. Invoking it after
   Fillmore act 1 has already begun is an action→action path not observed in

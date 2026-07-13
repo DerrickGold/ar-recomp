@@ -16,25 +16,33 @@ verified, same as the other status markers.
 **Legend:** ✅ Confirmed working · 🟡 Playable with known issues (see note)
 · 🔴 Broken/blocking · ⬜ Untested
 
-## Integration checkpoint — 2026-07-12
+## Action-widescreen milestone — 2026-07-12
 
-The action-mode widescreen implementation is ready to return to `main`:
+Every action level in regions `$01-$06` has now been played through and is
+confirmed fully playable with widescreen enabled. Across those passes:
 
-- wide BG1/BG2 streaming, narrow-BG2 mirror/clamp, margin sprite drawing, and
-  margin activation have survived the tested Fillmore, Bloodpool, and Kasandora
-  paths without the historical sprite corruption;
-- the fast vertical row-streaming and draw-performance fixes are source-only and
-  need focused regression checks, but no current evidence ties them to sprite/OAM
-  corruption;
-- the remaining inert-object findings are pre-existing recompilation coverage
-  gaps exposed by broader testing, not widescreen regressions;
-- `recomp/bank00.cfg` contains **43 newly added handler entries**, and the current
-  local generated build includes them. Static table, field-`$14`, literal-`$12`,
-  recognized yield, and saved-snapshot scans now report zero unconverted results.
-  Runtime-installed computed roots can still appear and require playthrough captures.
+- BG streaming, fast vertical traversal, sprites, old-edge activation, enemy and
+  platform behavior, bosses, room transitions, and the observed HDMA/parallax
+  effects render and behave correctly;
+- the historical extra/partial sprite corruption did not recur after the BG
+  refresher was isolated from emulated WRAM/OAM state;
+- decorative 256px BG2 layers use stage-appropriate presentation padding:
+  reflection where the art tolerates it, cyclic repeat for Aitos and Northwall
+  cloud/snow raster effects, and an explicit clamp fallback;
+- the handler-coverage batch restored the inert objects discovered by the wider
+  playthroughs. Those were pre-existing recompilation gaps, not widescreen
+  regressions.
+
+Two action-mode items remain outside this milestone. Death Heim (`$07`/`70X`)
+is a distinct, currently broken boss-rush/final-boss flow: `0701` reaches the
+first boss arena and then crashes.
+Regions `$01-$06` also need a final presentation-aware camera/world-edge clamp
+so the ends of finite background maps cannot scroll into the wider viewport.
+That edge exposure is the only known gap between their current fully playable
+state and complete widescreen presentation.
 
 No generated ROM-derived source is committed; reproducible builds materialize
-these entries from the cfg. Direct post-generation testing is the next gate.
+the registered handlers from `recomp/*.cfg`.
 
 ## Action stages — observed status
 
@@ -46,30 +54,35 @@ follows the game's internal order (`$18`/`$19` in WRAM — see `docs/SEAMS.md`
 
 | Region | Act 1 | Act 2 |
 |---|---|---|
-| 1 — Fillmore | ✅ Widescreen full pass; sprites and old-edge activation clean (2026-07-12) | 🟡 Full pass completed; fast-fall stale rows were fixed at the 16px vertical cadence and need one focused retest (2026-07-12) |
-| 2 — Bloodpool | ✅ Widescreen full pass; narrow BG2 policy behaves (2026-07-12) | 🟡 Widescreen/mirror and boss completion confirmed. Inert enemy root `$BB25` is now generated; focused retest pending (2026-07-12) |
-| 3 — Kasandora | 🟡 Instrumented widescreen pass remained visually successful; runtime roots `$C7FA/$C7FF/$C804/$C80A` are now generated and need focused retest (2026-07-12) | ⬜ Untested |
-| 4 — Aitos | ⬜ Untested; static handler preflight complete | ⬜ Untested; same region table covered |
-| 5 — Marahna | ⬜ Untested; static handler preflight complete | ⬜ Untested; same region table covered |
-| 6 — Northwall | ⬜ Untested; static handler preflight complete | ⬜ Untested; same region table covered |
-| 7 — Death Heim | ⬜ Single boss-rush/final-boss flow untested | — No Act 2 |
+| 1 — Fillmore | ✅ Full widescreen playthrough; sprites and activation clean (2026-07-12) | ✅ Full widescreen playthrough; fast vertical fall/row streaming confirmed repaired (2026-07-12) |
+| 2 — Bloodpool | ✅ Full widescreen playthrough; narrow BG2 policy clean (2026-07-12) | ✅ Full widescreen playthrough; enemies, moving platforms, mirror padding, and boss confirmed (2026-07-12) |
+| 3 — Kasandora | ✅ Full widescreen playthrough; generated runtime handlers and rendering confirmed (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
+| 4 — Aitos | ✅ Full widescreen playthrough; cyclic BG2 cloud padding removes the parallax seam (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
+| 5 — Marahna | ✅ Full widescreen playthrough (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
+| 6 — Northwall | ✅ Full widescreen playthrough; cyclic BG2 cloud/snow padding confirmed across the affected maps (2026-07-12) | ✅ Full widescreen playthrough and boss completion (2026-07-12) |
+| 7 — Death Heim | 🔴 `0701` reaches the first boss arena, then crashes; boss rush/final boss not playable (2026-07-12) | — No Act 2 |
 
 Static code confirms `$18=$07` selects its own handler table at `$00:F39A`.
 The game structure was confirmed on 2026-07-12: Death Heim has no ordinary acts;
 it teleports through all six act-2 bosses, then transitions to the final boss.
-An instrumented pass still needs to record its `$19` sequence and validate `0701`.
+The crash needs a focused capture before the `$19` teleport sequence can be
+recorded and the flow repaired.
 
-### Next action-mode test gate
+### Remaining action-mode completion gate
 
-With the 43-handler batch now generated locally, test in this order:
+The broad region `$01-$06` matrix is complete. Remaining action work is:
 
-1. Focused regressions: `0102` fast vertical fall; `0202` `$BB25`; `0301`
-   `$C7FA/$C7FF/$C804/$C80A`.
-2. New coverage: `0302`, `0401`, `0402`, `0501`, `0502`, `0601`, `0602`.
-3. Final flow: one `0701` Death Heim boss-rush/final-boss pass; there is no
+1. Map the native camera clamps and add widescreen-aware left/right limits so
+   finite background edges never enter the visible margins. Exercise at least
+   one wide streamed BG, one 256px padded BG2, and one vertical stage.
+2. Diagnose the `0701` crash after its first boss teleport, then run the repaired
+   Death Heim boss rush/final boss and record its `$19` sequence. There is no
    ordinary `0702`.
+3. Re-run representative `$01-$06` boundaries with the feature-disable gates
+   after the camera change. Add a lifted-limit A/B only after `NoSpriteLimits`
+   is actually forwarded to the PPU render flags.
 
-For every new act/flow:
+For Death Heim or any future anomaly:
 
 - play from start through boss/transition, exercising both old 256px edges;
 - take F2 snapshots at a dense encounter, a room/route transition, and the boss;
@@ -81,8 +94,9 @@ For every new act/flow:
 - record visual BG/sprite/activation results separately from handler coverage.
   A drawable or killable but inert object is usually a missing behavior handler,
   not proof of a widescreen rendering fault;
-- use `NoSpriteLimits=1` for the main pass, then repeat at least one dense scene
-  with `0` to distinguish authentic scanline pressure from OAM bugs;
+- current ActRaiser builds always use authentic scanline limits because the
+  parsed `NoSpriteLimits` field is not forwarded to `PpuBeginDrawing`; wire that
+  setting before attempting a lifted-limit A/B comparison;
 - if a symptom might be caused by the action→action warp, reproduce with
   `AR_WS_ACTION=0` or natural progression before classifying it.
 
@@ -123,9 +137,11 @@ silently attributed to future widescreen code.
 
 ## Remaining proper-widescreen roadmap
 
-1. **Complete action verification.** Finish the post-regeneration matrix above,
-   including authentic sprite limits, all magic/dynamic OBJ selectors, bosses,
-   HDMA/window effects, iris/room transitions, and Death Heim.
+The immediate implementation focus moves to the runtime settings/overlay plan
+in [settings-system.md](settings-system.md). The remaining widescreen backlog is:
+
+1. **Finish action presentation.** Implement the camera/world-edge clamp above,
+   then repair and validate the separate Death Heim `70X` flow.
 2. **Freeze simulation baselines.** Complete Bloodpool and all four untested
    towns using the town matrix before widening simulation mode.
 3. **Widen simulation backgrounds safely.** Derive margins from `$01:B4C6`
@@ -146,7 +162,7 @@ silently attributed to future widescreen code.
 |---|---|---|
 | Boot / title screen | ✅ | |
 | Save / load (in-game state) | ✅ | Checksum-gated continue path confirmed (`AR_SAVECHECK`) |
-| Action-stage combat | 🟡 | Core loop and bosses verified through Fillmore/Bloodpool plus an instrumented Kasandora-1 pass. The 43-handler batch is generated; direct retest remains. Open `$00:B8AB` spell-projectile garbage variant (`DEBUG.md` #19). |
+| Action-stage combat | 🟡 | Every action level in regions `$01-$06`, including their bosses, is fully playable after the handler-coverage batch. Death Heim/`70X` reaches its first boss and crashes. Open `$00:B8AB` spell-projectile garbage variant (`DEBUG.md` #19). |
 | Magic casting | 🟡 | WORKS as of 2026-07-07 (was dead — blocked by our own knockback cheat, `DEBUG.md` #18); Fire verified in-stage; other 3 spells' effects pending validation (`AR_ALL_MAGIC` cheat added for exactly this) |
 | Sim-mode town simulation | 🟡 | Fillmore ✅ end-to-end; Bloodpool entry/lightning partial; full Bloodpool plus Kasandora/Aitos/Marahna/Northwall baselines pending. Reward web and multi-actor cutscenes fixed 2026-07-07 (`DEBUG.md` #18b/§7.17). |
 | Scroll/MP persistence | ✅ | `$0295` persistent / `$21` working-copy model mapped + grant verified across modes (2026-07-07) |
@@ -155,7 +171,7 @@ silently attributed to future widescreen code.
 | Input | 🟡 | Hardcoded keyboard mapping works (see README); no gamepad support yet. Consumer side fully mapped (SEAMS "Input" + "Magic system") |
 | Cheats | 🟡 | Named cheat kit 2026-07-07: `AR_ALL_MAGIC`/`AR_RANGED_SWORD`/`AR_INF_MP`/`AR_INF_SP`/`AR_ANGEL_HP` + magic-safe `AR_NO_KNOCKBACK` + generic `AR_PIN`; real 8x turbo on `t`. `AR_FREEZE_TIMER` auto-backoff added, still unverified. `AR_NO_KNOCKBACK` is not physics-neutral: its pinned invulnerability suppresses water drag (confirmed 2026-07-12). |
 | Debug tooling | ✅ | 2026-07-07 toolkit: `dis65`/`romxref`/`wram`/`resolve_miss`/`cycle.sh` — anomaly capture → auto-triage → proposed cfg patch loop (`DEBUG.md` §1) |
-| Action widescreen BG/sprites | 🟡 | Fillmore 1/Bloodpool 1 clean; Bloodpool 2 mirror and boss completion confirmed. The generated 43-handler batch covers Bloodpool `$BB25`, Stage-3 runtime roots, all remaining table gaps, and final yield closure. Paired normal/slow F9 captures proved the earlier movement symptom was host slowdown (60→47 fps), fixed by keying margin refresh to the authentic 16px cadence; `[draw-perf]` covers that phase. Stage D2 remains clean; Kasandora retest, Aitos/Marahna/Northwall pairs, one Death Heim boss-rush pass, hardware-limit, and boss-effect testing remain. |
+| Action widescreen BG/sprites | 🟡 | Regions `$01-$06` are fully playable and visually validated: wide streaming, fast vertical rows, sprites, activation, narrow-BG2 mirror/repeat policies, HDMA/parallax scenes, and bosses all behave correctly. Remaining: camera/world-edge clamp for full presentation coverage; Death Heim/`70X` is blocked by its first-boss crash. |
 
 ## Codebase metrics (objective, automated — refreshed 2026-07-12)
 
@@ -170,7 +186,7 @@ it go stale — same discipline as the playability tables.
 |---|---|---|
 | Hand-authored recompiler directives (`recomp/*.cfg`) | 2,646 lines | `wc -l recomp/*.cfg` |
 | → generated C output (`src/gen/*.c`) | 2,130,680 lines | `wc -l src/gen/*.c` (after `tools/regen.sh`) |
-| Hand-written game runtime (`src/*.c`/`*.h`, excl. shared engine) | 3,230 lines | `wc -l src/*.c src/*.h` |
+| Hand-written game runtime (`src/*.c`/`*.h`, excl. shared engine) | 3,253 lines | `wc -l src/*.c src/*.h` |
 | Bank coverage | 29 of 32 possible SNES banks | `ls recomp/bank*.cfg \| wc -l` |
 | Recompiled functions (unique ROM addresses) | 2,467 | `grep -c "^    { 0x" src/gen/dispatch_v2.c` |
 | Recompiled functions (× m/x width variants) | 4,634 | `python3 tools/link_audit.py` |

@@ -61,8 +61,9 @@ treat zero words as unused type slots rather than termination. `$00:B449` is the
 important proof: types `$19-$1D` are zero, while `$1E-$27` resume with ten valid
 records; type `$21` points to record `$BB19` and exact handler `$BB25`.
 Tables `$A8F6-$E722` correspond to the six ordinary two-act kingdom regions.
-`$F39A` is Death Heim's distinct no-act boss-rush/final-boss table; `$19` changes
-within that flow still need an instrumented capture to name its internal maps.
+`$F39A` is Death Heim's distinct no-act boss-rush/final-boss table. Warp target
+`0701` reaches the first boss arena and currently crashes; repair and an
+instrumented run are required before its later `$19` maps can be named.
 
 These are different identity layers. The action object handler and composition
 pointer select behavior/layout within a common resident atlas; the small bank-6

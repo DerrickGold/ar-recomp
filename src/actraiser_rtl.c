@@ -344,6 +344,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   int wide = survey;
   uint8 clamp = 0;
   uint8 mirror = 0;
+  uint8 repeat = 0;
   int bg2_gap = 0;  /* margin source gap px/side for BG2 (UI staging strip) */
   int action_margins = 0;
   if (!survey && g_ram[0x18] == 0x00) {
@@ -417,22 +418,36 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     /* Some action sections declare BG2 as a single 256x256 screen
      * ($32/$34=$0100) while BG1 is the scrolling world. There is no BG2 world
      * data to decode into side margins, and its offscreen tilemap half is
-     * scratch/stale storage. The margin refresher therefore skips it; clamp
-     * that layer instead of exposing frozen tiles (Bloodpool act 2). */
+     * scratch/stale storage. The margin refresher therefore skips it; pad its
+     * authentic render (or clamp it) instead of exposing frozen tiles. */
     uint16 bg2_width = (uint16)(g_ram[0x32] | (g_ram[0x33] << 8));
     if (bg2_width < 0x0200) {
-      /* A 256-wide decorative BG2 has no real margin data. By default reflect
-       * its authentic rendered edges into the margins; AR_WS_BG2_MIRROR=0
-       * restores the proven clamp for A/B testing in the same binary. */
+      /* A 256-wide decorative BG2 has no real margin data. By default pad from
+       * its authentic rendered image; AR_WS_BG2_MIRROR=0 restores the proven
+       * clamp for A/B testing in the same binary.
+       *
+       * Bloodpool's mostly symmetric decoration benefits from reflection.
+       * Aitos act 1 (raw maps $01-$03), Northwall maps $01-$05, and the
+       * Northwall $08 boss arena show moving cloud/snow bands; reflection
+       * reverses their slope/motion at each boundary. Cyclically repeat the
+       * already-rendered scanline there so every parallax/raster band continues
+       * in the same direction without exposing stale BG2 VRAM. */
       static int bg2_mirror = -1;
       if (bg2_mirror < 0) {
         const char *bm = getenv("AR_WS_BG2_MIRROR");
         bg2_mirror = !(bm && bm[0] == '0');
       }
-      if (bg2_mirror)
-        mirror |= 0x02;
-      else
+      if (!bg2_mirror) {
         clamp |= 0x02;
+      } else if ((g_ram[0x18] == 0x04 &&
+                  g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x03) ||
+                 (g_ram[0x18] == 0x06 &&
+                  ((g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x05) ||
+                   g_ram[0x19] == 0x08))) {
+        repeat |= 0x02;
+      } else {
+        mirror |= 0x02;
+      }
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
@@ -442,17 +457,19 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (ob && ob[0]) {
       int L = atoi(ob) - 1;
       if (L >= 0 && L < 4) g_ppu->screenEnabled[0] = (uint8)(1u << L);
-      wide = 1; clamp = 0; mirror = 0;  /* raw wide: expose real tilemap data */
+      wide = 1; clamp = 0; mirror = 0; repeat = 0;  /* raw tilemap data */
     } }
   /* AR_WS_CLAMP=<hex mask>: override the per-layer clamp for tuning. */
   { const char *cm = getenv("AR_WS_CLAMP");
     if (cm && cm[0]) {
-      wide = 1; clamp = (uint8)strtoul(cm, NULL, 16); mirror = 0;
+      wide = 1; clamp = (uint8)strtoul(cm, NULL, 16);
+      mirror = 0; repeat = 0;
     } }
   if (wide) {
     PpuSetExtraSpace(g_ppu, (uint8)g_ws_extra);
     PpuSetWidescreenLayerClamp(g_ppu, clamp);
     PpuSetWidescreenLayerMirror(g_ppu, mirror);
+    PpuSetWidescreenLayerRepeat(g_ppu, repeat);
     if (bg2_gap)
       PpuSetWidescreenLayerMarginGap(g_ppu, 1, (uint8)bg2_gap, (uint8)bg2_gap);
     if (action_margins) {
@@ -474,12 +491,18 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   }
   /* One line per policy flip — cheap, and makes "why isn't this screen
    * wide?" diagnosable from any console.log (mode bytes included). */
-  static int last_wide = -1;
-  if (wide != last_wide) {
+  static int last_wide = -1, last_clamp = -1, last_mirror = -1, last_repeat = -1;
+  if (wide != last_wide || clamp != last_clamp || mirror != last_mirror ||
+      repeat != last_repeat) {
     last_wide = wide;
-    fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s\n",
+    last_clamp = clamp;
+    last_mirror = mirror;
+    last_repeat = repeat;
+    fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s "
+            "clamp=%02x mirror=%02x repeat=%02x\n",
             (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8)),
-            g_ram[0x18], g_ram[0x19], wide ? "WIDE" : "pillarbox");
+            g_ram[0x18], g_ram[0x19], wide ? "WIDE" : "pillarbox",
+            clamp, mirror, repeat);
   }
   /* AR_WS_LAYERS=1: dump per-frame PPU layer/tilemap state — which BG a
    * margin artifact lives on, and whether that BG's tilemap is 32-wide (wraps
@@ -829,24 +852,25 @@ void ActRaiser_ApplyCheats(void) {
   }
 }
 
-/* Level-warp: stage the game's OWN sim->act transition to a chosen region/act,
+/* Level-warp: stage the game's OWN sim->act transition to a chosen region/map,
  * bypassing the (broken) sim-mode UI. The intro/overworld stages an act entry by
  * writing the transition-DEST vars + a request flag, which the transition
  * processor then consumes (full fade + level-load + mode switch). Observed entry
  * into Fillmore act 1: $1B=01 (-> $18 region), $1A=01 (-> $19 act), $FB|=0x80
  * (request). We replicate that. Best triggered from a transition-capable state
  * (the intro, $18==00, which WORKS — unlike the post-act sim cascade). Hooked to
- * F6 in main.c with the target from AR_WARP=<region_hex><act_hex> (e.g. 0202). */
-void ActRaiser_Warp(unsigned region, unsigned act) {
+ * F6 in main.c with the raw target from AR_WARP=<region_hex><map_hex>. The map
+ * byte is written directly to $19 and is not a uniform act number. */
+void ActRaiser_Warp(unsigned region, unsigned map) {
   extern uint8 g_ram[0x20000];
   uint8 from_region = g_ram[0x18];
   uint8 from_map = g_ram[0x19];
   g_ram[0x1B] = (uint8)region;   /* -> $18 (region/mode) on the switch */
-  g_ram[0x1A] = (uint8)act;      /* -> $19 (act within region) */
+  g_ram[0x1A] = (uint8)map;      /* -> $19 (raw map/sub-flow within region) */
   g_ram[0xFB] |= 0x80;           /* transition-request flag */
   fprintf(stderr, "[warp] from $18=$%02X $19=$%02X staged region=$%02X "
-          "act=$%02X ($1B/$1A/$FB set); transition processor should pick it up.\n",
-          from_region, from_map, region & 0xFF, act & 0xFF);
+          "map=$%02X ($1B/$1A/$FB set); transition processor should pick it up.\n",
+          from_region, from_map, region & 0xFF, map & 0xFF);
   if (from_region >= 0x01 && from_region <= 0x07) {
     fprintf(stderr, "[warp] WARNING: action->action is not a naturally observed "
             "transition; inherited timing/object state may affect fidelity.\n");

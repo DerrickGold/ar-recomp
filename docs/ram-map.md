@@ -9,7 +9,7 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:0018 | 1 | Mode/region group: `$00` non-action (town/world/UI); `$01-$06` six two-act kingdom action regions; `$07` Death Heim boss-rush/final-boss action region (no ordinary acts) |
-| $7E:0019 | 1 | Current map/sub-flow number (second byte of map ID); act selector in `$01-$06`, boss-arena/sub-flow value to capture through Death Heim `$07` |
+| $7E:0019 | 1 | Current raw map/sub-flow number (second byte of map ID). Not a uniform act selector: Act 2 starts at `$02/$02/$03/$04/$04/$05` for regions `$01-$06`; Death Heim `$07` reaches its first boss and currently crashes |
 | $7E:001A | 1 | Destination map number |
 | $7E:001B | 1 | Destination map group (first byte of map ID) |
 

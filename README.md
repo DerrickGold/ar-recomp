@@ -67,28 +67,32 @@ status tracker** — per-action-stage / per-sim-town playability tables plus
 automated codebase metrics; update it whenever a stage/town is actually played.
 Snapshot as of 2026-07-12:
 
-- **Fillmore (kingdom 1)**: full clean round — act 1 → sim mode → act 2 —
-  including development cycles, story events, lair-seal cutscenes, rewards,
-  magic, and widescreen action-stage rendering.
-- **Bloodpool (kingdom 2)**: both action stages and the act-2 boss have been
-  completed in widescreen; its sim entry/lightning event is confirmed, while
-  the full town round remains.
-- **Kasandora (kingdom 3)**: an instrumented act-1 widescreen pass is captured;
-  act 2 and its simulation town remain unverified.
-- **Aitos, Marahna, Northwall, and Death Heim**: static action-handler preflight
-  is complete, but direct playthroughs remain. The current local generated build
-  includes the 43-entry handler batch needed for that matrix.
+- **Action stages, regions 1-6**: every ordinary action level has been played
+  through and is fully playable. Widescreen BG streaming, sprites, activation,
+  enemies/platforms, bosses, fast vertical traversal, and the observed
+  HDMA/parallax effects all render and behave correctly.
+- **Remaining action widescreen polish**: map and apply presentation-aware
+  camera/world-edge clamping so the ends of finite backgrounds cannot scroll
+  into the wider viewport.
+- **Death Heim (region 7 / `70X`)**: currently broken. `0701` reaches the first
+  boss arena and then crashes; the boss-rush/final-boss flow is not playable.
+- **Simulation mode**: Fillmore has one confirmed clean end-to-end town round;
+  Bloodpool has partial entry/lightning coverage. The remaining towns and full
+  simulation-mode widescreen behavior are TBD.
 - Open bugs and investigation state live in [`DEBUG.md`](DEBUG.md).
 
 
 Extra features WIP:
-* Proper-ish Widescreen support
+
+* Widescreen support (ordinary action levels validated; camera-edge polish,
+  Death Heim, and simulation mode remain)
+* Runtime settings and in-game overlay UI ([design](docs/settings-system.md))
 
 #### Screenshots
 
 ![menu](/assets/menu.png)
 ![mode7](/assets/mode7.png)
-![fillmore boss](/assets/fillmore-boss.png)
+![bloodpool act2](/assets/bloodpool-act2.png)
 ![fillmore sim](/assets/sim.png)
 
 ## AI disclosure
@@ -132,6 +136,9 @@ ActRaiserRecomp/
 │   │                             groundwork for a future full decompilation.
 │   ├── ram-map.md             # WRAM address reference
 │   ├── rom-map.md             # ROM data-region reference
+│   ├── rendering-engine.md    # rendering/streaming/OAM architecture
+│   ├── widescreen-survey.md   # widescreen evidence + implementation record
+│   ├── settings-system.md     # live settings + overlay UI design
 │   └── progress.md            # ★ per-action-level / per-sim-mode-town /
 │                                 major-functionality status tracker
 ├── recomp/
@@ -167,7 +174,8 @@ problem (which tool, which env var, which known gotcha), `SEAMS.md` tells you
 *what the game's internal architecture actually is* (object systems, dispatch
 tables, subsystem boundaries) as reverse-engineered so far, and `progress.md`
 tells you *what actually works today* (playability per stage/town + codebase
-metrics).
+metrics). `docs/settings-system.md` is the next-phase design for replacing
+boot-cached knobs with live settings and a host-side overlay UI.
 
 ## Build instructions
 
@@ -250,20 +258,25 @@ not overlays.
 
 Only what's listed below is read by `config.c`. **`config.ini`'s `[KeyMap]` and
 `[GamepadMap]` sections, and the `Autosave`/`DisableFrameDelay`/`SkipLauncher`/
-`EnableSnes9xOracle`/`WindowSize`/`IgnoreAspectRatio` keys, are currently
-placeholders — none of them are parsed or have any effect.** Gamepad input isn't
-implemented at all yet.
+`EnableSnes9xOracle`/`WindowSize` keys, are currently placeholders — none of
+them are parsed or have any effect.** `Fullscreen`, `LinearFiltering`, and
+`NoSpriteLimits` are parsed into `Config` but currently have no runtime
+consumer. Gamepad input isn't implemented at all yet.
 
 **Real config keys** (`[Graphics]`/`[Sound]`):
 
 | Key | Effect |
 |---|---|
 | `WindowScale` | integer window scale factor |
-| `Fullscreen` | fullscreen toggle |
 | `NewRenderer` | use the newer rendering path |
-| `NoSpriteLimits` | disable the SNES's per-scanline sprite limit |
-| `LinearFiltering` | linear texture filtering |
+| `ExtendedAspectRatio` | target widescreen ratio such as `16:9`; `off` disables widescreen |
+| `AspectPAR` | `4:3` for SNES pixel-aspect correction or `square` for square pixels |
+| `IgnoreAspectRatio` | disable logical-size aspect correction and stretch to the window |
 | `EnableAudio`, `AudioFreq`, `AudioChannels`, `AudioSamples` | audio output settings |
+
+Parsed-but-unwired keys (`Fullscreen`, `LinearFiltering`, `NoSpriteLimits`) are
+being tracked by the runtime-settings plan and should not yet be treated as
+working controls.
 
 **Keyboard controls are hardcoded** (not configurable via `.ini` yet) —
 see `HandleInput()` in `src/main.c`:
@@ -296,8 +309,29 @@ exported as an environment variable, which is how these are read):
 | `AR_INF_SP=1` | sim mode: infinite SP (miracle points), self-calibrating to your max |
 | `AR_ANGEL_HP=1` | sim mode: infinite angel health, self-calibrating to your max |
 | `AR_PIN=<8-hex-PAR>[,...]` | generic Pro Action Replay code pinner (e.g. `7E00210A`); catalogue in `codes.txt` / `docs/ram-map.md` |
-| `AR_WARP=<region_hex><act_hex>` | sets the `F6` warp target (default `0101` = Fillmore act 1); only takes effect from a transition-capable state |
+| `AR_WARP=<region_hex><map_hex>` | sets the raw `$18:$19` target used by `F6` (default `0101`); use the verified table below |
 | `AR_TURBO_MULT=<n>` | game frames per rendered frame while `T` turbo is on (default 8) |
+
+#### Verified `AR_WARP` targets
+
+The low byte is the game's raw map/sub-flow value, **not a uniform act number**.
+For example, `0302` is not Kasandora Act 2; it loads invalid/garbage state, while
+Kasandora Act 2 begins at `0303`.
+
+| Region | Act 1 entry | Act 2 entry | Notes |
+|---|---:|---:|---|
+| Fillmore | `0101` | `0102` | |
+| Bloodpool | `0201` | `0202` | |
+| Kasandora | `0301` | `0303` | Do not use `0302` as an Act 2 shortcut |
+| Aitos | `0401` | `0404` | |
+| Marahna | `0501` | `0504` | |
+| Northwall | `0601` | `0605` | `0608` directly enters the Act 2 boss arena for focused testing |
+| Death Heim | `0701` | — | **Broken:** reaches the first boss arena, then crashes |
+
+Set the target before launch, enter a transition-capable state, then press
+`F6`. An action-to-action warp is not a naturally observed transition and may
+inherit timing/object state; reproduce suspicious gameplay behavior through
+natural progression before classifying it as a game or widescreen regression.
 
 Everything else in `dev-config.ini`'s `[Debug]` section is diagnostic
 instrumentation for active bug-hunting, documented in `DEBUG.md` — not
