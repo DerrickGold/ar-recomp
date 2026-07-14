@@ -37,7 +37,7 @@ Read each snapshot's `$18`/`$19` from its `.wram.bin` (offsets 0x18/0x19).
 |-----|-----|--------|--------------|----------|
 | 00 | 00 | Title / menu | clean (black BG) but **pillarbox** — $19=00 likely covers other screens (intro etc.) we haven't sampled | snap_00 |
 | 00 | 01 | Sim mode, town view | world tilemap fills margins cleanly in static shot; **pillarbox until Phase 3** — needs scroll/map-edge clamp + people-sprite cull/OAM widening | snap_05 |
-| 00 | 07 | Sky palace (angel hub) | **WIDE — validated.** Columns + cloud plane extend naturally; menus/dialog centered fine | snap_01, snap_03 |
+| 00 | 07 | Sky palace (angel hub) | **WIDE.** BG1 sky/clouds are clean; BG2 pillars are genuinely wide, but dialogue states expose the game's offscreen BG2 staging. Render-only ROM source-map margin decode implemented 2026-07-12, pending direct validation | snap_01, snap_03; failure evidence `runs/20260712-232230`, 11:31 and 11:36 PM captures |
 | 00 | 08 | Temple interior / dialog scenes | **WIDE — validated.** Bounded scene on black backdrop, margins show backdrop | snap_04 |
 | 00 | 09 | Mode 7 world map | **WIDE — validated.** M7 plane fills full width; snap_02 shows a few black columns at extreme left at some scroll positions (map edge = backdrop) — acceptable | snap_02, snap_06 |
 | 01-07 | * | Action stage (act = $19) | world layers (BG1/BG2 parallax) extend beautifully; **pillarbox until Phase 3**. Artifacts: (a) at level edge (cam_x=0) left margin shows WRAPPED BG1 columns from the far end of the 512-wide tilemap → needs level-bound clamp via PpuSetExtraSideSpace; (b) BG3 HUD rows wrap in margins (repeated left-HUD tiles, the "«««" junk under SCORE) → PpuSetWidescreenBg3Widen(hud_height) or HudSplit; (c) sprite draw/cull windows still authentic (no pop-in observed in static shot; expected when enemies cross ±0/256 while moving) | snap_07 (Bloodpool act 1, $18=02 $19=01) |
@@ -74,36 +74,95 @@ UI engine uses BG2's offscreen tilemap columns as a construction/staging area
 for dialog and menu boxes — redrawn per UI state (box frames, fills parked in
 the columns adjacent to the visible screen; content changes when opening e.g.
 the message-speed screen). Invisible on hardware; exposed by widescreen
-margins as "extra text box edges" / black slabs. Sampling further out
-(margin-gap 48px) proved the offscreen area is staging/scratch ALL the way —
-there is NO pillar-continuation content. Detection approaches that failed:
+margins as "extra text box edges" / black slabs. Sampling further out during
+a dialogue state (margin-gap 48px) proved that state uses the offscreen area as
+staging/scratch all the way; merely skipping more columns cannot reach clean
+pillar continuation. Detection approaches that failed:
 y-band from box-frame tiles (staging is tall side columns, not a band),
 tile fingerprinting (box shares tiles 0x0ff/0x0ee with pillars), dispatcher
 hook `$02:BF60` (fires sporadically; hle_func can't wrap; geometry varies).
 
-**Sky palace mechanism (traced):** the game double-buffers UI in BG2's
-offscreen tilemap half. `$02:ADA8` is the SOLE BG2 tilemap writer — a whole
-64x32 map upload (4096 words) from a WRAM compose buffer (`[$76]`, bank $7E),
-re-run per UI state. Box-free states (message-speed submenu) leave the pillar
-continuation in the offscreen columns; dialog states STAGE A SECOND (taller)
-BOX there instead — verified per-row at a dialog frame: offscreen cols hold
-box interior fill $011 (rows 5-22) + borders $017/$018 (rows 24-27), not
-pillars. So the offscreen pillar tiles DO exist (submenu draws them), they're
-just clobbered by box-staging in dialog states. (Correcting an earlier wrong
-claim that "no pillar source exists".)
+**Observed Sky Palace map states:** dialogue states stage a second, taller box
+in BG2's offscreen half — verified per row: offscreen columns hold box interior
+fill `$011` (rows 5-22) and borders `$017/$018` (rows 24-27), not pillars. The
+message-speed submenu instead exposes a completed BG2 map with clean pillar
+continuation. This proves clean background data exists, but does **not** prove
+that every dialogue composition has an observable background-only intermediate.
+The submenu may rebuild the map or select a different completed page/state.
 
-**Sky palace verdict (FINAL, user decision 2026-07-10): plain full-wide,
-staging artifacts accepted.** The wide-colonnade first impression outweighs
-transient box-staging tiles in the margins during dialogs; every mitigation
-tried was worse (whole-layer clamp kills the pillars; dynamic clamps trigger
-too often since submenus keep other boxes staged; 48px margin-gap samples more
-staging; 32px margin-limit + bottom band rejected). The cache+substitute
-approach (`ActRaiser_SkyPalaceWideColonnade`, parked/commented in
-src/actraiser_rtl.c) is the most promising future fix but its cache never
-warms in normal flows — no fully box-free frame exists; the correct warm
-source is the compose buffer at `[$76]` BEFORE box-draw (layout NOT
-row-major-64 — quadrant/interleaved, unresolved), revisit in a
-game-code-modification phase.
+Static correction (2026-07-12): `$02:ADA8` is the shared **64-byte** VRAM DMA
+helper, not one monolithic 64x32 compose upload. Entry/whole-map refreshes are
+mega-bursts: `$02:B727` repeatedly calls the original `$02:B825` column decoder
+and drains its records inline. `$02:BF60` writes the BG3/HUD compose buffer at
+`$7F:B000`; it is not a proven direct BG2 staging writer. The exact submenu
+transition (rebuild versus BG2SC/page selection) remains a targeted trace item.
+
+**Historical policy (2026-07-10):** plain full-wide with transient staging
+artifacts accepted after whole-layer clamp, dynamic clamp, margin-gap, and
+scanline-band experiments all looked worse. The old
+`ActRaiser_SkyPalaceWideColonnade` cache experiment was parked because normal
+flows never reliably produced a clean frame from which to warm it.
+
+**Failed render-scoped decoder reconstruction (tested 2026-07-12):** in
+`runs/20260712-232230`, `[ws-sky]` reported 9/9 reconstructed strips, logical
+width `$0200`, scroll `$0000`, and BG2SC `$73`; the captured margins still held
+the staged boxes. BG2SC `$73` confirms the expected `$7000` base and 64x64 map,
+so this was not an offset or destination-page error. It demonstrates that the
+active `$B825` source/config has already switched to the UI-composed completed
+state. Re-decoding from it cannot recover an earlier clean palace map. The
+transaction was removed rather than retained as dead complexity.
+
+**Renderer-only padding trials (2026-07-12):** reflecting only the first clean
+16 raw BG2 pixels beside each authentic edge removed the staged boxes, proving
+the renderer-side isolation strategy. The user capture at 11:31 PM also showed
+why that source was too narrow: it contained only transparent/cap fragments,
+which repeated as broken posts rather than complete columns.
+
+The next isolated-center mirror also failed. The 11:36 PM capture corrected the
+ownership model: `$02:BF60` supplies text through BG3, but the visible bounding
+box remains on BG2. Reflecting the center therefore copied its side borders
+into both margins.
+
+**Direct source-map margin decode (implemented 2026-07-12; validated
+2026-07-13):** static ROM evidence at `$02:B6F8-$B726` is a conditional 256-byte
+copy from ROM `$07:D0A0` to WRAM `$7E:C200`. The source is a 16x16 metatile page
+with the authentic palace beam, capitals, shafts, and floor. Its metatile rows
+9-12 contain a box; the box-free scene behind it is reconstructed per column
+class (established 2026-07-13 by prediction-vs-live-map diffs, `runs/20260713-*`,
+after three staged fixes):
+
+1. Quadrant order is row-major within the metatile (`((y&1)<<1)|(x&1)` =
+   TL,TR,BL,BR); the initial x-major read transposed every 2x2 block and drew
+   the split shaft metatiles as 8px checkerboards.
+2. Rows 9-10 continue the shaft row 8; meta cols 0/15 keep rows 11-12 (the
+   page-seam base halves `$42/$40`+`$4A/$48` that complete each center-edge
+   half-base); the floor plane's top two rows sit under the box bottom, so
+   row 12 maps to floor row 13 at plain columns (the page's own floor rows
+   13-15 only cover the lower floor — true in BOTH scroll bands; a
+   band-conditional first attempt left a one-row black band in menu state).
+3. Pillar base flares exist only in the metatile table, never in a page row:
+   `$41/$49` center (the `$41` top half is plain shaft, so the splice is
+   seamless) flanked by `$40/$48` / `$42/$4A` skirts at the row-8 shaft
+   neighbors — recovered by reverse-lookup of the words the boot-time
+   colonnade left in the scratch columns.
+
+The game stages menu UI by rewriting the WRAM `$C200` page copy (rows 2-6)
+and re-decoding, so the pristine ROM page is the correct box-free source. The
+64x64 map holds four quadrant canvases (2 x-pages x 2 y-bands) selected per
+UI state via scroll; the mapping above applies to all of them. F2 VRAM dumps
+are taken after the post-scanout restore, so margins must be validated from
+rendered pixels or predictions, never from the dump.
+
+For rendering, only BG2 tile columns sampled by the side margins are generated.
+The source IDs are expanded through the live `$7E:2900` BG2 metatile table and
+the same `$FDFF` mask / `$2000` attribute composition used by `$02:B90D`.
+Columns belonging to the authentic center are explicitly excluded. The game
+keeps its real center box and offscreen staging; the temporary VRAM map is
+restored byte-for-byte after scanout. This remains presentation-only and needs
+no generated-code change. `AR_WS_SKYPALACE_BG=0` restores raw-wide output.
+**Validation:** the final margin decode is byte-identical to the game's own
+boot-composed colonnade (scratch cols 56-63, rows 18-31), and the user
+confirmed clean margins in both the dialogue and submenu states.
 
 **Engine widescreen primitives built along the way** (all game-agnostic,
 inert unless set, reset per frame by the extra-space setters):

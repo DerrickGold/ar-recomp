@@ -265,6 +265,7 @@ quality knobs default **on** = `!(e && e[0]=='0')`). "Avail." = the
 |---|---|---|---|---|
 | Wide action stages | `AR_WS_ACTION` | bool | on | master toggle; already uncached/live |
 | BG margin refresh | `AR_WS_BGREFRESH` | bool | on | true-content margins vs stale/wrapped |
+| Sky Palace BG2 source repair | `AR_WS_SKYPALACE_BG` | bool | on | render-only ROM source-map margin decode; off restores raw-wide dialogue staging. Validated 2026-07-13 (byte-identical to the boot colonnade) |
 | Widen sprites | `AR_WS_SPRITES` | bool | on | emit sprites into margins |
 | Draw margin objects | `AR_WS_MARGIN_OBJECTS` | bool | on | object draw coverage in margins |
 | Extend activation | `AR_WS_MARGIN_ACTIVATION` | bool | on | `$0400` activation boundary |

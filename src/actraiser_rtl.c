@@ -263,59 +263,6 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
   return RECOMP_RETURN_NORMAL;
 }
 
-/* Wide-colonnade support for the sky palace. The game double-buffers UI in
- * BG2's offscreen tilemap half: box-free states (e.g. the message-speed submenu)
- * leave the pillar continuation there, dialog states stage a box there instead
- * (verified: offscreen rows fill with box tiles $011/$017/$018 while a box is
- * up). So the pillar tiles for the margin columns DO exist — just not every
- * frame. Cache them from any box-free frame, and on boxed frames write the
- * cached pillars back into the sampled offscreen VRAM columns so the margins
- * show the colonnade. Safe: the BG tilemap is render-only (nothing reads it
- * back) and the game's next full-map upload ($02:ADA8) overwrites our patch.
- * hScroll is 0 in this scene, so the sampled columns are stable. Returns 1 if
- * the margins are colonnade-safe this frame (cached or naturally clean), 0 if
- * the cache is still cold and the caller should clamp instead. */
-static int ActRaiser_SkyPalaceWideColonnade(int extra) {
-  // TODO:
-  // This doesn't actually work - the tile detection is broken so it never manages to cache anything
-  enum { ROWS = 32, MAXC = (95 + 7) / 8 };  /* up to kWsExtraMax cols/side */
-  static uint16 cacheL[ROWS][MAXC], cacheR[ROWS][MAXC];
-  static int warm = 0;
-  int base = (g_ppu->bgXsc[1] & 0xfc) << 8;
-  if (!(g_ppu->bgXsc[1] & 1)) return 1;   /* 32-wide: margins just wrap, safe */
-  int tiles = (extra + 7) >> 3;
-  if (tiles > MAXC) tiles = MAXC;
-  int hs = g_ppu->hScroll[1];
-
-  /* Is a box staged in the sampled offscreen columns? (box frame tiles) */
-  int boxed = 0;
-  for (int r = 0; r < ROWS && !boxed; r++)
-    for (int i = 0; i < tiles; i++) {
-      int cr = ((hs >> 3) + 32 + i) & 63, cl = ((hs >> 3) + 63 - i) & 63;
-      uint16 tr = g_ppu->vram[(base + (cr & 32 ? 0x400 : 0) + r * 32 + (cr & 31)) & 0x7fff] & 0x3ff;
-      uint16 tl = g_ppu->vram[(base + (cl & 32 ? 0x400 : 0) + r * 32 + (cl & 31)) & 0x7fff] & 0x3ff;
-      if (tr == 0x17 || tr == 0x18 || tl == 0x17 || tl == 0x18) { boxed = 1; break; }
-    }
-      
-  fprintf(stderr, "Found boxed env, will draw from cache: %d\n", boxed);
-
-  for (int r = 0; r < ROWS; r++)
-    for (int i = 0; i < tiles; i++) {
-      int cr = ((hs >> 3) + 32 + i) & 63, cl = ((hs >> 3) + 63 - i) & 63;
-      int ar = (base + (cr & 32 ? 0x400 : 0) + r * 32 + (cr & 31)) & 0x7fff;
-      int al = (base + (cl & 32 ? 0x400 : 0) + r * 32 + (cl & 31)) & 0x7fff;
-      if (!boxed) {                       /* clean frame -> refresh the cache */
-        cacheR[r][i] = g_ppu->vram[ar];
-        cacheL[r][i] = g_ppu->vram[al];
-      } else if (warm) {                  /* boxed -> substitute cached pillars */
-        g_ppu->vram[ar] = cacheR[r][i];
-        g_ppu->vram[al] = cacheL[r][i];
-      }
-    }
-  if (!boxed) warm = 1;
-  return !boxed || warm;
-}
-
 /* Per-frame widescreen policy — the single seam where game mode decides how
  * much of the extra-column budget (g_ws_extra, set at startup from
  * ExtendedAspectRatio) is visible this frame. Phase 1: pillarbox everywhere
@@ -349,24 +296,13 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   int action_margins = 0;
   if (!survey && g_ram[0x18] == 0x00) {
     switch (g_ram[0x19]) {
-      case 0x07:            /* sky palace hub. BG1 = sky/clouds (wide, clean).
-                               BG2 = pillars — but the game constructs dialog/
-                               menu boxes in BG2's offscreen tilemap columns (a
-                               scratch canvas, redrawn per UI state), and while
-                               a box exists there is NO box-free pillar source
-                               anywhere in the map (box cols 3-27; the free
-                               cols 28-31/0-2 hold no shafts). So: DYNAMIC —
-                               BG2 wide while its staging strip is empty (full
-                               wide colonnade), clamped while UI is staged
-                               (colonnade centers during dialogs; sky always
-                               wide). BG3 = HUD + text (default clamped). */
+      case 0x07:            /* Sky Palace hub. BG1 = sky/clouds (wide, clean).
+                               BG2 = pillars plus game-owned offscreen dialog
+                               staging farther around its 64x64 tilemap. Keep
+                               BG2 raw-wide; the render transaction decodes a
+                               box-free ROM source into only margin columns.
+                               The authentic center retains its BG2 box. */
         wide = 1;
-        /* Substitute cached pillars into the offscreen margin columns while a
-         * box is staged there, so the colonnade stays wide during dialogs.
-         * Falls back to clamping BG2 only until the cache is warm (before any
-         * box-free frame — e.g. the message-speed submenu — has been seen). */
-        //if (ActRaiser_SkyPalaceWideColonnade(g_ws_extra))
-        //  clamp = 0x02;
         break;
 
       case 0x09:            /* Mode 7 world map: fully wide, no UI layers. */
@@ -491,7 +427,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   }
   /* One line per policy flip — cheap, and makes "why isn't this screen
    * wide?" diagnosable from any console.log (mode bytes included). */
-  static int last_wide = -1, last_clamp = -1, last_mirror = -1, last_repeat = -1;
+  static int last_wide = -1, last_clamp = -1, last_mirror = -1,
+             last_repeat = -1;
   if (wide != last_wide || clamp != last_clamp || mirror != last_mirror ||
       repeat != last_repeat) {
     last_wide = wide;
@@ -561,6 +498,9 @@ void ActRaiserDrawPpuFrame(void) {
   /* Stage B: populate BG1/BG2 margin tilemap cells transactionally before
    * scanline rendering. No-op under AR_WS_BGREFRESH=0 and outside action. */
   ActRaiser_WidescreenMarginRefresh();
+  /* Sky Palace: synthesize only BG2's offscreen margin columns from its ROM
+   * source page. The paired restore after scanout preserves UI staging. */
+  ActRaiser_WidescreenSkyPalacePrepare();
   /* Process ALL 8 HDMA channels, not a fixed subset. ActRaiser drives its
    * per-scanline effects (e.g. the Mode-7 title matrix animation) on channels
    * 2/3 — the old code only ran 5/6/7 (a stale assumption carried over from
@@ -594,6 +534,7 @@ void ActRaiserDrawPpuFrame(void) {
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
   }
+  ActRaiser_WidescreenSkyPalaceRestore();
 }
 
 /* Host-side cheat hooks (debug-menu scaffold). All env-gated, default OFF, so

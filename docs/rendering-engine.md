@@ -275,12 +275,64 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
 
 ## 11. UI / dialog compose (sim engine)
 
-- `$02:BF60`: dialog/message-box draw dispatcher (type in `$14`).
+- `$02:BF60`: dialog/message-box draw dispatcher (type in `$14`); its tile
+  writes target the BG3/HUD compose buffer at `$7F:B000`, later streamed by
+  `$02:AEEB`. It is not a proven direct writer of Sky Palace's BG2 staging.
 - Whole-map UI refreshes = the §3 mega-burst mechanism (record buffers
   re-filled + inline-drained repeatedly in one frame). The "[$76] ->
   `$3B04`" values seen game-side are just the NMI drain cursors at rest.
-- Sky palace policy: plain full-wide, staging artifacts accepted (FINAL,
-  per user decision — see widescreen-survey.md).
+- Sky Palace has two observed completed BG2 states: dialogue states place a
+  staged box in the offscreen columns, while the message-speed submenu shows
+  clean pillar continuation. No separate clean-before-box upload has been
+  observed inside one dialogue composition; whether the submenu rebuilds the
+  ring or selects another BG2SC page remains to trace.
+- A render-scoped `$B825` reconstruction was directly disproved by
+  `runs/20260712-232230`: `[ws-sky]` reported all 9/9 requested strips built at
+  width `$0200`, scroll `$0000`, and BG2SC `$73` (base `$7000`, 64x64), yet the
+  snapshot still showed the staged boxes. The address and destination geometry
+  were correct; the live decoder source/config already described the
+  UI-composed state, so decoding faithfully reproduced it. That transaction
+  has been removed.
+- A follow-up renderer-only trial kept the first clean 16px of raw BG2 outside
+  each authentic edge and reflected that narrow band outward. It successfully
+  removed staging, but the band did not contain a whole architectural column;
+  its transparent/cap fragments repeated as broken posts at the extreme sides
+  (user capture `Screenshot 2026-07-12 at 11.31.20 PM.png`).
+- Isolated authentic-center reflection supplied complete columns, but the
+  11:36 PM user capture corrected the layer ownership: BG3 carries the text,
+  while BG2 still carries the visible box frame. Center reflection therefore
+  copied the left/right portions of that box into both margins. That policy was
+  removed.
+- Static source recovery found the original map feed at `$02:B6F8-$B726`:
+  under its Sky Palace/submenu conditions, the game loops over 256 bytes from
+  ROM `$07:D0A0` and stores them at `$7E:C200`. The ROM block is a 16x16
+  metatile page containing the exact palace beam, capitals, shaft pattern, and
+  floor. Its rows 9-12 are occupied by a dialog box, but rows 3-8 establish the
+  unchanged shaft continuation underneath it.
+- Current Sky Palace policy (implemented 2026-07-12, **validated 2026-07-13**)
+  reads `$07:D0A0` itself and expands metatile IDs through the live BG2
+  definition table at `$7E:2900` using the same mask/attribute operation as
+  `$02:B90D`. Layout facts established during validation (cell-by-cell diffs
+  vs the live map, `runs/20260713-*`):
+  - Definition words are **row-major within the metatile** — quadrant
+    `((y&1)<<1)|(x&1)` = TL,TR,BL,BR. The x-major order transposes every 2x2
+    block (split shaft metatiles render as 8px checkerboards).
+  - The 64x64 map is four quadrant canvases (2 x-pages x 2 y-bands) selected
+    per UI state via scroll (menu `vscroll~504` = top band, dialogs
+    `vscroll~248` = bottom band; hscroll 0). All share one scene layout.
+  - The page's box rows 9-12 cover scene rows that must be reconstructed:
+    rows 9-10 continue the shaft (row 8); the floor plane's top two rows sit
+    under the box bottom (row 12 -> floor row 13 at plain columns; page rows
+    13-15 only cover the lower floor); meta cols 0/15 keep rows 11-12 (the
+    page-seam base halves `$42/$40` + `$4A/$48`).
+  - Pillar base flares exist **only in the metatile table**, never in a page
+    row: `$41/$49` center (`$41` top half = plain shaft, seamless splice)
+    flanked by the `$40/$48` / `$42/$4A` skirts on the row-8 shaft neighbors.
+  Only 8px tile columns sampled exclusively by the side margins are patched in
+  VRAM; the authentic center and its BG2 box are untouched. The entire BG2 ring
+  is restored immediately after scanout. The final margin decode is
+  **byte-identical to the game's own boot-composed colonnade** (scratch cols
+  56-63, rows 18-31). `AR_WS_SKYPALACE_BG=0` selects raw-wide output.
 
 ### 11.1 Town camera and OAM pipeline
 

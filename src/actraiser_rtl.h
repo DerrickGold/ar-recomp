@@ -8,10 +8,13 @@
 void ActRaiserDrawPpuFrame(void);
 void RunOneFrameOfGame(void);
 
-/* BG-only action-stage widescreen refresh. These never replace the game's
- * OAM builder or normal tile streamers. */
+/* BG-only widescreen presentation helpers. These never replace the game's OAM
+ * builder or normal tile streamers. The Sky Palace pair temporarily decodes a
+ * box-free source map into only BG2's margin columns, then restores game VRAM. */
 int ActRaiser_WidescreenBgRefreshEnabled(void);
 void ActRaiser_WidescreenMarginRefresh(void);
+void ActRaiser_WidescreenSkyPalacePrepare(void);
+void ActRaiser_WidescreenSkyPalaceRestore(void);
 void ActRaiser_WidescreenSpriteActivationProbe(void);
 
 #endif  // ACTRAISER_RTL_H

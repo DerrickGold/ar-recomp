@@ -675,6 +675,18 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   renderer with stale/wrapped margins. Unset/nonzero selects Stage B: isolated
   true-content BG1/BG2 margin refresh. Both modes retain the original recompiled
   BG streamers and OAM builder.
+- **`AR_WS_SKYPALACE_BG=0`** — disable the Sky Palace `$00/$07` render-only
+  source-map repair and restore historical raw-wide output with dialogue
+  staging visible in the margins. Default-on reads the 16x16 metatile page at
+  ROM `$07:D0A0`, reconstructs the box-covered rows 9-12 per column class
+  (shaft continuation; seam base halves at meta cols 0/15; floor's top two
+  rows at plain columns; `$41/$49` base flare + `$40/$48`/`$42/$4A` skirts at
+  shaft columns), expands it through the live `$7E:2900` metatile definitions
+  (row-major quadrants: TL,TR,BL,BR), and writes only margin-sampled BG2
+  columns for scanout. The game BG2 ring is restored afterward; center box,
+  CPU, and WRAM state remain authentic. Validated 2026-07-13: margin decode is
+  byte-identical to the game's boot-composed colonnade (rendering-engine.md
+  §11 has the layout facts; widescreen-survey.md the fix history).
 - **`AR_WS_BG2_MIRROR=0`** — for action sections whose BG2 declares only a
   256px width (`$32<$0200`), disable renderer-side presentation padding and
   restore the proven centered BG2 clamp. The default reflects only BG2's
@@ -684,12 +696,14 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   direction across the seam.
   Both modes operate on an isolated BG2 render and never copy BG1 or OBJ. This
   is a startup-cached switch—set it before launching.
-- **`AR_WS_BGDBG=1`** — log Stage-B column-strip and vertical-row counts,
+- **`AR_WS_BGDBG=1`** — log Stage-B action column-strip and vertical-row counts,
   accepted margins, and any rejected record cursor/VRAM target. A fast vertical
   traversal should produce `rows=N/N` at each 16px camera crossing; long gaps
   while `$24` advances identify a stale-row cadence regression. Every line ends
   in `(state restored)`; rejects are safety stops and should be investigated,
   never bypassed.
+  In Sky Palace it also reports `[ws-sky] source=$07:D0A0 meta=$7E:2900
+  cols=N ... (render-only)` or a descriptor/header rejection.
 - **`AR_WS_SPRITES=0`** — after the Stage-C regeneration, keep the isolated
   `$8D68` port on its authentic horizontal window for the fidelity gate. Unset/
   nonzero widens only per-sprite emission; `$8C98` activation stays original.

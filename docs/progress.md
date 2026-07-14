@@ -127,7 +127,9 @@ For **each** incomplete town, the baseline pass must cover:
 3. builders, people, monsters, lairs, and ordinary development cycles;
 4. town-specific disaster/story events and their multi-actor cutscenes;
 5. offerings/rewards and persistence of granted items/stat upgrades;
-6. lair sealing, dialogs/temple/sky-palace staging, and sim→act-2 transition;
+6. lair sealing, dialogs/temple, Sky Palace staging (margin decoder directly
+   validated 2026-07-13 — byte-identical to the boot colonnade; re-check per
+   town only if a palace state looks off), and sim→act-2 transition;
 7. an exit dispatch ring plus F2 snapshots around any partial actor, silent
    event, frozen builder, or missing reward.
 
