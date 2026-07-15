@@ -5,11 +5,12 @@ widescreen knobs, display/audio, QoL) and defines each one's **path to live
 runtime updates**, so a future in-game overlay menu can flip them mid-run. This
 is the "option B" refactor from the 2026-07-12 settings scan.
 
-Status: **PHASE 1 CORE IMPLEMENTED.** `src/settings.{c,h}` now own the existing
-cheat fields, nine widescreen behavior gates, a 20-row descriptor registry, and
-the deterministic render-profile cycle. Descriptor-driven persistence,
-display/audio config migration, save editing, and the overlay remain. Companion
-docs:
+Status: **PHASES 1–3 FOUNDATION IMPLEMENTED.** `src/settings.{c,h}` now own the
+existing cheat fields, nine widescreen behavior gates, the render profile, and
+a 21-row descriptor registry with lookup, formatting, availability, mutation,
+callbacks, sticky/restart results, and observer notification. Descriptor-driven
+persistence, display/audio config migration, the save codec/backends and
+editor, and the overlay remain. Companion docs:
 [SEAMS.md](SEAMS.md) (gameplay/tunable seams the cheats hook),
 [rendering-engine.md](rendering-engine.md) (widescreen policy internals),
 [ram-map.md](ram-map.md) (the WRAM addresses the cheats pin),
@@ -60,9 +61,10 @@ the `*_DBG` family intentionally remain direct `getenv` consumers (§11).
   menu rendering, and live-apply — no per-field duplication across those four.
 - A host-side in-game overlay that renders settings without consuming SNES
   VRAM/OAM or changing emulated game state.
-- Save editing (`CAT_SAVE`, §4/§5) as a first-class settings category, so
-  sim-mode progress states can be staged for testing — the gap `AR_WARP` cannot
-  cover (it stages an act transition, not sim progress).
+- Save persistence and editing (`CAT_SAVE`, §4/§5) as a first-class category:
+  keep native `.srm` compatibility, optionally load/persist lossless `save.ini`
+  files, and stage sim-mode progress states for testing — the gap `AR_WARP`
+  cannot cover (it stages an act transition, not sim progress).
 - Behavior-preserving: a normal run and every existing `AR_*` dev run stay
   byte-identical at boot.
 - A defined **apply path** per setting (§4) so the menu knows what each control
@@ -121,9 +123,12 @@ typedef struct Settings {
   int    turbo_mult;           // T key multiplier (default 8)
   uint16 warp_target;          // F6 raw region/map; use README's verified table
 
-  /* Save editing -- staged into g_sram, NOT per-frame. See save-format.md.
+  /* Save storage/editing -- loaded into and staged in g_sram, NOT per-frame.
+   * SAVE_BACKEND_NATIVE_SRM remains the compatible default; INI is opt-in.
+   * See save-format.md §4.
    * Only fields VERIFIED against our ROM appear here; the rest stay unexposed
-   * until promoted (save-format.md §3.2/§5). -1 = "leave as-is". */
+   * until promoted (save-format.md §3.2/§6). -1 = "leave as-is". */
+  int   save_backend;          // enum native-srm / ini; boot-selected
   int8  save_region_prog[6];   // Fillmore..Northwall -> SRAM 0x1200 +2/region
   bool  save_edit_armed;       // master gate; nothing touches g_sram unless set
   bool  save_autobackup;       // timestamped .bak before first edit (default on)
@@ -178,16 +183,23 @@ typedef struct SettingDesc {
   void       *field;      // &g_settings.cheat_all_magic
   long        defval, minval, maxval, step;
   bool        sticky;
+  const char *const *enum_labels;
+  int         enum_count;
+  bool (*available)(void);
+  void (*on_change)(const SettingDesc *);
   bool (*parse)(const char *, void *);  // custom env encoding
+  int  (*format)(char *, int, const void *);
 } SettingDesc;
 extern const SettingDesc g_setting_descs[];
 extern const int g_setting_desc_count;
 ```
 
-Phase 3 extends this row rather than creating another table: `enum_labels`,
-`available()`, `on_change()`, and `format()` are still required for menu and
-persistence. A unit test that every user-facing struct field has exactly one
-descriptor will then guard against struct/table drift.
+`Settings_Find`, `Settings_SetLong/Text`, `Settings_Reset`, and
+`Settings_FormatValue` are the only mutation/formatting path the overlay and
+persistence layer should use. They normalize ranges, report sticky disables or
+pending restarts, invoke the row callback, and notify the host observer. The
+CTest target verifies unique keys/fields and that every current user-facing
+field has exactly one descriptor.
 
 ### 3.3 Value resolution (the seed path)
 
@@ -265,9 +277,10 @@ live:
 | **CALLBACK** | `on_change()` fires one SDL/PPU call. `window_scale`→`SDL_SetWindowSize`; `fullscreen`→`SDL_SetWindowFullscreen`; `audio_enabled` mute→`SDL_PauseAudioDevice`; `ignore_aspect_ratio`→renderer logical-size. | window_scale, fullscreen, ignore_aspect_ratio, audio mute | small |
 | **RESTART** | Needs realloc/reinit unsafe to do cheaply mid-frame. Per setting: attempt heavy live reinit, or set a "pending — applies on relaunch" badge (§10.2). | aspect on/off + ratio (window + PPU buffer realloc), `new_renderer`, audio freq/samples (device reopen; audio thread) | real work |
 | **ACTION** | Not stored toggles — commands the menu invokes; only the *param* is stored. | warp (`warp_target`, F6), turbo (`turbo_mult`, T), savestate (F5/F7), snapshot (F2), pause (P) | reuse existing hotkey paths (`src/main.c:587`) |
-| **SAVE** | One-shot mutation of the `g_sram` buffer + mandatory checksum recompute. Takes effect **the next time the game loads the save from its own title menu** — no app restart. See §4.1. | `save_region_prog[]` (save-format.md §3.1) | small, but see the §4.1 hazard |
+| **SAVE** | Transactional mutation of the canonical `g_sram` image + mandatory checksum recompute; optional commit through the active `.srm` or `.ini` backend. Takes effect **the next time the game loads the save from its own title menu** — no app restart. See §4.1. | `save_region_prog[]` (save-format.md §3.1), save import/export actions | small, but see the §4.1 hazard |
 
-The core Phase-1 change is now implemented across those 20 descriptor rows:
+The core Phase-1 change is now implemented across the 20 passive rows (plus the
+render-profile ACTION row):
 
 ```c
 // before                                    // after
@@ -283,39 +296,59 @@ per-frame (`PpuSetExtraSpace` runs every frame in the policy,
 budget on boot, then let the menu clamp visible columns live — no realloc. See
 §10.2.
 
-### 4.1 The `APPLY_SAVE` path
+### 4.1 The save backend / `APPLY_SAVE` path
 
 Save edits are structurally unlike cheats. A cheat pins WRAM every frame; a save
-edit is a **one-shot mutation of the battery-SRAM buffer**, consumed by the game
-only when it next loads the save.
+edit is a **transactional mutation of the battery-SRAM image**, consumed by the
+game only when it next loads the save. Disk format is a separate concern.
 
-**Where it hooks.** `RtlReadSram()` (`src/main.c:544`) loads `saves/save.srm`
-into `g_sram` at boot. `Settings_ApplySaveEdits()` runs immediately after it —
-before the game boots — so a seeded `AR_SAVE_*` env value is live for the whole
-session (the "easy testing" path). The overlay can also invoke it on demand:
-because the game re-reads SRAM whenever the title menu loads a save, an edit
-applied mid-session takes effect on **return-to-title → continue**. No restart.
+**Current hook and Phase-6 target.** Today `RtlReadSram()`
+(`src/main.c:544`) directly loads `saves/save.srm` into `g_sram`, and
+`RtlWriteSram()` writes that path. Phase 6 replaces direct file ownership with
+`Save_LoadActive()` / `Save_WriteActive()`: the selected backend decodes either
+native 8 KiB SRAM or the lossless INI schema in save-format.md §4 into the same
+canonical `g_sram`. The game and HLE code continue to see exactly the same
+buffer.
 
-**Order of operations (all four steps are mandatory):**
-1. Refuse unless `save_edit_armed` is set — nothing touches `g_sram` otherwise.
-2. Take a timestamped backup if `save_autobackup` (default on).
-3. Write the verified fields; preserve untouched bytes, including power-on fill
-   (save-format.md §1).
-4. Recompute the checksum over `[0x0000, 0x1fec)` and store at `0x1fec`
+`Settings_ApplySaveEdits()` runs after the active backend has loaded — before
+the game boots — so a seeded `AR_SAVE_*` value can be live for the whole session
+(the "easy testing" path). The overlay can also invoke it on demand: because
+the game re-reads SRAM whenever the title menu loads a save, an edit applied
+mid-session takes effect on **return-to-title → continue**. No app restart.
+
+**Transactional operation (all steps are mandatory):**
+1. Refuse field edits unless `save_edit_armed` is set. Import/export has its own
+   explicit confirmation and does not bypass validation.
+2. Decode/copy the current image into an 8 KiB scratch buffer. Never partially
+   mutate live SRAM while parsing a file.
+3. Validate and write only verified `SaveFieldDesc[]` fields; preserve every
+   untouched byte, including unknown town data and power-on fill
+   (save-format.md §1/§3.4).
+4. Recompute the checksum over `[0x0000, 0x1fec)` and store it at `0x1fec`
    (save-format.md §2). **Skipping this makes the game reject the save.**
-5. Re-sync the auto-persist shadow buffer — see the hazard below.
+5. Take a timestamped backup of the active save if `save_autobackup` (default
+   on) before the first persistent change.
+6. Swap the validated scratch image into `g_sram` between frames. If the user
+   selected **Apply and save**, atomically write it through the one active
+   backend; **Apply for this session** leaves the disk file unchanged.
+7. Re-sync the auto-persist shadow buffer so the editor's deliberate mutation
+   is not mistaken for a game-originated save — see the hazard below.
 
 **⚠️ Hazard: auto-persist clobbers the user's real save.** `src/main.c:811-830`
 diffs `g_sram` every frame and calls `RtlWriteSram()` the moment it changes,
-overwriting `saves/save.srm` (deliberately — so progress survives a freeze). A
-save edit trips this instantly and silently replaces the user's save with the
-edited one. `Settings_ApplySaveEdits()` **must** re-sync that shadow buffer after
-writing (so the edit is not misread as a game write), on top of the backup in
-step 2. This is the single biggest implementation risk in the feature.
+overwriting `saves/save.srm` (deliberately — so progress survives a freeze). In
+Phase 6 the same behavior must call `Save_WriteActive()` and persist only the
+selected `.srm` or `.ini` target. A save edit otherwise trips this instantly and
+silently replaces the user's active save. `Settings_ApplySaveEdits()` **must**
+re-sync that shadow buffer after swapping the image (so the edit is not misread
+as a game write), in addition to the backup/explicit commit choice above. This
+is the single biggest implementation risk in the feature.
 
 **Verification gate.** No save field ships to the menu until a round-trip proves
-the game accepts our recomputed checksum (save-format.md §5.3), and only fields
-marked ✅ there may be exposed at all.
+the game accepts our recomputed checksum (save-format.md §6.3), and only fields
+marked ✅ there may be exposed at all. Separately, the INI codec must prove an
+unedited `.srm → .ini → .srm` round trip is byte-identical before it can become
+an active persistence backend.
 
 ---
 
@@ -381,21 +414,27 @@ restore an unknown prior byte.
 | Turbo multiplier | `AR_TURBO_MULT` | int | 8 | ACTION param (T key) |
 | Warp target | `AR_WARP` | custom | `0101` | ACTION raw region/map param (F6); populate choices from README's verified table, including broken `0701` status |
 
-### Save editing (`CAT_SAVE`) — all APPLY_SAVE
+### Save storage and editing (`CAT_SAVE`)
 
 Only ✅-verified fields (save-format.md §3.1). Everything else in the
-third-party map stays unexposed until promoted (save-format.md §5).
+third-party map stays unexposed until promoted (save-format.md §6). The active
+disk backend changes serialization only; both formats decode to the same 8 KiB
+`g_sram` image (save-format.md §4).
 
-| Setting | env | Type | Default | Note |
+| Setting | env | Type / apply | Default | Note |
 |---|---|---|---|---|
-| Arm save editing | `AR_SAVE_EDIT` | bool | **off** | master gate; `g_sram` is untouched unless set |
-| Auto-backup | `AR_SAVE_BACKUP` | bool | **on** | timestamped `.bak` before first edit; see §4.1 |
-| Fillmore progress | `AR_SAVE_PROG_FILLMORE` | enum | leave as-is | SRAM `0x1200` |
-| Bloodpool progress | `AR_SAVE_PROG_BLOODPOOL` | enum | leave as-is | SRAM `0x1202` |
-| Kasandora progress | `AR_SAVE_PROG_KASANDORA` | enum | leave as-is | SRAM `0x1204` |
-| Aitos progress | `AR_SAVE_PROG_AITOS` | enum | leave as-is | SRAM `0x1206` |
-| Marahna progress | `AR_SAVE_PROG_MARAHNA` | enum | leave as-is | SRAM `0x1208` |
-| Northwall progress | `AR_SAVE_PROG_NORTHWALL` | enum | leave as-is | SRAM `0x120a` |
+| Save storage format | `AR_SAVE_BACKEND` | enum / RESTART | `native-srm` | `native-srm` or `ini`; boot-selects exactly one authoritative backend/path |
+| Arm save editing | `AR_SAVE_EDIT` | bool / APPLY_SAVE | **off** | master gate; field edits cannot touch `g_sram` unless set |
+| Auto-backup | `AR_SAVE_BACKUP` | bool / PASSIVE | **on** | timestamped backup of the active format before first persistent edit; see §4.1 |
+| Import save | — | ACTION | — | decode `.srm`/`.ini` into scratch, validate, confirm, back up, then swap; does not silently change backend |
+| Export native SRAM | — | ACTION | — | write an emulator-compatible exact 8 KiB `.srm` without changing the active backend |
+| Export structured INI | — | ACTION | — | write the lossless versioned schema from save-format.md §4.1 without changing the active backend |
+| Fillmore progress | `AR_SAVE_PROG_FILLMORE` | enum / APPLY_SAVE | leave as-is | SRAM `0x1200` |
+| Bloodpool progress | `AR_SAVE_PROG_BLOODPOOL` | enum / APPLY_SAVE | leave as-is | SRAM `0x1202` |
+| Kasandora progress | `AR_SAVE_PROG_KASANDORA` | enum / APPLY_SAVE | leave as-is | SRAM `0x1204` |
+| Aitos progress | `AR_SAVE_PROG_AITOS` | enum / APPLY_SAVE | leave as-is | SRAM `0x1206` |
+| Marahna progress | `AR_SAVE_PROG_MARAHNA` | enum / APPLY_SAVE | leave as-is | SRAM `0x1208` |
+| Northwall progress | `AR_SAVE_PROG_NORTHWALL` | enum / APPLY_SAVE | leave as-is | SRAM `0x120a` |
 
 Progress enum: `act1` (`0x00`) · `active` (`0x01`, observed in our saves but
 absent from the third-party enum — see save-format.md §3.1) · `act1-cleared`
@@ -407,6 +446,11 @@ its encoding is untested.
 
 ## 6. Persistence
 
+- There are two distinct INI domains. **`settings.ini` is application
+  configuration** and may contain `save_backend = native-srm|ini`.
+  **`saves/save.ini` is battery-save game data** and is owned exclusively by
+  the Phase-6 save codec (save-format.md §4). Never pass save payload sections
+  through `SettingDesc[]` or merge them into `settings.ini`.
 - `Settings_Save(path)` / `Settings_Load(path)` iterate `g_setting_descs[]` using
   each row's `format`/`parse`, so adding a setting never touches the serializer.
 - **Recommendation (see §10.1):** write a **separate `settings.ini`**, loaded
@@ -414,6 +458,10 @@ its encoding is untested.
   and its comments untouched. The menu owns `settings.ini`; devs own
   `config.ini`; env still overrides both. Load order becomes:
   `defaults → config.ini → settings.ini → env → live`.
+- `Save_LoadActive()` / `Save_WriteActive()` independently serialize the exact
+  8 KiB `g_sram` image using the backend selected by those resolved settings.
+  Native `.srm` remains the default. The codec logs the chosen backend and path
+  once at boot so users can always tell which save is authoritative.
 
 ---
 
@@ -434,19 +482,21 @@ never mutate audio params the callback reads from the main thread.
 
 ## 8. Phased rollout
 
-1. **Phase 1 — struct + seed, no menu (implemented; runtime validation next).**
-   `src/settings.{c,h}` hold 20 descriptor rows: the legacy cheat controls and
-   all nine widescreen behavior fields. The cached cheat gates now read live
-   fields; special env encodings and default polarities are preserved. The
-   4:3/RAW/FULL preset actions and paused render-only redraw are implemented.
-   Remaining gate: run the §9 cheat golden comparisons before declaring Phase 1
-   behavior-validated.
-2. **Phase 2 — prove live mutation headless.** A debug path (reuse the hotkey /
-   a console command) that sets a field at frame N and confirms the effect at
-   N+1. No UI yet; de-risks the live path before menu work.
-3. **Phase 3 — descriptor metadata + apply kinds.** Fill labels/tooltips/ranges/
-   `available()`/`on_change`. Wire CALLBACK settings; add the "pending restart"
-   badge for RESTART.
+1. **Phase 1 — struct + seed, no menu (implemented; gameplay golden runs
+   remain).** The 20 legacy cheat/widescreen controls read live fields; special
+   env encodings and default polarities are covered by `actraiser_settings`.
+   The 4:3/RAW/FULL preset actions and paused render-only redraw are implemented.
+   Remaining validation: §9 frame-level cheat comparisons in representative
+   action/sim states.
+2. **Phase 2 — prove live mutation headless (implemented).**
+   `AR_SETTING_SET=key=value` plus optional `AR_SETTING_AT_GF=N` applies one
+   descriptor mutation through the real main loop. The unit test covers the API;
+   the headless probe has confirmed a live FULL→RAW profile mutation.
+3. **Phase 3 — descriptor metadata + apply kinds (implemented for current
+   rows).** Labels, tooltips, ranges, enum labels, availability, change
+   callbacks, formatting, sticky warnings, restart results, and a host observer
+   are present. New Config/audio/save rows must supply the same metadata as they
+   migrate in Phases 4/6.
 4. **Phase 4 — persistence + Config merge.** `settings.ini` save/load; fold the
    `g_config` display/audio/aspect fields into `Settings` so there is one source
    of truth.
@@ -454,13 +504,35 @@ never mutate audio params the callback reads from the main thread.
    Render rows from `SettingDesc[]`, write `g_settings`, intercept menu input,
    pause game-frame advancement while open, and expose ACTION commands without
    duplicating their existing hotkey implementations.
-6. **Phase 6 — save editing (`CAT_SAVE`).** Independent of Phases 1–5 and
-   schedulable in parallel: it touches `g_sram`, not the cheat gates. Order:
-   (a) promote the scratch analysis to `tools/srm.py` (save-format.md §5.4);
-   (b) implement `SramChecksum()` + `Settings_ApplySaveEdits()` with the §4.1
-   safety sequence; (c) **round-trip test** — edit region progress, boot, confirm
-   the game accepts it (save-format.md §5.3); (d) expose the six region-progress
-   rows. Only then extend field-by-field, each gated on its own verification.
+6. **Phase 6 — save codec, backends, and editor (`CAT_SAVE`).** Independent of
+   Phases 1–5 and schedulable after the current regeneration settles: it owns
+   `g_sram` persistence, not the cheat gates. Split it into reviewable pieces:
+
+   - **6A — codec core.** Promote the scratch analysis to `tools/srm.py`
+     (save-format.md §6.4); implement exact-size native SRAM decode/encode,
+     `SramChecksum()`, `SaveFieldDesc[]`, validation/errors, and fixture tests.
+   - **6B — lossless INI.** Implement the version-1 chunked-hex schema from
+     save-format.md §4.1. Require all raw chunks, apply verified readable-field
+     overrides, and reject invalid input transactionally. Prove every fixture
+     survives `.srm → .ini → .srm` byte-identically with no edits.
+   - **6C — active backend integration.** Route boot load and per-frame
+     auto-persist through `Save_LoadActive()` / `Save_WriteActive()`; keep
+     native `.srm` as default, make INI explicit, write atomically, log the
+     selected target, take backups, and expose a real shadow-buffer re-sync API.
+   - **6D — editing and conversion actions.** Implement the §4.1 safety
+     sequence; round-trip one region-progress edit through the game
+     (save-format.md §6.3); expose the six verified region fields plus explicit
+     Import, Export `.srm`, Export `.ini`, Apply for session, and Apply and save
+     actions in the overlay/headless path.
+   - **6E — field promotion.** Extend `SaveFieldDesc[]` one field at a time only
+     after WRAM correspondence, known-state diffing, and a game round trip.
+
+   Phase-6 acceptance requires: malformed/truncated INI never changes `g_sram`;
+   an unedited cross-format round trip preserves all 8192 bytes including fill
+   and unknown town state; a named-field edit changes only its verified bytes
+   plus `0x1fec`–`0x1fef`; backend choice is deterministic when both files
+   exist; auto-persist writes only the active target; and a save written by each
+   backend is accepted by the game.
 
 ---
 
@@ -470,11 +542,17 @@ never mutate audio params the callback reads from the main thread.
   struct and assert `g_ram` effects are identical via the WRAM oracle / `F2`
   snapshot. Since seeding uses the same env vars, an `AR_ALL_MAGIC=1` run must
   match byte-for-byte.
-- **Drift guard:** `static_assert(count == N)` + a test that every struct field
-  maps to exactly one descriptor.
-- **Live-path test:** the Phase-2 headless "set at N, observe at N+1."
+- **Drift guard:** `tests/settings_test.c` asserts 21 unique keys and storage
+  fields and exercises lookup/formatting for the current registry.
+- **Live-path test:** `AR_SETTING_SET=key=value AR_SETTING_AT_GF=N` applies via
+  the same mutation API the overlay will call; observe enforcement at N+1.
+- **Save-codec tests (Phase 6):** exact 8192-byte native round trip; fixture
+  `.srm → .ini → .srm` identity; malformed/missing/duplicate INI chunks rejected
+  without touching the destination; named-field override changes only its
+  verified bytes plus checksum; atomic-write failure leaves the previous save
+  readable; and both backends pass a real game load/save/load round trip.
 - **Clean dev workflow:** `cycle.sh`, the `config.ini` AR_ bridge, and all debug
-  flags (§11) stay on `getenv`. Migrate only the ~20 user-facing settings — do
+  flags (§11) stay on `getenv`. Migrate only user-facing settings — do
   not boil the ocean.
 
 ---
@@ -503,12 +581,14 @@ Start with a minimal SDL-rendered immediate UI plus bundled bitmap font
 integrating the existing RmlUi launcher stack (richer styling, but requires its
 C++/OpenGL/dependency build path).
 
-### 10.5 Save-edit commit model
-Edit `g_sram` in place + re-sync the auto-persist shadow (**recommended** —
-simplest, and the game picks edits up on its next title-menu load) vs. staging
-edits in a scratch buffer committed only on explicit user action (safer against
-accidental overwrites, but needs a second buffer and an explicit commit UI).
-Either way the §4.1 backup is mandatory. See save-format.md §4.1.
+### 10.5 Default save-edit action
+Transactional scratch decoding is required by the Phase-6 codec. The remaining
+UI decision is which explicit action gets primary placement: **Apply for this
+session** (**recommended** — swaps validated SRAM and re-syncs the shadow but
+does not alter disk) vs. **Apply and save** (backs up and atomically commits via
+the active backend). Both actions should exist; neither should be triggered by
+merely changing a row. Persistent edits require the §4.1 backup sequence and
+the save-format.md §5.1 safeguards.
 
 ---
 

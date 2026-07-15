@@ -1,10 +1,17 @@
 # ActRaiser Recomp — Battery Save (SRAM) Format
 
-Map of ActRaiser's 8 KiB battery SRAM, for the save-editing feature in
-[settings-system.md](settings-system.md) (`CAT_SAVE` / `APPLY_SAVE`). The
+Map of ActRaiser's 8 KiB battery SRAM, for the save codec, persistence backend,
+and editing feature in [settings-system.md](settings-system.md) (`CAT_SAVE` /
+`APPLY_SAVE`). The
 motivation is sim-mode testing: the `AR_WARP` path stages an act transition but
 **cannot reach sim-mode progress state** (population, per-region advancement,
 spells, lairs). Editing the save can.
+
+The **file-level contract** is settled: size, written footprint, fill behavior,
+and checksum are documented below. The semantic field map is deliberately not
+claimed to be complete: the live town-state block in §3.4 and several fields in
+§3.2/§3.3 are still unknown. That distinction is why the structured INI format
+in §4 carries a lossless raw image as well as readable verified fields.
 
 **Provenance — read this before trusting any offset below.** The starting field
 map came from a third-party tool
@@ -92,7 +99,7 @@ Side benefit: that 9/9 result independently confirms our recomp's SRAM
 emulation produces checksum-correct saves.
 
 **Not yet verified:** that the *game* accepts a save we wrote with a recomputed
-checksum. That requires a runtime round-trip (§5.3) and is the gating test
+checksum. That requires a runtime round-trip (§6.3) and is the gating test
 before the editor is trusted.
 
 ---
@@ -134,7 +141,7 @@ below is resolved.
 
 ### 3.2 Hypothesis 🟡 — from the third-party map, unverified here
 
-Do not expose in the menu until promoted to ✅ via §5. Our saves either read
+Do not expose in the menu until promoted to ✅ via §6. Our saves either read
 zero at these offsets (so the map is untested, not wrong) or the evidence is
 mixed.
 
@@ -176,7 +183,7 @@ remaster or non-SNES target), or the offsets need re-derivation.
 
 Note these live in a contiguous `0x1435`–`0x1448` neighbourhood. A single
 wrong base offset (or a different struct layout in our version) would explain
-the whole cluster — which is exactly what §5.1 is designed to resolve.
+the whole cluster — which is exactly what §6.1 is designed to resolve.
 
 ### 3.4 Undocumented region 🔍 — `0x0000`–`0x07ff+`
 
@@ -191,13 +198,128 @@ saves have a large, live, progress-dependent block at the very start:
 It grows as the sim progresses. Working hypothesis: **sim-mode town/terrain
 state** (which map squares are developed/sealed). If so this is the
 *highest-value* region for the feature's stated goal and the one thing no
-existing tool documents. Needs derivation (§5).
+existing tool documents. Needs derivation (§6).
 
 ---
 
-## 4. Editing rules and hazards
+## 4. Save codec and persistence backends
 
-### 4.1 ⚠️ Auto-persist will clobber the user's real save
+The runtime must keep one invariant regardless of the disk format:
+**`g_sram` is always the canonical, exact 8 KiB image seen by the game.** A save
+backend only translates between that buffer and durable storage. Game code must
+never know whether the active file is native SRAM or structured INI.
+
+Phase 6 supports two backends:
+
+| Backend | Default path | Purpose |
+|---|---|---|
+| `native-srm` | `saves/save.srm` | Existing behavior and byte-compatible interchange with emulators |
+| `ini` | `saves/save.ini` | Human-readable verified fields plus a lossless copy of the complete SRAM image |
+
+`native-srm` remains the default for backward compatibility. INI mode is an
+explicit setting, not an automatic preference based on which files happen to
+exist. Exactly **one active backend and path** is authoritative per session;
+auto-persist writes only that target. Import/export are separate actions and do
+not silently switch the active backend or update both files.
+
+This `save.ini` is game data and is separate from the menu-owned
+`settings.ini`. The latter stores runtime preferences such as the chosen save
+backend; it must never contain the SRAM payload.
+
+### 4.1 Lossless INI schema (version 1)
+
+A field-only INI is unsafe until every meaningful byte has been decoded. It
+would discard the §3.4 town map, unknown fields, dead fill bytes, and future
+data. Version 1 therefore stores the full image in dependency-free, chunked hex
+and also emits readable views of fields that have passed the §6.3 round-trip
+gate:
+
+```ini
+[Meta]
+format = actraiser-sram
+version = 1
+size = 0x2000
+rom = usa
+
+[Regions]
+fillmore = active
+bloodpool = act1
+kasandora = act1
+aitos = act1
+marahna = act1
+northwall = act1
+
+[Raw]
+; 64 bytes per line; all 128 lines are required in version 1.
+0000 = 60606060...
+0040 = 60606060...
+...
+1fc0 = 60606060...
+```
+
+The raw image is the base; recognized readable fields are authoritative
+overrides. Loading proceeds transactionally into a scratch 8 KiB buffer:
+
+1. Validate `format`, schema `version`, declared size, every raw chunk, and the
+   optional ROM identity. Reject malformed, duplicate, missing, or overlapping
+   chunks without changing `g_sram`.
+2. Decode the complete raw image, verify its stored §2 checksum before applying
+   overrides, and preserve every byte—including unknown data and the original
+   power-on fill. A bad base image is an error, not something the loader
+   silently repairs.
+3. Parse and apply only fields described by the verified `SaveFieldDesc[]`
+   registry. Unknown keys/sections are ignored with a diagnostic; they never
+   become unvalidated SRAM writes.
+4. Recompute and store the §2 checksum after applying overrides. A checksum
+   printed in `[Meta]`, if added for diagnostics, is informational only.
+5. Commit the scratch image between game frames, then re-sync the auto-persist
+   shadow as specified in §5.1.
+
+Writing performs the inverse operation from the current `g_sram`: copy the
+whole image, ensure its checksum is current, emit readable verified fields, and
+emit all 128 raw chunks. Consequently, an unedited
+`.srm → .ini → .srm` conversion must be byte-identical. When a readable value is
+edited, only that verified field and the four checksum bytes may change.
+
+The duplicated readable/raw representation is intentional. It makes INI saves
+editable today without pretending the entire semantic map is known, and it
+lets future codec versions promote raw bytes to named fields while remaining
+backward-compatible with version-1 files.
+
+### 4.2 Backend API and ownership
+
+Save serialization is a separate subsystem from `SettingDesc[]`. Runtime
+preferences such as `save_backend` belong in `g_settings`; save payload fields
+belong in a verified `SaveFieldDesc[]` registry so menu presentation, INI
+decode/encode, validation, and editing share one field definition without
+treating game data as ordinary app configuration.
+
+The implementation boundary should be equivalent to:
+
+```c
+typedef enum SaveBackend {
+  SAVE_BACKEND_NATIVE_SRM,
+  SAVE_BACKEND_INI,
+} SaveBackend;
+
+bool Save_Load(const SaveSpec *spec, uint8 out[0x2000], SaveError *err);
+bool Save_Write(const SaveSpec *spec, const uint8 sram[0x2000], SaveError *err);
+bool Save_Import(const char *path, uint8 out[0x2000], SaveError *err);
+bool Save_Export(const char *path, const uint8 sram[0x2000], SaveError *err);
+uint32 Save_RecomputeChecksum(uint8 sram[0x2000]);
+```
+
+`Save_Load` and import decode into scratch storage and leave the live image
+untouched on any error. `Save_Write` uses a temporary file plus flush/rename so
+a crash cannot leave a truncated active save. Backup, commit, shadow re-sync,
+and logging of the selected backend/path sit above the format adapters and are
+identical for `.srm` and `.ini`.
+
+---
+
+## 5. Editing rules and hazards
+
+### 5.1 ⚠️ Auto-persist will clobber the user's real save
 
 `src/main.c:811-830` diffs `g_sram` every frame and calls `RtlWriteSram()` the
 moment it changes, overwriting `saves/save.srm` — deliberately, so progress
@@ -214,18 +336,18 @@ The editor **must** do at least one of:
 Recommendation: **(1) + (2)** — re-sync the shadow *and* auto-backup. Never
 silently overwrite a save the user did not ask to modify.
 
-### 4.2 Checksum is mandatory
+### 5.2 Checksum is mandatory
 Any write must be followed by a `SramChecksum()` recompute over the mutated
 buffer (§2). Skipping it means the game treats the save as corrupt.
 
-### 4.3 Never edit mid-write
+### 5.3 Never edit mid-write
 Only mutate `g_sram` between frames (the single-threaded coroutine model in
 settings-system.md §7 guarantees this is safe) and never while the game is in
 the middle of its own save routine.
 
 ---
 
-## 5. Verification methodology (promoting 🟡 → ✅)
+## 6. Verification methodology (promoting 🟡 → ✅)
 
 We have a better oracle than the third-party map: **our own WRAM map.** The game
 copies SRAM→WRAM when a save is loaded, and [ram-map.md](ram-map.md) already
@@ -233,25 +355,25 @@ documents the WRAM side from cheat work — `$0282/84` SP, `$0286/87` angel HP,
 `$0295` persistent scroll count, `$0299-$029C` spell HAVE flags, `$02AC`
 equipped magic.
 
-### 5.1 WRAM correspondence (best for the 🔴 cluster)
+### 6.1 WRAM correspondence (best for the 🔴 cluster)
 Load a save, take an `F2` full snapshot (already dumps WRAM + SRAM), and match
 known WRAM values back to SRAM offsets. Because we know what `$0286/87` *means*,
 finding the SRAM bytes that feed it settles the angel-HP/SP/MP block directly —
 without trusting the third-party offsets at all. The alternative (static) route
 is to find the SRAM→WRAM load routine in the ROM via `tools/romxref.py`.
 
-### 5.2 Known-state diffing (best for §3.4)
+### 6.2 Known-state diffing (best for §3.4)
 Diff labelled saves at known checkpoints (`save.sim-blank` → `save.sim-bloodpool-start`
 already isolates 752 changed bytes). Capture a save before/after a single
 discrete sim action (seal one lair, gain one population tick) to bisect the
 `0x0000`–`0x07ff` block field-by-field.
 
-### 5.3 Round-trip (the gating test)
+### 6.3 Round-trip (the gating test)
 Edit a field → recompute checksum → boot → confirm the game accepts the save and
 shows the intended state. **No field ships to the menu without this.** This also
 retires the one open item in §2.
 
-### 5.4 Tooling
+### 6.4 Tooling
 The analysis scripts used for this doc live in the session scratchpad. Per the
 repo's tooling convention (`tools/` with a shared `tools/ar_lib.py` — see
 `dis65.py`, `romxref.py`, `wram.py`), they should be promoted to a
@@ -260,7 +382,7 @@ than re-written as throwaway scripts each time.
 
 ---
 
-## 6. Open questions
+## 7. Open questions
 
 1. **Slot structure.** No mirroring at `0x400`/`0x800`/`0x1000` block sizes
    (7 of 8 `0x400` blocks unique). Does ActRaiser keep >1 save slot, and if so
