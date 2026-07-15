@@ -88,8 +88,8 @@ key-on state: srcn/pitch/volumes/ADSR + first BRR bytes — all-zero BRR = sampl
 |---|---|---|---|---|---|
 | Per-frame display build / DMA | NMI path; `ActRaiserDrawPpuFrame`; DMA descriptors in ZP `$D0-$D5` | VRAM/OAM/CGRAM DMA, `$2100`-bus | "blit this frame's tiles/sprites/palette" | DMA descriptor tables | 🔴 |
 | Sprite (OAM) build | object loop `$8915` → OAM | OAM | "place object's sprite" | `$06A0` object struct (X/Y/handler) | 🟡 |
-| **Action OAM pipeline (fully mapped 2026-07-10)** | `$00:8C98` per-frame cull (obj vs 256×224 window keyed on camera `$22/$24`; sets/clears offscreen bit `$0400` in obj+`$30`) → `$00:8D68` sprite builder (walks 7-byte sprite defs at bank obj+`$18`, ptr obj+`$20`+5; draw window x∈[-16,256) y∈[-16,224); writes `$0380` shadow + packed high-table bits via `$00/$9A/$9C`) → `$00:923A`→`$9258` **HUD sprites** (from the `$06:A800` bank-6 table: FIXED screen positions, no camera math, no cull — widescreen-safe/centered) → OAM DMA `$02:ACA6` (544B `$0380`→`$2104`) | OAM | "which objects are visible + build their hardware sprites" | see ram-map.md "OAM shadow + sprite-build working vars" | 🟡 Stages C/D1/D2 and the combined wide path are directly validated across every action level in regions `$01-$06`. Wide activation is default-on; `AR_WS_MARGIN_ACTIVATION=0` is the fidelity gate. Death Heim/`$07` is blocked by its first-boss crash. |
-| **Action BG streaming (FULLY mapped 2026-07-12 — rendering-engine.md §3/§4/§12a)** | Camera `$02:B091` (clamp vs level dims `$2E/$30`) sets 16px-crossing flags in `$93` → dispatcher `$02:B127` (TRB per bit) → `$02:B158` column strips (2 cols × 64 rows) / `$02:B1AF` row strips (2 rows × 64 cols, span `[cam&~$FF,+512)` — 256-aligned, page-keyed decode) per layer (X=0 BG1, X=4 BG2) → ONE record into the layer's fixed buffer (`$3900/$3A02/$3B04/$3C06`, capacity 1/frame) → NMI drain `$02:ACC8/$ACE5` → `$02:ADA8` 64B chunks. 64×64-tile ring per layer (BG1 `$6000`, BG2 `$7000`); entry draw = inline mega-burst (full ring, one frame). The old "tier-2 burst" = `$B1AF` row strips (walk bob). Northwall `0601`: `$00:E7BC` → `$02:945E` builds `$7E:6000`; `$02:96B6` points HDMA ch2 at `$210F` (`BG2HOFS`). | VRAM BG1/BG2 tilemaps | "keep the resident 512×512px tilemap ring fed as the camera moves" | level map decode via section config `$02:893E` + metatile tables | 🟡 original recompiled builders remain active and regions `$01-$06` are directly validated. Stage B transactionally refreshes valid world margins while restoring CPU/WRAM/math state. Full margin columns remain cached on `$24&$FF00`; newly exposed vertical rows use `$B8A0` at `$24&$FFF0`, selectively draining neighboring-band columns when the 342px view straddles the row decoder's 512px page span. Narrow `$32<$0200` BG2 is never refreshed: the presentation layer pads an isolated authentic render (reflection normally; cyclic repeat for Aitos/Northwall maps `$01-$05/$08`), or clamps with `AR_WS_BG2_MIRROR=0`; none of these paths changes game VRAM/state. Remaining: presentation-aware camera/world-edge limits; Death Heim/`$07` is blocked by its crash. |
+| **Action OAM pipeline (fully mapped 2026-07-10)** | `$00:8C98` per-frame cull (obj vs 256×224 window keyed on camera `$22/$24`; sets/clears offscreen bit `$0400` in obj+`$30`) → `$00:8D68` sprite builder (walks 7-byte sprite defs at bank obj+`$18`, ptr obj+`$20`+5; draw window x∈[-16,256) y∈[-16,224); writes `$0380` shadow + packed high-table bits via `$00/$9A/$9C`) → `$00:923A`→`$9258` **HUD sprites** (from the `$06:A800` bank-6 table: FIXED screen positions, no camera math, no cull — widescreen-safe/centered) → OAM DMA `$02:ACA6` (544B `$0380`→`$2104`) | OAM | "which objects are visible + build their hardware sprites" | see ram-map.md "OAM shadow + sprite-build working vars" | 🟡 Stages C/D1/D2 and the combined wide path are directly validated across every action level in regions `$01-$07`, including the complete Death Heim flow. Wide activation is default-on; `AR_WS_MARGIN_ACTIVATION=0` is the fidelity gate. |
+| **Action BG streaming (FULLY mapped 2026-07-12 — rendering-engine.md §3/§4/§12a)** | Camera `$02:B091` (clamp vs level dims `$2E/$30`) sets 16px-crossing flags in `$93` → dispatcher `$02:B127` (TRB per bit) → `$02:B158` column strips (2 cols × 64 rows) / `$02:B1AF` row strips (2 rows × 64 cols, span `[cam&~$FF,+512)` — 256-aligned, page-keyed decode) per layer (X=0 BG1, X=4 BG2) → ONE record into the layer's fixed buffer (`$3900/$3A02/$3B04/$3C06`, capacity 1/frame) → NMI drain `$02:ACC8/$ACE5` → `$02:ADA8` 64B chunks. 64×64-tile ring per layer (BG1 `$6000`, BG2 `$7000`); entry draw = inline mega-burst (full ring, one frame). The old "tier-2 burst" = `$B1AF` row strips (walk bob). Northwall `0601`: `$00:E7BC` → `$02:945E` builds `$7E:6000`; `$02:96B6` points HDMA ch2 at `$210F` (`BG2HOFS`). | VRAM BG1/BG2 tilemaps | "keep the resident 512×512px tilemap ring fed as the camera moves" | level map decode via section config `$02:893E` + metatile tables | 🟡 original recompiled builders remain active and regions `$01-$07`, including the complete Death Heim flow, are directly validated. Stage B transactionally refreshes valid world margins while restoring CPU/WRAM/math state. Full margin columns remain cached on `$24&$FF00`; newly exposed vertical rows use `$B8A0` at `$24&$FFF0`, selectively draining neighboring-band columns when the 342px view straddles the row decoder's 512px page span. Narrow `$32<$0200` BG2 is never refreshed: the presentation layer pads an isolated authentic render (reflection normally; cyclic repeat for Aitos/Northwall maps `$01-$05/$08`), or clamps with `AR_WS_BG2_MIRROR=0`; none of these paths changes game VRAM/state. Remaining: presentation-aware camera/world-edge limits. |
 | UI/dialog tilemap compose+upload (sim engine) | `$02:BF60` dispatches message text into BG3 buffer `$7F:B000` → `$02:AEEB`, while the visible box frame and offscreen work boxes remain BG2; whole-map BG refreshes use `$02:B727`/`$B825` record mega-bursts and `$02:ADA8` as a 64B DMA helper. Sky Palace setup at `$02:B6F8-$B726` conditionally copies ROM `$07:D0A0` to `$7E:C200`. | BG3 text plus WRAM/VRAM BG2 map state | "draw the active UI while retaining offscreen work pages" | message-type IDs via `$14` (see Save/persistence note on `$14` reuse) | 🟡 major paths separated. Live `$B825` decode reproduced staging (`runs/20260712-232230`); narrow raw-edge reflection produced broken columns; center reflection copied the BG2 box (11:36 PM capture). Current render transaction reads `$07:D0A0`, reconstructs the box-covered rows per column class (row-major quadrants; shaft continuation; seam base halves at meta cols 0/15; floor top 2 rows under the box bottom; `$41/$49` flare + `$40/$48`/`$42/$4A` skirts at shaft columns — base art exists only in the metatile table), expands via `$7E:2900`, patches only margin BG2 columns, then restores VRAM. ✅ Validated 2026-07-13: byte-identical to the game's boot colonnade (scratch cols 56-63 rows 18-31); user-confirmed clean in dialogue + submenu states. |
 | BG mode / layers | `$2105` BGMODE, `$212C/2D` main/sub, scroll regs | PPU | "set up background layers/scroll" | — | 🔴 |
 | HDMA (raster fx, HBlank) | HDMAEN `$420C`; ActRaiser drives ch 2/3 (and others) | HDMA | "per-scanline effect" | HDMA tables | 🔴 |
@@ -317,6 +317,54 @@ explicit OAM allocator. Its native geometry is:
 The natural widescreen seam is therefore the horizontal predicate in `ADAD` and
 `AE6F`, gated to the world-record scan (`record >= $0A00`). The fixed scan must
 retain the authentic predicate so fixed overlays do not leak into the margins.
+
+Implementation regenerated and directly validated 2026-07-14:
+`recomp/bank01.cfg` HLEs both leaves to a
+shared faithful composition port. Its alternate mode preserves AE6F's exact
+`(attr & $F1FF) | $0600 | $8F` transform; all offset, vertical, rejected-slot,
+cursor, and packed-high-table behavior remains shared with ADAD. Only bases in
+`$0A00-$1087` can receive a widened horizontal bound, computed from current
+camera `$22` and the same `left<=cameraX` / `right<=$0100-cameraX` caps as BG1.
+`AR_WS_SIM_SPRITES=0` is the authentic fidelity gate and
+`AR_WS_SIM_SPRDBG=1` reports newly admitted margin components. The direct town
+run confirmed that enemies now compose completely into the margins without
+changing the fixed/UI segment.
+
+### Angel arrow lifetime: `$01:B41A-$B4AE`
+
+The angel arrow is not a separate fixed-screen renderer. It occupies the
+dedicated world record at `$0B0A`, inside the same `$0A00-$1087` scan widened
+above. `$01:B41A` dispatches its three states through the handler-minus-one
+table at `$B423`: idle `$B429`, spawn `$B42A`, and movement `$B44B`. Spawn copies
+the angel's direction from `$0AE4+$22`, initializes the record through `$CFF2`
+and `$AC70`, then selects state 2. Movement adds velocities `+1A/+1C`, calls
+`$B473`, continues animation through `$AC70` on carry clear, or clears `+12`
+and releases the slot through `$01:B810` on carry set.
+
+`$B473` is therefore a **lifetime gate before OAM composition**, not another
+sprite clipping leaf. Its authentic predicate tests the arrow's `x+4` against
+both the 512px town hard bounds and `[cameraX,cameraX+$100)`, then tests Y
+against the same 512px bounds and `[cameraY,cameraY+$E0)`. This explains why
+the regenerated wide emitter fixed enemies but the player's arrow still
+vanished at the old screen edge. The staged faithful HLE keeps the `x+4`
+anchor, DP `$00` scratch writes, carry contract, 512x512 hard bounds, and the
+entire vertical predicate; only the horizontal camera interval becomes
+`[cameraX-leftMargin,cameraX+$100+rightMargin)`. `AR_WS_SIM_SPRITES=0` restores
+the authentic interval, while `AR_WS_SIM_SPRDBG=1` adds
+`[ws-sim-projectile]` evidence when an arrow is alive only because of the
+margin extension. Regenerated direct testing on 2026-07-14 confirmed the arrow
+remains alive and renders correctly across both live margins.
+
+Static follow-up found no second shared world-projectile boundary to widen.
+`$B473` has exactly one call site, the arrow movement state at `$B45F`, and
+`$B810` has exactly one call site, the arrow-release path at `$B46E`.
+Meanwhile `$01:B898` walks every active `$26`-byte world record from
+`$0A00` through `$1087` and dispatches its type handler before `ACD9` composes
+the result. Remaining enemy shots, construction actors, lair effects, and
+rewards should therefore be validated as ordinary world records first; add a
+new lifetime patch only after a captured symptom identifies a content-specific
+gate. The `$06A0-$09FF` fixed/overlay array remains a separate screen-space
+system and must not be widened speculatively.
 
 **The OAM-flood bug mechanism** (found 2026-07-01, root cause is upstream — see next section): if an
 object has a null/bad frame pointer at `+08`, the first byte read at that address becomes a bogus
@@ -782,8 +830,8 @@ These RAM addresses recur across all the debugging; keep `ram-map.md` authoritat
 
 | Addr | Meaning |
 |---|---|
-| `$18` | mode / region: `00`=**intro/overworld AND sim mode both** (what distinguishes the two beyond `$18==0` is unidentified — the dispatcher `$00805F` branches to the sim handler whenever `$18==0`; check `$19` first), `01`–`07`=action stage region N (Fillmore=`01`), `$20+`=transitions |
-| `$19` | raw map/sub-flow within the region. It is **not** a uniform act number: action entry maps vary by kingdom (e.g. Kasandora Act 2 is `$03`, not `$02`); in sim mode region `9` selects a separate sub-flow at `$008129` |
+| `$18` | mode / region: `00`=**intro/overworld and simulation family** (`$19` distinguishes town/Sky Palace/temple/world-map submodes), `01`–`07`=action stage region N (Fillmore=`01`), `$20+`=transitions |
+| `$19` | raw map/sub-flow within the region. With `$18=00`, `$01-$06` select Fillmore/Bloodpool/Kasandora/Aitos/Marahna/Northwall town views, `$07` Sky Palace, `$08` temple, and `$09` world map. The zero-based current-town ID also lives at `$7F:7BF9`, with doubled table index at `$7F:7BFB`. In action mode `$19` is **not** a uniform act number: e.g. Kasandora Act 2 is `$03`, not `$02` |
 | `$1A`/`$1B` | transition **destination** (`$1B`→`$18`, `$1A`→`$19`, applied by the mode-switch `$00:8269`) |
 | `$FB` | bit `0x80` = transition-request flag (set with `$1A`/`$1B` to stage a mode change; game consumes+clears it) |
 | `$0100` | game-mode byte (watchdog dumps print it): observed `$85` during story-event cutscenes (rock-zap/seal wait chain); full value map not yet derived |
@@ -804,7 +852,7 @@ Verified entry targets from direct runs:
 | `$04` Aitos | `0401` | `0404` | |
 | `$05` Marahna | `0501` | `0504` | |
 | `$06` Northwall | `0601` | `0605` | `0608` is the Act 2 boss arena |
-| `$07` Death Heim | `0701` | — | broken: reaches first boss arena, then crashes |
+| `$07` Death Heim | `0701` | — | boss-rush hub; verified end-to-end through every rematch and the final boss (2026-07-14) |
 
 **Fidelity limit (2026-07-12):** the current test workflow reaches Fillmore
 act 1 before pressing F6, producing an action→action request. Only the three

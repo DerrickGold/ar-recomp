@@ -1,14 +1,19 @@
-# ActRaiser Recomp — Settings & Live-Config System (design)
+# ActRaiser Recomp — Settings & Live-Config System
 
 Design for a single source of truth that captures every custom setting (cheats,
 widescreen knobs, display/audio, QoL) and defines each one's **path to live
 runtime updates**, so a future in-game overlay menu can flip them mid-run. This
 is the "option B" refactor from the 2026-07-12 settings scan.
 
-Status: **NEXT IMPLEMENTATION PHASE — design only, not yet implemented.** Companion docs:
+Status: **PHASE 1 CORE IMPLEMENTED.** `src/settings.{c,h}` now own the existing
+cheat fields, nine widescreen behavior gates, a 20-row descriptor registry, and
+the deterministic render-profile cycle. Descriptor-driven persistence,
+display/audio config migration, save editing, and the overlay remain. Companion
+docs:
 [SEAMS.md](SEAMS.md) (gameplay/tunable seams the cheats hook),
 [rendering-engine.md](rendering-engine.md) (widescreen policy internals),
-[ram-map.md](ram-map.md) (the WRAM addresses the cheats pin).
+[ram-map.md](ram-map.md) (the WRAM addresses the cheats pin),
+[save-format.md](save-format.md) (the SRAM map + checksum behind `CAT_SAVE`).
 
 Source sites this design replaces: `ActRaiser_ApplyCheats`
 (`src/actraiser_rtl.c:607`), `ActRaiser_ApplyWidescreenPolicy`
@@ -19,7 +24,7 @@ Source sites this design replaces: `ActRaiser_ApplyCheats`
 
 ---
 
-## 1. Current state (what we're refactoring)
+## 1. Current state
 
 Two independent config surfaces exist today, and a setting's toggleability is
 decided by **where its value is consumed**, not which surface it comes from.
@@ -30,9 +35,8 @@ decided by **where its value is consumed**, not which surface it comes from.
    `config.ini` also bridges any `AR_*` key into the environment via `setenv()`
    (`src/config.c:53`), so the two surfaces overlap.
 
-The decisive pattern: **almost every cheat / widescreen flag is *enforced every
-frame* but its env value is *read once and cached*** in a `static int en = -1`
-gate. Example (`src/actraiser_rtl.c:665`):
+Before Phase 1, almost every cheat/widescreen flag was *enforced every frame*
+but its env value was *read once and cached* in a `static int en = -1` gate:
 
 ```c
 static int en = -1;
@@ -40,12 +44,11 @@ if (en < 0) { const char *e = getenv("AR_ALL_MAGIC"); en = ...; }  // read ONCE
 if (en) { g_ram[0x0299] = 0x01; ... }                              // applied EVERY frame
 ```
 
-Because enforcement is already per-frame, the machinery for live toggling is
-*already present*. Converting a gate to a live toggle means only replacing the
-cached `en` with a field the menu writes — no restructuring of the enforcement.
-A few widescreen flags (`AR_WS_ACTION` `:414`, `AR_WS_CLAMP` `:463`,
-`AR_WS_ONLYBG`, `AR_WS_LAYERS`) already read `getenv` uncached every frame, so
-they are effectively live today.
+Phase 1 has now replaced those cached gates with descriptor-seeded fields for
+the 11 cheat controls (including the moonjump sub-setting and PAR pin list) and
+nine widescreen behaviors. Their existing enforcement seams read `g_settings`
+every frame. Debug/diagnostic flags such as `AR_WS_ONLYBG`, `AR_WS_LAYERS`, and
+the `*_DBG` family intentionally remain direct `getenv` consumers (§11).
 
 ---
 
@@ -57,6 +60,9 @@ they are effectively live today.
   menu rendering, and live-apply — no per-field duplication across those four.
 - A host-side in-game overlay that renders settings without consuming SNES
   VRAM/OAM or changing emulated game state.
+- Save editing (`CAT_SAVE`, §4/§5) as a first-class settings category, so
+  sim-mode progress states can be staged for testing — the gap `AR_WARP` cannot
+  cover (it stages an act transition, not sim progress).
 - Behavior-preserving: a normal run and every existing `AR_*` dev run stay
   byte-identical at boot.
 - A defined **apply path** per setting (§4) so the menu knows what each control
@@ -78,6 +84,10 @@ the per-frame gates read it.
 ```c
 // settings.h
 typedef struct Settings {
+  /* Render-profile state. CUSTOM means the individual fields below no longer
+   * exactly match one of the three deterministic capture presets. */
+  DisplayMode display_mode;
+
   /* Cheats (action-gated unless marked all-mode) */
   bool   cheat_all_magic;      // all-mode  -> $0299-$029C
   bool   cheat_ranged_sword;   // all-mode  -> $00E4 = $80
@@ -93,8 +103,9 @@ typedef struct Settings {
   struct { uint32 off; uint8 val; } pins[32];
 
   /* Widescreen behavior (per-frame policy) */
-  bool ws_action, ws_bgrefresh, ws_sprites,
-       ws_margin_objects, ws_margin_activation, ws_bg2_padding;
+  bool ws_action, ws_sim, ws_bgrefresh, ws_skypalace_bg, ws_sprites,
+       ws_margin_objects, ws_margin_activation, ws_bg2_padding,
+       ws_sim_sprites;
   int  ws_clamp_override;      // -1 = none, else per-layer clamp mask
 
   /* Aspect / render budget (restart-class) */
@@ -109,44 +120,74 @@ typedef struct Settings {
   /* QoL params (values behind the existing live hotkeys) */
   int    turbo_mult;           // T key multiplier (default 8)
   uint16 warp_target;          // F6 raw region/map; use README's verified table
+
+  /* Save editing -- staged into g_sram, NOT per-frame. See save-format.md.
+   * Only fields VERIFIED against our ROM appear here; the rest stay unexposed
+   * until promoted (save-format.md §3.2/§5). -1 = "leave as-is". */
+  int8  save_region_prog[6];   // Fillmore..Northwall -> SRAM 0x1200 +2/region
+  bool  save_edit_armed;       // master gate; nothing touches g_sram unless set
+  bool  save_autobackup;       // timestamped .bak before first edit (default on)
 } Settings;
 extern Settings g_settings;
 ```
 
+#### Deterministic render profiles (implemented)
+
+`F9` cycles three preset actions over the live fields; `Shift+F9` retains the
+diagnostic dump. Boot with `ExtendedAspectRatio` enabled so the maximum
+framebuffer exists. Pausing with `P` supports exact-same-frame comparisons of
+the crop and draw-time BG policies:
+
+| Profile | Presentation | Widescreen HLE behavior |
+|---|---|---|
+| 4:3 authentic | crop the maximum framebuffer to its center 256 columns | force zero live margins and disable all repair policy |
+| Widescreen RAW | present the complete framebuffer and force symmetric margins | disable BG refresh/source repair, clamp, mirror/repeat, finite-world margin correction, sprite widening/drawing, and activation widening |
+| Widescreen FULL | present the complete framebuffer | enable every shipped widescreen correction and use the scene-specific policy table |
+
+The enum also has a non-cycling `CUSTOM` state. Boot-time `AR_WS_*` values are
+classified by their actual combination; a future overlay must mark the profile
+`CUSTOM` whenever it edits one individual widescreen field. Selecting a preset
+is an action that deliberately overwrites those fields. This prevents the UI
+from claiming “FULL” while, for example, sprite widening is disabled.
+
+Sprite emission and enemy activation are game-update seams, not scanout
+effects. While paused, F9 can immediately redraw presentation/BG differences,
+but OAM membership and activation reflect the new preset on the next game
+frame. For a sprite-focused comparison, change modes while running (or briefly
+unpause for one frame) before taking the F2 capture.
+
+`save_region_prog[]` is deliberately the *only* save field in Phase 1: it is the
+one block verified against our own saves, and it alone delivers the sim-mode
+testing goal. Every other offset in the third-party map is either untested or
+contradicted for our ROM (save-format.md §3.2/§3.3) and must not be exposed
+until a round-trip verifies it.
+
 ### 3.2 `SettingDesc[]` — the descriptor registry (**the capture/store answer**)
 
-One row per setting captures everything: storage location, type, seed source
-(env + ini key), category, default/range, availability, and — the key field —
-its **live-update path** (`ApplyKind`). This one table is the input contract for
-env-seeding, ini load/save, the menu, and live-apply.
+One row per setting captures its storage location, type, seed source, category,
+default/range, and live-update path. The implemented Phase-1 shape is:
 
 ```c
-typedef enum { SET_BOOL, SET_INT, SET_ENUM, SET_MASK, SET_CUSTOM } SettingType;
-typedef enum { APPLY_PASSIVE, APPLY_CALLBACK, APPLY_RESTART, APPLY_ACTION } ApplyKind;
-typedef enum { CAT_CHEATS, CAT_WIDESCREEN, CAT_ASPECT, CAT_DISPLAY,
-               CAT_AUDIO, CAT_QOL } SettingCat;
-
 typedef struct SettingDesc {
   const char *key;        // "cheat_all_magic"  (ini key + menu id)
   const char *env;        // "AR_ALL_MAGIC"     (seed + back-compat; NULL if none)
   const char *label, *tooltip;
-  SettingCat  cat;
   SettingType type;
-  ApplyKind   apply;
+  SettingApplyKind apply;
+  SettingCategory category;
   void       *field;      // &g_settings.cheat_all_magic
-  long        imin, imax, istep, defval;
-  const char **enum_labels;             // SET_ENUM
-  bool (*available)(void);              // e.g. action-mode-only; NULL = always
-  void (*on_change)(void);             // APPLY_CALLBACK/RESTART side-effect; NULL = PASSIVE
-  bool (*parse)(const char *, void *); // SET_CUSTOM escape hatch (PIN, MOONJUMP, ...)
-  int  (*format)(char *, size_t, const void *);
+  long        defval, minval, maxval, step;
+  bool        sticky;
+  bool (*parse)(const char *, void *);  // custom env encoding
 } SettingDesc;
 extern const SettingDesc g_setting_descs[];
 extern const int g_setting_desc_count;
 ```
 
-A `static_assert` on the row count plus a unit test that every struct field has
-exactly one descriptor guards against struct/table drift.
+Phase 3 extends this row rather than creating another table: `enum_labels`,
+`available()`, `on_change()`, and `format()` are still required for menu and
+persistence. A unit test that every user-facing struct field has exactly one
+descriptor will then guard against struct/table drift.
 
 ### 3.3 Value resolution (the seed path)
 
@@ -162,6 +203,14 @@ built-in default  <  config.ini  <  env var  <  (runtime: live menu writes)
   bridge, which merely `setenv`s); else the parsed ini value; else `defval`.
 - After boot the **live struct is authoritative** — env/ini only seeded it. The
   menu mutates the struct and never touches the environment again.
+
+**Implementation constraint for `settings.ini`:** `config.ini` currently puts
+its `AR_*` keys into the process environment with `setenv`. Once the separate
+menu-owned file lands, known registry settings must be passed into the registry
+as parsed values (or the original process environment must be snapshotted
+first); otherwise a bridged config value is indistinguishable from a real env
+override and incorrectly wins over `settings.ini`. Diagnostic-only flags may
+continue using the environment bridge.
 
 This is a drop-in: the gates get seeded from the same env vars they used to
 read, so boot behavior is unchanged. The refactor is behavior-preserving by
@@ -212,13 +261,13 @@ live:
 
 | Path | Mechanism | Settings | Cost |
 |---|---|---|---|
-| **PASSIVE** | Existing gate reads the field every frame. Menu writes struct → next frame reflects it. No extra code. | all 10 cheats, all 6 widescreen-behavior bools, `ws_clamp_override` | free |
+| **PASSIVE** | Existing gate reads the field every frame. Menu writes struct → next frame reflects it. No extra code. | 11 cheat controls and 9 widescreen behaviors currently registered | free |
 | **CALLBACK** | `on_change()` fires one SDL/PPU call. `window_scale`→`SDL_SetWindowSize`; `fullscreen`→`SDL_SetWindowFullscreen`; `audio_enabled` mute→`SDL_PauseAudioDevice`; `ignore_aspect_ratio`→renderer logical-size. | window_scale, fullscreen, ignore_aspect_ratio, audio mute | small |
 | **RESTART** | Needs realloc/reinit unsafe to do cheaply mid-frame. Per setting: attempt heavy live reinit, or set a "pending — applies on relaunch" badge (§10.2). | aspect on/off + ratio (window + PPU buffer realloc), `new_renderer`, audio freq/samples (device reopen; audio thread) | real work |
 | **ACTION** | Not stored toggles — commands the menu invokes; only the *param* is stored. | warp (`warp_target`, F6), turbo (`turbo_mult`, T), savestate (F5/F7), snapshot (F2), pause (P) | reuse existing hotkey paths (`src/main.c:587`) |
+| **SAVE** | One-shot mutation of the `g_sram` buffer + mandatory checksum recompute. Takes effect **the next time the game loads the save from its own title menu** — no app restart. See §4.1. | `save_region_prog[]` (save-format.md §3.1) | small, but see the §4.1 hazard |
 
-The single change that lights up the whole gameplay/widescreen menu is
-converting the ~17 PASSIVE gates:
+The core Phase-1 change is now implemented across those 20 descriptor rows:
 
 ```c
 // before                                    // after
@@ -234,6 +283,40 @@ per-frame (`PpuSetExtraSpace` runs every frame in the policy,
 budget on boot, then let the menu clamp visible columns live — no realloc. See
 §10.2.
 
+### 4.1 The `APPLY_SAVE` path
+
+Save edits are structurally unlike cheats. A cheat pins WRAM every frame; a save
+edit is a **one-shot mutation of the battery-SRAM buffer**, consumed by the game
+only when it next loads the save.
+
+**Where it hooks.** `RtlReadSram()` (`src/main.c:544`) loads `saves/save.srm`
+into `g_sram` at boot. `Settings_ApplySaveEdits()` runs immediately after it —
+before the game boots — so a seeded `AR_SAVE_*` env value is live for the whole
+session (the "easy testing" path). The overlay can also invoke it on demand:
+because the game re-reads SRAM whenever the title menu loads a save, an edit
+applied mid-session takes effect on **return-to-title → continue**. No restart.
+
+**Order of operations (all four steps are mandatory):**
+1. Refuse unless `save_edit_armed` is set — nothing touches `g_sram` otherwise.
+2. Take a timestamped backup if `save_autobackup` (default on).
+3. Write the verified fields; preserve untouched bytes, including power-on fill
+   (save-format.md §1).
+4. Recompute the checksum over `[0x0000, 0x1fec)` and store at `0x1fec`
+   (save-format.md §2). **Skipping this makes the game reject the save.**
+5. Re-sync the auto-persist shadow buffer — see the hazard below.
+
+**⚠️ Hazard: auto-persist clobbers the user's real save.** `src/main.c:811-830`
+diffs `g_sram` every frame and calls `RtlWriteSram()` the moment it changes,
+overwriting `saves/save.srm` (deliberately — so progress survives a freeze). A
+save edit trips this instantly and silently replaces the user's save with the
+edited one. `Settings_ApplySaveEdits()` **must** re-sync that shadow buffer after
+writing (so the edit is not misread as a game write), on top of the backup in
+step 2. This is the single biggest implementation risk in the feature.
+
+**Verification gate.** No save field ships to the menu until a round-trip proves
+the game accepts our recomputed checksum (save-format.md §5.3), and only fields
+marked ✅ there may be exposed at all.
+
 ---
 
 ## 5. Complete settings inventory (registry contents)
@@ -244,6 +327,14 @@ quality knobs default **on** = `!(e && e[0]=='0')`). "Avail." = the
 `available()` predicate.
 
 ### Cheats (`CAT_CHEATS`) — all PASSIVE
+
+“Passive” means disabling stops future enforcement; it does not generally
+rewind game history. All Magic is explicitly marked sticky because its unlock
+bytes may already have been consumed as legitimate-looking progress. Infinite
+HP's auto high-water and Freeze Timer's capture/drain latch reset when their
+live values are disabled/re-enabled. Leaving full No Knockback clears only the
+i-frame timer/flag that mode owns; experimental raw-offset pins cannot safely
+restore an unknown prior byte.
 
 | Setting | env | Type | Default | Avail. | Effect / RAM |
 |---|---|---|---|---|---|
@@ -263,7 +354,9 @@ quality knobs default **on** = `!(e && e[0]=='0')`). "Avail." = the
 
 | Setting | env | Type | Default | Note |
 |---|---|---|---|---|
-| Wide action stages | `AR_WS_ACTION` | bool | on | master toggle; already uncached/live |
+| Wide action stages | `AR_WS_ACTION` | bool | on | master action-geometry toggle |
+| Wide simulation towns | `AR_WS_SIM` | bool | on | master toggle; applies `$01:B4C6` map-edge caps, keeps BG2/dialogs clamped, and gates the separate world-sprite setting |
+| Wide simulation sprites | `AR_WS_SIM_SPRITES` | bool | on | widens ADAD/AE6F horizontal emission only for `$0A00-$1087` world records and the dedicated `$0B0A` angel-arrow lifetime leaf `$B473`. Fixed/UI records, hard world bounds, and vertical rules stay authentic |
 | BG margin refresh | `AR_WS_BGREFRESH` | bool | on | true-content margins vs stale/wrapped |
 | Sky Palace BG2 source repair | `AR_WS_SKYPALACE_BG` | bool | on | render-only ROM source-map margin decode; off restores raw-wide dialogue staging. Validated 2026-07-13 (byte-identical to the boot colonnade) |
 | Widen sprites | `AR_WS_SPRITES` | bool | on | emit sprites into margins |
@@ -287,6 +380,28 @@ quality knobs default **on** = `!(e && e[0]=='0')`). "Avail." = the
 | Audio samples | `AudioSamples` (ini) | int | 2048 | RESTART |
 | Turbo multiplier | `AR_TURBO_MULT` | int | 8 | ACTION param (T key) |
 | Warp target | `AR_WARP` | custom | `0101` | ACTION raw region/map param (F6); populate choices from README's verified table, including broken `0701` status |
+
+### Save editing (`CAT_SAVE`) — all APPLY_SAVE
+
+Only ✅-verified fields (save-format.md §3.1). Everything else in the
+third-party map stays unexposed until promoted (save-format.md §5).
+
+| Setting | env | Type | Default | Note |
+|---|---|---|---|---|
+| Arm save editing | `AR_SAVE_EDIT` | bool | **off** | master gate; `g_sram` is untouched unless set |
+| Auto-backup | `AR_SAVE_BACKUP` | bool | **on** | timestamped `.bak` before first edit; see §4.1 |
+| Fillmore progress | `AR_SAVE_PROG_FILLMORE` | enum | leave as-is | SRAM `0x1200` |
+| Bloodpool progress | `AR_SAVE_PROG_BLOODPOOL` | enum | leave as-is | SRAM `0x1202` |
+| Kasandora progress | `AR_SAVE_PROG_KASANDORA` | enum | leave as-is | SRAM `0x1204` |
+| Aitos progress | `AR_SAVE_PROG_AITOS` | enum | leave as-is | SRAM `0x1206` |
+| Marahna progress | `AR_SAVE_PROG_MARAHNA` | enum | leave as-is | SRAM `0x1208` |
+| Northwall progress | `AR_SAVE_PROG_NORTHWALL` | enum | leave as-is | SRAM `0x120a` |
+
+Progress enum: `act1` (`0x00`) · `active` (`0x01`, observed in our saves but
+absent from the third-party enum — see save-format.md §3.1) · `act1-cleared`
+(`0x02`) · `act2` (`0x03`) · `act2-cleared` (`0x04`). A seventh region byte
+(Death Heim, `0x120c`) is **not** exposed: it reads 0 in every save we have, so
+its encoding is untested.
 
 ---
 
@@ -319,10 +434,13 @@ never mutate audio params the callback reads from the main thread.
 
 ## 8. Phased rollout
 
-1. **Phase 1 — struct + seed, no menu.** Add `src/settings.{c,h}`, the `Settings`
-   struct, descriptor rows for the 17 PASSIVE flags, and `Settings_Init` seeding
-   from env. Convert those 17 gates to read the struct. *Verify byte-identical*
-   cheat behavior vs the old getenv path (§9). Highest-value, highest-risk step.
+1. **Phase 1 — struct + seed, no menu (implemented; runtime validation next).**
+   `src/settings.{c,h}` hold 20 descriptor rows: the legacy cheat controls and
+   all nine widescreen behavior fields. The cached cheat gates now read live
+   fields; special env encodings and default polarities are preserved. The
+   4:3/RAW/FULL preset actions and paused render-only redraw are implemented.
+   Remaining gate: run the §9 cheat golden comparisons before declaring Phase 1
+   behavior-validated.
 2. **Phase 2 — prove live mutation headless.** A debug path (reuse the hotkey /
    a console command) that sets a field at frame N and confirms the effect at
    N+1. No UI yet; de-risks the live path before menu work.
@@ -336,6 +454,13 @@ never mutate audio params the callback reads from the main thread.
    Render rows from `SettingDesc[]`, write `g_settings`, intercept menu input,
    pause game-frame advancement while open, and expose ACTION commands without
    duplicating their existing hotkey implementations.
+6. **Phase 6 — save editing (`CAT_SAVE`).** Independent of Phases 1–5 and
+   schedulable in parallel: it touches `g_sram`, not the cheat gates. Order:
+   (a) promote the scratch analysis to `tools/srm.py` (save-format.md §5.4);
+   (b) implement `SramChecksum()` + `Settings_ApplySaveEdits()` with the §4.1
+   safety sequence; (c) **round-trip test** — edit region progress, boot, confirm
+   the game accepts it (save-format.md §5.3); (d) expose the six region-progress
+   rows. Only then extend field-by-field, each gated on its own verification.
 
 ---
 
@@ -377,6 +502,13 @@ Start with a minimal SDL-rendered immediate UI plus bundled bitmap font
 (**recommended** — matches the current C/`SDL_Renderer` pipeline) vs. first
 integrating the existing RmlUi launcher stack (richer styling, but requires its
 C++/OpenGL/dependency build path).
+
+### 10.5 Save-edit commit model
+Edit `g_sram` in place + re-sync the auto-persist shadow (**recommended** —
+simplest, and the game picks edits up on its next title-menu load) vs. staging
+edits in a scratch buffer committed only on explicit user action (safer against
+accidental overwrites, but needs a second buffer and an explicit commit UI).
+Either way the §4.1 backup is mandatory. See save-format.md §4.1.
 
 ---
 

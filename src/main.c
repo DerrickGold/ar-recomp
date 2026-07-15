@@ -16,6 +16,7 @@
 #include "actraiser_rtl.h"
 #include "common_cpu_infra.h"
 #include "config.h"
+#include "settings.h"
 #include "run_dir.h"
 #include "util.h"
 #include "actraiser_spc_player.h"
@@ -30,6 +31,7 @@ static SDL_Window *g_window;
 static SDL_Renderer *g_renderer;
 static SDL_Texture *g_texture;
 static uint8 g_paused, g_turbo;
+static bool g_paused_redraw_pending;
 static uint32 g_input_state;
 static int g_snes_width = 256, g_snes_height = 224;
 /* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
@@ -65,7 +67,7 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs) {
   (void)funcs;
 }
 
-/* Diagnostic state dump (hotkey F9, and automatically on exit). Writes the
+/* Diagnostic state dump (hotkey Shift+F9, and automatically on exit). Writes the
  * live execution state to saves/ so a frozen/buggy moment can be handed off
  * for analysis without re-navigating menus: full WRAM + battery SRAM as raw
  * binaries, plus a human-readable summary (CPU regs, frame, current function,
@@ -80,8 +82,8 @@ void DumpDiagState(const char *tag) {
 #ifndef _WIN32
   mkdir("saves", 0755);
 #endif
-  /* Hotkey dumps get frame-unique filenames so a mid-bug F9 snapshot isn't
-   * clobbered by the automatic exit dump (or by a second F9). Exit keeps the
+  /* Hotkey dumps get frame-unique filenames so a mid-bug Shift+F9 snapshot
+   * isn't clobbered by the automatic exit dump (or by another). Exit keeps the
    * fixed names existing tooling expects. */
   int hotkey = tag && strcmp(tag, "hotkey") == 0;
   char p_wram[320], p_sram[320], p_state[320], p_disp[320];
@@ -183,6 +185,17 @@ static void SDLCALL AudioCallback(void *userdata, Uint8 *stream, int len) {
 
 static void RtlDrawPpuFrame(void) {
   g_rtl_game_info->draw_ppu_frame();
+}
+
+/* Runtime presentation settings can change while game execution is paused.
+ * Re-render the same emulated PPU state once after such a change; ordinary
+ * paused iterations retain that texture, so pause never advances the game or
+ * repeatedly replays the scanline/HDMA renderer. */
+static void RedrawPausedFrameIfNeeded(void) {
+  if (g_paused && g_paused_redraw_pending) {
+    RtlDrawPpuFrame();
+    g_paused_redraw_pending = false;
+  }
 }
 
 /* Differential-oracle capture: emit per-frame WRAM changes as JSONL in the
@@ -321,6 +334,69 @@ static void WramTraceInit(void) {
   fprintf(stderr, "[wram-trace] -> %s  range=[0x%05x,0x%05x]\n", path, g_wram_lo, g_wram_hi);
 }
 
+/* Write g_pixels to an open PPM, cropped to the current display mode's sub-rect
+ * (pitch is g_snes_width*4 — see PpuBeginDrawing). A 4:3 capture is therefore a
+ * true 256-wide image rather than the wide framebuffer with black bars baked
+ * in, while wide modes capture the full framebuffer exactly as before. */
+static void WriteFramebufferPpm(FILE *pf) {
+  int x0 = Settings_VisibleX0();
+  int w = Settings_VisibleWidth();
+  fprintf(pf, "P6\n%d %d\n255\n", w, g_snes_height);
+  for (int y = 0; y < g_snes_height; y++) {
+    const uint8_t *row = g_pixels + ((size_t)y * g_snes_width + x0) * 4;
+    for (int x = 0; x < w; x++) {
+      fputc(row[x * 4 + 2], pf);  /* R */
+      fputc(row[x * 4 + 1], pf);  /* G */
+      fputc(row[x * 4 + 0], pf);  /* B */
+    }
+  }
+}
+
+/* Point the presentation at the current display mode's framebuffer sub-rect and
+ * size the window to that mode's display aspect. Nothing is reallocated: the
+ * PPU always renders at the boot width, and 4:3 simply presents the authentic
+ * centre 256 columns instead of showing the margins as black bars. This is the
+ * same "allocate at max, select live" mechanism a future user-selectable
+ * resolution would use — see docs/settings-system.md §4.2/§10.2. */
+static void ApplyDisplayPresentation(void) {
+  if (!g_window || !g_renderer) return;
+  int vis_w = Settings_VisibleWidth();
+  int scale = g_config.window_scale ? g_config.window_scale : 3;
+  int win_h = g_snes_height * scale;
+  int win_w = vis_w * scale;
+
+  if (g_settings.display_mode == kDisplayMode_43) {
+    /* 256px at the 7:6 CRT PAR displays as 4:3. */
+    if (g_config.aspect_par_43) win_w = (win_h * 4 + 1) / 3;
+  } else if (g_ws_active && g_config.aspect_par_43) {
+    win_w = (win_h * g_config.extend_aspect_x
+             + g_config.extend_aspect_y / 2) / g_config.extend_aspect_y;
+  }
+
+  /* Logical size encodes the pixel stretch so SDL letterboxes correctly if the
+   * user resizes the window themselves. Mirrors the boot-time setup. */
+  if (g_ws_active && !g_config.ignore_aspect_ratio) {
+    if (g_config.aspect_par_43)
+      SDL_RenderSetLogicalSize(g_renderer, vis_w * 7, g_snes_height * 6);
+    else
+      SDL_RenderSetLogicalSize(g_renderer, vis_w, g_snes_height);
+  }
+  SDL_SetWindowSize(g_window, win_w, win_h);
+}
+
+static void PresentFramebuffer(void) {
+  if (!g_renderer || !g_texture) return;
+  /* Present only the current mode's sub-rect: the whole framebuffer when
+   * wide, the authentic centre 256 in 4:3. The texture allocation never
+   * changes while cycling modes. */
+  SDL_Rect src = { Settings_VisibleX0(), 0,
+                   Settings_VisibleWidth(), g_snes_height };
+  SDL_UpdateTexture(g_texture, NULL, g_pixels, g_snes_width * 4);
+  SDL_RenderClear(g_renderer);
+  SDL_RenderCopy(g_renderer, g_texture, &src, NULL);
+  SDL_RenderPresent(g_renderer);
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
@@ -411,6 +487,11 @@ int main(int argc, char **argv) {
   /* NewRenderer knob (previously parsed but never applied): honor it, except
    * widescreen needs the new PPU path (HUD split/BG3 widen exist only there). */
   g_new_ppu = g_config.new_renderer || g_ws_active;
+
+  /* Seed the live settings from the AR_WS_* env vars (same defaults the gates
+   * used before they were migrated), then pick the starting display mode. Must
+   * run after the widescreen budget above, which decides g_ws_active. */
+  Settings_Init();
 
   /* AR_MXCHECK=1: enable the per-function-entry m/x invariant check
    * (validates the emitter's static m/x analysis on every direct call). */
@@ -599,7 +680,27 @@ int main(int argc, char **argv) {
             RtlSaveLoad(kSaveLoad_Load, 0);
             fprintf(stderr, "State loaded.\n");
           } else if (event.key.keysym.sym == SDLK_F9) {
-            DumpDiagState("hotkey");
+            /* Cycle 4:3 -> widescreen RAW -> widescreen FULL, for capturing
+             * before/after comparison shots without a settings UI. Requires
+             * booting with ExtendedAspectRatio set: the wide framebuffer and
+             * window are sized once at boot, so an authentic-booted run has no
+             * margins to reveal and stays pinned to 4:3. Shift+F9 retains the
+             * long-standing diagnostic dump command. Ignore key-repeat so one
+             * physical press advances exactly one preset. */
+            if (event.key.repeat) {
+              /* no-op */
+            } else if (event.key.keysym.mod & KMOD_SHIFT) {
+              DumpDiagState("hotkey");
+            } else if (!g_ws_active) {
+              fprintf(stderr, "[display] F9 needs ExtendedAspectRatio "
+                      "(e.g. 16:9) in config.ini; staying 4:3\n");
+            } else {
+              int m = Settings_CycleDisplayMode();
+              ApplyDisplayPresentation();
+              g_paused_redraw_pending = true;
+              fprintf(stderr, "[display] mode %d/%d -> %s\n", m + 1,
+                      kDisplayMode_PresetCount, Settings_DisplayModeName(m));
+            }
           } else if (event.key.keysym.sym == SDLK_F6) {
             /* Level warp: stage the game's own sim->act transition to the raw
              * map named by AR_WARP=<region_hex><map_hex>. The low byte is $19,
@@ -616,6 +717,9 @@ int main(int argc, char **argv) {
              * moments be grabbed while driving the game manually so the
              * internals (esp. VRAM, where the bridge tiles live) can be watched
              * change over time alongside the picture. */
+            /* If F9 and F2 were queued in the same paused host iteration,
+             * render the new preset before capturing it. */
+            RedrawPausedFrameIfNeeded();
             extern uint8 g_ram[0x20000];
             extern void ActRaiser_FullSnapshot(const char *prefix);
             static int snap_n = 0;
@@ -633,11 +737,7 @@ int main(int argc, char **argv) {
             char ppm[344]; snprintf(ppm, sizeof ppm, "%s.ppm", prefix);
             FILE *pf = fopen(ppm, "wb");
             if (pf) {
-              fprintf(pf, "P6\n%d %d\n255\n", g_snes_width, g_snes_height);
-              for (int i = 0; i < g_snes_width * g_snes_height; i++) {
-                fputc(g_pixels[i*4+2], pf); fputc(g_pixels[i*4+1], pf);
-                fputc(g_pixels[i*4+0], pf);
-              }
+              WriteFramebufferPpm(pf);
               fclose(pf);
             }
             fprintf(stderr, "[snap] F2 -> %s.{wram,vram,cgram,oam,ppm} (gf=%u)\n",
@@ -653,6 +753,8 @@ int main(int argc, char **argv) {
     }
 
     if (g_paused) {
+      RedrawPausedFrameIfNeeded();
+      if (!headless) PresentFramebuffer();
       SDL_Delay(16);
       continue;
     }
@@ -834,6 +936,7 @@ int main(int argc, char **argv) {
 
     uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
     RtlDrawPpuFrame();
+    g_paused_redraw_pending = false;
     if (perf_on) {
       static uint32 draw_win_start, draw_ms_sum, draw_ms_max;
       static int draw_win_frames;
@@ -880,26 +983,17 @@ int main(int argc, char **argv) {
       if (want) {
         FILE *pf = fopen(fname, "wb");
         if (pf) {
-          fprintf(pf, "P6\n%d %d\n255\n", g_snes_width, g_snes_height);
-          for (int i = 0; i < g_snes_width * g_snes_height; i++) {
-            fputc(g_pixels[i*4+2], pf); /* R */
-            fputc(g_pixels[i*4+1], pf); /* G */
-            fputc(g_pixels[i*4+0], pf); /* B */
-          }
+          WriteFramebufferPpm(pf);
           fclose(pf);
-          fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d\n",
-                  fname, gf, g_snes_width, g_snes_height,
-                  g_ppu->extraLeftCur, g_ppu->extraRightCur);
+          fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d mode=%s\n",
+                  fname, gf, Settings_VisibleWidth(), g_snes_height,
+                  g_ppu->extraLeftCur, g_ppu->extraRightCur,
+                  Settings_DisplayModeName(g_settings.display_mode));
         }
       }
     }
 
-    if (!headless) {
-      SDL_UpdateTexture(g_texture, NULL, g_pixels, g_snes_width * 4);
-      SDL_RenderClear(g_renderer);
-      SDL_RenderCopy(g_renderer, g_texture, NULL, NULL);
-      SDL_RenderPresent(g_renderer);
-    }
+    if (!headless) PresentFramebuffer();
 
     if (headless) {
       extern int snes_frame_counter;

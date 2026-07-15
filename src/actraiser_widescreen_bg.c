@@ -23,6 +23,7 @@
 #include "common_rtl.h"
 #include "cpu_state.h"
 #include "funcs.h"
+#include "settings.h"
 #include "snes/ppu.h"
 #include "snes/snes.h"
 #include "widescreen.h"
@@ -71,12 +72,7 @@ static inline uint16 ws_ram16(uint16 a) {
 }
 
 int ActRaiser_WidescreenBgRefreshEnabled(void) {
-  static int enabled = -1;
-  if (enabled < 0) {
-    const char *e = getenv("AR_WS_BGREFRESH");
-    enabled = !(e && e[0] == '0');
-  }
-  return enabled;
+  return g_settings.ws_bgrefresh;
 }
 
 static int ws_bg_debug_enabled(void) {
@@ -89,12 +85,7 @@ static int ws_bg_debug_enabled(void) {
 }
 
 static int ws_sky_palace_bg_enabled(void) {
-  static int enabled = -1;
-  if (enabled < 0) {
-    const char *e = getenv("AR_WS_SKYPALACE_BG");
-    enabled = !(e && e[0] == '0');
-  }
-  return enabled;
+  return g_settings.ws_skypalace_bg;
 }
 
 static uint16 ws_tilemap_addr_64(uint16 base, int tile_x, int tile_y) {

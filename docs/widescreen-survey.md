@@ -36,7 +36,7 @@ Read each snapshot's `$18`/`$19` from its `.wram.bin` (offsets 0x18/0x19).
 | $18 | $19 | Screen | Wide verdict | Evidence |
 |-----|-----|--------|--------------|----------|
 | 00 | 00 | Title / menu | clean (black BG) but **pillarbox** — $19=00 likely covers other screens (intro etc.) we haven't sampled | snap_00 |
-| 00 | 01 | Sim mode, town view | world tilemap fills margins cleanly in static shot; **pillarbox until Phase 3** — needs scroll/map-edge clamp + people-sprite cull/OAM widening | snap_05 |
+| 00 | 01-06 | Sim town views: Fillmore through Northwall | **Range enabled; Fillmore directly validated.** BG1 uses asymmetric margins capped to each 512px town world; BG2/dialogs stay center-clamped. Regenerated ADAD/AE6F ports render complete world enemies in the margins, and the horizontal-only `$01:B473` lifetime extension lets arrow record `$0B0A` traverse them. Bloodpool capture `runs/20260714-185817/` proved `$00:$02` and exposed the former Fillmore-only gate; `$02-$06` now share the policy but still require direct content passes. `AR_WS_SIM=0` restores pillarbox and `AR_WS_SIM_SPRITES=0` restores native sprite/projectile predicates. | snap_05 + `$01:B4C6/$B473` static proof + 2026-07-14 Fillmore BG/enemy/arrow tests + Bloodpool mode capture |
 | 00 | 07 | Sky palace (angel hub) | **WIDE.** BG1 sky/clouds are clean; BG2 pillars are genuinely wide, but dialogue states expose the game's offscreen BG2 staging. Render-only ROM source-map margin decode implemented 2026-07-12, pending direct validation | snap_01, snap_03; failure evidence `runs/20260712-232230`, 11:31 and 11:36 PM captures |
 | 00 | 08 | Temple interior / dialog scenes | **WIDE — validated.** Bounded scene on black backdrop, margins show backdrop | snap_04 |
 | 00 | 09 | Mode 7 world map | **WIDE — validated.** M7 plane fills full width; snap_02 shows a few black columns at extreme left at some scroll positions (map edge = backdrop) — acceptable | snap_02, snap_06 |
@@ -404,8 +404,9 @@ native/HLE seams untouched.
    margin refresh only, while keeping the original OAM and streamer paths.
    `AR_WS_BGREFRESH=0` returns byte-for-byte to Stage A in the same binary.
    Direct user testing confirmed both the wide BG and sprites remain correct.
-   The shared path is enabled for `$18=$01-$07`; regions `$01-$06` are directly
-   validated and `$07` remains blocked by the Death Heim first-boss crash.
+   The shared path is enabled for `$18=$01-$07`; regions `$01-$06` were directly
+   validated at this stage. Death Heim `$07`, blocked by its first-boss crash at
+   the time, was subsequently repaired and validated end-to-end on 2026-07-14.
 3. **Stage C (validated 2026-07-12)**: widen only per-sprite emission for
    already-authentically-active objects. `$0400` activation remains authentic.
    A full direct-play pass of Fillmore act 1 with `AR_WS_SPRDBG=1` found no
@@ -596,13 +597,34 @@ Town sprites use a separate bank-1 pipeline:
   There is no action-style `$0400` activation decision in `ACD9`: active world
   records are already submitted, and per-component horizontal clipping is the
   widescreen bottleneck.
-- The safe future seam is to widen `ADAD/AE6F` only for world records at
+- The implemented composition seam widens `ADAD/AE6F` only for world records at
   `$0A00+`, using live asymmetric margins. Fixed records must remain authentic
   or UI/overlay sprites may leak into margins. At town map edges cap margins to
   `left<=cameraX`, `right<=$0100-cameraX` and use the same cap for BG and OBJ.
-- The existing partial-town-actor issue (`DEBUG.md` open item #17) must be
-  captured in authentic geometry first. Do not attribute or “fix” it as a
-  widescreen regression without that baseline.
+- The BG half of that policy is implemented in `ActRaiser_ApplyWidescreenPolicy`:
+  modes `$18=$00,$19=$01-$06` grant BG1
+  `left=min(extra,$22)` / `right=min(extra,$0100-$22)`, clears any unrendered
+  framebuffer gaps every frame, and clamps BG2. `AR_WS_SIM=0` selects the
+  authentic pillarbox in the same binary. It deliberately does not alter the
+  camera, tilemap, behavior records, or OAM emission.
+- Direct testing on 2026-07-14 confirmed that this BG policy exposes no wrapped
+  or stale tiles at town edges. The regenerated sprite stage HLEs ADAD/AE6F to a
+  shared faithful port: only record bases `$0A00-$1087` receive the live town
+  margins; fixed records and vertical clipping retain the ROM predicate.
+  `AR_WS_SIM_SPRITES=0` and `AR_WS_SIM_SPRDBG=1` provide the fidelity/debug
+  gates. Direct testing confirms complete enemy compositions in both margins.
+- The next symptom was upstream lifetime rather than composition: angel arrow
+  record `$0B0A` reaches ADAD, but movement `$B44B` calls single-use `$B473`,
+  which releases it outside the authentic horizontal camera window. Its staged
+  HLE extends that one interval to the live margins while preserving hard world
+  and vertical bounds. Regenerated direct testing confirms both margins.
+- A post-validation static pass found no second shared projectile boundary:
+  `$B473` is called only by arrow movement, `$B810` only by arrow release, and
+  `$B898` already ticks every active `$0A00-$1087` world record. Treat enemy
+  shots, construction/lair effects, and rewards as ordinary world records until
+  a direct margin symptom identifies a content-specific lifetime gate. Keep the
+  separate `$06A0-$09FF` fixed/overlay array authentic unless such a capture
+  proves that a world-like effect actually lives there.
 
 For a future decompilation, keep spawn/type identity (`$01:E099/$01:E7D9`),
 live behavior/update, frame composition (`ADAD/AE6F`), and graphics upload/VRAM
@@ -618,35 +640,41 @@ off whenever a cfg/emitter change makes it necessary.
 1. **Action Stage D2 — COMPLETE.** D1 drawing is unchanged; wide activation is
    default-on and `AR_WS_MARGIN_ACTIVATION=0` retains the same-binary fidelity
    gate. Direct Fillmore movement/combat and boundary behavior are clean.
-2. **All-action policy — IMPLEMENTED; regions `$01-$06` VALIDATED.** The runtime
+2. **All-action policy — IMPLEMENTED and VALIDATED.** The runtime
    enables the shared BG/sprite paths for `$18=$01-$07`. Every ordinary action
-   level is fully playable and renders correctly; Death Heim/`70X` reaches its
-   first boss arena and then crashes.
-3. **Action camera/world-edge clamp + final flow.** Map the native camera limits
-   and make them widescreen-aware so finite background edges do not scroll into
-   view. Separately diagnose the `0701` first-boss crash, then run the complete
-   Death Heim boss rush/final boss (there is no ordinary `0702`). Recheck
-   representative edges after the camera change.
+   level plus the complete Death Heim boss rush/final boss/return transition is
+   fully playable and renders correctly.
+3. **General action camera/world-edge clamp.** Map the native camera limits and
+   make them widescreen-aware so finite background edges do not scroll into
+   view. Recheck representative edges after the camera change.
 4. **Dynamic OBJ/effect validation.** Exercise all magic selectors and several
    boss/effect paths while tracing `$D0-$D5`, `$02AC`, object `$38`, OAM count,
    and VRAM `$2D40-$2DBF`. Catalogue selectors to named assets for decomp use.
-5. **Town authentic baseline corpus.** Before any town widening, replay
-   `simdev.rec`, `lairseal.rec`, and `auto_sim.rec` at left/center/right camera
-   positions; capture dialogs, builders/people, lair sealing, rewards, and
-   multi-actor cutscenes. Resolve or precisely freeze the existing partial-
-   actor symptom as a baseline.
-6. **Town BG/map-edge widening.** Implement town margins from the `$B4C6`
-   camera bounds, with a same-binary off switch. Verify no 512px map wrap and
-   preserve the existing policies for sky palace `$19=07`, temple `$08`, and
-   world map `$09`.
-7. **Town world-sprite emission.** Widen only the `ADAD/AE6F` horizontal leaf
-   predicate for `$0A00+` records; keep the `$06A0` fixed segment and vertical
-   predicate authentic. Add planned diagnostics only when implemented (suggested
-   names: `AR_WS_SIM_SPRITES`, `AR_WS_SIM_SPRDBG`; these flags do not exist yet).
-8. **Polish and special cases.** Audit action HUD side panels, boss HDMA/window
-   effects, iris wipes, town dialog staging, and unsampled intro/name-entry/
-   ending screens. Treat each as an explicit policy choice, not a side effect
-   of widening another mode.
+5. **Town authentic baseline corpus — direct passes pending.** A 2026-07-14
+   headless replay audit found that `simdev.rec` and `lairseal.rec` still exit
+   cleanly but, against the current SRAM, cover only Sky Palace/world-map
+   navigation—not a town viewport or its actors. Capture left/center/right
+   town positions, dialogs, builders/people, lair sealing, rewards, and
+   multi-actor cutscenes with `AR_WS_SIM=0`; resolve or precisely freeze the
+   existing partial-actor symptom as a baseline.
+6. **Town BG/map-edge widening — IMPLEMENTED and directly validated.**
+   Modes `$00:$01-$06` now derive asymmetric margins from camera `$22` and the
+   `$B4C6` 512px bounds, clamp BG2/dialogs, clear edge gaps, and provide
+   `AR_WS_SIM=0`. Fillmore confirmed clean clamped edges without wrapped/stale
+   tiles; Bloodpool identified and closed the former `$19==01` policy gate.
+   Full `$02-$06` town/special-flow coverage remains in item 8.
+7. **Town world sprites — enemy composition and arrow lifetime validated.**
+   The regenerated ADAD/AE6F ports widen only `$0A00-$1087` horizontally;
+   direct testing confirms complete margin enemies. `$06A0-$09FF` fixed records
+   and vertical clipping remain authentic. The horizontal-only `$B473`
+   lifetime extension for arrow record `$0B0A` is regenerated and directly
+   validated in both margins.
+8. **Town matrix, remaining actors/effects, and polish.** Test all six towns at
+   left/center/right camera positions; arrows into both margins; enemy shots;
+   construction people/effects; lair sealing, rewards, dialogs, pause/menus,
+   and transitions. Then audit action HUD side panels, boss HDMA/window effects,
+   iris wipes, and unsampled intro/name-entry/ending screens. Treat each as an
+   explicit policy choice, not a side effect of widening another mode.
 
 ### Cross-region findings: first pass (2026-07-12)
 
@@ -696,8 +724,11 @@ is broken at its first boss transition.
   `runs/20260712-220525/snapshots/snap_00_gf2960.ppm` proves reflection is the
   wrong presentation there: cloud slope and motion reverse at both 256px
   boundaries. The renderer now cyclically repeats the isolated authentic BG2
-  scanline for those three maps instead. This preserves same-direction scroll
-  while retaining Bloodpool's visually successful reflection policy.
+  scanline for those three maps instead. This preserves same-direction scroll.
+  Bloodpool Act 2 retains its visually successful reflection policy, while
+  Bloodpool Act 1 (`0201`) is explicitly hybrid: mirror its static mountain
+  band above screen `y=136`, then cyclically repeat BG2 rows `136-223` so the
+  animated water keeps the same apparent direction across both seams.
 - Northwall Act 1 entry `0601` exhibits the same narrow-BG2 cloud technique.
   `runs/20260712-222626/` records BG1 width `$2E=$0A00`, BG2 width
   `$32=$0100`, and the live `$00:E7BC` -> `$02:945E` -> `$02:96B6` path

@@ -74,8 +74,8 @@ Snapshot as of 2026-07-12:
 - **Remaining action widescreen polish**: map and apply presentation-aware
   camera/world-edge clamping so the ends of finite backgrounds cannot scroll
   into the wider viewport.
-- **Death Heim (region 7 / `70X`)**: currently broken. `0701` reaches the first
-  boss arena and then crashes; the boss-rush/final-boss flow is not playable.
+- **Death Heim (region 7 / `70X`)**: the complete boss rush, final boss, and
+  post-boss sky transition are playable and widescreen-validated.
 - **Simulation mode**: Fillmore has one confirmed clean end-to-end town round;
   Bloodpool has partial entry/lightning coverage. The remaining towns and full
   simulation-mode widescreen behavior are TBD.
@@ -84,8 +84,8 @@ Snapshot as of 2026-07-12:
 
 Extra features WIP:
 
-* Widescreen support (ordinary action levels validated; camera-edge polish,
-  Death Heim, and simulation mode remain)
+* Widescreen support (all action content validated; ordinary-stage camera-edge
+  polish and simulation-mode BG/sprite validation remain)
 * Runtime settings and in-game overlay UI ([design](docs/settings-system.md))
 
 #### Screenshots
@@ -292,7 +292,8 @@ see `HandleInput()` in `src/main.c`:
 | `F5` / `F7` | save / load state |
 | `F6` | level warp (see `AR_WARP` below) |
 | `F2` | full diagnostic snapshot (WRAM/VRAM/CGRAM/OAM + screenshot) |
-| `F9` | dump diagnostic state |
+| `F9` | cycle 4:3 authentic → widescreen raw → widescreen full (requires `ExtendedAspectRatio`; paused BG/crop changes redraw immediately, sprite/activation changes apply next game frame) |
+| `Shift`+`F9` | dump diagnostic state |
 
 **Cheats** (`[Cheats]` section — any `AR_*`/`SNESREF_*` key in the `.ini` is
 exported as an environment variable, which is how these are read):
@@ -326,7 +327,7 @@ Kasandora Act 2 begins at `0303`.
 | Aitos | `0401` | `0404` | |
 | Marahna | `0501` | `0504` | |
 | Northwall | `0601` | `0605` | `0608` directly enters the Act 2 boss arena for focused testing |
-| Death Heim | `0701` | — | **Broken:** reaches the first boss arena, then crashes |
+| Death Heim | `0701` | — | Boss-rush hub; verified end-to-end through every rematch and the final boss (2026-07-14) |
 
 Set the target before launch, enter a transition-capable state, then press
 `F6`. An action-to-action warp is not a naturally observed transition and may

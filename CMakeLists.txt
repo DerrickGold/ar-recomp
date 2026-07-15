@@ -61,6 +61,7 @@ add_executable(ActRaiserRecomp
     ${SNESRECOMP_RUNNER_SOURCES}
     # game-specific runtime
     src/config.c
+    src/settings.c
     src/run_dir.c
     src/main.c
     src/actraiser_00.c

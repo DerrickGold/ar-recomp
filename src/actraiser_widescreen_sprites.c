@@ -1,4 +1,4 @@
-/* Staged action sprite handling for widescreen.
+/* Staged action and simulation-town sprite handling for widescreen.
  *
  * $00:8D68 widens per-definition emission. The audited $00:8C98 replacement
  * independently controls initialized margin-object drawing (Stage D1) and
@@ -8,10 +8,16 @@
  * AR_WS_SPRITES=0 restores authentic per-definition emission.
  * AR_WS_MARGIN_OBJECTS=0 restores authentic object draw coverage.
  * AR_WS_MARGIN_ACTIVATION=0 restores the authentic $0400 boundary; Stage D2
- * is enabled by default after direct Fillmore validation. */
+ * is enabled by default after direct Fillmore validation.
+ *
+ * $01:ADAD/$01:AE6F are faithful sim-town composition ports. They widen only
+ * $0A00+ world records. $01:B473 extends the dedicated angel-projectile
+ * lifetime check to the same finite horizontal window. AR_WS_SIM_SPRITES=0
+ * keeps both predicates authentic. */
 
 #include "cpu_state.h"
 #include "actraiser_rtl.h"
+#include "settings.h"
 #include "snes/ppu.h"
 
 #include <stdio.h>
@@ -20,6 +26,8 @@
 
 extern uint8 g_ram[0x20000];
 extern Ppu *g_ppu;
+extern bool g_ws_active;
+extern int g_ws_extra;
 extern RecompReturn bank_00_923A_M0X0(CpuState *cpu);
 
 RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu);
@@ -36,12 +44,7 @@ static inline void ws_dp16w(CpuState *cpu, uint16 off, uint16 v) {
 }
 
 static int ws_sprite_widen_enabled(void) {
-  static int enabled = -1;
-  if (enabled < 0) {
-    const char *e = getenv("AR_WS_SPRITES");
-    enabled = !(e && e[0] == '0');
-  }
-  return enabled;
+  return g_settings.ws_sprites;
 }
 
 static int ws_sprite_debug_enabled(void) {
@@ -163,21 +166,11 @@ void ActRaiser_WidescreenSpriteActivationProbe(void) {
 }
 
 static int ws_margin_objects_enabled(void) {
-  static int enabled = -1;
-  if (enabled < 0) {
-    const char *e = getenv("AR_WS_MARGIN_OBJECTS");
-    enabled = !(e && e[0] == '0');
-  }
-  return enabled;
+  return g_settings.ws_margin_objects;
 }
 
 static int ws_margin_activation_enabled(void) {
-  static int enabled = -1;
-  if (enabled < 0) {
-    const char *e = getenv("AR_WS_MARGIN_ACTIVATION");
-    enabled = !(e && e[0] == '0');
-  }
-  return enabled;
+  return g_settings.ws_margin_activation;
 }
 
 static int ws_scan_axis_visible(uint16 pos, uint16 leading, uint16 trailing,
@@ -488,4 +481,326 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   /* Emulate the replaced RTS; the generated paired caller then restores S. */
   cpu->S = (uint16)(cpu->S + 2);
   return RECOMP_RETURN_NORMAL;
+}
+
+/* ── Simulation-town world sprite composition ─────────────────────────────
+ *
+ * $01:ACD9 has two record scans which share these leaf emitters:
+ *   fixed/UI  $06A0-$09FF (48 x $12 bytes)
+ *   world     $0A00-$1087 (44 x $26 bytes)
+ *
+ * The original $01:ADAD/$01:AE6F bodies differ only in their attribute-word
+ * transform. Keep every other ROM behavior—including the unusual $80 offset
+ * rule, vertical clipping, rejected-slot parking, OAM high-table packing, and
+ * shared $98 cursor—inside one faithful port. Widescreen changes only the
+ * horizontal predicate, only for the world array, and only in town mode.
+ *
+ * AR_WS_SIM_SPRITES=0 restores the authentic predicate in the same generated
+ * binary. AR_WS_SIM_SPRDBG=1 logs only components newly admitted into a live
+ * side margin; it never changes OAM or game state. */
+
+static int ws_sim_sprite_widen_enabled(void) {
+  /* Still gated on the AR_WS_SIM master, as before the refactor. */
+  return g_settings.ws_sim_sprites && g_settings.ws_sim;
+}
+
+static int ws_sim_sprite_debug_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *e = getenv("AR_WS_SIM_SPRDBG");
+    enabled = (e && e[0] && e[0] != '0');
+  }
+  return enabled;
+}
+
+/* The ROM sign-extends component offsets $81-$FF, but deliberately treats
+ * $80 as +128. Do not replace this with an int8_t cast. */
+static uint16 ws_sim_part_offset(uint8 v) {
+  return v >= 0x81 ? (uint16)(0xFF00 | v) : (uint16)v;
+}
+
+static void ws_sim_live_margins(int *left, int *right) {
+  *left = 0;
+  *right = 0;
+  if (!g_ws_active || !ws_sim_sprite_widen_enabled() ||
+      g_ram[0x18] != 0x00 ||
+      g_ram[0x19] < 0x01 || g_ram[0x19] > 0x06)
+    return;
+
+  int cam = (int)ws_ram16(0x22);
+  if (cam < 0) cam = 0;
+  if (cam > 0x0100) cam = 0x0100;
+  *left = cam < g_ws_extra ? cam : g_ws_extra;
+  *right = (0x0100 - cam) < g_ws_extra ? (0x0100 - cam) : g_ws_extra;
+}
+
+static void ws_sim_set_nz16(CpuState *cpu, uint16 value) {
+  cpu->_flag_Z = value == 0;
+  cpu->_flag_N = (value & 0x8000) != 0;
+  cpu->P = (uint8)((cpu->P & ~0x82) |
+                   (cpu->_flag_N ? 0x80 : 0) |
+                   (cpu->_flag_Z ? 0x02 : 0));
+}
+
+static uint16 ws_sim_adc16(CpuState *cpu, uint16 lhs, uint16 rhs) {
+  const uint32 sum = (uint32)lhs + (uint32)rhs +
+                     (uint32)(cpu->_flag_C ? 1 : 0);
+  const uint16 result = (uint16)sum;
+  cpu->_flag_C = sum > 0xFFFF;
+  cpu->_flag_V = ((~(lhs ^ rhs) & (lhs ^ result) & 0x8000) != 0);
+  ws_sim_set_nz16(cpu, result);
+  cpu->P = (uint8)((cpu->P & ~0x41) |
+                   (cpu->_flag_V ? 0x40 : 0) |
+                   (cpu->_flag_C ? 0x01 : 0));
+  return result;
+}
+
+static void ws_sim_cmp16(CpuState *cpu, uint16 lhs, uint16 rhs) {
+  const uint16 result = (uint16)(lhs - rhs);
+  cpu->_flag_C = lhs >= rhs;
+  ws_sim_set_nz16(cpu, result);
+  cpu->P = (uint8)((cpu->P & ~0x01) |
+                   (cpu->_flag_C ? 0x01 : 0));
+}
+
+/* $01:B473 is the visibility/lifetime leaf used only by the angel's arrow
+ * record $0B0A. The original state-2 update moves the arrow, calls this leaf,
+ * and immediately destroys the record when carry returns set. That made the
+ * arrow disappear at x=0/256 before the widened ADAD emitter could draw it.
+ *
+ * Keep the ROM's x+4 anchor, 512x512 hard bounds, 224px vertical viewport,
+ * DP-$00 scratch writes, and carry contract. Only the horizontal camera
+ * comparisons gain the finite live town margins. */
+RecompReturn ActRaiser_SimProjectileVisible(CpuState *cpu) {
+  const uint16 record = cpu->X;
+  const uint16 cam_x = ws_dp16(cpu, 0x22);
+  const uint16 cam_y = ws_dp16(cpu, 0x24);
+  int ext_l = 0, ext_r = 0;
+  ws_sim_live_margins(&ext_l, &ext_r);
+
+  /* Preserve the original DP scratch value even though the widened upper
+   * bound itself remains host-local. */
+  cpu->_flag_C = 0;  /* CLC */
+  cpu->P &= (uint8)~0x01;
+  const uint16 authentic_right = ws_sim_adc16(cpu, cam_x, 0x0100);
+  ws_dp16w(cpu, 0x00, authentic_right);
+
+  uint16 value = cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0A));
+  cpu->A = value;
+  ws_sim_set_nz16(cpu, value);
+  cpu->_flag_C = 0;  /* CLC */
+  cpu->P &= (uint8)~0x01;
+  value = ws_sim_adc16(cpu, value, 0x0004);
+  cpu->A = value;
+
+  int culled = (value & 0x8000) != 0;
+  if (!culled) {
+    ws_sim_cmp16(cpu, value, 0x0200);
+    culled = cpu->_flag_C;
+  }
+
+  const uint16 wide_left = (uint16)(cam_x - ext_l);
+  const uint16 wide_right = (uint16)(authentic_right + ext_r);
+  if (!culled) {
+    ws_sim_cmp16(cpu, value, wide_left);
+    culled = !cpu->_flag_C;
+  }
+  if (!culled) {
+    ws_sim_cmp16(cpu, value, wide_right);
+    culled = cpu->_flag_C;
+  }
+
+  if (!culled) {
+    cpu->A = cam_y;
+    ws_sim_set_nz16(cpu, cam_y);
+    cpu->_flag_C = 0;  /* CLC */
+    cpu->P &= (uint8)~0x01;
+    const uint16 vertical_bottom = ws_sim_adc16(cpu, cam_y, 0x00E0);
+    cpu->A = vertical_bottom;
+    ws_dp16w(cpu, 0x00, vertical_bottom);
+
+    value = cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0C));
+    cpu->A = value;
+    ws_sim_set_nz16(cpu, value);
+    if (value & 0x8000) {
+      culled = 1;
+    } else {
+      ws_sim_cmp16(cpu, value, 0x0200);
+      if (cpu->_flag_C) {
+        culled = 1;
+      } else {
+        ws_sim_cmp16(cpu, value, cam_y);
+        if (!cpu->_flag_C) {
+          culled = 1;
+        } else {
+          ws_sim_cmp16(cpu, value, vertical_bottom);
+          culled = cpu->_flag_C;
+        }
+      }
+    }
+  }
+
+  if (!culled && (ext_l || ext_r) && ws_sim_sprite_debug_enabled()) {
+    const uint16 x4 = (uint16)(
+        cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0A)) + 4);
+    if (x4 < cam_x || x4 >= authentic_right) {
+      fprintf(stderr,
+              "[ws-sim-projectile] gf=%u record=$%04X world=%u,%u "
+              "camera=%u,%u margins=%d/%d\n",
+              (unsigned)ws_ram16(0x88), record,
+              (unsigned)cpu_read16(cpu, cpu->DB,
+                                   (uint16)(record + 0x0A)),
+              (unsigned)cpu_read16(cpu, cpu->DB,
+                                   (uint16)(record + 0x0C)),
+              (unsigned)cam_x, (unsigned)cam_y, ext_l, ext_r);
+    }
+  }
+
+  /* $B44B branches to destruction on carry set. SEC/CLC do not disturb the
+   * final comparison's N/Z/V state. */
+  cpu->_flag_C = culled ? 1 : 0;
+  cpu->P = (uint8)((cpu->P & ~0x01) | (culled ? 0x01 : 0));
+  cpu->S = (uint16)(cpu->S + 2);  /* replaced RTS */
+  return RECOMP_RETURN_NORMAL;
+}
+
+static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
+  const uint16 record = cpu->X;
+  const int world_record = record >= 0x0A00 && record < 0x1088;
+  int ext_l = 0, ext_r = 0;
+  if (world_record)
+    ws_sim_live_margins(&ext_l, &ext_r);
+
+  const uint16 base_x = (uint16)(
+      cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0A)) -
+      ws_dp16(cpu, 0x94));
+  const uint16 base_y = (uint16)(
+      cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0C)) -
+      ws_dp16(cpu, 0x96));
+  ws_dp16w(cpu, 0x14, base_x);
+  ws_dp16w(cpu, 0x16, base_y);
+
+  uint16 part = cpu_read16(cpu, cpu->DB, (uint16)(record + 0x08));
+  uint16 count = cpu_read8(cpu, cpu->DB, part);
+  part = (uint16)(part + 1);
+  ws_dp16w(cpu, 0x0E, count);
+
+  uint16 oam = ws_dp16(cpu, 0x98);
+  uint16 final_a = 0;
+  int final_c = 0;
+  unsigned part_index = 0;
+
+  do {
+    const uint16 x_biased = (uint16)(
+        base_x + ws_sim_part_offset(cpu_read8(
+                     cpu, cpu->DB, (uint16)(part + 1))));
+    const int authentic_x = x_biased < 0x0110;
+    const uint16 wide_x = (uint16)(x_biased + ext_l);
+    const uint16 wide_bound = (uint16)(0x0110 + ext_l + ext_r);
+
+    if (wide_x < wide_bound) {
+      const uint16 screen_x = (uint16)(x_biased - 0x0010);
+      cpu_write8(cpu, cpu->DB, (uint16)(0x0380 + oam), (uint8)screen_x);
+
+      uint16 highp = ws_dp16(cpu, 0x9A);
+      uint8 mask = (uint8)ws_dp16(cpu, 0x9C);
+      uint8 high = cpu_read8(cpu, cpu->DB, highp);
+      if (screen_x & 0x0100)
+        high |= mask;
+      else
+        high &= (uint8)~mask;
+      if (cpu_read8(cpu, cpu->DB, part) & 0x01)
+        high |= (uint8)(mask << 1);
+      else
+        high &= (uint8)~(mask << 1);
+      cpu_write8(cpu, cpu->DB, highp, high);
+
+      const uint16 y_biased = (uint16)(
+          base_y + ws_sim_part_offset(cpu_read8(
+                       cpu, cpu->DB, (uint16)(part + 2))));
+      if (y_biased < 0x00F0) {
+        const uint8 screen_y = (uint8)(y_biased - 0x0011);
+        cpu_write8(cpu, cpu->DB, (uint16)(0x0381 + oam), screen_y);
+
+        const uint16 raw_attr =
+            cpu_read16(cpu, cpu->DB, (uint16)(part + 3));
+        const uint16 attr = alternate_attr
+            ? (uint16)((raw_attr & 0xF1FF) | 0x0600 | ws_dp16(cpu, 0x8F))
+            : (uint16)(raw_attr | ws_dp16(cpu, 0x8F));
+        cpu_write16(cpu, cpu->DB, (uint16)(0x0382 + oam), attr);
+        final_a = attr;
+
+        if (world_record && !authentic_x && ws_sim_sprite_debug_enabled()) {
+          int sx = screen_x & 0x01FF;
+          if (sx >= 0x0100 + ext_r)
+            sx -= 0x0200;
+          fprintf(stderr,
+                  "[ws-sim-sprite] gf=%u emitter=%s record=$%04X "
+                  "part=%u oam=$%03X x=%d y=%u margins=%d/%d "
+                  "tile=$%03X attr=$%04X\n",
+                  (unsigned)ws_ram16(0x88),
+                  alternate_attr ? "AE6F" : "ADAD", record, part_index,
+                  oam, sx, (unsigned)screen_y, ext_l, ext_r,
+                  (unsigned)(attr & 0x01FF), attr);
+        }
+
+        oam = (uint16)(oam + 4);
+        if (oam == 0x0200) {
+          final_c = 1;  /* CPX #$0200 equality carry survives PLX. */
+          break;
+        }
+
+        if (mask == 0x40) {
+          ws_dp16w(cpu, 0x9A, (uint16)(highp + 1));
+          ws_dp16w(cpu, 0x9C, 1);
+        } else {
+          ws_dp16w(cpu, 0x9C, (uint16)(mask << 2));
+        }
+      } else {
+        /* The ROM has already touched x/high bits at this point, then parks
+         * the unallocated low-table slot without advancing either cursor. */
+        cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
+      }
+    } else {
+      cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
+    }
+
+    {
+      uint16 next = (uint16)(part + 5);
+      final_c = next < part;  /* C from the ROM's TYA;CLC;ADC #5. */
+      part = next;
+      final_a = part;
+    }
+    count = (uint16)(count - 1);
+    ws_dp16w(cpu, 0x0E, count);
+    part_index++;
+  } while (count != 0);
+
+  ws_dp16w(cpu, 0x98, oam);
+  cpu->A = final_a;
+  cpu->X = record;  /* PLX */
+  cpu->Y = part;
+  cpu->_flag_C = final_c;
+  cpu->_flag_Z = record == 0;
+  cpu->_flag_N = (record & 0x8000) != 0;
+  cpu->P = (uint8)((cpu->P & ~0x83) |
+                   (cpu->_flag_N ? 0x80 : 0) |
+                   (cpu->_flag_Z ? 0x02 : 0) |
+                   (cpu->_flag_C ? 0x01 : 0));
+  cpu->m_flag = 0;
+  cpu->x_flag = 0;
+  cpu->P &= (uint8)~0x30;
+
+  /* Emulate the replaced RTS; the generated paired caller restores S. The
+   * original PHX/PLX pair is net-neutral and represented by the saved record. */
+  cpu->S = (uint16)(cpu->S + 2);
+  return RECOMP_RETURN_NORMAL;
+}
+
+RecompReturn ActRaiser_BuildSimSprites(CpuState *cpu) {
+  return ws_sim_build_sprites(cpu, 0);
+}
+
+RecompReturn ActRaiser_BuildSimSpritesAlt(CpuState *cpu) {
+  return ws_sim_build_sprites(cpu, 1);
 }

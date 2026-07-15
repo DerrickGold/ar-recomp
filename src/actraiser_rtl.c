@@ -1,6 +1,7 @@
 #define _XOPEN_SOURCE 600
 #include "actraiser_rtl.h"
 #include "variables.h"
+#include "settings.h"
 #include "common_cpu_infra.h"
 #include "snes/snes.h"
 #include "cpu_state.h"
@@ -319,7 +320,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   int repeat_band_layer = -1;
   uint8 repeat_band_y0 = 0, repeat_band_y1 = 0;
   int bg2_gap = 0;  /* margin source gap px/side for BG2 (UI staging strip) */
-  int action_margins = 0;
+  /* True when the current wide world has finite horizontal bounds. The PPU
+   * still owns the fixed centering budget; this policy narrows the live left
+   * and right margins as the camera approaches either world edge. */
+  int bounded_world_margins = 0;
   if (!survey && g_ram[0x18] == 0x00) {
     switch (g_ram[0x19]) {
       case 0x07:            /* Sky Palace hub. BG1 = sky/clouds (wide, clean).
@@ -340,17 +344,22 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
         wide = 0;
         break;
     
-      case 0x01: 
-      // Sim town can be wide
-      // TODO:
-      // * fix enemy sprite occlusion and culling based on new screen space
-      // * fix camera boundaries so town map wrapping isn't visible (or we make the tilemap larger [extra colums])
-      //   and insert blank tile spaces so it just looks black
-        wide = 1;
-        // clamp the dialog layer to prevent wrapping corruption. Nothing else is on layer
-        // 2 that we want to preserve here.
+      case 0x01:            /* Fillmore simulation town. */
+      case 0x02:            /* Bloodpool simulation town. */
+      case 0x03:            /* Kasandora simulation town. */
+      case 0x04:            /* Aitos simulation town. */
+      case 0x05:            /* Marahna simulation town. */
+      case 0x06: {          /* Northwall simulation town. */
+        /* $01:B4C6 clamps camera X ($22) to $0000-$0100, proving 256px of
+         * world on either side of the authentic viewport. AR_WS_SIM=0 is the
+         * same-binary authentic baseline for town regression captures. BG2 is
+         * the bounded dialog/overlay plane and remains center-clamped. The
+         * separate ADAD/AE6F and B473 ports use this same $01-$06 range. */
+        wide = g_settings.ws_sim;
+        bounded_world_margins = wide;
         clamp = 0x02;
         break;
+      }
 
       case 0x08:
       // Temple cut scenes don't need wide screen support
@@ -358,7 +367,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
         wide = 0;
         break;
 
-      default:              /* title(00), sim town(01), temple cutscene(08),
+      default:              /* title(00), temple cutscene(08),
                                transitions, unknown: pillarbox (the temple is a
                                black backdrop with no wide-worthy layer). */
         wide = 0;
@@ -373,9 +382,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * AR_WS_ACTION=0 restores the pillarboxed action baseline in the same
      * binary. AR_WS_BGREFRESH=0 returns exactly to Stage A (raw wide renderer,
      * stale/wrapped margin BG) without changing the action geometry. */
-    const char *aw = getenv("AR_WS_ACTION");
-    wide = !(aw && aw[0] == '0');
-    action_margins = wide && ActRaiser_WidescreenBgRefreshEnabled();
+    wide = g_settings.ws_action;
+    bounded_world_margins =
+        wide && ActRaiser_WidescreenBgRefreshEnabled();
 
     /* Some action sections declare BG2 as a single 256x256 screen
      * ($32/$34=$0100) while BG1 is the scrolling world. There is no BG2 world
@@ -394,11 +403,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
        * reverses their slope/motion at each boundary. Cyclically repeat the
        * already-rendered scanline there so every parallax/raster band continues
        * in the same direction without exposing stale BG2 VRAM. */
-      static int bg2_mirror = -1;
-      if (bg2_mirror < 0) {
-        const char *bm = getenv("AR_WS_BG2_MIRROR");
-        bg2_mirror = !(bm && bm[0] == '0');
-      }
+      int bg2_mirror = g_settings.ws_bg2_padding;
       if (!bg2_mirror) {
         clamp |= 0x02;
       } else if ((g_ram[0x18] == 0x04 &&
@@ -412,6 +417,20 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       } else {
         mirror |= 0x02;
       }
+    }
+
+    /* Bloodpool Act 1 ($02:$01) is another mixed-content narrow BG2. Its
+     * static mountain silhouette benefits from the normal reflected margins,
+     * but tile row 17 and below is animated water. Reflecting those lower
+     * scanlines reverses the apparent flow at both authentic-screen seams.
+     * Keep reflection above y=136 and cyclically continue the already-rendered
+     * water scanline below it. When AR_WS_BG2_MIRROR=0 selected the authentic
+     * clamp fallback, leave the repeat band disabled as part of that A/B gate. */
+    if (wide && g_ram[0x18] == 0x02 && g_ram[0x19] == 0x01 &&
+        (mirror & 0x02)) {
+      repeat_band_layer = 1;  /* BG2 */
+      repeat_band_y0 = 136;
+      repeat_band_y1 = 224;
     }
 
     /* Death Heim's boss-warp room ($07:$01) is already composed as a bounded
@@ -432,7 +451,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       const int ending_sky_pages =
           (g_ppu->bgXsc[0] & 0xfc) == 0x64 &&
           (g_ppu->bgXsc[1] & 0xfc) == 0x74;
-      action_margins = 0;
+      bounded_world_margins = 0;
       if (g_ram[0x0347] >= 0x07 &&
           (ending_sky_pages || g_ram[0x0334] >= 0x03)) {
         clamp |= 0x01;
@@ -453,7 +472,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * and draw both layers raw: this preserves their raster phase and avoids
      * the isolated-buffer clear/merge cost of presentation-layer repeat. */
     if (wide && g_ram[0x18] == 0x07 && g_ram[0x19] == 0x08) {
-      action_margins = 0;
+      bounded_world_margins = 0;
       clamp &= (uint8)~0x03;
       mirror &= (uint8)~0x03;
       repeat &= (uint8)~0x03;
@@ -476,6 +495,26 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       mirror = 0; repeat = 0;
       repeat_band_layer = -1;
     } }
+  /* Capture presets are final policy overrides, intentionally after the
+   * scene-specific rules and diagnostic clamp knob. This makes promotional
+   * comparisons deterministic:
+   *
+   *   4:3  authentic centre 256, no HLE presentation
+   *   RAW  full wide canvas, no clamp/pad/repeat/gap/world-edge correction
+   *   FULL scene policy plus every HLE gate enabled by Settings_SetDisplayMode
+   *
+   * RAW must not inherit a sim BG2 clamp or an action finite-world margin just
+   * because those policies are normally useful. The individual HLE builders
+   * and sprite/activation seams are disabled by the RAW preset's ws_* flags. */
+  if (g_settings.display_mode == kDisplayMode_43) {
+    wide = 0; clamp = 0; mirror = 0; repeat = 0;
+    bg2_gap = 0; bounded_world_margins = 0;
+    repeat_band_layer = -1;
+  } else if (g_settings.display_mode == kDisplayMode_WideRaw) {
+    wide = 1; clamp = 0; mirror = 0; repeat = 0;
+    bg2_gap = 0; bounded_world_margins = 0;
+    repeat_band_layer = -1;
+  }
   if (wide) {
     PpuSetExtraSpace(g_ppu, (uint8)g_ws_extra);
     PpuSetWidescreenLayerClamp(g_ppu, clamp);
@@ -486,11 +525,15 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
                                       repeat_band_y0, repeat_band_y1);
     if (bg2_gap)
       PpuSetWidescreenLayerMarginGap(g_ppu, 1, (uint8)bg2_gap, (uint8)bg2_gap);
-    if (action_margins) {
-      /* Clamp each side to real BG1 world space. The refresh fills every
-       * granted margin column this frame; outside [0,width) stays black. */
+    if (bounded_world_margins) {
+      /* Clamp each side to real BG1 world space. Action width is section
+       * state $2E; simulation towns are the fixed 512px world proven by
+       * $01:B4C6's camera clamp. Outside [0,width) stays black. */
       int cam = (int)(uint16)(g_ram[0x22] | (g_ram[0x23] << 8));
-      int width = (int)(uint16)(g_ram[0x2E] | (g_ram[0x2F] << 8));
+      int width = (g_ram[0x18] == 0x00 &&
+                   g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x06)
+                      ? 0x0200
+                      : (int)(uint16)(g_ram[0x2E] | (g_ram[0x2F] << 8));
       int room_l = cam;
       int room_r = width - 256 - cam;
       if (room_l < 0) room_l = 0;
@@ -547,12 +590,12 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
               g_ppu->window2left, g_ppu->window2right);
     }
   }
-  /* The compositor writes only the active window. Stage B's bounded margins
+  /* The compositor writes only the active window. Finite action/town worlds
    * can leave steady gap strips at the framebuffer edges, so clear those gaps
-   * every frame. Other modes retain Stage A's change-triggered full clear. */
+   * every frame. Other modes retain the change-triggered full clear. */
   static int last_l = -1, last_r = -1;
   int l = g_ppu->extraLeftCur, r = g_ppu->extraRightCur;
-  if (action_margins && g_ppu->renderBuffer) {
+  if (bounded_world_margins && g_ppu->renderBuffer) {
     int budget = g_ppu->extraLeftRight;
     int gap_l = budget - l;
     int gap_r = budget - r;
@@ -623,8 +666,8 @@ void ActRaiserDrawPpuFrame(void) {
   ActRaiser_WidescreenSkyPalaceRestore();
 }
 
-/* Host-side cheat hooks (debug-menu scaffold). All env-gated, default OFF, so
- * they never affect a normal run / the rts_dispatch transition test. Applied
+/* Host-side cheat hooks (debug-menu scaffold). All settings-gated and seeded
+ * OFF from their legacy env names, so they never affect a normal run. Applied
  * once per frame at the START of RunOneFrameOfGame (before the game's frame
  * logic), so a value pinned here is what the frame sees -> effective for death
  * prevention (HP) and physics override (moonjump). RAM is g_ram (WRAM): low
@@ -643,35 +686,8 @@ void ActRaiser_ApplyCheats(void) {
    * AND address-mapping probes with zero per-cheat C. Example:
    *   AR_PIN=7E00210A,7E029901   (INF MP + HAVE FIRE — the §7.18 kit)
    * Bad tokens are reported once and skipped. Max 32 pins. */
-  {
-    static int n = -2;
-    static struct { uint32 off; uint8 val; } pins[32];
-    if (n == -2) {
-      n = 0;
-      const char *e = getenv("AR_PIN");
-      if (e && e[0]) {
-        const char *p = e;
-        while (*p && n < 32) {
-          char tok[16] = {0};
-          int len = 0;
-          while (*p && *p != ',' && len < 15) tok[len++] = *p++;
-          if (*p == ',') p++;
-          uint32 code = (uint32)strtoul(tok, NULL, 16);
-          uint8 bank = (uint8)(code >> 24);
-          uint16 addr = (uint16)(code >> 8);
-          if (len == 8 && (bank == 0x7E || bank == 0x7F)) {
-            pins[n].off = ((uint32)(bank & 1) << 16) | addr;
-            pins[n].val = (uint8)code;
-            n++;
-          } else {
-            fprintf(stderr, "AR_PIN: bad token '%s' (want 8-hex PAR 7Exxxxvv/7Fxxxxvv)\n", tok);
-          }
-        }
-        if (n) fprintf(stderr, "AR_PIN: %d pin(s) active\n", n);
-      }
-    }
-    for (int i = 0; i < n; i++) g_ram[pins[i].off] = pins[i].val;
-  }
+  for (int i = 0; i < g_settings.pin_count; i++)
+    g_ram[g_settings.pins[i].off] = g_settings.pins[i].val;
 
   /* Action-stage gameplay tweaks only. $18 = region/mode: 01-07 = an action
    * stage (region N); 00 = intro/overworld, 08 = sim, $20+ = transitions. Gate
@@ -688,10 +704,7 @@ void ActRaiser_ApplyCheats(void) {
    * routine $01:915D derives $02AC from these). DEBUG.md #18 has the full
    * magic wiring map. */
   {
-    static int en = -1;
-    if (en < 0) { const char *e = getenv("AR_ALL_MAGIC");
-      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
-    if (en) {
+    if (g_settings.cheat_all_magic) {
       g_ram[0x0299] = 0x01;   /* Magical Fire */
       g_ram[0x029A] = 0x02;   /* Magical Stardust */
       g_ram[0x029B] = 0x03;   /* Magical Aura */
@@ -700,34 +713,20 @@ void ActRaiser_ApplyCheats(void) {
   }
 
   /* AR_RANGED_SWORD=1: sword fires a projectile ($E4 = $80, PAR 7E00E480). */
-  {
-    static int en = -1;
-    if (en < 0) { const char *e = getenv("AR_RANGED_SWORD");
-      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
-    if (en) g_ram[0x00E4] = 0x80;
-  }
+  if (g_settings.cheat_ranged_sword) g_ram[0x00E4] = 0x80;
 
   /* AR_INF_MP: infinite magic scrolls. =1 -> pin the WORKING count $21 to 10
    * (PAR 7E00210A); =<n> -> pin to n. Deliberately does NOT touch the
    * PERSISTENT count $0295 (DEBUG.md #18b: $21 is the act-mode working copy,
    * loaded from $0295 at $02:84E0) so the cheat never bakes into save.srm. */
-  {
-    static int en = -1; static unsigned val;
-    if (en < 0) { const char *e = getenv("AR_INF_MP");
-      if (!e || !e[0] || e[0] == '0') en = 0;
-      else { en = 1; val = (e[0] == '1' && !e[1]) ? 0x0A
-                         : (unsigned)strtoul(e, NULL, 0); } }
-    if (en) g_ram[0x21] = (uint8)val;
-  }
+  if (g_settings.cheat_inf_mp)
+    g_ram[0x21] = (uint8)g_settings.cheat_inf_mp;
 
   /* AR_INF_SP=1: infinite sim-mode SP (miracle points). Self-calibrating: pins
    * current SP $0282/16 to max SP $0284/16 once max is known (vs the PAR code's
    * blunt $FF, which over-fills early-game maxima). */
   {
-    static int en = -1;
-    if (en < 0) { const char *e = getenv("AR_INF_SP");
-      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
-    if (en && (g_ram[0x0284] | g_ram[0x0285])) {
+    if (g_settings.cheat_inf_sp && (g_ram[0x0284] | g_ram[0x0285])) {
       g_ram[0x0282] = g_ram[0x0284];
       g_ram[0x0283] = g_ram[0x0285];
     }
@@ -736,12 +735,8 @@ void ActRaiser_ApplyCheats(void) {
   /* AR_ANGEL_HP=1: infinite sim-mode angel health. Self-calibrating: pins
    * current HP $0286 to max HP $0287 (the PAR code 7E028608 hardcodes 8, which
    * would UNDER-fill after level-ups raise the max). */
-  {
-    static int en = -1;
-    if (en < 0) { const char *e = getenv("AR_ANGEL_HP");
-      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
-    if (en && g_ram[0x0287]) g_ram[0x0286] = g_ram[0x0287];
-  }
+  if (g_settings.cheat_angel_hp && g_ram[0x0287])
+    g_ram[0x0286] = g_ram[0x0287];
 
   if (g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07) return;
 
@@ -749,13 +744,18 @@ void ActRaiser_ApplyCheats(void) {
    * high-water max seen this stage (self-calibrates to "full" once you've been
    * at full, so we needn't know max HP statically). =<n> -> pin to literal n. */
   {
-    static int en = -1; static unsigned forced;
-    if (en < 0) { const char *e = getenv("AR_INF_HP");
-      if (!e || !e[0] || e[0] == '0') en = 0;
-      else { en = 1; forced = (unsigned)strtoul(e, NULL, 0); } }
-    if (en) {
-      if (forced > 1) { g_ram[0x1D] = (uint8)forced; }
-      else { static unsigned hi; unsigned hp = g_ram[0x1D];
+    static int prior_mode;
+    static unsigned hi;
+    int mode = g_settings.cheat_inf_hp;
+    if (mode != prior_mode) {
+      /* Entering/re-entering auto mode must calibrate from the current stage,
+       * not reuse a high-water value captured before a live toggle. */
+      if (mode == 1) hi = 0;
+      prior_mode = mode;
+    }
+    if (mode) {
+      if (mode > 1) { g_ram[0x1D] = (uint8)mode; }
+      else { unsigned hp = g_ram[0x1D];
         if (hp > hi && hp <= 0xFF) hi = hp;
         if (hi) g_ram[0x1D] = (uint8)hi; }
     }
@@ -776,11 +776,22 @@ void ActRaiser_ApplyCheats(void) {
    * ($18) so a fresh stage re-arms the freeze instead of staying stuck off
    * from a previous boss fight. */
   {
-    static int en = -1; static uint8 fe6, fe7; static int got;
+    static uint8 fe6, fe7; static int got;
     static int latched_off; static uint8 last_region = 0xFF;
-    if (en < 0) { const char *e = getenv("AR_FREEZE_TIMER");
-      en = (e && e[0] && e[0] != '0') ? 1 : 0; }
-    if (en) {
+    static int was_enabled;
+    if (!g_settings.cheat_freeze_timer) {
+      /* A future live off/on toggle starts a fresh capture and drain latch. */
+      was_enabled = 0;
+      got = 0;
+      latched_off = 0;
+      last_region = 0xFF;
+    } else {
+      if (!was_enabled) {
+        was_enabled = 1;
+        got = 0;
+        latched_off = 0;
+        last_region = 0xFF;
+      }
       if (g_ram[0x18] != last_region) {
         last_region = g_ram[0x18]; got = 0; latched_off = 0;
       }
@@ -810,19 +821,12 @@ void ActRaiser_ApplyCheats(void) {
    *      (default 0x8000 = B; SwapInputBits order). Override without a rebuild
    *      if B isn't jump (verify bits with AR_JOYLOG=1). */
   {
-    static int en = -1; static int spd; static unsigned btnmask;
-    if (en < 0) { const char *e = getenv("AR_MOONJUMP");
-      if (!e || !e[0] || e[0] == '0') en = 0;
-      else { en = 1;
-        spd = (e[0] == '1' && !e[1]) ? 6 : (int)strtoul(e, NULL, 0);
-        const char *b = getenv("AR_MOONJUMP_BTN");
-        btnmask = b && b[0] ? (unsigned)strtoul(b, NULL, 16) : 0x8000u; } }
-    if (en) {
+    if (g_settings.cheat_moonjump_speed) {
       extern Snes *g_snes;
       uint16 buttons = SwapInputBits(g_snes->input1_currentState);
-      if (buttons & btnmask) {                  /* jump (B) held */
+      if (buttons & g_settings.cheat_moonjump_button) {
         uint16 y = (uint16)(g_ram[0x08A4] | (g_ram[0x08A5] << 8));
-        y = (uint16)(y - spd);                  /* −Y = up */
+        y = (uint16)(y - g_settings.cheat_moonjump_speed); /* −Y = up */
         g_ram[0x08A4] = (uint8)(y & 0xFF);
         g_ram[0x08A5] = (uint8)((y >> 8) & 0xFF);
       }
@@ -842,13 +846,17 @@ void ActRaiser_ApplyCheats(void) {
    * while taking a hit. AR_NO_KNOCKBACK=<hexoff> (other than 1) instead raw-pins
    * $08A0+off to 0xFF for experimentation. */
   {
-    static int en = -1; static int full; static unsigned off;
-    if (en < 0) { const char *e = getenv("AR_NO_KNOCKBACK");
-      if (!e || !e[0] || e[0] == '0') en = 0;
-      else if (e[0] == '1' && !e[1]) { en = 1; full = 1; }
-      else { en = 1; full = 0; off = (unsigned)(strtoul(e, NULL, 16) & 0x3F); } }
-    if (en) {
-      if (full) {
+    static int prior_mode;
+    int mode = g_settings.cheat_no_knockback;
+    if (prior_mode == 1 && mode != 1) {
+      /* Release only the two fields owned by full-invulnerability mode. Raw
+       * experimental offset pins are intentionally not guessed/restored. */
+      g_ram[0x08C6] = 0;
+      g_ram[0x08D1] &= (uint8)~0x20;
+    }
+    prior_mode = mode;
+    if (mode) {
+      if (mode == 1) {
         g_ram[0x08C6] = 0xFF;     /* pin i-frame timer (+$26) so flag never clears */
         /* MAGIC EXCEPTION (2026-07-07, DEBUG.md #18): the cast gate ($00:9843 ->
          * $00:9DE1) does BIT #$2008 on player state $08D0 and refuses to cast
@@ -873,7 +881,7 @@ void ActRaiser_ApplyCheats(void) {
         else
           g_ram[0x08D1] |= 0x20;  /* set invuln flag $08D0 bit 0x2000 (+$30) */
       } else {
-        g_ram[0x08A0 + off] = 0xFF;
+        g_ram[0x08A0 + (unsigned)mode] = 0xFF;
       }
     }
   }
@@ -919,7 +927,7 @@ void RunOneFrameOfGame(void) {
     makecontext(&g_game_ctx, game_coroutine, 0);
   }
 
-  ActRaiser_ApplyCheats();   /* host-side cheats (env-gated, default off) */
+  ActRaiser_ApplyCheats();   /* host-side cheats (live settings, default off) */
 
   { extern int ar_trace_active(void); extern void ar_trace_frame(const char *);
     if (ar_trace_active()) ar_trace_frame("vblank"); }  /* frame boundary marker */

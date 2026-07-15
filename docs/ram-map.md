@@ -9,7 +9,7 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:0018 | 1 | Mode/region group: `$00` non-action (town/world/UI); `$01-$06` six two-act kingdom action regions; `$07` Death Heim boss-rush/final-boss action region (no ordinary acts); `$08` ending/credits (post-Death-Heim: mode-0 world montage cycling `$19=09`↔towns, then `$18=08` — presenter at `$02:AA9C`, stamps 'ACT' into SRAM `$70:1FF0`, waits for Start, exits to `$00:8059`) |
-| $7E:0019 | 1 | Current raw map/sub-flow number (second byte of map ID). Not a uniform act selector: Act 2 starts at `$02/$02/$03/$04/$04/$05` for regions `$01-$06`; Death Heim uses `$01` for its hub, `$02-$07` for the six rematch arenas, and `$08` for the final boss |
+| $7E:0019 | 1 | Current raw map/sub-flow number (second byte of map ID). With `$18=00`, `$01-$06` are the six simulation towns in order (Fillmore through Northwall), `$07` is Sky Palace, `$08` is the temple, and `$09` is the world map. In action mode it is not a uniform act selector: Act 2 starts at `$02/$02/$03/$04/$04/$05` for regions `$01-$06`; Death Heim uses `$01` for its hub, `$02-$07` for the six rematch arenas, and `$08` for the final boss |
 | $7E:001A | 1 | Destination map number |
 | $7E:001B | 1 | Destination map group (first byte of map ID) |
 
@@ -65,6 +65,7 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 |---------|------|-------------|
 | $7E:06A0-$09FF | 48 × $12 | Fixed-screen/overlay animation records. `$01:ACD9` tests `+10 & $8000`, runs `$01:AC70`, and emits with camera-independent origins. |
 | $7E:0A00+ | 44 × $26 | Town world-object records. Known render fields: `+08` frame-composition pointer, `+0A/+0C` world X/Y, `+10` render status (`$C000` = skip), `+25` delay/timer. `+12` is a behavior dispatch selector outside the OAM leaf. |
+| $7E:0B0A | $26 | Dedicated angel-arrow world record. `$01:B41A` state-dispatches idle/spawn/move through `$B423`; movement `$B44B` applies velocities `+1A/+1C`, and `$B473` returns carry set when the projectile should be released. |
 | $7E:0AEE/$0AF0 | 2+2 | Town camera-follow target X/Y read by `$01:B4C6`; camera derives `$22=$0AEE-$80`, `$24=$0AF0-$70` before clamping. |
 | $7F:9752 | 1+ | bit 1 selects town alternate OAM emitter `$01:AE6F` for the world segment. |
 | $7F:9754 | 1+ | nonzero reduces the normal 44-record town world scan to one record. |

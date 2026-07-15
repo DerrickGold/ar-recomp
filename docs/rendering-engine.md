@@ -368,6 +368,33 @@ fixed segment authentic. Town world width/height is 512×512 px, so usable
 side margins are asymmetric: `left <= cameraX`, `right <= $0100-cameraX`.
 Apply the same margins to town BG and world sprites to prevent map wrap.
 
+The first town stage is now implemented at the host presentation seam. For
+`$18=$00,$19=$01-$06`, `ActRaiser_ApplyWidescreenPolicy` keeps the PPU centering
+budget fixed but grants live BG margins
+`left=min(extra,$22)` and `right=min(extra,$0100-$22)`. BG2 remains clamped to
+the authentic center for dialogs, and unrendered edge gaps are cleared every
+frame. `AR_WS_SIM=0` restores the pillarboxed baseline. This stage changes no
+SNES camera/tilemap/OAM state; the `ADAD/AE6F` sprite predicate is intentionally
+separate. The sprite implementation is active behind cfg HLE replacements:
+both leaves use one faithful component/OAM port, with AE6F retaining its exact
+attribute rewrite. Only `$0A00-$1087` world-record bases receive the current
+asymmetric BG margin bounds; `$06A0-$09FF` fixed records and vertical clipping
+stay authentic. `AR_WS_SIM_SPRITES=0` restores the native horizontal predicate,
+and `AR_WS_SIM_SPRDBG=1` logs newly admitted components. Fillmore direct testing
+confirms complete enemy compositions in the margins; the other five towns use
+the same range gate but remain content-matrix validation targets.
+
+The angel arrow exposed the next layer of the same pipeline. Its dedicated
+world record `$0B0A` does reach ADAD, but state-2 movement `$01:B44B` first calls
+the single-use lifetime leaf `$01:B473`. That leaf releases the record whenever
+`x+4` leaves the authentic camera interval, so the widened emitter never sees
+the arrow. The `$B473` HLE extends only its horizontal camera interval
+to the live finite-world margins; the 512x512 hard bounds, `$E0`-pixel vertical
+window, DP scratch, and carry result remain faithful. This distinction should
+survive a decompilation: composition visibility and actor lifetime are separate
+policies even when they produce the same apparent edge cull. Regenerated direct
+testing confirms the arrow now traverses both margins correctly.
+
 ## 12. Conversion status
 
 | Routine | Status |
@@ -479,13 +506,13 @@ Facts the next design must satisfy (all trace/disasm-proven above):
     its missing behavior handler was hidden after zero holes in the `$B449` type
     table. This further confirms that mirror/clamp and object behavior are separate
     seams: host BG2 presentation never writes object state or handler pointers.
-11. **Action rendering is directly validated through region `$06`.** Complete
-    playthroughs of every ordinary action level confirm the streaming, sprite,
-    activation, mirror/repeat padding, and observed HDMA/parallax paths. The
+11. **Action rendering is directly validated through region `$07`.** Complete
+    playthroughs of every ordinary action level plus Death Heim confirm the
+    streaming, sprite, activation, mirror/repeat padding, observed
+    HDMA/parallax paths, boss rush, final boss, and return transition. The
     remaining presentation task is not tile streaming: map the camera's finite
     world-edge limits and make them widescreen-aware so background endpoints do
-    not scroll into the wider viewport. Death Heim/`70X` is a separate broken
-    flow that reaches its first boss arena and then crashes.
+    not scroll into the wider viewport.
 
 ### 13.1 Stage-B implementation refinement (2026-07-12)
 
@@ -541,8 +568,11 @@ the centered cloud field tear visibly from both margins. For this act,
 continues each authentic scanline: left `x<0` samples `256+x`, while right
 `x>=256` samples `x-256`. Because the copy happens after that scanline's tile
 decode/window/current scroll state, all bands keep the same direction and tile
-animation remains automatic. Bloodpool retains reflection; neither padding
-mode reads the stale offscreen tilemap half or mutates emulated state.
+animation remains automatic. Bloodpool Act 2 retains whole-layer reflection.
+Bloodpool Act 1 is mixed: its upper mountain band remains reflected, while BG2
+tile row 17 downward (`y=136-223`) cyclically repeats the live scanline so its
+animated water does not flow backward in the margins. Neither padding mode
+reads the stale offscreen tilemap half or mutates emulated state.
 
 Northwall (`$18=06`, raw maps `$19=01-$05`) uses the same narrow,
 parallax-cloud BG2 construction and therefore selects the same cyclic-repeat
@@ -659,5 +689,6 @@ performance.
 8. Native camera/world-edge clamp ownership and its presentation-aware wide
    bounds. Distinguish changing the gameplay camera limit from merely hiding or
    padding pixels outside finite BG data; verify both axes and parallax layers.
-9. Death Heim/`70X` first-boss crash, then boss-rush/final-boss rendering and
-   handler flow.
+9. Death Heim/`70X` is complete: the first-boss crash and later soft-lock were
+   repaired, and the boss rush, final boss, and return transition were directly
+   validated on 2026-07-14.

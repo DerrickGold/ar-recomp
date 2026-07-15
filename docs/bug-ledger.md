@@ -142,8 +142,8 @@ the current debugging process; this file is the case law.
    **Current generation status:** the local generated build now includes all 43 entries and links
    cleanly. `--tables`, `--all-yields`, `--field14`, and the Stage-3 snapshot scan each report zero
    unconverted entries. Direct playthroughs subsequently confirmed every ordinary action level in
-   regions `$01-$06` fully playable; Death Heim/`$07` is a separate remaining crash after entering
-   its first boss arena.
+   regions `$01-$06` fully playable. Death Heim/`$07` was still a separate crash at this point;
+   entry 20 records its subsequent 2026-07-14 repair and end-to-end validation.
 8. **Wrong-width dispatch routing (the "nearest survivor" class)** — DIFFERENT from a misdecode:
    the ROM bytes decode correctly at each width, but when the emit-truth prune drops a wrong-width
    variant, the runtime dispatch switch has to route that case to SOME surviving variant, and the

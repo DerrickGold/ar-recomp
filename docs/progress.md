@@ -150,16 +150,31 @@ silently attributed to future widescreen code.
 The immediate implementation focus moves to the runtime settings/overlay plan
 in [settings-system.md](settings-system.md). The remaining widescreen backlog is:
 
-1. **Finish action presentation.** Implement the camera/world-edge clamp above,
-   then repair and validate the separate Death Heim `70X` flow.
+1. **Finish action presentation.** Implement the camera/world-edge clamp above.
+   The separate Death Heim `70X` flow is already repaired and directly
+   validated through its boss rush, final boss, and return transition.
 2. **Freeze simulation baselines.** Complete Bloodpool and all four untested
-   towns using the town matrix before widening simulation mode.
-3. **Widen simulation backgrounds safely.** Derive margins from `$01:B4C6`
-   camera bounds; clamp at map edges; preserve special policies for sky palace,
-   temple, and world-map subflows; provide a same-binary disable switch.
-4. **Widen simulation world sprites.** Extend horizontal emission only for
-   `$0A00+` world records in `$01:ADAD/$01:AE6F`; retain authentic `$06A0`
-   fixed/UI records and vertical clipping. Add dedicated sim sprite diagnostics.
+   towns using the town matrix. The old `simdev.rec`/`lairseal.rec` files no
+   longer reach a town viewport from the current SRAM, so new direct captures
+   are required; use `AR_WS_SIM=0` for authentic geometry.
+3. **Widen simulation backgrounds safely — implemented and directly validated.**
+   Modes `$00:$01-$06` derive margins from `$01:B4C6` camera bounds, clamp at
+   the 512px map edges, keep BG2/dialogs centered, clear framebuffer gaps, and
+   provide the same-binary `AR_WS_SIM=0` switch. Fillmore direct BG testing on
+   2026-07-14 confirmed clean clamped edges with no odd tile exposure.
+   Bloodpool was captured as `$00:$02`, exposing and then repairing the original
+   Fillmore-only gate; Bloodpool plus modes `$03-$06` remain direct targets.
+4. **Widen simulation world sprites — enemy composition and angel projectile
+   validated.** The regenerated faithful `$01:ADAD/$01:AE6F` ports extend
+   horizontal emission only for `$0A00-$1087` world records; the 2026-07-14
+   direct run confirmed complete enemy sprites in both margins. The angel arrow
+   is already world record `$0B0A`, but its state-2 update `$01:B44B` destroys
+   it through `$01:B473` when `x+4` leaves the old `[cameraX,cameraX+$100)`
+   window. The faithful `$B473` port widens only those horizontal camera
+   comparisons, retaining the 512x512 hard bounds and authentic vertical rule.
+   Direct testing on 2026-07-14 confirmed arrows remain and render correctly in
+   both margins. `AR_WS_SIM_SPRITES=0` restores both native predicates and
+   `AR_WS_SIM_SPRDBG=1` diagnoses both paths.
 5. **Polish shared presentation.** Audit action HUD side panels, dialog staging,
    boss effects, intro/name-entry/ending screens, and framebuffer-gap clearing.
 6. **Re-run the complete matrix.** Recheck every action stage, every town, and
@@ -172,7 +187,7 @@ in [settings-system.md](settings-system.md). The remaining widescreen backlog is
 |---|---|---|
 | Boot / title screen | ✅ | |
 | Save / load (in-game state) | ✅ | Checksum-gated continue path confirmed (`AR_SAVECHECK`) |
-| Action-stage combat | 🟡 | Every action level in regions `$01-$06`, including their bosses, is fully playable after the handler-coverage batch. Death Heim/`70X` reaches its first boss and crashes. Open `$00:B8AB` spell-projectile garbage variant (`DEBUG.md` #19). |
+| Action-stage combat | ✅ | Every ordinary action level plus the complete Death Heim boss rush, final boss, and return transition is fully playable. Open `$00:B8AB` spell-projectile garbage variant (`DEBUG.md` #19) remains a separate unconverted-code edge case. |
 | Magic casting | 🟡 | WORKS as of 2026-07-07 (was dead — blocked by our own knockback cheat, `DEBUG.md` #18); Fire verified in-stage; other 3 spells' effects pending validation (`AR_ALL_MAGIC` cheat added for exactly this) |
 | Sim-mode town simulation | 🟡 | Fillmore ✅ end-to-end; Bloodpool entry/lightning partial; full Bloodpool plus Kasandora/Aitos/Marahna/Northwall baselines pending. Reward web and multi-actor cutscenes fixed 2026-07-07 (`DEBUG.md` #18b/§7.17). |
 | Scroll/MP persistence | ✅ | `$0295` persistent / `$21` working-copy model mapped + grant verified across modes (2026-07-07) |
@@ -181,7 +196,7 @@ in [settings-system.md](settings-system.md). The remaining widescreen backlog is
 | Input | 🟡 | Hardcoded keyboard mapping works (see README); no gamepad support yet. Consumer side fully mapped (SEAMS "Input" + "Magic system") |
 | Cheats | 🟡 | Named cheat kit 2026-07-07: `AR_ALL_MAGIC`/`AR_RANGED_SWORD`/`AR_INF_MP`/`AR_INF_SP`/`AR_ANGEL_HP` + magic-safe `AR_NO_KNOCKBACK` + generic `AR_PIN`; real 8x turbo on `t`. `AR_FREEZE_TIMER` auto-backoff added, still unverified. `AR_NO_KNOCKBACK` is not physics-neutral: its pinned invulnerability suppresses water drag (confirmed 2026-07-12). |
 | Debug tooling | ✅ | 2026-07-07 toolkit: `dis65`/`romxref`/`wram`/`resolve_miss`/`cycle.sh` — anomaly capture → auto-triage → proposed cfg patch loop (`DEBUG.md` §1) |
-| Action widescreen BG/sprites | 🟡 | Regions `$01-$06` are fully playable and visually validated: wide streaming, fast vertical rows, sprites, activation, narrow-BG2 mirror/repeat policies, HDMA/parallax scenes, and bosses all behave correctly. Remaining: camera/world-edge clamp for full presentation coverage; Death Heim/`70X` is blocked by its first-boss crash. |
+| Action widescreen BG/sprites | 🟡 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, fast vertical rows, sprites, activation, narrow-BG2 mirror/repeat policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. Remaining: general camera/world-edge clamp for full presentation coverage. |
 
 ## Codebase metrics (objective, automated — refreshed 2026-07-12)
 
