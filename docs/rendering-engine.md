@@ -560,6 +560,43 @@ parallax-scrolling snow BG2; it independently selects cyclic repeat. Maps
 `$06/$07` remain on the default policy; completed direct testing found no
 equivalent seam there.
 
+Death Heim's boss-warp room (`$18=$07`, `$19=$01`) needs a banded policy even
+though both action layers declare `$0200` width. Snapshot
+`runs/20260714-174654/snapshots/snap_00_gf1436` records camera/BG1 scroll
+`$22=$0000`, `$24=$001F`, BG1 size `$2E/$30=$0200/$0100`, BG2 scroll
+`$26/$28=$0000/$0000`, and BG2 size `$32/$34=$0200/$0100`. Reconstructing the
+two layers directly from the captured VRAM/CGRAM proves that BG1 contains only
+the central stone causeway, while BG2 contains both the face statues and the
+animated border/fog/water. The black left margin in the composite is therefore
+the camera-at-world-edge side budget (`cam=0`), not absent fog art.
+
+A whole-layer policy cannot separate the bounded statues from the desired wide
+fog. The renderer now supports a per-layer cyclic-repeat band: it first renders
+the authentic scanline in isolation, then repeats that scanline into both
+margins while preserving transparency, priority, scroll/HDMA phase, character
+animation, and color math. For `0701`, the full symmetric canvas is enabled,
+BG1 and BG2 are clamped (`mask=$03`), and BG2 tile rows 18-27 (screen
+`y=144-223`) override the clamp with cyclic repeat. Row 18 contains the
+decorative divider and the fog/water begins below it; all face art ends above
+the split. The world-margin decoder is skipped for this room because the
+presentation samples only authentic center pixels. This is render-only and
+does not alter the native scroll registers or tilemaps. Direct testing on
+2026-07-14 confirmed that the complete faces and causeway remain centered,
+the divider/fog fills both margins cleanly, and the animated effect continues
+normally.
+
+Death Heim raw maps `$02-$08` (`0702-0708`) select the narrow-parallax repeat
+policy. Capture
+`runs/20260714-173750/snapshots/snap_00_gf4875` records `$18=$07`, `$19=$04`,
+and BG2 logical width `$32=$0100`; the policy log showed `mirror=02`. Direct
+observation found the padded mountain/parallax image moving opposite the
+authentic center at the 256px boundaries. The same effect was then directly
+reported on maps `$05-$07`. Maps `$02`, `$03`, and `$08` are provisionally
+classified with that background family so boss-rush transitions cannot restore
+reflection. The full `$02-$08` range therefore selects the same
+isolated-scanline cyclic repeat as Aitos and Northwall. Direct post-build
+validation remains pending for these maps, especially the provisional entries.
+
 ## 14. Open questions (all remaining, none blocks the §13 design)
 
 1. `$7F:B800` action-anim frame composer (find on an animated level:

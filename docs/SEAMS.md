@@ -100,6 +100,24 @@ key-on state: srcn/pitch/volumes/ADSR + first BRR bytes — all-zero BRR = sampl
 | Sim-mode object sprite/behavior identity | ROM tables `$01:E099` (behavior/anim data ptrs) + `$01:E7D9` (sprite-frame ptrs), one 16-bit entry per object type — see "Sim-mode object/sprite spawn & OAM-build system" below | not VRAM directly — feeds world record `+00`/`+08`, which downstream OAM code (`ADAD`/`AE6F`) reads | "this object type's behavior and frame-composition asset" | **located 2026-07-01; bases corrected 2026-07-02** | 🟡 identity/assigner/emitter chain mapped; ROM character-upload identity remains to be catalogued |
 | Sim-mode per-frame building/icon update | `$01:8000` (bank 1) — see "Sim-mode dispatch structure" below | VRAM/OAM (downstream, not yet traced) | "update this frame's city/building/icon visuals" | region (`$19`) gates which sub-block runs; several `JSR (abs,X)` tables (`$2920`, `$208E`, `$B420`) select per-building/icon variants | 🔴 (dispatch structure mapped; the actual VRAM writes inside the deep `$018170+` body not yet traced) |
 
+Death Heim boss-warp presentation seam (`0701`, 2026-07-14): snapshot
+`runs/20260714-174654/snapshots/snap_00_gf1436` has camera `$22=0` and both
+BG widths `$0200`. VRAM/CGRAM reconstruction identifies BG1 as the causeway and
+BG2 as faces plus animated fog/water. The room therefore bypasses world-edge
+side-space reduction, clamps BG1+BG2, and uses the shared PPU's banded cyclic
+repeat on BG2 `y=144-223`; the margin tilemap transaction is unnecessary and
+skipped. This is a rendering seam only—the original BG scroll, animation, VRAM,
+and gameplay state remain authoritative. Direct testing on 2026-07-14
+confirmed centered complete faces/causeway and clean animated fog across both
+margins.
+
+Death Heim narrow-BG2 presentation evidence (2026-07-14): maps `0704-0707`
+directly show the same mountain/parallax motion; `0702`, `0703`, and `0708` are
+provisionally classified with that family. With `$32=$0100`, reflection makes
+the margins move opposite the authentic center; `$19=$02-$08` therefore uses
+isolated scanline cyclic repeat. See `docs/rendering-engine.md` §13 and
+`runs/20260714-173750/snapshots/snap_00_gf4875`.
+
 > **The asset-substitution seam is the loaders, not the draws.** When you find the routines that
 > copy graphics ROM→VRAM and select animation frames, capture the table index they use — that
 > index is the logical sprite/tileset identity. For **sim-mode objects** the type→behavior/frame

@@ -292,6 +292,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   uint8 clamp = 0;
   uint8 mirror = 0;
   uint8 repeat = 0;
+  int repeat_band_layer = -1;
+  uint8 repeat_band_y0 = 0, repeat_band_y1 = 0;
   int bg2_gap = 0;  /* margin source gap px/side for BG2 (UI staging strip) */
   int action_margins = 0;
   if (!survey && g_ram[0x18] == 0x00) {
@@ -363,8 +365,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
        * clamp for A/B testing in the same binary.
        *
        * Bloodpool's mostly symmetric decoration benefits from reflection.
-       * Aitos act 1 (raw maps $01-$03), Northwall maps $01-$05, and the
-       * Northwall $08 boss arena show moving cloud/snow bands; reflection
+       * Aitos act 1 (raw maps $01-$03), Northwall maps $01-$05 and $08, and
+       * Death Heim maps $02-$08 show moving cloud/snow/mountain bands; reflection
        * reverses their slope/motion at each boundary. Cyclically repeat the
        * already-rendered scanline there so every parallax/raster band continues
        * in the same direction without exposing stale BG2 VRAM. */
@@ -379,11 +381,27 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
                   g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x03) ||
                  (g_ram[0x18] == 0x06 &&
                   ((g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x05) ||
-                   g_ram[0x19] == 0x08))) {
+                   g_ram[0x19] == 0x08)) ||
+                 (g_ram[0x18] == 0x07 &&
+                  g_ram[0x19] >= 0x02 && g_ram[0x19] <= 0x08)) {
         repeat |= 0x02;
       } else {
         mirror |= 0x02;
       }
+    }
+
+    /* Death Heim's boss-warp room ($07:$01) is already composed as a bounded
+     * SNES-width scene: BG1 is the central causeway, while BG2 contains both
+     * the face statues and the animated fog/water. Open the full symmetric
+     * canvas despite camera X=0, clamp both scenery layers, then cyclically
+     * continue only BG2's border/fog rows. The split begins at tile row 18
+     * (screen Y=144), below every face and above the water field. */
+    if (wide && g_ram[0x18] == 0x07 && g_ram[0x19] == 0x01) {
+      action_margins = 0;
+      clamp |= 0x03;
+      repeat_band_layer = 1;  /* BG2 */
+      repeat_band_y0 = 144;
+      repeat_band_y1 = 224;
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
@@ -394,18 +412,23 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       int L = atoi(ob) - 1;
       if (L >= 0 && L < 4) g_ppu->screenEnabled[0] = (uint8)(1u << L);
       wide = 1; clamp = 0; mirror = 0; repeat = 0;  /* raw tilemap data */
+      repeat_band_layer = -1;
     } }
   /* AR_WS_CLAMP=<hex mask>: override the per-layer clamp for tuning. */
   { const char *cm = getenv("AR_WS_CLAMP");
     if (cm && cm[0]) {
       wide = 1; clamp = (uint8)strtoul(cm, NULL, 16);
       mirror = 0; repeat = 0;
+      repeat_band_layer = -1;
     } }
   if (wide) {
     PpuSetExtraSpace(g_ppu, (uint8)g_ws_extra);
     PpuSetWidescreenLayerClamp(g_ppu, clamp);
     PpuSetWidescreenLayerMirror(g_ppu, mirror);
     PpuSetWidescreenLayerRepeat(g_ppu, repeat);
+    if (repeat_band_layer >= 0)
+      PpuSetWidescreenLayerRepeatBand(g_ppu, (uint8)repeat_band_layer,
+                                      repeat_band_y0, repeat_band_y1);
     if (bg2_gap)
       PpuSetWidescreenLayerMarginGap(g_ppu, 1, (uint8)bg2_gap, (uint8)bg2_gap);
     if (action_margins) {
@@ -428,18 +451,26 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   /* One line per policy flip — cheap, and makes "why isn't this screen
    * wide?" diagnosable from any console.log (mode bytes included). */
   static int last_wide = -1, last_clamp = -1, last_mirror = -1,
-             last_repeat = -1;
+             last_repeat = -1, last_repeat_band_layer = -2,
+             last_repeat_band_y0 = -1, last_repeat_band_y1 = -1;
   if (wide != last_wide || clamp != last_clamp || mirror != last_mirror ||
-      repeat != last_repeat) {
+      repeat != last_repeat ||
+      repeat_band_layer != last_repeat_band_layer ||
+      repeat_band_y0 != last_repeat_band_y0 ||
+      repeat_band_y1 != last_repeat_band_y1) {
     last_wide = wide;
     last_clamp = clamp;
     last_mirror = mirror;
     last_repeat = repeat;
+    last_repeat_band_layer = repeat_band_layer;
+    last_repeat_band_y0 = repeat_band_y0;
+    last_repeat_band_y1 = repeat_band_y1;
     fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s "
-            "clamp=%02x mirror=%02x repeat=%02x\n",
+            "clamp=%02x mirror=%02x repeat=%02x rband=%d/%u-%u\n",
             (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8)),
             g_ram[0x18], g_ram[0x19], wide ? "WIDE" : "pillarbox",
-            clamp, mirror, repeat);
+            clamp, mirror, repeat, repeat_band_layer,
+            (unsigned)repeat_band_y0, (unsigned)repeat_band_y1);
   }
   /* AR_WS_LAYERS=1: dump per-frame PPU layer/tilemap state — which BG a
    * margin artifact lives on, and whether that BG's tilemap is 32-wide (wraps

@@ -531,6 +531,13 @@ void ActRaiser_WidescreenMarginRefresh(void) {
     s_refresh_key_valid = 0;
     return;
   }
+  /* Death Heim $07:$01 presents both BG1 and BG2 from their authentic center;
+   * only BG2's lower fog band is repeated by the renderer. No margin tilemap
+   * cells are sampled, so running the world-strip transaction is unnecessary. */
+  if (g_ram[0x18] == 0x07 && g_ram[0x19] == 0x01) {
+    s_refresh_key_valid = 0;
+    return;
+  }
   if (g_ppu->extraLeftCur == 0 && g_ppu->extraRightCur == 0) {
     s_refresh_key_valid = 0;
     return;

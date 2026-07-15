@@ -710,6 +710,27 @@ is broken at its first boss transition.
   restore reflection. Boss map `0608` also uses a parallax-scrolling snow BG2
   and explicitly selects cyclic repeat. Maps `0606/0607` remain on the default
   policy; direct full-level testing found no equivalent seam there.
+- Death Heim boss-warp room `0701` is a mixed-content BG2 case, not an ordinary
+  level-edge clamp. Offline reconstruction of
+  `runs/20260714-174654/snapshots/snap_00_gf1436` from its VRAM/CGRAM dumps
+  shows BG1 is the central causeway; BG2 owns both the face statues and the
+  animated divider/fog/water. Both layers report width `$0200`, but camera
+  `$22=$0000` reduced the left side budget to zero. The selected policy opens
+  symmetric margins, clamps BG1+BG2, then cyclically repeats only BG2 screen
+  rows `144-223`. This keeps every face in the authentic frame while extending
+  the animated lower field from its live rendered scroll phase. Direct testing
+  on 2026-07-14 confirmed the centered scenery, clean full-width fog, and
+  continuing animation.
+- Death Heim raw maps `0702-0708` select cyclic repeat for the moving
+  mountain/parallax background.
+  In
+  `runs/20260714-173750/snapshots/snap_00_gf4875`, the active policy was
+  `mirror=02` with BG2 `$32=$0100`; direct observation showed those reflected
+  margins scrolling opposite the authentic center on maps `$19=04-$07`.
+  `$19=02/$03/$08` are provisionally classified with the same background
+  family. The full `$02-$08` range now selects cyclic repeat; direct post-build
+  validation remains pending for these maps, especially the provisional
+  entries.
 - Full Bloodpool act 2 run `runs/20260712-200334/`: mirror fill is visually
   confirmed. The first handler batch restored early enemies/platforms. Later
   F2 captures found four more live `$12` roots (`$BD82`, `$BD36`, `$BBB4`,
