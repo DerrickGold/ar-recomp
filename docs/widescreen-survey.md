@@ -585,6 +585,13 @@ Town sprites use a separate bank-1 pipeline:
 - `$01:B4C6` follows `$0AEE/$0AF0`, deriving camera `$22/$24` and clamping to
   `$0000-$0100` horizontally and `$0000-$011F` vertically. This proves a
   512×512-pixel town world. `$7F:9F65/$9F67` are transient shake offsets.
+- Both `$B4C6` callers run before the behavior/OAM pass. Its faithful
+  HLE keeps corrected-wide X in `[extra,$0100-extra]` (16:9:
+  `[$002B,$00D5]`) and subjects horizontal shake to the same interval. That
+  prevents the wide viewport from reaching the renderer's cleared map-edge
+  gaps while keeping BG scroll, OAM, and projectile lifetime on one camera.
+  Vertical behavior is unchanged; RAW wide and `AR_WS_SIM=0` remain native.
+  The regenerated HLE was directly validated in simulation mode on 2026-07-14.
 - `$01:ACD9` rebuilds OAM every frame. It first scans 48 fixed `$12`-byte
   records at `$06A0` with fixed-screen origins, then 44 world `$26`-byte
   records at `$0A00` with camera-relative origins. These are two record
@@ -605,8 +612,10 @@ Town sprites use a separate bank-1 pipeline:
   modes `$18=$00,$19=$01-$06` grant BG1
   `left=min(extra,$22)` / `right=min(extra,$0100-$22)`, clears any unrendered
   framebuffer gaps every frame, and clamps BG2. `AR_WS_SIM=0` selects the
-  authentic pillarbox in the same binary. It deliberately does not alter the
-  camera, tilemap, behavior records, or OAM emission.
+  authentic pillarbox in the same binary. The regenerated `$B4C6` HLE prevents
+  the native camera endpoints—and therefore the cleared finite-map gaps—from
+  entering the corrected-wide viewport. Tilemap, behavior records, and fixed
+  OAM remain otherwise unchanged.
 - Direct testing on 2026-07-14 confirmed that this BG policy exposes no wrapped
   or stale tiles at town edges. The regenerated sprite stage HLEs ADAD/AE6F to a
   shared faithful port: only record bases `$0A00-$1087` receive the live town
@@ -662,7 +671,8 @@ off whenever a cfg/emitter change makes it necessary.
    `$B4C6` 512px bounds, clamp BG2/dialogs, clear edge gaps, and provide
    `AR_WS_SIM=0`. Fillmore confirmed clean clamped edges without wrapped/stale
    tiles; Bloodpool identified and closed the former `$19==01` policy gate.
-   Full `$02-$06` town/special-flow coverage remains in item 8.
+   The regenerated `$B4C6` corrected-wide camera clamp was directly confirmed
+   on 2026-07-14; full `$02-$06` town/special-flow coverage remains in item 8.
 7. **Town world sprites — enemy composition and arrow lifetime validated.**
    The regenerated ADAD/AE6F ports widen only `$0A00-$1087` horizontally;
    direct testing confirms complete margin enemies. `$06A0-$09FF` fixed records

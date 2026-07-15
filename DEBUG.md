@@ -733,6 +733,10 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   uses live horizontal margins while retaining authentic vertical coverage
   and status gates. D1 drawing remains independently controlled by the prior
   flag.
+- **`AR_WS_SIM_CAMDBG=1`** — log corrected-wide town camera transitions from
+  the `$01:B4C6` HLE: follow target, native camera, wide camera, live
+  bounds, and whether X/Y shake was accepted. At 16:9 the expected X interval
+  is `$002B-$00D5`. Read-only.
 - **`AR_WS_SIM_SPRITES=0`** — keep the faithful `$01:ADAD/$01:AE6F` ports on
   their authentic horizontal predicate and keep the angel arrow's `$01:B473`
   lifetime check at the authentic 256px camera

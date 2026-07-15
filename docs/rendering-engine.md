@@ -343,6 +343,8 @@ $01:B4C6 camera follow/clamp
   camera $22 = clamp($0AEE-$80, 0, $0100)
   camera $24 = clamp($0AF0-$70, 0, $011F)
   optional shake $7F:9F65/$9F67, accepted only inside those bounds
+  corrected wide: camera $22 = clamp(..., extra, $0100-extra)
+                  (16:9 => $002B-$00D5; directly validated 2026-07-14)
 
 $01:ACD9 per-frame OAM driver
   fixed segment: 48 records, $06A0, stride $12, fixed-screen origin
@@ -366,16 +368,20 @@ composition emission (`ADAD/AE6F`), and ROM graphics upload/VRAM asset identity.
 For widescreen, change only the world-segment horizontal predicate; keep the
 fixed segment authentic. Town world width/height is 512×512 px, so usable
 side margins are asymmetric: `left <= cameraX`, `right <= $0100-cameraX`.
-Apply the same margins to town BG and world sprites to prevent map wrap.
+Apply the same margins to the town camera, BG, and world sprites to prevent map
+wrap or cleared pixels at either edge. `$B4C6` runs before `ACD9`, so changing
+the camera there keeps PPU scroll and OAM on the same origin.
 
 The first town stage is now implemented at the host presentation seam. For
 `$18=$00,$19=$01-$06`, `ActRaiser_ApplyWidescreenPolicy` keeps the PPU centering
 budget fixed but grants live BG margins
 `left=min(extra,$22)` and `right=min(extra,$0100-$22)`. BG2 remains clamped to
 the authentic center for dialogs, and unrendered edge gaps are cleared every
-frame. `AR_WS_SIM=0` restores the pillarboxed baseline. This stage changes no
-SNES camera/tilemap/OAM state; the `ADAD/AE6F` sprite predicate is intentionally
-separate. The sprite implementation is active behind cfg HLE replacements:
+frame. `AR_WS_SIM=0` restores the pillarboxed baseline. The `$B4C6` HLE keeps
+the full wide viewport inside the 512px map; RAW wide retains the native camera.
+Direct testing on 2026-07-14 confirmed the corrected-wide clamp works as
+expected. The `ADAD/AE6F` sprite predicate remains a separate
+composition seam. The sprite implementation is active behind cfg HLE replacements:
 both leaves use one faithful component/OAM port, with AE6F retaining its exact
 attribute rewrite. Only `$0A00-$1087` world-record bases receive the current
 asymmetric BG margin bounds; `$06A0-$09FF` fixed records and vertical clipping

@@ -163,7 +163,11 @@ in [settings-system.md](settings-system.md). The remaining widescreen backlog is
    provide the same-binary `AR_WS_SIM=0` switch. Fillmore direct BG testing on
    2026-07-14 confirmed clean clamped edges with no odd tile exposure.
    Bloodpool was captured as `$00:$02`, exposing and then repairing the original
-   Fillmore-only gate; Bloodpool plus modes `$03-$06` remain direct targets.
+   Fillmore-only gate. A faithful `$01:B4C6` HLE constrains the
+   corrected-wide camera to `[extra,$0100-extra]`, eliminating cleared edge
+   gaps instead of merely rendering them black. Direct testing on 2026-07-14
+   confirmed the camera clamp works as expected in simulation mode. Bloodpool
+   plus modes `$03-$06` remain full content-pass targets.
 4. **Widen simulation world sprites — enemy composition and angel projectile
    validated.** The regenerated faithful `$01:ADAD/$01:AE6F` ports extend
    horizontal emission only for `$0A00-$1087` world records; the 2026-07-14

@@ -28,7 +28,7 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 ### Camera / Scroll — full model in rendering-engine.md §4/§6/§11.1
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0022 | 2 | BG1/camera X. Action writer `$02:B091`, clamp `[0,$2E-$100]`; town writer `$01:B4C6`, clamp `[0,$0100]`. All six scroll regs upload from `$22-$2D` via `$02:ADC3` (10-bit). |
+| $7E:0022 | 2 | BG1/camera X. Action writer `$02:B091`, clamp `[0,$2E-$100]`; town writer `$01:B4C6`, native clamp `[0,$0100]`, corrected-wide clamp `[extra,$0100-extra]` (16:9: `[$002B,$00D5]`, directly validated 2026-07-14). All six scroll regs upload from `$22-$2D` via `$02:ADC3` (10-bit). |
 | $7E:0024 | 2 | BG1/camera Y. Action clamp `[0,$30-$E1]`; town writer `$01:B4C6`, clamp `[0,$011F]`. |
 | $7E:0026/$0028 | 2+2 | BG2 H/V scroll (parallax, $02:B9D5/$02:BA0B from ratio nibbles $3A-$45) |
 | $7E:002A/$002C | 2+2 | BG3 H/V scroll ($2C pinned $FFFC: HUD up 4px) |

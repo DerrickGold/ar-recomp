@@ -10,10 +10,12 @@
  * AR_WS_MARGIN_ACTIVATION=0 restores the authentic $0400 boundary; Stage D2
  * is enabled by default after direct Fillmore validation.
  *
- * $01:ADAD/$01:AE6F are faithful sim-town composition ports. They widen only
- * $0A00+ world records. $01:B473 extends the dedicated angel-projectile
- * lifetime check to the same finite horizontal window. AR_WS_SIM_SPRITES=0
- * keeps both predicates authentic. */
+ * $01:B4C6 is the town camera follow/clamp. Its faithful port keeps the wide
+ * viewport inside the 512px world before OAM is composed. $01:ADAD/$01:AE6F
+ * widen only $0A00+ world records, and $01:B473 extends the dedicated angel-
+ * projectile lifetime check to the same finite horizontal window.
+ * AR_WS_SIM=0 restores the authentic camera; AR_WS_SIM_SPRITES=0 keeps both
+ * sprite/projectile predicates authentic. */
 
 #include "cpu_state.h"
 #include "actraiser_rtl.h"
@@ -532,6 +534,112 @@ static void ws_sim_live_margins(int *left, int *right) {
   if (cam > 0x0100) cam = 0x0100;
   *left = cam < g_ws_extra ? cam : g_ws_extra;
   *right = (0x0100 - cam) < g_ws_extra ? (0x0100 - cam) : g_ws_extra;
+}
+
+static int ws_sim_camera_debug_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *e = getenv("AR_WS_SIM_CAMDBG");
+    enabled = (e && e[0] && e[0] != '0');
+  }
+  return enabled;
+}
+
+static uint16 ws_sim_authentic_camera(uint16 target, uint16 center,
+                                      uint16 maximum) {
+  uint16 camera = (uint16)(target - center);
+  if (camera & 0x8000)
+    return 0;
+  return camera >= maximum ? maximum : camera;
+}
+
+/* Faithful replacement for $01:B4C6, the camera writer called before the
+ * town's behavior/OAM pass. Native horizontal follow is
+ *
+ *   cameraX = clamp($0AEE-$80, 0, $100)
+ *
+ * for a 512px world and 256px viewport. A wide viewport must instead keep
+ * [cameraX-extra, cameraX+$100+extra) inside [0,$200), yielding
+ * [extra,$100-extra]. Apply the same bounds to transient camera shake so an
+ * outward shake cannot reveal a cleared margin at a map edge. Vertical follow,
+ * both shake fields, their one-frame clear, final A=0, caller P/DB, and the RTL
+ * stack contract remain authentic.
+ *
+ * RAW widescreen deliberately retains the native camera as a before/after
+ * reference. AR_WS_SIM=0 and non-town $00 submodes do the same. */
+RecompReturn ActRaiser_UpdateSimCamera(CpuState *cpu) {
+  const uint8 saved_p = cpu->P;
+  const uint8 saved_db = cpu->DB;
+  const uint16 saved_x = cpu->X;
+  const uint16 saved_y = cpu->Y;
+
+  const uint16 target_x = cpu_read16(cpu, 0x01, 0x0AEE);
+  const uint16 target_y = cpu_read16(cpu, 0x01, 0x0AF0);
+  const uint16 native_x = ws_sim_authentic_camera(target_x, 0x0080, 0x0100);
+  uint16 camera_x = native_x;
+  uint16 camera_y = ws_sim_authentic_camera(target_y, 0x0070, 0x011F);
+
+  const int wide = g_ws_active && g_settings.ws_sim &&
+      g_settings.display_mode != kDisplayMode_43 &&
+      g_settings.display_mode != kDisplayMode_WideRaw &&
+      g_ram[0x18] == 0x00 &&
+      g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x06;
+  int margin = wide ? g_ws_extra : 0;
+  if (margin < 0) margin = 0;
+  if (margin > 0x80) margin = 0x80;
+  const uint16 left = (uint16)margin;
+  const uint16 right = (uint16)(0x0100 - margin);
+  if (camera_x < left) camera_x = left;
+  if (camera_x > right) camera_x = right;
+
+  const uint16 shake_x = cpu_read16(cpu, 0x7F, 0x9F65);
+  const uint16 shake_y = cpu_read16(cpu, 0x7F, 0x9F67);
+  const uint16 shaken_x = (uint16)(camera_x + shake_x);
+  const uint16 shaken_y = (uint16)(camera_y + shake_y);
+  const int accept_x = !(shaken_x & 0x8000) &&
+                       shaken_x >= left && shaken_x <= right;
+  const int accept_y = !(shaken_y & 0x8000) && shaken_y <= 0x011F;
+  if (accept_x) camera_x = shaken_x;
+  if (accept_y) camera_y = shaken_y;
+
+  ws_dp16w(cpu, 0x22, camera_x);
+  ws_dp16w(cpu, 0x24, camera_y);
+  cpu_write16(cpu, 0x7F, 0x9F65, 0);
+  cpu_write16(cpu, 0x7F, 0x9F67, 0);
+
+  if (wide && ws_sim_camera_debug_enabled()) {
+    static uint16 last_camera = 0xFFFF;
+    static uint8 last_town = 0xFF;
+    static int last_clamped = -1;
+    const int clamped = camera_x != native_x;
+    if (camera_x != last_camera || g_ram[0x19] != last_town ||
+        clamped != last_clamped) {
+      fprintf(stderr,
+              "[ws-sim-camera] gf=%u town=%u target=%u native=%u wide=%u "
+              "bounds=%u-%u shake=%d/%d\n",
+              (unsigned)ws_ram16(0x88), (unsigned)g_ram[0x19],
+              (unsigned)target_x, (unsigned)native_x, (unsigned)camera_x,
+              (unsigned)left, (unsigned)right, accept_x, accept_y);
+      last_camera = camera_x;
+      last_town = g_ram[0x19];
+      last_clamped = clamped;
+    }
+  }
+
+  /* PLB/PLP restore the caller's DB/P; RTL consumes the three-byte JSL frame.
+   * A is zero from the two shake-field clears. X/Y are untouched by the ROM. */
+  cpu->A = 0;
+  cpu->DB = saved_db;
+  cpu->P = saved_p;
+  cpu_p_to_mirrors(cpu);
+  cpu->X = saved_x;
+  cpu->Y = saved_y;
+  if (cpu->x_flag) {
+    cpu->X &= 0x00FF;
+    cpu->Y &= 0x00FF;
+  }
+  cpu->S = (uint16)(cpu->S + 3);
+  return RECOMP_RETURN_NORMAL;
 }
 
 static void ws_sim_set_nz16(CpuState *cpu, uint16 value) {

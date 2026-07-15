@@ -268,6 +268,24 @@ table selecting *which* `$130`-byte staging block to copy from. This only fills 
 fields; it does NOT populate `+00/+06/+08/+12` (behavior/type/sprite/status) — those come from the
 missing spawn below.
 
+### Town camera writer: `$01:B4C6`
+
+Both known callers (`$01:80AD` and `$01:B22A`) invoke `$B4C6` before the town
+behavior/OAM pass. It derives `$22=clamp($0AEE-$80,0,$100)` and
+`$24=clamp($0AF0-$70,0,$11F)`, conditionally adds one-frame shake from
+`$7F:9F65/$9F67`, then clears both shake fields. Because `ACD9` later uses
+`$22/$24` as its world origin, this writer is the safe shared seam for camera,
+BG scroll, sprites, and projectile lifetime.
+
+The faithful HLE changes only corrected-widescreen town X bounds to
+`[extra,$100-extra]` (16:9: `[$002B,$00D5]`) and applies the same interval to
+shake acceptance. This keeps `[camera-extra,camera+$100+extra)` inside the
+512px town. Vertical follow, register/flag preservation, shake clearing, and
+the JSL/RTL stack contract remain authentic. `AR_WS_SIM=0` and RAW wide use
+`[0,$100]`; `AR_WS_SIM_CAMDBG=1` reports boundary transitions. The cfg
+registration was regenerated and direct simulation-mode testing on 2026-07-14
+confirmed the camera remains inside the corrected-wide bounds as expected.
+
 ### `bank_01_ACD9` / `bank_01_ADAD` — the per-frame OAM rebuild (runs every frame, by design)
 
 `ACD9` runs unconditionally every sim-mode frame (called from `bank_01_9284`). It is **NOT** a
