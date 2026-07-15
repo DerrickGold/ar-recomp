@@ -26,6 +26,7 @@ enum { kDisplayMode_PresetCount = kDisplayMode_Custom };
 typedef enum {
   kSettingType_Bool,
   kSettingType_Int,
+  kSettingType_Enum,
   kSettingType_Mask,
   kSettingType_Custom,
 } SettingType;
@@ -46,7 +47,13 @@ typedef enum {
   kSettingCat_Qol,
 } SettingCategory;
 
-typedef struct SettingDesc {
+typedef struct SettingDesc SettingDesc;
+typedef bool (*SettingAvailableFn)(void);
+typedef void (*SettingChangedFn)(const SettingDesc *desc);
+typedef int (*SettingFormatFn)(char *buffer, int buffer_size,
+                               const void *field);
+
+struct SettingDesc {
   const char *key;          /* stable settings.ini/menu id */
   const char *env;          /* boot-only compatibility seed */
   const char *label;
@@ -57,8 +64,24 @@ typedef struct SettingDesc {
   void *field;
   long defval, minval, maxval, step;
   bool sticky;              /* disabling stops enforcement, cannot undo history */
+  const char *const *enum_labels;
+  int enum_count;
+  SettingAvailableFn available;
+  SettingChangedFn on_change;
   bool (*parse)(const char *text, void *field);
-} SettingDesc;
+  SettingFormatFn format;
+};
+
+typedef enum {
+  kSettingChange_Rejected = -1,
+  kSettingChange_Unchanged = 0,
+  kSettingChange_Applied = 1,
+  kSettingChange_AppliedStickyDisable = 2,
+  kSettingChange_RestartPending = 3,
+} SettingChangeResult;
+
+typedef void (*SettingsChangeObserver)(const SettingDesc *desc,
+                                       SettingChangeResult result);
 
 typedef struct SettingsPin {
   uint32 off;
@@ -101,12 +124,25 @@ extern const int g_setting_desc_count;
 
 void Settings_Init(void);
 
+/* Descriptor/mutation API used by the future overlay and settings.ini loader.
+ * All runtime writes go through these functions so range normalization,
+ * profile invalidation, callbacks, and sticky/restart results stay uniform. */
+const SettingDesc *Settings_Find(const char *key);
+bool Settings_IsAvailable(const SettingDesc *desc);
+bool Settings_GetLong(const SettingDesc *desc, long *value);
+SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value);
+SettingChangeResult Settings_SetText(const SettingDesc *desc, const char *text);
+SettingChangeResult Settings_Reset(const SettingDesc *desc);
+int Settings_FormatValue(const SettingDesc *desc, char *buffer, int buffer_size);
+void Settings_SetChangeObserver(SettingsChangeObserver observer);
+const char *Settings_CategoryName(SettingCategory category);
+const char *Settings_ApplyKindName(SettingApplyKind apply);
+const char *Settings_ChangeResultName(SettingChangeResult result);
+
 /* Apply a deterministic display-mode preset over the ws_* flags. Presets
- * overwrite them; editing an individual widescreen field should call
- * Settings_MarkDisplayModeCustom() so the UI never claims a preset is active
- * when its contents have diverged. */
+ * overwrite them; descriptor mutations of individual widescreen fields
+ * automatically reclassify the resulting FULL/RAW/CUSTOM combination. */
 void Settings_SetDisplayMode(int mode);
-void Settings_MarkDisplayModeCustom(void);
 int  Settings_CycleDisplayMode(void);
 const char *Settings_DisplayModeName(int mode);
 

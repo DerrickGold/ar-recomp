@@ -285,7 +285,9 @@ see `HandleInput()` in `src/main.c`:
 |---|---|
 | Arrow keys | D-pad |
 | `Z` | primary action button (SNES B) |
-| `X`, `A`, `S`, `Q`, `W`, Return, Right Shift | remaining face/shoulder buttons and Start/Select — exact SNES button-to-key mapping isn't documented here yet; see `HandleInput()` for the precise bit values |
+| `X`, `A`, `S` | SNES A, Y, X |
+| `Q`, `W` | SNES L, R |
+| Return, Right Shift | Start, Select |
 | `Esc` | quit |
 | `P` | pause |
 | `T` | turbo — fast-forward at 8 game frames per rendered frame (`AR_TURBO_MULT` to change) |
@@ -305,6 +307,7 @@ exported as an environment variable, which is how these are read):
 | `AR_MOONJUMP=1` (or `=<n>` for px/frame) | hold the jump button to fly upward |
 | `AR_NO_KNOCKBACK=1` | permanent invincibility — no damage, no hitstun. Magic-aware: invulnerability drops only for the 1-2 frames where a spell cast actually fires |
 | `AR_ALL_MAGIC=1` | unlocks all four spells in the equip menu |
+| `AR_MAGIC_CYCLE=1` | reserves SNES L (`Q`) during action mode to cycle Fire → Stardust → Aura → Light and reload each spell's resident OBJ tiles; `AR_MAGIC_CYCLE_BTN=<mask>` changes the button (`0x0020`=L, `0x0010`=R) |
 | `AR_RANGED_SWORD=1` | sword fires a projectile |
 | `AR_INF_MP=1` (or `=<n>`) | infinite magic scrolls (pins the working count; never written to the save file) |
 | `AR_INF_SP=1` | sim mode: infinite SP (miracle points), self-calibrating to your max |

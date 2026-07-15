@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(ActRaiserRecomp C)
 
 set(CMAKE_C_STANDARD 11)
+include(CTest)
 
 set(SNESRECOMP_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp)
 include(${SNESRECOMP_ROOT}/runner/runner.cmake)
@@ -123,3 +124,15 @@ target_link_libraries(ActRaiserRecomp PRIVATE
     ${SDL2_LIBRARIES}
     m
 )
+
+if(BUILD_TESTING)
+    add_executable(actraiser_settings_test
+        tests/settings_test.c
+        src/settings.c
+    )
+    target_include_directories(actraiser_settings_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_settings COMMAND actraiser_settings_test)
+endif()

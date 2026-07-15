@@ -656,6 +656,11 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 - **`AR_YIELDLOG=1`** — recomp call stack + SNES return address at each vblank yield. For
   "what is the main loop doing frame to frame."
 - **`AR_GFLOG=1`** — logs the game-frame counter per frame.
+- **`AR_SETTING_SET=<key>=<value>`** with optional
+  **`AR_SETTING_AT_GF=<N>`** — apply one descriptor-backed runtime setting at
+  logical game frame N (default 0). This is the Phase-2 headless/live-mutation
+  probe and uses the same validation/callback path as the future overlay, e.g.
+  `AR_SETTING_SET=display_mode=1` or `AR_SETTING_SET=ws_sprites=0`.
 
 ### 4b. Widescreen / rendering probes (added 2026-07-09, policy fn in actraiser_rtl.c)
 

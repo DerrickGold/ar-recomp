@@ -666,6 +666,69 @@ void ActRaiserDrawPpuFrame(void) {
   ActRaiser_WidescreenSkyPalaceRestore();
 }
 
+/* Reload the selector-dependent part of the action OBJ atlas after a live
+ * magic selection change. The native level-entry loader $02:BC9E copies 128
+ * words from $06:A400 + (selector-1)*$80 to VRAM $2D40. Merely changing
+ * $02AC during an action stage would therefore run the new spell with the old
+ * spell's resident tiles and produce a misleading graphics failure. This
+ * targeted host copy reproduces only that selector-dependent upload; the
+ * common atlas and palettes remain untouched. */
+static void ActRaiser_ReloadSelectedMagicTiles(uint8 selector) {
+  if (selector < 1 || selector > 4) return;
+  uint16 source = (uint16)(0xA400 + (selector - 1) * 0x80);
+  for (uint16 word = 0; word < 0x80; word++)
+    g_ppu->vram[0x2D40 + word] =
+        cpu_read16(&g_cpu, 0x06, (uint16)(source + word * 2));
+}
+
+/* AR_MAGIC_CYCLE=1 reserves one SNES button as an action-mode spell-cycle
+ * edge. The mask is in the auto-joypad word returned by SwapInputBits;
+ * AR_MAGIC_CYCLE_BTN defaults to $0020 = L ($0010 = R). This stays env-backed
+ * for now so it can be used while the descriptor/overlay work is in flight.
+ * The configured input is consumed before NMI samples the controller, making
+ * arbitrary remaps safe instead of also triggering their original action. */
+static void ActRaiser_ApplyMagicCycle(void) {
+  static int enabled = -1;
+  static uint16 button_mask;
+  static uint16 previous_buttons;
+  if (enabled < 0) {
+    const char *e = getenv("AR_MAGIC_CYCLE");
+    const char *b = getenv("AR_MAGIC_CYCLE_BTN");
+    enabled = e && e[0] && e[0] != '0';
+    button_mask = (b && b[0]) ? (uint16)strtoul(b, NULL, 0) : 0x0020;
+    if (!button_mask) enabled = 0;
+  }
+
+  uint16 buttons = SwapInputBits(g_snes->input1_currentState);
+  uint16 pressed = (uint16)(buttons & button_mask);
+  uint16 was_pressed = (uint16)(previous_buttons & button_mask);
+  previous_buttons = buttons;
+
+  if (!enabled || g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07)
+    return;
+
+  /* Reserve/consume the configured button for this aid. SwapInputBits is its
+   * own inverse, converting the SNES auto-joypad mask back to runner input. */
+  g_snes->input1_currentState &= (uint16)~SwapInputBits(button_mask);
+  if (!pressed || was_pressed) return;
+
+  if (g_ram[0x00F8] != 0) {
+    fprintf(stderr, "[magic-cycle] cast still active; selection unchanged\n");
+    return;
+  }
+
+  static const char *const names[] = {
+    "none", "Magical Fire", "Magical Stardust", "Magical Aura",
+    "Magical Light"
+  };
+  uint8 current = g_ram[0x02AC];
+  uint8 next = (current >= 1 && current < 4) ? (uint8)(current + 1) : 1;
+  g_ram[0x02AC] = next;
+  ActRaiser_ReloadSelectedMagicTiles(next);
+  fprintf(stderr, "[magic-cycle] selected %u/4: %s ($02AC=$%02X, "
+          "VRAM $2D40 refreshed)\n", (unsigned)next, names[next], next);
+}
+
 /* Host-side cheat hooks (debug-menu scaffold). All settings-gated and seeded
  * OFF from their legacy env names, so they never affect a normal run. Applied
  * once per frame at the START of RunOneFrameOfGame (before the game's frame
@@ -739,6 +802,9 @@ void ActRaiser_ApplyCheats(void) {
     g_ram[0x0286] = g_ram[0x0287];
 
   if (g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07) return;
+
+  /* Live action-stage magic selection/asset reload for effect testing. */
+  ActRaiser_ApplyMagicCycle();
 
   /* AR_INF_HP: infinite health. =1 -> auto: pin player HP ($1D) to the
    * high-water max seen this stage (self-calibrates to "full" once you've been

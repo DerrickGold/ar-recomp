@@ -334,6 +334,52 @@ static void WramTraceInit(void) {
   fprintf(stderr, "[wram-trace] -> %s  range=[0x%05x,0x%05x]\n", path, g_wram_lo, g_wram_hi);
 }
 
+/* Phase-2 live-settings probe. AR_SETTING_SET=key=value applies one descriptor
+ * mutation when the logical game frame reaches AR_SETTING_AT_GF (default 0).
+ * It uses the exact API the overlay will call, making headless next-frame
+ * enforcement tests possible without adding a temporary setting-specific
+ * hotkey. Diagnostic control only; it is intentionally not a registry row. */
+static void ApplyScheduledSettingChange(void) {
+  static int initialized, pending;
+  static unsigned target_gf;
+  static char key[64], value[256];
+  if (!initialized) {
+    initialized = 1;
+    const char *spec = getenv("AR_SETTING_SET");
+    const char *at = getenv("AR_SETTING_AT_GF");
+    target_gf = at && at[0] ? (unsigned)strtoul(at, NULL, 0) : 0;
+    if (spec && spec[0]) {
+      const char *equals = strchr(spec, '=');
+      size_t key_len = equals ? (size_t)(equals - spec) : 0;
+      if (equals && key_len > 0 && key_len < sizeof(key)) {
+        memcpy(key, spec, key_len);
+        key[key_len] = 0;
+        snprintf(value, sizeof(value), "%s", equals + 1);
+        pending = 1;
+      } else {
+        fprintf(stderr, "[settings] invalid AR_SETTING_SET='%s' (want key=value)\n",
+                spec);
+      }
+    }
+  }
+  if (!pending) return;
+  /* Power-on WRAM is intentionally filled with $55, including the game's
+   * logical-frame word. Wait until at least one emulated frame has run so a
+   * small target is not mistaken as already reached by the $5555 fill. */
+  extern int snes_frame_counter;
+  if (snes_frame_counter <= 0) return;
+  extern uint8 g_ram[0x20000];
+  unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+  if (gf < target_gf) return;
+  pending = 0;
+  const SettingDesc *desc = Settings_Find(key);
+  SettingChangeResult result = desc
+      ? Settings_SetText(desc, value)
+      : kSettingChange_Rejected;
+  fprintf(stderr, "[settings] gf=%u %s=%s -> %s%s\n", gf, key, value,
+          Settings_ChangeResultName(result), desc ? "" : " (unknown key)");
+}
+
 /* Write g_pixels to an open PPM, cropped to the current display mode's sub-rect
  * (pitch is g_snes_width*4 — see PpuBeginDrawing). A 4:3 capture is therefore a
  * true 256-wide image rather than the wide framebuffer with black bars baked
@@ -382,6 +428,16 @@ static void ApplyDisplayPresentation(void) {
       SDL_RenderSetLogicalSize(g_renderer, vis_w, g_snes_height);
   }
   SDL_SetWindowSize(g_window, win_w, win_h);
+}
+
+static void OnRuntimeSettingChanged(const SettingDesc *desc,
+                                    SettingChangeResult result) {
+  (void)result;
+  if (desc->category == kSettingCat_Display ||
+      desc->category == kSettingCat_Widescreen) {
+    ApplyDisplayPresentation();
+    g_paused_redraw_pending = true;
+  }
 }
 
 static void PresentFramebuffer(void) {
@@ -573,6 +629,8 @@ int main(int argc, char **argv) {
 
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   }
+
+  Settings_SetChangeObserver(OnRuntimeSettingChanged);
 
   g_spc_player = ActRaiserSpcPlayer_Create();
 
@@ -855,6 +913,8 @@ int main(int argc, char **argv) {
           fprintf(stderr, "[act-enter] $18=%02X $19=%02X at game-frame %u\n",
                   g_ram[0x18], g_ram[0x19], gf); } }
     }
+    ApplyScheduledSettingChange();
+
     /* AR_PERF=1: once-per-second frame-time budget lines. Separates the two
      * "it feels slow" classes in one run: host-bound (fps < 60; inspect both
      * run-ms here and draw-ms below) vs. pacing (fps=60, both budgets tiny, but
