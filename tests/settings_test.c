@@ -42,7 +42,7 @@ static void TestDefaultsAndMetadata(void) {
   g_ws_extra = 43;
   Settings_Init();
 
-  CHECK(g_setting_desc_count == 21);
+  CHECK(g_setting_desc_count == 22);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip && a->field);
@@ -56,6 +56,7 @@ static void TestDefaultsAndMetadata(void) {
     CHECK(Settings_SetText(a, formatted) == kSettingChange_Unchanged);
   }
   CHECK(g_settings.display_mode == kDisplayMode_WideFull);
+  CHECK(g_settings.hud_scale_percent == 0);
   CHECK(g_settings.ws_action && g_settings.ws_sim && g_settings.ws_sprites);
   CHECK(g_settings.cheat_inf_mp == 0);
   CHECK(g_settings.cheat_moonjump_button == 0x8000);
@@ -119,6 +120,13 @@ static void TestMutationApi(void) {
   CHECK(s_observer_calls == 1);
   CHECK(Settings_SetLong(sprites, 1) == kSettingChange_Applied);
   CHECK(g_settings.display_mode == kDisplayMode_WideFull);
+
+  const SettingDesc *hud_scale = Settings_Find("hud_scale_percent");
+  CHECK(Settings_SetLong(hud_scale, 287) == kSettingChange_Applied);
+  CHECK(g_settings.hud_scale_percent == 275);
+  char hud_value[32];
+  Settings_FormatValue(hud_scale, hud_value, sizeof(hud_value));
+  CHECK(!strcmp(hud_value, "2.75x"));
 
   const SettingDesc *mp = Settings_Find("cheat_inf_mp");
   CHECK(Settings_SetLong(mp, 999) == kSettingChange_Applied);

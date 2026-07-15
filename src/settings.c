@@ -117,6 +117,31 @@ static void DisplayModeChanged(const SettingDesc *desc) {
   Settings_SetDisplayMode(*(const int *)desc->field);
 }
 
+static int FormatHudScale(char *buffer, int buffer_size, const void *field) {
+  int value = *(const int *)field;
+  if (!value) return snprintf(buffer, (size_t)buffer_size, "Match game");
+  return snprintf(buffer, (size_t)buffer_size, "%d.%02dx",
+                  value / 100, value % 100);
+}
+
+static bool ParseHudScale(const char *text, void *field) {
+  int *out = (int *)field;
+  if (!strcmp(text, "Match game") || !strcmp(text, "match")) {
+    *out = 0;
+    return true;
+  }
+  char *end = NULL;
+  double value = strtod(text, &end);
+  if (!end || end == text) return false;
+  if (*end == 'x' && end[1] == 0) {
+    *out = (int)(value * 100.0 + 0.5);
+    return true;
+  }
+  if (*end) return false;
+  *out = (int)value;
+  return true;
+}
+
 static const char *const kDisplayModeLabels[] = {
   "4:3 authentic",
   "Widescreen raw",
@@ -139,6 +164,11 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.display_mode, kDisplayMode_WideFull, kDisplayMode_43,
     kDisplayMode_WideFull, 1, false, kDisplayModeLabels,
     kDisplayMode_PresetCount, NULL, DisplayModeChanged, NULL, NULL },
+  { "hud_scale_percent", "AR_HUD_SCALE", "HUD output scale",
+    "Scale the promoted HUD after game upscaling; 100 is native 1x output pixels.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Display,
+    &g_settings.hud_scale_percent, 0, 0, 400, 25, false, NULL, 0,
+    NULL, NULL, ParseHudScale, FormatHudScale },
   BOOL_SETTING(cheat_all_magic, "AR_ALL_MAGIC", "All magic",
                "Unlock all four spells; disabling cannot undo unlocks already written.",
                kSettingCat_Cheats, 0, true, NULL, NULL),

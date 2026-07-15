@@ -6,11 +6,12 @@ runtime updates**, so a future in-game overlay menu can flip them mid-run. This
 is the "option B" refactor from the 2026-07-12 settings scan.
 
 Status: **PHASES 1–3 FOUNDATION IMPLEMENTED.** `src/settings.{c,h}` now own the
-existing cheat fields, nine widescreen behavior gates, the render profile, and
-a 21-row descriptor registry with lookup, formatting, availability, mutation,
-callbacks, sticky/restart results, and observer notification. Descriptor-driven
-persistence, display/audio config migration, the save codec/backends and
-editor, and the overlay remain. Companion docs:
+existing cheat fields, nine widescreen behavior gates, the render profile, the
+host-output HUD scale, and a 22-row descriptor registry with lookup, formatting,
+availability, mutation, callbacks, sticky/restart results, and observer
+notification. The promoted game HUD now proves the post-upscale host-compositor
+seam; the settings menu itself, descriptor-driven persistence, display/audio
+config migration, and the save codec/backends/editor remain. Companion docs:
 [SEAMS.md](SEAMS.md) (gameplay/tunable seams the cheats hook),
 [rendering-engine.md](rendering-engine.md) (widescreen policy internals),
 [ram-map.md](ram-map.md) (the WRAM addresses the cheats pin),
@@ -89,6 +90,7 @@ typedef struct Settings {
   /* Render-profile state. CUSTOM means the individual fields below no longer
    * exactly match one of the three deterministic capture presets. */
   DisplayMode display_mode;
+  int hud_scale_percent;       // 0=match game; 100=native host-output 1x
 
   /* Cheats (action-gated unless marked all-mode) */
   bool   cheat_all_magic;      // all-mode  -> $0299-$029C
@@ -264,6 +266,15 @@ therefore a small SDL-rendered immediate UI with an in-repo bitmap font. Reusing
 RmlUi remains a later option if the runtime adopts its GL/C++ integration (see
 §10.4).
 
+The game HUD now validates this seam without implementing the settings menu.
+In widescreen-full scenes, the PPU extracts the promoted BG3 status pixels and
+the exact selected-magic OAM signature into transparent ARGB surfaces. The SDL
+present path first upscales the ordinary game texture, then switches to physical
+renderer-output coordinates and composites the HUD chunks at
+`hud_scale_percent`. `0` means **Match game**; `100` means one SNES HUD pixel is
+one output pixel vertically. This operation never rewrites VRAM, OAM, WRAM, or
+PPU registers. See `rendering-engine.md`, “Promoted HUD host overlay”.
+
 ---
 
 ## 4. Live-update paths (`ApplyKind` taxonomy)
@@ -273,14 +284,14 @@ live:
 
 | Path | Mechanism | Settings | Cost |
 |---|---|---|---|
-| **PASSIVE** | Existing gate reads the field every frame. Menu writes struct → next frame reflects it. No extra code. | 11 cheat controls and 9 widescreen behaviors currently registered | free |
+| **PASSIVE** | Existing gate reads the field every frame. Menu writes struct → next frame reflects it. No extra code. | 11 cheat controls, 9 widescreen behaviors, and host HUD scale currently registered | free |
 | **CALLBACK** | `on_change()` fires one SDL/PPU call. `window_scale`→`SDL_SetWindowSize`; `fullscreen`→`SDL_SetWindowFullscreen`; `audio_enabled` mute→`SDL_PauseAudioDevice`; `ignore_aspect_ratio`→renderer logical-size. | window_scale, fullscreen, ignore_aspect_ratio, audio mute | small |
 | **RESTART** | Needs realloc/reinit unsafe to do cheaply mid-frame. Per setting: attempt heavy live reinit, or set a "pending — applies on relaunch" badge (§10.2). | aspect on/off + ratio (window + PPU buffer realloc), `new_renderer`, audio freq/samples (device reopen; audio thread) | real work |
 | **ACTION** | Not stored toggles — commands the menu invokes; only the *param* is stored. | warp (`warp_target`, F6), turbo (`turbo_mult`, T), savestate (F5/F7), snapshot (F2), pause (P) | reuse existing hotkey paths (`src/main.c:587`) |
 | **SAVE** | Transactional mutation of the canonical `g_sram` image + mandatory checksum recompute; optional commit through the active `.srm` or `.ini` backend. Takes effect **the next time the game loads the save from its own title menu** — no app restart. See §4.1. | `save_region_prog[]` (save-format.md §3.1), save import/export actions | small, but see the §4.1 hazard |
 
-The core Phase-1 change is now implemented across the 20 passive rows (plus the
-render-profile ACTION row):
+The core Phase-1 change is now implemented across the 21 passive rows (plus the
+render-profile CALLBACK row):
 
 ```c
 // before                                    // after
@@ -402,6 +413,7 @@ restore an unknown prior byte.
 
 | Setting | Source | Type | Default | Apply |
 |---|---|---|---|---|
+| HUD output scale | `AR_HUD_SCALE` | int percent or `x` suffix | Match game (`0`) | PASSIVE; `100` = native output 1× |
 | Extended aspect | `ExtendedAspectRatio` (ini) | enum off/16:9/16:10 | off | RESTART (§10.2) |
 | Pixel aspect | `AspectPAR` (ini) | enum 4:3/square | 4:3 | RESTART |
 | Window scale | `WindowScale` (ini) | int | 3 | CALLBACK |

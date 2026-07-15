@@ -520,15 +520,14 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     repeat_band_layer = -1;
   }
 
-  /* Phase-1 HUD layout prototype. BG3 rows 0-3 are the live status compose
-   * band ($7F:B000 -> VRAM $5800). Split that band into source chunks and
-   * anchor them to the physical left edge, authentic center, and physical
-   * right edge. The 2026-07-14 action dump places its three occupied groups at
-   * columns 0-10, 11-20, and 21-31. Simulation has no centered status group,
-   * so it uses the two-way form: columns 0-20 anchor left and 21-31 anchor
-   * right. This intentionally moves BG3 only: fixed HUD OAM remains authentic/
-   * centered so direct testing reveals exactly which elements require sprite
-   * promotion.
+  /* Host-overlay HUD layout. BG3 rows 0-3 are the live status compose band
+   * ($7F:B000 -> VRAM $5800). The PPU extracts this band into a transparent
+   * surface and the host independently scales/anchors its source chunks after
+   * the game framebuffer has been upscaled. The 2026-07-14 action dump places
+   * its three occupied groups at columns 0-10, 11-20, and 21-31. Simulation
+   * has no centered status group, so it uses the two-way form: columns 0-20
+   * anchor left and 21-31 anchor right. Selected-magic OAM is promoted
+   * separately after its exact four-slot signature is validated below.
    *
    * RAW and 4:3 remain unsplit comparison modes. Sky Palace ($00:$07) uses
    * the same simulation header; temple/world-map flows do not. */
@@ -679,18 +678,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   }
 }
 
-/* Render-scoped action HUD OAM promotion. $00:923A emits the selected magic
- * icon as the first four OAM entries, using tiles $D4-$D7 in a 2x2 grid at
- * y=$0B/$13. Move that exact signature by the same full-width budget as the
- * score's right BG3 chunk. Back up and restore the XY words and packed high
- * bits so WRAM/OAM state, future DMA, savestates, and game logic remain
- * authentic. */
-static uint16 s_magic_hud_xy_backup[4];
-static uint8 s_magic_hud_high_backup;
-static int s_magic_hud_shifted;
-
-static void ActRaiser_WidescreenMagicHudPrepare(void) {
-  s_magic_hud_shifted = 0;
+/* $00:923A emits the selected-magic icon as the first four OAM entries, using
+ * tiles $D4-$D7 in a 2x2 grid at y=$0B/$13. Promote only that exact signature
+ * into the host HUD object surface. No emulated OAM/WRAM state is changed. */
+static void ActRaiser_WidescreenMagicHudPromote(void) {
   if (!g_ppu || g_ppu->wsHudSplitHeight != 40 ||
       g_ppu->wsHudLeftEnd != 88 || g_ppu->wsHudRightStart != 168 ||
       g_ppu->wsHudLeftOnlyY != 28 ||
@@ -706,31 +697,7 @@ static void ActRaiser_WidescreenMagicHudPrepare(void) {
     if (tile != (uint8)(0xD4 + slot) || y != expected_y)
       return;
   }
-
-  s_magic_hud_high_backup = g_ppu->highOam[0];
-  for (int slot = 0; slot < 4; slot++) {
-    int index = slot * 2;
-    int high_shift = slot * 2;
-    uint16 xy = g_ppu->oam[index];
-    uint16 x = (uint16)((xy & 0x00FF) |
-                         (((g_ppu->highOam[0] >> high_shift) & 1) << 8));
-    s_magic_hud_xy_backup[slot] = xy;
-    x = (uint16)((x + g_ppu->extraLeftRight) & 0x01FF);
-    g_ppu->oam[index] = (uint16)((xy & 0xFF00) | (x & 0x00FF));
-    g_ppu->highOam[0] = (uint8)(
-        (g_ppu->highOam[0] & ~(1u << high_shift)) |
-        (((x >> 8) & 1) << high_shift));
-  }
-  s_magic_hud_shifted = 1;
-}
-
-static void ActRaiser_WidescreenMagicHudRestore(void) {
-  if (!s_magic_hud_shifted)
-    return;
-  for (int slot = 0; slot < 4; slot++)
-    g_ppu->oam[slot * 2] = s_magic_hud_xy_backup[slot];
-  g_ppu->highOam[0] = s_magic_hud_high_backup;
-  s_magic_hud_shifted = 0;
+  PpuSetWidescreenHudOamRange(g_ppu, 0, 4);
 }
 
 void ActRaiserDrawPpuFrame(void) {
@@ -744,7 +711,7 @@ void ActRaiserDrawPpuFrame(void) {
   /* Sky Palace: synthesize only BG2's offscreen margin columns from its ROM
    * source page. The paired restore after scanout preserves UI staging. */
   ActRaiser_WidescreenSkyPalacePrepare();
-  ActRaiser_WidescreenMagicHudPrepare();
+  ActRaiser_WidescreenMagicHudPromote();
   /* Process ALL 8 HDMA channels, not a fixed subset. ActRaiser drives its
    * per-scanline effects (e.g. the Mode-7 title matrix animation) on channels
    * 2/3 — the old code only ran 5/6/7 (a stale assumption carried over from
@@ -778,7 +745,6 @@ void ActRaiserDrawPpuFrame(void) {
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
   }
-  ActRaiser_WidescreenMagicHudRestore();
   ActRaiser_WidescreenSkyPalaceRestore();
 }
 

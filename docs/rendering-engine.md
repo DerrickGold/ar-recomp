@@ -490,9 +490,11 @@ Facts the next design must satisfy (all trace/disasm-proven above):
    `$0400`-gated activation separately and is directly validated in Fillmore;
    `AR_WS_MARGIN_ACTIVATION=0` restores authentic activation. Regions/effects
    still need testing with hardware scanline limits enabled and lifted.
-8. **HUD (BG3)**: 32-tile-wide compose in `$7F:B000`, streamed per frame;
-   margins under the HUD stay clamped (current policy) or need a host
-   compose extension later.
+8. **HUD (BG3 + selected-magic OBJ)**: the 32-tile-wide compose in `$7F:B000`
+   is streamed per frame. Widescreen-full now promotes its status band into a
+   transparent host surface, with action/simulation-specific anchors and a
+   separately promoted four-slot selected-magic OBJ signature. The host draws
+   both after game upscale, so HUD size no longer depends on world scale.
 9. **Every drawing path is now known**: any wide-mode VRAM the game won't
    supply can be host-written safely during the NMI window as long as it
    stays out of the four record buffers' way.
@@ -520,7 +522,46 @@ Facts the next design must satisfy (all trace/disasm-proven above):
     world-edge limits and make them widescreen-aware so background endpoints do
     not scroll into the wider viewport.
 
-### 13.1 Stage-B implementation refinement (2026-07-12)
+### 13.1 Promoted HUD host overlay (2026-07-15)
+
+The HUD-scale implementation is deliberately a presentation seam rather than a
+second SNES tilemap rewrite:
+
+- `PpuSetWidescreenHudSplit` identifies the live BG3 status scanlines and their
+  source boundaries. Action uses `height=40`, `left=0..87`, `center=88..167`,
+  `right=168..255`, with scanlines 28 onward anchored wholly left for the
+  ENEMY label/bar. Simulation uses a two-way `0..167` / `168..255` split and
+  no center group.
+- While that policy is active, the normal 2bpp BG3 sampler writes status pixels
+  into `wsHudBgBuffer`; it does not write those pixels into the world composite.
+  Transparent tile pixels remain alpha zero. Palette lookup and master
+  brightness are resolved by the PPU before exporting ARGB, so the host does
+  not need to understand SNES tile formats.
+- `$00:923A`'s selected-magic icon is accepted only when OAM slots 0-3 exactly
+  match tiles `$D4-$D7` and the expected 2x2 Y layout. Those slots are routed to
+  `wsHudObjBuffer`; every other OBJ remains on the normal sprite path. Earlier
+  render-scoped OAM coordinate mutation is gone, so emulated state, savestates,
+  future DMA, and game logic remain authentic.
+- `src/main.c` uploads the game, HUD-BG3, and HUD-OBJ surfaces separately. It
+  renders the game with the normal logical-size/PAR transform, then composites
+  the HUD in physical renderer-output coordinates: left at the presentation
+  viewport's left edge, action timer at center, and score/magic at its right
+  edge. The lower action health row stays left. The selected-magic OBJ is placed
+  immediately before the right BG3 group.
+- `hud_scale_percent=0` (**Match game**) derives the current X/Y game scale and
+  preserves the Phase-1 visual size. `100` is native host-output 1x vertically;
+  the X scale additionally applies the configured 7:6 SNES pixel aspect when
+  enabled. `-`/`+` adjust by 25 percent, clamped to 25-400. Authentic 4:3 and
+  widescreen-raw never enable extraction and retain the ordinary in-frame HUD.
+- Renderer-backed F2/`AR_SHOT_AT_GF` captures read the final composited output,
+  so scaled-HUD regressions include the host overlay. Pure headless/oracle runs
+  bind no overlay surfaces and preserve the historical internal framebuffer
+  and deterministic emulated state. Visual automation can opt into the real
+  compositor with `AR_HEADLESS_VIDEO=1` (normally paired with the SDL dummy
+  video driver); this creates a hidden software renderer without enabling
+  interactive input or frame pacing.
+
+### 13.2 Stage-B implementation refinement (2026-07-12)
 
 The earlier `widescreen-bg` implementation proved the map-decoding idea but
 did not isolate it: that branch also hle-replaced `$8C98/$8D68`, hle-wrapped
@@ -546,7 +587,7 @@ cached. This matters for two-wide-layer rooms: `runs/20260712-202151/` proved
 that invoking every BG1 and BG2 margin decoder every rendered frame can consume
 the presentation budget even though game logic itself remains inexpensive.
 
-### 13.2 Narrow-layer presentation padding (2026-07-12)
+### 13.3 Narrow-layer presentation padding (2026-07-12)
 
 `PpuSetWidescreenLayerMirror` is a renderer capability for decorative layers
 that contain a real 256px image but no valid offscreen world columns. The normal

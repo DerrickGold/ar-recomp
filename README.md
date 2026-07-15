@@ -94,6 +94,7 @@ Extra features WIP:
 ![mode7](/assets/mode7.png)
 ![bloodpool act2](/assets/bloodpool-act2.png)
 ![fillmore sim](/assets/sim.png)
+![hud-scale-sim](/assets/hud-scaling.png)
 
 ## AI disclosure
 
@@ -296,6 +297,15 @@ see `HandleInput()` in `src/main.c`:
 | `F2` | full diagnostic snapshot (WRAM/VRAM/CGRAM/OAM + screenshot) |
 | `F9` | cycle 4:3 authentic → widescreen raw → widescreen full (requires `ExtendedAspectRatio`; paused BG/crop changes redraw immediately, sprite/activation changes apply next game frame) |
 | `Shift`+`F9` | dump diagnostic state |
+| `-` / `+` | decrease/increase the promoted widescreen HUD by 0.25×; the first adjustment starts from the current game presentation scale |
+
+In widescreen-full mode the action/simulation HUD is composited as a host
+overlay after the game framebuffer is upscaled. `AR_HUD_SCALE=100` makes one
+SNES HUD pixel one output pixel vertically, while `AR_HUD_SCALE=0` (the
+default, displayed as **Match game**) preserves the normal game-sized HUD.
+Values are percentages from 25 through 400 and can also use an `x` suffix,
+such as `AR_HUD_SCALE=2.5x`. Authentic 4:3 and widescreen-raw remain untouched
+comparison paths and keep the HUD inside the SNES framebuffer.
 
 **Cheats** (`[Cheats]` section — any `AR_*`/`SNESREF_*` key in the `.ini` is
 exported as an environment variable, which is how these are read):

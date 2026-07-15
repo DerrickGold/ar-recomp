@@ -30,6 +30,8 @@ static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 static SDL_Window *g_window;
 static SDL_Renderer *g_renderer;
 static SDL_Texture *g_texture;
+static SDL_Texture *g_hud_bg_texture;
+static SDL_Texture *g_hud_obj_texture;
 static uint8 g_paused, g_turbo;
 static bool g_paused_redraw_pending;
 static uint32 g_input_state;
@@ -38,6 +40,8 @@ static int g_snes_width = 256, g_snes_height = 224;
  * width can be chosen at startup without reallocation; faithful runs still
  * render/present only the leading 256*4 bytes per row via g_snes_width. */
 static uint8_t g_pixels[kPpuBufWidth * 4 * 240];
+static uint8_t g_hud_bg_pixels[kPpuBufWidth * 4 * 240];
+static uint8_t g_hud_obj_pixels[kPpuBufWidth * 4 * 240];
 
 /* Widescreen master switch + per-side extra-column budget — the definitions
  * for the runner's widescreen.h externs (each game defines them; 0/false =
@@ -56,6 +60,7 @@ extern const RtlGameInfo kActRaiserGameInfo;
 bool g_new_ppu = true;
 
 static SDL_mutex *g_audio_mutex;
+static bool RenderFramebuffer(void);
 
 void NORETURN Die(const char *error) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
@@ -384,7 +389,35 @@ static void ApplyScheduledSettingChange(void) {
  * (pitch is g_snes_width*4 — see PpuBeginDrawing). A 4:3 capture is therefore a
  * true 256-wide image rather than the wide framebuffer with black bars baked
  * in, while wide modes capture the full framebuffer exactly as before. */
-static void WriteFramebufferPpm(FILE *pf) {
+static SDL_Point WriteFramebufferPpm(FILE *pf) {
+  /* A promoted HUD is composited after the SNES framebuffer. When a renderer
+   * exists, capture that actual host-space result so F2 and visual-regression
+   * screenshots include the independently scaled overlay. Headless runs
+   * without video retain the historical internal-framebuffer capture. */
+  if (g_renderer && g_hud_bg_texture && RenderFramebuffer()) {
+    int out_w = 0, out_h = 0;
+    SDL_GetRendererOutputSize(g_renderer, &out_w, &out_h);
+    size_t pitch = (size_t)out_w * 4;
+    uint8_t *pixels = out_w > 0 && out_h > 0
+        ? (uint8_t *)malloc(pitch * (size_t)out_h) : NULL;
+    if (pixels && SDL_RenderReadPixels(g_renderer, NULL,
+                                      SDL_PIXELFORMAT_ARGB8888,
+                                      pixels, (int)pitch) == 0) {
+      fprintf(pf, "P6\n%d %d\n255\n", out_w, out_h);
+      for (int y = 0; y < out_h; y++) {
+        const uint8_t *row = pixels + (size_t)y * pitch;
+        for (int x = 0; x < out_w; x++) {
+          fputc(row[x * 4 + 2], pf);
+          fputc(row[x * 4 + 1], pf);
+          fputc(row[x * 4 + 0], pf);
+        }
+      }
+      free(pixels);
+      return (SDL_Point){ out_w, out_h };
+    }
+    free(pixels);
+  }
+
   int x0 = Settings_VisibleX0();
   int w = Settings_VisibleWidth();
   fprintf(pf, "P6\n%d %d\n255\n", w, g_snes_height);
@@ -396,6 +429,7 @@ static void WriteFramebufferPpm(FILE *pf) {
       fputc(row[x * 4 + 0], pf);  /* B */
     }
   }
+  return (SDL_Point){ w, g_snes_height };
 }
 
 /* Point the presentation at the current display mode's framebuffer sub-rect and
@@ -433,23 +467,181 @@ static void ApplyDisplayPresentation(void) {
 static void OnRuntimeSettingChanged(const SettingDesc *desc,
                                     SettingChangeResult result) {
   (void)result;
-  if (desc->category == kSettingCat_Display ||
-      desc->category == kSettingCat_Widescreen) {
+  /* HUD scale is a display-category value but must not resize a manually
+   * resized window. Only the display profile and geometry policies own the
+   * presentation/window dimensions. */
+  if (desc->field == &g_settings.display_mode ||
+      desc->category == kSettingCat_Widescreen)
     ApplyDisplayPresentation();
+  if (desc->category == kSettingCat_Display ||
+      desc->category == kSettingCat_Widescreen)
     g_paused_redraw_pending = true;
+}
+
+static void ApplyRendererLogicalSize(void) {
+  if (!g_renderer) return;
+  if (g_ws_active && !g_config.ignore_aspect_ratio) {
+    int vis_w = Settings_VisibleWidth();
+    if (g_config.aspect_par_43)
+      SDL_RenderSetLogicalSize(g_renderer, vis_w * 7, g_snes_height * 6);
+    else
+      SDL_RenderSetLogicalSize(g_renderer, vis_w, g_snes_height);
+  } else {
+    SDL_RenderSetLogicalSize(g_renderer, 0, 0);
   }
 }
 
-static void PresentFramebuffer(void) {
-  if (!g_renderer || !g_texture) return;
+static SDL_Rect GetPresentationViewport(void) {
+  int out_w = 0, out_h = 0;
+  SDL_GetRendererOutputSize(g_renderer, &out_w, &out_h);
+  SDL_Rect viewport = { 0, 0, out_w, out_h };
+  if (!g_ws_active || g_config.ignore_aspect_ratio || out_w <= 0 || out_h <= 0)
+    return viewport;
+
+  int logical_w = Settings_VisibleWidth() *
+                  (g_config.aspect_par_43 ? 7 : 1);
+  int logical_h = g_snes_height * (g_config.aspect_par_43 ? 6 : 1);
+  if ((int64_t)out_w * logical_h > (int64_t)out_h * logical_w) {
+    viewport.w = (int)((int64_t)out_h * logical_w / logical_h);
+    viewport.x = (out_w - viewport.w) / 2;
+  } else {
+    viewport.h = (int)((int64_t)out_w * logical_h / logical_w);
+    viewport.y = (out_h - viewport.h) / 2;
+  }
+  return viewport;
+}
+
+static void AdjustHudOutputScale(int delta_percent) {
+  const SettingDesc *desc = Settings_Find("hud_scale_percent");
+  if (!desc) return;
+  int current = g_settings.hud_scale_percent;
+  if (!current && g_renderer) {
+    SDL_Rect viewport = GetPresentationViewport();
+    current = (viewport.h * 100 + g_snes_height / 2) / g_snes_height;
+    current = ((current + 12) / 25) * 25;
+  }
+  if (!current) current = 100;
+  int next = current + delta_percent;
+  if (next < 25) next = 25;
+  if (next > 400) next = 400;
+  SettingChangeResult result = Settings_SetLong(desc, next);
+  char formatted[32];
+  Settings_FormatValue(desc, formatted, sizeof(formatted));
+  fprintf(stderr, "[hud-overlay] scale -> %s (%s; 1.00x = native output)\n",
+          formatted, Settings_ChangeResultName(result));
+}
+
+static int ScaledHudPixels(int pixels, double scale) {
+  int result = (int)(pixels * scale + 0.5);
+  return result > 0 ? result : 1;
+}
+
+static void RenderHudChunk(SDL_Texture *texture, SDL_Rect src, SDL_Rect dst) {
+  if (!texture || src.w <= 0 || src.h <= 0 || dst.w <= 0 || dst.h <= 0)
+    return;
+  SDL_RenderCopy(g_renderer, texture, &src, &dst);
+}
+
+static void RenderHudOverlay(SDL_Rect viewport) {
+  if (!g_hud_bg_texture || !g_ppu || !g_ppu->wsHudSplitHeight)
+    return;
+
+  int vis_w = Settings_VisibleWidth();
+  double scale_y, scale_x;
+  if (g_settings.hud_scale_percent == 0) {
+    scale_y = (double)viewport.h / g_snes_height;
+    scale_x = (double)viewport.w / vis_w;
+  } else {
+    scale_y = g_settings.hud_scale_percent / 100.0;
+    scale_x = scale_y * (g_config.aspect_par_43 ? 7.0 / 6.0 : 1.0);
+  }
+
+  int tex_extra = (g_snes_width - 256) / 2;
+  int height = g_ppu->wsHudSplitHeight;
+  int lower_y = g_ppu->wsHudLeftOnlyY;
+  if (lower_y > height) lower_y = height;
+  int upper_h = lower_y;
+  int upper_dh = ScaledHudPixels(upper_h, scale_y);
+
+  SDL_Rect src = { 0, 0, g_ppu->wsHudLeftEnd, upper_h };
+  SDL_Rect dst = { viewport.x, viewport.y,
+                   ScaledHudPixels(src.w, scale_x), upper_dh };
+  RenderHudChunk(g_hud_bg_texture, src, dst);
+
+  if (g_ppu->wsHudLeftEnd < g_ppu->wsHudRightStart) {
+    src.x = tex_extra + g_ppu->wsHudLeftEnd;
+    src.w = g_ppu->wsHudRightStart - g_ppu->wsHudLeftEnd;
+    dst.w = ScaledHudPixels(src.w, scale_x);
+    dst.x = viewport.x + (viewport.w - dst.w) / 2;
+    RenderHudChunk(g_hud_bg_texture, src, dst);
+  }
+
+  int right_source_w = 256 - g_ppu->wsHudRightStart;
+  int right_dest_w = ScaledHudPixels(right_source_w, scale_x);
+  src.x = tex_extra * 2 + g_ppu->wsHudRightStart;
+  src.w = right_source_w;
+  dst.x = viewport.x + viewport.w - right_dest_w;
+  dst.w = right_dest_w;
+  RenderHudChunk(g_hud_bg_texture, src, dst);
+
+  if (lower_y < height) {
+    src.x = 0;
+    src.y = lower_y;
+    src.w = 256;
+    src.h = height - lower_y;
+    dst.x = viewport.x;
+    dst.y = viewport.y + ScaledHudPixels(lower_y, scale_y);
+    dst.w = ScaledHudPixels(src.w, scale_x);
+    dst.h = ScaledHudPixels(src.h, scale_y);
+    RenderHudChunk(g_hud_bg_texture, src, dst);
+  }
+
+  /* The selected-magic icon is the separately promoted 2x2 OAM signature.
+   * Keep it four native pixels before the scaled right group. */
+  if (g_hud_obj_texture && g_ppu->wsHudOamCount == 4) {
+    int x = (g_ppu->oam[0] & 0xff) | ((g_ppu->highOam[0] & 1) << 8);
+    int y = g_ppu->oam[0] >> 8;
+    if (x < 256) {
+      SDL_Rect obj_src = { tex_extra + x, y, 16, 16 };
+      SDL_Rect obj_dst = {
+        viewport.x + viewport.w - right_dest_w -
+            ScaledHudPixels(20, scale_x),
+        viewport.y + ScaledHudPixels(y, scale_y),
+        ScaledHudPixels(16, scale_x),
+        ScaledHudPixels(16, scale_y),
+      };
+      RenderHudChunk(g_hud_obj_texture, obj_src, obj_dst);
+    }
+  }
+}
+
+static bool RenderFramebuffer(void) {
+  if (!g_renderer || !g_texture) return false;
   /* Present only the current mode's sub-rect: the whole framebuffer when
    * wide, the authentic centre 256 in 4:3. The texture allocation never
    * changes while cycling modes. */
   SDL_Rect src = { Settings_VisibleX0(), 0,
                    Settings_VisibleWidth(), g_snes_height };
   SDL_UpdateTexture(g_texture, NULL, g_pixels, g_snes_width * 4);
+  if (g_hud_bg_texture)
+    SDL_UpdateTexture(g_hud_bg_texture, NULL, g_hud_bg_pixels,
+                      g_snes_width * 4);
+  if (g_hud_obj_texture)
+    SDL_UpdateTexture(g_hud_obj_texture, NULL, g_hud_obj_pixels,
+                      g_snes_width * 4);
+  ApplyRendererLogicalSize();
   SDL_RenderClear(g_renderer);
   SDL_RenderCopy(g_renderer, g_texture, &src, NULL);
+
+  SDL_Rect viewport = GetPresentationViewport();
+  SDL_RenderSetLogicalSize(g_renderer, 0, 0);
+  RenderHudOverlay(viewport);
+  ApplyRendererLogicalSize();
+  return true;
+}
+
+static void PresentFramebuffer(void) {
+  if (!RenderFramebuffer()) return;
   SDL_RenderPresent(g_renderer);
 }
 
@@ -514,6 +706,10 @@ int main(int argc, char **argv) {
    * SNESREF_HEADLESS. */
   bool headless = getenv("AR_HEADLESS") && getenv("AR_HEADLESS")[0]
                   && getenv("AR_HEADLESS")[0] != '0';
+  bool headless_video = headless && getenv("AR_HEADLESS_VIDEO") &&
+                        getenv("AR_HEADLESS_VIDEO")[0] &&
+                        getenv("AR_HEADLESS_VIDEO")[0] != '0';
+  bool video = !headless || headless_video;
 
   /* Widescreen budget from config. internal_width = 224 * (ax/ay) display
    * units, divided by the 7:6 pixel stretch when the 4:3-corrected look is
@@ -582,13 +778,14 @@ int main(int argc, char **argv) {
     g_ar_trapfn = (e && e[0]) ? e : 0; }
 
   Uint32 sdl_flags = SDL_INIT_AUDIO;
-  if (!headless) sdl_flags |= SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER;
+  if (video) sdl_flags |= SDL_INIT_VIDEO;
+  if (!headless) sdl_flags |= SDL_INIT_GAMECONTROLLER;
   if (SDL_Init(sdl_flags) != 0) {
     fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return 1;
   }
 
-  if (!headless) {
+  if (video) {
     int scale = g_config.window_scale ? g_config.window_scale : 3;
     /* Window sized to the DISPLAY aspect: with the 4:3-corrected PAR the
      * rendered width (e.g. 342) is narrower than the displayed width (16:9 of
@@ -602,13 +799,15 @@ int main(int argc, char **argv) {
       kWindowTitle,
       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
       win_w, g_snes_height * scale,
-      SDL_WINDOW_RESIZABLE
+      SDL_WINDOW_RESIZABLE | (headless_video ? SDL_WINDOW_HIDDEN : 0)
     );
     if (!g_window) Die("SDL_CreateWindow failed");
 
-    g_renderer = SDL_CreateRenderer(g_window, -1,
-      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    g_renderer = SDL_CreateRenderer(g_window, -1, headless_video
+      ? SDL_RENDERER_SOFTWARE
+      : SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!g_renderer) Die("SDL_CreateRenderer failed");
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
     /* Aspect-correct letterboxing via SDL's logical size (widescreen only, so
      * faithful mode keeps the historical stretch-to-window behavior).
@@ -627,6 +826,17 @@ int main(int argc, char **argv) {
       g_snes_width, g_snes_height);
     if (!g_texture) Die("SDL_CreateTexture failed");
 
+    g_hud_bg_texture = SDL_CreateTexture(g_renderer,
+      SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+      g_snes_width, g_snes_height);
+    g_hud_obj_texture = SDL_CreateTexture(g_renderer,
+      SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+      g_snes_width, g_snes_height);
+    if (!g_hud_bg_texture || !g_hud_obj_texture)
+      Die("SDL_CreateTexture for HUD overlay failed");
+    SDL_SetTextureBlendMode(g_hud_bg_texture, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureBlendMode(g_hud_obj_texture, SDL_BLENDMODE_BLEND);
+
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   }
 
@@ -639,6 +849,14 @@ int main(int argc, char **argv) {
   if (!snes) Die("SnesInit failed");
 
   PpuBeginDrawing(g_ppu, g_pixels, g_snes_width * 4, 0);
+  /* Bind explicitly even without video: ppu_init uses malloc, so skipping the
+   * call would leave the new optional pointers at their pre-reset values in a
+   * pure headless/oracle run. NULL disables extraction deterministically. */
+  PpuBeginWidescreenHudOverlay(
+      g_ppu,
+      g_hud_bg_texture ? g_hud_bg_pixels : NULL,
+      g_hud_obj_texture ? g_hud_obj_pixels : NULL,
+      g_snes_width * 4);
   /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
    * centered in the wide framebuffer). Re-applied every frame by
    * ActRaiser_ApplyWidescreenPolicy since ppu_reset zeroes these fields. */
@@ -731,6 +949,13 @@ int main(int argc, char **argv) {
           } else if (event.key.keysym.sym == SDLK_t) {
             g_turbo = !g_turbo;
             fprintf(stderr, "[turbo] %s\n", g_turbo ? "ON (8x, AR_TURBO_MULT to change)" : "off");
+          } else if (event.key.keysym.sym == SDLK_MINUS ||
+                     event.key.keysym.sym == SDLK_KP_MINUS) {
+            if (!event.key.repeat) AdjustHudOutputScale(-25);
+          } else if (event.key.keysym.sym == SDLK_EQUALS ||
+                     event.key.keysym.sym == SDLK_PLUS ||
+                     event.key.keysym.sym == SDLK_KP_PLUS) {
+            if (!event.key.repeat) AdjustHudOutputScale(25);
           } else if (event.key.keysym.sym == SDLK_F5) {
             RtlSaveLoad(kSaveLoad_Save, 0);
             fprintf(stderr, "State saved.\n");
@@ -795,7 +1020,7 @@ int main(int argc, char **argv) {
             char ppm[344]; snprintf(ppm, sizeof ppm, "%s.ppm", prefix);
             FILE *pf = fopen(ppm, "wb");
             if (pf) {
-              WriteFramebufferPpm(pf);
+              (void)WriteFramebufferPpm(pf);
               fclose(pf);
             }
             fprintf(stderr, "[snap] F2 -> %s.{wram,vram,cgram,oam,ppm} (gf=%u)\n",
@@ -1043,10 +1268,10 @@ int main(int argc, char **argv) {
       if (want) {
         FILE *pf = fopen(fname, "wb");
         if (pf) {
-          WriteFramebufferPpm(pf);
+          SDL_Point shot_size = WriteFramebufferPpm(pf);
           fclose(pf);
           fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d mode=%s\n",
-                  fname, gf, Settings_VisibleWidth(), g_snes_height,
+                  fname, gf, shot_size.x, shot_size.y,
                   g_ppu->extraLeftCur, g_ppu->extraRightCur,
                   Settings_DisplayModeName(g_settings.display_mode));
         }
@@ -1090,6 +1315,8 @@ int main(int argc, char **argv) {
 
   SDL_CloseAudio();
   SDL_DestroyMutex(g_audio_mutex);
+  SDL_DestroyTexture(g_hud_obj_texture);
+  SDL_DestroyTexture(g_hud_bg_texture);
   SDL_DestroyTexture(g_texture);
   SDL_DestroyRenderer(g_renderer);
   SDL_DestroyWindow(g_window);

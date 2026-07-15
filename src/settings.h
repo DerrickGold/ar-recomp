@@ -90,6 +90,9 @@ typedef struct SettingsPin {
 
 typedef struct Settings {
   int display_mode;
+  /* Absolute host-output HUD scale percent. 0 follows the game's current
+   * presentation scale; 100 means one output pixel per SNES pixel vertically. */
+  int hud_scale_percent;
 
   /* Cheat values. Zero/false means disabled. Stateful enforcement latches are
    * deliberately kept private to ActRaiser_ApplyCheats, not stored here. */
