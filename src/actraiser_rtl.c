@@ -421,14 +421,22 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * layers and cyclically continue only BG2's border/fog rows; the split at
      * tile row 18 (screen Y=144) is below every face and above the water.
      *
-     * After the final boss, $0347=$07 and the same raw map transitions BG2 to
-     * sky/cloud/water art. Keep the causeway BG1 bounded, but repeat the whole
-     * live BG2 scanline so that transitioned background fills both margins. */
+     * After the final boss, $0347=$07. The fade-to-black/removal sequencer at
+     * $00:F5C2-$F5EF then selects the sky maps by writing BG1SC/BG2SC=$64/$74
+     * at $F5F0-$F619, before its fade-in. Use those live page bases as the
+     * exact render handoff; $0334=$03 is retained as a settled-state fallback
+     * but is written much later at $F650. Keep the causeway BG1 bounded, but
+     * mirror the whole live BG2 scanline so the non-periodic cloud edges join
+     * cleanly at both margins. */
     if (wide && g_ram[0x18] == 0x07 && g_ram[0x19] == 0x01) {
+      const int ending_sky_pages =
+          (g_ppu->bgXsc[0] & 0xfc) == 0x64 &&
+          (g_ppu->bgXsc[1] & 0xfc) == 0x74;
       action_margins = 0;
-      if (g_ram[0x0347] >= 0x07) {
+      if (g_ram[0x0347] >= 0x07 &&
+          (ending_sky_pages || g_ram[0x0334] >= 0x03)) {
         clamp |= 0x01;
-        repeat |= 0x02;
+        mirror |= 0x02;
       } else {
         clamp |= 0x03;
         repeat_band_layer = 1;  /* BG2 */
@@ -438,15 +446,17 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     }
 
     /* Death Heim's final arena ($07:$08) stacks two 256px star-road layers
-     * and applies independent scanline/sine motion. The generic world-edge
-     * budget would suppress both margins at camera X=0. Give the arena the
-     * full symmetric canvas and cyclically continue both isolated, already-
-     * scrolled scanlines; this preserves each layer's raster phase. */
+     * and applies independent scanline/sine motion. Both live BGSC registers
+     * select 32x32 tilemaps ($60/$70), so native tile fetch already wraps at
+     * 256px with the current per-line scroll. The generic world-edge budget
+     * was the only reason the margins stayed black. Open the symmetric canvas
+     * and draw both layers raw: this preserves their raster phase and avoids
+     * the isolated-buffer clear/merge cost of presentation-layer repeat. */
     if (wide && g_ram[0x18] == 0x07 && g_ram[0x19] == 0x08) {
       action_margins = 0;
       clamp &= (uint8)~0x03;
       mirror &= (uint8)~0x03;
-      repeat |= 0x03;
+      repeat &= (uint8)~0x03;
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the

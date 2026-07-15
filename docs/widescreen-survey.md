@@ -721,16 +721,39 @@ is broken at its first boss transition.
   the animated lower field from its live rendered scroll phase. Direct testing
   on 2026-07-14 confirmed the centered scenery, clean full-width fog, and
   continuing animation.
-- Death Heim raw maps `0702-0708` select cyclic repeat for the moving
+- The post-final-boss return to `0701` cannot switch on `$0347=$07` alone.
+  `runs/20260714-184728/snapshots/snap_01_gf14676` has `$0347=7/$0334=0` while
+  the faces are still visible; `snap_02_gf15031` has `$0334=3` after the
+  sky/cloud/water appears. Waiting for `$0334=3` was then observed to release
+  the clamp too late in `runs/20260714-185817/`. Static tracing locates the
+  exact transition: the `$00:F5C2-$F5E3` fade-to-black and `$F5E4-$F5EF`
+  statue-removal wait are followed by BG1SC/BG2SC writes `$64/$74` at
+  `$F5F0-$F619`; the fade-in starts at `$F625`, while `$0334=3` is delayed
+  until `$F650`. The refined policy requires `$0347>=7` plus live BGSC page
+  bases `$64/$74` (with `$0334>=3` as a fallback), clamps only BG1, and mirrors
+  the complete live BG2. Reflection removes the hard cloud-edge seam seen with
+  cyclic repeat. Direct testing on 2026-07-14 confirmed that the switch is
+  hidden by the black frame and completes before the sky fade-in.
+- Death Heim raw maps `0702-0707` select cyclic repeat for the moving
   mountain/parallax background.
   In
   `runs/20260714-173750/snapshots/snap_00_gf4875`, the active policy was
   `mirror=02` with BG2 `$32=$0100`; direct observation showed those reflected
   margins scrolling opposite the authentic center on maps `$19=04-$07`.
-  `$19=02/$03/$08` are provisionally classified with the same background
-  family. The full `$02-$08` range now selects cyclic repeat; direct post-build
+  `$19=02/$03` are provisionally classified with the same background family.
+  The full `$02-$07` range now selects cyclic repeat; direct post-build
   validation remains pending for these maps, especially the provisional
   entries.
+- Final-boss map `0708` is separate: both BG1 and BG2 declare `$0100` width and
+  form stacked transparent star-road/star-field effects with scanline/sine
+  motion (`runs/20260714-183142/snapshots/snap_00_gf12574` and
+  `snap_01_gf12654`). Camera `$22=0` previously collapsed both margin budgets.
+  Isolated repeat on both layers (`repeat=$03`) filled the margins but caused a
+  major slowdown in `runs/20260714-184728/`. BG1SC/BG2SC are `$60/$70`, so both
+  32x32 maps already wrap natively every 256px. The optimized policy opens
+  symmetric margins and draws both raw (`repeat=$00`), retaining their live
+  raster phases without temporary clear/merge passes. Direct testing on
+  2026-07-14 confirmed correct visuals and normal performance.
 - Full Bloodpool act 2 run `runs/20260712-200334/`: mirror fill is visually
   confirmed. The first handler batch restored early enemies/platforms. Later
   F2 captures found four more live `$12` roots (`$BD82`, `$BD36`, `$BBB4`,

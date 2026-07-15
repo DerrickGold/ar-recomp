@@ -1256,6 +1256,26 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
     end-to-end 2026-07-14). The reusable rule: **after any bank00.cfg handler work, run
     `python3 tools/find_yield_helpers.py`** (§5) — it derives the yield-helper census from
     ROM byte shape and exits nonzero on any unregistered continuation.
+
+21. **FIX LANDED (2026-07-14, regen + verify pending): ending/credits never start —
+    mode `$18=08`'s entry long-jump target was unconverted.** After the final boss the
+    ending montage plays (mode 0, `$19=09`↔towns), then the fade routine's special case
+    `$00:82C3` long-jumps into the credits presenter via `LDA #$02; PHA; LDX #$AA9B;
+    PHX; RTL` → `$02:AA9C` — which had NO func and NO label → dispatch-miss (`from
+    0082D0 to 02AA9C`, hf=47576 in runs/20260714-184728) → host-unwind skipped the
+    whole presenter; the game sat alive in mode 8 with only NMI frames running
+    (credits invisible; user report + healthy exit dump running bank_02_BF52/BEB8).
+    Fixes: `func bank_02_AA9C AA9C entry_mx:1,0` (bank02.cfg) + `func bank_00_8059
+    8059 entry_mx:1,0` (bank00.cfg — the presenter's own exit RTL at `$02:AAFD`
+    returns to the main-loop top after a Start-button wait; registering both closes
+    the ROM's ONLY two RTL-long-jump sites, verified by whole-ROM byte scan of the
+    `LDA#/PHA/LDX#/PHX/RTL` and `PHK/PEA/RTL` shapes). Both are dispatch-only tail
+    jumps (`$AA9C` relocates S to `$01FF` on entry, never returns — no paired-resume
+    hazard). The presenter stamps 'ACT' into SRAM `$70:1FF0` = the beat-the-game
+    marker. WATCH ITEM from the same run: one-shot `01ACD9 ran m=0 (1st time after
+    31200× m=1)` from `bank_03_D020_M1X0` at f=46977 (ending-prelude flyover) — no
+    garbage-variant fired and the montage displayed fine; re-check only if the ending
+    shows visual corruption after the regen.
 ---
 
 ## 8. Build & regen workflow

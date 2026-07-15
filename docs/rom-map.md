@@ -73,6 +73,16 @@ boss/summon spawn stubs `$F6D6/F6EE/F6FA/F706/F712/F71E` (+`$F81B`) each
 (re-pushed by `$F7C9`, consumed by `$F807`'s RTS). The all-six-regions
 completion check is `$00:A343` over `$7F:6B18`.
 
+After Death Heim the ending runs: a mode-0 world montage (`$19=09` alternating
+with each town map), then mode `$18=$08` — entered via the fade routine's
+special case `$00:82C3` (`CMP #$08` → `LDA #$02; PHA; LDX #$AA9B; PHX; RTL`, a
+cross-bank RTL long-jump; the only site of that byte shape in bank 0). The
+ending/credits presenter `$02:AA9C` relocates S to `$01FF`, drives 17+ credit
+entries via `JSR $02:AB30`, stamps `'A','C','T'` into SRAM `$70:1FF0-1FF2`
+(the beat-the-game marker), waits for Start (`$4219` bit 4), and RTL-jumps
+back to the main loop top `$00:8059` (the ROM's only other RTL-jump site,
+`$02:AAFD`).
+
 These are different identity layers. The action object handler and composition
 pointer select behavior/layout within a common resident atlas; the small bank-6
 uploads replace reserved effect tiles. Town type tables select behavior and

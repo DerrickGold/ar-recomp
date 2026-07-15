@@ -8,8 +8,8 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 ### Game Mode & Navigation
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0018 | 1 | Mode/region group: `$00` non-action (town/world/UI); `$01-$06` six two-act kingdom action regions; `$07` Death Heim boss-rush/final-boss action region (no ordinary acts) |
-| $7E:0019 | 1 | Current raw map/sub-flow number (second byte of map ID). Not a uniform act selector: Act 2 starts at `$02/$02/$03/$04/$04/$05` for regions `$01-$06`; Death Heim `$07` reaches its first boss and currently crashes |
+| $7E:0018 | 1 | Mode/region group: `$00` non-action (town/world/UI); `$01-$06` six two-act kingdom action regions; `$07` Death Heim boss-rush/final-boss action region (no ordinary acts); `$08` ending/credits (post-Death-Heim: mode-0 world montage cycling `$19=09`↔towns, then `$18=08` — presenter at `$02:AA9C`, stamps 'ACT' into SRAM `$70:1FF0`, waits for Start, exits to `$00:8059`) |
+| $7E:0019 | 1 | Current raw map/sub-flow number (second byte of map ID). Not a uniform act selector: Act 2 starts at `$02/$02/$03/$04/$04/$05` for regions `$01-$06`; Death Heim uses `$01` for its hub, `$02-$07` for the six rematch arenas, and `$08` for the final boss |
 | $7E:001A | 1 | Destination map number |
 | $7E:001B | 1 | Destination map group (first byte of map ID) |
 
@@ -166,7 +166,7 @@ Two-byte entries per town.
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:033E | 1 | Temple action (0x00=Give Oracle, 0x01=Listen, 0x02=Take Offering) |
-| $7E:0334 | 1 | Death Heim final-boss-defeated flag: `$00:FEFC` sets 1 when the teleport-out runs with `$19==8` |
+| $7E:0334 | 1 | Death Heim/ending state: `$00:FEFC` sets 1 when final-boss teleport-out runs with `$19==8`; `$00:F650` sets 3 only after the returning `0701` sky fade-in and `$0349` wait, so it is too late to identify the black-frame BG page swap (`$00:F5F0-$F619`, BG1SC/BG2SC `$64/$74`) |
 | $7E:0341 | 1 | Current town ID (also read by the `$00:A375` post-Death-Heim return stager as the pending destination) |
 | $7E:0347 | 1 | Death Heim boss-rush progress: `$00:FEEC` writes `$19 - 1` after each boss (hub stager `$F3D4` warps to `$0347+2` next); 0x07 = final boss beaten |
 

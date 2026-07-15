@@ -585,17 +585,59 @@ does not alter the native scroll registers or tilemaps. Direct testing on
 the divider/fog fills both margins cleanly, and the animated effect continues
 normally.
 
-Death Heim raw maps `$02-$08` (`0702-0708`) select the narrow-parallax repeat
+The post-final-boss return reuses raw map `0701` with different presentation
+state. Paired captures in `runs/20260714-184728/` separate the transition:
+`snap_01_gf14676` already has boss-rush progress `$0347=$07` but ending state
+`$0334=$00`, while the face scene is still visible; `snap_02_gf15031` has
+`$0334=$03` after the sky/cloud/water has appeared. Thus `$0347` alone switches
+too early, but `$0334>=3` is also visibly late in
+`runs/20260714-185817/`. The ROM sequence supplies the precise render seam:
+
+- `$00:F5C2-$F5E3` advances object field `+$38` to `$80` while driving the
+  `$2132` fixed-color fade to black;
+- `$F5E4-$F5EF` advances the sequencer and waits for the statue-removal child
+  referenced by `+$3A` to report `+$24=0`;
+- `$F5F0-$F619` stages BG1SC `$64` and BG2SC `$74`, selecting the sky maps
+  while the display is black, then seeds the fade-in counter at `$F61C`;
+- `$F625-$F642` performs the fade-in, and only after it plus the `$0349` wait
+  does `$F64C-$F650` write `$0334=3`.
+
+The policy now requires `$0347>=7` and observes the live BGSC page bases
+`$64/$74`; `$0334>=3` remains a settled-state fallback. It keeps BG1 clamped
+and replaces the lower repeat band with whole-BG2 reflection immediately when
+the sky pages become active. This samples the transitioned live BG2 after its
+scroll/window state, cannot resurrect face tiles still resident in VRAM, and
+joins the non-periodic cloud edges without the hard seam produced by cyclic
+repeat. Direct testing on 2026-07-14 confirmed that the handoff occurs invisibly
+during the black frame and that the wide sky is ready before fade-in.
+
+Death Heim raw maps `$02-$07` (`0702-0707`) select the narrow-parallax repeat
 policy. Capture
 `runs/20260714-173750/snapshots/snap_00_gf4875` records `$18=$07`, `$19=$04`,
 and BG2 logical width `$32=$0100`; the policy log showed `mirror=02`. Direct
 observation found the padded mountain/parallax image moving opposite the
 authentic center at the 256px boundaries. The same effect was then directly
-reported on maps `$05-$07`. Maps `$02`, `$03`, and `$08` are provisionally
+reported on maps `$05-$07`. Maps `$02` and `$03` are provisionally
 classified with that background family so boss-rush transitions cannot restore
-reflection. The full `$02-$08` range therefore selects the same
+reflection. The full `$02-$07` range therefore selects the same
 isolated-scanline cyclic repeat as Aitos and Northwall. Direct post-build
 validation remains pending for these maps, especially the provisional entries.
+
+Final-boss map `0708` is a distinct two-layer raster arena. Snapshots
+`runs/20260714-183142/snapshots/snap_00_gf12574` and `snap_01_gf12654` record
+camera `$22=$0000` and both BG widths `$2E/$32=$0100`; offline VRAM/CGRAM
+reconstruction identifies BG1 as the colored star road and BG2 as the sparse
+star field. Both are transparent stacked effects, not platform/world layers,
+and both receive live scanline/sine displacement. The generic world-edge budget
+therefore left the 43px margins black. The first fix used isolated repeat on
+both layers (`repeat=$03`) and filled the margins, but direct testing in
+`runs/20260714-184728/` found a large performance regression. The live BG1SC/
+BG2SC values are `$60/$70`: both are native 32x32-tile maps whose PPU fetches
+already wrap every 256px. `0708` now only opens the symmetric canvas and draws
+both raw (`repeat=$00`), preserving each layer's current raster phase while
+eliminating two temporary-buffer clears and two priority merges per scanline.
+Direct testing on 2026-07-14 confirmed the full-width effect and normal
+performance.
 
 ## 14. Open questions (all remaining, none blocks the §13 design)
 

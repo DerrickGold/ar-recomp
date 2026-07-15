@@ -111,12 +111,24 @@ and gameplay state remain authoritative. Direct testing on 2026-07-14
 confirmed centered complete faces/causeway and clean animated fog across both
 margins.
 
-The post-final-boss `0701` state is distinguished by boss-rush progress
-`$0347=$07` (`runs/20260714-183142/snapshots/snap_02_gf17900`; `$0334=$03`).
-BG2 has transitioned to sky/cloud/water while BG1 retains the causeway, so this
-state clamps BG1 and whole-scanline repeats BG2 instead of using the normal
-`y=144-223` band. The resident face tiles are irrelevant because padding copies
-the live post-window rendered BG2. Direct validation is pending.
+The post-final-boss `0701` switch requires boss-rush progress `$0347>=7`, but
+must not wait for ending state `$0334>=3`. Paired captures in
+`runs/20260714-184728/` prove why `$0347` alone is too early:
+`snap_01_gf14676` is `$0347=7/$0334=0` with faces still visible, while
+`snap_02_gf15031` is `$0334=3` with sky/cloud/water. The finer boundary is the
+game's own background-page handoff: `$00:F5C2-$F5E3` runs the fixed-color
+fade-to-black, `$F5E4-$F5EF` waits for the statue-removal child, and
+`$F5F0-$F619` writes BG1SC/BG2SC `$64/$74` before starting the fade-in at
+`$F625`. `$0334=3` is not written until `$F650`, after that fade-in and an
+additional `$0349` wait, which direct testing in `runs/20260714-185817/` found
+visibly late. The render policy therefore switches when `$0347>=7` and the
+live BGSC page bases are `$64/$74` (with `$0334>=3` only as a settled-state
+fallback). It clamps BG1 and whole-scanline mirrors BG2 instead of using the
+normal `y=144-223` band. Mirroring removes the cyclic cloud-edge seam;
+resident face tiles remain irrelevant because padding copies the live
+post-window rendered BG2. Direct testing on 2026-07-14 confirmed that the clamp
+changes during the black frame: no statues leak into the margins and the
+mirrored sky is already active when the fade-in begins.
 
 Death Heim narrow-BG2 presentation evidence (2026-07-14): maps `0704-0707`
 directly show the same mountain/parallax motion; `0702` and `0703` are
@@ -130,8 +142,13 @@ Final-boss map `0708` is a separate raster seam. Captures
 camera `$22=0`, BG1/BG2 width `$0100/$0100`, and black margins. Snapshot
 reconstruction identifies stacked BG1 star-road and BG2 star-field layers;
 both are presentation effects with scanline/sine motion. The arena bypasses
-world-edge side-space reduction and cyclically repeats both isolated live
-scanlines (`repeat=$03`). Direct validation is pending.
+world-edge side-space reduction. The first isolated-repeat implementation
+(`repeat=$03`) filled both margins but caused the performance regression in
+`runs/20260714-184728/`. BG1SC/BG2SC `$60/$70` prove both tilemaps already wrap
+at 256px, so the optimized path draws both raw on the symmetric canvas
+(`repeat=$00`), removing two clears and priority merges per scanline. Direct
+testing on 2026-07-14 confirmed both the full-width raster effect and removal
+of the isolated-repeat performance regression.
 
 > **The asset-substitution seam is the loaders, not the draws.** When you find the routines that
 > copy graphics ROM→VRAM and select animation frames, capture the table index they use — that
