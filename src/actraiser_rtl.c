@@ -320,6 +320,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   int repeat_band_layer = -1;
   uint8 repeat_band_y0 = 0, repeat_band_y1 = 0;
   int bg2_gap = 0;  /* margin source gap px/side for BG2 (UI staging strip) */
+  uint8 hud_split_height = 0;
+  uint8 hud_split_left_end = 0;
+  uint8 hud_split_right_start = 0;
+  uint8 hud_left_only_y = 0;
   /* True when the current wide world has finite horizontal bounds. The PPU
    * still owns the fixed centering budget; this policy narrows the live left
    * and right margins as the camera approaches either world edge. */
@@ -515,6 +519,44 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     bg2_gap = 0; bounded_world_margins = 0;
     repeat_band_layer = -1;
   }
+
+  /* Phase-1 HUD layout prototype. BG3 rows 0-3 are the live status compose
+   * band ($7F:B000 -> VRAM $5800). Split that band into source chunks and
+   * anchor them to the physical left edge, authentic center, and physical
+   * right edge. The 2026-07-14 action dump places its three occupied groups at
+   * columns 0-10, 11-20, and 21-31. Simulation has no centered status group,
+   * so it uses the two-way form: columns 0-20 anchor left and 21-31 anchor
+   * right. This intentionally moves BG3 only: fixed HUD OAM remains authentic/
+   * centered so direct testing reveals exactly which elements require sprite
+   * promotion.
+   *
+   * RAW and 4:3 remain unsplit comparison modes. Sky Palace ($00:$07) uses
+   * the same simulation header; temple/world-map flows do not. */
+  if (!survey && wide &&
+      g_settings.display_mode != kDisplayMode_43 &&
+      g_settings.display_mode != kDisplayMode_WideRaw) {
+    if (g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
+      /* BG3's effective screen placement puts tilemap row 2 at y=20-27. That
+       * row contains PLAYER health on the left and magic-scroll tiles on the
+       * right, so it must retain the three-way split. Row 3 (ENEMY and its
+       * long health bar) begins at y=28; anchor only that lower band left. */
+      hud_split_height = 40;
+      hud_split_left_end = 88;
+      hud_split_right_start = 168;
+      hud_left_only_y = 28;
+    } else if (g_ram[0x18] == 0x00 &&
+               g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x07) {
+      hud_split_height = 32;
+      hud_split_left_end = 168;
+      hud_split_right_start = 168;
+      hud_left_only_y = 32;
+    }
+  }
+
+  /* The HUD split is persistent PPU policy state, unlike the layer-clamp
+   * arrays reset by PpuSetExtraSpace. Clear it explicitly on every mode flip
+   * path before optionally enabling this frame's prototype. */
+  PpuSetWidescreenHudSplit(g_ppu, 0, 0, 0, 0);
   if (wide) {
     PpuSetExtraSpace(g_ppu, (uint8)g_ws_extra);
     PpuSetWidescreenLayerClamp(g_ppu, clamp);
@@ -525,6 +567,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
                                       repeat_band_y0, repeat_band_y1);
     if (bg2_gap)
       PpuSetWidescreenLayerMarginGap(g_ppu, 1, (uint8)bg2_gap, (uint8)bg2_gap);
+    if (hud_split_height)
+      PpuSetWidescreenHudSplit(g_ppu, hud_split_height,
+                               hud_split_left_end, hud_split_right_start,
+                               hud_left_only_y);
     if (bounded_world_margins) {
       /* Clamp each side to real BG1 world space. Action width is section
        * state $2E; simulation towns are the fixed 512px world proven by
@@ -550,12 +596,19 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * wide?" diagnosable from any console.log (mode bytes included). */
   static int last_wide = -1, last_clamp = -1, last_mirror = -1,
              last_repeat = -1, last_repeat_band_layer = -2,
-             last_repeat_band_y0 = -1, last_repeat_band_y1 = -1;
+             last_repeat_band_y0 = -1, last_repeat_band_y1 = -1,
+             last_hud_split_height = -1, last_hud_split_left_end = -1,
+             last_hud_split_right_start = -1,
+             last_hud_left_only_y = -1;
   if (wide != last_wide || clamp != last_clamp || mirror != last_mirror ||
       repeat != last_repeat ||
       repeat_band_layer != last_repeat_band_layer ||
       repeat_band_y0 != last_repeat_band_y0 ||
-      repeat_band_y1 != last_repeat_band_y1) {
+      repeat_band_y1 != last_repeat_band_y1 ||
+      hud_split_height != last_hud_split_height ||
+      hud_split_left_end != last_hud_split_left_end ||
+      hud_split_right_start != last_hud_split_right_start ||
+      hud_left_only_y != last_hud_left_only_y) {
     last_wide = wide;
     last_clamp = clamp;
     last_mirror = mirror;
@@ -563,12 +616,19 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     last_repeat_band_layer = repeat_band_layer;
     last_repeat_band_y0 = repeat_band_y0;
     last_repeat_band_y1 = repeat_band_y1;
+    last_hud_split_height = hud_split_height;
+    last_hud_split_left_end = hud_split_left_end;
+    last_hud_split_right_start = hud_split_right_start;
+    last_hud_left_only_y = hud_left_only_y;
     fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s "
-            "clamp=%02x mirror=%02x repeat=%02x rband=%d/%u-%u\n",
+            "clamp=%02x mirror=%02x repeat=%02x rband=%d/%u-%u "
+            "hud=%u/%u/%u left-only-y=%u\n",
             (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8)),
             g_ram[0x18], g_ram[0x19], wide ? "WIDE" : "pillarbox",
             clamp, mirror, repeat, repeat_band_layer,
-            (unsigned)repeat_band_y0, (unsigned)repeat_band_y1);
+            (unsigned)repeat_band_y0, (unsigned)repeat_band_y1,
+            (unsigned)hud_split_height, (unsigned)hud_split_left_end,
+            (unsigned)hud_split_right_start, (unsigned)hud_left_only_y);
   }
   /* AR_WS_LAYERS=1: dump per-frame PPU layer/tilemap state — which BG a
    * margin artifact lives on, and whether that BG's tilemap is 32-wide (wraps
@@ -619,6 +679,60 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   }
 }
 
+/* Render-scoped action HUD OAM promotion. $00:923A emits the selected magic
+ * icon as the first four OAM entries, using tiles $D4-$D7 in a 2x2 grid at
+ * y=$0B/$13. Move that exact signature by the same full-width budget as the
+ * score's right BG3 chunk. Back up and restore the XY words and packed high
+ * bits so WRAM/OAM state, future DMA, savestates, and game logic remain
+ * authentic. */
+static uint16 s_magic_hud_xy_backup[4];
+static uint8 s_magic_hud_high_backup;
+static int s_magic_hud_shifted;
+
+static void ActRaiser_WidescreenMagicHudPrepare(void) {
+  s_magic_hud_shifted = 0;
+  if (!g_ppu || g_ppu->wsHudSplitHeight != 40 ||
+      g_ppu->wsHudLeftEnd != 88 || g_ppu->wsHudRightStart != 168 ||
+      g_ppu->wsHudLeftOnlyY != 28 ||
+      g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07 ||
+      !g_ppu->extraLeftRight)
+    return;
+
+  for (int slot = 0; slot < 4; slot++) {
+    int index = slot * 2;
+    uint8 tile = (uint8)g_ppu->oam[index + 1];
+    uint8 y = (uint8)(g_ppu->oam[index] >> 8);
+    uint8 expected_y = slot < 2 ? 0x0B : 0x13;
+    if (tile != (uint8)(0xD4 + slot) || y != expected_y)
+      return;
+  }
+
+  s_magic_hud_high_backup = g_ppu->highOam[0];
+  for (int slot = 0; slot < 4; slot++) {
+    int index = slot * 2;
+    int high_shift = slot * 2;
+    uint16 xy = g_ppu->oam[index];
+    uint16 x = (uint16)((xy & 0x00FF) |
+                         (((g_ppu->highOam[0] >> high_shift) & 1) << 8));
+    s_magic_hud_xy_backup[slot] = xy;
+    x = (uint16)((x + g_ppu->extraLeftRight) & 0x01FF);
+    g_ppu->oam[index] = (uint16)((xy & 0xFF00) | (x & 0x00FF));
+    g_ppu->highOam[0] = (uint8)(
+        (g_ppu->highOam[0] & ~(1u << high_shift)) |
+        (((x >> 8) & 1) << high_shift));
+  }
+  s_magic_hud_shifted = 1;
+}
+
+static void ActRaiser_WidescreenMagicHudRestore(void) {
+  if (!s_magic_hud_shifted)
+    return;
+  for (int slot = 0; slot < 4; slot++)
+    g_ppu->oam[slot * 2] = s_magic_hud_xy_backup[slot];
+  g_ppu->highOam[0] = s_magic_hud_high_backup;
+  s_magic_hud_shifted = 0;
+}
+
 void ActRaiserDrawPpuFrame(void) {
   ActRaiser_ApplyWidescreenPolicy();
   /* Stage D reconnaissance: read-only classification of objects that intersect
@@ -630,6 +744,7 @@ void ActRaiserDrawPpuFrame(void) {
   /* Sky Palace: synthesize only BG2's offscreen margin columns from its ROM
    * source page. The paired restore after scanout preserves UI staging. */
   ActRaiser_WidescreenSkyPalacePrepare();
+  ActRaiser_WidescreenMagicHudPrepare();
   /* Process ALL 8 HDMA channels, not a fixed subset. ActRaiser drives its
    * per-scanline effects (e.g. the Mode-7 title matrix animation) on channels
    * 2/3 — the old code only ran 5/6/7 (a stale assumption carried over from
@@ -663,6 +778,7 @@ void ActRaiserDrawPpuFrame(void) {
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
   }
+  ActRaiser_WidescreenMagicHudRestore();
   ActRaiser_WidescreenSkyPalaceRestore();
 }
 
