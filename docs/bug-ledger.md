@@ -383,6 +383,50 @@ the current debugging process; this file is the case law.
     makes a wrong `func` registration self-healing, which is what allows the §5 static closure
     loop (`find_rts_webs --suggest`) to run without the manual shape check being fatal-if-wrong.
 
+20. **Death Heim boss rush (one crash + one SILENT soft-lock) — FIXED 2026-07-14,
+    user-verified end-to-end (every boss + final boss).** (Entries 17–19 remain open in
+    DEBUG.md §7.) Three symptoms, two root causes — both **yield helpers missing from the
+    hand-maintained helper list** ($8623/$8657/$8669/$A673/$F8A6/$F8D2/$F977):
+    - **`$86FA`** (wait-N-frames: `STZ $6,X; STZ $8,X; STA $24,X; PLA; INC A; STA $12,X`)
+      was unknown → the three continuations inside `$FE89`, the DH teleport-out sequencer
+      (`$FE9D/$FEE6/$FEEC`), were unregistered. The object loop missed the `$FE9D` dispatch
+      EVERY frame and the graceful fallback skipped the object forever — completely
+      silently, because the dispatch-miss stderr tripwire gates `S>=$0200` and the loop
+      dispatches at S≈$01F5 (the SECOND bug this gate has hidden — see #14). `$FEEC` is the
+      instruction that stages the hub warp (`LDA #$0701; STA $1A`, 16-bit) and writes rush
+      progress `$0347 = $19-1`, so the rush could never advance past its first victory.
+      *Find:* `AR_WRAM_TRACE` on the object table — slot-50 `$12` went A593→FE89→FE9D at
+      f=2513, wait timer 64→0 at f=2578, then ZERO writes to the slot ever again.
+    - **`$F778`** (spawn-stub helper: `PLA; STA $3E,X` — a THIRD capture field besides
+      `$12`/`$1E`) was never recognized as a helper. `$F7C9` later re-pushes the stashed
+      frame (`LDA $3E,X; PHA`) and `$F807`'s RTS consumes it → every `JSR $F778` site+3
+      (`$F6DF/$F6F7/$F70F/$F727/$F73F/$F775/$F82D`, one per DH boss/summon stub) is an
+      RTS-dispatch entry. Only `$F6DF` had been hand-registered → boss 1 worked, boss 2
+      crashed one record over ($F807→$F6F7 miss → host-unwind → m=0 leak → B127-misdecode
+      cascade, the classic #1 signature).
+    *Why every scan missed them:* the helper LIST was the single point of failure, and
+    `$FE89` enters `$12` only via spawn-record DATA words ($F6D4/F6EC/F704/F71C/F734/F76A +
+    `LDA #$FE89` at $F903) — seed-walking (`find_handler_chain --all-yields`) can never
+    reach a handler referenced only by data.
+    *Fix:* cfg regs for the twelve continuations (+`$D8A1/$D8A7` same-class stragglers) —
+    and **`tools/find_yield_helpers.py`** (§5), which derives the helper census from ROM
+    byte shape (PULL: `PLA/PLX/PLY` at push-balance 0 → object-field store; PEEK:
+    `LDA $01,S` at balance 0 → same store) and verifies every JSR site's continuation is
+    registered. Exits nonzero + `--lines` emits paste-ready cfg lines. **Run it after any
+    bank00.cfg handler work.**
+    *Reusable lessons:* (1) `trace_slice --diagnose`'s paired-resume DO-NOT-REGISTER
+    verdict is **wrong for frame-hijacking helpers**: `$F778` never returns normally (it
+    exits via the yield system's NLR path), so the paired C fall-through never runs and
+    registration is safe AND required — the ret-guard can't see frame hijacking. (2) Don't
+    "fix" a miss by unregistering the handler that RTSes into it (`$F7C9`): that converts
+    the crash into a soft-lock (the object is real gameplay logic and simply never
+    advances). (3) A "sequence completes, then nothing, zero logs" symptom = check the
+    census FIRST (DEBUG.md §1 row); if clean, find who writes the stuck object's
+    `$12/$1E/$3E` and teach the tool the new capture idiom. (4) DH internals mapped along
+    the way: `$19`=1 hub / 2–7 arenas / 8 final boss; hub record `$F3C8`→handler `$F3D4`
+    stages `$1A=$0347+2`; `$0334`=final-boss flag; all-regions exit = `$00:A343` over
+    `$7F:6B18`; object table = **80 slots** (`$06A0-$1AA0`, allocator bound `CPY #$1AA0`).
+
 ---
 
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)

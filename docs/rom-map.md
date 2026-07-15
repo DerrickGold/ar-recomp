@@ -61,9 +61,17 @@ treat zero words as unused type slots rather than termination. `$00:B449` is the
 important proof: types `$19-$1D` are zero, while `$1E-$27` resume with ten valid
 records; type `$21` points to record `$BB19` and exact handler `$BB25`.
 Tables `$A8F6-$E722` correspond to the six ordinary two-act kingdom regions.
-`$F39A` is Death Heim's distinct no-act boss-rush/final-boss table. Warp target
-`0701` reaches the first boss arena and currently crashes; repair and an
-instrumented run are required before its later `$19` maps can be named.
+`$F39A` is Death Heim's distinct no-act boss-rush/final-boss table. Its `$19`
+layout (repaired + user-verified end-to-end 2026-07-14, bug-ledger #20): `$19=1` =
+teleport hub, whose spawn record `$F3C8` (handler `$F3D4`) stages the next boss
+via `$1A = $0347 + 2`; `$19=2..7` = the six boss arenas; `$19=8` = final boss.
+Key code: `$00:FEEC` (end of the `$FE89` teleport-out sequencer) writes
+`$0347 = $19 - 1` (rush progress) and `LDA #$0701; STA $1A` (16-bit = stage
+`$1A=$01/$1B=$07`, the hub warp), and sets `$0334=1` when `$19==8`. The
+boss/summon spawn stubs `$F6D6/F6EE/F6FA/F706/F712/F71E` (+`$F81B`) each
+`JSR $F778`, which stashes the stub continuation in object field `$3E,X`
+(re-pushed by `$F7C9`, consumed by `$F807`'s RTS). The all-six-regions
+completion check is `$00:A343` over `$7F:6B18`.
 
 These are different identity layers. The action object handler and composition
 pointer select behavior/layout within a common resident atlas; the small bank-6

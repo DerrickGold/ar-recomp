@@ -304,6 +304,7 @@ those cases.
 | **Garbage / character disappears / stuck-but-animating / hard crash on an object** | On exit/F9 inspect `dump_dispatch_log.json` for non-benign `found:0` first (the ring is complete even when default stderr is silent); then `AR_MXHIST=1` if a misdecode/leak remains possible | feed live missing roots to `find_handler_chain.py` (§5); if the ring did not cover the onset, use `AR_DISPMISSALL=1 \| grep -v 'from 00896f'` or take an **F2 full-snapshot** (§9) and scan ≥64 object slots for an active `$12` with no converted `bank_00_*` fn |
 | **"Who corrupted this byte/value?"** | `AR_WATCHOBJ=<hexaddr>` (writes to an object slot) or `AR_WATCH16=<hexval>` (a specific 16-bit write) — both log the **writing function + stack + frame** | — |
 | **Missing object / event / spawn (logic)** | First check it's not an **unconverted spawn-data handler** (§11): F2 snapshot → object-table scan (**scan ≥64 slots, not 24**) for an active slot with an un-converted `$12`. Else differential oracle: `diff_seq.py` + oracle-only analysis (**must load SRAM** — see §6) | trace the spawn trigger / gate condition |
+| **Silent soft-lock: a sequence/cutscene finishes, then NOTHING — no logs, no anomaly, game alive** (§7.20 Death Heim) | `tools/find_yield_helpers.py` (§5) — an unregistered yield continuation misses dispatch EVERY frame *invisibly* (stderr tripwire gates `S>=$0200`; loop runs at S≈$01F5; graceful fallback skips forever) | If census clean: `AR_WRAM_TRACE=wram.jsonl` + decode the object table (80 slots, `$06A0` stride `$40`) — find the slot whose `$12` stops changing / whose `$24` wait expires with no effects; who wrote its `$12/$1E/$3E` names the (new) helper |
 | **Rendering wrong (no text, no HBlank, missing BG, black screen)** | `AR_PPULOG=1` (bgmode, brightness, forced-blank, layer enables, HDMAEN) + **oracle screenshots** (`AR_SHOT_AT_GF` vs `SNESREF_SHOT_AT_GF`) | audit the PPU/DMA runtime (`ActRaiserDrawPpuFrame`); WRAM oracle is **blind** to VRAM |
 | **Missing/extra sound or music** | check **BRK/COP syscall hooks** (§7) — `$035B`=SFX (BRK), `$035A`=music/event (COP) | `AR_WATCH16` on the request port |
 | **Game runs at exactly 1/2 or 1/3 speed in ONE mode/screen (smooth elsewhere, audio fine)** | This is usually the **pacing/yield-multiplication class**, not host performance. Confirm + count in one shot: quit (or F9) **while the mode is slow**, then in the dump's block ring **count `02ABF0` (NMI-handler) entries per game-loop iteration** — each entry = one host-frame yield; N entries per iteration = 1/N speed, and the ring block *preceding* each entry names the yield site. Cross-check with any per-frame `[wobj]`/`[frame]` log: updates at delta=N host frames. Known causes so far: a non-HLE'd `$4210` wait yielding per read (§7 the `$9284` fix), and spin-detector false pairing on a twice-per-frame ack helper (§7.12 `$93CB`) | `AR_PERF=1` separates the two classes numerically (fps<60 = host-bound; fps=60 + crawling = pacing). Its `run-ms` covers game execution; `[draw-perf]` covers `RtlDrawPpuFrame`, including host widescreen refresh. A low `run-ms` therefore does not by itself rule out draw-side load. `env AR_FRAMELOG=1 AR_VBLOG=1` names every yield's callsite/block live. NOTE: static `$4210` scans must include the long form `AF 10 42 00`, not just `AD 10 42` |
@@ -870,6 +871,24 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   `--bank NN` narrows to one bank (and then also lists the `[ok]` hits, useful as a coverage
   audit of a single subsystem).
 
+- **`tools/find_yield_helpers.py`** — **yield-helper census by SHAPE, not by list** *(2026-07-14,
+  built after §7.20's Death Heim pair: the hand-maintained helper list missed `$86FA` and
+  `$F778`, costing a soft-lock and a crash in one day)*. A yield helper is any JSR target that
+  captures its caller's return address into an object field; every `JSR helper` site makes
+  site+3 a computed dispatch entry that MUST be a cfg `func`. Two byte-stereotyped idioms are
+  auto-detected (linear decode at m=0,x=0 with push-balance tracking): **PULL** — `PLA/PLX/PLY`
+  at balance 0 then a store (± one register transfer / `INC A`) into an object field
+  (`$8657→$1E,X`, `$8669` PLY-form, `$86FA→$12,X` wait-N, `$F778→$3E,X` deferred re-push);
+  **PEEK** — `LDA $01,S` at balance 0 then the same store (`$8623`/`$A673→$12,X`; non-`$01`
+  offsets and nonzero balance are the routine reading its OWN temps — `$C09C`'s spawn-coords
+  arg is the guarded false positive, whose continuations are ordinary paired returns =
+  DO-NOT-REGISTER §7.17). Exits nonzero listing unregistered continuations; `--lines` emits
+  paste-ready cfg lines. **Run after any bank00.cfg handler work.** If a symptom smells like
+  "handler never resumes" and the census is clean, suspect a NEW capture idiom: find who
+  writes the stuck object's `$12/$1E/$3E` (`AR_WRAM_TRACE` + `wram.py`), then teach the tool
+  the shape. Deep-offset ancestor peeks (`$F8A6`-family `LDA $FD,S`) currently have no JSR
+  callers; if one grows a site, review by hand.
+
 - **THE CORE TOOLKIT (2026-07-07, built after §7.17's paired-resume arc — use these INSTEAD
   of ad-hoc python heredocs):** all share `tools/ar_lib.py` (LoROM mapping, gen_meta loader,
   ram-map.md symbol table, full 65816 disassembler with m/x tracking, and the canonical
@@ -1107,7 +1126,7 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
 
 ## 7. Known bug classes & how they were fixed
 
-**Resolved entries (1–16) moved to [docs/bug-ledger.md](docs/bug-ledger.md) — numbering
+**Resolved entries (1–16, 20) moved to [docs/bug-ledger.md](docs/bug-ledger.md) — numbering
 preserved, so `§7.N` references anywhere (cfg comments, memory, SEAMS) resolve to entry N
 there.** New entries: OPEN bugs are tracked below; when resolved, write the ledger entry
 (root cause + fix + reusable lesson) and move it to the ledger doc.
@@ -1231,6 +1250,12 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
     (paired-returns of `JSR $8915`); their residual m/x-leak-on-unwind is the suspected
     feeder of the B8AB wrong-width dispatch — if #19 needs an engine fix, that's the
     thread to pull (ancestor-skip carrying restored m/x).
+
+20. **RESOLVED + moved to [docs/bug-ledger.md](docs/bug-ledger.md) #20** — Death Heim boss
+    rush (one crash + one silent soft-lock, both unknown yield helpers; user-verified
+    end-to-end 2026-07-14). The reusable rule: **after any bank00.cfg handler work, run
+    `python3 tools/find_yield_helpers.py`** (§5) — it derives the yield-helper census from
+    ROM byte shape and exits nonzero on any unregistered continuation.
 ---
 
 ## 8. Build & regen workflow
@@ -1370,6 +1395,7 @@ AR_PERF=1              once-per-second game + draw budgets: [perf] fps/run-ms/gf
 F9 mid-bug + ring      exact-1/N-speed in one mode? quit/F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
 find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
 find_rts_webs.py       static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
+find_yield_helpers.py  yield-helper census BY SHAPE (pull/peek of caller frame -> object-field store) + every JSR site's continuation vs cfg; exit!=0 = unregistered = future silent soft-lock (§7.20). Run after ANY bank00.cfg handler work; --lines = paste-ready fixes
 AR_RTSDISP_MISS=1      names any continuation a `rts_dispatch` list doesn't cover (site + popped target); benign JSR-return fall-throughs also print — check the popped value before adding a mapping
 AR_GARBAGE_HIST=<n>    garbage-trap block-ring depth (default 24, max 1000) incl. per-block S — 1000 spans a whole sim frame; how the dev-cycle m-leak origin was found (§7.13)
 AR_SIMDEV=1 / AR_SIMDEV2=1   dev-cycle gate-branch probes (cpu_trace.h; retarget the PC list per hunt — the reusable "which branch fired" pattern)

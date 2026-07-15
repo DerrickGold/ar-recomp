@@ -166,8 +166,9 @@ Two-byte entries per town.
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:033E | 1 | Temple action (0x00=Give Oracle, 0x01=Listen, 0x02=Take Offering) |
-| $7E:0341 | 1 | Current town ID |
-| $7E:0347 | 1 | Completion flag (0x07 after defeating Death Heim) |
+| $7E:0334 | 1 | Death Heim final-boss-defeated flag: `$00:FEFC` sets 1 when the teleport-out runs with `$19==8` |
+| $7E:0341 | 1 | Current town ID (also read by the `$00:A375` post-Death-Heim return stager as the pending destination) |
+| $7E:0347 | 1 | Death Heim boss-rush progress: `$00:FEEC` writes `$19 - 1` after each boss (hub stager `$F3D4` warps to `$0347+2` next); 0x07 = final boss beaten |
 
 ## Debug / System
 
@@ -189,7 +190,8 @@ Two-byte entries per town.
 | $7F:B000-$7F:B7FF | 2KB | BG3 tilemap |
 
 ### Act Completion ($7F:6B18-$7F:6B23)
-Two bytes per town tracking act completion counts.
+Two bytes per town tracking act completion counts. `$00:A343` (Death Heim exit
+stager) requires all six words == 2 for the all-bosses-done path.
 
 ### Building Direction UI
 | Address | Description |

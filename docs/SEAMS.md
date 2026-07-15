@@ -111,12 +111,27 @@ and gameplay state remain authoritative. Direct testing on 2026-07-14
 confirmed centered complete faces/causeway and clean animated fog across both
 margins.
 
+The post-final-boss `0701` state is distinguished by boss-rush progress
+`$0347=$07` (`runs/20260714-183142/snapshots/snap_02_gf17900`; `$0334=$03`).
+BG2 has transitioned to sky/cloud/water while BG1 retains the causeway, so this
+state clamps BG1 and whole-scanline repeats BG2 instead of using the normal
+`y=144-223` band. The resident face tiles are irrelevant because padding copies
+the live post-window rendered BG2. Direct validation is pending.
+
 Death Heim narrow-BG2 presentation evidence (2026-07-14): maps `0704-0707`
-directly show the same mountain/parallax motion; `0702`, `0703`, and `0708` are
+directly show the same mountain/parallax motion; `0702` and `0703` are
 provisionally classified with that family. With `$32=$0100`, reflection makes
-the margins move opposite the authentic center; `$19=$02-$08` therefore uses
+the margins move opposite the authentic center; `$19=$02-$07` therefore uses
 isolated scanline cyclic repeat. See `docs/rendering-engine.md` §13 and
 `runs/20260714-173750/snapshots/snap_00_gf4875`.
+
+Final-boss map `0708` is a separate raster seam. Captures
+`runs/20260714-183142/snapshots/snap_00_gf12574` and `snap_01_gf12654` show
+camera `$22=0`, BG1/BG2 width `$0100/$0100`, and black margins. Snapshot
+reconstruction identifies stacked BG1 star-road and BG2 star-field layers;
+both are presentation effects with scanline/sine motion. The arena bypasses
+world-edge side-space reduction and cyclically repeats both isolated live
+scanlines (`repeat=$03`). Direct validation is pending.
 
 > **The asset-substitution seam is the loaders, not the draws.** When you find the routines that
 > copy graphics ROM→VRAM and select animation frames, capture the table index they use — that
@@ -812,14 +827,19 @@ broken until that transition/handler path is diagnosed.
 The most common in-level crash/freeze class (§7.6) comes from this system, so it's worth knowing.
 
 ### Object table
-- Base **`$06A0`**, stride **`$40`**, and it has **more than 24 slots** — active objects appear at
-  least through slot ~49 (`$12E0`); the Fillmore bridge segments live in slots 36–49. `AR_OBJLOG`
-  only scans 24 — **scan ≥64 slots** when hunting a missing/late object.
+- Base **`$06A0`**, stride **`$40`**, **80 slots exactly** (`$06A0-$1AA0`): the `$853D` allocator's
+  bound is `CPY #$1AA0`. The Fillmore bridge segments live in slots 36–49; the Death Heim victory
+  driver runs in slot 50 (`$1320`). `AR_OBJLOG` only scans 24 — **scan all 80 slots** when hunting
+  a missing/late object.
 - Per-slot fields (offset from slot base): `+$00` **status word** (high bits `0x4000`/`0x8000` set
   ⇒ inactive/free), `+$02` X (16-bit world), `+$04` Y, `+$12` **handler pointer** (`$12` — the main
   per-frame dispatch target), `+$14` **secondary handler** (field `$14`), `+$16/$18/$28/$30` spawn
-  params, `+$30` flags (e.g. bit `0x0400`), `+$34/$36` spawn-X/Y source, `+$1E` nested-dispatch
-  resume handler. Player = slot 8 (`$08A0`). Game-frame = `$0088/$0089` (16-bit).
+  params, `+$24` **wait timer** (the loop `DEC`s it at `$8954` and only dispatches `$12` once it
+  goes negative — the `$86FA` wait-N-frames mechanism), `+$30` flags (e.g. bit `0x0400`),
+  `+$34/$36` spawn-X/Y source, `+$1E` nested-dispatch resume handler, `+$3A` spawner-slot
+  backlink, `+$3E` **stashed continuation** (`$F778` pops its caller's return frame into it;
+  `$F7C9` re-pushes it for `$F807`'s RTS — a third capture field besides `$12`/`$1E`).
+  Player = slot 8 (`$08A0`). Game-frame = `$0088/$0089` (16-bit).
 
 ### Dispatch
 - The **`$8915` object loop** iterates slots, dispatching each active object's `$12` via push-RTS
@@ -837,9 +857,19 @@ The most common in-level crash/freeze class (§7.6) comes from this system, so i
 - **Primary-field `$12` yields** use the same idea with a different destination. Helpers `$8623`,
   `$86FA`, and `$A66A` read their caller's pushed return address and store the next instruction in
   object field `$12`; that post-JSR instruction is therefore a next-frame MAIN-handler entry.
-  `$A66A` was found from Bloodpool act 2's moving-platform handlers (`$B990/$B9BC`). The handler
-  finder detects this instruction shape across all bank-0 ROM JSR targets rather than relying on
-  a hard-coded helper-address list.
+  `$A66A` was found from Bloodpool act 2's moving-platform handlers (`$B990/$B9BC`).
+- **Field-`$3E` deferred continuations**: `$F778` (the boss/summon spawn helper) pops its caller's
+  return frame into `+$3E`; the shared `$F7C9` handler later re-pushes it and its `$F807` RTS
+  dispatches there — so every `JSR $F778` site+3 is an RTS-dispatch entry too (the Death Heim
+  boss-stub family `$F6DF/$F6F7/$F70F/$F727/$F73F/$F775/$F82D`).
+- **Coverage guard (2026-07-14, DEBUG.md §7.20):** chain-walking from known handler seeds
+  (`find_handler_chain.py --all-yields`) CANNOT reach a handler whose address only enters `$12`
+  via spawn-record **data words** (`$FE89` was stored by `$F6D4/F6EC/…` records and hid two
+  soft-lock continuations that way). `tools/find_yield_helpers.py` closes the class from the
+  other end — it finds every helper-shaped JSR **target** by byte shape (pull/peek of the caller
+  frame → object-field store) and verifies every call site's continuation is a registered cfg
+  func, with no seed walk and no hand-maintained helper list. Run it after any bank00.cfg
+  handler work; a MISSING hit is a future silent soft-lock.
 
 ### Per-level handler tables + spawn dispatcher
 - Spawn dispatcher **`$9557`** reads game-mode `$18` (region index) → indexes the 8-pointer list at
@@ -852,8 +882,10 @@ The most common in-level crash/freeze class (§7.6) comes from this system, so i
   `$01-$06` are the six kingdom action regions, each with acts 1 and 2. `$07` is
   **Death Heim**, a distinct no-act final action flow: it teleports through the six
   kingdoms' act-2 boss encounters as a boss rush, then transitions to the final boss.
-  This game structure was user-confirmed on 2026-07-12; an instrumented `$18=$07`
-  capture is still wanted to map its changing `$19` sub-flow values. `$00` is a
+  Its `$19` sub-flow is now mapped (full rush user-verified end-to-end 2026-07-14): `$19=1` =
+  hub (spawn record `$F3C8`/handler `$F3D4` stages the next boss from progress
+  counter `$0347`), `$19=2..7` = boss arenas, `$19=8` = final boss — see
+  docs/rom-map.md and DEBUG.md §7.20. `$00` is a
   separate dispatcher case, not Fillmore.
 
   `$19` chooses the act/map/sub-flow but does **not** participate in the `$95DD`

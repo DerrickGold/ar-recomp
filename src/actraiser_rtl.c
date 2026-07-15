@@ -69,6 +69,17 @@ volatile int g_ar_in_interrupt = 0;
  * via g_cpu_brk_hook, then falls through to the next instruction. */
 static void ActRaiser_BrkHook(CpuState *cpu) {
   cpu_write8(cpu, 0x00, 0x035B, (uint8)(cpu->A & 0xFF));
+  /* AR_COPLOG=1: also log BRK (sound-request) posts, for contrast against COP
+   * event posts below -- lets a stuck-state capture show whether the game is
+   * still alive and posting routine SFX while a specific event id never posts. */
+  if (getenv("AR_COPLOG")) {
+    extern uint8 g_ram[0x20000];
+    extern const char *g_last_recomp_func;
+    unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+    fprintf(stderr, "[brk] gf=%u fn=%s id=%02x $18=%02x $19=%02x\n",
+            gf, g_last_recomp_func ? g_last_recomp_func : "?",
+            (uint8)(cpu->A & 0xFF), g_ram[0x18], g_ram[0x19]);
+  }
 }
 
 /* ActRaiser COP syscall — the SECOND software interrupt, structurally identical
@@ -82,6 +93,19 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
  * BRK hook; found via the oracle writing $035A 90x while the recomp wrote it 0x. */
 static void ActRaiser_CopHook(CpuState *cpu) {
   cpu_write8(cpu, 0x00, 0x035A, (uint8)(cpu->A & 0xFF));
+  /* AR_COPLOG=1: log every COP-posted event id + game-frame + calling recomp
+   * function, so a Death-Heim stuck-state capture shows whether the
+   * boss-defeat/next-encounter event ever posts at all, vs posting an id whose
+   * consumer is unreached (see [[cop-syscall-hook-fix]] -- $C3DA consumer was
+   * previously suspected still-unreached for a different event id). */
+  if (getenv("AR_COPLOG")) {
+    extern uint8 g_ram[0x20000];
+    extern const char *g_last_recomp_func;
+    unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+    fprintf(stderr, "[cop] gf=%u fn=%s id=%02x $18=%02x $19=%02x\n",
+            gf, g_last_recomp_func ? g_last_recomp_func : "?",
+            (uint8)(cpu->A & 0xFF), g_ram[0x18], g_ram[0x19]);
+  }
 }
 
 /* Dump the full internal state (everything but the framebuffer, which the
@@ -393,15 +417,36 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     /* Death Heim's boss-warp room ($07:$01) is already composed as a bounded
      * SNES-width scene: BG1 is the central causeway, while BG2 contains both
      * the face statues and the animated fog/water. Open the full symmetric
-     * canvas despite camera X=0, clamp both scenery layers, then cyclically
-     * continue only BG2's border/fog rows. The split begins at tile row 18
-     * (screen Y=144), below every face and above the water field. */
+     * canvas despite camera X=0. During the boss rush, clamp both scenery
+     * layers and cyclically continue only BG2's border/fog rows; the split at
+     * tile row 18 (screen Y=144) is below every face and above the water.
+     *
+     * After the final boss, $0347=$07 and the same raw map transitions BG2 to
+     * sky/cloud/water art. Keep the causeway BG1 bounded, but repeat the whole
+     * live BG2 scanline so that transitioned background fills both margins. */
     if (wide && g_ram[0x18] == 0x07 && g_ram[0x19] == 0x01) {
       action_margins = 0;
-      clamp |= 0x03;
-      repeat_band_layer = 1;  /* BG2 */
-      repeat_band_y0 = 144;
-      repeat_band_y1 = 224;
+      if (g_ram[0x0347] >= 0x07) {
+        clamp |= 0x01;
+        repeat |= 0x02;
+      } else {
+        clamp |= 0x03;
+        repeat_band_layer = 1;  /* BG2 */
+        repeat_band_y0 = 144;
+        repeat_band_y1 = 224;
+      }
+    }
+
+    /* Death Heim's final arena ($07:$08) stacks two 256px star-road layers
+     * and applies independent scanline/sine motion. The generic world-edge
+     * budget would suppress both margins at camera X=0. Give the arena the
+     * full symmetric canvas and cyclically continue both isolated, already-
+     * scrolled scanlines; this preserves each layer's raster phase. */
+    if (wide && g_ram[0x18] == 0x07 && g_ram[0x19] == 0x08) {
+      action_margins = 0;
+      clamp &= (uint8)~0x03;
+      mirror &= (uint8)~0x03;
+      repeat |= 0x03;
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the

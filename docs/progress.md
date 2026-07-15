@@ -33,10 +33,10 @@ confirmed fully playable with widescreen enabled. Across those passes:
   playthroughs. Those were pre-existing recompilation gaps, not widescreen
   regressions.
 
-Two action-mode items remain outside this milestone. Death Heim (`$07`/`70X`)
-is a distinct, currently broken boss-rush/final-boss flow: `0701` reaches the
-first boss arena and then crashes.
-Regions `$01-$06` also need a final presentation-aware camera/world-edge clamp
+One action-mode item remains outside this milestone. Death Heim (`$07`/`70X`),
+the distinct boss-rush/final-boss flow, is done: user-verified end-to-end on
+2026-07-14, playing through every boss to the end (see the region table).
+Regions `$01-$06` still need a final presentation-aware camera/world-edge clamp
 so the ends of finite background maps cannot scroll into the wider viewport.
 That edge exposure is the only known gap between their current fully playable
 state and complete widescreen presentation.
@@ -60,13 +60,18 @@ follows the game's internal order (`$18`/`$19` in WRAM — see `docs/SEAMS.md`
 | 4 — Aitos | ✅ Full widescreen playthrough; cyclic BG2 cloud padding removes the parallax seam (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
 | 5 — Marahna | ✅ Full widescreen playthrough (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
 | 6 — Northwall | ✅ Full widescreen playthrough; cyclic BG2 cloud/snow padding confirmed across the affected maps (2026-07-12) | ✅ Full widescreen playthrough and boss completion (2026-07-12) |
-| 7 — Death Heim | 🔴 `0701` reaches the first boss arena, then crashes; boss rush/final boss not playable (2026-07-12) | — No Act 2 |
+| 7 — Death Heim | ✅ Full boss-rush playthrough to the end — entry, every boss fight, victory teleport-outs, hub warps, and the final boss all user-verified (2026-07-14) | — No Act 2 |
 
 Static code confirms `$18=$07` selects its own handler table at `$00:F39A`.
 The game structure was confirmed on 2026-07-12: Death Heim has no ordinary acts;
 it teleports through all six act-2 bosses, then transitions to the final boss.
-The crash needs a focused capture before the `$19` teleport sequence can be
-recorded and the flow repaired.
+The 2026-07-14 repair (DEBUG.md §7.20 / docs/bug-ledger.md) fixed one crash and
+one silent soft-lock, both unregistered yield-helper continuations; the `$19`
+flow, derived from code and confirmed through the boss warps, is: `$19=1` hub →
+bosses at `$19 = $0347+2` (progress counter `$0347 = beaten map - 1`, written by
+`$00:FEEC`, which also stages the hub warp via `LDA #$0701; STA $1A`) → `$19=8`
+final boss (sets `$0334=1`). The all-six-regions-complete path
+(`$00:A343` checking `$7F:6B18`) is the separate post-rush exit.
 
 ### Remaining action-mode completion gate
 
@@ -75,9 +80,12 @@ The broad region `$01-$06` matrix is complete. Remaining action work is:
 1. Map the native camera clamps and add widescreen-aware left/right limits so
    finite background edges never enter the visible margins. Exercise at least
    one wide streamed BG, one 256px padded BG2, and one vertical stage.
-2. Diagnose the `0701` crash after its first boss teleport, then run the repaired
-   Death Heim boss rush/final boss and record its `$19` sequence. There is no
-   ordinary `0702`.
+2. ~~Diagnose the `0701` crash after its first boss teleport~~ — done 2026-07-14
+   (yield-helper continuations; docs/bug-ledger.md #20), and the full rush
+   through the final boss (`$19=8`) is user-verified. There is no ordinary
+   `0702`. Optional residue: the all-six-regions exit variant (`$00:A343` over
+   `$7F:6B18`) fires only on a save with every kingdom's act 2 complete —
+   exercise it during a full-game playthrough.
 3. Re-run representative `$01-$06` boundaries with the feature-disable gates
    after the camera change. Add a lifted-limit A/B only after `NoSpriteLimits`
    is actually forwarded to the PPU render flags.
