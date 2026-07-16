@@ -113,7 +113,7 @@ Authoring gotchas to document with the pack format:
   2. Palette-group swap (OAM attr flips to a flash palette): census shows a
      burst variant (1-3 consecutive frames, recurring).
   3. CGRAM rewrite in place (fades/flash/cycling): palette-content churn.
-  Detection plan: extend the census with per-variant temporal signatures
+  Detection (census, landed 2026-07-15): per-variant temporal signatures
   (run length, periodicity) + a CGRAM-write classifier (changed group ~=
   reference * k -> fade; ~= uniform color -> flash; permutation -> cycle),
   plus event-correlated probes for the known cases (player i-frames via the

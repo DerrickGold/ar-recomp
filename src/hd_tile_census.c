@@ -43,18 +43,49 @@ static const char *const kClassNames[kCensusClass_Count] = {
   "bg-2bpp", "bg-4bpp", "obj-4bpp", "mode7",
 };
 
+/* Per-(tile, palette-content) temporal signature. Palette-swap animations
+ * are identified by shape: a hit-flash variant recurs in 1-3 consecutive
+ * frame runs (small max_run, many bursts); a fade is a long chain of
+ * one-frame variants; a stable recolor accumulates one long run. */
+typedef struct PaletteVariant {
+  uint64 hash;             /* FNV-1a of the sighting's CGRAM range */
+  uint32 sightings;        /* distinct frames seen with this palette */
+  uint32 bursts;           /* separate consecutive-frame runs */
+  uint16 first_gf, last_gf;
+  uint16 run_length, max_run;
+} PaletteVariant;
+
 typedef struct TileRecord {
   uint64 hash;             /* FNV-1a over raw tile data, seeded by class */
   uint8 class_;
   uint8 layer_mask;        /* bit0-3 BG1-4, bit4 OBJ, bit5 Mode-7 canvas */
   uint8 palette_group_mask;
-  uint8 palette_variant_count; /* saturates at kCensusMaxPaletteVariants */
+  uint8 palette_variant_count;
+  uint8 palette_overflow;  /* variants seen beyond the stored maximum */
   uint32 sightings;        /* frames this tile was visible */
   uint16 first_gf, last_gf;
-  uint64 palette_variants[kCensusMaxPaletteVariants];
+  PaletteVariant palette_variants[kCensusMaxPaletteVariants];
   uint8 pixels[64];        /* decoded 8x8 palette indices */
   uint8 first_palette_rgb[16][3];
 } TileRecord;
+
+/* Global CGRAM dynamics: classify every per-frame change of each 16-color
+ * group by shape — the game-agnostic detector for how this game implements
+ * fades, hit-flashes, and color cycling (docs/nx-pipeline.md). */
+typedef struct GroupDynamics {
+  uint32 change_frames;
+  uint32 fade_like;   /* new ~= prev * k across all colors */
+  uint32 flash_like;  /* non-black colors ~= one uniform color */
+  uint32 cycle_like;  /* same color multiset, reordered */
+  uint32 other;
+  uint32 bursts;      /* separate consecutive-change runs */
+  uint16 last_change_gf, run_length, max_run;
+} GroupDynamics;
+
+static GroupDynamics g_group_dynamics[16];
+static uint16 g_prev_cgram[256];
+static uint16 g_prev_cgram_gf;
+static int g_prev_cgram_valid;
 
 static TileRecord *g_records;
 static int g_record_count;
@@ -110,20 +141,43 @@ static void RecordSighting(TileRecord *record, uint8 layer_bit,
   uint64 palette_hash =
       Fnv1a(0xcbf29ce484222325ull, &g_ppu->cgram[palette_base & 0xff],
             (size_t)colors * 2);
+  PaletteVariant *variant = NULL;
   for (int i = 0; i < record->palette_variant_count; i++)
-    if (record->palette_variants[i] == palette_hash) return;
-  if (record->palette_variant_count < kCensusMaxPaletteVariants)
-    record->palette_variants[record->palette_variant_count] = palette_hash;
-  if (record->palette_variant_count == 0) {
-    for (int c = 0; c < 16; c++) {
-      uint16 xbgr = c < colors ? g_ppu->cgram[(palette_base + c) & 0xff] : 0;
-      record->first_palette_rgb[c][0] = (uint8)(((xbgr >> 0) & 0x1f) << 3);
-      record->first_palette_rgb[c][1] = (uint8)(((xbgr >> 5) & 0x1f) << 3);
-      record->first_palette_rgb[c][2] = (uint8)(((xbgr >> 10) & 0x1f) << 3);
+    if (record->palette_variants[i].hash == palette_hash) {
+      variant = &record->palette_variants[i];
+      break;
     }
+  if (!variant) {
+    if (record->palette_variant_count == 0) {
+      for (int c = 0; c < 16; c++) {
+        uint16 xbgr = c < colors ? g_ppu->cgram[(palette_base + c) & 0xff]
+                                 : 0;
+        record->first_palette_rgb[c][0] = (uint8)(((xbgr >> 0) & 0x1f) << 3);
+        record->first_palette_rgb[c][1] = (uint8)(((xbgr >> 5) & 0x1f) << 3);
+        record->first_palette_rgb[c][2] = (uint8)(((xbgr >> 10) & 0x1f) << 3);
+      }
+    }
+    if (record->palette_variant_count >= kCensusMaxPaletteVariants) {
+      if (record->palette_overflow < 255) record->palette_overflow++;
+      return;
+    }
+    variant = &record->palette_variants[record->palette_variant_count++];
+    memset(variant, 0, sizeof(*variant));
+    variant->hash = palette_hash;
+    variant->first_gf = gf;
+    variant->last_gf = (uint16)(gf - 2); /* force new-burst accounting */
   }
-  if (record->palette_variant_count <= kCensusMaxPaletteVariants)
-    record->palette_variant_count++;
+  if (variant->last_gf == gf && variant->sightings) return;
+  if ((uint16)(gf - variant->last_gf) == 1) {
+    variant->run_length++;
+  } else {
+    variant->bursts++;
+    variant->run_length = 1;
+  }
+  if (variant->run_length > variant->max_run)
+    variant->max_run = variant->run_length;
+  variant->last_gf = gf;
+  variant->sightings++;
 }
 
 /* ---- tile decoding ------------------------------------------------------ */
@@ -154,6 +208,98 @@ static TileRecord *RecordPlanarTile(int tile_word_adr, int bpp,
   if (record && !record->sightings)
     DecodePlanar(words, bpp, record->pixels);
   return record;
+}
+
+/* ---- CGRAM dynamics classifier ------------------------------------------ */
+
+static int Channel(uint16 xbgr, int i) { return (xbgr >> (5 * i)) & 0x1f; }
+
+/* All non-black colors within a small distance of one another: the
+ * hit-flash signature (palette jumps to near-uniform white/red). */
+static int GroupIsUniform(const uint16 *cur) {
+  int lo[3] = { 31, 31, 31 }, hi[3] = { 0, 0, 0 }, colored = 0;
+  for (int i = 1; i < 16; i++) {
+    uint16 c = cur[i] & 0x7fff;
+    if (!c) continue;
+    colored++;
+    for (int ch = 0; ch < 3; ch++) {
+      int v = Channel(c, ch);
+      if (v < lo[ch]) lo[ch] = v;
+      if (v > hi[ch]) hi[ch] = v;
+    }
+  }
+  return colored >= 4 && hi[0] - lo[0] <= 3 && hi[1] - lo[1] <= 3 &&
+         hi[2] - lo[2] <= 3;
+}
+
+/* Every channel of every color moved by one consistent scale factor: the
+ * fade signature (CGRAM fade-in/out toward black or full). */
+static int GroupIsScaled(const uint16 *prev, const uint16 *cur) {
+  int knum = -1, kden = 0;
+  for (int i = 1; i < 16 && kden == 0; i++)
+    for (int ch = 0; ch < 3; ch++) {
+      int p = Channel(prev[i], ch);
+      if (p >= 12) { knum = Channel(cur[i], ch); kden = p; break; }
+    }
+  if (!kden) return 0;
+  for (int i = 1; i < 16; i++)
+    for (int ch = 0; ch < 3; ch++) {
+      int p = Channel(prev[i], ch);
+      int c = Channel(cur[i], ch);
+      int expect = p * knum / kden;
+      int diff = c - expect;
+      if (diff < -2 || diff > 2) return 0;
+    }
+  return 1;
+}
+
+/* Same color multiset, different order: the color-cycling signature. */
+static int GroupIsPermutation(const uint16 *prev, const uint16 *cur) {
+  uint16 a[16], b[16];
+  memcpy(a, prev, sizeof(a));
+  memcpy(b, cur, sizeof(b));
+  for (int i = 1; i < 16; i++) {
+    uint16 va = a[i]; int j = i;
+    while (j > 0 && a[j - 1] > va) { a[j] = a[j - 1]; j--; }
+    a[j] = va;
+    uint16 vb = b[i]; j = i;
+    while (j > 0 && b[j - 1] > vb) { b[j] = b[j - 1]; j--; }
+    b[j] = vb;
+  }
+  return !memcmp(a, b, sizeof(a));
+}
+
+/* Once per game frame, classify each changed 16-color CGRAM group. A gap in
+ * surveyed frames (forced blank, census disabled scene) resnapshots without
+ * classifying so scene transitions don't pollute the statistics. */
+static void ClassifyPaletteWrites(void) {
+  uint16 gf = (uint16)(g_ram[0x88] | (g_ram[0x89] << 8));
+  if (g_prev_cgram_valid && gf == g_prev_cgram_gf) return;
+  int classify = g_prev_cgram_valid && (uint16)(gf - g_prev_cgram_gf) == 1;
+  if (classify) {
+    for (int group = 0; group < 16; group++) {
+      const uint16 *prev = &g_prev_cgram[group * 16];
+      const uint16 *cur = &g_ppu->cgram[group * 16];
+      if (!memcmp(prev, cur, 16 * sizeof(uint16))) continue;
+      GroupDynamics *dyn = &g_group_dynamics[group];
+      dyn->change_frames++;
+      if ((uint16)(gf - dyn->last_change_gf) == 1) {
+        dyn->run_length++;
+      } else {
+        dyn->bursts++;
+        dyn->run_length = 1;
+      }
+      if (dyn->run_length > dyn->max_run) dyn->max_run = dyn->run_length;
+      dyn->last_change_gf = gf;
+      if (GroupIsPermutation(prev, cur)) dyn->cycle_like++;
+      else if (GroupIsUniform(cur)) dyn->flash_like++;
+      else if (GroupIsScaled(prev, cur)) dyn->fade_like++;
+      else dyn->other++;
+    }
+  }
+  memcpy(g_prev_cgram, g_ppu->cgram, sizeof(g_prev_cgram));
+  g_prev_cgram_gf = gf;
+  g_prev_cgram_valid = 1;
 }
 
 /* ---- per-frame walkers -------------------------------------------------- */
@@ -291,23 +437,54 @@ static void CensusDump(void) {
   int overflow_palette[kCensusClass_Count] = { 0 };
   static int indices[kCensusClass_Count][kCensusMaxRecords];
 
+  int flash_suspects = 0;
   for (int i = 0; i < g_record_count; i++) {
     const TileRecord *record = &g_records[i];
     int class_ = record->class_;
     int sheet_index = class_counts[class_];
     indices[class_][class_counts[class_]++] = i;
-    if (record->palette_variant_count > 1) multi_palette[class_]++;
-    if (record->palette_variant_count > kCensusMaxPaletteVariants)
+    if (record->palette_variant_count > 1 || record->palette_overflow)
+      multi_palette[class_]++;
+    if (record->palette_overflow)
       overflow_palette[class_]++;
-    if (jsonl)
+    /* A recurring short-run variant beyond the first is the hit-flash /
+     * i-frame palette-swap fingerprint (docs/nx-pipeline.md). */
+    int flash_suspect = 0;
+    for (int v = 1; v < record->palette_variant_count; v++)
+      if (record->palette_variants[v].max_run <= 3 &&
+          record->palette_variants[v].bursts >= 2)
+        flash_suspect = 1;
+    flash_suspects += flash_suspect;
+    if (jsonl) {
       fprintf(jsonl, "{\"hash\":\"%016llx\",\"class\":\"%s\",\"sheet\":%d,"
-              "\"layers\":%u,\"groups\":%u,\"palettes\":%u,\"frames\":%u,"
-              "\"first_gf\":%u,\"last_gf\":%u}\n",
+              "\"layers\":%u,\"groups\":%u,\"palettes\":%u,\"overflow\":%u,"
+              "\"frames\":%u,\"first_gf\":%u,\"last_gf\":%u,"
+              "\"flash_suspect\":%d,\"variants\":[",
               (unsigned long long)record->hash, kClassNames[class_],
               sheet_index, record->layer_mask, record->palette_group_mask,
-              record->palette_variant_count, record->sightings,
-              record->first_gf, record->last_gf);
+              record->palette_variant_count, record->palette_overflow,
+              record->sightings, record->first_gf, record->last_gf,
+              flash_suspect);
+      for (int v = 0; v < record->palette_variant_count; v++) {
+        const PaletteVariant *variant = &record->palette_variants[v];
+        fprintf(jsonl, "%s[\"%016llx\",%u,%u,%u]", v ? "," : "",
+                (unsigned long long)variant->hash, variant->sightings,
+                variant->bursts, variant->max_run);
+      }
+      fprintf(jsonl, "]}\n");
+    }
   }
+  /* CGRAM group dynamics: one record per group that ever changed. */
+  if (jsonl)
+    for (int group = 0; group < 16; group++) {
+      const GroupDynamics *dyn = &g_group_dynamics[group];
+      if (!dyn->change_frames) continue;
+      fprintf(jsonl, "{\"cgram_group\":%d,\"changes\":%u,\"fade\":%u,"
+              "\"flash\":%u,\"cycle\":%u,\"other\":%u,\"bursts\":%u,"
+              "\"max_run\":%u}\n",
+              group, dyn->change_frames, dyn->fade_like, dyn->flash_like,
+              dyn->cycle_like, dyn->other, dyn->bursts, dyn->max_run);
+    }
   if (jsonl) fclose(jsonl);
 
   for (int c = 0; c < kCensusClass_Count; c++)
@@ -324,6 +501,18 @@ static void CensusDump(void) {
               "%d with >%d variants\n", kClassNames[c], class_counts[c],
               multi_palette[c], overflow_palette[c],
               kCensusMaxPaletteVariants);
+    fprintf(summary, "flash-suspect tiles (short recurring variant): %d\n",
+            flash_suspects);
+    fprintf(summary, "\nCGRAM group dynamics (per-frame change shapes):\n");
+    for (int group = 0; group < 16; group++) {
+      const GroupDynamics *dyn = &g_group_dynamics[group];
+      if (!dyn->change_frames) continue;
+      fprintf(summary, "  %s group %2d: %5u changes  fade=%u flash=%u "
+              "cycle=%u other=%u  bursts=%u max_run=%u\n",
+              group < 8 ? "BG " : "OBJ", group, dyn->change_frames,
+              dyn->fade_like, dyn->flash_like, dyn->cycle_like, dyn->other,
+              dyn->bursts, dyn->max_run);
+    }
     if (g_skipped_mode_mask)
       fprintf(summary, "skipped BG modes (mask): %02x\n",
               g_skipped_mode_mask);
@@ -400,6 +589,7 @@ void HdTileCensus_Frame(void) {
   }
   if (!g_enabled || !g_ppu || (g_ppu->inidisp & 0x80)) return;
 
+  ClassifyPaletteWrites();
   g_frames_surveyed++;
   int mode = g_ppu->bgmode & 7;
   switch (mode) {
