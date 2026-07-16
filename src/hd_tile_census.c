@@ -333,9 +333,59 @@ static void CensusDump(void) {
           "tile_census.{txt,jsonl}\n", g_frames_surveyed, g_record_count);
 }
 
+/* ---- Mode-7 canvas dump -------------------------------------------------
+ * AR_M7_DUMP=1: whenever the Mode-7 canvas content changes while BG mode 7
+ * is active, render the full 1024x1024 canvas through the current CGRAM
+ * palette to the run dir (m7_canvas_<gf>_<hash>.ppm). This is the artist
+ * source for `plane = mode7` manifest entries: paint over the dump at any
+ * scale; the canvas rect in the manifest maps the art back. Read-only. */
+
+static void HdMode7Dump_Frame(void) {
+  static int enabled = -1;
+  static uint64 last_hash;
+  if (enabled < 0) {
+    const char *env = getenv("AR_M7_DUMP");
+    enabled = env && env[0] && env[0] != '0';
+  }
+  if (!enabled || !g_ppu || (g_ppu->bgmode & 7) != 7 ||
+      (g_ppu->inidisp & 0x80))
+    return;
+  /* Canvas content = the high byte (pixels) of all 128*128 tile words plus
+   * the low-byte tilemap. Hash both so tilemap rearrangements re-dump. */
+  uint64 hash = Fnv1a(0xcbf29ce484222325ull, g_ppu->vram, 0x8000 * 2);
+  if (hash == last_hash) return;
+  last_hash = hash;
+
+  char path[320];
+  unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
+  RunDirFile(path, sizeof(path), "m7_canvas_gf%u_%08x.ppm", gf,
+             (unsigned)(hash & 0xffffffffu));
+  FILE *f = fopen(path, "wb");
+  if (!f) return;
+  fprintf(f, "P6\n1024 1024\n255\n");
+  for (int py = 0; py < 1024; py++) {
+    for (int px = 0; px < 1024; px++) {
+      int tile = g_ppu->vram[(py >> 3) * 128 + (px >> 3)] & 0xff;
+      uint8 pixel = (uint8)(g_ppu->vram[tile * 64 + (py & 7) * 8 + (px & 7)]
+                            >> 8);
+      uint16 xbgr = g_ppu->cgram[pixel];
+      uint8 rgb[3] = {
+        (uint8)(((xbgr >> 0) & 0x1f) << 3),
+        (uint8)(((xbgr >> 5) & 0x1f) << 3),
+        (uint8)(((xbgr >> 10) & 0x1f) << 3),
+      };
+      fwrite(rgb, 1, 3, f);
+    }
+  }
+  fclose(f);
+  fprintf(stderr, "[m7-dump] gf=%u canvas %016llx -> %s\n", gf,
+          (unsigned long long)hash, path);
+}
+
 /* ---- entry point -------------------------------------------------------- */
 
 void HdTileCensus_Frame(void) {
+  HdMode7Dump_Frame();
   if (g_enabled < 0) {
     const char *env = getenv("AR_TILE_CENSUS");
     g_enabled = env && env[0] && env[0] != '0';

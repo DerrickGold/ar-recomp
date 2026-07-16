@@ -56,6 +56,13 @@ static uint8_t g_hud_obj_pixels[kPpuBufWidth * 4 * 240];
  * (the HD textures replace them); the bindings exist because RemoveFromGame
  * only engages on a bound source. BG3/OBJ reuse the HUD surfaces above. */
 static uint8_t *g_hd_overlay_pixels[kPpuOverlaySource_Count];
+/* Mode-7 override surface: the engine renders substituted canvas art into
+ * this at kHdMode7Scale subsamples per axis (supersampled AA after the
+ * matrix warp); the host composites it between the game frame and the
+ * OBJ/HUD overlays. Allocated only when a mode7 manifest entry has art. */
+enum { kHdMode7Scale = 4 };
+static uint8_t *g_m7_overlay_pixels;
+static SDL_Texture *g_m7_texture;
 
 /* Widescreen master switch + per-side extra-column budget — the definitions
  * for the runner's widescreen.h externs (each game defines them; 0/false =
@@ -657,7 +664,7 @@ static void LoadHdReplacements(void) {
   int with_art = 0;
   for (int i = 0; i < g_hd_replacement_count; i++) {
     HdReplacement *entry = &g_hd_replacements[i];
-    if (entry->plane != kHdPlane_Screen) continue;
+    if (entry->plane == kHdPlane_Tiles) continue;
     /* Entries ship in the manifest without their art; a missing image file
      * is the normal "hook available, art not provided" state and stays
      * silent. A file that exists but fails to decode is a real error. */
@@ -669,6 +676,25 @@ static void LoadHdReplacements(void) {
     if (!rgba) {
       fprintf(stderr, "[hd-manifest] [replace:%s] cannot decode %s (%s)\n",
               entry->name, entry->image, stbi_failure_reason());
+      continue;
+    }
+    if (entry->plane == kHdPlane_Mode7) {
+      /* The engine sampler consumes raw ARGB words, not an SDL texture. */
+      uint32_t *argb = malloc((size_t)w * h * 4);
+      if (argb) {
+        for (size_t p = 0; p < (size_t)w * h; p++) {
+          const stbi_uc *s = rgba + p * 4;
+          argb[p] = (uint32_t)s[3] << 24 | (uint32_t)s[0] << 16 |
+                    (uint32_t)s[1] << 8 | s[2];
+        }
+        entry->pixels = argb;
+        entry->pixels_width = w;
+        entry->pixels_height = h;
+        with_art++;
+        fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d, mode7)\n",
+                entry->name, entry->image, w, h);
+      }
+      stbi_image_free(rgba);
       continue;
     }
     /* ABGR8888 matches stb's little-endian R,G,B,A byte order directly. */
@@ -697,6 +723,20 @@ static void LoadHdReplacements(void) {
 static void BindHdReplacementSurfaces(void) {
   for (int i = 0; i < g_hd_replacement_count; i++) {
     const HdReplacement *entry = &g_hd_replacements[i];
+    if (entry->plane == kHdPlane_Mode7 && entry->pixels &&
+        !g_m7_overlay_pixels && g_renderer) {
+      size_t pitch = (size_t)g_snes_width * kHdMode7Scale * 4;
+      g_m7_overlay_pixels = calloc(1, pitch * 224 * kHdMode7Scale);
+      g_m7_texture = SDL_CreateTexture(
+          g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+          g_snes_width * kHdMode7Scale, g_snes_height * kHdMode7Scale);
+      if (g_m7_overlay_pixels && g_m7_texture) {
+        SDL_SetTextureBlendMode(g_m7_texture, SDL_BLENDMODE_BLEND);
+        PpuBindMode7OverlaySurface(g_ppu, g_m7_overlay_pixels, pitch,
+                                   kHdMode7Scale);
+      }
+      continue;
+    }
     if (entry->plane != kHdPlane_Screen || !entry->texture) continue;
     int source = entry->source;
     if (source == kPpuOverlaySource_Bg3 || source == kPpuOverlaySource_Obj ||
@@ -707,6 +747,21 @@ static void BindHdReplacementSurfaces(void) {
       PpuBindOverlaySurface(g_ppu, (PpuOverlaySource)source,
                             g_hd_overlay_pixels[source], g_snes_width * 4);
   }
+}
+
+/* Composite the Mode-7 override surface over the game frame (the engine
+ * already removed the substituted pixels there). Drawn before the OBJ/HUD
+ * overlays so promoted sprites stay above substituted scenery. Brightness
+ * was applied by the engine sampler; forced blank renders nothing because
+ * the per-line clears run before the early-out. */
+static void RenderMode7Overlay(SDL_Rect viewport) {
+  if (!g_m7_texture || !g_ppu || !g_ppu->m7Override.rgba) return;
+  SDL_UpdateTexture(g_m7_texture, NULL, g_m7_overlay_pixels,
+                    g_snes_width * kHdMode7Scale * 4);
+  SDL_Rect src = { Settings_VisibleX0() * kHdMode7Scale, 0,
+                   Settings_VisibleWidth() * kHdMode7Scale,
+                   g_snes_height * kHdMode7Scale };
+  SDL_RenderCopy(g_renderer, g_m7_texture, &src, &viewport);
 }
 
 /* Draw every active HD replacement over the region its capture removed this
@@ -769,6 +824,7 @@ static bool RenderFramebuffer(void) {
 
   SDL_Rect viewport = GetPresentationViewport();
   SDL_RenderSetLogicalSize(g_renderer, 0, 0);
+  RenderMode7Overlay(viewport);
   RenderHudOverlay(viewport);
   RenderHdReplacements(viewport);
   ApplyRendererLogicalSize();
@@ -1453,9 +1509,12 @@ int main(int argc, char **argv) {
 
   SDL_CloseAudio();
   SDL_DestroyMutex(g_audio_mutex);
-  for (int i = 0; i < g_hd_replacement_count; i++)
+  for (int i = 0; i < g_hd_replacement_count; i++) {
     if (g_hd_replacements[i].texture)
       SDL_DestroyTexture((SDL_Texture *)g_hd_replacements[i].texture);
+    free(g_hd_replacements[i].pixels);
+  }
+  SDL_DestroyTexture(g_m7_texture);
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);
   SDL_DestroyTexture(g_texture);

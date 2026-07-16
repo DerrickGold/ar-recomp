@@ -41,6 +41,23 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source, int x, int y,
   return true;
 }
 
+static struct {
+  int calls;
+  int width, height, x0, y0, x1, y1;
+} g_m7_log;
+
+bool PpuSetMode7Override(Ppu *ppu, const uint32_t *rgba, int width,
+                         int height, int canvas_x0, int canvas_y0,
+                         int canvas_x1, int canvas_y1) {
+  (void)rgba;
+  g_m7_log.calls++;
+  g_m7_log.width = width; g_m7_log.height = height;
+  g_m7_log.x0 = canvas_x0; g_m7_log.y0 = canvas_y0;
+  g_m7_log.x1 = canvas_x1; g_m7_log.y1 = canvas_y1;
+  ppu->m7Override.rgba = rgba; /* mirror the engine's busy latch */
+  return true;
+}
+
 /* ---- helpers ------------------------------------------------------------ */
 
 static const char *WriteManifest(const char *body) {
@@ -145,16 +162,58 @@ static void TestParseRejections(void) {
 
 static void TestReservedPlanesParseButStayInert(void) {
   CHECK(HdReplacements_Load(WriteManifest(
-      "[replace:world-map]\n"
-      "plane = mode7\n"
-      "image = map.png\n"
+      "[replace:everything]\n"
+      "plane = tiles\n"
+      "image = pack.png\n"
       "when = wram[0018]==0x00\n")) == 1);
   ResetRuntime();
   MakeTitleState();
   g_hd_replacements[0].texture = (void *)0x1; /* even with art bound */
+  g_hd_replacements[0].pixels = (void *)0x1;
   HdReplacements_EvaluateFrame();
-  CHECK(g_capture_log.calls == 0);
+  CHECK(g_capture_log.calls == 0 && g_m7_log.calls == 0);
   CHECK(!g_hd_replacements[0].active);
+}
+
+static void TestMode7Entries(void) {
+  /* mode7 requires canvas_rect: entry without one is dropped. */
+  CHECK(HdReplacements_Load(WriteManifest(
+      "[replace:no-canvas]\n"
+      "plane = mode7\n"
+      "image = map.png\n"
+      "when = mode==7\n")) == 0);
+
+  CHECK(HdReplacements_Load(WriteManifest(
+      "[replace:title-swirl]\n"
+      "plane = mode7\n"
+      "canvas_rect = 139,156,376,251\n"
+      "image = logo.png\n"
+      "when = wram[0018]==0x00, mode==7, m7!=identity\n")) == 1);
+  ResetRuntime();
+  MakeTitleState();
+
+  /* Settled identity matrix: m7!=identity fails, no override. */
+  g_hd_replacements[0].pixels = (void *)0x1;
+  g_hd_replacements[0].pixels_width = 2048;
+  g_hd_replacements[0].pixels_height = 820;
+  HdReplacements_EvaluateFrame();
+  CHECK(g_m7_log.calls == 0 && !g_hd_replacements[0].active);
+
+  /* Mid-swirl matrix: override requested with the canvas rect. */
+  g_ppu->m7matrix[1] = 0x0123;
+  HdReplacements_EvaluateFrame();
+  CHECK(g_m7_log.calls == 1);
+  CHECK(g_m7_log.x0 == 139 && g_m7_log.y0 == 156 &&
+        g_m7_log.x1 == 376 && g_m7_log.y1 == 251);
+  CHECK(g_m7_log.width == 2048 && g_m7_log.height == 820);
+  CHECK(g_hd_replacements[0].active);
+
+  /* No art: never requests. */
+  memset(&g_m7_log, 0, sizeof(g_m7_log));
+  g_ppu->m7Override.rgba = NULL;
+  g_hd_replacements[0].pixels = NULL;
+  HdReplacements_EvaluateFrame();
+  CHECK(g_m7_log.calls == 0 && !g_hd_replacements[0].active);
 }
 
 static void TestEvaluateGates(void) {
@@ -207,6 +266,7 @@ int main(void) {
   TestParseTitleEntry();
   TestParseRejections();
   TestReservedPlanesParseButStayInert();
+  TestMode7Entries();
   TestEvaluateGates();
   if (g_failures) {
     fprintf(stderr, "hd manifest tests: %d failure(s)\n", g_failures);

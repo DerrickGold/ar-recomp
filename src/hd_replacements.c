@@ -32,12 +32,10 @@ static int ParseSourceName(const char *value) {
   return -1;
 }
 
-static bool ParseRect(const char *value, HdReplacement *entry) {
-  int x0, y0, x1, y1;
-  if (sscanf(value, "%d ,%d ,%d ,%d", &x0, &y0, &x1, &y1) != 4)
+static bool ParseRect4(const char *value, int *x0, int *y0, int *x1, int *y1) {
+  if (sscanf(value, "%d ,%d ,%d ,%d", x0, y0, x1, y1) != 4)
     return false;
-  entry->x0 = x0; entry->y0 = y0; entry->x1 = x1; entry->y1 = y1;
-  return x1 > x0 && y1 > y0;
+  return *x1 > *x0 && *y1 > *y0;
 }
 
 /* One comparison: <operand> ==|!= <value>. Returns false on syntax error. */
@@ -126,6 +124,11 @@ static bool EntryComplete(const HdReplacement *entry, const char *path,
     missing = "layer";
   else if (entry->plane == kHdPlane_Screen && entry->x1 <= entry->x0)
     missing = "rect";
+  else if (entry->plane == kHdPlane_Mode7 &&
+           (entry->canvas_x1 <= entry->canvas_x0 || entry->canvas_x0 < 0 ||
+            entry->canvas_x1 > 1024 || entry->canvas_y0 < 0 ||
+            entry->canvas_y1 > 1024))
+    missing = "canvas_rect";
   else if (!entry->condition_count) missing = "when";
   if (missing)
     fprintf(stderr, "[hd-manifest] %s:%d: [replace:%s] missing/invalid '%s'"
@@ -192,7 +195,11 @@ int HdReplacements_Load(const char *path) {
       pending.source = ParseSourceName(value);
       ok = pending.source >= 0;
     } else if (!strcmp(key, "rect")) {
-      ok = ParseRect(value, &pending);
+      ok = ParseRect4(value, &pending.x0, &pending.y0,
+                      &pending.x1, &pending.y1);
+    } else if (!strcmp(key, "canvas_rect")) {
+      ok = ParseRect4(value, &pending.canvas_x0, &pending.canvas_y0,
+                      &pending.canvas_x1, &pending.canvas_y1);
     } else if (!strcmp(key, "image")) {
       ResolveImagePath(path, value, pending.image, sizeof(pending.image));
     } else if (!strcmp(key, "when")) {
@@ -215,10 +222,9 @@ int HdReplacements_Load(const char *path) {
 
   for (int i = 0; i < g_hd_replacement_count; i++) {
     HdReplacement *entry = &g_hd_replacements[i];
-    if (entry->plane != kHdPlane_Screen)
-      fprintf(stderr, "[hd-manifest] [replace:%s] plane '%s' is reserved and "
-              "not implemented yet; entry inert\n", entry->name,
-              entry->plane == kHdPlane_Mode7 ? "mode7" : "tiles");
+    if (entry->plane == kHdPlane_Tiles)
+      fprintf(stderr, "[hd-manifest] [replace:%s] plane 'tiles' is reserved "
+              "and not implemented yet; entry inert\n", entry->name);
   }
   return g_hd_replacement_count;
 }
@@ -252,20 +258,40 @@ void HdReplacements_EvaluateFrame(void) {
 
   for (int i = 0; i < g_hd_replacement_count; i++) {
     HdReplacement *entry = &g_hd_replacements[i];
-    if (entry->plane != kHdPlane_Screen || !entry->texture)
+    bool has_art = entry->plane == kHdPlane_Screen ? entry->texture != NULL
+                                                   : entry->pixels != NULL;
+    if (entry->plane == kHdPlane_Tiles || !has_art)
       continue;
     bool pass = true;
     for (int c = 0; c < entry->condition_count && pass; c++)
       pass = ConditionPasses(&entry->conditions[c]);
     if (!pass)
       continue;
-    /* One capture rect per source per frame is a renderer invariant. An
-     * already-set capture (HUD split, magic OAM, or an earlier manifest
-     * entry) wins; drop this entry for the frame and say so once. */
+    /* One capture rect per source (and one Mode-7 override) per frame is a
+     * renderer invariant. An already-set owner (HUD split, magic OAM, or an
+     * earlier manifest entry) wins; drop this entry for the frame and say
+     * so once. */
+    static uint32 warned_mask;
+    if (entry->plane == kHdPlane_Mode7) {
+      if (g_ppu->m7Override.rgba) {
+        if (!(warned_mask & (1u << i))) {
+          warned_mask |= 1u << i;
+          fprintf(stderr, "[hd-manifest] [replace:%s] Mode-7 override busy "
+                  "(another entry owns it this frame); entry skipped\n",
+                  entry->name);
+        }
+        continue;
+      }
+      if (PpuSetMode7Override(g_ppu, (const uint32 *)entry->pixels,
+                              entry->pixels_width, entry->pixels_height,
+                              entry->canvas_x0, entry->canvas_y0,
+                              entry->canvas_x1, entry->canvas_y1))
+        entry->active = true;
+      continue;
+    }
     const PpuOverlayCapture *existing =
         &g_ppu->overlayCaptures[entry->source];
     if (existing->x1 > existing->x0) {
-      static uint32 warned_mask;
       if (!(warned_mask & (1u << i))) {
         warned_mask |= 1u << i;
         fprintf(stderr, "[hd-manifest] [replace:%s] source busy (another "

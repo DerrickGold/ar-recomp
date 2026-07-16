@@ -589,11 +589,24 @@ comment for the full key/gate grammar. Planes are capability tiers:
   or `hd_replacements=0` all degrade to authentic rendering because an
   unbound source makes `RemoveFromGame` a no-op. One capture rect per source
   per frame is a renderer invariant; conflicting entries warn and skip.
-- `mode7` / `tiles` (reserved): parsed but inert. `mode7` is the planned
-  canvas-space texture override sampled through the Mode-7 matrix (per-pixel
-  world coordinates already computed by `PpuDrawBackground_mode7`); `tiles`
-  is the planned hash-keyed HD tile-pack path (needs the N-x RGBA-sideband
-  renderer extension). Both are engine capabilities to be built upstream.
+- `mode7` (live, 2026-07-15): canvas-space texture override rendered through
+  the live matrix. The engine API (`PpuBindMode7OverlaySurface` +
+  `PpuSetMode7Override`, snesrecomp ppu.c) samples the entry's ARGB art at
+  the per-pixel canvas coordinates inside `PpuDrawBackground_mode7`, so
+  rotation, zoom, per-scanline HDMA warps, windows, field wrap, and INIDISP
+  brightness all apply. Output goes to a 4x-supersampled overlay surface
+  (`kHdMode7Scale`) composited between the game frame and the OBJ/HUD
+  overlays; opaque samples are removed from main+sub game buffers (no
+  color-math ghost), translucent fringes blend over the authentic frame.
+  First consumer: `[replace:title-swirl]` rides the intro warp with the same
+  art as the settled screen-plane entry (`m7!=identity` vs `m7==identity`
+  gates make the handoff seamless). `AR_M7_DUMP=1` dumps each distinct
+  Mode-7 canvas as a paletted 1024x1024 PPM — the artist source for
+  `canvas_rect`. Caveat for scenes with sprites above the canvas (world
+  map): those need full-screen OBJ promotion so sprites composite above the
+  substituted scenery — not yet wired.
+- `tiles` (reserved): parsed but inert — the planned hash-keyed HD
+  tile-pack path (needs the N-x RGBA-sideband renderer extension).
 
 `AR_TILE_CENSUS=1` (src/hd_tile_census.c) is the tile-pack sizing survey for
 the `tiles` plane: a read-only per-frame walk of visible BG/OAM/Mode-7 tiles

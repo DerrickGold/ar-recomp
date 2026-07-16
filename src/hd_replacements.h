@@ -62,14 +62,19 @@ typedef struct HdReplacement {
   HdPlane plane;
   int source; /* PpuOverlaySource for the screen plane */
   int x0, y0, x1, y1; /* screen-space rect, x1/y1 exclusive */
+  /* mode7 plane: the Mode-7 canvas-pixel rect the art maps onto. */
+  int canvas_x0, canvas_y0, canvas_x1, canvas_y1;
   char image[kHdMaxPath]; /* resolved relative to the manifest */
   bool brightness_mod; /* default true: follow INIDISP master brightness */
   HdCondition conditions[kHdMaxConditions];
   int condition_count;
 
-  /* Host-owned: SDL_Texture* once the image decoded; NULL keeps the entry
-   * fully inert (no capture request, authentic rendering). */
+  /* Host-owned art. Screen plane: SDL_Texture* in `texture`. Mode7 plane:
+   * malloc'd ARGB words in `pixels` (consumed by the engine sampler, not
+   * SDL). Entries with neither stay fully inert (authentic rendering). */
   void *texture;
+  void *pixels;
+  int pixels_width, pixels_height;
   /* Game-policy result, rebuilt every emulated frame. */
   bool active;
 } HdReplacement;
