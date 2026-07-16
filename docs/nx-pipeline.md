@@ -55,6 +55,21 @@ Three orthogonal extensions to the scanline renderer (ppu.c):
 | 4 | Tile-hash cache + pack loader | Pack format frozen only after census breadth (sim/boss/late-game palette-variance data) |
 | 5 | Authoring pipeline | census sheets -> paint-over -> pack; docs |
 
+## Widescreen compatibility
+
+The WRAM/VRAM/OAM-level widescreen HLE (margin tilemap refresh, Sky Palace
+BG2 synthesis, sprite margin emission, activation-window extension) operates
+on emulated state upstream of the renderer and is untouched by N-x — it
+fixes what the renderer samples, not how densely. The renderer-level
+widescreen features (layer clamp/mirror/repeat, repeat bands, margin gaps,
+extra-columns budget, negative-x windows) live inside the loops being
+N-x-ified and port as game-pixel-space logic (subpixel x / N); they are
+covered by the phase-1 N=1 byte-identical gate, and the N>1 visual
+regression matrix MUST include the AR_WS_HEADLESS widescreen scenes (action
+margins, Sky Palace, sim towns, HUD split). Known 1x-pitch assumptions to
+make N-aware: the bounded-world margin memsets in actraiser_rtl.c write raw
+renderBuffer rows, and the host PPM/F2 capture paths assume g_snes_width.
+
 ## Risks / open questions
 
 - **Performance**: N=4 is ~16x the fill of a scalar renderer that is fast
