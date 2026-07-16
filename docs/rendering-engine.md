@@ -570,9 +570,10 @@ second SNES tilemap rewrite. The reusable runner contract is documented in
 Second consumer of the generic overlay contract, swapping captured graphics
 for external high-resolution art. Replacements are data-driven: each
 `[replace:<name>]` entry in `game-assets/hd/manifest.ini` declares a
-substitution. The manifest is tracked as a template of discovered hooks,
-each shipped commented out; art files beside it are gitignored, so users
-uncomment a hook and supply their own image. Each entry uses a
+substitution. The manifest is tracked with every discovered hook shipped
+active; art files beside it are gitignored, and an entry whose image is
+absent stays silently inert, so users enable a hook by simply dropping in
+an image with the matching filename. Each entry uses a
 "plane" (the tool used), a gate, and an art file — see the manifest's header
 comment for the full key/gate grammar. Planes are capability tiers:
 

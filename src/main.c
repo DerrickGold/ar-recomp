@@ -654,14 +654,21 @@ static void LoadHdReplacements(void) {
   const char *path = getenv("AR_HD_MANIFEST");
   if (!path || !path[0]) path = "game-assets/hd/manifest.ini";
   if (!HdReplacements_Load(path)) return;
+  int with_art = 0;
   for (int i = 0; i < g_hd_replacement_count; i++) {
     HdReplacement *entry = &g_hd_replacements[i];
     if (entry->plane != kHdPlane_Screen) continue;
+    /* Entries ship in the manifest without their art; a missing image file
+     * is the normal "hook available, art not provided" state and stays
+     * silent. A file that exists but fails to decode is a real error. */
+    FILE *probe = fopen(entry->image, "rb");
+    if (!probe) continue;
+    fclose(probe);
     int w = 0, h = 0, comp = 0;
     stbi_uc *rgba = stbi_load(entry->image, &w, &h, &comp, 4);
     if (!rgba) {
-      fprintf(stderr, "[hd-manifest] [replace:%s] cannot decode %s; "
-              "entry inert\n", entry->name, entry->image);
+      fprintf(stderr, "[hd-manifest] [replace:%s] cannot decode %s (%s)\n",
+              entry->name, entry->image, stbi_failure_reason());
       continue;
     }
     /* ABGR8888 matches stb's little-endian R,G,B,A byte order directly. */
@@ -670,6 +677,7 @@ static void LoadHdReplacements(void) {
     if (texture && SDL_UpdateTexture(texture, NULL, rgba, w * 4) == 0) {
       SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
       entry->texture = texture;
+      with_art++;
       fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d)\n",
               entry->name, entry->image, w, h);
     } else {
@@ -679,6 +687,8 @@ static void LoadHdReplacements(void) {
     }
     stbi_image_free(rgba);
   }
+  fprintf(stderr, "[hd-manifest] %d entries, %d with art\n",
+          g_hd_replacement_count, with_art);
 }
 
 /* Bind overlay surfaces for every source a loaded screen-plane entry can
