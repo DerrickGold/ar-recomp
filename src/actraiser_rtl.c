@@ -570,6 +570,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       PpuSetWidescreenHudSplit(g_ppu, hud_split_height,
                                hud_split_left_end, hud_split_right_start,
                                hud_left_only_y);
+    if (hud_split_height)
+      PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3,
+                           0, 0, 256, hud_split_height,
+                           kPpuOverlayFlag_RemoveFromGame);
     if (bounded_world_margins) {
       /* Clamp each side to real BG1 world space. Action width is section
        * state $2E; simulation towns are the fixed 512px world proven by
@@ -697,10 +701,16 @@ static void ActRaiser_WidescreenMagicHudPromote(void) {
     if (tile != (uint8)(0xD4 + slot) || y != expected_y)
       return;
   }
-  PpuSetWidescreenHudOamRange(g_ppu, 0, 4);
+  if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
+                           0, 0, 256, 40,
+                           kPpuOverlayFlag_RemoveFromGame))
+    PpuSetOverlayOamRange(g_ppu, 0, 4);
 }
 
 void ActRaiserDrawPpuFrame(void) {
+  /* Overlay bindings are host-owned and persistent; capture policy is
+   * game-owned and rebuilt every frame so no prior mode can leak a region. */
+  PpuClearOverlayCaptures(g_ppu);
   ActRaiser_ApplyWidescreenPolicy();
   /* Stage D reconnaissance: read-only classification of objects that intersect
    * a live side margin but remain outside the authentic activation window. */

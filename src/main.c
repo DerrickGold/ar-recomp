@@ -563,7 +563,7 @@ static void RenderHudOverlay(SDL_Rect viewport) {
   int upper_h = lower_y;
   int upper_dh = ScaledHudPixels(upper_h, scale_y);
 
-  SDL_Rect src = { 0, 0, g_ppu->wsHudLeftEnd, upper_h };
+  SDL_Rect src = { tex_extra, 0, g_ppu->wsHudLeftEnd, upper_h };
   SDL_Rect dst = { viewport.x, viewport.y,
                    ScaledHudPixels(src.w, scale_x), upper_dh };
   RenderHudChunk(g_hud_bg_texture, src, dst);
@@ -578,14 +578,14 @@ static void RenderHudOverlay(SDL_Rect viewport) {
 
   int right_source_w = 256 - g_ppu->wsHudRightStart;
   int right_dest_w = ScaledHudPixels(right_source_w, scale_x);
-  src.x = tex_extra * 2 + g_ppu->wsHudRightStart;
+  src.x = tex_extra + g_ppu->wsHudRightStart;
   src.w = right_source_w;
   dst.x = viewport.x + viewport.w - right_dest_w;
   dst.w = right_dest_w;
   RenderHudChunk(g_hud_bg_texture, src, dst);
 
   if (lower_y < height) {
-    src.x = 0;
+    src.x = tex_extra;
     src.y = lower_y;
     src.w = 256;
     src.h = height - lower_y;
@@ -598,7 +598,9 @@ static void RenderHudOverlay(SDL_Rect viewport) {
 
   /* The selected-magic icon is the separately promoted 2x2 OAM signature.
    * Keep it four native pixels before the scaled right group. */
-  if (g_hud_obj_texture && g_ppu->wsHudOamCount == 4) {
+  const PpuOverlayCapture *obj_capture =
+      &g_ppu->overlayCaptures[kPpuOverlaySource_Obj];
+  if (g_hud_obj_texture && obj_capture->oamCount == 4) {
     int x = (g_ppu->oam[0] & 0xff) | ((g_ppu->highOam[0] & 1) << 8);
     int y = g_ppu->oam[0] >> 8;
     if (x < 256) {
@@ -849,14 +851,13 @@ int main(int argc, char **argv) {
   if (!snes) Die("SnesInit failed");
 
   PpuBeginDrawing(g_ppu, g_pixels, g_snes_width * 4, 0);
-  /* Bind explicitly even without video: ppu_init uses malloc, so skipping the
-   * call would leave the new optional pointers at their pre-reset values in a
-   * pure headless/oracle run. NULL disables extraction deterministically. */
-  PpuBeginWidescreenHudOverlay(
-      g_ppu,
-      g_hud_bg_texture ? g_hud_bg_pixels : NULL,
-      g_hud_obj_texture ? g_hud_obj_pixels : NULL,
-      g_snes_width * 4);
+  PpuClearOverlayBindings(g_ppu);
+  PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3,
+                        g_hud_bg_texture ? g_hud_bg_pixels : NULL,
+                        g_snes_width * 4);
+  PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Obj,
+                        g_hud_obj_texture ? g_hud_obj_pixels : NULL,
+                        g_snes_width * 4);
   /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
    * centered in the wide framebuffer). Re-applied every frame by
    * ActRaiser_ApplyWidescreenPolicy since ppu_reset zeroes these fields. */

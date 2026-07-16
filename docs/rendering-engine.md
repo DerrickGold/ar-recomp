@@ -525,24 +525,28 @@ Facts the next design must satisfy (all trace/disasm-proven above):
 ### 13.1 Promoted HUD host overlay (2026-07-15)
 
 The HUD-scale implementation is deliberately a presentation seam rather than a
-second SNES tilemap rewrite:
+second SNES tilemap rewrite. The reusable runner contract is documented in
+[`HOST_OVERLAY_EXTRACTION.md`](../third_party/snesrecomp/docs/HOST_OVERLAY_EXTRACTION.md):
 
 - `PpuSetWidescreenHudSplit` identifies the live BG3 status scanlines and their
   source boundaries. Action uses `height=40`, `left=0..87`, `center=88..167`,
   `right=168..255`, with scanlines 28 onward anchored wholly left for the
   ENEMY label/bar. Simulation uses a two-way `0..167` / `168..255` split and
   no center group.
-- While that policy is active, the normal 2bpp BG3 sampler writes status pixels
-  into `wsHudBgBuffer`; it does not write those pixels into the world composite.
+- While that policy is active, ActRaiser requests the generic BG3 overlay
+  capture rectangle `(0,0)-(256,40)`. The normal 2bpp sampler writes its
+  authentic, unsplit status pixels into the source-indexed overlay buffer; the
+  `RemoveFromGame` flag omits the rectangle from both main and subscreen.
   Transparent tile pixels remain alpha zero. Palette lookup and master
   brightness are resolved by the PPU before exporting ARGB, so the host does
   not need to understand SNES tile formats.
 - `$00:923A`'s selected-magic icon is accepted only when OAM slots 0-3 exactly
   match tiles `$D4-$D7` and the expected 2x2 Y layout. Those slots are routed to
-  `wsHudObjBuffer`; every other OBJ remains on the normal sprite path. Earlier
-  render-scoped OAM coordinate mutation is gone, so emulated state, savestates,
-  future DMA, and game logic remain authentic.
-- `src/main.c` uploads the game, HUD-BG3, and HUD-OBJ surfaces separately. It
+  the generic OBJ overlay buffer; every other OBJ remains on the normal sprite
+  path. Earlier render-scoped OAM coordinate mutation is gone, so emulated
+  state, savestates, future DMA, and game logic remain authentic.
+- `src/main.c` binds generic BG3/OBJ surfaces, then uploads the game and those
+  two captured surfaces separately. It
   renders the game with the normal logical-size/PAR transform, then composites
   the HUD in physical renderer-output coordinates: left at the presentation
   viewport's left edge, action timer at center, and score/magic at its right
