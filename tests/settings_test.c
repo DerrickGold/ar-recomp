@@ -44,7 +44,7 @@ static void TestDefaultsAndMetadata(void) {
   g_ws_extra = 43;
   Settings_Init();
 
-  CHECK(g_setting_desc_count == 34);
+  CHECK(g_setting_desc_count == 36);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip && a->field);
@@ -59,6 +59,7 @@ static void TestDefaultsAndMetadata(void) {
   }
   CHECK(g_settings.display_mode == kDisplayMode_WideFull);
   CHECK(g_settings.hud_scale_percent == 0);
+  CHECK(g_settings.menu_scale_percent == 0);
   CHECK(g_settings.extended_aspect == 0);
   CHECK(g_settings.pixel_aspect == kPixelAspect_Crt43);
   CHECK(g_settings.window_scale == 3);
@@ -84,7 +85,10 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(volume && volume->apply == kApply_Callback);
   CHECK(volume && volume->minval == 0 && volume->maxval == 100 &&
         volume->step == 5);
-  CHECK(hp && !Settings_IsAvailable(hp));
+  CHECK(hp && Settings_IsAvailable(hp));
+  for (int i = 0; i < g_setting_desc_count; i++)
+    if (g_setting_descs[i].category == kSettingCat_Cheats)
+      CHECK(Settings_IsAvailable(&g_setting_descs[i]));
   g_ram[0x18] = 1;
   CHECK(hp && Settings_IsAvailable(hp));
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Widescreen), "Widescreen"));
@@ -252,6 +256,15 @@ static void TestMutationApi(void) {
   Settings_FormatValue(hud_scale, hud_value, sizeof(hud_value));
   CHECK(!strcmp(hud_value, "2.75x"));
 
+  const SettingDesc *menu_scale = Settings_Find("menu_scale_percent");
+  CHECK(menu_scale && menu_scale->maxval == 800);
+  CHECK(Settings_SetLong(menu_scale, 162) == kSettingChange_Applied);
+  CHECK(g_settings.menu_scale_percent == 150);
+  Settings_FormatValue(menu_scale, hud_value, sizeof(hud_value));
+  CHECK(!strcmp(hud_value, "1.50x"));
+  CHECK(Settings_SetText(menu_scale, "Auto") == kSettingChange_Applied);
+  CHECK(g_settings.menu_scale_percent == 0);
+
   const SettingDesc *volume = Settings_Find("audio_master_volume");
   CHECK(Settings_SetLong(volume, 87) == kSettingChange_Applied);
   CHECK(g_settings.audio_master_volume == 85);
@@ -318,6 +331,42 @@ static void TestMutationApi(void) {
   CHECK(g_settings.ws_action && g_settings.ws_sprites);
 }
 
+static void TestCheatsCanBeStagedOutsideTheirRuntimeMode(void) {
+  ClearSettingsEnv();
+  memset(g_ram, 0, sizeof(g_ram));
+  g_ws_active = true;
+  g_ws_extra = 43;
+  Settings_Init();
+
+  /* $18=00 is the simulation/title/UI family. Action-only effects must remain
+   * editable here; the runtime action gate consumes them after transition. */
+  CHECK(g_ram[0x18] == 0);
+  const SettingDesc *hp = Settings_Find("cheat_inf_hp");
+  const SettingDesc *freeze = Settings_Find("cheat_freeze_timer");
+  const SettingDesc *moonjump = Settings_Find("cheat_moonjump_speed");
+  const SettingDesc *moonjump_button =
+      Settings_Find("cheat_moonjump_button");
+  const SettingDesc *no_knockback = Settings_Find("cheat_no_knockback");
+  CHECK(Settings_IsAvailable(hp));
+  CHECK(Settings_IsAvailable(freeze));
+  CHECK(Settings_IsAvailable(moonjump));
+  CHECK(Settings_IsAvailable(moonjump_button));
+  CHECK(Settings_IsAvailable(no_knockback));
+  CHECK(Settings_SetLong(hp, 32) == kSettingChange_Applied);
+  CHECK(Settings_SetLong(freeze, 1) == kSettingChange_Applied);
+  CHECK(Settings_SetLong(moonjump, 6) == kSettingChange_Applied);
+  CHECK(Settings_SetLong(moonjump_button, 0x4000) ==
+        kSettingChange_Applied);
+  CHECK(Settings_SetLong(no_knockback, 1) == kSettingChange_Applied);
+
+  g_ram[0x18] = 1;
+  CHECK(g_settings.cheat_inf_hp == 32);
+  CHECK(g_settings.cheat_freeze_timer);
+  CHECK(g_settings.cheat_moonjump_speed == 6);
+  CHECK(g_settings.cheat_moonjump_button == 0x4000);
+  CHECK(g_settings.cheat_no_knockback == 1);
+}
+
 static void TestNoWideBudget(void) {
   ClearSettingsEnv();
   setenv("AR_DISPLAY_MODE", "2", 1);
@@ -336,6 +385,7 @@ int main(void) {
   TestConfigSettingsEnvironmentPrecedence();
   TestLegacySeedEncodings();
   TestMutationApi();
+  TestCheatsCanBeStagedOutsideTheirRuntimeMode();
   TestNoWideBudget();
   ClearSettingsEnv();
   Settings_SetChangeObserver(NULL);

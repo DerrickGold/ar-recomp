@@ -226,12 +226,12 @@ Fillmore act 1 arrives with `$DE/$DF=$FF, $E1=0` — tile anim disabled.
 
 | VRAM words | Contents | Writer |
 |---|---|---|
-| `$0000-$1FFF` | BG1+BG2 chars (BG12NBA=$00) | `$02:B28E`+`$02:B475` decompressor pair (force-blank port loops) |
+| `$0000-$1FFF` | BG1+BG2 chars (BG12NBA=$00); Sky Palace capture is byte-identical to the `$4000`-byte ROM bank at `$0D:C000` (file `$06C000`) | `$02:B28E`+`$02:B475` decompressor pair (force-blank port loops) |
 | `$2000-$2FFF` | common action OBJ atlas (OBSEL=$01, 8x8/16x16) | `$02:BC9E`: 4096 words from ROM `$07:8000-$07:9FFF` |
 | `$2D40-$2DBF` | reserved OBJ magic/effect overlays inside the common atlas | `$02:BC9E` writes 128 words to `$2D40`; `$00:96C3-$96F5` can arm 128-byte slot-0 upload to `$2D80` |
 | `$3000-$3FFF` | OBJ address space reachable through OBSEL name selection; resident contents/consumers not yet catalogued | `?` |
 | `$4000-$4FFF` | extra char bank (user `?` — B28E loads it; no NBA points there in-game) | `$02:B28E` |
-| `$5000-$57FF` | BG3 chars 2bpp (BG34NBA=$05) | decompressor |
+| `$5000-$57FF` | BG3 chars 2bpp (BG34NBA=$05); dialog font is the `$1000`-byte decode of compressed ROM `$17:ECFB` (file `$0BECFB`) | `$02:C5C9` decompressor |
 | `$5800-$5BFF` | BG3 map (BG3SC=$58, 32x32) — THE HUD | `$02:AEEB` per-frame stream from `$7F:B000` |
 | `$6000-$6FFF` | BG1 map 64x64 ring | record drain only |
 | `$7000-$7FFF` | BG2 map 64x64 ring | record drain only |
@@ -272,6 +272,10 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
 - `$02:ADFF`: fixed 2-frame flicker of CGRAM row 7 from ROM `$02:AE35/55`
   (sprite palette 7 = player hit-flash row).
 - `$02:ADE2`: fixed-color fade (`$2132`) from `$BD/$BE/$BC` while `$C4`.
+- Sky Palace dialog-frame palette 7 is an exact match for ROM `$1C:BF73`
+  (file `$0E3F73`). Palette 1 at `$1C:BEB3` supplies scenery tile `$18`,
+  explaining why the game's lower 16×16 box metatiles are not reusable as
+  standalone host corners.
 
 ## 11. UI / dialog compose (sim engine)
 
@@ -309,6 +313,26 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
   metatile page containing the exact palace beam, capitals, shaft pattern, and
   floor. Its rows 9-12 are occupied by a dialog box, but rows 3-8 establish the
   unchanged shaft continuation underneath it.
+- Full snapshots `runs/20260716-072558/snapshots/snap_00_gf460` (ordinary
+  dialogue) and `snap_01_gf668` (three differently sized native boxes)
+  resolve the box itself down to reusable 8×8 characters. The 16×16 source-map
+  nine-slice is `$36/$55/$37`, `$3E/$59/$3F`, `$4E/$56/$4F`, but `$4E/$4F`
+  are scene-composition metatiles rather than pure corners: their outer halves
+  are palette-1 palace tile `$18`. The actual frame is:
+
+  | Position | 8×8 character |
+  |---|---|
+  | top-left / top-right | `$CE` / `$CF` |
+  | top edge | vertical-flipped `$EE` |
+  | left / right edge | `$DE` / `$DF` |
+  | center | `$FF` (opaque black) |
+  | bottom-left / bottom-right | vertical-flipped `$CE` / `$CF` |
+  | bottom edge | `$EE` |
+
+  These characters use palette 7 and form a clean arbitrary-size nine-slice;
+  palette index zero supplies the transparent bevel cutouts. This is immutable
+  asset identity useful to decompilation and replacement work, independent of
+  the host settings implementation.
 - Current Sky Palace policy (implemented 2026-07-12, **validated 2026-07-13**)
   reads `$07:D0A0` itself and expands metatile IDs through the live BG2
   definition table at `$7E:2900` using the same mask/attribute operation as
@@ -569,7 +593,7 @@ second SNES tilemap rewrite. The reusable runner contract is documented in
 
 Second consumer of the generic overlay contract, swapping captured graphics
 for external high-resolution art. Replacements are data-driven: each
-`[replace:<name>]` entry in `game-assets/hd/manifest.ini` declares a
+`[replace:<name>]` entry in `game-assets/manifest.ini` declares a
 substitution. The manifest is tracked with every discovered hook shipped
 active; art files beside it are gitignored, and an entry whose image is
 absent stays silently inert, so users enable a hook by simply dropping in
@@ -736,7 +760,7 @@ normally.
 
 The post-final-boss return reuses raw map `0701` with different presentation
 state. Paired captures in `runs/20260714-184728/` separate the transition:
-`snap_01_gf14676` already has boss-rush progress `$0347=$07` but ending state
+`snap_01_gf14676` already has boss-rush progress `$0347=$07` but current-song id
 `$0334=$00`, while the face scene is still visible; `snap_02_gf15031` has
 `$0334=$03` after the sky/cloud/water has appeared. Thus `$0347` alone switches
 too early, but `$0334>=3` is also visibly late in
@@ -749,10 +773,10 @@ too early, but `$0334>=3` is also visibly late in
 - `$F5F0-$F619` stages BG1SC `$64` and BG2SC `$74`, selecting the sky maps
   while the display is black, then seeds the fade-in counter at `$F61C`;
 - `$F625-$F642` performs the fade-in, and only after it plus the `$0349` wait
-  does `$F64C-$F650` write `$0334=3`.
+  does `$F64C-$F650` select song id `$0334=3`.
 
 The policy now requires `$0347>=7` and observes the live BGSC page bases
-`$64/$74`; `$0334>=3` remains a settled-state fallback. It keeps BG1 clamped
+`$64/$74`; song id `$0334>=3` remains a settled-state fallback. It keeps BG1 clamped
 and replaces the lower repeat band with whole-BG2 reflection immediately when
 the sky pages become active. This samples the transitioned live BG2 after its
 scroll/window state, cannot resurrect face tiles still resident in VRAM, and

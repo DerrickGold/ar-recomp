@@ -82,19 +82,22 @@ Snapshot as of 2026-07-12:
 - Open bugs and investigation state live in [`DEBUG.md`](DEBUG.md).
 
 
-Extra features WIP:
+Extended runtime features:
 
 * Widescreen support (all action content validated; ordinary-stage camera-edge
   polish and simulation-mode BG/sprite validation remain)
-* Runtime settings and in-game overlay UI ([design](docs/settings-system.md))
+* Global host settings overlay with live configuration, persistent user
+  settings, and mode-independent cheat staging
+  ([architecture and implementation](docs/settings-system.md))
 
 #### Screenshots
 
-![menu](/assets/menu.png)
-![mode7](/assets/mode7.png)
-![bloodpool act2](/assets/bloodpool-act2.png)
-![fillmore sim](/assets/sim.png)
-![hud-scale-sim](/assets/hud-scaling.png)
+![ActRaiser's native in-game menu](/assets/menu.png)
+![Mode 7 rendering](/assets/mode7.png)
+![Bloodpool Act 2 in widescreen](/assets/bloodpool-act2.png)
+![Fillmore simulation mode in widescreen](/assets/sim.png)
+![Independently scaled simulation-mode HUD](/assets/hud-scaling.png)
+![Host settings overlay using ActRaiser's native dialog font and frame graphics](/assets/overlay.png)
 
 ## AI disclosure
 
@@ -151,17 +154,28 @@ ActRaiserRecomp/
 │   │                             the actual authored "source" that drives
 │   │                             regeneration — safe to commit (see below).
 │   └── funcs.h                # generated from the *.cfg files — NOT committed
+├── game-assets/
+│   ├── manifest.ini           # ★ tracked asset-replacement manifest: every
+│   │                             known HD-art + music hook, engaged by
+│   │                             dropping the asset file it names
+│   ├── hd/                    # your HD art (*.png) — gitignored
+│   └── audio/                 # your music (*.ogg) — gitignored
 ├── src/
 │   ├── main.c                 # SDL2 entry point, input, frame loop, config
 │   ├── actraiser_rtl.c        # game-specific HLE/runtime glue + cheats
 │   ├── actraiser_spc_player.c # SPC/audio upload handling
+│   ├── hd_replacements.c      # HD-art manifest parsing + per-frame gates
+│   ├── music_replacements.c   # music manifest + OGG loop streamer + triggers
+│   ├── settings.c / settings_overlay.c  # live settings registry + host menu
 │   ├── config.c               # .ini parsing
 │   └── gen/                   # ★ regenerated C output — NOT committed (you
 │                                 produce this locally via tools/regen.sh)
 ├── third_party/
-│   └── snesrecomp/            # our fork of the recompiler engine + runtime
-│                                 (separate git repo, gitignored here — clone
-│                                 it yourself, see Build below)
+│   ├── snesrecomp/            # our fork of the recompiler engine + runtime
+│   │                             (separate git repo, gitignored here — clone
+│   │                             it yourself, see Build below)
+│   └── stb/                   # vendored single-file libs (stb_image,
+│                                 stb_vorbis) — tracked, no install step
 ├── tools/
 │   ├── regen.sh                # the regen pipeline — run this after cloning
 │   ├── rom_info.py, lzss_decompress.py, opcode_diff.py, ... — analysis tools
@@ -178,8 +192,9 @@ which known gotcha), `SEAMS.md` tells you *what the game's internal architecture
 actually is* (object systems, dispatch
 tables, subsystem boundaries) as reverse-engineered so far, and `progress.md`
 tells you *what actually works today* (playability per stage/town + codebase
-metrics). `docs/settings-system.md` is the next-phase design for replacing
-boot-cached knobs with live settings and a host-side overlay UI.
+metrics). `docs/settings-system.md` records the architecture and implementation
+of the live settings registry, persistent user settings, and host-side overlay
+UI.
 
 ## Build instructions
 
@@ -288,7 +303,7 @@ audio code.
 `settings.ini` is loaded automatically after the selected `config.ini`. It is
 menu/user-owned and uses stable descriptor keys such as `window_scale`,
 `extended_aspect`, `pixel_aspect`, `audio_enabled`,
-`audio_master_volume`, and `ws_sprites`. The implemented atomic writer emits
+`audio_master_volume`, `menu_scale_percent`, and `ws_sprites`. The implemented atomic writer emits
 every registry row without rewriting the developer-authored `config.ini`.
 
 Resolution order is:
@@ -312,7 +327,7 @@ see `HandleInput()` in `src/main.c`:
 | `X`, `A`, `S` | SNES A, Y, X |
 | `Q`, `W` | SNES L, R |
 | Return, Right Shift | Start, Select |
-| `Esc` | quit |
+| `Esc` / `F1` | open the host settings overlay from any game state; press again to close |
 | `P` | pause |
 | `T` | turbo — fast-forward at 8 game frames per rendered frame (`AR_TURBO_MULT` to change) |
 | `F5` / `F7` | save / load state |
@@ -321,6 +336,31 @@ see `HandleInput()` in `src/main.c`:
 | `F9` | cycle 4:3 authentic → widescreen raw → widescreen full (requires `ExtendedAspectRatio`; paused BG/crop changes redraw immediately, sprite/activation changes apply next game frame) |
 | `Shift`+`F9` | dump diagnostic state |
 | `-` / `+` | decrease/increase the promoted widescreen HUD by 0.25×; the first adjustment starts from the current game presentation scale |
+
+The host settings overlay is available from every game state. In the
+overlay, Up/Down selects a row, Left/Right changes it, `Q`/`W` changes
+category, `X` or Return advances/toggles a value, `A` restores its default, and
+`Z`, Escape, or F1 closes the menu. F2 remains available for a full
+snapshot while the overlay is open. Game-frame advancement and SNES input are
+frozen until it closes; accepted changes are atomically written to
+`settings.ini`.
+
+`AR_MENU_SCALE=0` (the default, displayed as **Auto**) chooses the largest
+quarter-step content scale that preserves the settings layout in the complete
+window. The overlay always covers the renderer's real output resolution and
+aspect ratio rather than inheriting the game's presentation viewport. `100`
+makes one font-art pixel one host-output pixel; values through `800` enlarge
+the font, selector, spacing, and panels independently from both the game
+framebuffer and `AR_HUD_SCALE`.
+
+The overlay decodes ActRaiser's 256-tile 2bpp dialog font and its native
+Sky Palace dialog frame directly from the user-supplied ROM at startup.
+Alphabetic and numeric tiles therefore retain the game's real artwork and
+baked outline/shadow treatment. The frame is assembled as three independent
+category/settings/help boxes with transparent gutters over the paused game.
+Host-authored fallback glyphs and frames remain available if the expected ROM
+assets cannot be decoded. No ROM-derived graphics data is committed or sampled
+from scene-dependent VRAM.
 
 In widescreen-full mode the action/simulation HUD is composited as a host
 overlay after the game framebuffer is upscaled. `AR_HUD_SCALE=100` makes one
@@ -331,23 +371,31 @@ such as `AR_HUD_SCALE=2.5x`. Authentic 4:3 and widescreen-raw remain untouched
 comparison paths and keep the HUD inside the SNES framebuffer.
 
 **Audio controls** are also live descriptor-backed settings. They can be set in
-the config's `AR_*` bridge today and will feed the future settings UI:
+the config's `AR_*` bridge or changed through the settings overlay:
 
 | Key | Effect |
 |---|---|
 | `AR_AUDIO_VOLUME=<0..100>` | master output volume (default 100); scales the final music/SFX/MSU-1 mix |
 | `AR_DIALOG_BLIP=0` | mutes only the per-character Sky Palace dialogue sound; other uses of the same sound/event ID remain active |
+| `AR_MUSIC_REPLACEMENTS=0` | disables manifest-driven music replacement (default on, inert without audio files) |
 
-For a live probe without the overlay, use for example
+For an automated live probe without the overlay, use for example
 `AR_SETTING_SET=audio_master_volume=25`; the scheduled settings mechanism
-applies it through the same registry callback the eventual menu will use.
+applies it through the same registry callback the menu uses.
 Independent music and SFX levels are not exposed yet because the SPC/DSP mix
 must first be separated or its voice ownership proven; see
 `docs/settings-system.md`, “Audio control seams”.
 
+Custom music (OGG streaming in place of SPC songs) is covered in
+[Asset replacement](#asset-replacement-hd-art--music) below.
+
 **Cheats** (`[Cheats]` section — registry-backed `AR_*` keys are staged as the
 config layer; diagnostic-only keys are exported through the compatibility
 environment bridge):
+
+Every registry-backed cheat can be changed from the settings overlay in any
+game mode. Mode-specific cheats are saved and staged immediately, then begin
+applying when their action or simulation engine becomes active.
 
 | Key | Effect |
 |---|---|
@@ -363,6 +411,7 @@ environment bridge):
 | `AR_ANGEL_HP=1` | sim mode: infinite angel health, self-calibrating to your max |
 | `AR_PIN=<8-hex-PAR>[,...]` | generic Pro Action Replay code pinner (e.g. `7E00210A`); catalogue in `codes.txt` / `docs/ram-map.md` |
 | `AR_WARP=<region_hex><map_hex>` | sets the raw `$18:$19` target used by `F6` (default `0101`); use the verified table below |
+| `AR_WARP_AT=<gameframe>` | fires the `AR_WARP` target automatically once the game-frame counter reaches the value (headless runs can't press F6); same state caveats as F6 |
 | `AR_TURBO_MULT=<n>` | game frames per rendered frame while `T` turbo is on (default 8) |
 
 #### Verified `AR_WARP` targets
@@ -390,6 +439,56 @@ Everything else in `dev-config.ini`'s `[Debug]` section is diagnostic
 instrumentation for active bug-hunting, documented in `DEBUG.md` — not
 gameplay-relevant, off by default, and safe to ignore unless you're debugging.
 
+## Asset replacement (HD art & music)
+
+Both systems share one design: `game-assets/manifest.ini` is **tracked** and
+ships every known replacement hook active, but an entry only engages when its
+asset file exists at the path it names — the asset files themselves are
+gitignored (bring your own). Drop a file with the matching name and it appears
+on the next launch; no configuration editing needed. A missing asset is
+silently inert (fully authentic rendering/audio), so a fresh clone behaves
+exactly like the unmodified game.
+
+### HD graphics (`[replace:<name>]` entries, files under `game-assets/hd/`)
+
+Substitutes HD art for individual graphics via a declared plane: `screen`
+(screen-locked elements like the title logo — any resolution, scales to the
+output viewport) or `mode7` (canvas-space art rendered through the live Mode-7
+matrix, so rotation/zoom/HDMA warps apply to the HD art). The title
+logo/medallion ships as the worked example, engaged by dropping
+`game-assets/hd/title-logo.png`. Toggled live by `hd_replacements` /
+`AR_HD_REPLACEMENTS`. Full plane/key/gate reference: the manifest header and
+`docs/rendering-engine.md` §13.
+
+### Music (`[music:<name>]` entries, files under `game-assets/audio/`)
+
+Streams OGG Vorbis files in place of the SPC driver's songs — sound effects
+stay authentic (the SPC driver keeps running; only its per-song instrument
+voices are muted at the DSP). All 17 songs of the ROM's song table ship as
+inert manifest entries (`audio/title.ogg` is the title theme). Adding a track
+needs no configuration: whenever a song starts without audio, the console
+prints exactly what to provide, e.g.
+
+```
+[music] src=18:947F song=01 authentic — drop game-assets/audio/song-00.ogg to replace ([music:song-00])
+```
+
+so one normal play session identifies every track — rename the `song-NN`
+entry/file in the manifest as you recognize each one. Loops are
+sample-accurate: set `LOOPSTART`/`LOOPLENGTH` Vorbis comment tags in the file
+(the RPG Maker convention, so existing tagging tools work), or
+`loop_start`/`loop_end` keys in the manifest entry; untagged files loop whole.
+Per-entry `when =` gates (same grammar as the HD art entries) select
+game-state-dependent variants of the same song — first matching entry wins,
+an ungated entry is the fallback. Toggled live by `music_replacements` /
+`AR_MUSIC_REPLACEMENTS`; `AR_MUSICLOG=1` adds verbose tracing (uploads, event
+ids, mix peaks). Full key reference: the manifest header and `docs/SEAMS.md`
+“Audio”.
+
+Note the licensing angle before sharing packs: files ripped from the original
+game (its soundtrack, its art) are copyrighted content and belong in the
+gitignored asset directories only — see the next section.
+
 ## What can (and can't) be committed here
 
 This repo mixes original engineering (safe to commit) with content mechanically
@@ -408,6 +507,11 @@ contributing:
   nothing to commit here, ever.
 - Audio/video recordings captured from a running instance (`*.wav`, replay
   recordings) — same reasoning as memory dumps, but for audio/video instead.
+- Asset-pack files under `game-assets/` (`hd/*.png`, `audio/*.ogg`) — a rip of
+  the original soundtrack or art is copyrighted content even after
+  re-encoding, and even a fully original fan arrangement is yours, not this
+  repo's, to distribute. The tracked `manifest.ini` (our own hook metadata) is
+  the only file that belongs in git there.
 - Trace/log files from debugging sessions (`*.jsonl`, `*.trace`, `*.log`,
   `*.cdl`) — these encode per-frame memory-state traces from actual gameplay.
 - Prebuilt third-party binaries (e.g. the `snes9x_libretro.dylib` reference

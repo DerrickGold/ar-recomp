@@ -147,12 +147,20 @@ silently attributed to future widescreen code.
 
 ## Remaining proper-widescreen roadmap
 
-The immediate implementation focus moves to the runtime settings/overlay plan
-in [settings-system.md](settings-system.md). Phases 1-4 are now implemented:
-the 34-row registry owns every wired application/game setting, resolves
+The immediate implementation focus is the runtime settings/overlay plan in
+[settings-system.md](settings-system.md). Phases 1-4 and the first Phase-5 UI
+slice are now implemented: the 36-row registry owns every wired
+application/game setting, resolves
 `config.ini < settings.ini < environment`, persists atomically, and exposes
-live/restart apply metadata. Phase 5—the descriptor-driven in-game overlay—is
-next. The remaining widescreen backlog is:
+live/restart apply metadata. The SDL host overlay renders descriptor-driven
+categories and rows, freezes game advancement while open, consumes SNES input,
+saves accepted changes, and scales independently. Escape/F1 opens it globally
+from every game state before emulated input dispatch. The authentic 2bpp font,
+selector, and three-panel dialog frame are decoded from the user-supplied ROM
+into full-window host atlases with independently scaled contents. Remaining
+Phase-5 work is custom editors/ACTION rows and gamepad input; a native menu
+entry is optional.
+The remaining widescreen backlog is:
 
 1. **Finish action presentation.** Implement the camera/world-edge clamp above.
    The separate Death Heim `70X` flow is already repaired and directly
@@ -200,8 +208,10 @@ next. The remaining widescreen backlog is:
 | Sim-mode town simulation | 🟡 | Fillmore ✅ end-to-end; Bloodpool entry/lightning partial; full Bloodpool plus Kasandora/Aitos/Marahna/Northwall baselines pending. Reward web and multi-actor cutscenes fixed 2026-07-07 (`DEBUG.md` #18b/§7.17). |
 | Scroll/MP persistence | ✅ | `$0295` persistent / `$21` working-copy model mapped + grant verified across modes (2026-07-07) |
 | Audio (music/SPC) | 🟡 | SPC upload handshake and boss-music playback fixed; a narrower "voice/SFX key-on" gap was reported and its current status isn't confirmed — verify before marking ✅ |
+| Music replacement (OGG streaming) | 🟡 | 2026-07-16: manifest-driven OGG streaming live (`[music:]` in `game-assets/manifest.ini`, all 17 song-table entries enumerated): port-0 play/halt protocol decoded, srcn>=0x0C DSP voice gate keeps SFX authentic, sample-accurate loops (LOOPSTART tags), `when =` variant gates. Title theme verified headless end-to-end (engage/loop/fallback/toggle). Pending: in-game listening pass, per-src identification of the 16 unnamed songs, driver fade capture. |
 | Mode 7 (overworld/menus) | 🟡 | Frame-pacing bug (1/3 speed) fixed; not otherwise deeply verified |
 | Input | 🟡 | Hardcoded keyboard mapping works (see README); no gamepad support yet. Consumer side fully mapped (SEAMS "Input" + "Magic system") |
+| Runtime settings overlay | 🟡 | Phase-5A host overlay opens globally with Escape/F1 from any game state: descriptor categories/values, full-window independently scaled three-panel native dialog theme, ROM-decoded font/frame atlases, frozen-game input capture, restart/sticky feedback, and atomic `settings.ini` saves. Custom editors/ACTION rows and gamepad input remain; a native menu entry is optional. |
 | Cheats | 🟡 | Named cheat kit 2026-07-07: `AR_ALL_MAGIC`/`AR_RANGED_SWORD`/`AR_INF_MP`/`AR_INF_SP`/`AR_ANGEL_HP` + magic-safe `AR_NO_KNOCKBACK` + generic `AR_PIN`; real 8x turbo on `t`. `AR_FREEZE_TIMER` auto-backoff added, still unverified. `AR_NO_KNOCKBACK` is not physics-neutral: its pinned invulnerability suppresses water drag (confirmed 2026-07-12). |
 | Debug tooling | ✅ | 2026-07-07 toolkit: `dis65`/`romxref`/`wram`/`resolve_miss`/`cycle.sh` — anomaly capture → auto-triage → proposed cfg patch loop (`DEBUG.md` §1) |
 | Action widescreen BG/sprites | 🟡 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, fast vertical rows, sprites, activation, narrow-BG2 mirror/repeat policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. Remaining: general camera/world-edge clamp for full presentation coverage. |

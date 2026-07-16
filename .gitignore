@@ -1,10 +1,13 @@
-# User-supplied HD art packs stay out of the repo (assets/ is docs imagery
-# only). The manifest itself IS tracked as a template of discovered,
-# commented-out replacement hooks — see docs/rendering-engine.md §13.1.1.
+# User-supplied HD art / music packs stay out of the repo (assets/ is docs
+# imagery only). The manifest itself IS tracked as a template of discovered
+# replacement hooks — see docs/rendering-engine.md §13.1.1 and docs/SEAMS.md
+# "Audio".
 game-assets/*
+!game-assets/manifest.ini
 !game-assets/hd/
 game-assets/hd/*
-!game-assets/hd/manifest.ini
+!game-assets/audio/
+game-assets/audio/*
 
 # ROM files (user must supply their own)
 *.sfc
@@ -14,6 +17,7 @@ game-assets/hd/*
 *.png
 *.ppm
 *.wav
+*.ogg
 *.bin
 *.rec
 !assets/*.png

@@ -2,18 +2,24 @@
 
 Design for a single source of truth that captures every custom setting (cheats,
 widescreen knobs, display/audio, QoL) and defines each one's **path to live
-runtime updates**, so a future in-game overlay menu can flip them mid-run. This
+runtime updates**, so the host overlay menu can flip them mid-run. This
 is the "option B" refactor from the 2026-07-12 settings scan.
 
-Status: **PHASES 1–4 IMPLEMENTED; PHASE 5 NEXT.** `src/settings.{c,h}` now own
+Status: **PHASES 1–4 AND THE PHASE-5A OVERLAY SLICE IMPLEMENTED.**
+`src/settings.{c,h}` now own
 the existing cheat fields, nine widescreen behavior gates, render profile,
-host-output HUD scale, application display/aspect/audio fields, and a 34-row
+host-output HUD/menu scales, application display/aspect/audio fields, and a 36-row
 descriptor registry with lookup, formatting, availability, mutation,
 callbacks, sticky/restart results, observer notification, layered INI loading,
 and atomic persistence. The promoted game HUD proves the post-upscale
 host-compositor seam; master audio gain, audio enable, fullscreen, window
 sizing, and the Sky Palace dialogue blip prove the live callback paths. The
-settings menu itself and the independent save codec/backends/editor remain.
+first host settings menu now renders registry categories/rows with the
+ROM-decoded font and selector, consumes input, freezes game advancement while
+remaining redrawable, applies live values, and atomically saves accepted
+changes. The native dialog-frame theme is also ROM-decoded. A native menu
+entry, custom-value editing, ACTION rows, and the independent save
+codec/backends/editor remain.
 Companion docs:
 [SEAMS.md](SEAMS.md) (gameplay/tunable seams the cheats hook),
 [rendering-engine.md](rendering-engine.md) (widescreen policy internals),
@@ -148,7 +154,7 @@ the crop and draw-time BG policies:
 | Widescreen FULL | present the complete framebuffer | enable every shipped widescreen correction and use the scene-specific policy table |
 
 The enum also has a non-cycling `CUSTOM` state. Boot-time `AR_WS_*` values are
-classified by their actual combination; a future overlay must mark the profile
+classified by their actual combination; the overlay marks the profile
 `CUSTOM` whenever it edits one individual widescreen field. Selecting a preset
 is an action that deliberately overwrites those fields. This prevents the UI
 from claiming “FULL” while, for example, sprite widening is disabled.
@@ -258,6 +264,15 @@ Required behavior:
 5. Closing the overlay must release/restore captured input so a held menu key
    cannot become a stuck SNES button.
 
+The Phase-5A slice implements those lifecycle rules in
+`src/settings_overlay.{c,h}`. Escape or F1 opens it globally before emulated
+input dispatch, independent of `$18/$19` or any native menu state. Neither key
+maps to the SNES controller, and opening clears the currently held emulated
+buttons before freezing frame advancement. Escape/F1/B closes the overlay;
+closing clears input again so no menu navigation can become a stuck game
+button. Window-manager quit remains available while Escape is owned by the
+menu.
+
 The current ActRaiser target is C and links SDL2 only. A reusable RmlUi launcher
 exists under `snesrecomp/runner/src/launcher/`, but it is not part of
 `runner.cmake` and expects C++ plus an existing OpenGL 3.3 context; ActRaiser
@@ -266,8 +281,45 @@ therefore a small SDL-rendered immediate UI with an in-repo bitmap font. Reusing
 RmlUi remains a later option if the runtime adopts its GL/C++ integration (see
 §10.4).
 
-The game HUD now validates this seam without implementing the settings menu.
-In widescreen-full scenes, the PPU extracts the promoted BG3 status pixels and
+That SDL frontend now renders directly in the renderer's physical output
+coordinates. Its canvas is always the complete window resolution and therefore
+inherits the window aspect ratio, not the letterboxed game viewport. Three
+independent panels (category, settings, and help) leave transparent gutters
+that expose the paused game. Font glyphs, selectors, borders, row spacing, and
+column padding use an independent nearest-neighbor content scale.
+`menu_scale_percent=0` selects the largest 0.25x step that retains a minimum
+464×208 layout; `100` means one source-art pixel per host-output pixel, and the
+current range reaches `800` for high-DPI displays. Manual values larger than
+the available window are fit-clamped for rendering without rewriting the
+saved preference.
+
+The font is the game's real 256-tile, 8×8, 2bpp dialog set. The title asset
+script's second `$80` operation uploads it to BG3 VRAM `$5000`; its encoded
+pointer `$0B:ECFB` normalizes to ROM `$17:ECFB`, file offset `$0BECFB`.
+The first word is the exact `$1000`-byte output size. A host equivalent of
+`$02:C5C9` decodes the continuously packed MSB-first stream once during overlay
+initialization into small normal/dim/warning atlas textures. Pixel classes map
+to transparent, black outline, pale-blue shadow, and white face, preserving the
+font's baked treatment. ASCII letters, lowercase letters, and digits map
+directly to tile indices; tile `$3E` supplies the selector. Host-authored
+supplements replace the colon, percent, dollar, and restart-marker slots that
+contain unrelated game symbols. If ROM validation or decoding fails, the
+compact 5×7 host font supplies the atlas instead. An SDL texture-allocation
+failure still aborts initialization normally. No ROM-derived bytes are
+committed, and the overlay never samples scene-dependent live VRAM.
+
+The panels use the game's native Sky Palace dialog frame as an 8×8 nine-slice.
+Runtime snapshots `runs/20260716-072558/snapshots/snap_00_gf460` and
+`snap_01_gf668` proved the character bank byte-identical to ROM `$0D:C000`
+(file `$06C000`) and palette 7 at ROM `$1C:BF73` (file `$0E3F73`). The host
+decodes `$CE/$CF` corners, `$DE/$DF` vertical edges, `$EE` horizontal edge, and
+opaque-black `$FF` center directly from the supplied ROM. Vertical flips
+produce the lower corners/top edge. This deliberately bypasses the 16×16
+metatiles `$4E/$4F`: they mix the lower dialog corners with Sky Palace scenery
+tile `$18`, which is not part of the reusable frame.
+
+The promoted game HUD is a separate earlier validation of the same host
+compositor seam. In widescreen-full scenes, the PPU extracts the promoted BG3 status pixels and
 the exact selected-magic OAM signature into transparent ARGB surfaces. The SDL
 present path first upscales the ordinary game texture, then switches to physical
 renderer-output coordinates and composites the HUD chunks at
@@ -342,6 +394,18 @@ DSP key-on/voice/source activity. Acceptance requires captures from every major
 mode and an explicit echo test; a slider that merely changes DSP master volume
 would be a mislabeled duplicate of the implemented master control.
 
+- **Music replacement (`music_replacements` / `AR_MUSIC_REPLACEMENTS`, default
+  on, passive).** Master toggle for manifest-driven OGG music streaming
+  (`[music:]` entries of `game-assets/manifest.ini`; see docs/SEAMS.md
+  "Audio"). Inert without audio files. Live-off mid-song is handled by
+  `MusicReplacements_FrameTick()` on the game thread: it stops the stream and
+  clears the DSP voice gate (`g_dsp_voice_mute_srcn_min`), so the (still
+  authentically running but silenced) SPC sequencer becomes audible mid-track
+  and the next song change is fully authentic. Note the srcn>=0x0C voice-gate
+  discovery here is ALSO prerequisite work for the music/SFX slider problem
+  above: if the srcn split proves stable across all modes, option 1 becomes
+  "scale srcn>=0x0C voices" rather than full voice-ownership RE.
+
 ### 4.1 The save backend / `APPLY_SAVE` path
 
 Save edits are structurally unlike cheats. A cheat pins WRAM every frame; a save
@@ -402,8 +466,9 @@ an active persistence backend.
 
 The full set of user-facing settings the menu should expose. Booleans note their
 default polarity (cheats default **off** = `(e && e[0]!='0')`; widescreen
-quality knobs default **on** = `!(e && e[0]=='0')`). "Avail." = the
-`available()` predicate.
+quality knobs default **on** = `!(e && e[0]=='0')`). Cheats are always editable
+and persist immediately; “Applies” identifies the engine in which their
+per-frame enforcement becomes active.
 
 ### Cheats (`CAT_CHEATS`) — all PASSIVE
 
@@ -415,19 +480,24 @@ live values are disabled/re-enabled. Leaving full No Knockback clears only the
 i-frame timer/flag that mode owns; experimental raw-offset pins cannot safely
 restore an unknown prior byte.
 
-| Setting | env | Type | Default | Avail. | Effect / RAM |
+| Setting | env | Type | Default | Applies | Effect / RAM |
 |---|---|---|---|---|---|
 | All Magic | `AR_ALL_MAGIC` | bool | off | all modes | unlock 4 spells `$0299-$029C` |
 | Ranged Sword | `AR_RANGED_SWORD` | bool | off | all modes | `$00E4=$80` projectile |
 | Infinite MP | `AR_INF_MP` | int | off (`1`→10) | all modes | pin scroll count `$21` |
-| Infinite SP | `AR_INF_SP` | bool | off | all modes | `$0282/83 = $0284/85` (self-cal) |
-| Angel HP | `AR_ANGEL_HP` | bool | off | all modes | `$0286 = $0287` (self-cal) |
+| Infinite SP | `AR_INF_SP` | bool | off | simulation | `$0282/83 = $0284/85` (self-cal) |
+| Angel HP | `AR_ANGEL_HP` | bool | off | simulation | `$0286 = $0287` (self-cal) |
 | Infinite HP | `AR_INF_HP` | int | off (`1`=auto) | action | pin `$1D` |
 | Freeze Timer | `AR_FREEZE_TIMER` | bool | off | action | pin `$E6/$E7`; auto-release on boss drain |
 | Moonjump | `AR_MOONJUMP` | int px/f | off (`1`→6) | action | move `$08A4` up while btn held |
 | — Moonjump button | `AR_MOONJUMP_BTN` | mask | `$8000` (B) | action | sub-setting of Moonjump |
 | No Knockback | `AR_NO_KNOCKBACK` | int | off (`1`=full) | action | invuln `$08C6`/`$08D1` (magic-safe) |
 | Custom codes | `AR_PIN` | custom | empty | all modes | up to 32 PAR `7Exxxxvv` pins/frame |
+
+The menu does not dim or reject action-only cheats while simulation, Sky
+Palace, a cutscene, or a title flow is active (and vice versa). A change is
+saved immediately, then the existing mode-gated runtime hook begins enforcing
+it naturally when the relevant engine becomes active.
 
 ### Widescreen behavior (`CAT_WIDESCREEN`) — all PASSIVE
 
@@ -449,6 +519,7 @@ restore an unknown prior byte.
 | Setting | Source | Type | Default | Apply |
 |---|---|---|---|---|
 | HUD output scale | `AR_HUD_SCALE` | int percent or `x` suffix | Match game (`0`) | PASSIVE; `100` = native output 1× |
+| Menu output scale | `AR_MENU_SCALE` | int percent or `x` suffix | Auto (`0`) | PASSIVE; full-window content scale from 25–800, `100` = native 1× |
 | HD replacements | `AR_HD_REPLACEMENTS` | bool | on | PASSIVE; inert when art is absent |
 | Master volume | `AR_AUDIO_VOLUME` | int percent | 100 | CALLBACK; atomic post-mix gain, live `0..100` in steps of 5 |
 | Dialogue text blip | `AR_DIALOG_BLIP` | bool | on | PASSIVE; exact `$01:902D` COP request only |
@@ -508,8 +579,8 @@ its encoding is untested.
   same-directory temporary file and atomic replacement. The menu owns
   `settings.ini`; devs own `config.ini`; env still overrides both. Load order:
   `defaults → config.ini → settings.ini → env → live`.
-- Phase 5 will invoke `Settings_Save("settings.ini")` after accepted menu
-  mutations. Existing diagnostic hotkeys and `AR_SETTING_SET` remain
+- The Phase-5 overlay invokes `Settings_Save("settings.ini")` after accepted
+  menu mutations. Existing diagnostic hotkeys and `AR_SETTING_SET` remain
   session-only so automated probes do not silently rewrite user preferences.
 - Restart-class rows store the desired/persisted value in `g_settings`, while
   already-created renderer/PPU/audio resources consume a boot snapshot. This
@@ -555,7 +626,7 @@ read mutable format fields directly from `g_settings`.
    callbacks, formatting, sticky warnings, restart results, and a host observer
    are present. New Config/audio/save rows must supply the same metadata as they
    migrate in Phases 4/6.
-4. **Phase 4 — persistence + Config merge (implemented).** The 34-row registry
+4. **Phase 4 — persistence + Config merge (implemented).** The registry
    owns every wired display/aspect/audio field. `config.ini` is a lower-priority
    compatibility layer, `settings.ini` load/save is descriptor-driven and
    atomic, real env values remain distinguishable and highest-priority, and
@@ -564,10 +635,15 @@ read mutable format fields directly from `g_settings`.
    paths. Independent music/SFX gain remains research-gated by the audio-seam
    criteria above; dead template config keys remain excluded rather than being
    promoted as fake settings.
-5. **Phase 5 — overlay UI.** Add the host overlay at the §3.4 present/input seam.
-   Render rows from `SettingDesc[]`, write `g_settings`, intercept menu input,
-   pause game-frame advancement while open, and expose ACTION commands without
-   duplicating their existing hotkey implementations.
+5. **Phase 5 — overlay UI (5A vertical slice implemented).** The SDL host
+   overlay now renders rows from `SettingDesc[]`, writes `g_settings`, persists
+   accepted mutations, intercepts menu input, freezes game-frame advancement,
+   and scales independently. Escape/F1 opens it globally from every game
+   state. The verified ROM font/selector asset is now decoded
+   into host atlases; the same path builds the native three-panel dialog-frame
+   theme, and the menu scales over the full window. Remaining 5B work: add
+   richer custom-value editors and ACTION rows, optionally add a native menu
+   entry, and add gamepad input when the runner gains it.
 6. **Phase 6 — save codec, backends, and editor (`CAT_SAVE`).** Independent of
    Phases 1–5 and schedulable after the current regeneration settles: it owns
    `g_sram` persistence, not the cheat gates. Split it into reviewable pieces:

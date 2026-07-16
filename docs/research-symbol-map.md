@@ -92,7 +92,7 @@ run it after any bank00.cfg handler work.
 | Address | Candidate symbol | Status | Contract / observation | Evidence |
 |---|---|---|---|---|
 | `$00:FE89` | `DeathHeim_TeleportOutSequencer` | Verified | Boss-death victory driver (object slot 50, base `$1320`); reachable only via spawn-record data words, never by code reference. Chain: `$86FA` wait 64 → `$FE9D` (player cutscene state `$0800`, beam copies player position, COP `$A0`) → `$FEE6` → wait 32 → `$FEEC`. | [rom map](rom-map.md), [bug ledger #20](bug-ledger.md) |
-| `$00:FEEC` | `DeathHeim_StageWarpToHub` | Verified | Writes rush progress `$0347 = $19 - 1`, stages the warp with a 16-bit `LDA #$0701; STA $1A`, sets the final-boss flag `$0334` when `$19==8`, and deallocates the driver. | [rom map](rom-map.md) |
+| `$00:FEEC` | `DeathHeim_StageWarpToHub` | Verified | Writes rush progress `$0347 = $19 - 1`, stages the warp with a 16-bit `LDA #$0701; STA $1A`, selects current-song id `$0334=1` when `$19==8`, and deallocates the driver. `$0334` is audio state, not a separate final-boss flag. | [rom map](rom-map.md) |
 | `$00:F3D4` | `DeathHeim_HubStageNextBoss` | Verified | Hub map `0701` spawn-record handler (record `$F3C8` in the `$F39A` table): stages `$1A = $0347 + 2`, `$1B = $18`; branches to the all-done path when `$0347==7`. | [rom map](rom-map.md) |
 | `$00:A343/$00:A375` | `PostDeathHeim_RegionCompletionStager` | Mapped | Post-Death-Heim return flow (distinct from the per-boss warp): checks six-region completion over `$7F:6B18` on the `$1B=0` path. The all-regions-complete variant is the one flow not yet exercised in a verified run. | [bug ledger #20](bug-ledger.md) |
 
@@ -107,6 +107,7 @@ run it after any bank00.cfg handler work.
 | `$02:B825` | `Tilemap_DecodeColumnRecord` | Verified | Decodes level map/metatiles into a caller-supplied column record. | [rendering §4](rendering-engine.md#4-bg-tilemap-streaming-action-stages) |
 | `$02:B8A0` | `Tilemap_DecodeRowRecord` | Verified | Decodes level map/metatiles into a caller-supplied row record. | [rendering §4](rendering-engine.md#4-bg-tilemap-streaming-action-stages) |
 | `$02:B90D` | `Tilemap_ExpandMetatile` | Verified | Expands a metatile ID through the live definition table and attributes. | [rendering §4](rendering-engine.md#4-bg-tilemap-streaming-action-stages) |
+| `$02:C5C9` | `Asset_DecompressLzRing` | Mapped | MSB-first bitstream decoder: literal token or 256-byte sliding-window backreference. Host reproduction decodes the dialog-font asset at ROM `$17:ECFB` to exactly `$1000` bytes. | [settings overlay assets](settings-system.md#34-host-overlay-integration-seam) |
 | `$02:B6F8-$02:B726` | `SkyPalace_SetupMetatilePage` | Mapped | Conditionally copies the Sky Palace source page at ROM `$07:D0A0` to WRAM `$7E:C200`. | [SEAMS UI seam](SEAMS.md#logic-hardware-seam-inventory) |
 | `$02:B727` | `Tilemap_RebuildWholeMap` | Mapped | Performs whole-map record mega-bursts used by setup/UI recomposition paths. | [rendering §3](rendering-engine.md#3-the-upload-record-system-tilemap-writes-all-of-them) |
 | `$02:BC56` | `ActionTileAnimation_Tick` | Mapped | Advances action tile animation and arms DMA descriptor slot 1. | [rendering §1](rendering-engine.md#1-frame-pipeline-overview) |
@@ -179,8 +180,9 @@ run it after any bank00.cfg handler work.
 | `$02:9964/$02:9A56` | `Spc_UploadImageFromDp` | Verified | Two-stage SPC uploaders (HLE'd): stage 1 streams a length/target block image, stage 2 installs BRR sample chunks from the ROM pool. The 24-bit source pointer lives at DP `+$A5` (`LDA [$A5],Y`), not DP `+0`. Post-boot uploads drive the game's own resident ARAM uploader at `$0F0E`. | [SEAMS audio](SEAMS.md#audio--closest-to-a-clean-interface--start-here) |
 | `$02:9ACD` | `Spc_BootImageDriver` | Mapped | Boot-time upload driver; installs the sound engine at ARAM `$0400` and jumps it there. | [SEAMS audio](SEAMS.md#audio--closest-to-a-clean-interface--start-here) |
 | `$00:A3FE-$00:A454` | `BossMusic_LoadHandshake` | Verified | Six-step blocking CPU↔SPC handshake: send `$F1` → `$A410` wait for echo → send `$01` → `$A427` wait for port clear → `$A431` send `$F0` → completion at `$A454`. Timing-sensitive; HLE'd upload plus native handshake is the working combination. | [SEAMS audio](SEAMS.md#audio--closest-to-a-clean-interface--start-here) |
-| `$02:AC33` | `Audio_ConsumeCopRequest` | Verified | Reads the COP event id from `$035A`, clears it, and writes it to APU port `$2142` — COP event ids are **audio/event commands**, not spawn requests (a proven red herring). | [SEAMS audio](SEAMS.md#audio--closest-to-a-clean-interface--start-here) |
-| `$02:B63B/$02:B66C` | `Audio_CommandConsumer` | Observed | Post-upload playback command consumer (start/stop/fade port writes); the instrumentation point for track-level music replacement. | [SEAMS audio](SEAMS.md#audio--closest-to-a-clean-interface--start-here) |
+| `$02:AC29-AC3C` | `Nmi_ForwardAudioRequests` | Verified | NMI tail: one 16-bit `LDA $035A; STZ $035A; STA $2142` forwards BOTH request ports per frame — COP event id (`$035A` → port `$2142`, low byte) and BRK SFX id (`$035B` → port `$2143`, high byte) — alternating with a zero write on odd frames (`LSR $88` carry gate). COP event ids are **audio/event commands**, not spawn requests (a proven red herring). Decoded fully 2026-07-16. | [SEAMS audio](SEAMS.md#audio--closest-to-a-clean-interface--start-here) |
+| `$02:B63B/$02:B66C` | `Audio_ScriptSongChange` | Verified | `[$A2]`-script song-change handler: reads song number + image id, no-ops if `$0334` (current song) already matches, else `$F0` halt → `$FF` → `JSL $9964` upload → song number to `$2140` (the play command). Decoded 2026-07-16; the port-0 vocabulary it defines drives music replacement (see SEAMS "APU port-0 command protocol"). | [SEAMS audio](SEAMS.md#audio--closest-to-a-clean-interface--start-here) |
+| `$0334` | `Wram_CurrentSongId` | Verified | Currently-loaded song id; compared by `Audio_ScriptSongChange` to skip redundant reloads, zeroed by the transition stop at `$00:83F2`. | dis65 of `$02:B64B`, romxref `$0334` |
 
 ## Data and table candidates
 
@@ -206,6 +208,9 @@ the eventual symbol format.
 | ROM `$08:8000` | `BrrSampleChunkPool` | Verified | Length-prefixed `[len16][BRR data]` instrument chunks; the chunk index is a stable ROM-wide instrument ID (per-sample HD-swap seam). | [SEAMS audio](SEAMS.md#audio--closest-to-a-clean-interface--start-here) |
 | ARAM `$0F0E/$0F12/$0F48` | `SpcResident_Uploader` | Verified | The sound engine's own resident uploader (SPC-side, not SNES bus): entry `$0F0E`, `$CC`-wait spin `$0F12`, finalize tail `$0F48` (`MOV X,#$31; MOV $F1,X; RET`). The HLE completes it by jumping `spc->pc` to the tail. | [SEAMS audio](SEAMS.md#audio--closest-to-a-clean-interface--start-here) |
 | ROM `$07:D0A0` | `SkyPalace_MetatilePage` | Verified | 16×16 source metatile page copied by Sky Palace setup. | [rendering Sky Palace](rendering-engine.md#6-sky-palace-bg2-dialog-staging) |
+| ROM `$17:ECFB` | `DialogFont_CompressedTiles` | Verified | Compressed asset whose first word declares a `$1000`-byte 256-tile 8×8 2bpp output. Font tile indices correspond to character codes; decoded by `$02:C5C9` into BG3 character space. File offset `$0BECFB`. | [settings overlay assets](settings-system.md#34-host-overlay-integration-seam) |
+| ROM `$0D:C000` | `SkyPalace_BgCharacterBank` | Verified | `$4000`-byte BG character bank, byte-identical to VRAM `$0000-$1FFF` words in both gf460/gf668 Sky Palace captures. Contains dialog-frame chars `$CE/$CF/$DE/$DF/$EE/$FF`. File offset `$06C000`. | [rendering UI/dialog](rendering-engine.md#11-ui--dialog-compose-sim-engine) |
+| ROM `$1C:BF73` | `SkyPalace_DialogPalette7` | Verified | Exact 16-color CGRAM palette used by the 8×8 dialog-frame characters. File offset `$0E3F73`; stable across ordinary dialogue and submenu captures. | [rendering palette paths](rendering-engine.md#10-palette-paths) |
 
 ## Stable state anchors used by handwritten code
 
@@ -232,7 +237,8 @@ polymorphic fields and temporary direct-page values should remain local.
 | `$7E:0021` | `WorkingMp` | Act-mode working MP/scroll count; loaded from persistent MP at act entry. |
 | `$7E:0295` | `PersistentMp` | Persistent MP/scroll count (save-backed); written only via long addressing by reward grants. |
 | `$7E:02AC` | `SelectedMagic` | Equipped magic id chosen in the equip menu; zero blocks casting. |
-| `$7E:0334` | `DeathHeimEndState` | Final-boss/ending sequencing flag (1 = final-boss teleport-out ran). |
+| `$7E:0336` | `TitleMenuSelection` | Continue/new-game/professional selection used by `$02:A622`; observed values 0–2 in the interactive title state. |
+| `$7E:0334` | `CurrentSongId` | Currently loaded song id; values observed during Death Heim transitions identify music changes, not a distinct ending-state flag. |
 | `$7E:0347` | `DeathHeimProgress` | Boss-rush progress (`$19 - 1` after each boss); `7` = all bosses beaten. |
 | `$7E:035A/$035B` | `CopEventRequest` / `BrkSfxRequest` | Software-interrupt request ports (music/event id, SFX id). |
 | `$7F:6B18` | `RegionCompletionFlags` | Six-region completion bitset checked by the post-Death-Heim return stager. |

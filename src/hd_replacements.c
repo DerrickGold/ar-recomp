@@ -38,8 +38,9 @@ static bool ParseRect4(const char *value, int *x0, int *y0, int *x1, int *y1) {
   return *x1 > *x0 && *y1 > *y0;
 }
 
-/* One comparison: <operand> ==|!= <value>. Returns false on syntax error. */
-static bool ParseCondition(char *term, HdCondition *cond) {
+/* One comparison: <operand> ==|!= <value>. Returns false on syntax error.
+ * Shared with the music manifest parser (music_replacements.c). */
+bool HdManifest_ParseCondition(char *term, HdCondition *cond) {
   memset(cond, 0, sizeof(*cond));
   char *op = strstr(term, "==");
   cond->negate = 0;
@@ -83,21 +84,22 @@ static bool ParseCondition(char *term, HdCondition *cond) {
   return false;
 }
 
-static bool ParseWhen(char *value, HdReplacement *entry) {
+bool HdManifest_ParseWhen(char *value, HdCondition *conditions, int max,
+                          int *count) {
   char *cursor = value;
   while (cursor && *cursor) {
     char *comma = strchr(cursor, ',');
     if (comma) *comma = 0;
     char *term = TrimInPlace(cursor);
     if (term[0]) {
-      if (entry->condition_count >= kHdMaxConditions) return false;
-      if (!ParseCondition(term, &entry->conditions[entry->condition_count]))
+      if (*count >= max) return false;
+      if (!HdManifest_ParseCondition(term, &conditions[*count]))
         return false;
-      entry->condition_count++;
+      (*count)++;
     }
     cursor = comma ? comma + 1 : NULL;
   }
-  return entry->condition_count > 0;
+  return *count > 0;
 }
 
 /* Resolve an image path relative to the manifest's directory. */
@@ -172,6 +174,8 @@ int HdReplacements_Load(const char *path) {
         pending.brightness_mod = true;
         in_entry = true;
         entry_line = line_number;
+      } else if (!strncmp(s + 1, "music:", 6)) {
+        /* Another module's sections in the shared manifest — not ours. */
       } else {
         fprintf(stderr, "[hd-manifest] %s:%d: unknown section '%s]' ignored\n",
                 path, line_number, s);
@@ -205,7 +209,8 @@ int HdReplacements_Load(const char *path) {
     } else if (!strcmp(key, "image")) {
       ResolveImagePath(path, value, pending.image, sizeof(pending.image));
     } else if (!strcmp(key, "when")) {
-      ok = ParseWhen(value, &pending);
+      ok = HdManifest_ParseWhen(value, pending.conditions, kHdMaxConditions,
+                                &pending.condition_count);
     } else if (!strcmp(key, "brightness")) {
       pending.brightness_mod = strtoul(value, NULL, 0) != 0;
     } else {
@@ -233,8 +238,11 @@ int HdReplacements_Load(const char *path) {
 
 /* ---- per-frame policy -------------------------------------------------- */
 
-static bool ConditionPasses(const HdCondition *cond) {
+bool HdManifest_ConditionPasses(const HdCondition *cond) {
   uint16 actual = 0;
+  /* PPU-dependent operands never pass without a PPU (headless music gates);
+   * WRAM operands stay valid everywhere. */
+  if (!g_ppu && cond->kind != kHdCond_WramByte) return false;
   switch (cond->kind) {
     case kHdCond_WramByte: actual = g_ram[cond->address]; break;
     case kHdCond_BgMode: actual = (uint16)(g_ppu->bgmode & 7); break;
@@ -266,7 +274,7 @@ void HdReplacements_EvaluateFrame(void) {
       continue;
     bool pass = true;
     for (int c = 0; c < entry->condition_count && pass; c++)
-      pass = ConditionPasses(&entry->conditions[c]);
+      pass = HdManifest_ConditionPasses(&entry->conditions[c]);
     if (!pass)
       continue;
     /* One capture rect per source (and one Mode-7 override) per frame is a

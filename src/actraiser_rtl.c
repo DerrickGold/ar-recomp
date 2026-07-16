@@ -815,7 +815,7 @@ void ActRaiserDrawPpuFrame(void) {
    * source page. The paired restore after scanout preserves UI staging. */
   ActRaiser_WidescreenSkyPalacePrepare();
   ActRaiser_WidescreenMagicHudPromote();
-  /* Manifest-driven HD substitutions (game-assets/hd/manifest.ini) — e.g. the
+  /* Manifest-driven HD substitutions (game-assets/manifest.ini) — e.g. the
    * settled title logo. Runs after the HUD/OAM capture policies so a busy
    * source is detected rather than clobbered; entries without host-loaded
    * art never request captures, keeping headless/oracle output authentic. */

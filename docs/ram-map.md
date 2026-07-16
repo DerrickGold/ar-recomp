@@ -111,6 +111,19 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:0200 | 1 | Text display speed |
+| $7E:0336 | 1 | Title `CONTINUE / NEW GAME` selection index. Observed values are 0–2; `$02:A622` initializes/reads it and `$02:A7E9` remaps it for the unlocked ending/professional-state marker. |
+
+The directly captured interactive title state at game-frame 821 also has
+`$0300=$0100`, `$0302=$0110`, `$92=$0C`, and `$0336<=2`. Those presentation
+values remain useful evidence about the native title renderer, but the
+host-settings overlay no longer depends on them: Escape/F1 opens it globally
+before emulated input dispatch.
+
+The overlay itself has no emulated WRAM state to map. Its open flag, selection,
+scroll position, decoded font/frame textures, and menu input live entirely on
+the host. Opening and closing clear the host joypad accumulator before the next
+NMI sample; while open, game-frame advancement is frozen, so no hidden
+in-game “settings mode” byte or PPU page is introduced.
 
 ## Town Simulation Data ($7E:0200+)
 
@@ -167,7 +180,7 @@ Two-byte entries per town.
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:033E | 1 | Temple action (0x00=Give Oracle, 0x01=Listen, 0x02=Take Offering) |
-| $7E:0334 | 1 | Death Heim/ending state: `$00:FEFC` sets 1 when final-boss teleport-out runs with `$19==8`; `$00:F650` sets 3 only after the returning `0701` sky fade-in and `$0349` wait, so it is too late to identify the black-frame BG page swap (`$00:F5F0-$F619`, BG1SC/BG2SC `$64/$74`) |
+| $7E:0334 | 1 | **Current song id** (RE-IDENTIFIED 2026-07-16 — earlier "Death Heim/ending state" reading was a misread of music state). The `[$A2]`-script song-change handler `$02:B64B` compares it to skip redundant reloads; written by ~10 play sites (`$00:828F/A370/F650/FF04`, `$01:8602/8754/8856`, `$02:8345/BD2A`, `$03:8262`); zeroed by the transition music-stop at `$00:83F2`. The old observations still hold reinterpreted: `$00:FEFC` "sets 1" = plays song 1 at final-boss teleport-out, `$00:F650` "sets 3" = starts song 3 after the returning `0701` sky fade-in — so it was always too late/irrelevant for the black-frame BG page swap (`$00:F5F0-$F619`, BG1SC/BG2SC `$64/$74`) |
 | $7E:0341 | 1 | Current town ID (also read by the `$00:A375` post-Death-Heim return stager as the pending destination) |
 | $7E:0347 | 1 | Death Heim boss-rush progress: `$00:FEEC` writes `$19 - 1` after each boss (hub stager `$F3D4` warps to `$0347+2` next); 0x07 = final boss beaten |
 
@@ -175,8 +188,8 @@ Two-byte entries per town.
 
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:035A | 1 | Accumulator low byte at last COP instruction |
-| $7E:035B | 1 | Accumulator low byte at last BRK instruction |
+| $7E:035A | 1 | Music/event request port: COP vector `$00:8526` stores A's low byte here (`LDA #id; COP`). Consumed by the NMI tail `$02:AC33` every other frame as the LOW byte of one 16-bit load, forwarded to APU port `$2142`, then zeroed (see SEAMS "APU port-0 command protocol") |
+| $7E:035B | 1 | SFX request port: BRK vector `$00:852F` stores A's low byte here (`LDA #id; BRK`). Forwarded as the HIGH byte of the same 16-bit NMI store to APU port `$2143` and zeroed together with `$035A` |
 
 ## High RAM ($7F:0000+)
 

@@ -17,7 +17,9 @@
 #include "common_cpu_infra.h"
 #include "config.h"
 #include "settings.h"
+#include "settings_overlay.h"
 #include "hd_replacements.h"
+#include "music_replacements.h"
 #include "run_dir.h"
 #include "util.h"
 #include "actraiser_spc_player.h"
@@ -265,7 +267,7 @@ static void RtlDrawPpuFrame(void) {
  * paused iterations retain that texture, so pause never advances the game or
  * repeatedly replays the scanline/HDMA renderer. */
 static void RedrawPausedFrameIfNeeded(void) {
-  if (g_paused && g_paused_redraw_pending) {
+  if ((g_paused || SettingsOverlay_IsOpen()) && g_paused_redraw_pending) {
     RtlDrawPpuFrame();
     g_paused_redraw_pending = false;
   }
@@ -704,7 +706,7 @@ static void RenderHudOverlay(SDL_Rect viewport) {
  * AR_HD_MANIFEST overrides the default manifest location for experiments. */
 static void LoadHdReplacements(void) {
   const char *path = getenv("AR_HD_MANIFEST");
-  if (!path || !path[0]) path = "game-assets/hd/manifest.ini";
+  if (!path || !path[0]) path = "game-assets/manifest.ini";
   if (!HdReplacements_Load(path)) return;
   int with_art = 0;
   for (int i = 0; i < g_hd_replacement_count; i++) {
@@ -872,6 +874,7 @@ static bool RenderFramebuffer(void) {
   RenderMode7Overlay(viewport);
   RenderHudOverlay(viewport);
   RenderHdReplacements(viewport);
+  SettingsOverlay_Render(viewport);
   ApplyRendererLogicalSize();
   return true;
 }
@@ -1093,7 +1096,21 @@ int main(int argc, char **argv) {
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   }
 
+  if (!SettingsOverlay_Init(g_renderer, rom_data, rom_size))
+    Die("SDL font atlas creation for settings overlay failed");
+
   Settings_SetChangeObserver(OnRuntimeSettingChanged);
+
+  /* Music replacement is audio-side and works headless too (unlike the HD
+   * manifest load above, which needs the renderer for textures). Same
+   * manifest file; [music:] sections. AR_MUSIC_MANIFEST overrides. */
+  {
+    const char *music_manifest = getenv("AR_MUSIC_MANIFEST");
+    if (!music_manifest || !music_manifest[0])
+      music_manifest = "game-assets/manifest.ini";
+    MusicReplacements_Load(music_manifest);
+    MusicReplacements_InstallHooks();
+  }
 
   g_spc_player = ActRaiserSpcPlayer_Create();
 
@@ -1183,8 +1200,21 @@ int main(int argc, char **argv) {
           running = false;
           break;
         case SDL_KEYDOWN:
-          if (event.key.keysym.sym == SDLK_ESCAPE) {
-            running = false;
+          if (SettingsOverlay_IsOpen()) {
+            bool was_open = true;
+            bool consumed = SettingsOverlay_HandleKey(
+                event.key.keysym.sym, true, event.key.repeat != 0);
+            if (was_open && !SettingsOverlay_IsOpen()) g_input_state = 0;
+            if (consumed) break;
+          }
+          /* The settings UI is host-owned and safe in every emulated state.
+           * Escape/F1 are not SNES inputs, so consume them before HandleInput
+           * and clear held joypad state before freezing game advancement. */
+          if (!event.key.repeat &&
+              (event.key.keysym.sym == SDLK_ESCAPE ||
+               event.key.keysym.sym == SDLK_F1)) {
+            g_input_state = 0;
+            SettingsOverlay_Open();
           } else if (event.key.keysym.sym == SDLK_p) {
             g_paused = !g_paused;
           } else if (event.key.keysym.sym == SDLK_t) {
@@ -1271,12 +1301,16 @@ int main(int argc, char **argv) {
           }
           break;
         case SDL_KEYUP:
-          HandleInput(event.key.keysym.sym, false);
+          if (SettingsOverlay_IsOpen())
+            (void)SettingsOverlay_HandleKey(event.key.keysym.sym, false,
+                                            false);
+          else
+            HandleInput(event.key.keysym.sym, false);
           break;
       }
     }
 
-    if (g_paused) {
+    if (g_paused || SettingsOverlay_IsOpen()) {
       RedrawPausedFrameIfNeeded();
       if (!headless) PresentFramebuffer();
       SDL_Delay(16);
@@ -1436,6 +1470,33 @@ int main(int argc, char **argv) {
      * (takes its own APU lock — must be outside the lock above). */
     { extern void ar_uploader_complete_tick(void); ar_uploader_complete_tick(); }
 
+    /* Music replacement live policy (setting toggled off mid-song). Takes
+     * its own APU lock — also outside the lock above. */
+    MusicReplacements_FrameTick();
+
+    /* AR_WARP_AT=<gameframe>: fire the AR_WARP target automatically once the
+     * 16-bit game-frame counter reaches the value. Headless runs can't press
+     * F6; used e.g. to sweep the warp table capturing each level's music src
+     * (AR_MUSICLOG). Same transition-capable-state caveats as F6. */
+    {
+      static long warp_at = -2;
+      static bool warp_fired;
+      if (warp_at == -2) {
+        const char *at = getenv("AR_WARP_AT");
+        warp_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
+      }
+      if (warp_at >= 0 && !warp_fired) {
+        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+        if (gf >= (unsigned)warp_at) {
+          warp_fired = true;
+          extern void ActRaiser_Warp(unsigned region, unsigned map);
+          const char *w = getenv("AR_WARP");
+          unsigned v = (w && w[0]) ? (unsigned)strtoul(w, NULL, 16) : 0x0101;
+          ActRaiser_Warp((v >> 8) & 0xFF, v & 0xFF);
+        }
+      }
+    }
+
     /* Auto-persist battery SRAM the moment the game writes a save, so progress
      * survives a freeze/force-quit (the clean-exit RtlWriteSram never runs if
      * the game hangs). Cheap: only writes when the 8KB SRAM actually changes.
@@ -1562,6 +1623,7 @@ int main(int argc, char **argv) {
     free(g_hd_replacements[i].pixels);
   }
   SDL_DestroyTexture(g_m7_texture);
+  SettingsOverlay_Destroy();
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);
   SDL_DestroyTexture(g_texture);

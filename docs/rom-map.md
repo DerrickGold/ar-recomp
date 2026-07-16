@@ -36,7 +36,25 @@
 ## Detailed Data Regions
 
 ### SPC700 Audio Driver
-- **0x11ACD-0x12621** (2,901 bytes): SPC700 program uploaded to audio RAM
+- **0x11ACD-0x12621** (2,901 bytes): SPC700 program uploaded to audio RAM.
+  This is the `$02:9ACD` boot upload image (block target ARAM `$0400`); the
+  upload/playback protocol it speaks on APU port 0 is decoded in
+  docs/SEAMS.md "APU port-0 command protocol".
+
+### Song table and song images ($02:C7E5, decoded 2026-07-16)
+- **0x147E5-0x14817**: 17-entry song pointer table, 3-byte (lo/hi/bank)
+  pointers to each song's SPC image. Entry 7 (`$1A:94B8`) = the title theme.
+  All 17 srcs are enumerated as `[music:]` entries in
+  `game-assets/manifest.ini`; a few additional songs arrive via inline
+  `[$A2]`-script pointers read through `$02:B4C0` rather than this table.
+- **0x32C00+** (`$06:AC00`): the COMMON sample-bank image uploaded once at
+  boot — sequence data at ARAM `$2400`, DSP sample directory page at `$2C00`,
+  and the stage-2 script installing BRR chunks 0-11 (srcn `$00-$0B`, the
+  SFX/shared instruments). Not a song despite living in the same upload path.
+- Song images (e.g. title at 0xD14B8 = `$1A:94B8`) carry their own per-song
+  instruments as stage-2 chunk indices installed from srcn `$0C` upward —
+  the srcn split that lets host music replacement mute music voices while
+  keeping SFX authentic.
 
 ### Game Data Tables
 - **0x1B40E-0x1B431**: Experience level requirements (population-based)
@@ -127,6 +145,10 @@ not collapse any of these to raw OAM tile numbers.
 ### Audio Samples (0x40000-0x4FD2D)
 32 BRR-encoded sound samples (indices 0x00-0x21).
 Each sample has a 16-bit length header followed by BRR audio data.
+This is the stage-2 chunk pool (`$08:8000`) scanned linearly by the `$02:9964`
+upload HLE: each song image's terminator doubles as a script of chunk indices
+selecting which samples stream into ARAM (common bank = chunks 0-11 → srcn
+`$00-$0B`; per-song instruments land at srcn `$0C+`). See SEAMS "Audio".
 
 ### Compressed Data (0x70000+)
 Extensive compressed sprite composition, map arrangement, and tileset data

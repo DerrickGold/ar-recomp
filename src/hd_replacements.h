@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include "types.h"
 
-/* Manifest-driven HD graphics replacements (game-assets/hd/manifest.ini).
+/* Manifest-driven HD graphics replacements (game-assets/manifest.ini).
  *
  * Each [replace:<name>] entry declares a substitution "plane" — the tool used
  * to swap the graphic. Planes deliberately have different capability tiers:
@@ -88,6 +88,14 @@ extern int g_hd_replacement_count;
 /* Parse a manifest. Returns the number of entries loaded; 0 with no error
  * output if the file simply does not exist. Safe to call once at startup. */
 int HdReplacements_Load(const char *path);
+
+/* The gate mini-language is shared with the music manifest sections
+ * (music_replacements.c): one comparison term / one full comma-separated
+ * `when` value, and the matching evaluator. Both mutate the input string. */
+bool HdManifest_ParseCondition(char *term, HdCondition *cond);
+bool HdManifest_ParseWhen(char *value, HdCondition *conditions, int max,
+                          int *count);
+bool HdManifest_ConditionPasses(const HdCondition *cond);
 
 /* Per-frame game policy: evaluate every screen-plane entry's gate and request
  * overlay captures for the winners. Call from the frame hook after the other

@@ -31,7 +31,7 @@ identity are the perishable, expensive-to-rederive parts.
 | Music / event | `LDA #id; COP` → `$035A`; COP vector `$FFE4→$8526`; hook `ActRaiser_CopHook` | APU ports `$2140-43` | "play music / fire event N" | event/song id (A → `$035A`) — song images via the `$02:C7E5` pointer table + inline script pointers (see below) | 🟢 |
 | Sound effect | `LDA #id; BRK` → `$035B`; BRK vector `$FFE6→$852F`; hook `ActRaiser_BrkHook` | APU ports | "play SFX N" | sfx id (A → `$035B`) | 🟢 |
 | Dialogue glyph blip | message glyph helper `$01:901C`; non-space request block `$01:902D` does `LDA #$07; COP` | `$035A` request path | "glyph printed" | exact call site + id `$07`; `audio_dialog_blip` suppresses only this site because `$07` is reused elsewhere | 🟢 |
-| Song upload (image identity) | `$02:9964` HLE — stage 1 (`$9A56` block image) + stage 2 (BRR streaming) | APU ports + ARAM | "load song N's sequence + instruments" | image src addr = song identity (e.g. `06:AC00` title, `1A:94B8` song 7); song table `$02:C7E5` (17 entries, 3-byte ptrs); more pointers inline in the `[$A2]` command scripts read via `$02:B4C0` | 🟢 |
+| Song upload (image identity) | `$02:9964` HLE — stage 1 (`$9A56` block image) + stage 2 (BRR streaming) | APU ports + ARAM | "load song N's sequence + instruments" | image src addr = song identity (`06:AC00` = common sample bank, `1A:94B8` = title = song 7); song table `$02:C7E5` (17 entries, 3-byte ptrs, all enumerated in `game-assets/manifest.ini`); more pointers inline in the `[$A2]` command scripts read via `$02:B4C0` | 🟢 |
 | **BRR sample bank (per-sample!)** | stage 2 of the `$9964` HLE (`RtlUploadSpcImageFromDpInternal`, common_rtl.c) | ARAM `$3000-$6E67` (common) / `$795F+` (per-song) | "install instrument waveforms" | chunk pool at ROM `$08:8000` — length-prefixed `[len16][BRR data]` chunks, selected by index; script = image terminator's target word (lo byte = count, hi byte onward = chunk indices); dest base = WRAM `$0358` | 🟢 |
 | Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
 | Final PCM out | `RtlRenderAudio` (common_rtl.c) → `dsp_getSamples`/MSU-1 mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | `audio_master_volume` applies atomic post-mix gain here; music/SFX identity is already lost | 🟢 |
@@ -41,20 +41,52 @@ identity are the perishable, expensive-to-rederive parts.
 > Found while fixing the boss-music handshake and the silent-DSP bug (memory:
 > `spc-upload-dp-pointer-fix`, `cop-syscall-hook-fix`, `post-boss-four-issues`; DEBUG.md §7.11).
 
-### Audio swap/enhancement points (mapped 2026-07-03 while fixing the silent-DSP bug)
+### APU port-0 command protocol (decoded 2026-07-16 for music replacement)
 
-The whole sample pipeline is now understood end-to-end, which gives four distinct
-quality/replacement tiers, from least to most invasive:
+Static decode of `$02:B63B` (script-driven song change), `$00:A3FE/A410/A427`
+(boss-music go-signal chain), and the NMI tail `$02:AC29-AC3C`, confirmed live
+via an `AR_APULOG` boot capture:
 
-1. **Track-level replacement (stream swap).** Song identity is visible at the moment of
-   upload: the stage-1 image source address (logged by `AR_APULOG`) uniquely names the track
-   (`06:AC00` = title, `1A:94B8` = song 7, the 17-entry table at `$02:C7E5` = the rest of the
-   soundtrack; a few more arrive via inline script pointers through `$02:B4C0`). A HAL backend
-   can key "now playing" off that address in the `$9964` HLE, mute the DSP mix in
-   `RtlRenderAudio`, and stream a modern recording instead — no ROM or SPC changes. Playback
-   *commands* after upload (start/stop/fade) arrive as port writes; those still need a small
-   command-level capture before full music replacement is seamless (the `$02:B63B`/`$B66C`
-   command consumer is the place to instrument).
+| Port | Value | Meaning |
+|---|---|---|
+| `$2140` | `$F0` | halt music (driver acks by clearing the port to 0) |
+| `$2140` | `$F1` | attention/prepare (driver echoes `$F1` back; a song number follows) |
+| `$2140` | `$FF` | enter the resident uploader (the `$9964` HLE bypasses the stream) |
+| `$2140` | `$00` | idle/clear |
+| `$2140` | else | **play song N** of the most recently uploaded song image |
+| `$2142` | id | event/music command forwarded once per NMI from COP → `$035A` |
+| `$2143` | id | SFX id forwarded once per NMI from BRK → `$035B` (16-bit store with `$2142`) |
+
+A song change is always `$F0` → (`$FF` + upload) → song number; the boss chain
+plays an already-loaded bank via `$F1`-echo → song number. Boot order: `02:9ACD`
+= SPC mini-driver, **`06:AC00` = the COMMON sample bank** (srcn 00-0B — the
+earlier "= title" note in the table above was wrong), `1A:94B8` = the title
+song (= entry 7 of the `$02:C7E5` table), played with song number `$01`.
+Fade commands have not been observed yet — `AR_MUSICLOG=1` logs unknown port-0
+values and nonzero port-2 ids to catch them in play.
+
+### Audio swap/enhancement tiers (tier 1 SHIPPED 2026-07-16)
+
+1. **Track-level replacement (stream swap) — IMPLEMENTED** as
+   `src/music_replacements.c` + `[music:<name>]` sections of
+   `game-assets/manifest.ini` (all 17 table songs enumerated; the tracked
+   manifest ships them inert until their .ogg exists). Identity = the stage-1
+   image source address captured by an engine upload hook
+   (`g_rtl_spc_upload_hook`); start/stop keyed off the port-0 protocol above
+   via `g_rtl_apu_port_hook`; OGG Vorbis streaming (stb_vorbis) with
+   sample-accurate loops (manifest `loop_start/loop_end` >
+   `LOOPSTART/LOOPLENGTH` Vorbis tags > whole file) mixed in
+   `RtlRenderAudio`'s locked region via `g_rtl_music_mix_hook`, msu1-style.
+   Muting: every handshake/port write stays authentic (zero soft-lock risk);
+   instead the DSP excludes voices with srcn >= 0x0C from the dry mix and
+   echo input (`g_dsp_voice_mute_srcn_min`, dsp.c) — per-song instruments
+   live there while SFX use the common bank by design (KONLOG-verified on the
+   title: music keys srcn 0C/0D). Per-entry `when =` gates (shared HD gate
+   grammar, sampled at song start) select level/state-dependent variants;
+   first matching entry wins, ungated entry = fallback. `music_replacements`
+   setting / `AR_MUSIC_REPLACEMENTS` toggles live; `AR_MUSICLOG=1` traces.
+   Known gap: driver-side fades aren't captured yet (streams hard-stop on
+   `$F0` exactly when the driver halts, so transitions stay correct).
 2. **Instrument-level replacement (per-sample HD swap).** Stage 2 of the HLE installs each
    instrument as a discrete, identifiable unit: chunk index N from the `$08:8000` pool → known
    ARAM range → known `srcn` via the `$2C00` directory. Because our code performs the copy, it
@@ -98,6 +130,7 @@ key-on state: srcn/pitch/volumes/ADSR + first BRR bytes — all-zero BRR = sampl
 | **Action OAM pipeline (fully mapped 2026-07-10)** | `$00:8C98` per-frame cull (obj vs 256×224 window keyed on camera `$22/$24`; sets/clears offscreen bit `$0400` in obj+`$30`) → `$00:8D68` sprite builder (walks 7-byte sprite defs at bank obj+`$18`, ptr obj+`$20`+5; draw window x∈[-16,256) y∈[-16,224); writes `$0380` shadow + packed high-table bits via `$00/$9A/$9C`) → `$00:923A`→`$9258` **HUD sprites** (from the `$06:A800` bank-6 table: FIXED screen positions, no camera math, no cull — widescreen-safe/centered) → OAM DMA `$02:ACA6` (544B `$0380`→`$2104`) | OAM | "which objects are visible + build their hardware sprites" | see ram-map.md "OAM shadow + sprite-build working vars" | 🟡 Stages C/D1/D2 and the combined wide path are directly validated across every action level in regions `$01-$07`, including the complete Death Heim flow. Wide activation is default-on; `AR_WS_MARGIN_ACTIVATION=0` is the fidelity gate. |
 | **Action BG streaming (FULLY mapped 2026-07-12 — rendering-engine.md §3/§4/§12a)** | Camera `$02:B091` (clamp vs level dims `$2E/$30`) sets 16px-crossing flags in `$93` → dispatcher `$02:B127` (TRB per bit) → `$02:B158` column strips (2 cols × 64 rows) / `$02:B1AF` row strips (2 rows × 64 cols, span `[cam&~$FF,+512)` — 256-aligned, page-keyed decode) per layer (X=0 BG1, X=4 BG2) → ONE record into the layer's fixed buffer (`$3900/$3A02/$3B04/$3C06`, capacity 1/frame) → NMI drain `$02:ACC8/$ACE5` → `$02:ADA8` 64B chunks. 64×64-tile ring per layer (BG1 `$6000`, BG2 `$7000`); entry draw = inline mega-burst (full ring, one frame). The old "tier-2 burst" = `$B1AF` row strips (walk bob). Northwall `0601`: `$00:E7BC` → `$02:945E` builds `$7E:6000`; `$02:96B6` points HDMA ch2 at `$210F` (`BG2HOFS`). | VRAM BG1/BG2 tilemaps | "keep the resident 512×512px tilemap ring fed as the camera moves" | level map decode via section config `$02:893E` + metatile tables | 🟡 original recompiled builders remain active and regions `$01-$07`, including the complete Death Heim flow, are directly validated. Stage B transactionally refreshes valid world margins while restoring CPU/WRAM/math state. Full margin columns remain cached on `$24&$FF00`; newly exposed vertical rows use `$B8A0` at `$24&$FFF0`, selectively draining neighboring-band columns when the 342px view straddles the row decoder's 512px page span. Narrow `$32<$0200` BG2 is never refreshed: the presentation layer pads an isolated authentic render (reflection normally; cyclic repeat for Aitos/Northwall maps `$01-$05/$08`), or clamps with `AR_WS_BG2_MIRROR=0`; none of these paths changes game VRAM/state. Remaining: presentation-aware camera/world-edge limits. |
 | UI/dialog tilemap compose+upload (sim engine) | `$02:BF60` dispatches message text into BG3 buffer `$7F:B000` → `$02:AEEB`, while the visible box frame and offscreen work boxes remain BG2; whole-map BG refreshes use `$02:B727`/`$B825` record mega-bursts and `$02:ADA8` as a 64B DMA helper. Sky Palace setup at `$02:B6F8-$B726` conditionally copies ROM `$07:D0A0` to `$7E:C200`. | BG3 text plus WRAM/VRAM BG2 map state | "draw the active UI while retaining offscreen work pages" | message-type IDs via `$14` (see Save/persistence note on `$14` reuse) | 🟡 major paths separated. Live `$B825` decode reproduced staging (`runs/20260712-232230`); narrow raw-edge reflection produced broken columns; center reflection copied the BG2 box (11:36 PM capture). Current render transaction reads `$07:D0A0`, reconstructs the box-covered rows per column class (row-major quadrants; shaft continuation; seam base halves at meta cols 0/15; floor top 2 rows under the box bottom; `$41/$49` flare + `$40/$48`/`$42/$4A` skirts at shaft columns — base art exists only in the metatile table), expands via `$7E:2900`, patches only margin BG2 columns, then restores VRAM. ✅ Validated 2026-07-13: byte-identical to the game's boot colonnade (scratch cols 56-63 rows 18-31); user-confirmed clean in dialogue + submenu states. |
+| **Native dialog presentation assets (verified 2026-07-16)** | compressed BG3 font at ROM `$17:ECFB` (file `$0BECFB`) → `$02:C5C9` decode → `$1000` bytes; Sky Palace BG char bank at ROM `$0D:C000` (file `$06C000`, `$4000` bytes); palette 7 at ROM `$1C:BF73` (file `$0E3F73`) | BG3 font / BG1+BG2 chars / CGRAM | "render ActRaiser's text and beveled dialog frame" | font tile index = character code; frame chars `$CE/$CF` corners, `$DE/$DF` sides, `$EE` horizontal edge, `$FF` black fill | 🟢 F2 captures `runs/20260716-072558/snapshots/snap_00_gf460` and `snap_01_gf668` supplied byte-exact VRAM/CGRAM identity. The reusable frame is an 8×8 nine-slice: vertical flips produce the top edge/lower corners. Do not reuse 16×16 metatiles `$4E/$4F`; each includes palette-1 Sky Palace scenery tile `$18` beside the real corner. Host settings decode only immutable ROM assets and never sample live scene VRAM. |
 | BG mode / layers | `$2105` BGMODE, `$212C/2D` main/sub, scroll regs | PPU | "set up background layers/scroll" | — | 🔴 |
 | HDMA (raster fx, HBlank) | HDMAEN `$420C`; ActRaiser drives ch 2/3 (and others) | HDMA | "per-scanline effect" | HDMA tables | 🔴 |
 | Mode 7 (overworld / transitions) | m7matrix; `$2134` multiply; the act-select spin | PPU mode 7 | "rotate/zoom the world map" | m7 transform params | 🔴 |
@@ -119,18 +152,19 @@ confirmed centered complete faces/causeway and clean animated fog across both
 margins.
 
 The post-final-boss `0701` switch requires boss-rush progress `$0347>=7`, but
-must not wait for ending state `$0334>=3`. Paired captures in
+must not wait for current-song id `$0334>=3`. Paired captures in
 `runs/20260714-184728/` prove why `$0347` alone is too early:
 `snap_01_gf14676` is `$0347=7/$0334=0` with faces still visible, while
 `snap_02_gf15031` is `$0334=3` with sky/cloud/water. The finer boundary is the
 game's own background-page handoff: `$00:F5C2-$F5E3` runs the fixed-color
 fade-to-black, `$F5E4-$F5EF` waits for the statue-removal child, and
 `$F5F0-$F619` writes BG1SC/BG2SC `$64/$74` before starting the fade-in at
-`$F625`. `$0334=3` is not written until `$F650`, after that fade-in and an
-additional `$0349` wait, which direct testing in `runs/20260714-185817/` found
-visibly late. The render policy therefore switches when `$0347>=7` and the
-live BGSC page bases are `$64/$74` (with `$0334>=3` only as a settled-state
-fallback). It clamps BG1 and whole-scanline mirrors BG2 instead of using the
+`$F625`. Song id `$0334=3` is not selected until `$F650`, after that fade-in
+and an additional `$0349` wait, which direct testing in
+`runs/20260714-185817/` found visibly late. The render policy therefore
+switches when `$0347>=7` and the live BGSC page bases are `$64/$74` (with
+song id `$0334>=3` only as a settled-state fallback). It clamps BG1 and
+whole-scanline mirrors BG2 instead of using the
 normal `y=144-223` band. Mirroring removes the cyclic cloud-edge seam;
 resident face tiles remain irrelevant because padding copies the live
 post-window rendered BG2. Direct testing on 2026-07-14 confirmed that the clamp
@@ -1184,7 +1218,7 @@ establishes or changes a semantic identity.
 | `$01:8000` | **sim-mode building/icon per-frame updater** — region-gated (`$19`), drives the `$2920`/`$208E`/`$B420` `JSR (abs,X)` tables; deep body at `$018170` does the actual per-building work via `JSL $1B1C7`. |
 | `$00:8465` | writes a hardware-register-style immediate (`LDA #$A1`) — same pattern as the NMITIMEN setup at `$008051`; called from `ResetHandler`'s sim-dispatch tail (`$008122`). Its own native width (`M1X0`) runs correctly — confirmed NOT a misdecode (2026-07-01), just legitimate register churn that was mistaken for corruption early in that investigation. |
 | `$00:8241` | called twice per main-loop iteration (`$008056` and `$00805C`, sandwiching the `$8418` vblank wait) — role not yet traced. |
-| `$02:A622` | **title-screen continue/new-game state machine.** Calls the save checksum (`$02:A88D`) at `$02A70A`, branches on the result (`$02A70D: BCC $A72F`) to one of two dialog flows — see "Save / persistence" below. |
+| `$02:A622` | **title-screen continue/new-game state machine.** Calls the save checksum (`$02:A88D`) at `$02A70A`, branches on the result (`$02A70D: BCC $A72F`) to one of two dialog flows, and owns selection byte `$0336`. Phase-5 host evidence captured the interactive menu at gf821 with `$18/$19=00/00`, `$0300/$0302=0100/0110`, `$92=0C`, and `$0336<=2`. These remain useful renderer-state observations, but the settings overlay no longer depends on them: Escape/F1 is intercepted globally before emulated input dispatch — see "Save / persistence" below. |
 | `$02:A88D` | **save-data validity checksum.** Computes a 16-bit ADD-sum and a 16-bit XOR-sum over SRAM `$700000-$701FEB` (calls `$02:84F3` to do the accumulation), compares against stored expected values at `$701FEC`/`$701FEE`. Returns pass/fail via carry (`CLC`=pass, `SEC`=fail). Confirmed correct 2026-07-01 (`AR_SAVECHECK`) — passes cleanly against a real mid-game save. |
 | `$02:84F3` | **checksum accumulator loop** — `LDX #0; loop: LDA $700000,X; ADC $14; STA $14; EOR $16; STA $16; INX INX; CPX #$1FEC; BNE loop`. `$14`/`$16` are its scratch accumulator — see the DP-scratch-reuse gotcha in `DEBUG.md` §0. Confirmed byte-identical across its `M0X0`/`M1X0` width variants (not a misdecode candidate despite an early `mxhist` flag). |
 | `$02:BF60` | **dialog/message-box draw dispatcher.** Takes a message-type ID via `A` (stored into the SAME `$14` DP scratch the checksum uses), branches on ID (`CMP #0/1/6/8/9/$B`) to different message-rendering sub-routines. Called by both `$02:A622` branches with different message sets. |

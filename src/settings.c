@@ -29,7 +29,6 @@ static bool s_boot_display_from_environment;
  * file-local g_snes_width. */
 extern bool g_ws_active;
 extern int g_ws_extra;
-extern uint8 g_ram[0x20000];
 
 static int InferDisplayMode(void);
 
@@ -121,10 +120,6 @@ static int FormatPins(char *buffer, int buffer_size, const void *field) {
   return used;
 }
 
-static bool ActionModeAvailable(void) {
-  return g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07;
-}
-
 static void WidescreenSettingChanged(const SettingDesc *desc) {
   (void)desc;
   g_settings.display_mode = InferDisplayMode();
@@ -157,6 +152,21 @@ static bool ParseHudScale(const char *text, void *field) {
   if (*end) return false;
   *out = (int)value;
   return true;
+}
+
+static int FormatMenuScale(char *buffer, int buffer_size, const void *field) {
+  int value = *(const int *)field;
+  if (!value) return snprintf(buffer, (size_t)buffer_size, "Auto");
+  return snprintf(buffer, (size_t)buffer_size, "%d.%02dx",
+                  value / 100, value % 100);
+}
+
+static bool ParseMenuScale(const char *text, void *field) {
+  if (!strcmp(text, "Auto") || !strcmp(text, "auto")) {
+    *(int *)field = 0;
+    return true;
+  }
+  return ParseHudScale(text, field);
 }
 
 static bool ParseAudioVolume(const char *text, void *field) {
@@ -247,8 +257,13 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_Display,
     &g_settings.hud_scale_percent, 0, 0, 400, 25, false, NULL, 0,
     NULL, NULL, ParseHudScale, FormatHudScale },
+  { "menu_scale_percent", "AR_MENU_SCALE", "Menu output scale",
+    "Scale host menu contents independently; Auto fits them to the window.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Display,
+    &g_settings.menu_scale_percent, 0, 0, 800, 25, false, NULL, 0,
+    NULL, NULL, ParseMenuScale, FormatMenuScale },
   BOOL_SETTING(hd_replacements, "AR_HD_REPLACEMENTS", "HD replacements",
-               "Substitute HD art per game-assets/hd/manifest.ini entries when their art is present.",
+               "Substitute HD art per game-assets/manifest.ini entries when their art is present.",
                kSettingCat_Display, 1, false, NULL, NULL),
   { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Extended aspect",
     "Allocate a widescreen framebuffer for an X:Y display ratio; off keeps authentic geometry.",
@@ -305,6 +320,9 @@ const SettingDesc g_setting_descs[] = {
   BOOL_SETTING(audio_dialog_blip, "AR_DIALOG_BLIP", "Dialogue text blip",
                "Play the per-character sound while Sky Palace dialogue is printed.",
                kSettingCat_Audio, 1, false, NULL, NULL),
+  BOOL_SETTING(music_replacements, "AR_MUSIC_REPLACEMENTS", "Music replacements",
+               "Stream OGG music per game-assets/manifest.ini entries when their audio is present.",
+               kSettingCat_Audio, 1, false, NULL, NULL),
   BOOL_SETTING(cheat_all_magic, "AR_ALL_MAGIC", "All magic",
                "Unlock all four spells; disabling cannot undo unlocks already written.",
                kSettingCat_Cheats, 0, true, NULL, NULL),
@@ -322,24 +340,23 @@ const SettingDesc g_setting_descs[] = {
                kSettingCat_Cheats, 0, false, NULL, NULL),
   INT_SETTING(cheat_inf_hp, "AR_INF_HP", "Infinite action HP",
               "1 tracks the stage high-water mark; larger values are literal HP.",
-              kSettingCat_Cheats, 0, 0, 255, ParseInfHp, ActionModeAvailable),
+              kSettingCat_Cheats, 0, 0, 255, ParseInfHp, NULL),
   BOOL_SETTING(cheat_freeze_timer, "AR_FREEZE_TIMER", "Freeze timer",
                "Pin the action timer until the boss tally drain is detected.",
-               kSettingCat_Cheats, 0, false, ActionModeAvailable, NULL),
+               kSettingCat_Cheats, 0, false, NULL, NULL),
   INT_SETTING(cheat_moonjump_speed, "AR_MOONJUMP", "Moonjump speed",
               "Pixels per frame while the configured button is held; 1 maps to 6.",
-              kSettingCat_Cheats, 0, 0, 255, ParseMoonjump,
-              ActionModeAvailable),
+              kSettingCat_Cheats, 0, 0, 255, ParseMoonjump, NULL),
   { "cheat_moonjump_button", "AR_MOONJUMP_BTN", "Moonjump button",
     "SNES auto-joypad mask; default $8000 is B.", kSettingType_Mask,
     kApply_Passive, kSettingCat_Cheats, &g_settings.cheat_moonjump_button,
-    0x8000, 0, 0xffff, 1, false, NULL, 0, ActionModeAvailable, NULL,
+    0x8000, 0, 0xffff, 1, false, NULL, 0, NULL, NULL,
     NULL, NULL },
   { "cheat_no_knockback", "AR_NO_KNOCKBACK", "No knockback",
     "1 is full invulnerability; other values are raw hex object offsets.",
     kSettingType_Int, kApply_Passive, kSettingCat_Cheats,
     &g_settings.cheat_no_knockback, 0, 0, 0x3f, 1, false, NULL, 0,
-    ActionModeAvailable, NULL, ParseNoKnockback, FormatNoKnockback },
+    NULL, NULL, ParseNoKnockback, FormatNoKnockback },
   { "pins", "AR_PIN", "Custom PAR pins",
     "Comma-separated 7Exxxxvv/7Fxxxxvv codes, enforced every frame.",
     kSettingType_Custom, kApply_Passive, kSettingCat_Cheats,
@@ -451,7 +468,11 @@ const SettingDesc *Settings_Find(const char *key) {
 }
 
 bool Settings_IsAvailable(const SettingDesc *desc) {
-  return desc && (!desc->available || desc->available());
+  /* Cheat values are intentionally stageable from every game state. Their
+   * runtime hooks decide when an effect applies; editing is never mode-gated. */
+  return desc &&
+         (desc->category == kSettingCat_Cheats ||
+          !desc->available || desc->available());
 }
 
 bool Settings_GetLong(const SettingDesc *desc, long *value) {

@@ -63,6 +63,7 @@ add_executable(ActRaiserRecomp
     # game-specific runtime
     src/config.c
     src/settings.c
+    src/settings_overlay.c
     src/run_dir.c
     src/main.c
     src/actraiser_00.c
@@ -70,6 +71,8 @@ add_executable(ActRaiserRecomp
     src/actraiser_cpu_infra.c
     src/actraiser_rtl.c
     src/hd_replacements.c
+    src/music_replacements.c
+    third_party/stb/stb_vorbis.c
     src/hd_tile_census.c
     src/actraiser_widescreen_bg.c
     src/actraiser_widescreen_sprites.c
@@ -140,6 +143,25 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_settings COMMAND actraiser_settings_test)
 
+    add_executable(actraiser_settings_overlay_test
+        tests/settings_overlay_test.c
+        src/config.c
+        src/settings.c
+        src/settings_overlay.c
+    )
+    target_include_directories(actraiser_settings_overlay_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SDL2_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_settings_overlay_test PRIVATE
+        ${SDL2_LIBRARIES}
+        m
+    )
+    add_test(NAME actraiser_settings_overlay COMMAND actraiser_settings_overlay_test)
+    set_tests_properties(actraiser_settings_overlay PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+
     add_executable(actraiser_hd_manifest_test
         tests/hd_manifest_test.c
         src/hd_replacements.c
@@ -149,4 +171,18 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_hd_manifest COMMAND actraiser_hd_manifest_test)
+
+    add_executable(actraiser_music_manifest_test
+        tests/music_manifest_test.c
+        src/music_replacements.c
+        src/hd_replacements.c
+        third_party/stb/stb_vorbis.c
+    )
+    target_include_directories(actraiser_music_manifest_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/third_party/stb
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_music_manifest_test PRIVATE m)
+    add_test(NAME actraiser_music_manifest COMMAND actraiser_music_manifest_test)
 endif()

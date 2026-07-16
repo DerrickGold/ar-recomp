@@ -99,8 +99,11 @@ typedef struct Settings {
   /* Absolute host-output HUD scale percent. 0 follows the game's current
    * presentation scale; 100 means one output pixel per SNES pixel vertically. */
   int hud_scale_percent;
+  /* Independent host settings-menu content scale. 0 auto-fits the complete
+   * output window in 0.25x steps; 100 is one source pixel per output pixel. */
+  int menu_scale_percent;
   /* Master toggle for manifest-driven HD graphics replacements
-   * (game-assets/hd/manifest.ini). Silently inert when the manifest/art files
+   * (game-assets/manifest.ini). Silently inert when the manifest/art files
    * are absent or the run is headless (no overlay bindings). */
   bool hd_replacements;
 
@@ -122,6 +125,11 @@ typedef struct Settings {
   int  audio_samples;
   int  audio_master_volume;  /* final host PCM gain, 0..100 percent */
   bool audio_dialog_blip;    /* per-glyph Sky Palace dialogue sound */
+  /* Master toggle for manifest-driven music replacement ([music:] entries of
+   * game-assets/manifest.ini). Silently inert when the manifest/audio files
+   * are absent. Live: turning it off mid-song stops the stream and unmutes
+   * the SPC driver's music voices; the next song change is fully authentic. */
+  bool music_replacements;
 
   /* Cheat values. Zero/false means disabled. Stateful enforcement latches are
    * deliberately kept private to ActRaiser_ApplyCheats, not stored here. */
@@ -176,7 +184,7 @@ void Settings_FinalizeDisplayMode(void);
 bool Settings_Load(const char *path);
 bool Settings_Save(const char *path);
 
-/* Descriptor/mutation API used by the future overlay and settings.ini loader.
+/* Descriptor/mutation API used by the host overlay and settings.ini loader.
  * All runtime writes go through these functions so range normalization,
  * profile invalidation, callbacks, and sticky/restart results stay uniform. */
 const SettingDesc *Settings_Find(const char *key);
