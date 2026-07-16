@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include "config.h"
 #include "settings.h"
 
 #include <stdio.h>
@@ -29,6 +30,7 @@ static void ChangeObserved(const SettingDesc *desc,
 }
 
 static void ClearSettingsEnv(void) {
+  Settings_ClearConfigLayer();
   for (int i = 0; i < g_setting_desc_count; i++) {
     if (g_setting_descs[i].env)
       unsetenv(g_setting_descs[i].env);
@@ -42,7 +44,7 @@ static void TestDefaultsAndMetadata(void) {
   g_ws_extra = 43;
   Settings_Init();
 
-  CHECK(g_setting_desc_count == 25);
+  CHECK(g_setting_desc_count == 34);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip && a->field);
@@ -57,6 +59,14 @@ static void TestDefaultsAndMetadata(void) {
   }
   CHECK(g_settings.display_mode == kDisplayMode_WideFull);
   CHECK(g_settings.hud_scale_percent == 0);
+  CHECK(g_settings.extended_aspect == 0);
+  CHECK(g_settings.pixel_aspect == kPixelAspect_Crt43);
+  CHECK(g_settings.window_scale == 3);
+  CHECK(!g_settings.fullscreen && g_settings.new_renderer);
+  CHECK(!g_settings.ignore_aspect_ratio);
+  CHECK(g_settings.audio_enabled);
+  CHECK(g_settings.audio_frequency == 44100);
+  CHECK(g_settings.audio_samples == 2048);
   CHECK(g_settings.audio_master_volume == 100);
   CHECK(g_settings.audio_dialog_blip);
   CHECK(g_settings.ws_action && g_settings.ws_sim && g_settings.ws_sprites);
@@ -80,6 +90,109 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Widescreen), "Widescreen"));
   CHECK(!strcmp(Settings_ApplyKindName(kApply_Restart), "Restart required"));
   CHECK(!strcmp(Settings_ChangeResultName(kSettingChange_Applied), "applied"));
+}
+
+static bool WriteTextFile(const char *path, const char *text) {
+  FILE *file = fopen(path, "w");
+  if (!file) return false;
+  bool ok = fputs(text, file) >= 0;
+  if (fclose(file) != 0) ok = false;
+  return ok;
+}
+
+static bool FileContains(const char *path, const char *needle) {
+  FILE *file = fopen(path, "r");
+  if (!file) return false;
+  char buffer[16384];
+  size_t size = fread(buffer, 1, sizeof(buffer) - 1, file);
+  buffer[size] = 0;
+  fclose(file);
+  return strstr(buffer, needle) != NULL;
+}
+
+static void TestConfigSettingsEnvironmentPrecedence(void) {
+  static const char config_path[] = "actraiser-settings-config-test.ini";
+  static const char settings_path[] = "actraiser-settings-layer-test.ini";
+  static const char saved_path[] = "actraiser-settings-saved-test.ini";
+  remove(config_path);
+  remove(settings_path);
+  remove(saved_path);
+  remove("actraiser-settings-saved-test.ini.tmp");
+
+  ClearSettingsEnv();
+  CHECK(WriteTextFile(config_path,
+      "[Graphics]\n"
+      "WindowScale = 4\n"
+      "Fullscreen = 1\n"
+      "ExtendedAspectRatio = 16:9\n"
+      "AspectPAR = 4:3\n"
+      "[Sound]\n"
+      "AudioFreq = 32040\n"
+      "AR_AUDIO_VOLUME = 65\n"
+      "[Cheats]\n"
+      "AR_DISPLAY_MODE = 2\n"
+      "AR_WS_SPRITES = 1\n"
+      "[KeyMap]\n"
+      "Fullscreen = Alt+Return\n"));
+  ParseConfigFile(config_path);
+
+  CHECK(WriteTextFile(settings_path,
+      "# menu-owned layer\n"
+      "window_scale = 5\n"
+      "audio_master_volume = 70%\n"
+      "extended_aspect = 16:10\n"
+      "pixel_aspect = Square pixels\n"
+      "ws_sprites = On\n"
+      "unknown_future_key = retained-by-future-version\n"));
+
+  /* Real environment values must remain distinguishable from config.ini's
+   * staged AR_* compatibility values and win over both file layers. */
+  setenv("AR_AUDIO_VOLUME", "85", 1);
+  setenv("AR_WS_SPRITES", "0", 1);
+  g_ws_active = true;
+  g_ws_extra = 52;
+  Settings_InitWithFile(settings_path);
+  Settings_FinalizeDisplayMode();
+
+  CHECK(g_settings.window_scale == 5);       /* settings > config */
+  CHECK(g_settings.fullscreen);              /* KeyMap did not clobber it */
+  CHECK(g_settings.audio_frequency == 32040);
+  CHECK(g_settings.audio_master_volume == 85); /* env > settings > config */
+  CHECK(!g_settings.ws_sprites);
+  CHECK(g_settings.display_mode == kDisplayMode_Custom);
+  CHECK(Settings_ExtendedAspectX() == 16 && Settings_ExtendedAspectY() == 10);
+  CHECK(g_settings.pixel_aspect == kPixelAspect_Square);
+
+  CHECK(Settings_SetLong(Settings_Find("window_scale"), 6) ==
+        kSettingChange_Applied);
+  CHECK(Settings_SetLong(Settings_Find("audio_master_volume"), 40) ==
+        kSettingChange_Applied);
+  CHECK(Settings_Save(saved_path));
+  CHECK(FileContains(saved_path, "window_scale = 6"));
+  CHECK(FileContains(saved_path, "audio_master_volume = 40%"));
+  CHECK(!FileContains(saved_path, "display_mode ="));
+  CHECK(!FileContains("actraiser-settings-saved-test.ini.tmp", "anything"));
+  CHECK(Settings_SetLong(Settings_Find("audio_master_volume"), 45) ==
+        kSettingChange_Applied);
+  CHECK(Settings_Save(saved_path));  /* atomically replace an existing file */
+  CHECK(FileContains(saved_path, "audio_master_volume = 45%"));
+
+  ClearSettingsEnv();
+  setenv("AR_FULLSCREEN", "false", 1);
+  g_ws_active = true;
+  g_ws_extra = 52;
+  Settings_InitWithFile(saved_path);
+  Settings_FinalizeDisplayMode();
+  CHECK(g_settings.window_scale == 6);
+  CHECK(!g_settings.fullscreen);  /* new Phase-4 env aliases use INI syntax */
+  CHECK(g_settings.audio_master_volume == 45);
+  CHECK(!g_settings.ws_sprites);
+  CHECK(g_settings.display_mode == kDisplayMode_Custom);
+  CHECK(Settings_ExtendedAspectX() == 16 && Settings_ExtendedAspectY() == 10);
+
+  remove(config_path);
+  remove(settings_path);
+  remove(saved_path);
 }
 
 static void TestLegacySeedEncodings(void) {
@@ -155,10 +268,21 @@ static void TestMutationApi(void) {
   CHECK(Settings_SetLong(dialog_blip, 0) == kSettingChange_Applied);
   CHECK(!g_settings.audio_dialog_blip);
 
+  char value[512];
+  const SettingDesc *renderer = Settings_Find("new_renderer");
+  CHECK(Settings_SetLong(renderer, 0) == kSettingChange_RestartPending);
+  CHECK(!g_settings.new_renderer);
+  const SettingDesc *aspect = Settings_Find("extended_aspect");
+  CHECK(Settings_SetText(aspect, "21:9") == kSettingChange_RestartPending);
+  Settings_FormatValue(aspect, value, sizeof(value));
+  CHECK(!strcmp(value, "21:9"));
+  const SettingDesc *window_scale = Settings_Find("window_scale");
+  CHECK(Settings_SetLong(window_scale, 4) == kSettingChange_Applied);
+  CHECK(g_settings.window_scale == 4);
+
   const SettingDesc *mp = Settings_Find("cheat_inf_mp");
   CHECK(Settings_SetLong(mp, 999) == kSettingChange_Applied);
   CHECK(g_settings.cheat_inf_mp == 255);
-  char value[512];
   Settings_FormatValue(mp, value, sizeof(value));
   CHECK(!strcmp(value, "255"));
 
@@ -209,6 +333,7 @@ static void TestNoWideBudget(void) {
 
 int main(void) {
   TestDefaultsAndMetadata();
+  TestConfigSettingsEnvironmentPrecedence();
   TestLegacySeedEncodings();
   TestMutationApi();
   TestNoWideBudget();

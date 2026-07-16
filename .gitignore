@@ -24,6 +24,10 @@ build/
 *.exe
 *.out
 
+# Menu/user-owned application settings (config.ini remains the tracked base).
+/settings.ini
+/settings.ini.tmp
+
 # snesrecomp generated output — mechanically derived from the copyrighted ROM
 # (one C function per recompiled 65816 routine). We can't distribute this;
 # users must supply their own verified ar.sfc and run tools/regen.sh, which

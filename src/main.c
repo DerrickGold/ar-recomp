@@ -45,6 +45,13 @@ static uint8 g_paused, g_turbo;
 static bool g_paused_redraw_pending;
 static uint32 g_input_state;
 static int g_snes_width = 256, g_snes_height = 224;
+/* Restart-class settings have a persisted desired value in g_settings and a
+ * boot snapshot consumed by already-created host/PPU resources. This prevents
+ * a pending-restart mutation from half-applying through an unrelated callback. */
+static int g_active_aspect_x, g_active_aspect_y;
+static int g_active_pixel_aspect = kPixelAspect_Crt43;
+static int g_active_audio_frequency = 44100;
+static int g_active_audio_samples = 2048;
 /* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
  * width can be chosen at startup without reallocation; faithful runs still
  * render/present only the leading 256*4 bytes per row via g_snes_width. */
@@ -85,6 +92,7 @@ static SDL_mutex *g_audio_mutex;
  * main/game thread. Keep the callback's one live input in an SDL atomic mirror
  * instead of racing on g_settings. */
 static SDL_atomic_t g_audio_master_percent;
+static bool g_audio_open;
 static bool RenderFramebuffer(void);
 
 void NORETURN Die(const char *error) {
@@ -220,6 +228,32 @@ static void SDLCALL AudioCallback(void *userdata, Uint8 *stream, int len) {
       samples[i] = (int16)(((int32)samples[i] * volume) / 100);
   }
   SDL_UnlockMutex(g_audio_mutex);
+}
+
+static bool OpenHostAudio(void) {
+  if (g_audio_open) return true;
+  SDL_AudioSpec want = {0}, have;
+  want.freq = g_active_audio_frequency > 0
+      ? g_active_audio_frequency : 44100;
+  want.format = AUDIO_S16;
+  want.channels = 2;
+  want.samples = g_active_audio_samples > 0
+      ? (Uint16)g_active_audio_samples : 2048;
+  want.callback = AudioCallback;
+  if (SDL_OpenAudio(&want, &have) != 0) {
+    fprintf(stderr, "SDL_OpenAudio failed: %s\n", SDL_GetError());
+    return false;
+  }
+  g_audio_open = true;
+  return true;
+}
+
+static void ApplyAudioEnabled(void) {
+  if (g_settings.audio_enabled) {
+    if (OpenHostAudio()) SDL_PauseAudio(0);
+  } else if (g_audio_open) {
+    SDL_PauseAudio(1);
+  }
 }
 
 static void RtlDrawPpuFrame(void) {
@@ -475,22 +509,23 @@ static SDL_Point WriteFramebufferPpm(FILE *pf) {
 static void ApplyDisplayPresentation(void) {
   if (!g_window || !g_renderer) return;
   int vis_w = Settings_VisibleWidth();
-  int scale = g_config.window_scale ? g_config.window_scale : 3;
+  int scale = g_settings.window_scale ? g_settings.window_scale : 3;
   int win_h = g_snes_height * scale;
   int win_w = vis_w * scale;
 
   if (g_settings.display_mode == kDisplayMode_43) {
     /* 256px at the 7:6 CRT PAR displays as 4:3. */
-    if (g_config.aspect_par_43) win_w = (win_h * 4 + 1) / 3;
-  } else if (g_ws_active && g_config.aspect_par_43) {
-    win_w = (win_h * g_config.extend_aspect_x
-             + g_config.extend_aspect_y / 2) / g_config.extend_aspect_y;
+    if (g_active_pixel_aspect == kPixelAspect_Crt43)
+      win_w = (win_h * 4 + 1) / 3;
+  } else if (g_ws_active && g_active_pixel_aspect == kPixelAspect_Crt43) {
+    win_w = (win_h * g_active_aspect_x + g_active_aspect_y / 2) /
+            g_active_aspect_y;
   }
 
   /* Logical size encodes the pixel stretch so SDL letterboxes correctly if the
    * user resizes the window themselves. Mirrors the boot-time setup. */
-  if (g_ws_active && !g_config.ignore_aspect_ratio) {
-    if (g_config.aspect_par_43)
+  if (g_ws_active && !g_settings.ignore_aspect_ratio) {
+    if (g_active_pixel_aspect == kPixelAspect_Crt43)
       SDL_RenderSetLogicalSize(g_renderer, vis_w * 7, g_snes_height * 6);
     else
       SDL_RenderSetLogicalSize(g_renderer, vis_w, g_snes_height);
@@ -503,10 +538,17 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   (void)result;
   if (desc->field == &g_settings.audio_master_volume)
     SDL_AtomicSet(&g_audio_master_percent, g_settings.audio_master_volume);
+  if (desc->field == &g_settings.audio_enabled)
+    ApplyAudioEnabled();
+  if (desc->field == &g_settings.fullscreen && g_window)
+    SDL_SetWindowFullscreen(g_window, g_settings.fullscreen
+        ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
   /* HUD scale is a display-category value but must not resize a manually
    * resized window. Only the display profile and geometry policies own the
    * presentation/window dimensions. */
   if (desc->field == &g_settings.display_mode ||
+      desc->field == &g_settings.window_scale ||
+      desc->field == &g_settings.ignore_aspect_ratio ||
       desc->category == kSettingCat_Widescreen)
     ApplyDisplayPresentation();
   if (desc->category == kSettingCat_Display ||
@@ -516,9 +558,9 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
 
 static void ApplyRendererLogicalSize(void) {
   if (!g_renderer) return;
-  if (g_ws_active && !g_config.ignore_aspect_ratio) {
+  if (g_ws_active && !g_settings.ignore_aspect_ratio) {
     int vis_w = Settings_VisibleWidth();
-    if (g_config.aspect_par_43)
+    if (g_active_pixel_aspect == kPixelAspect_Crt43)
       SDL_RenderSetLogicalSize(g_renderer, vis_w * 7, g_snes_height * 6);
     else
       SDL_RenderSetLogicalSize(g_renderer, vis_w, g_snes_height);
@@ -531,12 +573,14 @@ static SDL_Rect GetPresentationViewport(void) {
   int out_w = 0, out_h = 0;
   SDL_GetRendererOutputSize(g_renderer, &out_w, &out_h);
   SDL_Rect viewport = { 0, 0, out_w, out_h };
-  if (!g_ws_active || g_config.ignore_aspect_ratio || out_w <= 0 || out_h <= 0)
+  if (!g_ws_active || g_settings.ignore_aspect_ratio ||
+      out_w <= 0 || out_h <= 0)
     return viewport;
 
   int logical_w = Settings_VisibleWidth() *
-                  (g_config.aspect_par_43 ? 7 : 1);
-  int logical_h = g_snes_height * (g_config.aspect_par_43 ? 6 : 1);
+                  (g_active_pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
+  int logical_h = g_snes_height *
+                  (g_active_pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
   if ((int64_t)out_w * logical_h > (int64_t)out_h * logical_w) {
     viewport.w = (int)((int64_t)out_h * logical_w / logical_h);
     viewport.x = (out_w - viewport.w) / 2;
@@ -589,7 +633,8 @@ static void RenderHudOverlay(SDL_Rect viewport) {
     scale_x = (double)viewport.w / vis_w;
   } else {
     scale_y = g_settings.hud_scale_percent / 100.0;
-    scale_x = scale_y * (g_config.aspect_par_43 ? 7.0 / 6.0 : 1.0);
+    scale_x = scale_y *
+        (g_active_pixel_aspect == kPixelAspect_Crt43 ? 7.0 / 6.0 : 1.0);
   }
 
   int tex_extra = (g_snes_width - 256) / 2;
@@ -869,6 +914,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  Settings_ClearConfigLayer();
   if (config_path)
     ParseConfigFile(config_path);
   else
@@ -911,30 +957,40 @@ int main(int argc, char **argv) {
    * configured wide geometry. The oracle harness leaves it unset. */
   bool ws_headless = getenv("AR_WS_HEADLESS") && getenv("AR_WS_HEADLESS")[0]
                      && getenv("AR_WS_HEADLESS")[0] != '0';
+  /* Resolve application and game settings before allocating presentation
+   * resources. Known config.ini values were staged by ParseConfigFile;
+   * settings.ini overrides them, and real environment variables win last. */
+  Settings_InitWithFile("settings.ini");
+  g_active_aspect_x = Settings_ExtendedAspectX();
+  g_active_aspect_y = Settings_ExtendedAspectY();
+  g_active_pixel_aspect = g_settings.pixel_aspect;
+  g_active_audio_frequency = g_settings.audio_frequency;
+  g_active_audio_samples = g_settings.audio_samples;
   if ((!headless || ws_headless) &&
-      g_config.extend_aspect_x && g_config.extend_aspect_y) {
-    long num = 224L * g_config.extend_aspect_x * (g_config.aspect_par_43 ? 6 : 7);
-    long den = 7L * g_config.extend_aspect_y;
+      g_active_aspect_x && g_active_aspect_y) {
+    bool crt_par = g_active_pixel_aspect == kPixelAspect_Crt43;
+    long num = 224L * g_active_aspect_x * (crt_par ? 6 : 7);
+    long den = 7L * g_active_aspect_y;
     int internal_w = (int)((num + den - 1) / den);
     int extra = internal_w > 256 ? (internal_w - 256 + 1) / 2 : 0;
     if (extra > kWsExtraMax) extra = kWsExtraMax;
     g_ws_extra = extra;
     g_ws_active = extra > 0;
     g_snes_width = 256 + 2 * extra;
-    if (g_ws_active && !g_config.new_renderer)
+    if (g_ws_active && !g_settings.new_renderer)
       fprintf(stderr, "[widescreen] NewRenderer=0 unsupported with ExtendedAspectRatio; forcing new PPU\n");
     fprintf(stderr, "[widescreen] %u:%u %s -> %d extra columns/side (render width %d)\n",
-            g_config.extend_aspect_x, g_config.extend_aspect_y,
-            g_config.aspect_par_43 ? "4:3-PAR" : "square-PAR", g_ws_extra, g_snes_width);
+            g_active_aspect_x, g_active_aspect_y,
+            crt_par ? "4:3-PAR" : "square-PAR",
+            g_ws_extra, g_snes_width);
   }
   /* NewRenderer knob (previously parsed but never applied): honor it, except
    * widescreen needs the new PPU path (HUD split/BG3 widen exist only there). */
-  g_new_ppu = g_config.new_renderer || g_ws_active;
+  g_new_ppu = g_settings.new_renderer || g_ws_active;
 
-  /* Seed the live settings from the AR_WS_* env vars (same defaults the gates
-   * used before they were migrated), then pick the starting display mode. Must
-   * run after the widescreen budget above, which decides g_ws_active. */
-  Settings_Init();
+  /* Display presets depend on whether the resolved aspect allocated a wide
+   * budget. Finalize only after g_ws_active/g_ws_extra are authoritative. */
+  Settings_FinalizeDisplayMode();
   SDL_AtomicSet(&g_audio_master_percent, g_settings.audio_master_volume);
 
   /* AR_MXCHECK=1: enable the per-function-entry m/x invariant check
@@ -978,20 +1034,23 @@ int main(int argc, char **argv) {
   }
 
   if (video) {
-    int scale = g_config.window_scale ? g_config.window_scale : 3;
+    int scale = g_settings.window_scale ? g_settings.window_scale : 3;
     /* Window sized to the DISPLAY aspect: with the 4:3-corrected PAR the
      * rendered width (e.g. 342) is narrower than the displayed width (16:9 of
      * the height), so derive the window from the target ratio, not the
      * framebuffer. Faithful mode keeps the historical g_snes_width*scale. */
     int win_w = g_snes_width * scale;
-    if (g_ws_active && g_config.aspect_par_43)
-      win_w = (g_snes_height * scale * g_config.extend_aspect_x
-               + g_config.extend_aspect_y / 2) / g_config.extend_aspect_y;
+    if (g_ws_active && g_active_pixel_aspect == kPixelAspect_Crt43)
+      win_w = (g_snes_height * scale * g_active_aspect_x +
+               g_active_aspect_y / 2) / g_active_aspect_y;
+    Uint32 window_flags = SDL_WINDOW_RESIZABLE |
+        (headless_video ? SDL_WINDOW_HIDDEN : 0) |
+        (g_settings.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
     g_window = SDL_CreateWindow(
       kWindowTitle,
       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
       win_w, g_snes_height * scale,
-      SDL_WINDOW_RESIZABLE | (headless_video ? SDL_WINDOW_HIDDEN : 0)
+      window_flags
     );
     if (!g_window) Die("SDL_CreateWindow failed");
 
@@ -1006,8 +1065,8 @@ int main(int argc, char **argv) {
      * 4:3-PAR: logical w:h = (render_w*7):(224*6) encodes the 7:6 pixel
      * stretch; square: the raw framebuffer dimensions. IgnoreAspectRatio=1
      * restores plain stretching. */
-    if (g_ws_active && !g_config.ignore_aspect_ratio) {
-      if (g_config.aspect_par_43)
+    if (g_ws_active && !g_settings.ignore_aspect_ratio) {
+      if (g_active_pixel_aspect == kPixelAspect_Crt43)
         SDL_RenderSetLogicalSize(g_renderer, g_snes_width * 7, g_snes_height * 6);
       else
         SDL_RenderSetLogicalSize(g_renderer, g_snes_width, g_snes_height);
@@ -1097,19 +1156,7 @@ int main(int argc, char **argv) {
   WramTraceInit();
 
   g_audio_mutex = SDL_CreateMutex();
-  if (g_config.enable_audio) {
-    SDL_AudioSpec want = {0}, have;
-    want.freq = g_config.audio_freq ? g_config.audio_freq : 44100;
-    want.format = AUDIO_S16;
-    want.channels = 2;
-    want.samples = g_config.audio_samples ? g_config.audio_samples : 2048;
-    want.callback = AudioCallback;
-    if (SDL_OpenAudio(&want, &have) == 0) {
-      SDL_PauseAudio(0);
-    } else {
-      fprintf(stderr, "SDL_OpenAudio failed: %s\n", SDL_GetError());
-    }
-  }
+  ApplyAudioEnabled();
 
   mkdir("saves", 0755);
 

@@ -263,24 +263,44 @@ not overlays.
 Only what's listed below is read by `config.c`. **`config.ini`'s `[KeyMap]` and
 `[GamepadMap]` sections, and the `Autosave`/`DisableFrameDelay`/`SkipLauncher`/
 `EnableSnes9xOracle`/`WindowSize` keys, are currently placeholders — none of
-them are parsed or have any effect.** `Fullscreen`, `LinearFiltering`, and
-`NoSpriteLimits` are parsed into `Config` but currently have no runtime
-consumer. Gamepad input isn't implemented at all yet.
+them are parsed or have any effect.** `LinearFiltering`, `NoSpriteLimits`, and
+`AudioChannels` are parsed compatibility leftovers without runtime consumers.
+Gamepad input isn't implemented at all yet.
 
 **Real config keys** (`[Graphics]`/`[Sound]`):
 
 | Key | Effect |
 |---|---|
 | `WindowScale` | integer window scale factor |
+| `Fullscreen` | desktop-fullscreen window mode; live changes are supported by the settings registry |
 | `NewRenderer` | use the newer rendering path |
 | `ExtendedAspectRatio` | target widescreen ratio such as `16:9`; `off` disables widescreen |
 | `AspectPAR` | `4:3` for SNES pixel-aspect correction or `square` for square pixels |
 | `IgnoreAspectRatio` | disable logical-size aspect correction and stretch to the window |
-| `EnableAudio`, `AudioFreq`, `AudioChannels`, `AudioSamples` | audio output settings |
+| `EnableAudio`, `AudioFreq`, `AudioSamples` | audio output settings; enable/disable is live, format changes apply on restart |
 
-Parsed-but-unwired keys (`Fullscreen`, `LinearFiltering`, `NoSpriteLimits`) are
-being tracked by the runtime-settings plan and should not yet be treated as
-working controls.
+These legacy names are staged into the same descriptor registry used by the
+menu and `settings.ini`; `g_config` is no longer consulted by runtime video or
+audio code.
+
+### Persistent user settings
+
+`settings.ini` is loaded automatically after the selected `config.ini`. It is
+menu/user-owned and uses stable descriptor keys such as `window_scale`,
+`extended_aspect`, `pixel_aspect`, `audio_enabled`,
+`audio_master_volume`, and `ws_sprites`. The implemented atomic writer emits
+every registry row without rewriting the developer-authored `config.ini`.
+
+Resolution order is:
+
+```text
+built-in defaults < config.ini < settings.ini < real environment < live changes
+```
+
+Known `AR_*` settings inside `config.ini` are staged at the config tier rather
+than disguised as real environment variables. Diagnostic-only `AR_*` and
+`SNESREF_*` keys retain the old environment bridge. This means a command-line
+environment value still reliably overrides both files.
 
 **Keyboard controls are hardcoded** (not configurable via `.ini` yet) —
 see `HandleInput()` in `src/main.c`:
@@ -325,8 +345,9 @@ Independent music and SFX levels are not exposed yet because the SPC/DSP mix
 must first be separated or its voice ownership proven; see
 `docs/settings-system.md`, “Audio control seams”.
 
-**Cheats** (`[Cheats]` section — any `AR_*`/`SNESREF_*` key in the `.ini` is
-exported as an environment variable, which is how these are read):
+**Cheats** (`[Cheats]` section — registry-backed `AR_*` keys are staged as the
+config layer; diagnostic-only keys are exported through the compatibility
+environment bridge):
 
 | Key | Effect |
 |---|---|

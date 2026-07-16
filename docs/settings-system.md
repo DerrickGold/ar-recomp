@@ -5,15 +5,16 @@ widescreen knobs, display/audio, QoL) and defines each one's **path to live
 runtime updates**, so a future in-game overlay menu can flip them mid-run. This
 is the "option B" refactor from the 2026-07-12 settings scan.
 
-Status: **PHASES 1–3 IMPLEMENTED; PHASE 4 IN PROGRESS.** `src/settings.{c,h}` now own the
-existing cheat fields, nine widescreen behavior gates, the render profile, the
-host-output HUD scale, two live audio controls, and a 24-row descriptor registry with lookup, formatting,
-availability, mutation, callbacks, sticky/restart results, and observer
-notification. The promoted game HUD proves the post-upscale host-compositor
-seam; master audio gain and the Sky Palace dialogue blip now prove both audio
-apply paths. The settings menu itself, descriptor-driven persistence, the
-remaining display/audio config migration, and the save codec/backends/editor
-remain. Companion docs:
+Status: **PHASES 1–4 IMPLEMENTED; PHASE 5 NEXT.** `src/settings.{c,h}` now own
+the existing cheat fields, nine widescreen behavior gates, render profile,
+host-output HUD scale, application display/aspect/audio fields, and a 34-row
+descriptor registry with lookup, formatting, availability, mutation,
+callbacks, sticky/restart results, observer notification, layered INI loading,
+and atomic persistence. The promoted game HUD proves the post-upscale
+host-compositor seam; master audio gain, audio enable, fullscreen, window
+sizing, and the Sky Palace dialogue blip prove the live callback paths. The
+settings menu itself and the independent save codec/backends/editor remain.
+Companion docs:
 [SEAMS.md](SEAMS.md) (gameplay/tunable seams the cheats hook),
 [rendering-engine.md](rendering-engine.md) (widescreen policy internals),
 [ram-map.md](ram-map.md) (the WRAM addresses the cheats pin),
@@ -30,14 +31,17 @@ Source sites this design replaces: `ActRaiser_ApplyCheats`
 
 ## 1. Current state
 
-Two independent config surfaces exist today, and a setting's toggleability is
-decided by **where its value is consumed**, not which surface it comes from.
+User-facing settings now have one resolved runtime surface: `g_settings`.
+`config.c` remains as a compatibility parser for the legacy CamelCase
+`config.ini` keys, but it stages recognized values into the descriptor registry
+instead of owning runtime video/audio behavior. `settings.ini` is loaded above
+that layer, and real process-environment values remain the highest boot-time
+override.
 
-1. **`Config g_config` struct** (`src/config.c`) — parsed once from `config.ini`
-   at boot. Feeds window/renderer/audio init and the widescreen budget math.
-2. **`AR_*` env vars** — read via `getenv()` throughout the runtime.
-   `config.ini` also bridges any `AR_*` key into the environment via `setenv()`
-   (`src/config.c:53`), so the two surfaces overlap.
+Diagnostic-only `AR_*`/`SNESREF_*` flags intentionally remain direct `getenv`
+consumers. Unknown diagnostic keys in `config.ini` still use the environment
+bridge; known registry keys do not, so they remain distinguishable from real
+environment overrides.
 
 Before Phase 1, almost every cheat/widescreen flag was *enforced every frame*
 but its env value was *read once and cached* in a `static int en = -1` gate:
@@ -93,8 +97,18 @@ typedef struct Settings {
    * exactly match one of the three deterministic capture presets. */
   DisplayMode display_mode;
   int hud_scale_percent;       // 0=match game; 100=native host-output 1x
+  bool hd_replacements;
 
-  /* Audio (implemented live controls) */
+  /* Application presentation (restart rows retain desired value; host owns a
+   * boot snapshot for already-created resources). */
+  uint16 extended_aspect;      // packed (X << 8) | Y; 0 = authentic geometry
+  PixelAspect pixel_aspect;    // square or 4:3 CRT stretch
+  int window_scale;
+  bool fullscreen, new_renderer, ignore_aspect_ratio;
+
+  /* Audio */
+  bool audio_enabled;
+  int  audio_frequency, audio_samples; // restart-class device format
   int  audio_master_volume;    // 0..100; atomic callback mirror
   bool audio_dialog_blip;      // exact $01:902D COP #$07 site
 
@@ -116,30 +130,6 @@ typedef struct Settings {
   bool ws_action, ws_sim, ws_bgrefresh, ws_skypalace_bg, ws_sprites,
        ws_margin_objects, ws_margin_activation, ws_bg2_padding,
        ws_sim_sprites;
-  int  ws_clamp_override;      // -1 = none, else per-layer clamp mask
-
-  /* Aspect / render budget (restart-class) */
-  uint8 aspect_x, aspect_y;    // 0:0 = off (authentic 4:3)
-  bool  aspect_par_43;         // true = 4:3 PAR stretch, false = square pixels
-
-  /* Display / audio (restart-class) */
-  uint8  window_scale;
-  bool   fullscreen, new_renderer, ignore_aspect_ratio, audio_enabled;
-  uint16 audio_freq, audio_samples;
-
-  /* QoL params (values behind the existing live hotkeys) */
-  int    turbo_mult;           // T key multiplier (default 8)
-  uint16 warp_target;          // F6 raw region/map; use README's verified table
-
-  /* Save storage/editing -- loaded into and staged in g_sram, NOT per-frame.
-   * SAVE_BACKEND_NATIVE_SRM remains the compatible default; INI is opt-in.
-   * See save-format.md §4.
-   * Only fields VERIFIED against our ROM appear here; the rest stay unexposed
-   * until promoted (save-format.md §3.2/§6). -1 = "leave as-is". */
-  int   save_backend;          // enum native-srm / ini; boot-selected
-  int8  save_region_prog[6];   // Fillmore..Northwall -> SRAM 0x1200 +2/region
-  bool  save_edit_armed;       // master gate; nothing touches g_sram unless set
-  bool  save_autobackup;       // timestamped .bak before first edit (default on)
 } Settings;
 extern Settings g_settings;
 ```
@@ -211,26 +201,30 @@ field has exactly one descriptor.
 
 ### 3.3 Value resolution (the seed path)
 
-Precedence, applied **once at boot** by `Settings_Init()`, called immediately
-after `ParseConfigFile()` (`src/main.c:358`):
+Precedence is applied once at boot by `Settings_InitWithFile()` after
+`ParseConfigFile()` has staged the compatibility layer:
 
 ```
-built-in default  <  config.ini  <  env var  <  (runtime: live menu writes)
+built-in default < config.ini < settings.ini < real env < live menu writes
 ```
 
-- `Settings_Init` walks `g_setting_descs[]`: `getenv(desc->env)` wins if set
-  (this preserves every existing `AR_*` dev workflow *and* the `config.ini` AR_
-  bridge, which merely `setenv`s); else the parsed ini value; else `defval`.
+- `config.c` maps wired CamelCase application keys to stable descriptor keys.
+  Known registry `AR_*` values are staged with their historical parsing
+  semantics instead of being exported into the environment.
+- `settings.ini` uses stable `SettingDesc.key` names and ordinary formatted
+  values. Unknown future keys are ignored; invalid known values are reported.
+- A real `getenv(desc->env)` value is applied last, preserving every existing
+  command-line/dev workflow and its bespoke legacy encodings.
 - After boot the **live struct is authoritative** — env/ini only seeded it. The
   menu mutates the struct and never touches the environment again.
 
-**Implementation constraint for `settings.ini`:** `config.ini` currently puts
-its `AR_*` keys into the process environment with `setenv`. Once the separate
-menu-owned file lands, known registry settings must be passed into the registry
-as parsed values (or the original process environment must be snapshotted
-first); otherwise a bridged config value is indistinguishable from a real env
-override and incorrectly wins over `settings.ini`. Diagnostic-only flags may
-continue using the environment bridge.
+The earlier environment-identity hazard is resolved by
+`Settings_StageConfigValue` / `Settings_StageConfigEnvironment`. Diagnostic-only
+flags continue using the environment bridge, while known user settings retain
+their correct config-tier rank. Display presets additionally track the highest
+layer that touched an individual widescreen field: a lower-tier profile cannot
+erase a higher-tier `ws_*` override, while `AR_DISPLAY_MODE` still wins over
+same-tier individual flags as it historically did.
 
 This is a drop-in: the gates get seeded from the same env vars they used to
 read, so boot behavior is unchanged. The refactor is behavior-preserving by
@@ -455,17 +449,18 @@ restore an unknown prior byte.
 | Setting | Source | Type | Default | Apply |
 |---|---|---|---|---|
 | HUD output scale | `AR_HUD_SCALE` | int percent or `x` suffix | Match game (`0`) | PASSIVE; `100` = native output 1× |
+| HD replacements | `AR_HD_REPLACEMENTS` | bool | on | PASSIVE; inert when art is absent |
 | Master volume | `AR_AUDIO_VOLUME` | int percent | 100 | CALLBACK; atomic post-mix gain, live `0..100` in steps of 5 |
 | Dialogue text blip | `AR_DIALOG_BLIP` | bool | on | PASSIVE; exact `$01:902D` COP request only |
-| Extended aspect | `ExtendedAspectRatio` (ini) | enum off/16:9/16:10 | off | RESTART (§10.2) |
-| Pixel aspect | `AspectPAR` (ini) | enum 4:3/square | 4:3 | RESTART |
-| Window scale | `WindowScale` (ini) | int | 3 | CALLBACK |
-| Fullscreen | `Fullscreen` (ini) | bool | off | CALLBACK — *note: parsed but unused today (§11)* |
-| New renderer | `NewRenderer` (ini) | bool | on | RESTART |
-| Ignore aspect | `IgnoreAspectRatio` (ini) | bool | off | CALLBACK |
-| Enable audio | `EnableAudio` (ini) | bool | on | CALLBACK (mute) / RESTART (reopen) |
-| Audio freq | `AudioFreq` (ini) | int | 44100 | RESTART |
-| Audio samples | `AudioSamples` (ini) | int | 2048 | RESTART |
+| Extended aspect | `ExtendedAspectRatio` / `AR_EXTENDED_ASPECT_RATIO` | custom `off` or X:Y | off | RESTART (§10.2) |
+| Pixel aspect | `AspectPAR` / `AR_ASPECT_PAR` | enum 4:3/square | 4:3 | RESTART |
+| Window scale | `WindowScale` / `AR_WINDOW_SCALE` | int 1..8 | 3 | CALLBACK |
+| Fullscreen | `Fullscreen` / `AR_FULLSCREEN` | bool | off | CALLBACK; desktop-fullscreen |
+| New renderer | `NewRenderer` / `AR_NEW_RENDERER` | bool | on | RESTART |
+| Ignore aspect | `IgnoreAspectRatio` / `AR_IGNORE_ASPECT_RATIO` | bool | off | CALLBACK |
+| Enable audio | `EnableAudio` / `AR_ENABLE_AUDIO` | bool | on | CALLBACK; lazily opens then pauses/resumes the device |
+| Audio freq | `AudioFreq` / `AR_AUDIO_FREQ` | int | 44100 | RESTART |
+| Audio samples | `AudioSamples` / `AR_AUDIO_SAMPLES` | int | 2048 | RESTART |
 | Turbo multiplier | `AR_TURBO_MULT` | int | 8 | ACTION param (T key) |
 | Warp target | `AR_WARP` | custom | `0101` | ACTION raw region/map param (F6); populate choices from README's verified table, including broken `0701` status |
 
@@ -508,11 +503,18 @@ its encoding is untested.
   through `SettingDesc[]` or merge them into `settings.ini`.
 - `Settings_Save(path)` / `Settings_Load(path)` iterate `g_setting_descs[]` using
   each row's `format`/`parse`, so adding a setting never touches the serializer.
-- **Recommendation (see §10.1):** write a **separate `settings.ini`**, loaded
-  *after* `config.ini` in the file tier, leaving the dev-authored `config.ini`
-  and its comments untouched. The menu owns `settings.ini`; devs own
-  `config.ini`; env still overrides both. Load order becomes:
+- A separate **`settings.ini` is implemented and loaded after `config.ini`**,
+  leaving the dev-authored file and its comments untouched. The writer uses a
+  same-directory temporary file and atomic replacement. The menu owns
+  `settings.ini`; devs own `config.ini`; env still overrides both. Load order:
   `defaults → config.ini → settings.ini → env → live`.
+- Phase 5 will invoke `Settings_Save("settings.ini")` after accepted menu
+  mutations. Existing diagnostic hotkeys and `AR_SETTING_SET` remain
+  session-only so automated probes do not silently rewrite user preferences.
+- Restart-class rows store the desired/persisted value in `g_settings`, while
+  already-created renderer/PPU/audio resources consume a boot snapshot. This
+  prevents a pending aspect/audio-format change from half-applying through an
+  unrelated live callback.
 - `Save_LoadActive()` / `Save_WriteActive()` independently serialize the exact
   8 KiB `g_sram` image using the backend selected by those resolved settings.
   Native `.srm` remains the default. The codec logs the chosen backend and path
@@ -553,12 +555,15 @@ read mutable format fields directly from `g_settings`.
    callbacks, formatting, sticky warnings, restart results, and a host observer
    are present. New Config/audio/save rows must supply the same metadata as they
    migrate in Phases 4/6.
-4. **Phase 4 — persistence + Config merge (in progress).** Live master volume
-   and the exact-site dialogue-blip toggle are descriptor-backed. Next add
-   `settings.ini` save/load and fold the remaining `g_config`
-   display/audio/aspect fields into `Settings` so there is one source of truth.
-   Independent music/SFX gain remains research-gated by the audio-seam criteria
-   above.
+4. **Phase 4 — persistence + Config merge (implemented).** The 34-row registry
+   owns every wired display/aspect/audio field. `config.ini` is a lower-priority
+   compatibility layer, `settings.ini` load/save is descriptor-driven and
+   atomic, real env values remain distinguishable and highest-priority, and
+   restart-class host resources use boot snapshots. Window scale, fullscreen,
+   ignore-aspect, audio enable, master volume, and dialogue blip have live apply
+   paths. Independent music/SFX gain remains research-gated by the audio-seam
+   criteria above; dead template config keys remain excluded rather than being
+   promoted as fake settings.
 5. **Phase 5 — overlay UI.** Add the host overlay at the §3.4 present/input seam.
    Render rows from `SettingDesc[]`, write `g_settings`, intercept menu input,
    pause game-frame advancement while open, and expose ACTION commands without
@@ -666,7 +671,7 @@ a global once in the boot init block. Not for end users; at most a hidden
 **Dead config fields — parsed but zero consumers.** Do not expose these as
 menu settings; they currently do nothing (template leftovers from the
 snesrecomp base). Either wire them up first or omit them: `NoSpriteLimits`,
-`LinearFiltering`, `output_method`, `enable_gamepad[2]`, `gamepad_deadzone`,
-`skip_launcher`, `autosave`, and `Fullscreen` (parsed, but no
-`SDL_SetWindowFullscreen` call exists yet — the §5 CALLBACK wiring must be added
-for it to work).
+`LinearFiltering`, `NoSpriteLimits`, `AudioChannels`, `output_method`,
+`enable_gamepad[2]`, `gamepad_deadzone`, `skip_launcher`, and `autosave`.
+Fullscreen is no longer in this list: Phase 4 wires both its boot flag and live
+`SDL_SetWindowFullscreen` callback.

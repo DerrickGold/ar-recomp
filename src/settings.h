@@ -24,6 +24,12 @@ typedef enum {
 enum { kDisplayMode_PresetCount = kDisplayMode_Custom };
 
 typedef enum {
+  kPixelAspect_Square = 0,
+  kPixelAspect_Crt43,
+  kPixelAspect_Count,
+} PixelAspect;
+
+typedef enum {
   kSettingType_Bool,
   kSettingType_Int,
   kSettingType_Enum,
@@ -98,8 +104,22 @@ typedef struct Settings {
    * are absent or the run is headless (no overlay bindings). */
   bool hd_replacements;
 
+  /* Application presentation settings. `extended_aspect` packs X:Y as
+   * (X << 8) | Y; zero disables the widescreen framebuffer budget. These are
+   * resolved before SDL/PPU allocation and are therefore the runtime source of
+   * truth formerly held in g_config. */
+  uint16 extended_aspect;
+  int pixel_aspect;
+  int window_scale;
+  bool fullscreen;
+  bool new_renderer;
+  bool ignore_aspect_ratio;
+
   /* Audio controls. The SDL callback consumes an atomic mirror of the master
    * value; the game-thread COP hook reads the dialogue toggle directly. */
+  bool audio_enabled;
+  int  audio_frequency;
+  int  audio_samples;
   int  audio_master_volume;  /* final host PCM gain, 0..100 percent */
   bool audio_dialog_blip;    /* per-glyph Sky Palace dialogue sound */
 
@@ -134,7 +154,27 @@ extern Settings g_settings;
 extern const SettingDesc g_setting_descs[];
 extern const int g_setting_desc_count;
 
+/* Boot-layer staging. config.ini is parsed first and stages known registry
+ * values here; Settings_InitWithFile then resolves:
+ * defaults < config.ini < settings.ini < real process environment.
+ * Unknown diagnostic AR_* and SNESREF_* keys continue through config.c's legacy
+ * environment bridge. */
+void Settings_ClearConfigLayer(void);
+bool Settings_StageConfigValue(const char *key, const char *value);
+bool Settings_StageConfigEnvironment(const char *env, const char *value);
+
+/* Settings_Init is the test/tool convenience path and finalizes against the
+ * current g_ws budget. The game uses InitWithFile before allocating that
+ * budget, then calls FinalizeDisplayMode once g_ws_active is authoritative. */
 void Settings_Init(void);
+void Settings_InitWithFile(const char *path);
+void Settings_FinalizeDisplayMode(void);
+
+/* Descriptor-driven persistence. Load ignores unknown keys for forward
+ * compatibility and returns false on I/O or parse errors. Save replaces the
+ * target atomically and never rewrites the developer-owned config.ini. */
+bool Settings_Load(const char *path);
+bool Settings_Save(const char *path);
 
 /* Descriptor/mutation API used by the future overlay and settings.ini loader.
  * All runtime writes go through these functions so range normalization,
@@ -164,3 +204,5 @@ const char *Settings_DisplayModeName(int mode);
  * The PPU always renders the full width; nothing is reallocated. */
 int Settings_VisibleX0(void);
 int Settings_VisibleWidth(void);
+int Settings_ExtendedAspectX(void);
+int Settings_ExtendedAspectY(void);

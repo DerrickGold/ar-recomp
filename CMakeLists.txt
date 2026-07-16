@@ -131,6 +131,7 @@ target_link_libraries(ActRaiserRecomp PRIVATE
 if(BUILD_TESTING)
     add_executable(actraiser_settings_test
         tests/settings_test.c
+        src/config.c
         src/settings.c
     )
     target_include_directories(actraiser_settings_test PRIVATE

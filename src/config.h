@@ -8,6 +8,8 @@ enum {
 };
 
 typedef struct Config {
+  /* Legacy parse mirror only. Wired application values are staged into the
+   * Settings registry by config.c; runtime video/audio code reads g_settings. */
   bool new_renderer;
   bool ignore_aspect_ratio;
   uint8 fullscreen;

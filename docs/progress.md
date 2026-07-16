@@ -148,7 +148,11 @@ silently attributed to future widescreen code.
 ## Remaining proper-widescreen roadmap
 
 The immediate implementation focus moves to the runtime settings/overlay plan
-in [settings-system.md](settings-system.md). The remaining widescreen backlog is:
+in [settings-system.md](settings-system.md). Phases 1-4 are now implemented:
+the 34-row registry owns every wired application/game setting, resolves
+`config.ini < settings.ini < environment`, persists atomically, and exposes
+live/restart apply metadata. Phase 5—the descriptor-driven in-game overlay—is
+next. The remaining widescreen backlog is:
 
 1. **Finish action presentation.** Implement the camera/world-edge clamp above.
    The separate Death Heim `70X` flow is already repaired and directly
