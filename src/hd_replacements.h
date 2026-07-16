@@ -62,8 +62,11 @@ typedef struct HdReplacement {
   HdPlane plane;
   int source; /* PpuOverlaySource for the screen plane */
   int x0, y0, x1, y1; /* screen-space rect, x1/y1 exclusive */
-  /* mode7 plane: the Mode-7 canvas-pixel rect the art maps onto. */
+  /* mode7 plane: the Mode-7 canvas-pixel rect the art maps onto, and
+   * whether wrapped canvas repetitions are substituted too (default 0:
+   * only the primary instance; wraps keep the authentic faint sampling). */
   int canvas_x0, canvas_y0, canvas_x1, canvas_y1;
+  bool canvas_wrap;
   char image[kHdMaxPath]; /* resolved relative to the manifest */
   bool brightness_mod; /* default true: follow INIDISP master brightness */
   HdCondition conditions[kHdMaxConditions];

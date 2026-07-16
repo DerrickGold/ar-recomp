@@ -48,8 +48,9 @@ static struct {
 
 bool PpuSetMode7Override(Ppu *ppu, const uint32_t *rgba, int width,
                          int height, int canvas_x0, int canvas_y0,
-                         int canvas_x1, int canvas_y1) {
+                         int canvas_x1, int canvas_y1, uint8_t wrap) {
   (void)rgba;
+  (void)wrap;
   g_m7_log.calls++;
   g_m7_log.width = width; g_m7_log.height = height;
   g_m7_log.x0 = canvas_x0; g_m7_log.y0 = canvas_y0;

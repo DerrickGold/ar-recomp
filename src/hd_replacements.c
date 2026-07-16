@@ -200,6 +200,8 @@ int HdReplacements_Load(const char *path) {
     } else if (!strcmp(key, "canvas_rect")) {
       ok = ParseRect4(value, &pending.canvas_x0, &pending.canvas_y0,
                       &pending.canvas_x1, &pending.canvas_y1);
+    } else if (!strcmp(key, "wrap")) {
+      pending.canvas_wrap = strtoul(value, NULL, 0) != 0;
     } else if (!strcmp(key, "image")) {
       ResolveImagePath(path, value, pending.image, sizeof(pending.image));
     } else if (!strcmp(key, "when")) {
@@ -285,7 +287,8 @@ void HdReplacements_EvaluateFrame(void) {
       if (PpuSetMode7Override(g_ppu, (const uint32 *)entry->pixels,
                               entry->pixels_width, entry->pixels_height,
                               entry->canvas_x0, entry->canvas_y0,
-                              entry->canvas_x1, entry->canvas_y1))
+                              entry->canvas_x1, entry->canvas_y1,
+                              entry->canvas_wrap))
         entry->active = true;
       continue;
     }
