@@ -70,6 +70,31 @@ margins, Sky Palace, sim towns, HUD split). Known 1x-pitch assumptions to
 make N-aware: the bounded-world margin memsets in actraiser_rtl.c write raw
 renderBuffer rows, and the host PPM/F2 capture paths assume g_snes_width.
 
+## Pack granularity, testing, and authoring gotchas
+
+Packs are per-tile by construction: every fetch independently resolves hash
+-> entry-or-authentic, so a one-tile pack is valid, coverage grows
+incrementally, and a partially painted sprite renders mixed (useful debug
+view). No pre-existing pack format applies (Mesen HD packs are NES-only);
+correctness testing uses a GENERATED synthetic pack — every census tile
+upscaled with a hue-shift/marker — so screenshot diffs mechanically prove
+which pixels took the HD path and expose seam/priority errors without
+waiting on art. Good first real targets: individual sprites (angel,
+FILMORE nameplate) — richest priority interactions.
+
+Authoring gotchas to document with the pack format:
+- Animation streaming: sprites DMA new tile data to the same VRAM address
+  per frame; each frame is a distinct hash/entry (census enumerates them),
+  and the VRAM-write cache must treat per-frame invalidation as hot path.
+- Flips are render-time; packs store unflipped art (sheet orientation).
+- Identical tile bytes shared by unrelated graphics replace everywhere;
+  census layer masks flag multi-context tiles, (hash+palette+layer)
+  scoping is the escape hatch.
+- Paint over assembled sheets/screens then slice — per-tile upscaling
+  filters produce 8x8 seams.
+- In color-mathed layers, use pack alpha for edge AA only (game math is a
+  second transparency system on top).
+
 ## Risks / open questions
 
 - **Performance**: N=4 is ~16x the fill of a scalar renderer that is fast
