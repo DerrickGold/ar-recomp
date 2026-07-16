@@ -30,10 +30,11 @@ identity are the perishable, expensive-to-rederive parts.
 |---|---|---|---|---|---|
 | Music / event | `LDA #id; COP` → `$035A`; COP vector `$FFE4→$8526`; hook `ActRaiser_CopHook` | APU ports `$2140-43` | "play music / fire event N" | event/song id (A → `$035A`) — song images via the `$02:C7E5` pointer table + inline script pointers (see below) | 🟢 |
 | Sound effect | `LDA #id; BRK` → `$035B`; BRK vector `$FFE6→$852F`; hook `ActRaiser_BrkHook` | APU ports | "play SFX N" | sfx id (A → `$035B`) | 🟢 |
+| Dialogue glyph blip | message glyph helper `$01:901C`; non-space request block `$01:902D` does `LDA #$07; COP` | `$035A` request path | "glyph printed" | exact call site + id `$07`; `audio_dialog_blip` suppresses only this site because `$07` is reused elsewhere | 🟢 |
 | Song upload (image identity) | `$02:9964` HLE — stage 1 (`$9A56` block image) + stage 2 (BRR streaming) | APU ports + ARAM | "load song N's sequence + instruments" | image src addr = song identity (e.g. `06:AC00` title, `1A:94B8` song 7); song table `$02:C7E5` (17 entries, 3-byte ptrs); more pointers inline in the `[$A2]` command scripts read via `$02:B4C0` | 🟢 |
 | **BRR sample bank (per-sample!)** | stage 2 of the `$9964` HLE (`RtlUploadSpcImageFromDpInternal`, common_rtl.c) | ARAM `$3000-$6E67` (common) / `$795F+` (per-song) | "install instrument waveforms" | chunk pool at ROM `$08:8000` — length-prefixed `[len16][BRR data]` chunks, selected by index; script = image terminator's target word (lo byte = count, hi byte onward = chunk indices); dest base = WRAM `$0358` | 🟢 |
 | Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
-| Final PCM out | `RtlRenderAudio` (common_rtl.c) → `dsp_getSamples` → SDL `AudioCallback` | host audio | "the mixed stereo stream" | — | 🟢 |
+| Final PCM out | `RtlRenderAudio` (common_rtl.c) → `dsp_getSamples`/MSU-1 mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | `audio_master_volume` applies atomic post-mix gain here; music/SFX identity is already lost | 🟢 |
 | Raw APU port write | `RtlApuWrite` (`$2140-$2143`) | APU I/O | low-level handshake / param | — | 🔴 |
 
 > Audio is the highest-payoff first HAL target: the `$035A`/`$035B` events are already ID-based.
@@ -68,6 +69,12 @@ quality/replacement tiers, from least to most invasive:
    post-processing belong here. MSU-1-style streaming already has scaffolding in
    `runner/src/snes/msu1.{c,h}` (mix point documented there as `RtlRenderAudio`'s locked
    region).
+
+   The Phase-4 settings work now uses this seam for `audio_master_volume`
+   (`0..100`). It deliberately does not label any post-mix control "music" or
+   "SFX": independent levels require stable DSP voice classification or native
+   SPC-driver bus controls, including a defined echo policy. See
+   `settings-system.md`, "Audio control seams".
 
 Diagnostics for all of it: `AR_APULOG=1` (uploads incl. per-chunk stage-2 lines + port
 traffic), `AR_AUDIODBG=1` (DSP health: mvol/mute/peak/cyc-rate), `AR_KONLOG=1` (per-voice
@@ -1155,6 +1162,11 @@ promote a row to a real address once confirmed (a wrong cheat address is worse t
 
 Capture the *role* of a routine when you understand it — names are perishable. These are NOT yet
 renamed in the cfg (see below); this is the candidate list.
+
+The concise, confidence-rated candidate-name index now lives in
+[research-symbol-map.md](research-symbol-map.md). Keep the detailed evidence and
+investigation history here; update the research map whenever that evidence
+establishes or changes a semantic identity.
 
 | Address | Role |
 |---|---|

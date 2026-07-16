@@ -1,7 +1,9 @@
 #define _XOPEN_SOURCE 600
 #include "actraiser_rtl.h"
+#include "actraiser_game.h"
 #include "variables.h"
 #include "settings.h"
+#include "hd_replacements.h"
 #include "common_cpu_infra.h"
 #include "snes/snes.h"
 #include "cpu_state.h"
@@ -69,18 +71,28 @@ volatile int g_ar_in_interrupt = 0;
  * SFX in the object/OAM loops). Generated code invokes this at every BRK site
  * via g_cpu_brk_hook, then falls through to the next instruction. */
 static void ActRaiser_BrkHook(CpuState *cpu) {
-  cpu_write8(cpu, 0x00, 0x035B, (uint8)(cpu->A & 0xFF));
+  cpu_write8(cpu, 0x00, kActRaiserWram_BrkSoundRequest,
+             (uint8)(cpu->A & 0xFF));
   /* AR_COPLOG=1: also log BRK (sound-request) posts, for contrast against COP
    * event posts below -- lets a stuck-state capture show whether the game is
    * still alive and posting routine SFX while a specific event id never posts. */
   if (getenv("AR_COPLOG")) {
-    extern uint8 g_ram[0x20000];
     extern const char *g_last_recomp_func;
-    unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+    unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     fprintf(stderr, "[brk] gf=%u fn=%s id=%02x $18=%02x $19=%02x\n",
-            gf, g_last_recomp_func ? g_last_recomp_func : "?",
-            (uint8)(cpu->A & 0xFF), g_ram[0x18], g_ram[0x19]);
+            game_frame, g_last_recomp_func ? g_last_recomp_func : "?",
+            (uint8)(cpu->A & 0xFF), g_ram[kActRaiserWram_MapGroup],
+            g_ram[kActRaiserWram_CurrentMap]);
   }
+}
+
+/* Return the most recent recompiled block PC. The always-on ring is also used
+ * by crash diagnostics; consulting it here lets a user-facing sound toggle
+ * distinguish the dialogue composer's COP #$07 from unrelated uses of id 07. */
+static uint32 ActRaiser_LastBlockPc(void) {
+  extern int ar_block_history(uint32 *out, int max);
+  uint32 pc = 0;
+  return ar_block_history(&pc, 1) == 1 ? pc : 0;
 }
 
 /* ActRaiser COP syscall — the SECOND software interrupt, structurally identical
@@ -93,19 +105,28 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
  * $035A was never written → the event/platform never fired. Symmetric to the
  * BRK hook; found via the oracle writing $035A 90x while the recomp wrote it 0x. */
 static void ActRaiser_CopHook(CpuState *cpu) {
-  cpu_write8(cpu, 0x00, 0x035A, (uint8)(cpu->A & 0xFF));
+  const uint8 id = (uint8)(cpu->A & 0xFF);
+  const uint32 site = ActRaiser_LastBlockPc();
+  /* $01:901C is the message composer's per-glyph pacing helper. Its
+   * non-space path at $01:902D posts COP #$07 after drawing each character.
+   * Suppress only this exact site: id 07 also drives unrelated game events. */
+  const bool suppress_dialog_blip =
+      !g_settings.audio_dialog_blip && id == 0x07 && site == 0x01902D;
+  if (!suppress_dialog_blip)
+    cpu_write8(cpu, 0x00, kActRaiserWram_CopRequest, id);
   /* AR_COPLOG=1: log every COP-posted event id + game-frame + calling recomp
    * function, so a Death-Heim stuck-state capture shows whether the
    * boss-defeat/next-encounter event ever posts at all, vs posting an id whose
    * consumer is unreached (see [[cop-syscall-hook-fix]] -- $C3DA consumer was
    * previously suspected still-unreached for a different event id). */
   if (getenv("AR_COPLOG")) {
-    extern uint8 g_ram[0x20000];
     extern const char *g_last_recomp_func;
-    unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-    fprintf(stderr, "[cop] gf=%u fn=%s id=%02x $18=%02x $19=%02x\n",
-            gf, g_last_recomp_func ? g_last_recomp_func : "?",
-            (uint8)(cpu->A & 0xFF), g_ram[0x18], g_ram[0x19]);
+    unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    fprintf(stderr, "[cop] gf=%u fn=%s site=%06x id=%02x%s $18=%02x $19=%02x\n",
+            game_frame, g_last_recomp_func ? g_last_recomp_func : "?",
+            site, id, suppress_dialog_blip ? " suppressed-dialog-blip" : "",
+            g_ram[kActRaiserWram_MapGroup],
+            g_ram[kActRaiserWram_CurrentMap]);
   }
 }
 
@@ -120,7 +141,8 @@ void ActRaiser_FullSnapshot(const char *prefix) {
   char path[96];
   FILE *f;
   snprintf(path, sizeof path, "%s.wram.bin", prefix);
-  f = fopen(path, "wb"); if (f) { fwrite(g_ram, 1, 0x20000, f); fclose(f); }
+  f = fopen(path, "wb");
+  if (f) { fwrite(g_ram, 1, kActRaiserWramSize, f); fclose(f); }
   if (g_ppu) {
     snprintf(path, sizeof path, "%s.vram.bin", prefix);
     f = fopen(path, "wb"); if (f) { fwrite(g_ppu->vram, 2, 0x8000, f); fclose(f); }
@@ -160,7 +182,6 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
     extern const char *g_recomp_stack[];
     extern int g_recomp_stack_top;
     int top = g_recomp_stack_top;
-    extern uint8 g_ram[0x20000];
     fprintf(stderr, "[yield] f=%d S=%04x A=%04x P=%02x depth=%d:",
             snes_frame_counter, cpu->S, cpu->A, cpu->P, top);
     for (int i = top - 1; i >= 0 && i >= top - 6; i--)
@@ -175,10 +196,13 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * next NMI's ABF0 branch, to test whether a non-zero game-mode unsticks the
    * frozen title (state machine + menu decompression). Diagnostic only. */
   {
-    static int f18 = -2;
-    if (f18 == -2) { const char *e = getenv("AR_FORCE18");
-      f18 = e ? (int)strtoul(e, NULL, 0) : -1; }
-    if (f18 >= 0) { extern uint8 g_ram[0x20000]; g_ram[0x18] = (uint8)f18; }
+    static int forced_map_group = -2;
+    if (forced_map_group == -2) {
+      const char *value = getenv("AR_FORCE18");
+      forced_map_group = value ? (int)strtoul(value, NULL, 0) : -1;
+    }
+    if (forced_map_group >= 0)
+      g_ram[kActRaiserWram_MapGroup] = (uint8)forced_map_group;
   }
 
   /* AR_FRAMELOG=1: at each vblank yield, report how much game code ran since the
@@ -191,7 +215,6 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * flags, and the walking-cycle Crest/Boost counters ($08BC/$08C4). */
   if (getenv("AR_FRAMELOG")) {
     extern unsigned long g_recomp_push_count;
-    extern uint8 g_ram[0x20000];
     extern Snes *g_snes;
     static unsigned long last_push;
     /* return frame is at pre-pop S (we already did S+=2 above) */
@@ -203,33 +226,47 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
      * (see AR_SIMTRACE in cpu_trace.h). */
     uint16 joy_raw = g_snes->input1_currentState;
     uint16 joy = SwapInputBits(joy_raw);
-    uint16 gf = (uint16)(g_ram[0x88] | (g_ram[0x89] << 8));
-    uint16 px = (uint16)(g_ram[0x08A2] | (g_ram[0x08A3] << 8));
-    uint16 py = (uint16)(g_ram[0x08A4] | (g_ram[0x08A5] << 8));
-    int16 pvx = (int16)(g_ram[0x08A6] | (g_ram[0x08A7] << 8));
-    int16 pvy = (int16)(g_ram[0x08A8] | (g_ram[0x08A9] << 8));
-    uint16 ph = (uint16)(g_ram[0x08B2] | (g_ram[0x08B3] << 8));
-    uint16 ps = (uint16)(g_ram[0x08D0] | (g_ram[0x08D1] << 8));
-    static uint16 last_px, last_py;
-    static uint8 last_region, last_map;
-    int dx = 0, dy = 0;
-    if (g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07 &&
-        last_region == g_ram[0x18] && last_map == g_ram[0x19]) {
-      dx = (int16)(px - last_px);
-      dy = (int16)(py - last_py);
+    uint16 game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    uint16 player_x = ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionX);
+    uint16 player_y = ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionY);
+    int16 player_velocity_x = (int16)ActRaiser_ReadWram16(
+        kActRaiserWram_PlayerVelocityX);
+    int16 player_velocity_y = (int16)ActRaiser_ReadWram16(
+        kActRaiserWram_PlayerVelocityY);
+    uint16 player_handler = ActRaiser_ReadWram16(
+        kActRaiserWram_PlayerHandler);
+    uint16 player_flags = ActRaiser_ReadWram16(kActRaiserWram_PlayerFlags);
+    const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
+    const uint8 current_map = g_ram[kActRaiserWram_CurrentMap];
+    static uint16 last_player_x, last_player_y;
+    static uint8 last_map_group, last_map;
+    int delta_x = 0, delta_y = 0;
+    if (ActRaiser_IsActionMapGroup(map_group) &&
+        last_map_group == map_group && last_map == current_map) {
+      delta_x = (int16)(player_x - last_player_x);
+      delta_y = (int16)(player_y - last_player_y);
     }
     fprintf(stderr,
       "[frame] f=%d gf=%u push+%lu callsite=%02x:%04x A=%04x m=%d $18=%02x $19=%02x $1A=%02x $1B=%02x $F4=%02x $F5=%02x $FB=%02x time$E6=%02x%02x HP$1D=%02x joy=%04x(raw=%04x) pos=%04x,%04x d=%+d,%+d vel=%+d,%+d h=%04x state=%04x boost=%02x crest=%02x\n",
-      snes_frame_counter, gf, g_recomp_push_count - last_push, cpu->PB, ret,
+      snes_frame_counter, game_frame, g_recomp_push_count - last_push,
+      cpu->PB, ret,
       cpu->A, cpu->m_flag,
-      g_ram[0x18], g_ram[0x19], g_ram[0x1A], g_ram[0x1B],
-      g_ram[0xF4], g_ram[0xF5], g_ram[0xFB], g_ram[0xE7], g_ram[0xE6], g_ram[0x1D],
-      joy, joy_raw, px, py, dx, dy, pvx, pvy, ph, ps,
-      g_ram[0x08C4], g_ram[0x08BC]);
-    last_px = px;
-    last_py = py;
-    last_region = g_ram[0x18];
-    last_map = g_ram[0x19];
+      map_group, current_map, g_ram[kActRaiserWram_DestinationMap],
+      g_ram[kActRaiserWram_DestinationMapGroup],
+      g_ram[kActRaiserWram_InputEnableMask],
+      g_ram[kActRaiserWram_InputEnableMask + 1],
+      g_ram[kActRaiserWram_TransitionRequest],
+      g_ram[kActRaiserWram_ActionTimerHigh],
+      g_ram[kActRaiserWram_ActionTimerLow],
+      g_ram[kActRaiserWram_PlayerHp], joy, joy_raw, player_x, player_y,
+      delta_x, delta_y, player_velocity_x, player_velocity_y,
+      player_handler, player_flags,
+      g_ram[kActRaiserWram_PlayerBoost],
+      g_ram[kActRaiserWram_PlayerCrest]);
+    last_player_x = player_x;
+    last_player_y = player_y;
+    last_map_group = map_group;
+    last_map = current_map;
     last_push = g_recomp_push_count;
   }
 
@@ -239,19 +276,33 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * exact frame the object table is wiped / timer goes non-BCD (the "sprites
    * vanish + timer '?'" corruption). */
   if (getenv("AR_OBJLOG")) {
-    extern uint8 g_ram[0x20000];
-    if (g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-      int active = 0;
-      for (int i = 0; i < 24; i++) {
-        unsigned b = 0x06A0 + i * 0x40;
-        unsigned sw = g_ram[b] | (g_ram[b + 1] << 8);
-        if (!(sw & 0x8000) && !(sw & 0x4000)) active++;
+    if (ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+      enum {
+        kObjectLogSampleCount = 24,
+        kActionObjectHandlerOffset = 0x12,
+        kActionObjectDisabled = 0x4000,
+      };
+      unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+      int active_objects = 0;
+      for (int i = 0; i < kObjectLogSampleCount; i++) {
+        uint16 object_address = (uint16)(
+            kActRaiserWram_ActionObjectTable +
+            i * kActRaiserActionObjectStride);
+        uint16 status = ActRaiser_ReadWram16(object_address);
+        if (!(status & kActRaiserObjectStatus_End) &&
+            !(status & kActionObjectDisabled)) {
+          active_objects++;
+        }
       }
-      unsigned o0 = g_ram[0x06A0] | (g_ram[0x06A1] << 8);
-      unsigned o0h = g_ram[0x06B2] | (g_ram[0x06B3] << 8);
+      unsigned first_status = ActRaiser_ReadWram16(
+          kActRaiserWram_ActionObjectTable);
+      unsigned first_handler = ActRaiser_ReadWram16((uint16)(
+          kActRaiserWram_ActionObjectTable + kActionObjectHandlerOffset));
       fprintf(stderr, "[obj] gf=%u timer=%02x%02x HP=%02x active=%d obj0.sw=%04x obj0.h=%04x\n",
-              gf, g_ram[0xE7], g_ram[0xE6], g_ram[0x1D], active, o0, o0h);
+              game_frame, g_ram[kActRaiserWram_ActionTimerHigh],
+              g_ram[kActRaiserWram_ActionTimerLow],
+              g_ram[kActRaiserWram_PlayerHp], active_objects,
+              first_status, first_handler);
     }
   }
 
@@ -296,6 +347,20 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
  * Must run every frame: ppu_reset zeroes the PPU margin fields.
  * AR_WS_SURVEY=1 forces raw symmetric margins in EVERY mode — the Phase-2
  * artifact-survey knob (stale tiles/pop-in expected; not for normal play). */
+enum {
+  kAitosParallaxMapFirst = 0x01,
+  kAitosParallaxMapLast = 0x03,
+  kNorthwallParallaxMapFirst = 0x01,
+  kNorthwallParallaxMapLast = 0x05,
+  kNorthwallBossParallaxMap = 0x08,
+  kBloodpoolAct1Map = 0x01,
+  kBloodpoolWaterStartY = 136,
+  kDeathHeimFogStartY = 144,
+  kEndingSkyBg1TilemapPage = 0x64,
+  kEndingSkyBg2TilemapPage = 0x74,
+  kBgTilemapPageMask = 0xFC,
+};
+
 static void ActRaiser_ApplyWidescreenPolicy(void) {
   extern bool g_ws_active;
   extern int g_ws_extra;
@@ -305,6 +370,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     const char *e = getenv("AR_WS_SURVEY");
     survey = (e && e[0] && e[0] != '0') ? 1 : 0;
   }
+  const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
+  const uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
   /* Per-mode widescreen policy (docs/widescreen-survey.md). Two knobs per
    * mode: (1) does it use the wide view at all, and (2) a per-layer clamp
    * mask (bit L keeps BG(L+1) at 256) for scenes that mix wide world layers
@@ -328,9 +395,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * still owns the fixed centering budget; this policy narrows the live left
    * and right margins as the camera approaches either world edge. */
   int bounded_world_margins = 0;
-  if (!survey && g_ram[0x18] == 0x00) {
-    switch (g_ram[0x19]) {
-      case 0x07:            /* Sky Palace hub. BG1 = sky/clouds (wide, clean).
+  if (!survey && map_group == kActRaiserMapGroup_NonAction) {
+    switch (map_number) {
+      case kActRaiserNonActionMap_SkyPalace:
+                            /* Sky Palace hub. BG1 = sky/clouds (wide, clean).
                                BG2 = pillars plus game-owned offscreen dialog
                                staging farther around its 64x64 tilemap. Keep
                                BG2 raw-wide; the render transaction decodes a
@@ -339,21 +407,22 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
         wide = 1;
         break;
 
-      case 0x09:            /* Mode 7 world map: fully wide, no UI layers. */
+      case kActRaiserNonActionMap_WorldMap:
+                            /* Mode 7 world map: fully wide, no UI layers. */
         wide = 1; 
         break;
       
-      case 0x00: 
+      case kActRaiserNonActionMap_Title:
         // Title is always not wide screen since the backdrop is black
         wide = 0;
         break;
     
-      case 0x01:            /* Fillmore simulation town. */
-      case 0x02:            /* Bloodpool simulation town. */
-      case 0x03:            /* Kasandora simulation town. */
-      case 0x04:            /* Aitos simulation town. */
-      case 0x05:            /* Marahna simulation town. */
-      case 0x06: {          /* Northwall simulation town. */
+      case kActRaiserNonActionMap_Fillmore:
+      case kActRaiserNonActionMap_Bloodpool:
+      case kActRaiserNonActionMap_Kasandora:
+      case kActRaiserNonActionMap_Aitos:
+      case kActRaiserNonActionMap_Marahna:
+      case kActRaiserNonActionMap_Northwall: {
         /* $01:B4C6 clamps camera X ($22) to $0000-$0100, proving 256px of
          * world on either side of the authentic viewport. AR_WS_SIM=0 is the
          * same-binary authentic baseline for town regression captures. BG2 is
@@ -361,11 +430,11 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
          * separate ADAD/AE6F and B473 ports use this same $01-$06 range. */
         wide = g_settings.ws_sim;
         bounded_world_margins = wide;
-        clamp = 0x02;
+        clamp = kActRaiserBgLayerMask_Bg2;
         break;
       }
 
-      case 0x08:
+      case kActRaiserNonActionMap_Temple:
       // Temple cut scenes don't need wide screen support
       // background is black
         wide = 0;
@@ -377,7 +446,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
         wide = 0;
         break;
     }
-  } else if (!survey && g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
+  } else if (!survey && ActRaiser_IsActionMapGroup(map_group)) {
     /* Validated action-wide path, shared by all seven action-region handler
      * tables. Original tile streamers remain active; a separate host-side
      * transaction refreshes only BG tilemap VRAM margins with true map data,
@@ -395,8 +464,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * data to decode into side margins, and its offscreen tilemap half is
      * scratch/stale storage. The margin refresher therefore skips it; pad its
      * authentic render (or clamp it) instead of exposing frozen tiles. */
-    uint16 bg2_width = (uint16)(g_ram[0x32] | (g_ram[0x33] << 8));
-    if (bg2_width < 0x0200) {
+    uint16 bg2_width = ActRaiser_ReadWram16(kActRaiserWram_Bg2Width);
+    if (bg2_width < kActRaiserTownWorldWidth) {
       /* A 256-wide decorative BG2 has no real margin data. By default pad from
        * its authentic rendered image; AR_WS_BG2_MIRROR=0 restores the proven
        * clamp for A/B testing in the same binary.
@@ -409,17 +478,20 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
        * in the same direction without exposing stale BG2 VRAM. */
       int bg2_mirror = g_settings.ws_bg2_padding;
       if (!bg2_mirror) {
-        clamp |= 0x02;
-      } else if ((g_ram[0x18] == 0x04 &&
-                  g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x03) ||
-                 (g_ram[0x18] == 0x06 &&
-                  ((g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x05) ||
-                   g_ram[0x19] == 0x08)) ||
-                 (g_ram[0x18] == 0x07 &&
-                  g_ram[0x19] >= 0x02 && g_ram[0x19] <= 0x08)) {
-        repeat |= 0x02;
+        clamp |= kActRaiserBgLayerMask_Bg2;
+      } else if ((map_group == kActRaiserMapGroup_Aitos &&
+                  map_number >= kAitosParallaxMapFirst &&
+                  map_number <= kAitosParallaxMapLast) ||
+                 (map_group == kActRaiserMapGroup_Northwall &&
+                  ((map_number >= kNorthwallParallaxMapFirst &&
+                    map_number <= kNorthwallParallaxMapLast) ||
+                   map_number == kNorthwallBossParallaxMap)) ||
+                 (map_group == kActRaiserMapGroup_DeathHeim &&
+                  map_number >= kActRaiserDeathHeimMap_FirstBoss &&
+                  map_number <= kActRaiserDeathHeimMap_FinalBoss)) {
+        repeat |= kActRaiserBgLayerMask_Bg2;
       } else {
-        mirror |= 0x02;
+        mirror |= kActRaiserBgLayerMask_Bg2;
       }
     }
 
@@ -430,11 +502,12 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * Keep reflection above y=136 and cyclically continue the already-rendered
      * water scanline below it. When AR_WS_BG2_MIRROR=0 selected the authentic
      * clamp fallback, leave the repeat band disabled as part of that A/B gate. */
-    if (wide && g_ram[0x18] == 0x02 && g_ram[0x19] == 0x01 &&
-        (mirror & 0x02)) {
+    if (wide && map_group == kActRaiserMapGroup_Bloodpool &&
+        map_number == kBloodpoolAct1Map &&
+        (mirror & kActRaiserBgLayerMask_Bg2)) {
       repeat_band_layer = 1;  /* BG2 */
-      repeat_band_y0 = 136;
-      repeat_band_y1 = 224;
+      repeat_band_y0 = kBloodpoolWaterStartY;
+      repeat_band_y1 = kActRaiserAuthenticHeight;
     }
 
     /* Death Heim's boss-warp room ($07:$01) is already composed as a bounded
@@ -451,20 +524,26 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * but is written much later at $F650. Keep the causeway BG1 bounded, but
      * mirror the whole live BG2 scanline so the non-periodic cloud edges join
      * cleanly at both margins. */
-    if (wide && g_ram[0x18] == 0x07 && g_ram[0x19] == 0x01) {
+    if (wide && map_group == kActRaiserMapGroup_DeathHeim &&
+        map_number == kActRaiserDeathHeimMap_Hub) {
       const int ending_sky_pages =
-          (g_ppu->bgXsc[0] & 0xfc) == 0x64 &&
-          (g_ppu->bgXsc[1] & 0xfc) == 0x74;
+          (g_ppu->bgXsc[0] & kBgTilemapPageMask) ==
+              kEndingSkyBg1TilemapPage &&
+          (g_ppu->bgXsc[1] & kBgTilemapPageMask) ==
+              kEndingSkyBg2TilemapPage;
       bounded_world_margins = 0;
-      if (g_ram[0x0347] >= 0x07 &&
-          (ending_sky_pages || g_ram[0x0334] >= 0x03)) {
-        clamp |= 0x01;
-        mirror |= 0x02;
+      if (g_ram[kActRaiserWram_DeathHeimProgress] >=
+              kActRaiserDeathHeimProgress_FinalBossBeaten &&
+          (ending_sky_pages ||
+           g_ram[kActRaiserWram_DeathHeimEndingState] >=
+               kActRaiserDeathHeimEndingState_SkySettled)) {
+        clamp |= kActRaiserBgLayerMask_Bg1;
+        mirror |= kActRaiserBgLayerMask_Bg2;
       } else {
-        clamp |= 0x03;
+        clamp |= kActRaiserBgLayerMask_Bg1AndBg2;
         repeat_band_layer = 1;  /* BG2 */
-        repeat_band_y0 = 144;
-        repeat_band_y1 = 224;
+        repeat_band_y0 = kDeathHeimFogStartY;
+        repeat_band_y1 = kActRaiserAuthenticHeight;
       }
     }
 
@@ -475,11 +554,12 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * was the only reason the margins stayed black. Open the symmetric canvas
      * and draw both layers raw: this preserves their raster phase and avoids
      * the isolated-buffer clear/merge cost of presentation-layer repeat. */
-    if (wide && g_ram[0x18] == 0x07 && g_ram[0x19] == 0x08) {
+    if (wide && map_group == kActRaiserMapGroup_DeathHeim &&
+        map_number == kActRaiserDeathHeimMap_FinalBoss) {
       bounded_world_margins = 0;
-      clamp &= (uint8)~0x03;
-      mirror &= (uint8)~0x03;
-      repeat &= (uint8)~0x03;
+      clamp &= (uint8)~kActRaiserBgLayerMask_Bg1AndBg2;
+      mirror &= (uint8)~kActRaiserBgLayerMask_Bg1AndBg2;
+      repeat &= (uint8)~kActRaiserBgLayerMask_Bg1AndBg2;
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
@@ -534,21 +614,22 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   if (!survey && wide &&
       g_settings.display_mode != kDisplayMode_43 &&
       g_settings.display_mode != kDisplayMode_WideRaw) {
-    if (g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
+    if (ActRaiser_IsActionMapGroup(map_group)) {
       /* BG3's effective screen placement puts tilemap row 2 at y=20-27. That
        * row contains PLAYER health on the left and magic-scroll tiles on the
        * right, so it must retain the three-way split. Row 3 (ENEMY and its
        * long health bar) begins at y=28; anchor only that lower band left. */
-      hud_split_height = 40;
-      hud_split_left_end = 88;
-      hud_split_right_start = 168;
-      hud_left_only_y = 28;
-    } else if (g_ram[0x18] == 0x00 &&
-               g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x07) {
-      hud_split_height = 32;
-      hud_split_left_end = 168;
-      hud_split_right_start = 168;
-      hud_left_only_y = 32;
+      hud_split_height = kActRaiserActionHudHeight;
+      hud_split_left_end = kActRaiserActionHudLeftEnd;
+      hud_split_right_start = kActRaiserActionHudRightStart;
+      hud_left_only_y = kActRaiserActionHudLowerRowY;
+    } else if (map_group == kActRaiserMapGroup_NonAction &&
+               map_number >= kActRaiserSimulationTown_First &&
+               map_number <= kActRaiserNonActionMap_SkyPalace) {
+      hud_split_height = kActRaiserSimulationHudHeight;
+      hud_split_left_end = kActRaiserSimulationHudSplit;
+      hud_split_right_start = kActRaiserSimulationHudSplit;
+      hud_left_only_y = kActRaiserSimulationHudHeight;
     }
   }
 
@@ -565,31 +646,35 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       PpuSetWidescreenLayerRepeatBand(g_ppu, (uint8)repeat_band_layer,
                                       repeat_band_y0, repeat_band_y1);
     if (bg2_gap)
-      PpuSetWidescreenLayerMarginGap(g_ppu, 1, (uint8)bg2_gap, (uint8)bg2_gap);
+      PpuSetWidescreenLayerMarginGap(
+          g_ppu, kActRaiserPpuLayer_Bg2,
+          (uint8)bg2_gap, (uint8)bg2_gap);
     if (hud_split_height)
       PpuSetWidescreenHudSplit(g_ppu, hud_split_height,
                                hud_split_left_end, hud_split_right_start,
                                hud_left_only_y);
     if (hud_split_height)
       PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3,
-                           0, 0, 256, hud_split_height,
+                           0, 0, kActRaiserAuthenticWidth, hud_split_height,
                            kPpuOverlayFlag_RemoveFromGame);
     if (bounded_world_margins) {
       /* Clamp each side to real BG1 world space. Action width is section
        * state $2E; simulation towns are the fixed 512px world proven by
        * $01:B4C6's camera clamp. Outside [0,width) stays black. */
-      int cam = (int)(uint16)(g_ram[0x22] | (g_ram[0x23] << 8));
-      int width = (g_ram[0x18] == 0x00 &&
-                   g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x06)
-                      ? 0x0200
-                      : (int)(uint16)(g_ram[0x2E] | (g_ram[0x2F] << 8));
-      int room_l = cam;
-      int room_r = width - 256 - cam;
-      if (room_l < 0) room_l = 0;
-      if (room_r < 0) room_r = 0;
-      int ml = room_l < g_ws_extra ? room_l : g_ws_extra;
-      int mr = room_r < g_ws_extra ? room_r : g_ws_extra;
-      PpuSetExtraSideSpace(g_ppu, ml, mr, 0);
+      int camera_x = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
+      int world_width = ActRaiser_IsSimulationTown(map_group, map_number)
+          ? kActRaiserTownWorldWidth
+          : ActRaiser_ReadWram16(kActRaiserWram_Bg1Width);
+      int available_left = camera_x;
+      int available_right =
+          world_width - kActRaiserAuthenticWidth - camera_x;
+      if (available_left < 0) available_left = 0;
+      if (available_right < 0) available_right = 0;
+      int margin_left = available_left < g_ws_extra
+          ? available_left : g_ws_extra;
+      int margin_right = available_right < g_ws_extra
+          ? available_right : g_ws_extra;
+      PpuSetExtraSideSpace(g_ppu, margin_left, margin_right, 0);
     }
   } else {
     PpuSetExtraSpaceCentered(g_ppu, (uint8)g_ws_extra);
@@ -626,8 +711,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s "
             "clamp=%02x mirror=%02x repeat=%02x rband=%d/%u-%u "
             "hud=%u/%u/%u left-only-y=%u\n",
-            (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8)),
-            g_ram[0x18], g_ram[0x19], wide ? "WIDE" : "pillarbox",
+            (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+            map_group, map_number, wide ? "WIDE" : "pillarbox",
             clamp, mirror, repeat, repeat_band_layer,
             (unsigned)repeat_band_y0, (unsigned)repeat_band_y1,
             (unsigned)hud_split_height, (unsigned)hud_split_left_end,
@@ -638,11 +723,12 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * into the margin) or 64-wide (real content). Temporary Phase-4 probe. */
   if (getenv("AR_WS_LAYERS")) {
     static int lf = -1;
-    unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
-    if ((int)gf != lf) {
-      lf = (int)gf;
+    unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    if ((int)game_frame != lf) {
+      lf = (int)game_frame;
       fprintf(stderr, "[ws-layers] gf=%u mode=%d main=%02x sub=%02x wsel=%06x cgwsel=%02x cgadsub=%02x",
-              gf, g_ppu->bgmode & 7, g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
+              game_frame, g_ppu->bgmode & 7,
+              g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
               g_ppu->windowsel, g_ppu->cgwsel, g_ppu->cgadsub);
       for (int L = 0; L < 4; L++)
         fprintf(stderr, " BG%d[w%d h%02x hs=%d]", L + 1,
@@ -664,13 +750,13 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     int gap_r = budget - r;
     size_t pitch = g_ppu->renderPitch;
     if (gap_l > 0)
-      for (int y = 0; y < 224; y++)
+      for (int y = 0; y < kActRaiserAuthenticHeight; y++)
         memset(g_ppu->renderBuffer + (size_t)y * pitch, 0,
                (size_t)gap_l * 4);
     if (gap_r > 0)
-      for (int y = 0; y < 224; y++)
+      for (int y = 0; y < kActRaiserAuthenticHeight; y++)
         memset(g_ppu->renderBuffer + (size_t)y * pitch +
-                   ((size_t)budget + 256 + r) * 4,
+                   ((size_t)budget + kActRaiserAuthenticWidth + r) * 4,
                0, (size_t)gap_r * 4);
     last_l = l;
     last_r = r;
@@ -678,7 +764,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     last_l = l;
     last_r = r;
     if (g_ppu->renderBuffer)
-      memset(g_ppu->renderBuffer, 0, (size_t)g_ppu->renderPitch * 224);
+      memset(g_ppu->renderBuffer, 0,
+             (size_t)g_ppu->renderPitch * kActRaiserAuthenticHeight);
   }
 }
 
@@ -686,25 +773,31 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
  * tiles $D4-$D7 in a 2x2 grid at y=$0B/$13. Promote only that exact signature
  * into the host HUD object surface. No emulated OAM/WRAM state is changed. */
 static void ActRaiser_WidescreenMagicHudPromote(void) {
-  if (!g_ppu || g_ppu->wsHudSplitHeight != 40 ||
-      g_ppu->wsHudLeftEnd != 88 || g_ppu->wsHudRightStart != 168 ||
-      g_ppu->wsHudLeftOnlyY != 28 ||
-      g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07 ||
+  if (!g_ppu ||
+      g_ppu->wsHudSplitHeight != kActRaiserActionHudHeight ||
+      g_ppu->wsHudLeftEnd != kActRaiserActionHudLeftEnd ||
+      g_ppu->wsHudRightStart != kActRaiserActionHudRightStart ||
+      g_ppu->wsHudLeftOnlyY != kActRaiserActionHudLowerRowY ||
+      !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]) ||
       !g_ppu->extraLeftRight)
     return;
 
-  for (int slot = 0; slot < 4; slot++) {
+  for (int slot = 0; slot < kActRaiserMagicHudOamCount; slot++) {
     int index = slot * 2;
     uint8 tile = (uint8)g_ppu->oam[index + 1];
     uint8 y = (uint8)(g_ppu->oam[index] >> 8);
-    uint8 expected_y = slot < 2 ? 0x0B : 0x13;
-    if (tile != (uint8)(0xD4 + slot) || y != expected_y)
+    uint8 expected_y = slot < 2
+        ? kActRaiserMagicHudUpperY : kActRaiserMagicHudLowerY;
+    if (tile != (uint8)(kActRaiserMagicHudFirstTile + slot) ||
+        y != expected_y)
       return;
   }
   if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
-                           0, 0, 256, 40,
+                           0, 0, kActRaiserAuthenticWidth,
+                           kActRaiserActionHudHeight,
                            kPpuOverlayFlag_RemoveFromGame))
-    PpuSetOverlayOamRange(g_ppu, 0, 4);
+    PpuSetOverlayOamRange(g_ppu, kActRaiserMagicHudOamFirst,
+                          kActRaiserMagicHudOamCount);
 }
 
 void ActRaiserDrawPpuFrame(void) {
@@ -722,6 +815,31 @@ void ActRaiserDrawPpuFrame(void) {
    * source page. The paired restore after scanout preserves UI staging. */
   ActRaiser_WidescreenSkyPalacePrepare();
   ActRaiser_WidescreenMagicHudPromote();
+  /* Manifest-driven HD substitutions (game-assets/hd/manifest.ini) — e.g. the
+   * settled title logo. Runs after the HUD/OAM capture policies so a busy
+   * source is detected rather than clobbered; entries without host-loaded
+   * art never request captures, keeping headless/oracle output authentic. */
+  HdReplacements_EvaluateFrame();
+  /* AR_TILE_CENSUS=1: read-only HD tile-pack sizing survey (hd_tile_census.c). */
+  { extern void HdTileCensus_Frame(void); HdTileCensus_Frame(); }
+  /* AR_TITLELOG=1: per-frame title-screen PPU probe (map bytes, BG mode,
+   * HDMAEN, Mode-7 matrix, INIDISP) for deriving/validating the settled-logo
+   * gate above. Diagnostic only. */
+  if (getenv("AR_TITLELOG")) {
+    static int last_gf = -1;
+    int gf = (int)ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    if (gf != last_gf) {
+      last_gf = gf;
+      fprintf(stderr, "[titlelog] gf=%d $18=%02x $19=%02x bgmode=%02x "
+              "hdmaen=%02x m7=[%04x %04x %04x %04x] inidisp=%02x\n",
+              gf, g_ram[kActRaiserWram_MapGroup],
+              g_ram[kActRaiserWram_CurrentMap],
+              g_ppu->bgmode, g_snesrecomp_last_hdmaen,
+              (uint16)g_ppu->m7matrix[0], (uint16)g_ppu->m7matrix[1],
+              (uint16)g_ppu->m7matrix[2], (uint16)g_ppu->m7matrix[3],
+              g_ppu->inidisp);
+    }
+  }
   /* Process ALL 8 HDMA channels, not a fixed subset. ActRaiser drives its
    * per-scanline effects (e.g. the Mode-7 title matrix animation) on channels
    * 2/3 — the old code only ran 5/6/7 (a stale assumption carried over from
@@ -796,7 +914,8 @@ static void ActRaiser_ApplyMagicCycle(void) {
   uint16 was_pressed = (uint16)(previous_buttons & button_mask);
   previous_buttons = buttons;
 
-  if (!enabled || g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07)
+  if (!enabled ||
+      !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
     return;
 
   /* Reserve/consume the configured button for this aid. SwapInputBits is its
@@ -804,7 +923,7 @@ static void ActRaiser_ApplyMagicCycle(void) {
   g_snes->input1_currentState &= (uint16)~SwapInputBits(button_mask);
   if (!pressed || was_pressed) return;
 
-  if (g_ram[0x00F8] != 0) {
+  if (g_ram[kActRaiserWram_MagicCastState] != 0) {
     fprintf(stderr, "[magic-cycle] cast still active; selection unchanged\n");
     return;
   }
@@ -813,9 +932,9 @@ static void ActRaiser_ApplyMagicCycle(void) {
     "none", "Magical Fire", "Magical Stardust", "Magical Aura",
     "Magical Light"
   };
-  uint8 current = g_ram[0x02AC];
+  uint8 current = g_ram[kActRaiserWram_SelectedMagic];
   uint8 next = (current >= 1 && current < 4) ? (uint8)(current + 1) : 1;
-  g_ram[0x02AC] = next;
+  g_ram[kActRaiserWram_SelectedMagic] = next;
   ActRaiser_ReloadSelectedMagicTiles(next);
   fprintf(stderr, "[magic-cycle] selected %u/4: %s ($02AC=$%02X, "
           "VRAM $2D40 refreshed)\n", (unsigned)next, names[next], next);
@@ -829,8 +948,13 @@ static void ActRaiser_ApplyMagicCycle(void) {
  * direct-page addrs map 1:1 ($1D player HP, $E6/$E7 timer, player object $08A0).
  * This is the framework the planned debug menu plugs into — see
  * docs/SEAMS.md "Gameplay / Tunable seams" + memory debug-menu-warp-roadmap. */
+static int ActRaiser_BcdTimerToSeconds(uint8 low, uint8 high) {
+  int low_pair = (low & 0x0F) + ((low >> 4) & 0x0F) * 10;
+  int high_pair = (high & 0x0F) + ((high >> 4) & 0x0F) * 10;
+  return low_pair + high_pair * 100;
+}
+
 void ActRaiser_ApplyCheats(void) {
-  extern uint8 g_ram[0x20000];
 
   /* AR_PIN=<parcode>[,<parcode>...] — generic PAR/ZSNES cheat-code pinner
    * (2026-07-06). Each code is the standard 8-hex-digit PAR form BBAAAAVV
@@ -844,12 +968,13 @@ void ActRaiser_ApplyCheats(void) {
   for (int i = 0; i < g_settings.pin_count; i++)
     g_ram[g_settings.pins[i].off] = g_settings.pins[i].val;
 
-  /* Action-stage gameplay tweaks only. $18 = region/mode: 01-07 = an action
-   * stage (region N); 00 = intro/overworld, 08 = sim, $20+ = transitions. Gate
-   * on the whole action range so cheats persist across ALL regions, not just
-   * Fillmore ($18==01) — that bug disabled them after warping to region 2+. The
-   * player object/HP/timer fields are shared by the action engine across every
-   * region, so the same writes apply everywhere. */
+  /* Action-stage gameplay tweaks only. MapGroup $01-$06 selects an ordinary
+   * action region, $07 is Death Heim, $00 is the non-action town/world/UI
+   * engine, and $08 is the ending presenter. Gate on the whole action range so
+   * cheats persist across every region, not just Fillmore ($18==$01) — that
+   * bug disabled them after warping to region 2+. The player object/HP/timer
+   * fields are shared by the action engine across every region, so the same
+   * writes apply everywhere. */
   /* ── ALL-MODE cheats (above the action-stage gate: they feed the sim-mode
    * equip menu / angel, so they must pin in every mode) ─────────────────── */
 
@@ -860,40 +985,46 @@ void ActRaiser_ApplyCheats(void) {
    * magic wiring map. */
   {
     if (g_settings.cheat_all_magic) {
-      g_ram[0x0299] = 0x01;   /* Magical Fire */
-      g_ram[0x029A] = 0x02;   /* Magical Stardust */
-      g_ram[0x029B] = 0x03;   /* Magical Aura */
-      g_ram[0x029C] = 0x04;   /* Magical Light */
+      g_ram[kActRaiserWram_MagicInventory + 0] = 0x01; /* Magical Fire */
+      g_ram[kActRaiserWram_MagicInventory + 1] = 0x02; /* Magical Stardust */
+      g_ram[kActRaiserWram_MagicInventory + 2] = 0x03; /* Magical Aura */
+      g_ram[kActRaiserWram_MagicInventory + 3] = 0x04; /* Magical Light */
     }
   }
 
   /* AR_RANGED_SWORD=1: sword fires a projectile ($E4 = $80, PAR 7E00E480). */
-  if (g_settings.cheat_ranged_sword) g_ram[0x00E4] = 0x80;
+  if (g_settings.cheat_ranged_sword)
+    g_ram[kActRaiserWram_RangedSwordFlag] = 0x80;
 
   /* AR_INF_MP: infinite magic scrolls. =1 -> pin the WORKING count $21 to 10
    * (PAR 7E00210A); =<n> -> pin to n. Deliberately does NOT touch the
    * PERSISTENT count $0295 (DEBUG.md #18b: $21 is the act-mode working copy,
    * loaded from $0295 at $02:84E0) so the cheat never bakes into save.srm. */
   if (g_settings.cheat_inf_mp)
-    g_ram[0x21] = (uint8)g_settings.cheat_inf_mp;
+    g_ram[kActRaiserWram_WorkingMagicPoints] =
+        (uint8)g_settings.cheat_inf_mp;
 
   /* AR_INF_SP=1: infinite sim-mode SP (miracle points). Self-calibrating: pins
    * current SP $0282/16 to max SP $0284/16 once max is known (vs the PAR code's
    * blunt $FF, which over-fills early-game maxima). */
   {
-    if (g_settings.cheat_inf_sp && (g_ram[0x0284] | g_ram[0x0285])) {
-      g_ram[0x0282] = g_ram[0x0284];
-      g_ram[0x0283] = g_ram[0x0285];
+    if (g_settings.cheat_inf_sp &&
+        ActRaiser_ReadWram16(kActRaiserWram_AngelMaximumSp)) {
+      ActRaiser_WriteWram16(
+          kActRaiserWram_AngelCurrentSp,
+          ActRaiser_ReadWram16(kActRaiserWram_AngelMaximumSp));
     }
   }
 
   /* AR_ANGEL_HP=1: infinite sim-mode angel health. Self-calibrating: pins
    * current HP $0286 to max HP $0287 (the PAR code 7E028608 hardcodes 8, which
    * would UNDER-fill after level-ups raise the max). */
-  if (g_settings.cheat_angel_hp && g_ram[0x0287])
-    g_ram[0x0286] = g_ram[0x0287];
+  if (g_settings.cheat_angel_hp &&
+      g_ram[kActRaiserWram_AngelMaximumHp])
+    g_ram[kActRaiserWram_AngelCurrentHp] =
+        g_ram[kActRaiserWram_AngelMaximumHp];
 
-  if (g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07) return;
+  if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) return;
 
   /* Live action-stage magic selection/asset reload for effect testing. */
   ActRaiser_ApplyMagicCycle();
@@ -902,20 +1033,25 @@ void ActRaiser_ApplyCheats(void) {
    * high-water max seen this stage (self-calibrates to "full" once you've been
    * at full, so we needn't know max HP statically). =<n> -> pin to literal n. */
   {
-    static int prior_mode;
-    static unsigned hi;
-    int mode = g_settings.cheat_inf_hp;
-    if (mode != prior_mode) {
+    static int previous_cheat_mode;
+    static unsigned highest_hp;
+    int cheat_mode = g_settings.cheat_inf_hp;
+    if (cheat_mode != previous_cheat_mode) {
       /* Entering/re-entering auto mode must calibrate from the current stage,
        * not reuse a high-water value captured before a live toggle. */
-      if (mode == 1) hi = 0;
-      prior_mode = mode;
+      if (cheat_mode == 1) highest_hp = 0;
+      previous_cheat_mode = cheat_mode;
     }
-    if (mode) {
-      if (mode > 1) { g_ram[0x1D] = (uint8)mode; }
-      else { unsigned hp = g_ram[0x1D];
-        if (hp > hi && hp <= 0xFF) hi = hp;
-        if (hi) g_ram[0x1D] = (uint8)hi; }
+    if (cheat_mode) {
+      if (cheat_mode > 1) {
+        g_ram[kActRaiserWram_PlayerHp] = (uint8)cheat_mode;
+      } else {
+        unsigned current_hp = g_ram[kActRaiserWram_PlayerHp];
+        if (current_hp > highest_hp && current_hp <= 0xFF)
+          highest_hp = current_hp;
+        if (highest_hp)
+          g_ram[kActRaiserWram_PlayerHp] = (uint8)highest_hp;
+      }
     }
   }
 
@@ -931,38 +1067,49 @@ void ActRaiser_ApplyCheats(void) {
    * frozen timer blocks the drain and the boss->sim transition never
    * completes. No separate "boss defeated" flag needed; the abnormal
    * decrement rate IS the signal (2026-07-01). Latch resets on region change
-   * ($18) so a fresh stage re-arms the freeze instead of staying stuck off
-   * from a previous boss fight. */
+  * ($18) so a fresh stage re-arms the freeze instead of staying stuck off
+  * from a previous boss fight. */
   {
-    static uint8 fe6, fe7; static int got;
-    static int latched_off; static uint8 last_region = 0xFF;
-    static int was_enabled;
+    static uint8 captured_timer_low;
+    static uint8 captured_timer_high;
+    static int timer_captured;
+    static int drain_detected;
+    static uint8 last_map_group = kActRaiserUnknownMapGroup;
+    static int cheat_was_enabled;
     if (!g_settings.cheat_freeze_timer) {
       /* A future live off/on toggle starts a fresh capture and drain latch. */
-      was_enabled = 0;
-      got = 0;
-      latched_off = 0;
-      last_region = 0xFF;
+      cheat_was_enabled = 0;
+      timer_captured = 0;
+      drain_detected = 0;
+      last_map_group = kActRaiserUnknownMapGroup;
     } else {
-      if (!was_enabled) {
-        was_enabled = 1;
-        got = 0;
-        latched_off = 0;
-        last_region = 0xFF;
+      if (!cheat_was_enabled) {
+        cheat_was_enabled = 1;
+        timer_captured = 0;
+        drain_detected = 0;
+        last_map_group = kActRaiserUnknownMapGroup;
       }
-      if (g_ram[0x18] != last_region) {
-        last_region = g_ram[0x18]; got = 0; latched_off = 0;
+      if (g_ram[kActRaiserWram_MapGroup] != last_map_group) {
+        last_map_group = g_ram[kActRaiserWram_MapGroup];
+        timer_captured = 0;
+        drain_detected = 0;
       }
-      if (!got) { fe6 = g_ram[0xE6]; fe7 = g_ram[0xE7]; got = 1; }
-      if (!latched_off) {
-        int pinned = (fe6 & 0x0F) + ((fe6 >> 4) & 0x0F) * 10
-                   + ((fe7 & 0x0F) + ((fe7 >> 4) & 0x0F) * 10) * 100;
-        int cur = (g_ram[0xE6] & 0x0F) + ((g_ram[0xE6] >> 4) & 0x0F) * 10
-                + ((g_ram[0xE7] & 0x0F) + ((g_ram[0xE7] >> 4) & 0x0F) * 10) * 100;
-        if (pinned - cur > 1) {
-          latched_off = 1;   /* drain detected -- let the game own it from here */
+      if (!timer_captured) {
+        captured_timer_low = g_ram[kActRaiserWram_ActionTimerLow];
+        captured_timer_high = g_ram[kActRaiserWram_ActionTimerHigh];
+        timer_captured = 1;
+      }
+      if (!drain_detected) {
+        int captured_seconds = ActRaiser_BcdTimerToSeconds(
+            captured_timer_low, captured_timer_high);
+        int current_seconds = ActRaiser_BcdTimerToSeconds(
+            g_ram[kActRaiserWram_ActionTimerLow],
+            g_ram[kActRaiserWram_ActionTimerHigh]);
+        if (captured_seconds - current_seconds > 1) {
+          drain_detected = 1;
         } else {
-          g_ram[0xE6] = fe6; g_ram[0xE7] = fe7;
+          g_ram[kActRaiserWram_ActionTimerLow] = captured_timer_low;
+          g_ram[kActRaiserWram_ActionTimerHigh] = captured_timer_high;
         }
       }
     }
@@ -983,10 +1130,10 @@ void ActRaiser_ApplyCheats(void) {
       extern Snes *g_snes;
       uint16 buttons = SwapInputBits(g_snes->input1_currentState);
       if (buttons & g_settings.cheat_moonjump_button) {
-        uint16 y = (uint16)(g_ram[0x08A4] | (g_ram[0x08A5] << 8));
-        y = (uint16)(y - g_settings.cheat_moonjump_speed); /* −Y = up */
-        g_ram[0x08A4] = (uint8)(y & 0xFF);
-        g_ram[0x08A5] = (uint8)((y >> 8) & 0xFF);
+        uint16 player_y =
+            ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionY);
+        player_y = (uint16)(player_y - g_settings.cheat_moonjump_speed);
+        ActRaiser_WriteWram16(kActRaiserWram_PlayerPositionY, player_y);
       }
     }
   }
@@ -1009,13 +1156,14 @@ void ActRaiser_ApplyCheats(void) {
     if (prior_mode == 1 && mode != 1) {
       /* Release only the two fields owned by full-invulnerability mode. Raw
        * experimental offset pins are intentionally not guessed/restored. */
-      g_ram[0x08C6] = 0;
-      g_ram[0x08D1] &= (uint8)~0x20;
+      g_ram[kActRaiserWram_PlayerInvulnerabilityTimer] = 0;
+      g_ram[kActRaiserWram_PlayerFlags + 1] &=
+          (uint8)~kActRaiserPlayerFlag_InvulnerableHighByte;
     }
     prior_mode = mode;
     if (mode) {
       if (mode == 1) {
-        g_ram[0x08C6] = 0xFF;     /* pin i-frame timer (+$26) so flag never clears */
+        g_ram[kActRaiserWram_PlayerInvulnerabilityTimer] = 0xFF;
         /* MAGIC EXCEPTION (2026-07-07, DEBUG.md #18): the cast gate ($00:9843 ->
          * $00:9DE1) does BIT #$2008 on player state $08D0 and refuses to cast
          * while the invuln flag ($2000) is set -- pinning it unconditionally made
@@ -1030,16 +1178,19 @@ void ActRaiser_ApplyCheats(void) {
          * start; holding the button with no magic/MP no longer drops invuln
          * at all (the old version was vulnerable the entire time the button
          * was held). */
-        int cast_imminent = (g_ram[0x00A0] & 0xC0) != 0
-                         && g_ram[0xF8] == 0
-                         && g_ram[0x02AC] != 0
-                         && g_ram[0x21] != 0;
+        int cast_imminent =
+            (g_ram[kActRaiserWram_InputHeldHigh] & 0xC0) != 0 &&
+            g_ram[kActRaiserWram_MagicCastState] == 0 &&
+            g_ram[kActRaiserWram_SelectedMagic] != 0 &&
+            g_ram[kActRaiserWram_WorkingMagicPoints] != 0;
         if (cast_imminent)
-          g_ram[0x08D1] &= (uint8)~0x20;
+          g_ram[kActRaiserWram_PlayerFlags + 1] &=
+              (uint8)~kActRaiserPlayerFlag_InvulnerableHighByte;
         else
-          g_ram[0x08D1] |= 0x20;  /* set invuln flag $08D0 bit 0x2000 (+$30) */
+          g_ram[kActRaiserWram_PlayerFlags + 1] |=
+              kActRaiserPlayerFlag_InvulnerableHighByte;
       } else {
-        g_ram[0x08A0 + (unsigned)mode] = 0xFF;
+        g_ram[kActRaiserWram_PlayerObject + (unsigned)mode] = 0xFF;
       }
     }
   }
@@ -1055,16 +1206,15 @@ void ActRaiser_ApplyCheats(void) {
  * F6 in main.c with the raw target from AR_WARP=<region_hex><map_hex>. The map
  * byte is written directly to $19 and is not a uniform act number. */
 void ActRaiser_Warp(unsigned region, unsigned map) {
-  extern uint8 g_ram[0x20000];
-  uint8 from_region = g_ram[0x18];
-  uint8 from_map = g_ram[0x19];
-  g_ram[0x1B] = (uint8)region;   /* -> $18 (region/mode) on the switch */
-  g_ram[0x1A] = (uint8)map;      /* -> $19 (raw map/sub-flow within region) */
-  g_ram[0xFB] |= 0x80;           /* transition-request flag */
+  uint8 source_map_group = g_ram[kActRaiserWram_MapGroup];
+  uint8 source_map = g_ram[kActRaiserWram_CurrentMap];
+  g_ram[kActRaiserWram_DestinationMapGroup] = (uint8)region;
+  g_ram[kActRaiserWram_DestinationMap] = (uint8)map;
+  g_ram[kActRaiserWram_TransitionRequest] |= kActRaiserTransitionRequestBit;
   fprintf(stderr, "[warp] from $18=$%02X $19=$%02X staged region=$%02X "
           "map=$%02X ($1B/$1A/$FB set); transition processor should pick it up.\n",
-          from_region, from_map, region & 0xFF, map & 0xFF);
-  if (from_region >= 0x01 && from_region <= 0x07) {
+          source_map_group, source_map, region & 0xFF, map & 0xFF);
+  if (ActRaiser_IsActionMapGroup(source_map_group)) {
     fprintf(stderr, "[warp] WARNING: action->action is not a naturally observed "
             "transition; inherited timing/object state may affect fidelity.\n");
   }

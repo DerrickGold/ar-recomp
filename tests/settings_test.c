@@ -42,7 +42,7 @@ static void TestDefaultsAndMetadata(void) {
   g_ws_extra = 43;
   Settings_Init();
 
-  CHECK(g_setting_desc_count == 22);
+  CHECK(g_setting_desc_count == 25);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip && a->field);
@@ -57,6 +57,8 @@ static void TestDefaultsAndMetadata(void) {
   }
   CHECK(g_settings.display_mode == kDisplayMode_WideFull);
   CHECK(g_settings.hud_scale_percent == 0);
+  CHECK(g_settings.audio_master_volume == 100);
+  CHECK(g_settings.audio_dialog_blip);
   CHECK(g_settings.ws_action && g_settings.ws_sim && g_settings.ws_sprites);
   CHECK(g_settings.cheat_inf_mp == 0);
   CHECK(g_settings.cheat_moonjump_button == 0x8000);
@@ -65,8 +67,13 @@ static void TestDefaultsAndMetadata(void) {
 
   const SettingDesc *display = Settings_Find("display_mode");
   const SettingDesc *hp = Settings_Find("cheat_inf_hp");
+  const SettingDesc *volume = Settings_Find("audio_master_volume");
   CHECK(display && display->type == kSettingType_Enum);
   CHECK(display && display->enum_count == kDisplayMode_PresetCount);
+  CHECK(volume && volume->category == kSettingCat_Audio);
+  CHECK(volume && volume->apply == kApply_Callback);
+  CHECK(volume && volume->minval == 0 && volume->maxval == 100 &&
+        volume->step == 5);
   CHECK(hp && !Settings_IsAvailable(hp));
   g_ram[0x18] = 1;
   CHECK(hp && Settings_IsAvailable(hp));
@@ -83,6 +90,8 @@ static void TestLegacySeedEncodings(void) {
   setenv("AR_NO_KNOCKBACK", "10", 1); /* legacy parser is hexadecimal */
   setenv("AR_PIN", "7E00210A,7F1234AA", 1);
   setenv("AR_WS_SPRITES", "0", 1);
+  setenv("AR_AUDIO_VOLUME", "137", 1);
+  setenv("AR_DIALOG_BLIP", "0", 1);
   g_ws_active = true;
   g_ws_extra = 43;
   Settings_Init();
@@ -92,6 +101,8 @@ static void TestLegacySeedEncodings(void) {
   CHECK(g_settings.cheat_moonjump_speed == 6);
   CHECK(g_settings.cheat_no_knockback == 0x10);
   CHECK(g_settings.pin_count == 2);
+  CHECK(g_settings.audio_master_volume == 100);
+  CHECK(!g_settings.audio_dialog_blip);
   CHECK(g_settings.pins[0].off == 0x0021 && g_settings.pins[0].val == 0x0a);
   CHECK(g_settings.pins[1].off == 0x11234 && g_settings.pins[1].val == 0xaa);
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
@@ -127,6 +138,22 @@ static void TestMutationApi(void) {
   char hud_value[32];
   Settings_FormatValue(hud_scale, hud_value, sizeof(hud_value));
   CHECK(!strcmp(hud_value, "2.75x"));
+
+  const SettingDesc *volume = Settings_Find("audio_master_volume");
+  CHECK(Settings_SetLong(volume, 87) == kSettingChange_Applied);
+  CHECK(g_settings.audio_master_volume == 85);
+  CHECK(s_observer_desc == volume);
+  char volume_value[16];
+  Settings_FormatValue(volume, volume_value, sizeof(volume_value));
+  CHECK(!strcmp(volume_value, "85%"));
+  CHECK(Settings_SetText(volume, "40%") == kSettingChange_Applied);
+  CHECK(g_settings.audio_master_volume == 40);
+  CHECK(Settings_SetLong(volume, -1) == kSettingChange_Applied);
+  CHECK(g_settings.audio_master_volume == 0);
+
+  const SettingDesc *dialog_blip = Settings_Find("audio_dialog_blip");
+  CHECK(Settings_SetLong(dialog_blip, 0) == kSettingChange_Applied);
+  CHECK(!g_settings.audio_dialog_blip);
 
   const SettingDesc *mp = Settings_Find("cheat_inf_mp");
   CHECK(Settings_SetLong(mp, 999) == kSettingChange_Applied);

@@ -93,6 +93,15 @@ typedef struct Settings {
   /* Absolute host-output HUD scale percent. 0 follows the game's current
    * presentation scale; 100 means one output pixel per SNES pixel vertically. */
   int hud_scale_percent;
+  /* Master toggle for manifest-driven HD graphics replacements
+   * (game-assets/hd/manifest.ini). Silently inert when the manifest/art files
+   * are absent or the run is headless (no overlay bindings). */
+  bool hd_replacements;
+
+  /* Audio controls. The SDL callback consumes an atomic mirror of the master
+   * value; the game-thread COP hook reads the dialogue toggle directly. */
+  int  audio_master_volume;  /* final host PCM gain, 0..100 percent */
+  bool audio_dialog_blip;    /* per-glyph Sky Palace dialogue sound */
 
   /* Cheat values. Zero/false means disabled. Stateful enforcement latches are
    * deliberately kept private to ActRaiser_ApplyCheats, not stored here. */

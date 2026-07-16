@@ -135,6 +135,8 @@ ActRaiserRecomp/
 │   │                             engineered game architecture (object systems,
 │   │                             dispatch tables, subsystem roles) — the
 │   │                             groundwork for a future full decompilation.
+│   ├── research-symbol-map.md  # manually curated address → candidate semantic
+│   │                             name index, with confidence/promotion status
 │   ├── ram-map.md             # WRAM address reference
 │   ├── rom-map.md             # ROM data-region reference
 │   ├── rendering-engine.md    # rendering/streaming/OAM architecture
@@ -169,10 +171,11 @@ ActRaiserRecomp/
                                    replays) — NOT committed, purely local
 ```
 
-`DEBUG.md`, `docs/SEAMS.md`, and `docs/progress.md` are the three documents worth
-reading before diving into the code: `DEBUG.md` tells you *how to diagnose* a
-problem (which tool, which env var, which known gotcha), `SEAMS.md` tells you
-*what the game's internal architecture actually is* (object systems, dispatch
+`DEBUG.md`, `docs/SEAMS.md`, `docs/research-symbol-map.md`, and
+`docs/progress.md` are the documents worth reading before diving into the code:
+`DEBUG.md` tells you *how to diagnose* a problem (which tool, which env var,
+which known gotcha), `SEAMS.md` tells you *what the game's internal architecture
+actually is* (object systems, dispatch
 tables, subsystem boundaries) as reverse-engineered so far, and `progress.md`
 tells you *what actually works today* (playability per stage/town + codebase
 metrics). `docs/settings-system.md` is the next-phase design for replacing
@@ -306,6 +309,21 @@ default, displayed as **Match game**) preserves the normal game-sized HUD.
 Values are percentages from 25 through 400 and can also use an `x` suffix,
 such as `AR_HUD_SCALE=2.5x`. Authentic 4:3 and widescreen-raw remain untouched
 comparison paths and keep the HUD inside the SNES framebuffer.
+
+**Audio controls** are also live descriptor-backed settings. They can be set in
+the config's `AR_*` bridge today and will feed the future settings UI:
+
+| Key | Effect |
+|---|---|
+| `AR_AUDIO_VOLUME=<0..100>` | master output volume (default 100); scales the final music/SFX/MSU-1 mix |
+| `AR_DIALOG_BLIP=0` | mutes only the per-character Sky Palace dialogue sound; other uses of the same sound/event ID remain active |
+
+For a live probe without the overlay, use for example
+`AR_SETTING_SET=audio_master_volume=25`; the scheduled settings mechanism
+applies it through the same registry callback the eventual menu will use.
+Independent music and SFX levels are not exposed yet because the SPC/DSP mix
+must first be separated or its voice ownership proven; see
+`docs/settings-system.md`, “Audio control seams”.
 
 **Cheats** (`[Cheats]` section — any `AR_*`/`SNESREF_*` key in the `.ini` is
 exported as an environment variable, which is how these are read):

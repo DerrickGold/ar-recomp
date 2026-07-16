@@ -5,13 +5,15 @@ widescreen knobs, display/audio, QoL) and defines each one's **path to live
 runtime updates**, so a future in-game overlay menu can flip them mid-run. This
 is the "option B" refactor from the 2026-07-12 settings scan.
 
-Status: **PHASES 1–3 FOUNDATION IMPLEMENTED.** `src/settings.{c,h}` now own the
+Status: **PHASES 1–3 IMPLEMENTED; PHASE 4 IN PROGRESS.** `src/settings.{c,h}` now own the
 existing cheat fields, nine widescreen behavior gates, the render profile, the
-host-output HUD scale, and a 22-row descriptor registry with lookup, formatting,
+host-output HUD scale, two live audio controls, and a 24-row descriptor registry with lookup, formatting,
 availability, mutation, callbacks, sticky/restart results, and observer
-notification. The promoted game HUD now proves the post-upscale host-compositor
-seam; the settings menu itself, descriptor-driven persistence, display/audio
-config migration, and the save codec/backends/editor remain. Companion docs:
+notification. The promoted game HUD proves the post-upscale host-compositor
+seam; master audio gain and the Sky Palace dialogue blip now prove both audio
+apply paths. The settings menu itself, descriptor-driven persistence, the
+remaining display/audio config migration, and the save codec/backends/editor
+remain. Companion docs:
 [SEAMS.md](SEAMS.md) (gameplay/tunable seams the cheats hook),
 [rendering-engine.md](rendering-engine.md) (widescreen policy internals),
 [ram-map.md](ram-map.md) (the WRAM addresses the cheats pin),
@@ -91,6 +93,10 @@ typedef struct Settings {
    * exactly match one of the three deterministic capture presets. */
   DisplayMode display_mode;
   int hud_scale_percent;       // 0=match game; 100=native host-output 1x
+
+  /* Audio (implemented live controls) */
+  int  audio_master_volume;    // 0..100; atomic callback mirror
+  bool audio_dialog_blip;      // exact $01:902D COP #$07 site
 
   /* Cheats (action-gated unless marked all-mode) */
   bool   cheat_all_magic;      // all-mode  -> $0299-$029C
@@ -284,14 +290,15 @@ live:
 
 | Path | Mechanism | Settings | Cost |
 |---|---|---|---|
-| **PASSIVE** | Existing gate reads the field every frame. Menu writes struct → next frame reflects it. No extra code. | 11 cheat controls, 9 widescreen behaviors, and host HUD scale currently registered | free |
-| **CALLBACK** | `on_change()` fires one SDL/PPU call. `window_scale`→`SDL_SetWindowSize`; `fullscreen`→`SDL_SetWindowFullscreen`; `audio_enabled` mute→`SDL_PauseAudioDevice`; `ignore_aspect_ratio`→renderer logical-size. | window_scale, fullscreen, ignore_aspect_ratio, audio mute | small |
+| **PASSIVE** | Existing gate reads the field every frame. Menu writes struct → next frame reflects it. No extra code. | 11 cheat controls, 9 widescreen behaviors, host HUD scale, dialogue blip | free |
+| **CALLBACK** | `on_change()` fires one host update. Implemented audio master gain copies to an atomic callback mirror; future rows include `window_scale`→`SDL_SetWindowSize`, `fullscreen`→`SDL_SetWindowFullscreen`, `audio_enabled` mute→`SDL_PauseAudioDevice`, and `ignore_aspect_ratio`→renderer logical-size. | master volume now; window scale/fullscreen/ignore-aspect/audio-device toggle during Config migration | small |
 | **RESTART** | Needs realloc/reinit unsafe to do cheaply mid-frame. Per setting: attempt heavy live reinit, or set a "pending — applies on relaunch" badge (§10.2). | aspect on/off + ratio (window + PPU buffer realloc), `new_renderer`, audio freq/samples (device reopen; audio thread) | real work |
 | **ACTION** | Not stored toggles — commands the menu invokes; only the *param* is stored. | warp (`warp_target`, F6), turbo (`turbo_mult`, T), savestate (F5/F7), snapshot (F2), pause (P) | reuse existing hotkey paths (`src/main.c:587`) |
 | **SAVE** | Transactional mutation of the canonical `g_sram` image + mandatory checksum recompute; optional commit through the active `.srm` or `.ini` backend. Takes effect **the next time the game loads the save from its own title menu** — no app restart. See §4.1. | `save_region_prog[]` (save-format.md §3.1), save import/export actions | small, but see the §4.1 hazard |
 
-The core Phase-1 change is now implemented across the 21 passive rows (plus the
-render-profile CALLBACK row):
+The core Phase-1 change is implemented across the original passive rows. Phase
+4 adds one audio PASSIVE row and one audio CALLBACK row without changing those
+gameplay gates:
 
 ```c
 // before                                    // after
@@ -306,6 +313,40 @@ per-frame (`PpuSetExtraSpace` runs every frame in the policy,
 `src/actraiser_rtl.c:469`). Allocate the window + PPU buffers at the **max**
 budget on boot, then let the menu clamp visible columns live — no realloc. See
 §10.2.
+
+### Audio control seams (Phase 4)
+
+The current audio path has two useful control points, and they solve different
+problems:
+
+- **Master volume is post-mix host gain.** `AudioCallback()` calls
+  `RtlRenderAudio()` first, then scales the final interleaved signed-16-bit PCM
+  block by `audio_master_volume` (`0..100`). This includes the DSP mix, sound
+  effects, music, echo, and MSU-1 audio. The audio thread reads an
+  `SDL_atomic_t` mirror; it never races on `g_settings`.
+- **Dialogue blip is suppressed at its native request site.** The message
+  composer calls `$01:901C` for each printable glyph. After the character delay
+  (`$01:9278`), the non-space path at block `$01:902D` loads `#$07` and executes
+  `COP`; the ROM vector writes that request to `$035A`. When
+  `audio_dialog_blip` is off, `ActRaiser_CopHook()` skips only that exact
+  `$01:902D` post. It must not suppress every COP request with ID `$07`, because
+  the same ID is also used by unrelated events elsewhere in the game.
+
+Independent music and SFX sliders are **not yet exposed**. By the time
+`RtlRenderAudio()` returns, all eight DSP voices and echo are already summed;
+scaling that PCM cannot separate categories. A correct implementation requires
+one of these to be proven first:
+
+1. identify stable ActRaiser music/SFX voice ownership across Sky Palace, sim,
+   action, and bosses, then scale voices before DSP summation (including a
+   defined echo policy); or
+2. reverse-engineer the native SPC driver commands/state that control its music
+   and SFX buses, and adjust those buses before mixing.
+
+Use `AR_COPLOG=1` to correlate CPU sound requests and `AR_KONLOG=1` to correlate
+DSP key-on/voice/source activity. Acceptance requires captures from every major
+mode and an explicit echo test; a slider that merely changes DSP master volume
+would be a mislabeled duplicate of the implemented master control.
 
 ### 4.1 The save backend / `APPLY_SAVE` path
 
@@ -414,6 +455,8 @@ restore an unknown prior byte.
 | Setting | Source | Type | Default | Apply |
 |---|---|---|---|---|
 | HUD output scale | `AR_HUD_SCALE` | int percent or `x` suffix | Match game (`0`) | PASSIVE; `100` = native output 1× |
+| Master volume | `AR_AUDIO_VOLUME` | int percent | 100 | CALLBACK; atomic post-mix gain, live `0..100` in steps of 5 |
+| Dialogue text blip | `AR_DIALOG_BLIP` | bool | on | PASSIVE; exact `$01:902D` COP request only |
 | Extended aspect | `ExtendedAspectRatio` (ini) | enum off/16:9/16:10 | off | RESTART (§10.2) |
 | Pixel aspect | `AspectPAR` (ini) | enum 4:3/square | 4:3 | RESTART |
 | Window scale | `WindowScale` (ini) | int | 3 | CALLBACK |
@@ -480,15 +523,16 @@ its encoding is untested.
 ## 7. Threading / safety model
 
 The game runs as a cooperative coroutine via `swapcontext`
-(`RunOneFrameOfGame`, `src/actraiser_rtl.c:879`) on the **same thread** as the
-SDL event loop (`src/main.c` main loop). The menu mutates `g_settings` *between*
-frames; the game reads it on the *next* frame. **No locks or atomics are needed**
-for PASSIVE/CALLBACK/ACTION settings.
+(`RunOneFrameOfGame`, `src/actraiser_rtl.c`) on the **same thread** as the SDL
+event loop. The menu mutates `g_settings` *between* frames; ordinary game and
+host code reads it on the next frame without locks.
 
-The one exception: SDL's audio callback runs on a separate audio thread
-(`SDL_OpenAudio`, `src/main.c:556`). This is precisely why audio-format settings
-are RESTART (device close/reopen, which SDL serializes) rather than live-poked —
-never mutate audio params the callback reads from the main thread.
+SDL's audio callback is the exception: it runs on a separate audio thread.
+Live callback inputs must use a synchronized mirror. Master volume therefore
+copies the descriptor value into `SDL_atomic_t g_audio_master_percent`, which
+the callback reads after rendering. Audio-format settings remain RESTART-class
+because device close/reopen must be serialized by SDL; never have the callback
+read mutable format fields directly from `g_settings`.
 
 ---
 
@@ -509,9 +553,12 @@ never mutate audio params the callback reads from the main thread.
    callbacks, formatting, sticky warnings, restart results, and a host observer
    are present. New Config/audio/save rows must supply the same metadata as they
    migrate in Phases 4/6.
-4. **Phase 4 — persistence + Config merge.** `settings.ini` save/load; fold the
-   `g_config` display/audio/aspect fields into `Settings` so there is one source
-   of truth.
+4. **Phase 4 — persistence + Config merge (in progress).** Live master volume
+   and the exact-site dialogue-blip toggle are descriptor-backed. Next add
+   `settings.ini` save/load and fold the remaining `g_config`
+   display/audio/aspect fields into `Settings` so there is one source of truth.
+   Independent music/SFX gain remains research-gated by the audio-seam criteria
+   above.
 5. **Phase 5 — overlay UI.** Add the host overlay at the §3.4 present/input seam.
    Render rows from `SettingDesc[]`, write `g_settings`, intercept menu input,
    pause game-frame advancement while open, and expose ACTION commands without

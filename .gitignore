@@ -1,3 +1,7 @@
+# User-supplied HD art packs + manifest (repo assets/ is docs imagery only;
+# see docs/rendering-engine.md §13.1.1 for the manifest format)
+game-assets/
+
 # ROM files (user must supply their own)
 *.sfc
 *.smc
@@ -46,8 +50,9 @@ __pycache__/
 .venv/
 venv/
 
-# Dependencies (cloned repos)
-third_party/
+# Dependencies (cloned repos) — except small vendored single-file libs
+third_party/*
+!third_party/stb/
 
 # Test artifacts
 tests/golden/*.png

@@ -17,6 +17,7 @@
 #include "common_cpu_infra.h"
 #include "config.h"
 #include "settings.h"
+#include "hd_replacements.h"
 #include "run_dir.h"
 #include "util.h"
 #include "actraiser_spc_player.h"
@@ -25,6 +26,14 @@
 #include "debug_server.h"
 #include "framedump.h"
 #include "widescreen.h"
+
+/* HD art substitution (hd_replacements.c manifest entries). PNG only;
+ * decoded once at startup. */
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_NO_LINEAR
+#define STBI_NO_HDR
+#include "stb_image.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 static SDL_Window *g_window;
@@ -42,6 +51,11 @@ static int g_snes_width = 256, g_snes_height = 224;
 static uint8_t g_pixels[kPpuBufWidth * 4 * 240];
 static uint8_t g_hud_bg_pixels[kPpuBufWidth * 4 * 240];
 static uint8_t g_hud_obj_pixels[kPpuBufWidth * 4 * 240];
+/* Overlay surfaces for manifest-driven HD replacements, allocated lazily per
+ * source at bind time. The captured authentic pixels are never presented
+ * (the HD textures replace them); the bindings exist because RemoveFromGame
+ * only engages on a bound source. BG3/OBJ reuse the HUD surfaces above. */
+static uint8_t *g_hd_overlay_pixels[kPpuOverlaySource_Count];
 
 /* Widescreen master switch + per-side extra-column budget — the definitions
  * for the runner's widescreen.h externs (each game defines them; 0/false =
@@ -60,6 +74,10 @@ extern const RtlGameInfo kActRaiserGameInfo;
 bool g_new_ppu = true;
 
 static SDL_mutex *g_audio_mutex;
+/* The audio callback runs on SDL's audio thread, while settings mutate on the
+ * main/game thread. Keep the callback's one live input in an SDL atomic mirror
+ * instead of racing on g_settings. */
+static SDL_atomic_t g_audio_master_percent;
 static bool RenderFramebuffer(void);
 
 void NORETURN Die(const char *error) {
@@ -185,6 +203,15 @@ static void SDLCALL AudioCallback(void *userdata, Uint8 *stream, int len) {
   (void)userdata;
   if (SDL_LockMutex(g_audio_mutex)) { memset(stream, 0, len); return; }
   RtlRenderAudio((int16 *)stream, len / 4, 2);
+  int volume = SDL_AtomicGet(&g_audio_master_percent);
+  if (volume < 0) volume = 0;
+  if (volume > 100) volume = 100;
+  if (volume != 100) {
+    int16 *samples = (int16 *)stream;
+    const int sample_count = len / (int)sizeof(*samples);
+    for (int i = 0; i < sample_count; i++)
+      samples[i] = (int16)(((int32)samples[i] * volume) / 100);
+  }
   SDL_UnlockMutex(g_audio_mutex);
 }
 
@@ -467,6 +494,8 @@ static void ApplyDisplayPresentation(void) {
 static void OnRuntimeSettingChanged(const SettingDesc *desc,
                                     SettingChangeResult result) {
   (void)result;
+  if (desc->field == &g_settings.audio_master_volume)
+    SDL_AtomicSet(&g_audio_master_percent, g_settings.audio_master_volume);
   /* HUD scale is a display-category value but must not resize a manually
    * resized window. Only the display profile and geometry policies own the
    * presentation/window dimensions. */
@@ -617,6 +646,99 @@ static void RenderHudOverlay(SDL_Rect viewport) {
   }
 }
 
+/* Load the HD replacement manifest and decode each screen-plane entry's art
+ * once at startup. A missing manifest or image leaves entries textureless and
+ * therefore fully inert (no capture requests, authentic rendering).
+ * AR_HD_MANIFEST overrides the default manifest location for experiments. */
+static void LoadHdReplacements(void) {
+  const char *path = getenv("AR_HD_MANIFEST");
+  if (!path || !path[0]) path = "game-assets/hd/manifest.ini";
+  if (!HdReplacements_Load(path)) return;
+  for (int i = 0; i < g_hd_replacement_count; i++) {
+    HdReplacement *entry = &g_hd_replacements[i];
+    if (entry->plane != kHdPlane_Screen) continue;
+    int w = 0, h = 0, comp = 0;
+    stbi_uc *rgba = stbi_load(entry->image, &w, &h, &comp, 4);
+    if (!rgba) {
+      fprintf(stderr, "[hd-manifest] [replace:%s] cannot decode %s; "
+              "entry inert\n", entry->name, entry->image);
+      continue;
+    }
+    /* ABGR8888 matches stb's little-endian R,G,B,A byte order directly. */
+    SDL_Texture *texture = SDL_CreateTexture(
+        g_renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, w, h);
+    if (texture && SDL_UpdateTexture(texture, NULL, rgba, w * 4) == 0) {
+      SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+      entry->texture = texture;
+      fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d)\n",
+              entry->name, entry->image, w, h);
+    } else {
+      if (texture) SDL_DestroyTexture(texture);
+      fprintf(stderr, "[hd-manifest] [replace:%s] texture upload failed: %s\n",
+              entry->name, SDL_GetError());
+    }
+    stbi_image_free(rgba);
+  }
+}
+
+/* Bind overlay surfaces for every source a loaded screen-plane entry can
+ * capture. BG3/OBJ are already bound to the HUD surfaces; the other sources
+ * get lazily allocated buffers. Must run after the HUD bindings. */
+static void BindHdReplacementSurfaces(void) {
+  for (int i = 0; i < g_hd_replacement_count; i++) {
+    const HdReplacement *entry = &g_hd_replacements[i];
+    if (entry->plane != kHdPlane_Screen || !entry->texture) continue;
+    int source = entry->source;
+    if (source == kPpuOverlaySource_Bg3 || source == kPpuOverlaySource_Obj ||
+        g_hd_overlay_pixels[source])
+      continue;
+    g_hd_overlay_pixels[source] = calloc(1, kPpuBufWidth * 4 * 240);
+    if (g_hd_overlay_pixels[source])
+      PpuBindOverlaySurface(g_ppu, (PpuOverlaySource)source,
+                            g_hd_overlay_pixels[source], g_snes_width * 4);
+  }
+}
+
+/* Draw every active HD replacement over the region its capture removed this
+ * frame. Master brightness is resolved on the host texture so INIDISP fades
+ * apply to the substituted art; forced blank suppresses it entirely,
+ * matching the authentic layer. */
+static void RenderHdReplacements(SDL_Rect viewport) {
+  if (!g_ppu || (g_ppu->inidisp & 0x80)) return;
+
+  /* Screen space -> framebuffer -> visible sub-rect -> viewport. Promoted
+   * scenes are pillarboxed, so authentic x=0 sits g_ws_extra columns into
+   * the framebuffer regardless of display mode. */
+  int vis_w = Settings_VisibleWidth();
+  int vis_x0 = Settings_VisibleX0();
+  int extra = (g_snes_width - 256) / 2;
+  double scale_x = (double)viewport.w / vis_w;
+  double scale_y = (double)viewport.h / g_snes_height;
+
+  for (int i = 0; i < g_hd_replacement_count; i++) {
+    const HdReplacement *entry = &g_hd_replacements[i];
+    if (!entry->active || !entry->texture) continue;
+    const PpuOverlayCapture *capture =
+        &g_ppu->overlayCaptures[entry->source];
+    if (capture->x1 <= capture->x0 || capture->y1 <= capture->y0 ||
+        !(capture->flags & kPpuOverlayFlag_RemoveFromGame))
+      continue;
+    int dx0 = (int)((capture->x0 + extra - vis_x0) * scale_x + 0.5);
+    int dx1 = (int)((capture->x1 + extra - vis_x0) * scale_x + 0.5);
+    int dy0 = (int)(capture->y0 * scale_y + 0.5);
+    int dy1 = (int)(capture->y1 * scale_y + 0.5);
+    SDL_Rect dst = { viewport.x + dx0, viewport.y + dy0,
+                     dx1 - dx0, dy1 - dy0 };
+    if (dst.w <= 0 || dst.h <= 0) continue;
+
+    SDL_Texture *texture = (SDL_Texture *)entry->texture;
+    Uint8 mod = entry->brightness_mod
+        ? (Uint8)((g_ppu->inidisp & 0xf) * 255 / 15) : 255;
+    SDL_SetTextureColorMod(texture, mod, mod, mod);
+    SDL_RenderCopy(g_renderer, texture, NULL, &dst);
+  }
+}
+
 static bool RenderFramebuffer(void) {
   if (!g_renderer || !g_texture) return false;
   /* Present only the current mode's sub-rect: the whole framebuffer when
@@ -638,6 +760,7 @@ static bool RenderFramebuffer(void) {
   SDL_Rect viewport = GetPresentationViewport();
   SDL_RenderSetLogicalSize(g_renderer, 0, 0);
   RenderHudOverlay(viewport);
+  RenderHdReplacements(viewport);
   ApplyRendererLogicalSize();
   return true;
 }
@@ -746,6 +869,7 @@ int main(int argc, char **argv) {
    * used before they were migrated), then pick the starting display mode. Must
    * run after the widescreen budget above, which decides g_ws_active. */
   Settings_Init();
+  SDL_AtomicSet(&g_audio_master_percent, g_settings.audio_master_volume);
 
   /* AR_MXCHECK=1: enable the per-function-entry m/x invariant check
    * (validates the emitter's static m/x analysis on every direct call). */
@@ -839,6 +963,8 @@ int main(int argc, char **argv) {
     SDL_SetTextureBlendMode(g_hud_bg_texture, SDL_BLENDMODE_BLEND);
     SDL_SetTextureBlendMode(g_hud_obj_texture, SDL_BLENDMODE_BLEND);
 
+    LoadHdReplacements();
+
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   }
 
@@ -858,6 +984,7 @@ int main(int argc, char **argv) {
   PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Obj,
                         g_hud_obj_texture ? g_hud_obj_pixels : NULL,
                         g_snes_width * 4);
+  BindHdReplacementSurfaces();
   /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
    * centered in the wide framebuffer). Re-applied every frame by
    * ActRaiser_ApplyWidescreenPolicy since ppu_reset zeroes these fields. */
@@ -1316,6 +1443,9 @@ int main(int argc, char **argv) {
 
   SDL_CloseAudio();
   SDL_DestroyMutex(g_audio_mutex);
+  for (int i = 0; i < g_hd_replacement_count; i++)
+    if (g_hd_replacements[i].texture)
+      SDL_DestroyTexture((SDL_Texture *)g_hd_replacements[i].texture);
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);
   SDL_DestroyTexture(g_texture);

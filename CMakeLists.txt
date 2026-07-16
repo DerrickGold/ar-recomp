@@ -69,6 +69,8 @@ add_executable(ActRaiserRecomp
     src/gen_stubs.c
     src/actraiser_cpu_infra.c
     src/actraiser_rtl.c
+    src/hd_replacements.c
+    src/hd_tile_census.c
     src/actraiser_widescreen_bg.c
     src/actraiser_widescreen_sprites.c
     src/actraiser_spc_player.c
@@ -80,6 +82,7 @@ target_include_directories(ActRaiserRecomp PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/recomp
+    ${CMAKE_SOURCE_DIR}/third_party/stb
     ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     ${SDL2_INCLUDE_DIRS}
 )
@@ -135,4 +138,14 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_settings COMMAND actraiser_settings_test)
+
+    add_executable(actraiser_hd_manifest_test
+        tests/hd_manifest_test.c
+        src/hd_replacements.c
+    )
+    target_include_directories(actraiser_hd_manifest_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_hd_manifest COMMAND actraiser_hd_manifest_test)
 endif()

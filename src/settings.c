@@ -142,6 +142,22 @@ static bool ParseHudScale(const char *text, void *field) {
   return true;
 }
 
+static bool ParseAudioVolume(const char *text, void *field) {
+  if (!text || !text[0]) return false;
+  char *end = NULL;
+  long value = strtol(text, &end, 0);
+  if (!end || (*end && !(*end == '%' && end[1] == 0))) return false;
+  if (value < 0) value = 0;
+  if (value > 100) value = 100;
+  *(int *)field = (int)(value / 5 * 5);
+  return true;
+}
+
+static int FormatAudioVolume(char *buffer, int buffer_size,
+                             const void *field) {
+  return snprintf(buffer, (size_t)buffer_size, "%d%%", *(const int *)field);
+}
+
 static const char *const kDisplayModeLabels[] = {
   "4:3 authentic",
   "Widescreen raw",
@@ -169,6 +185,17 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_Display,
     &g_settings.hud_scale_percent, 0, 0, 400, 25, false, NULL, 0,
     NULL, NULL, ParseHudScale, FormatHudScale },
+  BOOL_SETTING(hd_replacements, "AR_HD_REPLACEMENTS", "HD replacements",
+               "Substitute HD art per game-assets/hd/manifest.ini entries when their art is present.",
+               kSettingCat_Display, 1, false, NULL, NULL),
+  { "audio_master_volume", "AR_AUDIO_VOLUME", "Master volume",
+    "Scale the final game output, including music, sound effects, and MSU-1 audio.",
+    kSettingType_Int, kApply_Callback, kSettingCat_Audio,
+    &g_settings.audio_master_volume, 100, 0, 100, 5, false, NULL, 0,
+    NULL, NULL, ParseAudioVolume, FormatAudioVolume },
+  BOOL_SETTING(audio_dialog_blip, "AR_DIALOG_BLIP", "Dialogue text blip",
+               "Play the per-character sound while Sky Palace dialogue is printed.",
+               kSettingCat_Audio, 1, false, NULL, NULL),
   BOOL_SETTING(cheat_all_magic, "AR_ALL_MAGIC", "All magic",
                "Unlock all four spells; disabling cannot undo unlocks already written.",
                kSettingCat_Cheats, 0, true, NULL, NULL),

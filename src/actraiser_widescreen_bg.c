@@ -19,6 +19,7 @@
  * metatile page into only the offscreen BG2 columns used for presentation,
  * render, then restore the game's UI/staging tilemap verbatim. */
 
+#include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "common_rtl.h"
 #include "cpu_state.h"
@@ -32,7 +33,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern uint8 g_ram[0x20000];
 extern Ppu *g_ppu;
 
 /* Internal bank-02 routine used by the original $02:B158 streamer. It is
@@ -41,15 +41,61 @@ extern Ppu *g_ppu;
 RecompReturn bank_02_B825_M1X0(CpuState *cpu);
 RecompReturn bank_02_B8A0_M1X0(CpuState *cpu);
 
-static uint8 s_wram_snapshot[0x20000];
+static uint8 s_wram_snapshot[kActRaiserWramSize];
 
 enum {
-  kSkyPalaceBg2Base = 0x7000,
-  kSkyPalaceBg2Words = 0x1000,
   kSkyPalaceSourceMap = 0x07D0A0,
+  kSkyPalaceSourceMetatilesPerRow = 16,
+  kSkyPalaceSourceTileRows = 32,
+  kSkyPalaceSourceShaftRow = 8,
+  kSkyPalaceDialogFirstMetatileRow = 9,
+  kSkyPalaceDialogLastMetatileRow = 12,
+  kSkyPalaceFloorMetatileRow = 13,
+  kSkyPalaceMetatileDefinitionBase = 0x56,
+  kSkyPalaceMetatileWordMask = 0x58,
+  kSkyPalaceMetatileAttributeHigh = 0x6F,
+  kTilemapWidthTiles = 64,
+  kTilemapPageWidthTiles = 32,
+  kMetatileSizeTiles = 2,
+  kTileSizePixels = 8,
+
+  kColumnBuilderReturnAddress = 0xB1AB,
+  kRowBuilderReturnAddress = 0xB1F3,
+  kUploadRecordWords = 0x81,
+  kUploadRecordBytes = 0x102,
+  kUploadChunkWords = 0x20,
+  kTilemapPageWords = 0x400,
+
+  kBgState_CameraX = 0x22,
+  kBgState_CameraY = 0x24,
+  kBgState_Width = 0x2E,
+  kBgState_Height = 0x30,
+  kBgState_Decoder46 = 0x46,
+  kBgState_Decoder48 = 0x48,
+  kBgState_Decoder52 = 0x52,
+  kBgState_Decoder54 = 0x54,
+  kBgState_ColumnRecordCursor = 0x5E,
+  kBgState_RowRecordCursor = 0x60,
+  kBgState_Decoder6B = 0x6B,
+  kBgStateStride = kActRaiserBgLayerStateStride,
+
+  /* Caller-populated direct-page contract for $02:B825/$02:B8A0. These
+   * names are deliberately local: the same DP bytes have unrelated meanings
+   * in other game subsystems. */
+  kDecoderDp_State48 = 0x00,
+  kDecoderDp_State46 = 0x02,
+  kDecoderDp_Width = 0x04,
+  kDecoderDp_Zero = 0x06,
+  kDecoderDp_State6B = 0x07,
+  kDecoderDp_DimensionProduct = 0x08,
+  kDecoderDp_DecoderBias = 0x09,
+  kDecoderDp_State54 = 0x0A,
+  kDecoderDp_WorldX = 0x14,
+  kDecoderDp_WorldY = 0x16,
+  kDecoderDp_State52 = 0xA5,
 };
 
-static uint16 s_sky_palace_bg2_backup[kSkyPalaceBg2Words];
+static uint16 s_sky_palace_bg2_backup[kActRaiserTilemapWords];
 static int s_sky_palace_restore_pending;
 
 /* The original streamers update a layer when the camera crosses a 16px map
@@ -57,19 +103,32 @@ static int s_sky_palace_restore_pending;
  * same cadence.  This is particularly important in rooms with two wide
  * layers: rebuilding every visible margin strip for BG1 and BG2 on every
  * rendered frame is enough to miss the host's 60Hz presentation deadline. */
+typedef struct WsLayerRefreshKey {
+  uint16 camera_x_tile;
+  uint16 camera_y_page;
+  uint16 width;
+  uint16 height;
+  uint16 decoder_state_46;
+  uint16 decoder_state_48;
+  uint16 decoder_state_52;
+  uint16 decoder_state_54;
+  uint16 column_record_cursor;
+  uint16 decoder_bytes_47_6b;
+  uint16 dimension_bytes_2f_31;
+} WsLayerRefreshKey;
+
 typedef struct WsRefreshKey {
-  uint8 mode, map, scene, act;
+  uint8 map_group;
+  uint8 current_map;
+  uint8 destination_map;
+  uint8 destination_map_group;
   uint16 margin_left, margin_right;
-  uint16 layer[2][11];
+  WsLayerRefreshKey layer[2];
 } WsRefreshKey;
 
 static WsRefreshKey s_refresh_key;
 static int s_refresh_key_valid;
 static uint16 s_row_y[2];
-
-static inline uint16 ws_ram16(uint16 a) {
-  return (uint16)(g_ram[a] | (g_ram[(uint16)(a + 1)] << 8));
-}
 
 int ActRaiser_WidescreenBgRefreshEnabled(void) {
   return g_settings.ws_bgrefresh;
@@ -100,7 +159,8 @@ void ActRaiser_WidescreenSkyPalaceRestore(void) {
   if (!s_sky_palace_restore_pending)
     return;
   if (g_ppu) {
-    memcpy(&g_ppu->vram[kSkyPalaceBg2Base], s_sky_palace_bg2_backup,
+    memcpy(&g_ppu->vram[kActRaiserBg2TilemapVram],
+           s_sky_palace_bg2_backup,
            sizeof(s_sky_palace_bg2_backup));
   }
   s_sky_palace_restore_pending = 0;
@@ -122,45 +182,54 @@ void ActRaiser_WidescreenSkyPalacePrepare(void) {
   ActRaiser_WidescreenSkyPalaceRestore();
 
   if (!ws_sky_palace_bg_enabled() || !g_ws_active || !g_ppu ||
-      g_ram[0x18] != 0x00 || g_ram[0x19] != 0x07 ||
+      g_ram[kActRaiserWram_MapGroup] != kActRaiserMapGroup_NonAction ||
+      g_ram[kActRaiserWram_CurrentMap] != kActRaiserNonActionMap_SkyPalace ||
       (g_ppu->extraLeftCur == 0 && g_ppu->extraRightCur == 0)) {
     return;
   }
 
-  uint16 map_base = (uint16)((g_ppu->bgXsc[1] & 0xfc) << 8);
-  uint16 meta_base = ws_ram16(0x56);
-  uint16 meta_mask = ws_ram16(0x58);
-  uint16 meta_attr = (uint16)(g_ram[0x6F] << 8);
+  uint16 tilemap_base = (uint16)(
+      (g_ppu->bgXsc[kActRaiserPpuLayer_Bg2] & 0xfc) << 8);
+  uint16 metatile_definition_base = ActRaiser_ReadWram16(
+      kSkyPalaceMetatileDefinitionBase);
+  uint16 metatile_word_mask = ActRaiser_ReadWram16(
+      kSkyPalaceMetatileWordMask);
+  uint16 metatile_attributes = (uint16)(
+      g_ram[kSkyPalaceMetatileAttributeHigh] << 8);
   const uint8 *source = RomFixedPtr(kSkyPalaceSourceMap);
 
   /* This source decoder is deliberately specific to the statically traced
    * Sky Palace layout. Reject unexpected descriptors/ROM revisions rather
    * than writing a plausible-looking but incorrect tilemap. */
-  if (map_base != kSkyPalaceBg2Base ||
-      (g_ppu->bgXsc[1] & 3) != 3 || meta_base > 0xF800 ||
+  if (tilemap_base != kActRaiserBg2TilemapVram ||
+      (g_ppu->bgXsc[kActRaiserPpuLayer_Bg2] & 3) != 3 ||
+      metatile_definition_base > 0xF800 ||
       source[0] != 0x43 || source[16] != 0x2A ||
       source[32] != 0x32 || source[48] != 0x00) {
     if (ws_bg_debug_enabled()) {
       fprintf(stderr,
               "[ws-sky] source reject BG2SC=$%02X base=$%04X meta=$%04X "
               "header=%02X/%02X/%02X/%02X\n",
-              g_ppu->bgXsc[1], map_base, meta_base, source[0], source[16],
-              source[32], source[48]);
+              g_ppu->bgXsc[kActRaiserPpuLayer_Bg2], tilemap_base,
+              metatile_definition_base, source[0], source[16], source[32],
+              source[48]);
     }
     return;
   }
 
   uint8 margin_col[64] = {0};
   uint8 center_col[64] = {0};
-  int hscroll = g_ppu->hScroll[1] & 0x1ff;
-  for (int x = 0; x < 256; x++)
+  int hscroll = g_ppu->hScroll[kActRaiserPpuLayer_Bg2] & 0x1ff;
+  for (int x = 0; x < kActRaiserAuthenticWidth; x++)
     center_col[((hscroll + x) & 0x1ff) >> 3] = 1;
   for (int x = -(int)g_ppu->extraLeftCur; x < 0; x++)
     margin_col[((hscroll + x) & 0x1ff) >> 3] = 1;
-  for (int x = 256; x < 256 + (int)g_ppu->extraRightCur; x++)
+  for (int x = kActRaiserAuthenticWidth;
+       x < kActRaiserAuthenticWidth + (int)g_ppu->extraRightCur; x++)
     margin_col[((hscroll + x) & 0x1ff) >> 3] = 1;
 
-  memcpy(s_sky_palace_bg2_backup, &g_ppu->vram[kSkyPalaceBg2Base],
+  memcpy(s_sky_palace_bg2_backup,
+         &g_ppu->vram[kActRaiserBg2TilemapVram],
          sizeof(s_sky_palace_bg2_backup));
   s_sky_palace_restore_pending = 1;
 
@@ -228,9 +297,12 @@ void ActRaiser_WidescreenSkyPalacePrepare(void) {
        * same page — the x-major order transposes each 2x2 block, rendering
        * the split shaft metatiles as 8px checkerboards). */
       int quadrant = ((source_tile_y & 1) << 1) | (source_tile_x & 1);
-      uint16 def = ws_ram16((uint16)(meta_base + metatile * 8 + quadrant * 2));
-      uint16 word = (uint16)((def & meta_mask) | meta_attr);
-      g_ppu->vram[ws_tilemap_addr_64(map_base, tile_x, tile_y)] = word;
+      uint16 definition_word = ActRaiser_ReadWram16((uint16)(
+          metatile_definition_base + metatile * 8 + quadrant * 2));
+      uint16 tilemap_word = (uint16)(
+          (definition_word & metatile_word_mask) | metatile_attributes);
+      g_ppu->vram[ws_tilemap_addr_64(
+          tilemap_base, tile_x, tile_y)] = tilemap_word;
     }
   }
 
@@ -241,13 +313,14 @@ void ActRaiser_WidescreenSkyPalacePrepare(void) {
 
   if (ws_bg_debug_enabled()) {
     static unsigned last_gf = ~0u;
-    unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
-    if (gf != last_gf) {
-      last_gf = gf;
+    unsigned game_frame = (unsigned)ActRaiser_ReadWram16(
+        kActRaiserWram_GameFrame);
+    if (game_frame != last_gf) {
+      last_gf = game_frame;
       fprintf(stderr,
               "[ws-sky] gf=%u source=$07:D0A0 meta=$7E:%04X cols=%d "
               "scroll=$%04X margins=%u/%u (render-only)\n",
-              gf, meta_base, patched_columns, hscroll,
+              game_frame, metatile_definition_base, patched_columns, hscroll,
               g_ppu->extraLeftCur, g_ppu->extraRightCur);
     }
   }
@@ -270,48 +343,56 @@ static int ws_call_builder(CpuState *cpu,
   return r == RECOMP_RETURN_NORMAL;
 }
 
-static int ws_call_b825(CpuState *cpu) {
+static int ws_call_column_builder(CpuState *cpu) {
   /* $02:B1A9 JSR $B825 leaves $B1AB on the emulated stack. */
-  return ws_call_builder(cpu, bank_02_B825_M1X0, 0xB1AB);
+  return ws_call_builder(cpu, bank_02_B825_M1X0,
+                         kColumnBuilderReturnAddress);
 }
 
-static int ws_call_b8a0(CpuState *cpu) {
+static int ws_call_row_builder(CpuState *cpu) {
   /* $02:B1F1 JSR $B8A0 leaves $B1F3 on the emulated stack. */
-  return ws_call_builder(cpu, bank_02_B8A0_M1X0, 0xB1F3);
+  return ws_call_builder(cpu, bank_02_B8A0_M1X0,
+                         kRowBuilderReturnAddress);
 }
 
 /* Drain a freshly built two-column record exactly like $02:ACE5, but only
  * after proving every target stays within this layer's 4 KiB tilemap. */
-static int ws_drain_column_record(uint16 buf, uint16 map_base) {
-  uint8 *rec = &g_ram[buf];
-  uint16 base = (uint16)(rec[0] | (rec[1] << 8));
+static int ws_drain_column_record(uint16 record_buffer,
+                                  uint16 tilemap_base) {
+  uint8 *record = &g_ram[record_buffer];
+  uint16 vram_base = (uint16)(record[0] | (record[1] << 8));
   static const uint16 chunk_vram[4] = { 0x0000, 0x0001, 0x0800, 0x0801 };
   static const uint16 chunk_word[4] = { 1, 0x21, 0x41, 0x61 };
 
-  if (base == 0)
+  if (vram_base == 0)
     return 0;
 
   /* Highest target = base + $801 + 31*$20. This per-layer check is stricter
    * than the experimental branch's global $6000-$7FFF check: a bad BG1
    * record cannot reach BG2, and neither layer can reach OBJ chars. */
-  uint32 hi = (uint32)base + 0x0801u + 31u * 0x20u;
-  if (base < map_base || hi >= (uint32)map_base + 0x1000u) {
+  uint32 highest_vram_address =
+      (uint32)vram_base + 0x0801u + 31u * kUploadChunkWords;
+  if (vram_base < tilemap_base ||
+      highest_vram_address >=
+          (uint32)tilemap_base + kActRaiserTilemapWords) {
     if (ws_bg_debug_enabled()) {
-      unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
+      unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       fprintf(stderr,
               "[ws-bg] gf=%u reject buf=$%04X map=$%04X base=$%04X hi=$%04X\n",
-              gf, buf, map_base, base, (unsigned)hi);
+              game_frame, record_buffer, tilemap_base, vram_base,
+              (unsigned)highest_vram_address);
     }
     return 0;
   }
 
   for (int c = 0; c < 4; c++) {
-    uint16 addr = (uint16)(base + chunk_vram[c]);
-    const uint8 *p = rec + 2 * chunk_word[c];
-    for (int k = 0; k < 32; k++) {
-      g_ppu->vram[addr] = (uint16)(p[0] | (p[1] << 8));
-      p += 2;
-      addr = (uint16)(addr + 0x20);
+    uint16 vram_address = (uint16)(vram_base + chunk_vram[c]);
+    const uint8 *source_words = record + 2 * chunk_word[c];
+    for (int k = 0; k < kUploadChunkWords; k++) {
+      g_ppu->vram[vram_address] = (uint16)(
+          source_words[0] | (source_words[1] << 8));
+      source_words += 2;
+      vram_address = (uint16)(vram_address + kUploadChunkWords);
     }
   }
   return 1;
@@ -319,32 +400,38 @@ static int ws_drain_column_record(uint16 buf, uint16 map_base) {
 
 /* Drain a freshly built two-row record exactly like the row half of
  * $02:ACE5. VMAIN=$80 makes each 64-byte chunk advance horizontally. */
-static int ws_drain_row_record(uint16 buf, uint16 map_base) {
-  uint8 *rec = &g_ram[buf];
-  uint16 base = (uint16)(rec[0] | (rec[1] << 8));
+static int ws_drain_row_record(uint16 record_buffer,
+                               uint16 tilemap_base) {
+  uint8 *record = &g_ram[record_buffer];
+  uint16 vram_base = (uint16)(record[0] | (record[1] << 8));
   static const uint16 chunk_vram[4] = { 0x0000, 0x0020, 0x0400, 0x0420 };
   static const uint16 chunk_word[4] = { 1, 0x21, 0x41, 0x61 };
 
-  if (base == 0)
+  if (vram_base == 0)
     return 0;
 
-  uint32 hi = (uint32)base + 0x0420u + 31u;
-  if (base < map_base || hi >= (uint32)map_base + 0x1000u) {
+  uint32 highest_vram_address = (uint32)vram_base + 0x0420u +
+                                kUploadChunkWords - 1;
+  if (vram_base < tilemap_base ||
+      highest_vram_address >=
+          (uint32)tilemap_base + kActRaiserTilemapWords) {
     if (ws_bg_debug_enabled()) {
-      unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
+      unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       fprintf(stderr,
               "[ws-bg] gf=%u reject row buf=$%04X map=$%04X base=$%04X hi=$%04X\n",
-              gf, buf, map_base, base, (unsigned)hi);
+              game_frame, record_buffer, tilemap_base, vram_base,
+              (unsigned)highest_vram_address);
     }
     return 0;
   }
 
   for (int c = 0; c < 4; c++) {
-    uint16 addr = (uint16)(base + chunk_vram[c]);
-    const uint8 *p = rec + 2 * chunk_word[c];
-    for (int k = 0; k < 32; k++) {
-      g_ppu->vram[addr++] = (uint16)(p[0] | (p[1] << 8));
-      p += 2;
+    uint16 vram_address = (uint16)(vram_base + chunk_vram[c]);
+    const uint8 *source_words = record + 2 * chunk_word[c];
+    for (int k = 0; k < kUploadChunkWords; k++) {
+      g_ppu->vram[vram_address++] = (uint16)(
+          source_words[0] | (source_words[1] << 8));
+      source_words += 2;
     }
   }
   return 1;
@@ -354,20 +441,25 @@ static int ws_drain_row_record(uint16 buf, uint16 map_base) {
  * not drain that whole record: doing so would fix one margin by replacing the
  * opposite visible half with world data 512px away. Copy only tile columns
  * intersecting the out-of-band margin. */
-static int ws_drain_row_record_range(uint16 buf, uint16 map_base,
+static int ws_drain_row_record_range(uint16 record_buffer,
+                                     uint16 tilemap_base,
                                      int world_left, int world_right) {
-  uint8 *rec = &g_ram[buf];
-  uint16 base = (uint16)(rec[0] | (rec[1] << 8));
-  uint32 hi = (uint32)base + 0x0420u + 31u;
+  uint8 *record = &g_ram[record_buffer];
+  uint16 vram_base = (uint16)(record[0] | (record[1] << 8));
+  uint32 highest_vram_address = (uint32)vram_base + 0x0420u +
+                                kUploadChunkWords - 1;
 
-  if (base == 0 || world_right <= world_left)
+  if (vram_base == 0 || world_right <= world_left)
     return 0;
-  if (base < map_base || hi >= (uint32)map_base + 0x1000u) {
+  if (vram_base < tilemap_base ||
+      highest_vram_address >=
+          (uint32)tilemap_base + kActRaiserTilemapWords) {
     if (ws_bg_debug_enabled()) {
-      unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
+      unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       fprintf(stderr,
               "[ws-bg] gf=%u reject partial row buf=$%04X map=$%04X base=$%04X hi=$%04X\n",
-              gf, buf, map_base, base, (unsigned)hi);
+              game_frame, record_buffer, tilemap_base, vram_base,
+              (unsigned)highest_vram_address);
     }
     return 0;
   }
@@ -377,14 +469,15 @@ static int ws_drain_row_record_range(uint16 buf, uint16 map_base,
   for (int tile = first_tile; tile < last_tile; tile++) {
     int col = tile & 0x3F;
     int half_col = col & 0x1F;
-    uint16 top_addr = (uint16)(base + half_col + (col >= 32 ? 0x400 : 0));
+    uint16 top_addr = (uint16)(
+        vram_base + half_col + (col >= 32 ? kTilemapPageWords : 0));
     uint16 bottom_addr = (uint16)(top_addr + 0x20);
     int top_off = 2 + half_col * 2 + (col >= 32 ? 0x80 : 0);
     int bottom_off = top_off + 0x40;
-    g_ppu->vram[top_addr] =
-        (uint16)(rec[top_off] | (rec[top_off + 1] << 8));
-    g_ppu->vram[bottom_addr] =
-        (uint16)(rec[bottom_off] | (rec[bottom_off + 1] << 8));
+    g_ppu->vram[top_addr] = (uint16)(
+        record[top_off] | (record[top_off + 1] << 8));
+    g_ppu->vram[bottom_addr] = (uint16)(
+        record[bottom_off] | (record[bottom_off + 1] << 8));
   }
   return 1;
 }
@@ -393,97 +486,111 @@ static int ws_drain_row_record_range(uint16 buf, uint16 map_base,
  * decoder to fill its fixed record buffer, then copy that record to VRAM. */
 static int ws_build_strip(CpuState *cpu, uint16 layer_x, uint16 world_x,
                           uint16 world_y) {
-  const uint16 expected_buf = layer_x == 0 ? 0x3900 : 0x3B04;
-  const uint16 map_base = layer_x == 0 ? 0x6000 : 0x7000;
+  const uint16 expected_record_buffer = layer_x == 0
+      ? kActRaiserBg1ColumnRecord : kActRaiserBg2ColumnRecord;
+  const uint16 tilemap_base = layer_x == 0
+      ? kActRaiserBg1TilemapVram : kActRaiserBg2TilemapVram;
 
-  g_ram[0x14] = (uint8)world_x;
-  g_ram[0x15] = (uint8)(world_x >> 8);
-  g_ram[0x16] = (uint8)world_y;
-  g_ram[0x17] = (uint8)(world_y >> 8);
+  ActRaiser_WriteWram16(kDecoderDp_WorldX, world_x);
+  ActRaiser_WriteWram16(kDecoderDp_WorldY, world_y);
 
-  uint16 v = ws_ram16((uint16)(0x48 + layer_x));
-  g_ram[0x00] = (uint8)v; g_ram[0x01] = (uint8)(v >> 8);
-  v = ws_ram16((uint16)(0x46 + layer_x));
-  g_ram[0x02] = (uint8)v; g_ram[0x03] = (uint8)(v >> 8);
-  v = ws_ram16((uint16)(0x2E + layer_x));
-  g_ram[0x04] = (uint8)v; g_ram[0x05] = (uint8)(v >> 8);
-  g_ram[0x06] = 0;
-  g_ram[0x07] = g_ram[(uint16)(0x6B + layer_x)];
+  uint16 state_word = ActRaiser_ReadWram16((uint16)(
+      kBgState_Decoder48 + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_State48, state_word);
+  state_word = ActRaiser_ReadWram16((uint16)(
+      kBgState_Decoder46 + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_State46, state_word);
+  state_word = ActRaiser_ReadWram16((uint16)(kBgState_Width + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_Width, state_word);
+  g_ram[kDecoderDp_Zero] = 0;
+  g_ram[kDecoderDp_State6B] =
+      g_ram[(uint16)(kBgState_Decoder6B + layer_x)];
 
   /* $B158's first $BED3 call multiplies the two bytes assembled from
    * $2F/$31. Compute it directly so only $B825's internal multiply touches
    * the emulated math unit (which the outer snapshot restores). */
-  uint16 product = (uint16)(g_ram[(uint16)(0x2F + layer_x)] *
-                            g_ram[(uint16)(0x31 + layer_x)]);
-  g_ram[0x08] = 0;
-  g_ram[0x09] = (uint8)(product + g_ram[(uint16)(0x47 + layer_x)]);
-  v = ws_ram16((uint16)(0x54 + layer_x));
-  g_ram[0x0A] = (uint8)v; g_ram[0x0B] = (uint8)(v >> 8);
-  v = ws_ram16((uint16)(0x52 + layer_x));
-  g_ram[0xA5] = (uint8)v; g_ram[0xA6] = (uint8)(v >> 8);
+  uint16 dimension_product = (uint16)(
+      g_ram[(uint16)(kBgState_Width + 1 + layer_x)] *
+      g_ram[(uint16)(kBgState_Height + 1 + layer_x)]);
+  g_ram[kDecoderDp_DimensionProduct] = 0;
+  g_ram[kDecoderDp_DecoderBias] = (uint8)(
+      dimension_product + g_ram[(uint16)(kBgState_Decoder46 + 1 + layer_x)]);
+  state_word = ActRaiser_ReadWram16((uint16)(
+      kBgState_Decoder54 + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_State54, state_word);
+  state_word = ActRaiser_ReadWram16((uint16)(
+      kBgState_Decoder52 + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_State52, state_word);
 
-  uint16 buf = ws_ram16((uint16)(0x5E + layer_x));
-  if (buf != expected_buf) {
+  uint16 record_buffer = ActRaiser_ReadWram16((uint16)(
+      kBgState_ColumnRecordCursor + layer_x));
+  if (record_buffer != expected_record_buffer) {
     if (ws_bg_debug_enabled()) {
-      unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
+      unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       fprintf(stderr, "[ws-bg] gf=%u reject layerX=%u cursor=$%04X expected=$%04X\n",
-              gf, layer_x, buf, expected_buf);
+              game_frame, layer_x, record_buffer, expected_record_buffer);
     }
     return 0;
   }
 
-  cpu->A = product;
-  cpu->X = buf;
-  cpu->Y = buf;
-  if (!ws_call_b825(cpu))
+  cpu->A = dimension_product;
+  cpu->X = record_buffer;
+  cpu->Y = record_buffer;
+  if (!ws_call_column_builder(cpu))
     return 0;
-  return ws_drain_column_record(buf, map_base);
+  return ws_drain_column_record(record_buffer, tilemap_base);
 }
 
 /* Marshal one 16px-tall world strip as $02:B1AF does. world_x must remain
  * 256px-aligned: $B8A0's level-map fetch is page-keyed. */
 static int ws_build_row(CpuState *cpu, uint16 layer_x, uint16 world_x,
                         uint16 world_y, int range_left, int range_right) {
-  const uint16 expected_buf = layer_x == 0 ? 0x3A02 : 0x3C06;
-  const uint16 map_base = layer_x == 0 ? 0x6000 : 0x7000;
+  const uint16 expected_record_buffer = layer_x == 0
+      ? kActRaiserBg1RowRecord : kActRaiserBg2RowRecord;
+  const uint16 tilemap_base = layer_x == 0
+      ? kActRaiserBg1TilemapVram : kActRaiserBg2TilemapVram;
 
-  g_ram[0x14] = (uint8)world_x;
-  g_ram[0x15] = (uint8)(world_x >> 8);
-  g_ram[0x16] = (uint8)world_y;
-  g_ram[0x17] = (uint8)(world_y >> 8);
+  ActRaiser_WriteWram16(kDecoderDp_WorldX, world_x);
+  ActRaiser_WriteWram16(kDecoderDp_WorldY, world_y);
 
-  uint16 v = ws_ram16((uint16)(0x48 + layer_x));
-  g_ram[0x00] = (uint8)v; g_ram[0x01] = (uint8)(v >> 8);
-  v = ws_ram16((uint16)(0x46 + layer_x));
-  g_ram[0x02] = (uint8)v; g_ram[0x03] = (uint8)(v >> 8);
-  v = ws_ram16((uint16)(0x2E + layer_x));
-  g_ram[0x04] = (uint8)v; g_ram[0x05] = (uint8)(v >> 8);
-  g_ram[0x06] = 0;
-  g_ram[0x07] = g_ram[(uint16)(0x6B + layer_x)];
-  v = ws_ram16((uint16)(0x54 + layer_x));
-  g_ram[0x0A] = (uint8)v; g_ram[0x0B] = (uint8)(v >> 8);
-  v = ws_ram16((uint16)(0x52 + layer_x));
-  g_ram[0xA5] = (uint8)v; g_ram[0xA6] = (uint8)(v >> 8);
+  uint16 state_word = ActRaiser_ReadWram16((uint16)(
+      kBgState_Decoder48 + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_State48, state_word);
+  state_word = ActRaiser_ReadWram16((uint16)(
+      kBgState_Decoder46 + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_State46, state_word);
+  state_word = ActRaiser_ReadWram16((uint16)(kBgState_Width + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_Width, state_word);
+  g_ram[kDecoderDp_Zero] = 0;
+  g_ram[kDecoderDp_State6B] =
+      g_ram[(uint16)(kBgState_Decoder6B + layer_x)];
+  state_word = ActRaiser_ReadWram16((uint16)(
+      kBgState_Decoder54 + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_State54, state_word);
+  state_word = ActRaiser_ReadWram16((uint16)(
+      kBgState_Decoder52 + layer_x));
+  ActRaiser_WriteWram16(kDecoderDp_State52, state_word);
 
-  uint16 buf = ws_ram16((uint16)(0x60 + layer_x));
-  if (buf != expected_buf) {
+  uint16 record_buffer = ActRaiser_ReadWram16((uint16)(
+      kBgState_RowRecordCursor + layer_x));
+  if (record_buffer != expected_record_buffer) {
     if (ws_bg_debug_enabled()) {
-      unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
+      unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       fprintf(stderr,
               "[ws-bg] gf=%u reject row layerX=%u cursor=$%04X expected=$%04X\n",
-              gf, layer_x, buf, expected_buf);
+              game_frame, layer_x, record_buffer, expected_record_buffer);
     }
     return 0;
   }
 
-  cpu->X = buf;
-  cpu->Y = buf;
-  if (!ws_call_b8a0(cpu))
+  cpu->X = record_buffer;
+  cpu->Y = record_buffer;
+  if (!ws_call_row_builder(cpu))
     return 0;
   if (range_left >= 0)
-    return ws_drain_row_record_range(buf, map_base,
+    return ws_drain_row_record_range(record_buffer, tilemap_base,
                                      range_left, range_right);
-  return ws_drain_row_record(buf, map_base);
+  return ws_drain_row_record(record_buffer, tilemap_base);
 }
 
 /* Build the authentic page-aligned row band plus a neighboring band when a
@@ -491,24 +598,33 @@ static int ws_build_row(CpuState *cpu, uint16 layer_x, uint16 world_x,
  * phase hole documented in rendering-engine.md without changing $B8A0. */
 static void ws_build_visible_row(CpuState *cpu, uint16 layer_x,
                                  uint16 world_y, int *built, int *requested) {
-  uint16 cam = ws_ram16((uint16)(0x22 + layer_x));
-  uint16 width = ws_ram16((uint16)(0x2E + layer_x));
-  uint16 base = (uint16)(cam & 0xFF00);
-  int view_left = (int)cam - (int)g_ppu->extraLeftCur;
-  int view_right = (int)cam + 0x100 + (int)g_ppu->extraRightCur;
+  uint16 camera_x = ActRaiser_ReadWram16((uint16)(
+      kBgState_CameraX + layer_x));
+  uint16 world_width = ActRaiser_ReadWram16((uint16)(
+      kBgState_Width + layer_x));
+  uint16 page_aligned_x = (uint16)(camera_x & 0xFF00);
+  int view_left = (int)camera_x - (int)g_ppu->extraLeftCur;
+  int view_right = (int)camera_x + kActRaiserAuthenticWidth +
+                   (int)g_ppu->extraRightCur;
 
   (*requested)++;
-  *built += ws_build_row(cpu, layer_x, base, world_y, -1, -1);
+  *built += ws_build_row(cpu, layer_x, page_aligned_x, world_y, -1, -1);
 
-  if (view_left < (int)base && base >= 0x100) {
+  if (view_left < (int)page_aligned_x &&
+      page_aligned_x >= kActRaiserAuthenticWidth) {
     (*requested)++;
-    *built += ws_build_row(cpu, layer_x, (uint16)(base - 0x100), world_y,
-                           view_left, base);
+    *built += ws_build_row(
+        cpu, layer_x,
+        (uint16)(page_aligned_x - kActRaiserAuthenticWidth), world_y,
+        view_left, page_aligned_x);
   }
-  if (view_right > (int)base + 0x200 && (uint32)base + 0x100u < width) {
+  if (view_right > (int)page_aligned_x + kActRaiserTownWorldWidth &&
+      (uint32)page_aligned_x + kActRaiserAuthenticWidth < world_width) {
     (*requested)++;
-    *built += ws_build_row(cpu, layer_x, (uint16)(base + 0x100), world_y,
-                           (int)base + 0x200, view_right);
+    *built += ws_build_row(
+        cpu, layer_x,
+        (uint16)(page_aligned_x + kActRaiserAuthenticWidth), world_y,
+        (int)page_aligned_x + kActRaiserTownWorldWidth, view_right);
   }
 }
 
@@ -518,14 +634,17 @@ void ActRaiser_WidescreenMarginRefresh(void) {
     s_refresh_key_valid = 0;
     return;
   }
-  if (g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07) {
+  const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
+  const uint8 current_map = g_ram[kActRaiserWram_CurrentMap];
+  if (!ActRaiser_IsActionMapGroup(map_group)) {
     s_refresh_key_valid = 0;
     return;
   }
   /* Death Heim $07:$01 presents both BG1 and BG2 from their authentic center;
    * only BG2's lower fog band is repeated by the renderer. No margin tilemap
    * cells are sampled, so running the world-strip transaction is unnecessary. */
-  if (g_ram[0x18] == 0x07 && g_ram[0x19] == 0x01) {
+  if (map_group == kActRaiserMapGroup_DeathHeim &&
+      current_map == kActRaiserDeathHeimMap_Hub) {
     s_refresh_key_valid = 0;
     return;
   }
@@ -536,38 +655,53 @@ void ActRaiser_WidescreenMarginRefresh(void) {
 
   WsRefreshKey key;
   memset(&key, 0, sizeof(key));
-  key.mode = g_ram[0x18];
-  key.map = g_ram[0x19];
-  key.scene = g_ram[0x1A];
-  key.act = g_ram[0x1B];
+  key.map_group = map_group;
+  key.current_map = current_map;
+  key.destination_map = g_ram[kActRaiserWram_DestinationMap];
+  key.destination_map_group = g_ram[kActRaiserWram_DestinationMapGroup];
   key.margin_left = g_ppu->extraLeftCur;
   key.margin_right = g_ppu->extraRightCur;
   for (int layer = 0; layer < 2; layer++) {
-    uint16 x = (uint16)(layer * 4);
-    key.layer[layer][0] = (uint16)(ws_ram16((uint16)(0x22 + x)) & 0xFFF0);
-    key.layer[layer][1] = (uint16)(ws_ram16((uint16)(0x24 + x)) & 0xFF00);
-    key.layer[layer][2] = ws_ram16((uint16)(0x2E + x));
-    key.layer[layer][3] = ws_ram16((uint16)(0x30 + x));
-    key.layer[layer][4] = ws_ram16((uint16)(0x46 + x));
-    key.layer[layer][5] = ws_ram16((uint16)(0x48 + x));
-    key.layer[layer][6] = ws_ram16((uint16)(0x52 + x));
-    key.layer[layer][7] = ws_ram16((uint16)(0x54 + x));
-    key.layer[layer][8] = ws_ram16((uint16)(0x5E + x));
-    key.layer[layer][9] = (uint16)(g_ram[(uint16)(0x47 + x)] |
-                                   (g_ram[(uint16)(0x6B + x)] << 8));
-    key.layer[layer][10] = (uint16)(g_ram[(uint16)(0x2F + x)] |
-                                    (g_ram[(uint16)(0x31 + x)] << 8));
+    uint16 layer_state_offset = (uint16)(layer * kBgStateStride);
+    WsLayerRefreshKey *layer_key = &key.layer[layer];
+    layer_key->camera_x_tile = (uint16)(ActRaiser_ReadWram16((uint16)(
+        kBgState_CameraX + layer_state_offset)) & 0xFFF0);
+    layer_key->camera_y_page = (uint16)(ActRaiser_ReadWram16((uint16)(
+        kBgState_CameraY + layer_state_offset)) & 0xFF00);
+    layer_key->width = ActRaiser_ReadWram16((uint16)(
+        kBgState_Width + layer_state_offset));
+    layer_key->height = ActRaiser_ReadWram16((uint16)(
+        kBgState_Height + layer_state_offset));
+    layer_key->decoder_state_46 = ActRaiser_ReadWram16((uint16)(
+        kBgState_Decoder46 + layer_state_offset));
+    layer_key->decoder_state_48 = ActRaiser_ReadWram16((uint16)(
+        kBgState_Decoder48 + layer_state_offset));
+    layer_key->decoder_state_52 = ActRaiser_ReadWram16((uint16)(
+        kBgState_Decoder52 + layer_state_offset));
+    layer_key->decoder_state_54 = ActRaiser_ReadWram16((uint16)(
+        kBgState_Decoder54 + layer_state_offset));
+    layer_key->column_record_cursor = ActRaiser_ReadWram16((uint16)(
+        kBgState_ColumnRecordCursor + layer_state_offset));
+    layer_key->decoder_bytes_47_6b = (uint16)(
+        g_ram[(uint16)(kBgState_Decoder46 + 1 + layer_state_offset)] |
+        (g_ram[(uint16)(kBgState_Decoder6B + layer_state_offset)] << 8));
+    layer_key->dimension_bytes_2f_31 = (uint16)(
+        g_ram[(uint16)(kBgState_Width + 1 + layer_state_offset)] |
+        (g_ram[(uint16)(kBgState_Height + 1 + layer_state_offset)] << 8));
   }
   int rebuild_columns = !s_refresh_key_valid ||
       memcmp(&key, &s_refresh_key, sizeof(key)) != 0;
   uint16 row_y[2];
   int rebuild_rows = 0;
   for (int layer = 0; layer < 2; layer++) {
-    uint16 x = (uint16)(layer * 4);
-    row_y[layer] = (uint16)(ws_ram16((uint16)(0x24 + x)) & 0xFFF0);
+    uint16 layer_state_offset = (uint16)(layer * kBgStateStride);
+    row_y[layer] = (uint16)(ActRaiser_ReadWram16((uint16)(
+        kBgState_CameraY + layer_state_offset)) & 0xFFF0);
     if (!rebuild_columns && row_y[layer] != s_row_y[layer] &&
-        ws_ram16((uint16)(0x2E + x)) >= 0x200 &&
-        g_ram[(uint16)(0x31 + x)] >= 3)
+        ActRaiser_ReadWram16((uint16)(
+            kBgState_Width + layer_state_offset)) >=
+            kActRaiserTownWorldWidth &&
+        g_ram[(uint16)(kBgState_Height + 1 + layer_state_offset)] >= 3)
       rebuild_rows = 1;
   }
   if (!rebuild_columns && !rebuild_rows)
@@ -591,51 +725,60 @@ void ActRaiser_WidescreenMarginRefresh(void) {
   int built_rows = 0, requested_rows = 0;
   if (rebuild_columns) {
     for (int layer = 0; layer < 2; layer++) {
-      uint16 layer_x = (uint16)(layer * 4);
-      uint16 cam = ws_ram16((uint16)(0x22 + layer_x));
-      uint16 width = ws_ram16((uint16)(0x2E + layer_x));
-      if (width < 0x200)
+      uint16 layer_state_offset = (uint16)(layer * kBgStateStride);
+      uint16 camera_x = ActRaiser_ReadWram16((uint16)(
+          kBgState_CameraX + layer_state_offset));
+      uint16 world_width = ActRaiser_ReadWram16((uint16)(
+          kBgState_Width + layer_state_offset));
+      if (world_width < kActRaiserTownWorldWidth)
         continue;
 
-      uint16 world_y = (uint16)(ws_ram16((uint16)(0x24 + layer_x)) & 0xFF00);
-      uint16 left_col = (uint16)(cam & 0xFFF0);
-      uint16 right_col = (uint16)((cam + 0x100) & 0xFFF0);
+      uint16 world_y = (uint16)(ActRaiser_ReadWram16((uint16)(
+          kBgState_CameraY + layer_state_offset)) & 0xFF00);
+      uint16 left_col = (uint16)(camera_x & 0xFFF0);
+      uint16 right_col = (uint16)(
+          (camera_x + kActRaiserAuthenticWidth) & 0xFFF0);
       int left_strips = g_ppu->extraLeftCur
           ? (g_ppu->extraLeftCur + 15) / 16 + 1 : 0;
       int right_strips = g_ppu->extraRightCur
           ? (g_ppu->extraRightCur + 15) / 16 + 1 : 0;
 
       for (int m = 1; m <= left_strips; m++) {
-        int wx = (int)left_col - m * 16;
-        if (wx >= 0 && wx < (int)width) {
+        int world_x = (int)left_col - m * 16;
+        if (world_x >= 0 && world_x < (int)world_width) {
           requested_columns++;
-          built_columns += ws_build_strip(cpu, layer_x, (uint16)wx, world_y);
+          built_columns += ws_build_strip(
+              cpu, layer_state_offset, (uint16)world_x, world_y);
         }
       }
       for (int m = 0; m <= right_strips; m++) {
-        int wx = (int)right_col + m * 16;
-        if (wx >= 0 && wx < (int)width) {
+        int world_x = (int)right_col + m * 16;
+        if (world_x >= 0 && world_x < (int)world_width) {
           requested_columns++;
-          built_columns += ws_build_strip(cpu, layer_x, (uint16)wx, world_y);
+          built_columns += ws_build_strip(
+              cpu, layer_state_offset, (uint16)world_x, world_y);
         }
       }
     }
   } else {
     for (int layer = 0; layer < 2; layer++) {
-      uint16 layer_x = (uint16)(layer * 4);
+      uint16 layer_state_offset = (uint16)(layer * kBgStateStride);
       if (row_y[layer] == s_row_y[layer] ||
-          ws_ram16((uint16)(0x2E + layer_x)) < 0x200 ||
-          g_ram[(uint16)(0x31 + layer_x)] < 3)
+          ActRaiser_ReadWram16((uint16)(
+              kBgState_Width + layer_state_offset)) <
+              kActRaiserTownWorldWidth ||
+          g_ram[(uint16)(kBgState_Height + 1 + layer_state_offset)] < 3)
         continue;
 
       if (row_y[layer] > s_row_y[layer]) {
         for (int y = (int)s_row_y[layer] + 0x10;
              y <= (int)row_y[layer]; y += 0x10)
-          ws_build_visible_row(cpu, layer_x, (uint16)(y + 0x100),
+          ws_build_visible_row(cpu, layer_state_offset,
+                               (uint16)(y + kActRaiserAuthenticWidth),
                                &built_rows, &requested_rows);
       } else {
         for (int y = (int)s_row_y[layer] - 0x10;; y -= 0x10) {
-          ws_build_visible_row(cpu, layer_x, (uint16)y,
+          ws_build_visible_row(cpu, layer_state_offset, (uint16)y,
                                &built_rows, &requested_rows);
           if (y == (int)row_y[layer])
             break;
@@ -667,13 +810,13 @@ void ActRaiser_WidescreenMarginRefresh(void) {
 
   if (ws_bg_debug_enabled()) {
     static unsigned last_gf = ~0u;
-    unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
-    if (gf != last_gf) {
-      last_gf = gf;
+    unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    if (game_frame != last_gf) {
+      last_gf = game_frame;
       fprintf(stderr,
               "[ws-bg] gf=%u strips=%d/%d rows=%d/%d margins=%u/%u (state restored)\n",
-              gf, built_columns, requested_columns, built_rows, requested_rows,
-              g_ppu->extraLeftCur, g_ppu->extraRightCur);
+              game_frame, built_columns, requested_columns, built_rows,
+              requested_rows, g_ppu->extraLeftCur, g_ppu->extraRightCur);
     }
   }
 }

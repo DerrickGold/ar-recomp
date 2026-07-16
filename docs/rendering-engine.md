@@ -565,6 +565,51 @@ second SNES tilemap rewrite. The reusable runner contract is documented in
   video driver); this creates a hidden software renderer without enabling
   interactive input or frame pacing.
 
+### 13.1.1 Manifest-driven HD replacements (2026-07-15)
+
+Second consumer of the generic overlay contract, swapping captured graphics
+for external high-resolution art. Replacements are data-driven: each
+`[replace:<name>]` entry in `game-assets/hd/manifest.ini` (untracked; user
+art lives outside the repo) declares a substitution
+"plane" (the tool used), a gate, and an art file — see the manifest's header
+comment for the full key/gate grammar. Planes are capability tiers:
+
+- `screen` (live): host-overlay substitution of screen-locked, untransformed
+  graphics via `PpuSetOverlayCapture` + `RemoveFromGame`. `src/hd_replacements.c`
+  owns parsing and the per-frame gate policy (`HdReplacements_EvaluateFrame`,
+  called after the HUD/OAM capture policies so busy sources are skipped, not
+  clobbered); `src/main.c` decodes each entry's PNG (vendored
+  `third_party/stb/stb_image.h`; `AR_HD_MANIFEST` overrides the path), binds
+  overlay surfaces for the sources used, and draws active entries over their
+  promoted rectangles in physical viewport coordinates, modulated by INIDISP
+  brightness (forced blank suppresses). Missing manifest/art, headless runs,
+  or `hd_replacements=0` all degrade to authentic rendering because an
+  unbound source makes `RemoveFromGame` a no-op. One capture rect per source
+  per frame is a renderer invariant; conflicting entries warn and skip.
+- `mode7` / `tiles` (reserved): parsed but inert. `mode7` is the planned
+  canvas-space texture override sampled through the Mode-7 matrix (per-pixel
+  world coordinates already computed by `PpuDrawBackground_mode7`); `tiles`
+  is the planned hash-keyed HD tile-pack path (needs the N-x RGBA-sideband
+  renderer extension). Both are engine capabilities to be built upstream.
+
+`AR_TILE_CENSUS=1` (src/hd_tile_census.c) is the tile-pack sizing survey for
+the `tiles` plane: a read-only per-frame walk of visible BG/OAM/Mode-7 tiles
+that writes unique-tile contact sheets (`tile_sheet_<class>.ppm`), a JSONL
+census, and a palette-variance summary to the run dir. First results
+(boot/title + level1-action.rec): 806 unique tiles, only 15 with more than
+one palette variant — (tile bytes + palette) identity is viable and packs
+are small.
+
+First shipped entry: the title logo. The title screen ($18=00/$19=00) is a
+single Mode-7 BG1 canvas (no OBJ sprites); the intro swirl is a per-scanline
+HDMA matrix animation on channel 2 that lands on the identity matrix
+(`m7 = [0100 0 0 0100]`), with INIDISP fading `00 -> 0f`. The manifest gate
+(`wram[0018]==0, wram[0019]==0, mode==7, m7==identity`) therefore keeps the
+swirl authentic and swaps the artwork band x=[11,248) y=[27,122) — menu text
+at y>=140 is never captured — on the settled frame. `AR_TITLELOG=1` prints
+the per-frame gate inputs used to derive this signature. Parser/evaluator
+unit tests: `tests/hd_manifest_test.c`.
+
 ### 13.2 Stage-B implementation refinement (2026-07-12)
 
 The earlier `widescreen-bg` implementation proved the map-decoding idea but

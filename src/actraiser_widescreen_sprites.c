@@ -18,6 +18,7 @@
  * sprite/projectile predicates authentic. */
 
 #include "cpu_state.h"
+#include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "settings.h"
 #include "snes/ppu.h"
@@ -26,13 +27,76 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-extern uint8 g_ram[0x20000];
 extern Ppu *g_ppu;
 extern bool g_ws_active;
 extern int g_ws_extra;
 extern RecompReturn bank_00_923A_M0X0(CpuState *cpu);
 
 RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu);
+
+typedef enum ActionObjectField {
+  kActionObject_Status = 0x00,
+  kActionObject_WorldX = 0x02,
+  kActionObject_WorldY = 0x04,
+  kActionObject_LeftExtent = 0x0A,
+  kActionObject_TopExtent = 0x0C,
+  kActionObject_RightExtent = 0x0E,
+  kActionObject_BottomExtent = 0x10,
+  kActionObject_Handler = 0x12,
+  kActionObject_Type = 0x16,
+  kActionObject_DefinitionBank = 0x18,
+  kActionObject_Definition = 0x20,
+  kActionObject_FlipAttributes = 0x28,
+  kActionObject_Flags = 0x30,
+} ActionObjectField;
+
+typedef enum SimRecordField {
+  kSimRecord_Composition = 0x08,
+  kSimRecord_WorldX = 0x0A,
+  kSimRecord_WorldY = 0x0C,
+} SimRecordField;
+
+enum {
+  kSpriteDp_ComponentCount = 0x0C,
+  kSpriteDp_ScreenOriginX = 0x14,
+  kSpriteDp_ScreenOriginY = 0x16,
+  kSpriteDp_AttributeBias = 0x8F,
+  kSpriteDp_CameraOriginX = 0x94,
+  kSpriteDp_CameraOriginY = 0x96,
+  kSpriteDp_OamCursor = 0x98,
+  kSpriteDp_OamHighCursor = 0x9A,
+  kSpriteDp_OamHighSlotsRemaining = 0x9C,
+  kSpriteDp_FlipAttributes = 0x9E,
+  kSpriteDefinitionPartBytes = 7,
+  kSimSpriteDefinitionPartBytes = 5,
+  kSpriteDrawBias = 16,
+  kSpriteBiasedWidth = kActRaiserAuthenticWidth + kSpriteDrawBias,
+  kSpriteBiasedHeight = kActRaiserAuthenticHeight + kSpriteDrawBias,
+  kActivationProbeObjectCount = 64,
+  kBuildHudSpritesReturnAddress = 0x8CDD,
+  kBuildObjectSpritesReturnAddress = 0x8D35,
+  kParkedActionOamEntry = 0xE080,
+  kParkedSimOamEntry = 0xE000,
+  kActionSpriteAttributeBias = 0x0E00,
+  kObjectFlipAttributeXor = 0x0100,
+  kObjectSpriteAttributeBiasFlags = 0x2008,
+  kDefinitionFlipHorizontal = 0x4000,
+  kDefinitionFlipVertical = 0x8000,
+  kOamEntryBytes = 4,
+  kOamYFieldOffset = 1,
+  kOamTileAttributeOffset = 2,
+  kActionDefinitionHeaderBytes = 4,
+  kActionPartFlags = 0,
+  kActionPartXOffsets = 1,
+  kActionPartYOffsets = 3,
+  kActionPartTileAttributes = 5,
+  kSimCameraCenterX = 0x0080,
+  kSimCameraCenterY = 0x0070,
+  kSimVerticalViewportHeight = 0x00E0,
+  kSimProjectileAnchorX = 4,
+  kSimOamBiasedWidth = kActRaiserAuthenticWidth + kSpriteDrawBias,
+  kSimOamBiasedHeight = 0x00F0,
+};
 
 static inline uint16 ws_dp16(CpuState *cpu, uint16 off) {
   uint16 a = (uint16)(cpu->D + off);
@@ -60,17 +124,13 @@ static int ws_sprite_debug_enabled(void) {
 
 typedef struct WsActivationCandidate {
   uint8 present;
-  uint8 defbank;
+  uint8 definition_bank;
   uint16 status;
   uint16 flags;
   uint16 handler;
-  uint16 def;
-  uint16 type;
+  uint16 definition_address;
+  uint16 object_type;
 } WsActivationCandidate;
-
-static inline uint16 ws_ram16(uint16 a) {
-  return (uint16)(g_ram[a] | (g_ram[(uint16)(a + 1)] << 8));
-}
 
 /* Match $8C98's bounding-box interpretation without touching $0400. The
  * object's leading/trailing extents are unsigned distances from its origin;
@@ -92,77 +152,110 @@ static int ws_axis_visible(uint16 pos, uint16 leading, uint16 trailing,
  * object logic, alter $0400, build OAM, or load graphics. */
 void ActRaiser_WidescreenSpriteActivationProbe(void) {
   static int enabled = -1;
-  static WsActivationCandidate prior[64];
+  static WsActivationCandidate prior[kActivationProbeObjectCount];
   if (enabled < 0) {
     const char *e = getenv("AR_WS_ACTDBG");
     enabled = (e && e[0] && e[0] != '0');
   }
-  if (!enabled || !g_ppu || g_ram[0x18] < 0x01 || g_ram[0x18] > 0x07)
+  if (!enabled || !g_ppu ||
+      !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
     return;
 
-  int ext_l = g_ppu->extraLeftCur;
-  int ext_r = g_ppu->extraRightCur;
-  if (!(ext_l | ext_r))
+  int margin_left = g_ppu->extraLeftCur;
+  int margin_right = g_ppu->extraRightCur;
+  if (!(margin_left | margin_right))
     return;
 
-  uint16 cam_x = ws_ram16(0x22);
-  uint16 cam_y = ws_ram16(0x24);
-  unsigned gf = (unsigned)ws_ram16(0x88);
+  uint16 camera_x = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
+  uint16 camera_y = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+  unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
 
-  for (int slot = 0; slot < 64; slot++) {
-    uint16 obj = (uint16)(0x06A0 + slot * 0x40);
-    uint16 status = ws_ram16(obj);
-    if (status & 0x8000)
+  for (int slot = 0; slot < kActivationProbeObjectCount; slot++) {
+    uint16 object_address = (uint16)(
+        kActRaiserWram_ActionObjectTable +
+        slot * kActRaiserActionObjectStride);
+    uint16 status = ActRaiser_ReadWram16(
+        (uint16)(object_address + kActionObject_Status));
+    if (status & kActRaiserObjectStatus_End)
       break;
 
-    int xlo = 0, xhi = 0;
-    int eligible = !(status & 0x4C00);
+    int screen_left = 0, screen_right = 0;
+    int eligible = !(status & kActRaiserObjectStatus_IneligibleMask);
     int vertical = eligible && ws_axis_visible(
-        ws_ram16((uint16)(obj + 0x04)), ws_ram16((uint16)(obj + 0x0C)),
-        ws_ram16((uint16)(obj + 0x10)), cam_y, 0, 224, NULL, NULL);
+        ActRaiser_ReadWram16(
+            (uint16)(object_address + kActionObject_WorldY)),
+        ActRaiser_ReadWram16(
+            (uint16)(object_address + kActionObject_TopExtent)),
+        ActRaiser_ReadWram16(
+            (uint16)(object_address + kActionObject_BottomExtent)),
+        camera_y, 0, kActRaiserAuthenticHeight, NULL, NULL);
     int authentic = vertical && ws_axis_visible(
-        ws_ram16((uint16)(obj + 0x02)), ws_ram16((uint16)(obj + 0x0A)),
-        ws_ram16((uint16)(obj + 0x0E)), cam_x, 0, 256, &xlo, &xhi);
+        ActRaiser_ReadWram16(
+            (uint16)(object_address + kActionObject_WorldX)),
+        ActRaiser_ReadWram16(
+            (uint16)(object_address + kActionObject_LeftExtent)),
+        ActRaiser_ReadWram16(
+            (uint16)(object_address + kActionObject_RightExtent)),
+        camera_x, 0, kActRaiserAuthenticWidth,
+        &screen_left, &screen_right);
     int wide = vertical && ws_axis_visible(
-        ws_ram16((uint16)(obj + 0x02)), ws_ram16((uint16)(obj + 0x0A)),
-        ws_ram16((uint16)(obj + 0x0E)), cam_x, -ext_l, 256 + ext_r,
-        &xlo, &xhi);
+        ActRaiser_ReadWram16(
+            (uint16)(object_address + kActionObject_WorldX)),
+        ActRaiser_ReadWram16(
+            (uint16)(object_address + kActionObject_LeftExtent)),
+        ActRaiser_ReadWram16(
+            (uint16)(object_address + kActionObject_RightExtent)),
+        camera_x, -margin_left,
+        kActRaiserAuthenticWidth + margin_right,
+        &screen_left, &screen_right);
     int candidate = wide && !authentic;
 
-    uint16 flags = ws_ram16((uint16)(obj + 0x30));
-    uint16 handler = ws_ram16((uint16)(obj + 0x12));
-    uint8 defbank = g_ram[(uint16)(obj + 0x18)];
-    uint16 def = ws_ram16((uint16)(obj + 0x20));
-    uint16 type = ws_ram16((uint16)(obj + 0x16));
-    WsActivationCandidate *p = &prior[slot];
+    uint16 flags = ActRaiser_ReadWram16(
+        (uint16)(object_address + kActionObject_Flags));
+    uint16 handler = ActRaiser_ReadWram16(
+        (uint16)(object_address + kActionObject_Handler));
+    uint8 definition_bank =
+        g_ram[(uint16)(object_address + kActionObject_DefinitionBank)];
+    uint16 definition_address = ActRaiser_ReadWram16(
+        (uint16)(object_address + kActionObject_Definition));
+    uint16 object_type = ActRaiser_ReadWram16(
+        (uint16)(object_address + kActionObject_Type));
+    WsActivationCandidate *previous = &prior[slot];
 
     if (candidate) {
-      int changed = !p->present || p->status != status || p->flags != flags ||
-                    p->handler != handler || p->defbank != defbank ||
-                    p->def != def || p->type != type;
+      int changed = !previous->present || previous->status != status ||
+                    previous->flags != flags ||
+                    previous->handler != handler ||
+                    previous->definition_bank != definition_bank ||
+                    previous->definition_address != definition_address ||
+                    previous->object_type != object_type;
       if (changed) {
         fprintf(stderr,
                 "[ws-activate] gf=%u slot=%d obj=$%04X event=%s side=%c "
                 "span=[%d,%d] margins=%d/%d status=$%04X flags30=$%04X "
                 "handler=$%04X type=$%04X def=$%02X:%04X\n",
-                gf, slot, obj, p->present ? "change" : "enter",
-                xhi < 0 ? 'L' : 'R', xlo, xhi, ext_l, ext_r, status,
-                flags, handler, type, defbank, def);
+                game_frame, slot, object_address,
+                previous->present ? "change" : "enter",
+                screen_right < 0 ? 'L' : 'R', screen_left, screen_right,
+                margin_left, margin_right, status,
+                flags, handler, object_type, definition_bank,
+                definition_address);
       }
-      p->present = 1;
-      p->status = status;
-      p->flags = flags;
-      p->handler = handler;
-      p->defbank = defbank;
-      p->def = def;
-      p->type = type;
-    } else if (p->present) {
+      previous->present = 1;
+      previous->status = status;
+      previous->flags = flags;
+      previous->handler = handler;
+      previous->definition_bank = definition_bank;
+      previous->definition_address = definition_address;
+      previous->object_type = object_type;
+    } else if (previous->present) {
       fprintf(stderr,
               "[ws-activate] gf=%u slot=%d obj=$%04X event=exit reason=%s "
               "span=[%d,%d] status=$%04X flags30=$%04X\n",
-              gf, slot, obj, authentic ? "authentic" : "outside",
-              xlo, xhi, status, flags);
-      p->present = 0;
+              game_frame, slot, object_address,
+              authentic ? "authentic" : "outside",
+              screen_left, screen_right, status, flags);
+      previous->present = 0;
     }
   }
 }
@@ -201,18 +294,22 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   cpu->P &= (uint8)~0x30;                /* REP #$30 */
   cpu_p_to_mirrors(cpu);
 
-  uint16 saved_s = cpu->S;
-  ws_dp16w(cpu, 0x94, (uint16)(ws_dp16(cpu, 0x22) - 0x10));
-  ws_dp16w(cpu, 0x96, (uint16)(ws_dp16(cpu, 0x24) - 0x10));
-  ws_dp16w(cpu, 0x9A, 0x0580);
-  ws_dp16w(cpu, 0x9C, 4);
-  ws_dp16w(cpu, 0x00, saved_s);
-  for (int i = 0; i < 0x0200; i += 2) {
-    g_ram[0x0380 + i] = 0x80;
-    g_ram[0x0381 + i] = 0xE0;
+  uint16 saved_stack_pointer = cpu->S;
+  ws_dp16w(cpu, kSpriteDp_CameraOriginX,
+           (uint16)(ws_dp16(cpu, kActRaiserWram_Bg1CameraX) -
+                    kSpriteDrawBias));
+  ws_dp16w(cpu, kSpriteDp_CameraOriginY,
+           (uint16)(ws_dp16(cpu, kActRaiserWram_Bg1CameraY) -
+                    kSpriteDrawBias));
+  ws_dp16w(cpu, kSpriteDp_OamHighCursor, kActRaiserOamHighTable);
+  ws_dp16w(cpu, kSpriteDp_OamHighSlotsRemaining, 4);
+  ws_dp16w(cpu, 0x00, saved_stack_pointer);
+  for (int offset = 0; offset < kActRaiserOamLowTableBytes; offset += 2) {
+    g_ram[kActRaiserOamShadow + offset] = 0x80;
+    g_ram[kActRaiserOamShadow + offset + 1] = 0xE0;
   }
 
-  cpu->A = saved_s;
+  cpu->A = saved_stack_pointer;
   cpu->X = 0;
   cpu->Y = 0;
   cpu->_flag_Z = 1;
@@ -220,8 +317,12 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   cpu->P = (uint8)((cpu->P & ~0x82) | 0x02);
   {
     uint16 call_s = cpu->S;
-    cpu_write8(cpu, 0x00, cpu->S, 0x8C); cpu->S--;
-    cpu_write8(cpu, 0x00, cpu->S, 0xDD); cpu->S--;
+    cpu_write8(cpu, 0x00, cpu->S,
+               (uint8)(kBuildHudSpritesReturnAddress >> 8));
+    cpu->S--;
+    cpu_write8(cpu, 0x00, cpu->S,
+               (uint8)kBuildHudSpritesReturnAddress);
+    cpu->S--;
     cpu->host_return_valid = 1;
     RecompReturn r = bank_00_923A_M0X0(cpu);
     cpu->S = call_s;
@@ -229,12 +330,13 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
       return r;
   }
 
-  uint16 obj = 0x06A0;
-  uint16 oam_y = cpu->Y;
+  uint16 object_address = kActRaiserWram_ActionObjectTable;
+  uint16 oam_offset = cpu->Y;
   uint16 terminal_status = 0;
   int oam_full = 0;
   int live_l = 0, live_r = 0;
-  if (g_ppu && g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
+  if (g_ppu &&
+      ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
     live_l = g_ppu->extraLeftCur;
     live_r = g_ppu->extraRightCur;
   }
@@ -245,89 +347,135 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   int activation_r = activation_wide ? live_r : 0;
   const char *actdbg = getenv("AR_WS_ACTDBG");
   int activation_debug = actdbg && actdbg[0] && actdbg[0] != '0';
-  uint16 cam_x = ws_dp16(cpu, 0x22);
-  uint16 cam_y = ws_dp16(cpu, 0x24);
+  uint16 camera_x = ws_dp16(cpu, kActRaiserWram_Bg1CameraX);
+  uint16 camera_y = ws_dp16(cpu, kActRaiserWram_Bg1CameraY);
 
   for (;;) {
-    uint16 status = cpu_read16(cpu, cpu->DB, obj);
-    if (status & 0x8000) {
+    uint16 status = cpu_read16(
+        cpu, cpu->DB, (uint16)(object_address + kActionObject_Status));
+    if (status & kActRaiserObjectStatus_End) {
       terminal_status = status;
       break;
     }
-    if (!(status & 0x4C00)) {
-      uint16 px = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x02));
-      uint16 py = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x04));
-      uint16 xl = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x0A));
-      uint16 yt = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x0C));
-      uint16 xr = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x0E));
-      uint16 yb = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x10));
-      int vertical = ws_scan_axis_visible(py, yt, yb, cam_y, 0, 0, 0x00E0);
+    if (!(status & kActRaiserObjectStatus_IneligibleMask)) {
+      uint16 world_x = cpu_read16(
+          cpu, cpu->DB,
+          (uint16)(object_address + kActionObject_WorldX));
+      uint16 world_y = cpu_read16(
+          cpu, cpu->DB,
+          (uint16)(object_address + kActionObject_WorldY));
+      uint16 left_extent = cpu_read16(
+          cpu, cpu->DB,
+          (uint16)(object_address + kActionObject_LeftExtent));
+      uint16 top_extent = cpu_read16(
+          cpu, cpu->DB,
+          (uint16)(object_address + kActionObject_TopExtent));
+      uint16 right_extent = cpu_read16(
+          cpu, cpu->DB,
+          (uint16)(object_address + kActionObject_RightExtent));
+      uint16 bottom_extent = cpu_read16(
+          cpu, cpu->DB,
+          (uint16)(object_address + kActionObject_BottomExtent));
+      int vertical = ws_scan_axis_visible(
+          world_y, top_extent, bottom_extent, camera_y, 0, 0,
+          kActRaiserAuthenticHeight);
       int authentic = vertical &&
-          ws_scan_axis_visible(px, xl, xr, cam_x, 0, 0, 0x0100);
+          ws_scan_axis_visible(world_x, left_extent, right_extent,
+                               camera_x, 0, 0,
+                               kActRaiserAuthenticWidth);
       int draw = vertical &&
-          ws_scan_axis_visible(px, xl, xr, cam_x, draw_l, draw_r, 0x0100);
+          ws_scan_axis_visible(world_x, left_extent, right_extent,
+                               camera_x, draw_l, draw_r,
+                               kActRaiserAuthenticWidth);
       int activation = vertical && ws_scan_axis_visible(
-          px, xl, xr, cam_x, activation_l, activation_r, 0x0100);
+          world_x, left_extent, right_extent, camera_x,
+          activation_l, activation_r, kActRaiserAuthenticWidth);
 
-      if (draw && !(status & 0x2000)) {
-        cpu->X = obj;
-        cpu->Y = oam_y;
+      if (draw && !(status & kActRaiserObjectStatus_NoDraw)) {
+        cpu->X = object_address;
+        cpu->Y = oam_offset;
         uint16 call_s = cpu->S;
-        cpu_write8(cpu, 0x00, cpu->S, 0x8D); cpu->S--;
-        cpu_write8(cpu, 0x00, cpu->S, 0x35); cpu->S--;
+        cpu_write8(cpu, 0x00, cpu->S,
+                   (uint8)(kBuildObjectSpritesReturnAddress >> 8));
+        cpu->S--;
+        cpu_write8(cpu, 0x00, cpu->S,
+                   (uint8)kBuildObjectSpritesReturnAddress);
+        cpu->S--;
         cpu->host_return_valid = 1;
         RecompReturn r = ActRaiser_BuildObjectSprites(cpu);
         cpu->S = call_s;
         if (r != RECOMP_RETURN_NORMAL)
           return r;
-        oam_y = cpu->Y;
+        oam_offset = cpu->Y;
         if (cpu->_flag_C) {
           oam_full = 1;
           break;
         }
       }
 
-      uint16 flags = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x30));
-      uint16 next_flags = activation ? (uint16)(flags & ~0x0400)
-                                     : (uint16)(flags | 0x0400);
-      if (activation_debug && ((flags ^ next_flags) & 0x0400)) {
-        int xlo = (int)(int16_t)(uint16)(px - xl - cam_x);
-        int xhi = (int)(int16_t)(uint16)(px + xr - cam_x);
-        uint16 handler = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x12));
-        uint16 type = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x16));
-        uint8 defbank = cpu_read8(cpu, cpu->DB, (uint16)(obj + 0x18));
-        uint16 def = cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x20));
+      uint16 flags = cpu_read16(
+          cpu, cpu->DB,
+          (uint16)(object_address + kActionObject_Flags));
+      uint16 next_flags = activation
+          ? (uint16)(flags & ~kActRaiserObjectFlag_OutsideActivation)
+          : (uint16)(flags | kActRaiserObjectFlag_OutsideActivation);
+      if (activation_debug &&
+          ((flags ^ next_flags) &
+           kActRaiserObjectFlag_OutsideActivation)) {
+        int screen_left = (int)(int16_t)(uint16)(
+            world_x - left_extent - camera_x);
+        int screen_right = (int)(int16_t)(uint16)(
+            world_x + right_extent - camera_x);
+        uint16 handler = cpu_read16(
+            cpu, cpu->DB,
+            (uint16)(object_address + kActionObject_Handler));
+        uint16 object_type = cpu_read16(
+            cpu, cpu->DB,
+            (uint16)(object_address + kActionObject_Type));
+        uint8 definition_bank = cpu_read8(
+            cpu, cpu->DB,
+            (uint16)(object_address + kActionObject_DefinitionBank));
+        uint16 definition_address = cpu_read16(
+            cpu, cpu->DB,
+            (uint16)(object_address + kActionObject_Definition));
         fprintf(stderr,
                 "[ws-activation-state] gf=%u slot=%u obj=$%04X "
                 "$0400=%u->%u mode=%s authentic=%d draw=%d active=%d "
                 "span=[%d,%d] margins=%d/%d handler=$%04X type=$%04X "
                 "def=$%02X:%04X\n",
-                (unsigned)ws_dp16(cpu, 0x88),
-                (unsigned)((obj - 0x06A0) / 0x40), obj,
-                !!(flags & 0x0400), !!(next_flags & 0x0400),
+                (unsigned)ws_dp16(cpu, kActRaiserWram_GameFrame),
+                (unsigned)((object_address -
+                    kActRaiserWram_ActionObjectTable) /
+                    kActRaiserActionObjectStride), object_address,
+                !!(flags & kActRaiserObjectFlag_OutsideActivation),
+                !!(next_flags & kActRaiserObjectFlag_OutsideActivation),
                 activation_wide ? "wide" : "authentic",
-                authentic, draw, activation, xlo, xhi, live_l, live_r,
-                handler, type, defbank, def);
+                authentic, draw, activation, screen_left, screen_right,
+                live_l, live_r, handler, object_type, definition_bank,
+                definition_address);
       }
-      cpu_write16(cpu, cpu->DB, (uint16)(obj + 0x30), next_flags);
+      cpu_write16(cpu, cpu->DB,
+                  (uint16)(object_address + kActionObject_Flags),
+                  next_flags);
     }
-    obj = (uint16)(obj + 0x40);
+    object_address =
+        (uint16)(object_address + kActRaiserActionObjectStride);
   }
 
   if (!oam_full) {
     uint8 acc = g_ram[(uint16)(cpu->D + 0x00)];
-    uint16 count = ws_dp16(cpu, 0x9C);
+    uint16 count = ws_dp16(cpu, kSpriteDp_OamHighSlotsRemaining);
     do {
       acc >>= 2;
       count--;
     } while (count != 0);
-    ws_dp16w(cpu, 0x9C, count);
-    g_ram[ws_dp16(cpu, 0x9A)] = acc;
+    ws_dp16w(cpu, kSpriteDp_OamHighSlotsRemaining, count);
+    g_ram[ws_dp16(cpu, kSpriteDp_OamHighCursor)] = acc;
     /* SEP #$20; LDA $00 changes only A.low. A.high remains the terminator
      * status high byte and X remains the terminator object address. */
     cpu->A = (uint16)((terminal_status & 0xFF00) | acc);
-    cpu->X = obj;
-    cpu->Y = oam_y;
+    cpu->X = object_address;
+    cpu->Y = oam_offset;
     cpu->_flag_Z = 1;
     cpu->_flag_N = 0;
     cpu->P = (uint8)((cpu->P & ~0x82) | 0x02);
@@ -348,131 +496,187 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
  * M=0, X=0, X=object base, Y=next OAM-shadow byte offset. Return preserves
  * the object in X, advances Y, and reports OAM-full through carry. */
 RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
-  uint16 obj = cpu->X;
-  uint16 oam_y = cpu->Y;
-  int full = 0;
+  uint16 object_address = cpu->X;
+  uint16 oam_offset = cpu->Y;
+  int oam_full = 0;
 
-  uint16 s14 = (uint16)(cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x02)) -
-                        cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x0A)) -
-                        ws_dp16(cpu, 0x94));
-  uint16 s16 = (uint16)(cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x04)) -
-                        cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x0C)) -
-                        ws_dp16(cpu, 0x96));
-  ws_dp16w(cpu, 0x14, s14);
-  ws_dp16w(cpu, 0x16, s16);
+  uint16 screen_origin_x = (uint16)(
+      cpu_read16(cpu, cpu->DB,
+                 (uint16)(object_address + kActionObject_WorldX)) -
+      cpu_read16(cpu, cpu->DB,
+                 (uint16)(object_address + kActionObject_LeftExtent)) -
+      ws_dp16(cpu, kSpriteDp_CameraOriginX));
+  uint16 screen_origin_y = (uint16)(
+      cpu_read16(cpu, cpu->DB,
+                 (uint16)(object_address + kActionObject_WorldY)) -
+      cpu_read16(cpu, cpu->DB,
+                 (uint16)(object_address + kActionObject_TopExtent)) -
+      ws_dp16(cpu, kSpriteDp_CameraOriginY));
+  ws_dp16w(cpu, kSpriteDp_ScreenOriginX, screen_origin_x);
+  ws_dp16w(cpu, kSpriteDp_ScreenOriginY, screen_origin_y);
 
-  uint16 flip = (uint16)(cpu_read16(cpu, cpu->DB,
-                                    (uint16)(obj + 0x28)) ^ 0x0100);
-  ws_dp16w(cpu, 0x9E, flip);
-  if (cpu_read16(cpu, cpu->DB, (uint16)(obj + 0x30)) & 0x2008)
-    ws_dp16w(cpu, 0x8F, (uint16)(ws_dp16(cpu, 0x8F) | 0x0E00));
+  uint16 flip_attributes = (uint16)(
+      cpu_read16(cpu, cpu->DB,
+                 (uint16)(object_address + kActionObject_FlipAttributes)) ^
+      kObjectFlipAttributeXor);
+  ws_dp16w(cpu, kSpriteDp_FlipAttributes, flip_attributes);
+  if (cpu_read16(cpu, cpu->DB,
+                 (uint16)(object_address + kActionObject_Flags)) &
+      kObjectSpriteAttributeBiasFlags) {
+    ws_dp16w(cpu, kSpriteDp_AttributeBias,
+             (uint16)(ws_dp16(cpu, kSpriteDp_AttributeBias) |
+                      kActionSpriteAttributeBias));
+  }
 
-  uint8 defbank = cpu_read8(cpu, cpu->DB, (uint16)(obj + 0x18));
-  uint16 def = (uint16)(cpu_read16(cpu, cpu->DB,
-                                   (uint16)(obj + 0x20)) + 4);
-  uint16 count = cpu_read8(cpu, defbank, def);
-  def++;
-  ws_dp16w(cpu, 0x0C, count);
+  uint8 definition_bank = cpu_read8(
+      cpu, cpu->DB,
+      (uint16)(object_address + kActionObject_DefinitionBank));
+  uint16 definition_address = (uint16)(
+      cpu_read16(cpu, cpu->DB,
+                 (uint16)(object_address + kActionObject_Definition)) +
+      kActionDefinitionHeaderBytes);
+  uint16 component_count =
+      cpu_read8(cpu, definition_bank, definition_address);
+  definition_address++;
+  ws_dp16w(cpu, kSpriteDp_ComponentCount, component_count);
 
-  int ext_l = 0, ext_r = 0;
+  int margin_left = 0;
+  int margin_right = 0;
   if (ws_sprite_widen_enabled() && g_ppu &&
-      g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
-    ext_l = g_ppu->extraLeftCur;
-    ext_r = g_ppu->extraRightCur;
+      ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+    margin_left = g_ppu->extraLeftCur;
+    margin_right = g_ppu->extraRightCur;
   }
 
   for (;;) {
-    uint16 a9e = ws_dp16(cpu, 0x9E);
-    uint16 ypair = (uint16)(cpu_read8(cpu, defbank, (uint16)(def + 3)) |
-                             (cpu_read8(cpu, defbank,
-                                        (uint16)(def + 4)) << 8));
-    uint16 dy = (a9e & 0x8000) ? (uint16)(ypair >> 8)
-                               : (uint16)(ypair & 0xFF);
-    uint16 y = (uint16)(dy + ws_dp16(cpu, 0x16));
+    flip_attributes = ws_dp16(cpu, kSpriteDp_FlipAttributes);
+    uint16 y_offsets = (uint16)(
+        cpu_read8(cpu, definition_bank,
+                  (uint16)(definition_address + kActionPartYOffsets)) |
+        (cpu_read8(cpu, definition_bank,
+                   (uint16)(definition_address +
+                            kActionPartYOffsets + 1)) << 8));
+    uint16 component_offset_y =
+        (flip_attributes & kDefinitionFlipVertical)
+            ? (uint16)(y_offsets >> 8) : (uint16)(y_offsets & 0xFF);
+    uint16 biased_y = (uint16)(
+        component_offset_y + ws_dp16(cpu, kSpriteDp_ScreenOriginY));
 
-    if (y < 0x00F0) {
+    if (biased_y < kSpriteBiasedHeight) {
       /* CMP failed with carry clear, so the ROM's SBC #$0010 stores y-$11. */
-      uint16 y_store = (uint16)(y - 0x11);
-      cpu_write16(cpu, defbank, (uint16)(0x0381 + oam_y), y_store);
+      uint16 stored_y = (uint16)(biased_y - (kSpriteDrawBias + 1));
+      cpu_write16(cpu, definition_bank,
+                  (uint16)(kActRaiserOamShadow + oam_offset +
+                           kOamYFieldOffset),
+                  stored_y);
 
-      uint16 tile = (uint16)(cpu_read8(cpu, defbank,
-                                      (uint16)(def + 5)) |
-                              (cpu_read8(cpu, defbank,
-                                       (uint16)(def + 6)) << 8));
-      uint16 attr = (uint16)((tile ^ a9e) | ws_dp16(cpu, 0x8F));
-      cpu_write16(cpu, defbank, (uint16)(0x0382 + oam_y), attr);
+      uint16 tile_attributes = (uint16)(
+          cpu_read8(cpu, definition_bank,
+                    (uint16)(definition_address +
+                             kActionPartTileAttributes)) |
+          (cpu_read8(cpu, definition_bank,
+                     (uint16)(definition_address +
+                              kActionPartTileAttributes + 1)) << 8));
+      uint16 rendered_attributes = (uint16)(
+          (tile_attributes ^ flip_attributes) |
+          ws_dp16(cpu, kSpriteDp_AttributeBias));
+      cpu_write16(cpu, definition_bank,
+                  (uint16)(kActRaiserOamShadow + oam_offset +
+                           kOamTileAttributeOffset),
+                  rendered_attributes);
 
-      uint16 xpair = (uint16)(cpu_read8(cpu, defbank,
-                                       (uint16)(def + 1)) |
-                              (cpu_read8(cpu, defbank,
-                                       (uint16)(def + 2)) << 8));
-      uint16 dx = (a9e & 0x4000) ? (uint16)(xpair >> 8)
-                                 : (uint16)(xpair & 0xFF);
-      uint16 x_biased = (uint16)(dx + ws_dp16(cpu, 0x14));
+      uint16 x_offsets = (uint16)(
+          cpu_read8(cpu, definition_bank,
+                    (uint16)(definition_address + kActionPartXOffsets)) |
+          (cpu_read8(cpu, definition_bank,
+                     (uint16)(definition_address +
+                              kActionPartXOffsets + 1)) << 8));
+      uint16 component_offset_x =
+          (flip_attributes & kDefinitionFlipHorizontal)
+              ? (uint16)(x_offsets >> 8) : (uint16)(x_offsets & 0xFF);
+      uint16 biased_x = (uint16)(
+          component_offset_x + ws_dp16(cpu, kSpriteDp_ScreenOriginX));
 
       /* Authentic: x<$110 => screen-x in [-16,256). Wide:
        * (x+L)<$110+L+R => screen-x in [-16-L,256+R). The 16px left reach is
        * exactly ActRaiser's maximum OAM tile width. The historical fixed-64
        * reach over-emitted invisible definitions and is intentionally gone. */
-      uint16 wide_x = (uint16)(x_biased + ext_l);
-      uint16 wide_bound = (uint16)(0x0110 + ext_l + ext_r);
+      uint16 wide_x = (uint16)(biased_x + margin_left);
+      uint16 wide_bound =
+          (uint16)(kSpriteBiasedWidth + margin_left + margin_right);
       if (wide_x < wide_bound) {
-        uint16 screen_x = (uint16)(x_biased - 0x10);
-        cpu_write8(cpu, defbank, (uint16)(0x0380 + oam_y),
+        uint16 screen_x = (uint16)(biased_x - kSpriteDrawBias);
+        cpu_write8(cpu, definition_bank,
+                   (uint16)(kActRaiserOamShadow + oam_offset),
                    (uint8)screen_x);
 
         uint8 acc = g_ram[(uint16)(cpu->D + 0x00)];
         acc = (uint8)((acc >> 1) | (((screen_x >> 8) & 1) << 7));
         acc = (uint8)((acc >> 1) |
-                      ((cpu_read8(cpu, defbank, def) & 1) << 7));
+                      ((cpu_read8(cpu, definition_bank,
+                                  (uint16)(definition_address +
+                                           kActionPartFlags)) & 1) << 7));
         g_ram[(uint16)(cpu->D + 0x00)] = acc;
 
-        uint16 slots = (uint16)(ws_dp16(cpu, 0x9C) - 1);
-        ws_dp16w(cpu, 0x9C, slots);
+        uint16 slots = (uint16)(
+            ws_dp16(cpu, kSpriteDp_OamHighSlotsRemaining) - 1);
+        ws_dp16w(cpu, kSpriteDp_OamHighSlotsRemaining, slots);
         if (slots == 0) {
-          uint16 highp = ws_dp16(cpu, 0x9A);
-          g_ram[highp] = acc;
-          ws_dp16w(cpu, 0x9A, (uint16)(highp + 1));
-          ws_dp16w(cpu, 0x9C, 4);
+          uint16 high_table_address =
+              ws_dp16(cpu, kSpriteDp_OamHighCursor);
+          g_ram[high_table_address] = acc;
+          ws_dp16w(cpu, kSpriteDp_OamHighCursor,
+                   (uint16)(high_table_address + 1));
+          ws_dp16w(cpu, kSpriteDp_OamHighSlotsRemaining, 4);
         }
 
         if (ws_sprite_debug_enabled()) {
-          int sx = screen_x & 0x8000 ? (int)screen_x - 0x10000
-                                     : (int)screen_x;
-          if (sx < -16 || sx >= 256) {
-            unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
+          int signed_screen_x = screen_x & 0x8000
+              ? (int)screen_x - 0x10000 : (int)screen_x;
+          if (signed_screen_x < -kSpriteDrawBias ||
+              signed_screen_x >= kActRaiserAuthenticWidth) {
+            unsigned game_frame =
+                ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
             fprintf(stderr,
                     "[ws-sprite] gf=%u obj=$%04X def=$%02X:%04X x=%d y=%u tile=$%02X\n",
-                    gf, obj, defbank, (unsigned)(uint16)(def - 1), sx,
-                    (unsigned)(y_store & 0xFF), (unsigned)(tile & 0xFF));
+                    game_frame, object_address, definition_bank,
+                    (unsigned)(uint16)(definition_address - 1),
+                    signed_screen_x,
+                    (unsigned)(stored_y & 0xFF),
+                    (unsigned)(tile_attributes & 0xFF));
           }
         }
 
-        oam_y = (uint16)(oam_y + 4);
-        if (oam_y == 0x0200) {
-          full = 1;
+        oam_offset = (uint16)(oam_offset + kOamEntryBytes);
+        if (oam_offset == kActRaiserOamLowTableBytes) {
+          oam_full = 1;
           break;
         }
       } else {
         /* Original reject occurs after y/tile writes. Re-park x/y only. */
-        cpu_write16(cpu, defbank, (uint16)(0x0380 + oam_y), 0xE080);
+        cpu_write16(cpu, definition_bank,
+                    (uint16)(kActRaiserOamShadow + oam_offset),
+                    kParkedActionOamEntry);
       }
     }
 
-    def = (uint16)(def + 7);
-    count--;
-    ws_dp16w(cpu, 0x0C, count);
-    if (count == 0)
+    definition_address =
+        (uint16)(definition_address + kSpriteDefinitionPartBytes);
+    component_count--;
+    ws_dp16w(cpu, kSpriteDp_ComponentCount, component_count);
+    if (component_count == 0)
       break;
   }
 
-  ws_dp16w(cpu, 0x8F, (uint16)(ws_dp16(cpu, 0x8F) & ~0x0E00));
-  cpu->A = 0x0E00;
-  cpu->X = obj;
-  cpu->Y = oam_y;
-  cpu->_flag_C = full ? 1 : 0;
-  cpu->_flag_Z = obj == 0;
-  cpu->_flag_N = (obj & 0x8000) != 0;
+  ws_dp16w(cpu, kSpriteDp_AttributeBias,
+           (uint16)(ws_dp16(cpu, kSpriteDp_AttributeBias) &
+                    ~kActionSpriteAttributeBias));
+  cpu->A = kActionSpriteAttributeBias;
+  cpu->X = object_address;
+  cpu->Y = oam_offset;
+  cpu->_flag_C = oam_full ? 1 : 0;
+  cpu->_flag_Z = object_address == 0;
+  cpu->_flag_N = (object_address & 0x8000) != 0;
   cpu->P = (uint8)((cpu->P & ~0x83) |
                    (cpu->_flag_N ? 0x80 : 0) |
                    (cpu->_flag_Z ? 0x02 : 0) |
@@ -525,15 +729,17 @@ static void ws_sim_live_margins(int *left, int *right) {
   *left = 0;
   *right = 0;
   if (!g_ws_active || !ws_sim_sprite_widen_enabled() ||
-      g_ram[0x18] != 0x00 ||
-      g_ram[0x19] < 0x01 || g_ram[0x19] > 0x06)
+      !ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+                                  g_ram[kActRaiserWram_CurrentMap]))
     return;
 
-  int cam = (int)ws_ram16(0x22);
-  if (cam < 0) cam = 0;
-  if (cam > 0x0100) cam = 0x0100;
-  *left = cam < g_ws_extra ? cam : g_ws_extra;
-  *right = (0x0100 - cam) < g_ws_extra ? (0x0100 - cam) : g_ws_extra;
+  int camera_x = (int)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
+  if (camera_x < 0) camera_x = 0;
+  if (camera_x > kActRaiserTownCameraMaximumX)
+    camera_x = kActRaiserTownCameraMaximumX;
+  *left = camera_x < g_ws_extra ? camera_x : g_ws_extra;
+  int available_right = kActRaiserTownCameraMaximumX - camera_x;
+  *right = available_right < g_ws_extra ? available_right : g_ws_extra;
 }
 
 static int ws_sim_camera_debug_enabled(void) {
@@ -575,20 +781,22 @@ RecompReturn ActRaiser_UpdateSimCamera(CpuState *cpu) {
 
   const uint16 target_x = cpu_read16(cpu, 0x01, 0x0AEE);
   const uint16 target_y = cpu_read16(cpu, 0x01, 0x0AF0);
-  const uint16 native_x = ws_sim_authentic_camera(target_x, 0x0080, 0x0100);
+  const uint16 native_x = ws_sim_authentic_camera(
+      target_x, kSimCameraCenterX, kActRaiserTownCameraMaximumX);
   uint16 camera_x = native_x;
-  uint16 camera_y = ws_sim_authentic_camera(target_y, 0x0070, 0x011F);
+  uint16 camera_y = ws_sim_authentic_camera(
+      target_y, kSimCameraCenterY, kActRaiserTownCameraMaximumY);
 
   const int wide = g_ws_active && g_settings.ws_sim &&
       g_settings.display_mode != kDisplayMode_43 &&
       g_settings.display_mode != kDisplayMode_WideRaw &&
-      g_ram[0x18] == 0x00 &&
-      g_ram[0x19] >= 0x01 && g_ram[0x19] <= 0x06;
+      ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+                                 g_ram[kActRaiserWram_CurrentMap]);
   int margin = wide ? g_ws_extra : 0;
   if (margin < 0) margin = 0;
-  if (margin > 0x80) margin = 0x80;
+  if (margin > kSimCameraCenterX) margin = kSimCameraCenterX;
   const uint16 left = (uint16)margin;
-  const uint16 right = (uint16)(0x0100 - margin);
+  const uint16 right = (uint16)(kActRaiserTownCameraMaximumX - margin);
   if (camera_x < left) camera_x = left;
   if (camera_x > right) camera_x = right;
 
@@ -598,7 +806,8 @@ RecompReturn ActRaiser_UpdateSimCamera(CpuState *cpu) {
   const uint16 shaken_y = (uint16)(camera_y + shake_y);
   const int accept_x = !(shaken_x & 0x8000) &&
                        shaken_x >= left && shaken_x <= right;
-  const int accept_y = !(shaken_y & 0x8000) && shaken_y <= 0x011F;
+  const int accept_y = !(shaken_y & 0x8000) &&
+                       shaken_y <= kActRaiserTownCameraMaximumY;
   if (accept_x) camera_x = shaken_x;
   if (accept_y) camera_y = shaken_y;
 
@@ -612,16 +821,18 @@ RecompReturn ActRaiser_UpdateSimCamera(CpuState *cpu) {
     static uint8 last_town = 0xFF;
     static int last_clamped = -1;
     const int clamped = camera_x != native_x;
-    if (camera_x != last_camera || g_ram[0x19] != last_town ||
+    if (camera_x != last_camera ||
+        g_ram[kActRaiserWram_CurrentMap] != last_town ||
         clamped != last_clamped) {
       fprintf(stderr,
               "[ws-sim-camera] gf=%u town=%u target=%u native=%u wide=%u "
               "bounds=%u-%u shake=%d/%d\n",
-              (unsigned)ws_ram16(0x88), (unsigned)g_ram[0x19],
+              (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+              (unsigned)g_ram[kActRaiserWram_CurrentMap],
               (unsigned)target_x, (unsigned)native_x, (unsigned)camera_x,
               (unsigned)left, (unsigned)right, accept_x, accept_y);
       last_camera = camera_x;
-      last_town = g_ram[0x19];
+      last_town = g_ram[kActRaiserWram_CurrentMap];
       last_clamped = clamped;
     }
   }
@@ -681,34 +892,36 @@ static void ws_sim_cmp16(CpuState *cpu, uint16 lhs, uint16 rhs) {
  * comparisons gain the finite live town margins. */
 RecompReturn ActRaiser_SimProjectileVisible(CpuState *cpu) {
   const uint16 record = cpu->X;
-  const uint16 cam_x = ws_dp16(cpu, 0x22);
-  const uint16 cam_y = ws_dp16(cpu, 0x24);
-  int ext_l = 0, ext_r = 0;
-  ws_sim_live_margins(&ext_l, &ext_r);
+  const uint16 camera_x = ws_dp16(cpu, kActRaiserWram_Bg1CameraX);
+  const uint16 camera_y = ws_dp16(cpu, kActRaiserWram_Bg1CameraY);
+  int margin_left = 0, margin_right = 0;
+  ws_sim_live_margins(&margin_left, &margin_right);
 
   /* Preserve the original DP scratch value even though the widened upper
    * bound itself remains host-local. */
   cpu->_flag_C = 0;  /* CLC */
   cpu->P &= (uint8)~0x01;
-  const uint16 authentic_right = ws_sim_adc16(cpu, cam_x, 0x0100);
+  const uint16 authentic_right = ws_sim_adc16(
+      cpu, camera_x, kActRaiserAuthenticWidth);
   ws_dp16w(cpu, 0x00, authentic_right);
 
-  uint16 value = cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0A));
+  uint16 value = cpu_read16(
+      cpu, cpu->DB, (uint16)(record + kSimRecord_WorldX));
   cpu->A = value;
   ws_sim_set_nz16(cpu, value);
   cpu->_flag_C = 0;  /* CLC */
   cpu->P &= (uint8)~0x01;
-  value = ws_sim_adc16(cpu, value, 0x0004);
+  value = ws_sim_adc16(cpu, value, kSimProjectileAnchorX);
   cpu->A = value;
 
   int culled = (value & 0x8000) != 0;
   if (!culled) {
-    ws_sim_cmp16(cpu, value, 0x0200);
+    ws_sim_cmp16(cpu, value, kActRaiserTownWorldWidth);
     culled = cpu->_flag_C;
   }
 
-  const uint16 wide_left = (uint16)(cam_x - ext_l);
-  const uint16 wide_right = (uint16)(authentic_right + ext_r);
+  const uint16 wide_left = (uint16)(camera_x - margin_left);
+  const uint16 wide_right = (uint16)(authentic_right + margin_right);
   if (!culled) {
     ws_sim_cmp16(cpu, value, wide_left);
     culled = !cpu->_flag_C;
@@ -719,25 +932,27 @@ RecompReturn ActRaiser_SimProjectileVisible(CpuState *cpu) {
   }
 
   if (!culled) {
-    cpu->A = cam_y;
-    ws_sim_set_nz16(cpu, cam_y);
+    cpu->A = camera_y;
+    ws_sim_set_nz16(cpu, camera_y);
     cpu->_flag_C = 0;  /* CLC */
     cpu->P &= (uint8)~0x01;
-    const uint16 vertical_bottom = ws_sim_adc16(cpu, cam_y, 0x00E0);
+    const uint16 vertical_bottom = ws_sim_adc16(
+        cpu, camera_y, kSimVerticalViewportHeight);
     cpu->A = vertical_bottom;
     ws_dp16w(cpu, 0x00, vertical_bottom);
 
-    value = cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0C));
+    value = cpu_read16(
+        cpu, cpu->DB, (uint16)(record + kSimRecord_WorldY));
     cpu->A = value;
     ws_sim_set_nz16(cpu, value);
     if (value & 0x8000) {
       culled = 1;
     } else {
-      ws_sim_cmp16(cpu, value, 0x0200);
+      ws_sim_cmp16(cpu, value, kActRaiserTownWorldWidth);
       if (cpu->_flag_C) {
         culled = 1;
       } else {
-        ws_sim_cmp16(cpu, value, cam_y);
+        ws_sim_cmp16(cpu, value, camera_y);
         if (!cpu->_flag_C) {
           culled = 1;
         } else {
@@ -748,19 +963,24 @@ RecompReturn ActRaiser_SimProjectileVisible(CpuState *cpu) {
     }
   }
 
-  if (!culled && (ext_l || ext_r) && ws_sim_sprite_debug_enabled()) {
+  if (!culled && (margin_left || margin_right) &&
+      ws_sim_sprite_debug_enabled()) {
     const uint16 x4 = (uint16)(
-        cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0A)) + 4);
-    if (x4 < cam_x || x4 >= authentic_right) {
+        cpu_read16(cpu, cpu->DB,
+                   (uint16)(record + kSimRecord_WorldX)) +
+        kSimProjectileAnchorX);
+    if (x4 < camera_x || x4 >= authentic_right) {
       fprintf(stderr,
               "[ws-sim-projectile] gf=%u record=$%04X world=%u,%u "
               "camera=%u,%u margins=%d/%d\n",
-              (unsigned)ws_ram16(0x88), record,
+              (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+              record,
               (unsigned)cpu_read16(cpu, cpu->DB,
-                                   (uint16)(record + 0x0A)),
+                                   (uint16)(record + kSimRecord_WorldX)),
               (unsigned)cpu_read16(cpu, cpu->DB,
-                                   (uint16)(record + 0x0C)),
-              (unsigned)cam_x, (unsigned)cam_y, ext_l, ext_r);
+                                   (uint16)(record + kSimRecord_WorldY)),
+              (unsigned)camera_x, (unsigned)camera_y,
+              margin_left, margin_right);
     }
   }
 
@@ -774,21 +994,26 @@ RecompReturn ActRaiser_SimProjectileVisible(CpuState *cpu) {
 
 static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
   const uint16 record = cpu->X;
-  const int world_record = record >= 0x0A00 && record < 0x1088;
-  int ext_l = 0, ext_r = 0;
+  const uint16 world_records_end = (uint16)(
+      kActRaiserWram_SimWorldRecords +
+      kActRaiserSimWorldRecordStride * kActRaiserSimWorldRecordCount);
+  const int world_record = record >= kActRaiserWram_SimWorldRecords &&
+                           record < world_records_end;
+  int margin_left = 0, margin_right = 0;
   if (world_record)
-    ws_sim_live_margins(&ext_l, &ext_r);
+    ws_sim_live_margins(&margin_left, &margin_right);
 
   const uint16 base_x = (uint16)(
-      cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0A)) -
+      cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_WorldX)) -
       ws_dp16(cpu, 0x94));
   const uint16 base_y = (uint16)(
-      cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0C)) -
+      cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_WorldY)) -
       ws_dp16(cpu, 0x96));
   ws_dp16w(cpu, 0x14, base_x);
   ws_dp16w(cpu, 0x16, base_y);
 
-  uint16 part = cpu_read16(cpu, cpu->DB, (uint16)(record + 0x08));
+  uint16 part = cpu_read16(
+      cpu, cpu->DB, (uint16)(record + kSimRecord_Composition));
   uint16 count = cpu_read8(cpu, cpu->DB, part);
   part = (uint16)(part + 1);
   ws_dp16w(cpu, 0x0E, count);
@@ -802,9 +1027,10 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
     const uint16 x_biased = (uint16)(
         base_x + ws_sim_part_offset(cpu_read8(
                      cpu, cpu->DB, (uint16)(part + 1))));
-    const int authentic_x = x_biased < 0x0110;
-    const uint16 wide_x = (uint16)(x_biased + ext_l);
-    const uint16 wide_bound = (uint16)(0x0110 + ext_l + ext_r);
+    const int authentic_x = x_biased < kSimOamBiasedWidth;
+    const uint16 wide_x = (uint16)(x_biased + margin_left);
+    const uint16 wide_bound = (uint16)(
+        kSimOamBiasedWidth + margin_left + margin_right);
 
     if (wide_x < wide_bound) {
       const uint16 screen_x = (uint16)(x_biased - 0x0010);
@@ -826,7 +1052,7 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
       const uint16 y_biased = (uint16)(
           base_y + ws_sim_part_offset(cpu_read8(
                        cpu, cpu->DB, (uint16)(part + 2))));
-      if (y_biased < 0x00F0) {
+      if (y_biased < kSimOamBiasedHeight) {
         const uint8 screen_y = (uint8)(y_biased - 0x0011);
         cpu_write8(cpu, cpu->DB, (uint16)(0x0381 + oam), screen_y);
 
@@ -840,20 +1066,21 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
 
         if (world_record && !authentic_x && ws_sim_sprite_debug_enabled()) {
           int sx = screen_x & 0x01FF;
-          if (sx >= 0x0100 + ext_r)
-            sx -= 0x0200;
+          if (sx >= kActRaiserAuthenticWidth + margin_right)
+            sx -= kActRaiserTownWorldWidth;
           fprintf(stderr,
                   "[ws-sim-sprite] gf=%u emitter=%s record=$%04X "
                   "part=%u oam=$%03X x=%d y=%u margins=%d/%d "
                   "tile=$%03X attr=$%04X\n",
-                  (unsigned)ws_ram16(0x88),
+                  (unsigned)ActRaiser_ReadWram16(
+                      kActRaiserWram_GameFrame),
                   alternate_attr ? "AE6F" : "ADAD", record, part_index,
-                  oam, sx, (unsigned)screen_y, ext_l, ext_r,
+                  oam, sx, (unsigned)screen_y, margin_left, margin_right,
                   (unsigned)(attr & 0x01FF), attr);
         }
 
         oam = (uint16)(oam + 4);
-        if (oam == 0x0200) {
+        if (oam == kActRaiserOamLowTableBytes) {
           final_c = 1;  /* CPX #$0200 equality carry survives PLX. */
           break;
         }
