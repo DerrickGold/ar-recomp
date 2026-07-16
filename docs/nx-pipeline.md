@@ -103,9 +103,25 @@ Authoring gotchas to document with the pack format:
   entry is active.
 - **Palette dynamics** (the one open format question): CGRAM fades,
   hit-flashes, and color cycling recolor tiles at runtime; truecolor art is
-  baked. Plan: store reference palette per pack entry, derive a runtime
-  modulation from live-vs-reference CGRAM. Needs boss/fade census data
-  before freezing — gather via AR_TILE_CENSUS=1 during normal play.
+  baked. Correctness is guaranteed regardless: identity includes palette
+  content, so an unrecognized palette state MISSES the pack and decodes
+  authentically — a flash is never lost, only briefly original-res. No game
+  logic is ever touched; this is presentation policy only.
+  The three SNES mechanisms and their handling:
+  1. OAM blink (alternate-frame sprite skip, the common i-frame flicker):
+     no palette involvement, inherited automatically.
+  2. Palette-group swap (OAM attr flips to a flash palette): census shows a
+     burst variant (1-3 consecutive frames, recurring).
+  3. CGRAM rewrite in place (fades/flash/cycling): palette-content churn.
+  Detection plan: extend the census with per-variant temporal signatures
+  (run length, periodicity) + a CGRAM-write classifier (changed group ~=
+  reference * k -> fade; ~= uniform color -> flash; permutation -> cycle),
+  plus event-correlated probes for the known cases (player i-frames via the
+  $08D0 0x2000 invuln flag; enemy hit reactions) to pin ActRaiser's actual
+  mechanisms. Runtime tiers, best to safest: exact variant match -> painted
+  pack variant; recognized fade -> tint by k (same idea as the shipped
+  INIDISP handling); recognized uniform flash -> lerp HD tile toward flash
+  color (zero extra art); unrecognized -> authentic fallback.
 - **Snapshot/savestate**: N-x buffers and sideband are render-only state,
   excluded from PPU_SAVESTATE regions (same as overlay surfaces).
 - The frozen mode7 paste path (engine aa39714/6ffdb62) is the reference
