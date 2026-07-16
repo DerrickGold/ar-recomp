@@ -589,7 +589,14 @@ comment for the full key/gate grammar. Planes are capability tiers:
   or `hd_replacements=0` all degrade to authentic rendering because an
   unbound source makes `RemoveFromGame` a no-op. One capture rect per source
   per frame is a renderer invariant; conflicting entries warn and skip.
-- `mode7` (live, 2026-07-15): canvas-space texture override rendered through
+- `mode7` (live, 2026-07-15 — **FROZEN, do not extend**: correct for its one
+  shipped consumer (the sprite-free title swirl) but built on paste
+  composition, which cannot express priority. Its backend migrates into the
+  N-x RGBA pipeline (see [`nx-pipeline.md`](nx-pipeline.md)); the manifest
+  schema is backend-agnostic and survives unchanged. Do not add mode7
+  entries for scenes with sprites over the canvas, and do not build OBJ
+  promotion — that was evaluated and rejected as a paste-path special
+  case.): canvas-space texture override rendered through
   the live matrix. The engine API (`PpuBindMode7OverlaySurface` +
   `PpuSetMode7Override`, snesrecomp ppu.c) samples the entry's ARGB art at
   the per-pixel canvas coordinates inside `PpuDrawBackground_mode7`, so
