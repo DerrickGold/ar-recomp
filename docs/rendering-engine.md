@@ -569,6 +569,16 @@ second SNES tilemap rewrite. The reusable runner contract is documented in
   the generic OBJ overlay buffer; every other OBJ remains on the normal sprite
   path. Earlier render-scoped OAM coordinate mutation is gone, so emulated
   state, savestates, future DMA, and game logic remain authentic.
+- Simulation's hourglass is also slots 0-3. The Fillmore snapshot at
+  `runs/20260716-172322/snapshots/snap_00_gf1378` identifies fixed/overlay
+  record 23 (`$083E`, live frame pointer `$01:DD4B`) and its OAM signature:
+  left/right x `$94/$9B`, upper/lower y `$0B/$13`, and output attributes
+  `$31/$71` (the right halves are horizontally flipped). ROM compositions at
+  `$01:DD4B/$DD60/$DD75/$DD8A` prove four animation phases: paired upper tiles
+  `$EC-$EF` and lower tiles `$FC-$FF`. Validation accepts only that range and
+  requires both halves and the `+$10` lower-tile relationship. The same host
+  placement then pins the 16px capture four native pixels before simulation's
+  right/score group.
 - `src/main.c` binds generic BG3/OBJ surfaces, then uploads the game and those
   two captured surfaces separately. It
   renders the game with the normal logical-size/PAR transform, then composites
@@ -646,6 +656,66 @@ census, and a palette-variance summary to the run dir. First results
 (boot/title + level1-action.rec): 806 unique tiles, only 15 with more than
 one palette variant — (tile bytes + palette) identity is viable and packs
 are small.
+
+#### Click-driven scene inspector (2026-07-16)
+
+The host scene inspector (`src/scene_inspector.c`) is the interactive front end
+to these replacement seams. Enable the persistent `scene_inspector` setting,
+press F3, or seed `AR_SCENE_INSPECTOR=1`; a left click inside the presented
+game viewport maps through the real renderer viewport/PAR and widescreen crop
+back to SNES screen coordinates, freezes frame advancement, and walks the live
+PPU state without mutating it. The inspector records whether it introduced the
+pause: right click, F3, or P clears the selection and resumes only in that case,
+so inspecting a frame that was already manually paused preserves that state.
+
+For Mode 1/0 BG candidates it reports the layer/bpp, scroll and widescreen
+source policy (center, wide, margin gap, clamp absence, mirror/repeat band, or
+promoted-HUD anchor), tilemap entry and VRAM word address, character word
+address, tile number, sampled pixel, CGRAM index, palette, priority, and flips.
+For OBJ candidates it reports every containing OAM slot, sprite size/rectangle,
+base animation-frame tile, clicked subtile, character address, palette,
+priority, flips, and sampled pixel. Mode 7 clicks follow the live matrix for
+that screen sample and report canvas coordinate, tilemap tile/address, pixel,
+matrix, and a starter `canvas_rect`. Game frame `$0088`, state `$18/$19`,
+camera `$22/$24`, map dimensions `$2E/$30`, screen masks, brightness, and live
+margin sizes accompany every report.
+
+The compact result keeps the native dialog nine-slice but uses a dedicated
+host-side 5x7 monospace atlas instead of the ROM font. Labels, numeric/VRAM
+values, target layers/source policies, warnings, and control hints use distinct
+debug colors. It caps its scale independently of the settings menu and initially
+fits its frame to the longest visible report line before occupying the output
+half opposite the selected point. A left press in the
+panel's title strip is intercepted and begins a bounded drag. A cyan
+lower-right grip uniformly scales the complete panel from 50% to 250%, keeping
+its logical report width and columns intact. The remaining report body
+deliberately passes clicks through to scene selection, so a panel covering the
+new sample cannot silently retain an old crosshair. The complete
+console result includes a manifest gate and an
+honest backend recommendation. Its FNV-1a content hashes use exactly the class
+seeds and raw tile representation of `AR_TILE_CENSUS`, so a clicked hash can be
+searched directly in `tile_census.jsonl`. `screen` and the constrained `mode7`
+plane remain the live backends. A scrolling BG/OBJ click is identification for
+the reserved `tiles` plane, not a claim that hash-keyed replacement already
+works. `tests/scene_inspector_test.c` guards center/mirror BG mapping and OAM
+frame/subtile identity.
+
+Presentation hit-testing is not limited to the base framebuffer transform.
+`BuildHudPresentationChunks()` is the shared source of the promoted HUD's
+texture-source, authentic-screen-source, and output-destination rectangles.
+The compositor draws those chunks and the inspector walks the same list in
+reverse draw order. It rejects transparent captured pixels, inverse-maps a hit
+through independent HUD scale and left/center/right anchoring, and filters the
+PPU walk to captured BG3 or captured OBJ as appropriate. Its marker and best
+candidate rectangle are then projected forward through that same chunk.
+`SDL_RenderSetLogicalSize` filters absolute mouse events before queuing them,
+so while it is active `event.button/motion.x/y` already use the logical render
+resolution. They map directly through the physical presentation viewport; a
+second window-to-logical conversion or window/output scale would double-apply
+the transform and discard far-edge clicks. Only the logical-size-zero fallback
+uses the live window/output ratio (including high-DPI backing scale).
+Independent HUD scale and anchoring are resolved afterward by the chunk
+inverse.
 
 First shipped entry: the title logo. The title screen ($18=00/$19=00) is a
 single Mode-7 BG1 canvas (no OBJ sprites); the intro swirl is a per-scanline

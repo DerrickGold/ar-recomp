@@ -30,11 +30,28 @@ typedef enum {
 } PixelAspect;
 
 typedef enum {
+  kScreenAspect_43 = 0,
+  kScreenAspect_169,
+  kScreenAspect_1610,
+  kScreenAspect_Count,
+} ScreenAspect;
+
+/* Host audio-rate presets. The stored value is the stable menu/config enum;
+ * Settings_AudioFrequencyHz translates it for SDL device creation. */
+typedef enum {
+  kAudioFrequency_32040 = 0,
+  kAudioFrequency_44100,
+  kAudioFrequency_48000,
+  kAudioFrequency_Count,
+} AudioFrequency;
+
+typedef enum {
   kSettingType_Bool,
   kSettingType_Int,
   kSettingType_Enum,
   kSettingType_Mask,
   kSettingType_Custom,
+  kSettingType_Action,
 } SettingType;
 
 typedef enum {
@@ -88,6 +105,7 @@ typedef enum {
 
 typedef void (*SettingsChangeObserver)(const SettingDesc *desc,
                                        SettingChangeResult result);
+typedef bool (*SettingsActionObserver)(const SettingDesc *desc);
 
 typedef struct SettingsPin {
   uint32 off;
@@ -107,11 +125,10 @@ typedef struct Settings {
    * are absent or the run is headless (no overlay bindings). */
   bool hd_replacements;
 
-  /* Application presentation settings. `extended_aspect` packs X:Y as
-   * (X << 8) | Y; zero disables the widescreen framebuffer budget. These are
-   * resolved before SDL/PPU allocation and are therefore the runtime source of
-   * truth formerly held in g_config. */
-  uint16 extended_aspect;
+  /* Application presentation settings. Video buffers reserve the PPU's
+   * maximum width, so screen/pixel aspect changes can select a new live
+   * render width without reallocating emulated state. */
+  int extended_aspect;
   int pixel_aspect;
   int window_scale;
   bool fullscreen;
@@ -121,7 +138,7 @@ typedef struct Settings {
   /* Audio controls. The SDL callback consumes an atomic mirror of the master
    * value; the game-thread COP hook reads the dialogue toggle directly. */
   bool audio_enabled;
-  int  audio_frequency;
+  int  audio_frequency;      /* AudioFrequency preset */
   int  audio_samples;
   int  audio_master_volume;  /* final host PCM gain, 0..100 percent */
   bool audio_dialog_blip;    /* per-glyph Sky Palace dialogue sound */
@@ -130,6 +147,12 @@ typedef struct Settings {
    * are absent. Live: turning it off mid-song stops the stream and unmutes
    * the SPC driver's music voices; the next song change is fully authentic. */
   bool music_replacements;
+
+  /* Quality-of-life command parameters. These persist; the corresponding
+   * ACTION rows are host commands and are never serialized. */
+  int turbo_multiplier;
+  uint16 warp_target;
+  bool scene_inspector;      /* click-to-inspect live PPU/asset identity */
 
   /* Cheat values. Zero/false means disabled. Stateful enforcement latches are
    * deliberately kept private to ActRaiser_ApplyCheats, not stored here. */
@@ -195,6 +218,8 @@ SettingChangeResult Settings_SetText(const SettingDesc *desc, const char *text);
 SettingChangeResult Settings_Reset(const SettingDesc *desc);
 int Settings_FormatValue(const SettingDesc *desc, char *buffer, int buffer_size);
 void Settings_SetChangeObserver(SettingsChangeObserver observer);
+void Settings_SetActionObserver(SettingsActionObserver observer);
+bool Settings_InvokeAction(const SettingDesc *desc);
 const char *Settings_CategoryName(SettingCategory category);
 const char *Settings_ApplyKindName(SettingApplyKind apply);
 const char *Settings_ChangeResultName(SettingChangeResult result);
@@ -209,8 +234,10 @@ const char *Settings_DisplayModeName(int mode);
 /* The framebuffer sub-rect the current mode should present: columns
  * [Settings_VisibleX0(), +Settings_VisibleWidth()). 4:3 presents only the
  * authentic centre 256 so the margins are cropped rather than shown as bars.
- * The PPU always renders the full width; nothing is reallocated. */
+ * Host textures retain maximum capacity while the PPU uses the current active
+ * width/pitch; changing ratios therefore requires no texture reallocation. */
 int Settings_VisibleX0(void);
 int Settings_VisibleWidth(void);
 int Settings_ExtendedAspectX(void);
 int Settings_ExtendedAspectY(void);
+int Settings_AudioFrequencyHz(void);

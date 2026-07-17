@@ -17,6 +17,7 @@
  * handlers below may take it even when the caller already holds it. */
 extern void RtlApuLock(void);
 extern void RtlApuUnlock(void);
+extern int RtlGetAudioOutputRate(void);
 extern void (*g_rtl_spc_upload_hook)(uint32_t src);
 extern void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val);
 extern void (*g_rtl_music_mix_hook)(int16_t *buf, int frames);
@@ -28,20 +29,32 @@ extern int g_dsp_voice_mute_srcn_min;
  * per-song range. Muting from 0x0C silences music voices only. */
 #define MUSIC_MUTE_SRCN_MIN 0x0C
 
-/* Driver command vocabulary on APU port 0 ($2140). Anything else written to
- * port 0 is a "start song N" request. */
+/* Driver command vocabulary on APU port 0 ($2140). Anything other than these
+ * controls and idle zero is a "start/resume song N" request. */
 #define SPC_CMD_HALT 0xF0
 #define SPC_CMD_ATTENTION 0xF1
+#define SPC_CMD_PAUSE 0xF2
 #define SPC_CMD_UPLOAD 0xFF
 
 MusicReplacement g_music_replacements[kMusicMaxReplacements];
 int g_music_replacement_count;
 
 static bool s_musiclog;
+static uint32 s_loaded_src; /* most recent SPC image upload source */
+static int s_current_song = -1;
+/* Native pause ($F2) and host pause (P/settings overlay) are independent.
+ * Either one suspends decoding without closing the Vorbis stream or moving
+ * its cursor. */
+static bool s_driver_paused;
+static bool s_host_paused;
+
+static bool PlaybackPaused(void) {
+  return s_driver_paused || s_host_paused;
+}
 
 /* ---- streamer state (serialised by the APU lock) ----------------------- */
 
-#define MUSIC_MAX_BLOCK_FRAMES 4096 /* supports file rates up to ~192 kHz */
+#define MUSIC_MAX_BLOCK_FRAMES 65536 /* 8192 output frames, up to 192 kHz */
 
 static struct {
   const MusicReplacement *session; /* non-NULL = DSP music voices muted */
@@ -338,8 +351,6 @@ static void StartSession(const MusicReplacement *entry, int song) {
 
 /* ---- engine hooks -------------------------------------------------------- */
 
-static uint32 s_loaded_src; /* most recent SPC image upload source */
-
 static void OnSpcUpload(uint32_t src) {
   s_loaded_src = src;
   if (s_musiclog)
@@ -354,21 +365,42 @@ static void OnApuPortWrite(uint8_t port, uint8_t val) {
     return;
   }
   if (port != 0) return;
+  if (s_musiclog)
+    fprintf(stderr, "[music] port0=%02x (session=%s song=%02x)\n", val,
+            s.session ? s.session->name : "-",
+            s_current_song < 0 ? 0xff : (unsigned)s_current_song);
   if (val == SPC_CMD_HALT) {
     /* The driver halts music instantly on $F0 (it precedes every song
      * change and transition); mirror it. */
+    s_current_song = -1;
+    s_driver_paused = false;
     EndSession("driver halt $F0");
+    return;
+  }
+  if (val == SPC_CMD_PAUSE) {
+    bool was_paused = PlaybackPaused();
+    s_driver_paused = true;
+    if (!was_paused && s.session)
+      fprintf(stderr, "[music] pause [music:%s] (driver $F2)\n",
+              s.session->name);
     return;
   }
   if (val == SPC_CMD_ATTENTION || val == SPC_CMD_UPLOAD || val == 0x00)
     return;
 
   /* Anything else on port 0 starts song `val` of the loaded image. */
+  int previous_song = s_current_song;
   if (!g_settings.music_replacements) {
+    s_current_song = val;
+    s_driver_paused = false;
     EndSession("music_replacements off");
     return;
   }
   const MusicReplacement *entry = MusicReplacements_Select(s_loaded_src, val);
+  bool resume_same_session = s_driver_paused && s.session == entry &&
+                             previous_song == val;
+  s_current_song = val;
+  s_driver_paused = false;
   if (!entry) {
     /* No playable entry. If a stub for this src exists but has no audio yet,
      * always say which file would engage it — this line is how tracks get
@@ -392,15 +424,28 @@ static void OnApuPortWrite(uint8_t port, uint8_t val) {
     EndSession("authentic song started");
     return;
   }
+  if (resume_same_session) {
+    if (!PlaybackPaused())
+      fprintf(stderr, "[music] resume [music:%s] at frame %u\n",
+              s.session->name, s.pos);
+    else if (s_musiclog)
+      fprintf(stderr, "[music] driver resume [music:%s] deferred by host "
+              "pause at frame %u\n", s.session->name, s.pos);
+    return;
+  }
   StartSession(entry, val);
 }
 
 /* Audio thread, APU lock held (RtlRenderAudio's locked region). */
 static void MixMusic(int16_t *out, int out_frames) {
-  if (!s.session || !s.v || out_frames <= 0) return;
+  if (!s.session || !s.v || PlaybackPaused() || out_frames <= 0)
+    return;
 
   const MusicReplacement *entry = s.session;
-  double per_block = (double)entry->file_rate / 60.0 + s.src_carry;
+  int output_rate = RtlGetAudioOutputRate();
+  if (output_rate <= 0) output_rate = 44100;
+  double per_block = ((double)out_frames * entry->file_rate / output_rate) +
+                     s.src_carry;
   int src_frames = (int)per_block;
   s.src_carry = per_block - src_frames;
   if (src_frames <= 0) return;
@@ -481,9 +526,49 @@ static void MixMusic(int16_t *out, int out_frames) {
 }
 
 void MusicReplacements_InstallHooks(void) {
+  s_loaded_src = 0;
+  s_current_song = -1;
+  s_driver_paused = false;
+  s_host_paused = false;
   g_rtl_spc_upload_hook = OnSpcUpload;
   g_rtl_apu_port_hook = OnApuPortWrite;
   g_rtl_music_mix_hook = MixMusic;
+}
+
+void MusicReplacements_ApplySetting(void) {
+  if (!g_settings.music_replacements) {
+    EndSession("enhanced music disabled");
+    return;
+  }
+  if (s_current_song < 0) return;
+  const MusicReplacement *entry =
+      MusicReplacements_Select(s_loaded_src, s_current_song);
+  RtlApuLock();
+  bool already_active = s.session == entry;
+  RtlApuUnlock();
+  if (entry && !already_active)
+    StartSession(entry, s_current_song);
+  else if (!entry)
+    EndSession("no replacement for current song");
+}
+
+void MusicReplacements_SetHostPaused(bool paused) {
+  RtlApuLock();
+  bool was_paused = PlaybackPaused();
+  s_host_paused = paused;
+  bool now_paused = PlaybackPaused();
+  if (was_paused != now_paused && s.session) {
+    fprintf(stderr, "[music] host %s [music:%s] at frame %u\n",
+            now_paused ? "pause" : "resume", s.session->name, s.pos);
+  }
+  RtlApuUnlock();
+}
+
+bool MusicReplacements_IsPlaybackPaused(void) {
+  RtlApuLock();
+  bool paused = PlaybackPaused();
+  RtlApuUnlock();
+  return paused;
 }
 
 void MusicReplacements_FrameTick(void) {

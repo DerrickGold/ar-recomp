@@ -14,6 +14,8 @@ static int s_failures;
 static int s_observer_calls;
 static const SettingDesc *s_observer_desc;
 static SettingChangeResult s_observer_result;
+static int s_action_calls;
+static const SettingDesc *s_action_desc;
 
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -27,6 +29,12 @@ static void ChangeObserved(const SettingDesc *desc,
   s_observer_calls++;
   s_observer_desc = desc;
   s_observer_result = result;
+}
+
+static bool ActionObserved(const SettingDesc *desc) {
+  s_action_calls++;
+  s_action_desc = desc;
+  return true;
 }
 
 static void ClearSettingsEnv(void) {
@@ -44,18 +52,25 @@ static void TestDefaultsAndMetadata(void) {
   g_ws_extra = 43;
   Settings_Init();
 
-  CHECK(g_setting_desc_count == 36);
+  CHECK(g_setting_desc_count == 47);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
-    CHECK(a->key && a->key[0] && a->label && a->tooltip && a->field);
+    CHECK(a->key && a->key[0] && a->label && a->tooltip);
+    CHECK((a->type == kSettingType_Action) == (a->field == NULL));
     CHECK(Settings_Find(a->key) == a);
     for (int j = i + 1; j < g_setting_desc_count; j++) {
       CHECK(strcmp(a->key, g_setting_descs[j].key) != 0);
-      CHECK(a->field != g_setting_descs[j].field);
+      if (a->field && g_setting_descs[j].field)
+        CHECK(a->field != g_setting_descs[j].field);
     }
     char formatted[512];
     Settings_FormatValue(a, formatted, sizeof(formatted));
-    CHECK(Settings_SetText(a, formatted) == kSettingChange_Unchanged);
+    if (a->type == kSettingType_Action) {
+      CHECK(!strcmp(formatted, "RUN"));
+      CHECK(Settings_SetText(a, formatted) == kSettingChange_Rejected);
+    } else {
+      CHECK(Settings_SetText(a, formatted) == kSettingChange_Unchanged);
+    }
   }
   CHECK(g_settings.display_mode == kDisplayMode_WideFull);
   CHECK(g_settings.hud_scale_percent == 0);
@@ -66,10 +81,14 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(!g_settings.fullscreen && g_settings.new_renderer);
   CHECK(!g_settings.ignore_aspect_ratio);
   CHECK(g_settings.audio_enabled);
-  CHECK(g_settings.audio_frequency == 44100);
+  CHECK(g_settings.audio_frequency == kAudioFrequency_44100);
+  CHECK(Settings_AudioFrequencyHz() == 44100);
   CHECK(g_settings.audio_samples == 2048);
   CHECK(g_settings.audio_master_volume == 100);
   CHECK(g_settings.audio_dialog_blip);
+  CHECK(g_settings.turbo_multiplier == 8);
+  CHECK(g_settings.warp_target == 0x0101);
+  CHECK(!g_settings.scene_inspector);
   CHECK(g_settings.ws_action && g_settings.ws_sim && g_settings.ws_sprites);
   CHECK(g_settings.cheat_inf_mp == 0);
   CHECK(g_settings.cheat_moonjump_button == 0x8000);
@@ -79,12 +98,27 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *display = Settings_Find("display_mode");
   const SettingDesc *hp = Settings_Find("cheat_inf_hp");
   const SettingDesc *volume = Settings_Find("audio_master_volume");
+  const SettingDesc *warp = Settings_Find("warp_target");
+  const SettingDesc *pause_action = Settings_Find("toggle_pause");
+  const SettingDesc *restart_action = Settings_Find("restart_game");
+  const SettingDesc *exit_action = Settings_Find("exit_desktop");
+  const SettingDesc *music = Settings_Find("music_replacements");
+  const SettingDesc *frequency = Settings_Find("audio_frequency");
   CHECK(display && display->type == kSettingType_Enum);
   CHECK(display && display->enum_count == kDisplayMode_PresetCount);
   CHECK(volume && volume->category == kSettingCat_Audio);
   CHECK(volume && volume->apply == kApply_Callback);
   CHECK(volume && volume->minval == 0 && volume->maxval == 100 &&
         volume->step == 5);
+  CHECK(warp && warp->type == kSettingType_Custom);
+  CHECK(pause_action && pause_action->type == kSettingType_Action &&
+        pause_action->apply == kApply_Action);
+  CHECK(restart_action && restart_action->type == kSettingType_Action);
+  CHECK(exit_action && exit_action->type == kSettingType_Action);
+  CHECK(music && music->apply == kApply_Callback);
+  CHECK(frequency && frequency->type == kSettingType_Enum &&
+        frequency->enum_count == kAudioFrequency_Count &&
+        frequency->apply == kApply_Restart);
   CHECK(hp && Settings_IsAvailable(hp));
   for (int i = 0; i < g_setting_desc_count; i++)
     if (g_setting_descs[i].category == kSettingCat_Cheats)
@@ -94,6 +128,15 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Widescreen), "Widescreen"));
   CHECK(!strcmp(Settings_ApplyKindName(kApply_Restart), "Restart required"));
   CHECK(!strcmp(Settings_ChangeResultName(kSettingChange_Applied), "applied"));
+  Settings_SetActionObserver(ActionObserved);
+  s_action_calls = 0;
+  CHECK(Settings_InvokeAction(pause_action));
+  CHECK(s_action_calls == 1 && s_action_desc == pause_action);
+  CHECK(Settings_InvokeAction(restart_action));
+  CHECK(s_action_calls == 2 && s_action_desc == restart_action);
+  CHECK(Settings_InvokeAction(exit_action));
+  CHECK(s_action_calls == 3 && s_action_desc == exit_action);
+  Settings_SetActionObserver(NULL);
 }
 
 static bool WriteTextFile(const char *path, const char *text) {
@@ -160,7 +203,8 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
 
   CHECK(g_settings.window_scale == 5);       /* settings > config */
   CHECK(g_settings.fullscreen);              /* KeyMap did not clobber it */
-  CHECK(g_settings.audio_frequency == 32040);
+  CHECK(g_settings.audio_frequency == kAudioFrequency_32040);
+  CHECK(Settings_AudioFrequencyHz() == 32040);
   CHECK(g_settings.audio_master_volume == 85); /* env > settings > config */
   CHECK(!g_settings.ws_sprites);
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
@@ -174,6 +218,10 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(Settings_Save(saved_path));
   CHECK(FileContains(saved_path, "window_scale = 6"));
   CHECK(FileContains(saved_path, "audio_master_volume = 40%"));
+  CHECK(FileContains(saved_path, "audio_frequency = 32.04 kHz"));
+  CHECK(FileContains(saved_path, "turbo_multiplier = 8"));
+  CHECK(FileContains(saved_path, "warp_target = 0101"));
+  CHECK(!FileContains(saved_path, "toggle_pause ="));
   CHECK(!FileContains(saved_path, "display_mode ="));
   CHECK(!FileContains("actraiser-settings-saved-test.ini.tmp", "anything"));
   CHECK(Settings_SetLong(Settings_Find("audio_master_volume"), 45) ==
@@ -190,6 +238,8 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(g_settings.window_scale == 6);
   CHECK(!g_settings.fullscreen);  /* new Phase-4 env aliases use INI syntax */
   CHECK(g_settings.audio_master_volume == 45);
+  CHECK(g_settings.audio_frequency == kAudioFrequency_32040);
+  CHECK(Settings_AudioFrequencyHz() == 32040);
   CHECK(!g_settings.ws_sprites);
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
   CHECK(Settings_ExtendedAspectX() == 16 && Settings_ExtendedAspectY() == 10);
@@ -209,6 +259,8 @@ static void TestLegacySeedEncodings(void) {
   setenv("AR_WS_SPRITES", "0", 1);
   setenv("AR_AUDIO_VOLUME", "137", 1);
   setenv("AR_DIALOG_BLIP", "0", 1);
+  setenv("AR_TURBO_MULT", "1", 1);
+  setenv("AR_WARP", "0605", 1);
   g_ws_active = true;
   g_ws_extra = 43;
   Settings_Init();
@@ -220,6 +272,8 @@ static void TestLegacySeedEncodings(void) {
   CHECK(g_settings.pin_count == 2);
   CHECK(g_settings.audio_master_volume == 100);
   CHECK(!g_settings.audio_dialog_blip);
+  CHECK(g_settings.turbo_multiplier == 2);
+  CHECK(g_settings.warp_target == 0x0605);
   CHECK(g_settings.pins[0].off == 0x0021 && g_settings.pins[0].val == 0x0a);
   CHECK(g_settings.pins[1].off == 0x11234 && g_settings.pins[1].val == 0xaa);
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
@@ -281,14 +335,41 @@ static void TestMutationApi(void) {
   CHECK(Settings_SetLong(dialog_blip, 0) == kSettingChange_Applied);
   CHECK(!g_settings.audio_dialog_blip);
 
+  const SettingDesc *frequency = Settings_Find("audio_frequency");
+  CHECK(Settings_SetText(frequency, "48 kHz") ==
+        kSettingChange_RestartPending);
+  CHECK(g_settings.audio_frequency == kAudioFrequency_48000);
+  CHECK(Settings_AudioFrequencyHz() == 48000);
+  CHECK(Settings_SetText(frequency, "32000") == kSettingChange_Rejected);
+  CHECK(Settings_AudioFrequencyHz() == 48000);
+
+  const SettingDesc *music = Settings_Find("music_replacements");
+  CHECK(Settings_SetLong(music, 0) == kSettingChange_Applied);
+  CHECK(!g_settings.music_replacements && s_observer_desc == music);
+
   char value[512];
+  const SettingDesc *turbo = Settings_Find("turbo_multiplier");
+  CHECK(Settings_SetLong(turbo, 12) == kSettingChange_Applied);
+  CHECK(g_settings.turbo_multiplier == 12);
+  const SettingDesc *warp = Settings_Find("warp_target");
+  CHECK(Settings_SetText(warp, "0303") == kSettingChange_Applied);
+  CHECK(g_settings.warp_target == 0x0303);
+  Settings_FormatValue(warp, value, sizeof(value));
+  CHECK(!strcmp(value, "0303"));
+  CHECK(Settings_SetText(warp, "garbage") == kSettingChange_Rejected);
+  CHECK(g_settings.warp_target == 0x0303);
+
   const SettingDesc *renderer = Settings_Find("new_renderer");
-  CHECK(Settings_SetLong(renderer, 0) == kSettingChange_RestartPending);
+  CHECK(Settings_SetLong(renderer, 0) == kSettingChange_Applied);
   CHECK(!g_settings.new_renderer);
   const SettingDesc *aspect = Settings_Find("extended_aspect");
-  CHECK(Settings_SetText(aspect, "21:9") == kSettingChange_RestartPending);
+  CHECK(Settings_SetText(aspect, "16:9") == kSettingChange_Applied);
   Settings_FormatValue(aspect, value, sizeof(value));
-  CHECK(!strcmp(value, "21:9"));
+  CHECK(!strcmp(value, "16:9"));
+  CHECK(Settings_SetText(aspect, "21:9") == kSettingChange_Rejected);
+  const SettingDesc *pixel_aspect = Settings_Find("pixel_aspect");
+  CHECK(Settings_SetText(pixel_aspect, "Square pixels") ==
+        kSettingChange_Applied);
   const SettingDesc *window_scale = Settings_Find("window_scale");
   CHECK(Settings_SetLong(window_scale, 4) == kSettingChange_Applied);
   CHECK(g_settings.window_scale == 4);
@@ -389,6 +470,7 @@ int main(void) {
   TestNoWideBudget();
   ClearSettingsEnv();
   Settings_SetChangeObserver(NULL);
+  Settings_SetActionObserver(NULL);
   if (s_failures) {
     fprintf(stderr, "settings tests: %d failure(s)\n", s_failures);
     return 1;

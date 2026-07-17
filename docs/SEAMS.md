@@ -34,7 +34,7 @@ identity are the perishable, expensive-to-rederive parts.
 | Song upload (image identity) | `$02:9964` HLE — stage 1 (`$9A56` block image) + stage 2 (BRR streaming) | APU ports + ARAM | "load song N's sequence + instruments" | image src addr = song identity (`06:AC00` = common sample bank, `1A:94B8` = title = song 7); song table `$02:C7E5` (17 entries, 3-byte ptrs, all enumerated in `game-assets/manifest.ini`); more pointers inline in the `[$A2]` command scripts read via `$02:B4C0` | 🟢 |
 | **BRR sample bank (per-sample!)** | stage 2 of the `$9964` HLE (`RtlUploadSpcImageFromDpInternal`, common_rtl.c) | ARAM `$3000-$6E67` (common) / `$795F+` (per-song) | "install instrument waveforms" | chunk pool at ROM `$08:8000` — length-prefixed `[len16][BRR data]` chunks, selected by index; script = image terminator's target word (lo byte = count, hi byte onward = chunk indices); dest base = WRAM `$0358` | 🟢 |
 | Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
-| Final PCM out | `RtlRenderAudio` (common_rtl.c) → `dsp_getSamples`/MSU-1 mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | `audio_master_volume` applies atomic post-mix gain here; music/SFX identity is already lost | 🟢 |
+| Final PCM out | `RtlRenderAudio` (common_rtl.c) → continuous `dsp_getSamplesResampled` + MSU-1/OGG mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | native DSP stays 32.04 kHz; actual SDL rate controls time-based resampling, so frequency/buffer changes preserve pitch; `audio_master_volume` applies atomic post-mix gain here | 🟢 |
 | Raw APU port write | `RtlApuWrite` (`$2140-$2143`) | APU I/O | low-level handshake / param | — | 🔴 |
 
 > Audio is the highest-payoff first HAL target: the `$035A`/`$035B` events are already ID-based.
@@ -51,6 +51,7 @@ via an `AR_APULOG` boot capture:
 |---|---|---|
 | `$2140` | `$F0` | halt music (driver acks by clearing the port to 0) |
 | `$2140` | `$F1` | attention/prepare (driver echoes `$F1` back; a song number follows) |
+| `$2140` | `$F2` | pause current song; a repeated current-song command resumes it |
 | `$2140` | `$FF` | enter the resident uploader (the `$9964` HLE bypasses the stream) |
 | `$2140` | `$00` | idle/clear |
 | `$2140` | else | **play song N** of the most recently uploaded song image |
@@ -94,9 +95,15 @@ values and nonzero port-2 ids to catch them in play.
    mixer) per instrument. The chunk index is a stable, ROM-wide instrument ID.
 3. **SFX-level replacement.** Already the cleanest seam: `$035B` (BRK hook) carries the SFX id
    before any APU involvement. Map id → modern sample in the hook, suppress the port write.
-4. **Output-quality tier.** All mixed audio funnels through `dsp_getSamples` inside
-   `RtlRenderAudio` (44.1 kHz stereo S16 by default, `AudioFreq`/`AudioSamples` in
-   config.ini). Resampling quality, interpolation upgrades (the DSP's gaussian filter lives in
+4. **Output-quality tier.** All mixed audio funnels through the continuous
+   `dsp_getSamplesResampled` boundary inside `RtlRenderAudio` (44.1 kHz stereo
+   S16 by default; the settings registry offers restart-class
+   32.04/44.1/48 kHz `AudioFreq` presets plus `AudioSamples`). The native FIFO
+   advances at 32.04 kHz based on callback duration, not one fixed 534-frame
+   block per SDL callback. OGG and MSU-1 use the same elapsed-time rule. This
+   fixes the former callback-rate-dependent pitch/tempo change while retaining
+   fractional source-frame carry across callbacks.
+   Resampling quality, interpolation upgrades (the DSP's gaussian filter lives in
    `dsp.c` `dsp_getSample`), reverb/echo behavior (`dsp.c` echoWrites/FIR), and any
    post-processing belong here. MSU-1-style streaming already has scaffolding in
    `runner/src/snes/msu1.{c,h}` (mix point documented there as `RtlRenderAudio`'s locked
@@ -895,7 +902,8 @@ These RAM addresses recur across all the debugging; keep `ram-map.md` authoritat
 | `$FB` | bit `0x80` = transition-request flag (set with `$1A`/`$1B` to stage a mode change; game consumes+clears it) |
 | `$0100` | game-mode byte (watchdog dumps print it): observed `$85` during story-event cutscenes (rock-zap/seal wait chain); full value map not yet derived |
 
-**Level warp** (`ActRaiser_Warp`, F6 hotkey, `AR_WARP=<reghex><maphex>` e.g. `0202`): stages the
+**Level warp** (`ActRaiser_Warp`, F6/overlay ACTION, registry-backed
+`AR_WARP=<reghex><maphex>` e.g. `0202`): stages the
 game's own sim→act transition — sets `$1B`=region, `$1A`=raw map, `$FB|=0x80` — so the game does the
 full fade + level-load + switch itself. Trigger from the intro (`$18==00`, which works), bypassing
 the broken post-act sim cascade. Observed: Fillmore act 1 entry = `$1B=01,$1A=01,$FB=80` (f=994) →

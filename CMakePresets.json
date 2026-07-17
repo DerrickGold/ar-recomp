@@ -1,0 +1,55 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Dev (Debug, tests, no sanitizers)",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "AR_SANITIZE": "OFF",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "play",
+      "displayName": "Play (RelWithDebInfo, optimized)",
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "AR_SANITIZE": "OFF",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "ASan+UBSan (corruption hunts, slow)",
+      "binaryDir": "${sourceDir}/build-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "AR_SANITIZE": "ON",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
+      "name": "trace",
+      "displayName": "Trace (SNESRECOMP_ENABLE_TRACE instrumentation)",
+      "binaryDir": "${sourceDir}/build-trace",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SNESRECOMP_ENABLE_TRACE": "ON",
+        "AR_SANITIZE": "OFF",
+        "BUILD_TESTING": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev", "jobs": 8 },
+    { "name": "play", "configurePreset": "play", "jobs": 8 },
+    { "name": "asan", "configurePreset": "asan", "jobs": 8 },
+    { "name": "trace", "configurePreset": "trace", "jobs": 8 }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } }
+  ]
+}

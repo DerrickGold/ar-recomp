@@ -1345,6 +1345,18 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
   WRAM dumps/oracle are blind to BG tilemaps, so this is what you use when something is drawn (or
   *not* drawn) to a BG layer. View a `.ppm` with `sips -s format png x.ppm --out x.png`.
   (Implemented in `ActRaiser_FullSnapshot`, `actraiser_rtl.c`; F2 handler in `src/main.c`.)
+- **F3 scene inspector (manual play):** press **F3**, then left-click a visible
+  graphic. The game pauses on that frame and a compact, color-coded host debug
+  panel identifies
+  matching BG tiles and OAM sprites; the console contains VRAM addresses,
+  palette/priority/flips, census-compatible tile hashes, Mode-7 canvas
+  coordinates, current `$18/$19`/camera/PPU state, and a starter replacement
+  manifest gate. The compact panel appears opposite the clicked point and can
+  be repositioned by left-dragging it. Right-click clears and resumes an
+  inspector-owned pause; F3 disables. Drag the cyan lower-right grip to scale
+  the whole panel down or up without losing report columns. This is the
+  fastest first step for “what
+  graphic is this and which replacement plane owns it?”
 - **Init/forcing:** `AR_WRAM_FILL`/`AR_WRAM_INIT`/`AR_SRAM_FILL` (poison/seed memory),
   `AR_FORCE18` (pin game-mode), `AR_NOPOP` (disable the vblank-wait RTS-frame pop, for ABI tests).
 
@@ -1435,6 +1447,7 @@ AR_WATCH16=<val>       who writes this 16-bit value (also fires on indirect + DM
 regen report           "PROVEN-EQUIVALENT VARIANT ROUTING" section: wrong-width dispatch routing, proven not guessed (§5)
 regen report           "JSR (abs,X) SUPPRESSED" / "Rejected JSR/JSL" / "DISPATCH TARGET SUPPRESSED" sections: silent-drop audit (§7.9)
 AR_PERF=1              once-per-second game + draw budgets: [perf] fps/run-ms/gf/APU and [draw-perf] RtlDrawPpuFrame ms — separates host-bound (fps<60) from pacing (fps=60 but game crawls). CAVEAT: gf is NMI-driven, always 1:1 — it can NOT detect the pacing class; use the ring trick below
+AR_APUPROF=<ms>        per-frame stall attribution: any game frame >= <ms> (bare `1` = 8 ms default) prints [apuprof] splitting the frame into game-thread lockwait / SPC catchup (ms+cycles+calls) / $2140 handshake reads+writes / music-hook / upload HLE, plus schedlat (samples the last port write was scheduled past `produced`), pushes+loops (execution volume — loops = loop-header count; pushes alone under-report straight-line decompression), and audiowait-max (worst blocked AudioCallback acquire since last report — >16 ms = missed fill deadline = audible dropout). This is the tool that root-caused the 2026-07-16 transition dropouts: collapsed multi-hardware-frame map loads (loops 25k-75k vs ~3k normal) under the then-frame-wide main-loop APU lock starved the callback 12-23 ms; the frame-wide lock is now removed (fine-grained locks inside every APU path already serialize) — audiowait-max stays ~0 through 55 ms loading frames
 Shift+F9 mid-bug + ring exact-1/N-speed in one mode? quit/Shift+F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
 find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
 find_rts_webs.py       static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
@@ -1454,6 +1467,7 @@ AR_FRAMELOG=1          per-frame mode/timer/HP/callsite/joypad
 AR_OBJLOG=1            object-table health
 AR_SHOT_AT_GF=N        recomp screenshot -> saves/shot.ppm
 F2 (windowed)          full snapshot WRAM+VRAM+CGRAM+OAM+ppm -> saves/snapshots/  (VRAM-visible!)
+F3 + left click        freeze/inspect identity + manifest hints; drag panel; right click clears/resumes
 diff_seq.py            timing-independent oracle value-divergence (LOAD SRAM!)
 oracle-only pass       missing object/event (oracle writes nonzero, recomp never)
 find_handler_chain.py  unconverted object handlers (<seeds> or --tables for all action regions); see §11

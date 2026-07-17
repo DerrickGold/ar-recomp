@@ -769,35 +769,78 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   }
 }
 
-/* $00:923A emits the selected-magic icon as the first four OAM entries, using
- * tiles $D4-$D7 in a 2x2 grid at y=$0B/$13. Promote only that exact signature
- * into the host HUD object surface. No emulated OAM/WRAM state is changed. */
-static void ActRaiser_WidescreenMagicHudPromote(void) {
-  if (!g_ppu ||
-      g_ppu->wsHudSplitHeight != kActRaiserActionHudHeight ||
-      g_ppu->wsHudLeftEnd != kActRaiserActionHudLeftEnd ||
-      g_ppu->wsHudRightStart != kActRaiserActionHudRightStart ||
-      g_ppu->wsHudLeftOnlyY != kActRaiserActionHudLowerRowY ||
-      !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]) ||
-      !g_ppu->extraLeftRight)
+/* Promote a validated fixed-screen HUD icon from the first four OAM slots.
+ * Action's $00:923A icon uses tiles $D4-$D7. Simulation's 2026-07-16 Fillmore
+ * capture proves the hourglass uses the same slots at x=$94/$9B, y=$0B/$13.
+ * ROM frames $01:DD4B/$DD60/$DD75/$DD8A cycle upper tiles $EC-$EF and paired
+ * lower tiles $FC-$FF, with horizontal flip on each right half. No OAM/WRAM
+ * state is changed; the host later places the icon beside the right HUD group. */
+static void ActRaiser_WidescreenHudObjPromote(void) {
+  if (!g_ppu || !g_ppu->extraLeftRight)
     return;
 
-  for (int slot = 0; slot < kActRaiserMagicHudOamCount; slot++) {
-    int index = slot * 2;
-    uint8 tile = (uint8)g_ppu->oam[index + 1];
-    uint8 y = (uint8)(g_ppu->oam[index] >> 8);
-    uint8 expected_y = slot < 2
-        ? kActRaiserMagicHudUpperY : kActRaiserMagicHudLowerY;
-    if (tile != (uint8)(kActRaiserMagicHudFirstTile + slot) ||
-        y != expected_y)
+  uint8 capture_height = 0;
+  uint8 map_group = g_ram[kActRaiserWram_MapGroup];
+  uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
+  if (g_ppu->wsHudSplitHeight == kActRaiserActionHudHeight &&
+      g_ppu->wsHudLeftEnd == kActRaiserActionHudLeftEnd &&
+      g_ppu->wsHudRightStart == kActRaiserActionHudRightStart &&
+      g_ppu->wsHudLeftOnlyY == kActRaiserActionHudLowerRowY &&
+      ActRaiser_IsActionMapGroup(map_group)) {
+    for (int slot = 0; slot < kActRaiserHudObjOamCount; slot++) {
+      int index = slot * 2;
+      uint8 tile = (uint8)g_ppu->oam[index + 1];
+      uint8 y = (uint8)(g_ppu->oam[index] >> 8);
+      uint8 expected_y = slot < 2
+          ? kActRaiserHudObjUpperY : kActRaiserHudObjLowerY;
+      if (tile != (uint8)(kActRaiserMagicHudFirstTile + slot) ||
+          y != expected_y)
+        return;
+    }
+    capture_height = kActRaiserActionHudHeight;
+  } else if (g_ppu->wsHudSplitHeight == kActRaiserSimulationHudHeight &&
+             g_ppu->wsHudLeftEnd == kActRaiserSimulationHudSplit &&
+             g_ppu->wsHudRightStart == kActRaiserSimulationHudSplit &&
+             g_ppu->wsHudLeftOnlyY == kActRaiserSimulationHudHeight &&
+             map_group == kActRaiserMapGroup_NonAction &&
+             map_number >= kActRaiserSimulationTown_First &&
+             map_number <= kActRaiserNonActionMap_SkyPalace) {
+    uint8 upper_tile = (uint8)g_ppu->oam[1];
+    if (upper_tile < kActRaiserSimulationHourglassFirstUpperTile ||
+        upper_tile >= kActRaiserSimulationHourglassFirstUpperTile +
+                          kActRaiserSimulationHourglassFrameCount)
       return;
+    for (int slot = 0; slot < kActRaiserHudObjOamCount; slot++) {
+      int index = slot * 2;
+      uint16 xy = g_ppu->oam[index];
+      uint16 tile_attr = g_ppu->oam[index + 1];
+      uint8 expected_x = (slot & 1)
+          ? kActRaiserSimulationHourglassRightX
+          : kActRaiserSimulationHourglassLeftX;
+      uint8 expected_y = slot < 2
+          ? kActRaiserHudObjUpperY : kActRaiserHudObjLowerY;
+      uint8 expected_tile = slot < 2 ? upper_tile
+          : (uint8)(upper_tile +
+                    kActRaiserSimulationHourglassLowerTileOffset);
+      uint8 expected_attr = (slot & 1)
+          ? kActRaiserSimulationHourglassRightAttr
+          : kActRaiserSimulationHourglassLeftAttr;
+      if ((uint8)xy != expected_x || (uint8)(xy >> 8) != expected_y ||
+          (uint8)tile_attr != expected_tile ||
+          (uint8)(tile_attr >> 8) != expected_attr)
+        return;
+    }
+    capture_height = kActRaiserSimulationHudHeight;
+  } else {
+    return;
   }
+
   if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
                            0, 0, kActRaiserAuthenticWidth,
-                           kActRaiserActionHudHeight,
+                           capture_height,
                            kPpuOverlayFlag_RemoveFromGame))
-    PpuSetOverlayOamRange(g_ppu, kActRaiserMagicHudOamFirst,
-                          kActRaiserMagicHudOamCount);
+    PpuSetOverlayOamRange(g_ppu, kActRaiserHudObjOamFirst,
+                          kActRaiserHudObjOamCount);
 }
 
 void ActRaiserDrawPpuFrame(void) {
@@ -814,7 +857,7 @@ void ActRaiserDrawPpuFrame(void) {
   /* Sky Palace: synthesize only BG2's offscreen margin columns from its ROM
    * source page. The paired restore after scanout preserves UI staging. */
   ActRaiser_WidescreenSkyPalacePrepare();
-  ActRaiser_WidescreenMagicHudPromote();
+  ActRaiser_WidescreenHudObjPromote();
   /* Manifest-driven HD substitutions (game-assets/manifest.ini) — e.g. the
    * settled title logo. Runs after the HUD/OAM capture policies so a busy
    * source is detected rather than clobbered; entries without host-loaded

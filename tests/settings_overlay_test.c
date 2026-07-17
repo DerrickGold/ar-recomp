@@ -14,6 +14,8 @@ int g_ws_extra;
 uint8 g_ram[0x20000];
 
 static int s_failures;
+static int s_action_calls;
+static const SettingDesc *s_action_desc;
 
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -22,6 +24,12 @@ static int s_failures;
     s_failures++; \
   } \
 } while (0)
+
+static bool ActionObserved(const SettingDesc *desc) {
+  s_action_calls++;
+  s_action_desc = desc;
+  return true;
+}
 
 static uint8_t *ReadOptionalRom(size_t *size_out) {
   const char *path = getenv("AR_OVERLAY_TEST_ROM");
@@ -59,6 +67,7 @@ int main(void) {
   g_ws_extra = 43;
   Settings_ClearConfigLayer();
   Settings_Init();
+  Settings_SetActionObserver(ActionObserved);
 
   int surface_width = 640;
   int surface_height = 480;
@@ -91,9 +100,9 @@ int main(void) {
     if (preview && preview[0]) CHECK(SDL_SaveBMP(surface, preview) == 0);
   }
 
-  /* Display row order begins profile, HUD scale, menu scale. Verify that the
-   * descriptor-driven input path reaches the independent scale setting and
-   * persists through the same accepted-change path used in the game. */
+  /* The overlay opens on primary navigation. A enters Display; only then do
+   * Up/Down select rows and Left/Right edit values. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
@@ -109,12 +118,135 @@ int main(void) {
   CHECK(saved != NULL);
   if (saved) fclose(saved);
 
+  /* B returns focus to primary navigation without closing. Down selects the
+   * next category, and A enters it. Aspect remains a bounded enum. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_IsOpen());
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.extended_aspect == kScreenAspect_169);
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.extended_aspect == kScreenAspect_1610);
+
+  /* Audio frequency is likewise a bounded preset selector, not an arbitrary
+   * integer editor. Audio starts with Enable audio, then Audio frequency. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.audio_frequency == kAudioFrequency_48000);
+  CHECK(Settings_AudioFrequencyHz() == 48000);
+
+  /* Move through Widescreen and Cheats to Quality of life. Its second row is
+   * the custom hexadecimal warp target: direct edit replaces the formatted
+   * value and persists through the same descriptor path. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  for (int i = 0; i < 4; i++)
+    CHECK(SettingsOverlay_HandleKey(SDLK_BACKSPACE, true, false));
+  CHECK(SettingsOverlay_HandleText("0303"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
+  CHECK(g_settings.warp_target == 0x0303);
+
+  /* The next QoL row is Pause. B then returns to primary navigation, where
+   * Inspector, Restart, and Exit are direct leaves: A runs them immediately
+   * without opening a duplicate one-row submenu. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(s_action_calls == 1);
+  CHECK(s_action_desc == Settings_Find("toggle_pause"));
+
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_IsOpen());
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(g_settings.scene_inspector);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(s_action_calls == 2);
+  CHECK(s_action_desc == Settings_Find("restart_game"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(s_action_calls == 3);
+  CHECK(s_action_desc == Settings_Find("exit_desktop"));
+
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, true));
+  CHECK(SettingsOverlay_IsOpen());
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(!SettingsOverlay_IsOpen());
+  SettingsOverlay_Open();
   CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, true));
   CHECK(SettingsOverlay_IsOpen());
   CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, false));
   CHECK(!SettingsOverlay_IsOpen());
 
+  /* Debug panels avoid the inspected point and can be moved without a click
+   * falling through to the tool beneath them. */
+  if (renderer) {
+    SDL_SetRenderDrawColor(renderer, 22, 28, 34, 255);
+    SDL_RenderClear(renderer);
+    SettingsOverlay_RenderDebugPanel(
+        "SCENE INSPECTOR",
+        "CLICK 474,170  WORLD $008E,$00C6\n"
+        "GF $016C STATE $00/$00 CAM $0080,$0080 MAP $0000,$0000\n"
+        "PPU MODE 7 BRIGHT 15 MAIN $01 SUB $00 MARGIN 0/0\n"
+        "BG1 T$03A P1 PAL3 PIX2 CENTER MAP$7104\n"
+        "OBJ#12 16X16 BASE$80 SUB$91 PAL4 PRI2 PIX7\n"
+        "CANDIDATES; WINDOWS/COLOR MATH MAY MASK A LAYER\n"
+        "LEFT CLICK INSPECT  RIGHT CLICK CLEAR  F3 DISABLE",
+        (SDL_Point){ surface_width / 2, surface_height - 1 });
+    SDL_RenderPresent(renderer);
+    const char *debug_preview = getenv("AR_OVERLAY_DEBUG_TEST_BMP");
+    if (debug_preview && debug_preview[0])
+      CHECK(SDL_SaveBMP(surface, debug_preview) == 0);
+    SDL_Rect panel_before = {0};
+    CHECK(SettingsOverlay_GetDebugPanelRect(&panel_before));
+    CHECK(panel_before.y < surface_height / 2);
+    CHECK(panel_before.w < surface_width - 40);
+    CHECK(!SettingsOverlay_BeginDebugPanelDrag(
+        panel_before.x + 4, panel_before.y + panel_before.h - 4));
+    CHECK(SettingsOverlay_BeginDebugPanelDrag(
+        panel_before.x + 4, panel_before.y + 4));
+    CHECK(SettingsOverlay_IsDebugPanelDragging());
+    SettingsOverlay_DragDebugPanel(
+        panel_before.x + 4, surface_height / 2);
+    SettingsOverlay_EndDebugPanelDrag();
+    CHECK(!SettingsOverlay_IsDebugPanelDragging());
+    SettingsOverlay_RenderDebugPanel(
+        "DEBUG", "FIRST LINE\nSECOND LINE",
+        (SDL_Point){ surface_width / 2, surface_height - 1 });
+    SDL_Rect panel_after = {0};
+    CHECK(SettingsOverlay_GetDebugPanelRect(&panel_after));
+    CHECK(panel_after.y != panel_before.y);
+    CHECK(SettingsOverlay_BeginDebugPanelDrag(
+        panel_after.x + panel_after.w - 4,
+        panel_after.y + panel_after.h - 4));
+    CHECK(SettingsOverlay_IsDebugPanelDragging());
+    SettingsOverlay_DragDebugPanel(
+        panel_after.x + panel_after.w - 4 - panel_after.w / 4,
+        panel_after.y + panel_after.h - 4 - panel_after.h / 4);
+    SettingsOverlay_EndDebugPanelDrag();
+    SettingsOverlay_RenderDebugPanel(
+        "DEBUG", "FIRST LINE\nSECOND LINE",
+        (SDL_Point){ surface_width / 2, surface_height - 1 });
+    SDL_Rect panel_resized = {0};
+    CHECK(SettingsOverlay_GetDebugPanelRect(&panel_resized));
+    CHECK(panel_resized.w < panel_after.w);
+    CHECK(panel_resized.h < panel_after.h);
+    SettingsOverlay_HideDebugPanel();
+    CHECK(!SettingsOverlay_GetDebugPanelRect(&panel_resized));
+    CHECK(!SettingsOverlay_BeginDebugPanelDrag(0, 0));
+  }
+
   SettingsOverlay_Destroy();
+  Settings_SetActionObserver(NULL);
   SDL_DestroyRenderer(renderer);
   SDL_FreeSurface(surface);
   SDL_Quit();

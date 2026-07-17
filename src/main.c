@@ -4,9 +4,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <signal.h>
+#include <errno.h>
 #include <SDL.h>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -18,6 +21,7 @@
 #include "config.h"
 #include "settings.h"
 #include "settings_overlay.h"
+#include "scene_inspector.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
 #include "run_dir.h"
@@ -44,19 +48,41 @@ static SDL_Texture *g_texture;
 static SDL_Texture *g_hud_bg_texture;
 static SDL_Texture *g_hud_obj_texture;
 static uint8 g_paused, g_turbo;
+static bool g_scene_inspector_owns_pause;
+typedef enum InspectorPresentationKind {
+  kInspectorPresentation_Base,
+  kInspectorPresentation_HudBg,
+  kInspectorPresentation_HudObj,
+} InspectorPresentationKind;
+typedef struct InspectorPresentationSelection {
+  InspectorPresentationKind kind;
+  double source_x;
+  double source_y;
+  int output_x;
+  int output_y;
+  int output_width;
+  int output_height;
+} InspectorPresentationSelection;
+static InspectorPresentationSelection g_scene_inspector_presentation;
 static bool g_paused_redraw_pending;
 static uint32 g_input_state;
+typedef enum {
+  kHostLifecycle_None,
+  kHostLifecycle_Restart,
+  kHostLifecycle_Exit,
+} HostLifecycleRequest;
+static HostLifecycleRequest g_host_lifecycle_request;
 static int g_snes_width = 256, g_snes_height = 224;
-/* Restart-class settings have a persisted desired value in g_settings and a
- * boot snapshot consumed by already-created host/PPU resources. This prevents
- * a pending-restart mutation from half-applying through an unrelated callback. */
+/* Audio-format settings retain boot snapshots because reopening the live SDL
+ * device is still restart-class. Video geometry is rebound live below. */
 static int g_active_aspect_x, g_active_aspect_y;
 static int g_active_pixel_aspect = kPixelAspect_Crt43;
 static int g_active_audio_frequency = 44100;
 static int g_active_audio_samples = 2048;
+static bool g_widescreen_runtime_allowed;
 /* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
- * width can be chosen at startup without reallocation; faithful runs still
- * render/present only the leading 256*4 bytes per row via g_snes_width. */
+ * active width can change live without reallocating storage; each frame uses
+ * only the leading g_snes_width*4 bytes per row. */
 static uint8_t g_pixels[kPpuBufWidth * 4 * 240];
 static uint8_t g_hud_bg_pixels[kPpuBufWidth * 4 * 240];
 static uint8_t g_hud_obj_pixels[kPpuBufWidth * 4 * 240];
@@ -96,6 +122,7 @@ static SDL_mutex *g_audio_mutex;
 static SDL_atomic_t g_audio_master_percent;
 static bool g_audio_open;
 static bool RenderFramebuffer(void);
+static void RebindPpuOutputSurfaces(void);
 
 void NORETURN Die(const char *error) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
@@ -185,8 +212,27 @@ void DumpDiagState(const char *tag) {
           p_state, tag ? tag : "");
 }
 
+/* Game-thread id for AR_APUPROF lock-wait attribution (set in main before
+ * the game loop; 0 = not yet known, wait timing disabled). */
+static SDL_threadID g_game_thread_id;
+
 void RtlApuLock(void) {
-  if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
+  if (!g_audio_mutex) return;
+  extern int ApuProfEnabled(void);
+  if (ApuProfEnabled()) {
+    extern uint64_t g_apuprof_lockwait_ns, g_apuprof_audiowait_max_ns;
+    extern uint64_t audio_trace_wall_ns(void);
+    if (SDL_TryLockMutex(g_audio_mutex) == 0) return;
+    uint64_t t0 = audio_trace_wall_ns();
+    SDL_LockMutex(g_audio_mutex);
+    uint64_t waited = audio_trace_wall_ns() - t0;
+    if (g_game_thread_id != 0 && SDL_ThreadID() == g_game_thread_id)
+      g_apuprof_lockwait_ns += waited;
+    else if (waited > g_apuprof_audiowait_max_ns)
+      g_apuprof_audiowait_max_ns = waited;
+    return;
+  }
+  SDL_LockMutex(g_audio_mutex);
 }
 
 void RtlApuUnlock(void) {
@@ -218,7 +264,19 @@ static void HandleInput(int keyCode, bool pressed) {
 
 static void SDLCALL AudioCallback(void *userdata, Uint8 *stream, int len) {
   (void)userdata;
-  if (SDL_LockMutex(g_audio_mutex)) { memset(stream, 0, len); return; }
+  /* AR_APUPROF: time this acquire — it is the audio thread's outer lock
+   * (RtlRenderAudio's internal RtlApuLock calls are recursive re-entries and
+   * can never block), so any starvation of the callback shows up here. */
+  extern int ApuProfEnabled(void);
+  if (ApuProfEnabled()) {
+    extern uint64_t g_apuprof_audiowait_max_ns;
+    extern uint64_t audio_trace_wall_ns(void);
+    uint64_t t0 = audio_trace_wall_ns();
+    if (SDL_LockMutex(g_audio_mutex)) { memset(stream, 0, len); return; }
+    uint64_t waited = audio_trace_wall_ns() - t0;
+    if (waited > g_apuprof_audiowait_max_ns)
+      g_apuprof_audiowait_max_ns = waited;
+  } else if (SDL_LockMutex(g_audio_mutex)) { memset(stream, 0, len); return; }
   RtlRenderAudio((int16 *)stream, len / 4, 2);
   int volume = SDL_AtomicGet(&g_audio_master_percent);
   if (volume < 0) volume = 0;
@@ -246,6 +304,11 @@ static bool OpenHostAudio(void) {
     fprintf(stderr, "SDL_OpenAudio failed: %s\n", SDL_GetError());
     return false;
   }
+  RtlSetAudioOutputRate(have.freq);
+  fprintf(stderr, "[audio] opened %d Hz, %u-frame buffer "
+                  "(requested %d Hz, %u frames)\n",
+          have.freq, (unsigned)have.samples, want.freq,
+          (unsigned)want.samples);
   g_audio_open = true;
   return true;
 }
@@ -502,12 +565,105 @@ static SDL_Point WriteFramebufferPpm(FILE *pf) {
   return (SDL_Point){ w, g_snes_height };
 }
 
-/* Point the presentation at the current display mode's framebuffer sub-rect and
- * size the window to that mode's display aspect. Nothing is reallocated: the
- * PPU always renders at the boot width, and 4:3 simply presents the authentic
- * centre 256 columns instead of showing the margins as black bars. This is the
- * same "allocate at max, select live" mechanism a future user-selectable
- * resolution would use — see docs/settings-system.md §4.2/§10.2. */
+static void TogglePause(void) {
+  g_paused = !g_paused;
+  fprintf(stderr, "[pause] %s\n", g_paused ? "on" : "off");
+}
+
+static void CloseSceneInspectorSelection(void) {
+  SceneInspector_Clear();
+  SettingsOverlay_HideDebugPanel();
+  memset(&g_scene_inspector_presentation, 0,
+         sizeof(g_scene_inspector_presentation));
+  if (g_scene_inspector_owns_pause) g_paused = false;
+  g_scene_inspector_owns_pause = false;
+  g_input_state = 0;
+}
+
+static void ToggleTurbo(void) {
+  g_turbo = !g_turbo;
+  if (g_turbo)
+    fprintf(stderr, "[turbo] ON (%dx)\n", g_settings.turbo_multiplier);
+  else
+    fprintf(stderr, "[turbo] off\n");
+}
+
+static void PerformWarp(void) {
+  extern void ActRaiser_Warp(unsigned region, unsigned map);
+  unsigned target = g_settings.warp_target;
+  ActRaiser_Warp((target >> 8) & 0xff, target & 0xff);
+}
+
+static void TakeFullSnapshot(void) {
+  /* Capture all emulated presentation state under a frame-unique prefix.
+   * This is shared by F2 and the overlay ACTION row. */
+  RedrawPausedFrameIfNeeded();
+  extern uint8 g_ram[0x20000];
+  extern void ActRaiser_FullSnapshot(const char *prefix);
+  static int snap_n;
+  char snapdir[320];
+  RunDirFile(snapdir, sizeof snapdir, "snapshots");
+#ifndef _WIN32
+  mkdir(snapdir, 0755);
+#endif
+  unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+  char prefix[336];
+  RunDirFile(prefix, sizeof prefix, "snapshots/snap_%02d_gf%u",
+             snap_n++, gf);
+  ActRaiser_FullSnapshot(prefix);
+  char ppm[344];
+  snprintf(ppm, sizeof ppm, "%s.ppm", prefix);
+  FILE *pf = fopen(ppm, "wb");
+  if (pf) {
+    (void)WriteFramebufferPpm(pf);
+    fclose(pf);
+  }
+  fprintf(stderr,
+          "[snap] -> %s.{wram,vram,cgram,oam,ppm} (gf=%u)\n",
+          prefix, gf);
+}
+
+static bool OnSettingsAction(const SettingDesc *desc) {
+  if (!desc || !desc->key) return false;
+  if (!strcmp(desc->key, "toggle_pause")) {
+    TogglePause();
+  } else if (!strcmp(desc->key, "toggle_turbo")) {
+    ToggleTurbo();
+  } else if (!strcmp(desc->key, "save_state")) {
+    RtlSaveLoad(kSaveLoad_Save, 0);
+    fprintf(stderr, "State saved.\n");
+  } else if (!strcmp(desc->key, "load_state")) {
+    RtlSaveLoad(kSaveLoad_Load, 0);
+    fprintf(stderr, "State loaded.\n");
+  } else if (!strcmp(desc->key, "warp_now")) {
+    PerformWarp();
+  } else if (!strcmp(desc->key, "take_snapshot")) {
+    TakeFullSnapshot();
+  } else if (!strcmp(desc->key, "restart_game") ||
+             !strcmp(desc->key, "exit_desktop")) {
+    /* Settings normally persist at mutation time, but repeat the write here
+     * so lifecycle actions are also safe entry points for future transactional
+     * save-editor rows. Battery SRAM is flushed by the shared shutdown path. */
+    if (!Settings_Save("settings.ini")) {
+      fprintf(stderr, "[lifecycle] could not save settings.ini\n");
+      return false;
+    }
+    g_host_lifecycle_request = !strcmp(desc->key, "restart_game")
+        ? kHostLifecycle_Restart : kHostLifecycle_Exit;
+    SettingsOverlay_Close();
+    fprintf(stderr, "[lifecycle] %s requested\n",
+            g_host_lifecycle_request == kHostLifecycle_Restart
+                ? "restart" : "exit");
+  } else {
+    return false;
+  }
+  return true;
+}
+
+/* Point the presentation at the current display mode's framebuffer sub-rect
+ * and size the window to that mode's display aspect. Host textures retain
+ * maximum capacity; g_snes_width selects the live PPU pitch, and 4:3 presents
+ * only the authentic centre 256 columns. */
 static void ApplyDisplayPresentation(void) {
   if (!g_window || !g_renderer) return;
   int vis_w = Settings_VisibleWidth();
@@ -535,6 +691,53 @@ static void ApplyDisplayPresentation(void) {
   SDL_SetWindowSize(g_window, win_w, win_h);
 }
 
+static void ResolveVideoGeometry(bool runtime_change) {
+  g_active_aspect_x = Settings_ExtendedAspectX();
+  g_active_aspect_y = Settings_ExtendedAspectY();
+  g_active_pixel_aspect = g_settings.pixel_aspect;
+
+  int extra = 0;
+  if (g_widescreen_runtime_allowed &&
+      g_active_aspect_x && g_active_aspect_y) {
+    bool crt_par = g_active_pixel_aspect == kPixelAspect_Crt43;
+    long num = 224L * g_active_aspect_x * (crt_par ? 6 : 7);
+    long den = 7L * g_active_aspect_y;
+    int internal_w = (int)((num + den - 1) / den);
+    extra = internal_w > 256 ? (internal_w - 256 + 1) / 2 : 0;
+    if (extra > kWsExtraMax) extra = kWsExtraMax;
+  }
+
+  g_ws_extra = extra;
+  g_ws_active = extra > 0;
+  g_snes_width = 256 + 2 * extra;
+  g_new_ppu = g_settings.new_renderer || g_ws_active;
+
+  if (runtime_change) {
+    /* 4:3 cannot retain a wide presentation profile. Returning to a wide
+     * ratio selects the validated FULL policy rather than reviving stale
+     * per-layer flags from the previous 4:3 interval. */
+    Settings_SetDisplayMode(g_ws_active ? kDisplayMode_WideFull
+                                        : kDisplayMode_43);
+    memset(g_pixels, 0, sizeof(g_pixels));
+    memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
+    memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
+    RebindPpuOutputSurfaces();
+    ApplyDisplayPresentation();
+    g_paused_redraw_pending = true;
+  }
+
+  fprintf(stderr,
+          "[video-geometry] %s %s -> %d extra columns/side "
+          "(render width %d, %s PPU)\n",
+          g_active_aspect_x
+              ? (g_active_aspect_y == 9 ? "16:9" : "16:10")
+              : "4:3",
+          g_active_pixel_aspect == kPixelAspect_Crt43
+              ? "4:3-PAR" : "square-PAR",
+          g_ws_extra, g_snes_width,
+          g_new_ppu ? "new" : "legacy");
+}
+
 static void OnRuntimeSettingChanged(const SettingDesc *desc,
                                     SettingChangeResult result) {
   (void)result;
@@ -542,9 +745,23 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
     SDL_AtomicSet(&g_audio_master_percent, g_settings.audio_master_volume);
   if (desc->field == &g_settings.audio_enabled)
     ApplyAudioEnabled();
+  if (desc->field == &g_settings.music_replacements)
+    MusicReplacements_ApplySetting();
+  if (desc->field == &g_settings.scene_inspector &&
+      !g_settings.scene_inspector)
+    CloseSceneInspectorSelection();
   if (desc->field == &g_settings.fullscreen && g_window)
     SDL_SetWindowFullscreen(g_window, g_settings.fullscreen
         ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+  if (desc->field == &g_settings.extended_aspect ||
+      desc->field == &g_settings.pixel_aspect) {
+    ResolveVideoGeometry(true);
+    return;
+  }
+  if (desc->field == &g_settings.new_renderer) {
+    g_new_ppu = g_settings.new_renderer || g_ws_active;
+    g_paused_redraw_pending = true;
+  }
   /* HUD scale is a display-category value but must not resize a manually
    * resized window. Only the display profile and geometry policies own the
    * presentation/window dimensions. */
@@ -624,10 +841,49 @@ static void RenderHudChunk(SDL_Texture *texture, SDL_Rect src, SDL_Rect dst) {
   SDL_RenderCopy(g_renderer, texture, &src, &dst);
 }
 
-static void RenderHudOverlay(SDL_Rect viewport) {
-  if (!g_hud_bg_texture || !g_ppu || !g_ppu->wsHudSplitHeight)
-    return;
+typedef struct HudPresentationChunk {
+  SDL_Texture *texture;
+  SDL_Rect texture_source;
+  SDL_Rect screen_source;
+  SDL_Rect output_destination;
+  InspectorPresentationKind inspector_kind;
+  int inspector_x_bias;
+} HudPresentationChunk;
 
+enum { kHudPresentationChunkCapacity = 5 };
+
+static void AddHudPresentationChunk(HudPresentationChunk *chunks,
+                                    int *count,
+                                    SDL_Texture *texture,
+                                    SDL_Rect texture_source,
+                                    SDL_Rect screen_source,
+                                    SDL_Rect output_destination,
+                                    InspectorPresentationKind kind,
+                                    int inspector_x_bias) {
+  if (!chunks || !count || *count >= kHudPresentationChunkCapacity ||
+      !texture || texture_source.w <= 0 || texture_source.h <= 0 ||
+      screen_source.w <= 0 || screen_source.h <= 0 ||
+      output_destination.w <= 0 || output_destination.h <= 0)
+    return;
+  chunks[(*count)++] = (HudPresentationChunk){
+    texture,
+    texture_source,
+    screen_source,
+    output_destination,
+    kind,
+    inspector_x_bias,
+  };
+}
+
+/* One geometry description drives both compositing and hit-testing. This is
+ * essential when the HUD uses an independent scale or its right group is
+ * translated to the widescreen edge. */
+static int BuildHudPresentationChunks(
+    SDL_Rect viewport, HudPresentationChunk *chunks) {
+  if (!g_hud_bg_texture || !g_ppu || !g_ppu->wsHudSplitHeight)
+    return 0;
+
+  int count = 0;
   int vis_w = Settings_VisibleWidth();
   double scale_y, scale_x;
   if (g_settings.hud_scale_percent == 0) {
@@ -649,14 +905,20 @@ static void RenderHudOverlay(SDL_Rect viewport) {
   SDL_Rect src = { tex_extra, 0, g_ppu->wsHudLeftEnd, upper_h };
   SDL_Rect dst = { viewport.x, viewport.y,
                    ScaledHudPixels(src.w, scale_x), upper_dh };
-  RenderHudChunk(g_hud_bg_texture, src, dst);
+  AddHudPresentationChunk(
+      chunks, &count, g_hud_bg_texture, src,
+      (SDL_Rect){ 0, 0, src.w, src.h }, dst,
+      kInspectorPresentation_HudBg, -g_ppu->extraLeftRight);
 
   if (g_ppu->wsHudLeftEnd < g_ppu->wsHudRightStart) {
     src.x = tex_extra + g_ppu->wsHudLeftEnd;
     src.w = g_ppu->wsHudRightStart - g_ppu->wsHudLeftEnd;
     dst.w = ScaledHudPixels(src.w, scale_x);
     dst.x = viewport.x + (viewport.w - dst.w) / 2;
-    RenderHudChunk(g_hud_bg_texture, src, dst);
+    AddHudPresentationChunk(
+        chunks, &count, g_hud_bg_texture, src,
+        (SDL_Rect){ g_ppu->wsHudLeftEnd, 0, src.w, src.h }, dst,
+        kInspectorPresentation_HudBg, 0);
   }
 
   int right_source_w = 256 - g_ppu->wsHudRightStart;
@@ -665,7 +927,10 @@ static void RenderHudOverlay(SDL_Rect viewport) {
   src.w = right_source_w;
   dst.x = viewport.x + viewport.w - right_dest_w;
   dst.w = right_dest_w;
-  RenderHudChunk(g_hud_bg_texture, src, dst);
+  AddHudPresentationChunk(
+      chunks, &count, g_hud_bg_texture, src,
+      (SDL_Rect){ g_ppu->wsHudRightStart, 0, src.w, src.h }, dst,
+      kInspectorPresentation_HudBg, g_ppu->extraLeftRight);
 
   if (lower_y < height) {
     src.x = tex_extra;
@@ -676,11 +941,15 @@ static void RenderHudOverlay(SDL_Rect viewport) {
     dst.y = viewport.y + ScaledHudPixels(lower_y, scale_y);
     dst.w = ScaledHudPixels(src.w, scale_x);
     dst.h = ScaledHudPixels(src.h, scale_y);
-    RenderHudChunk(g_hud_bg_texture, src, dst);
+    AddHudPresentationChunk(
+        chunks, &count, g_hud_bg_texture, src,
+        (SDL_Rect){ 0, lower_y, src.w, src.h }, dst,
+        kInspectorPresentation_HudBg, -g_ppu->extraLeftRight);
   }
 
-  /* The selected-magic icon is the separately promoted 2x2 OAM signature.
-   * Keep it four native pixels before the scaled right group. */
+  /* Action's selected-magic icon and simulation's hourglass are separately
+   * validated four-slot OAM signatures. Keep either promoted HUD icon four
+   * native pixels before the scaled right group. */
   const PpuOverlayCapture *obj_capture =
       &g_ppu->overlayCaptures[kPpuOverlaySource_Obj];
   if (g_hud_obj_texture && obj_capture->oamCount == 4) {
@@ -695,9 +964,303 @@ static void RenderHudOverlay(SDL_Rect viewport) {
         ScaledHudPixels(16, scale_x),
         ScaledHudPixels(16, scale_y),
       };
-      RenderHudChunk(g_hud_obj_texture, obj_src, obj_dst);
+      AddHudPresentationChunk(
+          chunks, &count, g_hud_obj_texture, obj_src,
+          (SDL_Rect){ x, y, 16, 16 }, obj_dst,
+          kInspectorPresentation_HudObj, 0);
     }
   }
+  return count;
+}
+
+static void RenderHudOverlay(SDL_Rect viewport) {
+  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
+  int count = BuildHudPresentationChunks(viewport, chunks);
+  for (int i = 0; i < count; i++)
+    RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
+                   chunks[i].output_destination);
+}
+
+static int InspectorScreenToOutputX(SDL_Rect viewport, double screen_x) {
+  int visible_left = Settings_VisibleX0() - g_ws_extra;
+  return viewport.x +
+      (int)((screen_x - visible_left) * viewport.w /
+            Settings_VisibleWidth() + 0.5);
+}
+
+static int InspectorScreenToOutputY(SDL_Rect viewport, double screen_y) {
+  return viewport.y +
+      (int)(screen_y * viewport.h / g_snes_height + 0.5);
+}
+
+static bool PointInRect(int x, int y, SDL_Rect rect) {
+  return x >= rect.x && x < rect.x + rect.w &&
+         y >= rect.y && y < rect.y + rect.h;
+}
+
+static bool HudChunkPixelVisible(const HudPresentationChunk *chunk,
+                                 int source_x, int source_y) {
+  const uint8_t *pixels = chunk->inspector_kind == kInspectorPresentation_HudObj
+      ? g_hud_obj_pixels : g_hud_bg_pixels;
+  int texture_x = source_x + (g_snes_width - 256) / 2;
+  if (!pixels || texture_x < 0 || texture_x >= g_snes_width ||
+      source_y < 0 || source_y >= g_snes_height)
+    return false;
+  return pixels[((size_t)source_y * g_snes_width + texture_x) * 4 + 3] != 0;
+}
+
+static bool FindSelectedHudChunk(SDL_Rect viewport,
+                                 HudPresentationChunk *selected) {
+  if (g_scene_inspector_presentation.kind == kInspectorPresentation_Base)
+    return false;
+  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
+  int count = BuildHudPresentationChunks(viewport, chunks);
+  for (int i = count - 1; i >= 0; i--) {
+    const SDL_Rect source = chunks[i].screen_source;
+    if (chunks[i].inspector_kind != g_scene_inspector_presentation.kind ||
+        g_scene_inspector_presentation.source_x < source.x ||
+        g_scene_inspector_presentation.source_x >= source.x + source.w ||
+        g_scene_inspector_presentation.source_y < source.y ||
+        g_scene_inspector_presentation.source_y >= source.y + source.h)
+      continue;
+    if (selected) *selected = chunks[i];
+    return true;
+  }
+  return false;
+}
+
+static int HudSourceToOutputX(const HudPresentationChunk *chunk,
+                              double source_x) {
+  return chunk->output_destination.x +
+      (int)((source_x - chunk->screen_source.x) *
+            chunk->output_destination.w / chunk->screen_source.w + 0.5);
+}
+
+static int HudSourceToOutputY(const HudPresentationChunk *chunk,
+                              double source_y) {
+  return chunk->output_destination.y +
+      (int)((source_y - chunk->screen_source.y) *
+            chunk->output_destination.h / chunk->screen_source.h + 0.5);
+}
+
+static bool HudHighlightToOutput(const HudPresentationChunk *chunk,
+                                 int x0, int y0, int x1, int y1,
+                                 SDL_Rect *output) {
+  if (!chunk || !output) return false;
+  x0 -= chunk->inspector_x_bias;
+  x1 -= chunk->inspector_x_bias;
+  const SDL_Rect source = chunk->screen_source;
+  if (x0 < source.x) x0 = source.x;
+  if (y0 < source.y) y0 = source.y;
+  if (x1 > source.x + source.w) x1 = source.x + source.w;
+  if (y1 > source.y + source.h) y1 = source.y + source.h;
+  if (x1 <= x0 || y1 <= y0) return false;
+  int output_x0 = HudSourceToOutputX(chunk, x0);
+  int output_y0 = HudSourceToOutputY(chunk, y0);
+  int output_x1 = HudSourceToOutputX(chunk, x1);
+  int output_y1 = HudSourceToOutputY(chunk, y1);
+  *output = (SDL_Rect){
+    output_x0, output_y0,
+    output_x1 - output_x0, output_y1 - output_y0,
+  };
+  return output->w > 0 && output->h > 0;
+}
+
+static void RenderSceneInspector(SDL_Rect viewport) {
+  if (!g_settings.scene_inspector || !SceneInspector_HasSelection()) return;
+  int x = 0, y = 0;
+  if (!SceneInspector_GetPoint(&x, &y)) return;
+  HudPresentationChunk hud_chunk;
+  bool hud_selection = FindSelectedHudChunk(viewport, &hud_chunk);
+  int projected_px = hud_selection
+      ? HudSourceToOutputX(
+          &hud_chunk, g_scene_inspector_presentation.source_x)
+      : InspectorScreenToOutputX(
+          viewport, g_scene_inspector_presentation.source_x);
+  int projected_py = hud_selection
+      ? HudSourceToOutputY(
+          &hud_chunk, g_scene_inspector_presentation.source_y)
+      : InspectorScreenToOutputY(
+          viewport, g_scene_inspector_presentation.source_y);
+  int output_width = 0, output_height = 0;
+  SDL_GetRendererOutputSize(g_renderer, &output_width, &output_height);
+  bool same_output = output_width ==
+                         g_scene_inspector_presentation.output_width &&
+                     output_height ==
+                         g_scene_inspector_presentation.output_height;
+  int px = same_output ? g_scene_inspector_presentation.output_x
+                       : projected_px;
+  int py = same_output ? g_scene_inspector_presentation.output_y
+                       : projected_py;
+  int anchor_dx = px - projected_px;
+  int anchor_dy = py - projected_py;
+
+  SDL_BlendMode old_blend = SDL_BLENDMODE_NONE;
+  Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
+  SDL_GetRenderDrawBlendMode(g_renderer, &old_blend);
+  SDL_GetRenderDrawColor(g_renderer, &old_r, &old_g, &old_b, &old_a);
+  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+  SDL_SetRenderDrawColor(g_renderer, 255, 192, 32, 255);
+  SDL_RenderDrawLine(g_renderer, px - 7, py, px + 7, py);
+  SDL_RenderDrawLine(g_renderer, px, py - 7, px, py + 7);
+
+  int x0, y0, x1, y1;
+  if (SceneInspector_GetHighlight(&x0, &y0, &x1, &y1)) {
+    SDL_Rect rect;
+    bool have_rect = hud_selection &&
+        HudHighlightToOutput(&hud_chunk, x0, y0, x1, y1, &rect);
+    if (!hud_selection) {
+      rect = (SDL_Rect){
+        InspectorScreenToOutputX(viewport, x0),
+        InspectorScreenToOutputY(viewport, y0),
+        InspectorScreenToOutputX(viewport, x1) -
+            InspectorScreenToOutputX(viewport, x0),
+        InspectorScreenToOutputY(viewport, y1) -
+            InspectorScreenToOutputY(viewport, y0),
+      };
+      have_rect = rect.w > 0 && rect.h > 0;
+    }
+    if (have_rect) {
+      /* Preserve the exact renderer-output click anchor. Native source
+       * sampling intentionally quantizes to one SNES pixel; without this
+       * correction, that discarded fraction visibly shifts both annotations
+       * when the game or promoted HUD is scaled by a non-integer factor. */
+      rect.x += anchor_dx;
+      rect.y += anchor_dy;
+      SDL_RenderDrawRect(g_renderer, &rect);
+    }
+  }
+  SDL_SetRenderDrawBlendMode(g_renderer, old_blend);
+  SDL_SetRenderDrawColor(g_renderer, old_r, old_g, old_b, old_a);
+  SettingsOverlay_RenderDebugPanel(
+      "SCENE INSPECTOR", SceneInspector_PanelText(), (SDL_Point){ px, py });
+}
+
+static bool WindowPointToOutput(int event_x, int event_y,
+                                int *output_x, int *output_y) {
+  if (!g_window || !g_renderer) return false;
+  int window_width = 0, window_height = 0;
+  int output_width = 0, output_height = 0;
+  SDL_GetWindowSize(g_window, &window_width, &window_height);
+  if (SDL_GetRendererOutputSize(g_renderer, &output_width, &output_height) ||
+      window_width <= 0 || window_height <= 0 ||
+      output_width <= 0 || output_height <= 0)
+    return false;
+  int logical_width = 0, logical_height = 0;
+  SDL_RenderGetLogicalSize(g_renderer, &logical_width, &logical_height);
+  if (logical_width > 0 && logical_height > 0) {
+    /* SDL_RenderSetLogicalSize filters absolute mouse events before they are
+     * queued: event.button/motion x/y are ALREADY logical coordinates. Map
+     * that logical point directly through the same physical viewport used by
+     * the game. Treating it as a window pixel (or passing it through
+     * SDL_RenderWindowToLogical again) scales it twice and sends far-edge
+     * clicks outside the viewport. */
+    SDL_Rect viewport = GetPresentationViewport();
+    if (output_x)
+      *output_x = viewport.x +
+          (int)(((int64_t)event_x * viewport.w + logical_width / 2) /
+                logical_width);
+    if (output_y)
+      *output_y = viewport.y +
+          (int)(((int64_t)event_y * viewport.h + logical_height / 2) /
+                logical_height);
+    return true;
+  }
+
+  /* Without a logical renderer size SDL leaves the event in window-client
+   * coordinates. Only this fallback needs the high-DPI window/output ratio. */
+  if (output_x)
+    *output_x = (int)(((int64_t)event_x * output_width +
+                       window_width / 2) / window_width);
+  if (output_y)
+    *output_y = (int)(((int64_t)event_y * output_height +
+                       window_height / 2) / window_height);
+  return true;
+}
+
+static bool InspectWindowPoint(int window_x, int window_y) {
+  int output_x = 0, output_y = 0;
+  if (!WindowPointToOutput(window_x, window_y, &output_x, &output_y))
+    return false;
+  SDL_Rect viewport = GetPresentationViewport();
+  bool had_selection = SceneInspector_HasSelection();
+  bool was_paused = g_paused != 0;
+  int output_width = 0, output_height = 0;
+  SDL_GetRendererOutputSize(g_renderer, &output_width, &output_height);
+
+  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
+  int chunk_count = BuildHudPresentationChunks(viewport, chunks);
+  bool selected = false;
+  for (int i = chunk_count - 1; i >= 0 && !selected; i--) {
+    const HudPresentationChunk *chunk = &chunks[i];
+    if (!PointInRect(output_x, output_y, chunk->output_destination))
+      continue;
+    double source_x = chunk->screen_source.x +
+        (double)(output_x - chunk->output_destination.x) *
+        chunk->screen_source.w / chunk->output_destination.w;
+    double source_y = chunk->screen_source.y +
+        (double)(output_y - chunk->output_destination.y) *
+        chunk->screen_source.h / chunk->output_destination.h;
+    int sample_x = (int)source_x;
+    int sample_y = (int)source_y;
+    if (!HudChunkPixelVisible(chunk, sample_x, sample_y)) continue;
+    int inspector_x = sample_x + chunk->inspector_x_bias;
+    unsigned bg_mask = chunk->inspector_kind == kInspectorPresentation_HudBg
+        ? kSceneInspectorBg3 : 0;
+    bool inspect_objects =
+        chunk->inspector_kind == kInspectorPresentation_HudObj;
+    if (!SceneInspector_SelectFiltered(
+            inspector_x, sample_y, bg_mask, inspect_objects))
+      continue;
+    g_scene_inspector_presentation = (InspectorPresentationSelection){
+      chunk->inspector_kind, source_x, source_y,
+      output_x, output_y, output_width, output_height,
+    };
+    fprintf(stderr,
+            "[scene-inspector-hit] event=%d,%d output=%d,%d target=%s "
+            "source=%.3f,%.3f dst=%d,%d,%d,%d\n",
+            window_x, window_y, output_x, output_y,
+            chunk->inspector_kind == kInspectorPresentation_HudBg
+                ? "hud-bg3" : "hud-obj",
+            source_x, source_y,
+            chunk->output_destination.x,
+            chunk->output_destination.y,
+            chunk->output_destination.w,
+            chunk->output_destination.h);
+    selected = true;
+  }
+
+  if (!selected) {
+    if (!PointInRect(output_x, output_y, viewport)) return false;
+    int visible_left = Settings_VisibleX0() - g_ws_extra;
+    double screen_position_x = visible_left +
+        (double)(output_x - viewport.x) * Settings_VisibleWidth() /
+        viewport.w;
+    double screen_position_y =
+        (double)(output_y - viewport.y) * g_snes_height / viewport.h;
+    int screen_x = visible_left +
+        (int)((double)(output_x - viewport.x) * Settings_VisibleWidth() /
+              viewport.w);
+    int screen_y =
+        (int)((double)(output_y - viewport.y) * g_snes_height /
+              viewport.h);
+    if (!SceneInspector_Select(screen_x, screen_y)) return false;
+    g_scene_inspector_presentation = (InspectorPresentationSelection){
+      kInspectorPresentation_Base, screen_position_x, screen_position_y,
+      output_x, output_y, output_width, output_height,
+    };
+    fprintf(stderr,
+            "[scene-inspector-hit] event=%d,%d output=%d,%d target=base "
+            "screen=%.3f,%.3f viewport=%d,%d,%d,%d\n",
+            window_x, window_y, output_x, output_y,
+            screen_position_x, screen_position_y,
+            viewport.x, viewport.y, viewport.w, viewport.h);
+  }
+  if (!had_selection)
+    g_scene_inspector_owns_pause = !was_paused;
+  g_input_state = 0;
+  g_paused = true;
+  return true;
 }
 
 /* Load the HD replacement manifest and decode each screen-plane entry's art
@@ -772,14 +1335,19 @@ static void BindHdReplacementSurfaces(void) {
     const HdReplacement *entry = &g_hd_replacements[i];
     if (entry->plane == kHdPlane_Mode7 && entry->pixels &&
         !g_m7_overlay_pixels && g_renderer) {
-      size_t pitch = (size_t)g_snes_width * kHdMode7Scale * 4;
-      g_m7_overlay_pixels = calloc(1, pitch * 224 * kHdMode7Scale);
+      size_t capacity_pitch =
+          (size_t)kPpuBufWidth * kHdMode7Scale * 4;
+      size_t active_pitch =
+          (size_t)g_snes_width * kHdMode7Scale * 4;
+      g_m7_overlay_pixels =
+          calloc(1, capacity_pitch * 224 * kHdMode7Scale);
       g_m7_texture = SDL_CreateTexture(
           g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-          g_snes_width * kHdMode7Scale, g_snes_height * kHdMode7Scale);
+          kPpuBufWidth * kHdMode7Scale,
+          g_snes_height * kHdMode7Scale);
       if (g_m7_overlay_pixels && g_m7_texture) {
         SDL_SetTextureBlendMode(g_m7_texture, SDL_BLENDMODE_BLEND);
-        PpuBindMode7OverlaySurface(g_ppu, g_m7_overlay_pixels, pitch,
+        PpuBindMode7OverlaySurface(g_ppu, g_m7_overlay_pixels, active_pitch,
                                    kHdMode7Scale);
       }
       continue;
@@ -796,6 +1364,33 @@ static void BindHdReplacementSurfaces(void) {
   }
 }
 
+static void RebindPpuOutputSurfaces(void) {
+  if (!g_ppu) return;
+  size_t pitch = (size_t)g_snes_width * 4;
+  PpuBeginDrawing(g_ppu, g_pixels, pitch, 0);
+  PpuClearOverlayBindings(g_ppu);
+  PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3,
+                        g_hud_bg_texture ? g_hud_bg_pixels : NULL, pitch);
+  PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Obj,
+                        g_hud_obj_texture ? g_hud_obj_pixels : NULL, pitch);
+  for (int source = 0; source < kPpuOverlaySource_Count; source++) {
+    if (source == kPpuOverlaySource_Bg3 ||
+        source == kPpuOverlaySource_Obj ||
+        !g_hd_overlay_pixels[source])
+      continue;
+    PpuBindOverlaySurface(g_ppu, (PpuOverlaySource)source,
+                          g_hd_overlay_pixels[source], pitch);
+  }
+  if (g_m7_overlay_pixels)
+    PpuBindMode7OverlaySurface(
+        g_ppu, g_m7_overlay_pixels,
+        (size_t)g_snes_width * kHdMode7Scale * 4, kHdMode7Scale);
+  if (g_ws_active)
+    PpuSetExtraSpaceCentered(g_ppu, (uint8_t)g_ws_extra);
+  else
+    PpuSetExtraSpace(g_ppu, 0);
+}
+
 /* Composite the Mode-7 override surface over the game frame (the engine
  * already removed the substituted pixels there). Drawn before the OBJ/HUD
  * overlays so promoted sprites stay above substituted scenery. Brightness
@@ -803,11 +1398,15 @@ static void BindHdReplacementSurfaces(void) {
  * the per-line clears run before the early-out. */
 static void RenderMode7Overlay(SDL_Rect viewport) {
   if (!g_m7_texture || !g_ppu || !g_ppu->m7Override.rgba) return;
-  SDL_UpdateTexture(g_m7_texture, NULL, g_m7_overlay_pixels,
-                    g_snes_width * kHdMode7Scale * 4);
+  /* Upload only the sub-rect RenderCopy samples (the visible columns); the
+   * source row pitch stays the full surface width. Identical in wide-full
+   * mode; a 4:3 view of a mode-7 substitution skips the margin columns. */
   SDL_Rect src = { Settings_VisibleX0() * kHdMode7Scale, 0,
                    Settings_VisibleWidth() * kHdMode7Scale,
                    g_snes_height * kHdMode7Scale };
+  SDL_UpdateTexture(g_m7_texture, &src,
+                    g_m7_overlay_pixels + (size_t)src.x * 4,
+                    g_snes_width * kHdMode7Scale * 4);
   SDL_RenderCopy(g_renderer, g_m7_texture, &src, &viewport);
 }
 
@@ -858,13 +1457,31 @@ static bool RenderFramebuffer(void) {
    * changes while cycling modes. */
   SDL_Rect src = { Settings_VisibleX0(), 0,
                    Settings_VisibleWidth(), g_snes_height };
-  SDL_UpdateTexture(g_texture, NULL, g_pixels, g_snes_width * 4);
-  if (g_hud_bg_texture)
-    SDL_UpdateTexture(g_hud_bg_texture, NULL, g_hud_bg_pixels,
-                      g_snes_width * 4);
-  if (g_hud_obj_texture)
-    SDL_UpdateTexture(g_hud_obj_texture, NULL, g_hud_obj_pixels,
-                      g_snes_width * 4);
+  SDL_Rect upload = { 0, 0, g_snes_width, g_snes_height };
+  SDL_UpdateTexture(g_texture, &upload, g_pixels, g_snes_width * 4);
+  /* The HUD planes are only sampled by RenderHudOverlay, and only while a
+   * widescreen HUD split is active; both captures are top-anchored. Upload
+   * just the rows the split can sample instead of three full-height planes
+   * every frame. Rows beyond the upload keep stale texture content, which is
+   * fine: sampling is bounded by the CURRENT split height and OAM signature,
+   * so a disabled or shorter split never reads them. */
+  if (g_ppu && g_ppu->wsHudSplitHeight) {
+    int split_rows = g_ppu->wsHudSplitHeight;
+    if (g_hud_bg_texture) {
+      int rows = g_ppu->overlayCaptures[kPpuOverlaySource_Bg3].y1;
+      if (rows < split_rows) rows = split_rows;
+      SDL_Rect hud = { 0, 0, g_snes_width, rows };
+      SDL_UpdateTexture(g_hud_bg_texture, &hud, g_hud_bg_pixels,
+                        g_snes_width * 4);
+    }
+    if (g_hud_obj_texture) {
+      int rows = g_ppu->overlayCaptures[kPpuOverlaySource_Obj].y1;
+      if (rows < split_rows) rows = split_rows;
+      SDL_Rect hud = { 0, 0, g_snes_width, rows };
+      SDL_UpdateTexture(g_hud_obj_texture, &hud, g_hud_obj_pixels,
+                        g_snes_width * 4);
+    }
+  }
   ApplyRendererLogicalSize();
   SDL_RenderClear(g_renderer);
   SDL_RenderCopy(g_renderer, g_texture, &src, NULL);
@@ -874,6 +1491,7 @@ static bool RenderFramebuffer(void) {
   RenderMode7Overlay(viewport);
   RenderHudOverlay(viewport);
   RenderHdReplacements(viewport);
+  RenderSceneInspector(viewport);
   SettingsOverlay_Render(viewport);
   ApplyRendererLogicalSize();
   return true;
@@ -960,38 +1578,16 @@ int main(int argc, char **argv) {
    * configured wide geometry. The oracle harness leaves it unset. */
   bool ws_headless = getenv("AR_WS_HEADLESS") && getenv("AR_WS_HEADLESS")[0]
                      && getenv("AR_WS_HEADLESS")[0] != '0';
+  g_widescreen_runtime_allowed = !headless || ws_headless;
   /* Resolve application and game settings before allocating presentation
    * resources. Known config.ini values were staged by ParseConfigFile;
    * settings.ini overrides them, and real environment variables win last. */
   Settings_InitWithFile("settings.ini");
-  g_active_aspect_x = Settings_ExtendedAspectX();
-  g_active_aspect_y = Settings_ExtendedAspectY();
-  g_active_pixel_aspect = g_settings.pixel_aspect;
-  g_active_audio_frequency = g_settings.audio_frequency;
+  g_active_audio_frequency = Settings_AudioFrequencyHz();
   g_active_audio_samples = g_settings.audio_samples;
-  if ((!headless || ws_headless) &&
-      g_active_aspect_x && g_active_aspect_y) {
-    bool crt_par = g_active_pixel_aspect == kPixelAspect_Crt43;
-    long num = 224L * g_active_aspect_x * (crt_par ? 6 : 7);
-    long den = 7L * g_active_aspect_y;
-    int internal_w = (int)((num + den - 1) / den);
-    int extra = internal_w > 256 ? (internal_w - 256 + 1) / 2 : 0;
-    if (extra > kWsExtraMax) extra = kWsExtraMax;
-    g_ws_extra = extra;
-    g_ws_active = extra > 0;
-    g_snes_width = 256 + 2 * extra;
-    if (g_ws_active && !g_settings.new_renderer)
-      fprintf(stderr, "[widescreen] NewRenderer=0 unsupported with ExtendedAspectRatio; forcing new PPU\n");
-    fprintf(stderr, "[widescreen] %u:%u %s -> %d extra columns/side (render width %d)\n",
-            g_active_aspect_x, g_active_aspect_y,
-            crt_par ? "4:3-PAR" : "square-PAR",
-            g_ws_extra, g_snes_width);
-  }
-  /* NewRenderer knob (previously parsed but never applied): honor it, except
-   * widescreen needs the new PPU path (HUD split/BG3 widen exist only there). */
-  g_new_ppu = g_settings.new_renderer || g_ws_active;
+  ResolveVideoGeometry(false);
 
-  /* Display presets depend on whether the resolved aspect allocated a wide
+  /* Display presets depend on whether the resolved aspect selected a wide
    * budget. Finalize only after g_ws_active/g_ws_extra are authoritative. */
   Settings_FinalizeDisplayMode();
   SDL_AtomicSet(&g_audio_master_percent, g_settings.audio_master_volume);
@@ -1077,15 +1673,15 @@ int main(int argc, char **argv) {
 
     g_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      g_snes_width, g_snes_height);
+      kPpuBufWidth, g_snes_height);
     if (!g_texture) Die("SDL_CreateTexture failed");
 
     g_hud_bg_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      g_snes_width, g_snes_height);
+      kPpuBufWidth, g_snes_height);
     g_hud_obj_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      g_snes_width, g_snes_height);
+      kPpuBufWidth, g_snes_height);
     if (!g_hud_bg_texture || !g_hud_obj_texture)
       Die("SDL_CreateTexture for HUD overlay failed");
     SDL_SetTextureBlendMode(g_hud_bg_texture, SDL_BLENDMODE_BLEND);
@@ -1100,6 +1696,7 @@ int main(int argc, char **argv) {
     Die("SDL font atlas creation for settings overlay failed");
 
   Settings_SetChangeObserver(OnRuntimeSettingChanged);
+  Settings_SetActionObserver(OnSettingsAction);
 
   /* Music replacement is audio-side and works headless too (unlike the HD
    * manifest load above, which needs the renderer for textures). Same
@@ -1118,15 +1715,8 @@ int main(int argc, char **argv) {
   Snes *snes = SnesInit(rom_data, (int)rom_size);
   if (!snes) Die("SnesInit failed");
 
-  PpuBeginDrawing(g_ppu, g_pixels, g_snes_width * 4, 0);
-  PpuClearOverlayBindings(g_ppu);
-  PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3,
-                        g_hud_bg_texture ? g_hud_bg_pixels : NULL,
-                        g_snes_width * 4);
-  PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Obj,
-                        g_hud_obj_texture ? g_hud_obj_pixels : NULL,
-                        g_snes_width * 4);
   BindHdReplacementSurfaces();
+  RebindPpuOutputSurfaces();
   /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
    * centered in the wide framebuffer). Re-applied every frame by
    * ActRaiser_ApplyWidescreenPolicy since ppu_reset zeroes these fields. */
@@ -1173,6 +1763,7 @@ int main(int argc, char **argv) {
   WramTraceInit();
 
   g_audio_mutex = SDL_CreateMutex();
+  g_game_thread_id = SDL_ThreadID();
   ApplyAudioEnabled();
 
   mkdir("saves", 0755);
@@ -1184,7 +1775,7 @@ int main(int argc, char **argv) {
   { const char *ls = getenv("AR_LOADSTATE");
     if (ls && ls[0]) {
       int slot = atoi(ls);
-      for (int i = 0; i < 4; i++) { RtlApuLock(); RtlRunFrame(0); RtlApuUnlock(); }
+      for (int i = 0; i < 4; i++) RtlRunFrame(0);
       RtlSaveLoad(kSaveLoad_Load, slot);
       fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
     } }
@@ -1216,10 +1807,30 @@ int main(int argc, char **argv) {
             g_input_state = 0;
             SettingsOverlay_Open();
           } else if (event.key.keysym.sym == SDLK_p) {
-            g_paused = !g_paused;
+            if (SceneInspector_HasSelection()) {
+              bool inspector_owned_pause = g_scene_inspector_owns_pause;
+              CloseSceneInspectorSelection();
+              if (!inspector_owned_pause) TogglePause();
+            } else {
+              TogglePause();
+            }
           } else if (event.key.keysym.sym == SDLK_t) {
-            g_turbo = !g_turbo;
-            fprintf(stderr, "[turbo] %s\n", g_turbo ? "ON (8x, AR_TURBO_MULT to change)" : "off");
+            ToggleTurbo();
+          } else if (event.key.keysym.sym == SDLK_F3) {
+            if (!event.key.repeat) {
+              const SettingDesc *inspector = Settings_Find("scene_inspector");
+              SettingChangeResult result = Settings_SetLong(
+                  inspector, !g_settings.scene_inspector);
+              if (result > kSettingChange_Unchanged &&
+                  !Settings_Save("settings.ini"))
+                fprintf(stderr,
+                        "[scene-inspector] could not save settings.ini\n");
+              fprintf(stderr, "[scene-inspector] %s (%s)\n",
+                      g_settings.scene_inspector
+                          ? "enabled — click the game to inspect"
+                          : "disabled",
+                      Settings_ChangeResultName(result));
+            }
           } else if (event.key.keysym.sym == SDLK_MINUS ||
                      event.key.keysym.sym == SDLK_KP_MINUS) {
             if (!event.key.repeat) AdjustHudOutputScale(-25);
@@ -1228,11 +1839,9 @@ int main(int argc, char **argv) {
                      event.key.keysym.sym == SDLK_KP_PLUS) {
             if (!event.key.repeat) AdjustHudOutputScale(25);
           } else if (event.key.keysym.sym == SDLK_F5) {
-            RtlSaveLoad(kSaveLoad_Save, 0);
-            fprintf(stderr, "State saved.\n");
+            (void)OnSettingsAction(Settings_Find("save_state"));
           } else if (event.key.keysym.sym == SDLK_F7) {
-            RtlSaveLoad(kSaveLoad_Load, 0);
-            fprintf(stderr, "State loaded.\n");
+            (void)OnSettingsAction(Settings_Find("load_state"));
           } else if (event.key.keysym.sym == SDLK_F9) {
             /* Cycle 4:3 -> widescreen RAW -> widescreen FULL, for capturing
              * before/after comparison shots without a settings UI. Requires
@@ -1257,13 +1866,10 @@ int main(int argc, char **argv) {
             }
           } else if (event.key.keysym.sym == SDLK_F6) {
             /* Level warp: stage the game's own sim->act transition to the raw
-             * map named by AR_WARP=<region_hex><map_hex>. The low byte is $19,
+             * registry target seeded by AR_WARP=<region_hex><map_hex>. The low byte is $19,
              * not a uniform act number (e.g. Kasandora act 2 is 0303). Press
              * from a transition-capable state; see README + docs/SEAMS.md. */
-            extern void ActRaiser_Warp(unsigned region, unsigned map);
-            const char *w = getenv("AR_WARP");
-            unsigned v = (w && w[0]) ? (unsigned)strtoul(w, NULL, 16) : 0x0101;
-            ActRaiser_Warp((v >> 8) & 0xFF, v & 0xFF);
+            PerformWarp();
           } else if (event.key.keysym.sym == SDLK_F2) {
             /* On-demand FULL snapshot — each press writes a unique set of files
              * tagged with the game-frame: WRAM + VRAM + CGRAM + OAM (via
@@ -1273,32 +1879,40 @@ int main(int argc, char **argv) {
              * change over time alongside the picture. */
             /* If F9 and F2 were queued in the same paused host iteration,
              * render the new preset before capturing it. */
-            RedrawPausedFrameIfNeeded();
-            extern uint8 g_ram[0x20000];
-            extern void ActRaiser_FullSnapshot(const char *prefix);
-            static int snap_n = 0;
-            char snapdir[320];
-            RunDirFile(snapdir, sizeof snapdir, "snapshots");
-#ifndef _WIN32
-            mkdir(snapdir, 0755);  /* keep snapshots out of the
-                                    * normal dump_* run data */
-#endif
-            unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-            char prefix[336];
-            RunDirFile(prefix, sizeof prefix, "snapshots/snap_%02d_gf%u",
-                       snap_n++, gf);
-            ActRaiser_FullSnapshot(prefix);
-            char ppm[344]; snprintf(ppm, sizeof ppm, "%s.ppm", prefix);
-            FILE *pf = fopen(ppm, "wb");
-            if (pf) {
-              (void)WriteFramebufferPpm(pf);
-              fclose(pf);
-            }
-            fprintf(stderr, "[snap] F2 -> %s.{wram,vram,cgram,oam,ppm} (gf=%u)\n",
-                    prefix, gf);
+            TakeFullSnapshot();
           } else {
             HandleInput(event.key.keysym.sym, true);
           }
+          break;
+        case SDL_TEXTINPUT:
+          if (SettingsOverlay_IsOpen())
+            (void)SettingsOverlay_HandleText(event.text.text);
+          break;
+        case SDL_MOUSEBUTTONDOWN:
+          if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
+            if (event.button.button == SDL_BUTTON_RIGHT) {
+              CloseSceneInspectorSelection();
+            } else if (event.button.button == SDL_BUTTON_LEFT) {
+              int output_x = 0, output_y = 0;
+              if (!WindowPointToOutput(event.button.x, event.button.y,
+                                       &output_x, &output_y) ||
+                  !SettingsOverlay_BeginDebugPanelDrag(
+                      output_x, output_y))
+                (void)InspectWindowPoint(event.button.x, event.button.y);
+            }
+          }
+          break;
+        case SDL_MOUSEMOTION:
+          if (SettingsOverlay_IsDebugPanelDragging()) {
+            int output_x = 0, output_y = 0;
+            if (WindowPointToOutput(event.motion.x, event.motion.y,
+                                    &output_x, &output_y))
+              SettingsOverlay_DragDebugPanel(output_x, output_y);
+          }
+          break;
+        case SDL_MOUSEBUTTONUP:
+          if (event.button.button == SDL_BUTTON_LEFT)
+            SettingsOverlay_EndDebugPanelDrag();
           break;
         case SDL_KEYUP:
           if (SettingsOverlay_IsOpen())
@@ -1309,6 +1923,17 @@ int main(int argc, char **argv) {
           break;
       }
     }
+
+    if (g_host_lifecycle_request != kHostLifecycle_None) {
+      running = false;
+      continue;
+    }
+
+    /* Host-owned pauses do not issue the game's native SPC $F2 command. Keep
+     * the HD decoder aligned explicitly; its independent driver-pause latch
+     * still prevents resume until both pause reasons have cleared. */
+    MusicReplacements_SetHostPaused(
+        g_paused || SettingsOverlay_IsOpen());
 
     if (g_paused || SettingsOverlay_IsOpen()) {
       RedrawPausedFrameIfNeeded();
@@ -1425,23 +2050,88 @@ int main(int argc, char **argv) {
     static int perf_on = -1;
     if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
     uint32 perf_t0 = perf_on ? SDL_GetTicks() : 0;
-    RtlApuLock();
+    /* AR_APUPROF=<ms>: per-frame APU-stall attribution. Any game frame whose
+     * wall time reaches the threshold (default 8 ms; the flag value overrides
+     * when >= 2) prints one [apuprof] line splitting the frame into lock-wait
+     * vs SPC catch-up vs handshake-spin vs upload vs music-hook time. */
+    static int apuprof_ms = -2;
+    if (apuprof_ms == -2) {
+      extern int ApuProfEnabled(void);
+      apuprof_ms = ApuProfEnabled() ? atoi(getenv("AR_APUPROF")) : -1;
+      if (apuprof_ms >= 0 && apuprof_ms < 2) apuprof_ms = 8;
+    }
+    uint64_t apuprof_t0 = 0;
+    unsigned long apuprof_push0 = 0;
+    uint64_t apuprof_loop0 = 0;
+    if (apuprof_ms > 0) {
+      extern void ApuProfFrameReset(void);
+      extern uint64_t audio_trace_wall_ns(void);
+      extern unsigned long g_recomp_push_count;
+      extern uint64_t g_watchdog_loop_headers;
+      ApuProfFrameReset();
+      apuprof_push0 = g_recomp_push_count;
+      apuprof_loop0 = g_watchdog_loop_headers;
+      apuprof_t0 = audio_trace_wall_ns();
+    }
+    /* No frame-wide APU lock here (removed 2026-07-16). Every APU-touching
+     * path inside the frame takes RtlApuLock itself (RtlApuWrite,
+     * snes_readBBus, ReadRegWord, the SPC upload HLE), and the engine's
+     * audio thread renders in short locked batches precisely so the two
+     * threads interleave. Holding the lock across the whole frame starved
+     * the audio callback during transition frames — a map-load frame runs
+     * 20-55 ms of collapsed multi-hardware-frame work ([apuprof] loops
+     * 25k-75k vs ~3k normal), the callback missed 2-3 fill deadlines, and
+     * every level/song transition audibly dropped out even with 250 ms of
+     * DSP ring buffered. It also pinned scheduled port-write latency at the
+     * produced+3-quanta ceiling (~50 ms) because `produced` could not
+     * advance while the game thread held the lock. */
     bool r = RtlRunFrame(inputs);
     (void)r;
     /* TURBO ('t' toggle): the renderer is created with PRESENTVSYNC, so
      * RenderPresent blocks at 60Hz regardless of the SDL_Delay skip below —
      * which made the original turbo a no-op. Real fast-forward = run extra
      * game frames per RENDERED frame while inside the vsync'd loop. 8x by
-     * default (AR_TURBO_MULT overrides). Same input word each sub-frame
+     * default (the registry-backed AR_TURBO_MULT setting overrides). Same input word each sub-frame
      * (level-held buttons repeat; fine for skipping sim waits). Cheats/pins
      * apply inside RtlRunFrame, so they hold during the skipped frames too. */
     if (g_turbo) {
-      static int mult = -1;
-      if (mult < 0) { const char *e = getenv("AR_TURBO_MULT");
-        mult = (e && e[0]) ? atoi(e) : 8; if (mult < 2) mult = 2; }
+      int mult = g_settings.turbo_multiplier;
       for (int tf = 1; tf < mult; tf++) RtlRunFrame(inputs);
     }
-    RtlApuUnlock();
+    if (apuprof_t0) {
+      extern uint64_t audio_trace_wall_ns(void);
+      extern uint64_t g_apuprof_lockwait_ns, g_apuprof_catchup_ns,
+          g_apuprof_catchup_cyc, g_apuprof_hook_ns, g_apuprof_upload_ns,
+          g_apuprof_sched_lat_max;
+      extern uint32_t g_apuprof_catchup_calls, g_apuprof_port_reads,
+          g_apuprof_port_writes;
+      extern const char *g_apuprof_last_port_func;
+      extern unsigned long g_recomp_push_count;
+      extern uint64_t g_watchdog_loop_headers;
+      extern uint64_t g_apuprof_audiowait_max_ns;
+      uint64_t dt_ns = audio_trace_wall_ns() - apuprof_t0;
+      if (dt_ns >= (uint64_t)apuprof_ms * 1000000u) {
+        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+        double audiowait_ms = g_apuprof_audiowait_max_ns / 1e6;
+        g_apuprof_audiowait_max_ns = 0;
+        fprintf(stderr,
+                "[apuprof] gf=%u dt=%.1fms lockwait=%.2fms "
+                "catchup=%.2fms/%llucyc/%uc reads=%u writes=%u "
+                "hook=%.2fms upload=%.2fms schedlat=%llusmp pushes=%lu "
+                "loops=%llu audiowait-max=%.2fms last=%s\n",
+                gf, dt_ns / 1e6, g_apuprof_lockwait_ns / 1e6,
+                g_apuprof_catchup_ns / 1e6,
+                (unsigned long long)g_apuprof_catchup_cyc,
+                g_apuprof_catchup_calls, g_apuprof_port_reads,
+                g_apuprof_port_writes, g_apuprof_hook_ns / 1e6,
+                g_apuprof_upload_ns / 1e6,
+                (unsigned long long)g_apuprof_sched_lat_max,
+                g_recomp_push_count - apuprof_push0,
+                (unsigned long long)(g_watchdog_loop_headers - apuprof_loop0),
+                audiowait_ms,
+                g_apuprof_last_port_func ? g_apuprof_last_port_func : "-");
+      }
+    }
     if (perf_on) {
       extern void snes_catchup_stats(uint64_t *calls, uint64_t *cycles);
       extern uint8 g_ram[];
@@ -1489,10 +2179,7 @@ int main(int argc, char **argv) {
         unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
         if (gf >= (unsigned)warp_at) {
           warp_fired = true;
-          extern void ActRaiser_Warp(unsigned region, unsigned map);
-          const char *w = getenv("AR_WARP");
-          unsigned v = (w && w[0]) ? (unsigned)strtoul(w, NULL, 16) : 0x0101;
-          ActRaiser_Warp((v >> 8) & 0xFF, v & 0xFF);
+          PerformWarp();
         }
       }
     }
@@ -1613,7 +2300,8 @@ int main(int argc, char **argv) {
    * write during replay so a replayed run never mutates save.srm (see the
    * auto-persist note above — it would break the next replay's frame align). */
   if (!getenv("AR_INPUT_REPLAY")) RtlWriteSram();
-  DumpDiagState("exit");
+  DumpDiagState(g_host_lifecycle_request == kHostLifecycle_Restart
+                    ? "restart" : "exit");
 
   SDL_CloseAudio();
   SDL_DestroyMutex(g_audio_mutex);
@@ -1631,5 +2319,16 @@ int main(int argc, char **argv) {
   SDL_DestroyWindow(g_window);
   SDL_Quit();
   free(rom_data);
+
+  if (g_host_lifecycle_request == kHostLifecycle_Restart) {
+    fprintf(stderr, "[lifecycle] restarting process\n");
+#ifdef _WIN32
+    _execvp(argv[0], (const char *const *)argv);
+#else
+    execvp(argv[0], argv);
+#endif
+    fprintf(stderr, "[lifecycle] restart failed: %s\n", strerror(errno));
+    return 1;
+  }
   return 0;
 }

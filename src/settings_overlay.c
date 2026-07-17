@@ -12,6 +12,11 @@ enum {
   kFontAssetOffset = 0xBECFB,
   kFontAtlasWidth = 128,
   kFontAtlasHeight = 128,
+  kDebugFontAtlasWidth = 96,
+  kDebugFontAtlasHeight = 128,
+  kDebugGlyphWidth = 6,
+  kDebugGlyphHeight = 8,
+  kDebugLineHeight = 10,
   kDialogCharAssetOffset = 0x6C000,
   kDialogPaletteAssetOffset = 0xE3F73,
   kDialogAtlasWidth = 24,
@@ -22,6 +27,7 @@ enum {
   kMinimumLayoutHeight = 208,
   kMinimumScalePercent = 25,
   kMaximumScalePercent = 800,
+  kNavRowHeight = 10,
 };
 
 #define ARGB(a, r, g, b) \
@@ -32,6 +38,27 @@ static const uint32_t kPanel = ARGB(255, 0, 0, 0);
 static const uint32_t kFrameDark = ARGB(255, 45, 63, 78);
 static const uint32_t kFrameLight = ARGB(255, 164, 196, 219);
 static const uint32_t kHighlight = ARGB(255, 22, 57, 83);
+
+typedef enum DebugTextStyle {
+  kDebugText_Normal,
+  kDebugText_Label,
+  kDebugText_Value,
+  kDebugText_Target,
+  kDebugText_Warning,
+  kDebugText_Dim,
+  kDebugTextStyle_Count,
+} DebugTextStyle;
+
+/* The scene inspector is a host debugger, not an in-game dialog. Keep its
+ * information hierarchy legible independently of the ROM font palette. */
+static const SDL_Color kDebugTextColors[kDebugTextStyle_Count] = {
+  { 218, 229, 238, 255 }, /* ordinary punctuation/text */
+  {  92, 196, 255, 255 }, /* field names */
+  { 255, 207,  92, 255 }, /* addresses and numeric values */
+  { 105, 232, 157, 255 }, /* BG/OBJ targets and source policies */
+  { 255, 145,  76, 255 }, /* missing candidates and warnings */
+  { 119, 139, 154, 255 }, /* controls and explanatory notes */
+};
 
 typedef enum TextStyle {
   kText_Normal,
@@ -58,6 +85,7 @@ static const uint32_t kTextPalettes[kTextStyle_Count][4] = {
 static const uint8_t kFallbackFont[128][7] = {
   [' '] = {0, 0, 0, 0, 0, 0, 0},
   ['!'] = {4, 4, 4, 4, 4, 0, 4},
+  ['"'] = {10, 10, 10, 0, 0, 0, 0},
   ['#'] = {10, 31, 10, 10, 31, 10, 0},
   ['$'] = {4, 15, 20, 14, 5, 30, 4},
   ['%'] = {24, 25, 2, 4, 8, 19, 3},
@@ -80,6 +108,7 @@ static const uint8_t kFallbackFont[128][7] = {
   ['8'] = {14, 17, 17, 14, 17, 17, 14},
   ['9'] = {14, 17, 17, 15, 1, 1, 14},
   [':'] = {0, 4, 4, 0, 4, 4, 0},
+  [';'] = {0, 4, 4, 0, 4, 4, 8},
   ['<'] = {2, 4, 8, 16, 8, 4, 2},
   ['='] = {0, 0, 31, 0, 31, 0, 0},
   ['>'] = {8, 4, 2, 1, 2, 4, 8},
@@ -124,6 +153,19 @@ static const SettingCategory kCategoryOrder[] = {
   kSettingCat_Qol,
 };
 
+typedef struct TopLevelItem {
+  const char *key;
+  const char *nav_label;
+} TopLevelItem;
+
+/* These remain ordinary descriptors for persistence and action dispatch, but
+ * are promoted out of Quality of life into the overlay's primary navigation. */
+static const TopLevelItem kTopLevelItems[] = {
+  { "scene_inspector", "Inspector" },
+  { "restart_game", "Restart game" },
+  { "exit_desktop", "Exit desktop" },
+};
+
 typedef struct BitReader {
   const uint8_t *data;
   size_t size;
@@ -142,10 +184,12 @@ typedef struct MenuLayout {
 
 static SDL_Renderer *s_renderer;
 static SDL_Texture *s_font_textures[kTextStyle_Count];
+static SDL_Texture *s_debug_font_texture;
 static SDL_Texture *s_dialog_frame_texture;
 static uint8_t s_font_tiles[kFontTileBytes];
 static bool s_glyph_defined[256];
 static bool s_open;
+static bool s_submenu_open;
 static int s_category_slot;
 static int s_row;
 static int s_top_row;
@@ -154,6 +198,26 @@ static int s_auto_menu_scale_percent = 100;
 static int s_match_game_scale_percent = 100;
 static char s_status[48];
 static uint32_t s_status_until;
+static bool s_editing;
+static char s_edit_buffer[512];
+static SDL_Rect s_debug_panel_rect;
+static SDL_Rect s_debug_panel_drag_rect;
+static SDL_Rect s_debug_panel_resize_rect;
+static bool s_debug_panel_visible;
+static bool s_debug_panel_dragging;
+static bool s_debug_panel_resizing;
+static bool s_debug_panel_user_position;
+static int s_debug_panel_scale_percent;
+static int s_debug_panel_render_scale_percent;
+static int s_debug_panel_output_x;
+static int s_debug_panel_output_y;
+static int s_debug_panel_drag_offset_x;
+static int s_debug_panel_drag_offset_y;
+static int s_debug_panel_resize_start_x;
+static int s_debug_panel_resize_start_y;
+static int s_debug_panel_resize_start_width;
+static int s_debug_panel_resize_start_height;
+static int s_debug_panel_resize_start_scale;
 
 static bool ReadBits(BitReader *reader, int count, unsigned *value) {
   if (!reader || !value || count < 0 ||
@@ -341,11 +405,56 @@ static SDL_Texture *CreateFontAtlas(TextStyle style) {
   return texture;
 }
 
+static SDL_Texture *CreateDebugFontAtlas(void) {
+  uint32_t *pixels = (uint32_t *)calloc(
+      (size_t)kDebugFontAtlasWidth * kDebugFontAtlasHeight,
+      sizeof(uint32_t));
+  if (!pixels) return NULL;
+
+  for (unsigned ch = 0; ch < 256; ch++) {
+    unsigned source_ch = ch;
+    if (source_ch >= 'a' && source_ch <= 'z')
+      source_ch = source_ch - 'a' + 'A';
+    if (source_ch >= 128 || !FallbackGlyphDefined(source_ch))
+      source_ch = '?';
+    int cell_x = (int)(ch & 15) * kDebugGlyphWidth;
+    int cell_y = (int)(ch >> 4) * kDebugGlyphHeight;
+    for (int row = 0; row < 7; row++) {
+      uint8_t bits = kFallbackFont[source_ch][row];
+      for (int col = 0; col < 5; col++) {
+        if (bits & (1u << (4 - col)))
+          pixels[(cell_y + row) * kDebugFontAtlasWidth + cell_x + col] =
+              ARGB(255, 255, 255, 255);
+      }
+    }
+  }
+
+  SDL_Texture *texture = SDL_CreateTexture(
+      s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
+      kDebugFontAtlasWidth, kDebugFontAtlasHeight);
+  if (texture &&
+      SDL_UpdateTexture(texture, NULL, pixels,
+                        kDebugFontAtlasWidth * (int)sizeof(uint32_t)) != 0) {
+    SDL_DestroyTexture(texture);
+    texture = NULL;
+  }
+  free(pixels);
+  if (texture) {
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+#if SDL_VERSION_ATLEAST(2, 0, 12)
+    SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
+#endif
+  }
+  return texture;
+}
+
 static void DestroyFontTextures(void) {
   for (int i = 0; i < kTextStyle_Count; i++) {
     SDL_DestroyTexture(s_font_textures[i]);
     s_font_textures[i] = NULL;
   }
+  SDL_DestroyTexture(s_debug_font_texture);
+  s_debug_font_texture = NULL;
 }
 
 static uint16_t ReadLe16(const uint8_t *data) {
@@ -446,18 +555,74 @@ static SDL_Texture *CreateDialogFrameTexture(const uint8_t *rom_data,
 
 static int CategoryRowCount(SettingCategory category) {
   int count = 0;
-  for (int i = 0; i < g_setting_desc_count; i++)
-    if (g_setting_descs[i].category == category) count++;
+  for (int i = 0; i < g_setting_desc_count; i++) {
+    const SettingDesc *desc = &g_setting_descs[i];
+    bool promoted = false;
+    for (int top = 0;
+         top < (int)(sizeof(kTopLevelItems) / sizeof(kTopLevelItems[0]));
+         top++) {
+      if (!strcmp(desc->key, kTopLevelItems[top].key)) {
+        promoted = true;
+        break;
+      }
+    }
+    if (desc->category == category && !promoted) count++;
+  }
   return count;
 }
 
+static int CategorySlotCount(void) {
+  return (int)(sizeof(kCategoryOrder) / sizeof(kCategoryOrder[0]));
+}
+
+static int TopLevelItemCount(void) {
+  return (int)(sizeof(kTopLevelItems) / sizeof(kTopLevelItems[0]));
+}
+
+static int NavSlotCount(void) {
+  return CategorySlotCount() + TopLevelItemCount();
+}
+
+static const TopLevelItem *TopLevelItemForSlot(int slot) {
+  int index = slot - CategorySlotCount();
+  if (index < 0 || index >= TopLevelItemCount()) return NULL;
+  return &kTopLevelItems[index];
+}
+
+static const SettingDesc *TopLevelDescForSlot(int slot) {
+  const TopLevelItem *item = TopLevelItemForSlot(slot);
+  return item ? Settings_Find(item->key) : NULL;
+}
+
+static bool IsTopLevelDesc(const SettingDesc *desc) {
+  if (!desc || !desc->key) return false;
+  for (int i = 0; i < TopLevelItemCount(); i++)
+    if (!strcmp(desc->key, kTopLevelItems[i].key)) return true;
+  return false;
+}
+
+static int NavRowCount(int slot) {
+  if (slot < 0 || slot >= NavSlotCount()) return 0;
+  if (slot < CategorySlotCount())
+    return CategoryRowCount(kCategoryOrder[slot]);
+  return TopLevelDescForSlot(slot) ? 1 : 0;
+}
+
+static const char *NavSlotLabel(int slot) {
+  if (slot < 0 || slot >= NavSlotCount()) return "";
+  if (slot < CategorySlotCount())
+    return Settings_CategoryName(kCategoryOrder[slot]);
+  const TopLevelItem *item = TopLevelItemForSlot(slot);
+  return item ? item->nav_label : "";
+}
+
 static void SelectFirstPopulatedCategory(void) {
-  const int count = (int)(sizeof(kCategoryOrder) / sizeof(kCategoryOrder[0]));
+  const int count = NavSlotCount();
   if (s_category_slot >= 0 && s_category_slot < count &&
-      CategoryRowCount(kCategoryOrder[s_category_slot]) > 0)
+      NavRowCount(s_category_slot) > 0)
     return;
   for (int i = 0; i < count; i++) {
-    if (CategoryRowCount(kCategoryOrder[i]) > 0) {
+    if (NavRowCount(i) > 0) {
       s_category_slot = i;
       return;
     }
@@ -467,11 +632,13 @@ static void SelectFirstPopulatedCategory(void) {
 
 static const SettingDesc *SelectedDesc(void) {
   SelectFirstPopulatedCategory();
+  const SettingDesc *top_level = TopLevelDescForSlot(s_category_slot);
+  if (top_level) return top_level;
   SettingCategory category = kCategoryOrder[s_category_slot];
   int row = 0;
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (desc->category != category) continue;
+    if (desc->category != category || IsTopLevelDesc(desc)) continue;
     if (row++ == s_row) return desc;
   }
   return NULL;
@@ -500,10 +667,57 @@ static void SaveAcceptedChange(SettingChangeResult result) {
     SetStatus("APPLIED - SAVED");
 }
 
+static void StopEditing(void) {
+  if (!s_editing) return;
+  s_editing = false;
+  SDL_StopTextInput();
+}
+
+static void BeginEditing(void) {
+  const SettingDesc *desc = SelectedDesc();
+  if (!desc || !Settings_IsAvailable(desc) ||
+      desc->type == kSettingType_Bool ||
+      desc->type == kSettingType_Enum ||
+      desc->type == kSettingType_Action) {
+    SetStatus("NOT TEXT EDITABLE");
+    return;
+  }
+  Settings_FormatValue(desc, s_edit_buffer, sizeof(s_edit_buffer));
+  s_editing = true;
+  SDL_StartTextInput();
+  SetStatus("TYPE VALUE - RETURN APPLIES");
+}
+
+static void CommitEditing(void) {
+  const SettingDesc *desc = SelectedDesc();
+  if (!s_editing || !desc) return;
+  SettingChangeResult result = Settings_SetText(desc, s_edit_buffer);
+  if (result == kSettingChange_Rejected) {
+    SetStatus("INVALID VALUE");
+    return;
+  }
+  StopEditing();
+  SaveAcceptedChange(result);
+}
+
+static void InvokeSelectedAction(void) {
+  const SettingDesc *desc = SelectedDesc();
+  if (!desc || desc->type != kSettingType_Action) return;
+  SetStatus(Settings_InvokeAction(desc) ? "ACTION COMPLETE" : "ACTION FAILED");
+}
+
 static void ChangeSelectedValue(int direction) {
   const SettingDesc *desc = SelectedDesc();
   if (!desc || !Settings_IsAvailable(desc)) {
     SetStatus("UNAVAILABLE HERE");
+    return;
+  }
+  if (desc->type == kSettingType_Action) {
+    if (direction > 0) InvokeSelectedAction();
+    return;
+  }
+  if (desc->type == kSettingType_Custom) {
+    BeginEditing();
     return;
   }
   long value = 0;
@@ -541,17 +755,17 @@ static void ResetSelectedValue(void) {
 }
 
 static void MoveCategory(int direction) {
-  const int count = (int)(sizeof(kCategoryOrder) / sizeof(kCategoryOrder[0]));
+  const int count = NavSlotCount();
   for (int attempt = 0; attempt < count; attempt++) {
     s_category_slot = (s_category_slot + direction + count) % count;
-    if (CategoryRowCount(kCategoryOrder[s_category_slot]) > 0) break;
+    if (NavRowCount(s_category_slot) > 0) break;
   }
   s_row = 0;
   s_top_row = 0;
 }
 
 static void EnsureSelectedRowVisible(void) {
-  int count = CategoryRowCount(kCategoryOrder[s_category_slot]);
+  int count = NavRowCount(s_category_slot);
   int visible = s_visible_rows > 0 ? s_visible_rows : 1;
   if (s_row < 0) s_row = 0;
   if (s_row >= count) s_row = count > 0 ? count - 1 : 0;
@@ -564,9 +778,20 @@ static void EnsureSelectedRowVisible(void) {
 }
 
 static void MoveRow(int direction) {
-  int count = CategoryRowCount(kCategoryOrder[s_category_slot]);
+  int count = NavRowCount(s_category_slot);
   if (count <= 0) return;
   s_row = (s_row + direction + count) % count;
+  EnsureSelectedRowVisible();
+}
+
+static void ActivateTopLevelSelection(void) {
+  const SettingDesc *direct = TopLevelDescForSlot(s_category_slot);
+  if (direct) {
+    /* Promoted settings/actions are leaves, not one-row submenus. */
+    ChangeSelectedValue(1);
+    return;
+  }
+  s_submenu_open = true;
   EnsureSelectedRowVisible();
 }
 
@@ -587,17 +812,30 @@ bool SettingsOverlay_Init(SDL_Renderer *renderer,
       return false;
     }
   }
+  s_debug_font_texture = CreateDebugFontAtlas();
+  if (!s_debug_font_texture) {
+    DestroyFontTextures();
+    return false;
+  }
   s_dialog_frame_texture =
       CreateDialogFrameTexture(rom_data, rom_size);
   return true;
 }
 
 void SettingsOverlay_Destroy(void) {
+  StopEditing();
   DestroyFontTextures();
   SDL_DestroyTexture(s_dialog_frame_texture);
   s_dialog_frame_texture = NULL;
   s_renderer = NULL;
   s_open = false;
+  s_submenu_open = false;
+  s_debug_panel_visible = false;
+  s_debug_panel_dragging = false;
+  s_debug_panel_resizing = false;
+  s_debug_panel_user_position = false;
+  s_debug_panel_scale_percent = 0;
+  s_debug_panel_render_scale_percent = 0;
 }
 
 bool SettingsOverlay_IsOpen(void) {
@@ -605,7 +843,9 @@ bool SettingsOverlay_IsOpen(void) {
 }
 
 void SettingsOverlay_Open(void) {
+  StopEditing();
   SelectFirstPopulatedCategory();
+  s_submenu_open = false;
   s_open = true;
   s_status[0] = 0;
   fprintf(stderr, "[settings-menu] opened\n");
@@ -613,6 +853,8 @@ void SettingsOverlay_Open(void) {
 
 void SettingsOverlay_Close(void) {
   if (!s_open) return;
+  StopEditing();
+  s_submenu_open = false;
   s_open = false;
   fprintf(stderr, "[settings-menu] closed\n");
 }
@@ -622,11 +864,63 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
   if (key == SDLK_F2) return false;
   if (!pressed) return true;
 
+  if (s_editing) {
+    switch (key) {
+      case SDLK_ESCAPE:
+        StopEditing();
+        SetStatus("EDIT CANCELLED");
+        break;
+      case SDLK_z:       /* SNES B */
+        StopEditing();
+        s_submenu_open = false;
+        SetStatus("EDIT CANCELLED");
+        break;
+      case SDLK_RETURN:
+      case SDLK_KP_ENTER:
+        if (!repeat) CommitEditing();
+        break;
+      case SDLK_BACKSPACE: {
+        size_t length = strlen(s_edit_buffer);
+        if (length) s_edit_buffer[length - 1] = 0;
+        break;
+      }
+      default:
+        break;
+    }
+    return true;
+  }
+
+  if (!s_submenu_open) {
+    switch (key) {
+      case SDLK_ESCAPE:
+      case SDLK_F1:
+      case SDLK_z:       /* SNES B */
+        if (!repeat) SettingsOverlay_Close();
+        break;
+      case SDLK_UP:
+        MoveCategory(-1);
+        break;
+      case SDLK_DOWN:
+        MoveCategory(1);
+        break;
+      case SDLK_x:       /* SNES A */
+      case SDLK_RETURN:  /* keyboard confirm */
+      case SDLK_KP_ENTER:
+        if (!repeat) ActivateTopLevelSelection();
+        break;
+      default:
+        break;
+    }
+    return true;
+  }
+
   switch (key) {
     case SDLK_ESCAPE:
     case SDLK_F1:
-    case SDLK_z:       /* SNES B */
       if (!repeat) SettingsOverlay_Close();
+      break;
+    case SDLK_z:       /* SNES B */
+      if (!repeat) s_submenu_open = false;
       break;
     case SDLK_UP:
       MoveRow(-1);
@@ -639,15 +933,9 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
       break;
     case SDLK_RIGHT:
     case SDLK_x:       /* SNES A */
-    case SDLK_RETURN:  /* SNES Start */
+    case SDLK_RETURN:  /* keyboard confirm */
+    case SDLK_KP_ENTER:
       ChangeSelectedValue(1);
-      break;
-    case SDLK_q:       /* SNES L */
-      MoveCategory(-1);
-      break;
-    case SDLK_w:       /* SNES R */
-    case SDLK_TAB:
-      MoveCategory(1);
       break;
     case SDLK_a:       /* SNES Y */
       ResetSelectedValue();
@@ -655,6 +943,15 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     default:
       break;
   }
+  return true;
+}
+
+bool SettingsOverlay_HandleText(const char *text) {
+  if (!s_open || !s_editing) return false;
+  if (!text) return true;
+  size_t used = strlen(s_edit_buffer);
+  size_t available = sizeof(s_edit_buffer) - used - 1;
+  if (available) strncat(s_edit_buffer, text, available);
   return true;
 }
 
@@ -789,6 +1086,108 @@ static void DrawTextRight(const MenuLayout *layout, int right, int y,
             text, length, style);
 }
 
+static void DrawDebugGlyph(const MenuLayout *layout, int x, int y,
+                           unsigned char ch, DebugTextStyle style) {
+  if (ch == ' ' || !s_debug_font_texture) return;
+  if (ch >= 128 || !FallbackGlyphDefined(ch)) {
+    if (ch >= 'a' && ch <= 'z') ch = (unsigned char)(ch - 'a' + 'A');
+    else ch = '?';
+  }
+  const SDL_Color color = kDebugTextColors[style];
+  SDL_SetTextureColorMod(s_debug_font_texture, color.r, color.g, color.b);
+  SDL_SetTextureAlphaMod(s_debug_font_texture, color.a);
+  SDL_Rect source = {
+    (ch & 15) * kDebugGlyphWidth,
+    (ch >> 4) * kDebugGlyphHeight,
+    kDebugGlyphWidth,
+    kDebugGlyphHeight,
+  };
+  SDL_Rect destination = LogicalRect(
+      layout, x, y, kDebugGlyphWidth, kDebugGlyphHeight);
+  SDL_RenderCopy(s_renderer, s_debug_font_texture, &source, &destination);
+}
+
+static void DrawDebugTextN(const MenuLayout *layout, int x, int y,
+                           const char *text, int length,
+                           DebugTextStyle style) {
+  if (!text || length <= 0) return;
+  for (int i = 0; i < length; i++)
+    DrawDebugGlyph(layout, x + i * kDebugGlyphWidth, y,
+                   (unsigned char)text[i], style);
+}
+
+static bool DebugWordEquals(const char *word, int length,
+                            const char *expected) {
+  return (int)strlen(expected) == length &&
+      !strncmp(word, expected, (size_t)length);
+}
+
+static bool DebugWordIsTarget(const char *word, int length) {
+  static const char *const targets[] = {
+    "BG", "OBJ", "M7", "MODE", "MODE7", "CENTER", "WIDE", "MARGIN",
+    "CLAMP", "MIRROR", "REPEAT", "GAP", "HUD-LEFT", "HUD-CENTER",
+    "HUD-RIGHT", "ON", "OFF", "TRUE", "FALSE",
+  };
+  for (size_t i = 0; i < sizeof(targets) / sizeof(targets[0]); i++)
+    if (DebugWordEquals(word, length, targets[i])) return true;
+  return false;
+}
+
+static bool DebugLineStartsWith(const char *text, int length,
+                                const char *prefix) {
+  size_t prefix_length = strlen(prefix);
+  return prefix_length <= (size_t)length &&
+      !strncmp(text, prefix, prefix_length);
+}
+
+static void DrawDebugHighlightedLine(const MenuLayout *layout,
+                                     int x, int y, const char *text,
+                                     int length) {
+  if (DebugLineStartsWith(text, length, "LEFT CLICK")) {
+    DrawDebugTextN(layout, x, y, text, length, kDebugText_Dim);
+    return;
+  }
+  if (DebugLineStartsWith(text, length, "NO VISIBLE") ||
+      DebugLineStartsWith(text, length, "...")) {
+    DrawDebugTextN(layout, x, y, text, length, kDebugText_Warning);
+    return;
+  }
+  if (DebugLineStartsWith(text, length, "CANDIDATES") ||
+      DebugLineStartsWith(text, length, "HASHES")) {
+    DrawDebugTextN(layout, x, y, text, length, kDebugText_Dim);
+    return;
+  }
+
+  for (int at = 0; at < length;) {
+    unsigned char ch = (unsigned char)text[at];
+    DebugTextStyle style = kDebugText_Normal;
+    int end = at + 1;
+    if (ch == '$') {
+      while (end < length &&
+             ((text[end] >= '0' && text[end] <= '9') ||
+              (text[end] >= 'A' && text[end] <= 'F') ||
+              (text[end] >= 'a' && text[end] <= 'f')))
+        end++;
+      style = kDebugText_Value;
+    } else if (ch >= '0' && ch <= '9') {
+      while (end < length && text[end] >= '0' && text[end] <= '9') end++;
+      style = kDebugText_Value;
+    } else if ((ch >= 'A' && ch <= 'Z') ||
+               (ch >= 'a' && ch <= 'z') || ch == '_') {
+      while (end < length &&
+             ((text[end] >= 'A' && text[end] <= 'Z') ||
+              (text[end] >= 'a' && text[end] <= 'z') ||
+              text[end] == '_' || text[end] == '-'))
+        end++;
+      style = DebugWordIsTarget(text + at, end - at)
+          ? kDebugText_Target : kDebugText_Label;
+    }
+    DrawDebugTextN(layout, x + at * kDebugGlyphWidth, y,
+                   text + at, end - at, style);
+    at = end;
+  }
+}
+
 static void DrawWrappedText(const MenuLayout *layout, int x, int y,
                             const char *text, int max_chars,
                             int max_lines, TextStyle style) {
@@ -820,14 +1219,8 @@ static int SnappedFitScale(int output_width, int output_height) {
   return fit;
 }
 
-static MenuLayout BuildLayout(int output_width, int output_height) {
-  int fit_scale = SnappedFitScale(output_width, output_height);
-  s_auto_menu_scale_percent = fit_scale;
-  int scale = g_settings.menu_scale_percent > 0
-      ? g_settings.menu_scale_percent : fit_scale;
-  if (scale > fit_scale) scale = fit_scale;
-  if (scale < kMinimumScalePercent) scale = kMinimumScalePercent;
-
+static MenuLayout BuildLayoutAtScale(int output_width, int output_height,
+                                     int scale) {
   int logical_width = output_width * 100 / scale;
   int logical_height = output_height * 100 / scale;
   int used_width = ScalePosition(logical_width, scale);
@@ -841,6 +1234,16 @@ static MenuLayout BuildLayout(int output_width, int output_height) {
     (output_width - used_width) / 2,
     (output_height - used_height) / 2,
   };
+}
+
+static MenuLayout BuildLayout(int output_width, int output_height) {
+  int fit_scale = SnappedFitScale(output_width, output_height);
+  s_auto_menu_scale_percent = fit_scale;
+  int scale = g_settings.menu_scale_percent > 0
+      ? g_settings.menu_scale_percent : fit_scale;
+  if (scale > fit_scale) scale = fit_scale;
+  if (scale < kMinimumScalePercent) scale = kMinimumScalePercent;
+  return BuildLayoutAtScale(output_width, output_height, scale);
 }
 
 static int SnapPanelEdge(int origin, int edge) {
@@ -889,8 +1292,11 @@ static void DrawMenu(const MenuLayout *layout) {
   if (s_status[0] && SDL_TICKS_PASSED(SDL_GetTicks(), s_status_until))
     s_status[0] = 0;
   SelectFirstPopulatedCategory();
-  SettingCategory category = kCategoryOrder[s_category_slot];
-  const char *category_name = Settings_CategoryName(category);
+  const SettingDesc *top_level = TopLevelDescForSlot(s_category_slot);
+  SettingCategory category = s_category_slot < CategorySlotCount()
+      ? kCategoryOrder[s_category_slot] : kSettingCat_Qol;
+  const char *category_name = top_level
+      ? NavSlotLabel(s_category_slot) : Settings_CategoryName(category);
   DrawTextN(layout, right_text_x, right_title_y,
             category_name, 15, kText_Normal);
   if (s_status[0]) {
@@ -904,33 +1310,34 @@ static void DrawMenu(const MenuLayout *layout) {
   }
 
   int category_y = category_first_y;
-  const int category_count =
-      (int)(sizeof(kCategoryOrder) / sizeof(kCategoryOrder[0]));
-  for (int slot = 0; slot < category_count; slot++) {
-    SettingCategory listed_category = kCategoryOrder[slot];
-    if (CategoryRowCount(listed_category) <= 0) continue;
+  const int category_count = CategorySlotCount();
+  const int nav_count = NavSlotCount();
+  for (int slot = 0; slot < nav_count; slot++) {
+    if (NavRowCount(slot) <= 0) continue;
+    if (slot == category_count) category_y += 4;
     TextStyle style = slot == s_category_slot ? kText_Normal : kText_Dim;
-    if (slot == s_category_slot)
+    if (slot == s_category_slot && !s_submenu_open)
       DrawGlyph(layout, left_text_x + ((SDL_GetTicks() / 300) & 1),
                 category_y, '>', kText_Warning);
     DrawTextN(layout, left_text_x + 10, category_y,
-              Settings_CategoryName(listed_category), 14, style);
-    category_y += kRowHeight;
+              NavSlotLabel(slot), 14, style);
+    category_y += kNavRowHeight;
   }
 
   s_visible_rows =
       (top_y + top_height - 12 - first_row_y) / kRowHeight + 1;
   if (s_visible_rows < 1) s_visible_rows = 1;
-  EnsureSelectedRowVisible();
+  if (!top_level) EnsureSelectedRowVisible();
 
   int category_row = 0;
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (desc->category != category) continue;
+    if (top_level || desc->category != category || IsTopLevelDesc(desc))
+      continue;
     int row = category_row++;
     if (row < s_top_row || row >= s_top_row + s_visible_rows) continue;
     int y = first_row_y + (row - s_top_row) * kRowHeight;
-    bool selected = row == s_row;
+    bool selected = s_submenu_open && row == s_row;
     bool available = Settings_IsAvailable(desc);
     if (selected) {
       FillLogicalRect(layout, right_x + 9, y - 2,
@@ -939,11 +1346,16 @@ static void DrawMenu(const MenuLayout *layout) {
       DrawGlyph(layout, selector_x + ((SDL_GetTicks() / 250) & 1),
                 y, '>', kText_Warning);
     }
-    TextStyle style = available ? kText_Normal : kText_Dim;
+    TextStyle style = available && s_submenu_open
+        ? kText_Normal : kText_Dim;
     DrawTextN(layout, label_x, y, desc->label, label_chars, style);
 
     char value[512];
-    Settings_FormatValue(desc, value, sizeof(value));
+    if (selected && s_editing) {
+      snprintf(value, sizeof(value), "%s", s_edit_buffer);
+    } else {
+      Settings_FormatValue(desc, value, sizeof(value));
+    }
     if (!value[0]) snprintf(value, sizeof(value), "CUSTOM");
     if (desc->field == &g_settings.display_mode) {
       static const char *const short_modes[] = {
@@ -960,7 +1372,8 @@ static void DrawMenu(const MenuLayout *layout) {
       DrawGlyph(layout, restart_x, y, '*', kText_Warning);
   }
 
-  const SettingDesc *selected = SelectedDesc();
+  const SettingDesc *selected = top_level
+      ? top_level : (s_submenu_open ? SelectedDesc() : NULL);
   if (selected) {
     int tooltip_chars = (bottom_width - 24) / kGlyphSize;
     DrawWrappedText(layout, margin + 12, bottom_y + 12,
@@ -970,7 +1383,12 @@ static void DrawMenu(const MenuLayout *layout) {
                         ? kText_Normal : kText_Dim);
   }
   DrawText(layout, margin + 12, bottom_y + bottom_height - 18,
-           "L/R TAB  D-PAD EDIT  Y RESET  B CLOSE", kText_Dim);
+           s_editing
+               ? "TYPE VALUE  RETURN APPLY  ESC CANCEL"
+               : (s_submenu_open
+                    ? "D-PAD SELECT/CHANGE A EDIT/RUN Y RESET B BACK"
+                    : "UP/DOWN SELECT  A OPEN/RUN  B CLOSE"),
+           kText_Dim);
 }
 
 void SettingsOverlay_Render(SDL_Rect game_viewport) {
@@ -998,4 +1416,221 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
 
   SDL_SetRenderDrawBlendMode(s_renderer, old_blend_mode);
   SDL_SetRenderDrawColor(s_renderer, old_r, old_g, old_b, old_a);
+}
+
+void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
+                                      SDL_Point avoid_point) {
+  if (!s_renderer || !s_debug_font_texture || !text || !text[0])
+    return;
+  int output_width = 0, output_height = 0;
+  if (SDL_GetRendererOutputSize(s_renderer, &output_width, &output_height) ||
+      output_width <= 0 || output_height <= 0)
+    return;
+
+  SDL_BlendMode old_blend_mode = SDL_BLENDMODE_NONE;
+  Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
+  SDL_GetRenderDrawBlendMode(s_renderer, &old_blend_mode);
+  SDL_GetRenderDrawColor(s_renderer, &old_r, &old_g, &old_b, &old_a);
+  SDL_SetRenderDrawBlendMode(s_renderer, SDL_BLENDMODE_BLEND);
+
+  MenuLayout layout = BuildLayout(output_width, output_height);
+  /* Debug reports should remain information-dense even when the settings
+   * menu itself is enlarged for couch-distance use. A lower-right resize grip
+   * can then override this automatic scale without changing the report's
+   * logical width or truncating additional columns. */
+  int automatic_scale = layout.scale_percent;
+  if (automatic_scale > 250) automatic_scale = 250;
+  int maximum_scale = SnappedFitScale(output_width, output_height);
+  if (maximum_scale > 250) maximum_scale = 250;
+  int debug_scale = s_debug_panel_scale_percent > 0
+      ? s_debug_panel_scale_percent : automatic_scale;
+  if (debug_scale > maximum_scale) debug_scale = maximum_scale;
+  if (debug_scale < 50) debug_scale = 50;
+  layout = BuildLayoutAtScale(output_width, output_height, debug_scale);
+  s_debug_panel_render_scale_percent = debug_scale;
+  const char *debug_title = title ? title : "DEBUG";
+  int lines = 0;
+  int longest_line = 0;
+  const char *measure = text;
+  while (*measure && lines < 12) {
+    const char *newline = strchr(measure, '\n');
+    int length = newline ? (int)(newline - measure) : (int)strlen(measure);
+    if (length > longest_line) longest_line = length;
+    lines++;
+    if (!newline) break;
+    measure = newline + 1;
+  }
+  if (lines < 1) lines = 1;
+  int panel_height = 30 + lines * 10;
+  if (panel_height > layout.logical_height - 16)
+    panel_height = layout.logical_height - 16;
+  int title_length = (int)strlen(debug_title);
+  int content_chars = longest_line > title_length
+      ? longest_line : title_length;
+  int panel_width = content_chars * kDebugGlyphWidth + 24;
+  if (panel_width < 200) panel_width = 200;
+  panel_width = (panel_width + kGlyphSize - 1) & ~(kGlyphSize - 1);
+  int maximum_panel_width = layout.logical_width - 16;
+  if (maximum_panel_width > 560) maximum_panel_width = 560;
+  maximum_panel_width &= ~(kGlyphSize - 1);
+  if (panel_width > maximum_panel_width) panel_width = maximum_panel_width;
+  int panel_x = (layout.logical_width - panel_width) / 2;
+  int panel_y = avoid_point.y < output_height / 2
+      ? layout.logical_height - panel_height - 8 : 8;
+  if (s_debug_panel_user_position) {
+    panel_x = (s_debug_panel_output_x - layout.origin_x) * 100 /
+        layout.scale_percent;
+    panel_y = (s_debug_panel_output_y - layout.origin_y) * 100 /
+        layout.scale_percent;
+  }
+  int max_x = layout.logical_width - panel_width;
+  int max_y = layout.logical_height - panel_height;
+  if (panel_x < 0) panel_x = 0;
+  if (panel_y < 0) panel_y = 0;
+  if (panel_x > max_x) panel_x = max_x;
+  if (panel_y > max_y) panel_y = max_y;
+  DrawDialogPanel(&layout, panel_x, panel_y, panel_width, panel_height);
+  DrawDebugTextN(&layout, panel_x + 12, panel_y + 9,
+                 debug_title, (int)strlen(debug_title), kDebugText_Label);
+
+  int max_chars = (panel_width - 24) / kDebugGlyphWidth;
+  const char *cursor = text;
+  for (int line = 0; line < lines && *cursor; line++) {
+    const char *newline = strchr(cursor, '\n');
+    int length = newline ? (int)(newline - cursor) : (int)strlen(cursor);
+    if (length > max_chars) length = max_chars;
+    DrawDebugHighlightedLine(
+        &layout, panel_x + 12,
+        panel_y + 21 + line * kDebugLineHeight, cursor, length);
+    if (!newline) break;
+    cursor = newline + 1;
+  }
+
+  /* Three short diagonal bars advertise the scale handle without replacing
+   * the native bottom-right frame corner. */
+  FillLogicalRect(&layout, panel_x + panel_width - 13,
+                  panel_y + panel_height - 5, 9, 1,
+                  ARGB(255, 92, 196, 255));
+  FillLogicalRect(&layout, panel_x + panel_width - 10,
+                  panel_y + panel_height - 8, 6, 1,
+                  ARGB(255, 92, 196, 255));
+  FillLogicalRect(&layout, panel_x + panel_width - 7,
+                  panel_y + panel_height - 11, 3, 1,
+                  ARGB(255, 92, 196, 255));
+
+  s_debug_panel_rect = LogicalRect(
+      &layout, panel_x, panel_y, panel_width, panel_height);
+  /* The title strip moves the panel and the lower-right corner scales it.
+   * Remaining report-body clicks pass through to the scene inspector so a
+   * panel covering a requested sample cannot retain an old crosshair. */
+  s_debug_panel_drag_rect = LogicalRect(
+      &layout, panel_x, panel_y, panel_width, 20);
+  s_debug_panel_resize_rect = LogicalRect(
+      &layout, panel_x + panel_width - 18,
+      panel_y + panel_height - 18, 18, 18);
+  s_debug_panel_visible = true;
+  if (s_debug_panel_user_position) {
+    s_debug_panel_output_x = s_debug_panel_rect.x;
+    s_debug_panel_output_y = s_debug_panel_rect.y;
+  }
+
+  SDL_SetRenderDrawBlendMode(s_renderer, old_blend_mode);
+  SDL_SetRenderDrawColor(s_renderer, old_r, old_g, old_b, old_a);
+}
+
+void SettingsOverlay_HideDebugPanel(void) {
+  s_debug_panel_visible = false;
+  s_debug_panel_dragging = false;
+  s_debug_panel_resizing = false;
+}
+
+bool SettingsOverlay_BeginDebugPanelDrag(int output_x, int output_y) {
+  if (!s_debug_panel_visible) return false;
+  if (output_x >= s_debug_panel_resize_rect.x &&
+      output_x < s_debug_panel_resize_rect.x + s_debug_panel_resize_rect.w &&
+      output_y >= s_debug_panel_resize_rect.y &&
+      output_y < s_debug_panel_resize_rect.y + s_debug_panel_resize_rect.h) {
+    s_debug_panel_resizing = true;
+    s_debug_panel_dragging = false;
+    s_debug_panel_user_position = true;
+    s_debug_panel_output_x = s_debug_panel_rect.x;
+    s_debug_panel_output_y = s_debug_panel_rect.y;
+    s_debug_panel_resize_start_x = output_x;
+    s_debug_panel_resize_start_y = output_y;
+    s_debug_panel_resize_start_width = s_debug_panel_rect.w;
+    s_debug_panel_resize_start_height = s_debug_panel_rect.h;
+    s_debug_panel_resize_start_scale = s_debug_panel_render_scale_percent;
+    return true;
+  }
+  if (output_x < s_debug_panel_drag_rect.x ||
+      output_x >= s_debug_panel_drag_rect.x + s_debug_panel_drag_rect.w ||
+      output_y < s_debug_panel_drag_rect.y ||
+      output_y >= s_debug_panel_drag_rect.y + s_debug_panel_drag_rect.h)
+    return false;
+  s_debug_panel_dragging = true;
+  s_debug_panel_user_position = true;
+  s_debug_panel_output_x = s_debug_panel_rect.x;
+  s_debug_panel_output_y = s_debug_panel_rect.y;
+  s_debug_panel_drag_offset_x = output_x - s_debug_panel_rect.x;
+  s_debug_panel_drag_offset_y = output_y - s_debug_panel_rect.y;
+  return true;
+}
+
+void SettingsOverlay_DragDebugPanel(int output_x, int output_y) {
+  if ((!s_debug_panel_dragging && !s_debug_panel_resizing) || !s_renderer)
+    return;
+  if (s_debug_panel_resizing) {
+    int dx = output_x - s_debug_panel_resize_start_x;
+    int dy = output_y - s_debug_panel_resize_start_y;
+    int change_x = s_debug_panel_resize_start_width > 0
+        ? dx * 100 / s_debug_panel_resize_start_width : 0;
+    int change_y = s_debug_panel_resize_start_height > 0
+        ? dy * 100 / s_debug_panel_resize_start_height : 0;
+    int change = abs(change_x) >= abs(change_y) ? change_x : change_y;
+    int scale = s_debug_panel_resize_start_scale * (100 + change) / 100;
+    scale = ((scale + 2) / 5) * 5;
+    if (scale < 50) scale = 50;
+    if (scale > 250) scale = 250;
+    s_debug_panel_scale_percent = scale;
+    return;
+  }
+  int output_width = 0, output_height = 0;
+  if (SDL_GetRendererOutputSize(s_renderer, &output_width, &output_height) ||
+      output_width <= 0 || output_height <= 0)
+    return;
+  int x = output_x - s_debug_panel_drag_offset_x;
+  int y = output_y - s_debug_panel_drag_offset_y;
+  int max_x = output_width - s_debug_panel_rect.w;
+  int max_y = output_height - s_debug_panel_rect.h;
+  if (max_x < 0) max_x = 0;
+  if (max_y < 0) max_y = 0;
+  if (x < 0) x = 0;
+  if (y < 0) y = 0;
+  if (x > max_x) x = max_x;
+  if (y > max_y) y = max_y;
+  s_debug_panel_output_x = x;
+  s_debug_panel_output_y = y;
+  int drag_dx = x - s_debug_panel_rect.x;
+  int drag_dy = y - s_debug_panel_rect.y;
+  s_debug_panel_rect.x = x;
+  s_debug_panel_rect.y = y;
+  s_debug_panel_drag_rect.x += drag_dx;
+  s_debug_panel_drag_rect.y += drag_dy;
+  s_debug_panel_resize_rect.x += drag_dx;
+  s_debug_panel_resize_rect.y += drag_dy;
+}
+
+void SettingsOverlay_EndDebugPanelDrag(void) {
+  s_debug_panel_dragging = false;
+  s_debug_panel_resizing = false;
+}
+
+bool SettingsOverlay_IsDebugPanelDragging(void) {
+  return s_debug_panel_dragging || s_debug_panel_resizing;
+}
+
+bool SettingsOverlay_GetDebugPanelRect(SDL_Rect *rect) {
+  if (!s_debug_panel_visible || !rect) return false;
+  *rect = s_debug_panel_rect;
+  return true;
 }

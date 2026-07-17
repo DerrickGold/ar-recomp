@@ -71,8 +71,21 @@ int MusicReplacements_Load(const char *manifest_path);
  * music mix). Call once at startup after Load. Safe headless. */
 void MusicReplacements_InstallHooks(void);
 
-/* Per-frame game-thread policy: reacts to the music_replacements setting
- * being toggled off mid-song (stops the stream, unmutes the DSP voices). */
+/* Apply the live enhanced-music setting. Disabling immediately stops the OGG
+ * stream and unmutes the authentic SPC voices; enabling can adopt the song
+ * already playing instead of waiting for the next song-change command. */
+void MusicReplacements_ApplySetting(void);
+
+/* Suspend/resume the replacement decoder for host-owned pauses (P and the
+ * settings overlay). Native in-game pause is tracked independently from the
+ * driver's $F2 command. Neither path closes the stream or advances its cursor;
+ * playback resumes only after both pause reasons clear. */
+void MusicReplacements_SetHostPaused(bool paused);
+
+/* Combined native/host pause state, exposed for diagnostics and tests. */
+bool MusicReplacements_IsPlaybackPaused(void);
+
+/* Per-frame safety policy for non-registry writers of g_settings. */
 void MusicReplacements_FrameTick(void);
 
 /* First entry matching (src, song) whose gates pass and whose audio loaded;

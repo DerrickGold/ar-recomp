@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 project(ActRaiserRecomp C)
 
+# A bare configure (no preset, no -DCMAKE_BUILD_TYPE) would otherwise build
+# with NO optimization and no -g. Default to the optimized play config; the
+# CMakePresets.json presets and any explicit -D still override this.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+    message(STATUS "No build type given — defaulting to RelWithDebInfo")
+endif()
+
 set(CMAKE_C_STANDARD 11)
 include(CTest)
 
@@ -64,6 +72,7 @@ add_executable(ActRaiserRecomp
     src/config.c
     src/settings.c
     src/settings_overlay.c
+    src/scene_inspector.c
     src/run_dir.c
     src/main.c
     src/actraiser_00.c
@@ -171,6 +180,16 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_hd_manifest COMMAND actraiser_hd_manifest_test)
+
+    add_executable(actraiser_scene_inspector_test
+        tests/scene_inspector_test.c
+        src/scene_inspector.c
+    )
+    target_include_directories(actraiser_scene_inspector_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_scene_inspector COMMAND actraiser_scene_inspector_test)
 
     add_executable(actraiser_music_manifest_test
         tests/music_manifest_test.c

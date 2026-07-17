@@ -9,6 +9,7 @@
 
 Settings g_settings;
 static SettingsChangeObserver s_change_observer;
+static SettingsActionObserver s_action_observer;
 
 enum { kSettingsMaxDescriptors = 64, kSettingsLayerValueSize = 512 };
 typedef struct SettingsLayerValue {
@@ -185,28 +186,90 @@ static int FormatAudioVolume(char *buffer, int buffer_size,
   return snprintf(buffer, (size_t)buffer_size, "%d%%", *(const int *)field);
 }
 
-static bool ParseExtendedAspect(const char *text, void *field) {
-  uint16 *value = (uint16 *)field;
-  if (!text || !text[0] || !strcmp(text, "off") || !strcmp(text, "Off") ||
-      !strcmp(text, "0") || !strcmp(text, "0:0")) {
-    *value = 0;
+static bool ParseAudioFrequency(const char *text, void *field) {
+  int *value = (int *)field;
+  if (!text) return false;
+  if (!strcmp(text, "32040") || !strcmp(text, "32.04 kHz") ||
+      !strcmp(text, "32.04khz") || !strcmp(text, "32.04")) {
+    *value = kAudioFrequency_32040;
     return true;
   }
-  unsigned x = 0, y = 0;
-  char trailing = 0;
-  if (sscanf(text, "%u:%u%c", &x, &y, &trailing) != 2 || !x || !y ||
-      x > 255 || y > 255)
-    return false;
-  *value = (uint16)((x << 8) | y);
+  if (!strcmp(text, "44100") || !strcmp(text, "44.1 kHz") ||
+      !strcmp(text, "44.1khz") || !strcmp(text, "44.1")) {
+    *value = kAudioFrequency_44100;
+    return true;
+  }
+  if (!strcmp(text, "48000") || !strcmp(text, "48 kHz") ||
+      !strcmp(text, "48khz") || !strcmp(text, "48")) {
+    *value = kAudioFrequency_48000;
+    return true;
+  }
+  /* Enum indices remain accepted for generated/headless settings input. */
+  if (!strcmp(text, "0")) {
+    *value = kAudioFrequency_32040;
+    return true;
+  }
+  if (!strcmp(text, "1")) {
+    *value = kAudioFrequency_44100;
+    return true;
+  }
+  if (!strcmp(text, "2")) {
+    *value = kAudioFrequency_48000;
+    return true;
+  }
+  return false;
+}
+
+static bool ParseExtendedAspect(const char *text, void *field) {
+  int *value = (int *)field;
+  if (!text || !text[0] || !strcmp(text, "off") || !strcmp(text, "Off") ||
+      !strcmp(text, "0") || !strcmp(text, "0:0") ||
+      !strcmp(text, "4:3")) {
+    *value = kScreenAspect_43;
+    return true;
+  }
+  if (!strcmp(text, "16:9") || !strcmp(text, "1")) {
+    *value = kScreenAspect_169;
+    return true;
+  }
+  if (!strcmp(text, "16:10") || !strcmp(text, "2")) {
+    *value = kScreenAspect_1610;
+    return true;
+  }
+  return false;
+}
+
+static bool ParseWarpTarget(const char *text, void *field) {
+  uint16 *value = (uint16 *)field;
+  if (!text || !text[0]) {
+    *value = 0x0101;
+    return true;
+  }
+  if (text[0] == '$') text++;
+  else if (text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) text += 2;
+  if (!text[0] || strlen(text) > 4) return false;
+  char *end = NULL;
+  unsigned long parsed = strtoul(text, &end, 16);
+  if (!end || *end || parsed > 0xffff) return false;
+  *value = (uint16)parsed;
   return true;
 }
 
-static int FormatExtendedAspect(char *buffer, int buffer_size,
-                                const void *field) {
-  uint16 value = *(const uint16 *)field;
-  if (!value) return snprintf(buffer, (size_t)buffer_size, "off");
-  return snprintf(buffer, (size_t)buffer_size, "%u:%u",
-                  (unsigned)(value >> 8), (unsigned)(value & 0xff));
+static int FormatWarpTarget(char *buffer, int buffer_size,
+                            const void *field) {
+  return snprintf(buffer, (size_t)buffer_size, "%04X",
+                  (unsigned)*(const uint16 *)field);
+}
+
+static bool ParseTurboMultiplier(const char *text, void *field) {
+  if (!text || !text[0]) return false;
+  char *end = NULL;
+  long value = strtol(text, &end, 0);
+  if (!end || *end) return false;
+  if (value < 2) value = 2;
+  if (value > 64) value = 64;
+  *(int *)field = (int)value;
+  return true;
 }
 
 static bool ParsePixelAspect(const char *text, void *field) {
@@ -236,6 +299,18 @@ static const char *const kPixelAspectLabels[] = {
   "4:3 CRT",
 };
 
+static const char *const kScreenAspectLabels[] = {
+  "4:3",
+  "16:9",
+  "16:10",
+};
+
+static const char *const kAudioFrequencyLabels[] = {
+  "32.04 kHz",
+  "44.1 kHz",
+  "48 kHz",
+};
+
 #define BOOL_SETTING(id, env_name, text, help, cat, def, is_sticky, active, changed) \
   { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
     &g_settings.id, def, 0, 1, 1, is_sticky, NULL, 0, active, changed, \
@@ -244,6 +319,10 @@ static const char *const kPixelAspectLabels[] = {
   { #id, env_name, text, help, kSettingType_Int, kApply_Passive, cat, \
     &g_settings.id, def, lo, hi, 1, false, NULL, 0, active, NULL, \
     parser, NULL }
+#define ACTION_SETTING(id, text, help) \
+  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
+    kSettingCat_Qol, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
+    NULL, NULL }
 
 const SettingDesc g_setting_descs[] = {
   { "display_mode", "AR_DISPLAY_MODE", "Render profile",
@@ -265,14 +344,16 @@ const SettingDesc g_setting_descs[] = {
   BOOL_SETTING(hd_replacements, "AR_HD_REPLACEMENTS", "HD replacements",
                "Substitute HD art per game-assets/manifest.ini entries when their art is present.",
                kSettingCat_Display, 1, false, NULL, NULL),
-  { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Extended aspect",
-    "Allocate a widescreen framebuffer for an X:Y display ratio; off keeps authentic geometry.",
-    kSettingType_Custom, kApply_Restart, kSettingCat_Aspect,
-    &g_settings.extended_aspect, 0, 0, 0xffff, 1, false, NULL, 0,
-    NULL, NULL, ParseExtendedAspect, FormatExtendedAspect },
+  { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Screen ratio",
+    "Select authentic 4:3, 16:9, or 16:10 output; video geometry updates live.",
+    kSettingType_Enum, kApply_Callback, kSettingCat_Aspect,
+    &g_settings.extended_aspect, kScreenAspect_43,
+    kScreenAspect_43, kScreenAspect_1610, 1, false,
+    kScreenAspectLabels, kScreenAspect_Count, NULL, NULL,
+    ParseExtendedAspect, NULL },
   { "pixel_aspect", "AR_ASPECT_PAR", "Pixel aspect",
     "Use the original 4:3 CRT pixel stretch or square output pixels.",
-    kSettingType_Enum, kApply_Restart, kSettingCat_Aspect,
+    kSettingType_Enum, kApply_Callback, kSettingCat_Aspect,
     &g_settings.pixel_aspect, kPixelAspect_Crt43,
     kPixelAspect_Square, kPixelAspect_Crt43, 1, false,
     kPixelAspectLabels, kPixelAspect_Count, NULL, NULL,
@@ -289,7 +370,7 @@ const SettingDesc g_setting_descs[] = {
     NULL, NULL, NULL, NULL },
   { "new_renderer", "AR_NEW_RENDERER", "New renderer",
     "Use the modern PPU renderer; widescreen always requires this renderer.",
-    kSettingType_Bool, kApply_Restart, kSettingCat_Display,
+    kSettingType_Bool, kApply_Callback, kSettingCat_Display,
     &g_settings.new_renderer, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
   { "ignore_aspect_ratio", "AR_IGNORE_ASPECT_RATIO", "Stretch to window",
@@ -303,10 +384,12 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.audio_enabled, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
   { "audio_frequency", "AR_AUDIO_FREQ", "Audio frequency",
-    "Set the host audio device sample rate on the next device initialization.",
-    kSettingType_Int, kApply_Restart, kSettingCat_Audio,
-    &g_settings.audio_frequency, 44100, 8000, 192000, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL },
+    "Select 32.04, 44.1, or 48 kHz for the next host audio-device initialization.",
+    kSettingType_Enum, kApply_Restart, kSettingCat_Audio,
+    &g_settings.audio_frequency, kAudioFrequency_44100,
+    kAudioFrequency_32040, kAudioFrequency_48000, 1, false,
+    kAudioFrequencyLabels, kAudioFrequency_Count, NULL, NULL,
+    ParseAudioFrequency, NULL },
   { "audio_samples", "AR_AUDIO_SAMPLES", "Audio buffer samples",
     "Set the host audio callback buffer size on the next device initialization.",
     kSettingType_Int, kApply_Restart, kSettingCat_Audio,
@@ -320,9 +403,39 @@ const SettingDesc g_setting_descs[] = {
   BOOL_SETTING(audio_dialog_blip, "AR_DIALOG_BLIP", "Dialogue text blip",
                "Play the per-character sound while Sky Palace dialogue is printed.",
                kSettingCat_Audio, 1, false, NULL, NULL),
-  BOOL_SETTING(music_replacements, "AR_MUSIC_REPLACEMENTS", "Music replacements",
-               "Stream OGG music per game-assets/manifest.ini entries when their audio is present.",
-               kSettingCat_Audio, 1, false, NULL, NULL),
+  { "music_replacements", "AR_MUSIC_REPLACEMENTS", "Enhanced music",
+    "Replace authentic music with matching OGG tracks from game-assets/manifest.ini.",
+    kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
+    &g_settings.music_replacements, 1, 0, 1, 1, false, NULL, 0,
+    NULL, NULL, NULL, NULL },
+  INT_SETTING(turbo_multiplier, "AR_TURBO_MULT", "Turbo multiplier",
+              "Number of game frames advanced per rendered frame while turbo is active.",
+              kSettingCat_Qol, 8, 2, 64, ParseTurboMultiplier, NULL),
+  { "warp_target", "AR_WARP", "Warp target",
+    "Raw hexadecimal region/map target used by Warp now; see README for verified values.",
+    kSettingType_Custom, kApply_Passive, kSettingCat_Qol,
+    &g_settings.warp_target, 0x0101, 0, 0xffff, 1, false, NULL, 0,
+    NULL, NULL, ParseWarpTarget, FormatWarpTarget },
+  BOOL_SETTING(scene_inspector, "AR_SCENE_INSPECTOR", "Scene inspector",
+               "Click the game to pause and identify BG tiles, OAM sprites, "
+               "VRAM addresses, palettes, hashes, and manifest gates.",
+               kSettingCat_Qol, 0, false, NULL, NULL),
+  ACTION_SETTING("toggle_pause", "Pause / resume",
+                 "Toggle game pause after the settings overlay closes."),
+  ACTION_SETTING("toggle_turbo", "Toggle turbo",
+                 "Toggle fast-forward using the configured turbo multiplier."),
+  ACTION_SETTING("save_state", "Save state",
+                 "Save quick-state slot 0, matching the F5 hotkey."),
+  ACTION_SETTING("load_state", "Load state",
+                 "Load quick-state slot 0, matching the F7 hotkey."),
+  ACTION_SETTING("warp_now", "Warp now",
+                 "Stage the configured raw warp target through the game's transition path."),
+  ACTION_SETTING("take_snapshot", "Take snapshot",
+                 "Capture WRAM, VRAM, CGRAM, OAM, and the current game framebuffer."),
+  ACTION_SETTING("restart_game", "Restart game",
+                 "Persist settings and battery SRAM, then restart the application."),
+  ACTION_SETTING("exit_desktop", "Exit to desktop",
+                 "Persist settings and battery SRAM, then close the application."),
   BOOL_SETTING(cheat_all_magic, "AR_ALL_MAGIC", "All magic",
                "Unlock all four spells; disabling cannot undo unlocks already written.",
                kSettingCat_Cheats, 0, true, NULL, NULL),
@@ -482,7 +595,9 @@ bool Settings_GetLong(const SettingDesc *desc, long *value) {
     case kSettingType_Int:
     case kSettingType_Enum: *value = *(const int *)desc->field; return true;
     case kSettingType_Mask: *value = *(const uint16 *)desc->field; return true;
-    case kSettingType_Custom: return false;
+    case kSettingType_Custom:
+    case kSettingType_Action:
+      return false;
   }
   return false;
 }
@@ -522,7 +637,9 @@ SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value) {
     case kSettingType_Int:
     case kSettingType_Enum: *(int *)desc->field = (int)value; break;
     case kSettingType_Mask: *(uint16 *)desc->field = (uint16)value; break;
-    case kSettingType_Custom: return kSettingChange_Rejected;
+    case kSettingType_Custom:
+    case kSettingType_Action:
+      return kSettingChange_Rejected;
   }
   return FinishChange(desc, desc->sticky && old_value != 0 && value == 0);
 }
@@ -530,6 +647,7 @@ SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value) {
 SettingChangeResult Settings_SetText(const SettingDesc *desc,
                                      const char *text) {
   if (!desc || !text) return kSettingChange_Rejected;
+  if (desc->type == kSettingType_Action) return kSettingChange_Rejected;
   if (desc->type == kSettingType_Custom) {
     if (!desc->parse) return kSettingChange_Rejected;
     char before[512], after[512];
@@ -590,6 +708,7 @@ SettingChangeResult Settings_SetText(const SettingDesc *desc,
 
 SettingChangeResult Settings_Reset(const SettingDesc *desc) {
   if (!desc) return kSettingChange_Rejected;
+  if (desc->type == kSettingType_Action) return kSettingChange_Rejected;
   if (desc->type == kSettingType_Custom)
     return Settings_SetText(desc, "");
   return Settings_SetLong(desc, desc->defval);
@@ -617,6 +736,8 @@ int Settings_FormatValue(const SettingDesc *desc, char *buffer,
     case kSettingType_Custom:
       buffer[0] = 0;
       return 0;
+    case kSettingType_Action:
+      return snprintf(buffer, buffer_size, "RUN");
   }
   buffer[0] = 0;
   return 0;
@@ -624,6 +745,15 @@ int Settings_FormatValue(const SettingDesc *desc, char *buffer,
 
 void Settings_SetChangeObserver(SettingsChangeObserver observer) {
   s_change_observer = observer;
+}
+
+void Settings_SetActionObserver(SettingsActionObserver observer) {
+  s_action_observer = observer;
+}
+
+bool Settings_InvokeAction(const SettingDesc *desc) {
+  return desc && desc->type == kSettingType_Action &&
+         s_action_observer && s_action_observer(desc);
 }
 
 const char *Settings_CategoryName(SettingCategory category) {
@@ -674,6 +804,8 @@ static void SetSettingDefault(const SettingDesc *desc) {
     case kSettingType_Custom:
       if (desc->parse) desc->parse("", desc->field);
       break;
+    case kSettingType_Action:
+      break;
   }
 }
 
@@ -693,6 +825,8 @@ static bool ApplyLegacyEnvironmentValue(const SettingDesc *desc,
     *(int *)desc->field = (int)strtoul(text, NULL, 0);
   } else if (desc->type == kSettingType_Mask && text[0]) {
     *(uint16 *)desc->field = (uint16)strtoul(text, NULL, 16);
+  } else if (desc->type == kSettingType_Action) {
+    return false;
   }
   return true;
 }
@@ -828,6 +962,12 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
               path, line_number, key);
       continue;
     }
+    if (desc->type == kSettingType_Action) {
+      fprintf(stderr, "[settings] %s:%d: action key '%s' is not persistent\n",
+              path, line_number, key);
+      success = false;
+      continue;
+    }
     bool applied = boot
         ? ApplyBootLayerValue(desc, value, rank, false)
         : Settings_SetText(desc, value) != kSettingChange_Rejected;
@@ -943,6 +1083,7 @@ bool Settings_Save(const char *path) {
   char value[512];
   for (int i = 0; success && i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
+    if (desc->type == kSettingType_Action) continue;
     /* CUSTOM is derived from the individual widescreen rows. Omitting the
      * preset lets those rows reconstruct it without a contradictory action. */
     if (desc->field == &g_settings.display_mode &&
@@ -1020,9 +1161,28 @@ int Settings_VisibleWidth(void) {
 }
 
 int Settings_ExtendedAspectX(void) {
-  return (g_settings.extended_aspect >> 8) & 0xff;
+  switch (g_settings.extended_aspect) {
+    case kScreenAspect_169:
+    case kScreenAspect_1610:
+      return 16;
+    default:
+      return 0;
+  }
 }
 
 int Settings_ExtendedAspectY(void) {
-  return g_settings.extended_aspect & 0xff;
+  switch (g_settings.extended_aspect) {
+    case kScreenAspect_169: return 9;
+    case kScreenAspect_1610: return 10;
+    default: return 0;
+  }
+}
+
+int Settings_AudioFrequencyHz(void) {
+  switch (g_settings.audio_frequency) {
+    case kAudioFrequency_32040: return 32040;
+    case kAudioFrequency_48000: return 48000;
+    case kAudioFrequency_44100:
+    default: return 44100;
+  }
 }

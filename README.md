@@ -89,6 +89,8 @@ Extended runtime features:
 * Global host settings overlay with live configuration, persistent user
   settings, and mode-independent cheat staging
   ([architecture and implementation](docs/settings-system.md))
+* Click-driven scene inspector for locating live BG/OBJ/Mode-7 graphics and
+  deriving asset-replacement manifest entries
 
 #### Screenshots
 
@@ -144,7 +146,7 @@ ActRaiserRecomp/
 │   ├── rom-map.md             # ROM data-region reference
 │   ├── rendering-engine.md    # rendering/streaming/OAM architecture
 │   ├── widescreen-survey.md   # widescreen evidence + implementation record
-│   ├── settings-system.md     # live settings + overlay UI design
+│   ├── settings-system.md     # live settings + overlay architecture/record
 │   └── progress.md            # ★ per-action-level / per-sim-mode-town /
 │                                 major-functionality status tracker
 ├── recomp/
@@ -288,11 +290,11 @@ Gamepad input isn't implemented at all yet.
 |---|---|
 | `WindowScale` | integer window scale factor |
 | `Fullscreen` | desktop-fullscreen window mode; live changes are supported by the settings registry |
-| `NewRenderer` | use the newer rendering path |
-| `ExtendedAspectRatio` | target widescreen ratio such as `16:9`; `off` disables widescreen |
-| `AspectPAR` | `4:3` for SNES pixel-aspect correction or `square` for square pixels |
+| `NewRenderer` | use the newer rendering path; live, though widescreen always forces it on |
+| `ExtendedAspectRatio` | live screen ratio: `4:3`/legacy `off`, `16:9`, or `16:10` |
+| `AspectPAR` | live pixel shape: `4:3` for SNES pixel-aspect correction or `square` |
 | `IgnoreAspectRatio` | disable logical-size aspect correction and stretch to the window |
-| `EnableAudio`, `AudioFreq`, `AudioSamples` | audio output settings; enable/disable is live, format changes apply on restart |
+| `EnableAudio`, `AudioFreq`, `AudioSamples` | audio output settings; enable/disable is live, frequency cycles through `32040`/`44100`/`48000` Hz, and format changes apply on restart |
 
 These legacy names are staged into the same descriptor registry used by the
 menu and `settings.ini`; `g_config` is no longer consulted by runtime video or
@@ -333,17 +335,66 @@ see `HandleInput()` in `src/main.c`:
 | `F5` / `F7` | save / load state |
 | `F6` | level warp (see `AR_WARP` below) |
 | `F2` | full diagnostic snapshot (WRAM/VRAM/CGRAM/OAM + screenshot) |
+| `F3` | toggle scene inspector; left-click pauses/inspects, drag its panel to move it, right-click clears/resumes |
 | `F9` | cycle 4:3 authentic → widescreen raw → widescreen full (requires `ExtendedAspectRatio`; paused BG/crop changes redraw immediately, sprite/activation changes apply next game frame) |
 | `Shift`+`F9` | dump diagnostic state |
 | `-` / `+` | decrease/increase the promoted widescreen HUD by 0.25×; the first adjustment starts from the current game presentation scale |
 
-The host settings overlay is available from every game state. In the
-overlay, Up/Down selects a row, Left/Right changes it, `Q`/`W` changes
-category, `X` or Return advances/toggles a value, `A` restores its default, and
-`Z`, Escape, or F1 closes the menu. F2 remains available for a full
-snapshot while the overlay is open. Game-frame advancement and SNES input are
-frozen until it closes; accepted changes are atomically written to
-`settings.ini`.
+The host settings overlay is available from every game state. It opens with
+focus on the primary left-hand navigation: Up/Down selects a category or
+direct action and `X` (SNES A) or Return enters/runs it. Inside a category,
+Up/Down selects a row, Left/Right changes ordinary values, and `X` or Return
+advances/toggles ordinary values, opens direct text editing for custom values,
+or runs the selected command. `Z` (SNES B) returns from a category to primary
+navigation; from primary navigation it closes the overlay. During text entry,
+Backspace edits, Return validates/applies, and Escape cancels. `A` restores a
+setting's default; Escape or F1 closes the menu from either focus. F2 remains available for
+a full snapshot while the overlay is open. Game-frame advancement and SNES
+input are frozen until it closes; accepted setting changes are atomically
+written to `settings.ini`. ACTION rows themselves are not persisted.
+
+Scene Inspector, Restart Game, and Exit Desktop are direct leaves in the
+primary left-hand navigation rather than one-row submenus or entries buried
+under Quality of life. Pressing A on any of them applies/runs it immediately. The QoL
+category retains the persistent turbo multiplier and raw warp target plus
+Pause/resume, Toggle turbo, Save state, Load state, Warp now, and Take snapshot.
+Restart and exit flush `settings.ini` and battery SRAM through the normal
+shutdown path; restart then replaces the current process with the same
+executable and command line.
+
+With the scene inspector enabled (`F3`, its top-level menu item, or
+`AR_SCENE_INSPECTOR=1`), left-click anywhere in the game viewport to freeze the
+current frame. A clean, color-coded monospace panel reports game mode/submode,
+camera and PPU
+state, the BG tile(s) and OAM sprite(s) under the pointer, tile/frame numbers,
+palette/priority/flips, and VRAM tilemap/character addresses. The console gets
+the full report, including a manifest gate/draft and tile hashes compatible
+with `AR_TILE_CENSUS`. The compact panel fits its natural width to the longest
+visible report line and initially opens opposite the selected
+point and can be moved by left-dragging its title strip. Dragging the cyan
+lower-right grip uniformly scales the frame, font, and spacing so the report
+can reveal more of the scene without truncating columns. Clicks elsewhere in
+the report body pass through to scene selection. Right-click, F3, or P
+clears the marker and releases the pause created by the inspector; an existing
+manual pause is preserved. `screen` and `mode7`
+manifest planes are live today; the inspector identifies hash-keyed `tiles`
+assets but labels that replacement plane as reserved until the N-x renderer
+path is implemented. When SDL logical rendering is active, its mouse events
+already arrive in logical coordinates and are mapped directly through the
+physical presentation viewport. The no-logical-size path converts window
+coordinates to renderer output first. PAR/letterboxing, widescreen cropping,
+and the independently scaled/anchored promoted HUD are then resolved. HUD
+clicks are mapped back through the same presentation chunks used to render
+them, so the marker, highlighted source tile/sprite, and pointer stay aligned.
+
+Screen ratio is a normal three-choice row—4:3, 16:9, and 16:10—not a text
+field. Screen ratio, pixel aspect, render profile, renderer path, window scale,
+fullscreen, stretching, HUD/menu scale, and widescreen policy changes apply
+live. Audio frequency is a three-choice 32.04/44.1/48 kHz row. It and audio
+buffer size retain the restart marker because they require reopening SDL's
+audio device. The actual opened device rate feeds a continuous resampling
+boundary; SPC, enhanced OGG, and MSU-1 sources therefore retain the same pitch
+and tempo at every preset and callback-buffer size.
 
 `AR_MENU_SCALE=0` (the default, displayed as **Auto**) chooses the largest
 quarter-step content scale that preserves the settings layout in the complete
@@ -377,7 +428,7 @@ the config's `AR_*` bridge or changed through the settings overlay:
 |---|---|
 | `AR_AUDIO_VOLUME=<0..100>` | master output volume (default 100); scales the final music/SFX/MSU-1 mix |
 | `AR_DIALOG_BLIP=0` | mutes only the per-character Sky Palace dialogue sound; other uses of the same sound/event ID remain active |
-| `AR_MUSIC_REPLACEMENTS=0` | disables manifest-driven music replacement (default on, inert without audio files) |
+| `AR_MUSIC_REPLACEMENTS=0` | disables enhanced manifest-driven music replacement (default on, inert without audio files); toggling live immediately hands the current song between OGG and the authentic SPC sequencer |
 
 For an automated live probe without the overlay, use for example
 `AR_SETTING_SET=audio_master_volume=25`; the scheduled settings mechanism

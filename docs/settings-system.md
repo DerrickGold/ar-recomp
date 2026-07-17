@@ -1,25 +1,32 @@
 # ActRaiser Recomp — Settings & Live-Config System
 
-Design for a single source of truth that captures every custom setting (cheats,
+Architecture and implementation record for the single source of truth that
+captures every custom setting (cheats,
 widescreen knobs, display/audio, QoL) and defines each one's **path to live
 runtime updates**, so the host overlay menu can flip them mid-run. This
 is the "option B" refactor from the 2026-07-12 settings scan.
 
-Status: **PHASES 1–4 AND THE PHASE-5A OVERLAY SLICE IMPLEMENTED.**
+Status: **PHASES 1–5 IMPLEMENTED.**
 `src/settings.{c,h}` now own
 the existing cheat fields, nine widescreen behavior gates, render profile,
-host-output HUD/menu scales, application display/aspect/audio fields, and a 36-row
-descriptor registry with lookup, formatting, availability, mutation,
+host-output HUD/menu scales, application display/aspect/audio fields, and a
+47-row descriptor registry (39 persistent settings plus 8 non-persistent host
+actions) with lookup, formatting, availability, mutation,
 callbacks, sticky/restart results, observer notification, layered INI loading,
 and atomic persistence. The promoted game HUD proves the post-upscale
 host-compositor seam; master audio gain, audio enable, fullscreen, window
 sizing, and the Sky Palace dialogue blip prove the live callback paths. The
-first host settings menu now renders registry categories/rows with the
+host settings menu renders registry categories/rows with the
 ROM-decoded font and selector, consumes input, freezes game advancement while
 remaining redrawable, applies live values, and atomically saves accepted
-changes. The native dialog-frame theme is also ROM-decoded. A native menu
-entry, custom-value editing, ACTION rows, and the independent save
-codec/backends/editor remain.
+changes. The native dialog-frame theme is also ROM-decoded. Direct text editing
+handles custom values such as PAR pins and warp targets, while screen ratio is
+an explicit 4:3/16:9/16:10 enum; ACTION
+rows reuse the pause, turbo, save/load-state, warp, snapshot, restart, and
+graceful-exit host paths.
+The optional native ActRaiser menu entry, broader gamepad input, and the
+independent save codec/backends/editor remain outside the completed overlay
+phase.
 Companion docs:
 [SEAMS.md](SEAMS.md) (gameplay/tunable seams the cheats hook),
 [rendering-engine.md](rendering-engine.md) (widescreen policy internals),
@@ -85,7 +92,7 @@ the `*_DBG` family intentionally remain direct `getenv` consumers (§11).
 
 **Non-goals (explicitly out of scope here)**
 - Migrating the ~45 debug/diagnostic `AR_*` flags (§11). They stay on `getenv`.
-- Live realloc for the RESTART-class settings on day one (§4, §10.2).
+- Live SDL audio-device reopen for the two remaining RESTART rows (§4, §10.2).
 
 ---
 
@@ -105,18 +112,23 @@ typedef struct Settings {
   int hud_scale_percent;       // 0=match game; 100=native host-output 1x
   bool hd_replacements;
 
-  /* Application presentation (restart rows retain desired value; host owns a
-   * boot snapshot for already-created resources). */
-  uint16 extended_aspect;      // packed (X << 8) | Y; 0 = authentic geometry
+  /* Application presentation; video geometry rebinds live. */
+  int extended_aspect;         // enum: 4:3, 16:9, or 16:10
   PixelAspect pixel_aspect;    // square or 4:3 CRT stretch
   int window_scale;
   bool fullscreen, new_renderer, ignore_aspect_ratio;
 
   /* Audio */
   bool audio_enabled;
-  int  audio_frequency, audio_samples; // restart-class device format
+  AudioFrequency audio_frequency; // enum: 32.04, 44.1, or 48 kHz
+  int  audio_samples;             // restart-class device format
   int  audio_master_volume;    // 0..100; atomic callback mirror
   bool audio_dialog_blip;      // exact $01:902D COP #$07 site
+
+  /* QoL/debug utility state */
+  int turbo_multiplier;
+  uint16 warp_target;
+  bool scene_inspector;        // F3 + click, read-only PPU asset identity
 
   /* Cheats (action-gated unless marked all-mode) */
   bool   cheat_all_magic;      // all-mode  -> $0299-$029C
@@ -264,7 +276,7 @@ Required behavior:
 5. Closing the overlay must release/restore captured input so a held menu key
    cannot become a stuck SNES button.
 
-The Phase-5A slice implements those lifecycle rules in
+The Phase-5 implementation applies those lifecycle rules in
 `src/settings_overlay.{c,h}`. Escape or F1 opens it globally before emulated
 input dispatch, independent of `$18/$19` or any native menu state. Neither key
 maps to the SNES controller, and opening clears the currently held emulated
@@ -273,11 +285,21 @@ closing clears input again so no menu navigation can become a stuck game
 button. Window-manager quit remains available while Escape is owned by the
 menu.
 
+Left/Right performs ordinary stepped edits. Pressing SNES A (`X`/Return) on a
+CUSTOM row starts SDL text-input mode with the current formatted value; typed
+text and Backspace edit a scratch buffer, Return validates it through
+`Settings_SetText`, and Escape cancels without touching the live value.
+Pressing the same button on an ACTION row calls `Settings_InvokeAction`.
+Actions are descriptor-driven but intentionally absent from `settings.ini`;
+the stored `turbo_multiplier` and `warp_target` parameters are ordinary
+persistent rows.
+
 The current ActRaiser target is C and links SDL2 only. A reusable RmlUi launcher
 exists under `snesrecomp/runner/src/launcher/`, but it is not part of
 `runner.cmake` and expects C++ plus an existing OpenGL 3.3 context; ActRaiser
-currently presents with `SDL_Renderer`. The lowest-risk first overlay is
-therefore a small SDL-rendered immediate UI with an in-repo bitmap font. Reusing
+currently presents with `SDL_Renderer`. The implemented overlay is therefore a
+small SDL-rendered immediate UI with ROM-decoded assets and a host fallback
+font. Reusing
 RmlUi remains a later option if the runtime adopts its GL/C++ integration (see
 §10.4).
 
@@ -292,6 +314,14 @@ column padding use an independent nearest-neighbor content scale.
 current range reaches `800` for high-DPI displays. Manual values larger than
 the available window are fit-clamped for rendering without rewriting the
 saved preference.
+
+Navigation is explicitly hierarchical. The overlay opens focused on the
+left-hand primary list; Up/Down moves between categories and promoted direct
+actions, and SNES A enters a category. Within a category, Up/Down selects rows,
+Left/Right edits values, and SNES B returns focus to the primary list. SNES B
+closes only when primary navigation already has focus. Inspector, Restart, and
+Exit are direct leaves and therefore execute/toggle immediately on A without a
+duplicate one-row settings panel. L/R no longer changes categories.
 
 The font is the game's real 256-tile, 8×8, 2bpp dialog set. The title asset
 script's second `$80` operation uploads it to BG3 VRAM `$5000`; its encoded
@@ -337,8 +367,8 @@ live:
 | Path | Mechanism | Settings | Cost |
 |---|---|---|---|
 | **PASSIVE** | Existing gate reads the field every frame. Menu writes struct → next frame reflects it. No extra code. | 11 cheat controls, 9 widescreen behaviors, host HUD scale, dialogue blip | free |
-| **CALLBACK** | `on_change()` fires one host update. Implemented audio master gain copies to an atomic callback mirror; future rows include `window_scale`→`SDL_SetWindowSize`, `fullscreen`→`SDL_SetWindowFullscreen`, `audio_enabled` mute→`SDL_PauseAudioDevice`, and `ignore_aspect_ratio`→renderer logical-size. | master volume now; window scale/fullscreen/ignore-aspect/audio-device toggle during Config migration | small |
-| **RESTART** | Needs realloc/reinit unsafe to do cheaply mid-frame. Per setting: attempt heavy live reinit, or set a "pending — applies on relaunch" badge (§10.2). | aspect on/off + ratio (window + PPU buffer realloc), `new_renderer`, audio freq/samples (device reopen; audio thread) | real work |
+| **CALLBACK** | The host observer performs one live update: master gain copies to an atomic callback mirror; display callbacks resize/rebind the preallocated video surfaces; window/fullscreen/stretch controls update SDL; audio enable pauses/resumes the device. | master volume, screen/pixel aspect, renderer path, window scale, fullscreen, ignore-aspect, audio-device toggle | small |
+| **RESTART** | Requires host-device reinitialization unsafe to perform from the current callback path. | audio frequency/samples (audio-device reopen; audio thread) | real work |
 | **ACTION** | Not stored toggles — commands the menu invokes; only the *param* is stored. | warp (`warp_target`, F6), turbo (`turbo_mult`, T), savestate (F5/F7), snapshot (F2), pause (P) | reuse existing hotkey paths (`src/main.c:587`) |
 | **SAVE** | Transactional mutation of the canonical `g_sram` image + mandatory checksum recompute; optional commit through the active `.srm` or `.ini` backend. Takes effect **the next time the game loads the save from its own title menu** — no app restart. See §4.1. | `save_region_prog[]` (save-format.md §3.1), save import/export actions | small, but see the §4.1 hazard |
 
@@ -353,17 +383,24 @@ if (en < 0) { ...getenv("AR_ALL_MAGIC")... }
 if (en) { ... }
 ```
 
-For aspect specifically there is a strong intermediate that downgrades it from
-RESTART to PASSIVE: the margin *amount* within an already-wide window is already
-per-frame (`PpuSetExtraSpace` runs every frame in the policy,
-`src/actraiser_rtl.c:469`). Allocate the window + PPU buffers at the **max**
-budget on boot, then let the menu clamp visible columns live — no realloc. See
-§10.2.
+Aspect now uses the renderer's compile-time maximum 448-pixel capacity while
+retaining an active pitch of `256 + 2*extra`. Ratio or pixel-shape changes
+recompute `extra`, rebind the PPU and overlay surfaces with that pitch, and
+select the matching texture subrect. The emulated PPU/WRAM state is untouched,
+so 4:3, 16:9, and 16:10 can switch live without reallocating game state.
 
 ### Audio control seams (Phase 4)
 
 The current audio path has two useful control points, and they solve different
 problems:
+
+- **Device rate is a presentation boundary, not a clock.** The runner's S-DSP
+  FIFO is always 32.04 kHz. `RtlSetAudioOutputRate()` receives the actual rate
+  returned by SDL, and `dsp_getSamplesResampled()` retains a fractional native
+  cursor across callbacks. Enhanced OGG and MSU-1 source consumption likewise
+  derives from `out_frames / output_rate`, with fractional carry. Changing
+  32.04/44.1/48 kHz or `AudioSamples` can therefore change latency/quality but
+  never pitch, tempo, or the amount of emulated audio consumed per second.
 
 - **Master volume is post-mix host gain.** `AudioCallback()` calls
   `RtlRenderAudio()` first, then scales the final interleaved signed-16-bit PCM
@@ -394,14 +431,18 @@ DSP key-on/voice/source activity. Acceptance requires captures from every major
 mode and an explicit echo test; a slider that merely changes DSP master volume
 would be a mislabeled duplicate of the implemented master control.
 
-- **Music replacement (`music_replacements` / `AR_MUSIC_REPLACEMENTS`, default
-  on, passive).** Master toggle for manifest-driven OGG music streaming
+- **Enhanced music (`music_replacements` / `AR_MUSIC_REPLACEMENTS`, default
+  on, callback).** Master toggle for manifest-driven OGG music streaming
   (`[music:]` entries of `game-assets/manifest.ini`; see docs/SEAMS.md
-  "Audio"). Inert without audio files. Live-off mid-song is handled by
-  `MusicReplacements_FrameTick()` on the game thread: it stops the stream and
-  clears the DSP voice gate (`g_dsp_voice_mute_srcn_min`), so the (still
-  authentically running but silenced) SPC sequencer becomes audible mid-track
-  and the next song change is fully authentic. Note the srcn>=0x0C voice-gate
+  "Audio"). Inert without audio files. The registry callback calls
+  `MusicReplacements_ApplySetting()` while game execution is paused: off stops
+  the stream and clears `g_dsp_voice_mute_srcn_min`, while on reselects and
+  starts a replacement for the remembered current `(src, song)` immediately.
+  Native `$F2` pause and host-owned pause/settings-overlay state suspend the
+  Vorbis decoder without closing it or advancing its cursor; the same-song
+  resume command continues at the saved frame rather than restarting the OGG.
+  The authentic SPC sequencer continues running beneath a replacement, so
+  disabling resumes it in place. Note the srcn>=0x0C voice-gate
   discovery here is ALSO prerequisite work for the music/SFX slider problem
   above: if the srcn split proves stable across all modes, option 1 becomes
   "scale srcn>=0x0C voices" rather than full voice-ownership RE.
@@ -523,17 +564,28 @@ it naturally when the relevant engine becomes active.
 | HD replacements | `AR_HD_REPLACEMENTS` | bool | on | PASSIVE; inert when art is absent |
 | Master volume | `AR_AUDIO_VOLUME` | int percent | 100 | CALLBACK; atomic post-mix gain, live `0..100` in steps of 5 |
 | Dialogue text blip | `AR_DIALOG_BLIP` | bool | on | PASSIVE; exact `$01:902D` COP request only |
-| Extended aspect | `ExtendedAspectRatio` / `AR_EXTENDED_ASPECT_RATIO` | custom `off` or X:Y | off | RESTART (§10.2) |
-| Pixel aspect | `AspectPAR` / `AR_ASPECT_PAR` | enum 4:3/square | 4:3 | RESTART |
+| Screen ratio | `ExtendedAspectRatio` / `AR_EXTENDED_ASPECT_RATIO` | enum 4:3/16:9/16:10 | 4:3 | CALLBACK; changes active PPU border/pitch and presentation live |
+| Pixel aspect | `AspectPAR` / `AR_ASPECT_PAR` | enum 4:3/square | 4:3 | CALLBACK; recomputes active internal width live |
 | Window scale | `WindowScale` / `AR_WINDOW_SCALE` | int 1..8 | 3 | CALLBACK |
 | Fullscreen | `Fullscreen` / `AR_FULLSCREEN` | bool | off | CALLBACK; desktop-fullscreen |
-| New renderer | `NewRenderer` / `AR_NEW_RENDERER` | bool | on | RESTART |
+| New renderer | `NewRenderer` / `AR_NEW_RENDERER` | bool | on | CALLBACK; live in 4:3, widescreen forces the new path while active |
 | Ignore aspect | `IgnoreAspectRatio` / `AR_IGNORE_ASPECT_RATIO` | bool | off | CALLBACK |
 | Enable audio | `EnableAudio` / `AR_ENABLE_AUDIO` | bool | on | CALLBACK; lazily opens then pauses/resumes the device |
-| Audio freq | `AudioFreq` / `AR_AUDIO_FREQ` | int | 44100 | RESTART |
+| Audio freq | `AudioFreq` / `AR_AUDIO_FREQ` | enum 32.04/44.1/48 kHz | 44.1 kHz | RESTART; numeric `32040`/`44100`/`48000` remain accepted |
 | Audio samples | `AudioSamples` / `AR_AUDIO_SAMPLES` | int | 2048 | RESTART |
-| Turbo multiplier | `AR_TURBO_MULT` | int | 8 | ACTION param (T key) |
-| Warp target | `AR_WARP` | custom | `0101` | ACTION raw region/map param (F6); populate choices from README's verified table, including broken `0701` status |
+| Turbo multiplier | `AR_TURBO_MULT` | int | 8 | Persistent ACTION parameter; consumed live by T and Toggle turbo |
+| Warp target | `AR_WARP` | custom hex | `0101` | Persistent ACTION parameter; direct text editor accepts the raw region/map target used by F6 and Warp now |
+| Scene inspector | `AR_SCENE_INSPECTOR` | bool | off | PASSIVE; F3/left-click freezes and identifies live BG/OAM/Mode-7 assets; panel auto-avoids the sample and is draggable; clear restores inspector-owned pause |
+
+The six non-persistent QoL ACTION rows are Pause/resume, Toggle turbo, Save
+state, Load state, Warp now, and Take snapshot; they dispatch to the same host
+paths used by P/T/F5/F7/F6/F2. Scene Inspector, Restart Game, and Exit Desktop
+remain ordinary registry descriptors but the overlay filters them out of the
+QoL panel and promotes them as direct leaves in the primary left-hand
+navigation. This is a presentation-only projection, so persistence, runtime
+observers, and action dispatch still have one source of truth. The lifecycle pair saves settings,
+takes the shared clean-shutdown/SRAM path, and either exits normally or
+re-executes the same process arguments.
 
 ### Save storage and editing (`CAT_SAVE`)
 
@@ -582,9 +634,9 @@ its encoding is untested.
 - The Phase-5 overlay invokes `Settings_Save("settings.ini")` after accepted
   menu mutations. Existing diagnostic hotkeys and `AR_SETTING_SET` remain
   session-only so automated probes do not silently rewrite user preferences.
-- Restart-class rows store the desired/persisted value in `g_settings`, while
-  already-created renderer/PPU/audio resources consume a boot snapshot. This
-  prevents a pending aspect/audio-format change from half-applying through an
+- The two restart-class audio-format rows store the desired/persisted value in
+  `g_settings`, while the open SDL audio device consumes a boot snapshot. This
+  prevents a pending frequency/buffer change from half-applying through an
   unrelated live callback.
 - `Save_LoadActive()` / `Save_WriteActive()` independently serialize the exact
   8 KiB `g_sram` image using the backend selected by those resolved settings.
@@ -630,20 +682,23 @@ read mutable format fields directly from `g_settings`.
    owns every wired display/aspect/audio field. `config.ini` is a lower-priority
    compatibility layer, `settings.ini` load/save is descriptor-driven and
    atomic, real env values remain distinguishable and highest-priority, and
-   restart-class host resources use boot snapshots. Window scale, fullscreen,
-   ignore-aspect, audio enable, master volume, and dialogue blip have live apply
-   paths. Independent music/SFX gain remains research-gated by the audio-seam
+   audio-format resources use boot snapshots. Screen ratio, pixel aspect,
+   renderer selection, window scale, fullscreen, ignore-aspect, audio enable,
+   master volume, and dialogue blip have live apply paths. Independent
+   music/SFX gain remains research-gated by the audio-seam
    criteria above; dead template config keys remain excluded rather than being
    promoted as fake settings.
-5. **Phase 5 — overlay UI (5A vertical slice implemented).** The SDL host
+5. **Phase 5 — overlay UI (implemented).** The SDL host
    overlay now renders rows from `SettingDesc[]`, writes `g_settings`, persists
    accepted mutations, intercepts menu input, freezes game-frame advancement,
    and scales independently. Escape/F1 opens it globally from every game
    state. The verified ROM font/selector asset is now decoded
    into host atlases; the same path builds the native three-panel dialog-frame
-   theme, and the menu scales over the full window. Remaining 5B work: add
-   richer custom-value editors and ACTION rows, optionally add a native menu
-   entry, and add gamepad input when the runner gains it.
+   theme, and the menu scales over the full window. Phase 5B adds validated
+   direct text editing and eight descriptor-driven ACTION rows backed by the
+   existing host commands. A native game-menu entry remains optional; gamepad
+   navigation belongs to the broader runner input project rather than blocking
+   the keyboard-complete overlay.
 6. **Phase 6 — save codec, backends, and editor (`CAT_SAVE`).** Independent of
    Phases 1–5 and schedulable after the current regeneration settles: it owns
    `g_sram` persistence, not the cheat gates. Split it into reviewable pieces:
@@ -682,10 +737,11 @@ read mutable format fields directly from `g_settings`.
   struct and assert `g_ram` effects are identical via the WRAM oracle / `F2`
   snapshot. Since seeding uses the same env vars, an `AR_ALL_MAGIC=1` run must
   match byte-for-byte.
-- **Drift guard:** `tests/settings_test.c` asserts 21 unique keys and storage
-  fields and exercises lookup/formatting for the current registry.
+- **Drift guard:** `tests/settings_test.c` asserts all 47 descriptor keys are
+  unique, all 39 persistent rows have unique storage, ACTION rows have none,
+  and lookup/formatting/persistence behave correctly.
 - **Live-path test:** `AR_SETTING_SET=key=value AR_SETTING_AT_GF=N` applies via
-  the same mutation API the overlay will call; observe enforcement at N+1.
+  the same mutation API the overlay calls; observe enforcement at N+1.
 - **Save-codec tests (Phase 6):** exact 8192-byte native round trip; fixture
   `.srm → .ini → .srm` identity; malformed/missing/duplicate INI chunks rejected
   without touching the destination; named-field override changes only its
@@ -697,29 +753,32 @@ read mutable format fields directly from `g_settings`.
 
 ---
 
-## 10. Open design decisions
-
-Marked pending; defaults recommended but not yet confirmed with the user.
+## 10. Design decisions and follow-ups
 
 ### 10.1 Persistence target
-Separate `settings.ini` (**recommended** — keeps dev `config.ini` clean) vs. a
-single merged file (simpler, but menu writes clobber hand-authored comments).
 
-### 10.2 RESTART settings (aspect / renderer / audio-format)
-Start with a **"pending restart" badge** (**recommended** — trivial, safe) vs.
-investing in live realloc up front. Intermediate for aspect specifically:
-allocate at max budget on boot + clamp columns live (§4), which avoids realloc
-entirely and makes aspect on/off effectively PASSIVE.
+Implemented as a separate atomic `settings.ini`, keeping developer-authored
+`config.ini` comments and structure untouched.
+
+### 10.2 Remaining RESTART settings (audio format)
+
+The video decision is implemented: maximum-capacity host textures plus live
+active-pitch/PPU rebinding make screen ratio, pixel aspect, and renderer
+selection callback rows. Audio frequency and sample-buffer size still show the
+pending-restart badge; making those live requires serializing an SDL audio
+device close/reopen against its callback thread.
 
 ### 10.3 Phase-1 scope
-Migrate only the user-facing ~20 (**recommended**) vs. also wrapping the debug
-flags into the struct for uniformity (larger blast radius, low payoff).
+
+Implemented for user-facing settings. Diagnostic/debug flags remain direct
+environment controls because wrapping them would add surface area without
+improving the player menu.
 
 ### 10.4 Overlay frontend
-Start with a minimal SDL-rendered immediate UI plus bundled bitmap font
-(**recommended** — matches the current C/`SDL_Renderer` pipeline) vs. first
-integrating the existing RmlUi launcher stack (richer styling, but requires its
-C++/OpenGL/dependency build path).
+
+Implemented as an SDL-rendered immediate UI using ROM-decoded ActRaiser font
+and frame assets with host-authored fallbacks. RmlUi remains a possible future
+frontend only if the runtime adopts its C++/OpenGL integration.
 
 ### 10.5 Default save-edit action
 Transactional scratch decoding is required by the Phase-6 codec. The remaining

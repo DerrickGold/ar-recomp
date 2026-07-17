@@ -44,6 +44,7 @@ bool PpuSetMode7Override(Ppu *ppu, const uint32_t *rgba, int width,
 /* Engine seams music_replacements.c binds against. */
 void RtlApuLock(void) {}
 void RtlApuUnlock(void) {}
+int RtlGetAudioOutputRate(void) { return 44100; }
 void (*g_rtl_spc_upload_hook)(uint32_t src);
 void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val);
 void (*g_rtl_music_mix_hook)(int16_t *buf, int frames);
@@ -253,6 +254,7 @@ static void TestTriggerStateMachine(void) {
   CHECK(g_rtl_apu_port_hook != NULL);
   CHECK(g_rtl_spc_upload_hook != NULL);
   CHECK(g_rtl_music_mix_hook != NULL);
+  CHECK(!MusicReplacements_IsPlaybackPaused());
 
   g_rtl_spc_upload_hook(0x1A94B8);
   g_rtl_apu_port_hook(0, 0xF0); /* halt */
@@ -260,12 +262,40 @@ static void TestTriggerStateMachine(void) {
   g_rtl_apu_port_hook(0, 0x01); /* play song 1: no audio -> authentic */
   CHECK(g_dsp_voice_mute_srcn_min == -1);
 
+  /* $F2 is native pause, not song F2. The same remembered song command
+   * resumes it. Host pause is an independent reason, so clearing only one
+   * latch must not resume playback. */
+  g_rtl_apu_port_hook(0, 0xF2);
+  CHECK(MusicReplacements_IsPlaybackPaused());
+  MusicReplacements_SetHostPaused(true);
+  g_rtl_apu_port_hook(0, 0x01);
+  CHECK(MusicReplacements_IsPlaybackPaused());
+  MusicReplacements_SetHostPaused(false);
+  CHECK(!MusicReplacements_IsPlaybackPaused());
+
+  MusicReplacements_SetHostPaused(true);
+  g_rtl_apu_port_hook(0, 0xF2);
+  MusicReplacements_SetHostPaused(false);
+  CHECK(MusicReplacements_IsPlaybackPaused());
+  g_rtl_apu_port_hook(0, 0x01);
+  CHECK(!MusicReplacements_IsPlaybackPaused());
+
   /* Force the entry playable but keep the file missing: the play-time open
    * fails and must also fall back authentic (no gate left behind). */
   g_music_replacements[0].has_audio = true;
   g_music_replacements[0].file_rate = 44100;
   g_music_replacements[0].file_frames = 44100;
   g_rtl_apu_port_hook(0, 0x01);
+  CHECK(g_dsp_voice_mute_srcn_min == -1);
+
+  /* The menu callback may toggle either direction while the game is paused.
+   * With this deliberately missing fixture both paths stay authentic, but
+   * they still exercise adoption of the remembered current song. */
+  g_settings.music_replacements = false;
+  MusicReplacements_ApplySetting();
+  CHECK(g_dsp_voice_mute_srcn_min == -1);
+  g_settings.music_replacements = true;
+  MusicReplacements_ApplySetting();
   CHECK(g_dsp_voice_mute_srcn_min == -1);
 
   /* Mix hook without a session: must not touch the buffer. */
