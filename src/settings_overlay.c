@@ -150,6 +150,7 @@ static const SettingCategory kCategoryOrder[] = {
   kSettingCat_Audio,
   kSettingCat_Widescreen,
   kSettingCat_Cheats,
+  kSettingCat_Save,
   kSettingCat_Qol,
 };
 
@@ -566,7 +567,9 @@ static int CategoryRowCount(SettingCategory category) {
         break;
       }
     }
-    if (desc->category == category && !promoted) count++;
+    if (desc->category == category && !promoted &&
+        Settings_IsMenuVisible(desc))
+      count++;
   }
   return count;
 }
@@ -638,7 +641,9 @@ static const SettingDesc *SelectedDesc(void) {
   int row = 0;
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (desc->category != category || IsTopLevelDesc(desc)) continue;
+    if (desc->category != category || IsTopLevelDesc(desc) ||
+        !Settings_IsMenuVisible(desc))
+      continue;
     if (row++ == s_row) return desc;
   }
   return NULL;
@@ -654,9 +659,11 @@ static void SaveAcceptedChange(SettingChangeResult result) {
     SetStatus(result == kSettingChange_Rejected ? "NOT EDITABLE" : "UNCHANGED");
     return;
   }
-  if (!Settings_Save("settings.ini")) {
+  const char *settings_path = getenv("AR_OVERLAY_TEST_SETTINGS_PATH");
+  if (!settings_path || !settings_path[0]) settings_path = "settings.ini";
+  if (!Settings_Save(settings_path)) {
     SetStatus("SAVE FAILED");
-    fprintf(stderr, "[settings-menu] could not save settings.ini\n");
+    fprintf(stderr, "[settings-menu] could not save %s\n", settings_path);
     return;
   }
   if (result == kSettingChange_RestartPending)
@@ -683,6 +690,9 @@ static void BeginEditing(void) {
     return;
   }
   Settings_FormatValue(desc, s_edit_buffer, sizeof(s_edit_buffer));
+  if (desc->apply == kApply_Save &&
+      !strcmp(s_edit_buffer, "Leave as-is"))
+    s_edit_buffer[0] = 0;
   s_editing = true;
   SDL_StartTextInput();
   SetStatus("TYPE VALUE - RETURN APPLIES");
@@ -743,6 +753,23 @@ static void ChangeSelectedValue(int direction) {
     }
   }
   SaveAcceptedChange(Settings_SetLong(desc, next));
+}
+
+static void ActivateSelectedRow(void) {
+  const SettingDesc *desc = SelectedDesc();
+  if (!desc || !Settings_IsAvailable(desc)) {
+    SetStatus("UNAVAILABLE HERE");
+    return;
+  }
+  if (desc->type == kSettingType_Action) {
+    InvokeSelectedAction();
+  } else if (desc->type == kSettingType_Int ||
+             desc->type == kSettingType_Mask ||
+             desc->type == kSettingType_Custom) {
+    BeginEditing();
+  } else {
+    ChangeSelectedValue(1);
+  }
 }
 
 static void ResetSelectedValue(void) {
@@ -932,10 +959,12 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
       ChangeSelectedValue(-1);
       break;
     case SDLK_RIGHT:
+      ChangeSelectedValue(1);
+      break;
     case SDLK_x:       /* SNES A */
     case SDLK_RETURN:  /* keyboard confirm */
     case SDLK_KP_ENTER:
-      ChangeSelectedValue(1);
+      ActivateSelectedRow();
       break;
     case SDLK_a:       /* SNES Y */
       ResetSelectedValue();
@@ -1281,11 +1310,12 @@ static void DrawMenu(const MenuLayout *layout) {
   const int selector_x = right_x + 12;
   const int label_x = right_x + 22;
   const int value_right = right_x + right_width - 12;
-  const int value_chars = 12;
-  const int value_left = value_right - value_chars * kGlyphSize;
-  const int restart_x = value_left - 12;
-  int label_chars = (restart_x - label_x - 4) / kGlyphSize;
-  if (label_chars < 1) label_chars = 1;
+  /* Save-state/item labels need up to 18 characters (for example
+   * "Act 2 cleared" and "Strength of Angel"). Town rows deliberately use the
+   * shorter "X State" label so this wider value column still leaves ample
+   * room. Label width is computed per row from the actual formatted value, so
+   * short values such as RUN do not waste the rest of that reservation. */
+  const int value_chars = 18;
 
   DrawText(layout, left_text_x, left_title_y,
            "SYSTEM SETTINGS", kText_Normal);
@@ -1332,7 +1362,8 @@ static void DrawMenu(const MenuLayout *layout) {
   int category_row = 0;
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (top_level || desc->category != category || IsTopLevelDesc(desc))
+    if (top_level || desc->category != category || IsTopLevelDesc(desc) ||
+        !Settings_IsMenuVisible(desc))
       continue;
     int row = category_row++;
     if (row < s_top_row || row >= s_top_row + s_visible_rows) continue;
@@ -1348,7 +1379,6 @@ static void DrawMenu(const MenuLayout *layout) {
     }
     TextStyle style = available && s_submenu_open
         ? kText_Normal : kText_Dim;
-    DrawTextN(layout, label_x, y, desc->label, label_chars, style);
 
     char value[512];
     if (selected && s_editing) {
@@ -1366,6 +1396,12 @@ static void DrawMenu(const MenuLayout *layout) {
           mode < (int)(sizeof(short_modes) / sizeof(short_modes[0])))
         snprintf(value, sizeof(value), "%s", short_modes[mode]);
     }
+    int shown_value_chars = CappedTextLength(value, value_chars);
+    int row_value_left = value_right - shown_value_chars * kGlyphSize;
+    int restart_x = row_value_left - 12;
+    int label_chars = (restart_x - label_x - 4) / kGlyphSize;
+    if (label_chars < 1) label_chars = 1;
+    DrawTextN(layout, label_x, y, desc->label, label_chars, style);
     DrawTextRight(layout, value_right, y,
                   value, value_chars, style);
     if (desc->apply == kApply_Restart)

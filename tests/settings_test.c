@@ -52,7 +52,7 @@ static void TestDefaultsAndMetadata(void) {
   g_ws_extra = 43;
   Settings_Init();
 
-  CHECK(g_setting_desc_count == 47);
+  CHECK(g_setting_desc_count == 99);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -89,6 +89,29 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.turbo_multiplier == 8);
   CHECK(g_settings.warp_target == 0x0101);
   CHECK(!g_settings.scene_inspector);
+  CHECK(g_settings.save_backend == 0);
+  CHECK(!g_settings.save_edit_armed && g_settings.save_autobackup);
+  CHECK(g_settings.save_editor_page == kSaveEditorPage_Progress);
+  for (int i = 0; i < 6; i++)
+    CHECK(g_settings.save_region_progress[i] == kSaveProgressEdit_LeaveAsIs);
+  CHECK(g_settings.save_master_level == 0 &&
+        g_settings.save_master_hp == 0 &&
+        g_settings.save_master_mp == 0 &&
+        g_settings.save_lives == 0 &&
+        g_settings.save_angel_sp_current == 0 &&
+        g_settings.save_angel_sp_max == 0 &&
+        g_settings.save_angel_hp_current == 0 &&
+        g_settings.save_angel_hp_max == 0 &&
+        g_settings.save_message_speed == 0);
+  CHECK(!g_settings.save_player_name[0]);
+  CHECK(g_settings.save_professional_mode == 0 &&
+        g_settings.save_death_heim_state == 0 &&
+        g_settings.save_equipped_magic == 0);
+  for (int i = 0; i < 4; i++) CHECK(g_settings.save_magic_slots[i] == 0);
+  for (int i = 0; i < 8; i++) CHECK(g_settings.save_item_slots[i] == 0);
+  for (int region = 0; region < 6; region++)
+    for (int act = 0; act < 2; act++)
+      CHECK(g_settings.save_scores[region][act] == 0);
   CHECK(g_settings.ws_action && g_settings.ws_sim && g_settings.ws_sprites);
   CHECK(g_settings.cheat_inf_mp == 0);
   CHECK(g_settings.cheat_moonjump_button == 0x8000);
@@ -104,6 +127,10 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *exit_action = Settings_Find("exit_desktop");
   const SettingDesc *music = Settings_Find("music_replacements");
   const SettingDesc *frequency = Settings_Find("audio_frequency");
+  const SettingDesc *save_backend = Settings_Find("save_backend");
+  const SettingDesc *save_fillmore = Settings_Find("save_prog_fillmore");
+  const SettingDesc *save_page = Settings_Find("save_editor_page");
+  const SettingDesc *save_apply = Settings_Find("save_apply_persist");
   CHECK(display && display->type == kSettingType_Enum);
   CHECK(display && display->enum_count == kDisplayMode_PresetCount);
   CHECK(volume && volume->category == kSettingCat_Audio);
@@ -119,6 +146,16 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(frequency && frequency->type == kSettingType_Enum &&
         frequency->enum_count == kAudioFrequency_Count &&
         frequency->apply == kApply_Restart);
+  CHECK(save_backend && save_backend->category == kSettingCat_Save &&
+        save_backend->apply == kApply_Restart);
+  CHECK(save_fillmore && save_fillmore->apply == kApply_Save &&
+        save_fillmore->enum_count == kSaveProgressEdit_Count);
+  CHECK(save_page && save_page->enum_count == kSaveEditorPage_Count &&
+        save_page->apply == kApply_Passive);
+  CHECK(Settings_IsMenuVisible(save_fillmore));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("save_master_level")));
+  CHECK(save_apply && save_apply->type == kSettingType_Action &&
+        save_apply->category == kSettingCat_Save);
   CHECK(hp && Settings_IsAvailable(hp));
   for (int i = 0; i < g_setting_desc_count; i++)
     if (g_setting_descs[i].category == kSettingCat_Cheats)
@@ -127,6 +164,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(hp && Settings_IsAvailable(hp));
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Widescreen), "Widescreen"));
   CHECK(!strcmp(Settings_ApplyKindName(kApply_Restart), "Restart required"));
+  CHECK(!strcmp(Settings_ApplyKindName(kApply_Save), "Staged save edit"));
   CHECK(!strcmp(Settings_ChangeResultName(kSettingChange_Applied), "applied"));
   Settings_SetActionObserver(ActionObserved);
   s_action_calls = 0;
@@ -221,6 +259,11 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(FileContains(saved_path, "audio_frequency = 32.04 kHz"));
   CHECK(FileContains(saved_path, "turbo_multiplier = 8"));
   CHECK(FileContains(saved_path, "warp_target = 0101"));
+  CHECK(FileContains(saved_path, "save_backend = native-srm"));
+  CHECK(FileContains(saved_path, "save_prog_fillmore = Leave as-is"));
+  CHECK(FileContains(saved_path, "save_master_level = Leave as-is"));
+  CHECK(FileContains(saved_path, "save_player_name = Leave as-is"));
+  CHECK(FileContains(saved_path, "save_score_northwall_2 = Leave as-is"));
   CHECK(!FileContains(saved_path, "toggle_pause ="));
   CHECK(!FileContains(saved_path, "display_mode ="));
   CHECK(!FileContains("actraiser-settings-saved-test.ini.tmp", "anything"));
@@ -348,6 +391,66 @@ static void TestMutationApi(void) {
   CHECK(!g_settings.music_replacements && s_observer_desc == music);
 
   char value[512];
+  const SettingDesc *save_backend = Settings_Find("save_backend");
+  CHECK(Settings_SetText(save_backend, "ini") ==
+        kSettingChange_RestartPending);
+  CHECK(g_settings.save_backend == 1);
+  const SettingDesc *save_fillmore = Settings_Find("save_prog_fillmore");
+  CHECK(Settings_SetText(save_fillmore, "act2-cleared") ==
+        kSettingChange_Applied);
+  CHECK(g_settings.save_region_progress[0] ==
+        kSaveProgressEdit_Act2Cleared);
+  Settings_FormatValue(save_fillmore, value, sizeof(value));
+  CHECK(!strcmp(value, "Act 2 cleared"));
+  const SettingDesc *save_level = Settings_Find("save_master_level");
+  CHECK(Settings_SetText(save_level, "17") == kSettingChange_Applied);
+  CHECK(g_settings.save_master_level == 17);
+  Settings_FormatValue(save_level, value, sizeof(value));
+  CHECK(!strcmp(value, "17"));
+  const SettingDesc *save_mp = Settings_Find("save_master_mp");
+  CHECK(Settings_SetText(save_mp, "0") == kSettingChange_Applied);
+  CHECK(g_settings.save_master_mp == 1);
+  Settings_FormatValue(save_mp, value, sizeof(value));
+  CHECK(!strcmp(value, "0"));
+  const SettingDesc *save_page = Settings_Find("save_editor_page");
+  CHECK(Settings_SetText(save_page, "Status") == kSettingChange_Applied);
+  CHECK(!Settings_IsMenuVisible(save_fillmore));
+  CHECK(Settings_IsMenuVisible(save_level));
+  CHECK(Settings_IsMenuVisible(Settings_Find("save_player_name")));
+  const SettingDesc *save_name = Settings_Find("save_player_name");
+  CHECK(Settings_SetText(save_name, "CODEX") == kSettingChange_Applied);
+  CHECK(!strcmp(g_settings.save_player_name, "CODEX"));
+  CHECK(Settings_SetText(save_name, "TOO-LONG-NAME") ==
+        kSettingChange_Rejected);
+  const SettingDesc *save_magic = Settings_Find("save_magic_slot_1");
+  CHECK(Settings_SetLong(save_page, kSaveEditorPage_Magic) ==
+        kSettingChange_Applied);
+  CHECK(Settings_IsMenuVisible(save_magic));
+  CHECK(!Settings_IsMenuVisible(save_level));
+  CHECK(Settings_SetText(save_magic, "Magical Aura") ==
+        kSettingChange_Applied);
+  CHECK(g_settings.save_magic_slots[0] == 4);
+  const SettingDesc *save_equipped = Settings_Find("save_equipped_magic");
+  CHECK(Settings_SetText(save_equipped, "Magical Stardust") ==
+        kSettingChange_Applied);
+  CHECK(g_settings.save_equipped_magic == 3);
+  const SettingDesc *save_item = Settings_Find("save_item_slot_8");
+  CHECK(Settings_SetLong(save_page, kSaveEditorPage_Items) ==
+        kSettingChange_Applied);
+  CHECK(Settings_IsMenuVisible(save_item));
+  CHECK(Settings_SetText(save_item, "Strength of Angel") ==
+        kSettingChange_Applied);
+  CHECK(g_settings.save_item_slots[7] == 14);
+  const SettingDesc *save_score = Settings_Find("save_score_northwall_2");
+  CHECK(Settings_SetLong(save_page, kSaveEditorPage_Scores) ==
+        kSettingChange_Applied);
+  CHECK(Settings_IsMenuVisible(save_score));
+  CHECK(Settings_SetText(save_score, "12340") == kSettingChange_Applied);
+  CHECK(g_settings.save_scores[5][1] == 1235);
+  Settings_FormatValue(save_score, value, sizeof(value));
+  CHECK(!strcmp(value, "12340"));
+  CHECK(Settings_SetText(save_score, "12345") == kSettingChange_Rejected);
+
   const SettingDesc *turbo = Settings_Find("turbo_multiplier");
   CHECK(Settings_SetLong(turbo, 12) == kSettingChange_Applied);
   CHECK(g_settings.turbo_multiplier == 12);

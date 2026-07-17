@@ -877,16 +877,30 @@ scheme is **presentation-only**: `$0088`, timers, and logic never see the extra 
 | Seam | Routine / address | Storage | Intent | Logical ID / table | Status |
 |---|---|---|---|---|---|
 | Save-file validity check | `$02:A88D` (checksum) called from `$02:A622` (title-screen gate) | SRAM `$700000-$701FEB` (checksum), stored expected values at `$701FEC`/`$701FEE` | "is this save data trustworthy enough to offer Continue?" | pass/fail via carry; no version/format ID beyond the checksum itself | 🟢 (clean pass/fail gate, algorithm fully understood) |
-| Save-file body | SRAM `$700000+`, 8192-byte `saves/save.srm` | LoROM battery SRAM, banks `$70-$7D` | city/kingdom state, presumably per-region | **format TBD** — checksum covers the whole 8172-byte body as one blob, no sub-structure identified yet | 🔴 |
+| Save-file body | SRAM `$700000+`, exact 8192-byte active `.srm`/lossless `.ini` | LoROM battery SRAM, banks `$70-$7D`; host `save_system.c` codec | lossless canonical image; town state combines `$1200+r*2` with `$13B6+r*2` bit 0; player status/inventory block `$1433-$147B`; unknown town-map block preserved raw | editor fields/address codecs 🟢; gameplay round-trip 🟡; town-map semantics 🔴 |
 
-> **Load path:** `RtlReadSram` (`common_rtl.c`) does a straight `fread(g_sram, 1, g_sram_size, f)` —
-> byte-for-byte, no remapping. `cpu_sram_offset` (`cpu_state.c`) maps `(bank, addr)` for bank `$70`
+> **Load path:** `src/main.c` now attaches `save_system.c`, which transactionally
+> decodes the boot-selected native or INI backend into the same `g_sram` buffer.
+> The runner's old `RtlReadSram` remains available generically but no longer owns
+> ActRaiser's runtime persistence. `cpu_sram_offset` (`cpu_state.c`) maps `(bank, addr)` for bank `$70`
 > to a literal 1:1 offset (`(bank & 0xF) << 15 | addr`, and bank `$70`'s `&0xF` is `0`, so addr IS
 > the offset) — confirmed correct against the checksum algorithm 2026-07-01. If a future save-format
 > HAL is built, this is the one seam that's ALREADY a clean pass/fail gate; the body itself still
-> needs its internal structure (city stats? per-building state? population?) mapped out, which
-> would make excellent future work for whoever's chasing sim-mode rendering next (the checksummed
-> blob almost certainly contains the data `$01:8000`'s building-update logic reads).
+> needs its internal structure (city stats? per-building state? population?) mapped out.
+> The version-1 INI stores every raw byte before applying only `SaveFieldDesc[]`
+> overrides, so future decompilation can promote fields without losing the
+> `$0000-$07FF+` town/terrain block or other unknown state. Runtime auto-persist
+> compares a shadow image and atomically writes only the boot-selected backend;
+> deliberate editor mutations re-sync that shadow so session-only edits cannot
+> silently overwrite disk.
+>
+> **USA field correction (2026-07-16):** the reference editor publishes
+> European-base offsets and subtracts two for USA saves. Applying that rule
+> aligns Angel SP/HP, player name, Master level/HP/MP, magic, items, lives, and
+> scores with the known `$0282-$02AC` WRAM status block. The raw `$01` town byte
+> is not an “active” state: state is `SRAM[$1200+r*2]*2 +
+> (SRAM[$13B6+r*2]&1)`, yielding Act 1=`0`, Act 1 cleared=`2`, Act 2=`3`, and
+> Act 2 cleared=`4`. See `save-format.md` §3 for exact values.
 
 ---
 

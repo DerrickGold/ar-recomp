@@ -73,6 +73,7 @@ add_executable(ActRaiserRecomp
     src/settings.c
     src/settings_overlay.c
     src/scene_inspector.c
+    src/save_system.c
     src/run_dir.c
     src/main.c
     src/actraiser_00.c
@@ -204,4 +205,17 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_music_manifest_test PRIVATE m)
     add_test(NAME actraiser_music_manifest COMMAND actraiser_music_manifest_test)
+
+    add_executable(actraiser_save_system_test
+        tests/save_system_test.c
+        src/save_system.c
+    )
+    target_include_directories(actraiser_save_system_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_compile_definitions(actraiser_save_system_test PRIVATE
+        ACTRAISER_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    )
+    add_test(NAME actraiser_save_system COMMAND actraiser_save_system_test)
 endif()

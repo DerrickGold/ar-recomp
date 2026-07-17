@@ -171,6 +171,27 @@ Two-byte entries per town.
 | $7E:0299 | 9 | Magic inventory |
 | $7E:02A2 | 9 | Offerings inventory |
 | $7E:02AB | 1 | Number of lives (max-HP-style grant handler `$01:9CBD` INCs it) |
+| $7E:02AC | 1 | Selected/equipped magic ID (`0` none, `1..4` Fire/Stardust/Aura/Light); save-backed at SRAM `$145D`, while the high bit of `$0299-$029C` marks the inventory slot containing that selection |
+
+**SRAM correspondence (USA ROM, 2026-07-16).** The persistent status block is
+linear: for `$0282-$02AC`, the corresponding save offset is generally WRAM +
+`$11B1`. This independently resolves the USA adjustment in the reference save
+editor:
+
+| WRAM | SRAM | Persistent field |
+|---:|---:|---|
+| `$0282/$0284` | `$1433/$1435` | Angel current/max SP |
+| `$0286/$0287` | `$1437/$1438` | Angel current/max HP |
+| `$0288` | `$1439` | Player name |
+| `$0291/$0293/$0295/$0297` | `$1442/$1444/$1446/$1448` | Level, HP, MP, next-level population/experience |
+| `$0299-$029C` | `$144A-$144D` | Four magic slots |
+| `$02A2-$02A9` | `$1453-$145A` | Eight stored item slots |
+| `$02AB/$02AC` | `$145C/$145D` | Zero-based lives / equipped magic |
+
+Scores follow immediately at SRAM `$1464-$147B` (six towns × two acts ×
+little-endian packed-BCD words). The large town/terrain save body does not use
+this simple status-copy relationship and remains mapped only at the raw level;
+see [save-format.md](save-format.md) §3.
 
 ### Platformer Score Records ($7E:02B3+)
 24 entries (6 towns x 2 acts x 2 bytes each).

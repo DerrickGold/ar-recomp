@@ -1359,6 +1359,15 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
   graphic is this and which replacement plane owns it?”
 - **Init/forcing:** `AR_WRAM_FILL`/`AR_WRAM_INIT`/`AR_SRAM_FILL` (poison/seed memory),
   `AR_FORCE18` (pin game-mode), `AR_NOPOP` (disable the vblank-wait RTS-frame pop, for ABI tests).
+- **Battery-save codec:** `python3 tools/srm.py check saves/save.srm` validates
+  exact size/checksum and prints the six combined town-state fields
+  (`$1200+r*2` base plus `$13B6+r*2` Act-2 bit). `decode`,
+  `diff`, `edit --region northwall=act2-cleared`, and `convert` share the
+  runtime codec's version-1 lossless schema. `AR_SAVE_NATIVE_PATH` and
+  `AR_SAVE_INI_PATH` redirect the active runtime target for isolated tests;
+  `AR_SAVE_IMPORT` selects a non-default import source. The in-game editor adds
+  paged Status/Magic/Items/Scores fields through the transactional C codec; see
+  `docs/save-format.md` §3 for their USA offsets and encodings.
 
 ---
 

@@ -8,42 +8,43 @@ motivation is sim-mode testing: the `AR_WARP` path stages an act transition but
 spells, lairs). Editing the save can.
 
 The **file-level contract** is settled: size, written footprint, fill behavior,
-and checksum are documented below. The semantic field map is deliberately not
-claimed to be complete: the live town-state block in §3.4 and several fields in
-§3.2/§3.3 are still unknown. That distinction is why the structured INI format
-in §4 carries a lossless raw image as well as readable verified fields.
+and checksum are documented below. The player/progress fields exposed by the
+editor now have a USA address and encoding model, but the large live town-state
+block in §3.4 remains unknown. That distinction is why the structured INI
+format in §4 carries a lossless raw image as well as readable verified fields.
 
 **Provenance — read this before trusting any offset below.** The starting field
-map came from a third-party tool
+map came from the open-source editor
 ([RyudoSynbios/game-tools-collection](https://github.com/RyudoSynbios/game-tools-collection/tree/master/src/lib/templates/actraiser/saveEditor),
-`template.ts` + `utils.ts`). It was then checked against our own `.srm` files
-(2026-07-14). **It is partly right and partly wrong for our ROM** — its checksum
-is exactly correct, several character/city fields decode to impossible values,
-and it omits the largest live region of our saves entirely. It is treated here
-as a *hypothesis source, not truth*. Every field carries a verification status.
+`template.ts` + `utils.ts`). Its declared offsets are the European layout;
+`getRegionOffset()` subtracts two bytes for USA saves. Our earlier audit missed
+that translation and consequently made the whole status block look misaligned.
+Applying it produces a linear SRAM→WRAM correspondence and plausible values in
+all nine repository saves. The editor remains a *hypothesis source*, not an
+authority: fields below also record our fixture, WRAM, or static-code evidence.
 
 Companion docs: [ram-map.md](ram-map.md) (the WRAM side — the game copies
 SRAM→WRAM on load; this is our best oracle for promoting fields to ✅),
 [settings-system.md](settings-system.md) (how editing is exposed),
 [progress.md](progress.md) (region/act naming).
 
-**Legend:** ✅ Verified against our ROM (method noted) · 🟡 Hypothesis — from the
-third-party map, not yet verified here · 🔴 Contradicted — decodes to impossible
-values against our saves; do **not** use without re-derivation.
+**Legend:** ✅ Verified against our ROM (method noted) · 🟡 Address/codec tested,
+but the user-visible result still needs an in-game round trip.
 
 ---
 
 ## 1. Geometry and written footprint ✅
 
-8 KiB (`0x2000`) battery SRAM, held in `g_sram` / `g_sram_size`, loaded by
-`RtlReadSram()` (`src/main.c:544`) and persisted by `RtlWriteSram()`.
+8 KiB (`0x2000`) battery SRAM, held in `g_sram` / `g_sram_size`. ActRaiser now
+attaches that canonical image to `src/save_system.c`; the selected backend owns
+load, atomic persistence, explicit editor writes, and shadow synchronization.
 
 | Range | Status | Notes |
 |---|---|---|
 | `0x0000`–`0x1d6a` | **written by the ROM** | the entire real save payload |
 | `0x1d6b`–`0x1feb` | **never written** | retains power-on fill |
 | `0x1fec`–`0x1fef` | **written** | 32-bit checksum (§2) |
-| `0x1ff0`–`0x1fff` | **never written** | retains power-on fill |
+| `0x1ff0`–`0x1fff` | normally retains fill; ending writes `$1ff0-$1ff2` | later static decompilation proved `$02:AA9C` stamps `ACT` after the ending; none of the nine analysed saves had reached that write |
 
 Evidence: across 5 independent saves at different progress levels, `0x1d6b`–
 `0x1feb` is an exact, unbroken run of the power-on fill byte. The last
@@ -61,8 +62,13 @@ zeroing them** (zeroing is harmless to validity once the checksum is recomputed,
 but it destroys the fill-generation signal and gratuitously diverges from a
 real cartridge).
 
-This footprint **contradicts** the third-party "Professional Mode" field at
-`0x1ff0` (§3.3): that offset is in a dead zone our ROM never writes.
+The original nine-save footprint alone made `$1ff0` look dead. Later static
+decompilation resolved the apparent contradiction: ending presenter `$02:AA9C`
+does write the third-party `ACT` marker, but none of those saves contains it.
+The marker lies outside the checksum. The editor can stage it explicitly as
+Professional Mode Locked/Unlocked, but a real post-ending round trip is still
+needed to verify the exact user-visible unlock behavior. Both codecs preserve
+it losslessly regardless.
 
 ---
 
@@ -106,84 +112,85 @@ before the editor is trusted.
 
 ## 3. Field map
 
-### 3.1 Verified ✅
+### 3.1 Region state ✅ address/encoding
 
-**Region progress — `0x1200`, stride 2 per region.**
+The six town states are **not standalone bytes**. For region `r` (`0..5`):
 
-| Offset | Region |
-|---|---|
-| `0x1200` | Fillmore |
-| `0x1202` | Bloodpool |
-| `0x1204` | Kasandora |
-| `0x1206` | Aitos |
-| `0x1208` | Marahna |
-| `0x120a` | Northwall |
-| `0x120c` | Death Heim (🟡 — see §3.2) |
+```text
+base = SRAM[$1200 + r*2]
+act2 = SRAM[$13B6 + r*2] & 1
+state = base*2 + act2
+```
 
-Values:
-
-| Value | Meaning | Source |
+| State | Meaning | Stored base / flag |
 |---|---|---|
-| `0x00` | Act-1 (not started) | third-party map |
-| `0x01` | **observed in-repo; absent from the third-party enum** — appears on the *currently active* region (present on Fillmore in a blank save, on Bloodpool in a bloodpool-start save). Best reading: "region active / act-1 in progress". Confirm before exposing. | ours |
-| `0x02` | Act-1 cleared | both |
-| `0x03` | Act-2 | third-party map |
-| `0x04` | Act-2 cleared | third-party map |
+| `0` | Act 1 | `0 / 0` |
+| `2` | Act 1 cleared | `1 / 0` |
+| `3` | Act 2 | `1 / 1` |
+| `4` | Act 2 cleared | `2 / 0` |
 
-*Method:* `save.sim-bloodpool-start.bak.srm` decodes to Fillmore `0x02`
-(Act-1 cleared) + Bloodpool `0x01`, with Fillmore population 2 / level 1 and all
-later regions `0x00` — exactly matching the state its filename claims.
-`save.sim-blank.bak.srm` decodes to Fillmore `0x01`, everything else `0x00`.
+This explains the raw `$01` values previously mislabeled “Active”: in a blank
+simulation save, Fillmore's `$1200=$01` means Act 1 cleared; Bloodpool's
+`$1202=$01` plus its Act-2 flag means Act 2. The USA flag base is `$13B6`;
+`$13B8` is the European-base offset shown in the external template before its
+region adjustment. `src/save_system.c`, the INI codec, and `tools/srm.py` all
+use the combined model.
 
-This block alone delivers the feature's core goal (jump to arbitrary sim-mode
-region progress), which is why the editor can ship on §3.1 + §2 before anything
-below is resolved.
+The region order is Fillmore, Bloodpool, Kasandora, Aitos, Marahna, Northwall.
+Menu labels use **“Town State”** to leave enough room for “Act 2 cleared.”
 
-### 3.2 Hypothesis 🟡 — from the third-party map, unverified here
+### 3.2 USA player/status block ✅ addresses; 🟡 gameplay round trip
 
-Do not expose in the menu until promoted to ✅ via §6. Our saves either read
-zero at these offsets (so the map is untested, not wrong) or the evidence is
-mixed.
+Subtracting two from the external template's European offsets aligns the save
+block with the known WRAM block (`SRAM - $11B1 = WRAM` through the player
+status fields). Repository fixtures then decode to plausible values—for
+example SP `20/20`, Angel HP `8/8`, Master level `1`, HP `8`, MP `0`, and next
+experience `80` in a new save.
 
-| Field | Offset | Type | Evidence in our saves |
-|---|---|---|---|
-| Act-2 access flag | `0x13b8` +2/region, bit 0 | bitflag | all our saves read 0 → untested. Paired with §3.1 (`0x1200 + 0x1b8`) |
-| Death Heim progress | `0x120c` (+ unlocked bit at `0x1240` bit 0) | uint8 + bit | all read 0 → untested. Enum: `0x1` unlocked, `0x4` cleared |
-| Difficulty | `0x13b6` | uint8 | reads 0 → untested. Enum: 1 Beginner / 2 Normal / 3 Expert |
-| Message speed | `0x13b1` | uint8 | reads 0 → untested (0–9) |
-| City population | `0x13cf` +2/city | uint16 | **weak positive** — Fillmore reads 2 in bloodpool-start, 0 in blank |
-| City level | `0x13e1` +2/city | uint16 | **weak positive** — Fillmore reads 1 in bloodpool-start, 0 in blank |
-| City offerings | `0x13ed` +2/city | uint16 | reads 0 → untested |
-| City speed | `0x13db` +1/city | uint8 | **suspect** — Marahna reads Stop/Normal while every other city reads 0; smells misaligned |
-| Total cities | `0x13cb` | uint16 | reads 2 in both blank and bloodpool-start → suspect |
-| Master level / lives / next-XP / equipped | `0x1444` / `0x145e` / `0x144a` / `0x145f` | — | level reads 0 (blank) and 11 (bloodpool-start) — plausible but unconfirmed |
-| Magic slots 1–4 | `0x144c`–`0x144f` | uint8, 7-bit | all read 0 → untested. Enum: 1 Fire / 2 Stardust / 3 Aura / 4 Light |
-| Inventory items 1–8 | `0x1455`–`0x145c` | uint8 | slot 8 reads `0x2` in every save → suspect |
-| City scores act-1/act-2 | `0x1466` / `0x1468` | uint16 BCD ×10 | untested |
-| Player name | `0x143b` | 8B Shift-JIS | untested |
+| Field | USA SRAM | Encoding/range | Menu |
+|---|---:|---|---|
+| Message speed | `$13B1` | uint8, `0..9` | Status |
+| Angel SP current/max | `$1433/$1435` | little-endian uint16, `0..999` | Status |
+| Angel HP current/max | `$1437/$1438` | uint8, current `0..24`, max `1..24` | Status |
+| Player name | `$1439-$1441` | 8 characters plus terminator/padding; printable ASCII subset in observed saves | Status |
+| Master level | `$1442` | little-endian uint16, `1..17` | Status |
+| Master HP | `$1444` | little-endian uint16, `1..24` | Status |
+| Master MP/scrolls | `$1446` | little-endian uint16, `0..10` | Status |
+| Next-level experience | `$1448` | little-endian uint16; derived by the game/tool | not exposed |
+| Lives | `$145C` | stored zero-based; displayed `1..9` | Status |
 
-City enum (third-party): 0 Fillmore, 1 Bloodpool, 2 Kasandora, 3 Aitos,
-4 Marahna, 5 Northwall — consistent with our region order.
+The external template lists Master HP as `$1246`; that lone address conflicts
+with both the linear WRAM correspondence and every fixture. `$1444` is the
+derived USA address used here.
 
-### 3.3 Contradicted 🔴 — do not use
+### 3.3 Progress, inventory, and score fields
 
-These decode to impossible values against our saves. Either the third-party tool
-models a different version/region (its validator advertises europe/usa/japan and
-a "Professional Mode" that reads as an unwritten byte for us — suggesting a
-remaster or non-SNES target), or the offsets need re-derivation.
+| Field | USA SRAM | Encoding | Menu |
+|---|---:|---|---|
+| Death Heim state | `$120C` + `$1240` bit 0 | locked `0/0`, unlocked `0/1`, cleared `3/1` | Progress |
+| Professional mode | `$1FF0-$1FF2` | ASCII `ACT` unlocked; `FF FF FF` locked | Progress |
+| Magic slots 1–4 | `$144A-$144D` | low 7 bits: 0 empty, 1 Fire, 2 Stardust, 3 Aura, 4 Light; high bit selects equipped slot | Magic |
+| Equipped magic | `$145D` | spell ID `0..4`; writer sets the high bit on the slot containing that spell | Magic |
+| Item slots 1–8 | `$1453-$145A` | enumerated item byte (§3.3.1) | Items |
+| Act scores | `$1464 + region*4 + act*2` | little-endian packed BCD of score/10, `0..99990` by 10 | Scores |
 
-| Field | Offset | Claimed | Decodes in our saves as |
-|---|---|---|---|
-| Professional Mode | `0x1ff0` | 3-byte magic `"ACT"` | `0x60 60 60` / `0x27 27 27` — **the power-on fill**; §1 proves our ROM never writes this byte |
-| Angel HP cur/max | `0x1439` / `0x143a` | max 1–24 | `65 / 0` — current 65 with max 0 is impossible |
-| Angel SP cur/max | `0x1435` / `0x1437` | max ≤999 | `20 / 2056`, `80 / 2827` — max far exceeds the stated cap |
-| Master MP | `0x1448` | max 10 | `80`, `700` |
-| Master HP | `0x1246` | 1–24 | `8`, `11` — plausible, but the neighbouring fields' failure makes the whole block suspect |
-| Current city | `0x13cd` | city index 0–5 | `422` |
+#### 3.3.1 Item byte values
 
-Note these live in a contiguous `0x1435`–`0x1448` neighbourhood. A single
-wrong base offset (or a different struct layout in our version) would explain
-the whole cluster — which is exactly what §6.1 is designed to resolve.
+| Value | Item | Value | Item |
+|---:|---|---:|---|
+| `$00` | Empty | `$05` | Source of Life |
+| `$06` | Source of Magic | `$07` | Loaf of Bread |
+| `$08` | Wheat | `$09` | Herb |
+| `$0A` | Bridge | `$0B` | Harmonious Music |
+| `$0D` | Ancient Tablet | `$0E` | Magic Skull |
+| `$0F` | Sheep's Fleece | `$12` | Bomb |
+| `$13` | Compass | `$14` | Strength of Angel |
+
+The Professional marker has an independent static proof: ending presenter
+`$02:AA9C` stamps `ACT`. Death Heim, inventory, score, and unlock semantics
+still need the manual §6.3 game round trip even though their addresses,
+encodings, range validation, checksum repair, and transactional writes are now
+covered by `actraiser_save_system` tests.
 
 ### 3.4 Undocumented region 🔍 — `0x0000`–`0x07ff+`
 
@@ -209,7 +216,7 @@ The runtime must keep one invariant regardless of the disk format:
 backend only translates between that buffer and durable storage. Game code must
 never know whether the active file is native SRAM or structured INI.
 
-Phase 6 supports two backends:
+The implemented Phase-6 runtime supports two backends:
 
 | Backend | Default path | Purpose |
 |---|---|---|
@@ -242,7 +249,7 @@ size = 0x2000
 rom = usa
 
 [Regions]
-fillmore = active
+fillmore = act1-cleared
 bloodpool = act1
 kasandora = act1
 aitos = act1
@@ -315,26 +322,40 @@ a crash cannot leave a truncated active save. Backup, commit, shadow re-sync,
 and logging of the selected backend/path sit above the format adapters and are
 identical for `.srm` and `.ini`.
 
+### 4.3 Runtime implementation (2026-07-16)
+
+`src/save_system.c` now implements this boundary. `src/main.c` attaches the
+canonical `g_sram` buffer after the cartridge power-on fill, snapshots the
+resolved backend, and routes boot load, per-frame change persistence, editor
+actions, and clean shutdown through it. Native remains `saves/save.srm`; INI is
+`saves/save.ini`. `AR_SAVE_NATIVE_PATH`/`AR_SAVE_INI_PATH` are isolated-test
+overrides, not additional authoritative targets.
+
+The test suite proves exact native size/checksum rejection, transactional
+destination preservation on malformed/missing/duplicate INI chunks, unedited
+cross-format byte identity, field-only mutation plus checksum, session-only
+shadow re-sync, and persistent active-backend writes. The codec also validates
+all nine repository fixtures. The remaining acceptance gate is the manual game
+round trip in §6.3: persist one host edit, Restart Game, Continue, and confirm
+the region is accepted and displayed as intended.
+
 ---
 
 ## 5. Editing rules and hazards
 
-### 5.1 ⚠️ Auto-persist will clobber the user's real save
+### 5.1 Auto-persist/editor interaction — mitigated
 
-`src/main.c:811-830` diffs `g_sram` every frame and calls `RtlWriteSram()` the
-moment it changes, overwriting `saves/save.srm` — deliberately, so progress
-survives a freeze. **A save editor mutating `g_sram` trips this instantly**, and
-the user's real save is silently replaced by the edited one.
+The former main-loop implementation diffed `g_sram` and immediately wrote
+`saves/save.srm`. A naïve editor mutation would therefore have made an
+ostensibly session-only edit permanent.
 
-The editor **must** do at least one of:
-1. suppress auto-persist while a save edit is staged (re-sync the shadow buffer
-   after editing, so the edit is not seen as a game write); and/or
-2. take a timestamped backup before the first edit (the repo already uses a
-   `.bak` convention); and/or
-3. stage edits into a scratch buffer and only commit on explicit user action.
-
-Recommendation: **(1) + (2)** — re-sync the shadow *and* auto-backup. Never
-silently overwrite a save the user did not ask to modify.
+`SaveSystem_ApplyEdits()` now stages mutations in scratch, validates and
+checksums the complete image, and re-syncs the auto-persist shadow after the
+live swap. **Apply for session** consequently leaves disk untouched. **Apply
+and save** takes a timestamped backup (when enabled) and performs an explicit
+atomic active-backend write before the swap. `SaveSystem_AutoPersistIfChanged()`
+continues to preserve game-originated SRAM changes, but only to the backend
+selected at boot.
 
 ### 5.2 Checksum is mandatory
 Any write must be followed by a `SramChecksum()` recompute over the mutated
@@ -369,16 +390,19 @@ discrete sim action (seal one lair, gain one population tick) to bisect the
 `0x0000`–`0x07ff` block field-by-field.
 
 ### 6.3 Round-trip (the gating test)
-Edit a field → recompute checksum → boot → confirm the game accepts the save and
-shows the intended state. **No field ships to the menu without this.** This also
-retires the one open item in §2.
+Turn **Allow save edits** on → stage one low-risk field → **Apply and save** →
+**Restart Game** → Continue → confirm the game accepts the save and shows the
+intended value. Repeat representative tests for town state, Status, Magic,
+Items, Scores, Death Heim, and Professional mode. Phase 6 remains 🟡 until that
+matrix passes. **Apply for session** is intentionally not the restart path: its
+shadow re-sync guarantees that Restart/Exit leaves disk unchanged.
 
 ### 6.4 Tooling
-The analysis scripts used for this doc live in the session scratchpad. Per the
-repo's tooling convention (`tools/` with a shared `tools/ar_lib.py` — see
-`dis65.py`, `romxref.py`, `wram.py`), they should be promoted to a
-**`tools/srm.py`** with subcommands (`check`, `decode`, `diff`, `edit`) rather
-than re-written as throwaway scripts each time.
+`tools/srm.py` is the checked-in command-line companion. Its `check`, `decode`,
+`diff`, `edit`, and `convert` subcommands validate the same exact size/checksum,
+use the same six field offsets, and read/write the version-1 lossless INI. It
+is suitable for fixture research; runtime persistence remains owned by the C
+codec.
 
 ---
 
@@ -387,11 +411,11 @@ than re-written as throwaway scripts each time.
 1. **Slot structure.** No mirroring at `0x400`/`0x800`/`0x1000` block sizes
    (7 of 8 `0x400` blocks unique). Does ActRaiser keep >1 save slot, and if so
    where? Affects whether the editor needs a slot selector.
-2. **Progress value `0x01`** (§3.1) — observed on the active region, absent from
-   the third-party enum. Exact semantics unconfirmed.
-3. **The `0x0000`–`0x07ff` block** (§3.4) — town/terrain state? This is the
+2. **The `0x0000`–`0x07ff` block** (§3.4) — town/terrain state? This is the
    highest-value unknown.
-4. **Why the `0x1435`–`0x1448` cluster contradicts** (§3.3) — different game
-   version, or a base-offset error?
-5. **Act-2 access bit** (§3.2) — real for our ROM, or an artifact of the
-   third-party target? All our saves read 0.
+3. **City internals.** The reference template disables population, town level,
+   offerings, and construction-speed fields. Derive these from single-action
+   save diffs rather than exposing its dormant offsets.
+4. **Manual acceptance matrix.** Which fields are immediately re-read on
+   Continue, and which require a particular mode/town transition before their
+   user-visible effect appears?

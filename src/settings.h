@@ -58,6 +58,7 @@ typedef enum {
   kApply_Passive,
   kApply_Callback,
   kApply_Restart,
+  kApply_Save,
   kApply_Action,
 } SettingApplyKind;
 
@@ -67,8 +68,27 @@ typedef enum {
   kSettingCat_Aspect,
   kSettingCat_Display,
   kSettingCat_Audio,
+  kSettingCat_Save,
   kSettingCat_Qol,
 } SettingCategory;
+
+typedef enum SaveProgressEdit {
+  kSaveProgressEdit_LeaveAsIs = 0,
+  kSaveProgressEdit_Act1,
+  kSaveProgressEdit_Act1Cleared,
+  kSaveProgressEdit_Act2,
+  kSaveProgressEdit_Act2Cleared,
+  kSaveProgressEdit_Count,
+} SaveProgressEdit;
+
+typedef enum SaveEditorPage {
+  kSaveEditorPage_Progress = 0,
+  kSaveEditorPage_Status,
+  kSaveEditorPage_Magic,
+  kSaveEditorPage_Items,
+  kSaveEditorPage_Scores,
+  kSaveEditorPage_Count,
+} SaveEditorPage;
 
 typedef struct SettingDesc SettingDesc;
 typedef bool (*SettingAvailableFn)(void);
@@ -154,6 +174,33 @@ typedef struct Settings {
   uint16 warp_target;
   bool scene_inspector;      /* click-to-inspect live PPU/asset identity */
 
+  /* Battery-save preferences and staged verified field edits. The active
+   * backend is snapshotted when the save system attaches at boot. Region
+   * values are SaveProgressEdit selectors; zero never mutates SRAM. */
+  int save_backend;          /* SaveBackend numeric value */
+  bool save_edit_armed;
+  bool save_autobackup;
+  int save_editor_page;
+  int save_region_progress[6];
+  /* Zero leaves the field untouched. Fields whose real range includes zero
+   * store real+1 and use a formatter to keep that staging sentinel distinct. */
+  int save_master_level;
+  int save_master_hp;
+  int save_master_mp;
+  int save_lives;
+  int save_angel_sp_current;
+  int save_angel_sp_max;
+  int save_angel_hp_current;
+  int save_angel_hp_max;
+  int save_message_speed;
+  char save_player_name[9];
+  int save_professional_mode;
+  int save_death_heim_state;
+  int save_equipped_magic;
+  int save_magic_slots[4];
+  int save_item_slots[8];
+  int save_scores[6][2];
+
   /* Cheat values. Zero/false means disabled. Stateful enforcement latches are
    * deliberately kept private to ActRaiser_ApplyCheats, not stored here. */
   bool cheat_all_magic;
@@ -212,6 +259,7 @@ bool Settings_Save(const char *path);
  * profile invalidation, callbacks, and sticky/restart results stay uniform. */
 const SettingDesc *Settings_Find(const char *key);
 bool Settings_IsAvailable(const SettingDesc *desc);
+bool Settings_IsMenuVisible(const SettingDesc *desc);
 bool Settings_GetLong(const SettingDesc *desc, long *value);
 SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value);
 SettingChangeResult Settings_SetText(const SettingDesc *desc, const char *text);

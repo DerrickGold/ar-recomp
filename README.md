@@ -362,6 +362,53 @@ Restart and exit flush `settings.ini` and battery SRAM through the normal
 shutdown path; restart then replaces the current process with the same
 executable and command line.
 
+### Save editor
+
+The **Save editor** category stages battery-save changes without treating the
+unknown town-map payload as disposable structured data. Use **Editor page** to
+switch between Progress, Status, Magic, Items, and Scores. The editable set
+includes all six town states, Death Heim and Professional-mode unlock state,
+player name, Master/Angel level/health/SP/MP/lives, message speed, magic and
+item slots, equipped magic, and both act scores for every town.
+
+**Allow save edits** is an explicit safety switch, not an edit by itself. Leave
+it Off while browsing; turn it On only when you are ready to apply changes.
+With it Off, both Apply actions and next-boot staged overrides are refused and
+cannot change live or stored SRAM. With it On, an explicit Apply works now;
+staged values also become session-only boot overrides on the next launch.
+Rows default to **Leave as-is**, so only values deliberately selected on any
+page are written.
+
+Then run one of these actions:
+
+- **Apply for session** updates the live 8 KiB SRAM image but deliberately does
+  not write disk. It remains session-only even if Restart/Exit is used; use it
+  only when the current game flow can naturally return to the title screen and
+  choose Continue.
+- **Apply and save** first creates a timestamped backup (when Auto-backup is
+  enabled), atomically writes the active backend, and updates live SRAM. This
+  is the practical menu-testing path: run it, choose the top-level **Restart
+  Game** action, then Continue.
+- **Export native SRAM** and **Export structured INI** write
+  `saves/export.srm` and `saves/export.ini` without changing the active save.
+- **Import save** reads `saves/import.srm`, falls back to `saves/import.ini`
+  (or uses `AR_SAVE_IMPORT=<path>`), fully validates it, backs up the active
+  save, and converts it into the active backend without silently changing
+  backend selection.
+
+The storage-format row selects the authoritative `saves/save.srm` or lossless
+`saves/save.ini` backend after restart. INI files retain all 8192 raw bytes in
+128 required chunks and add readable verified region fields; unknown terrain,
+town state, fill history, and the ending marker are therefore preserved.
+Malformed/truncated files never partially replace live SRAM, and every editor
+mutation recomputes the game's ADD/XOR checksum. The field map was reconciled
+against the USA-region adjustment in the
+[game-tools-collection ActRaiser editor](https://github.com/RyudoSynbios/game-tools-collection/tree/master/src/lib/templates/actraiser/saveEditor)
+and then checked against this project's WRAM map and save fixtures.
+`tools/srm.py` provides
+`check`, `decode`, `diff`, `edit`, and cross-format `convert` commands for the
+same format outside the game.
+
 With the scene inspector enabled (`F3`, its top-level menu item, or
 `AR_SCENE_INSPECTOR=1`), left-click anywhere in the game viewport to freeze the
 current frame. A clean, color-coded monospace panel reports game mode/submode,

@@ -22,6 +22,7 @@
 #include "settings.h"
 #include "settings_overlay.h"
 #include "scene_inspector.h"
+#include "save_system.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
 #include "run_dir.h"
@@ -623,6 +624,96 @@ static void TakeFullSnapshot(void) {
           prefix, gf);
 }
 
+static bool BuildSaveEditRequest(SaveEditRequest *edits) {
+  static const int region_states[kSaveProgressEdit_Count] = {
+    -1,
+    kSaveRegionState_Act1,
+    kSaveRegionState_Act1Cleared,
+    kSaveRegionState_Act2,
+    kSaveRegionState_Act2Cleared,
+  };
+  static const int item_values[] = {
+    -1, 0x00, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+    0x0b, 0x0d, 0x0e, 0x0f, 0x12, 0x13, 0x14,
+  };
+  if (!edits) return false;
+  SaveEditRequest_Clear(edits);
+  bool staged = false;
+  for (int i = 0; i < kActRaiserSaveRegionCount; i++) {
+    int selector = g_settings.save_region_progress[i];
+    if (selector < 0 || selector >= kSaveProgressEdit_Count) continue;
+    edits->region_state[i] = region_states[selector];
+    staged = staged || edits->region_state[i] >= 0;
+  }
+#define SAVE_STAGE_DIRECT(request_field, setting_field) do { \
+  edits->request_field = g_settings.setting_field > 0 \
+      ? g_settings.setting_field : -1; \
+  staged = staged || edits->request_field >= 0; \
+} while (0)
+#define SAVE_STAGE_ZERO(request_field, setting_field) do { \
+  edits->request_field = g_settings.setting_field > 0 \
+      ? g_settings.setting_field - 1 : -1; \
+  staged = staged || edits->request_field >= 0; \
+} while (0)
+  SAVE_STAGE_DIRECT(master_level, save_master_level);
+  SAVE_STAGE_DIRECT(master_hp, save_master_hp);
+  SAVE_STAGE_ZERO(master_mp, save_master_mp);
+  SAVE_STAGE_DIRECT(lives, save_lives);
+  SAVE_STAGE_ZERO(angel_sp_current, save_angel_sp_current);
+  SAVE_STAGE_ZERO(angel_sp_max, save_angel_sp_max);
+  SAVE_STAGE_ZERO(angel_hp_current, save_angel_hp_current);
+  SAVE_STAGE_DIRECT(angel_hp_max, save_angel_hp_max);
+  SAVE_STAGE_ZERO(message_speed, save_message_speed);
+#undef SAVE_STAGE_DIRECT
+#undef SAVE_STAGE_ZERO
+
+  if (g_settings.save_player_name[0]) {
+    edits->player_name_set = true;
+    snprintf(edits->player_name, sizeof(edits->player_name), "%s",
+             g_settings.save_player_name);
+    staged = true;
+  }
+  if (g_settings.save_professional_mode > 0) {
+    edits->professional_mode = g_settings.save_professional_mode - 1;
+    staged = true;
+  }
+  if (g_settings.save_death_heim_state > 0) {
+    static const int death_heim_states[] = { -1, 0, 1, 4 };
+    int selector = g_settings.save_death_heim_state;
+    if (selector < (int)(sizeof(death_heim_states) /
+                         sizeof(death_heim_states[0]))) {
+      edits->death_heim_state = death_heim_states[selector];
+      staged = true;
+    }
+  }
+  if (g_settings.save_equipped_magic > 0) {
+    edits->equipped_magic = g_settings.save_equipped_magic - 1;
+    staged = true;
+  }
+  for (int i = 0; i < 4; i++) {
+    if (g_settings.save_magic_slots[i] <= 0) continue;
+    edits->magic_slots[i] = g_settings.save_magic_slots[i] - 1;
+    staged = true;
+  }
+  for (int i = 0; i < 8; i++) {
+    int selector = g_settings.save_item_slots[i];
+    if (selector <= 0 ||
+        selector >= (int)(sizeof(item_values) / sizeof(item_values[0])))
+      continue;
+    edits->item_slots[i] = item_values[selector];
+    staged = true;
+  }
+  for (int region = 0; region < kActRaiserSaveRegionCount; region++) {
+    for (int act = 0; act < 2; act++) {
+      int selector = g_settings.save_scores[region][act];
+      if (selector <= 0) continue;
+      edits->scores[region][act] = (selector - 1) * 10;
+      staged = true;
+    }
+  }
+  return staged;
+}
+
 static bool OnSettingsAction(const SettingDesc *desc) {
   if (!desc || !desc->key) return false;
   if (!strcmp(desc->key, "toggle_pause")) {
@@ -639,11 +730,58 @@ static bool OnSettingsAction(const SettingDesc *desc) {
     PerformWarp();
   } else if (!strcmp(desc->key, "take_snapshot")) {
     TakeFullSnapshot();
+  } else if (!strcmp(desc->key, "save_apply_session") ||
+             !strcmp(desc->key, "save_apply_persist")) {
+    SaveEditRequest edits;
+    BuildSaveEditRequest(&edits);
+    SaveError error = {{0}};
+    bool persist = !strcmp(desc->key, "save_apply_persist");
+    if (!SaveSystem_ApplyEdits(
+            &edits, g_settings.save_edit_armed, persist,
+            g_settings.save_autobackup, &error)) {
+      fprintf(stderr, "[save-editor] %s failed: %s\n",
+              persist ? "apply and save" : "session apply", error.message);
+      return false;
+    }
+    fprintf(stderr, "[save-editor] staged save edits applied%s\n",
+            persist ? " and saved" : " for this session");
+  } else if (!strcmp(desc->key, "save_import")) {
+    const char *path = getenv("AR_SAVE_IMPORT");
+    if (!path || !path[0]) {
+      FILE *probe = fopen("saves/import.srm", "rb");
+      if (probe) {
+        fclose(probe);
+        path = "saves/import.srm";
+      } else {
+        path = "saves/import.ini";
+      }
+    }
+    SaveError error = {{0}};
+    if (!SaveSystem_Import(path, g_settings.save_autobackup, &error)) {
+      fprintf(stderr, "[save-editor] import %s failed: %s\n", path,
+              error.message);
+      return false;
+    }
+    fprintf(stderr, "[save-editor] imported %s -> %s\n", path,
+            SaveSystem_ActivePath());
+  } else if (!strcmp(desc->key, "save_export_srm") ||
+             !strcmp(desc->key, "save_export_ini")) {
+    bool ini = !strcmp(desc->key, "save_export_ini");
+    const char *path = ini ? "saves/export.ini" : "saves/export.srm";
+    SaveError error = {{0}};
+    if (!SaveSystem_Export(ini ? kSaveFileFormat_Ini
+                               : kSaveFileFormat_NativeSrm,
+                           path, &error)) {
+      fprintf(stderr, "[save-editor] export %s failed: %s\n", path,
+              error.message);
+      return false;
+    }
+    fprintf(stderr, "[save-editor] export -> %s\n", path);
   } else if (!strcmp(desc->key, "restart_game") ||
              !strcmp(desc->key, "exit_desktop")) {
-    /* Settings normally persist at mutation time, but repeat the write here
-     * so lifecycle actions are also safe entry points for future transactional
-     * save-editor rows. Battery SRAM is flushed by the shared shutdown path. */
+    /* Settings normally persist at mutation time, but repeat the write here.
+     * Battery SRAM is flushed through the active Phase-6 backend by the shared
+     * shutdown path. */
     if (!Settings_Save("settings.ini")) {
       fprintf(stderr, "[lifecycle] could not save settings.ini\n");
       return false;
@@ -1758,15 +1896,45 @@ int main(int argc, char **argv) {
   }
 
   /* Load persisted battery save (overrides the fresh-cart fill if present). */
-  RtlReadSram();
+  mkdir("saves", 0755);
+  RtlMigrateLegacySram(kActRaiserGameInfo.title);
+  {
+    extern uint8 *g_sram; extern int g_sram_size;
+    SaveError error = {{0}};
+    const char *native_path = getenv("AR_SAVE_NATIVE_PATH");
+    const char *ini_path = getenv("AR_SAVE_INI_PATH");
+    if (!native_path || !native_path[0]) native_path = "saves/save.srm";
+    if (!ini_path || !ini_path[0]) ini_path = "saves/save.ini";
+    if (!SaveSystem_Attach(g_sram, (size_t)g_sram_size,
+                           (SaveBackend)g_settings.save_backend,
+                           native_path, ini_path, &error))
+      Die(error.message);
+    if (!SaveSystem_LoadActive(&error)) {
+      fprintf(stderr, "[saves] active load rejected: %s; using fresh SRAM\n",
+              error.message);
+      SaveSystem_ResyncShadow();
+    }
+
+    SaveEditRequest edits;
+    bool staged = BuildSaveEditRequest(&edits);
+    if (staged && g_settings.save_edit_armed) {
+      if (!SaveSystem_ApplyEdits(
+              &edits, true, false, g_settings.save_autobackup, &error))
+        fprintf(stderr, "[save-editor] boot edits rejected: %s\n",
+                error.message);
+      else
+        fprintf(stderr, "[save-editor] boot edits applied for this session\n");
+    } else if (staged) {
+      fprintf(stderr,
+              "[save-editor] staged boot edits ignored; save editing is not armed\n");
+    }
+  }
 
   WramTraceInit();
 
   g_audio_mutex = SDL_CreateMutex();
   g_game_thread_id = SDL_ThreadID();
   ApplyAudioEnabled();
-
-  mkdir("saves", 0755);
 
   /* AR_LOADSTATE=<slot>: load a savestate at boot (before the main loop), so a
    * headless/instrumented run can start from a captured moment instead of
@@ -2185,26 +2353,21 @@ int main(int argc, char **argv) {
     }
 
     /* Auto-persist battery SRAM the moment the game writes a save, so progress
-     * survives a freeze/force-quit (the clean-exit RtlWriteSram never runs if
-     * the game hangs). Cheap: only writes when the 8KB SRAM actually changes.
+     * survives a freeze/force-quit (the clean-exit save-system write never runs
+     * if the game hangs). Cheap: only writes when the 8KB SRAM actually changes.
      * SKIPPED during input replay: a replay is keyed on the game-frame counter
      * from a fixed boot state, so letting the replayed run overwrite save.srm
      * mid-playthrough would change the boot state for the NEXT replay and break
      * the frame alignment (the recording then no longer reaches the same spot). */
-    if (!getenv("AR_INPUT_REPLAY"))
-    {
-      extern uint8 *g_sram; extern int g_sram_size;
-      static uint8 *sram_shadow; static int shadow_size;
-      if (g_sram && g_sram_size > 0) {
-        if (!sram_shadow || shadow_size != g_sram_size) {
-          free(sram_shadow);
-          sram_shadow = malloc(g_sram_size); shadow_size = g_sram_size;
-          if (sram_shadow) memcpy(sram_shadow, g_sram, g_sram_size);
-        } else if (memcmp(sram_shadow, g_sram, g_sram_size) != 0) {
-          memcpy(sram_shadow, g_sram, g_sram_size);
-          RtlWriteSram();
-          fprintf(stderr, "[saves] battery SRAM changed -> wrote saves/save.srm\n");
-        }
+    if (!getenv("AR_INPUT_REPLAY")) {
+      static bool write_error_reported;
+      SaveError error = {{0}};
+      if (!SaveSystem_AutoPersistIfChanged(&error)) {
+        if (!write_error_reported)
+          fprintf(stderr, "[saves] auto-persist failed: %s\n", error.message);
+        write_error_reported = true;
+      } else {
+        write_error_reported = false;
       }
     }
 
@@ -2296,10 +2459,16 @@ int main(int argc, char **argv) {
     }
   }
 
-  /* Persist battery save and dump diagnostic state on exit. Skip the SRAM
-   * write during replay so a replayed run never mutates save.srm (see the
-   * auto-persist note above — it would break the next replay's frame align). */
-  if (!getenv("AR_INPUT_REPLAY")) RtlWriteSram();
+  /* Flush only game-originated battery changes on exit. Deliberate
+   * session-only editor changes re-sync the save-system shadow, so using
+   * Restart/Exit after one must not turn it into a persistent edit. Skip the
+   * flush during replay so a replayed run never mutates the active save (see
+   * the auto-persist note above — it would break the next replay's alignment). */
+  if (!getenv("AR_INPUT_REPLAY")) {
+    SaveError error = {{0}};
+    if (!SaveSystem_AutoPersistIfChanged(&error))
+      fprintf(stderr, "[saves] shutdown flush failed: %s\n", error.message);
+  }
   DumpDiagState(g_host_lifecycle_request == kHostLifecycle_Restart
                     ? "restart" : "exit");
 

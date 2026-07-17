@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 bool g_ws_active;
 int g_ws_extra;
@@ -58,8 +59,15 @@ static uint8_t *ReadOptionalRom(size_t *size_out) {
 }
 
 int main(void) {
-  remove("settings.ini");
-  remove("settings.ini.tmp");
+  char settings_path[160];
+  char settings_temporary[164];
+  snprintf(settings_path, sizeof(settings_path),
+           "/tmp/actraiser-overlay-settings-%ld.ini", (long)getpid());
+  snprintf(settings_temporary, sizeof(settings_temporary), "%s.tmp",
+           settings_path);
+  setenv("AR_OVERLAY_TEST_SETTINGS_PATH", settings_path, 1);
+  remove(settings_path);
+  remove(settings_temporary);
   setenv("SDL_VIDEODRIVER", "dummy", 1);
   setenv("SDL_AUDIODRIVER", "dummy", 1);
 
@@ -114,7 +122,7 @@ int main(void) {
   if (auto_scale > 800) auto_scale = 800;
   int expected_scale = auto_scale < 800 ? auto_scale + 25 : 800;
   CHECK(g_settings.menu_scale_percent == expected_scale);
-  FILE *saved = fopen("settings.ini", "rb");
+  FILE *saved = fopen(settings_path, "rb");
   CHECK(saved != NULL);
   if (saved) fclose(saved);
 
@@ -139,12 +147,44 @@ int main(void) {
   CHECK(g_settings.audio_frequency == kAudioFrequency_48000);
   CHECK(Settings_AudioFrequencyHz() == 48000);
 
-  /* Move through Widescreen and Cheats to Quality of life. Its second row is
-   * the custom hexadecimal warp target: direct edit replaces the formatted
-   * value and persists through the same descriptor path. */
+  /* Save Editor is a first-class category between Cheats and QoL. Its backend
+   * and arming rows use the same submenu controls and persistence path. */
   CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.save_backend == 1);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.save_edit_armed);
+  CHECK(Settings_SetText(Settings_Find("save_prog_fillmore"),
+                         "act2-cleared") == kSettingChange_Applied);
+  const char *save_preview = getenv("AR_OVERLAY_SAVE_TEST_BMP");
+  if (renderer && save_preview && save_preview[0]) {
+    SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+    SDL_RenderClear(renderer);
+    SettingsOverlay_Render(
+        (SDL_Rect){0, 0, surface_width, surface_height});
+    SDL_RenderPresent(renderer);
+    CHECK(SDL_SaveBMP(surface, save_preview) == 0);
+  }
+
+  /* The default Progress page is taller than the visible panel. Verify its
+   * filtered row list reaches the final conversion action and dispatches it
+   * through the normal observer path. We started on row 1 (Allow save edits). */
+  for (int i = 0; i < 15; i++)
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(s_action_calls == 1);
+  CHECK(s_action_desc == Settings_Find("save_export_ini"));
+  s_action_calls = 0;
+  s_action_desc = NULL;
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+
+  /* Move once more to Quality of life. Its second row is the custom
+   * hexadecimal warp target. */
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
@@ -250,8 +290,8 @@ int main(void) {
   SDL_DestroyRenderer(renderer);
   SDL_FreeSurface(surface);
   SDL_Quit();
-  remove("settings.ini");
-  remove("settings.ini.tmp");
+  remove(settings_path);
+  remove(settings_temporary);
 
   if (s_failures) {
     fprintf(stderr, "settings overlay tests: %d failure(s)\n", s_failures);

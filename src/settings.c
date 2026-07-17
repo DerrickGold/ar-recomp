@@ -1,5 +1,6 @@
 #include "settings.h"
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,7 +12,7 @@ Settings g_settings;
 static SettingsChangeObserver s_change_observer;
 static SettingsActionObserver s_action_observer;
 
-enum { kSettingsMaxDescriptors = 64, kSettingsLayerValueSize = 512 };
+enum { kSettingsMaxDescriptors = 128, kSettingsLayerValueSize = 512 };
 typedef struct SettingsLayerValue {
   bool present;
   bool legacy_env_syntax;
@@ -261,6 +262,130 @@ static int FormatWarpTarget(char *buffer, int buffer_size,
                   (unsigned)*(const uint16 *)field);
 }
 
+static bool ParseSaveBackend(const char *text, void *field) {
+  if (!text || !field) return false;
+  if (!strcmp(text, "native-srm") || !strcmp(text, "native") ||
+      !strcmp(text, "0")) {
+    *(int *)field = 0;
+    return true;
+  }
+  if (!strcmp(text, "ini") || !strcmp(text, "1")) {
+    *(int *)field = 1;
+    return true;
+  }
+  return false;
+}
+
+static bool ParseSaveProgressEdit(const char *text, void *field) {
+  if (!text || !field) return false;
+  static const char *const names[kSaveProgressEdit_Count] = {
+    "leave-as-is", "act1", "act1-cleared", "act2", "act2-cleared"
+  };
+  static const char *const labels[kSaveProgressEdit_Count] = {
+    "Leave as-is", "Act 1", "Act 1 cleared", "Act 2", "Act 2 cleared"
+  };
+  for (int i = 0; i < kSaveProgressEdit_Count; i++) {
+    if (!strcmp(text, names[i]) || !strcmp(text, labels[i])) {
+      *(int *)field = i;
+      return true;
+    }
+  }
+  char *end = NULL;
+  long value = strtol(text, &end, 0);
+  if (!end || *end || value < 0 || value >= kSaveProgressEdit_Count)
+    return false;
+  *(int *)field = (int)value;
+  return true;
+}
+
+static bool ParseStagedDirect(const char *text, void *field) {
+  if (!text || !field) return false;
+  if (!strcmp(text, "Leave as-is") || !strcmp(text, "leave-as-is")) {
+    *(int *)field = 0;
+    return true;
+  }
+  char *end = NULL;
+  long value = strtol(text, &end, 0);
+  if (!end || *end) return false;
+  *(int *)field = (int)value;
+  return true;
+}
+
+static bool ParseStagedZeroBased(const char *text, void *field) {
+  if (!text || !field) return false;
+  if (!strcmp(text, "Leave as-is") || !strcmp(text, "leave-as-is")) {
+    *(int *)field = 0;
+    return true;
+  }
+  char *end = NULL;
+  long value = strtol(text, &end, 0);
+  if (!end || *end || value < 0 || value >= INT_MAX) return false;
+  *(int *)field = (int)value + 1;
+  return true;
+}
+
+static int FormatStagedDirect(char *buffer, int buffer_size,
+                              const void *field) {
+  int value = *(const int *)field;
+  return value == 0
+      ? snprintf(buffer, (size_t)buffer_size, "Leave as-is")
+      : snprintf(buffer, (size_t)buffer_size, "%d", value);
+}
+
+static int FormatStagedZeroBased(char *buffer, int buffer_size,
+                                 const void *field) {
+  int value = *(const int *)field;
+  return value == 0
+      ? snprintf(buffer, (size_t)buffer_size, "Leave as-is")
+      : snprintf(buffer, (size_t)buffer_size, "%d", value - 1);
+}
+
+static bool ParseStagedScore(const char *text, void *field) {
+  if (!text || !field) return false;
+  if (!strcmp(text, "Leave as-is") || !strcmp(text, "leave-as-is")) {
+    *(int *)field = 0;
+    return true;
+  }
+  char *end = NULL;
+  long score = strtol(text, &end, 0);
+  if (!end || *end || score < 0 || score > 99990 || score % 10) return false;
+  *(int *)field = (int)(score / 10) + 1;
+  return true;
+}
+
+static int FormatStagedScore(char *buffer, int buffer_size,
+                             const void *field) {
+  int value = *(const int *)field;
+  return value == 0
+      ? snprintf(buffer, (size_t)buffer_size, "Leave as-is")
+      : snprintf(buffer, (size_t)buffer_size, "%d", (value - 1) * 10);
+}
+
+static bool ParseSavePlayerName(const char *text, void *field) {
+  if (!text || !field) return false;
+  char *name = (char *)field;
+  if (!text[0] || !strcmp(text, "Leave as-is") ||
+      !strcmp(text, "leave-as-is")) {
+    name[0] = 0;
+    return true;
+  }
+  size_t length = strlen(text);
+  if (length > 8) return false;
+  for (size_t i = 0; i < length; i++) {
+    unsigned char ch = (unsigned char)text[i];
+    if (ch < 0x20 || ch > 0x7e) return false;
+  }
+  memcpy(name, text, length + 1);
+  return true;
+}
+
+static int FormatSavePlayerName(char *buffer, int buffer_size,
+                                const void *field) {
+  const char *name = (const char *)field;
+  return snprintf(buffer, (size_t)buffer_size, "%s",
+                  name[0] ? name : "Leave as-is");
+}
+
 static bool ParseTurboMultiplier(const char *text, void *field) {
   if (!text || !text[0]) return false;
   char *end = NULL;
@@ -311,6 +436,48 @@ static const char *const kAudioFrequencyLabels[] = {
   "48 kHz",
 };
 
+static const char *const kSaveBackendLabels[] = {
+  "native-srm",
+  "ini",
+};
+
+static const char *const kSaveProgressEditLabels[] = {
+  "Leave as-is",
+  "Act 1",
+  "Act 1 cleared",
+  "Act 2",
+  "Act 2 cleared",
+};
+
+static const char *const kSaveEditorPageLabels[] = {
+  "Progress", "Status", "Magic", "Items", "Scores",
+};
+
+static const char *const kSaveProfessionalLabels[] = {
+  "Leave as-is", "Locked", "Unlocked",
+};
+
+static const char *const kSaveDeathHeimLabels[] = {
+  "Leave as-is", "Locked", "Unlocked", "Cleared",
+};
+
+static const char *const kSaveEquippedMagicLabels[] = {
+  "Leave as-is", "None", "Magical Fire", "Magical Stardust",
+  "Magical Aura", "Magical Light",
+};
+
+static const char *const kSaveMagicSlotLabels[] = {
+  "Leave as-is", "Empty", "Magical Fire", "Magical Stardust",
+  "Magical Aura", "Magical Light",
+};
+
+static const char *const kSaveItemLabels[] = {
+  "Leave as-is", "Empty", "Source of Life", "Source of Magic",
+  "Loaf of Bread", "Wheat", "Herb", "Bridge", "Harmonious Music",
+  "Ancient Tablet", "Magic Skull", "Sheep's Fleece", "Bomb",
+  "Compass", "Strength of Angel",
+};
+
 #define BOOL_SETTING(id, env_name, text, help, cat, def, is_sticky, active, changed) \
   { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
     &g_settings.id, def, 0, 1, 1, is_sticky, NULL, 0, active, changed, \
@@ -323,6 +490,34 @@ static const char *const kAudioFrequencyLabels[] = {
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
     kSettingCat_Qol, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
     NULL, NULL }
+#define SAVE_ACTION_SETTING(id, text, help) \
+  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
+    kSettingCat_Save, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
+    NULL, NULL }
+#define SAVE_PROGRESS_SETTING(index, id, env_name, text, help) \
+  { id, env_name, text, help, kSettingType_Enum, kApply_Save, \
+    kSettingCat_Save, &g_settings.save_region_progress[index], \
+    kSaveProgressEdit_LeaveAsIs, kSaveProgressEdit_LeaveAsIs, \
+    kSaveProgressEdit_Act2Cleared, 1, false, kSaveProgressEditLabels, \
+    kSaveProgressEdit_Count, NULL, NULL, ParseSaveProgressEdit, NULL }
+#define SAVE_STAGE_DIRECT(field_name, id, text, help, maximum) \
+  { id, NULL, text, help, kSettingType_Int, kApply_Save, \
+    kSettingCat_Save, &g_settings.field_name, 0, 0, maximum, 1, false, \
+    NULL, 0, NULL, NULL, ParseStagedDirect, FormatStagedDirect }
+#define SAVE_STAGE_ZERO(field_name, id, text, help, maximum) \
+  { id, NULL, text, help, kSettingType_Int, kApply_Save, \
+    kSettingCat_Save, &g_settings.field_name, 0, 0, (maximum) + 1, 1, false, \
+    NULL, 0, NULL, NULL, ParseStagedZeroBased, FormatStagedZeroBased }
+#define SAVE_ENUM_FIELD(field_ptr, id, text, help, labels) \
+  { id, NULL, text, help, kSettingType_Enum, kApply_Save, \
+    kSettingCat_Save, field_ptr, 0, 0, \
+    (int)(sizeof(labels) / sizeof((labels)[0])) - 1, 1, false, labels, \
+    (int)(sizeof(labels) / sizeof((labels)[0])), NULL, NULL, NULL, NULL }
+#define SAVE_SCORE_FIELD(region, act, id, text) \
+  { id, NULL, text, "Stage the saved BCD score (0-99990 by 10).", \
+    kSettingType_Int, kApply_Save, kSettingCat_Save, \
+    &g_settings.save_scores[region][act], 0, 0, 10000, 1, false, \
+    NULL, 0, NULL, NULL, ParseStagedScore, FormatStagedScore }
 
 const SettingDesc g_setting_descs[] = {
   { "display_mode", "AR_DISPLAY_MODE", "Render profile",
@@ -436,6 +631,132 @@ const SettingDesc g_setting_descs[] = {
                  "Persist settings and battery SRAM, then restart the application."),
   ACTION_SETTING("exit_desktop", "Exit to desktop",
                  "Persist settings and battery SRAM, then close the application."),
+  { "save_backend", "AR_SAVE_BACKEND", "Save storage format",
+    "Choose the authoritative native-srm or lossless INI backend after restart.",
+    kSettingType_Enum, kApply_Restart, kSettingCat_Save,
+    &g_settings.save_backend, 0, 0, 1, 1, false,
+    kSaveBackendLabels, 2, NULL, NULL, ParseSaveBackend, NULL },
+  BOOL_SETTING(save_edit_armed, "AR_SAVE_EDIT", "Allow save edits",
+               "Safety switch: permits Apply actions and next-boot staged overrides to change SRAM.",
+               kSettingCat_Save, 0, false, NULL, NULL),
+  BOOL_SETTING(save_autobackup, "AR_SAVE_BACKUP", "Auto-backup",
+               "Back up the active save before the first persistent editor change.",
+               kSettingCat_Save, 1, false, NULL, NULL),
+  { "save_editor_page", NULL, "Editor page",
+    "Choose which group of staged save fields is shown below.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Save,
+    &g_settings.save_editor_page, kSaveEditorPage_Progress,
+    kSaveEditorPage_Progress, kSaveEditorPage_Count - 1, 1, false,
+    kSaveEditorPageLabels, kSaveEditorPage_Count, NULL, NULL, NULL, NULL },
+  SAVE_PROGRESS_SETTING(0, "save_prog_fillmore", "AR_SAVE_PROG_FILLMORE",
+                        "Fillmore State", "Stage Fillmore's Act/state flags."),
+  SAVE_PROGRESS_SETTING(1, "save_prog_bloodpool", "AR_SAVE_PROG_BLOODPOOL",
+                        "Bloodpool State", "Stage Bloodpool's Act/state flags."),
+  SAVE_PROGRESS_SETTING(2, "save_prog_kasandora", "AR_SAVE_PROG_KASANDORA",
+                        "Kasandora State", "Stage Kasandora's Act/state flags."),
+  SAVE_PROGRESS_SETTING(3, "save_prog_aitos", "AR_SAVE_PROG_AITOS",
+                        "Aitos State", "Stage Aitos's Act/state flags."),
+  SAVE_PROGRESS_SETTING(4, "save_prog_marahna", "AR_SAVE_PROG_MARAHNA",
+                        "Marahna State", "Stage Marahna's Act/state flags."),
+  SAVE_PROGRESS_SETTING(5, "save_prog_northwall", "AR_SAVE_PROG_NORTHWALL",
+                        "Northwall State", "Stage Northwall's Act/state flags."),
+  SAVE_ENUM_FIELD(&g_settings.save_death_heim_state,
+                  "save_death_heim_state", "Death Heim State",
+                  "Stage Death Heim as locked, unlocked, or cleared.",
+                  kSaveDeathHeimLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_professional_mode,
+                  "save_professional_mode", "Professional Mode",
+                  "Stage the title-screen Professional mode unlock marker.",
+                  kSaveProfessionalLabels),
+  { "save_player_name", NULL, "Player Name",
+    "Stage the saved player name (1-8 printable characters).",
+    kSettingType_Custom, kApply_Save, kSettingCat_Save,
+    g_settings.save_player_name, 0, 0, 0, 0, false,
+    NULL, 0, NULL, NULL, ParseSavePlayerName, FormatSavePlayerName },
+  SAVE_STAGE_DIRECT(save_master_level, "save_master_level", "Master Level",
+                    "Stage the persistent Master level (1-17).", 17),
+  SAVE_STAGE_DIRECT(save_master_hp, "save_master_hp", "Master HP",
+                    "Stage persistent Master health (1-24).", 24),
+  SAVE_STAGE_ZERO(save_master_mp, "save_master_mp", "Master MP",
+                  "Stage persistent magic scrolls/MP (0-10).", 10),
+  SAVE_STAGE_DIRECT(save_lives, "save_lives", "Lives",
+                    "Stage the displayed life count (1-9).", 9),
+  SAVE_STAGE_ZERO(save_angel_sp_current, "save_angel_sp_current",
+                  "Angel Current SP", "Stage current simulation SP (0-999).", 999),
+  SAVE_STAGE_ZERO(save_angel_sp_max, "save_angel_sp_max",
+                  "Angel Maximum SP", "Stage maximum simulation SP (0-999).", 999),
+  SAVE_STAGE_ZERO(save_angel_hp_current, "save_angel_hp_current",
+                  "Angel Current HP", "Stage current Angel health (0-24).", 24),
+  SAVE_STAGE_DIRECT(save_angel_hp_max, "save_angel_hp_max",
+                    "Angel Maximum HP", "Stage maximum Angel health (1-24).", 24),
+  SAVE_STAGE_ZERO(save_message_speed, "save_message_speed", "Message Speed",
+                  "Stage the saved native dialogue-speed value (0-9).", 9),
+  SAVE_ENUM_FIELD(&g_settings.save_equipped_magic,
+                  "save_equipped_magic", "Equipped Magic",
+                  "Stage the equipped spell; that spell must exist in a magic slot.",
+                  kSaveEquippedMagicLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_magic_slots[0],
+                  "save_magic_slot_1", "Magic Slot 1",
+                  "Stage the spell stored in magic inventory slot 1.",
+                  kSaveMagicSlotLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_magic_slots[1],
+                  "save_magic_slot_2", "Magic Slot 2",
+                  "Stage the spell stored in magic inventory slot 2.",
+                  kSaveMagicSlotLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_magic_slots[2],
+                  "save_magic_slot_3", "Magic Slot 3",
+                  "Stage the spell stored in magic inventory slot 3.",
+                  kSaveMagicSlotLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_magic_slots[3],
+                  "save_magic_slot_4", "Magic Slot 4",
+                  "Stage the spell stored in magic inventory slot 4.",
+                  kSaveMagicSlotLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_item_slots[0],
+                  "save_item_slot_1", "Item Slot 1",
+                  "Stage the item stored in inventory slot 1.", kSaveItemLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_item_slots[1],
+                  "save_item_slot_2", "Item Slot 2",
+                  "Stage the item stored in inventory slot 2.", kSaveItemLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_item_slots[2],
+                  "save_item_slot_3", "Item Slot 3",
+                  "Stage the item stored in inventory slot 3.", kSaveItemLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_item_slots[3],
+                  "save_item_slot_4", "Item Slot 4",
+                  "Stage the item stored in inventory slot 4.", kSaveItemLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_item_slots[4],
+                  "save_item_slot_5", "Item Slot 5",
+                  "Stage the item stored in inventory slot 5.", kSaveItemLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_item_slots[5],
+                  "save_item_slot_6", "Item Slot 6",
+                  "Stage the item stored in inventory slot 6.", kSaveItemLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_item_slots[6],
+                  "save_item_slot_7", "Item Slot 7",
+                  "Stage the item stored in inventory slot 7.", kSaveItemLabels),
+  SAVE_ENUM_FIELD(&g_settings.save_item_slots[7],
+                  "save_item_slot_8", "Item Slot 8",
+                  "Stage the item stored in inventory slot 8.", kSaveItemLabels),
+  SAVE_SCORE_FIELD(0, 0, "save_score_fillmore_1", "Fillmore Act 1"),
+  SAVE_SCORE_FIELD(0, 1, "save_score_fillmore_2", "Fillmore Act 2"),
+  SAVE_SCORE_FIELD(1, 0, "save_score_bloodpool_1", "Bloodpool Act 1"),
+  SAVE_SCORE_FIELD(1, 1, "save_score_bloodpool_2", "Bloodpool Act 2"),
+  SAVE_SCORE_FIELD(2, 0, "save_score_kasandora_1", "Kasandora Act 1"),
+  SAVE_SCORE_FIELD(2, 1, "save_score_kasandora_2", "Kasandora Act 2"),
+  SAVE_SCORE_FIELD(3, 0, "save_score_aitos_1", "Aitos Act 1"),
+  SAVE_SCORE_FIELD(3, 1, "save_score_aitos_2", "Aitos Act 2"),
+  SAVE_SCORE_FIELD(4, 0, "save_score_marahna_1", "Marahna Act 1"),
+  SAVE_SCORE_FIELD(4, 1, "save_score_marahna_2", "Marahna Act 2"),
+  SAVE_SCORE_FIELD(5, 0, "save_score_northwall_1", "Northwall Act 1"),
+  SAVE_SCORE_FIELD(5, 1, "save_score_northwall_2", "Northwall Act 2"),
+  SAVE_ACTION_SETTING("save_apply_session", "Apply for session",
+                      "Apply only to live SRAM; use a natural return to title, not Restart."),
+  SAVE_ACTION_SETTING("save_apply_persist", "Apply and save",
+                      "Back up and save staged fields; then Restart Game and Continue."),
+  SAVE_ACTION_SETTING("save_import", "Import save",
+                      "Import saves/import.srm, then saves/import.ini, or AR_SAVE_IMPORT."),
+  SAVE_ACTION_SETTING("save_export_srm", "Export native SRAM",
+                      "Export the current exact image to saves/export.srm."),
+  SAVE_ACTION_SETTING("save_export_ini", "Export structured INI",
+                      "Export the current lossless image to saves/export.ini."),
   BOOL_SETTING(cheat_all_magic, "AR_ALL_MAGIC", "All magic",
                "Unlock all four spells; disabling cannot undo unlocks already written.",
                kSettingCat_Cheats, 0, true, NULL, NULL),
@@ -586,6 +907,42 @@ bool Settings_IsAvailable(const SettingDesc *desc) {
   return desc &&
          (desc->category == kSettingCat_Cheats ||
           !desc->available || desc->available());
+}
+
+bool Settings_IsMenuVisible(const SettingDesc *desc) {
+  if (!desc || !desc->key) return false;
+  if (desc->category != kSettingCat_Save) return true;
+
+  /* Save storage/safety controls, the page selector, and commands stay
+   * visible on every editor page. Only the staged payload is paged. */
+  if (desc->type == kSettingType_Action ||
+      !strcmp(desc->key, "save_backend") ||
+      !strcmp(desc->key, "save_edit_armed") ||
+      !strcmp(desc->key, "save_autobackup") ||
+      !strcmp(desc->key, "save_editor_page"))
+    return true;
+
+  switch (g_settings.save_editor_page) {
+    case kSaveEditorPage_Progress:
+      return !strncmp(desc->key, "save_prog_", 10) ||
+             !strcmp(desc->key, "save_death_heim_state") ||
+             !strcmp(desc->key, "save_professional_mode");
+    case kSaveEditorPage_Status:
+      return !strcmp(desc->key, "save_player_name") ||
+             !strncmp(desc->key, "save_master_", 12) ||
+             !strcmp(desc->key, "save_lives") ||
+             !strncmp(desc->key, "save_angel_", 11) ||
+             !strcmp(desc->key, "save_message_speed");
+    case kSaveEditorPage_Magic:
+      return !strcmp(desc->key, "save_equipped_magic") ||
+             !strncmp(desc->key, "save_magic_slot_", 16);
+    case kSaveEditorPage_Items:
+      return !strncmp(desc->key, "save_item_slot_", 15);
+    case kSaveEditorPage_Scores:
+      return !strncmp(desc->key, "save_score_", 11);
+    default:
+      return false;
+  }
 }
 
 bool Settings_GetLong(const SettingDesc *desc, long *value) {
@@ -763,6 +1120,7 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Aspect: return "Aspect";
     case kSettingCat_Display: return "Display";
     case kSettingCat_Audio: return "Audio";
+    case kSettingCat_Save: return "Save editor";
     case kSettingCat_Qol: return "Quality of life";
   }
   return "Unknown";
@@ -773,6 +1131,7 @@ const char *Settings_ApplyKindName(SettingApplyKind apply) {
     case kApply_Passive: return "Live";
     case kApply_Callback: return "Live callback";
     case kApply_Restart: return "Restart required";
+    case kApply_Save: return "Staged save edit";
     case kApply_Action: return "Action";
   }
   return "Unknown";
