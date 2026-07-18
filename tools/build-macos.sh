@@ -1,45 +1,47 @@
 #!/usr/bin/env bash
-# Build ActRaiser Recompiled on macOS.
-#
-# Prerequisites:
-#   brew install cmake sdl2 ninja go
-#   bash tools/regen.sh --no-tests  (needs ar.sfc at repo root)
-#
-# Usage:
-#   bash tools/build-macos.sh [--config prod|debug]
+# Compatibility launcher for macOS. Cross-platform automation should invoke:
+#   snesbuild build --root . --config Release
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$ROOT"
-
 CONFIG="Release"
-for arg in "$@"; do
-  case "$arg" in
-    --config)  shift; CONFIG="${1:-Release}" ;;
-    debug)     CONFIG="Debug" ;;
-    prod)      CONFIG="Release" ;;
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      echo "Usage: bash tools/build-macos.sh [--config Release|Debug | prod | debug]"
+      exit 0
+      ;;
+    --config)
+      shift
+      CONFIG="${1:-Release}"
+      ;;
+    debug) CONFIG="Debug" ;;
+    prod) CONFIG="Release" ;;
+    *) echo "build-macos.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
+  shift
 done
 
-if [ ! -f "snesrecomp-go/runtime/runner.cmake" ]; then
-  echo "Error: the bundled snesrecomp-go runtime is incomplete."
+DRIVER_ARGS=(build --root "$ROOT" --config "$CONFIG" --generator "Unix Makefiles")
+if command -v brew >/dev/null 2>&1; then
+  DRIVER_ARGS+=(--prefix-path "$(brew --prefix)")
+fi
+
+if [ -n "${SNESBUILD:-}" ]; then
+  exec "$SNESBUILD" "${DRIVER_ARGS[@]}"
+fi
+
+HOST_DRIVER="$ROOT/snesrecomp-go/build/snesbuild"
+if [ -x "$HOST_DRIVER" ]; then
+  exec "$HOST_DRIVER" "${DRIVER_ARGS[@]}"
+fi
+
+GO_COMMAND="${GO:-$(command -v go || true)}"
+if [ -z "$GO_COMMAND" ]; then
+  echo "build-macos.sh: no snesbuild binary or Go toolchain found" >&2
   exit 1
 fi
 
-if [ ! -d "src/gen" ] || [ -z "$(ls -A src/gen/ 2>/dev/null)" ]; then
-  echo "Error: src/gen/ is empty. Run regen first:"
-  echo "  bash tools/regen.sh --no-tests"
-  exit 1
-fi
-
-echo "=== Building ActRaiser Recompiled ($CONFIG) ==="
-cmake -S . -B build -G "Unix Makefiles" \
-  -DCMAKE_BUILD_TYPE="$CONFIG" \
-  -DCMAKE_PREFIX_PATH="$(brew --prefix 2>/dev/null || echo /usr/local)"
-
-cmake --build build
-
-echo
-echo "=== Build complete ==="
-echo "Run: ./build/ActRaiserRecomp"
+exec "$GO_COMMAND" -C "$ROOT/snesrecomp-go" run ./cmd/snesbuild "${DRIVER_ARGS[@]}"

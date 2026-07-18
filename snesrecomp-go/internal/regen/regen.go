@@ -1026,7 +1026,7 @@ func (repo *repository) rebuildValidVariants() {
 	}
 }
 
-var stubMarkers = []string{"IndirectGoto: target", "IndirectGoto: dispatch table", "Call indirect SUPPRESSED", "Call: target unknown", "unresolvable cross-fn goto", "cpu_trace_unresolved_goto_trap", "cpu_trace_unresolved_stub_trap", "Goto with no successor", "unresolvable cross-bank goto", "unresolved IndirectGoto"}
+var stubMarkers = []string{"IndirectGoto: target", "IndirectGoto: dispatch table", "Call indirect SUPPRESSED", "Call: target unknown", "unresolvable cross-fn goto", "cpu_trace_unresolved_goto_trap", "cpu_trace_unresolved_stub_trap(cpu", "Goto with no successor", "unresolvable cross-bank goto", "unresolved IndirectGoto"}
 
 func lintStubs(directory string) (int, error) {
 	paths, err := filepath.Glob(filepath.Join(directory, "*_v2.c"))

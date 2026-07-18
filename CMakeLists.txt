@@ -22,8 +22,8 @@ set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
 file(GLOB ACTRAISER_GEN_SOURCES CONFIGURE_DEPENDS "${ACTRAISER_GEN_DIR}/*.c")
 if(NOT ACTRAISER_GEN_SOURCES)
     message(FATAL_ERROR
-        "${ACTRAISER_GEN_DIR} is empty — run `bash tools/regen.sh` with "
-        "ar.sfc at the repo root before building.")
+        "${ACTRAISER_GEN_DIR} is empty — run `snesbuild regen --root . "
+        "--rom ar.sfc` (or the compatibility tools/regen.sh wrapper) before building.")
 endif()
 
 # CMake updates the target when regeneration replaces bankXX_v2.c with

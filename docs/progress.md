@@ -243,7 +243,7 @@ it go stale — same discipline as the playability tables.
 | Metric | Value | How to reproduce |
 |---|---|---|
 | Hand-authored recompiler directives (`recomp/*.cfg`) | 2,646 lines | `wc -l recomp/*.cfg` |
-| → generated C output (`src/gen/*.c`) | 2,130,680 lines | `wc -l src/gen/*.c` (after `tools/regen.sh`) |
+| → generated C output (`src/gen/*.c`) | 2,130,680 lines | `wc -l src/gen/*.c` (after `snesbuild regen`) |
 | Hand-written game runtime (`src/*.c`/`*.h`, excl. shared engine) | 3,253 lines | `wc -l src/*.c src/*.h` |
 | Bank coverage | 29 of 32 possible SNES banks | `ls recomp/bank*.cfg \| wc -l` |
 | Recompiled functions (unique ROM addresses) | 2,480 | `grep -c "^    { 0x" src/gen/dispatch_v2.c` |

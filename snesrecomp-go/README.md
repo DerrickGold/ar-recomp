@@ -37,7 +37,8 @@ game ROM and should not be redistributed.
 
 ## Requirements
 
-- Go 1.24 or newer for the recompiler and its tests.
+- A downloaded `v2regen` or `snesbuild` binary needs no Go installation.
+- Go 1.24 or newer is required to build the tools or run their tests from source.
 - A C11 compiler and CMake 3.16 or newer for a game executable.
 - SDL2 development headers/libraries for the bundled runtime's input layer.
 - A legally obtained, local ROM for the game being recompiled.
@@ -52,10 +53,13 @@ From this directory:
 go test ./...
 mkdir -p build
 go build -o build/v2regen ./cmd/v2regen
+go build -o build/snesbuild ./cmd/snesbuild
 ```
 
-The resulting `build/v2regen` binary can be invoked from any game project as
-long as all project paths are passed explicitly.
+`v2regen` exposes individual recompiler operations. `snesbuild` is the
+cross-platform project driver: it runs the complete regeneration pipeline and
+can configure/build a game's CMake project. Both binaries are relocatable as
+long as project paths are passed explicitly.
 
 ## Use it from a game project
 
@@ -76,8 +80,14 @@ MyGameRecomp/
 └── snesrecomp-go/
 ```
 
-Build the tool once, then run the strict generation pipeline from the game
-project root:
+Build the tools once, then run the strict generation pipeline from the game
+project root in one command:
+
+```sh
+snesrecomp-go/build/snesbuild regen --root . --rom game.sfc
+```
+
+The equivalent low-level commands are:
 
 ```sh
 snesrecomp-go/build/v2regen regen \
@@ -92,6 +102,17 @@ snesrecomp-go/build/v2regen stub-census --gen-dir src/gen
 `regen` fails when hard stubs remain. `--allow-stubs` is available during an
 initial port so the complete output can be inspected, but release/CI pipelines
 should omit it.
+
+Configure and compile a CMake-based game project with:
+
+```sh
+snesrecomp-go/build/snesbuild build --root . --config RelWithDebInfo
+```
+
+`snesbuild all` performs both phases. A prebuilt `snesbuild` removes Go and
+shell interpreters from the user path; CMake, a native compiler, the platform
+SDK, and the frontend's native libraries remain build-time dependencies until
+they are supplied in a platform bundle.
 
 Generated C includes `cpu_state.h`, `cpu_trace.h`, `common_cpu_infra.h`, and
 `funcs.h`. The game target must therefore include `runtime/src`,
@@ -160,6 +181,7 @@ v2regen baseline verify --actual src/gen \
 ```
 
 Run `v2regen help` or `v2regen <command> -h` for every option.
+Run `snesbuild help` or `snesbuild <command> -h` for project-driver options.
 
 ## Documentation
 

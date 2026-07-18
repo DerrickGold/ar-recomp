@@ -148,6 +148,7 @@ ActRaiserRecomp/
 │   ├── rendering-engine.md    # rendering/streaming/OAM architecture
 │   ├── widescreen-survey.md   # widescreen evidence + implementation record
 │   ├── settings-system.md     # live settings + overlay architecture/record
+│   ├── BUILD_TOOLING.md       # cross-platform driver + binary-bundle roadmap
 │   └── progress.md            # ★ per-action-level / per-sim-mode-town /
 │                                 major-functionality status tracker
 ├── recomp/
@@ -172,7 +173,7 @@ ActRaiserRecomp/
 │   ├── settings.c / settings_overlay.c  # live settings registry + host menu
 │   ├── config.c               # .ini parsing
 │   └── gen/                   # ★ regenerated C output — NOT committed (you
-│                                 produce this locally via tools/regen.sh)
+│                                 produce this locally via snesbuild regen)
 ├── third_party/
 │   └── stb/                   # vendored single-file libs (stb_image,
 │                                 stb_vorbis) — tracked, no install step
@@ -180,7 +181,7 @@ ActRaiserRecomp/
 │   ├── docs/                  # per-project integration/config/runtime guides
 │   └── runtime/               # bundled C runtime + SNES hardware model
 ├── tools/
-│   ├── regen.sh                # the regen pipeline — run this after cloning
+│   ├── regen.sh                # compatibility launcher for Go snesbuild
 │   ├── rom_info.py, lzss_decompress.py, ... — game/trace analysis tools
 │   ├── compatibility launchers        # not used by build/regen; use cmd/v2regen
 │   └── oracle/                 # differential-testing harness vs. real snes9x
@@ -208,8 +209,8 @@ UI.
 - **A C11 compiler** (clang or gcc)
 - **SDL2** (development package/headers, not just the runtime library) — the
   only external library this links against
-- **Go 1.24+** — the normal regeneration pipeline is implemented entirely in
-  Go and has no third-party Go modules
+- **Go 1.24+** — needed when building the project tools from source; a future
+  downloaded `snesbuild` binary will not require a local Go installation
 - **git**
 
 Python is optional for unrelated forensic/triage scripts; it is not a build,
@@ -218,6 +219,8 @@ regeneration, runtime, or opcode-validation dependency.
 To reuse the bundled toolchain from another game project, start with
 [`snesrecomp-go/README.md`](snesrecomp-go/README.md) and its
 [`project integration guide`](snesrecomp-go/docs/PROJECT_INTEGRATION.md).
+The native project-driver design and dependency-bundling roadmap are in
+[`docs/BUILD_TOOLING.md`](docs/BUILD_TOOLING.md).
 
 **macOS** (verified — this is the only platform actually built/tested so far):
 
@@ -245,25 +248,29 @@ If you get it building, a PR documenting the steps would help.
 2. **Supply your own ROM.** Place a verified `ar.sfc` (see the checksums above)
    at the repo root.
 
-3. **Regenerate the recompiled banks.** This runs the recompiler over your ROM
-   using the directives in `recomp/*.cfg` and writes `src/gen/*.c` +
-   `recomp/funcs.h` — required before building, and not something you can skip
-   (those files are intentionally not committed):
+3. **Regenerate the recompiled banks.** The cross-platform `snesbuild` driver
+   runs the recompiler over your ROM, refreshes `src/gen/*.c`, `recomp/funcs.h`,
+   metadata, RTS-web census, and the hard-stub report. From a source checkout:
 
    ```sh
-   bash tools/regen.sh
+   go -C snesrecomp-go run ./cmd/snesbuild regen \
+     --root .. --rom ar.sfc --allow-stubs
    ```
 
-4. **Build:**
+   A downloaded `snesbuild`/`snesbuild.exe` can run the same operation directly
+   without Go or Bash. `bash tools/regen.sh` remains a compatibility command.
+   The inherited hard-stub backlog currently makes strict regeneration exit
+   nonzero after writing complete output; see `DEBUG.md` §8.
+
+4. **Configure and build through the same driver:**
 
    ```sh
-   mkdir build && cd build
-   cmake ..
-   cmake --build . -j
+   go -C snesrecomp-go run ./cmd/snesbuild build --root ..
    ```
 
-   `CMakeLists.txt` will fail loudly with setup instructions if `src/gen/` is
-   still empty at configure time.
+   This removes platform-specific shell logic, but native compilation still
+   requires CMake, a C11 compiler, SDL2 development files, and the host SDK.
+   Packaging those dependencies is the next distribution milestone.
 
 ## Running the game
 
@@ -627,7 +634,7 @@ contributing:
   text, audio) that were resident in memory at capture time.
 - **`src/gen/*.c` and `recomp/funcs.h`** — the actual recompiled C output.
   This is a direct, literal translation of the copyrighted ROM's machine code.
-  It's regenerated locally by `tools/regen.sh` from your own ROM; there is
+  It's regenerated locally by `snesbuild regen` from your own ROM; there is
   nothing to commit here, ever.
 - Audio/video recordings captured from a running instance (`*.wav`, replay
   recordings) — same reasoning as memory dumps, but for audio/video instead.

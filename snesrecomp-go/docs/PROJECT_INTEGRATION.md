@@ -31,6 +31,19 @@ CLI paths so either arrangement works.
 
 ## Generation pipeline
 
+For end users and cross-platform automation, `snesbuild` owns the ordered
+pipeline and all sidecars:
+
+```sh
+snesbuild regen --root . --rom game.sfc
+snesbuild build --root .
+# or: snesbuild all --root . --rom game.sfc
+```
+
+This path uses no shell utilities. A downloaded `snesbuild` binary also needs
+no Go installation. The individual `v2regen` commands below remain useful for
+CI composition and recompiler development.
+
 Build one binary and reuse it for every stage:
 
 ```sh

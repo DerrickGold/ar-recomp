@@ -315,7 +315,7 @@ those cases.
 | **Is the CPU layer even the problem?** | `AR_MXCHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
 | **Crash on a mode/level TRANSITION; SNES stack corrupted (`S` walks to `$FFxx`/`$42xx`/I-O); `ppu_write`/`ppu_read` abort** | Check stderr for **`[dispatch-miss]`** (default-on tripwire) — it names the unresolved RTS-trick/computed target. Then `AR_SCHECK=1` (S-drift + impending-underflow path) | confirm with `AR_RTSLOG=0x<rts_pc>`; register the popped target as a cfg `func` (see §7.7) |
 | **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Search the generated output for silent-drop markers: `rg -n -e 'Call indirect SUPPRESSED' -e 'Call: target unknown' -e 'not a valid LoROM code address' src/gen`. If none name the suspect bank/address range, it is probably a genuine logic/state bug (for example, a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `AR_INDIRLOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (a targeted branch probe — the 4-PC "which branch fired" pattern, bug-ledger "Methodology learnings") |
-| **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | The Go port does not emit the Python tool's historical detailed routing report. Use `AR_MXCHECK`/`AR_CALLMX` to confirm the live mismatch, then inspect the generated `(m,x)` switch and, if the static route is suspect, `findEquivalentVariants` in `snesrecomp-go/internal/emitter/function.go` plus `routeVariant` in `snesrecomp-go/internal/codegen/emitter.go`. `tools/regen.sh` logs how many equivalences each fixpoint pass learned | If no survivor is provably equivalent, investigate the caller-side width leak or pin the intended width with cfg `entry_mx:`; do not infer safety from variant distance |
+| **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | The Go port does not emit the Python tool's historical detailed routing report. Use `AR_MXCHECK`/`AR_CALLMX` to confirm the live mismatch, then inspect the generated `(m,x)` switch and, if the static route is suspect, `findEquivalentVariants` in `snesrecomp-go/internal/emitter/function.go` plus `routeVariant` in `snesrecomp-go/internal/codegen/emitter.go`. `snesbuild regen` logs how many equivalences each fixpoint pass learned | If no survivor is provably equivalent, investigate the caller-side width leak or pin the intended width with cfg `entry_mx:`; do not infer safety from variant distance |
 
 **Golden rule:** capture an **`AR_TRACE`** window first and read `--summary` → `--leaks` (STEP 0
 above) before toggling any per-symptom flag. One windowed run classifies the bug (misdecode /
@@ -846,9 +846,9 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 ## 5. Static analysis (no run needed)
 
 Command names below use `v2regen <subcommand>` as shorthand. From the repository root, run
-them without installing anything as `go -C snesrecomp-go run ./cmd/v2regen <subcommand> ...`;
-`tools/regen.sh` builds the same CLI once into a temporary binary and reuses it for the full
-pipeline.
+them without installing anything as `go -C snesrecomp-go run ./cmd/v2regen <subcommand> ...`.
+The cross-platform `snesbuild regen` driver calls those Go packages directly for the complete
+pipeline; `tools/regen.sh` is now only a compatibility launcher.
 
 - **`v2regen metadata`** — **gen/cfg metadata sidecar** *(2026-07-06)*. Run once after every
   regen (~1s). Scrapes `src/gen/*.c` + `recomp/*.cfg` into `saves/gen_meta.json`: every registered
@@ -864,7 +864,7 @@ pipeline.
   data-table handlers are invisible to it (`autoroute_pha_rts` only knows the zelda3 canonical
   byte pattern — 0 hits on ActRaiser's `BF table,X` / `LDY #cont; PHY` idioms). Close the gap by
   iterating the census against the regen until quiescent:
-  1. regen (`tools/regen.sh` — now auto-runs the census and prints the **UNC delta**: every cfg
+  1. regen (`snesbuild regen` — auto-runs the census and prints the **UNC delta**: every cfg
      round makes new code reachable whose pushes were always statically visible).
   2. `go -C snesrecomp-go run ./cmd/v2regen rts-webs --rom ../ar.sfc --cfg-dir ../recomp --suggest` — emits shape-classified cfg candidates per uncovered
      push: auto-SKIPs `ret:`-of-construct targets (the B8C2 recursion class), suggests
@@ -1010,7 +1010,7 @@ pipeline.
   length)` at every shared PC) — a real proof, not a distance guess. `routeVariant`
   now checks, in order: (1) a variant PROVEN equivalent via this check, (2) the cfg-declared
   canonical width, (3) the `(1,1)` SNES-reset default, (4) the old distance heuristic as a last
-  resort. `tools/regen.sh` logs the number of equivalences learned by each fixpoint pass. The Go
+  resort. `snesbuild regen` logs the number of equivalences learned by each fixpoint pass. The Go
   port intentionally has no detailed equivalent of the historical Python routing report, so
   validate a suspect decision with `AR_CALLMX`/`AR_MXCHECK` and inspect the generated dispatch
   switch. **Not every wrong-width variant has a provable answer** — if `findEquivalentVariants`
@@ -1312,11 +1312,12 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
 ## 8. Build & regen workflow
 
 - **Changed a runner source** (`src/*.c`, `snesrecomp-go/runtime/src/*`) → **rebuild only**:
-  `cmake --build build -j8`.
+  `go -C snesrecomp-go run ./cmd/snesbuild build --root .. --build-only --jobs 8`.
 - **Changed the emitter** (`snesrecomp-go/internal/{decoder,lowering,codegen,emitter}/*`) **or a cfg**
-  (`recomp/*.cfg`) → **regenerate then rebuild**: `bash tools/regen.sh` (rewrites `src/gen/*.c`),
-  then `cmake --build build -j8`. `src/gen` is generated — **never hand-edit it**; regenerate via
-  `tools/regen.sh`.
+  (`recomp/*.cfg`) → **regenerate then rebuild** with `snesbuild all` (while the inherited stub
+  backlog remains, from source: `go -C snesrecomp-go run ./cmd/snesbuild all --root .. --rom
+  ar.sfc --allow-stubs`). `src/gen` is generated —
+  **never hand-edit it**. The shell scripts remain compatibility launchers only.
 - Large generated banks are now split into stable
   `bankXX_partNN_v2.c` translation units. Do not assume a monolithic
   `bankXX_v2.c` exists when checking freshness or build artifacts;
@@ -1326,16 +1327,18 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
 - Constraints: **no stubs, ever** (a stub is a hard build error — close the recompiler gap).
   Edit only the emitter, runner, `src/main.c`, `src/actraiser_rtl.c`, `recomp/*.cfg`, and
   `tools/`. Commit/push only when asked.
-- **⚠️ Standing stub-lint reality (2026-07-18):** despite the policy above, the Go
-  `tools/regen.sh` currently completes generation and all sidecars, then exits 1 at the hard
-  stub census: 162 raw markers / 74 logical trap sites (20 goto, 54 indirect-dispatch). This
-  is inherited backlog, not a regression from the Go migration; the final pre-removal Python/Go
-  parity run reached the same 162-marker gate in both implementations. The ROM-derived comparison
-  archives were intentionally removed and are not distributed. The driver deliberately uses
-  `--allow-stubs` for the
-  emit stage so `funcs.h`, metadata, RTS census, and Go tests still run, then preserves the
-  nonzero final status. Run `bash tools/regen.sh --no-tests` (expect exit 1), then build
-  normally. Output is deterministic across `SNESRECOMP_JOBS`; to check whether a cfg change
+- **⚠️ Standing stub-lint reality (2026-07-18):** despite the policy above, Go
+  `snesbuild regen` currently completes generation and all sidecars, then exits 1 at the hard
+  stub census: 161 raw hard markers / 74 logical trap sites (20 goto, 54 indirect-dispatch).
+  This is inherited backlog, not a regression from the Go migration. The final pre-removal
+  Python/Go parity run reported 162 in both implementations; one was a false positive caused by
+  matching the trap function's name in the always-emitted empty-stub header comment. Go now matches
+  `cpu_trace_unresolved_stub_trap(cpu` calls specifically. The ROM-derived comparison
+  archives were intentionally removed and are not distributed. The driver deliberately allows
+  the internal emit stage to finish so `funcs.h`, metadata, RTS census, and optional Go tests
+  still run, then preserves the nonzero final status. `--allow-stubs` is available for an explicit
+  local backlog build but must not be used for release gates. Output is deterministic across
+  worker counts; to check whether a cfg change
   added stubs, diff the census `site=` lists between runs, not just the counts. Closing these
   sites properly remains open backlog.
 - **`hle_func` semantics (fixed 2026-07-10)**: the replaced function's REAL body is still
@@ -1445,10 +1448,10 @@ AR_TRACE_WATCH              always-on anomaly capture (defaults into the run dir
                             window on hidden dispmiss / garbage-variant / m-x leak / watchdog hang
 trace_slice.py <dump> --diagnose   ranked verdicts + paste-ready cfg lines (needs gen_meta.json)
 AR_TRACE=<f> + HF_LO/HI     targeted windowed capture (beats watch mode when both set)
-v2regen metadata           static sidecar refresh (auto-run by regen.sh)
+v2regen metadata           static sidecar refresh (auto-run by snesbuild regen)
 AR_PIN=<par8>[,..]          generic PAR-code pinner (codes.txt catalogue -> instant debug cheat / state probe)
 v2regen rts-webs --suggest  shape-classified cfg candidates for uncovered continuation pushes
-regen.sh census delta       "NEW uncovered continuations" printed per regen — triage BEFORE playing
+snesbuild census delta      "NEW uncovered continuations" printed per regen — triage BEFORE playing
 [dispatch-recursion]        DEFAULT-ON: >24 live dispatches of one target -> self-healing unwind;
                             names a bad (mid-loop) cfg func registration to REMOVE
 [4210-wedge]                DEFAULT-ON: vblank spin stuck 4096 reads -> prints which gate refused
