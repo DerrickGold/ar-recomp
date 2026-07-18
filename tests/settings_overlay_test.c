@@ -17,6 +17,7 @@ uint8 g_ram[0x20000];
 static int s_failures;
 static int s_action_calls;
 static const SettingDesc *s_action_desc;
+static int s_inspector_info_calls;
 
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -30,6 +31,16 @@ static bool ActionObserved(const SettingDesc *desc) {
   s_action_calls++;
   s_action_desc = desc;
   return true;
+}
+
+static void InspectorInfo(char *buffer, size_t buffer_size) {
+  s_inspector_info_calls++;
+  snprintf(buffer, buffer_size,
+           "SCENE Fillmore sim  $18/$19 $00/$01\n"
+           "GF $1234  HOST 5678  PAUSE MENU\n"
+           "CAM $0080,$0040  MAP 512X512\n"
+           "PPU MODE 1  MAIN $17 SUB $00\n"
+           "MUSIC Fillmore  SONG $01 AUTH");
 }
 
 static uint8_t *ReadOptionalRom(size_t *size_out) {
@@ -94,6 +105,7 @@ int main(void) {
   size_t rom_size = 0;
   uint8_t *rom_data = ReadOptionalRom(&rom_size);
   CHECK(SettingsOverlay_Init(renderer, rom_data, rom_size));
+  SettingsOverlay_SetInspectorInfoProvider(InspectorInfo);
   free(rom_data);
 
   SettingsOverlay_Open();
@@ -108,9 +120,9 @@ int main(void) {
     if (preview && preview[0]) CHECK(SDL_SaveBMP(surface, preview) == 0);
   }
 
-  /* The overlay opens on primary navigation. A enters Display; only then do
+  /* The overlay opens on primary navigation. B enters Display; only then do
    * Up/Down select rows and Left/Right edit values. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
@@ -126,12 +138,10 @@ int main(void) {
   CHECK(saved != NULL);
   if (saved) fclose(saved);
 
-  /* B returns focus to primary navigation without closing. Down selects the
-   * next category, and A enters it. Aspect remains a bounded enum. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
-  CHECK(SettingsOverlay_IsOpen());
+  /* Aspect rows are part of Display. Move past HD replacements to Screen
+   * ratio and verify it remains a bounded enum. */
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.extended_aspect == kScreenAspect_169);
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
@@ -139,21 +149,22 @@ int main(void) {
 
   /* Audio frequency is likewise a bounded preset selector, not an arbitrary
    * integer editor. Audio starts with Enable audio, then Audio frequency. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_IsOpen());
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.audio_frequency == kAudioFrequency_48000);
   CHECK(Settings_AudioFrequencyHz() == 48000);
 
-  /* Save Editor is a first-class category between Cheats and QoL. Its backend
-   * and arming rows use the same submenu controls and persistence path. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  /* Save Editor follows Cheats. Its panel title names the active edit
+   * section, while backend/arming stay global rows. */
   CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.save_backend == 1);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
@@ -176,50 +187,59 @@ int main(void) {
    * through the normal observer path. We started on row 1 (Allow save edits). */
   for (int i = 0; i < 15; i++)
     CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
   CHECK(s_action_calls == 1);
   CHECK(s_action_desc == Settings_Find("save_export_ini"));
   s_action_calls = 0;
   s_action_desc = NULL;
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+
+  /* Move once more to Extras. Bridge-free limit is first, followed by Turbo
+   * multiplier; warp and quick-state rows remain hidden. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
-
-  /* Move once more to Quality of life. Its second row is the custom
-   * hexadecimal warp target. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.fix_bridge_limit);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
-  for (int i = 0; i < 4; i++)
-    CHECK(SettingsOverlay_HandleKey(SDLK_BACKSPACE, true, false));
-  CHECK(SettingsOverlay_HandleText("0303"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
-  CHECK(g_settings.warp_target == 0x0303);
-
-  /* The next QoL row is Pause. B then returns to primary navigation, where
-   * Inspector, Restart, and Exit are direct leaves: A runs them immediately
-   * without opening a duplicate one-row submenu. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
   CHECK(s_action_calls == 1);
   CHECK(s_action_desc == Settings_Find("toggle_pause"));
 
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  /* Inspector is a real submenu: its first row makes the enabled state
+   * explicit, its second row dispatches the complete scene-asset dump, and
+   * the remainder is supplied by the read-only live-info provider. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
   CHECK(SettingsOverlay_IsOpen());
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.scene_inspector);
+  if (renderer) {
+    int calls_before = s_inspector_info_calls;
+    SettingsOverlay_Render(
+        (SDL_Rect){0, 0, surface_width, surface_height});
+    CHECK(s_inspector_info_calls == calls_before + 1);
+  }
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
   CHECK(s_action_calls == 2);
+  CHECK(s_action_desc == Settings_Find("dump_scene_assets"));
+
+  /* Restart and Exit remain direct primary-navigation leaves. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(s_action_calls == 3);
   CHECK(s_action_desc == Settings_Find("restart_game"));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
-  CHECK(s_action_calls == 3);
+  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(s_action_calls == 4);
   CHECK(s_action_desc == Settings_Find("exit_desktop"));
 
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, true));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, true));
   CHECK(SettingsOverlay_IsOpen());
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
   CHECK(!SettingsOverlay_IsOpen());
   SettingsOverlay_Open();
   CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, true));

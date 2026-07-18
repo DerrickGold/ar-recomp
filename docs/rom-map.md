@@ -109,7 +109,10 @@ numbers resident in VRAM remains a separate seam to map. A decompilation should
 not collapse any of these to raw OAM tile numbers.
 
 ### Town Building Data (0x1DCFA-0x1DFF9)
-128 bytes per town, 6 towns:
+128 bytes per town, 6 towns. Identified 2026-07-17: this is the **initial road/
+terrain-obstruction map** — `$03:AA1C` block-copies the whole 0x300-byte region
+(`$03:DCFA,X`) into the road-map words at `$7F:6800` at new-game init (see
+ram-map "Road Construction Encoding" for the bit layout):
 | Town | Offset |
 |------|--------|
 | Fillmore | 0x1DCFA-0x1DD79 |
@@ -118,6 +121,15 @@ not collapse any of these to raw OAM tile numbers.
 | Aitos | 0x1DE7A-0x1DEF9 |
 | Marahna | 0x1DEFA-0x1DF79 |
 | Northwall | 0x1DF7A-0x1DFF9 |
+
+### Town Structure-System Tables (bank $03, mapped 2026-07-17 — SEAMS town §7)
+| SNES address | File offset | Meaning |
+|---|---:|---|
+| `$03:DC74-$03:DC7F` | `0x1DC74` | Per-town structure-record array base pointers (`$7F:6BE7 + town*0x200`, 128 × 4-byte records each) |
+| `$03:AB6C+` | `0x12B6C` | Per-town pointers to initial structure-record images (`$FF`-terminated 4-byte records, copied at new-game init `$03:AA51`) |
+| `$03:A017/$A364/$A0D1/$A1A1/$A23D/$A29C/$A2F5` | `0x12017+` | Per-type-class 8-entry action tables (pushed-address−1): house/bridge/field/factory-tier/4/5/6 × actions 0-7. Bridge rows 2-6 all point at the `$A435` no-op — the bridge-indestructibility row |
+| `$03:D4D2+` | `0x1D4D2` | Structure-visual class table bases (class `$7D1F` + variant `$7D21` → step-program pointer, armed into `$7F:77E7+rec*8` by `$03:A4B8`) |
+| `$03:D2FA/$03:D306` | `0x1D2FA` | Development target-site coordinate tables (per SEAMS §5) |
 
 ### Text Data (Bank $04: 0x20000-0x27FFF)
 | Range | Content |

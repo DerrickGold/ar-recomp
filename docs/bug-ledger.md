@@ -427,6 +427,23 @@ the current debugging process; this file is the case law.
     stages `$1A=$0347+2`; `$0334`=final-boss flag; all-regions exit = `$00:A343` over
     `$7F:6B18`; object table = **80 slots** (`$06A0-$1AA0`, allocator bound `CPY #$1AA0`).
 
+21. **Sim-town water/animated tiles flash blank after entry — FIXED 2026-07-17.** Exact bad
+    capture: `runs/20260717-223857/snapshots/snap_08_gf1567`. CGRAM and the tilemap were stable;
+    physical VRAM bytes `$0000-$00FF` and animation phase `$7F:B800-$B8FF` were all zero, while
+    `$B900/$BA00/$BB00` held the other three valid phases. The reference emulator's phase 0 was
+    byte-identical to ROM file `$060000`, proving blank was corruption, not art. **Root cause:**
+    `$02:B4E8` configured the four-frame animation, then the main coroutine spent seven host
+    frames in `$02:B63B/$B679` waiting for the SPC `$F0` acknowledgement. Recomp NMI continued
+    during that force-blanked wait; `$02:BC56` armed the not-yet-captured `$7F:B800` page and the
+    sim-town `$02:AF30/$AF3D` full-word DMA erased freshly loaded VRAM `$0000`. `$02:BAF5` then
+    captured the already-erased page, and the animation's own WRAM→VRAM cycle perpetuated it.
+    **Fix:** HLE `$02:BC56` with a faithful scheduler that defers ticks while INIDISP force-blank
+    is active. The loader finishes `$BAF5` before the first tick, without changing visible phase
+    timing or the generic DMA path. **Reusable lesson:** `$18=0` does not imply `$AF86`; normal
+    town simulation is the `$19!=0,9` branch and uses `$BC56` + generic `$AF30`. When one phase of
+    an animation is corrupt, compare every WRAM phase and the loader/capture order before blaming
+    palette or bridge data.
+
 ---
 
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)

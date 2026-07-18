@@ -2,6 +2,7 @@
 #define MUSIC_REPLACEMENTS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include "types.h"
 #include "hd_replacements.h" /* shared HdCondition gate grammar */
 
@@ -84,6 +85,10 @@ void MusicReplacements_SetHostPaused(bool paused);
 
 /* Combined native/host pause state, exposed for diagnostics and tests. */
 bool MusicReplacements_IsPlaybackPaused(void);
+
+/* One-line identity for read-only diagnostics. Names a matching manifest
+ * track even when it is currently playing through the authentic SPC path. */
+void MusicReplacements_FormatPlaybackStatus(char *buffer, size_t buffer_size);
 
 /* Per-frame safety policy for non-registry writers of g_settings. */
 void MusicReplacements_FrameTick(void);

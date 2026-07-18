@@ -669,6 +669,130 @@ data-driven VM:
 
 ---
 
+### 7. Structure records, the 128-structure cap, and miracle damage (bank $03, mapped 2026-07-17)
+
+The persistent "what is built where" state behind §5's development cycle — mapped while
+implementing the optional bridge-limit enhancement (`src/actraiser_bugfixes.c`). Motivated by The Admiral's
+Maximum Population Guide (GameFAQs 47431): each region tops out at **128 structures**, bridges
+count against that cap while supporting the fewest people, and bridges are indestructible —
+so accidental bridges permanently cost population in Fillmore/Bloodpool/Kasandora.
+
+**The record arrays.** Every town owns a fixed array of 128 × 4-byte structure records at
+`word[$03:DC74 + town*2]` → `$7F:6BE7/$6DE7/$6FE7/$71E7/$73E7/$75E7` (0x200 bytes per town,
+contiguous `$6BE7-$77E6`). One record = one standing structure:
+
+| Byte | Meaning |
+|---|---|
+| +0 / +1 | map-cell X / Y (0-31; the town map is 32×32 cells = 8×8 selector squares of 4×4 cells) |
+| +2 | flags/type: bit7 = active/occupied, bit6 = under construction (contributes no support yet), bits 4-5 = subtype (house civ level; wheat-vs-corn bit `$10`; bridge orientation), bits 0-3 = **type class** |
+| +3 | low nibble = pending action id (queued via `$03:9F05`: `rec[3] = (rec[3] & $70) \| action`), bits 4-6 = build-step progress |
+
+Type classes: 0 = house, **1 = bridge**, 2 = field (corn; +`$10` = wheat), 3/4 = factory/
+windmill tier, 5/6 = special/support. New-game init: `$03:AA1C` clears road+square state and
+`$03:AA51+` copies each town's initial records from ROM (pointer pairs at `$03:AB6C`,
+`$FF`-terminated) into the arrays.
+
+**Allocator `$03:9D9F`.** First-free scan (bit7 clear) over the current town's 128 slots;
+writes `{$7C9D, $7C9F, $7CA1|$80, 0}` (pending cell X/Y and type staged by the caller), leaves
+the slot index in `$7C05` and the record pointer in X, carry clear. After 128 occupied slots:
+carry set = **the** 128-structure cap. Callers: the four §5 development-mode handlers
+(`$93CA/$9486/$9541/$95EE`) and the two bridge sites below. This is a hard physical limit —
+the arrays are fixed 0x200-byte allocations, so "raising the cap" is not possible in place.
+
+**Bridges.** Built only by the road-crossing checkers at `$03:9975/$99A4` (allocation JSRs at
+`$9994/$99D9`): when road expansion crosses a river cell (terrain probe `$97B0`, crossing
+flags `$0080/$0100` in the road-map word) they allocate type `$01` (one axis, cell X&3==?) or
+`$11` (other axis) and set the corresponding road-map bit (`$0080`/`$0100`) in the
+crossing square's `$7F:6800` road word so the crossing is never re-bridged. When the allocator fails, the bit stays clear and the FAQ-documented
+behavior emerges: the road continues on the far side with no bridge, and a later record free
+lets the crossing scanner build the bridge immediately. Northwall ORs `$08` into the visual
+variant (ice bridges) at build/draw time (`$A38E/$A3DC`). Crossing/pathing state lives in the
+`$6800` road map, but an exhaustive consumer census (all `$DC74` readers + a banks-00-02 scan
+for the array bases, 2026-07-17) found that bridge records still feed the census, miracle
+scan, construction-scene marks pass, and reconstruction renderer. The type-0/3/5
+story-event searches (`$8B66` callers `$8BC5/$EF9E/$EFD3`) never request bridges.
+
+**Population/support census `$03:C07F`.** Iterates the town's records and accumulates the
+two sides of §5's growth comparison: the house-derived **population** (type-0 houses, people
+per house by subtype/civ level) into `$7C05` → `$7E:021C + town*2` (+2, minus `$9F57,X` —
+population in this game is *derived from standing house records*, which is why destroying
+houses lowers it and why the record cap bounds it), and the **support capacity** into `$7C07`
+→ `$7F:6B26 + town*2` — completed class 2 = 32 (48 with the wheat bit), class 3/4 = 72, every
+other class including bridges = 32, under-construction (bit6) = 0. The FAQ's 32/48/72
+supported-people numbers fall straight out of this routine.
+
+**Miracle structure damage.** Bank-01 miracle effect actors post the hit: miracle kind →
+`$7F:96E8`, aimed pixel coords → `$96EA/$96EC`; the master-loop block at `$03:820F` converts
+to map cells (`>>4`) in `$90E1/$90E5` with the kind in `$90EB`. The effect driver `$01:9840`
+(and the per-miracle appliers around `$01:9A07/9A2B/9A9D/9AF5`, plus the scripted event at
+`$03:E7A6`) then `JSL $03:B274`: align the aimed cell to its 4×4-cell selector square (kind
+≥ 4 = earthquake = the whole 32×32 map), and for every active record in the rectangle queue
+action `kind+1` into `rec[+3]` (kind 0 is an internal silent record-clear), set the
+`$7F:90F7` refresh flag, then run the §5 build-step scanner `$9E5A` twice to execute the
+queued actions. **Lightning = kind 1 = action 2.**
+
+**Per-type action dispatch = the immunity matrix.** The §5 scanner routes each record by
+type class to an outer handler that RTS-dispatches `rec[+3]`'s action through a per-type
+8-entry table (entries are pushed-address−1): house `$A017`, bridge `$A364`, class 2 `$A0D1`,
+class 3 `$A1A1`, class 4 `$A23D`, class 5 `$A29C`, class 6 `$A2F5`. Action 0/1 = construction
+start/step (bridge: `$A374`, staging visual step programs via class `$7D1F`/variant `$7D21` →
+`$A4B8`); actions 2-6 = the damage flavors. House action 2 (`$A050`) queues teardown action 7
+and `JSL $03:B4A6`; **bridge actions 2-6 all point to `$A435`, a reset-to-idle no-op — that
+single table row is the entirety of bridge indestructibility.** (Wheat/factory earthquake
+immunity lives in the same tables' higher action rows.)
+
+**Visual step programs.** `$A4B8` (gate `$7BE9`) resolves class table base ROM `$03:D4D2` +
+variant to a step-program pointer and arms the record's slot in the 128 × 8-byte step-machine
+pool at `$7F:77E7 + record_index*8` (`$77E7-$7BE6`, ending exactly at the `$7BE7` tick
+variable). The §5 8-frame step walker (`$89F7` + step table `$03:8A7E`) then draws the
+tile changes. This is why records and visuals can diverge: tiles persist in the town map
+even if a record is freed afterwards.
+
+**Auxiliary per-town state mapped along the way:** `$7F:9250 + town*0x80` = 64-entry
+built-square dedup list (2-byte **square** coords x,y ≤ 7, `$FFFF` empty; appender `$8EC1`,
+staged pair `$9550/$9552`, scan cursors `$9554,X`); `$7F:3800 + town*0x400` = per-cell flag
+map (bit0 set near road/build commit `$9623`, bit1 near `$8E48`; init cleared, not saved);
+`$7F:6800 + town*0x80` road-map words, one per selector square, initialised from ROM
+`$03:DCFA` (bit `$40` = obstructs the build-direction selector, `$0080/$0100` =
+river-crossing/bridge state); `$7F:7BF9` = current town id, `$7F:7BFB` = town id ×2 (the
+DC74 index); scratch: `$7C05/$7C07` accumulators, `$7C1D` loop counter,
+`$7C11/$7C13/$7C15/$7C17` record-scan rectangle, `$7C9D/$7C9F/$7CA1` pending allocation
+request. **SRAM persistence (validated against real saves 2026-07-17):** road maps at
+`0x0000+town*0x80`, built-square lists at `0x0300+town*0x80`, record arrays at
+`0x0600+town*0x200` (ending exactly at the `0x1200` region-progress block) — see
+save-format.md §3.4. Cell-flag and tile maps are regenerated on town entry, not saved.
+
+**Host bug-fix seam (`hle_func`, recomp/bank03.cfg + src/actraiser_bugfixes.c).** Four narrow
+routines are hle-replaced with faithful C contracts plus sidecar post-passes and
+`AR_BRIDGEFIX_DEBUG` observability. The v1 toggled extensions (full-table allocations reusing
+a completed bridge record; lightning freeing bridge records) were **withdrawn 2026-07-17
+after play-testing**, which established a critical system fact: construction events
+regenerate structure state from the record table, and a vanished crossing can strand the
+build-direction cursor across the river. **v2 (`fix_bridge_limit`):** completed bridges
+migrate to a per-town extension area in free checksummed SRAM (save-format §3.4) via the
+allocator hle (`$9D9F`); the census hle (`$C07E`) adds their 32-person support; the
+construction-scene marks hle (`$9CFB`) appends their structure identities; and the scene
+finish hle (`$89F0`) appends their visible metatiles after native reconstruction.
+
+The renderer has two distinct record-presence consumers, not one. `$9CFB` writes per-cell
+**structure marks** through `$9FCD/$9FE4` into `$7F:2000` (bridge `$E1/$E2` by orientation,
+gated on `$919E+town`); `$9710` maps `(x,y)` to
+`town*$400 + quadrant*$100 + (y&15)*$10 + (x&15)`. Later, `$9D4D` dispatches active records
+through `$9F6B/$9F8D` and `$A4A8/$A4F7`: it selects the bridge rebuild program from the
+`$03:D4E2` family, arms the record's `$77E7+slot*8` step entry, and executes its initial draw
+through `$A591` → `$9C43`. `$A591` interprets a count plus `{dx,dy,metatile}` triples;
+`$9C43` copies four tilemap words from `$7E:3100 + metatile*8` into the quadrant-paged live
+town tilemap. For the observed settled bridge states, record actions `$11/$31` select
+programs `$D5C5/$D5D1`, lists `$DC1C/$DC24`, and metatiles `$44/$45`.
+
+A direct visual capture disproved the earlier marks-only assumption: the sidecar-only bridge
+had the correct `$E2` mark but remained a solid black map cell because `$9D4D` could not see
+it. The `$89F0` post-pass now decodes the same rebuild program and performs the same metatile
+copy for each validated sidecar bridge. Settled bridge programs contain one timed initial
+draw followed by `$FD`, so the post-pass needs no persistent step-machine entry and does not
+consume a structure slot. The four hooks preserve their native register/flag/scratch
+contracts; all unrelated consumers retain the authentic 128-slot view.
+
 ## Sim-mode town-map GRAPHICS pipeline (VRAM seam, mapped 2026-07-05)
 
 The town map reaches the PPU through two WRAM→VRAM DMAs — **the seam an HD/replacement tile
@@ -696,6 +820,17 @@ sets `$2116` and streams: the town **tilemap → VRAM `$6000`** (its `$8100` byt
 (reads ROM `$05:8000`, byte-extract `& $FF`). **`bank_02_BAF5`** is the inverse — a VRAM→WRAM
 *readback* (save) of `$0000` through the `$2139` read port into `$7F:B800`, later re-DMA'd back;
 this save/restore loop *perpetuates* whatever is in `$0000` frame-to-frame.
+
+For a sim town (`$18=0`, `$19!=0,9`), NMI schedules animation with `$02:BC56` and consumes its
+`$D7-$DC` descriptor through the generic full-word `$02:AF30` uploader; `$02:AF86` is only the
+separate `$19=0 or 9` ROM-bank-$0A/high-byte upload branch. A recomp-only timing race was captured
+at `runs/20260717-223857/snapshots/snap_08_gf1567`: scene setup armed four `$100`-byte frames while
+the main coroutine remained in `$02:B63B` waiting for the SPC `$F0` acknowledgement. NMI then
+uploaded the still-empty `$7F:B800` phase over freshly loaded VRAM `$0000`; `$BAF5` captured that
+blank phase, making the town water flash black every fourth frame. The `$02:BC56` HLE now defers
+invisible animation ticks while INIDISP force-blank is active, so `$BAF5` completes all four
+captures before animation can overwrite the loader's output. The reference emulator's captured
+phase 0 matches ROM file offset `$060000`; it is not an intentional blank frame.
 
 **Lair-seal corruption — ROOT-CAUSED (DEBUG.md §7.15, fix `exit_mx_at 039D4D 0 0`):** it was not a
 graphics-pipeline bug at all — `bank_03_8053` ran its `LDA #$6000; STA $2116` at m=1 (an exit-mx
@@ -1187,7 +1322,7 @@ promote a row to a real address once confirmed (a wrong cheat address is worse t
 | Player lives | TBD (RAM or SRAM) | infinite / set N lives | 🅥 | watch the lives display value, `AR_WATCH16` on it; the death routine decrements it. |
 | Player sword damage (dealt) | routine that subtracts enemy HP | one-hit kills, weak sword | 🅒 | `AR_WATCHOBJ` on an enemy slot's HP field while you hit it → the writer is the damage routine; the amount is its operand. |
 | Player sword length / reach | TBD (hitbox/collision calc) | double reach | 🅒 | the sword-vs-enemy hit test — the attack hitbox extent (a constant offset from player X). Hardest (geometry); find via the attack-frame collision routine. |
-| Player fly / moonjump | Y-**position** = `$08A4` (+$04) | moonjump / fly | 🅥 | **WIRED** — `AR_MOONJUMP=1` (default 6 px/frame) or `=<n>`; `AR_MOONJUMP_BTN=<mask>` (def `0x8000`=B). Moves Y-pos up while B held (`ActRaiser_ApplyCheats`). NOTE: uses Y-pos, NOT Y-vel `$08A8` — `$08A8` is "Y-velocity" only in the AIR state (polymorphic field); writing it while grounded did nothing. |
+| Player fly / moonjump | Y-**position** = `$08A4` (+$04) | moonjump / fly | 🅥 | **WIRED** — `AR_MOONJUMP=1`, speed from `AR_MOONJUMP_SPEED` (default 6 px/frame). Moves Y-pos up while the game's normal jump button (SNES B) is held (`ActRaiser_ApplyCheats`); no separate cheat binding. NOTE: uses Y-pos, NOT Y-vel `$08A8` — `$08A8` is "Y-velocity" only in the AIR state (polymorphic field); writing it while grounded did nothing. |
 | Boss HP / health bar | boss object slot HP field (offset TBD) | set boss HP, instant-kill | 🅥/🅒 | boss HP lives in the boss object's slot (we have `saves/act1-boss*.bin` snapshots). `AR_WATCHOBJ` on the boss slot while damaging it → the HP field + the boss-damage writer. |
 | Enemy HP (general) | object slot HP field (offset TBD) | — | 🅥 | same as boss — a per-object HP field in the `$06A0` table (offset not yet mapped). |
 | Act score / population | TBD (likely SRAM, per-act) | force score thresholds → sim gating | 🅥/🅒 | the routine that compares act score/population to a threshold to gate sim-mode progression — `AR_WATCH16` on the displayed score; find the threshold-compare site. |

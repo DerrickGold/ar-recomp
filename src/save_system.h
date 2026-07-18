@@ -96,6 +96,9 @@ bool SaveSystem_LoadActive(SaveError *error);
 bool SaveSystem_WriteActive(SaveError *error);
 bool SaveSystem_AutoPersistIfChanged(SaveError *error);
 void SaveSystem_ResyncShadow(void);
+/* Mark a live-SRAM subrange as session-only without concealing unrelated
+ * game writes. A later native save still persists the complete live image. */
+void SaveSystem_ResyncShadowRange(size_t offset, size_t size);
 const char *SaveSystem_ActivePath(void);
 SaveBackend SaveSystem_ActiveBackend(void);
 

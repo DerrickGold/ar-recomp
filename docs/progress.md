@@ -149,8 +149,7 @@ silently attributed to future widescreen code.
 
 The runtime settings/overlay plan in
 [settings-system.md](settings-system.md) is complete through Phase 6, with one
-manual save-acceptance matrix pending. Its 99-row registry contains 86
-persistent settings and 13 host ACTION commands,
+manual save-acceptance matrix pending. Its 101-row registry
 owns every wired application/game setting, resolves
 `config.ini < settings.ini < environment`, persists atomically, and exposes
 live/restart apply metadata. The SDL host overlay renders descriptor-driven
@@ -159,8 +158,9 @@ saves accepted changes, and scales independently. Escape/F1 opens it globally
 from every game state before emulated input dispatch. The authentic 2bpp font,
 selector, and three-panel dialog frame are decoded from the user-supplied ROM
 into full-window host atlases with independently scaled contents. Custom rows
-support validated text entry, and QoL actions reuse the pause, turbo,
-save/load-state, warp, snapshot, restart, and exit paths. Screen ratio is an explicit
+support validated text entry, and Extras/Inspector actions reuse the pause,
+turbo, save/load-state, warp, snapshot, complete scene-asset dump, restart, and
+exit paths. Screen ratio is an explicit
 4:3/16:9/16:10 cycle; ratio, pixel aspect, and renderer selection now rebind
 preallocated video surfaces live. Enhanced music now adopts or releases the
 currently playing song immediately, and audio frequency cycles through
@@ -227,6 +227,7 @@ The remaining widescreen backlog is:
 | Runtime settings overlay | ✅ | Phase 5 complete: global Escape/F1 access, hierarchical category/direct-action navigation, independently scaled three-panel native dialog theme, ROM-decoded font/frame atlases, frozen-game input capture, validated editing/actions, and atomic `settings.ini` saves. Phase 6 includes the guarded Save editor category and codec actions. A native game-menu entry is optional; gamepad support belongs to the separate input backlog. |
 | Battery save codec/editor | 🟡 | 2026-07-16: exact 8 KiB native codec, checksum validation/repair, version-1 lossless INI, deterministic active backend, atomic writes, timestamped editor backup, auto-persist/shutdown shadow re-sync, five paged edit groups (town/Death Heim/Professional progress, player/Angel status, magic, items, and BCD scores), import/export/session/persistent actions, `tools/srm.py`, and transactional tests are implemented. All 9 repository saves validate and `.srm → .ini → .srm` is byte-identical. Pending final gate: manual Apply and save → Restart Game → Continue acceptance matrix in the game. |
 | Cheats | 🟡 | Named cheat kit 2026-07-07: `AR_ALL_MAGIC`/`AR_RANGED_SWORD`/`AR_INF_MP`/`AR_INF_SP`/`AR_ANGEL_HP` + magic-safe `AR_NO_KNOCKBACK` + generic `AR_PIN`; real 8x turbo on `t`. `AR_FREEZE_TIMER` auto-backoff added, still unverified. `AR_NO_KNOCKBACK` is not physics-neutral: its pinned invulnerability suppresses water drag (confirmed 2026-07-12). |
+| Bridge structure-cap fix (sim) | 🟡 | 2026-07-17: structure-record system fully mapped + SRAM-validated (SEAMS town §7, save-format §3.4: 128 × 4-byte records per town, allocator `$03:9D9F`, census `$03:C07F`, miracle damage `$03:B274`, bridge immunity row `$A435`; record format confirmed against real saves incl. both bridge orientation variants). v1 slot-reuse/lightning designs were withdrawn after they erased bridges on reconstruction. v2 uses a validated/deduplicated completed-bridge sidecar: `$9D9F` migrates, `$C07E` restores support, `$9CFB` restores `$E1/$E2` marks, and `$89F0` decodes the native rebuild program to restore the visible metatile after `$9D4D`. Sidecar-only checksum changes are shadowed until a normal ROM save transaction, with a persistence regression test. Marks-only visual capture correctly failed (black bridge), establishing the second render seam; generated build + replacement screenshot are the remaining acceptance gate. |
 | Debug tooling | ✅ | 2026-07-07 toolkit: `dis65`/`romxref`/`wram`/`resolve_miss`/`cycle.sh` — anomaly capture → auto-triage → proposed cfg patch loop (`DEBUG.md` §1) |
 | Action widescreen BG/sprites | 🟡 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, fast vertical rows, sprites, activation, narrow-BG2 mirror/repeat policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. Remaining: general camera/world-edge clamp for full presentation coverage. |
 

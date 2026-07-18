@@ -11,6 +11,13 @@ bool SettingsOverlay_Init(SDL_Renderer *renderer,
                           const uint8_t *rom_data, size_t rom_size);
 void SettingsOverlay_Destroy(void);
 
+/* Optional live, read-only text shown below the Inspector controls. The
+ * provider is called only while that menu is rendered and may emit newlines. */
+typedef void (*SettingsOverlayInspectorInfoProvider)(char *buffer,
+                                                     size_t buffer_size);
+void SettingsOverlay_SetInspectorInfoProvider(
+    SettingsOverlayInspectorInfoProvider provider);
+
 bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);

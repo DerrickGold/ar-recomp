@@ -65,11 +65,11 @@ typedef enum {
 typedef enum {
   kSettingCat_Cheats,
   kSettingCat_Widescreen,
-  kSettingCat_Aspect,
   kSettingCat_Display,
   kSettingCat_Audio,
   kSettingCat_Save,
-  kSettingCat_Qol,
+  kSettingCat_Extras,
+  kSettingCat_Inspector,
 } SettingCategory;
 
 typedef enum SaveProgressEdit {
@@ -168,8 +168,11 @@ typedef struct Settings {
    * the SPC driver's music voices; the next song change is fully authentic. */
   bool music_replacements;
 
-  /* Quality-of-life command parameters. These persist; the corresponding
-   * ACTION rows are host commands and are never serialized. */
+  /* Extras: gameplay enhancements and host-tool command parameters. These
+   * persist; corresponding ACTION rows are host commands and are never
+   * serialized. */
+  bool fix_bridge_limit;  /* migrate completed bridges to the SRAM extension
+                             area so they stop consuming 128-cap records */
   int turbo_multiplier;
   uint16 warp_target;
   bool scene_inspector;      /* click-to-inspect live PPU/asset identity */
@@ -210,8 +213,8 @@ typedef struct Settings {
   bool cheat_angel_hp;
   int  cheat_inf_hp;
   bool cheat_freeze_timer;
+  bool cheat_moonjump;
   int  cheat_moonjump_speed;
-  uint16 cheat_moonjump_button;
   int  cheat_no_knockback;
   uint8 pin_count;
   SettingsPin pins[32];

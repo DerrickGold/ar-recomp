@@ -52,7 +52,7 @@ static void TestDefaultsAndMetadata(void) {
   g_ws_extra = 43;
   Settings_Init();
 
-  CHECK(g_setting_desc_count == 99);
+  CHECK(g_setting_desc_count == 101);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -114,7 +114,8 @@ static void TestDefaultsAndMetadata(void) {
       CHECK(g_settings.save_scores[region][act] == 0);
   CHECK(g_settings.ws_action && g_settings.ws_sim && g_settings.ws_sprites);
   CHECK(g_settings.cheat_inf_mp == 0);
-  CHECK(g_settings.cheat_moonjump_button == 0x8000);
+  CHECK(!g_settings.cheat_moonjump);
+  CHECK(g_settings.cheat_moonjump_speed == 6);
   CHECK(Settings_VisibleX0() == 0);
   CHECK(Settings_VisibleWidth() == 342);
 
@@ -122,15 +123,23 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *hp = Settings_Find("cheat_inf_hp");
   const SettingDesc *volume = Settings_Find("audio_master_volume");
   const SettingDesc *warp = Settings_Find("warp_target");
+  const SettingDesc *warp_action = Settings_Find("warp_now");
+  const SettingDesc *save_state_action = Settings_Find("save_state");
+  const SettingDesc *load_state_action = Settings_Find("load_state");
   const SettingDesc *pause_action = Settings_Find("toggle_pause");
   const SettingDesc *restart_action = Settings_Find("restart_game");
   const SettingDesc *exit_action = Settings_Find("exit_desktop");
   const SettingDesc *music = Settings_Find("music_replacements");
   const SettingDesc *frequency = Settings_Find("audio_frequency");
+  const SettingDesc *screen_ratio = Settings_Find("extended_aspect");
+  const SettingDesc *stretch = Settings_Find("ignore_aspect_ratio");
+  const SettingDesc *bridge_limit = Settings_Find("fix_bridge_limit");
   const SettingDesc *save_backend = Settings_Find("save_backend");
   const SettingDesc *save_fillmore = Settings_Find("save_prog_fillmore");
   const SettingDesc *save_page = Settings_Find("save_editor_page");
   const SettingDesc *save_apply = Settings_Find("save_apply_persist");
+  const SettingDesc *inspector = Settings_Find("scene_inspector");
+  const SettingDesc *dump_assets = Settings_Find("dump_scene_assets");
   CHECK(display && display->type == kSettingType_Enum);
   CHECK(display && display->enum_count == kDisplayMode_PresetCount);
   CHECK(volume && volume->category == kSettingCat_Audio);
@@ -138,6 +147,10 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(volume && volume->minval == 0 && volume->maxval == 100 &&
         volume->step == 5);
   CHECK(warp && warp->type == kSettingType_Custom);
+  CHECK(!Settings_IsMenuVisible(warp));
+  CHECK(!Settings_IsMenuVisible(warp_action));
+  CHECK(!Settings_IsMenuVisible(save_state_action));
+  CHECK(!Settings_IsMenuVisible(load_state_action));
   CHECK(pause_action && pause_action->type == kSettingType_Action &&
         pause_action->apply == kApply_Action);
   CHECK(restart_action && restart_action->type == kSettingType_Action);
@@ -146,6 +159,12 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(frequency && frequency->type == kSettingType_Enum &&
         frequency->enum_count == kAudioFrequency_Count &&
         frequency->apply == kApply_Restart);
+  CHECK(screen_ratio && screen_ratio->category == kSettingCat_Display);
+  CHECK(stretch && stretch->category == kSettingCat_Display);
+  CHECK(bridge_limit && bridge_limit->category == kSettingCat_Extras);
+  CHECK(inspector && inspector->category == kSettingCat_Inspector);
+  CHECK(dump_assets && dump_assets->category == kSettingCat_Inspector &&
+        dump_assets->type == kSettingType_Action);
   CHECK(save_backend && save_backend->category == kSettingCat_Save &&
         save_backend->apply == kApply_Restart);
   CHECK(save_fillmore && save_fillmore->apply == kApply_Save &&
@@ -163,6 +182,8 @@ static void TestDefaultsAndMetadata(void) {
   g_ram[0x18] = 1;
   CHECK(hp && Settings_IsAvailable(hp));
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Widescreen), "Widescreen"));
+  CHECK(!strcmp(Settings_CategoryName(kSettingCat_Extras), "Extras"));
+  CHECK(!strcmp(Settings_CategoryName(kSettingCat_Inspector), "Inspector"));
   CHECK(!strcmp(Settings_ApplyKindName(kApply_Restart), "Restart required"));
   CHECK(!strcmp(Settings_ApplyKindName(kApply_Save), "Staged save edit"));
   CHECK(!strcmp(Settings_ChangeResultName(kSettingChange_Applied), "applied"));
@@ -228,6 +249,8 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
       "extended_aspect = 16:10\n"
       "pixel_aspect = Square pixels\n"
       "ws_sprites = On\n"
+      "cheat_moonjump_speed = 9\n"
+      "cheat_moonjump_button = $4000\n"
       "unknown_future_key = retained-by-future-version\n"));
 
   /* Real environment values must remain distinguishable from config.ini's
@@ -248,6 +271,8 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
   CHECK(Settings_ExtendedAspectX() == 16 && Settings_ExtendedAspectY() == 10);
   CHECK(g_settings.pixel_aspect == kPixelAspect_Square);
+  CHECK(g_settings.cheat_moonjump);  /* migrated from the old speed-only row */
+  CHECK(g_settings.cheat_moonjump_speed == 9);
 
   CHECK(Settings_SetLong(Settings_Find("window_scale"), 6) ==
         kSettingChange_Applied);
@@ -258,6 +283,9 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(FileContains(saved_path, "audio_master_volume = 40%"));
   CHECK(FileContains(saved_path, "audio_frequency = 32.04 kHz"));
   CHECK(FileContains(saved_path, "turbo_multiplier = 8"));
+  CHECK(FileContains(saved_path, "cheat_moonjump = On"));
+  CHECK(FileContains(saved_path, "cheat_moonjump_speed = 9"));
+  CHECK(!FileContains(saved_path, "cheat_moonjump_button"));
   CHECK(FileContains(saved_path, "warp_target = 0101"));
   CHECK(FileContains(saved_path, "save_backend = native-srm"));
   CHECK(FileContains(saved_path, "save_prog_fillmore = Leave as-is"));
@@ -296,7 +324,7 @@ static void TestLegacySeedEncodings(void) {
   ClearSettingsEnv();
   setenv("AR_INF_MP", "1", 1);
   setenv("AR_INF_HP", "0x20", 1); /* leading zero historically disables */
-  setenv("AR_MOONJUMP", "1", 1);
+  setenv("AR_MOONJUMP", "9", 1);
   setenv("AR_NO_KNOCKBACK", "10", 1); /* legacy parser is hexadecimal */
   setenv("AR_PIN", "7E00210A,7F1234AA", 1);
   setenv("AR_WS_SPRITES", "0", 1);
@@ -310,7 +338,8 @@ static void TestLegacySeedEncodings(void) {
 
   CHECK(g_settings.cheat_inf_mp == 10);
   CHECK(g_settings.cheat_inf_hp == 0);
-  CHECK(g_settings.cheat_moonjump_speed == 6);
+  CHECK(g_settings.cheat_moonjump);
+  CHECK(g_settings.cheat_moonjump_speed == 9);
   CHECK(g_settings.cheat_no_knockback == 0x10);
   CHECK(g_settings.pin_count == 2);
   CHECK(g_settings.audio_master_volume == 100);
@@ -527,27 +556,27 @@ static void TestCheatsCanBeStagedOutsideTheirRuntimeMode(void) {
   CHECK(g_ram[0x18] == 0);
   const SettingDesc *hp = Settings_Find("cheat_inf_hp");
   const SettingDesc *freeze = Settings_Find("cheat_freeze_timer");
-  const SettingDesc *moonjump = Settings_Find("cheat_moonjump_speed");
-  const SettingDesc *moonjump_button =
-      Settings_Find("cheat_moonjump_button");
+  const SettingDesc *moonjump = Settings_Find("cheat_moonjump");
+  const SettingDesc *moonjump_speed =
+      Settings_Find("cheat_moonjump_speed");
   const SettingDesc *no_knockback = Settings_Find("cheat_no_knockback");
   CHECK(Settings_IsAvailable(hp));
   CHECK(Settings_IsAvailable(freeze));
   CHECK(Settings_IsAvailable(moonjump));
-  CHECK(Settings_IsAvailable(moonjump_button));
+  CHECK(Settings_IsAvailable(moonjump_speed));
+  CHECK(Settings_Find("cheat_moonjump_button") == NULL);
   CHECK(Settings_IsAvailable(no_knockback));
   CHECK(Settings_SetLong(hp, 32) == kSettingChange_Applied);
   CHECK(Settings_SetLong(freeze, 1) == kSettingChange_Applied);
-  CHECK(Settings_SetLong(moonjump, 6) == kSettingChange_Applied);
-  CHECK(Settings_SetLong(moonjump_button, 0x4000) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(moonjump, 1) == kSettingChange_Applied);
+  CHECK(Settings_SetLong(moonjump_speed, 9) == kSettingChange_Applied);
   CHECK(Settings_SetLong(no_knockback, 1) == kSettingChange_Applied);
 
   g_ram[0x18] = 1;
   CHECK(g_settings.cheat_inf_hp == 32);
   CHECK(g_settings.cheat_freeze_timer);
-  CHECK(g_settings.cheat_moonjump_speed == 6);
-  CHECK(g_settings.cheat_moonjump_button == 0x4000);
+  CHECK(g_settings.cheat_moonjump);
+  CHECK(g_settings.cheat_moonjump_speed == 9);
   CHECK(g_settings.cheat_no_knockback == 1);
 }
 

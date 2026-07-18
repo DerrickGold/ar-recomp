@@ -50,11 +50,21 @@ static bool ParseInfHp(const char *text, void *field) {
   return true;
 }
 
-static bool ParseMoonjump(const char *text, void *field) {
-  int *value = (int *)field;
-  if (!text || !text[0] || text[0] == '0') *value = 0;
-  else if (text[0] == '1' && !text[1]) *value = 6;
-  else *value = (int)strtoul(text, NULL, 0);
+static bool ParseMoonjumpLegacy(const char *text, void *field) {
+  bool *enabled = (bool *)field;
+  if (!text || !text[0] || text[0] == '0') {
+    *enabled = false;
+    return true;
+  }
+  *enabled = true;
+  if (text[0] == '1' && !text[1]) return true;
+
+  /* AR_MOONJUMP historically accepted the flight speed directly. Keep that
+   * developer-config shorthand while the menu exposes separate controls. */
+  unsigned long speed = strtoul(text, NULL, 0);
+  if (speed < 1) speed = 1;
+  if (speed > 255) speed = 255;
+  g_settings.cheat_moonjump_speed = (int)speed;
   return true;
 }
 
@@ -488,7 +498,11 @@ static const char *const kSaveItemLabels[] = {
     parser, NULL }
 #define ACTION_SETTING(id, text, help) \
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
-    kSettingCat_Qol, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
+    kSettingCat_Extras, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
+    NULL, NULL }
+#define INSPECTOR_ACTION_SETTING(id, text, help) \
+  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
+    kSettingCat_Inspector, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
     NULL, NULL }
 #define SAVE_ACTION_SETTING(id, text, help) \
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
@@ -541,14 +555,14 @@ const SettingDesc g_setting_descs[] = {
                kSettingCat_Display, 1, false, NULL, NULL),
   { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Screen ratio",
     "Select authentic 4:3, 16:9, or 16:10 output; video geometry updates live.",
-    kSettingType_Enum, kApply_Callback, kSettingCat_Aspect,
+    kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.extended_aspect, kScreenAspect_43,
     kScreenAspect_43, kScreenAspect_1610, 1, false,
     kScreenAspectLabels, kScreenAspect_Count, NULL, NULL,
     ParseExtendedAspect, NULL },
   { "pixel_aspect", "AR_ASPECT_PAR", "Pixel aspect",
     "Use the original 4:3 CRT pixel stretch or square output pixels.",
-    kSettingType_Enum, kApply_Callback, kSettingCat_Aspect,
+    kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.pixel_aspect, kPixelAspect_Crt43,
     kPixelAspect_Square, kPixelAspect_Crt43, 1, false,
     kPixelAspectLabels, kPixelAspect_Count, NULL, NULL,
@@ -570,7 +584,7 @@ const SettingDesc g_setting_descs[] = {
     NULL, NULL, NULL, NULL },
   { "ignore_aspect_ratio", "AR_IGNORE_ASPECT_RATIO", "Stretch to window",
     "Ignore the configured display aspect and stretch output to the whole window.",
-    kSettingType_Bool, kApply_Callback, kSettingCat_Aspect,
+    kSettingType_Bool, kApply_Callback, kSettingCat_Display,
     &g_settings.ignore_aspect_ratio, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
   { "audio_enabled", "AR_ENABLE_AUDIO", "Enable audio",
@@ -603,18 +617,32 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
     &g_settings.music_replacements, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
+  /* This is an optional gameplay enhancement rather than a bug fix: the
+   * original 128-record structure cap is authentic. Completed bridges move
+   * to a checksummed extension area so they stop consuming those records,
+   * while the census and redraw hooks preserve their support and tiles. */
+  BOOL_SETTING(fix_bridge_limit, "AR_FIX_BRIDGE_LIMIT", "Bridge-free limit",
+               "Completed bridges stop counting toward the 128-structure "
+               "population cap; they migrate to spare save space and keep "
+               "their tiles, crossing, and support.",
+               kSettingCat_Extras, 0, true, NULL, NULL),
   INT_SETTING(turbo_multiplier, "AR_TURBO_MULT", "Turbo multiplier",
               "Number of game frames advanced per rendered frame while turbo is active.",
-              kSettingCat_Qol, 8, 2, 64, ParseTurboMultiplier, NULL),
+              kSettingCat_Extras, 8, 2, 64, ParseTurboMultiplier, NULL),
   { "warp_target", "AR_WARP", "Warp target",
     "Raw hexadecimal region/map target used by Warp now; see README for verified values.",
-    kSettingType_Custom, kApply_Passive, kSettingCat_Qol,
+    kSettingType_Custom, kApply_Passive, kSettingCat_Extras,
     &g_settings.warp_target, 0x0101, 0, 0xffff, 1, false, NULL, 0,
     NULL, NULL, ParseWarpTarget, FormatWarpTarget },
   BOOL_SETTING(scene_inspector, "AR_SCENE_INSPECTOR", "Scene inspector",
                "Click the game to pause and identify BG tiles, OAM sprites, "
                "VRAM addresses, palettes, hashes, and manifest gates.",
-               kSettingCat_Qol, 0, false, NULL, NULL),
+               kSettingCat_Inspector, 0, false, NULL, NULL),
+  INSPECTOR_ACTION_SETTING(
+      "dump_scene_assets", "Dump scene assets",
+      "Export every resident BG tilemap, OBJ animation-tile atlas, all 128 "
+      "OAM sprites, palettes, raw PPU memory, and a metadata index as PNG "
+      "and data files in this run's diagnostic folder."),
   ACTION_SETTING("toggle_pause", "Pause / resume",
                  "Toggle game pause after the settings overlay closes."),
   ACTION_SETTING("toggle_turbo", "Toggle turbo",
@@ -642,8 +670,8 @@ const SettingDesc g_setting_descs[] = {
   BOOL_SETTING(save_autobackup, "AR_SAVE_BACKUP", "Auto-backup",
                "Back up the active save before the first persistent editor change.",
                kSettingCat_Save, 1, false, NULL, NULL),
-  { "save_editor_page", NULL, "Editor page",
-    "Choose which group of staged save fields is shown below.",
+  { "save_editor_page", NULL, "Edit section",
+    "Choose Progress, Status, Magic, Items, or Scores; the active section is also shown in the panel title.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Save,
     &g_settings.save_editor_page, kSaveEditorPage_Progress,
     kSaveEditorPage_Progress, kSaveEditorPage_Count - 1, 1, false,
@@ -778,14 +806,14 @@ const SettingDesc g_setting_descs[] = {
   BOOL_SETTING(cheat_freeze_timer, "AR_FREEZE_TIMER", "Freeze timer",
                "Pin the action timer until the boss tally drain is detected.",
                kSettingCat_Cheats, 0, false, NULL, NULL),
-  INT_SETTING(cheat_moonjump_speed, "AR_MOONJUMP", "Moonjump speed",
-              "Pixels per frame while the configured button is held; 1 maps to 6.",
-              kSettingCat_Cheats, 0, 0, 255, ParseMoonjump, NULL),
-  { "cheat_moonjump_button", "AR_MOONJUMP_BTN", "Moonjump button",
-    "SNES auto-joypad mask; default $8000 is B.", kSettingType_Mask,
-    kApply_Passive, kSettingCat_Cheats, &g_settings.cheat_moonjump_button,
-    0x8000, 0, 0xffff, 1, false, NULL, 0, NULL, NULL,
-    NULL, NULL },
+  { "cheat_moonjump", "AR_MOONJUMP", "Moonjump",
+    "Hold the game's normal jump button to fly upward while enabled.",
+    kSettingType_Bool, kApply_Passive, kSettingCat_Cheats,
+    &g_settings.cheat_moonjump, 0, 0, 1, 1, false, NULL, 0,
+    NULL, NULL, ParseMoonjumpLegacy, NULL },
+  INT_SETTING(cheat_moonjump_speed, "AR_MOONJUMP_SPEED", "Moonjump speed",
+              "Pixels moved upward per frame while jump is held.",
+              kSettingCat_Cheats, 6, 1, 255, NULL, NULL),
   { "cheat_no_knockback", "AR_NO_KNOCKBACK", "No knockback",
     "1 is full invulnerability; other values are raw hex object offsets.",
     kSettingType_Int, kApply_Passive, kSettingCat_Cheats,
@@ -911,6 +939,12 @@ bool Settings_IsAvailable(const SettingDesc *desc) {
 
 bool Settings_IsMenuVisible(const SettingDesc *desc) {
   if (!desc || !desc->key) return false;
+  if (desc->category == kSettingCat_Extras &&
+      (!strcmp(desc->key, "warp_target") ||
+       !strcmp(desc->key, "warp_now") ||
+       !strcmp(desc->key, "save_state") ||
+       !strcmp(desc->key, "load_state")))
+    return false;
   if (desc->category != kSettingCat_Save) return true;
 
   /* Save storage/safety controls, the page selector, and commands stay
@@ -1117,11 +1151,11 @@ const char *Settings_CategoryName(SettingCategory category) {
   switch (category) {
     case kSettingCat_Cheats: return "Cheats";
     case kSettingCat_Widescreen: return "Widescreen";
-    case kSettingCat_Aspect: return "Aspect";
     case kSettingCat_Display: return "Display";
     case kSettingCat_Audio: return "Audio";
     case kSettingCat_Save: return "Save editor";
-    case kSettingCat_Qol: return "Quality of life";
+    case kSettingCat_Extras: return "Extras";
+    case kSettingCat_Inspector: return "Inspector";
   }
   return "Unknown";
 }
@@ -1295,6 +1329,9 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
   }
 
   bool success = true;
+  bool moonjump_toggle_seen = false;
+  bool legacy_moonjump_speed_seen = false;
+  bool legacy_moonjump_enabled = false;
   char line[1024];
   int line_number = 0;
   while (fgets(line, sizeof(line), file)) {
@@ -1314,6 +1351,20 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
     TrimRight(key);
     char *value = TrimLeft(equals + 1);
     StripInlineComment(value);
+
+    /* Removed menu state may remain in settings.ini until the next save. */
+    if (!strcmp(key, "cheat_moonjump_button")) continue;
+
+    if (!strcmp(key, "cheat_moonjump")) {
+      moonjump_toggle_seen = true;
+    } else if (!strcmp(key, "cheat_moonjump_speed")) {
+      char *end = NULL;
+      long old_speed = strtol(value, &end, 0);
+      if (end && !*end) {
+        legacy_moonjump_speed_seen = true;
+        legacy_moonjump_enabled = old_speed != 0;
+      }
+    }
 
     const SettingDesc *desc = Settings_Find(key);
     if (!desc) {
@@ -1338,6 +1389,9 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
   }
   if (ferror(file)) success = false;
   fclose(file);
+  if (!moonjump_toggle_seen && legacy_moonjump_speed_seen)
+    Settings_SetLong(Settings_Find("cheat_moonjump"),
+                     legacy_moonjump_enabled);
   return success;
 }
 

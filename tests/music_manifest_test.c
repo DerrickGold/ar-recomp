@@ -255,12 +255,17 @@ static void TestTriggerStateMachine(void) {
   CHECK(g_rtl_spc_upload_hook != NULL);
   CHECK(g_rtl_music_mix_hook != NULL);
   CHECK(!MusicReplacements_IsPlaybackPaused());
+  char status[128];
+  MusicReplacements_FormatPlaybackStatus(status, sizeof(status));
+  CHECK(!strcmp(status, "MUSIC NONE"));
 
   g_rtl_spc_upload_hook(0x1A94B8);
   g_rtl_apu_port_hook(0, 0xF0); /* halt */
   g_rtl_apu_port_hook(0, 0xFF); /* upload */
   g_rtl_apu_port_hook(0, 0x01); /* play song 1: no audio -> authentic */
   CHECK(g_dsp_voice_mute_srcn_min == -1);
+  MusicReplacements_FormatPlaybackStatus(status, sizeof(status));
+  CHECK(strstr(status, "MUSIC tune $01 AUTH") != NULL);
 
   /* $F2 is native pause, not song F2. The same remembered song command
    * resumes it. Host pause is an independent reason, so clearing only one
@@ -268,6 +273,8 @@ static void TestTriggerStateMachine(void) {
   g_rtl_apu_port_hook(0, 0xF2);
   CHECK(MusicReplacements_IsPlaybackPaused());
   MusicReplacements_SetHostPaused(true);
+  MusicReplacements_FormatPlaybackStatus(status, sizeof(status));
+  CHECK(strstr(status, "PAUSED") != NULL);
   g_rtl_apu_port_hook(0, 0x01);
   CHECK(MusicReplacements_IsPlaybackPaused());
   MusicReplacements_SetHostPaused(false);

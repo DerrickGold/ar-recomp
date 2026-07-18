@@ -571,6 +571,35 @@ bool MusicReplacements_IsPlaybackPaused(void) {
   return paused;
 }
 
+void MusicReplacements_FormatPlaybackStatus(char *buffer, size_t buffer_size) {
+  if (!buffer || !buffer_size) return;
+  RtlApuLock();
+  if (s_current_song < 0) {
+    snprintf(buffer, buffer_size, "MUSIC NONE");
+    RtlApuUnlock();
+    return;
+  }
+  const MusicReplacement *identity = s.session;
+  for (int i = 0; i < g_music_replacement_count && !identity; i++) {
+    const MusicReplacement *candidate = &g_music_replacements[i];
+    if (candidate->src == s_loaded_src &&
+        (candidate->song == kMusicSongAny ||
+         candidate->song == s_current_song))
+      identity = candidate;
+  }
+  if (identity) {
+    snprintf(buffer, buffer_size, "MUSIC %.14s $%02X %s%s",
+             identity->name, (unsigned)s_current_song,
+             s.session ? "ENH" : "AUTH", PlaybackPaused() ? " PAUSED" : "");
+  } else {
+    snprintf(buffer, buffer_size, "MUSIC %02X:%04X $%02X AUTH%s",
+             (unsigned)(s_loaded_src >> 16),
+             (unsigned)(s_loaded_src & 0xffff),
+             (unsigned)s_current_song, PlaybackPaused() ? " PAUSED" : "");
+  }
+  RtlApuUnlock();
+}
+
 void MusicReplacements_FrameTick(void) {
   if (!g_settings.music_replacements && s.session)
     EndSession("music_replacements off");

@@ -73,6 +73,7 @@ add_executable(ActRaiserRecomp
     src/settings.c
     src/settings_overlay.c
     src/scene_inspector.c
+    src/scene_asset_dump.c
     src/save_system.c
     src/run_dir.c
     src/main.c
@@ -86,6 +87,7 @@ add_executable(ActRaiserRecomp
     src/hd_tile_census.c
     src/actraiser_widescreen_bg.c
     src/actraiser_widescreen_sprites.c
+    src/actraiser_bugfixes.c
     src/actraiser_spc_player.c
     # recompiled banks (generated)
     ${ACTRAISER_GEN_SOURCES}
@@ -191,6 +193,17 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_scene_inspector COMMAND actraiser_scene_inspector_test)
+
+    add_executable(actraiser_scene_asset_dump_test
+        tests/scene_asset_dump_test.c
+        src/scene_asset_dump.c
+    )
+    target_include_directories(actraiser_scene_asset_dump_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/third_party/stb
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_scene_asset_dump COMMAND actraiser_scene_asset_dump_test)
 
     add_executable(actraiser_music_manifest_test
         tests/music_manifest_test.c

@@ -2,7 +2,7 @@
 
 Architecture and implementation record for the single source of truth that
 captures every custom setting (cheats,
-widescreen knobs, display/audio, QoL) and defines each one's **path to live
+widescreen knobs, display/audio, extras, and inspection tools) and defines each one's **path to live
 runtime updates**, so the host overlay menu can flip them mid-run. This
 is the "option B" refactor from the 2026-07-12 settings scan.
 
@@ -10,8 +10,7 @@ Status: **PHASES 1–6 IMPLEMENTED; FINAL IN-GAME SAVE-ACCEPTANCE CHECK PENDING.
 `src/settings.{c,h}` now own
 the existing cheat fields, nine widescreen behavior gates, render profile,
 host-output HUD/menu scales, application display/aspect/audio fields, and a
-99-row descriptor registry (86 persistent settings plus 13 non-persistent host
-actions) with lookup, formatting, availability, mutation,
+101-row descriptor registry with lookup, formatting, availability, mutation,
 callbacks, sticky/restart results, observer notification, layered INI loading,
 and atomic persistence. The promoted game HUD proves the post-upscale
 host-compositor seam; master audio gain, audio enable, fullscreen, window
@@ -22,8 +21,8 @@ remaining redrawable, applies live values, and atomically saves accepted
 changes. The native dialog-frame theme is also ROM-decoded. Direct text editing
 handles custom values such as PAR pins and warp targets, while screen ratio is
 an explicit 4:3/16:9/16:10 enum; ACTION
-rows reuse the pause, turbo, save/load-state, warp, snapshot, restart,
-graceful-exit, and save-codec paths.
+rows reuse the pause, turbo, save/load-state, warp, snapshot, scene-asset dump,
+restart, graceful-exit, and save-codec paths.
 The optional native ActRaiser menu entry, broader gamepad input, and decoding
 the still-opaque town-map payload remain outside the completed overlay/save
 editor phases.
@@ -125,7 +124,8 @@ typedef struct Settings {
   int  audio_master_volume;    // 0..100; atomic callback mirror
   bool audio_dialog_blip;      // exact $01:902D COP #$07 site
 
-  /* QoL/debug utility state */
+  /* Extras and inspection utility state */
+  bool fix_bridge_limit;
   int turbo_multiplier;
   uint16 warp_target;
   bool scene_inspector;        // F3 + click, read-only PPU asset identity
@@ -138,8 +138,8 @@ typedef struct Settings {
   bool   cheat_angel_hp;       // all-mode  -> $0286 = $0287 (self-cal)
   int    cheat_inf_hp;         // action    0=off, 1=auto (high-water), n=literal $1D
   bool   cheat_freeze_timer;   // action    pin $E6/$E7 (auto-release on boss drain)
-  int    cheat_moonjump_spd;   // action    0=off, else px/frame on $08A4
-  uint16 cheat_moonjump_btn;   // button mask vs auto-joypad word (default $8000=B)
+  bool   cheat_moonjump;       // action    hold the game's normal jump button
+  int    cheat_moonjump_speed; // action    px/frame applied to $08A4 (default 6)
   int    cheat_no_knockback;   // action    0=off, 1=full invuln, else raw $08A0+off pin
   uint8  pin_count;            // AR_PIN generic PAR pinner
   struct { uint32 off; uint8 val; } pins[32];
@@ -248,8 +248,8 @@ This is a drop-in: the gates get seeded from the same env vars they used to
 read, so boot behavior is unchanged. The refactor is behavior-preserving by
 construction (see the golden regression in §9).
 
-The ~5 bespoke encodings — `AR_PIN` (code list), `AR_MOONJUMP` (`"1"`→6 else n,
-plus `AR_MOONJUMP_BTN`), `AR_INF_HP` (`1`=auto vs literal), `AR_INF_MP`
+The remaining bespoke encodings — `AR_PIN` (code list), `AR_INF_HP`
+(`1`=auto vs literal), `AR_INF_MP`
 (`"1"`→10 else n), `AR_NO_KNOCKBACK` (`1`=full vs hex offset) — do not fit
 uniform int parsing and use the `SET_CUSTOM` `parse`/`format` hooks rather than
 being forced into the generic path.
@@ -280,19 +280,20 @@ The Phase-5 implementation applies those lifecycle rules in
 `src/settings_overlay.{c,h}`. Escape or F1 opens it globally before emulated
 input dispatch, independent of `$18/$19` or any native menu state. Neither key
 maps to the SNES controller, and opening clears the currently held emulated
-buttons before freezing frame advancement. Escape/F1/B closes the overlay;
+buttons before freezing frame advancement. Escape/F1 closes from either level;
+SNES A backs out of a category or closes from primary navigation;
 closing clears input again so no menu navigation can become a stuck game
 button. Window-manager quit remains available while Escape is owned by the
 menu.
 
-Left/Right performs ordinary stepped edits. Pressing SNES A (`X`/Return) on a
+Left/Right performs ordinary stepped edits. Pressing SNES B (`Z`/Return) on a
 CUSTOM row starts SDL text-input mode with the current formatted value; typed
 text and Backspace edit a scratch buffer, Return validates it through
 `Settings_SetText`, and Escape cancels without touching the live value.
 Pressing the same button on an ACTION row calls `Settings_InvokeAction`.
 Actions are descriptor-driven but intentionally absent from `settings.ini`;
-the stored `turbo_multiplier` and `warp_target` parameters are ordinary
-persistent rows.
+their stored parameters remain ordinary persistent descriptors even when a
+developer-only command is hidden from the overlay.
 
 The current ActRaiser target is C and links SDL2 only. A reusable RmlUi launcher
 exists under `snesrecomp/runner/src/launcher/`, but it is not part of
@@ -317,11 +318,13 @@ saved preference.
 
 Navigation is explicitly hierarchical. The overlay opens focused on the
 left-hand primary list; Up/Down moves between categories and promoted direct
-actions, and SNES A enters a category. Within a category, Up/Down selects rows,
-Left/Right edits values, and SNES B returns focus to the primary list. SNES B
-closes only when primary navigation already has focus. Inspector, Restart, and
-Exit are direct leaves and therefore execute/toggle immediately on A without a
-duplicate one-row settings panel. L/R no longer changes categories.
+actions, and SNES B enters a category. Within a category, Up/Down selects rows,
+Left/Right edits values, and SNES A returns focus to the primary list. SNES A
+closes only when primary navigation already has focus. Inspector is a category:
+its first row exposes the persistent enable state, its second row performs a
+complete scene-asset dump, and a non-interactive live summary fills the panel
+below them. Restart and Exit are direct leaves and execute immediately on B.
+L/R no longer changes categories.
 
 The font is the game's real 256-tile, 8×8, 2bpp dialog set. The title asset
 script's second `$80` operation uploads it to BG3 VRAM `$5000`; its encoded
@@ -369,7 +372,7 @@ live:
 | **PASSIVE** | Existing gate reads the field every frame. Menu writes struct → next frame reflects it. No extra code. | 11 cheat controls, 9 widescreen behaviors, host HUD scale, dialogue blip | free |
 | **CALLBACK** | The host observer performs one live update: master gain copies to an atomic callback mirror; display callbacks resize/rebind the preallocated video surfaces; window/fullscreen/stretch controls update SDL; audio enable pauses/resumes the device. | master volume, screen/pixel aspect, renderer path, window scale, fullscreen, ignore-aspect, audio-device toggle | small |
 | **RESTART** | Requires host-device reinitialization unsafe to perform from the current callback path. | audio frequency/samples (audio-device reopen; audio thread) | real work |
-| **ACTION** | Not stored toggles — commands the menu invokes; only the *param* is stored. | warp (`warp_target`, F6), turbo (`turbo_mult`, T), savestate (F5/F7), snapshot (F2), pause (P) | reuse existing hotkey paths (`src/main.c:587`) |
+| **ACTION** | Not stored toggles — commands the menu invokes. | turbo, snapshot, pause, restart/exit, save-editor import/export/apply | reuse existing host paths; developer-only warp and quick-state hotkeys are omitted from the menu |
 | **SAVE** | Transactional mutation of the canonical `g_sram` image + mandatory checksum recompute; optional commit through the active `.srm` or `.ini` backend. Takes effect **the next time the game loads the save from its own title menu** — no app restart. See §4.1. | paged progress/status/magic/item/score staging, save import/export actions | small, but see the §4.1 hazard |
 
 The core Phase-1 change is implemented across the original passive rows. Phase
@@ -531,8 +534,8 @@ restore an unknown prior byte.
 | Angel HP | `AR_ANGEL_HP` | bool | off | simulation | `$0286 = $0287` (self-cal) |
 | Infinite HP | `AR_INF_HP` | int | off (`1`=auto) | action | pin `$1D` |
 | Freeze Timer | `AR_FREEZE_TIMER` | bool | off | action | pin `$E6/$E7`; auto-release on boss drain |
-| Moonjump | `AR_MOONJUMP` | int px/f | off (`1`→6) | action | move `$08A4` up while btn held |
-| — Moonjump button | `AR_MOONJUMP_BTN` | mask | `$8000` (B) | action | sub-setting of Moonjump |
+| Moonjump | `AR_MOONJUMP` | bool | off | action | move `$08A4` up while the game's normal jump button is held |
+| — Moonjump speed | `AR_MOONJUMP_SPEED` | int px/f | 6 | action | upward movement per held frame |
 | No Knockback | `AR_NO_KNOCKBACK` | int | off (`1`=full) | action | invuln `$08C6`/`$08D1` (magic-safe) |
 | Custom codes | `AR_PIN` | custom | empty | all modes | up to 32 PAR `7Exxxxvv` pins/frame |
 
@@ -556,7 +559,29 @@ it naturally when the relevant engine becomes active.
 | Decorative BG2 padding | `AR_WS_BG2_MIRROR` | bool | on | stage policy chooses reflection or cyclic repeat; off clamps the 256-wide BG2. Keep env name for compatibility |
 | Clamp override | `AR_WS_CLAMP` | mask | none | manual per-layer mask; already uncached/live |
 
-### Aspect / display / audio / QoL
+### Extras: bridge-limit enhancement — v2 (2026-07-17)
+
+The v1 toggles (bridge slot reuse, lightning destruction) were withdrawn the
+same day after play-testing — construction events regenerate town tiles from
+the record table, so record-freeing erased bridges and stranded the build
+cursor. v2 replaces them with the extension-area design (SEAMS town §7,
+save-format §3.4): four hle bodies in `src/actraiser_bugfixes.c` cooperate
+(`$9D9F` allocator migration, `$C07E` census, `$9CFB` construction-scene
+marks pass, `$89F0` post-reconstruction metatile render), while miracle damage
+remains completely native. The bridge is never destroyed — it keeps its map
+identity, visible tile, crossing, and 32-person support while no longer
+occupying one of the 128 records. Migration is session-only until the game's
+normal save transaction commits the native town block and sidecar together.
+
+| Setting | env | Type | Default | Note |
+|---|---|---|---|---|
+| Bridge-free limit | `AR_FIX_BRIDGE_LIMIT` | bool | off (sticky) | completed bridges migrate to spare checksummed SRAM and stop counting toward the 128-structure population cap. Retroactive (migration is lazy, per allocation attempt). Sticky in a saved game: disabling stops future migrations, but already-migrated bridges stay validated, drawn, supported, and crossable. Exiting without saving discards migrations from that session |
+
+`AR_BRIDGEFIX_DEBUG=1` logs migrations, bridge allocations, table-full
+events, validation cleanup, and sidecar redraw/render passes (`=2`: every
+structure allocation).
+
+### Display / audio / Extras / Inspector
 
 | Setting | Source | Type | Default | Apply |
 |---|---|---|---|---|
@@ -574,15 +599,17 @@ it naturally when the relevant engine becomes active.
 | Enable audio | `EnableAudio` / `AR_ENABLE_AUDIO` | bool | on | CALLBACK; lazily opens then pauses/resumes the device |
 | Audio freq | `AudioFreq` / `AR_AUDIO_FREQ` | enum 32.04/44.1/48 kHz | 44.1 kHz | RESTART; numeric `32040`/`44100`/`48000` remain accepted |
 | Audio samples | `AudioSamples` / `AR_AUDIO_SAMPLES` | int | 2048 | RESTART |
+| Bridge-free limit | `AR_FIX_BRIDGE_LIMIT` | bool | off (sticky) | PASSIVE; Extras category; completed bridges migrate to the checksummed SRAM extension and stop consuming structure records |
 | Turbo multiplier | `AR_TURBO_MULT` | int | 8 | Persistent ACTION parameter; consumed live by T and Toggle turbo |
 | Warp target | `AR_WARP` | custom hex | `0101` | Persistent ACTION parameter; direct text editor accepts the raw region/map target used by F6 and Warp now |
 | Scene inspector | `AR_SCENE_INSPECTOR` | bool | off | PASSIVE; F3/left-click freezes and identifies live BG/OAM/Mode-7 assets; panel auto-avoids the sample and is draggable; clear restores inspector-owned pause |
+| Dump scene assets | — | ACTION | — | Inspector command; complete resident BG canvases, OBJ animation-tile atlas, 128-entry OAM sheet, palette PNG, raw PPU/WRAM data, and JSON index under the run directory |
 
-The six non-persistent QoL ACTION rows are Pause/resume, Toggle turbo, Save
-state, Load state, Warp now, and Take snapshot; they dispatch to the same host
-paths used by P/T/F5/F7/F6/F2. Scene Inspector, Restart Game, and Exit Desktop
-remain ordinary registry descriptors but the overlay filters them out of the
-QoL panel and promotes them as direct leaves in the primary left-hand
+Extras shows Pause/resume, Toggle turbo, and Take snapshot; Save state, Load
+state, and Warp now retain the same host paths used by F5/F7/F6 but remain
+hidden developer commands. Inspector owns its enable row and Dump scene assets
+ACTION. Restart Game and Exit Desktop remain ordinary registry descriptors but
+the overlay promotes only that lifecycle pair as direct leaves in primary
 navigation. This is a presentation-only projection, so persistence, runtime
 observers, and action dispatch still have one source of truth. The lifecycle pair saves settings,
 takes the shared clean-shutdown/SRAM path, and either exits normally or
@@ -592,15 +619,17 @@ re-executes the same process arguments.
 
 The active disk backend changes serialization only; both formats decode to the
 same 8 KiB `g_sram` image (save-format.md §4). The staged payload is projected
-through five pages so the native-font panel stays readable; changing **Editor
-page** only filters rows and never changes SRAM.
+through five visually separated sections so the native-font panel stays readable;
+changing **Edit section** only filters rows and never changes SRAM. The active
+section is repeated in the panel title, with divider lines separating global
+storage/safety controls, section fields, and save commands.
 
 | Setting | env | Type / apply | Default | Note |
 |---|---|---|---|---|
 | Save storage format | `AR_SAVE_BACKEND` | enum / RESTART | `native-srm` | `native-srm` or `ini`; boot-selects exactly one authoritative backend/path |
 | Allow save edits | `AR_SAVE_EDIT` | bool / APPLY_SAVE | **off** | explicit safety gate; Apply actions and next-boot staged overrides refuse all fields while Off |
 | Auto-backup | `AR_SAVE_BACKUP` | bool / PASSIVE | **on** | timestamped backup of the active format before first persistent edit; see §4.1 |
-| Editor page | — | enum / PASSIVE | Progress | Progress, Status, Magic, Items, or Scores presentation filter |
+| Edit section | — | enum / PASSIVE | Progress | Progress, Status, Magic, Items, or Scores presentation filter |
 | Apply for session | — | ACTION | — | mutate live SRAM and re-sync the persistence shadow without writing disk |
 | Apply and save | — | ACTION | — | back up once, atomically persist through the active backend, then swap live SRAM |
 | Import save | `AR_SAVE_IMPORT` (path override) | ACTION | — | decode `saves/import.srm`, falling back to `saves/import.ini`, into scratch; validate, back up, convert to the active backend, and swap without changing backend selection |

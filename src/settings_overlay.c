@@ -146,12 +146,12 @@ static const uint8_t kFallbackFont[128][7] = {
 
 static const SettingCategory kCategoryOrder[] = {
   kSettingCat_Display,
-  kSettingCat_Aspect,
   kSettingCat_Audio,
   kSettingCat_Widescreen,
   kSettingCat_Cheats,
   kSettingCat_Save,
-  kSettingCat_Qol,
+  kSettingCat_Extras,
+  kSettingCat_Inspector,
 };
 
 typedef struct TopLevelItem {
@@ -159,10 +159,8 @@ typedef struct TopLevelItem {
   const char *nav_label;
 } TopLevelItem;
 
-/* These remain ordinary descriptors for persistence and action dispatch, but
- * are promoted out of Quality of life into the overlay's primary navigation. */
+/* Destructive host lifecycle commands stay direct primary-navigation leaves. */
 static const TopLevelItem kTopLevelItems[] = {
-  { "scene_inspector", "Inspector" },
   { "restart_game", "Restart game" },
   { "exit_desktop", "Exit desktop" },
 };
@@ -219,6 +217,12 @@ static int s_debug_panel_resize_start_y;
 static int s_debug_panel_resize_start_width;
 static int s_debug_panel_resize_start_height;
 static int s_debug_panel_resize_start_scale;
+static SettingsOverlayInspectorInfoProvider s_inspector_info_provider;
+
+void SettingsOverlay_SetInspectorInfoProvider(
+    SettingsOverlayInspectorInfoProvider provider) {
+  s_inspector_info_provider = provider;
+}
 
 static bool ReadBits(BitReader *reader, int count, unsigned *value) {
   if (!reader || !value || count < 0 ||
@@ -863,6 +867,7 @@ void SettingsOverlay_Destroy(void) {
   s_debug_panel_user_position = false;
   s_debug_panel_scale_percent = 0;
   s_debug_panel_render_scale_percent = 0;
+  s_inspector_info_provider = NULL;
 }
 
 bool SettingsOverlay_IsOpen(void) {
@@ -897,7 +902,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
         StopEditing();
         SetStatus("EDIT CANCELLED");
         break;
-      case SDLK_z:       /* SNES B */
+      case SDLK_x:       /* SNES A = cancel/back */
         StopEditing();
         s_submenu_open = false;
         SetStatus("EDIT CANCELLED");
@@ -921,7 +926,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     switch (key) {
       case SDLK_ESCAPE:
       case SDLK_F1:
-      case SDLK_z:       /* SNES B */
+      case SDLK_x:       /* SNES A = back/close */
         if (!repeat) SettingsOverlay_Close();
         break;
       case SDLK_UP:
@@ -930,7 +935,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
       case SDLK_DOWN:
         MoveCategory(1);
         break;
-      case SDLK_x:       /* SNES A */
+      case SDLK_z:       /* SNES B = game-style confirm */
       case SDLK_RETURN:  /* keyboard confirm */
       case SDLK_KP_ENTER:
         if (!repeat) ActivateTopLevelSelection();
@@ -946,7 +951,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     case SDLK_F1:
       if (!repeat) SettingsOverlay_Close();
       break;
-    case SDLK_z:       /* SNES B */
+    case SDLK_x:       /* SNES A = back */
       if (!repeat) s_submenu_open = false;
       break;
     case SDLK_UP:
@@ -961,7 +966,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     case SDLK_RIGHT:
       ChangeSelectedValue(1);
       break;
-    case SDLK_x:       /* SNES A */
+    case SDLK_z:       /* SNES B = game-style confirm */
     case SDLK_RETURN:  /* keyboard confirm */
     case SDLK_KP_ENTER:
       ActivateSelectedRow();
@@ -1238,6 +1243,22 @@ static void DrawWrappedText(const MenuLayout *layout, int x, int y,
   }
 }
 
+static void DrawInspectorInfo(const MenuLayout *layout, int x, int y,
+                              int max_chars, int max_lines) {
+  if (!s_inspector_info_provider || max_chars <= 0 || max_lines <= 0) return;
+  char buffer[768];
+  buffer[0] = 0;
+  s_inspector_info_provider(buffer, sizeof(buffer));
+  const char *line = buffer;
+  for (int row = 0; row < max_lines && line && *line; row++) {
+    const char *end = strchr(line, '\n');
+    int length = end ? (int)(end - line) : (int)strlen(line);
+    if (length > max_chars) length = max_chars;
+    DrawTextN(layout, x, y + row * 10, line, length, kText_Dim);
+    line = end ? end + 1 : NULL;
+  }
+}
+
 static int SnappedFitScale(int output_width, int output_height) {
   int fit_x = output_width * 100 / kMinimumLayoutWidth;
   int fit_y = output_height * 100 / kMinimumLayoutHeight;
@@ -1324,9 +1345,20 @@ static void DrawMenu(const MenuLayout *layout) {
   SelectFirstPopulatedCategory();
   const SettingDesc *top_level = TopLevelDescForSlot(s_category_slot);
   SettingCategory category = s_category_slot < CategorySlotCount()
-      ? kCategoryOrder[s_category_slot] : kSettingCat_Qol;
+      ? kCategoryOrder[s_category_slot] : kSettingCat_Extras;
   const char *category_name = top_level
       ? NavSlotLabel(s_category_slot) : Settings_CategoryName(category);
+  char save_category_name[32];
+  if (!top_level && category == kSettingCat_Save &&
+      g_settings.save_editor_page >= 0 &&
+      g_settings.save_editor_page < kSaveEditorPage_Count) {
+    static const char *const page_names[] = {
+      "Progress", "Status", "Magic", "Items", "Scores",
+    };
+    snprintf(save_category_name, sizeof(save_category_name), "Save: %s",
+             page_names[g_settings.save_editor_page]);
+    category_name = save_category_name;
+  }
   DrawTextN(layout, right_text_x, right_title_y,
             category_name, 15, kText_Normal);
   if (s_status[0]) {
@@ -1368,6 +1400,11 @@ static void DrawMenu(const MenuLayout *layout) {
     int row = category_row++;
     if (row < s_top_row || row >= s_top_row + s_visible_rows) continue;
     int y = first_row_y + (row - s_top_row) * kRowHeight;
+    if (category == kSettingCat_Save &&
+        (!strcmp(desc->key, "save_editor_page") ||
+         !strcmp(desc->key, "save_apply_session")))
+      FillLogicalRect(layout, right_x + 12, y - 3,
+                      right_width - 24, 1, 0x6080A0C0u);
     bool selected = s_submenu_open && row == s_row;
     bool available = Settings_IsAvailable(desc);
     if (selected) {
@@ -1408,6 +1445,15 @@ static void DrawMenu(const MenuLayout *layout) {
       DrawGlyph(layout, restart_x, y, '*', kText_Warning);
   }
 
+  if (!top_level && category == kSettingCat_Inspector) {
+    int info_y = first_row_y + category_row * kRowHeight + 5;
+    FillLogicalRect(layout, right_x + 12, info_y - 4,
+                    right_width - 24, 1, 0x6080A0C0u);
+    DrawText(layout, right_text_x, info_y, "LIVE SCENE", kText_Normal);
+    DrawInspectorInfo(layout, right_text_x, info_y + 12,
+                      (right_width - 24) / kGlyphSize, 5);
+  }
+
   const SettingDesc *selected = top_level
       ? top_level : (s_submenu_open ? SelectedDesc() : NULL);
   if (selected) {
@@ -1420,10 +1466,10 @@ static void DrawMenu(const MenuLayout *layout) {
   }
   DrawText(layout, margin + 12, bottom_y + bottom_height - 18,
            s_editing
-               ? "TYPE VALUE  RETURN APPLY  ESC CANCEL"
+               ? "TYPE VALUE  RETURN APPLY  A/ESC CANCEL"
                : (s_submenu_open
-                    ? "D-PAD SELECT/CHANGE A EDIT/RUN Y RESET B BACK"
-                    : "UP/DOWN SELECT  A OPEN/RUN  B CLOSE"),
+                    ? "D-PAD SELECT/CHANGE B EDIT/RUN Y RESET A BACK"
+                    : "UP/DOWN SELECT  B OPEN/RUN  A CLOSE"),
            kText_Dim);
 }
 

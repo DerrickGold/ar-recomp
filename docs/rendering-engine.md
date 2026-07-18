@@ -52,8 +52,12 @@ Then IN-GAME branch (`$18 != 0`):
 | `$02:AEEB` | **HUD stream**: `$7F:B000` -> VRAM `$5800`, 256B (BG3 map rows 0-3) EVERY frame; then `$F1`-gated one-shot `$7F:B100` -> `$5880`, 1472B (rows 4-26) | always / `$F1` |
 | `$02:AF30` | **VRAM DMA-descriptor slots**: slot0 `$D0`(src16)/`$D2`(bank)/`$D3`(VMADD)/`$D5`(size), slot1 `$D7/$D9/$DA/$DC`; word-mode bAdr $18; size self-clears | size != 0 |
 
-SIM-mode branch (`$18 == 0`, `$19` gated): `JSL $02:8384`, copies
-`$030C-$0313` -> `$0304-$030B`, then `$AEEB` (HUD), `$AF86`, `$AFCB`:
+SIM mode has two `$19`-gated branches. Town simulation (`$19 != 0,9`) runs
+`$AF69` (CGRAM effect), `$BC56` (tile-animation scheduler), `$AEBB` (town
+tilemap upload), `$AEEB` (HUD), then the same generic full-word descriptor
+consumer `$AF30` used in action mode. The `$19 == 0 or 9` non-town branch
+instead calls `JSL $02:8384`, copies `$030C-$0313` -> `$0304-$030B`, then
+uses `$AEEB`, `$AF86`, and `$AFCB`:
 
 | Routine | What it uploads | Gate |
 |---|---|---|
@@ -216,8 +220,16 @@ Fillmore act 1 arrives with `$DE/$DF=$FF, $E1=0` — tile anim disabled.
   Frame buffers live at `$7F:B800 + n*$E1`; composer = level loader `?`
   (Fillmore has $E1=0; find it on an animated level via a wram trace on
   off 0x1B800-0x1BFFF during load).
-- Sim mode: same tick, consumed by `$02:AF86` with HARDCODED src bank $0A
-  (ROM-direct frames) and dual targets $0000/$2A80, high-byte-only writes.
+- Sim town (`$18=0`, `$19!=0,9`): same WRAM-buffered animation path as action
+  mode, consumed by the generic `$02:AF30` full-word descriptor uploader.
+  `$02:BAF5` first captures four VRAM pages into
+  `$7F:B800/$B900/$BA00/$BB00`; later ticks re-upload one captured page to
+  VRAM `$0000`. `$AF86`'s ROM-bank-$0A, high-byte-only dual upload belongs
+  only to the separate `$19=0 or 9` non-town branch.
+- Recomp compatibility seam: `$02:BC56` is HLE'd to defer animation ticks
+  while INIDISP force-blank is set. This prevents a slow SPC `$F0` ack from
+  letting NMI upload the still-empty phase-0 buffer before `$BAF5` captures
+  it; phase and descriptor state otherwise remain native.
 - Independent second mechanism: `$02:AEAE` flips BG2SC between tilemap
   pages per `$C5/$C7` counters (`$02:BC34` phase helper) — tilemap-page
   animation, also disabled in Fillmore act 1.
@@ -279,6 +291,11 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
 
 ## 11. UI / dialog compose (sim engine)
 
+- Town-map tile *content* (which house/road/bridge tiles exist where) is not
+  decided in this engine layer: structure records drive per-record visual step
+  programs (`$03:A4B8` → `$7F:77E7` slots → the `$89F7`/`$8A7E` stepper) that
+  edit the town map, which the SEAMS "Sim-mode town-map GRAPHICS pipeline"
+  then uploads. See SEAMS town §7 for the record/step system.
 - `$02:BF60`: dialog/message-box draw dispatcher (type in `$14`); its tile
   writes target the BG3/HUD compose buffer at `$7F:B000`, later streamed by
   `$02:AEEB`. It is not a proven direct writer of Sky Palace's BG2 staging.
@@ -699,6 +716,16 @@ plane remain the live backends. A scrolling BG/OBJ click is identification for
 the reserved `tiles` plane, not a claim that hash-keyed replacement already
 works. `tests/scene_inspector_test.c` guards center/mirror BG mapping and OAM
 frame/subtile identity.
+
+The overlay's Inspector category also provides a one-click resident asset dump
+(`src/scene_asset_dump.c`). Unlike F2's framebuffer-oriented diagnostic
+snapshot, it decodes complete data sets: every tilemap cell for each BG layer
+(or the full 1024×1024 Mode-7 canvas), all 128 OAM compositions in a fixed
+16×8 sheet, and both OBJ name bases repeated through all eight OBJ palettes as
+a sprite-sheet atlas. Consequently, animation cels already loaded in OBJ VRAM
+remain visible even when OAM currently references another frame. A CGRAM sheet,
+raw VRAM/CGRAM/OAM/WRAM, and a JSON register/layer/OAM index accompany the PNGs
+in a frame-unique `scene_assets_*` run-directory folder.
 
 Presentation hit-testing is not limited to the base framebuffer transform.
 `BuildHudPresentationChunks()` is the shared source of the promoted HUD's

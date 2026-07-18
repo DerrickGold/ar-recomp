@@ -1318,6 +1318,19 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
 - Constraints: **no stubs, ever** (a stub is a hard build error — close the recompiler gap).
   Edit only the emitter, runner, `src/main.c`, `src/actraiser_rtl.c`, `recomp/*.cfg`, and
   `tools/`. Commit/push only when asked.
+- **⚠️ Standing stub-lint reality (2026-07-17):** despite the policy above, `tools/regen.sh`
+  currently ends in `=== STUB LINT — 164 stub(s) ===` + exit 1 on EVERY run — this is the
+  repo's long-standing state (same failure recorded in `regen1.txt` from Jul 1), NOT a
+  regression from your cfg change. 68 unresolved indirect-dispatch sites (banks 00/01/03,
+  mostly wrong-width garbage-variant flow) have never been closed; their trap calls compile
+  to no-op inlines in non-trace builds, so `nm` on old objects cannot prove any generation
+  was ever clean. All 29 banks ARE emitted before the lint exits, so the recipe is:
+  `bash tools/regen.sh --no-tests` (expect exit 1), then the three steps regen.sh skipped —
+  `python3 snesrecomp/tools/v2_sync_funcs_h.py --cfg-dir recomp --out recomp/funcs.h`,
+  `python3 tools/gen_metadata.py`, `python3 tools/find_rts_webs.py > saves/rts_webs.txt` —
+  then build. Output is deterministic across `SNESRECOMP_JOBS` and Python 3.13/3.14; to check
+  whether a cfg change added stubs, diff the lint's `site=` lists between runs, not the
+  counts. Closing the 68 sites properly is open backlog.
 - **`hle_func` semantics (fixed 2026-07-10)**: the replaced function's REAL body is still
   decoded + fed through codegen during regen (its text discarded, the forwarding stub emitted
   instead) so callees reachable only through it keep getting auto-promoted/emitted. Before this,
@@ -1460,6 +1473,8 @@ AR_APUPROF=<ms>        per-frame stall attribution: any game frame >= <ms> (bare
 Shift+F9 mid-bug + ring exact-1/N-speed in one mode? quit/Shift+F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
 find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
 find_rts_webs.py       static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
+town_structs.py        decode a town's 128-slot structure-record array from any WRAM dump (F2 snapshot / exit dump): per-slot type/cell/state, bridge count, TABLE FULL marker (--all = all six towns; SEAMS town §7). Same 4-byte layout sits in SRAM at 0x600+town*0x200 (save-format §3.4)
+AR_BRIDGEFIX_DEBUG=1   [bridgefix] structure-system observability via the hle'd allocator+miracle hooks: bridge allocations, table-full events, slot steals, miracle hits on bridges; =2 = every allocation + every miracle record hit (src/actraiser_bugfixes.c)
 find_yield_helpers.py  yield-helper census BY SHAPE (pull/peek of caller frame -> object-field store) + every JSR site's continuation vs cfg; exit!=0 = unregistered = future silent soft-lock (§7.20). Run after ANY bank00.cfg handler work; --lines = paste-ready fixes
 AR_RTSDISP_MISS=1      names any continuation a `rts_dispatch` list doesn't cover (site + popped target); benign JSR-return fall-throughs also print — check the popped value before adding a mapping
 AR_GARBAGE_HIST=<n>    garbage-trap block-ring depth (default 24, max 1000) incl. per-block S — 1000 spans a whole sim frame; how the dev-cycle m-leak origin was found (§7.13)

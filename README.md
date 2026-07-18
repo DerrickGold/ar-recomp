@@ -89,8 +89,9 @@ Extended runtime features:
 * Global host settings overlay with live configuration, persistent user
   settings, and mode-independent cheat staging
   ([architecture and implementation](docs/settings-system.md))
-* Click-driven scene inspector for locating live BG/OBJ/Mode-7 graphics and
-  deriving asset-replacement manifest entries
+* Click-driven scene inspector for locating live BG/OBJ/Mode-7 graphics,
+  deriving asset-replacement manifest entries, and exporting complete resident
+  BG/OAM/OBJ/palette data sets as PNG sheets
 
 #### Screenshots
 
@@ -342,10 +343,10 @@ see `HandleInput()` in `src/main.c`:
 
 The host settings overlay is available from every game state. It opens with
 focus on the primary left-hand navigation: Up/Down selects a category or
-direct action and `X` (SNES A) or Return enters/runs it. Inside a category,
-Up/Down selects a row, Left/Right changes ordinary values, and `X` or Return
+direct action and `Z` (SNES B) or Return enters/runs it. Inside a category,
+Up/Down selects a row, Left/Right changes ordinary values, and `Z` or Return
 advances/toggles ordinary values, opens direct text editing for custom values,
-or runs the selected command. `Z` (SNES B) returns from a category to primary
+or runs the selected command. `X` (SNES A) returns from a category to primary
 navigation; from primary navigation it closes the overlay. During text entry,
 Backspace edits, Return validates/applies, and Escape cancels. `A` restores a
 setting's default; Escape or F1 closes the menu from either focus. F2 remains available for
@@ -353,11 +354,15 @@ a full snapshot while the overlay is open. Game-frame advancement and SNES
 input are frozen until it closes; accepted setting changes are atomically
 written to `settings.ini`. ACTION rows themselves are not persisted.
 
-Scene Inspector, Restart Game, and Exit Desktop are direct leaves in the
-primary left-hand navigation rather than one-row submenus or entries buried
-under Quality of life. Pressing A on any of them applies/runs it immediately. The QoL
-category retains the persistent turbo multiplier and raw warp target plus
-Pause/resume, Toggle turbo, Save state, Load state, Warp now, and Take snapshot.
+Display includes screen and pixel aspect so output geometry lives in one place.
+Extras contains the bridge-limit enhancement plus turbo, pause, and snapshot
+controls. Warp and quick-state commands remain developer hotkeys and are not
+shown there. Inspector is a real submenu: its first row clearly shows/enables
+the click inspector, its second row dumps the complete resident scene assets,
+and the read-only area below shows the scene name, `$18/$19`, game/host frames,
+pause/turbo state, camera/map dimensions, PPU mode/masks, and current music.
+Restart Game and Exit Desktop remain direct primary-navigation leaves; pressing
+B on either runs it immediately.
 Restart and exit flush `settings.ini` and battery SRAM through the normal
 shutdown path; restart then replaces the current process with the same
 executable and command line.
@@ -365,8 +370,10 @@ executable and command line.
 ### Save editor
 
 The **Save editor** category stages battery-save changes without treating the
-unknown town-map payload as disposable structured data. Use **Editor page** to
-switch between Progress, Status, Magic, Items, and Scores. The editable set
+unknown town-map payload as disposable structured data. Use **Edit section** to
+switch between Progress, Status, Magic, Items, and Scores. The active section is
+repeated in the panel title and separated from global save controls and commands.
+The editable set
 includes all six town states, Death Heim and Professional-mode unlock state,
 player name, Master/Angel level/health/SP/MP/lives, message speed, magic and
 item slots, equipped magic, and both act scores for every town.
@@ -409,7 +416,7 @@ and then checked against this project's WRAM map and save fixtures.
 `check`, `decode`, `diff`, `edit`, and cross-format `convert` commands for the
 same format outside the game.
 
-With the scene inspector enabled (`F3`, its top-level menu item, or
+With the scene inspector enabled (`F3`, its Inspector-submenu toggle, or
 `AR_SCENE_INSPECTOR=1`), left-click anywhere in the game viewport to freeze the
 current frame. A clean, color-coded monospace panel reports game mode/submode,
 camera and PPU
@@ -433,6 +440,16 @@ coordinates to renderer output first. PAR/letterboxing, widescreen cropping,
 and the independently scaled/anchored promoted HUD are then resolved. HUD
 clicks are mapped back through the same presentation chunks used to render
 them, so the marker, highlighted source tile/sprite, and pointer stay aligned.
+
+**Dump scene assets** writes a frame-unique `scene_assets_*` directory beneath
+the current run folder (`runs/latest/` points at it). It exports each complete
+resident BG tilemap canvas as a transparent PNG, all 128 composed OAM entries as
+a 16×8 sprite sheet, and a second OBJ sheet containing both name bases across
+all eight palettes. That OBJ atlas includes animation cels loaded in VRAM even
+when they are not the frame currently drawn. It also writes the complete CGRAM
+palette sheet, raw VRAM/CGRAM/OAM/WRAM, and `metadata.json` with PPU registers,
+layer bases/dimensions, and an index for every OAM slot. These are decoded from
+resident PPU data, not cropped from the visible framebuffer.
 
 Screen ratio is a normal three-choice row—4:3, 16:9, and 16:10—not a text
 field. Screen ratio, pixel aspect, render profile, renderer path, window scale,
@@ -499,7 +516,7 @@ applying when their action or simulation engine becomes active.
 |---|---|
 | `AR_INF_HP=1` | pins player HP — infinite health |
 | `AR_FREEZE_TIMER=1` | freezes the action-stage countdown timer. **Currently still buggy** — has an auto-release heuristic for the boss-defeat drain sequence that isn't fully reliable yet |
-| `AR_MOONJUMP=1` (or `=<n>` for px/frame) | hold the jump button to fly upward |
+| `AR_MOONJUMP=1` | enable moonjump; hold the normal jump button to fly upward (`AR_MOONJUMP_SPEED`, default 6 px/frame) |
 | `AR_NO_KNOCKBACK=1` | permanent invincibility — no damage, no hitstun. Magic-aware: invulnerability drops only for the 1-2 frames where a spell cast actually fires |
 | `AR_ALL_MAGIC=1` | unlocks all four spells in the equip menu |
 | `AR_MAGIC_CYCLE=1` | reserves SNES L (`Q`) during action mode to cycle Fire → Stardust → Aura → Light and reload each spell's resident OBJ tiles; `AR_MAGIC_CYCLE_BTN=<mask>` changes the button (`0x0020`=L, `0x0010`=R) |
@@ -511,6 +528,14 @@ applying when their action or simulation engine becomes active.
 | `AR_WARP=<region_hex><map_hex>` | sets the raw `$18:$19` target used by `F6` (default `0101`); use the verified table below |
 | `AR_WARP_AT=<gameframe>` | fires the `AR_WARP` target automatically once the game-frame counter reaches the value (headless runs can't press F6); same state caveats as F6 |
 | `AR_TURBO_MULT=<n>` | game frames per rendered frame while `T` turbo is on (default 8) |
+
+**Bridge-limit enhancement** (overlay category **Extras**; background in
+`docs/SEAMS.md` town §7):
+
+| Key | Effect |
+|---|---|
+| `AR_FIX_BRIDGE_LIMIT=1` | bridges stop counting toward a town's 128-structure population cap: completed bridges migrate to a validated sidecar in spare battery-save space while keeping their map mark, rendered metatile, river crossing, and 32-person support. Retroactive on existing towns; persisted only by the game's normal save transaction and sticky once saved. Replaces the withdrawn v1 slot-reuse/lightning designs, which broke town redraws |
+| `AR_BRIDGEFIX_DEBUG=1` | `[bridgefix]` log from the structure-system hooks: migrations/cleanup, bridge allocations, table-full events, and sidecar mark/render passes; `=2` also logs every structure allocation |
 
 #### Verified `AR_WARP` targets
 

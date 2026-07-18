@@ -192,20 +192,55 @@ still need the manual §6.3 game round trip even though their addresses,
 encodings, range validation, checksum repair, and transactional writes are now
 covered by `actraiser_save_system` tests.
 
-### 3.4 Undocumented region 🔍 — `0x0000`–`0x07ff+`
+### 3.4 Town simulation block ✅ — `0x0000`–`0x11ff` (decoded 2026-07-17)
 
-The third-party map starts at `0x1200` and **documents nothing below it.** Our
-saves have a large, live, progress-dependent block at the very start:
+The third-party map starts at `0x1200` and documents nothing below it. The
+block below it is the persistent side of the structure-record system mapped in
+SEAMS town §7 (validated against `save.sim-bloodpool-start.bak.srm`, whose
+Fillmore array decodes to 92 active records = 77 houses + 13 fields + the two
+bridge orientation variants `$91/$81` — matching the FAQ's developed-Fillmore
+profile — while `complete.srm`, a warp-produced save with no sim play, shows
+initial road data and all-`$FFFF` square lists):
 
-| Save | Live span | Size |
+| SRAM | WRAM live copy | Contents |
 |---|---|---|
-| `save.sim-blank.bak.srm` | `0x0000`–`0x05ff` | 1536 B |
-| `save.sim-bloodpool-start.bak.srm` | `0x0000`–`0x076f` | 1904 B |
+| `0x0000 + town*0x80` | `$7F:6800` (current town) | road-map words, one per 8×8 selector square (bit `$40` obstructs, `$80/$100` bridge-built per axis, `$200` obstacle layer) |
+| `0x0300 + town*0x80` | `$7F:9250 + town*0x80` | built-square dedup list: 64 × 2-byte **square** coord pairs (x,y ≤ 7), `$FFFF` = empty |
+| `0x0600 + town*0x200` | `$7F:6BE7 + town*0x200` | structure-record array: 128 × 4 bytes `{cell X, cell Y, flags/type, action/progress}` — ends exactly at `0x1200` where region progress (§3.1) begins |
 
-It grows as the sim progresses. Working hypothesis: **sim-mode town/terrain
-state** (which map squares are developed/sealed). If so this is the
-*highest-value* region for the feature's stated goal and the one thing no
-existing tool documents. Needs derivation (§6).
+The per-cell flag maps (`$7F:3800+`) and drawn tile maps are **not** saved —
+they are regenerated on town entry from these arrays plus ROM terrain data.
+Decode any save's town state with `tools/town_structs.py` (works on WRAM
+dumps; the same record layout applies at the SRAM offsets above).
+
+**Host extension area (recomp-only, 2026-07-17).** The `fix_bridge_limit`
+setting migrates completed bridge records out of the 128-slot arrays into
+otherwise-free SRAM the ROM never writes (`[0x1d6b, 0x1fec)` is inside the
+checksummed range, so the game's own save path can persist it):
+
+| SRAM | Contents |
+|---|---|
+| `0x1D70` | magic `"AXB1"` (area treated as empty when absent) |
+| `0x1D74`–`0x1EF3` | 6 towns × 16 × 4-byte bridge records, same layout as the main arrays; `flags == 0` = free slot |
+
+Old saves are untouched until the first migration writes the magic. Sidecar
+records are accepted only when they describe an active, completed bridge at a
+valid cell and the corresponding orientation bit (`$0080/$0100`) still exists
+in that town's native road map. Invalid/stale records and later duplicates are
+reclaimed; a matching bridge still present in the main array wins for census,
+marks, and rendering, preventing an interrupted or older migration from being
+double-counted.
+
+Migration is transactional with the game's save command. The host recomputes
+the live checksum immediately, then resynchronizes only the sidecar and
+checksum ranges in the auto-persistence shadow. That makes the migration
+session-only: exiting without a native save cannot leak newly migrated bridge
+records to disk. The ROM's normal `$03:A656` save transaction later changes
+the native town block; auto-persistence then commits the complete, already
+checksummed 8 KiB image, including the sidecar. A save-system regression test
+covers both halves of this boundary. The census, marks, and scene-finish
+render hooks read the area directly (`src/actraiser_bugfixes.c`); the ROM
+itself never does.
 
 ---
 

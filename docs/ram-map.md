@@ -83,7 +83,7 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | $7E:00DE-$00E1 | 1+1+1+2 | tile-anim: tick period mask / frame count-1 / frame index / frame stride (bytes); $FF/$FF/-/0 = disabled |
 | $7E:00F1 | 1 | one-shot flag: re-stream BG3 map rows 4-26 ($7F:B100 -> VRAM $5880) next NMI |
 | $7F:B000-$B6BF | 1728 | HUD/BG3 tilemap compose buffer (rows 0-3 streamed every frame to VRAM $5800; rows 4-26 on $F1) |
-| $7F:B800+ | var | tile-anim frame buffers (action default; sim uses ROM $0A directly) |
+| $7F:B800+ | var | Tile-animation frame buffers. Action mode and sim towns (`$18=0`, `$19!=0,9`) use these through `$02:AF30`; `$02:BAF5` captures sim-town pages `$B800/$B900/$BA00/$BB00`. Only the separate sim `$19=0 or 9` branch uses ROM bank `$0A` directly through `$02:AF86`. |
 
 ### Mode 7 / World Map
 | Address | Size | Description |
@@ -133,6 +133,7 @@ in-game “settings mode” byte or PPU page is introduced.
 | $7E:0218 | 2 | Total population |
 | $7E:021A | 2 | Most recently visited town |
 | ... | 2 each | Individual town populations (Fillmore→Northwall) |
+| $7E:021C+2N | 2 each | ↑ the individual populations are recomputed by the structure census `$03:C07F`: sum of per-house people by civ level, +2, − `$7F:9F57+2N` — population is derived from standing house records (SEAMS town §7) |
 
 ### Growth Rates ($7E:0228-$7E:022D)
 One byte per town. Values:
@@ -234,6 +235,25 @@ stager) requires all six words == 2 for the all-bosses-done path.
 | $7F:6B9F-$7F:6BAA | X positions (6 towns) |
 | $7F:6BAB-$7F:6BB6 | Y positions (6 towns) |
 
+### Structure records & town capacity (mapped 2026-07-17, SEAMS town §7)
+| Address | Description |
+|---------|-------------|
+| $7F:3800-$7F:53FF | Per-cell flag maps, `$400` per town (32×32 cells; bit0 set at road/build commit `$03:9623`, bit1 at `$03:8E48`) |
+| $7F:6B26+2N | Per-town population **support capacity** (census `$03:C07F` sum: 32/48/72 per completed support structure, bridges 32) |
+| $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, bit6 under construction, bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
+| $7F:77E7-$7F:7BE6 | Per-record visual step-machine slots, 128 × 8 bytes (armed by `$03:A4B8`/rebuild `$A4A8`, walked by the `$89F7`/`$8A7E` 8-frame stepper). Completed sidecar bridges bypass this pool: the `$89F0` HLE replays their single native rebuild draw directly |
+| $7F:7BE7 | Step/tick scratch variable (record index during scanner passes) |
+| $7F:7BF9 / $7F:7BFB | Current town id / town id ×2 (index into `$03:DC74`) |
+| $7F:7C05 / $7F:7C07 | Census/scan accumulators (housing cap, support cap; allocator slot index) |
+| $7F:7C11/13/15/17 | Record-scan rectangle X0/Y0/X1/Y1 (cell coords) |
+| $7F:7C1D | Record-scan remaining counter |
+| $7F:7C9D/$7C9F/$7CA1 | Pending allocation request: cell X, cell Y, type byte |
+| $7F:90E1/$90E5 | Miracle aimed map cell X/Y (`$96EA/$96EC >> 4`); `$90E3/$90E7` = square-aligned copies |
+| $7F:90EB | Miracle kind for structure damage (0 silent clear, 1 lightning, ≥4 earthquake = whole map) |
+| $7F:90F7 | Structure-visual refresh flag set by `$03:B274` |
+| $7F:9250-$7F:954F | Per-town built-square lists, `$80` each: 64 × 2-byte **square**-coord pairs (x,y ≤ 7), `$FFFF` = empty (append/dedup `$03:8EC1`; staged pair `$9550/$9552`; cursors `$9554+`; persisted at SRAM `0x0300+town*0x80`) |
+| $7F:96E8/$96EA/$96EC | Miracle hit post from bank-01 effect actors: kind, pixel X, pixel Y (consumed by master-loop `$03:820F`) |
+
 ### Monster Lair Data ($7F:9500+)
 Arrays supporting up to 16 lairs (48 bytes each array):
 | Address | Description |
@@ -258,7 +278,13 @@ Arrays supporting up to 16 lairs (48 bytes each array):
 Two-byte entries per town tracking accumulated growth from monster defeats and lair seals.
 
 ### Road Construction Encoding ($7F:6800+)
+- One word per 8×8 selector square, `$80` bytes per town (`$300` total, all six
+  towns at `$6800+town*0x80`); initialised from ROM `$03:DCFA`, persisted at
+  SRAM `0x0000+town*0x80` (save-format §3.4)
 - Bit 0x40: Obstructs building direction selector
+- Bit 0x80 / 0x100: river-crossing bridge state per axis — set when the bridge
+  builders `$03:9985/$99CA` allocate a bridge record, checked so a crossing is
+  never re-bridged (SEAMS town §7)
 - Bit 0x200: Shows obstacle layer instead of base
 - Example values: `[29 38]`=straight road up, `[38 F8]`=crossroads, `[3A C8]`=horizontal road
 

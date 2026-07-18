@@ -22,12 +22,14 @@
 #include "settings.h"
 #include "settings_overlay.h"
 #include "scene_inspector.h"
+#include "scene_asset_dump.h"
 #include "save_system.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
 #include "run_dir.h"
 #include "util.h"
 #include "actraiser_spc_player.h"
+#include "actraiser_game.h"
 #include "snes/snes.h"
 #include "cpu_trace.h"
 #include "debug_server.h"
@@ -589,6 +591,64 @@ static void ToggleTurbo(void) {
     fprintf(stderr, "[turbo] off\n");
 }
 
+static uint16_t ReadWram16(unsigned address) {
+  return (uint16_t)(g_ram[address & 0x1ffff] |
+                    (g_ram[(address + 1) & 0x1ffff] << 8));
+}
+
+static const char *InspectorSceneName(uint8 map_group, uint8 map) {
+  static const char *const regions[] = {
+    "Non-action", "Fillmore act", "Bloodpool act", "Kasandora act",
+    "Aitos act", "Marahna act", "Northwall act", "Death Heim", "Ending",
+  };
+  static const char *const non_action[] = {
+    "Title", "Fillmore sim", "Bloodpool sim", "Kasandora sim", "Aitos sim",
+    "Marahna sim", "Northwall sim", "Sky Palace", "Temple", "World map",
+  };
+  if (map_group == kActRaiserMapGroup_NonAction &&
+      map < sizeof(non_action) / sizeof(non_action[0]))
+    return non_action[map];
+  if (map_group < sizeof(regions) / sizeof(regions[0])) return regions[map_group];
+  return "Unknown";
+}
+
+static void FormatInspectorInfo(char *buffer, size_t buffer_size) {
+  uint8 map_group = g_ram[kActRaiserWram_MapGroup];
+  uint8 map = g_ram[kActRaiserWram_CurrentMap];
+  char music[128];
+  MusicReplacements_FormatPlaybackStatus(music, sizeof(music));
+  extern int snes_frame_counter;
+  snprintf(buffer, buffer_size,
+           "SCENE %-11.11s $18/$19 $%02X/$%02X\n"
+           "GF $%04X HOST %d P:%c T:%s\n"
+           "CAM $%04X,$%04X MAP %uX%u\n"
+           "PPU MODE %u MAIN $%02X SUB $%02X\n"
+           "%s",
+           InspectorSceneName(map_group, map), map_group, map,
+           ReadWram16(kActRaiserWram_GameFrame), snes_frame_counter,
+           g_paused ? 'Y' : 'N', g_turbo ? "ON" : "OFF",
+           ReadWram16(kActRaiserWram_Bg1CameraX),
+           ReadWram16(kActRaiserWram_Bg1CameraY),
+           ReadWram16(kActRaiserWram_Bg1Width),
+           ReadWram16(kActRaiserWram_Bg1Height),
+           g_ppu ? PPU_mode(g_ppu) : 0,
+           g_ppu ? g_ppu->screenEnabled[0] : 0,
+           g_ppu ? g_ppu->screenEnabled[1] : 0,
+           music);
+}
+
+static bool DumpSceneAssets(void) {
+  if (!g_ppu) return false;
+  RedrawPausedFrameIfNeeded();
+  static unsigned dump_number;
+  extern int snes_frame_counter;
+  unsigned game_frame = ReadWram16(kActRaiserWram_GameFrame);
+  char directory[320];
+  RunDirFile(directory, sizeof(directory), "scene_assets_%02u_h%d_gf%u",
+             dump_number++, snes_frame_counter, game_frame);
+  return SceneAssetDump_Write(directory, g_ppu, g_ram, snes_frame_counter);
+}
+
 static void PerformWarp(void) {
   extern void ActRaiser_Warp(unsigned region, unsigned map);
   unsigned target = g_settings.warp_target;
@@ -730,6 +790,8 @@ static bool OnSettingsAction(const SettingDesc *desc) {
     PerformWarp();
   } else if (!strcmp(desc->key, "take_snapshot")) {
     TakeFullSnapshot();
+  } else if (!strcmp(desc->key, "dump_scene_assets")) {
+    if (!DumpSceneAssets()) return false;
   } else if (!strcmp(desc->key, "save_apply_session") ||
              !strcmp(desc->key, "save_apply_persist")) {
     SaveEditRequest edits;
@@ -1832,6 +1894,7 @@ int main(int argc, char **argv) {
 
   if (!SettingsOverlay_Init(g_renderer, rom_data, rom_size))
     Die("SDL font atlas creation for settings overlay failed");
+  SettingsOverlay_SetInspectorInfoProvider(FormatInspectorInfo);
 
   Settings_SetChangeObserver(OnRuntimeSettingChanged);
   Settings_SetActionObserver(OnSettingsAction);

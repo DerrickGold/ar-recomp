@@ -180,6 +180,22 @@ static void TestRuntimeTransactions(void) {
   CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, disk, &error));
   CHECK(!memcmp(live, disk, sizeof(live)));
 
+  /* A bridge sidecar mutation is session-only until the ROM performs a real
+   * save, represented here by a native town-block change. Range resync must
+   * hide only the sidecar/checksum; the later town change commits everything. */
+  memcpy(live + 0x1d70, "AXB1", 4);
+  Save_RecomputeChecksum(live);
+  SaveSystem_ResyncShadowRange(0x1d70, 4);
+  SaveSystem_ResyncShadowRange(kActRaiserSramChecksumOffset, 4);
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, disk, &error));
+  CHECK(memcmp(disk + 0x1d70, "AXB1", 4) != 0);
+  live[0x0600] ^= 0x01;
+  Save_RecomputeChecksum(live);
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, disk, &error));
+  CHECK(!memcmp(live, disk, sizeof(live)));
+
   int edits[kActRaiserSaveRegionCount] = {-1, -1, -1, -1, -1, 3};
   CHECK(!SaveSystem_ApplyRegionEdits(edits, false, false, false, &error));
   CHECK(SaveSystem_ApplyRegionEdits(edits, true, false, false, &error));

@@ -498,6 +498,14 @@ void SaveSystem_ResyncShadow(void) {
   s_runtime.shadow_valid = true;
 }
 
+void SaveSystem_ResyncShadowRange(size_t offset, size_t size) {
+  if (!s_runtime.live || !s_runtime.shadow_valid ||
+      s_runtime.size != kActRaiserSramSize ||
+      offset > kActRaiserSramSize || size > kActRaiserSramSize - offset)
+    return;
+  memcpy(s_runtime.shadow + offset, s_runtime.live + offset, size);
+}
+
 bool SaveSystem_LoadActive(SaveError *error) {
   ClearError(error);
   if (!s_runtime.live) return Fail(error, "save system is not attached");

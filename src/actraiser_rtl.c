@@ -6,6 +6,7 @@
 #include "hd_replacements.h"
 #include "common_cpu_infra.h"
 #include "snes/snes.h"
+#include "snes/ppu.h"
 #include "cpu_state.h"
 #include "funcs.h"
 #include "cpu_trace.h"
@@ -336,6 +337,138 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
   }
 
   ActRaiser_YieldToHost();
+  return RECOMP_RETURN_NORMAL;
+}
+
+/* $02:BC56 selects the next animated BG-character frame and arms NMI DMA
+ * descriptor 1. The native game assumes a force-blanked graphics load will
+ * finish before another animation tick. In the recomp, an SPC command ack can
+ * keep the main coroutine in $02:B63B for several host frames while NMI keeps
+ * running. A tick in that window uploads the not-yet-captured $7F:B800 frame
+ * over VRAM $0000; $02:BAF5 then captures that blank page and makes the
+ * corruption self-perpetuating.
+ *
+ * Preserve BC56's native behavior and register/flag contract, except that an
+ * invisible tick is deferred while INIDISP force-blank is active. Once the
+ * loader clears force-blank, animation resumes from the same phase with all
+ * four frames already captured. */
+static void ActRaiser_TileAnimSetNz(CpuState *cpu, uint16 value,
+                                    unsigned bits) {
+  const uint16 sign = bits == 8 ? 0x0080 : 0x8000;
+  const uint16 mask = bits == 8 ? 0x00FF : 0xFFFF;
+  value &= mask;
+  cpu->_flag_Z = value == 0;
+  cpu->_flag_N = (value & sign) != 0;
+}
+
+static uint16 ActRaiser_TileAnimAdc16(CpuState *cpu, uint16 left,
+                                     uint16 right) {
+  uint16 result;
+  if (!cpu->_flag_D) {
+    const uint32 sum = (uint32)left + (uint32)right + cpu->_flag_C;
+    result = (uint16)sum;
+    cpu->_flag_C = (sum & 0x10000) != 0;
+    cpu->_flag_V = ((left ^ result) & (right ^ result) & 0x8000) != 0;
+  } else {
+    uint32 carry = cpu->_flag_C;
+    uint32 decimal_result = 0;
+    uint32 carry_into_sign = 0;
+    for (unsigned shift = 0; shift < 16; shift += 4) {
+      uint32 digit = ((left >> shift) & 0xF) +
+                     ((right >> shift) & 0xF) + carry;
+      carry = digit > 9;
+      if (carry) digit += 6;
+      decimal_result |= (digit & 0xF) << shift;
+      if (shift == 8) carry_into_sign = carry;
+    }
+    result = (uint16)decimal_result;
+    cpu->_flag_C = carry != 0;
+    const uint32 visible_sign_sum =
+        (left & 0xF000) + (right & 0xF000) + (carry_into_sign << 12);
+    cpu->_flag_V =
+        ((left ^ visible_sign_sum) & (right ^ visible_sign_sum) & 0x8000) != 0;
+  }
+  ActRaiser_TileAnimSetNz(cpu, result, 16);
+  cpu_write_a16(cpu, result);
+  return result;
+}
+
+RecompReturn ActRaiser_TileAnimationTick(CpuState *cpu) {
+  const unsigned entry_m_bits = cpu->m_flag ? 8 : 16;
+  const uint16 entry_m_mask = cpu->m_flag ? 0x00FF : 0xFFFF;
+  const uint16 frame = cpu->m_flag
+      ? cpu_read8(cpu, 0x7E, (uint16)(cpu->D + 0x0088))
+      : cpu_read16(cpu, 0x7E, (uint16)(cpu->D + 0x0088));
+  const uint16 period = cpu->m_flag
+      ? cpu_read8(cpu, 0x7E, (uint16)(cpu->D + 0x00DE))
+      : cpu_read16(cpu, 0x7E, (uint16)(cpu->D + 0x00DE));
+  const uint16 due = (frame & period) & entry_m_mask;
+  cpu_write_a_m(cpu, due);
+  ActRaiser_TileAnimSetNz(cpu, due, entry_m_bits);
+
+  if (due != 0 || (g_ppu && PPU_forcedBlank(g_ppu))) {
+    cpu_mirrors_to_p(cpu);
+    cpu->S = (uint16)(cpu->S + 3);  /* replaced RTL */
+    return RECOMP_RETURN_NORMAL;
+  }
+
+  const uint16 phase_word = cpu->m_flag
+      ? cpu_read8(cpu, 0x7E, (uint16)(cpu->D + 0x00E0))
+      : cpu_read16(cpu, 0x7E, (uint16)(cpu->D + 0x00E0));
+  const uint16 phase_mask = cpu->m_flag
+      ? cpu_read8(cpu, 0x7E, (uint16)(cpu->D + 0x00DF))
+      : cpu_read16(cpu, 0x7E, (uint16)(cpu->D + 0x00DF));
+  const uint16 phase_plus_one =
+      (uint16)(((phase_word & phase_mask) + 1) & entry_m_mask);
+  cpu_write_a_m(cpu, phase_plus_one);
+  ActRaiser_TileAnimSetNz(cpu, phase_plus_one, entry_m_bits);
+  cpu_write_x_x(cpu, phase_plus_one);
+  ActRaiser_TileAnimSetNz(cpu, cpu_read_x_x(cpu), cpu->x_flag ? 8 : 16);
+
+  cpu_mirrors_to_p(cpu);
+  cpu->P |= CPU_P_X;               /* SEP #$10 */
+  cpu_p_to_mirrors(cpu);
+  cpu->X &= 0x00FF;
+  cpu_mirrors_to_p(cpu);
+  cpu->P &= (uint8)~CPU_P_M;       /* REP #$20 */
+  cpu_p_to_mirrors(cpu);
+
+  cpu_write_a16(cpu, 0);
+  ActRaiser_TileAnimSetNz(cpu, 0, 16);
+  for (;;) {
+    cpu_write_x8(cpu, (uint8)(cpu_read_x8(cpu) - 1));
+    ActRaiser_TileAnimSetNz(cpu, cpu_read_x8(cpu), 8);
+    if (cpu_read_x8(cpu) == 0) break;
+    cpu->_flag_C = 0;
+    ActRaiser_TileAnimAdc16(
+        cpu, cpu_read_a16(cpu),
+        cpu_read16(cpu, 0x7E, (uint16)(cpu->D + 0x00E1)));
+  }
+
+  cpu->_flag_C = 0;
+  const uint16 source =
+      ActRaiser_TileAnimAdc16(cpu, cpu_read_a16(cpu), 0xB800);
+  cpu_write16(cpu, 0x7E, (uint16)(cpu->D + 0x00D7), source);
+
+  cpu_mirrors_to_p(cpu);
+  cpu->P |= CPU_P_M;               /* SEP #$20 */
+  cpu_p_to_mirrors(cpu);
+  cpu_mirrors_to_p(cpu);
+  cpu->P &= (uint8)~CPU_P_X;       /* REP #$10 */
+  cpu_p_to_mirrors(cpu);
+
+  cpu_write_x16(cpu,
+                cpu_read16(cpu, 0x7E, (uint16)(cpu->D + 0x00E1)));
+  ActRaiser_TileAnimSetNz(cpu, cpu_read_x16(cpu), 16);
+  cpu_write16(cpu, 0x7E, (uint16)(cpu->D + 0x00DC), cpu_read_x16(cpu));
+
+  const uint8 next_phase =
+      (uint8)(cpu_read8(cpu, 0x7E, (uint16)(cpu->D + 0x00E0)) + 1);
+  cpu_write8(cpu, 0x7E, (uint16)(cpu->D + 0x00E0), next_phase);
+  ActRaiser_TileAnimSetNz(cpu, next_phase, 8);
+  cpu_mirrors_to_p(cpu);
+
+  cpu->S = (uint16)(cpu->S + 3);  /* replaced RTL */
   return RECOMP_RETURN_NORMAL;
 }
 
@@ -1158,21 +1291,21 @@ void ActRaiser_ApplyCheats(void) {
     }
   }
 
-  /* AR_MOONJUMP=1: hold the jump button to FLY UP. We move the player
+  /* AR_MOONJUMP=1: hold the game's jump button (SNES B) to FLY UP. We move the player
    * Y-POSITION ($08A4, +$04) directly rather than the Y-velocity ($08A8, +$08) —
    * object fields are polymorphic by state, so $08A8 is "Y-velocity" only in the
    * AIR state; while grounded it means something else (writing it there didn't
    * launch and leaked into other movement). Position is always position, so
    * decrementing $08A4 (screen-Y grows downward, so −Y = up) is a reliable
-   * state-independent fly. =<n> sets up-speed in pixels/frame (default 6).
-   *   AR_MOONJUMP_BTN=<hexmask> -> button mask vs the auto-joypad word
-   *      (default 0x8000 = B; SwapInputBits order). Override without a rebuild
-   *      if B isn't jump (verify bits with AR_JOYLOG=1). */
+   * state-independent fly. AR_MOONJUMP_SPEED sets up-speed in pixels/frame
+   * (default 6). The trigger follows the game's fixed jump mapping instead of
+   * exposing a second, potentially contradictory cheat binding. */
   {
-    if (g_settings.cheat_moonjump_speed) {
+    enum { kActRaiserJoypadJump = 0x8000 };  /* auto-joypad SNES B bit */
+    if (g_settings.cheat_moonjump) {
       extern Snes *g_snes;
       uint16 buttons = SwapInputBits(g_snes->input1_currentState);
-      if (buttons & g_settings.cheat_moonjump_button) {
+      if (buttons & kActRaiserJoypadJump) {
         uint16 player_y =
             ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionY);
         player_y = (uint16)(player_y - g_settings.cheat_moonjump_speed);
