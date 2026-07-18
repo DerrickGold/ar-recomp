@@ -12,16 +12,18 @@ endif()
 set(CMAKE_C_STANDARD 11)
 include(CTest)
 
-set(SNESRECOMP_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp)
-include(${SNESRECOMP_ROOT}/runner/runner.cmake)
+set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
+include(${SNESRECOMP_GO_ROOT}/runtime/runner.cmake)
 
 find_package(SDL2 REQUIRED)
 
-file(GLOB ACTRAISER_GEN_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/gen/*.c)
+set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
+    "Directory containing generated recomp C translation units")
+file(GLOB ACTRAISER_GEN_SOURCES CONFIGURE_DEPENDS "${ACTRAISER_GEN_DIR}/*.c")
 if(NOT ACTRAISER_GEN_SOURCES)
     message(FATAL_ERROR
-        "src/gen/ is empty — run `bash tools/regen.sh` with ar.sfc "
-        "at the repo root before building.")
+        "${ACTRAISER_GEN_DIR} is empty — run `bash tools/regen.sh` with "
+        "ar.sfc at the repo root before building.")
 endif()
 
 # CMake updates the target when regeneration replaces bankXX_v2.c with

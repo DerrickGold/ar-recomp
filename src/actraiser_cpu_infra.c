@@ -6,5 +6,7 @@ const RtlGameInfo kActRaiserGameInfo = {
   .initialize = NULL,
   .run_frame = &RunOneFrameOfGame,
   .draw_ppu_frame = &ActRaiserDrawPpuFrame,
+  .read_rdnmi = &ActRaiser_ReadRdnmi,
+  .recover_dispatch_miss = &ActRaiser_RecoverDispatchMiss,
   .save_name_prefix = "save",
 };

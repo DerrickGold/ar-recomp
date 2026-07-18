@@ -37,7 +37,7 @@ def load_rom(path=None):
 
 
 def load_meta(path=None):
-    """gen_meta.json (tools/gen_metadata.py sidecar) or None."""
+    """gen_meta.json (`v2regen metadata` sidecar) or None."""
     for c in ([path] if path else []) + [os.path.join(ROOT, 'saves', 'gen_meta.json'),
                                          'saves/gen_meta.json']:
         if c and os.path.exists(c):

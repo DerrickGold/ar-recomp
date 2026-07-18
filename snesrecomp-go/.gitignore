@@ -1,0 +1,15 @@
+# Local ROMs and generated/derived game artifacts.
+*.sfc
+*.smc
+/src/gen/
+/recomp/funcs.h
+/testdata/baseline/
+
+# Local builds and downloaded differential-test vectors.
+/build/
+/tools/oracle/harte_cache/
+
+# Editor/OS noise.
+.DS_Store
+*.swp
+*.swo

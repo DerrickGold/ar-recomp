@@ -296,8 +296,8 @@ their stored parameters remain ordinary persistent descriptors even when a
 developer-only command is hidden from the overlay.
 
 The current ActRaiser target is C and links SDL2 only. A reusable RmlUi launcher
-exists under `snesrecomp/runner/src/launcher/`, but it is not part of
-`runner.cmake` and expects C++ plus an existing OpenGL 3.3 context; ActRaiser
+exists under `snesrecomp-go/runtime/src/launcher/`, but it is not part of
+`snesrecomp-go/runtime/runner.cmake` and expects C++ plus an existing OpenGL 3.3 context; ActRaiser
 currently presents with `SDL_Renderer`. The implemented overlay is therefore a
 small SDL-rendered immediate UI with ROM-decoded assets and a host fallback
 font. Reusing
@@ -843,8 +843,8 @@ a global once in the boot init block. Not for end users; at most a hidden
 `AR_RTSDISP_MISS`, `AR_OBJLOG`, `AR_PPULOG`, `AR_FRAMELOG`.
 
 **Dead config fields — parsed but zero consumers.** Do not expose these as
-menu settings; they currently do nothing (template leftovers from the
-snesrecomp base). Either wire them up first or omit them: `NoSpriteLimits`,
+menu settings; they currently do nothing (template leftovers from the upstream
+runtime base). Either wire them up first or omit them: `NoSpriteLimits`,
 `LinearFiltering`, `NoSpriteLimits`, `AudioChannels`, `output_method`,
 `enable_gamepad[2]`, `gamepad_deadzone`, `skip_launcher`, and `autosave`.
 Fullscreen is no longer in this list: Phase 4 wires both its boot flag and live

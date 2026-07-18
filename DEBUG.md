@@ -36,7 +36,7 @@ in the `.ini` are ignored; inline `# comments` after a value are stripped.)
 
 The single most important mental model, learned the hard way (the act→sim cascade):
 
-> **Opcode correctness and decode-time WIDTH correctness are orthogonal.** A clean `opcode_diff.py`
+> **Opcode correctness and decode-time WIDTH correctness are orthogonal.** A clean `v2regen opcode-diff`
 > (Tom Harte, §5) does NOT mean "no misdecodes." Tom Harte tests each opcode with *known input
 > flags* ("given m=1, does `SEP #$20` work?"). It can NEVER test "did the **decoder** correctly
 > *assume* m=1 at this PC" — which byte-width it gave the instruction and which variant it emitted.
@@ -191,8 +191,10 @@ individual steps — this box is the process:
    table below (vram/wram/ppumem/hwread/stack/frame), then §5 static tools, then §6 oracle.
 5. **Apply the fix** — cfg directive (regen required) or runner/`src` change (rebuild only, §8).
 6. **Regen prints its own follow-ups**: the RTS-web census DELTA (newly-reachable uncovered
-   continuations — triage them NOW, before they cost a playtest) and the stub/suppression
-   reports. `find_rts_webs.py --suggest` emits shape-classified candidates for the delta.
+   continuations — triage them NOW, before they cost a playtest) and the hard-stub census.
+   `go -C snesrecomp-go run ./cmd/v2regen rts-webs --rom ../ar.sfc --cfg-dir ../recomp
+   --suggest` emits shape-classified candidates for the delta. Search `src/gen` directly for
+   suppressed-call markers as described in the symptom table below.
 7. **Verify by re-trace, not by eyeball**: the specific signal must flip (`--leaks` empty,
    `--vmadd` shows the right address, the anom dump stops appearing). Never declare a fix from
    "it built" — the `exit_mx_at 039D4D` false fix cost a full round.
@@ -284,7 +286,7 @@ declaring it fixed.
 **Only reach for a targeted flag AFTER the trace has localized the site** — and only when you need
 something the trace genuinely doesn't carry: a **single address's history across a whole run**
 (wider than a practical window) → `AR_WATCHOBJ`/`AR_WATCH16`; **opcode-level** correctness →
-`tools/opcode_diff.py`; a **real-hardware cross-check** → the oracle (§6); **whole-run leak
+`v2regen opcode-diff`; a **real-hardware cross-check** → the oracle (§6); **whole-run leak
 boundary without knowing the window** → `AR_MXHIST=1` (still the right first pass when you can't
 yet name the host frame). The per-symptom table below is now mostly the *fall-through* detail for
 those cases.
@@ -308,12 +310,12 @@ those cases.
 | **Rendering wrong (no text, no HBlank, missing BG, black screen)** | `AR_PPULOG=1` (bgmode, brightness, forced-blank, layer enables, HDMAEN) + **oracle screenshots** (`AR_SHOT_AT_GF` vs `SNESREF_SHOT_AT_GF`) | audit the PPU/DMA runtime (`ActRaiserDrawPpuFrame`); WRAM oracle is **blind** to VRAM |
 | **Missing/extra sound or music** | check **BRK/COP syscall hooks** (§7) — `$035B`=SFX (BRK), `$035A`=music/event (COP). `AR_COPLOG=1` now includes the exact current block PC and marks a suppressed dialogue glyph blip; the known glyph site is `$01:902D` (`COP #$07`) | `AR_COPLOG=1`; `AR_WATCH16` on the request port |
 | **Game runs at exactly 1/2 or 1/3 speed in ONE mode/screen (smooth elsewhere, audio fine)** | This is usually the **pacing/yield-multiplication class**, not host performance. Confirm + count in one shot: quit (or Shift+F9) **while the mode is slow**, then in the dump's block ring **count `02ABF0` (NMI-handler) entries per game-loop iteration** — each entry = one host-frame yield; N entries per iteration = 1/N speed, and the ring block *preceding* each entry names the yield site. Cross-check with any per-frame `[wobj]`/`[frame]` log: updates at delta=N host frames. Known causes so far: a non-HLE'd `$4210` wait yielding per read (§7 the `$9284` fix), and spin-detector false pairing on a twice-per-frame ack helper (§7.12 `$93CB`) | `AR_PERF=1` separates the two classes numerically (fps<60 = host-bound; fps=60 + crawling = pacing). Its `run-ms` covers game execution; `[draw-perf]` covers `RtlDrawPpuFrame`, including host widescreen refresh. A low `run-ms` therefore does not by itself rule out draw-side load. `env AR_FRAMELOG=1 AR_VBLOG=1` names every yield's callsite/block live. NOTE: static `$4210` scans must include the long form `AF 10 42 00`, not just `AD 10 42` |
-| **Suspect a single opcode is wrong** | `tools/opcode_diff.py` (Tom Harte differential, §5) | — |
+| **Suspect a single opcode is wrong** | `go -C snesrecomp-go run ./cmd/v2regen opcode-diff --cache-dir ../tools/oracle/harte_cache --runtime-dir runtime/src` (Tom Harte differential, §5) | — |
 | **Per-frame game-state progression** | `AR_FRAMELOG=1` (callsite, work delta, mode `$18/$19`, timer, HP) | `AR_OBJLOG=1` for the object table |
 | **Is the CPU layer even the problem?** | `AR_MXCHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
 | **Crash on a mode/level TRANSITION; SNES stack corrupted (`S` walks to `$FFxx`/`$42xx`/I-O); `ppu_write`/`ppu_read` abort** | Check stderr for **`[dispatch-miss]`** (default-on tripwire) — it names the unresolved RTS-trick/computed target. Then `AR_SCHECK=1` (S-drift + impending-underflow path) | confirm with `AR_RTSLOG=0x<rts_pc>`; register the popped target as a cfg `func` (see §7.7) |
-| **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Check the regen console output's three silent-drop report sections: **`JSR (abs,X) SUPPRESSED`** (cfg-required-dispatch-or-kill), **`DISPATCH TARGET SUPPRESSED BY DATA_REGION`**, **`Rejected JSR/JSL targets`** — grep the report for the bank/address range of the code you suspect. If none of those name the site, it's probably a genuine logic/state bug (e.g. a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `AR_INDIRLOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (a targeted branch probe — the 4-PC "which branch fired" pattern, bug-ledger "Methodology learnings") |
-| **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | Check the regen console's **`PROVEN-EQUIVALENT VARIANT ROUTING`** report section for the address — a `<== DIFFERS FROM CANONICAL/DEFAULT GUESS` entry means the OLD "nearest survivor" heuristic and the NEW proof disagree; a regen should already route it correctly. If the address is missing from the report entirely, `_find_equivalent_variants` couldn't prove any survivor equivalent (genuinely no safe target — see §7 "wrong-width dispatch, no provable target") | `AR_MXCHECK`/`AR_CALLMX` first to confirm it's actually reached at the wrong width at runtime (don't assume from static inspection alone — see gotcha #4 above) |
+| **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Search the generated output for silent-drop markers: `rg -n -e 'Call indirect SUPPRESSED' -e 'Call: target unknown' -e 'not a valid LoROM code address' src/gen`. If none name the suspect bank/address range, it is probably a genuine logic/state bug (for example, a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `AR_INDIRLOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (a targeted branch probe — the 4-PC "which branch fired" pattern, bug-ledger "Methodology learnings") |
+| **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | The Go port does not emit the Python tool's historical detailed routing report. Use `AR_MXCHECK`/`AR_CALLMX` to confirm the live mismatch, then inspect the generated `(m,x)` switch and, if the static route is suspect, `findEquivalentVariants` in `snesrecomp-go/internal/emitter/function.go` plus `routeVariant` in `snesrecomp-go/internal/codegen/emitter.go`. `tools/regen.sh` logs how many equivalences each fixpoint pass learned | If no survivor is provably equivalent, investigate the caller-side width leak or pin the intended width with cfg `entry_mx:`; do not infer safety from variant distance |
 
 **Golden rule:** capture an **`AR_TRACE`** window first and read `--summary` → `--leaks` (STEP 0
 above) before toggling any per-symptom flag. One windowed run classifies the bug (misdecode /
@@ -353,7 +355,8 @@ of one target → self-healing unwind naming the bad cfg line), and `[4210-wedge
 vblank spin stuck 4096 reads → prints which gate refused).)*
 
 ### `AR_MXCHECK=1` — entry M/X invariant check *(tier two: permanent regression guard)*
-Emitted in every function prologue (`ar_entry_mx_check`, see `emit_function.py`). Logs when a
+Emitted in every function prologue (`ar_entry_mx_check`; see
+`snesrecomp-go/internal/emitter/function.go`). Logs when a
 function is entered with `(m,x)` ≠ the variant it was compiled for. Catches **direct-call
 variant mismatches** = the emitter's static M/X analysis being wrong.
 *Limit:* can't catch a wrongly-*leaked* runtime flag (dispatch always picks the matching
@@ -401,8 +404,9 @@ transition is `$18==$27`).
 
 ### `[garbage-variant]` — split-immediate misdecode trap  *(default ON, closest-to-root, no oracle)*
 Printed by `ar_garbage_variant_trap` (`common_cpu_infra.c`), emitted into the prologue of any
-function variant the recompiler detected as a **split-immediate misdecode** at regen time
-(`_detect_garbage_variant`, `emit_function.py`): a variant whose decode contains a `BRK` at a PC
+function variant the recompiler detected as a **split-immediate misdecode** at regen time (see
+the garbage-evidence and equivalence analysis in `snesrecomp-go/internal/emitter/function.go`):
+a variant whose decode contains a `BRK` at a PC
 that a *valid sibling* variant decodes as **mid-instruction** — i.e. the `BRK` is the high byte of a
 16-bit immediate the wrong (narrow) width split off (`LDA #$0007`@m=0 → `LDA #$07`+`BRK`@m=1). Such
 a variant is **never legitimately reached**, so entering it means **a leaked m/x flag dispatched us
@@ -481,8 +485,8 @@ runtime-populated table, candidate for `indirect_call_table`/`indirect_dispatch`
 **SNES hardware-register space** (`$2000-$5FFF` — almost certainly NOT a real table; the "JSR
 (abs,X)" itself is likely a decode artifact from a wrong entry m/x, the same bug class as
 `$01:B898`), or **ROM** (prints the static table entry directly). Deduped per site, capped at 128
-unique sites. Reach for this whenever the `JSR (abs,X) SUPPRESSED` regen-report section lists a
-site you're trying to resolve.
+unique sites. Reach for this whenever a generated-source search such as
+`rg -n 'Call indirect SUPPRESSED' src/gen` lists a site you're trying to resolve.
 
 ### `AR_TRACE=<file.jsonl>` / `AR_TRACE_WATCH=<prefix>` — unified single-run trace  *(TIER ONE — start here; see §1 THE DEBUG LOOP)*
 The answer to "why did that take a dozen small runs that each missed a layer." ONE windowed run
@@ -536,7 +540,7 @@ stack drift (`S`), and a wrong data/program bank (`DB`/`PB`) are all visible on 
   `--vram 0000-00ff` (who wrote it) · `--wram <range>` · `--fn 8053` · `--around <seq> --window N`
   (causal neighbours — e.g. VMADD=$0000 at seq N immediately followed by the junk writes at N+1…).
 - **`--diagnose` + the `gen_meta.json` sidecar (2026-07-06): the auto-fix-suggester.** Run
-  **`tools/gen_metadata.py` once after every regen** (~1s: scrapes all registered func entries,
+  **`v2regen metadata` once after every regen** (~1s: scrapes all registered func entries,
   every decoder-created local label, tail-call-past-end sites, and the cfg directives into
   `saves/gen_meta.json`). `--diagnose` then joins runtime facts against static decode facts and
   prints, per dispatch-miss target: hit count + modal runtime (m,x) at the miss + tripwire-hidden
@@ -548,7 +552,8 @@ stack drift (`S`), and a wrong data/program bank (`DB`/`PB`) are all visible on 
 - **The lair-seal in one run:** `AR_TRACE_CH=call,vmadd,vram` then `--leaks` → the leak surfaces at
   `$8053` sites `$80BF/$80C2/$80C5` (m=1, expected m=0); the previous clean call `$80BC` calls
   `$9D4D` → `$9D4D` is the ambiguous-exit culprit. Fix = `exit_mx_at 039D4D 0 0`.
-- Choke points live in `ar_trace.c`/`.h` (build list `runner.cmake`), wired at `ar_entry_mx_check`
+- Choke points live in `ar_trace.c`/`.h` (build list
+  `snesrecomp-go/runtime/runner.cmake`), wired at `ar_entry_mx_check`
   (`cpu_state.h`, always-on — the `SNESRECOMP_TRACE` cpu_trace hooks are OFF in the fast build),
   ppu `WriteReg`/`$2139`, `WriteVramWord` (`common_rtl.c`), `dma_startDma`.
 - Caveat: the `func` `misdecode` flag only catches **entry-variant** mismatches (runtime m/x ≠ the
@@ -840,7 +845,12 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 
 ## 5. Static analysis (no run needed)
 
-- **`tools/gen_metadata.py`** — **gen/cfg metadata sidecar** *(2026-07-06)*. Run once after every
+Command names below use `v2regen <subcommand>` as shorthand. From the repository root, run
+them without installing anything as `go -C snesrecomp-go run ./cmd/v2regen <subcommand> ...`;
+`tools/regen.sh` builds the same CLI once into a temporary binary and reuses it for the full
+pipeline.
+
+- **`v2regen metadata`** — **gen/cfg metadata sidecar** *(2026-07-06)*. Run once after every
   regen (~1s). Scrapes `src/gen/*.c` + `recomp/*.cfg` into `saves/gen_meta.json`: every registered
   func entry (pc24 → variants), every decoder-created local label (pc24 → containing functions),
   every tail-call-past-end site, and all cfg directives. This is the static half of
@@ -856,7 +866,7 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   iterating the census against the regen until quiescent:
   1. regen (`tools/regen.sh` — now auto-runs the census and prints the **UNC delta**: every cfg
      round makes new code reachable whose pushes were always statically visible).
-  2. `tools/find_rts_webs.py --suggest` — emits shape-classified cfg candidates per uncovered
+  2. `go -C snesrecomp-go run ./cmd/v2regen rts-webs --rom ../ar.sfc --cfg-dir ../recomp --suggest` — emits shape-classified cfg candidates per uncovered
      push: auto-SKIPs `ret:`-of-construct targets (the B8C2 recursion class), suggests
      `func … entry_mx:m,0` with m inferred from which width decodes coherently. **Each suggestion
      still needs the §1 ⚠️ single-shot shape check by eye** — never blind-append.
@@ -869,7 +879,7 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   Truly runtime-computed dispatch (WRAM JMP vectors like `$6E20`/`$7920` in the event VM) cannot
   be closed statically — trace the vector writers once, then authorize via cfg.
 
-- **`tools/find_rts_webs.py`** — **pushed-continuation RTS-dispatch census** *(2026-07-04,
+- **`v2regen rts-webs`** — **pushed-continuation RTS-dispatch census** *(2026-07-04,
   built after §7.13's three-round hand-hunt)*. The town/scene engine nests this idiom
   arbitrarily deep and every layer used to cost one in-game repro + regen to find. The idiom
   is byte-stereotyped, so the whole class is statically enumerable in ONE pass: a continuation
@@ -977,7 +987,7 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   never yielding. It now also requires block-ring adjacency (same index or +1), so only a true
   tight re-read grows the counter. This did not change the static yield whitelist or pacing.
 
-- **`tools/opcode_diff.py`** — **Layer B**. Differential-tests the emitter's C output for each
+- **`v2regen opcode-diff`** — **Layer B**. Differential-tests the emitter's C output for each
   opcode against the Tom Harte SingleStepTests/65816 vectors (20k tests/opcode). Use when you
   suspect a single opcode's *semantics* (flags, decimal mode, addressing width). `--all`,
   `--opcodes`, `--mode native|emu`. 227 single-opcodes verified clean; gaps remain in
@@ -986,44 +996,42 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   > **A clean `opcode_diff` does NOT mean "no misdecodes."** It validates opcode *behavior* given
   > known flags, never the decoder's *width assumption* at a PC. Decode-time m/x drift is a
   > separate, whole-program problem — see §0 "What actually causes m/x drift."
-- **Proven-equivalent variant routing** *(2026-07-01, `tools/v2_regen.py` + `recompiler/v2/codegen.py`
-  + `recompiler/v2/emit_function.py`)* — the emit-truth prune pass (which drops a wrong-width
+- **Proven-equivalent variant routing** *(2026-07-01; Go implementation in
+  `snesrecomp-go/internal/emitter/function.go`, `internal/codegen/emitter.go`, and
+  `internal/regen/regen.go`)* — the emit-truth prune pass (which drops a wrong-width
   variant when a "clean" sibling proves the bytes are real code at that width) has to decide, for
   every PRUNED dispatch case, which SURVIVING variant to route callers to. The original heuristic
-  (`_nearest_survivor` in `codegen.py`) just picked whichever survivor was numerically "closest" in
+  (`nearestVariant` in `internal/codegen/emitter.go`) just picked whichever survivor was
+  numerically "closest" in
   `(m,x)` — a guess with no proof behind it, and the exact bug that misrouted `$01:B898`'s pruned
   `M1X0` dispatch case to the wrong-width `M1X1` body (see §7). The fix:
-  `emit_function._find_equivalent_variants` decodes a candidate variant against all three other
+  `findEquivalentVariants` decodes a candidate variant against all three other
   widths and does a byte-for-byte instruction-shape comparison (same `(pc16, mnemonic, operand
-  length)` at every shared PC) — a real proof, not a distance guess. `codegen._route_pruned_variant`
+  length)` at every shared PC) — a real proof, not a distance guess. `routeVariant`
   now checks, in order: (1) a variant PROVEN equivalent via this check, (2) the cfg-declared
   canonical width, (3) the `(1,1)` SNES-reset default, (4) the old distance heuristic as a last
-  resort. Run `tools/regen.sh` and read the console's `=== PROVEN-EQUIVALENT VARIANT ROUTING ===`
-  section: it lists every pruned-variant routing decision that came from tier 1, flagging any that
-  `<== DIFFERS FROM CANONICAL/DEFAULT GUESS` (i.e. a case the old heuristic would have gotten
-  wrong). **Not every wrong-width variant has a provable answer** — if `_find_equivalent_variants`
-  can't match a pruned variant's decode to ANY surviving sibling (a genuine divergence, not just
-  "never checked"), it's absent from the report and the routing falls back to tiers 2-4 exactly as
-  before; that's not a bug in the checker, it means the ROM genuinely has no safe substitute for
-  that dispatch case and the underlying caller-side leak needs its own investigation (`AR_CALLMX`/
-  `AR_MXCHECK` to find who dispatches there with the wrong width).
+  resort. `tools/regen.sh` logs the number of equivalences learned by each fixpoint pass. The Go
+  port intentionally has no detailed equivalent of the historical Python routing report, so
+  validate a suspect decision with `AR_CALLMX`/`AR_MXCHECK` and inspect the generated dispatch
+  switch. **Not every wrong-width variant has a provable answer** — if `findEquivalentVariants`
+  cannot match a pruned variant's decode to ANY surviving sibling (a genuine divergence, not just
+  "never checked"), routing falls back to tiers 2-4 exactly as before. That means the ROM has no
+  proven safe substitute for that dispatch case and the caller-side leak needs its own
+  investigation.
   > **Regen fixpoint-convergence bug (found + fixed 2026-07-01).** The regen loop is an iterative
   > fixpoint: each pass re-emits every bank, stopping once nothing new is found. Equivalence facts
   > discovered DURING a pass only get applied to dispatch-switch routing starting the NEXT pass —
   > but if the pass that discovers a new fact is ALSO the one where every other convergence
   > condition is satisfied, the loop broke immediately, writing that pass's (stale-by-one-pass)
-  > results as final. The end-of-run report (built separately, from the fully-accumulated data)
-  > showed the fix correctly; the actual generated `.c` code never got the corresponding
-  > re-emission. **Symptom: the console report says a routing case is "proven," but the generated
-  > code still has the old "nearest survivor" comment.** Fixed by requiring the convergence check to
-  > also confirm no new equivalence facts appeared during the pass before allowing the loop to
-  > break (`equivalences_grew_this_pass` in `tools/v2_regen.py`). If you ever see report/generated-code
-  > disagreement like this again for ANY report section (not just this one), suspect the same class
-  > of bug: something computed during a pass whose effect is deferred to the NEXT pass, combined
-  > with a convergence check that doesn't know to wait for it.
-- **`tools/link_audit.py`** — **Layer A**. Static call-graph audit over `src/gen`: orphan
+  > results as final. The historical Python report was built separately from the fully accumulated
+  > data and exposed the stale generated `.c`. The fix, preserved in the Go port, requires both
+  > `pruned == 0` and `equivalencesAdded == 0` before the loop in `internal/regen/regen.go` can
+  > converge. If generated code ever appears one pass behind newly learned analysis facts, suspect
+  > the same class of bug: something computed during a pass whose effect is deferred to the next
+  > pass, combined with a convergence check that does not wait for it.
+- **`v2regen link-audit`** — **Layer A**. Static call-graph audit over `src/gen`: orphan
   (dead-carved) functions, per-PC variant coverage, trap-site live/dead classification.
-- **`tools/stub_census.py`** — scans `src/gen` for unresolved trap markers
+- **`v2regen stub-census`** — scans `src/gen` for unresolved trap markers
   (`cpu_trace_unresolved_goto_trap`, `cpu_trace_dispatch_oob`). **Stubs are a hard build error** —
   resolve each, never allowlist.
 - **`tools/find_handler_chain.py`** — **object handler-chain finder** (the spawn-handler tool).
@@ -1303,9 +1311,9 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
 
 ## 8. Build & regen workflow
 
-- **Changed a runner source** (`src/*.c`, `third_party/snesrecomp/runner/src/*`) → **rebuild only**:
+- **Changed a runner source** (`src/*.c`, `snesrecomp-go/runtime/src/*`) → **rebuild only**:
   `cmake --build build -j8`.
-- **Changed the emitter** (`third_party/snesrecomp/recompiler/v2/*`) **or a cfg**
+- **Changed the emitter** (`snesrecomp-go/internal/{decoder,lowering,codegen,emitter}/*`) **or a cfg**
   (`recomp/*.cfg`) → **regenerate then rebuild**: `bash tools/regen.sh` (rewrites `src/gen/*.c`),
   then `cmake --build build -j8`. `src/gen` is generated — **never hand-edit it**; regenerate via
   `tools/regen.sh`.
@@ -1318,19 +1326,18 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
 - Constraints: **no stubs, ever** (a stub is a hard build error — close the recompiler gap).
   Edit only the emitter, runner, `src/main.c`, `src/actraiser_rtl.c`, `recomp/*.cfg`, and
   `tools/`. Commit/push only when asked.
-- **⚠️ Standing stub-lint reality (2026-07-17):** despite the policy above, `tools/regen.sh`
-  currently ends in `=== STUB LINT — 164 stub(s) ===` + exit 1 on EVERY run — this is the
-  repo's long-standing state (same failure recorded in `regen1.txt` from Jul 1), NOT a
-  regression from your cfg change. 68 unresolved indirect-dispatch sites (banks 00/01/03,
-  mostly wrong-width garbage-variant flow) have never been closed; their trap calls compile
-  to no-op inlines in non-trace builds, so `nm` on old objects cannot prove any generation
-  was ever clean. All 29 banks ARE emitted before the lint exits, so the recipe is:
-  `bash tools/regen.sh --no-tests` (expect exit 1), then the three steps regen.sh skipped —
-  `python3 snesrecomp/tools/v2_sync_funcs_h.py --cfg-dir recomp --out recomp/funcs.h`,
-  `python3 tools/gen_metadata.py`, `python3 tools/find_rts_webs.py > saves/rts_webs.txt` —
-  then build. Output is deterministic across `SNESRECOMP_JOBS` and Python 3.13/3.14; to check
-  whether a cfg change added stubs, diff the lint's `site=` lists between runs, not the
-  counts. Closing the 68 sites properly is open backlog.
+- **⚠️ Standing stub-lint reality (2026-07-18):** despite the policy above, the Go
+  `tools/regen.sh` currently completes generation and all sidecars, then exits 1 at the hard
+  stub census: 162 raw markers / 74 logical trap sites (20 goto, 54 indirect-dispatch). This
+  is inherited backlog, not a regression from the Go migration; the final pre-removal Python/Go
+  parity run reached the same 162-marker gate in both implementations. The ROM-derived comparison
+  archives were intentionally removed and are not distributed. The driver deliberately uses
+  `--allow-stubs` for the
+  emit stage so `funcs.h`, metadata, RTS census, and Go tests still run, then preserves the
+  nonzero final status. Run `bash tools/regen.sh --no-tests` (expect exit 1), then build
+  normally. Output is deterministic across `SNESRECOMP_JOBS`; to check whether a cfg change
+  added stubs, diff the census `site=` lists between runs, not just the counts. Closing these
+  sites properly remains open backlog.
 - **`hle_func` semantics (fixed 2026-07-10)**: the replaced function's REAL body is still
   decoded + fed through codegen during regen (its text discarded, the forwarding stub emitted
   instead) so callees reachable only through it keep getting auto-promoted/emitted. Before this,
@@ -1438,9 +1445,9 @@ AR_TRACE_WATCH              always-on anomaly capture (defaults into the run dir
                             window on hidden dispmiss / garbage-variant / m-x leak / watchdog hang
 trace_slice.py <dump> --diagnose   ranked verdicts + paste-ready cfg lines (needs gen_meta.json)
 AR_TRACE=<f> + HF_LO/HI     targeted windowed capture (beats watch mode when both set)
-tools/gen_metadata.py       ~1s static sidecar refresh (auto-run by regen.sh)
+v2regen metadata           static sidecar refresh (auto-run by regen.sh)
 AR_PIN=<par8>[,..]          generic PAR-code pinner (codes.txt catalogue -> instant debug cheat / state probe)
-find_rts_webs.py --suggest  shape-classified cfg candidates for uncovered continuation pushes
+v2regen rts-webs --suggest  shape-classified cfg candidates for uncovered continuation pushes
 regen.sh census delta       "NEW uncovered continuations" printed per regen — triage BEFORE playing
 [dispatch-recursion]        DEFAULT-ON: >24 live dispatches of one target -> self-healing unwind;
                             names a bad (mid-loop) cfg func registration to REMOVE
@@ -1466,13 +1473,13 @@ AR_DISPMISSALL=1       unregistered handler (grep -v 00896f)     (then register 
 AR_MXCHECK=1           emitter m/x analysis wrong on direct calls
 AR_WATCHOBJ=<addr>     who writes this object slot (also fires on indirect + DMA writes, tagged [wobj-ind]/[wobj-dma])
 AR_WATCH16=<val>       who writes this 16-bit value (also fires on indirect + DMA writes, tagged [watch16-ind]/[watch16-dma])
-regen report           "PROVEN-EQUIVALENT VARIANT ROUTING" section: wrong-width dispatch routing, proven not guessed (§5)
-regen report           "JSR (abs,X) SUPPRESSED" / "Rejected JSR/JSL" / "DISPATCH TARGET SUPPRESSED" sections: silent-drop audit (§7.9)
+AR_MXCHECK / AR_CALLMX + generated dispatch switch  verify wrong-width routing (§5)
+rg silent-drop markers in src/gen  `Call indirect SUPPRESSED` / unknown or invalid call targets (§7.9)
 AR_PERF=1              once-per-second game + draw budgets: [perf] fps/run-ms/gf/APU and [draw-perf] RtlDrawPpuFrame ms — separates host-bound (fps<60) from pacing (fps=60 but game crawls). CAVEAT: gf is NMI-driven, always 1:1 — it can NOT detect the pacing class; use the ring trick below
 AR_APUPROF=<ms>        per-frame stall attribution: any game frame >= <ms> (bare `1` = 8 ms default) prints [apuprof] splitting the frame into game-thread lockwait / SPC catchup (ms+cycles+calls) / $2140 handshake reads+writes / music-hook / upload HLE, plus schedlat (samples the last port write was scheduled past `produced`), pushes+loops (execution volume — loops = loop-header count; pushes alone under-report straight-line decompression), and audiowait-max (worst blocked AudioCallback acquire since last report — >16 ms = missed fill deadline = audible dropout). This is the tool that root-caused the 2026-07-16 transition dropouts: collapsed multi-hardware-frame map loads (loops 25k-75k vs ~3k normal) under the then-frame-wide main-loop APU lock starved the callback 12-23 ms; the frame-wide lock is now removed (fine-grained locks inside every APU path already serialize) — audiowait-max stays ~0 through 55 ms loading frames
 Shift+F9 mid-bug + ring exact-1/N-speed in one mode? quit/Shift+F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
 find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
-find_rts_webs.py       static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
+v2regen rts-webs       Go static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
 town_structs.py        decode a town's 128-slot structure-record array from any WRAM dump (F2 snapshot / exit dump): per-slot type/cell/state, bridge count, TABLE FULL marker (--all = all six towns; SEAMS town §7). Same 4-byte layout sits in SRAM at 0x600+town*0x200 (save-format §3.4)
 AR_BRIDGEFIX_DEBUG=1   [bridgefix] structure-system observability via the hle'd allocator+miracle hooks: bridge allocations, table-full events, slot steals, miracle hits on bridges; =2 = every allocation + every miracle record hit (src/actraiser_bugfixes.c)
 find_yield_helpers.py  yield-helper census BY SHAPE (pull/peek of caller frame -> object-field store) + every JSR site's continuation vs cfg; exit!=0 = unregistered = future silent soft-lock (§7.20). Run after ANY bank00.cfg handler work; --lines = paste-ready fixes
@@ -1495,7 +1502,7 @@ F3 + left click        freeze/inspect identity + manifest hints; drag panel; rig
 diff_seq.py            timing-independent oracle value-divergence (LOAD SRAM!)
 oracle-only pass       missing object/event (oracle writes nonzero, recomp never)
 find_handler_chain.py  unconverted object handlers (<seeds> or --tables for all action regions); see §11
-opcode_diff.py         single-opcode semantics vs Tom Harte
+v2regen opcode-diff    single-opcode semantics vs Tom Harte
 ```
 
 Object/spawn model & the spawn-handler crash class: **§11**. Object table = `$06A0` stride `$40`,

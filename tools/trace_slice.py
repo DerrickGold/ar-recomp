@@ -67,7 +67,7 @@ def fmt(e):
     return base
 
 def load_meta(explicit=None):
-    """gen_meta.json sidecar (tools/gen_metadata.py) — static decode facts."""
+    """gen_meta.json sidecar (`v2regen metadata`) — static decode facts."""
     import os
     here = os.path.dirname(os.path.abspath(__file__))
     cands = ([explicit] if explicit else []) + [
@@ -94,7 +94,7 @@ def _meta_note(meta, tgt, m, x, sources=()):
     bank, addr = tgt[:2], tgt[2:]
     suggest = f"func bank_{bank}_{addr} {addr} entry_mx:{m},{x}"
     if not meta:
-        return [f"SUGGESTED FIX:  {suggest}   (no gen_meta.json — run tools/gen_metadata.py to verify)"]
+        return [f"SUGGESTED FIX:  {suggest}   (no gen_meta.json — run v2regen metadata to verify)"]
     out = []
     # ── paired-resume-double guard (3rd hazard class, DEBUG.md §7.17 2026-07-07) ──
     # If the target is the RETURN address of a decoded JSR/JSL (site+3 / site+4)
@@ -184,7 +184,7 @@ def diagnose(ev, meta=None):
     gb    = [e for e in ev if e['ch'] == 'garbage']
     print(f"=== DIAGNOSE ({len(ev)} events, hf {ev[0]['hf']}..{ev[-1]['hf']}) ===")
     print(f"  m/x leaks: {len(leaks)} | dispatch-misses: {len(dm)} | garbage-variants: {len(gb)}"
-          + ("" if meta else "   [no gen_meta.json — run tools/gen_metadata.py for static joins]")
+          + ("" if meta else "   [no gen_meta.json — run v2regen metadata for static joins]")
           + "\n")
 
     if not leaks and not dm and not gb:

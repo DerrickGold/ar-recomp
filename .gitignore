@@ -92,6 +92,7 @@ saves/*
 tools/oracle/harte_cache/
 build/opcode_diff/
 snesref
+snesrecomp-go/testdata/baseline/
 
 # Prebuilt libretro cores (e.g. snes9x_libretro.dylib) — platform-specific
 # compiled binaries, not something we build or maintain; users fetch their own

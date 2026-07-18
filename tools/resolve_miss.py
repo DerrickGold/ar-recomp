@@ -191,7 +191,7 @@ def main():
     rom = load_rom(args.rom)
     meta = load_meta()
     if not meta:
-        print("note: no saves/gen_meta.json — guards degraded; run tools/gen_metadata.py",
+        print("note: no saves/gen_meta.json — guards degraded; run v2regen metadata",
               file=sys.stderr)
 
     misses = collect_misses(paths)

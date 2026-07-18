@@ -1,0 +1,14 @@
+No project-wide license has been granted for this directory.
+
+This module is derived from the historical snesrecomp project and includes a
+copied and modified C runtime. At the source snapshot used for this port, that
+project had not declared an overall license. Copyright remains with the
+respective authors and contributors.
+
+Nothing in this notice grants permission to use, copy, modify, or redistribute
+material beyond rights supplied by an applicable license on an individual
+file or dependency, or by law. See ATTRIBUTION.md and runtime/README.md for
+source lineage, acknowledgements, and inherited components.
+
+No game ROM, translated ROM code, game asset, or captured gameplay data is
+licensed or distributed by this module.

@@ -6,8 +6,8 @@ the downstream symptom.
 
 ## Pieces
 
-- `snesref.cpp` — macOS port of `third_party/snesrecomp/tools/snesref` (a
-  minimal SDL2 libretro frontend). Loads a libretro SNES core and emits
+- `snesref.cpp` — macOS minimal SDL2 libretro frontend, carried forward from
+  the historical recompiler oracle. Loads a libretro SNES core and emits
   per-frame WRAM-change JSONL. Build with `./build.sh` → `snesref`.
 - `snes9x_libretro.dylib` — the reference core (arm64, from buildbot.libretro.com).
 - recomp side — `AR_WRAM_TRACE` in `src/main.c` registers a per-frame

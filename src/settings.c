@@ -26,7 +26,7 @@ static int s_boot_display_mode;
 static bool s_boot_display_from_environment;
 
 /* g_ws_active / g_ws_extra are the canonical exported widescreen symbols
- * (snesrecomp/runner/src/widescreen.h). The framebuffer width is derived from
+ * (snesrecomp-go/runtime/src/widescreen.h). The framebuffer width is derived from
  * g_ws_extra exactly as main.c computes it, so we don't need main.c's
  * file-local g_snes_width. */
 extern bool g_ws_active;

@@ -29,6 +29,118 @@ void ActRaiser_YieldToHost(void) {
   swapcontext(&g_game_ctx, &g_host_ctx);
 }
 
+/* Keep ActRaiser's data-driven object-loop recovery policy out of the shared
+ * runtime. The shared dispatcher owns the generic BRA/BRL-follow mechanism;
+ * this project opts in only at the two ROM sites whose stack contract has
+ * been verified. */
+bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24) {
+  (void)target_pc24;
+  return source_pc24 == 0x008965u || source_pc24 == 0x008966u;
+}
+
+/* ActRaiser's inline RDNMI waits need coroutine pacing at a ROM-specific set
+ * of basic blocks. Returning -1 delegates ordinary reads to the shared SNES
+ * hardware model; a nonnegative result overrides the $4210 byte. */
+int ActRaiser_ReadRdnmi(Snes *snes) {
+  extern uint32_t g_ar_blk_ring[];
+  extern unsigned g_ar_blk_idx;
+  static bool yielding;
+
+  /* If the same block reads $4210 thousands of times without another traced
+   * block between reads, print the gate state once instead of leaving only a
+   * generic watchdog failure. */
+  {
+    static uint32_t wedge_blk, wedge_n;
+    static unsigned wedge_idx;
+    unsigned idx = g_ar_blk_idx;
+    uint32_t block = g_ar_blk_ring[(g_ar_blk_idx - 1) & 1023u];
+    if (block == wedge_blk && (idx == wedge_idx || idx == wedge_idx + 1)) {
+      if (++wedge_n == 4096) {
+        fprintf(stderr,
+                "[4210-wedge] blk=$%06X f=%d x4096 consecutive reads; "
+                "forceNmi=%d yielding=%d inNmi=%d nmiAvail=%d\n",
+                block, snes_frame_counter, snes->forceNmi ? 1 : 0,
+                yielding ? 1 : 0, snes->inNmi ? 1 : 0,
+                snes->nmiAvail ? 1 : 0);
+        fflush(stderr);
+      }
+    } else {
+      wedge_blk = block;
+      wedge_n = 1;
+    }
+    wedge_idx = idx;
+  }
+
+  /* These verified spin blocks can also execute from an interrupt context,
+   * where yielding is impossible. Report vblank immediately in that case so
+   * the emulated handler cannot deadlock inside its own wait. */
+  if (!(snes->forceNmi && !yielding)) {
+    static const uint32_t kSpinBlocksNoYield[] = {
+      0x019293, 0x0192AA, 0x0287F3, 0x029AC4,
+      0x02BEBF, 0x03B013, 0x03E535,
+    };
+    uint32_t block = g_ar_blk_ring[(g_ar_blk_idx - 1) & 1023u];
+    for (unsigned i = 0;
+         i < sizeof(kSpinBlocksNoYield) / sizeof(kSpinBlocksNoYield[0]); i++) {
+      if (block == kSpinBlocksNoYield[i]) {
+        static int warned;
+        if (!warned) {
+          warned = 1;
+          fprintf(stderr,
+                  "[4210] non-yieldable-context spin at $%06X f=%d "
+                  "-> fast-exit (bit7=1, unpaced)\n",
+                  block, snes_frame_counter);
+        }
+        return 0x82;
+      }
+    }
+  }
+
+  if (snes->forceNmi && !yielding && !getenv("AR_NO4210YIELD")) {
+    static const uint32_t kSpinBlocks[] = {
+      0x019293, /* intro/menu/effect wait */
+      0x0192AA, /* effect-loop wait */
+      0x0287F3, /* fade/transition helper */
+      0x029AC4, /* boot sound-init wait */
+      0x02BEBF, /* sound-code wait */
+      0x03B013, /* long-form wait */
+      0x03E535, /* sound-upload bracket wait */
+    };
+    uint32_t block = g_ar_blk_ring[(g_ar_blk_idx - 1) & 1023u];
+    for (unsigned i = 0; i < sizeof(kSpinBlocks) / sizeof(kSpinBlocks[0]); i++) {
+      if (block != kSpinBlocks[i])
+        continue;
+      if (getenv("AR_VBLOG")) {
+        extern uint8 g_ram[0x20000];
+        extern Ppu *g_ppu;
+        static int last_frame = -1;
+        if (snes_frame_counter != last_frame) {
+          last_frame = snes_frame_counter;
+          extern uint16 ar_cpu_S(void);
+          extern uint8 ar_cpu_PB(void);
+          fprintf(stderr,
+                  "[vbl] f=%d bright=%d fblank=%d bgmode=%02x main=%02x "
+                  "$18=%02x $19=%02x time$E6=%02x%02x HP=%02x PB=%02x "
+                  "S=%04x blk=%06X\n",
+                  snes_frame_counter, g_ppu->inidisp & 0xf,
+                  (g_ppu->inidisp & 0x80) ? 1 : 0, g_ppu->bgmode,
+                  g_ppu->screenEnabled[0], g_ram[0x18], g_ram[0x19],
+                  g_ram[0xE7], g_ram[0xE6], g_ram[0x1D], ar_cpu_PB(),
+                  ar_cpu_S(), block);
+        }
+      }
+      yielding = true;
+      ActRaiser_YieldToHost();
+      yielding = false;
+      return 0x82;
+    }
+    /* Clear/post/ack reads do not yield and report no vblank. */
+    return 0x02;
+  }
+
+  return -1;
+}
+
 /* A 65816 hardware interrupt is register-transparent to the interrupted
  * code: RTI restores P/PC/PB and a well-behaved handler save/restores
  * A/X/Y/D/DB. We invoke the recompiled NMI/IRQ handlers as plain host-C

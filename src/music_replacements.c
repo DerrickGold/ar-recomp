@@ -13,7 +13,7 @@
 #define strncasecmp _strnicmp
 #endif
 
-/* Engine seams (snesrecomp/runner). The APU mutex is recursive (SDL), so the
+/* Engine seams (snesrecomp-go/runtime). The APU mutex is recursive (SDL), so the
  * handlers below may take it even when the caller already holds it. */
 extern void RtlApuLock(void);
 extern void RtlApuUnlock(void);

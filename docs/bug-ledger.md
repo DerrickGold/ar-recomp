@@ -26,7 +26,8 @@ the current debugging process; this file is the case law.
    oracle screenshots (WRAM oracle is blind here).
 4. **Stack-ABI / PHP-PLP split across the recomp function boundary** — the `$8915` object loop's
    `PHP`/`PLP` straddle the `$8915`/`$8966` carve; mis-tracked stack baseline leaked 1 byte/frame
-   (fixed in `codegen.py` `_emit_return`). *Find:* trace-build stack-drift tripwire
+   (fixed in `emitReturn` in `snesrecomp-go/internal/codegen/emitter_extra.go`). *Find:*
+   trace-build stack-drift tripwire
    (`AR_DRIFT_FRAME`/`AR_DRIFT_LOG`).
 5. **BRK inline-syscall continuation** — BRK is a 2-byte syscall that must continue at PC+2;
    the decoder now trial-validates the continuation.
@@ -56,10 +57,10 @@ the current debugging process; this file is the case law.
    `cpu->S` across the whole chain. The targets decode at the RTS's `(m,x)`; the chain's terminal
    continuation (`$9195`'s `REP` → m=0 → its own normal RTS via the `$7D1B`-restored stack) is the
    true exit, so exit-mx analysis reports the correct m=0 to callers. For `$9156`:
-   `rts_dispatch 9B59 9B22 9B4A 9195`. Implemented across `cfg_loader.py` (parse →
-   `BankCfg.rts_dispatch`), `tools/v2_regen.py` (folds into the `indirect_dispatch` map with an
-   `'rts_trick'` marker), `decoder.py` (in-function successors + `insn.rts_dispatch`; exit-mx
-   analysis skips the dispatching RTS), `emit_function.py` (the `switch`/`goto` at the `Return`).
+   `rts_dispatch 9B59 9B22 9B4A 9195`. The current Go path is
+   `snesrecomp-go/internal/config/config.go` (parse), `internal/emitter/bank.go` (dispatch
+   authorization), `internal/decoder/decoder.go` (in-function successors), and
+   `internal/emitter/function.go` (the `switch`/`goto` at the return).
    *Proactive (Option A):* the targets are all the **immediate-push signature** (`$9195`
    `LDA #$9194;PHA`, `$9B22`/`$9B4A` `LDY #imm;PHY`; target = imm+1). An autoroute that detects
    `LD{A,X,Y} #imm`/`PEA #imm` feeding a reachable `RTS`/`RTL` (coherent-code guard, like
@@ -78,10 +79,11 @@ the current debugging process; this file is the case law.
    `ret:<pc16>`** — when present, the PHA jump-table is emitted as a call-with-return (dispatch each
    handler, no synthetic frame push since the `PHY` already pushed the return, then `goto` the
    in-function `ret` label), keeping the continuation in-function (no `func`-split). For `$B898`:
-   `indirect_dispatch B8C0 16 idx:X tables:B8D0 ret:B8C2` (bank01.cfg). Implemented: `snes65816.py`
-   (`dispatch_ret` slot), `cfg_loader.py` (`ret:` parse), `decoder.py` (PHA block: `+1` the table
-   words = handler-1 idiom, non-terminal, decode handlers + ret block as successors at the call's
-   m/x), `codegen.py` `_emit_indirect_dispatch` (`is_call_ret` branch). NOTE the decoder `+1`: the
+   `indirect_dispatch B8C0 16 idx:X tables:B8D0 ret:B8C2` (bank01.cfg). The current Go path is
+   `snesrecomp-go/internal/cpu65816/decoder.go` (`DispatchReturn`),
+   `internal/config/config.go` (`ret:` parse), `internal/decoder/decoder.go` (PHA block: `+1` the
+   table words = handler-1 idiom, non-terminal, decode handlers + ret block as successors at the
+   call's m/x), and `internal/emitter/dispatch.go` (call-return branch). NOTE the decoder `+1`: the
    table stores `handler-1` (RTS adds one); without it the labels are off by one.
 6. **Unconverted spawn/state object handler** — an object's per-frame `$12` handler is reached
    only by **runtime dispatch** (from spawn-data records or the `JSR $8657` yield idiom), so the
@@ -154,8 +156,9 @@ the current debugging process; this file is the case law.
    *Concrete cases:* `$01:B898` (session-long chase, root-caused via `AR_MXCHECK_BT` real
    backtrace + direct instruction-shape comparison), `$00:8465`, `$00:845F`, `$00:A3E1`,
    `$02:AB05`, and 11 more addresses found by the same static check in one pass (see §5's
-   proven-equivalent-routing entry). *Find:* the regen report's `PROVEN-EQUIVALENT VARIANT
-   ROUTING` section, or `AR_MXCHECK`/`AR_CALLMX` catching the wrong-width entry live. *Fix:* the
+   proven-equivalent-routing entry). *Find:* `AR_MXCHECK`/`AR_CALLMX` catching the wrong-width
+   entry live, followed by inspection of the generated dispatch switch and the Go
+   `findEquivalentVariants`/`routeVariant` implementation. *Fix:* the
    proven-equivalence pass now routes automatically wherever it CAN prove an answer; for the
    residual cases with no provable target, a manual cfg `entry_mx:` pin (like `$01:B898`'s
    `entry_mx:0,0`) is still needed — the static prover can only report "no answer," not invent one.
@@ -165,11 +168,13 @@ the current debugging process; this file is the case law.
    (abs,X)` gets its call site severed entirely (`Call indirect SUPPRESSED`, "cfg-required-
    dispatch-or-kill"); a dispatch-table entry whose target lands in a cfg `data_region` gets
    dropped from that ONE table slot; a `JSL`/`JSR` target the decoder judged out-of-LoROM (garbage
-   operand past an unrelated `RTS`) gets its call skipped. All three are loud at REGEN time (the
-   console report names every site) but completely silent at RUNTIME — no trap, no log, nothing to
-   catch with the misdecode toolkit (§2), because nothing wrong-width ever dispatches; the call
-   simply doesn't happen. *Find:* grep the regen console output for the address range you suspect,
-   or `AR_INDIRLOG=1` for a specific suppressed `JSR (abs,X)` site (classifies the table base as
+   operand past an unrelated `RTS`) gets its call skipped. They are completely silent at RUNTIME —
+   no trap, no log, nothing to catch with the misdecode toolkit (§2), because nothing wrong-width
+   ever dispatches; the call simply doesn't happen. *Find:* search generated C with
+   `rg -n 'Call indirect SUPPRESSED|Call: target unknown|not a valid LoROM code address' src/gen`.
+   The Go port no longer emits the historical Python console report for data-region-suppressed
+   table entries, so inspect the suspect generated switch against cfg `data_region` ranges. Use
+   `AR_INDIRLOG=1` for a specific suppressed `JSR (abs,X)` site (classifies the table base as
    WRAM/genuine-table, SNES-hardware-register-space/likely-decode-artifact, or ROM/genuine-table).
    *Fix:* author `indirect_call_table`/`indirect_dispatch` cfg directives once the real table shape
    is known (§7.7's `indirect_dispatch … ret:` directive is the same mechanism, just for the
@@ -295,7 +300,7 @@ the current debugging process; this file is the case law.
       dispatch arbitrarily deep. When a sim subsystem silently no-ops: dispatch_log
       `found:0` first (§ the heuristic above), then expect the fix to be `rts_dispatch`
       (stateful mid-loop continuation) not `func`, then re-run with `AR_RTSDISP_MISS=1`
-      and expect one more nested layer. **`tools/find_rts_webs.py` (§5) now enumerates
+      and expect one more nested layer. **`v2regen rts-webs` (§5) now enumerates
       every dispatch site + continuation in the class statically — run it FIRST to see
       the whole backlog and register in one batch, instead of one regen per layer; it
       can't give RAM-pointer handler targets (still need one runtime `found:0`), but it
@@ -321,13 +326,13 @@ the current debugging process; this file is the case law.
       `CFC7` (from a `$7F:xxxx` stream), and for a non-`$7F` byte dispatches it through table
       `$CD6F` (`$CD5E: LDY #$CD6B; PHY; PHX; ASL; TAX; LDA $01CD6F,X; PLX; PHA; RTS`). Byte 3's
       handler `$CDCC` sets `$001E,X` (walk counter) + `LDA #$3; STA $0012,X` (state=3). But
-      `find_rts_webs.py` had flagged `PHA;RTS @01:cd6b` UNCOVERED, and the handlers `$CDCC`
+      `v2regen rts-webs` had flagged `PHA;RTS @01:cd6b` UNCOVERED, and the handlers `$CDCC`
       etc. had **0 emitted blocks** — so the dispatch silently no-op'd and state=3 never wrote.
     - Fix: `indirect_dispatch CD6A 18 idx:A tables:CD6F ret:CD6C` (bank01.cfg) — same idx:A /
       PHX-PLX / ret shape as `B8C0`. People now walk.
     - **Two lessons:** (1) a frozen-but-spawned actor whose per-frame processor DOES run but
       the state never advances = look for a script-command dispatch the state-machine needs;
-      the script is byte-stereotyped so `find_rts_webs.py` finds it. (2) The engine's animation
+      the script is byte-stereotyped so `v2regen rts-webs` finds it. (2) The engine's animation
       pacing is data-driven per-script-step, NOT a fixed delay — the "17x too fast" was the
       whole script being consumed at 1 byte/frame instead of honoring per-step delays that the
       script-command handlers install. Tools added: `AR_SIMWALK`, `AR_SIMDEV2`.

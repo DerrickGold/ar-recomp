@@ -8,7 +8,7 @@
  *
  *   snesref <core.dylib> <rom.sfc>
  *
- * Ported from third_party/snesrecomp/tools/snesref/frontend.cpp:
+ * Ported from the historical snesrecomp snesref frontend:
  *   - Win32 LoadLibrary/GetProcAddress -> dlopen/dlsym
  *   - MMX-specific trace addresses -> configurable full-WRAM range
  *   - added SNESREF_HEADLESS (no window, run uncapped) for CI/deterministic

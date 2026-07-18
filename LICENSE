@@ -15,9 +15,13 @@ It does **not** cover, and grants no rights to:
   generate them yourself, locally, from your own legally obtained ROM, and
   they remain subject to the original game's copyright regardless of this
   license.
-- `third_party/snesrecomp` (the recompiler engine, a separate repository)
-  and its own dependencies, which carry their own licensing terms
-  independent of this one.
+- `snesrecomp-go/`, a Go reimplementation of the historical Python
+  `snesrecomp` plus its copied C runtime and adapted documentation. The source
+  repository had not declared an overall license at the snapshot used for the
+  port. See `snesrecomp-go/ATTRIBUTION.md` and
+  `snesrecomp-go/runtime/README.md` for provenance.
+- `tools/oracle/libretro.h`, which contains and remains covered by the
+  libretro project's own MIT license notice.
 
 MIT License
 -----------

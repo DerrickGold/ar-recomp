@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Regen pipeline driver for ActRaiserRecomp.
 #
-# Regenerates src/gen/*.c from the recomp/bank_*.cfg configs over a verified
-# ar.sfc, splitting large banks into stable parallel-build translation units,
-# then syncs recomp/funcs.h.
+# Regenerates src/gen/*.c with the Go recompiler from recomp/bank_*.cfg over a
+# verified ar.sfc, then refreshes every generated sidecar. Python is not a
+# dependency of this normal regeneration path.
 #
 # Flags:
-#   --no-tests   skip the framework test suite (default: run it).
+#   --no-tests   skip the Go toolchain test suite (default: run it).
 #   -h | --help  this message.
 #
 # Run from anywhere — paths resolve relative to this script's location.
@@ -27,11 +27,9 @@ done
 cd "$ROOT"
 
 ROM="ar.sfc"
-TESTS="snesrecomp/tests/run_tests.py"
-
-PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
-if [ -z "$PYTHON" ]; then
-  echo "regen.sh: no python3/python interpreter found on PATH" >&2
+GO="${GO:-$(command -v go || true)}"
+if [ -z "$GO" ]; then
+  echo "regen.sh: no Go toolchain found on PATH" >&2
   exit 1
 fi
 
@@ -42,22 +40,27 @@ fi
 
 step() { echo; echo "=== $* ==="; }
 
-# Parallel emit (v2_regen --jobs, reads SNESRECOMP_JOBS): the bank-emit Pool
-# has existed upstream but defaulted to 1 worker, so regens ran sequential.
-# Default to the physical core count; override with SNESRECOMP_JOBS=N (1 = old
-# sequential behavior, useful when bisecting emit-order-sensitive bugs).
-export SNESRECOMP_JOBS="${SNESRECOMP_JOBS:-$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || sysctl -n hw.physicalcpu 2>/dev/null || echo 4)}"
+# Build once and reuse the same binary for every pipeline stage. mktemp keeps
+# host architecture binaries out of the repository.
+GO_TOOL="$(mktemp "${TMPDIR:-/tmp}/actraiser-v2regen.XXXXXX")"
+trap 'rm -f "$GO_TOOL"' EXIT
+step "Building Go recomp toolchain"
+"$GO" -C snesrecomp-go build -o "$GO_TOOL" ./cmd/v2regen
+
+# Per-function workers avoid the old bank-level imbalance where bank $00 held
+# 1,512 of 1,748 initial entries. Override with SNESRECOMP_JOBS=N when needed.
+SNESRECOMP_JOBS="${SNESRECOMP_JOBS:-$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || sysctl -n hw.physicalcpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 
 step "Regenerating banks (SNESRECOMP_JOBS=$SNESRECOMP_JOBS)"
-"$PYTHON" snesrecomp/tools/v2_regen.py --rom "$ROM" \
-    --cfg-dir recomp --out-dir src/gen --prefix actraiser
+"$GO_TOOL" regen --rom "$ROM" --cfg-dir recomp --out-dir src/gen \
+    --jobs "$SNESRECOMP_JOBS" --allow-stubs
 
 step "Syncing funcs.h"
-"$PYTHON" snesrecomp/tools/v2_sync_funcs_h.py --cfg-dir recomp \
-    --out recomp/funcs.h
+"$GO_TOOL" sync-funcs --cfg-dir recomp --out recomp/funcs.h
 
 step "Refreshing gen metadata sidecar (trace_slice --diagnose static join)"
-"$PYTHON" tools/gen_metadata.py
+"$GO_TOOL" metadata --gen-dir src/gen --cfg-dir recomp \
+    --out saves/gen_meta.json
 
 step "RTS-web census (uncovered pushed-continuations; see DEBUG.md §5)"
 # Every cfg round can make NEW code reachable whose continuation pushes were
@@ -65,7 +68,8 @@ step "RTS-web census (uncovered pushed-continuations; see DEBUG.md §5)"
 # 2026-07-06: the census had flagged it since forever — nobody re-ran it).
 # Keep a copy per regen and print the DELTA of newly-uncovered entries so
 # they get triaged (shape-check per DEBUG.md §1 ⚠️ — do NOT blind-register).
-"$PYTHON" tools/find_rts_webs.py > saves/rts_webs.txt 2>/dev/null || true
+"$GO_TOOL" rts-webs --rom "$ROM" --cfg-dir recomp \
+    > saves/rts_webs.txt 2>/dev/null || true
 if [ -f saves/rts_webs.prev.txt ]; then
   NEW_UNC=$(grep '\[UNC\]' saves/rts_webs.txt | grep -Fxv -f <(grep '\[UNC\]' saves/rts_webs.prev.txt) || true)
   if [ -n "$NEW_UNC" ]; then
@@ -79,9 +83,17 @@ else
 fi
 cp saves/rts_webs.txt saves/rts_webs.prev.txt
 
+step "Hard stub census"
+STUB_STATUS=0
+"$GO_TOOL" stub-census --gen-dir src/gen || STUB_STATUS=$?
+
 if [ "$RUN_TESTS" -eq 1 ]; then
-  step "Framework tests"
-  "$PYTHON" "$TESTS"
+  step "Go recomp toolchain tests"
+  "$GO" -C snesrecomp-go test ./...
 fi
 
 step "Done"
+if [ "$STUB_STATUS" -ne 0 ]; then
+  echo "regen.sh: generated outputs and sidecars are complete, but the hard stub gate failed" >&2
+  exit "$STUB_STATUS"
+fi

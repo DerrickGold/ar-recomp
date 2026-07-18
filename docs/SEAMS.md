@@ -235,8 +235,9 @@ region-gated early-exit (`LDA $19; CMP #7`/`#8` at the top decides whether to ev
 body at `$018170`), then a further gate at `$018010-$018024` (checks DP `$347`, DP `$A1`, and long
 address `$7F9750` — meaning ALL THREE must be in specific states to reach the deep body) before
 finally running `JSL $1B1C7` and the actual per-building update logic. This function ALSO drives
-the `$2920`/`$208E`/`$B420` `JSR (abs,X)` tables flagged as `SUPPRESSED` in the regen report (see
-`DEBUG.md` §7.9) — `$B420` is a genuine static ROM table (5 real entries, confirmed by reading the
+the `$2920`/`$208E`/`$B420` `JSR (abs,X)` tables marked `Call indirect SUPPRESSED` in generated C
+(`rg -n 'Call indirect SUPPRESSED' src/gen`; see `DEBUG.md` §7.9) — `$B420` is a genuine static
+ROM table (5 real entries, confirmed by reading the
 bytes), but `$2920`/`$208E` resolve to SNES hardware-register space (`$2000-$5FFF`) under LoROM,
 meaning either they're populated at runtime via DMA (not yet confirmed) or the `JSR (abs,X)`
 instructions decoding there are themselves decode artifacts from a wrong entry width — not yet
@@ -876,7 +877,8 @@ the `$F99A` table (plus a handler if it's a new behavior). The handler set is cl
 
 **Known-unmapped sub-seam (risk):** ~45 sites across `$03:E0xx–$F9xx` (inside the event handlers'
 own bodies) dispatch via **runtime WRAM JMP vectors `($6E20)` and `($7920)`** — currently emitted
-as trap stubs (regen report "UNRESOLVED INDIRECT DISPATCH"). No event exercised them yet in play;
+as trap stubs (listed by `go -C snesrecomp-go run ./cmd/v2regen stub-census --gen-dir ../src/gen`).
+No event exercised them yet in play;
 whichever event first walks into one will `[dispatch-oob]` loudly. Closing this needs the vector
 WRITERS traced once (who stores to `$6E20`/`$7920`), then a cfg/indirect-vector authorization —
 it cannot be closed statically.

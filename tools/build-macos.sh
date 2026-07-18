@@ -2,8 +2,7 @@
 # Build ActRaiser Recompiled on macOS.
 #
 # Prerequisites:
-#   brew install cmake sdl2 ninja python3
-#   ln -s ../snesrecomp snesrecomp  (or clone as sibling)
+#   brew install cmake sdl2 ninja go
 #   bash tools/regen.sh --no-tests  (needs ar.sfc at repo root)
 #
 # Usage:
@@ -23,9 +22,8 @@ for arg in "$@"; do
   esac
 done
 
-if [ ! -d "snesrecomp" ]; then
-  echo "Error: snesrecomp/ not found. Create a symlink:"
-  echo "  ln -s third_party/snesrecomp snesrecomp"
+if [ ! -f "snesrecomp-go/runtime/runner.cmake" ]; then
+  echo "Error: the bundled snesrecomp-go runtime is incomplete."
   exit 1
 fi
 

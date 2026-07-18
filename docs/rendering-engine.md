@@ -566,8 +566,8 @@ Facts the next design must satisfy (all trace/disasm-proven above):
 ### 13.1 Promoted HUD host overlay (2026-07-15)
 
 The HUD-scale implementation is deliberately a presentation seam rather than a
-second SNES tilemap rewrite. The reusable runner contract is documented in
-[`HOST_OVERLAY_EXTRACTION.md`](../third_party/snesrecomp/docs/HOST_OVERLAY_EXTRACTION.md):
+second SNES tilemap rewrite. Its reusable runner contract is implemented by the
+bundled runtime's widescreen/PPU interfaces:
 
 - `PpuSetWidescreenHudSplit` identifies the live BG3 status scanlines and their
   source boundaries. Action uses `height=40`, `left=0..87`, `center=88..167`,
@@ -649,7 +649,7 @@ comment for the full key/gate grammar. Planes are capability tiers:
   promotion — that was evaluated and rejected as a paste-path special
   case.): canvas-space texture override rendered through
   the live matrix. The engine API (`PpuBindMode7OverlaySurface` +
-  `PpuSetMode7Override`, snesrecomp ppu.c) samples the entry's ARGB art at
+  `PpuSetMode7Override`, `snesrecomp-go/runtime/src/ppu.c`) samples the entry's ARGB art at
   the per-pixel canvas coordinates inside `PpuDrawBackground_mode7`, so
   rotation, zoom, per-scanline HDMA warps, windows, field wrap, and INIDISP
   brightness all apply. Output goes to a 4x-supersampled overlay surface

@@ -35,8 +35,8 @@ the distinction matters:
   new expression of the same functionality.
 - A **static recompilation** mechanically translates the ROM's actual 65816
   machine code into equivalent C, one function at a time, via an automated tool
-  ([snesrecomp](https://github.com/DerrickGold/snesrecomp), our fork of an
-  existing SNES static recompiler). The output is a direct, literal translation
+  ([`snesrecomp-go`](snesrecomp-go/README.md), the bundled Go reimplementation
+  of the historical SNES static recompiler). The output is a direct, literal translation
   of the original binary's logic — not new authorship. That generated code is
   copyrighted-ROM-derived and is **never committed to this repo** (see below);
   it's regenerated locally by everyone who builds this project, from their own
@@ -174,14 +174,15 @@ ActRaiserRecomp/
 │   └── gen/                   # ★ regenerated C output — NOT committed (you
 │                                 produce this locally via tools/regen.sh)
 ├── third_party/
-│   ├── snesrecomp/            # our fork of the recompiler engine + runtime
-│   │                             (separate git repo, gitignored here — clone
-│   │                             it yourself, see Build below)
 │   └── stb/                   # vendored single-file libs (stb_image,
 │                                 stb_vorbis) — tracked, no install step
+├── snesrecomp-go/             # standalone concurrent Go recomp toolchain
+│   ├── docs/                  # per-project integration/config/runtime guides
+│   └── runtime/               # bundled C runtime + SNES hardware model
 ├── tools/
 │   ├── regen.sh                # the regen pipeline — run this after cloning
-│   ├── rom_info.py, lzss_decompress.py, opcode_diff.py, ... — analysis tools
+│   ├── rom_info.py, lzss_decompress.py, ... — game/trace analysis tools
+│   ├── compatibility launchers        # not used by build/regen; use cmd/v2regen
 │   └── oracle/                 # differential-testing harness vs. real snes9x
 ├── tests/                      # golden-image + replay regression tests
 └── saves/                      # runtime output only (dumps, snapshots,
@@ -207,39 +208,39 @@ UI.
 - **A C11 compiler** (clang or gcc)
 - **SDL2** (development package/headers, not just the runtime library) — the
   only external library this links against
-- **Python 3**, standard library only — the regen pipeline (`tools/regen.sh`
-  and everything it calls in `third_party/snesrecomp/`) imports nothing
-  outside the stdlib, so there's no `pip install` step
+- **Go 1.24+** — the normal regeneration pipeline is implemented entirely in
+  Go and has no third-party Go modules
 - **git**
+
+Python is optional for unrelated forensic/triage scripts; it is not a build,
+regeneration, runtime, or opcode-validation dependency.
+
+To reuse the bundled toolchain from another game project, start with
+[`snesrecomp-go/README.md`](snesrecomp-go/README.md) and its
+[`project integration guide`](snesrecomp-go/docs/PROJECT_INTEGRATION.md).
 
 **macOS** (verified — this is the only platform actually built/tested so far):
 
 ```sh
-brew install cmake sdl2 python3
+brew install cmake sdl2 go
 ```
 
 **Linux** (Debian/Ubuntu — same CMake setup, untested by this project but
 should work; the build has no OS-specific code beyond standard SDL2/POSIX):
 
 ```sh
-sudo apt install build-essential cmake libsdl2-dev python3
+sudo apt install build-essential cmake libsdl2-dev golang-go
 ```
 
-**Windows**: the underlying `snesrecomp` engine supports MSVC (see
-`third_party/snesrecomp/runner/runner.cmake`), but this specific project
+**Windows**: the bundled runtime has MSVC-oriented support (see
+`snesrecomp-go/runtime/runner.cmake`), but this specific project
 hasn't been built on Windows yet — no `.vcxproj`/CI verifying it works here.
 If you get it building, a PR documenting the steps would help.
 
 ### Steps
 
-1. **Clone this repo**, then clone the recompiler engine into `third_party/`
-   (it's a separate repo, not a submodule — a `snesrecomp -> third_party/snesrecomp`
-   symlink at the repo root already points here):
-
-   ```sh
-   git clone https://github.com/DerrickGold/snesrecomp third_party/snesrecomp
-   cd third_party/snesrecomp && git checkout actraiser-main && cd ../..
-   ```
+1. **Clone this repo.** The Go recompiler and C runtime are included; there is
+   no secondary toolchain checkout or symlink to create.
 
 2. **Supply your own ROM.** Place a verified `ar.sfc` (see the checksums above)
    at the repo root.
@@ -648,9 +649,11 @@ contributing:
   commentary that *tell* the recompiler what to do. They don't contain any
   translated ROM logic themselves, similar to how a symbol map or linker
   script isn't itself a copy of a binary.
-- All hand-written runtime/tooling source (`src/*.c` outside `src/gen/`,
-  everything under `tools/`, the `third_party/snesrecomp` engine fork) —
-  original engineering, not ROM-derived.
+- All hand-written project runtime/tooling source (`src/*.c` outside
+  `src/gen/`, everything under `tools/`) — original engineering, not
+  ROM-derived. `snesrecomp-go/` also contains no ROM-derived game data, but it
+  has separate upstream provenance and licensing status documented in
+  `snesrecomp-go/ATTRIBUTION.md`.
 - `docs/`, `DEBUG.md` — our own analysis and documentation. Short illustrative
   disassembly snippets in service of explaining architecture are fine and
   normal for this kind of documentation; wholesale reproduction of ROM data
@@ -667,6 +670,9 @@ This repo's original source (runtime, tooling, `recomp/*.cfg`, docs) is
 ActRaiser ROM or anything derived from it — see the LICENSE file's Scope
 section, and "What can (and can't) be committed here" above.
 
-The recompiler engine, [`snesrecomp`](https://github.com/DerrickGold/snesrecomp)
-(cloned separately into `third_party/`, not distributed with this repo), is
-currently unlicensed — no license has been declared there yet.
+The bundled `snesrecomp-go/` is a Go reimplementation of the historical Python
+recompiler and includes its copied C runtime and adapted documentation. That
+source repository had not declared an overall license at the snapshot used for
+the port. The module is therefore explicitly excluded from this repository's
+MIT grant; see `snesrecomp-go/ATTRIBUTION.md`, its runtime provenance README,
+and the LICENSE Scope section.

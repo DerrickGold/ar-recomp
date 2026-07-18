@@ -7,6 +7,8 @@
 
 void ActRaiserDrawPpuFrame(void);
 void RunOneFrameOfGame(void);
+int ActRaiser_ReadRdnmi(Snes *snes);
+bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
 
 /* BG-only widescreen presentation helpers. These never replace the game's OAM
  * builder or normal tile streamers. The Sky Palace pair temporarily decodes a

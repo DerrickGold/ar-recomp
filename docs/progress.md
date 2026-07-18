@@ -246,13 +246,13 @@ it go stale — same discipline as the playability tables.
 | → generated C output (`src/gen/*.c`) | 2,130,680 lines | `wc -l src/gen/*.c` (after `tools/regen.sh`) |
 | Hand-written game runtime (`src/*.c`/`*.h`, excl. shared engine) | 3,253 lines | `wc -l src/*.c src/*.h` |
 | Bank coverage | 29 of 32 possible SNES banks | `ls recomp/bank*.cfg \| wc -l` |
-| Recompiled functions (unique ROM addresses) | 2,467 | `grep -c "^    { 0x" src/gen/dispatch_v2.c` |
-| Recompiled functions (× m/x width variants) | 4,634 | `python3 tools/link_audit.py` |
-| Static reachability | 4,634/4,634 (100%) — 0 orphans, 0 unreferenced variants | `python3 tools/link_audit.py` |
-| Unresolved trap sites | 75 logical sites / 167 variant emissions: 21 goto sites (55 variants) + 54 indirect-oob sites (112 variants) | `python3 tools/stub_census.py` |
-| Opcode correctness vs. Tom Harte 65816 reference vectors | 227/227 opcodes clean, 14,528/14,528 vectors passed | `python3 tools/opcode_diff.py --all` |
-| Framework regression suite (`tests/v2/`) | 189/201 passed; three split-bank tests added and passing, same 12 historical failures | `python3 third_party/snesrecomp/tests/v2/run_tests.py` |
-| Framework regression suite (top-level) | still blocked by the `lint_codegen_widths` gate (5 violations, aborts the loop; last clean measure 57/58 on 2026-07-03) | `python3 third_party/snesrecomp/tests/run_tests.py` — see `DEBUG.md`/ask a fresh session to look at it |
+| Recompiled functions (unique ROM addresses) | 2,480 | `grep -c "^    { 0x" src/gen/dispatch_v2.c` |
+| Recompiled functions (× m/x width variants) | 4,657 | `go -C snesrecomp-go run ./cmd/v2regen link-audit --gen-dir ../src/gen --src-dir ../src --runtime-dir runtime/src` |
+| Static reachability | 4,657/4,657 (100%) — 0 orphans, 0 unreferenced variants | same Go link-audit command |
+| Unresolved trap sites | 74 logical sites / 165 variant emissions: 20 goto sites (53 variants) + 54 indirect-oob sites (112 variants) | `go -C snesrecomp-go run ./cmd/v2regen stub-census --gen-dir ../src/gen` |
+| Opcode correctness vs. Tom Harte 65816 reference vectors | 227/227 opcodes clean, 14,528/14,528 vectors passed | `go -C snesrecomp-go run ./cmd/v2regen opcode-diff --cache-dir ../tools/oracle/harte_cache --runtime-dir runtime/src --all` |
+| Go recompiler unit/regression suite | all packages passing | `go -C snesrecomp-go test ./...` |
+| Generated-output layout | 83 generated C files in the current local build; generated files and comparison archives are ROM-derived and are not distributed | `find src/gen -maxdepth 1 -name '*.c' -type f \| wc -l` |
 
 ## What "done" looks like
 
