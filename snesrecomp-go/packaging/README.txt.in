@@ -11,20 +11,21 @@ WHAT YOU NEED
 Your own game ROM: a ".sfc" file. Nothing else.
 
 
-HOW TO PLAY  (two easy steps)
------------------------------
+HOW TO PLAY
+-----------
 1. Put your ROM (the ".sfc" file) into THIS folder, next to this README.
 
-2. Start "@SNESBUILD_RUN_SCRIPT@":
+2. Build the game once - start "@SNESBUILD_RUN_SCRIPT@":
       macOS    - double-click  run-build.command
       Windows  - double-click  run-build.bat
       Linux    - run           ./run-build.sh
 
-   The first time takes a few minutes while it builds the game. When it
-   finishes, the game starts on its own.
+   This takes a few minutes. It only needs to be done one time.
 
-That's it. After the first build, a "run-game" file appears in this folder.
-From then on, just start that to play right away - no waiting.
+3. Play - when the build finishes, a "run-game" file appears in this folder
+   (run-game.command on macOS, run-game.bat on Windows, run-game.sh on Linux).
+   Open it to start the game. Use it every time you want to play; it starts
+   right away, with no waiting.
 
 
 IF SOMETHING GOES WRONG
@@ -49,8 +50,8 @@ folders beside it. Anything you don't add simply stays original.
 
 WHAT THE FOLDERS ARE
 --------------------
-- run-build.*     the button you press to build and play the first time.
-- run-game.*      created after building; press it to play again instantly.
+- run-build.*     press this once to build the game.
+- run-game.*      created by the build; press it to play, every time.
 - utils/          the build tools and game files. You can ignore this.
 
 Licensing and credits are in utils/LICENSE and utils/ATTRIBUTION.md.

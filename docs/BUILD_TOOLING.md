@@ -153,19 +153,18 @@ licensed; Linux ships no SDL (no single portable redistributable) and the run
 script points the user at their package manager.
 
 **How a user runs it:** unpack the archive, drop the ROM in the folder next to
-`README.txt`, and run `run-build`. It builds the game via
+`README.txt`, and run `run-build` **once**. It builds the game via
 `snesbuild all --hermetic --allow-stubs` (regen + compile with the bundled
-toolchain and SDL, `--root utils`), then does the two things that make repeat
-play trivial:
+toolchain and SDL, `--root utils`), then does the two things that make play
+trivial:
 
 1. **Copies the finished game to the root** — the executable and, on
    macOS/Windows, its bundled SDL library — so the playable result sits in the
    top folder, not buried in a build directory.
-2. **Generates a `run-game` script** (`.command`/`.bat`/`.sh`) next to it, then
-   launches the game once. From then on the user just opens `run-game` to play
-   instantly with no rebuild. (That generated script is created locally, so it
-   is not Gatekeeper-quarantined — only the downloaded `run-build` triggers the
-   one-time right-click-Open on macOS.)
+2. **Generates a `run-game` script** (`.command`/`.bat`/`.sh`) next to it. The
+   user opens `run-game` to play — every time, with no rebuild. (That generated
+   script is created locally, so it is not Gatekeeper-quarantined — only the
+   downloaded `run-build` triggers the one-time right-click-Open on macOS.)
 
 `snesbuild` locates the bundled Zig and SDL beside its own executable
 (`utils/tools/`), and the built game links SDL via an rpath
@@ -175,8 +174,7 @@ working directory set to `utils/` so the game finds `config.ini` and
 `game-assets/`. This whole flow is verified end-to-end: a bundle extracted to
 an empty directory outside the repo, with the dev machine's Zig/SDL/homebrew
 removed from the environment, builds from the ROM, deposits the game and
-`run-game` in the root, and both first-play and `run-game` replay launch the
-game.
+`run-game` in the root, and the generated `run-game` script launches the game.
 
 A post-package **leak gate** re-extracts every archive and fails packaging if
 an unreviewed top-level entry appears (only `README.txt`, the run script, and

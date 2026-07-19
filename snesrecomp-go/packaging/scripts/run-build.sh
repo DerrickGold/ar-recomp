@@ -70,5 +70,5 @@ EOF
 chmod +x "$PLAY"
 
 echo
-echo "Build complete - this was a one time process. Now you can open `run-game.bat` to start the game"
+echo "Build complete - this was a one time process. Now you can run ./run-game.sh to start the game."
 exit 0

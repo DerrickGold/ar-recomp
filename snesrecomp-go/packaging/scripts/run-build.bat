@@ -56,7 +56,7 @@ set "PLAY=%ROOT%\run-game.bat"
 >>"%PLAY%" echo "%%~dp0%BIN_NAME%" "%%~dp0%ROM%" --config config.ini
 
 echo.
-echo Build complete - this was a one time process. Now you can open `run-game.bat` to start the game
+echo Build complete - this was a one time process. Now you can open run-game.bat to start the game.
 :end
 echo.
 pause

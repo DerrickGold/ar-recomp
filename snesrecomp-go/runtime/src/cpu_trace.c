@@ -1211,6 +1211,29 @@ void cpu_trace_block_watch_check(CpuState *cpu, uint32_t pc24) {
 }
 
 void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
+    /* LOCAL DIAGNOSTIC FIX (2026-07-19): populate the lightweight block ring
+     * here too. It is written ONLY by the SNESRECOMP_TRACE=0 inline twin in
+     * cpu_trace.h (the SNESRECOMP_TRACE = 0 branch), so in a trace build the
+     * ring stayed all-zero. ActRaiser's project-side $4210 coroutine-yield gate
+     * (src/actraiser_rtl.c ActRaiser_ReadRdnmi) reads this ring
+     * UNCONDITIONALLY to identify the spinning block and match it against
+     * kSpinBlocks[]; with an empty ring the block always read $000000, never
+     * matched, the vblank yield never fired, and the trace build wedged at
+     * frame 0 ("[4210-wedge] blk=$000000 f=0 x4096 consecutive reads").
+     * That is why the trace build regressed since the gf2200 hunt: the $4210
+     * yield machinery was added after it was last used. Keep in sync with the
+     * cpu_trace.h inline. */
+    {
+        extern uint32_t g_ar_blk_ring[]; extern uint32_t g_ar_blk_aux[];
+        extern uint16_t g_ar_blk_s[];    extern unsigned g_ar_blk_idx;
+        unsigned _i = g_ar_blk_idx++ & 1023u;
+        g_ar_blk_ring[_i] = pc24;
+        g_ar_blk_aux[_i] = ((uint32_t)(cpu->x_flag & 1) << 17)
+                         | ((uint32_t)(cpu->m_flag & 1) << 16) | (cpu->X & 0xFFFFu);
+        g_ar_blk_s[_i] = cpu->S;
+        { extern void ar_strace_block(uint32_t, uint16_t, int, int);
+          ar_strace_block(pc24, cpu->S, cpu->m_flag & 1, cpu->x_flag & 1); }
+    }
     /* AR_MTRACE=1: log runtime m/x-flag at key bank_03_8053 PCs, host-frame
      * gated (AR_HF_LO/HI) — pinpoint where m=1 leaks into $80C9 (VMADD setup). */
     if (pc24==0x038053||pc24==0x03805E||pc24==0x03806E||pc24==0x038085||

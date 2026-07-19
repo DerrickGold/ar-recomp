@@ -505,22 +505,70 @@ func flagExpression(register ir.Reg) string {
 	return map[ir.Reg]string{ir.N: "cpu->_flag_N", ir.V: "cpu->_flag_V", ir.C: "cpu->_flag_C", ir.ZF: "cpu->_flag_Z"}[register]
 }
 
+// emitRTSDispatchGuard emits the RTS-trick dispatch switch for a `rts_dispatch`
+// site: read the popped target off the stack and `goto` the matching in-function
+// label instead of taking a host return.
+//
+// WIDTH-EXACTNESS GATE (2026-07-19). The `goto` targets are labels named
+// L_<pc>_M<m>X<x>, where m/x are the widths THIS INSTRUCTION was DECODED at —
+// they are not a function of the runtime flags. Control, however, arrives here
+// from a hardware RTS whose runtime m/x can differ from the decode. Jumping into
+// a sibling-width decode is silent memory corruption, not a mispredict: the
+// target block's PHA/PLA/PHY/PLY are emitted at the decoded width, so an 8-bit
+// push gets popped as 16-bit (or vice versa) and the emulated stack shifts by one
+// byte. Downstream, the next RTS reads its return address misaligned and
+// dispatches to a plausible-but-wrong PC.
+//
+// Observed in ActRaiser: $03:9EF4's guard entered L_9E32_M0X0 while runtime m=1,
+// so $9E39's PLA popped 2 bytes for the 1-byte PHA at $9E09 (odd +1 drift), after
+// which $9EF4 popped the $A0D1 jump-table base as a return address.
+//
+// So: only take the goto when the runtime widths match the labels' decode widths;
+// otherwise fall through to the generic host return, which is exactly what an
+// unregistered target already does. This is upstream snesrecomp's invariant
+// ("a combination without an exact AOT body ... never borrows a sibling decoded at
+// a different operand width", mstan 03e389e) minus their LLE interpreter tier —
+// our generic return is the fallback instead, by design.
+//
+// Each case collects the target's decoded variants and emits per-variant
+// runtime m/x guards, refusing to jump into any wrong-width sibling.
 func emitRTSDispatchGuard(instruction *cpu65816.Instruction, local map[decoder.DecodeKey]struct{}) []string {
-	m, x := instruction.M&1, instruction.X&1
+	bank := byte(instruction.Address >> 16)
+	site := instruction.Address & 0xffffff
 	lines := []string{
 		"{ uint16 _rts_s = cpu->S;",
 		"  uint16 _rts_t = (uint16)(((cpu_read8(cpu, 0x00, (uint16)(_rts_s + 2)) << 8) | cpu_read8(cpu, 0x00, (uint16)(_rts_s + 1))) + 1);",
+		"  int _rts_mx = ((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1); (void)_rts_mx;",
 		"  switch (_rts_t) {",
 	}
 	for _, entry := range instruction.DispatchEntries {
-		target := decoder.DecodeKey{PC: uint32(byte(instruction.Address>>16))<<16 | entry&0xffff, M: m, X: x}
-		if _, found := local[target]; !found {
-			lines = append(lines, fmt.Sprintf("    /* case 0x%04X: %s not decoded in this variant -> default */", uint16(entry), label(target)))
+		targetPC := uint32(bank)<<16 | entry&0xffff
+		byMX := map[uint8]decoder.DecodeKey{}
+		for m := uint8(0); m < 2; m++ {
+			for x := uint8(0); x < 2; x++ {
+				key := decoder.DecodeKey{PC: targetPC, M: m, X: x}
+				if _, found := local[key]; found {
+					byMX[(m<<1)|x] = key
+				}
+			}
+		}
+		if len(byMX) == 0 {
+			lines = append(lines, fmt.Sprintf("    /* case 0x%04X: no variant decoded in this function -> default */", uint16(entry)))
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("    case 0x%04X: cpu->S = (uint16)(_rts_s + 2); goto %s;", uint16(entry), label(target)))
+		lines = append(lines, fmt.Sprintf("    case 0x%04X:", uint16(entry)))
+		for _, mx := range []uint8{0, 1, 2, 3} {
+			key, found := byMX[mx]
+			if !found {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("      if (_rts_mx == %d) { cpu->S = (uint16)(_rts_s + 2); goto %s; }", mx, label(key)))
+		}
+		lines = append(lines,
+			"      if (getenv(\"AR_RTSDISP_MISS\"))",
+			fmt.Sprintf("        fprintf(stderr, \"[rts_dispatch_width] site=$%06X popped target=$%04X: runtime m=%%d x=%%d has no decoded body -> generic return (refused wrong-width goto)\\n\", (int)cpu->m_flag, (int)cpu->x_flag);", site, uint16(entry)),
+			"      break;  /* wrong-width -> normal return */")
 	}
-	site := instruction.Address & 0xffffff
 	return append(lines,
 		"    default:",
 		"      if (getenv(\"AR_RTSDISP_MISS\"))",
