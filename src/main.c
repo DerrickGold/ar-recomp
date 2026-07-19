@@ -1052,7 +1052,7 @@ typedef struct HudPresentationChunk {
   int inspector_x_bias;
 } HudPresentationChunk;
 
-enum { kHudPresentationChunkCapacity = 5 };
+enum { kHudPresentationChunkCapacity = 7 };
 
 static void AddHudPresentationChunk(HudPresentationChunk *chunks,
                                     int *count,
@@ -1099,9 +1099,14 @@ static int BuildHudPresentationChunks(
 
   int tex_extra = (g_snes_width - 256) / 2;
   int height = g_ppu->wsHudSplitHeight;
-  int lower_y = g_ppu->wsHudLeftOnlyY;
-  if (lower_y > height) lower_y = height;
-  int upper_h = lower_y;
+  int player_y = g_ppu->wsHudPlayerRowY;
+  int enemy_y = g_ppu->wsHudLeftOnlyY;
+  if (player_y > height) player_y = height;
+  if (enemy_y > height) enemy_y = height;
+  if (player_y > enemy_y) player_y = enemy_y;
+
+  /* Band 1: top row (ACT/TIME/SCORE) — 3-way left/center/right split. */
+  int upper_h = player_y;
   int upper_dh = ScaledHudPixels(upper_h, scale_y);
 
   SDL_Rect src = { tex_extra, 0, g_ppu->wsHudLeftEnd, upper_h };
@@ -1134,41 +1139,80 @@ static int BuildHudPresentationChunks(
       (SDL_Rect){ g_ppu->wsHudRightStart, 0, src.w, src.h }, dst,
       kInspectorPresentation_HudBg, g_ppu->extraLeftRight);
 
-  if (lower_y < height) {
+  /* Band 2: player row (PLAYER health + magic-scroll) — left+right split
+   * at wsHudRightStart so health pips stay left-anchored and scroll tiles
+   * stay right-anchored regardless of HP level. */
+  if (player_y < enemy_y) {
+    int mid_h = enemy_y - player_y;
+    int mid_dh = ScaledHudPixels(mid_h, scale_y);
+    int mid_dy = viewport.y + ScaledHudPixels(player_y, scale_y);
+
     src.x = tex_extra;
-    src.y = lower_y;
-    src.w = 256;
-    src.h = height - lower_y;
+    src.y = player_y;
+    src.w = g_ppu->wsHudRightStart;
+    src.h = mid_h;
     dst.x = viewport.x;
-    dst.y = viewport.y + ScaledHudPixels(lower_y, scale_y);
+    dst.y = mid_dy;
     dst.w = ScaledHudPixels(src.w, scale_x);
-    dst.h = ScaledHudPixels(src.h, scale_y);
+    dst.h = mid_dh;
     AddHudPresentationChunk(
         chunks, &count, g_hud_bg_texture, src,
-        (SDL_Rect){ 0, lower_y, src.w, src.h }, dst,
+        (SDL_Rect){ 0, player_y, src.w, src.h }, dst,
+        kInspectorPresentation_HudBg, -g_ppu->extraLeftRight);
+
+    src.x = tex_extra + g_ppu->wsHudRightStart;
+    src.w = 256 - g_ppu->wsHudRightStart;
+    dst.x = viewport.x + viewport.w - ScaledHudPixels(src.w, scale_x);
+    dst.w = ScaledHudPixels(src.w, scale_x);
+    AddHudPresentationChunk(
+        chunks, &count, g_hud_bg_texture, src,
+        (SDL_Rect){ g_ppu->wsHudRightStart, player_y, src.w, src.h }, dst,
+        kInspectorPresentation_HudBg, g_ppu->extraLeftRight);
+  }
+
+  /* Band 3: enemy row — full-width left-anchored (boss health spans the
+   * entire screen). */
+  if (enemy_y < height) {
+    int low_h = height - enemy_y;
+    src.x = tex_extra;
+    src.y = enemy_y;
+    src.w = 256;
+    src.h = low_h;
+    dst.x = viewport.x;
+    dst.y = viewport.y + ScaledHudPixels(enemy_y, scale_y);
+    dst.w = ScaledHudPixels(src.w, scale_x);
+    dst.h = ScaledHudPixels(low_h, scale_y);
+    AddHudPresentationChunk(
+        chunks, &count, g_hud_bg_texture, src,
+        (SDL_Rect){ 0, enemy_y, src.w, src.h }, dst,
         kInspectorPresentation_HudBg, -g_ppu->extraLeftRight);
   }
 
-  /* Action's selected-magic icon and simulation's hourglass are separately
-   * validated four-slot OAM signatures. Keep either promoted HUD icon four
+  /* Action's selected-magic icon (4 OAM, 16x16), simulation's hourglass
+   * (4 OAM, 16x16), and Sky Palace's magic icon (2 OAM, 16x8) are
+   * separately validated OAM signatures. Keep the promoted HUD icon four
    * native pixels before the scaled right group. */
   const PpuOverlayCapture *obj_capture =
       &g_ppu->overlayCaptures[kPpuOverlaySource_Obj];
   if (g_hud_obj_texture && obj_capture->oamCount == 4) {
-    int x = (g_ppu->oam[0] & 0xff) | ((g_ppu->highOam[0] & 1) << 8);
-    int y = g_ppu->oam[0] >> 8;
+    int first = obj_capture->oamFirst;
+    int x = (g_ppu->oam[first * 2] & 0xff) |
+            ((g_ppu->highOam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;
+    int y = g_ppu->oam[first * 2] >> 8;
+    int icon_w = 16;
+    int icon_h = 16;
     if (x < 256) {
-      SDL_Rect obj_src = { tex_extra + x, y, 16, 16 };
+      SDL_Rect obj_src = { tex_extra + x, y, icon_w, icon_h };
       SDL_Rect obj_dst = {
         viewport.x + viewport.w - right_dest_w -
             ScaledHudPixels(20, scale_x),
         viewport.y + ScaledHudPixels(y, scale_y),
-        ScaledHudPixels(16, scale_x),
-        ScaledHudPixels(16, scale_y),
+        ScaledHudPixels(icon_w, scale_x),
+        ScaledHudPixels(icon_h, scale_y),
       };
       AddHudPresentationChunk(
           chunks, &count, g_hud_obj_texture, obj_src,
-          (SDL_Rect){ x, y, 16, 16 }, obj_dst,
+          (SDL_Rect){ x, y, icon_w, icon_h }, obj_dst,
           kInspectorPresentation_HudObj, 0);
     }
   }

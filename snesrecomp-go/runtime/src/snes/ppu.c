@@ -229,17 +229,21 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom) {
 }
 
 void PpuSetWidescreenHudSplit(Ppu *ppu, uint8_t height, uint8_t left_end,
-                              uint8_t right_start, uint8_t left_only_y) {
-  // See ppu.h. Equal bounds select the two-way left/right form; reversed or
-  // empty bounds are invalid and disable the split.
+                              uint8_t right_start, uint8_t player_row_y,
+                              uint8_t left_only_y) {
   if (left_end == 0 || left_end > right_start) height = 0;
-  if (!height)
+  if (!height) {
+    player_row_y = 0;
     left_only_y = 0;
-  else if (left_only_y > height)
-    left_only_y = height;
+  } else {
+    if (player_row_y > height) player_row_y = height;
+    if (left_only_y > height) left_only_y = height;
+    if (player_row_y > left_only_y) player_row_y = left_only_y;
+  }
   ppu->wsHudSplitHeight = height;
   ppu->wsHudLeftEnd = left_end;
   ppu->wsHudRightStart = right_start;
+  ppu->wsHudPlayerRowY = player_row_y;
   ppu->wsHudLeftOnlyY = left_only_y;
 }
 
@@ -692,12 +696,24 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
       win.nr == 1 && !(win.bits & 1)) {
     if (ppu->wsHudLeftOnlyY < ppu->wsHudSplitHeight &&
         y >= ppu->wsHudLeftOnlyY) {
-      /* Lower left-only form: preserve the complete source row as one chunk.
-       * This is useful for status rows whose content crosses an upper band's
-       * left/center boundary (for example a long enemy-health bar). */
+      /* Lowest band (enemy row): full-width left-anchored so a long
+       * enemy-health bar renders without a gap. */
       win.edges[0] = -hud_extra;
       win.edges[1] = 256 - hud_extra;
       ws_bias[0] = hud_extra;
+    } else if (ppu->wsHudPlayerRowY < ppu->wsHudLeftOnlyY &&
+               y >= ppu->wsHudPlayerRowY) {
+      /* Middle band (player row): left+right two-way split so a long
+       * player-health bar stays left-anchored while magic-scroll tiles
+       * on the right stay right-anchored. */
+      win.nr = 3;
+      win.bits = 0x02;
+      win.edges[0] = -hud_extra;
+      win.edges[1] = ppu->wsHudRightStart - hud_extra;
+      win.edges[2] = ppu->wsHudRightStart + hud_extra;
+      win.edges[3] = 256 + hud_extra;
+      ws_bias[0] = hud_extra;
+      ws_bias[2] = -(int16)hud_extra;
     } else if (ppu->wsHudLeftEnd == ppu->wsHudRightStart) {
       /* Two-way form: no centered HUD group. Source [0,split) hugs the left
        * presentation edge and [split,256) hugs the right. */

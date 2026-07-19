@@ -635,6 +635,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   uint8 hud_split_height = 0;
   uint8 hud_split_left_end = 0;
   uint8 hud_split_right_start = 0;
+  uint8 hud_player_row_y = 0;
   uint8 hud_left_only_y = 0;
   /* True when the current wide world has finite horizontal bounds. The PPU
    * still owns the fixed centering budget; this policy narrows the live left
@@ -860,20 +861,22 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       g_settings.display_mode != kDisplayMode_43 &&
       g_settings.display_mode != kDisplayMode_WideRaw) {
     if (ActRaiser_IsActionMapGroup(map_group)) {
-      /* BG3's effective screen placement puts tilemap row 2 at y=20-27. That
-       * row contains PLAYER health on the left and magic-scroll tiles on the
-       * right, so it must retain the three-way split. Row 3 (ENEMY and its
-       * long health bar) begins at y=28; anchor only that lower band left. */
+      /* Three horizontal bands in the 40px action HUD:
+       *   y= 0-19  ACT/TIME/SCORE — 3-way left/center/right
+       *   y=20-27  PLAYER health + magic-scroll — left+right at rightStart
+       *   y=28-39  ENEMY health — full-width left-only (boss spans 256px) */
       hud_split_height = kActRaiserActionHudHeight;
       hud_split_left_end = kActRaiserActionHudLeftEnd;
       hud_split_right_start = kActRaiserActionHudRightStart;
-      hud_left_only_y = kActRaiserActionHudLowerRowY;
+      hud_player_row_y = kActRaiserActionHudPlayerRowY;
+      hud_left_only_y = kActRaiserActionHudEnemyRowY;
     } else if (map_group == kActRaiserMapGroup_NonAction &&
                map_number >= kActRaiserSimulationTown_First &&
                map_number <= kActRaiserNonActionMap_SkyPalace) {
       hud_split_height = kActRaiserSimulationHudHeight;
       hud_split_left_end = kActRaiserSimulationHudSplit;
       hud_split_right_start = kActRaiserSimulationHudSplit;
+      hud_player_row_y = kActRaiserSimulationHudHeight;
       hud_left_only_y = kActRaiserSimulationHudHeight;
     }
   }
@@ -881,7 +884,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   /* The HUD split is persistent PPU policy state, unlike the layer-clamp
    * arrays reset by PpuSetExtraSpace. Clear it explicitly on every mode flip
    * path before optionally enabling this frame's prototype. */
-  PpuSetWidescreenHudSplit(g_ppu, 0, 0, 0, 0);
+  PpuSetWidescreenHudSplit(g_ppu, 0, 0, 0, 0, 0);
   if (wide) {
     PpuSetExtraSpace(g_ppu, (uint8)g_ws_extra);
     PpuSetWidescreenLayerClamp(g_ppu, clamp);
@@ -897,7 +900,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (hud_split_height)
       PpuSetWidescreenHudSplit(g_ppu, hud_split_height,
                                hud_split_left_end, hud_split_right_start,
-                               hud_left_only_y);
+                               hud_player_row_y, hud_left_only_y);
     if (hud_split_height)
       PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3,
                            0, 0, kActRaiserAuthenticWidth, hud_split_height,
@@ -1030,7 +1033,8 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
   if (g_ppu->wsHudSplitHeight == kActRaiserActionHudHeight &&
       g_ppu->wsHudLeftEnd == kActRaiserActionHudLeftEnd &&
       g_ppu->wsHudRightStart == kActRaiserActionHudRightStart &&
-      g_ppu->wsHudLeftOnlyY == kActRaiserActionHudLowerRowY &&
+      g_ppu->wsHudPlayerRowY == kActRaiserActionHudPlayerRowY &&
+      g_ppu->wsHudLeftOnlyY == kActRaiserActionHudEnemyRowY &&
       ActRaiser_IsActionMapGroup(map_group)) {
     for (int slot = 0; slot < kActRaiserHudObjOamCount; slot++) {
       int index = slot * 2;
@@ -1050,6 +1054,37 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
              map_group == kActRaiserMapGroup_NonAction &&
              map_number >= kActRaiserSimulationTown_First &&
              map_number <= kActRaiserNonActionMap_SkyPalace) {
+    if (map_number == kActRaiserNonActionMap_SkyPalace) {
+      /* Sky Palace magic icon shifts OAM slots when dialog sprites appear;
+       * scan for the 4-sprite signature instead of hardcoding a slot. */
+      int found_slot = -1;
+      for (int s = kActRaiserSkyPalaceMagicOamFirst; s <= 124; s++) {
+        int ok = 1;
+        for (int i = 0; i < kActRaiserSkyPalaceMagicOamCount && ok; i++) {
+          int index = (s + i) * 2;
+          uint8 y = (uint8)(g_ppu->oam[index] >> 8);
+          uint8 attr = (uint8)(g_ppu->oam[index + 1] >> 8);
+          uint8 expected_y = i < 2
+              ? kActRaiserHudObjUpperY : kActRaiserHudObjLowerY;
+          uint8 expected_attr = (i & 1)
+              ? kActRaiserSkyPalaceMagicRightAttr
+              : kActRaiserSkyPalaceMagicLeftAttr;
+          if (y != expected_y || attr != expected_attr)
+            ok = 0;
+        }
+        if (ok) { found_slot = s; break; }
+      }
+      if (found_slot < 0)
+        return;
+      if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
+                               0, 0, kActRaiserAuthenticWidth,
+                               kActRaiserSimulationHudHeight,
+                               kPpuOverlayFlag_RemoveFromGame))
+        PpuSetOverlayOamRange(g_ppu, found_slot,
+                              kActRaiserSkyPalaceMagicOamCount);
+      return;
+    }
+    /* Town sim: hourglass is a 4-sprite animated icon in OAM slots 0-3. */
     uint8 upper_tile = (uint8)g_ppu->oam[1];
     if (upper_tile < kActRaiserSimulationHourglassFirstUpperTile ||
         upper_tile >= kActRaiserSimulationHourglassFirstUpperTile +

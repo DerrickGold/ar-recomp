@@ -192,6 +192,7 @@ struct Ppu {
   uint8_t extraLeftCur, extraRightCur, extraLeftRight, extraBottomCur;
   // Widescreen HUD split (see PpuSetWidescreenHudSplit). 0 height = off.
   uint8_t wsHudSplitHeight, wsHudLeftEnd, wsHudRightStart;
+  uint8_t wsHudPlayerRowY;
   uint8_t wsHudLeftOnlyY;
   // Widescreen BG3 widen (see PpuSetWidescreenBg3Widen). Scanlines >= this let
   // BG3 (layer 2) extend into the side margins like BG1/BG2 instead of staying
@@ -425,7 +426,8 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom);
 // fall back to centered. Like the extra-space setters, callers re-apply per
 // frame.
 void PpuSetWidescreenHudSplit(Ppu *ppu, uint8_t height, uint8_t left_end,
-                              uint8_t right_start, uint8_t left_only_y);
+                              uint8_t right_start, uint8_t player_row_y,
+                              uint8_t left_only_y);
 
 // Let BG3 (layer 2) render into the widescreen side margins on scanlines
 // >= from_y, instead of being clamped to the authentic 256-wide region. Pass

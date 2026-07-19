@@ -571,9 +571,11 @@ bundled runtime's widescreen/PPU interfaces:
 
 - `PpuSetWidescreenHudSplit` identifies the live BG3 status scanlines and their
   source boundaries. Action uses `height=40`, `left=0..87`, `center=88..167`,
-  `right=168..255`, with scanlines 28 onward anchored wholly left for the
-  ENEMY label/bar. Simulation uses a two-way `0..167` / `168..255` split and
-  no center group.
+  `right=168..255`, with three horizontal bands: the upper band (y 0-19)
+  three-way splits ACT/TIME/SCORE+magic, the player-health band (y 20-27)
+  two-way left+right at x 168, and the enemy-health band (y 28-39) anchors
+  full-width left (boss health spans 256px). Simulation uses a two-way
+  `0..167` / `168..255` split and no center or multi-band groups.
 - While that policy is active, ActRaiser requests the generic BG3 overlay
   capture rectangle `(0,0)-(256,40)`. The normal 2bpp sampler writes its
   authentic, unsplit status pixels into the source-indexed overlay buffer; the
@@ -586,7 +588,12 @@ bundled runtime's widescreen/PPU interfaces:
   the generic OBJ overlay buffer; every other OBJ remains on the normal sprite
   path. Earlier render-scoped OAM coordinate mutation is gone, so emulated
   state, savestates, future DMA, and game logic remain authentic.
-- Simulation's hourglass is also slots 0-3. The Fillmore snapshot at
+- Simulation's hourglass (town maps 1-6) is also slots 0-3. Sky Palace's
+  selected-magic icon is a separate OAM capture path: the game dynamically
+  allocates its 4 OAM sprites (dialog Yes/No icons can push the magic icon to
+  higher slots), so the host scans OAM from slot 6 onward for the signature
+  (y `$0B`/`$13`, attrs `$39`/`$79` mirrored pairs) rather than hardcoding a
+  slot index. The Fillmore snapshot at
   `runs/20260716-172322/snapshots/snap_00_gf1378` identifies fixed/overlay
   record 23 (`$083E`, live frame pointer `$01:DD4B`) and its OAM signature:
   left/right x `$94/$9B`, upper/lower y `$0B/$13`, and output attributes
