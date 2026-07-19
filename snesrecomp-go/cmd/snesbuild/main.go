@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/DerrickGold/snesrecomp-go/internal/project"
+	"github.com/DerrickGold/snesrecomp-go/internal/toolchain"
 )
 
 var version = "dev"
@@ -42,6 +43,8 @@ func run(args []string) error {
 		return runBuild(args[1:])
 	case "all":
 		return runAll(args[1:])
+	case "toolchain":
+		return runToolchain(args[1:])
 	case "doctor":
 		return runDoctor(args[1:])
 	case "version", "--version":
@@ -63,13 +66,17 @@ Commands:
   regen       Regenerate C and all generated sidecars
   configure   Configure the native game build with CMake
   build       Configure (by default) and compile the native game
+              (--hermetic compiles with the pinned Zig toolchain, no CMake)
   all         Regenerate, configure, and compile in one command
+  toolchain   Report, fetch, or pin the hermetic C toolchain (Zig)
   doctor      Report host tools and project inputs
   version     Print the driver version and target platform
 
 The binary itself has no runtime dependencies. Regeneration needs only a local
-ROM. Native compilation currently also needs CMake, a C compiler, and the
-frontend dependencies required by the game project.`)
+ROM. The default CMake build needs CMake, a C compiler, and the frontend
+dependencies of the game project; --hermetic replaces CMake and the compiler
+with the pinned Zig toolchain, leaving only the frontend's native libraries
+(for example SDL2) as external inputs.`)
 }
 
 type regenFlags struct {
@@ -124,6 +131,41 @@ type buildFlags struct {
 	jobs                                                               int
 	buildOnly                                                          bool
 	cmakeArgs                                                          stringList
+	hermetic                                                           bool
+	zig, sdlInclude, sdlLib, optimize                                  string
+	verbose                                                            bool
+}
+
+func addHermeticFlags(flags *flag.FlagSet, values *buildFlags) {
+	flags.BoolVar(&values.hermetic, "hermetic", false, "build with the pinned Zig toolchain instead of CMake")
+	flags.StringVar(&values.zig, "zig", "", "Zig executable (default: $SNESBUILD_ZIG, project cache, then PATH)")
+	flags.StringVar(&values.sdlInclude, "sdl-include", "", "SDL2 header directory (default: auto-discover)")
+	flags.StringVar(&values.sdlLib, "sdl-lib", "", "SDL2 library directory (default: auto-discover)")
+	flags.StringVar(&values.optimize, "optimize", "-O2", "hermetic optimization level")
+	flags.BoolVar(&values.verbose, "verbose", false, "print each hermetic compile command")
+}
+
+func toolchainCacheDir(root string) string {
+	return filepath.Join(root, "build", "toolchain")
+}
+
+func (values *buildFlags) hermeticOptions() (project.HermeticOptions, error) {
+	paths := project.DefaultPaths(values.root)
+	paths.BuildDir, paths.ToolchainDir = values.buildDir, values.toolchainDir
+	zigPath := values.zig
+	if zigPath == "" {
+		located, err := toolchain.Locate(toolchainCacheDir(values.root))
+		if err != nil {
+			return project.HermeticOptions{}, err
+		}
+		fmt.Printf("hermetic: using Zig %s (%s, via %s)\n", located.Version, located.Path, located.Source)
+		zigPath = located.Path
+	}
+	return project.HermeticOptions{
+		Paths: paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
+		SDLIncludeDir: values.sdlInclude, SDLLibDir: values.sdlLib, Verbose: values.verbose,
+		Stdout: os.Stdout, Stderr: os.Stderr,
+	}, nil
 }
 
 func addBuildFlags(flags *flag.FlagSet) *buildFlags {
@@ -138,6 +180,7 @@ func addBuildFlags(flags *flag.FlagSet) *buildFlags {
 	flags.IntVar(&values.jobs, "jobs", runtime.NumCPU(), "parallel native build jobs")
 	flags.BoolVar(&values.buildOnly, "build-only", false, "skip CMake configure and use the existing build directory")
 	flags.Var(&values.cmakeArgs, "cmake-arg", "additional CMake configure argument; repeat as needed")
+	addHermeticFlags(flags, values)
 	return values
 }
 
@@ -179,6 +222,14 @@ func runBuild(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if values.hermetic {
+		options, err := values.hermeticOptions()
+		if err != nil {
+			return err
+		}
+		_, err = project.HermeticBuild(options)
+		return err
+	}
 	return project.Build(values.options())
 }
 
@@ -194,6 +245,14 @@ func runAll(args []string) error {
 	}
 	buildValues.root = regenValues.root
 	buildValues.toolchainDir = regenValues.toolchainDir
+	if buildValues.hermetic {
+		options, err := buildValues.hermeticOptions()
+		if err != nil {
+			return err
+		}
+		_, err = project.HermeticBuild(options)
+		return err
+	}
 	return project.Build(buildValues.options())
 }
 
@@ -207,7 +266,60 @@ func addBuildFlagsForAll(flags *flag.FlagSet) *buildFlags {
 	flags.IntVar(&values.jobs, "build-jobs", runtime.NumCPU(), "parallel native build jobs")
 	flags.BoolVar(&values.buildOnly, "build-only", false, "skip CMake configure")
 	flags.Var(&values.cmakeArgs, "cmake-arg", "additional CMake configure argument; repeat as needed")
+	addHermeticFlags(flags, values)
 	return values
+}
+
+func runToolchain(args []string) error {
+	flags := flag.NewFlagSet("toolchain", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	cacheDir := flags.String("cache-dir", "", "toolchain cache directory (default <root>/build/toolchain)")
+	goos := flags.String("goos", runtime.GOOS, "target OS for `pin`")
+	goarch := flags.String("goarch", runtime.GOARCH, "target architecture for `pin`")
+	subcommand := "status"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		subcommand, args = args[0], args[1:]
+	}
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if subcommand == "pin" {
+		url, sha, archive, err := toolchain.Pin(*goos, *goarch)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s %s %s\n", url, sha, archive)
+		return nil
+	}
+	cache := *cacheDir
+	if cache == "" {
+		cache = toolchainCacheDir(*root)
+	}
+	switch subcommand {
+	case "status":
+		url, sha, err := toolchain.PinnedURL()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("pinned Zig      %s\n", toolchain.PinnedZigVersion)
+		fmt.Printf("release         %s\n", url)
+		fmt.Printf("sha256          %s\n", sha)
+		located, err := toolchain.Locate(cache)
+		if err != nil {
+			fmt.Printf("local zig       MISSING\n")
+			return err
+		}
+		fmt.Printf("local zig       %s (%s, via %s)\n", located.Version, located.Path, located.Source)
+		if located.Version != toolchain.PinnedZigVersion {
+			fmt.Printf("note            local version differs from the pin; hermetic release builds should use %s\n", toolchain.PinnedZigVersion)
+		}
+		return nil
+	case "fetch":
+		_, err := toolchain.Fetch(cache, os.Stdout)
+		return err
+	default:
+		return fmt.Errorf("unknown toolchain subcommand %q (expected status, fetch, or pin)", subcommand)
+	}
 }
 
 func runDoctor(args []string) error {
@@ -258,6 +370,20 @@ func runDoctor(args []string) error {
 		fmt.Println("go             optional/not found (needed only for source builds and --run-tests)")
 	} else {
 		fmt.Printf("go             optional/ok (%s)\n", path)
+	}
+	if zig, zigErr := toolchain.Locate(toolchainCacheDir(*root)); zigErr != nil {
+		fmt.Printf("zig            not found (hermetic builds need it: `snesbuild toolchain fetch`)\n")
+	} else {
+		fmt.Printf("zig            ok (%s, %s, via %s)\n", zig.Version, zig.Path, zig.Source)
+	}
+	manifestPath := filepath.Join(resolved.Root, project.ManifestFileName)
+	if manifest, manifestErr := project.LoadManifest(manifestPath); manifestErr != nil {
+		fmt.Printf("%-15s not found (%s; hermetic builds need it)\n", "snesbuild.ini", manifestPath)
+	} else {
+		fmt.Printf("%-15s ok (%d game sources, target %s)\n", "snesbuild.ini", len(manifest.Sources), manifest.Name)
+		for _, warning := range project.ManifestDriftWarnings(resolved.Root, manifest) {
+			fmt.Printf("%-15s WARNING %s\n", "snesbuild.ini", warning)
+		}
 	}
 	if regenMissing {
 		return errors.New("regeneration inputs are incomplete")

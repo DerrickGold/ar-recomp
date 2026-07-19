@@ -1,0 +1,56 @@
+ActRaiser Recomp  (@SNESBUILD_OS_NAME@/@SNESBUILD_ARCH_NAME@)
+Version @SNESBUILD_VERSION@
+
+This builds and runs the game on your computer from a game ROM you already
+own. Everything needed is already in this folder. You do NOT need to install
+anything.
+
+
+WHAT YOU NEED
+-------------
+Your own game ROM: a ".sfc" file. Nothing else.
+
+
+HOW TO PLAY  (two easy steps)
+-----------------------------
+1. Put your ROM (the ".sfc" file) into THIS folder, next to this README.
+
+2. Start "@SNESBUILD_RUN_SCRIPT@":
+      macOS    - double-click  run-build.command
+      Windows  - double-click  run-build.bat
+      Linux    - run           ./run-build.sh
+
+   The first time takes a few minutes while it builds the game. When it
+   finishes, the game starts on its own.
+
+That's it. After the first build, a "run-game" file appears in this folder.
+From then on, just start that to play right away - no waiting.
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+- "No ROM found": the ".sfc" file must be in this folder, next to this README.
+
+- macOS says the file is from an unidentified developer: hold Control, click
+  run-build.command, choose Open, then Open again. (You only do this once.)
+
+- Linux says SDL2 is missing: install it with your package manager, e.g.
+  "sudo apt install libsdl2-dev", then try again. (macOS and Windows already
+  include it.)
+
+
+OPTIONAL: YOUR OWN MUSIC AND HD GRAPHICS
+----------------------------------------
+This package plays the ROM's original music and graphics. If you want to add
+your own, look in the "utils/game-assets" folder: "manifest.ini" lists every
+music and graphic slot, and you drop matching files into the "audio" and "hd"
+folders beside it. Anything you don't add simply stays original.
+
+
+WHAT THE FOLDERS ARE
+--------------------
+- run-build.*     the button you press to build and play the first time.
+- run-game.*      created after building; press it to play again instantly.
+- utils/          the build tools and game files. You can ignore this.
+
+Licensing and credits are in utils/LICENSE and utils/ATTRIBUTION.md.

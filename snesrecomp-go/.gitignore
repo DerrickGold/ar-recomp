@@ -7,6 +7,8 @@
 
 # Local builds and downloaded differential-test vectors.
 /build/
+/packaging/build/
+/packaging/cache/
 /tools/oracle/harte_cache/
 
 # Editor/OS noise.

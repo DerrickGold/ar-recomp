@@ -44,6 +44,44 @@ existing developer muscle memory. They prefer `$SNESBUILD` or
 `snesrecomp-go/build/snesbuild`, then fall back to `go run`. New automation
 should call `snesbuild` directly.
 
+## Hermetic builds (no CMake, no system compiler)
+
+`snesbuild build --hermetic` compiles the entire game — engine runtime, game
+sources, and generated banks — with a pinned [Zig](https://ziglang.org)
+toolchain (`zig cc`, a self-contained clang+lld) and links the executable
+directly. CMake, Xcode CLT/gcc, and SDL2 *development packages* are not
+required; only the SDL2 runtime library remains an external input, and the
+planned platform bundle will carry that beside the executable.
+
+```sh
+snesbuild toolchain fetch          # one-time: download + sha256-verify + extract
+snesbuild build --hermetic --root . --rom ar.sfc
+snesbuild all --hermetic --root . --rom ar.sfc --allow-stubs   # regen + build
+```
+
+The pinned Zig release (0.16.0) is resolved in order: `$SNESBUILD_ZIG`, the
+project cache `build/toolchain/`, then `PATH`. `snesbuild toolchain status`
+reports the pin, its checksum, and what is locally available. Fetch verifies
+the archive against a checksum embedded in the snesbuild binary — the network
+is trusted for bytes, never for content.
+
+Inputs are split along the same boundary as the redistribution rules:
+
+- `snesrecomp-go/runtime/runner.cmake` stays the single source of truth for
+  the engine's source list (parsed directly, so the CMake and hermetic builds
+  cannot drift);
+- `snesbuild.ini` at the project root declares the game half: target name,
+  game sources, includes, defines, and SDL2 usage. `snesbuild doctor`
+  cross-checks it against the game target in `CMakeLists.txt` and warns on
+  drift;
+- generated banks are globbed from `src/gen` as always.
+
+Output lands in `build/hermetic/` with flat per-source objects. Rebuilds are
+incremental (source/header mtimes + a flags hash); a no-op rebuild takes well
+under a second, a clean build roughly two minutes on an 8-core machine. The
+CMake path (`snesbuild build`, presets, tests, sanitizers) remains the
+developer workflow; hermetic is the distribution path.
+
 ## Dependency boundary
 
 | Operation | Required on the user's machine |
@@ -58,22 +96,112 @@ standard library for path handling, worker selection, process execution, RTS
 census deltas, and cross-platform exit status handling; it does not call
 `grep`, `find`, `cp`, `readlink`, `sysctl`, or other Unix utilities.
 
-## Distribution roadmap
+## Self-contained distribution bundles
 
-The intended end state is a platform bundle that users unpack beside a clean
-checkout and their own ROM:
+`snesrecomp-go/packaging/` is a standalone CMake project (it compiles no C
+itself) that produces a **fully self-contained, one-click bundle per
+platform**. A non-technical user downloads one archive, drops in their ROM,
+and runs one script — no repository checkout, no compiler, no SDL, nothing
+installed system-wide. Because the Go module is CGO-free, every platform
+cross-builds from one machine.
 
-1. Publish signed `snesbuild` binaries for macOS, Linux, and Windows on the
-   architectures supported by the game runtime.
-2. Add CI smoke tests for each binary's `doctor` and synthetic-ROM
-   regeneration path.
-3. Bundle or bootstrap a pinned native build stack: CMake, Ninja, a C compiler
-   and linker, SDL2 headers/libraries, and the minimum platform SDK material
-   legally permitted for that host.
-4. Teach `snesbuild doctor` to validate the pinned bundle and `snesbuild all`
-   to select it without modifying global `PATH` or package-manager state.
-5. Optionally add a small ROM-picker/progress UI around the same Go APIs; the
-   CLI remains the automation and CI surface.
+**Build all six from the repo root, one command:**
+
+```sh
+make release
+# or, pure CMake, from the packaging dir:
+#   cd snesrecomp-go/packaging && cmake --workflow --preset release
+# single platform:  make release-macos-arm64   (or the per-platform presets)
+```
+
+Each platform's CMake build tree holds a freshly extracted ~180 MB Zig
+toolchain, so it is removed automatically as soon as that bundle is staged
+(pass `KEEP_BUILD=1` to retain them for debugging). The download cache
+(`snesrecomp-go/packaging/cache/`, ~420 MB of archives) is kept, so re-runs
+re-extract in seconds without re-downloading. To reclaim more afterwards:
+`make clean` removes every regenerable artifact (build trees, generated C, tool
+binaries, release bundles) while keeping the ROM, save files, source, and that
+download cache; `make clean-all` also drops the cache.
+
+Bundles (plus `.sha256` sidecars) land in `release/`, named
+`actraiser-recomp-<os>-<arch>.{tar.xz,zip}` (~55–65 MB tar.xz, ~100 MB Windows
+zip).
+
+**The bundle is built for a non-technical user, so its root is deliberately
+almost empty** — everything that would intimidate is hidden under `utils/`:
+
+```
+actraiser-recomp-<platform>/
+├── README.txt              plain-text instructions
+├── run-build.command/.bat/.sh   the one thing to run
+└── utils/                  hidden: the whole build (ignore it)
+    ├── snesbuild.ini, config.ini
+    ├── recomp/ src/ third_party/stb/ snesrecomp-go/runtime/   authored source (no generated C)
+    ├── game-assets/        manifest template + empty audio/+hd/ (no media ships)
+    ├── tools/snesbuild     the driver (stripped, git-describe-stamped)
+    ├── tools/toolchain/zig-*/   pinned C compiler (Zig 0.16.0)
+    ├── tools/sdl2/         bundled SDL2 (macOS, Windows x86_64)
+    └── LICENSE, ATTRIBUTION.md
+```
+
+The only things deliberately absent are the ROM (the user supplies it), the
+ROM-derived generated C (regenerated locally), and the media assets — the
+`game-assets/manifest.ini` ships as a template mapping every song/graphic slot
+so users drop in their own files. The bundled SDL2 comes from SDL's official
+redistributables (universal macOS `.dmg`; Windows mingw archive), both zlib
+licensed; Linux ships no SDL (no single portable redistributable) and the run
+script points the user at their package manager.
+
+**How a user runs it:** unpack the archive, drop the ROM in the folder next to
+`README.txt`, and run `run-build`. It builds the game via
+`snesbuild all --hermetic --allow-stubs` (regen + compile with the bundled
+toolchain and SDL, `--root utils`), then does the two things that make repeat
+play trivial:
+
+1. **Copies the finished game to the root** — the executable and, on
+   macOS/Windows, its bundled SDL library — so the playable result sits in the
+   top folder, not buried in a build directory.
+2. **Generates a `run-game` script** (`.command`/`.bat`/`.sh`) next to it, then
+   launches the game once. From then on the user just opens `run-game` to play
+   instantly with no rebuild. (That generated script is created locally, so it
+   is not Gatekeeper-quarantined — only the downloaded `run-build` triggers the
+   one-time right-click-Open on macOS.)
+
+`snesbuild` locates the bundled Zig and SDL beside its own executable
+(`utils/tools/`), and the built game links SDL via an rpath
+(`@executable_path` / `$ORIGIN`) with the bundled library copied next to it, so
+it runs with no system SDL. The `run-game` script runs the root binary with its
+working directory set to `utils/` so the game finds `config.ini` and
+`game-assets/`. This whole flow is verified end-to-end: a bundle extracted to
+an empty directory outside the repo, with the dev machine's Zig/SDL/homebrew
+removed from the environment, builds from the ROM, deposits the game and
+`run-game` in the root, and both first-play and `run-game` replay launch the
+game.
+
+A post-package **leak gate** re-extracts every archive and fails packaging if
+an unreviewed top-level entry appears (only `README.txt`, the run script, and
+`utils/` are allowed) or any first-party file contains a build-machine path;
+third-party payloads under `utils/tools/toolchain/`, `utils/tools/sdl2/`, and
+`utils/third_party/` are exempt from the string scan. `-trimpath` keeps such
+paths out of the Go binary to begin with; the gate proves it stays that way
+across the whole bundle (≈145 first-party files scanned per archive).
+
+## Remaining distribution work
+
+1. **Signing/notarization.** macOS Gatekeeper blocks the unsigned
+   `run-build.command` (right-click → Open is the current workaround); the
+   binaries want signing before public release.
+2. **CI** to run `make release` on a clean tagged checkout (today's archives
+   carry the `-dirty` stamp) and publish the artifacts + checksums.
+3. **Windows/Linux runtime validation.** All six bundles cross-build and the
+   full standalone flow is verified end-to-end on macOS; the built *game* has
+   only been run on macOS, so the Windows SDL2main/WinMain path and the Linux
+   system-SDL fallback still need a real run on those hosts.
+4. **`--allow-stubs` decision.** The one-click flow currently passes it so
+   regen always completes; closing the hard-stub backlog would let the shipped
+   flow drop it.
+5. Optionally, a small ROM-picker/progress GUI wrapping the same Go APIs — the
+   CLI + scripts remain the automation surface.
 
 Only generic tools and runtime sources should be distributed. The ROM,
 generated C, generated manifests, and the resulting ROM-derived game binary

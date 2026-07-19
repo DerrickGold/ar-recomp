@@ -25,6 +25,7 @@ game-assets/audio/*
 # Build output
 build/
 build-release/
+release/
 *.o
 *.exe
 *.out

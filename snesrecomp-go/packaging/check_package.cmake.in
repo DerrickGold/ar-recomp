@@ -1,0 +1,66 @@
+# CPack post-build gate: fail packaging if a produced archive contains
+# top-level entries beyond the reviewed allowlist, or if any first-party file
+# references the build machine (source tree or home directory). Third-party
+# payload directories (bundled toolchain/SDL) are exempt from the string scan
+# — they are upstream artifacts built elsewhere. Configured by
+# CMakeLists.txt; runs automatically after `cpack` creates each archive.
+
+set(_leak_patterns "@SNESBUILD_LEAK_PATTERNS@")
+set(_allowed_toplevel "@SNESBUILD_ALLOWED_TOPLEVEL@")
+set(_scan_exempt "@SNESBUILD_SCAN_EXEMPT_DIRS@")
+
+foreach(_package IN LISTS CPACK_PACKAGE_FILES)
+    get_filename_component(_package "${_package}" ABSOLUTE)
+    set(_stage "${_package}.leakcheck")
+    file(REMOVE_RECURSE "${_stage}")
+    file(MAKE_DIRECTORY "${_stage}")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E tar xf "${_package}"
+        WORKING_DIRECTORY "${_stage}"
+        RESULT_VARIABLE _extract_result)
+    if(NOT _extract_result EQUAL 0)
+        message(FATAL_ERROR "leak check: cannot extract ${_package}")
+    endif()
+
+    # Archives contain a single versioned root directory.
+    file(GLOB _roots LIST_DIRECTORIES true "${_stage}/*")
+    list(LENGTH _roots _root_count)
+    if(NOT _root_count EQUAL 1)
+        message(FATAL_ERROR "leak check: expected one root directory in ${_package}")
+    endif()
+    list(GET _roots 0 _root)
+
+    file(GLOB _entries LIST_DIRECTORIES true RELATIVE "${_root}" "${_root}/*")
+    foreach(_entry IN LISTS _entries)
+        if(NOT _entry IN_LIST _allowed_toplevel)
+            message(FATAL_ERROR
+                "leak check: unexpected top-level entry in ${_package}: ${_entry}")
+        endif()
+    endforeach()
+
+    file(GLOB_RECURSE _files LIST_DIRECTORIES false RELATIVE "${_root}" "${_root}/*")
+    set(_checked 0)
+    foreach(_file IN LISTS _files)
+        set(_exempt FALSE)
+        foreach(_dir IN LISTS _scan_exempt)
+            if(_file MATCHES "^${_dir}/")
+                set(_exempt TRUE)
+                break()
+            endif()
+        endforeach()
+        if(_exempt)
+            continue()
+        endif()
+        foreach(_pattern IN LISTS _leak_patterns)
+            file(STRINGS "${_root}/${_file}" _hits REGEX "${_pattern}" LIMIT_COUNT 1)
+            if(_hits)
+                message(FATAL_ERROR
+                    "leak check: ${_file} in ${_package} contains build-machine "
+                    "path matching '${_pattern}': ${_hits}")
+            endif()
+        endforeach()
+        math(EXPR _checked "${_checked} + 1")
+    endforeach()
+    file(REMOVE_RECURSE "${_stage}")
+    message(STATUS "leak check: ${_package} clean (${_checked} first-party files scanned)")
+endforeach()

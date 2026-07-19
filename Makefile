@@ -1,0 +1,69 @@
+# Root convenience targets for producing the distributable game bundles.
+#
+# `make release` cross-builds every platform's self-contained bundle and
+# writes them (plus SHA-256 sidecars) into ./release/. Bundles are named
+# actraiser-recomp-<platform>.{tar.xz,zip}. Requires Go and CMake; the C
+# toolchain and SDL2 are downloaded and bundled by the packaging project, so
+# no compiler/SDL install is needed to PRODUCE the bundles.
+#
+# The equivalent pure-CMake command (run from the packaging directory) is:
+#   cd snesrecomp-go/packaging && cmake --workflow --preset release
+# Individual platforms: `make release-macos-arm64`, etc.
+#
+# Each platform's CMake build tree (which holds a freshly extracted ~180 MB Zig
+# toolchain) is removed as soon as that bundle is staged into release/, so the
+# large intermediate build data does not accumulate. The download cache
+# (snesrecomp-go/packaging/cache) is kept so re-runs need no re-download. Pass
+# KEEP_BUILD=1 to retain the per-platform build trees for debugging.
+#
+# Cleaning:
+#   make clean        remove every regenerable artifact (build trees, generated
+#                     C, tool binaries, release bundles) — keeps the ROM, save
+#                     files, source, and the downloaded dependency cache.
+#   make clean-all    also remove the downloaded Zig/SDL cache (forces a
+#                     re-download on the next `make release`).
+#   make clean-release  remove only the packaged bundles + packaging build.
+
+PACKAGING := snesrecomp-go/packaging
+PLATFORMS := macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64
+
+# Regenerable artifacts, grouped. Never lists the ROM, saves/*.srm, recordings,
+# or authored source; only the specific generated sidecars inside saves/.
+CLEAN_BUILD_DIRS := build build-release build-asan build-trace $(PACKAGING)/build snesrecomp-go/build
+CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
+CLEAN_RELEASE    := release
+
+.PHONY: release $(addprefix release-,$(PLATFORMS)) clean clean-all clean-release
+
+release:
+	@for p in $(PLATFORMS); do \
+	  echo "=== packaging $$p ==="; \
+	  ( cd $(PACKAGING) && cmake --workflow --preset package-$$p ) || exit 1; \
+	  [ -n "$(KEEP_BUILD)" ] || rm -rf $(PACKAGING)/build/$$p; \
+	done
+	@rm -rf release/_CPack_Packages
+	@[ -n "$(KEEP_BUILD)" ] || rm -rf $(PACKAGING)/build
+	@echo "Bundles written to $(CURDIR)/release/"
+
+$(addprefix release-,$(PLATFORMS)): release-%:
+	( cd $(PACKAGING) && cmake --workflow --preset package-$* )
+	@rm -rf release/_CPack_Packages
+	@[ -n "$(KEEP_BUILD)" ] || rm -rf $(PACKAGING)/build/$*
+	@echo "Bundle written to $(CURDIR)/release/"
+
+clean:
+	@removed=""; \
+	for t in $(CLEAN_BUILD_DIRS) $(CLEAN_GENERATED) $(CLEAN_RELEASE); do \
+	  if [ -e "$$t" ]; then echo "  rm $$t ($$(du -sh "$$t" 2>/dev/null | cut -f1))"; rm -rf "$$t"; removed=1; fi; \
+	done; \
+	[ -n "$$removed" ] || echo "  nothing to clean"; \
+	echo "Kept: ROM, saves/*.srm, source, and $(PACKAGING)/cache (use 'make clean-all' to drop the download cache)."
+
+clean-all: clean
+	@if [ -e "$(PACKAGING)/cache" ]; then \
+	  echo "  rm $(PACKAGING)/cache ($$(du -sh $(PACKAGING)/cache 2>/dev/null | cut -f1)) — Zig/SDL will re-download next release"; \
+	  rm -rf "$(PACKAGING)/cache"; \
+	fi
+
+clean-release:
+	rm -rf release $(PACKAGING)/build

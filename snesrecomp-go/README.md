@@ -110,9 +110,17 @@ snesrecomp-go/build/snesbuild build --root . --config RelWithDebInfo
 ```
 
 `snesbuild all` performs both phases. A prebuilt `snesbuild` removes Go and
-shell interpreters from the user path; CMake, a native compiler, the platform
-SDK, and the frontend's native libraries remain build-time dependencies until
-they are supplied in a platform bundle.
+shell interpreters from the user path. With the default CMake path, CMake, a
+native compiler, the platform SDK, and the frontend's native libraries remain
+build-time dependencies. The hermetic path removes all but the last of those:
+
+```sh
+snesbuild toolchain fetch                # pinned Zig, checksum-verified
+snesbuild build --hermetic --root .      # zig cc + link, no CMake
+```
+
+It is driven by a `snesbuild.ini` manifest at the project root; see
+[`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md).
 
 Generated C includes `cpu_state.h`, `cpu_trace.h`, `common_cpu_infra.h`, and
 `funcs.h`. The game target must therefore include `runtime/src`,
@@ -182,6 +190,27 @@ v2regen baseline verify --actual src/gen \
 
 Run `v2regen help` or `v2regen <command> -h` for every option.
 Run `snesbuild help` or `snesbuild <command> -h` for project-driver options.
+
+## Distribution packaging
+
+`packaging/` is a standalone CMake project that builds a **fully
+self-contained, one-click bundle per platform**: the whole buildable game
+project plus the build machinery (`tools/snesbuild`, the pinned Zig toolchain,
+bundled SDL2 on macOS/Windows) and a `run-build` script. A user unpacks it,
+drops in their ROM, and runs the script — no repository checkout and no
+developer tools required.
+
+```sh
+make release                                    # from the game repo root, all platforms
+# cd packaging && cmake --workflow --preset release   # pure-CMake equivalent
+```
+
+Go is CGO-free, so every platform cross-builds from one machine. Bundles are
+named `actraiser-recomp-<os>-<arch>.{tar.xz,zip}` and written to the repo's
+`release/`. They contain only generic tools, the project's own authored
+source, and redistributable third-party components — never a ROM, generated C,
+or media assets (the asset manifest ships as an empty template). See the game
+repository's `docs/BUILD_TOOLING.md` for the full bundle contract.
 
 ## Documentation
 

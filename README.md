@@ -132,7 +132,9 @@ ActRaiserRecomp/
 ├── config.ini               # default runtime config (player-facing)
 ├── dev-config.ini           # development config: debug flags + cheats enabled
 ├── nocheats-config.ini      # like dev-config.ini, cheats off
-├── CMakeLists.txt
+├── CMakeLists.txt            # developer build (CMake presets: dev/play/asan/trace)
+├── snesbuild.ini             # game build manifest for the hermetic/bundled path
+├── Makefile                  # `make release` (all platform bundles), `make clean`
 ├── DEBUG.md                  # ★ the debugging guide — every tool, every known
 │                                bug class, and the full bug-hunt journal.
 │                                Start here if something's broken.
@@ -179,6 +181,7 @@ ActRaiserRecomp/
 │                                 stb_vorbis) — tracked, no install step
 ├── snesrecomp-go/             # standalone concurrent Go recomp toolchain
 │   ├── docs/                  # per-project integration/config/runtime guides
+│   ├── packaging/             # builds the self-contained per-platform bundles
 │   └── runtime/               # bundled C runtime + SNES hardware model
 ├── tools/
 │   ├── regen.sh                # compatibility launcher for Go snesbuild
@@ -186,6 +189,7 @@ ActRaiserRecomp/
 │   ├── compatibility launchers        # not used by build/regen; use cmd/v2regen
 │   └── oracle/                 # differential-testing harness vs. real snes9x
 ├── tests/                      # golden-image + replay regression tests
+├── release/                    # produced distribution bundles — NOT committed
 └── saves/                      # runtime output only (dumps, snapshots,
                                    replays) — NOT committed, purely local
 ```
@@ -203,14 +207,46 @@ UI.
 
 ## Build instructions
 
-### Dependencies
+There are two ways to build, aimed at different people:
 
-- **CMake** ≥ 3.16
-- **A C11 compiler** (clang or gcc)
-- **SDL2** (development package/headers, not just the runtime library) — the
-  only external library this links against
-- **Go 1.24+** — needed when building the project tools from source; a future
-  downloaded `snesbuild` binary will not require a local Go installation
+- **Players — a prebuilt one-click bundle** (no developer tools at all). See
+  [Prebuilt bundles](#prebuilt-one-click-bundles-for-players) just below.
+- **Developers — from a source checkout** (CMake presets, or the hermetic
+  no-install path). See [Building from source](#building-from-source).
+
+### Prebuilt one-click bundles (for players)
+
+The distribution bundles are the zero-setup path: a player downloads one
+archive for their platform, drops in their own ROM, and runs one script — no
+CMake, compiler, SDL, or Go required, and no repository checkout. Each bundle
+carries the whole buildable project plus a pinned C toolchain (Zig) and, on
+macOS/Windows, SDL2; the game's C is generated locally from the player's ROM
+(never shipped), and the folder exposes only a `README.txt` and a `run-build`
+script, with everything else tucked under `utils/`. First run builds and
+launches the game and writes a `run-game` script for instant replays.
+
+To **produce** all six bundles from a source checkout (into `release/`, named
+`actraiser-recomp-<platform>.{tar.xz,zip}` with SHA-256 sidecars):
+
+```sh
+make release
+```
+
+Go and CMake are the only host requirements — the C toolchain and SDL2 are
+downloaded and bundled automatically. Full details, layout, and the current
+signing/CI gaps are in [`docs/BUILD_TOOLING.md`](docs/BUILD_TOOLING.md).
+
+### Building from source
+
+#### Dependencies
+
+- **Go 1.24+** — builds the recompiler/driver; required for both build paths
+- **CMake** ≥ 3.16 — for the developer CMake presets (not needed for `--hermetic`)
+- **A C11 compiler** (clang or gcc) — likewise (the hermetic path uses its own
+  bundled Zig instead)
+- **SDL2** (development package/headers) — the only external library this links
+  against; auto-discovered by both build paths, and bundled outright in the
+  distribution package (so end users need nothing)
 - **git**
 
 Python is optional for unrelated forensic/triage scripts; it is not a build,
@@ -219,8 +255,14 @@ regeneration, runtime, or opcode-validation dependency.
 To reuse the bundled toolchain from another game project, start with
 [`snesrecomp-go/README.md`](snesrecomp-go/README.md) and its
 [`project integration guide`](snesrecomp-go/docs/PROJECT_INTEGRATION.md).
-The native project-driver design and dependency-bundling roadmap are in
+The native project-driver design, the hermetic build, and the self-contained
+distribution bundles are documented in
 [`docs/BUILD_TOOLING.md`](docs/BUILD_TOOLING.md).
+
+The `brew`/`apt` lines below install the CMake-preset build's dependencies. The
+hermetic path drops the CMake and C-compiler requirements (it uses its own
+bundled Zig), so it needs only Go and SDL2 development files — and the
+distribution bundle removes even the SDL2 requirement by carrying it inside.
 
 **macOS** (verified — this is the only platform actually built/tested so far):
 
@@ -240,7 +282,7 @@ sudo apt install build-essential cmake libsdl2-dev golang-go
 hasn't been built on Windows yet — no `.vcxproj`/CI verifying it works here.
 If you get it building, a PR documenting the steps would help.
 
-### Steps
+#### Steps
 
 1. **Clone this repo.** The Go recompiler and C runtime are included; there is
    no secondary toolchain checkout or symlink to create.
@@ -262,15 +304,28 @@ If you get it building, a PR documenting the steps would help.
    The inherited hard-stub backlog currently makes strict regeneration exit
    nonzero after writing complete output; see `DEBUG.md` §8.
 
-4. **Configure and build through the same driver:**
+4. **Compile the game.** Two options:
 
-   ```sh
-   go -C snesrecomp-go run ./cmd/snesbuild build --root ..
-   ```
+   - **Hermetic (no CMake/compiler/SDL install)** — compiles with a pinned Zig
+     toolchain that `snesbuild` downloads on first use, discovering SDL2
+     automatically:
 
-   This removes platform-specific shell logic, but native compilation still
-   requires CMake, a C11 compiler, SDL2 development files, and the host SDK.
-   Packaging those dependencies is the next distribution milestone.
+     ```sh
+     go -C snesrecomp-go run ./cmd/snesbuild toolchain fetch   # one time
+     go -C snesrecomp-go run ./cmd/snesbuild build --hermetic --root ..
+     ```
+
+   - **CMake presets (the classic developer build)** — needs CMake, a C11
+     compiler, and SDL2 development files:
+
+     ```sh
+     cmake --preset play && cmake --build --preset play
+     # or, through the driver: go -C snesrecomp-go run ./cmd/snesbuild build --root ..
+     ```
+
+   Steps 2–4 are exactly what the player-facing `run-build` bundle script
+   automates; producing those bundles is described under
+   [Prebuilt bundles](#prebuilt-one-click-bundles-for-players) above.
 
 ## Running the game
 

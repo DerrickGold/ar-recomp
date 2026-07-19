@@ -178,6 +178,38 @@ The generated ABI is `RecompReturn Function_MxXx(CpuState *cpu)`. Do not invent
 per-function return structs or pass CPU registers as C parameters; mutate the
 shared `CpuState` exactly as generated code does.
 
+## Hermetic builds (`snesbuild build --hermetic`)
+
+The hermetic path compiles every translation unit with a pinned Zig toolchain
+and links the executable itself — no CMake and no system compiler. It reads
+two inputs the CMake path also uses, plus one manifest it owns:
+
+- `runtime/runner.cmake` — the engine's source/include lists (parsed
+  directly; the first unconditional `set(...)` block of each variable). The
+  `SNESRECOMP_ENABLE_TRACE` developer sources are never part of hermetic
+  builds.
+- `src/gen/*.c` — globbed as always.
+- `snesbuild.ini` at the project root — the game half:
+
+```ini
+[project]
+name = MyGame          # executable name (must match the CMake target
+                       # for doctor's drift cross-check)
+std = c11
+sdl2 = true            # discover SDL2 headers/libs and link -lSDL2
+link = -lm             # extra linker args, repeatable
+
+define = MY_FLAG=0     # repeatable
+include = src          # repeatable, relative to the project root
+source = src/main.c    # repeatable, game translation units only
+```
+
+Toolchain resolution order: `$SNESBUILD_ZIG`, the project's
+`build/toolchain/` cache (populated by `snesbuild toolchain fetch`, which
+verifies the release archive against a checksum embedded in the binary),
+then `PATH`. Objects and the executable land in `build/hermetic/`; rebuilds
+are incremental by source/header mtime plus a compile-flags hash.
+
 ## Per-game conventions
 
 Carry forward the source project's neutral conventions:
