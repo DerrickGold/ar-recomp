@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <signal.h>
 #include <errno.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #ifdef _WIN32
 #include <process.h>
@@ -120,11 +120,14 @@ extern const RtlGameInfo kActRaiserGameInfo;
 
 bool g_new_ppu = true;
 
-static SDL_mutex *g_audio_mutex;
+static SDL_Mutex *g_audio_mutex;
 /* The audio callback runs on SDL's audio thread, while settings mutate on the
  * main/game thread. Keep the callback's one live input in an SDL atomic mirror
  * instead of racing on g_settings. */
-static SDL_atomic_t g_audio_master_percent;
+static SDL_AtomicInt g_audio_master_percent;
+/* SDL3 binds output to an SDL_AudioStream; keep the stream (and derived device
+ * id) so pause/resume/close can address the opened device. */
+static SDL_AudioStream *g_audio_stream;
 static bool g_audio_open;
 static bool RenderFramebuffer(void);
 static void RebindPpuOutputSurfaces(void);
@@ -133,6 +136,12 @@ void NORETURN Die(const char *error) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
   fprintf(stderr, "Error: %s\n", error);
   exit(1);
+}
+
+/* SDL3 render primitives take float rects. All internal geometry is integer
+ * SNES-pixel math, so convert only at the SDL draw call. */
+static SDL_FRect ToFRect(SDL_Rect r) {
+  return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };
 }
 
 void OpenGLRenderer_Create(struct RendererFuncs *funcs) {
@@ -219,7 +228,7 @@ void DumpDiagState(const char *tag) {
 
 /* Game-thread id for AR_APUPROF lock-wait attribution (set in main before
  * the game loop; 0 = not yet known, wait timing disabled). */
-static SDL_threadID g_game_thread_id;
+static SDL_ThreadID g_game_thread_id;
 
 void RtlApuLock(void) {
   if (!g_audio_mutex) return;
@@ -227,11 +236,12 @@ void RtlApuLock(void) {
   if (ApuProfEnabled()) {
     extern uint64_t g_apuprof_lockwait_ns, g_apuprof_audiowait_max_ns;
     extern uint64_t audio_trace_wall_ns(void);
-    if (SDL_TryLockMutex(g_audio_mutex) == 0) return;
+    /* SDL3 SDL_TryLockMutex returns true when the lock was acquired. */
+    if (SDL_TryLockMutex(g_audio_mutex)) return;
     uint64_t t0 = audio_trace_wall_ns();
     SDL_LockMutex(g_audio_mutex);
     uint64_t waited = audio_trace_wall_ns() - t0;
-    if (g_game_thread_id != 0 && SDL_ThreadID() == g_game_thread_id)
+    if (g_game_thread_id != 0 && SDL_GetCurrentThreadID() == g_game_thread_id)
       g_apuprof_lockwait_ns += waited;
     else if (waited > g_apuprof_audiowait_max_ns)
       g_apuprof_audiowait_max_ns = waited;
@@ -253,12 +263,12 @@ static void HandleInput(int keyCode, bool pressed) {
     case SDLK_RIGHT:  bit = 0x0080; break;
     case SDLK_RETURN: bit = 0x0008; break;
     case SDLK_RSHIFT: bit = 0x0004; break;
-    case SDLK_z:      bit = 0x0001; break;
-    case SDLK_x:      bit = 0x0100; break;
-    case SDLK_a:      bit = 0x0002; break;
-    case SDLK_s:      bit = 0x0200; break;
-    case SDLK_q:      bit = 0x0400; break;
-    case SDLK_w:      bit = 0x0800; break;
+    case SDLK_Z:      bit = 0x0001; break;
+    case SDLK_X:      bit = 0x0100; break;
+    case SDLK_A:      bit = 0x0002; break;
+    case SDLK_S:      bit = 0x0200; break;
+    case SDLK_Q:      bit = 0x0400; break;
+    case SDLK_W:      bit = 0x0800; break;
     default: return;
   }
   if (pressed)
@@ -267,62 +277,106 @@ static void HandleInput(int keyCode, bool pressed) {
     g_input_state &= ~bit;
 }
 
-static void SDLCALL AudioCallback(void *userdata, Uint8 *stream, int len) {
+/* SDL3 audio-stream callback: fires when the bound device needs more data.
+ * `additional_amount` is the number of BYTES the stream wants right now, in
+ * the stream's input format (16-bit stereo interleaved = 4 bytes per sample
+ * frame — the same shape RtlRenderAudio produced for the SDL2 callback).
+ *
+ * We render into a fixed on-stack scratch buffer in bounded chunks and push
+ * each to the stream. A fixed buffer (rather than alloca(additional_amount))
+ * keeps the audio-thread stack safe no matter how large a request SDL makes —
+ * SDL may ask for the whole device buffer at once, and alloca cannot fail
+ * gracefully. The APU lock is taken once around the whole request so the
+ * batch renders atomically with respect to the game thread. */
+static void SDLCALL AudioCallback(void *userdata, SDL_AudioStream *stream,
+                                  int additional_amount, int total_amount) {
   (void)userdata;
+  (void)total_amount;
+  if (additional_amount <= 0) return;
+  /* 2048 stereo 16-bit frames per chunk; loop for larger requests. */
+  enum { kChunkBytes = 2048 * 4 };
+  Uint8 chunk[kChunkBytes];
+
   /* AR_APUPROF: time this acquire — it is the audio thread's outer lock
    * (RtlRenderAudio's internal RtlApuLock calls are recursive re-entries and
-   * can never block), so any starvation of the callback shows up here. */
+   * can never block), so any starvation of the callback shows up here. SDL3
+   * mutex locks never fail (void return), so no lock-failure early-out. */
   extern int ApuProfEnabled(void);
   if (ApuProfEnabled()) {
     extern uint64_t g_apuprof_audiowait_max_ns;
     extern uint64_t audio_trace_wall_ns(void);
     uint64_t t0 = audio_trace_wall_ns();
-    if (SDL_LockMutex(g_audio_mutex)) { memset(stream, 0, len); return; }
+    SDL_LockMutex(g_audio_mutex);
     uint64_t waited = audio_trace_wall_ns() - t0;
     if (waited > g_apuprof_audiowait_max_ns)
       g_apuprof_audiowait_max_ns = waited;
-  } else if (SDL_LockMutex(g_audio_mutex)) { memset(stream, 0, len); return; }
-  RtlRenderAudio((int16 *)stream, len / 4, 2);
-  int volume = SDL_AtomicGet(&g_audio_master_percent);
+  } else {
+    SDL_LockMutex(g_audio_mutex);
+  }
+  int volume = SDL_GetAtomicInt(&g_audio_master_percent);
   if (volume < 0) volume = 0;
   if (volume > 100) volume = 100;
-  if (volume != 100) {
-    int16 *samples = (int16 *)stream;
-    const int sample_count = len / (int)sizeof(*samples);
-    for (int i = 0; i < sample_count; i++)
-      samples[i] = (int16)(((int32)samples[i] * volume) / 100);
+  int remaining = additional_amount;
+  while (remaining > 0) {
+    int bytes = remaining < kChunkBytes ? remaining : kChunkBytes;
+    RtlRenderAudio((int16 *)chunk, bytes / 4, 2);
+    if (volume != 100) {
+      int16 *samples = (int16 *)chunk;
+      const int sample_count = bytes / (int)sizeof(*samples);
+      for (int i = 0; i < sample_count; i++)
+        samples[i] = (int16)(((int32)samples[i] * volume) / 100);
+    }
+    SDL_PutAudioStreamData(stream, chunk, bytes);
+    remaining -= bytes;
   }
   SDL_UnlockMutex(g_audio_mutex);
 }
 
 static bool OpenHostAudio(void) {
   if (g_audio_open) return true;
-  SDL_AudioSpec want = {0}, have;
+  SDL_AudioSpec want = {0};
   want.freq = g_active_audio_frequency > 0
       ? g_active_audio_frequency : 44100;
-  want.format = AUDIO_S16;
+  want.format = SDL_AUDIO_S16;
   want.channels = 2;
-  want.samples = g_active_audio_samples > 0
-      ? (Uint16)g_active_audio_samples : 2048;
-  want.callback = AudioCallback;
-  if (SDL_OpenAudio(&want, &have) != 0) {
-    fprintf(stderr, "SDL_OpenAudio failed: %s\n", SDL_GetError());
+  /* SDL3's AudioSpec no longer carries a buffer size; the device sample-frame
+   * count is controlled by a hint. Preserve the configured buffer depth. */
+  if (g_active_audio_samples > 0) {
+    char frames[16];
+    snprintf(frames, sizeof(frames), "%d", g_active_audio_samples);
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, frames);
+  }
+  g_audio_stream = SDL_OpenAudioDeviceStream(
+      SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, AudioCallback, NULL);
+  if (!g_audio_stream) {
+    fprintf(stderr, "SDL_OpenAudioDeviceStream failed: %s\n", SDL_GetError());
     return false;
   }
-  RtlSetAudioOutputRate(have.freq);
-  fprintf(stderr, "[audio] opened %d Hz, %u-frame buffer "
-                  "(requested %d Hz, %u frames)\n",
-          have.freq, (unsigned)have.samples, want.freq,
-          (unsigned)want.samples);
+  /* `want` is the STREAM INPUT format — the rate our callback produces at.
+   * SDL resamples that to the device's native rate internally, so the
+   * emulator's output rate must be want.freq, NOT the device rate. (This
+   * differs from SDL2, where SDL_OpenAudio's callback ran at the device rate
+   * `have.freq`; feeding the device rate here would mis-time RtlRenderAudio
+   * and detune all audio whenever the device rate differs from want.freq.) */
+  RtlSetAudioOutputRate(want.freq);
+  /* The device's actual rate/buffer is informational only (SDL resamples). */
+  SDL_AudioSpec device = want;
+  int device_frames = 0;
+  SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(g_audio_stream),
+                           &device, &device_frames);
+  fprintf(stderr, "[audio] stream input %d Hz, device %d Hz %d-frame buffer "
+                  "(requested %d frames)\n",
+          want.freq, device.freq, device_frames, g_active_audio_samples);
   g_audio_open = true;
   return true;
 }
 
+/* SDL3 opens the device paused; playback needs an explicit resume. */
 static void ApplyAudioEnabled(void) {
   if (g_settings.audio_enabled) {
-    if (OpenHostAudio()) SDL_PauseAudio(0);
+    if (OpenHostAudio()) SDL_ResumeAudioStreamDevice(g_audio_stream);
   } else if (g_audio_open) {
-    SDL_PauseAudio(1);
+    SDL_PauseAudioStreamDevice(g_audio_stream);
   }
 }
 
@@ -533,27 +587,28 @@ static SDL_Point WriteFramebufferPpm(FILE *pf) {
    * screenshots include the independently scaled overlay. Headless runs
    * without video retain the historical internal-framebuffer capture. */
   if (g_renderer && g_hud_bg_texture && RenderFramebuffer()) {
-    int out_w = 0, out_h = 0;
-    SDL_GetRendererOutputSize(g_renderer, &out_w, &out_h);
-    size_t pitch = (size_t)out_w * 4;
-    uint8_t *pixels = out_w > 0 && out_h > 0
-        ? (uint8_t *)malloc(pitch * (size_t)out_h) : NULL;
-    if (pixels && SDL_RenderReadPixels(g_renderer, NULL,
-                                      SDL_PIXELFORMAT_ARGB8888,
-                                      pixels, (int)pitch) == 0) {
+    /* SDL3 SDL_RenderReadPixels returns a newly allocated surface in the
+     * renderer's native format; convert it to ARGB8888 so the byte-order
+     * extraction below is exact regardless of the backend's format. */
+    SDL_Surface *raw = SDL_RenderReadPixels(g_renderer, NULL);
+    SDL_Surface *argb = raw
+        ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
+    if (raw) SDL_DestroySurface(raw);
+    if (argb) {
+      int out_w = argb->w, out_h = argb->h;
       fprintf(pf, "P6\n%d %d\n255\n", out_w, out_h);
       for (int y = 0; y < out_h; y++) {
-        const uint8_t *row = pixels + (size_t)y * pitch;
+        const uint8_t *row = (const uint8_t *)argb->pixels +
+                             (size_t)y * argb->pitch;
         for (int x = 0; x < out_w; x++) {
           fputc(row[x * 4 + 2], pf);
           fputc(row[x * 4 + 1], pf);
           fputc(row[x * 4 + 0], pf);
         }
       }
-      free(pixels);
+      SDL_DestroySurface(argb);
       return (SDL_Point){ out_w, out_h };
     }
-    free(pixels);
   }
 
   int x0 = Settings_VisibleX0();
@@ -883,12 +938,15 @@ static void ApplyDisplayPresentation(void) {
   }
 
   /* Logical size encodes the pixel stretch so SDL letterboxes correctly if the
-   * user resizes the window themselves. Mirrors the boot-time setup. */
+   * user resizes the window themselves. Mirrors the boot-time setup. LETTERBOX
+   * reproduces SDL2 SDL_RenderSetLogicalSize's aspect-preserving behavior. */
   if (g_ws_active && !g_settings.ignore_aspect_ratio) {
     if (g_active_pixel_aspect == kPixelAspect_Crt43)
-      SDL_RenderSetLogicalSize(g_renderer, vis_w * 7, g_snes_height * 6);
+      SDL_SetRenderLogicalPresentation(g_renderer, vis_w * 7, g_snes_height * 6,
+                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
     else
-      SDL_RenderSetLogicalSize(g_renderer, vis_w, g_snes_height);
+      SDL_SetRenderLogicalPresentation(g_renderer, vis_w, g_snes_height,
+                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
   }
   SDL_SetWindowSize(g_window, win_w, win_h);
 }
@@ -944,7 +1002,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
                                     SettingChangeResult result) {
   (void)result;
   if (desc->field == &g_settings.audio_master_volume)
-    SDL_AtomicSet(&g_audio_master_percent, g_settings.audio_master_volume);
+    SDL_SetAtomicInt(&g_audio_master_percent, g_settings.audio_master_volume);
   if (desc->field == &g_settings.audio_enabled)
     ApplyAudioEnabled();
   if (desc->field == &g_settings.music_replacements)
@@ -953,8 +1011,9 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
       !g_settings.scene_inspector)
     CloseSceneInspectorSelection();
   if (desc->field == &g_settings.fullscreen && g_window)
-    SDL_SetWindowFullscreen(g_window, g_settings.fullscreen
-        ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    /* SDL3 SDL_SetWindowFullscreen takes a bool; borderless-desktop is the
+     * default fullscreen mode. */
+    SDL_SetWindowFullscreen(g_window, g_settings.fullscreen != 0);
   if (desc->field == &g_settings.extended_aspect ||
       desc->field == &g_settings.pixel_aspect) {
     ResolveVideoGeometry(true);
@@ -982,17 +1041,20 @@ static void ApplyRendererLogicalSize(void) {
   if (g_ws_active && !g_settings.ignore_aspect_ratio) {
     int vis_w = Settings_VisibleWidth();
     if (g_active_pixel_aspect == kPixelAspect_Crt43)
-      SDL_RenderSetLogicalSize(g_renderer, vis_w * 7, g_snes_height * 6);
+      SDL_SetRenderLogicalPresentation(g_renderer, vis_w * 7, g_snes_height * 6,
+                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
     else
-      SDL_RenderSetLogicalSize(g_renderer, vis_w, g_snes_height);
+      SDL_SetRenderLogicalPresentation(g_renderer, vis_w, g_snes_height,
+                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
   } else {
-    SDL_RenderSetLogicalSize(g_renderer, 0, 0);
+    SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
+                                     SDL_LOGICAL_PRESENTATION_DISABLED);
   }
 }
 
 static SDL_Rect GetPresentationViewport(void) {
   int out_w = 0, out_h = 0;
-  SDL_GetRendererOutputSize(g_renderer, &out_w, &out_h);
+  SDL_GetRenderOutputSize(g_renderer, &out_w, &out_h);
   SDL_Rect viewport = { 0, 0, out_w, out_h };
   if (!g_ws_active || g_settings.ignore_aspect_ratio ||
       out_w <= 0 || out_h <= 0)
@@ -1040,7 +1102,8 @@ static int ScaledHudPixels(int pixels, double scale) {
 static void RenderHudChunk(SDL_Texture *texture, SDL_Rect src, SDL_Rect dst) {
   if (!texture || src.w <= 0 || src.h <= 0 || dst.w <= 0 || dst.h <= 0)
     return;
-  SDL_RenderCopy(g_renderer, texture, &src, &dst);
+  SDL_FRect src_f = ToFRect(src), dst_f = ToFRect(dst);
+  SDL_RenderTexture(g_renderer, texture, &src_f, &dst_f);
 }
 
 typedef struct HudPresentationChunk {
@@ -1329,7 +1392,7 @@ static void RenderSceneInspector(SDL_Rect viewport) {
       : InspectorScreenToOutputY(
           viewport, g_scene_inspector_presentation.source_y);
   int output_width = 0, output_height = 0;
-  SDL_GetRendererOutputSize(g_renderer, &output_width, &output_height);
+  SDL_GetRenderOutputSize(g_renderer, &output_width, &output_height);
   bool same_output = output_width ==
                          g_scene_inspector_presentation.output_width &&
                      output_height ==
@@ -1347,8 +1410,10 @@ static void RenderSceneInspector(SDL_Rect viewport) {
   SDL_GetRenderDrawColor(g_renderer, &old_r, &old_g, &old_b, &old_a);
   SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
   SDL_SetRenderDrawColor(g_renderer, 255, 192, 32, 255);
-  SDL_RenderDrawLine(g_renderer, px - 7, py, px + 7, py);
-  SDL_RenderDrawLine(g_renderer, px, py - 7, px, py + 7);
+  SDL_RenderLine(g_renderer, (float)(px - 7), (float)py,
+                 (float)(px + 7), (float)py);
+  SDL_RenderLine(g_renderer, (float)px, (float)(py - 7),
+                 (float)px, (float)(py + 7));
 
   int x0, y0, x1, y1;
   if (SceneInspector_GetHighlight(&x0, &y0, &x1, &y1)) {
@@ -1373,7 +1438,8 @@ static void RenderSceneInspector(SDL_Rect viewport) {
        * when the game or promoted HUD is scaled by a non-integer factor. */
       rect.x += anchor_dx;
       rect.y += anchor_dy;
-      SDL_RenderDrawRect(g_renderer, &rect);
+      SDL_FRect rect_f = ToFRect(rect);
+      SDL_RenderRect(g_renderer, &rect_f);
     }
   }
   SDL_SetRenderDrawBlendMode(g_renderer, old_blend);
@@ -1388,33 +1454,17 @@ static bool WindowPointToOutput(int event_x, int event_y,
   int window_width = 0, window_height = 0;
   int output_width = 0, output_height = 0;
   SDL_GetWindowSize(g_window, &window_width, &window_height);
-  if (SDL_GetRendererOutputSize(g_renderer, &output_width, &output_height) ||
+  if (!SDL_GetRenderOutputSize(g_renderer, &output_width, &output_height) ||
       window_width <= 0 || window_height <= 0 ||
       output_width <= 0 || output_height <= 0)
     return false;
-  int logical_width = 0, logical_height = 0;
-  SDL_RenderGetLogicalSize(g_renderer, &logical_width, &logical_height);
-  if (logical_width > 0 && logical_height > 0) {
-    /* SDL_RenderSetLogicalSize filters absolute mouse events before they are
-     * queued: event.button/motion x/y are ALREADY logical coordinates. Map
-     * that logical point directly through the same physical viewport used by
-     * the game. Treating it as a window pixel (or passing it through
-     * SDL_RenderWindowToLogical again) scales it twice and sends far-edge
-     * clicks outside the viewport. */
-    SDL_Rect viewport = GetPresentationViewport();
-    if (output_x)
-      *output_x = viewport.x +
-          (int)(((int64_t)event_x * viewport.w + logical_width / 2) /
-                logical_width);
-    if (output_y)
-      *output_y = viewport.y +
-          (int)(((int64_t)event_y * viewport.h + logical_height / 2) /
-                logical_height);
-    return true;
-  }
-
-  /* Without a logical renderer size SDL leaves the event in window-client
-   * coordinates. Only this fallback needs the high-DPI window/output ratio. */
+  /* SDL3 does NOT pre-transform mouse events by the renderer's logical
+   * presentation — event x/y stay in window-client coordinates. All the
+   * downstream hit-testing (GetPresentationViewport, the HUD chunk rects)
+   * works in renderer-output-pixel space, so the only mapping this needs is
+   * the window -> output-pixel scale, which also covers high-DPI backing
+   * scale. This was the SDL2 "no logical size" fallback path; under SDL3 it
+   * is correct for every case. */
   if (output_x)
     *output_x = (int)(((int64_t)event_x * output_width +
                        window_width / 2) / window_width);
@@ -1432,7 +1482,7 @@ static bool InspectWindowPoint(int window_x, int window_y) {
   bool had_selection = SceneInspector_HasSelection();
   bool was_paused = g_paused != 0;
   int output_width = 0, output_height = 0;
-  SDL_GetRendererOutputSize(g_renderer, &output_width, &output_height);
+  SDL_GetRenderOutputSize(g_renderer, &output_width, &output_height);
 
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   int chunk_count = BuildHudPresentationChunks(viewport, chunks);
@@ -1556,8 +1606,10 @@ static void LoadHdReplacements(void) {
     /* ABGR8888 matches stb's little-endian R,G,B,A byte order directly. */
     SDL_Texture *texture = SDL_CreateTexture(
         g_renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, w, h);
-    if (texture && SDL_UpdateTexture(texture, NULL, rgba, w * 4) == 0) {
+    if (texture && SDL_UpdateTexture(texture, NULL, rgba, w * 4)) {
       SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+      /* Match the SDL2 global nearest scale-quality the build relied on. */
+      SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
       entry->texture = texture;
       with_art++;
       fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d)\n",
@@ -1593,6 +1645,7 @@ static void BindHdReplacementSurfaces(void) {
           g_snes_height * kHdMode7Scale);
       if (g_m7_overlay_pixels && g_m7_texture) {
         SDL_SetTextureBlendMode(g_m7_texture, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(g_m7_texture, SDL_SCALEMODE_NEAREST);
         PpuBindMode7OverlaySurface(g_ppu, g_m7_overlay_pixels, active_pitch,
                                    kHdMode7Scale);
       }
@@ -1653,7 +1706,8 @@ static void RenderMode7Overlay(SDL_Rect viewport) {
   SDL_UpdateTexture(g_m7_texture, &src,
                     g_m7_overlay_pixels + (size_t)src.x * 4,
                     g_snes_width * kHdMode7Scale * 4);
-  SDL_RenderCopy(g_renderer, g_m7_texture, &src, &viewport);
+  SDL_FRect src_f = ToFRect(src), viewport_f = ToFRect(viewport);
+  SDL_RenderTexture(g_renderer, g_m7_texture, &src_f, &viewport_f);
 }
 
 /* Draw every active HD replacement over the region its capture removed this
@@ -1692,7 +1746,8 @@ static void RenderHdReplacements(SDL_Rect viewport) {
     Uint8 mod = entry->brightness_mod
         ? (Uint8)((g_ppu->inidisp & 0xf) * 255 / 15) : 255;
     SDL_SetTextureColorMod(texture, mod, mod, mod);
-    SDL_RenderCopy(g_renderer, texture, NULL, &dst);
+    SDL_FRect dst_f = ToFRect(dst);
+    SDL_RenderTexture(g_renderer, texture, NULL, &dst_f);
   }
 }
 
@@ -1730,10 +1785,12 @@ static bool RenderFramebuffer(void) {
   }
   ApplyRendererLogicalSize();
   SDL_RenderClear(g_renderer);
-  SDL_RenderCopy(g_renderer, g_texture, &src, NULL);
+  SDL_FRect src_f = ToFRect(src);
+  SDL_RenderTexture(g_renderer, g_texture, &src_f, NULL);
 
   SDL_Rect viewport = GetPresentationViewport();
-  SDL_RenderSetLogicalSize(g_renderer, 0, 0);
+  SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
+                                   SDL_LOGICAL_PRESENTATION_DISABLED);
   RenderMode7Overlay(viewport);
   RenderHudOverlay(viewport);
   RenderHdReplacements(viewport);
@@ -1875,7 +1932,7 @@ int main(int argc, char **argv) {
   /* Display presets depend on whether the resolved aspect selected a wide
    * budget. Finalize only after g_ws_active/g_ws_extra are authoritative. */
   Settings_FinalizeDisplayMode();
-  SDL_AtomicSet(&g_audio_master_percent, g_settings.audio_master_volume);
+  SDL_SetAtomicInt(&g_audio_master_percent, g_settings.audio_master_volume);
 
   /* AR_MXCHECK=1: enable the per-function-entry m/x invariant check
    * (validates the emitter's static m/x analysis on every direct call). */
@@ -1909,10 +1966,11 @@ int main(int argc, char **argv) {
     const char *e = getenv("AR_TRAPFN");
     g_ar_trapfn = (e && e[0]) ? e : 0; }
 
-  Uint32 sdl_flags = SDL_INIT_AUDIO;
+  SDL_InitFlags sdl_flags = SDL_INIT_AUDIO;
   if (video) sdl_flags |= SDL_INIT_VIDEO;
-  if (!headless) sdl_flags |= SDL_INIT_GAMECONTROLLER;
-  if (SDL_Init(sdl_flags) != 0) {
+  if (!headless) sdl_flags |= SDL_INIT_GAMEPAD;
+  /* SDL3 returns true on success (the SDL2 0-on-success convention flipped). */
+  if (!SDL_Init(sdl_flags)) {
     fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return 1;
   }
@@ -1927,39 +1985,58 @@ int main(int argc, char **argv) {
     if (g_ws_active && g_active_pixel_aspect == kPixelAspect_Crt43)
       win_w = (g_snes_height * scale * g_active_aspect_x +
                g_active_aspect_y / 2) / g_active_aspect_y;
-    Uint32 window_flags = SDL_WINDOW_RESIZABLE |
+    /* SDL3 merged FULLSCREEN_DESKTOP into FULLSCREEN (borderless desktop is
+     * the default fullscreen mode when no exclusive video mode is set). */
+    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE |
         (headless_video ? SDL_WINDOW_HIDDEN : 0) |
-        (g_settings.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+        (g_settings.fullscreen ? SDL_WINDOW_FULLSCREEN : 0);
+    /* SDL3 SDL_CreateWindow no longer takes an x,y position; it is created at
+     * a default (centered) position. */
     g_window = SDL_CreateWindow(
       kWindowTitle,
-      SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
       win_w, g_snes_height * scale,
       window_flags
     );
     if (!g_window) Die("SDL_CreateWindow failed");
 
-    g_renderer = SDL_CreateRenderer(g_window, -1, headless_video
-      ? SDL_RENDERER_SOFTWARE
-      : SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    /* SDL3 renderer creation takes a driver NAME (NULL = first available
+     * accelerated backend) instead of an index + flag bitmask. Vsync is set
+     * separately, and the software backend is selected by name. */
+    g_renderer = SDL_CreateRenderer(g_window,
+      headless_video ? SDL_SOFTWARE_RENDERER : NULL);
     if (!g_renderer) Die("SDL_CreateRenderer failed");
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    if (!headless_video)
+      SDL_SetRenderVSync(g_renderer, 1);
 
-    /* Aspect-correct letterboxing via SDL's logical size (widescreen only, so
-     * faithful mode keeps the historical stretch-to-window behavior).
+    /* Aspect-correct letterboxing via SDL's logical presentation (widescreen
+     * only, so faithful mode keeps the historical stretch-to-window behavior).
      * 4:3-PAR: logical w:h = (render_w*7):(224*6) encodes the 7:6 pixel
      * stretch; square: the raw framebuffer dimensions. IgnoreAspectRatio=1
-     * restores plain stretching. */
+     * restores plain stretching. LETTERBOX matches SDL2's logical-size look. */
     if (g_ws_active && !g_settings.ignore_aspect_ratio) {
       if (g_active_pixel_aspect == kPixelAspect_Crt43)
-        SDL_RenderSetLogicalSize(g_renderer, g_snes_width * 7, g_snes_height * 6);
+        SDL_SetRenderLogicalPresentation(g_renderer, g_snes_width * 7,
+            g_snes_height * 6, SDL_LOGICAL_PRESENTATION_LETTERBOX);
       else
-        SDL_RenderSetLogicalSize(g_renderer, g_snes_width, g_snes_height);
+        SDL_SetRenderLogicalPresentation(g_renderer, g_snes_width,
+            g_snes_height, SDL_LOGICAL_PRESENTATION_LETTERBOX);
     }
 
     g_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
       kPpuBufWidth, g_snes_height);
     if (!g_texture) Die("SDL_CreateTexture failed");
+    /* The base framebuffer is opaque: the PPU writes RGB with the alpha byte
+     * left 0 (see ppu_old.c). SDL2 defaulted new textures to BLENDMODE_NONE so
+     * that alpha was ignored, but SDL3 defaults them to BLENDMODE_BLEND — which
+     * would blend those alpha-0 pixels to fully transparent and present a BLACK
+     * screen. Force NONE to restore the SDL2 opaque blit. (The HUD/overlay
+     * textures below deliberately keep BLEND; they carry real alpha.) */
+    SDL_SetTextureBlendMode(g_texture, SDL_BLENDMODE_NONE);
+    /* SDL3 textures default to linear filtering; the SDL2 build set the global
+     * SDL_HINT_RENDER_SCALE_QUALITY=0 (nearest). Set nearest per-texture so
+     * the pixel-art framebuffer and HUD planes upscale crisply. */
+    SDL_SetTextureScaleMode(g_texture, SDL_SCALEMODE_NEAREST);
 
     g_hud_bg_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
@@ -1971,6 +2048,10 @@ int main(int argc, char **argv) {
       Die("SDL_CreateTexture for HUD overlay failed");
     SDL_SetTextureBlendMode(g_hud_bg_texture, SDL_BLENDMODE_BLEND);
     SDL_SetTextureBlendMode(g_hud_obj_texture, SDL_BLENDMODE_BLEND);
+    /* Nearest filtering (see g_texture above; the global scale-quality hint
+     * SDL2 relied on is gone in SDL3). */
+    SDL_SetTextureScaleMode(g_hud_bg_texture, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureScaleMode(g_hud_obj_texture, SDL_SCALEMODE_NEAREST);
 
     LoadHdReplacements();
 
@@ -2081,7 +2162,7 @@ int main(int argc, char **argv) {
   WramTraceInit();
 
   g_audio_mutex = SDL_CreateMutex();
-  g_game_thread_id = SDL_ThreadID();
+  g_game_thread_id = SDL_GetCurrentThreadID();
   ApplyAudioEnabled();
 
   /* AR_LOADSTATE=<slot>: load a savestate at boot (before the main loop), so a
@@ -2103,14 +2184,14 @@ int main(int argc, char **argv) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       switch (event.type) {
-        case SDL_QUIT:
+        case SDL_EVENT_QUIT:
           running = false;
           break;
-        case SDL_KEYDOWN:
+        case SDL_EVENT_KEY_DOWN:
           if (SettingsOverlay_IsOpen()) {
             bool was_open = true;
             bool consumed = SettingsOverlay_HandleKey(
-                event.key.keysym.sym, true, event.key.repeat != 0);
+                event.key.key, true, event.key.repeat != 0);
             if (was_open && !SettingsOverlay_IsOpen()) g_input_state = 0;
             if (consumed) break;
           }
@@ -2118,11 +2199,11 @@ int main(int argc, char **argv) {
            * Escape/F1 are not SNES inputs, so consume them before HandleInput
            * and clear held joypad state before freezing game advancement. */
           if (!event.key.repeat &&
-              (event.key.keysym.sym == SDLK_ESCAPE ||
-               event.key.keysym.sym == SDLK_F1)) {
+              (event.key.key == SDLK_ESCAPE ||
+               event.key.key == SDLK_F1)) {
             g_input_state = 0;
             SettingsOverlay_Open();
-          } else if (event.key.keysym.sym == SDLK_p) {
+          } else if (event.key.key == SDLK_P) {
             if (SceneInspector_HasSelection()) {
               bool inspector_owned_pause = g_scene_inspector_owns_pause;
               CloseSceneInspectorSelection();
@@ -2130,9 +2211,9 @@ int main(int argc, char **argv) {
             } else {
               TogglePause();
             }
-          } else if (event.key.keysym.sym == SDLK_t) {
+          } else if (event.key.key == SDLK_T) {
             ToggleTurbo();
-          } else if (event.key.keysym.sym == SDLK_F3) {
+          } else if (event.key.key == SDLK_F3) {
             if (!event.key.repeat) {
               const SettingDesc *inspector = Settings_Find("scene_inspector");
               SettingChangeResult result = Settings_SetLong(
@@ -2147,18 +2228,18 @@ int main(int argc, char **argv) {
                           : "disabled",
                       Settings_ChangeResultName(result));
             }
-          } else if (event.key.keysym.sym == SDLK_MINUS ||
-                     event.key.keysym.sym == SDLK_KP_MINUS) {
+          } else if (event.key.key == SDLK_MINUS ||
+                     event.key.key == SDLK_KP_MINUS) {
             if (!event.key.repeat) AdjustHudOutputScale(-25);
-          } else if (event.key.keysym.sym == SDLK_EQUALS ||
-                     event.key.keysym.sym == SDLK_PLUS ||
-                     event.key.keysym.sym == SDLK_KP_PLUS) {
+          } else if (event.key.key == SDLK_EQUALS ||
+                     event.key.key == SDLK_PLUS ||
+                     event.key.key == SDLK_KP_PLUS) {
             if (!event.key.repeat) AdjustHudOutputScale(25);
-          } else if (event.key.keysym.sym == SDLK_F5) {
+          } else if (event.key.key == SDLK_F5) {
             (void)OnSettingsAction(Settings_Find("save_state"));
-          } else if (event.key.keysym.sym == SDLK_F7) {
+          } else if (event.key.key == SDLK_F7) {
             (void)OnSettingsAction(Settings_Find("load_state"));
-          } else if (event.key.keysym.sym == SDLK_F9) {
+          } else if (event.key.key == SDLK_F9) {
             /* Cycle 4:3 -> widescreen RAW -> widescreen FULL, for capturing
              * before/after comparison shots without a settings UI. Requires
              * booting with ExtendedAspectRatio set: the wide framebuffer and
@@ -2168,7 +2249,7 @@ int main(int argc, char **argv) {
              * physical press advances exactly one preset. */
             if (event.key.repeat) {
               /* no-op */
-            } else if (event.key.keysym.mod & KMOD_SHIFT) {
+            } else if (event.key.mod & SDL_KMOD_SHIFT) {
               DumpDiagState("hotkey");
             } else if (!g_ws_active) {
               fprintf(stderr, "[display] F9 needs ExtendedAspectRatio "
@@ -2180,13 +2261,13 @@ int main(int argc, char **argv) {
               fprintf(stderr, "[display] mode %d/%d -> %s\n", m + 1,
                       kDisplayMode_PresetCount, Settings_DisplayModeName(m));
             }
-          } else if (event.key.keysym.sym == SDLK_F6) {
+          } else if (event.key.key == SDLK_F6) {
             /* Level warp: stage the game's own sim->act transition to the raw
              * registry target seeded by AR_WARP=<region_hex><map_hex>. The low byte is $19,
              * not a uniform act number (e.g. Kasandora act 2 is 0303). Press
              * from a transition-capable state; see README + docs/SEAMS.md. */
             PerformWarp();
-          } else if (event.key.keysym.sym == SDLK_F2) {
+          } else if (event.key.key == SDLK_F2) {
             /* On-demand FULL snapshot — each press writes a unique set of files
              * tagged with the game-frame: WRAM + VRAM + CGRAM + OAM (via
              * ActRaiser_FullSnapshot) plus a .ppm screenshot. Lets several
@@ -2197,45 +2278,49 @@ int main(int argc, char **argv) {
              * render the new preset before capturing it. */
             TakeFullSnapshot();
           } else {
-            HandleInput(event.key.keysym.sym, true);
+            HandleInput(event.key.key, true);
           }
           break;
-        case SDL_TEXTINPUT:
+        case SDL_EVENT_TEXT_INPUT:
           if (SettingsOverlay_IsOpen())
             (void)SettingsOverlay_HandleText(event.text.text);
           break;
-        case SDL_MOUSEBUTTONDOWN:
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
           if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
               CloseSceneInspectorSelection();
             } else if (event.button.button == SDL_BUTTON_LEFT) {
+              /* SDL3 mouse event coordinates are floats; the hit-testing works
+               * at SNES-pixel granularity, so truncating to int is exact. */
+              int event_x = (int)event.button.x;
+              int event_y = (int)event.button.y;
               int output_x = 0, output_y = 0;
-              if (!WindowPointToOutput(event.button.x, event.button.y,
+              if (!WindowPointToOutput(event_x, event_y,
                                        &output_x, &output_y) ||
                   !SettingsOverlay_BeginDebugPanelDrag(
                       output_x, output_y))
-                (void)InspectWindowPoint(event.button.x, event.button.y);
+                (void)InspectWindowPoint(event_x, event_y);
             }
           }
           break;
-        case SDL_MOUSEMOTION:
+        case SDL_EVENT_MOUSE_MOTION:
           if (SettingsOverlay_IsDebugPanelDragging()) {
             int output_x = 0, output_y = 0;
-            if (WindowPointToOutput(event.motion.x, event.motion.y,
+            if (WindowPointToOutput((int)event.motion.x, (int)event.motion.y,
                                     &output_x, &output_y))
               SettingsOverlay_DragDebugPanel(output_x, output_y);
           }
           break;
-        case SDL_MOUSEBUTTONUP:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
           if (event.button.button == SDL_BUTTON_LEFT)
             SettingsOverlay_EndDebugPanelDrag();
           break;
-        case SDL_KEYUP:
+        case SDL_EVENT_KEY_UP:
           if (SettingsOverlay_IsOpen())
-            (void)SettingsOverlay_HandleKey(event.key.keysym.sym, false,
+            (void)SettingsOverlay_HandleKey(event.key.key, false,
                                             false);
           else
-            HandleInput(event.key.keysym.sym, false);
+            HandleInput(event.key.key, false);
           break;
       }
     }
@@ -2620,7 +2705,9 @@ int main(int argc, char **argv) {
   DumpDiagState(g_host_lifecycle_request == kHostLifecycle_Restart
                     ? "restart" : "exit");
 
-  SDL_CloseAudio();
+  /* SDL_DestroyAudioStream also closes the bound device (replaces the SDL2
+   * SDL_CloseAudio path). */
+  if (g_audio_stream) SDL_DestroyAudioStream(g_audio_stream);
   SDL_DestroyMutex(g_audio_mutex);
   for (int i = 0; i < g_hd_replacement_count; i++) {
     if (g_hd_replacements[i].texture)

@@ -45,7 +45,7 @@ if not defined BIN_NAME (
 
 rem Put the finished game (and its media library) in this folder.
 copy /y "%UTILS%\build\hermetic\%BIN_NAME%" "%ROOT%\" >nul
-if exist "%UTILS%\build\hermetic\SDL2.dll" copy /y "%UTILS%\build\hermetic\SDL2.dll" "%ROOT%\" >nul
+if exist "%UTILS%\build\hermetic\SDL3.dll" copy /y "%UTILS%\build\hermetic\SDL3.dll" "%ROOT%\" >nul
 
 rem Create a one-click "play again" script next to the game. In the generated
 rem file, %%~dp0 becomes a literal %~dp0 (the folder the script lives in).

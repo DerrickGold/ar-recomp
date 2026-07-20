@@ -76,7 +76,7 @@ The binary itself has no runtime dependencies. Regeneration needs only a local
 ROM. The default CMake build needs CMake, a C compiler, and the frontend
 dependencies of the game project; --hermetic replaces CMake and the compiler
 with the pinned Zig toolchain, leaving only the frontend's native libraries
-(for example SDL2) as external inputs.`)
+(for example SDL3) as external inputs.`)
 }
 
 type regenFlags struct {
@@ -139,8 +139,8 @@ type buildFlags struct {
 func addHermeticFlags(flags *flag.FlagSet, values *buildFlags) {
 	flags.BoolVar(&values.hermetic, "hermetic", false, "build with the pinned Zig toolchain instead of CMake")
 	flags.StringVar(&values.zig, "zig", "", "Zig executable (default: $SNESBUILD_ZIG, project cache, then PATH)")
-	flags.StringVar(&values.sdlInclude, "sdl-include", "", "SDL2 header directory (default: auto-discover)")
-	flags.StringVar(&values.sdlLib, "sdl-lib", "", "SDL2 library directory (default: auto-discover)")
+	flags.StringVar(&values.sdlInclude, "sdl-include", "", "SDL3 header directory (default: auto-discover)")
+	flags.StringVar(&values.sdlLib, "sdl-lib", "", "SDL3 library directory (default: auto-discover)")
 	flags.StringVar(&values.optimize, "optimize", "-O2", "hermetic optimization level")
 	flags.BoolVar(&values.verbose, "verbose", false, "print each hermetic compile command")
 }

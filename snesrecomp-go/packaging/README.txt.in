@@ -35,8 +35,8 @@ IF SOMETHING GOES WRONG
 - macOS says the file is from an unidentified developer: hold Control, click
   run-build.command, choose Open, then Open again. (You only do this once.)
 
-- Linux says SDL2 is missing: install it with your package manager, e.g.
-  "sudo apt install libsdl2-dev", then try again. (macOS and Windows already
+- Linux says SDL3 is missing: install it with your package manager, e.g.
+  "sudo apt install libsdl3-dev", then try again. (macOS and Windows already
   include it.)
 
 

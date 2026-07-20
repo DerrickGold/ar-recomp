@@ -26,7 +26,7 @@ type HermeticOptions struct {
 	ZigPath       string // required: resolved zig executable
 	Jobs          int
 	Optimize      string // defaults to -O2
-	SDLIncludeDir string // discovered when empty and the manifest wants SDL2
+	SDLIncludeDir string // discovered when empty and the manifest wants SDL3
 	SDLLibDir     string
 	Verbose       bool
 	Stdout        io.Writer
@@ -100,9 +100,9 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		includeDirs = append(includeDirs, resolveUnder(paths.Root, include))
 	}
 	sdlBundled := false
-	if manifest.UseSDL2 {
+	if manifest.UseSDL3 {
 		if options.SDLIncludeDir == "" || options.SDLLibDir == "" {
-			includeDir, libDir, bundled, sdlErr := discoverSDL2()
+			includeDir, libDir, bundled, sdlErr := discoverSDL3()
 			if sdlErr != nil {
 				return "", sdlErr
 			}
@@ -115,13 +115,13 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			}
 		}
 		includeDirs = append(includeDirs, options.SDLIncludeDir)
-		// The game includes <SDL.h> (needs the dir that holds SDL.h) while
-		// the SDL headers may self-reference <SDL2/...> (needs its parent).
-		// Add both so every SDL source layout resolves.
-		if strings.EqualFold(filepath.Base(options.SDLIncludeDir), "SDL2") {
+		// The game includes <SDL3/SDL.h>, so the include dir must be the
+		// parent that holds the SDL3/ folder. If a caller instead points at
+		// the SDL3/ leaf itself, add its parent so <SDL3/...> still resolves.
+		if strings.EqualFold(filepath.Base(options.SDLIncludeDir), "SDL3") {
 			includeDirs = append(includeDirs, filepath.Dir(options.SDLIncludeDir))
 		}
-		fmt.Fprintf(options.Stdout, "hermetic: SDL2 headers %s, libraries %s%s\n",
+		fmt.Fprintf(options.Stdout, "hermetic: SDL3 headers %s, libraries %s%s\n",
 			options.SDLIncludeDir, options.SDLLibDir, map[bool]string{true: " (bundled)", false: ""}[sdlBundled])
 	}
 
@@ -210,8 +210,8 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	for _, source := range sources {
 		linkArgs = append(linkArgs, filepath.Join(objectDir, objectName(paths.Root, source)))
 	}
-	if manifest.UseSDL2 {
-		linkArgs = append(linkArgs, "-L"+options.SDLLibDir, "-lSDL2")
+	if manifest.UseSDL3 {
+		linkArgs = append(linkArgs, "-L"+options.SDLLibDir, "-lSDL3")
 		// Look for the SDL runtime beside the game binary first so a copied
 		// (bundled) library wins over system search paths.
 		switch runtime.GOOS {
@@ -247,11 +247,11 @@ func copySDLRuntime(libDir, binaryDir string) ([]string, error) {
 	var patterns []string
 	switch runtime.GOOS {
 	case "darwin":
-		patterns = []string{"libSDL2*.dylib"}
+		patterns = []string{"libSDL3*.dylib"}
 	case "windows":
-		patterns = []string{"SDL2*.dll"}
+		patterns = []string{"SDL3*.dll"}
 	default:
-		patterns = []string{"libSDL2*.so*"}
+		patterns = []string{"libSDL3*.so*"}
 	}
 	var copied []string
 	for _, pattern := range patterns {
@@ -322,67 +322,46 @@ func newestHeaderTime(includeDirs []string) time.Time {
 	return newest
 }
 
-// discoverSDL2 finds SDL2 development files: a copy bundled beside the
-// running executable first (distribution bundle layout: <exe dir>/sdl2/
+// discoverSDL3 finds SDL3 development files: a copy bundled beside the
+// running executable first (distribution bundle layout: <exe dir>/sdl3/
 // include + lib), then pkg-config, then well-known platform prefixes.
-// Explicit --sdl-include/--sdl-lib flags always win; this is only the
-// fallback so both bundles and developer machines work out of the box.
-func discoverSDL2() (includeDir, libDir string, bundled bool, err error) {
+// The include directory returned is the PARENT that contains the SDL3/
+// header folder, matching the game's `#include <SDL3/SDL.h>` convention
+// (sdl3.pc's Cflags reports exactly this parent). Explicit
+// --sdl-include/--sdl-lib flags always win; this is only the fallback so
+// both bundles and developer machines work out of the box.
+func discoverSDL3() (includeDir, libDir string, bundled bool, err error) {
 	if executable, exeErr := os.Executable(); exeErr == nil {
-		base := filepath.Join(filepath.Dir(executable), "sdl2")
+		base := filepath.Join(filepath.Dir(executable), "sdl3")
 		include := filepath.Join(base, "include")
 		lib := filepath.Join(base, "lib")
-		// Bundled headers live under include/SDL2/; point at that leaf so
-		// the game's <SDL.h> resolves (the parent is added by the caller).
-		if directoryExists(filepath.Join(include, "SDL2")) {
-			include = filepath.Join(include, "SDL2")
-		}
-		if directoryExists(include) && directoryExists(lib) {
+		// Bundled headers live under include/SDL3/; the include dir stays the
+		// parent so the game's <SDL3/SDL.h> resolves.
+		if directoryExists(filepath.Join(include, "SDL3")) && directoryExists(lib) {
 			return include, lib, true, nil
 		}
 	}
 	if pkgConfig, lookErr := exec.LookPath("pkg-config"); lookErr == nil {
-		includeOut, includeErr := exec.Command(pkgConfig, "--cflags-only-I", "sdl2").Output()
-		libOut, libErr := exec.Command(pkgConfig, "--libs-only-L", "sdl2").Output()
-		include := sdlIncludeFlagValue(string(includeOut))
+		includeOut, includeErr := exec.Command(pkgConfig, "--cflags-only-I", "sdl3").Output()
+		libOut, libErr := exec.Command(pkgConfig, "--libs-only-L", "sdl3").Output()
+		include := firstFlagValue(string(includeOut), "-I")
 		lib := firstFlagValue(string(libOut), "-L")
 		if includeErr == nil && libErr == nil && include != "" && lib != "" {
 			return include, lib, false, nil
 		}
 	}
 	prefixes := []string{
-		"/opt/homebrew/opt/sdl2", "/opt/homebrew/opt/sdl2-compat",
-		"/usr/local/opt/sdl2", "/usr/local/opt/sdl2-compat",
-		"/usr", "/usr/local",
+		"/opt/homebrew/opt/sdl3", "/usr/local/opt/sdl3",
+		"/opt/homebrew", "/usr/local", "/usr",
 	}
 	for _, prefix := range prefixes {
-		include := filepath.Join(prefix, "include", "SDL2")
+		include := filepath.Join(prefix, "include")
 		lib := filepath.Join(prefix, "lib")
-		if directoryExists(include) && directoryExists(lib) {
+		if directoryExists(filepath.Join(include, "SDL3")) && directoryExists(lib) {
 			return include, lib, false, nil
 		}
 	}
-	return "", "", false, fmt.Errorf("SDL2 development files not found; pass --sdl-include and --sdl-lib")
-}
-
-// sdlIncludeFlagValue picks the include directory that actually contains
-// SDL.h: project sources use `#include <SDL.h>`, so the .../SDL2 entry wins
-// over a bare parent include root when pkg-config reports both.
-func sdlIncludeFlagValue(output string) string {
-	fallback := ""
-	for _, field := range strings.Fields(output) {
-		value := strings.TrimPrefix(field, "-I")
-		if value == field || value == "" {
-			continue
-		}
-		if filepath.Base(value) == "SDL2" {
-			return value
-		}
-		if fallback == "" {
-			fallback = value
-		}
-	}
-	return fallback
+	return "", "", false, fmt.Errorf("SDL3 development files not found; pass --sdl-include and --sdl-lib")
 }
 
 func firstFlagValue(output, prefix string) string {

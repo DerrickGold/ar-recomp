@@ -3,7 +3,7 @@
 #include "settings.h"
 #include "settings_overlay.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -96,9 +96,9 @@ int main(void) {
   if (surface_width <= 0) surface_width = 640;
   if (surface_height <= 0) surface_height = 480;
 
-  CHECK(SDL_Init(SDL_INIT_VIDEO) == 0);
-  SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(
-      0, surface_width, surface_height, 32, SDL_PIXELFORMAT_ARGB8888);
+  CHECK(SDL_Init(SDL_INIT_VIDEO));
+  SDL_Surface *surface = SDL_CreateSurface(
+      surface_width, surface_height, SDL_PIXELFORMAT_ARGB8888);
   CHECK(surface != NULL);
   SDL_Renderer *renderer = surface ? SDL_CreateSoftwareRenderer(surface) : NULL;
   CHECK(renderer != NULL);
@@ -117,12 +117,12 @@ int main(void) {
         (SDL_Rect){0, 0, surface_width, surface_height});
     SDL_RenderPresent(renderer);
     const char *preview = getenv("AR_OVERLAY_TEST_BMP");
-    if (preview && preview[0]) CHECK(SDL_SaveBMP(surface, preview) == 0);
+    if (preview && preview[0]) CHECK(SDL_SaveBMP(surface, preview));
   }
 
   /* The overlay opens on primary navigation. B enters Display; only then do
    * Up/Down select rows and Left/Right edit values. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
@@ -149,10 +149,10 @@ int main(void) {
 
   /* Audio frequency is likewise a bounded preset selector, not an arbitrary
    * integer editor. Audio starts with Enable audio, then Audio frequency. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(SettingsOverlay_IsOpen());
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.audio_frequency == kAudioFrequency_48000);
@@ -160,11 +160,11 @@ int main(void) {
 
   /* Save Editor follows Cheats. Its panel title names the active edit
    * section, while backend/arming stay global rows. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.save_backend == 1);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
@@ -179,7 +179,7 @@ int main(void) {
     SettingsOverlay_Render(
         (SDL_Rect){0, 0, surface_width, surface_height});
     SDL_RenderPresent(renderer);
-    CHECK(SDL_SaveBMP(surface, save_preview) == 0);
+    CHECK(SDL_SaveBMP(surface, save_preview));
   }
 
   /* The default Progress page is taller than the visible panel. Verify its
@@ -187,32 +187,32 @@ int main(void) {
    * through the normal observer path. We started on row 1 (Allow save edits). */
   for (int i = 0; i < 15; i++)
     CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(s_action_calls == 1);
   CHECK(s_action_desc == Settings_Find("save_export_ini"));
   s_action_calls = 0;
   s_action_desc = NULL;
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 
   /* Move once more to Extras. Bridge-free limit is first, followed by Turbo
    * multiplier; warp and quick-state rows remain hidden. */
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.fix_bridge_limit);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(s_action_calls == 1);
   CHECK(s_action_desc == Settings_Find("toggle_pause"));
 
   /* Inspector is a real submenu: its first row makes the enabled state
    * explicit, its second row dispatches the complete scene-asset dump, and
    * the remainder is supplied by the read-only live-info provider. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(SettingsOverlay_IsOpen());
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.scene_inspector);
   if (renderer) {
@@ -222,24 +222,24 @@ int main(void) {
     CHECK(s_inspector_info_calls == calls_before + 1);
   }
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(s_action_calls == 2);
   CHECK(s_action_desc == Settings_Find("dump_scene_assets"));
 
   /* Restart and Exit remain direct primary-navigation leaves. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(s_action_calls == 3);
   CHECK(s_action_desc == Settings_Find("restart_game"));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(s_action_calls == 4);
   CHECK(s_action_desc == Settings_Find("exit_desktop"));
 
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, true));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, true));
   CHECK(SettingsOverlay_IsOpen());
-  CHECK(SettingsOverlay_HandleKey(SDLK_x, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(!SettingsOverlay_IsOpen());
   SettingsOverlay_Open();
   CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, true));
@@ -265,7 +265,7 @@ int main(void) {
     SDL_RenderPresent(renderer);
     const char *debug_preview = getenv("AR_OVERLAY_DEBUG_TEST_BMP");
     if (debug_preview && debug_preview[0])
-      CHECK(SDL_SaveBMP(surface, debug_preview) == 0);
+      CHECK(SDL_SaveBMP(surface, debug_preview));
     SDL_Rect panel_before = {0};
     CHECK(SettingsOverlay_GetDebugPanelRect(&panel_before));
     CHECK(panel_before.y < surface_height / 2);
@@ -308,7 +308,7 @@ int main(void) {
   SettingsOverlay_Destroy();
   Settings_SetActionObserver(NULL);
   SDL_DestroyRenderer(renderer);
-  SDL_FreeSurface(surface);
+  SDL_DestroySurface(surface);
   SDL_Quit();
   remove(settings_path);
   remove(settings_temporary);

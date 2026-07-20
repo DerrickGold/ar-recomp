@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 /* Host-owned settings overlay. It consumes SDL input before the SNES joypad
  * path and renders after the emulated framebuffer has been composited. */

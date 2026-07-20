@@ -9,7 +9,7 @@
 #
 #  * Single platform (-DSNESBUILD_GOOS/-GOARCH, set by the package-* presets):
 #    cross-builds snesbuild, stages that platform's pinned build dependencies
-#    (Zig, and prebuilt SDL2 where an official redistributable exists), and
+#    (Zig, and prebuilt SDL3 where an official redistributable exists), and
 #    assembles a STANDALONE bundle with the whole buildable game project so a
 #    user needs only this archive and their own ROM — no repo checkout, no
 #    developer tools. Go cross-compiles every target from any host.
@@ -133,63 +133,66 @@ if(NOT IS_DIRECTORY ${_zig_stage}/${_zig_release})
     endif()
 endif()
 
-# ── Bundled SDL2 (official redistributables; zlib license) ───────────────────
-set(SNESBUILD_SDL2_VERSION "2.32.10" CACHE STRING "Bundled SDL2 release")
-set(_sdl_base "https://github.com/libsdl-org/SDL/releases/download/release-${SNESBUILD_SDL2_VERSION}")
-set(_sdl_stage ${CMAKE_BINARY_DIR}/deps/sdl2)
-set(SNESBUILD_SDL2_BUNDLED FALSE)
+# ── Bundled SDL3 (official redistributables; zlib license) ───────────────────
+set(SNESBUILD_SDL3_VERSION "3.4.12" CACHE STRING "Bundled SDL3 release")
+set(_sdl_base "https://github.com/libsdl-org/SDL/releases/download/release-${SNESBUILD_SDL3_VERSION}")
+set(_sdl_stage ${CMAKE_BINARY_DIR}/deps/sdl3)
+set(SNESBUILD_SDL3_BUNDLED FALSE)
 
 if(SNESBUILD_GOOS STREQUAL "darwin")
     if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
         message(FATAL_ERROR "macOS bundles must be packaged on a macOS host")
     endif()
     find_program(SEVENZIP_EXECUTABLE NAMES 7zz 7z REQUIRED
-        DOC "7-Zip, used to extract the SDL2 .dmg without mounting it")
-    set(_sdl_dmg SDL2-${SNESBUILD_SDL2_VERSION}.dmg)
+        DOC "7-Zip, used to extract the SDL3 .dmg without mounting it")
+    set(_sdl_dmg SDL3-${SNESBUILD_SDL3_VERSION}.dmg)
     file(DOWNLOAD ${_sdl_base}/${_sdl_dmg} ${_cache_dir}/${_sdl_dmg}
-        EXPECTED_HASH SHA256=4a7ac31640d70214e848f994be8a12849c0f97918a7e6c2e27a40036166d1a7f)
-    if(NOT EXISTS ${_sdl_stage}/lib/libSDL2.dylib)
+        EXPECTED_HASH SHA256=c77d36d9393bb5481e38d222b75a1a63ab16274457b3d18c63fef90aaf5fc93b)
+    if(NOT EXISTS ${_sdl_stage}/lib/libSDL3.dylib)
         file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/dmg)
         file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/dmg)
         execute_process(COMMAND ${SEVENZIP_EXECUTABLE} x -y
             -o${CMAKE_BINARY_DIR}/deps/dmg ${_cache_dir}/${_sdl_dmg}
             OUTPUT_QUIET ERROR_QUIET)
+        # SDL3 ships the macOS binary inside an xcframework as a universal
+        # (arm64 + x86_64) library, so the one dmg serves both arch presets.
         file(GLOB_RECURSE _framework_binary
-            ${CMAKE_BINARY_DIR}/deps/dmg/*/SDL2.framework/Versions/A/SDL2)
+            ${CMAKE_BINARY_DIR}/deps/dmg/*/SDL3.xcframework/macos-arm64_x86_64/SDL3.framework/Versions/A/SDL3)
         if(NOT _framework_binary)
-            message(FATAL_ERROR "SDL2.framework not found inside ${_sdl_dmg}")
+            message(FATAL_ERROR "SDL3.framework not found inside ${_sdl_dmg}")
         endif()
         list(GET _framework_binary 0 _framework_binary)
         get_filename_component(_framework_dir ${_framework_binary} DIRECTORY)
         file(MAKE_DIRECTORY ${_sdl_stage}/lib)
-        file(COPY ${_framework_dir}/Headers/ DESTINATION ${_sdl_stage}/include/SDL2)
-        file(COPY_FILE ${_framework_binary} ${_sdl_stage}/lib/libSDL2.dylib)
-        execute_process(COMMAND install_name_tool -id "@rpath/libSDL2.dylib"
-            ${_sdl_stage}/lib/libSDL2.dylib COMMAND_ERROR_IS_FATAL ANY)
+        file(COPY ${_framework_dir}/Headers/ DESTINATION ${_sdl_stage}/include/SDL3)
+        file(COPY_FILE ${_framework_binary} ${_sdl_stage}/lib/libSDL3.dylib)
+        execute_process(COMMAND install_name_tool -id "@rpath/libSDL3.dylib"
+            ${_sdl_stage}/lib/libSDL3.dylib COMMAND_ERROR_IS_FATAL ANY)
         execute_process(COMMAND codesign --force --sign - --timestamp=none
-            ${_sdl_stage}/lib/libSDL2.dylib COMMAND_ERROR_IS_FATAL ANY)
+            ${_sdl_stage}/lib/libSDL3.dylib COMMAND_ERROR_IS_FATAL ANY)
     endif()
-    set(SNESBUILD_SDL2_BUNDLED TRUE)
+    set(SNESBUILD_SDL3_BUNDLED TRUE)
 elseif(SNESBUILD_GOOS STREQUAL "windows" AND SNESBUILD_GOARCH STREQUAL "amd64")
-    set(_sdl_mingw SDL2-devel-${SNESBUILD_SDL2_VERSION}-mingw.tar.gz)
+    set(_sdl_mingw SDL3-devel-${SNESBUILD_SDL3_VERSION}-mingw.tar.gz)
     file(DOWNLOAD ${_sdl_base}/${_sdl_mingw} ${_cache_dir}/${_sdl_mingw}
-        EXPECTED_HASH SHA256=83a5d74012311edc3c0d40ea6faecbe57ad692aa033fa5dc273cc937e3938ff2)
-    if(NOT EXISTS ${_sdl_stage}/lib/SDL2.dll)
+        EXPECTED_HASH SHA256=ea8071241b934e1feec0337f7d78807a5004de9a500dba1942aaf615a988d7a2)
+    if(NOT EXISTS ${_sdl_stage}/lib/SDL3.dll)
         file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/mingw)
         file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/mingw)
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${_cache_dir}/${_sdl_mingw}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/deps/mingw COMMAND_ERROR_IS_FATAL ANY)
-        set(_mingw_root ${CMAKE_BINARY_DIR}/deps/mingw/SDL2-${SNESBUILD_SDL2_VERSION}/x86_64-w64-mingw32)
+        set(_mingw_root ${CMAKE_BINARY_DIR}/deps/mingw/SDL3-${SNESBUILD_SDL3_VERSION}/x86_64-w64-mingw32)
         file(MAKE_DIRECTORY ${_sdl_stage}/lib)
-        file(COPY ${_mingw_root}/include/SDL2/ DESTINATION ${_sdl_stage}/include/SDL2)
-        file(COPY ${_mingw_root}/lib/libSDL2.dll.a ${_mingw_root}/lib/libSDL2main.a
-            DESTINATION ${_sdl_stage}/lib)
-        file(COPY_FILE ${_mingw_root}/bin/SDL2.dll ${_sdl_stage}/lib/SDL2.dll)
+        file(COPY ${_mingw_root}/include/SDL3/ DESTINATION ${_sdl_stage}/include/SDL3)
+        # SDL3 dropped the separate SDLmain static lib; only the import lib
+        # for the DLL is needed to link.
+        file(COPY ${_mingw_root}/lib/libSDL3.dll.a DESTINATION ${_sdl_stage}/lib)
+        file(COPY_FILE ${_mingw_root}/bin/SDL3.dll ${_sdl_stage}/lib/SDL3.dll)
     endif()
-    set(SNESBUILD_SDL2_BUNDLED TRUE)
+    set(SNESBUILD_SDL3_BUNDLED TRUE)
 else()
-    message(STATUS "No official SDL2 redistributable for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH}; "
-        "the run script will fall back to a system SDL2")
+    message(STATUS "No official SDL3 redistributable for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH}; "
+        "the run script will fall back to a system SDL3")
 endif()
 
 # ── One-click run script per platform ────────────────────────────────────────
@@ -241,8 +244,8 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/templates/hd-README.txt
 install(PROGRAMS ${_snesbuild} DESTINATION utils/tools)
 install(DIRECTORY ${_zig_stage}/${_zig_release} DESTINATION utils/tools/toolchain
     USE_SOURCE_PERMISSIONS)
-if(SNESBUILD_SDL2_BUNDLED)
-    install(DIRECTORY ${_sdl_stage}/ DESTINATION utils/tools/sdl2 USE_SOURCE_PERMISSIONS)
+if(SNESBUILD_SDL3_BUNDLED)
+    install(DIRECTORY ${_sdl_stage}/ DESTINATION utils/tools/sdl3 USE_SOURCE_PERMISSIONS)
 endif()
 
 # ── Post-package leak gate ───────────────────────────────────────────────────
@@ -251,7 +254,7 @@ endif()
 # Third-party payloads (bundled toolchain/SDL, upstream stb) are exempt from
 # the string scan.
 set(SNESBUILD_ALLOWED_TOPLEVEL "${_run_script_name}" README.txt utils)
-set(SNESBUILD_SCAN_EXEMPT_DIRS utils/tools/toolchain utils/tools/sdl2 utils/third_party)
+set(SNESBUILD_SCAN_EXEMPT_DIRS utils/tools/toolchain utils/tools/sdl3 utils/third_party)
 set(_leak_paths "${CMAKE_CURRENT_SOURCE_DIR}" "${GAME_ROOT}")
 if(DEFINED ENV{HOME} AND NOT "$ENV{HOME}" STREQUAL "")
     list(APPEND _leak_paths "$ENV{HOME}")

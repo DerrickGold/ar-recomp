@@ -295,7 +295,7 @@ Actions are descriptor-driven but intentionally absent from `settings.ini`;
 their stored parameters remain ordinary persistent descriptors even when a
 developer-only command is hidden from the overlay.
 
-The current ActRaiser target is C and links SDL2 only. A reusable RmlUi launcher
+The current ActRaiser target is C and links SDL3 only. A reusable RmlUi launcher
 exists under `snesrecomp-go/runtime/src/launcher/`, but it is not part of
 `snesrecomp-go/runtime/runner.cmake` and expects C++ plus an existing OpenGL 3.3 context; ActRaiser
 currently presents with `SDL_Renderer`. The implemented overlay is therefore a

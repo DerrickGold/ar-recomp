@@ -27,15 +27,15 @@ done
   $ROOT
 then run this again."
 
-# Linux has no single portable SDL2 redistributable, so it is not bundled;
+# Linux has no single portable SDL3 redistributable, so it is not bundled;
 # rely on the system package. Give a clear hint if it is missing.
-if ! pkg-config --exists sdl2 2>/dev/null \
-        && [ ! -e /usr/lib/libSDL2-2.0.so.0 ] \
-        && [ ! -e /usr/lib/x86_64-linux-gnu/libSDL2-2.0.so.0 ]; then
-    fail "SDL2 is not installed. Install it first, for example:
-  Debian/Ubuntu:  sudo apt install libsdl2-dev
-  Fedora:         sudo dnf install SDL2-devel
-  Arch:           sudo pacman -S sdl2
+if ! pkg-config --exists sdl3 2>/dev/null \
+        && [ ! -e /usr/lib/libSDL3.so.0 ] \
+        && [ ! -e /usr/lib/x86_64-linux-gnu/libSDL3.so.0 ]; then
+    fail "SDL3 is not installed. Install it first, for example:
+  Debian/Ubuntu:  sudo apt install libsdl3-dev
+  Fedora:         sudo dnf install SDL3-devel
+  Arch:           sudo pacman -S sdl3
 then run this again."
 fi
 

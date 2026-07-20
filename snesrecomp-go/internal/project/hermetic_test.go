@@ -82,21 +82,10 @@ func TestNewestHeaderTime(t *testing.T) {
 	}
 }
 
-func TestSDLIncludeFlagValue(t *testing.T) {
-	got := sdlIncludeFlagValue("-I/opt/homebrew/include -I/opt/homebrew/include/SDL2")
-	if got != "/opt/homebrew/include/SDL2" {
-		t.Fatalf("got %q", got)
-	}
-	if got := sdlIncludeFlagValue("-I/plain/include"); got != "/plain/include" {
-		t.Fatalf("fallback: %q", got)
-	}
-	if got := sdlIncludeFlagValue(""); got != "" {
-		t.Fatalf("empty: %q", got)
-	}
-}
-
 func TestFirstFlagValue(t *testing.T) {
-	if got := firstFlagValue("-I/usr/include/SDL2 -D_THREAD_SAFE", "-I"); got != "/usr/include/SDL2" {
+	// SDL3's sdl3.pc reports the parent include dir (the game includes
+	// <SDL3/SDL.h>), so the first -I is taken verbatim.
+	if got := firstFlagValue("-I/opt/homebrew/include -D_THREAD_SAFE", "-I"); got != "/opt/homebrew/include" {
 		t.Fatalf("got %q", got)
 	}
 	if got := firstFlagValue("", "-I"); got != "" {

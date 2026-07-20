@@ -25,7 +25,7 @@ type Manifest struct {
 	Includes []string // game include directories
 	Defines  []string // NAME or NAME=VALUE
 	Link     []string // extra linker arguments, e.g. -lm
-	UseSDL2  bool     // discover SDL2 headers/libs and link -lSDL2
+	UseSDL3  bool     // discover SDL3 headers/libs and link -lSDL3
 }
 
 // ManifestFileName is the expected file name at the project root.
@@ -68,8 +68,8 @@ func LoadManifest(path string) (Manifest, error) {
 			manifest.Defines = append(manifest.Defines, value)
 		case "link":
 			manifest.Link = append(manifest.Link, value)
-		case "sdl2":
-			manifest.UseSDL2 = value == "true" || value == "1" || value == "on"
+		case "sdl3":
+			manifest.UseSDL3 = value == "true" || value == "1" || value == "on"
 		default:
 			return Manifest{}, fmt.Errorf("%s:%d: unknown key %q", path, lineNumber, key)
 		}

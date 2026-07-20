@@ -49,8 +49,8 @@ should call `snesbuild` directly.
 `snesbuild build --hermetic` compiles the entire game — engine runtime, game
 sources, and generated banks — with a pinned [Zig](https://ziglang.org)
 toolchain (`zig cc`, a self-contained clang+lld) and links the executable
-directly. CMake, Xcode CLT/gcc, and SDL2 *development packages* are not
-required; only the SDL2 runtime library remains an external input, and the
+directly. CMake, Xcode CLT/gcc, and SDL3 *development packages* are not
+required; only the SDL3 runtime library remains an external input, and the
 planned platform bundle will carry that beside the executable.
 
 ```sh
@@ -71,7 +71,7 @@ Inputs are split along the same boundary as the redistribution rules:
   the engine's source list (parsed directly, so the CMake and hermetic builds
   cannot drift);
 - `snesbuild.ini` at the project root declares the game half: target name,
-  game sources, includes, defines, and SDL2 usage. `snesbuild doctor`
+  game sources, includes, defines, and SDL3 usage. `snesbuild doctor`
   cross-checks it against the game target in `CMakeLists.txt` and warns on
   drift;
 - generated banks are globbed from `src/gen` as always.
@@ -88,8 +88,8 @@ developer workflow; hermetic is the distribution path.
 |---|---|
 | Run a downloaded `snesbuild doctor` or `regen` | `snesbuild`, this project, and the user's local ROM |
 | Build `snesbuild` from source | Go 1.24+ |
-| Compile the game today | CMake, a C11 compiler, SDL2 development files, and platform SDK/linker support |
-| Run the compiled game | SDL2 runtime plus the user's local ROM |
+| Compile the game today | CMake, a C11 compiler, SDL3 development files, and platform SDK/linker support |
+| Run the compiled game | SDL3 runtime plus the user's local ROM |
 
 The Go binary has no third-party Go or runtime dependencies. It uses Go's
 standard library for path handling, worker selection, process execution, RTS
@@ -140,14 +140,14 @@ actraiser-recomp-<platform>/
     ├── game-assets/        manifest template + empty audio/+hd/ (no media ships)
     ├── tools/snesbuild     the driver (stripped, git-describe-stamped)
     ├── tools/toolchain/zig-*/   pinned C compiler (Zig 0.16.0)
-    ├── tools/sdl2/         bundled SDL2 (macOS, Windows x86_64)
+    ├── tools/sdl3/         bundled SDL3 (macOS, Windows x86_64)
     └── LICENSE, ATTRIBUTION.md
 ```
 
 The only things deliberately absent are the ROM (the user supplies it), the
 ROM-derived generated C (regenerated locally), and the media assets — the
 `game-assets/manifest.ini` ships as a template mapping every song/graphic slot
-so users drop in their own files. The bundled SDL2 comes from SDL's official
+so users drop in their own files. The bundled SDL3 comes from SDL's official
 redistributables (universal macOS `.dmg`; Windows mingw archive), both zlib
 licensed; Linux ships no SDL (no single portable redistributable) and the run
 script points the user at their package manager.
@@ -179,7 +179,7 @@ removed from the environment, builds from the ROM, deposits the game and
 A post-package **leak gate** re-extracts every archive and fails packaging if
 an unreviewed top-level entry appears (only `README.txt`, the run script, and
 `utils/` are allowed) or any first-party file contains a build-machine path;
-third-party payloads under `utils/tools/toolchain/`, `utils/tools/sdl2/`, and
+third-party payloads under `utils/tools/toolchain/`, `utils/tools/sdl3/`, and
 `utils/third_party/` are exempt from the string scan. `-trimpath` keeps such
 paths out of the Go binary to begin with; the gate proves it stays that way
 across the whole bundle (≈145 first-party files scanned per archive).
@@ -193,7 +193,7 @@ across the whole bundle (≈145 first-party files scanned per archive).
    carry the `-dirty` stamp) and publish the artifacts + checksums.
 3. **Windows/Linux runtime validation.** All six bundles cross-build and the
    full standalone flow is verified end-to-end on macOS; the built *game* has
-   only been run on macOS, so the Windows SDL2main/WinMain path and the Linux
+   only been run on macOS, so the Windows SDL3/WinMain path and the Linux
    system-SDL fallback still need a real run on those hosts.
 4. **`--allow-stubs` decision.** The one-click flow currently passes it so
    regen always completes; closing the hard-stub backlog would let the shipped

@@ -42,7 +42,7 @@ the distinction matters:
   it's regenerated locally by everyone who builds this project, from their own
   ROM.
 
-Layered on top of the recompiled game logic is a hand-written runtime — SDL2
+Layered on top of the recompiled game logic is a hand-written runtime — SDL3
 windowing/input, a PPU/APU (video/audio) reimplementation, save-state handling,
 and a growing set of "HLE" (high-level emulation) shims that replace timing- or
 hardware-dependent ROM routines with equivalent native code. That runtime layer
@@ -167,7 +167,7 @@ ActRaiserRecomp/
 │   ├── hd/                    # your HD art (*.png) — gitignored
 │   └── audio/                 # your music (*.ogg) — gitignored
 ├── src/
-│   ├── main.c                 # SDL2 entry point, input, frame loop, config
+│   ├── main.c                 # SDL3 entry point, input, frame loop, config
 │   ├── actraiser_rtl.c        # game-specific HLE/runtime glue + cheats
 │   ├── actraiser_spc_player.c # SPC/audio upload handling
 │   ├── hd_replacements.c      # HD-art manifest parsing + per-frame gates
@@ -220,7 +220,7 @@ The distribution bundles are the zero-setup path: a player downloads one
 archive for their platform, drops in their own ROM, and runs one script — no
 CMake, compiler, SDL, or Go required, and no repository checkout. Each bundle
 carries the whole buildable project plus a pinned C toolchain (Zig) and, on
-macOS/Windows, SDL2; the game's C is generated locally from the player's ROM
+macOS/Windows, SDL3; the game's C is generated locally from the player's ROM
 (never shipped), and the folder exposes only a `README.txt` and a `run-build`
 script, with everything else tucked under `utils/`. Running `run-build` once
 builds the game and writes a `run-game` script; the player opens `run-game` to
@@ -233,7 +233,7 @@ To **produce** all six bundles from a source checkout (into `release/`, named
 make release
 ```
 
-Go and CMake are the only host requirements — the C toolchain and SDL2 are
+Go and CMake are the only host requirements — the C toolchain and SDL3 are
 downloaded and bundled automatically. Full details, layout, and the current
 signing/CI gaps are in [`docs/BUILD_TOOLING.md`](docs/BUILD_TOOLING.md).
 
@@ -245,7 +245,7 @@ signing/CI gaps are in [`docs/BUILD_TOOLING.md`](docs/BUILD_TOOLING.md).
 - **CMake** ≥ 3.16 — for the developer CMake presets (not needed for `--hermetic`)
 - **A C11 compiler** (clang or gcc) — likewise (the hermetic path uses its own
   bundled Zig instead)
-- **SDL2** (development package/headers) — the only external library this links
+- **SDL3** (development package/headers) — the only external library this links
   against; auto-discovered by both build paths, and bundled outright in the
   distribution package (so end users need nothing)
 - **git**
@@ -262,20 +262,20 @@ distribution bundles are documented in
 
 The `brew`/`apt` lines below install the CMake-preset build's dependencies. The
 hermetic path drops the CMake and C-compiler requirements (it uses its own
-bundled Zig), so it needs only Go and SDL2 development files — and the
-distribution bundle removes even the SDL2 requirement by carrying it inside.
+bundled Zig), so it needs only Go and SDL3 development files — and the
+distribution bundle removes even the SDL3 requirement by carrying it inside.
 
 **macOS** (verified — this is the only platform actually built/tested so far):
 
 ```sh
-brew install cmake sdl2 go
+brew install cmake sdl3 go
 ```
 
 **Linux** (Debian/Ubuntu — same CMake setup, untested by this project but
-should work; the build has no OS-specific code beyond standard SDL2/POSIX):
+should work; the build has no OS-specific code beyond standard SDL3/POSIX):
 
 ```sh
-sudo apt install build-essential cmake libsdl2-dev golang-go
+sudo apt install build-essential cmake libsdl3-dev golang-go
 ```
 
 **Windows**: the bundled runtime has MSVC-oriented support (see
@@ -308,7 +308,7 @@ If you get it building, a PR documenting the steps would help.
 4. **Compile the game.** Two options:
 
    - **Hermetic (no CMake/compiler/SDL install)** — compiles with a pinned Zig
-     toolchain that `snesbuild` downloads on first use, discovering SDL2
+     toolchain that `snesbuild` downloads on first use, discovering SDL3
      automatically:
 
      ```sh
@@ -317,7 +317,7 @@ If you get it building, a PR documenting the steps would help.
      ```
 
    - **CMake presets (the classic developer build)** — needs CMake, a C11
-     compiler, and SDL2 development files:
+     compiler, and SDL3 development files:
 
      ```sh
      cmake --preset play && cmake --build --preset play

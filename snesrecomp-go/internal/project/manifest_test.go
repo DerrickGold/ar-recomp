@@ -23,7 +23,7 @@ func TestLoadManifest(t *testing.T) {
 # comment
 [project]
 name = MyGame
-sdl2 = true
+sdl3 = true
 link = -lm
 define = FOO=1
 define = BAR
@@ -35,7 +35,7 @@ source = src/game.c
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Name != "MyGame" || !manifest.UseSDL2 || manifest.Std != "c11" {
+	if manifest.Name != "MyGame" || !manifest.UseSDL3 || manifest.Std != "c11" {
 		t.Fatalf("unexpected manifest: %+v", manifest)
 	}
 	if len(manifest.Sources) != 2 || manifest.Sources[1] != "src/game.c" {

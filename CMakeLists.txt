@@ -15,7 +15,7 @@ include(CTest)
 set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
 include(${SNESRECOMP_GO_ROOT}/runtime/runner.cmake)
 
-find_package(SDL2 REQUIRED)
+find_package(SDL3 REQUIRED)
 
 set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
     "Directory containing generated recomp C translation units")
@@ -101,7 +101,6 @@ target_include_directories(ActRaiserRecomp PRIVATE
     ${CMAKE_SOURCE_DIR}/recomp
     ${CMAKE_SOURCE_DIR}/third_party/stb
     ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
-    ${SDL2_INCLUDE_DIRS}
 )
 
 if(SNESRECOMP_ENABLE_TRACE)
@@ -141,7 +140,7 @@ if(AR_SANITIZE AND NOT MSVC)
 endif()
 
 target_link_libraries(ActRaiserRecomp PRIVATE
-    ${SDL2_LIBRARIES}
+    SDL3::SDL3
     m
 )
 
@@ -166,14 +165,50 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_settings_overlay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
-        ${SDL2_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_settings_overlay_test PRIVATE
-        ${SDL2_LIBRARIES}
+        SDL3::SDL3
         m
     )
     add_test(NAME actraiser_settings_overlay COMMAND actraiser_settings_overlay_test)
     set_tests_properties(actraiser_settings_overlay PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+
+    # SDL3 render-pipeline regression guard: presents a known framebuffer
+    # through the same texture/FRect/logical-presentation path main.c uses and
+    # asserts the read-back frame is not black (the prior SDL3 attempt's bug).
+    add_executable(actraiser_render_pipeline_test
+        tests/render_pipeline_test.c
+    )
+    target_link_libraries(actraiser_render_pipeline_test PRIVATE
+        SDL3::SDL3
+        m
+    )
+    add_test(NAME actraiser_render_pipeline
+        COMMAND actraiser_render_pipeline_test)
+    set_tests_properties(actraiser_render_pipeline PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+
+    # End-to-end guard using the REAL PPU: renders a backdrop through the actual
+    # scanline renderer (which writes RGB with alpha=0), presents it through the
+    # SDL3 path, and asserts the frame is visible — catching the SDL3 default
+    # BLENDMODE_BLEND black-screen regression with genuine emulator output.
+    add_executable(actraiser_ppu_render_pipeline_test
+        tests/ppu_render_pipeline_test.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu_old.c
+    )
+    target_include_directories(actraiser_ppu_render_pipeline_test PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_ppu_render_pipeline_test PRIVATE
+        SDL3::SDL3
+        m
+    )
+    add_test(NAME actraiser_ppu_render_pipeline
+        COMMAND actraiser_ppu_render_pipeline_test)
+    set_tests_properties(actraiser_ppu_render_pipeline PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
 
     add_executable(actraiser_hd_manifest_test

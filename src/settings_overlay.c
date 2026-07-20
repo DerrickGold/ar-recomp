@@ -196,7 +196,7 @@ static int s_visible_rows = 9;
 static int s_auto_menu_scale_percent = 100;
 static int s_match_game_scale_percent = 100;
 static char s_status[48];
-static uint32_t s_status_until;
+static Uint64 s_status_until;
 static bool s_editing;
 static char s_edit_buffer[512];
 static SDL_Rect s_debug_panel_rect;
@@ -222,6 +222,19 @@ static SettingsOverlayInspectorInfoProvider s_inspector_info_provider;
 void SettingsOverlay_SetInspectorInfoProvider(
     SettingsOverlayInspectorInfoProvider provider) {
   s_inspector_info_provider = provider;
+}
+
+/* SDL3 render primitives take float rects. Layout math stays integer (it also
+ * feeds the public panel-rect API), so convert only at the draw call. */
+static SDL_FRect ToFRect(SDL_Rect r) {
+  return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };
+}
+
+/* SDL3 SDL_StartTextInput/SDL_StopTextInput require the target window. The
+ * overlay only holds a renderer; recover the window from it. A headless
+ * software renderer (unit tests) has no window, so these become no-ops. */
+static SDL_Window *OverlayWindow(void) {
+  return s_renderer ? SDL_GetRenderWindow(s_renderer) : NULL;
 }
 
 static bool ReadBits(BitReader *reader, int count, unsigned *value) {
@@ -395,17 +408,17 @@ static SDL_Texture *CreateFontAtlas(TextStyle style) {
       s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
       kFontAtlasWidth, kFontAtlasHeight);
   if (texture &&
-      SDL_UpdateTexture(texture, NULL, pixels,
-                        kFontAtlasWidth * (int)sizeof(uint32_t)) != 0) {
+      !SDL_UpdateTexture(texture, NULL, pixels,
+                         kFontAtlasWidth * (int)sizeof(uint32_t))) {
     SDL_DestroyTexture(texture);
     texture = NULL;
   }
   free(pixels);
   if (texture) {
     SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-#if SDL_VERSION_ATLEAST(2, 0, 12)
-    SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
-#endif
+    /* SDL3 textures default to linear filtering; the pixel-art atlases must
+     * sample nearest so glyph edges stay crisp at every scale. */
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
   }
   return texture;
 }
@@ -438,17 +451,17 @@ static SDL_Texture *CreateDebugFontAtlas(void) {
       s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
       kDebugFontAtlasWidth, kDebugFontAtlasHeight);
   if (texture &&
-      SDL_UpdateTexture(texture, NULL, pixels,
-                        kDebugFontAtlasWidth * (int)sizeof(uint32_t)) != 0) {
+      !SDL_UpdateTexture(texture, NULL, pixels,
+                         kDebugFontAtlasWidth * (int)sizeof(uint32_t))) {
     SDL_DestroyTexture(texture);
     texture = NULL;
   }
   free(pixels);
   if (texture) {
     SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-#if SDL_VERSION_ATLEAST(2, 0, 12)
-    SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
-#endif
+    /* SDL3 textures default to linear filtering; the pixel-art atlases must
+     * sample nearest so glyph edges stay crisp at every scale. */
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
   }
   return texture;
 }
@@ -540,16 +553,14 @@ static SDL_Texture *CreateDialogFrameTexture(const uint8_t *rom_data,
       s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
       kDialogAtlasWidth, kDialogAtlasHeight);
   if (texture &&
-      SDL_UpdateTexture(texture, NULL, pixels,
-                        kDialogAtlasWidth * (int)sizeof(uint32_t)) != 0) {
+      !SDL_UpdateTexture(texture, NULL, pixels,
+                         kDialogAtlasWidth * (int)sizeof(uint32_t))) {
     SDL_DestroyTexture(texture);
     texture = NULL;
   }
   if (texture) {
     SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-#if SDL_VERSION_ATLEAST(2, 0, 12)
-    SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
-#endif
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
     fprintf(stderr,
             "[settings-menu] decoded native dialog frame: "
             "chars ROM $%06X, palette ROM $%06X\n",
@@ -681,7 +692,7 @@ static void SaveAcceptedChange(SettingChangeResult result) {
 static void StopEditing(void) {
   if (!s_editing) return;
   s_editing = false;
-  SDL_StopTextInput();
+  if (OverlayWindow()) SDL_StopTextInput(OverlayWindow());
 }
 
 static void BeginEditing(void) {
@@ -698,7 +709,7 @@ static void BeginEditing(void) {
       !strcmp(s_edit_buffer, "Leave as-is"))
     s_edit_buffer[0] = 0;
   s_editing = true;
-  SDL_StartTextInput();
+  if (OverlayWindow()) SDL_StartTextInput(OverlayWindow());
   SetStatus("TYPE VALUE - RETURN APPLIES");
 }
 
@@ -902,7 +913,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
         StopEditing();
         SetStatus("EDIT CANCELLED");
         break;
-      case SDLK_x:       /* SNES A = cancel/back */
+      case SDLK_X:       /* SNES A = cancel/back */
         StopEditing();
         s_submenu_open = false;
         SetStatus("EDIT CANCELLED");
@@ -926,7 +937,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     switch (key) {
       case SDLK_ESCAPE:
       case SDLK_F1:
-      case SDLK_x:       /* SNES A = back/close */
+      case SDLK_X:       /* SNES A = back/close */
         if (!repeat) SettingsOverlay_Close();
         break;
       case SDLK_UP:
@@ -935,7 +946,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
       case SDLK_DOWN:
         MoveCategory(1);
         break;
-      case SDLK_z:       /* SNES B = game-style confirm */
+      case SDLK_Z:       /* SNES B = game-style confirm */
       case SDLK_RETURN:  /* keyboard confirm */
       case SDLK_KP_ENTER:
         if (!repeat) ActivateTopLevelSelection();
@@ -951,7 +962,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     case SDLK_F1:
       if (!repeat) SettingsOverlay_Close();
       break;
-    case SDLK_x:       /* SNES A = back */
+    case SDLK_X:       /* SNES A = back */
       if (!repeat) s_submenu_open = false;
       break;
     case SDLK_UP:
@@ -966,12 +977,12 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     case SDLK_RIGHT:
       ChangeSelectedValue(1);
       break;
-    case SDLK_z:       /* SNES B = game-style confirm */
+    case SDLK_Z:       /* SNES B = game-style confirm */
     case SDLK_RETURN:  /* keyboard confirm */
     case SDLK_KP_ENTER:
       ActivateSelectedRow();
       break;
-    case SDLK_a:       /* SNES Y */
+    case SDLK_A:       /* SNES Y */
       ResetSelectedValue();
       break;
     default:
@@ -1013,7 +1024,7 @@ static void SetDrawColor(uint32_t color) {
 static void FillPixelRect(int x, int y, int width, int height,
                           uint32_t color) {
   if (width <= 0 || height <= 0) return;
-  SDL_Rect rect = { x, y, width, height };
+  SDL_FRect rect = { (float)x, (float)y, (float)width, (float)height };
   SetDrawColor(color);
   SDL_RenderFillRect(s_renderer, &rect);
 }
@@ -1033,10 +1044,11 @@ static void DrawDialogTile(const MenuLayout *layout, int atlas_column,
     kGlyphSize,
     kGlyphSize,
   };
-  SDL_Rect destination =
-      LogicalRect(layout, x, y, kGlyphSize, kGlyphSize);
-  SDL_RenderCopy(s_renderer, s_dialog_frame_texture,
-                 &source, &destination);
+  SDL_FRect destination =
+      ToFRect(LogicalRect(layout, x, y, kGlyphSize, kGlyphSize));
+  SDL_FRect source_f = ToFRect(source);
+  SDL_RenderTexture(s_renderer, s_dialog_frame_texture,
+                    &source_f, &destination);
 }
 
 static void DrawDialogPanel(const MenuLayout *layout,
@@ -1083,15 +1095,15 @@ static void DrawGlyph(const MenuLayout *layout, int x, int y,
   if (!s_glyph_defined[ch]) return;
   SDL_Texture *texture = s_font_textures[style];
   if (!texture) return;
-  SDL_Rect source = {
-    (ch & 15) * kGlyphSize,
-    (ch >> 4) * kGlyphSize,
-    kGlyphSize,
-    kGlyphSize,
+  SDL_FRect source = {
+    (float)((ch & 15) * kGlyphSize),
+    (float)((ch >> 4) * kGlyphSize),
+    (float)kGlyphSize,
+    (float)kGlyphSize,
   };
-  SDL_Rect destination = LogicalRect(
-      layout, x, y, kGlyphSize, kGlyphSize);
-  SDL_RenderCopy(s_renderer, texture, &source, &destination);
+  SDL_FRect destination = ToFRect(LogicalRect(
+      layout, x, y, kGlyphSize, kGlyphSize));
+  SDL_RenderTexture(s_renderer, texture, &source, &destination);
 }
 
 static void DrawTextN(const MenuLayout *layout, int x, int y,
@@ -1130,15 +1142,15 @@ static void DrawDebugGlyph(const MenuLayout *layout, int x, int y,
   const SDL_Color color = kDebugTextColors[style];
   SDL_SetTextureColorMod(s_debug_font_texture, color.r, color.g, color.b);
   SDL_SetTextureAlphaMod(s_debug_font_texture, color.a);
-  SDL_Rect source = {
-    (ch & 15) * kDebugGlyphWidth,
-    (ch >> 4) * kDebugGlyphHeight,
-    kDebugGlyphWidth,
-    kDebugGlyphHeight,
+  SDL_FRect source = {
+    (float)((ch & 15) * kDebugGlyphWidth),
+    (float)((ch >> 4) * kDebugGlyphHeight),
+    (float)kDebugGlyphWidth,
+    (float)kDebugGlyphHeight,
   };
-  SDL_Rect destination = LogicalRect(
-      layout, x, y, kDebugGlyphWidth, kDebugGlyphHeight);
-  SDL_RenderCopy(s_renderer, s_debug_font_texture, &source, &destination);
+  SDL_FRect destination = ToFRect(LogicalRect(
+      layout, x, y, kDebugGlyphWidth, kDebugGlyphHeight));
+  SDL_RenderTexture(s_renderer, s_debug_font_texture, &source, &destination);
 }
 
 static void DrawDebugTextN(const MenuLayout *layout, int x, int y,
@@ -1340,7 +1352,9 @@ static void DrawMenu(const MenuLayout *layout) {
 
   DrawText(layout, left_text_x, left_title_y,
            "SYSTEM SETTINGS", kText_Normal);
-  if (s_status[0] && SDL_TICKS_PASSED(SDL_GetTicks(), s_status_until))
+  /* SDL3 removed SDL_TICKS_PASSED; SDL_GetTicks is now 64-bit and never wraps
+   * in practice, so a direct comparison is exact. */
+  if (s_status[0] && SDL_GetTicks() >= s_status_until)
     s_status[0] = 0;
   SelectFirstPopulatedCategory();
   const SettingDesc *top_level = TopLevelDescForSlot(s_category_slot);
@@ -1477,8 +1491,8 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
   if (!s_open || !s_renderer || !s_font_textures[kText_Normal]) return;
   int output_width = 0;
   int output_height = 0;
-  if (SDL_GetRendererOutputSize(
-          s_renderer, &output_width, &output_height) != 0 ||
+  if (!SDL_GetRenderOutputSize(
+          s_renderer, &output_width, &output_height) ||
       output_width <= 0 || output_height <= 0)
     return;
 
@@ -1505,7 +1519,7 @@ void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
   if (!s_renderer || !s_debug_font_texture || !text || !text[0])
     return;
   int output_width = 0, output_height = 0;
-  if (SDL_GetRendererOutputSize(s_renderer, &output_width, &output_height) ||
+  if (!SDL_GetRenderOutputSize(s_renderer, &output_width, &output_height) ||
       output_width <= 0 || output_height <= 0)
     return;
 
@@ -1677,7 +1691,7 @@ void SettingsOverlay_DragDebugPanel(int output_x, int output_y) {
     return;
   }
   int output_width = 0, output_height = 0;
-  if (SDL_GetRendererOutputSize(s_renderer, &output_width, &output_height) ||
+  if (!SDL_GetRenderOutputSize(s_renderer, &output_width, &output_height) ||
       output_width <= 0 || output_height <= 0)
     return;
   int x = output_x - s_debug_panel_drag_offset_x;
