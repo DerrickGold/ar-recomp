@@ -36,10 +36,37 @@ typedef struct DioramaScrollDelta {
   float bg_dv[4];
 } DioramaScrollDelta;
 
+/* B4-split (followup doc): the camera pose Diorama_Composite renders with,
+ * passed in by the caller instead of Composite reading the game-thread-owned
+ * g_diorama_cam directly (the pre-existing D6 exception this checkpoint
+ * closes). Free Cam mode: the caller passes the authored/persisted pose
+ * (snapshotted through FrameSlot). Dynamic Cam mode: the caller passes the
+ * present-thread's own render camera (baseline pose, later checkpoints add
+ * damped sway on top) — see present.c's g_diorama_render_cam. fov_y isn't
+ * part of this: it's a fixed camera constant (kDioramaFovY, diorama.c),
+ * never authored per-mode. */
+typedef struct DioramaCameraPose {
+  float tilt_x;
+  float tilt_y;
+  float distance;
+} DioramaCameraPose;
+
+/* B4-kick (followup doc): boost's "zoom-punch" multiplies the RESOLVED
+ * distance (1.0 = no change) rather than offsetting DioramaCameraPose's
+ * distance field directly — cam_pose->distance is often the 0 "auto-fit"
+ * sentinel (M5's dead-zone design, see Diorama_Composite's cam.distance
+ * handling), and an additive world-unit offset on top of 0 would still
+ * resolve to <=0 and re-trigger auto-fit, silently eating the punch. A
+ * multiplier applied AFTER auto-fit/dead-zone resolution composes correctly
+ * either way, which is also why this is its own parameter rather than a
+ * 4th DioramaCameraPose field — that struct is reused verbatim for
+ * FrameSlot's settings snapshots (main.c), which have no kick state at all. */
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int active_pixel_aspect, bool ignore_aspect_ratio,
                        int visible_width, SDL_Texture *textures[],
                        uint8_t *pixels[],
-                       const DioramaScrollDelta *scroll_delta);
+                       const DioramaScrollDelta *scroll_delta,
+                       const DioramaCameraPose *cam_pose,
+                       float distance_scale);
 
 void Diorama_FlushSettingsIfDirty(void);

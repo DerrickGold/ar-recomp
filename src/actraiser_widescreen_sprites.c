@@ -51,9 +51,16 @@ typedef enum ActionObjectField {
 } ActionObjectField;
 
 typedef enum SimRecordField {
+  kSimRecord_Behavior = 0x00,
+  kSimRecord_ScriptCursor = 0x02,
+  kSimRecord_FrameTimer = 0x04,
+  kSimRecord_ActorFlags = 0x06,
   kSimRecord_Composition = 0x08,
   kSimRecord_WorldX = 0x0A,
   kSimRecord_WorldY = 0x0C,
+  kSimRecord_Type = 0x0E,
+  kSimRecord_Status = 0x10,
+  kSimRecord_State = 0x12,
 } SimRecordField;
 
 enum {
@@ -742,6 +749,131 @@ static void ws_sim_live_margins(int *left, int *right) {
   *right = available_right < g_ws_extra ? available_right : g_ws_extra;
 }
 
+/* AR_SIMCAT=1 is a read-only ROM-research probe for the simulation rendering
+ * catalogue.  The composition leaves are the one place where record identity,
+ * behavior state, current visual frame, OAM allocation, and live OBJ registers
+ * are all available together.  Log only identity changes so long deterministic
+ * replays remain compact enough to diff and post-process. */
+typedef struct SimCatalogSignature {
+  uint16 composition;
+  uint16 type;
+  uint16 semantic_state;
+  uint8 valid;
+} SimCatalogSignature;
+
+static int ws_sim_catalog_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *e = getenv("AR_SIMCAT");
+    enabled = e && e[0] && e[0] != '0';
+  }
+  return enabled;
+}
+
+static void ws_sim_catalog_record(CpuState *cpu, uint16 record,
+                                  int world_record, uint16 composition,
+                                  uint16 oam_before) {
+  static SimCatalogSignature signatures[
+      kActRaiserSimFixedRecordCount + kActRaiserSimWorldRecordCount];
+  if (!ws_sim_catalog_enabled() ||
+      !ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+                                  g_ram[kActRaiserWram_CurrentMap]))
+    return;
+
+  unsigned index;
+  if (world_record) {
+    index = kActRaiserSimFixedRecordCount +
+        (unsigned)(record - kActRaiserWram_SimWorldRecords) /
+            kActRaiserSimWorldRecordStride;
+  } else {
+    index = (unsigned)(record - kActRaiserWram_SimFixedRecords) /
+        kActRaiserSimFixedRecordStride;
+  }
+  if (index >= sizeof(signatures) / sizeof(signatures[0])) return;
+
+  SimCatalogSignature next = {0};
+  next.composition = composition;
+  next.type = cpu_read16(cpu, cpu->DB,
+                         (uint16)(record + kSimRecord_Type));
+  if (world_record) {
+    next.semantic_state = (uint16)(
+        cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_State)) &
+        0x7FFF);
+  }
+  next.valid = 1;
+
+  SimCatalogSignature *prior = &signatures[index];
+  if (prior->valid && prior->composition == next.composition &&
+      prior->type == next.type &&
+      prior->semantic_state == next.semantic_state)
+    return;
+  *prior = next;
+
+  unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+  unsigned obj1 = g_ppu ? (unsigned)PPU_objTileAdr1(g_ppu) : 0;
+  unsigned obj2 = g_ppu ? (unsigned)PPU_objTileAdr2(g_ppu) : 0;
+  unsigned obsel = g_ppu ? g_ppu->obsel : 0;
+  if (world_record) {
+    uint16 raw_state = cpu_read16(
+        cpu, cpu->DB, (uint16)(record + kSimRecord_State));
+    uint16 status = cpu_read16(
+        cpu, cpu->DB, (uint16)(record + kSimRecord_Status));
+    fprintf(stderr,
+            "[simcat] gf=%u town=%u tier=W idx=%u rec=%04X type=%02X "
+            "state=%04X behavior=%04X script=%04X timer=%04X frame=%04X "
+            "x=%04X y=%04X status=%04X flags=%04X "
+            "f14=%04X f16=%04X f18=%04X vx=%04X vy=%04X "
+            "f1e=%04X f20=%04X f22=%04X b24=%02X b25=%02X "
+            "oam=%03X obsel=%02X obj1=%04X obj2=%04X\n",
+            game_frame, g_ram[kActRaiserWram_CurrentMap],
+            index - kActRaiserSimFixedRecordCount, record,
+            next.type & 0xFF, raw_state,
+            cpu_read16(cpu, cpu->DB,
+                       (uint16)(record + kSimRecord_Behavior)),
+            cpu_read16(cpu, cpu->DB,
+                       (uint16)(record + kSimRecord_ScriptCursor)),
+            cpu_read16(cpu, cpu->DB,
+                       (uint16)(record + kSimRecord_FrameTimer)),
+            composition,
+            cpu_read16(cpu, cpu->DB,
+                       (uint16)(record + kSimRecord_WorldX)),
+            cpu_read16(cpu, cpu->DB,
+                       (uint16)(record + kSimRecord_WorldY)),
+            status,
+            cpu_read16(cpu, cpu->DB,
+                       (uint16)(record + kSimRecord_ActorFlags)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x14)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x16)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x18)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x1A)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x1C)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x1E)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x20)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x22)),
+            cpu_read8(cpu, cpu->DB, (uint16)(record + 0x24)),
+            cpu_read8(cpu, cpu->DB, (uint16)(record + 0x25)),
+            oam_before, obsel, obj1, obj2);
+  } else {
+    uint16 status = cpu_read16(
+        cpu, cpu->DB, (uint16)(record + kSimRecord_Status));
+    fprintf(stderr,
+            "[simcat] gf=%u town=%u tier=F idx=%u rec=%04X list=%04X "
+            "timer=%04X script=%04X loop=%04X base=%04X frame=%04X "
+            "x=%04X y=%04X status=%04X oam=%03X "
+            "obsel=%02X obj1=%04X obj2=%04X\n",
+            game_frame, g_ram[kActRaiserWram_CurrentMap], index, record,
+            next.type,
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x00)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x02)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x04)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x06)),
+            composition,
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0A)),
+            cpu_read16(cpu, cpu->DB, (uint16)(record + 0x0C)),
+            status, oam_before, obsel, obj1, obj2);
+  }
+}
+
 static int ws_sim_camera_debug_enabled(void) {
   static int enabled = -1;
   if (enabled < 0) {
@@ -1014,6 +1146,8 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
 
   uint16 part = cpu_read16(
       cpu, cpu->DB, (uint16)(record + kSimRecord_Composition));
+  ws_sim_catalog_record(cpu, record, world_record, part,
+                        ws_dp16(cpu, 0x98));
   uint16 count = cpu_read8(cpu, cpu->DB, part);
   part = (uint16)(part + 1);
   ws_dp16w(cpu, 0x0E, count);

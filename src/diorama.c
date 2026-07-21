@@ -5,16 +5,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-// #define USE_UPRIGHT_OBJ
-
-/* Codebase convention for boolean env flags (e.g. AR_MXCHECK, main.c):
- * non-null, non-empty, AND not "0" — plain getenv(x)?1:0 wrongly treats
- * FOO=0 the same as FOO=1, since getenv only returns NULL when unset. */
-static bool EnvFlagOn(const char *name) {
-  const char *v = getenv(name);
-  return v && v[0] && v[0] != '0';
-}
-
 /* ── M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish) ────
  *
  * Off by default; requires AR_GPU_SHADERS=1 (main.c, switches the renderer
@@ -88,7 +78,7 @@ static void EnsureBlurShader(SDL_Renderer *renderer) {
       props, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL);
   if (!device) {
     fprintf(stderr, "[gpu-fx] renderer has no GPU device — blur effects "
-                    "disabled (is AR_GPU_SHADERS=1 set?)\n");
+                    "disabled (enable \"GPU shader effects\" in Graphics settings?)\n");
     return;
   }
   SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
@@ -132,26 +122,23 @@ static void EnsureBlurShader(SDL_Renderer *renderer) {
   fprintf(stderr, "[gpu-fx] blur shader ready\n");
 }
 
-/* AR_GPU_FX_SHADOW=1, independent of any other AR_GPU_FX_* toggle (per the
- * session's request to test each effect in isolation). Both this AND
- * AR_GPU_SHADERS=1 (the backend switch, main.c) must be set. */
+/* kSettingCat_Graphics "Soft shadow blur" row, independent of the other
+ * GPU effect toggles. Read fresh every frame (same live-toggle pattern as
+ * the diorama_layer_* visibility settings) — both this AND
+ * gpu_shaders_enabled (the backend switch, main.c) must be on. */
 static bool ShadowBlurEnabled(SDL_Renderer *renderer) {
-  static int enabled = -1;
-  if (enabled < 0) enabled = EnvFlagOn("AR_GPU_FX_SHADOW") ? 1 : 0;
-  if (!enabled) return false;
+  if (!g_settings.gpu_fx_shadow) return false;
   EnsureBlurShader(renderer);
   return g_blur_available;
 }
 
-/* AR_GPU_FX_DOF=1 (§7.2 depth-of-field): reuses the SAME blur shader as the
- * shadow effect (identical 9-tap box blur), just applied to a layer's MAIN
- * draw with a radius scaled by that layer's distance from the focal plane,
- * instead of a fixed radius on the shadow copy. Independent toggle, same
- * AR_GPU_SHADERS=1 prerequisite. */
-static bool DofBlurEnabled(SDL_Renderer *renderer) {
-  static int enabled = -1;
-  if (enabled < 0) enabled = EnvFlagOn("AR_GPU_FX_DOF") ? 1 : 0;
-  if (!enabled) return false;
+/* B5: skybox DoF reuses the same blur shader machinery, but unlike the
+ * effects above it has no separate settings toggle — the skybox mode enum
+ * itself is the opt-in, and blur is inherent to reading as "atmosphere, not
+ * focus" (the doc's framing), not an independent knob. Falls back to a
+ * crisp (unblurred) skybox if the shader is unavailable — still far better
+ * than the void it replaces. */
+static bool SkyboxBlurEnabled(SDL_Renderer *renderer) {
   EnsureBlurShader(renderer);
   return g_blur_available;
 }
@@ -235,7 +222,7 @@ static void EnsureRimLightShader(SDL_Renderer *renderer) {
       props, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL);
   if (!device) {
     fprintf(stderr, "[gpu-fx] renderer has no GPU device — rim light "
-                    "disabled (is AR_GPU_SHADERS=1 set?)\n");
+                    "disabled (enable \"GPU shader effects\" in Graphics settings?)\n");
     return;
   }
   SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
@@ -279,44 +266,45 @@ static void EnsureRimLightShader(SDL_Renderer *renderer) {
   fprintf(stderr, "[gpu-fx] rim light shader ready\n");
 }
 
-/* AR_GPU_FX_RIM=1, independent of AR_GPU_FX_SHADOW (each effect tested in
- * isolation per the session's request). Both this AND AR_GPU_SHADERS=1
- * (the backend switch) must be set. */
+/* kSettingCat_Graphics "Rim lighting" row, independent of the other GPU
+ * effect toggles. Both this AND gpu_shaders_enabled must be on. */
 static bool RimLightEnabled(SDL_Renderer *renderer) {
-  static int enabled = -1;
-  if (enabled < 0) enabled = EnvFlagOn("AR_GPU_FX_RIM") ? 1 : 0;
-  if (!enabled) return false;
+  if (!g_settings.gpu_fx_rim) return false;
   EnsureRimLightShader(renderer);
   return g_rim_light_available;
 }
 
-/* ── Parallax-aware edge AA (AR_GPU_FX_EDGEAA=1) ─────────────────────────
- * Doc §7.2's "parallax-aware anti-aliasing at layer edges." Each BG layer's
- * quad is the same size on the source texture but sits at a different Z, so
- * after perspective projection their outer boundaries (the diorama
- * "shadowbox" side walls) land at slightly different screen positions —
- * the hard rectangular UV cutoff at each layer's edge can look aliased/
- * jaggy at a tilt. This fades alpha to 0 over a few texels near the true
- * UV edge (u_min/u_max/v_min/v_max — NOT assumed to be 0/1, since the
- * widescreen-widened capture only fills [0, snes_width/kPpuBufWidth) of the
- * allocated texture), softening that boundary instead of a hard cut. */
+/* ── Depth of field + parallax-aware edge AA, COMBINED ───────────────────
+ * Doc §7.2's DOF blur and "parallax-aware anti-aliasing at layer edges."
+ * These two target the SAME layer set (BG1/BG2 + their priority-split
+ * halves), and SDL only allows ONE custom fragment shader bound per draw
+ * call — an earlier version of this code picked edge AA over DOF whenever
+ * both were enabled for a layer, which (since both default on) meant DOF
+ * silently never rendered at all (confirmed live). Fixed by doing both in
+ * one shader pass: blur_radius=0 makes the box-blur a no-op (all 9 taps
+ * land on the same texel), edge_feather<=0 skips the edge fade — either
+ * knob independently zeroable, so this one shader correctly serves
+ * DOF-only, edge-AA-only, both together, or (both zero) neither. */
 
 typedef struct {
-  float texel_w, texel_h, u_min, u_max, v_min, v_max, feather, _pad;
-} EdgeAAUniforms;
+  float texel_w, texel_h, blur_radius;
+  float u_min, u_max, v_min, v_max;
+  float edge_feather, _pad;
+} DofEdgeUniforms;
 
-static SDL_GPUShader *g_edge_aa_shader;
-static SDL_GPURenderState *g_edge_aa_state;
-static bool g_edge_aa_init_attempted;
-static bool g_edge_aa_available;
+static SDL_GPUShader *g_dofedge_shader;
+static SDL_GPURenderState *g_dofedge_state;
+static bool g_dofedge_init_attempted;
+static bool g_dofedge_available;
 
-static const char kEdgeAAMSL[] =
+static const char kDofEdgeMSL[] =
 "#include <metal_stdlib>\n"
 "#include <simd/simd.h>\n"
 "using namespace metal;\n"
 "struct type_Context {\n"
-"  float texel_w; float texel_h; float u_min; float u_max;\n"
-"  float v_min; float v_max; float feather; float pad0;\n"
+"  float texel_w; float texel_h; float blur_radius;\n"
+"  float u_min; float u_max; float v_min; float v_max;\n"
+"  float edge_feather; float pad0;\n"
 "};\n"
 "struct main0_out { float4 out_var_SV_Target [[color(0)]]; };\n"
 "struct main0_in {\n"
@@ -329,78 +317,96 @@ static const char kEdgeAAMSL[] =
 "    sampler u_sampler [[sampler(0)]]) {\n"
 "  main0_out out = {};\n"
 "  float2 uv = in.in_var_TEXCOORD0;\n"
-"  float4 c = u_texture.sample(u_sampler, uv);\n"
-"  float du = min(uv.x - Context.u_min, Context.u_max - uv.x);\n"
-"  float dv = min(uv.y - Context.v_min, Context.v_max - uv.y);\n"
-"  float d = min(du, dv);\n"
-"  float texel_avg = (Context.texel_w + Context.texel_h) * 0.5;\n"
-"  float fade = clamp(d / (texel_avg * Context.feather), 0.0, 1.0);\n"
+"  float2 texel = float2(Context.texel_w, Context.texel_h) * Context.blur_radius;\n"
+"  float4 sum = float4(0.0);\n"
+"  sum += u_texture.sample(u_sampler, uv + float2(-texel.x, -texel.y));\n"
+"  sum += u_texture.sample(u_sampler, uv + float2( 0.0,     -texel.y));\n"
+"  sum += u_texture.sample(u_sampler, uv + float2( texel.x, -texel.y));\n"
+"  sum += u_texture.sample(u_sampler, uv + float2(-texel.x,  0.0));\n"
+"  sum += u_texture.sample(u_sampler, uv) * 2.0;\n"
+"  sum += u_texture.sample(u_sampler, uv + float2( texel.x,  0.0));\n"
+"  sum += u_texture.sample(u_sampler, uv + float2(-texel.x,  texel.y));\n"
+"  sum += u_texture.sample(u_sampler, uv + float2( 0.0,      texel.y));\n"
+"  sum += u_texture.sample(u_sampler, uv + float2( texel.x,  texel.y));\n"
+"  float4 c = sum / 10.0;\n"
+"  float fade = 1.0;\n"
+"  if (Context.edge_feather > 0.0) {\n"
+"    float du = min(uv.x - Context.u_min, Context.u_max - uv.x);\n"
+"    float dv = min(uv.y - Context.v_min, Context.v_max - uv.y);\n"
+"    float d = min(du, dv);\n"
+"    float texel_avg = (Context.texel_w + Context.texel_h) * 0.5;\n"
+"    fade = clamp(d / (texel_avg * Context.edge_feather), 0.0, 1.0);\n"
+"  }\n"
 "  float4 vc = in.in_var_COLOR0;\n"
 "  out.out_var_SV_Target = float4(c.rgb * vc.rgb, c.a * fade * vc.a);\n"
 "  return out;\n"
 "}\n";
 
-static void EnsureEdgeAAShader(SDL_Renderer *renderer) {
-  if (g_edge_aa_init_attempted) return;
-  g_edge_aa_init_attempted = true;
+static void EnsureDofEdgeShader(SDL_Renderer *renderer) {
+  if (g_dofedge_init_attempted) return;
+  g_dofedge_init_attempted = true;
 
   SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
   SDL_GPUDevice *device = (SDL_GPUDevice *)SDL_GetPointerProperty(
       props, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL);
   if (!device) {
-    fprintf(stderr, "[gpu-fx] renderer has no GPU device — edge AA "
-                    "disabled (is AR_GPU_SHADERS=1 set?)\n");
+    fprintf(stderr, "[gpu-fx] renderer has no GPU device — DOF/edge AA "
+                    "disabled (enable \"GPU shader effects\" in Graphics settings?)\n");
     return;
   }
   SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   if (!(formats & SDL_GPU_SHADERFORMAT_MSL)) {
     fprintf(stderr, "[gpu-fx] this GPU backend doesn't support MSL "
-                    "(formats=0x%x) — edge AA disabled\n",
+                    "(formats=0x%x) — DOF/edge AA disabled\n",
             (unsigned)formats);
     return;
   }
 
   SDL_GPUShaderCreateInfo info;
   SDL_zero(info);
-  info.code = (const Uint8 *)kEdgeAAMSL;
-  info.code_size = sizeof(kEdgeAAMSL) - 1;
+  info.code = (const Uint8 *)kDofEdgeMSL;
+  info.code_size = sizeof(kDofEdgeMSL) - 1;
   info.entrypoint = "main0";
   info.format = SDL_GPU_SHADERFORMAT_MSL;
   info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
   info.num_samplers = 1;
   info.num_uniform_buffers = 1;
 
-  g_edge_aa_shader = SDL_CreateGPUShader(device, &info);
-  if (!g_edge_aa_shader) {
-    fprintf(stderr, "[gpu-fx] edge AA shader compile failed: %s\n",
+  g_dofedge_shader = SDL_CreateGPUShader(device, &info);
+  if (!g_dofedge_shader) {
+    fprintf(stderr, "[gpu-fx] DOF/edge AA shader compile failed: %s\n",
             SDL_GetError());
     return;
   }
 
   SDL_GPURenderStateCreateInfo state_info;
   SDL_zero(state_info);
-  state_info.fragment_shader = g_edge_aa_shader;
-  g_edge_aa_state = SDL_CreateGPURenderState(renderer, &state_info);
-  if (!g_edge_aa_state) {
-    fprintf(stderr, "[gpu-fx] edge AA render state creation failed: %s\n",
+  state_info.fragment_shader = g_dofedge_shader;
+  g_dofedge_state = SDL_CreateGPURenderState(renderer, &state_info);
+  if (!g_dofedge_state) {
+    fprintf(stderr, "[gpu-fx] DOF/edge AA render state creation failed: %s\n",
             SDL_GetError());
-    SDL_ReleaseGPUShader(device, g_edge_aa_shader);
-    g_edge_aa_shader = NULL;
+    SDL_ReleaseGPUShader(device, g_dofedge_shader);
+    g_dofedge_shader = NULL;
     return;
   }
 
-  g_edge_aa_available = true;
-  fprintf(stderr, "[gpu-fx] edge AA shader ready\n");
+  g_dofedge_available = true;
+  fprintf(stderr, "[gpu-fx] DOF/edge AA shader ready\n");
 }
 
-/* AR_GPU_FX_EDGEAA=1, independent of the other AR_GPU_FX_* toggles. Both
- * this AND AR_GPU_SHADERS=1 (the backend switch) must be set. */
+/* kSettingCat_Graphics "Depth of field" row (§7.2). */
+static bool DofBlurEnabled(SDL_Renderer *renderer) {
+  if (!g_settings.gpu_fx_dof) return false;
+  EnsureDofEdgeShader(renderer);
+  return g_dofedge_available;
+}
+
+/* kSettingCat_Graphics "Edge anti-aliasing" row. */
 static bool EdgeAAEnabled(SDL_Renderer *renderer) {
-  static int enabled = -1;
-  if (enabled < 0) enabled = EnvFlagOn("AR_GPU_FX_EDGEAA") ? 1 : 0;
-  if (!enabled) return false;
-  EnsureEdgeAAShader(renderer);
-  return g_edge_aa_available;
+  if (!g_settings.gpu_fx_edgeaa) return false;
+  EnsureDofEdgeShader(renderer);
+  return g_dofedge_available;
 }
 
 /* Which layers get edge AA: the BG planes whose rectangular boundary is the
@@ -418,6 +424,97 @@ static bool LayerGetsEdgeAA(int plane) {
     default:
       return false;
   }
+}
+
+/* ── B1b-crisp: ×4 supersample + premultiplied-LINEAR AA ─────────────────
+ * The diorama layer textures are SDL_SCALEMODE_NEAREST (main.c ~2528) and
+ * the tilted quads sample them through an arbitrary perspective warp, so
+ * high-contrast pixel-art edges step/shimmer as the camera moves — even
+ * with interpolation off, this is plain NEAREST minification/magnification
+ * artifacting, not a scroll-smoothness issue. Fix: render each layer to a
+ * ×4 integer-upscaled NEAREST intermediate first (matches the existing
+ * kHdMode7Scale=4 supersample scale, main.c:105/present.c:42), then sample
+ * THAT with LINEAR for the actual tilt+shift draw — the intermediate is 4
+ * whole texels per source texel, so LINEAR there interpolates smoothly
+ * instead of stepping.
+ *
+ * Compositing the source (straight alpha) onto a transparent-black-cleared
+ * intermediate with plain SDL_BLENDMODE_BLEND is a cheap, shader-free way to
+ * premultiply: dstRGB = srcRGB*srcA + 0*(1-srcA) = srcRGB*srcA, dstA = srcA.
+ * Premultiplying matters because the LINEAR sample blends across texel
+ * boundaries — with straight alpha, blending a fully-transparent black texel
+ * against an opaque colored one drags black into the result (a dark fringe);
+ * premultiplied RGB is already zero wherever alpha is zero, so the blend
+ * only ever mixes real color. The final draw then uses
+ * SDL_BLENDMODE_BLEND_PREMULTIPLIED to composite that premultiplied result
+ * onto the screen correctly.
+ *
+ * Scoped to layers that DON'T have an M8 custom GPU shader bound (rim
+ * light / DOF / edge-AA, all opt-in and off by default): those shaders do
+ * their own straight-alpha math (box-blurring texel.rgb, edge-fading via
+ * vertex alpha) that assumes a straight-alpha source and BLENDMODE_BLEND —
+ * feeding them a premultiplied source would need reworking that math too,
+ * out of scope for this AA-only pass. A layer gets one polish path or the
+ * other, never both. */
+enum { kDioramaSupersample = 4 };
+
+static SDL_Texture *g_diorama_ss_texture;
+static int g_diorama_ss_w, g_diorama_ss_h;
+
+static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
+                                                     int w, int h) {
+  if (g_diorama_ss_texture && g_diorama_ss_w == w && g_diorama_ss_h == h)
+    return g_diorama_ss_texture;
+  if (g_diorama_ss_texture) SDL_DestroyTexture(g_diorama_ss_texture);
+  g_diorama_ss_texture = SDL_CreateTexture(
+      renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
+  g_diorama_ss_w = w;
+  g_diorama_ss_h = h;
+  if (g_diorama_ss_texture)
+    SDL_SetTextureScaleMode(g_diorama_ss_texture, SDL_SCALEMODE_LINEAR);
+  return g_diorama_ss_texture;
+}
+
+/* Renders `source` (a full kPpuBufWidth x snes_height layer texture, already
+ * NEAREST-scaled) into the shared ×4 intermediate, premultiplied per the
+ * comment above. Caller must have already set `source`'s blend mode to
+ * SDL_BLENDMODE_BLEND. Returns NULL (caller falls back to `source`) if the
+ * intermediate couldn't be (re)created.
+ *
+ * Live report (2026-07-21): a thin magenta/garbage-colored line was visible
+ * at the diorama's right edge whenever a layer used this path (most
+ * noticeable on the near-fullscreen backdrop plane) — present even with NO
+ * interpolation shift active, so it wasn't the B1b UV-window bug. Root
+ * cause: this used to blit the WHOLE source texture (`SDL_RenderTexture(...,
+ * NULL, NULL)`) into the WHOLE intermediate, which faithfully copies
+ * source's uninitialized tail (columns snes_width..kPpuBufWidth-1 — see the
+ * B1b UV-window comment below for why that tail exists at all) into the
+ * intermediate too. The final draw's LINEAR sample at the exact valid/
+ * invalid boundary (u=uv_u1) then blends the last real texel against that
+ * garbage, every frame, for every crisp-path layer — B1b-crisp switched
+ * this path from NEAREST (no cross-texel blending, so this boundary was
+ * never sampled softly) to LINEAR, which is what actually exposed it. Fixed
+ * by blitting only the VALID `{0,0,snes_width,snes_height}` source sub-rect
+ * into the correspondingly-scaled sub-rect of the intermediate — the
+ * remainder stays the transparent-black clear from above, so the LINEAR
+ * boundary blend fades toward transparent/black instead of garbage. */
+static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
+                                            SDL_Texture *source,
+                                            int snes_width, int snes_height) {
+  SDL_Texture *ss = EnsureDioramaSupersampleTexture(
+      renderer, kPpuBufWidth * kDioramaSupersample,
+      snes_height * kDioramaSupersample);
+  if (!ss) return NULL;
+  SDL_SetRenderTarget(renderer, ss);
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
+  SDL_RenderClear(renderer);
+  SDL_FRect src = { 0.0f, 0.0f, (float)snes_width, (float)snes_height };
+  SDL_FRect dst = { 0.0f, 0.0f, (float)(snes_width * kDioramaSupersample),
+                    (float)(snes_height * kDioramaSupersample) };
+  SDL_RenderTexture(renderer, source, &src, &dst);
+  SDL_SetRenderTarget(renderer, NULL);
+  return ss;
 }
 
 /* ── Camera constants (§5.6) ─────────────────────────────────────────── */
@@ -440,9 +537,13 @@ typedef struct DioramaCamera {
   float fov_y;
 } DioramaCamera;
 
-static DioramaCamera g_diorama_cam = {
-  .tilt_x = 0.0f, .tilt_y = -0.18f, .distance = 0.0f, .fov_y = 0.4f
-};
+/* A3 (followup doc): zero-init, not a hand-tuned literal — every field here
+ * is unconditionally overwritten by Diorama_SeedCameraFromSettings (below)
+ * before first render (boot, camera-row menu edits, and Reset Camera all
+ * call it), so the settings descriptors are the single source of truth for
+ * the actual defaults. A literal here would be dead weight a future editor
+ * could mistake for load-bearing. */
+static DioramaCamera g_diorama_cam;
 static float g_diorama_auto_distance = 5.0f;
 static bool g_diorama_settings_dirty;
 static uint64_t g_diorama_settings_dirty_at;
@@ -487,13 +588,22 @@ void Diorama_ResetCamera(void) {
     "diorama_tilt_x_mrad",
     "diorama_tilt_y_mrad",
     "diorama_distance_x100",
-    "diorama_sprite_upright",
+    /* B4-baseline (followup doc): Reset Camera also returns Dynamic Cam's
+     * dedicated baseline pose to its defaults, so it's a true "return
+     * everything camera-related to defaults" action regardless of which
+     * mode is active. */
+    "diorama_dyncam_baseline_tilt_x_mrad",
+    "diorama_dyncam_baseline_tilt_y_mrad",
+    "diorama_dyncam_baseline_distance_x100",
+    "diorama_reactive_strength",
     "diorama_depth_shade",
     "diorama_layer_backdrop",
     "diorama_layer_bg2",
     "diorama_layer_bg1",
     "diorama_layer_obj",
     "diorama_layer_bg3",
+    "diorama_skybox",
+    "diorama_shoebox",
   };
   for (size_t i = 0; i < sizeof(kResetKeys) / sizeof(kResetKeys[0]); i++) {
     const SettingDesc *row = Settings_Find(kResetKeys[i]);
@@ -602,14 +712,49 @@ static void BuildViewProjection(const DioramaCamera *cam, int out_w, int out_h,
   Mat4Mul(proj, view, out_mat);
 }
 
-static void BuildUprightModel(float pitch_undo, float pivot_y, float out[16]) {
-  float c = cosf(pitch_undo), s = sinf(pitch_undo);
-  float rot[16]  = { 1,0,0,0,  0,c,s,0,  0,-s,c,0,  0,0,0,1 };
-  float to[16]   = { 1,0,0,0,  0,1,0,0,  0,0,1,0,  0,-pivot_y,0,1 };
-  float back[16] = { 1,0,0,0,  0,1,0,0,  0,0,1,0,  0, pivot_y,0,1 };
-  float tmp[16];
-  Mat4Mul(back, rot, tmp);
-  Mat4Mul(tmp, to, out);
+/* GEO (followup doc, shared prereq for B5/B6): the projection kernel
+ * (world xyz -> clip -> perspective divide -> viewport pixel), factored out
+ * of what was BuildLayerMesh's inline per-vertex math so B5's skybox quad
+ * and B6's floor/ceiling/wall quads can share it. Pure function of its
+ * inputs — calling it with the same (mvp, x, y, z, screen_w, screen_h) as
+ * the inlined version always produced is bit-for-bit identical to before;
+ * only the CALLER'S world-coordinate formula matters for byte-identical
+ * output, and BuildLayerMesh's is left untouched below (verified: an
+ * algebraically-equivalent but differently-associated rewrite of its
+ * `(s - 0.5f) * aspect_x` does NOT reproduce the same float32 rounding in
+ * ~14% of cases — checked numerically before this refactor). */
+static SDL_FPoint ProjectWorldPoint(const float mvp[16], float x, float y, float z,
+                                    int screen_w, int screen_h) {
+  float clip[4];
+  clip[0] = mvp[0]*x + mvp[4]*y + mvp[8]*z  + mvp[12];
+  clip[1] = mvp[1]*x + mvp[5]*y + mvp[9]*z  + mvp[13];
+  clip[2] = mvp[2]*x + mvp[6]*y + mvp[10]*z + mvp[14];
+  clip[3] = mvp[3]*x + mvp[7]*y + mvp[11]*z + mvp[15];
+  float inv_w = (clip[3] != 0.0f) ? 1.0f / clip[3] : 1.0f;
+  float sx = (clip[0] * inv_w * 0.5f + 0.5f) * screen_w;
+  float sy = (1.0f - (clip[1] * inv_w * 0.5f + 0.5f)) * screen_h;
+  return (SDL_FPoint){ sx, sy };
+}
+
+/* Shared triangulation: a (subdiv_u+1)x(subdiv_v+1) vertex grid into
+ * subdiv_u*subdiv_v quads, each split into 2 triangles. Identical to what
+ * BuildLayerMesh always did (diorama.c, pre-GEO) — factored out verbatim so
+ * BuildQuadMesh doesn't duplicate it. */
+static void TriangulateGrid(int subdiv_u, int subdiv_v, int *out_indices,
+                            int *num_indices) {
+  int ii = 0, cols = subdiv_u + 1;
+  for (int row = 0; row < subdiv_v; row++) {
+    for (int col = 0; col < subdiv_u; col++) {
+      int tl = row * cols + col;
+      out_indices[ii++] = tl;
+      out_indices[ii++] = tl + 1;
+      out_indices[ii++] = tl + cols;
+      out_indices[ii++] = tl + 1;
+      out_indices[ii++] = tl + cols + 1;
+      out_indices[ii++] = tl + cols;
+    }
+  }
+  *num_indices = ii;
 }
 
 static void BuildLayerMesh(const float mvp[16], float z_world,
@@ -625,15 +770,8 @@ static void BuildLayerMesh(const float mvp[16], float z_world,
       float t = (float)row / DIORAMA_SUBDIV_Y;
       float wx = (s - 0.5f) * aspect_x;
       float wy = 0.5f - t;
-      float clip[4];
-      clip[0] = mvp[0]*wx + mvp[4]*wy + mvp[8]*z_world  + mvp[12];
-      clip[1] = mvp[1]*wx + mvp[5]*wy + mvp[9]*z_world  + mvp[13];
-      clip[2] = mvp[2]*wx + mvp[6]*wy + mvp[10]*z_world + mvp[14];
-      clip[3] = mvp[3]*wx + mvp[7]*wy + mvp[11]*z_world + mvp[15];
-      float inv_w = (clip[3] != 0.0f) ? 1.0f / clip[3] : 1.0f;
-      float sx = (clip[0] * inv_w * 0.5f + 0.5f) * screen_w;
-      float sy = (1.0f - (clip[1] * inv_w * 0.5f + 0.5f)) * screen_h;
-      out_verts[vi].position = (SDL_FPoint){ sx, sy };
+      out_verts[vi].position =
+          ProjectWorldPoint(mvp, wx, wy, z_world, screen_w, screen_h);
       out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
                                               v0 + t * (v1 - v0) };
       out_verts[vi].color = color;
@@ -641,19 +779,45 @@ static void BuildLayerMesh(const float mvp[16], float z_world,
     }
   }
   *num_verts = vi;
-  int ii = 0, cols = DIORAMA_SUBDIV_X + 1;
-  for (int row = 0; row < DIORAMA_SUBDIV_Y; row++) {
-    for (int col = 0; col < DIORAMA_SUBDIV_X; col++) {
-      int tl = row * cols + col;
-      out_indices[ii++] = tl;
-      out_indices[ii++] = tl + 1;
-      out_indices[ii++] = tl + cols;
-      out_indices[ii++] = tl + 1;
-      out_indices[ii++] = tl + cols + 1;
-      out_indices[ii++] = tl + cols;
+  TriangulateGrid(DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, out_indices, num_indices);
+}
+
+/* GEO (followup doc): general world-space quad mesh builder, lerped from a
+ * corner + two edge vectors — B5's viewport-fill skybox quad and B6's
+ * floor/ceiling/side-wall quads (which vary axis pairs BuildLayerMesh can't:
+ * it hardcodes a constant z_world and only varies X/Y) will call this. DEAD
+ * CODE until then (GEO is a pure factor-out checkpoint; near-wall culling
+ * and the actual wall geometry are B6's job, not this one) — kept
+ * deliberately separate from BuildLayerMesh's own formula rather than
+ * routing BuildLayerMesh through it, since the two aren't bit-identical
+ * (see ProjectWorldPoint's comment). */
+static void BuildQuadMesh(const float mvp[16],
+                          float origin_x, float origin_y, float origin_z,
+                          float edge_u_x, float edge_u_y, float edge_u_z,
+                          float edge_v_x, float edge_v_y, float edge_v_z,
+                          float u0, float v0, float u1, float v1,
+                          int subdiv_u, int subdiv_v,
+                          int screen_w, int screen_h, SDL_FColor color,
+                          SDL_Vertex *out_verts, int *out_indices,
+                          int *num_verts, int *num_indices) {
+  int vi = 0;
+  for (int row = 0; row <= subdiv_v; row++) {
+    for (int col = 0; col <= subdiv_u; col++) {
+      float s = (float)col / subdiv_u;
+      float t = (float)row / subdiv_v;
+      float wx = origin_x + s * edge_u_x + t * edge_v_x;
+      float wy = origin_y + s * edge_u_y + t * edge_v_y;
+      float wz = origin_z + s * edge_u_z + t * edge_v_z;
+      out_verts[vi].position =
+          ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h);
+      out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
+                                              v0 + t * (v1 - v0) };
+      out_verts[vi].color = color;
+      vi++;
     }
   }
-  *num_indices = ii;
+  *num_verts = vi;
+  TriangulateGrid(subdiv_u, subdiv_v, out_indices, num_indices);
 }
 
 /* ── Render ───────────────────────────────────────────────────────────── */
@@ -672,20 +836,231 @@ void Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
   }
 }
 
-/* M7 (§6.1): which SNES BG scroll register (0=BG1..3=BG4) a diorama plane's
- * content follows, or -1 if it isn't scroll-shiftable (the backdrop's
- * meaning is ambiguous outside a single BG, and sprites move via per-OAM
- * position, not a layer scroll register — §6.4 explicitly defers sprite
- * interpolation). Priority-band splits (Bg1Hi/Bg2Hi) follow their parent's
- * scroll, same as they share its Z/shade. */
+/* M7 (§6.1)/B1b (followup doc): which base-camera delta (0=BG1, 1=BG2) a
+ * diorama plane's content follows, or -1 if it isn't scroll-shiftable (the
+ * backdrop's meaning is ambiguous outside a single BG). Priority-band splits
+ * (Bg1Hi/Bg2Hi) follow their parent's scroll, same as they share its
+ * Z/shade. BG3 has no WRAM camera (index 2 stays zero in DioramaScrollDelta
+ * — it's UI, not world content), so it isn't listed here at all; it simply
+ * never interpolates.
+ *
+ * B1b rule: OBJ planes ride the BG1 base-camera delta. §6.4 originally
+ * deferred sprite interpolation entirely (returned -1) — left that way,
+ * sprites (including the player standing on BG1's platforms) would step at
+ * 60fps while the world glides at >60fps, the exact relative-judder artifact
+ * B1's rejected "exclude HDMA layers" non-fix was ruled out for, but now on
+ * the most eye-tracked object on screen. Sprite screen positions already
+ * embed the camera (screen = world − camera), so shifting the OBJ plane by
+ * the interpolated BG1 camera delta keeps sprites rigidly attached to the
+ * gliding world; their own world-space animation still refreshes at 60fps —
+ * the same acceptable residual as HDMA raster detail (see B1's ceiling
+ * note). */
 static int DioramaLayerBgIndex(int plane) {
   switch (plane) {
     case kPpuOverlaySource_Bg1:
     case kDioramaPlane_Bg1Hi: return 0;
     case kPpuOverlaySource_Bg2:
     case kDioramaPlane_Bg2Hi: return 1;
-    case kPpuOverlaySource_Bg3: return 2;
+    case kPpuOverlaySource_Obj:
+    case kDioramaPlane_Obj1:
+    case kDioramaPlane_Obj2:
+    case kDioramaPlane_Obj3: return 0;
     default: return -1;
+  }
+}
+
+/* KNOWN LIMITATION (live report + investigated, 2026-07-21, not fixed): near
+ * a level's start/end, the captured BG2 content this draws goes black at
+ * the world-bound edge instead of extending — visible as a black wedge
+ * clipping the skybox. Root cause: the widescreen margin ceiling
+ * (extraLeftCur/extraRightCur, set once per frame in
+ * ActRaiser_ApplyWidescreenPolicy from BG1's world position,
+ * actraiser_rtl.c ~908-925) is a single GLOBAL PPU value, not per-layer —
+ * every layer's scanline rendering respects the same ceiling. The existing
+ * per-layer knobs (wsLayerClamp/wsLayerMirror/wsLayerRepeat, consumed by
+ * PpuLayerExtra, ppu.c ~419) can only SHRINK a layer's margin down to 0 from
+ * that ceiling; nothing lets one layer draw further than it. So there is no
+ * cheap fix here — BG2 can't be given a wider margin than BG1's world bound
+ * without either (a) a new per-layer NUMERIC margin ceiling in
+ * PpuLayerExtra (touches a hot per-scanline path in core PPU rendering), or
+ * (b) a second BG2-only scanout pass per frame just for this capture, run
+ * with the ceiling forced to the full budget + mirror/repeat, separate from
+ * the main frame. Author's call: (a) is the preferred direction (more
+ * performant — no extra scanout pass) but deferred as its own follow-up,
+ * not part of B5. */
+
+/* B5 (followup doc): draws BG2 as a viewport-FILLING screen-space quad —
+ * deliberately NOT run through the camera MVP (BuildQuadMesh/
+ * ProjectWorldPoint are for world-space geometry; a plain screen-rect quad
+ * is the simplest of the doc's two suggested approaches and, unlike an
+ * "oversized far-plane quad," mathematically cannot reveal an edge at any
+ * tilt/yaw/zoom the free/dynamic cameras can reach). Dimmed via a FIXED
+ * vertex color (not run through shade_mix/diorama_depth_shade — the doc's
+ * explicit "independent of the depth-shade slider" call) and optionally
+ * DoF'd with the existing blur shader. Must be called BEFORE the per-layer
+ * loop (painter's algorithm: skybox is behind everything).
+ *
+ * `dim`: false in Skybox-only (live report, 2026-07-21) — there, BG2 is the
+ * ENTIRE visible background (the caller also skips the backdrop layer in
+ * that mode, see Diorama_Composite), so a dim/atmospheric tint just reads
+ * as needlessly dark. Plane+skybox still wants it dim (atmosphere behind
+ * the sharper in-box copy, not the focus) — but subtle (see kSkyboxDim).
+ * `blur_radius`: caller-chosen per mode (live report, 2026-07-21) —
+ * Skybox-only wants it barely soft (BG2 is the whole visible background
+ * there, so heavy blur reads as "the picture is broken," not atmosphere);
+ * Plane+skybox wants the fuller blur since the in-box copy stays sharp and
+ * the skybox is deliberately meant to read as unfocused backdrop. */
+static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
+                              int snes_width, int snes_height,
+                              int out_w, int out_h, bool dim,
+                              float blur_radius) {
+  if (!bg2_texture) return;
+  float uv_u1 = (float)snes_width / (float)kPpuBufWidth;
+  /* Same live report: a visible lighter/garbage-colored strip appeared at
+   * the screen's right edge. Root cause: the blur shader samples texels up
+   * to `radius` away from each fragment (kBlurMSL, this file's top-of-file
+   * comment) — for fragments right at u=uv_u1 (this quad's edge, since
+   * uv_u1 < 1.0 is the true boundary of what Diorama_Upload ever wrote,
+   * kPpuBufWidth vs the widescreen capture's max width — the same class of
+   * bug B1b's UV-window clamp fixed for the tilted layers), the rightward
+   * samples reach past uv_u1 into that same uninitialized texture memory.
+   * Unlike B1b's interpolation shift (which the tilted layers' own address
+   * mode could clamp), the blur shader has no knowledge of uv_u1 to clamp
+   * against, so the fix here is simpler: never SAMPLE that close to either
+   * edge in the first place — inset the mapped UV range by a texel margin
+   * comfortably larger than the blur's reach (this also keeps the LEFT
+   * edge's leftward samples at u>0, so no explicit CLAMP addressing is
+   * needed here — deliberately not touched, since the caller,
+   * Diorama_Composite, is mid-sequence managing that mode itself for its
+   * own interpolation clamp around the per-layer loop that runs after this
+   * returns). Costs an imperceptible crop of the sky content, not a
+   * rendering defect. */
+  float margin_u = (blur_radius + 1.0f) / (float)kPpuBufWidth;
+  float u0 = margin_u, u1 = uv_u1 - margin_u;
+  if (u1 < u0) u1 = u0;  /* degenerate guard for a pathologically narrow capture */
+  /* Live report (2026-07-21): {0.30,0.30,0.40} read as jarringly dark for
+   * Plane+skybox — the intent is a subtle cue that this is background, not
+   * a heavy tint. Lightened substantially; still a touch cool/blue like the
+   * rest of the per-layer shade table. */
+  static const SDL_FColor kSkyboxDim = { 0.78f, 0.78f, 0.85f, 1.0f };
+  static const SDL_FColor kSkyboxFull = { 1.0f, 1.0f, 1.0f, 1.0f };
+  SDL_FColor tint = dim ? kSkyboxDim : kSkyboxFull;
+  SDL_Vertex verts[4] = {
+    { { 0.0f, 0.0f },                   tint, { u0, 0.0f } },
+    { { (float)out_w, 0.0f },           tint, { u1, 0.0f } },
+    { { (float)out_w, (float)out_h },   tint, { u1, 1.0f } },
+    { { 0.0f, (float)out_h },           tint, { u0, 1.0f } },
+  };
+  int indices[6] = { 0, 1, 2, 0, 2, 3 };
+  SDL_SetTextureBlendMode(bg2_texture, SDL_BLENDMODE_NONE);
+  bool blur = SkyboxBlurEnabled(renderer);
+  if (blur) {
+    BlurUniforms u = {
+      1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height,
+      blur_radius, 0.0f,
+    };
+    SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
+    SDL_SetGPURenderState(renderer, g_blur_state);
+  }
+  SDL_RenderGeometry(renderer, bg2_texture, verts, 4, indices, 6);
+  if (blur) SDL_SetGPURenderState(renderer, NULL);
+}
+
+/* B6 (followup doc): floor/ceiling/side-wall enclosure. z_back/z_front match
+ * the backdrop's and HUD's z_world exactly (kDioramaLayers' z=0.00/0.95,
+ * minus the 0.5 offset every layer's z_world applies) so the box lines up
+ * with the layer stack's own depth range. Flat-shaded and untextured —
+ * SDL_RenderGeometry accepts a NULL texture for vertex-color-only rendering
+ * (doc's "start flat"; no wall art yet). Built via BuildQuadMesh (GEO) —
+ * floor/ceiling/walls each vary a different world-axis pair, which
+ * BuildLayerMesh's hardcoded-z formula can't do (see GEO's comment). Must
+ * be called AFTER the skybox (if any) and BEFORE the per-layer loop —
+ * painter's algorithm, the box surrounds the stack. */
+static const float kShoeboxZBack = -0.50f;
+static const float kShoeboxZFront = 0.45f;
+/* Crossfade band (rad) around tilt_y=0 — see the near-wall comment below. */
+static const float kShoeboxWallFadeRange = 0.15f;
+
+static void DrawDioramaShoebox(SDL_Renderer *renderer, const float mvp[16],
+                               float aspect_x, float tilt_y,
+                               int out_w, int out_h) {
+  /* Live report (2026-07-21): opaque walls read as a plain gray box,
+   * disconnected from the skybox (drawn before everything, including these
+   * walls) — since the walls are the same painter's-algorithm layer as the
+   * skybox's "far opening," letting them stay translucent lets the sky page
+   * straight through instead of needing to texture the walls separately.
+   * 0.35 then read as too faint to actually define an edge at low tilt —
+   * split the difference. */
+  static const SDL_FColor kShoeboxColor = { 0.15f, 0.15f, 0.20f, 0.55f };
+  /* Live report (2026-07-21): a box sized to match the layer stack exactly
+   * (hx = 0.5*aspect_x, y=[-0.5,0.5]) can rotate its own corners into view
+   * at extreme tilt/pan, revealing void past ITS edges — the same class of
+   * problem the skybox fixes for the backdrop, just one level out.
+   * Oversized X/Y (not Z — that still has to line up with the layer
+   * stack's own depth range) gives headroom across the whole tilt clamp
+   * (±0.7 rad) without needing per-angle math. */
+  static const float kShoeboxOverscan = 2.0f;
+  float hx = 0.5f * aspect_x * kShoeboxOverscan;
+  float half_y = 0.5f * kShoeboxOverscan;
+  float z_span = kShoeboxZFront - kShoeboxZBack;
+  SDL_Vertex verts[4];
+  int indices[6];
+  int nv, ni;
+
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+  /* Floor (y=-0.5) and ceiling (y=+0.5): always drawn — yaw doesn't bring
+   * them toward the camera the way a side wall does (the doc's own note:
+   * revisit only if pitch range grows past the existing ±0.7 clamp). Both
+   * span the full x/z extent, single quad each (no subdivision needed for
+   * a flat, untextured surface). */
+  BuildQuadMesh(mvp, -hx, -half_y, kShoeboxZBack,
+               2.0f * hx, 0.0f, 0.0f,
+               0.0f, 0.0f, z_span,
+               0.0f, 0.0f, 1.0f, 1.0f, 1, 1, out_w, out_h, kShoeboxColor,
+               verts, indices, &nv, &ni);
+  SDL_RenderGeometry(renderer, NULL, verts, nv, indices, ni);
+
+  BuildQuadMesh(mvp, -hx, half_y, kShoeboxZBack,
+               2.0f * hx, 0.0f, 0.0f,
+               0.0f, 0.0f, z_span,
+               0.0f, 0.0f, 1.0f, 1.0f, 1, 1, out_w, out_h, kShoeboxColor,
+               verts, indices, &nv, &ni);
+  SDL_RenderGeometry(renderer, NULL, verts, nv, indices, ni);
+
+  /* Side walls (x=±hx): SDL_RenderGeometry has no depth test, so a wall on
+   * the camera's near side would occlude the view straight into the box —
+   * the doc's rule is to draw only the FAR wall, using tilt_y's sign (no
+   * dot product needed for a simple box). FIRST-PASS SIGN GUESS, same as
+   * B4-vellean's pitch lean: positive tilt_y is assumed to put the +X wall
+   * near camera — flip if it reads backwards in play. Crossfades both
+   * walls over a small band around tilt_y=0 (rather than a hard cull) so
+   * the transition isn't a pop. */
+  float t = tilt_y / kShoeboxWallFadeRange;
+  if (t > 1.0f) t = 1.0f;
+  if (t < -1.0f) t = -1.0f;
+  float alpha_pos_x = 0.5f - 0.5f * t;  /* fades out as the +X wall nears */
+  float alpha_neg_x = 0.5f + 0.5f * t;  /* fades in as the -X wall goes far */
+
+  if (alpha_neg_x > 0.01f) {
+    SDL_FColor c = kShoeboxColor;
+    c.a *= alpha_neg_x;
+    BuildQuadMesh(mvp, -hx, -half_y, kShoeboxZBack,
+                 0.0f, 0.0f, z_span,
+                 0.0f, 2.0f * half_y, 0.0f,
+                 0.0f, 0.0f, 1.0f, 1.0f, 1, 1, out_w, out_h, c,
+                 verts, indices, &nv, &ni);
+    SDL_RenderGeometry(renderer, NULL, verts, nv, indices, ni);
+  }
+  if (alpha_pos_x > 0.01f) {
+    SDL_FColor c = kShoeboxColor;
+    c.a *= alpha_pos_x;
+    BuildQuadMesh(mvp, hx, -half_y, kShoeboxZBack,
+                 0.0f, 0.0f, z_span,
+                 0.0f, 2.0f * half_y, 0.0f,
+                 0.0f, 0.0f, 1.0f, 1.0f, 1, 1, out_w, out_h, c,
+                 verts, indices, &nv, &ni);
+    SDL_RenderGeometry(renderer, NULL, verts, nv, indices, ni);
   }
 }
 
@@ -693,8 +1068,10 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int active_pixel_aspect, bool ignore_aspect_ratio,
                        int visible_width, SDL_Texture *textures[],
                        uint8_t *pixels[],
-                       const DioramaScrollDelta *scroll_delta) {
-  if (!renderer) return false;
+                       const DioramaScrollDelta *scroll_delta,
+                       const DioramaCameraPose *cam_pose,
+                       float distance_scale) {
+  if (!renderer || !cam_pose) return false;
 
   SDL_SetRenderLogicalPresentation(renderer, 0, 0,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);
@@ -715,6 +1092,26 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   SDL_SetRenderDrawColor(renderer, 20, 20, 30, 255);
   SDL_RenderClear(renderer);
 
+  /* B5 (followup doc): drawn before the per-layer loop below — painter's
+   * algorithm, skybox is the farthest thing in the scene. Same
+   * pixels[]-populated guard the per-layer loop uses below, so a stale
+   * texture from a prior session doesn't draw when BG2 isn't actually
+   * captured this frame.
+   *
+   * Live report (2026-07-21): Skybox-only wants noticeably LESS blur than
+   * Plane+skybox — it's the entire visible background there (no sharper
+   * in-box copy to contrast against), so the same heavy blur just reads as
+   * "broken," not atmospheric. */
+  static const float kSkyboxBlurRadiusOnly = 1.0f;
+  static const float kSkyboxBlurRadiusBoth = 3.0f;
+  if (g_settings.diorama_skybox != kDioramaSky_Off &&
+      pixels[kPpuOverlaySource_Bg2]) {
+    bool both = g_settings.diorama_skybox == kDioramaSky_Both;
+    DrawDioramaSkybox(renderer, textures[kPpuOverlaySource_Bg2],
+                      snes_width, snes_height, out_w, out_h, both,
+                      both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly);
+  }
+
   float tex_h = (float)snes_height;
   float uv_u0 = 0.0f;
   float uv_u1 = (float)snes_width / (float)kPpuBufWidth;
@@ -726,34 +1123,45 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   float vis_half_w = 0.5f * (float)visible_width / tex_h * par;
 
   float screen_aspect = (float)out_w / (float)out_h;
-  float tan_half = tanf(g_diorama_cam.fov_y * 0.5f);
+  float tan_half = tanf(kDioramaFovY * 0.5f);
   float fit_h = 0.5f / tan_half;
   float fit_w = vis_half_w / (tan_half * screen_aspect);
   static const float kDioramaZ_Hud = 0.95f;
   g_diorama_auto_distance =
       fmaxf(fit_h, fit_w) * 1.02f + (kDioramaZ_Hud - 0.5f);
 
-  DioramaCamera cam = g_diorama_cam;
+  /* B4-split (followup doc): the camera comes from the caller's snapshot
+   * (Free Cam: the authored/persisted pose via FrameSlot; Dynamic Cam:
+   * present.c's own render camera) instead of reading the game-thread-owned
+   * g_diorama_cam directly — see the DioramaCameraPose comment (diorama.h)
+   * for why. fov_y stays the fixed camera constant; it was never authored
+   * per-mode. */
+  DioramaCamera cam = { cam_pose->tilt_x, cam_pose->tilt_y,
+                        cam_pose->distance, kDioramaFovY };
   if (cam.distance <= 0.0f) cam.distance = g_diorama_auto_distance;
+  /* M5 (followup doc): the descriptor range (0..2000, settings.c) must stay
+   * contiguous to cover both the 0 auto-fit sentinel and the real
+   * kDioramaDistMin..kDioramaDistMax range, so 1..199 (0.01x..1.99x) is a
+   * reachable "dead zone" the range alone can't exclude — a single
+   * right-arrow off the default 0 lands at distance=1, inside the near
+   * plane (kNear=0.1), clipping the whole scene. Enforce the floor here,
+   * at consume time. */
+  else if (cam.distance < kDioramaDistMin) cam.distance = kDioramaDistMin;
+  /* B4-kick: boost's zoom-punch, applied AFTER the auto-fit/dead-zone
+   * resolution above so it composes correctly with the 0 sentinel (see the
+   * distance_scale parameter comment, diorama.h). 1.0 = no change. */
+  cam.distance *= distance_scale;
+  if (cam.distance < kDioramaDistMin) cam.distance = kDioramaDistMin;
 
   float mvp[16];
   BuildViewProjection(&cam, out_w, out_h, mvp);
 
-  float upright = (float)g_settings.diorama_sprite_upright / 100.0f;
-  float shade_mix = (float)g_settings.diorama_depth_shade / 100.0f;
-  float upright_mvp[16];
-  int disable_fig_adjust = 1;
+  /* B6 (followup doc): drawn before the per-layer loop below — painter's
+   * algorithm, the box surrounds the stack. */
+  if (g_settings.diorama_shoebox)
+    DrawDioramaShoebox(renderer, mvp, aspect_x, cam.tilt_y, out_w, out_h);
 
-  #ifdef USE_UPRIGHT_OBJ
-  disable_fig_adjust = 0;
-  if (upright > 0.0f && cam.tilt_x != 0.0f) {
-    float model[16];
-    BuildUprightModel(-cam.tilt_x * upright, -0.5f, model);
-    Mat4Mul(mvp, model, upright_mvp);
-  } else {
-    memcpy(upright_mvp, mvp, sizeof(upright_mvp));
-  }
-  #endif
+  float shade_mix = (float)g_settings.diorama_depth_shade / 100.0f;
 
   SDL_Vertex verts[DIORAMA_VERTS_PER_LAYER];
   int indices[DIORAMA_INDICES_PER_LAYER];
@@ -762,6 +1170,36 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   for (int i = 0; i < kDioramaLayerCount; i++) {
     const DioramaLayerDesc *layer = &kDioramaLayers[i];
     if (layer->visible && !*layer->visible) continue;
+    /* A5 (followup doc): with diorama_hud_flat on, BG3 is deliberately not
+     * captured as a diorama layer (actraiser_rtl.c) and the anchored flat
+     * HUD draws separately (present.c). Skip this entry outright rather
+     * than relying on its pixel buffer staying unpopulated — once the
+     * buffer has been written at least once (tilted mode was used this
+     * session), the pointer stays non-NULL and its last frame's content
+     * would otherwise keep drawing as a stale ghost plane. */
+    if (layer->plane == kPpuOverlaySource_Bg3 && g_settings.diorama_hud_flat)
+      continue;
+    /* B5 (followup doc): "Skybox only" promotes BG2 OUT of the box entirely
+     * (drawn above as the enveloping skybox instead) — both priority bands
+     * share the same underlying capture/visibility toggle, so both are
+     * excluded together. "Plane + skybox" and "Off" leave this loop
+     * untouched: BG2 still draws in-box exactly as before. */
+    if ((layer->plane == kPpuOverlaySource_Bg2 ||
+         layer->plane == kDioramaPlane_Bg2Hi) &&
+        g_settings.diorama_skybox == kDioramaSky_Only)
+      continue;
+    /* B5 follow-up (live report, 2026-07-21): the pre-existing backdrop
+     * plane (kDioramaPlane_Backdrop, the full flat-scene residual) sits
+     * opaque at z=-0.50, in front of the skybox — at low tilt its projected
+     * quad fills nearly the whole frustum, leaving only a thin sliver for
+     * the skybox to show through at all. In Skybox-only, BG2 is meant to
+     * REPLACE that role entirely (it's now the ENTIRE background, not a
+     * margin-filler), so skip backdrop too. Plane+skybox keeps it — there
+     * BG2's in-box copy is the main visual and backdrop still backstops any
+     * gaps the way it always has. */
+    if (layer->plane == kDioramaPlane_Backdrop &&
+        g_settings.diorama_skybox == kDioramaSky_Only)
+      continue;
     bool is_backdrop = (layer->plane == kDioramaPlane_Backdrop);
     SDL_Texture *texture = textures[layer->plane];
     if (!texture || !pixels[layer->plane]) continue;
@@ -774,7 +1212,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     };
 
     float z_world = layer->z - 0.5f;
-    int adjust_figures = layer->is_figure && !disable_fig_adjust;
     /* M7/§6.2-6.3: shift this layer's UV window by its BG's interpolated
      * sub-tick scroll delta. Each layer uses its OWN BG's delta (parallax:
      * BG2 typically scrolls slower than BG1), so the differing per-layer
@@ -788,14 +1225,65 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         layer_dv = scroll_delta->bg_dv[bg];
       }
     }
-    BuildLayerMesh(adjust_figures? upright_mvp : mvp,
-                   z_world, uv_u0 + layer_du, 0.0f + layer_dv,
-                   uv_u1 + layer_du, 1.0f + layer_dv,
+    float layer_u0 = uv_u0 + layer_du, layer_u1 = uv_u1 + layer_du;
+    /* B1b (followup doc) follow-up: the diorama capture only ever fills
+     * [uv_u0, uv_u1] of the texture — the sliver beyond it, up to the
+     * texture's true width (kPpuBufWidth vs the diorama capture's max width,
+     * capped at kWsExtraMax=95 per side by the SNES OAM-wrap hard limit,
+     * one short of kPpuExtraLeftRight=96 — widescreen.h), is genuinely never
+     * written (SDL streaming textures have undefined initial content, not
+     * zeroed). SDL_TEXTURE_ADDRESS_CLAMP (above) only guards against going
+     * outside [0,1] of the TEXTURE — it does nothing for a coordinate that's
+     * inside [0,1] but past the CAPTURED sub-region, so an interpolation
+     * shift large enough to push u1 past uv_u1 sampled that uninitialized
+     * memory directly: a garbage-colored strip at the tilted plane's edge,
+     * only visible once real camera panning started moving the window (B1b's
+     * source fix made that motion real for the first time — the old
+     * HDMA-residue source rarely produced a clean directional shift).
+     * Clamp the WINDOW POSITION (both edges together, preserving width — no
+     * visual squish) rather than the shift itself, so smoothing is
+     * untouched except for a large single-tick delta at the exact screen
+     * position where the buffer's true edge is in view. */
+    if (layer_u1 > uv_u1) {
+      float excess = layer_u1 - uv_u1;
+      layer_u1 -= excess; layer_u0 -= excess;
+    } else if (layer_u0 < uv_u0) {
+      float excess = uv_u0 - layer_u0;
+      layer_u0 += excess; layer_u1 += excess;
+    }
+    BuildLayerMesh(mvp,
+                   z_world, layer_u0, 0.0f + layer_dv,
+                   layer_u1, 1.0f + layer_dv,
                    aspect_x, out_w, out_h, shade,
                    verts, indices, &nv, &ni);
 
+    /* Determined up front (before the shadow/main draws) so B1b-crisp knows
+     * whether this layer is eligible for the premultiplied supersample path
+     * — see the section comment above kDioramaSupersample. */
+    bool rim_light = layer->is_figure && RimLightEnabled(renderer);
+    bool want_dof = !rim_light && layer->plane != kPpuOverlaySource_Bg3 &&
+        DofBlurEnabled(renderer);
+    float dof_radius = want_dof ? DofRadiusForLayer(layer->z) : 0.0f;
+    if (dof_radius < 0.05f) dof_radius = 0.0f;
+    bool want_edge = !rim_light && LayerGetsEdgeAA(layer->plane) &&
+        EdgeAAEnabled(renderer);
+    bool dof_or_edge = !rim_light && (dof_radius > 0.0f || want_edge);
+    bool use_shader = rim_light || dof_or_edge;
+
     SDL_SetTextureBlendMode(texture,
         is_backdrop ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND);
+
+    SDL_Texture *draw_texture = texture;
+    bool used_ss = false;
+    if (!use_shader) {
+      SDL_Texture *ss =
+          BuildDioramaSupersample(renderer, texture, snes_width, snes_height);
+      if (ss) { draw_texture = ss; used_ss = true; }
+    }
+    if (used_ss) {
+      SDL_SetTextureBlendMode(draw_texture,
+          is_backdrop ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND_PREMULTIPLIED);
+    }
 
     if (!is_backdrop && layer->casts_shadow) {
       float off = (float)out_h * 0.004f;
@@ -819,64 +1307,35 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
         SDL_SetGPURenderState(renderer, g_blur_state);
       }
-      SDL_RenderGeometry(renderer, texture, shadow, nv, indices, ni);
+      SDL_RenderGeometry(renderer, draw_texture, shadow, nv, indices, ni);
       if (shadow_blur)
         SDL_SetGPURenderState(renderer, NULL);
     }
 
-    /* M8/AR_GPU_FX_RIM: edge glow on sprite silhouettes only (doc §7.2).
-     * Bound only for this one draw call, sprites only — everything else
-     * (backdrop, BG tiles, HUD) renders exactly as before. */
-    bool rim_light = layer->is_figure && RimLightEnabled(renderer);
-
-    /* M8/AR_GPU_FX_DOF: depth-of-field, distance-from-focal-plane blur.
-     * Never on the HUD (BG3) — UI text must stay legible regardless of
-     * camera "focus". Mutually exclusive with rim light per draw call (SDL's
-     * custom render state is one shader at a time); in practice this rarely
-     * matters since sprites sit near the focal plane already (DofRadiusForLayer
-     * returns ~0 for them), so the two effects don't compete for the same
-     * layers in the first place. Skips the bind entirely when the computed
-     * radius is negligible, to avoid paying for a shader pass with no
-     * visible effect. */
-    /* M8/AR_GPU_FX_EDGEAA: feather the true UV edge (not assumed 0/1 — see
-     * LayerGetsEdgeAA comment) on BG1/BG2/their Hi splits. Takes priority
-     * over DOF when both would apply to the same layer (only one custom
-     * shader can be bound per draw call); in practice this mostly matters
-     * for BG2, where DOF's blur is already small (BG2 sits close to the
-     * focal plane), so preferring the edge fade there is a reasonable
-     * trade-off rather than a real loss. */
-    bool edge_aa = !rim_light && LayerGetsEdgeAA(layer->plane) &&
-        EdgeAAEnabled(renderer);
-
-    bool dof_blur = !rim_light && !edge_aa &&
-        layer->plane != kPpuOverlaySource_Bg3 && DofBlurEnabled(renderer);
-    float dof_radius = dof_blur ? DofRadiusForLayer(layer->z) : 0.0f;
-    if (dof_radius < 0.05f) dof_blur = false;
-
+    /* M8/AR_GPU_FX_RIM, AR_GPU_FX_DOF, AR_GPU_FX_EDGEAA: rim_light/want_dof/
+     * dof_radius/want_edge/dof_or_edge were already computed above (before
+     * the shadow draw) so B1b-crisp's supersample gate could see them. Both
+     * DOF and edge-AA are applied TOGETHER in the combined DOF/edge-AA
+     * shader (see the section comment above kDofEdgeMSL) — neither silently
+     * loses to the other. */
     if (rim_light) {
       RimLightUniforms u = {
         1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height, 0.33f, 0.0f,
       };
       SDL_SetGPURenderStateFragmentUniforms(g_rim_light_state, 0, &u, sizeof(u));
       SDL_SetGPURenderState(renderer, g_rim_light_state);
-    } else if (edge_aa) {
-      EdgeAAUniforms u = {
-        1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height,
+    } else if (dof_or_edge) {
+      DofEdgeUniforms u = {
+        1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height, dof_radius,
         uv_u0 + layer_du, uv_u1 + layer_du,
         0.0f + layer_dv, 1.0f + layer_dv,
-        2.0f, 0.0f,
+        want_edge ? 2.0f : 0.0f, 0.0f,
       };
-      SDL_SetGPURenderStateFragmentUniforms(g_edge_aa_state, 0, &u, sizeof(u));
-      SDL_SetGPURenderState(renderer, g_edge_aa_state);
-    } else if (dof_blur) {
-      BlurUniforms u = {
-        1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height, dof_radius, 0.0f,
-      };
-      SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
-      SDL_SetGPURenderState(renderer, g_blur_state);
+      SDL_SetGPURenderStateFragmentUniforms(g_dofedge_state, 0, &u, sizeof(u));
+      SDL_SetGPURenderState(renderer, g_dofedge_state);
     }
-    SDL_RenderGeometry(renderer, texture, verts, nv, indices, ni);
-    if (rim_light || edge_aa || dof_blur)
+    SDL_RenderGeometry(renderer, draw_texture, verts, nv, indices, ni);
+    if (rim_light || dof_or_edge)
       SDL_SetGPURenderState(renderer, NULL);
   }
 

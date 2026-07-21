@@ -14,6 +14,10 @@ bool g_ws_active;
 int g_ws_extra;
 int g_ws_display_extra;
 uint8 g_ram[0x20000];
+/* kSettingCat_Graphics's GpuShadersActive() availability gate reads this
+ * (main.c's real runtime state); this harness has no renderer, so it's
+ * never actually true here. */
+bool g_gpu_shaders_active;
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
 
@@ -154,7 +158,10 @@ int main(void) {
    * integer editor. Audio starts with Enable audio, then Audio frequency. */
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(SettingsOverlay_IsOpen());
-  /* Presentation sits between Display and Audio in kCategoryOrder. */
+  /* M1(a) (followup doc): Diorama (formerly Presentation), Graphics, then
+   * Widescreen sit between Display and Audio in kCategoryOrder. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
@@ -164,9 +171,10 @@ int main(void) {
   CHECK(Settings_AudioFrequencyHz() == 48000);
 
   /* Save Editor follows Cheats. Its panel title names the active edit
-   * section, while backend/arming stay global rows. */
+   * section, while backend/arming stay global rows. M1(a) moved Widescreen
+   * before Audio in kCategoryOrder, so Audio -> Cheats -> Save is now only
+   * two hops (was three when Widescreen still sat between them). */
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));

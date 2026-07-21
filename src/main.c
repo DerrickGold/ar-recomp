@@ -501,22 +501,24 @@ static int SDLCALL PresentThreadFn(void *userdata) {
     if (!g_frame_pending) {
       /* D11/§2.5, extended for M7: timed wait. On timeout (no new frame
        * submitted), re-composite + re-present the last slot — §2.5's "keep
-       * the window alive while paused" path. With AR_INTERP_ENABLE=1 (M7
-       * scroll interpolation — off by default, see the PresentComposite
-       * comment on the BG2/HDMA vibration bug), poll at ~4ms so this also
-       * becomes the steady-state redraw path on a >60Hz display, recomputing
-       * the interpolation alpha fresh each time (SDL_RenderPresent's vsync
-       * block still caps the actual rate, so this never spins). Without
-       * interpolation there is no benefit to redrawing identical content
-       * faster than the original 16ms idle cadence, so stick with that. */
-      static int interp_enabled = -1;
-      if (interp_enabled < 0) {
-        const char *e = getenv("AR_INTERP_ENABLE");
-        interp_enabled = (e && e[0] && e[0] != '0') ? 1 : 0;
-      }
-      bool signaled = SDL_WaitConditionTimeout(g_present_ready_cond,
-                                               g_present_mutex,
-                                               interp_enabled ? 4 : 16);
+       * the window alive while paused" path. With the "Scroll interpolation"
+       * setting on (kSettingCat_Graphics, off by default — see the
+       * PresentComposite comment on the BG2/HDMA vibration bug), poll at
+       * ~4ms so this also becomes the steady-state redraw path on a >60Hz
+       * display, recomputing the interpolation alpha fresh each time.
+       * B1a (followup doc): "Uncapped framerate" also wants this ~4ms
+       * cadence — without vsync (see the SDL_SetRenderVSync read at boot),
+       * SDL_RenderPresent no longer blocks the loop until the display's next
+       * refresh, so polling at the old 16ms idle cadence would just throttle
+       * the very re-present rate this setting exists to unlock. Without
+       * either setting there is no benefit to redrawing identical content
+       * faster than the original 16ms idle cadence, so stick with that.
+       * Reading g_settings directly is fine here (this is main.c, not
+       * present.c — no D6 boundary). */
+      bool signaled = SDL_WaitConditionTimeout(
+          g_present_ready_cond, g_present_mutex,
+          (g_settings.gpu_interp_enabled || g_settings.uncapped_framerate)
+              ? 4 : 16);
       if (!g_present_running || g_present_quiesce_requested) continue;
       if (!signaled && !g_frame_pending && g_present_last_presented_idx >= 0) {
         int idx = g_present_last_presented_idx;
@@ -1378,6 +1380,10 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
     /* SDL3 SDL_SetWindowFullscreen takes a bool; borderless-desktop is the
      * default fullscreen mode. */
     SDL_SetWindowFullscreen(g_window, g_settings.fullscreen != 0);
+  /* B1a (followup doc): live-apply without a restart — mirrors the boot-time
+   * SDL_SetRenderVSync read near SDL_CreateRenderer. */
+  if (desc->field == &g_settings.uncapped_framerate && g_renderer)
+    SDL_SetRenderVSync(g_renderer, g_settings.uncapped_framerate ? 0 : 1);
   if (desc->field == &g_settings.extended_aspect ||
       desc->field == &g_settings.pixel_aspect) {
     ResolveVideoGeometry(true);
@@ -1765,6 +1771,58 @@ void Diorama_OnModeChanged(void) {
   PresentThread_Resume();
 }
 
+/* B4-vellean (followup doc): self-calibrating velocity normalizer — REVISED
+ * TWICE after live measurement (AR_DYNCAM_LOG captures, 2026-07-21):
+ *   1st capture: the doc's literal "permanent running max, seeded 256" was
+ *   dominated by a too-high floor (ordinary run/walk PlayerVelocityX never
+ *   exceeded ~1-2 raw units — the 256 floor never got superseded, yaw lean
+ *   read 0.004-0.008 all session) and by a single early outlier on Y (one
+ *   big fall — likely the stage-entry drop-in, not a real jump — spiked the
+ *   running max once; a monotonic max can only grow, so every ordinary jump
+ *   afterward normalized against that outlier and read near-zero).
+ *   2nd capture (after switching to a decaying PEAK follower, ~10s
+ *   half-life): fixed X (yaw now reaches ±0.5 during normal running), but Y
+ *   was STILL dead — one -1.000 spike at the very start (4 frames, matching
+ *   the same drop-in event), then near-zero for the rest of a ~56s session
+ *   with plenty of real jumps in it. A peak-follower is fundamentally the
+ *   wrong shape for this: ONE frame can set the entire session's scale, no
+ *   matter how fast it decays, if that one frame is a scripted event (a
+ *   drop-in) rather than representative gameplay physics.
+ * Fix: normalize against a recent-activity AVERAGE (exponential moving
+ * average of |v|, ~0.8s time constant) instead of a peak, scaled by
+ * kNormMultiple so "typical recent motion" reads as a fraction of full
+ * lean and a burst clearly above that reads as more. A single-frame outlier
+ * — however large — only nudges the average by kEmaAlpha of its excess, so
+ * it can't singlehandedly desensitize anything; sustained real motion (a
+ * multi-frame jump arc, continuous running) dominates the average the way
+ * it should. This is the auto-gain-control shape (RMS/average-following),
+ * not peak-following, and it's what "self-calibrates near real top speed"
+ * actually needs when scripted one-off events share the same WRAM signal as
+ * real gameplay motion. */
+static float g_diorama_velx_avg = 4.0f;
+static float g_diorama_vely_avg = 4.0f;
+
+static float NormalizeDioramaVelocity(int16_t v, float *avg) {
+  static const float kFloor = 4.0f;
+  static const float kEmaAlpha = 0.02f;      /* ~0.8s time constant @ 60Hz */
+  static const float kNormMultiple = 3.0f;   /* "full lean" = 3x recent avg */
+  float av = fabsf((float)v);
+  *avg += (av - *avg) * kEmaAlpha;
+  float ref = *avg * kNormMultiple;
+  if (ref < kFloor) ref = kFloor;
+  float norm = (float)v / ref;
+  if (norm > 1.0f) norm = 1.0f;
+  if (norm < -1.0f) norm = -1.0f;
+  return norm;
+}
+
+/* B4-kick (followup doc): rising-edge detection for the three event
+ * triggers. Game-thread-only state (FrameSlot_Capture's exclusive caller) —
+ * present.c only ever sees the resulting one-shot FrameSlot flags. */
+static bool g_diorama_prev_boost;
+static int16_t g_diorama_prev_vely;
+static uint8_t g_diorama_prev_hp;
+
 /* M5 (ar-recomp-threading-impl.md Appendix D5): the sole FrameSlot writer.
  * Reads live g_ppu, g_settings, g_snes_width/height,
  * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
@@ -1790,12 +1848,72 @@ void FrameSlot_Capture(FrameSlot *dst) {
   /* M7/§6.1: scroll snapshot for present-time interpolation. */
   dst->timestamp_ns = SDL_GetTicksNS();
   dst->turbo_active = g_turbo != 0;
-  if (g_ppu) {
-    for (int i = 0; i < 4; i++) {
-      dst->bg_hscroll[i] = (int16_t)g_ppu->hScroll[i];
-      dst->bg_vscroll[i] = (int16_t)g_ppu->vScroll[i];
-    }
-  }
+  dst->interp_setting_enabled = g_settings.gpu_interp_enabled;
+  dst->diorama_hud_flat = g_settings.diorama_hud_flat;
+  /* B4-split (followup doc): both candidate camera poses, scaled the same
+   * way Diorama_SeedCameraFromSettings does (g_diorama_cam and g_settings
+   * are kept in lockstep by Diorama_AdjustCamera's write-back and
+   * OnRuntimeSettingChanged's re-seed on menu edits, so reading straight
+   * from g_settings here is equivalent to reading the live g_diorama_cam). */
+  dst->diorama_camera_mode = g_settings.diorama_camera_mode;
+  dst->diorama_free_pose = (DioramaCameraPose){
+    (float)g_settings.diorama_tilt_x_mrad / 1000.0f,
+    (float)g_settings.diorama_tilt_y_mrad / 1000.0f,
+    (float)g_settings.diorama_distance_x100 / 100.0f,
+  };
+  dst->diorama_dyncam_baseline = (DioramaCameraPose){
+    (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad / 1000.0f,
+    (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad / 1000.0f,
+    (float)g_settings.diorama_dyncam_baseline_distance_x100 / 100.0f,
+  };
+  dst->diorama_reactive_strength = g_settings.diorama_reactive_strength;
+  /* B4-vellean (followup doc): same ReadWram16+cast pattern already used for
+   * PlayerVelocityX/Y elsewhere (actraiser_rtl.c ~346-349). */
+  int16_t vel_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityX);
+  int16_t vel_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityY);
+  dst->diorama_dyncam_lean_yaw =
+      NormalizeDioramaVelocity(vel_x, &g_diorama_velx_avg);
+  dst->diorama_dyncam_lean_pitch =
+      NormalizeDioramaVelocity(vel_y, &g_diorama_vely_avg);
+
+  /* B4-kick (followup doc): rising-edge event triggers. Hit was originally
+   * the invuln-bit test AR_NO_KNOCKBACK already relies on elsewhere in this
+   * file — REVISED (2026-07-21, live report + AR_FRAMELOG/AR_DYNCAM_LOG
+   * correlation): that flag consistently lagged the real hit by ~10 game
+   * frames (~167ms @ 60Hz) across 3 measured hits, apparently because the
+   * game doesn't set it until after the knockback/hit-stun begins, not at
+   * the instant damage applies. PlayerHp decreasing IS the instant damage
+   * applies, so that's the trigger now — fires exactly on the hit frame,
+   * no game-side lag to inherit. Landing has no documented WRAM flag, so
+   * it's inferred from velocity: falling with |vely| clearly above the
+   * recent-average scale, settling near zero in one tick — reuses
+   * g_diorama_vely_avg (just updated above) instead of a guessed magic
+   * threshold, same reasoning as B4-vellean's self-calibration. Boost is a
+   * 0-to-nonzero read of the raw byte, matching how
+   * PlayerInvulnerabilityTimer is read/pinned elsewhere (g_ram[...], not
+   * ReadWram16 — it's a single byte). */
+  uint8_t hp = g_ram[kActRaiserWram_PlayerHp];
+  dst->diorama_dyncam_event_hit = hp < g_diorama_prev_hp;
+  g_diorama_prev_hp = hp;
+
+  bool was_falling =
+      g_diorama_prev_vely > (int16_t)(g_diorama_vely_avg * 0.5f);
+  bool now_settled = abs((int)vel_y) < (int)(g_diorama_vely_avg * 0.15f);
+  dst->diorama_dyncam_event_land = was_falling && now_settled;
+  g_diorama_prev_vely = vel_y;
+
+  bool boost = g_ram[kActRaiserWram_PlayerBoost] != 0;
+  dst->diorama_dyncam_event_boost = boost && !g_diorama_prev_boost;
+  g_diorama_prev_boost = boost;
+  /* B1b (followup doc): the stable game-authored camera in WRAM, read
+   * BEFORE HDMA touches the PPU scroll registers — see the long comment on
+   * FrameSlot's timestamp_ns field (present.h) for why this replaced
+   * g_ppu->hScroll[]/vScroll[]. g_ram is always valid (no g_ppu dependency,
+   * unlike the PPU-register read this replaces). */
+  dst->bg1_camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
+  dst->bg1_camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+  dst->bg2_camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraX);
+  dst->bg2_camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraY);
 
   if (g_ppu) {
     dst->hud_split_height = g_ppu->wsHudSplitHeight;
@@ -2416,18 +2534,21 @@ int main(int argc, char **argv) {
      * accelerated backend) instead of an index + flag bitmask. Vsync is set
      * separately, and the software backend is selected by name.
      *
-     * M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish):
-     * AR_GPU_SHADERS=1 requests the "gpu" backend instead, which is a
-     * prerequisite for SDL_CreateGPURenderState/SDL_SetGPURenderState (used
-     * by the diorama shader effects below — each still independently gated
-     * off by default). Off by default: this swaps the render backend for
-     * the WHOLE app (HUD, flat mode, screenshots, settings overlay), not
-     * just diorama, so it needs to earn trust on its own before any shader
-     * effect is layered on top. Falls back to the normal auto-selected
-     * backend if "gpu" isn't available, rather than dying — this is
-     * opt-in polish, not a requirement to run at all. */
-    { const char *e = getenv("AR_GPU_SHADERS");
-      g_gpu_shaders_requested = (e && e[0] && e[0] != '0') ? 1 : 0; }
+     * M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish): the
+     * gpu_shaders_enabled setting (kSettingCat_Graphics, kApply_Restart —
+     * this backend choice is fixed for the process lifetime) requests the
+     * "gpu" backend instead, a prerequisite for SDL_CreateGPURenderState/
+     * SDL_SetGPURenderState (used by the diorama shader effects, each still
+     * independently toggleable in the same menu). Off by default: this
+     * swaps the render backend for the WHOLE app (HUD, flat mode,
+     * screenshots, settings overlay), not just diorama, so it needs to earn
+     * trust on its own before any shader effect is layered on top. Falls
+     * back to the normal auto-selected backend if "gpu" isn't available,
+     * rather than dying — this is opt-in polish, not a requirement to run
+     * at all. Settings_InitWithFile() has already run by this point, so
+     * g_settings reflects settings.ini/config.ini/the legacy AR_GPU_SHADERS
+     * env var per the usual priority chain. */
+    g_gpu_shaders_requested = g_settings.gpu_shaders_enabled;
     if (headless_video) {
       g_renderer = SDL_CreateRenderer(g_window, SDL_SOFTWARE_RENDERER);
     } else if (g_gpu_shaders_requested) {
@@ -2444,8 +2565,14 @@ int main(int argc, char **argv) {
       g_renderer = SDL_CreateRenderer(g_window, NULL);
     }
     if (!g_renderer) Die("SDL_CreateRenderer failed");
+    /* B1a (followup doc): "Uncapped framerate" row (kSettingCat_Graphics).
+     * This is the mechanism the toggle actually needs to change something —
+     * a bare setting with nothing reading it would be inert. Disabling
+     * vsync stops SDL_RenderPresent from blocking the present thread until
+     * the display's next refresh; see the present-cadence read below for
+     * the other half (redrawing often enough for that to matter). */
     if (!headless_video)
-      SDL_SetRenderVSync(g_renderer, 1);
+      SDL_SetRenderVSync(g_renderer, g_settings.uncapped_framerate ? 0 : 1);
 
     /* Aspect-correct letterboxing via SDL's logical presentation (widescreen
      * only, so faithful mode keeps the historical stretch-to-window behavior).
@@ -2496,6 +2623,30 @@ int main(int argc, char **argv) {
 
     /* One streaming texture per diorama plane (priority bands included).
      * Only the backdrop is opaque — every other plane alpha-blends. */
+    /* Live report (2026-07-21): a persistent pink/garbage-colored line at
+     * the diorama's right edge, root-caused across two failed attempts (the
+     * B1b-crisp supersample copy, then suspected in the DOF/edge-AA shader)
+     * before landing on the actual source: every consumer that ever samples
+     * near the true edge of what Diorama_Upload writes (u=uv_u1 =
+     * snes_width/kPpuBufWidth, always < 1.0 — the buffer is allocated at
+     * the PPU's max width but a layer's real captured content is narrower,
+     * capped by kWsExtraMax's SNES OAM-wrap hardware limit) can reach into
+     * columns snes_width..kPpuBufWidth-1, which Diorama_Upload's
+     * SDL_UpdateTexture never touches. SDL_TEXTUREACCESS_STREAMING content
+     * is undefined until written (no zero guarantee, confirmed non-zero in
+     * practice on this backend), so that tail is genuine garbage, not just
+     * theoretically risky — and every fix so far (B1b's UV-window clamp,
+     * B1b-crisp's valid-subrect blit, the skybox blur's UV inset) was
+     * patching ONE consumer at a time as each was discovered, while the DOF/
+     * edge-AA shader's own unclamped blur sampling proved there would always
+     * be another. Fix it once at the SOURCE instead: zero-fill each
+     * texture's FULL extent immediately after creation, before any real
+     * frame ever writes into it. Diorama_Upload only ever touches the valid
+     * {0,0,snes_width,snes_height} sub-rect afterward, so the margin stays
+     * deterministically transparent black (not garbage) for the texture's
+     * entire lifetime — every current and future consumer is safe without
+     * needing its own clamp/inset workaround. */
+    uint8_t *zero_fill = calloc(1, (size_t)kPpuBufWidth * g_snes_height * 4);
     for (int i = 0; i < kDioramaPlane_Count; i++) {
       if (i == kPpuOverlaySource_Bg4) continue;
       g_diorama_textures[i] = SDL_CreateTexture(g_renderer,
@@ -2506,8 +2657,12 @@ int main(int argc, char **argv) {
             i == kDioramaPlane_Backdrop ? SDL_BLENDMODE_NONE
                                         : SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(g_diorama_textures[i], SDL_SCALEMODE_NEAREST);
+        if (zero_fill)
+          SDL_UpdateTexture(g_diorama_textures[i], NULL, zero_fill,
+                            kPpuBufWidth * 4);
       }
     }
+    free(zero_fill);
 
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   }
@@ -2744,9 +2899,15 @@ int main(int argc, char **argv) {
               fprintf(stderr, "[display] F9 needs ExtendedAspectRatio "
                       "(e.g. 16:9) in config.ini; staying 4:3\n");
             } else {
+              /* A1 (followup doc): Settings_CycleDisplayMode now routes
+               * through Settings_SetLong, whose FinishChange fires
+               * OnRuntimeSettingChanged — that observer already quiesces the
+               * present thread, calls ApplyDisplayPresentation(), and sets
+               * g_paused_redraw_pending for kSettingCat_Display. Doing them
+               * again here would re-mutate the renderer outside the
+               * observer's quiesce bracket, reintroducing the race this
+               * fixes. */
               int m = Settings_CycleDisplayMode();
-              ApplyDisplayPresentation();
-              g_paused_redraw_pending = true;
               fprintf(stderr, "[display] mode %d/%d -> %s\n", m + 1,
                       kDisplayMode_PresetCount, Settings_DisplayModeName(m));
             }

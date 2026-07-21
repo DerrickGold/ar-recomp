@@ -1166,18 +1166,69 @@ void ActRaiserDrawPpuFrame(void) {
       extern int g_ws_extra;
       int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
       size_t pitch = (size_t)width * 4;
-      static const PpuOverlaySource kCaptureLayers[] = {
-        kPpuOverlaySource_Bg1, kPpuOverlaySource_Bg2,
-        kPpuOverlaySource_Bg3, kPpuOverlaySource_Obj,
+      /* A7/A5 (followup doc): BG3 (the status bar) is excluded from this
+       * diorama capture loop whenever diorama_hud_flat is on (default) —
+       * leaving the line-906 widescreen HUD split capture (PpuSetOverlayCapture
+       * ... kPpuOverlaySource_Bg3 ... RemoveFromGame, above) standing instead
+       * of being overridden by this block. That capture feeds
+       * g_hud_bg_pixels/g_hud_bg_texture exactly as in flat mode, which is
+       * what lets PresentComposite's diorama branch call
+       * PresentHudOverlayComposited (present.c) and get the same widescreen
+       * HUD anchoring (ACT/TIME/SCORE spread, boss-health full width) flat
+       * mode already has. Before A7 BG3 was unconditionally rebound here, so
+       * the last bind won — the anchored capture never survived and the HUD
+       * only ever showed as an unanchored tilted plane.
+       *
+       * diorama_hud_flat=false (A5's A/B option) restores that pre-A7
+       * behavior on purpose: BG3 captured here as an ordinary diorama layer,
+       * rendered as the tilted plane (diorama.c's kDioramaLayers table), with
+       * no anchored overlay. This is a game-thread read of the setting — the
+       * present-side choice (whether to call PresentHudOverlayComposited)
+       * uses the FrameSlot-snapshotted copy per D6. */
+      static const PpuOverlaySource kCaptureLayersCommon[] = {
+        kPpuOverlaySource_Bg1, kPpuOverlaySource_Bg2, kPpuOverlaySource_Obj,
       };
-      for (int i = 0; i < (int)(sizeof(kCaptureLayers) / sizeof(kCaptureLayers[0])); i++) {
-        PpuOverlaySource src = kCaptureLayers[i];
+      for (int i = 0; i < (int)(sizeof(kCaptureLayersCommon) /
+                                sizeof(kCaptureLayersCommon[0])); i++) {
+        PpuOverlaySource src = kCaptureLayersCommon[i];
         if (!g_diorama_layer_pixels[src])
           g_diorama_layer_pixels[src] = calloc(1, kPpuBufWidth * 4 * 240);
         PpuBindOverlaySurface(g_ppu, src, g_diorama_layer_pixels[src], pitch);
         if (g_ppu->screenEnabled[0] & (1 << src))
           PpuSetOverlayCapture(g_ppu, src, -g_ws_extra, 0, width, 224,
                                kPpuOverlayFlag_RemoveFromGame);
+      }
+      /* BG3 needs its OWN branch, not just an on/off entry in the loop above:
+       * PpuBindOverlaySurface is the ONLY thing that changes a source's
+       * bound destination buffer, so a source simply left OUT of a frame's
+       * capture list keeps whatever buffer the LAST frame bound it to —
+       * there is no implicit "unbind." With diorama_hud_flat=true excluding
+       * BG3 from a shared loop (as A7 originally did), toggling
+       * flat->tilted->flat left BG3 permanently bound to the diorama layer
+       * buffer from the tilted frame: g_hud_bg_pixels silently stopped
+       * receiving fresh captures (frozen HUD) while the diorama buffer kept
+       * getting live writes and diorama.c kept drawing it — the HUD showing
+       * in two places at once (a live tilted ghost plus a frozen flat
+       * overlay). Explicitly rebinding BOTH ways, every frame, is
+       * self-healing regardless of toggle history. */
+      if (g_settings.diorama_hud_flat) {
+        extern uint8_t g_hud_bg_pixels[];
+        PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3, g_hud_bg_pixels,
+                              pitch);
+        /* Do NOT reissue PpuSetOverlayCapture here — the line-906
+         * HUD-split-specific capture region (0,0,kActRaiserAuthenticWidth,
+         * hud_split_height) must stay the authority for this source; this
+         * generic wide-capture path is only for the diorama's OWN layers. */
+      } else {
+        if (!g_diorama_layer_pixels[kPpuOverlaySource_Bg3])
+          g_diorama_layer_pixels[kPpuOverlaySource_Bg3] =
+              calloc(1, kPpuBufWidth * 4 * 240);
+        PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3,
+                              g_diorama_layer_pixels[kPpuOverlaySource_Bg3],
+                              pitch);
+        if (g_ppu->screenEnabled[0] & (1 << kPpuOverlaySource_Bg3))
+          PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3, -g_ws_extra, 0,
+                               width, 224, kPpuOverlayFlag_RemoveFromGame);
       }
       if (g_ppu->screenEnabled[0] & (1 << kPpuOverlaySource_Obj))
         PpuSetOverlayOamRange(g_ppu, 0, 128);

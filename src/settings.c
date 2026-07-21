@@ -445,6 +445,17 @@ static const char *const kPixelAspectLabels[] = {
   "4:3 CRT",
 };
 
+static const char *const kDioramaCamModeLabels[] = {
+  "Free Cam",
+  "Dynamic Cam",
+};
+
+static const char *const kDioramaSkyModeLabels[] = {
+  "Off",
+  "Skybox only",
+  "Plane + skybox",
+};
+
 static const char *const kScreenAspectLabels[] = {
   "4:3",
   "16:9",
@@ -508,6 +519,14 @@ bool Diorama_NewPpuCapable(void) {
   return g_settings.new_renderer || g_ws_active;
 }
 static bool DioramaModeIsOff(void) { return !g_settings.diorama_mode; }
+
+/* Graphics availability gate (kSettingCat_Graphics): the per-effect rows
+ * only matter once the "gpu" renderer backend is actually running — gated
+ * on the REAL runtime state (main.c's g_gpu_shaders_active), not just the
+ * gpu_shaders_enabled setting, since backend creation can silently fall
+ * back if the "gpu" driver isn't available on this machine (main.c). */
+extern bool g_gpu_shaders_active;
+static bool GpuShadersActive(void) { return g_gpu_shaders_active; }
 
 #define BOOL_SETTING(id, env_name, text, help, cat, def, is_sticky, active, changed) \
   { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
@@ -616,19 +635,92 @@ const SettingDesc g_setting_descs[] = {
                "Render action-stage layers as tilted 3D planes (action stages only; needs the new renderer).",
                kSettingCat_Presentation, 0, false, Diorama_NewPpuCapable,
                DioramaModeChanged),
-  INT_SETTING(diorama_tilt_y_mrad, NULL, "Camera yaw",
-              "Diorama camera yaw in milliradians; negative swings the left edge toward you.",
-              kSettingCat_Presentation, -180, -700, 700, NULL,
-              Diorama_ModeIsOn),
-  INT_SETTING(diorama_tilt_x_mrad, NULL, "Camera pitch",
-              "Diorama camera pitch in milliradians; 0 keeps sprites planted on their platforms.",
-              kSettingCat_Presentation, 0, -700, 700, NULL, Diorama_ModeIsOn),
-  INT_SETTING(diorama_distance_x100, NULL, "Camera distance",
-              "Diorama camera distance (hundredths); 0 auto-fits the frame to the window.",
-              kSettingCat_Presentation, 0, 0, 2000, NULL, Diorama_ModeIsOn),
-  INT_SETTING(diorama_sprite_upright, NULL, "Sprite upright",
-              "How much the sprite plane stays standing against camera pitch; 100 keeps figures fully upright.",
-              kSettingCat_Presentation, 60, 0, 100, NULL, Diorama_ModeIsOn),
+  /* B4-mode/B4-split/B4-baseline (followup doc): Dynamic Cam snaps the
+   * render camera to its own dedicated baseline pose (see
+   * diorama_dyncam_baseline_* below) — reactive sway (velocity-lean, pan,
+   * event kicks) is later checkpoints, not wired yet. */
+  { "diorama_camera_mode", NULL, "Camera mode",
+    "Free Cam: manual orbit/zoom, persists. Dynamic Cam: snaps to its own "
+    "baseline pose (reactive sway from gameplay motion lands in a later update).",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_camera_mode, kDioramaCam_Free,
+    kDioramaCam_Free, kDioramaCam_Dynamic, 1, false,
+    kDioramaCamModeLabels, kDioramaCam_Count, Diorama_ModeIsOn, NULL,
+    NULL, NULL },
+  /* B4-baseline (followup doc): Dynamic Cam's dedicated pose (see the
+   * Settings struct comment). Provisional literals per the doc — a gentle
+   * 3/4 tilt (~0.20 rad pitch), symmetric yaw (0), auto-fit distance. Same
+   * step convention as their free-cam counterparts just below. */
+  { "diorama_dyncam_baseline_tilt_y_mrad", NULL, "Dynamic baseline yaw",
+    "Dynamic Cam's resting yaw in milliradians; sway leans around this, not 0.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_dyncam_baseline_tilt_y_mrad, 0, -700, 700, 20, false,
+    NULL, 0, Diorama_ModeIsOn, NULL, NULL, NULL },
+  { "diorama_dyncam_baseline_tilt_x_mrad", NULL, "Dynamic baseline pitch",
+    "Dynamic Cam's resting pitch in milliradians; sway leans around this, not 0.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_dyncam_baseline_tilt_x_mrad, 200, -700, 700, 25, false,
+    NULL, 0, Diorama_ModeIsOn, NULL, NULL, NULL },
+  { "diorama_dyncam_baseline_distance_x100", NULL, "Dynamic baseline distance",
+    "Dynamic Cam's resting camera distance (hundredths); 0 auto-fits the frame.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_dyncam_baseline_distance_x100, 0, 0, 2000, 25, false,
+    NULL, 0, Diorama_ModeIsOn, NULL, NULL, NULL },
+  INT_SETTING(diorama_reactive_strength, NULL, "Reactive strength",
+              "Dynamic Cam: how strongly the camera sways with gameplay "
+              "motion; 0 holds it fixed at the baseline pose.",
+              kSettingCat_Presentation, 35, 0, 100, NULL, Diorama_ModeIsOn),
+  /* B5 (followup doc): promotes BG2 to an enveloping dimmed+DoF'd skybox so
+   * camera tilt/yaw/zoom never reveals the void past the finite backdrop
+   * quad's edges. Off keeps today's look; see the DioramaSkyMode comment
+   * (settings.h) for what the other two modes do. */
+  { "diorama_skybox", NULL, "Skybox",
+    "Off: BG2 is an in-box parallax plane (void may show at the margins "
+    "under tilt). Skybox only: BG2 fills the background instead. Plane + "
+    "skybox: both — keeps BG2's parallax AND backstops the void/gaps.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_skybox, kDioramaSky_Off,
+    kDioramaSky_Off, kDioramaSky_Both, 1, false,
+    kDioramaSkyModeLabels, kDioramaSky_Count, Diorama_ModeIsOn, NULL,
+    NULL, NULL },
+  /* B6 (followup doc): floor/ceiling/side-wall enclosure masking the box's
+   * off-screen edges. Composes with B5 (skybox fills the far opening);
+   * independent so each can be A/B'd alone. */
+  BOOL_SETTING(diorama_shoebox, NULL, "Shoebox walls",
+               "Enclose the layer stack in a floor, ceiling, and side "
+               "walls so its off-screen edges are masked instead of "
+               "ending in void.",
+               kSettingCat_Presentation, 0, false, Diorama_ModeIsOn, NULL),
+  /* M5 (followup doc): these three were INT_SETTING, which hardcodes
+   * step=1 — an arrow press moved the camera by 1 mrad / 0.01x, ~1400
+   * presses to traverse the tilt range. Written as full descriptor literals
+   * instead (same pattern as hud_scale_percent/menu_scale_percent above)
+   * so each press jumps by a coarse, usable step. */
+  /* step=20, not 25: NormalizeLong rounds to minval + k*step, and the
+   * default -180 is only grid-aligned there (-180 - -700 = 520 = 20*26;
+   * 520 isn't a multiple of 25, so a step of 25 would snap the untouched
+   * default to -200 the first time anything round-trips it). */
+  { "diorama_tilt_y_mrad", NULL, "Camera yaw",
+    "Diorama camera yaw in milliradians; negative swings the left edge toward you.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_tilt_y_mrad, -180, -700, 700, 20, false, NULL, 0,
+    Diorama_ModeIsOn, NULL, NULL, NULL },
+  { "diorama_tilt_x_mrad", NULL, "Camera pitch",
+    "Diorama camera pitch in milliradians; 0 keeps sprites planted on their platforms.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_tilt_x_mrad, 0, -700, 700, 25, false, NULL, 0,
+    Diorama_ModeIsOn, NULL, NULL, NULL },
+  /* M5 dead-zone note: 0 is the auto-fit sentinel and the usable minimum is
+   * kDioramaDistMin (200, i.e. 2.0x) — values 1-199 are a reachable "dead
+   * zone" the range alone can't exclude (0..2000 must stay contiguous to
+   * cover both the sentinel and the real range). Diorama_Render enforces
+   * the floor at consume time (diorama.c) so a stray value in that gap
+   * renders a valid scene instead of clipping into the near plane. */
+  { "diorama_distance_x100", NULL, "Camera distance",
+    "Diorama camera distance (hundredths); 0 auto-fits the frame to the window.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_distance_x100, 0, 0, 2000, 25, false, NULL, 0,
+    Diorama_ModeIsOn, NULL, NULL, NULL },
   INT_SETTING(diorama_depth_shade, NULL, "Depth shading",
               "Strength of the atmospheric darkening applied to farther planes.",
               kSettingCat_Presentation, 100, 0, 100, NULL, Diorama_ModeIsOn),
@@ -647,8 +739,62 @@ const SettingDesc g_setting_descs[] = {
   BOOL_SETTING(diorama_layer_bg3, NULL, "Show BG3/HUD",
                "Diorama: show the BG3 (HUD) plane.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
+  BOOL_SETTING(diorama_hud_flat, NULL, "Flat HUD",
+               "On: HUD (ACT/TIME/SCORE, health, boss bar) stays flat and "
+               "widescreen-anchored like flat mode. Off: HUD renders as an "
+               "unanchored tilted plane in the box, matching the pre-fix look.",
+               kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
   PRESENTATION_ACTION_SETTING("diorama_reset", "Reset defaults",
                               "Return all diorama controls to their defaults."),
+  /* B1a (followup doc): mode-agnostic (flat or diorama) — unlike the GPU
+   * shader rows below, doesn't need gpu_shaders_enabled/GpuShadersActive at
+   * all. Live-applies through OnRuntimeSettingChanged (main.c), which calls
+   * SDL_SetRenderVSync under the same quiesce every other renderer-mutating
+   * setting gets. */
+  BOOL_SETTING(uncapped_framerate, NULL, "Uncapped framerate",
+               "Disable vsync so the present thread isn't blocked waiting for "
+               "the display's refresh. Lowers input-to-photon latency and "
+               "steadies pacing; on a 60Hz display this doesn't raise the "
+               "60fps pixel update rate (see Scroll interpolation for "
+               "smoother diorama motion).",
+               kSettingCat_Graphics, 0, false, NULL, NULL),
+  /* M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish). The
+   * backend switch needs a restart (SDL's renderer backend is fixed at
+   * SDL_CreateRenderer); the effect rows below apply live and are only
+   * offered once that backend is actually running (GpuShadersActive). */
+  { "gpu_shaders_enabled", "AR_GPU_SHADERS", "GPU shader effects",
+    "Use SDL's GPU-accelerated renderer backend, required for the diorama "
+    "shader effects below. Falls back to the normal backend if unavailable "
+    "on this machine.",
+    kSettingType_Bool, kApply_Restart, kSettingCat_Graphics,
+    &g_settings.gpu_shaders_enabled, 0, 0, 1, 1, false, NULL, 0,
+    NULL, NULL, NULL, NULL },
+  BOOL_SETTING(gpu_fx_rim, "AR_GPU_FX_RIM", "Rim lighting",
+               "Diorama: warm edge glow on sprite silhouettes.",
+               kSettingCat_Graphics, 1, false, GpuShadersActive, NULL),
+  BOOL_SETTING(gpu_fx_dof, "AR_GPU_FX_DOF", "Depth of field",
+               "Diorama: blur background layers by distance from the main "
+               "playfield.",
+               kSettingCat_Graphics, 1, false, GpuShadersActive, NULL),
+  BOOL_SETTING(gpu_fx_edgeaa, "AR_GPU_FX_EDGEAA", "Edge anti-aliasing",
+               "Diorama: soften the hard rectangular edge of tilted "
+               "background layers.",
+               kSettingCat_Graphics, 1, false, GpuShadersActive, NULL),
+  BOOL_SETTING(gpu_fx_shadow, "AR_GPU_FX_SHADOW", "Soft shadow blur (experimental)",
+               "Diorama: blur sprite/layer drop shadows. KNOWN ISSUE: can "
+               "bleed onto transparent gaps in the layer behind it (e.g. a "
+               "hazy patch over the sky) — off by default until fixed.",
+               kSettingCat_Graphics, 0, false, GpuShadersActive, NULL),
+  /* B1b (followup doc): the source fix (WRAM camera instead of the
+   * HDMA-polluted PPU scroll registers, present.c ComputeDioramaScrollDelta)
+   * has landed, so the old "known issue: jitters HDMA-driven parallax
+   * layers" no longer applies — kept off by default until the fix proves
+   * stable in-game (the doc's explicit call), not because of a known bug. */
+  BOOL_SETTING(gpu_interp_enabled, "AR_INTERP_ENABLE",
+               "Scroll interpolation",
+               "Diorama: smooth background scroll motion between emulated "
+               "frames on high-refresh (>60Hz) displays.",
+               kSettingCat_Graphics, 0, false, Diorama_ModeIsOn, NULL),
   { "audio_enabled", "AR_ENABLE_AUDIO", "Enable audio",
     "Pause or resume host audio output without changing emulated audio state.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
@@ -1214,7 +1360,8 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Cheats: return "Cheats";
     case kSettingCat_Widescreen: return "Widescreen";
     case kSettingCat_Display: return "Display";
-    case kSettingCat_Presentation: return "Presentation";
+    case kSettingCat_Presentation: return "Diorama";
+    case kSettingCat_Graphics: return "Graphics";
     case kSettingCat_Audio: return "Audio";
     case kSettingCat_Save: return "Save editor";
     case kSettingCat_Extras: return "Extras";
@@ -1611,7 +1758,15 @@ int Settings_CycleDisplayMode(void) {
               g_settings.display_mode < kDisplayMode_PresetCount)
                  ? (g_settings.display_mode + 1) % kDisplayMode_PresetCount
                  : kDisplayMode_43;
-  Settings_SetDisplayMode(next);
+  /* A1 (followup doc): route through Settings_SetLong on the descriptor
+   * rather than calling Settings_SetDisplayMode directly, so FinishChange
+   * fires the runtime change observer (OnRuntimeSettingChanged) — the same
+   * PresentThread_Quiesce()/ApplyDisplayPresentation()/Resume() bracket
+   * every other renderer-mutating settings change gets. DisplayModeChanged
+   * (the descriptor's on_change) still calls Settings_SetDisplayMode to set
+   * the ws_* flags; no recursion, since that function writes fields
+   * directly rather than going back through Settings_SetLong. */
+  Settings_SetLong(Settings_Find("display_mode"), next);
   return g_settings.display_mode;
 }
 

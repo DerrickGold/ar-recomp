@@ -45,6 +45,33 @@ typedef enum {
   kAudioFrequency_Count,
 } AudioFrequency;
 
+/* B4 (followup doc): Free Cam is today's manual orbit/zoom, persisted and
+ * player-owned. Dynamic Cam is the opt-in reactive camera that sways off
+ * gameplay signals around its own dedicated baseline pose — mutually
+ * exclusive with Free Cam, not a blend. */
+typedef enum {
+  kDioramaCam_Free = 0,
+  kDioramaCam_Dynamic = 1,
+  kDioramaCam_Count,
+} DioramaCameraMode;
+
+/* B5 (followup doc): promotes BG2 (the farthest/sky background layer in
+ * ActRaiser Mode 1 action stages) from an ordinary in-box parallax plane to
+ * an enveloping, dimmed, DoF'd skybox that fills the viewport — fixes the
+ * dark void that rotates into view past the finite backdrop quad's edges
+ * once the camera tilts/yaws/zooms. Enum, not a bool: the three looks are
+ * mutually exclusive views of the same layer (matches display_mode's/
+ * extended_aspect's mutually-exclusive-preset modeling). Default Off: BG2 is
+ * a heuristic pick for "sky" (no programmatic flag says so — see
+ * AR_WS_ONLYBG, actraiser_rtl.c), so this stays opt-in rather than changing
+ * today's known-good look unprompted. */
+typedef enum {
+  kDioramaSky_Off = 0,
+  kDioramaSky_Only = 1,
+  kDioramaSky_Both = 2,
+  kDioramaSky_Count,
+} DioramaSkyMode;
+
 typedef enum {
   kSettingType_Bool,
   kSettingType_Int,
@@ -67,6 +94,7 @@ typedef enum {
   kSettingCat_Widescreen,
   kSettingCat_Display,
   kSettingCat_Presentation,
+  kSettingCat_Graphics,
   kSettingCat_Audio,
   kSettingCat_Save,
   kSettingCat_Extras,
@@ -239,13 +267,71 @@ typedef struct Settings {
   int  diorama_tilt_x_mrad;      /* camera pitch, milliradians */
   int  diorama_tilt_y_mrad;      /* camera yaw, milliradians */
   int  diorama_distance_x100;    /* camera distance, hundredths */
-  int  diorama_sprite_upright;   /* % the OBJ plane resists pitch (feet-anchored) */
   int  diorama_depth_shade;      /* % strength of per-plane depth shading */
   bool diorama_layer_bg1;
   bool diorama_layer_bg2;
   bool diorama_layer_bg3;
   bool diorama_layer_obj;
   bool diorama_layer_backdrop;
+  /* A5 (followup doc): true (default) = BG3 excluded from the diorama
+   * capture, drawn via the anchored PresentHudOverlayComposited path (A7) —
+   * flat, widescreen-spread, readable. false = BG3 captured as a diorama
+   * layer and drawn as an unanchored tilted plane (today's pre-A7 look) —
+   * kept as an A/B curiosity, not a real anchored alternative (see A5's
+   * load-bearing constraint: screen-space anchored rects can't be projected
+   * onto a tilted mesh). */
+  bool diorama_hud_flat;
+  /* B4-mode (followup doc): DioramaCameraMode selector. */
+  int diorama_camera_mode;
+  /* B4-baseline (followup doc): Dynamic Cam's OWN dedicated pose, separate
+   * from the Free-Cam angle above — Dynamic Cam sways around this, not
+   * around whatever Free Cam was last left at. Same mrad/x100 scaled-int
+   * convention as diorama_tilt_x/y_mrad/diorama_distance_x100. Defaults are
+   * a gentle 3/4 tilt with symmetric left/right room (tilt_y=0) and the same
+   * auto-fit distance sentinel (0) as the free-cam default. */
+  int diorama_dyncam_baseline_tilt_x_mrad;
+  int diorama_dyncam_baseline_tilt_y_mrad;
+  int diorama_dyncam_baseline_distance_x100;
+  /* B4 (followup doc): 0-100, scales every reactive offset (velocity-lean,
+   * positional pan, event kicks — later checkpoints); 0 disables sway
+   * entirely, snapping to the baseline pose above. */
+  int diorama_reactive_strength;
+  /* B5 (followup doc): DioramaSkyMode selector — see the enum comment. */
+  int diorama_skybox;
+  /* B6 (followup doc): put the layer stack inside a floor/ceiling/side-wall
+   * enclosure so the level's off-screen edges are masked by box surfaces
+   * instead of ending in void. Composes with B5: skybox fills the box's far
+   * opening. Independent toggle so each can be A/B'd alone. */
+  bool diorama_shoebox;
+
+  /* Graphics (kSettingCat_Graphics, M8/M7 GPU shader + interpolation work).
+   * gpu_shaders_enabled picks SDL's "gpu" renderer backend at boot — fixed
+   * for the process lifetime (kApply_Restart). The per-effect toggles below
+   * apply live (diorama.c rereads g_settings every frame, same pattern as
+   * the diorama_layer_* toggles above) and are only meaningful/available
+   * once gpu_shaders_enabled actually took effect (Settings_IsAvailable
+   * gates on the real runtime g_gpu_shaders_active, not just this flag, in
+   * case backend creation silently fell back). gpu_fx_shadow defaults OFF:
+   * a known visual bug (shadow blur can bleed onto transparent gaps in a
+   * receiving layer) keeps it opt-in until fixed — see diorama.c.
+   * gpu_interp_enabled also defaults OFF, but as of B1b (followup doc) its
+   * source bug is fixed (present.c ComputeDioramaScrollDelta now reads the
+   * stable WRAM camera, not the HDMA-polluted PPU scroll registers) — OFF
+   * pending in-game confirmation the fix is stable, not a known issue. */
+  bool gpu_shaders_enabled;
+  bool gpu_fx_rim;
+  bool gpu_fx_dof;
+  bool gpu_fx_edgeaa;
+  bool gpu_fx_shadow;
+  bool gpu_interp_enabled;
+  /* B1a (followup doc): mode-agnostic (works flat or diorama), unlike
+   * gpu_interp_enabled's motion-smoothing which is diorama-only. Wired to
+   * two mechanisms (main.c): SDL_SetRenderVSync off (applied at boot AND
+   * live via OnRuntimeSettingChanged, quiesced like every other
+   * renderer-mutating setting), and the present thread's idle-redraw
+   * cadence drops to ~4ms so disabling vsync actually has somewhere to
+   * re-present faster into. */
+  bool uncapped_framerate;
 } Settings;
 
 extern Settings g_settings;

@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include "types.h"
 #include "hd_replacements.h"
+#include "diorama.h"
 
 /* M5 (ar-recomp-threading-impl.md Appendix D). FrameSlot is the ONE contract
  * for everything present-time rendering reads: it is populated by the single
@@ -89,13 +90,27 @@ typedef struct FrameSlot {
   /* Diorama gate (D14 — Diorama_IsActiveThisFrame() result for this frame). */
   bool diorama_active;
 
-  /* M7 (§6.1): per-frame scroll snapshot for present-time interpolation.
-   * Indexed by BG number (0=BG1..3=BG4), matching g_ppu->hScroll/vScroll.
-   * timestamp_ns is when THIS slot was captured (FrameSlot_Capture, right
-   * after RtlDrawPpuFrame). Mode-7 matrix interpolation is out of scope:
-   * diorama (the only consumer) is Mode-1-only by the scope banner, and the
-   * flat path's Mode-7 overlay is a single image, not a per-layer mesh to
-   * shift.
+  /* M7 (§6.1)/B1b (followup doc): per-frame camera snapshot for present-time
+   * interpolation. timestamp_ns is when THIS slot was captured
+   * (FrameSlot_Capture, right after RtlDrawPpuFrame). Mode-7 matrix
+   * interpolation is out of scope: diorama (the only consumer) is
+   * Mode-1-only by the scope banner, and the flat path's Mode-7 overlay is a
+   * single image, not a per-layer mesh to shift.
+   *
+   * B1b replaced the original g_ppu->hScroll[]/vScroll[] snapshot with
+   * these: ActRaiser's BG2 parallax is HDMA-driven (per-scanline register
+   * rewrites), so hScroll[1]/vScroll[1] is whatever the last HDMA line left
+   * behind by the time FrameSlot_Capture runs — not a stable "camera
+   * position" — and interpolating between two such snapshots vibrated the
+   * whole layer with no real camera motion (confirmed live). These are the
+   * game's own STABLE logical camera in WRAM (kActRaiserWram_Bg1/2CameraX/Y,
+   * $0022/$0024/$0026/$0028), read via ActRaiser_ReadWram16 — the
+   * game-authored position BEFORE HDMA touches the PPU registers, so it
+   * doesn't carry the residue. Only BG1/BG2 have a WRAM camera (BG3 is UI,
+   * not world content — see ComputeDioramaScrollDelta, its delta is always
+   * 0). WRAM camera values wrap naturally in ordinary int16 arithmetic
+   * (unlike the 10-bit modular PPU scroll registers this replaces), so no
+   * wrap-correction is needed when differencing them.
    *
    * NOTE ON "prev": interpolation needs this slot's data PLUS the
    * previous frame's. It is NOT safe to read g_frame_slots[1-idx] for that —
@@ -107,8 +122,8 @@ typedef struct FrameSlot {
    * updated after each composite from the slot it just showed — no shared
    * memory, no race. */
   uint64_t timestamp_ns;
-  int16_t bg_hscroll[4];
-  int16_t bg_vscroll[4];
+  int16_t bg1_camera_x, bg1_camera_y;
+  int16_t bg2_camera_x, bg2_camera_y;
   /* §6.4 turbo edge case: turbo compresses many emulated ticks' worth of
    * scroll into one FrameSlot submission (still at the normal ~16ms
    * submission cadence — see the M7 plan note on why this differs from the
@@ -116,6 +131,52 @@ typedef struct FrameSlot {
    * prev->curr delta is not a valid one-tick velocity estimate. Skip
    * interpolation outright when either slot was captured under turbo. */
   bool turbo_active;
+  /* kSettingCat_Graphics "Scroll interpolation" row, snapshotted here (not
+   * read live from present.c per D6) so PresentComposite knows whether to
+   * even attempt interpolation for this frame. */
+  bool interp_setting_enabled;
+  /* A5 (followup doc) "Flat HUD" row, snapshotted here (not read live from
+   * present.c per D6): true = diorama's PresentHudOverlayComposited call
+   * (A7) runs, drawing the anchored flat HUD; false = skip it — BG3 was
+   * left in the game-thread capture instead (actraiser_rtl.c), so it
+   * renders as diorama.c's ordinary tilted BG3 layer. */
+  bool diorama_hud_flat;
+  /* B4-split (followup doc): DioramaCameraMode (settings.h) plus both
+   * candidate authored poses, resolved at present-composite time into
+   * whichever is active this frame — see present.c's g_diorama_render_cam
+   * and the DioramaCameraPose comment (diorama.h) for the full rationale.
+   * Snapshotting BOTH poses (rather than resolving on the game thread) keeps
+   * FrameSlot_Capture a plain field-by-field mirror of g_settings, matching
+   * every other row here. diorama_reactive_strength rides along now so
+   * later B4 checkpoints (velocity-lean, pan, kicks) don't need another
+   * FrameSlot edit. */
+  int diorama_camera_mode;
+  DioramaCameraPose diorama_free_pose;
+  DioramaCameraPose diorama_dyncam_baseline;
+  int diorama_reactive_strength;
+  /* B4-vellean (followup doc): PlayerVelocityX/Y, self-calibrated against a
+   * running per-session max and clamped to [-1,1] — see FrameSlot_Capture
+   * (main.c) for why normalization happens there (it owns the WRAM read and
+   * the running-max state) rather than here. yaw follows horizontal
+   * velocity (running), pitch follows vertical velocity (jump/fall), naming
+   * matches which DioramaCameraPose field each drives in present.c's sway
+   * formula. Not yet multiplied by k_run/k_pitch/reactive_strength — that
+   * formula is present-side (D6: present.c owns the actual sway math, this
+   * is just the clamped raw signal). */
+  float diorama_dyncam_lean_yaw;
+  float diorama_dyncam_lean_pitch;
+  /* B4-kick (followup doc): rising-edge event flags, computed on the game
+   * thread (FrameSlot_Capture, main.c — it owns the WRAM reads and the
+   * prior-state needed to detect an edge). True only on the ONE FrameSlot
+   * capture where the underlying signal transitioned; present.c triggers a
+   * fresh decaying impulse only when it sees a slot whose timestamp_ns it
+   * hasn't already processed (a present redraw of the same slot must not
+   * re-trigger). event_hit: PlayerFlags invuln bit rising edge (taking a
+   * hit). event_land: PlayerVelocityY falling-then-settled in one tick.
+   * event_boost: PlayerBoost 0-to-nonzero rising edge. */
+  bool diorama_dyncam_event_hit;
+  bool diorama_dyncam_event_land;
+  bool diorama_dyncam_event_boost;
 
   /* Widescreen HUD split + related PPU scalars (§2.8). */
   uint8_t hud_split_height;
@@ -208,8 +269,8 @@ SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer, bool ws_active,
  * FrameSlot_ExtractScrollSnapshot. */
 typedef struct DioramaScrollSnapshot {
   uint64_t timestamp_ns;
-  int16_t bg_hscroll[4];
-  int16_t bg_vscroll[4];
+  int16_t bg1_camera_x, bg1_camera_y;
+  int16_t bg2_camera_x, bg2_camera_y;
   uint8_t bg_mode;
   bool turbo_active;
   bool diorama_active;

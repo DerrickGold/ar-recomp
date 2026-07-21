@@ -10,6 +10,10 @@ bool g_ws_active;
 int g_ws_extra;
 int g_ws_display_extra;
 uint8 g_ram[0x20000];
+/* kSettingCat_Graphics's GpuShadersActive() availability gate reads this
+ * (main.c's real runtime state); this harness has no renderer, so it's
+ * never actually true here. */
+bool g_gpu_shaders_active;
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
 
@@ -55,7 +59,14 @@ static void TestDefaultsAndMetadata(void) {
   g_ws_extra = g_ws_display_extra = 43;
   Settings_Init();
 
-  CHECK(g_setting_desc_count == 113);
+  /* +6 for kSettingCat_Graphics (gpu_shaders_enabled, gpu_fx_rim/dof/edgeaa/
+   * shadow, gpu_interp_enabled), -1 for A4's removal of the inert
+   * diorama_sprite_upright row, +1 for A5's diorama_hud_flat, +1 for B1a's
+   * uncapped_framerate, +1 for B4-mode's diorama_camera_mode, +4 for
+   * B4-baseline's diorama_dyncam_baseline_tilt_x/y_mrad,
+   * diorama_dyncam_baseline_distance_x100, diorama_reactive_strength, +1 for
+   * B5's diorama_skybox, +1 for B6's diorama_shoebox (followup doc). */
+  CHECK(g_setting_desc_count == 127);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);

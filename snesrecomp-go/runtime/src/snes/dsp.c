@@ -141,6 +141,73 @@ void dsp_saveload(Dsp *dsp, SaveLoadInfo *sli) {
  * lock like every other dsp_cycle caller. */
 int g_dsp_voice_mute_srcn_min = -1;
 
+/* AR_MUSICLEAK=1: while the music mute gate is engaged, report once a second
+ * every voice that still reached the dry mix.
+ *
+ * The gate in dsp_cycle tests the LIVE srcn register, which the driver may
+ * rewrite at any time on a voice that is still sounding. So the report tracks
+ * both the srcn latched when the note was keyed on and the srcn the register
+ * reads now:
+ *
+ *   kon>=threshold, live<threshold  -> the note started as MUSIC and the gate
+ *                                      dropped out from under it. Unlatched-
+ *                                      SRCN leak.
+ *   kon<threshold,  live<threshold  -> keyed on in the common bank. Either a
+ *                                      genuine SFX or a song borrowing a
+ *                                      shared instrument; duty and whether the
+ *                                      same srcn recurs across songs tells
+ *                                      which.
+ *
+ * Kept as a file-static side table rather than a Dsp field on purpose:
+ * dsp_saveload serialises sizeof(Dsp) wholesale, so widening the struct would
+ * invalidate every existing savestate. This is pure runtime diagnostics. */
+static int dsp_musicLeakEnabled(void) {
+  static int enabled = -1;
+  if(enabled < 0) enabled = getenv("AR_MUSICLEAK") ? 1 : 0;
+  return enabled;
+}
+static uint8_t s_leakKonSrcn[8];  /* srcn latched at key-on, per voice */
+static int s_leakPeak[8];         /* peak |sampleOut| this window, per voice */
+static int s_leakHits[8];         /* nonzero-output samples = how sustained */
+static uint8_t s_leakLiveSrcn[8]; /* last live srcn observed leaking, per voice */
+static uint8_t s_leakKonSeen[8];  /* kon srcn in effect for the AUDIBLE samples.
+                                   * Distinct from s_leakKonSrcn, which by flush
+                                   * time may already hold a LATER key-on that was
+                                   * muted and so contributed no samples. */
+static int s_leakSlipped[8];      /* samples where kon >= gate but live < gate */
+
+static void dsp_musicLeakNoteKon(Dsp* dsp, int ch) {
+  if(!dsp_musicLeakEnabled()) return;
+  s_leakKonSrcn[ch] = dsp->channel[ch].srcn;
+}
+
+static void dsp_musicLeakAccum(Dsp* dsp, int ch) {
+  int v = dsp->channel[ch].sampleOut;
+  if(v < 0) v = -v;
+  if(v <= 0) return;
+  if(v > s_leakPeak[ch]) s_leakPeak[ch] = v;
+  s_leakLiveSrcn[ch] = dsp->channel[ch].srcn;
+  s_leakKonSeen[ch] = s_leakKonSrcn[ch];
+  s_leakHits[ch]++;
+  if(s_leakKonSrcn[ch] >= g_dsp_voice_mute_srcn_min) s_leakSlipped[ch]++;
+}
+
+static void dsp_musicLeakFlush(void) {
+  static unsigned window;
+  if(++window < 32000) return;   /* ~1 s of DSP samples */
+  window = 0;
+  for(int ch = 0; ch < 8; ch++) {
+    if(!s_leakHits[ch]) continue;
+    fprintf(stderr, "[musicleak] ch=%d kon_srcn=%02x live_srcn=%02x peak=%5d "
+            "duty=%3u%% slipped=%3u%% %s\n",
+            ch, s_leakKonSeen[ch], s_leakLiveSrcn[ch], s_leakPeak[ch],
+            (unsigned)(s_leakHits[ch] * 100u / 32000u),
+            (unsigned)(s_leakSlipped[ch] * 100u / (unsigned)s_leakHits[ch]),
+            s_leakSlipped[ch] ? "<-- UNLATCHED-SRCN LEAK" : "(keyed on in common bank)");
+    s_leakPeak[ch] = s_leakHits[ch] = s_leakSlipped[ch] = 0;
+  }
+}
+
 void dsp_cycle(Dsp* dsp) {
   int totalL = 0;
   int totalR = 0;
@@ -149,11 +216,15 @@ void dsp_cycle(Dsp* dsp) {
     if(g_dsp_voice_mute_srcn_min >= 0 &&
        dsp->channel[i].srcn >= g_dsp_voice_mute_srcn_min)
       continue;
+    if(g_dsp_voice_mute_srcn_min >= 0 && dsp_musicLeakEnabled())
+      dsp_musicLeakAccum(dsp, i);
     totalL += (dsp->channel[i].sampleOut * dsp->channel[i].volumeL) >> 6;
     totalR += (dsp->channel[i].sampleOut * dsp->channel[i].volumeR) >> 6;
     totalL = totalL < -0x8000 ? -0x8000 : (totalL > 0x7fff ? 0x7fff : totalL); // clamp 16-bit
     totalR = totalR < -0x8000 ? -0x8000 : (totalR > 0x7fff ? 0x7fff : totalR); // clamp 16-bit
   }
+  if(g_dsp_voice_mute_srcn_min >= 0 && dsp_musicLeakEnabled())
+    dsp_musicLeakFlush();
   totalL = (totalL * dsp->masterVolumeL) >> 7;
   totalR = (totalR * dsp->masterVolumeR) >> 7;
   totalL = totalL < -0x8000 ? -0x8000 : (totalL > 0x7fff ? 0x7fff : totalL); // clamp 16-bit
@@ -294,6 +365,7 @@ static void dsp_cycleChannel(Dsp* dsp, int ch) {
       dsp->channel[ch].adsrState = 4;
     } else if(dsp->channel[ch].keyOn) {
       dsp->channel[ch].keyOn = false;
+      dsp_musicLeakNoteKon(dsp, ch);
       // restart current sample
       dsp->channel[ch].previousFlags = 0;
       uint16_t samplePointer = dsp->dirPage + 4 * dsp->channel[ch].srcn;

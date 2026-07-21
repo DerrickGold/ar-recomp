@@ -64,6 +64,7 @@ typedef enum TextStyle {
   kText_Normal,
   kText_Dim,
   kText_Warning,
+  kText_Value,
   kTextStyle_Count,
 } TextStyle;
 
@@ -77,6 +78,11 @@ static const uint32_t kTextPalettes[kTextStyle_Count][4] = {
     ARGB(255, 45, 63, 78), ARGB(255, 91, 111, 126) },
   { ARGB(0, 0, 0, 0), ARGB(255, 38, 21, 3),
     ARGB(255, 164, 98, 20), ARGB(255, 255, 200, 90) },
+  /* M2 (followup doc): row values get a cool-cyan face so they read
+   * distinct from warm-white labels. Reuses the resize-grip cyan already
+   * in-tree (ARGB(255,92,196,255), ~line 1610) for palette harmony. */
+  { ARGB(0, 0, 0, 0), ARGB(255, 0, 0, 0),
+    ARGB(255, 40, 120, 140), ARGB(255, 92, 196, 255) },
 };
 
 /* Compact 5x7 fallback and supplemental punctuation. The ROM font is the
@@ -144,11 +150,16 @@ static const uint8_t kFallbackFont[128][7] = {
   ['Z'] = {31, 1, 2, 4, 8, 16, 31},
 };
 
+/* M1(a) (followup doc): the three graphics-related categories (Display,
+ * Diorama i.e. kSettingCat_Presentation, Graphics) sit adjacent to
+ * Widescreen — the granular ws_* flags that Display's display_mode row
+ * presets — instead of Audio wedging between them. */
 static const SettingCategory kCategoryOrder[] = {
   kSettingCat_Display,
   kSettingCat_Presentation,
-  kSettingCat_Audio,
+  kSettingCat_Graphics,
   kSettingCat_Widescreen,
+  kSettingCat_Audio,
   kSettingCat_Cheats,
   kSettingCat_Save,
   kSettingCat_Extras,
@@ -348,6 +359,121 @@ static void WriteFallbackGlyph(unsigned tile, unsigned source_ch) {
         SetTilePixel(tile, col + 1, row, 3);
     }
   }
+}
+
+/* ── M3 (followup doc): category nav icons ──────────────────────────────
+ * Tiles 128-255 are never touched by the ROM font (0x20-0x7F) or the
+ * fallback font (0-127, see BuildFallbackFont) — free real estate for a
+ * handful of host-authored 8x8 icon glyphs, reusing the exact same
+ * two-bitplane tile storage + DrawGlyph blit path as every other glyph, so
+ * they automatically pick up the kText_Normal/kText_Dim/kText_Value/
+ * kText_Warning tinting already baked per style (CreateFontAtlas). Unlike
+ * WriteFallbackGlyph's 5x7-in-8x8 letterforms, icons use the full 8x8
+ * canvas: '#' marks a face pixel, an outline pixel is auto-added on any
+ * blank cell 4-adjacent to a face pixel (same outline-behind-face visual
+ * language as the text glyphs, just derived instead of hand-placed). */
+static void WriteIconGlyph(unsigned tile, const char rows[8][9]) {
+  if (tile >= 256) return;
+  memset(s_font_tiles + tile * 16, 0, 16);
+  bool face[8][8];
+  for (int y = 0; y < 8; y++)
+    for (int x = 0; x < 8; x++)
+      face[y][x] = rows[y][x] == '#';
+  for (int y = 0; y < 8; y++)
+    for (int x = 0; x < 8; x++) {
+      if (face[y][x]) continue;
+      bool touches = (x > 0 && face[y][x - 1]) ||
+                     (x < 7 && face[y][x + 1]) ||
+                     (y > 0 && face[y - 1][x]) ||
+                     (y < 7 && face[y + 1][x]);
+      if (touches) SetTilePixel(tile, x, y, 2);
+    }
+  for (int y = 0; y < 8; y++)
+    for (int x = 0; x < 8; x++)
+      if (face[y][x]) SetTilePixel(tile, x, y, 3);
+}
+
+enum {
+  kIconTile_Display = 128,
+  kIconTile_Diorama,
+  kIconTile_Graphics,
+  kIconTile_Widescreen,
+  kIconTile_Audio,
+  kIconTile_Cheats,
+  kIconTile_Save,
+  kIconTile_Extras,
+  kIconTile_Inspector,
+  kIconTile_Count_ = kIconTile_Inspector + 1,
+};
+
+static void WriteHostIcons(void) {
+  WriteIconGlyph(kIconTile_Display, (const char[8][9]){
+    "..####..", ".######.", ".#....#.", ".#....#.",
+    ".######.", "...##...", "..####..", "........",
+  });
+  /* Diorama: a tilted plane (diamond outline) for the 3D camera/perspective
+   * mode. A stacked-bars "receding planes" design was tried first, but the
+   * outline dilation (see WriteIconGlyph) bridges the gap between any two
+   * wide bars only 1 row apart — it rendered as a single solid funnel
+   * instead of separate bars. The diamond's outline never gets that close
+   * to itself, so it stays hollow. */
+  WriteIconGlyph(kIconTile_Diorama, (const char[8][9]){
+    "...##...", "..#..#..", ".#....#.", "#......#",
+    ".#....#.", "..#..#..", "...##...", "........",
+  });
+  /* Graphics: a four-point sparkle for the GPU shader effects. Each ray is
+   * ≥2 cells from its neighbors so the outline dilation can't bridge them
+   * into a bowtie (the earlier diamond+cross design touched at the
+   * center and read as one blob). */
+  WriteIconGlyph(kIconTile_Graphics, (const char[8][9]){
+    "...##...", "...##...", "........", "##....##",
+    "##....##", "........", "...##...", "...##...",
+  });
+  /* Widescreen: arrows pointing outward, aspect stretching left/right. */
+  WriteIconGlyph(kIconTile_Widescreen, (const char[8][9]){
+    "........", "#.....#.", "##...##.", "#.#.#.#.",
+    "#.#.#.#.", "##...##.", "#.....#.", "........",
+  });
+  /* Audio: speaker cone plus two sound-wave dots, distinct from Graphics'
+   * symmetric sparkle. */
+  WriteIconGlyph(kIconTile_Audio, (const char[8][9]){
+    "..#.....", ".##....#", ".####..#", "######.#",
+    ".####..#", ".##....#", "..#.....", "........",
+  });
+  WriteIconGlyph(kIconTile_Cheats, (const char[8][9]){
+    "...#....", "..###...", ".#####..", "########",
+    "..###...", ".#.#.#..", "#..#..#.", "........",
+  });
+  WriteIconGlyph(kIconTile_Save, (const char[8][9]){
+    "########", "#......#", "#.####.#", "#.#..#.#",
+    "#.####.#", "#......#", "#......#", "########",
+  });
+  WriteIconGlyph(kIconTile_Extras, (const char[8][9]){
+    "........", "...##...", "...##...", ".######.",
+    ".######.", "...##...", "...##...", "........",
+  });
+  WriteIconGlyph(kIconTile_Inspector, (const char[8][9]){
+    ".####...", "#....#..", "#....#..", "#....#..",
+    ".####...", "...##...", "....##..", ".....##.",
+  });
+  for (unsigned t = kIconTile_Display; t < kIconTile_Count_; t++)
+    s_glyph_defined[t] = true;
+}
+
+/* Which icon (if any) represents a settings category in the nav column. */
+static int CategoryIconTile(SettingCategory category) {
+  switch (category) {
+    case kSettingCat_Display:      return kIconTile_Display;
+    case kSettingCat_Presentation: return kIconTile_Diorama;
+    case kSettingCat_Graphics:     return kIconTile_Graphics;
+    case kSettingCat_Widescreen:   return kIconTile_Widescreen;
+    case kSettingCat_Audio:        return kIconTile_Audio;
+    case kSettingCat_Cheats:       return kIconTile_Cheats;
+    case kSettingCat_Save:         return kIconTile_Save;
+    case kSettingCat_Extras:       return kIconTile_Extras;
+    case kSettingCat_Inspector:    return kIconTile_Inspector;
+  }
+  return -1;
 }
 
 static void BuildFallbackFont(void) {
@@ -847,6 +973,8 @@ bool SettingsOverlay_Init(SDL_Renderer *renderer,
   bool rom_font = DecodeFontAsset(rom_data, rom_size);
   if (rom_font) PrepareRomFont();
   else BuildFallbackFont();
+  /* M3: host-authored nav icons, independent of which text font loaded. */
+  WriteHostIcons();
 
   for (int i = 0; i < kTextStyle_Count; i++) {
     s_font_textures[i] = CreateFontAtlas((TextStyle)i);
@@ -1396,8 +1524,18 @@ static void DrawMenu(const MenuLayout *layout) {
     if (slot == s_category_slot && !s_submenu_open)
       DrawGlyph(layout, left_text_x + ((SDL_GetTicks() / 300) & 1),
                 category_y, '>', kText_Warning);
-    DrawTextN(layout, left_text_x + 10, category_y,
-              NavSlotLabel(slot), 14, style);
+    /* M3: a small category icon sits in the gutter between the selector
+     * cursor and the label; top-level command leaves (Restart game, Exit
+     * desktop) have no icon and just leave that gutter blank, keeping every
+     * row's label starting column aligned. */
+    if (slot < category_count) {
+      int icon_tile = CategoryIconTile(kCategoryOrder[slot]);
+      if (icon_tile >= 0)
+        DrawGlyph(layout, left_text_x + 10, category_y,
+                  (unsigned char)icon_tile, style);
+    }
+    DrawTextN(layout, left_text_x + 20, category_y,
+              NavSlotLabel(slot), 13, style);
     category_y += kNavRowHeight;
   }
 
@@ -1454,8 +1592,13 @@ static void DrawMenu(const MenuLayout *layout) {
     int label_chars = (restart_x - label_x - 4) / kGlyphSize;
     if (label_chars < 1) label_chars = 1;
     DrawTextN(layout, label_x, y, desc->label, label_chars, style);
-    DrawTextRight(layout, value_right, y,
-                  value, value_chars, style);
+    /* M2 (followup doc): values render in kText_Value (cool cyan) so they
+     * read distinct from labels, but only for normal/enabled rows — a
+     * dim/unavailable row's style must win so it stays visibly greyed,
+     * matching M4's dim-when-unavailable intent instead of lighting up in
+     * bright cyan. */
+    DrawTextRight(layout, value_right, y, value, value_chars,
+                  style == kText_Normal ? kText_Value : style);
     if (desc->apply == kApply_Restart)
       DrawGlyph(layout, restart_x, y, '*', kText_Warning);
   }
