@@ -31,6 +31,7 @@ static bool s_boot_display_from_environment;
  * file-local g_snes_width. */
 extern bool g_ws_active;
 extern int g_ws_extra;
+extern int g_ws_display_extra;
 
 static int InferDisplayMode(void);
 
@@ -139,6 +140,16 @@ static void WidescreenSettingChanged(const SettingDesc *desc) {
 
 static void DisplayModeChanged(const SettingDesc *desc) {
   Settings_SetDisplayMode(*(const int *)desc->field);
+}
+
+/* Defined by the host (main.c): re-resolves video geometry for the widened
+ * diorama render margin and rebinds the PPU surfaces. Weakly relevant to the
+ * settings tests, which link their own no-op. */
+void Diorama_OnModeChanged(void);
+
+static void DioramaModeChanged(const SettingDesc *desc) {
+  (void)desc;
+  Diorama_OnModeChanged();
 }
 
 static int FormatHudScale(char *buffer, int buffer_size, const void *field) {
@@ -488,6 +499,16 @@ static const char *const kSaveItemLabels[] = {
   "Compass", "Strength of Angel",
 };
 
+/* Diorama availability gates (§10.6). The mode row is offered only when the
+ * new PPU path can run; the camera/layer rows only once the mode is on. The
+ * inert-in-diorama Display rows use the negation so contradictory combos are
+ * greyed out rather than silently ignored (§D15). */
+bool Diorama_ModeIsOn(void) { return g_settings.diorama_mode; }
+bool Diorama_NewPpuCapable(void) {
+  return g_settings.new_renderer || g_ws_active;
+}
+static bool DioramaModeIsOff(void) { return !g_settings.diorama_mode; }
+
 #define BOOL_SETTING(id, env_name, text, help, cat, def, is_sticky, active, changed) \
   { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
     &g_settings.id, def, 0, 1, 1, is_sticky, NULL, 0, active, changed, \
@@ -500,6 +521,10 @@ static const char *const kSaveItemLabels[] = {
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
     kSettingCat_Extras, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
     NULL, NULL }
+#define PRESENTATION_ACTION_SETTING(id, text, help) \
+  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
+    kSettingCat_Presentation, NULL, 0, 0, 0, 0, false, NULL, 0, \
+    Diorama_ModeIsOn, NULL, NULL, NULL }
 #define INSPECTOR_ACTION_SETTING(id, text, help) \
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
     kSettingCat_Inspector, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
@@ -544,7 +569,7 @@ const SettingDesc g_setting_descs[] = {
     "Scale the promoted HUD after game upscaling; 100 is native 1x output pixels.",
     kSettingType_Int, kApply_Passive, kSettingCat_Display,
     &g_settings.hud_scale_percent, 0, 0, 400, 25, false, NULL, 0,
-    NULL, NULL, ParseHudScale, FormatHudScale },
+    DioramaModeIsOff, NULL, ParseHudScale, FormatHudScale },
   { "menu_scale_percent", "AR_MENU_SCALE", "Menu output scale",
     "Scale host menu contents independently; Auto fits them to the window.",
     kSettingType_Int, kApply_Passive, kSettingCat_Display,
@@ -552,7 +577,7 @@ const SettingDesc g_setting_descs[] = {
     NULL, NULL, ParseMenuScale, FormatMenuScale },
   BOOL_SETTING(hd_replacements, "AR_HD_REPLACEMENTS", "HD replacements",
                "Substitute HD art per game-assets/manifest.ini entries when their art is present.",
-               kSettingCat_Display, 1, false, NULL, NULL),
+               kSettingCat_Display, 1, false, DioramaModeIsOff, NULL),
   { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Screen ratio",
     "Select authentic 4:3, 16:9, or 16:10 output; video geometry updates live.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
@@ -587,6 +612,43 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Bool, kApply_Callback, kSettingCat_Display,
     &g_settings.ignore_aspect_ratio, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
+  BOOL_SETTING(diorama_mode, NULL, "Diorama 3D",
+               "Render action-stage layers as tilted 3D planes (action stages only; needs the new renderer).",
+               kSettingCat_Presentation, 0, false, Diorama_NewPpuCapable,
+               DioramaModeChanged),
+  INT_SETTING(diorama_tilt_y_mrad, NULL, "Camera yaw",
+              "Diorama camera yaw in milliradians; negative swings the left edge toward you.",
+              kSettingCat_Presentation, -180, -700, 700, NULL,
+              Diorama_ModeIsOn),
+  INT_SETTING(diorama_tilt_x_mrad, NULL, "Camera pitch",
+              "Diorama camera pitch in milliradians; 0 keeps sprites planted on their platforms.",
+              kSettingCat_Presentation, 0, -700, 700, NULL, Diorama_ModeIsOn),
+  INT_SETTING(diorama_distance_x100, NULL, "Camera distance",
+              "Diorama camera distance (hundredths); 0 auto-fits the frame to the window.",
+              kSettingCat_Presentation, 0, 0, 2000, NULL, Diorama_ModeIsOn),
+  INT_SETTING(diorama_sprite_upright, NULL, "Sprite upright",
+              "How much the sprite plane stays standing against camera pitch; 100 keeps figures fully upright.",
+              kSettingCat_Presentation, 60, 0, 100, NULL, Diorama_ModeIsOn),
+  INT_SETTING(diorama_depth_shade, NULL, "Depth shading",
+              "Strength of the atmospheric darkening applied to farther planes.",
+              kSettingCat_Presentation, 100, 0, 100, NULL, Diorama_ModeIsOn),
+  BOOL_SETTING(diorama_layer_backdrop, NULL, "Show backdrop",
+               "Diorama: show the backdrop plane.",
+               kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
+  BOOL_SETTING(diorama_layer_bg2, NULL, "Show BG2",
+               "Diorama: show the BG2 parallax plane.",
+               kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
+  BOOL_SETTING(diorama_layer_bg1, NULL, "Show BG1",
+               "Diorama: show the BG1 playfield plane.",
+               kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
+  BOOL_SETTING(diorama_layer_obj, NULL, "Show sprites",
+               "Diorama: show the sprite (OBJ) plane.",
+               kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
+  BOOL_SETTING(diorama_layer_bg3, NULL, "Show BG3/HUD",
+               "Diorama: show the BG3 (HUD) plane.",
+               kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
+  PRESENTATION_ACTION_SETTING("diorama_reset", "Reset defaults",
+                              "Return all diorama controls to their defaults."),
   { "audio_enabled", "AR_ENABLE_AUDIO", "Enable audio",
     "Pause or resume host audio output without changing emulated audio state.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
@@ -1152,6 +1214,7 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Cheats: return "Cheats";
     case kSettingCat_Widescreen: return "Widescreen";
     case kSettingCat_Display: return "Display";
+    case kSettingCat_Presentation: return "Presentation";
     case kSettingCat_Audio: return "Audio";
     case kSettingCat_Save: return "Save editor";
     case kSettingCat_Extras: return "Extras";
@@ -1563,14 +1626,18 @@ const char *Settings_DisplayModeName(int mode) {
 }
 
 /* Framebuffer layout is [extra][256][extra] (g_snes_width total), so the
- * authentic view is the centre 256 columns starting at g_ws_extra. */
+ * authentic view is the centre 256 columns starting at g_ws_extra. When the
+ * render margin exceeds the display margin (diorama mode), the visible
+ * window is the centre 256+2*display_extra columns. */
 int Settings_VisibleX0(void) {
-  return (g_settings.display_mode == kDisplayMode_43) ? g_ws_extra : 0;
+  if (g_settings.display_mode == kDisplayMode_43) return g_ws_extra;
+  return g_ws_extra - g_ws_display_extra;
 }
 
 int Settings_VisibleWidth(void) {
-  return (g_settings.display_mode == kDisplayMode_43) ? 256
-                                                      : 256 + 2 * g_ws_extra;
+  return (g_settings.display_mode == kDisplayMode_43)
+             ? 256
+             : 256 + 2 * g_ws_display_extra;
 }
 
 int Settings_ExtendedAspectX(void) {

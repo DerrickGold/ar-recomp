@@ -1,6 +1,7 @@
 #define _XOPEN_SOURCE 600
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
+#include "diorama_planes.h"
 #include "variables.h"
 #include "settings.h"
 #include "hd_replacements.h"
@@ -1143,6 +1144,68 @@ void ActRaiserDrawPpuFrame(void) {
    * source is detected rather than clobbered; entries without host-loaded
    * art never request captures, keeping headless/oracle output authentic. */
   HdReplacements_EvaluateFrame();
+
+  /* Diorama per-layer capture: when active (D toggle) or armed for a one-shot
+   * dump (Shift+D), override all existing capture policies with full-frame
+   * RemoveFromGame captures for BG1/2/3/OBJ. Bind dedicated diorama buffers
+   * so we don't collide with the HUD/HD overlay surfaces. The captures
+   * overwrite whatever the widescreen HUD split and HD replacements set
+   * above — mutual exclusion for this frame. */
+  {
+    extern bool Diorama_IsActiveThisFrame(void);
+    extern bool g_diorama_dump_pending;
+    extern bool g_diorama_frame_active;
+    extern uint8_t *g_diorama_layer_pixels[];
+    bool active = Diorama_IsActiveThisFrame();
+    bool want_capture = active ||
+        (g_diorama_dump_pending &&
+         ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]));
+    g_diorama_frame_active = active;
+    if (want_capture) {
+      extern bool g_ws_active;
+      extern int g_ws_extra;
+      int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+      size_t pitch = (size_t)width * 4;
+      static const PpuOverlaySource kCaptureLayers[] = {
+        kPpuOverlaySource_Bg1, kPpuOverlaySource_Bg2,
+        kPpuOverlaySource_Bg3, kPpuOverlaySource_Obj,
+      };
+      for (int i = 0; i < (int)(sizeof(kCaptureLayers) / sizeof(kCaptureLayers[0])); i++) {
+        PpuOverlaySource src = kCaptureLayers[i];
+        if (!g_diorama_layer_pixels[src])
+          g_diorama_layer_pixels[src] = calloc(1, kPpuBufWidth * 4 * 240);
+        PpuBindOverlaySurface(g_ppu, src, g_diorama_layer_pixels[src], pitch);
+        if (g_ppu->screenEnabled[0] & (1 << src))
+          PpuSetOverlayCapture(g_ppu, src, -g_ws_extra, 0, width, 224,
+                               kPpuOverlayFlag_RemoveFromGame);
+      }
+      if (g_ppu->screenEnabled[0] & (1 << kPpuOverlaySource_Obj))
+        PpuSetOverlayOamRange(g_ppu, 0, 128);
+      /* Priority-band splits: scanout routes each captured pixel to the
+       * surface matching its hardware priority (Mode-1 tile priority bit for
+       * BGs, the 2-bit OAM priority for sprites), so the diorama can draw
+       * the true Mode-1 interleave — foreground tiles over sprites, low
+       * priority sprites behind the playfield. Bound after their primaries
+       * because a primary rebind drops the band family. */
+      static const struct { PpuOverlaySource src; int band; int plane; }
+      kPrioBands[] = {
+        { kPpuOverlaySource_Bg1, 1, kDioramaPlane_Bg1Hi },
+        { kPpuOverlaySource_Bg2, 1, kDioramaPlane_Bg2Hi },
+        { kPpuOverlaySource_Obj, 1, kDioramaPlane_Obj1 },
+        { kPpuOverlaySource_Obj, 2, kDioramaPlane_Obj2 },
+        { kPpuOverlaySource_Obj, 3, kDioramaPlane_Obj3 },
+      };
+      for (int i = 0; i < (int)(sizeof(kPrioBands) / sizeof(kPrioBands[0])); i++) {
+        if (!g_diorama_layer_pixels[kPrioBands[i].plane])
+          g_diorama_layer_pixels[kPrioBands[i].plane] =
+              calloc(1, kPpuBufWidth * 4 * 240);
+        PpuBindOverlayPrioSurface(g_ppu, kPrioBands[i].src,
+                                  kPrioBands[i].band,
+                                  g_diorama_layer_pixels[kPrioBands[i].plane]);
+      }
+    }
+  }
+
   /* AR_TILE_CENSUS=1: read-only HD tile-pack sizing survey (hd_tile_census.c). */
   { extern void HdTileCensus_Frame(void); HdTileCensus_Frame(); }
   /* AR_TITLELOG=1: per-frame title-screen PPU probe (map bytes, BG mode,

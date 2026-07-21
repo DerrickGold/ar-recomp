@@ -249,6 +249,13 @@ struct Ppu {
   uint8_t *renderBuffer;
   uint32_t overlayRenderPitch[kPpuOverlaySource_Count];
   uint8_t *overlayRenderBuffer[kPpuOverlaySource_Count];
+  /* Optional priority-band split surfaces (PpuBindOverlayPrioSurface). When
+   * bound, scanout routes each captured pixel of the source to the band
+   * matching its hardware priority instead of the primary surface: OBJ bands
+   * 1..3 receive sprite priorities 1..3 (primary keeps priority 0); BG band 1
+   * receives priority-1 tiles (primary keeps priority 0). Bands share the
+   * primary's pitch and capture rectangle. */
+  uint8_t *overlayRenderBands[kPpuOverlaySource_Count][3];
   /* Overlay surfaces are cleared lazily: a surface whose capture is inactive
    * and whose flag here is clear is already all-transparent, so its
    * per-scanline clear can be skipped (the common case — captures are rare).
@@ -358,6 +365,16 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_fl
 void PpuClearOverlayBindings(Ppu *ppu);
 bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
                            uint8_t *pixels, size_t pitch);
+
+// Bind an additional priority-band surface for a source, splitting the
+// captured layer by hardware priority at scanout. OBJ: band n (1..3)
+// receives sprites of OAM priority n, the primary surface keeps priority 0.
+// BG sources: band 1 receives priority-1 tiles, the primary keeps
+// priority 0. Requires a bound primary surface and shares its pitch and
+// capture rectangle. Rebinding or unbinding the primary drops every band,
+// so bind bands after their primary. NULL unbinds one band.
+bool PpuBindOverlayPrioSurface(Ppu *ppu, PpuOverlaySource source, int band,
+                               uint8_t *pixels);
 
 // Clear per-frame capture policy, then configure an arbitrary screen-space
 // rectangle from BG1-BG4 or OBJ. With RemoveFromGame, pixels inside the rect

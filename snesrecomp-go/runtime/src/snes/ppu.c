@@ -42,17 +42,20 @@ void ppu_reset(Ppu* ppu) {
     uint32_t renderFlags = ppu->renderFlags;
     uint32_t overlayPitch[kPpuOverlaySource_Count];
     uint8_t *overlayBuffer[kPpuOverlaySource_Count];
+    uint8_t *overlayBands[kPpuOverlaySource_Count][3];
     uint8_t *m7Buffer = ppu->m7OverlayBuffer;
     uint32_t m7Pitch = ppu->m7OverlayPitch;
     uint8_t m7Scale = ppu->m7OverlayScale;
     memcpy(overlayPitch, ppu->overlayRenderPitch, sizeof(overlayPitch));
     memcpy(overlayBuffer, ppu->overlayRenderBuffer, sizeof(overlayBuffer));
+    memcpy(overlayBands, ppu->overlayRenderBands, sizeof(overlayBands));
     memset(ppu, 0, sizeof(*ppu));
     ppu->renderBuffer = renderBuffer;
     ppu->renderPitch = (uint32_t)pitch;
     ppu->renderFlags = renderFlags;
     memcpy(ppu->overlayRenderPitch, overlayPitch, sizeof(overlayPitch));
     memcpy(ppu->overlayRenderBuffer, overlayBuffer, sizeof(overlayBuffer));
+    memcpy(ppu->overlayRenderBands, overlayBands, sizeof(overlayBands));
     ppu->m7OverlayBuffer = m7Buffer;
     ppu->m7OverlayPitch = m7Pitch;
     ppu->m7OverlayScale = m7Scale;
@@ -82,6 +85,7 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_fl
 void PpuClearOverlayBindings(Ppu *ppu) {
   memset(ppu->overlayRenderBuffer, 0, sizeof(ppu->overlayRenderBuffer));
   memset(ppu->overlayRenderPitch, 0, sizeof(ppu->overlayRenderPitch));
+  memset(ppu->overlayRenderBands, 0, sizeof(ppu->overlayRenderBands));
   PpuClearOverlayCaptures(ppu);
 }
 
@@ -94,11 +98,30 @@ bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
     return false;
   ppu->overlayRenderBuffer[source] = pixels;
   ppu->overlayRenderPitch[source] = pixels ? (uint32_t)pitch : 0;
+  /* Any primary rebind invalidates the priority-band family; a policy that
+   * wants bands re-binds them right after its primary. This keeps stale
+   * diorama bands from swallowing pixels once another system (HUD split, HD
+   * replacements) takes the source over. */
+  memset(ppu->overlayRenderBands[source], 0,
+         sizeof(ppu->overlayRenderBands[source]));
   /* A newly bound buffer's contents are unknown; force one full clear. */
   ppu->overlayRenderMaybeDirty[source] = pixels != NULL;
   if (!pixels)
     memset(&ppu->overlayCaptures[source], 0,
            sizeof(ppu->overlayCaptures[source]));
+  return true;
+}
+
+bool PpuBindOverlayPrioSurface(Ppu *ppu, PpuOverlaySource source, int band,
+                               uint8_t *pixels) {
+  if ((unsigned)source >= kPpuOverlaySource_Count || band < 1 || band > 3 ||
+      (source != kPpuOverlaySource_Obj && band != 1) ||
+      (pixels && !ppu->overlayRenderBuffer[source]))
+    return false;
+  ppu->overlayRenderBands[source][band - 1] = pixels;
+  /* A newly bound buffer's contents are unknown; force one full clear. */
+  if (pixels)
+    ppu->overlayRenderMaybeDirty[source] = true;
   return true;
 }
 
@@ -1243,6 +1266,11 @@ static void PpuClearOverlayRenderLine(Ppu *ppu, uint y) {
     if (!active && !ppu->overlayRenderMaybeDirty[source])
       continue;
     memset(pixels + (size_t)screen_y * pitch, 0, pitch);
+    for (int band = 0; band < 3; band++) {
+      uint8_t *band_pixels = ppu->overlayRenderBands[source][band];
+      if (band_pixels)
+        memset(band_pixels + (size_t)screen_y * pitch, 0, pitch);
+    }
     if (last_line)
       ppu->overlayRenderMaybeDirty[source] = active;
   }
@@ -1282,9 +1310,51 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
   uint32 *dst = (uint32 *)(ppu->overlayRenderBuffer[source] +
                             (size_t)screen_y * pitch);
   const PpuZbufType *src = ppu->overlayBuffers[source].data;
-  for (int x = x0; x < x1; x++)
-    dst[x + texture_extra] =
-        PpuOverlayColor(ppu, src[x + kPpuExtraLeftRight]);
+
+  uint32 *band_dst[3] = { NULL, NULL, NULL };
+  bool any_bands = false;
+  for (int band = 0; band < 3; band++) {
+    uint8_t *base = ppu->overlayRenderBands[source][band];
+    if (base) {
+      band_dst[band] = (uint32 *)(base + (size_t)screen_y * pitch);
+      any_bands = true;
+    }
+  }
+  if (!any_bands) {
+    for (int x = x0; x < x1; x++)
+      dst[x + texture_extra] =
+          PpuOverlayColor(ppu, src[x + kPpuExtraLeftRight]);
+    return;
+  }
+
+  /* Priority-split resolve: route each captured pixel to the band surface
+   * matching its hardware priority. The z top byte carries the Mode-1 rank
+   * (see the PpuDrawBackgrounds table): for OBJ the top two bits ARE the OAM
+   * priority (SPRITE_PRIO_TO_PRIO), for a BG layer one threshold separates
+   * its two tile-priority ranks. Lines were pre-cleared, so only real pixels
+   * need writes and every surface gets each pixel exactly once. */
+  static const uint8 kBgHiPrioMin[kPpuOverlaySource_Count] = {
+    0xc0,  /* BG1: hi z 0xc0.., lo 0x80.. (mode 1) */
+    0xb1,  /* BG2: hi z 0xb1.., lo 0x71.. */
+    0x32,  /* BG3: hi z 0xf2../0x32.. (either $2105 variant), lo 0x12.. */
+    0xff,  /* BG4: never rendered by this PPU (modes 1/7 only) */
+    0x00,  /* OBJ routes by the top two bits instead */
+  };
+  for (int x = x0; x < x1; x++) {
+    PpuZbufType zp = src[x + kPpuExtraLeftRight];
+    uint32 color = PpuOverlayColor(ppu, zp);
+    if (!color)
+      continue;
+    uint32 *out = dst;
+    if (source == kPpuOverlaySource_Obj) {
+      int band = zp >> 14;
+      if (band > 0 && band_dst[band - 1])
+        out = band_dst[band - 1];
+    } else if (band_dst[0] && (zp >> 8) >= kBgHiPrioMin[source]) {
+      out = band_dst[0];
+    }
+    out[x + texture_extra] = color;
+  }
 }
 
 static PpuPixelPrioBufs *PpuBeginBackgroundOverlay(Ppu *ppu, uint y,

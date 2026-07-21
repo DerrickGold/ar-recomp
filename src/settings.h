@@ -66,6 +66,7 @@ typedef enum {
   kSettingCat_Cheats,
   kSettingCat_Widescreen,
   kSettingCat_Display,
+  kSettingCat_Presentation,
   kSettingCat_Audio,
   kSettingCat_Save,
   kSettingCat_Extras,
@@ -229,6 +230,22 @@ typedef struct Settings {
   bool ws_margin_activation;  /* AR_WS_MARGIN_ACTIVATION extend $0400 window */
   bool ws_bg2_padding;        /* AR_WS_BG2_MIRROR        pad decorative BG2 */
   bool ws_sim_sprites;        /* AR_WS_SIM_SPRITES       widen sim components */
+
+  /* Diorama 3D presentation. Camera angles are scaled ints (no float setting
+   * type); the live DioramaCamera is seeded from these and writes back on
+   * every adjustment, so the menu and the mouse controls share one source of
+   * truth. Engages only in action stages, and only on the new PPU path. */
+  bool diorama_mode;
+  int  diorama_tilt_x_mrad;      /* camera pitch, milliradians */
+  int  diorama_tilt_y_mrad;      /* camera yaw, milliradians */
+  int  diorama_distance_x100;    /* camera distance, hundredths */
+  int  diorama_sprite_upright;   /* % the OBJ plane resists pitch (feet-anchored) */
+  int  diorama_depth_shade;      /* % strength of per-plane depth shading */
+  bool diorama_layer_bg1;
+  bool diorama_layer_bg2;
+  bool diorama_layer_bg3;
+  bool diorama_layer_obj;
+  bool diorama_layer_backdrop;
 } Settings;
 
 extern Settings g_settings;
@@ -289,6 +306,11 @@ const char *Settings_DisplayModeName(int mode);
  * width/pitch; changing ratios therefore requires no texture reallocation. */
 int Settings_VisibleX0(void);
 int Settings_VisibleWidth(void);
+
+/* Diorama availability predicates, shared by the descriptor table and the
+ * host render/hotkey paths so the gate has exactly one spelling (§D14). */
+bool Diorama_ModeIsOn(void);
+bool Diorama_NewPpuCapable(void);
 int Settings_ExtendedAspectX(void);
 int Settings_ExtendedAspectY(void);
 int Settings_AudioFrequencyHz(void);

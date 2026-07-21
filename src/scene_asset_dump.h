@@ -13,4 +13,6 @@ typedef struct Ppu Ppu;
 bool SceneAssetDump_Write(const char *directory, const Ppu *ppu,
                           const uint8_t *wram, int host_frame);
 
+bool WritePng(const char *path, const uint8_t *rgba, int width, int height);
+
 #endif

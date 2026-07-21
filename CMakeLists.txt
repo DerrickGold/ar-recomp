@@ -78,6 +78,8 @@ add_executable(ActRaiserRecomp
     src/scene_asset_dump.c
     src/save_system.c
     src/run_dir.c
+    src/diorama.c
+    src/present.c
     src/main.c
     src/actraiser_00.c
     src/gen_stubs.c
@@ -137,6 +139,24 @@ if(AR_SANITIZE AND NOT MSVC)
     target_link_options(ActRaiserRecomp PRIVATE
         -fsanitize=address,undefined)
     message(STATUS "ActRaiserRecomp: AR_SANITIZE on — ASan+UBSan enabled")
+endif()
+
+# AR_TSAN: ThreadSanitizer opt-in build (D16, ar-recomp-threading-impl.md).
+# Mutually exclusive with AR_SANITIZE (ASan+TSan can't be combined in one
+# binary). Use this to bring up the M5 present thread: run a session
+# exercising widescreen/diorama/HD-replacements, F5/F7 save-load, F9 display
+# cycle, F2 snapshot, pause/settings-overlay, and window resize, and watch
+# for TSan reports. Off by default (real perf cost, like AR_SANITIZE).
+option(AR_TSAN "Build with ThreadSanitizer (debug the present-thread handshake)" OFF)
+if(AR_TSAN AND NOT MSVC)
+    if(AR_SANITIZE)
+        message(FATAL_ERROR "AR_TSAN and AR_SANITIZE cannot both be ON")
+    endif()
+    target_compile_options(ActRaiserRecomp PRIVATE
+        -fsanitize=thread -fno-omit-frame-pointer -g)
+    target_link_options(ActRaiserRecomp PRIVATE
+        -fsanitize=thread)
+    message(STATUS "ActRaiserRecomp: AR_TSAN on — ThreadSanitizer enabled")
 endif()
 
 target_link_libraries(ActRaiserRecomp PRIVATE

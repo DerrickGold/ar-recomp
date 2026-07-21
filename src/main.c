@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <signal.h>
 #include <errno.h>
+#include <math.h>
 #include <SDL3/SDL.h>
 
 #ifdef _WIN32
@@ -24,6 +25,7 @@
 #include "settings_overlay.h"
 #include "scene_inspector.h"
 #include "scene_asset_dump.h"
+#include "diorama.h"
 #include "save_system.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
@@ -37,6 +39,7 @@
 #include "debug_server.h"
 #include "framedump.h"
 #include "widescreen.h"
+#include "present.h"
 
 /* HD art substitution (hd_replacements.c manifest entries). PNG only;
  * decoded once at startup. */
@@ -47,27 +50,26 @@
 #include "stb_image.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
-static SDL_Window *g_window;
-static SDL_Renderer *g_renderer;
-static SDL_Texture *g_texture;
-static SDL_Texture *g_hud_bg_texture;
-static SDL_Texture *g_hud_obj_texture;
+/* Not static: present.c (M5, D6) reads these presentation resources
+ * directly. They are boot-created once and, after that, either read-only
+ * pointers or exclusively touched under the M5.3 present-thread handshake —
+ * not part of the g_ppu/g_settings race class D6 fences off. */
+SDL_Window *g_window;
+SDL_Renderer *g_renderer;
+/* M8: true once the "gpu" backend was successfully requested (AR_GPU_SHADERS=1)
+ * AND created. Individual shader effects (present.c) must still check their
+ * OWN AR_GPU_FX_* toggle on top of this — this only gates whether the
+ * SDL_GPURenderState machinery is usable at all. */
+bool g_gpu_shaders_requested;
+bool g_gpu_shaders_active;
+SDL_Texture *g_texture;
+SDL_Texture *g_hud_bg_texture;
+SDL_Texture *g_hud_obj_texture;
 static uint8 g_paused, g_turbo;
 static bool g_scene_inspector_owns_pause;
-typedef enum InspectorPresentationKind {
-  kInspectorPresentation_Base,
-  kInspectorPresentation_HudBg,
-  kInspectorPresentation_HudObj,
-} InspectorPresentationKind;
-typedef struct InspectorPresentationSelection {
-  InspectorPresentationKind kind;
-  double source_x;
-  double source_y;
-  int output_x;
-  int output_y;
-  int output_width;
-  int output_height;
-} InspectorPresentationSelection;
+/* InspectorPresentationKind/InspectorPresentationSelection now live in
+ * present.h (D4) — shared between this file's InspectWindowPoint (live
+ * hit-test) and present.c's renderer (fed from the FrameSlot snapshot). */
 static InspectorPresentationSelection g_scene_inspector_presentation;
 static bool g_paused_redraw_pending;
 static uint32 g_input_state;
@@ -88,9 +90,9 @@ static bool g_widescreen_runtime_allowed;
 /* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
  * active width can change live without reallocating storage; each frame uses
  * only the leading g_snes_width*4 bytes per row. */
-static uint8_t g_pixels[kPpuBufWidth * 4 * 240];
-static uint8_t g_hud_bg_pixels[kPpuBufWidth * 4 * 240];
-static uint8_t g_hud_obj_pixels[kPpuBufWidth * 4 * 240];
+uint8_t g_pixels[kPpuBufWidth * 4 * 240];
+uint8_t g_hud_bg_pixels[kPpuBufWidth * 4 * 240];
+uint8_t g_hud_obj_pixels[kPpuBufWidth * 4 * 240];
 /* Overlay surfaces for manifest-driven HD replacements, allocated lazily per
  * source at bind time. The captured authentic pixels are never presented
  * (the HD textures replace them); the bindings exist because RemoveFromGame
@@ -101,8 +103,30 @@ static uint8_t *g_hd_overlay_pixels[kPpuOverlaySource_Count];
  * matrix warp); the host composites it between the game frame and the
  * OBJ/HUD overlays. Allocated only when a mode7 manifest entry has art. */
 enum { kHdMode7Scale = 4 };
-static uint8_t *g_m7_overlay_pixels;
-static SDL_Texture *g_m7_texture;
+uint8_t *g_m7_overlay_pixels;
+SDL_Texture *g_m7_texture;
+
+/* Diorama per-plane capture buffers, indexed by kDioramaPlane_* (engine
+ * sources = the priority-0 remainder of each layer, appended entries = the
+ * priority-band splits; see diorama_planes.h). Dedicated set separate from
+ * the HUD/HD overlay buffers (BG3/OBJ reuse those for the widescreen HUD
+ * split, and HD replacements claim per-source capture slots — see §4.3).
+ * Allocated lazily on first diorama capture (actraiser_rtl.c); never freed
+ * (matches the existing buffer convention — §D18). BG4 is never drawn in
+ * Mode 1, so excluded; the backdrop slot stays NULL (RenderDiorama points
+ * it at g_pixels). */
+uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
+bool g_diorama_dump_pending;
+/* The single diorama gate (§D14): mode armed, the new PPU path can run, and
+ * we are in an action stage. Capture and render both early-out on this, so
+ * there is exactly one spelling of "diorama is happening". */
+bool Diorama_IsActiveThisFrame(void) {
+  extern uint8 g_ram[0x20000];
+  return g_settings.diorama_mode && Diorama_NewPpuCapable() &&
+         ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]);
+}
+bool g_diorama_frame_active;
+SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
 
 /* Widescreen master switch + per-side extra-column budget — the definitions
  * for the runner's widescreen.h externs (each game defines them; 0/false =
@@ -111,6 +135,11 @@ static SDL_Texture *g_m7_texture;
  * ActRaiser_ApplyWidescreenPolicy (actraiser_rtl.c). */
 bool g_ws_active;
 int g_ws_extra;
+/* Margin the *display* crops to (aspect-derived). Normally equal to
+ * g_ws_extra; diorama mode widens the render margin to kWsExtraMax so the
+ * tilt reveals real content, while the flat presentation keeps showing the
+ * user's chosen aspect. */
+int g_ws_display_extra;
 
 extern Snes *g_snes;
 extern Ppu *g_ppu;
@@ -129,7 +158,6 @@ static SDL_AtomicInt g_audio_master_percent;
  * id) so pause/resume/close can address the opened device. */
 static SDL_AudioStream *g_audio_stream;
 static bool g_audio_open;
-static bool RenderFramebuffer(void);
 static void RebindPpuOutputSurfaces(void);
 
 void NORETURN Die(const char *error) {
@@ -388,11 +416,253 @@ static void RtlDrawPpuFrame(void) {
  * Re-render the same emulated PPU state once after such a change; ordinary
  * paused iterations retain that texture, so pause never advances the game or
  * repeatedly replays the scanline/HDMA renderer. */
-static void RedrawPausedFrameIfNeeded(void) {
+/* M5.3 (ar-recomp-threading-impl.md §2, Appendix D5-D11): the present
+ * thread. Moves SDL_RenderPresent's vsync block off the game thread.
+ *
+ * Two condition variables, reused for every handshake purpose (D11 — no new
+ * subsystem, each waiter loops on its own predicate so sharing is safe):
+ *   g_present_ready_cond: game -> present. Signaled when a new frame is
+ *     submitted (g_frame_pending) or a quiesce is requested/released.
+ *   g_present_done_cond:  present -> game. Signaled on THREE occasions:
+ *     (1) a submitted frame is dequeued (clears g_frame_pending — the D11
+ *         submit-side wait), (2) PresentUpload finishes for the dequeued
+ *         frame (sets g_present_upload_done — the pixel-buffer-safety wait,
+ *         see present.h's buffer-ownership note: this is what lets the game
+ *         thread redraw g_pixels/etc. WITHOUT double-buffering them), and
+ *         (3) a quiesce request is acknowledged (g_present_quiesced).
+ *
+ * Buffer ownership (M5 plan): the FrameSlot metadata is double-buffered
+ * (g_frame_slots[2]); the raw pixel buffers are NOT — safety for those comes
+ * from (2) above, not copying. */
+static SDL_Thread *g_present_thread;
+static SDL_Mutex *g_present_mutex;
+static SDL_Condition *g_present_ready_cond;
+static SDL_Condition *g_present_done_cond;
+static bool g_present_running;
+static bool g_present_thread_active;  /* false: headless / no renderer — synchronous fallback */
+
+static FrameSlot g_frame_slots[2];
+static int g_frame_last_idx;       /* game-thread-only: alternates 0/1 */
+static int g_frame_pending_idx;    /* valid while g_frame_pending */
+static bool g_frame_pending;
+static bool g_present_upload_done = true;
+static int g_present_last_presented_idx = -1;  /* present-thread-only */
+
+static bool g_present_quiesce_requested;
+static bool g_present_quiesced;
+
+/* D8: quiesce, not a command queue. Parks the present thread after it
+ * finishes whatever it's mid-doing, so the caller (game/main thread) can
+ * safely run code that mutates the renderer/window/g_ppu wholesale
+ * (geometry changes, fullscreen toggle, savestate load, screenshot capture)
+ * without racing the present thread's reads. */
+static void PresentThread_Quiesce(void) {
+  if (!g_present_thread_active) return;
+  SDL_LockMutex(g_present_mutex);
+  g_present_quiesce_requested = true;
+  SDL_SignalCondition(g_present_ready_cond);
+  while (!g_present_quiesced && g_present_running)
+    SDL_WaitCondition(g_present_done_cond, g_present_mutex);
+  SDL_UnlockMutex(g_present_mutex);
+}
+
+static void PresentThread_Resume(void) {
+  if (!g_present_thread_active) return;
+  SDL_LockMutex(g_present_mutex);
+  g_present_quiesce_requested = false;
+  SDL_SignalCondition(g_present_ready_cond);
+  SDL_UnlockMutex(g_present_mutex);
+}
+
+static int SDLCALL PresentThreadFn(void *userdata) {
+  (void)userdata;
+  /* M7: present-thread-local scroll history for interpolation (present.h's
+   * FrameSlot comment explains why this must NOT be a pointer into
+   * g_frame_slots[] — that would race the game thread's next submission).
+   * Only this thread ever touches it, so it needs no lock. */
+  DioramaScrollSnapshot prev_scroll = {0};
+  SDL_LockMutex(g_present_mutex);
+  while (g_present_running) {
+    if (g_present_quiesce_requested) {
+      g_present_quiesced = true;
+      SDL_SignalCondition(g_present_done_cond);
+      while (g_present_quiesce_requested && g_present_running)
+        SDL_WaitCondition(g_present_ready_cond, g_present_mutex);
+      g_present_quiesced = false;
+      /* M7: a quiesce (settings change, diorama toggle, savestate load) can
+       * span an arbitrary wall-clock gap and/or a scene change. prev_scroll
+       * still holds whatever was captured before the quiesce — invalidate
+       * it so the first frame after resuming shows curr as-is (no
+       * interpolation) instead of computing a bogus jump delta against
+       * stale/unrelated pre-quiesce scroll data. */
+      memset(&prev_scroll, 0, sizeof(prev_scroll));
+      continue;
+    }
+    if (!g_frame_pending) {
+      /* D11/§2.5, extended for M7: timed wait. On timeout (no new frame
+       * submitted), re-composite + re-present the last slot — §2.5's "keep
+       * the window alive while paused" path. With AR_INTERP_ENABLE=1 (M7
+       * scroll interpolation — off by default, see the PresentComposite
+       * comment on the BG2/HDMA vibration bug), poll at ~4ms so this also
+       * becomes the steady-state redraw path on a >60Hz display, recomputing
+       * the interpolation alpha fresh each time (SDL_RenderPresent's vsync
+       * block still caps the actual rate, so this never spins). Without
+       * interpolation there is no benefit to redrawing identical content
+       * faster than the original 16ms idle cadence, so stick with that. */
+      static int interp_enabled = -1;
+      if (interp_enabled < 0) {
+        const char *e = getenv("AR_INTERP_ENABLE");
+        interp_enabled = (e && e[0] && e[0] != '0') ? 1 : 0;
+      }
+      bool signaled = SDL_WaitConditionTimeout(g_present_ready_cond,
+                                               g_present_mutex,
+                                               interp_enabled ? 4 : 16);
+      if (!g_present_running || g_present_quiesce_requested) continue;
+      if (!signaled && !g_frame_pending && g_present_last_presented_idx >= 0) {
+        int idx = g_present_last_presented_idx;
+        SDL_UnlockMutex(g_present_mutex);
+        /* Re-present the SAME slot with a freshly-computed alpha — curr
+         * hasn't changed, so prev_scroll must NOT be touched here. Updating
+         * it after every idle repaint (as an earlier version of this code
+         * did) collapses prev==curr the moment a tick goes idle, snapping
+         * the extrapolated shift back to zero for one repaint and then
+         * re-extrapolating on the next — a visible forward/back "vibration"
+         * on every idle repaint. prev_scroll only ever advances in the
+         * dequeue path below, when a genuinely new tick was captured. */
+        PresentComposite(&g_frame_slots[idx], &prev_scroll);
+        if (g_renderer) SDL_RenderPresent(g_renderer);
+        SDL_LockMutex(g_present_mutex);
+      }
+      continue;
+    }
+
+    int idx = g_frame_pending_idx;
+    g_frame_pending = false;
+    SDL_SignalCondition(g_present_done_cond);  /* D11: unblocks the submit wait */
+    SDL_UnlockMutex(g_present_mutex);
+
+    FrameSlot *slot = &g_frame_slots[idx];
+    static int perf_on = -1;
+    if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
+    uint32 upload_t0 = perf_on ? SDL_GetTicks() : 0;
+    PresentUpload(slot);
+
+    SDL_LockMutex(g_present_mutex);
+    g_present_upload_done = true;
+    SDL_SignalCondition(g_present_done_cond);  /* unblocks the pre-draw wait */
+    SDL_UnlockMutex(g_present_mutex);
+
+    uint32 composite_t0 = perf_on ? SDL_GetTicks() : 0;
+    PresentComposite(slot, &prev_scroll);
+    uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
+    if (g_renderer) SDL_RenderPresent(g_renderer);
+    FrameSlot_ExtractScrollSnapshot(slot, &prev_scroll);
+    if (perf_on) {
+      uint32 now = SDL_GetTicks();
+      uint32 upload_ms = composite_t0 - upload_t0;
+      uint32 present_ms = vsync_t0 - composite_t0;
+      uint32 vsync_ms = now - vsync_t0;
+      static uint32 win_start, up_sum, up_max, pr_sum, pr_max, vs_sum, vs_max;
+      static int win_frames;
+      up_sum += upload_ms; if (upload_ms > up_max) up_max = upload_ms;
+      pr_sum += present_ms; if (present_ms > pr_max) pr_max = present_ms;
+      vs_sum += vsync_ms; if (vsync_ms > vs_max) vs_max = vsync_ms;
+      win_frames++;
+      if (!win_start) win_start = now;
+      if (now - win_start >= 1000) {
+        fprintf(stderr,
+                "[present-perf] frames=%d upload-ms avg=%.1f max=%u "
+                "present-ms avg=%.1f max=%u vsync-wait avg=%.1f max=%u\n",
+                win_frames, (double)up_sum / win_frames, up_max,
+                (double)pr_sum / win_frames, pr_max,
+                (double)vs_sum / win_frames, vs_max);
+        win_start = now; up_sum = 0; up_max = 0;
+        pr_sum = 0; pr_max = 0; vs_sum = 0; vs_max = 0; win_frames = 0;
+      }
+    }
+    g_present_last_presented_idx = idx;
+
+    SDL_LockMutex(g_present_mutex);
+  }
+  SDL_UnlockMutex(g_present_mutex);
+  return 0;
+}
+
+/* Call before every RtlDrawPpuFrame(): blocks (briefly — PresentUpload is
+ * sub-millisecond per [present-perf]) until the present thread has finished
+ * reading the pixel buffers this call is about to overwrite. No-op with no
+ * present thread (headless/synchronous fallback). */
+static void WaitForPixelBuffersFree(void) {
+  if (!g_present_thread_active) return;
+  SDL_LockMutex(g_present_mutex);
+  while (!g_present_upload_done && g_present_running)
+    SDL_WaitCondition(g_present_done_cond, g_present_mutex);
+  SDL_UnlockMutex(g_present_mutex);
+}
+
+/* Call after every RtlDrawPpuFrame(): hands the just-drawn frame to the
+ * present thread (or, with none running, presents synchronously — the old
+ * M5.2 path, kept for headless-with-video and as a safety fallback). */
+static void SubmitFrameToPresent(void) {
+  if (!g_present_thread_active) {
+    if (!g_renderer || !g_texture) return;
+    static int perf_on = -1;
+    if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
+    FrameSlot slot;
+    FrameSlot_Capture(&slot);
+    uint32 render_t0 = perf_on ? SDL_GetTicks() : 0;
+    PresentUpload(&slot);
+    PresentComposite(&slot, NULL);
+    uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
+    SDL_RenderPresent(g_renderer);
+    if (perf_on) {
+      uint32 now = SDL_GetTicks();
+      uint32 render_ms = vsync_t0 - render_t0;
+      uint32 vsync_ms = now - vsync_t0;
+      static uint32 win_start, render_sum, render_max, vsync_sum, vsync_max;
+      static int win_frames;
+      render_sum += render_ms; if (render_ms > render_max) render_max = render_ms;
+      vsync_sum += vsync_ms; if (vsync_ms > vsync_max) vsync_max = vsync_ms;
+      win_frames++;
+      if (!win_start) win_start = now;
+      if (now - win_start >= 1000) {
+        fprintf(stderr,
+                "[present-perf] frames=%d present-ms avg=%.1f max=%u "
+                "vsync-wait avg=%.1f max=%u (no present thread)\n",
+                win_frames, (double)render_sum / win_frames, render_max,
+                (double)vsync_sum / win_frames, vsync_max);
+        win_start = now; render_sum = 0; render_max = 0;
+        vsync_sum = 0; vsync_max = 0; win_frames = 0;
+      }
+    }
+    return;
+  }
+
+  SDL_LockMutex(g_present_mutex);
+  while (g_frame_pending && g_present_running)
+    SDL_WaitCondition(g_present_done_cond, g_present_mutex);  /* D11 */
+  if (!g_present_running) { SDL_UnlockMutex(g_present_mutex); return; }
+  int idx = 1 - g_frame_last_idx;
+  FrameSlot_Capture(&g_frame_slots[idx]);
+  g_frame_last_idx = idx;
+  g_frame_pending_idx = idx;
+  g_frame_pending = true;
+  g_present_upload_done = false;
+  SDL_SignalCondition(g_present_ready_cond);
+  SDL_UnlockMutex(g_present_mutex);
+}
+
+/* Returns true if a redraw actually happened (so the caller knows whether to
+ * submit a fresh frame or let the present thread's own idle timeout keep
+ * re-presenting the last one — §2.5). */
+static bool RedrawPausedFrameIfNeeded(void) {
   if ((g_paused || SettingsOverlay_IsOpen()) && g_paused_redraw_pending) {
+    WaitForPixelBuffersFree();
     RtlDrawPpuFrame();
     g_paused_redraw_pending = false;
+    return true;
   }
+  return false;
 }
 
 /* Differential-oracle capture: emit per-frame WRAM changes as JSONL in the
@@ -586,29 +856,42 @@ static SDL_Point WriteFramebufferPpm(FILE *pf) {
    * exists, capture that actual host-space result so F2 and visual-regression
    * screenshots include the independently scaled overlay. Headless runs
    * without video retain the historical internal-framebuffer capture. */
-  if (g_renderer && g_hud_bg_texture && RenderFramebuffer()) {
+  /* §2.9(c)/D8: this does a full render pass + SDL_RenderReadPixels on
+   * whichever thread calls it (F2, AR_SHOT_*) — quiesce the present thread
+   * first so the two don't touch g_renderer/g_texture/etc. concurrently. */
+  PresentThread_Quiesce();
+  FrameSlot ppm_slot;
+  bool have_ppm_slot = false;
+  SDL_Surface *argb = NULL;
+  if (g_renderer && g_hud_bg_texture) {
+    FrameSlot_Capture(&ppm_slot);
+    PresentUpload(&ppm_slot);
+    PresentComposite(&ppm_slot, NULL);
+    have_ppm_slot = true;
+  }
+  if (have_ppm_slot) {
     /* SDL3 SDL_RenderReadPixels returns a newly allocated surface in the
      * renderer's native format; convert it to ARGB8888 so the byte-order
      * extraction below is exact regardless of the backend's format. */
     SDL_Surface *raw = SDL_RenderReadPixels(g_renderer, NULL);
-    SDL_Surface *argb = raw
-        ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
+    argb = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
     if (raw) SDL_DestroySurface(raw);
-    if (argb) {
-      int out_w = argb->w, out_h = argb->h;
-      fprintf(pf, "P6\n%d %d\n255\n", out_w, out_h);
-      for (int y = 0; y < out_h; y++) {
-        const uint8_t *row = (const uint8_t *)argb->pixels +
-                             (size_t)y * argb->pitch;
-        for (int x = 0; x < out_w; x++) {
-          fputc(row[x * 4 + 2], pf);
-          fputc(row[x * 4 + 1], pf);
-          fputc(row[x * 4 + 0], pf);
-        }
+  }
+  PresentThread_Resume();
+  if (argb) {
+    int out_w = argb->w, out_h = argb->h;
+    fprintf(pf, "P6\n%d %d\n255\n", out_w, out_h);
+    for (int y = 0; y < out_h; y++) {
+      const uint8_t *row = (const uint8_t *)argb->pixels +
+                           (size_t)y * argb->pitch;
+      for (int x = 0; x < out_w; x++) {
+        fputc(row[x * 4 + 2], pf);
+        fputc(row[x * 4 + 1], pf);
+        fputc(row[x * 4 + 0], pf);
       }
-      SDL_DestroySurface(argb);
-      return (SDL_Point){ out_w, out_h };
     }
+    SDL_DestroySurface(argb);
+    return (SDL_Point){ out_w, out_h };
   }
 
   int x0 = Settings_VisibleX0();
@@ -741,6 +1024,66 @@ static void TakeFullSnapshot(void) {
           prefix, gf);
 }
 
+static bool WritePngFromArgb(const char *path, const uint8_t *argb_pixels,
+                             int width, int height) {
+  size_t row_bytes = (size_t)width * 4;
+  uint8_t *rgba = malloc(row_bytes * (size_t)height);
+  if (!rgba) return false;
+  for (int y = 0; y < height; y++) {
+    const uint8_t *src = argb_pixels + (size_t)y * row_bytes;
+    uint8_t *dst = rgba + (size_t)y * row_bytes;
+    for (int x = 0; x < width; x++) {
+      dst[0] = src[2];  // R (BGRA byte 2 → RGBA byte 0)
+      dst[1] = src[1];  // G
+      dst[2] = src[0];  // B (BGRA byte 0 → RGBA byte 2)
+      dst[3] = src[3];  // A
+      src += 4;
+      dst += 4;
+    }
+  }
+  bool ok = WritePng(path, rgba, width, height);
+  free(rgba);
+  return ok;
+}
+
+static void DumpDioramaLayers(void) {
+  extern uint8 g_ram[0x20000];
+  unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+  char dir[320];
+  RunDirFile(dir, sizeof dir, "diorama_dump");
+#ifndef _WIN32
+  mkdir(dir, 0755);
+#else
+  _mkdir(dir);
+#endif
+  /* Primaries hold each layer's priority-0 remainder once the band splits
+   * are bound; the _hi/_p* files are the priority bands. */
+  static const struct { int source; const char *name; } kLayers[] = {
+    { kPpuOverlaySource_Bg1, "bg1" },
+    { kDioramaPlane_Bg1Hi,   "bg1_hi" },
+    { kPpuOverlaySource_Bg2, "bg2" },
+    { kDioramaPlane_Bg2Hi,   "bg2_hi" },
+    { kPpuOverlaySource_Bg3, "bg3" },
+    { kPpuOverlaySource_Obj, "obj_p0" },
+    { kDioramaPlane_Obj1,    "obj_p1" },
+    { kDioramaPlane_Obj2,    "obj_p2" },
+    { kDioramaPlane_Obj3,    "obj_p3" },
+  };
+  int dumped = 0;
+  for (int i = 0; i < (int)(sizeof(kLayers) / sizeof(kLayers[0])); i++) {
+    uint8_t *px = g_diorama_layer_pixels[kLayers[i].source];
+    if (!px) continue;
+    char path[344];
+    snprintf(path, sizeof path, "%s/%s_gf%u.png", dir, kLayers[i].name, gf);
+    if (WritePngFromArgb(path, px, g_snes_width, 224)) dumped++;
+  }
+  char path[344];
+  snprintf(path, sizeof path, "%s/backdrop_gf%u.png", dir, gf);
+  if (WritePngFromArgb(path, g_pixels, g_snes_width, 224)) dumped++;
+  fprintf(stderr, "[diorama] dumped %d layer PNGs to %s/ (gf=%u, w=%d)\n",
+          dumped, dir, gf, g_snes_width);
+}
+
 static bool BuildSaveEditRequest(SaveEditRequest *edits) {
   static const int region_states[kSaveProgressEdit_Count] = {
     -1,
@@ -841,12 +1184,18 @@ static bool OnSettingsAction(const SettingDesc *desc) {
     RtlSaveLoad(kSaveLoad_Save, 0);
     fprintf(stderr, "State saved.\n");
   } else if (!strcmp(desc->key, "load_state")) {
+    /* §2.9(b)/D8: rewrites all of g_ppu (VRAM/CGRAM/OAM/regs) — quiesce so
+     * the present thread never reads it mid-tear. */
+    PresentThread_Quiesce();
     RtlSaveLoad(kSaveLoad_Load, 0);
+    PresentThread_Resume();
     fprintf(stderr, "State loaded.\n");
   } else if (!strcmp(desc->key, "warp_now")) {
     PerformWarp();
   } else if (!strcmp(desc->key, "take_snapshot")) {
     TakeFullSnapshot();
+  } else if (!strcmp(desc->key, "diorama_reset")) {
+    Diorama_ResetCamera();
   } else if (!strcmp(desc->key, "dump_scene_assets")) {
     if (!DumpSceneAssets()) return false;
   } else if (!strcmp(desc->key, "save_apply_session") ||
@@ -967,6 +1316,13 @@ static void ResolveVideoGeometry(bool runtime_change) {
     if (extra > kWsExtraMax) extra = kWsExtraMax;
   }
 
+  g_ws_display_extra = extra;
+  /* Diorama tilts reveal area beyond the displayed frame; render the full
+   * margin so those columns carry real game content instead of black. The
+   * display crop (Settings_VisibleWidth) stays at the aspect-derived width. */
+  if (g_settings.diorama_mode && extra > 0)
+    extra = kWsExtraMax;
+
   g_ws_extra = extra;
   g_ws_active = extra > 0;
   g_snes_width = 256 + 2 * extra;
@@ -1001,6 +1357,14 @@ static void ResolveVideoGeometry(bool runtime_change) {
 static void OnRuntimeSettingChanged(const SettingDesc *desc,
                                     SettingChangeResult result) {
   (void)result;
+  /* D8: several branches below mutate the renderer/window wholesale
+   * (SDL_SetWindowFullscreen, ResolveVideoGeometry -> RebindPpuOutputSurfaces
+   * + ApplyDisplayPresentation's SDL_SetRenderLogicalPresentation/
+   * SDL_SetWindowSize — §2.9(a)). Quiesce the present thread for the whole
+   * dispatch rather than surgically picking branches; it's cheap (settings
+   * changes are rare, human-triggered) and simpler than re-deriving which
+   * branches are render-safe on every future edit here. */
+  PresentThread_Quiesce();
   if (desc->field == &g_settings.audio_master_volume)
     SDL_SetAtomicInt(&g_audio_master_percent, g_settings.audio_master_volume);
   if (desc->field == &g_settings.audio_enabled)
@@ -1017,8 +1381,15 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   if (desc->field == &g_settings.extended_aspect ||
       desc->field == &g_settings.pixel_aspect) {
     ResolveVideoGeometry(true);
+    PresentThread_Resume();
     return;
   }
+  /* Menu edits of the camera rows re-seed the live camera, the mirror of the
+   * write-back Diorama_AdjustCamera does for mouse input (§D13). */
+  if (desc->field == &g_settings.diorama_tilt_x_mrad ||
+      desc->field == &g_settings.diorama_tilt_y_mrad ||
+      desc->field == &g_settings.diorama_distance_x100)
+    Diorama_SeedCameraFromSettings();
   if (desc->field == &g_settings.new_renderer) {
     g_new_ppu = g_settings.new_renderer || g_ws_active;
     g_paused_redraw_pending = true;
@@ -1034,6 +1405,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   if (desc->category == kSettingCat_Display ||
       desc->category == kSettingCat_Widescreen)
     g_paused_redraw_pending = true;
+  PresentThread_Resume();
 }
 
 static void ApplyRendererLogicalSize(void) {
@@ -1052,34 +1424,19 @@ static void ApplyRendererLogicalSize(void) {
   }
 }
 
-static SDL_Rect GetPresentationViewport(void) {
-  int out_w = 0, out_h = 0;
-  SDL_GetRenderOutputSize(g_renderer, &out_w, &out_h);
-  SDL_Rect viewport = { 0, 0, out_w, out_h };
-  if (!g_ws_active || g_settings.ignore_aspect_ratio ||
-      out_w <= 0 || out_h <= 0)
-    return viewport;
-
-  int logical_w = Settings_VisibleWidth() *
-                  (g_active_pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
-  int logical_h = g_snes_height *
-                  (g_active_pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
-  if ((int64_t)out_w * logical_h > (int64_t)out_h * logical_w) {
-    viewport.w = (int)((int64_t)out_h * logical_w / logical_h);
-    viewport.x = (out_w - viewport.w) / 2;
-  } else {
-    viewport.h = (int)((int64_t)out_w * logical_h / logical_w);
-    viewport.y = (out_h - viewport.h) / 2;
-  }
-  return viewport;
-}
+/* GetPresentationViewport moved to present.h/present.c as
+ * ComputePresentationViewport (M5, D4/D6): pure, no globals, so both this
+ * file's live callers (below) and present.c's slot-fed composite get the
+ * same math. */
 
 static void AdjustHudOutputScale(int delta_percent) {
   const SettingDesc *desc = Settings_Find("hud_scale_percent");
   if (!desc) return;
   int current = g_settings.hud_scale_percent;
   if (!current && g_renderer) {
-    SDL_Rect viewport = GetPresentationViewport();
+    SDL_Rect viewport = ComputePresentationViewport(
+        g_renderer, g_ws_active, g_settings.ignore_aspect_ratio,
+        g_active_pixel_aspect, Settings_VisibleWidth(), g_snes_height);
     current = (viewport.h * 100 + g_snes_height / 2) / g_snes_height;
     current = ((current + 12) / 25) * 25;
   }
@@ -1094,213 +1451,7 @@ static void AdjustHudOutputScale(int delta_percent) {
           formatted, Settings_ChangeResultName(result));
 }
 
-static int ScaledHudPixels(int pixels, double scale) {
-  int result = (int)(pixels * scale + 0.5);
-  return result > 0 ? result : 1;
-}
 
-static void RenderHudChunk(SDL_Texture *texture, SDL_Rect src, SDL_Rect dst) {
-  if (!texture || src.w <= 0 || src.h <= 0 || dst.w <= 0 || dst.h <= 0)
-    return;
-  SDL_FRect src_f = ToFRect(src), dst_f = ToFRect(dst);
-  SDL_RenderTexture(g_renderer, texture, &src_f, &dst_f);
-}
-
-typedef struct HudPresentationChunk {
-  SDL_Texture *texture;
-  SDL_Rect texture_source;
-  SDL_Rect screen_source;
-  SDL_Rect output_destination;
-  InspectorPresentationKind inspector_kind;
-  int inspector_x_bias;
-} HudPresentationChunk;
-
-enum { kHudPresentationChunkCapacity = 7 };
-
-static void AddHudPresentationChunk(HudPresentationChunk *chunks,
-                                    int *count,
-                                    SDL_Texture *texture,
-                                    SDL_Rect texture_source,
-                                    SDL_Rect screen_source,
-                                    SDL_Rect output_destination,
-                                    InspectorPresentationKind kind,
-                                    int inspector_x_bias) {
-  if (!chunks || !count || *count >= kHudPresentationChunkCapacity ||
-      !texture || texture_source.w <= 0 || texture_source.h <= 0 ||
-      screen_source.w <= 0 || screen_source.h <= 0 ||
-      output_destination.w <= 0 || output_destination.h <= 0)
-    return;
-  chunks[(*count)++] = (HudPresentationChunk){
-    texture,
-    texture_source,
-    screen_source,
-    output_destination,
-    kind,
-    inspector_x_bias,
-  };
-}
-
-/* One geometry description drives both compositing and hit-testing. This is
- * essential when the HUD uses an independent scale or its right group is
- * translated to the widescreen edge. */
-static int BuildHudPresentationChunks(
-    SDL_Rect viewport, HudPresentationChunk *chunks) {
-  if (!g_hud_bg_texture || !g_ppu || !g_ppu->wsHudSplitHeight)
-    return 0;
-
-  int count = 0;
-  int vis_w = Settings_VisibleWidth();
-  double scale_y, scale_x;
-  if (g_settings.hud_scale_percent == 0) {
-    scale_y = (double)viewport.h / g_snes_height;
-    scale_x = (double)viewport.w / vis_w;
-  } else {
-    scale_y = g_settings.hud_scale_percent / 100.0;
-    scale_x = scale_y *
-        (g_active_pixel_aspect == kPixelAspect_Crt43 ? 7.0 / 6.0 : 1.0);
-  }
-
-  int tex_extra = (g_snes_width - 256) / 2;
-  int height = g_ppu->wsHudSplitHeight;
-  int player_y = g_ppu->wsHudPlayerRowY;
-  int enemy_y = g_ppu->wsHudLeftOnlyY;
-  if (player_y > height) player_y = height;
-  if (enemy_y > height) enemy_y = height;
-  if (player_y > enemy_y) player_y = enemy_y;
-
-  /* Band 1: top row (ACT/TIME/SCORE) — 3-way left/center/right split. */
-  int upper_h = player_y;
-  int upper_dh = ScaledHudPixels(upper_h, scale_y);
-
-  SDL_Rect src = { tex_extra, 0, g_ppu->wsHudLeftEnd, upper_h };
-  SDL_Rect dst = { viewport.x, viewport.y,
-                   ScaledHudPixels(src.w, scale_x), upper_dh };
-  AddHudPresentationChunk(
-      chunks, &count, g_hud_bg_texture, src,
-      (SDL_Rect){ 0, 0, src.w, src.h }, dst,
-      kInspectorPresentation_HudBg, -g_ppu->extraLeftRight);
-
-  if (g_ppu->wsHudLeftEnd < g_ppu->wsHudRightStart) {
-    src.x = tex_extra + g_ppu->wsHudLeftEnd;
-    src.w = g_ppu->wsHudRightStart - g_ppu->wsHudLeftEnd;
-    dst.w = ScaledHudPixels(src.w, scale_x);
-    dst.x = viewport.x + (viewport.w - dst.w) / 2;
-    AddHudPresentationChunk(
-        chunks, &count, g_hud_bg_texture, src,
-        (SDL_Rect){ g_ppu->wsHudLeftEnd, 0, src.w, src.h }, dst,
-        kInspectorPresentation_HudBg, 0);
-  }
-
-  int right_source_w = 256 - g_ppu->wsHudRightStart;
-  int right_dest_w = ScaledHudPixels(right_source_w, scale_x);
-  src.x = tex_extra + g_ppu->wsHudRightStart;
-  src.w = right_source_w;
-  dst.x = viewport.x + viewport.w - right_dest_w;
-  dst.w = right_dest_w;
-  AddHudPresentationChunk(
-      chunks, &count, g_hud_bg_texture, src,
-      (SDL_Rect){ g_ppu->wsHudRightStart, 0, src.w, src.h }, dst,
-      kInspectorPresentation_HudBg, g_ppu->extraLeftRight);
-
-  /* Band 2: player row (PLAYER health + magic-scroll) — left+right split
-   * at wsHudRightStart so health pips stay left-anchored and scroll tiles
-   * stay right-anchored regardless of HP level. */
-  if (player_y < enemy_y) {
-    int mid_h = enemy_y - player_y;
-    int mid_dh = ScaledHudPixels(mid_h, scale_y);
-    int mid_dy = viewport.y + ScaledHudPixels(player_y, scale_y);
-
-    src.x = tex_extra;
-    src.y = player_y;
-    src.w = g_ppu->wsHudRightStart;
-    src.h = mid_h;
-    dst.x = viewport.x;
-    dst.y = mid_dy;
-    dst.w = ScaledHudPixels(src.w, scale_x);
-    dst.h = mid_dh;
-    AddHudPresentationChunk(
-        chunks, &count, g_hud_bg_texture, src,
-        (SDL_Rect){ 0, player_y, src.w, src.h }, dst,
-        kInspectorPresentation_HudBg, -g_ppu->extraLeftRight);
-
-    src.x = tex_extra + g_ppu->wsHudRightStart;
-    src.w = 256 - g_ppu->wsHudRightStart;
-    dst.x = viewport.x + viewport.w - ScaledHudPixels(src.w, scale_x);
-    dst.w = ScaledHudPixels(src.w, scale_x);
-    AddHudPresentationChunk(
-        chunks, &count, g_hud_bg_texture, src,
-        (SDL_Rect){ g_ppu->wsHudRightStart, player_y, src.w, src.h }, dst,
-        kInspectorPresentation_HudBg, g_ppu->extraLeftRight);
-  }
-
-  /* Band 3: enemy row — full-width left-anchored (boss health spans the
-   * entire screen). */
-  if (enemy_y < height) {
-    int low_h = height - enemy_y;
-    src.x = tex_extra;
-    src.y = enemy_y;
-    src.w = 256;
-    src.h = low_h;
-    dst.x = viewport.x;
-    dst.y = viewport.y + ScaledHudPixels(enemy_y, scale_y);
-    dst.w = ScaledHudPixels(src.w, scale_x);
-    dst.h = ScaledHudPixels(low_h, scale_y);
-    AddHudPresentationChunk(
-        chunks, &count, g_hud_bg_texture, src,
-        (SDL_Rect){ 0, enemy_y, src.w, src.h }, dst,
-        kInspectorPresentation_HudBg, -g_ppu->extraLeftRight);
-  }
-
-  /* Action's selected-magic icon (4 OAM, 16x16), simulation's hourglass
-   * (4 OAM, 16x16), and Sky Palace's magic icon (2 OAM, 16x8) are
-   * separately validated OAM signatures. Keep the promoted HUD icon four
-   * native pixels before the scaled right group. */
-  const PpuOverlayCapture *obj_capture =
-      &g_ppu->overlayCaptures[kPpuOverlaySource_Obj];
-  if (g_hud_obj_texture && obj_capture->oamCount == 4) {
-    int first = obj_capture->oamFirst;
-    int x = (g_ppu->oam[first * 2] & 0xff) |
-            ((g_ppu->highOam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;
-    int y = g_ppu->oam[first * 2] >> 8;
-    int icon_w = 16;
-    int icon_h = 16;
-    if (x < 256) {
-      SDL_Rect obj_src = { tex_extra + x, y, icon_w, icon_h };
-      SDL_Rect obj_dst = {
-        viewport.x + viewport.w - right_dest_w -
-            ScaledHudPixels(20, scale_x),
-        viewport.y + ScaledHudPixels(y, scale_y),
-        ScaledHudPixels(icon_w, scale_x),
-        ScaledHudPixels(icon_h, scale_y),
-      };
-      AddHudPresentationChunk(
-          chunks, &count, g_hud_obj_texture, obj_src,
-          (SDL_Rect){ x, y, icon_w, icon_h }, obj_dst,
-          kInspectorPresentation_HudObj, 0);
-    }
-  }
-  return count;
-}
-
-static void RenderHudOverlay(SDL_Rect viewport) {
-  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  int count = BuildHudPresentationChunks(viewport, chunks);
-  for (int i = 0; i < count; i++)
-    RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
-                   chunks[i].output_destination);
-}
-
-static int InspectorScreenToOutputX(SDL_Rect viewport, double screen_x) {
-  int visible_left = Settings_VisibleX0() - g_ws_extra;
-  return viewport.x +
-      (int)((screen_x - visible_left) * viewport.w /
-            Settings_VisibleWidth() + 0.5);
-}
-
-static int InspectorScreenToOutputY(SDL_Rect viewport, double screen_y) {
-  return viewport.y +
-      (int)(screen_y * viewport.h / g_snes_height + 0.5);
-}
 
 static bool PointInRect(int x, int y, SDL_Rect rect) {
   return x >= rect.x && x < rect.x + rect.w &&
@@ -1316,136 +1467,6 @@ static bool HudChunkPixelVisible(const HudPresentationChunk *chunk,
       source_y < 0 || source_y >= g_snes_height)
     return false;
   return pixels[((size_t)source_y * g_snes_width + texture_x) * 4 + 3] != 0;
-}
-
-static bool FindSelectedHudChunk(SDL_Rect viewport,
-                                 HudPresentationChunk *selected) {
-  if (g_scene_inspector_presentation.kind == kInspectorPresentation_Base)
-    return false;
-  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  int count = BuildHudPresentationChunks(viewport, chunks);
-  for (int i = count - 1; i >= 0; i--) {
-    const SDL_Rect source = chunks[i].screen_source;
-    if (chunks[i].inspector_kind != g_scene_inspector_presentation.kind ||
-        g_scene_inspector_presentation.source_x < source.x ||
-        g_scene_inspector_presentation.source_x >= source.x + source.w ||
-        g_scene_inspector_presentation.source_y < source.y ||
-        g_scene_inspector_presentation.source_y >= source.y + source.h)
-      continue;
-    if (selected) *selected = chunks[i];
-    return true;
-  }
-  return false;
-}
-
-static int HudSourceToOutputX(const HudPresentationChunk *chunk,
-                              double source_x) {
-  return chunk->output_destination.x +
-      (int)((source_x - chunk->screen_source.x) *
-            chunk->output_destination.w / chunk->screen_source.w + 0.5);
-}
-
-static int HudSourceToOutputY(const HudPresentationChunk *chunk,
-                              double source_y) {
-  return chunk->output_destination.y +
-      (int)((source_y - chunk->screen_source.y) *
-            chunk->output_destination.h / chunk->screen_source.h + 0.5);
-}
-
-static bool HudHighlightToOutput(const HudPresentationChunk *chunk,
-                                 int x0, int y0, int x1, int y1,
-                                 SDL_Rect *output) {
-  if (!chunk || !output) return false;
-  x0 -= chunk->inspector_x_bias;
-  x1 -= chunk->inspector_x_bias;
-  const SDL_Rect source = chunk->screen_source;
-  if (x0 < source.x) x0 = source.x;
-  if (y0 < source.y) y0 = source.y;
-  if (x1 > source.x + source.w) x1 = source.x + source.w;
-  if (y1 > source.y + source.h) y1 = source.y + source.h;
-  if (x1 <= x0 || y1 <= y0) return false;
-  int output_x0 = HudSourceToOutputX(chunk, x0);
-  int output_y0 = HudSourceToOutputY(chunk, y0);
-  int output_x1 = HudSourceToOutputX(chunk, x1);
-  int output_y1 = HudSourceToOutputY(chunk, y1);
-  *output = (SDL_Rect){
-    output_x0, output_y0,
-    output_x1 - output_x0, output_y1 - output_y0,
-  };
-  return output->w > 0 && output->h > 0;
-}
-
-static void RenderSceneInspector(SDL_Rect viewport) {
-  if (!g_settings.scene_inspector || !SceneInspector_HasSelection()) return;
-  int x = 0, y = 0;
-  if (!SceneInspector_GetPoint(&x, &y)) return;
-  HudPresentationChunk hud_chunk;
-  bool hud_selection = FindSelectedHudChunk(viewport, &hud_chunk);
-  int projected_px = hud_selection
-      ? HudSourceToOutputX(
-          &hud_chunk, g_scene_inspector_presentation.source_x)
-      : InspectorScreenToOutputX(
-          viewport, g_scene_inspector_presentation.source_x);
-  int projected_py = hud_selection
-      ? HudSourceToOutputY(
-          &hud_chunk, g_scene_inspector_presentation.source_y)
-      : InspectorScreenToOutputY(
-          viewport, g_scene_inspector_presentation.source_y);
-  int output_width = 0, output_height = 0;
-  SDL_GetRenderOutputSize(g_renderer, &output_width, &output_height);
-  bool same_output = output_width ==
-                         g_scene_inspector_presentation.output_width &&
-                     output_height ==
-                         g_scene_inspector_presentation.output_height;
-  int px = same_output ? g_scene_inspector_presentation.output_x
-                       : projected_px;
-  int py = same_output ? g_scene_inspector_presentation.output_y
-                       : projected_py;
-  int anchor_dx = px - projected_px;
-  int anchor_dy = py - projected_py;
-
-  SDL_BlendMode old_blend = SDL_BLENDMODE_NONE;
-  Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
-  SDL_GetRenderDrawBlendMode(g_renderer, &old_blend);
-  SDL_GetRenderDrawColor(g_renderer, &old_r, &old_g, &old_b, &old_a);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(g_renderer, 255, 192, 32, 255);
-  SDL_RenderLine(g_renderer, (float)(px - 7), (float)py,
-                 (float)(px + 7), (float)py);
-  SDL_RenderLine(g_renderer, (float)px, (float)(py - 7),
-                 (float)px, (float)(py + 7));
-
-  int x0, y0, x1, y1;
-  if (SceneInspector_GetHighlight(&x0, &y0, &x1, &y1)) {
-    SDL_Rect rect;
-    bool have_rect = hud_selection &&
-        HudHighlightToOutput(&hud_chunk, x0, y0, x1, y1, &rect);
-    if (!hud_selection) {
-      rect = (SDL_Rect){
-        InspectorScreenToOutputX(viewport, x0),
-        InspectorScreenToOutputY(viewport, y0),
-        InspectorScreenToOutputX(viewport, x1) -
-            InspectorScreenToOutputX(viewport, x0),
-        InspectorScreenToOutputY(viewport, y1) -
-            InspectorScreenToOutputY(viewport, y0),
-      };
-      have_rect = rect.w > 0 && rect.h > 0;
-    }
-    if (have_rect) {
-      /* Preserve the exact renderer-output click anchor. Native source
-       * sampling intentionally quantizes to one SNES pixel; without this
-       * correction, that discarded fraction visibly shifts both annotations
-       * when the game or promoted HUD is scaled by a non-integer factor. */
-      rect.x += anchor_dx;
-      rect.y += anchor_dy;
-      SDL_FRect rect_f = ToFRect(rect);
-      SDL_RenderRect(g_renderer, &rect_f);
-    }
-  }
-  SDL_SetRenderDrawBlendMode(g_renderer, old_blend);
-  SDL_SetRenderDrawColor(g_renderer, old_r, old_g, old_b, old_a);
-  SettingsOverlay_RenderDebugPanel(
-      "SCENE INSPECTOR", SceneInspector_PanelText(), (SDL_Point){ px, py });
 }
 
 static bool WindowPointToOutput(int event_x, int event_y,
@@ -1474,18 +1495,52 @@ static bool WindowPointToOutput(int event_x, int event_y,
   return true;
 }
 
+/* Resolve the OBJ HUD-icon slot from LIVE g_ppu, the same computation
+ * present.c's BuildProjectionInputsFromSlot does from the FrameSlot (D4 —
+ * one algorithm, two callers). */
+static void FillLiveHudProjectionInputs(HudProjectionInputs *in) {
+  memset(in, 0, sizeof(*in));
+  in->hud_bg_texture = g_hud_bg_texture;
+  in->hud_obj_texture = g_hud_obj_texture;
+  in->hud_scale_percent = g_settings.hud_scale_percent;
+  in->pixel_aspect = g_active_pixel_aspect;
+  in->snes_width = g_snes_width;
+  in->snes_height = g_snes_height;
+  in->visible_width = Settings_VisibleWidth();
+  if (!g_ppu) return;
+  in->hud_split_height = g_ppu->wsHudSplitHeight;
+  in->hud_left_end = g_ppu->wsHudLeftEnd;
+  in->hud_right_start = g_ppu->wsHudRightStart;
+  in->hud_player_row_y = g_ppu->wsHudPlayerRowY;
+  in->hud_left_only_y = g_ppu->wsHudLeftOnlyY;
+  in->extra_left_right = g_ppu->extraLeftRight;
+  const PpuOverlayCapture *obj_capture =
+      &g_ppu->overlayCaptures[kPpuOverlaySource_Obj];
+  if (obj_capture->oamCount == 4) {
+    int first = obj_capture->oamFirst;
+    in->obj_icon_x = (g_ppu->oam[first * 2] & 0xff) |
+        ((g_ppu->highOam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;
+    in->obj_icon_y = g_ppu->oam[first * 2] >> 8;
+    in->obj_icon_valid = true;
+  }
+}
+
 static bool InspectWindowPoint(int window_x, int window_y) {
   int output_x = 0, output_y = 0;
   if (!WindowPointToOutput(window_x, window_y, &output_x, &output_y))
     return false;
-  SDL_Rect viewport = GetPresentationViewport();
+  SDL_Rect viewport = ComputePresentationViewport(
+      g_renderer, g_ws_active, g_settings.ignore_aspect_ratio,
+      g_active_pixel_aspect, Settings_VisibleWidth(), g_snes_height);
   bool had_selection = SceneInspector_HasSelection();
   bool was_paused = g_paused != 0;
   int output_width = 0, output_height = 0;
   SDL_GetRenderOutputSize(g_renderer, &output_width, &output_height);
 
+  HudProjectionInputs hud_inputs;
+  FillLiveHudProjectionInputs(&hud_inputs);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  int chunk_count = BuildHudPresentationChunks(viewport, chunks);
+  int chunk_count = BuildHudPresentationChunks(viewport, &hud_inputs, chunks);
   bool selected = false;
   for (int i = chunk_count - 1; i >= 0 && !selected; i--) {
     const HudPresentationChunk *chunk = &chunks[i];
@@ -1690,121 +1745,117 @@ static void RebindPpuOutputSurfaces(void) {
     PpuSetExtraSpace(g_ppu, 0);
 }
 
-/* Composite the Mode-7 override surface over the game frame (the engine
- * already removed the substituted pixels there). Drawn before the OBJ/HUD
- * overlays so promoted sprites stay above substituted scenery. Brightness
- * was applied by the engine sampler; forced blank renders nothing because
- * the per-line clears run before the early-out. */
-static void RenderMode7Overlay(SDL_Rect viewport) {
-  if (!g_m7_texture || !g_ppu || !g_ppu->m7Override.rgba) return;
-  /* Upload only the sub-rect RenderCopy samples (the visible columns); the
-   * source row pitch stays the full surface width. Identical in wide-full
-   * mode; a 4:3 view of a mode-7 substitution skips the margin columns. */
-  SDL_Rect src = { Settings_VisibleX0() * kHdMode7Scale, 0,
-                   Settings_VisibleWidth() * kHdMode7Scale,
-                   g_snes_height * kHdMode7Scale };
-  SDL_UpdateTexture(g_m7_texture, &src,
-                    g_m7_overlay_pixels + (size_t)src.x * 4,
-                    g_snes_width * kHdMode7Scale * 4);
-  SDL_FRect src_f = ToFRect(src), viewport_f = ToFRect(viewport);
-  SDL_RenderTexture(g_renderer, g_m7_texture, &src_f, &viewport_f);
+/* Called by the diorama_mode descriptor's change hook, so the menu row and
+ * the D hotkey share one path. The render margin widens to kWsExtraMax while
+ * the mode is armed (ResolveVideoGeometry), so the geometry must be
+ * re-derived and the PPU surfaces rebound at the new pitch; the display crop
+ * and window size are deliberately unaffected. */
+void Diorama_OnModeChanged(void) {
+  if (!g_settings.diorama_mode) g_diorama_frame_active = false;
+  if (!g_ppu) return;   /* pre-boot settings load */
+  /* D8: memsets the live pixel buffers and rebinds PPU output surfaces —
+   * quiesce first (same hazard class as OnRuntimeSettingChanged). */
+  PresentThread_Quiesce();
+  ResolveVideoGeometry(false);
+  memset(g_pixels, 0, sizeof(g_pixels));
+  memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
+  memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
+  RebindPpuOutputSurfaces();
+  g_paused_redraw_pending = true;
+  PresentThread_Resume();
 }
 
-/* Draw every active HD replacement over the region its capture removed this
- * frame. Master brightness is resolved on the host texture so INIDISP fades
- * apply to the substituted art; forced blank suppresses it entirely,
- * matching the authentic layer. */
-static void RenderHdReplacements(SDL_Rect viewport) {
-  if (!g_ppu || (g_ppu->inidisp & 0x80)) return;
+/* M5 (ar-recomp-threading-impl.md Appendix D5): the sole FrameSlot writer.
+ * Reads live g_ppu, g_settings, g_snes_width/height,
+ * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
+ * runs on the game thread, immediately after RtlDrawPpuFrame() returns,
+ * before the game thread touches any of this state again). present.c must
+ * never do this; it only reads the FrameSlot this produces. */
+void FrameSlot_Capture(FrameSlot *dst) {
+  memset(dst, 0, sizeof(*dst));
 
-  /* Screen space -> framebuffer -> visible sub-rect -> viewport. Promoted
-   * scenes are pillarboxed, so authentic x=0 sits g_ws_extra columns into
-   * the framebuffer regardless of display mode. */
-  int vis_w = Settings_VisibleWidth();
-  int vis_x0 = Settings_VisibleX0();
-  int extra = (g_snes_width - 256) / 2;
-  double scale_x = (double)viewport.w / vis_w;
-  double scale_y = (double)viewport.h / g_snes_height;
+  dst->snes_width = g_snes_width;
+  dst->snes_height = g_snes_height;
+  dst->display_mode = g_settings.display_mode;
+  dst->pixel_aspect = g_active_pixel_aspect;
+  dst->ws_active = g_ws_active;
+  dst->ws_extra = g_ws_extra;
+  dst->ignore_aspect_ratio = g_settings.ignore_aspect_ratio;
+  dst->visible_x0 = Settings_VisibleX0();
+  dst->visible_width = Settings_VisibleWidth();
+  dst->hud_scale_percent = g_settings.hud_scale_percent;
 
-  for (int i = 0; i < g_hd_replacement_count; i++) {
-    const HdReplacement *entry = &g_hd_replacements[i];
-    if (!entry->active || !entry->texture) continue;
-    const PpuOverlayCapture *capture =
-        &g_ppu->overlayCaptures[entry->source];
-    if (capture->x1 <= capture->x0 || capture->y1 <= capture->y0 ||
-        !(capture->flags & kPpuOverlayFlag_RemoveFromGame))
-      continue;
-    int dx0 = (int)((capture->x0 + extra - vis_x0) * scale_x + 0.5);
-    int dx1 = (int)((capture->x1 + extra - vis_x0) * scale_x + 0.5);
-    int dy0 = (int)(capture->y0 * scale_y + 0.5);
-    int dy1 = (int)(capture->y1 * scale_y + 0.5);
-    SDL_Rect dst = { viewport.x + dx0, viewport.y + dy0,
-                     dx1 - dx0, dy1 - dy0 };
-    if (dst.w <= 0 || dst.h <= 0) continue;
+  dst->diorama_active = g_diorama_frame_active;
 
-    SDL_Texture *texture = (SDL_Texture *)entry->texture;
-    Uint8 mod = entry->brightness_mod
-        ? (Uint8)((g_ppu->inidisp & 0xf) * 255 / 15) : 255;
-    SDL_SetTextureColorMod(texture, mod, mod, mod);
-    SDL_FRect dst_f = ToFRect(dst);
-    SDL_RenderTexture(g_renderer, texture, NULL, &dst_f);
-  }
-}
-
-static bool RenderFramebuffer(void) {
-  if (!g_renderer || !g_texture) return false;
-  /* Present only the current mode's sub-rect: the whole framebuffer when
-   * wide, the authentic centre 256 in 4:3. The texture allocation never
-   * changes while cycling modes. */
-  SDL_Rect src = { Settings_VisibleX0(), 0,
-                   Settings_VisibleWidth(), g_snes_height };
-  SDL_Rect upload = { 0, 0, g_snes_width, g_snes_height };
-  SDL_UpdateTexture(g_texture, &upload, g_pixels, g_snes_width * 4);
-  /* The HUD planes are only sampled by RenderHudOverlay, and only while a
-   * widescreen HUD split is active; both captures are top-anchored. Upload
-   * just the rows the split can sample instead of three full-height planes
-   * every frame. Rows beyond the upload keep stale texture content, which is
-   * fine: sampling is bounded by the CURRENT split height and OAM signature,
-   * so a disabled or shorter split never reads them. */
-  if (g_ppu && g_ppu->wsHudSplitHeight) {
-    int split_rows = g_ppu->wsHudSplitHeight;
-    if (g_hud_bg_texture) {
-      int rows = g_ppu->overlayCaptures[kPpuOverlaySource_Bg3].y1;
-      if (rows < split_rows) rows = split_rows;
-      SDL_Rect hud = { 0, 0, g_snes_width, rows };
-      SDL_UpdateTexture(g_hud_bg_texture, &hud, g_hud_bg_pixels,
-                        g_snes_width * 4);
-    }
-    if (g_hud_obj_texture) {
-      int rows = g_ppu->overlayCaptures[kPpuOverlaySource_Obj].y1;
-      if (rows < split_rows) rows = split_rows;
-      SDL_Rect hud = { 0, 0, g_snes_width, rows };
-      SDL_UpdateTexture(g_hud_obj_texture, &hud, g_hud_obj_pixels,
-                        g_snes_width * 4);
+  /* M7/§6.1: scroll snapshot for present-time interpolation. */
+  dst->timestamp_ns = SDL_GetTicksNS();
+  dst->turbo_active = g_turbo != 0;
+  if (g_ppu) {
+    for (int i = 0; i < 4; i++) {
+      dst->bg_hscroll[i] = (int16_t)g_ppu->hScroll[i];
+      dst->bg_vscroll[i] = (int16_t)g_ppu->vScroll[i];
     }
   }
-  ApplyRendererLogicalSize();
-  SDL_RenderClear(g_renderer);
-  SDL_FRect src_f = ToFRect(src);
-  SDL_RenderTexture(g_renderer, g_texture, &src_f, NULL);
 
-  SDL_Rect viewport = GetPresentationViewport();
-  SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
-                                   SDL_LOGICAL_PRESENTATION_DISABLED);
-  RenderMode7Overlay(viewport);
-  RenderHudOverlay(viewport);
-  RenderHdReplacements(viewport);
-  RenderSceneInspector(viewport);
-  SettingsOverlay_Render(viewport);
-  ApplyRendererLogicalSize();
-  return true;
+  if (g_ppu) {
+    dst->hud_split_height = g_ppu->wsHudSplitHeight;
+    dst->hud_left_end = g_ppu->wsHudLeftEnd;
+    dst->hud_right_start = g_ppu->wsHudRightStart;
+    dst->hud_player_row_y = g_ppu->wsHudPlayerRowY;
+    dst->hud_left_only_y = g_ppu->wsHudLeftOnlyY;
+    dst->extra_left_right = g_ppu->extraLeftRight;
+    dst->inidisp = g_ppu->inidisp;
+    dst->bg_mode = (uint8_t)PPU_mode(g_ppu);
+
+    _Static_assert(kFrameSlotOverlaySourceCount == kPpuOverlaySource_Count,
+                   "FrameSlot overlay source count must match the PPU's");
+    _Static_assert(kFrameSlotOverlay_Bg3 == kPpuOverlaySource_Bg3 &&
+                   kFrameSlotOverlay_Obj == kPpuOverlaySource_Obj,
+                   "present.h's mirrored overlay source order must match ppu.h");
+    _Static_assert(kFrameSlotOverlayFlag_RemoveFromGame ==
+                   kPpuOverlayFlag_RemoveFromGame,
+                   "present.h's mirrored overlay flag must match ppu.h");
+    for (int i = 0; i < kFrameSlotOverlaySourceCount; i++) {
+      const PpuOverlayCapture *src = &g_ppu->overlayCaptures[i];
+      FrameSlotOverlayCapture *d = &dst->overlay_captures[i];
+      d->x0 = src->x0; d->x1 = src->x1;
+      d->y0 = src->y0; d->y1 = src->y1;
+      d->flags = src->flags;
+      d->oamFirst = src->oamFirst; d->oamCount = src->oamCount;
+    }
+
+    /* Only needed when an OBJ overlay/HUD icon is active this frame (§2.8
+     * cost note). */
+    if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount) {
+      _Static_assert(sizeof(dst->oam) == sizeof(g_ppu->oam), "oam size (D18)");
+      _Static_assert(sizeof(dst->high_oam) == sizeof(g_ppu->highOam),
+                     "highOam size (D18)");
+      memcpy(dst->oam, g_ppu->oam, sizeof(dst->oam));
+      memcpy(dst->high_oam, g_ppu->highOam, sizeof(dst->high_oam));
+      dst->oam_valid = true;
+    }
+
+    dst->m7_active = (g_ppu->m7Override.rgba != NULL);
+  }
+
+  dst->hd_entry_count = 0;
+  for (int i = 0; i < g_hd_replacement_count && i < kHdMaxReplacements; i++) {
+    const HdReplacement *e = &g_hd_replacements[i];
+    FrameSlotHdEntry *d = &dst->hd_entries[dst->hd_entry_count++];
+    d->active = e->active;
+    d->source = e->source;
+    d->brightness_mod = e->brightness_mod;
+    d->texture = e->texture;
+  }
+
+  dst->scene_inspector_enabled = g_settings.scene_inspector;
+  dst->inspector_selection = g_scene_inspector_presentation;
 }
 
-static void PresentFramebuffer(void) {
-  if (!RenderFramebuffer()) return;
-  SDL_RenderPresent(g_renderer);
-}
-
+/* M5.2: still called synchronously (no present thread yet — that's M5.3).
+ * FrameSlot_Capture + PresentUpload + PresentComposite replace the old
+ * single RenderFramebuffer(); this is the checkpoint that proves the
+ * present.c extraction is behavior-preserving before concurrency is added. */
 static bool PathExists(const char *path) {
   struct stat st;
   return stat(path, &st) == 0;
@@ -1823,6 +1874,368 @@ static bool RunningAsBundle(void) {
         PathExists(probe))
       return true;
   return false;
+}
+
+/* M6 (ar-recomp-threading-impl.md §3, Phase 2 fixed-timestep). Per-tick
+ * input resolution: the debug force-input hooks and the differential-oracle
+ * record/replay, both keyed on the game's own $0088 frame counter. Must run
+ * once per EMULATED tick (§3.7) — with the M6 accumulator loop, a single
+ * outer host iteration can run zero, one, or several ticks (catch-up), so
+ * this can no longer live inline before a single RtlRunFrame call. Headless
+ * still calls this exactly once per outer iteration (§3.6 — headless never
+ * runs more than one tick per iteration), so its behavior is unchanged. */
+static uint32 ComputeGameInputs(bool *stop_running) {
+  uint32 inputs = g_input_state;
+  {
+    /* TEMP DEBUG: force a button after N frames to auto-advance the
+     * intro without a real keypress, for headless crash repro. */
+    static const char *force_env;
+    static int force_after = -2;
+    static unsigned force_mask = 0;
+    static int pulse_frames[16]; static int n_pulses = -1;
+    if (force_after == -2) { force_env = getenv("AR_FORCE_INPUT_AFTER");
+      force_after = force_env ? atoi(force_env) : -1;
+      const char *m = getenv("AR_FORCE_INPUT_MASK");
+      force_mask = m ? (unsigned)strtoul(m, NULL, 0) : 0x0001; /* default B */ }
+    if (n_pulses == -1) { n_pulses = 0;
+      /* AR_FORCE_PULSES="150,210,...": press force_mask for 4 frames as an
+       * EDGE (press+release) starting at each listed frame, to drive menus
+       * that need distinct button presses (e.g. B skip-swirl, then B select). */
+      const char *p = getenv("AR_FORCE_PULSES");
+      if (p) for (; *p && n_pulses < 16; ) {
+        pulse_frames[n_pulses++] = atoi(p);
+        while (*p && *p != ',') p++; if (*p == ',') p++; }
+    }
+    extern int snes_frame_counter;
+    if (force_after >= 0 && snes_frame_counter >= force_after) inputs |= force_mask;
+    for (int i = 0; i < n_pulses; i++)
+      if (snes_frame_counter >= pulse_frames[i] && snes_frame_counter < pulse_frames[i] + 4)
+        inputs |= force_mask;
+  }
+  /* Differential-oracle input record/replay, keyed by the GAME's logical
+   * frame counter $7E:0088 (g_ram[0x88], 16-bit) instead of the host frame.
+   * The game-frame advances identically in the recomp and the snes9x oracle
+   * for identical input, so a recording made here replays frame-exact in the
+   * oracle regardless of how many host frames each spent booting (the old
+   * host-frame + offset scheme never aligned because boot timing differs).
+   * SNES 12-bit button layout == libretro JOYPAD id order, so one file drives
+   * both. File format: repeating 8-byte LE records {uint32 gframe; uint32 inputs}.
+   * AR_INPUT_RECORD=path: append one record per host frame.
+   * AR_INPUT_REPLAY=path: override `inputs` with the value recorded for the
+   * current game-frame (last writer wins when a game-frame repeats). */
+  {
+    extern uint8 g_ram[];
+    unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+    static FILE *rec; static int rec_init;
+    static uint32 *rep; static long rep_max = -1; static int rep_init;
+    /* End-of-replay marker: the game-frame of the LAST record (the frame the
+     * user closed the window / pressed ESC on). The recording itself stores
+     * no stop event, so we auto-quit when replay reaches this frame — without
+     * it, replay runs off the end of the recording with empty live input.
+     * rep_started gates the check past the boot frame (gf == 0x5555 fill
+     * before $0088 is initialised inflates the value space). */
+    static long rep_last_gf = -1; static int rep_started = 0;
+    if (!rep_init) { rep_init = 1; const char *p = getenv("AR_INPUT_REPLAY");
+      if (p && p[0]) { FILE *f = fopen(p, "rb");
+        if (f) { fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+          long nrec = n / 8; uint32 *raw = (uint32 *)malloc((size_t)nrec * 8);
+          if (raw && fread(raw, 8, (size_t)nrec, f) == (size_t)nrec) {
+            for (long i = 0; i < nrec; i++) if ((long)raw[i*2] > rep_max) rep_max = (long)raw[i*2];
+            if (nrec > 0) rep_last_gf = (long)raw[(nrec - 1) * 2];
+            if (rep_max >= 0) { rep = (uint32 *)calloc((size_t)rep_max + 1, 4);
+              if (rep) for (long i = 0; i < nrec; i++) rep[raw[i*2]] = raw[i*2+1]; } }
+          free(raw); fclose(f);
+          fprintf(stderr, "[input-replay] %ld records, max gf=%ld last gf=%ld from %s\n",
+                  nrec, rep_max, rep_last_gf, p); } } }
+    if (rep && (long)gf <= rep_max) inputs = rep[gf];
+    /* Auto-stop at the end of the recording. AR_REPLAY_NOSTOP=1 disables
+     * this so replay runs PAST the last recorded game-frame (holding the
+     * last recorded input). Needed to reproduce an in-frame infinite spin:
+     * such a freeze never advances $0088, so it is never recorded — the
+     * recording ends one frame *before* the hang, and the auto-stop would
+     * quit right before the freezing frame executes. */
+    static int nostop = -1;
+    if (nostop < 0) nostop = getenv("AR_REPLAY_NOSTOP") ? 1 : 0;
+    if (rep && rep_last_gf >= 0 && !nostop) {
+      if ((long)gf <= rep_last_gf) rep_started = 1;
+      if (rep_started && (long)gf >= rep_last_gf) {
+        fprintf(stderr, "[input-replay] reached end of recording at gf=%u — stopping\n", gf);
+        *stop_running = true;
+      }
+    }
+    if (rep && nostop && (long)gf > rep_max) inputs = rep_last_gf >= 0 ? rep[rep_last_gf] : 0;
+    if (!rec_init) { rec_init = 1; const char *p = getenv("AR_INPUT_RECORD");
+      if (p && p[0]) { rec = fopen(p, "wb"); fprintf(stderr, "[input-record] -> %s\n", p); } }
+    if (rec) { uint32 v[2] = { (uint32)gf, (uint32)inputs }; fwrite(v, 4, 2, rec); fflush(rec); }
+    /* AR_GFLOG=1: log (host_frame, gf) every N host frames to compare
+     * $0088 advance rate vs the oracle. */
+    if (getenv("AR_GFLOG")) {
+      extern int snes_frame_counter;
+      if ((snes_frame_counter % 100) == 0)
+        fprintf(stderr, "[gflog] host=%d gf=%u\n", snes_frame_counter, gf);
+    }
+    /* Report the first action-region entry game-frame. */
+    { static int seen_act = 0;
+      if (!seen_act && g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
+        seen_act = 1;
+        fprintf(stderr, "[act-enter] $18=%02X $19=%02X at game-frame %u\n",
+                g_ram[0x18], g_ram[0x19], gf); } }
+  }
+  return inputs;
+}
+
+/* One emulated tick: sample input, run the recompiled game logic, apply
+ * turbo's extra same-input sub-frames (§3.2 — unchanged mechanism, just
+ * relocated so it fires once per emulated tick instead of once per outer
+ * host iteration), and the AR_PERF/AR_APUPROF instrumentation that measures
+ * it (§3.5 — "wrap the per-tick RtlRunFrame"). Called once per outer
+ * iteration by the headless loop (§3.6) and 0-N times per outer iteration by
+ * the non-headless fixed-timestep accumulator loop (§3.1). */
+static void RunOneEmulatedTick(bool *stop_running) {
+  extern uint8 g_ram[];
+  static int perf_on = -1;
+  if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
+  uint32 perf_t0 = perf_on ? SDL_GetTicks() : 0;
+  /* AR_APUPROF=<ms>: per-frame APU-stall attribution. Any game frame whose
+   * wall time reaches the threshold (default 8 ms; the flag value overrides
+   * when >= 2) prints one [apuprof] line splitting the frame into lock-wait
+   * vs SPC catch-up vs handshake-spin vs upload vs music-hook time. */
+  static int apuprof_ms = -2;
+  if (apuprof_ms == -2) {
+    extern int ApuProfEnabled(void);
+    apuprof_ms = ApuProfEnabled() ? atoi(getenv("AR_APUPROF")) : -1;
+    if (apuprof_ms >= 0 && apuprof_ms < 2) apuprof_ms = 8;
+  }
+  uint64_t apuprof_t0 = 0;
+  unsigned long apuprof_push0 = 0;
+  uint64_t apuprof_loop0 = 0;
+  if (apuprof_ms > 0) {
+    extern void ApuProfFrameReset(void);
+    extern uint64_t audio_trace_wall_ns(void);
+    extern unsigned long g_recomp_push_count;
+    extern uint64_t g_watchdog_loop_headers;
+    ApuProfFrameReset();
+    apuprof_push0 = g_recomp_push_count;
+    apuprof_loop0 = g_watchdog_loop_headers;
+    apuprof_t0 = audio_trace_wall_ns();
+  }
+
+  uint32 inputs = ComputeGameInputs(stop_running);
+
+  /* No frame-wide APU lock here (removed 2026-07-16). Every APU-touching
+   * path inside the frame takes RtlApuLock itself (RtlApuWrite,
+   * snes_readBBus, ReadRegWord, the SPC upload HLE), and the engine's
+   * audio thread renders in short locked batches precisely so the two
+   * threads interleave. Holding the lock across the whole frame starved
+   * the audio callback during transition frames — a map-load frame runs
+   * 20-55 ms of collapsed multi-hardware-frame work ([apuprof] loops
+   * 25k-75k vs ~3k normal), the callback missed 2-3 fill deadlines, and
+   * every level/song transition audibly dropped out even with 250 ms of
+   * DSP ring buffered. It also pinned scheduled port-write latency at the
+   * produced+3-quanta ceiling (~50 ms) because `produced` could not
+   * advance while the game thread held the lock. */
+  bool r = RtlRunFrame(inputs);
+  (void)r;
+  /* TURBO ('t' toggle): real fast-forward = run extra game frames per
+   * emulated TICK (not per rendered/present frame — that decoupling is
+   * M5's job). Same input word each sub-frame (level-held buttons repeat;
+   * fine for skipping sim waits). Cheats/pins apply inside RtlRunFrame, so
+   * they hold during the skipped frames too. */
+  if (g_turbo) {
+    int mult = g_settings.turbo_multiplier;
+    for (int tf = 1; tf < mult; tf++) RtlRunFrame(inputs);
+  }
+  if (apuprof_t0) {
+    extern uint64_t audio_trace_wall_ns(void);
+    extern uint64_t g_apuprof_lockwait_ns, g_apuprof_catchup_ns,
+        g_apuprof_catchup_cyc, g_apuprof_hook_ns, g_apuprof_upload_ns,
+        g_apuprof_sched_lat_max;
+    extern uint32_t g_apuprof_catchup_calls, g_apuprof_port_reads,
+        g_apuprof_port_writes;
+    extern const char *g_apuprof_last_port_func;
+    extern unsigned long g_recomp_push_count;
+    extern uint64_t g_watchdog_loop_headers;
+    extern uint64_t g_apuprof_audiowait_max_ns;
+    uint64_t dt_ns = audio_trace_wall_ns() - apuprof_t0;
+    if (dt_ns >= (uint64_t)apuprof_ms * 1000000u) {
+      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      double audiowait_ms = g_apuprof_audiowait_max_ns / 1e6;
+      g_apuprof_audiowait_max_ns = 0;
+      fprintf(stderr,
+              "[apuprof] gf=%u dt=%.1fms lockwait=%.2fms "
+              "catchup=%.2fms/%llucyc/%uc reads=%u writes=%u "
+              "hook=%.2fms upload=%.2fms schedlat=%llusmp pushes=%lu "
+              "loops=%llu audiowait-max=%.2fms last=%s\n",
+              gf, dt_ns / 1e6, g_apuprof_lockwait_ns / 1e6,
+              g_apuprof_catchup_ns / 1e6,
+              (unsigned long long)g_apuprof_catchup_cyc,
+              g_apuprof_catchup_calls, g_apuprof_port_reads,
+              g_apuprof_port_writes, g_apuprof_hook_ns / 1e6,
+              g_apuprof_upload_ns / 1e6,
+              (unsigned long long)g_apuprof_sched_lat_max,
+              g_recomp_push_count - apuprof_push0,
+              (unsigned long long)(g_watchdog_loop_headers - apuprof_loop0),
+              audiowait_ms,
+              g_apuprof_last_port_func ? g_apuprof_last_port_func : "-");
+    }
+  }
+  if (perf_on) {
+    extern void snes_catchup_stats(uint64_t *calls, uint64_t *cycles);
+    static uint32 win_start, run_ms_sum, run_ms_max; static int win_frames;
+    static uint64_t last_cu_calls, last_cu_cycles; static unsigned last_gf;
+    uint32 t1 = SDL_GetTicks();
+    uint32 dt = t1 - perf_t0;
+    run_ms_sum += dt; if (dt > run_ms_max) run_ms_max = dt;
+    win_frames++;
+    if (!win_start) win_start = t1;
+    if (t1 - win_start >= 1000) {
+      uint64_t cc, cy; snes_catchup_stats(&cc, &cy);
+      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      fprintf(stderr, "[perf] fps=%d run-ms avg=%.1f max=%u gf+=%u "
+              "apu-catchup calls=%llu cyc=%llu $18=%02x\n",
+              win_frames, (double)run_ms_sum / win_frames, run_ms_max,
+              (unsigned)(uint16)(gf - last_gf),
+              (unsigned long long)(cc - last_cu_calls),
+              (unsigned long long)(cy - last_cu_cycles), g_ram[0x18]);
+      last_cu_calls = cc; last_cu_cycles = cy; last_gf = gf;
+      win_start = t1; run_ms_sum = 0; run_ms_max = 0; win_frames = 0;
+    }
+  }
+}
+
+/* Per-outer-iteration draw + present (§3.5 — "PPM screenshot capture" and
+ * the draw step both stay per-outer-iteration, not per-tick: even if the
+ * accumulator ran several catch-up ticks this iteration, we draw/present
+ * only the LAST one's resulting PPU state once). Caller gates this on
+ * "did at least one tick actually run" (headless: always; non-headless:
+ * produced_frame). */
+static void DrawAndPresentFrame(bool headless) {
+  extern uint8 g_ram[];
+  static int perf_on = -1;
+  if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
+
+  WaitForPixelBuffersFree();
+  uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
+  RtlDrawPpuFrame();
+  if (g_diorama_dump_pending) {
+    DumpDioramaLayers();
+    g_diorama_dump_pending = false;
+    if (!g_settings.diorama_mode)
+      RebindPpuOutputSurfaces();
+  }
+  g_paused_redraw_pending = false;
+  if (perf_on) {
+    static uint32 draw_win_start, draw_ms_sum, draw_ms_max;
+    static int draw_win_frames;
+    uint32 now = SDL_GetTicks();
+    uint32 dt = now - perf_draw_t0;
+    draw_ms_sum += dt;
+    if (dt > draw_ms_max) draw_ms_max = dt;
+    draw_win_frames++;
+    if (!draw_win_start) draw_win_start = now;
+    if (now - draw_win_start >= 1000) {
+      fprintf(stderr,
+              "[draw-perf] frames=%d draw-ms avg=%.1f max=%u $18=%02x $19=%02x\n",
+              draw_win_frames, (double)draw_ms_sum / draw_win_frames,
+              draw_ms_max, g_ram[0x18], g_ram[0x19]);
+      draw_win_start = now;
+      draw_ms_sum = 0;
+      draw_ms_max = 0;
+      draw_win_frames = 0;
+    }
+  }
+
+  /* Framebuffer capture to PPM (works headless — g_pixels is always populated).
+   * AR_SHOT_AT_GF=N      : one shot to saves/shot.ppm at game-frame >= N.
+   * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.ppm every N game-frames,
+   *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
+   *   state vs bug state frame by frame. */
+  { unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+    const char *sg = getenv("AR_SHOT_AT_GF");
+    const char *se = getenv("AR_SHOT_EVERY");
+    int want = 0; char fname[320]; fname[0] = 0;
+    static int shot_done = 0;
+    if (sg && sg[0] && !shot_done && gf >= (unsigned)strtoul(sg, NULL, 0)) {
+      shot_done = 1; want = 1; RunDirFile(fname, sizeof(fname), "shot.ppm");
+    } else if (se && se[0]) {
+      unsigned every = (unsigned)strtoul(se, NULL, 0); if (!every) every = 1;
+      const char *sf = getenv("AR_SHOT_FROM"); const char *st = getenv("AR_SHOT_TO");
+      unsigned lo = sf ? (unsigned)strtoul(sf, NULL, 0) : 0;
+      unsigned hi = st ? (unsigned)strtoul(st, NULL, 0) : 0xffffffffu;
+      if (gf >= lo && gf <= hi && (gf % every) == 0) {
+        want = 1; RunDirFile(fname, sizeof(fname), "shot_%u.ppm", gf);
+      }
+    }
+    if (want) {
+      FILE *pf = fopen(fname, "wb");
+      if (pf) {
+        SDL_Point shot_size = WriteFramebufferPpm(pf);
+        fclose(pf);
+        fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d mode=%s\n",
+                fname, gf, shot_size.x, shot_size.y,
+                g_ppu->extraLeftCur, g_ppu->extraRightCur,
+                Settings_DisplayModeName(g_settings.display_mode));
+      }
+    }
+  }
+
+  if (!headless) SubmitFrameToPresent();
+}
+
+/* Per-outer-iteration host-side housekeeping (§3.5): polls / one-shot
+ * triggers that are not coupled to the emulated tick rate. Runs once per
+ * outer iteration regardless of how many ticks the accumulator fired. */
+static void RunOuterIterationHousekeeping(void) {
+  extern uint8 g_ram[];
+  /* Complete the SPC engine's resident uploader once it enters the $CC-wait,
+   * for the case where the CPU's HLEd $9A56 ran before the engine got there
+   * (takes its own APU lock — must be outside the lock above). */
+  { extern void ar_uploader_complete_tick(void); ar_uploader_complete_tick(); }
+
+  /* Music replacement live policy (setting toggled off mid-song). Takes
+   * its own APU lock — also outside the lock above. */
+  MusicReplacements_FrameTick();
+
+  /* AR_WARP_AT=<gameframe>: fire the AR_WARP target automatically once the
+   * 16-bit game-frame counter reaches the value. Headless runs can't press
+   * F6; used e.g. to sweep the warp table capturing each level's music src
+   * (AR_MUSICLOG). Same transition-capable-state caveats as F6. */
+  {
+    static long warp_at = -2;
+    static bool warp_fired;
+    if (warp_at == -2) {
+      const char *at = getenv("AR_WARP_AT");
+      warp_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
+    }
+    if (warp_at >= 0 && !warp_fired) {
+      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      if (gf >= (unsigned)warp_at) {
+        warp_fired = true;
+        PerformWarp();
+      }
+    }
+  }
+
+  Diorama_FlushSettingsIfDirty();
+
+  /* Auto-persist battery SRAM the moment the game writes a save, so progress
+   * survives a freeze/force-quit (the clean-exit save-system write never runs
+   * if the game hangs). Cheap: only writes when the 8KB SRAM actually changes.
+   * SKIPPED during input replay: a replay is keyed on the game-frame counter
+   * from a fixed boot state, so letting the replayed run overwrite save.srm
+   * mid-playthrough would change the boot state for the NEXT replay and break
+   * the frame alignment (the recording then no longer reaches the same spot). */
+  if (!getenv("AR_INPUT_REPLAY")) {
+    static bool write_error_reported;
+    SaveError error = {{0}};
+    if (!SaveSystem_AutoPersistIfChanged(&error)) {
+      if (!write_error_reported)
+        fprintf(stderr, "[saves] auto-persist failed: %s\n", error.message);
+      write_error_reported = true;
+    } else {
+      write_error_reported = false;
+    }
+  }
 }
 
 int main(int argc, char **argv) {
@@ -2001,9 +2414,35 @@ int main(int argc, char **argv) {
 
     /* SDL3 renderer creation takes a driver NAME (NULL = first available
      * accelerated backend) instead of an index + flag bitmask. Vsync is set
-     * separately, and the software backend is selected by name. */
-    g_renderer = SDL_CreateRenderer(g_window,
-      headless_video ? SDL_SOFTWARE_RENDERER : NULL);
+     * separately, and the software backend is selected by name.
+     *
+     * M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish):
+     * AR_GPU_SHADERS=1 requests the "gpu" backend instead, which is a
+     * prerequisite for SDL_CreateGPURenderState/SDL_SetGPURenderState (used
+     * by the diorama shader effects below — each still independently gated
+     * off by default). Off by default: this swaps the render backend for
+     * the WHOLE app (HUD, flat mode, screenshots, settings overlay), not
+     * just diorama, so it needs to earn trust on its own before any shader
+     * effect is layered on top. Falls back to the normal auto-selected
+     * backend if "gpu" isn't available, rather than dying — this is
+     * opt-in polish, not a requirement to run at all. */
+    { const char *e = getenv("AR_GPU_SHADERS");
+      g_gpu_shaders_requested = (e && e[0] && e[0] != '0') ? 1 : 0; }
+    if (headless_video) {
+      g_renderer = SDL_CreateRenderer(g_window, SDL_SOFTWARE_RENDERER);
+    } else if (g_gpu_shaders_requested) {
+      g_renderer = SDL_CreateRenderer(g_window, SDL_GPU_RENDERER);
+      if (g_renderer) {
+        g_gpu_shaders_active = true;
+      } else {
+        fprintf(stderr, "[gpu-shaders] \"gpu\" renderer unavailable (%s) — "
+                "falling back to the default backend, shaders disabled\n",
+                SDL_GetError());
+        g_renderer = SDL_CreateRenderer(g_window, NULL);
+      }
+    } else {
+      g_renderer = SDL_CreateRenderer(g_window, NULL);
+    }
     if (!g_renderer) Die("SDL_CreateRenderer failed");
     if (!headless_video)
       SDL_SetRenderVSync(g_renderer, 1);
@@ -2055,6 +2494,21 @@ int main(int argc, char **argv) {
 
     LoadHdReplacements();
 
+    /* One streaming texture per diorama plane (priority bands included).
+     * Only the backdrop is opaque — every other plane alpha-blends. */
+    for (int i = 0; i < kDioramaPlane_Count; i++) {
+      if (i == kPpuOverlaySource_Bg4) continue;
+      g_diorama_textures[i] = SDL_CreateTexture(g_renderer,
+          SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+          kPpuBufWidth, g_snes_height);
+      if (g_diorama_textures[i]) {
+        SDL_SetTextureBlendMode(g_diorama_textures[i],
+            i == kDioramaPlane_Backdrop ? SDL_BLENDMODE_NONE
+                                        : SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(g_diorama_textures[i], SDL_SCALEMODE_NEAREST);
+      }
+    }
+
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   }
 
@@ -2064,6 +2518,7 @@ int main(int argc, char **argv) {
 
   Settings_SetChangeObserver(OnRuntimeSettingChanged);
   Settings_SetActionObserver(OnSettingsAction);
+  Diorama_SeedCameraFromSettings();
 
   /* Music replacement is audio-side and works headless too (unlike the HD
    * manifest load above, which needs the renderer for textures). Same
@@ -2177,8 +2632,42 @@ int main(int argc, char **argv) {
       fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
     } }
 
+  /* M5.3/D9: spawn the present thread only now — after every boot-time
+   * texture creation (base/HUD/diorama textures, the settings-overlay font
+   * atlas) has already happened above, and only when there's a renderer to
+   * own (video && !headless — §2.7: headless skips the present thread
+   * entirely; SubmitFrameToPresent's synchronous fallback still fills
+   * g_pixels for PPM captures via AR_HEADLESS_VIDEO). */
+  if (video && !headless) {
+    g_present_mutex = SDL_CreateMutex();
+    g_present_ready_cond = SDL_CreateCondition();
+    g_present_done_cond = SDL_CreateCondition();
+    if (g_present_mutex && g_present_ready_cond && g_present_done_cond) {
+      g_present_running = true;
+      g_present_thread = SDL_CreateThread(PresentThreadFn, "present", NULL);
+      if (g_present_thread) {
+        g_present_thread_active = true;
+      } else {
+        fprintf(stderr, "[present] SDL_CreateThread failed: %s — "
+                "falling back to synchronous present\n", SDL_GetError());
+        g_present_running = false;
+      }
+    } else {
+      fprintf(stderr, "[present] mutex/condition creation failed: %s — "
+              "falling back to synchronous present\n", SDL_GetError());
+    }
+  }
+
   bool running = true;
-  uint32 last_tick = SDL_GetTicks();
+  uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
+
+  /* M6/§3.1,§3.3: fixed-timestep accumulator, non-headless only. NTSC rate:
+   * 262 scanlines * 1364 master-clock dots / 21.477272 MHz = 60.0988 fps, NOT
+   * 60.00 — using 60.00 causes audible audio drift over a long session. */
+  static const uint64_t kFrameNs = 16639267;  /* floor(1e9 / 60.0988) */
+  static const int kMaxCatchupFrames = 3;     /* spiral-of-death cap, §3.1 */
+  uint64_t accumulator = 0;
+  uint64_t last_time_ns = SDL_GetTicksNS();
 
   while (running) {
     SDL_Event event;
@@ -2277,6 +2766,47 @@ int main(int argc, char **argv) {
             /* If F9 and F2 were queued in the same paused host iteration,
              * render the new preset before capturing it. */
             TakeFullSnapshot();
+          } else if (event.key.key == SDLK_D && !event.key.repeat) {
+            if (event.key.mod & SDL_KMOD_SHIFT) {
+              extern uint8 g_ram[0x20000];
+              if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+                fprintf(stderr, "[diorama] layer dump requires an action stage "
+                        "($18=%02x)\n", g_ram[kActRaiserWram_MapGroup]);
+              } else {
+                g_diorama_dump_pending = true;
+                fprintf(stderr, "[diorama] layer capture armed for next frame\n");
+              }
+            } else {
+              /* Route through the descriptor so the hotkey, the menu, and
+               * settings.ini stay one path — the change callback does the
+               * geometry rebind. */
+              const SettingDesc *mode = Settings_Find("diorama_mode");
+              if (mode && !Settings_IsAvailable(mode)) {
+                fprintf(stderr, "[diorama] requires the new renderer\n");
+              } else if (mode) {
+                Settings_SetLong(mode, !g_settings.diorama_mode);
+                fprintf(stderr, "[diorama] %s\n",
+                        g_settings.diorama_mode ? "ON" : "OFF");
+              }
+            }
+          } else if (g_settings.diorama_mode && !event.key.repeat &&
+                     event.key.key >= SDLK_1 && event.key.key <= SDLK_5) {
+            /* Layer visibility hotkeys, gated behind diorama so the digits
+             * stay free otherwise. Order matches the on-screen back-to-front
+             * stack: 1 backdrop, 2 BG2, 3 BG1, 4 sprites, 5 HUD. */
+            static const char *const kLayerKeys[] = {
+              "diorama_layer_backdrop", "diorama_layer_bg2",
+              "diorama_layer_bg1", "diorama_layer_obj", "diorama_layer_bg3",
+            };
+            int index = event.key.key - SDLK_1;
+            const SettingDesc *row = Settings_Find(kLayerKeys[index]);
+            long value = 0;
+            if (row && Settings_GetLong(row, &value)) {
+              Settings_SetLong(row, !value);
+              fprintf(stderr, "[diorama] %s %s\n", row->label,
+                      value ? "hidden" : "shown");
+              g_paused_redraw_pending = true;
+            }
           } else {
             HandleInput(event.key.key, true);
           }
@@ -2286,7 +2816,15 @@ int main(int argc, char **argv) {
             (void)SettingsOverlay_HandleText(event.text.text);
           break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
-          if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
+          /* Diorama owns right-drag (orbit) and middle-click (reset) while it
+           * is on screen; §8.7 disables click-inspect in diorama for v1
+           * because the flat hit-testing does not follow the tilted planes. */
+          if (!SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame()) {
+            if (event.button.button == SDL_BUTTON_RIGHT)
+              Diorama_SetDragging(true);
+            else if (event.button.button == SDL_BUTTON_MIDDLE)
+              Diorama_ResetCamera();
+          } else if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
               CloseSceneInspectorSelection();
             } else if (event.button.button == SDL_BUTTON_LEFT) {
@@ -2304,14 +2842,26 @@ int main(int argc, char **argv) {
           }
           break;
         case SDL_EVENT_MOUSE_MOTION:
-          if (SettingsOverlay_IsDebugPanelDragging()) {
+          if (Diorama_IsDragging() && Diorama_IsActiveThisFrame()) {
+            Diorama_AdjustCamera(event.motion.xrel * Diorama_DragRadPerPx(),
+                                 event.motion.yrel * Diorama_DragRadPerPx(),
+                                 0.0f);
+          } else if (SettingsOverlay_IsDebugPanelDragging()) {
             int output_x = 0, output_y = 0;
             if (WindowPointToOutput((int)event.motion.x, (int)event.motion.y,
                                     &output_x, &output_y))
               SettingsOverlay_DragDebugPanel(output_x, output_y);
           }
           break;
+        case SDL_EVENT_MOUSE_WHEEL:
+          /* Wheel up zooms in, i.e. decreases the camera distance. */
+          if (!SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame())
+            Diorama_AdjustCamera(0.0f, 0.0f,
+                                 -event.wheel.y * Diorama_ZoomStep());
+          break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
+          if (event.button.button == SDL_BUTTON_RIGHT)
+            Diorama_SetDragging(false);
           if (event.button.button == SDL_BUTTON_LEFT)
             SettingsOverlay_EndDebugPanelDrag();
           break;
@@ -2337,335 +2887,34 @@ int main(int argc, char **argv) {
         g_paused || SettingsOverlay_IsOpen());
 
     if (g_paused || SettingsOverlay_IsOpen()) {
-      RedrawPausedFrameIfNeeded();
-      if (!headless) PresentFramebuffer();
+      /* §3.4: don't accumulate wall-clock time spent paused — otherwise
+       * unpausing would fire a burst of catch-up ticks. last_time_ns is
+       * re-stamped every paused iteration below, so it's always "just now"
+       * by the time the game actually unpauses. */
+      accumulator = 0;
+      bool redrew = RedrawPausedFrameIfNeeded();
+      /* §2.5: with a present thread running, it re-presents the last slot
+       * on its own ~16ms idle timeout — only submit here when something
+       * actually changed. Without one (headless-with-video / thread
+       * creation failed), keep the old unconditional re-present. */
+      if (!headless && (redrew || !g_present_thread_active))
+        SubmitFrameToPresent();
       SDL_Delay(16);
+      last_time_ns = SDL_GetTicksNS();
       continue;
     }
 
-    uint32 inputs = g_input_state;
-    {
-      /* TEMP DEBUG: force a button after N frames to auto-advance the
-       * intro without a real keypress, for headless crash repro. */
-      static const char *force_env;
-      static int force_after = -2;
-      static unsigned force_mask = 0;
-      static int pulse_frames[16]; static int n_pulses = -1;
-      if (force_after == -2) { force_env = getenv("AR_FORCE_INPUT_AFTER");
-        force_after = force_env ? atoi(force_env) : -1;
-        const char *m = getenv("AR_FORCE_INPUT_MASK");
-        force_mask = m ? (unsigned)strtoul(m, NULL, 0) : 0x0001; /* default B */ }
-      if (n_pulses == -1) { n_pulses = 0;
-        /* AR_FORCE_PULSES="150,210,...": press force_mask for 4 frames as an
-         * EDGE (press+release) starting at each listed frame, to drive menus
-         * that need distinct button presses (e.g. B skip-swirl, then B select). */
-        const char *p = getenv("AR_FORCE_PULSES");
-        if (p) for (; *p && n_pulses < 16; ) {
-          pulse_frames[n_pulses++] = atoi(p);
-          while (*p && *p != ',') p++; if (*p == ',') p++; }
-      }
-      extern int snes_frame_counter;
-      if (force_after >= 0 && snes_frame_counter >= force_after) inputs |= force_mask;
-      for (int i = 0; i < n_pulses; i++)
-        if (snes_frame_counter >= pulse_frames[i] && snes_frame_counter < pulse_frames[i] + 4)
-          inputs |= force_mask;
-    }
-    /* Differential-oracle input record/replay, keyed by the GAME's logical
-     * frame counter $7E:0088 (g_ram[0x88], 16-bit) instead of the host frame.
-     * The game-frame advances identically in the recomp and the snes9x oracle
-     * for identical input, so a recording made here replays frame-exact in the
-     * oracle regardless of how many host frames each spent booting (the old
-     * host-frame + offset scheme never aligned because boot timing differs).
-     * SNES 12-bit button layout == libretro JOYPAD id order, so one file drives
-     * both. File format: repeating 8-byte LE records {uint32 gframe; uint32 inputs}.
-     * AR_INPUT_RECORD=path: append one record per host frame.
-     * AR_INPUT_REPLAY=path: override `inputs` with the value recorded for the
-     * current game-frame (last writer wins when a game-frame repeats). */
-    {
-      extern uint8 g_ram[];
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-      static FILE *rec; static int rec_init;
-      static uint32 *rep; static long rep_max = -1; static int rep_init;
-      /* End-of-replay marker: the game-frame of the LAST record (the frame the
-       * user closed the window / pressed ESC on). The recording itself stores
-       * no stop event, so we auto-quit when replay reaches this frame — without
-       * it, replay runs off the end of the recording with empty live input.
-       * rep_started gates the check past the boot frame (gf == 0x5555 fill
-       * before $0088 is initialised inflates the value space). */
-      static long rep_last_gf = -1; static int rep_started = 0;
-      if (!rep_init) { rep_init = 1; const char *p = getenv("AR_INPUT_REPLAY");
-        if (p && p[0]) { FILE *f = fopen(p, "rb");
-          if (f) { fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-            long nrec = n / 8; uint32 *raw = (uint32 *)malloc((size_t)nrec * 8);
-            if (raw && fread(raw, 8, (size_t)nrec, f) == (size_t)nrec) {
-              for (long i = 0; i < nrec; i++) if ((long)raw[i*2] > rep_max) rep_max = (long)raw[i*2];
-              if (nrec > 0) rep_last_gf = (long)raw[(nrec - 1) * 2];
-              if (rep_max >= 0) { rep = (uint32 *)calloc((size_t)rep_max + 1, 4);
-                if (rep) for (long i = 0; i < nrec; i++) rep[raw[i*2]] = raw[i*2+1]; } }
-            free(raw); fclose(f);
-            fprintf(stderr, "[input-replay] %ld records, max gf=%ld last gf=%ld from %s\n",
-                    nrec, rep_max, rep_last_gf, p); } } }
-      if (rep && (long)gf <= rep_max) inputs = rep[gf];
-      /* Auto-stop at the end of the recording. AR_REPLAY_NOSTOP=1 disables
-       * this so replay runs PAST the last recorded game-frame (holding the
-       * last recorded input). Needed to reproduce an in-frame infinite spin:
-       * such a freeze never advances $0088, so it is never recorded — the
-       * recording ends one frame *before* the hang, and the auto-stop would
-       * quit right before the freezing frame executes. */
-      static int nostop = -1;
-      if (nostop < 0) nostop = getenv("AR_REPLAY_NOSTOP") ? 1 : 0;
-      if (rep && rep_last_gf >= 0 && !nostop) {
-        if ((long)gf <= rep_last_gf) rep_started = 1;
-        if (rep_started && (long)gf >= rep_last_gf) {
-          fprintf(stderr, "[input-replay] reached end of recording at gf=%u — stopping\n", gf);
-          running = false;
-        }
-      }
-      if (rep && nostop && (long)gf > rep_max) inputs = rep_last_gf >= 0 ? rep[rep_last_gf] : 0;
-      if (!rec_init) { rec_init = 1; const char *p = getenv("AR_INPUT_RECORD");
-        if (p && p[0]) { rec = fopen(p, "wb"); fprintf(stderr, "[input-record] -> %s\n", p); } }
-      if (rec) { uint32 v[2] = { (uint32)gf, (uint32)inputs }; fwrite(v, 4, 2, rec); fflush(rec); }
-      /* AR_GFLOG=1: log (host_frame, gf) every N host frames to compare
-       * $0088 advance rate vs the oracle. */
-      if (getenv("AR_GFLOG")) {
-        extern int snes_frame_counter;
-        if ((snes_frame_counter % 100) == 0)
-          fprintf(stderr, "[gflog] host=%d gf=%u\n", snes_frame_counter, gf);
-      }
-      /* Report the first action-region entry game-frame. */
-      { static int seen_act = 0;
-        if (!seen_act && g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
-          seen_act = 1;
-          fprintf(stderr, "[act-enter] $18=%02X $19=%02X at game-frame %u\n",
-                  g_ram[0x18], g_ram[0x19], gf); } }
-    }
     ApplyScheduledSettingChange();
 
-    /* AR_PERF=1: once-per-second frame-time budget lines. Separates the two
-     * "it feels slow" classes in one run: host-bound (fps < 60; inspect both
-     * run-ms here and draw-ms below) vs. pacing (fps=60, both budgets tiny, but
-     * on-screen action crawls because logical updates span extra host frames;
-     * see the $4210 3-read-wait class). An APU-port spin cycling the SPC under
-     * the lock appears here as run-ms plus a large apu-catchup delta; host
-     * widescreen/compositor work appears in [draw-perf]. */
-    static int perf_on = -1;
-    if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
-    uint32 perf_t0 = perf_on ? SDL_GetTicks() : 0;
-    /* AR_APUPROF=<ms>: per-frame APU-stall attribution. Any game frame whose
-     * wall time reaches the threshold (default 8 ms; the flag value overrides
-     * when >= 2) prints one [apuprof] line splitting the frame into lock-wait
-     * vs SPC catch-up vs handshake-spin vs upload vs music-hook time. */
-    static int apuprof_ms = -2;
-    if (apuprof_ms == -2) {
-      extern int ApuProfEnabled(void);
-      apuprof_ms = ApuProfEnabled() ? atoi(getenv("AR_APUPROF")) : -1;
-      if (apuprof_ms >= 0 && apuprof_ms < 2) apuprof_ms = 8;
-    }
-    uint64_t apuprof_t0 = 0;
-    unsigned long apuprof_push0 = 0;
-    uint64_t apuprof_loop0 = 0;
-    if (apuprof_ms > 0) {
-      extern void ApuProfFrameReset(void);
-      extern uint64_t audio_trace_wall_ns(void);
-      extern unsigned long g_recomp_push_count;
-      extern uint64_t g_watchdog_loop_headers;
-      ApuProfFrameReset();
-      apuprof_push0 = g_recomp_push_count;
-      apuprof_loop0 = g_watchdog_loop_headers;
-      apuprof_t0 = audio_trace_wall_ns();
-    }
-    /* No frame-wide APU lock here (removed 2026-07-16). Every APU-touching
-     * path inside the frame takes RtlApuLock itself (RtlApuWrite,
-     * snes_readBBus, ReadRegWord, the SPC upload HLE), and the engine's
-     * audio thread renders in short locked batches precisely so the two
-     * threads interleave. Holding the lock across the whole frame starved
-     * the audio callback during transition frames — a map-load frame runs
-     * 20-55 ms of collapsed multi-hardware-frame work ([apuprof] loops
-     * 25k-75k vs ~3k normal), the callback missed 2-3 fill deadlines, and
-     * every level/song transition audibly dropped out even with 250 ms of
-     * DSP ring buffered. It also pinned scheduled port-write latency at the
-     * produced+3-quanta ceiling (~50 ms) because `produced` could not
-     * advance while the game thread held the lock. */
-    bool r = RtlRunFrame(inputs);
-    (void)r;
-    /* TURBO ('t' toggle): the renderer is created with PRESENTVSYNC, so
-     * RenderPresent blocks at 60Hz regardless of the SDL_Delay skip below —
-     * which made the original turbo a no-op. Real fast-forward = run extra
-     * game frames per RENDERED frame while inside the vsync'd loop. 8x by
-     * default (the registry-backed AR_TURBO_MULT setting overrides). Same input word each sub-frame
-     * (level-held buttons repeat; fine for skipping sim waits). Cheats/pins
-     * apply inside RtlRunFrame, so they hold during the skipped frames too. */
-    if (g_turbo) {
-      int mult = g_settings.turbo_multiplier;
-      for (int tf = 1; tf < mult; tf++) RtlRunFrame(inputs);
-    }
-    if (apuprof_t0) {
-      extern uint64_t audio_trace_wall_ns(void);
-      extern uint64_t g_apuprof_lockwait_ns, g_apuprof_catchup_ns,
-          g_apuprof_catchup_cyc, g_apuprof_hook_ns, g_apuprof_upload_ns,
-          g_apuprof_sched_lat_max;
-      extern uint32_t g_apuprof_catchup_calls, g_apuprof_port_reads,
-          g_apuprof_port_writes;
-      extern const char *g_apuprof_last_port_func;
-      extern unsigned long g_recomp_push_count;
-      extern uint64_t g_watchdog_loop_headers;
-      extern uint64_t g_apuprof_audiowait_max_ns;
-      uint64_t dt_ns = audio_trace_wall_ns() - apuprof_t0;
-      if (dt_ns >= (uint64_t)apuprof_ms * 1000000u) {
-        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-        double audiowait_ms = g_apuprof_audiowait_max_ns / 1e6;
-        g_apuprof_audiowait_max_ns = 0;
-        fprintf(stderr,
-                "[apuprof] gf=%u dt=%.1fms lockwait=%.2fms "
-                "catchup=%.2fms/%llucyc/%uc reads=%u writes=%u "
-                "hook=%.2fms upload=%.2fms schedlat=%llusmp pushes=%lu "
-                "loops=%llu audiowait-max=%.2fms last=%s\n",
-                gf, dt_ns / 1e6, g_apuprof_lockwait_ns / 1e6,
-                g_apuprof_catchup_ns / 1e6,
-                (unsigned long long)g_apuprof_catchup_cyc,
-                g_apuprof_catchup_calls, g_apuprof_port_reads,
-                g_apuprof_port_writes, g_apuprof_hook_ns / 1e6,
-                g_apuprof_upload_ns / 1e6,
-                (unsigned long long)g_apuprof_sched_lat_max,
-                g_recomp_push_count - apuprof_push0,
-                (unsigned long long)(g_watchdog_loop_headers - apuprof_loop0),
-                audiowait_ms,
-                g_apuprof_last_port_func ? g_apuprof_last_port_func : "-");
-      }
-    }
-    if (perf_on) {
-      extern void snes_catchup_stats(uint64_t *calls, uint64_t *cycles);
-      extern uint8 g_ram[];
-      static uint32 win_start, run_ms_sum, run_ms_max; static int win_frames;
-      static uint64_t last_cu_calls, last_cu_cycles; static unsigned last_gf;
-      uint32 t1 = SDL_GetTicks();
-      uint32 dt = t1 - perf_t0;
-      run_ms_sum += dt; if (dt > run_ms_max) run_ms_max = dt;
-      win_frames++;
-      if (!win_start) win_start = t1;
-      if (t1 - win_start >= 1000) {
-        uint64_t cc, cy; snes_catchup_stats(&cc, &cy);
-        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-        fprintf(stderr, "[perf] fps=%d run-ms avg=%.1f max=%u gf+=%u "
-                "apu-catchup calls=%llu cyc=%llu $18=%02x\n",
-                win_frames, (double)run_ms_sum / win_frames, run_ms_max,
-                (unsigned)(uint16)(gf - last_gf),
-                (unsigned long long)(cc - last_cu_calls),
-                (unsigned long long)(cy - last_cu_cycles), g_ram[0x18]);
-        last_cu_calls = cc; last_cu_cycles = cy; last_gf = gf;
-        win_start = t1; run_ms_sum = 0; run_ms_max = 0; win_frames = 0;
-      }
-    }
-    /* Complete the SPC engine's resident uploader once it enters the $CC-wait,
-     * for the case where the CPU's HLEd $9A56 ran before the engine got there
-     * (takes its own APU lock — must be outside the lock above). */
-    { extern void ar_uploader_complete_tick(void); ar_uploader_complete_tick(); }
-
-    /* Music replacement live policy (setting toggled off mid-song). Takes
-     * its own APU lock — also outside the lock above. */
-    MusicReplacements_FrameTick();
-
-    /* AR_WARP_AT=<gameframe>: fire the AR_WARP target automatically once the
-     * 16-bit game-frame counter reaches the value. Headless runs can't press
-     * F6; used e.g. to sweep the warp table capturing each level's music src
-     * (AR_MUSICLOG). Same transition-capable-state caveats as F6. */
-    {
-      static long warp_at = -2;
-      static bool warp_fired;
-      if (warp_at == -2) {
-        const char *at = getenv("AR_WARP_AT");
-        warp_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
-      }
-      if (warp_at >= 0 && !warp_fired) {
-        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-        if (gf >= (unsigned)warp_at) {
-          warp_fired = true;
-          PerformWarp();
-        }
-      }
-    }
-
-    /* Auto-persist battery SRAM the moment the game writes a save, so progress
-     * survives a freeze/force-quit (the clean-exit save-system write never runs
-     * if the game hangs). Cheap: only writes when the 8KB SRAM actually changes.
-     * SKIPPED during input replay: a replay is keyed on the game-frame counter
-     * from a fixed boot state, so letting the replayed run overwrite save.srm
-     * mid-playthrough would change the boot state for the NEXT replay and break
-     * the frame alignment (the recording then no longer reaches the same spot). */
-    if (!getenv("AR_INPUT_REPLAY")) {
-      static bool write_error_reported;
-      SaveError error = {{0}};
-      if (!SaveSystem_AutoPersistIfChanged(&error)) {
-        if (!write_error_reported)
-          fprintf(stderr, "[saves] auto-persist failed: %s\n", error.message);
-        write_error_reported = true;
-      } else {
-        write_error_reported = false;
-      }
-    }
-
-    uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
-    RtlDrawPpuFrame();
-    g_paused_redraw_pending = false;
-    if (perf_on) {
-      static uint32 draw_win_start, draw_ms_sum, draw_ms_max;
-      static int draw_win_frames;
-      uint32 now = SDL_GetTicks();
-      uint32 dt = now - perf_draw_t0;
-      draw_ms_sum += dt;
-      if (dt > draw_ms_max) draw_ms_max = dt;
-      draw_win_frames++;
-      if (!draw_win_start) draw_win_start = now;
-      if (now - draw_win_start >= 1000) {
-        fprintf(stderr,
-                "[draw-perf] frames=%d draw-ms avg=%.1f max=%u $18=%02x $19=%02x\n",
-                draw_win_frames, (double)draw_ms_sum / draw_win_frames,
-                draw_ms_max, g_ram[0x18], g_ram[0x19]);
-        draw_win_start = now;
-        draw_ms_sum = 0;
-        draw_ms_max = 0;
-        draw_win_frames = 0;
-      }
-    }
-
-    /* Framebuffer capture to PPM (works headless — g_pixels is always populated).
-     * AR_SHOT_AT_GF=N      : one shot to saves/shot.ppm at game-frame >= N.
-     * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.ppm every N game-frames,
-     *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
-     *   state vs bug state frame by frame. */
-    { extern uint8 g_ram[];
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-      const char *sg = getenv("AR_SHOT_AT_GF");
-      const char *se = getenv("AR_SHOT_EVERY");
-      int want = 0; char fname[320]; fname[0] = 0;
-      static int shot_done = 0;
-      if (sg && sg[0] && !shot_done && gf >= (unsigned)strtoul(sg, NULL, 0)) {
-        shot_done = 1; want = 1; RunDirFile(fname, sizeof(fname), "shot.ppm");
-      } else if (se && se[0]) {
-        unsigned every = (unsigned)strtoul(se, NULL, 0); if (!every) every = 1;
-        const char *sf = getenv("AR_SHOT_FROM"); const char *st = getenv("AR_SHOT_TO");
-        unsigned lo = sf ? (unsigned)strtoul(sf, NULL, 0) : 0;
-        unsigned hi = st ? (unsigned)strtoul(st, NULL, 0) : 0xffffffffu;
-        if (gf >= lo && gf <= hi && (gf % every) == 0) {
-          want = 1; RunDirFile(fname, sizeof(fname), "shot_%u.ppm", gf);
-        }
-      }
-      if (want) {
-        FILE *pf = fopen(fname, "wb");
-        if (pf) {
-          SDL_Point shot_size = WriteFramebufferPpm(pf);
-          fclose(pf);
-          fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d mode=%s\n",
-                  fname, gf, shot_size.x, shot_size.y,
-                  g_ppu->extraLeftCur, g_ppu->extraRightCur,
-                  Settings_DisplayModeName(g_settings.display_mode));
-        }
-      }
-    }
-
-    if (!headless) PresentFramebuffer();
-
     if (headless) {
+      /* §3.6: headless keeps the OLD model verbatim — uncapped by default,
+       * exactly one tick per outer iteration, no present thread. The
+       * oracle/replay tooling depends on this running as fast as the CPU
+       * allows. */
+      RunOneEmulatedTick(&running);
+      RunOuterIterationHousekeeping();
+      DrawAndPresentFrame(true);
+
       extern int snes_frame_counter;
       static int quit_frames = -2;
       if (quit_frames == -2) { const char *q = getenv("AR_QUIT_FRAMES");
@@ -2683,13 +2932,52 @@ int main(int argc, char **argv) {
         if (elapsed < 16) SDL_Delay(16 - elapsed);
         last_tick = SDL_GetTicks();
       }
-    } else if (!g_turbo) {
-      uint32 now = SDL_GetTicks();
-      uint32 elapsed = now - last_tick;
-      if (elapsed < 16)
-        SDL_Delay(16 - elapsed);
-      last_tick = SDL_GetTicks();
+      continue;
     }
+
+    /* M6/§3.1: fixed-timestep accumulator (non-headless only). The game
+     * thread is no longer paced by SDL_Delay(16) here — the present thread
+     * (M5) owns the vsync wait, and this wall-clock accumulator owns the
+     * emulated tick rate, decoupled from the display refresh rate. */
+    {
+      uint64_t now_ns = SDL_GetTicksNS();
+      uint64_t dt = now_ns - last_time_ns;
+      last_time_ns = now_ns;
+      accumulator += dt;
+      if (accumulator > kFrameNs * (uint64_t)kMaxCatchupFrames)
+        accumulator = kFrameNs * (uint64_t)kMaxCatchupFrames;
+
+      bool produced_frame = false;
+      while (accumulator >= kFrameNs) {
+        RunOneEmulatedTick(&running);
+        accumulator -= kFrameNs;
+        produced_frame = true;
+      }
+
+      RunOuterIterationHousekeeping();
+
+      if (produced_frame) {
+        DrawAndPresentFrame(false);
+      } else {
+        SDL_Delay(1);
+      }
+    }
+  }
+
+  /* D10: join the present thread immediately after the main loop, BEFORE any
+   * teardown touches the renderer/textures/font atlas it may still be
+   * reading (SettingsOverlay_Destroy + the DestroyTexture block below run
+   * well before SDL_DestroyRenderer — joining first is the only ordering
+   * that's safe). */
+  if (g_present_thread) {
+    SDL_LockMutex(g_present_mutex);
+    g_present_running = false;
+    g_present_quiesce_requested = false;
+    SDL_SignalCondition(g_present_ready_cond);
+    SDL_SignalCondition(g_present_done_cond);
+    SDL_UnlockMutex(g_present_mutex);
+    SDL_WaitThread(g_present_thread, NULL);
+    g_present_thread_active = false;
   }
 
   /* Flush only game-originated battery changes on exit. Deliberate

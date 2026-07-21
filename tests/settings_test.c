@@ -8,7 +8,10 @@
 
 bool g_ws_active;
 int g_ws_extra;
+int g_ws_display_extra;
 uint8 g_ram[0x20000];
+/* Host-side diorama geometry rebind; no renderer in this harness. */
+void Diorama_OnModeChanged(void) {}
 
 static int s_failures;
 static int s_observer_calls;
@@ -49,10 +52,10 @@ static void TestDefaultsAndMetadata(void) {
   ClearSettingsEnv();
   memset(g_ram, 0, sizeof(g_ram));
   g_ws_active = true;
-  g_ws_extra = 43;
+  g_ws_extra = g_ws_display_extra = 43;
   Settings_Init();
 
-  CHECK(g_setting_desc_count == 101);
+  CHECK(g_setting_desc_count == 113);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -258,7 +261,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   setenv("AR_AUDIO_VOLUME", "85", 1);
   setenv("AR_WS_SPRITES", "0", 1);
   g_ws_active = true;
-  g_ws_extra = 52;
+  g_ws_extra = g_ws_display_extra = 52;
   Settings_InitWithFile(settings_path);
   Settings_FinalizeDisplayMode();
 
@@ -303,7 +306,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   ClearSettingsEnv();
   setenv("AR_FULLSCREEN", "false", 1);
   g_ws_active = true;
-  g_ws_extra = 52;
+  g_ws_extra = g_ws_display_extra = 52;
   Settings_InitWithFile(saved_path);
   Settings_FinalizeDisplayMode();
   CHECK(g_settings.window_scale == 6);
@@ -333,7 +336,7 @@ static void TestLegacySeedEncodings(void) {
   setenv("AR_TURBO_MULT", "1", 1);
   setenv("AR_WARP", "0605", 1);
   g_ws_active = true;
-  g_ws_extra = 43;
+  g_ws_extra = g_ws_display_extra = 43;
   Settings_Init();
 
   CHECK(g_settings.cheat_inf_mp == 10);
@@ -360,7 +363,7 @@ static void TestLegacySeedEncodings(void) {
 static void TestMutationApi(void) {
   ClearSettingsEnv();
   g_ws_active = true;
-  g_ws_extra = 43;
+  g_ws_extra = g_ws_display_extra = 43;
   Settings_Init();
   Settings_SetChangeObserver(ChangeObserved);
   s_observer_calls = 0;
@@ -548,7 +551,7 @@ static void TestCheatsCanBeStagedOutsideTheirRuntimeMode(void) {
   ClearSettingsEnv();
   memset(g_ram, 0, sizeof(g_ram));
   g_ws_active = true;
-  g_ws_extra = 43;
+  g_ws_extra = g_ws_display_extra = 43;
   Settings_Init();
 
   /* $18=00 is the simulation/title/UI family. Action-only effects must remain
@@ -584,7 +587,7 @@ static void TestNoWideBudget(void) {
   ClearSettingsEnv();
   setenv("AR_DISPLAY_MODE", "2", 1);
   g_ws_active = false;
-  g_ws_extra = 0;
+  g_ws_extra = g_ws_display_extra = 0;
   Settings_Init();
   CHECK(g_settings.display_mode == kDisplayMode_43);
   CHECK(Settings_SetLong(Settings_Find("display_mode"),

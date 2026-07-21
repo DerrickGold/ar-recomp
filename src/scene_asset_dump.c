@@ -98,8 +98,8 @@ static bool WriteChunk(FILE *file, const char type[4],
 /* PNG's IDAT payload is a zlib stream. Stored DEFLATE blocks keep this tiny
  * writer dependency-free and lossless; asset dumps favor exactness and
  * portability over compression ratio. */
-static bool WritePng(const char *path, const uint8_t *rgba,
-                     int width, int height) {
+bool WritePng(const char *path, const uint8_t *rgba,
+              int width, int height) {
   if (!path || !rgba || width <= 0 || height <= 0) return false;
   size_t stride = (size_t)width * kRgbaChannels;
   if (stride / kRgbaChannels != (size_t)width) return false;

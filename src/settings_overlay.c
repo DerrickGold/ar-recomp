@@ -146,6 +146,7 @@ static const uint8_t kFallbackFont[128][7] = {
 
 static const SettingCategory kCategoryOrder[] = {
   kSettingCat_Display,
+  kSettingCat_Presentation,
   kSettingCat_Audio,
   kSettingCat_Widescreen,
   kSettingCat_Cheats,

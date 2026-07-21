@@ -12,7 +12,10 @@
 
 bool g_ws_active;
 int g_ws_extra;
+int g_ws_display_extra;
 uint8 g_ram[0x20000];
+/* Host-side diorama geometry rebind; no renderer in this harness. */
+void Diorama_OnModeChanged(void) {}
 
 static int s_failures;
 static int s_action_calls;
@@ -83,7 +86,7 @@ int main(void) {
   setenv("SDL_AUDIODRIVER", "dummy", 1);
 
   g_ws_active = true;
-  g_ws_extra = 43;
+  g_ws_extra = g_ws_display_extra = 43;
   Settings_ClearConfigLayer();
   Settings_Init();
   Settings_SetActionObserver(ActionObserved);
@@ -151,6 +154,8 @@ int main(void) {
    * integer editor. Audio starts with Enable audio, then Audio frequency. */
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(SettingsOverlay_IsOpen());
+  /* Presentation sits between Display and Audio in kCategoryOrder. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
