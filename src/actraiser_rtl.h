@@ -6,6 +6,7 @@
 #include "snes/snes_regs.h"
 
 void ActRaiserDrawPpuFrame(void);
+void ActRaiser_RebindPpuOutputSurfaces(void);
 void RunOneFrameOfGame(void);
 int ActRaiser_ReadRdnmi(Snes *snes);
 bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);

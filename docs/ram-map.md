@@ -65,7 +65,10 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 |---------|------|-------------|
 | $7E:06A0-$09FF | 48 × $12 | Fixed-screen/overlay animation records. `$01:ACD9` tests `+10 & $8000`, runs `$01:AC70`, and emits with camera-independent origins. |
 | $7E:0A00+ | 44 × $26 | Town world-object records. Known render fields: `+08` frame-composition pointer, `+0A/+0C` world X/Y, `+10` render status (`$C000` = skip), `+25` delay/timer. `+12` is a behavior dispatch selector outside the OAM leaf. |
-| $7E:0B0A | $26 | Dedicated angel-arrow world record. `$01:B41A` state-dispatches idle/spawn/move through `$B423`; movement `$B44B` applies velocities `+1A/+1C`, and `$B473` returns carry set when the projectile should be released. |
+| $7E:0A00+`+0E` | 2 | World-record **class**, indexing the `$01:B8D0` dispatch: `$0C` angel, `$11` town position controller, `$12` Blue Dragon, `$13` Napper Bat, `$14` Red Demon, `$15` Skull Head. Slots are recycled, so a class can change under a stable composition. |
+| $7E:0A00+`+12` | 2 | Masked `& $7FFF`, the **state** index inside that class's own table. `(class $12, state 6)` is the Blue Dragon's 33-frame building strike. sim3d keys presentation height on the `(class, state)` pair. |
+| $7E:0AE4 | $26 | Angel world record (index 6), class `$0C`. Its class handler `$B904` is a no-op because another subsystem drives it. Identify the angel by this address plus class — the `$A627-$A792` pose compositions are also borrowed by miracle effect records. |
+| $7E:0B0A | $26 | Dedicated angel-arrow world record (index 7). `$01:B41A` state-dispatches idle/spawn/move through `$B423`; movement `$B44B` applies velocities `+1A/+1C`, and `$B473` returns carry set when the projectile should be released. |
 | $7E:0AEE/$0AF0 | 2+2 | Town camera-follow target X/Y read by `$01:B4C6`; camera derives `$22=$0AEE-$80`, `$24=$0AF0-$70` before clamping. |
 | $7F:9752 | 1+ | bit 1 selects town alternate OAM emitter `$01:AE6F` for the world segment. |
 | $7F:9754 | 1+ | nonzero reduces the normal 44-record town world scan to one record. |
@@ -83,11 +86,16 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | $7E:00DE-$00E1 | 1+1+1+2 | tile-anim: tick period mask / frame count-1 / frame index / frame stride (bytes); $FF/$FF/-/0 = disabled |
 | $7E:00F1 | 1 | one-shot flag: re-stream BG3 map rows 4-26 ($7F:B100 -> VRAM $5880) next NMI |
 | $7F:B000-$B6BF | 1728 | HUD/BG3 tilemap compose buffer (rows 0-3 streamed every frame to VRAM $5800; rows 4-26 on $F1) |
+| $7F:0000-$1FFF | 8192 | **Full town BG1 tilemap**, the whole 64x64-tile (512x512 pixel) town, not just the on-screen window. Quadrant-paged: `$03:9C43` writes each cell's 2x2 tile block at `quadrant*2048 + (cellY & 15)*128 + (cellX & 15)*4`, four words at `+$00/+$02/+$40/+$42`. Row stride is 32 tiles, quadrant stride 32x32 tiles. A row-major read looks like an unrelated layer — it was mistaken for BG2 twice before `$9C43` was disassembled |
+| $7F:1000-$1FFF | 4096 | (Within the above.) The lower two quadrant pages happen to be the range the graphics orchestrator streams to VRAM; SEAMS' "BG tilemap → VRAM" row describes that upload, not a separate buffer |
+| $7F:2000-$23FF | 1024 | **Town terrain cell map**, 32x32 cells, quadrant-paged as four 16x16 pages at +0/+256/+512/+768. Cell values are metatile indices expanded through `$7E:3100` into the tilemap above; structure records' `+0/+1` cell X/Y address this grid. Initial contents are copied from ROM `$0A:8000 + (town-1)*$400`, uncompressed. Not reloaded on every town entry — five separate town visits were observed still holding Fillmore's map |
+| $7E:3100+ | 2048 | Metatile table: 8 bytes (four BG1 tilemap words) per metatile index, consumed by `$03:9C43`. Note the cell value is **not** a direct index — expansion is a write path the game runs on change, and cell → 2x2 block is only ~62-77% single-valued when inverted, so read `$7F:0000` rather than trying to rebuild it |
 | $7F:B800+ | var | Tile-animation frame buffers. Action mode and sim towns (`$18=0`, `$19!=0,9`) use these through `$02:AF30`; `$02:BAF5` captures sim-town pages `$B800/$B900/$BA00/$BB00`. Only the separate sim `$19=0 or 9` branch uses ROM bank `$0A` directly through `$02:AF86`. |
 
 ### Mode 7 / World Map
 | Address | Size | Description |
 |---------|------|-------------|
+| $7E:C000-$FFFF | 16384 | **Live Mode-7 world-map tilemap shadow**, row-major 128x128, one byte per tile (row `y` at `$C000 + y*128`). Matches the Mode-7 VRAM byte-for-byte while `$19=09` is displayed, and survives coherently inside a simulation town, which is what lets the 3D town view draw neighbouring regions at their current development state. Rows 0-7 hold unrelated scratch during town mode. Base data is ROM `$06:B341`; tiles `$0E:8000`, palette `$1C:BF93`, all uncompressed |
 | $7E:0314 | 2 | Map rotation (intro zoom effect) |
 | $7E:0316 | 2 | Current zoom level |
 | $7E:0318 | 2 | Target zoom level |
@@ -211,7 +219,7 @@ see [save-format.md](save-format.md) §3.
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:035A | 1 | Music/event request port: COP vector `$00:8526` stores A's low byte here (`LDA #id; COP`). Consumed by the NMI tail `$02:AC33` every other frame as the LOW byte of one 16-bit load, forwarded to APU port `$2142`, then zeroed (see SEAMS "APU port-0 command protocol") |
-| $7E:035B | 1 | SFX request port: BRK vector `$00:852F` stores A's low byte here (`LDA #id; BRK`). Forwarded as the HIGH byte of the same 16-bit NMI store to APU port `$2143` and zeroed together with `$035A` |
+| $7E:035B | 1 | SFX request port: BRK vector `$00:852F` stores A's low byte here (`LDA #id; BRK`). Forwarded as the HIGH byte of the same 16-bit NMI store to APU port `$2143` and zeroed together with `$035A`. **id `$00` = idle/clear, not a sound** — it is by far the most-written value (754 posts vs 12 key-ons in one session, mostly from `$03:9E6B`), and the NMI forwards zero as "nothing pending". Ids observed in play so far: `$03 $08 $0C $0D $10 $18 $1E $1F $24` (callers + sample/pan per id in [research-symbol-map](research-symbol-map.md#audio-and-spc-transport), captured via `AR_SFXCENSUS=1`) |
 
 ## High RAM ($7F:0000+)
 
@@ -243,6 +251,40 @@ stager) requires all six words == 2 for the all-bosses-done path.
 | $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, bit6 under construction, bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
 | $7F:77E7-$7F:7BE6 | Per-record visual step-machine slots, 128 × 8 bytes (armed by `$03:A4B8`/rebuild `$A4A8`, walked by the `$89F7`/`$8A7E` 8-frame stepper). Completed sidecar bridges bypass this pool: the `$89F0` HLE replays their single native rebuild draw directly |
 | $7F:7BE7 | Step/tick scratch variable (record index during scanner passes) |
+| $7F:7BE9 | Scanner gate: nonzero makes `$03:A4B8` (arm visual step) and `$03:A4F7` early-out |
+
+#### Record `+3` = action/progress byte, and the per-type state machines (mapped 2026-07-22)
+
+Bit 7 is a separate flag; the **low nibble is the action state**. `$03:9F05` writes the low
+nibble (`AND #$70` + ORA — note it also CLEARS bit7); `$03:9EF5` writes bits 4-6 (`AND #$8F`).
+A healthy standing house reads `$80`; `$07` means destroyed-and-pending-free.
+
+Scanners: `$03:9E6B` (houses) and `$03:9DE4` (fields/bridges/factories) process **16 records per
+frame**, slice = `$88 & 7`, so all 128 records every 8 frames; `$03:9E5A` is a full 128-record
+pass. Each dispatches on record `+2 & $0F` (type) to one of 7 outer handlers, which do
+`LDY #<table>; BRL $9ED3`. `$03:9ED3` then indexes the per-type table by the `+3` low nibble and
+RTS-tricks to the handler (see the `rts_dispatch 9EF3` web in `recomp/bank03.cfg`).
+
+House table `$03:A017` (entries store *addr-1*):
+
+| action | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| handler | `$A027` | `$A04C` | `$A050` | `$A05A` | `$A060` | `$A066` | `$A07F` | `$A44F` |
+
+`$03:A44F` (action 7) is the **destroy/remove one-shot**: it arms visual set `$7D1F=$0E`/`$7D21=0`
+via `$A4B8`, calls `$A4F7` and `$9FCD`, then `LDA #$00 / STA $0002,X` — zeroing the flags byte,
+which **frees the slot**. It is unconditional once entered, so a record sitting at `+3` low
+nibble 7 with `+2` still `$80` means the handler was never reached or never completed
+(bug-ledger §22). `$03:A477` is the sibling free handler with the same tail.
+
+To watch record transitions live, trace the array directly (flat offset = `0x10000 + $7Fxxxx`):
+
+```sh
+AR_WRAM_TRACE=structrec.jsonl AR_TRACE_LO=0x16BE7 AR_TRACE_HI=0x16DE6 \
+  ./build-release/ActRaiserRecomp ar.sfc
+```
+
+(that range is town 0 / Fillmore's 128 records; shift by the town's `$03:DC74` base for others.)
 | $7F:7BF9 / $7F:7BFB | Current town id / town id ×2 (index into `$03:DC74`) |
 | $7F:7C05 / $7F:7C07 | Census/scan accumulators (housing cap, support cap; allocator slot index) |
 | $7F:7C11/13/15/17 | Record-scan rectangle X0/Y0/X1/Y1 (cell coords) |

@@ -916,6 +916,432 @@ eliminating two temporary-buffer clears and two priority merges per scanline.
 Direct testing on 2026-07-14 confirmed the full-width effect and normal
 performance.
 
+## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
+
+The enhanced town renderer is designed in `ar-recomp-sim-rendering-plan.md`
+rather than here, because it is a presentation layer built on top of §11's
+Mode-1 pipeline rather than a change to it. What matters when reading this
+document: town simulation is **ordinary PPU Mode 1, not Mode 7**, so the
+projection is a host-side transform of captured Mode-1 planes plus a semantic
+OBJ atlas — the PPU/priority behaviour described above is unchanged, and the
+feature-off path is byte-identical.
+
+One deliberate deviation is worth knowing here, because §11 above would
+otherwise lead you to expect it cannot happen: in the **projected** profile,
+world billboards are painted back-to-front by map row *within* each hardware
+priority band, not in pure OAM order. The bands still own the coarse layering
+and OAM order remains the tiebreak. On the flat screen OAM order alone is
+correct because every sprite shares one plane; once the map is projected, two
+actors on different rows really are at different distances. The flat and
+feature-off paths are untouched.
+
+- Design, phases, and checkpoint results: `ar-recomp-sim-rendering-plan.md`
+- Object height/anchor policy and composition identities:
+  `docs/sim-object-catalog.md`
+- Host seams (classification, height easing, shadow mask, shadow blur, rim
+  light, billboard depth order, tuning handoff, picker build switch, D1 trace):
+  `docs/SEAMS.md` "Sim 3D presentation seams"
+- Player-facing stage toggles and tuning dials: `docs/settings-system.md`
+  "Simulation 3D"
+- Ground extension beyond the captured window (world-map underlay, full-town
+  canvas): §13c below
+
+## 13c. Simulation-town ground extension (2026-07-22)
+
+The 3D town view draws a finite ground quad: the captured screen window,
+projected. Outside it there was nothing, so the frame ended in flat backdrop
+colour. Two layers now extend the ground past that window, both derived from
+data the game already keeps resident.
+
+**The world map underlay.** ActRaiser's Mode-7 world map is three flat
+uncompressed ROM blobs — a 128x128 byte tilemap at `$06:B341`, 256 8bpp tiles
+at `$0E:8000`, and a 256-entry palette at `$1C:BF93` (verified byte-for-byte
+against a live capture: tilemap 16172/16384 and chr 16346/16384 identical, the
+deltas being exactly the runtime edits; palette 512/512 identical). One
+world-map tile covers exactly one town map cell, so the world map is the town
+at **half linear resolution** and each town is a 32x32-tile window of it.
+Established by correlating each town's terrain against the world map over every
+scale and offset: 1:1 wins with a clean unimodal peak, and the per-town origins
+are the world cathedral icon minus the town's own cathedral cell. Every origin
+lands on a multiple of 16 and the six windows tile the map disjointly — no
+other assignment of towns to icons has that property, which is what pins the
+table. Bloodpool and Fillmore share an edge, as do Aitos and Kasandora, so
+standing at one town's border shows the neighbour's real territory.
+
+The underlay tracks live state rather than the ROM baseline: `$7E:C000` holds a
+128x128 shadow of the Mode-7 tilemap which matches VRAM byte-for-byte on the
+world-map screen and stays coherent while a town is active, so cathedrals and
+roads appear as they currently stand. Rows 0-7 of that shadow are scratch
+during town mode and are only adopted from a world-map frame.
+
+**The full-town canvas.** The world map is half resolution, so the town's own
+off-screen territory deserves better. The game keeps the whole town's BG1
+tilemap resident: `$03:9C43` writes each cell's 2x2 tile block at
+`$7F:0000 + quadrant*2048 + (cellY & 15)*128 + (cellX & 15)*4`, four words at
+`+$00/+$02/+$40/+$42`, so the row stride is 32 tiles, the quadrant stride is
+32x32 tiles, and the four quadrant pages are a 64x64-tile — 512x512 pixel — map
+of the entire town. That paging is why a row-major read of the range looks like
+an unrelated layer. The canvas renders it each frame from that tilemap plus
+character data from VRAM `$0000` and CGRAM, re-rendering only when one of those
+actually changes.
+
+An earlier version accumulated captured frames into the same buffer instead.
+It was replaced: accumulation could only ever show ground the camera had
+already passed over, and only as it looked at the time, so construction
+happening off-screen stayed invisible until the camera returned.
+
+**Draw order** is `atmospheric backdrop -> world underlay -> town canvas ->
+town ground quad -> shadows/objects/rim`. The renderer is painter-ordered with
+no depth buffer, so there is no z-fighting; the town's own opaque ground quad
+covers its visible window and the extension supplies everything beyond. The
+canvas is opaque throughout, so it never punches a hole in the underlay
+beneath it.
+
+Sprites are extended separately and only horizontally — see
+`docs/SEAMS.md` "Sim-mode OAM emit margin" for why the vertical direction
+cannot follow.
+
+
+## 13d. Simulation-town cull cues (2026-07-22)
+
+The ground extension created a problem it could not solve. Ground now reaches
+far past the sprite-drawable window, but OAM cannot place an actor out there,
+so the extended ground is permanently empty — and worse, an actor walking
+toward the edge simply stops being drawn while the ground under it is still
+bright, sharp and plainly visible. The cues below exist to make that boundary
+legible. They are presentation only; none of them changes what the emitter
+culls, which is fixed by hardware (see §13c and ledger §25).
+
+### The invariant
+
+**If a record is being taken away by the sprite window, something must be over
+it.** Not "the far field is mostly covered" — per record. That distinction is
+the whole design. An earlier attempt drew a noise field over the far ground and
+tried to make it dense enough that gaps were unlikely; the gaps were what the
+player noticed, because a gap is exactly where a sprite vanishes over clear
+ground. Coverage by probability cannot express a per-record guarantee.
+
+### One boundary, every cue
+
+Everything is driven by one pure function, `Sim3D_CullProximity`, evaluated
+once per vertex and shared by every term that reads it — two terms describing
+the same boundary must not be able to disagree about where it is. It is stated
+in the emitter's own biased coordinates so the cull predicate and the things that
+explain it are the same arithmetic rather than two derivations that agree by
+inspection. `src/actraiser_widescreen_sprites.c` carries `_Static_assert`s
+tying the mirrored window constants to the emitter's.
+
+It returns 0 well inside the window and 1 at the edge, and every cue reads
+it:
+
+1. **Ground fade, and ground dimming.** Two independent terms on the same
+   ramp, and they have to be independent. The *fade* is structural — the town
+   canvas is drawn with per-vertex alpha `1 - proximity * fade`, so
+   out-of-range town ground cross-fades into the world map underlay beneath
+   it. The *dim* is photometric: a per-vertex brightness multiplier applied to
+   every ground draw, canvas and underlay alike.
+
+   They were one control until the sky landed. The underlay's own distance
+   haze blends toward `separated_backdrop_argb`, which used to be flat black
+   and is now a blue gradient, so turning the fade up washed the far field
+   toward grey-blue instead of darkening it. Darkness has to multiply into the
+   colour or the only way to get a dark far field is to pick a dark sky.
+
+   The blurred underlay pass takes the dim but **not** the fade: it is the
+   layer being revealed, so fading it would thin the very thing the canvas
+   hands over to and the far field would go transparent rather than dark.
+
+   The fade's own target brightness is deliberately not a number to be tuned
+   into agreement — it is whatever the underlay happens to be, and
+   cross-fading reaches it by construction. The dim is applied *after* that
+   handover, to both layers equally, which is why it does not reintroduce the
+   problem the very first attempt had: a separate darkening overlay that hazed
+   the underlay a second time on top of `underlay_haze_pct` and took
+   everything outside the town to near black.
+2. **Focus falloff.** A 4x box-downsample of the same world-map bake, upscaled
+   with linear filtering, is drawn first at the haze alpha; the sharp copy goes
+   over it at `1 - proximity * defocus`. Distance haze and defocus therefore
+   arrive on one ramp instead of as two boundaries the eye must reconcile.
+   Blur says "too far to resolve" in a way dimming cannot.
+3. **Cloud shroud.** Three noise banks at different scales, drifting at
+   different rates so the field churns rather than sliding across as one
+   image, lifted above the ground plane so a bank passes over a tree instead of
+   lying across it.
+4. **Per-record cover.** The guarantee itself. See below.
+
+### Cull evidence
+
+`SimSourceRecord` carries `anchor_x/anchor_y` — the emitter's own biased
+composition origin, handed over rather than re-derived — plus `clipped_parts`
+and `clip_reason`. The emitter reports at the two branches that previously just
+parked an OAM slot at `$E000` and dropped the fact.
+
+`Sim3D_SourceCullCover` gates eligibility. Only the sprite window may create
+cover: a record that emitted nothing *and* was never clipped is the game
+declining to draw it, and covering that would assert something false about the
+world. Fixed-tier furniture is screen space and never qualifies.
+
+### Two questions, not one
+
+Cover timing and cover placement are separate queries, and conflating them is
+what makes a lifted actor look like it vanished early.
+
+- **When** cover arrives is a question about the emitter. It culls on the
+  record's own y — the ROM knows nothing about virtual height — so
+  `Sim3D_SourceCullCover` uses the unlifted anchor.
+- **Where** cover goes is a question about the renderer.
+  `Sim3D_SourceDrawLift` runs the same pure classifier the object pass uses,
+  from the source record's own fields. It has to be reachable that way: a
+  record the window took away entirely emitted no parts and so has no
+  `objects[]` entry to read a height from, and that is precisely the record
+  whose placement matters most.
+
+### The lift inset
+
+The lit region is painted on the ground, so it can only ever express the
+height-zero boundary. It promises "actors can be here", and for flying actors
+that promise is wrong by the lift amount along the bottom edge. The window's
+bottom is therefore inset by `Sim3D_MaxDrawLift` — the classifier's ceiling,
+not a measurement over the live record list, because an inset that tracked
+whatever happens to be flying would drift the ground fade up and down while
+nothing on screen moved.
+
+The top edge is deliberately not inset: lift is toward negative y, so a record
+approaching the top leaves the lit region *before* it culls, which is already
+the safe direction.
+
+Lifting the camera instead does not work and the reasoning is worth keeping.
+The emitter reaches `base_y` through `dp $96`, which is one value for every
+record, so biasing it moves grounded records too; it trades the bottom edge for
+the top; and the vertical window cannot move at all, because OAM's Y byte has
+no ninth bit and `ActRaiser_SimProjectileVisible`'s false result destroys the
+record, making the predicate gameplay rather than presentation.
+
+### Mesh density is a correctness constraint
+
+`kSimUnderlayColumns/Rows` was 24x18, chosen for affine UV correctness alone.
+Once the fade began being *sampled* at those vertices, that number became
+wrong: over an extent spanning source +/- 512px it is ~60px per cell, coarser
+than the corner radius, so a rounded window was interpolated back into a
+straight-edged box and the smoothstep feather was flattened with it. It is now
+64x48. **The mesh must be finer than the smallest feature the fade is meant to
+show** — a stricter constraint than the perspective one that set the old value.
+
+### Draw order
+
+Extending §13c: `backdrop -> world underlay (blurred, then sharp) -> town
+canvas (faded) -> town ground quad -> shadows/objects/rim -> cloud shroud ->
+menu planes`.
+
+The menu planes are held back from the painter-order loop and drawn last, in
+rank order among themselves so the box frame still composites under its own
+text. A sprite drifting under the shroud is the effect doing its job; a cloud
+drifting across a menu the player is reading is the effect damaging something
+that is not part of the world at all.
+
+The menu is three things on three kinds of layer, and it took two attempts to
+get all of them:
+
+- **Text** — `Bg3Low`/`Bg3High`. §11 records the ownership from a capture.
+- **Box frame and panel fill** — `Bg2High`. Deferring BG3 alone lifted the text
+  and left the panel under the shroud, so clouds showed inside the windows.
+- **Icons and cursors** — **fixed-tier OBJ**, drawn through the billboard path
+  at their own priority band. `Obj3` ranks *above* `Bg2High`, so deferring the
+  panel by itself put its opaque fill over them and the menu rendered empty.
+
+Fixed-tier OBJ are therefore deferred **by tier, not by plane**: they share the
+OBJ ranks with world billboards that must stay under the shroud, so
+`DrawSimObjectPriority` takes a `SimObjectTierFilter` and each band is drawn
+twice — world-tier in the painter-order loop, fixed-tier in the deferred group.
+That split is also why rim light is world-tier only, which it should always
+have been.
+
+The deferred group walks the full hardware rank rather than just the menu
+planes, so order *within* the group is unchanged and only the group's depth
+relative to the world moves. `Bg2Low` is deliberately excluded: the plan's
+presentation order places it behind the projected ground, where it is a
+background layer rather than UI, and promoting it would put whatever a town
+keeps there on top of everything.
+
+Lifting BG3 wholesale is safe because the town HUD's own BG3 pixels have
+already been removed from the profile by the `sim3d.c` overlay handoff and are
+composited separately afterward, so what remains on that layer in a town is
+menu furniture.
+
+### Diagnostics
+
+`AR_SIMCULLMARK=1` draws one marker per record earning cover, over the shroud —
+green while approaching the edge, red once the emitter is actually clipping its
+parts. A red marker with no cover under it is exactly the artifact this section
+exists to remove.
+
+
+
+## 13e. Colour math the D2 gate accepts (2026-07-22)
+
+The separated capture reproduces the frame from individual layers, so any PPU
+colour math has to be reproduced too or the byte-exact fidelity gate rejects
+the frame and the view drops to authentic. The gate therefore fails closed on
+anything not shown to be reproducible, and three states are currently accepted:
+
+1. **No-op** — `cgwsel == 0`, `fixedColor == 0`, no half/subtract. The PPU's
+   own fast path proves nothing happens.
+2. **Targeted-miracle half-add** — BG1 on the subscreen, half-added beneath OBJ
+   palettes 4-7. Stays a *compositing policy* (`object_half_add`) because it
+   combines two planes.
+3. **Fixed-colour add** — the sun miracle.
+
+### The sun miracle
+
+Diagnosed from the transition log, which now prints the registers when this is
+the rejection reason: `cgwsel=$00 cgadsub=$01 fixed=$0001 screen=$15/$00`,
+brightness 15 — a fixed-colour add, ramping from 1, onto **BG1 alone**. It
+trips the moment the ramp leaves zero, which is why the effect starts and the
+view drops in the same frame.
+
+`cgwsel == 0` is what makes it reproducible: fixed colour rather than subscreen
+as the math source, math enabled over the whole screen, no main-screen-black
+region, no direct colour — so there is no window geometry to recover.
+
+Unlike the half-add this is **baked into the captured plane pixels** rather
+than made a compositing policy. A fixed-colour add is a property of one layer,
+and the authentic rebuild, the flat recomposition and the projected textures
+all read the same buffers, so one application serves all three and the D2 gate
+verifies it against real hardware output.
+
+### Why it could not be done the obvious way
+
+The PPU adds in **5-bit component space** and only then maps through
+`brightnessMult` to 8 bits. Overlay surfaces receive the 8-bit result, so
+adding the expanded fixed colour to the expanded pixel is a different
+operation — it differs on **168 of the 1024** (component, add) pairs, and the
+gate is byte-exact, so the naive version would have produced exactly today's
+behaviour plus code.
+
+The reproduction inverts `brightnessMult` to recover the 5-bit component, adds
+with the hardware's clamp at 31, and maps forward again. That is exact on all
+1024 pairs. Inversion needs the table to be injective; it is, comfortably below
+full brightness, but only brightness 15 has been checked against hardware
+output so the gate admits only that. A miracle running under a screen fade is a
+second effect layered on this one and wants its own evidence.
+
+### Failure mode
+
+Benign by construction. If the reproduction is ever wrong the D2 gate sees a
+pixel mismatch and drops to authentic — the same behaviour as before the state
+was accepted at all, so a mistake here costs the enhanced view for those
+frames and never correctness.
+
+## 13f. Simulation-town sky (2026-07-22)
+
+### The horizon that is not there
+
+`kSimFeature_Backdrop` replaces the flat clear behind the finite ground with a
+vertical gradient between two authored sky colours, mixed *from* the scene's
+own `separated_backdrop_argb` by the strength setting. Sky brightens toward the
+horizon and deepens overhead, which is the one property of real sky that
+survives being reduced to two colours. Strength 0 reproduces the previous flat
+fill exactly, which is what makes D5a-2's "only pixels behind the finite
+ground change" checkable against A8 rather than against a differently-coloured
+screen.
+
+The first version *derived* both endpoints from the backdrop — lifting toward
+white, dropping toward black — on the reasoning that this preserves whatever
+hue the game chose and cannot clash with a town palette. That reasoning holds
+only where there is a hue to preserve: a simulation town's backdrop is black,
+and black lifted toward white is grey, so the sky rendered greyscale. Mixing
+toward an authored blue is well-defined for any backdrop, and a town that does
+choose a coloured one still tints the result rather than being overruled.
+
+**The ground-plane horizon is never on screen.** Across the whole settable
+pitch range (-700..700 mrad) the vanishing line lands 544 to 5619 destination
+pixels outside a 224-row viewport, and a pitch of exactly zero has no horizon
+at all. What reads as sky in frame is where the ground *data* runs out, not
+where the ground plane vanishes — in practice only the corners past the end of
+the extended map, and only when fully zoomed out.
+
+The sky is therefore graded around a **synthetic** horizon at
+`backdrop_horizon_pct` of the viewport height (default 50%), with the gradient
+completing at the top of the viewport so moving the anchor restretches it
+rather than leaving a band of flat zenith above where it ran out. The real
+horizon is used as the anchor only if it ever becomes visible — one comparison,
+so widening the pitch range cannot silently produce sky below the horizon.
+
+The synthetic anchor is honest about what it is: with no horizon line in frame
+there is nothing for the eye to check it against, so its job is to look like
+sky at those edges, not to agree with a vanishing point 1674 pixels off the top
+of the screen. `Scene3D_GroundHorizonScreenY` remains the pure primitive,
+solved as the limit of the projection rather than by projecting some "far
+enough" point; the ground extension already reaches thousands of captured
+pixels out, so any finite stand-in for infinity would need re-tuning whenever
+the extent changed.
+
+## 13g. Simulation-town camera (2026-07-22)
+
+### Two modes, two poses
+
+`sim3d_camera_mode` is Free or Dynamic, mutually exclusive, mirroring the
+diorama split. **Each mode owns its own pose**: Free Cam keeps the
+player-authored `sim3d_tilt_*`/`sim3d_distance_x100` that the right-drag edits
+and that persists across a session; Dynamic Cam has dedicated
+`sim3d_dyncam_baseline_*` settings, defaulting to the captured baseline, that
+the reactive lean works around.
+
+Two poses rather than one is the entire point. With a single shared pose,
+switching to Dynamic would sway around wherever the last manual drag happened
+to leave the camera, so the mode's look would depend on unrelated history.
+The active pose is resolved once, on the game thread (`Sim3D_ActivePose`), and
+published through `sim.projection_*` like any other tuning — two `Sim3DTuning`
+sites read it, and a camera that differed between them would be a genuinely
+confusing bug.
+
+Consequences worth stating: the right-drag is inert in Dynamic Cam, because it
+edits a pose the projection is not built from and a silent no-op is worse than
+no response; "Reset camera" restores the pose of the mode in use rather than
+always the free one; and a mode change **snaps** rather than eases, since
+easing across it swings the camera between two unrelated poses and reads as a
+knock instead of a switch.
+
+### Reactive motion
+
+Dynamic Cam leans the town camera toward the angel's direction of travel and
+jolts it when the angel takes a hit — the same reactive camera the
+action stages use in diorama mode, and deliberately the same construction: a
+velocity lean eased toward on a **wall-clock** exponential, plus additive
+impulses decaying on another. Both details were tuned against real failures
+there and carry over unchanged. A fixed per-frame damping factor is twice as
+stiff at 120Hz as at 60Hz; an impulse that replaces rather than stacks loses
+back-to-back events.
+
+Three things differ, because the mode differs:
+
+- **The signal.** Action mode reads `PlayerVelocityX/Y`, which is an
+  action-stage concept. The town reads the angel record's own `+$1A/+$1C`
+  planar velocities. There is no jump and no ground here, so "vertical
+  velocity" is simply the other axis of a planar drift, and pitch leans toward
+  it exactly as yaw leans toward horizontal travel.
+- **The magnitudes are smaller** (`kSimLeanYaw` 0.045 rad against the diorama's
+  0.10). The action stages look at the player from the side, where a lean
+  swings the whole scene across the screen. The town is viewed from near
+  overhead, where the same angle mostly slides the ground under a camera that
+  is already looking down, and very little of it is needed before the map
+  appears to swim.
+- **Town scoping.** Outside a town the angel record holds whatever the last
+  action stage left there, so the capture reports a neutral camera and resets
+  its edge state. The first town frame only seeds the previous HP: arriving
+  with less health than the last town ended with is not a hit, and without
+  that guard the camera jolts on entry.
+
+Hit detection is an HP decrease rather than an invulnerability flag, matching
+the correction made in action mode — the flag is set once hit-stun begins,
+roughly ten frames after damage applies, whereas an HP decrease *is* the frame
+damage applies.
+
+The offsets are folded in **before** the view-projection matrix is built, so
+every stage — ground, billboards, shadows, the cull boundary, the shroud —
+sees one camera. Adjusting the matrix afterwards would leave object anchors on
+the old one.
+
 ## 14. Open questions (all remaining, none blocks the §13 design)
 
 1. `$7F:B800` action-anim frame composer (find on an animated level:

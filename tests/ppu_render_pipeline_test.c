@@ -18,6 +18,10 @@
 #include <string.h>
 
 #include "snes/ppu.h"
+#include "actraiser_game.h"
+#include "sim3d.h"
+#include "sim_render_atlas.h"
+#include "sim_render_metadata.h"
 
 /* main.c owns this global; the PPU line renderer reads it to pick new/old path. */
 bool g_new_ppu = false;
@@ -57,7 +61,285 @@ static uint16_t bgr555(int r5, int g5, int b5) {
 /* Expand a 5-bit channel to 8-bit the way the PPU does ((v<<3)|(v>>2)). */
 static int expand5(int v5) { return ((v5 & 0x1f) << 3) | ((v5 & 0x1f) >> 2); }
 
+static void set_solid_4bpp_tile(Ppu *ppu, int tile, int color) {
+  for (int row = 0; row < 8; row++) {
+    uint16_t lo = 0, hi = 0;
+    if (color & 1) lo |= 0x00ff;
+    if (color & 2) lo |= 0xff00;
+    if (color & 4) hi |= 0x00ff;
+    if (color & 8) hi |= 0xff00;
+    ppu->vram[tile * 16 + row] = lo;
+    ppu->vram[tile * 16 + row + 8] = hi;
+  }
+}
+
+static void TestObjRangeRaster(void) {
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  ppu_reset(ppu);
+  ppu->inidisp = 0x0f;
+  ppu->obsel = 0;  /* 8x8 small objects; OBJ tiles start at VRAM word 0. */
+  ppu->cgram[0x81] = bgr555(31, 0, 0);
+  ppu->cgram[0x82] = bgr555(0, 0, 31);
+  set_solid_4bpp_tile(ppu, 0, 1);
+  set_solid_4bpp_tile(ppu, 1, 2);
+
+  /* Two fully overlapping priority-2 entries. Normal OAM order makes slot 0
+   * own the range; priority rotation beginning at slot 1 reverses ownership. */
+  ppu->oam[0] = 10 | (20 << 8);
+  ppu->oam[1] = 0 | (2 << 12);
+  ppu->oam[2] = 10 | (20 << 8);
+  ppu->oam[3] = 1 | (2 << 12);
+  PpuObjRangeBounds bounds;
+  CHECK(PpuGetObjRangeBounds(ppu, 0, 2, 2, &bounds));
+  CHECK(bounds.x0 == 10 && bounds.y0 == 20 &&
+        bounds.x1 == 18 && bounds.y1 == 28);
+
+  uint32_t pixels[8 * 8];
+  CHECK(PpuRasterizeObjRange(ppu, 0, 2, 2, &bounds, pixels, 8, 8,
+                             8 * sizeof(uint32_t)));
+  CHECK(pixels[0] == 0xffff0000u);
+  CHECK(pixels[63] == 0xffff0000u);
+
+  ppu->oamaddh = 0x80;
+  ppu->oamaddl = 2;  /* byte index 2 = OAM slot 1 */
+  CHECK(PpuRasterizeObjRange(ppu, 0, 2, 2, &bounds, pixels, 8, 8,
+                             8 * sizeof(uint32_t)));
+  CHECK(pixels[0] == 0xff0000ffu);
+
+  /* High-OAM x/size bits and vertical OAM wrap are interpreted by the same
+   * bounds path used by scanout: x=$1fc -> -4, y=250 -> -6, large=16. */
+  ppu->oam[4] = 0xfc | (250 << 8);
+  ppu->oam[5] = 0 | (1 << 12);
+  ppu->highOam[0] = (1 << 4) | (1 << 5);
+  CHECK(PpuGetObjRangeBounds(ppu, 2, 1, 1, &bounds));
+  CHECK(bounds.x0 == -4 && bounds.y0 == -6 &&
+        bounds.x1 == 12 && bounds.y1 == 10);
+  CHECK(!PpuGetObjRangeBounds(ppu, 2, 1, 0, &bounds));
+
+  /* An asymmetric source pixel proves horizontal and vertical flip handling
+   * is shared with scanout rather than approximated by the atlas caller. */
+  memset(&ppu->vram[2 * 16], 0, 16 * sizeof(ppu->vram[0]));
+  ppu->vram[2 * 16] = 1u << 6;  /* source (x=1,y=0), color index 1 */
+  ppu->oamaddh = 0;
+  ppu->oam[6] = 30 | (40 << 8);
+  ppu->oam[7] = 2;
+  CHECK(PpuGetObjRangeBounds(ppu, 3, 1, 0, &bounds));
+  CHECK(PpuRasterizeObjRange(ppu, 3, 1, 0, &bounds, pixels, 8, 8,
+                             8 * sizeof(uint32_t)));
+  CHECK(pixels[1] == 0xffff0000u && pixels[0] == 0);
+  ppu->oam[7] |= 0xc000;  /* H+V flip -> destination (x=6,y=7). */
+  CHECK(PpuRasterizeObjRange(ppu, 3, 1, 0, &bounds, pixels, 8, 8,
+                             8 * sizeof(uint32_t)));
+  CHECK(pixels[7 * 8 + 6] == 0xffff0000u && pixels[1] == 0);
+
+  ppu_free(ppu);
+}
+
+static void BeginSimRecord(uint16_t record, bool world, uint16_t cursor,
+                           uint16_t world_x, uint16_t world_y) {
+  SimRenderMetadata_BeginRecord(
+      record, world, false, 0xe000, world_x, world_y, 1, 0, 0, cursor);
+}
+
+static void TestSemanticAtlasPacking(void) {
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  ppu_reset(ppu);
+  ppu->inidisp = 0x0f;
+  ppu->cgram[0x81] = bgr555(31, 31, 31);
+  set_solid_4bpp_tile(ppu, 0, 1);
+
+  SimRenderMetadata_Reset();
+  BeginSimRecord(kActRaiserWram_SimWorldRecords, true, 0, 110, 70);
+  SimRenderMetadata_RecordPart(0, 1u << 12);
+  SimRenderMetadata_RecordPart(4, 2u << 12);
+  SimRenderMetadata_EndRecord(8);
+  ppu->oam[0] = 5 | (7 << 8);
+  ppu->oam[1] = 1u << 12;
+  ppu->oam[2] = 13 | (7 << 8);
+  ppu->oam[3] = 2u << 12;
+
+  CHECK(SimRenderAtlas_Build(ppu, 100, 50));
+  SimAtlasBuildInput atlas;
+  CHECK(SimRenderMetadata_CopyAtlasInput(&atlas));
+  CHECK(atlas.object_count == 2);
+  CHECK(atlas.objects[0].atlas_valid && atlas.objects[1].atlas_valid);
+  CHECK(atlas.objects[0].atlas_x == 1 && atlas.objects[0].atlas_y == 1);
+  CHECK(atlas.objects[0].atlas_w == 8 && atlas.objects[0].atlas_h == 8);
+  CHECK(atlas.objects[1].atlas_x == 10 && atlas.objects[1].atlas_y == 1);
+  CHECK(atlas.objects[0].local_x0 == -5);
+  CHECK(atlas.objects[0].local_y0 == -13);
+  CHECK(atlas.objects[0].foot_x == 113 && atlas.objects[0].foot_y == 65);
+  CHECK(atlas.objects[1].foot_x == 113 && atlas.objects[1].foot_y == 65);
+  CHECK(g_sim_obj_atlas_pixels[1 * kSimObjAtlasWidth + 1] ==
+        0xffffffffu);
+
+  /* Fifty independent 64x64 fragments cannot all fit with the mandatory
+   * gutter in a 512x512 atlas.
+   *
+   * This once required the builder to invalidate every descriptor and publish
+   * AtlasOverflow -- "never the first 49 as a partial success" -- on the
+   * principle that a partial atlas is untrustworthy. Reversed once the SIM 3D
+   * view shipped, because an invalid atlas invalidated the frame's metadata,
+   * which dropped the whole view to the flat composite: a full-screen
+   * perspective flash standing in for one sprite that would not pack. The ROM
+   * makes actors vanish at the screen edge anyway, so purging the fragment is
+   * both proportionate and authentic. The condition is still reported --
+   * purged objects keep atlas_valid clear and the D1 census counts them, so a
+   * checkpoint still fails on it -- it just no longer costs the frame. */
+  ppu_reset(ppu);
+  ppu->inidisp = 0x0f;
+  ppu->obsel = 2 << 5;  /* size pair 8/64 */
+  SimRenderMetadata_Reset();
+  for (int slot = 0; slot < 50; slot++) {
+    bool world = slot >= kActRaiserSimFixedRecordCount;
+    int record_index = world ? slot - kActRaiserSimFixedRecordCount : slot;
+    uint16_t record = (uint16_t)(
+        (world ? kActRaiserWram_SimWorldRecords
+               : kActRaiserWram_SimFixedRecords) +
+        record_index * (world ? kActRaiserSimWorldRecordStride
+                              : kActRaiserSimFixedRecordStride));
+    BeginSimRecord(record, world, (uint16_t)(slot * 4), 0, 0);
+    SimRenderMetadata_RecordPart((uint16_t)(slot * 4), 1u << 12);
+    SimRenderMetadata_EndRecord((uint16_t)((slot + 1) * 4));
+    uint8_t index = (uint8_t)(slot * 2);
+    ppu->oam[index] = 0;
+    ppu->oam[index + 1] = 1u << 12;
+    ppu->highOam[index >> 3] |= (uint8_t)(1u << ((index & 7) + 1));
+  }
+  CHECK(SimRenderAtlas_Build(ppu, 0, 0));
+
+  uint8_t wram[kActRaiserWramSize] = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  SimFrameData frame;
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, 0, 0, 0);
+  /* The frame survives, which is the entire point of the reversal. */
+  CHECK(frame.metadata_valid);
+  CHECK(frame.atlas_valid);
+  CHECK(!(frame.integrity_flags & kSimMetadataIntegrity_AtlasOverflow));
+  int packed = 0, purged = 0;
+  for (int i = 0; i < frame.object_count; i++) {
+    if (frame.objects[i].atlas_valid) packed++;
+    else purged++;
+  }
+  /* 512 / (64 + 1) = 7 columns of 7 rows, so 49 of the 50 pack. */
+  CHECK(packed == 49);
+  CHECK(purged == 1);
+
+  ppu_free(ppu);
+}
+
+static void TestSim3DFlatComposition(void) {
+  enum { width = 3, height = 2 };
+  uint32_t storage[kSim3DPlane_Count][width * height];
+  uint8_t *planes[kSim3DPlane_Count];
+  memset(storage, 0, sizeof(storage));
+  for (int plane = 0; plane < kSim3DPlane_Count; plane++)
+    planes[plane] = (uint8_t *)storage[plane];
+
+  storage[kSim3DPlane_Bg3Low][1] = 0xffff0000u;
+  storage[kSim3DPlane_Obj0][1] = 0xff00ff00u;
+  storage[kSim3DPlane_Obj1][1] = 0x000000ffu; /* transparent despite RGB */
+  storage[kSim3DPlane_Bg1High][1] = 0xff0000ffu;
+  storage[kSim3DPlane_Obj3][1] = 0xffffff00u;
+  storage[kSim3DPlane_Bg3High][1] = 0xffff00ffu;
+
+  uint32_t output[(width + 1) * height];
+  memset(output, 0xcc, sizeof(output));
+  Sim3D_ComposeFlatPixels(
+      output, width, height, (width + 1) * (int)sizeof(uint32_t),
+      0xff112233u, 1, 3, planes, 0, 0);
+  CHECK(output[0] == 0xff000000u);
+  CHECK(output[1] == 0xffff00ffu); /* last hardware-rank plane wins */
+  CHECK(output[2] == 0xff112233u);
+  CHECK(output[width + 1] == 0xff000000u);
+  CHECK(output[width + 2] == 0xff112233u);
+  CHECK(output[width + 3] == 0xff112233u);
+
+  Sim3D_ComposeFlatPixels(
+      output, width, 1, (width + 1) * (int)sizeof(uint32_t),
+      0xff112233u, 1, 3, planes, 1u << kSim3DPlane_Obj0, 0);
+  CHECK(output[1] == 0xff00ff00u);
+
+  Sim3D_ComposeFlatPixels(
+      output, width, 1, (width + 1) * (int)sizeof(uint32_t),
+      0xff112233u, 1, 3, planes, 1u << kSim3DPlane_Obj1, 0);
+  CHECK(output[1] == 0xff112233u); /* alpha-zero capture cannot cover */
+}
+
+static void TestSim3DWidescreenHudCaptureHandoff(void) {
+  CHECK(Sim3D_ObjPlaneForPriority(0) == kSim3DPlane_Obj0);
+  CHECK(Sim3D_ObjPlaneForPriority(1) == kSim3DPlane_Obj1);
+  CHECK(Sim3D_ObjPlaneForPriority(2) == kSim3DPlane_Obj2);
+  CHECK(Sim3D_ObjPlaneForPriority(3) == kSim3DPlane_Obj3);
+  CHECK(Sim3D_ObjPlaneForPriority(-1) == -1);
+  CHECK(Sim3D_ObjPlaneForPriority(4) == -1);
+
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  ppu_reset(ppu);
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 9;
+  ppu->screenEnabled[0] = 0x17;
+  ppu->screenEnabled[1] = 0;
+  PpuSetWidescreenHudSplit(
+      ppu, kActRaiserSimulationHudHeight,
+      kActRaiserSimulationHudSplit, kActRaiserSimulationHudSplit,
+      kActRaiserSimulationHudHeight, kActRaiserSimulationHudHeight);
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg3, 0, 0,
+      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Obj, 0, 0,
+      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(
+      ppu, kActRaiserHudObjOamFirst, kActRaiserHudObjOamCount));
+
+  const int extra = 43;
+  Sim3DCaptureRequest request = {
+    .town = true,
+    .master_enabled = true,
+    .renderer_ready = true,
+    .requested_features = kSimFeature_SeparatedComposite,
+    .width = kActRaiserAuthenticWidth + 2 * extra,
+    .height = kActRaiserAuthenticHeight,
+  };
+  Sim3D_BeginFrame();
+  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  const PpuOverlayCapture *bg3 =
+      &ppu->overlayCaptures[kPpuOverlaySource_Bg3];
+  const PpuOverlayCapture *obj =
+      &ppu->overlayCaptures[kPpuOverlaySource_Obj];
+  CHECK(bg3->x0 == -extra && bg3->x1 == kActRaiserAuthenticWidth + extra);
+  CHECK(bg3->y0 == 0 && bg3->y1 == kActRaiserAuthenticHeight);
+  CHECK(bg3->flags == 0);
+  CHECK(obj->x0 == -extra && obj->x1 == kActRaiserAuthenticWidth + extra);
+  CHECK(obj->oamFirst == 0 && obj->oamCount == 128);
+  CHECK(Sim3D_BeginFrame());
+
+  /* An unrelated layer capture still owns its source and must fail closed. */
+  PpuClearOverlayCaptures(ppu);
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg1, 0, 0, 16, 16,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(!Sim3D_PrepareCapture(ppu, &request));
+  CHECK(!Sim3D_BeginFrame());
+  ppu_free(ppu);
+}
+
 int main(void) {
+  TestObjRangeRaster();
+  TestSemanticAtlasPacking();
+  TestSim3DFlatComposition();
+  TestSim3DWidescreenHudCaptureHandoff();
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));
 

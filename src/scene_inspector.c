@@ -33,6 +33,18 @@ typedef struct InspectionState {
 } InspectionState;
 
 static InspectionState s;
+static SimFrameData s_sim;
+static bool s_sim_valid;
+
+void SceneInspector_SetSimFrameData(const SimFrameData *frame) {
+  if (!frame) {
+    memset(&s_sim, 0, sizeof(s_sim));
+    s_sim_valid = false;
+    return;
+  }
+  s_sim = *frame;
+  s_sim_valid = true;
+}
 
 static void Append(TextBuilder *builder, const char *format, ...) {
   if (!builder || !builder->data || builder->length >= builder->capacity)
@@ -331,6 +343,50 @@ static int InspectObjects(TextBuilder *panel, TextBuilder *report) {
            (unsigned long long)hash, pixel,
            (0x80 + palette * 16 + pixel) & 0xff, char_address,
            (oam1 >> 8) & 1, palette, priority_group, hflip, vflip);
+    if (s_sim_valid) {
+      for (unsigned sim_index = 0; sim_index < s_sim.object_count;
+           sim_index++) {
+        const SimRenderObject *object = &s_sim.objects[sim_index];
+        if (slot < object->oam_first ||
+            slot >= object->oam_first + object->oam_count)
+          continue;
+        const char tier = object->tier == kSimRecordTier_World ? 'W' : 'F';
+        if (matches <= kMaxObjectLines) {
+          Append(panel,
+                 " SIM%c REC$%04X CMP$%04X OAM%d+%d P%d FOOT%d,%d "
+                 "%s H%d %s\n",
+                 tier, object->record_address, object->composition,
+                 object->oam_first, object->oam_count, object->priority,
+                 object->foot_x, object->foot_y,
+                 Sim3D_HeightClassName((SimHeightClass)object->height_class),
+                 (int)object->virtual_height,
+                 object->atlas_valid ? "ATLAS READY" : "ATLAS PENDING");
+        }
+        Append(report,
+               "         SIM3D source=%u tier=%c record=$%04X "
+               "composition=$%04X type=$%04X state=$%04X "
+               "world=$%04X,$%04X foot=%d,%d OAM=%u+%u priority=%u "
+               "height=%s/%d traits=$%02X shadow=%s "
+               "local=[%d,%d,%d,%d] atlas=%s [%u,%u,%u,%u]\n",
+               (unsigned)object->source_index, tier,
+               (unsigned)object->record_address,
+               (unsigned)object->composition, (unsigned)object->type,
+               (unsigned)object->semantic_state,
+               (unsigned)object->world_x, (unsigned)object->world_y,
+               object->foot_x, object->foot_y,
+               (unsigned)object->oam_first, (unsigned)object->oam_count,
+               (unsigned)object->priority,
+               Sim3D_HeightClassName((SimHeightClass)object->height_class),
+               (int)object->virtual_height, (unsigned)object->traits,
+               Sim3D_ObjectCastsShadow(object) ? "caster" : "none",
+               object->local_x0, object->local_y0,
+               object->local_x1, object->local_y1,
+               object->atlas_valid ? "ready" : "pending",
+               (unsigned)object->atlas_x, (unsigned)object->atlas_y,
+               (unsigned)object->atlas_w, (unsigned)object->atlas_h);
+        break;
+      }
+    }
     ConsiderHighlight(priority, pixel, x, display_y,
                       x + size, display_y + size);
   }
@@ -454,6 +510,26 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
          mode, g_ppu->inidisp & 0xf, g_ppu->screenEnabled[0],
          g_ppu->screenEnabled[1], g_ppu->extraLeftCur,
          g_ppu->extraRightCur);
+  if (s_sim_valid && s_sim.town) {
+    Append(&panel,
+           "SIM3D %s META %s SERIAL %u REQ$%03X EFF$%03X\n",
+           Sim3D_ViewName(s_sim.view),
+           s_sim.metadata_valid ? "OK" : "FALLBACK",
+           (unsigned)s_sim.build_serial,
+           (unsigned)s_sim.requested_features,
+           (unsigned)s_sim.effective_features);
+    Append(&panel, "ATLAS %s %ux%u USED %ux%u\n",
+           s_sim.atlas_valid ? "READY" : "UNAVAILABLE",
+           (unsigned)s_sim.atlas_width, (unsigned)s_sim.atlas_height,
+           (unsigned)s_sim.atlas_used_width,
+           (unsigned)s_sim.atlas_used_height);
+    Append(&panel, "FLAT %s STATUS %s MISMATCH %u HASH %016llX\n",
+           s_sim.separated_valid ? "READY" : "FALLBACK",
+           Sim3D_CaptureStatusName(
+               (Sim3DCaptureStatus)s_sim.separated_status),
+           (unsigned)s_sim.separated_mismatch_pixels,
+           (unsigned long long)s_sim.separated_hash);
+  }
 
   Append(&report,
          "[scene-inspector] click screen=%d,%d world=$%04X,$%04X\n"
@@ -471,6 +547,30 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
          g_ppu->screenWindowed[0], g_ppu->screenWindowed[1],
          g_ppu->extraLeftCur, g_ppu->extraRightCur,
          g_ppu->extraLeftRight, g_ram[0x18], g_ram[0x19], mode);
+  if (s_sim_valid && s_sim.town) {
+    Append(&report,
+           "sim3d: view=%s metadata_valid=%d integrity=$%X serial=%u "
+           "requested=$%03X effective=$%03X sources=%u fragments=%u "
+           "world-oam=%u+%u atlas=%s %ux%u used=%ux%u\n",
+           Sim3D_ViewName(s_sim.view), s_sim.metadata_valid,
+           (unsigned)s_sim.integrity_flags, (unsigned)s_sim.build_serial,
+           (unsigned)s_sim.requested_features,
+           (unsigned)s_sim.effective_features,
+           (unsigned)s_sim.source_count, (unsigned)s_sim.object_count,
+           (unsigned)s_sim.world_oam_first,
+           (unsigned)s_sim.world_oam_count,
+           s_sim.atlas_valid ? "ready" : "unavailable",
+           (unsigned)s_sim.atlas_width, (unsigned)s_sim.atlas_height,
+           (unsigned)s_sim.atlas_used_width,
+           (unsigned)s_sim.atlas_used_height);
+    Append(&report,
+           "sim3d-flat: valid=%d status=%s mismatch_pixels=%u hash=%016llX\n",
+           s_sim.separated_valid,
+           Sim3D_CaptureStatusName(
+               (Sim3DCaptureStatus)s_sim.separated_status),
+           (unsigned)s_sim.separated_mismatch_pixels,
+           (unsigned long long)s_sim.separated_hash);
+  }
 
   int bg_count = 0;
   if (mode == 7) {

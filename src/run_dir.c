@@ -136,6 +136,8 @@ void RunDirRebaseEnvOutputs(void) {
   rebase_bare_env("AR_DRIFT_LOG");
   rebase_bare_env("AR_MX_OUT");
   rebase_bare_env("AR_WRAM_TRACE");
+  rebase_bare_env("AR_SIM3D_TRACE");
+  rebase_bare_env("AR_SIM3D_D1_TRACE");
 }
 
 #else /* _WIN32: no tee/symlink plumbing — keep the legacy layout. */

@@ -1,4 +1,5 @@
 #include "diorama.h"
+#include "scene3d_math.h"
 #include "settings.h"
 #include "snes/ppu.h"
 #include <math.h>
@@ -530,12 +531,7 @@ float Diorama_ZoomStep(void)     { return kDioramaZoomStep; }
 
 /* ── Camera state ────────────────────────────────────────────────────── */
 
-typedef struct DioramaCamera {
-  float tilt_x;
-  float tilt_y;
-  float distance;
-  float fov_y;
-} DioramaCamera;
+typedef Scene3DCamera DioramaCamera;
 
 /* A3 (followup doc): zero-init, not a hand-tuned literal — every field here
  * is unconditionally overwritten by Diorama_SeedCameraFromSettings (below)
@@ -681,35 +677,9 @@ static const int kDioramaLayerCount =
 #define DIORAMA_VERTS_PER_LAYER ((DIORAMA_SUBDIV_X + 1) * (DIORAMA_SUBDIV_Y + 1))
 #define DIORAMA_INDICES_PER_LAYER (DIORAMA_SUBDIV_X * DIORAMA_SUBDIV_Y * 6)
 
-static void Mat4Mul(const float a[16], const float b[16], float out[16]) {
-  for (int c = 0; c < 4; c++)
-    for (int r = 0; r < 4; r++) {
-      float s = 0.0f;
-      for (int k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
-      out[c * 4 + r] = s;
-    }
-}
-
 static void BuildViewProjection(const DioramaCamera *cam, int out_w, int out_h,
                                 float out_mat[16]) {
-  const float kNear = 0.1f, kFar = 100.0f;
-  float aspect = (out_h > 0) ? (float)out_w / (float)out_h : 1.0f;
-  float f = 1.0f / tanf(cam->fov_y * 0.5f);
-  float proj[16] = {
-    f / aspect, 0, 0,                                    0,
-    0,          f, 0,                                    0,
-    0,          0, (kFar + kNear) / (kNear - kFar),     -1,
-    0,          0, (2 * kFar * kNear) / (kNear - kFar),  0,
-  };
-  float cx = cosf(cam->tilt_x), sx = sinf(cam->tilt_x);
-  float cy = cosf(cam->tilt_y), sy = sinf(cam->tilt_y);
-  float rotY[16]  = { cy,0,sy,0,  0,1,0,0,  -sy,0,cy,0,  0,0,0,1 };
-  float rotX[16]  = { 1,0,0,0,  0,cx,sx,0,  0,-sx,cx,0,  0,0,0,1 };
-  float trans[16] = { 1,0,0,0,  0,1,0,0,  0,0,1,0,  0,0,-cam->distance,1 };
-  float rot[16], view[16];
-  Mat4Mul(rotX, rotY, rot);
-  Mat4Mul(trans, rot, view);
-  Mat4Mul(proj, view, out_mat);
+  Scene3D_BuildViewProjection(cam, out_w, out_h, out_mat);
 }
 
 /* GEO (followup doc, shared prereq for B5/B6): the projection kernel
@@ -725,15 +695,9 @@ static void BuildViewProjection(const DioramaCamera *cam, int out_w, int out_h,
  * ~14% of cases — checked numerically before this refactor). */
 static SDL_FPoint ProjectWorldPoint(const float mvp[16], float x, float y, float z,
                                     int screen_w, int screen_h) {
-  float clip[4];
-  clip[0] = mvp[0]*x + mvp[4]*y + mvp[8]*z  + mvp[12];
-  clip[1] = mvp[1]*x + mvp[5]*y + mvp[9]*z  + mvp[13];
-  clip[2] = mvp[2]*x + mvp[6]*y + mvp[10]*z + mvp[14];
-  clip[3] = mvp[3]*x + mvp[7]*y + mvp[11]*z + mvp[15];
-  float inv_w = (clip[3] != 0.0f) ? 1.0f / clip[3] : 1.0f;
-  float sx = (clip[0] * inv_w * 0.5f + 0.5f) * screen_w;
-  float sy = (1.0f - (clip[1] * inv_w * 0.5f + 0.5f)) * screen_h;
-  return (SDL_FPoint){ sx, sy };
+  Scene3DPoint point = Scene3D_ProjectWorldPoint(
+      mvp, x, y, z, screen_w, screen_h);
+  return (SDL_FPoint){ point.x, point.y };
 }
 
 /* Shared triangulation: a (subdiv_u+1)x(subdiv_v+1) vertex grid into

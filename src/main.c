@@ -29,6 +29,7 @@
 #include "save_system.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
+#include "sfx_census.h"
 #include "run_dir.h"
 #include "launcher.h"
 #include "util.h"
@@ -40,6 +41,13 @@
 #include "framedump.h"
 #include "widescreen.h"
 #include "present.h"
+#include "sim_phase0_trace.h"
+#include "sim_render_metadata.h"
+#include "sim_render_atlas.h"
+#include "sim_town_canvas.h"
+#include "sim_world_map.h"
+#include "sim3d.h"
+#include "scene3d_math.h"
 
 /* HD art substitution (hd_replacements.c manifest entries). PNG only;
  * decoded once at startup. */
@@ -127,6 +135,80 @@ bool Diorama_IsActiveThisFrame(void) {
 }
 bool g_diorama_frame_active;
 SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
+SDL_Texture *g_sim_obj_atlas_texture;
+SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
+SDL_Texture *g_sim3d_flat_texture;
+bool g_sim3d_textures_ready;
+static bool g_sim3d_camera_dragging;
+static bool g_sim3d_camera_settings_dirty;
+static uint64_t g_sim3d_camera_settings_dirty_at;
+
+static bool Sim3D_ProfileUsesGround(SimRenderFeatureMask features) {
+  const SimRenderFeatureMask required =
+      kSimFeature_SeparatedComposite | kSimFeature_GroundProjection;
+  return (features & required) == required;
+}
+
+static bool Sim3D_FreeCameraActiveThisFrame(void) {
+  /* The drag edits the free pose. In Dynamic Cam that pose is not what the
+   * projection is built from, so a drag would silently change nothing the
+   * player can see -- worse than it simply not responding. */
+  if (g_settings.sim3d_camera_mode != kSimCam_Free) return false;
+  if (!g_settings.sim3d_mode || !Diorama_NewPpuCapable() ||
+      !g_sim3d_textures_ready ||
+      !(Sim3D_ImplementedFeatures() & kSimFeature_GroundProjection) ||
+      !ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+                                  g_ram[kActRaiserWram_CurrentMap]) ||
+      ActRaiser_SimMapPickerActive())
+    return false;
+  return Sim3D_ProfileUsesGround(Settings_Sim3DRequestedFeatures());
+}
+
+static int ClampInt(int value, int low, int high) {
+  return value < low ? low : value > high ? high : value;
+}
+
+static void Sim3D_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
+  int yaw = g_settings.sim3d_tilt_y_mrad + (int)(d_yaw * 1000.0f);
+  int pitch = g_settings.sim3d_tilt_x_mrad + (int)(d_pitch * 1000.0f);
+  g_settings.sim3d_tilt_y_mrad = ClampInt(yaw, -700, 700);
+  g_settings.sim3d_tilt_x_mrad = ClampInt(pitch, -700, 700);
+  if (d_zoom != 0.0f) {
+    float distance = g_settings.sim3d_distance_x100 > 0
+        ? (float)g_settings.sim3d_distance_x100 / 100.0f
+        : Scene3D_AutoFitDistance(0.4f);
+    distance += d_zoom;
+    if (distance < 2.0f) distance = 2.0f;
+    if (distance > 20.0f) distance = 20.0f;
+    g_settings.sim3d_distance_x100 = (int)(distance * 100.0f);
+  }
+  g_sim3d_camera_settings_dirty = true;
+  g_sim3d_camera_settings_dirty_at = SDL_GetTicks();
+  g_paused_redraw_pending = true;
+}
+
+static void Sim3D_ResetCamera(void) {
+  /* Resets the pose of the mode currently in use, not always the free one.
+   * "Reset camera" should put back whatever the player is looking through;
+   * restoring a pose that is not on screen would read as the button doing
+   * nothing. */
+  static const char *const free_keys[] = {
+    "sim3d_tilt_x_mrad", "sim3d_tilt_y_mrad", "sim3d_distance_x100",
+  };
+  static const char *const dynamic_keys[] = {
+    "sim3d_dyncam_baseline_tilt_x_mrad", "sim3d_dyncam_baseline_tilt_y_mrad",
+    "sim3d_dyncam_baseline_distance_x100",
+  };
+  const char *const *keys = g_settings.sim3d_camera_mode == kSimCam_Dynamic
+      ? dynamic_keys : free_keys;
+  for (size_t i = 0; i < 3; i++) {
+    const SettingDesc *row = Settings_Find(keys[i]);
+    if (row) Settings_Reset(row);
+  }
+  g_sim3d_camera_settings_dirty = true;
+  g_sim3d_camera_settings_dirty_at = SDL_GetTicks();
+  g_paused_redraw_pending = true;
+}
 
 /* Widescreen master switch + per-side extra-column budget — the definitions
  * for the runner's widescreen.h externs (each game defines them; 0/false =
@@ -158,7 +240,7 @@ static SDL_AtomicInt g_audio_master_percent;
  * id) so pause/resume/close can address the opened device. */
 static SDL_AudioStream *g_audio_stream;
 static bool g_audio_open;
-static void RebindPpuOutputSurfaces(void);
+void ActRaiser_RebindPpuOutputSurfaces(void);
 
 void NORETURN Die(const char *error) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
@@ -1198,6 +1280,8 @@ static bool OnSettingsAction(const SettingDesc *desc) {
     TakeFullSnapshot();
   } else if (!strcmp(desc->key, "diorama_reset")) {
     Diorama_ResetCamera();
+  } else if (!strcmp(desc->key, "sim3d_reset_camera")) {
+    Sim3D_ResetCamera();
   } else if (!strcmp(desc->key, "dump_scene_assets")) {
     if (!DumpSceneAssets()) return false;
   } else if (!strcmp(desc->key, "save_apply_session") ||
@@ -1339,7 +1423,7 @@ static void ResolveVideoGeometry(bool runtime_change) {
     memset(g_pixels, 0, sizeof(g_pixels));
     memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
     memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
-    RebindPpuOutputSurfaces();
+    ActRaiser_RebindPpuOutputSurfaces();
     ApplyDisplayPresentation();
     g_paused_redraw_pending = true;
   }
@@ -1409,7 +1493,8 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
       desc->category == kSettingCat_Widescreen)
     ApplyDisplayPresentation();
   if (desc->category == kSettingCat_Display ||
-      desc->category == kSettingCat_Widescreen)
+      desc->category == kSettingCat_Widescreen ||
+      desc->category == kSettingCat_Simulation)
     g_paused_redraw_pending = true;
   PresentThread_Resume();
 }
@@ -1724,7 +1809,7 @@ static void BindHdReplacementSurfaces(void) {
   }
 }
 
-static void RebindPpuOutputSurfaces(void) {
+void ActRaiser_RebindPpuOutputSurfaces(void) {
   if (!g_ppu) return;
   size_t pitch = (size_t)g_snes_width * 4;
   PpuBeginDrawing(g_ppu, g_pixels, pitch, 0);
@@ -1766,7 +1851,7 @@ void Diorama_OnModeChanged(void) {
   memset(g_pixels, 0, sizeof(g_pixels));
   memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
   memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
-  RebindPpuOutputSurfaces();
+  ActRaiser_RebindPpuOutputSurfaces();
   g_paused_redraw_pending = true;
   PresentThread_Resume();
 }
@@ -1802,7 +1887,7 @@ void Diorama_OnModeChanged(void) {
 static float g_diorama_velx_avg = 4.0f;
 static float g_diorama_vely_avg = 4.0f;
 
-static float NormalizeDioramaVelocity(int16_t v, float *avg) {
+static float NormalizeReactiveVelocity(int16_t v, float *avg) {
   static const float kFloor = 4.0f;
   static const float kEmaAlpha = 0.02f;      /* ~0.8s time constant @ 60Hz */
   static const float kNormMultiple = 3.0f;   /* "full lean" = 3x recent avg */
@@ -1823,6 +1908,82 @@ static bool g_diorama_prev_boost;
 static int16_t g_diorama_prev_vely;
 static uint8_t g_diorama_prev_hp;
 
+/* Sim-town reactive camera. Separate averages from the action-stage pair
+ * above: the two modes measure different actors moving at different scales,
+ * and sharing an accumulator would make every town entry re-calibrate against
+ * whatever the last action stage was doing. */
+static float g_sim_velx_avg = 4.0f;
+static float g_sim_vely_avg = 4.0f;
+static uint8_t g_sim_prev_hp;
+static bool g_sim_prev_in_town;
+
+/* Sim world-record planar velocities. The catalogue keeps every world record
+ * on one flat map, so these are the whole of the angel's motion -- there is no
+ * third axis to read and none is implied by the projection. */
+enum {
+  kSimRecordVelocityX = 0x1A,
+  kSimRecordVelocityY = 0x1C,
+};
+
+/* The pose the projection is built from this frame.
+ *
+ * Free Cam's is the player-owned one the right-drag edits and the reset action
+ * restores; Dynamic Cam has its own baseline that the reactive lean works
+ * around. Resolved in one place because two Sim3DTuning sites read it, and a
+ * camera that differed between them would be a genuinely confusing bug. */
+typedef struct SimCameraPose { int pitch_mrad, yaw_mrad, distance_x100; } SimCameraPose;
+
+static SimCameraPose Sim3D_ActivePose(void) {
+  if (g_settings.sim3d_camera_mode == kSimCam_Dynamic)
+    return (SimCameraPose){
+      g_settings.sim3d_dyncam_baseline_tilt_x_mrad,
+      g_settings.sim3d_dyncam_baseline_tilt_y_mrad,
+      g_settings.sim3d_dyncam_baseline_distance_x100,
+    };
+  return (SimCameraPose){
+    g_settings.sim3d_tilt_x_mrad,
+    g_settings.sim3d_tilt_y_mrad,
+    g_settings.sim3d_distance_x100,
+  };
+}
+
+static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
+  dst->sim_camera_mode = g_settings.sim3d_camera_mode;
+  dst->sim_dyncam_strength = g_settings.sim3d_reactive_strength;
+
+  /* Outside a town there is no angel record to read: the memory holds
+   * whatever the action stage left there. Reporting a neutral camera and
+   * resetting the edge state means re-entering a town starts level instead of
+   * inheriting a lean from a stale read. */
+  if (!in_town) {
+    dst->sim_dyncam_lean_yaw = 0.0f;
+    dst->sim_dyncam_lean_pitch = 0.0f;
+    dst->sim_dyncam_event_hit = false;
+    g_sim_prev_in_town = false;
+    return;
+  }
+
+  int16_t vel_x = (int16_t)ActRaiser_ReadWram16(
+      kActRaiserWram_SimAngelRecord + kSimRecordVelocityX);
+  int16_t vel_y = (int16_t)ActRaiser_ReadWram16(
+      kActRaiserWram_SimAngelRecord + kSimRecordVelocityY);
+  dst->sim_dyncam_lean_yaw = NormalizeReactiveVelocity(vel_x, &g_sim_velx_avg);
+  dst->sim_dyncam_lean_pitch =
+      NormalizeReactiveVelocity(vel_y, &g_sim_vely_avg);
+
+  /* Damage taken, on the frame it applies. Same reasoning as the action
+   * stage's revision: an HP decrease is the instant damage lands, whereas an
+   * invulnerability flag is set later, once hit-stun begins.
+   *
+   * The first town frame only seeds the previous value. Entering a town with
+   * less HP than the last one ended with is not a hit, and without this the
+   * camera jolts on arrival. */
+  uint8_t hp = g_ram[kActRaiserWram_AngelCurrentHp];
+  dst->sim_dyncam_event_hit = g_sim_prev_in_town && hp < g_sim_prev_hp;
+  g_sim_prev_hp = hp;
+  g_sim_prev_in_town = true;
+}
+
 /* M5 (ar-recomp-threading-impl.md Appendix D5): the sole FrameSlot writer.
  * Reads live g_ppu, g_settings, g_snes_width/height,
  * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
@@ -1831,6 +1992,47 @@ static uint8_t g_diorama_prev_hp;
  * never do this; it only reads the FrameSlot this produces. */
 void FrameSlot_Capture(FrameSlot *dst) {
   memset(dst, 0, sizeof(*dst));
+
+  /* D2 publishes only the pitch-zero separated-composite capability, and
+   * only after its same-frame CPU oracle found zero differing pixels. */
+  SimRenderMetadata_CaptureFrame(
+      &dst->sim, g_ram, g_settings.sim3d_mode,
+      Settings_Sim3DRequestedFeatures(),
+      g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
+  int sim_margin_left = 0, sim_margin_right = 0;
+  ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right);
+  SimCameraPose sim_pose = Sim3D_ActivePose();
+  Sim3D_AnnotateFrame(&dst->sim, &(Sim3DTuning){
+      .pitch_mrad = sim_pose.pitch_mrad,
+      .yaw_mrad = sim_pose.yaw_mrad,
+      .distance_x100 = sim_pose.distance_x100,
+      .height_scale_x100 = g_settings.sim3d_height_scale_x100,
+      .shadow_opacity_pct = g_settings.sim3d_shadow_opacity_pct,
+      .height_pop_pct = g_settings.sim3d_height_pop_pct,
+      .light_azimuth_deg = g_settings.sim3d_light_azimuth_deg,
+      .light_elevation_deg = g_settings.sim3d_light_elevation_deg,
+      .shadow_softness_pct = g_settings.sim3d_shadow_softness_pct,
+      .rim_strength_pct = g_settings.sim3d_rim_strength_pct,
+      .underlay_haze_pct = g_settings.sim3d_underlay_haze_pct,
+      .cloud_opacity_pct = g_settings.sim3d_cloud_opacity_pct,
+      .cloud_falloff_px = g_settings.sim3d_cloud_falloff_px,
+      .cloud_inset_px = g_settings.sim3d_cloud_inset_px,
+      .cull_lead_px = g_settings.sim3d_cull_lead_px,
+      .cull_haze_pct = g_settings.sim3d_cull_haze_pct,
+      .cull_dim_pct = g_settings.sim3d_cull_dim_pct,
+      .cull_haze_lead_px = g_settings.sim3d_cull_haze_lead_px,
+      .cull_corner_px = g_settings.sim3d_cull_corner_px,
+      .underlay_defocus_pct = g_settings.sim3d_underlay_defocus_pct,
+      .cloud_altitude_px = g_settings.sim3d_cloud_altitude_px,
+      .cloud_drift_pct = g_settings.sim3d_cloud_drift_pct,
+      .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
+      .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
+      .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
+      .sprite_margin_left = sim_margin_left,
+      .sprite_margin_right = sim_margin_right });
+  /* Accumulation itself happens once a frame at the always-run site below;
+   * this only publishes the current canvas state into the slot. */
+  dst->sim.town_canvas_serial = SimTownCanvas_Serial();
 
   dst->snes_width = g_snes_width;
   dst->snes_height = g_snes_height;
@@ -1872,9 +2074,9 @@ void FrameSlot_Capture(FrameSlot *dst) {
   int16_t vel_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityX);
   int16_t vel_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityY);
   dst->diorama_dyncam_lean_yaw =
-      NormalizeDioramaVelocity(vel_x, &g_diorama_velx_avg);
+      NormalizeReactiveVelocity(vel_x, &g_diorama_velx_avg);
   dst->diorama_dyncam_lean_pitch =
-      NormalizeDioramaVelocity(vel_y, &g_diorama_vely_avg);
+      NormalizeReactiveVelocity(vel_y, &g_diorama_vely_avg);
 
   /* B4-kick (followup doc): rising-edge event triggers. Hit was originally
    * the invuln-bit test AR_NO_KNOCKBACK already relies on elsewhere in this
@@ -1905,6 +2107,10 @@ void FrameSlot_Capture(FrameSlot *dst) {
   bool boost = g_ram[kActRaiserWram_PlayerBoost] != 0;
   dst->diorama_dyncam_event_boost = boost && !g_diorama_prev_boost;
   g_diorama_prev_boost = boost;
+
+  CaptureSimDynamicCamera(
+      dst, ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+                                      g_ram[kActRaiserWram_CurrentMap]));
   /* B1b (followup doc): the stable game-authored camera in WRAM, read
    * BEFORE HDMA touches the PPU scroll registers — see the long comment on
    * FrameSlot's timestamp_ns field (present.h) for why this replaced
@@ -2078,7 +2284,7 @@ static uint32 ComputeGameInputs(bool *stop_running) {
       if ((long)gf <= rep_last_gf) rep_started = 1;
       if (rep_started && (long)gf >= rep_last_gf) {
         fprintf(stderr, "[input-replay] reached end of recording at gf=%u — stopping\n", gf);
-        *stop_running = true;
+        *stop_running = false;
       }
     }
     if (rep && nostop && (long)gf > rep_max) inputs = rep_last_gf >= 0 ? rep[rep_last_gf] : 0;
@@ -2235,11 +2441,60 @@ static void DrawAndPresentFrame(bool headless) {
   WaitForPixelBuffersFree();
   uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
   RtlDrawPpuFrame();
+  {
+    extern int snes_frame_counter;
+    SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram, g_ppu);
+    SimFrameData sim;
+    SimRenderMetadata_CaptureFrame(
+        &sim, g_ram, g_settings.sim3d_mode,
+        Settings_Sim3DRequestedFeatures(),
+        g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
+    int sim_margin_left = 0, sim_margin_right = 0;
+    ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right);
+    SimCameraPose sim_pose = Sim3D_ActivePose();
+    Sim3D_AnnotateFrame(&sim, &(Sim3DTuning){
+        .pitch_mrad = sim_pose.pitch_mrad,
+        .yaw_mrad = sim_pose.yaw_mrad,
+        .distance_x100 = sim_pose.distance_x100,
+        .height_scale_x100 = g_settings.sim3d_height_scale_x100,
+        .shadow_opacity_pct = g_settings.sim3d_shadow_opacity_pct,
+        .height_pop_pct = g_settings.sim3d_height_pop_pct,
+        .light_azimuth_deg = g_settings.sim3d_light_azimuth_deg,
+        .light_elevation_deg = g_settings.sim3d_light_elevation_deg,
+        .shadow_softness_pct = g_settings.sim3d_shadow_softness_pct,
+        .rim_strength_pct = g_settings.sim3d_rim_strength_pct,
+        .underlay_haze_pct = g_settings.sim3d_underlay_haze_pct,
+      .cloud_opacity_pct = g_settings.sim3d_cloud_opacity_pct,
+      .cloud_falloff_px = g_settings.sim3d_cloud_falloff_px,
+      .cloud_inset_px = g_settings.sim3d_cloud_inset_px,
+      .cull_lead_px = g_settings.sim3d_cull_lead_px,
+      .cull_haze_pct = g_settings.sim3d_cull_haze_pct,
+      .cull_dim_pct = g_settings.sim3d_cull_dim_pct,
+      .cull_haze_lead_px = g_settings.sim3d_cull_haze_lead_px,
+      .cull_corner_px = g_settings.sim3d_cull_corner_px,
+      .underlay_defocus_pct = g_settings.sim3d_underlay_defocus_pct,
+      .cloud_altitude_px = g_settings.sim3d_cloud_altitude_px,
+      .cloud_drift_pct = g_settings.sim3d_cloud_drift_pct,
+      .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
+      .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
+      .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
+      .sprite_margin_left = sim_margin_left,
+      .sprite_margin_right = sim_margin_right });
+    /* This site runs on every frame including headless, unlike
+     * FrameSlot_Capture, which only runs when a present thread consumes it. */
+    Sim3D_RenderTownCanvas(&sim, g_ram, g_ppu);
+    sim.town_canvas_serial = SimTownCanvas_Serial();
+    Sim3D_LogViewTransition(&sim);
+    SceneInspector_SetSimFrameData(&sim);
+    SimRenderMetadata_TraceFrame(
+        (uint32)snes_frame_counter, &sim, g_pixels,
+        g_snes_width, g_snes_height, g_snes_width * 4);
+  }
   if (g_diorama_dump_pending) {
     DumpDioramaLayers();
     g_diorama_dump_pending = false;
     if (!g_settings.diorama_mode)
-      RebindPpuOutputSurfaces();
+      ActRaiser_RebindPpuOutputSurfaces();
   }
   g_paused_redraw_pending = false;
   if (perf_on) {
@@ -2335,6 +2590,12 @@ static void RunOuterIterationHousekeeping(void) {
   }
 
   Diorama_FlushSettingsIfDirty();
+  if (g_sim3d_camera_settings_dirty && !g_sim3d_camera_dragging &&
+      SDL_GetTicks() - g_sim3d_camera_settings_dirty_at > 500) {
+    g_sim3d_camera_settings_dirty = false;
+    if (!Settings_Save("settings.ini"))
+      fprintf(stderr, "[sim3d] failed to persist camera settings\n");
+  }
 
   /* Auto-persist battery SRAM the moment the game writes a save, so progress
    * survives a freeze/force-quit (the clean-exit save-system write never runs
@@ -2455,7 +2716,9 @@ int main(int argc, char **argv) {
   /* Resolve application and game settings before allocating presentation
    * resources. Known config.ini values were staged by ParseConfigFile;
    * settings.ini overrides them, and real environment variables win last. */
-  Settings_InitWithFile("settings.ini");
+  const char *settings_path = getenv("AR_SETTINGS_PATH");
+  if (!settings_path || !settings_path[0]) settings_path = "settings.ini";
+  Settings_InitWithFile(settings_path);
   g_active_audio_frequency = Settings_AudioFrequencyHz();
   g_active_audio_samples = g_settings.audio_samples;
   ResolveVideoGeometry(false);
@@ -2511,11 +2774,24 @@ int main(int argc, char **argv) {
     /* Window sized to the DISPLAY aspect: with the 4:3-corrected PAR the
      * rendered width (e.g. 342) is narrower than the displayed width (16:9 of
      * the height), so derive the window from the target ratio, not the
-     * framebuffer. Faithful mode keeps the historical g_snes_width*scale. */
-    int win_w = g_snes_width * scale;
-    if (g_ws_active && g_active_pixel_aspect == kPixelAspect_Crt43)
+     * framebuffer. Faithful mode keeps the historical width*scale.
+     *
+     * Must use the DISPLAY crop (Settings_VisibleWidth), not g_snes_width:
+     * diorama mode inflates the render width to the full kWsExtraMax margin
+     * (ResolveVideoGeometry) while the displayed width stays aspect-derived,
+     * so g_snes_width here booted the window wider than the configured screen
+     * ratio. Mirrors ApplyDisplayPresentation, which is what fixes it up on
+     * any later runtime aspect change. */
+    int vis_w = Settings_VisibleWidth();
+    int win_w = vis_w * scale;
+    if (g_settings.display_mode == kDisplayMode_43) {
+      /* 256px at the 7:6 CRT PAR displays as 4:3. */
+      if (g_active_pixel_aspect == kPixelAspect_Crt43)
+        win_w = (g_snes_height * scale * 4 + 1) / 3;
+    } else if (g_ws_active && g_active_pixel_aspect == kPixelAspect_Crt43) {
       win_w = (g_snes_height * scale * g_active_aspect_x +
                g_active_aspect_y / 2) / g_active_aspect_y;
+    }
     /* SDL3 merged FULLSCREEN_DESKTOP into FULLSCREEN (borderless desktop is
      * the default fullscreen mode when no exclusive video mode is set). */
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE |
@@ -2581,10 +2857,10 @@ int main(int argc, char **argv) {
      * restores plain stretching. LETTERBOX matches SDL2's logical-size look. */
     if (g_ws_active && !g_settings.ignore_aspect_ratio) {
       if (g_active_pixel_aspect == kPixelAspect_Crt43)
-        SDL_SetRenderLogicalPresentation(g_renderer, g_snes_width * 7,
+        SDL_SetRenderLogicalPresentation(g_renderer, vis_w * 7,
             g_snes_height * 6, SDL_LOGICAL_PRESENTATION_LETTERBOX);
       else
-        SDL_SetRenderLogicalPresentation(g_renderer, g_snes_width,
+        SDL_SetRenderLogicalPresentation(g_renderer, vis_w,
             g_snes_height, SDL_LOGICAL_PRESENTATION_LETTERBOX);
     }
 
@@ -2618,6 +2894,59 @@ int main(int argc, char **argv) {
      * SDL2 relied on is gone in SDL3). */
     SDL_SetTextureScaleMode(g_hud_bg_texture, SDL_SCALEMODE_NEAREST);
     SDL_SetTextureScaleMode(g_hud_obj_texture, SDL_SCALEMODE_NEAREST);
+
+    /* D1b semantic OBJ atlas. It is uploaded every supported SIM frame but is
+     * not selected by the compositor until the later separated-composite
+     * capability lands, keeping this checkpoint visually authentic. */
+    g_sim_obj_atlas_texture = SDL_CreateTexture(
+        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+        kSimObjAtlasWidth, kSimObjAtlasHeight);
+    if (g_sim_obj_atlas_texture) {
+      SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
+      SDL_SetTextureScaleMode(g_sim_obj_atlas_texture, SDL_SCALEMODE_NEAREST);
+      /* Static storage is zero-initialized before the game thread starts. */
+      SDL_UpdateTexture(g_sim_obj_atlas_texture, NULL,
+                        g_sim_obj_atlas_pixels, kSimObjAtlasPitch);
+    } else {
+      fprintf(stderr, "[sim3d-d1] semantic atlas texture unavailable: %s\n",
+              SDL_GetError());
+    }
+
+    /* D2's observational Mode-1 capture family. Layer textures are retained
+     * for inspector/future geometry use; the pitch-zero reference and its
+     * absolute-difference image have dedicated opaque streaming textures. */
+    g_sim3d_textures_ready = true;
+    for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+      g_sim3d_layer_textures[plane] = SDL_CreateTexture(
+          g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+          kSim3DMaxWidth, kSim3DMaxHeight);
+      if (!g_sim3d_layer_textures[plane]) {
+        g_sim3d_textures_ready = false;
+        break;
+      }
+      SDL_SetTextureBlendMode(g_sim3d_layer_textures[plane],
+                              SDL_BLENDMODE_BLEND);
+      SDL_SetTextureScaleMode(g_sim3d_layer_textures[plane],
+                              SDL_SCALEMODE_NEAREST);
+    }
+    g_sim3d_flat_texture = SDL_CreateTexture(
+        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+        kSim3DMaxWidth, kSim3DMaxHeight);
+    if (!g_sim3d_flat_texture)
+      g_sim3d_textures_ready = false;
+    if (g_sim3d_textures_ready) {
+      SDL_SetTextureBlendMode(g_sim3d_flat_texture, SDL_BLENDMODE_NONE);
+      SDL_SetTextureScaleMode(g_sim3d_flat_texture, SDL_SCALEMODE_NEAREST);
+    } else {
+      fprintf(stderr, "[sim3d-d2] capture textures unavailable: %s\n",
+              SDL_GetError());
+      for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+        SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
+        g_sim3d_layer_textures[plane] = NULL;
+      }
+      SDL_DestroyTexture(g_sim3d_flat_texture);
+      g_sim3d_flat_texture = NULL;
+    }
 
     LoadHdReplacements();
 
@@ -2665,10 +2994,26 @@ int main(int argc, char **argv) {
     free(zero_fill);
 
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
+
+    /* Take keyboard focus on launch. A window created by SDL is ordered in
+     * but the process is not necessarily activated — launched from a terminal
+     * (or as an un-bundled binary on macOS) the shell keeps focus and the
+     * game starts behind it, silently swallowing input until the user clicks
+     * on it. SDL_RaiseWindow both raises and, with the default
+     * SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, activates the application.
+     * Deliberately last in the video setup so focus lands on a window that is
+     * fully configured, and skipped for headless_video (that window is
+     * SDL_WINDOW_HIDDEN and must never steal focus from a batch run). */
+    if (!headless_video && !SDL_RaiseWindow(g_window))
+      fprintf(stderr, "[window] could not raise to foreground: %s\n",
+              SDL_GetError());
   }
 
   if (!SettingsOverlay_Init(g_renderer, rom_data, rom_size))
     Die("SDL font atlas creation for settings overlay failed");
+  /* The world map underlay reads three uncompressed ROM blobs once. A failure
+   * is not fatal: the stage reports nothing usable and simply never draws. */
+  SimWorldMap_Init(rom_data, rom_size);
   SettingsOverlay_SetInspectorInfoProvider(FormatInspectorInfo);
 
   Settings_SetChangeObserver(OnRuntimeSettingChanged);
@@ -2686,6 +3031,9 @@ int main(int argc, char **argv) {
     MusicReplacements_InstallHooks();
   }
 
+  /* After music: the census chains the APU port seam music installs. */
+  SfxCensus_Init();
+
   g_spc_player = ActRaiserSpcPlayer_Create();
 
   RtlRegisterGame(&kActRaiserGameInfo);
@@ -2693,7 +3041,7 @@ int main(int argc, char **argv) {
   if (!snes) Die("SnesInit failed");
 
   BindHdReplacementSurfaces();
-  RebindPpuOutputSurfaces();
+  ActRaiser_RebindPpuOutputSurfaces();
   /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
    * centered in the wide framebuffer). Re-applied every frame by
    * ActRaiser_ApplyWidescreenPolicy since ppu_reset zeroes these fields. */
@@ -2985,6 +3333,12 @@ int main(int argc, char **argv) {
               Diorama_SetDragging(true);
             else if (event.button.button == SDL_BUTTON_MIDDLE)
               Diorama_ResetCamera();
+          } else if (!SettingsOverlay_IsOpen() &&
+                     Sim3D_FreeCameraActiveThisFrame()) {
+            if (event.button.button == SDL_BUTTON_RIGHT)
+              g_sim3d_camera_dragging = true;
+            else if (event.button.button == SDL_BUTTON_MIDDLE)
+              Sim3D_ResetCamera();
           } else if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
               CloseSceneInspectorSelection();
@@ -3007,6 +3361,11 @@ int main(int argc, char **argv) {
             Diorama_AdjustCamera(event.motion.xrel * Diorama_DragRadPerPx(),
                                  event.motion.yrel * Diorama_DragRadPerPx(),
                                  0.0f);
+          } else if (g_sim3d_camera_dragging &&
+                     Sim3D_FreeCameraActiveThisFrame()) {
+            Sim3D_AdjustCamera(event.motion.xrel * Diorama_DragRadPerPx(),
+                               event.motion.yrel * Diorama_DragRadPerPx(),
+                               0.0f);
           } else if (SettingsOverlay_IsDebugPanelDragging()) {
             int output_x = 0, output_y = 0;
             if (WindowPointToOutput((int)event.motion.x, (int)event.motion.y,
@@ -3019,10 +3378,16 @@ int main(int argc, char **argv) {
           if (!SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame())
             Diorama_AdjustCamera(0.0f, 0.0f,
                                  -event.wheel.y * Diorama_ZoomStep());
+          else if (!SettingsOverlay_IsOpen() &&
+                   Sim3D_FreeCameraActiveThisFrame())
+            Sim3D_AdjustCamera(0.0f, 0.0f,
+                               -event.wheel.y * Diorama_ZoomStep());
           break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
-          if (event.button.button == SDL_BUTTON_RIGHT)
+          if (event.button.button == SDL_BUTTON_RIGHT) {
             Diorama_SetDragging(false);
+            g_sim3d_camera_dragging = false;
+          }
           if (event.button.button == SDL_BUTTON_LEFT)
             SettingsOverlay_EndDebugPanelDrag();
           break;
@@ -3153,6 +3518,12 @@ int main(int argc, char **argv) {
   }
   DumpDiagState(g_host_lifecycle_request == kHostLifecycle_Restart
                     ? "restart" : "exit");
+  SimPhase0Trace_Close();
+  SimRenderMetadata_TraceClose();
+
+  /* Before tearing down audio: the census reads only its own accumulators,
+   * but the report should land while the run dir is still current. */
+  SfxCensus_Report();
 
   /* SDL_DestroyAudioStream also closes the bound device (replaces the SDL2
    * SDL_CloseAudio path). */
@@ -3164,6 +3535,10 @@ int main(int argc, char **argv) {
     free(g_hd_replacements[i].pixels);
   }
   SDL_DestroyTexture(g_m7_texture);
+  SDL_DestroyTexture(g_sim_obj_atlas_texture);
+  for (int plane = 0; plane < kSim3DPlane_Count; plane++)
+    SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
+  SDL_DestroyTexture(g_sim3d_flat_texture);
   SettingsOverlay_Destroy();
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);

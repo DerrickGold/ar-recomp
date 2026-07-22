@@ -10,10 +10,11 @@
  * AR_WS_MARGIN_ACTIVATION=0 restores the authentic $0400 boundary; Stage D2
  * is enabled by default after direct Fillmore validation.
  *
- * $01:B4C6 is the town camera follow/clamp. Its faithful port keeps the wide
- * viewport inside the 512px world before OAM is composed. $01:ADAD/$01:AE6F
- * widen only $0A00+ world records, and $01:B473 extends the dedicated angel-
- * projectile lifetime check to the same finite horizontal window.
+ * $01:B4C6 is the town camera follow/clamp. Its faithful port preserves the
+ * ROM's complete 0..256 camera range; the PPU narrows only the unavailable
+ * side margin at a finite-world edge. $01:ADAD/$01:AE6F widen only $0A00+
+ * world records, and $01:B473 extends the dedicated angel-projectile lifetime
+ * check to the same finite horizontal window.
  * AR_WS_SIM=0 restores the authentic camera; AR_WS_SIM_SPRITES=0 keeps both
  * sprite/projectile predicates authentic. */
 
@@ -21,6 +22,7 @@
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "settings.h"
+#include "sim_render_metadata.h"
 #include "snes/ppu.h"
 
 #include <stdio.h>
@@ -104,6 +106,13 @@ enum {
   kSimOamBiasedWidth = kActRaiserAuthenticWidth + kSpriteDrawBias,
   kSimOamBiasedHeight = 0x00F0,
 };
+
+/* Sim3D_CullProximity mirrors this window so it can be evaluated without a
+ * CPU. The mirror is only sound while the two agree. */
+_Static_assert(kSimOamBiasedWidth == kSimSpriteWindowBiasedWidth,
+               "cull-lead window drifted from the emitter's x predicate");
+_Static_assert(kSimOamBiasedHeight == kSimSpriteWindowBiasedHeight,
+               "cull-lead window drifted from the emitter's y predicate");
 
 static inline uint16 ws_dp16(CpuState *cpu, uint16 off) {
   uint16 a = (uint16)(cpu->D + off);
@@ -749,6 +758,43 @@ static void ws_sim_live_margins(int *left, int *right) {
   *right = available_right < g_ws_extra ? available_right : g_ws_extra;
 }
 
+void ActRaiser_SimSpriteMargins(int *left, int *right) {
+  ws_sim_live_margins(left, right);
+}
+
+/* Widening the SIM sprite emitter for the 3D view: PROTOTYPED, MEASURED, AND
+ * REVERTED 2026-07-22. Recorded because both directions look obviously right
+ * and both are wrong.
+ *
+ * HORIZONTAL. Lifting the emitter's predicate from the widescreen `g_ws_extra`
+ * cap to the whole finite town admitted +16.9% more sprites, left the
+ * source-record count byte-identical (so it stayed observational), and passed
+ * the D2 gate at zero mismatch. It still had to come out: OAM X is nine bits
+ * over a 512-wide town, so once the margin reaches the wrap the emitter admits
+ * parts on both sides of it, and enemies appear wrapped onto the opposite edge
+ * of the map. The same wrap is what blew up a multi-part composition's union
+ * bounding box past the 512-pixel atlas (ledger 24). The `g_ws_extra` cap was
+ * doing more than bounding the widescreen margin; it was keeping the emitter
+ * clear of the wrap.
+ *
+ * VERTICAL. PpuObjScreenY reads the Y byte as `y >= 224 ? y - 256 : y`, so it
+ * expresses screen rows -32..223: the 32 rows above the screen look free, and
+ * there is no ninth Y bit to extend downward with. But a part at row -5 with a
+ * 16-pixel body draws rows 0..10 -- inside the authentic 224-row viewport --
+ * so admitting them makes sprite pixels appear that the original game hides.
+ * A checkpoint run confirmed it by failing the authentic-framebuffer
+ * comparison (ledger 25).
+ *
+ * Whichever direction, the emitter must never feed `ws_sim_live_margins`'s
+ * consumer either: that predicate's false result *destroys* the record
+ * ($B44B branches to destruction on carry set), so widening it would change
+ * projectile lifetime and world-record slot pressure -- gameplay, not
+ * presentation.
+ *
+ * The area the 3D view draws but OAM cannot populate is instead shrouded, so
+ * an empty extension never reads as missing actors. See the cloud shroud in
+ * `src/present.c`. */
+
 /* AR_SIMCAT=1 is a read-only ROM-research probe for the simulation rendering
  * catalogue.  The composition leaves are the one place where record identity,
  * behavior state, current visual frame, OAM allocation, and live OBJ registers
@@ -896,12 +942,14 @@ static uint16 ws_sim_authentic_camera(uint16 target, uint16 center,
  *
  *   cameraX = clamp($0AEE-$80, 0, $100)
  *
- * for a 512px world and 256px viewport. A wide viewport must instead keep
- * [cameraX-extra, cameraX+$100+extra) inside [0,$200), yielding
- * [extra,$100-extra]. Apply the same bounds to transient camera shake so an
- * outward shake cannot reveal a cleared margin at a map edge. Vertical follow,
- * both shake fields, their one-frame clear, final A=0, caller P/DB, and the RTL
- * stack contract remain authentic.
+ * for a 512px world and 256px viewport. Earlier Wide Full code additionally
+ * clamped this to [extra,$100-extra] and depended on synthesized margin columns
+ * for the map edges. That made the left/right 43 columns unreachable at 16:9
+ * whenever margin reconstruction was incomplete, while Wide Raw still exposed
+ * the real edge. Preserve the ROM's 0..$100 range and let
+ * PpuSetExtraSideSpace independently collapse the unavailable outer margin.
+ * Vertical follow, both shake fields, their one-frame clear, final A=0,
+ * caller P/DB, and the RTL stack contract remain authentic.
  *
  * RAW widescreen deliberately retains the native camera as a before/after
  * reference. AR_WS_SIM=0 and non-town $00 submodes do the same. */
@@ -924,11 +972,8 @@ RecompReturn ActRaiser_UpdateSimCamera(CpuState *cpu) {
       g_settings.display_mode != kDisplayMode_WideRaw &&
       ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
                                  g_ram[kActRaiserWram_CurrentMap]);
-  int margin = wide ? g_ws_extra : 0;
-  if (margin < 0) margin = 0;
-  if (margin > kSimCameraCenterX) margin = kSimCameraCenterX;
-  const uint16 left = (uint16)margin;
-  const uint16 right = (uint16)(kActRaiserTownCameraMaximumX - margin);
+  const uint16 left = 0;
+  const uint16 right = kActRaiserTownCameraMaximumX;
   if (camera_x < left) camera_x = left;
   if (camera_x > right) camera_x = right;
 
@@ -1146,13 +1191,27 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
 
   uint16 part = cpu_read16(
       cpu, cpu->DB, (uint16)(record + kSimRecord_Composition));
-  ws_sim_catalog_record(cpu, record, world_record, part,
-                        ws_dp16(cpu, 0x98));
+  const uint16 oam_before = ws_dp16(cpu, 0x98);
+  ws_sim_catalog_record(cpu, record, world_record, part, oam_before);
+  SimRenderMetadata_BeginRecord(
+      record, world_record != 0, alternate_attr != 0, part,
+      cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_WorldX)),
+      cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_WorldY)),
+      cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_Type)),
+      world_record
+          ? (uint16)(cpu_read16(
+                cpu, cpu->DB, (uint16)(record + kSimRecord_State)) & 0x7FFF)
+          : 0,
+      cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_Status)),
+      oam_before);
+  /* The biased origin the window predicate below is about to be applied to,
+   * handed over rather than re-derived: see SimRenderMetadata_RecordAnchor. */
+  SimRenderMetadata_RecordAnchor((int16_t)base_x, (int16_t)base_y);
   uint16 count = cpu_read8(cpu, cpu->DB, part);
   part = (uint16)(part + 1);
   ws_dp16w(cpu, 0x0E, count);
 
-  uint16 oam = ws_dp16(cpu, 0x98);
+  uint16 oam = oam_before;
   uint16 final_a = 0;
   int final_c = 0;
   unsigned part_index = 0;
@@ -1196,6 +1255,7 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
             ? (uint16)((raw_attr & 0xF1FF) | 0x0600 | ws_dp16(cpu, 0x8F))
             : (uint16)(raw_attr | ws_dp16(cpu, 0x8F));
         cpu_write16(cpu, cpu->DB, (uint16)(0x0382 + oam), attr);
+        SimRenderMetadata_RecordPart(oam, attr);
         final_a = attr;
 
         if (world_record && !authentic_x && ws_sim_sprite_debug_enabled()) {
@@ -1229,9 +1289,11 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
         /* The ROM has already touched x/high bits at this point, then parks
          * the unallocated low-table slot without advancing either cursor. */
         cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
+        SimRenderMetadata_RecordClippedPart(kSimClip_Vertical);
       }
     } else {
       cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
+      SimRenderMetadata_RecordClippedPart(kSimClip_Horizontal);
     }
 
     {
@@ -1245,6 +1307,7 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
     part_index++;
   } while (count != 0);
 
+  SimRenderMetadata_EndRecord(oam);
   ws_dp16w(cpu, 0x98, oam);
   cpu->A = final_a;
   cpu->X = record;  /* PLX */

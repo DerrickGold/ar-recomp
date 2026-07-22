@@ -63,6 +63,10 @@ enum {
   /* Do not merge captured pixels back into either main or subscreen. The host
    * can then reinsert them without a duplicate remaining in renderBuffer. */
   kPpuOverlayFlag_RemoveFromGame = 1,
+  /* Preserve the SNES OBJ color-math eligibility in captured ARGB alpha:
+   * palette groups 4-7 use alpha $80, groups 0-3 remain opaque. This is an
+   * extraction-only annotation; it never changes authentic PPU scanout. */
+  kPpuOverlayFlag_MarkObjColorMath = 2,
 };
 
 /* Mode-7 canvas-space texture override (per-frame game policy, cleared with
@@ -94,6 +98,14 @@ typedef struct PpuOverlayCapture {
    * semantic identity (HUD icon, portrait, etc.) before supplying the range. */
   uint8_t oamFirst, oamCount;
 } PpuOverlayCapture;
+
+/* Screen-space bounds of one semantic OAM range. Endpoints are exclusive.
+ * The range raster API below decodes complete OBJ graphics (including pixels
+ * outside the current visible viewport) so a game can pack them into an
+ * isolated host atlas without cropping the already-composited framebuffer. */
+typedef struct PpuObjRangeBounds {
+  int16_t x0, y0, x1, y1;
+} PpuObjRangeBounds;
 
 enum {
   kPpuRenderFlags_NewRenderer = 1,
@@ -355,6 +367,20 @@ uint8_t ppu_read(Ppu* ppu, uint8_t adr);
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val);
 void ppu_saveload(Ppu *ppu, SaveLoadInfo *sli);
 void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_flags);
+
+/* Reusable semantic-OBJ extraction. `first/count` select contiguous OAM slots
+ * and every selected slot must have `priority` (the raw 0..3 OAM priority).
+ * Bounds use the renderer's live OBJ size/high-bit/widescreen wrap policy.
+ * Rasterization clears the supplied rectangle, then resolves overlapping
+ * parts in the PPU's live OAM priority-rotation order. Colors use the same
+ * VRAM tile, flip, palette, and master-brightness conversion as scanout.
+ * These functions never mutate OAM, VRAM, or CGRAM. */
+bool PpuGetObjRangeBounds(Ppu *ppu, uint8_t first, uint8_t count,
+                          uint8_t priority, PpuObjRangeBounds *out);
+bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
+                          uint8_t priority, const PpuObjRangeBounds *bounds,
+                          uint32_t *pixels, int width, int height,
+                          size_t pitch);
 
 // Clear/bind persistent transparent ARGB host-overlay surfaces. Bindings survive
 // ppu_reset; capture rectangles do not and are configured by game policy each

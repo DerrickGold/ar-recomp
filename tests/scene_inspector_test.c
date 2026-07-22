@@ -29,6 +29,7 @@ static void ResetPpu(void) {
   s_ppu.extraRightCur = 43;
   g_ram[0x18] = 1;
   g_ram[0x19] = 2;
+  SceneInspector_SetSimFrameData(NULL);
   SceneInspector_Clear();
 }
 
@@ -66,6 +67,45 @@ static void TestObjectIdentity(void) {
   int x0, y0, x1, y1;
   CHECK(SceneInspector_GetHighlight(&x0, &y0, &x1, &y1));
   CHECK(x0 == 20 && y0 == 30 && x1 == 28 && y1 == 38);
+
+  SimFrameData sim = {0};
+  sim.town = 1;
+  sim.view = kSimView_Enhanced;
+  sim.metadata_valid = true;
+  sim.build_serial = 42;
+  sim.requested_features = kSimFeature_All;
+  sim.separated_valid = true;
+  sim.separated_status = kSim3DCapture_Ready;
+  sim.separated_hash = UINT64_C(0x123456789abcdef0);
+  sim.object_count = 1;
+  sim.objects[0] = (SimRenderObject){
+    .record_address = 0x0A00,
+    .composition = 0xE71B,
+    .oam_first = slot,
+    .oam_count = 1,
+    .priority = 2,
+    .tier = kSimRecordTier_World,
+    .foot_x = 120,
+    .foot_y = 104,
+  };
+  /* The panel must report the classifier's own verdict for this Napper
+   * ground-pluck composition, not a second inspector-local guess. */
+  SimObjectClassification classification = Sim3D_ClassifyObject(
+      sim.objects[0].tier, 0x13, 11, sim.objects[0].record_address,
+      sim.objects[0].composition);
+  sim.objects[0].height_class = classification.height_class;
+  sim.objects[0].virtual_height = classification.virtual_height;
+  sim.objects[0].traits = classification.traits;
+  SceneInspector_SetSimFrameData(&sim);
+  CHECK(SceneInspector_Select(22, 32));
+  CHECK(strstr(SceneInspector_PanelText(),
+               "SIM3D enhanced META OK SERIAL 42") != NULL);
+  CHECK(strstr(SceneInspector_PanelText(),
+               "FLAT READY STATUS ready MISMATCH 0 "
+               "HASH 123456789ABCDEF0") != NULL);
+  CHECK(strstr(SceneInspector_PanelText(),
+               "SIMW REC$0A00 CMP$E71B OAM3+1 P2 FOOT120,104 "
+               "semi_grounded H8 ATLAS PENDING") != NULL);
 }
 
 static void TestPlaneFiltering(void) {

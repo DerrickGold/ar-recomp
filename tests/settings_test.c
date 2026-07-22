@@ -59,14 +59,11 @@ static void TestDefaultsAndMetadata(void) {
   g_ws_extra = g_ws_display_extra = 43;
   Settings_Init();
 
-  /* +6 for kSettingCat_Graphics (gpu_shaders_enabled, gpu_fx_rim/dof/edgeaa/
-   * shadow, gpu_interp_enabled), -1 for A4's removal of the inert
-   * diorama_sprite_upright row, +1 for A5's diorama_hud_flat, +1 for B1a's
-   * uncapped_framerate, +1 for B4-mode's diorama_camera_mode, +4 for
-   * B4-baseline's diorama_dyncam_baseline_tilt_x/y_mrad,
-   * diorama_dyncam_baseline_distance_x100, diorama_reactive_strength, +1 for
-   * B5's diorama_skybox, +1 for B6's diorama_shoebox (followup doc). */
-  CHECK(g_setting_desc_count == 127);
+  /* Count moves whenever a category gains or loses rows; the SIM 3D block
+   * most recently gained the world-map underlay and cloud-shroud stage
+   * toggles with their haze/density/falloff/inset dials, on top of the nine
+   * named stage toggles and the shadow/height-pop tuning rows. */
+  CHECK(g_setting_desc_count == 172);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -103,6 +100,34 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.turbo_multiplier == 8);
   CHECK(g_settings.warp_target == 0x0101);
   CHECK(!g_settings.scene_inspector);
+  CHECK(!g_settings.sim3d_mode);
+  /* The stage toggles are what the player's master switch resolves, so a
+   * landed stage missing from these defaults is dead in normal play. They must
+   * agree with kSim3DShippedFeatures; bump both as each visual gate passes. */
+  CHECK(Settings_Sim3DRequestedFeatures() == kSim3DShippedFeatures);
+  CHECK(g_settings.sim3d_separated_composite);
+  CHECK(g_settings.sim3d_ground_projection);
+  CHECK(g_settings.sim3d_object_billboards);
+  CHECK(g_settings.sim3d_virtual_height);
+  CHECK(g_settings.sim3d_shadows);
+  CHECK(g_settings.sim3d_backdrop);
+  CHECK(g_settings.sim3d_soft_shadows);
+  CHECK(g_settings.sim3d_rim_light);
+  CHECK(!g_settings.sim3d_picker_exit_ease);
+  CHECK(g_settings.sim3d_diagnostic_layers == 0);
+  /* Camera baseline captured from a tuned session (2026-07-22), not derived:
+   * see the note on the sim3d defaults in settings.c. Distance is now a real
+   * pinned zoom rather than 0, which meant "auto-fit to the scene". */
+  CHECK(g_settings.sim3d_tilt_x_mrad == -575);
+  CHECK(g_settings.sim3d_tilt_y_mrad == 0);
+  CHECK(g_settings.sim3d_distance_x100 == 300);
+  /* D3c ships the catalogue heights unscaled; 0 is a valid "ground every
+   * billboard" tuning value, so it must not double as the default. */
+  CHECK(g_settings.sim3d_height_scale_x100 == 100);
+  const SettingDesc *height_scale = Settings_Find("sim3d_height_scale_x100");
+  CHECK(height_scale && height_scale->category == kSettingCat_Simulation);
+  CHECK(height_scale && height_scale->minval == 0 &&
+        height_scale->maxval == 400 && height_scale->defval == 100);
   CHECK(g_settings.save_backend == 0);
   CHECK(!g_settings.save_edit_armed && g_settings.save_autobackup);
   CHECK(g_settings.save_editor_page == kSaveEditorPage_Progress);
@@ -154,6 +179,8 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *save_apply = Settings_Find("save_apply_persist");
   const SettingDesc *inspector = Settings_Find("scene_inspector");
   const SettingDesc *dump_assets = Settings_Find("dump_scene_assets");
+  const SettingDesc *sim_mode = Settings_Find("sim3d_mode");
+  const SettingDesc *sim_reset = Settings_Find("sim3d_reset_camera");
   CHECK(display && display->type == kSettingType_Enum);
   CHECK(display && display->enum_count == kDisplayMode_PresetCount);
   CHECK(volume && volume->category == kSettingCat_Audio);
@@ -179,6 +206,9 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(inspector && inspector->category == kSettingCat_Inspector);
   CHECK(dump_assets && dump_assets->category == kSettingCat_Inspector &&
         dump_assets->type == kSettingType_Action);
+  CHECK(sim_mode && sim_mode->category == kSettingCat_Simulation);
+  CHECK(sim_reset && sim_reset->category == kSettingCat_Simulation &&
+        sim_reset->type == kSettingType_Action);
   CHECK(save_backend && save_backend->category == kSettingCat_Save &&
         save_backend->apply == kApply_Restart);
   CHECK(save_fillmore && save_fillmore->apply == kApply_Save &&
@@ -196,6 +226,7 @@ static void TestDefaultsAndMetadata(void) {
   g_ram[0x18] = 1;
   CHECK(hp && Settings_IsAvailable(hp));
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Widescreen), "Widescreen"));
+  CHECK(!strcmp(Settings_CategoryName(kSettingCat_Simulation), "Simulation"));
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Extras), "Extras"));
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Inspector), "Inspector"));
   CHECK(!strcmp(Settings_ApplyKindName(kApply_Restart), "Restart required"));
@@ -210,6 +241,27 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_InvokeAction(exit_action));
   CHECK(s_action_calls == 3 && s_action_desc == exit_action);
   Settings_SetActionObserver(NULL);
+}
+
+static void TestSim3DEnvironmentLabels(void) {
+  ClearSettingsEnv();
+  setenv("AR_SIM3D", "on", 1);
+  setenv("AR_SIM3D_SHADOWS", "off", 1);
+  setenv("AR_SIM3D_HEIGHT", "off", 1);
+  setenv("AR_SIM3D_PITCH", "350", 1);
+  Settings_Init();
+  CHECK(g_settings.sim3d_mode);
+  /* Turning stages off by name is the only way to select a profile now, and
+   * the fold must drop exactly those bits. */
+  CHECK(!g_settings.sim3d_shadows && !g_settings.sim3d_virtual_height);
+  CHECK(Settings_Sim3DRequestedFeatures() ==
+        (kSimFeature_SeparatedComposite | kSimFeature_GroundProjection |
+         kSimFeature_ObjectBillboards | kSimFeature_SoftShadows |
+         kSimFeature_RimLight | kSimFeature_WorldUnderlay |
+         kSimFeature_CloudShroud | kSimFeature_CullHaze |
+         kSimFeature_Backdrop));
+  CHECK(g_settings.sim3d_tilt_x_mrad == 350);
+  ClearSettingsEnv();
 }
 
 static bool WriteTextFile(const char *path, const char *text) {
@@ -609,6 +661,7 @@ static void TestNoWideBudget(void) {
 
 int main(void) {
   TestDefaultsAndMetadata();
+  TestSim3DEnvironmentLabels();
   TestConfigSettingsEnvironmentPrecedence();
   TestLegacySeedEncodings();
   TestMutationApi();

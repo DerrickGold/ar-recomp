@@ -110,6 +110,26 @@ enum {
   kActRaiserWram_SimWorldRecords = 0x0A00,
   kActRaiserWram_SimCameraTargetX = 0x0AEE,
   kActRaiserWram_SimCameraTargetY = 0x0AF0,
+  /* World record indices 6 and 7. The angel is driven by its own subsystem
+   * (class $0C is a no-op handler); the arrow is an ordinary world record
+   * whose $01:B473 lifetime/culling remains authentic gameplay. */
+  kActRaiserWram_SimAngelRecord = 0x0AE4,
+  kActRaiserWram_SimAngelArrowRecord = 0x0B0A,
+
+  /* $7F-bank simulation command state. g_ram mirrors $7E:0000-$7F:FFFF,
+   * hence the explicit +$10000 host offsets. $7F:9215 is set by the still-
+   * unclassified type-$0B picker ($01:93E4), Direct the People's on-screen
+   * Building Direction picker ($01:9737), and the shared targeted-miracle
+   * picker ($01:975C); their confirm/cancel paths clear it.
+   * $7F:7CA1 is the pending world/structure type consumed by the allocation
+   * path. The $01:93DC picker stages $000B while Direct the People and the
+   * targeted-miracle path both stage $0009, so it is evidence but not a complete
+   * picker-operation discriminator. */
+  kActRaiserWram_SimPendingWorldType = 0x17CA1,
+  kActRaiserWram_SimAimedMapCellX = 0x190E1,
+  kActRaiserWram_SimAimedMapCellY = 0x190E5,
+  kActRaiserWram_SimMiracleKind = 0x190EB,
+  kActRaiserWram_SimMapPickerFlag = 0x19215,
 };
 
 enum {
@@ -193,16 +213,52 @@ static inline void ActRaiser_WriteWram16(uint16 address, uint16 value) {
   g_ram[(uint16)(address + 1)] = (uint8)(value >> 8);
 }
 
+/* Full 128-KiB $7E/$7F mirror access. Keep this distinct from the established
+ * low-WRAM helper so a bank-$7F semantic address cannot silently truncate to
+ * 16 bits at the call boundary. */
+static inline uint16 ActRaiser_ReadWramMirror16(uint32 address) {
+  return (uint16)(g_ram[address] | (g_ram[address + 1] << 8));
+}
+
+static inline void ActRaiser_WriteWramMirror16(uint32 address, uint16 value) {
+  g_ram[address] = (uint8)value;
+  g_ram[address + 1] = (uint8)(value >> 8);
+}
+
 static inline int ActRaiser_IsActionMapGroup(uint8 map_group) {
   return map_group >= kActRaiserActionMapGroup_First &&
          map_group <= kActRaiserActionMapGroup_Last;
 }
+
+/* Live sprite-drawable margins either side of the authentic 256-pixel window,
+ * in authentic pixels. This is the OAM emitter's own horizontal predicate, so
+ * a presentation layer asking "where can a sprite actually appear?" gets the
+ * same answer the emitter gives rather than re-deriving it. Zero outside a
+ * simulation town or when widescreen sprite widening is off. */
+void ActRaiser_SimSpriteMargins(int *left, int *right);
 
 static inline int ActRaiser_IsSimulationTown(uint8 map_group,
                                              uint8 map_number) {
   return map_group == kActRaiserMapGroup_NonAction &&
          map_number >= kActRaiserSimulationTown_First &&
          map_number <= kActRaiserSimulationTown_Last;
+}
+
+/* Keep the pure form available to the capture and feature-mask tests. The ROM
+ * uses the full word at $7F:9215, so any nonzero value means the authentic
+ * top-down position-picker view is required. */
+static inline int ActRaiser_SimMapPickerActiveForState(uint8 map_group,
+                                                       uint8 map_number,
+                                                       uint16 picker_flag) {
+  return ActRaiser_IsSimulationTown(map_group, map_number) &&
+         picker_flag != 0;
+}
+
+static inline int ActRaiser_SimMapPickerActive(void) {
+  return ActRaiser_SimMapPickerActiveForState(
+      g_ram[kActRaiserWram_MapGroup],
+      g_ram[kActRaiserWram_CurrentMap],
+      ActRaiser_ReadWramMirror16(kActRaiserWram_SimMapPickerFlag));
 }
 
 #endif  /* ACTRAISER_GAME_H */

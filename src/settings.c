@@ -12,7 +12,14 @@ Settings g_settings;
 static SettingsChangeObserver s_change_observer;
 static SettingsActionObserver s_action_observer;
 
-enum { kSettingsMaxDescriptors = 128, kSettingsLayerValueSize = 512 };
+/* Descriptor-backed settings grew past the original round-number reserve when
+ * the five SIM D1 A/B controls landed.  This is fixed boot storage, not a
+ * serialized limit; leave useful headroom for the remaining SIM stages. */
+/* Sized with headroom rather than to the current table: this backs
+ * s_config_layer, and Settings_InitWithFile aborts the moment the table
+ * outgrows it, so a cap that tracks the count exactly turns every new setting
+ * into a crash on boot. */
+enum { kSettingsMaxDescriptors = 192, kSettingsLayerValueSize = 512 };
 typedef struct SettingsLayerValue {
   bool present;
   bool legacy_env_syntax;
@@ -450,6 +457,11 @@ static const char *const kDioramaCamModeLabels[] = {
   "Dynamic Cam",
 };
 
+static const char *const kSimCamModeLabels[] = {
+  "Free Cam",
+  "Dynamic Cam",
+};
+
 static const char *const kDioramaSkyModeLabels[] = {
   "Off",
   "Skybox only",
@@ -515,10 +527,108 @@ static const char *const kSaveItemLabels[] = {
  * inert-in-diorama Display rows use the negation so contradictory combos are
  * greyed out rather than silently ignored (§D15). */
 bool Diorama_ModeIsOn(void) { return g_settings.diorama_mode; }
+bool Sim3D_ModeIsOn(void) { return g_settings.sim3d_mode; }
 bool Diorama_NewPpuCapable(void) {
   return g_settings.new_renderer || g_ws_active;
 }
 static bool DioramaModeIsOff(void) { return !g_settings.diorama_mode; }
+
+/* Sim-town 3D defaults (2026-07-22).
+ *
+ * The numeric sim3d defaults below, and the constants they name in
+ * sim_render_metadata.h, are a **captured baseline**: a snapshot of a tuned
+ * live session, taken deliberately so that a settings reset and a fresh save
+ * both land on a configuration that has actually been looked at. They are not
+ * derived, and several of them differ from the value the surrounding comment
+ * argues for on first principles -- where that happens the comment says so and
+ * why the looked-at value won.
+ *
+ * Consequence worth knowing before changing one: `settings.ini` persists these
+ * keys and beats the compiled default, so editing a number here changes
+ * nothing for anyone who already has an ini. It changes what a reset restores
+ * and what a new install starts from, which is exactly what it is for.
+ *
+ * Every numeric default must sit on its row's `step` grid or the settings
+ * round-trip test fails. */
+
+/* The enhanced SIM renderer is configured as individual stage toggles. The
+ * resolver and the frame payload still work in one mask, so this is the single
+ * place the toggles are folded into one -- the toggles are the only stored
+ * state, and no mask is persisted anywhere. */
+static const struct {
+  SimRenderFeatureMask bit;
+  bool *field;
+} kSim3DStageToggles[] = {
+  { kSimFeature_SeparatedComposite, &g_settings.sim3d_separated_composite },
+  { kSimFeature_GroundProjection, &g_settings.sim3d_ground_projection },
+  { kSimFeature_ObjectBillboards, &g_settings.sim3d_object_billboards },
+  { kSimFeature_VirtualHeight, &g_settings.sim3d_virtual_height },
+  { kSimFeature_Shadows, &g_settings.sim3d_shadows },
+  { kSimFeature_SoftShadows, &g_settings.sim3d_soft_shadows },
+  { kSimFeature_RimLight, &g_settings.sim3d_rim_light },
+  { kSimFeature_WorldUnderlay, &g_settings.sim3d_world_underlay },
+  { kSimFeature_CloudShroud, &g_settings.sim3d_cloud_shroud },
+  { kSimFeature_CullHaze, &g_settings.sim3d_cull_haze },
+  { kSimFeature_Backdrop, &g_settings.sim3d_backdrop },
+  { kSimFeature_PickerExitEase, &g_settings.sim3d_picker_exit_ease },
+};
+static const int kSim3DStageToggleCount =
+    (int)(sizeof(kSim3DStageToggles) / sizeof(kSim3DStageToggles[0]));
+
+SimRenderFeatureMask Settings_Sim3DRequestedFeatures(void) {
+  SimRenderFeatureMask mask = 0;
+  for (int i = 0; i < kSim3DStageToggleCount; i++)
+    if (*kSim3DStageToggles[i].field) mask |= kSim3DStageToggles[i].bit;
+  return mask;
+}
+
+/* Stages that exist in the contract but have no shipped implementation yet.
+ * They stay visible and requestable -- the resolver records them as requested
+ * and clears them from the effective mask -- but are greyed out so the menu
+ * never implies an effect that will not appear. */
+static bool Sim3DStageImplemented(SimRenderFeatureMask bit) {
+  return g_settings.sim3d_mode && (kSim3DShippedFeatures & bit) != 0;
+}
+static bool Sim3DSeparatedAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_SeparatedComposite);
+}
+static bool Sim3DGroundAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_GroundProjection);
+}
+static bool Sim3DBillboardsAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_ObjectBillboards);
+}
+static bool Sim3DVirtualHeightAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_VirtualHeight);
+}
+static bool Sim3DShadowsAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_Shadows);
+}
+static bool Sim3DSoftShadowsAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_SoftShadows);
+}
+static bool Sim3DRimLightAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_RimLight);
+}
+static bool Sim3DWorldUnderlayAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_WorldUnderlay);
+}
+static bool Sim3DCloudShroudAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_CloudShroud);
+}
+static bool Sim3DDynamicCameraAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_GroundProjection) &&
+      g_settings.sim3d_camera_mode == kSimCam_Dynamic;
+}
+static bool Sim3DCullHazeAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_CullHaze);
+}
+static bool Sim3DBackdropAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_Backdrop);
+}
+static bool Sim3DPickerEaseAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_PickerExitEase);
+}
 
 /* Graphics availability gate (kSettingCat_Graphics): the per-effect rows
  * only matter once the "gpu" renderer backend is actually running — gated
@@ -544,6 +654,10 @@ static bool GpuShadersActive(void) { return g_gpu_shaders_active; }
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
     kSettingCat_Presentation, NULL, 0, 0, 0, 0, false, NULL, 0, \
     Diorama_ModeIsOn, NULL, NULL, NULL }
+#define SIM_ACTION_SETTING(id, text, help) \
+  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
+    kSettingCat_Simulation, NULL, 0, 0, 0, 0, false, NULL, 0, \
+    Sim3D_ModeIsOn, NULL, NULL, NULL }
 #define INSPECTOR_ACTION_SETTING(id, text, help) \
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
     kSettingCat_Inspector, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
@@ -631,6 +745,350 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Bool, kApply_Callback, kSettingCat_Display,
     &g_settings.ignore_aspect_ratio, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
+  BOOL_SETTING(sim3d_mode, "AR_SIM3D", "Simulation town 3D",
+               "Tilt the simulation-town map into a projected ground plane; "
+               "picker modes automatically return to the authentic top-down view.",
+               kSettingCat_Simulation, 0, false, Diorama_NewPpuCapable,
+               NULL),
+  /* The enhanced renderer, stage by stage. Each is an ordinary toggle so a
+   * stage can be turned on or off by name; `kSim3DShippedFeatures` is the one
+   * list of stages with a shipped implementation, and the defaults here must
+   * agree with it. A stage missing from both is invisible in normal play no
+   * matter how it is tuned. */
+  BOOL_SETTING(sim3d_separated_composite, "AR_SIM3D_SEPARATED",
+               "Separated layer capture",
+               "Rebuild the town from captured semantic layers and the object "
+               "atlas instead of the authentic composite. Every other stage "
+               "below depends on this one.",
+               kSettingCat_Simulation, 1, false, Sim3DSeparatedAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_ground_projection, "AR_SIM3D_GROUND",
+               "Ground projection",
+               "Project the map through the oblique camera instead of drawing "
+               "it flat.",
+               kSettingCat_Simulation, 1, false, Sim3DGroundAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_object_billboards, "AR_SIM3D_BILLBOARDS",
+               "Object billboards",
+               "Draw world records as individually placed sprites standing on "
+               "the projected ground.",
+               kSettingCat_Simulation, 1, false, Sim3DBillboardsAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_virtual_height, "AR_SIM3D_HEIGHT",
+               "Object heights",
+               "Lift flying actors and effects onto their classified height "
+               "above the map. Needs object billboards.",
+               kSettingCat_Simulation, 1, false, Sim3DVirtualHeightAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_shadows, "AR_SIM3D_SHADOWS", "Ground shadows",
+               "Cast per-object shadows onto the ground only. Needs object "
+               "billboards; darkness is set by Shadow darkness below.",
+               kSettingCat_Simulation, 1, false, Sim3DShadowsAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_soft_shadows, "AR_SIM3D_SOFT_SHADOWS",
+               "Soft shadows",
+               "Blur the ground shadow mask instead of leaving a hard "
+               "silhouette edge. Needs ground shadows; radius is set by "
+               "Shadow softness.",
+               kSettingCat_Simulation, 1, false, Sim3DSoftShadowsAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_rim_light, "AR_SIM3D_RIM_LIGHT", "Rim light",
+               "Add a lit edge to billboard silhouettes on the side facing "
+               "the light. Needs object billboards; brightness is set by Rim "
+               "light strength.",
+               kSettingCat_Simulation, 1, false, Sim3DRimLightAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_world_underlay, "AR_SIM3D_WORLD_UNDERLAY",
+               "World map underlay",
+               "Extend the ground past the town edge with the live world "
+               "map, so the neighbouring regions are visible instead of "
+               "empty space. Needs the ground projection; distance fade is "
+               "set by World map haze.",
+               kSettingCat_Simulation, 1, false, Sim3DWorldUnderlayAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_cloud_shroud, "AR_SIM3D_CLOUDS", "Cloud shroud",
+               "Cover the extended ground with drifting cloud banks. Sprites "
+               "can only be drawn near the camera, so the far ground is always "
+               "actor-free; the clouds read that as distance instead of as an "
+               "empty town. Needs the world map underlay.",
+               kSettingCat_Simulation, 1, false, Sim3DCloudShroudAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_cull_haze, "AR_SIM3D_CULL_HAZE_STAGE",
+               "Out-of-range ground fade",
+               "Fade the town ground into the distant world map outside the "
+               "sprite-drawable window, so the bright area reads as where "
+               "actors can be rather than as clouds having gaps. Unlike the "
+               "shroud this is continuous, so it explains the boundary even "
+               "where cover is thin. Needs the world map underlay.",
+               kSettingCat_Simulation, 1, false, Sim3DCullHazeAvailable,
+               NULL),
+  { "sim3d_camera_mode", "AR_SIM3D_CAMERA_MODE", "Camera mode",
+    "Free Cam: manual orbit and zoom with the right mouse button, and the "
+    "pose persists. Dynamic Cam: its own baseline pose, leaning toward the "
+    "angel's direction of travel and jolting when the angel is hit. Switching "
+    "restores that mode's own camera rather than carrying the other one over.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_camera_mode, kSimCam_Dynamic,
+    kSimCam_Free, kSimCam_Dynamic, 1, false,
+    kSimCamModeLabels, kSimCam_Count, Sim3DGroundAvailable, NULL,
+    NULL, NULL },
+  /* Dynamic Cam's dedicated pose. Defaults are the captured baseline (see the
+   * sim3d defaults note above), so the shipped Dynamic view is the one that
+   * was actually tuned rather than whatever Free Cam was last left at. */
+  { "sim3d_dyncam_baseline_tilt_x_mrad", NULL, "Dynamic baseline pitch",
+    "Dynamic Cam's resting pitch in milliradians; the lean works around this.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_dyncam_baseline_tilt_x_mrad, -575, -700, 700, 25, false,
+    NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
+  { "sim3d_dyncam_baseline_tilt_y_mrad", NULL, "Dynamic baseline yaw",
+    "Dynamic Cam's resting yaw in milliradians; the lean works around this.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_dyncam_baseline_tilt_y_mrad, 0, -700, 700, 20, false,
+    NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
+  { "sim3d_dyncam_baseline_distance_x100", NULL, "Dynamic baseline distance",
+    "Dynamic Cam's resting camera distance (hundredths); 0 auto-fits.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_dyncam_baseline_distance_x100, 300, 0, 2000, 25, false,
+    NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
+  BOOL_SETTING(sim3d_cull_lift_inset, "AR_SIM3D_LIFT_INSET",
+               "Account for flight height at the edge",
+               "Pull the bottom of the in-range area in by the height flying "
+               "actors are drawn at. The lit ground can only describe the "
+               "boundary for something standing on it, so without this a "
+               "flying actor is drawn above the edge and appears to vanish "
+               "over clear ground. Costs a little of the bright area along "
+               "the near edge.",
+               kSettingCat_Simulation, 1, false, Sim3DCullHazeAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_backdrop, "AR_SIM3D_BACKDROP", "Atmospheric backdrop",
+               "Draw a graded sky behind the finite ground instead of a flat "
+               "clear, anchored to the tilted map's own horizon so it stays "
+               "put as the camera pitches. Needs the ground projection.",
+               kSettingCat_Simulation, 1, false, Sim3DBackdropAvailable,
+               NULL),
+  BOOL_SETTING(sim3d_picker_exit_ease, "AR_SIM3D_PICKER_EASE",
+               "Ease picker exit",
+               "Ease the return from a completed map picker instead of "
+               "cutting; not implemented yet.",
+               kSettingCat_Simulation, 0, false, Sim3DPickerEaseAvailable,
+               NULL),
+  { "sim3d_diagnostic_layers", "AR_SIM3D_DIAGNOSTIC_LAYERS",
+    "SIM diagnostic layers",
+    "Developer-only hexadecimal visibility mask for isolated SIM captures; "
+    "zero shows the selected complete profile.",
+    kSettingType_Mask, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_diagnostic_layers, 0, 0, 0xFFFF, 1, false,
+    NULL, 0, Sim3D_ModeIsOn, NULL, NULL, NULL },
+  { "sim3d_tilt_y_mrad", "AR_SIM3D_YAW", "Camera yaw",
+    "SIM free-camera yaw in milliradians; right-drag horizontally to adjust.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_tilt_y_mrad, 0, -700, 700, 20, false, NULL, 0,
+    Sim3D_ModeIsOn, NULL, NULL, NULL },
+  { "sim3d_tilt_x_mrad", "AR_SIM3D_PITCH", "Camera pitch",
+    "SIM free-camera pitch in milliradians; right-drag vertically to adjust.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_tilt_x_mrad, -575, -700, 700, 25, false, NULL, 0,
+    Sim3D_ModeIsOn, NULL, NULL, NULL },
+  { "sim3d_distance_x100", "AR_SIM3D_DISTANCE", "Camera distance",
+    "SIM camera distance in hundredths; 0 auto-fits, and the mouse wheel zooms.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_distance_x100, 300, 0, 2000, 25, false, NULL, 0,
+    Sim3D_ModeIsOn, NULL, NULL, NULL },
+  { "sim3d_height_scale_x100", "AR_SIM3D_HEIGHT_SCALE",
+    "Object height scale",
+    "Scale every classified SIM flight plane as a percentage of its "
+    "catalogue height; 100 keeps the documented planes and 0 grounds every "
+    "billboard without disabling the height stage.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_height_scale_x100, 100, 0, 400, 10, false, NULL, 0,
+    Sim3D_ModeIsOn, NULL, NULL, NULL },
+  { "sim3d_shadow_opacity_pct", "AR_SIM3D_SHADOW_OPACITY",
+    "Shadow darkness",
+    "Darkness of the SIM ground shadow mask as a percentage; 0 skips the "
+    "shadow pass without disabling any other 3D stage.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_shadow_opacity_pct, kSimShadowOpacityDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3D_ModeIsOn, NULL, NULL, NULL },
+  { "sim3d_light_azimuth_deg", "AR_SIM3D_LIGHT_AZIMUTH",
+    "Light direction",
+    "Compass direction the shadow is thrown, in degrees: 0 casts to the "
+    "right, 90 away from the camera, 180 left, 270 toward the camera. Only "
+    "matters when the light is off vertical.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_light_azimuth_deg, kSimLightAzimuthDefaultDeg,
+    0, 359, 15, false, NULL, 0, Sim3DShadowsAvailable, NULL, NULL, NULL },
+  { "sim3d_light_elevation_deg", "AR_SIM3D_LIGHT_ELEVATION",
+    "Light height",
+    "How high the light sits, in degrees above the ground: 90 is straight "
+    "overhead and puts each shadow directly under its caster, lower values "
+    "push shadows further out along the light direction.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_light_elevation_deg, kSimLightElevationDefaultDeg,
+    20, 90, 5, false, NULL, 0, Sim3DShadowsAvailable, NULL, NULL, NULL },
+  { "sim3d_shadow_softness_pct", "AR_SIM3D_SHADOW_SOFTNESS",
+    "Shadow softness",
+    "Blur radius for the shadow mask, as a percentage. 0 keeps the hard "
+    "silhouette even with soft shadows enabled.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_shadow_softness_pct, kSimShadowSoftnessDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3DSoftShadowsAvailable, NULL, NULL, NULL },
+  { "sim3d_rim_strength_pct", "AR_SIM3D_RIM_STRENGTH",
+    "Rim light strength",
+    "Brightness of the lit edge added to sprite silhouettes, as a percentage. "
+    "0 leaves sprite colours untouched even with rim light enabled.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_rim_strength_pct, kSimRimStrengthDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3DRimLightAvailable, NULL, NULL, NULL },
+  { "sim3d_underlay_haze_pct", "AR_SIM3D_UNDERLAY_HAZE",
+    "World map haze",
+    "How far the world map underlay fades toward the scene backdrop, as a "
+    "percentage. 0 draws it at full strength; 100 hides it entirely without "
+    "disabling any other 3D stage.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_underlay_haze_pct, kSimUnderlayHazeDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3DWorldUnderlayAvailable, NULL, NULL,
+    NULL },
+  { "sim3d_cloud_opacity_pct", "AR_SIM3D_CLOUD_OPACITY",
+    "Cloud density",
+    "How opaque the cloud shroud becomes at full cover, as a percentage. 0 "
+    "draws no clouds without disabling any other 3D stage.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cloud_opacity_pct, kSimCloudOpacityDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+  { "sim3d_cloud_falloff_px", "AR_SIM3D_CLOUD_FALLOFF",
+    "Cloud edge softness",
+    "How far past the sprite-drawable edge the clouds take to reach full "
+    "cover, in original pixels. Smaller values make them part sharply as you "
+    "approach; larger values keep a long hazy gradient.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cloud_falloff_px, kSimCloudFalloffDefaultPx,
+    16, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+  { "sim3d_cloud_inset_px", "AR_SIM3D_CLOUD_INSET",
+    "Cloud edge overlap",
+    "How far inside the sprite-drawable edge the cloud cover starts building, "
+    "in original pixels. Sprites stop being drawn at that edge, so starting "
+    "the build-up before it means an actor is already under cloud when it "
+    "disappears. Zero starts the ramp exactly at the edge, which leaves a "
+    "clear band where actors vanish into nothing.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cloud_inset_px, kSimCloudInsetDefaultPx,
+    0, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+  { "sim3d_cull_lead_px", "AR_SIM3D_CULL_LEAD",
+    "Cloud lead on culled sprites",
+    "How far before the sprite-drawable edge a record's own cloud cover "
+    "reaches full strength, in original pixels. The cover has to arrive "
+    "before the sprite goes, not after: too small and an actor blinks out a "
+    "moment ahead of the cloud that should have hidden it.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cull_lead_px, kSimCullLeadDefaultPx,
+    8, 256, 8, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+  { "sim3d_cull_haze_pct", "AR_SIM3D_CULL_HAZE",
+    "Out-of-range ground fade",
+    "How far the town ground fades toward the distant world map outside the "
+    "sprite-drawable window, as a percentage. The bright region is where "
+    "actors can exist, so this reads as an area of effect rather than as "
+    "sprites failing. It fades rather than dims so the target brightness is "
+    "the world map's own, which is already hazed for distance. Zero keeps the "
+    "ground at full opacity everywhere.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cull_haze_pct, kSimCullHazeDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+  { "sim3d_cull_dim_pct", "AR_SIM3D_CULL_DIM",
+    "Out-of-range darkening",
+    "How far the ground outside the sprite-drawable window is darkened, as a "
+    "percentage. Separate from the fade above: the fade decides which layer "
+    "is showing out there, this decides how lit it is. It multiplies the "
+    "colour down rather than mixing toward the sky, so raising it makes the "
+    "far field darker instead of hazier.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cull_dim_pct, kSimCullDimDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+  { "sim3d_cull_haze_lead_px", "AR_SIM3D_CULL_HAZE_LEAD",
+    "Ground fade ramp width",
+    "How many original pixels the fade takes to reach full strength, "
+    "measured inward from the sprite-drawable edge. Long on purpose: a "
+    "brightness step reads as a hard line across the ground, which is a worse "
+    "artifact than the uneven cloud cover it replaces.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cull_haze_lead_px, kSimCullHazeLeadDefaultPx,
+    16, 512, 16, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+  { "sim3d_cull_corner_px", "AR_SIM3D_CULL_CORNER",
+    "Ground fade corner rounding",
+    "How far the corners of the in-range area are rounded, in original "
+    "pixels. Zero gives the sprite-drawable rectangle exactly, which reads as "
+    "a hard-edged box laid over the world; rounding reads as framing. "
+    "Rounding only ever adds cover at the corners, so it cannot expose a "
+    "sprite the window was going to take away.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cull_corner_px, kSimCullCornerDefaultPx,
+    0, 256, 8, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+  { "sim3d_underlay_defocus_pct", "AR_SIM3D_DEFOCUS",
+    "World map defocus",
+    "How far out of focus the distant world map goes outside the "
+    "sprite-drawable window, as a percentage. Blur says \"too far away to "
+    "resolve\" in a way dimming cannot, but it is a cheap downsample rather "
+    "than a real lens, so a partial mix reads as depth where a full one reads "
+    "as a smear. Zero keeps the map sharp everywhere.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_underlay_defocus_pct, kSimUnderlayDefocusDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+  { "sim3d_cloud_altitude_px", "AR_SIM3D_CLOUD_ALTITUDE",
+    "Cloud altitude",
+    "How far above the ground the cloud banks float, in original pixels. Zero "
+    "lays them flat on the terrain, where they read as fog painted onto the "
+    "map; lifting them puts them between the camera and the world, so they "
+    "pass over trees and flying actors instead of through them.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cloud_altitude_px, kSimCloudAltitudeDefaultPx,
+    0, 256, 8, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+  { "sim3d_cloud_drift_pct", "AR_SIM3D_CLOUD_DRIFT",
+    "Cloud drift speed",
+    "How fast the cloud banks move, as a percentage of their built-in rates. "
+    "The layers drift at different speeds, so they pass through each other "
+    "and the field churns rather than sliding across as one image. Zero holds "
+    "them still.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_cloud_drift_pct, kSimCloudDriftDefaultPct,
+    0, 500, 10, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+  { "sim3d_backdrop_strength_pct", "AR_SIM3D_BACKDROP_STRENGTH",
+    "Sky gradient strength",
+    "How far the sky is mixed from the town's own backdrop colour toward blue, "
+    "as a percentage. It brightens toward the horizon and deepens overhead. A "
+    "town that picks a coloured backdrop tints the result; most pick black, "
+    "which is why the sky is mixed toward a blue rather than derived from the "
+    "backdrop alone. Zero is the flat fill the projected view used before.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_backdrop_strength_pct, kSimBackdropStrengthDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL },
+  { "sim3d_backdrop_horizon_pct", "AR_SIM3D_BACKDROP_HORIZON",
+    "Sky horizon height",
+    "Where the sky's bright end sits, as a percentage of screen height from "
+    "the top. The tilted map's real horizon is always far off screen, and the "
+    "sky is only visible fully zoomed out past the end of the extended map, "
+    "so this places the gradient where sky reads rather than where the ground "
+    "plane vanishes.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_backdrop_horizon_pct, kSimBackdropHorizonDefaultPct,
+    0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL },
+  { "sim3d_reactive_strength", "AR_SIM3D_REACTIVE",
+    "Camera reactivity",
+    "How far the town camera leans toward the angel's direction of travel and "
+    "how hard it jolts when the angel is hit, as a percentage. Zero holds the "
+    "camera at the pose the pitch/yaw/zoom settings describe.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_reactive_strength, 100, 0, 200, 10, false, NULL, 0,
+    Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
+  { "sim3d_height_pop_pct", "AR_SIM3D_HEIGHT_POP",
+    "Flying sprite pop",
+    "Extra size for a flying sprite at its catalogue height, as a percentage. "
+    "The true perspective gain from being lifted is about 1%, too subtle to "
+    "read; 0 keeps only that. Raising the object height scale raises this "
+    "with it.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_height_pop_pct, 0, 0, 50, 1, false, NULL, 0,
+    Sim3D_ModeIsOn, NULL, NULL, NULL },
+  SIM_ACTION_SETTING("sim3d_reset_camera", "Reset camera",
+                     "Return the camera mode in use to its default pitch, yaw, and distance."),
   BOOL_SETTING(diorama_mode, NULL, "Diorama 3D",
                "Render action-stage layers as tilted 3D planes (action stages only; needs the new renderer).",
                kSettingCat_Presentation, 0, false, Diorama_NewPpuCapable,
@@ -1101,7 +1559,51 @@ static bool Settings_UsesLegacyEnvironmentSyntax(const SettingDesc *desc) {
          desc->field != &g_settings.ignore_aspect_ratio &&
          desc->field != &g_settings.audio_enabled &&
          desc->field != &g_settings.audio_frequency &&
-         desc->field != &g_settings.audio_samples;
+         desc->field != &g_settings.audio_samples &&
+         desc->field != &g_settings.sim3d_mode &&
+         desc->field != &g_settings.sim3d_diagnostic_layers &&
+         desc->field != &g_settings.sim3d_tilt_x_mrad &&
+         desc->field != &g_settings.sim3d_tilt_y_mrad &&
+         desc->field != &g_settings.sim3d_distance_x100 &&
+         desc->field != &g_settings.sim3d_height_scale_x100 &&
+         desc->field != &g_settings.sim3d_shadow_opacity_pct &&
+         desc->field != &g_settings.sim3d_height_pop_pct &&
+         desc->field != &g_settings.sim3d_light_azimuth_deg &&
+         desc->field != &g_settings.sim3d_light_elevation_deg &&
+         desc->field != &g_settings.sim3d_shadow_softness_pct &&
+         desc->field != &g_settings.sim3d_rim_strength_pct &&
+         desc->field != &g_settings.sim3d_underlay_haze_pct &&
+         desc->field != &g_settings.sim3d_cloud_opacity_pct &&
+         desc->field != &g_settings.sim3d_cloud_falloff_px &&
+         desc->field != &g_settings.sim3d_cloud_inset_px &&
+         desc->field != &g_settings.sim3d_cull_lead_px &&
+         desc->field != &g_settings.sim3d_cull_haze_pct &&
+         desc->field != &g_settings.sim3d_cull_dim_pct &&
+         desc->field != &g_settings.sim3d_cull_haze_lead_px &&
+         desc->field != &g_settings.sim3d_cull_corner_px &&
+         desc->field != &g_settings.sim3d_underlay_defocus_pct &&
+         desc->field != &g_settings.sim3d_cloud_altitude_px &&
+         desc->field != &g_settings.sim3d_cloud_drift_pct &&
+         desc->field != &g_settings.sim3d_separated_composite &&
+         desc->field != &g_settings.sim3d_ground_projection &&
+         desc->field != &g_settings.sim3d_object_billboards &&
+         desc->field != &g_settings.sim3d_virtual_height &&
+         desc->field != &g_settings.sim3d_shadows &&
+         desc->field != &g_settings.sim3d_soft_shadows &&
+         desc->field != &g_settings.sim3d_rim_light &&
+         desc->field != &g_settings.sim3d_world_underlay &&
+         desc->field != &g_settings.sim3d_cloud_shroud &&
+         desc->field != &g_settings.sim3d_cull_haze &&
+         desc->field != &g_settings.sim3d_cull_lift_inset &&
+         desc->field != &g_settings.sim3d_camera_mode &&
+         desc->field != &g_settings.sim3d_dyncam_baseline_tilt_x_mrad &&
+         desc->field != &g_settings.sim3d_dyncam_baseline_tilt_y_mrad &&
+         desc->field != &g_settings.sim3d_dyncam_baseline_distance_x100 &&
+         desc->field != &g_settings.sim3d_backdrop_strength_pct &&
+         desc->field != &g_settings.sim3d_backdrop_horizon_pct &&
+         desc->field != &g_settings.sim3d_reactive_strength &&
+         desc->field != &g_settings.sim3d_backdrop &&
+         desc->field != &g_settings.sim3d_picker_exit_ease;
 }
 
 static bool Settings_StageConfigIndex(int index, const char *value,
@@ -1361,6 +1863,7 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Widescreen: return "Widescreen";
     case kSettingCat_Display: return "Display";
     case kSettingCat_Presentation: return "Diorama";
+    case kSettingCat_Simulation: return "Simulation";
     case kSettingCat_Graphics: return "Graphics";
     case kSettingCat_Audio: return "Audio";
     case kSettingCat_Save: return "Save editor";

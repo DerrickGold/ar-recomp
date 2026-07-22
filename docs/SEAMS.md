@@ -36,6 +36,15 @@ identity are the perishable, expensive-to-rederive parts.
 | Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
 | Final PCM out | `RtlRenderAudio` (common_rtl.c) → continuous `dsp_getSamplesResampled` + MSU-1/OGG mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | native DSP stays 32.04 kHz; actual SDL rate controls time-based resampling, so frequency/buffer changes preserve pitch; `audio_master_volume` applies atomic post-mix gain here | 🟢 |
 | Raw APU port write | `RtlApuWrite` (`$2140-$2143`) | APU I/O | low-level handshake / param | — | 🔴 |
+| **Voice key-on observation** | `g_dsp_voice_kon_hook` (dsp.c, fires once per applied key-on) | DSP `KON` | "voice C started sample S" | `(ch, srcn, decodeOffset, volL, volR, pitch)`; NULL by default; installed by `sfx_census.c`. Called on whichever thread is cycling the APU, APU lock held. Must be invoked **after** `decodeOffset` is resolved from the directory — earlier and it reports the previous note's advancing decode cursor | 🟢 |
+
+Host-side engine seams installed for this subsystem (all NULL/-1 by default, so
+other games are byte-identical): `g_rtl_spc_upload_hook` (image src = song
+identity), `g_rtl_apu_port_hook` (every `$2140-43` write — **chained**, not
+owned: `music_replacements.c` installs first and `sfx_census.c` forwards to it,
+so init order in `main.c` matters), `g_rtl_music_mix_hook` (OGG mix inside
+`RtlRenderAudio`'s locked region), `g_dsp_voice_mute_srcn_min` (the music mute
+gate), `g_dsp_voice_kon_hook` (key-on observation).
 
 > Audio is the highest-payoff first HAL target: the `$035A`/`$035B` events are already ID-based.
 > Found while fixing the boss-music handshake and the silent-DSP bug (memory:
@@ -81,8 +90,24 @@ values and nonzero port-2 ids to catch them in play.
    Muting: every handshake/port write stays authentic (zero soft-lock risk);
    instead the DSP excludes voices with srcn >= 0x0C from the dry mix and
    echo input (`g_dsp_voice_mute_srcn_min`, dsp.c) — per-song instruments
-   live there while SFX use the common bank by design (KONLOG-verified on the
-   title: music keys srcn 0C/0D). Per-entry `when =` gates (shared HD gate
+   normally live there while SFX use the common bank.
+   ⚠️ **This premise is NOT universal (disproved 2026-07-21).** `song-02`/bp
+   (`18:DDCC`) keys **srcn `00` as a musical instrument** on two voices at
+   32-70% duty, sustained past the driver's `$F2` pause — i.e. the original
+   bassline stays audible under the replacement stream. Two competing
+   explanations were tested and **ruled out**: SRCN slipping (the gate reads the
+   live `$x4` register, which the driver could rewrite under a sounding note —
+   `AR_MUSICLEAK` reports `slipped=0%` on every voice of every track measured),
+   and directory rewriting (`dir` is a constant `$2C00` and each srcn resolves
+   to exactly one BRR start — see the verified table below). So `srcn` *is* a
+   stable sample identity; some songs simply borrow shared-bank samples.
+   The leak is intermittent and not yet reproducible on demand: one capture
+   showed srcn `00`/`01` on seven voices at once across three songs, while three
+   later sessions over the same content were clean. Fix candidates: a per-song
+   `mute_srcn` set in the manifest (cheap, costs any SFX sharing that srcn for
+   the duration of that song), or request-driven SFX attribution (correct, and
+   also unlocks the music/SFX split — see the census below).
+   Per-entry `when =` gates (shared HD gate
    grammar, sampled at song start) select level/state-dependent variants;
    first matching entry wins, ungated entry = fallback. `music_replacements`
    setting / `AR_MUSIC_REPLACEMENTS` toggles live; `AR_MUSICLOG=1` traces.
@@ -95,6 +120,28 @@ values and nonzero port-2 ids to catch them in play.
    mixer) per instrument. The chunk index is a stable, ROM-wide instrument ID.
 3. **SFX-level replacement.** Already the cleanest seam: `$035B` (BRK hook) carries the SFX id
    before any APU involvement. Map id → modern sample in the hook, suppress the port write.
+
+   **SFX census (`AR_SFXCENSUS=1`, `src/sfx_census.c`)** joins the two ends of
+   that path — `SfxCensus_OnRequest` from the BRK hook (id, calling recomp
+   function, game frame, and CPU `X`/`Y` as the requesting-actor handle) against
+   the new `g_dsp_voice_kon_hook` DSP seam — and correlates them by APU-cycle
+   proximity (~2 frames), since the protocol carries no tag from request to
+   key-on. Report lands at `<run-dir>/sfx_census.txt`. First real capture
+   (2026-07-22, ~13500 frames of sim + act): 10 ids, 981 requests. Findings that
+   constrain both this tier and the volume split:
+   - **id `00` is the idle/clear post, not a sound** (754 posts, 12 key-ons,
+     almost all from `$03:9E6B`). The census no longer arms correlation on it.
+   - **The driver already pans per effect**: id `18` spans `volL/volR` of
+     `-71..47 / -38..71` — asymmetric and sign-inverted, not a constant. Any
+     positional-audio layer must *compose* with this, not replace it.
+   - **Sound identity is (srcn, pitch envelope), not srcn**: id `08` stretches
+     one sample across `pitch 0385-3aae` (~16x).
+   - **~84% of shared-bank key-ons carry no request** — and are not music (in a
+     clean run the leaking srcn set equals the census-attributed set exactly).
+     They are the driver re-triggering a repeating effect, so a purely
+     request-driven classifier would mute most legitimate SFX re-keys. A
+     classifier must treat "srcn established by a recent request" as a
+     continuation.
 4. **Output-quality tier.** All mixed audio funnels through the continuous
    `dsp_getSamplesResampled` boundary inside `RtlRenderAudio` (44.1 kHz stereo
    S16 by default; the settings registry offers restart-class
@@ -113,11 +160,38 @@ values and nonzero port-2 ids to catch them in play.
    (`0..100`). It deliberately does not label any post-mix control "music" or
    "SFX": independent levels require stable DSP voice classification or native
    SPC-driver bus controls, including a defined echo policy. See
-   `settings-system.md`, "Audio control seams".
+   `settings-system.md`, "Audio control seams". The SFX census (tier 3 above) is
+   the groundwork for that classification; its orphan-key-on accounting is the
+   measurement that says whether a proposed classifier is safe.
+
+**Verified common-bank sample directory** (DIR page `$2C00`, constant; each srcn
+resolves 1:1 to one BRR start, confirmed across a full session plus a replay):
+
+| srcn | ARAM | srcn | ARAM | srcn | ARAM |
+|---|---|---|---|---|---|
+| `00` | `$3000` † | `04` | `$4F2F` † | `08` | `$6906` |
+| `01` | `$3B01` † | `05` | `$5814` | `09` | `$6DA1` |
+| `02` | `$44EB` | `06` | `$5DB4` | `0A` | `$6DF2` |
+| `03` | `$4545` | `07` | `$5DD8` † | `0B` | `$6E4C` |
+
+† documented from the stage-2 install order but not directly observed keying in
+the captured sessions. Note `srcn 00` start == loop == `$3000`, so a key-on with
+no key-off sustains indefinitely.
 
 Diagnostics for all of it: `AR_APULOG=1` (uploads incl. per-chunk stage-2 lines + port
 traffic), `AR_AUDIODBG=1` (DSP health: mvol/mute/peak/cyc-rate), `AR_KONLOG=1` (per-voice
-key-on state: srcn/pitch/volumes/ADSR + first BRR bytes — all-zero BRR = samples missing).
+key-on state: srcn/pitch/volumes/ADSR + first BRR bytes — all-zero BRR = samples missing),
+`AR_MUSICLEAK=1` (per-voice 1s report of anything reaching the dry mix while the music
+mute gate is engaged: `kon_srcn` vs `live_srcn`, resolved `dir`/`brr`, peak, duty, and a
+`slipped%` column that separates a gate dropout from genuine shared-bank use),
+`AR_SFXCENSUS=1` (the id → sample/caller/pan map above).
+
+⚠️ **None of the audio diagnostics can be collected headless.** 3000 headless frames
+produce zero BRK posts (the run never leaves title/attract) and the DSP barely advances
+(one mix tick in 1200 frames), so no key-ons fire; `AR_WARP`/`AR_WARP_AT` stages a warp
+the run never reaches. Also note `.rec` input recordings do **not** replay faithfully
+without their matching boot `save.srm` — the recording run itself auto-persists SRAM, so
+a later replay starts from different state and diverges.
 
 ---
 
@@ -267,8 +341,14 @@ World object record (WRAM $7E:$0A00+, 44 records, stride $26)
   +08      current frame-composition pointer derived from $01:E7D9 / frame lists
   +0A/+0C  world X/Y (also populated for one cohort by $03:813F staging copy)
   +0E      list/type id used by update/animation code; NOT ADAD's tile count
+           (2026-07-22: this is the top-level record class indexing $01:B8D0 —
+           $0C angel, $11 town position controller, $12-$15 the four enemy
+           families. sim3d keys height policy on it)
   +10      render status tested by ACD9 ($C000 set = skip)
   +12      behavior dispatch selector used outside the OAM leaf
+           (2026-07-22: masked to $7FFF this is the state index inside the
+           class's own table, e.g. class $12 state 6 = Blue Dragon building
+           strike. `(class, state)` is the pair sim3d's classifier consumes)
   +25      delay/timer byte checked and decremented by ACD9 before drawing
         │
         ▼  per-frame $01:ACD9 → $01:ADAD or $01:AE6F
@@ -432,6 +512,63 @@ rewards should therefore be validated as ordinary world records first; add a
 new lifetime patch only after a captured symptom identifies a content-specific
 gate. The `$06A0-$09FF` fixed/overlay array remains a separate screen-space
 system and must not be widened speculatively.
+
+### Sim 3D presentation seams (D3c/D4a, 2026-07-22)
+
+The enhanced town renderer adds host-only seams downstream of the composition
+leaves. None of them touch gameplay: every one reads the record fields above
+and writes only host presentation metadata.
+
+| Seam | Where | Contract |
+|---|---|---|
+| Live-area clipping | `ComposeFlatPixelsPolicy` **and** `RestoreTownHudPolicy` (`src/sim3d.c`) | Columns outside `live_x0/live_x1` are black below the promoted-HUD rows, for the base fill **and** for every composited plane. An OBJ with a wrapped-negative X rasterizes into the margin, so omitting the plane clip breaks D2 byte-equality at a map edge (ledger §23) |
+| Semantic record metadata | `SimRenderMetadata_BeginRecord/RecordPart/EndRecord`, called from the `$01:ADAD`/`$AE6F` HLE leaves | Records the OAM range each source record emits, split when parts cross priority bands or OBJ colour-math eligibility. Producer state is game-thread only |
+| Object classification | `Sim3D_ClassifyObject` (`src/sim_render_metadata.c`) | Pure function of `(tier, class +$0E, state +$12, record address, composition +$08)` → presentation plane, virtual height, anchor/shadow traits. **Record semantics first, composition override second.** Adding a rule here is the supported way to fix a mis-anchored object; never add a height test in the renderer |
+| Height easing | `ApplyHeightSlew` inside `SimRenderMetadata_CaptureFrame` | Per-world-record ramp (4px/frame) toward the classified plane, folded into the immutable frame copy. Cleared whenever the SIM 3D master is off, a picker is active, or the frame falls back, so re-enabling never replays a stale ramp. Contact-exact classes bypass it entirely |
+| Picker view policy | `AR_SIM3D_PICKER_TOPDOWN` (CMake option, default `OFF`) | Build-time choice between the authentic flat picker view and keeping the projected view. Guards exactly two sites: the view classification in `SimRenderMetadata_CaptureFrame` and the capture gate in `Sim3D_PrepareCapture`. Gameplay, `$7F:9215`, D-pad targeting, and the selected cell are identical either way |
+| Shadow caster selection | `Sim3D_ObjectCastsShadow` (`src/sim_render_metadata.c`) | Pure predicate over the classified descriptor: world tier, valid atlas art, and neither `MapPlane` nor `NoShadow`. Height is deliberately **not** an input — grounded actors cast too. To stop something casting, mark it `NoShadow` in the classifier, never special-case it in the shadow pass |
+| Ground shadow mask | `DrawSimShadowMask` (`src/present.c`) | Builds silhouettes into a dedicated transparent target and composites it immediately after the BG1-low ground draw, so a shadow can only darken ground pixels and overlapping casters cannot double-darken. Reads only the immutable `FrameSlot`; if the target cannot be allocated it logs once and clears the stage while all geometry keeps rendering |
+| Shadow blur | `BlurSimShadowMask` (`src/present.c`) | Separable box blur over the mask target using ordinary blended draws and a custom add-alpha blend mode — **no shader**. Two passes of N taps, ping-ponging through a scratch target. If the scratch target or the custom blend mode is unavailable it degrades to D4a's hard silhouette; it never disables the shadow pass |
+| Rim light | `DrawSimRimLight` (`src/present.c`) | Two extra silhouette draws through the shared billboard loop — offset fill in the light colour, then a mask blend (`dstA *= srcA`) that **intersects** it with the sprite's own body — composited additively per priority band. The band must stay *inside* the silhouette; subtracting instead puts it outside, which reads as a glow, not light. Confinement to billboards is structural: the loop skips map-plane art and each band composites after its own sprites, so the rim cannot reach the ground or HUD |
+| Billboard depth order | `SimObjectSortsAfter` + `DrawSimObjectPriority` (`src/present.c`) | Projected billboards sort **overhead art last, then** back-to-front by captured screen row, *within* a hardware priority band; the band still owns coarse layering and reverse OAM order is the stable tiebreak (the comparator is strict for exactly that reason). Applies only to the projected profile — the flat path keeps pure OAM order, where it is correct. `kSimObjectTrait_Overhead` exists because the row sort is right for actors standing on the map and wrong for the miracle clouds, whose art hangs above the row their record sits on: sorting those by row let a nearer tree draw over a cloud, an overlap the ROM's own OAM order had expressed correctly before D3b introduced the sort |
+| Overhead trait | `Sim3D_ClassifyObject` (`src/sim_render_metadata.c`) | Set for `$D9E5-$DCD2` **except `$DA22`**, which is the family's own ground shadow ellipse drawn 40-72px below the shared anchor — it lies on the ground and anything standing there must occlude it, the exact opposite of the cloud above it. Deliberately a sort trait and **not** a height: the family keeps its record-origin ground anchor, because the bolt and rain compositions span cloud to ground and any lift detaches the strike from the terrain (D3c). Asserted in `sim_render_metadata_test` on both sides |
+| Presentation tuning | `Sim3D_AnnotateFrame(frame, const Sim3DTuning *)` | One struct of resolved tuning values (camera, height scale, shadow opacity, height pop) copied into the immutable frame. Add a knob to the struct, never as another positional argument, and never read `g_settings` from a render stage — a frame must not mix values read at different times |
+| View-drop reporting | `Sim3D_LogViewTransition` (`src/sim3d.c`) | Prints one `[sim3d-view]` line per enhanced<->authentic transition in a town, with game frame, capture status, and integrity flags. Always on and transition-only, so a one-frame flat flicker is self-diagnosing. Called from the per-frame trace site, which also runs headless |
+| World-map underlay | `src/sim_world_map.c`, drawn by `DrawSimWorldUnderlay` (`src/present.c`) | Reads three flat uncompressed ROM blobs — tilemap `$06:B341`, 256 8bpp tiles `$0E:8000`, palette `$1C:BF93` — and the live Mode-7 shadow at **`$7E:C000`**, which matches VRAM byte-for-byte on the world-map screen and stays coherent inside a town. Rows 0-7 of the shadow are scratch during town mode and are only adopted from a world-map frame; they fall back to the ROM baseline otherwise, which affects Northwall alone (origin y = 0). One world tile = one town cell, so the map draws at 2x. Read-only with respect to the machine |
+| Town window table | `kTownWindows` (`src/sim_world_map.c`) | Six origins: Fillmore (80,48), Bloodpool (48,48), Kasandora (16,64), Aitos (16,32), Marahna (64,96), Northwall (32,0). Derived as world cathedral icon minus the town's own cathedral cell. Every origin is a multiple of 16 and the six 32x32 windows tile the map disjointly — no other assignment of towns to the map's six icons has that property, which is what pins it. Asserted structurally in `tests/sim_world_map_test.c`, because a wrong origin puts a town on someone else's terrain and still looks plausible |
+| Full-town ground canvas | `src/sim_town_canvas.c`, drawn by `DrawSimTownCanvas` (`src/present.c`) | Renders the whole 512x512 town from the resident BG1 tilemap at **`$7F:0000`** plus VRAM `$0000` character data and CGRAM. The tilemap is **quadrant-paged**: `$03:9C43` writes each cell's 2x2 block at `quadrant*2048 + (cellY & 15)*128 + (cellX & 15)*4`, words at `+$00/+$02/+$40/+$42` — row stride 32 tiles, quadrant stride 32x32 tiles, four pages = 64x64 tiles. A row-major read of that range looks like an unrelated layer, which is exactly how it was mistaken for BG2 twice. Re-renders only when tilemap, char data, palette, brightness or backdrop changes |
+| Sim-mode OAM emit margin | `ws_sim_emit_margins` (`src/actraiser_widescreen_sprites.c`) | Widens the **emitter's** horizontal predicate to the whole finite town when the 3D ground view is active, so records the authentic frame never shows are composed for a view that genuinely displays them (+16.9% sprites measured). Deliberately **not** applied to `ws_sim_live_margins`, which feeds `ActRaiser_SimProjectileVisible` — that predicate's false result *destroys* the record (`$B44B` branches to destruction on carry set), so widening it would change projectile lifetime and world-record slot pressure. The verification that it stayed observational is that the source-record count is byte-identical with the margin on and off. **Never widened vertically:** OAM's Y byte expresses rows -32..223 with no ninth bit, and admitting the 32 rows above the screen makes sprite pixels appear inside the authentic viewport (ledger §25) |
+| Cull-cue boundary | `Sim3D_CullProximity` (`src/sim_render_metadata.c`) | The single pure predicate behind every out-of-range cue — ground fade, focus falloff, cloud shroud, per-record cover. Stated in the **emitter's biased coordinates**, not screen or town space, so the cull test and the things that explain it are one piece of arithmetic; `_Static_assert`s in `actraiser_widescreen_sprites.c` tie the mirrored window constants to the emitter's own. Rounded-box distance (not `max(dx,dy)`, which is an axis-aligned box and was the visible squareness) with a smoothstepped ramp. Rounding and the bottom `lift_inset` may only ever **add** cover; both are asserted that way |
+| Cull fade vs cull dim | `SimCullFade` (`src/present.c`) | Two independent terms on one proximity ramp. `fade` is structural (which layer is showing, via alpha); `dim` is photometric (how lit it is, multiplied into the vertex colour). Splitting them was forced by the graded sky: the underlay's distance haze blends toward `separated_backdrop_argb`, formerly flat black and now a blue gradient, so the single combined control washed the far field grey-blue instead of darkening it. The blurred underlay pass takes `dim` but **not** `fade` — it is the layer being revealed, and fading it makes the far field transparent rather than dark |
+| Cull evidence capture | `SimRenderMetadata_RecordAnchor` / `_RecordClippedPart` (`src/sim_render_metadata.c`) | The emitter reports its biased composition origin and every part the sprite window rejected, at the two branches in `ws_sim_build_sprites` that previously parked the OAM slot at `$E000` and dropped the fact. The anchor is **handed over, not re-derived**: the emitter reaches it through DP `$94/$96` with 16-bit wraparound and a second derivation is a second thing to keep in step. Purely observational — no OAM or game state is touched |
+| Cull cover eligibility | `Sim3D_SourceCullCover` (`src/sim_render_metadata.c`) | Only the sprite window may create cover. A record that emitted nothing **and** was never clipped is the game declining to draw it, and covering that asserts something false about the world; fixed-tier furniture is screen space and never qualifies. Widening this to "anything absent" would put clouds over destroyed projectiles and off-world records |
+| Cover timing vs placement | `Sim3D_SourceCullCover` vs `Sim3D_SourceDrawLift` | Two different questions and they must not be merged. *When* cover arrives is the emitter's — it culls on the record's own y, so the unlifted anchor is correct. *Where* cover goes is the renderer's — a flying record is drawn up-screen and cover at the record lands under its feet. `Sim3D_SourceDrawLift` runs the pure classifier from the **source record's** fields precisely because a fully-culled record has no `objects[]` entry to read a height from |
+| Lit-window lift inset | `Sim3D_MaxDrawLift` (`src/sim_render_metadata.c`) | The lit ground can only express the height-zero boundary, so its **bottom** edge is inset by the classifier's lift ceiling. Derived from the classifier, never measured over the live record list — an inset that tracked whatever happens to be flying would drift the ground fade while nothing on screen moved. Top edge deliberately not inset: lift is toward negative y, so that side is already conservative. Lifting `dp $96` instead is not an option — one value for every record, trades bottom for top, and the vertical window cannot move at all (see "Sim-mode OAM emit margin") |
+| Ground-mesh density | `kSimUnderlayColumns/Rows` (`src/present.c`) | 64x48, raised from 24x18. The old value served affine UV correctness only; once the cull fade began being **sampled at these vertices** it became a correctness constraint of its own — the mesh must be finer than the smallest feature the fade shows, or a rounded window interpolates back into a box. Vertex/index arrays are file-scope at this density (~140KB) and are present-thread only |
+| Fixed-colour add (sun miracle) | `ApplyFixedColorAdd` (`src/sim3d.c`) | Third accepted D2 colour-math state: `cgwsel == 0` (fixed colour as the math source, enabled screen-wide, no window, no main-screen-black region), add without half or subtract, non-zero fixed colour, full brightness. Measured from the sun miracle as `cgwsel=$00 cgadsub=$01 fixed=$0001 screen=$15/$00`, a ramping red add onto BG1 alone. **Baked into the captured plane pixels**, not made a compositing policy like the half-add: a fixed-colour add is a property of one layer, and one application then serves the authentic rebuild, the flat recomposition and the projected textures alike. The arithmetic inverts the PPU's `brightnessMult` table to recover the 5-bit component, adds with the hardware clamp at 31, and maps forward — adding the *expanded* colours instead differs on 168 of 1024 (component, add) pairs and the byte-exact gate rejects it. Brightness 15 only, conservatively |
+| Atmospheric backdrop | `DrawSimBackdrop` (`src/present.c`) | Graded sky behind the finite ground, drawn after the flat clear so no pixel is ever undefined if it declines to draw. Endpoints are **authored** sky colours mixed *from* `separated_backdrop_argb`, not derived from it: a town's backdrop is black, and black lifted toward white is grey, which is how the first version shipped a greyscale sky. **Strength 0 is pixel-identical to the flat clear**, which is what D5a-2 compares against. Confined to "behind the finite ground" by draw order, not by a mask |
+| Projected horizon | `Scene3D_GroundHorizonScreenY` (`src/scene3d_math.c`) | Solved as the limit of the projection as ground y runs to infinity — never by projecting a "far enough" point, since the ground extension already reaches thousands of captured pixels out and any finite stand-in would need re-tuning with the extent. **The horizon is off screen at every settable pitch** (-700..700 mrad puts it 544-5619px outside a 224-row viewport; pitch 0 has none), so the sky grades around a *synthetic* horizon at `backdrop_horizon_pct` and uses the real one only if it becomes visible. `scene3d_math_test` sweeps the pitch range and **fails if any setting ever puts it on screen**, forcing the backdrop to be revisited rather than silently drawing sky below the horizon |
+| Sim camera mode | `Sim3D_ActivePose` (`src/main.c`) | Free and Dynamic each own a pose — Free the player-authored `sim3d_tilt_*`/`distance`, Dynamic the dedicated `sim3d_dyncam_baseline_*`. Resolved **once** on the game thread and published through `sim.projection_*`, because two `Sim3DTuning` sites read it. A single shared pose would make Dynamic sway around wherever the last manual drag left the camera. The right-drag is gated to Free (in Dynamic it would edit a pose nothing is built from), "Reset camera" restores the active mode's pose, and a mode change snaps rather than eases |
+| Sim dynamic camera | `ApplySimDynamicCamera` (`src/present.c`) + `CaptureSimDynamicCamera` (`src/main.c`) | Same split as the diorama reactive camera: the game thread owns the WRAM reads, the running averages and the edge detection; present.c owns the formula. Signal is the **angel record's `+$1A/+$1C` planar velocities**, not `PlayerVelocity` (an action-stage concept). Hit is an **HP decrease**, not the invuln flag, which lags damage by ~10 frames. Lean magnitudes are roughly half the diorama's because a near-overhead camera turns the same angle into ground-swim. Applied **before** `Scene3D_BuildViewProjection` so every stage shares one camera. Reset to neutral outside a town, and the first town frame only seeds the HP baseline so arrival is not read as a hit |
+| Menu deferral | `SimPlaneIsMenu` + `SimObjectTierFilter` (`src/present.c`) | The sim menu is three layers: text (`Bg3Low/High`), box frame and fill (`Bg2High`), and icons/cursors (**fixed-tier OBJ**, which rank above `Bg2High`). All are held out of the painter-order loop and drawn after every atmospheric effect, walking the **full hardware rank** so order within the group is unchanged and only its depth moves. Deferring BG3 alone left clouds inside the panels; adding `Bg2High` without the OBJ buried the icons under its own fill. Fixed-tier OBJ are deferred **by tier, not by plane**, because they share OBJ ranks with world billboards that must stay under the shroud — hence each band drawing twice. **`Bg2Low` is excluded**: the painter order places it behind the projected ground as a background layer. Safe for BG3 **only because** the town HUD's BG3 pixels are already removed by the `sim3d.c` overlay handoff |
+| Atlas overflow policy | `SimRenderAtlas_Build` + `SimRenderMetadata_CommitAtlas` | A per-object failure (bounds query, too large to fit, atlas full, raster failure) **purges that object** and the build continues; only a broken contract fails the whole build. Purged objects keep `atlas_valid` clear and are counted by the D1 census, so the condition still fails a checkpoint without costing the frame. Three places encode this — the builder loop, the foot-union pass (a purged fragment has zeroed local bounds and would drag the shared foot), and the commit validator, which required `atlas_valid` on every object (ledger §24) |
+| Metadata-failure scope | `Sim3D_ResolveFeatureMask` (`src/sim_render_metadata.c`) | `metadata_valid == false` clears **only** the object stages (billboards, height, shadows, soft shadows, rim). The separated composite, ground projection and world underlay come from captured plane pixels and the camera, none of which the semantic record pass supplies. Dropping the whole view instead paid for a sprite problem with a full-screen perspective change (ledger §24) |
+| Deterministic evidence | `AR_SIM3D_D1_TRACE=<file>` | Per-frame JSONL carrying view, `picker_flag`, the compiled `picker_topdown`, feature masks, atlas rects, and per-object `height_class`/`classified_height`/`virtual_height`. `tools/sim3d_demo.py` validates against it and asserts the picker contract that the binary actually shipped |
+
+Three traps worth knowing before touching the table:
+
+- **`$A627-$A792` is not an angel signal.** Miracle effect records borrow the
+  angel's pose frames; only the `$0AE4` record address and class `$0C` select
+  the angel's flight plane.
+- **Cursors are not one contiguous composition range.** `$D233-$D302` is the
+  ROM's cursor family, but the `$D993` path/area selection square is a
+  separate map-plane cursor on a class-`$09` record, adjacent to the
+  `$D9E5-$DCD2` miracle cloud effects. See `docs/sim-object-catalog.md`.
+- **A geometrically correct billboard shadow is the wrong shadow.** Shearing a
+  camera-facing silhouette along the light and projecting it onto the ground
+  collapses it to a smear, because the billboard has no depth. D4a lays the
+  silhouette flat about the caster's foot (`kSimShadowFootprintDepth`) and
+  shears the whole quad by the caster's height instead.
 
 **The OAM-flood bug mechanism** (found 2026-07-01, root cause is upstream — see next section): if an
 object has a null/bad frame pointer at `+08`, the first byte read at that address becomes a bogus

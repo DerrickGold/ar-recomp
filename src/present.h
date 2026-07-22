@@ -7,6 +7,7 @@
 #include "types.h"
 #include "hd_replacements.h"
 #include "diorama.h"
+#include "sim_render_metadata.h"
 
 /* M5 (ar-recomp-threading-impl.md Appendix D). FrameSlot is the ONE contract
  * for everything present-time rendering reads: it is populated by the single
@@ -15,7 +16,8 @@
  * must not read g_ppu/g_settings/g_snes_width/etc. live, only slot fields.
  *
  * Pixel buffers (g_pixels, g_hud_bg_pixels, g_hud_obj_pixels,
- * g_m7_overlay_pixels, g_diorama_layer_pixels[]) are deliberately NOT copied
+ * g_m7_overlay_pixels, g_diorama_layer_pixels[], g_sim_obj_atlas_pixels) are
+ * deliberately NOT copied
  * here — see the M5 plan's buffer-ownership note. Safety for those comes from
  * the present-thread handshake (the game thread does not touch them again
  * until the present thread's upload phase has finished reading them), not
@@ -89,6 +91,12 @@ typedef struct FrameSlot {
 
   /* Diorama gate (D14 — Diorama_IsActiveThisFrame() result for this frame). */
   bool diorama_active;
+
+  /* D1 simulation-town semantic payload.  This value-copy is the only form
+   * the present thread may consume; the HLE producer remains game-thread
+   * private.  All effective visual bits are zero until their render stages
+   * land, so adding this contract cannot change the authentic composite. */
+  SimFrameData sim;
 
   /* M7 (§6.1)/B1b (followup doc): per-frame camera snapshot for present-time
    * interpolation. timestamp_ns is when THIS slot was captured
@@ -177,6 +185,26 @@ typedef struct FrameSlot {
   bool diorama_dyncam_event_hit;
   bool diorama_dyncam_event_land;
   bool diorama_dyncam_event_boost;
+
+  /* Sim-town dynamic camera. Same shape as the diorama fields above and for
+   * the same reasons: the game thread owns the WRAM reads and the per-frame
+   * state an edge or a running average needs, present.c owns the actual
+   * camera formula.
+   *
+   * The signals differ from action mode's because the mode does. There is no
+   * jump and no ground, so "vertical velocity" is just the other axis of a
+   * planar drift: yaw leans toward horizontal travel and pitch toward
+   * vertical travel, and both come from the angel record's own +$1A/+$1C
+   * planar velocities rather than from PlayerVelocity, which is an
+   * action-stage concept. */
+  /* SimCameraMode. Free Cam's pose reaches present.c the ordinary way, inside
+   * sim.projection_*, because the game thread already resolved which pose is
+   * active; this only says whether the reactive offsets apply on top. */
+  int sim_camera_mode;
+  int sim_dyncam_strength;
+  float sim_dyncam_lean_yaw;
+  float sim_dyncam_lean_pitch;
+  bool sim_dyncam_event_hit;
 
   /* Widescreen HUD split + related PPU scalars (§2.8). */
   uint8_t hud_split_height;

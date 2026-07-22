@@ -60,6 +60,33 @@ is wrong. **Four ways runtime m/x goes wrong even with perfect opcodes:**
    cfg `exit_mx_at` / handle the RTS-trick with `rts_dispatch`.
 4. **Computed dispatch** reaching a PC at a runtime m/x the decoder never decoded that target for.
 
+**Which reported leaks actually matter (triage rule, 2026-07-22 — bug-ledger §22).** `--leaks` and
+the `ar_call_mx_check` tripwire report the **decoder's static expectation** at a JSR/JSL site. That
+is *not* by itself a defect: the emitted call is always a runtime `switch (((m_flag&1)<<1)|(x_flag&1))`
+over all four variants, so the correct-width callee runs regardless. A leak becomes real only when
+the mis-labelled **block** contains an **m-dependent-length immediate**, because then every byte
+after it was decoded at the wrong width and a real instruction gets swallowed. So:
+
+> Dump the block's RAW BYTES and decode at both widths — `dis65.py <blk> --mx 1,0` vs `--mx 0,0`.
+> **Same instruction stream → cosmetic, move on. Different lengths → an instruction was eaten;
+> read the emitted block in `src/gen` and find out which one.**
+
+Two long-standing benign examples that will keep showing up and are NOT worth re-chasing:
+`NmiHandler $008520` / `IrqHandler $008525` (x=0 vs expected x=1, every frame — native-mode
+interrupts don't change m/x, and both handlers are `JSL`+`RTI`), and `bank_03_9DE4/9E5A/9E6B`
+`$03:A048`/`$03:A116`. The real one a hundred bytes away (`$03:A46A`) ate a `STA $0002,X`.
+
+**The swallowed-instruction symptom shape: a SILENT MISSING STORE.** No crash, no garbage variant,
+no stack drift, nothing in `--diagnose` — a state machine simply reaches its terminal state and the
+side effect never happens. The tell in `src/gen` is a block emitting `g_cpu_brk_hook`/
+`g_cpu_cop_hook` in a region the ROM has no software interrupt in (the swallowed opcode's tail
+bytes decode as `00`/`02`). Worth a scan whenever "X gets into state N and never leaves":
+
+```sh
+# blocks in a bank that emit brk/cop hooks — candidates for a width misdecode
+grep -n 'cpu_trace_block\|brk_hook\|cop_hook' src/gen/bank03_part*_v2.c
+```
+
 A routine that hits *all four at once* (stack relocation + RTS-tricks + nested cross-function
 PHP/PLP) is a "perfect storm" the static decoder can't track — e.g. `$03:8053` (the act→sim
 enter-sim setup). The decoder guesses at every hop; on a *rare* code path (most of the game never
@@ -150,6 +177,42 @@ adding a new probe.
    tripwire") — process discipline (check first) is necessary but not sufficient; the tooling
    should also make this class of gap impossible to stay silent for long, so a future rotted
    workaround surfaces on its own instead of needing someone to remember to look.
+
+6. **A "verified" result is only as good as the field you actually read, and green output is not
+   the same as a run that happened.** Four separate false-greens in one 2026-07-22 session, each
+   costing a re-run or a wrong conclusion:
+   - The A/B that signed off the widened sprite emitter checked `separated_mismatch_pixels`,
+     found a clean zero, and never read `integrity_flags` **in the same JSON object** — where
+     the real failure was sitting. Decide which field would *disprove* the change before running
+     it, not which one confirms it.
+   - `tools/sim3d_demo.py` defaults to `--binary build/ActRaiserRecomp`, so a session spent
+     building `build-release/` tests a stale binary and reports plausible-looking results. The
+     tell was a checkpoint whose visual SHA-256 was byte-identical to the previous run.
+     **Rebuild `build/` before any checkpoint run, or pass `--binary`.**
+   - A background shell inherits the working directory of whatever `cd` ran before it. A suite
+     launched after an earlier `cd build-release` died instantly on "no such file", and the
+     trailing `echo` in the command chain made the task report **exit code 0**. Never end a
+     background command with something that can succeed independently of the work.
+   - `--all` had been broken since the stage-pin guard was added, because `run_suite` referenced
+     an undefined `checkpoint`. It had never been exercised — every prior "suite passed" was
+     individual `--checkpoint` runs. A guard added to one entry point is not added to the other.
+
+7. **Look for the same contract in every place that could restate it.** Making atlas overflow
+   non-fatal took three edits — the builder loop, the foot-union pass, and the commit-side
+   descriptor validator — and the first attempt was abandoned because the third one raised a
+   flag (`AtlasRasterFailure`) that looked like an unrelated latent bug. It was the same
+   all-or-nothing rule, written again. This is the same shape as ledger §23, where two
+   composition paths each applied the live-area rule to their base fill and forgot it for their
+   plane loop. **When you relax an invariant, grep for every consumer of the flag it sets.**
+
+8. **Reverse-engineering: read the writer before inverting the data.** Two attempts to rebuild
+   the town from its 32x32 cell map failed (cell → 2x2 tile block is only 62-77% single-valued
+   however you align it), and the range holding the answer — `$7F:0000` — was dismissed twice
+   from eyeballing word patterns, once as "only the VRAM window" and once as "probably BG2".
+   Disassembling the *writer*, `$03:9C43`, gave the layout in four instructions: it is the whole
+   64x64-tile town, quadrant-paged, which is exactly why a row-major read looks like a different
+   layer. Expansion tables like `$7E:3100` are write paths the game runs on change; invert them
+   only after checking whether the expanded result is already resident.
 
 ---
 
@@ -840,6 +903,135 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
   pointer, `+0A/+0C` position, `+10` status, `+25` delay. The pointed-to frame
   starts with the component count. A bad count is usually a bad `+08` pointer,
   not record `+0E` and not an OAM cursor reset.
+
+### 4e. Identifying a town sprite from a snapshot *(added 2026-07-22)*
+
+"Which object is that on screen?" is answerable without decoding a single
+tile, and the tile-decode route is the one that wastes time — sprite VRAM is
+streamed per scene, so a snapshot taken mid-effect usually has the OBJ
+character base somewhere the catalogue's default `--obj-base1/2` don't reach,
+and every composition renders as symmetric noise. Two reliable routes instead:
+
+1. **Live records + camera, from the snapshot's WRAM.** Walk world records
+   `$0A00` stride `$26` (and fixed `$06A0` stride `$12`), skipping
+   `+10 & $8000`. Read `+08` composition, `+0E` class, `+12 & $7FFF` state,
+   `+0A/+0C` world X/Y, and subtract camera `$22/$24` for authentic screen
+   coordinates. Relative screen layout is preserved under the 3D projection,
+   so left/right and near/far ordering is enough to match a record to a
+   visible sprite. `$7F:90EB` names the active miracle.
+2. **Composition geometry straight from ROM.** `tools/sim_object_catalog.py`'s
+   `composition(rom, addr)` is pure — part count, per-part x/y/size, palette,
+   and bounds need no snapshot at all. Shape alone is often decisive: a 12-part
+   64x64 with the centre four omitted is a hollow selection square; a 64x32
+   block sitting entirely at y `+40..+72` with its own palette is a shadow;
+   17-20 parts spanning y `-16..64` is one composition drawn from cloud to
+   ground.
+
+This is how the miracle cloud/bolt/rain family and the `$D993` selection
+square were classified. Rendering the compositions was tried first and
+produced garbage — reach for records and ROM geometry before pixels.
+
+**A one-frame flicker to the flat/top-down view is a capture fallback, and it
+names itself.** The enhanced town renderer draws the authentic composite
+whenever `separated_valid` is false for that frame, which looks exactly like
+"it flipped to top-down for a frame". `[sim3d-view]` console lines report every
+enhanced<->authentic transition with the game frame, the capture status, and
+the integrity flags — no trace pass or rebuild needed, just reproduce and read
+the console. Two entries per town entry are normal and benign: the ROM holds
+forced blank (`INIDISP=$80`) while it loads, then fades in over ~16 frames, and
+a forced-blank frame fails the PPU gate by design.
+
+When the status is `pixel_mismatch`, arm the dump instead of guessing which
+pixels differ — a fidelity failure cannot be dumped by frame number because
+nobody knows the number until after it happens:
+
+```sh
+AR_SIM3D_D2_DUMP_PREFIX=/tmp/mm AR_SIM3D_DUMP_ON_MISMATCH=1 ./build/ActRaiserRecomp ar.sfc
+```
+
+That writes `-A.ppm` (authentic), `-B.ppm` (our recomposition), `-difference.ppm`
+and every captured plane, for the first frame that actually mismatches. Diffing
+A against B gives exact pixel coordinates, which is usually the whole diagnosis:
+4 differing pixels at x=93-94 in a 446-wide frame said "margin columns just
+outside the live area" immediately (ledger §23).
+
+Note the logging call lives beside `SimRenderMetadata_TraceFrame`, not in
+`FrameSlot_Capture` — the latter only runs when a present thread consumes the
+slot, so anything placed there is silent in headless replays.
+
+**A replay only reproduces what its display geometry reproduces.** Replaying the
+user's own recording of §23 showed zero mismatches, because the headless replay
+ran 256 px wide while their session ran 446 with widescreen margins — and the
+bug lives in those margins. Compare the `[video-geometry]` line between the
+failing session's console and the replay before concluding a `.rec` does not
+reproduce a bug; add `AR_WS_HEADLESS=1 AR_EXTENDED_ASPECT_RATIO=16:9
+AR_DISPLAY_MODE=2` to match a widescreen session.
+
+**"The stage does nothing" is usually the profile, not the stage.** A SIM 3D
+render stage needs three separate things to be true before a single pixel
+changes: the feature bit must be in the effective mask, its dependencies must
+resolve on, and its own tuning value must be nonzero. Both D3c virtual height
+and D4a shadows shipped invisible in normal play because the *default* B
+profile predated them — the code, the tests, and the checkpoints were all
+green, because the checkpoints pass their own explicit masks. Order of
+investigation, cheapest first:
+
+1. `AR_SIM3D_D1_TRACE` reports `requested` and `effective` per frame. If your
+   bit is in `requested` but missing from `effective`, the resolver cleared it —
+   look for an unmet dependency. If it is missing from `requested`, no stage
+   toggle asked for it and the renderer is not the problem.
+2. Check the shipped default (`kSim3DShippedFeatures`) actually lists the
+   stage. Adding a stage means adding it there *and* to the per-stage setting
+   default, or only your checkpoints will ever see it.
+3. Only then look at the tuning value (`shadow_opacity_pct`, `height_pop_pct`,
+   `height_scale_x100`) — each is deliberately allowed to be zero, which is a
+   real "off" that leaves the stage otherwise enabled.
+
+**A persisted `settings.ini` beats the compiled default, so changing a default
+proves nothing about a live run.** Chasing "the rim light is too bright" cost
+two rounds of lowering `kSimRimStrengthDefaultPct` with zero visible effect,
+because the user's `settings.ini` already carried the old value and defaults
+only apply to a config that has never stored the key. Before adjusting any
+default in response to a live observation, `grep` the key out of `settings.ini`
+(and any `AR_SETTINGS_PATH` fixture) and change it *there*, or verify with the
+env override, which does take effect. The reverse also bites: checkpoints pass
+`AR_SETTINGS_PATH` fixtures, so a checkpoint and a play session can legitimately
+disagree about the same setting.
+
+**"Dial the number back" is the wrong fix when the shape is wrong.** The rim
+light above scaled its wrongness with its strength: it drew the lit band
+*outside* the silhouette, so every reduction produced a fainter halo rather than
+a better rim. If a value change produces a proportionally weaker version of the
+same wrong look rather than a different look, the geometry is wrong, not the
+magnitude. The action-stage shader (`kRimLightMSL`, `diorama.c`) had it right
+by construction — its edge term is multiplied by the pixel's own alpha, so it
+can only ever brighten pixels the sprite already owns. **When a host effect
+exists in both the action and simulation renderers, compare them before
+re-deriving one.**
+
+**A setting default must lie on its own step grid.** `settings_test`'s
+format/parse round-trip fails otherwise: a default of `8` on a `step 5` row
+formats, re-parses, and lands on a different value, which reports as
+`Settings_SetText(...) == kSettingChange_Unchanged` failing for an unrelated-
+looking row.
+
+**A regression checkpoint proves nothing until you watch it fail.** The
+`D2-margin-object-exit` checkpoint for ledger §23 passed on the very build whose
+fix had been reverted: without `headless_video` the run has no renderer, the
+capture never happens, and "zero mismatching pixels" is trivially true. Always
+revert the fix, confirm the new checkpoint FAILS with the expected numbers, then
+restore. Pair every "must be zero" assertion with a positive one
+(`separated_ready_frames_min`, expected `separated_statuses`) that proves the
+work under test actually ran.
+
+**A checkpoint can pass while asserting nothing.** `tools/sim3d_demo.py` only
+writes the D1 metadata trace when the checkpoint sets `d1_metadata`/`d2_flat`/
+`d3*_visual`; a manifest carrying `expect.d1_metadata` without one of those
+flags validated an absent summary and reported PASS. The runner now raises on
+that combination, but the general lesson holds for any harness whose
+expectations and data collection are configured separately: after adding
+expectations, confirm the summary actually contains the fields you asserted
+(`grep` the key out of `summary.json`) rather than trusting a green result.
 
 ---
 

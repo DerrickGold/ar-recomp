@@ -76,8 +76,15 @@ add_executable(ActRaiserRecomp
     src/settings_overlay.c
     src/scene_inspector.c
     src/scene_asset_dump.c
+    src/sim_phase0_trace.c
+    src/sim_render_metadata.c
+    src/sim_render_atlas.c
+    src/sim_world_map.c
+    src/sim_town_canvas.c
+    src/sim3d.c
     src/save_system.c
     src/run_dir.c
+    src/scene3d_math.c
     src/diorama.c
     src/present.c
     src/main.c
@@ -87,6 +94,7 @@ add_executable(ActRaiserRecomp
     src/actraiser_rtl.c
     src/hd_replacements.c
     src/music_replacements.c
+    src/sfx_census.c
     third_party/stb/stb_vorbis.c
     src/hd_tile_census.c
     src/actraiser_widescreen_bg.c
@@ -119,6 +127,22 @@ target_compile_definitions(ActRaiserRecomp PRIVATE
 if(NOT MSVC)
     target_compile_options(ActRaiserRecomp PRIVATE
         -w -Wno-implicit-function-declaration)
+endif()
+
+# AR_SIM3D_PICKER_TOPDOWN: restore the authentic flat view while a SIM position
+# picker is active (Direct the People / Building Direction and every targeted
+# miracle). Off while the projected ground is evaluated for targeting -- the
+# path is retained, not deleted. Gameplay, $7F:9215, D-pad targeting, and the
+# selected cell are identical either way; only those frames' presentation
+# changes. The sim3d_demo checkpoints read the compiled value back out of the
+# D1 trace and assert the matching picker contract, so neither setting leaves
+# the picker frames unverified.
+option(AR_SIM3D_PICKER_TOPDOWN
+    "Use the authentic top-down view while a SIM map picker is active" OFF)
+if(AR_SIM3D_PICKER_TOPDOWN)
+    target_compile_definitions(ActRaiserRecomp PRIVATE AR_SIM3D_PICKER_TOPDOWN=1)
+else()
+    target_compile_definitions(ActRaiserRecomp PRIVATE AR_SIM3D_PICKER_TOPDOWN=0)
 endif()
 
 # AR_SANITIZE: AddressSanitizer + UndefinedBehaviorSanitizer opt-in build.
@@ -165,6 +189,77 @@ target_link_libraries(ActRaiserRecomp PRIVATE
 )
 
 if(BUILD_TESTING)
+    add_executable(actraiser_scene3d_math_test
+        tests/scene3d_math_test.c
+        src/scene3d_math.c
+    )
+    target_include_directories(actraiser_scene3d_math_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_scene3d_math_test PRIVATE m)
+    add_test(NAME actraiser_scene3d_math COMMAND actraiser_scene3d_math_test)
+
+    add_executable(actraiser_sim_town_canvas_test
+        tests/sim_town_canvas_test.c
+        src/sim_town_canvas.c
+    )
+    target_include_directories(actraiser_sim_town_canvas_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_sim_town_canvas
+        COMMAND actraiser_sim_town_canvas_test)
+
+    add_executable(actraiser_sim_world_map_test
+        tests/sim_world_map_test.c
+        src/sim_world_map.c
+    )
+    target_include_directories(actraiser_sim_world_map_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_sim_world_map COMMAND actraiser_sim_world_map_test)
+
+    add_executable(actraiser_game_test
+        tests/actraiser_game_test.c
+    )
+    target_include_directories(actraiser_game_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_game COMMAND actraiser_game_test)
+
+    add_executable(actraiser_sim_phase0_trace_test
+        tests/sim_phase0_trace_test.c
+        src/sim_phase0_trace.c
+    )
+    target_include_directories(actraiser_sim_phase0_trace_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_sim_phase0_trace
+        COMMAND actraiser_sim_phase0_trace_test)
+
+    add_executable(actraiser_sim_render_metadata_test
+        tests/sim_render_metadata_test.c
+        src/sim_render_metadata.c
+        src/sim_world_map.c
+    )
+    target_include_directories(actraiser_sim_render_metadata_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    # The picker-view test asserts whichever policy the app is built with.
+    if(AR_SIM3D_PICKER_TOPDOWN)
+        target_compile_definitions(actraiser_sim_render_metadata_test
+            PRIVATE AR_SIM3D_PICKER_TOPDOWN=1)
+    else()
+        target_compile_definitions(actraiser_sim_render_metadata_test
+            PRIVATE AR_SIM3D_PICKER_TOPDOWN=0)
+    endif()
+    add_test(NAME actraiser_sim_render_metadata
+        COMMAND actraiser_sim_render_metadata_test)
+
     add_executable(actraiser_settings_test
         tests/settings_test.c
         src/config.c
@@ -193,6 +288,10 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_settings_overlay COMMAND actraiser_settings_overlay_test)
     set_tests_properties(actraiser_settings_overlay PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+    add_test(NAME actraiser_settings_overlay_minimum
+        COMMAND actraiser_settings_overlay_test)
+    set_tests_properties(actraiser_settings_overlay_minimum PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;AR_OVERLAY_TEST_SIZE=464x208")
 
     # SDL3 render-pipeline regression guard: presents a known framebuffer
     # through the same texture/FRect/logical-presentation path main.c uses and
@@ -215,11 +314,17 @@ if(BUILD_TESTING)
     # BLENDMODE_BLEND black-screen regression with genuine emulator output.
     add_executable(actraiser_ppu_render_pipeline_test
         tests/ppu_render_pipeline_test.c
+        src/sim3d.c
+        src/sim_render_metadata.c
+        src/sim_world_map.c
+        src/sim_town_canvas.c
+        src/sim_render_atlas.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu_old.c
     )
     target_include_directories(actraiser_ppu_render_pipeline_test PRIVATE
         ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_ppu_render_pipeline_test PRIVATE
@@ -244,6 +349,8 @@ if(BUILD_TESTING)
     add_executable(actraiser_scene_inspector_test
         tests/scene_inspector_test.c
         src/scene_inspector.c
+        src/sim_render_metadata.c
+        src/sim_world_map.c
     )
     target_include_directories(actraiser_scene_inspector_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

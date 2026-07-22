@@ -141,6 +141,14 @@ void dsp_saveload(Dsp *dsp, SaveLoadInfo *sli) {
  * lock like every other dsp_cycle caller. */
 int g_dsp_voice_mute_srcn_min = -1;
 
+/* Voice key-on observation seam (NULL by default = zero behavior change for
+ * other games). Fires once per applied key-on, on whichever thread is cycling
+ * the APU, with the APU lock held. ActRaiser's sfx_census.c installs it to
+ * correlate each BRK-posted sound request with the sample the driver actually
+ * keyed, which is what a music/SFX split and per-source panning both need. */
+void (*g_dsp_voice_kon_hook)(int ch, uint8_t srcn, uint16_t decodeOffset,
+                             int volL, int volR, uint16_t pitch) = NULL;
+
 /* AR_MUSICLEAK=1: while the music mute gate is engaged, report once a second
  * every voice that still reached the dry mix.
  *
@@ -175,10 +183,20 @@ static uint8_t s_leakKonSeen[8];  /* kon srcn in effect for the AUDIBLE samples.
                                    * time may already hold a LATER key-on that was
                                    * muted and so contributed no samples. */
 static int s_leakSlipped[8];      /* samples where kon >= gate but live < gate */
+/* srcn is only an INDEX into dirPage — the same srcn number denotes different
+ * samples under different directories. The resolved BRR start address is the
+ * sample's real identity, so record both: two voices reported as "srcn 00" are
+ * only the same sound if their brr addresses agree. */
+static uint16_t s_leakKonDir[8];
+static uint16_t s_leakKonBrr[8];
+static uint16_t s_leakSeenDir[8];
+static uint16_t s_leakSeenBrr[8];
 
 static void dsp_musicLeakNoteKon(Dsp* dsp, int ch) {
   if(!dsp_musicLeakEnabled()) return;
   s_leakKonSrcn[ch] = dsp->channel[ch].srcn;
+  s_leakKonDir[ch] = dsp->dirPage;
+  s_leakKonBrr[ch] = dsp->channel[ch].decodeOffset;
 }
 
 static void dsp_musicLeakAccum(Dsp* dsp, int ch) {
@@ -188,6 +206,8 @@ static void dsp_musicLeakAccum(Dsp* dsp, int ch) {
   if(v > s_leakPeak[ch]) s_leakPeak[ch] = v;
   s_leakLiveSrcn[ch] = dsp->channel[ch].srcn;
   s_leakKonSeen[ch] = s_leakKonSrcn[ch];
+  s_leakSeenDir[ch] = s_leakKonDir[ch];
+  s_leakSeenBrr[ch] = s_leakKonBrr[ch];
   s_leakHits[ch]++;
   if(s_leakKonSrcn[ch] >= g_dsp_voice_mute_srcn_min) s_leakSlipped[ch]++;
 }
@@ -198,9 +218,10 @@ static void dsp_musicLeakFlush(void) {
   window = 0;
   for(int ch = 0; ch < 8; ch++) {
     if(!s_leakHits[ch]) continue;
-    fprintf(stderr, "[musicleak] ch=%d kon_srcn=%02x live_srcn=%02x peak=%5d "
-            "duty=%3u%% slipped=%3u%% %s\n",
-            ch, s_leakKonSeen[ch], s_leakLiveSrcn[ch], s_leakPeak[ch],
+    fprintf(stderr, "[musicleak] ch=%d kon_srcn=%02x live_srcn=%02x dir=%04x "
+            "brr=%04x peak=%5d duty=%3u%% slipped=%3u%% %s\n",
+            ch, s_leakKonSeen[ch], s_leakLiveSrcn[ch], s_leakSeenDir[ch],
+            s_leakSeenBrr[ch], s_leakPeak[ch],
             (unsigned)(s_leakHits[ch] * 100u / 32000u),
             (unsigned)(s_leakSlipped[ch] * 100u / (unsigned)s_leakHits[ch]),
             s_leakSlipped[ch] ? "<-- UNLATCHED-SRCN LEAK" : "(keyed on in common bank)");
@@ -365,12 +386,20 @@ static void dsp_cycleChannel(Dsp* dsp, int ch) {
       dsp->channel[ch].adsrState = 4;
     } else if(dsp->channel[ch].keyOn) {
       dsp->channel[ch].keyOn = false;
-      dsp_musicLeakNoteKon(dsp, ch);
       // restart current sample
       dsp->channel[ch].previousFlags = 0;
       uint16_t samplePointer = dsp->dirPage + 4 * dsp->channel[ch].srcn;
       dsp->channel[ch].decodeOffset = dsp->apu_ram[samplePointer];
       dsp->channel[ch].decodeOffset |= dsp->apu_ram[(samplePointer + 1) & 0xffff] << 8;
+      /* AFTER decodeOffset is resolved from the directory — recording it any
+       * earlier captures the PREVIOUS note's advancing decode cursor, not this
+       * note's sample start. */
+      dsp_musicLeakNoteKon(dsp, ch);
+      if(g_dsp_voice_kon_hook)
+        g_dsp_voice_kon_hook(ch, dsp->channel[ch].srcn,
+                             dsp->channel[ch].decodeOffset,
+                             dsp->channel[ch].volumeL, dsp->channel[ch].volumeR,
+                             dsp->channel[ch].pitch);
       if(getenv("AR_KONLOG")) {
         uint16_t off = dsp->channel[ch].decodeOffset;
         fprintf(stderr, "[konapply] ch=%d srcn=%02x dirPage=%04x ptr@%04x brr@%04x "

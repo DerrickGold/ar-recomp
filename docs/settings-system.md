@@ -559,6 +559,69 @@ it naturally when the relevant engine becomes active.
 | Decorative BG2 padding | `AR_WS_BG2_MIRROR` | bool | on | stage policy chooses reflection or cyclic repeat; off clamps the 256-wide BG2. Keep env name for compatibility |
 | Clamp override | `AR_WS_CLAMP` | mask | none | manual per-layer mask; already uncached/live |
 
+### Simulation 3D (`kSettingCat_Simulation`) — all PASSIVE (2026-07-22)
+
+Read by the game thread and resolved into the immutable `FrameSlot` payload;
+the present thread never reads them live. All are gated on `sim3d_mode` being
+on. The diagnostic layer mask is a developer control, not a shipped player
+setting.
+
+| Setting | env | Type | Default | Note |
+|---|---|---|---|---|
+| Simulation town 3D | `AR_SIM3D` | bool | off | master toggle; requires the new PPU renderer |
+| Separated layer capture | `AR_SIM3D_SEPARATED` | bool | on | every other stage depends on this one |
+| Ground projection | `AR_SIM3D_GROUND` | bool | on | |
+| Object billboards | `AR_SIM3D_BILLBOARDS` | bool | on | |
+| Object heights | `AR_SIM3D_HEIGHT` | bool | on | needs object billboards |
+| Ground shadows | `AR_SIM3D_SHADOWS` | bool | on | needs object billboards |
+| Soft shadows | `AR_SIM3D_SOFT_SHADOWS` | bool | on | blur the ground shadow mask; needs ground shadows |
+| Rim light | `AR_SIM3D_RIM_LIGHT` | bool | on | lit edge on billboard silhouettes; needs object billboards |
+| World map underlay | `AR_SIM3D_WORLD_UNDERLAY` | bool | on | extends the ground past the town edge with the live world map and the full-town canvas; needs the ground projection. Also gates the widened sprite emit margin |
+| Atmospheric backdrop | `AR_SIM3D_BACKDROP` | bool | off | Phase 5; greyed out until implemented |
+| Ease picker exit | `AR_SIM3D_PICKER_EASE` | bool | off | Phase 5; greyed out until implemented |
+| SIM diagnostic layers | `AR_SIM3D_DIAGNOSTIC_LAYERS` | mask | `0` | developer-only per-plane visibility; deliberately produces incomplete images |
+| Camera pitch / yaw / distance | `AR_SIM3D_PITCH` / `_YAW` / `_DISTANCE` | int | −350 / 0 / 0 (auto-fit) | milliradians, milliradians, hundredths; right-drag orbits and the wheel zooms |
+| Object height scale | `AR_SIM3D_HEIGHT_SCALE` | int | 100 | percent of each classified flight plane. `0` grounds every billboard **without** disabling the height stage, so it is a real value and never doubles as "unset" — the frame capture defaults the field to 100 |
+| Flying sprite pop | `AR_SIM3D_HEIGHT_POP` | int | 5 | extra size for a flying sprite at its catalogue height, percent, normalized against that plane so the number means what it says. `0` leaves only the ~1% the lift genuinely produces. Scales lifted objects only, which is what makes it independent of camera distance |
+| Light direction | `AR_SIM3D_LIGHT_AZIMUTH` | int | 0 | compass direction the shadow is thrown, degrees: 0 right, 90 away from camera, 180 left, 270 toward camera. Inert at elevation 90 |
+| Light height | `AR_SIM3D_LIGHT_ELEVATION` | int | 85 | degrees above the ground. 90 is straight overhead and puts each shadow under its caster; lower pushes shadows out along the light direction. Shear is `cot(elevation)`, clamped so a near-horizon light cannot throw a shadow to infinity |
+| Shadow softness | `AR_SIM3D_SHADOW_SOFTNESS` | int | 35 | blur radius percent. `0` keeps the hard silhouette even with soft shadows on |
+| Rim light strength | `AR_SIM3D_RIM_STRENGTH` | int | 10 | brightness of the lit edge, percent. `0` leaves sprite colours untouched with the stage still enabled |
+| World map haze | `AR_SIM3D_UNDERLAY_HAZE` | int | 35 | how far the world-map underlay fades toward the scene backdrop, percent. `100` hides it without disabling any other stage. Governs the half-resolution world map only — the full-town canvas draws at full opacity, because it is the town being played |
+| Shadow darkness | `AR_SIM3D_SHADOW_OPACITY` | int | 45 | percent darkness of the D4a ground shadow mask. `0` skips the shadow pass entirely without disabling any other 3D stage, so the mask can be compared against itself without touching the stage toggle |
+
+**Two registry rules these rows exercise.** A numeric default must lie on the
+row's own `step` grid — the descriptor round-trip test formats and re-parses
+every default, and an off-grid value (a default of `8` with `step 5`) fails as
+an unrelated-looking `kSettingChange_Unchanged` mismatch. And a stored
+`settings.ini` value beats the compiled default: changing a default only
+affects configs that have never persisted that key, which makes it useless as a
+way to adjust a running session (see DEBUG.md §4e).
+
+**One profile, no masks.** The toggles are the only stored form. There is no
+feature-mask setting and no A/B profile pair: `Settings_Sim3DRequestedFeatures`
+folds the toggles into the single mask the resolver and frame payload work in,
+and one frame renders one profile. Comparing two builds of the scene means
+toggling stages across separate runs, which is exactly what the checkpoints do
+via their `baseline_env`.
+
+The defaults must agree with `kSim3DShippedFeatures` in
+`sim_render_metadata.h`, the single list of stages with a shipped
+implementation. **Add a landed stage to both**, or the player's master toggle
+silently keeps rendering an older profile no matter how the stage is tuned;
+that is exactly what happened to D3c virtual height and D4a shadows.
+
+Unimplemented stages stay listed but greyed out. They can still be *requested*
+— the resolver records the request and clears the bit from the effective mask,
+which is the documented A/B contract — but the menu never implies an effect
+that will not appear.
+
+Note the one build-time companion: `AR_SIM3D_PICKER_TOPDOWN` (CMake option,
+default `OFF`) chooses whether map pickers revert to the authentic flat view.
+It is deliberately *not* a runtime setting — it changes a fidelity contract
+the checkpoints assert against, so it is pinned at build time and reported in
+the D1 trace.
+
 ### Extras: bridge-limit enhancement — v2 (2026-07-17)
 
 The v1 toggles (bridge slot reuse, lightning destruction) were withdrawn the

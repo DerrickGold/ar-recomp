@@ -448,8 +448,136 @@ the current debugging process; this file is the case law.
     town simulation is the `$19!=0,9` branch and uses `$BC56` + generic `$AF30`. When one phase of
     an animation is corrupt, compare every WRAM phase and the loader/capture order before blaming
     palette or bridge data.
+22. **Destroyed sim-town house keeps its status bubble forever — FIXED 2026-07-22.** A house
+    destroyed by a monster kept its thought/status bubble permanently; the game later rebuilt a
+    house on the same cell, so the bubble sat on top of a standing house. Reported as
+    intermittent and "cutscene-related"; it is neither — every destroyed house sticks.
+    **Root cause: a silent MISSING STORE from wrong exit-m/x propagation (§0 mechanism #3).**
+    Both structure-record FREE handlers end by zeroing the record's flags byte
+    (`STA $0002,X` = clear bit7 = release the slot), and in both the store was eaten by a
+    16-bit immediate:
+
+    | handler | preceded by | continuation | raw | m=1 (real) | m=0 (emitted) |
+    |---|---|---|---|---|---|
+    | `$03:A44F` (action 7 = destroy) | `JSR $9FCD` @`$A467` | `$A46A` | `bd 02 00 29 40 f0 00 a9 00 9d 02 00 60` | `LDA $0002,X`/`AND #$40`/`BEQ +0`/`LDA #$00`/**`STA $0002,X`**/`RTS` | `LDA $0002,X`/`AND #$F040`/`BRK`/`BRK`/`COP`/`RTS` |
+    | `$03:A477` (sibling) | `JSR $9FE4` @`$A48F` | `$A492` | `a9 00 9d 02 00 60` | `LDA #$00`/**`STA $0002,X`**/`RTS` | `LDA #$9D00`/`COP`/`RTS` |
+
+    The decoder could not infer `$9FCD`/`$9FE4`'s exit width and resumed both continuations at
+    m=0, where the immediate swallows the `9d` (`STA abs,X`) opcode. **Fix:** `exit_mx_at 039FCD
+    1 0` + `exit_mx_at 039FE4 1 0` in `recomp/bank03.cfg`. Safe to pin: both callees are
+    width-neutral (`PHX/PHA … PLA/PLX/RTS`, no SEP/REP) and each has exactly ONE caller in the
+    whole ROM, both reached via `JSR $A4F7 ; LDA #$08` (`a9 08`) at m=1.
+    **Reusable lessons (three, all new):**
+    (a) **An m/x leak is only harmful when the mis-labelled block holds an m-dependent-length
+    immediate.** `--leaks` and `ar_call_mx_check` report the *decoder's static expectation* at a
+    call site; the emitted call itself is a runtime `switch` over all four variants, so the leak
+    alone changes nothing. The triage step that separates cosmetic from fatal is: dump the block's
+    RAW BYTES and decode at both widths (`dis65.py <blk> --mx 1,0` vs `0,0`). Same stream → cosmetic.
+    Different lengths → a real instruction was swallowed.
+    (b) **A missing store is a symptom shape with no tripwire.** No crash, no garbage variant, no
+    stack drift, nothing in `--diagnose` — just a side effect that never happens. The tell in
+    `src/gen` is a block that emits `g_cpu_brk_hook`/`g_cpu_cop_hook` in a region the ROM has no
+    software interrupt in; scan for it (`cpu_trace_block` … `brk_hook`) when a state machine
+    reaches its terminal state and stops.
+    (c) **A WRAM range trace is the fastest way to prove "state entered and never left."**
+    `AR_WRAM_TRACE=<f> AR_TRACE_LO/HI` over the record array gave the exact frame each record
+    entered the stuck state and proved the scanner kept running on its neighbours — one run, no
+    guessing. Flat offset = `0x10000 + $7Fxxxx`.
+    Ruled out first and worth NOT re-chasing: every `dispmiss` in both runs (all the known-benign
+    `B8C2` nested-reentry and §7.17 paired-resume shapes) and the `$03:A048`/`$A116` call-site
+    leaks, which fire in this exact subsystem and are inert.
 
 ---
+
+23. **One-frame flicker to the flat/top-down view when an actor leaves the screen sideways —
+    FIXED 2026-07-22.** Reported as "shooting an arrow off screen left/right flickers, as if
+    the picker forced a top-down frame". Not the picker: `AR_SIM3D_PICKER_TOPDOWN` is compiled
+    out, and every frame reported `view=enhanced` with the picker flag clear. **Root cause: the
+    D2 separated recomposition composited layer pixels outside the live area, where the hardware
+    shows black.** `ComposeFlatPixelsPolicy` applied the `live_x0/live_x1` rule to its base fill
+    only; the plane loop then blended every plane pixel at every x. An OBJ whose X has wrapped
+    negative (`world_x = $FFFE`) still rasterizes into the widescreen margin columns, and when
+    the camera sits at a map edge the *live* margin has collapsed to zero, so those columns must
+    be black. The result was 4-8 differing pixels at x=93-94 (live area starts at 95), which
+    correctly failed D2's byte-equality gate — dropping that single frame to the authentic
+    composite, i.e. one flat frame among projected ones. **Fix:** clip plane compositing to the
+    live area below the promoted-HUD rows (`full_width_rows`), in `src/sim3d.c`.
+    **Reusable lessons:**
+    - **A flat one-frame flicker in an enhanced renderer is a capture fallback, and the status
+      names the cause.** `[sim3d-view]` console lines report every enhanced<->authentic
+      transition with status, integrity flags, and mismatch count; `AR_SIM3D_DUMP_ON_MISMATCH=1`
+      with `AR_SIM3D_D2_DUMP_PREFIX` writes the authentic/composed/difference triplet on the
+      first failing frame, which is the only frame worth looking at. Neither needs the frame
+      number known in advance — which is the whole problem with dump-at-frame.
+    - **A replay only reproduces what its display geometry reproduces.** The first replay of the
+      user's own recording showed zero mismatches because it ran 256 px wide; the bug needs the
+      95-column widescreen margins. Compare `[video-geometry]` between the failing session and
+      the replay before concluding a recording does not reproduce a bug.
+    - **A fidelity gate failing is evidence the gate works, not that the gate is wrong.** The
+      instinct to relax the comparison would have hidden a real composition defect.
+    - **When one composition path has a rule, look for every other path that rebuilds the same
+      image.** Two sites here applied the live-area rule to their base fill and forgot it for
+      their plane loop.
+
+24. **Whole-screen perspective flash whenever a stray arrow crossed the town — FIXED
+    2026-07-22 (policy change, not a pixel fix).** Same symptom family as #23 and initially
+    misdiagnosed as the same cause. It was not: `separated_mismatch_pixels` was **zero** on
+    every frame. The fallback came from the *other* gate. Widening the SIM sprite emitter for
+    the 3D ground view (see SEAMS "Sim-mode OAM emit margin") admitted more world records;
+    on 12 frames one object's OBJ bounding box exceeded the 512x512 atlas, `SimRenderAtlas_Build`
+    failed, `metadata_valid` went false, and `Sim3D_ResolveFeatureMask` returned 0 — dropping
+    the entire view to the flat composite. The tell was in the counts: **9-10 objects on the
+    failing frames versus 20 on healthy ones**, so it was never sprite volume; a single
+    oversized bounds rectangle, almost certainly a multi-part composition straddling the OAM X
+    wrap once the widened margin admits its parts.
+    **Two fixes, both policy:**
+    - *Broken object metadata no longer drops the view.* The ground, projection, camera and
+      world underlay come from the separated plane capture, which is gated separately; the
+      semantic record pass supplies only sprites. `Sim3D_ResolveFeatureMask` now clears just
+      the object stages when `metadata_valid` is false, and `CaptureFrame` no longer switches
+      to `AuthenticFallback` on a metadata failure (it did so in two places — the initial
+      selection and the world-OAM-suffix path).
+    - *Atlas overflow purges the object, not the frame.* Per-object failures in
+      `SimRenderAtlas_Build` clear that object's descriptor and continue. This reversed a
+      deliberate earlier contract ("never the first 49 as a partial success"), which the
+      `ppu_render_pipeline` test asserted explicitly.
+    **Result:** `fallback_frame_count` 12 -> 0, `invalid_frame_count` 12 -> 0,
+    `integrity_flags` `[0,64]` -> `[0]`. The purged objects are still counted and still fail
+    the D5a checkpoint, so the underlying wrap bug stays visible.
+    **Reusable lessons:**
+    - **Two gates, two meanings.** "The separated planes do not reproduce the frame" (D2 pixel
+      gate) and "the object metadata is unusable" (integrity flags) had the same consequence.
+      Only the first has anything to do with the ground or the camera. Conflating them paid for
+      a sprite problem with a full-screen perspective change — louder than the artifact it hid,
+      and on this bug it hid a sprite the ROM makes vanish anyway.
+    - **This refines #23's lesson rather than contradicting it.** A fidelity gate *firing* is
+      still evidence it works; what was wrong here was the gate's *response*. Fail-closed
+      belongs in the checkpoint, where strictness is free, not in the player's frame. The
+      checkpoints still assert zero mismatch and zero purged objects.
+    - **An all-or-nothing contract is usually written in more than one place.** Making overflow
+      non-fatal took three edits: the builder loop, the foot-union pass (a purged fragment has
+      zeroed local bounds and would drag the shared foot), and — the one that cost an aborted
+      first attempt — `SimRenderMetadata_CommitAtlas`, whose descriptor validator required
+      `atlas_valid` on *every* object and raised `AtlasRasterFailure` when one was missing.
+      That flag looked like a latent second bug; it was the same contract, restated.
+    - **Measure the failure you are fixing.** The A/B that "verified" the emitter widening
+      checked `separated_mismatch_pixels` only and reported a clean zero, while
+      `integrity_flags` — where the actual failure lived — went unread in the same JSON.
+
+25. **Vertical OAM extension for off-screen actors — PROTOTYPED AND REJECTED 2026-07-22.**
+    Not a bug; recorded so it is not re-attempted. `PpuObjScreenY` reads the OAM Y byte as
+    `y >= 224 ? y - 256 : y`, so it expresses screen rows -32..223: 32 rows above the screen
+    look free, and there is no ninth Y bit to extend downward with the way X has one. Admitting
+    those rows measured **+249 sprites (+1.7pp)** on top of the horizontal widening — and failed
+    the checkpoint's *authentic framebuffer* comparison, which the horizontal widening never
+    touches. Reason: a part at row -5 with a 16-pixel body draws rows 0..10, inside the
+    authentic 224-row viewport, so it makes sprite pixels appear that the original game hides.
+    The horizontal margins are different in kind — they extend into widescreen area the hardware
+    never showed. Reverted; the reasoning lives beside the vertical predicate in
+    `src/actraiser_widescreen_sprites.c`. Reaching actors above or below the camera needs a path
+    that does not travel through OAM at all: the emitter recording parts host-side and the atlas
+    rasterizing from a synthetic OAM view. `PpuRasterizeObjRange` is already fully
+    screen-independent (no clipping, no scanline limits), so art is not the obstacle.
 
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 

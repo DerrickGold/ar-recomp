@@ -23,6 +23,74 @@ static void PpuDrawWholeLine(Ppu *ppu, uint y);
 static bool ppu_evaluateSprites(Ppu* ppu, int line);
 static uint16_t ppu_getVramRemap(Ppu* ppu);
 
+static const uint8_t kPpuSpriteSizes[8][2] = {
+  {8, 16}, {8, 32}, {8, 64}, {16, 32},
+  {16, 64}, {32, 64}, {16, 32}, {16, 32}
+};
+
+static void PpuUpdateBrightnessCache(Ppu *ppu) {
+  if (PPU_brightness(ppu) == ppu->lastBrightnessMult)
+    return;
+  uint8_t brightness = PPU_brightness(ppu);
+  ppu->lastBrightnessMult = brightness;
+  for (int i = 0; i < 32; i++) {
+    uint8_t value = (uint8_t)(((i << 3) | (i >> 2)) * brightness / 15);
+    ppu->brightnessMultHalf[i * 2] = value;
+    ppu->brightnessMultHalf[i * 2 + 1] = value;
+    ppu->brightnessMult[i] = value;
+  }
+  /* Store 31 extra entries to remove the need for clamping to 31. */
+  memset(&ppu->brightnessMult[32], ppu->brightnessMult[31], 31);
+}
+
+static int PpuObjSizeForIndex(const Ppu *ppu, uint8_t index) {
+  int large = (ppu->highOam[index >> 3] >> ((index & 7) + 1)) & 1;
+  return kPpuSpriteSizes[PPU_objSize(ppu)][large];
+}
+
+static int PpuObjScreenX(const Ppu *ppu, uint8_t index) {
+  int x = ppu->oam[index] & 0xff;
+  x |= ((ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
+  /* Preserve legitimate widescreen right-margin positions before applying
+   * the SNES 9-bit wrap used for left-edge straddling sprites. */
+  if (x >= 256 + ppu->extraRightCur) x -= 512;
+  return x;
+}
+
+static int PpuObjScreenY(const Ppu *ppu, uint8_t index) {
+  int y = ppu->oam[index] >> 8;
+  return y >= 224 ? y - 256 : y;
+}
+
+static uint32 PpuObjTilePlane(Ppu *ppu, int attributes, int sprite_size,
+                              int row, int col) {
+  int obj_address = (attributes & 0x100)
+      ? PPU_objTileAdr2(ppu) : PPU_objTileAdr1(ppu);
+  int used_col = attributes & 0x4000 ? sprite_size - 1 - col : col;
+  int tile = attributes & 0xff;
+  int used_tile = ((((tile >> 4) + (row >> 3)) << 4) |
+                   (((tile & 0xf) + (used_col >> 3)) & 0xf));
+  uint16 *address =
+      &ppu->vram[(obj_address + used_tile * 16 + (row & 7)) & 0x7fff];
+  return address[0] | (uint32)address[8] << 16;
+}
+
+static int PpuObjTilePixel(uint32 plane, int px, bool h_flipped) {
+  int shift = h_flipped ? px : 7 - px;
+  uint32 bits = plane >> shift;
+  return ((bits >> 0) & 1) | ((bits >> 7) & 2) |
+         ((bits >> 14) & 4) | ((bits >> 21) & 8);
+}
+
+static uint32 PpuObjColor(Ppu *ppu, int palette_index) {
+  if (!(palette_index & 0xff)) return 0;
+  uint32 color = ppu->cgram[palette_index & 0xff];
+  return 0xff000000u |
+      (uint32)ppu->brightnessMult[color & 0x1f] << 16 |
+      (uint32)ppu->brightnessMult[(color >> 5) & 0x1f] << 8 |
+      ppu->brightnessMult[(color >> 10) & 0x1f];
+}
+
 
 Ppu* ppu_init(void) {
   /* ppu_reset preserves host-owned render bindings. Start them deterministically
@@ -183,7 +251,8 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
   capture->x1 = (int16_t)x1;
   capture->y0 = (int16_t)y0;
   capture->y1 = (int16_t)y1;
-  capture->flags = flags & kPpuOverlayFlag_RemoveFromGame;
+  capture->flags = flags &
+      (kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkObjColorMath);
   capture->oamFirst = 0;
   capture->oamCount = 0;
   return true;
@@ -379,15 +448,7 @@ void ppu_runLine(Ppu* ppu, int line) {
     ppu->evenFrame = !ppu->evenFrame;
   } else {
     // Cache the brightness computation
-    if (PPU_brightness(ppu) != ppu->lastBrightnessMult) {
-      uint8_t ppu_brightness = PPU_brightness(ppu);
-      ppu->lastBrightnessMult = ppu_brightness;
-      for (int i = 0; i < 32; i++)
-        ppu->brightnessMultHalf[i * 2] = ppu->brightnessMultHalf[i * 2 + 1] = ppu->brightnessMult[i] =
-        ((i << 3) | (i >> 2)) * ppu_brightness / 15;
-      // Store 31 extra entries to remove the need for clamping to 31.
-      memset(&ppu->brightnessMult[32], ppu->brightnessMult[31], 31);
-    }
+    PpuUpdateBrightnessCache(ppu);
 
     // evaluate sprites
     ClearBackdrop(&ppu->objBuffer);
@@ -1239,12 +1300,21 @@ static bool PpuOverlayActiveOnLine(Ppu *ppu, PpuOverlaySource source,
 static uint32 PpuOverlayColor(Ppu *ppu, PpuZbufType pixel) {
   /* Isolated layer buffers may contain the priority-only backdrop marker.
    * A zero palette index is still transparent for a captured BG/OBJ plane. */
-  if (!(pixel & 0xff)) return 0;
-  uint32 color = ppu->cgram[pixel & 0xff];
-  return 0xff000000u |
-      (uint32)ppu->brightnessMult[color & 0x1f] << 16 |
-      (uint32)ppu->brightnessMult[(color >> 5) & 0x1f] << 8 |
-      ppu->brightnessMult[(color >> 10) & 0x1f];
+  return PpuObjColor(ppu, pixel & 0xff);
+}
+
+static uint32 PpuCapturedOverlayColor(
+    Ppu *ppu, PpuOverlaySource source,
+    const PpuOverlayCapture *capture, PpuZbufType pixel) {
+  uint32 color = PpuOverlayColor(ppu, pixel);
+  /* OBJ color math is selected by CGADSUB's OBJ bit only for palettes 4-7.
+   * SPRITE_PRIO_TO_PRIO encodes those pixels with layer id 4; palettes 0-3
+   * use id 6 so the compositor deliberately skips the OBJ math bit. */
+  if (color && source == kPpuOverlaySource_Obj &&
+      (capture->flags & kPpuOverlayFlag_MarkObjColorMath) &&
+      ((pixel >> 8) & 0x0f) == 4)
+    color = (color & 0x00ffffffu) | 0x80000000u;
+  return color;
 }
 
 /* Captures are per-frame game policy fixed before scanout, so a surface whose
@@ -1322,8 +1392,8 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
   }
   if (!any_bands) {
     for (int x = x0; x < x1; x++)
-      dst[x + texture_extra] =
-          PpuOverlayColor(ppu, src[x + kPpuExtraLeftRight]);
+      dst[x + texture_extra] = PpuCapturedOverlayColor(
+          ppu, source, capture, src[x + kPpuExtraLeftRight]);
     return;
   }
 
@@ -1342,7 +1412,7 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
   };
   for (int x = x0; x < x1; x++) {
     PpuZbufType zp = src[x + kPpuExtraLeftRight];
-    uint32 color = PpuOverlayColor(ppu, zp);
+    uint32 color = PpuCapturedOverlayColor(ppu, source, capture, zp);
     if (!color)
       continue;
     uint32 *out = dst;
@@ -1549,11 +1619,93 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 
 }
 
+bool PpuGetObjRangeBounds(Ppu *ppu, uint8_t first, uint8_t count,
+                          uint8_t priority, PpuObjRangeBounds *out) {
+  if (!ppu || !out || !count || first >= 128 || count > 128 - first ||
+      priority > 3)
+    return false;
+
+  int x0 = 32767, y0 = 32767, x1 = -32768, y1 = -32768;
+  for (int slot = first; slot < first + count; slot++) {
+    uint8_t index = (uint8_t)(slot * 2);
+    int attributes = ppu->oam[index + 1];
+    if (((attributes >> 12) & 3) != priority)
+      return false;
+    int size = PpuObjSizeForIndex(ppu, index);
+    int x = PpuObjScreenX(ppu, index);
+    int y = PpuObjScreenY(ppu, index);
+    x0 = IntMin(x0, x);
+    y0 = IntMin(y0, y);
+    x1 = IntMax(x1, x + size);
+    y1 = IntMax(y1, y + size);
+  }
+  if (x1 <= x0 || y1 <= y0)
+    return false;
+  out->x0 = (int16_t)x0;
+  out->y0 = (int16_t)y0;
+  out->x1 = (int16_t)x1;
+  out->y1 = (int16_t)y1;
+  return true;
+}
+
+bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
+                          uint8_t priority, const PpuObjRangeBounds *bounds,
+                          uint32_t *pixels, int width, int height,
+                          size_t pitch) {
+  PpuObjRangeBounds actual;
+  if (!pixels || !bounds || width <= 0 || height <= 0 ||
+      pitch < (size_t)width * sizeof(uint32_t) ||
+      !PpuGetObjRangeBounds(ppu, first, count, priority, &actual) ||
+      actual.x0 != bounds->x0 || actual.y0 != bounds->y0 ||
+      actual.x1 != bounds->x1 || actual.y1 != bounds->y1 ||
+      width != actual.x1 - actual.x0 || height != actual.y1 - actual.y0)
+    return false;
+
+  for (int y = 0; y < height; y++)
+    memset((uint8_t *)pixels + (size_t)y * pitch, 0,
+           (size_t)width * sizeof(uint32_t));
+  PpuUpdateBrightnessCache(ppu);
+
+  /* Scan all OAM in the renderer's priority-rotation order and filter to the
+   * semantic range. Earlier entries own an overlapping opaque pixel. */
+  uint8_t index = PPU_objPriority(ppu) ? (ppu->oamaddl & 0xfe) : 0;
+  for (int evaluated = 0; evaluated < 128; evaluated++, index += 2) {
+    int slot = index >> 1;
+    if (slot < first || slot >= first + count)
+      continue;
+
+    int attributes = ppu->oam[index + 1];
+    if (((attributes >> 12) & 3) != priority)
+      return false;
+    int size = PpuObjSizeForIndex(ppu, index);
+    int x = PpuObjScreenX(ppu, index);
+    int y = PpuObjScreenY(ppu, index);
+    bool h_flipped = (attributes & 0x4000) != 0;
+    bool v_flipped = (attributes & 0x8000) != 0;
+    int palette_base = 0x80 + 16 * ((attributes >> 9) & 7);
+
+    for (int display_row = 0; display_row < size; display_row++) {
+      int source_row = v_flipped ? size - 1 - display_row : display_row;
+      int dy = y + display_row - actual.y0;
+      uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (size_t)dy * pitch);
+      for (int col = 0; col < size; col += 8) {
+        uint32 plane =
+            PpuObjTilePlane(ppu, attributes, size, source_row, col);
+        for (int px = 0; px < 8; px++) {
+          int pixel = PpuObjTilePixel(plane, px, h_flipped);
+          if (!pixel)
+            continue;
+          int dx = x + col + px - actual.x0;
+          if (!dst[dx])
+            dst[dx] = PpuObjColor(ppu, palette_base + pixel);
+        }
+      }
+    }
+  }
+  return true;
+}
+
 static bool ppu_evaluateSprites(Ppu* ppu, int line) {
-  static const uint8 spriteSizes[8][2] = {
-    {8, 16}, {8, 32}, {8, 64}, {16, 32},
-    {16, 64}, {32, 64}, {16, 32}, {16, 32}
-  };
 
   // TODO: iterate over oam normally to determine in-range sprites,
   //   then iterate those in-range sprites in reverse for tile-fetching
@@ -1565,12 +1717,11 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     uint8_t y = ppu->oam[index] >> 8;
     // check if the sprite is on this line and get the sprite size
     uint8_t row = line - y;
-    int spriteSize = spriteSizes[PPU_objSize(ppu)][(ppu->highOam[index >> 3] >> ((index & 7) + 1)) & 1];
+    int spriteSize = PpuObjSizeForIndex(ppu, index);
     int spriteHeight = PPU_objInterlace(ppu) ? spriteSize / 2 : spriteSize;
     if(row < spriteHeight) {
       // in y-range, get the x location, using the high bit as well
-      int x = ppu->oam[index] & 0xff;
-      x |= ((ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
+      int x = PpuObjScreenX(ppu, index);
       // SNES OAM x is 9-bit; values >255 normally wrap to negative so sprites
       // can straddle the LEFT edge. In widescreen that wrap would also pull
       // legitimate right-margin sprites (screen x 256..) to the left, hiding
@@ -1580,7 +1731,6 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
       // positive (right margin); [256+extraRightCur, 512) still wrap to the
       // left straddle range. With extraRightCur==0 this is the authentic
       // `if (x > 255) x -= 512`.
-      if (x >= 256 + ppu->extraRightCur) x -= 512;
       // if in x-range: include sprites whose body pokes into the visible
       // area, which in widescreen starts at -extraLeftCur (the per-tile
       // gate below clips columns the same way). With extraLeftCur==0 this
@@ -1599,9 +1749,6 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
         if(PPU_objInterlace(ppu)) row = row * 2 + (ppu->evenFrame ? 0 : 1);
         // get some data for the sprite and y-flip row if needed
         int oam1 = ppu->oam[index + 1];
-        int tile = oam1 & 0xff;
-        int objAdr = (oam1 & 0x100) ? PPU_objTileAdr2(ppu) : PPU_objTileAdr1(ppu);
-        int palette = (oam1 & 0xe00) >> 9;
         bool hFlipped = oam1 & 0x4000;
         if(oam1 & 0x8000) row = spriteSize - 1 - row;
         // fetch all tiles in x-range
@@ -1620,10 +1767,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
               break;
             }
             // figure out which tile this uses, looping within 16x16 pages, and get it's data
-            int usedCol = oam1 & 0x4000 ? spriteSize - 1 - col : col;
-            int usedTile = ((((oam1 & 0xff) >> 4) + (row >> 3)) << 4) | (((oam1 & 0xf) + (usedCol >> 3)) & 0xf);
-            uint16 *addr = &ppu->vram[(objAdr + usedTile * 16 + (row & 0x7)) & 0x7fff];
-            uint32 plane = addr[0] | (uint32)addr[8] << 16;
+            uint32 plane = PpuObjTilePlane(ppu, oam1, spriteSize, row, col);
             // go over each pixel
             int px_left = IntMax(-(col + x + kPpuExtraLeftRight), 0);
             int px_right = IntMin(256 + kPpuExtraLeftRight - (col + x), 8);
@@ -1636,9 +1780,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
                 slot < obj_capture->oamFirst + obj_capture->oamCount;
 
             for (int px = px_left; px < px_right; px++) {
-              int shift = oam1 & 0x4000 ? px : 7 - px;
-              uint32 bits = plane >> shift;
-              int pixel = (bits >> 0) & 1 | (bits >> 7) & 2 | (bits >> 14) & 4 | (bits >> 21) & 8;
+              int pixel = PpuObjTilePixel(plane, px, hFlipped);
               if (pixel != 0) {
                 int screen_x = col + x + px;
                 int di = screen_x + kPpuExtraLeftRight;

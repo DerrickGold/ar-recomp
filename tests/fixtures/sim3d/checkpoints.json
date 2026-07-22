@@ -1,0 +1,1454 @@
+{
+  "schema": "actraiser-sim3d-checkpoints-v1",
+  "checkpoints": {
+    "D0-fillmore-idle": {
+      "description": "Fillmore baseline with no position-picker transition",
+      "replay": "saves/sim.rec",
+      "sram_base64": "tests/fixtures/sim3d/fillmore-legacy-seed.srm.b64",
+      "sram_sha256": "645a38e35665a1bf8d1e8e5b830219d40a5cae58769e5de97dd4ae74b5537f89",
+      "quit_frames": 1200,
+      "timeout_seconds": 60,
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "picker_ranges": [],
+        "picker_pending_world_types": [],
+        "picker_operations": [],
+        "ppu_modes": [
+          9
+        ]
+      }
+    },
+    "D0-fillmore-picker": {
+      "description": "Fillmore baseline plus one Direct the People / Building Direction picker sequence",
+      "replay": "saves/simdev.rec",
+      "sram_base64": "tests/fixtures/sim3d/fillmore-legacy-seed.srm.b64",
+      "sram_sha256": "645a38e35665a1bf8d1e8e5b830219d40a5cae58769e5de97dd4ae74b5537f89",
+      "quit_frames": 5000,
+      "timeout_seconds": 60,
+      "env": {
+        "AR_SIMCAT": "1"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "picker_ranges": [
+          [
+            1115,
+            1259
+          ]
+        ],
+        "picker_pending_world_types": [
+          9
+        ],
+        "picker_operations": [
+          "direct_people"
+        ],
+        "ppu_modes": [
+          9
+        ]
+      }
+    },
+    "D0-fillmore-repeat-picker": {
+      "description": "Fillmore baseline plus Direct the People / Building Direction and two targeted-miracle picker sequences",
+      "replay": "saves/lairseal.rec",
+      "sram_base64": "tests/fixtures/sim3d/fillmore-legacy-seed.srm.b64",
+      "sram_sha256": "645a38e35665a1bf8d1e8e5b830219d40a5cae58769e5de97dd4ae74b5537f89",
+      "quit_frames": 6000,
+      "timeout_seconds": 60,
+      "env": {
+        "AR_SIMCAT": "1"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "picker_ranges": [
+          [
+            1252,
+            1397
+          ],
+          [
+            1768,
+            1834
+          ],
+          [
+            2312,
+            2362
+          ]
+        ],
+        "picker_pending_world_types": [
+          9
+        ],
+        "picker_operations": [
+          "direct_people",
+          "targeted_miracle",
+          "targeted_miracle"
+        ],
+        "ppu_modes": [
+          9
+        ]
+      }
+    },
+    "D0-fillmore-actions": {
+      "description": "Fillmore miracle, Napper, Blue Demon lightning, and house-fire behavior coverage",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 12000,
+      "timeout_seconds": 120,
+      "trace_picker_routines": true,
+      "env": {
+        "AR_SIMCAT": "1"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "picker_ranges": [
+          [
+            962,
+            1101
+          ],
+          [
+            1352,
+            1367
+          ],
+          [
+            1866,
+            1913
+          ],
+          [
+            2241,
+            2313
+          ],
+          [
+            7420,
+            7461
+          ],
+          [
+            10166,
+            10199
+          ]
+        ],
+        "picker_pending_world_types": [
+          9
+        ],
+        "picker_operations": [
+          "direct_people",
+          "targeted_miracle",
+          "targeted_miracle",
+          "targeted_miracle",
+          "targeted_miracle",
+          "targeted_miracle"
+        ],
+        "miracle_kinds": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "object_evidence": [
+          "blue_demon_lightning",
+          "napper_ground_pluck",
+          "ground_fire",
+          "ground_people"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1
+      }
+    },
+    "D0-fillmore-wide-full-edge": {
+      "description": "Wide Full preserves the native left town-camera extent while finite margins suppress Wide Raw tile wrapping",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 1000,
+      "timeout_seconds": 60,
+      "env": {
+        "AR_WS_HEADLESS": "1",
+        "AR_EXTENDED_ASPECT_RATIO": "16:9",
+        "AR_DISPLAY_MODE": "2",
+        "AR_SIM3D": "0"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "visible_town_camera_x_min": 42,
+        "visible_town_camera_x_max": 96
+      }
+    },
+    "D1-metadata-actions": {
+      "description": "D1 frame-owned SIM record/OAM metadata plus complete semantic OBJ atlas over every captured miracle and enemy/effect variation; output remains authentic",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 12000,
+      "timeout_seconds": 120,
+      "d1_metadata": true,
+      "env": {
+        "AR_SIMCAT": "1",
+        "AR_SIM3D": "1",
+        "AR_SIM3D_SEPARATED": "off",
+        "AR_SIM3D_GROUND": "off",
+        "AR_SIM3D_BILLBOARDS": "off",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "picker_ranges": [
+          [
+            962,
+            1101
+          ],
+          [
+            1352,
+            1367
+          ],
+          [
+            1866,
+            1913
+          ],
+          [
+            2241,
+            2313
+          ],
+          [
+            7420,
+            7461
+          ],
+          [
+            10166,
+            10199
+          ]
+        ],
+        "picker_pending_world_types": [
+          9
+        ],
+        "miracle_kinds": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "object_evidence": [
+          "blue_demon_lightning",
+          "napper_ground_pluck",
+          "ground_fire",
+          "ground_people"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 100,
+          "valid_frames_min": 100,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "integrity_flags": [
+            0
+          ],
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 100,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            0
+          ],
+          "effective": [
+            0
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "off",
+        "AR_SIM3D_GROUND": "off",
+        "AR_SIM3D_BILLBOARDS": "off",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      }
+    },
+    "D2-flat-actions": {
+      "description": "D2 same-frame A0 authentic versus A1 pitch-zero separated Mode-1 recomposition across miracles, pickers, enemies, and grounded effects",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 12000,
+      "timeout_seconds": 120,
+      "d2_flat": true,
+      "d2_dump_game_frame": 700,
+      "env": {
+        "AR_SIMCAT": "1",
+        "AR_SIM3D": "1",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "off",
+        "AR_SIM3D_BILLBOARDS": "off",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "picker_ranges": [
+          [
+            962,
+            1101
+          ],
+          [
+            1352,
+            1367
+          ],
+          [
+            1866,
+            1913
+          ],
+          [
+            2241,
+            2313
+          ],
+          [
+            7420,
+            7461
+          ],
+          [
+            10166,
+            10199
+          ]
+        ],
+        "picker_pending_world_types": [
+          9
+        ],
+        "miracle_kinds": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "object_evidence": [
+          "blue_demon_lightning",
+          "napper_ground_pluck",
+          "ground_fire",
+          "ground_people"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 100,
+          "valid_frames_min": 100,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "integrity_flags": [
+            0
+          ],
+          "separated_statuses": [
+            6,
+            7,
+            12
+          ],
+          "separated_valid_frames_min": 8000,
+          "separated_ready_frames_min": 8000,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "ready_picker_exit_frames": [
+            1102,
+            1368,
+            1914,
+            2314,
+            7462,
+            10200
+          ],
+          "map_plane_picker_exit_frames": [
+            1102,
+            1368,
+            2314,
+            7462,
+            10200
+          ],
+          "unique_separated_hashes_min": 5000,
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 100,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            1
+          ],
+          "effective": [
+            0,
+            1
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "off",
+        "AR_SIM3D_GROUND": "off",
+        "AR_SIM3D_BILLBOARDS": "off",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      }
+    },
+    "D3a-ground-projection": {
+      "description": "D3a A1 flat separated composite versus A2 projected BG1 ground, with fixed OBJ/UI bypass and picker fallback",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 2600,
+      "timeout_seconds": 120,
+      "d3a_visual": true,
+      "d3a_shot_game_frame": 700,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "off",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 1000,
+          "valid_frames_min": 1000,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "projection_cameras": [
+            [
+              -350,
+              0,
+              0
+            ]
+          ],
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 500,
+          "separated_ready_frames_min": 500,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "ready_picker_exit_frames": [
+            1102,
+            1368,
+            1914,
+            2314
+          ],
+          "map_plane_picker_exit_frames": [
+            1102,
+            1368,
+            2314
+          ],
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 1000,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            3
+          ],
+          "effective": [
+            0,
+            3
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "off",
+        "AR_SIM3D_BILLBOARDS": "off",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      }
+    },
+    "D3b-object-billboards": {
+      "description": "D3b A2 projected ground versus A3 per-object, shared-foot, screen-facing world billboards with picker fallback",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 2600,
+      "timeout_seconds": 120,
+      "d3b_visual": true,
+      "d3a_shot_game_frame": 700,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 1000,
+          "valid_frames_min": 1000,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "projection_cameras": [
+            [
+              -350,
+              0,
+              0
+            ]
+          ],
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 500,
+          "separated_ready_frames_min": 500,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "ready_picker_exit_frames": [
+            1102,
+            1368,
+            1914,
+            2314
+          ],
+          "map_plane_picker_exit_frames": [
+            1102,
+            1368,
+            2314
+          ],
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 1000,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            7
+          ],
+          "effective": [
+            0,
+            7
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "off",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      }
+    },
+    "D3b-wide-hud-handoff": {
+      "description": "Wide Full D3b keeps the relocated hourglass out of the projected BG1 ground while restoring the standard HUD capture",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 1200,
+      "timeout_seconds": 120,
+      "d3b_visual": true,
+      "d3a_shot_game_frame": 700,
+      "env": {
+        "AR_WS_HEADLESS": "1",
+        "AR_EXTENDED_ASPECT_RATIO": "16:9",
+        "AR_ASPECT_PAR": "0",
+        "AR_DISPLAY_MODE": "2",
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-225",
+        "AR_SIM3D_YAW": "-20",
+        "AR_SIM3D_DISTANCE": "275",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "projection_cameras": [
+            [
+              -225,
+              -20,
+              275
+            ]
+          ],
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 50,
+          "separated_ready_frames_min": 50,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            7
+          ],
+          "effective": [
+            0,
+            7
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "off",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      }
+    },
+    "D3c-virtual-height": {
+      "description": "D3c A3 world billboards versus A4 classified virtual height across the angel, arrow, enemy families, people, animals, boats, building lightning, ground fire, and Napper pluck",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 2600,
+      "timeout_seconds": 120,
+      "d3c_visual": true,
+      "d3a_shot_game_frame": 700,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 1000,
+          "valid_frames_min": 1000,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "projection_cameras": [
+            [
+              -350,
+              0,
+              0
+            ]
+          ],
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 500,
+          "separated_ready_frames_min": 500,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "ready_picker_exit_frames": [
+            1102,
+            1368,
+            1914,
+            2314
+          ],
+          "map_plane_picker_exit_frames": [
+            1102,
+            1368,
+            2314
+          ],
+          "max_virtual_height": 24,
+          "lifted_objects_min": 1,
+          "height_class_minimums": {
+            "none": 1,
+            "grounded": 1,
+            "flying": 1,
+            "map_plane": 1
+          },
+          "forbidden_height_classes": [
+            "missing",
+            "invalid"
+          ],
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 1000,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            15
+          ],
+          "effective": [
+            0,
+            15
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      }
+    },
+    "D3c-height-variations": {
+      "description": "D3c object-variation matrix: the full action replay must classify the angel arrow, Napper ground-pluck, Blue Dragon building lightning, and ground fire onto their documented planes without lifting a map object",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 12000,
+      "timeout_seconds": 300,
+      "d1_metadata": true,
+      "headless_video": true,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 10000,
+          "valid_frames_min": 10000,
+          "invalid_frames_max": 0,
+          "integrity_flags": [
+            0
+          ],
+          "max_virtual_height": 24,
+          "max_classified_height": 24,
+          "height_ramp_steps_min": 1,
+          "height_slew_violations_max": 0,
+          "height_class_minimums": {
+            "none": 1,
+            "grounded": 1,
+            "flying": 1,
+            "flying_projectile": 219,
+            "semi_grounded": 36,
+            "ground_effect": 1866,
+            "ground_strike": 1,
+            "map_plane": 6536
+          },
+          "forbidden_height_classes": [
+            "missing",
+            "invalid"
+          ],
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            15
+          ],
+          "effective": [
+            0,
+            15
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "off",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      }
+    },
+    "D4a-hard-shadows": {
+      "description": "D4a A4 virtual height versus A5 ground-only hard shadows: only classified casters contribute a silhouette, lifted casters offset along the light, and the arrow, building lightning, ground fire, miracle clouds, cursors, and fixed HUD leave the ground untouched",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 2600,
+      "timeout_seconds": 120,
+      "d4a_visual": true,
+      "d3a_shot_game_frame": 700,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SHADOW_OPACITY": "45",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 1000,
+          "valid_frames_min": 1000,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "projection_cameras": [
+            [
+              -350,
+              0,
+              0
+            ]
+          ],
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 500,
+          "separated_ready_frames_min": 500,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "max_virtual_height": 24,
+          "lifted_objects_min": 1,
+          "shadow_casters_min": 1,
+          "shadow_lifted_casters_min": 1,
+          "shadow_opacity_values": [
+            45
+          ],
+          "height_class_minimums": {
+            "none": 1,
+            "grounded": 1,
+            "flying": 1,
+            "map_plane": 1
+          },
+          "forbidden_height_classes": [
+            "missing",
+            "invalid"
+          ],
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 1000,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            31
+          ],
+          "effective": [
+            0,
+            31
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "off",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "max_differing_pixels": 6000
+    },
+    "D4b-soft-shadows": {
+      "description": "D4b A5 hard shadows versus A6 soft shadows: the blur changes only edge softness on the ground mask, never a shadow's position, its opacity ownership, or any scene geometry",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 2600,
+      "timeout_seconds": 120,
+      "d3a_shot_game_frame": 700,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SHADOW_OPACITY": "45",
+        "AR_SIM3D_SHADOW_SOFTNESS": "35",
+        "AR_SIM3D_LIGHT_AZIMUTH": "0",
+        "AR_SIM3D_LIGHT_ELEVATION": "85",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 1000,
+          "valid_frames_min": 1000,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "projection_cameras": [
+            [
+              -350,
+              0,
+              0
+            ]
+          ],
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 500,
+          "separated_ready_frames_min": 500,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "max_virtual_height": 24,
+          "lifted_objects_min": 1,
+          "shadow_casters_min": 1,
+          "shadow_lifted_casters_min": 1,
+          "shadow_opacity_values": [
+            45
+          ],
+          "height_class_minimums": {
+            "none": 1,
+            "grounded": 1,
+            "flying": 1,
+            "map_plane": 1
+          },
+          "forbidden_height_classes": [
+            "missing",
+            "invalid"
+          ],
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 1000,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            63
+          ],
+          "effective": [
+            0,
+            63
+          ],
+          "shadow_softness_values": [
+            35
+          ],
+          "light_values": [
+            [
+              0,
+              85
+            ]
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "off",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "d4b_visual": true,
+      "max_differing_pixels": 6000
+    },
+    "D4c-rim-light": {
+      "description": "D4c A6 soft shadows versus A7 rim light: the lit edge is confined to billboard silhouettes, and disabling it restores unmodified sprite colour",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 2600,
+      "timeout_seconds": 120,
+      "d3a_shot_game_frame": 700,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SHADOW_OPACITY": "45",
+        "AR_SIM3D_SHADOW_SOFTNESS": "35",
+        "AR_SIM3D_LIGHT_AZIMUTH": "0",
+        "AR_SIM3D_LIGHT_ELEVATION": "85",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "on",
+        "AR_SIM3D_RIM_STRENGTH": "30",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 1000,
+          "valid_frames_min": 1000,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "projection_cameras": [
+            [
+              -350,
+              0,
+              0
+            ]
+          ],
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 500,
+          "separated_ready_frames_min": 500,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "max_virtual_height": 24,
+          "lifted_objects_min": 1,
+          "shadow_casters_min": 1,
+          "shadow_lifted_casters_min": 1,
+          "shadow_opacity_values": [
+            45
+          ],
+          "height_class_minimums": {
+            "none": 1,
+            "grounded": 1,
+            "flying": 1,
+            "map_plane": 1
+          },
+          "forbidden_height_classes": [
+            "missing",
+            "invalid"
+          ],
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 1000,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            127
+          ],
+          "effective": [
+            0,
+            127
+          ],
+          "shadow_softness_values": [
+            35
+          ],
+          "light_values": [
+            [
+              0,
+              85
+            ]
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "max_differing_pixels": 6000,
+      "d4c_visual": true
+    },
+    "D2-margin-object-exit": {
+      "description": "D2 fidelity at a map edge: an actor whose X wraps negative rasterizes into the widescreen margin columns, where the collapsed live area means the hardware shows black. Every frame of this replay must stay byte-exact, so no arrow leaving the screen sideways can drop a frame to the authentic composite",
+      "replay": "saves/sim-arrowbug.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-arrow-margin-settings.ini",
+      "quit_frames": 1600,
+      "timeout_seconds": 180,
+      "d1_metadata": true,
+      "headless_video": true,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_WS_HEADLESS": "1",
+        "AR_EXTENDED_ASPECT_RATIO": "16:9",
+        "AR_DISPLAY_MODE": "2",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "on",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "d1_metadata": {
+          "frame_count_min": 900,
+          "valid_frames_min": 900,
+          "invalid_frames_max": 0,
+          "picker_contract": false,
+          "separated_statuses": [
+            6,
+            12
+          ],
+          "separated_valid_frames_min": 900,
+          "separated_ready_frames_min": 900,
+          "integrity_flags": [
+            0
+          ],
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0
+        }
+      }
+    },
+    "D5a-world-underlay": {
+      "description": "D5a A7 rim light versus A8 world underlay: the live world map extends the ground past the town edge, the town's own 32x32-tile window stays punched out so nothing is drawn twice, and the D2 byte-equality gate is untouched because the underlay is present-side only",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 2600,
+      "timeout_seconds": 120,
+      "d3a_shot_game_frame": 700,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SHADOW_OPACITY": "45",
+        "AR_SIM3D_SHADOW_SOFTNESS": "35",
+        "AR_SIM3D_LIGHT_AZIMUTH": "0",
+        "AR_SIM3D_LIGHT_ELEVATION": "85",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "on",
+        "AR_SIM3D_RIM_STRENGTH": "30",
+        "AR_SIM3D_WORLD_UNDERLAY": "on",
+        "AR_SIM3D_UNDERLAY_HAZE": "35",
+        "AR_SIM3D_CLOUDS": "on",
+        "AR_SIM3D_CLOUD_OPACITY": "80",
+        "AR_SIM3D_CLOUD_FALLOFF": "96"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 1000,
+          "valid_frames_min": 1000,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "projection_cameras": [
+            [
+              -350,
+              0,
+              0
+            ]
+          ],
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 500,
+          "separated_ready_frames_min": 500,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "max_virtual_height": 24,
+          "lifted_objects_min": 1,
+          "shadow_casters_min": 1,
+          "shadow_lifted_casters_min": 1,
+          "shadow_opacity_values": [
+            45
+          ],
+          "height_class_minimums": {
+            "none": 1,
+            "grounded": 1,
+            "flying": 1,
+            "map_plane": 1
+          },
+          "forbidden_height_classes": [
+            "missing",
+            "invalid"
+          ],
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 1000,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 0,
+          "accounting_errors_max": 0,
+          "requested": [
+            1663
+          ],
+          "effective": [
+            0,
+            1663
+          ],
+          "shadow_softness_values": [
+            35
+          ],
+          "light_values": [
+            [
+              0,
+              85
+            ]
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off"
+      },
+      "max_differing_pixels": 200000,
+      "d5a_visual": true,
+      "headless_video": true
+    }
+  }
+}

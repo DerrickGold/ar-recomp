@@ -2,6 +2,8 @@
 
 #include <stdbool.h>
 
+#include "sim_render_metadata.h"
+
 enum {
   kSceneInspectorBg1 = 1 << 0,
   kSceneInspectorBg2 = 1 << 1,
@@ -18,6 +20,9 @@ bool SceneInspector_Select(int screen_x, int screen_y);
  * the report tied to the pixels actually composited at the clicked point. */
 bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
                                    unsigned bg_mask, bool inspect_objects);
+/* Game-thread snapshot supplied after scanout.  Passing NULL invalidates it;
+ * selection code never reads the live SIM metadata producer. */
+void SceneInspector_SetSimFrameData(const SimFrameData *frame);
 void SceneInspector_Clear(void);
 bool SceneInspector_HasSelection(void);
 const char *SceneInspector_PanelText(void);

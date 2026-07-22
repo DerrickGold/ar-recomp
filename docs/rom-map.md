@@ -131,6 +131,28 @@ ram-map "Road Construction Encoding" for the bit layout):
 | `$03:D4D2+` | `0x1D4D2` | Structure-visual class table bases (class `$7D1F` + variant `$7D21` → step-program pointer, armed into `$7F:77E7+rec*8` by `$03:A4B8`) |
 | `$03:D2FA/$03:D306` | `0x1D2FA` | Development target-site coordinate tables (per SEAMS §5) |
 
+### Town OBJ composition landmarks (bank $01, classified 2026-07-22)
+
+Composition addresses consumed by `$01:ADAD`/`$AE6F` via world record `+08`.
+`docs/sim-object-catalog.md` is the full catalogue; these are the ones the
+sim3d height/anchor classifier keys on, recorded here because several are easy
+to mistake for their neighbours.
+
+| Address(es) | Identity | Notes |
+|---|---|---|
+| `$A627-$A792` | Angel directional/pose frames | **Not** an angel signal on their own — borrowed by miracle effect records |
+| `$D233-$D302` | Position/direction cursor family | class-`$11` town position controller |
+| `$D967/$D972/$D97D/$D988` | Angel arrow vertical/horizontal A/B | record `$0B0A` |
+| `$D993` | 64x64 hollow path/area selection square | palette 6, class-`$09` record; a **second** map-plane cursor outside `$D233-$D302` |
+| `$D9E5` | Miracle cloud alone | palette 2 |
+| `$DA22` | Miracle cloud's own ground shadow ellipse | palette 7, colour-math eligible, drawn +40..+72 below the shared anchor by a co-located record |
+| `$DA4B/$DAA1/$DAF7/$DB5C` | Cloud + lightning bolt | one composition spanning cloud to ground (64x76-80) |
+| `$DC77/$DBC1/$DC1C/$DCD2` | Cloud + rain streaks | one composition spanning cloud to ground (64x72) |
+| `$E1BD/$E209/$E255` | Blue Dragon building-zap bolt | emitted on the dragon's own record, alternating with flight frames; the ROM drops the record onto the target |
+| `$E6CA/$E6D0/$E6D6` | Ground fire | |
+| `$E71B/$E73A/$E75E` | Napper ground-pluck frames | the near-ground phase of class `$13` state 5 |
+| `$E99C-$E9C6` | Sailboat frames | water plane |
+
 ### Text Data (Bank $04: 0x20000-0x27FFF)
 | Range | Content |
 |-------|---------|
@@ -161,6 +183,14 @@ This is the stage-2 chunk pool (`$08:8000`) scanned linearly by the `$02:9964`
 upload HLE: each song image's terminator doubles as a script of chunk indices
 selecting which samples stream into ARAM (common bank = chunks 0-11 → srcn
 `$00-$0B`; per-song instruments land at srcn `$0C+`). See SEAMS "Audio".
+
+The resulting common-bank directory is stable and verified 1:1 (DIR page
+`$2C00`, never rewritten at runtime): srcn `00`→`$3000`, `01`→`$3B01`,
+`02`→`$44EB`, `03`→`$4545`, `04`→`$4F2F`, `05`→`$5814`, `06`→`$5DB4`,
+`07`→`$5DD8`, `08`→`$6906`, `09`→`$6DA1`, `0A`→`$6DF2`, `0B`→`$6E4C`.
+`srcn 00` has start == loop == `$3000`, so a key-on with no key-off sustains
+indefinitely. Note that the common bank is **not** SFX-exclusive: some songs
+key shared-bank samples as musical instruments (see SEAMS "Audio swap tiers").
 
 ### Compressed Data (0x70000+)
 Extensive compressed sprite composition, map arrangement, and tileset data

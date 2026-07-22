@@ -5,6 +5,9 @@
 #include "variables.h"
 #include "settings.h"
 #include "hd_replacements.h"
+#include "sfx_census.h"
+#include "sim_render_atlas.h"
+#include "sim3d.h"
 #include "common_cpu_infra.h"
 #include "snes/snes.h"
 #include "snes/ppu.h"
@@ -187,6 +190,15 @@ volatile int g_ar_in_interrupt = 0;
 static void ActRaiser_BrkHook(CpuState *cpu) {
   cpu_write8(cpu, 0x00, kActRaiserWram_BrkSoundRequest,
              (uint8)(cpu->A & 0xFF));
+  /* AR_SFXCENSUS=1: record the request with its caller and the index registers
+   * that identify the requesting actor, so the census can join it to whatever
+   * sample the SPC driver ends up keying. No-op when disabled. */
+  {
+    extern const char *g_last_recomp_func;
+    SfxCensus_OnRequest((uint8_t)(cpu->A & 0xFF), g_last_recomp_func,
+                        ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+                        (uint16_t)cpu->X, (uint16_t)cpu->Y);
+  }
   /* AR_COPLOG=1: also log BRK (sound-request) posts, for contrast against COP
    * event posts below -- lets a stuck-state capture show whether the game is
    * still alive and posting routine SFX while a specific event id never posts. */
@@ -1127,6 +1139,8 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
 void ActRaiserDrawPpuFrame(void) {
   /* Overlay bindings are host-owned and persistent; capture policy is
    * game-owned and rebuilt every frame so no prior mode can leak a region. */
+  if (Sim3D_BeginFrame())
+    ActRaiser_RebindPpuOutputSurfaces();
   PpuClearOverlayCaptures(g_ppu);
   ActRaiser_ApplyWidescreenPolicy();
   /* Stage D reconnaissance: read-only classification of objects that intersect
@@ -1257,6 +1271,32 @@ void ActRaiserDrawPpuFrame(void) {
     }
   }
 
+  /* D2: claim observational full-frame Mode-1 captures only after every
+   * pre-existing HUD/HD/diorama policy has had a chance to declare a
+   * conflict. The original PPU framebuffer remains intact as same-frame A0. */
+  {
+    extern bool g_sim3d_textures_ready;
+    extern bool g_diorama_frame_active;
+    extern int g_ws_extra;
+    uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
+    uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
+    bool town = ActRaiser_IsSimulationTown(map_group, map_number);
+    Sim3DCaptureRequest request = {
+      .town = town,
+      .master_enabled = g_settings.sim3d_mode,
+      .picker_active = town && ActRaiser_SimMapPickerActiveForState(
+          map_group, map_number,
+          ActRaiser_ReadWram16(kActRaiserWram_SimMapPickerFlag)),
+      .renderer_ready = g_sim3d_textures_ready,
+      .diorama_active = g_diorama_frame_active,
+      .requested_features = Settings_Sim3DRequestedFeatures(),
+      .diagnostic_layer_mask = g_settings.sim3d_diagnostic_layers,
+      .width = kActRaiserAuthenticWidth + 2 * g_ws_extra,
+      .height = kActRaiserAuthenticHeight,
+    };
+    Sim3D_PrepareCapture(g_ppu, &request);
+  }
+
   /* AR_TILE_CENSUS=1: read-only HD tile-pack sizing survey (hd_tile_census.c). */
   { extern void HdTileCensus_Frame(void); HdTileCensus_Frame(); }
   /* AR_TITLELOG=1: per-frame title-screen PPU probe (map bytes, BG mode,
@@ -1294,6 +1334,17 @@ void ActRaiserDrawPpuFrame(void) {
 
   int trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
 
+  /* D1b: isolate each semantic (record, priority) OAM fragment before the
+   * scanline renderer consumes this exact OAM/VRAM/CGRAM state. The atlas is
+   * presentation-only and the authentic framebuffer remains untouched. */
+  if (ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+                                 g_ram[kActRaiserWram_CurrentMap])) {
+    SimRenderAtlas_Build(
+        g_ppu,
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
+  }
+
   for (int i = 0; i <= 224; i++) {
     ppu_runLine(g_ppu, i);
     for (int ch = 0; ch < 8; ch++)
@@ -1309,6 +1360,14 @@ void ActRaiserDrawPpuFrame(void) {
       ActRaiser_RestoreRegs(&g_cpu, &snap);
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
+  }
+  {
+    extern uint8_t g_pixels[];
+    extern int g_ws_extra;
+    int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+    Sim3D_FinishCapture(
+        g_pixels, width * 4,
+        ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
   }
   ActRaiser_WidescreenSkyPalaceRestore();
 }

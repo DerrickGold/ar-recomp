@@ -157,6 +157,7 @@ static const uint8_t kFallbackFont[128][7] = {
 static const SettingCategory kCategoryOrder[] = {
   kSettingCat_Display,
   kSettingCat_Presentation,
+  kSettingCat_Simulation,
   kSettingCat_Graphics,
   kSettingCat_Widescreen,
   kSettingCat_Audio,
@@ -202,6 +203,11 @@ static bool s_glyph_defined[256];
 static bool s_open;
 static bool s_submenu_open;
 static int s_category_slot;
+/* The primary-navigation list has its own scroll window.  The right-hand
+ * submenu already scrolls through s_top_row/s_visible_rows; sharing those
+ * values would make moving either pane unexpectedly reposition the other. */
+static int s_nav_top_row;
+static int s_nav_visible_rows = 9;
 static int s_row;
 static int s_top_row;
 static int s_visible_rows = 9;
@@ -396,6 +402,7 @@ static void WriteIconGlyph(unsigned tile, const char rows[8][9]) {
 enum {
   kIconTile_Display = 128,
   kIconTile_Diorama,
+  kIconTile_Simulation,
   kIconTile_Graphics,
   kIconTile_Widescreen,
   kIconTile_Audio,
@@ -420,6 +427,11 @@ static void WriteHostIcons(void) {
   WriteIconGlyph(kIconTile_Diorama, (const char[8][9]){
     "...##...", "..#..#..", ".#....#.", "#......#",
     ".#....#.", "..#..#..", "...##...", "........",
+  });
+  /* Simulation: a horizon over a receding ground grid. */
+  WriteIconGlyph(kIconTile_Simulation, (const char[8][9]){
+    "........", "........", "########", "...##...",
+    "..#..#..", ".#....#.", "#......#", "........",
   });
   /* Graphics: a four-point sparkle for the GPU shader effects. Each ray is
    * ≥2 cells from its neighbors so the outline dilation can't bridge them
@@ -465,6 +477,7 @@ static int CategoryIconTile(SettingCategory category) {
   switch (category) {
     case kSettingCat_Display:      return kIconTile_Display;
     case kSettingCat_Presentation: return kIconTile_Diorama;
+    case kSettingCat_Simulation:   return kIconTile_Simulation;
     case kSettingCat_Graphics:     return kIconTile_Graphics;
     case kSettingCat_Widescreen:   return kIconTile_Widescreen;
     case kSettingCat_Audio:        return kIconTile_Audio;
@@ -753,6 +766,38 @@ static int NavRowCount(int slot) {
   return TopLevelDescForSlot(slot) ? 1 : 0;
 }
 
+static void SelectFirstPopulatedCategory(void);
+
+static int NavPopulatedCount(void) {
+  int populated = 0;
+  for (int slot = 0; slot < NavSlotCount(); slot++)
+    if (NavRowCount(slot) > 0) populated++;
+  return populated;
+}
+
+static int NavOrdinalForSlot(int selected_slot) {
+  int ordinal = 0;
+  for (int slot = 0; slot < NavSlotCount(); slot++) {
+    if (NavRowCount(slot) <= 0) continue;
+    if (slot == selected_slot) return ordinal;
+    ordinal++;
+  }
+  return 0;
+}
+
+static void EnsureSelectedNavVisible(void) {
+  SelectFirstPopulatedCategory();
+  int count = NavPopulatedCount();
+  int visible = s_nav_visible_rows > 0 ? s_nav_visible_rows : 1;
+  int selected = NavOrdinalForSlot(s_category_slot);
+  if (selected < s_nav_top_row) s_nav_top_row = selected;
+  if (selected >= s_nav_top_row + visible)
+    s_nav_top_row = selected - visible + 1;
+  int maximum_top = count > visible ? count - visible : 0;
+  if (s_nav_top_row > maximum_top) s_nav_top_row = maximum_top;
+  if (s_nav_top_row < 0) s_nav_top_row = 0;
+}
+
 static const char *NavSlotLabel(int slot) {
   if (slot < 0 || slot >= NavSlotCount()) return "";
   if (slot < CategorySlotCount())
@@ -931,6 +976,7 @@ static void MoveCategory(int direction) {
   }
   s_row = 0;
   s_top_row = 0;
+  EnsureSelectedNavVisible();
 }
 
 static void EnsureSelectedRowVisible(void) {
@@ -1029,6 +1075,27 @@ void SettingsOverlay_Close(void) {
   s_submenu_open = false;
   s_open = false;
   fprintf(stderr, "[settings-menu] closed\n");
+}
+
+const char *SettingsOverlay_SelectedKey(void) {
+  if (!s_open) return "";
+  const SettingDesc *desc = SelectedDesc();
+  return desc && desc->key ? desc->key : "";
+}
+
+bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
+                                        int *top_ordinal,
+                                        int *visible_rows,
+                                        int *total_rows) {
+  if (!s_open) return false;
+  SelectFirstPopulatedCategory();
+  EnsureSelectedNavVisible();
+  if (selected_ordinal)
+    *selected_ordinal = NavOrdinalForSlot(s_category_slot);
+  if (top_ordinal) *top_ordinal = s_nav_top_row;
+  if (visible_rows) *visible_rows = s_nav_visible_rows;
+  if (total_rows) *total_rows = NavPopulatedCount();
+  return true;
 }
 
 bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
@@ -1514,12 +1581,28 @@ static void DrawMenu(const MenuLayout *layout) {
                     s_status, status_chars, kText_Warning);
   }
 
-  int category_y = category_first_y;
   const int category_count = CategorySlotCount();
   const int nav_count = NavSlotCount();
+  const int nav_total = NavPopulatedCount();
+  s_nav_visible_rows =
+      (top_y + top_height - 12 - category_first_y) / kNavRowHeight + 1;
+  if (s_nav_visible_rows < 1) s_nav_visible_rows = 1;
+  EnsureSelectedNavVisible();
+
+  int nav_ordinal = 0;
   for (int slot = 0; slot < nav_count; slot++) {
     if (NavRowCount(slot) <= 0) continue;
-    if (slot == category_count) category_y += 4;
+    int ordinal = nav_ordinal++;
+    if (ordinal < s_nav_top_row ||
+        ordinal >= s_nav_top_row + s_nav_visible_rows)
+      continue;
+    int category_y =
+        category_first_y + (ordinal - s_nav_top_row) * kNavRowHeight;
+    /* Keep lifecycle actions visually separated without spending another row;
+     * the previous fixed four-pixel gap was what pushed Exit past the panel. */
+    if (slot == category_count && ordinal > s_nav_top_row)
+      FillLogicalRect(layout, left_x + 12, category_y - 1,
+                      left_width - 24, 1, 0x6080A0C0u);
     TextStyle style = slot == s_category_slot ? kText_Normal : kText_Dim;
     if (slot == s_category_slot && !s_submenu_open)
       DrawGlyph(layout, left_text_x + ((SDL_GetTicks() / 300) & 1),
@@ -1536,8 +1619,17 @@ static void DrawMenu(const MenuLayout *layout) {
     }
     DrawTextN(layout, left_text_x + 20, category_y,
               NavSlotLabel(slot), 13, style);
-    category_y += kNavRowHeight;
   }
+  /* Indicators live in the otherwise-unused far-right gutter so they do not
+   * consume a navigation row or collide with the selection cursor. */
+  const int nav_indicator_x = left_x + left_width - 12;
+  if (s_nav_top_row > 0)
+    DrawGlyph(layout, nav_indicator_x, category_first_y,
+              '^', kText_Warning);
+  if (s_nav_top_row + s_nav_visible_rows < nav_total)
+    DrawGlyph(layout, nav_indicator_x,
+              category_first_y + (s_nav_visible_rows - 1) * kNavRowHeight,
+              'v', kText_Warning);
 
   s_visible_rows =
       (top_y + top_height - 12 - first_row_y) / kRowHeight + 1;

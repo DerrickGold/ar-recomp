@@ -22,6 +22,18 @@ bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);
 
+/* Read-only layout diagnostics used by preview/regression tests. Ordinals
+ * count populated primary-navigation rows, including Restart and Exit. */
+/* Key of the currently selected row, or "" when the overlay is closed. Lets a
+ * test navigate to a row by name instead of counting keypresses, which breaks
+ * every time a row is inserted above it. */
+const char *SettingsOverlay_SelectedKey(void);
+
+bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
+                                        int *top_ordinal,
+                                        int *visible_rows,
+                                        int *total_rows);
+
 /* Returns true when the event belongs to the overlay and must not reach the
  * host hotkey/SNES input paths. F2 is deliberately left available so visual
  * snapshots can include the menu. */

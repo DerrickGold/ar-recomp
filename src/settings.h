@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include "sim_render_metadata.h"
 
 /* Live runtime settings — the first slice of the g_settings refactor described
  * in docs/settings-system.md (§3.1/§4). Existing cheat and widescreen behavior
@@ -55,6 +56,18 @@ typedef enum {
   kDioramaCam_Count,
 } DioramaCameraMode;
 
+/* The same two-mode split for the simulation town, and for the same reason:
+ * Free Cam's pose is player-owned and persists across a session, Dynamic Cam
+ * has its own dedicated baseline that reactive motion leans around. Keeping
+ * two poses rather than one is what makes switching modes restore each mode's
+ * own camera instead of leaving Dynamic to sway around wherever the last
+ * manual drag happened to leave things. */
+typedef enum {
+  kSimCam_Free = 0,
+  kSimCam_Dynamic = 1,
+  kSimCam_Count,
+} SimCameraMode;
+
 /* B5 (followup doc): promotes BG2 (the farthest/sky background layer in
  * ActRaiser Mode 1 action stages) from an ordinary in-box parallax plane to
  * an enveloping, dimmed, DoF'd skybox that fills the viewport — fixes the
@@ -94,6 +107,7 @@ typedef enum {
   kSettingCat_Widescreen,
   kSettingCat_Display,
   kSettingCat_Presentation,
+  kSettingCat_Simulation,
   kSettingCat_Graphics,
   kSettingCat_Audio,
   kSettingCat_Save,
@@ -259,6 +273,61 @@ typedef struct Settings {
   bool ws_bg2_padding;        /* AR_WS_BG2_MIRROR        pad decorative BG2 */
   bool ws_sim_sprites;        /* AR_WS_SIM_SPRITES       widen sim components */
 
+  /* Simulation-town 3D presentation.  The master and two masks are captured
+   * into each FrameSlot; render stages consume only their resolved effective
+   * masks.  D1 exposes the controls while the implemented-capability mask is
+   * still zero, so every selection safely resolves to authentic output. */
+  bool sim3d_mode;
+  /* The enhanced renderer's stages. These toggles are the only stored form:
+   * there is no feature mask setting and no A/B profile pair. Comparing two
+   * builds of the scene means toggling stages across separate runs, which is
+   * what the checkpoints do. */
+  bool sim3d_separated_composite;
+  bool sim3d_ground_projection;
+  bool sim3d_object_billboards;
+  bool sim3d_virtual_height;
+  bool sim3d_shadows;
+  bool sim3d_soft_shadows;
+  bool sim3d_rim_light;
+  bool sim3d_world_underlay;
+  bool sim3d_cloud_shroud;
+  bool sim3d_cull_haze;
+  bool sim3d_backdrop;
+  bool sim3d_picker_exit_ease;
+  uint16 sim3d_diagnostic_layers;
+  int sim3d_tilt_x_mrad;       /* camera pitch, milliradians */
+  int sim3d_tilt_y_mrad;       /* camera yaw, milliradians */
+  int sim3d_distance_x100;     /* camera distance, hundredths; 0 = auto */
+  int sim3d_height_scale_x100; /* virtual-height scale, percent of the
+                                * classified plane; 100 = catalogue default */
+  int sim3d_shadow_opacity_pct; /* ground shadow darkness, percent; 0 = off */
+  int sim3d_height_pop_pct;
+  int sim3d_light_azimuth_deg;   /* direction the shadow is thrown */
+  int sim3d_light_elevation_deg; /* 90 = straight overhead, no offset */
+  int sim3d_shadow_softness_pct; /* D4b blur radius; 0 = hard shadow */
+  int sim3d_rim_strength_pct;    /* D4c rim contribution; 0 = unlit sprites */     /* extra billboard scale at the catalogue
+                                 * flight plane, percent; 0 = true perspective */
+  int sim3d_underlay_haze_pct;   /* world-map underlay fade; 100 = hidden */
+  int sim3d_cloud_opacity_pct;   /* shroud density; 0 = no clouds */
+  int sim3d_cloud_falloff_px;    /* clear-to-full ramp, authentic px */
+  int sim3d_cloud_inset_px;      /* ramp start inside the edge, px */
+  int sim3d_cull_lead_px;        /* per-record cover lead before the edge, px */
+  int sim3d_cull_haze_pct;       /* out-of-range town->underlay crossfade, % */
+  int sim3d_cull_dim_pct;        /* out-of-range darkening toward black, % */
+  int sim3d_cull_haze_lead_px;   /* haze ramp width before the edge, px */
+  int sim3d_cull_corner_px;      /* lit-window corner radius, px */
+  int sim3d_underlay_defocus_pct;/* world map focus falloff strength, % */
+  int sim3d_cloud_altitude_px;   /* shroud height above the ground plane, px */
+  int sim3d_cloud_drift_pct;     /* shroud drift rate, % of base velocity */
+  bool sim3d_cull_lift_inset;    /* inset lit window by the max draw lift */
+  int sim3d_backdrop_strength_pct;/* sky gradient departure from flat, % */
+  int sim3d_backdrop_horizon_pct; /* synthetic horizon, % of viewport height */
+  int sim3d_camera_mode;         /* SimCameraMode: free vs dynamic */
+  int sim3d_dyncam_baseline_tilt_x_mrad;
+  int sim3d_dyncam_baseline_tilt_y_mrad;
+  int sim3d_dyncam_baseline_distance_x100;
+  int sim3d_reactive_strength;   /* sim lean + kick scale, % */
+
   /* Diorama 3D presentation. Camera angles are scaled ints (no float setting
    * type); the live DioramaCamera is seeded from these and writes back on
    * every adjustment, so the menu and the mouse controls share one source of
@@ -397,6 +466,11 @@ int Settings_VisibleWidth(void);
  * host render/hotkey paths so the gate has exactly one spelling (§D14). */
 bool Diorama_ModeIsOn(void);
 bool Diorama_NewPpuCapable(void);
+bool Sim3D_ModeIsOn(void);
 int Settings_ExtendedAspectX(void);
 int Settings_ExtendedAspectY(void);
 int Settings_AudioFrequencyHz(void);
+/* Folds the SIM 3D stage toggles into the one mask the resolver and the frame
+ * payload work in. The toggles are the only stored state; no mask is
+ * persisted, so this is the single conversion point. */
+SimRenderFeatureMask Settings_Sim3DRequestedFeatures(void);

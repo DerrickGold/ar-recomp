@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -154,13 +155,37 @@ int main(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.extended_aspect == kScreenAspect_1610);
 
+  /* Drive the Simulation category through the same key path a user does.
+   * This guards both the master toggle and the A/B view selector against
+   * becoming display-only rows. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false)); /* Diorama */
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false)); /* Simulation */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!g_settings.sim3d_mode);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(g_settings.sim3d_mode);
+  /* Walk to a stage toggle by key rather than counting rows: the stage list
+   * grows every time a render stage lands. Toggling one from the menu must
+   * also change what the renderer is asked for, since the fold is the only
+   * thing standing between these rows and the frame payload. */
+  for (int guard = 0; guard < 32 &&
+       strcmp(SettingsOverlay_SelectedKey(), "sim3d_shadows"); guard++)
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "sim3d_shadows"));
+  CHECK(g_settings.sim3d_shadows);
+  CHECK(Settings_Sim3DRequestedFeatures() & kSimFeature_Shadows);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!g_settings.sim3d_shadows);
+  CHECK(!(Settings_Sim3DRequestedFeatures() & kSimFeature_Shadows));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(g_settings.sim3d_shadows);
+
   /* Audio frequency is likewise a bounded preset selector, not an arbitrary
    * integer editor. Audio starts with Enable audio, then Audio frequency. */
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(SettingsOverlay_IsOpen());
-  /* M1(a) (followup doc): Diorama (formerly Presentation), Graphics, then
-   * Widescreen sit between Display and Audio in kCategoryOrder. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  /* We are on Simulation; Graphics and Widescreen precede Audio. */
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
@@ -242,10 +267,29 @@ int main(void) {
   /* Restart and Exit remain direct primary-navigation leaves. */
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  if (renderer) {
+    SettingsOverlay_Render(
+        (SDL_Rect){0, 0, surface_width, surface_height});
+    int selected = -1, top = -1, visible = -1, total = -1;
+    CHECK(SettingsOverlay_GetNavigationState(
+        &selected, &top, &visible, &total));
+    CHECK(selected == total - 2);
+    CHECK(selected >= top && selected < top + visible);
+    if (visible < total) CHECK(top > 0);
+  }
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(s_action_calls == 3);
   CHECK(s_action_desc == Settings_Find("restart_game"));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  if (renderer) {
+    SettingsOverlay_Render(
+        (SDL_Rect){0, 0, surface_width, surface_height});
+    int selected = -1, top = -1, visible = -1, total = -1;
+    CHECK(SettingsOverlay_GetNavigationState(
+        &selected, &top, &visible, &total));
+    CHECK(selected == total - 1);
+    CHECK(selected >= top && selected < top + visible);
+  }
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(s_action_calls == 4);
   CHECK(s_action_desc == Settings_Find("exit_desktop"));
