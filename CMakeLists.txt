@@ -74,6 +74,7 @@ add_executable(ActRaiserRecomp
     src/config.c
     src/settings.c
     src/settings_overlay.c
+    src/input_map.c
     src/scene_inspector.c
     src/scene_asset_dump.c
     src/sim_phase0_trace.c
@@ -264,7 +265,11 @@ if(BUILD_TESTING)
         tests/settings_test.c
         src/config.c
         src/settings.c
+        src/input_map.c
     )
+    # settings.c owns the input-binding descriptors, so the registry test now
+    # links the SDL-backed key/button naming they serialize through.
+    target_link_libraries(actraiser_settings_test PRIVATE SDL3::SDL3 m)
     target_include_directories(actraiser_settings_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
@@ -276,6 +281,7 @@ if(BUILD_TESTING)
         src/config.c
         src/settings.c
         src/settings_overlay.c
+        src/input_map.c
     )
     target_include_directories(actraiser_settings_overlay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

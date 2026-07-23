@@ -583,6 +583,22 @@ bundled runtime's widescreen/PPU interfaces:
   Transparent tile pixels remain alpha zero. Palette lookup and master
   brightness are resolved by the PPU before exporting ARGB, so the host does
   not need to understand SNES tile formats.
+- **Diorama mode extends that same rectangle to the full authentic height
+  (2026-07-23).** BG3 carries more than the status bar: the act-title card
+  (tilemap rows 8/10, y=64..88) and the pause text are the same layer, just
+  below the split. In flat mode those rows stay in the game framebuffer and
+  are simply visible; in diorama mode that framebuffer becomes the *backdrop
+  plane*, drawn first and then painted over by the BG2/BG1/OBJ planes — the
+  text disappeared behind the scene. With `diorama_hud_flat` on, the capture
+  is therefore reissued as `(0,0)-(256,224)`, and `BuildHudPresentationChunks`
+  emits one extra chunk for everything below `hud_split_height`: **centered,
+  256 wide, at its authentic Y**, because that content is authored for the
+  authentic screen and has no left/right anchor semantics. The three anchored
+  bands are driven by `wsHudSplitHeight`, not by the capture rectangle, so
+  their geometry is unchanged. Only an already-active capture is extended — a
+  frame with no HUD split (non-action map, 4:3/RAW) must not get a
+  `RemoveFromGame` BG3 capture that nothing on the present side draws. Flat
+  mode leaves `hud_body_y1` zero and is bit-identical.
 - `$00:923A`'s selected-magic icon is accepted only when OAM slots 0-3 exactly
   match tiles `$D4-$D7` and the expected 2x2 Y layout. Those slots are routed to
   the generic OBJ overlay buffer; every other OBJ remains on the normal sprite

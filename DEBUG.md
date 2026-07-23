@@ -836,6 +836,14 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 2. **Screenshots at fixed game-frames**: `AR_SHOT_AT_GF=N` / `AR_SHOT_EVERY=N` —
    PPMs land in `runs/<ts>/`. `AR_VRAMDUMP_GF=g1,g2,...` adds headless FULL
    snapshots (wram+vram+cgram+oam) at exact game-frames — no window needed.
+2b. **Presentation modes that change the margin budget must be switched MID-RUN**:
+   `AR_DIORAMA_AT=<gameframe>` flips Diorama 3D on through the same descriptor
+   path as the `D` hotkey. Booting with `diorama_mode = On` forces the margin
+   budget to `kWsExtraMax` (95 vs the aspect-derived 72), and that desyncs a
+   game-frame-keyed replay outright — the same recording that reaches Fillmore
+   act 1 flat never left the world map with diorama on at boot. Replay flat into
+   the stage, flip after (**open question**: why margin width moves game-logic
+   timing at all).
 3. **Compare NUMERICALLY, never by eye**: slice pixel rows/columns in python
    (`px[(y*w+x)*3]`...). HARD LESSON: pillarboxed shots with dark world content were
    repeatedly misread as widescreen when eyeballing PNGs — a whole survey phase was

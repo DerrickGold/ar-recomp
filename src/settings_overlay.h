@@ -34,10 +34,45 @@ bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
                                         int *visible_rows,
                                         int *total_rows);
 
+/* Which tab of the selected section is active, and how many that section has.
+ * Tests step tabs with the normal key path and use this to know when they have
+ * arrived, rather than assuming a section's tab count. */
+bool SettingsOverlay_GetTabState(int *active_tab, int *tab_count);
+
+/* Advances hold-to-accelerate value stepping. main.c calls this once per frame
+ * on the main thread while the overlay is open (never the present thread — a
+ * settings write there would deadlock against the present-thread quiesce). */
+void SettingsOverlay_Tick(void);
+
+/* Test seam: the pure hold-acceleration curve — base steps to move for a row
+ * that has been held `held_ms`. Exposed so the ramp can be checked without
+ * driving real wall-clock time. */
+struct SettingDesc;
+long SettingsOverlay_HoldStepForTest(const struct SettingDesc *desc,
+                                     uint64_t held_ms);
+/* Drives the hold tick with an injected clock so a test can cross the ramp
+ * thresholds deterministically without sleeping. */
+void SettingsOverlay_TickAtForTest(uint64_t now_ms);
+
 /* Returns true when the event belongs to the overlay and must not reach the
  * host hotkey/SNES input paths. F2 is deliberately left available so visual
  * snapshots can include the menu. */
 bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat);
+
+/* Gamepad path. Navigation follows the player's OWN gamepad bindings (menu
+ * confirm is whatever they bound to SNES B, and so on), so a Steam Deck can
+ * drive the whole menu — including rebinding — with no keyboard attached.
+ * Returns true when the overlay owned the event. */
+bool SettingsOverlay_HandleGamepadEvent(const SDL_Event *event);
+
+/* A binding row is armed and waiting for the next physical input. main.c must
+ * offer raw events here BEFORE its own hotkey chain while this is true, or a
+ * key like F9 would run its hotkey instead of being bound. */
+/* True while a row's text-entry field is active. Numeric rows never enter this
+ * state (they step); it is reached only by the Mask/Custom string holdouts. */
+bool SettingsOverlay_IsEditing(void);
+bool SettingsOverlay_IsCapturing(void);
+bool SettingsOverlay_HandleCaptureEvent(const SDL_Event *event);
 /* Text events are accepted only while a descriptor is in direct-edit mode. */
 bool SettingsOverlay_HandleText(const char *text);
 /* game_viewport is used only to resolve the HUD's "Match game" scale when

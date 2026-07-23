@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "input_map.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -19,7 +20,7 @@ static SettingsActionObserver s_action_observer;
  * s_config_layer, and Settings_InitWithFile aborts the moment the table
  * outgrows it, so a cap that tracks the count exactly turns every new setting
  * into a crash on boot. */
-enum { kSettingsMaxDescriptors = 192, kSettingsLayerValueSize = 512 };
+enum { kSettingsMaxDescriptors = 256, kSettingsLayerValueSize = 512 };
 typedef struct SettingsLayerValue {
   bool present;
   bool legacy_env_syntax;
@@ -74,21 +75,6 @@ static bool ParseMoonjumpLegacy(const char *text, void *field) {
   if (speed > 255) speed = 255;
   g_settings.cheat_moonjump_speed = (int)speed;
   return true;
-}
-
-static bool ParseNoKnockback(const char *text, void *field) {
-  int *value = (int *)field;
-  if (!text || !text[0] || text[0] == '0') *value = 0;
-  else if (text[0] == '1' && !text[1]) *value = 1;
-  else *value = (int)(strtoul(text, NULL, 16) & 0x3f);
-  return true;
-}
-
-static int FormatNoKnockback(char *buffer, int buffer_size,
-                             const void *field) {
-  int value = *(const int *)field;
-  return value <= 1 ? snprintf(buffer, buffer_size, "%d", value)
-                    : snprintf(buffer, buffer_size, "%X", value);
 }
 
 static bool ParsePins(const char *text, void *field) {
@@ -263,6 +249,11 @@ static bool ParseExtendedAspect(const char *text, void *field) {
   }
   if (!strcmp(text, "16:10") || !strcmp(text, "2")) {
     *value = kScreenAspect_1610;
+    return true;
+  }
+  if (!strcmp(text, "stretch") || !strcmp(text, "Stretch") ||
+      !strcmp(text, "3")) {
+    *value = kScreenAspect_Stretch;
     return true;
   }
   return false;
@@ -472,6 +463,19 @@ static const char *const kScreenAspectLabels[] = {
   "4:3",
   "16:9",
   "16:10",
+  "Stretch",
+};
+
+static const char *const kWindowModeLabels[] = {
+  "Windowed",
+  "Borderless",
+  "Fullscreen",
+};
+
+static const char *const kRefreshModeLabels[] = {
+  "Vsync",
+  "Unlimited",
+  "Limit",
 };
 
 static const char *const kAudioFrequencyLabels[] = {
@@ -494,7 +498,7 @@ static const char *const kSaveProgressEditLabels[] = {
 };
 
 static const char *const kSaveEditorPageLabels[] = {
-  "Progress", "Status", "Magic", "Items", "Scores",
+  "Actions", "Progress", "Status", "Magic", "Items", "Scores",
 };
 
 static const char *const kSaveProfessionalLabels[] = {
@@ -531,7 +535,20 @@ bool Sim3D_ModeIsOn(void) { return g_settings.sim3d_mode; }
 bool Diorama_NewPpuCapable(void) {
   return g_settings.new_renderer || g_ws_active;
 }
-static bool DioramaModeIsOff(void) { return !g_settings.diorama_mode; }
+
+/* Screen ratio now carries the old "Stretch to window" toggle as its fourth
+ * option; keep the ignore_aspect_ratio field (which the runtime readers gate
+ * on) derived from it. */
+static void OnScreenRatioChanged(const SettingDesc *desc) {
+  (void)desc;
+  g_settings.ignore_aspect_ratio =
+      g_settings.extended_aspect == kScreenAspect_Stretch;
+}
+
+/* The frame-limit FPS row only matters when Refresh rate is Limit. */
+static bool FrameLimitActive(void) {
+  return g_settings.refresh_mode == kRefreshMode_Limit;
+}
 
 /* Sim-town 3D defaults (2026-07-22).
  *
@@ -638,6 +655,79 @@ static bool Sim3DPickerEaseAvailable(void) {
 extern bool g_gpu_shaders_active;
 static bool GpuShadersActive(void) { return g_gpu_shaders_active; }
 
+static const char *const kInputDeviceLabels[kInputDevice_Count] = {
+  "Auto", "Keyboard", "Gamepad",
+};
+static const char *const kInputClassLabels[kInputClass_Count] = {
+  "Keyboard", "Gamepad",
+};
+
+/* Round-trip partner for FormatGamepadSlot: settings.ini stores the rendered
+ * text, so the parser has to read its own output back (and a bare number, for
+ * a hand-edited file). */
+static bool ParseGamepadSlot(const char *text, void *field) {
+  if (!text) return false;
+  while (*text == ' ') text++;
+  int slot = 0;
+  if (!strncmp(text, "First connected", 15)) {
+    slot = 0;
+  } else if (sscanf(text, "Gamepad %d", &slot) == 1) {
+    /* named-but-absent form */
+  } else if (sscanf(text, "%d", &slot) != 1) {
+    return false;
+  }
+  if (slot < 0 || slot > 8) return false;
+  *(int *)field = slot;
+  return true;
+}
+
+/* Slot 0 follows hotplug; 1..N name a specific pad. Showing the live product
+ * name is the whole point of the row on a Deck, where "Gamepad 1" could be
+ * the built-in controls or a paired external pad. */
+static int FormatGamepadSlot(char *buffer, int buffer_size,
+                             const void *field) {
+  int slot = *(const int *)field;
+  int connected = InputMap_GamepadCount();
+  if (slot <= 0) {
+    if (!connected) return snprintf(buffer, buffer_size, "First connected");
+    return snprintf(buffer, buffer_size, "First connected (%s)",
+                    InputMap_GamepadName(0));
+  }
+  if (slot > connected)
+    return snprintf(buffer, buffer_size, "Gamepad %d (not connected)", slot);
+  return snprintf(buffer, buffer_size, "%d: %s", slot,
+                  InputMap_GamepadName(slot - 1));
+}
+
+/* One binding row per (device class, action). The key is what lands in
+ * settings.ini, so it is spelled out rather than derived from the enum. */
+#define BINDING_SETTING(action_enum, class_enum, id, text, help) \
+  { id, NULL, text, help, kSettingType_Binding, kApply_Passive, \
+    kSettingCat_InputBinds, &g_settings.input_bind[class_enum][action_enum], \
+    0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
+    InputMap_ParseBindingField, InputMap_FormatBindingField }
+#define BINDING_SETTINGS(action_enum, id_suffix, text) \
+  BINDING_SETTING(action_enum, kInputClass_Keyboard, "bind_key_" id_suffix, \
+                  text, "Press Enter, then the key to bind. " \
+                  "Y resets it to the default."), \
+  BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
+                  text, "Press Enter, then the button to bind. " \
+                  "Y resets it to the default.")
+/* Camera rows exist for both classes: the pad gets the stick, and a keyboard
+ * player who prefers keys to the mouse can bind them (unbound by default). */
+#define BINDING_CAM_SETTINGS(action_enum, id_suffix, text) \
+  BINDING_SETTING(action_enum, kInputClass_Keyboard, "bind_key_" id_suffix, \
+                  text, "Diorama / 3D town Free Cam only. Press Enter, then " \
+                  "the key to bind. Y resets it to the default."), \
+  BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
+                  text, "Diorama / 3D town Free Cam only. Push the stick or " \
+                  "press the button to bind. Y resets it to the default.")
+/* Gamepad-only host action: no keyboard twin. */
+#define BINDING_HOST_SETTING(action_enum, id_suffix, text) \
+  BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
+                  text, "Press Enter, then the button to bind. " \
+                  "Y resets it to the default.")
+
 #define BOOL_SETTING(id, env_name, text, help, cat, def, is_sticky, active, changed) \
   { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
     &g_settings.id, def, 0, 1, 1, is_sticky, NULL, 0, active, changed, \
@@ -650,13 +740,15 @@ static bool GpuShadersActive(void) { return g_gpu_shaders_active; }
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
     kSettingCat_Extras, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
     NULL, NULL }
+/* Both reset actions live on their mode's Camera tab, beside the pose rows
+ * they restore — hence the category here rather than the mode's Scene tab. */
 #define PRESENTATION_ACTION_SETTING(id, text, help) \
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
-    kSettingCat_Presentation, NULL, 0, 0, 0, 0, false, NULL, 0, \
+    kSettingCat_DioramaCamera, NULL, 0, 0, 0, 0, false, NULL, 0, \
     Diorama_ModeIsOn, NULL, NULL, NULL }
 #define SIM_ACTION_SETTING(id, text, help) \
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
-    kSettingCat_Simulation, NULL, 0, 0, 0, 0, false, NULL, 0, \
+    kSettingCat_SimCamera, NULL, 0, 0, 0, 0, false, NULL, 0, \
     Sim3D_ModeIsOn, NULL, NULL, NULL }
 #define INSPECTOR_ACTION_SETTING(id, text, help) \
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
@@ -699,10 +791,11 @@ const SettingDesc g_setting_descs[] = {
     kDisplayMode_WideFull, 1, false, kDisplayModeLabels,
     kDisplayMode_PresetCount, NULL, DisplayModeChanged, NULL, NULL },
   { "hud_scale_percent", "AR_HUD_SCALE", "HUD output scale",
-    "Scale the promoted HUD after game upscaling; 100 is native 1x output pixels.",
+    "Scale the promoted HUD after game upscaling; 100 is native 1x output "
+    "pixels. Set it anywhere; it takes effect where the HUD shows.",
     kSettingType_Int, kApply_Passive, kSettingCat_Display,
     &g_settings.hud_scale_percent, 0, 0, 400, 25, false, NULL, 0,
-    DioramaModeIsOff, NULL, ParseHudScale, FormatHudScale },
+    NULL, NULL, ParseHudScale, FormatHudScale },
   { "menu_scale_percent", "AR_MENU_SCALE", "Menu output scale",
     "Scale host menu contents independently; Auto fits them to the window.",
     kSettingType_Int, kApply_Passive, kSettingCat_Display,
@@ -710,13 +803,14 @@ const SettingDesc g_setting_descs[] = {
     NULL, NULL, ParseMenuScale, FormatMenuScale },
   BOOL_SETTING(hd_replacements, "AR_HD_REPLACEMENTS", "HD replacements",
                "Substitute HD art per game-assets/manifest.ini entries when their art is present.",
-               kSettingCat_Display, 1, false, DioramaModeIsOff, NULL),
+               kSettingCat_Display, 1, false, NULL, NULL),
   { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Screen ratio",
-    "Select authentic 4:3, 16:9, or 16:10 output; video geometry updates live.",
+    "Output aspect: authentic 4:3, widescreen 16:9 / 16:10, or Stretch to "
+    "fill the whole window. Video geometry updates live.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.extended_aspect, kScreenAspect_43,
-    kScreenAspect_43, kScreenAspect_1610, 1, false,
-    kScreenAspectLabels, kScreenAspect_Count, NULL, NULL,
+    kScreenAspect_43, kScreenAspect_Stretch, 1, false,
+    kScreenAspectLabels, kScreenAspect_Count, NULL, OnScreenRatioChanged,
     ParseExtendedAspect, NULL },
   { "pixel_aspect", "AR_ASPECT_PAR", "Pixel aspect",
     "Use the original 4:3 CRT pixel stretch or square output pixels.",
@@ -725,15 +819,17 @@ const SettingDesc g_setting_descs[] = {
     kPixelAspect_Square, kPixelAspect_Crt43, 1, false,
     kPixelAspectLabels, kPixelAspect_Count, NULL, NULL,
     ParsePixelAspect, NULL },
-  { "window_scale", "AR_WINDOW_SCALE", "Window scale",
-    "Set the initial window size as a multiple of the SNES output height.",
+  { "window_mode", "AR_WINDOW_MODE", "Window mode",
+    "Windowed, borderless desktop-fullscreen, or exclusive fullscreen.",
+    kSettingType_Enum, kApply_Callback, kSettingCat_Display,
+    &g_settings.window_mode, kWindowMode_Windowed,
+    kWindowMode_Windowed, kWindowMode_Exclusive, 1, false,
+    kWindowModeLabels, kWindowMode_Count, NULL, NULL, NULL, NULL },
+  { "window_scale", "AR_WINDOW_SCALE", "Render scale",
+    "Internal render/upscale multiple of the SNES output. Higher values "
+    "render more detail (3D town and Mode 7) and downsample to the window.",
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.window_scale, 3, 1, 8, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL },
-  { "fullscreen", "AR_FULLSCREEN", "Fullscreen",
-    "Switch the host window between windowed and desktop-fullscreen output.",
-    kSettingType_Bool, kApply_Callback, kSettingCat_Display,
-    &g_settings.fullscreen, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
   { "new_renderer", "AR_NEW_RENDERER", "New renderer",
     "Use the modern PPU renderer; widescreen always requires this renderer.",
@@ -741,10 +837,24 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.new_renderer, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
   { "ignore_aspect_ratio", "AR_IGNORE_ASPECT_RATIO", "Stretch to window",
-    "Ignore the configured display aspect and stretch output to the whole window.",
+    "Ignore the configured display aspect and stretch output to the whole "
+    "window. Now folded into Screen ratio > Stretch.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Display,
     &g_settings.ignore_aspect_ratio, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
+  { "refresh_mode", "AR_REFRESH_MODE", "Refresh rate",
+    "Vsync locks to your display's refresh; Unlimited disables vsync; Limit "
+    "caps to a chosen FPS.",
+    kSettingType_Enum, kApply_Callback, kSettingCat_Display,
+    &g_settings.refresh_mode, kRefreshMode_Vsync,
+    kRefreshMode_Vsync, kRefreshMode_Limit, 1, false,
+    kRefreshModeLabels, kRefreshMode_Count, NULL, NULL, NULL, NULL },
+  { "frame_limit_fps", "AR_FRAME_LIMIT_FPS", "Frame limit",
+    "Target frames per second when Refresh rate is Limit; independent of the "
+    "display refresh.",
+    kSettingType_Int, kApply_Callback, kSettingCat_Display,
+    &g_settings.frame_limit_fps, 60, 20, 480, 5, false, NULL, 0,
+    FrameLimitActive, NULL, NULL, NULL },
   BOOL_SETTING(sim3d_mode, "AR_SIM3D", "Simulation town 3D",
                "Tilt the simulation-town map into a projected ground plane; "
                "picker modes automatically return to the authentic top-down view.",
@@ -827,7 +937,7 @@ const SettingDesc g_setting_descs[] = {
     "pose persists. Dynamic Cam: its own baseline pose, leaning toward the "
     "angel's direction of travel and jolting when the angel is hit. Switching "
     "restores that mode's own camera rather than carrying the other one over.",
-    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Enum, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_camera_mode, kSimCam_Dynamic,
     kSimCam_Free, kSimCam_Dynamic, 1, false,
     kSimCamModeLabels, kSimCam_Count, Sim3DGroundAvailable, NULL,
@@ -837,17 +947,17 @@ const SettingDesc g_setting_descs[] = {
    * was actually tuned rather than whatever Free Cam was last left at. */
   { "sim3d_dyncam_baseline_tilt_x_mrad", NULL, "Dynamic baseline pitch",
     "Dynamic Cam's resting pitch in milliradians; the lean works around this.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_dyncam_baseline_tilt_x_mrad, -575, -700, 700, 25, false,
     NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
   { "sim3d_dyncam_baseline_tilt_y_mrad", NULL, "Dynamic baseline yaw",
     "Dynamic Cam's resting yaw in milliradians; the lean works around this.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_dyncam_baseline_tilt_y_mrad, 0, -700, 700, 20, false,
     NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
   { "sim3d_dyncam_baseline_distance_x100", NULL, "Dynamic baseline distance",
     "Dynamic Cam's resting camera distance (hundredths); 0 auto-fits.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_dyncam_baseline_distance_x100, 300, 0, 2000, 25, false,
     NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
   BOOL_SETTING(sim3d_cull_lift_inset, "AR_SIM3D_LIFT_INSET",
@@ -881,17 +991,17 @@ const SettingDesc g_setting_descs[] = {
     NULL, 0, Sim3D_ModeIsOn, NULL, NULL, NULL },
   { "sim3d_tilt_y_mrad", "AR_SIM3D_YAW", "Camera yaw",
     "SIM free-camera yaw in milliradians; right-drag horizontally to adjust.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_tilt_y_mrad, 0, -700, 700, 20, false, NULL, 0,
     Sim3D_ModeIsOn, NULL, NULL, NULL },
   { "sim3d_tilt_x_mrad", "AR_SIM3D_PITCH", "Camera pitch",
     "SIM free-camera pitch in milliradians; right-drag vertically to adjust.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_tilt_x_mrad, -575, -700, 700, 25, false, NULL, 0,
     Sim3D_ModeIsOn, NULL, NULL, NULL },
   { "sim3d_distance_x100", "AR_SIM3D_DISTANCE", "Camera distance",
     "SIM camera distance in hundredths; 0 auto-fits, and the mouse wheel zooms.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_distance_x100, 300, 0, 2000, 25, false, NULL, 0,
     Sim3D_ModeIsOn, NULL, NULL, NULL },
   { "sim3d_height_scale_x100", "AR_SIM3D_HEIGHT_SCALE",
@@ -906,7 +1016,7 @@ const SettingDesc g_setting_descs[] = {
     "Shadow darkness",
     "Darkness of the SIM ground shadow mask as a percentage; 0 skips the "
     "shadow pass without disabling any other 3D stage.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_shadow_opacity_pct, kSimShadowOpacityDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3D_ModeIsOn, NULL, NULL, NULL },
   { "sim3d_light_azimuth_deg", "AR_SIM3D_LIGHT_AZIMUTH",
@@ -914,7 +1024,7 @@ const SettingDesc g_setting_descs[] = {
     "Compass direction the shadow is thrown, in degrees: 0 casts to the "
     "right, 90 away from the camera, 180 left, 270 toward the camera. Only "
     "matters when the light is off vertical.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_light_azimuth_deg, kSimLightAzimuthDefaultDeg,
     0, 359, 15, false, NULL, 0, Sim3DShadowsAvailable, NULL, NULL, NULL },
   { "sim3d_light_elevation_deg", "AR_SIM3D_LIGHT_ELEVATION",
@@ -922,21 +1032,21 @@ const SettingDesc g_setting_descs[] = {
     "How high the light sits, in degrees above the ground: 90 is straight "
     "overhead and puts each shadow directly under its caster, lower values "
     "push shadows further out along the light direction.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_light_elevation_deg, kSimLightElevationDefaultDeg,
     20, 90, 5, false, NULL, 0, Sim3DShadowsAvailable, NULL, NULL, NULL },
   { "sim3d_shadow_softness_pct", "AR_SIM3D_SHADOW_SOFTNESS",
     "Shadow softness",
     "Blur radius for the shadow mask, as a percentage. 0 keeps the hard "
     "silhouette even with soft shadows enabled.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_shadow_softness_pct, kSimShadowSoftnessDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DSoftShadowsAvailable, NULL, NULL, NULL },
   { "sim3d_rim_strength_pct", "AR_SIM3D_RIM_STRENGTH",
     "Rim light strength",
     "Brightness of the lit edge added to sprite silhouettes, as a percentage. "
     "0 leaves sprite colours untouched even with rim light enabled.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_rim_strength_pct, kSimRimStrengthDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DRimLightAvailable, NULL, NULL, NULL },
   { "sim3d_underlay_haze_pct", "AR_SIM3D_UNDERLAY_HAZE",
@@ -944,7 +1054,7 @@ const SettingDesc g_setting_descs[] = {
     "How far the world map underlay fades toward the scene backdrop, as a "
     "percentage. 0 draws it at full strength; 100 hides it entirely without "
     "disabling any other 3D stage.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_haze_pct, kSimUnderlayHazeDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DWorldUnderlayAvailable, NULL, NULL,
     NULL },
@@ -952,7 +1062,7 @@ const SettingDesc g_setting_descs[] = {
     "Cloud density",
     "How opaque the cloud shroud becomes at full cover, as a percentage. 0 "
     "draws no clouds without disabling any other 3D stage.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_opacity_pct, kSimCloudOpacityDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
   { "sim3d_cloud_falloff_px", "AR_SIM3D_CLOUD_FALLOFF",
@@ -960,7 +1070,7 @@ const SettingDesc g_setting_descs[] = {
     "How far past the sprite-drawable edge the clouds take to reach full "
     "cover, in original pixels. Smaller values make them part sharply as you "
     "approach; larger values keep a long hazy gradient.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_falloff_px, kSimCloudFalloffDefaultPx,
     16, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
   { "sim3d_cloud_inset_px", "AR_SIM3D_CLOUD_INSET",
@@ -970,7 +1080,7 @@ const SettingDesc g_setting_descs[] = {
     "the build-up before it means an actor is already under cloud when it "
     "disappears. Zero starts the ramp exactly at the edge, which leaves a "
     "clear band where actors vanish into nothing.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_inset_px, kSimCloudInsetDefaultPx,
     0, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
   { "sim3d_cull_lead_px", "AR_SIM3D_CULL_LEAD",
@@ -979,7 +1089,7 @@ const SettingDesc g_setting_descs[] = {
     "reaches full strength, in original pixels. The cover has to arrive "
     "before the sprite goes, not after: too small and an actor blinks out a "
     "moment ahead of the cloud that should have hidden it.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_lead_px, kSimCullLeadDefaultPx,
     8, 256, 8, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
   { "sim3d_cull_haze_pct", "AR_SIM3D_CULL_HAZE",
@@ -990,7 +1100,7 @@ const SettingDesc g_setting_descs[] = {
     "sprites failing. It fades rather than dims so the target brightness is "
     "the world map's own, which is already hazed for distance. Zero keeps the "
     "ground at full opacity everywhere.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_pct, kSimCullHazeDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
   { "sim3d_cull_dim_pct", "AR_SIM3D_CULL_DIM",
@@ -1000,7 +1110,7 @@ const SettingDesc g_setting_descs[] = {
     "is showing out there, this decides how lit it is. It multiplies the "
     "colour down rather than mixing toward the sky, so raising it makes the "
     "far field darker instead of hazier.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_dim_pct, kSimCullDimDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
   { "sim3d_cull_haze_lead_px", "AR_SIM3D_CULL_HAZE_LEAD",
@@ -1009,7 +1119,7 @@ const SettingDesc g_setting_descs[] = {
     "measured inward from the sprite-drawable edge. Long on purpose: a "
     "brightness step reads as a hard line across the ground, which is a worse "
     "artifact than the uneven cloud cover it replaces.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_lead_px, kSimCullHazeLeadDefaultPx,
     16, 512, 16, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
   { "sim3d_cull_corner_px", "AR_SIM3D_CULL_CORNER",
@@ -1019,7 +1129,7 @@ const SettingDesc g_setting_descs[] = {
     "a hard-edged box laid over the world; rounding reads as framing. "
     "Rounding only ever adds cover at the corners, so it cannot expose a "
     "sprite the window was going to take away.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_corner_px, kSimCullCornerDefaultPx,
     0, 256, 8, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
   { "sim3d_underlay_defocus_pct", "AR_SIM3D_DEFOCUS",
@@ -1029,7 +1139,7 @@ const SettingDesc g_setting_descs[] = {
     "resolve\" in a way dimming cannot, but it is a cheap downsample rather "
     "than a real lens, so a partial mix reads as depth where a full one reads "
     "as a smear. Zero keeps the map sharp everywhere.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_defocus_pct, kSimUnderlayDefocusDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
   { "sim3d_cloud_altitude_px", "AR_SIM3D_CLOUD_ALTITUDE",
@@ -1038,7 +1148,7 @@ const SettingDesc g_setting_descs[] = {
     "lays them flat on the terrain, where they read as fog painted onto the "
     "map; lifting them puts them between the camera and the world, so they "
     "pass over trees and flying actors instead of through them.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_altitude_px, kSimCloudAltitudeDefaultPx,
     0, 256, 8, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
   { "sim3d_cloud_drift_pct", "AR_SIM3D_CLOUD_DRIFT",
@@ -1047,7 +1157,7 @@ const SettingDesc g_setting_descs[] = {
     "The layers drift at different speeds, so they pass through each other "
     "and the field churns rather than sliding across as one image. Zero holds "
     "them still.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_drift_pct, kSimCloudDriftDefaultPct,
     0, 500, 10, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
   { "sim3d_backdrop_strength_pct", "AR_SIM3D_BACKDROP_STRENGTH",
@@ -1057,7 +1167,7 @@ const SettingDesc g_setting_descs[] = {
     "town that picks a coloured backdrop tints the result; most pick black, "
     "which is why the sky is mixed toward a blue rather than derived from the "
     "backdrop alone. Zero is the flat fill the projected view used before.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_backdrop_strength_pct, kSimBackdropStrengthDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL },
   { "sim3d_backdrop_horizon_pct", "AR_SIM3D_BACKDROP_HORIZON",
@@ -1067,7 +1177,7 @@ const SettingDesc g_setting_descs[] = {
     "sky is only visible fully zoomed out past the end of the extended map, "
     "so this places the gradient where sky reads rather than where the ground "
     "plane vanishes.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_backdrop_horizon_pct, kSimBackdropHorizonDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL },
   { "sim3d_reactive_strength", "AR_SIM3D_REACTIVE",
@@ -1075,7 +1185,7 @@ const SettingDesc g_setting_descs[] = {
     "How far the town camera leans toward the angel's direction of travel and "
     "how hard it jolts when the angel is hit, as a percentage. Zero holds the "
     "camera at the pose the pitch/yaw/zoom settings describe.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_reactive_strength, 100, 0, 200, 10, false, NULL, 0,
     Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
   { "sim3d_height_pop_pct", "AR_SIM3D_HEIGHT_POP",
@@ -1100,7 +1210,7 @@ const SettingDesc g_setting_descs[] = {
   { "diorama_camera_mode", NULL, "Camera mode",
     "Free Cam: manual orbit/zoom, persists. Dynamic Cam: snaps to its own "
     "baseline pose (reactive sway from gameplay motion lands in a later update).",
-    kSettingType_Enum, kApply_Passive, kSettingCat_Presentation,
+    kSettingType_Enum, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_camera_mode, kDioramaCam_Free,
     kDioramaCam_Free, kDioramaCam_Dynamic, 1, false,
     kDioramaCamModeLabels, kDioramaCam_Count, Diorama_ModeIsOn, NULL,
@@ -1111,23 +1221,23 @@ const SettingDesc g_setting_descs[] = {
    * step convention as their free-cam counterparts just below. */
   { "diorama_dyncam_baseline_tilt_y_mrad", NULL, "Dynamic baseline yaw",
     "Dynamic Cam's resting yaw in milliradians; sway leans around this, not 0.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_dyncam_baseline_tilt_y_mrad, 0, -700, 700, 20, false,
     NULL, 0, Diorama_ModeIsOn, NULL, NULL, NULL },
   { "diorama_dyncam_baseline_tilt_x_mrad", NULL, "Dynamic baseline pitch",
     "Dynamic Cam's resting pitch in milliradians; sway leans around this, not 0.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_dyncam_baseline_tilt_x_mrad, 200, -700, 700, 25, false,
     NULL, 0, Diorama_ModeIsOn, NULL, NULL, NULL },
   { "diorama_dyncam_baseline_distance_x100", NULL, "Dynamic baseline distance",
     "Dynamic Cam's resting camera distance (hundredths); 0 auto-fits the frame.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_dyncam_baseline_distance_x100, 0, 0, 2000, 25, false,
     NULL, 0, Diorama_ModeIsOn, NULL, NULL, NULL },
   INT_SETTING(diorama_reactive_strength, NULL, "Reactive strength",
               "Dynamic Cam: how strongly the camera sways with gameplay "
               "motion; 0 holds it fixed at the baseline pose.",
-              kSettingCat_Presentation, 35, 0, 100, NULL, Diorama_ModeIsOn),
+              kSettingCat_DioramaCamera, 35, 0, 100, NULL, Diorama_ModeIsOn),
   /* B5 (followup doc): promotes BG2 to an enveloping dimmed+DoF'd skybox so
    * camera tilt/yaw/zoom never reveals the void past the finite backdrop
    * quad's edges. Off keeps today's look; see the DioramaSkyMode comment
@@ -1160,12 +1270,12 @@ const SettingDesc g_setting_descs[] = {
    * default to -200 the first time anything round-trips it). */
   { "diorama_tilt_y_mrad", NULL, "Camera yaw",
     "Diorama camera yaw in milliradians; negative swings the left edge toward you.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_tilt_y_mrad, -180, -700, 700, 20, false, NULL, 0,
     Diorama_ModeIsOn, NULL, NULL, NULL },
   { "diorama_tilt_x_mrad", NULL, "Camera pitch",
     "Diorama camera pitch in milliradians; 0 keeps sprites planted on their platforms.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_tilt_x_mrad, 0, -700, 700, 25, false, NULL, 0,
     Diorama_ModeIsOn, NULL, NULL, NULL },
   /* M5 dead-zone note: 0 is the auto-fit sentinel and the usable minimum is
@@ -1176,7 +1286,7 @@ const SettingDesc g_setting_descs[] = {
    * renders a valid scene instead of clipping into the near plane. */
   { "diorama_distance_x100", NULL, "Camera distance",
     "Diorama camera distance (hundredths); 0 auto-fits the frame to the window.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_distance_x100, 0, 0, 2000, 25, false, NULL, 0,
     Diorama_ModeIsOn, NULL, NULL, NULL },
   INT_SETTING(diorama_depth_shade, NULL, "Depth shading",
@@ -1238,7 +1348,7 @@ const SettingDesc g_setting_descs[] = {
                "Diorama: soften the hard rectangular edge of tilted "
                "background layers.",
                kSettingCat_Graphics, 1, false, GpuShadersActive, NULL),
-  BOOL_SETTING(gpu_fx_shadow, "AR_GPU_FX_SHADOW", "Soft shadow blur (experimental)",
+  BOOL_SETTING(gpu_fx_shadow, "AR_GPU_FX_SHADOW", "Soft shadow blur",
                "Diorama: blur sprite/layer drop shadows. KNOWN ISSUE: can "
                "bleed onto transparent gaps in the layer behind it (e.g. a "
                "hazy patch over the sky) — off by default until fixed.",
@@ -1283,18 +1393,110 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
     &g_settings.music_replacements, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
+
+  /* --- Controls (kSettingCat_Input) --------------------------------------
+   * The binding rows come in two parallel sets, keyboard and gamepad. Both
+   * sets are always stored and always loaded; input_bind_page decides which
+   * one the menu lists (Settings_IsMenuVisible), the same paging trick the
+   * save editor uses, so the category stays readable instead of showing 34
+   * rows at once. */
+  { "input_device", NULL, "Input device",
+    "Which device drives the game. Auto keeps the keyboard and the selected "
+    "gamepad both live.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Input,
+    &g_settings.input_device, kInputDevice_Auto, kInputDevice_Auto,
+    kInputDevice_Gamepad, 1, false, kInputDeviceLabels, kInputDevice_Count,
+    NULL, NULL, NULL, NULL },
+  { "input_gamepad_slot", NULL, "Gamepad",
+    "Which connected controller to read. First connected follows hotplug.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Input,
+    &g_settings.input_gamepad_slot, 0, 0, 8, 1, false, NULL, 0,
+    NULL, NULL, ParseGamepadSlot, FormatGamepadSlot },
+  { "input_bind_page", NULL, "Configure bindings for",
+    "Choose which device's bindings the rows below show and edit.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Input,
+    &g_settings.input_bind_page, kInputClass_Keyboard, kInputClass_Keyboard,
+    kInputClass_Gamepad, 1, false, kInputClassLabels, kInputClass_Count,
+    NULL, NULL, NULL, NULL },
+  BOOL_SETTING(input_stick_as_dpad, NULL, "Left stick as D-Pad",
+               "Steer with the left analog stick in addition to the D-Pad. "
+               "Recommended on Steam Deck.",
+               kSettingCat_Input, 1, false, NULL, NULL),
+  INT_SETTING(input_stick_deadzone, NULL, "Stick deadzone",
+              "How far the left stick must travel before it counts as a "
+              "direction, as a percent of full travel.",
+              kSettingCat_Input, 35, 5, 90, NULL, NULL),
+  INT_SETTING(input_cam_sensitivity, NULL, "Camera sensitivity",
+              "Speed of stick-driven camera orbit and zoom in the diorama and "
+              "3D town, as a percent of the base rate.",
+              kSettingCat_Input, 100, 10, 400, NULL, NULL),
+  INT_SETTING(input_cam_deadzone, NULL, "Camera stick deadzone",
+              "How far the camera stick must travel before it orbits. Lower "
+              "than the D-Pad deadzone so small nudges still aim.",
+              kSettingCat_Input, 12, 0, 60, NULL, NULL),
+  BOOL_SETTING(input_cam_invert_y, NULL, "Invert camera Y",
+               "Push the camera stick up to pitch the view down.",
+               kSettingCat_Input, 0, false, NULL, NULL),
+
+  BINDING_SETTINGS(kInputAction_Up, "up", "Up"),
+  BINDING_SETTINGS(kInputAction_Down, "down", "Down"),
+  BINDING_SETTINGS(kInputAction_Left, "left", "Left"),
+  BINDING_SETTINGS(kInputAction_Right, "right", "Right"),
+  BINDING_SETTINGS(kInputAction_B, "b", "B  - jump/confirm"),
+  BINDING_SETTINGS(kInputAction_A, "a", "A  - cancel"),
+  BINDING_SETTINGS(kInputAction_Y, "y", "Y  - attack"),
+  BINDING_SETTINGS(kInputAction_X, "x", "X  - magic"),
+  BINDING_SETTINGS(kInputAction_L, "l", "L"),
+  BINDING_SETTINGS(kInputAction_R, "r", "R"),
+  BINDING_SETTINGS(kInputAction_Start, "start", "Start"),
+  BINDING_SETTINGS(kInputAction_Select, "select", "Select"),
+
+  /* Camera rows. These do nothing outside the diorama / 3D sim town in Free
+   * Cam, which is what the availability gate below says on the row itself
+   * rather than leaving a player wondering why the stick is dead. */
+  BINDING_CAM_SETTINGS(kInputAction_CamYawLeft, "cam_yaw_left",
+                       "Cam yaw left"),
+  BINDING_CAM_SETTINGS(kInputAction_CamYawRight, "cam_yaw_right",
+                       "Cam yaw right"),
+  BINDING_CAM_SETTINGS(kInputAction_CamPitchUp, "cam_pitch_up",
+                       "Cam pitch up"),
+  BINDING_CAM_SETTINGS(kInputAction_CamPitchDown, "cam_pitch_down",
+                       "Cam pitch down"),
+  BINDING_CAM_SETTINGS(kInputAction_CamZoomIn, "cam_zoom_in",
+                       "Cam zoom in"),
+  BINDING_CAM_SETTINGS(kInputAction_CamZoomOut, "cam_zoom_out",
+                       "Cam zoom out"),
+  BINDING_HOST_SETTING(kInputAction_CamReset, "cam_reset", "Cam reset"),
+
+  /* Host actions are gamepad-only rows (see input_map.h): the keyboard's
+     Esc/F1, P, T, F5, and F7 hotkeys stay hard-wired so a bad rebind can
+     never lock a desktop player out of the menu. On a Deck there is no
+     keyboard, so the pad must be able to reach the overlay by itself. */
+  BINDING_HOST_SETTING(kInputAction_Menu, "menu", "Open menu"),
+  BINDING_HOST_SETTING(kInputAction_Pause, "pause", "Pause emulation"),
+  BINDING_HOST_SETTING(kInputAction_Turbo, "turbo", "Fast forward"),
+  BINDING_HOST_SETTING(kInputAction_SaveState, "savestate", "Save state"),
+  BINDING_HOST_SETTING(kInputAction_LoadState, "loadstate", "Load state"),
+
   /* This is an optional gameplay enhancement rather than a bug fix: the
    * original 128-record structure cap is authentic. Completed bridges move
    * to a checksummed extension area so they stop consuming those records,
    * while the census and redraw hooks preserve their support and tiles. */
+  BOOL_SETTING(show_debug_settings, "AR_SHOW_DEBUG_SETTINGS",
+               "Show debug settings",
+               "Reveal developer-only rows: the diorama and town 3D numeric "
+               "tuning dials, their layer and stage A/B toggles, and the scene "
+               "inspector. Off keeps the menu to the master toggles and major "
+               "on/off effects.",
+               kSettingCat_Extras, 0, false, NULL, NULL),
   BOOL_SETTING(fix_bridge_limit, "AR_FIX_BRIDGE_LIMIT", "Bridge-free limit",
                "Completed bridges stop counting toward the 128-structure "
                "population cap; they migrate to spare save space and keep "
                "their tiles, crossing, and support.",
-               kSettingCat_Extras, 0, true, NULL, NULL),
+               kSettingCat_Enhancements, 0, true, NULL, NULL),
   INT_SETTING(turbo_multiplier, "AR_TURBO_MULT", "Turbo multiplier",
               "Number of game frames advanced per rendered frame while turbo is active.",
-              kSettingCat_Extras, 8, 2, 64, ParseTurboMultiplier, NULL),
+              kSettingCat_Enhancements, 8, 2, 64, ParseTurboMultiplier, NULL),
   { "warp_target", "AR_WARP", "Warp target",
     "Raw hexadecimal region/map target used by Warp now; see README for verified values.",
     kSettingType_Custom, kApply_Passive, kSettingCat_Extras,
@@ -1337,10 +1539,10 @@ const SettingDesc g_setting_descs[] = {
                "Back up the active save before the first persistent editor change.",
                kSettingCat_Save, 1, false, NULL, NULL),
   { "save_editor_page", NULL, "Edit section",
-    "Choose Progress, Status, Magic, Items, or Scores; the active section is also shown in the panel title.",
+    "Choose Actions, Progress, Status, Magic, Items, or Scores; the overlay drives this from its tab bar.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Save,
-    &g_settings.save_editor_page, kSaveEditorPage_Progress,
-    kSaveEditorPage_Progress, kSaveEditorPage_Count - 1, 1, false,
+    &g_settings.save_editor_page, kSaveEditorPage_Actions,
+    kSaveEditorPage_Actions, kSaveEditorPage_Count - 1, 1, false,
     kSaveEditorPageLabels, kSaveEditorPage_Count, NULL, NULL, NULL, NULL },
   SAVE_PROGRESS_SETTING(0, "save_prog_fillmore", "AR_SAVE_PROG_FILLMORE",
                         "Fillmore State", "Stage Fillmore's Act/state flags."),
@@ -1481,10 +1683,11 @@ const SettingDesc g_setting_descs[] = {
               "Pixels moved upward per frame while jump is held.",
               kSettingCat_Cheats, 6, 1, 255, NULL, NULL),
   { "cheat_no_knockback", "AR_NO_KNOCKBACK", "No knockback",
-    "1 is full invulnerability; other values are raw hex object offsets.",
-    kSettingType_Int, kApply_Passive, kSettingCat_Cheats,
-    &g_settings.cheat_no_knockback, 0, 0, 0x3f, 1, false, NULL, 0,
-    NULL, NULL, ParseNoKnockback, FormatNoKnockback },
+    "Full invulnerability using the game's own i-frames: hits register no "
+    "damage, knockback, or hitstun.",
+    kSettingType_Bool, kApply_Passive, kSettingCat_Cheats,
+    &g_settings.cheat_no_knockback, 0, 0, 1, 1, false, NULL, 0,
+    NULL, NULL, NULL, NULL },
   { "pins", "AR_PIN", "Custom PAR pins",
     "Comma-separated 7Exxxxvv/7Fxxxxvv codes, enforced every frame.",
     kSettingType_Custom, kApply_Passive, kSettingCat_Cheats,
@@ -1554,9 +1757,11 @@ static bool Settings_UsesLegacyEnvironmentSyntax(const SettingDesc *desc) {
   return desc->field != &g_settings.extended_aspect &&
          desc->field != &g_settings.pixel_aspect &&
          desc->field != &g_settings.window_scale &&
-         desc->field != &g_settings.fullscreen &&
+         desc->field != &g_settings.window_mode &&
          desc->field != &g_settings.new_renderer &&
          desc->field != &g_settings.ignore_aspect_ratio &&
+         desc->field != &g_settings.refresh_mode &&
+         desc->field != &g_settings.frame_limit_fps &&
          desc->field != &g_settings.audio_enabled &&
          desc->field != &g_settings.audio_frequency &&
          desc->field != &g_settings.audio_samples &&
@@ -1649,22 +1854,45 @@ bool Settings_IsAvailable(const SettingDesc *desc) {
 
 bool Settings_IsMenuVisible(const SettingDesc *desc) {
   if (!desc || !desc->key) return false;
+  /* Developer-only rows collapse out of the menu unless explicitly enabled.
+   * Checked first so a debug row is hidden regardless of its category rules. */
+  if (Settings_IsDebugOnly(desc) && !g_settings.show_debug_settings)
+    return false;
   if (desc->category == kSettingCat_Extras &&
       (!strcmp(desc->key, "warp_target") ||
        !strcmp(desc->key, "warp_now") ||
        !strcmp(desc->key, "save_state") ||
        !strcmp(desc->key, "load_state")))
     return false;
+  /* input_bind_page and save_editor_page are still real, persisted settings,
+   * but the overlay now drives them from its tab bar rather than from a row
+   * the player scrolls to — so they no longer list themselves. */
+  if (!strcmp(desc->key, "input_bind_page") ||
+      !strcmp(desc->key, "save_editor_page"))
+    return false;
+
+  /* The Gamepad row is pointless with nothing plugged in. */
+  if (desc->category == kSettingCat_Input)
+    return strcmp(desc->key, "input_gamepad_slot") != 0 ||
+           InputMap_GamepadCount() > 0;
+
+  /* Bindings exist for both device classes at all times, but only the class
+   * selected by input_bind_page (i.e. the active Controls tab) is listed. */
+  if (desc->category == kSettingCat_InputBinds) {
+    InputClass klass;
+    if (!InputMap_DescribeRow(desc, NULL, &klass)) return true;
+    return (int)klass == g_settings.input_bind_page;
+  }
+
   if (desc->category != kSettingCat_Save) return true;
 
-  /* Save storage/safety controls, the page selector, and commands stay
-   * visible on every editor page. Only the staged payload is paged. */
+  /* Save storage/safety controls and the apply/import/export commands now live
+   * on the dedicated Actions page instead of repeating on every payload page. */
   if (desc->type == kSettingType_Action ||
       !strcmp(desc->key, "save_backend") ||
       !strcmp(desc->key, "save_edit_armed") ||
-      !strcmp(desc->key, "save_autobackup") ||
-      !strcmp(desc->key, "save_editor_page"))
-    return true;
+      !strcmp(desc->key, "save_autobackup"))
+    return g_settings.save_editor_page == kSaveEditorPage_Actions;
 
   switch (g_settings.save_editor_page) {
     case kSaveEditorPage_Progress:
@@ -1697,6 +1925,7 @@ bool Settings_GetLong(const SettingDesc *desc, long *value) {
     case kSettingType_Enum: *value = *(const int *)desc->field; return true;
     case kSettingType_Mask: *value = *(const uint16 *)desc->field; return true;
     case kSettingType_Custom:
+    case kSettingType_Binding:
     case kSettingType_Action:
       return false;
   }
@@ -1739,6 +1968,7 @@ SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value) {
     case kSettingType_Enum: *(int *)desc->field = (int)value; break;
     case kSettingType_Mask: *(uint16 *)desc->field = (uint16)value; break;
     case kSettingType_Custom:
+    case kSettingType_Binding:
     case kSettingType_Action:
       return kSettingChange_Rejected;
   }
@@ -1749,7 +1979,8 @@ SettingChangeResult Settings_SetText(const SettingDesc *desc,
                                      const char *text) {
   if (!desc || !text) return kSettingChange_Rejected;
   if (desc->type == kSettingType_Action) return kSettingChange_Rejected;
-  if (desc->type == kSettingType_Custom) {
+  if (desc->type == kSettingType_Custom ||
+      desc->type == kSettingType_Binding) {
     if (!desc->parse) return kSettingChange_Rejected;
     char before[512], after[512];
     Settings_FormatValue(desc, before, sizeof(before));
@@ -1810,7 +2041,8 @@ SettingChangeResult Settings_SetText(const SettingDesc *desc,
 SettingChangeResult Settings_Reset(const SettingDesc *desc) {
   if (!desc) return kSettingChange_Rejected;
   if (desc->type == kSettingType_Action) return kSettingChange_Rejected;
-  if (desc->type == kSettingType_Custom)
+  if (desc->type == kSettingType_Custom ||
+      desc->type == kSettingType_Binding)
     return Settings_SetText(desc, "");
   return Settings_SetLong(desc, desc->defval);
 }
@@ -1835,6 +2067,7 @@ int Settings_FormatValue(const SettingDesc *desc, char *buffer,
       return snprintf(buffer, buffer_size, "$%04X",
                       (unsigned)*(const uint16 *)desc->field);
     case kSettingType_Custom:
+    case kSettingType_Binding:
       buffer[0] = 0;
       return 0;
     case kSettingType_Action:
@@ -1863,14 +2096,78 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Widescreen: return "Widescreen";
     case kSettingCat_Display: return "Display";
     case kSettingCat_Presentation: return "Diorama";
+    case kSettingCat_DioramaCamera: return "Diorama camera";
     case kSettingCat_Simulation: return "Simulation";
+    case kSettingCat_SimCamera: return "Town camera";
+    case kSettingCat_SimLighting: return "Town lighting";
+    case kSettingCat_SimAtmosphere: return "Town atmosphere";
     case kSettingCat_Graphics: return "Graphics";
     case kSettingCat_Audio: return "Audio";
+    case kSettingCat_Input: return "Controls";
+    case kSettingCat_InputBinds: return "Bindings";
     case kSettingCat_Save: return "Save editor";
-    case kSettingCat_Extras: return "Extras";
+    case kSettingCat_Extras: return "Tools";
+    case kSettingCat_Enhancements: return "Game";
     case kSettingCat_Inspector: return "Inspector";
+    case kSettingCat_Count: break;
   }
   return "Unknown";
+}
+
+bool Settings_CategoryIsSim3D(SettingCategory category) {
+  return category == kSettingCat_Simulation ||
+         category == kSettingCat_SimCamera ||
+         category == kSettingCat_SimLighting ||
+         category == kSettingCat_SimAtmosphere;
+}
+
+bool Settings_IsDebugOnly(const SettingDesc *desc) {
+  if (!desc || !desc->key) return false;
+
+  /* The scene inspector and its asset dump are development tools end to end. */
+  if (desc->category == kSettingCat_Inspector) return true;
+
+  /* The granular widescreen flags are all preset by Screen ratio / Render
+   * profile; toggling them individually is a developer A/B, not a player
+   * control. The whole Widescreen tab collapses when debug is off. */
+  if (desc->category == kSettingCat_Widescreen) return true;
+
+  /* The diorama and town 3D renderers carry dozens of fine numeric dials —
+   * camera pose in milliradians, cloud ramp widths in pixels, haze/opacity
+   * percentages. None are things a player tunes for performance; that is what
+   * the on/off effect toggles are for. So every Int/Mask row in those
+   * categories is developer-only, while the Bool effect switches, the camera
+   * mode selector, and the reset action stay visible. */
+  bool three_d = desc->category == kSettingCat_Presentation ||
+                 desc->category == kSettingCat_DioramaCamera ||
+                 Settings_CategoryIsSim3D(desc->category);
+  if (three_d &&
+      (desc->type == kSettingType_Int || desc->type == kSettingType_Mask))
+    return true;
+
+  /* A few Bool rows in those same categories are internal A/B or plumbing
+   * toggles rather than real user-facing effects: the separated compositor
+   * stage, the cull-lift inset, the picker exit easing, the per-layer capture
+   * toggles, and the flat-HUD A/B curiosity. */
+  static const char *const kDebugKeys[] = {
+    "sim3d_separated_composite", "sim3d_cull_lift_inset",
+    "sim3d_picker_exit_ease",
+    /* Town 3D stages that should never be off in normal play — turning them
+     * off just breaks the projection. */
+    "sim3d_ground_projection", "sim3d_object_billboards", "sim3d_virtual_height",
+    "diorama_layer_bg1", "diorama_layer_bg2", "diorama_layer_bg3",
+    "diorama_layer_obj", "diorama_layer_backdrop", "diorama_hud_flat",
+    /* The modern renderer is required for widescreen and every 3D mode; there
+     * is no reason for a player to disable it. The stretched-aspect field is
+     * driven by Screen ratio, and the old ignore-aspect toggle folded into it.
+     * The Refresh rate row now owns vsync, so the old uncapped-framerate bool
+     * is redundant in the menu. */
+    "new_renderer", "ignore_aspect_ratio", "uncapped_framerate",
+  };
+  for (size_t i = 0; i < sizeof(kDebugKeys) / sizeof(kDebugKeys[0]); i++)
+    if (!strcmp(desc->key, kDebugKeys[i])) return true;
+
+  return false;
 }
 
 const char *Settings_ApplyKindName(SettingApplyKind apply) {
@@ -1908,6 +2205,7 @@ static void SetSettingDefault(const SettingDesc *desc) {
       *(uint16 *)desc->field = (uint16)desc->defval;
       break;
     case kSettingType_Custom:
+    case kSettingType_Binding:
       if (desc->parse) desc->parse("", desc->field);
       break;
     case kSettingType_Action:
@@ -2302,6 +2600,7 @@ int Settings_ExtendedAspectX(void) {
   switch (g_settings.extended_aspect) {
     case kScreenAspect_169:
     case kScreenAspect_1610:
+    case kScreenAspect_Stretch:  /* wide content, then filled to the window */
       return 16;
     default:
       return 0;
@@ -2312,9 +2611,14 @@ int Settings_ExtendedAspectY(void) {
   switch (g_settings.extended_aspect) {
     case kScreenAspect_169: return 9;
     case kScreenAspect_1610: return 10;
+    case kScreenAspect_Stretch: return 9;
     default: return 0;
   }
 }
+
+static int s_host_refresh_hz;
+void Settings_SetHostRefreshHz(int hz) { s_host_refresh_hz = hz > 0 ? hz : 0; }
+int Settings_HostRefreshHz(void) { return s_host_refresh_hz; }
 
 int Settings_AudioFrequencyHz(void) {
   switch (g_settings.audio_frequency) {

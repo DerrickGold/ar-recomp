@@ -23,6 +23,7 @@
 #include "config.h"
 #include "settings.h"
 #include "settings_overlay.h"
+#include "input_map.h"
 #include "scene_inspector.h"
 #include "scene_asset_dump.h"
 #include "diorama.h"
@@ -210,6 +211,54 @@ static void Sim3D_ResetCamera(void) {
   g_paused_redraw_pending = true;
 }
 
+/* Polled analog camera control (input_map.h): the right stick orbits and the
+ * triggers zoom the diorama / 3D-town Free Cam, the same poses the mouse
+ * right-drag and wheel already edit. Integrated over REAL elapsed time, not
+ * per host iteration, so the orbit speed does not change with frame rate or
+ * with the emulator being paused.
+ *
+ * Deliberately routed through the same Diorama_AdjustCamera /
+ * Sim3D_AdjustCamera entry points as the mouse, so clamping, the settings
+ * write-back, and the paused-redraw flag all stay on one path. */
+static void ApplyAnalogCameraInput(void) {
+  static uint64_t last_ns;
+  uint64_t now_ns = SDL_GetTicksNS();
+  uint64_t elapsed_ns = last_ns ? now_ns - last_ns : 0;
+  last_ns = now_ns;
+  /* A long stall (load, alt-tab) must not teleport the camera. */
+  if (elapsed_ns > 100000000ull) elapsed_ns = 100000000ull;
+  if (!elapsed_ns) return;
+
+  bool diorama = !SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame();
+  bool sim3d = !SettingsOverlay_IsOpen() && !diorama &&
+               Sim3D_FreeCameraActiveThisFrame();
+  if (!diorama && !sim3d) return;
+
+  float dt = (float)elapsed_ns / 1e9f;
+  float gain = (float)g_settings.input_cam_sensitivity / 100.0f;
+
+  /* Base rates: a full stick sweeps the +-0.7 rad tilt clamp in a bit over a
+   * second, and crosses the 2..20 distance range in about three. */
+  static const float kYawRadPerSec = 1.2f;
+  static const float kPitchRadPerSec = 1.2f;
+  static const float kZoomPerSec = 6.0f;
+
+  float yaw = InputMap_AnalogAction(kInputAction_CamYawRight) -
+              InputMap_AnalogAction(kInputAction_CamYawLeft);
+  float pitch = InputMap_AnalogAction(kInputAction_CamPitchDown) -
+                InputMap_AnalogAction(kInputAction_CamPitchUp);
+  float zoom = InputMap_AnalogAction(kInputAction_CamZoomOut) -
+               InputMap_AnalogAction(kInputAction_CamZoomIn);
+  if (g_settings.input_cam_invert_y) pitch = -pitch;
+  if (yaw == 0.0f && pitch == 0.0f && zoom == 0.0f) return;
+
+  float d_yaw = yaw * kYawRadPerSec * gain * dt;
+  float d_pitch = pitch * kPitchRadPerSec * gain * dt;
+  float d_zoom = zoom * kZoomPerSec * gain * dt;
+  if (diorama) Diorama_AdjustCamera(d_yaw, d_pitch, d_zoom);
+  else Sim3D_AdjustCamera(d_yaw, d_pitch, d_zoom);
+}
+
 /* Widescreen master switch + per-side extra-column budget — the definitions
  * for the runner's widescreen.h externs (each game defines them; 0/false =
  * authentic 256-wide, all PPU margin machinery inert). Set once at startup
@@ -364,27 +413,20 @@ void RtlApuUnlock(void) {
   if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
 }
 
-static void HandleInput(int keyCode, bool pressed) {
-  uint32 bit = 0;
-  switch (keyCode) {
-    case SDLK_UP:     bit = 0x0010; break;
-    case SDLK_DOWN:   bit = 0x0020; break;
-    case SDLK_LEFT:   bit = 0x0040; break;
-    case SDLK_RIGHT:  bit = 0x0080; break;
-    case SDLK_RETURN: bit = 0x0008; break;
-    case SDLK_RSHIFT: bit = 0x0004; break;
-    case SDLK_Z:      bit = 0x0001; break;
-    case SDLK_X:      bit = 0x0100; break;
-    case SDLK_A:      bit = 0x0002; break;
-    case SDLK_S:      bit = 0x0200; break;
-    case SDLK_Q:      bit = 0x0400; break;
-    case SDLK_W:      bit = 0x0800; break;
-    default: return;
-  }
-  if (pressed)
-    g_input_state |= bit;
-  else
-    g_input_state &= ~bit;
+/* The 12 joypad bits now live in input_map.c, keyed by SCANCODE (physical key
+ * position) rather than keycode, so a bind made on one keyboard layout stays
+ * on the same physical key on another. g_input_state remains the one word the
+ * runner, the force-input hooks, and the oracle record/replay path read. */
+static void HandleInput(int scancode, bool pressed) {
+  InputMap_HandleKey(scancode, pressed);
+  g_input_state = InputMap_State();
+}
+
+/* Every place that freezes the game (menu open, inspector selection) has to
+ * drop held bits, or a direction held across the freeze leaks back out. */
+static void ClearHeldInput(void) {
+  InputMap_Clear();
+  g_input_state = 0;
 }
 
 /* SDL3 audio-stream callback: fires when the bound device needs more data.
@@ -556,8 +598,25 @@ static void PresentThread_Resume(void) {
   SDL_UnlockMutex(g_present_mutex);
 }
 
+static uint64_t FrameLimitIntervalNs(void);  /* defined with the display code */
+
+/* Pace the present thread to the Frame limit (Refresh rate = Limit). Called
+ * with no lock held, immediately before SDL_RenderPresent; sleeps out any time
+ * left in the target interval since the previous present. A no-op in Vsync
+ * (SDL blocks) and Unlimited (interval 0) modes. */
+static void PresentThrottle(uint64_t *last_present_ns) {
+  uint64_t interval = FrameLimitIntervalNs();
+  uint64_t now = SDL_GetTicksNS();
+  if (interval && *last_present_ns && now - *last_present_ns < interval) {
+    SDL_DelayNS(interval - (now - *last_present_ns));
+    now = SDL_GetTicksNS();
+  }
+  *last_present_ns = now;
+}
+
 static int SDLCALL PresentThreadFn(void *userdata) {
   (void)userdata;
+  uint64_t last_present_ns = 0;
   /* M7: present-thread-local scroll history for interpolation (present.h's
    * FrameSlot comment explains why this must NOT be a pointer into
    * g_frame_slots[] — that would race the game thread's next submission).
@@ -599,7 +658,8 @@ static int SDLCALL PresentThreadFn(void *userdata) {
        * present.c — no D6 boundary). */
       bool signaled = SDL_WaitConditionTimeout(
           g_present_ready_cond, g_present_mutex,
-          (g_settings.gpu_interp_enabled || g_settings.uncapped_framerate)
+          (g_settings.gpu_interp_enabled ||
+           g_settings.refresh_mode != kRefreshMode_Vsync)
               ? 4 : 16);
       if (!g_present_running || g_present_quiesce_requested) continue;
       if (!signaled && !g_frame_pending && g_present_last_presented_idx >= 0) {
@@ -614,6 +674,7 @@ static int SDLCALL PresentThreadFn(void *userdata) {
          * on every idle repaint. prev_scroll only ever advances in the
          * dequeue path below, when a genuinely new tick was captured. */
         PresentComposite(&g_frame_slots[idx], &prev_scroll);
+        PresentThrottle(&last_present_ns);
         if (g_renderer) SDL_RenderPresent(g_renderer);
         SDL_LockMutex(g_present_mutex);
       }
@@ -639,6 +700,7 @@ static int SDLCALL PresentThreadFn(void *userdata) {
     uint32 composite_t0 = perf_on ? SDL_GetTicks() : 0;
     PresentComposite(slot, &prev_scroll);
     uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
+    PresentThrottle(&last_present_ns);
     if (g_renderer) SDL_RenderPresent(g_renderer);
     FrameSlot_ExtractScrollSnapshot(slot, &prev_scroll);
     if (perf_on) {
@@ -1004,7 +1066,7 @@ static void CloseSceneInspectorSelection(void) {
          sizeof(g_scene_inspector_presentation));
   if (g_scene_inspector_owns_pause) g_paused = false;
   g_scene_inspector_owns_pause = false;
-  g_input_state = 0;
+  ClearHeldInput();
 }
 
 static void ToggleTurbo(void) {
@@ -1352,10 +1414,100 @@ static bool OnSettingsAction(const SettingDesc *desc) {
   return true;
 }
 
+/* Gamepad-only host actions (input_map.h). Deliberately the same entry points
+ * the keyboard hotkeys use, so a pad press and a keypress cannot diverge. */
+static void OnGamepadHostAction(InputAction action) {
+  switch (action) {
+    case kInputAction_Menu:
+      if (SettingsOverlay_IsOpen()) {
+        SettingsOverlay_Close();
+      } else {
+        ClearHeldInput();
+        SettingsOverlay_Open();
+      }
+      break;
+    case kInputAction_Pause:
+      TogglePause();
+      break;
+    case kInputAction_CamReset:
+      /* Same split the middle-click reset uses: whichever 3D view is on
+       * screen owns the button, and neither responds outside them. */
+      if (Diorama_IsActiveThisFrame()) Diorama_ResetCamera();
+      else if (Sim3D_FreeCameraActiveThisFrame()) Sim3D_ResetCamera();
+      break;
+    case kInputAction_Turbo:
+      ToggleTurbo();
+      break;
+    case kInputAction_SaveState:
+      (void)OnSettingsAction(Settings_Find("save_state"));
+      break;
+    case kInputAction_LoadState:
+      (void)OnSettingsAction(Settings_Find("load_state"));
+      break;
+    default:
+      break;
+  }
+}
+
 /* Point the presentation at the current display mode's framebuffer sub-rect
  * and size the window to that mode's display aspect. Host textures retain
  * maximum capacity; g_snes_width selects the live PPU pitch, and 4:3 presents
  * only the authentic centre 256 columns. */
+/* Windowed / borderless-desktop / exclusive fullscreen. SDL3 desktop
+ * fullscreen is FullscreenMode == NULL; a non-NULL mode requests a real
+ * (exclusive) video mode. */
+static void ApplyWindowMode(void) {
+  if (!g_window) return;
+  switch (g_settings.window_mode) {
+    case kWindowMode_Windowed:
+      SDL_SetWindowFullscreen(g_window, false);
+      break;
+    case kWindowMode_Exclusive: {
+      SDL_DisplayID display = SDL_GetDisplayForWindow(g_window);
+      SDL_SetWindowFullscreenMode(g_window,
+                                  SDL_GetDesktopDisplayMode(display));
+      SDL_SetWindowFullscreen(g_window, true);
+      break;
+    }
+    case kWindowMode_Borderless:
+    default:
+      SDL_SetWindowFullscreenMode(g_window, NULL);
+      SDL_SetWindowFullscreen(g_window, true);
+      break;
+  }
+}
+
+/* Publish the window's current display refresh rate so the Refresh rate row
+ * can show "Vsync NHz" instead of a bare "Vsync". Re-query whenever the window
+ * changes display or the display's mode changes. */
+static void UpdateHostRefreshHz(void) {
+  if (!g_window) {
+    Settings_SetHostRefreshHz(0);
+    return;
+  }
+  SDL_DisplayID display = SDL_GetDisplayForWindow(g_window);
+  const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display);
+  if (!mode) mode = SDL_GetDesktopDisplayMode(display);
+  Settings_SetHostRefreshHz(mode ? (int)(mode->refresh_rate + 0.5f) : 0);
+}
+
+/* Vsync tracks Refresh rate: on only in Vsync mode, off for Unlimited and
+ * Limit (Limit paces the present thread by wall clock instead). */
+static void ApplyRefreshVsync(void) {
+  if (!g_renderer) return;
+  SDL_SetRenderVSync(g_renderer,
+                     g_settings.refresh_mode == kRefreshMode_Vsync ? 1 : 0);
+}
+
+/* Minimum nanoseconds between presents when Refresh rate is Limit; 0 means no
+ * limit. Read by the present thread's pacing. */
+static uint64_t FrameLimitIntervalNs(void) {
+  if (g_settings.refresh_mode != kRefreshMode_Limit) return 0;
+  int fps = g_settings.frame_limit_fps;
+  if (fps < 1) fps = 1;
+  return 1000000000ull / (uint64_t)fps;
+}
+
 static void ApplyDisplayPresentation(void) {
   if (!g_window || !g_renderer) return;
   int vis_w = Settings_VisibleWidth();
@@ -1460,14 +1612,17 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   if (desc->field == &g_settings.scene_inspector &&
       !g_settings.scene_inspector)
     CloseSceneInspectorSelection();
-  if (desc->field == &g_settings.fullscreen && g_window)
-    /* SDL3 SDL_SetWindowFullscreen takes a bool; borderless-desktop is the
-     * default fullscreen mode. */
-    SDL_SetWindowFullscreen(g_window, g_settings.fullscreen != 0);
+  if (desc->field == &g_settings.window_mode && g_window) {
+    ApplyWindowMode();
+    UpdateHostRefreshHz();  /* exclusive fullscreen can change the mode */
+  }
   /* B1a (followup doc): live-apply without a restart — mirrors the boot-time
-   * SDL_SetRenderVSync read near SDL_CreateRenderer. */
-  if (desc->field == &g_settings.uncapped_framerate && g_renderer)
-    SDL_SetRenderVSync(g_renderer, g_settings.uncapped_framerate ? 0 : 1);
+   * SDL_SetRenderVSync read near SDL_CreateRenderer. Refresh rate owns vsync
+   * now; the frame-limit interval is polled per-present by the present thread,
+   * so a Limit-FPS change needs no explicit apply here. */
+  if ((desc->field == &g_settings.refresh_mode ||
+       desc->field == &g_settings.uncapped_framerate) && g_renderer)
+    ApplyRefreshVsync();
   if (desc->field == &g_settings.extended_aspect ||
       desc->field == &g_settings.pixel_aspect) {
     ResolveVideoGeometry(true);
@@ -1494,7 +1649,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
     ApplyDisplayPresentation();
   if (desc->category == kSettingCat_Display ||
       desc->category == kSettingCat_Widescreen ||
-      desc->category == kSettingCat_Simulation)
+      Settings_CategoryIsSim3D(desc->category))
     g_paused_redraw_pending = true;
   PresentThread_Resume();
 }
@@ -1704,7 +1859,7 @@ static bool InspectWindowPoint(int window_x, int window_y) {
   }
   if (!had_selection)
     g_scene_inspector_owns_pause = !was_paused;
-  g_input_state = 0;
+  ClearHeldInput();
   g_paused = true;
   return true;
 }
@@ -2213,6 +2368,9 @@ static bool RunningAsBundle(void) {
  * still calls this exactly once per outer iteration (§3.6 — headless never
  * runs more than one tick per iteration), so its behavior is unchanged. */
 static uint32 ComputeGameInputs(bool *stop_running) {
+  /* Re-read rather than trusting the last event: a gamepad's held bits are
+   * owned by input_map.c and change without a keyboard event ever firing. */
+  g_input_state = InputMap_State();
   uint32 inputs = g_input_state;
   {
     /* TEMP DEBUG: force a button after N frames to auto-advance the
@@ -2824,10 +2982,13 @@ int main(int argc, char **argv) {
                g_active_aspect_y / 2) / g_active_aspect_y;
     }
     /* SDL3 merged FULLSCREEN_DESKTOP into FULLSCREEN (borderless desktop is
-     * the default fullscreen mode when no exclusive video mode is set). */
+     * the default fullscreen mode when no exclusive video mode is set).
+     * Exclusive fullscreen's video mode is set after window creation by
+     * ApplyWindowMode; at boot the flag just requests fullscreen. */
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE |
         (headless_video ? SDL_WINDOW_HIDDEN : 0) |
-        (g_settings.fullscreen ? SDL_WINDOW_FULLSCREEN : 0);
+        (g_settings.window_mode != kWindowMode_Windowed
+             ? SDL_WINDOW_FULLSCREEN : 0);
     /* SDL3 SDL_CreateWindow no longer takes an x,y position; it is created at
      * a default (centered) position. */
     g_window = SDL_CreateWindow(
@@ -2879,7 +3040,13 @@ int main(int argc, char **argv) {
      * the display's next refresh; see the present-cadence read below for
      * the other half (redrawing often enough for that to matter). */
     if (!headless_video)
-      SDL_SetRenderVSync(g_renderer, g_settings.uncapped_framerate ? 0 : 1);
+      ApplyRefreshVsync();
+
+    /* Exclusive fullscreen needs its video mode set after creation; borderless
+     * and windowed are already handled by the creation flag. */
+    if (!headless_video && g_settings.window_mode == kWindowMode_Exclusive)
+      ApplyWindowMode();
+    UpdateHostRefreshHz();
 
     /* Aspect-correct letterboxing via SDL's logical presentation (widescreen
      * only, so faithful mode keeps the historical stretch-to-window behavior).
@@ -3049,6 +3216,10 @@ int main(int argc, char **argv) {
 
   Settings_SetChangeObserver(OnRuntimeSettingChanged);
   Settings_SetActionObserver(OnSettingsAction);
+  /* After the action observer is installed: the pad's save/load-state
+   * bindings route through it. */
+  InputMap_Init();
+  InputMap_SetActionHandler(OnGamepadHostAction);
   Diorama_SeedCameraFromSettings();
 
   /* Music replacement is audio-side and works headless too (unlike the HD
@@ -3210,12 +3381,21 @@ int main(int argc, char **argv) {
         case SDL_EVENT_QUIT:
           running = false;
           break;
+        /* Dragging the window to another monitor, or that monitor changing
+         * mode, can change the refresh rate the Vsync row reports. */
+        case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+        case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+          UpdateHostRefreshHz();
+          break;
         case SDL_EVENT_KEY_DOWN:
+          /* An armed binding row consumes the raw key: it needs the scancode,
+           * and it must win over F5/F9/etc. so those stay bindable. */
+          if (SettingsOverlay_HandleCaptureEvent(&event)) break;
           if (SettingsOverlay_IsOpen()) {
             bool was_open = true;
             bool consumed = SettingsOverlay_HandleKey(
                 event.key.key, true, event.key.repeat != 0);
-            if (was_open && !SettingsOverlay_IsOpen()) g_input_state = 0;
+            if (was_open && !SettingsOverlay_IsOpen()) ClearHeldInput();
             if (consumed) break;
           }
           /* The settings UI is host-owned and safe in every emulated state.
@@ -3224,7 +3404,7 @@ int main(int argc, char **argv) {
           if (!event.key.repeat &&
               (event.key.key == SDLK_ESCAPE ||
                event.key.key == SDLK_F1)) {
-            g_input_state = 0;
+            ClearHeldInput();
             SettingsOverlay_Open();
           } else if (event.key.key == SDLK_P) {
             if (SceneInspector_HasSelection()) {
@@ -3348,7 +3528,7 @@ int main(int argc, char **argv) {
               g_paused_redraw_pending = true;
             }
           } else {
-            HandleInput(event.key.key, true);
+            HandleInput(event.key.scancode, true);
           }
           break;
         case SDL_EVENT_TEXT_INPUT:
@@ -3422,12 +3602,27 @@ int main(int argc, char **argv) {
           if (event.button.button == SDL_BUTTON_LEFT)
             SettingsOverlay_EndDebugPanelDrag();
           break;
+        case SDL_EVENT_GAMEPAD_ADDED:
+        case SDL_EVENT_GAMEPAD_REMOVED:
+          InputMap_HandleEvent(&event);
+          break;
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+          /* While the menu owns the screen the pad drives the menu, not the
+           * game — same split the keyboard already had. */
+          if (SettingsOverlay_IsOpen()) {
+            (void)SettingsOverlay_HandleGamepadEvent(&event);
+            break;
+          }
+          InputMap_HandleEvent(&event);
+          break;
         case SDL_EVENT_KEY_UP:
           if (SettingsOverlay_IsOpen())
             (void)SettingsOverlay_HandleKey(event.key.key, false,
                                             false);
           else
-            HandleInput(event.key.key, false);
+            HandleInput(event.key.scancode, false);
           break;
       }
     }
@@ -3436,6 +3631,8 @@ int main(int argc, char **argv) {
       running = false;
       continue;
     }
+
+    ApplyAnalogCameraInput();
 
     /* Host-owned pauses do not issue the game's native SPC $F2 command. Keep
      * the HD decoder aligned explicitly; its independent driver-pause latch
@@ -3449,6 +3646,11 @@ int main(int argc, char **argv) {
        * re-stamped every paused iteration below, so it's always "just now"
        * by the time the game actually unpauses. */
       accumulator = 0;
+      /* Advance hold-to-accelerate value stepping on the MAIN thread (a
+       * settings write from the present thread would deadlock the quiesce).
+       * Runs at this loop's ~60Hz cadence while the menu is open; a value it
+       * changes sets g_paused_redraw_pending, which the redraw below honors. */
+      SettingsOverlay_Tick();
       bool redrew = RedrawPausedFrameIfNeeded();
       /* §2.5: with a present thread running, it re-presents the last slot
        * on its own ~16ms idle timeout — only submit here when something
@@ -3571,6 +3773,7 @@ int main(int argc, char **argv) {
     SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
   SDL_DestroyTexture(g_sim3d_flat_texture);
   SettingsOverlay_Destroy();
+  InputMap_Shutdown();
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);
   SDL_DestroyTexture(g_texture);

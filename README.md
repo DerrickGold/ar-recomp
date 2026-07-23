@@ -384,8 +384,19 @@ than disguised as real environment variables. Diagnostic-only `AR_*` and
 `SNESREF_*` keys retain the old environment bridge. This means a command-line
 environment value still reliably overrides both files.
 
-**Keyboard controls are hardcoded** (not configurable via `.ini` yet) —
-see `HandleInput()` in `src/main.c`:
+### Controls
+
+Every joypad button is re-bindable from **Settings -> Controls**, for the
+keyboard and for a gamepad independently. Both binding sets are always stored;
+the *Input device* row decides which one feeds the game (*Auto* keeps both
+live), and *Configure bindings for* switches which set the rows below show.
+To rebind, select a row, press Return (or SNES B), then press the key or
+button you want; `A` (SNES Y) restores that row's default and Escape cancels.
+Bindings live in `settings.ini` as `bind_key_*` / `bind_pad_*` and are saved
+the moment they change.
+
+Keyboard bindings are stored by **physical key position** (SDL scancode), so a
+layout change moves with the keys rather than the letters. The defaults are:
 
 | Key(s) | Function |
 |---|---|
@@ -394,6 +405,44 @@ see `HandleInput()` in `src/main.c`:
 | `X`, `A`, `S` | SNES A, Y, X |
 | `Q`, `W` | SNES L, R |
 | Return, Right Shift | Start, Select |
+
+The gamepad defaults follow the standard SNES-on-Xbox-layout mapping: South =
+B, East = A, West = Y, North = X, shoulders = L/R, Menu/View = Start/Select,
+D-pad = D-pad. The left analog stick doubles as the D-pad (*Left stick as
+D-Pad*, on by default, with an adjustable deadzone); the right stick and
+triggers are reserved for the camera.
+
+**Camera control** (diorama and 3D sim town, Free Cam only) is on the pad too
+— until now it was mouse-only, which a Deck does not have. The right stick
+orbits (yaw/pitch), the triggers zoom in/out, and clicking the right stick
+recentres the camera; all seven are re-bindable, and *Camera sensitivity*,
+*Camera stick deadzone*, and *Invert camera Y* tune the feel. Stick input is
+integrated over real elapsed time, so orbit speed does not change with frame
+rate. Outside those two modes the camera bindings do nothing. The mouse path
+(right-drag orbit, wheel zoom, middle-click reset) is unchanged.
+
+Six **host actions** are gamepad-bindable too, because a Steam Deck has no
+keyboard: open settings menu (default L3), reset camera (default R3), pause,
+fast forward, save state, and load state. The pad also drives the settings menu itself —
+using your own bindings, so menu confirm is whatever you bound to SNES B — and
+that includes rebinding, so the whole feature is reachable with no keyboard
+attached. The keyboard hotkeys below stay hard-wired on purpose: a bad rebind
+can never lock a desktop player out of the menu.
+
+Set the *Gamepad* row to pick between several connected controllers; it names
+each one, and *First connected* follows hotplug. If SDL does not recognise a
+pad, drop a `gamecontrollerdb.txt` next to the executable (or in `assets/`)
+and it is loaded at startup.
+
+**Steam Deck:** launched through Steam, Steam Input presents a standard pad
+and everything works with the defaults. Launched from desktop mode, SDL's
+HIDAPI Steam driver is enabled at startup so the built-in sticks, D-pad, and
+face buttons are picked up directly. Either way, L3 opens the settings menu.
+
+Host hotkeys (keyboard only, not re-bindable):
+
+| Key(s) | Function |
+|---|---|
 | `Esc` / `F1` | open the host settings overlay from any game state; press again to close |
 | `P` | pause |
 | `T` | turbo — fast-forward at 8 game frames per rendered frame (`AR_TURBO_MULT` to change) |

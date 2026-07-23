@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "config.h"
+#include "input_map.h"
 #include "settings.h"
 
 #include <stdio.h>
@@ -62,8 +63,11 @@ static void TestDefaultsAndMetadata(void) {
   /* Count moves whenever a category gains or loses rows; the SIM 3D block
    * most recently gained the world-map underlay and cloud-shroud stage
    * toggles with their haze/density/falloff/inset dials, on top of the nine
-   * named stage toggles and the shadow/height-pop tuning rows. */
-  CHECK(g_setting_desc_count == 172);
+   * named stage toggles and the shadow/height-pop tuning rows. On top of
+   * that, Controls added eight device/tuning rows plus 42 binding rows: 18
+   * actions x keyboard+gamepad (12 SNES buttons and 6 analog camera axes),
+   * plus 6 gamepad-only host actions. */
+  CHECK(g_setting_desc_count == 225);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -89,7 +93,9 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.extended_aspect == 0);
   CHECK(g_settings.pixel_aspect == kPixelAspect_Crt43);
   CHECK(g_settings.window_scale == 3);
-  CHECK(!g_settings.fullscreen && g_settings.new_renderer);
+  CHECK(g_settings.window_mode == kWindowMode_Windowed &&
+        g_settings.new_renderer);
+  CHECK(g_settings.refresh_mode == kRefreshMode_Vsync);
   CHECK(!g_settings.ignore_aspect_ratio);
   CHECK(g_settings.audio_enabled);
   CHECK(g_settings.audio_frequency == kAudioFrequency_44100);
@@ -130,7 +136,7 @@ static void TestDefaultsAndMetadata(void) {
         height_scale->maxval == 400 && height_scale->defval == 100);
   CHECK(g_settings.save_backend == 0);
   CHECK(!g_settings.save_edit_armed && g_settings.save_autobackup);
-  CHECK(g_settings.save_editor_page == kSaveEditorPage_Progress);
+  CHECK(g_settings.save_editor_page == kSaveEditorPage_Actions);
   for (int i = 0; i < 6; i++)
     CHECK(g_settings.save_region_progress[i] == kSaveProgressEdit_LeaveAsIs);
   CHECK(g_settings.save_master_level == 0 &&
@@ -202,21 +208,70 @@ static void TestDefaultsAndMetadata(void) {
         frequency->apply == kApply_Restart);
   CHECK(screen_ratio && screen_ratio->category == kSettingCat_Display);
   CHECK(stretch && stretch->category == kSettingCat_Display);
-  CHECK(bridge_limit && bridge_limit->category == kSettingCat_Extras);
+  /* Screen ratio > Stretch derives the ignore-aspect field the runtime reads. */
+  CHECK(Settings_SetLong(screen_ratio, kScreenAspect_Stretch) ==
+        kSettingChange_Applied);
+  CHECK(g_settings.ignore_aspect_ratio);
+  CHECK(Settings_SetLong(screen_ratio, kScreenAspect_169) ==
+        kSettingChange_Applied);
+  CHECK(!g_settings.ignore_aspect_ratio);
+  /* The detected refresh Hz is informational and must NOT leak into the saved
+   * value: refresh_mode always formats as its plain enum label so it
+   * round-trips through settings.ini. */
+  Settings_SetHostRefreshHz(144);
+  CHECK(Settings_HostRefreshHz() == 144);
+  const SettingDesc *refresh = Settings_Find("refresh_mode");
+  CHECK(refresh && refresh->type == kSettingType_Enum);
+  char refresh_value[32];
+  Settings_FormatValue(refresh, refresh_value, sizeof(refresh_value));
+  CHECK(!strcmp(refresh_value, "Vsync"));
+  Settings_SetHostRefreshHz(0);
+  CHECK(bridge_limit && bridge_limit->category == kSettingCat_Enhancements);
   CHECK(inspector && inspector->category == kSettingCat_Inspector);
   CHECK(dump_assets && dump_assets->category == kSettingCat_Inspector &&
         dump_assets->type == kSettingType_Action);
   CHECK(sim_mode && sim_mode->category == kSettingCat_Simulation);
-  CHECK(sim_reset && sim_reset->category == kSettingCat_Simulation &&
+  /* Camera rows (and the reset that restores them) are their own tab of the
+   * Town 3D section, separate from the stage toggles. */
+  CHECK(sim_reset && sim_reset->category == kSettingCat_SimCamera &&
         sim_reset->type == kSettingType_Action);
+  CHECK(Settings_CategoryIsSim3D(kSettingCat_SimCamera) &&
+        Settings_CategoryIsSim3D(kSettingCat_Simulation) &&
+        !Settings_CategoryIsSim3D(kSettingCat_Display));
+
+  /* Debug classification: the 3D numeric dials, internal A/B toggles, the SIM
+   * diagnostic mask, and the inspector are developer-only; master toggles,
+   * major on/off effects, camera mode, and unrelated settings are not. The
+   * switch that reveals them is itself never hidden. */
+  CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_tilt_x_mrad")));
+  CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_shadow_opacity_pct")));
+  CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_diagnostic_layers")));
+  CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_separated_composite")));
+  CHECK(Settings_IsDebugOnly(Settings_Find("diorama_depth_shade")));
+  CHECK(Settings_IsDebugOnly(Settings_Find("diorama_layer_bg2")));
+  CHECK(Settings_IsDebugOnly(Settings_Find("scene_inspector")));
+  CHECK(Settings_IsDebugOnly(Settings_Find("dump_scene_assets")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_mode")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_shadows")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_camera_mode")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("diorama_skybox")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("show_debug_settings")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("audio_master_volume")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("hud_scale_percent")));
   CHECK(save_backend && save_backend->category == kSettingCat_Save &&
         save_backend->apply == kApply_Restart);
   CHECK(save_fillmore && save_fillmore->apply == kApply_Save &&
         save_fillmore->enum_count == kSaveProgressEdit_Count);
   CHECK(save_page && save_page->enum_count == kSaveEditorPage_Count &&
         save_page->apply == kApply_Passive);
+  /* Payload rows are paged; the backend/apply controls live only on Actions. */
+  g_settings.save_editor_page = kSaveEditorPage_Progress;
   CHECK(Settings_IsMenuVisible(save_fillmore));
   CHECK(!Settings_IsMenuVisible(Settings_Find("save_master_level")));
+  CHECK(!Settings_IsMenuVisible(save_backend));
+  g_settings.save_editor_page = kSaveEditorPage_Actions;
+  CHECK(Settings_IsMenuVisible(save_backend));
+  CHECK(!Settings_IsMenuVisible(save_fillmore));
   CHECK(save_apply && save_apply->type == kSettingType_Action &&
         save_apply->category == kSettingCat_Save);
   CHECK(hp && Settings_IsAvailable(hp));
@@ -227,7 +282,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(hp && Settings_IsAvailable(hp));
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Widescreen), "Widescreen"));
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Simulation), "Simulation"));
-  CHECK(!strcmp(Settings_CategoryName(kSettingCat_Extras), "Extras"));
+  CHECK(!strcmp(Settings_CategoryName(kSettingCat_Extras), "Tools"));
   CHECK(!strcmp(Settings_CategoryName(kSettingCat_Inspector), "Inspector"));
   CHECK(!strcmp(Settings_ApplyKindName(kApply_Restart), "Restart required"));
   CHECK(!strcmp(Settings_ApplyKindName(kApply_Save), "Staged save edit"));
@@ -329,7 +384,9 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   Settings_FinalizeDisplayMode();
 
   CHECK(g_settings.window_scale == 5);       /* settings > config */
-  CHECK(g_settings.fullscreen);              /* KeyMap did not clobber it */
+  /* Legacy [Graphics] Fullscreen=1 maps to Borderless; [KeyMap] Fullscreen did
+   * not clobber it. */
+  CHECK(g_settings.window_mode == kWindowMode_Borderless);
   CHECK(g_settings.audio_frequency == kAudioFrequency_32040);
   CHECK(Settings_AudioFrequencyHz() == 32040);
   CHECK(g_settings.audio_master_volume == 85); /* env > settings > config */
@@ -367,13 +424,13 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(FileContains(saved_path, "audio_master_volume = 45%"));
 
   ClearSettingsEnv();
-  setenv("AR_FULLSCREEN", "false", 1);
+  setenv("AR_WINDOW_MODE", "Windowed", 1);
   g_ws_active = true;
   g_ws_extra = g_ws_display_extra = 52;
   Settings_InitWithFile(saved_path);
   Settings_FinalizeDisplayMode();
   CHECK(g_settings.window_scale == 6);
-  CHECK(!g_settings.fullscreen);  /* new Phase-4 env aliases use INI syntax */
+  CHECK(g_settings.window_mode == kWindowMode_Windowed);
   CHECK(g_settings.audio_master_volume == 45);
   CHECK(g_settings.audio_frequency == kAudioFrequency_32040);
   CHECK(Settings_AudioFrequencyHz() == 32040);
@@ -391,7 +448,7 @@ static void TestLegacySeedEncodings(void) {
   setenv("AR_INF_MP", "1", 1);
   setenv("AR_INF_HP", "0x20", 1); /* leading zero historically disables */
   setenv("AR_MOONJUMP", "9", 1);
-  setenv("AR_NO_KNOCKBACK", "10", 1); /* legacy parser is hexadecimal */
+  setenv("AR_NO_KNOCKBACK", "1", 1); /* now a plain on/off toggle */
   setenv("AR_PIN", "7E00210A,7F1234AA", 1);
   setenv("AR_WS_SPRITES", "0", 1);
   setenv("AR_AUDIO_VOLUME", "137", 1);
@@ -406,7 +463,7 @@ static void TestLegacySeedEncodings(void) {
   CHECK(g_settings.cheat_inf_hp == 0);
   CHECK(g_settings.cheat_moonjump);
   CHECK(g_settings.cheat_moonjump_speed == 9);
-  CHECK(g_settings.cheat_no_knockback == 0x10);
+  CHECK(g_settings.cheat_no_knockback);
   CHECK(g_settings.pin_count == 2);
   CHECK(g_settings.audio_master_volume == 100);
   CHECK(!g_settings.audio_dialog_blip);
@@ -579,9 +636,10 @@ static void TestMutationApi(void) {
   CHECK(!strcmp(value, "255"));
 
   const SettingDesc *no_knockback = Settings_Find("cheat_no_knockback");
-  CHECK(Settings_SetLong(no_knockback, 0x10) == kSettingChange_Applied);
+  /* Now a plain on/off toggle: any nonzero normalizes to 1 and formats "On". */
+  CHECK(Settings_SetLong(no_knockback, 1) == kSettingChange_Applied);
   Settings_FormatValue(no_knockback, value, sizeof(value));
-  CHECK(!strcmp(value, "10"));
+  CHECK(!strcmp(value, "On"));
   CHECK(Settings_SetText(no_knockback, value) == kSettingChange_Unchanged);
 
   const SettingDesc *freeze = Settings_Find("cheat_freeze_timer");
@@ -659,6 +717,105 @@ static void TestNoWideBudget(void) {
   CHECK(Settings_VisibleWidth() == 256);
 }
 
+
+/* Input bindings: defaults reproduce the pre-rebinding hard-coded keyboard
+ * layout, every row survives the ini text round trip, and claiming a control
+ * that another row already owns steals it rather than double-binding. */
+static void TestInputBindings(void) {
+  ClearSettingsEnv();
+  Settings_Init();
+
+  const SettingDesc *key_b = Settings_Find("bind_key_b");
+  const SettingDesc *key_a = Settings_Find("bind_key_a");
+  const SettingDesc *pad_b = Settings_Find("bind_pad_b");
+  const SettingDesc *pad_menu = Settings_Find("bind_pad_menu");
+  CHECK(key_b && key_a && pad_b && pad_menu);
+  CHECK(key_b->type == kSettingType_Binding);
+  /* Host actions are gamepad-only; there is no keyboard twin. */
+  CHECK(Settings_Find("bind_key_menu") == NULL);
+
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_B] ==
+        INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_Z, false));
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_B] ==
+        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_SOUTH,
+                        false));
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_Menu] ==
+        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_LEFT_STICK,
+                        false));
+
+  char text[64];
+  Settings_FormatValue(key_b, text, sizeof(text));
+  CHECK(!strcmp(text, "Key Z"));
+  Settings_FormatValue(pad_b, text, sizeof(text));
+  CHECK(!strcmp(text, "Pad A / south"));
+
+  /* Rebinding B to the key A already holds must clear A, not duplicate it. */
+  CHECK(InputMap_ApplyBinding(
+            key_b, INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_X, false)) ==
+        kSettingChange_Applied);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_B] ==
+        INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_X, false));
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_A] == 0);
+  Settings_FormatValue(key_a, text, sizeof(text));
+  CHECK(!strcmp(text, "Unbound"));
+
+  /* Reset restores that row's own default, not a shared zero. */
+  CHECK(Settings_Reset(key_b) == kSettingChange_Applied);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_B] ==
+        INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_Z, false));
+
+  /* Axis bindings keep their direction across the text round trip. */
+  const SettingDesc *pad_up = Settings_Find("bind_pad_up");
+  CHECK(InputMap_ApplyBinding(
+            pad_up, INPUT_BIND_MAKE(kInputBind_PadAxis,
+                                    SDL_GAMEPAD_AXIS_LEFTY, true)) ==
+        kSettingChange_Applied);
+  Settings_FormatValue(pad_up, text, sizeof(text));
+  CHECK(!strcmp(text, "Pad L-Stick Up"));
+  CHECK(Settings_SetText(pad_up, text) == kSettingChange_Unchanged);
+
+  /* Camera actions default to the right stick (signed, sharing one axis) and
+   * the triggers, and are analog rather than edge-dispatched. */
+  CHECK(INPUT_ACTION_IS_ANALOG(kInputAction_CamYawLeft));
+  CHECK(INPUT_ACTION_IS_ANALOG(kInputAction_CamZoomOut));
+  CHECK(!INPUT_ACTION_IS_ANALOG(kInputAction_CamReset));
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamYawLeft] ==
+        INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHTX, true));
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamYawRight] ==
+        INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHTX, false));
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamPitchUp] ==
+        INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHTY, true));
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamZoomIn] ==
+        INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER,
+                        false));
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamReset] ==
+        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+                        false));
+  /* Camera keys are unbound by default: the desktop path is the mouse. */
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_CamYawLeft] ==
+        0);
+  /* Two rows legitimately share the right-stick X axis with opposite signs;
+   * the duplicate-steal pass must not treat them as a collision. */
+  const SettingDesc *yaw_left = Settings_Find("bind_pad_cam_yaw_left");
+  CHECK(yaw_left);
+  Settings_FormatValue(yaw_left, text, sizeof(text));
+  CHECK(!strcmp(text, "Pad R-Stick Left"));
+  CHECK(Settings_SetText(yaw_left, text) == kSettingChange_Unchanged);
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamYawRight] ==
+        INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHTX, false));
+
+  /* The whole table survives a save/load cycle. */
+  const char *path = "actraiser-settings-bindings-test.ini";
+  CHECK(Settings_Save(path));
+  uint32 saved[kSettingsInputClasses][kSettingsInputActions];
+  memcpy(saved, g_settings.input_bind, sizeof(saved));
+  Settings_Init();
+  CHECK(memcmp(saved, g_settings.input_bind, sizeof(saved)) != 0);
+  CHECK(Settings_Load(path));
+  CHECK(memcmp(saved, g_settings.input_bind, sizeof(saved)) == 0);
+  remove(path);
+}
+
 int main(void) {
   TestDefaultsAndMetadata();
   TestSim3DEnvironmentLabels();
@@ -667,6 +824,7 @@ int main(void) {
   TestMutationApi();
   TestCheatsCanBeStagedOutsideTheirRuntimeMode();
   TestNoWideBudget();
+  TestInputBindings();
   ClearSettingsEnv();
   Settings_SetChangeObserver(NULL);
   Settings_SetActionObserver(NULL);

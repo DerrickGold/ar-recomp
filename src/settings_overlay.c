@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "input_map.h"
 #include "settings.h"
 
 enum {
@@ -22,12 +23,20 @@ enum {
   kDialogAtlasWidth = 24,
   kDialogAtlasHeight = 24,
   kGlyphSize = 8,
-  kRowHeight = 14,
+  kRowHeight = 13,
   kMinimumLayoutWidth = 464,
   kMinimumLayoutHeight = 208,
   kMinimumScalePercent = 25,
   kMaximumScalePercent = 800,
-  kNavRowHeight = 10,
+  /* Nav rows are as tall as a section icon; the eight sections then fill the
+   * column without scrolling at any ordinary window size. */
+  kNavRowHeight = 17,
+  kSmallLineHeight = 9,
+  kTabBarHeight = 12,
+  /* Hold-to-accelerate timing. The initial delay is what separates a tap
+   * (single fine step) from a hold; after it, a step fires every interval. */
+  kHoldInitialDelayMs = 350,
+  kHoldRepeatMs = 55,
 };
 
 #define ARGB(a, r, g, b) \
@@ -38,6 +47,21 @@ static const uint32_t kPanel = ARGB(255, 0, 0, 0);
 static const uint32_t kFrameDark = ARGB(255, 45, 63, 78);
 static const uint32_t kFrameLight = ARGB(255, 164, 196, 219);
 static const uint32_t kHighlight = ARGB(255, 22, 57, 83);
+
+/* Colors sampled from the game's own Sky Palace menu CGRAM (runs/.../cgram),
+ * so the overlay reads as ActRaiser rather than drifting into a custom scheme:
+ *  - the steel blue of the dialog frame carries all passive chrome (titles,
+ *    tab strip, rules, scrollbars),
+ *  - the menu's selection yellow marks wherever the cursor currently is (the
+ *    highlighted section, row, and active tab), exactly like the game's
+ *    yellow-bordered selected item slot,
+ *  - the warm gold is the game's own highlight text color (CGRAM pal0 #6),
+ *    used for the blinking cursor and the restart marker. */
+static const uint32_t kSteelBlue = ARGB(255, 164, 196, 219);
+static const uint32_t kSteelDim = ARGB(255, 74, 104, 130);
+static const uint32_t kSelectYellow = ARGB(255, 255, 230, 0);
+static const uint32_t kGameGold = ARGB(255, 255, 180, 65);
+static const uint32_t kMutedText = ARGB(255, 120, 140, 158);
 
 typedef enum DebugTextStyle {
   kDebugText_Normal,
@@ -70,25 +94,33 @@ typedef enum TextStyle {
 
 /* Pixel zero is transparent. The remaining entries are the original
  * dialog-font outline, blue shadow, and face colors, plus host-side dim and
- * warning remaps of those same three pixel classes. */
+ * warning remaps of those same three pixel classes. Every non-transparent
+ * color here is a color from the game's own menu CGRAM. */
 static const uint32_t kTextPalettes[kTextStyle_Count][4] = {
+  /* Normal: the game's white face over its blue shadow (CGRAM pal0 #3/#2). */
   { ARGB(0, 0, 0, 0), ARGB(255, 0, 0, 0),
     ARGB(255, 156, 205, 255), ARGB(255, 255, 255, 255) },
+  /* Dim: recessed steel for unavailable/passive text. */
   { ARGB(0, 0, 0, 0), ARGB(255, 0, 0, 0),
     ARGB(255, 45, 63, 78), ARGB(255, 91, 111, 126) },
+  /* Warning/cursor: the game's warm gold highlight (CGRAM pal0 #6). */
   { ARGB(0, 0, 0, 0), ARGB(255, 38, 21, 3),
-    ARGB(255, 164, 98, 20), ARGB(255, 255, 200, 90) },
-  /* M2 (followup doc): row values get a cool-cyan face so they read
-   * distinct from warm-white labels. Reuses the resize-grip cyan already
-   * in-tree (ARGB(255,92,196,255), ~line 1610) for palette harmony. */
+    ARGB(255, 164, 98, 20), ARGB(255, 255, 180, 65) },
+  /* Value: the game's light menu blue (CGRAM pal0 #2) so a row's value reads
+   * distinct from its warm-white label without the neon cyan drift. */
   { ARGB(0, 0, 0, 0), ARGB(255, 0, 0, 0),
-    ARGB(255, 40, 120, 140), ARGB(255, 92, 196, 255) },
+    ARGB(255, 49, 82, 164), ARGB(255, 156, 205, 255) },
 };
 
-/* Compact 5x7 fallback and supplemental punctuation. The ROM font is the
- * normal path, but these host-authored masks keep the menu usable if the
- * supplied ROM does not match the verified asset layout. */
-static const uint8_t kFallbackFont[128][7] = {
+/* Compact 5x8 fallback and supplemental punctuation, five pixels wide in the
+ * low bits of each row, sharing a baseline on row 6 so caps and lowercase sit
+ * on the same line and row 7 is free for descenders. The ROM font is the
+ * normal path for menu chrome, but these host-authored masks keep the menu
+ * usable if the supplied ROM does not match the verified asset layout — and
+ * they are also the SOURCE of the small proportional-height font the
+ * description panel and tab bar draw with, which is why the lowercase set is
+ * authored for real rather than aliased onto the capitals. */
+static const uint8_t kFallbackFont[128][8] = {
   [' '] = {0, 0, 0, 0, 0, 0, 0},
   ['!'] = {4, 4, 4, 4, 4, 0, 4},
   ['"'] = {10, 10, 10, 0, 0, 0, 0},
@@ -148,35 +180,160 @@ static const uint8_t kFallbackFont[128][7] = {
   ['X'] = {17, 17, 10, 4, 10, 17, 17},
   ['Y'] = {17, 17, 10, 4, 4, 4, 4},
   ['Z'] = {31, 1, 2, 4, 8, 16, 31},
+  /* Lowercase: x-height on rows 2-6, ascenders from row 0, descenders on
+   * row 7. Only the small font renders these; the 8x8 menu font still folds
+   * lowercase onto the capitals (see BuildFallbackFont) to match the ROM
+   * dialog font's single-case letterforms. */
+  ['a'] = {0, 0, 14, 1, 15, 17, 15, 0},
+  ['b'] = {16, 16, 30, 17, 17, 17, 30, 0},
+  ['c'] = {0, 0, 14, 16, 16, 16, 14, 0},
+  ['d'] = {1, 1, 15, 17, 17, 17, 15, 0},
+  ['e'] = {0, 0, 14, 17, 31, 16, 14, 0},
+  ['f'] = {6, 8, 28, 8, 8, 8, 8, 0},
+  ['g'] = {0, 0, 15, 17, 17, 15, 1, 14},
+  ['h'] = {16, 16, 30, 17, 17, 17, 17, 0},
+  ['i'] = {4, 0, 12, 4, 4, 4, 14, 0},
+  ['j'] = {2, 0, 6, 2, 2, 2, 18, 12},
+  ['k'] = {16, 16, 18, 20, 24, 20, 18, 0},
+  ['l'] = {12, 4, 4, 4, 4, 4, 14, 0},
+  ['m'] = {0, 0, 26, 21, 21, 21, 21, 0},
+  ['n'] = {0, 0, 30, 17, 17, 17, 17, 0},
+  ['o'] = {0, 0, 14, 17, 17, 17, 14, 0},
+  ['p'] = {0, 0, 30, 17, 17, 30, 16, 16},
+  ['q'] = {0, 0, 15, 17, 17, 15, 1, 1},
+  ['r'] = {0, 0, 22, 25, 16, 16, 16, 0},
+  ['s'] = {0, 0, 15, 16, 14, 1, 30, 0},
+  ['t'] = {8, 8, 28, 8, 8, 8, 6, 0},
+  ['u'] = {0, 0, 17, 17, 17, 19, 13, 0},
+  ['v'] = {0, 0, 17, 17, 17, 10, 4, 0},
+  ['w'] = {0, 0, 17, 17, 21, 21, 10, 0},
+  ['x'] = {0, 0, 17, 10, 4, 10, 17, 0},
+  ['y'] = {0, 0, 17, 17, 17, 15, 1, 14},
+  ['z'] = {0, 0, 31, 2, 4, 8, 31, 0},
+  ['\''] = {4, 4, 0, 0, 0, 0, 0, 0},
+  ['&'] = {12, 18, 20, 8, 21, 18, 13, 0},
+  ['@'] = {14, 17, 23, 21, 23, 16, 15, 0},
+  ['{'] = {6, 8, 8, 16, 8, 8, 6, 0},
+  ['}'] = {12, 2, 2, 1, 2, 2, 12, 0},
+  ['|'] = {4, 4, 4, 4, 4, 4, 4, 0},
+  ['\\'] = {16, 8, 8, 4, 2, 2, 1, 0},
+  ['^'] = {4, 10, 17, 0, 0, 0, 0, 0},
+  ['~'] = {0, 0, 9, 21, 18, 0, 0, 0},
+  ['`'] = {8, 4, 0, 0, 0, 0, 0, 0},
 };
 
-/* M1(a) (followup doc): the three graphics-related categories (Display,
- * Diorama i.e. kSettingCat_Presentation, Graphics) sit adjacent to
- * Widescreen — the granular ws_* flags that Display's display_mode row
- * presets — instead of Audio wedging between them. */
-static const SettingCategory kCategoryOrder[] = {
-  kSettingCat_Display,
-  kSettingCat_Presentation,
-  kSettingCat_Simulation,
-  kSettingCat_Graphics,
-  kSettingCat_Widescreen,
-  kSettingCat_Audio,
-  kSettingCat_Cheats,
-  kSettingCat_Save,
-  kSettingCat_Extras,
-  kSettingCat_Inspector,
+/* ── Sections and tabs (M1(b), followup doc) ─────────────────────────────
+ * The nav column used to list one row per SettingCategory, which meant 13
+ * rows of near-synonyms (Display / Diorama / Simulation / Graphics /
+ * Widescreen were all "how the game looks") and two categories that alone
+ * carried 45 and 52 rows. Navigation is now two levels:
+ *
+ *   SECTION  — what the nav column lists. Eight of them, each with a 16x16
+ *              game menu icon (grey when unselected, the game's colored slot
+ *              palette when current).
+ *   TAB      — the horizontal strip at the top of the submenu, cycled with
+ *              L/R (pad) or Q/E, [/], Tab (keyboard). One tab is one
+ *              SettingCategory, so a tab is always a panel-sized row list.
+ *
+ * A tab may additionally own a paging setting (`page_key`/`page_value`).
+ * Save's five editor pages and Controls' keyboard/gamepad binding pages were
+ * already row-filtered by such a setting; making the tab drive it turns two
+ * bespoke in-list page selectors into the same mechanism as everything else,
+ * and those two rows stop listing themselves (Settings_IsMenuVisible). */
+typedef struct MenuTab {
+  SettingCategory category;
+  const char *label;
+  const char *page_key;   /* NULL, or the setting this tab selects */
+  long page_value;
+} MenuTab;
+
+typedef struct MenuSection {
+  const char *label;
+  const char *blurb;      /* shown in the description panel from the nav column */
+  const MenuTab *tabs;
+  int tab_count;
+} MenuSection;
+
+#define TAB(cat, name) { kSettingCat_##cat, name, NULL, 0 }
+#define PAGE_TAB(cat, name, key, value) { kSettingCat_##cat, name, key, value }
+
+static const MenuTab kTabsVideo[] = {
+  TAB(Display, "General"),
+  TAB(Graphics, "Effects"),
+  TAB(Widescreen, "Widescreen"),
+};
+static const MenuTab kTabsDiorama[] = {
+  TAB(Presentation, "Scene"),
+  TAB(DioramaCamera, "Camera"),
+};
+static const MenuTab kTabsTown[] = {
+  TAB(Simulation, "Scene"),
+  TAB(SimCamera, "Camera"),
+  TAB(SimLighting, "Light"),
+  TAB(SimAtmosphere, "Weather"),
+};
+static const MenuTab kTabsAudio[] = {
+  TAB(Audio, "Audio"),
+};
+static const MenuTab kTabsControls[] = {
+  TAB(Input, "Devices"),
+  PAGE_TAB(InputBinds, "Keyboard", "input_bind_page", 0),
+  PAGE_TAB(InputBinds, "Gamepad", "input_bind_page", 1),
+};
+static const MenuTab kTabsCheats[] = {
+  TAB(Cheats, "Cheats"),
+};
+static const MenuTab kTabsSave[] = {
+  /* The backend/arming controls and the apply/import/export commands used to
+   * repeat on every editor page, inflating each list. They live on their own
+   * Actions tab now, so the payload pages stay short. */
+  PAGE_TAB(Save, "Actions", "save_editor_page", kSaveEditorPage_Actions),
+  PAGE_TAB(Save, "Progress", "save_editor_page", kSaveEditorPage_Progress),
+  PAGE_TAB(Save, "Status", "save_editor_page", kSaveEditorPage_Status),
+  PAGE_TAB(Save, "Magic", "save_editor_page", kSaveEditorPage_Magic),
+  PAGE_TAB(Save, "Items", "save_editor_page", kSaveEditorPage_Items),
+  PAGE_TAB(Save, "Scores", "save_editor_page", kSaveEditorPage_Scores),
+};
+static const MenuTab kTabsSystem[] = {
+  TAB(Extras, "Tools"),
+  TAB(Enhancements, "Game"),
+  TAB(Inspector, "Inspector"),
 };
 
-typedef struct TopLevelItem {
-  const char *key;
-  const char *nav_label;
-} TopLevelItem;
+#undef TAB
+#undef PAGE_TAB
 
-/* Destructive host lifecycle commands stay direct primary-navigation leaves. */
-static const TopLevelItem kTopLevelItems[] = {
-  { "restart_game", "Restart game" },
-  { "exit_desktop", "Exit desktop" },
+#define SECTION(name, blurb, tabs) \
+  { name, blurb, tabs, (int)(sizeof(tabs) / sizeof((tabs)[0])) }
+
+/* Icon maps below are indexed by position in this array — keep the two in the
+ * same order. Restart/Exit are no longer promoted nav leaves: they are the
+ * last two rows of System > Tools, where their descriptors already lived. Each
+ * section's identity is now carried entirely by its game icon (grey when
+ * unselected, the colored game slot palette when current); all chrome is the
+ * shared steel-blue/yellow game scheme. */
+static const MenuSection kSections[] = {
+  SECTION("Video", "Window, aspect, shader effects and widescreen behavior.",
+          kTabsVideo),
+  SECTION("Diorama", "Tilt the action stages into a layered 3D diorama.",
+          kTabsDiorama),
+  SECTION("Town 3D", "Project the simulation town onto a 3D ground plane.",
+          kTabsTown),
+  SECTION("Audio", "Output device, mixing and music replacement.",
+          kTabsAudio),
+  SECTION("Controls", "Input device, analog tuning and every key binding.",
+          kTabsControls),
+  SECTION("Cheats", "Gameplay assists and raw memory pins.",
+          kTabsCheats),
+  SECTION("Save", "Inspect and stage edits to the battery save.",
+          kTabsSave),
+  SECTION("System", "Host commands, restart and exit, plus the scene inspector.",
+          kTabsSystem),
 };
+
+#undef SECTION
+
+enum { kSectionCount = (int)(sizeof(kSections) / sizeof(kSections[0])) };
 
 typedef struct BitReader {
   const uint8_t *data;
@@ -202,7 +359,14 @@ static uint8_t s_font_tiles[kFontTileBytes];
 static bool s_glyph_defined[256];
 static bool s_open;
 static bool s_submenu_open;
-static int s_category_slot;
+static int s_section;
+/* Per-section tab memory: leaving Town 3D on its Weather tab and coming back
+ * later returns to Weather, not to Scene. */
+static int s_tab[kSectionCount];
+/* Horizontal scroll of the tab strip (index of the first shown VISIBLE tab)
+ * for sections whose tabs are wider than the panel — e.g. Save's six pages.
+ * Kept so the strip shifts to keep the active tab on screen. */
+static int s_tab_scroll;
 /* The primary-navigation list has its own scroll window.  The right-hand
  * submenu already scrolls through s_top_row/s_visible_rows; sharing those
  * values would make moving either pane unexpectedly reposition the other. */
@@ -217,6 +381,28 @@ static char s_status[48];
 static Uint64 s_status_until;
 static bool s_editing;
 static char s_edit_buffer[512];
+/* Hold-to-accelerate stepping. A numeric row's value is nudged once on the
+ * Left/Right press, then SettingsOverlay_Tick (driven each frame from the main
+ * thread while the menu is open) keeps stepping it as long as the direction is
+ * held, growing the step the longer it is held so a large range is both fine-
+ * tunable and quick to cross without ever typing. s_hold_key is the keyboard
+ * key that began the hold (0 for a pad), used to match the release; each step
+ * applies live but the settings.ini write is deferred to release
+ * (s_hold_dirty) so a fast hold is not one disk write per frame. */
+static const SettingDesc *s_hold_desc;
+static int s_hold_dir;
+static Uint64 s_hold_start_ms;
+static Uint64 s_hold_next_ms;
+static SDL_Keycode s_hold_key;
+static bool s_hold_dirty;
+static SettingChangeResult s_hold_result;
+/* The keyboard key of the event currently being dispatched (0 for a pad), so a
+ * hold started deep inside ApplyMenuNav knows which key release will end it. */
+static SDL_Keycode s_input_key;
+/* Binding capture: the row is armed and the NEXT physical input on the
+ * matching device becomes its binding. Held separately from s_editing because
+ * capture consumes raw events rather than text. */
+static const SettingDesc *s_capture_desc;
 static SDL_Rect s_debug_panel_rect;
 static SDL_Rect s_debug_panel_drag_rect;
 static SDL_Rect s_debug_panel_resize_rect;
@@ -342,7 +528,7 @@ static void SetTilePixel(unsigned tile, int x, int y, unsigned value) {
 static bool FallbackGlyphDefined(unsigned ch) {
   if (ch == ' ') return true;
   if (ch >= 128) return false;
-  for (int row = 0; row < 7; row++)
+  for (int row = 0; row < 8; row++)
     if (kFallbackFont[ch][row]) return true;
   return false;
 }
@@ -358,7 +544,7 @@ static void WriteFallbackGlyph(unsigned tile, unsigned source_ch) {
       SetTilePixel(tile, col + 2, row + 1, 2);
     }
   }
-  for (int row = 0; row < 7; row++) {
+  for (int row = 0; row < 8; row++) {
     uint8_t bits = kFallbackFont[source_ch][row];
     for (int col = 0; col < 5; col++) {
       if (bits & (1u << (4 - col)))
@@ -367,127 +553,237 @@ static void WriteFallbackGlyph(unsigned tile, unsigned source_ch) {
   }
 }
 
-/* ── M3 (followup doc): category nav icons ──────────────────────────────
- * Tiles 128-255 are never touched by the ROM font (0x20-0x7F) or the
- * fallback font (0-127, see BuildFallbackFont) — free real estate for a
- * handful of host-authored 8x8 icon glyphs, reusing the exact same
- * two-bitplane tile storage + DrawGlyph blit path as every other glyph, so
- * they automatically pick up the kText_Normal/kText_Dim/kText_Value/
- * kText_Warning tinting already baked per style (CreateFontAtlas). Unlike
- * WriteFallbackGlyph's 5x7-in-8x8 letterforms, icons use the full 8x8
- * canvas: '#' marks a face pixel, an outline pixel is auto-added on any
- * blank cell 4-adjacent to a face pixel (same outline-behind-face visual
- * language as the text glyphs, just derived instead of hand-placed). */
-static void WriteIconGlyph(unsigned tile, const char rows[8][9]) {
-  if (tile >= 256) return;
-  memset(s_font_tiles + tile * 16, 0, 16);
-  bool face[8][8];
-  for (int y = 0; y < 8; y++)
-    for (int x = 0; x < 8; x++)
-      face[y][x] = rows[y][x] == '#';
-  for (int y = 0; y < 8; y++)
-    for (int x = 0; x < 8; x++) {
-      if (face[y][x]) continue;
-      bool touches = (x > 0 && face[y][x - 1]) ||
-                     (x < 7 && face[y][x + 1]) ||
-                     (y > 0 && face[y - 1][x]) ||
-                     (y < 7 && face[y + 1][x]);
-      if (touches) SetTilePixel(tile, x, y, 2);
-    }
-  for (int y = 0; y < 8; y++)
-    for (int x = 0; x < 8; x++)
-      if (face[y][x]) SetTilePixel(tile, x, y, 3);
-}
-
+/* ── Section nav icons ──────────────────────────────────────────────────
+ * Real ActRaiser menu icons, lifted from a Sky Palace status-screen VRAM
+ * snapshot (tools/dump_snapshot_chr.py + icon_picker_sheet.py). Each is a
+ * 16x16 4bpp index map — the game stores these as framed item/magic/status
+ * glyphs — rendered through the game's OWN menu CGRAM palettes: the grey slot
+ * palette (pal 14) for an unselected section, and the colored "selected slot"
+ * palette (pal 13, red/gold frame) for the current one, exactly as the game
+ * lights up the item you are pointing at. Index 14 is the black outline. */
 enum {
-  kIconTile_Display = 128,
-  kIconTile_Diorama,
-  kIconTile_Simulation,
-  kIconTile_Graphics,
-  kIconTile_Widescreen,
-  kIconTile_Audio,
-  kIconTile_Cheats,
-  kIconTile_Save,
-  kIconTile_Extras,
-  kIconTile_Inspector,
-  kIconTile_Count_ = kIconTile_Inspector + 1,
+  kIconSize = 16,
+  kIconAtlasWidth = kIconSize * kSectionCount,
+  /* Two stacked rows: grey (inactive) at y=0, colored (selected) below. */
+  kIconAtlasHeight = kIconSize * 2,
 };
 
-static void WriteHostIcons(void) {
-  WriteIconGlyph(kIconTile_Display, (const char[8][9]){
-    "..####..", ".######.", ".#....#.", ".#....#.",
-    ".######.", "...##...", "..####..", "........",
-  });
-  /* Diorama: a tilted plane (diamond outline) for the 3D camera/perspective
-   * mode. A stacked-bars "receding planes" design was tried first, but the
-   * outline dilation (see WriteIconGlyph) bridges the gap between any two
-   * wide bars only 1 row apart — it rendered as a single solid funnel
-   * instead of separate bars. The diamond's outline never gets that close
-   * to itself, so it stays hollow. */
-  WriteIconGlyph(kIconTile_Diorama, (const char[8][9]){
-    "...##...", "..#..#..", ".#....#.", "#......#",
-    ".#....#.", "..#..#..", "...##...", "........",
-  });
-  /* Simulation: a horizon over a receding ground grid. */
-  WriteIconGlyph(kIconTile_Simulation, (const char[8][9]){
-    "........", "........", "########", "...##...",
-    "..#..#..", ".#....#.", "#......#", "........",
-  });
-  /* Graphics: a four-point sparkle for the GPU shader effects. Each ray is
-   * ≥2 cells from its neighbors so the outline dilation can't bridge them
-   * into a bowtie (the earlier diamond+cross design touched at the
-   * center and read as one blob). */
-  WriteIconGlyph(kIconTile_Graphics, (const char[8][9]){
-    "...##...", "...##...", "........", "##....##",
-    "##....##", "........", "...##...", "...##...",
-  });
-  /* Widescreen: arrows pointing outward, aspect stretching left/right. */
-  WriteIconGlyph(kIconTile_Widescreen, (const char[8][9]){
-    "........", "#.....#.", "##...##.", "#.#.#.#.",
-    "#.#.#.#.", "##...##.", "#.....#.", "........",
-  });
-  /* Audio: speaker cone plus two sound-wave dots, distinct from Graphics'
-   * symmetric sparkle. */
-  WriteIconGlyph(kIconTile_Audio, (const char[8][9]){
-    "..#.....", ".##....#", ".####..#", "######.#",
-    ".####..#", ".##....#", "..#.....", "........",
-  });
-  WriteIconGlyph(kIconTile_Cheats, (const char[8][9]){
-    "...#....", "..###...", ".#####..", "########",
-    "..###...", ".#.#.#..", "#..#..#.", "........",
-  });
-  WriteIconGlyph(kIconTile_Save, (const char[8][9]){
-    "########", "#......#", "#.####.#", "#.#..#.#",
-    "#.####.#", "#......#", "#......#", "########",
-  });
-  WriteIconGlyph(kIconTile_Extras, (const char[8][9]){
-    "........", "...##...", "...##...", ".######.",
-    ".######.", "...##...", "...##...", "........",
-  });
-  WriteIconGlyph(kIconTile_Inspector, (const char[8][9]){
-    ".####...", "#....#..", "#....#..", "#....#..",
-    ".####...", "...##...", "....##..", ".....##.",
-  });
-  for (unsigned t = kIconTile_Display; t < kIconTile_Count_; t++)
-    s_glyph_defined[t] = true;
+/* The two 16-color menu palettes straight from the snapshot CGRAM (BGR555 →
+ * RGB). kIconGreyPalette is pal 14 (unselected slots), kIconSelectPalette is
+ * pal 13 (the highlighted slot: green/blue glyphs, red/gold frame). Index 0 is
+ * transparent so the panel shows through the rounded corners. */
+static const uint32_t kIconGreyPalette[16] = {
+  0, ARGB(255, 90, 90, 90), ARGB(255, 115, 115, 115), ARGB(255, 164, 164, 164),
+  ARGB(255, 189, 189, 189), ARGB(255, 222, 222, 222), ARGB(255, 246, 246, 246),
+  ARGB(255, 197, 197, 197), ARGB(255, 238, 238, 238), ARGB(255, 205, 205, 205),
+  ARGB(255, 156, 156, 156), ARGB(255, 131, 131, 131), ARGB(255, 82, 82, 82),
+  ARGB(255, 255, 255, 255), ARGB(255, 0, 0, 0), ARGB(255, 41, 41, 41),
+};
+static const uint32_t kIconSelectPalette[16] = {
+  0, ARGB(255, 49, 82, 164), ARGB(255, 82, 197, 0), ARGB(255, 180, 230, 0),
+  ARGB(255, 115, 180, 230), ARGB(255, 197, 222, 230), ARGB(255, 230, 246, 255),
+  ARGB(255, 255, 230, 0), ARGB(255, 255, 213, 172), ARGB(255, 213, 172, 131),
+  ARGB(255, 230, 164, 0), ARGB(255, 255, 0, 0), ARGB(255, 164, 123, 82),
+  ARGB(255, 255, 255, 255), ARGB(255, 0, 0, 0), ARGB(255, 0, 82, 0),
+};
+
+typedef uint8_t IconIndexMap[kIconSize][kIconSize];
+
+static const IconIndexMap kSectionIconMaps[kSectionCount] = {
+  { /* Display <- game icon #11 */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
+    {14,11,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
+    {14,11,14, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,14,11,14},
+    {14,11,14, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,14,14,14},
+    {14,11,14, 2, 2, 2, 2, 2, 2, 2, 2, 2, 5, 6, 6,14},
+    {14,14,14, 2, 2, 2, 2, 2, 2, 2, 5, 6, 6, 6, 6,14},
+    {14, 6, 5, 3, 3, 3, 3, 3, 3, 5, 6, 6, 6, 6, 6,14},
+    {14, 6, 6, 6, 5, 5, 4, 4, 4, 3, 4, 4, 5, 5, 5,14},
+    {14, 6, 6, 6, 6, 5, 4, 5, 5, 5, 3, 3, 4, 4, 4,14},
+    {14, 5, 5, 5, 4, 3, 3, 5, 5, 5, 5, 5, 2, 2, 3,14},
+    {14, 4, 3, 3, 2, 2, 5, 5, 5, 5, 5, 5, 5,14,14,14},
+    {14, 2, 2, 2, 5, 5, 5, 5, 5, 5, 5, 5, 5,14,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
+    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Diorama <- game icon #12 */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14, 7, 7, 7, 7, 7, 7, 7, 7,14, 7, 7,14, 7, 7,14},
+    {14, 7,14,14,14,14,14,14,14,14, 7,10,14,14, 7,14},
+    {14, 7,14,15,15,15,15,15,15, 7,10,15,15,14, 7,14},
+    {14, 7,14,15,15,15,15,15, 7, 7,12,15,15,14, 7,14},
+    {14, 7,14,15, 7, 7, 7,10,10,10,10,10,10,14, 7,14},
+    {14, 7,14,15,15,15,15, 6, 3, 5,15,15,15,14, 7,14},
+    {14, 7,14,15,15,15, 5, 3, 5,15,15,15,15,14, 7,14},
+    {14, 7,14,15,15,15, 6, 3, 5,15,15,15,15,14, 7,14},
+    {14, 7,14,15,15, 6, 3, 5,15,15,15,15,15,14, 7,14},
+    {14, 7,14,15, 6, 6, 3, 5,15,15,15,15,15,14, 7,14},
+    {14, 7,14,13, 6, 3, 5,15,15,15,15,15,15,14, 7,14},
+    {14, 7,14,13, 6, 4, 5,15,15,15,15,15,15,14, 7,14},
+    {14, 7,14,13, 6, 6, 6,14,14,14,14,14,14,14, 7,14},
+    {14, 7,14,13,13,13,14, 7, 7, 7, 7, 7, 7, 7, 7,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Simulation <- game icon #10 */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14,11,11,11,11,14, 6,13,13, 6,14,11,11,11,11,14},
+    {14,11,14,14,14,14,13,14,14,13,14,14,14,14,11,14},
+    {14,11,14,15,15, 7, 6,13,13, 6, 7,15,15,14,11,14},
+    {14,11,14,15, 7,10,10, 7,10, 7, 7, 7,15,14,11,14},
+    {14,11,14,15, 7, 9, 8, 8, 8, 8,10, 7,15,14,11,14},
+    {14,14,14,15, 7, 8, 1, 8, 1, 8, 8, 7,15,14,14,14},
+    {14, 6,13, 6,10, 9, 1, 9, 1, 9, 9,10, 6,13, 6,14},
+    {14, 6,13, 6, 9, 8, 8,12, 8, 8, 9, 9, 6,13, 6,14},
+    {14,14, 6, 5,12, 9, 8, 8, 8, 9, 9,12, 5, 6,14,14},
+    {14,11,14, 9, 8,12,12,12,12,12,12, 8, 9,14,11,14},
+    {14,11,14, 8,15, 9, 8, 8, 8, 8, 8,12, 8,14,11,14},
+    {14,11,14,15,15, 9, 8, 8, 8, 8, 8,12,15,14,11,14},
+    {14,11,14,14,14,12, 8, 9, 9, 8, 9,12,14,14,11,14},
+    {14,11,11,11,11,14, 9, 8,14, 8, 9,14,11,11,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Audio <- game icon #53 */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14,11,14, 9, 9,14,11,11,11,11,14,14, 9, 9,14,14},
+    {14,11,14,10, 9,14,14,14,14,14,14,14, 9,10,14,14},
+    {14,11,14,15, 9,15,15,15,15,15,15,15, 9,14,11,14},
+    {14,11,14,15, 9,12,10,10,10,10,10,12, 9,14,11,14},
+    {14,11,14,10, 9,15, 5,15, 5,15, 5,15, 9,10,14,14},
+    {14,11,14, 9, 9,15,13,15,13,15,13,15, 9, 9,14,14},
+    {14,11,14, 9,10,15,13,15,13,15,13,15,10, 9,14,14},
+    {14,11,14, 9,10,15,13,15,13,15,13,15,10, 9,14,14},
+    {14,11,14, 9,10,15,13,15,13,15,13,15,10, 9,14,14},
+    {14,11,14, 9, 9,15,13,15,13,15,13,15, 9, 9,14,14},
+    {14,11,14,10, 9, 9, 5,15, 5,15, 5, 9, 9,10,14,14},
+    {14,11,14,15,10, 9, 9, 9, 9, 9, 9, 9,10,14,11,14},
+    {14,11,14,14,14,10, 9,10,10,10, 9,10,14,14,11,14},
+    {14,11,11,14,10, 9,10,10, 9,10,10, 9,10,14,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Input <- game icon #18 */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14, 7, 7, 7, 7, 7, 7,14, 1,14, 7, 7, 7, 7, 7,14},
+    {14, 7,14,14,14,14,14, 1,14,14,14,14,14,14, 7,14},
+    {14, 7,14,15,15,15,15, 1,15,15,15,15,15,14, 7,14},
+    {14, 7,14,15,15,15,15, 3,15,15,15,15,15,14, 7,14},
+    {14,14, 3, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 3,14,14},
+    {14, 3, 5, 5, 5, 5, 5, 5, 5, 5, 3, 3, 3, 5, 3,14},
+    {14, 5, 5, 5,14, 5, 5, 5, 5, 3,11, 5, 3, 3, 5,14},
+    {14, 5, 5,14,14,14, 5, 5, 5, 3, 3, 3,11, 3, 5,14},
+    {14, 5, 5, 5,14, 5, 5, 5, 5, 3,11, 5, 3, 3, 5,14},
+    {14, 3, 5, 5, 5, 5, 5, 5, 5, 5, 3, 3,11, 5, 3,14},
+    {14,14, 3, 5, 5, 5, 3,15,15, 3, 5, 5, 5, 3,14,14},
+    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
+    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
+    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Cheats <- game icon #14 */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14,11,11,11,11,11,14,14,14,14,11,11,14,14,13,14},
+    {14,11,14,14,14,14, 5,13,13, 5,14,14, 5,13,14,14},
+    {14,11,14,15, 5,13, 7, 7, 7, 7,13,13,13, 5,14,14},
+    {14,11,14, 5,13, 7,15,15,15,15, 7,13,13,14,11,14},
+    {14,11,14,13, 7,15, 4, 6, 6, 4,15, 7,13,14,11,14},
+    {14,14, 5, 7,15, 4, 6,13,13, 6, 4,15, 7, 5,14,14},
+    {14,14,13, 7,15, 6,13,13,13,13, 6,15, 7,13,14,14},
+    {14,14,13, 7,15, 6,13,13,13,13, 6,15, 7,13,14,14},
+    {14,14, 5, 7,15, 4, 6,13,13, 6, 4,15, 7, 5,14,14},
+    {14,11,14,13, 7,15, 4, 6, 6, 4,15, 7,13,14,11,14},
+    {14,11,14,13,13, 7,15,15,15,15, 7,13, 5,14,11,14},
+    {14,14, 5,13,13,13, 7, 7, 7, 7,13, 5,15,14,11,14},
+    {14,14,13, 5,14,14, 5,13,13, 5,14,14,14,14,11,14},
+    {14,13,14,14,11,11,14,14,14,14,11,11,11,11,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Save <- game icon #16 */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14,11,14, 7,13,13, 7,14,14,14,14,14,11,11,11,14},
+    {14,11,14,14,10, 7,13, 7, 5, 6, 6, 4,14,14,11,14},
+    {14,11,14,15,15,10, 7, 7, 6,13,13,13, 6, 4,14,14},
+    {14,11,14,15, 1, 4,10, 7, 7, 6, 6,13,13, 6,14,14},
+    {14,11,14,15, 4, 5,12,10, 7, 7,10,13,10,13,14,14},
+    {14,11,14,15, 4,12, 4, 5, 4, 6, 8, 8, 9,13,14,14},
+    {14,11,14,15, 4, 5, 5, 4, 8, 6, 8, 1, 8,14,11,14},
+    {14,11,14,15, 4, 5, 4, 8, 8, 5, 8, 8, 8,14,11,14},
+    {14,11,14,15, 4, 5, 5, 9, 8, 8, 8, 8, 8,14,11,14},
+    {14,11,14, 4, 4, 4, 5,12, 9, 8, 8, 8,15,14,11,14},
+    {14,14, 4, 4, 5, 5, 6,12,12, 9, 8, 9,15,14,11,14},
+    {14,14,12,10, 7, 7, 7, 5, 6,12,15,15,15,14,11,14},
+    {14,12,10, 7, 7, 8,13, 7, 5, 6,13,14,14,14,11,14},
+    {14,12,10, 7, 7, 7, 7, 7, 7, 5, 6,13,14,11,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Extras <- game icon #54 */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14,11,11,11,14,14,14,14,11,11,11,11,11,11,11,14},
+    {14,11,14,14, 4, 4, 3, 3,14,14,14,14,14,14,11,14},
+    {14,11,14,15, 6, 6, 6, 5, 3, 4,15,15,15,14,11,14},
+    {14,11,14,15, 6, 5, 5, 5, 6, 5, 3, 4,15,14,11,14},
+    {14,11,14,15, 4,14,14,14, 4,14,14, 6,15,14,11,14},
+    {14,11,14,15, 5, 4, 5, 5, 5, 5, 4, 6,15,14,11,14},
+    {14,11,14,15, 4,14,14, 4,14,14,14, 5,15,14,11,14},
+    {14,11,14,15, 4, 5, 5, 5, 5, 5, 5, 4,15,14,11,14},
+    {14,11,14,15, 5,14,14,14,14, 3,14, 5,15,14,11,14},
+    {14,11,14,15, 4, 5, 4, 5, 5, 5, 5, 5,15,14,11,14},
+    {14,11,14,15, 4, 5,14,14, 4, 5, 4, 5,15,14,11,14},
+    {14,11,14,15, 4, 5, 4, 5, 5, 5, 5, 4,15,14,11,14},
+    {14,11,14,14, 4, 4, 4, 5, 5, 5, 5, 3,14,14,11,14},
+    {14,11,11,11,14,14,14,14,14,14,14,14,11,11,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+};
+
+static SDL_Texture *s_icon_texture;
+
+static uint32_t ScaleColor(uint32_t color, int percent) {
+  unsigned r = ((color >> 16) & 0xff) * (unsigned)percent / 100;
+  unsigned g = ((color >> 8) & 0xff) * (unsigned)percent / 100;
+  unsigned b = (color & 0xff) * (unsigned)percent / 100;
+  return ARGB(255, r, g, b);
 }
 
-/* Which icon (if any) represents a settings category in the nav column. */
-static int CategoryIconTile(SettingCategory category) {
-  switch (category) {
-    case kSettingCat_Display:      return kIconTile_Display;
-    case kSettingCat_Presentation: return kIconTile_Diorama;
-    case kSettingCat_Simulation:   return kIconTile_Simulation;
-    case kSettingCat_Graphics:     return kIconTile_Graphics;
-    case kSettingCat_Widescreen:   return kIconTile_Widescreen;
-    case kSettingCat_Audio:        return kIconTile_Audio;
-    case kSettingCat_Cheats:       return kIconTile_Cheats;
-    case kSettingCat_Save:         return kIconTile_Save;
-    case kSettingCat_Extras:       return kIconTile_Extras;
-    case kSettingCat_Inspector:    return kIconTile_Inspector;
+static SDL_Texture *CreateIconAtlas(void) {
+  uint32_t *pixels = (uint32_t *)calloc(
+      (size_t)kIconAtlasWidth * kIconAtlasHeight, sizeof(uint32_t));
+  if (!pixels) return NULL;
+
+  /* Row 0 = grey (unselected), row 1 = colored (selected), each icon straight
+   * through the game palette so the colors are the game's own. */
+  for (int row = 0; row < 2; row++) {
+    const uint32_t *palette = row == 0 ? kIconGreyPalette : kIconSelectPalette;
+    for (int section = 0; section < kSectionCount; section++) {
+      for (int y = 0; y < kIconSize; y++) {
+        for (int x = 0; x < kIconSize; x++) {
+          uint8_t index = kSectionIconMaps[section][y][x];
+          uint32_t color = palette[index];
+          if ((color >> 24) == 0) continue;   /* transparent index */
+          pixels[(row * kIconSize + y) * kIconAtlasWidth +
+                 section * kIconSize + x] = color;
+        }
+      }
+    }
   }
-  return -1;
+
+  SDL_Texture *texture = SDL_CreateTexture(
+      s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
+      kIconAtlasWidth, kIconAtlasHeight);
+  if (texture &&
+      !SDL_UpdateTexture(texture, NULL, pixels,
+                         kIconAtlasWidth * (int)sizeof(uint32_t))) {
+    SDL_DestroyTexture(texture);
+    texture = NULL;
+  }
+  free(pixels);
+  if (texture) {
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+  }
+  return texture;
 }
+
 
 static void BuildFallbackFont(void) {
   memset(s_font_tiles, 0, sizeof(s_font_tiles));
@@ -571,13 +867,19 @@ static SDL_Texture *CreateDebugFontAtlas(void) {
 
   for (unsigned ch = 0; ch < 256; ch++) {
     unsigned source_ch = ch;
-    if (source_ch >= 'a' && source_ch <= 'z')
-      source_ch = source_ch - 'a' + 'A';
+    /* Lowercase is authored for real now; fold onto the capital only for the
+     * handful of codepoints that still have no lowercase mask. */
+    if (source_ch >= 128 || !FallbackGlyphDefined(source_ch)) {
+      if (source_ch >= 'a' && source_ch <= 'z')
+        source_ch = source_ch - 'a' + 'A';
+      else
+        source_ch = '?';
+    }
     if (source_ch >= 128 || !FallbackGlyphDefined(source_ch))
       source_ch = '?';
     int cell_x = (int)(ch & 15) * kDebugGlyphWidth;
     int cell_y = (int)(ch >> 4) * kDebugGlyphHeight;
-    for (int row = 0; row < 7; row++) {
+    for (int row = 0; row < 8; row++) {
       uint8_t bits = kFallbackFont[source_ch][row];
       for (int col = 0; col < 5; col++) {
         if (bits & (1u << (4 - col)))
@@ -709,143 +1011,146 @@ static SDL_Texture *CreateDialogFrameTexture(const uint8_t *rom_data,
   return texture;
 }
 
-static int CategoryRowCount(SettingCategory category) {
-  int count = 0;
+/* ── Section / tab / row addressing ─────────────────────────────────────
+ * s_section indexes kSections. s_tab[section] remembers which tab that
+ * section was last left on, so stepping away and back does not dump the
+ * player at the top of a four-tab section. Rows are the visible descriptors
+ * of the active tab's category, in descriptor-table order. */
+static const MenuSection *ActiveSection(void) {
+  if (s_section < 0) s_section = 0;
+  if (s_section >= kSectionCount) s_section = kSectionCount - 1;
+  return &kSections[s_section];
+}
+
+/* A tab is hidden when it holds no visible rows — which happens when every row
+ * it would list is developer-only and debug settings are off (the Town 3D
+ * Light/Weather tabs and the System Inspector tab collapse this way). Page tabs
+ * (Save pages, Controls binding pages) share always-visible rows, so they never
+ * collapse and are cheap to short-circuit. */
+static bool RawTabHidden(int section, int tab) {
+  const MenuTab *menu_tab = &kSections[section].tabs[tab];
+  if (menu_tab->page_key) return false;
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    bool promoted = false;
-    for (int top = 0;
-         top < (int)(sizeof(kTopLevelItems) / sizeof(kTopLevelItems[0]));
-         top++) {
-      if (!strcmp(desc->key, kTopLevelItems[top].key)) {
-        promoted = true;
+    if (desc->category == menu_tab->category && Settings_IsMenuVisible(desc))
+      return false;
+  }
+  return true;
+}
+
+static int VisibleTabCount(int section) {
+  int count = 0;
+  for (int tab = 0; tab < kSections[section].tab_count; tab++)
+    if (!RawTabHidden(section, tab)) count++;
+  return count < 1 ? 1 : count;
+}
+
+static int ActiveTabIndex(void) {
+  const MenuSection *section = ActiveSection();
+  int tab = s_tab[s_section];
+  if (tab < 0) tab = 0;
+  if (tab >= section->tab_count) tab = section->tab_count - 1;
+  /* Never leave the cursor parked on a collapsed tab: if debug settings were
+   * turned off while it was there, slide to the next visible tab. */
+  if (RawTabHidden(s_section, tab)) {
+    for (int i = 1; i <= section->tab_count; i++) {
+      int candidate = (tab + i) % section->tab_count;
+      if (!RawTabHidden(s_section, candidate)) {
+        tab = candidate;
         break;
       }
     }
-    if (desc->category == category && !promoted &&
-        Settings_IsMenuVisible(desc))
-      count++;
   }
+  s_tab[s_section] = tab;
+  return tab;
+}
+
+/* Position of the active tab among the visible ones — the index the tab bar
+ * and the test navigation count in, since hidden tabs are not shown. */
+static int ActiveVisibleTabPosition(void) {
+  int active = ActiveTabIndex();
+  int position = 0;
+  for (int tab = 0; tab < active; tab++)
+    if (!RawTabHidden(s_section, tab)) position++;
+  return position;
+}
+
+static const MenuTab *ActiveTab(void) {
+  return &ActiveSection()->tabs[ActiveTabIndex()];
+}
+
+/* A paging tab owns a real setting (save_editor_page / input_bind_page) that
+ * Settings_IsMenuVisible filters rows against. Push the tab's value into it
+ * before anything enumerates rows, so the row list and the highlighted tab
+ * can never disagree.
+ *
+ * Deliberately a direct store rather than Settings_SetLong: row enumeration
+ * happens during SettingsOverlay_Render, which runs on the present thread
+ * (present.c), and the host's change observer quiesces that very thread —
+ * routing this through the mutation API would deadlock the presenter against
+ * itself. Both fields are plain in-range enum selectors with no callback and
+ * no restart semantics, so there is nothing for the normalizing path to do
+ * here anyway. */
+static void SyncActiveTabPage(void) {
+  const MenuTab *tab = ActiveTab();
+  if (!tab->page_key) return;
+  const SettingDesc *desc = Settings_Find(tab->page_key);
+  if (!desc || desc->type != kSettingType_Enum || !desc->field) return;
+  if (tab->page_value < desc->minval || tab->page_value > desc->maxval) return;
+  *(int *)desc->field = (int)tab->page_value;
+}
+
+static bool RowBelongsToActiveTab(const SettingDesc *desc) {
+  return desc->category == ActiveTab()->category &&
+         Settings_IsMenuVisible(desc);
+}
+
+static int TabRowCount(void) {
+  SyncActiveTabPage();
+  int count = 0;
+  for (int i = 0; i < g_setting_desc_count; i++)
+    if (RowBelongsToActiveTab(&g_setting_descs[i])) count++;
   return count;
 }
 
-static int CategorySlotCount(void) {
-  return (int)(sizeof(kCategoryOrder) / sizeof(kCategoryOrder[0]));
-}
-
-static int TopLevelItemCount(void) {
-  return (int)(sizeof(kTopLevelItems) / sizeof(kTopLevelItems[0]));
-}
-
-static int NavSlotCount(void) {
-  return CategorySlotCount() + TopLevelItemCount();
-}
-
-static const TopLevelItem *TopLevelItemForSlot(int slot) {
-  int index = slot - CategorySlotCount();
-  if (index < 0 || index >= TopLevelItemCount()) return NULL;
-  return &kTopLevelItems[index];
-}
-
-static const SettingDesc *TopLevelDescForSlot(int slot) {
-  const TopLevelItem *item = TopLevelItemForSlot(slot);
-  return item ? Settings_Find(item->key) : NULL;
-}
-
-static bool IsTopLevelDesc(const SettingDesc *desc) {
-  if (!desc || !desc->key) return false;
-  for (int i = 0; i < TopLevelItemCount(); i++)
-    if (!strcmp(desc->key, kTopLevelItems[i].key)) return true;
-  return false;
-}
-
-static int NavRowCount(int slot) {
-  if (slot < 0 || slot >= NavSlotCount()) return 0;
-  if (slot < CategorySlotCount())
-    return CategoryRowCount(kCategoryOrder[slot]);
-  return TopLevelDescForSlot(slot) ? 1 : 0;
-}
-
-static void SelectFirstPopulatedCategory(void);
-
+/* Nav rows are the sections themselves; a section with no populated tab at
+ * all would be dead, but every section here always has at least one row, so
+ * the nav list is a fixed eight and never renumbers under the cursor. */
 static int NavPopulatedCount(void) {
-  int populated = 0;
-  for (int slot = 0; slot < NavSlotCount(); slot++)
-    if (NavRowCount(slot) > 0) populated++;
-  return populated;
-}
-
-static int NavOrdinalForSlot(int selected_slot) {
-  int ordinal = 0;
-  for (int slot = 0; slot < NavSlotCount(); slot++) {
-    if (NavRowCount(slot) <= 0) continue;
-    if (slot == selected_slot) return ordinal;
-    ordinal++;
-  }
-  return 0;
+  return kSectionCount;
 }
 
 static void EnsureSelectedNavVisible(void) {
-  SelectFirstPopulatedCategory();
-  int count = NavPopulatedCount();
   int visible = s_nav_visible_rows > 0 ? s_nav_visible_rows : 1;
-  int selected = NavOrdinalForSlot(s_category_slot);
-  if (selected < s_nav_top_row) s_nav_top_row = selected;
-  if (selected >= s_nav_top_row + visible)
-    s_nav_top_row = selected - visible + 1;
-  int maximum_top = count > visible ? count - visible : 0;
+  if (s_section < s_nav_top_row) s_nav_top_row = s_section;
+  if (s_section >= s_nav_top_row + visible)
+    s_nav_top_row = s_section - visible + 1;
+  int maximum_top = kSectionCount > visible ? kSectionCount - visible : 0;
   if (s_nav_top_row > maximum_top) s_nav_top_row = maximum_top;
   if (s_nav_top_row < 0) s_nav_top_row = 0;
 }
 
-static const char *NavSlotLabel(int slot) {
-  if (slot < 0 || slot >= NavSlotCount()) return "";
-  if (slot < CategorySlotCount())
-    return Settings_CategoryName(kCategoryOrder[slot]);
-  const TopLevelItem *item = TopLevelItemForSlot(slot);
-  return item ? item->nav_label : "";
-}
-
-static void SelectFirstPopulatedCategory(void) {
-  const int count = NavSlotCount();
-  if (s_category_slot >= 0 && s_category_slot < count &&
-      NavRowCount(s_category_slot) > 0)
-    return;
-  for (int i = 0; i < count; i++) {
-    if (NavRowCount(i) > 0) {
-      s_category_slot = i;
-      return;
-    }
-  }
-  s_category_slot = 0;
-}
-
 static const SettingDesc *SelectedDesc(void) {
-  SelectFirstPopulatedCategory();
-  const SettingDesc *top_level = TopLevelDescForSlot(s_category_slot);
-  if (top_level) return top_level;
-  SettingCategory category = kCategoryOrder[s_category_slot];
+  SyncActiveTabPage();
   int row = 0;
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (desc->category != category || IsTopLevelDesc(desc) ||
-        !Settings_IsMenuVisible(desc))
-      continue;
+    if (!RowBelongsToActiveTab(desc)) continue;
     if (row++ == s_row) return desc;
   }
   return NULL;
 }
+
 
 static void SetStatus(const char *text) {
   snprintf(s_status, sizeof(s_status), "%s", text ? text : "");
   s_status_until = SDL_GetTicks() + 2500;
 }
 
-static void SaveAcceptedChange(SettingChangeResult result) {
-  if (result <= kSettingChange_Unchanged) {
-    SetStatus(result == kSettingChange_Rejected ? "NOT EDITABLE" : "UNCHANGED");
-    return;
-  }
+/* Persist the current settings to disk and report the outcome. Split from the
+ * apply step so a held value can be applied live every frame but written once
+ * on release. */
+static void PersistChange(SettingChangeResult result) {
   const char *settings_path = getenv("AR_OVERLAY_TEST_SETTINGS_PATH");
   if (!settings_path || !settings_path[0]) settings_path = "settings.ini";
   if (!Settings_Save(settings_path)) {
@@ -861,6 +1166,57 @@ static void SaveAcceptedChange(SettingChangeResult result) {
     SetStatus("APPLIED - SAVED");
 }
 
+static void SaveAcceptedChange(SettingChangeResult result) {
+  if (result <= kSettingChange_Unchanged) {
+    SetStatus(result == kSettingChange_Rejected ? "NOT EDITABLE" : "UNCHANGED");
+    return;
+  }
+  PersistChange(result);
+}
+
+/* Flush a deferred write left by a hold, and forget the held row. Safe to call
+ * unconditionally — no-op when nothing is held. */
+static void EndValueHold(void) {
+  if (!s_hold_desc) return;
+  bool dirty = s_hold_dirty;
+  SettingChangeResult result = s_hold_result;
+  s_hold_desc = NULL;
+  s_hold_dir = 0;
+  s_hold_key = 0;
+  s_hold_dirty = false;
+  if (dirty) PersistChange(result);
+}
+
+/* Round to a "nice" magnitude (1, 2, or 5 times a power of ten) so an
+ * accelerated step lands on tidy numbers rather than something like 83. */
+static long NiceStep(long value) {
+  if (value < 1) return 1;
+  long magnitude = 1;
+  while (magnitude * 10 <= value) magnitude *= 10;
+  long lead = value / magnitude;
+  long snapped = lead < 2 ? 1 : lead < 5 ? 2 : 5;
+  return snapped * magnitude;
+}
+
+/* How many base steps a single held repeat should move, given how long the
+ * direction has been held. Ramps from 1 (fine) to a range-proportional coarse
+ * amount so a wide range crosses in ~1s of holding while a tap still nudges by
+ * one. Pure function of the descriptor and elapsed time — unit-tested. */
+static long HoldStepMultiplier(const SettingDesc *desc, Uint64 held_ms) {
+  long base = desc->step > 0 ? desc->step : 1;
+  long range = desc->maxval - desc->minval;
+  if (range <= 0) return 1;
+  long coarse_units = NiceStep(range / 24);
+  long coarse_mult = coarse_units / base;
+  if (coarse_mult < 1) coarse_mult = 1;
+  if (held_ms < (Uint64)kHoldInitialDelayMs + 700) return 1;
+  if (held_ms < (Uint64)kHoldInitialDelayMs + 1700) {
+    long mid = coarse_mult / 4;
+    return mid < 1 ? 1 : mid;
+  }
+  return coarse_mult;
+}
+
 static void StopEditing(void) {
   if (!s_editing) return;
   s_editing = false;
@@ -872,6 +1228,7 @@ static void BeginEditing(void) {
   if (!desc || !Settings_IsAvailable(desc) ||
       desc->type == kSettingType_Bool ||
       desc->type == kSettingType_Enum ||
+      desc->type == kSettingType_Binding ||
       desc->type == kSettingType_Action) {
     SetStatus("NOT TEXT EDITABLE");
     return;
@@ -883,6 +1240,22 @@ static void BeginEditing(void) {
   s_editing = true;
   if (OverlayWindow()) SDL_StartTextInput(OverlayWindow());
   SetStatus("TYPE VALUE - RETURN APPLIES");
+}
+
+static void CancelCapture(void) {
+  if (!s_capture_desc) return;
+  s_capture_desc = NULL;
+  SetStatus("BIND CANCELLED");
+}
+
+static void BeginCapture(void) {
+  const SettingDesc *desc = SelectedDesc();
+  if (!desc || desc->type != kSettingType_Binding) return;
+  InputClass klass;
+  if (!InputMap_DescribeRow(desc, NULL, &klass)) return;
+  s_capture_desc = desc;
+  SetStatus(klass == kInputClass_Keyboard ? "PRESS A KEY - ESC CANCELS"
+                                          : "PRESS A BUTTON - ESC CANCELS");
 }
 
 static void CommitEditing(void) {
@@ -903,43 +1276,93 @@ static void InvokeSelectedAction(void) {
   SetStatus(Settings_InvokeAction(desc) ? "ACTION COMPLETE" : "ACTION FAILED");
 }
 
+/* Int rows are adjusted entirely by stepping (with hold-to-accelerate); they
+ * never open the text editor. Mask/Custom rows are the genuine non-numeric
+ * holdouts — a hex layer mask, arbitrary PAR pins, a player name — and keep
+ * text entry.
+ *
+ * Apply one value step of `multiplier` base-steps. Live every call; persisted
+ * immediately when `persist` (a tap or single press), otherwise deferred to
+ * the end of the hold via s_hold_dirty. */
+static void StepNumeric(const SettingDesc *desc, int direction,
+                        long multiplier, bool persist) {
+  long value = 0;
+  if (!Settings_GetLong(desc, &value)) return;
+  /* The scale rows use 0 as a "follow the auto value" sentinel; step off that
+   * resolved number so the first press moves relative to what is on screen. */
+  if (value == 0 && desc->field == &g_settings.menu_scale_percent)
+    value = s_auto_menu_scale_percent;
+  if (value == 0 && desc->field == &g_settings.hud_scale_percent)
+    value = s_match_game_scale_percent;
+  long step = desc->step > 0 ? desc->step : 1;
+  long next = value + (long)direction * step * multiplier;
+  SettingChangeResult result = Settings_SetLong(desc, next);
+  if (persist) {
+    SaveAcceptedChange(result);
+  } else if (result > kSettingChange_Unchanged) {
+    s_hold_dirty = true;
+    s_hold_result = result;
+  }
+}
+
+/* Begin (or, on a re-press of the same direction, continue) a held step. The
+ * idempotent guard matters for the analog stick, whose held deflection can
+ * re-emit press edges — restarting would keep resetting the acceleration ramp
+ * to its slowest tier. */
+static void BeginValueHold(const SettingDesc *desc, int direction,
+                           SDL_Keycode key) {
+  if (s_hold_desc == desc && s_hold_dir == direction) return;
+  EndValueHold();
+  s_hold_desc = desc;
+  s_hold_dir = direction;
+  s_hold_key = key;
+  s_hold_start_ms = SDL_GetTicks();
+  s_hold_next_ms = s_hold_start_ms + kHoldInitialDelayMs;
+  s_hold_dirty = false;
+  s_hold_result = kSettingChange_Applied;
+  StepNumeric(desc, direction, 1, false);  /* immediate fine step */
+}
+
 static void ChangeSelectedValue(int direction) {
   const SettingDesc *desc = SelectedDesc();
   if (!desc || !Settings_IsAvailable(desc)) {
     SetStatus("UNAVAILABLE HERE");
     return;
   }
-  if (desc->type == kSettingType_Action) {
-    if (direction > 0) InvokeSelectedAction();
-    return;
-  }
-  if (desc->type == kSettingType_Custom) {
-    BeginEditing();
-    return;
-  }
-  long value = 0;
-  if (!Settings_GetLong(desc, &value)) {
-    SetStatus("EDIT IN SETTINGS.INI");
-    return;
-  }
-
-  long next = value;
-  if (desc->type == kSettingType_Bool) {
-    next = !value;
-  } else {
-    if (value == 0 && desc->field == &g_settings.menu_scale_percent)
-      value = s_auto_menu_scale_percent;
-    if (value == 0 && desc->field == &g_settings.hud_scale_percent)
-      value = s_match_game_scale_percent;
-    next = value;
-    long step = desc->step > 0 ? desc->step : 1;
-    next += direction < 0 ? -step : step;
-    if (desc->type == kSettingType_Enum) {
-      if (next < desc->minval) next = desc->maxval;
-      if (next > desc->maxval) next = desc->minval;
+  switch (desc->type) {
+    case kSettingType_Action:
+      if (direction > 0) InvokeSelectedAction();
+      return;
+    case kSettingType_Binding:
+      BeginCapture();
+      return;
+    case kSettingType_Mask:
+    case kSettingType_Custom:
+      BeginEditing();
+      return;
+    case kSettingType_Int:
+      BeginValueHold(desc, direction, s_input_key);
+      return;
+    case kSettingType_Bool:
+    case kSettingType_Enum: {
+      long value = 0;
+      if (!Settings_GetLong(desc, &value)) {
+        SetStatus("EDIT IN SETTINGS.INI");
+        return;
+      }
+      long next;
+      if (desc->type == kSettingType_Bool) {
+        next = !value;
+      } else {
+        long step = desc->step > 0 ? desc->step : 1;
+        next = value + (direction < 0 ? -step : step);
+        if (next < desc->minval) next = desc->maxval;
+        if (next > desc->maxval) next = desc->minval;
+      }
+      SaveAcceptedChange(Settings_SetLong(desc, next));
+      return;
     }
   }
-  SaveAcceptedChange(Settings_SetLong(desc, next));
 }
 
 static void ActivateSelectedRow(void) {
@@ -948,14 +1371,16 @@ static void ActivateSelectedRow(void) {
     SetStatus("UNAVAILABLE HERE");
     return;
   }
-  if (desc->type == kSettingType_Action) {
-    InvokeSelectedAction();
-  } else if (desc->type == kSettingType_Int ||
-             desc->type == kSettingType_Mask ||
-             desc->type == kSettingType_Custom) {
-    BeginEditing();
-  } else {
-    ChangeSelectedValue(1);
+  switch (desc->type) {
+    case kSettingType_Action:  InvokeSelectedAction(); break;
+    case kSettingType_Binding: BeginCapture(); break;
+    case kSettingType_Mask:
+    case kSettingType_Custom:  BeginEditing(); break;
+    /* Confirm on a numeric row is a single fine step up, not a text prompt —
+     * a discrete nudge with no hold, so it saves immediately. */
+    case kSettingType_Int:     StepNumeric(desc, +1, 1, true); break;
+    case kSettingType_Bool:
+    case kSettingType_Enum:    ChangeSelectedValue(1); break;
   }
 }
 
@@ -968,19 +1393,18 @@ static void ResetSelectedValue(void) {
   SaveAcceptedChange(Settings_Reset(desc));
 }
 
-static void MoveCategory(int direction) {
-  const int count = NavSlotCount();
-  for (int attempt = 0; attempt < count; attempt++) {
-    s_category_slot = (s_category_slot + direction + count) % count;
-    if (NavRowCount(s_category_slot) > 0) break;
-  }
+static void MoveSection(int direction) {
+  EndValueHold();
+  s_section = (s_section + direction + kSectionCount) % kSectionCount;
   s_row = 0;
   s_top_row = 0;
+  s_tab_scroll = 0;
+  SyncActiveTabPage();
   EnsureSelectedNavVisible();
 }
 
 static void EnsureSelectedRowVisible(void) {
-  int count = NavRowCount(s_category_slot);
+  int count = TabRowCount();
   int visible = s_visible_rows > 0 ? s_visible_rows : 1;
   if (s_row < 0) s_row = 0;
   if (s_row >= count) s_row = count > 0 ? count - 1 : 0;
@@ -993,34 +1417,51 @@ static void EnsureSelectedRowVisible(void) {
 }
 
 static void MoveRow(int direction) {
-  int count = NavRowCount(s_category_slot);
+  int count = TabRowCount();
   if (count <= 0) return;
+  EndValueHold();
   s_row = (s_row + direction + count) % count;
   EnsureSelectedRowVisible();
 }
 
-static void ActivateTopLevelSelection(void) {
-  const SettingDesc *direct = TopLevelDescForSlot(s_category_slot);
-  if (direct) {
-    /* Promoted settings/actions are leaves, not one-row submenus. */
-    ChangeSelectedValue(1);
-    return;
+/* Tabs wrap, like every other list in this menu. Changing tab always resets
+ * the row cursor: the two lists have nothing in common, so carrying an index
+ * across would land somewhere arbitrary. */
+static void MoveTab(int direction) {
+  const MenuSection *section = ActiveSection();
+  if (VisibleTabCount(s_section) <= 1) return;
+  EndValueHold();
+  int candidate = ActiveTabIndex();
+  for (int i = 0; i < section->tab_count; i++) {
+    candidate = (candidate + direction + section->tab_count) %
+                section->tab_count;
+    if (!RawTabHidden(s_section, candidate)) break;
   }
+  s_tab[s_section] = candidate;
+  s_row = 0;
+  s_top_row = 0;
+  StopEditing();
+  s_capture_desc = NULL;
+  SyncActiveTabPage();
+  EnsureSelectedRowVisible();
+}
+
+static void EnterSection(void) {
   s_submenu_open = true;
+  s_row = 0;
+  s_top_row = 0;
+  SyncActiveTabPage();
   EnsureSelectedRowVisible();
 }
 
 bool SettingsOverlay_Init(SDL_Renderer *renderer,
                           const uint8_t *rom_data, size_t rom_size) {
   s_renderer = renderer;
-  SelectFirstPopulatedCategory();
   if (!renderer) return true;
 
   bool rom_font = DecodeFontAsset(rom_data, rom_size);
   if (rom_font) PrepareRomFont();
   else BuildFallbackFont();
-  /* M3: host-authored nav icons, independent of which text font loaded. */
-  WriteHostIcons();
 
   for (int i = 0; i < kTextStyle_Count; i++) {
     s_font_textures[i] = CreateFontAtlas((TextStyle)i);
@@ -1034,6 +1475,12 @@ bool SettingsOverlay_Init(SDL_Renderer *renderer,
     DestroyFontTextures();
     return false;
   }
+  /* Host-authored section icons, independent of which text font loaded. */
+  s_icon_texture = CreateIconAtlas();
+  if (!s_icon_texture) {
+    DestroyFontTextures();
+    return false;
+  }
   s_dialog_frame_texture =
       CreateDialogFrameTexture(rom_data, rom_size);
   return true;
@@ -1042,6 +1489,8 @@ bool SettingsOverlay_Init(SDL_Renderer *renderer,
 void SettingsOverlay_Destroy(void) {
   StopEditing();
   DestroyFontTextures();
+  SDL_DestroyTexture(s_icon_texture);
+  s_icon_texture = NULL;
   SDL_DestroyTexture(s_dialog_frame_texture);
   s_dialog_frame_texture = NULL;
   s_renderer = NULL;
@@ -1062,9 +1511,11 @@ bool SettingsOverlay_IsOpen(void) {
 
 void SettingsOverlay_Open(void) {
   StopEditing();
-  SelectFirstPopulatedCategory();
+  EndValueHold();
+  s_capture_desc = NULL;
   s_submenu_open = false;
   s_open = true;
+  SyncActiveTabPage();
   s_status[0] = 0;
   fprintf(stderr, "[settings-menu] opened\n");
 }
@@ -1072,6 +1523,8 @@ void SettingsOverlay_Open(void) {
 void SettingsOverlay_Close(void) {
   if (!s_open) return;
   StopEditing();
+  EndValueHold();
+  s_capture_desc = NULL;
   s_submenu_open = false;
   s_open = false;
   fprintf(stderr, "[settings-menu] closed\n");
@@ -1088,30 +1541,280 @@ bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
                                         int *visible_rows,
                                         int *total_rows) {
   if (!s_open) return false;
-  SelectFirstPopulatedCategory();
   EnsureSelectedNavVisible();
-  if (selected_ordinal)
-    *selected_ordinal = NavOrdinalForSlot(s_category_slot);
+  if (selected_ordinal) *selected_ordinal = s_section;
   if (top_ordinal) *top_ordinal = s_nav_top_row;
   if (visible_rows) *visible_rows = s_nav_visible_rows;
   if (total_rows) *total_rows = NavPopulatedCount();
   return true;
 }
 
+bool SettingsOverlay_GetTabState(int *active_tab, int *tab_count) {
+  if (!s_open) return false;
+  /* Report positions among the VISIBLE tabs — hidden (all-debug) tabs are not
+   * shown and cannot be navigated to, so a caller counting tabs must not see
+   * them. */
+  if (active_tab) *active_tab = ActiveVisibleTabPosition();
+  if (tab_count) *tab_count = VisibleTabCount(s_section);
+  return true;
+}
+
+/* Shared by the live tick and the test tick so the clock is the only
+ * difference. Ends the hold if the row it was moving is no longer the target
+ * of a plain held direction (navigated away, started editing, went
+ * unavailable), otherwise fires every due repeat with the ramped magnitude. */
+static void TickHold(Uint64 now_ms) {
+  if (!s_open || !s_hold_desc) return;
+  if (!s_submenu_open || s_editing || s_capture_desc ||
+      SelectedDesc() != s_hold_desc || !Settings_IsAvailable(s_hold_desc)) {
+    EndValueHold();
+    return;
+  }
+  int guard = 0;
+  while (now_ms >= s_hold_next_ms && guard++ < 8) {
+    long multiplier = HoldStepMultiplier(s_hold_desc, now_ms - s_hold_start_ms);
+    StepNumeric(s_hold_desc, s_hold_dir, multiplier, false);
+    s_hold_next_ms += kHoldRepeatMs;
+  }
+  /* If a frame hitch left the schedule far in the past, resync rather than
+   * firing a long catch-up burst on the next tick. */
+  if (s_hold_next_ms + kHoldRepeatMs < now_ms)
+    s_hold_next_ms = now_ms + kHoldRepeatMs;
+}
+
+void SettingsOverlay_Tick(void) {
+  TickHold(SDL_GetTicks());
+}
+
+long SettingsOverlay_HoldStepForTest(const struct SettingDesc *desc,
+                                     uint64_t held_ms) {
+  return desc ? HoldStepMultiplier((const SettingDesc *)desc, held_ms) : 0;
+}
+
+void SettingsOverlay_TickAtForTest(uint64_t now_ms) {
+  TickHold((Uint64)now_ms);
+}
+
+/* Logical menu commands. Both the keyboard path and the gamepad path funnel
+ * through these so the two never drift apart, and so a rebound pad drives the
+ * menu with the player's own buttons. */
+typedef enum {
+  kMenuNav_Up,
+  kMenuNav_Down,
+  kMenuNav_Left,
+  kMenuNav_Right,
+  kMenuNav_Confirm,
+  kMenuNav_Back,     /* leave the submenu, or close from the nav column */
+  kMenuNav_Reset,    /* restore the selected row's default */
+  kMenuNav_TabPrev,  /* previous tab of the current section */
+  kMenuNav_TabNext,
+  kMenuNav_Close,
+} MenuNav;
+
+static void ApplyMenuNav(MenuNav nav, bool repeat) {
+  if (!s_submenu_open) {
+    switch (nav) {
+      case kMenuNav_Up:      MoveSection(-1); break;
+      case kMenuNav_Down:    MoveSection(1); break;
+      /* Left/Right have nothing to edit out here, so they preview the
+       * section's tabs — the tab bar is visible from the nav column, so a
+       * player can pick the tab before ever entering. */
+      case kMenuNav_Left:
+      case kMenuNav_TabPrev: MoveTab(-1); break;
+      case kMenuNav_Right:
+      case kMenuNav_TabNext: MoveTab(1); break;
+      case kMenuNav_Confirm:
+        if (!repeat) EnterSection();
+        break;
+      case kMenuNav_Back:
+      case kMenuNav_Close:
+        if (!repeat) SettingsOverlay_Close();
+        break;
+      default:
+        break;
+    }
+    return;
+  }
+
+  switch (nav) {
+    case kMenuNav_Up:      MoveRow(-1); break;
+    case kMenuNav_Down:    MoveRow(1); break;
+    /* Ignore OS key-repeat on value change: a numeric row's repeats come from
+     * SettingsOverlay_Tick (which paces and accelerates them), and a non-
+     * numeric row should change once per physical press. */
+    case kMenuNav_Left:    if (!repeat) ChangeSelectedValue(-1); break;
+    case kMenuNav_Right:   if (!repeat) ChangeSelectedValue(1); break;
+    case kMenuNav_TabPrev: MoveTab(-1); break;
+    case kMenuNav_TabNext: MoveTab(1); break;
+    case kMenuNav_Confirm: ActivateSelectedRow(); break;
+    case kMenuNav_Reset:   ResetSelectedValue(); break;
+    case kMenuNav_Back:
+      if (!repeat) {
+        EndValueHold();
+        s_submenu_open = false;
+      }
+      break;
+    case kMenuNav_Close:
+      if (!repeat) SettingsOverlay_Close();
+      break;
+  }
+}
+
+bool SettingsOverlay_IsEditing(void) {
+  return s_open && s_editing;
+}
+
+bool SettingsOverlay_IsCapturing(void) {
+  return s_open && s_capture_desc != NULL;
+}
+
+bool SettingsOverlay_HandleCaptureEvent(const SDL_Event *event) {
+  if (!SettingsOverlay_IsCapturing() || !event) return false;
+
+  /* Escape always aborts, whatever device the row belongs to — otherwise a
+   * keyboard row would swallow Escape as its own new binding. */
+  if (event->type == SDL_EVENT_KEY_DOWN &&
+      event->key.scancode == SDL_SCANCODE_ESCAPE) {
+    CancelCapture();
+    return true;
+  }
+
+  InputClass klass;
+  if (!InputMap_DescribeRow(s_capture_desc, NULL, &klass)) {
+    CancelCapture();
+    return true;
+  }
+  /* Ignore events from the other device class so, for example, a stray
+   * controller nudge cannot land in a keyboard row. */
+  bool keyboard_event = event->type == SDL_EVENT_KEY_DOWN ||
+                        event->type == SDL_EVENT_KEY_UP ||
+                        event->type == SDL_EVENT_TEXT_INPUT;
+  bool pad_event = event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+                   event->type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
+                   event->type == SDL_EVENT_GAMEPAD_AXIS_MOTION;
+  if (!keyboard_event && !pad_event) return false;
+  if (klass == kInputClass_Keyboard && !keyboard_event) return true;
+  if (klass == kInputClass_Gamepad && !pad_event) return true;
+
+  uint32 binding = 0;
+  if (!InputMap_DecodeEvent(event, klass, &binding)) return true;
+
+  const SettingDesc *desc = s_capture_desc;
+  s_capture_desc = NULL;
+  SaveAcceptedChange(InputMap_ApplyBinding(desc, binding));
+  return true;
+}
+
+bool SettingsOverlay_HandleGamepadEvent(const SDL_Event *event) {
+  if (!s_open || !event) return false;
+  if (SettingsOverlay_HandleCaptureEvent(event)) return true;
+
+  InputAction action;
+  bool pressed = false;
+  if (!InputMap_ActionForEvent(event, &action, &pressed)) return true;
+  /* This dispatch is pad-sourced; a held value is released by the button/stick
+   * edge, not a keyboard key. */
+  s_input_key = 0;
+  if (!pressed) {
+    /* Releasing the held direction ends the accelerate-and-flush. */
+    if (s_hold_desc && s_hold_key == 0 &&
+        (action == kInputAction_Left || action == kInputAction_Right))
+      EndValueHold();
+    return true;
+  }
+
+  /* A text-entry field cannot be typed into with a pad; the two edge cases
+   * that still make sense there are commit and cancel. */
+  if (s_editing) {
+    if (action == kInputAction_B) CommitEditing();
+    else if (action == kInputAction_A) StopEditing();
+    return true;
+  }
+
+  switch (action) {
+    case kInputAction_Up:     ApplyMenuNav(kMenuNav_Up, false); break;
+    case kInputAction_Down:   ApplyMenuNav(kMenuNav_Down, false); break;
+    case kInputAction_Left:   ApplyMenuNav(kMenuNav_Left, false); break;
+    case kInputAction_Right:  ApplyMenuNav(kMenuNav_Right, false); break;
+    case kInputAction_B:      ApplyMenuNav(kMenuNav_Confirm, false); break;
+    case kInputAction_A:      ApplyMenuNav(kMenuNav_Back, false); break;
+    case kInputAction_Y:      ApplyMenuNav(kMenuNav_Reset, false); break;
+    /* Shoulders page the tab bar — the same idiom as the system menus on
+     * every console this build targets, and free on a Deck. */
+    case kInputAction_L:      ApplyMenuNav(kMenuNav_TabPrev, false); break;
+    case kInputAction_R:      ApplyMenuNav(kMenuNav_TabNext, false); break;
+    case kInputAction_Menu:
+    case kInputAction_Start:  ApplyMenuNav(kMenuNav_Close, false); break;
+    default: break;
+  }
+  return true;
+}
+
+/* True when `key` is the keyboard binding the player assigned to `action`.
+ * Bindings store scancodes, so translate the keycode first (NULL modstate:
+ * menu control is layout-position based, like the game input path). */
+static bool MenuKeyMatchesBinding(SDL_Keycode key, InputAction action) {
+  uint32 binding = g_settings.input_bind[kInputClass_Keyboard][action];
+  if (INPUT_BIND_KIND(binding) != kInputBind_Key) return false;
+  return SDL_GetScancodeFromKey(key, NULL) == INPUT_BIND_CODE(binding);
+}
+
+/* Maps a keycode to a menu command through the player's OWN keyboard bindings,
+ * so rebinding B/A/Y/L/R or a direction moves those controls in the menu too —
+ * the hint line names them by SNES button, and this is what makes that promise
+ * true. It mirrors the gamepad path (SettingsOverlay_HandleGamepadEvent), with
+ * one deliberate exception: Start/Select/Menu are NOT mapped here. Their
+ * keyboard defaults collide with the universal keyboard conventions the menu
+ * keeps (Start defaults to Return, which the menu already uses to confirm), so
+ * on a keyboard the conventions win and Esc/Enter own open-close instead.
+ * Returns false when the key is not one of these bound controls. */
+static bool MenuNavForBoundKey(SDL_Keycode key, MenuNav *out) {
+  static const struct {
+    InputAction action;
+    MenuNav nav;
+  } kMap[] = {
+    { kInputAction_Up,    kMenuNav_Up },
+    { kInputAction_Down,  kMenuNav_Down },
+    { kInputAction_Left,  kMenuNav_Left },
+    { kInputAction_Right, kMenuNav_Right },
+    { kInputAction_B,     kMenuNav_Confirm },
+    { kInputAction_A,     kMenuNav_Back },
+    { kInputAction_Y,     kMenuNav_Reset },
+    { kInputAction_L,     kMenuNav_TabPrev },
+    { kInputAction_R,     kMenuNav_TabNext },
+  };
+  for (size_t i = 0; i < sizeof(kMap) / sizeof(kMap[0]); i++)
+    if (MenuKeyMatchesBinding(key, kMap[i].action)) {
+      *out = kMap[i].nav;
+      return true;
+    }
+  return false;
+}
+
 bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
   if (!s_open) return false;
   if (key == SDLK_F2) return false;
-  if (!pressed) return true;
+  if (!pressed) {
+    /* Releasing the key that began a held step ends it and flushes the write. */
+    if (s_hold_key && key == s_hold_key) EndValueHold();
+    return true;
+  }
+  /* Dispatch is keyboard-sourced; a held step started now is released by this
+   * same key coming up. */
+  s_input_key = key;
+  /* Capture is fed raw events by main.c (SettingsOverlay_HandleCaptureEvent)
+   * because a scancode, not a keycode, is what gets bound. */
+  if (s_capture_desc) return true;
 
   if (s_editing) {
+    /* While typing a value, letter keys must reach the text buffer
+     * (SettingsOverlay_HandleText), so this path handles ONLY the fixed edit
+     * controls and maps no SNES button — Esc cancels, Enter commits,
+     * Backspace deletes. A bound key like the default A-cancel would otherwise
+     * eat that letter mid-value (a player name cannot contain 'x'). */
     switch (key) {
       case SDLK_ESCAPE:
         StopEditing();
-        SetStatus("EDIT CANCELLED");
-        break;
-      case SDLK_X:       /* SNES A = cancel/back */
-        StopEditing();
-        s_submenu_open = false;
         SetStatus("EDIT CANCELLED");
         break;
       case SDLK_RETURN:
@@ -1129,60 +1832,48 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     return true;
   }
 
-  if (!s_submenu_open) {
-    switch (key) {
-      case SDLK_ESCAPE:
-      case SDLK_F1:
-      case SDLK_X:       /* SNES A = back/close */
-        if (!repeat) SettingsOverlay_Close();
-        break;
-      case SDLK_UP:
-        MoveCategory(-1);
-        break;
-      case SDLK_DOWN:
-        MoveCategory(1);
-        break;
-      case SDLK_Z:       /* SNES B = game-style confirm */
-      case SDLK_RETURN:  /* keyboard confirm */
-      case SDLK_KP_ENTER:
-        if (!repeat) ActivateTopLevelSelection();
-        break;
-      default:
-        break;
-    }
-    return true;
-  }
-
   switch (key) {
+    /* Universal keyboard controls, deliberately fixed and independent of the
+     * game bindings: arrows navigate, Enter confirms, Esc/F1 close, [/]+Tab
+     * cycle tabs. These alone fully operate the menu, which matters because
+     * the menu is the only place to repair a broken binding — so it must stay
+     * usable even if the player has unbound or mangled their SNES keys. */
     case SDLK_ESCAPE:
     case SDLK_F1:
-      if (!repeat) SettingsOverlay_Close();
-      break;
-    case SDLK_X:       /* SNES A = back */
-      if (!repeat) s_submenu_open = false;
+      ApplyMenuNav(kMenuNav_Close, repeat);
       break;
     case SDLK_UP:
-      MoveRow(-1);
+      ApplyMenuNav(kMenuNav_Up, repeat);
       break;
     case SDLK_DOWN:
-      MoveRow(1);
+      ApplyMenuNav(kMenuNav_Down, repeat);
       break;
     case SDLK_LEFT:
-      ChangeSelectedValue(-1);
+      ApplyMenuNav(kMenuNav_Left, repeat);
       break;
     case SDLK_RIGHT:
-      ChangeSelectedValue(1);
+      ApplyMenuNav(kMenuNav_Right, repeat);
       break;
-    case SDLK_Z:       /* SNES B = game-style confirm */
-    case SDLK_RETURN:  /* keyboard confirm */
+    case SDLK_RETURN:
     case SDLK_KP_ENTER:
-      ActivateSelectedRow();
+      ApplyMenuNav(kMenuNav_Confirm, repeat);
       break;
-    case SDLK_A:       /* SNES Y */
-      ResetSelectedValue();
+    case SDLK_LEFTBRACKET:
+      ApplyMenuNav(kMenuNav_TabPrev, repeat);
       break;
-    default:
+    case SDLK_RIGHTBRACKET:
+    case SDLK_TAB:
+      ApplyMenuNav(kMenuNav_TabNext, repeat);
       break;
+    default: {
+      /* Everything the hint line labels by SNES button — B confirm, A back,
+       * Y reset, L/R tab, and the directions — follows the player's own
+       * keyboard bindings (default Z/X/A, Q/W, arrows), so a rebind moves the
+       * menu control with it. */
+      MenuNav nav;
+      if (MenuNavForBoundKey(key, &nav)) ApplyMenuNav(nav, repeat);
+      break;
+    }
   }
   return true;
 }
@@ -1328,6 +2019,84 @@ static void DrawTextRight(const MenuLayout *layout, int right, int y,
             text, length, style);
 }
 
+/* ── Small font ─────────────────────────────────────────────────────────
+ * The 6x8 atlas built from kFallbackFont, drawn with a free-form color via
+ * SetTextureColorMod. It is monochrome (no baked outline/shadow), so unlike
+ * the 8x8 ROM font it can take an arbitrary color at zero cost — which is
+ * what lets the tab bar, description panel, and hint line pick up each
+ * section's accent instead of everything being the same white.
+ *
+ * Three quarters the width of the ROM font per character, so the description
+ * panel fits roughly a third more text per line at a size that still reads
+ * comfortably at couch distance. */
+static void DrawSmallGlyph(const MenuLayout *layout, int x, int y,
+                           unsigned char ch) {
+  if (ch == ' ' || !s_debug_font_texture) return;
+  SDL_FRect source = {
+    (float)((ch & 15) * kDebugGlyphWidth),
+    (float)((ch >> 4) * kDebugGlyphHeight),
+    (float)kDebugGlyphWidth,
+    (float)kDebugGlyphHeight,
+  };
+  SDL_FRect destination = ToFRect(LogicalRect(
+      layout, x, y, kDebugGlyphWidth, kDebugGlyphHeight));
+  SDL_RenderTexture(s_renderer, s_debug_font_texture, &source, &destination);
+}
+
+static void DrawSmallTextN(const MenuLayout *layout, int x, int y,
+                           const char *text, int max_chars, uint32_t color) {
+  if (!text || max_chars <= 0 || !s_debug_font_texture) return;
+  SDL_SetTextureColorMod(s_debug_font_texture, (Uint8)(color >> 16),
+                         (Uint8)(color >> 8), (Uint8)color);
+  SDL_SetTextureAlphaMod(s_debug_font_texture, (Uint8)(color >> 24));
+  for (int i = 0; text[i] && i < max_chars; i++)
+    DrawSmallGlyph(layout, x + i * kDebugGlyphWidth, y,
+                   (unsigned char)text[i]);
+}
+
+static void DrawSmallText(const MenuLayout *layout, int x, int y,
+                          const char *text, uint32_t color) {
+  DrawSmallTextN(layout, x, y, text, 512, color);
+}
+
+static int SmallTextWidth(const char *text) {
+  return text ? (int)strlen(text) * kDebugGlyphWidth : 0;
+}
+
+/* Icons are authored at 16x16 but drawn at whatever `size` the caller wants;
+ * nearest-neighbour keeps integer multiples crisp. `selected` picks the
+ * colored game palette (the highlighted slot) over the grey one, and `alpha`
+ * fades an unselected, un-focused nav row so it reads as recessive. */
+static void DrawSectionIcon(const MenuLayout *layout, int x, int y, int size,
+                            int section, bool selected, int alpha) {
+  if (!s_icon_texture || section < 0 || section >= kSectionCount) return;
+  SDL_SetTextureColorMod(s_icon_texture, 255, 255, 255);
+  SDL_SetTextureAlphaMod(s_icon_texture, (Uint8)alpha);
+  SDL_FRect source = {
+    (float)(section * kIconSize), selected ? (float)kIconSize : 0.0f,
+    (float)kIconSize, (float)kIconSize,
+  };
+  SDL_FRect destination = ToFRect(LogicalRect(layout, x, y, size, size));
+  SDL_RenderTexture(s_renderer, s_icon_texture, &source, &destination);
+}
+
+/* A slim track with a proportional thumb, drawn in the panel's inner gutter.
+ * Replaces the pair of blinking ^ / v glyphs the lists used to carry: those
+ * cost a full 8px text cell out of the value column and only said "there is
+ * more", never how much more or where you are in it. Draws nothing when the
+ * whole list already fits. */
+static void DrawScrollBar(const MenuLayout *layout, int x, int y, int height,
+                          int total, int visible, int top, uint32_t accent) {
+  if (total <= visible || visible <= 0 || height <= 0) return;
+  FillLogicalRect(layout, x, y, 3, height, ARGB(90, 60, 84, 106));
+  int thumb = height * visible / total;
+  if (thumb < 6) thumb = 6;
+  if (thumb > height) thumb = height;
+  int span = total - visible;
+  int offset = span > 0 ? (height - thumb) * top / span : 0;
+  FillLogicalRect(layout, x, y + offset, 3, thumb, accent);
+}
+
 static void DrawDebugGlyph(const MenuLayout *layout, int x, int y,
                            unsigned char ch, DebugTextStyle style) {
   if (ch == ' ' || !s_debug_font_texture) return;
@@ -1430,25 +2199,31 @@ static void DrawDebugHighlightedLine(const MenuLayout *layout,
   }
 }
 
-static void DrawWrappedText(const MenuLayout *layout, int x, int y,
-                            const char *text, int max_chars,
-                            int max_lines, TextStyle style) {
+/* Word-wrapped small-font paragraph. Returns the number of lines drawn so a
+ * caller can place something underneath. The description panel uses this: at
+ * 6px per character it fits the longest tooltips in the table without the
+ * truncation the 8px menu font used to force. */
+static int DrawWrappedSmallText(const MenuLayout *layout, int x, int y,
+                                const char *text, int max_chars,
+                                int max_lines, uint32_t color) {
   const char *cursor = text;
-  if (max_chars > 63) max_chars = 63;
-  for (int line = 0; line < max_lines && cursor && *cursor; line++) {
+  if (max_chars > 127) max_chars = 127;
+  int line = 0;
+  for (; line < max_lines && cursor && *cursor; line++) {
     int length = (int)strlen(cursor);
     if (length > max_chars) {
       length = max_chars;
       while (length > 1 && cursor[length] != ' ') length--;
       if (length <= 1) length = max_chars;
     }
-    char buffer[64];
+    char buffer[128];
     memcpy(buffer, cursor, (size_t)length);
     buffer[length] = 0;
-    DrawText(layout, x, y + line * 10, buffer, style);
+    DrawSmallText(layout, x, y + line * kSmallLineHeight, buffer, color);
     cursor += length;
     while (*cursor == ' ') cursor++;
   }
+  return line;
 }
 
 static void DrawInspectorInfo(const MenuLayout *layout, int x, int y,
@@ -1462,7 +2237,8 @@ static void DrawInspectorInfo(const MenuLayout *layout, int x, int y,
     const char *end = strchr(line, '\n');
     int length = end ? (int)(end - line) : (int)strlen(line);
     if (length > max_chars) length = max_chars;
-    DrawTextN(layout, x, y + row * 10, line, length, kText_Dim);
+    DrawDebugTextN(layout, x, y + row * kSmallLineHeight, line, length,
+                   kDebugText_Normal);
     line = end ? end + 1 : NULL;
   }
 }
@@ -1511,8 +2287,8 @@ static int SnapPanelEdge(int origin, int edge) {
 static void DrawMenu(const MenuLayout *layout) {
   const int margin = 8;
   const int gap = 8;
-  const int left_width = 144;
-  const int bottom_height = 64;
+  const int left_width = 152;
+  const int bottom_height = 72;
   const int panel_right =
       SnapPanelEdge(margin, layout->logical_width - margin);
   const int panel_bottom =
@@ -1527,148 +2303,221 @@ static void DrawMenu(const MenuLayout *layout) {
 
   DrawDialogPanel(layout, left_x, top_y, left_width, top_height);
   DrawDialogPanel(layout, right_x, top_y, right_width, top_height);
-  DrawDialogPanel(layout, margin, bottom_y,
-                  bottom_width, bottom_height);
+  DrawDialogPanel(layout, margin, bottom_y, bottom_width, bottom_height);
 
-  const int left_text_x = left_x + 12;
-  const int left_title_y = top_y + 12;
-  const int category_first_y = top_y + 30;
-  const int right_text_x = right_x + 12;
-  const int right_title_y = top_y + 12;
-  const int first_row_y = top_y + 30;
-  const int selector_x = right_x + 12;
-  const int label_x = right_x + 22;
-  const int value_right = right_x + right_width - 12;
-  /* Save-state/item labels need up to 18 characters (for example
-   * "Act 2 cleared" and "Strength of Angel"). Town rows deliberately use the
-   * shorter "X State" label so this wider value column still leaves ample
-   * room. Label width is computed per row from the actual formatted value, so
-   * short values such as RUN do not waste the rest of that reservation. */
-  const int value_chars = 18;
+  const MenuSection *section = ActiveSection();
+  /* The section accent tints only its 16x16 icon (baked into the atlas); all
+   * chrome here is the shared game steel-blue, and the cursor/selection is the
+   * game's menu yellow. */
+  const uint32_t structure = kSteelBlue;
+  const uint32_t structure_dim = kSteelDim;
+  SyncActiveTabPage();
 
-  DrawText(layout, left_text_x, left_title_y,
-           "SYSTEM SETTINGS", kText_Normal);
   /* SDL3 removed SDL_TICKS_PASSED; SDL_GetTicks is now 64-bit and never wraps
    * in practice, so a direct comparison is exact. */
   if (s_status[0] && SDL_GetTicks() >= s_status_until)
     s_status[0] = 0;
-  SelectFirstPopulatedCategory();
-  const SettingDesc *top_level = TopLevelDescForSlot(s_category_slot);
-  SettingCategory category = s_category_slot < CategorySlotCount()
-      ? kCategoryOrder[s_category_slot] : kSettingCat_Extras;
-  const char *category_name = top_level
-      ? NavSlotLabel(s_category_slot) : Settings_CategoryName(category);
-  char save_category_name[32];
-  if (!top_level && category == kSettingCat_Save &&
-      g_settings.save_editor_page >= 0 &&
-      g_settings.save_editor_page < kSaveEditorPage_Count) {
-    static const char *const page_names[] = {
-      "Progress", "Status", "Magic", "Items", "Scores",
-    };
-    snprintf(save_category_name, sizeof(save_category_name), "Save: %s",
-             page_names[g_settings.save_editor_page]);
-    category_name = save_category_name;
-  }
-  DrawTextN(layout, right_text_x, right_title_y,
-            category_name, 15, kText_Normal);
-  if (s_status[0]) {
-    int category_length = CappedTextLength(category_name, 15);
-    int status_chars =
-        (right_width - 24) / kGlyphSize - category_length - 2;
-    if (status_chars > 24) status_chars = 24;
-    if (status_chars > 0)
-      DrawTextRight(layout, value_right, right_title_y,
-                    s_status, status_chars, kText_Warning);
-  }
 
-  const int category_count = CategorySlotCount();
-  const int nav_count = NavSlotCount();
-  const int nav_total = NavPopulatedCount();
+  /* ── Nav column ──────────────────────────────────────────────────────── */
+  const int left_text_x = left_x + 10;
+  const int left_title_y = top_y + 10;
+  const int nav_first_y = top_y + 18;
+
+  DrawSmallText(layout, left_text_x, left_title_y - 3, "SYSTEM SETTINGS",
+                ARGB(255, 132, 154, 174));
+  FillLogicalRect(layout, left_text_x, left_title_y + 6,
+                  left_width - 20, 1, ARGB(120, 120, 150, 178));
+
   s_nav_visible_rows =
-      (top_y + top_height - 12 - category_first_y) / kNavRowHeight + 1;
+      (top_y + top_height - 6 - nav_first_y) / kNavRowHeight;
   if (s_nav_visible_rows < 1) s_nav_visible_rows = 1;
   EnsureSelectedNavVisible();
 
-  int nav_ordinal = 0;
-  for (int slot = 0; slot < nav_count; slot++) {
-    if (NavRowCount(slot) <= 0) continue;
-    int ordinal = nav_ordinal++;
-    if (ordinal < s_nav_top_row ||
-        ordinal >= s_nav_top_row + s_nav_visible_rows)
+  for (int slot = 0; slot < kSectionCount; slot++) {
+    if (slot < s_nav_top_row ||
+        slot >= s_nav_top_row + s_nav_visible_rows)
       continue;
-    int category_y =
-        category_first_y + (ordinal - s_nav_top_row) * kNavRowHeight;
-    /* Keep lifecycle actions visually separated without spending another row;
-     * the previous fixed four-pixel gap was what pushed Exit past the panel. */
-    if (slot == category_count && ordinal > s_nav_top_row)
-      FillLogicalRect(layout, left_x + 12, category_y - 1,
-                      left_width - 24, 1, 0x6080A0C0u);
-    TextStyle style = slot == s_category_slot ? kText_Normal : kText_Dim;
-    if (slot == s_category_slot && !s_submenu_open)
-      DrawGlyph(layout, left_text_x + ((SDL_GetTicks() / 300) & 1),
-                category_y, '>', kText_Warning);
-    /* M3: a small category icon sits in the gutter between the selector
-     * cursor and the label; top-level command leaves (Restart game, Exit
-     * desktop) have no icon and just leave that gutter blank, keeping every
-     * row's label starting column aligned. */
-    if (slot < category_count) {
-      int icon_tile = CategoryIconTile(kCategoryOrder[slot]);
-      if (icon_tile >= 0)
-        DrawGlyph(layout, left_text_x + 10, category_y,
-                  (unsigned char)icon_tile, style);
-    }
-    DrawTextN(layout, left_text_x + 20, category_y,
-              NavSlotLabel(slot), 13, style);
+    int row_y = nav_first_y + (slot - s_nav_top_row) * kNavRowHeight;
+    bool current = slot == s_section;
+    /* The selected section keeps a tinted plate even after the player has
+     * moved focus into the submenu, so the right-hand panel never looks
+     * orphaned from the nav column. */
+    if (current)
+      FillLogicalRect(layout, left_x + 6, row_y - 1, left_width - 12,
+                      kNavRowHeight - 2,
+                      s_submenu_open ? ARGB(90, 32, 56, 78) : kHighlight);
+    if (current && !s_submenu_open)
+      FillLogicalRect(layout, left_x + 6, row_y - 1, 2, kNavRowHeight - 2,
+                      kSelectYellow);
+    /* The selected section lights up in the game's colored slot palette; the
+     * rest stay grey, and a nav row that is not the current one dims slightly
+     * so the cursor reads at a glance. */
+    DrawSectionIcon(layout, left_text_x, row_y, kIconSize, slot,
+                    current, current ? 255 : 205);
+    DrawTextN(layout, left_text_x + kIconSize + 4, row_y + 4,
+              kSections[slot].label, 11,
+              current ? kText_Normal : kText_Dim);
   }
-  /* Indicators live in the otherwise-unused far-right gutter so they do not
-   * consume a navigation row or collide with the selection cursor. */
-  const int nav_indicator_x = left_x + left_width - 12;
-  if (s_nav_top_row > 0)
-    DrawGlyph(layout, nav_indicator_x, category_first_y,
-              '^', kText_Warning);
-  if (s_nav_top_row + s_nav_visible_rows < nav_total)
-    DrawGlyph(layout, nav_indicator_x,
-              category_first_y + (s_nav_visible_rows - 1) * kNavRowHeight,
-              'v', kText_Warning);
+  DrawScrollBar(layout, left_x + left_width - 12, nav_first_y,
+                s_nav_visible_rows * kNavRowHeight, kSectionCount,
+                s_nav_visible_rows, s_nav_top_row, structure);
 
-  s_visible_rows =
-      (top_y + top_height - 12 - first_row_y) / kRowHeight + 1;
+  /* ── Submenu header: section title, status, tab bar ───────────────────── */
+  const int right_text_x = right_x + 12;
+  const int right_title_y = top_y + 8;
+  /* The value column stops short of the frame so the scrollbar has a gutter
+   * of its own instead of overlapping a value. */
+  const int value_right = right_x + right_width - 16;
+  const int scroll_x = right_x + right_width - 13;
+
+  /* The submenu header is always the active section, so its icon takes the
+   * colored selected palette. */
+  DrawSectionIcon(layout, right_text_x, right_title_y - 2, kIconSize,
+                  s_section, true, 255);
+  DrawTextN(layout, right_text_x + kIconSize + 6, right_title_y,
+            section->label, 12, kText_Normal);
+  if (s_status[0]) {
+    int status_chars = (right_width - 32) / kDebugGlyphWidth;
+    if (status_chars > 40) status_chars = 40;
+    int status_length = CappedTextLength(s_status, status_chars);
+    DrawSmallTextN(layout,
+                   value_right - status_length * kDebugGlyphWidth,
+                   right_title_y + 1, s_status, status_length, kGameGold);
+  }
+
+  /* A section with a single VISIBLE tab draws no strip at all — a lone
+   * highlighted chip would read as a control the player can act on, and it
+   * would spend a row's worth of height saying nothing. Hidden (all-debug)
+   * tabs are skipped, so with debug settings off Town 3D shows Scene/Camera
+   * and System shows no strip. */
+  const int visible_tabs = VisibleTabCount(s_section);
+  const int active_tab = ActiveTabIndex();
+  const int tab_y = right_title_y + 13;
+  int rule_y = right_title_y + 12;
+  if (visible_tabs > 1) {
+    /* Gather the visible tabs, their widths, and the active one's position so
+     * a section with more tabs than fit (Save's six pages) can scroll the
+     * strip to keep the active tab on screen. */
+    int vis[64], vwidth[64], vcount = 0, apos = 0;
+    for (int tab = 0; tab < section->tab_count; tab++) {
+      if (RawTabHidden(s_section, tab) || vcount >= 64) continue;
+      if (tab == active_tab) apos = vcount;
+      vis[vcount] = tab;
+      vwidth[vcount] = SmallTextWidth(section->tabs[tab].label) + 8;
+      vcount++;
+    }
+
+    const int chevron = kDebugGlyphWidth;
+    /* The strip lives between the "L" and "R" button letters. */
+    const int strip_x0 = right_text_x + chevron + 5;
+    const int strip_x1 = value_right - chevron - 3;
+
+    int total = 0;
+    for (int i = 0; i < vcount; i++) total += vwidth[i] + 2;
+    bool overflow = total > strip_x1 - strip_x0;
+    /* When scrolling, reserve a chevron on each side of the strip. */
+    int inner_x0 = strip_x0 + (overflow ? chevron : 0);
+    int inner_x1 = strip_x1 - (overflow ? chevron : 0);
+
+    if (!overflow) s_tab_scroll = 0;
+    if (s_tab_scroll > apos) s_tab_scroll = apos;
+    if (s_tab_scroll < 0) s_tab_scroll = 0;
+    /* Shift right until the active tab fits from the current scroll start. */
+    while (s_tab_scroll < apos) {
+      int span = 0;
+      for (int i = s_tab_scroll; i <= apos; i++) span += vwidth[i] + 2;
+      if (span <= inner_x1 - inner_x0) break;
+      s_tab_scroll++;
+    }
+
+    DrawSmallText(layout, right_text_x, tab_y + 2, "L", kSteelDim);
+    if (overflow && s_tab_scroll > 0)
+      DrawSmallText(layout, strip_x0, tab_y + 2, "<", kSelectYellow);
+
+    int tab_x = inner_x0;
+    int last_shown = s_tab_scroll - 1;
+    for (int i = s_tab_scroll; i < vcount; i++) {
+      if (tab_x + vwidth[i] > inner_x1) break;
+      bool current = vis[i] == active_tab;
+      /* The active tab is the cursor's position among the tabs, so it takes
+       * the same menu yellow as the selected row/section. */
+      if (current) {
+        FillLogicalRect(layout, tab_x, tab_y - 2, vwidth[i], 11,
+                        ScaleColor(kSelectYellow, 20));
+        FillLogicalRect(layout, tab_x, tab_y + 9, vwidth[i], 1, kSelectYellow);
+      }
+      DrawSmallText(layout, tab_x + 4, tab_y + 1, section->tabs[vis[i]].label,
+                    current ? kSelectYellow : kMutedText);
+      tab_x += vwidth[i] + 2;
+      last_shown = i;
+    }
+    if (overflow && last_shown < vcount - 1)
+      DrawSmallText(layout, inner_x1 + 2, tab_y + 2, ">", kSelectYellow);
+    DrawSmallText(layout, value_right - chevron + 2, tab_y + 2, "R", kSteelDim);
+    rule_y = tab_y + 13;
+  }
+  /* Accent rule under the header ties the title, tabs, and row list into one
+   * section-colored block. */
+  FillLogicalRect(layout, right_x + 10, rule_y, right_width - 20, 1,
+                  structure_dim);
+
+  /* ── Rows ─────────────────────────────────────────────────────────────── */
+  const int first_row_y = rule_y + 6;
+  const int selector_x = right_x + 12;
+  const int label_x = right_x + 22;
+  /* Save-state/item labels need up to 18 characters (for example
+   * "Act 2 cleared" and "Strength of Angel"). Label width is computed per row
+   * from the actual formatted value, so short values such as RUN do not waste
+   * the rest of that reservation. */
+  const int value_chars = 18;
+
+  s_visible_rows = (top_y + top_height - 6 - first_row_y) / kRowHeight;
   if (s_visible_rows < 1) s_visible_rows = 1;
-  if (!top_level) EnsureSelectedRowVisible();
+  EnsureSelectedRowVisible();
 
-  int category_row = 0;
+  const SettingCategory category = ActiveTab()->category;
+  int row_index = 0;
+  int drawn_rows = 0;
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (top_level || desc->category != category || IsTopLevelDesc(desc) ||
-        !Settings_IsMenuVisible(desc))
-      continue;
-    int row = category_row++;
+    if (!RowBelongsToActiveTab(desc)) continue;
+    int row = row_index++;
     if (row < s_top_row || row >= s_top_row + s_visible_rows) continue;
+    drawn_rows++;
     int y = first_row_y + (row - s_top_row) * kRowHeight;
+    /* Commands are separated from the settings they act on. */
     if (category == kSettingCat_Save &&
-        (!strcmp(desc->key, "save_editor_page") ||
-         !strcmp(desc->key, "save_apply_session")))
-      FillLogicalRect(layout, right_x + 12, y - 3,
-                      right_width - 24, 1, 0x6080A0C0u);
+        !strcmp(desc->key, "save_apply_session"))
+      FillLogicalRect(layout, right_x + 12, y - 3, right_width - 24, 1,
+                      structure_dim);
+    if (category == kSettingCat_Extras && !strcmp(desc->key, "restart_game"))
+      FillLogicalRect(layout, right_x + 12, y - 3, right_width - 24, 1,
+                      ARGB(160, 190, 96, 76));
     bool selected = s_submenu_open && row == s_row;
     bool available = Settings_IsAvailable(desc);
     if (selected) {
-      FillLogicalRect(layout, right_x + 9, y - 2,
-                      right_width - 18,
-                      11, kHighlight);
-      DrawGlyph(layout, selector_x + ((SDL_GetTicks() / 250) & 1),
-                y, '>', kText_Warning);
+      FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
+                      kHighlight);
+      FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
+      DrawGlyph(layout, selector_x + ((SDL_GetTicks() / 250) & 1), y, '>',
+                kText_Warning);
     }
     TextStyle style = available && s_submenu_open
         ? kText_Normal : kText_Dim;
 
     char value[512];
-    if (selected && s_editing) {
+    if (selected && desc == s_capture_desc) {
+      /* Blink so an armed row is unmistakable — on a Deck the status line at
+       * the bottom of the panel is easy to miss mid-rebind. */
+      snprintf(value, sizeof(value), "%s",
+               (SDL_GetTicks() / 300) & 1 ? "PRESS..." : "");
+    } else if (selected && s_editing) {
       snprintf(value, sizeof(value), "%s", s_edit_buffer);
     } else {
       Settings_FormatValue(desc, value, sizeof(value));
     }
-    if (!value[0]) snprintf(value, sizeof(value), "CUSTOM");
+    if (!value[0] && desc != s_capture_desc)
+      snprintf(value, sizeof(value), "CUSTOM");
     if (desc->field == &g_settings.display_mode) {
       static const char *const short_modes[] = {
         "4:3 AUTH", "WIDE RAW", "WIDE FULL", "CUSTOM"
@@ -1678,6 +2527,15 @@ static void DrawMenu(const MenuLayout *layout) {
           mode < (int)(sizeof(short_modes) / sizeof(short_modes[0])))
         snprintf(value, sizeof(value), "%s", short_modes[mode]);
     }
+    /* Vsync locks to the display, so name the display's actual refresh rate
+     * rather than the bare word "Vsync". Purely display-side (the saved value
+     * stays the plain enum label). Unknown Hz falls back to "Vsync". */
+    if (desc->field == &g_settings.refresh_mode &&
+        g_settings.refresh_mode == kRefreshMode_Vsync) {
+      int hz = Settings_HostRefreshHz();
+      if (hz > 0)
+        snprintf(value, sizeof(value), "Vsync %dHz", hz);
+    }
     int shown_value_chars = CappedTextLength(value, value_chars);
     int row_value_left = value_right - shown_value_chars * kGlyphSize;
     int restart_x = row_value_left - 12;
@@ -1686,42 +2544,112 @@ static void DrawMenu(const MenuLayout *layout) {
     DrawTextN(layout, label_x, y, desc->label, label_chars, style);
     /* M2 (followup doc): values render in kText_Value (cool cyan) so they
      * read distinct from labels, but only for normal/enabled rows — a
-     * dim/unavailable row's style must win so it stays visibly greyed,
-     * matching M4's dim-when-unavailable intent instead of lighting up in
-     * bright cyan. */
+     * dim/unavailable row's style must win so it stays visibly greyed. */
     DrawTextRight(layout, value_right, y, value, value_chars,
                   style == kText_Normal ? kText_Value : style);
     if (desc->apply == kApply_Restart)
       DrawGlyph(layout, restart_x, y, '*', kText_Warning);
   }
 
-  if (!top_level && category == kSettingCat_Inspector) {
-    int info_y = first_row_y + category_row * kRowHeight + 5;
-    FillLogicalRect(layout, right_x + 12, info_y - 4,
-                    right_width - 24, 1, 0x6080A0C0u);
-    DrawText(layout, right_text_x, info_y, "LIVE SCENE", kText_Normal);
-    DrawInspectorInfo(layout, right_text_x, info_y + 12,
-                      (right_width - 24) / kGlyphSize, 5);
+  DrawScrollBar(layout, scroll_x, first_row_y - 2,
+                s_visible_rows * kRowHeight, row_index, s_visible_rows,
+                s_top_row, structure);
+
+  if (row_index == 0)
+    DrawSmallText(layout, right_text_x, first_row_y + 2,
+                  "Nothing to configure on this tab.", kMutedText);
+
+  if (category == kSettingCat_Inspector) {
+    int info_y = first_row_y + drawn_rows * kRowHeight + 5;
+    FillLogicalRect(layout, right_x + 12, info_y - 4, right_width - 24, 1,
+                    structure_dim);
+    DrawSmallText(layout, right_text_x, info_y, "LIVE SCENE", structure);
+    DrawInspectorInfo(layout, right_text_x, info_y + 11,
+                      (right_width - 24) / kDebugGlyphWidth, 6);
   }
 
-  const SettingDesc *selected = top_level
-      ? top_level : (s_submenu_open ? SelectedDesc() : NULL);
+  /* ── Description panel ────────────────────────────────────────────────── */
+  const int description_x = margin + 12;
+  const int description_chars = (bottom_width - 24) / kDebugGlyphWidth;
+  const SettingDesc *selected = s_submenu_open ? SelectedDesc() : NULL;
+  const int header_y = bottom_y + 8;
   if (selected) {
-    int tooltip_chars = (bottom_width - 24) / kGlyphSize;
-    DrawWrappedText(layout, margin + 12, bottom_y + 12,
-                    selected->tooltip,
-                    tooltip_chars, 3,
-                    Settings_IsAvailable(selected)
-                        ? kText_Normal : kText_Dim);
+    DrawSmallText(layout, description_x, header_y, selected->label, structure);
+    /* Naming HOW a change takes effect next to the row removes the usual
+     * "did that do anything?" question; the '*' row marker only says that a
+     * restart is involved, not what the other kinds do. */
+    const char *apply = Settings_ApplyKindName(selected->apply);
+    uint32_t apply_color = selected->apply == kApply_Restart
+        ? kGameGold : kMutedText;
+    if (!Settings_IsAvailable(selected)) {
+      apply = "Unavailable in this mode";
+      apply_color = ARGB(255, 246, 49, 49);  /* menu red */
+    }
+    DrawSmallTextN(layout,
+                   panel_right - 12 - SmallTextWidth(apply), header_y,
+                   apply, description_chars, apply_color);
+    FillLogicalRect(layout, description_x, header_y + 10,
+                    bottom_width - 24, 1, structure_dim);
+    DrawWrappedSmallText(layout, description_x, header_y + 14,
+                         selected->tooltip, description_chars, 4,
+                         ARGB(255, 208, 220, 232));
+  } else {
+    DrawSmallText(layout, description_x, header_y, section->label, structure);
+    FillLogicalRect(layout, description_x, header_y + 10,
+                    bottom_width - 24, 1, structure_dim);
+    DrawWrappedSmallText(layout, description_x, header_y + 14,
+                         section->blurb, description_chars, 4,
+                         ARGB(255, 208, 220, 232));
   }
-  DrawText(layout, margin + 12, bottom_y + bottom_height - 18,
-           s_editing
-               ? "TYPE VALUE  RETURN APPLY  A/ESC CANCEL"
-               : (s_submenu_open
-                    ? "D-PAD SELECT/CHANGE B EDIT/RUN Y RESET A BACK"
-                    : "UP/DOWN SELECT  B OPEN/RUN  A CLOSE"),
-           kText_Dim);
+
+  /* ── Hint line ────────────────────────────────────────────────────────── */
+  static const uint32_t kKeyColor = ARGB(255, 146, 200, 244);
+  static const uint32_t kHintColor = ARGB(255, 112, 132, 150);
+  /* Flat key/label pairs. Key names take the bright color so the line reads
+   * as controls rather than as one more grey sentence. */
+  const char *hints[14];
+  int hint_count = 0;
+#define HINT(key, text) do { \
+    hints[hint_count++] = (key); hints[hint_count++] = (text); \
+  } while (0)
+  if (s_capture_desc) {
+    HINT("ANY KEY", "bind");
+    HINT("ESC", "cancel");
+  } else if (s_editing) {
+    HINT("RETURN", "apply");
+    HINT("A/ESC", "cancel");
+  } else if (s_submenu_open) {
+    HINT("UP/DOWN", "select");
+    /* The verbs track what the selected row actually does: an Int row adjusts
+     * (hold to accelerate — felt, not spelled out, to keep the line short),
+     * a string/mask row opens a text prompt, the rest cycle. "adjust" is the
+     * same width as "change", so this never widens the line. */
+    const SettingDesc *row = SelectedDesc();
+    bool numeric = row && row->type == kSettingType_Int;
+    bool textual = row && (row->type == kSettingType_Mask ||
+                           row->type == kSettingType_Custom);
+    HINT("LEFT/RIGHT", numeric ? "adjust" : "change");
+    if (VisibleTabCount(s_section) > 1) HINT("L/R", "tab");
+    if (textual) HINT("B", "type");
+    HINT("Y", "reset");
+    HINT("A", "back");
+  } else {
+    HINT("UP/DOWN", "section");
+    if (VisibleTabCount(s_section) > 1) HINT("L/R", "tab");
+    HINT("B", "open");
+    HINT("A", "close");
+  }
+#undef HINT
+  int hint_x = description_x;
+  const int hint_y = bottom_y + bottom_height - 13;
+  for (int i = 0; i + 1 < hint_count; i += 2) {
+    DrawSmallText(layout, hint_x, hint_y, hints[i], kKeyColor);
+    hint_x += SmallTextWidth(hints[i]) + 5;
+    DrawSmallText(layout, hint_x, hint_y, hints[i + 1], kHintColor);
+    hint_x += SmallTextWidth(hints[i + 1]) + 11;
+  }
 }
+
 
 void SettingsOverlay_Render(SDL_Rect game_viewport) {
   if (!s_open || !s_renderer || !s_font_textures[kText_Normal]) return;

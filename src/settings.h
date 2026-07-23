@@ -34,8 +34,28 @@ typedef enum {
   kScreenAspect_43 = 0,
   kScreenAspect_169,
   kScreenAspect_1610,
+  kScreenAspect_Stretch,   /* fill the window, ignore aspect (was a separate
+                            * "Stretch to window" toggle) */
   kScreenAspect_Count,
 } ScreenAspect;
+
+/* Host window presentation. Borderless is desktop-fullscreen (SDL's default
+ * fullscreen); Exclusive requests a real fullscreen video mode. */
+typedef enum {
+  kWindowMode_Windowed = 0,
+  kWindowMode_Borderless,
+  kWindowMode_Exclusive,
+  kWindowMode_Count,
+} WindowMode;
+
+/* Present pacing. Vsync locks to the display; Unlimited disables vsync so the
+ * present thread never blocks; Limit paces to frame_limit_fps. */
+typedef enum {
+  kRefreshMode_Vsync = 0,
+  kRefreshMode_Unlimited,
+  kRefreshMode_Limit,
+  kRefreshMode_Count,
+} RefreshMode;
 
 /* Host audio-rate presets. The stored value is the stable menu/config enum;
  * Settings_AudioFrequencyHz translates it for SDL device creation. */
@@ -85,12 +105,23 @@ typedef enum {
   kDioramaSky_Count,
 } DioramaSkyMode;
 
+/* Dimensions of Settings::input_bind. input_map.h static-asserts that these
+ * still match its own InputClass/InputAction counts. */
+enum {
+  kSettingsInputClasses = 2,
+  kSettingsInputActions = 24,
+};
+
 typedef enum {
   kSettingType_Bool,
   kSettingType_Int,
   kSettingType_Enum,
   kSettingType_Mask,
   kSettingType_Custom,
+  /* An input binding. Stored, parsed, and serialized exactly like CUSTOM —
+   * the separate type exists so the overlay can tell a binding row apart and
+   * open its press-a-button capture mode instead of a text-entry field. */
+  kSettingType_Binding,
   kSettingType_Action,
 } SettingType;
 
@@ -102,18 +133,36 @@ typedef enum {
   kApply_Action,
 } SettingApplyKind;
 
+/* A category is one TAB of the host settings overlay, not a top-level menu
+ * entry: settings_overlay.c groups several of these under each nav section
+ * (Video, Diorama, Town 3D, ...). Categories that used to hold 30-50 rows are
+ * therefore split into several here — a category is meant to be a panel-sized
+ * list, and the section above it is what the player navigates by. */
 typedef enum {
   kSettingCat_Cheats,
   kSettingCat_Widescreen,
   kSettingCat_Display,
-  kSettingCat_Presentation,
-  kSettingCat_Simulation,
+  kSettingCat_Presentation,      /* Diorama: layers, skybox, master toggle */
+  kSettingCat_DioramaCamera,     /* Diorama: camera pose + reactive sway */
+  kSettingCat_Simulation,        /* Town 3D: master toggle + render stages */
+  kSettingCat_SimCamera,         /* Town 3D: camera pose + reactive sway */
+  kSettingCat_SimLighting,       /* Town 3D: light direction, shadow, rim */
+  kSettingCat_SimAtmosphere,     /* Town 3D: clouds, haze, cull, backdrop */
   kSettingCat_Graphics,
   kSettingCat_Audio,
+  kSettingCat_Input,             /* device selection and analog tuning */
+  kSettingCat_InputBinds,        /* one row per (device class, action) */
   kSettingCat_Save,
-  kSettingCat_Extras,
+  kSettingCat_Extras,        /* System > Tools: host commands + debug switch */
+  kSettingCat_Enhancements,  /* System > Game: gameplay QoL (bridge, turbo) */
   kSettingCat_Inspector,
+  kSettingCat_Count,
 } SettingCategory;
+
+/* True for every Town 3D tab. Callers that react to "the 3D town presentation
+ * changed" (main.c's paused-redraw kick) want the whole group, not one tab. */
+bool Settings_CategoryIsSim3D(SettingCategory category);
+
 
 typedef enum SaveProgressEdit {
   kSaveProgressEdit_LeaveAsIs = 0,
@@ -125,7 +174,10 @@ typedef enum SaveProgressEdit {
 } SaveProgressEdit;
 
 typedef enum SaveEditorPage {
-  kSaveEditorPage_Progress = 0,
+  /* Actions holds the backend/arming controls and the apply/import/export
+   * commands that used to repeat on every page; the rest are staged payload. */
+  kSaveEditorPage_Actions = 0,
+  kSaveEditorPage_Progress,
   kSaveEditorPage_Status,
   kSaveEditorPage_Magic,
   kSaveEditorPage_Items,
@@ -193,10 +245,15 @@ typedef struct Settings {
    * render width without reallocating emulated state. */
   int extended_aspect;
   int pixel_aspect;
-  int window_scale;
-  bool fullscreen;
+  int window_scale;         /* render/upscale multiple of the SNES height */
+  int window_mode;          /* WindowMode: windowed / borderless / exclusive */
   bool new_renderer;
+  /* Derived from extended_aspect == kScreenAspect_Stretch; kept as its own
+   * field because many runtime readers (present.c, diorama.c, main.c) gate on
+   * it. Settings keep it in sync via OnScreenRatioChanged. */
   bool ignore_aspect_ratio;
+  int refresh_mode;         /* RefreshMode: vsync / unlimited / limit */
+  int frame_limit_fps;      /* target FPS when refresh_mode == Limit */
 
   /* Audio controls. The SDL callback consumes an atomic mirror of the master
    * value; the game-thread COP hook reads the dialogue toggle directly. */
@@ -219,6 +276,11 @@ typedef struct Settings {
   int turbo_multiplier;
   uint16 warp_target;
   bool scene_inspector;      /* click-to-inspect live PPU/asset identity */
+  /* Reveals developer-only rows in the settings overlay — the diorama/town
+   * numeric tuning dials, layer A/B toggles, and the scene inspector tools.
+   * Off (default) keeps the menu to the master toggles and major on/off
+   * effects a player tunes for performance. See Settings_IsDebugOnly. */
+  bool show_debug_settings;
 
   /* Battery-save preferences and staged verified field edits. The active
    * backend is snapshotted when the save system attaches at boot. Region
@@ -258,7 +320,7 @@ typedef struct Settings {
   bool cheat_freeze_timer;
   bool cheat_moonjump;
   int  cheat_moonjump_speed;
-  int  cheat_no_knockback;
+  bool cheat_no_knockback;   /* full-invuln "ignore hits"; on/off */
   uint8 pin_count;
   SettingsPin pins[32];
 
@@ -401,6 +463,19 @@ typedef struct Settings {
    * cadence drops to ~4ms so disabling vsync actually has somewhere to
    * re-present faster into. */
   bool uncapped_framerate;
+
+  /* Input mapping. The dimensions mirror input_map.h's InputClass /
+   * InputAction enums (statically asserted there); they are spelled out here
+   * so settings.h stays free of the SDL dependency input_map.h carries. */
+  uint32 input_bind[kSettingsInputClasses][kSettingsInputActions];
+  int input_device;           /* InputDeviceMode: auto / keyboard / gamepad */
+  int input_gamepad_slot;     /* 0 = first connected, else 1-based slot */
+  int input_bind_page;        /* which class the Input category lists */
+  int input_stick_deadzone;   /* percent of full stick travel */
+  bool input_stick_as_dpad;
+  int input_cam_deadzone;     /* percent, for the analog camera actions */
+  int input_cam_sensitivity;  /* percent of the base orbit/zoom rate */
+  bool input_cam_invert_y;
 } Settings;
 
 extern Settings g_settings;
@@ -435,6 +510,12 @@ bool Settings_Save(const char *path);
 const SettingDesc *Settings_Find(const char *key);
 bool Settings_IsAvailable(const SettingDesc *desc);
 bool Settings_IsMenuVisible(const SettingDesc *desc);
+/* True for a developer-only row: the fine numeric tuning dials of the diorama
+ * and town 3D renderers, their internal layer/stage A/B toggles, and the scene
+ * inspector tools. Hidden from the menu unless g_settings.show_debug_settings
+ * is on. Master mode toggles, major on/off effects, and camera mode/reset stay
+ * visible either way. */
+bool Settings_IsDebugOnly(const SettingDesc *desc);
 bool Settings_GetLong(const SettingDesc *desc, long *value);
 SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value);
 SettingChangeResult Settings_SetText(const SettingDesc *desc, const char *text);
@@ -470,6 +551,13 @@ bool Sim3D_ModeIsOn(void);
 int Settings_ExtendedAspectX(void);
 int Settings_ExtendedAspectY(void);
 int Settings_AudioFrequencyHz(void);
+
+/* The host display's detected refresh rate in whole Hz (0 = unknown). main.c
+ * pushes it from SDL at boot and whenever the window's display/mode changes;
+ * the overlay shows it next to the Vsync refresh option so "Vsync" is not a
+ * blind label. Purely informational — it drives no behavior. */
+void Settings_SetHostRefreshHz(int hz);
+int Settings_HostRefreshHz(void);
 /* Folds the SIM 3D stage toggles into the one mask the resolver and the frame
  * payload work in. The toggles are the only stored state; no mask is
  * persisted, so this is the single conversion point. */

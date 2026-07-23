@@ -37,7 +37,9 @@ void ParseConfigFile(const char *path) {
       Settings_StageConfigValue("window_scale", val);
     } else if (application_section && strcmp(key, "Fullscreen") == 0) {
       g_config.fullscreen = (uint8)atoi(val);
-      Settings_StageConfigValue("fullscreen", val);
+      /* Legacy Fullscreen=1 meant desktop-fullscreen, now window_mode
+       * Borderless (1); 0 stays Windowed (0). */
+      Settings_StageConfigValue("window_mode", atoi(val) ? "1" : "0");
     } else if (application_section && strcmp(key, "NewRenderer") == 0) {
       g_config.new_renderer = atoi(val) != 0;
       Settings_StageConfigValue("new_renderer", val);
