@@ -1229,10 +1229,37 @@ void ActRaiserDrawPpuFrame(void) {
         extern uint8_t g_hud_bg_pixels[];
         PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3, g_hud_bg_pixels,
                               pitch);
-        /* Do NOT reissue PpuSetOverlayCapture here — the line-906
+        /* Do NOT issue the generic wide capture here — the line-906
          * HUD-split-specific capture region (0,0,kActRaiserAuthenticWidth,
-         * hud_split_height) must stay the authority for this source; this
-         * generic wide-capture path is only for the diorama's OWN layers. */
+         * hud_split_height) stays the authority for this source's X range;
+         * that wide path is only for the diorama's OWN layers.
+         *
+         * BG3 carries more than the status bar, though: the act-title card
+         * ("FILLMORE / ACT-1", BG3 tilemap rows 8/10 -> y=64..88) and the
+         * pause text are the same layer, just below the split. In flat mode
+         * they stay in the game framebuffer and are simply visible. In
+         * diorama mode that framebuffer becomes the BACKDROP plane, drawn
+         * first and then painted over by the BG2/BG1/OBJ planes — the text
+         * silently disappeared behind the scene. Extend the SAME capture
+         * rectangle down the full authentic height so those rows land in
+         * g_hud_bg_pixels too; present.c draws everything below
+         * hud_split_height as one flat, centered "body" chunk (the HUD
+         * split's three anchored bands are driven by wsHudSplitHeight, not
+         * by this rectangle, so their geometry is unchanged).
+         *
+         * Only extend an ALREADY-ACTIVE capture: when the widescreen policy
+         * declined a HUD split (non-action map, 4:3 / RAW display mode) BG3
+         * is not captured at all, and adding a RemoveFromGame capture with
+         * nothing on the present side to draw it would erase BG3 outright. */
+        PpuOverlayCapture *bg3_capture =
+            &g_ppu->overlayCaptures[kPpuOverlaySource_Bg3];
+        if (bg3_capture->y1 > bg3_capture->y0 &&
+            bg3_capture->y1 < kActRaiserAuthenticHeight)
+          PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3,
+                               bg3_capture->x0, bg3_capture->y0,
+                               bg3_capture->x1 - bg3_capture->x0,
+                               kActRaiserAuthenticHeight - bg3_capture->y0,
+                               bg3_capture->flags);
       } else {
         if (!g_diorama_layer_pixels[kPpuOverlaySource_Bg3])
           g_diorama_layer_pixels[kPpuOverlaySource_Bg3] =

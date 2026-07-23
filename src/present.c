@@ -199,6 +199,26 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
         kInspectorPresentation_HudBg, -in->extra_left_right);
   }
 
+  /* Band 4 (diorama): everything on BG3 BELOW the status bar — the act-title
+   * card and the pause text. Unlike the bands above, this content is authored
+   * for the authentic 256px screen and has no left/right anchor semantics, so
+   * it is drawn as a single centered chunk at its authentic Y. Only present
+   * when the capture side extended BG3's rectangle past the split (diorama +
+   * diorama_hud_flat); in flat mode these rows are still drawn by the game
+   * into the framebuffer and hud_body_y1 stays 0. */
+  if (in->hud_body_y1 > height) {
+    int body_h = in->hud_body_y1 - height;
+    int body_dw = ScaledHudPixels(256, scale_x);
+    SDL_Rect body_src = { tex_extra, height, 256, body_h };
+    SDL_Rect body_dst = { viewport.x + (viewport.w - body_dw) / 2,
+                          viewport.y + ScaledHudPixels(height, scale_y),
+                          body_dw, ScaledHudPixels(body_h, scale_y) };
+    AddHudPresentationChunk(
+        chunks, &count, in->hud_bg_texture, body_src,
+        (SDL_Rect){ 0, height, 256, body_h }, body_dst,
+        kInspectorPresentation_HudBg, 0);
+  }
+
   /* Action's selected-magic icon (4 OAM, 16x16), simulation's hourglass
    * (4 OAM, 16x16), and Sky Palace's magic icon (2 OAM, 16x8) are separately
    * validated OAM signatures; the caller resolves the icon x/y (from live
@@ -276,6 +296,12 @@ static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) 
   in.hud_player_row_y = slot->hud_player_row_y;
   in.hud_left_only_y = slot->hud_left_only_y;
   in.extra_left_right = slot->extra_left_right;
+  {
+    const FrameSlotOverlayCapture *bg3 =
+        &slot->overlay_captures[kFrameSlotOverlay_Bg3];
+    if (bg3->y1 > (int16_t)slot->hud_split_height && bg3->y1 <= 240)
+      in.hud_body_y1 = (uint8_t)bg3->y1;
+  }
 
   const FrameSlotOverlayCapture *obj_capture =
       &slot->overlay_captures[kFrameSlotOverlay_Obj];

@@ -262,6 +262,13 @@ typedef struct HudProjectionInputs {
   int visible_width;
   uint8_t hud_split_height, hud_left_end, hud_right_start;
   uint8_t hud_player_row_y, hud_left_only_y, extra_left_right;
+  /* Bottom row (exclusive) of the BG3 capture when it extends BELOW
+   * hud_split_height — diorama mode captures the whole authentic height so
+   * the act-title card and pause text (same layer as the HUD, just further
+   * down the screen) can be drawn as a flat overlay instead of vanishing
+   * behind the tilted scene planes. 0 (or <= hud_split_height) means the
+   * capture is the status bar only, as in flat mode. */
+  uint8_t hud_body_y1;
   /* Resolved OBJ HUD-icon slot (computed by the caller from oam/highOam —
    * see main.c's InspectWindowPoint / FrameSlot's oam[]/high_oam[]). */
   bool obj_icon_valid;
@@ -277,7 +284,9 @@ typedef struct HudPresentationChunk {
   int inspector_x_bias;
 } HudPresentationChunk;
 
-enum { kHudPresentationChunkCapacity = 7 };
+/* 3 (top band) + 2 (player row) + 1 (enemy row) + 1 (BG3 body: act title /
+ * pause text) + 1 (OBJ icon). */
+enum { kHudPresentationChunkCapacity = 8 };
 
 int BuildHudPresentationChunks(SDL_Rect viewport,
                                const HudProjectionInputs *inputs,

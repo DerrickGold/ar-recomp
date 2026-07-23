@@ -1605,6 +1605,10 @@ static void FillLiveHudProjectionInputs(HudProjectionInputs *in) {
   in->hud_player_row_y = g_ppu->wsHudPlayerRowY;
   in->hud_left_only_y = g_ppu->wsHudLeftOnlyY;
   in->extra_left_right = g_ppu->extraLeftRight;
+  const PpuOverlayCapture *bg3_capture =
+      &g_ppu->overlayCaptures[kPpuOverlaySource_Bg3];
+  if (bg3_capture->y1 > (int16_t)in->hud_split_height && bg3_capture->y1 <= 240)
+    in->hud_body_y1 = (uint8_t)bg3_capture->y1;
   const PpuOverlayCapture *obj_capture =
       &g_ppu->overlayCaptures[kPpuOverlaySource_Obj];
   if (obj_capture->oamCount == 4) {
@@ -2585,6 +2589,33 @@ static void RunOuterIterationHousekeeping(void) {
       if (gf >= (unsigned)warp_at) {
         warp_fired = true;
         PerformWarp();
+      }
+    }
+  }
+
+  /* AR_DIORAMA_AT=<gameframe>: flip Diorama 3D on once the game-frame counter
+   * reaches the value, through the same descriptor path the D hotkey uses.
+   * Booting straight into diorama changes the widescreen margin budget and
+   * desyncs game-frame-keyed input replays, so a visual-regression run has to
+   * replay flat into the stage and only then switch. */
+  {
+    static long diorama_at = -2;
+    static bool diorama_fired;
+    if (diorama_at == -2) {
+      const char *at = getenv("AR_DIORAMA_AT");
+      diorama_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
+    }
+    if (diorama_at >= 0 && !diorama_fired) {
+      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      /* $0088 is $5555-filled before the game initialises it; ignore that
+       * boot sentinel or every target fires on frame 0. */
+      if (gf != 0x5555 && gf >= (unsigned)diorama_at) {
+        diorama_fired = true;
+        const SettingDesc *mode = Settings_Find("diorama_mode");
+        if (mode && Settings_IsAvailable(mode) && !g_settings.diorama_mode) {
+          Settings_SetLong(mode, 1);
+          fprintf(stderr, "[diorama] ON via AR_DIORAMA_AT at gf=%u\n", gf);
+        }
       }
     }
   }
