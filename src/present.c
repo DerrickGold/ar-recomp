@@ -1759,8 +1759,10 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
   y1 = source.y + (0.5f - world_y1) * source.h;
 
   float base_alpha = (float)alpha / 255.0f;
-  /* File-scope rather than automatic: at this density the pair is ~140KB,
-   * well past a sane frame. Every caller runs on the present thread. */
+  /* File-scope rather than automatic: at this density the pair is ~175KB
+   * (3185 * 32B SDL_Vertex + indices), well past a sane frame. Since Phase 0
+   * every caller runs on the render/main thread — the only thread that issues
+   * SDL render calls — so these shared statics stay single-threaded-safe. */
   static SDL_Vertex vertices[kSimUnderlayVertexCount];
   static int indices[kSimUnderlayIndexCount];
   int vertex_count = 0, index_count = 0;
