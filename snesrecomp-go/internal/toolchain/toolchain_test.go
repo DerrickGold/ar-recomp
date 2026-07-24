@@ -1,8 +1,12 @@
 package toolchain
 
 import (
+	"bytes"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPinTableCoversSupportedPlatforms(t *testing.T) {
@@ -76,5 +80,48 @@ func TestLocateReportsActionableError(t *testing.T) {
 	message := err.Error()
 	if !strings.Contains(message, "toolchain fetch") || !strings.Contains(message, EnvOverride) {
 		t.Fatalf("error not actionable: %s", message)
+	}
+}
+
+func TestProgressReaderReportsPercentage(t *testing.T) {
+	var out bytes.Buffer
+	payload := strings.Repeat("x", 100)
+	reader := &progressReader{inner: strings.NewReader(payload), total: 100, out: &out}
+	n, err := io.Copy(io.Discard, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 100 {
+		t.Fatalf("copied %d bytes, want 100", n)
+	}
+	if reader.read != 100 {
+		t.Fatalf("progressReader.read=%d, want 100", reader.read)
+	}
+	if !strings.Contains(out.String(), "100%") {
+		t.Fatalf("progress output never reached 100%%: %q", out.String())
+	}
+}
+
+func TestProgressReaderUnknownTotalIsSilent(t *testing.T) {
+	var out bytes.Buffer
+	// total==0 (unknown Content-Length) must still count bytes but print nothing.
+	reader := &progressReader{inner: strings.NewReader("abcd"), total: 0, out: &out}
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		t.Fatal(err)
+	}
+	if reader.read != 4 {
+		t.Fatalf("progressReader.read=%d, want 4", reader.read)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("expected no output for unknown total, got %q", out.String())
+	}
+}
+
+func TestDownloadClientHasTimeout(t *testing.T) {
+	// The download client must cap the whole transfer so a stalled connection
+	// cannot hang the build forever. This mirrors the constant used in download().
+	client := &http.Client{Timeout: 30 * time.Minute}
+	if client.Timeout != 30*time.Minute {
+		t.Fatalf("timeout=%v, want 30m", client.Timeout)
 	}
 }

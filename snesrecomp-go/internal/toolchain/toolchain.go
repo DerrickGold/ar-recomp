@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // PinnedZigVersion is the single Zig release every platform bundle carries.
@@ -219,8 +220,31 @@ func checksumMatches(path, want string) bool {
 	return hex.EncodeToString(digest.Sum(nil)) == want
 }
 
+// progressReader wraps an io.Reader and prints a percentage line to out as
+// bytes flow through it. total==0 (unknown Content-Length) suppresses the
+// percentage but still counts bytes. out is a field so tests can capture the
+// output instead of writing to the terminal.
+type progressReader struct {
+	inner io.Reader
+	total int64
+	read  int64
+	out   io.Writer
+}
+
+func (p *progressReader) Read(buffer []byte) (int, error) {
+	n, err := p.inner.Read(buffer)
+	p.read += int64(n)
+	if p.out != nil && p.total > 0 {
+		fmt.Fprintf(p.out, "\r  %3d%% (%d/%d bytes)", p.read*100/p.total, p.read, p.total)
+	}
+	return n, err
+}
+
 func download(url, destination string) error {
-	response, err := http.Get(url)
+	// A default http.Client has no timeout, so a stalled connection could hang
+	// the build forever. Cap the whole transfer at 30 minutes.
+	client := &http.Client{Timeout: 30 * time.Minute}
+	response, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", url, err)
 	}
@@ -233,8 +257,15 @@ func download(url, destination string) error {
 		return err
 	}
 	defer file.Close()
-	if _, err := io.Copy(file, response.Body); err != nil {
+	var source io.Reader = response.Body
+	if response.ContentLength > 0 {
+		source = &progressReader{inner: response.Body, total: response.ContentLength, out: os.Stdout}
+	}
+	if _, err := io.Copy(file, source); err != nil {
 		return fmt.Errorf("download %s: %w", url, err)
+	}
+	if response.ContentLength > 0 {
+		fmt.Fprintln(os.Stdout)
 	}
 	return nil
 }
