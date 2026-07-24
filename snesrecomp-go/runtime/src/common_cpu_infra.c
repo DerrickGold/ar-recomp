@@ -607,27 +607,6 @@ void (*g_cpu_cop_hook)(CpuState *cpu) = 0;
 const char *g_recomp_stack[RECOMP_STACK_DEPTH];
 int g_recomp_stack_top = 0;
 unsigned long g_recomp_push_count = 0;  /* total function entries; per-frame work meter */
-int g_trace_one_frame = 0;  /* AR_CTACTION: trace exactly one inter-yield batch */
-int g_ct_arm_request = 0;   /* set when 8465_M0X0 seen; WaitForVblank arms next batch */
-
-/* AR_CTACTION batch buffer: buffer each inter-yield batch's call trace and flush
- * only the batch that contains 8465_M0X0 — captures the exact m=1->0 corrupting
- * frame from its start. Reset/flushed by RecompBatchYield() at each vblank. */
-static char g_batch_buf[256 * 1024];
-static int  g_batch_len;
-static int  g_batch_had_8465;
-static int  g_batch_done;   /* once we've flushed the corrupting batch, stop */
-
-void RecompBatchYield(void) {
-  if (!getenv("AR_CTACTION") || g_batch_done) return;
-  if (g_batch_had_8465) {
-    fwrite(g_batch_buf, 1, (size_t)g_batch_len, stderr);
-    fprintf(stderr, "[1f] flushed corrupting batch (%d bytes)\n", g_batch_len);
-    g_batch_done = 1;
-  }
-  g_batch_len = 0;
-  g_batch_had_8465 = 0;
-}
 
 /* Per-frame 65816 stack-entry level (cpu->S at function entry), parallel
  * to g_recomp_stack and indexed by the same g_recomp_stack_top. The
@@ -784,88 +763,6 @@ void RecompStackPush(const char *name) {
                 g_recomp_stack_top * 2, "", name ? name : "?");
     }
   }
-  // TEMP DIAGNOSTIC: tripwires for the action-level fade-freeze investigation.
-  //   AR_TRAP8465 — fire when the misdecoded bank_00_8465_M0X0 (BRK stub that
-  //                 never pops its return frame) is entered: dump frame, cpu->S,
-  //                 m/x, and the full recomp call stack (innermost first). This
-  //                 should NEVER run in a correct game; it's the smoking gun.
-  //   Also counts entries into bank_00_8966 (the new computed-jump continuation
-  //                 dispatch entry) to confirm the fix path is exercised.
-  if ((getenv("AR_TRAP8465") || getenv("AR_CTACTION")) && name
-      && strcmp(name, "bank_00_8465_M0X0") == 0) {
-    extern int snes_frame_counter;
-    g_ct_arm_request = 1;   /* ask WaitForVblank to trace the NEXT full batch */
-    static int once;
-    if (!once) {
-      once = 1;
-      fprintf(stderr, "[trap] *** bank_00_8465_M0X0 (BRK misdecode) entered f=%d top=%d ***\n",
-              snes_frame_counter, g_recomp_stack_top);
-      for (int i = g_recomp_stack_top - 1; i >= 0 && i >= g_recomp_stack_top - 12; i--)
-        fprintf(stderr, "[trap]   [%d] %s\n", i, g_recomp_stack[i] ? g_recomp_stack[i] : "?");
-    }
-  }
-  // TEMP DIAGNOSTIC: AR_92CBLOG — when the level object-stream rebuild $92CB
-  // runs, log the section key it loads: cpu->D, cpu->DB, and the 16-bit
-  // [$7E:D+$18] compared against the $B100 index table. Lets us see whether the
-  // recomp loads a different section than the oracle (28 vs 49 objects).
-  if (getenv("AR_92CBLOG") && name && strncmp(name, "bank_00_92CB", 12) == 0) {
-    extern int snes_frame_counter;
-    extern CpuState g_cpu;
-    extern uint8 g_ram[];
-    uint32 a = (uint32)((g_cpu.D + 0x18) & 0x1ffff);
-    unsigned key = (unsigned)g_ram[a] | ((unsigned)g_ram[(a + 1) & 0x1ffff] << 8);
-    fprintf(stderr, "[92cb] f=%d D=%04x DB=%02x [$7E:D+18]=%04x  ($7E0018=%04x)\n",
-            snes_frame_counter, g_cpu.D, g_cpu.DB, key,
-            (unsigned)g_ram[0x18] | ((unsigned)g_ram[0x19] << 8));
-  }
-  // TEMP DIAGNOSTIC: AR_SPAWNLOG — log X (grid slot) at the object-spawn /
-  // slot-init routines, to see which slot each spawn targets and whether the
-  // free-slot pointer advances. The terminator dies because spawns keep hitting
-  // the same slot ($11E0) without advancing it.
-  if (getenv("AR_SPAWNLOG") && name) {
-    extern int snes_frame_counter;
-    extern CpuState g_cpu;
-    extern uint8 g_ram[];
-    const char *m = NULL;
-    if (strncmp(name, "bank_00_A758", 12) == 0) m = "A758";
-    else if (strncmp(name, "bank_00_85B7", 12) == 0) m = "85B7(init $4000)";
-    else if (strncmp(name, "bank_02_B127", 12) == 0) m = "B127";
-    /* AR_MLOG: log entry m-flag of the 82E2 sub-call chain to localize the
-     * m=0 leak that makes B127 misdecode (needs m=1). */
-    if (getenv("AR_MLOG") && (strncmp(name, "bank_00_845F", 12) == 0 ||
-        strncmp(name, "bank_00_8915", 12) == 0 || strncmp(name, "bank_02_B030", 12) == 0 ||
-        strncmp(name, "bank_02_B091", 12) == 0 || strncmp(name, "bank_02_B127", 12) == 0)) {
-      extern int snes_frame_counter;
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-      if (gf >= 1900 && gf <= 1918)
-        fprintf(stderr, "[mlog] gf=%u %-20s entry m=%u x=%u S=%04x\n", gf, name,
-                (unsigned)g_cpu.m_flag, (unsigned)g_cpu.x_flag, g_cpu.S);
-    }
-    if (m && strcmp(m, "B127") == 0)
-      fprintf(stderr, "[b127] entry name=%s m=%u x=%u caller=%s caller2=%s\n",
-              name, (unsigned)g_cpu.m_flag, (unsigned)g_cpu.x_flag,
-              g_recomp_stack_top >= 1 && g_recomp_stack[g_recomp_stack_top-1] ? g_recomp_stack[g_recomp_stack_top-1] : "?",
-              g_recomp_stack_top >= 2 && g_recomp_stack[g_recomp_stack_top-2] ? g_recomp_stack[g_recomp_stack_top-2] : "?");
-    if (m) fprintf(stderr, "[spawn] gf=%u f=%d %-16s X=%04x A=%04x Y=%04x  $008a=%04x $00cc=%04x\n",
-                   (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8),
-                   snes_frame_counter, m, g_cpu.X, g_cpu.A, g_cpu.Y,
-                   (unsigned)g_ram[0x8a] | ((unsigned)g_ram[0x8b] << 8),
-                   (unsigned)g_ram[0xcc] | ((unsigned)g_ram[0xcd] << 8));
-  }
-  // TEMP DIAGNOSTIC: log the first frame each function is entered, to see the
-  // recomp's execution progression (AR_FUNCLOG=1). AR_FUNCLOG=<substr> filters.
-  if (getenv("AR_FUNCLOG")) {
-    static const void *seen[8192]; static int nseen;
-    int found = 0;
-    for (int i = 0; i < nseen; i++) if (seen[i] == (const void*)name) { found = 1; break; }
-    if (!found && nseen < 8192) {
-      seen[nseen++] = name;
-      const char *filt = getenv("AR_FUNCLOG");
-      extern int snes_frame_counter;
-      if (filt[0] == '1' || strstr(name, filt))
-        fprintf(stderr, "[func] frame %d: %s\n", snes_frame_counter, name);
-    }
-  }
   // TEMP DIAGNOSTIC: AR_CALLTRACE=N logs EVERY function entry during frames
   // [N, N+2], with indentation by stack depth, for ground-truth control flow.
   {
@@ -885,20 +782,6 @@ void RecompStackPush(const char *name) {
         fprintf(stderr, "[ct S=%04x m=%u] %*s%s\n", g_cpu.S, (unsigned)g_cpu.m_flag,
                 g_recomp_stack_top * 2, "", name);
     }
-  }
-  // TEMP DIAGNOSTIC: AR_CTACTION one-shot trace. ActRaiser_WaitForVblank arms
-  // g_trace_one_frame for exactly one inter-yield batch once the game enters
-  // action mode ($18==1), to capture the stuck per-frame loop without flooding.
-  if (getenv("AR_CTACTION") && !g_batch_done && name) {
-    extern int snes_frame_counter;
-    extern CpuState g_cpu;
-    if (strcmp(name, "bank_00_8465_M0X0") == 0) g_batch_had_8465 = 1;
-    if (g_batch_len < (int)sizeof(g_batch_buf) - 256)
-      g_batch_len += snprintf(g_batch_buf + g_batch_len,
-              sizeof(g_batch_buf) - (size_t)g_batch_len,
-              "[1f f%d m=%u x=%u] %*s%s\n", snes_frame_counter,
-              (unsigned)g_cpu.m_flag, (unsigned)g_cpu.x_flag,
-              g_recomp_stack_top * 2, "", name);
   }
   g_recomp_push_count++;   /* monotonic; AR_FRAMELOG measures per-frame work */
   if (g_recomp_stack_top < RECOMP_STACK_DEPTH)
