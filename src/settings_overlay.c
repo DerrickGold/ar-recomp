@@ -1832,37 +1832,40 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     return true;
   }
 
-  switch (key) {
-    /* Universal keyboard controls, deliberately fixed and independent of the
-     * game bindings: arrows navigate, Enter confirms, Esc/F1 close, [/]+Tab
-     * cycle tabs. These alone fully operate the menu, which matters because
-     * the menu is the only place to repair a broken binding — so it must stay
-     * usable even if the player has unbound or mangled their SNES keys. */
-    case SDLK_ESCAPE:
-    case SDLK_F1:
+  /* Universal keyboard controls, deliberately fixed and independent of the
+   * game bindings: arrows navigate, Enter confirms, Esc/F1 close, [/]+Tab
+   * cycle tabs. These alone fully operate the menu, which matters because the
+   * menu is the only place to repair a broken binding — so it must stay usable
+   * even if the player has unbound or mangled their SNES keys. Matched by
+   * SCANCODE (physical position) not keycode, so the arrow/Enter/Esc positions
+   * navigate the menu the same way on a non-US layout (AZERTY etc.). */
+  SDL_Scancode sc = SDL_GetScancodeFromKey(key, NULL);
+  switch (sc) {
+    case SDL_SCANCODE_ESCAPE:
+    case SDL_SCANCODE_F1:
       ApplyMenuNav(kMenuNav_Close, repeat);
       break;
-    case SDLK_UP:
+    case SDL_SCANCODE_UP:
       ApplyMenuNav(kMenuNav_Up, repeat);
       break;
-    case SDLK_DOWN:
+    case SDL_SCANCODE_DOWN:
       ApplyMenuNav(kMenuNav_Down, repeat);
       break;
-    case SDLK_LEFT:
+    case SDL_SCANCODE_LEFT:
       ApplyMenuNav(kMenuNav_Left, repeat);
       break;
-    case SDLK_RIGHT:
+    case SDL_SCANCODE_RIGHT:
       ApplyMenuNav(kMenuNav_Right, repeat);
       break;
-    case SDLK_RETURN:
-    case SDLK_KP_ENTER:
+    case SDL_SCANCODE_RETURN:
+    case SDL_SCANCODE_KP_ENTER:
       ApplyMenuNav(kMenuNav_Confirm, repeat);
       break;
-    case SDLK_LEFTBRACKET:
+    case SDL_SCANCODE_LEFTBRACKET:
       ApplyMenuNav(kMenuNav_TabPrev, repeat);
       break;
-    case SDLK_RIGHTBRACKET:
-    case SDLK_TAB:
+    case SDL_SCANCODE_RIGHTBRACKET:
+    case SDL_SCANCODE_TAB:
       ApplyMenuNav(kMenuNav_TabNext, repeat);
       break;
     default: {
