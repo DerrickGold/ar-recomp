@@ -64,7 +64,8 @@ static struct {
   unsigned total;                  /* file length, frames */
   bool loop;
   int gain_percent;
-  double src_carry;                /* fractional source frames per block */
+  double src_carry;                /* fractional source frames per block == carried resample phase */
+  int16_t hist[2];                 /* prior block's final source frame (L,R), for the cubic left-edge tap */
 } s;
 
 /* ---- parsing ------------------------------------------------------------ */
@@ -342,6 +343,8 @@ static void StartSession(const MusicReplacement *entry, int song) {
   s.loop_end = entry->loop_end;
   s.gain_percent = entry->gain_percent;
   s.src_carry = 0.0;
+  s.hist[0] = 0;
+  s.hist[1] = 0;
   g_dsp_voice_mute_srcn_min = MUSIC_MUTE_SRCN_MIN;
   fprintf(stderr, "[music] src=%02X:%04X song=%02x -> [music:%s] %s\n",
           (unsigned)(entry->src >> 16), (unsigned)(entry->src & 0xffff),
@@ -444,10 +447,11 @@ static void MixMusic(int16_t *out, int out_frames) {
   const MusicReplacement *entry = s.session;
   int output_rate = RtlGetAudioOutputRate();
   if (output_rate <= 0) output_rate = 44100;
+  const double phase0 = s.src_carry;      /* carried sub-sample resample phase */
   double per_block = ((double)out_frames * entry->file_rate / output_rate) +
-                     s.src_carry;
+                     phase0;
   int src_frames = (int)per_block;
-  s.src_carry = per_block - src_frames;
+  s.src_carry = per_block - src_frames;   /* == end-of-block phase, carried on */
   if (src_frames <= 0) return;
   if (src_frames > MUSIC_MAX_BLOCK_FRAMES) src_frames = MUSIC_MAX_BLOCK_FRAMES;
 
@@ -488,18 +492,31 @@ static void MixMusic(int16_t *out, int out_frames) {
          (size_t)(src_frames - filled) * 2 * sizeof(int16_t));
 
   const int gain = s.gain_percent;
-  const double step = (double)src_frames / (double)out_frames;
-  double pos = 0.0;
+  /* True rate ratio (not the integer src_frames/out_frames) so the phase we
+   * carry in s.src_carry stays consistent with the per-block decode count. */
+  const double step = (double)entry->file_rate / (double)output_rate;
+  const int last = src_frames - 1;
+  double pos = phase0;                    /* continue where the prior block ended */
   for (int i = 0; i < out_frames; i++) {
     int idx = (int)pos;
     double frac = pos - idx;
-    int idx1 = idx + 1;
-    if (idx > src_frames - 1) idx = src_frames - 1;
-    if (idx1 > src_frames - 1) idx1 = src_frames - 1;
+    /* 4-tap Catmull-Rom taps at idx-1, idx, idx+1, idx+2. idx-1 == -1 pulls
+     * the prior block's final frame from s.hist; the right edge clamps to the
+     * last decoded frame (bounded, sub-sample error, no full-block reset). */
+    int im1 = idx - 1, i0 = idx, i1 = idx + 1, i2 = idx + 2;
+    if (i0 > last) i0 = last;
+    if (i1 > last) i1 = last;
+    if (i2 > last) i2 = last;
     for (int ch = 0; ch < 2; ch++) {
-      int s0 = src[idx * 2 + ch];
-      int s1 = src[idx1 * 2 + ch];
-      int sample = (int)(s0 + (s1 - s0) * frac);
+      double p0 = (im1 < 0) ? (double)s.hist[ch] : (double)src[im1 * 2 + ch];
+      double p1 = (double)src[i0 * 2 + ch];
+      double p2 = (double)src[i1 * 2 + ch];
+      double p3 = (double)src[i2 * 2 + ch];
+      double v = p1 + 0.5 * frac *
+                 ((p2 - p0) +
+                  frac * ((2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) +
+                          frac * (3.0 * (p1 - p2) + p3 - p0)));
+      int sample = (int)v;
       sample = (sample * gain) / 100;
       int mixed = out[i * 2 + ch] + sample;
       out[i * 2 + ch] = (int16_t)(mixed < -32768 ? -32768
@@ -507,6 +524,11 @@ static void MixMusic(int16_t *out, int out_frames) {
     }
     pos += step;
   }
+  /* Carry this block's final source frame as history for the next left edge.
+   * src_frames >= 1 and filled > 0 here (early-returned otherwise), and src[]
+   * is zero-filled up to src_frames, so src[last] is always valid. */
+  s.hist[0] = src[last * 2 + 0];
+  s.hist[1] = src[last * 2 + 1];
 
   /* AR_MUSICLOG: once a second, prove frames are actually reaching the mix
    * (post-mix peak) and where the read cursor sits — the counterpart of

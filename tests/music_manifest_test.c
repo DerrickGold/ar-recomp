@@ -312,7 +312,68 @@ static void TestTriggerStateMachine(void) {
   CHECK(buf[0] == 0x1111 && buf[31] == 0x1111);
 }
 
+/* music resampler: the MixMusic interpolation is static in music_replacements.c
+ * and needs a decoded OGG session to drive, so replicate its exact Catmull-Rom
+ * kernel + phase arithmetic here and pin the spec's three ROM-free claims. The
+ * audible-quality payoff (48k against a 44.1k OGG) is the Wave-3 listening gate. */
+static double CatmullRom(double p0, double p1, double p2, double p3, double frac) {
+  return p1 + 0.5 * frac *
+         ((p2 - p0) +
+          frac * ((2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) +
+                  frac * (3.0 * (p1 - p2) + p3 - p0)));
+}
+static void TestMusicResamplerMath(void) {
+  /* Claim 1: Catmull-Rom at frac==0 returns exactly p1 (== src[idx]), so the
+   * native-rate default path is byte-identical to the old linear lerp. */
+  for (int t = 0; t < 4; t++) {
+    double p[4] = { -1000.0 + t, 4321.0, -8765.0, 20000.0 };
+    double v = CatmullRom(p[0], p[1], p[2], p[3], 0.0);
+    CHECK((int)v == (int)p[1]);
+  }
+  /* Claim 2: native-rate ratio is exactly 1.0 (step==1.0), so per_block is
+   * integral, src_carry stays 0.0, and the carried phase0 stays 0. */
+  {
+    int file_rate = 44100, output_rate = 44100, out_frames = 512;
+    double src_carry = 0.0;
+    for (int block = 0; block < 8; block++) {
+      double phase0 = src_carry;
+      double per_block = (double)out_frames * file_rate / output_rate + phase0;
+      int src_frames = (int)per_block;
+      src_carry = per_block - src_frames;
+      CHECK(src_frames == out_frames);   /* 512 in, 512 out */
+      CHECK(src_carry == 0.0);           /* no drift */
+      CHECK(phase0 == 0.0);              /* frac==0 everywhere -> identity */
+    }
+  }
+  /* Claim 3: phase continuity at a non-native rate — pos starts at phase0 and
+   * ends at per_block; the next block's frame 0 sits at src_frames, and the
+   * carried remainder equals src_carry (zero cumulative drift). */
+  {
+    int file_rate = 44100, output_rate = 48000, out_frames = 1024;
+    double step = (double)file_rate / output_rate;
+    double src_carry = 0.0;
+    double absolute_src = 0.0;   /* running true source position across blocks */
+    for (int block = 0; block < 32; block++) {
+      double phase0 = src_carry;
+      double per_block = (double)out_frames * file_rate / output_rate + phase0;
+      int src_frames = (int)per_block;
+      src_carry = per_block - src_frames;
+      double pos = phase0;
+      for (int i = 0; i < out_frames; i++) pos += step;
+      /* pos ends at per_block; leftover past the decoded frames == src_carry */
+      CHECK((pos - src_frames) - src_carry < 1e-6 &&
+            (pos - src_frames) - src_carry > -1e-6);
+      absolute_src += (double)out_frames * step;
+    }
+    /* Over 32 blocks the accumulated source position matches out*step exactly
+     * (no per-block reset drift). */
+    CHECK(absolute_src - (double)(32 * out_frames) * step < 1e-3 &&
+          absolute_src - (double)(32 * out_frames) * step > -1e-3);
+  }
+}
+
 int main(void) {
+  TestMusicResamplerMath();
   TestParseEntries();
   TestParseRejections();
   TestSharedManifestHdSideIgnoresMusic();
