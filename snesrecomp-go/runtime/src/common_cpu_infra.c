@@ -857,14 +857,34 @@ void RecompStackPop(void) {
 
 // Frame watchdog: detect infinite loops in generated code.
 // Set before calling run_frame, checked by generated code periodically.
-static clock_t g_frame_start_clock;
+// Wall-clock (monotonic) time source. clock() measures process-wide CPU
+// time across all threads on glibc/Linux, so a busy audio/present thread
+// makes it outrun wall time and can trip the watchdog on a game that is
+// not actually hung. Use a monotonic wall clock instead. SDL is game-layer
+// only; this SDL-agnostic runtime TU uses the platform primitive directly.
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+static uint64_t watchdog_monotonic_ns(void) {
+#if defined(_WIN32)
+  LARGE_INTEGER f, c;
+  QueryPerformanceFrequency(&f);
+  QueryPerformanceCounter(&c);
+  return (uint64_t)((c.QuadPart * 1000000000ULL) / (uint64_t)f.QuadPart);
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+#endif
+}
+static uint64_t g_frame_start_ns;
 static int g_watchdog_enabled;
 static int g_watchdog_counter;
 jmp_buf g_watchdog_jmp;
 int g_watchdog_tripped;
 
 void WatchdogFrameStart(void) {
-  g_frame_start_clock = clock();
+  g_frame_start_ns = watchdog_monotonic_ns();
   g_watchdog_enabled = 1;
   g_watchdog_tripped = 0;
   g_watchdog_counter = 0;
@@ -880,10 +900,10 @@ uint64_t g_watchdog_loop_headers;
 void WatchdogCheck(void) {
   g_watchdog_loop_headers++;
   if (!g_watchdog_enabled) return;
-  // Only check clock() every 10000 iterations to avoid overhead
+  // Only check the clock every 10000 iterations to avoid overhead
   if (++g_watchdog_counter < 10000) return;
   g_watchdog_counter = 0;
-  double elapsed = (double)(clock() - g_frame_start_clock) / CLOCKS_PER_SEC;
+  double elapsed = (double)(watchdog_monotonic_ns() - g_frame_start_ns) / 1e9;
   /* Boot has no watchdog. I_RESET runs once and uploads the SPC
    * engine + samples through the IPL handshake, which is real-time
    * paced by the audio thread (the SPC bootROM can only echo bytes
