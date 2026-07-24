@@ -1,4 +1,5 @@
-#pragma once
+#ifndef SCENE_INSPECTOR_H
+#define SCENE_INSPECTOR_H
 
 #include <stdbool.h>
 
@@ -31,3 +32,5 @@ const char *SceneInspector_PanelText(void);
  * the best visible tile or sprite candidate and uses exclusive endpoints. */
 bool SceneInspector_GetPoint(int *screen_x, int *screen_y);
 bool SceneInspector_GetHighlight(int *x0, int *y0, int *x1, int *y1);
+
+#endif  /* SCENE_INSPECTOR_H */

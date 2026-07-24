@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DIORAMA_PLANES_H
+#define DIORAMA_PLANES_H
 #include "snes/ppu.h"
 
 /* Diorama plane indexing for g_diorama_layer_pixels[] and the plane texture
@@ -17,3 +18,5 @@ enum {
   kDioramaPlane_Obj3,                                /* sprites, priority 3 */
   kDioramaPlane_Count
 };
+
+#endif  /* DIORAMA_PLANES_H */

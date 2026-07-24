@@ -1,4 +1,5 @@
-#pragma once
+#ifndef SETTINGS_H
+#define SETTINGS_H
 #include "types.h"
 #include "sim_render_metadata.h"
 
@@ -562,3 +563,5 @@ int Settings_HostRefreshHz(void);
  * payload work in. The toggles are the only stored state; no mask is
  * persisted, so this is the single conversion point. */
 SimRenderFeatureMask Settings_Sim3DRequestedFeatures(void);
+
+#endif  /* SETTINGS_H */

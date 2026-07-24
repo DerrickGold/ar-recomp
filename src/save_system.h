@@ -1,4 +1,5 @@
-#pragma once
+#ifndef SAVE_SYSTEM_H
+#define SAVE_SYSTEM_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -116,3 +117,5 @@ bool SaveSystem_ApplyRegionEdits(const int edits[kActRaiserSaveRegionCount],
 bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error);
 bool SaveSystem_Export(SaveFileFormat format, const char *path,
                        SaveError *error);
+
+#endif  /* SAVE_SYSTEM_H */

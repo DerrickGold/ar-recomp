@@ -1,4 +1,5 @@
-#pragma once
+#ifndef SETTINGS_OVERLAY_H
+#define SETTINGS_OVERLAY_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -94,3 +95,5 @@ void SettingsOverlay_DragDebugPanel(int output_x, int output_y);
 void SettingsOverlay_EndDebugPanelDrag(void);
 bool SettingsOverlay_IsDebugPanelDragging(void);
 bool SettingsOverlay_GetDebugPanelRect(SDL_Rect *rect);
+
+#endif  /* SETTINGS_OVERLAY_H */

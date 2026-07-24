@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DIORAMA_H
+#define DIORAMA_H
 #include <stdbool.h>
 #include <SDL3/SDL.h>
 #include "diorama_planes.h"
@@ -70,3 +71,5 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        float distance_scale);
 
 void Diorama_FlushSettingsIfDirty(void);
+
+#endif  /* DIORAMA_H */

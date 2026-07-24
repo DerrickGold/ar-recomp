@@ -1,4 +1,5 @@
-#pragma once
+#ifndef INPUT_MAP_H
+#define INPUT_MAP_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -167,3 +168,5 @@ bool InputMap_ParseBinding(const char *text, uint32 *binding);
  * connected"; slots 1..N name a specific pad. */
 int InputMap_GamepadCount(void);
 const char *InputMap_GamepadName(int slot);
+
+#endif  /* INPUT_MAP_H */
