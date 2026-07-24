@@ -12,6 +12,14 @@ endif()
 set(CMAKE_C_STANDARD 11)
 include(CTest)
 
+# AR_TESTS_ONLY: configure ONLY the ROM-free test tier (the tests/ suite links
+# individual src/*.c + SDL + PPU, never the generated ROM banks). When ON, the
+# generated-bank glob check and the ActRaiserRecomp game target — both of which
+# require a ROM to have been recompiled (src/gen/*.c + funcs.h) — are skipped,
+# so `cmake -DAR_TESTS_ONLY=ON` configures cleanly on a checkout with no ROM.
+# Off by default: a normal build is byte-identical to before this option existed.
+option(AR_TESTS_ONLY "Configure only the ROM-free test tier (no ROM required)" OFF)
+
 set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
 include(${SNESRECOMP_GO_ROOT}/runtime/runner.cmake)
 
@@ -20,10 +28,11 @@ find_package(SDL3 REQUIRED)
 set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
     "Directory containing generated recomp C translation units")
 file(GLOB ACTRAISER_GEN_SOURCES CONFIGURE_DEPENDS "${ACTRAISER_GEN_DIR}/*.c")
-if(NOT ACTRAISER_GEN_SOURCES)
+if(NOT ACTRAISER_GEN_SOURCES AND NOT AR_TESTS_ONLY)
     message(FATAL_ERROR
         "${ACTRAISER_GEN_DIR} is empty — run `snesbuild regen --root . "
-        "--rom ar.sfc` (or the compatibility tools/regen.sh wrapper) before building.")
+        "--rom ar.sfc` (or the compatibility tools/regen.sh wrapper) before building. "
+        "(Configure with -DAR_TESTS_ONLY=ON to build only the ROM-free test tier.)")
 endif()
 
 # CMake updates the target when regeneration replaces bankXX_v2.c with
@@ -67,6 +76,11 @@ if(IS_DIRECTORY "${_AR_GEN_OBJ_DIR}")
             "build artifact(s), ${_AR_STALE_MIB} MiB")
     endif()
 endif()
+
+# The ActRaiserRecomp game target links the generated ROM banks + funcs.h, so it
+# is skipped entirely under AR_TESTS_ONLY (a ROM-free checkout). The BUILD_TESTING
+# test tier below is independent of this target and always available.
+if(NOT AR_TESTS_ONLY)
 
 add_executable(ActRaiserRecomp
     ${SNESRECOMP_RUNNER_SOURCES}
@@ -188,6 +202,8 @@ target_link_libraries(ActRaiserRecomp PRIVATE
     SDL3::SDL3
     m
 )
+
+endif() # NOT AR_TESTS_ONLY
 
 if(BUILD_TESTING)
     add_executable(actraiser_scene3d_math_test
