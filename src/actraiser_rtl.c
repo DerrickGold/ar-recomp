@@ -1396,6 +1396,10 @@ void ActRaiserDrawPpuFrame(void) {
         g_pixels, width * 4,
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
   }
+  /* Sky Palace BG2 is prepared at the top of this function and ALWAYS restored
+   * here at the end. ActRaiserDrawPpuFrame has no early returns, so a pending
+   * restore can never be stranded — keep it that way if you add control flow
+   * above. */
   ActRaiser_WidescreenSkyPalaceRestore();
 }
 
