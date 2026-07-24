@@ -59,7 +59,6 @@ static inline const uint8 *RomFixedPtr(uint32_t addr) { return &g_rom[(((addr >>
 #define RomFixedPtr(addr) (&g_rom[(((addr >> 16) << 15) | (addr & 0x7fff)) & 0x3fffff])
 #endif
 
-#define GET_BYTE(p) (*(uint8*)(p))
 #define SET_WORD(p, v) (*(uint16*)(p) = (uint16)(v))
 
 // Construct a LongPtr from a 16-bit lo word and 8-bit bank byte.
