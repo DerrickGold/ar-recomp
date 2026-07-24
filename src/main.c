@@ -3341,31 +3341,22 @@ int main(int argc, char **argv) {
       fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
     } }
 
-  /* M5.3/D9: spawn the present thread only now — after every boot-time
-   * texture creation (base/HUD/diorama textures, the settings-overlay font
-   * atlas) has already happened above, and only when there's a renderer to
-   * own (video && !headless — §2.7: headless skips the present thread
-   * entirely; SubmitFrameToPresent's synchronous fallback still fills
-   * g_pixels for PPM captures via AR_HEADLESS_VIDEO). */
-  if (video && !headless) {
-    g_present_mutex = SDL_CreateMutex();
-    g_present_ready_cond = SDL_CreateCondition();
-    g_present_done_cond = SDL_CreateCondition();
-    if (g_present_mutex && g_present_ready_cond && g_present_done_cond) {
-      g_present_running = true;
-      g_present_thread = SDL_CreateThread(PresentThreadFn, "present", NULL);
-      if (g_present_thread) {
-        g_present_thread_active = true;
-      } else {
-        fprintf(stderr, "[present] SDL_CreateThread failed: %s — "
-                "falling back to synchronous present\n", SDL_GetError());
-        g_present_running = false;
-      }
-    } else {
-      fprintf(stderr, "[present] mutex/condition creation failed: %s — "
-              "falling back to synchronous present\n", SDL_GetError());
-    }
-  }
+  /* Phase 0 (MY-AUDIT-render-off-thread): the present thread is intentionally
+   * NOT spawned. SDL3's 2D render API is main-thread-only (SDL_render.h:46-47),
+   * and PresentThreadFn was the sole contract violator (it issued every
+   * present.c render call plus SDL_RenderPresent off the SDL_Init/main thread),
+   * which is why the default GL/EGL backend would not boot on Wayland. All
+   * rendering now runs synchronously on this (the main) thread via
+   * SubmitFrameToPresent's g_present_thread_active==false branch — the same
+   * path headless already used.
+   *
+   * Left frozen at their initializer state: g_present_thread == NULL keeps the
+   * teardown join (below) a no-op; g_present_thread_active == false short-
+   * circuits PresentThread_Quiesce/Resume and WaitForPixelBuffersFree and makes
+   * the paused-redraw path submit unconditionally. The mutex/conds are never
+   * created, so nothing can lock a NULL handle. Fixed-timestep decoupling is
+   * preserved by the M6 accumulator (owns the emulated tick rate) plus vsync
+   * (SDL_RenderPresent blocks briefly when vsync is on). */
 
   bool running = true;
   uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
