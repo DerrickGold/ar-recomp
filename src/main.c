@@ -2149,6 +2149,44 @@ static SimCameraPose Sim3D_ActivePose(void) {
   };
 }
 
+/* #16: the Sim3DTuning snapshot was spelled out identically at both
+ * Sim3D_AnnotateFrame sites (FrameSlot_Capture and DrawAndPresentFrame). Build
+ * it once here so the two can never drift. Output is byte-identical to the
+ * former inline literals (same field list, same sources). */
+static Sim3DTuning BuildSim3DTuning(void) {
+  int sim_margin_left = 0, sim_margin_right = 0;
+  ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right);
+  SimCameraPose sim_pose = Sim3D_ActivePose();
+  return (Sim3DTuning){
+      .pitch_mrad = sim_pose.pitch_mrad,
+      .yaw_mrad = sim_pose.yaw_mrad,
+      .distance_x100 = sim_pose.distance_x100,
+      .height_scale_x100 = g_settings.sim3d_height_scale_x100,
+      .shadow_opacity_pct = g_settings.sim3d_shadow_opacity_pct,
+      .height_pop_pct = g_settings.sim3d_height_pop_pct,
+      .light_azimuth_deg = g_settings.sim3d_light_azimuth_deg,
+      .light_elevation_deg = g_settings.sim3d_light_elevation_deg,
+      .shadow_softness_pct = g_settings.sim3d_shadow_softness_pct,
+      .rim_strength_pct = g_settings.sim3d_rim_strength_pct,
+      .underlay_haze_pct = g_settings.sim3d_underlay_haze_pct,
+      .cloud_opacity_pct = g_settings.sim3d_cloud_opacity_pct,
+      .cloud_falloff_px = g_settings.sim3d_cloud_falloff_px,
+      .cloud_inset_px = g_settings.sim3d_cloud_inset_px,
+      .cull_lead_px = g_settings.sim3d_cull_lead_px,
+      .cull_haze_pct = g_settings.sim3d_cull_haze_pct,
+      .cull_dim_pct = g_settings.sim3d_cull_dim_pct,
+      .cull_haze_lead_px = g_settings.sim3d_cull_haze_lead_px,
+      .cull_corner_px = g_settings.sim3d_cull_corner_px,
+      .underlay_defocus_pct = g_settings.sim3d_underlay_defocus_pct,
+      .cloud_altitude_px = g_settings.sim3d_cloud_altitude_px,
+      .cloud_drift_pct = g_settings.sim3d_cloud_drift_pct,
+      .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
+      .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
+      .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
+      .sprite_margin_left = sim_margin_left,
+      .sprite_margin_right = sim_margin_right };
+}
+
 static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
   dst->sim_camera_mode = g_settings.sim3d_camera_mode;
   dst->sim_dyncam_strength = g_settings.sim3d_reactive_strength;
@@ -2201,37 +2239,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
       &dst->sim, g_ram, g_settings.sim3d_mode,
       Settings_Sim3DRequestedFeatures(),
       g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
-  int sim_margin_left = 0, sim_margin_right = 0;
-  ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right);
-  SimCameraPose sim_pose = Sim3D_ActivePose();
-  Sim3D_AnnotateFrame(&dst->sim, &(Sim3DTuning){
-      .pitch_mrad = sim_pose.pitch_mrad,
-      .yaw_mrad = sim_pose.yaw_mrad,
-      .distance_x100 = sim_pose.distance_x100,
-      .height_scale_x100 = g_settings.sim3d_height_scale_x100,
-      .shadow_opacity_pct = g_settings.sim3d_shadow_opacity_pct,
-      .height_pop_pct = g_settings.sim3d_height_pop_pct,
-      .light_azimuth_deg = g_settings.sim3d_light_azimuth_deg,
-      .light_elevation_deg = g_settings.sim3d_light_elevation_deg,
-      .shadow_softness_pct = g_settings.sim3d_shadow_softness_pct,
-      .rim_strength_pct = g_settings.sim3d_rim_strength_pct,
-      .underlay_haze_pct = g_settings.sim3d_underlay_haze_pct,
-      .cloud_opacity_pct = g_settings.sim3d_cloud_opacity_pct,
-      .cloud_falloff_px = g_settings.sim3d_cloud_falloff_px,
-      .cloud_inset_px = g_settings.sim3d_cloud_inset_px,
-      .cull_lead_px = g_settings.sim3d_cull_lead_px,
-      .cull_haze_pct = g_settings.sim3d_cull_haze_pct,
-      .cull_dim_pct = g_settings.sim3d_cull_dim_pct,
-      .cull_haze_lead_px = g_settings.sim3d_cull_haze_lead_px,
-      .cull_corner_px = g_settings.sim3d_cull_corner_px,
-      .underlay_defocus_pct = g_settings.sim3d_underlay_defocus_pct,
-      .cloud_altitude_px = g_settings.sim3d_cloud_altitude_px,
-      .cloud_drift_pct = g_settings.sim3d_cloud_drift_pct,
-      .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
-      .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
-      .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
-      .sprite_margin_left = sim_margin_left,
-      .sprite_margin_right = sim_margin_right });
+  Sim3DTuning tuning = BuildSim3DTuning();
+  Sim3D_AnnotateFrame(&dst->sim, &tuning);
   /* Accumulation itself happens once a frame at the always-run site below;
    * this only publishes the current canvas state into the slot. */
   dst->sim.town_canvas_serial = SimTownCanvas_Serial();
@@ -2654,37 +2663,8 @@ static void DrawAndPresentFrame(bool headless) {
         &sim, g_ram, g_settings.sim3d_mode,
         Settings_Sim3DRequestedFeatures(),
         g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
-    int sim_margin_left = 0, sim_margin_right = 0;
-    ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right);
-    SimCameraPose sim_pose = Sim3D_ActivePose();
-    Sim3D_AnnotateFrame(&sim, &(Sim3DTuning){
-        .pitch_mrad = sim_pose.pitch_mrad,
-        .yaw_mrad = sim_pose.yaw_mrad,
-        .distance_x100 = sim_pose.distance_x100,
-        .height_scale_x100 = g_settings.sim3d_height_scale_x100,
-        .shadow_opacity_pct = g_settings.sim3d_shadow_opacity_pct,
-        .height_pop_pct = g_settings.sim3d_height_pop_pct,
-        .light_azimuth_deg = g_settings.sim3d_light_azimuth_deg,
-        .light_elevation_deg = g_settings.sim3d_light_elevation_deg,
-        .shadow_softness_pct = g_settings.sim3d_shadow_softness_pct,
-        .rim_strength_pct = g_settings.sim3d_rim_strength_pct,
-        .underlay_haze_pct = g_settings.sim3d_underlay_haze_pct,
-      .cloud_opacity_pct = g_settings.sim3d_cloud_opacity_pct,
-      .cloud_falloff_px = g_settings.sim3d_cloud_falloff_px,
-      .cloud_inset_px = g_settings.sim3d_cloud_inset_px,
-      .cull_lead_px = g_settings.sim3d_cull_lead_px,
-      .cull_haze_pct = g_settings.sim3d_cull_haze_pct,
-      .cull_dim_pct = g_settings.sim3d_cull_dim_pct,
-      .cull_haze_lead_px = g_settings.sim3d_cull_haze_lead_px,
-      .cull_corner_px = g_settings.sim3d_cull_corner_px,
-      .underlay_defocus_pct = g_settings.sim3d_underlay_defocus_pct,
-      .cloud_altitude_px = g_settings.sim3d_cloud_altitude_px,
-      .cloud_drift_pct = g_settings.sim3d_cloud_drift_pct,
-      .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
-      .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
-      .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
-      .sprite_margin_left = sim_margin_left,
-      .sprite_margin_right = sim_margin_right });
+    Sim3DTuning tuning = BuildSim3DTuning();
+    Sim3D_AnnotateFrame(&sim, &tuning);
     /* This site runs on every frame including headless, unlike
      * FrameSlot_Capture, which only runs when a present thread consumes it. */
     Sim3D_RenderTownCanvas(&sim, g_ram, g_ppu);
