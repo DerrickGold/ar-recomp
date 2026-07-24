@@ -45,6 +45,17 @@ static struct {
   uint8_t tiles[kWorldTileCount * kWorldTileBytes];
   uint32_t palette[256];
   uint32_t serial;
+  /* One flag per tile (tilemap is one byte per tile, so this is indexed
+   * identically). A tile is dirty when its tilemap byte changed since it was
+   * last baked; Init marks all of them so the first bake is a full one. */
+  uint8_t dirty[kSimWorldMapBytes];
+  /* Persistent CPU-side baked image (ARGB8888, kSimWorldMapPixels square, tight
+   * pitch). The palette expansion writes here and only for dirty tiles; every
+   * bake then full-copies this into the caller's buffer. That copy is not
+   * optional: the caller hands us a streaming-texture lock whose contents are
+   * write-only and undefined, so baking only dirty tiles into it would leave
+   * the rest as garbage from a previous unrelated use. */
+  uint32_t pixels[kSimWorldMapPixels * kSimWorldMapPixels];
 } g_world;
 
 static uint32_t ExpandBgr555(uint16_t value) {
@@ -74,6 +85,9 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
     g_world.palette[i] =
         ExpandBgr555((uint16_t)(entry[0] | ((uint16_t)entry[1] << 8)));
   }
+  /* Force the first bake to be a full one: everything is "dirty" relative to
+   * the (undefined) contents of the persistent pixels buffer. */
+  memset(g_world.dirty, 1, sizeof(g_world.dirty));
   g_world.available = true;
   g_world.serial = 1;
   return true;
@@ -110,8 +124,19 @@ void SimWorldMap_Refresh(const uint8 *wram, uint8_t map_group,
       ? 0 : kSimWorldMapVolatileRows;
   size_t offset = (size_t)first_row * kSimWorldMapTiles;
   size_t length = sizeof(g_world.tilemap) - offset;
-  if (memcmp(g_world.tilemap + offset, shadow + offset, length) == 0) return;
-  memcpy(g_world.tilemap + offset, shadow + offset, length);
+  /* Per-tile diff: adopt only the bytes that changed and mark just those tiles
+   * dirty, so the next bake re-expands the palette for the handful that moved
+   * rather than all 16384. A wholesale change (a town switch, whose shadow is a
+   * different 128x128) naturally marks every differing tile, which is exactly
+   * the set the bake must redo. Serial still bumps once for the whole frame. */
+  bool changed = false;
+  for (size_t i = offset; i < offset + length; i++) {
+    if (g_world.tilemap[i] == shadow[i]) continue;
+    g_world.tilemap[i] = shadow[i];
+    g_world.dirty[i] = 1;
+    changed = true;
+  }
+  if (!changed) return;
   if (++g_world.serial == 0) g_world.serial = 1;
 }
 
@@ -123,20 +148,35 @@ bool SimWorldMap_Bake(uint32_t *pixels, int pitch_pixels) {
   if (!g_world.available || !pixels || pitch_pixels < kSimWorldMapPixels)
     return false;
 
+  /* Palette-expand only the tiles that changed since their last bake into the
+   * persistent CPU image, then clear their flags. This is the expensive part
+   * (a palette lookup per pixel), and it is the whole point of the dirty
+   * tracking: a single-tile edit touches 64 pixels, not 1,048,576. */
   for (int tile_y = 0; tile_y < kSimWorldMapTiles; tile_y++) {
     for (int tile_x = 0; tile_x < kSimWorldMapTiles; tile_x++) {
+      int tile_index = tile_y * kSimWorldMapTiles + tile_x;
+      if (!g_world.dirty[tile_index]) continue;
       const uint8_t *art =
-          g_world.tiles + g_world.tilemap[tile_y * kSimWorldMapTiles + tile_x] *
-          kWorldTileBytes;
+          g_world.tiles + g_world.tilemap[tile_index] * kWorldTileBytes;
       for (int row = 0; row < kSimWorldMapTilePixels; row++) {
-        uint32_t *out = pixels +
-            (size_t)(tile_y * kSimWorldMapTilePixels + row) * pitch_pixels +
+        uint32_t *out = g_world.pixels +
+            (size_t)(tile_y * kSimWorldMapTilePixels + row) * kSimWorldMapPixels +
             tile_x * kSimWorldMapTilePixels;
         const uint8_t *source = art + row * kSimWorldMapTilePixels;
         for (int column = 0; column < kSimWorldMapTilePixels; column++)
           out[column] = g_world.palette[source[column]];
       }
+      g_world.dirty[tile_index] = 0;
     }
   }
+
+  /* Always copy the whole persistent image into the caller's buffer. The
+   * caller's `pixels` is a streaming-texture lock: write-only with undefined
+   * prior contents, so anything not written this call would be garbage. Copy
+   * row by row because the caller's pitch may exceed kSimWorldMapPixels. */
+  for (int y = 0; y < kSimWorldMapPixels; y++)
+    memcpy(pixels + (size_t)y * pitch_pixels,
+           g_world.pixels + (size_t)y * kSimWorldMapPixels,
+           (size_t)kSimWorldMapPixels * sizeof(uint32_t));
   return true;
 }

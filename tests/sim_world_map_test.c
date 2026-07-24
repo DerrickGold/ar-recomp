@@ -45,6 +45,42 @@ static uint8_t *BuildRom(void) {
   return rom;
 }
 
+/* Colour BuildRom assigns to a tile: tile t is painted with palette index t,
+ * and entry t is a pure blue ramp, so this reproduces ExpandBgr555 for that
+ * ramp (red = green = 0). Independent of the module's bake path on purpose. */
+static uint32_t ColorForTile(uint8_t tile) {
+  uint32_t blue = (uint32_t)((tile & 0x1F) << 3) | ((tile & 0x1F) >> 2);
+  return 0xFF000000u | blue;
+}
+
+/* A full, unconditional bake of `tilemap`, computed here rather than by the
+ * module. Comparing the module's dirty-tracked bake against this catches both
+ * failure modes: a tile that should have been re-baked but was not, and a
+ * non-dirty tile left as whatever garbage the caller's buffer held. */
+static void ReferenceFullBake(const uint8_t *tilemap, uint32_t *out) {
+  for (int tile_y = 0; tile_y < kSimWorldMapTiles; tile_y++)
+    for (int tile_x = 0; tile_x < kSimWorldMapTiles; tile_x++) {
+      uint32_t color = ColorForTile(tilemap[tile_y * kSimWorldMapTiles + tile_x]);
+      for (int row = 0; row < kSimWorldMapTilePixels; row++) {
+        uint32_t *p = out +
+            (size_t)(tile_y * kSimWorldMapTilePixels + row) * kSimWorldMapPixels +
+            tile_x * kSimWorldMapTilePixels;
+        for (int col = 0; col < kSimWorldMapTilePixels; col++) p[col] = color;
+      }
+    }
+}
+
+/* Mirror the module's adoption policy against a test-owned expected tilemap so
+ * the reference bake can be computed from the same state the module holds: a
+ * town frame adopts rows 8+, only a world-map frame adopts rows 0-7. */
+static void ApplyRefreshToExpected(uint8_t *expected, const uint8_t *shadow,
+                                   uint8_t map_number) {
+  int first_row = (map_number == kActRaiserNonActionMap_WorldMap)
+      ? 0 : kSimWorldMapVolatileRows;
+  size_t offset = (size_t)first_row * kSimWorldMapTiles;
+  memcpy(expected + offset, shadow + offset, kSimWorldMapBytes - offset);
+}
+
 static void TestUnavailableRom(void) {
   uint8_t tiny[16] = { 0 };
   CHECK(!SimWorldMap_Init(tiny, sizeof(tiny)));
@@ -168,11 +204,100 @@ static void TestBakeIsFullyCovered(void) {
   free(rom);
 }
 
+/* Per-tile dirty tracking (finding O2) must never change what a bake produces,
+ * only how much work it does. The guardrail is the streaming-texture lock: the
+ * caller hands the bake a write-only buffer of undefined content, so we bake
+ * into a buffer deliberately pre-filled with garbage (0xAA) and assert the
+ * result is byte-identical to a full reference bake. If the optimisation ever
+ * baked only dirty tiles into that buffer, the non-dirty tiles would keep the
+ * 0xAA garbage and these comparisons would fail. */
+static void TestDirtyTrackingMatchesFullBake(void) {
+  uint8_t *rom = BuildRom();
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+
+  size_t count = (size_t)kSimWorldMapPixels * kSimWorldMapPixels;
+  uint32_t *baked = malloc(count * 4);
+  uint32_t *reference = malloc(count * 4);
+
+  /* The tilemap the module holds right after Init is BuildRom's `i & 0x7F`. */
+  uint8_t *expected = malloc(kSimWorldMapBytes);
+  for (int i = 0; i < kSimWorldMapBytes; i++)
+    expected[i] = (uint8_t)(i & 0x7F);
+
+  /* (2) First bake after Init: all tiles dirty, so a bake into garbage memory
+   * must still reproduce the whole ROM tilemap. */
+  memset(baked, 0xAA, count * 4);
+  CHECK(SimWorldMap_Bake(baked, kSimWorldMapPixels));
+  ReferenceFullBake(expected, reference);
+  CHECK(memcmp(baked, reference, count * 4) == 0);
+
+  /* (1) A single-tile Refresh, then a bake into garbage, must match a full
+   * bake of the new state — proving the 16383 non-dirty tiles were preserved
+   * from the persistent image rather than left as the 0xAA the caller's
+   * write-only lock would really contain. */
+  uint8_t *wram = calloc(1, kWramSize);
+  for (int i = 0; i < kSimWorldMapBytes; i++)
+    wram[kShadowWram + i] = (uint8_t)(i & 0x7F);      /* start == baseline */
+  /* Change exactly one tile in an adopted row (row 8, well clear of the
+   * volatile rows 0-7) to a value the baseline never uses there. */
+  size_t edited = (size_t)kSimWorldMapVolatileRows * kSimWorldMapTiles + 5;
+  wram[kShadowWram + edited] = 0x33;
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  expected[edited] = 0x33;
+
+  memset(baked, 0xAA, count * 4);
+  CHECK(SimWorldMap_Bake(baked, kSimWorldMapPixels));
+  ReferenceFullBake(expected, reference);
+  CHECK(memcmp(baked, reference, count * 4) == 0);
+  /* And the edited tile really did land — a sanity check that the comparison
+   * above is not vacuously passing on an unchanged image. */
+  {
+    size_t px = (size_t)(edited / kSimWorldMapTiles) * kSimWorldMapTilePixels *
+                kSimWorldMapPixels +
+                (edited % kSimWorldMapTiles) * kSimWorldMapTilePixels;
+    CHECK(baked[px] == ColorForTile(0x33));
+  }
+
+  /* (3) A mixed sequence of several Refreshes, then one bake, must also match a
+   * full bake of the final state. Includes a world-map frame so rows 0-7 move
+   * too, exercising the volatile-row offset in the diff. */
+  memset(wram + kShadowWram, 0xAB, kSimWorldMapBytes);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);        /* rows 8+ */
+  ApplyRefreshToExpected(expected, wram + kShadowWram, 1);
+  wram[kShadowWram + 100] = 0x07;
+  wram[kShadowWram + 4000] = 0x71;
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  ApplyRefreshToExpected(expected, wram + kShadowWram, 1);
+  memset(wram + kShadowWram, 0x5C, kSimWorldMapBytes);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction,
+                      kActRaiserNonActionMap_WorldMap);              /* rows 0+ */
+  ApplyRefreshToExpected(expected, wram + kShadowWram,
+                         kActRaiserNonActionMap_WorldMap);
+
+  memset(baked, 0xAA, count * 4);
+  CHECK(SimWorldMap_Bake(baked, kSimWorldMapPixels));
+  ReferenceFullBake(expected, reference);
+  CHECK(memcmp(baked, reference, count * 4) == 0);
+
+  /* A bake with no intervening Refresh (nothing dirty) still emits the full
+   * image, because the caller's buffer is fresh garbage every frame. */
+  memset(baked, 0xAA, count * 4);
+  CHECK(SimWorldMap_Bake(baked, kSimWorldMapPixels));
+  CHECK(memcmp(baked, reference, count * 4) == 0);
+
+  free(expected);
+  free(wram);
+  free(reference);
+  free(baked);
+  free(rom);
+}
+
 int main(void) {
   TestUnavailableRom();
   TestTownWindows();
   TestShadowAdoptionPolicy();
   TestBakeIsFullyCovered();
+  TestDirtyTrackingMatchesFullBake();
   SimWorldMap_Shutdown();
   printf("sim world map tests: %s\n", s_failures ? "FAIL" : "pass");
   return s_failures ? 1 : 0;
