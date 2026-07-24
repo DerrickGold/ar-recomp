@@ -65,6 +65,11 @@ reports the pin, its checksum, and what is locally available. Fetch verifies
 the archive against a checksum embedded in the snesbuild binary — the network
 is trusted for bytes, never for content.
 
+The macOS/Linux Zig pins are `.tar.xz` archives, unpacked via the host `tar`,
+which must support `.xz` (standard on modern macOS and Linux). The Windows Zig
+pins are `.zip`, extracted in-process via Go's `archive/zip`, so a Windows host
+never depends on `tar` having `.xz` support.
+
 Inputs are split along the same boundary as the redistribution rules:
 
 - `snesrecomp-go/runtime/runner.cmake` stays the single source of truth for
