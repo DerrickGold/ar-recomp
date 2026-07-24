@@ -430,6 +430,22 @@ static void ClearHeldInput(void) {
   g_input_state = 0;
 }
 
+/* Which device owns the settings overlay right now. Mirrors InputMap_State's
+ * gameplay arbitration (input_map.c:487-496) so ONE physical Steam-Deck press
+ * — which desktop-mode Steam Input can surface as a real pad event AND a
+ * synthesized keyboard twin — moves the menu once, not twice. Exactly one of
+ * these is true at any time: gamepad owns only when a pad is present and the
+ * user hasn't pinned Keyboard; otherwise the keyboard owns (this folds in
+ * InputMap_State's !s_pad_count safety valve, so Gamepad-mode with no pad
+ * connected still lets the keyboard drive/close the menu — no lockout). */
+static bool MenuGamepadIsActiveDevice(void) {
+  return g_settings.input_device != kInputDevice_Keyboard &&
+         InputMap_GamepadCount() > 0;
+}
+static bool MenuKeyboardIsActiveDevice(void) {
+  return !MenuGamepadIsActiveDevice();
+}
+
 /* SDL3 audio-stream callback: fires when the bound device needs more data.
  * `additional_amount` is the number of BYTES the stream wants right now, in
  * the stream's input format (16-bit stereo interleaved = 4 bytes per sample
@@ -3431,11 +3447,19 @@ int main(int argc, char **argv) {
            * and it must win over F5/F9/etc. so those stay bindable. */
           if (SettingsOverlay_HandleCaptureEvent(&event)) break;
           if (SettingsOverlay_IsOpen()) {
-            bool was_open = true;
-            bool consumed = SettingsOverlay_HandleKey(
-                event.key.key, true, event.key.repeat != 0);
-            if (was_open && !SettingsOverlay_IsOpen()) ClearHeldInput();
-            if (consumed) break;
+            /* Only the menu's active device drives navigation, so one
+             * physical press (+ its synthesized twin) moves the menu once. */
+            if (MenuKeyboardIsActiveDevice()) {
+              bool was_open = true;
+              bool consumed = SettingsOverlay_HandleKey(
+                  event.key.key, true, event.key.repeat != 0);
+              if (was_open && !SettingsOverlay_IsOpen()) ClearHeldInput();
+              if (consumed) break;
+            } else {
+              /* Menu owns the screen but keyboard isn't its device: swallow
+               * the key so it never reaches gameplay HandleInput. */
+              break;
+            }
           }
           /* The settings UI is host-owned and safe in every emulated state.
            * Escape/F1 are not SNES inputs, so consume them before HandleInput
@@ -3649,19 +3673,21 @@ int main(int argc, char **argv) {
         case SDL_EVENT_GAMEPAD_BUTTON_UP:
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
           /* While the menu owns the screen the pad drives the menu, not the
-           * game — same split the keyboard already had. */
+           * game — but only when the pad is the menu's active device. */
           if (SettingsOverlay_IsOpen()) {
-            (void)SettingsOverlay_HandleGamepadEvent(&event);
+            if (MenuGamepadIsActiveDevice())
+              (void)SettingsOverlay_HandleGamepadEvent(&event);
             break;
           }
           InputMap_HandleEvent(&event);
           break;
         case SDL_EVENT_KEY_UP:
-          if (SettingsOverlay_IsOpen())
-            (void)SettingsOverlay_HandleKey(event.key.key, false,
-                                            false);
-          else
+          if (SettingsOverlay_IsOpen()) {
+            if (MenuKeyboardIsActiveDevice())
+              (void)SettingsOverlay_HandleKey(event.key.key, false, false);
+          } else {
             HandleInput(event.key.scancode, false);
+          }
           break;
       }
     }

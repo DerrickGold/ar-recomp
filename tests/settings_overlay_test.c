@@ -126,6 +126,36 @@ static uint8_t *ReadOptionalRom(size_t *size_out) {
   return data;
 }
 
+/* AUDIT-1.1 / 3P-overlay-inputdevice: the menu-device arbitration gate in
+ * main.c (MenuGamepadIsActiveDevice / MenuKeyboardIsActiveDevice) is static and
+ * cannot be linked here, so replicate its exact rule over (input_device,
+ * gamepad_count) and assert the 5-row truth table: exactly one owner per row,
+ * so one physical Steam-Deck press (which can surface as both a pad event and a
+ * synthesized keyboard twin) never drives the menu twice and never locks out. */
+static bool MenuGamepadOwns(int input_device, int gamepad_count) {
+  return input_device != kInputDevice_Keyboard && gamepad_count > 0;
+}
+static void CheckMenuDeviceGateTruthTable(void) {
+  const struct {
+    int input_device;
+    int gamepad_count;
+    bool gamepad_owns;
+  } rows[] = {
+      { kInputDevice_Auto,     0, false },  /* Auto, no pad     -> keyboard */
+      { kInputDevice_Auto,     1, true  },  /* Auto, pad        -> gamepad  */
+      { kInputDevice_Keyboard, 0, false },  /* Keyboard pinned  -> keyboard */
+      { kInputDevice_Keyboard, 2, false },  /* Keyboard + pad   -> keyboard */
+      { kInputDevice_Gamepad,  1, true  },  /* Gamepad, pad     -> gamepad  */
+      { kInputDevice_Gamepad,  0, false },  /* Gamepad, no pad  -> keyboard (safety valve) */
+  };
+  for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+    bool pad = MenuGamepadOwns(rows[i].input_device, rows[i].gamepad_count);
+    bool kbd = !pad;
+    CHECK(pad == rows[i].gamepad_owns);
+    CHECK(pad != kbd);  /* exactly one owner: never double-fire, never lockout */
+  }
+}
+
 int main(void) {
   char settings_path[160];
   char settings_temporary[164];
@@ -143,6 +173,7 @@ int main(void) {
   g_ws_extra = g_ws_display_extra = 43;
   Settings_ClearConfigLayer();
   Settings_Init();
+  CheckMenuDeviceGateTruthTable();
   Settings_SetActionObserver(ActionObserved);
   /* Most of this test drives every tab and row, including the developer-only
    * ones (the town Light/Weather dials, the inspector). Turn debug settings on
