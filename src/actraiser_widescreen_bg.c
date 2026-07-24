@@ -520,6 +520,8 @@ static int ws_build_strip(CpuState *cpu, uint16 layer_x, uint16 world_x,
   /* $B158's first $BED3 call multiplies the two bytes assembled from
    * $2F/$31. Compute it directly so only $B825's internal multiply touches
    * the emulated math unit (which the outer snapshot restores). */
+  /* Both g_ram bytes promote to int before the multiply, so 255*255=65025 fits
+   * the uint16 result; no overflow. */
   uint16 dimension_product = (uint16)(
       g_ram[(uint16)(kBgState_Width + 1 + layer_x)] *
       g_ram[(uint16)(kBgState_Height + 1 + layer_x)]);
