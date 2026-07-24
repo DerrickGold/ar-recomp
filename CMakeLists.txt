@@ -330,6 +330,22 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_render_pipeline PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
 
+    # Phase 0 insurance: the whole SDL present pattern (window -> renderer ->
+    # clear -> present -> readpixels) executed on the SDL_Init thread, proving
+    # nothing in that sequence structurally needs a second thread once the
+    # present thread is removed. Software renderer under the dummy driver.
+    add_executable(actraiser_main_thread_boot_test
+        tests/main_thread_boot_test.c
+    )
+    target_link_libraries(actraiser_main_thread_boot_test PRIVATE
+        SDL3::SDL3
+        m
+    )
+    add_test(NAME actraiser_main_thread_boot
+        COMMAND actraiser_main_thread_boot_test)
+    set_tests_properties(actraiser_main_thread_boot PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+
     # End-to-end guard using the REAL PPU: renders a backdrop through the actual
     # scanline renderer (which writes RGB with alpha=0), presents it through the
     # SDL3 path, and asserts the frame is visible — catching the SDL3 default
