@@ -670,9 +670,16 @@ static DioramaScrollDelta ComputeDioramaScrollDelta(
   if (curr->timestamp_ns <= prev->timestamp_ns) return d;      /* not a real pair yet */
   uint64_t span = curr->timestamp_ns - prev->timestamp_ns;
   if (span >= 50000000ULL) return d;                            /* §6.2 sanity: <50ms */
+  /* R3: smooth the tick span so a single wall-clock hitch doesn't corrupt
+   * the one-cycle velocity estimate. Single-threaded after Phase 0, so this
+   * function-local static needs no lock; the <50ms guard above keeps a
+   * hitch out of the average. */
+  static float span_ema = 0.0f;
+  if (span_ema <= 0.0f) span_ema = (float)span;                 /* seed on first valid pair */
+  else span_ema += ((float)span - span_ema) * 0.25f;
   uint64_t now = SDL_GetTicksNS();
   if (now < curr->timestamp_ns) return d;
-  float t = (float)(now - curr->timestamp_ns) / (float)span;
+  float t = (float)(now - curr->timestamp_ns) / span_ema;
   if (t < 0.0f) t = 0.0f;
   if (t > 1.0f) t = 1.0f;                                       /* §6.4 turbo/frame-skip clamp */
 
