@@ -32,7 +32,8 @@ then run this again."
 if ! pkg-config --exists sdl3 2>/dev/null \
         && ! ldconfig -p 2>/dev/null | grep -q 'libSDL3\.so'; then
     fail "SDL3 is not installed. Install it first, for example:
-  Debian/Ubuntu:  sudo apt install libsdl3-dev
+  Debian 13+/Ubuntu 24.04+:  sudo apt install libsdl3-dev
+  (Ubuntu 22.04 / Debian 12 have no SDL3 package - use a PPA or build from source)
   Fedora:         sudo dnf install SDL3-devel
   Arch:           sudo pacman -S sdl3
 then run this again."
