@@ -101,12 +101,12 @@ void InputMap_SetActionHandler(InputMapActionFn handler) {
 }
 
 void InputMap_Init(void) {
-  /* SDL3 drives the Steam Deck's built-in controls through its HIDAPI Steam
-   * driver when the game is launched OUTSIDE Steam; inside Steam, Steam Input
-   * presents a virtual Xbox pad and this hint is a no-op. Enabling it is what
-   * makes a desktop-mode (non-Steam) launch on the Deck see the built-in
-   * sticks, D-pad, and face buttons at all. */
-  SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAM, "1");
+  /* The Steam Deck's built-in gamepad is driven by SDL's HIDAPI Steam Deck
+   * driver, which is enabled by the default HIDAPI joystick hint, so a
+   * desktop-mode launch already sees its sticks/D-pad/face buttons with no
+   * extra hint. A prior SDL_SetHint for the HIDAPI *Steam* driver was removed:
+   * that hint governs Bluetooth Steam Controllers, not the Deck's built-in
+   * pad, and it was set after SDL_Init(SDL_INIT_GAMEPAD) — too late anyway. */
 
   /* Optional community mapping database for pads SDL does not know about.
    * Absent by default; a missing file is not an error. */
