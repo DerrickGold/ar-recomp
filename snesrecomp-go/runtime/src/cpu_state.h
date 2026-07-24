@@ -478,7 +478,6 @@ void ar_mxhist_record(uint32 pc24, int m, int x);
 void ar_mxhist_dump(void);
 void ar_entry_trapfn(CpuState *cpu, const char *fn, uint32 pc24);
 void ar_garbage_variant_trap(CpuState *cpu, const char *fn, uint32 pc24);
-void ar_adad_trace(CpuState *cpu, const char *fn, uint32 pc24);
 /* Unified runtime trace (ar_trace.c) — declared here so the inline
  * ar_entry_mx_check func-entry hook can call it without pulling ar_trace.h. */
 int  ar_trace_active(void);
@@ -493,7 +492,6 @@ static inline void ar_entry_mx_check(CpuState *cpu, int em, int ex,
     ar_mxhist_record(pc24, cpu->m_flag & 1, cpu->x_flag & 1);
   if (g_ar_trapfn)
     ar_entry_trapfn(cpu, fn, pc24);
-  ar_adad_trace(cpu, fn, pc24);
   /* Unified AR_TRACE func-entry channel (records runtime + expected m/x, so a
    * misdecode is visible inline). No-op unless AR_TRACE is set + in window. */
   if (ar_trace_active())

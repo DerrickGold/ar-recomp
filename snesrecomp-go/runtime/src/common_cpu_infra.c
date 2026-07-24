@@ -151,27 +151,6 @@ void ar_mxhist_dump(void) {
   }
 }
 
-/* AR_ADADTRACE=1 (2026-07-01, temporary probe): every entry to bank_01_ADAD*
- * (sim-mode decoration-object OAM-record writer) -- prints X (the per-object
- * index into the DB-relative source table) and DB, plus the raw source words
- * at DB:$000a+X / $000c+X / $0008+X it's about to copy into the WRAM record.
- * Chasing the ~46 identical duplicate decoration sprites (x=77,y=44,tile=0x55)
- * stuck in WRAM $03E8-$047F -- unclear if X fails to advance between calls
- * (loop-index bug) or the SOURCE table itself is uniformly blank (all-same
- * legitimately, meaning the bug is upstream of this function). */
-void ar_adad_trace(CpuState *cpu, const char *fn, uint32_t pc24) {
-  if (!getenv("AR_ADADTRACE") || !fn || !strstr(fn, "bank_01_ADAD")) return;
-  extern int snes_frame_counter;
-  static int n;
-  if (n++ >= 60000) return;
-  uint16 v0a = cpu_read16(cpu, cpu->DB, (uint16)(0x000a + cpu->X));
-  uint16 v0c = cpu_read16(cpu, cpu->DB, (uint16)(0x000c + cpu->X));
-  uint16 v08 = cpu_read16(cpu, cpu->DB, (uint16)(0x0008 + cpu->X));
-  fprintf(stderr, "[adadtrace] %s (%06X) f=%d X=$%04X DB=$%02X D=$%04X "
-          "src[+0a]=$%04X src[+0c]=$%04X src[+08]=$%04X\n",
-          fn, pc24, snes_frame_counter, cpu->X, cpu->DB, cpu->D, v0a, v0c, v08);
-}
-
 /* AR_TRAPFN=<substring>: the first time a function whose name contains the
  * substring is entered, dump the full recomp call stack (top -> bottom) plus
  * the runtime m/x flags. Used to find the dispatch chain that reached a
