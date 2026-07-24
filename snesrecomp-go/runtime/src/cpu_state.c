@@ -169,7 +169,7 @@ uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 addr) {
             if (ar_strace_active()) ar_strace_op("POP", addr, cpu->ram[off], cpu->S);
             extern int ar_stackprov_enabled(void);
             if (ar_stackprov_enabled()) {
-                extern uint32_t g_stack_pusher[];
+                extern uint32_t *g_stack_pusher;
                 if (g_stack_pusher[addr] == 0) {
                     extern uint32_t g_ar_blk_ring[]; extern unsigned g_ar_blk_idx;
                     extern int snes_frame_counter;
@@ -369,7 +369,7 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 addr, uint8 v) {
             extern int ar_stackprov_enabled(void);
             if (ar_stackprov_enabled()) {
                 extern uint32_t g_ar_blk_ring[]; extern unsigned g_ar_blk_idx;
-                extern uint32_t g_stack_pusher[]; extern unsigned g_stack_pusher_frame[];
+                extern uint32_t *g_stack_pusher; extern unsigned *g_stack_pusher_frame;
                 extern int snes_frame_counter;
                 g_stack_pusher[addr] = g_ar_blk_ring[(g_ar_blk_idx - 1u) & 1023u];
                 g_stack_pusher_frame[addr] = (unsigned)snes_frame_counter;
@@ -979,8 +979,8 @@ static RecompReturn _cpu_dispatch_once(CpuState *cpu, uint32 pc24,
                     {
                         extern int ar_stackprov_enabled(void);
                         if (ar_stackprov_enabled()) {
-                            extern uint32_t g_stack_pusher[];
-                            extern unsigned g_stack_pusher_frame[];
+                            extern uint32_t *g_stack_pusher;
+                            extern unsigned *g_stack_pusher_frame;
                             fprintf(stderr,
                                 "[stackprov] return-frame provenance around S=$%04X "
                                 "(bad target %06X, f=%d):\n", cpu->S, pc24,

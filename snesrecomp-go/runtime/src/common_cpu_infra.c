@@ -512,8 +512,8 @@ void ar_xtrace_dump(const char *why, int n) {
  * cases need opposite fixes, so distinguishing them is the whole point.
  * Runner-only, gated, ~256KB. Written from cpu_write8's push heuristic
  * (bank==0 && addr==cpu->S, before the S decrement); read at the dispatch-miss. */
-uint32_t g_stack_pusher[0x10000];
-unsigned g_stack_pusher_frame[0x10000];
+uint32_t *g_stack_pusher = NULL;         /* 256KB, lazily calloc'd when AR_STACKPROV on */
+unsigned *g_stack_pusher_frame = NULL;   /* 256KB, lazily calloc'd when AR_STACKPROV on */
 
 /* AR_STRACE: instruction-granular cpu->S trace scoped to a PC window (default the
  * B20C/B21F loop $03B200..$03B260). Logs every stack push/pop (from cpu_write8/
@@ -555,7 +555,14 @@ void ar_strace_block(uint32_t pc24, uint16_t s, int m, int x) {
 
 int ar_stackprov_enabled(void) {
   static int e = -1;
-  if (e < 0) e = getenv("AR_STACKPROV") ? 1 : 0;
+  if (e < 0) {
+    e = getenv("AR_STACKPROV") ? 1 : 0;
+    if (e && !g_stack_pusher) {
+      g_stack_pusher       = calloc(0x10000, sizeof(uint32_t));
+      g_stack_pusher_frame = calloc(0x10000, sizeof(unsigned));
+      if (!g_stack_pusher || !g_stack_pusher_frame) e = 0;  /* alloc failed: stay disabled */
+    }
+  }
   return e;
 }
 
