@@ -105,9 +105,6 @@ a consuming project verifies and documents them for its own ROM.
 - The maintained integration path is CMake plus the source list in
   `runner.cmake`.
 - SDL2 is currently part of that list through `keybinds.c`.
-- Optional launcher GUI sources/assets exist under `runtime/src/launcher/` but
-  are not in the default runner source list and require their own RmlUi/front-
-  end integration.
 - `debug_server.c` is retained for provenance and future repair, but is not
   built by the default or trace source lists.
 - Platform claims should be based on each consuming project's CI/build matrix;
