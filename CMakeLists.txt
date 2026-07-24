@@ -103,6 +103,7 @@ add_executable(ActRaiserRecomp
     src/diorama.c
     src/present.c
     src/diorama_scroll_math.c
+    src/frame_slot.c
     src/main.c
     src/actraiser_00.c
     src/gen_stubs.c
