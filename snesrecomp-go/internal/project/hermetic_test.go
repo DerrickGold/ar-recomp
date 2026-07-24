@@ -75,10 +75,20 @@ func TestNewestHeaderTime(t *testing.T) {
 	if !newest.Equal(when.Truncate(time.Second)) && !newest.After(when.Add(-time.Second)) {
 		t.Fatalf("newest: %v want ~%v", newest, when)
 	}
-	// Non-recursive by contract: nested headers only count via their own dir.
+	// Scanning the nested dir directly still finds its own header.
 	nestedOnly := newestHeaderTime([]string{nested})
 	if nestedOnly.IsZero() {
 		t.Fatal("nested dir scan found nothing")
+	}
+	// Recursive by contract: a header one level down (nested/deep.h) is found
+	// when scanning the PARENT, so a nested SDL3/*.h update is not missed.
+	deepWhen := time.Now().Add(90 * time.Minute)
+	if err := os.Chtimes(filepath.Join(nested, "deep.h"), deepWhen, deepWhen); err != nil {
+		t.Fatal(err)
+	}
+	recursive := newestHeaderTime([]string{directory})
+	if !recursive.After(when.Add(-time.Second)) || recursive.Before(deepWhen.Add(-time.Second)) {
+		t.Fatalf("recursive scan missed nested/deep.h: got %v want ~%v", recursive, deepWhen)
 	}
 }
 

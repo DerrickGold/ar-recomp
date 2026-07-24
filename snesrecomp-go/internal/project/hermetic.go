@@ -297,27 +297,32 @@ func objectFresh(source, object string, newestHeader time.Time) bool {
 	return modified.After(sourceInfo.ModTime()) && modified.After(newestHeader)
 }
 
-// newestHeaderTime scans each include directory (non-recursively — every
-// header-bearing directory is listed explicitly) for the newest *.h mtime.
+// newestHeaderTime scans each include directory recursively for the newest
+// *.h mtime. Nested layouts like <include>/SDL3/SDL_render.h must count, so a
+// staleness check that only listed the top level would miss a header updated
+// one directory down. An unreadable subtree is skipped rather than fatal.
 func newestHeaderTime(includeDirs []string) time.Time {
 	var newest time.Time
 	for _, directory := range includeDirs {
-		entries, err := os.ReadDir(directory)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".h") {
-				continue
-			}
-			info, err := entry.Info()
+		_ = filepath.WalkDir(directory, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
-				continue
+				if entry != nil && entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".h") {
+				return nil
+			}
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				return nil
 			}
 			if info.ModTime().After(newest) {
 				newest = info.ModTime()
 			}
-		}
+			return nil
+		})
 	}
 	return newest
 }
