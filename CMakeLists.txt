@@ -23,7 +23,7 @@ option(AR_TESTS_ONLY "Configure only the ROM-free test tier (no ROM required)" O
 set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
 include(${SNESRECOMP_GO_ROOT}/runtime/runner.cmake)
 
-find_package(SDL3 REQUIRED)
+find_package(SDL3 3.4.0 REQUIRED)
 
 set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
     "Directory containing generated recomp C translation units")
