@@ -1799,7 +1799,7 @@ typedef struct { int call_idx; int frame; uint8_t wram_slice[0x2000]; } recomp_s
 extern const char *g_recomp_snap_on_func;
 extern int        g_recomp_snap_count;
 extern int        g_recomp_snap_frame;
-extern recomp_snap_entry g_recomp_snap_ring[256];
+extern recomp_snap_entry *g_recomp_snap_ring;
 extern const recomp_snap_entry* recomp_snap_lookup(int call_idx);
 
 static char s_snap_name_buf[128];

@@ -734,12 +734,13 @@ typedef struct {
     int     frame;
     uint8_t wram_slice[RECOMP_SNAP_SLICE_LEN];
 } recomp_snap_entry;
-recomp_snap_entry g_recomp_snap_ring[RECOMP_SNAP_RING_LEN];
+recomp_snap_entry *g_recomp_snap_ring = NULL;   /* lazily calloc'd on first capture */
 
 /* Lookup an entry by absolute call index. Returns NULL if the index
  * is out of the ring's current window. */
 const recomp_snap_entry* recomp_snap_lookup(int call_idx) {
     if (call_idx < 1) return NULL;
+    if (!g_recomp_snap_ring) return NULL;
     int slot = (call_idx - 1) % RECOMP_SNAP_RING_LEN;
     if (g_recomp_snap_ring[slot].call_idx != call_idx) return NULL;
     return &g_recomp_snap_ring[slot];
@@ -807,6 +808,10 @@ void RecompStackPush(const char *name) {
       match = 0;
     }
     if (match) {
+      if (!g_recomp_snap_ring) {
+        g_recomp_snap_ring = calloc(RECOMP_SNAP_RING_LEN, sizeof(recomp_snap_entry));
+        if (!g_recomp_snap_ring) return;   /* alloc failed: skip capture, do not crash */
+      }
       g_recomp_snap_count++;
       g_recomp_snap_frame = snes_frame_counter;
       int slot = (g_recomp_snap_count - 1) % RECOMP_SNAP_RING_LEN;
