@@ -41,6 +41,9 @@ extern Ppu *g_ppu;
 RecompReturn bank_02_B825_M1X0(CpuState *cpu);
 RecompReturn bank_02_B8A0_M1X0(CpuState *cpu);
 
+// Single-owner WRAM save/restore scratch for ActRaiser_WidescreenMarginRefresh
+// only. Written (snapshot) and read back (restore) within one call, once per PPU
+// frame, on the sim/draw thread; non-reentrant. Do not reuse from another caller.
 static uint8 s_wram_snapshot[kActRaiserWramSize];
 
 enum {
