@@ -3025,6 +3025,22 @@ int main(int argc, char **argv) {
   }
 
   if (video) {
+    /* Which backend SDL actually chose. A "dummy"/"offscreen" driver makes
+     * every video call succeed while nothing reaches the screen (audio is
+     * unaffected), so a silent window is otherwise indistinguishable from a
+     * working one. Listing the compiled-in drivers also tells you instantly
+     * whether a hand-supplied libSDL3 was built without a real backend. */
+    const char *driver = SDL_GetCurrentVideoDriver();
+    fprintf(stderr, "[video] driver: %s (available:", driver ? driver : "(none)");
+    for (int i = 0, n = SDL_GetNumVideoDrivers(); i < n; i++)
+      fprintf(stderr, " %s", SDL_GetVideoDriver(i));
+    fprintf(stderr, ")\n");
+    if (driver && (SDL_strcmp(driver, "dummy") == 0 ||
+                   SDL_strcmp(driver, "offscreen") == 0))
+      fprintf(stderr, "[video] WARNING: '%s' renders nowhere — the window will "
+                      "never appear. Set SDL_VIDEODRIVER to a real backend from "
+                      "the list above, or use an SDL build that has one.\n", driver);
+
     int scale = g_settings.window_scale ? g_settings.window_scale : 3;
     /* Window sized to the DISPLAY aspect: with the 4:3-corrected PAR the
      * rendered width (e.g. 342) is narrower than the displayed width (16:9 of

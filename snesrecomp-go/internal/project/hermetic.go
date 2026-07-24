@@ -68,6 +68,15 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Source lists that disagree produce either a link failure thousands of
+	// object files later or a silently different binary from the developer
+	// build. Both are far more expensive to read than this. `doctor` reports
+	// the same drift as a warning; here it stops the build.
+	if drift := ManifestDriftWarnings(paths.Root, manifest); len(drift) > 0 {
+		return "", fmt.Errorf("%s and CMakeLists.txt disagree on the game source list:\n  %s\n"+
+			"add the missing entries to whichever file is behind, then build again",
+			ManifestFileName, strings.Join(drift, "\n  "))
+	}
 
 	runtimeDir := filepath.Join(paths.ToolchainDir, "runtime")
 	runnerSources, runnerIncludes, err := RunnerSources(runtimeDir)

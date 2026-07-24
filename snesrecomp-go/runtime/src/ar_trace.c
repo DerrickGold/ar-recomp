@@ -1,4 +1,12 @@
 /* ar_trace — unified single-run runtime trace. See ar_trace.h. */
+
+/* Watch mode opens a custom FILE* over watch_write. glibc spells that
+ * fopencookie and hides it behind __USE_GNU, so this must be defined before
+ * any libc header is pulled in — including transitively via ar_trace.h. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "ar_trace.h"
 
 #include <stdio.h>
@@ -95,7 +103,8 @@ static void ring_push_and_maybe_dump(const char *line) {
   s_pending_anom = 0;
 }
 
-/* funopen write callback: accumulate chars until newline, then push the line. */
+/* Custom-stream write callback: accumulate chars until newline, then push the
+ * line. Signature matches BSD funopen; the glibc path adapts it below. */
 static int watch_write(void *cookie, const char *buf, int len) {
   (void)cookie;
   for (int i = 0; i < len; i++) {
@@ -109,6 +118,24 @@ static int watch_write(void *cookie, const char *buf, int len) {
   }
   return len;
 }
+
+/* Write-only FILE* over watch_write. funopen is BSD/macOS; glibc offers
+ * fopencookie, which wants size_t/ssize_t and a function table. Both give a
+ * stream that never touches the filesystem, so the ring stays in memory. */
+#ifdef __GLIBC__
+static ssize_t watch_write_cookie(void *cookie, const char *buf, size_t len) {
+  return (ssize_t)watch_write(cookie, buf, (int)len);
+}
+
+static FILE *open_watch_stream(void) {
+  cookie_io_functions_t io = {NULL, watch_write_cookie, NULL, NULL};
+  return fopencookie(NULL, "w", io);
+}
+#else
+static FILE *open_watch_stream(void) {
+  return funopen(NULL, NULL, watch_write, NULL, NULL);
+}
+#endif
 
 static void parse_channels(const char *csv) {
   if (!csv || !csv[0]) { s_ch = AR_TR_DEFAULT; return; }
@@ -146,7 +173,7 @@ static void trace_init(void) {
     if (k) s_post_k = (int)strtoul(k, NULL, 0);
     if (s_ring_n < 16) s_ring_n = 16;
     s_ring = calloc((size_t)s_ring_n, AR_LINE_MAX);
-    s_fp = s_ring ? funopen(NULL, NULL, watch_write, NULL, NULL) : NULL;
+    s_fp = s_ring ? open_watch_stream() : NULL;
     if (!s_fp) { fprintf(stderr, "[ar_trace] watch: alloc/stream failed\n"); return; }
     setvbuf(s_fp, NULL, _IONBF, 0);
     const char *chenv = getenv("AR_TRACE_CH");

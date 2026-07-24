@@ -129,3 +129,27 @@ func TestSdlLibDirHasLib(t *testing.T) {
 		t.Fatal("libSDL3.dylib not accepted")
 	}
 }
+
+func TestHermeticBuildRejectsSourceDrift(t *testing.T) {
+	// A source list that has drifted from CMakeLists.txt must stop the build
+	// up front, not surface as an undefined-symbol wall at link time.
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "snesbuild.ini"), `
+[project]
+name = MyGame
+source = src/main.c
+`)
+	writeTestFile(t, filepath.Join(root, "CMakeLists.txt"), `
+add_executable(MyGame
+    src/main.c
+    src/late_addition.c
+)
+`)
+	_, err := HermeticBuild(HermeticOptions{Paths: DefaultPaths(root), ZigPath: "zig"})
+	if err == nil {
+		t.Fatal("drifted source list built without complaint")
+	}
+	if !strings.Contains(err.Error(), "src/late_addition.c") {
+		t.Fatalf("error names no drifted source: %v", err)
+	}
+}
