@@ -129,6 +129,14 @@ typedef struct WsRefreshKey {
   WsLayerRefreshKey layer[2];
 } WsRefreshKey;
 
+/* WsRefreshKey has no padding: the four uint8s (offsets 0-3) fill exactly to the
+ * offset-4 uint16 boundary, and every remaining member is uint16, so the whole
+ * struct is 52 bytes with no gaps. That is what makes the refresh-key memcmp in
+ * ActRaiser_WidescreenMarginRefresh exact. If this assert ever fires, a field was
+ * reordered or a sub-uint16 field added — the memcmp is no longer byte-exact. */
+_Static_assert(sizeof(WsRefreshKey) == 52,
+    "WsRefreshKey gained padding; the refresh-key memcmp is no longer exact");
+
 static WsRefreshKey s_refresh_key;
 static int s_refresh_key_valid;
 static uint16 s_row_y[2];
