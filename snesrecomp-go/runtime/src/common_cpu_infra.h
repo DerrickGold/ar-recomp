@@ -3,7 +3,7 @@
 #include "types.h"
 
 #ifdef _MSC_VER
-#pragma warning(disable: 4013 4028 4033 4090 4133 4305 4715 4716)
+#pragma warning(disable: 4013 4028 4033 4090 4133 4305)
 #endif
 
 typedef struct Snes Snes;
