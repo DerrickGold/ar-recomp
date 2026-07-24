@@ -514,8 +514,12 @@ static bool OpenHostAudio(void) {
   /* The device's actual rate/buffer is informational only (SDL resamples). */
   SDL_AudioSpec device = want;
   int device_frames = 0;
-  SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(g_audio_stream),
-                           &device, &device_frames);
+  if (!SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(g_audio_stream),
+                                &device, &device_frames)) {
+    fprintf(stderr, "[audio] SDL_GetAudioDeviceFormat failed: %s "
+                    "(device rate/buffer diagnostic unavailable)\n",
+            SDL_GetError());
+  }
   fprintf(stderr, "[audio] stream input %d Hz, device %d Hz %d-frame buffer "
                   "(requested %d frames)\n",
           want.freq, device.freq, device_frames, g_active_audio_samples);
