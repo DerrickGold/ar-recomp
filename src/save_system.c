@@ -559,8 +559,11 @@ SaveBackend SaveSystem_ActiveBackend(void) {
   return s_runtime.backend;
 }
 
-static bool CopyFile(const char *source, const char *destination,
-                     SaveError *error) {
+/* Named BackupCopyFile, not CopyFile: <windows.h> #defines CopyFile -> CopyFileA,
+ * which would token-rewrite this definition and its call into a conflict with the
+ * Win32 CopyFileA prototype (a hard MSVC/MinGW compile error). */
+static bool BackupCopyFile(const char *source, const char *destination,
+                           SaveError *error) {
   FILE *in = fopen(source, "rb");
   if (!in) return Fail(error, "cannot read %s: %s", source, strerror(errno));
   FILE *out = fopen(destination, "wb");
@@ -611,7 +614,7 @@ static bool BackupActiveOnce(bool enabled, SaveError *error) {
   strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", &local_time);
   char backup[640];
   snprintf(backup, sizeof(backup), "%s.bak-%s", path, timestamp);
-  if (!CopyFile(path, backup, error)) return false;
+  if (!BackupCopyFile(path, backup, error)) return false;
   s_runtime.backup_taken = true;
   fprintf(stderr, "[saves] backup -> %s\n", backup);
   return true;
