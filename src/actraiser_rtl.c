@@ -16,7 +16,11 @@
 #include "cpu_trace.h"
 #include <stdio.h>
 #include <stdbool.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <ucontext.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,13 +28,22 @@ extern int snes_frame_counter;
 
 #define GAME_STACK_SIZE (2 * 1024 * 1024)
 
+#ifdef _WIN32
+static void *g_host_fiber;   /* ConvertThreadToFiber result (driver thread) */
+static void *g_game_fiber;   /* CreateFiber result (game coroutine) */
+#else
 static ucontext_t g_host_ctx;
 static ucontext_t g_game_ctx;
 static char *g_game_stack;
+#endif
 static bool g_game_started;
 
 void ActRaiser_YieldToHost(void) {
+#ifdef _WIN32
+  SwitchToFiber(g_host_fiber);
+#else
   swapcontext(&g_game_ctx, &g_host_ctx);
+#endif
 }
 
 /* Keep ActRaiser's data-driven object-loop recovery policy out of the shared
@@ -288,6 +301,13 @@ static void game_coroutine(void) {
   for (;;)
     ActRaiser_YieldToHost();
 }
+
+#ifdef _WIN32
+static VOID CALLBACK game_coroutine_fiber(LPVOID param) {
+  (void)param;
+  game_coroutine();   /* never returns: for(;;) ActRaiser_YieldToHost() */
+}
+#endif
 
 RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
   /* A85E (and the identical $00:8418) are HLE'd to this function. The real ROM
@@ -1739,6 +1759,18 @@ void ActRaiser_Warp(unsigned region, unsigned map) {
 void RunOneFrameOfGame(void) {
   if (!g_game_started) {
     g_game_started = true;
+#ifdef _WIN32
+    g_host_fiber = ConvertThreadToFiber(NULL);
+    if (!g_host_fiber) {
+      fprintf(stderr, "Failed to convert driver thread to fiber\n");
+      return;
+    }
+    g_game_fiber = CreateFiber(GAME_STACK_SIZE, game_coroutine_fiber, NULL);
+    if (!g_game_fiber) {
+      fprintf(stderr, "Failed to create game coroutine fiber\n");
+      return;
+    }
+#else
     g_game_stack = malloc(GAME_STACK_SIZE);
     if (!g_game_stack) {
       fprintf(stderr, "Failed to allocate game coroutine stack\n");
@@ -1749,6 +1781,7 @@ void RunOneFrameOfGame(void) {
     g_game_ctx.uc_stack.ss_size = GAME_STACK_SIZE;
     g_game_ctx.uc_link = &g_host_ctx;
     makecontext(&g_game_ctx, game_coroutine, 0);
+#endif
   }
 
   ActRaiser_ApplyCheats();   /* host-side cheats (live settings, default off) */
@@ -1757,7 +1790,11 @@ void RunOneFrameOfGame(void) {
     if (ar_trace_active()) ar_trace_frame("vblank"); }  /* frame boundary marker */
   g_snes->forceNmi = true;
   g_snes->nmiAvail = true;   /* fresh RDNMI ($4210 bit7) vblank token this frame */
+#ifdef _WIN32
+  SwitchToFiber(g_game_fiber);
+#else
   swapcontext(&g_host_ctx, &g_game_ctx);
+#endif
   g_snes->forceNmi = false;
 
   g_snes->inNmi = true;
