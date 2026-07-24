@@ -28,6 +28,13 @@ echo Using ROM: %ROM%
 echo Building - the first run takes a few minutes...
 echo.
 
+if not exist "%UTILS%\tools\sdl3\lib\SDL3.dll" (
+    echo NOTE: bundled SDL3.dll not found under tools\sdl3\lib. If the build
+    echo fails to start with a missing-SDL3.dll error, the SDL3 redistributable
+    echo was not fetched for this host arch ^(windows-arm64 may need a rebuild^).
+    echo.
+)
+
 "%UTILS%\tools\snesbuild.exe" all --hermetic --root "%UTILS%" --rom "%ROOT%\%ROM%" --allow-stubs
 if errorlevel 1 (
     echo.
