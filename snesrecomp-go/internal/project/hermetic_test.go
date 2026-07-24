@@ -105,3 +105,27 @@ func TestFirstFlagValue(t *testing.T) {
 		t.Fatalf("bare prefix: %q", got)
 	}
 }
+
+func TestSdlLibDirHasLib(t *testing.T) {
+	dir := t.TempDir()
+	// Empty dir: exists but holds no SDL3 library -> must be rejected. This is
+	// the /usr/lib case on Debian/Ubuntu where the .so lives in a multiarch dir.
+	if sdlLibDirHasLib(dir) {
+		t.Fatal("empty lib dir accepted")
+	}
+	// A directory that does not exist is likewise rejected.
+	if sdlLibDirHasLib(filepath.Join(dir, "missing")) {
+		t.Fatal("missing lib dir accepted")
+	}
+	// A Linux-style versioned shared object is accepted.
+	writeTestFile(t, filepath.Join(dir, "libSDL3.so.0"), "x")
+	if !sdlLibDirHasLib(dir) {
+		t.Fatal("libSDL3.so.0 not accepted")
+	}
+	// A macOS-style dylib in a fresh dir is accepted too.
+	macDir := t.TempDir()
+	writeTestFile(t, filepath.Join(macDir, "libSDL3.dylib"), "x")
+	if !sdlLibDirHasLib(macDir) {
+		t.Fatal("libSDL3.dylib not accepted")
+	}
+}

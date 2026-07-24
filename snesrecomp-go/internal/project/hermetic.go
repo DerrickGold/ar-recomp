@@ -327,6 +327,26 @@ func newestHeaderTime(includeDirs []string) time.Time {
 	return newest
 }
 
+// sdlCandidate is one (include-parent, lib-dir) pair probed by discoverSDL3.
+type sdlCandidate struct {
+	include string
+	lib     string
+}
+
+// sdlLibDirHasLib reports whether dir actually contains an SDL3 shared library
+// (libSDL3*.dylib on macOS, libSDL3*.so* on Linux). A directory merely
+// existing is not enough — /usr/lib exists everywhere but only the multiarch
+// subdir holds the .so on Debian/Ubuntu.
+func sdlLibDirHasLib(dir string) bool {
+	for _, pattern := range []string{"libSDL3*.dylib", "libSDL3*.so*"} {
+		matches, err := filepath.Glob(filepath.Join(dir, pattern))
+		if err == nil && len(matches) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // discoverSDL3 finds SDL3 development files: a copy bundled beside the
 // running executable first (distribution bundle layout: <exe dir>/sdl3/
 // include + lib), then pkg-config, then well-known platform prefixes.
@@ -355,15 +375,28 @@ func discoverSDL3() (includeDir, libDir string, bundled bool, err error) {
 			return include, lib, false, nil
 		}
 	}
-	prefixes := []string{
-		"/opt/homebrew/opt/sdl3", "/usr/local/opt/sdl3",
-		"/opt/homebrew", "/usr/local", "/usr",
+	candidates := []sdlCandidate{
+		{"/opt/homebrew/opt/sdl3/include", "/opt/homebrew/opt/sdl3/lib"},
+		{"/usr/local/opt/sdl3/include", "/usr/local/opt/sdl3/lib"},
+		{"/opt/homebrew/include", "/opt/homebrew/lib"},
+		{"/usr/local/include", "/usr/local/lib"},
+		{"/usr/include", "/usr/lib"},
 	}
-	for _, prefix := range prefixes {
-		include := filepath.Join(prefix, "include")
-		lib := filepath.Join(prefix, "lib")
-		if directoryExists(filepath.Join(include, "SDL3")) && directoryExists(lib) {
-			return include, lib, false, nil
+	if runtime.GOOS == "linux" {
+		// Debian/Ubuntu install the SDL3 shared object under a multiarch dir
+		// (e.g. /usr/lib/x86_64-linux-gnu or .../aarch64-linux-gnu), not the
+		// plain /usr/lib the base candidates check. Add both arch dirs so an
+		// ARM64 Debian/Ubuntu box is found, not just x86_64.
+		candidates = append(candidates,
+			sdlCandidate{"/usr/include", "/usr/lib/x86_64-linux-gnu"},
+			sdlCandidate{"/usr/include", "/usr/lib/aarch64-linux-gnu"},
+			sdlCandidate{"/usr/local/include", "/usr/local/lib/x86_64-linux-gnu"},
+			sdlCandidate{"/usr/local/include", "/usr/local/lib/aarch64-linux-gnu"},
+		)
+	}
+	for _, candidate := range candidates {
+		if directoryExists(filepath.Join(candidate.include, "SDL3")) && sdlLibDirHasLib(candidate.lib) {
+			return candidate.include, candidate.lib, false, nil
 		}
 	}
 	return "", "", false, fmt.Errorf("SDL3 development files not found; pass --sdl-include and --sdl-lib")
