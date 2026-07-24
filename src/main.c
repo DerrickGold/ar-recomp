@@ -45,6 +45,7 @@
 #include "widescreen.h"
 #include "present.h"
 #include "frame_slot.h"
+#include "user_data_dir.h"
 #include "sim_phase0_trace.h"
 #include "sim_render_metadata.h"
 #include "sim_render_atlas.h"
@@ -1426,7 +1427,9 @@ static bool OnSettingsAction(const SettingDesc *desc) {
     /* Settings normally persist at mutation time, but repeat the write here.
      * Battery SRAM is flushed through the active Phase-6 backend by the shared
      * shutdown path. */
-    if (!Settings_Save("settings.ini")) {
+    char settings_path[1024];
+    UserDataFile(settings_path, sizeof settings_path, "settings.ini");
+    if (!Settings_Save(settings_path)) {
       fprintf(stderr, "[lifecycle] could not save settings.ini\n");
       return false;
     }
@@ -2483,7 +2486,9 @@ static void RunOuterIterationHousekeeping(void) {
   if (g_sim3d_camera_settings_dirty && !g_sim3d_camera_dragging &&
       SDL_GetTicks() - g_sim3d_camera_settings_dirty_at > 500) {
     g_sim3d_camera_settings_dirty = false;
-    if (!Settings_Save("settings.ini"))
+    char settings_path[1024];
+    UserDataFile(settings_path, sizeof settings_path, "settings.ini");
+    if (!Settings_Save(settings_path))
       fprintf(stderr, "[sim3d] failed to persist camera settings\n");
   }
 
@@ -2985,16 +2990,28 @@ int main(int argc, char **argv) {
     if (g_sram && g_sram_size > 0) memset(g_sram, sfill, g_sram_size);
   }
 
-  /* Load persisted battery save (overrides the fresh-cart fill if present). */
-  mkdir("saves", 0755);
+  /* Load persisted battery save (overrides the fresh-cart fill if present).
+   * P9: settings.ini and saves/ live under the user-writable pref dir
+   * (SDL_GetPrefPath) so the packaged bundle's cwd (utils/, clobbered on
+   * rebuild) is not written to. A NULL pref path falls back to cwd-relative,
+   * so in-tree dev runs are unchanged. */
+  char saves_dir[1024], save_srm[1024], save_ini[1024];
+  UserDataFile(saves_dir, sizeof saves_dir, "saves");
+  mkdir(saves_dir, 0755);
   RtlMigrateLegacySram(kActRaiserGameInfo.title);
   {
     extern uint8 *g_sram; extern int g_sram_size;
     SaveError error = {{0}};
     const char *native_path = getenv("AR_SAVE_NATIVE_PATH");
     const char *ini_path = getenv("AR_SAVE_INI_PATH");
-    if (!native_path || !native_path[0]) native_path = "saves/save.srm";
-    if (!ini_path || !ini_path[0]) ini_path = "saves/save.ini";
+    if (!native_path || !native_path[0]) {
+      UserDataFile(save_srm, sizeof save_srm, "saves/save.srm");
+      native_path = save_srm;
+    }
+    if (!ini_path || !ini_path[0]) {
+      UserDataFile(save_ini, sizeof save_ini, "saves/save.ini");
+      ini_path = save_ini;
+    }
     if (!SaveSystem_Attach(g_sram, (size_t)g_sram_size,
                            (SaveBackend)g_settings.save_backend,
                            native_path, ini_path, &error))
@@ -3151,8 +3168,10 @@ int main(int argc, char **argv) {
               const SettingDesc *inspector = Settings_Find("scene_inspector");
               SettingChangeResult result = Settings_SetLong(
                   inspector, !g_settings.scene_inspector);
+              char settings_path[1024];
+              UserDataFile(settings_path, sizeof settings_path, "settings.ini");
               if (result > kSettingChange_Unchanged &&
-                  !Settings_Save("settings.ini"))
+                  !Settings_Save(settings_path))
                 fprintf(stderr,
                         "[scene-inspector] could not save settings.ini\n");
               fprintf(stderr, "[scene-inspector] %s (%s)\n",

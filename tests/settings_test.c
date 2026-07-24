@@ -2,6 +2,7 @@
 #include "config.h"
 #include "input_map.h"
 #include "settings.h"
+#include "user_data_dir.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -849,7 +850,33 @@ static void TestFrameLimitInterval(void) {
   CHECK(R2_FrameLimitIntervalNs() == 0);
 }
 
+/* P9: settings.ini / saves/ resolve under the SDL pref dir (or cwd-relative
+ * when SDL_GetPrefPath is unavailable, so in-tree dev runs are unchanged). */
+static void TestUserDataFile(void) {
+  const char *dir = UserDataDir();  /* real SDL_GetPrefPath under dummy driver */
+  char buf[1024];
+  UserDataFile(buf, sizeof buf, "settings.ini");
+  /* Always ends with the leaf. */
+  size_t n = strlen(buf), leaf = strlen("settings.ini");
+  CHECK(n >= leaf && strcmp(buf + n - leaf, "settings.ini") == 0);
+  if (dir[0]) {
+    /* Pref dir available: path is the dir (trailing sep) + leaf, and absolute. */
+    CHECK(strncmp(buf, dir, strlen(dir)) == 0);
+    CHECK(buf[0] == '/');
+    /* A nested leaf composes the same way. */
+    char srm[1024];
+    UserDataFile(srm, sizeof srm, "saves/save.srm");
+    size_t sn = strlen(srm), sl = strlen("saves/save.srm");
+    CHECK(sn >= sl && strcmp(srm + sn - sl, "saves/save.srm") == 0);
+    CHECK(strncmp(srm, dir, strlen(dir)) == 0);
+  } else {
+    /* Fallback: leaf verbatim, cwd-relative (dev behavior unchanged). */
+    CHECK(strcmp(buf, "settings.ini") == 0);
+  }
+}
+
 int main(void) {
+  TestUserDataFile();
   TestFrameLimitInterval();
   TestDefaultsAndMetadata();
   TestSim3DEnvironmentLabels();

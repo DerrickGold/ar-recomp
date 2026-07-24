@@ -104,6 +104,7 @@ add_executable(ActRaiserRecomp
     src/present.c
     src/diorama_scroll_math.c
     src/frame_slot.c
+    src/user_data_dir.c
     src/main.c
     src/actraiser_00.c
     src/gen_stubs.c
@@ -284,6 +285,7 @@ if(BUILD_TESTING)
         src/config.c
         src/settings.c
         src/input_map.c
+        src/user_data_dir.c
     )
     # settings.c owns the input-binding descriptors, so the registry test now
     # links the SDL-backed key/button naming they serialize through.
