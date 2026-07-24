@@ -746,14 +746,12 @@ static void BuildLayerMesh(const float mvp[16], float z_world,
   TriangulateGrid(DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, out_indices, num_indices);
 }
 
-/* GEO (followup doc): general world-space quad mesh builder, lerped from a
- * corner + two edge vectors — B5's viewport-fill skybox quad and B6's
- * floor/ceiling/side-wall quads (which vary axis pairs BuildLayerMesh can't:
- * it hardcodes a constant z_world and only varies X/Y) will call this. DEAD
- * CODE until then (GEO is a pure factor-out checkpoint; near-wall culling
- * and the actual wall geometry are B6's job, not this one) — kept
- * deliberately separate from BuildLayerMesh's own formula rather than
- * routing BuildLayerMesh through it, since the two aren't bit-identical
+/* General world-space quad mesh builder, lerped from a corner + two edge
+ * vectors. Used by DrawDioramaShoebox (gated by g_settings.diorama_shoebox)
+ * to build the floor/ceiling/side-wall quads, which vary axis pairs that
+ * BuildLayerMesh cannot (it hardcodes a constant z_world and only varies
+ * X/Y). Kept deliberately separate from BuildLayerMesh's own formula rather
+ * than routing BuildLayerMesh through it, since the two aren't bit-identical
  * (see ProjectWorldPoint's comment). */
 static void BuildQuadMesh(const float mvp[16],
                           float origin_x, float origin_y, float origin_z,
