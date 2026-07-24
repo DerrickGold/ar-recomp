@@ -139,6 +139,19 @@ set(_sdl_base "https://github.com/libsdl-org/SDL/releases/download/release-${SNE
 set(_sdl_stage ${CMAKE_BINARY_DIR}/deps/sdl3)
 set(SNESBUILD_SDL3_BUNDLED FALSE)
 
+# The SDL3 checksum comes from the Go source of truth (internal/toolchain/
+# sdl_pins.go), the same pattern as the Zig pin above, so no SHA256 is
+# hardcoded here. Platforms with no official redistributable simply get no pin
+# (the run script falls back to a system SDL3).
+execute_process(
+    COMMAND ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR} run ./cmd/snesbuild
+        toolchain pin --sdl --goos ${SNESBUILD_GOOS} --goarch ${SNESBUILD_GOARCH}
+    OUTPUT_VARIABLE _sdl_pin OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE _sdl_pin_result)
+if(_sdl_pin_result EQUAL 0)
+    separate_arguments(_sdl_pin_fields UNIX_COMMAND "${_sdl_pin}")
+    list(GET _sdl_pin_fields 1 _sdl_src_sha)
+endif()
+
 if(SNESBUILD_GOOS STREQUAL "darwin")
     if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
         message(FATAL_ERROR "macOS bundles must be packaged on a macOS host")
@@ -147,7 +160,7 @@ if(SNESBUILD_GOOS STREQUAL "darwin")
         DOC "7-Zip, used to extract the SDL3 .dmg without mounting it")
     set(_sdl_dmg SDL3-${SNESBUILD_SDL3_VERSION}.dmg)
     file(DOWNLOAD ${_sdl_base}/${_sdl_dmg} ${_cache_dir}/${_sdl_dmg}
-        EXPECTED_HASH SHA256=c77d36d9393bb5481e38d222b75a1a63ab16274457b3d18c63fef90aaf5fc93b)
+        EXPECTED_HASH SHA256=${_sdl_src_sha})
     if(NOT EXISTS ${_sdl_stage}/lib/libSDL3.dylib)
         file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/dmg)
         file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/dmg)
@@ -175,7 +188,7 @@ if(SNESBUILD_GOOS STREQUAL "darwin")
 elseif(SNESBUILD_GOOS STREQUAL "windows" AND SNESBUILD_GOARCH STREQUAL "amd64")
     set(_sdl_mingw SDL3-devel-${SNESBUILD_SDL3_VERSION}-mingw.tar.gz)
     file(DOWNLOAD ${_sdl_base}/${_sdl_mingw} ${_cache_dir}/${_sdl_mingw}
-        EXPECTED_HASH SHA256=ea8071241b934e1feec0337f7d78807a5004de9a500dba1942aaf615a988d7a2)
+        EXPECTED_HASH SHA256=${_sdl_src_sha})
     if(NOT EXISTS ${_sdl_stage}/lib/SDL3.dll)
         file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/mingw)
         file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/mingw)

@@ -276,6 +276,7 @@ func runToolchain(args []string) error {
 	cacheDir := flags.String("cache-dir", "", "toolchain cache directory (default <root>/build/toolchain)")
 	goos := flags.String("goos", runtime.GOOS, "target OS for `pin`")
 	goarch := flags.String("goarch", runtime.GOARCH, "target architecture for `pin`")
+	sdl := flags.Bool("sdl", false, "print the SDL3 pin (url sha archive kind) instead of the Zig pin")
 	subcommand := "status"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		subcommand, args = args[0], args[1:]
@@ -284,6 +285,14 @@ func runToolchain(args []string) error {
 		return err
 	}
 	if subcommand == "pin" {
+		if *sdl {
+			url, sha, archive, kind, err := toolchain.SDL3Pin(*goos, *goarch)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%s %s %s %s\n", url, sha, archive, kind)
+			return nil
+		}
 		url, sha, archive, err := toolchain.Pin(*goos, *goarch)
 		if err != nil {
 			return err

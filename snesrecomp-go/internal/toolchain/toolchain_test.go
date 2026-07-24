@@ -125,3 +125,35 @@ func TestDownloadClientHasTimeout(t *testing.T) {
 		t.Fatalf("timeout=%v, want 30m", client.Timeout)
 	}
 }
+
+func TestSDL3PinReturnsRedistributables(t *testing.T) {
+	// macOS is a universal dmg: both arches share one file + hash.
+	for _, arch := range []string{"arm64", "amd64"} {
+		url, sha, archive, kind, err := SDL3Pin("darwin", arch)
+		if err != nil {
+			t.Fatalf("darwin/%s: %v", arch, err)
+		}
+		if kind != "dmg" || !strings.HasSuffix(archive, ".dmg") {
+			t.Fatalf("darwin/%s: kind=%q archive=%q", arch, kind, archive)
+		}
+		if len(sha) != 64 || !strings.Contains(url, PinnedSDL3Version) {
+			t.Fatalf("darwin/%s: sha=%q url=%q", arch, sha, url)
+		}
+	}
+	_, _, _, kind, err := SDL3Pin("windows", "amd64")
+	if err != nil || kind != "mingw" {
+		t.Fatalf("windows/amd64: kind=%q err=%v", kind, err)
+	}
+}
+
+func TestSDL3PinErrorsWithoutRedistributable(t *testing.T) {
+	// Linux and windows-arm64 have no official redistributable; the packaging
+	// script must fall back to a system SDL3, so the pin must error (not panic).
+	for _, p := range []struct{ goos, goarch string }{
+		{"linux", "amd64"}, {"linux", "arm64"}, {"windows", "arm64"},
+	} {
+		if _, _, _, _, err := SDL3Pin(p.goos, p.goarch); err == nil {
+			t.Fatalf("%s/%s: expected error, got nil", p.goos, p.goarch)
+		}
+	}
+}
