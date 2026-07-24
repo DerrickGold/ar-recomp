@@ -10,7 +10,9 @@
 
 #ifdef _WIN32
 #include <process.h>
+#include <direct.h>
 #include <sys/stat.h>
+#define mkdir(path, mode) _mkdir(path)
 #else
 #include <sys/stat.h>
 #include <unistd.h>
