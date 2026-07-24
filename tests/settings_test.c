@@ -816,7 +816,41 @@ static void TestInputBindings(void) {
   remove(path);
 }
 
+/* R2: FrameLimitIntervalNs is static in main.c and can't be linked here, so
+ * replicate its exact formula over the real g_settings + Settings_HostRefreshHz
+ * and assert the three branches: Limit == 1e9/fps (byte-identical to before),
+ * Unlimited with hz>0 == 1e9/(2*hz), and hz==0 (headless) == 0. The real-run
+ * ~120fps-not-250 acceptance is the Wave-3 on-device gate. */
+static uint64_t R2_FrameLimitIntervalNs(void) {
+  if (g_settings.refresh_mode == kRefreshMode_Limit) {
+    int fps = g_settings.frame_limit_fps;
+    if (fps < 1) fps = 1;
+    return 1000000000ull / (uint64_t)fps;
+  }
+  if (g_settings.refresh_mode == kRefreshMode_Unlimited) {
+    int hz = Settings_HostRefreshHz();
+    if (hz > 0) return 1000000000ull / (uint64_t)(2 * hz);
+  }
+  return 0;
+}
+static void TestFrameLimitInterval(void) {
+  Settings_Init();
+  g_settings.refresh_mode = kRefreshMode_Limit;
+  g_settings.frame_limit_fps = 90;
+  CHECK(R2_FrameLimitIntervalNs() == 1000000000ull / 90);
+  g_settings.frame_limit_fps = 0;                 /* clamps to 1 */
+  CHECK(R2_FrameLimitIntervalNs() == 1000000000ull);
+  g_settings.refresh_mode = kRefreshMode_Unlimited;
+  Settings_SetHostRefreshHz(60);
+  CHECK(R2_FrameLimitIntervalNs() == 1000000000ull / 120);  /* ~2x refresh */
+  Settings_SetHostRefreshHz(0);                   /* headless: unknown refresh */
+  CHECK(R2_FrameLimitIntervalNs() == 0);          /* stays truly unlimited */
+  g_settings.refresh_mode = kRefreshMode_Vsync;   /* neither branch */
+  CHECK(R2_FrameLimitIntervalNs() == 0);
+}
+
 int main(void) {
+  TestFrameLimitInterval();
   TestDefaultsAndMetadata();
   TestSim3DEnvironmentLabels();
   TestConfigSettingsEnvironmentPrecedence();

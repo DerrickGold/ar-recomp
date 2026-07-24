@@ -1520,13 +1520,22 @@ static void ApplyRefreshVsync(void) {
                      g_settings.refresh_mode == kRefreshMode_Vsync ? 1 : 0);
 }
 
-/* Minimum nanoseconds between presents when Refresh rate is Limit; 0 means no
- * limit. Read by the present thread's pacing. */
+/* Minimum nanoseconds between presents; 0 means no limit. Read by
+ * PresentThrottle on the main-thread present path (Phase 0). */
 static uint64_t FrameLimitIntervalNs(void) {
-  if (g_settings.refresh_mode != kRefreshMode_Limit) return 0;
-  int fps = g_settings.frame_limit_fps;
-  if (fps < 1) fps = 1;
-  return 1000000000ull / (uint64_t)fps;
+  if (g_settings.refresh_mode == kRefreshMode_Limit) {
+    int fps = g_settings.frame_limit_fps;
+    if (fps < 1) fps = 1;
+    return 1000000000ull / (uint64_t)fps;
+  }
+  /* R2: soft-cap Unlimited to ~2x the display refresh so duplicate/idle
+   * presents don't spin at ~250fps. When the host refresh is unknown
+   * (e.g. headless), stay truly unlimited (0). */
+  if (g_settings.refresh_mode == kRefreshMode_Unlimited) {
+    int hz = Settings_HostRefreshHz();
+    if (hz > 0) return 1000000000ull / (uint64_t)(2 * hz);
+  }
+  return 0;
 }
 
 static void ApplyDisplayPresentation(void) {
