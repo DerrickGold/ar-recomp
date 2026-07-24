@@ -30,8 +30,7 @@ then run this again."
 # Linux has no single portable SDL3 redistributable, so it is not bundled;
 # rely on the system package. Give a clear hint if it is missing.
 if ! pkg-config --exists sdl3 2>/dev/null \
-        && [ ! -e /usr/lib/libSDL3.so.0 ] \
-        && [ ! -e /usr/lib/x86_64-linux-gnu/libSDL3.so.0 ]; then
+        && ! ldconfig -p 2>/dev/null | grep -q 'libSDL3\.so'; then
     fail "SDL3 is not installed. Install it first, for example:
   Debian/Ubuntu:  sudo apt install libsdl3-dev
   Fedora:         sudo dnf install SDL3-devel
