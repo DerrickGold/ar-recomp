@@ -102,6 +102,7 @@ add_executable(ActRaiserRecomp
     src/scene3d_math.c
     src/diorama.c
     src/present.c
+    src/diorama_scroll_math.c
     src/main.c
     src/actraiser_00.c
     src/gen_stubs.c
@@ -433,4 +434,18 @@ if(BUILD_TESTING)
         ACTRAISER_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     )
     add_test(NAME actraiser_save_system COMMAND actraiser_save_system_test)
+
+    # Golden test for the diorama M7 scroll-interpolation math, extracted from
+    # present.c with the wall-clock injected so t is controllable (Test gap 2).
+    add_executable(actraiser_diorama_scroll_math_test
+        tests/diorama_scroll_math_test.c
+        src/diorama_scroll_math.c
+    )
+    target_include_directories(actraiser_diorama_scroll_math_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_diorama_scroll_math_test PRIVATE SDL3::SDL3 m)
+    add_test(NAME actraiser_diorama_scroll_math
+        COMMAND actraiser_diorama_scroll_math_test)
 endif()
