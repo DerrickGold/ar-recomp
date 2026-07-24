@@ -12,7 +12,10 @@
 #include <setjmp.h>
 #include <string.h>
 #include <time.h>
+#if defined(__GLIBC__) || defined(__APPLE__)
 #include <execinfo.h>
+#define AR_HAVE_BACKTRACE 1
+#endif
 
 Snes *g_snes;
 Cpu *g_snes_cpu;
@@ -367,10 +370,12 @@ void ar_entry_mx_fail(CpuState *cpu, int em, int ex, const char *fn, uint32_t pc
     const char *want = getenv("AR_MXCHECK_BT");
     if (want && !done && strstr(fn, want)) {
       done = 1;
+#ifdef AR_HAVE_BACKTRACE
       void *bt[32];
       int n = backtrace(bt, 32);
       fprintf(stderr, "[mxcheck-bt] real C call stack for %s:\n", fn);
       backtrace_symbols_fd(bt, n, 2);
+#endif
     }
   }
   fflush(stderr);

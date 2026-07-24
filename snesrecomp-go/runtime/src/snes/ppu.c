@@ -6,7 +6,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#if defined(__GLIBC__) || defined(__APPLE__)
 #include <execinfo.h>
+#define AR_HAVE_BACKTRACE 1
+#endif
 
 #include "snes.h"
 #include "../debug_server.h"
@@ -1951,9 +1954,11 @@ uint8_t ppu_read(Ppu* ppu, uint8_t adr) {
                   "from %s\n", adr, g_last_recomp_func ? g_last_recomp_func : "?");
           if (!bt_dumped) {
             bt_dumped = 1;
+#ifdef AR_HAVE_BACKTRACE
             void *bt[24];
             int n = backtrace(bt, 24);
             backtrace_symbols_fd(bt, n, 2);
+#endif
             /* Snapshot the dispatch ring at the first garbage access — the
              * crash usually aborts before DumpDiagState, so capture the
              * last-N dispatches feeding into the leak right here. */
