@@ -81,6 +81,7 @@ static bool g_scene_inspector_owns_pause;
  * hit-test) and present.c's renderer (fed from the FrameSlot snapshot). */
 static InspectorPresentationSelection g_scene_inspector_presentation;
 static bool g_paused_redraw_pending;
+static bool g_window_hidden;  /* true while MINIMIZED or HIDDEN: skip present */
 static uint32 g_input_state;
 typedef enum {
   kHostLifecycle_None,
@@ -1972,6 +1973,19 @@ static void BindHdReplacementSurfaces(void) {
   }
 }
 
+/* RENDER_TARGETS_RESET/DEVICE_RESET: STATIC textures are emptied by the
+ * driver. Destroy and re-upload the HD replacement textures from disk. */
+static void ReloadHdReplacementTextures(void) {
+  for (int i = 0; i < g_hd_replacement_count; i++) {
+    if (g_hd_replacements[i].texture) {
+      SDL_DestroyTexture((SDL_Texture *)g_hd_replacements[i].texture);
+      g_hd_replacements[i].texture = NULL;
+    }
+  }
+  LoadHdReplacements();
+  BindHdReplacementSurfaces();
+}
+
 void ActRaiser_RebindPpuOutputSurfaces(void) {
   if (!g_ppu) return;
   size_t pitch = (size_t)g_snes_width * 4;
@@ -3382,6 +3396,36 @@ int main(int argc, char **argv) {
         case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
           UpdateHostRefreshHz();
           break;
+        /* Phase 0 made rendering main-thread-only, so re-deriving the logical
+         * presentation here no longer races the (removed) present thread. The
+         * window is SDL_WINDOW_RESIZABLE; on a real size change re-apply the
+         * aspect-locked logical presentation and request a repaint so
+         * letterboxing tracks the new client size. */
+        case SDL_EVENT_WINDOW_RESIZED:
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+          ApplyDisplayPresentation();
+          g_paused_redraw_pending = true;
+          break;
+        case SDL_EVENT_WINDOW_MINIMIZED:
+        case SDL_EVENT_WINDOW_HIDDEN:
+          g_window_hidden = true;
+          break;
+        case SDL_EVENT_WINDOW_RESTORED:
+        case SDL_EVENT_WINDOW_SHOWN:
+          g_window_hidden = false;
+          g_paused_redraw_pending = true;
+          break;
+        /* GPU device/target reset: STATIC HD textures lose their contents and
+         * must be recreated. DEVICE_LOST is unrecoverable. */
+        case SDL_EVENT_RENDER_TARGETS_RESET:
+        case SDL_EVENT_RENDER_DEVICE_RESET:
+          ReloadHdReplacementTextures();
+          g_paused_redraw_pending = true;
+          break;
+        case SDL_EVENT_RENDER_DEVICE_LOST:
+          fprintf(stderr, "[render] device lost, cannot recover — exiting\n");
+          running = false;
+          break;
         case SDL_EVENT_KEY_DOWN:
           /* An armed binding row consumes the raw key: it needs the scancode,
            * and it must win over F5/F9/etc. so those stay bindable. */
@@ -3651,7 +3695,7 @@ int main(int argc, char **argv) {
        * on its own ~16ms idle timeout — only submit here when something
        * actually changed. Without one (headless-with-video / thread
        * creation failed), keep the old unconditional re-present. */
-      if (!headless && (redrew || !g_present_thread_active))
+      if (!headless && !g_window_hidden && (redrew || !g_present_thread_active))
         SubmitFrameToPresent();
       SDL_Delay(16);
       last_time_ns = SDL_GetTicksNS();
@@ -3711,7 +3755,7 @@ int main(int argc, char **argv) {
       RunOuterIterationHousekeeping();
 
       if (produced_frame) {
-        DrawAndPresentFrame(false);
+        if (!g_window_hidden) DrawAndPresentFrame(false);
       } else {
         SDL_Delay(1);
       }
