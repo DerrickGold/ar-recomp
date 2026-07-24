@@ -140,7 +140,84 @@ void RunDirRebaseEnvOutputs(void) {
   rebase_bare_env("AR_SIM3D_D1_TRACE");
 }
 
-#else /* _WIN32: no tee/symlink plumbing — keep the legacy layout. */
-void RunDirInit(int argc, char **argv) { (void)argc; (void)argv; }
-void RunDirRebaseEnvOutputs(void) {}
+#else /* _WIN32: run-dir without tee/symlink (no clean Win32 analog). */
+#include <direct.h>   /* _mkdir  */
+#include <io.h>       /* _access */
+
+/* Bare filenames (no path separator) for per-run outputs land inside the
+ * run dir. Detect BOTH '/' and '\\' as "already a path". */
+static void rebase_bare_env(const char *name) {
+  const char *v = getenv(name);
+  if (!v || !v[0] || strchr(v, '/') || strchr(v, '\\')) return;
+  char path[300];
+  RunDirFile(path, sizeof path, "%s", v);
+  _putenv_s(name, path);
+}
+
+static void write_run_info(int argc, char **argv) {
+  char path[300];
+  RunDirFile(path, sizeof path, "run_info.txt");
+  FILE *f = fopen(path, "w");
+  if (!f) return;
+  fprintf(f, "cmd:");
+  for (int i = 0; i < argc; i++) fprintf(f, " %s", argv[i]);
+  time_t t = time(NULL);
+  char ts[64];
+  strftime(ts, sizeof ts, "%Y-%m-%d %H:%M:%S", localtime(&t));
+  fprintf(f, "\ndate: %s\n--- AR_*/SNESRECOMP_* env (pre-config) ---\n", ts);
+  for (char **e = _environ; e && *e; e++)
+    if (!strncmp(*e, "AR_", 3) || !strncmp(*e, "SNESRECOMP_", 11) ||
+        !strncmp(*e, "SNESREF_", 8))
+      fprintf(f, "%s\n", *e);
+  fclose(f);
+}
+
+void RunDirInit(int argc, char **argv) {
+  const char *no = getenv("AR_NO_RUN_DIR");
+  if (no && no[0] && no[0] != '0') return;   /* legacy saves/ layout */
+
+  /* _mkdir returns 0 on create; if it already exists, probe writability
+   * (_access mode 02 == write). */
+  if (_mkdir("runs") != 0 && _access("runs", 02) != 0) return;
+
+  time_t t = time(NULL);
+  char ts[32];
+  strftime(ts, sizeof ts, "%Y%m%d-%H%M%S", localtime(&t));
+  char dir[256];
+  snprintf(dir, sizeof dir, "runs/%s", ts);
+  for (int n = 1; _mkdir(dir) != 0; n++) {
+    if (n > 99) return;
+    snprintf(dir, sizeof dir, "runs/%s-%d", ts, n);
+  }
+  snprintf(g_run_dir, sizeof g_run_dir, "%s", dir);
+  g_enabled = 1;
+
+  /* No tee (console stays on the OS console) and no symlink on Windows. */
+
+  /* Engine-side writers (fn_census, crash dispatch log) key off this. */
+  _putenv_s("AR_RUN_DIR", g_run_dir);
+
+  /* Default the always-on anomaly capture, but only if not already set
+   * (mirrors the POSIX setenv overwrite=0 semantics). */
+  if (!getenv("AR_TRACE_WATCH"))
+    _putenv_s("AR_TRACE_WATCH", "anom");
+
+  write_run_info(argc, argv);
+
+  fprintf(stderr, "[run-dir] %s (dumps ringfenced here; "
+                  "AR_NO_RUN_DIR=1 for legacy saves/ layout)\n", g_run_dir);
+  atexit(print_artifact_hint);
+  (void)g_enabled;
+}
+
+void RunDirRebaseEnvOutputs(void) {
+  rebase_bare_env("AR_TRACE_WATCH");
+  rebase_bare_env("AR_TRACE");
+  rebase_bare_env("AR_INPUT_RECORD");
+  rebase_bare_env("AR_DRIFT_LOG");
+  rebase_bare_env("AR_MX_OUT");
+  rebase_bare_env("AR_WRAM_TRACE");
+  rebase_bare_env("AR_SIM3D_TRACE");
+  rebase_bare_env("AR_SIM3D_D1_TRACE");
+}
 #endif
