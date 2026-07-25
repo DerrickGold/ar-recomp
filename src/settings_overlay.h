@@ -12,6 +12,12 @@ bool SettingsOverlay_Init(SDL_Renderer *renderer,
                           const uint8_t *rom_data, size_t rom_size);
 void SettingsOverlay_Destroy(void);
 
+/* RENDER_TARGETS_RESET/DEVICE_RESET recovery: the overlay's atlases are
+ * SDL_TEXTUREACCESS_STATIC (uploaded once at Init) so the driver empties them
+ * on a reset. Rebuilds them from the persisted decoded font tiles + the ROM
+ * dialog assets; UI/navigation state is untouched. No-op without a renderer. */
+bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size);
+
 /* Optional live, read-only text shown below the Inspector controls. The
  * provider is called only while that menu is rendered and may emit newlines. */
 typedef void (*SettingsOverlayInspectorInfoProvider)(char *buffer,

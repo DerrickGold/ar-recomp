@@ -206,6 +206,10 @@ int main(void) {
   size_t rom_size = 0;
   uint8_t *rom_data = ReadOptionalRom(&rom_size);
   CHECK(SettingsOverlay_Init(renderer, rom_data, rom_size));
+  /* Device-reset recovery: rebuild every atlas in place. All rendering below
+   * runs against the REBUILT textures, so a broken reload shows up in the
+   * preview captures too. */
+  CHECK(SettingsOverlay_ReloadTextures(rom_data, rom_size));
   SettingsOverlay_SetInspectorInfoProvider(InspectorInfo);
   free(rom_data);
 

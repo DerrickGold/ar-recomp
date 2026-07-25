@@ -3140,11 +3140,16 @@ int main(int argc, char **argv) {
           g_window_hidden = false;
           g_paused_redraw_pending = true;
           break;
-        /* GPU device/target reset: STATIC HD textures lose their contents and
-         * must be recreated. DEVICE_LOST is unrecoverable. */
+        /* GPU device/target reset: STATIC textures lose their contents and
+         * must be recreated — both the HD replacements and the settings
+         * overlay's atlases (fonts/icons/dialog frame, uploaded once at
+         * Init). DEVICE_LOST is unrecoverable. */
         case SDL_EVENT_RENDER_TARGETS_RESET:
         case SDL_EVENT_RENDER_DEVICE_RESET:
           ReloadHdReplacementTextures();
+          if (!SettingsOverlay_ReloadTextures(rom_data, rom_size))
+            fprintf(stderr,
+                    "[settings-menu] atlas reload after device reset failed\n");
           g_paused_redraw_pending = true;
           break;
         case SDL_EVENT_RENDER_DEVICE_LOST:

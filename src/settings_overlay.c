@@ -1458,15 +1458,9 @@ static void EnterSection(void) {
   EnsureSelectedRowVisible();
 }
 
-bool SettingsOverlay_Init(SDL_Renderer *renderer,
-                          const uint8_t *rom_data, size_t rom_size) {
-  s_renderer = renderer;
-  if (!renderer) return true;
-
-  bool rom_font = DecodeFontAsset(rom_data, rom_size);
-  if (rom_font) PrepareRomFont();
-  else BuildFallbackFont();
-
+/* (Re)create every overlay texture from the already-decoded font tiles and
+ * the ROM dialog assets. Shared by Init and the device-reset reload. */
+static bool CreateOverlayTextures(const uint8_t *rom_data, size_t rom_size) {
   for (int i = 0; i < kTextStyle_Count; i++) {
     s_font_textures[i] = CreateFontAtlas((TextStyle)i);
     if (!s_font_textures[i]) {
@@ -1488,6 +1482,30 @@ bool SettingsOverlay_Init(SDL_Renderer *renderer,
   s_dialog_frame_texture =
       CreateDialogFrameTexture(rom_data, rom_size);
   return true;
+}
+
+bool SettingsOverlay_Init(SDL_Renderer *renderer,
+                          const uint8_t *rom_data, size_t rom_size) {
+  s_renderer = renderer;
+  if (!renderer) return true;
+
+  bool rom_font = DecodeFontAsset(rom_data, rom_size);
+  if (rom_font) PrepareRomFont();
+  else BuildFallbackFont();
+
+  return CreateOverlayTextures(rom_data, rom_size);
+}
+
+bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size) {
+  if (!s_renderer) return true;
+  DestroyFontTextures();
+  SDL_DestroyTexture(s_icon_texture);
+  s_icon_texture = NULL;
+  SDL_DestroyTexture(s_dialog_frame_texture);
+  s_dialog_frame_texture = NULL;
+  /* The decoded font tiles (s_font_tiles/s_glyph_defined) are CPU-side and
+   * survive the reset; only the GPU-side atlases need rebuilding. */
+  return CreateOverlayTextures(rom_data, rom_size);
 }
 
 void SettingsOverlay_Destroy(void) {
