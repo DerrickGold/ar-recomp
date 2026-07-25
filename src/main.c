@@ -46,6 +46,7 @@
 #include "widescreen.h"
 #include "present.h"
 #include "frame_slot.h"
+#include "portable_paths.h"
 #include "user_data_dir.h"
 #include "sim_phase0_trace.h"
 #include "sim_render_metadata.h"
@@ -2348,30 +2349,6 @@ void Diorama_OnModeChanged(void) {
   InvalidatePresentHistory();
 }
 
-/* M5.2: still called synchronously (no present thread yet — that's M5.3).
- * FrameSlot_Capture + PresentUpload + PresentComposite replace the old
- * single RenderFramebuffer(); this is the checkpoint that proves the
- * present.c extraction is behavior-preserving before concurrency is added. */
-static bool PathExists(const char *path) {
-  struct stat st;
-  return stat(path, &st) == 0;
-}
-
-/* A shipped, self-contained bundle places the game binary beside its content
- * (a game-assets/ directory and/or a portable.txt marker). An in-tree
- * developer build lives under build/ with the content at the repo root, so
- * neither marker sits next to the executable. Presence of a marker is the
- * signal to anchor the working directory to the executable's own location. */
-static bool RunningAsBundle(void) {
-  static const char *const markers[] = {"game-assets", "portable.txt"};
-  char probe[1024];
-  for (size_t i = 0; i < sizeof markers / sizeof markers[0]; i++)
-    if (snesrecomp_exe_dir_path(markers[i], probe, sizeof probe) &&
-        PathExists(probe))
-      return true;
-  return false;
-}
-
 /* M6 (ar-recomp-threading-impl.md §3, Phase 2 fixed-timestep). Per-tick
  * input resolution: the debug force-input hooks and the differential-oracle
  * record/replay, both keyed on the game's own $0088 frame counter. Must run
@@ -2850,7 +2827,7 @@ int main(int argc, char **argv) {
    * workflow is unchanged. Must precede RunDirInit (console tee into runs/)
    * and any relative file access. */
   static char rom_abs[1024], config_abs[1024];
-  if (RunningAsBundle()) {
+  if (PortablePaths_IsBundle()) {
     if (rom_path && snesrecomp_abspath(rom_path, rom_abs, sizeof rom_abs))
       rom_path = rom_abs;
     if (config_path &&
