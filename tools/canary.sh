@@ -36,7 +36,11 @@ if ! ls "${ROOT}"/src/gen/*.c >/dev/null 2>&1; then
   STUB_CREATED=1
   echo "[canary] src/gen empty — wrote temporary stub ${STUB#${ROOT}/}"
 fi
-cleanup() { [ "${STUB_CREATED}" = "1" ] && rm -f "${STUB}"; }
+cleanup() {
+  if [ "${STUB_CREATED}" = "1" ]; then
+    rm -f "${STUB}"
+  fi
+}
 trap cleanup EXIT
 
 # --- configure + build + test (ROM-free tier only) ---------------------------------------
