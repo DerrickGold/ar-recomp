@@ -450,8 +450,16 @@ static bool MenuGamepadIsActiveDevice(void) {
   return g_settings.input_device != kInputDevice_Keyboard &&
          InputMap_GamepadCount() > 0;
 }
+/* NOT the negation of the gamepad predicate — these mirror InputMap_State's two
+ * INDEPENDENT gameplay gates (input_map.c:491-494), so in Auto (the default)
+ * BOTH devices drive the menu, exactly as the input_device="Auto" description
+ * promises ("keeps the keyboard and the selected gamepad both live"). Only an
+ * explicit Gamepad pin (with a pad connected) takes the keyboard off the menu;
+ * that matches InputMap_State's !s_pad_count safety valve so a Gamepad pin with
+ * no pad still lets the keyboard reach/close the menu — no lockout. */
 static bool MenuKeyboardIsActiveDevice(void) {
-  return !MenuGamepadIsActiveDevice();
+  return g_settings.input_device != kInputDevice_Gamepad ||
+         InputMap_GamepadCount() == 0;
 }
 
 /* SDL3 audio-stream callback: fires when the bound device needs more data.
@@ -3358,8 +3366,15 @@ int main(int argc, char **argv) {
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         case SDL_EVENT_GAMEPAD_BUTTON_UP:
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-          /* While the menu owns the screen the pad drives the menu, not the
-           * game — but only when the pad is the menu's active device. */
+          /* An armed binding row consumes the raw pad event regardless of the
+           * active menu device — mirrors the keyboard capture at the KEY_DOWN
+           * case above, so a gamepad-bind row can be captured even when the
+           * menu's active device is the keyboard (input_device=Keyboard). */
+          if (SettingsOverlay_IsOpen() &&
+              SettingsOverlay_HandleCaptureEvent(&event))
+            break;
+          /* While the menu owns the screen the pad drives menu NAVIGATION, not
+           * the game — but only when the pad is a menu-active device. */
           if (SettingsOverlay_IsOpen()) {
             if (MenuGamepadIsActiveDevice())
               (void)SettingsOverlay_HandleGamepadEvent(&event);

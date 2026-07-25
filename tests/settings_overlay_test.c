@@ -126,33 +126,41 @@ static uint8_t *ReadOptionalRom(size_t *size_out) {
   return data;
 }
 
-/* AUDIT-1.1 / 3P-overlay-inputdevice: the menu-device arbitration gate in
- * main.c (MenuGamepadIsActiveDevice / MenuKeyboardIsActiveDevice) is static and
- * cannot be linked here, so replicate its exact rule over (input_device,
- * gamepad_count) and assert the 5-row truth table: exactly one owner per row,
- * so one physical Steam-Deck press (which can surface as both a pad event and a
- * synthesized keyboard twin) never drives the menu twice and never locks out. */
+/* AUDIT-1.1 / 3P-overlay-inputdevice: the menu-device arbitration gates in
+ * main.c (MenuGamepadIsActiveDevice / MenuKeyboardIsActiveDevice) are static and
+ * cannot be linked here, so replicate their EXACT independent rules over
+ * (input_device, gamepad_count) and assert the truth table. The two predicates
+ * are NOT complementary — they mirror InputMap_State's two independent gameplay
+ * gates (input_map.c:491-494): in Auto BOTH devices are menu-active, so a
+ * keyboard user with an idle pad connected is never locked out of the menu. */
 static bool MenuGamepadOwns(int input_device, int gamepad_count) {
   return input_device != kInputDevice_Keyboard && gamepad_count > 0;
+}
+static bool MenuKeyboardOwns(int input_device, int gamepad_count) {
+  return input_device != kInputDevice_Gamepad || gamepad_count == 0;
 }
 static void CheckMenuDeviceGateTruthTable(void) {
   const struct {
     int input_device;
     int gamepad_count;
-    bool gamepad_owns;
+    bool gamepad_active;
+    bool keyboard_active;
   } rows[] = {
-      { kInputDevice_Auto,     0, false },  /* Auto, no pad     -> keyboard */
-      { kInputDevice_Auto,     1, true  },  /* Auto, pad        -> gamepad  */
-      { kInputDevice_Keyboard, 0, false },  /* Keyboard pinned  -> keyboard */
-      { kInputDevice_Keyboard, 2, false },  /* Keyboard + pad   -> keyboard */
-      { kInputDevice_Gamepad,  1, true  },  /* Gamepad, pad     -> gamepad  */
-      { kInputDevice_Gamepad,  0, false },  /* Gamepad, no pad  -> keyboard (safety valve) */
+      /* input_device,       pads, gamepad, keyboard */
+      { kInputDevice_Auto,     0, false, true  },  /* Auto, no pad   -> keyboard only     */
+      { kInputDevice_Auto,     1, true,  true  },  /* Auto, pad      -> BOTH (no lockout)  */
+      { kInputDevice_Keyboard, 0, false, true  },  /* Keyboard pin   -> keyboard only     */
+      { kInputDevice_Keyboard, 2, false, true  },  /* Keyboard + pad -> keyboard only     */
+      { kInputDevice_Gamepad,  1, true,  false },  /* Gamepad, pad   -> gamepad only      */
+      { kInputDevice_Gamepad,  0, false, true  },  /* Gamepad, no pad-> keyboard (valve)   */
   };
   for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
     bool pad = MenuGamepadOwns(rows[i].input_device, rows[i].gamepad_count);
-    bool kbd = !pad;
-    CHECK(pad == rows[i].gamepad_owns);
-    CHECK(pad != kbd);  /* exactly one owner: never double-fire, never lockout */
+    bool kbd = MenuKeyboardOwns(rows[i].input_device, rows[i].gamepad_count);
+    CHECK(pad == rows[i].gamepad_active);
+    CHECK(kbd == rows[i].keyboard_active);
+    /* At least one device is always active — never a total lockout. */
+    CHECK(pad || kbd);
   }
 }
 
