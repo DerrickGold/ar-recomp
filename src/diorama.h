@@ -6,6 +6,8 @@
 
 void Diorama_SeedCameraFromSettings(void);
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom);
+bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held);
+void Diorama_GetDynamicCameraOrbit(float *yaw, float *pitch);
 void Diorama_ResetCamera(void);
 bool Diorama_IsActiveThisFrame(void);
 void Diorama_OnModeChanged(void);

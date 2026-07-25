@@ -55,10 +55,12 @@ SimRenderFeatureMask Sim3D_ImplementedFeatures(void);
 
 /* Host-side camera controls for the enhanced simulation-town view. Render
  * textures remain host-owned, so availability accepts their current readiness
- * rather than reaching into main.c. Adjust/reset mutate descriptor-backed
- * settings; the caller is responsible for requesting a paused-frame redraw. */
-bool Sim3DCamera_FreeControlsAvailable(bool textures_ready);
+ * rather than reaching into main.c. In Dynamic mode, zoom edits the persisted
+ * baseline while orbit is a transient offset that decays after release. */
+bool Sim3DCamera_ControlsAvailable(bool textures_ready);
 void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta, float zoom_delta);
+bool Sim3DCamera_UpdateDynamic(float elapsed_seconds, bool orbit_held);
+void Sim3DCamera_GetDynamicOrbit(float *yaw, float *pitch);
 void Sim3DCamera_Reset(void);
 bool Sim3DCamera_IsDragging(void);
 void Sim3DCamera_SetDragging(bool dragging);

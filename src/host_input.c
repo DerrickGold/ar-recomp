@@ -161,8 +161,7 @@ void HostInput_ApplyAnalogCamera(void) {
   const bool diorama =
       !SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame();
   const bool sim3d = !SettingsOverlay_IsOpen() && !diorama &&
-      Sim3DCamera_FreeControlsAvailable(g_sim3d_textures_ready);
-  if (!diorama && !sim3d) return;
+      Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready);
 
   const float elapsed_seconds =
       (float)elapsed_ns / kNanosecondsPerSecond;
@@ -176,7 +175,8 @@ void HostInput_ApplyAnalogCamera(void) {
   const float zoom = InputMap_AnalogAction(kInputAction_CamZoomOut) -
                      InputMap_AnalogAction(kInputAction_CamZoomIn);
   if (g_settings.input_cam_invert_y) pitch = -pitch;
-  if (yaw == 0.0f && pitch == 0.0f && zoom == 0.0f) return;
+  const bool orbit_input = yaw != 0.0f || pitch != 0.0f;
+  const bool camera_input = orbit_input || zoom != 0.0f;
 
   const float yaw_delta =
       yaw * kYawRadiansPerSecond * gain * elapsed_seconds;
@@ -184,10 +184,25 @@ void HostInput_ApplyAnalogCamera(void) {
       pitch * kPitchRadiansPerSecond * gain * elapsed_seconds;
   const float zoom_delta =
       zoom * kZoomUnitsPerSecond * gain * elapsed_seconds;
-  if (diorama)
+  if (diorama && camera_input)
     Diorama_AdjustCamera(yaw_delta, pitch_delta, zoom_delta);
-  else
+  else if (sim3d && camera_input)
     HostInput_AdjustSim3DCamera(yaw_delta, pitch_delta, zoom_delta);
+
+  const bool diorama_orbit_held =
+      diorama && g_settings.diorama_camera_mode == kDioramaCam_Dynamic &&
+      (orbit_input || Diorama_IsDragging());
+  const bool sim_orbit_held =
+      sim3d && g_settings.sim3d_camera_mode == kSimCam_Dynamic &&
+      (orbit_input || Sim3DCamera_IsDragging());
+  const bool diorama_changed = Diorama_UpdateDynamicCamera(
+      elapsed_seconds, diorama_orbit_held);
+  const bool sim_changed = Sim3DCamera_UpdateDynamic(
+      elapsed_seconds, sim_orbit_held);
+  if (((diorama || sim3d) && camera_input) ||
+      (diorama && diorama_changed) ||
+      (sim3d && sim_changed))
+    HostInput_RequestPausedRedraw();
 }
 
 static void OnGamepadHostAction(InputAction action) {
@@ -206,7 +221,7 @@ static void OnGamepadHostAction(InputAction action) {
     case kInputAction_CamReset:
       if (Diorama_IsActiveThisFrame()) {
         Diorama_ResetCamera();
-      } else if (Sim3DCamera_FreeControlsAvailable(
+      } else if (Sim3DCamera_ControlsAvailable(
                      g_sim3d_textures_ready)) {
         HostInput_ResetSim3DCamera();
       }

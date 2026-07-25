@@ -179,6 +179,10 @@ typedef struct FrameSlot {
   int diorama_camera_mode;
   DioramaCameraPose diorama_free_pose;
   DioramaCameraPose diorama_dyncam_baseline;
+  /* Host-input orbit layered over the dynamic baseline. Unlike the baseline
+   * zoom, these offsets are not persisted and return to zero after release. */
+  float diorama_manual_orbit_yaw;
+  float diorama_manual_orbit_pitch;
   int diorama_reactive_strength;
   /* B4-vellean (followup doc): PlayerVelocityX/Y, self-calibrated against a
    * running per-session max and clamped to [-1,1] — see FrameSlot_Capture
@@ -220,6 +224,8 @@ typedef struct FrameSlot {
    * active; this only says whether the reactive offsets apply on top. */
   int sim_camera_mode;
   int sim_dyncam_strength;
+  float sim_manual_orbit_yaw;
+  float sim_manual_orbit_pitch;
   float sim_dyncam_lean_yaw;
   float sim_dyncam_lean_pitch;
   bool sim_dyncam_event_hit;

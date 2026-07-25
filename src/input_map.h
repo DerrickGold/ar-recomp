@@ -47,8 +47,8 @@ typedef enum {
   /* Analog camera actions. Unlike everything above these are POLLED, not
    * edge-driven: main.c asks for each one's 0..1 magnitude once per host
    * iteration and integrates it over real elapsed time, so a stick held
-   * half-way orbits at half speed. They only do anything while the diorama or
-   * the 3D sim town is on screen in Free Cam. */
+   * half-way orbits at half speed. Dynamic Cam accepts the same controls but
+   * treats orbit as a returning transient offset. */
   kInputAction_CamYawLeft = kInputAction_EdgeEnd,
   kInputAction_CamYawRight,
   kInputAction_CamPitchUp,

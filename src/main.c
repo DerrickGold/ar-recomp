@@ -1369,7 +1369,7 @@ int main(int argc, char **argv) {
             else if (event.button.button == SDL_BUTTON_MIDDLE)
               Diorama_ResetCamera();
           } else if (!SettingsOverlay_IsOpen() &&
-                     Sim3DCamera_FreeControlsAvailable(
+                     Sim3DCamera_ControlsAvailable(
                          g_sim3d_textures_ready)) {
             if (event.button.button == SDL_BUTTON_RIGHT)
               Sim3DCamera_SetDragging(true);
@@ -1398,7 +1398,7 @@ int main(int argc, char **argv) {
                                  event.motion.yrel * Diorama_DragRadPerPx(),
                                  0.0f);
           } else if (Sim3DCamera_IsDragging() &&
-                     Sim3DCamera_FreeControlsAvailable(
+                     Sim3DCamera_ControlsAvailable(
                          g_sim3d_textures_ready)) {
             HostInput_AdjustSim3DCamera(
                 event.motion.xrel * Diorama_DragRadPerPx(),
@@ -1418,7 +1418,7 @@ int main(int argc, char **argv) {
             Diorama_AdjustCamera(0.0f, 0.0f,
                                  -event.wheel.y * Diorama_ZoomStep());
           else if (!SettingsOverlay_IsOpen() &&
-                   Sim3DCamera_FreeControlsAvailable(
+                   Sim3DCamera_ControlsAvailable(
                        g_sim3d_textures_ready))
             HostInput_AdjustSim3DCamera(
                 0.0f, 0.0f, -event.wheel.y * Diorama_ZoomStep());

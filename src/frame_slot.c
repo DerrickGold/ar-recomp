@@ -170,6 +170,8 @@ Sim3DTuning BuildSim3DTuning(void) {
 static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
   dst->sim_camera_mode = g_settings.sim3d_camera_mode;
   dst->sim_dyncam_strength = g_settings.sim3d_reactive_strength;
+  Sim3DCamera_GetDynamicOrbit(&dst->sim_manual_orbit_yaw,
+                              &dst->sim_manual_orbit_pitch);
 
   /* Outside a town there is no angel record to read: the memory holds
    * whatever the action stage left there. Reporting a neutral camera and
@@ -304,6 +306,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
     (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad / 1000.0f,
     (float)g_settings.diorama_dyncam_baseline_distance_x100 / 100.0f,
   };
+  Diorama_GetDynamicCameraOrbit(&dst->diorama_manual_orbit_yaw,
+                                &dst->diorama_manual_orbit_pitch);
   dst->diorama_reactive_strength = g_settings.diorama_reactive_strength;
   /* B4-vellean (followup doc): same ReadWram16+cast pattern already used for
    * PlayerVelocityX/Y elsewhere (actraiser_rtl.c ~346-349). */

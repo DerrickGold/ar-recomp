@@ -1,4 +1,5 @@
 #include "diorama.h"
+#include "camera_orbit.h"
 #include "diorama_scroll_math.h"   /* R17/C1: DioramaInterpUvWindow */
 #include "scene3d_math.h"
 #include "settings.h"
@@ -546,6 +547,8 @@ static float g_diorama_auto_distance = 5.0f;
 static bool g_diorama_settings_dirty;
 static uint64_t g_diorama_settings_dirty_at;
 static bool s_diorama_dragging;
+static CameraOrbit s_diorama_dynamic_orbit;
+static const float kDioramaOrbitReturnTimeSeconds = 0.35f;
 
 bool Diorama_IsDragging(void)          { return s_diorama_dragging; }
 void Diorama_SetDragging(bool dragging) { s_diorama_dragging = dragging; }
@@ -564,6 +567,28 @@ void Diorama_SeedCameraFromSettings(void) {
 }
 
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
+  if (g_settings.diorama_camera_mode == kDioramaCam_Dynamic) {
+    const float baseline_yaw =
+        (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad / 1000.0f;
+    const float baseline_pitch =
+        (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad / 1000.0f;
+    CameraOrbit_Adjust(&s_diorama_dynamic_orbit, d_yaw, d_pitch,
+                       baseline_yaw, baseline_pitch,
+                       kDioramaTiltMin, kDioramaTiltMax);
+
+    if (d_zoom == 0.0f) return;
+    float distance = g_settings.diorama_dyncam_baseline_distance_x100 > 0
+        ? (float)g_settings.diorama_dyncam_baseline_distance_x100 / 100.0f
+        : g_diorama_auto_distance;
+    distance = Clampf(distance + d_zoom,
+                      kDioramaDistMin, kDioramaDistMax);
+    g_settings.diorama_dyncam_baseline_distance_x100 =
+        (int)(distance * 100.0f);
+    g_diorama_settings_dirty = true;
+    g_diorama_settings_dirty_at = SDL_GetTicks();
+    return;
+  }
+
   g_diorama_cam.tilt_y = Clampf(g_diorama_cam.tilt_y + d_yaw,
                                 kDioramaTiltMin, kDioramaTiltMax);
   g_diorama_cam.tilt_x = Clampf(g_diorama_cam.tilt_x + d_pitch,
@@ -579,6 +604,23 @@ void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
   g_settings.diorama_distance_x100 = (int)(g_diorama_cam.distance * 100.0f);
   g_diorama_settings_dirty = true;
   g_diorama_settings_dirty_at = SDL_GetTicks();
+}
+
+bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held) {
+  if (g_settings.diorama_camera_mode != kDioramaCam_Dynamic) {
+    bool changed = s_diorama_dynamic_orbit.yaw != 0.0f ||
+                   s_diorama_dynamic_orbit.pitch != 0.0f;
+    CameraOrbit_Reset(&s_diorama_dynamic_orbit);
+    return changed;
+  }
+  return CameraOrbit_Update(
+      &s_diorama_dynamic_orbit, elapsed_seconds, orbit_held,
+      kDioramaOrbitReturnTimeSeconds);
+}
+
+void Diorama_GetDynamicCameraOrbit(float *yaw, float *pitch) {
+  if (yaw) *yaw = s_diorama_dynamic_orbit.yaw;
+  if (pitch) *pitch = s_diorama_dynamic_orbit.pitch;
 }
 
 void Diorama_ResetCamera(void) {
@@ -607,6 +649,7 @@ void Diorama_ResetCamera(void) {
     const SettingDesc *row = Settings_Find(kResetKeys[i]);
     if (row) Settings_Reset(row);
   }
+  CameraOrbit_Reset(&s_diorama_dynamic_orbit);
   Diorama_SeedCameraFromSettings();
   g_diorama_settings_dirty = true;
   g_diorama_settings_dirty_at = SDL_GetTicks();

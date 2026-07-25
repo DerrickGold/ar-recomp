@@ -2099,8 +2099,8 @@ static SimDynamicCameraState g_sim_dyncam;
  * exactly what the pitch/yaw/distance settings describe. */
 static void ApplySimDynamicCamera(const FrameSlot *slot,
                                   Scene3DCamera *camera) {
-  bool enabled = slot->sim_camera_mode == kSimCam_Dynamic &&
-      slot->sim_dyncam_strength > 0;
+  bool dynamic = slot->sim_camera_mode == kSimCam_Dynamic;
+  bool reactive = dynamic && slot->sim_dyncam_strength > 0;
 
   /* A mode change snaps rather than eases. Easing across it would swing the
    * camera from the free pose to the baseline over a visible fraction of a
@@ -2119,7 +2119,7 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
   }
   g_sim_dyncam.last_ns = now_ns;
 
-  if (!enabled) {
+  if (!dynamic) {
     /* Cleared rather than left to decay, so switching the feature off is
      * immediate and switching it back on starts level instead of resuming a
      * lean from whenever it was turned off. */
@@ -2131,7 +2131,13 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
   float target_x = kSimLeanPitch * gain * slot->sim_dyncam_lean_pitch;
   float target_y = kSimLeanYaw * gain * slot->sim_dyncam_lean_yaw;
 
-  if (!g_sim_dyncam.active || mode_changed || dt <= 0.0f) {
+  if (!reactive) {
+    g_sim_dyncam.lean_x = 0.0f;
+    g_sim_dyncam.lean_y = 0.0f;
+    g_sim_dyncam.kick_pitch = 0.0f;
+    g_sim_dyncam.kick_zoom = 0.0f;
+    g_sim_dyncam.active = false;
+  } else if (!g_sim_dyncam.active || mode_changed || dt <= 0.0f) {
     g_sim_dyncam.lean_x = target_x;
     g_sim_dyncam.lean_y = target_y;
     g_sim_dyncam.active = true;
@@ -2145,21 +2151,22 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
    * a slot already processed must not re-trigger, or a paused frame would
    * shake forever. Stacking is additive so a hit taken mid-jolt reads as
    * stronger rather than restarting. */
-  if (slot->timestamp_ns != g_sim_dyncam.last_slot_ns) {
+  if (reactive && slot->timestamp_ns != g_sim_dyncam.last_slot_ns) {
     g_sim_dyncam.last_slot_ns = slot->timestamp_ns;
     if (slot->sim_dyncam_event_hit) {
       g_sim_dyncam.kick_pitch += kSimKickPitch * gain;
       g_sim_dyncam.kick_zoom += kSimKickZoom * gain;
     }
   }
-  if (dt > 0.0f) {
+  if (reactive && dt > 0.0f) {
     float decay = expf(-dt / kSimKickTau);
     g_sim_dyncam.kick_pitch *= decay;
     g_sim_dyncam.kick_zoom *= decay;
   }
 
-  camera->tilt_x += g_sim_dyncam.lean_x + g_sim_dyncam.kick_pitch;
-  camera->tilt_y += g_sim_dyncam.lean_y;
+  camera->tilt_x += g_sim_dyncam.lean_x + g_sim_dyncam.kick_pitch +
+      slot->sim_manual_orbit_pitch;
+  camera->tilt_y += g_sim_dyncam.lean_y + slot->sim_manual_orbit_yaw;
   camera->distance *= 1.0f + g_sim_dyncam.kick_zoom;
   if (camera->distance < 2.0f) camera->distance = 2.0f;
 }
@@ -2830,7 +2837,9 @@ void PresentComposite(const FrameSlot *slot,
     DioramaCameraPose final_cam = g_diorama_render_cam;
     float distance_scale = 1.0f;
     if (dynamic) {
-      final_cam.tilt_x += g_diorama_kick_pitch;
+      final_cam.tilt_x += g_diorama_kick_pitch +
+          slot->diorama_manual_orbit_pitch;
+      final_cam.tilt_y += slot->diorama_manual_orbit_yaw;
       distance_scale = 1.0f + g_diorama_kick_zoom;
     }
 

@@ -89,6 +89,7 @@ add_executable(ActRaiserRecomp
     src/settings.c
     src/settings_overlay.c
     src/input_map.c
+    src/camera_orbit.c
     src/scene_inspector.c
     src/scene_asset_dump.c
     src/sim_phase0_trace.c
@@ -273,6 +274,16 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_scene3d_math_test PRIVATE m)
     add_test(NAME actraiser_scene3d_math COMMAND actraiser_scene3d_math_test)
+
+    add_executable(actraiser_camera_orbit_test
+        tests/camera_orbit_test.c
+        src/camera_orbit.c
+    )
+    target_include_directories(actraiser_camera_orbit_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_camera_orbit_test PRIVATE m)
+    add_test(NAME actraiser_camera_orbit COMMAND actraiser_camera_orbit_test)
 
     add_executable(actraiser_sim_town_canvas_test
         tests/sim_town_canvas_test.c
