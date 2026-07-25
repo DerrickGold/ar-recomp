@@ -139,7 +139,7 @@ static void DisplayModeChanged(const SettingDesc *desc) {
   Settings_SetDisplayMode(*(const int *)desc->field);
 }
 
-/* Defined by the host (main.c): re-resolves video geometry for the widened
+/* Defined by the host: re-resolves video geometry for the widened
  * diorama render margin and rebinds the PPU surfaces. Weakly relevant to the
  * settings tests, which link their own no-op. */
 void Diorama_OnModeChanged(void);

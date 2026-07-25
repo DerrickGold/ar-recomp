@@ -8,6 +8,7 @@ void Diorama_SeedCameraFromSettings(void);
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom);
 void Diorama_ResetCamera(void);
 bool Diorama_IsActiveThisFrame(void);
+void Diorama_OnModeChanged(void);
 
 float Diorama_DragRadPerPx(void);
 float Diorama_ZoomStep(void);

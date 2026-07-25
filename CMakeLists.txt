@@ -102,12 +102,14 @@ add_executable(ActRaiserRecomp
     src/run_dir.c
     src/scene3d_math.c
     src/diorama.c
+    src/diorama_host.c
     src/present.c
     src/diorama_scroll_math.c
     src/dev_tools.c
     src/forced_input.c
     src/frame_slot.c
     src/host_audio.c
+    src/host_dev_tools.c
     src/host_display.c
     src/host_display_pacing.c
     src/host_input.c

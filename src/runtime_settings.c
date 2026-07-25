@@ -9,6 +9,7 @@
 #include "actraiser_rtl.h"
 #include "diorama.h"
 #include "host_audio.h"
+#include "host_dev_tools.h"
 #include "host_display.h"
 #include "host_input.h"
 #include "music_replacements.h"
@@ -17,7 +18,6 @@
 #include "sim3d.h"
 #include "user_data_dir.h"
 
-static RuntimeSettingsCallbacks s_callbacks;
 static RuntimeLifecycleRequest s_lifecycle_request;
 
 extern SDL_Window *g_window;
@@ -133,18 +133,17 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
     HostDisplay_InvalidatePresentHistory();
     fprintf(stderr, "State loaded.\n");
   } else if (!strcmp(desc->key, "warp_now")) {
-    if (s_callbacks.perform_warp) s_callbacks.perform_warp();
+    extern void ActRaiser_Warp(unsigned region, unsigned map);
+    const unsigned target = (unsigned)g_settings.warp_target;
+    ActRaiser_Warp((target >> 8) & 0xff, target & 0xff);
   } else if (!strcmp(desc->key, "take_snapshot")) {
-    if (s_callbacks.take_full_snapshot) s_callbacks.take_full_snapshot();
+    HostDevTools_TakeFullSnapshot();
   } else if (!strcmp(desc->key, "diorama_reset")) {
     Diorama_ResetCamera();
   } else if (!strcmp(desc->key, "sim3d_reset_camera")) {
     HostInput_ResetSim3DCamera();
   } else if (!strcmp(desc->key, "dump_scene_assets")) {
-    if (!s_callbacks.dump_scene_assets ||
-        !s_callbacks.dump_scene_assets()) {
-      return false;
-    }
+    if (!HostDevTools_DumpSceneAssets()) return false;
   } else if (!strcmp(desc->key, "save_apply_session") ||
              !strcmp(desc->key, "save_apply_persist")) {
     SaveEditRequest edits;
@@ -261,8 +260,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   HostDisplay_InvalidatePresentHistory();
 }
 
-void RuntimeSettings_Install(const RuntimeSettingsCallbacks *callbacks) {
-  s_callbacks = callbacks ? *callbacks : (RuntimeSettingsCallbacks){0};
+void RuntimeSettings_Install(void) {
   Settings_SetChangeObserver(OnRuntimeSettingChanged);
   Settings_SetActionObserver(RuntimeSettings_HandleAction);
 }

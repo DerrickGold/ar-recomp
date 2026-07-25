@@ -29,7 +29,6 @@
 #include "scene_inspector.h"
 #include "diorama.h"
 #include "diorama_scroll_math.h"  /* kInterpPhaseNone */
-#include "dev_tools.h"
 #include "forced_input.h"
 #include "save_system.h"
 #include "hd_replacement_host.h"
@@ -47,6 +46,7 @@
 #include "present.h"
 #include "frame_slot.h"
 #include "host_audio.h"
+#include "host_dev_tools.h"
 #include "host_display.h"
 #include "host_input.h"
 #include "input_replay.h"
@@ -117,14 +117,6 @@ uint8_t g_hud_obj_pixels[
  * it at g_pixels). */
 uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
 bool g_diorama_dump_pending;
-/* The single diorama gate (§D14): mode armed, the new PPU path can run, and
- * we are in an action stage. Capture and render both early-out on this, so
- * there is exactly one spelling of "diorama is happening". */
-bool Diorama_IsActiveThisFrame(void) {
-  extern uint8 g_ram[0x20000];
-  return g_settings.diorama_mode && Diorama_NewPpuCapable() &&
-         ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]);
-}
 bool g_diorama_frame_active;
 SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
 SDL_Texture *g_sim_obj_atlas_texture;
@@ -153,28 +145,6 @@ extern const RtlGameInfo kActRaiserGameInfo;
 
 bool g_new_ppu = true;
 
-static DevToolsContext CurrentDevToolsContext(void) {
-  return (DevToolsContext){
-    .renderer = g_renderer,
-    .hud_bg_texture = g_hud_bg_texture,
-    .hud_obj_texture = g_hud_obj_texture,
-    .ppu = g_ppu,
-    .framebuffer_pixels = g_pixels,
-    .hud_bg_pixels = g_hud_bg_pixels,
-    .hud_obj_pixels = g_hud_obj_pixels,
-    .diorama_layer_pixels = g_diorama_layer_pixels,
-    .inspector_presentation = &g_scene_inspector_presentation,
-    .snes_width = g_snes_width,
-    .snes_height = g_snes_height,
-    .pixel_aspect = g_active_pixel_aspect,
-    .widescreen_extra = g_ws_extra,
-    .widescreen_active = g_ws_active,
-    .ignore_aspect_ratio = g_settings.ignore_aspect_ratio,
-    .paused = HostInput_IsPaused(),
-    .turbo = HostInput_IsTurbo(),
-  };
-}
-
 void NORETURN Die(const char *error) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
   fprintf(stderr, "Error: %s\n", error);
@@ -193,70 +163,6 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs) {
 
 static void RtlDrawPpuFrame(void) {
   g_rtl_game_info->draw_ppu_frame();
-}
-
-static void FormatInspectorInfo(char *buffer, size_t buffer_size) {
-  const DevToolsContext context = CurrentDevToolsContext();
-  DevTools_FormatInspectorInfo(&context, buffer, buffer_size);
-}
-
-static bool DumpSceneAssets(void) {
-  HostInput_RedrawPausedFrameIfNeeded();
-  const DevToolsContext context = CurrentDevToolsContext();
-  return DevTools_DumpSceneAssets(&context);
-}
-
-static void PerformWarp(void) {
-  extern void ActRaiser_Warp(unsigned region, unsigned map);
-  unsigned target = g_settings.warp_target;
-  ActRaiser_Warp((target >> 8) & 0xff, target & 0xff);
-}
-
-static void TakeFullSnapshot(void) {
-  /* Capture all emulated presentation state under a frame-unique prefix.
-   * This is shared by F2 and the overlay ACTION row. */
-  HostInput_RedrawPausedFrameIfNeeded();
-  const DevToolsContext context = CurrentDevToolsContext();
-  DevTools_TakeFullSnapshot(&context);
-}
-
-/* GetPresentationViewport moved to present.h/present.c as
- * ComputePresentationViewport (M5, D4/D6): pure, no globals, so both this
- * file's live callers (below) and present.c's slot-fed composite get the
- * same math. */
-
-static void AdjustHudOutputScale(int delta_percent) {
-  const DevToolsContext context = CurrentDevToolsContext();
-  DevTools_AdjustHudOutputScale(&context, delta_percent);
-}
-
-static bool InspectWindowPoint(int window_x, int window_y) {
-  const bool had_selection = SceneInspector_HasSelection();
-  const DevToolsContext context = CurrentDevToolsContext();
-  if (!DevTools_InspectWindowPoint(&context, window_x, window_y))
-    return false;
-  HostInput_OnInspectorSelection(had_selection);
-  return true;
-}
-
-/* Called by the diorama_mode descriptor's change hook, so the menu row and
- * the D hotkey share one path. The render margin widens to kWsExtraMax while
- * the mode is armed (HostDisplay_ResolveVideoGeometry), so the geometry must be
- * re-derived and the PPU surfaces rebound at the new pitch; the display crop
- * and window size are deliberately unaffected. */
-void Diorama_OnModeChanged(void) {
-  if (!g_settings.diorama_mode) g_diorama_frame_active = false;
-  if (!g_ppu) return;   /* pre-boot settings load */
-  /* Memsets the live pixel buffers and rebinds PPU output surfaces. Formerly
-   * quiesce-bracketed; main-thread-only rendering makes that unnecessary
-   * (#18/P13), same as OnRuntimeSettingChanged. */
-  HostDisplay_ResolveVideoGeometry(false);
-  memset(g_pixels, 0, sizeof(g_pixels));
-  memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
-  memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
-  ActRaiser_RebindPpuOutputSurfaces();
-  HostInput_RequestPausedRedraw();
-  HostDisplay_InvalidatePresentHistory();
 }
 
 /* One emulated tick: sample input, run the recompiled game logic, apply
@@ -421,8 +327,7 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
         g_snes_width, g_snes_height, g_snes_width * 4);
   }
   if (g_diorama_dump_pending) {
-    const DevToolsContext dev_tools = CurrentDevToolsContext();
-    DevTools_DumpDioramaLayers(&dev_tools);
+    HostDevTools_DumpDioramaLayers();
     g_diorama_dump_pending = false;
     if (!g_settings.diorama_mode)
       ActRaiser_RebindPpuOutputSurfaces();
@@ -476,9 +381,8 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
     if (want) {
       FILE *pf = fopen(fname, "wb");
       if (pf) {
-        const DevToolsContext dev_tools = CurrentDevToolsContext();
-        SDL_Point shot_size =
-            DevTools_WriteFramebufferPpm(pf, &dev_tools);
+        const SDL_Point shot_size =
+            HostDevTools_WriteFramebufferPpm(pf);
         fclose(pf);
         fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d mode=%s\n",
                 fname, gf, shot_size.x, shot_size.y,
@@ -548,7 +452,7 @@ static void RunOuterIterationHousekeeping(void) {
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       if (gf >= (unsigned)warp_at) {
         warp_fired = true;
-        PerformWarp();
+        (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
       }
     }
   }
@@ -1058,14 +962,10 @@ int main(int argc, char **argv) {
   /* The world map underlay reads three uncompressed ROM blobs once. A failure
    * is not fatal: the stage reports nothing usable and simply never draws. */
   SimWorldMap_Init(rom_data, rom_size);
-  SettingsOverlay_SetInspectorInfoProvider(FormatInspectorInfo);
+  SettingsOverlay_SetInspectorInfoProvider(
+      HostDevTools_FormatInspectorInfo);
 
-  const RuntimeSettingsCallbacks runtime_settings_callbacks = {
-    .perform_warp = PerformWarp,
-    .take_full_snapshot = TakeFullSnapshot,
-    .dump_scene_assets = DumpSceneAssets,
-  };
-  RuntimeSettings_Install(&runtime_settings_callbacks);
+  RuntimeSettings_Install();
   /* After the action observer is installed: the pad's save/load-state
    * bindings route through it. */
   InputMap_Init();
@@ -1351,11 +1251,13 @@ int main(int argc, char **argv) {
             }
           } else if (event.key.key == SDLK_MINUS ||
                      event.key.key == SDLK_KP_MINUS) {
-            if (!event.key.repeat) AdjustHudOutputScale(-25);
+            if (!event.key.repeat)
+              HostDevTools_AdjustHudOutputScale(-25);
           } else if (event.key.key == SDLK_EQUALS ||
                      event.key.key == SDLK_PLUS ||
                      event.key.key == SDLK_KP_PLUS) {
-            if (!event.key.repeat) AdjustHudOutputScale(25);
+            if (!event.key.repeat)
+              HostDevTools_AdjustHudOutputScale(25);
           } else if (event.key.key == SDLK_F5) {
             (void)RuntimeSettings_HandleAction(Settings_Find("save_state"));
           } else if (event.key.key == SDLK_F7) {
@@ -1391,7 +1293,7 @@ int main(int argc, char **argv) {
              * registry target seeded by AR_WARP=<region_hex><map_hex>. The low byte is $19,
              * not a uniform act number (e.g. Kasandora act 2 is 0303). Press
              * from a transition-capable state; see README + docs/SEAMS.md. */
-            PerformWarp();
+            (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
           } else if (event.key.key == SDLK_F2) {
             /* On-demand FULL snapshot — each press writes a unique set of files
              * tagged with the game-frame: WRAM + VRAM + CGRAM + OAM (via
@@ -1401,7 +1303,7 @@ int main(int argc, char **argv) {
              * change over time alongside the picture. */
             /* If F9 and F2 were queued in the same paused host iteration,
              * render the new preset before capturing it. */
-            TakeFullSnapshot();
+            HostDevTools_TakeFullSnapshot();
           } else if (event.key.key == SDLK_D && !event.key.repeat) {
             if (event.key.mod & SDL_KMOD_SHIFT) {
               extern uint8 g_ram[0x20000];
@@ -1480,7 +1382,7 @@ int main(int argc, char **argv) {
                       event_x, event_y, &output_x, &output_y) ||
                   !SettingsOverlay_BeginDebugPanelDrag(
                       output_x, output_y))
-                (void)InspectWindowPoint(event_x, event_y);
+                (void)HostDevTools_InspectWindowPoint(event_x, event_y);
             }
           }
           break;
