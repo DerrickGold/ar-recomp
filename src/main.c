@@ -797,6 +797,15 @@ static void SubmitFrameToPresent(void) {
     PresentUpload(&slot);
     PresentComposite(&slot, NULL);
     uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
+    /* Phase 0: with no present thread, this is the only present site, so the
+     * Frame-limit pacing (Refresh rate = Limit / Unlimited's R2 soft-cap)
+     * must happen here — same composite -> throttle -> present order as
+     * PresentThreadFn, so the sleep shows up in the vsync-wait perf bucket.
+     * A no-op in Vsync mode (interval 0; SDL_RenderPresent blocks instead).
+     * Emulation pace is unaffected: the M6 accumulator runs catch-up ticks
+     * for wall-clock time spent sleeping here. */
+    static uint64_t last_present_ns;
+    PresentThrottle(&last_present_ns);
     SDL_RenderPresent(g_renderer);
     if (perf_on) {
       uint32 now = SDL_GetTicks();
