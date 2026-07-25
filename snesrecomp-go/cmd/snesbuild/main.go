@@ -277,6 +277,9 @@ func runToolchain(args []string) error {
 	goos := flags.String("goos", runtime.GOOS, "target OS for `pin`")
 	goarch := flags.String("goarch", runtime.GOARCH, "target architecture for `pin`")
 	sdl := flags.Bool("sdl", false, "print the SDL3 pin (url sha archive kind) instead of the Zig pin")
+	steamDeckSDL := flags.Bool(
+		"steam-deck-sdl", false,
+		"print Steam Deck SDL3 header/runtime pins instead of the Zig pin")
 	subcommand := "status"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		subcommand, args = args[0], args[1:]
@@ -285,6 +288,18 @@ func runToolchain(args []string) error {
 		return err
 	}
 	if subcommand == "pin" {
+		if *sdl && *steamDeckSDL {
+			return fmt.Errorf("--sdl and --steam-deck-sdl are mutually exclusive")
+		}
+		if *steamDeckSDL {
+			headersURL, headersSHA, headersArchive,
+				runtimeURL, runtimeSHA, runtimeArchive :=
+				toolchain.SteamDeckSDL3Pins()
+			fmt.Printf("%s %s %s %s %s %s\n",
+				headersURL, headersSHA, headersArchive,
+				runtimeURL, runtimeSHA, runtimeArchive)
+			return nil
+		}
 		if *sdl {
 			url, sha, archive, kind, err := toolchain.SDL3Pin(*goos, *goarch)
 			if err != nil {

@@ -12,6 +12,7 @@
     { "name": "macos-x86_64", "inherits": "base", "displayName": "snesbuild macOS x86_64", "cacheVariables": { "SNESBUILD_GOOS": "darwin", "SNESBUILD_GOARCH": "amd64" } },
     { "name": "linux-x86_64", "inherits": "base", "displayName": "snesbuild Linux x86_64", "cacheVariables": { "SNESBUILD_GOOS": "linux", "SNESBUILD_GOARCH": "amd64" } },
     { "name": "linux-arm64", "inherits": "base", "displayName": "snesbuild Linux arm64", "cacheVariables": { "SNESBUILD_GOOS": "linux", "SNESBUILD_GOARCH": "arm64" } },
+    { "name": "steam-deck", "inherits": "base", "displayName": "snesbuild Steam Deck x86_64", "cacheVariables": { "SNESBUILD_GOOS": "linux", "SNESBUILD_GOARCH": "amd64", "SNESBUILD_STEAM_DECK": "ON" } },
     { "name": "windows-x86_64", "inherits": "base", "displayName": "snesbuild Windows x86_64", "cacheVariables": { "SNESBUILD_GOOS": "windows", "SNESBUILD_GOARCH": "amd64" } },
     { "name": "windows-arm64", "inherits": "base", "displayName": "snesbuild Windows arm64", "cacheVariables": { "SNESBUILD_GOOS": "windows", "SNESBUILD_GOARCH": "arm64" } }
   ],
@@ -20,6 +21,7 @@
     { "name": "macos-x86_64", "configurePreset": "macos-x86_64" },
     { "name": "linux-x86_64", "configurePreset": "linux-x86_64" },
     { "name": "linux-arm64", "configurePreset": "linux-arm64" },
+    { "name": "steam-deck", "configurePreset": "steam-deck" },
     { "name": "windows-x86_64", "configurePreset": "windows-x86_64" },
     { "name": "windows-arm64", "configurePreset": "windows-arm64" },
     { "name": "release", "configurePreset": "release", "targets": ["release"] }
@@ -29,6 +31,7 @@
     { "name": "macos-x86_64", "configurePreset": "macos-x86_64" },
     { "name": "linux-x86_64", "configurePreset": "linux-x86_64" },
     { "name": "linux-arm64", "configurePreset": "linux-arm64" },
+    { "name": "steam-deck", "configurePreset": "steam-deck" },
     { "name": "windows-x86_64", "configurePreset": "windows-x86_64" },
     { "name": "windows-arm64", "configurePreset": "windows-arm64" }
   ],
@@ -63,6 +66,14 @@
         { "type": "configure", "name": "linux-arm64" },
         { "type": "build", "name": "linux-arm64" },
         { "type": "package", "name": "linux-arm64" }
+      ]
+    },
+    {
+      "name": "package-steam-deck",
+      "steps": [
+        { "type": "configure", "name": "steam-deck" },
+        { "type": "build", "name": "steam-deck" },
+        { "type": "package", "name": "steam-deck" }
       ]
     },
     {

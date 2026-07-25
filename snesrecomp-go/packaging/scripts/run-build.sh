@@ -27,9 +27,10 @@ done
   $ROOT
 then run this again."
 
-# Linux has no single portable SDL3 redistributable, so it is not bundled;
-# rely on the system package. Give a clear hint if it is missing.
-if ! pkg-config --exists sdl3 2>/dev/null \
+# Generic Linux bundles rely on the system package. The Steam Deck preset
+# instead carries Valve's pinned x86_64 Steam Runtime SDL under tools/sdl3.
+if [ ! -f "$UTILS/tools/sdl3/lib/libSDL3.so" ] \
+        && ! pkg-config --exists sdl3 2>/dev/null \
         && ! ldconfig -p 2>/dev/null | grep -q 'libSDL3\.so'; then
     fail "SDL3 is not installed. Install it first, for example:
   Debian 13+/Ubuntu 24.04+:  sudo apt install libsdl3-dev

@@ -220,13 +220,13 @@ The distribution bundles are the zero-setup path: a player downloads one
 archive for their platform, drops in their own ROM, and runs one script — no
 CMake, compiler, SDL, or Go required, and no repository checkout. Each bundle
 carries the whole buildable project plus a pinned C toolchain (Zig) and, on
-macOS/Windows, SDL3; the game's C is generated locally from the player's ROM
-(never shipped), and the folder exposes only a `README.txt` and a `run-build`
-script, with everything else tucked under `utils/`. Running `run-build` once
-builds the game and writes a `run-game` script; the player opens `run-game` to
-play, every time, with no rebuild.
+macOS, Windows x86_64, and Steam Deck, SDL3; the game's C is generated locally
+from the player's ROM (never shipped), and the folder exposes only a
+`README.txt` and a `run-build` script, with everything else tucked under
+`utils/`. Running `run-build` once builds the game and writes a `run-game`
+script; the player opens `run-game` to play, every time, with no rebuild.
 
-To **produce** all six bundles from a source checkout (into `release/`, named
+To **produce** all seven bundles from a source checkout (into `release/`, named
 `actraiser-recomp-<platform>.{tar.xz,zip}` with SHA-256 sidecars):
 
 ```sh
@@ -236,6 +236,13 @@ make release
 Go and CMake are the only host requirements — the C toolchain and SDL3 are
 downloaded and bundled automatically. Full details, layout, and the current
 signing/CI gaps are in [`docs/BUILD_TOOLING.md`](docs/BUILD_TOOLING.md).
+
+The dedicated `steam-deck` bundle is always Linux x86_64 and carries the
+pinned SDL3 runtime from Valve's Steam Runtime. Build only that archive with:
+
+```sh
+make release-steam-deck
+```
 
 ### Building from source
 

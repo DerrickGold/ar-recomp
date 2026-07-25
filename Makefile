@@ -3,12 +3,14 @@
 # `make release` cross-builds every platform's self-contained bundle and
 # writes them (plus SHA-256 sidecars) into ./release/. Bundles are named
 # actraiser-recomp-<platform>.{tar.xz,zip}. Requires Go and CMake; the C
-# toolchain and SDL2 are downloaded and bundled by the packaging project, so
-# no compiler/SDL install is needed to PRODUCE the bundles.
+# toolchain and supported SDL3 redistributables are downloaded and bundled by
+# the packaging project, so no compiler/SDL install is needed to PRODUCE the
+# bundles.
 #
 # The equivalent pure-CMake command (run from the packaging directory) is:
 #   cd snesrecomp-go/packaging && cmake --workflow --preset release
-# Individual platforms: `make release-macos-arm64`, etc.
+# Individual platforms: `make release-macos-arm64`, `make release-steam-deck`,
+# etc.
 #
 # Each platform's CMake build tree (which holds a freshly extracted ~180 MB Zig
 # toolchain) is removed as soon as that bundle is staged into release/, so the
@@ -36,7 +38,7 @@
 #   make clean-release  remove only the packaged bundles + packaging build.
 
 PACKAGING := snesrecomp-go/packaging
-PLATFORMS := macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64
+PLATFORMS := macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck
 ROM ?= ar.sfc
 
 # Regenerable artifacts, grouped. Never lists the ROM, saves/*.srm, recordings,

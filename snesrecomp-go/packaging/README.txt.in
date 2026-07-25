@@ -35,11 +35,7 @@ IF SOMETHING GOES WRONG
 - macOS says the file is from an unidentified developer: hold Control, click
   run-build.command, choose Open, then Open again. (You only do this once.)
 
-- Linux says SDL3 is missing: install it with your package manager, then try
-  again. (macOS and Windows already include it.) Package names vary -
-  Fedora 39+: "sudo dnf install SDL3-devel"; Arch: "sudo pacman -S sdl3".
-  Ubuntu 22.04 / Debian 12 have no SDL3 package yet; use a newer release, a
-  PPA, or build SDL3 from source.
+@SNESBUILD_SDL_NOTE@
 
 
 OPTIONAL: YOUR OWN MUSIC AND HD GRAPHICS

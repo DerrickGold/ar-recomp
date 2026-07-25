@@ -157,3 +157,21 @@ func TestSDL3PinErrorsWithoutRedistributable(t *testing.T) {
 		}
 	}
 }
+
+func TestSteamDeckSDL3PinsAreVerifiedX8664Inputs(t *testing.T) {
+	headersURL, headersSHA, headersArchive,
+		runtimeURL, runtimeSHA, runtimeArchive := SteamDeckSDL3Pins()
+	if headersArchive != "SDL3-"+PinnedSteamDeckSDL3HeaderVersion+".tar.gz" ||
+		!strings.HasSuffix(headersURL, headersArchive) ||
+		len(headersSHA) != 64 {
+		t.Fatalf("invalid Deck SDL headers pin: %q %q %q",
+			headersURL, headersSHA, headersArchive)
+	}
+	if !strings.Contains(runtimeArchive, PinnedSteamDeckSDL3RuntimeVersion) ||
+		!strings.HasSuffix(runtimeArchive, "_amd64.deb") ||
+		!strings.HasSuffix(runtimeURL, runtimeArchive) ||
+		len(runtimeSHA) != 64 {
+		t.Fatalf("invalid Deck SDL runtime pin: %q %q %q",
+			runtimeURL, runtimeSHA, runtimeArchive)
+	}
+}

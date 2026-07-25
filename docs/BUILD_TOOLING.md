@@ -110,13 +110,14 @@ and runs one script — no repository checkout, no compiler, no SDL, nothing
 installed system-wide. Because the Go module is CGO-free, every platform
 cross-builds from one machine.
 
-**Build all six from the repo root, one command:**
+**Build all seven from the repo root, one command:**
 
 ```sh
 make release
 # or, pure CMake, from the packaging dir:
 #   cd snesrecomp-go/packaging && cmake --workflow --preset release
 # single platform:  make release-macos-arm64   (or the per-platform presets)
+# Steam Deck only:  make release-steam-deck
 ```
 
 Each platform's CMake build tree holds a freshly extracted ~180 MB Zig
@@ -145,17 +146,19 @@ actraiser-recomp-<platform>/
     ├── game-assets/        manifest template + empty audio/+hd/ (no media ships)
     ├── tools/snesbuild     the driver (stripped, git-describe-stamped)
     ├── tools/toolchain/zig-*/   pinned C compiler (Zig 0.16.0)
-    ├── tools/sdl3/         bundled SDL3 (macOS, Windows x86_64)
+    ├── tools/sdl3/         bundled SDL3 (macOS, Windows x86_64, Steam Deck)
     └── LICENSE, ATTRIBUTION.md
 ```
 
 The only things deliberately absent are the ROM (the user supplies it), the
 ROM-derived generated C (regenerated locally), and the media assets — the
 `game-assets/manifest.ini` ships as a template mapping every song/graphic slot
-so users drop in their own files. The bundled SDL3 comes from SDL's official
-redistributables (universal macOS `.dmg`; Windows mingw archive), both zlib
-licensed; Linux ships no SDL (no single portable redistributable) and the run
-script points the user at their package manager.
+so users drop in their own files. macOS and Windows x86_64 use SDL's official
+redistributables (universal macOS `.dmg`; Windows mingw archive). The dedicated
+Steam Deck archive is always Linux x86_64 and combines matching-version pinned
+official SDL headers with Valve's pinned Steam Runtime SDL shared library.
+Generic Linux archives still use the system SDL because there is no single
+portable upstream redistributable.
 
 **How a user runs it:** unpack the archive, drop the ROM in the folder next to
 `README.txt`, and run `run-build` **once**. It builds the game via
@@ -196,10 +199,10 @@ across the whole bundle (≈145 first-party files scanned per archive).
    binaries want signing before public release.
 2. **CI** to run `make release` on a clean tagged checkout (today's archives
    carry the `-dirty` stamp) and publish the artifacts + checksums.
-3. **Windows/Linux runtime validation.** All six bundles cross-build and the
-   full standalone flow is verified end-to-end on macOS; the built *game* has
-   only been run on macOS, so the Windows SDL3/WinMain path and the Linux
-   system-SDL fallback still need a real run on those hosts.
+3. **Windows/generic Linux runtime validation.** All seven bundles cross-build
+   and the full standalone flow is verified end-to-end on macOS. The game and
+   input path are now hardware-validated on Steam Deck; Windows SDL3/WinMain
+   and the generic Linux system-SDL fallback still need real-host runs.
 4. **`--allow-stubs` decision.** The one-click flow currently passes it so
    regen always completes; closing the hard-stub backlog would let the shipped
    flow drop it.
