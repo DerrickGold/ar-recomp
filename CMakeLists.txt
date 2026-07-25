@@ -106,6 +106,7 @@ add_executable(ActRaiserRecomp
     src/forced_input.c
     src/frame_slot.c
     src/host_audio.c
+    src/host_display.c
     src/host_display_pacing.c
     src/input_replay.c
     src/oracle_trace.c

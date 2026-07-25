@@ -29,7 +29,7 @@
 #include "scene_inspector.h"
 #include "scene_asset_dump.h"
 #include "diorama.h"
-#include "diorama_scroll_math.h"  /* kInterpPhaseNone, pair-validity predicate */
+#include "diorama_scroll_math.h"  /* kInterpPhaseNone */
 #include "forced_input.h"
 #include "save_system.h"
 #include "hd_replacements.h"
@@ -47,11 +47,10 @@
 #include "present.h"
 #include "frame_slot.h"
 #include "host_audio.h"
-#include "host_display_pacing.h"
+#include "host_display.h"
 #include "input_replay.h"
 #include "oracle_trace.h"
 #include "portable_paths.h"
-#include "present_cadence_metrics.h"
 #include "runtime_diagnostics.h"
 #include "scheduled_settings.h"
 #include "user_data_dir.h"
@@ -81,10 +80,10 @@ enum {
  * lookup off this, and a shipped .desktop file must share its basename. */
 #define AR_APP_IDENTIFIER "dev.quintet-enix.actraiser-recomp"
 #define AR_APP_VERSION "0.1.0-dev"
-/* Not static: present.c (M5, D6) reads these presentation resources
+/* Not static: present.c and host_display.c read these presentation resources
  * directly. They are boot-created once and, after that, either read-only
- * pointers or exclusively touched under the M5.3 present-thread handshake —
- * not part of the g_ppu/g_settings race class D6 fences off. */
+ * pointers or used synchronously on the main thread — not part of the
+ * g_ppu/g_settings state boundary D6 fences off. */
 SDL_Window *g_window;
 SDL_Renderer *g_renderer;
 /* M8: true once the "gpu" backend was successfully requested (AR_GPU_SHADERS=1)
@@ -371,345 +370,6 @@ static void RtlDrawPpuFrame(void) {
  * Re-render the same emulated PPU state once after such a change; ordinary
  * paused iterations retain that texture, so pause never advances the game or
  * repeatedly replays the scanline/HDMA renderer. */
-/* #18/P13: the M5.3 present thread and its handshake machinery are GONE.
- *
- * Phase 0 established that SDL3's 2D render API is main-thread-only
- * (SDL_render.h:46-47) and that PresentThreadFn was the sole contract
- * violator — it issued every present.c render call plus SDL_RenderPresent off
- * the SDL_Init thread, which is why the default GL/EGL backend would not boot
- * on Wayland. Phase 0 stopped spawning it but left the machinery compiled
- * (dead) for revertibility. That revert window has closed, so the whole
- * apparatus is deleted here rather than left as a permanent trap for the next
- * reader:
- *   - the thread handle, mutex, and the two condition variables;
- *   - g_present_running / g_present_thread_active / g_present_quiesce* state;
- *   - the double-buffered g_frame_slots[2] + g_frame_pending queue (a
- *     synchronous present needs exactly one stack FrameSlot, not a
- *     producer/consumer ring);
- *   - g_present_upload_done + WaitForPixelBuffersFree (#18): a pixel-buffer
- *     handshake exists only to stop a CONSUMER thread reading g_pixels while
- *     the game thread redraws it. With one thread, PresentUpload has always
- *     already returned before the next RtlDrawPpuFrame() begins;
- *   - PresentThread_Quiesce/Resume (P13): nothing to park, so the brackets
- *     around savestate loads, settings changes, diorama rebinds, and the
- *     screenshot readback are gone. Those operations are now plain
- *     straight-line main-thread code.
- *
- * What SURVIVES from the M5/M6/M7 design: the fixed-timestep accumulator
- * still owns the emulated tick rate (decoupled from display refresh), and
- * FrameSlot is still the D6 boundary — present.c reads only the slot
- * FrameSlot_Capture produces, never live g_ppu/g_settings. */
-static uint64_t FrameLimitIntervalNs(void);  /* defined with the display code */
-static bool RunningUnderGamescope(void);     /* ditto */
-
-static HostDisplayPacingOptions CurrentDisplayPacingOptions(void) {
-  return (HostDisplayPacingOptions){
-      .refresh_mode = g_settings.refresh_mode,
-      .frame_limit_fps = g_settings.frame_limit_fps,
-      .host_refresh_hz = Settings_HostRefreshHz(),
-      .compositor_managed = RunningUnderGamescope(),
-  };
-}
-
-/* Pace to `interval` by advancing an absolute DEADLINE, not by stamping "now"
- * after each sleep. SDL_DelayNS "waits at least the specified time, but
- * possibly longer due to OS scheduling", so re-basing on the post-sleep clock
- * folded every oversleep into the next period and the achieved rate drifted
- * one-directionally below the target. Carrying the deadline lets a late present
- * be absorbed by a shorter following sleep, which is what makes the average
- * come out at the requested rate.
- *
- * `*deadline_ns` is the time the NEXT present may occur. Resynchronize instead
- * of sprinting when we fall more than two intervals behind (a hitch, a paused
- * stretch, a settings change, or the interval itself changing) — otherwise the
- * throttle would issue a burst of unthrottled presents to "catch up", which is
- * exactly the wrong response. interval 0 = no pacing. */
-static void PresentThrottleInterval(uint64_t *deadline_ns, uint64_t interval) {
-  uint64_t now = SDL_GetTicksNS();
-  if (!interval) { *deadline_ns = now; return; }
-  if (*deadline_ns == 0 || now > *deadline_ns + 2 * interval) {
-    *deadline_ns = now + interval;   /* (re)synchronize */
-    return;
-  }
-  if (now < *deadline_ns) {
-    SDL_DelayNS(*deadline_ns - now);
-    now = SDL_GetTicksNS();
-  }
-  *deadline_ns += interval;
-  /* Never leave the deadline in the past by more than one interval, or the
-   * next call would compute a zero sleep and free-run. */
-  if (*deadline_ns < now) *deadline_ns = now + interval;
-}
-
-/* M6/§3.1: the emulated NTSC tick duration. 262 scanlines * 1364 master-clock
- * dots / 21.477272 MHz = 60.0988 fps, NOT 60.00 — using 60.00 causes audible
- * audio drift over a long session. File-scope: the main-loop accumulator owns
- * it, and PausedIdleIntervalNs reuses it as the input-poll cadence floor. */
-static const uint64_t kFrameNs = 16639267;  /* floor(1e9 / 60.0988) */
-
-/* Host-UI present pacing: the display's own refresh rate, whatever it is
- * (Settings_HostRefreshHz, captured from the SDL display mode; 60 only as
- * the fallback when the host reports none — headless-with-video, dummy
- * driver). No baked-in cadence: a 144Hz panel paces the menu at 144Hz.
- * In Vsync mode SDL_RenderPresent's block is the pacer, so return only a
- * 2x-refresh anti-spin floor (a sleep never long enough to push the present
- * past the next vblank — stacking a full-interval sleep on the vsync block
- * can phase-align badly and oscillate to half rate; same 2x reasoning as
- * R2's Unlimited soft-cap) that still bounds the loop when the platform
- * skips the vsync block (occluded window). */
-static uint64_t UiPresentIntervalNs(void) {
-  return HostDisplayPacing_UiIntervalNs(
-      CurrentDisplayPacingOptions(), kFrameNs);
-}
-
-/* Plain pause (overlay CLOSED): the frame is static, so presents are only
- * window keep-alive + input polling — panel-rate re-composites buy nothing.
- * Pace to the SLOWER of the display and one emulated frame: a >60Hz panel
- * idles at the game's own tick duration (unpause latency unchanged from the
- * pre-Phase-0 ~16ms), a <60Hz panel just follows the display. The menu keeps
- * full UiPresentIntervalNs — it animates (hold-stepping, status fades). */
-static uint64_t PausedIdleIntervalNs(void) {
-  return HostDisplayPacing_PausedIntervalNs(
-      CurrentDisplayPacingOptions(), kFrameNs);
-}
-
-/* M7 scroll interpolation needs the PREVIOUS presented frame's camera
- * alongside the current one. That history used to live thread-locally inside
- * PresentThreadFn; with one thread it is this static, updated after each
- * composite from the slot just shown (still a separate snapshot struct, never
- * a pointer into a FrameSlot the next capture would overwrite — see
- * present.h). Passing NULL here, as the synchronous path did while it was
- * merely a fallback, made ComputeDioramaScrollDelta return zero on its first
- * guard, i.e. the "Scroll interpolation" setting silently did nothing. */
-static DioramaScrollSnapshot g_prev_scroll;
-
-/* R17/C5: the present pacing deadline, at file scope because BOTH present paths
- * (a tick present and a between-ticks re-present) must share one. Two
- * independent deadlines paced against the same interval would each admit a
- * present per interval, doubling the effective rate and making the Frame limit
- * mean half of what it says. */
-static uint64_t g_present_deadline_ns;
-
-/* R17/C5: the interval that paces GAME presents, guaranteed non-zero.
- *
- * FrameLimitIntervalNs() returns 0 in Vsync (SDL_RenderPresent is expected to
- * block instead) and in Unlimited when the host refresh is unknown or we are
- * under gamescope (both deliberately "truly unlimited"). That was safe only
- * while presents were one-per-tick and the no-tick iteration slept: "unlimited"
- * meant unlimited presents, of which there were 60 a second. Once a re-present
- * can fire on every iteration, a zero interval means nothing paces the loop at
- * all except a vsync block this codebase already documents as skippable —
- * UiPresentIntervalNs keeps a 2x-refresh floor for exactly that reason. An
- * occluded-but-mapped window is the concrete case: SDL_EVENT_WINDOW_OCCLUDED is
- * not handled, so g_window_hidden is false, the platform need not block in
- * SDL_RenderPresent, and the loop would spin a core discarding composites.
- *
- * So: honor an explicit Limit exactly (nonzero already), and otherwise fall back
- * to a floor. Half a refresh period can never be mistaken for user-visible
- * throttling and can never push a present past the next vblank, so it is a
- * no-op whenever vsync genuinely blocks. */
-static uint64_t GamePresentIntervalNs(void) {
-  return HostDisplayPacing_GameIntervalNs(
-      CurrentDisplayPacingOptions(), kFrameNs);
-}
-
-/* R17/C2: the retained frame a between-ticks re-present re-composites, held
- * with the scroll snapshot it must be paired against.
- *
- * The pair is stored TOGETHER and captured BEFORE FrameSlot_ExtractScrollSnapshot
- * advances g_prev_scroll, because that extract makes g_prev_scroll a copy of
- * this very slot's camera: after it runs, g_prev_scroll.timestamp_ns ==
- * slot.timestamp_ns exactly, and pairing the slot against the live
- * g_prev_scroll later would fail ComputeDioramaScrollDeltaAt's
- * curr->timestamp_ns <= prev->timestamp_ns guard and silently interpolate
- * nothing. (Passing NULL instead — what the keep-alive path does — fails one
- * guard earlier. Neither "just pass g_prev_scroll" nor "pass NULL" is correct
- * for a re-present; it needs the PREVIOUS tick's snapshot, which only exists
- * before the extract.) Assertion 2 in RepresentLastFrame is the tripwire if
- * anyone reorders these.
- *
- * This is also what the deleted present thread had: g_frame_slots[] plus
- * g_present_last_presented_idx kept the last presented frame readable. #18/P13
- * collapsed that to one stack local, which is why re-presenting became
- * impossible. */
-static struct {
-  FrameSlot slot;                 /* ~10KB; copied once per tick present */
-  DioramaScrollSnapshot prev;     /* the snapshot to pair `slot` against */
-  bool valid;
-} g_repr;
-
-/* The deleted present thread invalidated its scroll history whenever it came
- * out of a quiesce, because a settings change / savestate load / diorama
- * toggle can span an arbitrary wall-clock gap AND change the scene: keeping
- * the pre-event snapshot would make the next frame interpolate against
- * unrelated camera data (a one-frame visible jump). The quiesce is gone, so
- * the former quiesce sites call this instead. Zeroing is the invalidation —
- * ComputeDioramaScrollDelta bails on !prev->diorama_active and on
- * timestamp_ns == 0.
- *
- * R17/C2: the retained re-present slot has exactly the same lifetime, so it is
- * dropped here too — one clear site, no second rule to keep in sync. Every
- * caller of this function reassigns g_snes_width and/or memsets the pixel
- * buffers, so a retained slot's geometry and the live buffers would disagree.
- * Renamed from InvalidateScrollHistory: it now invalidates both pieces of
- * cross-frame present state, not just the scroll snapshot. */
-static void InvalidatePresentHistory(void) {
-  memset(&g_prev_scroll, 0, sizeof g_prev_scroll);
-  g_repr.valid = false;
-}
-
-/* Call after every RtlDrawPpuFrame(): capture the just-drawn frame and
- * present it. Synchronous and main-thread-only (#18/P13 removed the present
- * thread and its handshake — see the note above the pacing helpers).
- *
- * game_tick is true only for the present that follows a genuine emulated
- * tick; the paused/menu keep-alive re-present passes false. That distinction
- * is load-bearing for M7 — see the R16 note below.
- *
- * alpha (R17/C4) is the sub-tick phase for a tick present; ignored (and forced
- * to kInterpPhaseNone) when game_tick is false, since a keep-alive re-capture
- * does not sit at a meaningful point between two ticks. */
-static void SubmitFrameToPresent(bool game_tick, float alpha) {
-  if (!g_renderer || !g_texture) return;
-  static int perf_on = -1;
-  if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
-  FrameSlot slot;
-  FrameSlot_Capture(&slot);
-  uint32 render_t0 = perf_on ? SDL_GetTicks() : 0;
-  PresentUpload(&slot);
-  /* R16: only a post-tick present may take part in scroll interpolation.
-   * A keep-alive re-present carries IDENTICAL camera data under a FRESH
-   * capture timestamp (FrameSlot_Capture re-stamps timestamp_ns every call),
-   * so letting one through would advance g_prev_scroll to a non-tick frame.
-   * (R16 originally also kept the host-UI present interval out of the
-   * wall-clock span EMA that scaled extrapolation; R17/C4 deleted that EMA
-   * along with the reconstruction it served, so only the snapshot-advance half
-   * of this reasoning still applies. A keep-alive now also passes
-   * kInterpPhaseNone, which is the more direct statement of the same thing.)
-   * The deleted present thread held this same invariant structurally:
-   * it re-presented the SAME slot and never touched prev_scroll on an idle
-   * repaint ("prev_scroll only ever advances in the dequeue path below, when
-   * a genuinely new tick was captured").
-   *
-   * R17/C2: retain the (slot, prev) PAIR for the between-ticks re-present, and
-   * do it HERE — before the extract below overwrites g_prev_scroll with this
-   * slot's own camera. See the g_repr comment for why a later pairing against
-   * the live g_prev_scroll cannot work. */
-  if (game_tick) {
-    g_repr.prev = g_prev_scroll;
-    g_repr.slot = slot;
-    g_repr.valid = true;
-  }
-  PresentComposite(&slot, game_tick ? &g_prev_scroll : NULL,
-                   game_tick ? alpha : kInterpPhaseNone);
-  if (game_tick) FrameSlot_ExtractScrollSnapshot(&slot, &g_prev_scroll);
-  uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
-  /* This is the only present site, so Frame-limit pacing (Refresh rate =
-   * Limit / Unlimited's R2 soft-cap) happens here, composite -> throttle ->
-   * present, so the sleep lands in the vsync-wait perf bucket. A no-op in
-   * Vsync mode (interval 0; SDL_RenderPresent blocks instead). Emulation
-   * pace is unaffected: the M6 accumulator runs catch-up ticks for
-   * wall-clock time spent sleeping here (its cap is Limit-aware).
-   *
-   * The Frame limit governs GAME presentation only. Host UI paces to the
-   * display instead — the settings overlay at full panel rate
-   * (UiPresentIntervalNs — it animates), a plain pause at the idle
-   * keep-alive rate (PausedIdleIntervalNs — static frame, input polling
-   * only). Emulation is not ticking in either, so no game pacing is
-   * bypassed. The deadline is shared across the three modes and resynchronizes
-   * whenever it falls far behind, so switching mode (opening the menu, pausing,
-   * changing the limit) starts pacing cleanly rather than from a stale
-   * pre-switch timestamp. */
-  PresentThrottleInterval(&g_present_deadline_ns,
-                          SettingsOverlay_IsOpen() ? UiPresentIntervalNs()
-                          : g_paused               ? PausedIdleIntervalNs()
-                                                   : GamePresentIntervalNs());
-  SDL_RenderPresent(g_renderer);
-  if (perf_on) {
-    uint32 now = SDL_GetTicks();
-    uint32 render_ms = vsync_t0 - render_t0;
-    uint32 vsync_ms = now - vsync_t0;
-    static uint32 win_start, render_sum, render_max, vsync_sum, vsync_max;
-    static int win_frames;
-    render_sum += render_ms; if (render_ms > render_max) render_max = render_ms;
-    vsync_sum += vsync_ms; if (vsync_ms > vsync_max) vsync_max = vsync_ms;
-    win_frames++;
-    if (!win_start) win_start = now;
-    if (now - win_start >= 1000) {
-      fprintf(stderr,
-              "[present-perf] frames=%d present-ms avg=%.1f max=%u "
-              "vsync-wait avg=%.1f max=%u (no present thread)\n",
-              win_frames, (double)render_sum / win_frames, render_max,
-              (double)vsync_sum / win_frames, vsync_max);
-      win_start = now; render_sum = 0; render_max = 0;
-      vsync_sum = 0; vsync_max = 0; win_frames = 0;
-    }
-  }
-}
-
-/* R17/C5 counters, reported by DumpDiagState. Re-presents > 0 with
- * maximum_represent_alpha still 0 is the signature of a broken cadence: we are
- * re-presenting, but always at phase zero, i.e. inert. */
-static unsigned long g_tick_present_count;
-static unsigned long g_represent_count;
-static float g_maximum_represent_alpha;
-static unsigned long g_no_present_no_sleep_iteration_count;
-
-PresentCadenceMetrics PresentCadence_GetMetrics(void) {
-  return (PresentCadenceMetrics){
-      .tick_present_count = g_tick_present_count,
-      .represent_count = g_represent_count,
-      .maximum_represent_alpha = g_maximum_represent_alpha,
-      .no_present_no_sleep_iteration_count =
-          g_no_present_no_sleep_iteration_count,
-  };
-}
-
-/* R17/C5: re-composite the retained frame at a NEW sub-tick phase.
- *
- * This is what makes the render rate independent of the 60.0988Hz tick rate:
- * between two ticks the game state is unchanged, but the phase advances, so the
- * same slot composites at a slightly different interpolated camera position.
- * The deleted present thread did exactly this from its ~4ms idle timeout (which
- * it deliberately shortened from 16ms when interpolation was enabled) — that
- * timeout WAS the independent render clock, and #18/P13 removed it without a
- * replacement, which is why the feature has been inert since Phase 0.
- *
- * Deliberately does NOT call FrameSlot_Capture: a fresh capture re-stamps
- * timestamp_ns, which would reset the phase to zero and defeat the entire
- * purpose. It also does not call PresentUpload — the textures still hold this
- * slot's pixels, since nothing has drawn since, and a device reset invalidates
- * the retained slot (C2) rather than leaving stale handles behind. */
-static void RepresentLastFrame(float alpha) {
-  if (!g_renderer || !g_texture) return;
-  /* The C2 tripwire: the retained pair must be a genuine (prev tick -> this
-   * tick) pair. Fires on the first re-present if the pair copy is ever moved
-   * after FrameSlot_ExtractScrollSnapshot, which would make prev a copy of
-   * slot's own camera and silently interpolate nothing. */
-  SDL_assert(g_repr.prev.timestamp_ns < g_repr.slot.timestamp_ns);
-  /* Encodes C2's L1 precondition: only diorama slots are ever re-presented, so
-   * no flat-path pointer-bearing state is re-consumed. */
-  SDL_assert(g_repr.slot.diorama_active);
-  SDL_assert(alpha >= 0.0f && alpha < 1.0f);
-  /* Geometry drift: any event that re-derives geometry also invalidates the
-   * retained slot (C2), so this should be unreachable. Bail rather than
-   * composite a mismatched slot in release builds — a torn or skewed frame is
-   * worse than a dropped re-present. */
-  if (g_repr.slot.snes_width != g_snes_width ||
-      g_repr.slot.snes_height != g_snes_height ||
-      g_repr.slot.ws_extra != g_ws_extra) {
-    SDL_assert(!"retained slot geometry disagrees with live geometry");
-    g_repr.valid = false;
-    return;
-  }
-  PresentComposite(&g_repr.slot, &g_repr.prev, alpha);
-  PresentThrottleInterval(&g_present_deadline_ns, GamePresentIntervalNs());
-  SDL_RenderPresent(g_renderer);
-  g_represent_count++;
-  if (alpha > g_maximum_represent_alpha)
-    g_maximum_represent_alpha = alpha;
-}
-
 /* Returns true if a redraw actually happened, so the paused loop knows a
  * fresh frame is worth submitting (§2.5). */
 static bool RedrawPausedFrameIfNeeded(void) {
@@ -1059,7 +719,7 @@ static bool OnSettingsAction(const SettingDesc *desc) {
      * state is an unrelated scene, so the interpolation history must not
      * survive it. */
     RtlSaveLoad(kSaveLoad_Load, 0);
-    InvalidatePresentHistory();
+    HostDisplay_InvalidatePresentHistory();
     fprintf(stderr, "State loaded.\n");
   } else if (!strcmp(desc->key, "warp_now")) {
     PerformWarp();
@@ -1174,134 +834,6 @@ static void OnGamepadHostAction(InputAction action) {
     default:
       break;
   }
-}
-
-/* Point the presentation at the current display mode's framebuffer sub-rect
- * and size the window to that mode's display aspect. Host textures retain
- * maximum capacity; g_snes_width selects the live PPU pitch, and 4:3 presents
- * only the authentic centre 256 columns. */
-/* Windowed / borderless-desktop / exclusive fullscreen. SDL3 desktop
- * fullscreen is FullscreenMode == NULL; a non-NULL mode requests a real
- * (exclusive) video mode. */
-static void ApplyWindowMode(void) {
-  if (!g_window) return;
-  switch (g_settings.window_mode) {
-    case kWindowMode_Windowed:
-      SDL_SetWindowFullscreen(g_window, false);
-      break;
-    case kWindowMode_Exclusive: {
-      SDL_DisplayID display = SDL_GetDisplayForWindow(g_window);
-      SDL_SetWindowFullscreenMode(g_window,
-                                  SDL_GetDesktopDisplayMode(display));
-      SDL_SetWindowFullscreen(g_window, true);
-      break;
-    }
-    case kWindowMode_Borderless:
-    default:
-      SDL_SetWindowFullscreenMode(g_window, NULL);
-      SDL_SetWindowFullscreen(g_window, true);
-      break;
-  }
-}
-
-/* Publish the window's current display refresh rate so the Refresh rate row
- * can show "Vsync NHz" instead of a bare "Vsync". Re-query whenever the window
- * changes display or the display's mode changes. */
-/* True under gamescope (Steam Deck's compositor, and desktop Steam's
- * game-mode nesting). Cached: the environment cannot change mid-process.
- *
- * Why we must know: gamescope OWNS frame pacing and deliberately lies about
- * the mode. Its maintainer, on SDL#14674: "Gamescope intentionally does not
- * expose a mode change when the refresh rate/fps slider changes — because most
- * games mishandle a mode switch, either breaking or hanging or crashing." The
- * consequence reported in that issue: "on OLED, after setting it to 60Hz, it
- * still reports to SDL that it's a 90Hz display." gamescope also has its own
- * --framerate-limit, applied as a divisor of the refresh rate. So on Deck the
- * reported refresh is not ground truth and an in-app sleep limiter stacks on
- * top of the compositor's — two limiters beating against each other. */
-static bool RunningUnderGamescope(void) {
-  static int cached = -1;
-  if (cached < 0) {
-    const char *gs = getenv("GAMESCOPE_WAYLAND_DISPLAY");
-    cached = (gs && gs[0]) ? 1 : 0;
-    if (cached)
-      fprintf(stderr, "[display] gamescope detected — deferring frame pacing "
-                      "to the compositor (its refresh report is advisory)\n");
-  }
-  return cached == 1;
-}
-
-static void UpdateHostRefreshHz(void) {
-  if (!g_window) {
-    Settings_SetHostRefreshHz(0);
-    return;
-  }
-  SDL_DisplayID display = SDL_GetDisplayForWindow(g_window);
-  const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display);
-  if (!mode) mode = SDL_GetDesktopDisplayMode(display);
-  Settings_SetHostRefreshHz(mode ? (int)(mode->refresh_rate + 0.5f) : 0);
-}
-
-/* Re-read the display mode periodically, treating the mode-changed EVENT as an
- * optimization rather than the source of truth. Required because a compositor
- * may change the effective refresh without ever emitting an event (gamescope
- * suppresses them by design — see RunningUnderGamescope), and cheap: one
- * SDL_GetCurrentDisplayMode per second off the main loop. */
-static void PollHostDisplayProperties(void) {
-  static uint64_t next_poll_ns;
-  uint64_t now = SDL_GetTicksNS();
-  if (now < next_poll_ns) return;
-  next_poll_ns = now + 1000000000ull;   /* ~1 Hz */
-  UpdateHostRefreshHz();
-}
-
-/* Backing pixels per window point for the window's CURRENT display. Pushed
- * into settings so the pinned HUD/menu scale percentages stay physically the
- * same size across displays of different density (see
- * Settings_ScalePercentToOutput). Re-read on every event that can change which
- * display the window is on, or that display's scale. */
-static void UpdateHostPixelDensity(void) {
-  if (!g_window) {
-    Settings_SetHostPixelDensity(1.0f);
-    return;
-  }
-  float density = SDL_GetWindowPixelDensity(g_window);
-  Settings_SetHostPixelDensity(density > 0.0f ? density : 1.0f);
-}
-
-/* Both host display properties change on the same events (moving display,
- * scale change, mode change, fullscreen transition), so refresh them together
- * and give every call site one thing to remember. */
-static void UpdateHostDisplayProperties(void) {
-  UpdateHostRefreshHz();
-  UpdateHostPixelDensity();
-}
-
-/* Vsync tracks Refresh rate: on only in Vsync mode, off for Unlimited and
- * Limit (Limit paces the present thread by wall clock instead). */
-static void ApplyRefreshVsync(void) {
-  if (!g_renderer) return;
-  int want = g_settings.refresh_mode == kRefreshMode_Vsync ? 1 : 0;
-  /* CHECK the result: SDL documents "Not every value is supported by every
-   * driver, so you should check the return value" — the Metal backend, for
-   * one, rejects everything but 0/1 outright. Vsync also defaults to DISABLED,
-   * so a silently failed enable leaves tearing plus a free-running loop while
-   * the menu still advertises "Vsync NHz". */
-  if (!SDL_SetRenderVSync(g_renderer, want))
-    fprintf(stderr, "[display] SDL_SetRenderVSync(%d) rejected: %s\n", want,
-            SDL_GetError());
-  /* Publish what the renderer ACTUALLY does, read back rather than assumed, so
-   * the settings row can label itself honestly. */
-  int actual = 0;
-  Settings_SetHostVsyncActive(SDL_GetRenderVSync(g_renderer, &actual) &&
-                              actual != 0);
-}
-
-/* Minimum nanoseconds between presents; 0 means no limit. Read by
- * PresentThrottle on the main-thread present path (Phase 0). */
-static uint64_t FrameLimitIntervalNs(void) {
-  return HostDisplayPacing_FrameLimitIntervalNs(
-      CurrentDisplayPacingOptions());
 }
 
 /* window_scale is "N screen pixels per SNES pixel", and SDL window sizes are
@@ -1460,16 +992,16 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
       !g_settings.scene_inspector)
     CloseSceneInspectorSelection();
   if (desc->field == &g_settings.window_mode && g_window) {
-    ApplyWindowMode();
-    UpdateHostDisplayProperties();  /* exclusive fullscreen can change the mode */
+    HostDisplay_ApplyWindowMode();
+    HostDisplay_UpdateProperties();  /* exclusive fullscreen can change the mode */
   }
   /* B1a (followup doc): live-apply without a restart — mirrors the boot-time
    * SDL_SetRenderVSync read near SDL_CreateRenderer. Refresh rate owns vsync
    * now; the frame-limit interval is polled per-present by
-   * SubmitFrameToPresent, so a Limit-FPS change needs no explicit apply. */
+   * HostDisplay_SubmitFrame, so a Limit-FPS change needs no explicit apply. */
   if ((desc->field == &g_settings.refresh_mode ||
        desc->field == &g_settings.uncapped_framerate) && g_renderer)
-    ApplyRefreshVsync();
+    HostDisplay_ApplyRefreshVsync();
   if (desc->field == &g_settings.extended_aspect ||
       desc->field == &g_settings.pixel_aspect) {
     ResolveVideoGeometry(true);
@@ -1506,7 +1038,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   /* A settings change can span an arbitrary human-scale gap and may have
    * rebuilt the geometry; don't interpolate the next frame against a camera
    * snapshot from before it. */
-  InvalidatePresentHistory();
+  HostDisplay_InvalidatePresentHistory();
 }
 
 /* GetPresentationViewport moved to present.h/present.c as
@@ -1867,7 +1399,7 @@ void Diorama_OnModeChanged(void) {
   memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
   ActRaiser_RebindPpuOutputSurfaces();
   g_paused_redraw_pending = true;
-  InvalidatePresentHistory();
+  HostDisplay_InvalidatePresentHistory();
 }
 
 /* M6 (ar-recomp-threading-impl.md §3, Phase 2 fixed-timestep). Per-tick
@@ -2027,7 +1559,7 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
   uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
   RtlDrawPpuFrame();
   /* #16: function-scope so the annotated sim outlives the block below and can
-   * be published to FrameSlot_Capture around the SubmitFrameToPresent tail. */
+   * be published to FrameSlot_Capture around the HostDisplay_SubmitFrame tail. */
   SimFrameData sim;
   {
     extern int snes_frame_counter;
@@ -2118,7 +1650,7 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
      * and paused/menu-redraw captures run outside this window and must
      * self-annotate. */
     FrameSlot_SetPendingAnnotatedSim(&sim);
-    SubmitFrameToPresent(true, alpha);
+    (void)HostDisplay_SubmitFrame(kHostDisplayPresent_GameTick, alpha);
     FrameSlot_SetPendingAnnotatedSim(NULL);
   }
 }
@@ -2131,7 +1663,7 @@ static void RunOuterIterationHousekeeping(void) {
   /* Re-read the display mode ~1/s. The mode-changed events are an
    * optimization, not the source of truth: a compositor can change the
    * effective refresh without emitting one (gamescope does so deliberately). */
-  PollHostDisplayProperties();
+  HostDisplay_PollProperties();
 
   /* Surface audio-chunk drops the callback counted (R12). Reported here, off
    * the audio thread, and coalesced so a sustained problem cannot spam. */
@@ -2436,7 +1968,7 @@ int main(int argc, char **argv) {
      * the boot window and any later re-apply agree on what Nx means. The
      * density is not known until the window exists (SDL_GetWindowPixelDensity
      * needs one), so use the primary display's content scale as the boot-time
-     * stand-in; the first UpdateHostDisplayProperties corrects it. */
+     * stand-in; the first HostDisplay_UpdateProperties corrects it. */
     {
       float boot_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
       if (boot_scale > 1.0f) {
@@ -2466,7 +1998,7 @@ int main(int argc, char **argv) {
     /* SDL3 merged FULLSCREEN_DESKTOP into FULLSCREEN (borderless desktop is
      * the default fullscreen mode when no exclusive video mode is set).
      * Exclusive fullscreen's video mode is set after window creation by
-     * ApplyWindowMode; at boot the flag just requests fullscreen. */
+     * HostDisplay_ApplyWindowMode; at boot the flag just requests fullscreen. */
     /* HIGH_PIXEL_DENSITY: request a native-resolution backing store on
      * scaled displays (Retina macOS, scaled Wayland). Without it SDL creates
      * a 1x store and the compositor upscales — the game, PAR resample, and
@@ -2529,13 +2061,13 @@ int main(int argc, char **argv) {
      * the display's next refresh; see the present-cadence read below for
      * the other half (redrawing often enough for that to matter). */
     if (!headless_video)
-      ApplyRefreshVsync();
+      HostDisplay_ApplyRefreshVsync();
 
     /* Exclusive fullscreen needs its video mode set after creation; borderless
      * and windowed are already handled by the creation flag. */
     if (!headless_video && g_settings.window_mode == kWindowMode_Exclusive)
-      ApplyWindowMode();
-    UpdateHostDisplayProperties();
+      HostDisplay_ApplyWindowMode();
+    HostDisplay_UpdateProperties();
 
     /* Aspect-correct letterboxing via SDL's logical presentation — one
      * implementation shared with the resize/settings paths so boot and runtime
@@ -2838,15 +2370,14 @@ int main(int argc, char **argv) {
    * thread. SDL3's 2D render API is main-thread-only (SDL_render.h:46-47) and
    * PresentThreadFn was the sole contract violator, which is why the default
    * GL/EGL backend would not boot on Wayland. All rendering runs synchronously
-   * on this (the main) thread via SubmitFrameToPresent. Fixed-timestep
+   * on this (the main) thread via HostDisplay_SubmitFrame. Fixed-timestep
    * decoupling is preserved by the M6 accumulator (owns the emulated tick
    * rate) plus vsync (SDL_RenderPresent blocks briefly when vsync is on). */
 
   bool running = true;
   uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
 
-  /* M6/§3.1,§3.3: fixed-timestep accumulator, non-headless only. kFrameNs
-   * (the NTSC tick duration) is file-scope, next to UiPresentIntervalNs. */
+  /* M6/§3.1,§3.3: fixed-timestep accumulator, non-headless only. */
   static const int kMaxCatchupFrames = 3;     /* spiral-of-death cap, §3.1 */
   uint64_t accumulator = 0;
   uint64_t last_time_ns = SDL_GetTicksNS();
@@ -2873,7 +2404,7 @@ int main(int argc, char **argv) {
         case SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED:
         case SDL_EVENT_DISPLAY_ADDED:
         case SDL_EVENT_DISPLAY_REMOVED:
-          UpdateHostDisplayProperties();
+          HostDisplay_UpdateProperties();
           g_paused_redraw_pending = true;
           break;
         /* The window is the USER's: a drag-resize re-derives the picture inside
@@ -2917,9 +2448,9 @@ int main(int argc, char **argv) {
            * destroyed and recreated every one of them, so those copies are
            * now dangling — re-compositing the retained slot would be a
            * use-after-free. Drop it; the next tick present retains a fresh
-           * one. This is also what makes RepresentLastFrame's upload skip
+           * one. This also makes retained-frame upload skipping
            * safe: the textures it relies on are never stale-by-reset. */
-          InvalidatePresentHistory();
+          HostDisplay_InvalidatePresentHistory();
           break;
         case SDL_EVENT_RENDER_DEVICE_LOST:
           fprintf(stderr, "[render] device lost, cannot recover — exiting\n");
@@ -3206,7 +2737,7 @@ int main(int argc, char **argv) {
        * iteration, BEFORE any tick can fire) re-derives geometry. Drop the
        * retained slot so the first iteration after unpausing cannot
        * re-present a pre-pause frame at pre-change geometry. */
-      InvalidatePresentHistory();
+      HostDisplay_InvalidatePresentHistory();
       /* Advance hold-to-accelerate value stepping. Wall-clock scheduled, so
        * it is correct at whatever rate this loop runs; a value it changes
        * sets g_paused_redraw_pending, which the redraw below honors. */
@@ -3216,17 +2747,21 @@ int main(int argc, char **argv) {
       RedrawPausedFrameIfNeeded();
       /* §2.5: re-present unconditionally to keep the window alive while
        * paused — the removed present thread used to do this from its own idle
-       * timeout. The present is paced by SubmitFrameToPresent's host-UI
+       * timeout. The present is paced by HostDisplay_SubmitFrame's host-UI
        * interval (menu: panel rate; plain pause: idle keep-alive rate).
        * game_tick=false (R16): no tick ran, so this must not feed M7's scroll
        * history or its tick-span average. */
       bool presented = false;
       if (!headless && !g_window_hidden) {
-        SubmitFrameToPresent(false, kInterpPhaseNone);
-        presented = true;
+        const HostDisplayPresentMode present_mode =
+            SettingsOverlay_IsOpen()
+                ? kHostDisplayPresent_Menu
+                : kHostDisplayPresent_Paused;
+        presented = HostDisplay_SubmitFrame(
+            present_mode, kInterpPhaseNone);
       }
       /* Pacing comes from the present itself (vsync block, or the
-       * display-refresh UI throttle in SubmitFrameToPresent), so this loop
+       * display-refresh UI throttle in HostDisplay_SubmitFrame), so this loop
        * — and with it menu input polling and repaints — runs at the
        * panel's native rate, whatever it is. The fixed sleep remains only
        * as the anti-spin fallback when nothing presents (hidden window,
@@ -3268,9 +2803,9 @@ int main(int argc, char **argv) {
     }
 
     /* M6/§3.1: fixed-timestep accumulator (non-headless only). The game
-     * thread is no longer paced by SDL_Delay(16) here — the present thread
-     * (M5) owns the vsync wait, and this wall-clock accumulator owns the
-     * emulated tick rate, decoupled from the display refresh rate. */
+     * thread is no longer paced by SDL_Delay(16) here —
+     * HostDisplay_SubmitFrame owns the present wait, and this wall-clock
+     * accumulator owns the emulated tick rate independently. */
     {
       uint64_t now_ns = SDL_GetTicksNS();
       uint64_t dt = now_ns - last_time_ns;
@@ -3278,22 +2813,21 @@ int main(int argc, char **argv) {
       accumulator += dt;
       /* Spiral-of-death cap (§3.1) — with Limit-aware headroom. Phase 0 put
        * the Refresh=Limit throttle sleep on THIS thread, so at Limit <~30fps
-       * one deliberate present interval (1e9/fps) exceeds 3*kFrameNs and the
+       * one deliberate present interval exceeds three emulation ticks and the
        * fixed cap would discard wall time EVERY iteration, permanently
        * slowing the game (~58.3Hz at Limit=25; exactly 60.000Hz at 20 — the
-       * audio-drift rate kFrameNs's comment warns about). Allow one limit
+       * audio-drift rate the emulation interval protects). Allow one limit
        * interval + one tick so the intentional sleep always banks; genuine
        * hitches beyond that still clamp. Vsync/Unlimited intervals are far
        * below the base cap, so behavior there is unchanged. */
       const uint64_t catchup_cap_ns =
-          HostDisplayPacing_CatchupCapNs(
-              CurrentDisplayPacingOptions(), kFrameNs, kMaxCatchupFrames);
+          HostDisplay_CatchupCapNs(kMaxCatchupFrames);
       if (accumulator > catchup_cap_ns) accumulator = catchup_cap_ns;
 
       bool produced_frame = false;
-      while (accumulator >= kFrameNs) {
+      while (accumulator >= kHostDisplayEmulationFrameIntervalNs) {
         RunOneEmulatedTick(&running);
-        accumulator -= kFrameNs;
+        accumulator -= kHostDisplayEmulationFrameIntervalNs;
         produced_frame = true;
       }
 
@@ -3304,8 +2838,10 @@ int main(int argc, char **argv) {
        * exact, and it cannot be corrupted by presents because presents do not
        * write the accumulator. The drain loop's own exit condition guarantees
        * the range. */
-      SDL_assert(accumulator < kFrameNs);
-      float alpha = (float)accumulator / (float)kFrameNs;
+      SDL_assert(accumulator < kHostDisplayEmulationFrameIntervalNs);
+      const float alpha =
+          (float)accumulator /
+          (float)kHostDisplayEmulationFrameIntervalNs;
 
       RunOuterIterationHousekeeping();
 
@@ -3330,20 +2866,16 @@ int main(int argc, char **argv) {
        * slot's copy — the slot is one tick stale by construction. Without the
        * gate a re-present would spend a full composite to draw a
        * byte-identical image. */
-      bool interp_active =
-          g_repr.valid && g_diorama_frame_active &&
-          g_settings.gpu_interp_enabled &&
-          !g_paused_redraw_pending &&      /* pending redraw: re-render, don't re-present */
-          DioramaScrollPairIsInterpolable(&g_repr.slot, &g_repr.prev);
-
       bool presented = false;
       if (!g_window_hidden) {
         if (produced_frame) {
           DrawAndPresentFrame(false, alpha);
-          g_tick_present_count++;
           presented = true;
-        } else if (interp_active) {
-          RepresentLastFrame(alpha);
+        } else if (HostDisplay_TryRepresentFrame(
+                       alpha,
+                       g_diorama_frame_active,
+                       g_settings.gpu_interp_enabled,
+                       g_paused_redraw_pending)) {
           presented = true;
         }
       }
@@ -3354,11 +2886,8 @@ int main(int argc, char **argv) {
        * attached to the hidden-window arm, and "the code happens to fall through
        * to a sleep" is precisely the kind of structural invariant this codebase
        * has now lost five times. The no-present/no-sleep counter must stay 0. */
-      if (!presented) {
-        if (!g_window_hidden && produced_frame)
-          g_no_present_no_sleep_iteration_count++;
-        SDL_Delay(1);
-      }
+      HostDisplay_YieldIfNoPresent(
+          presented, g_window_hidden, produced_frame);
     }
   }
 
