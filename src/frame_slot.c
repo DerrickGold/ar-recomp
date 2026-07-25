@@ -242,6 +242,14 @@ void FrameSlot_Capture(FrameSlot *dst) {
     }
     last_tick = snes_frame_counter;
   }
+  /* R17/C3: publish it. Present-time interpolation needs the TRUE period of
+   * the prev->curr pair, not an assumed single tick: the main loop's drain
+   * runs up to kMaxCatchupFrames ticks in one iteration while the scroll
+   * snapshot advances once per present, so a 2-tick pair carries two ticks of
+   * camera motion. Dividing the sub-tick phase by this is what keeps
+   * extrapolation from overshooting by that factor. Same clamped value the
+   * reactive-camera statistics above use. */
+  dst->capture_ticks = (uint8_t)g_capture_ticks;
 
   /* D2 publishes only the pitch-zero separated-composite capability, and
    * only after its same-frame CPU oracle found zero differing pixels. */

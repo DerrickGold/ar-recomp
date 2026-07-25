@@ -138,6 +138,16 @@ typedef struct FrameSlot {
    * separate prev snapshot remains the interface — PresentComposite is given
    * prev explicitly rather than inferring it. */
   uint64_t timestamp_ns;
+  /* R17/C3: emulated ticks between the previous capture and this one — the
+   * TRUE period of the prev->curr camera pair, clamped to 1..8 by
+   * FrameSlot_Capture, and 0 while paused (a frozen re-capture is not a pair).
+   * Interpolation divides the sub-tick phase by this: the main loop can drain
+   * several ticks in one iteration while the scroll snapshot advances once per
+   * present, and a multi-tick pair therefore carries proportionally more
+   * camera motion than one tick's worth. Without it, extrapolation overshoots
+   * by exactly that factor. (The wall-clock span EMA this replaces normalized
+   * the same effect implicitly, by measuring the real elapsed interval.) */
+  uint8_t capture_ticks;
   int16_t bg1_camera_x, bg1_camera_y;
   int16_t bg2_camera_x, bg2_camera_y;
   /* §6.4 turbo edge case: turbo compresses many emulated ticks' worth of
