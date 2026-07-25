@@ -103,6 +103,7 @@ add_executable(ActRaiserRecomp
     src/diorama.c
     src/present.c
     src/diorama_scroll_math.c
+    src/forced_input.c
     src/frame_slot.c
     src/host_audio.c
     src/input_replay.c

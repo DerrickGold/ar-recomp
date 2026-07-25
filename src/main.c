@@ -30,6 +30,7 @@
 #include "scene_asset_dump.h"
 #include "diorama.h"
 #include "diorama_scroll_math.h"  /* kInterpPhaseNone, pair-validity predicate */
+#include "forced_input.h"
 #include "save_system.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
@@ -1899,33 +1900,8 @@ static uint32 ComputeGameInputs(bool *stop_running) {
   /* Re-read rather than trusting the last event: a gamepad's held bits are
    * owned by input_map.c and change without a keyboard event ever firing. */
   g_input_state = InputMap_State();
-  uint32 inputs = g_input_state;
-  {
-    /* TEMP DEBUG: force a button after N frames to auto-advance the
-     * intro without a real keypress, for headless crash repro. */
-    static const char *force_env;
-    static int force_after = -2;
-    static unsigned force_mask = 0;
-    static int pulse_frames[16]; static int n_pulses = -1;
-    if (force_after == -2) { force_env = getenv("AR_FORCE_INPUT_AFTER");
-      force_after = force_env ? atoi(force_env) : -1;
-      const char *m = getenv("AR_FORCE_INPUT_MASK");
-      force_mask = m ? (unsigned)strtoul(m, NULL, 0) : 0x0001; /* default B */ }
-    if (n_pulses == -1) { n_pulses = 0;
-      /* AR_FORCE_PULSES="150,210,...": press force_mask for 4 frames as an
-       * EDGE (press+release) starting at each listed frame, to drive menus
-       * that need distinct button presses (e.g. B skip-swirl, then B select). */
-      const char *p = getenv("AR_FORCE_PULSES");
-      if (p) for (; *p && n_pulses < 16; ) {
-        pulse_frames[n_pulses++] = atoi(p);
-        while (*p && *p != ',') p++; if (*p == ',') p++; }
-    }
-    extern int snes_frame_counter;
-    if (force_after >= 0 && snes_frame_counter >= force_after) inputs |= force_mask;
-    for (int i = 0; i < n_pulses; i++)
-      if (snes_frame_counter >= pulse_frames[i] && snes_frame_counter < pulse_frames[i] + 4)
-        inputs |= force_mask;
-  }
+  const uint32 inputs =
+      ForcedInput_Apply(g_input_state, snes_frame_counter);
   const InputReplayFrameResult replay_result = InputReplay_Resolve(inputs);
   if (replay_result.stop_requested) *stop_running = false;
   return replay_result.inputs;
@@ -2854,6 +2830,7 @@ int main(int argc, char **argv) {
   }
 
   OracleTrace_Init();
+  ForcedInput_Init();
   InputReplay_Init();
   ScheduledSettings_Init();
 
