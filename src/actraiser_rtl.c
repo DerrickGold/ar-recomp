@@ -2,7 +2,6 @@
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
 #include "diorama_planes.h"
-#include "variables.h"
 #include "settings.h"
 #include "hd_replacements.h"
 #include "sfx_census.h"

@@ -16,7 +16,6 @@
 #include "snes.h"
 #include "../types.h"
 #include "../common_rtl.h"
-#include "variables.h"
 
 Cpu* cpu_init(void) {
   Cpu* cpu = malloc(sizeof(Cpu));

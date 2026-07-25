@@ -12,7 +12,6 @@
 #include "dma.h"
 #include "ppu.h"
 #include "cart.h"
-#include "variables.h"
 #include "../common_rtl.h"
 #include "../common_cpu_infra.h"
 #include "../debug_server.h"
