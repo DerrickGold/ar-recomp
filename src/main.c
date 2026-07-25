@@ -51,6 +51,7 @@
 #include "portable_paths.h"
 #include "present_cadence_metrics.h"
 #include "runtime_diagnostics.h"
+#include "scheduled_settings.h"
 #include "user_data_dir.h"
 #include "sim_phase0_trace.h"
 #include "sim_render_metadata.h"
@@ -69,6 +70,11 @@
 #include "stb_image.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
+enum {
+  kDefaultPowerOnWramFill = 0x55,
+  kPowerOnGameFrameSentinel =
+      kDefaultPowerOnWramFill | (kDefaultPowerOnWramFill << 8),
+};
 /* Reverse-domain app identifier: compositors key window grouping and icon
  * lookup off this, and a shipped .desktop file must share its basename. */
 #define AR_APP_IDENTIFIER "dev.quintet-enix.actraiser-recomp"
@@ -714,52 +720,6 @@ static bool RedrawPausedFrameIfNeeded(void) {
   return false;
 }
 
-/* Phase-2 live-settings probe. AR_SETTING_SET=key=value applies one descriptor
- * mutation when the logical game frame reaches AR_SETTING_AT_GF (default 0).
- * It uses the exact API the overlay will call, making headless next-frame
- * enforcement tests possible without adding a temporary setting-specific
- * hotkey. Diagnostic control only; it is intentionally not a registry row. */
-static void ApplyScheduledSettingChange(void) {
-  static int initialized, pending;
-  static unsigned target_gf;
-  static char key[64], value[256];
-  if (!initialized) {
-    initialized = 1;
-    const char *spec = getenv("AR_SETTING_SET");
-    const char *at = getenv("AR_SETTING_AT_GF");
-    target_gf = at && at[0] ? (unsigned)strtoul(at, NULL, 0) : 0;
-    if (spec && spec[0]) {
-      const char *equals = strchr(spec, '=');
-      size_t key_len = equals ? (size_t)(equals - spec) : 0;
-      if (equals && key_len > 0 && key_len < sizeof(key)) {
-        memcpy(key, spec, key_len);
-        key[key_len] = 0;
-        snprintf(value, sizeof(value), "%s", equals + 1);
-        pending = 1;
-      } else {
-        fprintf(stderr, "[settings] invalid AR_SETTING_SET='%s' (want key=value)\n",
-                spec);
-      }
-    }
-  }
-  if (!pending) return;
-  /* Power-on WRAM is intentionally filled with $55, including the game's
-   * logical-frame word. Wait until at least one emulated frame has run so a
-   * small target is not mistaken as already reached by the $5555 fill. */
-  extern int snes_frame_counter;
-  if (snes_frame_counter <= 0) return;
-  extern uint8 g_ram[0x20000];
-  unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-  if (gf < target_gf) return;
-  pending = 0;
-  const SettingDesc *desc = Settings_Find(key);
-  SettingChangeResult result = desc
-      ? Settings_SetText(desc, value)
-      : kSettingChange_Rejected;
-  fprintf(stderr, "[settings] gf=%u %s=%s -> %s%s\n", gf, key, value,
-          Settings_ChangeResultName(result), desc ? "" : " (unknown key)");
-}
-
 /* Write g_pixels to an open PPM, cropped to the current display mode's sub-rect
  * (pitch is g_snes_width*4 — see PpuBeginDrawing). A 4:3 capture is therefore a
  * true 256-wide image rather than the wide framebuffer with black bars baked
@@ -911,14 +871,13 @@ static void TakeFullSnapshot(void) {
   /* Capture all emulated presentation state under a frame-unique prefix.
    * This is shared by F2 and the overlay ACTION row. */
   RedrawPausedFrameIfNeeded();
-  extern uint8 g_ram[0x20000];
   static int snap_n;
   char snapdir[320];
   RunDirFile(snapdir, sizeof snapdir, "snapshots");
 #ifndef _WIN32
   mkdir(snapdir, 0755);
 #endif
-  unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+  const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
   char prefix[336];
   RunDirFile(prefix, sizeof prefix, "snapshots/snap_%02d_gf%u",
              snap_n++, gf);
@@ -958,8 +917,7 @@ static bool WritePngFromArgb(const char *path, const uint8_t *argb_pixels,
 }
 
 static void DumpDioramaLayers(void) {
-  extern uint8 g_ram[0x20000];
-  unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+  const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
   char dir[320];
   RunDirFile(dir, sizeof dir, "diorama_dump");
 #ifndef _WIN32
@@ -2047,7 +2005,7 @@ static void RunOneEmulatedTick(bool *stop_running) {
     extern uint64_t g_apuprof_audiowait_max_ns;
     uint64_t dt_ns = audio_trace_wall_ns() - apuprof_t0;
     if (dt_ns >= (uint64_t)apuprof_ms * 1000000u) {
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
       double audiowait_ms = g_apuprof_audiowait_max_ns / 1e6;
       g_apuprof_audiowait_max_ns = 0;
       fprintf(stderr,
@@ -2079,13 +2037,14 @@ static void RunOneEmulatedTick(bool *stop_running) {
     if (!win_start) win_start = t1;
     if (t1 - win_start >= 1000) {
       uint64_t cc, cy; snes_catchup_stats(&cc, &cy);
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
       fprintf(stderr, "[perf] fps=%d run-ms avg=%.1f max=%u gf+=%u "
               "apu-catchup calls=%llu cyc=%llu $18=%02x\n",
               win_frames, (double)run_ms_sum / win_frames, run_ms_max,
               (unsigned)(uint16)(gf - last_gf),
               (unsigned long long)(cc - last_cu_calls),
-              (unsigned long long)(cy - last_cu_cycles), g_ram[0x18]);
+              (unsigned long long)(cy - last_cu_cycles),
+              g_ram[kActRaiserWram_MapGroup]);
       last_cu_calls = cc; last_cu_cycles = cy; last_gf = gf;
       win_start = t1; run_ms_sum = 0; run_ms_max = 0; win_frames = 0;
     }
@@ -2151,7 +2110,8 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
       fprintf(stderr,
               "[draw-perf] frames=%d draw-ms avg=%.1f max=%u $18=%02x $19=%02x\n",
               draw_win_frames, (double)draw_ms_sum / draw_win_frames,
-              draw_ms_max, g_ram[0x18], g_ram[0x19]);
+              draw_ms_max, g_ram[kActRaiserWram_MapGroup],
+              g_ram[kActRaiserWram_CurrentMap]);
       draw_win_start = now;
       draw_ms_sum = 0;
       draw_ms_max = 0;
@@ -2164,7 +2124,7 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
    * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.ppm every N game-frames,
    *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
    *   state vs bug state frame by frame. */
-  { unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+  { const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
     const char *sg = getenv("AR_SHOT_AT_GF");
     const char *se = getenv("AR_SHOT_EVERY");
     int want = 0; char fname[320]; fname[0] = 0;
@@ -2249,7 +2209,7 @@ static void RunOuterIterationHousekeeping(void) {
       warp_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
     }
     if (warp_at >= 0 && !warp_fired) {
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
       if (gf >= (unsigned)warp_at) {
         warp_fired = true;
         PerformWarp();
@@ -2270,10 +2230,11 @@ static void RunOuterIterationHousekeeping(void) {
       diorama_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
     }
     if (diorama_at >= 0 && !diorama_fired) {
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
       /* $0088 is $5555-filled before the game initialises it; ignore that
        * boot sentinel or every target fires on frame 0. */
-      if (gf != 0x5555 && gf >= (unsigned)diorama_at) {
+      if (gf != kPowerOnGameFrameSentinel &&
+          gf >= (unsigned)diorama_at) {
         diorama_fired = true;
         const SettingDesc *mode = Settings_Find("diorama_mode");
         if (mode && Settings_IsAvailable(mode) && !g_settings.diorama_mode) {
@@ -2820,10 +2781,11 @@ int main(int argc, char **argv) {
    * boot so uninitialized-RAM reads agree with the reference. AR_WRAM_INIT
    * overrides with an exact dump (used by the differential harness). */
   {
-    extern uint8 g_ram[0x20000];
     const char *fenv = getenv("AR_WRAM_FILL");
-    int fill = fenv ? (int)strtoul(fenv, NULL, 0) : 0x55;
-    memset(g_ram, fill, 0x20000);
+    int fill = fenv
+        ? (int)strtoul(fenv, NULL, 0)
+        : kDefaultPowerOnWramFill;
+    memset(g_ram, fill, kActRaiserWramSize);
     const char *wp0 = getenv("AR_WRAM_INIT");
     if (wp0 && wp0[0]) {
       FILE *f = fopen(wp0, "rb");
@@ -2893,6 +2855,7 @@ int main(int argc, char **argv) {
 
   OracleTrace_Init();
   InputReplay_Init();
+  ScheduledSettings_Init();
 
   if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
                       g_settings.audio_master_volume,
@@ -3280,7 +3243,7 @@ int main(int argc, char **argv) {
        * by the time the game actually unpauses. */
       accumulator = 0;
       /* R17/C2: a pause can last minutes, and a settings change applied during
-       * it (ApplyScheduledSettingChange runs below, on the first unpaused
+       * it (ScheduledSettings_ApplyIfDue runs below, on the first unpaused
        * iteration, BEFORE any tick can fire) re-derives geometry. Drop the
        * retained slot so the first iteration after unpausing cannot
        * re-present a pre-pause frame at pre-change geometry. */
@@ -3314,7 +3277,7 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    ApplyScheduledSettingChange();
+    ScheduledSettings_ApplyIfDue();
 
     if (headless) {
       /* §3.6: headless keeps the OLD model verbatim — uncapped by default,

@@ -6,15 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "actraiser_game.h"
 #include "common_rtl.h"
 
 enum {
-  kGameFrameLowAddress = 0x88,
-  kGameFrameHighAddress = 0x89,
-  kGameModeAddress = 0x18,
-  kCurrentMapAddress = 0x19,
-  kFirstActionMode = 0x01,
-  kLastActionMode = 0x07,
   kReplayRecordByteCount = 8,
   kReplayFrameCapacity = UINT16_MAX + 1u,
   kGameFrameLogInterval = 100,
@@ -46,8 +41,7 @@ static void WriteLittleEndian32(uint8_t *bytes, uint32_t value) {
 }
 
 static unsigned ReadGameFrame(void) {
-  return (unsigned)g_ram[kGameFrameLowAddress] |
-         ((unsigned)g_ram[kGameFrameHighAddress] << 8);
+  return ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
 }
 
 static void LoadReplayFile(const char *path) {
@@ -145,14 +139,14 @@ static void LogGameFrame(unsigned game_frame) {
             snes_frame_counter, game_frame);
   }
 
-  const uint8_t game_mode = g_ram[kGameModeAddress];
+  const uint8_t game_mode = g_ram[kActRaiserWram_MapGroup];
   if (!s_action_entry_reported &&
-      game_mode >= kFirstActionMode &&
-      game_mode <= kLastActionMode) {
+      game_mode >= kActRaiserActionMapGroup_First &&
+      game_mode <= kActRaiserActionMapGroup_Last) {
     s_action_entry_reported = true;
     fprintf(stderr,
             "[act-enter] $18=%02X $19=%02X at game-frame %u\n",
-            game_mode, g_ram[kCurrentMapAddress], game_frame);
+            game_mode, g_ram[kActRaiserWram_CurrentMap], game_frame);
   }
 }
 

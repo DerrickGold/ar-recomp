@@ -109,6 +109,7 @@ add_executable(ActRaiserRecomp
     src/oracle_trace.c
     src/portable_paths.c
     src/runtime_diagnostics.c
+    src/scheduled_settings.c
     src/user_data_dir.c
     src/main.c
     src/actraiser_00.c
