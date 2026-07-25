@@ -459,6 +459,7 @@ extern CpuState g_cpu;
 
 /* Diagnostic — generated functions can call this to log entry. */
 void cpu_dbg_funcname(const char *name);
+void CpuDispatchLogWriteFile(const char *path);
 
 /* ── Entry m/x invariant check (AR_MXCHECK) ───────────────────────────
  * Each generated variant bank_XX_PC_MmXn was emitted ASSUMING entry

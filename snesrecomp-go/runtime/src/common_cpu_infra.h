@@ -50,6 +50,8 @@ typedef bool DispatchMissRecoveryFunc(uint32 source_pc24, uint32 target_pc24);
  * (straight-line loops push nothing, so push counts under-report them). Kept
  * in BOTH configurations: it is a profiling counter, not watchdog logic. */
 extern uint64_t g_watchdog_loop_headers;
+extern const char *g_last_recomp_func;
+extern const char *g_recomp_stack[];
 /* True when the watchdog abandoned the current frame. Always defined so the
  * game layer can test it unconditionally; permanently 0 when disabled. */
 extern int g_watchdog_tripped;

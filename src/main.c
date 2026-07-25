@@ -48,6 +48,8 @@
 #include "frame_slot.h"
 #include "host_audio.h"
 #include "portable_paths.h"
+#include "present_cadence_metrics.h"
+#include "runtime_diagnostics.h"
 #include "user_data_dir.h"
 #include "sim_phase0_trace.h"
 #include "sim_render_metadata.h"
@@ -310,108 +312,6 @@ static SDL_FRect ToFRect(SDL_Rect r) {
 
 void OpenGLRenderer_Create(struct RendererFuncs *funcs) {
   (void)funcs;
-}
-
-/* Diagnostic state dump (hotkey Shift+F9, and automatically on exit). Writes the
- * live execution state to saves/ so a frozen/buggy moment can be handed off
- * for analysis without re-navigating menus: full WRAM + battery SRAM as raw
- * binaries, plus a human-readable summary (CPU regs, frame, current function,
- * recomp call stack, and a few documented game-state bytes). */
-void DumpDiagState(const char *tag) {
-  extern uint8 g_ram[0x20000];
-  extern uint8 *g_sram; extern int g_sram_size;
-  extern CpuState g_cpu;
-  extern int snes_frame_counter;
-  extern const char *g_last_recomp_func;
-  extern const char *g_recomp_stack[]; extern int g_recomp_stack_top;
-#ifndef _WIN32
-  mkdir("saves", 0755);
-#endif
-  /* Hotkey dumps get frame-unique filenames so a mid-bug Shift+F9 snapshot
-   * isn't clobbered by the automatic exit dump (or by another). Exit keeps the
-   * fixed names existing tooling expects. */
-  int hotkey = tag && strcmp(tag, "hotkey") == 0;
-  /* STATIC, not on the stack: this runs from the watchdog trip, i.e. on the
-   * game coroutine's stack at its deepest (a 64-frame recompiled dispatch
-   * chain), which is exactly when ~5KB of extra locals is most likely to
-   * overrun it. Single-threaded by construction (the game thread is the only
-   * caller), so sharing the buffers is safe. */
-  static char p_wram[320], p_sram[320], p_state[320], p_disp[320];
-  if (hotkey) {
-    RunDirFile(p_wram, sizeof p_wram, "dump_f%d_wram.bin", snes_frame_counter);
-    RunDirFile(p_sram, sizeof p_sram, "dump_f%d_sram.bin", snes_frame_counter);
-    RunDirFile(p_state, sizeof p_state, "dump_f%d_state.txt", snes_frame_counter);
-    RunDirFile(p_disp, sizeof p_disp, "dump_f%d_dispatch_log.json", snes_frame_counter);
-  } else {
-    RunDirFile(p_wram, sizeof p_wram, "dump_wram.bin");
-    RunDirFile(p_sram, sizeof p_sram, "dump_sram.bin");
-    RunDirFile(p_state, sizeof p_state, "dump_state.txt");
-    RunDirFile(p_disp, sizeof p_disp, "dump_dispatch_log.json");
-  }
-  FILE *f = fopen(p_wram, "wb");
-  if (f) { fwrite(g_ram, 1, 0x20000, f); fclose(f); }
-  if (g_sram && g_sram_size > 0) {
-    f = fopen(p_sram, "wb");
-    if (f) { fwrite(g_sram, 1, (size_t)g_sram_size, f); fclose(f); }
-  }
-  f = fopen(p_state, "w");
-  if (f) {
-    fprintf(f, "=== ActRaiser recomp state dump (%s) ===\n", tag ? tag : "");
-    fprintf(f, "frame=%d  last_func=%s\n", snes_frame_counter,
-            g_last_recomp_func ? g_last_recomp_func : "(none)");
-    fprintf(f, "A=%04x X=%04x Y=%04x S=%04x D=%04x DB=%02x PB=%02x P=%02x"
-            " m=%d x=%d\n", g_cpu.A, g_cpu.X, g_cpu.Y, g_cpu.S, g_cpu.D,
-            g_cpu.DB, g_cpu.PB, g_cpu.P, g_cpu.m_flag, g_cpu.x_flag);
-    fprintf(f, "recomp call stack (innermost first), depth=%d:\n",
-            g_recomp_stack_top);
-    for (int i = g_recomp_stack_top - 1; i >= 0; i--)
-      fprintf(f, "  [%d] %s\n", g_recomp_stack_top - 1 - i,
-              g_recomp_stack[i] ? g_recomp_stack[i] : "?");
-    /* A few documented WRAM bytes (see docs/ram-map.md). */
-    fprintf(f, "game-state: $18=%02x $19=%02x  town-level $0291=%04x\n",
-            g_ram[0x18], g_ram[0x19], g_ram[0x0291] | (g_ram[0x0292] << 8));
-    /* Recent executed-block PCs (oldest-first) — reveals an infinite
-     * loop's block cycle when the watchdog trips. */
-    {
-      extern int ar_block_history3(uint32_t *, uint32_t *, uint16_t *, int);
-      /* Static for the same stack-depth reason as the path buffers above:
-       * 256 * (4 + 4 + 2) bytes is ~2.5KB. */
-      static uint32_t hist[256], aux[256]; static uint16_t srec[256];
-      int n = ar_block_history3(hist, aux, srec, 256);
-      fprintf(f, "block history (last %d, oldest-first) pc m x S X  "
-                 "(watch S drift across a call to find the unbalanced subroutine):\n", n);
-      for (int i = 0; i < n; i++)
-        fprintf(f, "  %06X m=%u x=%u S=%04X X=%04X\n", hist[i],
-                (aux[i] >> 16) & 1, (aux[i] >> 17) & 1, srec[i], aux[i] & 0xFFFF);
-    }
-    fclose(f);
-  }
-  {
-    /* Post-mortem dispatch ring: last DISPATCH_LOG_CAP runtime dispatches
-     * (pc24, source, func, m/x, found/miss, frame) feeding into the exit/crash.
-     * The offline equivalent of the TCP `dispatch_log_get` command. */
-    extern void CpuDispatchLogWriteFile(const char *path);
-    CpuDispatchLogWriteFile(p_disp);
-  }
-  {
-    /* R17/C5 present cadence. The decisive line for "is render actually
-     * decoupled from the tick rate?": represents==0 means every present still
-     * followed a tick, and represents>0 with max-alpha 0.00 means we re-present
-     * but always at phase zero — both are the inert-interpolation signature.
-     * no-present-no-sleep must be 0; anything else is a busy-spin. */
-    extern unsigned long ar_present_counters_tick(void);
-    extern unsigned long ar_present_counters_repr(void);
-    extern float ar_present_counters_max_alpha(void);
-    extern unsigned long ar_present_counters_spin(void);
-    fprintf(stderr,
-            "[present-cadence] tick-presents=%lu re-presents=%lu "
-            "max-represent-alpha=%.3f no-present-no-sleep=%lu\n",
-            ar_present_counters_tick(), ar_present_counters_repr(),
-            (double)ar_present_counters_max_alpha(),
-            ar_present_counters_spin());
-  }
-  fprintf(stderr, "[dump] wrote %s + wram/sram/dispatch_log (%s)\n",
-          p_state, tag ? tag : "");
 }
 
 /* The 12 joypad bits now live in input_map.c, keyed by SCANCODE (physical key
@@ -739,19 +639,23 @@ static void SubmitFrameToPresent(bool game_tick, float alpha) {
   }
 }
 
-/* R17/C5 counters, reported by DumpDiagState. represents > 0 with
- * max_represent_alpha still 0 is the signature of a broken cadence: we are
+/* R17/C5 counters, reported by DumpDiagState. Re-presents > 0 with
+ * maximum_represent_alpha still 0 is the signature of a broken cadence: we are
  * re-presenting, but always at phase zero, i.e. inert. */
-static unsigned long g_tick_presents, g_represents;
-static float g_max_represent_alpha;
-static unsigned long g_no_present_no_sleep_iters;
-/* Accessors so DumpDiagState (defined above these statics, on the deepest stack
- * a watchdog trip can reach) can read them without a forward declaration
- * block. */
-unsigned long ar_present_counters_tick(void) { return g_tick_presents; }
-unsigned long ar_present_counters_repr(void) { return g_represents; }
-float ar_present_counters_max_alpha(void) { return g_max_represent_alpha; }
-unsigned long ar_present_counters_spin(void) { return g_no_present_no_sleep_iters; }
+static unsigned long g_tick_present_count;
+static unsigned long g_represent_count;
+static float g_maximum_represent_alpha;
+static unsigned long g_no_present_no_sleep_iteration_count;
+
+PresentCadenceMetrics PresentCadence_GetMetrics(void) {
+  return (PresentCadenceMetrics){
+      .tick_present_count = g_tick_present_count,
+      .represent_count = g_represent_count,
+      .maximum_represent_alpha = g_maximum_represent_alpha,
+      .no_present_no_sleep_iteration_count =
+          g_no_present_no_sleep_iteration_count,
+  };
+}
 
 /* R17/C5: re-composite the retained frame at a NEW sub-tick phase.
  *
@@ -793,8 +697,9 @@ static void RepresentLastFrame(float alpha) {
   PresentComposite(&g_repr.slot, &g_repr.prev, alpha);
   PresentThrottleInterval(&g_present_deadline_ns, GamePresentIntervalNs());
   SDL_RenderPresent(g_renderer);
-  g_represents++;
-  if (alpha > g_max_represent_alpha) g_max_represent_alpha = alpha;
+  g_represent_count++;
+  if (alpha > g_maximum_represent_alpha)
+    g_maximum_represent_alpha = alpha;
 }
 
 /* Returns true if a redraw actually happened, so the paused loop knows a
@@ -3716,7 +3621,7 @@ int main(int argc, char **argv) {
       if (!g_window_hidden) {
         if (produced_frame) {
           DrawAndPresentFrame(false, alpha);
-          g_tick_presents++;
+          g_tick_present_count++;
           presented = true;
         } else if (interp_active) {
           RepresentLastFrame(alpha);
@@ -3729,9 +3634,10 @@ int main(int argc, char **argv) {
        * reviewers found this exact hole in an earlier draft where the sleep was
        * attached to the hidden-window arm, and "the code happens to fall through
        * to a sleep" is precisely the kind of structural invariant this codebase
-       * has now lost five times. g_no_present_no_sleep_iters must stay 0. */
+       * has now lost five times. The no-present/no-sleep counter must stay 0. */
       if (!presented) {
-        if (!g_window_hidden && produced_frame) g_no_present_no_sleep_iters++;
+        if (!g_window_hidden && produced_frame)
+          g_no_present_no_sleep_iteration_count++;
         SDL_Delay(1);
       }
     }

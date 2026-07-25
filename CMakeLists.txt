@@ -106,6 +106,7 @@ add_executable(ActRaiserRecomp
     src/frame_slot.c
     src/host_audio.c
     src/portable_paths.c
+    src/runtime_diagnostics.c
     src/user_data_dir.c
     src/main.c
     src/actraiser_00.c
