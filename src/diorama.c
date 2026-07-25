@@ -1,4 +1,5 @@
 #include "diorama.h"
+#include "diorama_scroll_math.h"   /* R17/C1: DioramaInterpUvWindow */
 #include "scene3d_math.h"
 #include "settings.h"
 #include "snes/ppu.h"
@@ -724,9 +725,22 @@ static void TriangulateGrid(int subdiv_u, int subdiv_v, int *out_indices,
   *num_indices = ii;
 }
 
+/* R17/C1: UV slack reserved inside the captured region while interpolating, so
+ * a sub-tick shift has room to move without running off the captured pixels
+ * into the texture's never-written sliver. ~1.6% of the 256px base width, and
+ * comfortably more than one tick of camera motion at walking speed, so an
+ * ordinary shift passes through unsaturated. */
+static const float kInterpUvSlackPx = 4.0f;
+
+/* height_scale (R17/C1): 1.0 normally. While interpolating, the V window is
+ * inset by the slack margin, so the mesh's unit height is scaled to match —
+ * otherwise the same source rows would be stretched over the full height and
+ * reserving the margin would read as a vertical zoom the moment the setting is
+ * toggled. aspect_x is compensated by the caller for the same reason. */
 static void BuildLayerMesh(const float mvp[16], float z_world,
                            float u0, float v0, float u1, float v1,
-                           float aspect_x, int screen_w, int screen_h,
+                           float aspect_x, float height_scale,
+                           int screen_w, int screen_h,
                            SDL_FColor color,
                            SDL_Vertex *out_verts, int *out_indices,
                            int *num_verts, int *num_indices) {
@@ -736,7 +750,7 @@ static void BuildLayerMesh(const float mvp[16], float z_world,
       float s = (float)col / DIORAMA_SUBDIV_X;
       float t = (float)row / DIORAMA_SUBDIV_Y;
       float wx = (s - 0.5f) * aspect_x;
-      float wy = 0.5f - t;
+      float wy = (0.5f - t) * height_scale;
       out_verts[vi].position =
           ProjectWorldPoint(mvp, wx, wy, z_world, screen_w, screen_h);
       out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
@@ -1078,13 +1092,38 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   }
 
   float tex_h = (float)snes_height;
-  float uv_u0 = 0.0f;
-  float uv_u1 = (float)snes_width / (float)kPpuBufWidth;
+  /* R17/C1: reserve a slack margin inside the captured region so an
+   * interpolation shift has somewhere to go. The predecessor code used the
+   * WHOLE captured span as the window and then clamped the shifted window back
+   * into it — which, the span and the window being identical, subtracted the
+   * entire shift and made horizontal sub-tick interpolation a no-op on every
+   * layer on every frame (see DioramaInterpUvWindow).
+   *
+   * The margin is taken only while interpolating: with the setting off the
+   * window is the full span exactly as before, so non-interpolated output is
+   * bit-for-bit unchanged. While interpolating, the visible source region
+   * narrows by 2*slack, so aspect_x and the mesh's unit height are
+   * compensated below — otherwise reserving the margin would read as a slight
+   * zoom the instant the setting is toggled. 4px is ~1.6% of the 256px base
+   * width and comfortably exceeds one tick of camera motion at walking speed
+   * (a few px), so a normal shift never saturates. */
+  const float slack_px = interpolating ? kInterpUvSlackPx : 0.0f;
+  float uv_u0 = slack_px / (float)kPpuBufWidth;
+  float uv_u1 = ((float)snes_width - slack_px) / (float)kPpuBufWidth;
+  float uv_slack = slack_px / (float)kPpuBufWidth;
+  float uv_v0 = slack_px / tex_h;
+  float uv_v1 = 1.0f - slack_px / tex_h;
+  float v_slack = slack_px / tex_h;
+  /* The mesh spans the full unit height by default (BuildLayerMesh's
+   * wy = 0.5 - t); scale it to match the narrowed V window so the image is
+   * cropped symmetrically rather than stretched. */
+  float height_scale = (tex_h - 2.0f * slack_px) / tex_h;
 
   float par = 1.0f;
   if (active_pixel_aspect == kPixelAspect_Crt43 && !ignore_aspect_ratio)
     par = 7.0f / 6.0f;
-  float aspect_x = (float)snes_width / tex_h * par;
+  float aspect_x =
+      ((float)snes_width - 2.0f * slack_px) / (tex_h - 2.0f * slack_px) * par;
   float vis_half_w = 0.5f * (float)visible_width / tex_h * par;
 
   float screen_aspect = (float)out_w / (float)out_h;
@@ -1190,9 +1229,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         layer_dv = scroll_delta->bg_dv[bg];
       }
     }
-    float layer_u0 = uv_u0 + layer_du, layer_u1 = uv_u1 + layer_du;
-    /* B1b (followup doc) follow-up: the diorama capture only ever fills
-     * [uv_u0, uv_u1] of the texture — the sliver beyond it, up to the
+    /* B1b (followup doc) follow-up: the diorama capture only ever fills the
+     * captured sub-region of the texture — the sliver beyond it, up to the
      * texture's true width (kPpuBufWidth vs the diorama capture's max width,
      * capped at kWsExtraMax=95 per side by the SNES OAM-wrap hard limit,
      * one short of kPpuExtraLeftRight=96 — widescreen.h), is genuinely never
@@ -1200,26 +1238,29 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * zeroed). SDL_TEXTURE_ADDRESS_CLAMP (above) only guards against going
      * outside [0,1] of the TEXTURE — it does nothing for a coordinate that's
      * inside [0,1] but past the CAPTURED sub-region, so an interpolation
-     * shift large enough to push u1 past uv_u1 sampled that uninitialized
-     * memory directly: a garbage-colored strip at the tilted plane's edge,
-     * only visible once real camera panning started moving the window (B1b's
-     * source fix made that motion real for the first time — the old
-     * HDMA-residue source rarely produced a clean directional shift).
-     * Clamp the WINDOW POSITION (both edges together, preserving width — no
-     * visual squish) rather than the shift itself, so smoothing is
-     * untouched except for a large single-tick delta at the exact screen
-     * position where the buffer's true edge is in view. */
-    if (layer_u1 > uv_u1) {
-      float excess = layer_u1 - uv_u1;
-      layer_u1 -= excess; layer_u0 -= excess;
-    } else if (layer_u0 < uv_u0) {
-      float excess = uv_u0 - layer_u0;
-      layer_u0 += excess; layer_u1 += excess;
-    }
+     * shift that runs off the captured region samples that uninitialized
+     * memory directly: a garbage-colored strip at the tilted plane's edge.
+     *
+     * R17/C1: the shift is bounded by clamping the SHIFT to the slack margin
+     * reserved above, not by clamping the shifted window's POSITION back into
+     * the region. Position-clamping is what the predecessor did, and because
+     * the window was the whole captured span it subtracted the entire shift,
+     * cancelling horizontal interpolation completely on every layer of every
+     * frame while still looking correct in AR_INTERP_LOG. Width is preserved
+     * exactly either way, so there is no visual squish. */
+    float layer_u0, layer_u1;
+    DioramaInterpUvWindow(uv_u0, uv_u1, layer_du, uv_slack,
+                          &layer_u0, &layer_u1);
+    /* V gets the same treatment — the predecessor left dv entirely unclamped,
+     * so a vertical shift ran straight off the captured region into the
+     * CLAMP-mode edge row and smeared the first/last scanline. */
+    float layer_v0, layer_v1;
+    DioramaInterpUvWindow(uv_v0, uv_v1, layer_dv, v_slack,
+                          &layer_v0, &layer_v1);
     BuildLayerMesh(mvp,
-                   z_world, layer_u0, 0.0f + layer_dv,
-                   layer_u1, 1.0f + layer_dv,
-                   aspect_x, out_w, out_h, shade,
+                   z_world, layer_u0, layer_v0,
+                   layer_u1, layer_v1,
+                   aspect_x, height_scale, out_w, out_h, shade,
                    verts, indices, &nv, &ni);
 
     /* Determined up front (before the shadow/main draws) so B1b-crisp knows
@@ -1290,10 +1331,17 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       SDL_SetGPURenderStateFragmentUniforms(g_rim_light_state, 0, &u, sizeof(u));
       SDL_SetGPURenderState(renderer, g_rim_light_state);
     } else if (dof_or_edge) {
+      /* R17/C1: feed the shader the SAME window the mesh got. These used to be
+       * recomputed as uv_u0 + layer_du / 1.0f + layer_dv — the RAW pre-clamp
+       * values — while the vertices drawn in this very iteration used the
+       * clamped window, so the shader's edge-fade window was offset from the
+       * real UV range and faded the wrong pixels (a transparent strip at one
+       * plane edge once a shift saturated). Use layer_u0/u1/v0/v1 directly so
+       * the two can no longer disagree. */
       DofEdgeUniforms u = {
         1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height, dof_radius,
-        uv_u0 + layer_du, uv_u1 + layer_du,
-        0.0f + layer_dv, 1.0f + layer_dv,
+        layer_u0, layer_u1,
+        layer_v0, layer_v1,
         want_edge ? 2.0f : 0.0f, 0.0f,
       };
       SDL_SetGPURenderStateFragmentUniforms(g_dofedge_state, 0, &u, sizeof(u));

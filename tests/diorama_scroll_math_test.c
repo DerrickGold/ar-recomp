@@ -59,6 +59,55 @@ int main(void) {
   CHECK(near(after.bg_du[0], before.bg_du[0]));
   CHECK(near(after.bg_dv[0], before.bg_dv[0]));
 
+  /* R17/C1: the UV window must actually SHIFT.
+   *
+   * The predecessor logic clamped the shifted window back inside the captured
+   * region, and because the window was exactly as wide as that region, the
+   * "excess" it subtracted was the whole shift — horizontal interpolation was
+   * a total no-op on every layer on every frame. These cases fail against
+   * that logic (they assert the window MOVED) and pass against the
+   * clamp-the-shift rule. Acceptance is stated on the returned UV window, not
+   * on the interpolation alpha: a ramping alpha with a cancelled window is
+   * exactly the bug this replaced. */
+  {
+    const float slack = 4.0f / 448.0f;               /* kInterpUvSlackPx / kPpuBufWidth */
+    const float r0 = slack, r1 = 446.0f / 448.0f - slack;
+    const float width = r1 - r0;
+    float u0, u1;
+
+    /* Half the slack: passes through untouched, width preserved. */
+    float du = 0.5f * slack;
+    DioramaInterpUvWindow(r0, r1, du, slack, &u0, &u1);
+    CHECK(near(u0, r0 + du));
+    CHECK(near(u1, r1 + du));
+    CHECK(near(u1 - u0, width));
+    CHECK(u0 != r0);                                  /* it MOVED — the bug's tell */
+
+    /* Negative shift is symmetric. */
+    DioramaInterpUvWindow(r0, r1, -du, slack, &u0, &u1);
+    CHECK(near(u0, r0 - du));
+    CHECK(near(u1 - u0, width));
+    CHECK(u0 != r0);
+
+    /* Beyond the margin: saturates AT the margin, still never snaps to zero. */
+    DioramaInterpUvWindow(r0, r1, 3.0f * slack, slack, &u0, &u1);
+    CHECK(near(u0, r0 + slack));
+    CHECK(near(u1 - u0, width));
+    DioramaInterpUvWindow(r0, r1, -3.0f * slack, slack, &u0, &u1);
+    CHECK(near(u0, r0 - slack));
+    CHECK(near(u1 - u0, width));
+
+    /* Saturated window stays inside the real texture span [0, 446/448]. */
+    DioramaInterpUvWindow(r0, r1, 99.0f, slack, &u0, &u1);
+    CHECK(u0 >= 0.0f && u1 <= 446.0f / 448.0f + 1e-6f);
+    DioramaInterpUvWindow(r0, r1, -99.0f, slack, &u0, &u1);
+    CHECK(u0 >= -1e-6f && u1 <= 446.0f / 448.0f);
+
+    /* Zero shift is exactly identity. */
+    DioramaInterpUvWindow(r0, r1, 0.0f, slack, &u0, &u1);
+    CHECK(near(u0, r0) && near(u1, r1));
+  }
+
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return 1; }
   puts("diorama_scroll_math_test: PASS");
   return 0;

@@ -7,6 +7,19 @@
 #include <stdio.h>   /* fprintf (AR_INTERP_LOG) */
 #include <stdlib.h>  /* getenv (AR_INTERP_LOG) */
 
+void DioramaInterpUvWindow(float region_u0, float region_u1, float du,
+                           float slack, float *out_u0, float *out_u1) {
+  /* Clamp the SHIFT, not the window position — see the header comment for why
+   * clamping the position cancelled the shift outright. Saturating at the
+   * slack margin means motion stays smooth up to the margin and then stops
+   * growing, instead of snapping back to zero. */
+  if (slack < 0.0f) slack = 0.0f;
+  if (du > slack) du = slack;
+  else if (du < -slack) du = -slack;
+  *out_u0 = region_u0 + du;
+  *out_u1 = region_u1 + du;
+}
+
 DioramaScrollDelta ComputeDioramaScrollDeltaAt(
     const FrameSlot *curr, const DioramaScrollSnapshot *prev, uint64_t now_ns) {
   DioramaScrollDelta d = {0};
