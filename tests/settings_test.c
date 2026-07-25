@@ -99,8 +99,8 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.refresh_mode == kRefreshMode_Vsync);
   CHECK(!g_settings.ignore_aspect_ratio);
   CHECK(g_settings.audio_enabled);
-  CHECK(g_settings.audio_frequency == kAudioFrequency_44100);
-  CHECK(Settings_AudioFrequencyHz() == 44100);
+  CHECK(g_settings.audio_frequency == kAudioFrequency_Auto);
+  CHECK(Settings_AudioFrequencyHz() == 0);   /* 0 = device-native at open */
   CHECK(g_settings.audio_samples == 2048);
   CHECK(g_settings.audio_master_volume == 100);
   CHECK(g_settings.audio_dialog_blip);

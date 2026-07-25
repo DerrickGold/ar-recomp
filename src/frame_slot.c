@@ -56,12 +56,25 @@ extern bool g_diorama_frame_active;
 static float g_diorama_velx_avg = 4.0f;
 static float g_diorama_vely_avg = 4.0f;
 
+/* Captures are per PRESENTED frame, not per emulated tick: gameplay batches
+ * catch-up ticks into one capture below 60Hz present rates (Frame limit,
+ * <60Hz panels), and the paused/menu loop re-captures frozen WRAM at panel
+ * rate with zero ticks elapsing. All reactive-camera statistics therefore
+ * advance by TICKS, not by call: FrameSlot_Capture measures how many
+ * emulated ticks elapsed since the last capture (snes_frame_counter) and
+ * the EMA applies once per tick — so kEmaAlpha's time constant is anchored
+ * to the fixed 60.0988Hz tick rate, identical on every display and limit
+ * setting, and a session parked in the settings menu cannot recalibrate the
+ * averages against a frozen pause velocity. */
+static int g_capture_ticks;   /* ticks since previous capture; 0 while paused */
+
 static float NormalizeReactiveVelocity(int16_t v, float *avg) {
   static const float kFloor = 4.0f;
-  static const float kEmaAlpha = 0.02f;      /* ~0.8s time constant @ 60Hz */
+  static const float kEmaAlpha = 0.02f;      /* ~0.8s time constant, per-tick */
   static const float kNormMultiple = 3.0f;   /* "full lean" = 3x recent avg */
   float av = fabsf((float)v);
-  *avg += (av - *avg) * kEmaAlpha;
+  for (int t = 0; t < g_capture_ticks; t++)
+    *avg += (av - *avg) * kEmaAlpha;
   float ref = *avg * kNormMultiple;
   if (ref < kFloor) ref = kFloor;
   float norm = (float)v / ref;
@@ -212,6 +225,23 @@ void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim) {
  * never do this; it only reads the FrameSlot this produces. */
 void FrameSlot_Capture(FrameSlot *dst) {
   memset(dst, 0, sizeof(*dst));
+
+  /* Ticks elapsed since the previous capture — the advancement unit for the
+   * reactive-camera statistics below (see g_capture_ticks). Clamped: a
+   * savestate load or long stall must not fire a giant catch-up burst. 0
+   * while paused (frozen WRAM re-captures must not move averages or edge
+   * state). First capture seeds without advancing. */
+  { extern int snes_frame_counter;
+    static int last_tick = -1;
+    if (last_tick < 0) g_capture_ticks = 1;
+    else {
+      int elapsed = snes_frame_counter - last_tick;
+      if (elapsed < 0) elapsed = 1;           /* counter reset (reload) */
+      if (elapsed > 8) elapsed = 8;           /* stall/settings-menu clamp */
+      g_capture_ticks = elapsed;
+    }
+    last_tick = snes_frame_counter;
+  }
 
   /* D2 publishes only the pitch-zero separated-composite capability, and
    * only after its same-frame CPU oracle found zero differing pixels. */

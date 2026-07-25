@@ -528,8 +528,13 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
   SDL_GetRenderDrawColor(g_renderer, &old_r, &old_g, &old_b, &old_a);
   SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
   SDL_SetRenderDrawColor(g_renderer, 255, 192, 32, 255);
-  SDL_RenderLine(g_renderer, (float)(px - 7), (float)py, (float)(px + 7), (float)py);
-  SDL_RenderLine(g_renderer, (float)px, (float)(py - 7), (float)px, (float)(py + 7));
+  /* Crosshair arms scale with the output (7 SNES pixels' worth at the
+   * current viewport scale, min the historical 7px) — a fixed 7 output
+   * pixels is near-invisible at 4K/high-density output. */
+  int arm = viewport.h > 0 ? (viewport.h * 7 + 112) / 224 : 7;
+  if (arm < 7) arm = 7;
+  SDL_RenderLine(g_renderer, (float)(px - arm), (float)py, (float)(px + arm), (float)py);
+  SDL_RenderLine(g_renderer, (float)px, (float)(py - arm), (float)px, (float)(py + arm));
 
   int x0, y0, x1, y1;
   if (SceneInspector_GetHighlight(&x0, &y0, &x1, &y1)) {

@@ -520,15 +520,37 @@ static void SDLCALL AudioCallback(void *userdata, SDL_AudioStream *stream,
 static bool OpenHostAudio(void) {
   if (g_audio_open) return true;
   SDL_AudioSpec want = {0};
-  want.freq = g_active_audio_frequency > 0
-      ? g_active_audio_frequency : 44100;
+  /* Stream input rate: prefer the DEVICE's native rate so the resample
+   * chain is one hop (32040 -> device) instead of two (32040 -> 44100 ->
+   * 48000 on the common 48kHz-native hardware). The audio_frequency setting
+   * still pins an explicit rate when the user sets one; the query failing
+   * (or reporting nonsense) falls back to the setting/44100 as before. */
+  int device_native_hz = 0;
+  {
+    SDL_AudioSpec native = {0};
+    if (SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                 &native, NULL) &&
+        native.freq >= 8000 && native.freq <= 384000)
+      device_native_hz = native.freq;
+  }
+  want.freq = g_active_audio_frequency > 0 ? g_active_audio_frequency
+              : device_native_hz > 0       ? device_native_hz
+                                           : 44100;
   want.format = SDL_AUDIO_S16;
   want.channels = 2;
   /* SDL3's AudioSpec no longer carries a buffer size; the device sample-frame
-   * count is controlled by a hint. Preserve the configured buffer depth. */
+   * count is controlled by a hint. The configured depth is a frame COUNT
+   * whose latency meaning depends on the device rate (2048 = ~46ms at
+   * 44.1kHz but ~11ms at 192kHz), so when the user has not moved it off the
+   * default, scale it to the device rate to preserve the intended ~46ms
+   * rather than the raw count. An explicit non-default value is respected
+   * verbatim (the user asked for that count). */
   if (g_active_audio_samples > 0) {
+    int frames_n = g_active_audio_samples;
+    if (frames_n == 2048 && device_native_hz > 0)
+      frames_n = (int)(2048ll * device_native_hz / 44100);
     char frames[16];
-    snprintf(frames, sizeof(frames), "%d", g_active_audio_samples);
+    snprintf(frames, sizeof(frames), "%d", frames_n);
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, frames);
   }
   g_audio_stream = SDL_OpenAudioDeviceStream(
@@ -2794,6 +2816,21 @@ int main(int argc, char **argv) {
      * so g_snes_width here booted the window wider than the configured screen
      * ratio. Mirrors ApplyDisplayPresentation, which is what fixes it up on
      * any later runtime aspect change. */
+    /* Clamp the scale to what the desktop can actually hold — the setting
+     * allows up to 8x (~2400px wide), which overflows small laptop panels
+     * (1366x768) with no recourse: the oversized window's title bar can land
+     * off-screen. Usable bounds (excludes docks/taskbars) of the primary
+     * display, checked against the WIDEST possible window for this scale
+     * (the 16:9-of-height display width); shrink until it fits, floor 1x. */
+    {
+      SDL_Rect usable;
+      if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable)) {
+        while (scale > 1 &&
+               ((g_snes_height * scale * 16 + 4) / 9 > usable.w ||
+                g_snes_height * scale > usable.h))
+          scale--;
+      }
+    }
     int vis_w = Settings_VisibleWidth();
     int win_w = vis_w * scale;
     if (g_settings.display_mode == kDisplayMode_43) {
@@ -2808,7 +2845,14 @@ int main(int argc, char **argv) {
      * the default fullscreen mode when no exclusive video mode is set).
      * Exclusive fullscreen's video mode is set after window creation by
      * ApplyWindowMode; at boot the flag just requests fullscreen. */
+    /* HIGH_PIXEL_DENSITY: request a native-resolution backing store on
+     * scaled displays (Retina macOS, scaled Wayland). Without it SDL creates
+     * a 1x store and the compositor upscales — the game, PAR resample, and
+     * overlay all render soft at logical resolution. Downstream needs no
+     * change: every consumer sizes itself from SDL_GetRenderOutputSize, and
+     * WindowPointToOutput already maps window points -> output pixels. */
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE |
+        SDL_WINDOW_HIGH_PIXEL_DENSITY |
         (headless_video ? SDL_WINDOW_HIDDEN : 0) |
         (g_settings.window_mode != kWindowMode_Windowed
              ? SDL_WINDOW_FULLSCREEN : 0);
@@ -3206,9 +3250,16 @@ int main(int argc, char **argv) {
           running = false;
           break;
         /* Dragging the window to another monitor, or that monitor changing
-         * mode, can change the refresh rate the Vsync row reports. */
+         * mode, can change the refresh rate the Vsync row reports — and the
+         * SAME monitor can re-mode under us (user flips 60->144Hz in OS
+         * settings, Windows dynamic refresh re-modes on power state), which
+         * arrives as a display-level event, not a window one. The R2 soft-
+         * cap and the menu's UI pacing both derive from this value. */
         case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
         case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+        case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
+        case SDL_EVENT_DISPLAY_ADDED:
+        case SDL_EVENT_DISPLAY_REMOVED:
           UpdateHostRefreshHz();
           break;
         /* Phase 0 made rendering main-thread-only, so re-deriving the logical

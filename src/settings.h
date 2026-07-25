@@ -59,11 +59,17 @@ typedef enum {
 } RefreshMode;
 
 /* Host audio-rate presets. The stored value is the stable menu/config enum;
- * Settings_AudioFrequencyHz translates it for SDL device creation. */
+ * Settings_AudioFrequencyHz translates it for SDL device creation. Auto
+ * (the default) resolves to the playback device's native rate at open time
+ * (Settings_AudioFrequencyHz returns 0 = "query the device") so the
+ * resample chain is one hop on 48kHz-native hardware instead of
+ * 32040->44100->48000. Appended after the original three so saved numeric
+ * indices keep their meaning. */
 typedef enum {
   kAudioFrequency_32040 = 0,
   kAudioFrequency_44100,
   kAudioFrequency_48000,
+  kAudioFrequency_Auto,
   kAudioFrequency_Count,
 } AudioFrequency;
 

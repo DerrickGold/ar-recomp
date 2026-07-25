@@ -10,6 +10,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>   /* fsync/fileno: WriteAtomic durability */
 #endif
 
 const SaveFieldDesc g_save_region_fields[kActRaiserSaveRegionCount] = {
@@ -395,6 +397,15 @@ static bool WriteAtomic(const char *path, WriteBodyFn body,
   bool success = body(file, context, error);
   if (fflush(file) != 0 || ferror(file))
     success = Fail(error, "error flushing %s", temporary);
+#ifndef _WIN32
+  /* Durability, not just atomicity: rename() alone leaves the data blocks
+   * in the write-back cache — a power cut after a battery-SRAM flush could
+   * replace the old save with an EMPTY renamed file on filesystems without
+   * ext4-style rename heuristics. fsync before rename; the Windows branch
+   * already write-throughs (MOVEFILE_WRITE_THROUGH). */
+  if (success && fsync(fileno(file)) != 0)
+    success = Fail(error, "error syncing %s: %s", temporary, strerror(errno));
+#endif
   if (fclose(file) != 0)
     success = Fail(error, "error closing %s", temporary);
   if (success && !ReplaceFile(temporary, path))

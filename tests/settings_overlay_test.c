@@ -334,11 +334,15 @@ int main(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 
   /* Audio frequency is a bounded preset selector, not an arbitrary integer
-   * editor. Audio starts with Enable audio, then Audio frequency. */
+   * editor. Audio starts with Enable audio, then Audio frequency. The
+   * default is Auto (device-native, Hz==0 sentinel); stepping LEFT pins the
+   * explicit 48 kHz preset. */
   NavToSection(kSection_Audio);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   RowToKey("audio_frequency");
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.audio_frequency == kAudioFrequency_Auto);
+  CHECK(Settings_AudioFrequencyHz() == 0);
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
   CHECK(g_settings.audio_frequency == kAudioFrequency_48000);
   CHECK(Settings_AudioFrequencyHz() == 48000);
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));

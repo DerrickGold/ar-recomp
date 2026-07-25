@@ -7,6 +7,8 @@
 #include <string.h>
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>   /* fsync/fileno: Settings_Save durability */
 #endif
 
 Settings g_settings;
@@ -217,6 +219,12 @@ static bool ParseAudioFrequency(const char *text, void *field) {
   if (!strcmp(text, "48000") || !strcmp(text, "48 kHz") ||
       !strcmp(text, "48khz") || !strcmp(text, "48")) {
     *value = kAudioFrequency_48000;
+    return true;
+  }
+  if (!strcmp(text, "auto") || !strcmp(text, "Auto") ||
+      !strcmp(text, "Auto (device)") || !strcmp(text, "device") ||
+      !strcmp(text, "0 Hz") || !strcmp(text, "3")) {
+    *value = kAudioFrequency_Auto;
     return true;
   }
   /* Enum indices remain accepted for generated/headless settings input. */
@@ -482,6 +490,7 @@ static const char *const kAudioFrequencyLabels[] = {
   "32.04 kHz",
   "44.1 kHz",
   "48 kHz",
+  "Auto (device)",
 };
 
 static const char *const kSaveBackendLabels[] = {
@@ -1369,10 +1378,10 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.audio_enabled, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
   { "audio_frequency", "AR_AUDIO_FREQ", "Audio frequency",
-    "Select 32.04, 44.1, or 48 kHz for the next host audio-device initialization.",
+    "Auto matches the audio device's native rate; or pin 32.04, 44.1, or 48 kHz.",
     kSettingType_Enum, kApply_Restart, kSettingCat_Audio,
-    &g_settings.audio_frequency, kAudioFrequency_44100,
-    kAudioFrequency_32040, kAudioFrequency_48000, 1, false,
+    &g_settings.audio_frequency, kAudioFrequency_Auto,
+    kAudioFrequency_32040, kAudioFrequency_Auto, 1, false,
     kAudioFrequencyLabels, kAudioFrequency_Count, NULL, NULL,
     ParseAudioFrequency, NULL },
   { "audio_samples", "AR_AUDIO_SAMPLES", "Audio buffer samples",
@@ -2517,6 +2526,11 @@ bool Settings_Save(const char *path) {
     success = fprintf(file, "%s = %s\n", desc->key, value) >= 0;
   }
   if (fflush(file) != 0 || ferror(file)) success = false;
+#ifndef _WIN32
+  /* Durability before the rename — see save_system.c WriteAtomic. Windows
+   * write-throughs in Settings_ReplaceFile (MOVEFILE_WRITE_THROUGH). */
+  if (success && fsync(fileno(file)) != 0) success = false;
+#endif
   if (fclose(file) != 0) success = false;
 
   if (success && !Settings_ReplaceFile(temporary, path)) {
@@ -2624,7 +2638,8 @@ int Settings_AudioFrequencyHz(void) {
   switch (g_settings.audio_frequency) {
     case kAudioFrequency_32040: return 32040;
     case kAudioFrequency_48000: return 48000;
-    case kAudioFrequency_44100:
-    default: return 44100;
+    case kAudioFrequency_44100: return 44100;
+    case kAudioFrequency_Auto:
+    default: return 0;   /* 0 = resolve to the device's native rate at open */
   }
 }
