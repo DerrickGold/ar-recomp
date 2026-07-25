@@ -2,6 +2,7 @@
 #define SCENE3D_MATH_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct Scene3DCamera {
   float tilt_x;
@@ -17,9 +18,14 @@ typedef struct Scene3DPoint {
 void Scene3D_BuildViewProjection(const Scene3DCamera *camera,
                                  int output_width, int output_height,
                                  float out_matrix[16]);
-Scene3DPoint Scene3D_ProjectWorldPoint(const float matrix[16],
-                                      float x, float y, float z,
-                                      int output_width, int output_height);
+/* Projects a world point only while it is safely in front of the camera
+ * plane. Returns false for points on/behind that plane or for non-finite
+ * results, and leaves `out_point` untouched on failure. Callers that build a
+ * primitive must reject the whole primitive if any of its vertices fail. */
+bool Scene3D_ProjectWorldPoint(const float matrix[16],
+                               float x, float y, float z,
+                               int output_width, int output_height,
+                               Scene3DPoint *out_point);
 /* Perspective scale relative to a point at `reference_depth`. A screen-facing
  * billboard multiplies its unprojected pixel size by this value while keeping
  * its anchor at Scene3D_ProjectWorldPoint(...). */
@@ -30,16 +36,25 @@ float Scene3D_ProjectBillboardScale(const float matrix[16],
  * travels downward, so the sample lands on z=0 at (x + z*light_x,
  * y + z*light_y); a zero-height sample therefore projects onto itself and a
  * shadow can never leave the ground plane. */
-Scene3DPoint Scene3D_ProjectShadowPoint(const float matrix[16],
-                                        float x, float y, float z,
-                                        float light_x, float light_y,
-                                        int output_width, int output_height);
+bool Scene3D_ProjectShadowPoint(const float matrix[16],
+                                float x, float y, float z,
+                                float light_x, float light_y,
+                                int output_width, int output_height,
+                                Scene3DPoint *out_point);
 /* Ground-footprint scale for a caster at height `z`. A directional light casts
  * a constant-size shadow, which reads as no height at all; shrinking the
  * footprint with height is the cue that actually sells altitude. Returns 1 at
  * z=0 and falls off monotonically, never reaching zero or going negative. */
 float Scene3D_ShadowFootprintScale(float z, float shrink);
 float Scene3D_AutoFitDistance(float fov_y);
+
+/* Repeating texture offset for wall-clock animation. Reducing the completed
+ * motion rather than the clock itself makes the wrap land on an equivalent
+ * texture coordinate, so long-running animation never jumps at an arbitrary
+ * time boundary. */
+float Scene3D_WrappedTextureOffset(uint64_t elapsed_ms,
+                                   float units_per_second,
+                                   float speed_scale);
 
 /* Homogeneous depth of a world point under `matrix`. Positive is in front of
  * the camera; it crosses zero at the camera plane, where a perspective divide
@@ -48,12 +63,17 @@ float Scene3D_AutoFitDistance(float fov_y);
  * this rather than assume every vertex is projectable. */
 float Scene3D_ClipDepth(const float matrix[16], float x, float y, float z);
 
-/* Ground y at which clip depth equals `minimum_depth`, at world x. Clip depth
- * is affine in y on the ground plane, so this is solved, not searched.
+/* World y at which clip depth equals `minimum_depth`, at world x/z. Clip
+ * depth is affine in y on a constant-z plane, so this is solved, not searched.
  * `*increasing` reports whether depth grows with y — with the ground tilted
  * away from the camera it does, which makes the boundary a floor on y and the
  * near edge (toward the viewer) the one that folds. Returns false when depth
  * does not vary with y at all, leaving no bound to apply. */
+bool Scene3D_DepthBoundaryY(const float matrix[16], float x, float z,
+                            float minimum_depth, float *boundary_y,
+                            bool *increasing);
+
+/* Convenience form for the z=0 ground plane. */
 bool Scene3D_GroundDepthBoundaryY(const float matrix[16], float x,
                                   float minimum_depth, float *boundary_y,
                                   bool *increasing);

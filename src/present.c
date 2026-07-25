@@ -753,9 +753,11 @@ static void DrawSimGroundPlane(SDL_Texture *texture, SDL_Rect source,
     float fy = (float)row / (float)kSimGroundRows;
     for (int column = 0; column <= kSimGroundColumns; column++) {
       float fx = (float)column / (float)kSimGroundColumns;
-      Scene3DPoint projected = Scene3D_ProjectWorldPoint(
-          matrix, (fx - 0.5f) * aspect, 0.5f - fy, 0.0f,
-          viewport.w, viewport.h);
+      Scene3DPoint projected;
+      if (!Scene3D_ProjectWorldPoint(
+              matrix, (fx - 0.5f) * aspect, 0.5f - fy, 0.0f,
+              viewport.w, viewport.h, &projected))
+        return;
       vertices[vertex_count++] = (SDL_Vertex){
         { viewport.x + projected.x, viewport.y + projected.y }, white,
         { (source.x + fx * source.w) / (float)kSim3DMaxWidth,
@@ -791,18 +793,22 @@ static float SimHeightWorldUnits(SDL_Rect source, int virtual_height,
       (100.0f * (float)source.h);
 }
 
-static Scene3DPoint ProjectSimTexturePoint(
+static bool ProjectSimTexturePoint(
     const float matrix[16], SDL_Rect source, SDL_Rect viewport,
-    float texture_x, float texture_y, float height_world) {
+    float texture_x, float texture_y, float height_world,
+    Scene3DPoint *out_point) {
   float fx = (texture_x - source.x) / source.w;
   float fy = (texture_y - source.y) / source.h;
   float aspect = (float)viewport.w / (float)viewport.h;
-  Scene3DPoint point = Scene3D_ProjectWorldPoint(
-      matrix, (fx - 0.5f) * aspect, 0.5f - fy, height_world,
-      viewport.w, viewport.h);
+  Scene3DPoint point;
+  if (!Scene3D_ProjectWorldPoint(
+          matrix, (fx - 0.5f) * aspect, 0.5f - fy, height_world,
+          viewport.w, viewport.h, &point))
+    return false;
   point.x += viewport.x;
   point.y += viewport.y;
-  return point;
+  *out_point = point;
+  return true;
 }
 
 static float SimTexturePointDepthScale(
@@ -835,12 +841,16 @@ static void DrawSimMapPlaneObject(const SimRenderObject *object,
   float y0 = (float)(object->local_y0 + screen_origin_y);
   float x1 = (float)(object->local_x1 + screen_origin_x);
   float y1 = (float)(object->local_y1 + screen_origin_y);
-  Scene3DPoint points[] = {
-    ProjectSimTexturePoint(matrix, source, viewport, x0, y0, 0.0f),
-    ProjectSimTexturePoint(matrix, source, viewport, x1, y0, 0.0f),
-    ProjectSimTexturePoint(matrix, source, viewport, x0, y1, 0.0f),
-    ProjectSimTexturePoint(matrix, source, viewport, x1, y1, 0.0f),
-  };
+  Scene3DPoint points[4];
+  if (!ProjectSimTexturePoint(matrix, source, viewport, x0, y0, 0.0f,
+                              &points[0]) ||
+      !ProjectSimTexturePoint(matrix, source, viewport, x1, y0, 0.0f,
+                              &points[1]) ||
+      !ProjectSimTexturePoint(matrix, source, viewport, x0, y1, 0.0f,
+                              &points[2]) ||
+      !ProjectSimTexturePoint(matrix, source, viewport, x1, y1, 0.0f,
+                              &points[3]))
+    return;
   float u0 = object->atlas_x / (float)kSimObjAtlasWidth;
   float v0 = object->atlas_y / (float)kSimObjAtlasHeight;
   float u1 = (object->atlas_x + object->atlas_w) /
@@ -1096,14 +1106,19 @@ static void DrawSimShadowMask(
     float footprint = Scene3D_ShadowFootprintScale(height_world,
                                                    kSimShadowHeightShrink);
     Scene3DPoint corner[4];
+    bool shadow_visible = true;
     for (int c = 0; c < 4; c++) {
-      corner[c] = Scene3D_ProjectShadowPoint(
-          matrix, anchor_world_x + offset_x[c & 1] * unit_x * footprint,
-          anchor_world_y - offset_y[c >> 1] * unit_y *
-              kSimShadowFootprintDepth * footprint,
-          height_world, light_x, light_y,
-          local_viewport.w, local_viewport.h);
+      if (!Scene3D_ProjectShadowPoint(
+              matrix, anchor_world_x + offset_x[c & 1] * unit_x * footprint,
+              anchor_world_y - offset_y[c >> 1] * unit_y *
+                  kSimShadowFootprintDepth * footprint,
+              height_world, light_x, light_y,
+              local_viewport.w, local_viewport.h, &corner[c])) {
+        shadow_visible = false;
+        break;
+      }
     }
+    if (!shadow_visible) continue;
 
     float u0 = object->atlas_x / (float)kSimObjAtlasWidth;
     float v0 = object->atlas_y / (float)kSimObjAtlasHeight;
@@ -1273,9 +1288,10 @@ static void DrawSimObjectPriority(
           ? SimHeightWorldUnits(source, object->virtual_height,
                                 slot->sim.height_scale_x100)
           : 0.0f;
-      anchor = ProjectSimTexturePoint(
-          matrix, source, viewport, texture_anchor_x, texture_anchor_y,
-          height_world);
+      if (!ProjectSimTexturePoint(
+              matrix, source, viewport, texture_anchor_x, texture_anchor_y,
+              height_world, &anchor))
+        continue;
       float depth_scale = SimTexturePointDepthScale(
           matrix, source, viewport, texture_anchor_x, texture_anchor_y,
           height_world, Scene3D_AutoFitDistance(camera->fov_y));
@@ -1738,8 +1754,10 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
     for (int column = 0; column <= kSimUnderlayColumns; column++) {
       float texture_x =
           x0 + (x1 - x0) * (float)column / (float)kSimUnderlayColumns;
-      Scene3DPoint projected = ProjectSimTexturePoint(
-          matrix, source, viewport, texture_x, texture_y, 0.0f);
+      Scene3DPoint projected;
+      if (!ProjectSimTexturePoint(matrix, source, viewport, texture_x,
+                                  texture_y, 0.0f, &projected))
+        return;
       float away = SimCullProximityAt(fade, texture_x, texture_y, source);
       /* Multiplied into the vertex colour, so it darkens whatever the texture
        * holds rather than mixing it with a colour of its own. That is the
@@ -1895,6 +1913,14 @@ static void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
   float texture_y_at_zero = -(float)slot->sim.camera_y - origin_y;
   float span = (float)(kSimWorldMapPixels * kSimWorldMapTownScale);
 
+  /* Lifted off the ground plane, using the same pixels-to-world-units scale
+   * D3c virtual heights use, so "72 pixels up" means the same thing to a
+   * cloud as it does to a flying actor. This must be resolved before the
+   * near-plane bound: a constant-height cloud has a different camera-plane
+   * intersection than the ground below it. */
+  float altitude = SimHeightWorldUnits(source, slot->sim.cloud_altitude_px,
+                                       slot->sim.height_scale_x100);
+
   float x0 = texture_x_at_zero, x1 = texture_x_at_zero + span;
   float y0 = texture_y_at_zero, y1 = texture_y_at_zero + span;
   float margin = (float)kSimUnderlayMarginPixels;
@@ -1914,9 +1940,9 @@ static void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
     float world_x = ((texture_x - source.x) / source.w - 0.5f) * aspect;
     float boundary = 0.0f;
     bool increasing = false;
-    if (!Scene3D_GroundDepthBoundaryY(matrix, world_x,
-                                      kSimUnderlayMinClipDepth, &boundary,
-                                      &increasing))
+    if (!Scene3D_DepthBoundaryY(matrix, world_x, altitude,
+                                kSimUnderlayMinClipDepth, &boundary,
+                                &increasing))
       continue;
     if (increasing) {
       if (world_y1 < boundary) world_y1 = boundary;
@@ -1935,14 +1961,6 @@ static void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
   float falloff = (float)slot->sim.cloud_falloff_px;
   float inset = (float)slot->sim.cloud_inset_px;
   float opacity = (float)slot->sim.cloud_opacity_pct / 100.0f;
-  /* Lifted off the ground plane, using the same pixels-to-world-units scale
-   * D3c virtual heights use, so "72 pixels up" means the same thing to a
-   * cloud as it does to a flying actor. Drawing order already put the shroud
-   * over the objects; this is the geometry catching up with it, so a bank
-   * passes above a tree instead of lying across it. */
-  float altitude = SimHeightWorldUnits(source, slot->sim.cloud_altitude_px,
-                                       slot->sim.height_scale_x100);
-
   /* Overlapping banks at different scales and offsets, so each layer's gaps
    * sit over another layer's body and alpha compounds as `1 - prod(1 - a)`.
    *
@@ -1974,7 +1992,7 @@ static void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
    * anything, it keeps moving through a pause, and game_frame is a 16-bit
    * counter that would jump the whole sky every eighteen minutes when it
    * wrapped. */
-  float seconds = (float)(SDL_GetTicks() % 3600000u) / 1000.0f;
+  Uint64 elapsed_ms = SDL_GetTicks();
   float drift = (float)slot->sim.cloud_drift_pct / 100.0f;
 
   static SDL_Vertex vertices[kSimCloudVertexCount];
@@ -2010,22 +2028,30 @@ static void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
                                           clear_x1, clear_y0, clear_y1,
                                           inset, falloff);
         if (cover > 0.0f) any_cover = true;
-        Scene3DPoint projected = ProjectSimTexturePoint(
-            matrix, source, viewport, texture_x, texture_y, altitude);
+        Scene3DPoint projected;
+        if (!ProjectSimTexturePoint(matrix, source, viewport, texture_x,
+                                    texture_y, altitude, &projected)) {
+          any_cover = false;
+          vertex_count = 0;
+          break;
+        }
         float u = ((texture_x - texture_x_at_zero) / span) * scale +
             kCloudLayers[layer].offset_x +
-            kCloudLayers[layer].drift_x * seconds * drift;
+            Scene3D_WrappedTextureOffset(
+                elapsed_ms, kCloudLayers[layer].drift_x, drift);
         float v = ((texture_y - texture_y_at_zero) / span) * scale +
             kCloudLayers[layer].offset_y +
-            kCloudLayers[layer].drift_y * seconds * drift;
+            Scene3D_WrappedTextureOffset(
+                elapsed_ms, kCloudLayers[layer].drift_y, drift);
         vertices[vertex_count++] = (SDL_Vertex){
           { projected.x, projected.y },
           { 1.0f, 1.0f, 1.0f, cover * opacity * weight },
           { u, v },
         };
       }
+      if (!vertex_count) break;
     }
-    if (!any_cover) continue;
+    if (!any_cover || !vertex_count) continue;
     SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count, indices,
                        index_count);
   }
@@ -2340,8 +2366,10 @@ static void DrawSimCullMarkers(const FrameSlot *slot, SDL_Rect source,
     float lift = SimHeightWorldUnits(
         source, Sim3D_SourceDrawLift(record, slot->sim.height_scale_x100),
         100);
-    Scene3DPoint centre = ProjectSimTexturePoint(
-        matrix, source, viewport, texture_x, texture_y, lift);
+    Scene3DPoint centre;
+    if (!ProjectSimTexturePoint(matrix, source, viewport, texture_x,
+                                texture_y, lift, &centre))
+      continue;
 
     float half = 3.0f + 5.0f * cover;
     SDL_FRect box = { centre.x - half, centre.y - half, half * 2, half * 2 };

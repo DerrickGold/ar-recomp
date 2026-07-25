@@ -697,11 +697,15 @@ static void BuildViewProjection(const DioramaCamera *cam, int out_w, int out_h,
  * algebraically-equivalent but differently-associated rewrite of its
  * `(s - 0.5f) * aspect_x` does NOT reproduce the same float32 rounding in
  * ~14% of cases — checked numerically before this refactor). */
-static SDL_FPoint ProjectWorldPoint(const float mvp[16], float x, float y, float z,
-                                    int screen_w, int screen_h) {
-  Scene3DPoint point = Scene3D_ProjectWorldPoint(
-      mvp, x, y, z, screen_w, screen_h);
-  return (SDL_FPoint){ point.x, point.y };
+static bool ProjectWorldPoint(const float mvp[16], float x, float y, float z,
+                              int screen_w, int screen_h,
+                              SDL_FPoint *out_point) {
+  Scene3DPoint point;
+  if (!Scene3D_ProjectWorldPoint(mvp, x, y, z, screen_w, screen_h,
+                                 &point))
+    return false;
+  *out_point = (SDL_FPoint){ point.x, point.y };
+  return true;
 }
 
 /* Shared triangulation: a (subdiv_u+1)x(subdiv_v+1) vertex grid into
@@ -744,6 +748,8 @@ static void BuildLayerMesh(const float mvp[16], float z_world,
                            SDL_FColor color,
                            SDL_Vertex *out_verts, int *out_indices,
                            int *num_verts, int *num_indices) {
+  *num_verts = 0;
+  *num_indices = 0;
   int vi = 0;
   for (int row = 0; row <= DIORAMA_SUBDIV_Y; row++) {
     for (int col = 0; col <= DIORAMA_SUBDIV_X; col++) {
@@ -751,8 +757,9 @@ static void BuildLayerMesh(const float mvp[16], float z_world,
       float t = (float)row / DIORAMA_SUBDIV_Y;
       float wx = (s - 0.5f) * aspect_x;
       float wy = (0.5f - t) * height_scale;
-      out_verts[vi].position =
-          ProjectWorldPoint(mvp, wx, wy, z_world, screen_w, screen_h);
+      if (!ProjectWorldPoint(mvp, wx, wy, z_world, screen_w, screen_h,
+                             &out_verts[vi].position))
+        return;
       out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
                                               v0 + t * (v1 - v0) };
       out_verts[vi].color = color;
@@ -779,6 +786,8 @@ static void BuildQuadMesh(const float mvp[16],
                           int screen_w, int screen_h, SDL_FColor color,
                           SDL_Vertex *out_verts, int *out_indices,
                           int *num_verts, int *num_indices) {
+  *num_verts = 0;
+  *num_indices = 0;
   int vi = 0;
   for (int row = 0; row <= subdiv_v; row++) {
     for (int col = 0; col <= subdiv_u; col++) {
@@ -787,8 +796,9 @@ static void BuildQuadMesh(const float mvp[16],
       float wx = origin_x + s * edge_u_x + t * edge_v_x;
       float wy = origin_y + s * edge_u_y + t * edge_v_y;
       float wz = origin_z + s * edge_u_z + t * edge_v_z;
-      out_verts[vi].position =
-          ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h);
+      if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
+                             &out_verts[vi].position))
+        return;
       out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
                                               v0 + t * (v1 - v0) };
       out_verts[vi].color = color;

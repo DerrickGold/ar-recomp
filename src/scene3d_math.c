@@ -2,6 +2,8 @@
 
 #include <math.h>
 
+static const float kMinimumProjectionDepth = 0.0001f;
+
 static void Mat4Mul(const float a[16], const float b[16], float out[16]) {
   for (int column = 0; column < 4; column++) {
     for (int row = 0; row < 4; row++) {
@@ -43,17 +45,23 @@ void Scene3D_BuildViewProjection(const Scene3DCamera *camera,
   Mat4Mul(projection, view, out_matrix);
 }
 
-Scene3DPoint Scene3D_ProjectWorldPoint(const float matrix[16],
-                                      float x, float y, float z,
-                                      int output_width, int output_height) {
+bool Scene3D_ProjectWorldPoint(const float matrix[16],
+                               float x, float y, float z,
+                               int output_width, int output_height,
+                               Scene3DPoint *out_point) {
+  if (!out_point) return false;
   float clip_x = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
   float clip_y = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
   float clip_w = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
-  float inverse_w = clip_w != 0.0f ? 1.0f / clip_w : 1.0f;
-  return (Scene3DPoint){
+  if (clip_w <= kMinimumProjectionDepth) return false;
+  float inverse_w = 1.0f / clip_w;
+  Scene3DPoint projected = {
     (clip_x * inverse_w * 0.5f + 0.5f) * output_width,
     (1.0f - (clip_y * inverse_w * 0.5f + 0.5f)) * output_height,
   };
+  if (!isfinite(projected.x) || !isfinite(projected.y)) return false;
+  *out_point = projected;
+  return true;
 }
 
 float Scene3D_ProjectBillboardScale(const float matrix[16],
@@ -61,16 +69,19 @@ float Scene3D_ProjectBillboardScale(const float matrix[16],
                                     float reference_depth) {
   float clip_w = matrix[3] * x + matrix[7] * y +
                  matrix[11] * z + matrix[15];
-  if (clip_w <= 0.0001f || reference_depth <= 0.0f) return 0.0f;
+  if (clip_w <= kMinimumProjectionDepth || reference_depth <= 0.0f)
+    return 0.0f;
   return reference_depth / clip_w;
 }
 
-Scene3DPoint Scene3D_ProjectShadowPoint(const float matrix[16],
-                                        float x, float y, float z,
-                                        float light_x, float light_y,
-                                        int output_width, int output_height) {
+bool Scene3D_ProjectShadowPoint(const float matrix[16],
+                                float x, float y, float z,
+                                float light_x, float light_y,
+                                int output_width, int output_height,
+                                Scene3DPoint *out_point) {
   return Scene3D_ProjectWorldPoint(matrix, x + z * light_x, y + z * light_y,
-                                   0.0f, output_width, output_height);
+                                   0.0f, output_width, output_height,
+                                   out_point);
 }
 
 float Scene3D_ShadowFootprintScale(float z, float shrink) {
@@ -82,19 +93,36 @@ float Scene3D_AutoFitDistance(float fov_y) {
   return 0.5f / tanf(fov_y * 0.5f);
 }
 
+float Scene3D_WrappedTextureOffset(uint64_t elapsed_ms,
+                                   float units_per_second,
+                                   float speed_scale) {
+  double offset = (double)elapsed_ms * 0.001 *
+      (double)units_per_second * (double)speed_scale;
+  double wrapped = fmod(offset, 1.0);
+  if (wrapped < 0.0) wrapped += 1.0;
+  return (float)wrapped;
+}
+
 float Scene3D_ClipDepth(const float matrix[16], float x, float y, float z) {
   return matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
+}
+
+bool Scene3D_DepthBoundaryY(const float matrix[16], float x, float z,
+                            float minimum_depth, float *boundary_y,
+                            bool *increasing) {
+  float slope = matrix[7];  /* depth gained per unit of world y */
+  if (slope == 0.0f) return false;
+  float base = matrix[3] * x + matrix[11] * z + matrix[15];
+  if (boundary_y) *boundary_y = (minimum_depth - base) / slope;
+  if (increasing) *increasing = slope > 0.0f;
+  return true;
 }
 
 bool Scene3D_GroundDepthBoundaryY(const float matrix[16], float x,
                                   float minimum_depth, float *boundary_y,
                                   bool *increasing) {
-  float slope = matrix[7];  /* depth gained per unit of ground y */
-  if (slope == 0.0f) return false;
-  float base = matrix[3] * x + matrix[15];
-  if (boundary_y) *boundary_y = (minimum_depth - base) / slope;
-  if (increasing) *increasing = slope > 0.0f;
-  return true;
+  return Scene3D_DepthBoundaryY(matrix, x, 0.0f, minimum_depth, boundary_y,
+                                increasing);
 }
 
 bool Scene3D_GroundHorizonScreenY(const float matrix[16], int output_height,

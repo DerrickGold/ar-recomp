@@ -17,6 +17,24 @@ static bool Near(float actual, float expected) {
   return fabsf(actual - expected) < 0.001f;
 }
 
+static Scene3DPoint ProjectWorldPoint(const float matrix[16],
+                                      float x, float y, float z,
+                                      int width, int height) {
+  Scene3DPoint point = {0};
+  CHECK(Scene3D_ProjectWorldPoint(matrix, x, y, z, width, height, &point));
+  return point;
+}
+
+static Scene3DPoint ProjectShadowPoint(const float matrix[16],
+                                       float x, float y, float z,
+                                       float light_x, float light_y,
+                                       int width, int height) {
+  Scene3DPoint point = {0};
+  CHECK(Scene3D_ProjectShadowPoint(matrix, x, y, z, light_x, light_y,
+                                   width, height, &point));
+  return point;
+}
+
 int main(void) {
   const int width = 256, height = 224;
   const float aspect = (float)width / (float)height;
@@ -26,9 +44,9 @@ int main(void) {
   };
   float matrix[16];
   Scene3D_BuildViewProjection(&camera, width, height, matrix);
-  Scene3DPoint top_left = Scene3D_ProjectWorldPoint(
+  Scene3DPoint top_left = ProjectWorldPoint(
       matrix, -aspect * 0.5f, 0.5f, 0.0f, width, height);
-  Scene3DPoint bottom_right = Scene3D_ProjectWorldPoint(
+  Scene3DPoint bottom_right = ProjectWorldPoint(
       matrix, aspect * 0.5f, -0.5f, 0.0f, width, height);
   CHECK(Near(top_left.x, 0.0f));
   CHECK(Near(top_left.y, 0.0f));
@@ -47,9 +65,9 @@ int main(void) {
   camera.tilt_x = 0.35f;
   camera.tilt_y = -0.2f;
   Scene3D_BuildViewProjection(&camera, width, height, matrix);
-  Scene3DPoint tilted_top_left = Scene3D_ProjectWorldPoint(
+  Scene3DPoint tilted_top_left = ProjectWorldPoint(
       matrix, -aspect * 0.5f, 0.5f, 0.0f, width, height);
-  Scene3DPoint tilted_bottom_right = Scene3D_ProjectWorldPoint(
+  Scene3DPoint tilted_bottom_right = ProjectWorldPoint(
       matrix, aspect * 0.5f, -0.5f, 0.0f, width, height);
   CHECK(isfinite(tilted_top_left.x) && isfinite(tilted_top_left.y));
   CHECK(isfinite(tilted_bottom_right.x) && isfinite(tilted_bottom_right.y));
@@ -65,6 +83,25 @@ int main(void) {
   CHECK(top_scale > 0.0f && bottom_scale > 0.0f);
   CHECK(!Near(top_scale, bottom_scale));
 
+  /* Projection is a visibility contract, not merely a perspective divide.
+   * A point on or behind the camera plane must be rejected without exposing
+   * a huge/mirrored coordinate or partially overwriting the caller's output. */
+  const float depth_probe[16] = {
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 0, 1,
+    0, 0, 0, 0,
+  };
+  Scene3DPoint rejected = { 17.0f, 29.0f };
+  CHECK(!Scene3D_ProjectWorldPoint(
+      depth_probe, 0.0f, 0.0f, 0.0f, width, height, &rejected));
+  CHECK(rejected.x == 17.0f && rejected.y == 29.0f);
+  CHECK(!Scene3D_ProjectWorldPoint(
+      depth_probe, 0.0f, 0.0f, -1.0f, width, height, &rejected));
+  CHECK(Scene3D_ProjectWorldPoint(
+      depth_probe, 0.0f, 0.0f, 1.0f, width, height, &rejected));
+  CHECK(isfinite(rejected.x) && isfinite(rejected.y));
+
   /* D3c virtual height: the shipped SIM pitch is negative, i.e. the camera
    * looks down on the ground plane, so lifting a billboard along +Z must move
    * it up-screen and closer to the camera. Zero height must reproduce the
@@ -72,11 +109,11 @@ int main(void) {
   camera.tilt_x = -0.35f;
   camera.tilt_y = 0.0f;
   Scene3D_BuildViewProjection(&camera, width, height, matrix);
-  Scene3DPoint grounded = Scene3D_ProjectWorldPoint(
+  Scene3DPoint grounded = ProjectWorldPoint(
       matrix, 0.1f, -0.2f, 0.0f, width, height);
-  Scene3DPoint zero_height = Scene3D_ProjectWorldPoint(
+  Scene3DPoint zero_height = ProjectWorldPoint(
       matrix, 0.1f, -0.2f, 0.0f, width, height);
-  Scene3DPoint lifted = Scene3D_ProjectWorldPoint(
+  Scene3DPoint lifted = ProjectWorldPoint(
       matrix, 0.1f, -0.2f, 24.0f / 224.0f, width, height);
   CHECK(Near(zero_height.x, grounded.x) && Near(zero_height.y, grounded.y));
   CHECK(lifted.y < grounded.y);
@@ -92,13 +129,13 @@ int main(void) {
    * projection of the sheared ground point, never of the lifted point. */
   camera.tilt_x = -0.35f;
   Scene3D_BuildViewProjection(&camera, width, height, matrix);
-  Scene3DPoint contact = Scene3D_ProjectShadowPoint(
+  Scene3DPoint contact = ProjectShadowPoint(
       matrix, 0.1f, -0.2f, 0.0f, 0.35f, 0.12f, width, height);
   CHECK(Near(contact.x, grounded.x) && Near(contact.y, grounded.y));
   float shadow_height = 24.0f / 224.0f;
-  Scene3DPoint offset_shadow = Scene3D_ProjectShadowPoint(
+  Scene3DPoint offset_shadow = ProjectShadowPoint(
       matrix, 0.1f, -0.2f, shadow_height, 0.35f, 0.12f, width, height);
-  Scene3DPoint sheared_ground = Scene3D_ProjectWorldPoint(
+  Scene3DPoint sheared_ground = ProjectWorldPoint(
       matrix, 0.1f + shadow_height * 0.35f, -0.2f + shadow_height * 0.12f,
       0.0f, width, height);
   CHECK(Near(offset_shadow.x, sheared_ground.x) &&
@@ -106,7 +143,7 @@ int main(void) {
   CHECK(offset_shadow.x > contact.x);
   /* Higher casters throw their shadow further; the relation is monotonic so a
    * slewed height cannot make a shadow jitter back and forth. */
-  Scene3DPoint higher_shadow = Scene3D_ProjectShadowPoint(
+  Scene3DPoint higher_shadow = ProjectShadowPoint(
       matrix, 0.1f, -0.2f, shadow_height * 2.0f, 0.35f, 0.12f, width, height);
   CHECK(higher_shadow.x > offset_shadow.x);
   /* Footprint shrink: full size on the ground, monotonically smaller with
@@ -122,17 +159,17 @@ int main(void) {
   CHECK(Near(Scene3D_ShadowFootprintScale(-1.0f, 4.0f), 1.0f));
 
   /* A zero light direction degenerates to the contact shadow, not to NaN. */
-  Scene3DPoint overhead = Scene3D_ProjectShadowPoint(
+  Scene3DPoint overhead = ProjectShadowPoint(
       matrix, 0.1f, -0.2f, shadow_height, 0.0f, 0.0f, width, height);
   CHECK(Near(overhead.x, grounded.x) && Near(overhead.y, grounded.y));
 
   /* A ground plane seen exactly edge-on still yields a finite anchor. */
   camera.tilt_x = -1.5707963f;
   Scene3D_BuildViewProjection(&camera, width, height, matrix);
-  Scene3DPoint edge_on = Scene3D_ProjectWorldPoint(
+  Scene3DPoint edge_on = ProjectWorldPoint(
       matrix, 0.1f, -0.2f, 24.0f / 224.0f, width, height);
   CHECK(isfinite(edge_on.x) && isfinite(edge_on.y));
-  Scene3DPoint edge_on_shadow = Scene3D_ProjectShadowPoint(
+  Scene3DPoint edge_on_shadow = ProjectShadowPoint(
       matrix, 0.1f, -0.2f, 24.0f / 224.0f, 0.35f, 0.12f, width, height);
   CHECK(isfinite(edge_on_shadow.x) && isfinite(edge_on_shadow.y));
 
@@ -155,6 +192,15 @@ int main(void) {
   CHECK(Near(Scene3D_ClipDepth(matrix, 0.0f, boundary, 0.0f), 0.35f));
   CHECK(Scene3D_ClipDepth(matrix, 0.0f, boundary - 1.0f, 0.0f) < 0.35f);
   CHECK(Scene3D_ClipDepth(matrix, 0.0f, boundary + 1.0f, 0.0f) > 0.35f);
+  /* Lifted planes need their own boundary. Reusing the z=0 result for clouds
+   * can leave a row behind the camera even though the ground row is safe. */
+  float lifted_boundary = 0.0f;
+  const float cloud_altitude = 72.0f / 224.0f;
+  CHECK(Scene3D_DepthBoundaryY(matrix, 0.0f, cloud_altitude, 0.35f,
+                               &lifted_boundary, NULL));
+  CHECK(Near(Scene3D_ClipDepth(
+                 matrix, 0.0f, lifted_boundary, cloud_altitude), 0.35f));
+  CHECK(!Near(lifted_boundary, boundary));
   /* Tilting the other way reverses which edge is dangerous. */
   camera.tilt_x = 0.35f;
   Scene3D_BuildViewProjection(&camera, width, height, matrix);
@@ -186,7 +232,7 @@ int main(void) {
   float previous = horizon + 1.0e6f;
   for (float y = 100.0f; y <= 1000000.0f; y *= 10.0f) {
     Scene3DPoint far_point =
-        Scene3D_ProjectWorldPoint(matrix, 0.0f, y, 0.0f, width, height);
+        ProjectWorldPoint(matrix, 0.0f, y, 0.0f, width, height);
     CHECK(far_point.y > horizon);
     CHECK(far_point.y < previous);
     previous = far_point.y;
@@ -216,7 +262,7 @@ int main(void) {
   CHECK(Scene3D_GroundHorizonScreenY(matrix, height, &yawed));
   for (float x = -2.0f; x <= 2.0f; x += 1.0f) {
     Scene3DPoint far_point =
-        Scene3D_ProjectWorldPoint(matrix, x, 100000.0f, 0.0f, width, height);
+        ProjectWorldPoint(matrix, x, 100000.0f, 0.0f, width, height);
     CHECK(fabsf(far_point.y - yawed) < 1.0f);
   }
 
@@ -224,6 +270,18 @@ int main(void) {
   float doubled = 0.0f;
   CHECK(Scene3D_GroundHorizonScreenY(matrix, height * 2, &doubled));
   CHECK(Near(doubled, yawed * 2.0f));
+
+  /* Wrapping completed texture motion is continuous at the old one-hour
+   * clock reset and remains bounded even after very long uptimes. */
+  float before_hour =
+      Scene3D_WrappedTextureOffset(3599999, 0.0060f, 1.0f);
+  float at_hour =
+      Scene3D_WrappedTextureOffset(3600000, 0.0060f, 1.0f);
+  CHECK(fabsf(at_hour - before_hour) < 0.001f);
+  float long_running = Scene3D_WrappedTextureOffset(
+      UINT64_C(365) * 24 * 60 * 60 * 1000, 0.0094f, 0.73f);
+  CHECK(isfinite(long_running));
+  CHECK(long_running >= 0.0f && long_running < 1.0f);
 
   if (!failures) puts("scene3d math tests passed");
   return failures ? 1 : 0;
