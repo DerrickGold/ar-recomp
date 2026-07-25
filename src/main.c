@@ -335,7 +335,12 @@ void DumpDiagState(const char *tag) {
    * isn't clobbered by the automatic exit dump (or by another). Exit keeps the
    * fixed names existing tooling expects. */
   int hotkey = tag && strcmp(tag, "hotkey") == 0;
-  char p_wram[320], p_sram[320], p_state[320], p_disp[320];
+  /* STATIC, not on the stack: this runs from the watchdog trip, i.e. on the
+   * game coroutine's stack at its deepest (a 64-frame recompiled dispatch
+   * chain), which is exactly when ~5KB of extra locals is most likely to
+   * overrun it. Single-threaded by construction (the game thread is the only
+   * caller), so sharing the buffers is safe. */
+  static char p_wram[320], p_sram[320], p_state[320], p_disp[320];
   if (hotkey) {
     RunDirFile(p_wram, sizeof p_wram, "dump_f%d_wram.bin", snes_frame_counter);
     RunDirFile(p_sram, sizeof p_sram, "dump_f%d_sram.bin", snes_frame_counter);
@@ -373,7 +378,9 @@ void DumpDiagState(const char *tag) {
      * loop's block cycle when the watchdog trips. */
     {
       extern int ar_block_history3(uint32_t *, uint32_t *, uint16_t *, int);
-      uint32_t hist[256], aux[256]; uint16_t srec[256];
+      /* Static for the same stack-depth reason as the path buffers above:
+       * 256 * (4 + 4 + 2) bytes is ~2.5KB. */
+      static uint32_t hist[256], aux[256]; static uint16_t srec[256];
       int n = ar_block_history3(hist, aux, srec, 256);
       fprintf(f, "block history (last %d, oldest-first) pc m x S X  "
                  "(watch S drift across a call to find the unbalanced subroutine):\n", n);
@@ -3691,6 +3698,10 @@ int main(int argc, char **argv) {
     SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
   SDL_DestroyTexture(g_sim3d_flat_texture);
   SettingsOverlay_Destroy();
+  /* Release the game coroutine's stack mapping / fiber. Safe here: the game
+   * thread is this thread and the main loop has exited, so nothing can be
+   * running on that stack. */
+  ActRaiser_DestroyGameCoroutine();
   InputMap_Shutdown();
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);

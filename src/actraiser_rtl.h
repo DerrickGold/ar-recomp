@@ -8,6 +8,9 @@
 void ActRaiserDrawPpuFrame(void);
 void ActRaiser_RebindPpuOutputSurfaces(void);
 void RunOneFrameOfGame(void);
+/* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown.
+ * Safe to call when none was created. */
+void ActRaiser_DestroyGameCoroutine(void);
 int ActRaiser_ReadRdnmi(Snes *snes);
 bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
 

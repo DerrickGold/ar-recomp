@@ -1,4 +1,11 @@
+/* _XOPEN_SOURCE exposes ucontext (getcontext/makecontext/swapcontext), but on
+ * macOS it also HIDES the BSD extensions — including MAP_ANON, which the
+ * coroutine stack's guard page needs. _DARWIN_C_SOURCE puts them back without
+ * giving up the XSI namespace. */
 #define _XOPEN_SOURCE 600
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE 1
+#endif
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
 #include "diorama_planes.h"
@@ -19,6 +26,14 @@
 #include <windows.h>
 #else
 #include <ucontext.h>
+#include <errno.h>
+#include <sys/mman.h>   /* mmap: guard page below the coroutine stack */
+#include <unistd.h>
+/* _XOPEN_SOURCE (needed for ucontext) hides MAP_ANONYMOUS on some libcs;
+ * macOS spells it MAP_ANON. */
+#if !defined(MAP_ANONYMOUS) && defined(MAP_ANON)
+#define MAP_ANONYMOUS MAP_ANON
+#endif
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +48,9 @@ static void *g_game_fiber;   /* CreateFiber result (game coroutine) */
 #else
 static ucontext_t g_host_ctx;
 static ucontext_t g_game_ctx;
-static char *g_game_stack;
+static char *g_game_stack;        /* usable stack (guard page excluded) */
+static void  *g_game_stack_map;   /* mmap base, including the guard page */
+static size_t g_game_stack_map_len;
 #endif
 static bool g_game_started;
 
@@ -41,7 +58,13 @@ void ActRaiser_YieldToHost(void) {
 #ifdef _WIN32
   SwitchToFiber(g_host_fiber);
 #else
-  swapcontext(&g_game_ctx, &g_host_ctx);
+  /* swapcontext can fail with ENOMEM ("Insufficient stack space left"). An
+   * unchecked failure would silently return and keep running on a stack the
+   * host believes it owns; there is no recovery, so abort loudly instead. */
+  if (swapcontext(&g_game_ctx, &g_host_ctx) != 0) {
+    fprintf(stderr, "FATAL: swapcontext (game -> host) failed\n");
+    abort();
+  }
 #endif
 }
 
@@ -1762,8 +1785,15 @@ void ActRaiser_Warp(unsigned region, unsigned map) {
  * loop. Returns false if the coroutine could not be created. */
 static bool CreateGameCoroutine(void) {
 #ifdef _WIN32
+  /* FIBER_FLAG_FLOAT_SWITCH is REQUIRED, not optional: MS documents that with
+   * flags zero "the floating-point state on x86 systems is not switched and
+   * data can be corrupted if a fiber uses floating-point arithmetic" — and the
+   * game coroutine does use FP (the watchdog's `double elapsed`, the DSP
+   * resample phase). Committing 64KB of the 2MB reserve up front instead of the
+   * whole thing keeps the fiber cheap to (re)create while still reserving the
+   * full stack; the recompiled dispatch stack can go 64 frames deep. */
   if (!g_host_fiber) {
-    g_host_fiber = ConvertThreadToFiber(NULL);
+    g_host_fiber = ConvertThreadToFiberEx(NULL, FIBER_FLAG_FLOAT_SWITCH);
     if (!g_host_fiber) {
       fprintf(stderr, "Failed to convert driver thread to fiber\n");
       return false;
@@ -1773,30 +1803,74 @@ static bool CreateGameCoroutine(void) {
     DeleteFiber(g_game_fiber);
     g_game_fiber = NULL;
   }
-  g_game_fiber = CreateFiber(GAME_STACK_SIZE, game_coroutine_fiber, NULL);
+  g_game_fiber = CreateFiberEx(64 * 1024, GAME_STACK_SIZE,
+                               FIBER_FLAG_FLOAT_SWITCH,
+                               game_coroutine_fiber, NULL);
   if (!g_game_fiber) {
     fprintf(stderr, "Failed to create game coroutine fiber\n");
     return false;
   }
 #else
   if (!g_game_stack) {
-    g_game_stack = malloc(GAME_STACK_SIZE);
-    if (!g_game_stack) {
+    /* mmap with a PROT_NONE GUARD PAGE below the stack rather than malloc.
+     * makecontext requires the caller to supply the stack, and with an
+     * app-supplied stack "it is the application's responsibility to handle
+     * stack overflow" — a malloc'd stack has no guard, so a deep recompiled
+     * dispatch chain that overruns it would silently scribble over whatever
+     * the allocator placed underneath (heap corruption, arbitrary later
+     * crash). With a guard page the overflow faults immediately, at the site
+     * that caused it. */
+    long page = sysconf(_SC_PAGESIZE);
+    size_t guard = page > 0 ? (size_t)page : 4096u;
+    size_t total = GAME_STACK_SIZE + guard;
+    void *map = mmap(NULL, total, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (map == MAP_FAILED) {
       fprintf(stderr, "Failed to allocate game coroutine stack\n");
       return false;
     }
+    /* Stacks grow DOWN, so the guard belongs at the lowest address. */
+    if (mprotect(map, guard, PROT_NONE) != 0)
+      fprintf(stderr, "[coroutine] guard page unavailable (%s) — stack "
+                      "overflow will not fault cleanly\n", strerror(errno));
+    g_game_stack_map = map;
+    g_game_stack_map_len = total;
+    g_game_stack = (char *)map + guard;
   }
   /* The abandoned context is just register state pointing into this stack;
    * re-running makecontext over the SAME buffer resets the entry point, so no
-   * free/realloc is needed (and none would be safe while the old context's
+   * unmap/remap is needed (and none would be safe while the old context's
    * frames still nominally live there). */
-  getcontext(&g_game_ctx);
+  if (getcontext(&g_game_ctx) != 0) {
+    fprintf(stderr, "Failed to capture game coroutine context\n");
+    return false;
+  }
   g_game_ctx.uc_stack.ss_sp = g_game_stack;
   g_game_ctx.uc_stack.ss_size = GAME_STACK_SIZE;
   g_game_ctx.uc_link = &g_host_ctx;
   makecontext(&g_game_ctx, game_coroutine, 0);
 #endif
   return true;
+}
+
+/* Release the coroutine's stack/fiber. Called from the game's shutdown path so
+ * the guard-page mapping and the fiber are not leaked, and so a leak checker
+ * run against a clean exit stays quiet. Safe to call without a coroutine. */
+void ActRaiser_DestroyGameCoroutine(void) {
+#ifdef _WIN32
+  if (g_game_fiber) {
+    DeleteFiber(g_game_fiber);
+    g_game_fiber = NULL;
+  }
+#else
+  if (g_game_stack_map) {
+    munmap(g_game_stack_map, g_game_stack_map_len);
+    g_game_stack_map = NULL;
+    g_game_stack_map_len = 0;
+    g_game_stack = NULL;
+  }
+#endif
+  g_game_started = false;
 }
 
 void RunOneFrameOfGame(void) {
@@ -1831,7 +1905,10 @@ void RunOneFrameOfGame(void) {
 #ifdef _WIN32
   SwitchToFiber(g_game_fiber);
 #else
-  swapcontext(&g_host_ctx, &g_game_ctx);
+  if (swapcontext(&g_host_ctx, &g_game_ctx) != 0) {
+    fprintf(stderr, "FATAL: swapcontext (host -> game) failed\n");
+    abort();
+  }
 #endif
   g_snes->forceNmi = false;
 
