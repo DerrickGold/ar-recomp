@@ -744,6 +744,31 @@ static uint64_t PausedIdleIntervalNs(void) {
  * guard, i.e. the "Scroll interpolation" setting silently did nothing. */
 static DioramaScrollSnapshot g_prev_scroll;
 
+/* R17/C2: the retained frame a between-ticks re-present re-composites, held
+ * with the scroll snapshot it must be paired against.
+ *
+ * The pair is stored TOGETHER and captured BEFORE FrameSlot_ExtractScrollSnapshot
+ * advances g_prev_scroll, because that extract makes g_prev_scroll a copy of
+ * this very slot's camera: after it runs, g_prev_scroll.timestamp_ns ==
+ * slot.timestamp_ns exactly, and pairing the slot against the live
+ * g_prev_scroll later would fail ComputeDioramaScrollDeltaAt's
+ * curr->timestamp_ns <= prev->timestamp_ns guard and silently interpolate
+ * nothing. (Passing NULL instead — what the keep-alive path does — fails one
+ * guard earlier. Neither "just pass g_prev_scroll" nor "pass NULL" is correct
+ * for a re-present; it needs the PREVIOUS tick's snapshot, which only exists
+ * before the extract.) Assertion 2 in RepresentLastFrame is the tripwire if
+ * anyone reorders these.
+ *
+ * This is also what the deleted present thread had: g_frame_slots[] plus
+ * g_present_last_presented_idx kept the last presented frame readable. #18/P13
+ * collapsed that to one stack local, which is why re-presenting became
+ * impossible. */
+static struct {
+  FrameSlot slot;                 /* ~10KB; copied once per tick present */
+  DioramaScrollSnapshot prev;     /* the snapshot to pair `slot` against */
+  bool valid;
+} g_repr;
+
 /* The deleted present thread invalidated its scroll history whenever it came
  * out of a quiesce, because a settings change / savestate load / diorama
  * toggle can span an arbitrary wall-clock gap AND change the scene: keeping
@@ -751,9 +776,17 @@ static DioramaScrollSnapshot g_prev_scroll;
  * unrelated camera data (a one-frame visible jump). The quiesce is gone, so
  * the former quiesce sites call this instead. Zeroing is the invalidation —
  * ComputeDioramaScrollDelta bails on !prev->diorama_active and on
- * timestamp_ns == 0. */
-static void InvalidateScrollHistory(void) {
+ * timestamp_ns == 0.
+ *
+ * R17/C2: the retained re-present slot has exactly the same lifetime, so it is
+ * dropped here too — one clear site, no second rule to keep in sync. Every
+ * caller of this function reassigns g_snes_width and/or memsets the pixel
+ * buffers, so a retained slot's geometry and the live buffers would disagree.
+ * Renamed from InvalidateScrollHistory: it now invalidates both pieces of
+ * cross-frame present state, not just the scroll snapshot. */
+static void InvalidatePresentHistory(void) {
   memset(&g_prev_scroll, 0, sizeof g_prev_scroll);
+  g_repr.valid = false;
 }
 
 /* Call after every RtlDrawPpuFrame(): capture the just-drawn frame and
@@ -782,7 +815,17 @@ static void SubmitFrameToPresent(bool game_tick) {
    * each. The deleted present thread held this same invariant structurally:
    * it re-presented the SAME slot and never touched prev_scroll on an idle
    * repaint ("prev_scroll only ever advances in the dequeue path below, when
-   * a genuinely new tick was captured"). */
+   * a genuinely new tick was captured").
+   *
+   * R17/C2: retain the (slot, prev) PAIR for the between-ticks re-present, and
+   * do it HERE — before the extract below overwrites g_prev_scroll with this
+   * slot's own camera. See the g_repr comment for why a later pairing against
+   * the live g_prev_scroll cannot work. */
+  if (game_tick) {
+    g_repr.prev = g_prev_scroll;
+    g_repr.slot = slot;
+    g_repr.valid = true;
+  }
   PresentComposite(&slot, game_tick ? &g_prev_scroll : NULL);
   if (game_tick) FrameSlot_ExtractScrollSnapshot(&slot, &g_prev_scroll);
   uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
@@ -1364,7 +1407,7 @@ static bool OnSettingsAction(const SettingDesc *desc) {
      * state is an unrelated scene, so the interpolation history must not
      * survive it. */
     RtlSaveLoad(kSaveLoad_Load, 0);
-    InvalidateScrollHistory();
+    InvalidatePresentHistory();
     fprintf(stderr, "State loaded.\n");
   } else if (!strcmp(desc->key, "warp_now")) {
     PerformWarp();
@@ -1829,7 +1872,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   /* A settings change can span an arbitrary human-scale gap and may have
    * rebuilt the geometry; don't interpolate the next frame against a camera
    * snapshot from before it. */
-  InvalidateScrollHistory();
+  InvalidatePresentHistory();
 }
 
 /* GetPresentationViewport moved to present.h/present.c as
@@ -2190,7 +2233,7 @@ void Diorama_OnModeChanged(void) {
   memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
   ActRaiser_RebindPpuOutputSurfaces();
   g_paused_redraw_pending = true;
-  InvalidateScrollHistory();
+  InvalidatePresentHistory();
 }
 
 /* M5.2: still called synchronously (no present thread yet — that's M5.3).
@@ -3359,6 +3402,14 @@ int main(int argc, char **argv) {
             fprintf(stderr,
                     "[settings-menu] atlas reload after device reset failed\n");
           g_paused_redraw_pending = true;
+          /* R17/C2: the retained re-present slot copies hd_entries[].texture
+           * as raw SDL_Texture* (present.h). ReloadHdReplacementTextures just
+           * destroyed and recreated every one of them, so those copies are
+           * now dangling — re-compositing the retained slot would be a
+           * use-after-free. Drop it; the next tick present retains a fresh
+           * one. This is also what makes RepresentLastFrame's upload skip
+           * safe: the textures it relies on are never stale-by-reset. */
+          InvalidatePresentHistory();
           break;
         case SDL_EVENT_RENDER_DEVICE_LOST:
           fprintf(stderr, "[render] device lost, cannot recover — exiting\n");
@@ -3640,6 +3691,12 @@ int main(int argc, char **argv) {
        * re-stamped every paused iteration below, so it's always "just now"
        * by the time the game actually unpauses. */
       accumulator = 0;
+      /* R17/C2: a pause can last minutes, and a settings change applied during
+       * it (ApplyScheduledSettingChange runs below, on the first unpaused
+       * iteration, BEFORE any tick can fire) re-derives geometry. Drop the
+       * retained slot so the first iteration after unpausing cannot
+       * re-present a pre-pause frame at pre-change geometry. */
+      InvalidatePresentHistory();
       /* Advance hold-to-accelerate value stepping. Wall-clock scheduled, so
        * it is correct at whatever rate this loop runs; a value it changes
        * sets g_paused_redraw_pending, which the redraw below honors. */

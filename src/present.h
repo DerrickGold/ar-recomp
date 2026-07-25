@@ -51,7 +51,16 @@ typedef struct FrameSlotHdEntry {
   bool active;
   int source;
   bool brightness_mod;
-  void *texture;  /* SDL_Texture*; stable after boot, copied for convenience */
+  /* SDL_Texture*, copied for convenience. NOT stable after boot, despite what
+   * this comment used to claim: ReloadHdReplacementTextures (main.c) destroys
+   * and recreates every one on SDL_EVENT_RENDER_TARGETS_RESET /
+   * _DEVICE_RESET. Within a single present that is harmless (the slot is
+   * captured and consumed in one synchronous call), but a RETAINED slot — see
+   * R17/C2's g_repr, which a between-ticks re-present re-composites — would
+   * hold dangling handles across a reset. That is why the reset arm calls
+   * InvalidatePresentHistory(). Do not retain a FrameSlot anywhere else
+   * without the same invalidation. */
+  void *texture;
 } FrameSlotHdEntry;
 
 /* Scene-inspector click anchor (D4-adjacent: shared between the present-time
