@@ -875,6 +875,37 @@ static void TestFrameLimitInterval(void) {
   CHECK(R2_FrameLimitIntervalNs() == 0);
 }
 
+/* R6: a pinned scale percentage is defined in source-pixels-per-OUTPUT-pixel,
+ * and SDL_WINDOW_HIGH_PIXEL_DENSITY makes the output PHYSICAL pixels — so the
+ * pinned value must be multiplied by the display's pixel density to keep its
+ * apparent size. Auto (0) must pass through untouched: those paths derive from
+ * the output size and are already density-correct. */
+static void TestScalePercentToOutput(void) {
+  Settings_SetHostPixelDensity(1.0f);
+  CHECK(Settings_HostPixelDensity() == 1.0f);
+  CHECK(Settings_ScalePercentToOutput(100) == 100);
+  CHECK(Settings_ScalePercentToOutput(250) == 250);
+
+  Settings_SetHostPixelDensity(2.0f);          /* Retina */
+  CHECK(Settings_ScalePercentToOutput(100) == 200);
+  CHECK(Settings_ScalePercentToOutput(250) == 500);
+  CHECK(Settings_ScalePercentToOutput(0) == 0);        /* auto untouched */
+  CHECK(Settings_ScalePercentToOutput(-1) == -1);      /* sentinel untouched */
+
+  Settings_SetHostPixelDensity(1.5f);          /* Wayland fractional */
+  CHECK(Settings_ScalePercentToOutput(100) == 150);
+  CHECK(Settings_ScalePercentToOutput(75) == 113);     /* rounds, never 0 */
+
+  /* A bogus density can never zero out or invert a pinned scale. */
+  Settings_SetHostPixelDensity(0.0f);
+  CHECK(Settings_HostPixelDensity() == 1.0f);
+  CHECK(Settings_ScalePercentToOutput(100) == 100);
+  Settings_SetHostPixelDensity(-3.0f);
+  CHECK(Settings_HostPixelDensity() == 1.0f);
+  CHECK(Settings_ScalePercentToOutput(1) == 1);
+  Settings_SetHostPixelDensity(1.0f);          /* restore for later tests */
+}
+
 /* P9: settings.ini / saves/ resolve under the SDL pref dir (or cwd-relative
  * when SDL_GetPrefPath is unavailable, so in-tree dev runs are unchanged). */
 static void TestUserDataFile(void) {
@@ -902,6 +933,7 @@ static void TestUserDataFile(void) {
 
 int main(void) {
   TestUserDataFile();
+  TestScalePercentToOutput();
   TestFrameLimitInterval();
   TestDefaultsAndMetadata();
   TestSim3DEnvironmentLabels();

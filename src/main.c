@@ -599,64 +599,34 @@ static void RtlDrawPpuFrame(void) {
  * Re-render the same emulated PPU state once after such a change; ordinary
  * paused iterations retain that texture, so pause never advances the game or
  * repeatedly replays the scanline/HDMA renderer. */
-/* M5.3 (ar-recomp-threading-impl.md §2, Appendix D5-D11): the present
- * thread. Moves SDL_RenderPresent's vsync block off the game thread.
+/* #18/P13: the M5.3 present thread and its handshake machinery are GONE.
  *
- * Two condition variables, reused for every handshake purpose (D11 — no new
- * subsystem, each waiter loops on its own predicate so sharing is safe):
- *   g_present_ready_cond: game -> present. Signaled when a new frame is
- *     submitted (g_frame_pending) or a quiesce is requested/released.
- *   g_present_done_cond:  present -> game. Signaled on THREE occasions:
- *     (1) a submitted frame is dequeued (clears g_frame_pending — the D11
- *         submit-side wait), (2) PresentUpload finishes for the dequeued
- *         frame (sets g_present_upload_done — the pixel-buffer-safety wait,
- *         see present.h's buffer-ownership note: this is what lets the game
- *         thread redraw g_pixels/etc. WITHOUT double-buffering them), and
- *         (3) a quiesce request is acknowledged (g_present_quiesced).
+ * Phase 0 established that SDL3's 2D render API is main-thread-only
+ * (SDL_render.h:46-47) and that PresentThreadFn was the sole contract
+ * violator — it issued every present.c render call plus SDL_RenderPresent off
+ * the SDL_Init thread, which is why the default GL/EGL backend would not boot
+ * on Wayland. Phase 0 stopped spawning it but left the machinery compiled
+ * (dead) for revertibility. That revert window has closed, so the whole
+ * apparatus is deleted here rather than left as a permanent trap for the next
+ * reader:
+ *   - the thread handle, mutex, and the two condition variables;
+ *   - g_present_running / g_present_thread_active / g_present_quiesce* state;
+ *   - the double-buffered g_frame_slots[2] + g_frame_pending queue (a
+ *     synchronous present needs exactly one stack FrameSlot, not a
+ *     producer/consumer ring);
+ *   - g_present_upload_done + WaitForPixelBuffersFree (#18): a pixel-buffer
+ *     handshake exists only to stop a CONSUMER thread reading g_pixels while
+ *     the game thread redraws it. With one thread, PresentUpload has always
+ *     already returned before the next RtlDrawPpuFrame() begins;
+ *   - PresentThread_Quiesce/Resume (P13): nothing to park, so the brackets
+ *     around savestate loads, settings changes, diorama rebinds, and the
+ *     screenshot readback are gone. Those operations are now plain
+ *     straight-line main-thread code.
  *
- * Buffer ownership (M5 plan): the FrameSlot metadata is double-buffered
- * (g_frame_slots[2]); the raw pixel buffers are NOT — safety for those comes
- * from (2) above, not copying. */
-static SDL_Thread *g_present_thread;
-static SDL_Mutex *g_present_mutex;
-static SDL_Condition *g_present_ready_cond;
-static SDL_Condition *g_present_done_cond;
-static bool g_present_running;
-static bool g_present_thread_active;  /* false: headless / no renderer — synchronous fallback */
-
-static FrameSlot g_frame_slots[2];
-static int g_frame_last_idx;       /* game-thread-only: alternates 0/1 */
-static int g_frame_pending_idx;    /* valid while g_frame_pending */
-static bool g_frame_pending;
-static bool g_present_upload_done = true;
-static int g_present_last_presented_idx = -1;  /* present-thread-only */
-
-static bool g_present_quiesce_requested;
-static bool g_present_quiesced;
-
-/* D8: quiesce, not a command queue. Parks the present thread after it
- * finishes whatever it's mid-doing, so the caller (game/main thread) can
- * safely run code that mutates the renderer/window/g_ppu wholesale
- * (geometry changes, fullscreen toggle, savestate load, screenshot capture)
- * without racing the present thread's reads. */
-static void PresentThread_Quiesce(void) {
-  if (!g_present_thread_active) return;
-  SDL_LockMutex(g_present_mutex);
-  g_present_quiesce_requested = true;
-  SDL_SignalCondition(g_present_ready_cond);
-  while (!g_present_quiesced && g_present_running)
-    SDL_WaitCondition(g_present_done_cond, g_present_mutex);
-  SDL_UnlockMutex(g_present_mutex);
-}
-
-static void PresentThread_Resume(void) {
-  if (!g_present_thread_active) return;
-  SDL_LockMutex(g_present_mutex);
-  g_present_quiesce_requested = false;
-  SDL_SignalCondition(g_present_ready_cond);
-  SDL_UnlockMutex(g_present_mutex);
-}
-
+ * What SURVIVES from the M5/M6/M7 design: the fixed-timestep accumulator
+ * still owns the emulated tick rate (decoupled from display refresh), and
+ * FrameSlot is still the D6 boundary — present.c reads only the slot
+ * FrameSlot_Capture produces, never live g_ppu/g_settings. */
 static uint64_t FrameLimitIntervalNs(void);  /* defined with the display code */
 
 /* Sleep out any time left in `interval` since the previous present, then
@@ -669,14 +639,6 @@ static void PresentThrottleInterval(uint64_t *last_present_ns,
     now = SDL_GetTicksNS();
   }
   *last_present_ns = now;
-}
-
-/* Pace a present to the Frame limit (Refresh rate = Limit). Called with no
- * lock held, immediately before SDL_RenderPresent; sleeps out any time left
- * in the target interval since the previous present. A no-op in Vsync (SDL
- * blocks) and Unlimited (interval 0) modes. */
-static void PresentThrottle(uint64_t *last_present_ns) {
-  PresentThrottleInterval(last_present_ns, FrameLimitIntervalNs());
 }
 
 /* M6/§3.1: the emulated NTSC tick duration. 262 scanlines * 1364 master-clock
@@ -714,217 +676,89 @@ static uint64_t PausedIdleIntervalNs(void) {
   return ui > kFrameNs ? ui : kFrameNs;
 }
 
-static int SDLCALL PresentThreadFn(void *userdata) {
-  (void)userdata;
-  uint64_t last_present_ns = 0;
-  /* M7: present-thread-local scroll history for interpolation (present.h's
-   * FrameSlot comment explains why this must NOT be a pointer into
-   * g_frame_slots[] — that would race the game thread's next submission).
-   * Only this thread ever touches it, so it needs no lock. */
-  DioramaScrollSnapshot prev_scroll = {0};
-  SDL_LockMutex(g_present_mutex);
-  while (g_present_running) {
-    if (g_present_quiesce_requested) {
-      g_present_quiesced = true;
-      SDL_SignalCondition(g_present_done_cond);
-      while (g_present_quiesce_requested && g_present_running)
-        SDL_WaitCondition(g_present_ready_cond, g_present_mutex);
-      g_present_quiesced = false;
-      /* M7: a quiesce (settings change, diorama toggle, savestate load) can
-       * span an arbitrary wall-clock gap and/or a scene change. prev_scroll
-       * still holds whatever was captured before the quiesce — invalidate
-       * it so the first frame after resuming shows curr as-is (no
-       * interpolation) instead of computing a bogus jump delta against
-       * stale/unrelated pre-quiesce scroll data. */
-      memset(&prev_scroll, 0, sizeof(prev_scroll));
-      continue;
-    }
-    if (!g_frame_pending) {
-      /* D11/§2.5, extended for M7: timed wait. On timeout (no new frame
-       * submitted), re-composite + re-present the last slot — §2.5's "keep
-       * the window alive while paused" path. With the "Scroll interpolation"
-       * setting on (kSettingCat_Graphics, off by default — see the
-       * PresentComposite comment on the BG2/HDMA vibration bug), poll at
-       * ~4ms so this also becomes the steady-state redraw path on a >60Hz
-       * display, recomputing the interpolation alpha fresh each time.
-       * B1a (followup doc): "Uncapped framerate" also wants this ~4ms
-       * cadence — without vsync (see the SDL_SetRenderVSync read at boot),
-       * SDL_RenderPresent no longer blocks the loop until the display's next
-       * refresh, so polling at the old 16ms idle cadence would just throttle
-       * the very re-present rate this setting exists to unlock. Without
-       * either setting there is no benefit to redrawing identical content
-       * faster than the original 16ms idle cadence, so stick with that.
-       * Reading g_settings directly is fine here (this is main.c, not
-       * present.c — no D6 boundary). */
-      bool signaled = SDL_WaitConditionTimeout(
-          g_present_ready_cond, g_present_mutex,
-          (g_settings.gpu_interp_enabled ||
-           g_settings.refresh_mode != kRefreshMode_Vsync)
-              ? 4 : 16);
-      if (!g_present_running || g_present_quiesce_requested) continue;
-      if (!signaled && !g_frame_pending && g_present_last_presented_idx >= 0) {
-        int idx = g_present_last_presented_idx;
-        SDL_UnlockMutex(g_present_mutex);
-        /* Re-present the SAME slot with a freshly-computed alpha — curr
-         * hasn't changed, so prev_scroll must NOT be touched here. Updating
-         * it after every idle repaint (as an earlier version of this code
-         * did) collapses prev==curr the moment a tick goes idle, snapping
-         * the extrapolated shift back to zero for one repaint and then
-         * re-extrapolating on the next — a visible forward/back "vibration"
-         * on every idle repaint. prev_scroll only ever advances in the
-         * dequeue path below, when a genuinely new tick was captured. */
-        PresentComposite(&g_frame_slots[idx], &prev_scroll);
-        PresentThrottle(&last_present_ns);
-        if (g_renderer) SDL_RenderPresent(g_renderer);
-        SDL_LockMutex(g_present_mutex);
-      }
-      continue;
-    }
+/* M7 scroll interpolation needs the PREVIOUS presented frame's camera
+ * alongside the current one. That history used to live thread-locally inside
+ * PresentThreadFn; with one thread it is this static, updated after each
+ * composite from the slot just shown (still a separate snapshot struct, never
+ * a pointer into a FrameSlot the next capture would overwrite — see
+ * present.h). Passing NULL here, as the synchronous path did while it was
+ * merely a fallback, made ComputeDioramaScrollDelta return zero on its first
+ * guard, i.e. the "Scroll interpolation" setting silently did nothing. */
+static DioramaScrollSnapshot g_prev_scroll;
 
-    int idx = g_frame_pending_idx;
-    g_frame_pending = false;
-    SDL_SignalCondition(g_present_done_cond);  /* D11: unblocks the submit wait */
-    SDL_UnlockMutex(g_present_mutex);
-
-    FrameSlot *slot = &g_frame_slots[idx];
-    static int perf_on = -1;
-    if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
-    uint32 upload_t0 = perf_on ? SDL_GetTicks() : 0;
-    PresentUpload(slot);
-
-    SDL_LockMutex(g_present_mutex);
-    g_present_upload_done = true;
-    SDL_SignalCondition(g_present_done_cond);  /* unblocks the pre-draw wait */
-    SDL_UnlockMutex(g_present_mutex);
-
-    uint32 composite_t0 = perf_on ? SDL_GetTicks() : 0;
-    PresentComposite(slot, &prev_scroll);
-    uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
-    PresentThrottle(&last_present_ns);
-    if (g_renderer) SDL_RenderPresent(g_renderer);
-    FrameSlot_ExtractScrollSnapshot(slot, &prev_scroll);
-    if (perf_on) {
-      uint32 now = SDL_GetTicks();
-      uint32 upload_ms = composite_t0 - upload_t0;
-      uint32 present_ms = vsync_t0 - composite_t0;
-      uint32 vsync_ms = now - vsync_t0;
-      static uint32 win_start, up_sum, up_max, pr_sum, pr_max, vs_sum, vs_max;
-      static int win_frames;
-      up_sum += upload_ms; if (upload_ms > up_max) up_max = upload_ms;
-      pr_sum += present_ms; if (present_ms > pr_max) pr_max = present_ms;
-      vs_sum += vsync_ms; if (vsync_ms > vs_max) vs_max = vsync_ms;
-      win_frames++;
-      if (!win_start) win_start = now;
-      if (now - win_start >= 1000) {
-        fprintf(stderr,
-                "[present-perf] frames=%d upload-ms avg=%.1f max=%u "
-                "present-ms avg=%.1f max=%u vsync-wait avg=%.1f max=%u\n",
-                win_frames, (double)up_sum / win_frames, up_max,
-                (double)pr_sum / win_frames, pr_max,
-                (double)vs_sum / win_frames, vs_max);
-        win_start = now; up_sum = 0; up_max = 0;
-        pr_sum = 0; pr_max = 0; vs_sum = 0; vs_max = 0; win_frames = 0;
-      }
-    }
-    g_present_last_presented_idx = idx;
-
-    SDL_LockMutex(g_present_mutex);
-  }
-  SDL_UnlockMutex(g_present_mutex);
-  return 0;
+/* The deleted present thread invalidated its scroll history whenever it came
+ * out of a quiesce, because a settings change / savestate load / diorama
+ * toggle can span an arbitrary wall-clock gap AND change the scene: keeping
+ * the pre-event snapshot would make the next frame interpolate against
+ * unrelated camera data (a one-frame visible jump). The quiesce is gone, so
+ * the former quiesce sites call this instead. Zeroing is the invalidation —
+ * ComputeDioramaScrollDelta bails on !prev->diorama_active and on
+ * timestamp_ns == 0. */
+static void InvalidateScrollHistory(void) {
+  memset(&g_prev_scroll, 0, sizeof g_prev_scroll);
 }
 
-/* Call before every RtlDrawPpuFrame(): blocks (briefly — PresentUpload is
- * sub-millisecond per [present-perf]) until the present thread has finished
- * reading the pixel buffers this call is about to overwrite. No-op with no
- * present thread (headless/synchronous fallback). */
-static void WaitForPixelBuffersFree(void) {
-  if (!g_present_thread_active) return;
-  SDL_LockMutex(g_present_mutex);
-  while (!g_present_upload_done && g_present_running)
-    SDL_WaitCondition(g_present_done_cond, g_present_mutex);
-  SDL_UnlockMutex(g_present_mutex);
-}
-
-/* Call after every RtlDrawPpuFrame(): hands the just-drawn frame to the
- * present thread (or, with none running, presents synchronously — the old
- * M5.2 path, kept for headless-with-video and as a safety fallback). */
+/* Call after every RtlDrawPpuFrame(): capture the just-drawn frame and
+ * present it. Synchronous and main-thread-only (#18/P13 removed the present
+ * thread and its handshake — see the note above the pacing helpers). */
 static void SubmitFrameToPresent(void) {
-  if (!g_present_thread_active) {
-    if (!g_renderer || !g_texture) return;
-    static int perf_on = -1;
-    if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
-    FrameSlot slot;
-    FrameSlot_Capture(&slot);
-    uint32 render_t0 = perf_on ? SDL_GetTicks() : 0;
-    PresentUpload(&slot);
-    PresentComposite(&slot, NULL);
-    uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
-    /* Phase 0: with no present thread, this is the only present site, so the
-     * Frame-limit pacing (Refresh rate = Limit / Unlimited's R2 soft-cap)
-     * must happen here — same composite -> throttle -> present order as
-     * PresentThreadFn, so the sleep shows up in the vsync-wait perf bucket.
-     * A no-op in Vsync mode (interval 0; SDL_RenderPresent blocks instead).
-     * Emulation pace is unaffected: the M6 accumulator runs catch-up ticks
-     * for wall-clock time spent sleeping here.
-     *
-     * The Frame limit governs GAME presentation only. Host UI paces to the
-     * display instead — the settings overlay at full panel rate
-     * (UiPresentIntervalNs — it animates), a plain pause at the idle
-     * keep-alive rate (PausedIdleIntervalNs — static frame, input polling
-     * only). Emulation is not ticking in either, so no game pacing is
-     * bypassed. The shared stamp still advances so closing the menu
-     * re-enters Limit pacing cleanly instead of measuring from a pre-menu
-     * present. */
-    static uint64_t last_present_ns;
-    PresentThrottleInterval(&last_present_ns,
-                            SettingsOverlay_IsOpen() ? UiPresentIntervalNs()
-                            : g_paused               ? PausedIdleIntervalNs()
-                                                     : FrameLimitIntervalNs());
-    SDL_RenderPresent(g_renderer);
-    if (perf_on) {
-      uint32 now = SDL_GetTicks();
-      uint32 render_ms = vsync_t0 - render_t0;
-      uint32 vsync_ms = now - vsync_t0;
-      static uint32 win_start, render_sum, render_max, vsync_sum, vsync_max;
-      static int win_frames;
-      render_sum += render_ms; if (render_ms > render_max) render_max = render_ms;
-      vsync_sum += vsync_ms; if (vsync_ms > vsync_max) vsync_max = vsync_ms;
-      win_frames++;
-      if (!win_start) win_start = now;
-      if (now - win_start >= 1000) {
-        fprintf(stderr,
-                "[present-perf] frames=%d present-ms avg=%.1f max=%u "
-                "vsync-wait avg=%.1f max=%u (no present thread)\n",
-                win_frames, (double)render_sum / win_frames, render_max,
-                (double)vsync_sum / win_frames, vsync_max);
-        win_start = now; render_sum = 0; render_max = 0;
-        vsync_sum = 0; vsync_max = 0; win_frames = 0;
-      }
+  if (!g_renderer || !g_texture) return;
+  static int perf_on = -1;
+  if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
+  FrameSlot slot;
+  FrameSlot_Capture(&slot);
+  uint32 render_t0 = perf_on ? SDL_GetTicks() : 0;
+  PresentUpload(&slot);
+  PresentComposite(&slot, &g_prev_scroll);
+  FrameSlot_ExtractScrollSnapshot(&slot, &g_prev_scroll);
+  uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
+  /* This is the only present site, so Frame-limit pacing (Refresh rate =
+   * Limit / Unlimited's R2 soft-cap) happens here, composite -> throttle ->
+   * present, so the sleep lands in the vsync-wait perf bucket. A no-op in
+   * Vsync mode (interval 0; SDL_RenderPresent blocks instead). Emulation
+   * pace is unaffected: the M6 accumulator runs catch-up ticks for
+   * wall-clock time spent sleeping here (its cap is Limit-aware).
+   *
+   * The Frame limit governs GAME presentation only. Host UI paces to the
+   * display instead — the settings overlay at full panel rate
+   * (UiPresentIntervalNs — it animates), a plain pause at the idle
+   * keep-alive rate (PausedIdleIntervalNs — static frame, input polling
+   * only). Emulation is not ticking in either, so no game pacing is
+   * bypassed. The shared stamp still advances so closing the menu
+   * re-enters Limit pacing cleanly instead of measuring from a pre-menu
+   * present. */
+  static uint64_t last_present_ns;
+  PresentThrottleInterval(&last_present_ns,
+                          SettingsOverlay_IsOpen() ? UiPresentIntervalNs()
+                          : g_paused               ? PausedIdleIntervalNs()
+                                                   : FrameLimitIntervalNs());
+  SDL_RenderPresent(g_renderer);
+  if (perf_on) {
+    uint32 now = SDL_GetTicks();
+    uint32 render_ms = vsync_t0 - render_t0;
+    uint32 vsync_ms = now - vsync_t0;
+    static uint32 win_start, render_sum, render_max, vsync_sum, vsync_max;
+    static int win_frames;
+    render_sum += render_ms; if (render_ms > render_max) render_max = render_ms;
+    vsync_sum += vsync_ms; if (vsync_ms > vsync_max) vsync_max = vsync_ms;
+    win_frames++;
+    if (!win_start) win_start = now;
+    if (now - win_start >= 1000) {
+      fprintf(stderr,
+              "[present-perf] frames=%d present-ms avg=%.1f max=%u "
+              "vsync-wait avg=%.1f max=%u (no present thread)\n",
+              win_frames, (double)render_sum / win_frames, render_max,
+              (double)vsync_sum / win_frames, vsync_max);
+      win_start = now; render_sum = 0; render_max = 0;
+      vsync_sum = 0; vsync_max = 0; win_frames = 0;
     }
-    return;
   }
-
-  SDL_LockMutex(g_present_mutex);
-  while (g_frame_pending && g_present_running)
-    SDL_WaitCondition(g_present_done_cond, g_present_mutex);  /* D11 */
-  if (!g_present_running) { SDL_UnlockMutex(g_present_mutex); return; }
-  int idx = 1 - g_frame_last_idx;
-  FrameSlot_Capture(&g_frame_slots[idx]);
-  g_frame_last_idx = idx;
-  g_frame_pending_idx = idx;
-  g_frame_pending = true;
-  g_present_upload_done = false;
-  SDL_SignalCondition(g_present_ready_cond);
-  SDL_UnlockMutex(g_present_mutex);
 }
 
-/* Returns true if a redraw actually happened (so the caller knows whether to
- * submit a fresh frame or let the present thread's own idle timeout keep
- * re-presenting the last one — §2.5). */
+/* Returns true if a redraw actually happened, so the paused loop knows a
+ * fresh frame is worth submitting (§2.5). */
 static bool RedrawPausedFrameIfNeeded(void) {
   if ((g_paused || SettingsOverlay_IsOpen()) && g_paused_redraw_pending) {
-    WaitForPixelBuffersFree();
     RtlDrawPpuFrame();
     g_paused_redraw_pending = false;
     return true;
@@ -1123,10 +957,10 @@ static SDL_Point WriteFramebufferPpm(FILE *pf) {
    * exists, capture that actual host-space result so F2 and visual-regression
    * screenshots include the independently scaled overlay. Headless runs
    * without video retain the historical internal-framebuffer capture. */
-  /* §2.9(c)/D8: this does a full render pass + SDL_RenderReadPixels on
-   * whichever thread calls it (F2, AR_SHOT_*) — quiesce the present thread
-   * first so the two don't touch g_renderer/g_texture/etc. concurrently. */
-  PresentThread_Quiesce();
+  /* P13: this does a full render pass + SDL_RenderReadPixels (F2, AR_SHOT_*).
+   * It used to be bracketed by a present-thread quiesce so the two couldn't
+   * touch g_renderer/g_texture concurrently; with rendering main-thread-only
+   * the readback simply runs inline — nothing else can be mid-present. */
   FrameSlot ppm_slot;
   bool have_ppm_slot = false;
   SDL_Surface *argb = NULL;
@@ -1144,7 +978,6 @@ static SDL_Point WriteFramebufferPpm(FILE *pf) {
     argb = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
     if (raw) SDL_DestroySurface(raw);
   }
-  PresentThread_Resume();
   if (argb) {
     int out_w = argb->w, out_h = argb->h;
     fprintf(pf, "P6\n%d %d\n255\n", out_w, out_h);
@@ -1451,11 +1284,12 @@ static bool OnSettingsAction(const SettingDesc *desc) {
     RtlSaveLoad(kSaveLoad_Save, 0);
     fprintf(stderr, "State saved.\n");
   } else if (!strcmp(desc->key, "load_state")) {
-    /* §2.9(b)/D8: rewrites all of g_ppu (VRAM/CGRAM/OAM/regs) — quiesce so
-     * the present thread never reads it mid-tear. */
-    PresentThread_Quiesce();
+    /* Rewrites all of g_ppu (VRAM/CGRAM/OAM/regs). No quiesce needed: the
+     * next present happens later on this same thread (#18/P13). The loaded
+     * state is an unrelated scene, so the interpolation history must not
+     * survive it. */
     RtlSaveLoad(kSaveLoad_Load, 0);
-    PresentThread_Resume();
+    InvalidateScrollHistory();
     fprintf(stderr, "State loaded.\n");
   } else if (!strcmp(desc->key, "warp_now")) {
     PerformWarp();
@@ -1614,6 +1448,28 @@ static void UpdateHostRefreshHz(void) {
   Settings_SetHostRefreshHz(mode ? (int)(mode->refresh_rate + 0.5f) : 0);
 }
 
+/* Backing pixels per window point for the window's CURRENT display. Pushed
+ * into settings so the pinned HUD/menu scale percentages stay physically the
+ * same size across displays of different density (see
+ * Settings_ScalePercentToOutput). Re-read on every event that can change which
+ * display the window is on, or that display's scale. */
+static void UpdateHostPixelDensity(void) {
+  if (!g_window) {
+    Settings_SetHostPixelDensity(1.0f);
+    return;
+  }
+  float density = SDL_GetWindowPixelDensity(g_window);
+  Settings_SetHostPixelDensity(density > 0.0f ? density : 1.0f);
+}
+
+/* Both host display properties change on the same events (moving display,
+ * scale change, mode change, fullscreen transition), so refresh them together
+ * and give every call site one thing to remember. */
+static void UpdateHostDisplayProperties(void) {
+  UpdateHostRefreshHz();
+  UpdateHostPixelDensity();
+}
+
 /* Vsync tracks Refresh rate: on only in Vsync mode, off for Unlimited and
  * Limit (Limit paces the present thread by wall clock instead). */
 static void ApplyRefreshVsync(void) {
@@ -1640,10 +1496,25 @@ static uint64_t FrameLimitIntervalNs(void) {
   return 0;
 }
 
+/* window_scale is "N screen pixels per SNES pixel", and SDL window sizes are
+ * in POINTS, so on a density-2 display an Nx window would cover 2N physical
+ * pixels per SNES pixel — the same points-vs-pixels ambiguity the pinned HUD
+ * and menu percentages have (see Settings_ScalePercentToOutput). Divide the
+ * requested scale by the density so 3x means 3x REAL pixels everywhere,
+ * keeping at least 1 point per SNES pixel so a high-density display can never
+ * round the window down to nothing. */
+static int WindowScaleInPoints(int scale) {
+  float density = Settings_HostPixelDensity();
+  if (density <= 1.0f) return scale;
+  int points = (int)((float)scale / density + 0.5f);
+  return points > 0 ? points : 1;
+}
+
 static void ApplyDisplayPresentation(void) {
   if (!g_window || !g_renderer) return;
   int vis_w = Settings_VisibleWidth();
   int scale = g_settings.window_scale ? g_settings.window_scale : 3;
+  scale = WindowScaleInPoints(scale);
   int win_h = g_snes_height * scale;
   int win_w = vis_w * scale;
 
@@ -1727,14 +1598,13 @@ static void ResolveVideoGeometry(bool runtime_change) {
 static void OnRuntimeSettingChanged(const SettingDesc *desc,
                                     SettingChangeResult result) {
   (void)result;
-  /* D8: several branches below mutate the renderer/window wholesale
+  /* Several branches below mutate the renderer/window wholesale
    * (SDL_SetWindowFullscreen, ResolveVideoGeometry -> RebindPpuOutputSurfaces
    * + ApplyDisplayPresentation's SDL_SetRenderLogicalPresentation/
-   * SDL_SetWindowSize — §2.9(a)). Quiesce the present thread for the whole
-   * dispatch rather than surgically picking branches; it's cheap (settings
-   * changes are rare, human-triggered) and simpler than re-deriving which
-   * branches are render-safe on every future edit here. */
-  PresentThread_Quiesce();
+   * SDL_SetWindowSize — §2.9(a)). This used to be bracketed by a
+   * present-thread quiesce; with rendering main-thread-only (#18/P13) the
+   * dispatch is ordinary straight-line code — the next present cannot
+   * overlap it. */
   if (desc->field == &g_settings.audio_master_volume)
     SDL_SetAtomicInt(&g_audio_master_percent, g_settings.audio_master_volume);
   if (desc->field == &g_settings.audio_enabled)
@@ -1746,19 +1616,18 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
     CloseSceneInspectorSelection();
   if (desc->field == &g_settings.window_mode && g_window) {
     ApplyWindowMode();
-    UpdateHostRefreshHz();  /* exclusive fullscreen can change the mode */
+    UpdateHostDisplayProperties();  /* exclusive fullscreen can change the mode */
   }
   /* B1a (followup doc): live-apply without a restart — mirrors the boot-time
    * SDL_SetRenderVSync read near SDL_CreateRenderer. Refresh rate owns vsync
-   * now; the frame-limit interval is polled per-present by the present thread,
-   * so a Limit-FPS change needs no explicit apply here. */
+   * now; the frame-limit interval is polled per-present by
+   * SubmitFrameToPresent, so a Limit-FPS change needs no explicit apply. */
   if ((desc->field == &g_settings.refresh_mode ||
        desc->field == &g_settings.uncapped_framerate) && g_renderer)
     ApplyRefreshVsync();
   if (desc->field == &g_settings.extended_aspect ||
       desc->field == &g_settings.pixel_aspect) {
     ResolveVideoGeometry(true);
-    PresentThread_Resume();
     return;
   }
   /* Menu edits of the camera rows re-seed the live camera, the mirror of the
@@ -1783,7 +1652,10 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
       desc->category == kSettingCat_Widescreen ||
       Settings_CategoryIsSim3D(desc->category))
     g_paused_redraw_pending = true;
-  PresentThread_Resume();
+  /* A settings change can span an arbitrary human-scale gap and may have
+   * rebuilt the geometry; don't interpolate the next frame against a camera
+   * snapshot from before it. */
+  InvalidateScrollHistory();
 }
 
 static void ApplyRendererLogicalSize(void) {
@@ -1880,7 +1752,10 @@ static void FillLiveHudProjectionInputs(HudProjectionInputs *in) {
   memset(in, 0, sizeof(*in));
   in->hud_bg_texture = g_hud_bg_texture;
   in->hud_obj_texture = g_hud_obj_texture;
-  in->hud_scale_percent = g_settings.hud_scale_percent;
+  /* Same density correction the FrameSlot producer applies (D4 — one
+   * algorithm, two callers). */
+  in->hud_scale_percent =
+      Settings_ScalePercentToOutput(g_settings.hud_scale_percent);
   in->pixel_aspect = g_active_pixel_aspect;
   in->snes_width = g_snes_width;
   in->snes_height = g_snes_height;
@@ -2148,16 +2023,16 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
 void Diorama_OnModeChanged(void) {
   if (!g_settings.diorama_mode) g_diorama_frame_active = false;
   if (!g_ppu) return;   /* pre-boot settings load */
-  /* D8: memsets the live pixel buffers and rebinds PPU output surfaces —
-   * quiesce first (same hazard class as OnRuntimeSettingChanged). */
-  PresentThread_Quiesce();
+  /* Memsets the live pixel buffers and rebinds PPU output surfaces. Formerly
+   * quiesce-bracketed; main-thread-only rendering makes that unnecessary
+   * (#18/P13), same as OnRuntimeSettingChanged. */
   ResolveVideoGeometry(false);
   memset(g_pixels, 0, sizeof(g_pixels));
   memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
   memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
   ActRaiser_RebindPpuOutputSurfaces();
   g_paused_redraw_pending = true;
-  PresentThread_Resume();
+  InvalidateScrollHistory();
 }
 
 /* M5.2: still called synchronously (no present thread yet — that's M5.3).
@@ -2425,7 +2300,6 @@ static void DrawAndPresentFrame(bool headless) {
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
 
-  WaitForPixelBuffersFree();
   uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
   RtlDrawPpuFrame();
   /* #16: function-scope so the annotated sim outlives the block below and can
@@ -2822,6 +2696,18 @@ int main(int argc, char **argv) {
      * off-screen. Usable bounds (excludes docks/taskbars) of the primary
      * display, checked against the WIDEST possible window for this scale
      * (the 16:9-of-height display width); shrink until it fits, floor 1x. */
+    /* Points, not pixels — same conversion ApplyDisplayPresentation does, so
+     * the boot window and any later re-apply agree on what Nx means. The
+     * density is not known until the window exists (SDL_GetWindowPixelDensity
+     * needs one), so use the primary display's content scale as the boot-time
+     * stand-in; the first UpdateHostDisplayProperties corrects it. */
+    {
+      float boot_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
+      if (boot_scale > 1.0f) {
+        int points = (int)((float)scale / boot_scale + 0.5f);
+        scale = points > 0 ? points : 1;
+      }
+    }
     {
       SDL_Rect usable;
       if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable)) {
@@ -2913,7 +2799,7 @@ int main(int argc, char **argv) {
      * and windowed are already handled by the creation flag. */
     if (!headless_video && g_settings.window_mode == kWindowMode_Exclusive)
       ApplyWindowMode();
-    UpdateHostRefreshHz();
+    UpdateHostDisplayProperties();
 
     /* Aspect-correct letterboxing via SDL's logical presentation (widescreen
      * only, so faithful mode keeps the historical stretch-to-window behavior).
@@ -3216,22 +3102,13 @@ int main(int argc, char **argv) {
       fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
     } }
 
-  /* Phase 0 (MY-AUDIT-render-off-thread): the present thread is intentionally
-   * NOT spawned. SDL3's 2D render API is main-thread-only (SDL_render.h:46-47),
-   * and PresentThreadFn was the sole contract violator (it issued every
-   * present.c render call plus SDL_RenderPresent off the SDL_Init/main thread),
-   * which is why the default GL/EGL backend would not boot on Wayland. All
-   * rendering now runs synchronously on this (the main) thread via
-   * SubmitFrameToPresent's g_present_thread_active==false branch — the same
-   * path headless already used.
-   *
-   * Left frozen at their initializer state: g_present_thread == NULL keeps the
-   * teardown join (below) a no-op; g_present_thread_active == false short-
-   * circuits PresentThread_Quiesce/Resume and WaitForPixelBuffersFree and makes
-   * the paused-redraw path submit unconditionally. The mutex/conds are never
-   * created, so nothing can lock a NULL handle. Fixed-timestep decoupling is
-   * preserved by the M6 accumulator (owns the emulated tick rate) plus vsync
-   * (SDL_RenderPresent blocks briefly when vsync is on). */
+  /* Phase 0 (MY-AUDIT-render-off-thread) + #18/P13: there is no present
+   * thread. SDL3's 2D render API is main-thread-only (SDL_render.h:46-47) and
+   * PresentThreadFn was the sole contract violator, which is why the default
+   * GL/EGL backend would not boot on Wayland. All rendering runs synchronously
+   * on this (the main) thread via SubmitFrameToPresent. Fixed-timestep
+   * decoupling is preserved by the M6 accumulator (owns the emulated tick
+   * rate) plus vsync (SDL_RenderPresent blocks briefly when vsync is on). */
 
   bool running = true;
   uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
@@ -3254,13 +3131,17 @@ int main(int argc, char **argv) {
          * SAME monitor can re-mode under us (user flips 60->144Hz in OS
          * settings, Windows dynamic refresh re-modes on power state), which
          * arrives as a display-level event, not a window one. The R2 soft-
-         * cap and the menu's UI pacing both derive from this value. */
+         * cap and the menu's UI pacing both derive from this value. The same
+         * events change the window's PIXEL DENSITY (dragging between a Retina
+         * and a 1x monitor), which the pinned HUD/menu scale percentages are
+         * corrected by — so refresh both together. */
         case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
         case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
         case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
         case SDL_EVENT_DISPLAY_ADDED:
         case SDL_EVENT_DISPLAY_REMOVED:
-          UpdateHostRefreshHz();
+          UpdateHostDisplayProperties();
+          g_paused_redraw_pending = true;
           break;
         /* Phase 0 made rendering main-thread-only, so re-deriving the logical
          * presentation here no longer races the (removed) present thread. The
@@ -3575,19 +3456,19 @@ int main(int argc, char **argv) {
        * re-stamped every paused iteration below, so it's always "just now"
        * by the time the game actually unpauses. */
       accumulator = 0;
-      /* Advance hold-to-accelerate value stepping on the MAIN thread (a
-       * settings write from the present thread would deadlock the quiesce).
-       * Runs at this loop's ~60Hz cadence while the menu is open; a value it
-       * changes sets g_paused_redraw_pending, which the redraw below honors. */
+      /* Advance hold-to-accelerate value stepping. Wall-clock scheduled, so
+       * it is correct at whatever rate this loop runs; a value it changes
+       * sets g_paused_redraw_pending, which the redraw below honors. */
       SettingsOverlay_Tick();
-      bool redrew = RedrawPausedFrameIfNeeded();
-      /* §2.5: with a present thread running, it re-presents the last slot
-       * on its own ~16ms idle timeout — only submit here when something
-       * actually changed. Without one (headless-with-video / thread
-       * creation failed), keep the old unconditional re-present. */
+      /* Re-render the emulated frame only when something changed (a settings
+       * edit, a resize); it is not re-rendered per iteration. */
+      RedrawPausedFrameIfNeeded();
+      /* §2.5: re-present unconditionally to keep the window alive while
+       * paused — the removed present thread used to do this from its own idle
+       * timeout. The present is paced by SubmitFrameToPresent's host-UI
+       * interval (menu: panel rate; plain pause: idle keep-alive rate). */
       bool presented = false;
-      if (!headless && !g_window_hidden &&
-          (redrew || !g_present_thread_active)) {
+      if (!headless && !g_window_hidden) {
         SubmitFrameToPresent();
         presented = true;
       }
@@ -3674,23 +3555,11 @@ int main(int argc, char **argv) {
     }
   }
 
-  /* D10: join the present thread immediately after the main loop, BEFORE any
-   * teardown touches the renderer/textures/font atlas it may still be
-   * reading (SettingsOverlay_Destroy + the DestroyTexture block below run
-   * well before SDL_DestroyRenderer — joining first is the only ordering
-   * that's safe). */
-  if (g_present_thread) {
-    SDL_LockMutex(g_present_mutex);
-    g_present_running = false;
-    g_present_quiesce_requested = false;
-    SDL_SignalCondition(g_present_ready_cond);
-    SDL_SignalCondition(g_present_done_cond);
-    SDL_UnlockMutex(g_present_mutex);
-    SDL_WaitThread(g_present_thread, NULL);
-    g_present_thread_active = false;
-  }
-
-  /* Flush only game-originated battery changes on exit. Deliberate
+  /* D10's present-thread join is gone with the thread itself (#18/P13):
+   * nothing can be mid-render here, so teardown below (SettingsOverlay_Destroy
+   * + the DestroyTexture block + SDL_DestroyRenderer) is safe in source order.
+   *
+   * Flush only game-originated battery changes on exit. Deliberate
    * session-only editor changes re-sync the save-system shadow, so using
    * Restart/Exit after one must not turn it into a persistent edit. Skip the
    * flush during replay so a replayed run never mutates the active save (see

@@ -102,9 +102,13 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
   int count = 0;
   double scale_y, scale_x;
   if (in->hud_scale_percent == 0) {
+    /* Auto: derived from the viewport, so already in physical output pixels. */
     scale_y = (double)viewport.h / in->snes_height;
     scale_x = (double)viewport.w / in->visible_width;
   } else {
+    /* Pinned: the percentage is SNES-pixels-per-OUTPUT-pixel, and the output is
+     * physical under SDL_WINDOW_HIGH_PIXEL_DENSITY. The FrameSlot already
+     * carries the density-corrected value (D6 — no live settings read here). */
     scale_y = in->hud_scale_percent / 100.0;
     scale_x = scale_y * (in->pixel_aspect == kPixelAspect_Crt43 ? 7.0 / 6.0 : 1.0);
   }

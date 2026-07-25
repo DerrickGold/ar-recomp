@@ -2665,6 +2665,31 @@ static int s_host_refresh_hz;
 void Settings_SetHostRefreshHz(int hz) { s_host_refresh_hz = hz > 0 ? hz : 0; }
 int Settings_HostRefreshHz(void) { return s_host_refresh_hz; }
 
+/* Backing pixels per window point (SDL_GetWindowPixelDensity), pushed from
+ * main.c whenever the window moves display or changes scale. 1.0 on a
+ * non-scaled display; 2.0 on Retina; fractional under Wayland fractional
+ * scaling.
+ *
+ * Why the pinned scale rows need it: SDL_WINDOW_HIGH_PIXEL_DENSITY makes
+ * SDL_GetRenderOutputSize report PHYSICAL pixels, but hud_scale_percent and
+ * menu_scale_percent are documented in SNES-pixels-per-output-pixel terms
+ * ("100 means one output pixel per SNES pixel vertically"). Without scaling
+ * them, a saved 200% rendered at half its former PHYSICAL size the moment the
+ * flag was added, and the same saved number meant different things on a Mac
+ * (density 2) and on Windows/X11 (density 1). The auto (0) rows derive from the
+ * output size and self-correct; only the explicit percentages need this. */
+static float s_host_pixel_density = 1.0f;
+void Settings_SetHostPixelDensity(float density) {
+  s_host_pixel_density = density > 0.0f ? density : 1.0f;
+}
+float Settings_HostPixelDensity(void) { return s_host_pixel_density; }
+
+int Settings_ScalePercentToOutput(int percent) {
+  if (percent <= 0) return percent;   /* 0 = auto; resolved from output size */
+  int scaled = (int)((float)percent * s_host_pixel_density + 0.5f);
+  return scaled > 0 ? scaled : 1;
+}
+
 int Settings_AudioFrequencyHz(void) {
   switch (g_settings.audio_frequency) {
     case kAudioFrequency_32040: return 32040;

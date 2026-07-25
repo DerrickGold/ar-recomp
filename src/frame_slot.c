@@ -268,7 +268,10 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->ignore_aspect_ratio = g_settings.ignore_aspect_ratio;
   dst->visible_x0 = Settings_VisibleX0();
   dst->visible_width = Settings_VisibleWidth();
-  dst->hud_scale_percent = g_settings.hud_scale_percent;
+  /* Density-corrected here, at the D6 producer, so present.c consumes a value
+   * already expressed in PHYSICAL output pixels (0 = auto passes through). */
+  dst->hud_scale_percent =
+      Settings_ScalePercentToOutput(g_settings.hud_scale_percent);
 
   dst->diorama_active = g_diorama_frame_active;
 

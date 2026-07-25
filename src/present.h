@@ -120,15 +120,14 @@ typedef struct FrameSlot {
    * (unlike the 10-bit modular PPU scroll registers this replaces), so no
    * wrap-correction is needed when differencing them.
    *
-   * NOTE ON "prev": interpolation needs this slot's data PLUS the
-   * previous frame's. It is NOT safe to read g_frame_slots[1-idx] for that —
-   * the game thread's next submission targets exactly that alternate slot,
-   * and per the M5.3 handshake it is free to start writing it well before
-   * the present thread finishes compositing the current one (that's the
-   * whole point of decoupling upload from composite). Instead, the present
-   * thread keeps its OWN small thread-local DioramaScrollSnapshot (below),
-   * updated after each composite from the slot it just showed — no shared
-   * memory, no race. */
+   * NOTE ON "prev": interpolation needs this slot's data PLUS the previous
+   * frame's, so the caller keeps its own DioramaScrollSnapshot (below) and
+   * passes it to PresentComposite; the slot itself only ever carries the
+   * CURRENT frame. Historically this note warned against reading the
+   * alternate entry of a double-buffered slot array (the M5.3 present thread
+   * could be writing it); that array and thread are gone (#18/P13), but the
+   * separate prev snapshot remains the interface — PresentComposite is given
+   * prev explicitly rather than inferring it. */
   uint64_t timestamp_ns;
   int16_t bg1_camera_x, bg1_camera_y;
   int16_t bg2_camera_x, bg2_camera_y;

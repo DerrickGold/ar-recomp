@@ -565,6 +565,20 @@ int Settings_AudioFrequencyHz(void);
  * blind label. Purely informational — it drives no behavior. */
 void Settings_SetHostRefreshHz(int hz);
 int Settings_HostRefreshHz(void);
+
+/* Backing pixels per window point for the window's current display
+ * (SDL_GetWindowPixelDensity), pushed from main.c. */
+void Settings_SetHostPixelDensity(float density);
+float Settings_HostPixelDensity(void);
+
+/* Convert a user-pinned scale percentage (hud_scale_percent,
+ * menu_scale_percent — both defined as SNES/source pixels per OUTPUT pixel)
+ * into the physical-pixel percentage the renderer needs, now that
+ * SDL_WINDOW_HIGH_PIXEL_DENSITY makes the output size physical. A pinned 100%
+ * keeps its apparent size on a 2x display instead of halving. Percent 0 (auto)
+ * passes through untouched — those paths derive from the output size and are
+ * already density-correct. */
+int Settings_ScalePercentToOutput(int percent);
 /* Folds the SIM 3D stage toggles into the one mask the resolver and the frame
  * payload work in. The toggles are the only stored state; no mask is
  * persisted, so this is the single conversion point. */

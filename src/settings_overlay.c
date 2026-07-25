@@ -2298,8 +2298,14 @@ static MenuLayout BuildLayoutAtScale(int output_width, int output_height,
 static MenuLayout BuildLayout(int output_width, int output_height) {
   int fit_scale = SnappedFitScale(output_width, output_height);
   s_auto_menu_scale_percent = fit_scale;
+  /* A pinned percentage is in source-pixels-per-OUTPUT-pixel terms, and the
+   * output is physical pixels under SDL_WINDOW_HIGH_PIXEL_DENSITY — scale it by
+   * the display's pixel density so a saved 200% looks the same size on a
+   * Retina panel as it did before the flag existed. The auto fit_scale is
+   * already derived from the output size, so it must NOT be scaled. */
   int scale = g_settings.menu_scale_percent > 0
-      ? g_settings.menu_scale_percent : fit_scale;
+      ? Settings_ScalePercentToOutput(g_settings.menu_scale_percent)
+      : fit_scale;
   if (scale > fit_scale) scale = fit_scale;
   if (scale < kMinimumScalePercent) scale = kMinimumScalePercent;
   return BuildLayoutAtScale(output_width, output_height, scale);
