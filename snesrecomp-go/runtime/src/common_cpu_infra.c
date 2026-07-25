@@ -401,6 +401,14 @@ void WatchdogFrameStart(void) {
   g_watchdog_counter = 0;
   g_recomp_stack_top = 0;
   g_tailcall_context_valid = 0;
+  /* A trip inside a recompiled NMI/IRQ handler skips that handler's
+   * `g_ar_in_interrupt = 0` epilogue, and the stack-drift tripwire SUPPRESSES
+   * itself while the flag is set (its documented job: ignore handler-internal
+   * imbalance). Left stuck, one hang would permanently disarm the primary
+   * diagnostic for the m/x-drift bug class. Clear it here, alongside the other
+   * per-frame resets. Weak so a game layer without the flag still links. */
+  { extern volatile int g_ar_in_interrupt __attribute__((weak));
+    if (&g_ar_in_interrupt) g_ar_in_interrupt = 0; }
 }
 
 /* Disarm at the end of the frame. REQUIRED for correctness, not tidiness: the
@@ -447,8 +455,12 @@ void WatchdogCheck(void) {
      * fires inside the coroutine, so g_cpu/g_ram/g_recomp_stack hold the exact
      * stuck state (the SDL event loop is wedged, so the F9/exit dumps can't
      * run during a hang). Weak so non-app linkers don't require it. */
+    /* FIRST trip only. A hang that recurs every frame would otherwise cost 5s
+     * of wall clock plus a multi-megabyte dump each time, turning a diagnosable
+     * fault into an unusable machine. The first dump is the informative one. */
     { extern void DumpDiagState(const char *) __attribute__((weak));
-      if (DumpDiagState) DumpDiagState("watchdog"); }
+      static int dumped;
+      if (!dumped && DumpDiagState) { dumped = 1; DumpDiagState("watchdog"); } }
     /* Also flush the AR_TRACE_WATCH ring: a hang is exactly the case the always-on
      * capture exists for — the ring holds the lead-up to the spin. */
     { extern void ar_trace_flush(const char *) __attribute__((weak));

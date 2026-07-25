@@ -2678,6 +2678,14 @@ int Settings_HostRefreshHz(void) { return s_host_refresh_hz; }
  * flag was added, and the same saved number meant different things on a Mac
  * (density 2) and on Windows/X11 (density 1). The auto (0) rows derive from the
  * output size and self-correct; only the explicit percentages need this. */
+/* Whether the renderer REALLY has vsync on, read back from SDL after the
+ * request (SDL_SetRenderVSync can be rejected — Metal accepts only 0/1). The
+ * "Vsync NHz" row labels from this, not from the requested value, so a
+ * rejected enable does not leave the menu claiming a vsync we do not have. */
+static bool s_host_vsync_active;
+void Settings_SetHostVsyncActive(bool active) { s_host_vsync_active = active; }
+bool Settings_HostVsyncActive(void) { return s_host_vsync_active; }
+
 static float s_host_pixel_density = 1.0f;
 void Settings_SetHostPixelDensity(float density) {
   s_host_pixel_density = density > 0.0f ? density : 1.0f;

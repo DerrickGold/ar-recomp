@@ -294,6 +294,10 @@ static SDL_Mutex *g_audio_mutex;
  * main/game thread. Keep the callback's one live input in an SDL atomic mirror
  * instead of racing on g_settings. */
 static SDL_AtomicInt g_audio_master_percent;
+/* Count of SDL_PutAudioStreamData failures. Written by the audio callback,
+ * drained and reported by the main loop (an fprintf on the callback thread
+ * could cause the very underrun it is reporting). */
+static SDL_AtomicInt g_audio_put_failures;
 /* SDL3 binds output to an SDL_AudioStream; keep the stream (and derived device
  * id) so pause/resume/close can address the opened device. */
 static SDL_AudioStream *g_audio_stream;
@@ -518,7 +522,13 @@ static void SDLCALL AudioCallback(void *userdata, SDL_AudioStream *stream,
       for (int i = 0; i < sample_count; i++)
         samples[i] = (int16)(((int32)samples[i] * volume) / 100);
     }
-    SDL_PutAudioStreamData(stream, chunk, bytes);
+    /* SDL_PutAudioStreamData returns false on failure, and a dropped chunk is
+     * silent data loss whose SPC cycles were ALREADY consumed under the lock —
+     * unrecoverable, but the player deserves to know their audio glitched.
+     * Counted atomically and reported from the main loop: this is the audio
+     * callback, where an fprintf could itself cause the underrun it reports. */
+    if (!SDL_PutAudioStreamData(stream, chunk, bytes))
+      SDL_AddAtomicInt(&g_audio_put_failures, 1);
     remaining -= bytes;
   }
   SDL_UnlockMutex(g_audio_mutex);
@@ -1543,8 +1553,20 @@ static void UpdateHostDisplayProperties(void) {
  * Limit (Limit paces the present thread by wall clock instead). */
 static void ApplyRefreshVsync(void) {
   if (!g_renderer) return;
-  SDL_SetRenderVSync(g_renderer,
-                     g_settings.refresh_mode == kRefreshMode_Vsync ? 1 : 0);
+  int want = g_settings.refresh_mode == kRefreshMode_Vsync ? 1 : 0;
+  /* CHECK the result: SDL documents "Not every value is supported by every
+   * driver, so you should check the return value" — the Metal backend, for
+   * one, rejects everything but 0/1 outright. Vsync also defaults to DISABLED,
+   * so a silently failed enable leaves tearing plus a free-running loop while
+   * the menu still advertises "Vsync NHz". */
+  if (!SDL_SetRenderVSync(g_renderer, want))
+    fprintf(stderr, "[display] SDL_SetRenderVSync(%d) rejected: %s\n", want,
+            SDL_GetError());
+  /* Publish what the renderer ACTUALLY does, read back rather than assumed, so
+   * the settings row can label itself honestly. */
+  int actual = 0;
+  Settings_SetHostVsyncActive(SDL_GetRenderVSync(g_renderer, &actual) &&
+                              actual != 0);
 }
 
 /* Minimum nanoseconds between presents; 0 means no limit. Read by
@@ -2510,6 +2532,20 @@ static void RunOuterIterationHousekeeping(void) {
    * optimization, not the source of truth: a compositor can change the
    * effective refresh without emitting one (gamescope does so deliberately). */
   PollHostDisplayProperties();
+
+  /* Surface audio-chunk drops the callback counted (R12). Reported here, off
+   * the audio thread, and coalesced so a sustained problem cannot spam. */
+  {
+    int dropped = SDL_GetAtomicInt(&g_audio_put_failures);
+    if (dropped) {
+      SDL_AddAtomicInt(&g_audio_put_failures, -dropped);
+      static int total;
+      total += dropped;
+      fprintf(stderr, "[audio] %d chunk(s) rejected by SDL_PutAudioStreamData "
+                      "(%d total this session) — audio glitched\n",
+              dropped, total);
+    }
+  }
 
   /* Complete the SPC engine's resident uploader once it enters the $CC-wait,
    * for the case where the CPU's HLEd $9A56 ran before the engine got there

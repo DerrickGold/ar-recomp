@@ -2565,12 +2565,21 @@ static void DrawMenu(const MenuLayout *layout) {
     }
     /* Vsync locks to the display, so name the display's actual refresh rate
      * rather than the bare word "Vsync". Purely display-side (the saved value
-     * stays the plain enum label). Unknown Hz falls back to "Vsync". */
+     * stays the plain enum label). Unknown Hz falls back to "Vsync".
+     *
+     * Labelled from what the renderer ACTUALLY reports, not from the requested
+     * mode: SDL_SetRenderVSync can be rejected by a backend (Metal accepts only
+     * 0/1) and vsync defaults to disabled, so claiming "Vsync 60Hz" while the
+     * renderer is tearing would be a lie the player cannot debug. */
     if (desc->field == &g_settings.refresh_mode &&
         g_settings.refresh_mode == kRefreshMode_Vsync) {
-      int hz = Settings_HostRefreshHz();
-      if (hz > 0)
-        snprintf(value, sizeof(value), "Vsync %dHz", hz);
+      if (!Settings_HostVsyncActive()) {
+        snprintf(value, sizeof(value), "Vsync (unavailable)");
+      } else {
+        int hz = Settings_HostRefreshHz();
+        if (hz > 0)
+          snprintf(value, sizeof(value), "Vsync %dHz", hz);
+      }
     }
     int shown_value_chars = CappedTextLength(value, value_chars);
     int row_value_left = value_right - shown_value_chars * kGlyphSize;

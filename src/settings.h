@@ -566,6 +566,11 @@ int Settings_AudioFrequencyHz(void);
 void Settings_SetHostRefreshHz(int hz);
 int Settings_HostRefreshHz(void);
 
+/* Whether vsync is actually active on the renderer (read back from SDL, not
+ * merely requested — SDL_SetRenderVSync can be rejected by a backend). */
+void Settings_SetHostVsyncActive(bool active);
+bool Settings_HostVsyncActive(void);
+
 /* Backing pixels per window point for the window's current display
  * (SDL_GetWindowPixelDensity), pushed from main.c. */
 void Settings_SetHostPixelDensity(float density);
