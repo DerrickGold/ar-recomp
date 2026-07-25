@@ -628,17 +628,36 @@ static void RtlDrawPpuFrame(void) {
  * FrameSlot is still the D6 boundary — present.c reads only the slot
  * FrameSlot_Capture produces, never live g_ppu/g_settings. */
 static uint64_t FrameLimitIntervalNs(void);  /* defined with the display code */
+static bool RunningUnderGamescope(void);     /* ditto */
 
-/* Sleep out any time left in `interval` since the previous present, then
- * stamp. interval 0 = no pacing. */
-static void PresentThrottleInterval(uint64_t *last_present_ns,
-                                    uint64_t interval) {
+/* Pace to `interval` by advancing an absolute DEADLINE, not by stamping "now"
+ * after each sleep. SDL_DelayNS "waits at least the specified time, but
+ * possibly longer due to OS scheduling", so re-basing on the post-sleep clock
+ * folded every oversleep into the next period and the achieved rate drifted
+ * one-directionally below the target. Carrying the deadline lets a late present
+ * be absorbed by a shorter following sleep, which is what makes the average
+ * come out at the requested rate.
+ *
+ * `*deadline_ns` is the time the NEXT present may occur. Resynchronize instead
+ * of sprinting when we fall more than two intervals behind (a hitch, a paused
+ * stretch, a settings change, or the interval itself changing) — otherwise the
+ * throttle would issue a burst of unthrottled presents to "catch up", which is
+ * exactly the wrong response. interval 0 = no pacing. */
+static void PresentThrottleInterval(uint64_t *deadline_ns, uint64_t interval) {
   uint64_t now = SDL_GetTicksNS();
-  if (interval && *last_present_ns && now - *last_present_ns < interval) {
-    SDL_DelayNS(interval - (now - *last_present_ns));
+  if (!interval) { *deadline_ns = now; return; }
+  if (*deadline_ns == 0 || now > *deadline_ns + 2 * interval) {
+    *deadline_ns = now + interval;   /* (re)synchronize */
+    return;
+  }
+  if (now < *deadline_ns) {
+    SDL_DelayNS(*deadline_ns - now);
     now = SDL_GetTicksNS();
   }
-  *last_present_ns = now;
+  *deadline_ns += interval;
+  /* Never leave the deadline in the past by more than one interval, or the
+   * next call would compute a zero sleep and free-run. */
+  if (*deadline_ns < now) *deadline_ns = now + interval;
 }
 
 /* M6/§3.1: the emulated NTSC tick duration. 262 scanlines * 1364 master-clock
@@ -658,6 +677,11 @@ static const uint64_t kFrameNs = 16639267;  /* floor(1e9 / 60.0988) */
  * R2's Unlimited soft-cap) that still bounds the loop when the platform
  * skips the vsync block (occluded window). */
 static uint64_t UiPresentIntervalNs(void) {
+  /* Under gamescope the reported refresh may be a phantom (see
+   * RunningUnderGamescope), so pacing host UI to it would throttle the menu to
+   * a rate the panel is not running at. The compositor paces us instead; keep
+   * only a generous anti-spin floor. */
+  if (RunningUnderGamescope()) return kFrameNs / 2;
   int hz = Settings_HostRefreshHz();
   if (hz <= 0) hz = 60;
   uint64_t interval = 1000000000ull / (uint64_t)hz;
@@ -724,11 +748,12 @@ static void SubmitFrameToPresent(void) {
    * (UiPresentIntervalNs — it animates), a plain pause at the idle
    * keep-alive rate (PausedIdleIntervalNs — static frame, input polling
    * only). Emulation is not ticking in either, so no game pacing is
-   * bypassed. The shared stamp still advances so closing the menu
-   * re-enters Limit pacing cleanly instead of measuring from a pre-menu
-   * present. */
-  static uint64_t last_present_ns;
-  PresentThrottleInterval(&last_present_ns,
+   * bypassed. The deadline is shared across the three modes and resynchronizes
+   * whenever it falls far behind, so switching mode (opening the menu, pausing,
+   * changing the limit) starts pacing cleanly rather than from a stale
+   * pre-switch timestamp. */
+  static uint64_t present_deadline_ns;
+  PresentThrottleInterval(&present_deadline_ns,
                           SettingsOverlay_IsOpen() ? UiPresentIntervalNs()
                           : g_paused               ? PausedIdleIntervalNs()
                                                    : FrameLimitIntervalNs());
@@ -1437,6 +1462,30 @@ static void ApplyWindowMode(void) {
 /* Publish the window's current display refresh rate so the Refresh rate row
  * can show "Vsync NHz" instead of a bare "Vsync". Re-query whenever the window
  * changes display or the display's mode changes. */
+/* True under gamescope (Steam Deck's compositor, and desktop Steam's
+ * game-mode nesting). Cached: the environment cannot change mid-process.
+ *
+ * Why we must know: gamescope OWNS frame pacing and deliberately lies about
+ * the mode. Its maintainer, on SDL#14674: "Gamescope intentionally does not
+ * expose a mode change when the refresh rate/fps slider changes — because most
+ * games mishandle a mode switch, either breaking or hanging or crashing." The
+ * consequence reported in that issue: "on OLED, after setting it to 60Hz, it
+ * still reports to SDL that it's a 90Hz display." gamescope also has its own
+ * --framerate-limit, applied as a divisor of the refresh rate. So on Deck the
+ * reported refresh is not ground truth and an in-app sleep limiter stacks on
+ * top of the compositor's — two limiters beating against each other. */
+static bool RunningUnderGamescope(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *gs = getenv("GAMESCOPE_WAYLAND_DISPLAY");
+    cached = (gs && gs[0]) ? 1 : 0;
+    if (cached)
+      fprintf(stderr, "[display] gamescope detected — deferring frame pacing "
+                      "to the compositor (its refresh report is advisory)\n");
+  }
+  return cached == 1;
+}
+
 static void UpdateHostRefreshHz(void) {
   if (!g_window) {
     Settings_SetHostRefreshHz(0);
@@ -1446,6 +1495,19 @@ static void UpdateHostRefreshHz(void) {
   const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display);
   if (!mode) mode = SDL_GetDesktopDisplayMode(display);
   Settings_SetHostRefreshHz(mode ? (int)(mode->refresh_rate + 0.5f) : 0);
+}
+
+/* Re-read the display mode periodically, treating the mode-changed EVENT as an
+ * optimization rather than the source of truth. Required because a compositor
+ * may change the effective refresh without ever emitting an event (gamescope
+ * suppresses them by design — see RunningUnderGamescope), and cheap: one
+ * SDL_GetCurrentDisplayMode per second off the main loop. */
+static void PollHostDisplayProperties(void) {
+  static uint64_t next_poll_ns;
+  uint64_t now = SDL_GetTicksNS();
+  if (now < next_poll_ns) return;
+  next_poll_ns = now + 1000000000ull;   /* ~1 Hz */
+  UpdateHostRefreshHz();
 }
 
 /* Backing pixels per window point for the window's CURRENT display. Pushed
@@ -1488,8 +1550,15 @@ static uint64_t FrameLimitIntervalNs(void) {
   }
   /* R2: soft-cap Unlimited to ~2x the display refresh so duplicate/idle
    * presents don't spin at ~250fps. When the host refresh is unknown
-   * (e.g. headless), stay truly unlimited (0). */
-  if (g_settings.refresh_mode == kRefreshMode_Unlimited) {
+   * (e.g. headless), stay truly unlimited (0).
+   *
+   * Skipped under gamescope: the cap is derived from a refresh rate the
+   * compositor may be misreporting (a 60Hz Deck OLED still advertises 90Hz),
+   * and gamescope already limits presentation itself — a second, wrongly
+   * calibrated limiter on top only adds beat-frequency judder. An EXPLICIT
+   * Limit above is still honored: that is the user asking for a specific rate. */
+  if (g_settings.refresh_mode == kRefreshMode_Unlimited &&
+      !RunningUnderGamescope()) {
     int hz = Settings_HostRefreshHz();
     if (hz > 0) return 1000000000ull / (uint64_t)(2 * hz);
   }
@@ -2430,6 +2499,11 @@ static void DrawAndPresentFrame(bool headless) {
  * outer iteration regardless of how many ticks the accumulator fired. */
 static void RunOuterIterationHousekeeping(void) {
   extern uint8 g_ram[];
+  /* Re-read the display mode ~1/s. The mode-changed events are an
+   * optimization, not the source of truth: a compositor can change the
+   * effective refresh without emitting one (gamescope does so deliberately). */
+  PollHostDisplayProperties();
+
   /* Complete the SPC engine's resident uploader once it enters the $CC-wait,
    * for the case where the CPU's HLEd $9A56 ran before the engine got there
    * (takes its own APU lock — must be outside the lock above). */
@@ -3157,6 +3231,7 @@ int main(int argc, char **argv) {
         case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
         case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
         case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
+        case SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED:
         case SDL_EVENT_DISPLAY_ADDED:
         case SDL_EVENT_DISPLAY_REMOVED:
           UpdateHostDisplayProperties();
