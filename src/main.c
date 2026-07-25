@@ -65,8 +65,7 @@
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 /* Reverse-domain app identifier: compositors key window grouping and icon
- * lookup off this, and a shipped .desktop file must share its basename. Also
- * the pair SDL_GetPrefPath already uses for the user-data directory. */
+ * lookup off this, and a shipped .desktop file must share its basename. */
 #define AR_APP_IDENTIFIER "dev.quintet-enix.actraiser-recomp"
 #define AR_APP_VERSION "0.1.0-dev"
 /* Not static: present.c (M5, D6) reads these presentation resources
@@ -2925,44 +2924,14 @@ int main(int argc, char **argv) {
   /* Resolve application and game settings before allocating presentation
    * resources. Known config.ini values were staged by ParseConfigFile;
    * settings.ini overrides them, and real environment variables win last.
-   * P9: the default load path must be the SAME pref-dir location every
-   * Settings_Save site writes, or saved settings are never read back. Safe
-   * pre-SDL_Init: SDL_GetPrefPath needs no subsystem (settings_test calls
-   * UserDataDir with SDL never initialized). AR_SETTINGS_PATH still wins so
-   * replay fixtures (tools/sim3d_demo.py) keep their pinned settings. */
+   * The default load path is the SAME portable-relative location every
+   * Settings_Save site writes. AR_SETTINGS_PATH still wins so replay fixtures
+   * (tools/sim3d_demo.py) can keep their pinned settings. */
   char settings_file[1024];
   const char *settings_path = getenv("AR_SETTINGS_PATH");
-  if (!settings_path || !settings_path[0]) {
+  if (!settings_path || !settings_path[0])
     settings_path = UserDataFile(settings_file, sizeof settings_file,
                                  "settings.ini");
-    /* One-time migration: pre-P9 builds read/wrote cwd-relative
-     * settings.ini. If the pref-dir file does not exist yet but a cwd one
-     * does (and the two are different paths — the cwd fallback makes them
-     * equal when SDL_GetPrefPath fails), adopt the old file so an upgrade
-     * does not silently reset every saved preference. Copy, don't move:
-     * a downgrade to a pre-P9 build keeps working. */
-    if (strcmp(settings_path, "settings.ini") != 0) {
-      FILE *dst_probe = fopen(settings_path, "rb");
-      if (dst_probe) {
-        fclose(dst_probe);
-      } else {
-        FILE *src = fopen("settings.ini", "rb");
-        if (src) {
-          FILE *dst = fopen(settings_path, "wb");
-          if (dst) {
-            char buf[4096]; size_t n;
-            while ((n = fread(buf, 1, sizeof buf, src)) > 0)
-              if (fwrite(buf, 1, n, dst) != n) break;
-            fclose(dst);
-            fprintf(stderr,
-                    "[settings] migrated cwd settings.ini -> %s\n",
-                    settings_path);
-          }
-          fclose(src);
-        }
-      }
-    }
-  }
   Settings_InitWithFile(settings_path);
   g_active_audio_frequency = Settings_AudioFrequencyHz();
   g_active_audio_samples = g_settings.audio_samples;
@@ -3393,10 +3362,8 @@ int main(int argc, char **argv) {
   }
 
   /* Load persisted battery save (overrides the fresh-cart fill if present).
-   * P9: settings.ini and saves/ live under the user-writable pref dir
-   * (SDL_GetPrefPath) so the packaged bundle's cwd (utils/, clobbered on
-   * rebuild) is not written to. A NULL pref path falls back to cwd-relative,
-   * so in-tree dev runs are unchanged. */
+   * Portable builds use saves/ beside the executable after the bundle anchor;
+   * developer runs use saves/ under their launch directory. */
   char saves_dir[1024], save_srm[1024], save_ini[1024];
   UserDataFile(saves_dir, sizeof saves_dir, "saves");
   mkdir(saves_dir, 0755);
