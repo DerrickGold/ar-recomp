@@ -10,8 +10,10 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <io.h>       /* _get_osfhandle/_fileno: WriteAtomic durability */
 #else
-#include <unistd.h>   /* fsync/fileno: WriteAtomic durability */
+#include <fcntl.h>    /* open: directory fsync after rename */
+#include <unistd.h>   /* fsync/fileno/close: WriteAtomic durability */
 #endif
 
 const SaveFieldDesc g_save_region_fields[kActRaiserSaveRegionCount] = {
@@ -371,7 +373,45 @@ bool Save_LoadFile(SaveFileFormat format, const char *path,
 typedef bool (*WriteBodyFn)(FILE *file, const void *context,
                             SaveError *error);
 
-static bool ReplaceFile(const char *temporary, const char *path) {
+/* Flush this file's data blocks to stable storage. Portable half of the
+ * atomic-write durability recipe (see WriteAtomic). */
+static bool FlushFileData(FILE *file) {
+#ifdef _WIN32
+  HANDLE h = (HANDLE)_get_osfhandle(_fileno(file));
+  if (h == INVALID_HANDLE_VALUE) return false;
+  return FlushFileBuffers(h) != 0;
+#else
+  return fsync(fileno(file)) == 0;
+#endif
+}
+
+/* fsync the directory holding `path` so the rename that published the file is
+ * itself durable (POSIX fsync(2) explicitly does not cover the containing
+ * directory entry). No-op on Windows, where directories are not openable as
+ * files and MoveFileEx's metadata write-through covers the entry. */
+static void SyncContainingDirectory(const char *path) {
+#ifndef _WIN32
+  char dir[1024];
+  snprintf(dir, sizeof dir, "%s", path);
+  char *slash = strrchr(dir, '/');
+  if (slash) *slash = '\0';
+  else snprintf(dir, sizeof dir, ".");
+  int fd = open(dir[0] ? dir : "/", O_RDONLY);
+  if (fd < 0) return;
+  (void)fsync(fd);
+  close(fd);
+#else
+  (void)path;
+#endif
+}
+
+/* Named SaveReplaceFileAtomic, not ReplaceFile: <windows.h> (winbase.h)
+ * defines ReplaceFile as a UNICODE-selected alias for ReplaceFileW/A, so a
+ * bare `static bool ReplaceFile(...)` here is macro-rewritten and collides
+ * with the Win32 prototype — the Windows build would not compile. Same class
+ * as the CopyFile->CopyFileA collision fixed earlier, and the reason
+ * settings.c spells its twin Settings_ReplaceFile. */
+static bool SaveReplaceFileAtomic(const char *temporary, const char *path) {
 #ifdef _WIN32
   return MoveFileExA(temporary, path,
                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
@@ -397,19 +437,28 @@ static bool WriteAtomic(const char *path, WriteBodyFn body,
   bool success = body(file, context, error);
   if (fflush(file) != 0 || ferror(file))
     success = Fail(error, "error flushing %s", temporary);
-#ifndef _WIN32
-  /* Durability, not just atomicity: rename() alone leaves the data blocks
-   * in the write-back cache — a power cut after a battery-SRAM flush could
-   * replace the old save with an EMPTY renamed file on filesystems without
-   * ext4-style rename heuristics. fsync before rename; the Windows branch
-   * already write-throughs (MOVEFILE_WRITE_THROUGH). */
-  if (success && fsync(fileno(file)) != 0)
+  /* Durability, not just atomicity: the rename alone leaves the data blocks
+   * in the write-back cache, so a power cut just after a battery-SRAM flush
+   * could replace a good save with an EMPTY renamed file. Flush the file's
+   * own blocks before the rename on BOTH platforms:
+   *   - POSIX fsync(2): "Calling fsync() does not necessarily ensure that the
+   *     entry in the directory containing the file has also reached disk. For
+   *     that an explicit fsync() on a file descriptor for the directory is
+   *     also needed." -> SyncContainingDirectory below, after the rename.
+   *   - Windows: MOVEFILE_WRITE_THROUGH's documented flush guarantee is worded
+   *     for the copy-and-delete (cross-volume) case; our temp file is a
+   *     SAME-directory rename, so do not rely on it for the data blocks —
+   *     FlushFileBuffers the handle explicitly. */
+  if (success && !FlushFileData(file))
     success = Fail(error, "error syncing %s: %s", temporary, strerror(errno));
-#endif
   if (fclose(file) != 0)
     success = Fail(error, "error closing %s", temporary);
-  if (success && !ReplaceFile(temporary, path))
+  if (success && !SaveReplaceFileAtomic(temporary, path))
     success = Fail(error, "cannot replace %s: %s", path, strerror(errno));
+  /* Make the directory entry itself durable, so the rename cannot be lost
+   * while the (already-synced) file contents survive. Best-effort: a failure
+   * here does not invalidate a save that is otherwise written and renamed. */
+  if (success) SyncContainingDirectory(path);
   if (!success) remove(temporary);
   free(temporary);
   return success;

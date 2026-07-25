@@ -160,8 +160,14 @@ bool InputMap_DecodeEvent(const SDL_Event *event, InputClass klass,
 SettingChangeResult InputMap_ApplyBinding(const SettingDesc *desc,
                                           uint32 binding);
 
-/* Human-readable, and also the exact text written to settings.ini. */
+/* The exact text written to settings.ini. Keys persist as "Key #<scancode>"
+ * (plus a "(Name)" hint the reader ignores) because SDL scancode NAMES are
+ * documented as platform-unstable and would silently reset a binding when a
+ * config moves between platforms. */
 int InputMap_FormatBinding(char *buffer, int buffer_size, uint32 binding);
+/* Pretty form for the settings menu — a key reads as "Key Return", without
+ * the numeric storage spelling. */
+int InputMap_DescribeBinding(char *buffer, int buffer_size, uint32 binding);
 bool InputMap_ParseBinding(const char *text, uint32 *binding);
 
 /* Connected-pad enumeration for the "Gamepad" row. Slot 0 is "first

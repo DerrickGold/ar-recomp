@@ -2538,6 +2538,11 @@ static void DrawMenu(const MenuLayout *layout) {
                (SDL_GetTicks() / 300) & 1 ? "PRESS..." : "");
     } else if (selected && s_editing) {
       snprintf(value, sizeof(value), "%s", s_edit_buffer);
+    } else if (desc->type == kSettingType_Binding) {
+      /* Bindings persist as "Key #40 (Return)" (scancode NAMES are not stable
+       * across platforms), but the menu shows the readable "Key Return". */
+      InputMap_DescribeBinding(value, sizeof(value),
+                               *(const uint32 *)desc->field);
     } else {
       Settings_FormatValue(desc, value, sizeof(value));
     }

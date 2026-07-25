@@ -303,14 +303,28 @@ static const char *PadAxisDirectionName(int axis, bool negative) {
 }
 
 
+/* Persisted (settings.ini) form. For keys the NUMBER is authoritative and the
+ * name is only a human hint: SDL documents scancode names as "by design not
+ * stable across platforms" and "unsuitable for creating a stable
+ * cross-platform two-way mapping" — SDL_SCANCODE_LGUI prints "Left GUI" on
+ * Linux but "Left Windows" on Windows, and RETURN/RETURN2 are BOTH "Return".
+ * A settings.ini carried between platforms (Steam Cloud, copied prefs) used to
+ * fail SDL_GetScancodeFromName and silently reset the binding to its default;
+ * our own Start default is SDL_SCANCODE_RETURN, i.e. the ambiguous one.
+ * Written as "Key 40 Return": a leading DECIMAL scancode, then the name as a
+ * readability tail the reader ignores. (Not "#40" — StripInlineComment treats
+ * a space-preceded '#' or ';' as the start of an ini comment, which would
+ * truncate the value to "Key".) The legacy name-only form still parses.
+ * InputMap_DescribeBinding is the pretty, name-only form for the MENU. */
 int InputMap_FormatBinding(char *buffer, int buffer_size, uint32 binding) {
   int kind = INPUT_BIND_KIND(binding);
   int code = INPUT_BIND_CODE(binding);
   switch (kind) {
     case kInputBind_Key: {
       const char *name = SDL_GetScancodeName((SDL_Scancode)code);
-      if (!name || !name[0]) break;
-      return snprintf(buffer, buffer_size, "Key %s", name);
+      if (name && name[0])
+        return snprintf(buffer, buffer_size, "Key %d %s", code, name);
+      return snprintf(buffer, buffer_size, "Key %d", code);
     }
     case kInputBind_PadButton: {
       const char *name = code >= 0 && code < SDL_GAMEPAD_BUTTON_COUNT
@@ -331,6 +345,20 @@ int InputMap_FormatBinding(char *buffer, int buffer_size, uint32 binding) {
   return snprintf(buffer, buffer_size, "Unbound");
 }
 
+/* Menu-facing form: identical to the persisted one EXCEPT that a key reads as
+ * its plain name ("Return"), not the "#40 (Return)" storage spelling. Only
+ * the settings-overlay display uses this; settings.ini always gets the
+ * numeric form from InputMap_FormatBinding. */
+int InputMap_DescribeBinding(char *buffer, int buffer_size, uint32 binding) {
+  if (INPUT_BIND_KIND(binding) == kInputBind_Key) {
+    int code = INPUT_BIND_CODE(binding);
+    const char *name = SDL_GetScancodeName((SDL_Scancode)code);
+    if (name && name[0]) return snprintf(buffer, buffer_size, "Key %s", name);
+    return snprintf(buffer, buffer_size, "Key #%d", code);
+  }
+  return InputMap_FormatBinding(buffer, buffer_size, binding);
+}
+
 static bool EqualsIgnoreCase(const char *a, const char *b) {
   for (; *a && *b; a++, b++) {
     char ca = *a >= 'A' && *a <= 'Z' ? (char)(*a + 32) : *a;
@@ -349,9 +377,28 @@ bool InputMap_ParseBinding(const char *text, uint32 *binding) {
     return true;
   }
   if (!strncmp(text, "Key ", 4)) {
-    SDL_Scancode code = SDL_GetScancodeFromName(text + 4);
-    if (code == SDL_SCANCODE_UNKNOWN) return false;
-    *binding = INPUT_BIND_MAKE(kInputBind_Key, code, false);
+    const char *rest_key = text + 4;
+    while (*rest_key == ' ') rest_key++;
+    /* Name FIRST, number second. The whole remainder is offered to SDL as a
+     * scancode name, which handles both the legacy name-only form ("Key Z")
+     * and the names that are themselves digits ("Key 1" is SDL_SCANCODE_1,
+     * NOT scancode number 1). Only when the remainder is not a valid name —
+     * which is the case for our canonical "29 Z" (number + tail) and for a
+     * bare "29" — does the leading decimal scancode win. That makes the
+     * number authoritative exactly where it needs to be (cross-platform
+     * configs, where the NAME may not resolve) without breaking the digit
+     * names. */
+    SDL_Scancode named = SDL_GetScancodeFromName(rest_key);
+    if (named != SDL_SCANCODE_UNKNOWN) {
+      *binding = INPUT_BIND_MAKE(kInputBind_Key, named, false);
+      return true;
+    }
+    char *end = NULL;
+    long value = strtol(rest_key, &end, 10);
+    if (end == rest_key) return false;
+    if (value <= 0 || value >= SDL_SCANCODE_COUNT) return false;
+    if (*end != '\0' && *end != ' ') return false;
+    *binding = INPUT_BIND_MAKE(kInputBind_Key, (int)value, false);
     return true;
   }
   if (strncmp(text, "Pad ", 4)) return false;

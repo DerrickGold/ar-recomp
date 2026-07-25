@@ -745,7 +745,32 @@ static void TestInputBindings(void) {
                         false));
 
   char text[64];
+  /* R7: keys persist as "Key <scancode> <name>" — the NUMBER is authoritative
+   * because SDL scancode names are documented as platform-unstable ("Left GUI"
+   * vs "Left Windows"; RETURN and RETURN2 both "Return"), which silently reset
+   * bindings when a config moved between platforms. The name is a readability
+   * tail the parser ignores. Not "#40": a space-preceded '#' would be eaten by
+   * the ini inline-comment stripper. */
   Settings_FormatValue(key_b, text, sizeof(text));
+  CHECK(!strcmp(text, "Key 29 Z"));
+  /* The numeric field alone is enough, extra name text is ignored, and the
+   * legacy name-only form still loads. All three land on the same binding. */
+  const uint32 z_binding =
+      INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_Z, false);
+  uint32 parsed = 0;
+  CHECK(InputMap_ParseBinding("Key 29", &parsed) && parsed == z_binding);
+  CHECK(InputMap_ParseBinding("Key 29 Z", &parsed) && parsed == z_binding);
+  CHECK(InputMap_ParseBinding("Key 29 whatever", &parsed) &&
+        parsed == z_binding);
+  CHECK(InputMap_ParseBinding("Key Z", &parsed) && parsed == z_binding);
+  /* A scancode whose NAME is itself a digit must still resolve by name, not be
+   * misread as a scancode number ("1" is SDL_SCANCODE_1 == 30, not scancode 1). */
+  CHECK(InputMap_ParseBinding("Key 1", &parsed) &&
+        parsed == INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_1, false));
+  /* Out-of-range numbers are rejected rather than silently clamped. */
+  CHECK(!InputMap_ParseBinding("Key 99999", &parsed));
+  /* The menu shows the readable form, never the storage spelling. */
+  InputMap_DescribeBinding(text, sizeof(text), z_binding);
   CHECK(!strcmp(text, "Key Z"));
   Settings_FormatValue(pad_b, text, sizeof(text));
   CHECK(!strcmp(text, "Pad A / south"));

@@ -7,8 +7,10 @@
 #include <string.h>
 #ifdef _WIN32
 #include <windows.h>
+#include <io.h>       /* _get_osfhandle/_fileno: Settings_Save durability */
 #else
-#include <unistd.h>   /* fsync/fileno: Settings_Save durability */
+#include <fcntl.h>    /* open: directory fsync after rename */
+#include <unistd.h>   /* fsync/fileno/close: Settings_Save durability */
 #endif
 
 Settings g_settings;
@@ -2494,6 +2496,37 @@ static bool Settings_ReplaceFile(const char *temporary, const char *path) {
 #endif
 }
 
+/* Durability half of the atomic write — see the long note in
+ * save_system.c's WriteAtomic. MOVEFILE_WRITE_THROUGH's documented flush
+ * guarantee is worded for the cross-volume copy+delete case, and POSIX
+ * fsync(2) does not cover the containing directory entry, so both platforms
+ * need an explicit data flush and POSIX needs a directory fsync. */
+static bool Settings_FlushFileData(FILE *file) {
+#ifdef _WIN32
+  HANDLE h = (HANDLE)_get_osfhandle(_fileno(file));
+  if (h == INVALID_HANDLE_VALUE) return false;
+  return FlushFileBuffers(h) != 0;
+#else
+  return fsync(fileno(file)) == 0;
+#endif
+}
+
+static void Settings_SyncContainingDirectory(const char *path) {
+#ifndef _WIN32
+  char dir[1024];
+  snprintf(dir, sizeof dir, "%s", path);
+  char *slash = strrchr(dir, '/');
+  if (slash) *slash = '\0';
+  else snprintf(dir, sizeof dir, ".");
+  int fd = open(dir[0] ? dir : "/", O_RDONLY);
+  if (fd < 0) return;
+  (void)fsync(fd);
+  close(fd);
+#else
+  (void)path;
+#endif
+}
+
 bool Settings_Save(const char *path) {
   if (!path || !path[0]) return false;
   size_t path_length = strlen(path);
@@ -2526,11 +2559,7 @@ bool Settings_Save(const char *path) {
     success = fprintf(file, "%s = %s\n", desc->key, value) >= 0;
   }
   if (fflush(file) != 0 || ferror(file)) success = false;
-#ifndef _WIN32
-  /* Durability before the rename — see save_system.c WriteAtomic. Windows
-   * write-throughs in Settings_ReplaceFile (MOVEFILE_WRITE_THROUGH). */
-  if (success && fsync(fileno(file)) != 0) success = false;
-#endif
+  if (success && !Settings_FlushFileData(file)) success = false;
   if (fclose(file) != 0) success = false;
 
   if (success && !Settings_ReplaceFile(temporary, path)) {
@@ -2538,6 +2567,8 @@ bool Settings_Save(const char *path) {
             strerror(errno));
     success = false;
   }
+  /* Best-effort: make the rename itself durable. */
+  if (success) Settings_SyncContainingDirectory(path);
   if (!success) remove(temporary);
   free(temporary);
   return success;
@@ -2576,8 +2607,8 @@ int Settings_CycleDisplayMode(void) {
   /* A1 (followup doc): route through Settings_SetLong on the descriptor
    * rather than calling Settings_SetDisplayMode directly, so FinishChange
    * fires the runtime change observer (OnRuntimeSettingChanged) — the same
-   * PresentThread_Quiesce()/ApplyDisplayPresentation()/Resume() bracket
-   * every other renderer-mutating settings change gets. DisplayModeChanged
+   * ApplyDisplayPresentation() path every other renderer-mutating settings
+   * change gets. DisplayModeChanged
    * (the descriptor's on_change) still calls Settings_SetDisplayMode to set
    * the ws_* flags; no recursion, since that function writes fields
    * directly rather than going back through Settings_SetLong. */
