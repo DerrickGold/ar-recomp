@@ -46,6 +46,7 @@
 #include "present.h"
 #include "frame_slot.h"
 #include "host_audio.h"
+#include "input_replay.h"
 #include "oracle_trace.h"
 #include "portable_paths.h"
 #include "present_cadence_metrics.h"
@@ -1967,76 +1968,9 @@ static uint32 ComputeGameInputs(bool *stop_running) {
       if (snes_frame_counter >= pulse_frames[i] && snes_frame_counter < pulse_frames[i] + 4)
         inputs |= force_mask;
   }
-  /* Differential-oracle input record/replay, keyed by the GAME's logical
-   * frame counter $7E:0088 (g_ram[0x88], 16-bit) instead of the host frame.
-   * The game-frame advances identically in the recomp and the snes9x oracle
-   * for identical input, so a recording made here replays frame-exact in the
-   * oracle regardless of how many host frames each spent booting (the old
-   * host-frame + offset scheme never aligned because boot timing differs).
-   * SNES 12-bit button layout == libretro JOYPAD id order, so one file drives
-   * both. File format: repeating 8-byte LE records {uint32 gframe; uint32 inputs}.
-   * AR_INPUT_RECORD=path: append one record per host frame.
-   * AR_INPUT_REPLAY=path: override `inputs` with the value recorded for the
-   * current game-frame (last writer wins when a game-frame repeats). */
-  {
-    extern uint8 g_ram[];
-    unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-    static FILE *rec; static int rec_init;
-    static uint32 *rep; static long rep_max = -1; static int rep_init;
-    /* End-of-replay marker: the game-frame of the LAST record (the frame the
-     * user closed the window / pressed ESC on). The recording itself stores
-     * no stop event, so we auto-quit when replay reaches this frame — without
-     * it, replay runs off the end of the recording with empty live input.
-     * rep_started gates the check past the boot frame (gf == 0x5555 fill
-     * before $0088 is initialised inflates the value space). */
-    static long rep_last_gf = -1; static int rep_started = 0;
-    if (!rep_init) { rep_init = 1; const char *p = getenv("AR_INPUT_REPLAY");
-      if (p && p[0]) { FILE *f = fopen(p, "rb");
-        if (f) { fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-          long nrec = n / 8; uint32 *raw = (uint32 *)malloc((size_t)nrec * 8);
-          if (raw && fread(raw, 8, (size_t)nrec, f) == (size_t)nrec) {
-            for (long i = 0; i < nrec; i++) if ((long)raw[i*2] > rep_max) rep_max = (long)raw[i*2];
-            if (nrec > 0) rep_last_gf = (long)raw[(nrec - 1) * 2];
-            if (rep_max >= 0) { rep = (uint32 *)calloc((size_t)rep_max + 1, 4);
-              if (rep) for (long i = 0; i < nrec; i++) rep[raw[i*2]] = raw[i*2+1]; } }
-          free(raw); fclose(f);
-          fprintf(stderr, "[input-replay] %ld records, max gf=%ld last gf=%ld from %s\n",
-                  nrec, rep_max, rep_last_gf, p); } } }
-    if (rep && (long)gf <= rep_max) inputs = rep[gf];
-    /* Auto-stop at the end of the recording. AR_REPLAY_NOSTOP=1 disables
-     * this so replay runs PAST the last recorded game-frame (holding the
-     * last recorded input). Needed to reproduce an in-frame infinite spin:
-     * such a freeze never advances $0088, so it is never recorded — the
-     * recording ends one frame *before* the hang, and the auto-stop would
-     * quit right before the freezing frame executes. */
-    static int nostop = -1;
-    if (nostop < 0) nostop = getenv("AR_REPLAY_NOSTOP") ? 1 : 0;
-    if (rep && rep_last_gf >= 0 && !nostop) {
-      if ((long)gf <= rep_last_gf) rep_started = 1;
-      if (rep_started && (long)gf >= rep_last_gf) {
-        fprintf(stderr, "[input-replay] reached end of recording at gf=%u — stopping\n", gf);
-        *stop_running = false;
-      }
-    }
-    if (rep && nostop && (long)gf > rep_max) inputs = rep_last_gf >= 0 ? rep[rep_last_gf] : 0;
-    if (!rec_init) { rec_init = 1; const char *p = getenv("AR_INPUT_RECORD");
-      if (p && p[0]) { rec = fopen(p, "wb"); fprintf(stderr, "[input-record] -> %s\n", p); } }
-    if (rec) { uint32 v[2] = { (uint32)gf, (uint32)inputs }; fwrite(v, 4, 2, rec); fflush(rec); }
-    /* AR_GFLOG=1: log (host_frame, gf) every N host frames to compare
-     * $0088 advance rate vs the oracle. */
-    if (getenv("AR_GFLOG")) {
-      extern int snes_frame_counter;
-      if ((snes_frame_counter % 100) == 0)
-        fprintf(stderr, "[gflog] host=%d gf=%u\n", snes_frame_counter, gf);
-    }
-    /* Report the first action-region entry game-frame. */
-    { static int seen_act = 0;
-      if (!seen_act && g_ram[0x18] >= 0x01 && g_ram[0x18] <= 0x07) {
-        seen_act = 1;
-        fprintf(stderr, "[act-enter] $18=%02X $19=%02X at game-frame %u\n",
-                g_ram[0x18], g_ram[0x19], gf); } }
-  }
-  return inputs;
+  const InputReplayFrameResult replay_result = InputReplay_Resolve(inputs);
+  if (replay_result.stop_requested) *stop_running = false;
+  return replay_result.inputs;
 }
 
 /* One emulated tick: sample input, run the recompiled game logic, apply
@@ -2367,7 +2301,7 @@ static void RunOuterIterationHousekeeping(void) {
    * from a fixed boot state, so letting the replayed run overwrite save.srm
    * mid-playthrough would change the boot state for the NEXT replay and break
    * the frame alignment (the recording then no longer reaches the same spot). */
-  if (!getenv("AR_INPUT_REPLAY")) {
+  if (!InputReplay_ShouldProtectSaveData()) {
     static bool write_error_reported;
     SaveError error = {{0}};
     if (!SaveSystem_AutoPersistIfChanged(&error)) {
@@ -2958,6 +2892,7 @@ int main(int argc, char **argv) {
   }
 
   OracleTrace_Init();
+  InputReplay_Init();
 
   if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
                       g_settings.audio_master_volume,
@@ -3515,7 +3450,7 @@ int main(int argc, char **argv) {
    * Restart/Exit after one must not turn it into a persistent edit. Skip the
    * flush during replay so a replayed run never mutates the active save (see
    * the auto-persist note above — it would break the next replay's alignment). */
-  if (!getenv("AR_INPUT_REPLAY")) {
+  if (!InputReplay_ShouldProtectSaveData()) {
     SaveError error = {{0}};
     if (!SaveSystem_AutoPersistIfChanged(&error))
       fprintf(stderr, "[saves] shutdown flush failed: %s\n", error.message);
@@ -3529,6 +3464,7 @@ int main(int argc, char **argv) {
    * but the report should land while the run dir is still current. */
   SfxCensus_Report();
 
+  InputReplay_Shutdown();
   OracleTrace_Shutdown();
   HostAudio_Shutdown();
   for (int i = 0; i < g_hd_replacement_count; i++) {
