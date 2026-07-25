@@ -7,6 +7,7 @@
 
 #include "input_map.h"
 #include "settings.h"
+#include "user_data_dir.h"
 
 enum {
   kFontTileBytes = 0x1000,
@@ -1151,8 +1152,11 @@ static void SetStatus(const char *text) {
  * apply step so a held value can be applied live every frame but written once
  * on release. */
 static void PersistChange(SettingChangeResult result) {
+  char settings_file[1024];
   const char *settings_path = getenv("AR_OVERLAY_TEST_SETTINGS_PATH");
-  if (!settings_path || !settings_path[0]) settings_path = "settings.ini";
+  if (!settings_path || !settings_path[0])
+    settings_path = UserDataFile(settings_file, sizeof settings_file,
+                                 "settings.ini");
   if (!Settings_Save(settings_path)) {
     SetStatus("SAVE FAILED");
     fprintf(stderr, "[settings-menu] could not save %s\n", settings_path);

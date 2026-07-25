@@ -2,6 +2,7 @@
 #include "scene3d_math.h"
 #include "settings.h"
 #include "snes/ppu.h"
+#include "user_data_dir.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -614,7 +615,9 @@ void Diorama_FlushSettingsIfDirty(void) {
   if (g_diorama_settings_dirty && !s_diorama_dragging &&
       SDL_GetTicks() - g_diorama_settings_dirty_at > 500) {
     g_diorama_settings_dirty = false;
-    if (!Settings_Save("settings.ini"))
+    char settings_path[1024];
+    UserDataFile(settings_path, sizeof settings_path, "settings.ini");
+    if (!Settings_Save(settings_path))
       fprintf(stderr, "[diorama] failed to persist camera settings\n");
   }
 }

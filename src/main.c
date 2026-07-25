@@ -2618,9 +2618,17 @@ int main(int argc, char **argv) {
   g_widescreen_runtime_allowed = !headless || ws_headless;
   /* Resolve application and game settings before allocating presentation
    * resources. Known config.ini values were staged by ParseConfigFile;
-   * settings.ini overrides them, and real environment variables win last. */
+   * settings.ini overrides them, and real environment variables win last.
+   * P9: the default load path must be the SAME pref-dir location every
+   * Settings_Save site writes, or saved settings are never read back. Safe
+   * pre-SDL_Init: SDL_GetPrefPath needs no subsystem (settings_test calls
+   * UserDataDir with SDL never initialized). AR_SETTINGS_PATH still wins so
+   * replay fixtures (tools/sim3d_demo.py) keep their pinned settings. */
+  char settings_file[1024];
   const char *settings_path = getenv("AR_SETTINGS_PATH");
-  if (!settings_path || !settings_path[0]) settings_path = "settings.ini";
+  if (!settings_path || !settings_path[0])
+    settings_path = UserDataFile(settings_file, sizeof settings_file,
+                                 "settings.ini");
   Settings_InitWithFile(settings_path);
   g_active_audio_frequency = Settings_AudioFrequencyHz();
   g_active_audio_samples = g_settings.audio_samples;

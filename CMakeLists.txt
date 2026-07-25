@@ -302,6 +302,7 @@ if(BUILD_TESTING)
         src/settings.c
         src/settings_overlay.c
         src/input_map.c
+        src/user_data_dir.c
     )
     target_include_directories(actraiser_settings_overlay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
