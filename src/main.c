@@ -657,6 +657,12 @@ static void PresentThrottle(uint64_t *last_present_ns) {
   PresentThrottleInterval(last_present_ns, FrameLimitIntervalNs());
 }
 
+/* M6/§3.1: the emulated NTSC tick duration. 262 scanlines * 1364 master-clock
+ * dots / 21.477272 MHz = 60.0988 fps, NOT 60.00 — using 60.00 causes audible
+ * audio drift over a long session. File-scope: the main-loop accumulator owns
+ * it, and PausedIdleIntervalNs reuses it as the input-poll cadence floor. */
+static const uint64_t kFrameNs = 16639267;  /* floor(1e9 / 60.0988) */
+
 /* Host-UI present pacing: the display's own refresh rate, whatever it is
  * (Settings_HostRefreshHz, captured from the SDL display mode; 60 only as
  * the fallback when the host reports none — headless-with-video, dummy
@@ -673,6 +679,17 @@ static uint64_t UiPresentIntervalNs(void) {
   uint64_t interval = 1000000000ull / (uint64_t)hz;
   return g_settings.refresh_mode == kRefreshMode_Vsync ? interval / 2
                                                        : interval;
+}
+
+/* Plain pause (overlay CLOSED): the frame is static, so presents are only
+ * window keep-alive + input polling — panel-rate re-composites buy nothing.
+ * Pace to the SLOWER of the display and one emulated frame: a >60Hz panel
+ * idles at the game's own tick duration (unpause latency unchanged from the
+ * pre-Phase-0 ~16ms), a <60Hz panel just follows the display. The menu keeps
+ * full UiPresentIntervalNs — it animates (hold-stepping, status fades). */
+static uint64_t PausedIdleIntervalNs(void) {
+  uint64_t ui = UiPresentIntervalNs();
+  return ui > kFrameNs ? ui : kFrameNs;
 }
 
 static int SDLCALL PresentThreadFn(void *userdata) {
@@ -829,19 +846,19 @@ static void SubmitFrameToPresent(void) {
      * Emulation pace is unaffected: the M6 accumulator runs catch-up ticks
      * for wall-clock time spent sleeping here.
      *
-     * The Frame limit governs GAME presentation only. Host UI — the settings
-     * overlay and the paused redraw (same predicate as
-     * RedrawPausedFrameIfNeeded) — paces to the display's own refresh
-     * (UiPresentIntervalNs) so the menu is smooth at the panel's native rate
-     * regardless of the limit; emulation is not ticking then, so no game
-     * pacing is bypassed. The shared stamp still advances so closing the
-     * menu re-enters Limit pacing cleanly instead of measuring from a
-     * pre-menu present. */
+     * The Frame limit governs GAME presentation only. Host UI paces to the
+     * display instead — the settings overlay at full panel rate
+     * (UiPresentIntervalNs — it animates), a plain pause at the idle
+     * keep-alive rate (PausedIdleIntervalNs — static frame, input polling
+     * only). Emulation is not ticking in either, so no game pacing is
+     * bypassed. The shared stamp still advances so closing the menu
+     * re-enters Limit pacing cleanly instead of measuring from a pre-menu
+     * present. */
     static uint64_t last_present_ns;
     PresentThrottleInterval(&last_present_ns,
-                            (g_paused || SettingsOverlay_IsOpen())
-                                ? UiPresentIntervalNs()
-                                : FrameLimitIntervalNs());
+                            SettingsOverlay_IsOpen() ? UiPresentIntervalNs()
+                            : g_paused               ? PausedIdleIntervalNs()
+                                                     : FrameLimitIntervalNs());
     SDL_RenderPresent(g_renderer);
     if (perf_on) {
       uint32 now = SDL_GetTicks();
@@ -2682,9 +2699,37 @@ int main(int argc, char **argv) {
    * replay fixtures (tools/sim3d_demo.py) keep their pinned settings. */
   char settings_file[1024];
   const char *settings_path = getenv("AR_SETTINGS_PATH");
-  if (!settings_path || !settings_path[0])
+  if (!settings_path || !settings_path[0]) {
     settings_path = UserDataFile(settings_file, sizeof settings_file,
                                  "settings.ini");
+    /* One-time migration: pre-P9 builds read/wrote cwd-relative
+     * settings.ini. If the pref-dir file does not exist yet but a cwd one
+     * does (and the two are different paths — the cwd fallback makes them
+     * equal when SDL_GetPrefPath fails), adopt the old file so an upgrade
+     * does not silently reset every saved preference. Copy, don't move:
+     * a downgrade to a pre-P9 build keeps working. */
+    if (strcmp(settings_path, "settings.ini") != 0) {
+      FILE *dst_probe = fopen(settings_path, "rb");
+      if (dst_probe) {
+        fclose(dst_probe);
+      } else {
+        FILE *src = fopen("settings.ini", "rb");
+        if (src) {
+          FILE *dst = fopen(settings_path, "wb");
+          if (dst) {
+            char buf[4096]; size_t n;
+            while ((n = fread(buf, 1, sizeof buf, src)) > 0)
+              if (fwrite(buf, 1, n, dst) != n) break;
+            fclose(dst);
+            fprintf(stderr,
+                    "[settings] migrated cwd settings.ini -> %s\n",
+                    settings_path);
+          }
+          fclose(src);
+        }
+      }
+    }
+  }
   Settings_InitWithFile(settings_path);
   g_active_audio_frequency = Settings_AudioFrequencyHz();
   g_active_audio_samples = g_settings.audio_samples;
@@ -3147,10 +3192,8 @@ int main(int argc, char **argv) {
   bool running = true;
   uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
 
-  /* M6/§3.1,§3.3: fixed-timestep accumulator, non-headless only. NTSC rate:
-   * 262 scanlines * 1364 master-clock dots / 21.477272 MHz = 60.0988 fps, NOT
-   * 60.00 — using 60.00 causes audible audio drift over a long session. */
-  static const uint64_t kFrameNs = 16639267;  /* floor(1e9 / 60.0988) */
+  /* M6/§3.1,§3.3: fixed-timestep accumulator, non-headless only. kFrameNs
+   * (the NTSC tick duration) is file-scope, next to UiPresentIntervalNs. */
   static const int kMaxCatchupFrames = 3;     /* spiral-of-death cap, §3.1 */
   uint64_t accumulator = 0;
   uint64_t last_time_ns = SDL_GetTicksNS();
@@ -3548,8 +3591,20 @@ int main(int argc, char **argv) {
       uint64_t dt = now_ns - last_time_ns;
       last_time_ns = now_ns;
       accumulator += dt;
-      if (accumulator > kFrameNs * (uint64_t)kMaxCatchupFrames)
-        accumulator = kFrameNs * (uint64_t)kMaxCatchupFrames;
+      /* Spiral-of-death cap (§3.1) — with Limit-aware headroom. Phase 0 put
+       * the Refresh=Limit throttle sleep on THIS thread, so at Limit <~30fps
+       * one deliberate present interval (1e9/fps) exceeds 3*kFrameNs and the
+       * fixed cap would discard wall time EVERY iteration, permanently
+       * slowing the game (~58.3Hz at Limit=25; exactly 60.000Hz at 20 — the
+       * audio-drift rate kFrameNs's comment warns about). Allow one limit
+       * interval + one tick so the intentional sleep always banks; genuine
+       * hitches beyond that still clamp. Vsync/Unlimited intervals are far
+       * below the base cap, so behavior there is unchanged. */
+      uint64_t catchup_cap_ns = kFrameNs * (uint64_t)kMaxCatchupFrames;
+      uint64_t limit_headroom_ns = FrameLimitIntervalNs() + kFrameNs;
+      if (limit_headroom_ns > catchup_cap_ns)
+        catchup_cap_ns = limit_headroom_ns;
+      if (accumulator > catchup_cap_ns) accumulator = catchup_cap_ns;
 
       bool produced_frame = false;
       while (accumulator >= kFrameNs) {
