@@ -2607,7 +2607,7 @@ int Settings_CycleDisplayMode(void) {
   /* A1 (followup doc): route through Settings_SetLong on the descriptor
    * rather than calling Settings_SetDisplayMode directly, so FinishChange
    * fires the runtime change observer (OnRuntimeSettingChanged) — the same
-   * ApplyDisplayPresentation() path every other renderer-mutating settings
+   * RecomputeLogicalPresentation() path every other renderer-mutating settings
    * change gets. DisplayModeChanged
    * (the descriptor's on_change) still calls Settings_SetDisplayMode to set
    * the ws_* flags; no recursion, since that function writes fields

@@ -1510,7 +1510,49 @@ static int WindowScaleInPoints(int scale) {
   return points > 0 ? points : 1;
 }
 
-static void ApplyDisplayPresentation(void) {
+/* Re-derive ONLY the renderer's logical presentation — the game's render
+ * resolution and aspect, letterboxed into whatever window currently exists.
+ * Never touches the window size.
+ *
+ * This is the half that must run on every resize: the user owns the window,
+ * the settings own the picture inside it. Previously the resize handler called
+ * ApplyDisplayPresentation, whose tail is SDL_SetWindowSize, so every
+ * drag-resize was snapped straight back to window_scale (observable on macOS)
+ * and could oscillate on a fractional-scale Wayland compositor, where SDL
+ * warns "the new dimensions may not match the exact size requested" and the
+ * request "can be denied by the windowing system".
+ *
+ * Unlike the old code this ALSO applies in the non-widescreen case. When
+ * g_ws_active is false the previous version applied no logical presentation at
+ * all, which is what made a 4:3 window stretch instead of letterbox — the
+ * aspect setting was silently not respected once the window stopped matching
+ * it. LETTERBOX reproduces SDL2 SDL_RenderSetLogicalSize's behavior. */
+static void RecomputeLogicalPresentation(void) {
+  if (!g_window || !g_renderer) return;
+  int vis_w = Settings_VisibleWidth();
+  if (g_settings.ignore_aspect_ratio) {
+    /* "Stretch to window" is an explicit user choice: disable logical
+     * presentation entirely so the picture fills whatever shape the window is. */
+    SDL_SetRenderLogicalPresentation(g_renderer, vis_w, g_snes_height,
+                                     SDL_LOGICAL_PRESENTATION_STRETCH);
+    return;
+  }
+  /* The 7:6 CRT PAR is encoded in the logical SIZE (w*7 : h*6) so SDL's
+   * letterbox math preserves the stretched aspect at any window size. */
+  if (g_active_pixel_aspect == kPixelAspect_Crt43)
+    SDL_SetRenderLogicalPresentation(g_renderer, vis_w * 7, g_snes_height * 6,
+                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
+  else
+    SDL_SetRenderLogicalPresentation(g_renderer, vis_w, g_snes_height,
+                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
+}
+
+/* Resize the WINDOW to the configured scale/aspect. Only for explicit user
+ * intent — a window_scale or display_mode/aspect change, or boot. Deliberately
+ * NOT called from the resize event, so a hand-resized window is never fought.
+ * Always re-derives the logical presentation too, since the picture must track
+ * the new geometry. */
+static void ApplyWindowScale(void) {
   if (!g_window || !g_renderer) return;
   int vis_w = Settings_VisibleWidth();
   int scale = g_settings.window_scale ? g_settings.window_scale : 3;
@@ -1527,18 +1569,11 @@ static void ApplyDisplayPresentation(void) {
             g_active_aspect_y;
   }
 
-  /* Logical size encodes the pixel stretch so SDL letterboxes correctly if the
-   * user resizes the window themselves. Mirrors the boot-time setup. LETTERBOX
-   * reproduces SDL2 SDL_RenderSetLogicalSize's aspect-preserving behavior. */
-  if (g_ws_active && !g_settings.ignore_aspect_ratio) {
-    if (g_active_pixel_aspect == kPixelAspect_Crt43)
-      SDL_SetRenderLogicalPresentation(g_renderer, vis_w * 7, g_snes_height * 6,
-                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
-    else
-      SDL_SetRenderLogicalPresentation(g_renderer, vis_w, g_snes_height,
-                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
-  }
-  SDL_SetWindowSize(g_window, win_w, win_h);
+  RecomputeLogicalPresentation();
+  /* Only in windowed mode: resizing a fullscreen window fights the display
+   * mode, and on Wayland the request is simply denied. */
+  if (g_settings.window_mode == kWindowMode_Windowed)
+    SDL_SetWindowSize(g_window, win_w, win_h);
 }
 
 static void ResolveVideoGeometry(bool runtime_change) {
@@ -1579,7 +1614,9 @@ static void ResolveVideoGeometry(bool runtime_change) {
     memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
     memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
     ActRaiser_RebindPpuOutputSurfaces();
-    ApplyDisplayPresentation();
+    /* The render geometry itself changed, so the window is re-sized to match
+     * the new aspect — this IS the explicit-intent path (a settings change). */
+    ApplyWindowScale();
     g_paused_redraw_pending = true;
   }
 
@@ -1600,7 +1637,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   (void)result;
   /* Several branches below mutate the renderer/window wholesale
    * (SDL_SetWindowFullscreen, ResolveVideoGeometry -> RebindPpuOutputSurfaces
-   * + ApplyDisplayPresentation's SDL_SetRenderLogicalPresentation/
+   * + ApplyWindowScale's SDL_SetRenderLogicalPresentation/
    * SDL_SetWindowSize — §2.9(a)). This used to be bracketed by a
    * present-thread quiesce; with rendering main-thread-only (#18/P13) the
    * dispatch is ordinary straight-line code — the next present cannot
@@ -1642,12 +1679,18 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   }
   /* HUD scale is a display-category value but must not resize a manually
    * resized window. Only the display profile and geometry policies own the
-   * presentation/window dimensions. */
-  if (desc->field == &g_settings.display_mode ||
-      desc->field == &g_settings.window_scale ||
-      desc->field == &g_settings.ignore_aspect_ratio ||
-      desc->category == kSettingCat_Widescreen)
-    ApplyDisplayPresentation();
+   * presentation/window dimensions.
+   *
+   * window_scale is the one row whose whole purpose is to set the window size,
+   * so it gets ApplyWindowScale. The others change what is DRAWN, not how big
+   * the window is: re-derive the logical presentation and leave the user's
+   * window alone (a hand-resized window must survive an aspect change). */
+  if (desc->field == &g_settings.window_scale)
+    ApplyWindowScale();
+  else if (desc->field == &g_settings.display_mode ||
+           desc->field == &g_settings.ignore_aspect_ratio ||
+           desc->category == kSettingCat_Widescreen)
+    RecomputeLogicalPresentation();
   if (desc->category == kSettingCat_Display ||
       desc->category == kSettingCat_Widescreen ||
       Settings_CategoryIsSim3D(desc->category))
@@ -1656,22 +1699,6 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
    * rebuilt the geometry; don't interpolate the next frame against a camera
    * snapshot from before it. */
   InvalidateScrollHistory();
-}
-
-static void ApplyRendererLogicalSize(void) {
-  if (!g_renderer) return;
-  if (g_ws_active && !g_settings.ignore_aspect_ratio) {
-    int vis_w = Settings_VisibleWidth();
-    if (g_active_pixel_aspect == kPixelAspect_Crt43)
-      SDL_SetRenderLogicalPresentation(g_renderer, vis_w * 7, g_snes_height * 6,
-                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
-    else
-      SDL_SetRenderLogicalPresentation(g_renderer, vis_w, g_snes_height,
-                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
-  } else {
-    SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
-                                     SDL_LOGICAL_PRESENTATION_DISABLED);
-  }
 }
 
 /* GetPresentationViewport moved to present.h/present.c as
@@ -2688,15 +2715,15 @@ int main(int argc, char **argv) {
      * diorama mode inflates the render width to the full kWsExtraMax margin
      * (ResolveVideoGeometry) while the displayed width stays aspect-derived,
      * so g_snes_width here booted the window wider than the configured screen
-     * ratio. Mirrors ApplyDisplayPresentation, which is what fixes it up on
-     * any later runtime aspect change. */
+     * ratio. Mirrors ApplyWindowScale, which is what fixes it up on any
+     * later explicit window_scale/aspect change. */
     /* Clamp the scale to what the desktop can actually hold — the setting
      * allows up to 8x (~2400px wide), which overflows small laptop panels
      * (1366x768) with no recourse: the oversized window's title bar can land
      * off-screen. Usable bounds (excludes docks/taskbars) of the primary
      * display, checked against the WIDEST possible window for this scale
      * (the 16:9-of-height display width); shrink until it fits, floor 1x. */
-    /* Points, not pixels — same conversion ApplyDisplayPresentation does, so
+    /* Points, not pixels — same conversion ApplyWindowScale does, so
      * the boot window and any later re-apply agree on what Nx means. The
      * density is not known until the window exists (SDL_GetWindowPixelDensity
      * needs one), so use the primary display's content scale as the boot-time
@@ -2801,19 +2828,11 @@ int main(int argc, char **argv) {
       ApplyWindowMode();
     UpdateHostDisplayProperties();
 
-    /* Aspect-correct letterboxing via SDL's logical presentation (widescreen
-     * only, so faithful mode keeps the historical stretch-to-window behavior).
-     * 4:3-PAR: logical w:h = (render_w*7):(224*6) encodes the 7:6 pixel
-     * stretch; square: the raw framebuffer dimensions. IgnoreAspectRatio=1
-     * restores plain stretching. LETTERBOX matches SDL2's logical-size look. */
-    if (g_ws_active && !g_settings.ignore_aspect_ratio) {
-      if (g_active_pixel_aspect == kPixelAspect_Crt43)
-        SDL_SetRenderLogicalPresentation(g_renderer, vis_w * 7,
-            g_snes_height * 6, SDL_LOGICAL_PRESENTATION_LETTERBOX);
-      else
-        SDL_SetRenderLogicalPresentation(g_renderer, vis_w,
-            g_snes_height, SDL_LOGICAL_PRESENTATION_LETTERBOX);
-    }
+    /* Aspect-correct letterboxing via SDL's logical presentation — one
+     * implementation shared with the resize/settings paths so boot and runtime
+     * can never disagree (4:3-PAR encodes the 7:6 stretch in the logical size;
+     * ignore_aspect_ratio stretches instead). */
+    RecomputeLogicalPresentation();
 
     g_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
@@ -3143,14 +3162,20 @@ int main(int argc, char **argv) {
           UpdateHostDisplayProperties();
           g_paused_redraw_pending = true;
           break;
-        /* Phase 0 made rendering main-thread-only, so re-deriving the logical
-         * presentation here no longer races the (removed) present thread. The
-         * window is SDL_WINDOW_RESIZABLE; on a real size change re-apply the
-         * aspect-locked logical presentation and request a repaint so
-         * letterboxing tracks the new client size. */
+        /* The window is the USER's: a drag-resize re-derives the picture inside
+         * it and nothing else. RecomputeLogicalPresentation never calls
+         * SDL_SetWindowSize — calling the window-sizing path here (as this did)
+         * snapped every manual resize straight back to window_scale and could
+         * oscillate on a fractional-scale compositor, where SDL notes the
+         * granted size "may not match the exact size requested". The render
+         * resolution and aspect settings are still fully respected: they
+         * letterbox inside whatever size the user chose.
+         *
+         * Phase 0 made rendering main-thread-only, so re-deriving the logical
+         * presentation here no longer races the (removed) present thread. */
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-          ApplyDisplayPresentation();
+          RecomputeLogicalPresentation();
           g_paused_redraw_pending = true;
           break;
         case SDL_EVENT_WINDOW_MINIMIZED:
@@ -3261,12 +3286,10 @@ int main(int argc, char **argv) {
             } else {
               /* A1 (followup doc): Settings_CycleDisplayMode now routes
                * through Settings_SetLong, whose FinishChange fires
-               * OnRuntimeSettingChanged — that observer already quiesces the
-               * present thread, calls ApplyDisplayPresentation(), and sets
-               * g_paused_redraw_pending for kSettingCat_Display. Doing them
-               * again here would re-mutate the renderer outside the
-               * observer's quiesce bracket, reintroducing the race this
-               * fixes. */
+               * OnRuntimeSettingChanged — that observer already re-derives
+               * the logical presentation and sets g_paused_redraw_pending for
+               * kSettingCat_Display. Doing it again here would re-mutate the
+               * renderer redundantly. */
               int m = Settings_CycleDisplayMode();
               fprintf(stderr, "[display] mode %d/%d -> %s\n", m + 1,
                       kDisplayMode_PresetCount, Settings_DisplayModeName(m));
