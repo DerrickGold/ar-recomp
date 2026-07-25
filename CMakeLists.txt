@@ -105,6 +105,7 @@ add_executable(ActRaiserRecomp
     src/diorama_scroll_math.c
     src/frame_slot.c
     src/host_audio.c
+    src/oracle_trace.c
     src/portable_paths.c
     src/runtime_diagnostics.c
     src/user_data_dir.c

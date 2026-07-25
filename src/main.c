@@ -42,11 +42,11 @@
 #include "snes/snes.h"
 #include "cpu_trace.h"
 #include "debug_server.h"
-#include "framedump.h"
 #include "widescreen.h"
 #include "present.h"
 #include "frame_slot.h"
 #include "host_audio.h"
+#include "oracle_trace.h"
 #include "portable_paths.h"
 #include "present_cadence_metrics.h"
 #include "runtime_diagnostics.h"
@@ -713,142 +713,6 @@ static bool RedrawPausedFrameIfNeeded(void) {
   return false;
 }
 
-/* Differential-oracle capture: emit per-frame WRAM changes as JSONL in the
- * exact shape snesref (tools/oracle) emits, so the two traces can be diffed
- * to find the first divergence (frame + WRAM byte). Enabled by AR_WRAM_TRACE
- * (output path); range via AR_TRACE_LO/HI (default full 128KB). */
-static FILE *g_wram_trace;
-static uint8_t g_wram_prev[0x20000];
-static bool g_wram_primed;
-static uint32_t g_wram_lo = 0x00000, g_wram_hi = 0x1ffff;
-
-static void WramTraceCallback(uint32_t frame, const uint8_t *wram) {
-  /* AR_DUMP_ACT=1: each action-stage frame ($18==01), overwrite a full 128KB
-   * WRAM snapshot to saves/recomp_act1.bin. After the walk-off crash the file
-   * holds the LAST pre-crash action frame's object table — for oracle diffing
-   * without needing to know the exact crash frame number. */
-  static int dump_act = -1;
-  if (dump_act == -1) dump_act = getenv("AR_DUMP_ACT") ? 1 : 0;
-  if (dump_act && wram[0x18] == 0x01) {
-    static int first_done;
-    char pth[320];
-    if (!first_done) { first_done = 1;
-      RunDirFile(pth, sizeof pth, "recomp_act1_first.bin");
-      FILE *ff = fopen(pth, "wb");
-      if (ff) { fwrite(wram, 1, 0x20000, ff); fclose(ff);
-        fprintf(stderr, "[dump-act] FIRST action frame %u -> recomp_act1_first.bin\n", frame); } }
-    RunDirFile(pth, sizeof pth, "recomp_act1.bin");
-    FILE *df = fopen(pth, "wb");
-    if (df) { fwrite(wram, 1, 0x20000, df); fclose(df); }
-  }
-  /* AR_DUMP_AT_GF=N: dump full WRAM exactly when game-frame $0088==N, to
-   * saves/recomp_at.bin — for frame-exact recomp-vs-oracle diffing. */
-  static long dump_at_gf = -2;
-  if (dump_at_gf == -2) { const char *e = getenv("AR_DUMP_AT_GF"); dump_at_gf = e ? atol(e) : -1; }
-  if (dump_at_gf >= 0) {
-    unsigned gf = (unsigned)wram[0x88] | ((unsigned)wram[0x89] << 8);
-    if ((long)gf == dump_at_gf) {
-      char pth[320]; RunDirFile(pth, sizeof pth, "recomp_at.bin");
-      FILE *gf_f = fopen(pth, "wb");
-      if (gf_f) { fwrite(wram, 1, 0x20000, gf_f); fclose(gf_f);
-        fprintf(stderr, "[dump-at-gf] gf=%u -> recomp_at.bin\n", gf); } } }
-  /* AR_VRAMDUMP_GF=g1,g2,...: headless FULL snapshot (WRAM+VRAM+CGRAM+OAM) at
-   * each listed game-frame, from a single replay run. This is the recomp-internal
-   * VRAM diff engine for the lair-seal corruption: capture a clean pre-seal frame
-   * and the corrupt frame in ONE run, then diff the .vram.bin files — no
-   * scene-divergence or scratch-noise confound (unlike the snes9x oracle).
-   * Writes saves/snapshots/vd_gf<N>.{wram,vram,cgram,oam}.bin. */
-  {
-    static const char *vd_list = (const char *)-1;
-    if (vd_list == (const char *)-1) vd_list = getenv("AR_VRAMDUMP_GF");
-    if (vd_list && vd_list[0]) {
-      unsigned gf = (unsigned)wram[0x88] | ((unsigned)wram[0x89] << 8);
-      /* scan the comma list for a match; dump once per frame value */
-      const char *p = vd_list;
-      while (*p) {
-        unsigned want = (unsigned)strtoul(p, NULL, 0);
-        if (want == gf) {
-          static unsigned last_dumped = 0xffffffffu;
-          if (gf != last_dumped) {
-            last_dumped = gf;
-            extern void ActRaiser_FullSnapshot(const char *prefix);
-            char pfx[320], snapdir[320];
-            RunDirFile(snapdir, sizeof snapdir, "snapshots");
-#ifndef _WIN32
-            mkdir(snapdir, 0755);
-#endif
-            RunDirFile(pfx, sizeof pfx, "snapshots/vd_gf%u", gf);
-            ActRaiser_FullSnapshot(pfx);
-            { extern Ppu *g_ppu;
-              if (g_ppu) fprintf(stderr, "[ppureg] gf=%u bgmode=$%02x bgsc=[%02x %02x %02x %02x] bgTileAdr=$%04x\n",
-                gf, g_ppu->bgmode, g_ppu->bgXsc[0], g_ppu->bgXsc[1],
-                g_ppu->bgXsc[2], g_ppu->bgXsc[3], g_ppu->bgTileAdr); }
-            fprintf(stderr, "[vramdump] gf=%u -> %s.{wram,vram,cgram,oam}.bin\n",
-                    gf, pfx);
-          }
-          break;
-        }
-        const char *comma = strchr(p, ',');
-        if (!comma) break;
-        p = comma + 1;
-      }
-    }
-  }
-  /* AR_MX_OUT=<file>: per-game-frame CPU m/x capture for the snes9x CPU-flag
-   * oracle (tools/oracle/diff_mx.py). Emits "gframe m x" from the SNES cpu state
-   * at the frame-end yield, compared against snesref's SNESREF_MX_OUT (read from
-   * snes9x's ICPU.Opcodes) to catch the first decode-time m/x divergence in the
-   * boss->sim transition. Keyed on game-frame $0088 to align with the oracle. */
-  {
-    static FILE *mxf = NULL; static int mx_tried;
-    if (!mx_tried) { mx_tried = 1; const char *p = getenv("AR_MX_OUT");
-      if (p && p[0]) mxf = fopen(p, "w"); }
-    if (mxf) {
-      extern CpuState g_cpu;
-      unsigned gf = (unsigned)wram[0x88] | ((unsigned)wram[0x89] << 8);
-      /* "gframe m x g18 g1a" — $18/$1A let the differ auto-anchor on the
-       * boss->sim transition independently in each run (no shared $0088). */
-      fprintf(mxf, "%u %d %d %u %u\n", gf, g_cpu.m_flag & 1, g_cpu.x_flag & 1,
-              wram[0x18], wram[0x1a]);
-      if ((frame % 30) == 0) fflush(mxf);
-    }
-  }
-  if (!g_wram_trace) return;
-  if (!g_wram_primed) {
-    memcpy(g_wram_prev + g_wram_lo, wram + g_wram_lo, g_wram_hi - g_wram_lo + 1);
-    g_wram_primed = true;
-    return;
-  }
-  for (uint32_t a = g_wram_lo; a <= g_wram_hi; a++) {
-    if (wram[a] != g_wram_prev[a]) {
-      fprintf(g_wram_trace, "{\"f\":%u,\"adr\":\"0x%05x\",\"old\":\"0x%02x\",\"val\":\"0x%02x\"}\n",
-              frame, a, g_wram_prev[a], wram[a]);
-      g_wram_prev[a] = wram[a];
-    }
-  }
-  if ((frame % 30) == 0) fflush(g_wram_trace);
-}
-
-static void WramTraceInit(void) {
-  const char *path = getenv("AR_WRAM_TRACE");
-  /* AR_DUMP_ACT / AR_DUMP_AT_GF / AR_MX_OUT alone also need the callback. */
-  if ((!path || !path[0]) &&
-      (getenv("AR_DUMP_ACT") || getenv("AR_DUMP_AT_GF") || getenv("AR_MX_OUT") ||
-       getenv("AR_VRAMDUMP_GF"))) {
-    g_framedump_callback = WramTraceCallback;
-    return;
-  }
-  if (!path || !path[0]) return;
-  const char *v;
-  if ((v = getenv("AR_TRACE_LO")) && v[0]) g_wram_lo = (uint32_t)strtoul(v, NULL, 0);
-  if ((v = getenv("AR_TRACE_HI")) && v[0]) g_wram_hi = (uint32_t)strtoul(v, NULL, 0);
-  if (g_wram_hi > 0x1ffff) g_wram_hi = 0x1ffff;
-  g_wram_trace = fopen(path, "w");
-  if (!g_wram_trace) { fprintf(stderr, "AR_WRAM_TRACE: cannot open %s\n", path); return; }
-  g_framedump_callback = WramTraceCallback;
-  fprintf(stderr, "[wram-trace] -> %s  range=[0x%05x,0x%05x]\n", path, g_wram_lo, g_wram_hi);
-}
-
 /* Phase-2 live-settings probe. AR_SETTING_SET=key=value applies one descriptor
  * mutation when the logical game frame reaches AR_SETTING_AT_GF (default 0).
  * It uses the exact API the overlay will call, making headless next-frame
@@ -1047,7 +911,6 @@ static void TakeFullSnapshot(void) {
    * This is shared by F2 and the overlay ACTION row. */
   RedrawPausedFrameIfNeeded();
   extern uint8 g_ram[0x20000];
-  extern void ActRaiser_FullSnapshot(const char *prefix);
   static int snap_n;
   char snapdir[320];
   RunDirFile(snapdir, sizeof snapdir, "snapshots");
@@ -3094,7 +2957,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  WramTraceInit();
+  OracleTrace_Init();
 
   if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
                       g_settings.audio_master_volume,
@@ -3666,6 +3529,7 @@ int main(int argc, char **argv) {
    * but the report should land while the run dir is still current. */
   SfxCensus_Report();
 
+  OracleTrace_Shutdown();
   HostAudio_Shutdown();
   for (int i = 0; i < g_hd_replacement_count; i++) {
     if (g_hd_replacements[i].texture)

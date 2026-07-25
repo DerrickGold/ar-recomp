@@ -7,6 +7,7 @@
 
 void ActRaiserDrawPpuFrame(void);
 void ActRaiser_RebindPpuOutputSurfaces(void);
+void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
 /* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown.
  * Safe to call when none was created. */
