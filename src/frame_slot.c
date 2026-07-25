@@ -209,7 +209,7 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
  * FrameSlot_Capture copies it instead of recomputing the identical
  * CaptureFrame+AnnotateFrame (same wram/settings/tuning inputs, same
  * thread, nothing mutates them in between). NULL for every other caller —
- * the AR_SHOT/F2 screenshot capture (WriteFramebufferPpm) and the
+ * the AR_SHOT/F2 screenshot capture (DevTools_WriteFramebufferPpm) and the
  * paused/menu redraw submit — which fall back to computing their own. */
 static const SimFrameData *s_pending_annotated_sim;
 

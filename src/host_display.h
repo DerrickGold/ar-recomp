@@ -25,6 +25,8 @@ void HostDisplay_ApplyWindowMode(void);
 void HostDisplay_UpdateProperties(void);
 void HostDisplay_PollProperties(void);
 void HostDisplay_ApplyRefreshVsync(void);
+bool HostDisplay_WindowPointToOutput(int window_x, int window_y,
+                                    int *output_x, int *output_y);
 
 uint64_t HostDisplay_CatchupCapNs(int maximum_catchup_frames);
 

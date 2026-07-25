@@ -91,7 +91,7 @@ static void AddHudPresentationChunk(HudPresentationChunk *chunks, int *count,
 
 /* One geometry description drives both compositing and hit-testing (D4):
  * pure, no globals — the present thread feeds it from a FrameSlot, and
- * main.c's InspectWindowPoint feeds it from live state. Ported verbatim from
+ * DevTools_InspectWindowPoint feeds it from live state. Ported verbatim from
  * the pre-M5 main.c version, just reading `inputs` instead of g_ppu/g_settings/
  * g_snes_width/g_snes_height directly. */
 int BuildHudPresentationChunks(SDL_Rect viewport,

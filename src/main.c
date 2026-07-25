@@ -27,9 +27,9 @@
 #include "settings_overlay.h"
 #include "input_map.h"
 #include "scene_inspector.h"
-#include "scene_asset_dump.h"
 #include "diorama.h"
 #include "diorama_scroll_math.h"  /* kInterpPhaseNone */
+#include "dev_tools.h"
 #include "forced_input.h"
 #include "save_system.h"
 #include "hd_replacements.h"
@@ -303,6 +303,28 @@ bool g_new_ppu = true;
 
 void ActRaiser_RebindPpuOutputSurfaces(void);
 
+static DevToolsContext CurrentDevToolsContext(void) {
+  return (DevToolsContext){
+    .renderer = g_renderer,
+    .hud_bg_texture = g_hud_bg_texture,
+    .hud_obj_texture = g_hud_obj_texture,
+    .ppu = g_ppu,
+    .framebuffer_pixels = g_pixels,
+    .hud_bg_pixels = g_hud_bg_pixels,
+    .hud_obj_pixels = g_hud_obj_pixels,
+    .diorama_layer_pixels = g_diorama_layer_pixels,
+    .inspector_presentation = &g_scene_inspector_presentation,
+    .snes_width = g_snes_width,
+    .snes_height = g_snes_height,
+    .pixel_aspect = g_active_pixel_aspect,
+    .widescreen_extra = g_ws_extra,
+    .widescreen_active = g_ws_active,
+    .ignore_aspect_ratio = g_settings.ignore_aspect_ratio,
+    .paused = g_paused != 0,
+    .turbo = g_turbo != 0,
+  };
+}
+
 void NORETURN Die(const char *error) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
   fprintf(stderr, "Error: %s\n", error);
@@ -378,66 +400,6 @@ static bool RedrawPausedFrameIfNeeded(void) {
   return false;
 }
 
-/* Write g_pixels to an open PPM, cropped to the current display mode's sub-rect
- * (pitch is g_snes_width*4 — see PpuBeginDrawing). A 4:3 capture is therefore a
- * true 256-wide image rather than the wide framebuffer with black bars baked
- * in, while wide modes capture the full framebuffer exactly as before. */
-static SDL_Point WriteFramebufferPpm(FILE *pf) {
-  /* A promoted HUD is composited after the SNES framebuffer. When a renderer
-   * exists, capture that actual host-space result so F2 and visual-regression
-   * screenshots include the independently scaled overlay. Headless runs
-   * without video retain the historical internal-framebuffer capture. */
-  /* P13: this does a full render pass + SDL_RenderReadPixels (F2, AR_SHOT_*).
-   * It used to be bracketed by a present-thread quiesce so the two couldn't
-   * touch g_renderer/g_texture concurrently; with rendering main-thread-only
-   * the readback simply runs inline — nothing else can be mid-present. */
-  FrameSlot ppm_slot;
-  bool have_ppm_slot = false;
-  SDL_Surface *argb = NULL;
-  if (g_renderer && g_hud_bg_texture) {
-    FrameSlot_Capture(&ppm_slot);
-    PresentUpload(&ppm_slot);
-    PresentComposite(&ppm_slot, NULL, kInterpPhaseNone);
-    have_ppm_slot = true;
-  }
-  if (have_ppm_slot) {
-    /* SDL3 SDL_RenderReadPixels returns a newly allocated surface in the
-     * renderer's native format; convert it to ARGB8888 so the byte-order
-     * extraction below is exact regardless of the backend's format. */
-    SDL_Surface *raw = SDL_RenderReadPixels(g_renderer, NULL);
-    argb = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
-    if (raw) SDL_DestroySurface(raw);
-  }
-  if (argb) {
-    int out_w = argb->w, out_h = argb->h;
-    fprintf(pf, "P6\n%d %d\n255\n", out_w, out_h);
-    for (int y = 0; y < out_h; y++) {
-      const uint8_t *row = (const uint8_t *)argb->pixels +
-                           (size_t)y * argb->pitch;
-      for (int x = 0; x < out_w; x++) {
-        fputc(row[x * 4 + 2], pf);
-        fputc(row[x * 4 + 1], pf);
-        fputc(row[x * 4 + 0], pf);
-      }
-    }
-    SDL_DestroySurface(argb);
-    return (SDL_Point){ out_w, out_h };
-  }
-
-  int x0 = Settings_VisibleX0();
-  int w = Settings_VisibleWidth();
-  fprintf(pf, "P6\n%d %d\n255\n", w, g_snes_height);
-  for (int y = 0; y < g_snes_height; y++) {
-    const uint8_t *row = g_pixels + ((size_t)y * g_snes_width + x0) * 4;
-    for (int x = 0; x < w; x++) {
-      fputc(row[x * 4 + 2], pf);  /* R */
-      fputc(row[x * 4 + 1], pf);  /* G */
-      fputc(row[x * 4 + 0], pf);  /* B */
-    }
-  }
-  return (SDL_Point){ w, g_snes_height };
-}
-
 static void TogglePause(void) {
   g_paused = !g_paused;
   fprintf(stderr, "[pause] %s\n", g_paused ? "on" : "off");
@@ -461,62 +423,15 @@ static void ToggleTurbo(void) {
     fprintf(stderr, "[turbo] off\n");
 }
 
-static uint16_t ReadWram16(unsigned address) {
-  return (uint16_t)(g_ram[address & 0x1ffff] |
-                    (g_ram[(address + 1) & 0x1ffff] << 8));
-}
-
-static const char *InspectorSceneName(uint8 map_group, uint8 map) {
-  static const char *const regions[] = {
-    "Non-action", "Fillmore act", "Bloodpool act", "Kasandora act",
-    "Aitos act", "Marahna act", "Northwall act", "Death Heim", "Ending",
-  };
-  static const char *const non_action[] = {
-    "Title", "Fillmore sim", "Bloodpool sim", "Kasandora sim", "Aitos sim",
-    "Marahna sim", "Northwall sim", "Sky Palace", "Temple", "World map",
-  };
-  if (map_group == kActRaiserMapGroup_NonAction &&
-      map < sizeof(non_action) / sizeof(non_action[0]))
-    return non_action[map];
-  if (map_group < sizeof(regions) / sizeof(regions[0])) return regions[map_group];
-  return "Unknown";
-}
-
 static void FormatInspectorInfo(char *buffer, size_t buffer_size) {
-  uint8 map_group = g_ram[kActRaiserWram_MapGroup];
-  uint8 map = g_ram[kActRaiserWram_CurrentMap];
-  char music[128];
-  MusicReplacements_FormatPlaybackStatus(music, sizeof(music));
-  extern int snes_frame_counter;
-  snprintf(buffer, buffer_size,
-           "SCENE %-11.11s $18/$19 $%02X/$%02X\n"
-           "GF $%04X HOST %d P:%c T:%s\n"
-           "CAM $%04X,$%04X MAP %uX%u\n"
-           "PPU MODE %u MAIN $%02X SUB $%02X\n"
-           "%s",
-           InspectorSceneName(map_group, map), map_group, map,
-           ReadWram16(kActRaiserWram_GameFrame), snes_frame_counter,
-           g_paused ? 'Y' : 'N', g_turbo ? "ON" : "OFF",
-           ReadWram16(kActRaiserWram_Bg1CameraX),
-           ReadWram16(kActRaiserWram_Bg1CameraY),
-           ReadWram16(kActRaiserWram_Bg1Width),
-           ReadWram16(kActRaiserWram_Bg1Height),
-           g_ppu ? PPU_mode(g_ppu) : 0,
-           g_ppu ? g_ppu->screenEnabled[0] : 0,
-           g_ppu ? g_ppu->screenEnabled[1] : 0,
-           music);
+  const DevToolsContext context = CurrentDevToolsContext();
+  DevTools_FormatInspectorInfo(&context, buffer, buffer_size);
 }
 
 static bool DumpSceneAssets(void) {
-  if (!g_ppu) return false;
   RedrawPausedFrameIfNeeded();
-  static unsigned dump_number;
-  extern int snes_frame_counter;
-  unsigned game_frame = ReadWram16(kActRaiserWram_GameFrame);
-  char directory[320];
-  RunDirFile(directory, sizeof(directory), "scene_assets_%02u_h%d_gf%u",
-             dump_number++, snes_frame_counter, game_frame);
-  return SceneAssetDump_Write(directory, g_ppu, g_ram, snes_frame_counter);
+  const DevToolsContext context = CurrentDevToolsContext();
+  return DevTools_DumpSceneAssets(&context);
 }
 
 static void PerformWarp(void) {
@@ -529,86 +444,8 @@ static void TakeFullSnapshot(void) {
   /* Capture all emulated presentation state under a frame-unique prefix.
    * This is shared by F2 and the overlay ACTION row. */
   RedrawPausedFrameIfNeeded();
-  static int snap_n;
-  char snapdir[320];
-  RunDirFile(snapdir, sizeof snapdir, "snapshots");
-#ifndef _WIN32
-  mkdir(snapdir, 0755);
-#endif
-  const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
-  char prefix[336];
-  RunDirFile(prefix, sizeof prefix, "snapshots/snap_%02d_gf%u",
-             snap_n++, gf);
-  ActRaiser_FullSnapshot(prefix);
-  char ppm[344];
-  snprintf(ppm, sizeof ppm, "%s.ppm", prefix);
-  FILE *pf = fopen(ppm, "wb");
-  if (pf) {
-    (void)WriteFramebufferPpm(pf);
-    fclose(pf);
-  }
-  fprintf(stderr,
-          "[snap] -> %s.{wram,vram,cgram,oam,ppm} (gf=%u)\n",
-          prefix, gf);
-}
-
-static bool WritePngFromArgb(const char *path, const uint8_t *argb_pixels,
-                             int width, int height) {
-  size_t row_bytes = (size_t)width * 4;
-  uint8_t *rgba = malloc(row_bytes * (size_t)height);
-  if (!rgba) return false;
-  for (int y = 0; y < height; y++) {
-    const uint8_t *src = argb_pixels + (size_t)y * row_bytes;
-    uint8_t *dst = rgba + (size_t)y * row_bytes;
-    for (int x = 0; x < width; x++) {
-      dst[0] = src[2];  // R (BGRA byte 2 → RGBA byte 0)
-      dst[1] = src[1];  // G
-      dst[2] = src[0];  // B (BGRA byte 0 → RGBA byte 2)
-      dst[3] = src[3];  // A
-      src += 4;
-      dst += 4;
-    }
-  }
-  bool ok = WritePng(path, rgba, width, height);
-  free(rgba);
-  return ok;
-}
-
-static void DumpDioramaLayers(void) {
-  const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
-  char dir[320];
-  RunDirFile(dir, sizeof dir, "diorama_dump");
-#ifndef _WIN32
-  mkdir(dir, 0755);
-#else
-  _mkdir(dir);
-#endif
-  /* Primaries hold each layer's priority-0 remainder once the band splits
-   * are bound; the _hi/_p* files are the priority bands. */
-  static const struct { int source; const char *name; } kLayers[] = {
-    { kPpuOverlaySource_Bg1, "bg1" },
-    { kDioramaPlane_Bg1Hi,   "bg1_hi" },
-    { kPpuOverlaySource_Bg2, "bg2" },
-    { kDioramaPlane_Bg2Hi,   "bg2_hi" },
-    { kPpuOverlaySource_Bg3, "bg3" },
-    { kPpuOverlaySource_Obj, "obj_p0" },
-    { kDioramaPlane_Obj1,    "obj_p1" },
-    { kDioramaPlane_Obj2,    "obj_p2" },
-    { kDioramaPlane_Obj3,    "obj_p3" },
-  };
-  int dumped = 0;
-  for (int i = 0; i < (int)(sizeof(kLayers) / sizeof(kLayers[0])); i++) {
-    uint8_t *px = g_diorama_layer_pixels[kLayers[i].source];
-    if (!px) continue;
-    char path[344];
-    snprintf(path, sizeof path, "%s/%s_gf%u.png", dir, kLayers[i].name, gf);
-    if (WritePngFromArgb(path, px, g_snes_width, 224)) dumped++;
-  }
-  char path[344];
-  snprintf(path, sizeof path, "%s/backdrop_gf%u.png", dir, gf);
-  if (WritePngFromArgb(path, g_pixels, g_snes_width, 224)) dumped++;
-  fprintf(stderr, "[diorama] dumped %d layer PNGs to %s/ (gf=%u, w=%d)\n",
-          dumped, dir, gf, g_snes_width);
+  const DevToolsContext context = CurrentDevToolsContext();
+  DevTools_TakeFullSnapshot(&context);
 }
 
 static bool BuildSaveEditRequest(SaveEditRequest *edits) {
@@ -910,190 +747,16 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
  * same math. */
 
 static void AdjustHudOutputScale(int delta_percent) {
-  const SettingDesc *desc = Settings_Find("hud_scale_percent");
-  if (!desc) return;
-  int current = g_settings.hud_scale_percent;
-  if (!current && g_renderer) {
-    SDL_Rect viewport = ComputePresentationViewport(
-        g_renderer, g_ws_active, g_settings.ignore_aspect_ratio,
-        g_active_pixel_aspect, Settings_VisibleWidth(), g_snes_height);
-    current = (viewport.h * 100 + g_snes_height / 2) / g_snes_height;
-    current = ((current + 12) / 25) * 25;
-  }
-  if (!current) current = 100;
-  int next = current + delta_percent;
-  if (next < 25) next = 25;
-  if (next > 400) next = 400;
-  SettingChangeResult result = Settings_SetLong(desc, next);
-  char formatted[32];
-  Settings_FormatValue(desc, formatted, sizeof(formatted));
-  fprintf(stderr, "[hud-overlay] scale -> %s (%s; 1.00x = native output)\n",
-          formatted, Settings_ChangeResultName(result));
-}
-
-
-
-static bool PointInRect(int x, int y, SDL_Rect rect) {
-  return x >= rect.x && x < rect.x + rect.w &&
-         y >= rect.y && y < rect.y + rect.h;
-}
-
-static bool HudChunkPixelVisible(const HudPresentationChunk *chunk,
-                                 int source_x, int source_y) {
-  const uint8_t *pixels = chunk->inspector_kind == kInspectorPresentation_HudObj
-      ? g_hud_obj_pixels : g_hud_bg_pixels;
-  int texture_x = source_x + (g_snes_width - 256) / 2;
-  if (!pixels || texture_x < 0 || texture_x >= g_snes_width ||
-      source_y < 0 || source_y >= g_snes_height)
-    return false;
-  return pixels[((size_t)source_y * g_snes_width + texture_x) * 4 + 3] != 0;
-}
-
-static bool WindowPointToOutput(int event_x, int event_y,
-                                int *output_x, int *output_y) {
-  if (!g_window || !g_renderer) return false;
-  int window_width = 0, window_height = 0;
-  int output_width = 0, output_height = 0;
-  SDL_GetWindowSize(g_window, &window_width, &window_height);
-  if (!SDL_GetRenderOutputSize(g_renderer, &output_width, &output_height) ||
-      window_width <= 0 || window_height <= 0 ||
-      output_width <= 0 || output_height <= 0)
-    return false;
-  /* SDL3 does NOT pre-transform mouse events by the renderer's logical
-   * presentation — event x/y stay in window-client coordinates. All the
-   * downstream hit-testing (GetPresentationViewport, the HUD chunk rects)
-   * works in renderer-output-pixel space, so the only mapping this needs is
-   * the window -> output-pixel scale, which also covers high-DPI backing
-   * scale. This was the SDL2 "no logical size" fallback path; under SDL3 it
-   * is correct for every case. */
-  if (output_x)
-    *output_x = (int)(((int64_t)event_x * output_width +
-                       window_width / 2) / window_width);
-  if (output_y)
-    *output_y = (int)(((int64_t)event_y * output_height +
-                       window_height / 2) / window_height);
-  return true;
-}
-
-/* Resolve the OBJ HUD-icon slot from LIVE g_ppu, the same computation
- * present.c's BuildProjectionInputsFromSlot does from the FrameSlot (D4 —
- * one algorithm, two callers). */
-static void FillLiveHudProjectionInputs(HudProjectionInputs *in) {
-  memset(in, 0, sizeof(*in));
-  in->hud_bg_texture = g_hud_bg_texture;
-  in->hud_obj_texture = g_hud_obj_texture;
-  /* Same density correction the FrameSlot producer applies (D4 — one
-   * algorithm, two callers). */
-  in->hud_scale_percent =
-      Settings_ScalePercentToOutput(g_settings.hud_scale_percent);
-  in->pixel_aspect = g_active_pixel_aspect;
-  in->snes_width = g_snes_width;
-  in->snes_height = g_snes_height;
-  in->visible_width = Settings_VisibleWidth();
-  if (!g_ppu) return;
-  in->hud_split_height = g_ppu->wsHudSplitHeight;
-  in->hud_left_end = g_ppu->wsHudLeftEnd;
-  in->hud_right_start = g_ppu->wsHudRightStart;
-  in->hud_player_row_y = g_ppu->wsHudPlayerRowY;
-  in->hud_left_only_y = g_ppu->wsHudLeftOnlyY;
-  in->extra_left_right = g_ppu->extraLeftRight;
-  const PpuOverlayCapture *bg3_capture =
-      &g_ppu->overlayCaptures[kPpuOverlaySource_Bg3];
-  if (bg3_capture->y1 > (int16_t)in->hud_split_height && bg3_capture->y1 <= 240)
-    in->hud_body_y1 = (uint8_t)bg3_capture->y1;
-  const PpuOverlayCapture *obj_capture =
-      &g_ppu->overlayCaptures[kPpuOverlaySource_Obj];
-  if (obj_capture->oamCount == 4) {
-    int first = obj_capture->oamFirst;
-    in->obj_icon_x = (g_ppu->oam[first * 2] & 0xff) |
-        ((g_ppu->highOam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;
-    in->obj_icon_y = g_ppu->oam[first * 2] >> 8;
-    in->obj_icon_valid = true;
-  }
+  const DevToolsContext context = CurrentDevToolsContext();
+  DevTools_AdjustHudOutputScale(&context, delta_percent);
 }
 
 static bool InspectWindowPoint(int window_x, int window_y) {
-  int output_x = 0, output_y = 0;
-  if (!WindowPointToOutput(window_x, window_y, &output_x, &output_y))
+  const bool had_selection = SceneInspector_HasSelection();
+  const bool was_paused = g_paused != 0;
+  const DevToolsContext context = CurrentDevToolsContext();
+  if (!DevTools_InspectWindowPoint(&context, window_x, window_y))
     return false;
-  SDL_Rect viewport = ComputePresentationViewport(
-      g_renderer, g_ws_active, g_settings.ignore_aspect_ratio,
-      g_active_pixel_aspect, Settings_VisibleWidth(), g_snes_height);
-  bool had_selection = SceneInspector_HasSelection();
-  bool was_paused = g_paused != 0;
-  int output_width = 0, output_height = 0;
-  SDL_GetRenderOutputSize(g_renderer, &output_width, &output_height);
-
-  HudProjectionInputs hud_inputs;
-  FillLiveHudProjectionInputs(&hud_inputs);
-  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  int chunk_count = BuildHudPresentationChunks(viewport, &hud_inputs, chunks);
-  bool selected = false;
-  for (int i = chunk_count - 1; i >= 0 && !selected; i--) {
-    const HudPresentationChunk *chunk = &chunks[i];
-    if (!PointInRect(output_x, output_y, chunk->output_destination))
-      continue;
-    double source_x = chunk->screen_source.x +
-        (double)(output_x - chunk->output_destination.x) *
-        chunk->screen_source.w / chunk->output_destination.w;
-    double source_y = chunk->screen_source.y +
-        (double)(output_y - chunk->output_destination.y) *
-        chunk->screen_source.h / chunk->output_destination.h;
-    int sample_x = (int)source_x;
-    int sample_y = (int)source_y;
-    if (!HudChunkPixelVisible(chunk, sample_x, sample_y)) continue;
-    int inspector_x = sample_x + chunk->inspector_x_bias;
-    unsigned bg_mask = chunk->inspector_kind == kInspectorPresentation_HudBg
-        ? kSceneInspectorBg3 : 0;
-    bool inspect_objects =
-        chunk->inspector_kind == kInspectorPresentation_HudObj;
-    if (!SceneInspector_SelectFiltered(
-            inspector_x, sample_y, bg_mask, inspect_objects))
-      continue;
-    g_scene_inspector_presentation = (InspectorPresentationSelection){
-      chunk->inspector_kind, source_x, source_y,
-      output_x, output_y, output_width, output_height,
-    };
-    fprintf(stderr,
-            "[scene-inspector-hit] event=%d,%d output=%d,%d target=%s "
-            "source=%.3f,%.3f dst=%d,%d,%d,%d\n",
-            window_x, window_y, output_x, output_y,
-            chunk->inspector_kind == kInspectorPresentation_HudBg
-                ? "hud-bg3" : "hud-obj",
-            source_x, source_y,
-            chunk->output_destination.x,
-            chunk->output_destination.y,
-            chunk->output_destination.w,
-            chunk->output_destination.h);
-    selected = true;
-  }
-
-  if (!selected) {
-    if (!PointInRect(output_x, output_y, viewport)) return false;
-    int visible_left = Settings_VisibleX0() - g_ws_extra;
-    double screen_position_x = visible_left +
-        (double)(output_x - viewport.x) * Settings_VisibleWidth() /
-        viewport.w;
-    double screen_position_y =
-        (double)(output_y - viewport.y) * g_snes_height / viewport.h;
-    int screen_x = visible_left +
-        (int)((double)(output_x - viewport.x) * Settings_VisibleWidth() /
-              viewport.w);
-    int screen_y =
-        (int)((double)(output_y - viewport.y) * g_snes_height /
-              viewport.h);
-    if (!SceneInspector_Select(screen_x, screen_y)) return false;
-    g_scene_inspector_presentation = (InspectorPresentationSelection){
-      kInspectorPresentation_Base, screen_position_x, screen_position_y,
-      output_x, output_y, output_width, output_height,
-    };
-    fprintf(stderr,
-            "[scene-inspector-hit] event=%d,%d output=%d,%d target=base "
-            "screen=%.3f,%.3f viewport=%d,%d,%d,%d\n",
-            window_x, window_y, output_x, output_y,
-            screen_position_x, screen_position_y,
-            viewport.x, viewport.y, viewport.w, viewport.h);
-  }
   if (!had_selection)
     g_scene_inspector_owns_pause = !was_paused;
   ClearHeldInput();
@@ -1358,7 +1021,8 @@ static void RunOneEmulatedTick(bool *stop_running) {
     extern uint64_t g_apuprof_audiowait_max_ns;
     uint64_t dt_ns = audio_trace_wall_ns() - apuprof_t0;
     if (dt_ns >= (uint64_t)apuprof_ms * 1000000u) {
-      const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
+      const unsigned gf =
+          ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       double audiowait_ms = g_apuprof_audiowait_max_ns / 1e6;
       g_apuprof_audiowait_max_ns = 0;
       fprintf(stderr,
@@ -1390,7 +1054,8 @@ static void RunOneEmulatedTick(bool *stop_running) {
     if (!win_start) win_start = t1;
     if (t1 - win_start >= 1000) {
       uint64_t cc, cy; snes_catchup_stats(&cc, &cy);
-      const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
+      const unsigned gf =
+          ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       fprintf(stderr, "[perf] fps=%d run-ms avg=%.1f max=%u gf+=%u "
               "apu-catchup calls=%llu cyc=%llu $18=%02x\n",
               win_frames, (double)run_ms_sum / win_frames, run_ms_max,
@@ -1444,7 +1109,8 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
         g_snes_width, g_snes_height, g_snes_width * 4);
   }
   if (g_diorama_dump_pending) {
-    DumpDioramaLayers();
+    const DevToolsContext dev_tools = CurrentDevToolsContext();
+    DevTools_DumpDioramaLayers(&dev_tools);
     g_diorama_dump_pending = false;
     if (!g_settings.diorama_mode)
       ActRaiser_RebindPpuOutputSurfaces();
@@ -1477,7 +1143,9 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
    * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.ppm every N game-frames,
    *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
    *   state vs bug state frame by frame. */
-  { const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
+  {
+    const unsigned gf =
+        ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     const char *sg = getenv("AR_SHOT_AT_GF");
     const char *se = getenv("AR_SHOT_EVERY");
     int want = 0; char fname[320]; fname[0] = 0;
@@ -1496,7 +1164,9 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
     if (want) {
       FILE *pf = fopen(fname, "wb");
       if (pf) {
-        SDL_Point shot_size = WriteFramebufferPpm(pf);
+        const DevToolsContext dev_tools = CurrentDevToolsContext();
+        SDL_Point shot_size =
+            DevTools_WriteFramebufferPpm(pf, &dev_tools);
         fclose(pf);
         fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d mode=%s\n",
                 fname, gf, shot_size.x, shot_size.y,
@@ -1562,7 +1232,8 @@ static void RunOuterIterationHousekeeping(void) {
       warp_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
     }
     if (warp_at >= 0 && !warp_fired) {
-      const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
+      const unsigned gf =
+          ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       if (gf >= (unsigned)warp_at) {
         warp_fired = true;
         PerformWarp();
@@ -1583,7 +1254,8 @@ static void RunOuterIterationHousekeeping(void) {
       diorama_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
     }
     if (diorama_at >= 0 && !diorama_fired) {
-      const unsigned gf = ReadWram16(kActRaiserWram_GameFrame);
+      const unsigned gf =
+          ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       /* $0088 is $5555-filled before the game initialises it; ignore that
        * boot sentinel or every target fires on frame 0. */
       if (gf != kPowerOnGameFrameSentinel &&
@@ -1859,7 +1531,8 @@ int main(int argc, char **argv) {
      * a 1x store and the compositor upscales — the game, PAR resample, and
      * overlay all render soft at logical resolution. Downstream needs no
      * change: every consumer sizes itself from SDL_GetRenderOutputSize, and
-     * WindowPointToOutput already maps window points -> output pixels. */
+     * HostDisplay_WindowPointToOutput already maps window points to output
+     * pixels. */
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE |
         SDL_WINDOW_HIGH_PIXEL_DENSITY |
         (headless_video ? SDL_WINDOW_HIDDEN : 0) |
@@ -2491,8 +2164,8 @@ int main(int argc, char **argv) {
               int event_x = (int)event.button.x;
               int event_y = (int)event.button.y;
               int output_x = 0, output_y = 0;
-              if (!WindowPointToOutput(event_x, event_y,
-                                       &output_x, &output_y) ||
+              if (!HostDisplay_WindowPointToOutput(
+                      event_x, event_y, &output_x, &output_y) ||
                   !SettingsOverlay_BeginDebugPanelDrag(
                       output_x, output_y))
                 (void)InspectWindowPoint(event_x, event_y);
@@ -2511,8 +2184,9 @@ int main(int argc, char **argv) {
                                0.0f);
           } else if (SettingsOverlay_IsDebugPanelDragging()) {
             int output_x = 0, output_y = 0;
-            if (WindowPointToOutput((int)event.motion.x, (int)event.motion.y,
-                                    &output_x, &output_y))
+            if (HostDisplay_WindowPointToOutput(
+                    (int)event.motion.x, (int)event.motion.y,
+                    &output_x, &output_y))
               SettingsOverlay_DragDebugPanel(output_x, output_y);
           }
           break;

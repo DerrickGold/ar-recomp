@@ -65,8 +65,8 @@ typedef struct FrameSlotHdEntry {
 
 /* Scene-inspector click anchor (D4-adjacent: shared between the present-time
  * renderer, which reads it from the FrameSlot, and main.c's game-thread click
- * handler InspectWindowPoint, which writes it from a live hit-test). Shared
- * here (rather than kept private to main.c) so present.c can use the same
+ * handler in dev_tools.c, which writes it from a live hit-test). Shared here
+ * (rather than kept private to the host) so present.c can use the same
  * type without redeclaring it. */
 typedef enum InspectorPresentationKind {
   kInspectorPresentation_Base,
@@ -254,7 +254,7 @@ typedef struct FrameSlot {
   int hd_entry_count;
 
   /* Scene inspector (present.c must not touch g_settings.scene_inspector or
-   * main.c's g_scene_inspector_presentation directly). */
+   * the live g_scene_inspector_presentation directly). */
   bool scene_inspector_enabled;
   InspectorPresentationSelection inspector_selection;
 } FrameSlot;
@@ -266,8 +266,8 @@ typedef struct FrameSlot {
 void FrameSlot_Capture(FrameSlot *dst);
 
 /* --- Shared pure geometry (D4): no global reads, so either the present
- * thread (fed from a FrameSlot) or the game thread's mouse hit-test
- * (InspectWindowPoint, fed from live state) can call these with the same
+ * thread (fed from a FrameSlot) or dev_tools.c's game-thread mouse hit-test
+ * (fed from live state) can call these with the same
  * math and get the same answer for the same inputs. Defined in present.c. */
 
 typedef struct HudProjectionInputs {
@@ -288,7 +288,7 @@ typedef struct HudProjectionInputs {
    * capture is the status bar only, as in flat mode. */
   uint8_t hud_body_y1;
   /* Resolved OBJ HUD-icon slot (computed by the caller from oam/highOam —
-   * see main.c's InspectWindowPoint / FrameSlot's oam[]/high_oam[]). */
+   * see DevTools_InspectWindowPoint / FrameSlot's oam[]/high_oam[]). */
   bool obj_icon_valid;
   int obj_icon_x, obj_icon_y;
 } HudProjectionInputs;

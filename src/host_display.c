@@ -87,6 +87,32 @@ static bool RunningUnderGamescope(void) {
   return running_under_gamescope;
 }
 
+bool HostDisplay_WindowPointToOutput(int window_x, int window_y,
+                                    int *output_x, int *output_y) {
+  if (!g_window || !g_renderer) return false;
+
+  int window_width = 0;
+  int window_height = 0;
+  int output_width = 0;
+  int output_height = 0;
+  SDL_GetWindowSize(g_window, &window_width, &window_height);
+  if (!SDL_GetRenderOutputSize(
+          g_renderer, &output_width, &output_height) ||
+      window_width <= 0 || window_height <= 0 ||
+      output_width <= 0 || output_height <= 0)
+    return false;
+
+  /* SDL3 mouse events remain in window-client coordinates. Convert them to
+   * renderer-output pixels; this also covers a high-DPI backing scale. */
+  if (output_x)
+    *output_x = (int)(((int64_t)window_x * output_width +
+                       window_width / 2) / window_width);
+  if (output_y)
+    *output_y = (int)(((int64_t)window_y * output_height +
+                       window_height / 2) / window_height);
+  return true;
+}
+
 static HostDisplayPacingOptions CurrentPacingOptions(void) {
   return (HostDisplayPacingOptions){
       .refresh_mode = g_settings.refresh_mode,
