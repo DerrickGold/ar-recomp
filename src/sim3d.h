@@ -52,6 +52,18 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
                          int authentic_pitch, uint16_t game_frame);
 
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void);
+
+/* Host-side camera controls for the enhanced simulation-town view. Render
+ * textures remain host-owned, so availability accepts their current readiness
+ * rather than reaching into main.c. Adjust/reset mutate descriptor-backed
+ * settings; the caller is responsible for requesting a paused-frame redraw. */
+bool Sim3DCamera_FreeControlsAvailable(bool textures_ready);
+void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta, float zoom_delta);
+void Sim3DCamera_Reset(void);
+bool Sim3DCamera_IsDragging(void);
+void Sim3DCamera_SetDragging(bool dragging);
+void Sim3DCamera_FlushSettingsIfDirty(void);
+
 /* Console line on every enhanced<->authentic transition in a town, so a
  * one-frame flicker names its own cause without a trace pass. */
 void Sim3D_LogViewTransition(const SimFrameData *frame);

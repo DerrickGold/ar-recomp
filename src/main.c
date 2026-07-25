@@ -60,7 +60,6 @@
 #include "sim_town_canvas.h"
 #include "sim_world_map.h"
 #include "sim3d.h"
-#include "scene3d_math.h"
 
 /* HD art substitution (hd_replacements.c manifest entries). PNG only;
  * decoded once at startup. */
@@ -161,74 +160,15 @@ SDL_Texture *g_sim_obj_atlas_texture;
 SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
 SDL_Texture *g_sim3d_flat_texture;
 bool g_sim3d_textures_ready;
-static bool g_sim3d_camera_dragging;
-static bool g_sim3d_camera_settings_dirty;
-static uint64_t g_sim3d_camera_settings_dirty_at;
 
-static bool Sim3D_ProfileUsesGround(SimRenderFeatureMask features) {
-  const SimRenderFeatureMask required =
-      kSimFeature_SeparatedComposite | kSimFeature_GroundProjection;
-  return (features & required) == required;
-}
-
-static bool Sim3D_FreeCameraActiveThisFrame(void) {
-  /* The drag edits the free pose. In Dynamic Cam that pose is not what the
-   * projection is built from, so a drag would silently change nothing the
-   * player can see -- worse than it simply not responding. */
-  if (g_settings.sim3d_camera_mode != kSimCam_Free) return false;
-  if (!g_settings.sim3d_mode || !Diorama_NewPpuCapable() ||
-      !g_sim3d_textures_ready ||
-      !(Sim3D_ImplementedFeatures() & kSimFeature_GroundProjection) ||
-      !ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
-                                  g_ram[kActRaiserWram_CurrentMap]) ||
-      ActRaiser_SimMapPickerActive())
-    return false;
-  return Sim3D_ProfileUsesGround(Settings_Sim3DRequestedFeatures());
-}
-
-static int ClampInt(int value, int low, int high) {
-  return value < low ? low : value > high ? high : value;
-}
-
-static void Sim3D_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
-  int yaw = g_settings.sim3d_tilt_y_mrad + (int)(d_yaw * 1000.0f);
-  int pitch = g_settings.sim3d_tilt_x_mrad + (int)(d_pitch * 1000.0f);
-  g_settings.sim3d_tilt_y_mrad = ClampInt(yaw, -700, 700);
-  g_settings.sim3d_tilt_x_mrad = ClampInt(pitch, -700, 700);
-  if (d_zoom != 0.0f) {
-    float distance = g_settings.sim3d_distance_x100 > 0
-        ? (float)g_settings.sim3d_distance_x100 / 100.0f
-        : Scene3D_AutoFitDistance(0.4f);
-    distance += d_zoom;
-    if (distance < 2.0f) distance = 2.0f;
-    if (distance > 20.0f) distance = 20.0f;
-    g_settings.sim3d_distance_x100 = (int)(distance * 100.0f);
-  }
-  g_sim3d_camera_settings_dirty = true;
-  g_sim3d_camera_settings_dirty_at = SDL_GetTicks();
+static void AdjustSim3DCameraAndRedraw(float yaw_delta, float pitch_delta,
+                                       float zoom_delta) {
+  Sim3DCamera_Adjust(yaw_delta, pitch_delta, zoom_delta);
   g_paused_redraw_pending = true;
 }
 
-static void Sim3D_ResetCamera(void) {
-  /* Resets the pose of the mode currently in use, not always the free one.
-   * "Reset camera" should put back whatever the player is looking through;
-   * restoring a pose that is not on screen would read as the button doing
-   * nothing. */
-  static const char *const free_keys[] = {
-    "sim3d_tilt_x_mrad", "sim3d_tilt_y_mrad", "sim3d_distance_x100",
-  };
-  static const char *const dynamic_keys[] = {
-    "sim3d_dyncam_baseline_tilt_x_mrad", "sim3d_dyncam_baseline_tilt_y_mrad",
-    "sim3d_dyncam_baseline_distance_x100",
-  };
-  const char *const *keys = g_settings.sim3d_camera_mode == kSimCam_Dynamic
-      ? dynamic_keys : free_keys;
-  for (size_t i = 0; i < 3; i++) {
-    const SettingDesc *row = Settings_Find(keys[i]);
-    if (row) Settings_Reset(row);
-  }
-  g_sim3d_camera_settings_dirty = true;
-  g_sim3d_camera_settings_dirty_at = SDL_GetTicks();
+static void ResetSim3DCameraAndRedraw(void) {
+  Sim3DCamera_Reset();
   g_paused_redraw_pending = true;
 }
 
@@ -239,30 +179,33 @@ static void Sim3D_ResetCamera(void) {
  * with the emulator being paused.
  *
  * Deliberately routed through the same Diorama_AdjustCamera /
- * Sim3D_AdjustCamera entry points as the mouse, so clamping, the settings
+ * Sim3DCamera_Adjust entry points as the mouse, so clamping, the settings
  * write-back, and the paused-redraw flag all stay on one path. */
 static void ApplyAnalogCameraInput(void) {
+  static const uint64_t kMaximumElapsedNs = 100000000ull;
+  static const float kNanosecondsPerSecond = 1000000000.0f;
+  static const float kPercentScale = 100.0f;
+  static const float kYawRadiansPerSecond = 1.2f;
+  static const float kPitchRadiansPerSecond = 1.2f;
+  static const float kZoomUnitsPerSecond = 6.0f;
   static uint64_t last_ns;
-  uint64_t now_ns = SDL_GetTicksNS();
+  const uint64_t now_ns = SDL_GetTicksNS();
   uint64_t elapsed_ns = last_ns ? now_ns - last_ns : 0;
   last_ns = now_ns;
   /* A long stall (load, alt-tab) must not teleport the camera. */
-  if (elapsed_ns > 100000000ull) elapsed_ns = 100000000ull;
+  if (elapsed_ns > kMaximumElapsedNs) elapsed_ns = kMaximumElapsedNs;
   if (!elapsed_ns) return;
 
-  bool diorama = !SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame();
-  bool sim3d = !SettingsOverlay_IsOpen() && !diorama &&
-               Sim3D_FreeCameraActiveThisFrame();
+  const bool diorama =
+      !SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame();
+  const bool sim3d = !SettingsOverlay_IsOpen() && !diorama &&
+      Sim3DCamera_FreeControlsAvailable(g_sim3d_textures_ready);
   if (!diorama && !sim3d) return;
 
-  float dt = (float)elapsed_ns / 1e9f;
-  float gain = (float)g_settings.input_cam_sensitivity / 100.0f;
-
-  /* Base rates: a full stick sweeps the +-0.7 rad tilt clamp in a bit over a
-   * second, and crosses the 2..20 distance range in about three. */
-  static const float kYawRadPerSec = 1.2f;
-  static const float kPitchRadPerSec = 1.2f;
-  static const float kZoomPerSec = 6.0f;
+  const float elapsed_seconds =
+      (float)elapsed_ns / kNanosecondsPerSecond;
+  const float gain =
+      (float)g_settings.input_cam_sensitivity / kPercentScale;
 
   float yaw = InputMap_AnalogAction(kInputAction_CamYawRight) -
               InputMap_AnalogAction(kInputAction_CamYawLeft);
@@ -273,11 +216,18 @@ static void ApplyAnalogCameraInput(void) {
   if (g_settings.input_cam_invert_y) pitch = -pitch;
   if (yaw == 0.0f && pitch == 0.0f && zoom == 0.0f) return;
 
-  float d_yaw = yaw * kYawRadPerSec * gain * dt;
-  float d_pitch = pitch * kPitchRadPerSec * gain * dt;
-  float d_zoom = zoom * kZoomPerSec * gain * dt;
-  if (diorama) Diorama_AdjustCamera(d_yaw, d_pitch, d_zoom);
-  else Sim3D_AdjustCamera(d_yaw, d_pitch, d_zoom);
+  /* A full stick sweeps the +/-0.7-radian tilt clamp in a little over a
+   * second and crosses the 2..20 distance range in about three seconds. */
+  const float yaw_delta =
+      yaw * kYawRadiansPerSecond * gain * elapsed_seconds;
+  const float pitch_delta =
+      pitch * kPitchRadiansPerSecond * gain * elapsed_seconds;
+  const float zoom_delta =
+      zoom * kZoomUnitsPerSecond * gain * elapsed_seconds;
+  if (diorama)
+    Diorama_AdjustCamera(yaw_delta, pitch_delta, zoom_delta);
+  else
+    AdjustSim3DCameraAndRedraw(yaw_delta, pitch_delta, zoom_delta);
 }
 
 /* Widescreen master switch + per-side extra-column budget — the definitions
@@ -562,7 +512,7 @@ static bool OnSettingsAction(const SettingDesc *desc) {
   } else if (!strcmp(desc->key, "diorama_reset")) {
     Diorama_ResetCamera();
   } else if (!strcmp(desc->key, "sim3d_reset_camera")) {
-    Sim3D_ResetCamera();
+    ResetSim3DCameraAndRedraw();
   } else if (!strcmp(desc->key, "dump_scene_assets")) {
     if (!DumpSceneAssets()) return false;
   } else if (!strcmp(desc->key, "save_apply_session") ||
@@ -654,7 +604,8 @@ static void OnGamepadHostAction(InputAction action) {
       /* Same split the middle-click reset uses: whichever 3D view is on
        * screen owns the button, and neither responds outside them. */
       if (Diorama_IsActiveThisFrame()) Diorama_ResetCamera();
-      else if (Sim3D_FreeCameraActiveThisFrame()) Sim3D_ResetCamera();
+      else if (Sim3DCamera_FreeControlsAvailable(g_sim3d_textures_ready))
+        ResetSim3DCameraAndRedraw();
       break;
     case kInputAction_Turbo:
       ToggleTurbo();
@@ -1271,14 +1222,7 @@ static void RunOuterIterationHousekeeping(void) {
   }
 
   Diorama_FlushSettingsIfDirty();
-  if (g_sim3d_camera_settings_dirty && !g_sim3d_camera_dragging &&
-      SDL_GetTicks() - g_sim3d_camera_settings_dirty_at > 500) {
-    g_sim3d_camera_settings_dirty = false;
-    char settings_path[1024];
-    UserDataFile(settings_path, sizeof settings_path, "settings.ini");
-    if (!Settings_Save(settings_path))
-      fprintf(stderr, "[sim3d] failed to persist camera settings\n");
-  }
+  Sim3DCamera_FlushSettingsIfDirty();
 
   /* Auto-persist battery SRAM the moment the game writes a save, so progress
    * survives a freeze/force-quit (the clean-exit save-system write never runs
@@ -2150,11 +2094,12 @@ int main(int argc, char **argv) {
             else if (event.button.button == SDL_BUTTON_MIDDLE)
               Diorama_ResetCamera();
           } else if (!SettingsOverlay_IsOpen() &&
-                     Sim3D_FreeCameraActiveThisFrame()) {
+                     Sim3DCamera_FreeControlsAvailable(
+                         g_sim3d_textures_ready)) {
             if (event.button.button == SDL_BUTTON_RIGHT)
-              g_sim3d_camera_dragging = true;
+              Sim3DCamera_SetDragging(true);
             else if (event.button.button == SDL_BUTTON_MIDDLE)
-              Sim3D_ResetCamera();
+              ResetSim3DCameraAndRedraw();
           } else if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
               CloseSceneInspectorSelection();
@@ -2177,11 +2122,13 @@ int main(int argc, char **argv) {
             Diorama_AdjustCamera(event.motion.xrel * Diorama_DragRadPerPx(),
                                  event.motion.yrel * Diorama_DragRadPerPx(),
                                  0.0f);
-          } else if (g_sim3d_camera_dragging &&
-                     Sim3D_FreeCameraActiveThisFrame()) {
-            Sim3D_AdjustCamera(event.motion.xrel * Diorama_DragRadPerPx(),
-                               event.motion.yrel * Diorama_DragRadPerPx(),
-                               0.0f);
+          } else if (Sim3DCamera_IsDragging() &&
+                     Sim3DCamera_FreeControlsAvailable(
+                         g_sim3d_textures_ready)) {
+            AdjustSim3DCameraAndRedraw(
+                event.motion.xrel * Diorama_DragRadPerPx(),
+                event.motion.yrel * Diorama_DragRadPerPx(),
+                0.0f);
           } else if (SettingsOverlay_IsDebugPanelDragging()) {
             int output_x = 0, output_y = 0;
             if (HostDisplay_WindowPointToOutput(
@@ -2196,14 +2143,15 @@ int main(int argc, char **argv) {
             Diorama_AdjustCamera(0.0f, 0.0f,
                                  -event.wheel.y * Diorama_ZoomStep());
           else if (!SettingsOverlay_IsOpen() &&
-                   Sim3D_FreeCameraActiveThisFrame())
-            Sim3D_AdjustCamera(0.0f, 0.0f,
-                               -event.wheel.y * Diorama_ZoomStep());
+                   Sim3DCamera_FreeControlsAvailable(
+                       g_sim3d_textures_ready))
+            AdjustSim3DCameraAndRedraw(
+                0.0f, 0.0f, -event.wheel.y * Diorama_ZoomStep());
           break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
           if (event.button.button == SDL_BUTTON_RIGHT) {
             Diorama_SetDragging(false);
-            g_sim3d_camera_dragging = false;
+            Sim3DCamera_SetDragging(false);
           }
           if (event.button.button == SDL_BUTTON_LEFT)
             SettingsOverlay_EndDebugPanelDrag();

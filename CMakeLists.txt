@@ -97,6 +97,7 @@ add_executable(ActRaiserRecomp
     src/sim_world_map.c
     src/sim_town_canvas.c
     src/sim3d.c
+    src/sim3d_camera.c
     src/save_system.c
     src/run_dir.c
     src/scene3d_math.c
