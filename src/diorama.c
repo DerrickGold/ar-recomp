@@ -436,7 +436,7 @@ static bool LayerGetsEdgeAA(int plane) {
  * with interpolation off, this is plain NEAREST minification/magnification
  * artifacting, not a scroll-smoothness issue. Fix: render each layer to a
  * ×4 integer-upscaled NEAREST intermediate first (matches the existing
- * kHdMode7Scale=4 supersample scale, main.c:105/present.c:42), then sample
+ * the host's kHdMode7Scale=4 supersample scale, then sample
  * THAT with LINEAR for the actual tilt+shift draw — the intermediate is 4
  * whole texels per source texel, so LINEAR there interpolates smoothly
  * instead of stepping.

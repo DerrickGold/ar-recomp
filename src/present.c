@@ -24,6 +24,7 @@
 #include "diorama.h"
 #include "diorama_planes.h"
 #include "diorama_scroll_math.h"
+#include "hd_replacement_host.h"
 #include "settings_overlay.h"
 #include "scene_inspector.h"
 #include "scene3d_math.h"
@@ -40,8 +41,6 @@ extern SDL_Renderer *g_renderer;
 extern SDL_Texture *g_texture;
 extern SDL_Texture *g_hud_bg_texture;
 extern SDL_Texture *g_hud_obj_texture;
-extern SDL_Texture *g_m7_texture;
-extern uint8_t *g_m7_overlay_pixels;
 extern uint8_t g_pixels[];
 extern uint8_t g_hud_bg_pixels[];
 extern uint8_t g_hud_obj_pixels[];
@@ -52,8 +51,6 @@ static void UploadSimTownCanvas(void);
 
 extern SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
 extern SDL_Texture *g_sim3d_flat_texture;
-
-enum { kHdMode7Scale = 4 };  /* mirrors main.c's private enum */
 
 static SDL_FRect ToFRect(SDL_Rect r) {
   return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };

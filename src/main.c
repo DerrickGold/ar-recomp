@@ -32,7 +32,7 @@
 #include "dev_tools.h"
 #include "forced_input.h"
 #include "save_system.h"
-#include "hd_replacements.h"
+#include "hd_replacement_host.h"
 #include "music_replacements.h"
 #include "sfx_census.h"
 #include "run_dir.h"
@@ -60,14 +60,6 @@
 #include "sim_town_canvas.h"
 #include "sim_world_map.h"
 #include "sim3d.h"
-
-/* HD art substitution (hd_replacements.c manifest entries). PNG only;
- * decoded once at startup. */
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_PNG
-#define STBI_NO_LINEAR
-#define STBI_NO_HDR
-#include "stb_image.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 enum {
@@ -122,18 +114,6 @@ uint8_t g_hud_bg_pixels[
     kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
 uint8_t g_hud_obj_pixels[
     kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
-/* Overlay surfaces for manifest-driven HD replacements, allocated lazily per
- * source at bind time. The captured authentic pixels are never presented
- * (the HD textures replace them); the bindings exist because RemoveFromGame
- * only engages on a bound source. BG3/OBJ reuse the HUD surfaces above. */
-static uint8_t *g_hd_overlay_pixels[kPpuOverlaySource_Count];
-/* Mode-7 override surface: the engine renders substituted canvas art into
- * this at kHdMode7Scale subsamples per axis (supersampled AA after the
- * matrix warp); the host composites it between the game frame and the
- * OBJ/HUD overlays. Allocated only when a mode7 manifest entry has art. */
-enum { kHdMode7Scale = 4 };
-uint8_t *g_m7_overlay_pixels;
-SDL_Texture *g_m7_texture;
 
 /* Diorama per-plane capture buffers, indexed by kDioramaPlane_* (engine
  * sources = the priority-0 remainder of each layer, appended entries = the
@@ -250,8 +230,6 @@ struct SpcPlayer *g_spc_player;
 extern const RtlGameInfo kActRaiserGameInfo;
 
 bool g_new_ppu = true;
-
-void ActRaiser_RebindPpuOutputSurfaces(void);
 
 static DevToolsContext CurrentDevToolsContext(void) {
   return (DevToolsContext){
@@ -713,150 +691,6 @@ static bool InspectWindowPoint(int window_x, int window_y) {
   ClearHeldInput();
   g_paused = true;
   return true;
-}
-
-/* Load the HD replacement manifest and decode each screen-plane entry's art
- * once at startup. A missing manifest or image leaves entries textureless and
- * therefore fully inert (no capture requests, authentic rendering).
- * AR_HD_MANIFEST overrides the default manifest location for experiments. */
-static void LoadHdReplacements(void) {
-  const char *path = getenv("AR_HD_MANIFEST");
-  if (!path || !path[0]) path = "game-assets/manifest.ini";
-  if (!HdReplacements_Load(path)) return;
-  int with_art = 0;
-  for (int i = 0; i < g_hd_replacement_count; i++) {
-    HdReplacement *entry = &g_hd_replacements[i];
-    if (entry->plane == kHdPlane_Tiles) continue;
-    /* Entries ship in the manifest without their art; a missing image file
-     * is the normal "hook available, art not provided" state and stays
-     * silent. A file that exists but fails to decode is a real error. */
-    FILE *probe = fopen(entry->image, "rb");
-    if (!probe) continue;
-    fclose(probe);
-    int w = 0, h = 0, comp = 0;
-    stbi_uc *rgba = stbi_load(entry->image, &w, &h, &comp, 4);
-    if (!rgba) {
-      fprintf(stderr, "[hd-manifest] [replace:%s] cannot decode %s (%s)\n",
-              entry->name, entry->image, stbi_failure_reason());
-      continue;
-    }
-    if (entry->plane == kHdPlane_Mode7) {
-      /* The engine sampler consumes raw ARGB words, not an SDL texture. */
-      uint32_t *argb = malloc((size_t)w * h * 4);
-      if (argb) {
-        for (size_t p = 0; p < (size_t)w * h; p++) {
-          const stbi_uc *s = rgba + p * 4;
-          argb[p] = (uint32_t)s[3] << 24 | (uint32_t)s[0] << 16 |
-                    (uint32_t)s[1] << 8 | s[2];
-        }
-        entry->pixels = argb;
-        entry->pixels_width = w;
-        entry->pixels_height = h;
-        with_art++;
-        fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d, mode7)\n",
-                entry->name, entry->image, w, h);
-      }
-      stbi_image_free(rgba);
-      continue;
-    }
-    /* ABGR8888 matches stb's little-endian R,G,B,A byte order directly. */
-    SDL_Texture *texture = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, w, h);
-    if (texture && SDL_UpdateTexture(texture, NULL, rgba, w * 4)) {
-      SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-      /* Match the SDL2 global nearest scale-quality the build relied on. */
-      SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-      entry->texture = texture;
-      with_art++;
-      fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d)\n",
-              entry->name, entry->image, w, h);
-    } else {
-      if (texture) SDL_DestroyTexture(texture);
-      fprintf(stderr, "[hd-manifest] [replace:%s] texture upload failed: %s\n",
-              entry->name, SDL_GetError());
-    }
-    stbi_image_free(rgba);
-  }
-  fprintf(stderr, "[hd-manifest] %d entries, %d with art\n",
-          g_hd_replacement_count, with_art);
-}
-
-/* Bind overlay surfaces for every source a loaded screen-plane entry can
- * capture. BG3/OBJ are already bound to the HUD surfaces; the other sources
- * get lazily allocated buffers. Must run after the HUD bindings. */
-static void BindHdReplacementSurfaces(void) {
-  for (int i = 0; i < g_hd_replacement_count; i++) {
-    const HdReplacement *entry = &g_hd_replacements[i];
-    if (entry->plane == kHdPlane_Mode7 && entry->pixels &&
-        !g_m7_overlay_pixels && g_renderer) {
-      size_t capacity_pitch =
-          (size_t)kPpuBufWidth * kHdMode7Scale * 4;
-      size_t active_pitch =
-          (size_t)g_snes_width * kHdMode7Scale * 4;
-      g_m7_overlay_pixels =
-          calloc(1, capacity_pitch * 224 * kHdMode7Scale);
-      g_m7_texture = SDL_CreateTexture(
-          g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-          kPpuBufWidth * kHdMode7Scale,
-          g_snes_height * kHdMode7Scale);
-      if (g_m7_overlay_pixels && g_m7_texture) {
-        SDL_SetTextureBlendMode(g_m7_texture, SDL_BLENDMODE_BLEND);
-        SDL_SetTextureScaleMode(g_m7_texture, SDL_SCALEMODE_NEAREST);
-        PpuBindMode7OverlaySurface(g_ppu, g_m7_overlay_pixels, active_pitch,
-                                   kHdMode7Scale);
-      }
-      continue;
-    }
-    if (entry->plane != kHdPlane_Screen || !entry->texture) continue;
-    int source = entry->source;
-    if (source == kPpuOverlaySource_Bg3 || source == kPpuOverlaySource_Obj ||
-        g_hd_overlay_pixels[source])
-      continue;
-    g_hd_overlay_pixels[source] = calloc(1, kPpuBufWidth * 4 * 240);
-    if (g_hd_overlay_pixels[source])
-      PpuBindOverlaySurface(g_ppu, (PpuOverlaySource)source,
-                            g_hd_overlay_pixels[source], g_snes_width * 4);
-  }
-}
-
-/* RENDER_TARGETS_RESET/DEVICE_RESET: STATIC textures are emptied by the
- * driver. Destroy and re-upload the HD replacement textures from disk. */
-static void ReloadHdReplacementTextures(void) {
-  for (int i = 0; i < g_hd_replacement_count; i++) {
-    if (g_hd_replacements[i].texture) {
-      SDL_DestroyTexture((SDL_Texture *)g_hd_replacements[i].texture);
-      g_hd_replacements[i].texture = NULL;
-    }
-  }
-  LoadHdReplacements();
-  BindHdReplacementSurfaces();
-}
-
-void ActRaiser_RebindPpuOutputSurfaces(void) {
-  if (!g_ppu) return;
-  size_t pitch = (size_t)g_snes_width * 4;
-  PpuBeginDrawing(g_ppu, g_pixels, pitch, 0);
-  PpuClearOverlayBindings(g_ppu);
-  PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3,
-                        g_hud_bg_texture ? g_hud_bg_pixels : NULL, pitch);
-  PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Obj,
-                        g_hud_obj_texture ? g_hud_obj_pixels : NULL, pitch);
-  for (int source = 0; source < kPpuOverlaySource_Count; source++) {
-    if (source == kPpuOverlaySource_Bg3 ||
-        source == kPpuOverlaySource_Obj ||
-        !g_hd_overlay_pixels[source])
-      continue;
-    PpuBindOverlaySurface(g_ppu, (PpuOverlaySource)source,
-                          g_hd_overlay_pixels[source], pitch);
-  }
-  if (g_m7_overlay_pixels)
-    PpuBindMode7OverlaySurface(
-        g_ppu, g_m7_overlay_pixels,
-        (size_t)g_snes_width * kHdMode7Scale * 4, kHdMode7Scale);
-  if (g_ws_active)
-    PpuSetExtraSpaceCentered(g_ppu, (uint8_t)g_ws_extra);
-  else
-    PpuSetExtraSpace(g_ppu, 0);
 }
 
 /* Called by the diorama_mode descriptor's change hook, so the menu row and
@@ -1631,7 +1465,7 @@ int main(int argc, char **argv) {
       g_sim3d_flat_texture = NULL;
     }
 
-    LoadHdReplacements();
+    HdReplacementHost_LoadTextures();
 
     /* One streaming texture per diorama plane (priority bands included).
      * Only the backdrop is opaque — every other plane alpha-blends. */
@@ -1727,7 +1561,7 @@ int main(int argc, char **argv) {
   Snes *snes = SnesInit(rom_data, (int)rom_size);
   if (!snes) Die("SnesInit failed");
 
-  BindHdReplacementSurfaces();
+  HdReplacementHost_BindSurfaces();
   ActRaiser_RebindPpuOutputSurfaces();
   /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
    * centered in the wide framebuffer). Re-applied every frame by
@@ -1910,14 +1744,14 @@ int main(int argc, char **argv) {
          * Init). DEVICE_LOST is unrecoverable. */
         case SDL_EVENT_RENDER_TARGETS_RESET:
         case SDL_EVENT_RENDER_DEVICE_RESET:
-          ReloadHdReplacementTextures();
+          HdReplacementHost_ReloadTextures();
           if (!SettingsOverlay_ReloadTextures(rom_data, rom_size))
             fprintf(stderr,
                     "[settings-menu] atlas reload after device reset failed\n");
           g_paused_redraw_pending = true;
           /* R17/C2: the retained re-present slot copies hd_entries[].texture
-           * as raw SDL_Texture* (present.h). ReloadHdReplacementTextures just
-           * destroyed and recreated every one of them, so those copies are
+           * as raw SDL_Texture* (present.h). The host reload just destroyed
+           * and recreated every one of them, so those copies are
            * now dangling — re-compositing the retained slot would be a
            * use-after-free. Drop it; the next tick present retains a fresh
            * one. This also makes retained-frame upload skipping
@@ -2394,12 +2228,7 @@ int main(int argc, char **argv) {
   InputReplay_Shutdown();
   OracleTrace_Shutdown();
   HostAudio_Shutdown();
-  for (int i = 0; i < g_hd_replacement_count; i++) {
-    if (g_hd_replacements[i].texture)
-      SDL_DestroyTexture((SDL_Texture *)g_hd_replacements[i].texture);
-    free(g_hd_replacements[i].pixels);
-  }
-  SDL_DestroyTexture(g_m7_texture);
+  HdReplacementHost_Shutdown();
   SDL_DestroyTexture(g_sim_obj_atlas_texture);
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     SDL_DestroyTexture(g_sim3d_layer_textures[plane]);

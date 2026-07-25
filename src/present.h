@@ -52,8 +52,8 @@ typedef struct FrameSlotHdEntry {
   int source;
   bool brightness_mod;
   /* SDL_Texture*, copied for convenience. NOT stable after boot, despite what
-   * this comment used to claim: ReloadHdReplacementTextures (main.c) destroys
-   * and recreates every one on SDL_EVENT_RENDER_TARGETS_RESET /
+   * this comment used to claim: HdReplacementHost_ReloadTextures destroys and
+   * recreates every one on SDL_EVENT_RENDER_TARGETS_RESET /
    * _DEVICE_RESET. Within a single present that is harmless (the slot is
    * captured and consumed in one synchronous call), but a RETAINED slot — see
    * R17/C2's g_repr, which a between-ticks re-present re-composites — would
