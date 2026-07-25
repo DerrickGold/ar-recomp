@@ -407,6 +407,23 @@ void DumpDiagState(const char *tag) {
     extern void CpuDispatchLogWriteFile(const char *path);
     CpuDispatchLogWriteFile(p_disp);
   }
+  {
+    /* R17/C5 present cadence. The decisive line for "is render actually
+     * decoupled from the tick rate?": represents==0 means every present still
+     * followed a tick, and represents>0 with max-alpha 0.00 means we re-present
+     * but always at phase zero — both are the inert-interpolation signature.
+     * no-present-no-sleep must be 0; anything else is a busy-spin. */
+    extern unsigned long ar_present_counters_tick(void);
+    extern unsigned long ar_present_counters_repr(void);
+    extern float ar_present_counters_max_alpha(void);
+    extern unsigned long ar_present_counters_spin(void);
+    fprintf(stderr,
+            "[present-cadence] tick-presents=%lu re-presents=%lu "
+            "max-represent-alpha=%.3f no-present-no-sleep=%lu\n",
+            ar_present_counters_tick(), ar_present_counters_repr(),
+            (double)ar_present_counters_max_alpha(),
+            ar_present_counters_spin());
+  }
   fprintf(stderr, "[dump] wrote %s + wram/sram/dispatch_log (%s)\n",
           p_state, tag ? tag : "");
 }
@@ -745,6 +762,38 @@ static uint64_t PausedIdleIntervalNs(void) {
  * guard, i.e. the "Scroll interpolation" setting silently did nothing. */
 static DioramaScrollSnapshot g_prev_scroll;
 
+/* R17/C5: the present pacing deadline, at file scope because BOTH present paths
+ * (a tick present and a between-ticks re-present) must share one. Two
+ * independent deadlines paced against the same interval would each admit a
+ * present per interval, doubling the effective rate and making the Frame limit
+ * mean half of what it says. */
+static uint64_t g_present_deadline_ns;
+
+/* R17/C5: the interval that paces GAME presents, guaranteed non-zero.
+ *
+ * FrameLimitIntervalNs() returns 0 in Vsync (SDL_RenderPresent is expected to
+ * block instead) and in Unlimited when the host refresh is unknown or we are
+ * under gamescope (both deliberately "truly unlimited"). That was safe only
+ * while presents were one-per-tick and the no-tick iteration slept: "unlimited"
+ * meant unlimited presents, of which there were 60 a second. Once a re-present
+ * can fire on every iteration, a zero interval means nothing paces the loop at
+ * all except a vsync block this codebase already documents as skippable —
+ * UiPresentIntervalNs keeps a 2x-refresh floor for exactly that reason. An
+ * occluded-but-mapped window is the concrete case: SDL_EVENT_WINDOW_OCCLUDED is
+ * not handled, so g_window_hidden is false, the platform need not block in
+ * SDL_RenderPresent, and the loop would spin a core discarding composites.
+ *
+ * So: honor an explicit Limit exactly (nonzero already), and otherwise fall back
+ * to a floor. Half a refresh period can never be mistaken for user-visible
+ * throttling and can never push a present past the next vblank, so it is a
+ * no-op whenever vsync genuinely blocks. */
+static uint64_t GamePresentIntervalNs(void) {
+  uint64_t interval = FrameLimitIntervalNs();
+  if (interval) return interval;
+  uint64_t floor_ns = UiPresentIntervalNs();     /* 2x refresh; kFrameNs/2 under gamescope */
+  return floor_ns ? floor_ns : kFrameNs / 2;
+}
+
 /* R17/C2: the retained frame a between-ticks re-present re-composites, held
  * with the scroll snapshot it must be paired against.
  *
@@ -852,11 +901,10 @@ static void SubmitFrameToPresent(bool game_tick, float alpha) {
    * whenever it falls far behind, so switching mode (opening the menu, pausing,
    * changing the limit) starts pacing cleanly rather than from a stale
    * pre-switch timestamp. */
-  static uint64_t present_deadline_ns;
-  PresentThrottleInterval(&present_deadline_ns,
+  PresentThrottleInterval(&g_present_deadline_ns,
                           SettingsOverlay_IsOpen() ? UiPresentIntervalNs()
                           : g_paused               ? PausedIdleIntervalNs()
-                                                   : FrameLimitIntervalNs());
+                                                   : GamePresentIntervalNs());
   SDL_RenderPresent(g_renderer);
   if (perf_on) {
     uint32 now = SDL_GetTicks();
@@ -878,6 +926,64 @@ static void SubmitFrameToPresent(bool game_tick, float alpha) {
       vsync_sum = 0; vsync_max = 0; win_frames = 0;
     }
   }
+}
+
+/* R17/C5 counters, reported by DumpDiagState. represents > 0 with
+ * max_represent_alpha still 0 is the signature of a broken cadence: we are
+ * re-presenting, but always at phase zero, i.e. inert. */
+static unsigned long g_tick_presents, g_represents;
+static float g_max_represent_alpha;
+static unsigned long g_no_present_no_sleep_iters;
+/* Accessors so DumpDiagState (defined above these statics, on the deepest stack
+ * a watchdog trip can reach) can read them without a forward declaration
+ * block. */
+unsigned long ar_present_counters_tick(void) { return g_tick_presents; }
+unsigned long ar_present_counters_repr(void) { return g_represents; }
+float ar_present_counters_max_alpha(void) { return g_max_represent_alpha; }
+unsigned long ar_present_counters_spin(void) { return g_no_present_no_sleep_iters; }
+
+/* R17/C5: re-composite the retained frame at a NEW sub-tick phase.
+ *
+ * This is what makes the render rate independent of the 60.0988Hz tick rate:
+ * between two ticks the game state is unchanged, but the phase advances, so the
+ * same slot composites at a slightly different interpolated camera position.
+ * The deleted present thread did exactly this from its ~4ms idle timeout (which
+ * it deliberately shortened from 16ms when interpolation was enabled) — that
+ * timeout WAS the independent render clock, and #18/P13 removed it without a
+ * replacement, which is why the feature has been inert since Phase 0.
+ *
+ * Deliberately does NOT call FrameSlot_Capture: a fresh capture re-stamps
+ * timestamp_ns, which would reset the phase to zero and defeat the entire
+ * purpose. It also does not call PresentUpload — the textures still hold this
+ * slot's pixels, since nothing has drawn since, and a device reset invalidates
+ * the retained slot (C2) rather than leaving stale handles behind. */
+static void RepresentLastFrame(float alpha) {
+  if (!g_renderer || !g_texture) return;
+  /* The C2 tripwire: the retained pair must be a genuine (prev tick -> this
+   * tick) pair. Fires on the first re-present if the pair copy is ever moved
+   * after FrameSlot_ExtractScrollSnapshot, which would make prev a copy of
+   * slot's own camera and silently interpolate nothing. */
+  SDL_assert(g_repr.prev.timestamp_ns < g_repr.slot.timestamp_ns);
+  /* Encodes C2's L1 precondition: only diorama slots are ever re-presented, so
+   * no flat-path pointer-bearing state is re-consumed. */
+  SDL_assert(g_repr.slot.diorama_active);
+  SDL_assert(alpha >= 0.0f && alpha < 1.0f);
+  /* Geometry drift: any event that re-derives geometry also invalidates the
+   * retained slot (C2), so this should be unreachable. Bail rather than
+   * composite a mismatched slot in release builds — a torn or skewed frame is
+   * worse than a dropped re-present. */
+  if (g_repr.slot.snes_width != g_snes_width ||
+      g_repr.slot.snes_height != g_snes_height ||
+      g_repr.slot.ws_extra != g_ws_extra) {
+    SDL_assert(!"retained slot geometry disagrees with live geometry");
+    g_repr.valid = false;
+    return;
+  }
+  PresentComposite(&g_repr.slot, &g_repr.prev, alpha);
+  PresentThrottleInterval(&g_present_deadline_ns, GamePresentIntervalNs());
+  SDL_RenderPresent(g_renderer);
+  g_represents++;
+  if (alpha > g_max_represent_alpha) g_max_represent_alpha = alpha;
 }
 
 /* Returns true if a redraw actually happened, so the paused loop knows a
@@ -3811,9 +3917,53 @@ int main(int argc, char **argv) {
 
       RunOuterIterationHousekeeping();
 
-      if (produced_frame) {
-        if (!g_window_hidden) DrawAndPresentFrame(false, alpha);
-      } else {
+      /* R17/C5: the render rate is now independent of the tick rate.
+       *
+       * Presents used to fire ONLY when the drain produced a tick, which pinned
+       * the present rate at (or below) 60.0988Hz no matter what the display or
+       * the user's Refresh-rate setting said, and left every wall-clock-driven
+       * present-side animation sampled at exactly the tick rate. For scroll
+       * interpolation that was fatal rather than merely coarse: with one present
+       * per capture, the phase was always ~0, so the feature could not do
+       * anything at all.
+       *
+       * Between ticks the game state has not changed, so there is nothing to
+       * re-capture — but the PHASE has advanced, so re-compositing the retained
+       * slot at the new phase is real new output. Pacing still comes solely from
+       * the shared deadline, so the Refresh-rate setting keeps meaning exactly
+       * what it says.
+       *
+       * Gated on the pair being interpolable, using the SAME predicate the math
+       * uses (C4), and on LIVE diorama/setting state rather than the retained
+       * slot's copy — the slot is one tick stale by construction. Without the
+       * gate a re-present would spend a full composite to draw a
+       * byte-identical image. */
+      bool interp_active =
+          g_repr.valid && g_diorama_frame_active &&
+          g_settings.gpu_interp_enabled &&
+          !g_paused_redraw_pending &&      /* pending redraw: re-render, don't re-present */
+          DioramaScrollPairIsInterpolable(&g_repr.slot, &g_repr.prev);
+
+      bool presented = false;
+      if (!g_window_hidden) {
+        if (produced_frame) {
+          DrawAndPresentFrame(false, alpha);
+          g_tick_presents++;
+          presented = true;
+        } else if (interp_active) {
+          RepresentLastFrame(alpha);
+          presented = true;
+        }
+      }
+      /* INVARIANT: every iteration either presents (which blocks on vsync or on
+       * a guaranteed-nonzero throttle interval) or yields. One unconditional
+       * line, not a property of the branch structure above — four independent
+       * reviewers found this exact hole in an earlier draft where the sleep was
+       * attached to the hidden-window arm, and "the code happens to fall through
+       * to a sleep" is precisely the kind of structural invariant this codebase
+       * has now lost five times. g_no_present_no_sleep_iters must stay 0. */
+      if (!presented) {
+        if (!g_window_hidden && produced_frame) g_no_present_no_sleep_iters++;
         SDL_Delay(1);
       }
     }
