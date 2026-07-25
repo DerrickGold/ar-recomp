@@ -637,18 +637,42 @@ static void PresentThread_Resume(void) {
 
 static uint64_t FrameLimitIntervalNs(void);  /* defined with the display code */
 
-/* Pace the present thread to the Frame limit (Refresh rate = Limit). Called
- * with no lock held, immediately before SDL_RenderPresent; sleeps out any time
- * left in the target interval since the previous present. A no-op in Vsync
- * (SDL blocks) and Unlimited (interval 0) modes. */
-static void PresentThrottle(uint64_t *last_present_ns) {
-  uint64_t interval = FrameLimitIntervalNs();
+/* Sleep out any time left in `interval` since the previous present, then
+ * stamp. interval 0 = no pacing. */
+static void PresentThrottleInterval(uint64_t *last_present_ns,
+                                    uint64_t interval) {
   uint64_t now = SDL_GetTicksNS();
   if (interval && *last_present_ns && now - *last_present_ns < interval) {
     SDL_DelayNS(interval - (now - *last_present_ns));
     now = SDL_GetTicksNS();
   }
   *last_present_ns = now;
+}
+
+/* Pace a present to the Frame limit (Refresh rate = Limit). Called with no
+ * lock held, immediately before SDL_RenderPresent; sleeps out any time left
+ * in the target interval since the previous present. A no-op in Vsync (SDL
+ * blocks) and Unlimited (interval 0) modes. */
+static void PresentThrottle(uint64_t *last_present_ns) {
+  PresentThrottleInterval(last_present_ns, FrameLimitIntervalNs());
+}
+
+/* Host-UI present pacing: the display's own refresh rate, whatever it is
+ * (Settings_HostRefreshHz, captured from the SDL display mode; 60 only as
+ * the fallback when the host reports none — headless-with-video, dummy
+ * driver). No baked-in cadence: a 144Hz panel paces the menu at 144Hz.
+ * In Vsync mode SDL_RenderPresent's block is the pacer, so return only a
+ * 2x-refresh anti-spin floor (a sleep never long enough to push the present
+ * past the next vblank — stacking a full-interval sleep on the vsync block
+ * can phase-align badly and oscillate to half rate; same 2x reasoning as
+ * R2's Unlimited soft-cap) that still bounds the loop when the platform
+ * skips the vsync block (occluded window). */
+static uint64_t UiPresentIntervalNs(void) {
+  int hz = Settings_HostRefreshHz();
+  if (hz <= 0) hz = 60;
+  uint64_t interval = 1000000000ull / (uint64_t)hz;
+  return g_settings.refresh_mode == kRefreshMode_Vsync ? interval / 2
+                                                       : interval;
 }
 
 static int SDLCALL PresentThreadFn(void *userdata) {
@@ -803,9 +827,21 @@ static void SubmitFrameToPresent(void) {
      * PresentThreadFn, so the sleep shows up in the vsync-wait perf bucket.
      * A no-op in Vsync mode (interval 0; SDL_RenderPresent blocks instead).
      * Emulation pace is unaffected: the M6 accumulator runs catch-up ticks
-     * for wall-clock time spent sleeping here. */
+     * for wall-clock time spent sleeping here.
+     *
+     * The Frame limit governs GAME presentation only. Host UI — the settings
+     * overlay and the paused redraw (same predicate as
+     * RedrawPausedFrameIfNeeded) — paces to the display's own refresh
+     * (UiPresentIntervalNs) so the menu is smooth at the panel's native rate
+     * regardless of the limit; emulation is not ticking then, so no game
+     * pacing is bypassed. The shared stamp still advances so closing the
+     * menu re-enters Limit pacing cleanly instead of measuring from a
+     * pre-menu present. */
     static uint64_t last_present_ns;
-    PresentThrottle(&last_present_ns);
+    PresentThrottleInterval(&last_present_ns,
+                            (g_paused || SettingsOverlay_IsOpen())
+                                ? UiPresentIntervalNs()
+                                : FrameLimitIntervalNs());
     SDL_RenderPresent(g_renderer);
     if (perf_on) {
       uint32 now = SDL_GetTicks();
@@ -3455,9 +3491,19 @@ int main(int argc, char **argv) {
        * on its own ~16ms idle timeout — only submit here when something
        * actually changed. Without one (headless-with-video / thread
        * creation failed), keep the old unconditional re-present. */
-      if (!headless && !g_window_hidden && (redrew || !g_present_thread_active))
+      bool presented = false;
+      if (!headless && !g_window_hidden &&
+          (redrew || !g_present_thread_active)) {
         SubmitFrameToPresent();
-      SDL_Delay(16);
+        presented = true;
+      }
+      /* Pacing comes from the present itself (vsync block, or the
+       * display-refresh UI throttle in SubmitFrameToPresent), so this loop
+       * — and with it menu input polling and repaints — runs at the
+       * panel's native rate, whatever it is. The fixed sleep remains only
+       * as the anti-spin fallback when nothing presents (hidden window,
+       * headless). */
+      if (!presented) SDL_Delay(16);
       last_time_ns = SDL_GetTicksNS();
       continue;
     }
