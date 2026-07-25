@@ -12,13 +12,13 @@ int main(void) {
   memset(&curr, 0, sizeof(curr)); memset(&prev, 0, sizeof(prev));
   curr.snes_width = 256; curr.snes_height = 224;
   curr.diorama_active = prev.diorama_active = true;
+  curr.capture_ticks = 1;                             /* a one-tick pair */
   prev.timestamp_ns = 1000000000ULL;
   curr.timestamp_ns = 1000000000ULL + 16600000ULL;   /* +16.6ms */
   prev.bg1_camera_x = 0;  curr.bg1_camera_x = 10;     /* +10 px */
 
-  /* t ~= 0.5: now halfway into the 16.6ms span past curr. */
-  uint64_t now = curr.timestamp_ns + 8300000ULL;
-  DioramaScrollDelta d = ComputeDioramaScrollDeltaAt(&curr, &prev, now);
+  /* alpha 0.5 = halfway to the next tick. */
+  DioramaScrollDelta d = ComputeDioramaScrollDeltaAt(&curr, &prev, 0.5f);
   CHECK(d.active);
   CHECK(near(d.bg_du[0], (0.5f * 10.0f) / 256.0f));   /* ~0.01953 */
   CHECK(d.bg_du[0] > 0.0f);
@@ -31,33 +31,95 @@ int main(void) {
 
   /* Turbo suppresses interpolation. */
   curr.turbo_active = true;
-  CHECK(!ComputeDioramaScrollDeltaAt(&curr, &prev, now).active);
+  CHECK(!ComputeDioramaScrollDeltaAt(&curr, &prev, 0.5f).active);
   curr.turbo_active = false;
 
-  /* span >= 50ms suppresses. */
+  /* span >= 50ms suppresses (the timestamps are still the honest record of
+   * when the two frames were captured; they are just no longer the divisor). */
   FrameSlot slow = curr; slow.timestamp_ns = prev.timestamp_ns + 60000000ULL;
-  CHECK(!ComputeDioramaScrollDeltaAt(&slow, &prev, slow.timestamp_ns + 1).active);
+  CHECK(!ComputeDioramaScrollDeltaAt(&slow, &prev, 0.5f).active);
 
-  /* R16: prev==NULL must return inactive AND leave the internal tick-span
-   * average untouched. main.c relies on exactly this to keep paused/menu
-   * keep-alive presents out of the velocity estimate: they carry identical
-   * camera data under a fresh capture timestamp, so if their (much shorter)
-   * host-UI interval reached span_ema, `t` would saturate and the first
-   * frames after unpausing would over-extrapolate a whole tick of motion.
-   * Baseline the delta, flood the function with NULL-prev calls at panel
-   * rate, then re-run the SAME pair: an identical result proves no leak. */
-  DioramaScrollDelta before = ComputeDioramaScrollDeltaAt(&curr, &prev, now);
-  CHECK(before.active);
-  for (int i = 0; i < 60; i++) {
-    /* A keep-alive present: fresh timestamp ~6.9ms apart (144Hz), same camera. */
-    FrameSlot idle = curr;
-    idle.timestamp_ns = curr.timestamp_ns + (uint64_t)(i + 1) * 6944444ULL;
-    CHECK(!ComputeDioramaScrollDeltaAt(&idle, NULL, idle.timestamp_ns).active);
+  /* R17/C4: the sub-tick phase is now PASSED IN, so the whole class of bugs
+   * that came from reconstructing it (R16's span_ema pollution, R3's smoothing,
+   * saturation at t=1.0) is gone with the quantity itself. The former
+   * span_ema-leak regression case that lived here is deliberately REPLACED
+   * rather than deleted: the average it guarded no longer exists, so it could
+   * only ever pass. What matters now is the BINDING — that a present at a real
+   * sub-tick phase produces a real shift — which is what every historical
+   * failure actually got wrong while the arithmetic stayed correct.
+   *
+   * Monotone ramp: the same pair at increasing phase must give strictly
+   * increasing offsets, reaching exactly one tick of motion at alpha -> 1. */
+  {
+    float prev_du = -1.0f;
+    const float phases[] = { 0.0f, 0.25f, 0.5f, 0.75f };
+    for (unsigned i = 0; i < sizeof phases / sizeof *phases; i++) {
+      DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&curr, &prev, phases[i]);
+      CHECK(r.active);                       /* alpha 0.0 is a LEGAL phase */
+      CHECK(near(r.bg_du[0], (phases[i] * 10.0f) / 256.0f));
+      CHECK(r.bg_du[0] > prev_du);           /* strictly increasing */
+      prev_du = r.bg_du[0];
+    }
+    /* alpha 0 means zero shift, but ACTIVE — distinct from "no phase". */
+    CHECK(near(ComputeDioramaScrollDeltaAt(&curr, &prev, 0.0f).bg_du[0], 0.0f));
+    /* kInterpPhaseNone means "this present has no phase" -> inactive. */
+    CHECK(!ComputeDioramaScrollDeltaAt(&curr, &prev, kInterpPhaseNone).active);
   }
-  DioramaScrollDelta after = ComputeDioramaScrollDeltaAt(&curr, &prev, now);
-  CHECK(after.active);
-  CHECK(near(after.bg_du[0], before.bg_du[0]));
-  CHECK(near(after.bg_dv[0], before.bg_dv[0]));
+
+  /* R17/C3: a multi-tick pair carries proportionally more motion, so the phase
+   * must be divided by capture_ticks. Without this the extrapolation overshoots
+   * by exactly that factor — the correction the deleted wall-clock span EMA had
+   * been making implicitly. 2 ticks, 20px total, alpha 0.5 -> half of ONE
+   * tick's 10px. */
+  {
+    FrameSlot multi = curr;
+    multi.capture_ticks = 2;
+    multi.bg1_camera_x = 20;                 /* 20px over two ticks */
+    DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&multi, &prev, 0.5f);
+    CHECK(r.active);
+    CHECK(near(r.bg_du[0], (0.5f * 10.0f) / 256.0f));
+    /* Same pair mislabelled as one tick would double it — the bug this guards. */
+    FrameSlot mislabelled = multi; mislabelled.capture_ticks = 1;
+    CHECK(near(ComputeDioramaScrollDeltaAt(&mislabelled, &prev, 0.5f).bg_du[0],
+               (0.5f * 20.0f) / 256.0f));
+  }
+
+  /* capture_ticks == 0 is a paused re-capture, not a pair — and it is the
+   * divisor, so this also guards against a division by zero. */
+  {
+    FrameSlot paused = curr; paused.capture_ticks = 0;
+    CHECK(!ComputeDioramaScrollDeltaAt(&paused, &prev, 0.5f).active);
+  }
+
+  /* The gate and the math must agree exactly, or "should we re-present?" drifts
+   * from "will this interpolate?" and an inert feature looks like a working one
+   * (H3). Same matrix through both entry points. */
+  {
+    FrameSlot m = curr;
+    /* equal timestamps: not a pair */
+    m.timestamp_ns = prev.timestamp_ns;
+    CHECK(DioramaScrollPairIsInterpolable(&m, &prev) ==
+          ComputeDioramaScrollDeltaAt(&m, &prev, 0.5f).active);
+    CHECK(!DioramaScrollPairIsInterpolable(&m, &prev));
+    /* NULL prev */
+    CHECK(!DioramaScrollPairIsInterpolable(&curr, NULL));
+    CHECK(DioramaScrollPairIsInterpolable(&curr, NULL) ==
+          ComputeDioramaScrollDeltaAt(&curr, NULL, 0.5f).active);
+    /* prev not in diorama mode */
+    DioramaScrollSnapshot flat = prev; flat.diorama_active = false;
+    CHECK(!DioramaScrollPairIsInterpolable(&curr, &flat));
+    CHECK(DioramaScrollPairIsInterpolable(&curr, &flat) ==
+          ComputeDioramaScrollDeltaAt(&curr, &flat, 0.5f).active);
+    /* the valid pair agrees too */
+    CHECK(DioramaScrollPairIsInterpolable(&curr, &prev));
+    CHECK(DioramaScrollPairIsInterpolable(&curr, &prev) ==
+          ComputeDioramaScrollDeltaAt(&curr, &prev, 0.5f).active);
+    /* bg_mode change */
+    FrameSlot mode = curr; mode.bg_mode = (uint8_t)(prev.bg_mode + 1);
+    CHECK(!DioramaScrollPairIsInterpolable(&mode, &prev));
+    CHECK(DioramaScrollPairIsInterpolable(&mode, &prev) ==
+          ComputeDioramaScrollDeltaAt(&mode, &prev, 0.5f).active);
+  }
 
   /* R17/C1: the UV window must actually SHIFT.
    *

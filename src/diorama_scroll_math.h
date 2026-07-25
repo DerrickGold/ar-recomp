@@ -1,9 +1,29 @@
 #ifndef DIORAMA_SCROLL_MATH_H
 #define DIORAMA_SCROLL_MATH_H
 #include "present.h"   /* FrameSlot, DioramaScrollSnapshot, DioramaScrollDelta */
-/* Pure interpolation math with the wall-clock injected, for testability. */
+
+/* R17/C4: "this present carries no sub-tick phase" — screenshots, the headless
+ * path, and the paused/menu keep-alive, none of which sit at a meaningful point
+ * between two ticks. Deliberately NOT 0.0f, which is a perfectly legal phase
+ * (the instant a tick lands) and would silently conflate "no phase" with
+ * "phase zero". */
+static const float kInterpPhaseNone = -1.0f;
+
+/* Pure interpolation math. `alpha` is the main loop's sub-tick phase —
+ * accumulator/kFrameNs, in [0,1) — or kInterpPhaseNone. Takes no clock: the
+ * phase is passed in rather than reconstructed from SDL_GetTicksNS() against
+ * an EMA of the tick period, which is what made this function corruptible by
+ * non-tick presents (R16) and prone to saturating at 1.0. */
 DioramaScrollDelta ComputeDioramaScrollDeltaAt(
-    const FrameSlot *curr, const DioramaScrollSnapshot *prev, uint64_t now_ns);
+    const FrameSlot *curr, const DioramaScrollSnapshot *prev, float alpha);
+
+/* The pair-validity half of the above, exposed so a caller deciding whether a
+ * re-present is worth doing uses the SAME predicate the math does. Keeping
+ * these in one place is what stops the gate from drifting away from the
+ * bail-outs — a drift that would burn a full composite per frame to draw a
+ * byte-identical image while looking like the feature was working. */
+bool DioramaScrollPairIsInterpolable(const FrameSlot *curr,
+                                     const DioramaScrollSnapshot *prev);
 
 /* R17/C1: shift a layer's UV window by `du`, keeping the window inside the
  * captured texture region.

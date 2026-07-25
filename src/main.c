@@ -29,6 +29,7 @@
 #include "scene_inspector.h"
 #include "scene_asset_dump.h"
 #include "diorama.h"
+#include "diorama_scroll_math.h"  /* kInterpPhaseNone, pair-validity predicate */
 #include "save_system.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
@@ -795,8 +796,12 @@ static void InvalidatePresentHistory(void) {
  *
  * game_tick is true only for the present that follows a genuine emulated
  * tick; the paused/menu keep-alive re-present passes false. That distinction
- * is load-bearing for M7 — see the R16 note below. */
-static void SubmitFrameToPresent(bool game_tick) {
+ * is load-bearing for M7 — see the R16 note below.
+ *
+ * alpha (R17/C4) is the sub-tick phase for a tick present; ignored (and forced
+ * to kInterpPhaseNone) when game_tick is false, since a keep-alive re-capture
+ * does not sit at a meaningful point between two ticks. */
+static void SubmitFrameToPresent(bool game_tick, float alpha) {
   if (!g_renderer || !g_texture) return;
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
@@ -807,12 +812,13 @@ static void SubmitFrameToPresent(bool game_tick) {
   /* R16: only a post-tick present may take part in scroll interpolation.
    * A keep-alive re-present carries IDENTICAL camera data under a FRESH
    * capture timestamp (FrameSlot_Capture re-stamps timestamp_ns every call),
-   * so letting one through would both advance g_prev_scroll to a non-tick
-   * frame and pour the host-UI present interval into
-   * ComputeDioramaScrollDeltaAt's span_ema — dragging the one-tick velocity
-   * estimate down toward the panel period, so `t` saturates at 1.0 and the
-   * first frames after unpausing over-extrapolate a full tick of motion
-   * each. The deleted present thread held this same invariant structurally:
+   * so letting one through would advance g_prev_scroll to a non-tick frame.
+   * (R16 originally also kept the host-UI present interval out of the
+   * wall-clock span EMA that scaled extrapolation; R17/C4 deleted that EMA
+   * along with the reconstruction it served, so only the snapshot-advance half
+   * of this reasoning still applies. A keep-alive now also passes
+   * kInterpPhaseNone, which is the more direct statement of the same thing.)
+   * The deleted present thread held this same invariant structurally:
    * it re-presented the SAME slot and never touched prev_scroll on an idle
    * repaint ("prev_scroll only ever advances in the dequeue path below, when
    * a genuinely new tick was captured").
@@ -826,7 +832,8 @@ static void SubmitFrameToPresent(bool game_tick) {
     g_repr.slot = slot;
     g_repr.valid = true;
   }
-  PresentComposite(&slot, game_tick ? &g_prev_scroll : NULL);
+  PresentComposite(&slot, game_tick ? &g_prev_scroll : NULL,
+                   game_tick ? alpha : kInterpPhaseNone);
   if (game_tick) FrameSlot_ExtractScrollSnapshot(&slot, &g_prev_scroll);
   uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
   /* This is the only present site, so Frame-limit pacing (Refresh rate =
@@ -1085,7 +1092,7 @@ static SDL_Point WriteFramebufferPpm(FILE *pf) {
   if (g_renderer && g_hud_bg_texture) {
     FrameSlot_Capture(&ppm_slot);
     PresentUpload(&ppm_slot);
-    PresentComposite(&ppm_slot, NULL);
+    PresentComposite(&ppm_slot, NULL, kInterpPhaseNone);
     have_ppm_slot = true;
   }
   if (have_ppm_slot) {
@@ -2495,8 +2502,12 @@ static void RunOneEmulatedTick(bool *stop_running) {
  * accumulator ran several catch-up ticks this iteration, we draw/present
  * only the LAST one's resulting PPU state once). Caller gates this on
  * "did at least one tick actually run" (headless: always; non-headless:
- * produced_frame). */
-static void DrawAndPresentFrame(bool headless) {
+ * produced_frame).
+ *
+ * alpha (R17/C4): the sub-tick phase, forwarded to the present. Headless passes
+ * kInterpPhaseNone — it never presents to a display and its cadence is
+ * deliberately one-tick-per-iteration (§3.6). */
+static void DrawAndPresentFrame(bool headless, float alpha) {
   extern uint8 g_ram[];
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
@@ -2594,7 +2605,7 @@ static void DrawAndPresentFrame(bool headless) {
      * and paused/menu-redraw captures run outside this window and must
      * self-annotate. */
     FrameSlot_SetPendingAnnotatedSim(&sim);
-    SubmitFrameToPresent(true);
+    SubmitFrameToPresent(true, alpha);
     FrameSlot_SetPendingAnnotatedSim(NULL);
   }
 }
@@ -3712,7 +3723,7 @@ int main(int argc, char **argv) {
        * history or its tick-span average. */
       bool presented = false;
       if (!headless && !g_window_hidden) {
-        SubmitFrameToPresent(false);
+        SubmitFrameToPresent(false, kInterpPhaseNone);
         presented = true;
       }
       /* Pacing comes from the present itself (vsync block, or the
@@ -3735,7 +3746,7 @@ int main(int argc, char **argv) {
        * allows. */
       RunOneEmulatedTick(&running);
       RunOuterIterationHousekeeping();
-      DrawAndPresentFrame(true);
+      DrawAndPresentFrame(true, kInterpPhaseNone);
 
       extern int snes_frame_counter;
       static int quit_frames = -2;
@@ -3788,10 +3799,20 @@ int main(int argc, char **argv) {
         produced_frame = true;
       }
 
+      /* R17/C4: the sub-tick phase, taken AFTER the drain — whatever wall-clock
+       * time has accrued toward the next tick but has not yet produced one.
+       * This is the quantity present-time interpolation used to reconstruct
+       * from its own clock divided by an EMA of the tick period; here it is
+       * exact, and it cannot be corrupted by presents because presents do not
+       * write the accumulator. The drain loop's own exit condition guarantees
+       * the range. */
+      SDL_assert(accumulator < kFrameNs);
+      float alpha = (float)accumulator / (float)kFrameNs;
+
       RunOuterIterationHousekeeping();
 
       if (produced_frame) {
-        if (!g_window_hidden) DrawAndPresentFrame(false);
+        if (!g_window_hidden) DrawAndPresentFrame(false, alpha);
       } else {
         SDL_Delay(1);
       }

@@ -343,9 +343,19 @@ void FrameSlot_ExtractScrollSnapshot(const FrameSlot *slot,
 void PresentUpload(const FrameSlot *slot);
 /* prev_scroll: the scroll snapshot from the frame shown immediately before
  * this one (M7 interpolation, diorama mode only). NULL disables
- * interpolation for this call (screenshots, the no-present-thread
- * synchronous fallback, or simply "no previous frame yet"). */
+ * interpolation for this call (screenshots, or simply "no previous frame
+ * yet").
+ *
+ * alpha (R17/C4): the sub-tick phase this present sits at — the main loop's
+ * accumulator remainder over kFrameNs, in [0,1) — or kInterpPhaseNone
+ * (diorama_scroll_math.h) for a present that has no meaningful phase. Passed in
+ * rather than read from a clock here, so present-time code cannot disagree with
+ * the loop that owns the tick schedule. It is host timing, not game state, so
+ * it is a parameter rather than a FrameSlot field: the slot stays immutable
+ * after capture, and one retained slot can be re-composited at several
+ * different phases (which is the whole point of the re-present). */
 void PresentComposite(const FrameSlot *slot,
-                      const DioramaScrollSnapshot *prev_scroll);
+                      const DioramaScrollSnapshot *prev_scroll,
+                      float alpha);
 
 #endif

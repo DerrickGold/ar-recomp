@@ -1,7 +1,12 @@
 /* diorama_scroll_math.c — extracted from present.c's ComputeDioramaScrollDelta
- * so the pure M7 interpolation math can be golden-tested with the wall-clock
- * injected (Test gap 2). present.c keeps a thin wrapper that supplies
- * SDL_GetTicksNS() at the single production call site. */
+ * so the pure M7 interpolation math can be golden-tested (Test gap 2).
+ *
+ * Originally the wall clock was INJECTED here for testability, which was an
+ * improvement over reading it inline but still left production reconstructing
+ * the sub-tick phase from a clock plus an EMA of the tick period. R17/C4 passes
+ * the phase itself instead: the main loop owns the tick schedule and already
+ * knows the phase exactly, so there is nothing left to estimate and no clock in
+ * this file at all. */
 #include "diorama_scroll_math.h"
 
 #include <stdio.h>   /* fprintf (AR_INTERP_LOG) */
@@ -20,29 +25,51 @@ void DioramaInterpUvWindow(float region_u0, float region_u1, float du,
   *out_u1 = region_u1 + du;
 }
 
+bool DioramaScrollPairIsInterpolable(const FrameSlot *curr,
+                                    const DioramaScrollSnapshot *prev) {
+  if (!prev || !curr) return false;
+  if (!prev->diorama_active) return false;
+  if (curr->turbo_active || prev->turbo_active) return false;  /* §6.4 */
+  if (curr->timestamp_ns == 0 || prev->timestamp_ns == 0) return false;
+  if (curr->bg_mode != prev->bg_mode) return false;            /* §6.4 mode change */
+  if (curr->timestamp_ns <= prev->timestamp_ns) return false;  /* not a real pair */
+  /* §6.2 sanity: a pair spanning >=50ms is not a plausible one-tick velocity
+   * estimate (savestate load, long stall). Still checked on the timestamps,
+   * which remain the honest record of when the two frames were captured — the
+   * span is simply no longer used as the interpolation DIVISOR. */
+  if (curr->timestamp_ns - prev->timestamp_ns >= 50000000ULL) return false;
+  /* R17/C3: 0 means "paused re-capture", which is not a pair; and it is the
+   * divisor below, so this also guards the division. */
+  if (curr->capture_ticks == 0) return false;
+  return true;
+}
+
 DioramaScrollDelta ComputeDioramaScrollDeltaAt(
-    const FrameSlot *curr, const DioramaScrollSnapshot *prev, uint64_t now_ns) {
+    const FrameSlot *curr, const DioramaScrollSnapshot *prev, float alpha) {
   DioramaScrollDelta d = {0};
-  if (!prev || !curr) return d;
-  if (!prev->diorama_active) return d;
-  if (curr->turbo_active || prev->turbo_active) return d;      /* §6.4 */
-  if (curr->timestamp_ns == 0 || prev->timestamp_ns == 0) return d;
-  if (curr->bg_mode != prev->bg_mode) return d;                /* §6.4 mode change */
-  if (curr->timestamp_ns <= prev->timestamp_ns) return d;      /* not a real pair yet */
-  uint64_t span = curr->timestamp_ns - prev->timestamp_ns;
-  if (span >= 50000000ULL) return d;                            /* §6.2 sanity: <50ms */
-  /* R3: smooth the tick span so a single wall-clock hitch doesn't corrupt
-   * the one-cycle velocity estimate. Single-threaded after Phase 0, so this
-   * function-local static needs no lock; the <50ms guard above keeps a
-   * hitch out of the average. */
-  static float span_ema = 0.0f;
-  if (span_ema <= 0.0f) span_ema = (float)span;                 /* seed on first valid pair */
-  else span_ema += ((float)span - span_ema) * 0.25f;
-  uint64_t now = now_ns;
-  if (now < curr->timestamp_ns) return d;
-  float t = (float)(now - curr->timestamp_ns) / span_ema;
+  /* Single source of truth, shared with the caller's gate — so "should we
+   * bother re-presenting?" can never drift from "will this actually
+   * interpolate?", which would make an inert feature indistinguishable from a
+   * working one. */
+  if (!DioramaScrollPairIsInterpolable(curr, prev)) return d;
+  if (alpha == kInterpPhaseNone) return d;
+
+  /* R17/C4: the sub-tick phase is the main loop's own accumulator remainder,
+   * passed in. It replaces `(SDL_GetTicksNS() - curr->timestamp_ns) /
+   * span_ema` — a value reconstructed from a DIFFERENT clock than the one that
+   * scheduled the tick, divided by an EMA estimate of a period that is known
+   * exactly (kFrameNs). Reconstructing it was the root of three separate
+   * regressions: the estimate could be polluted by non-tick presents (R16),
+   * needed R3's smoothing to survive a hitch, and saturated at 1.0 whenever
+   * the wall clock outran the estimate. accumulator/kFrameNs needs none of
+   * that: it is exact by construction and cannot be corrupted by presents,
+   * because presents do not write it.
+   *
+   * Divided by capture_ticks (C3) because alpha is a fraction of ONE tick
+   * while the pair may span several — see the field comment in present.h. */
+  float t = alpha / (float)curr->capture_ticks;
   if (t < 0.0f) t = 0.0f;
-  if (t > 1.0f) t = 1.0f;                                       /* §6.4 turbo/frame-skip clamp */
+  if (t > 1.0f) t = 1.0f;
 
   d.active = true;
   /* B1b (followup doc) source fix: the WRAM camera is a real world-pixel
@@ -66,15 +93,22 @@ DioramaScrollDelta ComputeDioramaScrollDeltaAt(
   /* AR_INTERP_LOG=1: log BG1's interpolated offset every present, so the M7
    * acceptance test (ar-recomp-threading-impl.md milestone M7) can assert
    * "monotonic sub-steps ~half the per-tick delta" mechanically instead of
-   * by eye. */
+   * by eye. Fires on re-presents too (that is where the sub-steps now come
+   * from), so a run where every line reads alpha=0.00 is the tell that the
+   * cadence is broken again.
+   *
+   * NOTE: a ramping t here does NOT prove the feature works — the UV window
+   * consumer can still cancel the shift downstream, which is exactly what
+   * R17/C1 fixed. Judge acceptance on the mesh UVs or on screen. */
   static int log_on = -1;
   if (log_on < 0) {
     const char *e = getenv("AR_INTERP_LOG");
     log_on = (e && e[0] && e[0] != '0') ? 1 : 0;
   }
   if (log_on) {
-    fprintf(stderr, "[interp] t=%.3f bg1_du=%.5f bg1_dv=%.5f span_ns=%llu\n",
-            t, d.bg_du[0], d.bg_dv[0], (unsigned long long)span);
+    fprintf(stderr,
+            "[interp] t=%.3f alpha=%.3f ticks=%u bg1_du=%.5f bg1_dv=%.5f\n",
+            t, alpha, (unsigned)curr->capture_ticks, d.bg_du[0], d.bg_dv[0]);
   }
   return d;
 }

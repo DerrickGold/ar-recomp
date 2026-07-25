@@ -670,8 +670,15 @@ void FrameSlot_ExtractScrollSnapshot(const FrameSlot *slot,
  * Extrapolation is the standard fixed-timestep-render technique for exactly
  * this "render happens after the last tick, before the next one" case. */
 static DioramaScrollDelta ComputeDioramaScrollDelta(
-    const FrameSlot *curr, const DioramaScrollSnapshot *prev) {
-  return ComputeDioramaScrollDeltaAt(curr, prev, SDL_GetTicksNS());
+    const FrameSlot *curr, const DioramaScrollSnapshot *prev, float alpha) {
+  /* R17/C4: the phase comes from the caller (the main loop's accumulator
+   * remainder), not from SDL_GetTicksNS() here. Present-time code reading its
+   * own clock to guess where it sat between two ticks is what made this
+   * corruptible: the guess needed an EMA of a period the loop already knew
+   * exactly, and that EMA could be polluted by presents the loop never
+   * scheduled (R16). This wrapper survives only because present.c must not
+   * include diorama_scroll_math.h's caller-side gate. */
+  return ComputeDioramaScrollDeltaAt(curr, prev, alpha);
 }
 
 /* B4-split (followup doc): the present-thread-owned "effective render
@@ -2678,7 +2685,8 @@ static void PresentSim3D(const FrameSlot *slot) {
 }
 
 void PresentComposite(const FrameSlot *slot,
-                      const DioramaScrollSnapshot *prev_scroll) {
+                      const DioramaScrollSnapshot *prev_scroll,
+                      float alpha) {
   if (!g_renderer || !g_texture) return;
 
   if (slot->sim.view == kSimView_Enhanced && slot->sim.separated_valid) {
@@ -2708,7 +2716,7 @@ void PresentComposite(const FrameSlot *slot,
      * Read from the FrameSlot (D6 — present.c must not read g_settings
      * live), snapshotted by FrameSlot_Capture on the game thread. */
     DioramaScrollDelta scroll_delta = slot->interp_setting_enabled
-        ? ComputeDioramaScrollDelta(slot, prev_scroll)
+        ? ComputeDioramaScrollDelta(slot, prev_scroll, alpha)
         : (DioramaScrollDelta){0};
     /* B4-split (followup doc): resolve which authored pose is active this
      * frame. Free Cam: the live authored pose, unchanged from B4-split.
