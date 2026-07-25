@@ -20,4 +20,10 @@ extern int g_active_pixel_aspect;
  * caller's twin in main.c's DrawAndPresentFrame reaching it through here). */
 Sim3DTuning BuildSim3DTuning(void);
 
+/* #16: publish DrawAndPresentFrame's already-annotated canonical sim for the
+ * duration of its SubmitFrameToPresent call; FrameSlot_Capture copies it
+ * instead of recomputing the identical annotation. Pass NULL to clear —
+ * every other FrameSlot_Capture caller must see NULL and self-annotate. */
+void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim);
+
 #endif /* FRAME_SLOT_H */

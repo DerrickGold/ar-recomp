@@ -191,6 +191,19 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
   g_sim_prev_in_town = true;
 }
 
+/* #16: DrawAndPresentFrame annotates the canonical SimFrameData once per
+ * frame and points this at it around its SubmitFrameToPresent call;
+ * FrameSlot_Capture copies it instead of recomputing the identical
+ * CaptureFrame+AnnotateFrame (same wram/settings/tuning inputs, same
+ * thread, nothing mutates them in between). NULL for every other caller —
+ * the AR_SHOT/F2 screenshot capture (WriteFramebufferPpm) and the
+ * paused/menu redraw submit — which fall back to computing their own. */
+static const SimFrameData *s_pending_annotated_sim;
+
+void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim) {
+  s_pending_annotated_sim = sim;
+}
+
 /* M5 (ar-recomp-threading-impl.md Appendix D5): the sole FrameSlot writer.
  * Reads live g_ppu, g_settings, g_snes_width/height,
  * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
@@ -202,15 +215,19 @@ void FrameSlot_Capture(FrameSlot *dst) {
 
   /* D2 publishes only the pitch-zero separated-composite capability, and
    * only after its same-frame CPU oracle found zero differing pixels. */
-  SimRenderMetadata_CaptureFrame(
-      &dst->sim, g_ram, g_settings.sim3d_mode,
-      Settings_Sim3DRequestedFeatures(),
-      g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
-  Sim3DTuning tuning = BuildSim3DTuning();
-  Sim3D_AnnotateFrame(&dst->sim, &tuning);
-  /* Accumulation itself happens once a frame at the always-run site below;
-   * this only publishes the current canvas state into the slot. */
-  dst->sim.town_canvas_serial = SimTownCanvas_Serial();
+  if (s_pending_annotated_sim) {
+    dst->sim = *s_pending_annotated_sim;   /* already annotated this frame */
+  } else {
+    SimRenderMetadata_CaptureFrame(
+        &dst->sim, g_ram, g_settings.sim3d_mode,
+        Settings_Sim3DRequestedFeatures(),
+        g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
+    Sim3DTuning tuning = BuildSim3DTuning();
+    Sim3D_AnnotateFrame(&dst->sim, &tuning);
+    /* Accumulation itself happens once a frame at the always-run site below;
+     * this only publishes the current canvas state into the slot. */
+    dst->sim.town_canvas_serial = SimTownCanvas_Serial();
+  }
 
   dst->snes_width = g_snes_width;
   dst->snes_height = g_snes_height;

@@ -2353,10 +2353,12 @@ static void DrawAndPresentFrame(bool headless) {
   WaitForPixelBuffersFree();
   uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
   RtlDrawPpuFrame();
+  /* #16: function-scope so the annotated sim outlives the block below and can
+   * be published to FrameSlot_Capture around the SubmitFrameToPresent tail. */
+  SimFrameData sim;
   {
     extern int snes_frame_counter;
     SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram, g_ppu);
-    SimFrameData sim;
     SimRenderMetadata_CaptureFrame(
         &sim, g_ram, g_settings.sim3d_mode,
         Settings_Sim3DRequestedFeatures(),
@@ -2435,7 +2437,16 @@ static void DrawAndPresentFrame(bool headless) {
     }
   }
 
-  if (!headless) SubmitFrameToPresent();
+  if (!headless) {
+    /* #16: FrameSlot_Capture inside this call copies the sim annotated above
+     * instead of recomputing it (identical inputs, same thread, nothing
+     * mutates them in between). Cleared immediately after: the screenshot
+     * and paused/menu-redraw captures run outside this window and must
+     * self-annotate. */
+    FrameSlot_SetPendingAnnotatedSim(&sim);
+    SubmitFrameToPresent();
+    FrameSlot_SetPendingAnnotatedSim(NULL);
+  }
 }
 
 /* Per-outer-iteration host-side housekeeping (§3.5): polls / one-shot
