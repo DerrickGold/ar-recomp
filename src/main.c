@@ -48,9 +48,11 @@
 #include "frame_slot.h"
 #include "host_audio.h"
 #include "host_display.h"
+#include "host_input.h"
 #include "input_replay.h"
 #include "oracle_trace.h"
 #include "portable_paths.h"
+#include "runtime_settings.h"
 #include "runtime_diagnostics.h"
 #include "scheduled_settings.h"
 #include "user_data_dir.h"
@@ -86,23 +88,12 @@ bool g_gpu_shaders_active;
 SDL_Texture *g_texture;
 SDL_Texture *g_hud_bg_texture;
 SDL_Texture *g_hud_obj_texture;
-static uint8 g_paused;
-uint8 g_turbo;  /* external: read by FrameSlot_Capture (frame_slot.c) */
-static bool g_scene_inspector_owns_pause;
 /* InspectorPresentationKind/InspectorPresentationSelection now live in
  * present.h (D4) — shared between this file's InspectWindowPoint (live
  * hit-test) and present.c's renderer (fed from the FrameSlot snapshot). */
 /* external: read by FrameSlot_Capture (frame_slot.c) */
 InspectorPresentationSelection g_scene_inspector_presentation;
-static bool g_paused_redraw_pending;
 static bool g_window_hidden;  /* true while MINIMIZED or HIDDEN: skip present */
-static uint32 g_input_state;
-typedef enum {
-  kHostLifecycle_None,
-  kHostLifecycle_Restart,
-  kHostLifecycle_Exit,
-} HostLifecycleRequest;
-static HostLifecycleRequest g_host_lifecycle_request;
 /* external: read by FrameSlot_Capture (frame_slot.c) */
 int g_snes_width = 256, g_snes_height = 224;
 /* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
@@ -140,75 +131,6 @@ SDL_Texture *g_sim_obj_atlas_texture;
 SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
 SDL_Texture *g_sim3d_flat_texture;
 bool g_sim3d_textures_ready;
-
-static void AdjustSim3DCameraAndRedraw(float yaw_delta, float pitch_delta,
-                                       float zoom_delta) {
-  Sim3DCamera_Adjust(yaw_delta, pitch_delta, zoom_delta);
-  g_paused_redraw_pending = true;
-}
-
-static void ResetSim3DCameraAndRedraw(void) {
-  Sim3DCamera_Reset();
-  g_paused_redraw_pending = true;
-}
-
-/* Polled analog camera control (input_map.h): the right stick orbits and the
- * triggers zoom the diorama / 3D-town Free Cam, the same poses the mouse
- * right-drag and wheel already edit. Integrated over REAL elapsed time, not
- * per host iteration, so the orbit speed does not change with frame rate or
- * with the emulator being paused.
- *
- * Deliberately routed through the same Diorama_AdjustCamera /
- * Sim3DCamera_Adjust entry points as the mouse, so clamping, the settings
- * write-back, and the paused-redraw flag all stay on one path. */
-static void ApplyAnalogCameraInput(void) {
-  static const uint64_t kMaximumElapsedNs = 100000000ull;
-  static const float kNanosecondsPerSecond = 1000000000.0f;
-  static const float kPercentScale = 100.0f;
-  static const float kYawRadiansPerSecond = 1.2f;
-  static const float kPitchRadiansPerSecond = 1.2f;
-  static const float kZoomUnitsPerSecond = 6.0f;
-  static uint64_t last_ns;
-  const uint64_t now_ns = SDL_GetTicksNS();
-  uint64_t elapsed_ns = last_ns ? now_ns - last_ns : 0;
-  last_ns = now_ns;
-  /* A long stall (load, alt-tab) must not teleport the camera. */
-  if (elapsed_ns > kMaximumElapsedNs) elapsed_ns = kMaximumElapsedNs;
-  if (!elapsed_ns) return;
-
-  const bool diorama =
-      !SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame();
-  const bool sim3d = !SettingsOverlay_IsOpen() && !diorama &&
-      Sim3DCamera_FreeControlsAvailable(g_sim3d_textures_ready);
-  if (!diorama && !sim3d) return;
-
-  const float elapsed_seconds =
-      (float)elapsed_ns / kNanosecondsPerSecond;
-  const float gain =
-      (float)g_settings.input_cam_sensitivity / kPercentScale;
-
-  float yaw = InputMap_AnalogAction(kInputAction_CamYawRight) -
-              InputMap_AnalogAction(kInputAction_CamYawLeft);
-  float pitch = InputMap_AnalogAction(kInputAction_CamPitchDown) -
-                InputMap_AnalogAction(kInputAction_CamPitchUp);
-  float zoom = InputMap_AnalogAction(kInputAction_CamZoomOut) -
-               InputMap_AnalogAction(kInputAction_CamZoomIn);
-  if (g_settings.input_cam_invert_y) pitch = -pitch;
-  if (yaw == 0.0f && pitch == 0.0f && zoom == 0.0f) return;
-
-  /* A full stick sweeps the +/-0.7-radian tilt clamp in a little over a
-   * second and crosses the 2..20 distance range in about three seconds. */
-  const float yaw_delta =
-      yaw * kYawRadiansPerSecond * gain * elapsed_seconds;
-  const float pitch_delta =
-      pitch * kPitchRadiansPerSecond * gain * elapsed_seconds;
-  const float zoom_delta =
-      zoom * kZoomUnitsPerSecond * gain * elapsed_seconds;
-  if (diorama)
-    Diorama_AdjustCamera(yaw_delta, pitch_delta, zoom_delta);
-  else
-    AdjustSim3DCameraAndRedraw(yaw_delta, pitch_delta, zoom_delta);
-}
 
 /* Widescreen master switch + per-side extra-column budget — the definitions
  * for the runner's widescreen.h externs (each game defines them; 0/false =
@@ -248,8 +170,8 @@ static DevToolsContext CurrentDevToolsContext(void) {
     .widescreen_extra = g_ws_extra,
     .widescreen_active = g_ws_active,
     .ignore_aspect_ratio = g_settings.ignore_aspect_ratio,
-    .paused = g_paused != 0,
-    .turbo = g_turbo != 0,
+    .paused = HostInput_IsPaused(),
+    .turbo = HostInput_IsTurbo(),
   };
 }
 
@@ -269,86 +191,8 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs) {
   (void)funcs;
 }
 
-/* The 12 joypad bits now live in input_map.c, keyed by SCANCODE (physical key
- * position) rather than keycode, so a bind made on one keyboard layout stays
- * on the same physical key on another. g_input_state remains the one word the
- * runner, the force-input hooks, and the oracle record/replay path read. */
-static void HandleInput(int scancode, bool pressed) {
-  InputMap_HandleKey(scancode, pressed);
-  g_input_state = InputMap_State();
-}
-
-/* Every place that freezes the game (menu open, inspector selection) has to
- * drop held bits, or a direction held across the freeze leaks back out. */
-static void ClearHeldInput(void) {
-  InputMap_Clear();
-  g_input_state = 0;
-}
-
-/* Which device owns the settings overlay right now. Mirrors InputMap_State's
- * gameplay arbitration (input_map.c:487-496) so ONE physical Steam-Deck press
- * — which desktop-mode Steam Input can surface as a real pad event AND a
- * synthesized keyboard twin — moves the menu once, not twice. Exactly one of
- * these is true at any time: gamepad owns only when a pad is present and the
- * user hasn't pinned Keyboard; otherwise the keyboard owns (this folds in
- * InputMap_State's !s_pad_count safety valve, so Gamepad-mode with no pad
- * connected still lets the keyboard drive/close the menu — no lockout). */
-static bool MenuGamepadIsActiveDevice(void) {
-  return g_settings.input_device != kInputDevice_Keyboard &&
-         InputMap_GamepadCount() > 0;
-}
-/* NOT the negation of the gamepad predicate — these mirror InputMap_State's two
- * INDEPENDENT gameplay gates (input_map.c:491-494), so in Auto (the default)
- * BOTH devices drive the menu, exactly as the input_device="Auto" description
- * promises ("keeps the keyboard and the selected gamepad both live"). Only an
- * explicit Gamepad pin (with a pad connected) takes the keyboard off the menu;
- * that matches InputMap_State's !s_pad_count safety valve so a Gamepad pin with
- * no pad still lets the keyboard reach/close the menu — no lockout. */
-static bool MenuKeyboardIsActiveDevice(void) {
-  return g_settings.input_device != kInputDevice_Gamepad ||
-         InputMap_GamepadCount() == 0;
-}
-
 static void RtlDrawPpuFrame(void) {
   g_rtl_game_info->draw_ppu_frame();
-}
-
-/* Runtime presentation settings can change while game execution is paused.
- * Re-render the same emulated PPU state once after such a change; ordinary
- * paused iterations retain that texture, so pause never advances the game or
- * repeatedly replays the scanline/HDMA renderer. */
-/* Returns true if a redraw actually happened, so the paused loop knows a
- * fresh frame is worth submitting (§2.5). */
-static bool RedrawPausedFrameIfNeeded(void) {
-  if ((g_paused || SettingsOverlay_IsOpen()) && g_paused_redraw_pending) {
-    RtlDrawPpuFrame();
-    g_paused_redraw_pending = false;
-    return true;
-  }
-  return false;
-}
-
-static void TogglePause(void) {
-  g_paused = !g_paused;
-  fprintf(stderr, "[pause] %s\n", g_paused ? "on" : "off");
-}
-
-static void CloseSceneInspectorSelection(void) {
-  SceneInspector_Clear();
-  SettingsOverlay_HideDebugPanel();
-  memset(&g_scene_inspector_presentation, 0,
-         sizeof(g_scene_inspector_presentation));
-  if (g_scene_inspector_owns_pause) g_paused = false;
-  g_scene_inspector_owns_pause = false;
-  ClearHeldInput();
-}
-
-static void ToggleTurbo(void) {
-  g_turbo = !g_turbo;
-  if (g_turbo)
-    fprintf(stderr, "[turbo] ON (%dx)\n", g_settings.turbo_multiplier);
-  else
-    fprintf(stderr, "[turbo] off\n");
 }
 
 static void FormatInspectorInfo(char *buffer, size_t buffer_size) {
@@ -357,7 +201,7 @@ static void FormatInspectorInfo(char *buffer, size_t buffer_size) {
 }
 
 static bool DumpSceneAssets(void) {
-  RedrawPausedFrameIfNeeded();
+  HostInput_RedrawPausedFrameIfNeeded();
   const DevToolsContext context = CurrentDevToolsContext();
   return DevTools_DumpSceneAssets(&context);
 }
@@ -371,303 +215,9 @@ static void PerformWarp(void) {
 static void TakeFullSnapshot(void) {
   /* Capture all emulated presentation state under a frame-unique prefix.
    * This is shared by F2 and the overlay ACTION row. */
-  RedrawPausedFrameIfNeeded();
+  HostInput_RedrawPausedFrameIfNeeded();
   const DevToolsContext context = CurrentDevToolsContext();
   DevTools_TakeFullSnapshot(&context);
-}
-
-static bool BuildSaveEditRequest(SaveEditRequest *edits) {
-  static const int region_states[kSaveProgressEdit_Count] = {
-    -1,
-    kSaveRegionState_Act1,
-    kSaveRegionState_Act1Cleared,
-    kSaveRegionState_Act2,
-    kSaveRegionState_Act2Cleared,
-  };
-  static const int item_values[] = {
-    -1, 0x00, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
-    0x0b, 0x0d, 0x0e, 0x0f, 0x12, 0x13, 0x14,
-  };
-  if (!edits) return false;
-  SaveEditRequest_Clear(edits);
-  bool staged = false;
-  for (int i = 0; i < kActRaiserSaveRegionCount; i++) {
-    int selector = g_settings.save_region_progress[i];
-    if (selector < 0 || selector >= kSaveProgressEdit_Count) continue;
-    edits->region_state[i] = region_states[selector];
-    staged = staged || edits->region_state[i] >= 0;
-  }
-#define SAVE_STAGE_DIRECT(request_field, setting_field) do { \
-  edits->request_field = g_settings.setting_field > 0 \
-      ? g_settings.setting_field : -1; \
-  staged = staged || edits->request_field >= 0; \
-} while (0)
-#define SAVE_STAGE_ZERO(request_field, setting_field) do { \
-  edits->request_field = g_settings.setting_field > 0 \
-      ? g_settings.setting_field - 1 : -1; \
-  staged = staged || edits->request_field >= 0; \
-} while (0)
-  SAVE_STAGE_DIRECT(master_level, save_master_level);
-  SAVE_STAGE_DIRECT(master_hp, save_master_hp);
-  SAVE_STAGE_ZERO(master_mp, save_master_mp);
-  SAVE_STAGE_DIRECT(lives, save_lives);
-  SAVE_STAGE_ZERO(angel_sp_current, save_angel_sp_current);
-  SAVE_STAGE_ZERO(angel_sp_max, save_angel_sp_max);
-  SAVE_STAGE_ZERO(angel_hp_current, save_angel_hp_current);
-  SAVE_STAGE_DIRECT(angel_hp_max, save_angel_hp_max);
-  SAVE_STAGE_ZERO(message_speed, save_message_speed);
-#undef SAVE_STAGE_DIRECT
-#undef SAVE_STAGE_ZERO
-
-  if (g_settings.save_player_name[0]) {
-    edits->player_name_set = true;
-    snprintf(edits->player_name, sizeof(edits->player_name), "%s",
-             g_settings.save_player_name);
-    staged = true;
-  }
-  if (g_settings.save_professional_mode > 0) {
-    edits->professional_mode = g_settings.save_professional_mode - 1;
-    staged = true;
-  }
-  if (g_settings.save_death_heim_state > 0) {
-    static const int death_heim_states[] = { -1, 0, 1, 4 };
-    int selector = g_settings.save_death_heim_state;
-    if (selector < (int)(sizeof(death_heim_states) /
-                         sizeof(death_heim_states[0]))) {
-      edits->death_heim_state = death_heim_states[selector];
-      staged = true;
-    }
-  }
-  if (g_settings.save_equipped_magic > 0) {
-    edits->equipped_magic = g_settings.save_equipped_magic - 1;
-    staged = true;
-  }
-  for (int i = 0; i < 4; i++) {
-    if (g_settings.save_magic_slots[i] <= 0) continue;
-    edits->magic_slots[i] = g_settings.save_magic_slots[i] - 1;
-    staged = true;
-  }
-  for (int i = 0; i < 8; i++) {
-    int selector = g_settings.save_item_slots[i];
-    if (selector <= 0 ||
-        selector >= (int)(sizeof(item_values) / sizeof(item_values[0])))
-      continue;
-    edits->item_slots[i] = item_values[selector];
-    staged = true;
-  }
-  for (int region = 0; region < kActRaiserSaveRegionCount; region++) {
-    for (int act = 0; act < 2; act++) {
-      int selector = g_settings.save_scores[region][act];
-      if (selector <= 0) continue;
-      edits->scores[region][act] = (selector - 1) * 10;
-      staged = true;
-    }
-  }
-  return staged;
-}
-
-static bool OnSettingsAction(const SettingDesc *desc) {
-  if (!desc || !desc->key) return false;
-  if (!strcmp(desc->key, "toggle_pause")) {
-    TogglePause();
-  } else if (!strcmp(desc->key, "toggle_turbo")) {
-    ToggleTurbo();
-  } else if (!strcmp(desc->key, "save_state")) {
-    RtlSaveLoad(kSaveLoad_Save, 0);
-    fprintf(stderr, "State saved.\n");
-  } else if (!strcmp(desc->key, "load_state")) {
-    /* Rewrites all of g_ppu (VRAM/CGRAM/OAM/regs). No quiesce needed: the
-     * next present happens later on this same thread (#18/P13). The loaded
-     * state is an unrelated scene, so the interpolation history must not
-     * survive it. */
-    RtlSaveLoad(kSaveLoad_Load, 0);
-    HostDisplay_InvalidatePresentHistory();
-    fprintf(stderr, "State loaded.\n");
-  } else if (!strcmp(desc->key, "warp_now")) {
-    PerformWarp();
-  } else if (!strcmp(desc->key, "take_snapshot")) {
-    TakeFullSnapshot();
-  } else if (!strcmp(desc->key, "diorama_reset")) {
-    Diorama_ResetCamera();
-  } else if (!strcmp(desc->key, "sim3d_reset_camera")) {
-    ResetSim3DCameraAndRedraw();
-  } else if (!strcmp(desc->key, "dump_scene_assets")) {
-    if (!DumpSceneAssets()) return false;
-  } else if (!strcmp(desc->key, "save_apply_session") ||
-             !strcmp(desc->key, "save_apply_persist")) {
-    SaveEditRequest edits;
-    BuildSaveEditRequest(&edits);
-    SaveError error = {{0}};
-    bool persist = !strcmp(desc->key, "save_apply_persist");
-    if (!SaveSystem_ApplyEdits(
-            &edits, g_settings.save_edit_armed, persist,
-            g_settings.save_autobackup, &error)) {
-      fprintf(stderr, "[save-editor] %s failed: %s\n",
-              persist ? "apply and save" : "session apply", error.message);
-      return false;
-    }
-    fprintf(stderr, "[save-editor] staged save edits applied%s\n",
-            persist ? " and saved" : " for this session");
-  } else if (!strcmp(desc->key, "save_import")) {
-    const char *path = getenv("AR_SAVE_IMPORT");
-    if (!path || !path[0]) {
-      FILE *probe = fopen("saves/import.srm", "rb");
-      if (probe) {
-        fclose(probe);
-        path = "saves/import.srm";
-      } else {
-        path = "saves/import.ini";
-      }
-    }
-    SaveError error = {{0}};
-    if (!SaveSystem_Import(path, g_settings.save_autobackup, &error)) {
-      fprintf(stderr, "[save-editor] import %s failed: %s\n", path,
-              error.message);
-      return false;
-    }
-    fprintf(stderr, "[save-editor] imported %s -> %s\n", path,
-            SaveSystem_ActivePath());
-  } else if (!strcmp(desc->key, "save_export_srm") ||
-             !strcmp(desc->key, "save_export_ini")) {
-    bool ini = !strcmp(desc->key, "save_export_ini");
-    const char *path = ini ? "saves/export.ini" : "saves/export.srm";
-    SaveError error = {{0}};
-    if (!SaveSystem_Export(ini ? kSaveFileFormat_Ini
-                               : kSaveFileFormat_NativeSrm,
-                           path, &error)) {
-      fprintf(stderr, "[save-editor] export %s failed: %s\n", path,
-              error.message);
-      return false;
-    }
-    fprintf(stderr, "[save-editor] export -> %s\n", path);
-  } else if (!strcmp(desc->key, "restart_game") ||
-             !strcmp(desc->key, "exit_desktop")) {
-    /* Settings normally persist at mutation time, but repeat the write here.
-     * Battery SRAM is flushed through the active Phase-6 backend by the shared
-     * shutdown path. */
-    char settings_path[1024];
-    UserDataFile(settings_path, sizeof settings_path, "settings.ini");
-    if (!Settings_Save(settings_path)) {
-      fprintf(stderr, "[lifecycle] could not save settings.ini\n");
-      return false;
-    }
-    g_host_lifecycle_request = !strcmp(desc->key, "restart_game")
-        ? kHostLifecycle_Restart : kHostLifecycle_Exit;
-    SettingsOverlay_Close();
-    fprintf(stderr, "[lifecycle] %s requested\n",
-            g_host_lifecycle_request == kHostLifecycle_Restart
-                ? "restart" : "exit");
-  } else {
-    return false;
-  }
-  return true;
-}
-
-/* Gamepad-only host actions (input_map.h). Deliberately the same entry points
- * the keyboard hotkeys use, so a pad press and a keypress cannot diverge. */
-static void OnGamepadHostAction(InputAction action) {
-  switch (action) {
-    case kInputAction_Menu:
-      if (SettingsOverlay_IsOpen()) {
-        SettingsOverlay_Close();
-      } else {
-        ClearHeldInput();
-        SettingsOverlay_Open();
-      }
-      break;
-    case kInputAction_Pause:
-      TogglePause();
-      break;
-    case kInputAction_CamReset:
-      /* Same split the middle-click reset uses: whichever 3D view is on
-       * screen owns the button, and neither responds outside them. */
-      if (Diorama_IsActiveThisFrame()) Diorama_ResetCamera();
-      else if (Sim3DCamera_FreeControlsAvailable(g_sim3d_textures_ready))
-        ResetSim3DCameraAndRedraw();
-      break;
-    case kInputAction_Turbo:
-      ToggleTurbo();
-      break;
-    case kInputAction_SaveState:
-      (void)OnSettingsAction(Settings_Find("save_state"));
-      break;
-    case kInputAction_LoadState:
-      (void)OnSettingsAction(Settings_Find("load_state"));
-      break;
-    default:
-      break;
-  }
-}
-
-static void OnRuntimeSettingChanged(const SettingDesc *desc,
-                                    SettingChangeResult result) {
-  (void)result;
-  /* Several branches below mutate the renderer/window wholesale
-   * (SDL_SetWindowFullscreen, HostDisplay_ResolveVideoGeometry ->
-   * RebindPpuOutputSurfaces + HostDisplay_ApplyWindowScale's logical sizing/
-   * SDL_SetWindowSize — §2.9(a)). This used to be bracketed by a
-   * present-thread quiesce; with rendering main-thread-only (#18/P13) the
-   * dispatch is ordinary straight-line code — the next present cannot
-   * overlap it. */
-  if (desc->field == &g_settings.audio_master_volume)
-    HostAudio_SetMasterVolumePercent(g_settings.audio_master_volume);
-  if (desc->field == &g_settings.audio_enabled)
-    HostAudio_SetEnabled(g_settings.audio_enabled);
-  if (desc->field == &g_settings.music_replacements)
-    MusicReplacements_ApplySetting();
-  if (desc->field == &g_settings.scene_inspector &&
-      !g_settings.scene_inspector)
-    CloseSceneInspectorSelection();
-  if (desc->field == &g_settings.window_mode && g_window) {
-    HostDisplay_ApplyWindowMode();
-    HostDisplay_UpdateProperties();  /* exclusive fullscreen can change the mode */
-  }
-  /* B1a (followup doc): live-apply without a restart — mirrors the boot-time
-   * SDL_SetRenderVSync read near SDL_CreateRenderer. Refresh rate owns vsync
-   * now; the frame-limit interval is polled per-present by
-   * HostDisplay_SubmitFrame, so a Limit-FPS change needs no explicit apply. */
-  if ((desc->field == &g_settings.refresh_mode ||
-       desc->field == &g_settings.uncapped_framerate) && g_renderer)
-    HostDisplay_ApplyRefreshVsync();
-  if (desc->field == &g_settings.extended_aspect ||
-      desc->field == &g_settings.pixel_aspect) {
-    HostDisplay_ResolveVideoGeometry(true);
-    g_paused_redraw_pending = true;
-    return;
-  }
-  /* Menu edits of the camera rows re-seed the live camera, the mirror of the
-   * write-back Diorama_AdjustCamera does for mouse input (§D13). */
-  if (desc->field == &g_settings.diorama_tilt_x_mrad ||
-      desc->field == &g_settings.diorama_tilt_y_mrad ||
-      desc->field == &g_settings.diorama_distance_x100)
-    Diorama_SeedCameraFromSettings();
-  if (desc->field == &g_settings.new_renderer) {
-    g_new_ppu = g_settings.new_renderer || g_ws_active;
-    g_paused_redraw_pending = true;
-  }
-  /* HUD scale is a display-category value but must not resize a manually
-   * resized window. Only the display profile and geometry policies own the
-   * presentation/window dimensions.
-   *
-   * window_scale is the one row whose whole purpose is to set the window size,
-   * so it gets HostDisplay_ApplyWindowScale. The others change what is DRAWN,
-   * not how big the window is: re-derive the logical presentation and leave
-   * the user's window alone (a hand-resized window must survive an aspect
-   * change). */
-  if (desc->field == &g_settings.window_scale)
-    HostDisplay_ApplyWindowScale();
-  else if (desc->field == &g_settings.display_mode ||
-           desc->field == &g_settings.ignore_aspect_ratio ||
-           desc->category == kSettingCat_Widescreen)
-    HostDisplay_RecomputeLogicalPresentation();
-  if (desc->category == kSettingCat_Display ||
-      desc->category == kSettingCat_Widescreen ||
-      Settings_CategoryIsSim3D(desc->category))
-    g_paused_redraw_pending = true;
-  /* A settings change can span an arbitrary human-scale gap and may have
-   * rebuilt the geometry; don't interpolate the next frame against a camera
-   * snapshot from before it. */
-  HostDisplay_InvalidatePresentHistory();
 }
 
 /* GetPresentationViewport moved to present.h/present.c as
@@ -682,14 +232,10 @@ static void AdjustHudOutputScale(int delta_percent) {
 
 static bool InspectWindowPoint(int window_x, int window_y) {
   const bool had_selection = SceneInspector_HasSelection();
-  const bool was_paused = g_paused != 0;
   const DevToolsContext context = CurrentDevToolsContext();
   if (!DevTools_InspectWindowPoint(&context, window_x, window_y))
     return false;
-  if (!had_selection)
-    g_scene_inspector_owns_pause = !was_paused;
-  ClearHeldInput();
-  g_paused = true;
+  HostInput_OnInspectorSelection(had_selection);
   return true;
 }
 
@@ -709,27 +255,8 @@ void Diorama_OnModeChanged(void) {
   memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
   memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
   ActRaiser_RebindPpuOutputSurfaces();
-  g_paused_redraw_pending = true;
+  HostInput_RequestPausedRedraw();
   HostDisplay_InvalidatePresentHistory();
-}
-
-/* M6 (ar-recomp-threading-impl.md §3, Phase 2 fixed-timestep). Per-tick
- * input resolution: the debug force-input hooks and the differential-oracle
- * record/replay, both keyed on the game's own $0088 frame counter. Must run
- * once per EMULATED tick (§3.7) — with the M6 accumulator loop, a single
- * outer host iteration can run zero, one, or several ticks (catch-up), so
- * this can no longer live inline before a single RtlRunFrame call. Headless
- * still calls this exactly once per outer iteration (§3.6 — headless never
- * runs more than one tick per iteration), so its behavior is unchanged. */
-static uint32 ComputeGameInputs(bool *stop_running) {
-  /* Re-read rather than trusting the last event: a gamepad's held bits are
-   * owned by input_map.c and change without a keyboard event ever firing. */
-  g_input_state = InputMap_State();
-  const uint32 inputs =
-      ForcedInput_Apply(g_input_state, snes_frame_counter);
-  const InputReplayFrameResult replay_result = InputReplay_Resolve(inputs);
-  if (replay_result.stop_requested) *stop_running = false;
-  return replay_result.inputs;
 }
 
 /* One emulated tick: sample input, run the recompiled game logic, apply
@@ -768,7 +295,7 @@ static void RunOneEmulatedTick(bool *stop_running) {
     apuprof_t0 = audio_trace_wall_ns();
   }
 
-  uint32 inputs = ComputeGameInputs(stop_running);
+  uint32 inputs = HostInput_ComputeGameInputs(stop_running);
 
   /* No frame-wide APU lock here (removed 2026-07-16). Every APU-touching
    * path inside the frame takes RtlApuLock itself (RtlApuWrite,
@@ -789,7 +316,7 @@ static void RunOneEmulatedTick(bool *stop_running) {
    * M5's job). Same input word each sub-frame (level-held buttons repeat;
    * fine for skipping sim waits). Cheats/pins apply inside RtlRunFrame, so
    * they hold during the skipped frames too. */
-  if (g_turbo) {
+  if (HostInput_IsTurbo()) {
     int mult = g_settings.turbo_multiplier;
     for (int tf = 1; tf < mult; tf++) RtlRunFrame(inputs);
   }
@@ -900,7 +427,7 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
     if (!g_settings.diorama_mode)
       ActRaiser_RebindPpuOutputSurfaces();
   }
-  g_paused_redraw_pending = false;
+  HostInput_MarkFrameDrawn();
   if (perf_on) {
     static uint32 draw_win_start, draw_ms_sum, draw_ms_max;
     static int draw_win_frames;
@@ -1533,12 +1060,16 @@ int main(int argc, char **argv) {
   SimWorldMap_Init(rom_data, rom_size);
   SettingsOverlay_SetInspectorInfoProvider(FormatInspectorInfo);
 
-  Settings_SetChangeObserver(OnRuntimeSettingChanged);
-  Settings_SetActionObserver(OnSettingsAction);
+  const RuntimeSettingsCallbacks runtime_settings_callbacks = {
+    .perform_warp = PerformWarp,
+    .take_full_snapshot = TakeFullSnapshot,
+    .dump_scene_assets = DumpSceneAssets,
+  };
+  RuntimeSettings_Install(&runtime_settings_callbacks);
   /* After the action observer is installed: the pad's save/load-state
    * bindings route through it. */
   InputMap_Init();
-  InputMap_SetActionHandler(OnGamepadHostAction);
+  HostInput_InstallActionHandler();
   Diorama_SeedCameraFromSettings();
 
   /* Music replacement is audio-side and works headless too (unlike the HD
@@ -1635,7 +1166,7 @@ int main(int argc, char **argv) {
     }
 
     SaveEditRequest edits;
-    bool staged = BuildSaveEditRequest(&edits);
+    bool staged = RuntimeSettings_BuildSaveEditRequest(&edits);
     if (staged && g_settings.save_edit_armed) {
       if (!SaveSystem_ApplyEdits(
               &edits, true, false, g_settings.save_autobackup, &error))
@@ -1711,7 +1242,7 @@ int main(int argc, char **argv) {
         case SDL_EVENT_DISPLAY_ADDED:
         case SDL_EVENT_DISPLAY_REMOVED:
           HostDisplay_UpdateProperties();
-          g_paused_redraw_pending = true;
+          HostInput_RequestPausedRedraw();
           break;
         /* The window is the USER's: a drag-resize re-derives the picture inside
          * it and nothing else. HostDisplay_RecomputeLogicalPresentation never
@@ -1727,7 +1258,7 @@ int main(int argc, char **argv) {
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
           HostDisplay_RecomputeLogicalPresentation();
-          g_paused_redraw_pending = true;
+          HostInput_RequestPausedRedraw();
           break;
         case SDL_EVENT_WINDOW_MINIMIZED:
         case SDL_EVENT_WINDOW_HIDDEN:
@@ -1736,7 +1267,7 @@ int main(int argc, char **argv) {
         case SDL_EVENT_WINDOW_RESTORED:
         case SDL_EVENT_WINDOW_SHOWN:
           g_window_hidden = false;
-          g_paused_redraw_pending = true;
+          HostInput_RequestPausedRedraw();
           break;
         /* GPU device/target reset: STATIC textures lose their contents and
          * must be recreated — both the HD replacements and the settings
@@ -1748,7 +1279,7 @@ int main(int argc, char **argv) {
           if (!SettingsOverlay_ReloadTextures(rom_data, rom_size))
             fprintf(stderr,
                     "[settings-menu] atlas reload after device reset failed\n");
-          g_paused_redraw_pending = true;
+          HostInput_RequestPausedRedraw();
           /* R17/C2: the retained re-present slot copies hd_entries[].texture
            * as raw SDL_Texture* (present.h). The host reload just destroyed
            * and recreated every one of them, so those copies are
@@ -1769,11 +1300,12 @@ int main(int argc, char **argv) {
           if (SettingsOverlay_IsOpen()) {
             /* Only the menu's active device drives navigation, so one
              * physical press (+ its synthesized twin) moves the menu once. */
-            if (MenuKeyboardIsActiveDevice()) {
+            if (HostInput_MenuKeyboardIsActive()) {
               bool was_open = true;
               bool consumed = SettingsOverlay_HandleKey(
                   event.key.key, true, event.key.repeat != 0);
-              if (was_open && !SettingsOverlay_IsOpen()) ClearHeldInput();
+              if (was_open && !SettingsOverlay_IsOpen())
+                HostInput_ClearHeld();
               if (consumed) break;
             } else {
               /* Menu owns the screen but keyboard isn't its device: swallow
@@ -1787,18 +1319,19 @@ int main(int argc, char **argv) {
           if (!event.key.repeat &&
               (event.key.key == SDLK_ESCAPE ||
                event.key.key == SDLK_F1)) {
-            ClearHeldInput();
+            HostInput_ClearHeld();
             SettingsOverlay_Open();
           } else if (event.key.key == SDLK_P) {
             if (SceneInspector_HasSelection()) {
-              bool inspector_owned_pause = g_scene_inspector_owns_pause;
-              CloseSceneInspectorSelection();
-              if (!inspector_owned_pause) TogglePause();
+              const bool inspector_owned_pause =
+                  HostInput_InspectorOwnsPause();
+              HostInput_CloseInspectorSelection();
+              if (!inspector_owned_pause) HostInput_TogglePause();
             } else {
-              TogglePause();
+              HostInput_TogglePause();
             }
           } else if (event.key.key == SDLK_T) {
-            ToggleTurbo();
+            HostInput_ToggleTurbo();
           } else if (event.key.key == SDLK_F3) {
             if (!event.key.repeat) {
               const SettingDesc *inspector = Settings_Find("scene_inspector");
@@ -1824,9 +1357,9 @@ int main(int argc, char **argv) {
                      event.key.key == SDLK_KP_PLUS) {
             if (!event.key.repeat) AdjustHudOutputScale(25);
           } else if (event.key.key == SDLK_F5) {
-            (void)OnSettingsAction(Settings_Find("save_state"));
+            (void)RuntimeSettings_HandleAction(Settings_Find("save_state"));
           } else if (event.key.key == SDLK_F7) {
-            (void)OnSettingsAction(Settings_Find("load_state"));
+            (void)RuntimeSettings_HandleAction(Settings_Find("load_state"));
           } else if (event.key.key == SDLK_F9) {
             /* Cycle 4:3 -> widescreen RAW -> widescreen FULL, for capturing
              * before/after comparison shots without a settings UI. Requires
@@ -1908,10 +1441,10 @@ int main(int argc, char **argv) {
               Settings_SetLong(row, !value);
               fprintf(stderr, "[diorama] %s %s\n", row->label,
                       value ? "hidden" : "shown");
-              g_paused_redraw_pending = true;
+              HostInput_RequestPausedRedraw();
             }
           } else {
-            HandleInput(event.key.scancode, true);
+            HostInput_HandleKeyboard(event.key.scancode, true);
           }
           break;
         case SDL_EVENT_TEXT_INPUT:
@@ -1933,10 +1466,10 @@ int main(int argc, char **argv) {
             if (event.button.button == SDL_BUTTON_RIGHT)
               Sim3DCamera_SetDragging(true);
             else if (event.button.button == SDL_BUTTON_MIDDLE)
-              ResetSim3DCameraAndRedraw();
+              HostInput_ResetSim3DCamera();
           } else if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
-              CloseSceneInspectorSelection();
+              HostInput_CloseInspectorSelection();
             } else if (event.button.button == SDL_BUTTON_LEFT) {
               /* SDL3 mouse event coordinates are floats; the hit-testing works
                * at SNES-pixel granularity, so truncating to int is exact. */
@@ -1959,7 +1492,7 @@ int main(int argc, char **argv) {
           } else if (Sim3DCamera_IsDragging() &&
                      Sim3DCamera_FreeControlsAvailable(
                          g_sim3d_textures_ready)) {
-            AdjustSim3DCameraAndRedraw(
+            HostInput_AdjustSim3DCamera(
                 event.motion.xrel * Diorama_DragRadPerPx(),
                 event.motion.yrel * Diorama_DragRadPerPx(),
                 0.0f);
@@ -1979,7 +1512,7 @@ int main(int argc, char **argv) {
           else if (!SettingsOverlay_IsOpen() &&
                    Sim3DCamera_FreeControlsAvailable(
                        g_sim3d_textures_ready))
-            AdjustSim3DCameraAndRedraw(
+            HostInput_AdjustSim3DCamera(
                 0.0f, 0.0f, -event.wheel.y * Diorama_ZoomStep());
           break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -2007,7 +1540,7 @@ int main(int argc, char **argv) {
           /* While the menu owns the screen the pad drives menu NAVIGATION, not
            * the game — but only when the pad is a menu-active device. */
           if (SettingsOverlay_IsOpen()) {
-            if (MenuGamepadIsActiveDevice())
+            if (HostInput_MenuGamepadIsActive())
               (void)SettingsOverlay_HandleGamepadEvent(&event);
             break;
           }
@@ -2015,29 +1548,29 @@ int main(int argc, char **argv) {
           break;
         case SDL_EVENT_KEY_UP:
           if (SettingsOverlay_IsOpen()) {
-            if (MenuKeyboardIsActiveDevice())
+            if (HostInput_MenuKeyboardIsActive())
               (void)SettingsOverlay_HandleKey(event.key.key, false, false);
           } else {
-            HandleInput(event.key.scancode, false);
+            HostInput_HandleKeyboard(event.key.scancode, false);
           }
           break;
       }
     }
 
-    if (g_host_lifecycle_request != kHostLifecycle_None) {
+    if (RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None) {
       running = false;
       continue;
     }
 
-    ApplyAnalogCameraInput();
+    HostInput_ApplyAnalogCamera();
 
     /* Host-owned pauses do not issue the game's native SPC $F2 command. Keep
      * the HD decoder aligned explicitly; its independent driver-pause latch
      * still prevents resume until both pause reasons have cleared. */
     MusicReplacements_SetHostPaused(
-        g_paused || SettingsOverlay_IsOpen());
+        HostInput_IsPaused() || SettingsOverlay_IsOpen());
 
-    if (g_paused || SettingsOverlay_IsOpen()) {
+    if (HostInput_IsPaused() || SettingsOverlay_IsOpen()) {
       /* §3.4: don't accumulate wall-clock time spent paused — otherwise
        * unpausing would fire a burst of catch-up ticks. last_time_ns is
        * re-stamped every paused iteration below, so it's always "just now"
@@ -2055,7 +1588,7 @@ int main(int argc, char **argv) {
       SettingsOverlay_Tick();
       /* Re-render the emulated frame only when something changed (a settings
        * edit, a resize); it is not re-rendered per iteration. */
-      RedrawPausedFrameIfNeeded();
+      HostInput_RedrawPausedFrameIfNeeded();
       /* §2.5: re-present unconditionally to keep the window alive while
        * paused — the removed present thread used to do this from its own idle
        * timeout. The present is paced by HostDisplay_SubmitFrame's host-UI
@@ -2186,7 +1719,7 @@ int main(int argc, char **argv) {
                        alpha,
                        g_diorama_frame_active,
                        g_settings.gpu_interp_enabled,
-                       g_paused_redraw_pending)) {
+                       HostInput_IsPausedRedrawPending())) {
           presented = true;
         }
       }
@@ -2216,7 +1749,8 @@ int main(int argc, char **argv) {
     if (!SaveSystem_AutoPersistIfChanged(&error))
       fprintf(stderr, "[saves] shutdown flush failed: %s\n", error.message);
   }
-  DumpDiagState(g_host_lifecycle_request == kHostLifecycle_Restart
+  DumpDiagState(RuntimeSettings_LifecycleRequest() ==
+                        kRuntimeLifecycle_Restart
                     ? "restart" : "exit");
   SimPhase0Trace_Close();
   SimRenderMetadata_TraceClose();
@@ -2247,7 +1781,7 @@ int main(int argc, char **argv) {
   SDL_Quit();
   free(rom_data);
 
-  if (g_host_lifecycle_request == kHostLifecycle_Restart) {
+  if (RuntimeSettings_LifecycleRequest() == kRuntimeLifecycle_Restart) {
     fprintf(stderr, "[lifecycle] restarting process\n");
 #ifdef _WIN32
     _execvp(argv[0], (const char *const *)argv);

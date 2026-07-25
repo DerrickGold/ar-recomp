@@ -110,11 +110,13 @@ add_executable(ActRaiserRecomp
     src/host_audio.c
     src/host_display.c
     src/host_display_pacing.c
+    src/host_input.c
     src/hd_replacement_host.c
     src/input_replay.c
     src/oracle_trace.c
     src/portable_paths.c
     src/runtime_diagnostics.c
+    src/runtime_settings.c
     src/scheduled_settings.c
     src/user_data_dir.c
     src/main.c
