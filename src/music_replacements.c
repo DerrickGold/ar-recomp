@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "music_replacements.h"
+#include "host_audio.h"
 #include "settings.h"
 
 #define STB_VORBIS_HEADER_ONLY
@@ -15,8 +16,6 @@
 
 /* Engine seams (snesrecomp-go/runtime). The APU mutex is recursive (SDL), so the
  * handlers below may take it even when the caller already holds it. */
-extern void RtlApuLock(void);
-extern void RtlApuUnlock(void);
 extern int RtlGetAudioOutputRate(void);
 extern void (*g_rtl_spc_upload_hook)(uint32_t src);
 extern void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val);

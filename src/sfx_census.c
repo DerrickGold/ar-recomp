@@ -4,12 +4,11 @@
 #include <stdint.h>
 
 #include "sfx_census.h"
+#include "host_audio.h"
 #include "run_dir.h"
 
 /* Engine seams. The APU mutex is recursive, so handlers may take it even when
  * the caller already holds it (both of ours are called with it held). */
-extern void RtlApuLock(void);
-extern void RtlApuUnlock(void);
 extern void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val);
 extern void (*g_dsp_voice_kon_hook)(int ch, uint8_t srcn, uint16_t decodeOffset,
                                     int volL, int volR, uint16_t pitch);

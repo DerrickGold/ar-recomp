@@ -46,6 +46,7 @@
 #include "widescreen.h"
 #include "present.h"
 #include "frame_slot.h"
+#include "host_audio.h"
 #include "portable_paths.h"
 #include "user_data_dir.h"
 #include "sim_phase0_trace.h"
@@ -108,8 +109,6 @@ int g_snes_width = 256, g_snes_height = 224;
 static int g_active_aspect_x, g_active_aspect_y;
 /* external: read by FrameSlot_Capture (frame_slot.c) */
 int g_active_pixel_aspect = kPixelAspect_Crt43;
-static int g_active_audio_frequency = 44100;
-static int g_active_audio_samples = 2048;
 static bool g_widescreen_runtime_allowed;
 /* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
  * active width can change live without reallocating storage; each frame uses
@@ -295,19 +294,6 @@ extern const RtlGameInfo kActRaiserGameInfo;
 
 bool g_new_ppu = true;
 
-static SDL_Mutex *g_audio_mutex;
-/* The audio callback runs on SDL's audio thread, while settings mutate on the
- * main/game thread. Keep the callback's one live input in an SDL atomic mirror
- * instead of racing on g_settings. */
-static SDL_AtomicInt g_audio_master_percent;
-/* Count of SDL_PutAudioStreamData failures. Written by the audio callback,
- * drained and reported by the main loop (an fprintf on the callback thread
- * could cause the very underrun it is reporting). */
-static SDL_AtomicInt g_audio_put_failures;
-/* SDL3 binds output to an SDL_AudioStream; keep the stream (and derived device
- * id) so pause/resume/close can address the opened device. */
-static SDL_AudioStream *g_audio_stream;
-static bool g_audio_open;
 void ActRaiser_RebindPpuOutputSurfaces(void);
 
 void NORETURN Die(const char *error) {
@@ -428,34 +414,6 @@ void DumpDiagState(const char *tag) {
           p_state, tag ? tag : "");
 }
 
-/* Game-thread id for AR_APUPROF lock-wait attribution (set in main before
- * the game loop; 0 = not yet known, wait timing disabled). */
-static SDL_ThreadID g_game_thread_id;
-
-void RtlApuLock(void) {
-  if (!g_audio_mutex) return;
-  extern int ApuProfEnabled(void);
-  if (ApuProfEnabled()) {
-    extern uint64_t g_apuprof_lockwait_ns, g_apuprof_audiowait_max_ns;
-    extern uint64_t audio_trace_wall_ns(void);
-    /* SDL3 SDL_TryLockMutex returns true when the lock was acquired. */
-    if (SDL_TryLockMutex(g_audio_mutex)) return;
-    uint64_t t0 = audio_trace_wall_ns();
-    SDL_LockMutex(g_audio_mutex);
-    uint64_t waited = audio_trace_wall_ns() - t0;
-    if (g_game_thread_id != 0 && SDL_GetCurrentThreadID() == g_game_thread_id)
-      g_apuprof_lockwait_ns += waited;
-    else if (waited > g_apuprof_audiowait_max_ns)
-      g_apuprof_audiowait_max_ns = waited;
-    return;
-  }
-  SDL_LockMutex(g_audio_mutex);
-}
-
-void RtlApuUnlock(void) {
-  if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
-}
-
 /* The 12 joypad bits now live in input_map.c, keyed by SCANCODE (physical key
  * position) rather than keycode, so a bind made on one keyboard layout stays
  * on the same physical key on another. g_input_state remains the one word the
@@ -494,153 +452,6 @@ static bool MenuGamepadIsActiveDevice(void) {
 static bool MenuKeyboardIsActiveDevice(void) {
   return g_settings.input_device != kInputDevice_Gamepad ||
          InputMap_GamepadCount() == 0;
-}
-
-/* SDL3 audio-stream callback: fires when the bound device needs more data.
- * `additional_amount` is the number of BYTES the stream wants right now, in
- * the stream's input format (16-bit stereo interleaved = 4 bytes per sample
- * frame — the same shape RtlRenderAudio produced for the SDL2 callback).
- *
- * We render into a fixed on-stack scratch buffer in bounded chunks and push
- * each to the stream. A fixed buffer (rather than alloca(additional_amount))
- * keeps the audio-thread stack safe no matter how large a request SDL makes —
- * SDL may ask for the whole device buffer at once, and alloca cannot fail
- * gracefully. The APU lock is taken once around the whole request so the
- * batch renders atomically with respect to the game thread. */
-static void SDLCALL AudioCallback(void *userdata, SDL_AudioStream *stream,
-                                  int additional_amount, int total_amount) {
-  (void)userdata;
-  (void)total_amount;
-  if (additional_amount <= 0) return;
-  /* 2048 stereo 16-bit frames per chunk; loop for larger requests. */
-  enum { kChunkBytes = 2048 * 4 };
-  Uint8 chunk[kChunkBytes];
-
-  /* AR_APUPROF: time this acquire — it is the audio thread's outer lock
-   * (RtlRenderAudio's internal RtlApuLock calls are recursive re-entries and
-   * can never block), so any starvation of the callback shows up here. SDL3
-   * mutex locks never fail (void return), so no lock-failure early-out. */
-  extern int ApuProfEnabled(void);
-  if (ApuProfEnabled()) {
-    extern uint64_t g_apuprof_audiowait_max_ns;
-    extern uint64_t audio_trace_wall_ns(void);
-    uint64_t t0 = audio_trace_wall_ns();
-    SDL_LockMutex(g_audio_mutex);
-    uint64_t waited = audio_trace_wall_ns() - t0;
-    if (waited > g_apuprof_audiowait_max_ns)
-      g_apuprof_audiowait_max_ns = waited;
-  } else {
-    SDL_LockMutex(g_audio_mutex);
-  }
-  int volume = SDL_GetAtomicInt(&g_audio_master_percent);
-  if (volume < 0) volume = 0;
-  if (volume > 100) volume = 100;
-  int remaining = additional_amount;
-  while (remaining > 0) {
-    int bytes = remaining < kChunkBytes ? remaining : kChunkBytes;
-    RtlRenderAudio((int16 *)chunk, bytes / 4, 2);
-    if (volume != 100) {
-      int16 *samples = (int16 *)chunk;
-      const int sample_count = bytes / (int)sizeof(*samples);
-      for (int i = 0; i < sample_count; i++)
-        samples[i] = (int16)(((int32)samples[i] * volume) / 100);
-    }
-    /* SDL_PutAudioStreamData returns false on failure, and a dropped chunk is
-     * silent data loss whose SPC cycles were ALREADY consumed under the lock —
-     * unrecoverable, but the player deserves to know their audio glitched.
-     * Counted atomically and reported from the main loop: this is the audio
-     * callback, where an fprintf could itself cause the underrun it reports. */
-    if (!SDL_PutAudioStreamData(stream, chunk, bytes))
-      SDL_AddAtomicInt(&g_audio_put_failures, 1);
-    remaining -= bytes;
-  }
-  SDL_UnlockMutex(g_audio_mutex);
-}
-
-static bool OpenHostAudio(void) {
-  if (g_audio_open) return true;
-  SDL_AudioSpec want = {0};
-  /* Stream input rate: prefer the DEVICE's native rate so the resample
-   * chain is one hop (32040 -> device) instead of two (32040 -> 44100 ->
-   * 48000 on the common 48kHz-native hardware). The audio_frequency setting
-   * still pins an explicit rate when the user sets one; the query failing
-   * (or reporting nonsense) falls back to the setting/44100 as before. */
-  int device_native_hz = 0;
-  {
-    SDL_AudioSpec native = {0};
-    if (SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                 &native, NULL) &&
-        native.freq >= 8000 && native.freq <= 384000)
-      device_native_hz = native.freq;
-  }
-  want.freq = g_active_audio_frequency > 0 ? g_active_audio_frequency
-              : device_native_hz > 0       ? device_native_hz
-                                           : 44100;
-  /* Below 44.1kHz the request cannot be honored and only hurts: SDL's
-   * OpenPhysicalAudioDevice clamps the DEVICE rate to at least
-   * DEFAULT_AUDIO_PLAYBACK_FREQUENCY (44100), so asking for the SNES-native
-   * 32040 still opens a 44100 device and merely adds a pointless hop through
-   * OUR resampler. Clamp, so the "32.04 kHz" preset degrades to the honest
-   * minimum instead of silently being worse than every other choice. */
-  if (want.freq < 44100) {
-    fprintf(stderr, "[audio] requested %d Hz is below SDL's 44100 device "
-                    "minimum; using 44100 (the setting cannot lower it)\n",
-            want.freq);
-    want.freq = 44100;
-  }
-  want.format = SDL_AUDIO_S16;
-  want.channels = 2;
-  /* SDL3's AudioSpec no longer carries a buffer size; the device sample-frame
-   * count is controlled by a hint. The configured depth is a frame COUNT
-   * whose latency meaning depends on the device rate (2048 = ~46ms at
-   * 44.1kHz but ~11ms at 192kHz), so when the user has not moved it off the
-   * default, scale it to the device rate to preserve the intended ~46ms
-   * rather than the raw count. An explicit non-default value is respected
-   * verbatim (the user asked for that count). */
-  if (g_active_audio_samples > 0) {
-    int frames_n = g_active_audio_samples;
-    if (frames_n == 2048 && device_native_hz > 0)
-      frames_n = (int)(2048ll * device_native_hz / 44100);
-    char frames[16];
-    snprintf(frames, sizeof(frames), "%d", frames_n);
-    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, frames);
-  }
-  g_audio_stream = SDL_OpenAudioDeviceStream(
-      SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, AudioCallback, NULL);
-  if (!g_audio_stream) {
-    fprintf(stderr, "SDL_OpenAudioDeviceStream failed: %s\n", SDL_GetError());
-    return false;
-  }
-  /* `want` is the STREAM INPUT format — the rate our callback produces at.
-   * SDL resamples that to the device's native rate internally, so the
-   * emulator's output rate must be want.freq, NOT the device rate. (This
-   * differs from SDL2, where SDL_OpenAudio's callback ran at the device rate
-   * `have.freq`; feeding the device rate here would mis-time RtlRenderAudio
-   * and detune all audio whenever the device rate differs from want.freq.) */
-  RtlSetAudioOutputRate(want.freq);
-  /* The device's actual rate/buffer is informational only (SDL resamples). */
-  SDL_AudioSpec device = want;
-  int device_frames = 0;
-  if (!SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(g_audio_stream),
-                                &device, &device_frames)) {
-    fprintf(stderr, "[audio] SDL_GetAudioDeviceFormat failed: %s "
-                    "(device rate/buffer diagnostic unavailable)\n",
-            SDL_GetError());
-  }
-  fprintf(stderr, "[audio] stream input %d Hz, device %d Hz %d-frame buffer "
-                  "(requested %d frames)\n",
-          want.freq, device.freq, device_frames, g_active_audio_samples);
-  g_audio_open = true;
-  return true;
-}
-
-/* SDL3 opens the device paused; playback needs an explicit resume. */
-static void ApplyAudioEnabled(void) {
-  if (g_settings.audio_enabled) {
-    if (OpenHostAudio()) SDL_ResumeAudioStreamDevice(g_audio_stream);
-  } else if (g_audio_open) {
-    SDL_PauseAudioStreamDevice(g_audio_stream);
-  }
 }
 
 static void RtlDrawPpuFrame(void) {
@@ -1930,9 +1741,9 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
    * dispatch is ordinary straight-line code — the next present cannot
    * overlap it. */
   if (desc->field == &g_settings.audio_master_volume)
-    SDL_SetAtomicInt(&g_audio_master_percent, g_settings.audio_master_volume);
+    HostAudio_SetMasterVolumePercent(g_settings.audio_master_volume);
   if (desc->field == &g_settings.audio_enabled)
-    ApplyAudioEnabled();
+    HostAudio_SetEnabled(g_settings.audio_enabled);
   if (desc->field == &g_settings.music_replacements)
     MusicReplacements_ApplySetting();
   if (desc->field == &g_settings.scene_inspector &&
@@ -2705,9 +2516,8 @@ static void RunOuterIterationHousekeeping(void) {
   /* Surface audio-chunk drops the callback counted (R12). Reported here, off
    * the audio thread, and coalesced so a sustained problem cannot spam. */
   {
-    int dropped = SDL_GetAtomicInt(&g_audio_put_failures);
+    int dropped = HostAudio_TakeRejectedChunkCount();
     if (dropped) {
-      SDL_AddAtomicInt(&g_audio_put_failures, -dropped);
       static int total;
       total += dropped;
       fprintf(stderr, "[audio] %d chunk(s) rejected by SDL_PutAudioStreamData "
@@ -2910,15 +2720,11 @@ int main(int argc, char **argv) {
     settings_path = UserDataFile(settings_file, sizeof settings_file,
                                  "settings.ini");
   Settings_InitWithFile(settings_path);
-  g_active_audio_frequency = Settings_AudioFrequencyHz();
-  g_active_audio_samples = g_settings.audio_samples;
   ResolveVideoGeometry(false);
 
   /* Display presets depend on whether the resolved aspect selected a wide
    * budget. Finalize only after g_ws_active/g_ws_extra are authoritative. */
   Settings_FinalizeDisplayMode();
-  SDL_SetAtomicInt(&g_audio_master_percent, g_settings.audio_master_volume);
-
   /* AR_MXCHECK=1: enable the per-function-entry m/x invariant check
    * (validates the emitter's static m/x analysis on every direct call). */
   { extern int g_ar_mx_check; const char *e = getenv("AR_MXCHECK");
@@ -3385,9 +3191,11 @@ int main(int argc, char **argv) {
 
   WramTraceInit();
 
-  g_audio_mutex = SDL_CreateMutex();
-  g_game_thread_id = SDL_GetCurrentThreadID();
-  ApplyAudioEnabled();
+  if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
+                      g_settings.audio_master_volume,
+                      g_settings.audio_enabled)) {
+    fprintf(stderr, "[audio] host audio disabled for this session\n");
+  }
 
   /* AR_LOADSTATE=<slot>: load a savestate at boot (before the main loop), so a
    * headless/instrumented run can start from a captured moment instead of
@@ -3952,10 +3760,7 @@ int main(int argc, char **argv) {
    * but the report should land while the run dir is still current. */
   SfxCensus_Report();
 
-  /* SDL_DestroyAudioStream also closes the bound device (replaces the SDL2
-   * SDL_CloseAudio path). */
-  if (g_audio_stream) SDL_DestroyAudioStream(g_audio_stream);
-  SDL_DestroyMutex(g_audio_mutex);
+  HostAudio_Shutdown();
   for (int i = 0; i < g_hd_replacement_count; i++) {
     if (g_hd_replacements[i].texture)
       SDL_DestroyTexture((SDL_Texture *)g_hd_replacements[i].texture);
