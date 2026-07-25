@@ -43,6 +43,8 @@ func run(args []string) error {
 		return runBuild(args[1:])
 	case "all":
 		return runAll(args[1:])
+	case "gui":
+		return runGUI(args[1:])
 	case "toolchain":
 		return runToolchain(args[1:])
 	case "doctor":
@@ -68,6 +70,7 @@ Commands:
   build       Configure (by default) and compile the native game
               (--hermetic compiles with the pinned Zig toolchain, no CMake)
   all         Regenerate, configure, and compile in one command
+  gui         Open the local graphical hermetic game builder
   toolchain   Report, fetch, or pin the hermetic C toolchain (Zig)
   doctor      Report host tools and project inputs
   version     Print the driver version and target platform

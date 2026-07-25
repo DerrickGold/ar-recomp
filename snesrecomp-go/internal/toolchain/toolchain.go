@@ -188,7 +188,7 @@ func Fetch(cacheDir string, stdout io.Writer) (Zig, error) {
 	archivePath := filepath.Join(cacheDir, entry.Archive)
 	if !checksumMatches(archivePath, want) {
 		fmt.Fprintf(stdout, "toolchain: downloading %s\n", url)
-		if err := download(url, archivePath); err != nil {
+		if err := download(url, archivePath, stdout); err != nil {
 			return Zig{}, err
 		}
 	}
@@ -240,7 +240,7 @@ func (p *progressReader) Read(buffer []byte) (int, error) {
 	return n, err
 }
 
-func download(url, destination string) error {
+func download(url, destination string, output io.Writer) error {
 	// A default http.Client has no timeout, so a stalled connection could hang
 	// the build forever. Cap the whole transfer at 30 minutes.
 	client := &http.Client{Timeout: 30 * time.Minute}
@@ -259,13 +259,13 @@ func download(url, destination string) error {
 	defer file.Close()
 	var source io.Reader = response.Body
 	if response.ContentLength > 0 {
-		source = &progressReader{inner: response.Body, total: response.ContentLength, out: os.Stdout}
+		source = &progressReader{inner: response.Body, total: response.ContentLength, out: output}
 	}
 	if _, err := io.Copy(file, source); err != nil {
 		return fmt.Errorf("download %s: %w", url, err)
 	}
 	if response.ContentLength > 0 {
-		fmt.Fprintln(os.Stdout)
+		fmt.Fprintln(output)
 	}
 	return nil
 }

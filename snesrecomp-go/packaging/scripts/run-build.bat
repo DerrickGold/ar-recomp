@@ -1,69 +1,34 @@
 @echo off
-rem One-click build-and-play for Windows. Double-click this file.
-rem Put your game ROM (.sfc) in this same folder first. See README.txt.
-setlocal enabledelayedexpansion
+rem One-click graphical build for Windows. Double-click this file.
+setlocal
 
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "UTILS=%ROOT%\utils"
 
-if not exist "%UTILS%" (
-    echo ERROR: This package looks incomplete ^(the utils folder is missing^).
+if not exist "%UTILS%\tools\snesbuild.exe" (
+    echo ERROR: This package looks incomplete.
     echo Re-extract the downloaded archive and run this again.
-    goto :end
+    goto :error
 )
-
-cd /d "%ROOT%"
-
-set "ROM="
-for %%F in (*.sfc *.smc) do if not defined ROM set "ROM=%%F"
-if not defined ROM (
-    echo ERROR: No ROM found. Copy your game ROM ^(a .sfc file^) into this folder:
-    echo   %ROOT%
-    echo then run this again.
-    goto :end
-)
-
-echo Using ROM: %ROM%
-echo Building - the first run takes a few minutes...
-echo.
 
 if not exist "%UTILS%\tools\sdl3\lib\SDL3.dll" (
-    echo NOTE: bundled SDL3.dll not found under tools\sdl3\lib. If the build
-    echo fails to start with a missing-SDL3.dll error, the SDL3 redistributable
-    echo was not fetched for this host arch ^(windows-arm64 may need a rebuild^).
+    echo NOTE: bundled SDL3.dll was not found. This platform may require a
+    echo system SDL3 development package before it can build.
     echo.
 )
 
-"%UTILS%\tools\snesbuild.exe" all --hermetic --root "%UTILS%" --rom "%ROOT%\%ROM%" --allow-stubs
-if errorlevel 1 (
-    echo.
-    echo ERROR: The build did not complete. The messages above say why;
-    echo share them when asking for help.
-    goto :end
-)
-
-set "BIN_NAME="
-for %%F in ("%UTILS%\build\hermetic\*.exe") do if not defined BIN_NAME set "BIN_NAME=%%~nxF"
-if not defined BIN_NAME (
-    echo ERROR: Build finished but no game program was found.
-    goto :end
-)
-
-rem Put the finished game (and its media library) in this folder.
-copy /y "%UTILS%\build\hermetic\%BIN_NAME%" "%ROOT%\" >nul
-if exist "%UTILS%\build\hermetic\SDL3.dll" copy /y "%UTILS%\build\hermetic\SDL3.dll" "%ROOT%\" >nul
-
-rem Create a one-click "play again" script next to the game. In the generated
-rem file, %%~dp0 becomes a literal %~dp0 (the folder the script lives in).
-set "PLAY=%ROOT%\run-game.bat"
->"%PLAY%" echo @echo off
->>"%PLAY%" echo rem Runs the already-built game. Created by run-build.bat.
->>"%PLAY%" echo cd /d "%%~dp0utils"
->>"%PLAY%" echo "%%~dp0%BIN_NAME%" "%%~dp0%ROM%" --config config.ini
-
+echo Opening the local ActRaiser Recomp builder...
+echo If the browser does not open, use the private URL shown below.
 echo.
-echo Build complete - this was a one time process. Now you can open run-game.bat to start the game.
-:end
+
+"%UTILS%\tools\snesbuild.exe" gui --root "%UTILS%" --output-dir "%ROOT%" --allow-stubs
+if errorlevel 1 goto :error
+exit /b 0
+
+:error
+echo.
+echo The builder stopped unexpectedly. Share the messages above when asking for help.
 echo.
 pause
+exit /b 1

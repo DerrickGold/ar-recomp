@@ -8,29 +8,30 @@ anything.
 
 WHAT YOU NEED
 -------------
-Your own game ROM: a ".sfc" file. Nothing else.
+Your own game ROM: a ".sfc" or ".smc" file. Nothing else.
 
 
 HOW TO PLAY
 -----------
-1. Put your ROM (the ".sfc" file) into THIS folder, next to this README.
-
-2. Build the game once - start "@SNESBUILD_RUN_SCRIPT@":
+1. Start "@SNESBUILD_RUN_SCRIPT@":
       macOS    - double-click  run-build.command
       Windows  - double-click  run-build.bat
       Linux    - run           ./run-build.sh
 
-   This takes a few minutes. It only needs to be done one time.
+2. Your browser opens the private local builder. Choose your ROM, then press
+   "Build game". This takes a few minutes and only needs to be done one time.
+   Your ROM never leaves this computer.
 
 3. Play - when the build finishes, a "run-game" file appears in this folder
    (run-game.command on macOS, run-game.bat on Windows, run-game.sh on Linux).
-   Open it to start the game. Use it every time you want to play; it starts
-   right away, with no waiting.
+   Press "Launch game" in the builder now. Later, open the run-game file
+   directly; it starts right away, with no rebuilding.
 
 
 IF SOMETHING GOES WRONG
 -----------------------
-- "No ROM found": the ".sfc" file must be in this folder, next to this README.
+- The browser does not open: copy the private http://127.0.0.1 URL printed in
+  the run-build window and paste it into any browser on this computer.
 
 - macOS says the file is from an unidentified developer: hold Control, click
   run-build.command, choose Open, then Open again. (You only do this once.)
@@ -48,7 +49,7 @@ folders beside it. Anything you don't add simply stays original.
 
 WHAT THE FOLDERS ARE
 --------------------
-- run-build.*     press this once to build the game.
+- run-build.*     opens the graphical builder.
 - run-game.*      created by the build; press it to play, every time.
 - utils/          the build tools and game files. You can ignore this.
 

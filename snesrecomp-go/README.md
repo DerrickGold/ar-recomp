@@ -39,8 +39,8 @@ game ROM and should not be redistributed.
 
 - A downloaded `v2regen` or `snesbuild` binary needs no Go installation.
 - Go 1.24 or newer is required to build the tools or run their tests from source.
-- A C11 compiler and CMake 3.16 or newer for a game executable.
-- SDL2 development headers/libraries for the bundled runtime's input layer.
+- A C11 compiler, CMake 3.16+, and SDL3 development files for the traditional
+  developer build. The hermetic/GUI path uses the packaged Zig and SDL3 inputs.
 - A legally obtained, local ROM for the game being recompiled.
 
 The Go module has no third-party Go dependencies.
@@ -196,9 +196,9 @@ Run `snesbuild help` or `snesbuild <command> -h` for project-driver options.
 `packaging/` is a standalone CMake project that builds a **fully
 self-contained, one-click bundle per platform**: the whole buildable game
 project plus the build machinery (`tools/snesbuild`, the pinned Zig toolchain,
-bundled SDL2 on macOS/Windows) and a `run-build` script. A user unpacks it,
-drops in their ROM, and runs the script — no repository checkout and no
-developer tools required.
+and the supported SDL3 redistributables) and a `run-build` script. A user
+unpacks it and runs the script, which opens the local graphical ROM picker and
+build log — no repository checkout or developer tools required.
 
 ```sh
 make release                                    # from the game repo root, all platforms

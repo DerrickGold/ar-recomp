@@ -217,14 +217,16 @@ There are two ways to build, aimed at different people:
 ### Prebuilt one-click bundles (for players)
 
 The distribution bundles are the zero-setup path: a player downloads one
-archive for their platform, drops in their own ROM, and runs one script — no
-CMake, compiler, SDL, or Go required, and no repository checkout. Each bundle
-carries the whole buildable project plus a pinned C toolchain (Zig) and, on
-macOS, Windows x86_64, and Steam Deck, SDL3; the game's C is generated locally
-from the player's ROM (never shipped), and the folder exposes only a
+archive for their platform and runs one script — no CMake, compiler, SDL, or
+Go required, and no repository checkout. The script opens a local graphical
+builder where the player selects their own ROM and watches the build. Each
+bundle carries the whole buildable project plus a pinned C toolchain (Zig)
+and, on macOS, Windows x86_64, and Steam Deck, SDL3; the game's C is generated
+locally from the player's ROM (never shipped), and the folder exposes only a
 `README.txt` and a `run-build` script, with everything else tucked under
-`utils/`. Running `run-build` once builds the game and writes a `run-game`
-script; the player opens `run-game` to play, every time, with no rebuild.
+`utils/`. The browser interface is served only on loopback and the ROM never
+leaves the computer. Running `run-build` once writes a `run-game` script; the
+player opens `run-game` to play, every time, with no rebuild.
 
 To **produce** all seven bundles from a source checkout (into `release/`, named
 `actraiser-recomp-<platform>.{tar.xz,zip}` with SHA-256 sidecars):
@@ -332,7 +334,7 @@ If you get it building, a PR documenting the steps would help.
      ```
 
    Steps 2–4 are exactly what the player-facing `run-build` bundle script
-   automates; producing those bundles is described under
+   automates through its local graphical builder; producing those bundles is described under
    [Prebuilt bundles](#prebuilt-one-click-bundles-for-players) above.
 
 ## Running the game

@@ -51,12 +51,14 @@ sources, and generated banks — with a pinned [Zig](https://ziglang.org)
 toolchain (`zig cc`, a self-contained clang+lld) and links the executable
 directly. CMake, Xcode CLT/gcc, and SDL3 *development packages* are not
 required; only the SDL3 runtime library remains an external input, and the
-planned platform bundle will carry that beside the executable.
+platform bundles carry it beside the executable where a redistributable is
+available.
 
 ```sh
 snesbuild toolchain fetch          # one-time: download + sha256-verify + extract
 snesbuild build --hermetic --root . --rom ar.sfc
 snesbuild all --hermetic --root . --rom ar.sfc --allow-stubs   # regen + build
+snesbuild gui --root .         # local graphical ROM picker + hermetic build
 ```
 
 The pinned Zig release (0.16.0) is resolved in order: `$SNESBUILD_ZIG`, the
@@ -93,7 +95,8 @@ developer workflow; hermetic is the distribution path.
 |---|---|
 | Run a downloaded `snesbuild doctor` or `regen` | `snesbuild`, this project, and the user's local ROM |
 | Build `snesbuild` from source | Go 1.24+ |
-| Compile the game today | CMake, a C11 compiler, SDL3 development files, and platform SDK/linker support |
+| Build through a self-contained bundle GUI | The bundle and the user's local ROM |
+| Compile through the developer CMake path | CMake, a C11 compiler, SDL3 development files, and platform SDK/linker support |
 | Run the compiled game | SDL3 runtime plus the user's local ROM |
 
 The Go binary has no third-party Go or runtime dependencies. It uses Go's
@@ -105,10 +108,10 @@ census deltas, and cross-platform exit status handling; it does not call
 
 `snesrecomp-go/packaging/` is a standalone CMake project (it compiles no C
 itself) that produces a **fully self-contained, one-click bundle per
-platform**. A non-technical user downloads one archive, drops in their ROM,
-and runs one script — no repository checkout, no compiler, no SDL, nothing
-installed system-wide. Because the Go module is CGO-free, every platform
-cross-builds from one machine.
+platform**. A non-technical user downloads one archive and runs one script,
+which opens a local graphical ROM picker and build log — no repository
+checkout, compiler, SDL, or system-wide install. Because the Go module is
+CGO-free, every platform cross-builds from one machine.
 
 **Build all seven from the repo root, one command:**
 
@@ -160,11 +163,13 @@ official SDL headers with Valve's pinned Steam Runtime SDL shared library.
 Generic Linux archives still use the system SDL because there is no single
 portable upstream redistributable.
 
-**How a user runs it:** unpack the archive, drop the ROM in the folder next to
-`README.txt`, and run `run-build` **once**. It builds the game via
-`snesbuild all --hermetic --allow-stubs` (regen + compile with the bundled
-toolchain and SDL, `--root utils`), then does the two things that make play
-trivial:
+**How a user runs it:** unpack the archive and run `run-build` **once**. The
+script starts `snesbuild gui`, a dependency-free local web interface bound to
+`127.0.0.1` behind a random per-session URL. The user selects a ROM, sees the
+live build log, and can launch the finished game. The ROM is copied locally as
+`utils/user-rom.sfc`; it is never sent over the network. The GUI runs the same
+hermetic regeneration/build APIs as the CLI, then does the two things that make
+play trivial:
 
 1. **Copies the finished game to the root** — the executable and, on
    macOS/Windows, its bundled SDL library — so the playable result sits in the
@@ -206,9 +211,6 @@ across the whole bundle (≈145 first-party files scanned per archive).
 4. **`--allow-stubs` decision.** The one-click flow currently passes it so
    regen always completes; closing the hard-stub backlog would let the shipped
    flow drop it.
-5. Optionally, a small ROM-picker/progress GUI wrapping the same Go APIs — the
-   CLI + scripts remain the automation surface.
-
 Only generic tools and runtime sources should be distributed. The ROM,
 generated C, generated manifests, and the resulting ROM-derived game binary
 must continue to be produced locally from the user's legally obtained ROM.
