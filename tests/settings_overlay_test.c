@@ -126,42 +126,49 @@ static uint8_t *ReadOptionalRom(size_t *size_out) {
   return data;
 }
 
-/* AUDIT-1.1 / 3P-overlay-inputdevice: the menu-device arbitration gates in
- * main.c (MenuGamepadIsActiveDevice / MenuKeyboardIsActiveDevice) are static and
- * cannot be linked here, so replicate their EXACT independent rules over
- * (input_device, gamepad_count) and assert the truth table. The two predicates
- * are NOT complementary — they mirror InputMap_State's two independent gameplay
- * gates (input_map.c:491-494): in Auto BOTH devices are menu-active, so a
- * keyboard user with an idle pad connected is never locked out of the menu. */
+/* The gamepad menu gate remains connection-based. Keyboard arbitration is
+ * activity-based in Auto: an idle connected pad does not lock out a keyboard,
+ * but a native pad event wins over a simultaneous Steam-generated key. */
 static bool MenuGamepadOwns(int input_device, int gamepad_count) {
   return input_device != kInputDevice_Keyboard && gamepad_count > 0;
-}
-static bool MenuKeyboardOwns(int input_device, int gamepad_count) {
-  return input_device != kInputDevice_Gamepad || gamepad_count == 0;
 }
 static void CheckMenuDeviceGateTruthTable(void) {
   const struct {
     int input_device;
     int gamepad_count;
-    bool gamepad_active;
+    bool pad_input_active;
+    bool gamepad_enabled;
     bool keyboard_active;
   } rows[] = {
-      /* input_device,       pads, gamepad, keyboard */
-      { kInputDevice_Auto,     0, false, true  },  /* Auto, no pad   -> keyboard only     */
-      { kInputDevice_Auto,     1, true,  true  },  /* Auto, pad      -> BOTH (no lockout)  */
-      { kInputDevice_Keyboard, 0, false, true  },  /* Keyboard pin   -> keyboard only     */
-      { kInputDevice_Keyboard, 2, false, true  },  /* Keyboard + pad -> keyboard only     */
-      { kInputDevice_Gamepad,  1, true,  false },  /* Gamepad, pad   -> gamepad only      */
-      { kInputDevice_Gamepad,  0, false, true  },  /* Gamepad, no pad-> keyboard (valve)   */
+      /* input_device,       pads, active, gamepad, keyboard */
+      { kInputDevice_Auto,     0, false, false, true  },
+      { kInputDevice_Auto,     1, false, true,  true  },
+      { kInputDevice_Auto,     1, true,  true,  false },
+      { kInputDevice_Keyboard, 0, false, false, true  },
+      { kInputDevice_Keyboard, 2, true,  false, true  },
+      { kInputDevice_Gamepad,  1, false, true,  false },
+      { kInputDevice_Gamepad,  0, false, false, true  },
   };
   for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
     bool pad = MenuGamepadOwns(rows[i].input_device, rows[i].gamepad_count);
-    bool kbd = MenuKeyboardOwns(rows[i].input_device, rows[i].gamepad_count);
-    CHECK(pad == rows[i].gamepad_active);
+    bool kbd = InputMap_ShouldAcceptKeyboard(
+        (InputDeviceMode)rows[i].input_device, rows[i].gamepad_count > 0,
+        rows[i].pad_input_active);
+    CHECK(pad == rows[i].gamepad_enabled);
     CHECK(kbd == rows[i].keyboard_active);
     /* At least one device is always active — never a total lockout. */
     CHECK(pad || kbd);
   }
+
+  const uint32 keyboard = (1u << kInputAction_Up) |
+                          (1u << kInputAction_B);
+  const uint32 gamepad = (1u << kInputAction_Right);
+  CHECK(InputMap_ArbitrateState(kInputDevice_Auto, true, true,
+                                keyboard, gamepad) == gamepad);
+  CHECK(InputMap_ArbitrateState(kInputDevice_Auto, true, false,
+                                keyboard, gamepad) == keyboard);
+  CHECK(InputMap_ArbitrateState(kInputDevice_Gamepad, false, false,
+                                keyboard, gamepad) == keyboard);
 }
 
 int main(void) {

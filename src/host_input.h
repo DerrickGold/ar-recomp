@@ -13,6 +13,9 @@ uint32_t HostInput_ComputeGameInputs(bool *keep_running);
 
 bool HostInput_MenuGamepadIsActive(void);
 bool HostInput_MenuKeyboardIsActive(void);
+/* Auto-mode event arbitration: true when a simultaneous live pad input owns
+ * this host iteration and a synthesized keyboard twin must be ignored. */
+bool HostInput_KeyboardIsSuppressed(void);
 
 bool HostInput_IsPaused(void);
 bool HostInput_IsTurbo(void);

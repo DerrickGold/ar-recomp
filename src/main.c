@@ -1197,6 +1197,12 @@ int main(int argc, char **argv) {
           /* An armed binding row consumes the raw key: it needs the scancode,
            * and it must win over F5/F9/etc. so those stay bindable. */
           if (SettingsOverlay_HandleCaptureEvent(&event)) break;
+          /* Steam Input can emit a keyboard mapping and a native gamepad
+           * event for one physical control. Auto mode gives the live gamepad
+           * event ownership, including host hotkeys, so the synthesized key
+           * cannot perform a second action. Key-up is still processed below
+           * to ensure a previously accepted key can never stick. */
+          if (HostInput_KeyboardIsSuppressed()) break;
           if (SettingsOverlay_IsOpen()) {
             /* Only the menu's active device drives navigation, so one
              * physical press (+ its synthesized twin) moves the menu once. */

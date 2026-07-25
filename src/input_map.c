@@ -35,6 +35,7 @@ static uint32 s_stick_bits;   /* left stick emulating the D-pad */
 static bool s_key_down[SDL_SCANCODE_COUNT];
 static bool s_pad_button_down[SDL_GAMEPAD_BUTTON_COUNT];
 static int s_pad_axis_value[SDL_GAMEPAD_AXIS_COUNT];
+static uint32 s_host_axis_held;
 
 static InputMapActionFn s_action_handler;
 
@@ -60,6 +61,13 @@ static bool JoystickIsSelected(SDL_JoystickID id) {
   int selected = g_settings.input_gamepad_slot;
   if (selected <= 0 || selected > s_pad_count) return slot == 0;
   return slot == selected - 1;
+}
+
+static GamepadSlot *SelectedGamepad(void) {
+  if (!s_pad_count) return NULL;
+  int selected = g_settings.input_gamepad_slot;
+  if (selected <= 0 || selected > s_pad_count) return &s_pads[0];
+  return &s_pads[selected - 1];
 }
 
 static void AddGamepad(SDL_JoystickID id) {
@@ -526,20 +534,16 @@ SettingChangeResult InputMap_ApplyBinding(const SettingDesc *desc,
 
 void InputMap_Clear(void) {
   s_key_bits = s_pad_bits = s_stick_bits = 0;
+  s_host_axis_held = 0;
   memset(s_key_down, 0, sizeof(s_key_down));
   memset(s_pad_button_down, 0, sizeof(s_pad_button_down));
   memset(s_pad_axis_value, 0, sizeof(s_pad_axis_value));
 }
 
 uint32 InputMap_State(void) {
-  uint32 state = 0;
-  /* Safety valve: "Gamepad" with nothing plugged in would otherwise leave the
-   * player with no working input and no way to reach the menu to undo it. */
-  if (g_settings.input_device != kInputDevice_Gamepad || !s_pad_count)
-    state |= s_key_bits;
-  if (g_settings.input_device != kInputDevice_Keyboard)
-    state |= s_pad_bits | s_stick_bits;
-  return state & 0xFFF;
+  return InputMap_ArbitrateState(
+      (InputDeviceMode)g_settings.input_device, s_pad_count > 0,
+      InputMap_GamepadIsActive(), s_key_bits, s_pad_bits | s_stick_bits);
 }
 
 static void SetActionBit(uint32 *bits, InputAction action, bool pressed) {
@@ -575,6 +579,62 @@ static int StickDeadzone(void) {
   return 32767 * percent / 100;
 }
 
+bool InputMap_GamepadIsActive(void) {
+  if (!s_pad_count) return false;
+  if (s_pad_bits || s_stick_bits || s_host_axis_held) return true;
+
+  for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; button++)
+    if (s_pad_button_down[button]) return true;
+  const int stick_deadzone = StickDeadzone();
+  for (int axis = 0; axis < SDL_GAMEPAD_AXIS_COUNT; axis++) {
+    int value = s_pad_axis_value[axis];
+    bool trigger = axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ||
+                   axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+    if ((trigger && value > kAxisPressThreshold) ||
+        (!trigger && (value < -stick_deadzone ||
+                      value > stick_deadzone)))
+      return true;
+  }
+
+  /* SDL pumps the physical state before delivering the queued events. Reading
+   * the open device here catches a pad event whose synthesized keyboard twin
+   * happens to appear earlier in that queue. */
+  GamepadSlot *selected = SelectedGamepad();
+  if (!selected || !selected->pad) return false;
+  for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; button++)
+    if (SDL_GetGamepadButton(selected->pad, (SDL_GamepadButton)button))
+      return true;
+  for (int axis = 0; axis < SDL_GAMEPAD_AXIS_COUNT; axis++) {
+    int value = SDL_GetGamepadAxis(selected->pad, (SDL_GamepadAxis)axis);
+    bool trigger = axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ||
+                   axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+    if ((trigger && value > kAxisPressThreshold) ||
+        (!trigger && (value < -stick_deadzone ||
+                      value > stick_deadzone)))
+      return true;
+  }
+  return false;
+}
+
+bool InputMap_ShouldAcceptKeyboard(InputDeviceMode mode,
+                                   bool gamepad_connected,
+                                   bool gamepad_active) {
+  if (mode == kInputDevice_Keyboard) return true;
+  if (!gamepad_connected) return true;  /* gamepad-mode safety valve */
+  if (mode == kInputDevice_Gamepad) return false;
+  return !gamepad_active;
+}
+
+uint32 InputMap_ArbitrateState(InputDeviceMode mode, bool gamepad_connected,
+                               bool gamepad_active, uint32 keyboard_state,
+                               uint32 gamepad_state) {
+  if (mode == kInputDevice_Keyboard || !gamepad_connected)
+    return keyboard_state & 0xFFFu;
+  if (mode == kInputDevice_Gamepad || gamepad_active)
+    return gamepad_state & 0xFFFu;
+  return keyboard_state & 0xFFFu;
+}
+
 static void HandlePadButton(SDL_GamepadButton button, bool pressed) {
   if (button >= 0 && button < SDL_GAMEPAD_BUTTON_COUNT)
     s_pad_button_down[button] = pressed;
@@ -591,9 +651,8 @@ static void HandlePadButton(SDL_GamepadButton button, bool pressed) {
   }
 }
 
-/* Host actions bound to an axis are edge-triggered; this remembers the last
- * evaluated state per action so holding a trigger does not repeat. */
-static uint32 s_host_axis_held;
+/* Host actions bound to an axis are edge-triggered; s_host_axis_held remembers
+ * the last evaluated state per action so holding a trigger does not repeat. */
 
 static void HandlePadAxis(SDL_GamepadAxis axis, int value) {
   if (axis >= 0 && axis < SDL_GAMEPAD_AXIS_COUNT)
@@ -666,18 +725,22 @@ static float BindingMagnitude(uint32 binding) {
 
 float InputMap_AnalogAction(InputAction action) {
   if (action < 0 || action >= kInputAction_Count) return 0.0f;
-  float best = 0.0f;
+  float keyboard = 0.0f;
   if (g_settings.input_device != kInputDevice_Gamepad || !s_pad_count) {
-    float m = BindingMagnitude(
+    keyboard = BindingMagnitude(
         g_settings.input_bind[kInputClass_Keyboard][action]);
-    if (m > best) best = m;
   }
+  float gamepad = 0.0f;
   if (g_settings.input_device != kInputDevice_Keyboard) {
-    float m = BindingMagnitude(
+    gamepad = BindingMagnitude(
         g_settings.input_bind[kInputClass_Gamepad][action]);
-    if (m > best) best = m;
   }
-  return best;
+  if (g_settings.input_device == kInputDevice_Keyboard || !s_pad_count)
+    return keyboard;
+  if (g_settings.input_device == kInputDevice_Gamepad ||
+      InputMap_GamepadIsActive())
+    return gamepad;
+  return keyboard;
 }
 
 void InputMap_HandleEvent(const SDL_Event *event) {

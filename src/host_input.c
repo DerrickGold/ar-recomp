@@ -56,8 +56,15 @@ bool HostInput_MenuGamepadIsActive(void) {
 }
 
 bool HostInput_MenuKeyboardIsActive(void) {
-  return g_settings.input_device != kInputDevice_Gamepad ||
-         InputMap_GamepadCount() == 0;
+  const bool gamepad_connected = InputMap_GamepadCount() > 0;
+  return InputMap_ShouldAcceptKeyboard(
+      (InputDeviceMode)g_settings.input_device, gamepad_connected,
+      gamepad_connected && InputMap_GamepadIsActive());
+}
+
+bool HostInput_KeyboardIsSuppressed(void) {
+  return g_settings.input_device == kInputDevice_Auto &&
+         InputMap_GamepadCount() > 0 && InputMap_GamepadIsActive();
 }
 
 bool HostInput_IsPaused(void) {

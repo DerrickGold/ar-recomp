@@ -72,7 +72,9 @@ typedef enum {
 } InputClass;
 
 typedef enum {
-  kInputDevice_Auto = 0,     /* keyboard and pad both live */
+  /* Both remain available, but meaningful gamepad activity wins over
+   * simultaneous keyboard input instead of ORing the two sources together. */
+  kInputDevice_Auto = 0,
   kInputDevice_Keyboard,
   kInputDevice_Gamepad,
   kInputDevice_Count,
@@ -110,8 +112,23 @@ void InputMap_HandleEvent(const SDL_Event *event);
  * event and ordering there matters. `scancode` is SDL_Scancode. */
 void InputMap_HandleKey(int scancode, bool pressed);
 
-/* Current joypad word in runner bit order, already gated on the configured
- * device mode and the selected pad slot. */
+/* Resolves the two physical sources under the device policy. Kept public as a
+ * pure function so the simultaneous-input contract is testable without
+ * attaching a real controller. */
+uint32 InputMap_ArbitrateState(InputDeviceMode mode, bool gamepad_connected,
+                               bool gamepad_active, uint32 keyboard_state,
+                               uint32 gamepad_state);
+bool InputMap_ShouldAcceptKeyboard(InputDeviceMode mode,
+                                   bool gamepad_connected,
+                                   bool gamepad_active);
+
+/* True while the selected pad has any meaningful button/axis activity. This
+ * combines retained event state with SDL's live device state, allowing a
+ * keyboard event queued just before its gamepad twin to still be suppressed. */
+bool InputMap_GamepadIsActive(void);
+
+/* Current joypad word in runner bit order, already arbitrated under the
+ * configured device mode and selected pad slot. */
 uint32 InputMap_State(void);
 /* Drops every held bit — used wherever main.c freezes the game (menu open,
  * inspector selection) so a held direction cannot leak across the freeze. */
