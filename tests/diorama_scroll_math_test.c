@@ -38,6 +38,27 @@ int main(void) {
   FrameSlot slow = curr; slow.timestamp_ns = prev.timestamp_ns + 60000000ULL;
   CHECK(!ComputeDioramaScrollDeltaAt(&slow, &prev, slow.timestamp_ns + 1).active);
 
+  /* R16: prev==NULL must return inactive AND leave the internal tick-span
+   * average untouched. main.c relies on exactly this to keep paused/menu
+   * keep-alive presents out of the velocity estimate: they carry identical
+   * camera data under a fresh capture timestamp, so if their (much shorter)
+   * host-UI interval reached span_ema, `t` would saturate and the first
+   * frames after unpausing would over-extrapolate a whole tick of motion.
+   * Baseline the delta, flood the function with NULL-prev calls at panel
+   * rate, then re-run the SAME pair: an identical result proves no leak. */
+  DioramaScrollDelta before = ComputeDioramaScrollDeltaAt(&curr, &prev, now);
+  CHECK(before.active);
+  for (int i = 0; i < 60; i++) {
+    /* A keep-alive present: fresh timestamp ~6.9ms apart (144Hz), same camera. */
+    FrameSlot idle = curr;
+    idle.timestamp_ns = curr.timestamp_ns + (uint64_t)(i + 1) * 6944444ULL;
+    CHECK(!ComputeDioramaScrollDeltaAt(&idle, NULL, idle.timestamp_ns).active);
+  }
+  DioramaScrollDelta after = ComputeDioramaScrollDeltaAt(&curr, &prev, now);
+  CHECK(after.active);
+  CHECK(near(after.bg_du[0], before.bg_du[0]));
+  CHECK(near(after.bg_dv[0], before.bg_dv[0]));
+
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return 1; }
   puts("diorama_scroll_math_test: PASS");
   return 0;

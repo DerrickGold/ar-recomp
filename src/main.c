@@ -758,8 +758,12 @@ static void InvalidateScrollHistory(void) {
 
 /* Call after every RtlDrawPpuFrame(): capture the just-drawn frame and
  * present it. Synchronous and main-thread-only (#18/P13 removed the present
- * thread and its handshake — see the note above the pacing helpers). */
-static void SubmitFrameToPresent(void) {
+ * thread and its handshake — see the note above the pacing helpers).
+ *
+ * game_tick is true only for the present that follows a genuine emulated
+ * tick; the paused/menu keep-alive re-present passes false. That distinction
+ * is load-bearing for M7 — see the R16 note below. */
+static void SubmitFrameToPresent(bool game_tick) {
   if (!g_renderer || !g_texture) return;
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
@@ -767,8 +771,20 @@ static void SubmitFrameToPresent(void) {
   FrameSlot_Capture(&slot);
   uint32 render_t0 = perf_on ? SDL_GetTicks() : 0;
   PresentUpload(&slot);
-  PresentComposite(&slot, &g_prev_scroll);
-  FrameSlot_ExtractScrollSnapshot(&slot, &g_prev_scroll);
+  /* R16: only a post-tick present may take part in scroll interpolation.
+   * A keep-alive re-present carries IDENTICAL camera data under a FRESH
+   * capture timestamp (FrameSlot_Capture re-stamps timestamp_ns every call),
+   * so letting one through would both advance g_prev_scroll to a non-tick
+   * frame and pour the host-UI present interval into
+   * ComputeDioramaScrollDeltaAt's span_ema — dragging the one-tick velocity
+   * estimate down toward the panel period, so `t` saturates at 1.0 and the
+   * first frames after unpausing over-extrapolate a full tick of motion
+   * each. The deleted present thread held this same invariant structurally:
+   * it re-presented the SAME slot and never touched prev_scroll on an idle
+   * repaint ("prev_scroll only ever advances in the dequeue path below, when
+   * a genuinely new tick was captured"). */
+  PresentComposite(&slot, game_tick ? &g_prev_scroll : NULL);
+  if (game_tick) FrameSlot_ExtractScrollSnapshot(&slot, &g_prev_scroll);
   uint32 vsync_t0 = perf_on ? SDL_GetTicks() : 0;
   /* This is the only present site, so Frame-limit pacing (Refresh rate =
    * Limit / Unlimited's R2 soft-cap) happens here, composite -> throttle ->
@@ -2535,7 +2551,7 @@ static void DrawAndPresentFrame(bool headless) {
      * and paused/menu-redraw captures run outside this window and must
      * self-annotate. */
     FrameSlot_SetPendingAnnotatedSim(&sim);
-    SubmitFrameToPresent();
+    SubmitFrameToPresent(true);
     FrameSlot_SetPendingAnnotatedSim(NULL);
   }
 }
@@ -3634,10 +3650,12 @@ int main(int argc, char **argv) {
       /* §2.5: re-present unconditionally to keep the window alive while
        * paused — the removed present thread used to do this from its own idle
        * timeout. The present is paced by SubmitFrameToPresent's host-UI
-       * interval (menu: panel rate; plain pause: idle keep-alive rate). */
+       * interval (menu: panel rate; plain pause: idle keep-alive rate).
+       * game_tick=false (R16): no tick ran, so this must not feed M7's scroll
+       * history or its tick-span average. */
       bool presented = false;
       if (!headless && !g_window_hidden) {
-        SubmitFrameToPresent();
+        SubmitFrameToPresent(false);
         presented = true;
       }
       /* Pacing comes from the present itself (vsync block, or the
