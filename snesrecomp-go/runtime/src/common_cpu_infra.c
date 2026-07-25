@@ -12,10 +12,6 @@
 #include <setjmp.h>
 #include <string.h>
 #include <time.h>
-#if defined(__GLIBC__) || defined(__APPLE__)
-#include <execinfo.h>
-#define AR_HAVE_BACKTRACE 1
-#endif
 
 Snes *g_snes;
 Cpu *g_snes_cpu;
