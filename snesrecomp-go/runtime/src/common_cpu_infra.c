@@ -367,13 +367,20 @@ static uint64_t watchdog_monotonic_ns(void) {
   LARGE_INTEGER f, c;
   QueryPerformanceFrequency(&f);
   QueryPerformanceCounter(&c);
-  /* Divide-before-scale: QueryPerformanceCounter counts since boot, so
+  /* Split scaling (whole seconds + fractional remainder), because this scales
+   * the ABSOLUTE counter. QueryPerformanceCounter counts since boot, so
    * c.QuadPart * 1e9 overflows uint64 after ~1.84e10 counts (~30 min at a
    * 10 MHz QPF, seconds at a TSC-frequency QPF). That made watchdog time
    * non-monotonic and could underflow the elapsed subtraction into a bogus
    * multi-billion-second value, falsely tripping the 5 s hang watchdog on a
-   * game that is not hung. Split into whole seconds + fractional remainder so
-   * no intermediate product overflows. */
+   * game that is not hung.
+   *
+   * Note this is NOT a contradiction of Microsoft's guidance to multiply
+   * first ("we convert to microseconds *before* dividing by ticks-per-second"):
+   * that advice is for an ELAPSED INTERVAL, which is small enough that the
+   * product cannot overflow and where dividing first would throw away
+   * sub-second precision. For an absolute since-boot counter the split form is
+   * the correct adaptation — it keeps full precision AND cannot overflow. */
   uint64_t cnt = (uint64_t)c.QuadPart;
   uint64_t freq = (uint64_t)f.QuadPart;
   if (freq == 0) return 0;

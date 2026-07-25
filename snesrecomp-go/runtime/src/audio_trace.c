@@ -8,13 +8,27 @@
 #include <windows.h>
 static uint64_t wall_ms(void) { return (uint64_t)GetTickCount64(); }
 /* High-resolution monotonic nanoseconds — GetTickCount64's ~15 ms
- * granularity is far too coarse for intra-frame port-write spacing. */
+ * granularity is far too coarse for intra-frame port-write spacing.
+ *
+ * Integer math on a whole-seconds + fractional-remainder split, NOT
+ * (double)counter * 1e9 / freq. QueryPerformanceCounter "returns the total
+ * number of ticks that have occurred since the Windows operating system was
+ * started", and MS warns that "conversion between 64 bit integers and floating
+ * point (double) can cause loss of precision because the floating point
+ * mantissa can't represent all possible integral values". Scaling the ABSOLUTE
+ * counter through a double put the product near 2^76 on a long-uptime host (10
+ * MHz QPF, ~100 days), where one double ULP is ~17 ms — i.e. right back to the
+ * GetTickCount64 granularity this function exists to escape, silently
+ * invalidating every [apuprof] schedlat/lockwait figure. */
 static uint64_t wall_ns(void) {
   static LARGE_INTEGER freq;
   LARGE_INTEGER now;
   if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
   QueryPerformanceCounter(&now);
-  return (uint64_t)((double)now.QuadPart * 1e9 / (double)freq.QuadPart);
+  uint64_t f = (uint64_t)freq.QuadPart;
+  if (!f) return 0;
+  uint64_t c = (uint64_t)now.QuadPart;
+  return (c / f) * 1000000000ull + ((c % f) * 1000000000ull) / f;
 }
 #else
 #include <time.h>

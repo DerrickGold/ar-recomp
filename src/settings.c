@@ -488,6 +488,13 @@ static const char *const kRefreshModeLabels[] = {
   "Limit",
 };
 
+/* NOTE: these strings are ALSO the settings.ini values (Settings_FormatValue
+ * writes the label, ParseAudioFrequency reads it), so they are a persisted
+ * format — do not reword them without teaching the parser the old spelling.
+ * "32.04 kHz" is the SNES S-DSP's native rate, offered for completeness, but
+ * SDL clamps the device rate to at least 44100: selecting it does not open a
+ * 32kHz device. main.c clamps the request and logs why; the row's description
+ * says so too. */
 static const char *const kAudioFrequencyLabels[] = {
   "32.04 kHz",
   "44.1 kHz",
@@ -1380,7 +1387,8 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.audio_enabled, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
   { "audio_frequency", "AR_AUDIO_FREQ", "Audio frequency",
-    "Auto matches the audio device's native rate; or pin 32.04, 44.1, or 48 kHz.",
+    "Auto matches the audio device's native rate. 32.04 kHz is raised to 44.1 "
+    "(SDL's device minimum).",
     kSettingType_Enum, kApply_Restart, kSettingCat_Audio,
     &g_settings.audio_frequency, kAudioFrequency_Auto,
     kAudioFrequency_32040, kAudioFrequency_Auto, 1, false,

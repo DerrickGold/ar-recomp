@@ -63,6 +63,11 @@
 #include "stb_image.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
+/* Reverse-domain app identifier: compositors key window grouping and icon
+ * lookup off this, and a shipped .desktop file must share its basename. Also
+ * the pair SDL_GetPrefPath already uses for the user-data directory. */
+#define AR_APP_IDENTIFIER "dev.quintet-enix.actraiser-recomp"
+#define AR_APP_VERSION "0.1.0-dev"
 /* Not static: present.c (M5, D6) reads these presentation resources
  * directly. They are boot-created once and, after that, either read-only
  * pointers or exclusively touched under the M5.3 present-thread handshake —
@@ -553,6 +558,18 @@ static bool OpenHostAudio(void) {
   want.freq = g_active_audio_frequency > 0 ? g_active_audio_frequency
               : device_native_hz > 0       ? device_native_hz
                                            : 44100;
+  /* Below 44.1kHz the request cannot be honored and only hurts: SDL's
+   * OpenPhysicalAudioDevice clamps the DEVICE rate to at least
+   * DEFAULT_AUDIO_PLAYBACK_FREQUENCY (44100), so asking for the SNES-native
+   * 32040 still opens a 44100 device and merely adds a pointless hop through
+   * OUR resampler. Clamp, so the "32.04 kHz" preset degrades to the honest
+   * minimum instead of silently being worse than every other choice. */
+  if (want.freq < 44100) {
+    fprintf(stderr, "[audio] requested %d Hz is below SDL's 44100 device "
+                    "minimum; using 44100 (the setting cannot lower it)\n",
+            want.freq);
+    want.freq = 44100;
+  }
   want.format = SDL_AUDIO_S16;
   want.channels = 2;
   /* SDL3's AudioSpec no longer carries a buffer size; the device sample-frame
@@ -2811,6 +2828,16 @@ int main(int argc, char **argv) {
   { extern const char *g_ar_trapfn;
     const char *e = getenv("AR_TRAPFN");
     g_ar_trapfn = (e && e[0]) ? e : 0; }
+
+  /* App metadata, BEFORE SDL_Init — SDL documents that it "should be called as
+   * early as possible, before SDL_Init", and it cannot be retrofitted later.
+   * The identifier "must be in reverse-domain format" and is what "desktop
+   * compositors [use] to identify and group windows together": without it a
+   * Linux/Deck window gets a generic icon and no taskbar grouping, and the
+   * matching .desktop file (same basename as this identifier) has nothing to
+   * associate with. */
+  SDL_SetAppMetadata(kWindowTitle, AR_APP_VERSION, AR_APP_IDENTIFIER);
+  SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_TYPE_STRING, "game");
 
   SDL_InitFlags sdl_flags = SDL_INIT_AUDIO;
   if (video) sdl_flags |= SDL_INIT_VIDEO;
