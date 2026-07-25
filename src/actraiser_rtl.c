@@ -1755,32 +1755,71 @@ void ActRaiser_Warp(unsigned region, unsigned map) {
   }
 }
 
-void RunOneFrameOfGame(void) {
-  if (!g_game_started) {
-    g_game_started = true;
+/* (Re)create the game coroutine on its own 2MB stack. Split out of
+ * RunOneFrameOfGame so the watchdog-trip path can rebuild it: a tripped frame
+ * was left SUSPENDED mid-spin (the trip yields rather than unwinding — see
+ * WatchdogCheck), so resuming that context would re-enter the same infinite
+ * loop. Returns false if the coroutine could not be created. */
+static bool CreateGameCoroutine(void) {
 #ifdef _WIN32
+  if (!g_host_fiber) {
     g_host_fiber = ConvertThreadToFiber(NULL);
     if (!g_host_fiber) {
       fprintf(stderr, "Failed to convert driver thread to fiber\n");
-      return;
+      return false;
     }
-    g_game_fiber = CreateFiber(GAME_STACK_SIZE, game_coroutine_fiber, NULL);
-    if (!g_game_fiber) {
-      fprintf(stderr, "Failed to create game coroutine fiber\n");
-      return;
-    }
+  }
+  if (g_game_fiber) {
+    DeleteFiber(g_game_fiber);
+    g_game_fiber = NULL;
+  }
+  g_game_fiber = CreateFiber(GAME_STACK_SIZE, game_coroutine_fiber, NULL);
+  if (!g_game_fiber) {
+    fprintf(stderr, "Failed to create game coroutine fiber\n");
+    return false;
+  }
 #else
+  if (!g_game_stack) {
     g_game_stack = malloc(GAME_STACK_SIZE);
     if (!g_game_stack) {
       fprintf(stderr, "Failed to allocate game coroutine stack\n");
-      return;
+      return false;
     }
-    getcontext(&g_game_ctx);
-    g_game_ctx.uc_stack.ss_sp = g_game_stack;
-    g_game_ctx.uc_stack.ss_size = GAME_STACK_SIZE;
-    g_game_ctx.uc_link = &g_host_ctx;
-    makecontext(&g_game_ctx, game_coroutine, 0);
+  }
+  /* The abandoned context is just register state pointing into this stack;
+   * re-running makecontext over the SAME buffer resets the entry point, so no
+   * free/realloc is needed (and none would be safe while the old context's
+   * frames still nominally live there). */
+  getcontext(&g_game_ctx);
+  g_game_ctx.uc_stack.ss_sp = g_game_stack;
+  g_game_ctx.uc_stack.ss_size = GAME_STACK_SIZE;
+  g_game_ctx.uc_link = &g_host_ctx;
+  makecontext(&g_game_ctx, game_coroutine, 0);
 #endif
+  return true;
+}
+
+void RunOneFrameOfGame(void) {
+  if (!g_game_started) {
+    g_game_started = true;
+#if AR_WATCHDOG
+    /* Give the runtime watchdog the coroutine yield to escape a stuck frame
+     * with (the old longjmp out of this coroutine was UB / fiber-forbidden). */
+    { extern void (*g_watchdog_yield_hook)(void);
+      g_watchdog_yield_hook = ActRaiser_YieldToHost; }
+#endif
+    if (!CreateGameCoroutine()) return;
+  }
+
+  /* A previous frame tripped the watchdog: its coroutine is suspended inside
+   * the spin it never left, so rebuild rather than resume. The emulated CPU
+   * state is re-initialized by game_coroutine's ResetHandler — i.e. this is a
+   * soft reset, which is the honest outcome of an unrecoverable hang. */
+  if (g_watchdog_tripped) {
+    fprintf(stderr, "[watchdog] rebuilding the game coroutine after a hang "
+                    "(the abandoned frame cannot be resumed)\n");
+    g_watchdog_tripped = 0;
+    if (!CreateGameCoroutine()) return;
   }
 
   ActRaiser_ApplyCheats();   /* host-side cheats (live settings, default off) */

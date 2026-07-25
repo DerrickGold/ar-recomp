@@ -1,6 +1,5 @@
 #include "common_rtl.h"
 #include "common_cpu_infra.h"
-#include <setjmp.h>
 #include "recomp_hw.h"
 #include "framedump.h"
 #include "util.h"
@@ -159,15 +158,18 @@ bool RtlRunFrame(uint32 inputs) {
   g_snes->input2_currentState = (inputs >> 12) & 0xfff;
 
   WatchdogFrameStart();
-  // Watchdog guard: WatchdogCheck() (called per-block in v2 gen) longjmps
-  // here when a frame exceeds 5s, so an infinite loop in recompiled code
-  // doesn't freeze the runtime indefinitely. Without this setjmp the
-  // longjmp would dereference an uninitialized jmp_buf and crash.
-  if (setjmp(g_watchdog_jmp) == 0) {
-    g_rtl_game_info->run_frame();
-  }
-  // If g_watchdog_tripped is set, frame was abandoned mid-execution;
-  // continue to the next frame so the user can interrupt cleanly.
+  g_rtl_game_info->run_frame();
+  /* MUST disarm here. The watchdog is armed for the FRAME, but the recompiled
+   * NMI/IRQ handlers and the PPU draw path also carry WatchdogCheck at every
+   * loop header and run AFTER this returns — with the watchdog still armed
+   * they would measure against this frame's start time and trip spuriously.
+   * (The old code only ever cleared the flag on the trip path.) */
+  WatchdogFrameEnd();
+  /* If g_watchdog_tripped is set the frame was abandoned mid-execution: the
+   * coroutine yielded out of the stuck frame (no longjmp — that was UB across
+   * stacks and forbidden out of a Windows fiber), so it is SUSPENDED, not
+   * unwound. The game layer checks the flag and rebuilds the coroutine rather
+   * than resuming it back into the same spin. */
   if (g_framedump_callback)
     g_framedump_callback(snes_frame_counter, g_ram);
   {

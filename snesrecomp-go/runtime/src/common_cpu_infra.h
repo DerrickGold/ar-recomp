@@ -33,8 +33,39 @@ typedef int RdnmiReadHookFunc(Snes *snes);
  * The addresses that opt in belong in the per-game project. */
 typedef bool DispatchMissRecoveryFunc(uint32 source_pc24, uint32 target_pc24);
 
+/* Default the watchdog OFF for any TU that does not define it (the ROM-free
+ * test targets, and any consumer that has not opted in). The game target sets
+ * it explicitly from the CMake option. */
+#ifndef AR_WATCHDOG
+#define AR_WATCHDOG 0
+#endif
+
+/* Hang watchdog (AR_WATCHDOG). Bring-up instrumentation: it detects a frame
+ * that never finishes (an infinite loop in recompiled code) and escapes it by
+ * yielding the game coroutine. Compiled OUT of release builds — the generated
+ * code calls WatchdogCheck at every loop header, so when the option is off
+ * these become empty inlines and the whole mechanism costs nothing. Build with
+ * -DAR_WATCHDOG=ON (default for Debug/RelWithDebInfo) to keep it. */
+/* Monotonic loop-header count — an execution-volume proxy used by AR_APUPROF
+ * (straight-line loops push nothing, so push counts under-report them). Kept
+ * in BOTH configurations: it is a profiling counter, not watchdog logic. */
+extern uint64_t g_watchdog_loop_headers;
+/* True when the watchdog abandoned the current frame. Always defined so the
+ * game layer can test it unconditionally; permanently 0 when disabled. */
+extern int g_watchdog_tripped;
+
+/* Declared identically in both configurations — the generated bank code also
+ * declares WatchdogCheck (via funcs.h), so these must stay non-static. With
+ * AR_WATCHDOG=0 the definitions in common_cpu_infra.c shrink to just the
+ * profiling counter: no clock read, no trip path, nothing to abandon a frame. */
 void WatchdogCheck(void);
 void WatchdogFrameStart(void);
+void WatchdogFrameEnd(void);
+#if AR_WATCHDOG
+/* The game layer registers its coroutine yield here; the trip path calls it
+ * instead of longjmp (which was UB across stacks / forbidden out of a fiber). */
+extern void (*g_watchdog_yield_hook)(void);
+#endif
 void RecompStackPush(const char *name);
 void RecompStackPop(void);
 /* Per-frame 65816 entry-S tracking for return-to-ancestor RTS resolution
@@ -53,9 +84,6 @@ extern uint32_t g_tailcall_src24;
 void cpu_tailcall_request(uint32_t pc24, uint16_t miss_s, uint32_t src24);
 void cpu_tailcall_inherit_return_context(uint16_t entry_s, uint8_t hrv);
 int cpu_take_tailcall_return_context(uint16_t *entry_s, uint8_t *hrv);
-#include <setjmp.h>
-extern jmp_buf g_watchdog_jmp;
-extern int g_watchdog_tripped;
 
 typedef struct RtlGameInfo {
   const char *title;

@@ -136,10 +136,38 @@ if(SNESRECOMP_ENABLE_TRACE)
 else()
     set(_AR_TRACE 0)
 endif()
+
+# AR_WATCHDOG: the 5s hang watchdog. Bring-up instrumentation — it exists to
+# catch an infinite loop in recompiled code during porting, and once a build is
+# verified there is nothing left for it to find. It is not free: the generated
+# code calls WatchdogCheck at EVERY loop header (thousands of sites per bank),
+# and escaping a stuck frame necessarily abandons it. Default ON for the
+# development configurations and OFF for Release, so shipping builds carry
+# neither the per-loop-header clock check nor the abandon path.
+if(NOT DEFINED AR_WATCHDOG)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+        set(_AR_WATCHDOG_DEFAULT OFF)
+    else()
+        set(_AR_WATCHDOG_DEFAULT ON)
+    endif()
+else()
+    set(_AR_WATCHDOG_DEFAULT ${AR_WATCHDOG})
+endif()
+option(AR_WATCHDOG "Build the 5s hang watchdog (dev instrumentation)"
+       ${_AR_WATCHDOG_DEFAULT})
+if(AR_WATCHDOG)
+    set(_AR_WATCHDOG 1)
+    message(STATUS "ActRaiserRecomp: hang watchdog ENABLED (dev build)")
+else()
+    set(_AR_WATCHDOG 0)
+    message(STATUS "ActRaiserRecomp: hang watchdog omitted (release build)")
+endif()
+
 target_compile_definitions(ActRaiserRecomp PRIVATE
     SYSTEM_VOLUME_MIXER_AVAILABLE=0
     SNESRECOMP_TRACE=${_AR_TRACE}
     SNESRECOMP_REVERSE_DEBUG=0
+    AR_WATCHDOG=${_AR_WATCHDOG}
 )
 
 if(NOT MSVC)

@@ -9,7 +9,6 @@
 #include "util.h"
 #include "cpu_trace.h"
 #include "debug_server.h"
-#include <setjmp.h>
 #include <string.h>
 #include <time.h>
 
@@ -337,6 +336,22 @@ void RecompStackPop(void) {
   g_last_recomp_func = g_recomp_stack_top > 0 ? g_recomp_stack[g_recomp_stack_top - 1] : "(none)";
 }
 
+/* Execution-volume counter (AR_APUPROF) and the trip flag live outside the
+ * AR_WATCHDOG guard: the first is profiling, the second is read unconditionally
+ * by the game layer. With the watchdog off, WatchdogCheck (an inline in the
+ * header) only bumps the counter and g_watchdog_tripped stays 0 forever. */
+uint64_t g_watchdog_loop_headers;
+int g_watchdog_tripped;
+
+#if !AR_WATCHDOG
+/* Watchdog omitted (release). Keep the execution-volume counter AR_APUPROF
+ * reads — the generated code's per-loop-header call becomes one increment. */
+void WatchdogCheck(void) { g_watchdog_loop_headers++; }
+void WatchdogFrameStart(void) { }
+void WatchdogFrameEnd(void) { }
+#endif
+
+#if AR_WATCHDOG
 // Frame watchdog: detect infinite loops in generated code.
 // Set before calling run_frame, checked by generated code periodically.
 // Wall-clock (monotonic) time source. clock() measures process-wide CPU
@@ -373,8 +388,11 @@ static uint64_t watchdog_monotonic_ns(void) {
 static uint64_t g_frame_start_ns;
 static int g_watchdog_enabled;
 static int g_watchdog_counter;
-jmp_buf g_watchdog_jmp;
-int g_watchdog_tripped;
+
+/* Set by the game layer to its coroutine yield (ActRaiser_YieldToHost). The
+ * watchdog trip uses THIS instead of longjmp — see the long note in
+ * WatchdogCheck. NULL means "no coroutine": the trip then only reports. */
+void (*g_watchdog_yield_hook)(void);
 
 void WatchdogFrameStart(void) {
   g_frame_start_ns = watchdog_monotonic_ns();
@@ -385,13 +403,16 @@ void WatchdogFrameStart(void) {
   g_tailcall_context_valid = 0;
 }
 
-/* Monotonic loop-header count — an execution-volume proxy for AR_APUPROF
- * (straight-line loops push nothing, so push counts under-report them). */
-uint64_t g_watchdog_loop_headers;
+/* Disarm at the end of the frame. REQUIRED for correctness, not tidiness: the
+ * recompiled NMI/IRQ handlers and the PPU draw path also run WatchdogCheck
+ * (thousands of generated call sites) but do so OUTSIDE the frame window, so an
+ * armed watchdog there would trip against a stale g_frame_start_ns. */
+void WatchdogFrameEnd(void) {
+  g_watchdog_enabled = 0;
+}
 
 // Called at loop headers in generated code — detect infinite loops
 void WatchdogCheck(void) {
-  g_watchdog_loop_headers++;
   if (!g_watchdog_enabled) return;
   // Only check the clock every 10000 iterations to avoid overhead
   if (++g_watchdog_counter < 10000) return;
@@ -436,9 +457,39 @@ void WatchdogCheck(void) {
     g_watchdog_tripped = 1;
     { extern int snes_frame_counter;
       debug_server_profile_latch(snes_frame_counter); }
-    longjmp(g_watchdog_jmp, 1);
+    /* Leave the stuck frame by YIELDING the coroutine, not by longjmp.
+     *
+     * The old longjmp(g_watchdog_jmp) was undefined behavior twice over:
+     *   - POSIX/C: the setjmp lives in RtlRunFrame, on the HOST stack, while
+     *     this code runs on the coroutine's own stack. longjmp(3): "If the
+     *     function which called setjmp() returns before longjmp() is called,
+     *     the behavior is undefined" — and jumping between stacks was never
+     *     defined in the first place.
+     *   - Windows: the trip happens inside an LPFIBER_START_ROUTINE, and
+     *     MSVC's longjmp "uses the same stack-unwinding semantics as
+     *     exception-handling code"; MS documents "Don't use longjmp to
+     *     transfer control from a callback routine invoked directly or
+     *     indirectly by Windows code." The x64 unwinder has no path from one
+     *     fiber stack to another.
+     * A yield is the mechanism the coroutine already uses every frame: it
+     * swapcontext/SwitchToFiber's back to the host, whose swapcontext call in
+     * RunOneFrameOfGame simply RETURNS. Fully defined, no unwinding.
+     *
+     * The stuck frame is left suspended rather than unwound, so the coroutine
+     * would resume mid-spin on the next frame — g_watchdog_tripped is the
+     * signal for the game layer to rebuild the context instead of resuming it.
+     * Yielding also preserves every lock the frame holds (the APU mutex is
+     * shared with the audio callback; longjmp-ing past its unlock would have
+     * deadlocked audio permanently). */
+    if (g_watchdog_yield_hook) {
+      g_watchdog_yield_hook();
+      return;   /* if the host does resume us, do not re-trip immediately */
+    }
+    /* No coroutine registered: nothing safe to jump to. Report and continue;
+     * the caller sees g_watchdog_tripped. */
   }
 }
+#endif  /* AR_WATCHDOG */
 
 Snes *SnesInit(const uint8 *data, int data_size) {
   g_snes = snes_init(g_ram);
