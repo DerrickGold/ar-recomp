@@ -58,7 +58,7 @@ typedef struct FrameSlotHdEntry {
    * captured and consumed in one synchronous call), but a RETAINED slot — see
    * R17/C2's g_repr, which a between-ticks re-present re-composites — would
    * hold dangling handles across a reset. That is why the reset arm calls
-   * InvalidatePresentHistory(). Do not retain a FrameSlot anywhere else
+   * HostDisplay_InvalidatePresentHistory(). Do not retain a FrameSlot anywhere else
    * without the same invalidation. */
   void *texture;
 } FrameSlotHdEntry;

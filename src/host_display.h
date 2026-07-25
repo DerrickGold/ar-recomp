@@ -10,8 +10,16 @@ typedef enum HostDisplayPresentMode {
   kHostDisplayPresent_Menu,
 } HostDisplayPresentMode;
 
+enum { kHostDisplayFramebufferHeight = 240 };
+
 /* 262 scanlines * 1364 master-clock dots / 21.477272 MHz = 60.0988 Hz. */
 extern const uint64_t kHostDisplayEmulationFrameIntervalNs;
+
+void HostDisplay_SetWidescreenRuntimeAllowed(bool allowed);
+void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes);
+void HostDisplay_CalculateWindowSize(int scale, int *width, int *height);
+void HostDisplay_RecomputeLogicalPresentation(void);
+void HostDisplay_ApplyWindowScale(void);
 
 void HostDisplay_ApplyWindowMode(void);
 void HostDisplay_UpdateProperties(void);

@@ -18,21 +18,35 @@
 
 #include <SDL3/SDL.h>
 
+#include "actraiser_game.h"
+#include "actraiser_rtl.h"
 #include "diorama_scroll_math.h"
 #include "frame_slot.h"
 #include "host_display_pacing.h"
 #include "present.h"
 #include "present_cadence_metrics.h"
 #include "settings.h"
+#include "snes/ppu.h"
+#include "widescreen.h"
 
 extern SDL_Window *g_window;
 extern SDL_Renderer *g_renderer;
 extern SDL_Texture *g_texture;
 extern int g_snes_width;
 extern int g_snes_height;
+extern bool g_new_ppu;
+extern bool g_ws_active;
 extern int g_ws_extra;
+extern int g_ws_display_extra;
+extern uint8_t g_pixels[
+    kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
+extern uint8_t g_hud_bg_pixels[
+    kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
+extern uint8_t g_hud_obj_pixels[
+    kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
 
 const uint64_t kHostDisplayEmulationFrameIntervalNs = 16639267ull;
+int g_active_pixel_aspect = kPixelAspect_Crt43;
 
 enum {
   kDeadlineResyncIntervalCount = 2,
@@ -53,6 +67,9 @@ static unsigned long s_tick_present_count;
 static unsigned long s_represent_count;
 static float s_maximum_represent_alpha;
 static unsigned long s_no_present_no_sleep_iteration_count;
+static int s_active_aspect_x;
+static int s_active_aspect_y;
+static bool s_widescreen_runtime_allowed;
 
 static bool RunningUnderGamescope(void) {
   static bool initialized;
@@ -116,6 +133,129 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
       return HostDisplayPacing_GameIntervalNs(
           options, kHostDisplayEmulationFrameIntervalNs);
   }
+}
+
+void HostDisplay_SetWidescreenRuntimeAllowed(bool allowed) {
+  s_widescreen_runtime_allowed = allowed;
+}
+
+static int WindowScaleInPoints(int scale) {
+  const float density = Settings_HostPixelDensity();
+  if (density <= 1.0f) return scale;
+  const int points = (int)((float)scale / density + 0.5f);
+  return points > 0 ? points : 1;
+}
+
+void HostDisplay_CalculateWindowSize(int scale, int *width, int *height) {
+  const int window_height = g_snes_height * scale;
+  int window_width = Settings_VisibleWidth() * scale;
+
+  if (g_settings.display_mode == kDisplayMode_43) {
+    if (g_active_pixel_aspect == kPixelAspect_Crt43)
+      window_width = (window_height * 4 + 1) / 3;
+  } else if (g_ws_active &&
+             g_active_pixel_aspect == kPixelAspect_Crt43) {
+    window_width =
+        (window_height * s_active_aspect_x + s_active_aspect_y / 2) /
+        s_active_aspect_y;
+  }
+
+  if (width) *width = window_width;
+  if (height) *height = window_height;
+}
+
+void HostDisplay_RecomputeLogicalPresentation(void) {
+  if (!g_window || !g_renderer) return;
+  const int visible_width = Settings_VisibleWidth();
+  if (g_settings.ignore_aspect_ratio) {
+    SDL_SetRenderLogicalPresentation(
+        g_renderer, visible_width, g_snes_height,
+        SDL_LOGICAL_PRESENTATION_STRETCH);
+    return;
+  }
+  if (g_active_pixel_aspect == kPixelAspect_Crt43) {
+    SDL_SetRenderLogicalPresentation(
+        g_renderer, visible_width * 7, g_snes_height * 6,
+        SDL_LOGICAL_PRESENTATION_LETTERBOX);
+  } else {
+    SDL_SetRenderLogicalPresentation(
+        g_renderer, visible_width, g_snes_height,
+        SDL_LOGICAL_PRESENTATION_LETTERBOX);
+  }
+}
+
+void HostDisplay_ApplyWindowScale(void) {
+  if (!g_window || !g_renderer) return;
+  const int configured_scale =
+      g_settings.window_scale ? g_settings.window_scale : 3;
+  const int point_scale = WindowScaleInPoints(configured_scale);
+  int window_width;
+  int window_height;
+  HostDisplay_CalculateWindowSize(
+      point_scale, &window_width, &window_height);
+
+  HostDisplay_RecomputeLogicalPresentation();
+  if (g_settings.window_mode == kWindowMode_Windowed)
+    SDL_SetWindowSize(g_window, window_width, window_height);
+}
+
+void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
+  s_active_aspect_x = Settings_ExtendedAspectX();
+  s_active_aspect_y = Settings_ExtendedAspectY();
+  g_active_pixel_aspect = g_settings.pixel_aspect;
+
+  int extra_columns = 0;
+  if (s_widescreen_runtime_allowed &&
+      s_active_aspect_x &&
+      s_active_aspect_y) {
+    const bool crt_pixel_aspect =
+        g_active_pixel_aspect == kPixelAspect_Crt43;
+    const long numerator =
+        (long)g_snes_height * s_active_aspect_x *
+        (crt_pixel_aspect ? 6 : 7);
+    const long denominator = 7L * s_active_aspect_y;
+    const int internal_width =
+        (int)((numerator + denominator - 1) / denominator);
+    extra_columns =
+        internal_width > kActRaiserAuthenticWidth
+            ? (internal_width - kActRaiserAuthenticWidth + 1) / 2
+            : 0;
+    if (extra_columns > kWsExtraMax) extra_columns = kWsExtraMax;
+  }
+
+  g_ws_display_extra = extra_columns;
+  if (g_settings.diorama_mode && extra_columns > 0)
+    extra_columns = kWsExtraMax;
+
+  g_ws_extra = extra_columns;
+  g_ws_active = extra_columns > 0;
+  g_snes_width =
+      kActRaiserAuthenticWidth + 2 * extra_columns;
+  g_new_ppu = g_settings.new_renderer || g_ws_active;
+
+  if (apply_runtime_changes) {
+    Settings_SetDisplayMode(
+        g_ws_active ? kDisplayMode_WideFull : kDisplayMode_43);
+    memset(g_pixels, 0, sizeof(g_pixels));
+    memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
+    memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
+    ActRaiser_RebindPpuOutputSurfaces();
+    HostDisplay_ApplyWindowScale();
+    HostDisplay_InvalidatePresentHistory();
+  }
+
+  fprintf(stderr,
+          "[video-geometry] %s %s -> %d extra columns/side "
+          "(render width %d, %s PPU)\n",
+          s_active_aspect_x
+              ? (s_active_aspect_y == 9 ? "16:9" : "16:10")
+              : "4:3",
+          g_active_pixel_aspect == kPixelAspect_Crt43
+              ? "4:3-PAR"
+              : "square-PAR",
+          g_ws_extra,
+          g_snes_width,
+          g_new_ppu ? "new" : "legacy");
 }
 
 void HostDisplay_ApplyWindowMode(void) {
