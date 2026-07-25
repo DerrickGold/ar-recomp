@@ -345,30 +345,39 @@ static void TestMusicResamplerMath(void) {
       CHECK(phase0 == 0.0);              /* frac==0 everywhere -> identity */
     }
   }
-  /* Claim 3: phase continuity at a non-native rate — pos starts at phase0 and
-   * ends at per_block; the next block's frame 0 sits at src_frames, and the
-   * carried remainder equals src_carry (zero cumulative drift). */
+  /* Claim 3: phase continuity at a non-native rate — the carry recurrence
+   * (phase0 = carry; per_block = out*ratio + phase0; src_frames = (int);
+   * carry = fraction) never drifts from the ideal resample ratio. Asserted
+   * against an INDEPENDENT oracle: after every block, the integer source
+   * frames decoded so far plus the live carry must equal blocks*out*ratio by
+   * direct multiplication. (An earlier version summed step out_frames times
+   * and compared it with the recurrence built from the same product — both
+   * sides were the same arithmetic, so it could never fail.) */
   {
     int file_rate = 44100, output_rate = 48000, out_frames = 1024;
-    double step = (double)file_rate / output_rate;
+    double step = (double)file_rate / output_rate;   /* 0.91875 */
     double src_carry = 0.0;
-    double absolute_src = 0.0;   /* running true source position across blocks */
+    long long total_decoded = 0;   /* integer source frames consumed */
     for (int block = 0; block < 32; block++) {
       double phase0 = src_carry;
       double per_block = (double)out_frames * file_rate / output_rate + phase0;
       int src_frames = (int)per_block;
       src_carry = per_block - src_frames;
-      double pos = phase0;
-      for (int i = 0; i < out_frames; i++) pos += step;
-      /* pos ends at per_block; leftover past the decoded frames == src_carry */
-      CHECK((pos - src_frames) - src_carry < 1e-6 &&
-            (pos - src_frames) - src_carry > -1e-6);
-      absolute_src += (double)out_frames * step;
+      total_decoded += src_frames;
+      /* The carried phase is always a proper fraction... */
+      CHECK(src_carry >= 0.0 && src_carry < 1.0);
+      /* ...the decode count only wobbles between floor/ceil of the ideal
+       * per-block consumption (940/941 here) — a carry reset would pin it
+       * at the floor forever... */
+      int ideal_floor = (int)((double)out_frames * step);
+      CHECK(src_frames == ideal_floor || src_frames == ideal_floor + 1);
+      /* ...and decoded + carry tracks the ideal source position with zero
+       * cumulative drift. A per-block carry reset diverges by block 2
+       * (30080 + 0 vs 30105.6 by block 32). */
+      double ideal = (double)(block + 1) * out_frames * step;
+      double actual = (double)total_decoded + src_carry;
+      CHECK(actual - ideal < 1e-6 && actual - ideal > -1e-6);
     }
-    /* Over 32 blocks the accumulated source position matches out*step exactly
-     * (no per-block reset drift). */
-    CHECK(absolute_src - (double)(32 * out_frames) * step < 1e-3 &&
-          absolute_src - (double)(32 * out_frames) * step > -1e-3);
   }
 }
 
