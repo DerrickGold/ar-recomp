@@ -54,6 +54,7 @@ cmake -S "${ROOT}" -B "${BUILD}" -G Ninja \
 # src/*.c + SDL + PPU (ROM-free). (AR0 will add a -DAR_TESTS_ONLY that excludes the game
 # target from configure entirely; until then, name the test targets explicitly.)
 TEST_TARGETS=(
+  actraiser_host_display_pacing_test
   actraiser_scene3d_math_test actraiser_sim_town_canvas_test actraiser_sim_world_map_test
   actraiser_game_test actraiser_sim_phase0_trace_test actraiser_sim_render_metadata_test
   actraiser_settings_test actraiser_settings_overlay_test actraiser_render_pipeline_test

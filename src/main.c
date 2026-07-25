@@ -47,6 +47,7 @@
 #include "present.h"
 #include "frame_slot.h"
 #include "host_audio.h"
+#include "host_display_pacing.h"
 #include "input_replay.h"
 #include "oracle_trace.h"
 #include "portable_paths.h"
@@ -401,6 +402,15 @@ static void RtlDrawPpuFrame(void) {
 static uint64_t FrameLimitIntervalNs(void);  /* defined with the display code */
 static bool RunningUnderGamescope(void);     /* ditto */
 
+static HostDisplayPacingOptions CurrentDisplayPacingOptions(void) {
+  return (HostDisplayPacingOptions){
+      .refresh_mode = g_settings.refresh_mode,
+      .frame_limit_fps = g_settings.frame_limit_fps,
+      .host_refresh_hz = Settings_HostRefreshHz(),
+      .compositor_managed = RunningUnderGamescope(),
+  };
+}
+
 /* Pace to `interval` by advancing an absolute DEADLINE, not by stamping "now"
  * after each sleep. SDL_DelayNS "waits at least the specified time, but
  * possibly longer due to OS scheduling", so re-basing on the post-sleep clock
@@ -448,16 +458,8 @@ static const uint64_t kFrameNs = 16639267;  /* floor(1e9 / 60.0988) */
  * R2's Unlimited soft-cap) that still bounds the loop when the platform
  * skips the vsync block (occluded window). */
 static uint64_t UiPresentIntervalNs(void) {
-  /* Under gamescope the reported refresh may be a phantom (see
-   * RunningUnderGamescope), so pacing host UI to it would throttle the menu to
-   * a rate the panel is not running at. The compositor paces us instead; keep
-   * only a generous anti-spin floor. */
-  if (RunningUnderGamescope()) return kFrameNs / 2;
-  int hz = Settings_HostRefreshHz();
-  if (hz <= 0) hz = 60;
-  uint64_t interval = 1000000000ull / (uint64_t)hz;
-  return g_settings.refresh_mode == kRefreshMode_Vsync ? interval / 2
-                                                       : interval;
+  return HostDisplayPacing_UiIntervalNs(
+      CurrentDisplayPacingOptions(), kFrameNs);
 }
 
 /* Plain pause (overlay CLOSED): the frame is static, so presents are only
@@ -467,8 +469,8 @@ static uint64_t UiPresentIntervalNs(void) {
  * pre-Phase-0 ~16ms), a <60Hz panel just follows the display. The menu keeps
  * full UiPresentIntervalNs — it animates (hold-stepping, status fades). */
 static uint64_t PausedIdleIntervalNs(void) {
-  uint64_t ui = UiPresentIntervalNs();
-  return ui > kFrameNs ? ui : kFrameNs;
+  return HostDisplayPacing_PausedIntervalNs(
+      CurrentDisplayPacingOptions(), kFrameNs);
 }
 
 /* M7 scroll interpolation needs the PREVIOUS presented frame's camera
@@ -507,10 +509,8 @@ static uint64_t g_present_deadline_ns;
  * throttling and can never push a present past the next vblank, so it is a
  * no-op whenever vsync genuinely blocks. */
 static uint64_t GamePresentIntervalNs(void) {
-  uint64_t interval = FrameLimitIntervalNs();
-  if (interval) return interval;
-  uint64_t floor_ns = UiPresentIntervalNs();     /* 2x refresh; kFrameNs/2 under gamescope */
-  return floor_ns ? floor_ns : kFrameNs / 2;
+  return HostDisplayPacing_GameIntervalNs(
+      CurrentDisplayPacingOptions(), kFrameNs);
 }
 
 /* R17/C2: the retained frame a between-ticks re-present re-composites, held
@@ -1300,26 +1300,8 @@ static void ApplyRefreshVsync(void) {
 /* Minimum nanoseconds between presents; 0 means no limit. Read by
  * PresentThrottle on the main-thread present path (Phase 0). */
 static uint64_t FrameLimitIntervalNs(void) {
-  if (g_settings.refresh_mode == kRefreshMode_Limit) {
-    int fps = g_settings.frame_limit_fps;
-    if (fps < 1) fps = 1;
-    return 1000000000ull / (uint64_t)fps;
-  }
-  /* R2: soft-cap Unlimited to ~2x the display refresh so duplicate/idle
-   * presents don't spin at ~250fps. When the host refresh is unknown
-   * (e.g. headless), stay truly unlimited (0).
-   *
-   * Skipped under gamescope: the cap is derived from a refresh rate the
-   * compositor may be misreporting (a 60Hz Deck OLED still advertises 90Hz),
-   * and gamescope already limits presentation itself — a second, wrongly
-   * calibrated limiter on top only adds beat-frequency judder. An EXPLICIT
-   * Limit above is still honored: that is the user asking for a specific rate. */
-  if (g_settings.refresh_mode == kRefreshMode_Unlimited &&
-      !RunningUnderGamescope()) {
-    int hz = Settings_HostRefreshHz();
-    if (hz > 0) return 1000000000ull / (uint64_t)(2 * hz);
-  }
-  return 0;
+  return HostDisplayPacing_FrameLimitIntervalNs(
+      CurrentDisplayPacingOptions());
 }
 
 /* window_scale is "N screen pixels per SNES pixel", and SDL window sizes are
@@ -3303,10 +3285,9 @@ int main(int argc, char **argv) {
        * interval + one tick so the intentional sleep always banks; genuine
        * hitches beyond that still clamp. Vsync/Unlimited intervals are far
        * below the base cap, so behavior there is unchanged. */
-      uint64_t catchup_cap_ns = kFrameNs * (uint64_t)kMaxCatchupFrames;
-      uint64_t limit_headroom_ns = FrameLimitIntervalNs() + kFrameNs;
-      if (limit_headroom_ns > catchup_cap_ns)
-        catchup_cap_ns = limit_headroom_ns;
+      const uint64_t catchup_cap_ns =
+          HostDisplayPacing_CatchupCapNs(
+              CurrentDisplayPacingOptions(), kFrameNs, kMaxCatchupFrames);
       if (accumulator > catchup_cap_ns) accumulator = catchup_cap_ns;
 
       bool produced_frame = false;

@@ -106,6 +106,7 @@ add_executable(ActRaiserRecomp
     src/forced_input.c
     src/frame_slot.c
     src/host_audio.c
+    src/host_display_pacing.c
     src/input_replay.c
     src/oracle_trace.c
     src/portable_paths.c
@@ -244,6 +245,17 @@ target_link_libraries(ActRaiserRecomp PRIVATE
 endif() # NOT AR_TESTS_ONLY
 
 if(BUILD_TESTING)
+    add_executable(actraiser_host_display_pacing_test
+        tests/host_display_pacing_test.c
+        src/host_display_pacing.c
+    )
+    target_include_directories(actraiser_host_display_pacing_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_host_display_pacing
+        COMMAND actraiser_host_display_pacing_test)
+
     add_executable(actraiser_scene3d_math_test
         tests/scene3d_math_test.c
         src/scene3d_math.c
