@@ -1,9 +1,7 @@
 #!/bin/sh
 #
-# Extract a read-only macOS disk image without leaving it attached when the
-# copy fails or this script is interrupted. A previous packaging process may
-# have died before detaching the same image, so matching stale attachments are
-# removed before a new one is created.
+# Extract a macOS disk image archive cleanly using 7-Zip by preserving
+# the full structural bundle (like .xcframework) that CMake expects.
 
 set -eu
 
@@ -15,65 +13,55 @@ fi
 image=$1
 destination=$2
 mount_root=$3
-mount_point="${mount_root}/dmgmnt.$$"
-hdiutil_command=${HDIUTIL:-hdiutil}
-ditto_command=${DITTO:-ditto}
-script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
-detach_script="${script_dir}/detach-macos-dmgs.sh"
 
-cleanup()
-{
-    status=$?
-    trap - EXIT HUP INT TERM
+# Define a clean temporary workspace
+stage_one="${mount_root}/stage1_$$"
 
-    if ! /bin/sh "$detach_script" "$image"; then
-        echo "error: could not detach disk image $image" >&2
-        if [ "$status" -eq 0 ]; then
-            status=1
-        fi
+rm -rf "$stage_one"
+mkdir -p "$stage_one"
+mkdir -p "$(dirname "$destination")"
+
+echo "Bypassing hdiutil: Extracting DMG via 7-Zip..."
+
+# Extract the DMG content directly into stage_one
+7zz x "$image" -o"$stage_one" -y >/dev/null
+
+# Look for the root of the framework payload. We search for .xcframework first,
+# then fall back to .framework if CMake passed a direct destination.
+found_payload=$(find "$stage_one" -type d \( -name "*.xcframework" -o -name "*.framework" \) -print -quit)
+
+if [ -n "$found_payload" ] && [ -d "$found_payload" ]; then
+    echo "Found payload at: $(basename "$found_payload")! Aligning bundle layout for CMake..."
+    
+    # If the destination does not already end in the framework name, append it
+    # to ensure we don't flatten the .xcframework or .framework bundle structure.
+    target_dir="$destination"
+    payload_name=$(basename "$found_payload")
+
+    if [ "$(basename "$target_dir")" != "$payload_name" ]; then
+        target_dir="$target_dir/$payload_name"
     fi
 
-    rmdir "$mount_point" >/dev/null 2>&1 || true
-    exit "$status"
-}
+    echo "Copying bundle to: $target_dir"
+    rm -rf "$target_dir"
+    mkdir -p "$(dirname "$target_dir")"
+    ditto "$found_payload" "$target_dir"
 
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-mkdir -p "$mount_root"
-
-# hdiutil will not attach a DMG at a second explicit mount point when that
-# image is already attached. This can happen after an interrupted configure,
-# including in the other macOS architecture's build tree.
-/bin/sh "$detach_script" "$image"
-
-attach_attempt=1
-while :; do
-    # 1. Use -mountrandom to let macOS determine a safe, unconflicted path.
-    #    We append -noverify and drop the broken explicit -mountpoint.
-    echo "Attaching disk image..."
-    if attach_output=$("$hdiutil_command" attach -nobrowse -readonly -noverify -mountrandom /tmp "$image"); then
-        
-        # 2. Extract the random mount point macOS successfully created
-        resolved_mnt=$(echo "$attach_output" | awk -F'\t' '/\/tmp\/dmgmnt/ {print $NF}')
-        
-        if [ -n "$resolved_mnt" ] && [ -d "$resolved_mnt" ]; then
-            # 3. Swap the target folder so the rest of your script (like ditto) works seamlessly
-            mount_point="$resolved_mnt"
-            break
-        fi
-    fi
-
-    # Cleanup fallback if it fails
-    /bin/sh "$detach_script" "$image"
-    if [ "$attach_attempt" -ge 2 ]; then
-        echo "error: could not attach $image after $attach_attempt attempts" >&2
+else
+    # Fallback: If 7-Zip extracted everything flat into a subfolder (like 'SDL3'), copy its entire contents
+    found_dir=$(find "$stage_one" -mindepth 1 -maxdepth 2 -type d ! -name ".*" -print -quit)
+    if [ -n "$found_dir" ]; then
+        echo "Copying extracted folder contents directly..."
+        rm -rf "$destination"
+        ditto "$found_dir" "$destination"
+    else
+        echo "error: No framework files were found in the extracted payload!" >&2
+        ls -R "$stage_one"
+        rm -rf "$stage_one"
         exit 1
     fi
-    attach_attempt=$((attach_attempt + 1))
-    echo "Retrying disk-image attach (attempt $attach_attempt of 2)"
-done
+fi
 
-"$ditto_command" "$mount_point" "$destination"
+# Clean up temporary staging workspace
+rm -rf "$stage_one"
+echo "Extraction completed successfully!"
