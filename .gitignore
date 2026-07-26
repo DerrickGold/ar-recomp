@@ -22,9 +22,16 @@ game-assets/audio/*
 *.rec
 !assets/*.png
 
-# Build output
-build*/
+# Build output. These are listed individually rather than as a bare `build*/`
+# glob: unanchored, that also matched snesrecomp-go/internal/buildgui/ — the
+# builder GUI's SOURCE directory — so every file added there was silently
+# untracked (gui.go and gui_test.go had to be force-added to exist at all, and
+# the next file added would have been lost the same way).
+build/
+build-*/
 release/
+snesrecomp-go/build/
+snesrecomp-go/packaging/build/
 *.o
 *.exe
 *.out
