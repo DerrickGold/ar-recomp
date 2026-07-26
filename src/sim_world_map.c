@@ -144,14 +144,16 @@ uint32_t SimWorldMap_Serial(void) {
   return g_world.available ? g_world.serial : 0;
 }
 
-bool SimWorldMap_Bake(uint32_t *pixels, int pitch_pixels) {
-  if (!g_world.available || !pixels || pitch_pixels < kSimWorldMapPixels)
-    return false;
-
-  /* Palette-expand only the tiles that changed since their last bake into the
-   * persistent CPU image, then clear their flags. This is the expensive part
-   * (a palette lookup per pixel), and it is the whole point of the dirty
-   * tracking: a single-tile edit touches 64 pixels, not 1,048,576. */
+/* Palette-expand only the tiles that changed since their last bake into the
+ * persistent CPU image, then clear their flags. This is the expensive part
+ * (a palette lookup per pixel), and it is the whole point of the dirty
+ * tracking: a single-tile edit touches 64 pixels, not 1,048,576.
+ *
+ * Idempotent, so both Bake and Downsample can call it: the second call in a
+ * frame finds nothing dirty and does no work. Downsample must not skip it —
+ * otherwise the mip would be built from a stale image whenever it ran before
+ * the frame's Bake.  */
+static void RefreshPersistentImage(void) {
   for (int tile_y = 0; tile_y < kSimWorldMapTiles; tile_y++) {
     for (int tile_x = 0; tile_x < kSimWorldMapTiles; tile_x++) {
       int tile_index = tile_y * kSimWorldMapTiles + tile_x;
@@ -169,6 +171,13 @@ bool SimWorldMap_Bake(uint32_t *pixels, int pitch_pixels) {
       g_world.dirty[tile_index] = 0;
     }
   }
+}
+
+bool SimWorldMap_Bake(uint32_t *pixels, int pitch_pixels) {
+  if (!g_world.available || !pixels || pitch_pixels < kSimWorldMapPixels)
+    return false;
+
+  RefreshPersistentImage();
 
   /* Always copy the whole persistent image into the caller's buffer. The
    * caller's `pixels` is a streaming-texture lock: write-only with undefined
@@ -178,5 +187,38 @@ bool SimWorldMap_Bake(uint32_t *pixels, int pitch_pixels) {
     memcpy(pixels + (size_t)y * pitch_pixels,
            g_world.pixels + (size_t)y * kSimWorldMapPixels,
            (size_t)kSimWorldMapPixels * sizeof(uint32_t));
+  return true;
+}
+
+bool SimWorldMap_Downsample(uint32_t *pixels, int pitch_pixels, int divisor) {
+  if (!g_world.available || !pixels || divisor < 1) return false;
+  if (kSimWorldMapPixels % divisor != 0) return false;
+  const int extent = kSimWorldMapPixels / divisor;
+  if (pitch_pixels < extent) return false;
+
+  RefreshPersistentImage();
+
+  /* Reads g_world.pixels, never a caller-supplied mapping — see the header. */
+  const uint32_t taps = (uint32_t)divisor * (uint32_t)divisor;
+  for (int y = 0; y < extent; y++) {
+    uint32_t *out = pixels + (size_t)y * pitch_pixels;
+    for (int x = 0; x < extent; x++) {
+      uint32_t alpha = 0, red = 0, green = 0, blue = 0;
+      for (int sy = 0; sy < divisor; sy++) {
+        const uint32_t *row = g_world.pixels +
+            (size_t)(y * divisor + sy) * kSimWorldMapPixels +
+            (size_t)x * divisor;
+        for (int sx = 0; sx < divisor; sx++) {
+          uint32_t texel = row[sx];
+          alpha += (texel >> 24) & 0xFF;
+          red += (texel >> 16) & 0xFF;
+          green += (texel >> 8) & 0xFF;
+          blue += texel & 0xFF;
+        }
+      }
+      out[x] = ((alpha / taps) << 24) | ((red / taps) << 16) |
+          ((green / taps) << 8) | (blue / taps);
+    }
+  }
   return true;
 }

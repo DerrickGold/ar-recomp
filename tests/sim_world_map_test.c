@@ -292,12 +292,90 @@ static void TestDirtyTrackingMatchesFullBake(void) {
   free(rom);
 }
 
+/* The blur mip must be a box average of the SAME image Bake emits, computed
+ * from the module's persistent copy rather than from the caller's buffer.
+ *
+ * The predecessor built this mip by reading back the streaming-texture lock it
+ * had just baked into — legal-looking on Metal, garbage on a Vulkan/Mesa
+ * backend where the mapping is write-combined (that is the macOS-fine /
+ * Steam-Deck-garbled split). The test that catches a reintroduction is one that
+ * hands Downsample a destination full of garbage and byte-compares against an
+ * independent reference: if the implementation ever reads its own destination,
+ * or reads anything other than the baked image, the comparison fails.
+ *
+ * Also asserts the pitch is honored, since the destination's pitch comes from
+ * SDL and need not equal the extent. */
+static void TestDownsampleMatchesBake(void) {
+  uint8_t *rom = BuildRom();
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+
+  const int count = kSimWorldMapPixels * kSimWorldMapPixels;
+  uint32_t *baked = malloc((size_t)count * 4);
+  const int divisor = 4;
+  const int extent = kSimWorldMapPixels / divisor;
+  /* Over-wide destination: pitch deliberately != extent. */
+  const int pitch = extent + 7;
+  uint32_t *mip = malloc((size_t)pitch * extent * 4);
+  uint32_t *reference = malloc((size_t)extent * extent * 4);
+
+  CHECK(SimWorldMap_Bake(baked, kSimWorldMapPixels));
+
+  /* Independent box average over the baked image. */
+  for (int y = 0; y < extent; y++) {
+    for (int x = 0; x < extent; x++) {
+      uint32_t a = 0, r = 0, g = 0, b = 0;
+      for (int sy = 0; sy < divisor; sy++) {
+        for (int sx = 0; sx < divisor; sx++) {
+          uint32_t texel =
+              baked[(size_t)(y * divisor + sy) * kSimWorldMapPixels +
+                    (size_t)x * divisor + sx];
+          a += (texel >> 24) & 0xFF; r += (texel >> 16) & 0xFF;
+          g += (texel >> 8) & 0xFF;  b += texel & 0xFF;
+        }
+      }
+      const uint32_t taps = (uint32_t)(divisor * divisor);
+      reference[(size_t)y * extent + x] =
+          ((a / taps) << 24) | ((r / taps) << 16) | ((g / taps) << 8) |
+          (b / taps);
+    }
+  }
+
+  memset(mip, 0xAA, (size_t)pitch * extent * 4);
+  CHECK(SimWorldMap_Downsample(mip, pitch, divisor));
+  for (int y = 0; y < extent; y++) {
+    CHECK(memcmp(mip + (size_t)y * pitch, reference + (size_t)y * extent,
+                 (size_t)extent * 4) == 0);
+  }
+
+  /* Repeating it with nothing dirty must reproduce the same mip — the caller's
+   * buffer is fresh garbage every frame, exactly as for Bake. */
+  memset(mip, 0x5C, (size_t)pitch * extent * 4);
+  CHECK(SimWorldMap_Downsample(mip, pitch, divisor));
+  for (int y = 0; y < extent; y++) {
+    CHECK(memcmp(mip + (size_t)y * pitch, reference + (size_t)y * extent,
+                 (size_t)extent * 4) == 0);
+  }
+
+  /* Argument validation: a divisor that does not divide the extent, a
+   * nonsensical divisor, a short pitch, and a NULL destination. */
+  CHECK(!SimWorldMap_Downsample(mip, pitch, 3));
+  CHECK(!SimWorldMap_Downsample(mip, pitch, 0));
+  CHECK(!SimWorldMap_Downsample(mip, extent - 1, divisor));
+  CHECK(!SimWorldMap_Downsample(NULL, pitch, divisor));
+
+  free(reference);
+  free(mip);
+  free(baked);
+  free(rom);
+}
+
 int main(void) {
   TestUnavailableRom();
   TestTownWindows();
   TestShadowAdoptionPolicy();
   TestBakeIsFullyCovered();
   TestDirtyTrackingMatchesFullBake();
+  TestDownsampleMatchesBake();
   SimWorldMap_Shutdown();
   printf("sim world map tests: %s\n", s_failures ? "FAIL" : "pass");
   return s_failures ? 1 : 0;

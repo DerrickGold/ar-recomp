@@ -77,4 +77,23 @@ uint32_t SimWorldMap_Serial(void);
  * of the town is the correct stand-in for territory that is off-screen. */
 bool SimWorldMap_Bake(uint32_t *pixels, int pitch_pixels);
 
+/* Box-downsamples the baked image by `divisor` into `pixels`, which must be
+ * (kSimWorldMapPixels / divisor) square. `divisor` must be >= 1 and divide
+ * kSimWorldMapPixels exactly; anything else returns false.
+ *
+ * This exists because the source it reads MUST be the module's own persistent
+ * CPU image, never a mapped streaming-texture lock. SDL_LockTexture is
+ * documented write-only ("the pixels made available for editing don't
+ * necessarily contain the old texture data", SDL_render.h) — on Metal the
+ * mapping happens to be readable, so reading a just-written lock appears to
+ * work, while a Vulkan/Mesa backend can hand back write-combined or staging
+ * memory whose reads return unpredictable content. Downsampling from the lock
+ * therefore produced a correct mip on macOS and a garbled one on Steam Deck.
+ * Keeping the read on this side of the wall makes that mistake unavailable to
+ * callers. Same hazard as finding O2 (the town canvas), in the read direction.
+ *
+ * Costs nothing extra: SimWorldMap_Bake already maintains the full-resolution
+ * image this reads, which is what the caller's lock was a copy OF. */
+bool SimWorldMap_Downsample(uint32_t *pixels, int pitch_pixels, int divisor);
+
 #endif  /* SIM_WORLD_MAP_H */

@@ -1695,43 +1695,40 @@ static SDL_Texture *EnsureSimUnderlayTexture(const FrameSlot *slot) {
     return NULL;
   bool baked = SimWorldMap_Bake((uint32_t *)pixels,
                                 pitch / (int)sizeof(uint32_t));
-  /* Built from the bake while it is still mapped, so the full-resolution
-   * image never needs a second copy on the heap. */
-  if (baked && s_sim_underlay_blur_texture) {
+  /* Unlock BEFORE touching the blur texture. The previous version kept this
+   * lock open and read the just-baked pixels back out of it to build the mip,
+   * which is a documented contract violation twice over: SDL_LockTexture is
+   * WRITE-ONLY ("the pixels made available for editing don't necessarily
+   * contain the old texture data", SDL_render.h), and two streaming locks were
+   * held at once with the inner one released first.
+   *
+   * It worked on macOS and garbled on Steam Deck for the reason that class of
+   * bug always does: Metal hands back a persistently-mapped buffer that reads
+   * back fine, while a Vulkan/Mesa backend can hand back write-combined or
+   * staging memory whose reads return unpredictable content — so the mip was
+   * built from partly-garbage source and the upscaled blur smeared it across
+   * the top of the 1024 square. Same hazard as finding O2 (the town canvas
+   * bake), in the read direction rather than the write direction.
+   *
+   * The mip now comes from SimWorldMap_Downsample, which reads the module's own
+   * persistent CPU image. That costs no extra memory: the image already exists
+   * and is what this lock was a copy OF. */
+  SDL_UnlockTexture(s_sim_underlay_texture);
+  if (!baked) return NULL;
+  if (s_sim_underlay_blur_texture) {
     void *blur_pixels = NULL;
     int blur_pitch = 0;
     if (SDL_LockTexture(s_sim_underlay_blur_texture, NULL, &blur_pixels,
                         &blur_pitch)) {
-      const uint32_t *src = (const uint32_t *)pixels;
-      int src_pitch = pitch / (int)sizeof(uint32_t);
-      for (int y = 0; y < kSimUnderlayBlurPixels; y++) {
-        uint32_t *dst = (uint32_t *)((uint8_t *)blur_pixels +
-                                     (size_t)y * blur_pitch);
-        for (int x = 0; x < kSimUnderlayBlurPixels; x++) {
-          uint32_t alpha = 0, red = 0, green = 0, blue = 0;
-          for (int sy = 0; sy < kSimUnderlayBlurDivisor; sy++) {
-            const uint32_t *row =
-                src + (size_t)(y * kSimUnderlayBlurDivisor + sy) * src_pitch +
-                (size_t)x * kSimUnderlayBlurDivisor;
-            for (int sx = 0; sx < kSimUnderlayBlurDivisor; sx++) {
-              uint32_t texel = row[sx];
-              alpha += (texel >> 24) & 0xFF;
-              red += (texel >> 16) & 0xFF;
-              green += (texel >> 8) & 0xFF;
-              blue += texel & 0xFF;
-            }
-          }
-          const uint32_t taps =
-              kSimUnderlayBlurDivisor * kSimUnderlayBlurDivisor;
-          dst[x] = ((alpha / taps) << 24) | ((red / taps) << 16) |
-              ((green / taps) << 8) | (blue / taps);
-        }
+      if (!SimWorldMap_Downsample((uint32_t *)blur_pixels,
+                                  blur_pitch / (int)sizeof(uint32_t),
+                                  kSimUnderlayBlurDivisor)) {
+        /* Leave the mip as-is rather than presenting a half-written lock. */
+        fprintf(stderr, "[sim3d-underlay] world map downsample failed\n");
       }
       SDL_UnlockTexture(s_sim_underlay_blur_texture);
     }
   }
-  SDL_UnlockTexture(s_sim_underlay_texture);
-  if (!baked) return NULL;
   s_sim_underlay_serial = slot->sim.underlay_serial;
   return s_sim_underlay_texture;
 }
