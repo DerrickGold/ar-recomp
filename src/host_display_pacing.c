@@ -78,3 +78,15 @@ uint64_t HostDisplayPacing_CatchupCapNs(
       ? limited_present_headroom_ns
       : ordinary_cap_ns;
 }
+
+int HostDisplayPacing_WindowAxisToOutput(int window_position,
+                                        int window_extent,
+                                        int output_extent) {
+  if (window_extent <= 0 || output_extent <= 0) return 0;
+  const int64_t scaled =
+      ((int64_t)window_position * output_extent + window_extent / 2) /
+      window_extent;
+  if (scaled < 0) return 0;
+  if (scaled > output_extent - 1) return output_extent - 1;
+  return (int)scaled;
+}

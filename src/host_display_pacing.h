@@ -32,4 +32,23 @@ uint64_t HostDisplayPacing_CatchupCapNs(
     uint64_t emulation_frame_interval_ns,
     int maximum_catchup_frames);
 
+/* Maps one axis of a window-client coordinate onto renderer-output pixels.
+ *
+ * Pure so it can be unit-tested: the interesting behaviour is at the edges and
+ * the two sizes are rarely equal (a high-DPI backing store makes output larger;
+ * a reduced render resolution would make it smaller).
+ *
+ * Rounds to nearest and CLAMPS to the last valid pixel. The clamp is the point:
+ * round-to-nearest alone returns `extent` — one past the end — for the final
+ * window pixel whenever output <= window/2, which is exactly the ratio a 2x
+ * downscale produces. Every current caller happens to bounds-check, so the
+ * symptom today is only a one-pixel dead edge, but SDL_mouse.h warns that mouse
+ * coordinates may fall outside the window at all, so no caller may assume the
+ * result is in range unless this guarantees it.
+ *
+ * Returns 0 for a non-positive extent rather than dividing by zero. */
+int HostDisplayPacing_WindowAxisToOutput(int window_position,
+                                         int window_extent,
+                                         int output_extent);
+
 #endif /* HOST_DISPLAY_PACING_H */

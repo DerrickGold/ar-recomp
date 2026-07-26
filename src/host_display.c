@@ -102,14 +102,21 @@ bool HostDisplay_WindowPointToOutput(int window_x, int window_y,
       output_width <= 0 || output_height <= 0)
     return false;
 
-  /* SDL3 mouse events remain in window-client coordinates. Convert them to
-   * renderer-output pixels; this also covers a high-DPI backing scale. */
+  /* SDL3 reports mouse coordinates relative to the window (SDL_events.h
+   * documents the ORIGIN; it does not state the unit, so treating them as
+   * window-client coordinates and rescaling is the conservative reading).
+   * Convert to renderer-output pixels; this covers a high-DPI backing scale in
+   * one direction and a reduced render resolution in the other.
+   *
+   * W4-5: the arithmetic lives in host_display_pacing.c so its edge behaviour is
+   * unit-tested — round-to-nearest alone overshoots by one pixel on the final
+   * row/column when the output is half the window or smaller. */
   if (output_x)
-    *output_x = (int)(((int64_t)window_x * output_width +
-                       window_width / 2) / window_width);
+    *output_x = HostDisplayPacing_WindowAxisToOutput(
+        window_x, window_width, output_width);
   if (output_y)
-    *output_y = (int)(((int64_t)window_y * output_height +
-                       window_height / 2) / window_height);
+    *output_y = HostDisplayPacing_WindowAxisToOutput(
+        window_y, window_height, output_height);
   return true;
 }
 

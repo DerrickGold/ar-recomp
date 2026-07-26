@@ -111,12 +111,82 @@ static void TestSub60LimitsRetainElapsedTime(void) {
   }
 }
 
+/* W4-5: window-client coordinate -> renderer-output pixel.
+ *
+ * The property that matters is that the result is ALWAYS a valid index into the
+ * output extent, for every input the window can produce and at every ratio.
+ * Round-to-nearest alone satisfies that when magnifying but overshoots by one on
+ * the final row/column once the output is half the window or smaller — the exact
+ * ratio a 2x render-resolution reduction produces. */
+static void TestWindowAxisToOutput(void) {
+  /* Identity: every position maps to itself. */
+  for (int position = 0; position < 8; position++)
+    CHECK(HostDisplayPacing_WindowAxisToOutput(position, 8, 8) == position);
+
+  /* The last valid window pixel must map in range at every ratio, including the
+   * minifying ones where the unclamped formula returns `extent`. */
+  const struct { int window; int output; } ratios[] = {
+    { 1280, 2560 },   /* 2x high-DPI magnify */
+    { 1280, 1920 },   /* 1.5x magnify */
+    { 1920, 1280 },   /* 1.5x minify — never overshot even unclamped */
+    { 2560, 1280 },   /* 2x minify — the overshooting case */
+    { 3840, 1080 },   /* 3.56x minify */
+    { 2560,  640 },   /* 4x minify */
+    {    1,    1 },   /* degenerate single pixel */
+    {    7,    3 },   /* non-integer, odd sizes */
+  };
+  for (size_t index = 0; index < sizeof ratios / sizeof *ratios; index++) {
+    const int window = ratios[index].window;
+    const int output = ratios[index].output;
+    for (int position = 0; position < window; position++) {
+      const int mapped =
+          HostDisplayPacing_WindowAxisToOutput(position, window, output);
+      CHECK(mapped >= 0);
+      CHECK(mapped <= output - 1);
+    }
+    /* Monotone: a larger window position never maps to a smaller output pixel. */
+    int previous = -1;
+    for (int position = 0; position < window; position++) {
+      const int mapped =
+          HostDisplayPacing_WindowAxisToOutput(position, window, output);
+      CHECK(mapped >= previous);
+      previous = mapped;
+    }
+    /* The first window pixel lands on the first output pixel. The LAST one is
+     * deliberately not asserted to be output-1: when magnifying, one window
+     * pixel spans several output pixels and round-to-nearest picks the first of
+     * them (window 1279 of 1280 -> 2558 of 2560, covering 2558..2559), which is
+     * correct. What must hold is only that it is in range and is the largest
+     * value produced — both already asserted above. */
+    CHECK(HostDisplayPacing_WindowAxisToOutput(0, window, output) == 0);
+    CHECK(HostDisplayPacing_WindowAxisToOutput(window - 1, window, output) >=
+          HostDisplayPacing_WindowAxisToOutput(window - 2 > 0 ? window - 2 : 0,
+                                               window, output));
+    /* Minifying, the last window pixel DOES reach the last output pixel — and
+     * this is the case the unclamped formula overshot. */
+    if (output <= window)
+      CHECK(HostDisplayPacing_WindowAxisToOutput(window - 1, window, output) ==
+            output - 1);
+  }
+
+  /* Out-of-window inputs are clamped, not propagated: SDL_mouse.h warns that
+   * mouse coordinates may fall outside the window entirely. */
+  CHECK(HostDisplayPacing_WindowAxisToOutput(-50, 1280, 720) == 0);
+  CHECK(HostDisplayPacing_WindowAxisToOutput(99999, 1280, 720) == 719);
+
+  /* A non-positive extent yields 0 rather than dividing by zero. */
+  CHECK(HostDisplayPacing_WindowAxisToOutput(10, 0, 720) == 0);
+  CHECK(HostDisplayPacing_WindowAxisToOutput(10, 1280, 0) == 0);
+  CHECK(HostDisplayPacing_WindowAxisToOutput(10, -4, -4) == 0);
+}
+
 int main(void) {
   TestExplicitFrameLimits();
   TestUnlimitedAndVsyncPolicies();
   TestUiAndPausedIntervals();
   TestGamePresentAntiSpinFloor();
   TestSub60LimitsRetainElapsedTime();
+  TestWindowAxisToOutput();
   if (s_failure_count) {
     fprintf(stderr, "host_display_pacing_test: %d failure(s)\n",
             s_failure_count);
