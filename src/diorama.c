@@ -1014,7 +1014,7 @@ static const float kShoeboxZFront = 0.45f;
 static const float kShoeboxWallFadeRange = 0.15f;
 
 static void DrawDioramaShoebox(SDL_Renderer *renderer, const float mvp[16],
-                               float aspect_x, float tilt_y,
+                               float aspect_x, float height_scale, float tilt_y,
                                int out_w, int out_h) {
   /* Live report (2026-07-21): opaque walls read as a plain gray box,
    * disconnected from the skybox (drawn before everything, including these
@@ -1030,10 +1030,28 @@ static void DrawDioramaShoebox(SDL_Renderer *renderer, const float mvp[16],
    * problem the skybox fixes for the backdrop, just one level out.
    * Oversized X/Y (not Z — that still has to line up with the layer
    * stack's own depth range) gives headroom across the whole tilt clamp
-   * (±0.7 rad) without needing per-angle math. */
-  static const float kShoeboxOverscan = 2.0f;
+   * (±0.7 rad) without needing per-angle math.
+   *
+   * Live report (2026-07-26): overscan 2.0 put the walls at exactly TWICE the
+   * layer extent, so they no longer converged on the plane edges — a visible
+   * gap between the rendered planes and the walls, which defeats the box's
+   * other job (masking the original screen edges). It also ignored C1's slack
+   * inset on Y, making the vertical mismatch (2.07x) worse than the
+   * horizontal (2.00x).
+   *
+   * Reduced to a small margin, and half_y now tracks height_scale so both
+   * axes are inset consistently with the layers. The corner-into-view hazard
+   * the 2.0 was guarding is now handled properly upstream: a9599e6 gave
+   * Scene3D_ProjectWorldPoint a near-plane rejection, so a corner that
+   * rotates behind the camera makes BuildQuadMesh drop the quad instead of
+   * projecting it to a huge finite coordinate. That guard did not exist when
+   * 2.0 was chosen, which is why padding was the only available fix then. If
+   * the extremes still misbehave, the next step is a per-frame clamp via
+   * Scene3D_DepthBoundaryY (what the sim underlay already does) rather than
+   * re-inflating this constant. */
+  static const float kShoeboxOverscan = 1.05f;
   float hx = 0.5f * aspect_x * kShoeboxOverscan;
-  float half_y = 0.5f * kShoeboxOverscan;
+  float half_y = 0.5f * height_scale * kShoeboxOverscan;
   float z_span = kShoeboxZFront - kShoeboxZBack;
   SDL_Vertex verts[4];
   int indices[6];
@@ -1216,7 +1234,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   /* B6 (followup doc): drawn before the per-layer loop below — painter's
    * algorithm, the box surrounds the stack. */
   if (g_settings.diorama_shoebox)
-    DrawDioramaShoebox(renderer, mvp, aspect_x, cam.tilt_y, out_w, out_h);
+    DrawDioramaShoebox(renderer, mvp, aspect_x, height_scale, cam.tilt_y,
+                       out_w, out_h);
 
   float shade_mix = (float)g_settings.diorama_depth_shade / 100.0f;
 
