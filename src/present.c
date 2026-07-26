@@ -1254,7 +1254,25 @@ typedef enum SimObjectTierFilter {
 typedef struct SimBillboardPass {
   SimBillboardPassKind kind;
   float offset_x, offset_y;
+  /* W4-1: the blend mode this pass needs on the atlas texture.
+   *
+   * It has to travel WITH the pass rather than be set by the caller
+   * beforehand, because DrawSimObjectPriority sets the atlas blend mode itself
+   * on entry (it is the ordinary draw's mode, and the two main-path callers
+   * rely on that). A caller that set a mode and then called in had it silently
+   * overwritten before anything was drawn — which is exactly how the rim-light
+   * mask pass lost its blend mode and stopped trimming the rim. */
+  SDL_BlendMode blend;
 } SimBillboardPass;
+
+/* Single source of truth for "what blend mode does this draw use", so the
+ * caller-side pass setup and the callee-side set cannot disagree. A NULL pass is
+ * the ordinary coloured draw. */
+static SDL_BlendMode SimBillboardPassBlend(const SimBillboardPass *pass) {
+  return (pass && pass->blend != SDL_BLENDMODE_INVALID)
+      ? pass->blend
+      : SDL_BLENDMODE_BLEND;
+}
 
 /* Strict "a must be drawn after b" for the in-band painter sort. Strict, not
  * "greater or equal": returning true for equal keys would make the insertion
@@ -1278,7 +1296,8 @@ static void DrawSimObjectPriority(
     const Scene3DCamera *camera, const float matrix[16],
     const SimBillboardPass *pass) {
   if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
-  SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
+  SDL_SetTextureBlendMode(g_sim_obj_atlas_texture,
+                          SimBillboardPassBlend(pass));
   float flat_scale_x = (float)viewport.w / source.w;
   float flat_scale_y = (float)viewport.h / source.h;
 
@@ -1489,9 +1508,15 @@ static void DrawSimRimLight(
   /* Band width scales with the output so the rim does not thin out to nothing
    * as the window grows. */
   float distance = (float)viewport.h / (float)source.h * 1.25f;
-  SimBillboardPass fill = { kSimBillboardPass_Fill, 0.0f, 0.0f };
+  /* The fill lays down the offset silhouette with ordinary alpha blending; the
+   * mask then multiplies it down to the part inside the sprite's own body,
+   * which is what makes it read as a rim rather than a drop shadow in reverse.
+   * W4-1: each pass carries its own blend mode, because the callee sets the
+   * atlas mode on entry and would otherwise overwrite one set here. */
+  SimBillboardPass fill = { kSimBillboardPass_Fill, 0.0f, 0.0f,
+                            SDL_BLENDMODE_BLEND };
   SimRimOffset(slot, distance, &fill.offset_x, &fill.offset_y);
-  SimBillboardPass mask = { kSimBillboardPass_Mask, 0.0f, 0.0f };
+  SimBillboardPass mask = { kSimBillboardPass_Mask, 0.0f, 0.0f, mask_blend };
 
   SDL_Rect saved_clip;
   bool clipped = SDL_RenderClipEnabled(g_renderer);
@@ -1509,10 +1534,11 @@ static void DrawSimRimLight(
   DrawSimObjectPriority(slot, priority, kSimTierFilter_World, true,
                         virtual_height, source,
                         local_viewport, camera, matrix, &fill);
-  SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, mask_blend);
   DrawSimObjectPriority(slot, priority, kSimTierFilter_World, true,
                         virtual_height, source,
                         local_viewport, camera, matrix, &mask);
+  /* Restore the shared atlas state this function borrowed. The blend mode is
+   * left at the ordinary draw mode rather than whatever the mask pass used. */
   SDL_SetTextureColorMod(g_sim_obj_atlas_texture, 255, 255, 255);
   SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
 
