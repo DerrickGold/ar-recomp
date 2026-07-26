@@ -20,7 +20,7 @@ int main(void) {
   /* alpha 0.5 = halfway to the next tick. */
   DioramaScrollDelta d = ComputeDioramaScrollDeltaAt(&curr, &prev, 0.5f);
   CHECK(d.active);
-  CHECK(near(d.bg_du[0], (0.5f * 10.0f) / 256.0f));   /* ~0.01953 */
+  CHECK(near(d.bg_du[0], (0.5f * 10.0f) / 448.0f));   /* IJ1: /448, not /256 */
   CHECK(d.bg_du[0] > 0.0f);
   /* Refuted-claim guard: do NOT assert bg_du[1]==0 (BG2 has a WRAM camera).
    * BG3 (index 2) and BG4 (index 3) DO stay zero. */
@@ -56,7 +56,7 @@ int main(void) {
     for (unsigned i = 0; i < sizeof phases / sizeof *phases; i++) {
       DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&curr, &prev, phases[i]);
       CHECK(r.active);                       /* alpha 0.0 is a LEGAL phase */
-      CHECK(near(r.bg_du[0], (phases[i] * 10.0f) / 256.0f));
+      CHECK(near(r.bg_du[0], (phases[i] * 10.0f) / 448.0f));
       CHECK(r.bg_du[0] > prev_du);           /* strictly increasing */
       prev_du = r.bg_du[0];
     }
@@ -77,11 +77,11 @@ int main(void) {
     multi.bg1_camera_x = 20;                 /* 20px over two ticks */
     DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&multi, &prev, 0.5f);
     CHECK(r.active);
-    CHECK(near(r.bg_du[0], (0.5f * 10.0f) / 256.0f));
+    CHECK(near(r.bg_du[0], (0.5f * 10.0f) / 448.0f));
     /* Same pair mislabelled as one tick would double it — the bug this guards. */
     FrameSlot mislabelled = multi; mislabelled.capture_ticks = 1;
     CHECK(near(ComputeDioramaScrollDeltaAt(&mislabelled, &prev, 0.5f).bg_du[0],
-               (0.5f * 20.0f) / 256.0f));
+               (0.5f * 20.0f) / 448.0f));
   }
 
   /* capture_ticks == 0 is a paused re-capture, not a pair — and it is the
@@ -168,6 +168,61 @@ int main(void) {
     /* Zero shift is exactly identity. */
     DioramaInterpUvWindow(r0, r1, 0.0f, slack, &u0, &u1);
     CHECK(near(u0, r0) && near(u1, r1));
+  }
+
+  /* IJ1: the U and V axes must use the SAME unit — one source texel — so a
+   * diagonal camera move produces a shift with the same aspect as the motion.
+   *
+   * The bug: U divided by snes_width (256) while diorama.c normalizes its U
+   * window by the layer texture's allocated width (kPpuBufWidth = 448). V
+   * divided by snes_height, which IS the texture height, so V was right and U
+   * was 1.75x too large. Two consequences, both of which the author saw as
+   * jitter:
+   *   - At t->1 the displayed camera sat at P + 1.75*delta while the next
+   *     tick's t=0 lands at P + delta, so 0.75*delta was thrown away BACKWARD
+   *     every tick — a 60Hz sawtooth even at constant velocity.
+   *   - Diagonal motion sheared, because H and V disagreed by 1.75x.
+   *
+   * The assertion is the axis RATIO, which is unit-independent and therefore
+   * survives any future change to either denominator: an equal-pixel diagonal
+   * move must yield du/dv equal to the texture's own height/width ratio. */
+  {
+    FrameSlot diag = curr;
+    diag.capture_ticks = 1;
+    diag.snes_width = 256; diag.snes_height = 224;
+    DioramaScrollSnapshot base = prev;
+    base.bg1_camera_x = 100; base.bg1_camera_y = 100;
+    diag.bg1_camera_x = 108; diag.bg1_camera_y = 108;   /* +8 px on BOTH axes */
+
+    DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&diag, &base, 1.0f);
+    CHECK(r.active);
+    /* One texel of U is 1/448; one row of V is 1/224. So an equal-pixel move
+     * must give dv exactly 2x du (448/224), NOT the 1.75x-inflated du the bug
+     * produced (which yielded dv/du = 224/... -> 1.143). */
+    CHECK(near(r.bg_du[0], 8.0f / 448.0f));
+    CHECK(near(r.bg_dv[0], 8.0f / 224.0f));
+    CHECK(near(r.bg_dv[0] / r.bg_du[0], 448.0f / 224.0f));
+
+    /* And the load-bearing property: at t=1 the shift must equal EXACTLY one
+     * tick of motion in texture units, so extrapolation lands precisely on the
+     * next tick's captured position instead of overshooting past it. Overshoot
+     * is what made the offset get discarded backward every tick. */
+    CHECK(near(r.bg_du[0] * 448.0f, 8.0f));    /* 8 texels, not 14 */
+    CHECK(near(r.bg_dv[0] * 224.0f, 8.0f));
+
+    /* The R17/C1 slack margin must not saturate at ordinary walking speed. The
+     * margin is 4px of the 448-wide texture; a one-tick move of 4 source px at
+     * full phase must therefore fit exactly, and 3px must fit with room. With
+     * the 1.75x inflation, saturation began at 2.29px — inside walking range. */
+    const float uv_slack = 4.0f / 448.0f;
+    for (int px = 1; px <= 4; px++) {
+      FrameSlot walk = diag;
+      walk.bg1_camera_x = 100 + px;
+      walk.bg1_camera_y = 100;
+      DioramaScrollDelta w = ComputeDioramaScrollDeltaAt(&walk, &base, 1.0f);
+      CHECK(w.active);
+      CHECK(w.bg_du[0] <= uv_slack + 1e-6f);   /* does not need clamping */
+    }
   }
 
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return 1; }

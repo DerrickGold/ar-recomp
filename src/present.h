@@ -37,6 +37,15 @@ enum {
   kFrameSlotOverlay_Bg4 = 3,
   kFrameSlotOverlay_Obj = 4,
   kFrameSlotOverlaySourceCount = 5,  /* kPpuOverlaySource_Count */
+  /* Mirrors ppu.h's kPpuBufWidth (256 + 96*2), for the same D6 reason as the
+   * overlay enum above: present-time code must not include ppu.h. It is the
+   * ALLOCATED width of every layer texture, and therefore the denominator that
+   * normalizes the U axis — the capture occupies only the leading snes_width
+   * columns of it. Anything computing a normalized U offset must divide by this,
+   * not by snes_width; see IJ1 in diorama_scroll_math.c for the artifact that
+   * mistake produced. Cross-checked by FrameSlot_Capture's _Static_assert
+   * against the real constant. */
+  kFrameSlotLayerTextureWidth = 448,  /* kPpuBufWidth */
 };
 enum { kFrameSlotOverlayFlag_RemoveFromGame = 1 };
 

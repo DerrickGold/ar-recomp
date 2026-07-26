@@ -80,14 +80,43 @@ DioramaScrollDelta ComputeDioramaScrollDeltaAt(
    * camera and stay at their zero-initialized d.bg_du/bg_dv — BG3 is the
    * HUD (composes with diorama_hud_flat's default, where BG3 isn't even a
    * tilted plane), and BG4 is unused in this game's Mode 1. */
+  /* IJ1: the U denominator is the TEXTURE width, not the visible width.
+   *
+   * These deltas are consumed as normalized UV offsets into the diorama layer
+   * textures, which are allocated kPpuBufWidth (448) wide — the widescreen
+   * headroom — with the capture occupying only the leading snes_width columns.
+   * diorama.c normalizes its U window the same way (uv_u1 = snes_width /
+   * kPpuBufWidth), and its shader uniforms pass the U texel size as
+   * 1/kPpuBufWidth. So one source column is 1/448 of U, NOT 1/snes_width.
+   *
+   * Dividing by snes_width made every horizontal shift kPpuBufWidth/snes_width
+   * too large — 1.75x with widescreen off. That is why interpolation jittered
+   * during STEADY walking, not just on velocity changes: at t->1 the displayed
+   * camera sat at P + 1.75*delta, while the next tick's t=0 lands at
+   * P + delta, so 0.75*delta was discarded BACKWARD at every tick boundary —
+   * a 60Hz sawtooth even at perfectly constant velocity, which is precisely
+   * the case forward extrapolation is supposed to render smoothly.
+   *
+   * It also made the R17/C1 slack margin saturate at 2.29 camera px/tick
+   * instead of the intended 4, so ordinary walking clipped the offset to a
+   * constant for most of a tick and then jumped — a second, harsher artifact
+   * on top of the first.
+   *
+   * V was already correct: snes_height IS the texture height, and diorama.c
+   * normalizes V by the same tex_h. Only U was inconsistent, which is also why
+   * diagonal motion sheared horizontally against vertically.
+   *
+   * (Widescreen ON makes snes_width 446, i.e. a factor of 1.0045 — nearly
+   * correct. So the pre-fix artifact was much worse with widescreen off, which
+   * is a useful signature if it is ever seen again.) */
   int dh1 = curr->bg1_camera_x - prev->bg1_camera_x;
   int dv1 = curr->bg1_camera_y - prev->bg1_camera_y;
-  d.bg_du[0] = (t * (float)dh1) / (float)curr->snes_width;
+  d.bg_du[0] = (t * (float)dh1) / (float)kFrameSlotLayerTextureWidth;
   d.bg_dv[0] = (t * (float)dv1) / (float)curr->snes_height;
 
   int dh2 = curr->bg2_camera_x - prev->bg2_camera_x;
   int dv2 = curr->bg2_camera_y - prev->bg2_camera_y;
-  d.bg_du[1] = (t * (float)dh2) / (float)curr->snes_width;
+  d.bg_du[1] = (t * (float)dh2) / (float)kFrameSlotLayerTextureWidth;
   d.bg_dv[1] = (t * (float)dv2) / (float)curr->snes_height;
 
   /* AR_INTERP_LOG=1: log BG1's interpolated offset every present, so the M7

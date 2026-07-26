@@ -379,6 +379,12 @@ void FrameSlot_Capture(FrameSlot *dst) {
     _Static_assert(kFrameSlotOverlayFlag_RemoveFromGame ==
                    kPpuOverlayFlag_RemoveFromGame,
                    "present.h's mirrored overlay flag must match ppu.h");
+    /* IJ1: this one is load-bearing arithmetic, not just a layout mirror — it
+     * is the denominator that normalizes every U-axis offset into the layer
+     * textures. Dividing by snes_width instead cost 1.75x too much horizontal
+     * interpolation shift. */
+    _Static_assert(kFrameSlotLayerTextureWidth == kPpuBufWidth,
+                   "present.h's mirrored layer texture width must match ppu.h");
     for (int i = 0; i < kFrameSlotOverlaySourceCount; i++) {
       const PpuOverlayCapture *src = &g_ppu->overlayCaptures[i];
       FrameSlotOverlayCapture *d = &dst->overlay_captures[i];
