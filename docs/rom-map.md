@@ -189,8 +189,10 @@ The resulting common-bank directory is stable and verified 1:1 (DIR page
 `02`→`$44EB`, `03`→`$4545`, `04`→`$4F2F`, `05`→`$5814`, `06`→`$5DB4`,
 `07`→`$5DD8`, `08`→`$6906`, `09`→`$6DA1`, `0A`→`$6DF2`, `0B`→`$6E4C`.
 `srcn 00` has start == loop == `$3000`, so a key-on with no key-off sustains
-indefinitely. Note that the common bank is **not** SFX-exclusive: some songs
-key shared-bank samples as musical instruments (see SEAMS "Audio swap tiers").
+indefinitely. Music key-ons observed in this range were not intentional
+shared-bank instruments: they came from the fixed bootstrap race that cleared
+the sequencer's `$11FF=$0C` instrument-base byte after the common upload (see
+SEAMS "Audio swap tiers").
 
 ### Compressed Data (0x70000+)
 Extensive compressed sprite composition, map arrangement, and tileset data

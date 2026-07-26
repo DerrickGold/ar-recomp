@@ -579,6 +579,27 @@ the current debugging process; this file is the case law.
     rasterizing from a synthetic OAM view. `PpuRasterizeObjRange` is already fully
     screen-independent (no clipping, no scanline limits), so art is not the obstacle.
 
+26. **Intermittent corrupt native music under HD replacements — RESOLVED 2026-07-25.**
+    **Symptom:** on some launches, native music leaked through the OGG replacement immediately
+    and sounded garbled; the entire session was then bad. Failed runs keyed music on common-bank
+    srcn `00`-`06`, while correct runs began at srcn `0C`.
+    **Root cause:** the first-upload HLE copied the resident SPC driver and returned while its
+    bootstrap could still be clearing ARAM. The following common-bank image writes `$11FF=$0C`,
+    the base the sequencer adds to song-local instrument ids, but a fast game thread could make
+    that write while the SPC was still at bootstrap PC `$0407`; the bootstrap then executed
+    `$040C MOV $11FF,A` with `A=0`. Every song instrument was shifted down by 12 into the common
+    SFX bank, selecting the wrong BRR samples and bypassing the `srcn >= $0C` HD-music mute gate.
+    **Fix:** after an exact entry/idle signature match, the first-upload HLE now advances the APU
+    synchronously from `$0400` to the `$0460/$0462` idle loop before returning. This is a bounded
+    emulation barrier (maximum 131072 cycles; 3032 observed), not a host sleep, and does not
+    affect other SPC drivers.
+    **Verification:** 20/20 unpaced fast boots reached the common upload only at `$0460/$0462`;
+    10/10 paced title boots keyed srcn `0C` at BRR `$795F`; a five-second paced leak trace emitted
+    no `musicleak` reports; all 20 runtime tests passed.
+    **Reusable lesson:** HLE must preserve consumer-visible ordering, not merely reproduce the
+    transferred bytes and handshake result. Host thread scheduling is not an emulated-time
+    ordering guarantee.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

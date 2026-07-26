@@ -2066,6 +2066,22 @@ SettingChangeResult Settings_Reset(const SettingDesc *desc) {
   return Settings_SetLong(desc, desc->defval);
 }
 
+SettingChangeResult Settings_ResetCategory(SettingCategory category) {
+  if (category < 0 || category >= kSettingCat_Count)
+    return kSettingChange_Rejected;
+  SettingChangeResult aggregate = kSettingChange_Unchanged;
+  for (int i = 0; i < g_setting_desc_count; i++) {
+    const SettingDesc *desc = &g_setting_descs[i];
+    if (desc->category != category || desc->type == kSettingType_Action)
+      continue;
+    SettingChangeResult result = Settings_Reset(desc);
+    /* The enum is deliberately ordered by consequence for accepted changes:
+     * ordinary < sticky history remains < restart required. */
+    if (result > aggregate) aggregate = result;
+  }
+  return aggregate;
+}
+
 int Settings_FormatValue(const SettingDesc *desc, char *buffer,
                          int buffer_size) {
   if (!desc || !buffer || buffer_size <= 0) return 0;

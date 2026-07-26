@@ -90,23 +90,22 @@ values and nonzero port-2 ids to catch them in play.
    Muting: every handshake/port write stays authentic (zero soft-lock risk);
    instead the DSP excludes voices with srcn >= 0x0C from the dry mix and
    echo input (`g_dsp_voice_mute_srcn_min`, dsp.c) — per-song instruments
-   normally live there while SFX use the common bank.
-   ⚠️ **This premise is NOT universal (disproved 2026-07-21).** `song-02`/bp
-   (`18:DDCC`) keys **srcn `00` as a musical instrument** on two voices at
-   32-70% duty, sustained past the driver's `$F2` pause — i.e. the original
-   bassline stays audible under the replacement stream. Two competing
-   explanations were tested and **ruled out**: SRCN slipping (the gate reads the
-   live `$x4` register, which the driver could rewrite under a sounding note —
-   `AR_MUSICLEAK` reports `slipped=0%` on every voice of every track measured),
-   and directory rewriting (`dir` is a constant `$2C00` and each srcn resolves
-   to exactly one BRR start — see the verified table below). So `srcn` *is* a
-   stable sample identity; some songs simply borrow shared-bank samples.
-   The leak is intermittent and not yet reproducible on demand: one capture
-   showed srcn `00`/`01` on seven voices at once across three songs, while three
-   later sessions over the same content were clean. Fix candidates: a per-song
-   `mute_srcn` set in the manifest (cheap, costs any SFX sharing that srcn for
-   the duration of that song), or request-driven SFX attribution (correct, and
-   also unlocks the music/SFX split — see the census below).
+   live there while SFX use the common bank.
+   The apparent counterexample captured on 2026-07-21 (music keying srcn
+   `00`-`06` intermittently across several songs) was resolved on 2026-07-25:
+   it was a bootstrap/upload ordering race, not intentional shared-bank music.
+   The first SPC image starts at `$0400` and clears ARAM `$11FF`; the common
+   image later sets `$11FF=$0C`, which the sequencer adds to song-local
+   instrument ids. Because the upload HLE returned before the bootstrap had
+   necessarily finished, a fast game thread could write `$0C` first and then
+   let the bootstrap clear it back to zero. That shifted every music SRCN down
+   by 12 into the unmuted common bank, simultaneously explaining the corrupt
+   instruments, the leak, its all-session persistence, and its launch-time
+   intermittency. `RtlUploadSpcImageFromDpInternal` now recognizes the exact
+   ActRaiser bootstrap and advances it for 3032 emulated APU cycles to its
+   `$0460/$0462` idle loop before returning from the first upload. The common
+   upload therefore always wins the `$11FF` ordering, and song voices remain
+   at srcn `$0C+`.
    Per-entry `when =` gates (shared HD gate
    grammar, sampled at song start) select level/state-dependent variants;
    first matching entry wins, ungated entry = fallback. `music_replacements`
@@ -186,12 +185,14 @@ mute gate is engaged: `kon_srcn` vs `live_srcn`, resolved `dir`/`brr`, peak, dut
 `slipped%` column that separates a gate dropout from genuine shared-bank use),
 `AR_SFXCENSUS=1` (the id → sample/caller/pan map above).
 
-⚠️ **None of the audio diagnostics can be collected headless.** 3000 headless frames
-produce zero BRK posts (the run never leaves title/attract) and the DSP barely advances
-(one mix tick in 1200 frames), so no key-ons fire; `AR_WARP`/`AR_WARP_AT` stages a warp
-the run never reaches. Also note `.rec` input recordings do **not** replay faithfully
-without their matching boot `save.srm` — the recording run itself auto-persists SRAM, so
-a later replay starts from different state and diverges.
+For audio diagnostics in headless mode, use `AR_PACE=1`: the audio thread then
+advances the SPC at the same real-time cadence as normal play, so key-ons and
+mix/leak reports are meaningful. Unpaced headless remains useful for
+startup-order stress (it reliably exposes a game-thread-outruns-SPC race), but
+it can finish thousands of game frames before enough audio callbacks occur for
+a listening trace. Also note `.rec` input recordings do **not** replay
+faithfully without their matching boot `save.srm` — the recording run itself
+auto-persists SRAM, so a later replay starts from different state and diverges.
 
 ---
 

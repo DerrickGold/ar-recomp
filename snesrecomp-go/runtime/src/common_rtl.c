@@ -644,6 +644,77 @@ void RtlApuWrite(uint16 adr, uint8 val) {
  * differs. */
 #define AR_SPC_UPLOAD_DP_PTR 0xA5
 
+/* ActRaiser's first SPC image starts the resident driver at $0400. Its
+ * bootstrap clears ARAM $11FF before entering the timer/main loop at
+ * $0460/$0462:
+ *
+ *   $0404  MOV A,#$00
+ *   $0407  clear direct-page loop
+ *   $040C  MOV $11FF,A
+ *
+ * The next image ($06:AC00, the common sample bank) deliberately writes
+ * $11FF=$0C: the sequencer adds that base to song-local instrument ids so
+ * music resolves to srcn $0C+ rather than the shared SFX samples at $00-$0B.
+ *
+ * The upload HLE makes the first transfer effectively instantaneous. Without
+ * a barrier here, the game thread can apply the common image while the audio
+ * thread has advanced the new driver only as far as $0407. The bootstrap then
+ * resumes and clears the freshly written $0C back to zero. Whether that
+ * happens depends on host thread scheduling, and the resulting music keys the
+ * wrong common-bank samples while also evading the srcn >= $0C HD-music gate.
+ *
+ * Preserve the native ordering deterministically: after recognizing the exact
+ * ActRaiser bootstrap, execute it normally until it reaches its idle loop
+ * before returning from the first upload. This is emulated APU work, not a
+ * host sleep; the bounded signature guard leaves every other SPC driver
+ * untouched. */
+enum {
+  AR_SPC_BOOT_ENTRY = 0x0400,
+  AR_SPC_BOOT_IDLE_0 = 0x0460,
+  AR_SPC_BOOT_IDLE_1 = 0x0462,
+  AR_SPC_BOOT_MAX_CYCLES = 131072,
+};
+
+static bool IsActRaiserSpcBootstrap(const Apu *apu) {
+  static const uint8_t entry_signature[] = {
+    0x20, 0xCD, 0xCF, 0xBD, 0xE8, 0x00, 0x5D, 0xAF,
+    0xC8, 0xF0, 0xD0, 0xFB, 0xC5, 0xFF, 0x11,
+  };
+  static const uint8_t idle_signature[] = {
+    0xEB, 0xFD, 0xF0, 0xFC,
+  };
+  return memcmp(apu->ram + AR_SPC_BOOT_ENTRY, entry_signature,
+                sizeof(entry_signature)) == 0 &&
+         memcmp(apu->ram + AR_SPC_BOOT_IDLE_0, idle_signature,
+                sizeof(idle_signature)) == 0;
+}
+
+static bool FinishActRaiserSpcBootstrap(Apu *apu, bool log) {
+  if (!IsActRaiserSpcBootstrap(apu))
+    return true;
+
+  unsigned cycles = 0;
+  audio_trace_set_producer(AUDIO_TRACE_PRODUCER_CPU);
+  while (cycles < AR_SPC_BOOT_MAX_CYCLES &&
+         apu->spc->pc != AR_SPC_BOOT_IDLE_0 &&
+         apu->spc->pc != AR_SPC_BOOT_IDLE_1 &&
+         !apu->spc->stopped) {
+    apu_cycle(apu);
+    cycles++;
+  }
+  audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
+
+  bool ready = apu->spc->pc == AR_SPC_BOOT_IDLE_0 ||
+               apu->spc->pc == AR_SPC_BOOT_IDLE_1;
+  if (log || !ready) {
+    fprintf(stderr, "[apu] ActRaiser SPC bootstrap %s after %u cycles "
+                    "(pc=%04x base=%02x stopped=%d)\n",
+            ready ? "ready" : "TIMEOUT", cycles, apu->spc->pc,
+            apu->ram[0x11FF], (int)apu->spc->stopped);
+  }
+  return ready;
+}
+
 /* Set by the HLE upload when the engine's resident ARAM uploader needs to be
  * completed but the engine hasn't entered it yet; cleared once completed. See
  * RtlUploadSpcImageFromDpInternal and ar_uploader_complete_tick. */
@@ -724,7 +795,7 @@ static bool RtlUploadSpcImageFromDpInternal(CpuState *cpu, bool update_cpu_resul
    * bank-contiguous); chunks land back-to-back in ARAM starting at WRAM
    * $0358 (boot preloads $3000 for the 12-sample common bank; the boot
    * caller then sets $0358 = DP$02+DP$08 = end-of-common for song banks).
-   * Verified against the DSP sample directory: title segments land at
+   * Verified against the DSP sample directory: common-bank segments land at
    * $3000/$3B01/.../$6E4C = srcn 00-0B exactly; song-7 segments at
    * $795F/.../$B89E = srcn 0C-12 exactly. Without this stage every DIR
    * entry points at zero-filled ARAM -> voices key on but decode silence
@@ -823,6 +894,8 @@ static bool RtlUploadSpcImageFromDpInternal(CpuState *cpu, bool update_cpu_resul
       if (g_snes->apu->spc->sp == 0)
         g_snes->apu->spc->sp = 0xef;
       g_snes->apu->spc->pc = final_pc;
+      if (final_pc == AR_SPC_BOOT_ENTRY)
+        (void)FinishActRaiserSpcBootstrap(g_snes->apu, ulog);
     }
   } else {
     /* Subsequent upload: ActRaiser's resident SPC engine handles these via its

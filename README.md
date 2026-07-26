@@ -471,10 +471,14 @@ advances/toggles ordinary values, opens direct text editing for custom values,
 or runs the selected command. `X` (SNES A) returns from a category to primary
 navigation; from primary navigation it closes the overlay. During text entry,
 Backspace edits, Return validates/applies, and Escape cancels. `A` restores a
-setting's default; Escape or F1 closes the menu from either focus. F2 remains available for
-a full snapshot while the overlay is open. Game-frame advancement and SNES
-input are frozen until it closes; accepted setting changes are atomically
-written to `settings.ini`. ACTION rows themselves are not persisted.
+setting's default. Every tab also ends with `Reset <section> defaults`; pressing
+it twice restores every tab in that top-level section, including hidden
+developer controls, without changing other sections. For example, resetting
+Town 3D restores Scene, Camera, Light, and Weather together. Escape or F1 closes
+the menu from either focus. F2 remains available for a full snapshot while the
+overlay is open. Game-frame advancement and SNES input are frozen until it
+closes; accepted setting changes are atomically written to `settings.ini`.
+ACTION rows themselves are not persisted.
 
 Display includes screen and pixel aspect so output geometry lives in one place.
 Extras contains the bridge-limit enhancement plus turbo, pause, and snapshot

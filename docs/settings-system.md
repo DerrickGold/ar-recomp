@@ -319,11 +319,14 @@ Navigation is explicitly hierarchical. The overlay opens focused on the
 left-hand primary list; Up/Down moves between categories and promoted direct
 actions, and SNES B enters a category. Within a category, Up/Down selects rows,
 Left/Right edits values, and SNES A returns focus to the primary list. SNES A
-closes only when primary navigation already has focus. Inspector is a category:
-its first row exposes the persistent enable state, its second row performs a
-complete scene-asset dump, and a non-interactive live summary fills the panel
-below them. Restart and Exit are direct leaves and execute immediately on B.
-L/R no longer changes categories.
+closes only when primary navigation already has focus. The final row in every
+tab is `Reset <section> defaults`; two B presses restore all tabs in that
+top-level section, including hidden developer controls, while leaving other
+sections untouched. Inspector is a category: its first row exposes the
+persistent enable state, its second row performs a complete scene-asset dump,
+and a non-interactive live summary fills the panel below them. Restart and Exit
+are direct leaves and execute immediately on B. L/R no longer changes
+categories.
 
 The font is the game's real 256-tile, 8×8, 2bpp dialog set. The title asset
 script's second `$80` operation uploads it to BG3 VRAM `$5000`; its encoded
@@ -733,6 +736,9 @@ checksummed once, and committed transactionally by `SaveSystem_ApplyEdits()`.
 - The Phase-5 overlay invokes `Settings_Save("settings.ini")` after accepted
   menu mutations. Existing diagnostic hotkeys and `AR_SETTING_SET` remain
   session-only so automated probes do not silently rewrite user preferences.
+- A section reset applies the registry defaults to every non-action descriptor
+  in that section, combines any restart/sticky consequences, then atomically
+  saves `settings.ini` once for the whole batch.
 - The two restart-class audio-format rows store the desired/persisted value in
   `g_settings`, while the open SDL audio device consumes a boot snapshot. This
   prevents a pending frequency/buffer change from half-applying through an

@@ -669,6 +669,46 @@ static void TestMutationApi(void) {
   CHECK(g_settings.ws_action && g_settings.ws_sprites);
 }
 
+static void TestCategoryReset(void) {
+  ClearSettingsEnv();
+  g_ws_active = true;
+  g_ws_extra = g_ws_display_extra = 43;
+  Settings_Init();
+  Settings_SetChangeObserver(NULL);
+
+  const SettingDesc *sim_mode = Settings_Find("sim3d_mode");
+  const SettingDesc *sim_tilt = Settings_Find("sim3d_tilt_x_mrad");
+  const SettingDesc *volume = Settings_Find("audio_master_volume");
+  const SettingDesc *frequency = Settings_Find("audio_frequency");
+  CHECK(sim_mode && sim_tilt && volume && frequency);
+  CHECK(Settings_SetLong(sim_mode, 1) == kSettingChange_Applied);
+  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval + sim_tilt->step) ==
+        kSettingChange_Applied);
+  CHECK(Settings_SetLong(volume, 55) == kSettingChange_Applied);
+  CHECK(Settings_SetLong(frequency, kAudioFrequency_48000) ==
+        kSettingChange_RestartPending);
+
+  /* A registry category is narrow: resetting Town camera must not reset the
+   * Town scene master toggle or an unrelated Audio setting. */
+  CHECK(Settings_ResetCategory(kSettingCat_SimCamera) ==
+        kSettingChange_Applied);
+  CHECK(g_settings.sim3d_tilt_x_mrad == sim_tilt->defval);
+  CHECK(g_settings.sim3d_mode);
+  CHECK(g_settings.audio_master_volume == 55);
+  CHECK(g_settings.audio_frequency == kAudioFrequency_48000);
+  CHECK(Settings_ResetCategory(kSettingCat_SimCamera) ==
+        kSettingChange_Unchanged);
+
+  /* Batch results preserve the strongest consequence from any row. */
+  CHECK(Settings_ResetCategory(kSettingCat_Audio) ==
+        kSettingChange_RestartPending);
+  CHECK(g_settings.audio_master_volume == volume->defval);
+  CHECK(g_settings.audio_frequency == frequency->defval);
+  CHECK(g_settings.sim3d_mode);
+  CHECK(Settings_ResetCategory(kSettingCat_Count) ==
+        kSettingChange_Rejected);
+}
+
 static void TestCheatsCanBeStagedOutsideTheirRuntimeMode(void) {
   ClearSettingsEnv();
   memset(g_ram, 0, sizeof(g_ram));
@@ -927,6 +967,7 @@ int main(void) {
   TestConfigSettingsEnvironmentPrecedence();
   TestLegacySeedEncodings();
   TestMutationApi();
+  TestCategoryReset();
   TestCheatsCanBeStagedOutsideTheirRuntimeMode();
   TestNoWideBudget();
   TestInputBindings();

@@ -334,7 +334,11 @@ static const MenuSection kSections[] = {
 
 #undef SECTION
 
-enum { kSectionCount = (int)(sizeof(kSections) / sizeof(kSections[0])) };
+enum {
+  kSectionCount = (int)(sizeof(kSections) / sizeof(kSections[0])),
+  kSectionResetConfirmMs = 3000,
+};
+static const char kSectionResetKey[] = "reset_section_defaults";
 
 typedef struct BitReader {
   const uint8_t *data;
@@ -397,6 +401,11 @@ static Uint64 s_hold_next_ms;
 static SDL_Keycode s_hold_key;
 static bool s_hold_dirty;
 static SettingChangeResult s_hold_result;
+/* A section reset changes every tab (including hidden developer rows), so it
+ * takes a second confirm press within a short window. The arm is cleared as
+ * soon as navigation leaves the synthetic reset row. */
+static int s_reset_armed_section = -1;
+static Uint64 s_reset_armed_until;
 /* The keyboard key of the event currently being dispatched (0 for a pad), so a
  * hold started deep inside ApplyMenuNav knows which key release will end it. */
 static SDL_Keycode s_input_key;
@@ -423,6 +432,11 @@ static int s_debug_panel_resize_start_width;
 static int s_debug_panel_resize_start_height;
 static int s_debug_panel_resize_start_scale;
 static SettingsOverlayInspectorInfoProvider s_inspector_info_provider;
+
+static void ClearSectionResetArm(void) {
+  s_reset_armed_section = -1;
+  s_reset_armed_until = 0;
+}
 
 void SettingsOverlay_SetInspectorInfoProvider(
     SettingsOverlayInspectorInfoProvider provider) {
@@ -1106,12 +1120,19 @@ static bool RowBelongsToActiveTab(const SettingDesc *desc) {
          Settings_IsMenuVisible(desc);
 }
 
-static int TabRowCount(void) {
+static int TabSettingRowCount(void) {
   SyncActiveTabPage();
   int count = 0;
   for (int i = 0; i < g_setting_desc_count; i++)
     if (RowBelongsToActiveTab(&g_setting_descs[i])) count++;
   return count;
+}
+
+/* Every populated tab ends with the same section-scoped action. Town 3D's
+ * button therefore restores Scene + Camera + Light + Weather together no
+ * matter which tab the player happens to be viewing. */
+static int TabRowCount(void) {
+  return TabSettingRowCount() + 1;
 }
 
 /* Nav rows are the sections themselves; a section with no populated tab at
@@ -1140,6 +1161,10 @@ static const SettingDesc *SelectedDesc(void) {
     if (row++ == s_row) return desc;
   }
   return NULL;
+}
+
+static bool SelectedRowIsSectionReset(void) {
+  return s_submenu_open && s_row == TabSettingRowCount();
 }
 
 
@@ -1176,6 +1201,41 @@ static void SaveAcceptedChange(SettingChangeResult result) {
     return;
   }
   PersistChange(result);
+}
+
+/* Reset every registry category represented by the active top-level section.
+ * Repeated paging tabs (Save, keyboard/gamepad bindings) deliberately collapse
+ * to one category reset each. Hidden debug rows are registry rows too, so this
+ * produces the shipped configuration rather than merely resetting what the
+ * current menu happens to expose. */
+static void ConfirmOrResetActiveSection(void) {
+  Uint64 now = SDL_GetTicks();
+  const MenuSection *section = ActiveSection();
+  if (s_reset_armed_section != s_section || now > s_reset_armed_until) {
+    s_reset_armed_section = s_section;
+    s_reset_armed_until = now + kSectionResetConfirmMs;
+    char status[sizeof(s_status)];
+    snprintf(status, sizeof(status), "B AGAIN: RESET %s", section->label);
+    SetStatus(status);
+    s_status_until = s_reset_armed_until;
+    return;
+  }
+
+  ClearSectionResetArm();
+  bool categories[kSettingCat_Count] = {false};
+  for (int tab = 0; tab < section->tab_count; tab++)
+    categories[section->tabs[tab].category] = true;
+
+  SettingChangeResult aggregate = kSettingChange_Unchanged;
+  for (int category = 0; category < kSettingCat_Count; category++) {
+    if (!categories[category]) continue;
+    SettingChangeResult result =
+        Settings_ResetCategory((SettingCategory)category);
+    if (result > aggregate) aggregate = result;
+  }
+  fprintf(stderr, "[settings-menu] reset %s section to built-in defaults\n",
+          section->label);
+  SaveAcceptedChange(aggregate);
 }
 
 /* Flush a deferred write left by a hold, and forget the held row. Safe to call
@@ -1328,6 +1388,10 @@ static void BeginValueHold(const SettingDesc *desc, int direction,
 }
 
 static void ChangeSelectedValue(int direction) {
+  if (SelectedRowIsSectionReset()) {
+    SetStatus("PRESS B TO RESET SECTION");
+    return;
+  }
   const SettingDesc *desc = SelectedDesc();
   if (!desc || !Settings_IsAvailable(desc)) {
     SetStatus("UNAVAILABLE HERE");
@@ -1370,6 +1434,10 @@ static void ChangeSelectedValue(int direction) {
 }
 
 static void ActivateSelectedRow(void) {
+  if (SelectedRowIsSectionReset()) {
+    ConfirmOrResetActiveSection();
+    return;
+  }
   const SettingDesc *desc = SelectedDesc();
   if (!desc || !Settings_IsAvailable(desc)) {
     SetStatus("UNAVAILABLE HERE");
@@ -1389,6 +1457,10 @@ static void ActivateSelectedRow(void) {
 }
 
 static void ResetSelectedValue(void) {
+  if (SelectedRowIsSectionReset()) {
+    ConfirmOrResetActiveSection();
+    return;
+  }
   const SettingDesc *desc = SelectedDesc();
   if (!desc || !Settings_IsAvailable(desc)) {
     SetStatus("UNAVAILABLE HERE");
@@ -1399,6 +1471,7 @@ static void ResetSelectedValue(void) {
 
 static void MoveSection(int direction) {
   EndValueHold();
+  ClearSectionResetArm();
   s_section = (s_section + direction + kSectionCount) % kSectionCount;
   s_row = 0;
   s_top_row = 0;
@@ -1424,6 +1497,7 @@ static void MoveRow(int direction) {
   int count = TabRowCount();
   if (count <= 0) return;
   EndValueHold();
+  ClearSectionResetArm();
   s_row = (s_row + direction + count) % count;
   EnsureSelectedRowVisible();
 }
@@ -1435,6 +1509,7 @@ static void MoveTab(int direction) {
   const MenuSection *section = ActiveSection();
   if (VisibleTabCount(s_section) <= 1) return;
   EndValueHold();
+  ClearSectionResetArm();
   int candidate = ActiveTabIndex();
   for (int i = 0; i < section->tab_count; i++) {
     candidate = (candidate + direction + section->tab_count) %
@@ -1451,6 +1526,7 @@ static void MoveTab(int direction) {
 }
 
 static void EnterSection(void) {
+  ClearSectionResetArm();
   s_submenu_open = true;
   s_row = 0;
   s_top_row = 0;
@@ -1534,6 +1610,7 @@ bool SettingsOverlay_IsOpen(void) {
 void SettingsOverlay_Open(void) {
   StopEditing();
   EndValueHold();
+  ClearSectionResetArm();
   s_capture_desc = NULL;
   s_submenu_open = false;
   s_open = true;
@@ -1546,6 +1623,7 @@ void SettingsOverlay_Close(void) {
   if (!s_open) return;
   StopEditing();
   EndValueHold();
+  ClearSectionResetArm();
   s_capture_desc = NULL;
   s_submenu_open = false;
   s_open = false;
@@ -1554,6 +1632,7 @@ void SettingsOverlay_Close(void) {
 
 const char *SettingsOverlay_SelectedKey(void) {
   if (!s_open) return "";
+  if (SelectedRowIsSectionReset()) return kSectionResetKey;
   const SettingDesc *desc = SelectedDesc();
   return desc && desc->key ? desc->key : "";
 }
@@ -1673,6 +1752,7 @@ static void ApplyMenuNav(MenuNav nav, bool repeat) {
     case kMenuNav_Back:
       if (!repeat) {
         EndValueHold();
+        ClearSectionResetArm();
         s_submenu_open = false;
       }
       break;
@@ -2596,6 +2676,36 @@ static void DrawMenu(const MenuLayout *layout) {
       DrawGlyph(layout, restart_x, y, '*', kText_Warning);
   }
 
+  /* Synthetic section action: it is deliberately outside the descriptor
+   * registry because one button spans several registry categories/tabs and
+   * must never be written as a setting of its own. */
+  {
+    int row = row_index++;
+    if (row >= s_top_row && row < s_top_row + s_visible_rows) {
+      drawn_rows++;
+      int y = first_row_y + (row - s_top_row) * kRowHeight;
+      FillLogicalRect(layout, right_x + 12, y - 3, right_width - 24, 1,
+                      ARGB(160, 190, 96, 76));
+      bool selected = s_submenu_open && row == s_row;
+      if (selected) {
+        FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
+                        kHighlight);
+        FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
+        DrawGlyph(layout, selector_x + ((SDL_GetTicks() / 250) & 1), y, '>',
+                  kText_Warning);
+      }
+      char label[64];
+      snprintf(label, sizeof(label), "Reset %s defaults", section->label);
+      int restart_x = value_right - 5 * kGlyphSize - 12;
+      int label_chars = (restart_x - label_x - 4) / kGlyphSize;
+      if (label_chars < 1) label_chars = 1;
+      DrawTextN(layout, label_x, y, label, label_chars,
+                s_submenu_open ? kText_Normal : kText_Dim);
+      DrawTextRight(layout, value_right, y, "RESET", 5,
+                    s_submenu_open ? kText_Warning : kText_Dim);
+    }
+  }
+
   DrawScrollBar(layout, scroll_x, first_row_y - 2,
                 s_visible_rows * kRowHeight, row_index, s_visible_rows,
                 s_top_row, structure);
@@ -2616,9 +2726,27 @@ static void DrawMenu(const MenuLayout *layout) {
   /* ── Description panel ────────────────────────────────────────────────── */
   const int description_x = margin + 12;
   const int description_chars = (bottom_width - 24) / kDebugGlyphWidth;
+  const bool reset_selected =
+      s_submenu_open && SelectedRowIsSectionReset();
   const SettingDesc *selected = s_submenu_open ? SelectedDesc() : NULL;
   const int header_y = bottom_y + 8;
-  if (selected) {
+  if (reset_selected) {
+    char label[64], help[256];
+    snprintf(label, sizeof(label), "Reset %s defaults", section->label);
+    snprintf(help, sizeof(help),
+             "Restore every %s tab, including hidden developer controls, "
+             "to the shipped defaults. Press B twice to confirm.",
+             section->label);
+    DrawSmallText(layout, description_x, header_y, label, structure);
+    DrawSmallTextN(layout,
+                   panel_right - 12 - SmallTextWidth("Action"), header_y,
+                   "Action", description_chars, kGameGold);
+    FillLogicalRect(layout, description_x, header_y + 10,
+                    bottom_width - 24, 1, structure_dim);
+    DrawWrappedSmallText(layout, description_x, header_y + 14,
+                         help, description_chars, 4,
+                         ARGB(255, 208, 220, 232));
+  } else if (selected) {
     DrawSmallText(layout, description_x, header_y, selected->label, structure);
     /* Naming HOW a change takes effect next to the row removes the usual
      * "did that do anything?" question; the '*' row marker only says that a
@@ -2665,18 +2793,22 @@ static void DrawMenu(const MenuLayout *layout) {
     HINT("A/ESC", "cancel");
   } else if (s_submenu_open) {
     HINT("UP/DOWN", "select");
-    /* The verbs track what the selected row actually does: an Int row adjusts
-     * (hold to accelerate — felt, not spelled out, to keep the line short),
-     * a string/mask row opens a text prompt, the rest cycle. "adjust" is the
-     * same width as "change", so this never widens the line. */
-    const SettingDesc *row = SelectedDesc();
-    bool numeric = row && row->type == kSettingType_Int;
-    bool textual = row && (row->type == kSettingType_Mask ||
-                           row->type == kSettingType_Custom);
-    HINT("LEFT/RIGHT", numeric ? "adjust" : "change");
-    if (VisibleTabCount(s_section) > 1) HINT("L/R", "tab");
-    if (textual) HINT("B", "type");
-    HINT("Y", "reset");
+    if (SelectedRowIsSectionReset()) {
+      HINT("B", "reset");
+      if (VisibleTabCount(s_section) > 1) HINT("L/R", "tab");
+    } else {
+      /* The verbs track what the selected row actually does: an Int row
+       * adjusts (hold to accelerate — felt, not spelled out, to keep the line
+       * short), a string/mask row opens a text prompt, the rest cycle. */
+      const SettingDesc *row = SelectedDesc();
+      bool numeric = row && row->type == kSettingType_Int;
+      bool textual = row && (row->type == kSettingType_Mask ||
+                             row->type == kSettingType_Custom);
+      HINT("LEFT/RIGHT", numeric ? "adjust" : "change");
+      if (VisibleTabCount(s_section) > 1) HINT("L/R", "tab");
+      if (textual) HINT("B", "type");
+      HINT("Y", "reset");
+    }
     HINT("A", "back");
   } else {
     HINT("UP/DOWN", "section");

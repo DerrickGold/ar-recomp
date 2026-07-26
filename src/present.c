@@ -727,41 +727,124 @@ static const float kDioramaKickPitch = 0.05f;  /* rad */
 static const float kDioramaKickZoom = -0.15f;  /* fraction; "slight" zoom-in */
 static const float kDioramaKickTau = 0.20f;    /* seconds, wall-clock exp decay */
 
+/* D5a cull fade. One boundary drives two independent ground treatments:
+ * `fade` hands town ground over to the underlay, while `dim` multiplies the
+ * surviving colour toward black. Every ground draw that can cover the town
+ * canvas must use this same description, or a later opaque draw will restore
+ * the square captured-texture boundary over the rounded fade. */
+typedef struct SimCullFade {
+  int lead;
+  int corner;
+  int lift_inset;
+  float fade;
+  float dim;
+  /* The full-resolution town map is finite even when the projected ground is
+   * not. Feather its own extent into the half-resolution world underlay so
+   * the last canvas texel cannot form a hard vertical/horizontal seam. */
+  float extent_x0, extent_y0, extent_x1, extent_y1;
+  float extent_feather;
+  int margin_left, margin_right;
+  int screen_x0;
+} SimCullFade;
+
+/* Cull proximity at a captured-texture point, 0..1. The conversion back to
+ * the emitter's biased coordinates keeps the visual boundary identical to the
+ * cull predicate instead of maintaining a second approximation of it. */
+static float SimCullProximityAt(const SimCullFade *fade, float texture_x,
+                                float texture_y, SDL_Rect source) {
+  if (!fade) return 0.0f;
+  int16_t biased_x = (int16_t)(texture_x - (float)fade->screen_x0 + 16.0f);
+  int16_t biased_y = (int16_t)(texture_y - (float)source.y + 17.0f);
+  return Sim3D_CullProximity(biased_x, biased_y, fade->margin_left,
+                             fade->margin_right, fade->lead,
+                             fade->corner, fade->lift_inset);
+}
+
+/* Opacity of full-resolution town ground at the finite town-map extent.
+ * Smoothstep has zero slope at both ends, avoiding a second crease where the
+ * feather reaches full opacity. A zero feather disables this independent
+ * mask (as it must for the world-map underlay itself). */
+static float SimGroundExtentAlphaAt(const SimCullFade *fade, float texture_x,
+                                    float texture_y) {
+  if (!fade || fade->extent_feather <= 0.0f) return 1.0f;
+  float edge_x = fminf(texture_x - fade->extent_x0,
+                       fade->extent_x1 - texture_x);
+  float edge_y = fminf(texture_y - fade->extent_y0,
+                       fade->extent_y1 - texture_y);
+  float edge = edge_x < edge_y ? edge_x : edge_y;
+  float ramp = edge / fade->extent_feather;
+  if (ramp <= 0.0f) return 0.0f;
+  if (ramp >= 1.0f) return 1.0f;
+  return ramp * ramp * (3.0f - 2.0f * ramp);
+}
+
+/* Inserts a texture-space split into a sorted mesh axis. Coordinates at or
+ * outside the existing extent do not create a new segment. */
+static int InsertSimGroundCoordinate(float *coordinates, int count,
+                                     int capacity, float coordinate) {
+  if (count <= 0 || count >= capacity ||
+      coordinate <= coordinates[0] ||
+      coordinate >= coordinates[count - 1])
+    return count;
+  int index = 1;
+  while (index < count && coordinates[index] < coordinate) index++;
+  if (fabsf(coordinates[index] - coordinate) < 0.0001f) return count;
+  memmove(&coordinates[index + 1], &coordinates[index],
+          (size_t)(count - index) * sizeof(coordinates[0]));
+  coordinates[index] = coordinate;
+  return count + 1;
+}
+
 enum {
-  kSimGroundColumns = 8,
-  kSimGroundRows = 6,
+  /* The cull tint is sampled at these vertices. The old 8x6 projection mesh
+   * was adequate for affine UVs but too coarse for a 96px rounded corner: its
+   * interpolation would turn the newly shared tint back into a visibly
+   * polygonal box. Match the extension mesh density so both layers resolve
+   * one boundary. */
+  kSimGroundColumns = 64,
+  kSimGroundRows = 48,
   kSimGroundVertexCount = (kSimGroundColumns + 1) * (kSimGroundRows + 1),
   kSimGroundIndexCount = kSimGroundColumns * kSimGroundRows * 6,
 };
 
 static void DrawSimGroundPlane(SDL_Texture *texture, SDL_Rect source,
                                SDL_Rect viewport,
-                               const Scene3DCamera *camera) {
+                               const float matrix[16],
+                               const SimCullFade *fade) {
   if (!texture || source.w <= 0 || source.h <= 0 ||
       viewport.w <= 0 || viewport.h <= 0)
     return;
 
-  float matrix[16];
-  Scene3D_BuildViewProjection(camera, viewport.w, viewport.h, matrix);
   float aspect = (float)viewport.w / (float)viewport.h;
-  SDL_Vertex vertices[kSimGroundVertexCount];
-  int indices[kSimGroundIndexCount];
+  /* Reused on the present thread; together these are too large for a routine
+   * stack allocation at the density the rounded boundary requires. */
+  static SDL_Vertex vertices[kSimGroundVertexCount];
+  static int indices[kSimGroundIndexCount];
   int vertex_count = 0, index_count = 0;
-  const SDL_FColor white = { 1.0f, 1.0f, 1.0f, 1.0f };
 
   for (int row = 0; row <= kSimGroundRows; row++) {
     float fy = (float)row / (float)kSimGroundRows;
     for (int column = 0; column <= kSimGroundColumns; column++) {
       float fx = (float)column / (float)kSimGroundColumns;
+      float texture_x = source.x + fx * source.w;
+      float texture_y = source.y + fy * source.h;
       Scene3DPoint projected;
       if (!Scene3D_ProjectWorldPoint(
               matrix, (fx - 0.5f) * aspect, 0.5f - fy, 0.0f,
               viewport.w, viewport.h, &projected))
         return;
+      float away = SimCullProximityAt(fade, texture_x, texture_y, source);
+      float bright = fade ? 1.0f - away * fade->dim : 1.0f;
+      float extent_alpha =
+          SimGroundExtentAlphaAt(fade, texture_x, texture_y);
+      SDL_FColor tint = {
+        bright, bright, bright,
+        (fade ? 1.0f - away * fade->fade : 1.0f) * extent_alpha,
+      };
       vertices[vertex_count++] = (SDL_Vertex){
-        { viewport.x + projected.x, viewport.y + projected.y }, white,
-        { (source.x + fx * source.w) / (float)kSim3DMaxWidth,
-          (source.y + fy * source.h) / (float)kSim3DMaxHeight },
+        { viewport.x + projected.x, viewport.y + projected.y }, tint,
+        { texture_x / (float)kSim3DMaxWidth,
+          texture_y / (float)kSim3DMaxHeight },
       };
     }
   }
@@ -1476,8 +1559,20 @@ enum {
    * smallest feature the fade is meant to show. */
   kSimUnderlayColumns = 64,
   kSimUnderlayRows = 48,
-  kSimUnderlayVertexCount = (kSimUnderlayColumns + 1) * (kSimUnderlayRows + 1),
-  kSimUnderlayIndexCount = kSimUnderlayColumns * kSimUnderlayRows * 6,
+  /* The canvas can insert both sides of the live captured rectangle into
+   * each axis, then omit its alpha-masked cells. Exact split coordinates keep
+   * the independently drawn meshes watertight. */
+  kSimUnderlayMaxColumns = kSimUnderlayColumns + 2,
+  kSimUnderlayMaxRows = kSimUnderlayRows + 2,
+  kSimUnderlayVertexCount =
+      (kSimUnderlayMaxColumns + 1) * (kSimUnderlayMaxRows + 1),
+  kSimUnderlayIndexCount =
+      kSimUnderlayMaxColumns * kSimUnderlayMaxRows * 6,
+  /* One world-map tile occupies 16 town pixels. Cross-fading over that exact
+   * footprint hides the resolution handoff without smearing multiple terrain
+   * features together. */
+  kSimTownExtentFeatherPixels =
+      kSimWorldMapTilePixels * kSimWorldMapTownScale,
   /* Box-downsample factor for the out-of-focus copy of the world map. Four
    * is enough to lose the 8x8 tile grid -- the detail that reads as "nearby"
    * -- while keeping coastlines and landmasses legible as shapes. */
@@ -1641,64 +1736,23 @@ static SDL_Texture *EnsureSimUnderlayTexture(const FrameSlot *slot) {
   return s_sim_underlay_texture;
 }
 
-/* D5a cull fade. Applied to the town's own ground so it thins toward the
- * sprite-drawable edge and lets the already-hazed world map show through.
- *
- * A fade rather than a darkening pass, because the target brightness is not a
- * number to be tuned into agreement -- it is whatever the underlay happens to
- * be. Dimming the extended ground with a separate overlay hazed the underlay
- * a second time on top of underlay_haze_pct and took everything outside the
- * town to near black. Cross-fading cannot do that: at full strength the town
- * ground is simply absent and what remains is the underlay at its own
- * brightness, which is the thing being matched. */
-typedef struct SimCullFade {
-  int lead;
-  int corner;
-  int lift_inset;
-  /* Two independent things the same boundary drives.
-   *
-   * `fade` is structural: how far this layer hands over to whatever is beneath
-   * it. `dim` is photometric: how far what remains is taken toward black.
-   *
-   * They were one control until it became clear they cannot be. Fading the
-   * town ground reveals the world map, and the world map's own distance haze
-   * blends toward the scene backdrop -- which, since the graded sky landed, is
-   * a blue gradient rather than the flat black it used to be. Turning the fade
-   * up therefore washed the far field toward grey-blue instead of darkening
-   * it. Darkness has to be its own term, multiplied into the colour, or the
-   * only way to get a dark far field is to pick a dark sky. */
-  float fade;
-  float dim;
-  int margin_left, margin_right;
-  int screen_x0;
-} SimCullFade;
-
-/* Cull proximity at a captured-texture point, 0..1. Evaluated once per vertex
- * and shared by both terms below -- they describe the same boundary and must
- * not be able to disagree about where it is. */
-static float SimCullProximityAt(const SimCullFade *fade, float texture_x,
-                                float texture_y, SDL_Rect source) {
-  if (!fade) return 0.0f;
-  /* Captured-texture point back to the emitter's biased coordinates, so the
-   * boundary is the cull predicate itself rather than a copy of it. */
-  int16_t biased_x = (int16_t)(texture_x - (float)fade->screen_x0 + 16.0f);
-  int16_t biased_y = (int16_t)(texture_y - (float)source.y + 17.0f);
-  return Sim3D_CullProximity(biased_x, biased_y, fade->margin_left,
-                             fade->margin_right, fade->lead,
-                             fade->corner, fade->lift_inset);
-}
-
 /* Draws one texture as an extension of the ground plane. `texture_x_at_zero`
  * is the captured-texture column that samples the texture's left edge, and
  * `span` is how many captured columns the whole texture covers — the two
  * numbers that place any town-space image under the same camera as the town's
- * own ground mesh. `fade` is optional; NULL draws at a uniform alpha. */
+ * own ground mesh. `fade` is optional; NULL draws at a uniform alpha.
+ *
+ * `exclude` identifies the live BG1 rectangle. Canvas cells in that rectangle
+ * are omitted only where an alpha mask is active: drawing both layers there
+ * would apply the same feather twice, while omitting the fully opaque backing
+ * would expose the underlay through transparent BG1 priority pixels. */
 static void DrawSimGroundExtension(SDL_Texture *texture,
                                    float texture_x_at_zero,
                                    float texture_y_at_zero, float span,
                                    uint8_t alpha, SDL_Rect source,
                                    SDL_Rect viewport, const float matrix[16],
-                                   const SimCullFade *fade) {
+                                   const SimCullFade *fade,
+                                   const SDL_FRect *exclude) {
   if (!texture || !alpha || source.w <= 0 || source.h <= 0) return;
 
   /* Clamp the extension to the world map's own edges so every UV stays inside
@@ -1742,30 +1796,55 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
   y1 = source.y + (0.5f - world_y1) * source.h;
 
   float base_alpha = (float)alpha / 255.0f;
-  /* File-scope rather than automatic: at this density the pair is ~175KB
-   * (3185 * 32B SDL_Vertex + indices), well past a sane frame. Since Phase 0
-   * every caller runs on the render/main thread — the only thread that issues
-   * SDL render calls — so these shared statics stay single-threaded-safe. */
+  /* File-scope rather than automatic: at this density the vertex/index pair
+   * is well past a sane frame-stack allocation. Since Phase 0 every caller
+   * runs on the render/main thread — the only thread that issues SDL render
+   * calls — so these shared statics stay single-threaded-safe. */
   static SDL_Vertex vertices[kSimUnderlayVertexCount];
   static int indices[kSimUnderlayIndexCount];
   int vertex_count = 0, index_count = 0;
-  for (int row = 0; row <= kSimUnderlayRows; row++) {
-    float texture_y = y0 + (y1 - y0) * (float)row / (float)kSimUnderlayRows;
-    for (int column = 0; column <= kSimUnderlayColumns; column++) {
-      float texture_x =
-          x0 + (x1 - x0) * (float)column / (float)kSimUnderlayColumns;
+  float x_coordinates[kSimUnderlayMaxColumns + 1];
+  float y_coordinates[kSimUnderlayMaxRows + 1];
+  int x_count = kSimUnderlayColumns + 1;
+  int y_count = kSimUnderlayRows + 1;
+  for (int column = 0; column < x_count; column++)
+    x_coordinates[column] =
+        x0 + (x1 - x0) * (float)column / (float)kSimUnderlayColumns;
+  for (int row = 0; row < y_count; row++)
+    y_coordinates[row] =
+        y0 + (y1 - y0) * (float)row / (float)kSimUnderlayRows;
+  if (exclude) {
+    x_count = InsertSimGroundCoordinate(
+        x_coordinates, x_count, kSimUnderlayMaxColumns + 1, exclude->x);
+    x_count = InsertSimGroundCoordinate(
+        x_coordinates, x_count, kSimUnderlayMaxColumns + 1,
+        exclude->x + exclude->w);
+    y_count = InsertSimGroundCoordinate(
+        y_coordinates, y_count, kSimUnderlayMaxRows + 1, exclude->y);
+    y_count = InsertSimGroundCoordinate(
+        y_coordinates, y_count, kSimUnderlayMaxRows + 1,
+        exclude->y + exclude->h);
+  }
+
+  for (int row = 0; row < y_count; row++) {
+    float texture_y = y_coordinates[row];
+    for (int column = 0; column < x_count; column++) {
+      float texture_x = x_coordinates[column];
       Scene3DPoint projected;
       if (!ProjectSimTexturePoint(matrix, source, viewport, texture_x,
                                   texture_y, 0.0f, &projected))
         return;
       float away = SimCullProximityAt(fade, texture_x, texture_y, source);
+      float extent_alpha =
+          SimGroundExtentAlphaAt(fade, texture_x, texture_y);
       /* Multiplied into the vertex colour, so it darkens whatever the texture
        * holds rather than mixing it with a colour of its own. That is the
        * difference the fade could not express. */
       float bright = fade ? 1.0f - away * fade->dim : 1.0f;
       SDL_FColor tint = {
         bright, bright, bright,
-        base_alpha * (fade ? 1.0f - away * fade->fade : 1.0f),
+        base_alpha * (fade ? 1.0f - away * fade->fade : 1.0f) *
+            extent_alpha,
       };
       vertices[vertex_count++] = (SDL_Vertex){
         { projected.x, projected.y }, tint,
@@ -1774,10 +1853,24 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
       };
     }
   }
-  for (int row = 0; row < kSimUnderlayRows; row++) {
-    for (int column = 0; column < kSimUnderlayColumns; column++) {
-      int top_left = row * (kSimUnderlayColumns + 1) + column;
-      int bottom_left = top_left + kSimUnderlayColumns + 1;
+  for (int row = 0; row + 1 < y_count; row++) {
+    for (int column = 0; column + 1 < x_count; column++) {
+      float centre_x =
+          (x_coordinates[column] + x_coordinates[column + 1]) * 0.5f;
+      float centre_y =
+          (y_coordinates[row] + y_coordinates[row + 1]) * 0.5f;
+      if (exclude &&
+          centre_x >= exclude->x && centre_x < exclude->x + exclude->w &&
+          centre_y >= exclude->y && centre_y < exclude->y + exclude->h) {
+        float away =
+            SimCullProximityAt(fade, centre_x, centre_y, source);
+        float cull_alpha = fade ? 1.0f - away * fade->fade : 1.0f;
+        float extent_alpha =
+            SimGroundExtentAlphaAt(fade, centre_x, centre_y);
+        if (cull_alpha < 0.9999f || extent_alpha < 0.9999f) continue;
+      }
+      int top_left = row * x_count + column;
+      int bottom_left = top_left + x_count;
       indices[index_count++] = top_left;
       indices[index_count++] = top_left + 1;
       indices[index_count++] = bottom_left + 1;
@@ -2444,42 +2537,47 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
   if (defocus) {
     DrawSimGroundExtension(s_sim_underlay_blur_texture, texture_x_at_zero,
                            texture_y_at_zero, span, hazed, source, viewport,
-                           matrix, &blurred_dim);
+                           matrix, &blurred_dim, NULL);
     DrawSimGroundExtension(texture, texture_x_at_zero, texture_y_at_zero,
-                           span, 255, source, viewport, matrix, &focus);
+                           span, 255, source, viewport, matrix, &focus, NULL);
     return;
   }
   /* Sharp-only path (defocus off): still dimmed, never faded, same reason. */
   DrawSimGroundExtension(texture, texture_x_at_zero, texture_y_at_zero, span,
-                         hazed, source, viewport, matrix, &blurred_dim);
+                         hazed, source, viewport, matrix, &blurred_dim, NULL);
 }
 
-/* The accumulated town ground, drawn over the underlay at full resolution.
- * Unvisited pixels are transparent, so the underlay shows through exactly
- * where this has nothing -- and, with the cull fade on, also where the sprite
- * window says actors can no longer be. */
+/* The full-town ground, drawn over the underlay at full resolution. Where an
+ * alpha handoff is active, the live captured rectangle is omitted below so
+ * this canvas extends BG1 rather than feathering underneath it a second time. */
 static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
                               SDL_Rect viewport, const float matrix[16],
-                              bool cull_fade, int lift_inset) {
+                              bool cull_fade, int lift_inset,
+                              const SDL_FRect *exclude) {
   if (!slot->sim.town_canvas_serial || !s_sim_canvas_texture) return;
+  float extent_x0 =
+      (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x;
+  float extent_y0 = -(float)slot->sim.camera_y;
   SimCullFade fade = {
     .lead = slot->sim.cull_haze_lead_px ? slot->sim.cull_haze_lead_px
                                         : kSimCullHazeLeadDefaultPx,
     .corner = slot->sim.cull_corner_px,
     .lift_inset = lift_inset,
-    .fade = (float)slot->sim.cull_haze_pct / 100.0f,
-    .dim = (float)slot->sim.cull_dim_pct / 100.0f,
+    .fade = cull_fade ? (float)slot->sim.cull_haze_pct / 100.0f : 0.0f,
+    .dim = cull_fade ? (float)slot->sim.cull_dim_pct / 100.0f : 0.0f,
+    .extent_x0 = extent_x0,
+    .extent_y0 = extent_y0,
+    .extent_x1 = extent_x0 + (float)kSimTownCanvasPixels,
+    .extent_y1 = extent_y0 + (float)kSimTownCanvasPixels,
+    .extent_feather = (float)kSimTownExtentFeatherPixels,
     .margin_left = slot->sim.sprite_margin_left,
     .margin_right = slot->sim.sprite_margin_right,
     .screen_x0 = slot->sim.underlay_screen_x0,
   };
-  bool faded = cull_fade &&
-      (slot->sim.cull_haze_pct != 0 || slot->sim.cull_dim_pct != 0);
   DrawSimGroundExtension(
       s_sim_canvas_texture,
-      (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x,
-      -(float)slot->sim.camera_y, (float)kSimTownCanvasPixels, 255,
-      source, viewport, matrix, faded ? &fade : NULL);
+      extent_x0, extent_y0, (float)kSimTownCanvasPixels, 255,
+      source, viewport, matrix, &fade, exclude);
 }
 
 /* BG planes carrying menu furniture rather than world. Deferred past every
@@ -2575,6 +2673,12 @@ static void RenderSimProfile(const FrameSlot *slot,
   float matrix[16];
   Scene3D_BuildViewProjection(&camera, viewport.w, viewport.h, matrix);
 
+  uint32_t enabled_planes = slot->sim.diagnostic_layer_mask
+      ? slot->sim.diagnostic_layer_mask
+      : (1u << kSim3DPlane_Count) - 1;
+  bool fade_ground_planes = cull_haze &&
+      (slot->sim.cull_haze_pct != 0 || slot->sim.cull_dim_pct != 0);
+
   /* The gradient needs the projected horizon, so it follows the matrix rather
    * than the clear above. The flat fill stays as the base: it costs one
    * rectangle and guarantees no pixel is ever left undefined if the gradient
@@ -2587,15 +2691,40 @@ static void RenderSimProfile(const FrameSlot *slot,
    * the town itself draws belongs on top of it. */
   if (underlay) {
     DrawSimWorldUnderlay(slot, source, viewport, matrix, lift_inset);
-    /* Full-resolution ground on top of the half-resolution world map, and
-     * both under everything the town itself captured this frame. */
-    DrawSimTownCanvas(slot, source, viewport, matrix, cull_haze, lift_inset);
+    /* Keep the canvas as the opaque backing for transparent BG1 priority
+     * pixels, but omit it under BG1 wherever either alpha handoff is active.
+     * That applies each feather once instead of twice on one side of the
+     * captured-quad seam and once on the other. */
+    bool live_ground_enabled =
+        ((enabled_planes & (1u << kSim3DPlane_Bg1Low)) &&
+         g_sim3d_layer_textures[kSim3DPlane_Bg1Low]) ||
+        ((enabled_planes & (1u << kSim3DPlane_Bg1High)) &&
+         g_sim3d_layer_textures[kSim3DPlane_Bg1High]);
+    SDL_FRect live_ground = ToFRect(source);
+    DrawSimTownCanvas(slot, source, viewport, matrix, cull_haze, lift_inset,
+                      live_ground_enabled ? &live_ground : NULL);
   }
 
   SDL_FRect src = ToFRect(source), dst = ToFRect(viewport);
-  uint32_t enabled_planes = slot->sim.diagnostic_layer_mask
-      ? slot->sim.diagnostic_layer_mask
-      : (1u << kSim3DPlane_Count) - 1;
+  float town_extent_x0 =
+      (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x;
+  float town_extent_y0 = -(float)slot->sim.camera_y;
+  SimCullFade ground_fade = {
+    .lead = slot->sim.cull_haze_lead_px ? slot->sim.cull_haze_lead_px
+                                        : kSimCullHazeLeadDefaultPx,
+    .corner = slot->sim.cull_corner_px,
+    .lift_inset = lift_inset,
+    .fade = cull_haze ? (float)slot->sim.cull_haze_pct / 100.0f : 0.0f,
+    .dim = cull_haze ? (float)slot->sim.cull_dim_pct / 100.0f : 0.0f,
+    .extent_x0 = town_extent_x0,
+    .extent_y0 = town_extent_y0,
+    .extent_x1 = town_extent_x0 + (float)kSimTownCanvasPixels,
+    .extent_y1 = town_extent_y0 + (float)kSimTownCanvasPixels,
+    .extent_feather = underlay ? (float)kSimTownExtentFeatherPixels : 0.0f,
+    .margin_left = slot->sim.sprite_margin_left,
+    .margin_right = slot->sim.sprite_margin_right,
+    .screen_x0 = slot->sim.underlay_screen_x0,
+  };
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
     if (!(enabled_planes & (1u << plane))) continue;
     if (SimPlaneIsMenu(plane)) continue;
@@ -2619,7 +2748,9 @@ static void RenderSimProfile(const FrameSlot *slot,
     SDL_Texture *texture = g_sim3d_layer_textures[plane];
     if (!texture) continue;
     if (plane == kSim3DPlane_Bg1Low || plane == kSim3DPlane_Bg1High) {
-      DrawSimGroundPlane(texture, source, viewport, &camera);
+      DrawSimGroundPlane(texture, source, viewport, matrix,
+                         (fade_ground_planes || underlay)
+                             ? &ground_fade : NULL);
       /* Ground first, mask immediately after, everything else on top: the
        * shadow can only ever darken ground pixels. */
       if (plane == kSim3DPlane_Bg1Low && shadows)

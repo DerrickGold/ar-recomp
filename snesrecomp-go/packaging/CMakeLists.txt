@@ -183,11 +183,15 @@ if(SNESBUILD_GOOS STREQUAL "darwin")
     if(NOT EXISTS ${_sdl_stage}/lib/libSDL3.dylib)
         file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/dmg)
         file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/dmg)
-        execute_process(COMMAND hdiutil attach -nobrowse -readonly
-            -mountpoint ${CMAKE_BINARY_DIR}/deps/dmgmnt ${_cache_dir}/${_sdl_dmg}
-            COMMAND_ERROR_IS_FATAL ANY)
-        file(COPY ${CMAKE_BINARY_DIR}/deps/dmgmnt/ DESTINATION ${CMAKE_BINARY_DIR}/deps/dmg)
-        execute_process(COMMAND hdiutil detach ${CMAKE_BINARY_DIR}/deps/dmgmnt
+        # Keep the attach/copy/detach lifecycle in one process so its EXIT and
+        # signal traps can detach after a copy failure or interrupted configure.
+        # The helper also recovers a matching stale attachment left by either
+        # macOS architecture, which share this universal SDL3 disk image.
+        execute_process(COMMAND /bin/sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/extract-macos-dmg.sh
+            ${_cache_dir}/${_sdl_dmg}
+            ${CMAKE_BINARY_DIR}/deps/dmg
+            ${CMAKE_BINARY_DIR}/deps
             COMMAND_ERROR_IS_FATAL ANY)
         # SDL3 ships the macOS binary inside an xcframework as a universal
         # (arm64 + x86_64) library, so the one dmg serves both arch presets.

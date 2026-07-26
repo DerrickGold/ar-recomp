@@ -47,7 +47,7 @@ CLEAN_BUILD_DIRS := build build-release build-asan build-trace $(PACKAGING)/buil
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) clean clean-all clean-release
+.PHONY: dev release $(addprefix release-,$(PLATFORMS)) clean clean-all clean-release clean-packaging-mounts
 
 dev:
 	@if [ -z "$$(ls src/gen/*.c 2>/dev/null)" ]; then \
@@ -74,7 +74,10 @@ $(addprefix release-,$(PLATFORMS)): release-%:
 	@[ -n "$(KEEP_BUILD)" ] || rm -rf $(PACKAGING)/build/$*
 	@echo "Bundle written to $(CURDIR)/release/"
 
-clean:
+clean-packaging-mounts:
+	@/bin/sh "$(PACKAGING)/scripts/detach-macos-dmgs.sh" "$(abspath $(PACKAGING)/cache)"
+
+clean: clean-packaging-mounts
 	@removed=""; \
 	for t in $(CLEAN_BUILD_DIRS) $(CLEAN_GENERATED) $(CLEAN_RELEASE); do \
 	  if [ -e "$$t" ]; then echo "  rm $$t ($$(du -sh "$$t" 2>/dev/null | cut -f1))"; rm -rf "$$t"; removed=1; fi; \
@@ -89,5 +92,5 @@ clean-all: clean
 	  rm -rf "$(PACKAGING)/cache"; \
 	fi
 
-clean-release:
+clean-release: clean-packaging-mounts
 	rm -rf release $(PACKAGING)/build

@@ -527,6 +527,10 @@ bool Settings_GetLong(const SettingDesc *desc, long *value);
 SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value);
 SettingChangeResult Settings_SetText(const SettingDesc *desc, const char *text);
 SettingChangeResult Settings_Reset(const SettingDesc *desc);
+/* Restore every non-action descriptor in one registry category to its
+ * built-in default. Returns the strongest result produced by the batch
+ * (restart-required beats sticky-disable, which beats an ordinary change). */
+SettingChangeResult Settings_ResetCategory(SettingCategory category);
 int Settings_FormatValue(const SettingDesc *desc, char *buffer, int buffer_size);
 void Settings_SetChangeObserver(SettingsChangeObserver observer);
 void Settings_SetActionObserver(SettingsActionObserver observer);

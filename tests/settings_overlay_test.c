@@ -338,6 +338,42 @@ int main(void) {
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "sim3d_shadow_opacity_pct"));
   NavToTab(3);
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "sim3d_underlay_haze_pct"));
+
+  /* Every tab ends with one section-scoped reset button. Town 3D spans four
+   * registry categories, including hidden developer dials, and the button
+   * must restore all four without touching Audio (or any other section).
+   * The first confirm only arms it; the second performs and persists it. */
+  const SettingDesc *sim_tilt = Settings_Find("sim3d_tilt_x_mrad");
+  const SettingDesc *sim_shadow = Settings_Find("sim3d_shadow_opacity_pct");
+  const SettingDesc *sim_corner = Settings_Find("sim3d_cull_corner_px");
+  const SettingDesc *volume = Settings_Find("audio_master_volume");
+  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval + sim_tilt->step) ==
+        kSettingChange_Applied);
+  CHECK(Settings_SetLong(sim_shadow, sim_shadow->defval - sim_shadow->step) ==
+        kSettingChange_Applied);
+  CHECK(Settings_SetLong(sim_corner, 0) == kSettingChange_Applied);
+  CHECK(Settings_SetLong(volume, 75) == kSettingChange_Applied);
+  CHECK(g_settings.sim3d_mode);  /* made non-default by the Scene test above */
+  RowToKey("reset_section_defaults");
+  const char *reset_preview = getenv("AR_OVERLAY_RESET_TEST_BMP");
+  if (renderer && reset_preview && reset_preview[0]) {
+    SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+    SDL_RenderClear(renderer);
+    SettingsOverlay_Render(
+        (SDL_Rect){0, 0, surface_width, surface_height});
+    SDL_RenderPresent(renderer);
+    CHECK(SDL_SaveBMP(surface, reset_preview));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));  /* arm */
+  CHECK(g_settings.sim3d_mode);
+  CHECK(g_settings.sim3d_tilt_x_mrad != sim_tilt->defval);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));  /* confirm */
+  CHECK(!g_settings.sim3d_mode);
+  CHECK(g_settings.sim3d_tilt_x_mrad == sim_tilt->defval);
+  CHECK(g_settings.sim3d_shadow_opacity_pct == sim_shadow->defval);
+  CHECK(g_settings.sim3d_cull_corner_px == sim_corner->defval);
+  CHECK(g_settings.audio_master_volume == 75);
+  CHECK(Settings_Reset(volume) == kSettingChange_Applied);
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 
   /* Audio frequency is a bounded preset selector, not an arbitrary integer
