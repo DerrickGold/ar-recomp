@@ -1179,6 +1179,11 @@ int main(int argc, char **argv) {
           if (!SettingsOverlay_ReloadTextures(rom_data, rom_size))
             fprintf(stderr,
                     "[settings-menu] atlas reload after device reset failed\n");
+          /* The sim-3D caches are serial-gated on GAME state, so they would
+           * never notice the reset and would keep presenting discarded
+           * contents for the rest of the session (a settled town never bumps
+           * the underlay serial). Drop them so the next present re-bakes. */
+          PresentSimUnderlay_Reset();
           HostInput_RequestPausedRedraw();
           /* R17/C2: the retained re-present slot copies hd_entries[].texture
            * as raw SDL_Texture* (present.h). The host reload just destroyed

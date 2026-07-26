@@ -1597,6 +1597,22 @@ static bool s_sim_canvas_alloc_failed;
 static SDL_Texture *s_sim_cloud_texture;
 static bool s_sim_cloud_alloc_failed;
 
+/* Called from the SDL_EVENT_RENDER_TARGETS_RESET / _DEVICE_RESET arm.
+ *
+ * SDL_events.h documents _DEVICE_RESET as "The device has been reset and all
+ * textures need to be recreated". Every texture dropped here is written ONLY
+ * when its game-side serial changes (underlay/canvas) or exactly once at
+ * creation (cloud noise), and none of those serials has any dependence on GPU
+ * device state — so without this call the caches short-circuit forever and keep
+ * handing back textures whose contents the driver discarded. In a settled town
+ * the underlay serial can stay fixed indefinitely, so the damage does not
+ * self-heal; only changing town would clear it.
+ *
+ * The symptom is already documented for this exact texture class in
+ * UploadSimTownCanvas below ("it showed as magenta"): freshly reallocated
+ * STREAMING storage is uninitialized. Never reproducible on macOS/Metal, which
+ * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
+ * Vulkan/SDL_GPU (Steam Deck) bug. */
 void PresentSimUnderlay_Reset(void) {
   if (s_sim_underlay_texture) SDL_DestroyTexture(s_sim_underlay_texture);
   s_sim_underlay_texture = NULL;

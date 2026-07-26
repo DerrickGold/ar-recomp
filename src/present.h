@@ -373,4 +373,14 @@ void PresentComposite(const FrameSlot *slot,
                       const DioramaScrollSnapshot *prev_scroll,
                       float alpha);
 
+/* Drops the sim-3D texture caches (world-map underlay + its blur mip, the town
+ * canvas, the cloud-noise field) so the next present rebuilds them.
+ *
+ * MUST be called from the SDL_EVENT_RENDER_TARGETS_RESET / _DEVICE_RESET arm.
+ * Each of those textures is (re)written only when a GAME-side serial changes, or
+ * once at creation — never in response to device state — so after a reset the
+ * caches would short-circuit forever and keep presenting textures whose
+ * contents the driver discarded. See the comment on the definition. */
+void PresentSimUnderlay_Reset(void);
+
 #endif
