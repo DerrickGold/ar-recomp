@@ -23,8 +23,7 @@ game-assets/audio/*
 !assets/*.png
 
 # Build output
-build/
-build-release/
+build*/
 release/
 *.o
 *.exe
