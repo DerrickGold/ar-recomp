@@ -16,6 +16,9 @@ uint8 g_ram[0x20000];
  * (main.c's real runtime state); this harness has no renderer, so it's
  * never actually true here. */
 bool g_gpu_shaders_active;
+/* W4-2: present.c owns the real value (latched when a renderer rejects the rim
+ * mask blend mode); stubbed true here so the row's availability is exercised. */
+bool g_sim_rim_mask_supported = true;
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
 
@@ -958,8 +961,48 @@ static void TestUserDataFile(void) {
   CHECK(strcmp(srm, "saves/save.srm") == 0);
 }
 
+/* W4-2: the "Rim light" row must disappear when the renderer cannot honour the
+ * custom blend mode the effect needs, rather than offering a toggle that does
+ * nothing. present.c owns the real flag and latches it on the first failed
+ * SDL_SetTextureBlendMode; this drives the availability predicate directly. */
+static void TestRimLightAvailabilityFollowsBlendSupport(void) {
+  extern bool g_sim_rim_mask_supported;
+  const SettingDesc *rim = Settings_Find("sim3d_rim_light");
+  CHECK(rim != NULL);
+  if (!rim) return;
+
+  const bool restore_support = g_sim_rim_mask_supported;
+  const int restore_mode = g_settings.sim3d_mode;
+
+  /* The row is gated on BOTH the sim-3D stage being enabled and the blend mode
+   * being usable, so enable the stage first — otherwise this would pass for the
+   * wrong reason (unavailable either way) and prove nothing. */
+  g_settings.sim3d_mode = 1;
+
+  g_sim_rim_mask_supported = true;
+  CHECK(Settings_IsAvailable(rim));
+
+  /* Unsupported blend mode alone must remove the row. */
+  g_sim_rim_mask_supported = false;
+  CHECK(!Settings_IsAvailable(rim));
+
+  /* Restoring support brings it back — so the flag is demonstrably what decides
+   * it, not some unrelated precondition. */
+  g_sim_rim_mask_supported = true;
+  CHECK(Settings_IsAvailable(rim));
+
+  /* The stage gate still dominates: no blend support in the world makes an
+   * unimplemented stage available. */
+  g_settings.sim3d_mode = 0;
+  CHECK(!Settings_IsAvailable(rim));
+
+  g_sim_rim_mask_supported = restore_support;
+  g_settings.sim3d_mode = restore_mode;
+}
+
 int main(void) {
   TestUserDataFile();
+  TestRimLightAvailabilityFollowsBlendSupport();
   TestScalePercentToOutput();
   TestFrameLimitInterval();
   TestDefaultsAndMetadata();

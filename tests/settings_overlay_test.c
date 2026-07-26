@@ -20,6 +20,9 @@ uint8 g_ram[0x20000];
  * (main.c's real runtime state); this harness has no renderer, so it's
  * never actually true here. */
 bool g_gpu_shaders_active;
+/* W4-2: present.c owns the real value (latched when a renderer rejects the rim
+ * mask blend mode); stubbed true here so the row's availability is exercised. */
+bool g_sim_rim_mask_supported = true;
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
 

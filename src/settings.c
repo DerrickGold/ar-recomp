@@ -642,8 +642,22 @@ static bool Sim3DShadowsAvailable(void) {
 static bool Sim3DSoftShadowsAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_SoftShadows);
 }
+/* W4-2: the rim mask needs a CUSTOM blend mode, and
+ * SDL_ComposeCustomBlendMode cannot report whether the backend supports one —
+ * only the eventual SDL_SetTextureBlendMode can. present.c latches the answer
+ * on the first failed set, so this reflects real runtime capability rather than
+ * an assumption, exactly as GpuShadersActive does for the shader effects. Grey
+ * the row out rather than offering a toggle that cannot do anything: an option
+ * that silently does nothing is the dishonesty findings R8 and R13 were about.
+ *
+ * A plain bool rather than an accessor so the ROM-free tests can stub it with
+ * one definition, matching g_gpu_shaders_active above. Defaults to true: the
+ * mode is assumed usable until a set actually fails, so a backend that supports
+ * it never sees the row disappear. */
+extern bool g_sim_rim_mask_supported;
 static bool Sim3DRimLightAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_RimLight);
+  return Sim3DStageImplemented(kSimFeature_RimLight) &&
+      g_sim_rim_mask_supported;
 }
 static bool Sim3DWorldUnderlayAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_WorldUnderlay);

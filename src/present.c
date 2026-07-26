@@ -1265,6 +1265,10 @@ typedef struct SimBillboardPass {
   SDL_BlendMode blend;
 } SimBillboardPass;
 
+/* Defined with the rim-light code below, since the capability it latches belongs
+ * to that effect; declared here because the billboard draw is the only caller. */
+static bool SimApplyAtlasBlendMode(SDL_BlendMode blend);
+
 /* Single source of truth for "what blend mode does this draw use", so the
  * caller-side pass setup and the callee-side set cannot disagree. A NULL pass is
  * the ordinary coloured draw. */
@@ -1296,8 +1300,9 @@ static void DrawSimObjectPriority(
     const Scene3DCamera *camera, const float matrix[16],
     const SimBillboardPass *pass) {
   if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
-  SDL_SetTextureBlendMode(g_sim_obj_atlas_texture,
-                          SimBillboardPassBlend(pass));
+  /* W4-2: a rejected blend mode means this pass cannot draw correctly, so bail
+   * rather than draw with whatever mode happened to be set. */
+  if (!SimApplyAtlasBlendMode(SimBillboardPassBlend(pass))) return;
   float flat_scale_x = (float)viewport.w / source.w;
   float flat_scale_y = (float)viewport.h / source.h;
 
@@ -1467,8 +1472,22 @@ static SDL_Texture *EnsureSimRimTexture(int w, int h) {
 /* Multiplies destination alpha by source alpha while leaving destination
  * colour, i.e. keeps only the overlap. Applied to the offset silhouette with
  * the sprite at its true position, this trims the rim band back inside the
- * sprite so it can never touch a background pixel. */
+ * sprite so it can never touch a background pixel.
+ *
+ * W4-2: SDL_ComposeCustomBlendMode only COMPOSES a value — SDL_blendmode.h
+ * documents that "not all renderers support" custom modes and directs callers to
+ * the per-renderer support notes, and the composing call itself cannot report
+ * that. Support is discovered only when the mode is handed to
+ * SDL_SetTextureBlendMode, whose bool return we must therefore check. Until that
+ * happens the mode is "composed but unproven", which is why this returns
+ * SDL_BLENDMODE_INVALID once a set has actually failed rather than optimistically
+ * forever. */
+/* Reads true until a set actually fails; settings.c gates the "Rim light" row on
+ * it (declared there as an extern bool, matching g_gpu_shaders_active). */
+bool g_sim_rim_mask_supported = true;
+
 static SDL_BlendMode SimRimMaskBlend(void) {
+  if (!g_sim_rim_mask_supported) return SDL_BLENDMODE_INVALID;
   static SDL_BlendMode mode = SDL_BLENDMODE_INVALID;
   if (mode == SDL_BLENDMODE_INVALID)
     mode = SDL_ComposeCustomBlendMode(
@@ -1476,6 +1495,21 @@ static SDL_BlendMode SimRimMaskBlend(void) {
         SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_SRC_ALPHA,
         SDL_BLENDOPERATION_ADD);
   return mode;
+}
+
+/* Applies a pass's blend mode and reports whether the renderer accepted it.
+ * A custom mode that the backend cannot honour must disable the effect rather
+ * than silently draw with whatever mode was set before — that would produce
+ * exactly the untrimmed silhouette W4-1 fixed. */
+static bool SimApplyAtlasBlendMode(SDL_BlendMode blend) {
+  if (SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, blend)) return true;
+  if (g_sim_rim_mask_supported) {
+    g_sim_rim_mask_supported = false;
+    fprintf(stderr,
+            "[sim3d-rim] this renderer rejected the rim mask blend mode (%s) — "
+            "rim light disabled\n", SDL_GetError());
+  }
+  return false;
 }
 
 /* Screen-space direction the rim sits on. The lateral part is the opposite of
