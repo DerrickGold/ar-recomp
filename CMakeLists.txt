@@ -106,6 +106,8 @@ add_executable(ActRaiserRecomp
     src/diorama_host.c
     src/present.c
     src/diorama_scroll_math.c
+    src/actraiser_ws_gap.c
+    src/diorama_skybox_uv.c
     src/dev_tools.c
     src/forced_input.c
     src/frame_slot.c
@@ -518,4 +520,29 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_diorama_scroll_math_test PRIVATE SDL3::SDL3 m)
     add_test(NAME actraiser_diorama_scroll_math
         COMMAND actraiser_diorama_scroll_math_test)
+
+    # Fix C (SPEC-backdrop-clip.md): geometry of the framebuffer margin-gap
+    # fill. Pure, so it needs neither SDL nor the PPU.
+    add_executable(actraiser_ws_gap_test
+        tests/actraiser_ws_gap_test.c
+        src/actraiser_ws_gap.c
+    )
+    target_include_directories(actraiser_ws_gap_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_ws_gap COMMAND actraiser_ws_gap_test)
+
+    # Fix B (SPEC-backdrop-clip.md): BG2 valid-span classification and the
+    # skybox quad's UV range, including the no-op guarantee that a padded
+    # margin reproduces the pre-fix UV values exactly.
+    add_executable(actraiser_diorama_skybox_uv_test
+        tests/diorama_skybox_uv_test.c
+        src/diorama_skybox_uv.c
+    )
+    target_include_directories(actraiser_diorama_skybox_uv_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_diorama_skybox_uv_test PRIVATE m)
+    add_test(NAME actraiser_diorama_skybox_uv
+        COMMAND actraiser_diorama_skybox_uv_test)
 endif()

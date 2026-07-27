@@ -1283,6 +1283,20 @@ const SettingDesc g_setting_descs[] = {
     kDioramaSky_Off, kDioramaSky_Both, 1, false,
     kDioramaSkyModeLabels, kDioramaSky_Count, Diorama_ModeIsOn, NULL,
     NULL, NULL },
+  /* One switch for all three parts of the margin fix (SPEC-backdrop-clip.md),
+   * so the black wedge at a level bound can be A/B'd live: stand at the level
+   * start and toggle. Default on; Off restores every pre-fix path byte for
+   * byte, which is what makes it a usable comparison rather than a
+   * half-migration. */
+  { "diorama_margin_fix", "AR_DIORAMA_MARGIN_FIX", "Edge margin fix",
+    "Fixes the black wedge at a level's start/end: pads captured layers to the "
+    "full widescreen budget, fills the frame's edge gaps with the scene "
+    "backdrop instead of black, and crops the skybox to BG2's valid span. "
+    "Off restores the previous behaviour for comparison.",
+    kSettingType_Bool, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_margin_fix, 1, 0, 1, 1, false,
+    NULL, 0, Diorama_ModeIsOn, NULL,
+    NULL, NULL },
   /* B6 (followup doc): floor/ceiling/side-wall enclosure masking the box's
    * off-screen edges. Composes with B5 (skybox fills the far opening);
    * independent so each can be A/B'd alone. */

@@ -22,6 +22,7 @@
 #include "present.h"
 #include "types.h"
 #include "diorama.h"
+#include "diorama_skybox_uv.h"
 #include "diorama_planes.h"
 #include "diorama_scroll_math.h"
 #include "hd_replacement_host.h"
@@ -3072,10 +3073,22 @@ void PresentComposite(const FrameSlot *slot,
         slot->diorama_dyncam_event_boost);
     }
 
+    /* Fix B (SPEC-backdrop-clip.md): resolve BG2's valid captured span from the
+     * slot alone (D6 — this file never reads live g_ppu). ws_extra, not
+     * extra_left_right, is the offset: the capture pitch and Diorama_Upload's
+     * rect are both derived from ws_extra, so it is what texture column 0
+     * corresponds to. They are equal today; keeping them distinct is what makes
+     * that stay true if either ever moves. */
+    int bg2_valid_x0 = 0, bg2_valid_x1 = kFrameSlotLayerTextureWidth;
+    DioramaBg2ValidSpan(slot->ws_extra, slot->extra_left_right,
+                        slot->extra_left_cur, slot->extra_right_cur,
+                        slot->bg2_margin_source, kFrameSlotLayerTextureWidth,
+                        &bg2_valid_x0, &bg2_valid_x1);
     if (!Diorama_Composite(g_renderer, slot->snes_width, slot->snes_height,
                            slot->pixel_aspect, slot->ignore_aspect_ratio,
                            slot->visible_width, g_diorama_textures, pixels,
-                           &scroll_delta, &final_cam, distance_scale))
+                           &scroll_delta, &final_cam, distance_scale,
+                           bg2_valid_x0, bg2_valid_x1))
       return;
     int out_w = 0, out_h = 0;
     SDL_GetRenderOutputSize(g_renderer, &out_w, &out_h);

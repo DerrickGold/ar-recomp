@@ -368,6 +368,15 @@ void FrameSlot_Capture(FrameSlot *dst) {
     dst->hud_player_row_y = g_ppu->wsHudPlayerRowY;
     dst->hud_left_only_y = g_ppu->wsHudLeftOnlyY;
     dst->extra_left_right = g_ppu->extraLeftRight;
+    /* Fix B: from the latch, NOT g_ppu — see the field comment in present.h and
+     * the latch in ActRaiserDrawPpuFrame. */
+    {
+      int live_left = 0, live_right = 0, bg2_source = 0;
+      ActRaiser_LiveMargins(&live_left, &live_right, &bg2_source);
+      dst->extra_left_cur = (uint8_t)live_left;
+      dst->extra_right_cur = (uint8_t)live_right;
+      dst->bg2_margin_source = (uint8_t)bg2_source;
+    }
     dst->inidisp = g_ppu->inidisp;
     dst->bg_mode = (uint8_t)PPU_mode(g_ppu);
 

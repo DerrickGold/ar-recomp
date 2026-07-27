@@ -119,4 +119,10 @@ void Sim3D_ComposeFlatPixels(
     uint8_t *const planes[kSim3DPlane_Count], uint32_t plane_mask,
     int full_width_rows);
 
+/* The colour the authentic renderer shows for any unrendered pixel: cgram[0]
+ * expanded to 8 bits per channel through the PPU's brightness table. Shared so
+ * the widescreen margin-gap fill (actraiser_ws_gap.h) and the sim-3D flat
+ * composite cannot disagree about it. */
+uint32_t ActRaiser_BackdropArgb(const Ppu *ppu);
+
 #endif  /* SIM3D_H */

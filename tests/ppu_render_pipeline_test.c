@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "snes/ppu.h"
@@ -335,11 +336,205 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   ppu_free(ppu);
 }
 
+/* Fix A (SPEC-backdrop-clip.md): a CAPTURED layer's synthesized mirror/repeat
+ * padding must reach the full centering budget, not stop at the live per-side
+ * margin — otherwise a host that samples the whole fixed capture span reads
+ * never-written (transparent) columns at a world bound.
+ *
+ * The load-bearing assertion is the GATE PROOF at the end: the game's own
+ * framebuffer must keep the live margin exactly. That half must pass both before
+ * and after the fix, so it is the guard against a flat-mode regression.
+ */
+static void TestCapturedPaddingReachesBudget(void) {
+  enum { kBudget = 95, kLiveRight = 95, kCaptureWidth = 256 + 2 * kBudget };
+  const int bg2 = kActRaiserPpuLayer_Bg2;
+
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  /* The overlay-capture and widescreen-padding paths live in PpuDrawWholeLine,
+   * which ppu_runLine only reaches when g_new_ppu is set; the old path ignores
+   * both. Diorama mode always implies the new renderer (Diorama_NewPpuCapable),
+   * so this matches the only configuration the fix can run in. */
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+
+  static uint32_t capture[kCaptureWidth * 4];
+  static uint8_t fb[kCaptureWidth * 4 * 4];
+
+  /* Render one line twice: once with the widened padding enabled, once with it
+   * off, and compare the same column. */
+  uint32_t left_on = 0, left_off = 0;
+  for (int enabled = 1; enabled >= 0; enabled--) {
+    ppu_reset(ppu);
+    memset(capture, 0, sizeof(capture));
+    memset(fb, 0, sizeof(fb));
+
+    ppu->inidisp = 0x0f;               /* brightness 15, force-blank off */
+    ppu->bgmode = 1;                   /* Mode 1: BG1/BG2 are 4bpp */
+    ppu->screenEnabled[0] = 1u << bg2; /* BG2 on the main screen only */
+    ppu->cgram[0] = bgr555(0, 0, 0);
+    ppu->cgram[0x21] = bgr555(31, 0, 31); /* BG2 palette 2, colour 1 */
+    /* BG2 tile data at VRAM word 0 (bgTileAdr nibble for layer 1 == 0), one
+     * solid 4bpp tile using palette colour 1. */
+    set_solid_4bpp_tile(ppu, 1, 1);
+    ppu->bgTileAdr = 0;
+    /* BG2 tilemap at word 0x2000: PPU_bgTilemapAdr is (bgXsc & 0xfc) << 8, so
+     * 0x20 << 8 == 0x2000. Fill the whole 64x64 map with that tile, palette 2
+     * (bits 10-12), so every column the renderer touches is non-transparent. */
+    ppu->bgXsc[bg2] = 0x20 | 0x3;      /* wider + higher tilemap */
+    for (int i = 0; i < 0x1000; i++)
+      ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+    ppu->hScroll[bg2] = 0;
+    ppu->vScroll[bg2] = 0;
+
+    /* Symmetric budget, then narrow the LEFT margin to 0: the level-start case. */
+    PpuSetExtraSpace(ppu, kBudget);
+    PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
+    PpuSetWidescreenPadCapturedToBudget(ppu, (uint8_t)enabled);
+    PpuSetExtraSideSpace(ppu, 0, kLiveRight, 0);
+
+    PpuBeginDrawing(ppu, fb, kCaptureWidth * 4, 0);
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                                (uint8_t *)capture,
+                                kCaptureWidth * sizeof(uint32_t)));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0,
+                               kCaptureWidth, 2,
+                               kPpuOverlayFlag_RemoveFromGame));
+    ppu_runLine(ppu, 1);
+
+    /* Column 0 of the capture is screen x = -95, i.e. the far end of the
+     * collapsed left margin. */
+    if (enabled) {
+      left_on = capture[0];
+    } else {
+      left_off = capture[0];
+    }
+
+    /* The already-live RIGHT side must be identical either way — the fix must
+     * not disturb a margin that was already being rendered. */
+    const uint32_t right = capture[kCaptureWidth - 1];
+    CHECK((right & 0xffffffu) != 0);
+
+    PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+  }
+
+  /* With the fix ON the collapsed side carries mirrored content... */
+  CHECK((left_on & 0xffffffu) != 0);
+  /* ...and with it OFF that column was never written, which is the bug. */
+  CHECK(left_off == 0);
+
+  /* The mirror image: a level's END collapses the RIGHT margin instead. Without
+   * this the `captured` term on margin_right is unobservable, and dropping it
+   * would pass every left-side assertion above. */
+  uint32_t right_on = 0, right_off = 0;
+  for (int enabled = 1; enabled >= 0; enabled--) {
+    ppu_reset(ppu);
+    memset(capture, 0, sizeof(capture));
+    memset(fb, 0, sizeof(fb));
+    ppu->inidisp = 0x0f;
+    ppu->bgmode = 1;
+    ppu->screenEnabled[0] = (uint8_t)(1u << bg2);
+    ppu->cgram[0] = bgr555(0, 0, 0);
+    ppu->cgram[0x21] = bgr555(31, 0, 31);
+    set_solid_4bpp_tile(ppu, 1, 1);
+    ppu->bgTileAdr = 0;
+    ppu->bgXsc[bg2] = 0x20 | 0x3;
+    for (int i = 0; i < 0x1000; i++)
+      ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+    ppu->hScroll[bg2] = 0;
+    ppu->vScroll[bg2] = 0;
+    PpuSetExtraSpace(ppu, kBudget);
+    PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
+    PpuSetWidescreenPadCapturedToBudget(ppu, (uint8_t)enabled);
+    PpuSetExtraSideSpace(ppu, kBudget, 0, 0);   /* right margin collapsed */
+
+    PpuBeginDrawing(ppu, fb, kCaptureWidth * 4, 0);
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                                (uint8_t *)capture,
+                                kCaptureWidth * sizeof(uint32_t)));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0,
+                               kCaptureWidth, 2,
+                               kPpuOverlayFlag_RemoveFromGame));
+    ppu_runLine(ppu, 1);
+    if (enabled) right_on = capture[kCaptureWidth - 1];
+    else right_off = capture[kCaptureWidth - 1];
+    /* The already-live LEFT side renders either way. */
+    CHECK((capture[0] & 0xffffffu) != 0);
+    PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+  }
+  CHECK((right_on & 0xffffffu) != 0);
+  CHECK(right_off == 0);
+
+  /* GATE PROOF. The game's own framebuffer must NOT gain the widened padding:
+   * a narrower margin there is the intended pillarbox at a world edge, and
+   * HUD-split rows composite the full budget. Framebuffer column 0 stays the
+   * cleared/backdrop pixel even with the fix enabled. Removing the `captured`
+   * condition in PpuDrawBackground_4bpp_policy makes this fail. */
+  /* GATE PROOF. The game's own framebuffer must NOT gain the widened padding: a
+   * narrower margin there is the intended pillarbox at a world edge, and
+   * HUD-split rows composite the full budget, so widening it would change flat
+   * output and break byte-identical replay.
+   *
+   * This needs its own pass with NO overlay surface bound. The passes above use
+   * kPpuOverlayFlag_RemoveFromGame, which strips BG2 from the framebuffer
+   * outright — so their framebuffer is unconditionally blank and proves nothing.
+   * With nothing bound, PpuDrawBackground_4bpp_policy receives bgBuffers rather
+   * than overlayBuffers, which is exactly the condition the gate tests.
+   *
+   * Deleting the `dstbuf == &ppu->overlayBuffers[layer]` term makes this fail. */
+  {
+    ppu_reset(ppu);
+    memset(fb, 0, sizeof(fb));
+    ppu->inidisp = 0x0f;
+    ppu->bgmode = 1;
+    ppu->screenEnabled[0] = (uint8_t)(1u << bg2);
+    ppu->cgram[0] = bgr555(0, 0, 0);
+    ppu->cgram[0x21] = bgr555(31, 0, 31);
+    set_solid_4bpp_tile(ppu, 1, 1);
+    ppu->bgTileAdr = 0;
+    ppu->bgXsc[bg2] = 0x20 | 0x3;
+    for (int i = 0; i < 0x1000; i++)
+      ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+    ppu->hScroll[bg2] = 0;
+    ppu->vScroll[bg2] = 0;
+    PpuSetExtraSpace(ppu, kBudget);
+    PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
+    PpuSetWidescreenPadCapturedToBudget(ppu, 1);  /* enabled, yet must be inert */
+    /* A HUD split is REQUIRED to observe this. Outside the split the compositor
+     * clamps the framebuffer to the live window (ppu.c: composite_left =
+     * extraLeftCur), so a widened layer buffer is discarded and the leak is
+     * invisible. On split rows composite_left becomes extraLeftRight — the full
+     * budget — so anything the layer wrote in the collapsed margin reaches the
+     * framebuffer. That is exactly the flat-mode regression the gate prevents. */
+    PpuSetWidescreenHudSplit(ppu, 8, 100, 100, 8, 8);
+    PpuSetExtraSideSpace(ppu, 0, kLiveRight, 0);
+
+    PpuBeginDrawing(ppu, fb, kCaptureWidth * 4, 0);
+    ppu_runLine(ppu, 1);   /* screen y = 0, inside the split */
+
+    const uint32_t *row = (const uint32_t *)(const void *)fb;
+    /* Screen x = -95 .. -1 is the collapsed left margin: it must stay backdrop
+     * even though the padding feature is enabled, because this frame's BG2 went
+     * to bgBuffers rather than an overlay buffer. */
+    CHECK((row[0] & 0xffffffu) == 0);
+    CHECK((row[kBudget - 1] & 0xffffffu) == 0);
+    /* Sanity: the authentic centre and the live right margin DID render, so a
+     * blank framebuffer cannot make the two checks above pass for free. */
+    CHECK((row[kBudget + 10] & 0xffffffu) != 0);
+    CHECK((row[kCaptureWidth - 1] & 0xffffffu) != 0);
+  }
+
+  g_new_ppu = saved_new_ppu;
+}
+
 int main(void) {
   TestObjRangeRaster();
   TestSemanticAtlasPacking();
   TestSim3DFlatComposition();
   TestSim3DWidescreenHudCaptureHandoff();
+  TestCapturedPaddingReachesBudget();
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));
 
