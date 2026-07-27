@@ -1,4 +1,5 @@
 #include "diorama.h"
+#include "diorama_skybox_uv.h"
 #include "camera_orbit.h"
 #include "diorama_scroll_math.h"   /* R17/C1: DioramaInterpUvWindow */
 #include "scene3d_math.h"
@@ -901,25 +902,35 @@ static int DioramaLayerBgIndex(int plane) {
   }
 }
 
-/* KNOWN LIMITATION (live report + investigated, 2026-07-21, not fixed): near
- * a level's start/end, the captured BG2 content this draws goes black at
- * the world-bound edge instead of extending — visible as a black wedge
- * clipping the skybox. Root cause: the widescreen margin ceiling
- * (extraLeftCur/extraRightCur, set once per frame in
- * ActRaiser_ApplyWidescreenPolicy from BG1's world position,
- * actraiser_rtl.c ~908-925) is a single GLOBAL PPU value, not per-layer —
- * every layer's scanline rendering respects the same ceiling. The existing
- * per-layer knobs (wsLayerClamp/wsLayerMirror/wsLayerRepeat, consumed by
- * PpuLayerExtra, ppu.c ~419) can only SHRINK a layer's margin down to 0 from
- * that ceiling; nothing lets one layer draw further than it. So there is no
- * cheap fix here — BG2 can't be given a wider margin than BG1's world bound
- * without either (a) a new per-layer NUMERIC margin ceiling in
- * PpuLayerExtra (touches a hot per-scanline path in core PPU rendering), or
- * (b) a second BG2-only scanout pass per frame just for this capture, run
- * with the ceiling forced to the full budget + mirror/repeat, separate from
- * the main frame. Author's call: (a) is the preferred direction (more
- * performant — no extra scanout pass) but deferred as its own follow-up,
- * not part of B5. */
+/* Edge margin fix (SPEC-backdrop-clip.md; live report 2026-07-21, fixed
+ * 2026-07-26 behind the `diorama_margin_fix` setting / AR_DIORAMA_MARGIN_FIX).
+ *
+ * Symptom: near a level's start/end the captured BG2 content went black at the
+ * world-bound edge instead of extending — a black wedge clipping the skybox.
+ * Cause: ActRaiser_ApplyWidescreenPolicy narrows the LIVE per-side margin as the
+ * camera reaches a finite world's bound, but every diorama consumer samples the
+ * FIXED capture span, and the never-rendered columns are transparent — which
+ * this quad's SDL_BLENDMODE_NONE turns into opaque black.
+ *
+ * An earlier revision of this comment claimed there was "no cheap fix" and that
+ * the only options were a per-layer numeric ceiling in PpuLayerExtra or a second
+ * BG2-only scanout pass. Both were wrong. PpuLayerExtra returns 0 for any layer
+ * carrying a clamp/mirror/repeat bit BEFORE it consults a numeric argument, so a
+ * numeric ceiling is inert for the common case; and for most action maps BG2's
+ * margins are not fetched from tilemap at all — they are SYNTHESIZED by
+ * PpuMergePaddedBackground from the always-present authentic 256 columns, whose
+ * two padding loops were simply bounded by the live margin instead of the
+ * budget. Widening them for captured layers only (Fix A) costs no extra fetch
+ * and no extra pass.
+ *
+ * Where synthesis does not apply — a genuinely wide BG2, or a clamped one — this
+ * function crops its own U range to BG2's valid span instead (Fix B), trading a
+ * slight sky stretch for the wedge. The framebuffer's own gap strips are filled
+ * with the scene backdrop rather than black (Fix C, actraiser_rtl.c).
+ *
+ * Still open: the DOF/edge-AA feather below anchors to the fixed span, so the
+ * real content edge gets no feather when the span is cropped. Cosmetic, and only
+ * on the GPU-shader path. */
 
 /* B5 (followup doc): draws BG2 as a viewport-FILLING screen-space quad —
  * deliberately NOT run through the camera MVP (BuildQuadMesh/
@@ -945,7 +956,8 @@ static int DioramaLayerBgIndex(int plane) {
 static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
                               int snes_width, int snes_height,
                               int out_w, int out_h, bool dim,
-                              float blur_radius) {
+                              float blur_radius,
+                              int bg2_valid_x0, int bg2_valid_x1) {
   if (!bg2_texture) return;
   float uv_u1 = (float)snes_width / (float)kPpuBufWidth;
   /* Same live report: a visible lighter/garbage-colored strip appeared at
@@ -967,9 +979,22 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
    * own interpolation clamp around the per-layer loop that runs after this
    * returns). Costs an imperceptible crop of the sky content, not a
    * rendering defect. */
-  float margin_u = (blur_radius + 1.0f) / (float)kPpuBufWidth;
-  float u0 = margin_u, u1 = uv_u1 - margin_u;
-  if (u1 < u0) u1 = u0;  /* degenerate guard for a pathologically narrow capture */
+  /* Fix B (SPEC-backdrop-clip.md): map U over BG2's ACTUALLY VALID span, not the
+   * whole fixed capture. Where Fix A padded the margins out to the budget the
+   * span IS the whole capture, so this is bit-identical to the pre-fix math;
+   * where it could not (a wide BG2 fetched from tilemap, or a clamped one) the
+   * sky stretches a little instead of showing a black wedge. With the setting
+   * off, the original expression runs unchanged. */
+  float u0, u1;
+  if (g_settings.diorama_margin_fix) {
+    DioramaSkyboxUvRange(kPpuBufWidth, bg2_valid_x0, bg2_valid_x1,
+                         blur_radius, &u0, &u1);
+  } else {
+    float margin_u = (blur_radius + 1.0f) / (float)kPpuBufWidth;
+    u0 = margin_u;
+    u1 = uv_u1 - margin_u;
+    if (u1 < u0) u1 = u0;  /* degenerate guard for a pathologically narrow capture */
+  }
   /* Live report (2026-07-21): {0.30,0.30,0.40} read as jarringly dark for
    * Plane+skybox — the intent is a subtle cue that this is background, not
    * a heavy tint. Lightened substantially; still a touch cool/blue like the
@@ -1120,7 +1145,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        uint8_t *pixels[],
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,
-                       float distance_scale) {
+                       float distance_scale,
+                       int bg2_valid_x0, int bg2_valid_x1) {
   if (!renderer || !cam_pose) return false;
 
   SDL_SetRenderLogicalPresentation(renderer, 0, 0,
@@ -1159,7 +1185,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     bool both = g_settings.diorama_skybox == kDioramaSky_Both;
     DrawDioramaSkybox(renderer, textures[kPpuOverlaySource_Bg2],
                       snes_width, snes_height, out_w, out_h, both,
-                      both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly);
+                      both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly,
+                      bg2_valid_x0, bg2_valid_x1);
   }
 
   float tex_h = (float)snes_height;

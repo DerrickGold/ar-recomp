@@ -279,6 +279,7 @@ static inline void PpuResetLayerClamps(Ppu *ppu) {
   ppu->wsLayerClamp = 0;
   ppu->wsLayerMirror = 0;
   ppu->wsLayerRepeat = 0;
+  ppu->wsPadCapturedToBudget = 0;
   memset(ppu->wsClampY0, 0, sizeof(ppu->wsClampY0));
   memset(ppu->wsClampY1, 0, sizeof(ppu->wsClampY1));
   memset(ppu->wsRepeatY0, 0, sizeof(ppu->wsRepeatY0));
@@ -358,6 +359,12 @@ void PpuSetWidescreenLayerMirror(Ppu *ppu, uint8_t mask) {
   // layers are clamped by PpuLayerExtra so unsupported mirroring cannot expose
   // stale offscreen tilemap data.
   ppu->wsLayerMirror = mask;
+}
+
+void PpuSetWidescreenPadCapturedToBudget(Ppu *ppu, uint8_t enabled) {
+  // See ppu.h. Reset by PpuResetLayerClamps like the other per-frame policy
+  // bits, so a mode flip cannot leave it latched.
+  ppu->wsPadCapturedToBudget = enabled ? 1 : 0;
 }
 
 void PpuSetWidescreenLayerRepeat(Ppu *ppu, uint8_t mask) {
@@ -984,9 +991,15 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu,
 // also duplicate sprites and lower-priority BGs visible through transparent
 // pixels. Comparing isolated z/color words reproduces the normal per-layer
 // priority merge. `repeat` chooses cyclic continuation instead of reflection.
+// margin_left/margin_right bound the two synthesized padding runs. They are
+// normally the live per-side margin; a captured layer may pass the full budget
+// instead (see PpuSetWidescreenPadCapturedToBudget). The centre run is
+// unconditional and unaffected.
 static void PpuMergePaddedBackground(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
                                      const PpuPixelPrioBufs *layerbuf,
-                                     bool repeat) {
+                                     bool repeat,
+                                     int margin_left, int margin_right) {
+  (void)ppu;
   PpuZbufType *dst = dstbuf->data;
   const PpuZbufType *src = layerbuf->data;
   for (int x = 0; x < kPpuXPixels; x++) {
@@ -994,7 +1007,7 @@ static void PpuMergePaddedBackground(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
     if (src[i] > dst[i])
       dst[i] = src[i];
   }
-  for (int x = -(int)ppu->extraLeftCur; x < 0; x++) {
+  for (int x = -margin_left; x < 0; x++) {
     int di = x + kPpuExtraLeftRight;
     int sx = repeat ? kPpuXPixels + x : -x;
     int si = sx + kPpuExtraLeftRight;
@@ -1002,7 +1015,7 @@ static void PpuMergePaddedBackground(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
       dst[di] = src[si];
   }
   for (int x = kPpuXPixels;
-       x < kPpuXPixels + (int)ppu->extraRightCur; x++) {
+       x < kPpuXPixels + margin_right; x++) {
     int di = x + kPpuExtraLeftRight;
     int sx = repeat ? x - kPpuXPixels : kPpuXPixels * 2 - 2 - x;
     int si = sx + kPpuExtraLeftRight;
@@ -1036,9 +1049,26 @@ static void PpuDrawBackground_4bpp_policy(Ppu *ppu,
     PpuDrawBackground_4bpp_mosaic(ppu, &layerbuf, y, sub, layer, zhi, zlo);
   else
     PpuDrawBackground_4bpp(ppu, &layerbuf, y, sub, layer, zhi, zlo);
+  /* A host that CAPTURES this layer samples the whole fixed capture span, which
+   * is sized from the budget -- not the live window. So when the live margin has
+   * narrowed at a world bound, synthesize the padding out to the full budget for
+   * that buffer: the source (the authentic 256 columns) is always present, so
+   * this needs no extra tilemap fetch and cannot expose stale/wrapped cells.
+   *
+   * The game's own framebuffer deliberately keeps the live margin: a narrower
+   * margin there is the intended pillarbox at a world edge, and HUD-split rows
+   * composite the full budget (see PpuLayerExtra's layer-5 case), so widening
+   * unconditionally would newly show mirrored content in the HUD border gaps and
+   * change flat-mode output. dstbuf == &overlayBuffers[layer] is exactly the
+   * captured case (PpuBeginBackgroundOverlay hands that buffer out). */
+  bool captured = ppu->wsPadCapturedToBudget && layer < kPpuOverlaySource_Count &&
+                  dstbuf == &ppu->overlayBuffers[layer];
+  int margin_left = captured ? (int)ppu->extraLeftRight : (int)ppu->extraLeftCur;
+  int margin_right = captured ? (int)ppu->extraLeftRight : (int)ppu->extraRightCur;
   PpuMergePaddedBackground(ppu, dstbuf, &layerbuf,
                            repeat_band ||
-                           (ppu->wsLayerRepeat & (1u << layer)) != 0);
+                           (ppu->wsLayerRepeat & (1u << layer)) != 0,
+                           margin_left, margin_right);
 }
 
 // Draw a whole line of a 2bpp background layer into bgBuffers, with mosaic applied

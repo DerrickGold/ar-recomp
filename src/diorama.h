@@ -65,14 +65,21 @@ typedef struct DioramaCameraPose {
  * multiplier applied AFTER auto-fit/dead-zone resolution composes correctly
  * either way, which is also why this is its own parameter rather than a
  * 4th DioramaCameraPose field — that struct is reused verbatim for
- * FrameSlot's settings snapshots (main.c), which have no kick state at all. */
+ * FrameSlot's settings snapshots (main.c), which have no kick state at all.
+ *
+ * bg2_valid_x0/x1 (Fix B, SPEC-backdrop-clip.md): the half-open TEXTURE-column
+ * span of BG2's actually-rendered content, from DioramaBg2ValidSpan. Only the
+ * skybox quad uses it — it is a screen-space quad, so cropping its source is
+ * free. Deliberately NOT applied to the per-layer loop: those quads are
+ * world-registered against BG1, and narrowing their UV would desync them. */
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int active_pixel_aspect, bool ignore_aspect_ratio,
                        int visible_width, SDL_Texture *textures[],
                        uint8_t *pixels[],
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,
-                       float distance_scale);
+                       float distance_scale,
+                       int bg2_valid_x0, int bg2_valid_x1);
 
 void Diorama_FlushSettingsIfDirty(void);
 

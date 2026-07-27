@@ -212,6 +212,12 @@ struct Ppu {
   // so a BG3 status bar never tiles into the margins). SMW sets it to the HUD
   // band height so water/level content on BG3 below the bar fills 16:9.
   uint8_t wsBg3WidenY;
+  // Widescreen: synthesize mirror/repeat padding out to the full centering
+  // budget (extraLeftRight) for CAPTURED layers, instead of stopping at the
+  // live per-side margin (extraLeftCur/extraRightCur). See
+  // PpuSetWidescreenPadCapturedToBudget. 0 = off (padding stops at the live
+  // margin, the pre-existing behaviour for every path).
+  uint8_t wsPadCapturedToBudget;
   // Widescreen per-layer clamp (see PpuSetWidescreenLayerClamp). Bit L set =>
   // BGL+1 (layer L, 0..3) is clamped to the authentic 256-wide region even in
   // widescreen. For UI/dialog/status layers whose tilemap is only 256 wide, so
@@ -506,6 +512,24 @@ void PpuSetWidescreenLayerMirror(Ppu *ppu, uint8_t mask);
 // unsupported layers remain authentically clamped. Re-apply per frame. A
 // repeat bit takes precedence if the same layer is also marked for mirroring.
 void PpuSetWidescreenLayerRepeat(Ppu *ppu, uint8_t mask);
+
+// Widescreen: when enabled, a layer whose margins are SYNTHESIZED (mirror or
+// repeat padding, not fetched from tilemap) pads a CAPTURED layer buffer out to
+// the full centering budget rather than stopping at the live per-side margin.
+//
+// Why this exists: a host that captures a layer (PpuBindOverlaySurface) samples
+// the whole fixed capture span, which is sized from the budget -- but the line
+// renderer only ever writes within the live margin, and the live margin shrinks
+// to 0 as a finite world's camera reaches its bound. The never-written columns
+// then read as transparent/black at the capture's edge even though the padding
+// source (the authentic 256 columns) is always available. Widening costs a
+// memcpy-style compare-store per padded column and no additional tilemap fetch.
+//
+// Deliberately scoped to captured buffers: the game's own framebuffer must keep
+// the live margin exactly, because a narrower margin there is the intended
+// pillarbox at a world edge. 0 = off (previous behaviour everywhere).
+// Re-apply per frame: the extra-space setters reset it.
+void PpuSetWidescreenPadCapturedToBudget(Ppu *ppu, uint8_t enabled);
 
 // Clamp BG(layer+1) to the authentic 256 on scanlines [y0,y1) only (the generic
 // "overlay plane" / BG2.5): a bounded UI element sharing a layer with wide world

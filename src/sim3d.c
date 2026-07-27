@@ -68,7 +68,11 @@ static uint8_t ExpandColor5(uint32_t value, int brightness) {
   return (uint8_t)(expanded * (uint32_t)brightness / 15);
 }
 
-static uint32_t BackdropArgb(const Ppu *ppu) {
+/* Shared with actraiser_rtl.c's margin-gap fill (Fix C, SPEC-backdrop-clip.md)
+ * rather than duplicated there: both want "the colour the authentic renderer
+ * shows for an unrendered pixel", and two copies of the 5-bit expansion would
+ * be free to drift. Declared in sim3d.h. */
+uint32_t ActRaiser_BackdropArgb(const Ppu *ppu) {
   uint32_t color = ppu->cgram[0];
   int brightness = PPU_brightness(ppu);
   return 0xff000000u |
@@ -358,7 +362,7 @@ bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
   g_sim3d.height = request->height;
   g_sim3d.live_x0 = extra - ppu->extraLeftCur;
   g_sim3d.live_x1 = extra + kPpuXPixels + ppu->extraRightCur;
-  g_sim3d.backdrop_argb = BackdropArgb(ppu);
+  g_sim3d.backdrop_argb = ActRaiser_BackdropArgb(ppu);
   g_sim3d.diagnostic_layer_mask = request->diagnostic_layer_mask;
   return true;
 }

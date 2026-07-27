@@ -246,6 +246,18 @@ typedef struct FrameSlot {
   uint8_t hud_player_row_y;
   uint8_t hud_left_only_y;
   uint8_t extra_left_right;
+  /* Fix B (SPEC-backdrop-clip.md): the LIVE per-side margins the frame was
+   * rendered with (extra_left_right above is the fixed budget, which does not
+   * narrow at a world bound). Latched by ActRaiser_LiveMargins rather than read
+   * from g_ppu, which can be zeroed between the draw and this capture.
+   *
+   * A zeroed slot therefore means "live span = the authentic 256 only", which
+   * over-crops safely. Do NOT reinterpret 0 as "unset, use the full budget" —
+   * that reintroduces the black wedge at exactly camera_x == 0, the case this
+   * exists to fix. */
+  uint8_t extra_left_cur;
+  uint8_t extra_right_cur;
+  uint8_t bg2_margin_source; /* DioramaBg2MarginSource */
   uint8_t inidisp;
   uint8_t bg_mode;  /* PPU_mode(g_ppu) == (g_ppu->bgmode & 7) */
 

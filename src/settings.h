@@ -436,6 +436,15 @@ typedef struct Settings {
   int diorama_reactive_strength;
   /* B5 (followup doc): DioramaSkyMode selector — see the enum comment. */
   int diorama_skybox;
+  /* Margin fix (SPEC-backdrop-clip.md): at a level's start/end the live
+   * widescreen margin collapses to 0, but every diorama consumer samples the
+   * FIXED capture span — so the never-rendered columns showed as an opaque
+   * black wedge at the screen edge. On: pad captured layers out to the full
+   * budget (Fix A), fill the framebuffer's gap strips with the scene backdrop
+   * instead of black (Fix C), and crop the skybox quad's UV to BG2's actually
+   * valid span where padding cannot reach it (Fix B). Off restores every
+   * pre-fix path exactly, so this is a live A/B for the artifact. */
+  bool diorama_margin_fix;
   /* B6 (followup doc): put the layer stack inside a floor/ceiling/side-wall
    * enclosure so the level's off-screen edges are masked by box surfaces
    * instead of ending in void. Composes with B5: skybox fills the box's far

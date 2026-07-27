@@ -8,6 +8,8 @@
 #endif
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
+#include "actraiser_ws_gap.h"
+#include "diorama_skybox_uv.h"
 #include "diorama_planes.h"
 #include "settings.h"
 #include "hd_replacements.h"
@@ -934,6 +936,13 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     PpuSetWidescreenLayerClamp(g_ppu, clamp);
     PpuSetWidescreenLayerMirror(g_ppu, mirror);
     PpuSetWidescreenLayerRepeat(g_ppu, repeat);
+    /* Fix A (SPEC-backdrop-clip.md). Only meaningful in diorama mode, which is
+     * the only thing that captures these layers; gating on the setting keeps
+     * this a live A/B and keeps flat output untouched either way. Must come
+     * after PpuSetExtraSpace above, which resets the per-frame policy bits. */
+    PpuSetWidescreenPadCapturedToBudget(
+        g_ppu, (uint8)(g_settings.diorama_mode &&
+                       g_settings.diorama_margin_fix));
     if (repeat_band_layer >= 0)
       PpuSetWidescreenLayerRepeatBand(g_ppu, (uint8)repeat_band_layer,
                                       repeat_band_y0, repeat_band_y1);
@@ -1037,19 +1046,20 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   static int last_l = -1, last_r = -1;
   int l = g_ppu->extraLeftCur, r = g_ppu->extraRightCur;
   if (bounded_world_margins && g_ppu->renderBuffer) {
-    int budget = g_ppu->extraLeftRight;
-    int gap_l = budget - l;
-    int gap_r = budget - r;
-    size_t pitch = g_ppu->renderPitch;
-    if (gap_l > 0)
-      for (int y = 0; y < kActRaiserAuthenticHeight; y++)
-        memset(g_ppu->renderBuffer + (size_t)y * pitch, 0,
-               (size_t)gap_l * 4);
-    if (gap_r > 0)
-      for (int y = 0; y < kActRaiserAuthenticHeight; y++)
-        memset(g_ppu->renderBuffer + (size_t)y * pitch +
-                   ((size_t)budget + kActRaiserAuthenticWidth + r) * 4,
-               0, (size_t)gap_r * 4);
+    /* Fix C (SPEC-backdrop-clip.md). In flat mode these strips are the intended
+     * pillarbox at a world edge and stay black. In diorama mode this same
+     * framebuffer becomes the backdrop PLANE, drawn with SDL_BLENDMODE_NONE
+     * behind the whole stack, so black here paints an opaque wedge across ~a
+     * fifth of the screen; the scene's own backdrop colour makes it continuous.
+     * Gating on diorama_mode is what keeps flat output byte-identical, and the
+     * settings gate keeps the old behaviour available for the A/B. */
+    uint32 gap_fill =
+        (g_settings.diorama_mode && g_settings.diorama_margin_fix)
+            ? ActRaiser_BackdropArgb(g_ppu)
+            : 0u;
+    ActRaiserFillMarginGaps(g_ppu->renderBuffer, g_ppu->renderPitch,
+                            kActRaiserAuthenticHeight,
+                            g_ppu->extraLeftRight, l, r, gap_fill);
     last_l = l;
     last_r = r;
   } else if (l != last_l || r != last_r) {
@@ -1166,6 +1176,12 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
     PpuSetOverlayOamRange(g_ppu, kActRaiserHudObjOamFirst,
                           kActRaiserHudObjOamCount);
 }
+
+/* Fix B (SPEC-backdrop-clip.md): margin geometry of the last rendered frame,
+ * latched at the end of ActRaiserDrawPpuFrame. See ActRaiser_LiveMargins. */
+static int s_live_margin_left;
+static int s_live_margin_right;
+static int s_live_bg2_margin_source;
 
 void ActRaiserDrawPpuFrame(void) {
   /* Overlay bindings are host-owned and persistent; capture policy is
@@ -1427,11 +1443,34 @@ void ActRaiserDrawPpuFrame(void) {
         g_pixels, width * 4,
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
   }
+  /* Fix B (SPEC-backdrop-clip.md): latch the margin state the frame was ACTUALLY
+   * rendered with, here, rather than letting FrameSlot_Capture read live g_ppu.
+   * Between this function and the frame slot capture, main.c may call
+   * ActRaiser_RebindPpuOutputSurfaces(), which reaches PpuSetExtraSpaceCentered
+   * (hd_replacement_host.c) and ZEROES both live margins — reading g_ppu later
+   * would silently describe a different frame than the pixels came from. That
+   * path is !diorama_mode-gated today, so the bug would be latent rather than
+   * live; latching makes it impossible either way. */
+  s_live_margin_left = g_ppu->extraLeftCur;
+  s_live_margin_right = g_ppu->extraRightCur;
+  s_live_bg2_margin_source = DioramaBg2MarginSource_Classify(
+      g_ppu->wsLayerClamp, g_ppu->wsLayerMirror, g_ppu->wsLayerRepeat,
+      g_ppu->wsRepeatY1[kActRaiserPpuLayer_Bg2] >
+          g_ppu->wsRepeatY0[kActRaiserPpuLayer_Bg2]);
+
   /* Sky Palace BG2 is prepared at the top of this function and ALWAYS restored
    * here at the end. ActRaiserDrawPpuFrame has no early returns, so a pending
    * restore can never be stranded — keep it that way if you add control flow
    * above. */
   ActRaiser_WidescreenSkyPalaceRestore();
+}
+
+/* See the latch above. Reports the margin geometry of the most recently rendered
+ * frame, which is what a consumer of that frame's captured pixels must use. */
+void ActRaiser_LiveMargins(int *left, int *right, int *bg2_margin_source) {
+  if (left) *left = s_live_margin_left;
+  if (right) *right = s_live_margin_right;
+  if (bg2_margin_source) *bg2_margin_source = s_live_bg2_margin_source;
 }
 
 /* Reload the selector-dependent part of the action OBJ atlas after a live

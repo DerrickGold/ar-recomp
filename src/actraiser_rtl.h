@@ -7,6 +7,14 @@
 
 void ActRaiserDrawPpuFrame(void);
 void ActRaiser_RebindPpuOutputSurfaces(void);
+
+/* Fix B (SPEC-backdrop-clip.md): the widescreen margin geometry the most recent
+ * frame was actually RENDERED with, latched at the end of ActRaiserDrawPpuFrame.
+ * A consumer of that frame's captured pixels must use this rather than reading
+ * g_ppu->extraLeftCur/extraRightCur, which can be zeroed between the draw and
+ * the frame-slot capture (see the latch's comment). `bg2_margin_source` is a
+ * DioramaBg2MarginSource. Any pointer may be NULL. */
+void ActRaiser_LiveMargins(int *left, int *right, int *bg2_margin_source);
 void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
 /* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown.

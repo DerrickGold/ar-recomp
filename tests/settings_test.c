@@ -70,8 +70,9 @@ static void TestDefaultsAndMetadata(void) {
    * named stage toggles and the shadow/height-pop tuning rows. On top of
    * that, Controls added eight device/tuning rows plus 42 binding rows: 18
    * actions x keyboard+gamepad (12 SNES buttons and 6 analog camera axes),
-   * plus 6 gamepad-only host actions. */
-  CHECK(g_setting_desc_count == 225);
+   * plus 6 gamepad-only host actions. Presentation then gained the diorama
+   * edge-margin-fix A/B toggle (SPEC-backdrop-clip.md). */
+  CHECK(g_setting_desc_count == 226);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
