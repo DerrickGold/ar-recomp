@@ -381,6 +381,55 @@ static void TestMusicResamplerMath(void) {
   }
 }
 
+/* F5 (2026-07-26 handback): "hd music loops and plays first few seconds of the
+ * previous song before transitioning" when a boss fight starts.
+ *
+ * The boss go-signal chain ($00:A3FE -> $00:A410, gen bank00_part04_v2.c:9688
+ * then :9796) issues a play command with NO preceding $F0 and no new upload, so
+ * the upload-derived identity still names the OUTGOING song: selection resolves
+ * to the session already playing and the old restart rewound it to frame 0.
+ *
+ * MusicPlay_IsRedundantRestart is the decision, extracted pure so it is
+ * testable without an audio device (no .ogg encoder exists on the authoring
+ * machine, and `has_audio` requires a real decodable file).
+ *
+ * HOW THIS FAILS AGAINST THE OLD CODE: the pre-fix path had no such guard —
+ * every play command reaching an entry called StartSession unconditionally. Any
+ * implementation that returns false for the live-session case (i.e. deletes the
+ * guard, or drops the `live == selected` term) fails TheRedundantCase below. */
+static void TestRedundantRestartGuard(void) {
+  /* Two distinct entries; identity is the pointer, as in the caller. */
+  MusicReplacement act, boss;
+  memset(&act, 0, sizeof(act));
+  memset(&boss, 0, sizeof(boss));
+
+  /* THE BUG: the boss chain's play command resolves to the act track that is
+   * already streaming. Restarting it is what replayed its opening. */
+  CHECK(MusicPlay_IsRedundantRestart(&act, &act, true));
+
+  /* A genuine song change must still start: different entry. */
+  CHECK(!MusicPlay_IsRedundantRestart(&act, &boss, true));
+
+  /* Nothing playing yet ($F0 ran EndSession, or first play of the session):
+   * must start. This is the common case and a false positive here would mean
+   * music never begins. */
+  CHECK(!MusicPlay_IsRedundantRestart(NULL, &boss, false));
+  CHECK(!MusicPlay_IsRedundantRestart(NULL, &boss, true));
+
+  /* A FINISHED ONE-SHOT keeps its session but closes the decoder (MixMusic
+   * does this deliberately so the muted SPC sequencer cannot fade back in).
+   * Re-triggering it IS legitimate, so the stream state — not the mere
+   * presence of a session — has to decide. Dropping the `stream_open` term
+   * would make a one-shot un-retriggerable. */
+  CHECK(!MusicPlay_IsRedundantRestart(&act, &act, false));
+
+  /* Degenerate: no entry selected. The caller returns earlier in that case,
+   * but the predicate must not claim a redundant restart regardless. */
+  CHECK(!MusicPlay_IsRedundantRestart(&act, NULL, true));
+  CHECK(!MusicPlay_IsRedundantRestart(NULL, NULL, true));
+  CHECK(!MusicPlay_IsRedundantRestart(NULL, NULL, false));
+}
+
 int main(void) {
   TestMusicResamplerMath();
   TestParseEntries();
@@ -388,6 +437,7 @@ int main(void) {
   TestSharedManifestHdSideIgnoresMusic();
   TestSelection();
   TestLoopSlicing();
+  TestRedundantRestartGuard();
   TestTriggerStateMachine();
   if (g_failures) {
     fprintf(stderr, "music manifest tests: %d failure(s)\n", g_failures);

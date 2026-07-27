@@ -276,6 +276,12 @@ int MusicReplacements_Load(const char *manifest_path) {
 
 /* ---- selection ---------------------------------------------------------- */
 
+bool MusicPlay_IsRedundantRestart(const MusicReplacement *live,
+                                  const MusicReplacement *selected,
+                                  bool stream_open) {
+  return live != NULL && live == selected && stream_open;
+}
+
 const MusicReplacement *MusicReplacements_Select(uint32 src, int song) {
   for (int i = 0; i < g_music_replacement_count; i++) {
     const MusicReplacement *entry = &g_music_replacements[i];
@@ -372,8 +378,10 @@ static void OnApuPortWrite(uint8_t port, uint8_t val) {
             s.session ? s.session->name : "-",
             s_current_song < 0 ? 0xff : (unsigned)s_current_song);
   if (val == SPC_CMD_HALT) {
-    /* The driver halts music instantly on $F0 (it precedes every song
-     * change and transition); mirror it. */
+    /* The driver halts music instantly on $F0; mirror it. Note $F0 precedes
+     * every song change that UPLOADS a new image, but not every play command:
+     * the $F1-echo chains play an already-resident bank without it (see the
+     * identity guard before StartSession below). */
     s_current_song = -1;
     s_driver_paused = false;
     EndSession("driver halt $F0");
@@ -433,6 +441,12 @@ static void OnApuPortWrite(uint8_t port, uint8_t val) {
     else if (s_musiclog)
       fprintf(stderr, "[music] driver resume [music:%s] deferred by host "
               "pause at frame %u\n", s.session->name, s.pos);
+    return;
+  }
+  if (MusicPlay_IsRedundantRestart(s.session, entry, s.v != NULL)) {
+    if (s_musiclog)
+      fprintf(stderr, "[music] play song=%02x already streaming [music:%s] at "
+              "frame %u — no restart\n", (unsigned)val, s.session->name, s.pos);
     return;
   }
   StartSession(entry, val);
