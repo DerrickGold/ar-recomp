@@ -98,6 +98,25 @@ void MusicReplacements_FrameTick(void);
  * placed above an ungated fallback win. Exposed for tests. */
 const MusicReplacement *MusicReplacements_Select(uint32 src, int song);
 
+/* True when a play command resolves to the stream that is ALREADY playing, so
+ * honouring it would rewind the track the player is currently hearing.
+ *
+ * This exists because a play command is not always a song CHANGE. The boss
+ * go-signal chain ($00:A3FE -> $00:A410) issues one with no preceding $F0 and
+ * no new upload, so the upload-derived identity (`s_loaded_src`) still names
+ * the OUTGOING song and selection resolves to the live session. Restarting
+ * there replays the previous track's opening until the chain's later $F0 —
+ * the reported "first few seconds of the previous song".
+ *
+ * `stream_open` must be the live decoder's state, not merely "a session
+ * exists": a finished one-shot deliberately keeps its session while closing
+ * the file, and re-triggering that IS a legitimate restart.
+ *
+ * Pure, so the decision is testable without an audio device or a real file. */
+bool MusicPlay_IsRedundantRestart(const MusicReplacement *live,
+                                 const MusicReplacement *selected,
+                                 bool stream_open);
+
 /* Loop-region slicing (pure, exposed for tests): with the read cursor at
  * `pos` (frames) wanting `want` frames, return how many contiguous frames to
  * decode now. When that many frames lands exactly on the loop point (or the

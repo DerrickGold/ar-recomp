@@ -67,8 +67,17 @@ via an `AR_APULOG` boot capture:
 | `$2142` | id | event/music command forwarded once per NMI from COP → `$035A` |
 | `$2143` | id | SFX id forwarded once per NMI from BRK → `$035B` (16-bit store with `$2142`) |
 
-A song change is always `$F0` → (`$FF` + upload) → song number; the boss chain
-plays an already-loaded bank via `$F1`-echo → song number. Boot order: `02:9ACD`
+A song change that uploads a new image is always `$F0` → `$FF` + upload → song
+number. **A play command is not always a song change**, and nothing guarantees a
+preceding `$F0`: the boss chain plays an already-loaded bank via `$F1`-echo →
+song number, with no `$F0` and no upload ahead of it (`$00:A3FE` → `$00:A410`
+writes `$F1` then the song number, and only reaches `$F0` afterwards — gen
+`bank00_part04_v2.c:9688`, `:9796`, `:9943`). Three more `$F0`-less `$F1`-echo
+play sites: `$02:9914`, `$01:8A9A`, `$03:E48E`. Any host-side logic that infers
+"a live song means the driver never halted" from the absence of `$F0` is
+therefore wrong — this is what caused F5 (the previous track replaying its
+opening on a boss transition), since the upload-derived identity still named the
+outgoing song. Key on identity, not on `$F0`. Boot order: `02:9ACD`
 = SPC mini-driver, **`06:AC00` = the COMMON sample bank** (srcn 00-0B — the
 earlier "= title" note in the table above was wrong), `1A:94B8` = the title
 song (= entry 7 of the `$02:C7E5` table), played with song number `$01`.
