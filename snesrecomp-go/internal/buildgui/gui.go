@@ -425,8 +425,14 @@ const pageHTML = `<!doctype html>
 /* The look borrows from the game's own presentation: a high, pale sky over a
  * hazy horizon (the Sky Palace's outlook), the Palace's fluted marble columns
  * framing the content, and the manual/box palette of warm gold on deep blue.
- * Every visual is CSS or inline SVG -- no bitmap ships in the release bundle,
- * which deliberately carries no media (see packaging/CMakeLists.txt). */
+ * Every visual is CSS or inline SVG apart from the cover art, which is served
+ * from this origin -- no other bitmap ships (the release bundle deliberately
+ * carries no media; see packaging/CMakeLists.txt).
+ *
+ * Structure: a two-tab shell (Build / Manual) with a STICKY PROGRESS DOCK. The
+ * build is not a full-height section -- once it starts, its progress detaches
+ * into the dock so the reader can sit in the manual for the several minutes a
+ * build takes and still see exactly where it is. */
 :root {
   color-scheme: dark;
   --ink:#f6f1e3; --muted:#b9b39c; --gold:#e0b95f; --gold-deep:#a97f2c;
@@ -434,6 +440,7 @@ const pageHTML = `<!doctype html>
   --sky-high:#1d3f78; --sky-mid:#4b7bb5; --sky-low:#b8d4e6; --sky-haze:#e9d9b6;
   --panel:#10192bd9; --line:#31456b;
   --ok:#8fd6a6; --bad:#f0938a;
+  --dock-h:64px;
 }
 * { box-sizing:border-box; }
 html,body { height:100%; }
@@ -447,6 +454,8 @@ body {
       var(--sky-low) 74%, var(--sky-haze) 92%, #cbb388 100%);
   background-color:var(--sky-high);
   background-attachment:fixed;
+  /* Leave room for the dock so it can never cover the last line of content. */
+  padding-bottom:var(--dock-h);
 }
 /* Clouds: layered soft radial gradients that drift very slowly. Two bands at
  * different speeds/scales give parallax without any image or canvas. */
@@ -481,109 +490,105 @@ body {
 @media (prefers-reduced-motion:reduce) {
   .clouds { animation:none; }
   #state[data-kind=building]::before { animation:none; }
+  #bar.indeterminate { animation:none; }
 }
 
-/* Sky Palace columns frame the page. Fluted shaft via repeating-linear-
- * gradient, with a capital and base block. Hidden on narrow viewports where
- * they would crowd the content instead of framing it. */
-.colonnade { position:fixed; top:0; bottom:0; width:74px; z-index:1; pointer-events:none; }
-.colonnade.left { left:max(0px,calc(50% - 560px)); }
-.colonnade.right { right:max(0px,calc(50% - 560px)); }
+/* Sky Palace colonnade. The shafts are ABSOLUTE, not fixed, and sized to the
+ * document, so each column stands on a plinth at the page's base instead of
+ * running off both edges of the viewport like a pipe -- and content no longer
+ * slides behind a floating shaft while scrolling. Hidden on narrow viewports
+ * where they would crowd the content rather than frame it. */
+.colonnade { position:absolute; top:0; bottom:0; width:78px; z-index:1; pointer-events:none; }
+.colonnade.left { left:max(0px,calc(50% - 610px)); }
+.colonnade.right { right:max(0px,calc(50% - 610px)); }
 .shaft {
-  position:absolute; top:52px; bottom:52px; left:9px; right:9px;
+  position:absolute; top:64px; bottom:64px; left:11px; right:11px;
   background:
     repeating-linear-gradient(90deg,
       var(--marble-shade) 0 1px, var(--marble) 1px 7px,
       #fffdf6 7px 9px, var(--marble) 9px 15px, var(--marble-shade) 15px 16px);
   box-shadow:inset 0 0 18px #6d655233, 0 0 26px #0a132480;
 }
+/* Capital (top) and plinth (bottom): each is a two-tier block, so the column
+ * visibly terminates instead of being cropped. */
 .cap, .base {
-  position:absolute; left:0; right:0; height:26px;
+  position:absolute; left:0; right:0; height:30px;
   background:linear-gradient(180deg,#fffdf7,var(--marble) 55%,var(--marble-shade));
   box-shadow:0 2px 10px #0a132466;
 }
-.cap { top:26px; }
+.cap { top:34px; }
 .cap::before {
-  content:""; position:absolute; left:-5px; right:-5px; top:-26px; height:26px;
-  background:linear-gradient(180deg,var(--marble),#fffdf7 40%,var(--marble-shade));
+  content:""; position:absolute; left:-6px; right:-6px; top:-34px; height:34px;
+  background:linear-gradient(180deg,var(--marble),#fffdf7 42%,var(--marble-shade));
   border-radius:3px 3px 0 0;
 }
-.base { bottom:26px; }
+.base { bottom:34px; background:linear-gradient(180deg,var(--marble-shade),var(--marble) 45%,#fffdf7); }
 .base::after {
-  content:""; position:absolute; left:-5px; right:-5px; bottom:-26px; height:26px;
-  background:linear-gradient(180deg,var(--marble-shade),var(--marble) 60%,var(--marble-dark));
-  border-radius:0 0 3px 3px;
+  content:""; position:absolute; left:-8px; right:-8px; bottom:-34px; height:34px;
+  background:linear-gradient(180deg,var(--marble),var(--marble-shade) 55%,var(--marble-dark));
+  border-radius:0 0 2px 2px;
+  box-shadow:0 6px 18px #0a132466;
 }
-@media (max-width:1000px) { .colonnade { display:none; } }
+@media (max-width:1080px) { .colonnade { display:none; } }
 
-main { position:relative; z-index:2; width:min(880px,calc(100% - 40px)); margin:0 auto; padding:44px 0 56px; }
+main { position:relative; z-index:2; width:min(920px,calc(100% - 40px)); margin:0 auto; padding:38px 0 40px; }
 
-.crest { display:flex; align-items:center; gap:16px; margin-bottom:6px; }
-.crest svg { width:44px; height:44px; flex:none; filter:drop-shadow(0 2px 6px #0a132499); }
-.eyebrow { color:#f4e6c2; text-transform:uppercase; letter-spacing:.2em; font-size:.7rem; font-weight:700;
+/* Header: the cover art sits BESIDE the title rather than floating between the
+ * lede and the panel, so it anchors the composition and stays visible on both
+ * tabs without needing a section of its own. */
+.masthead { display:flex; align-items:center; gap:26px; }
+.masthead .cover {
+  flex:none; width:210px; border:1px solid var(--gold-deep); border-radius:3px;
+  overflow:hidden; background:#0d1b34;
+  box-shadow:0 14px 38px #05091599, inset 0 0 0 1px #ffe9b422;
+}
+.masthead .cover img { display:block; width:100%; height:auto; }
+.masthead .titles { min-width:0; }
+.eyebrow { color:#f4e6c2; text-transform:uppercase; letter-spacing:.2em; font-size:.68rem; font-weight:700;
   font-family:system-ui,-apple-system,sans-serif; text-shadow:0 1px 3px #0a1324cc; }
 h1 {
-  margin:.1em 0 0; font-size:clamp(2.1rem,6vw,3.6rem); font-weight:600; letter-spacing:.01em;
+  margin:.12em 0 .1em; font-size:clamp(1.9rem,5vw,3.1rem); font-weight:600; letter-spacing:.01em;
   color:#fff8e6; text-shadow:0 2px 0 var(--gold-deep), 0 3px 14px #0a132480;
 }
-.rule { height:3px; margin:14px 0 16px; border-radius:2px;
-  background:linear-gradient(90deg,transparent,var(--gold) 12%,#fff2cd 50%,var(--gold) 88%,transparent); }
-.lede { max-width:60ch; color:#e8e2cf; margin:0 0 26px; text-shadow:0 1px 4px #0a132466; }
+.tagline { margin:0; color:#efe7d0; font-style:italic; font-size:1rem;
+  text-shadow:0 1px 4px #0a132466; }
+.lede { max-width:62ch; color:#e8e2cf; margin:12px 0 0; font-size:.95rem;
+  text-shadow:0 1px 4px #0a132466; }
+@media (max-width:640px) {
+  .masthead { flex-direction:column; align-items:flex-start; gap:16px; }
+  .masthead .cover { width:min(260px,60%); }
+}
 
-/* The cover is landscape (the SNES box front), so it sits ABOVE the form as a
- * banner rather than in a narrow portrait sidebar. */
-.layout { display:grid; gap:22px; align-items:start; }
+/* Tab strip. Two tabs only: the thing you came to do, and the thing to do while
+ * it runs. */
+.tabs { display:flex; gap:4px; margin:26px 0 0; border-bottom:2px solid var(--gold-deep); }
+.tab {
+  appearance:none; border:1px solid transparent; border-bottom:0;
+  border-radius:4px 4px 0 0; padding:10px 20px; margin-bottom:-2px;
+  background:#0f1c3480; color:#cfc9b5; font:inherit; font-size:.95rem; font-weight:600;
+  letter-spacing:.02em; cursor:pointer; position:relative; box-shadow:none;
+}
+.tab:hover { color:var(--ink); background:#16274580; }
+.tab[aria-selected=true] {
+  background:var(--panel); color:#fff8e6;
+  border-color:var(--line); border-bottom:2px solid var(--panel);
+  box-shadow:0 -2px 0 var(--gold) inset;
+}
+/* Badge: a build that finishes while the reader is in the manual announces
+ * itself here rather than yanking the tab out from under them. */
+.tab .badge {
+  display:none; width:8px; height:8px; border-radius:50%; margin-left:8px;
+  vertical-align:middle; background:var(--gold);
+}
+.tab[data-badge=ok] .badge { display:inline-block; background:var(--ok); }
+.tab[data-badge=bad] .badge { display:inline-block; background:var(--bad); }
 
 .panel {
   background:var(--panel); backdrop-filter:blur(7px);
-  border:1px solid var(--line); border-top:2px solid var(--gold);
-  border-radius:4px; padding:22px; box-shadow:0 20px 60px #05091580;
+  border:1px solid var(--line); border-top:0;
+  border-radius:0 0 4px 4px; padding:24px; box-shadow:0 20px 60px #05091580;
 }
-
-/* Box art: the retail cover, embedded in the binary and served from this
- * origin (see assets.go). Capped in width so it reads as a header plate
- * rather than dominating the page on a wide display. */
-.boxart { margin:0; display:flex; flex-direction:column; align-items:center; gap:8px; }
-.boxart .frame {
-  border:1px solid var(--gold-deep); border-radius:3px; overflow:hidden;
-  box-shadow:0 12px 34px #05091599, inset 0 0 0 1px #ffe9b422; background:#0d1b34;
-  max-width:min(430px,100%);
-}
-.boxart img { display:block; width:100%; height:auto; }
-.boxart figcaption { color:#efe7d0; font-size:.74rem; letter-spacing:.14em; text-transform:uppercase;
-  font-family:system-ui,-apple-system,sans-serif; text-align:center; text-shadow:0 1px 3px #0a1324; }
-
-/* Back-of-box reading material, shown while the build runs. Set as real text
- * rather than a scan of the back cover: it stays legible at any window size,
- * is selectable and screen-reader accessible, and costs bytes rather than
- * another embedded image. */
-.blurb { margin-top:2px; }
-.blurb h2 { margin:0 0 4px; font-size:1.02rem; color:#fff3d6; letter-spacing:.02em; }
-.blurb h3 { margin:16px 0 4px; font-size:.9rem; font-style:italic; color:var(--gold); font-weight:600; }
-.blurb p { margin:0; color:#e4dece; font-size:.92rem; }
-.blurb .colophon { margin-top:16px; padding-top:12px; border-top:1px solid var(--line);
-  color:var(--muted); font-size:.76rem; font-family:system-ui,-apple-system,sans-serif; }
-
-/* Manual reader. The <iframe> hosts the browser's own PDF viewer, so paging,
- * zoom, search and printing come for free and no JS library ships. It is
- * hidden until asked for: an 8 MB fetch and a viewer process are not worth
- * starting for someone who only wants to build. */
-.reading { margin-top:0; }
-.manual { margin-top:26px; padding-top:20px; border-top:1px solid var(--line); }
-.manual-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
-.manual-head h2 { margin:0; font-size:1.02rem; color:#fff3d6; letter-spacing:.02em; }
-.manual-actions { display:flex; align-items:center; gap:12px; }
-.linkbtn { color:var(--gold); font-size:.83rem; text-decoration:none; border-bottom:1px solid #a97f2c66;
-  font-family:system-ui,-apple-system,sans-serif; }
-.linkbtn:hover { color:#ffe9b8; border-bottom-color:var(--gold); }
-.manual-hint { margin:8px 0 0; color:var(--muted); font-size:.83rem;
-  font-family:system-ui,-apple-system,sans-serif; }
-#manual-frame {
-  display:block; width:100%; height:min(78vh,880px); margin-top:14px;
-  border:1px solid var(--gold-deep); border-radius:3px; background:#0d1b34;
-  box-shadow:0 12px 34px #05091599;
-}
-#manual-frame[hidden] { display:none; }
+[role=tabpanel][hidden] { display:none; }
 
 label { display:block; font-weight:600; margin-bottom:8px; font-size:.95rem; letter-spacing:.02em; }
 input[type=file] {
@@ -611,40 +616,33 @@ button.secondary {
 }
 button:disabled { opacity:.42; cursor:not-allowed; box-shadow:none; }
 
-/* Progress: a determinate bar plus the step list, so the current stage and the
- * overall position are both visible without opening the console. */
-.progress { margin:24px 0 4px; }
-.progress-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:8px; }
-#phase { font-weight:600; letter-spacing:.01em; }
-#pct { font-variant-numeric:tabular-nums; color:var(--gold); font-weight:700;
-  font-family:system-ui,-apple-system,sans-serif; }
-.track {
-  height:15px; border:1px solid #40598c; border-radius:3px; overflow:hidden;
-  background:linear-gradient(180deg,#091326,#0c1a33); box-shadow:inset 0 2px 6px #00000073;
+/* ONE status line. The previous layout said the same thing three times -- a
+ * phase label, a separate state line, and eight empty step circles -- before
+ * the user had even chosen a file. */
+#state { display:flex; align-items:center; gap:9px; margin:20px 0 0; color:#ded8c4;
+  font-family:system-ui,-apple-system,sans-serif; font-size:.92rem; }
+#state[data-kind=building]::before {
+  content:""; width:13px; height:13px; border:2px solid #ffffff2e;
+  border-top-color:var(--gold); border-radius:50%; animation:spin .8s linear infinite;
 }
-#bar {
-  height:100%; width:0; transition:width .45s cubic-bezier(.4,0,.2,1);
-  background:linear-gradient(180deg,#ffeec0,var(--gold) 45%,var(--gold-deep));
-  box-shadow:0 0 12px #e0b95f80;
-}
-#bar.indeterminate {
-  width:100% !important;
-  background:repeating-linear-gradient(115deg,var(--gold-deep) 0 12px,var(--gold) 12px 24px);
-  background-size:200% 100%; animation:slide 1.1s linear infinite; opacity:.55;
-}
-@keyframes slide { to { background-position:-48px 0; } }
-#detail { margin-top:7px; min-height:1.3em; color:var(--muted); font-size:.83rem;
-  font-family:system-ui,-apple-system,sans-serif; }
+#state[data-kind=succeeded] { color:var(--ok); font-weight:600; }
+#state[data-kind=failed] { color:var(--bad); font-weight:600; }
+@keyframes spin { to { transform:rotate(360deg); } }
 
-.steps { list-style:none; margin:18px 0 0; padding:0; display:grid; gap:5px; }
-.step { display:flex; align-items:center; gap:10px; font-size:.88rem; color:#8f9ab4;
+/* The step checklist is collapsed until a build starts: eight grey circles are
+ * the largest block on the page and say nothing at all while idle. */
+#steps-box { margin-top:16px; }
+#steps-box[hidden] { display:none; }
+.steps { list-style:none; margin:0; padding:0; display:grid; gap:5px;
+  grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); }
+.step { display:flex; align-items:center; gap:10px; font-size:.86rem; color:#8f9ab4;
   font-family:system-ui,-apple-system,sans-serif; transition:color .2s; }
-.tick { width:16px; height:16px; flex:none; border:1px solid #45577d; border-radius:50%;
+.tick { width:15px; height:15px; flex:none; border:1px solid #45577d; border-radius:50%;
   position:relative; transition:all .2s; }
 .step[data-state=done] { color:var(--ok); }
 .step[data-state=done] .tick { border-color:var(--ok); background:#8fd6a626; }
 .step[data-state=done] .tick::after {
-  content:""; position:absolute; left:4px; top:1px; width:5px; height:9px;
+  content:""; position:absolute; left:4px; top:1px; width:5px; height:8px;
   border-right:2px solid var(--ok); border-bottom:2px solid var(--ok); transform:rotate(38deg);
 }
 .step[data-state=active] { color:#fff5df; font-weight:600; }
@@ -657,28 +655,83 @@ button:disabled { opacity:.42; cursor:not-allowed; box-shadow:none; }
 .step[data-state=failed] { color:var(--bad); }
 .step[data-state=failed] .tick { border-color:var(--bad); }
 
-#state { display:flex; align-items:center; gap:9px; margin:20px 0 8px; color:#ded8c4;
-  font-family:system-ui,-apple-system,sans-serif; font-size:.92rem; }
-#state[data-kind=building]::before {
-  content:""; width:13px; height:13px; border:2px solid #ffffff2e;
-  border-top-color:var(--gold); border-radius:50%; animation:spin .8s linear infinite;
-}
-#state[data-kind=succeeded] { color:var(--ok); font-weight:600; }
-#state[data-kind=failed] { color:var(--bad); font-weight:600; }
-@keyframes spin { to { transform:rotate(360deg); } }
-
-details { margin-top:14px; }
-summary { cursor:pointer; color:var(--muted); font-size:.83rem; letter-spacing:.06em;
+details { margin-top:16px; }
+summary { cursor:pointer; color:var(--muted); font-size:.8rem; letter-spacing:.06em;
   text-transform:uppercase; font-family:system-ui,-apple-system,sans-serif; }
 summary:hover { color:var(--gold); }
 pre {
-  margin:10px 0 0; min-height:150px; max-height:320px; overflow:auto;
+  margin:10px 0 0; min-height:140px; max-height:300px; overflow:auto;
   white-space:pre-wrap; word-break:break-word; padding:14px; border-radius:3px;
   background:#060b16; border:1px solid #26364f; color:#c3bda9;
   font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;
 }
-.privacy { color:#cfc9b5; font-size:.8rem; margin-top:16px; line-height:1.5;
+.privacy { color:#cfc9b5; font-size:.78rem; margin:16px 0 0; line-height:1.5;
   font-family:system-ui,-apple-system,sans-serif; }
+
+/* Manual tab. The reader gets the full panel: this is the whole reason the tab
+ * exists, and a scanned page is unreadable in a short box. */
+.manual-bar { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between;
+  gap:12px; margin-bottom:12px; }
+.manual-bar p { margin:0; color:var(--muted); font-size:.83rem;
+  font-family:system-ui,-apple-system,sans-serif; }
+.linkbtn { color:var(--gold); font-size:.83rem; text-decoration:none; border-bottom:1px solid #a97f2c66;
+  font-family:system-ui,-apple-system,sans-serif; white-space:nowrap; }
+.linkbtn:hover { color:#ffe9b8; border-bottom-color:var(--gold); }
+#manual-frame {
+  display:block; width:100%; height:min(76vh,900px);
+  border:1px solid var(--gold-deep); border-radius:3px; background:#0d1b34;
+}
+.blurb { margin-top:22px; padding-top:18px; border-top:1px solid var(--line); }
+.blurb h2 { margin:0 0 4px; font-size:1rem; color:#fff3d6; letter-spacing:.02em; }
+.blurb p { margin:0; color:#e4dece; font-size:.9rem; }
+.blurb .colophon { margin-top:12px; color:var(--muted); font-size:.75rem;
+  font-family:system-ui,-apple-system,sans-serif; }
+
+/* STICKY PROGRESS DOCK. Present on every tab once a build begins, so the build
+ * no longer needs to own the viewport. Hidden entirely while idle -- an empty
+ * bar pinned to the screen is just furniture. */
+#dock {
+  position:fixed; left:0; right:0; bottom:0; z-index:5;
+  background:#0a1426f2; backdrop-filter:blur(9px);
+  border-top:2px solid var(--gold-deep); box-shadow:0 -10px 34px #05091599;
+  transform:translateY(100%); transition:transform .28s cubic-bezier(.4,0,.2,1);
+}
+#dock[data-open=true] { transform:translateY(0); }
+.dock-inner {
+  width:min(920px,calc(100% - 40px)); margin:0 auto; padding:10px 0 12px;
+  display:flex; align-items:center; gap:16px;
+}
+.dock-text { min-width:0; flex:1; }
+.dock-head { display:flex; align-items:baseline; gap:10px; }
+#dock-phase { font-weight:600; font-size:.95rem; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; }
+#dock-pct { margin-left:auto; font-variant-numeric:tabular-nums; color:var(--gold);
+  font-weight:700; font-family:system-ui,-apple-system,sans-serif; font-size:.9rem; }
+#dock-detail { color:var(--muted); font-size:.78rem; min-height:1.1em;
+  font-family:system-ui,-apple-system,sans-serif; }
+#dock[data-kind=succeeded] #dock-phase { color:var(--ok); }
+#dock[data-kind=failed] #dock-phase { color:var(--bad); }
+#dock-launch { display:none; flex:none; padding:9px 18px; }
+#dock[data-kind=succeeded] #dock-launch { display:inline-block; }
+
+.track {
+  height:12px; border:1px solid #40598c; border-radius:3px; overflow:hidden;
+  background:linear-gradient(180deg,#091326,#0c1a33);
+  background-color:#091326; box-shadow:inset 0 2px 6px #00000073; margin-top:6px;
+}
+#bar {
+  height:100%; width:0; transition:width .45s cubic-bezier(.4,0,.2,1);
+  background:linear-gradient(180deg,#ffeec0,var(--gold) 45%,var(--gold-deep));
+  box-shadow:0 0 12px #e0b95f80;
+}
+#dock[data-kind=succeeded] #bar { background:linear-gradient(180deg,#cdf0da,var(--ok)); }
+#dock[data-kind=failed] #bar { background:linear-gradient(180deg,#f8cfca,var(--bad)); }
+#bar.indeterminate {
+  width:100% !important;
+  background:repeating-linear-gradient(115deg,var(--gold-deep) 0 12px,var(--gold) 12px 24px);
+  background-size:200% 100%; animation:slide 1.1s linear infinite; opacity:.55;
+}
+@keyframes slide { to { background-position:-48px 0; } }
 .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
 </style>
 </head>
@@ -688,113 +741,133 @@ pre {
 <div class="colonnade right" aria-hidden="true"><div class="cap"></div><div class="shaft"></div><div class="base"></div></div>
 
 <main>
-  <div class="crest">
-    <svg viewBox="0 0 48 48" aria-hidden="true">
-      <defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#fff3d0"/><stop offset="1" stop-color="#c9992f"/>
-      </linearGradient></defs>
-      <path fill="url(#cg)" d="M24 3l3.4 7.6L35 8.9l-2.2 7.3 6.6 3.6-5.6 5.2 4 6.6-7.6.3-1.2 7.5L24 35.6l-5 3.8-1.2-7.5-7.6-.3 4-6.6-5.6-5.2 6.6-3.6L13 8.9l7.6 1.7z"/>
-      <circle cx="24" cy="22" r="5.2" fill="#0d1b34" opacity=".55"/>
-    </svg>
-    <div>
-      <div class="eyebrow">Local &middot; Private &middot; Self-contained</div>
-      <h1>Build your game</h1>
-    </div>
-  </div>
-  <div class="rule"></div>
-  <p class="lede">Choose your legally obtained ROM. Everything runs on this computer with the
-  toolchain packaged beside this builder &mdash; nothing is uploaded.</p>
-
-  <figure class="boxart">
-    <div class="frame">
+  <header class="masthead">
+    <div class="cover">
       <img src="boxart.webp" width="760" height="555" alt="ActRaiser Super Nintendo box art: the game's logo above a lightning storm over pyramids">
     </div>
-    <figcaption>Create order from chaos</figcaption>
-  </figure>
+    <div class="titles">
+      <div class="eyebrow">Local &middot; Private &middot; Self-contained</div>
+      <h1>Build your game</h1>
+      <p class="tagline">Create order from chaos</p>
+      <p class="lede">Choose your legally obtained ROM. Everything runs on this computer
+      with the toolchain packaged beside this builder &mdash; nothing is uploaded.</p>
+    </div>
+  </header>
 
-  <div class="layout">
-    <section class="panel">
-      <form id="build-form">
-        <label for="rom">ActRaiser ROM (.sfc or .smc)</label>
-        <input id="rom" name="rom" type="file" accept=".sfc,.smc" required>
-        <div class="actions">
-          <button id="build" type="submit">Build game</button>
-          <button id="launch" class="secondary" type="button" disabled>Launch game</button>
-          <button id="close" class="secondary" type="button">Close builder</button>
-        </div>
-      </form>
-
-      <div class="progress">
-        <div class="progress-head">
-          <span id="phase">Waiting for your ROM</span>
-          <span id="pct" aria-hidden="true">&mdash;</span>
-        </div>
-        <div class="track" role="progressbar" aria-labelledby="phase"
-             aria-valuemin="0" aria-valuemax="100" id="track">
-          <div id="bar"></div>
-        </div>
-        <div id="detail"></div>
-        <ol class="steps" id="steps">{{STEPS}}</ol>
-      </div>
-
-      <div id="state" data-kind="idle">Ready to build</div>
-      <details id="log-box">
-        <summary>Build log</summary>
-        <pre id="log">Select your ROM to begin.</pre>
-      </details>
-      <p class="privacy">Your ROM is copied only into this local folder and is never uploaded.
-      This page talks only to the builder on 127.0.0.1.</p>
-    </section>
-
-    <section class="panel reading">
-      <div class="blurb">
-        <h2>Action &amp; Simulation</h2>
-        <p>Pulse-stopping action sequences combined with a Simulation Mode that lets you
-        forge a new civilization &mdash; a game built to use the Super NES to the full.</p>
-        <h3>Restore peace and order to your people's world</h3>
-        <p>Long ago you and your people built a peaceful land. Since then the evil Tanzra
-        and his Guardians have taken it for their own, and your once-tranquil world has
-        become a breeding ground for monsters. Injured, you withdrew to your Sky Palace
-        and fell into a deep sleep. Many years have passed; your wounds and your slumber
-        are behind you. Now you must punish Tanzra and give your people back the world
-        they knew &mdash; or lose their faith forever.</p>
-        <p class="colophon">Text and artwork &copy; 1990&ndash;1992 Quintet / Enix.
-        Reproduced from the retail packaging and manual for reference. This project ships
-        no game code or data &mdash; that is generated on this machine from your own ROM.</p>
-      </div>
-
-      <div class="manual">
-        <div class="manual-head">
-          <h2>Instruction booklet</h2>
-          <div class="manual-actions">
-            <button id="manual-toggle" class="secondary" type="button"
-                    aria-expanded="false" aria-controls="manual-frame">Read the manual</button>
-            <a id="manual-open" class="linkbtn" href="manual.pdf" target="_blank" rel="noreferrer">Open in a new tab</a>
-          </div>
-        </div>
-        <p class="manual-hint">40 scanned pages. Your browser's own reader handles paging,
-        zoom and search &mdash; something to do while the build runs.</p>
-        <iframe id="manual-frame" title="ActRaiser instruction booklet" hidden></iframe>
-      </div>
-    </section>
-
-
+  <div class="tabs" role="tablist" aria-label="Builder sections">
+    <button class="tab" id="tab-build" role="tab" aria-selected="true"
+            aria-controls="panel-build">Build<span class="badge" aria-hidden="true"></span></button>
+    <button class="tab" id="tab-manual" role="tab" aria-selected="false"
+            aria-controls="panel-manual" tabindex="-1">Manual</button>
   </div>
+
+  <section class="panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build">
+    <form id="build-form">
+      <label for="rom">ActRaiser ROM (.sfc or .smc)</label>
+      <input id="rom" name="rom" type="file" accept=".sfc,.smc" required>
+      <div class="actions">
+        <button id="build" type="submit">Build game</button>
+        <button id="launch" class="secondary" type="button" disabled>Launch game</button>
+        <button id="close" class="secondary" type="button">Close builder</button>
+      </div>
+    </form>
+
+    <div id="state" data-kind="idle">Ready to build &mdash; choose your ROM above</div>
+
+    <div id="steps-box" hidden>
+      <ol class="steps" id="steps">{{STEPS}}</ol>
+    </div>
+
+    <details id="log-box">
+      <summary>Build log</summary>
+      <pre id="log">Select your ROM to begin.</pre>
+    </details>
+    <p class="privacy">Your ROM is copied only into this local folder and is never uploaded.
+    This page talks only to the builder on 127.0.0.1.</p>
+  </section>
+
+  <section class="panel" id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden>
+    <div class="manual-bar">
+      <p>The original 40-page instruction booklet &mdash; your browser's own reader
+      handles paging, zoom and search.</p>
+      <a class="linkbtn" href="manual.pdf" target="_blank" rel="noreferrer">Open in a new tab</a>
+    </div>
+    <iframe id="manual-frame" title="ActRaiser instruction booklet"></iframe>
+    <div class="blurb">
+      <h2>Action &amp; Simulation</h2>
+      <p>Pulse-stopping action sequences combined with a Simulation Mode that lets you
+      forge a new civilization &mdash; a game built to use the Super NES to the full.
+      Long ago you and your people built a peaceful land; since then the evil Tanzra
+      and his Guardians have made it a breeding ground for monsters. Punish Tanzra and
+      give your people back the world they knew.</p>
+      <p class="colophon">Text and artwork &copy; 1990&ndash;1992 Quintet / Enix.
+      Reproduced from the retail packaging and manual for reference. This project ships
+      no game code or data &mdash; that is generated on this machine from your own ROM.</p>
+    </div>
+  </section>
 </main>
+
+<div id="dock" data-open="false" data-kind="idle" aria-live="polite">
+  <div class="dock-inner">
+    <div class="dock-text">
+      <div class="dock-head">
+        <span id="dock-phase">Starting build</span>
+        <span id="dock-pct" aria-hidden="true">0%</span>
+      </div>
+      <div class="track" role="progressbar" aria-labelledby="dock-phase"
+           aria-valuemin="0" aria-valuemax="100" id="track"><div id="bar"></div></div>
+      <div id="dock-detail"></div>
+    </div>
+    <button id="dock-launch" type="button">Launch game</button>
+  </div>
+</div>
 
 <script>
 const form=document.querySelector("#build-form"), build=document.querySelector("#build"), launch=document.querySelector("#launch");
 const state=document.querySelector("#state"), log=document.querySelector("#log"), closeButton=document.querySelector("#close");
-const phase=document.querySelector("#phase"), pct=document.querySelector("#pct"), bar=document.querySelector("#bar");
-const detail=document.querySelector("#detail"), track=document.querySelector("#track"), logBox=document.querySelector("#log-box");
+const bar=document.querySelector("#bar"), track=document.querySelector("#track"), logBox=document.querySelector("#log-box");
+const dock=document.querySelector("#dock"), dockPhase=document.querySelector("#dock-phase");
+const dockPct=document.querySelector("#dock-pct"), dockDetail=document.querySelector("#dock-detail");
+const dockLaunch=document.querySelector("#dock-launch"), stepsBox=document.querySelector("#steps-box");
 const steps=[...document.querySelectorAll(".step")];
+const tabs=[...document.querySelectorAll(".tab")];
+const buildTab=document.querySelector("#tab-build");
 let polling=false;
+
+/* Tabs. The manual's <iframe> is HIDDEN rather than removed when its tab is not
+ * showing: unmounting it would refetch 8 MB and lose the reader's page. It is
+ * still created empty and only given its src on first open, so a user who never
+ * opens the manual never pays for it. */
+function selectTab(tab){
+  for(const t of tabs){
+    const on=t===tab;
+    t.setAttribute("aria-selected",String(on));
+    t.tabIndex=on?0:-1;
+    document.querySelector("#"+t.getAttribute("aria-controls")).hidden=!on;
+  }
+  if(tab===document.querySelector("#tab-manual")){
+    const frame=document.querySelector("#manual-frame");
+    if(!frame.getAttribute("src")) frame.setAttribute("src","manual.pdf");
+  }
+  if(tab===buildTab) buildTab.removeAttribute("data-badge");
+  tab.focus({preventScroll:true});
+}
+tabs.forEach(t=>t.addEventListener("click",()=>selectTab(t)));
+/* Left/right arrows move between tabs, per the ARIA tabs pattern. */
+document.querySelector(".tabs").addEventListener("keydown",event=>{
+  const i=tabs.indexOf(document.activeElement);
+  if(i<0) return;
+  if(event.key==="ArrowRight"||event.key==="ArrowLeft"){
+    event.preventDefault();
+    selectTab(tabs[(i+(event.key==="ArrowRight"?1:tabs.length-1))%tabs.length]);
+  }
+});
 
 function show(kind,text){ state.dataset.kind=kind; state.textContent=text; }
 
 /* The phase list and percentage come from the server (buildgui/progress.go), so
  * the page never parses the build log itself -- one definition of the phase
- * model, and the bar cannot disagree with the step list. */
+ * model, and the dock cannot disagree with the step list. */
 function paint(progress,kind){
   if(!progress) return;
   const done=new Set(progress.completed||[]);
@@ -804,22 +877,23 @@ function paint(progress,kind){
     else if(id===progress.phaseId) step.dataset.state=(kind==="failed"?"failed":"active");
     else step.removeAttribute("data-state");
   });
-  phase.textContent=progress.phaseLabel||"";
   const percent=Math.max(0,Math.min(100,progress.percent|0));
+  dockPhase.textContent=progress.phaseLabel||"";
+  dockPct.textContent=percent+"%";
+  dockDetail.textContent=progress.detail||"";
   bar.style.width=percent+"%";
-  pct.textContent=percent+"%";
-  track.setAttribute("aria-valuenow",percent);
-  /* Only the compile phase can measure itself; elsewhere the bar's width still
-   * reflects completed phases, so keep it determinate and just say less. */
-  detail.textContent=progress.detail||"";
   bar.classList.remove("indeterminate");
+  track.setAttribute("aria-valuenow",percent);
 }
 
-function resetProgress(){
-  steps.forEach(step=>step.removeAttribute("data-state"));
-  bar.style.width="0%"; bar.classList.remove("indeterminate");
-  pct.textContent="—"; phase.textContent="Waiting for your ROM"; detail.textContent="";
-  track.removeAttribute("aria-valuenow");
+/* A finished build must be unmissable without hijacking the reader's tab: the
+ * dock announces it (and offers Launch inline), and the Build tab gets a dot. */
+function announce(kind,message){
+  dock.dataset.kind=kind;
+  dock.dataset.open="true";
+  if(message) dockPhase.textContent=message;
+  if(document.querySelector("#panel-build").hidden)
+    buildTab.dataset.badge=(kind==="failed"?"bad":"ok");
 }
 
 async function responseJSON(response){ const body=await response.json(); if(!response.ok) throw new Error(body.error||"Request failed"); return body; }
@@ -829,13 +903,23 @@ async function refresh(){
     const data=await responseJSON(await fetch("status",{cache:"no-store"}));
     if(data.log){ log.textContent=data.log; log.scrollTop=log.scrollHeight; }
     paint(data.progress,data.state);
-    if(data.state==="building"){ show("building","Building — this can take a few minutes"); build.disabled=true; launch.disabled=true; }
-    if(data.state==="succeeded"){ show("succeeded",data.message||"Build complete"); build.disabled=false; launch.disabled=false; polling=false; }
+    if(data.state==="building"){
+      show("building","Building — this can take a few minutes");
+      build.disabled=true; launch.disabled=true;
+      dock.dataset.kind="building"; dock.dataset.open="true";
+    }
+    if(data.state==="succeeded"){
+      show("succeeded",data.message||"Build complete");
+      build.disabled=false; launch.disabled=false; polling=false;
+      dockPct.textContent="100%"; bar.style.width="100%";
+      announce("succeeded",data.message||"Build complete");
+    }
     if(data.state==="failed"){
       show("failed",data.error||"Build failed"); build.disabled=false; launch.disabled=true; polling=false;
       logBox.open=true;  /* a failure is the one time the log matters unprompted */
+      announce("failed",data.error||"Build failed");
     }
-  } catch(error) { show("failed",error.message); polling=false; }
+  } catch(error) { show("failed",error.message); polling=false; announce("failed",error.message); }
   if(polling) setTimeout(refresh,500);
 }
 
@@ -843,24 +927,31 @@ form.addEventListener("submit",async event=>{
   event.preventDefault();
   if(!document.querySelector("#rom").files.length) return;
   build.disabled=true; launch.disabled=true; log.textContent="Preparing local ROM copy…";
-  resetProgress(); show("building","Starting build");
-  phase.textContent="Preparing your ROM"; bar.classList.add("indeterminate");
+  show("building","Starting build");
+  steps.forEach(step=>step.removeAttribute("data-state"));
+  stepsBox.hidden=false;   /* only worth showing once there is progress to show */
+  buildTab.removeAttribute("data-badge");
+  dock.dataset.kind="building"; dock.dataset.open="true";
+  dockPhase.textContent="Preparing your ROM"; dockPct.textContent="0%"; dockDetail.textContent="";
+  bar.classList.add("indeterminate");
   try { await responseJSON(await fetch("build",{method:"POST",body:new FormData(form)})); polling=true; refresh(); }
-  catch(error){ show("failed",error.message); build.disabled=false; bar.classList.remove("indeterminate"); }
+  catch(error){ show("failed",error.message); build.disabled=false; announce("failed",error.message); }
 });
-/* The manual is fetched only on first open: 8 MB and a PDF viewer process are
- * not worth starting for someone who just wants to build. */
-const manualToggle=document.querySelector("#manual-toggle"), manualFrame=document.querySelector("#manual-frame");
-manualToggle.addEventListener("click",()=>{
-  const opening=manualFrame.hasAttribute("hidden");
-  if(opening && !manualFrame.getAttribute("src")) manualFrame.setAttribute("src","manual.pdf");
-  manualFrame.toggleAttribute("hidden",!opening);
-  manualToggle.setAttribute("aria-expanded",String(opening));
-  manualToggle.textContent=opening?"Hide the manual":"Read the manual";
-  if(opening) manualFrame.scrollIntoView({behavior:"smooth",block:"nearest"});
+
+async function doLaunch(){
+  try { await responseJSON(await fetch("launch",{method:"POST"})); show("succeeded","Game launched"); dockPhase.textContent="Game launched"; }
+  catch(error){ show("failed",error.message); }
+}
+launch.addEventListener("click",doLaunch);
+dockLaunch.addEventListener("click",doLaunch);
+closeButton.addEventListener("click",async()=>{
+  try {
+    await responseJSON(await fetch("close",{method:"POST"}));
+    show("idle","Builder closed — you can close this tab");
+    build.disabled=true; launch.disabled=true; closeButton.disabled=true;
+    dock.dataset.open="false";
+  } catch(error){ show("failed",error.message); }
 });
-launch.addEventListener("click",async()=>{ try { await responseJSON(await fetch("launch",{method:"POST"})); show("succeeded","Game launched"); } catch(error){ show("failed",error.message); } });
-closeButton.addEventListener("click",async()=>{ try { await responseJSON(await fetch("close",{method:"POST"})); show("idle","Builder closed — you can close this tab"); build.disabled=true; launch.disabled=true; closeButton.disabled=true; } catch(error){ show("failed",error.message); } });
 </script>
 </body>
 </html>`
