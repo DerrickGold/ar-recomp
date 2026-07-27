@@ -1,0 +1,128 @@
+package buildgui
+
+import (
+	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// Both assets must actually be embedded. A `go:embed` of a missing file is a
+// compile error, but an empty or truncated file is not -- and either would only
+// show up as a broken image or an unreadable manual in a browser.
+func TestEmbeddedAssetsArePresentAndWellFormed(t *testing.T) {
+	if len(boxArtWebP) < 4096 {
+		t.Errorf("box art is %d bytes; expected a real image", len(boxArtWebP))
+	}
+	// RIFF....WEBP
+	if !bytes.HasPrefix(boxArtWebP, []byte("RIFF")) ||
+		!bytes.Equal(boxArtWebP[8:12], []byte("WEBP")) {
+		t.Errorf("box art is not a WebP file (prefix %q)", boxArtWebP[:min(12, len(boxArtWebP))])
+	}
+	if len(manualPDF) < 100_000 {
+		t.Errorf("manual is %d bytes; expected the full scanned booklet", len(manualPDF))
+	}
+	if !bytes.HasPrefix(manualPDF, []byte("%PDF-")) {
+		t.Errorf("manual is not a PDF (prefix %q)", manualPDF[:min(8, len(manualPDF))])
+	}
+	// A truncated PDF is the likely corruption; the trailer proves the tail.
+	if !bytes.Contains(manualPDF[max(0, len(manualPDF)-2048):], []byte("%%EOF")) {
+		t.Error("manual PDF has no EOF trailer; it may be truncated")
+	}
+}
+
+func TestAssetEndpointsServeCorrectTypes(t *testing.T) {
+	app := newApplication(context.Background(), Options{ProjectRoot: t.TempDir()}, "tok")
+	cases := []struct {
+		endpoint, contentType string
+		minBytes              int
+	}{
+		{"boxart.webp", "image/webp", 4096},
+		{"manual.pdf", "application/pdf", 100_000},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.endpoint, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			app.ServeHTTP(response,
+				httptest.NewRequest(http.MethodGet, "/tok/"+testCase.endpoint, nil))
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d", response.Code)
+			}
+			if got := response.Header().Get("Content-Type"); got != testCase.contentType {
+				t.Errorf("Content-Type = %q, want %q", got, testCase.contentType)
+			}
+			if response.Body.Len() < testCase.minBytes {
+				t.Errorf("served %d bytes, want at least %d",
+					response.Body.Len(), testCase.minBytes)
+			}
+			if response.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Error("missing nosniff on an asset response")
+			}
+		})
+	}
+}
+
+// The manual must render in the page rather than download, and must be a
+// tokenless-URL 404 like every other endpoint.
+func TestManualServedInlineAndTokenGated(t *testing.T) {
+	app := newApplication(context.Background(), Options{ProjectRoot: t.TempDir()}, "tok")
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/tok/manual.pdf", nil))
+	disposition := response.Header().Get("Content-Disposition")
+	if !strings.HasPrefix(disposition, "inline") {
+		t.Errorf("Content-Disposition = %q, want inline so it reads in-page", disposition)
+	}
+	// Range support matters: browsers fetch large PDFs incrementally.
+	if response.Header().Get("Accept-Ranges") != "bytes" {
+		t.Errorf("Accept-Ranges = %q, want bytes",
+			response.Header().Get("Accept-Ranges"))
+	}
+
+	unguarded := httptest.NewRecorder()
+	app.ServeHTTP(unguarded, httptest.NewRequest(http.MethodGet, "/manual.pdf", nil))
+	if unguarded.Code != http.StatusNotFound {
+		t.Errorf("manual without the session token = %d, want 404", unguarded.Code)
+	}
+}
+
+// The page must reference both assets, and the CSP must admit the manual's
+// iframe without loosening object-src.
+func TestPageReferencesAssetsAndPermitsTheManualFrame(t *testing.T) {
+	app := newApplication(context.Background(), Options{
+		Title: "Builder", ProjectRoot: t.TempDir(),
+	}, "tok")
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/tok/", nil))
+	body := response.Body.String()
+	for _, reference := range []string{`src="boxart.webp"`, `href="manual.pdf"`} {
+		if !strings.Contains(body, reference) {
+			t.Errorf("page does not reference %s", reference)
+		}
+	}
+	if !strings.Contains(body, `id="manual-frame"`) {
+		t.Error("page has no manual iframe")
+	}
+	policy := response.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "frame-src 'self'") {
+		t.Errorf("CSP must admit the manual iframe: %s", policy)
+	}
+	if !strings.Contains(policy, "object-src 'none'") {
+		t.Errorf("CSP loosened object-src: %s", policy)
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
