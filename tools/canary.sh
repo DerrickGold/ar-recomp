@@ -62,6 +62,7 @@ TEST_TARGETS=(
   actraiser_scene_asset_dump_test actraiser_hd_manifest_test actraiser_music_manifest_test
   actraiser_main_thread_boot_test actraiser_diorama_scroll_math_test
   actraiser_ws_gap_test actraiser_diorama_skybox_uv_test
+  actraiser_diorama_layer_order_test
 )
 echo "[canary] build the ${#TEST_TARGETS[@]} ROM-free test targets (not the game binary)"
 cmake --build "${BUILD}" --target "${TEST_TARGETS[@]}" >/tmp/canary_build.log 2>&1 \

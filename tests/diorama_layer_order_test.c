@@ -1,0 +1,440 @@
+/* Per-room diorama layer overrides (F3/F4 from the 2026-07-26 handback).
+ *
+ * The load-bearing assertions here are:
+ *   1. NO-OP: with no override, Resolve returns the defaults verbatim IN ORDER.
+ *      If that ever breaks, every unedited room in the game changes.
+ *   2. AN ORDER-ONLY EDIT MOVES ONLY WHAT IT NAMES. Paint order is an explicit
+ *      key that defaults to the plane's built-in slot -- NOT a sort by z. The
+ *      two disagree today (Bg2Hi z=0.21 paints after Bg1 z=0.50), so sorting by
+ *      z would reshuffle planes for an edit that changed nothing.
+ *   3. ORDER AND Z ARE INDEPENDENT: z feeds depth-of-field
+ *      (DofRadiusForLayer, diorama.c:1371), so reordering must not silently
+ *      refocus a layer.
+ *   4. STABILITY: planes with equal keys keep built-in order, or the four OBJ
+ *      priority planes would reshuffle against each other.
+ */
+#include "diorama_layer_order.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static int g_failures;
+
+#define CHECK(cond)                                                        \
+  do {                                                                     \
+    if (!(cond)) {                                                         \
+      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);               \
+      g_failures++;                                                        \
+    }                                                                      \
+  } while (0)
+
+/* A stand-in for diorama.c's kDioramaLayers, in its real order and with its
+ * real z values (diorama.c:696-717). Keeping the real numbers means a test
+ * failure maps directly onto what the game would do. */
+static const DioramaResolvedLayer kDefaults[] = {
+  { kDioramaPlane_Backdrop, 0.00f, 255 },
+  { kPpuOverlaySource_Obj,  0.51f, 255 },
+  { kDioramaPlane_Obj1,     0.51f, 255 },
+  { kPpuOverlaySource_Bg2,  0.20f, 255 },
+  { kPpuOverlaySource_Bg1,  0.50f, 255 },
+  { kDioramaPlane_Obj2,     0.51f, 255 },
+  { kDioramaPlane_Bg2Hi,    0.21f, 255 },
+  { kDioramaPlane_Bg1Hi,    0.51f, 255 },
+  { kDioramaPlane_Obj3,     0.52f, 255 },
+  { kPpuOverlaySource_Bg3,  0.95f, 255 },
+};
+static const int kDefaultCount =
+    (int)(sizeof(kDefaults) / sizeof(kDefaults[0]));
+
+/* THE no-op guarantee: an empty table must not perturb anything. */
+static void TestNoOverrideIsIdentity(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  CHECK(n == kDefaultCount);
+  for (int i = 0; i < n; i++) {
+    CHECK(out[i].plane == kDefaults[i].plane);
+    CHECK(out[i].z == kDefaults[i].z);
+    CHECK(out[i].alpha == 255);
+  }
+}
+
+/* A room authored for a DIFFERENT room must not leak. */
+static void TestOverrideIsScopedToItsRoom(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  CHECK(room != NULL);
+  room->planes[kPpuOverlaySource_Bg1].set_order = true;
+  room->planes[kPpuOverlaySource_Bg1].order = 0;
+
+  /* Same group, different room ($19 differs) — must be untouched. */
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x03, kDefaults,
+                                    kDefaultCount, out, 16);
+  CHECK(n == kDefaultCount);
+  for (int i = 0; i < n; i++) CHECK(out[i].plane == kDefaults[i].plane);
+}
+
+/* Fillmore Act 2's case: get the water plane painting in FRONT of the rock
+ * path. */
+static void TestOrderEditReordersPaint(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  CHECK(room != NULL);
+  /* Push BG2 (built-in slot 3) past BG1 (built-in slot 4) by authoring an
+   * explicit paint slot. Note this does NOT touch z, so depth-of-field is
+   * unaffected -- which is the whole reason order and z are separate keys. */
+  room->planes[kPpuOverlaySource_Bg2].set_order = true;
+  room->planes[kPpuOverlaySource_Bg2].order = 5;
+
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  CHECK(n == kDefaultCount);
+
+  int bg2_at = -1, bg1_at = -1;
+  for (int i = 0; i < n; i++) {
+    if (out[i].plane == kPpuOverlaySource_Bg2) bg2_at = i;
+    if (out[i].plane == kPpuOverlaySource_Bg1) bg1_at = i;
+  }
+  CHECK(bg2_at >= 0 && bg1_at >= 0);
+  /* The whole point: BG2 now paints AFTER BG1, i.e. in front of it. */
+  CHECK(bg2_at > bg1_at);
+  /* z is untouched by an order-only edit: BG2 keeps its default 0.20, so its
+   * DOF blur is unchanged. */
+  CHECK(out[bg2_at].z == 0.20f);
+}
+
+/* Planes the override does not name must keep their built-in relative order.
+ * The four OBJ planes reshuffling would change sprite priority interleave the
+ * defaults already get right. */
+static void TestSortIsStableForUnnamedPlanes(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x07, 0x02);
+  CHECK(room != NULL);
+  /* Any single edit activates the room and therefore the sort. */
+  room->planes[kDioramaPlane_Backdrop].set_order = true;
+  room->planes[kDioramaPlane_Backdrop].order = 0;
+
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x07, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  /* Among the z==0.51 group, built-in order is Obj0, Obj1, Obj2, Bg1Hi. */
+  int seen[4], k = 0;
+  for (int i = 0; i < n && k < 4; i++) {
+    if (out[i].z != 0.51f) continue;
+    seen[k++] = out[i].plane;
+  }
+  CHECK(k == 4);
+  CHECK(seen[0] == kPpuOverlaySource_Obj);
+  CHECK(seen[1] == kDioramaPlane_Obj1);
+  CHECK(seen[2] == kDioramaPlane_Obj2);
+  CHECK(seen[3] == kDioramaPlane_Bg1Hi);
+}
+
+/* THE regression this design exists for. An edit that authors only z or only
+ * alpha -- or authors an order equal to the built-in slot -- must leave the
+ * paint sequence byte-identical. The previous revision sorted by ascending z
+ * whenever a room was active, which moved FIVE planes for a no-op edit because
+ * z and paint order disagree in the defaults (Bg2Hi z=0.21 paints after Bg1
+ * z=0.50). */
+static void TestNonOrderEditDoesNotReorder(void) {
+  const struct { const char *what; int plane; bool z, alpha; } cases[] = {
+    { "z only",     kPpuOverlaySource_Bg2, true,  false },
+    { "alpha only", kPpuOverlaySource_Bg1, false, true  },
+    { "both",       kDioramaPlane_Bg2Hi,   true,  true  },
+  };
+  for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+    DioramaLayerOrderTable table;
+    memset(&table, 0, sizeof(table));
+    DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+    DioramaPlaneOverride *o = &room->planes[cases[c].plane];
+    if (cases[c].z)     { o->set_z = true; o->z = 0.33f; }
+    if (cases[c].alpha) { o->set_alpha = true; o->alpha = 200; }
+
+    DioramaResolvedLayer out[16];
+    int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                      kDefaultCount, out, 16);
+    CHECK(n == kDefaultCount);
+    for (int i = 0; i < n; i++) {
+      if (out[i].plane == kDefaults[i].plane) continue;
+      printf("FAIL %s reordered slot %d: got %s\n", cases[c].what, i,
+             DioramaLayerOrder_PlaneToken(out[i].plane));
+      g_failures++;
+    }
+  }
+
+  /* An order authored to the plane's OWN built-in slot is also a no-op. */
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kPpuOverlaySource_Bg2].set_order = true;
+  room->planes[kPpuOverlaySource_Bg2].order = 3;  /* its built-in slot */
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  for (int i = 0; i < n; i++) CHECK(out[i].plane == kDefaults[i].plane);
+}
+
+/* Alpha must reach the output, and an un-authored plane stays opaque. */
+static void TestAlphaOverride(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kPpuOverlaySource_Bg2].set_alpha = true;
+  room->planes[kPpuOverlaySource_Bg2].alpha = 128;
+
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  for (int i = 0; i < n; i++) {
+    if (out[i].plane == kPpuOverlaySource_Bg2) CHECK(out[i].alpha == 128);
+    else CHECK(out[i].alpha == 255);
+  }
+}
+
+/* Reset must be a true undo: the room becomes inactive and Resolve returns to
+ * the identity path, including the original table ORDER. */
+static void TestResetRoomRestoresDefaults(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kPpuOverlaySource_Bg2].set_order = true;
+  room->planes[kPpuOverlaySource_Bg2].order = 9;
+  CHECK(DioramaLayerOrder_RoomIsActive(
+      DioramaLayerOrder_Find(&table, 0x01, 0x02)));
+
+  DioramaLayerOrder_ResetRoom(&table, 0x01, 0x02);
+  CHECK(DioramaLayerOrder_Find(&table, 0x01, 0x02) == NULL);
+
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  for (int i = 0; i < n; i++) CHECK(out[i].plane == kDefaults[i].plane);
+}
+
+/* A reset slot must be recycled rather than leaking table capacity. */
+static void TestResetSlotIsRecycled(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *a = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x01);
+  a->planes[kPpuOverlaySource_Bg1].set_order = true;
+  int after_first = table.count;
+  DioramaLayerOrder_ResetRoom(&table, 0x01, 0x01);
+  DioramaRoomOverride *b = DioramaLayerOrder_FindOrAdd(&table, 0x02, 0x02);
+  CHECK(b != NULL);
+  CHECK(table.count == after_first);  /* reused, did not grow */
+  CHECK(b->map_group == 0x02 && b->map_number == 0x02);
+  /* And the recycled slot carries none of the old room's edits. */
+  CHECK(!b->planes[kPpuOverlaySource_Bg1].set_order);
+}
+
+static void TestSectionParsing(void) {
+  uint8_t group = 0, map = 0;
+  CHECK(DioramaLayerOrder_ParseSection("layers:01:02", &group, &map));
+  CHECK(group == 0x01 && map == 0x02);
+  /* Hex, because these are the WRAM bytes as everything else prints them. */
+  CHECK(DioramaLayerOrder_ParseSection("layers:07:08", &group, &map));
+  CHECK(group == 0x07 && map == 0x08);
+  CHECK(DioramaLayerOrder_ParseSection("layers:0A:FF", &group, &map));
+  CHECK(group == 0x0A && map == 0xFF);
+  /* Not ours, or malformed. */
+  CHECK(!DioramaLayerOrder_ParseSection("replace:bg1", &group, &map));
+  CHECK(!DioramaLayerOrder_ParseSection("layers:01", &group, &map));
+  CHECK(!DioramaLayerOrder_ParseSection("layers:01:02:03", &group, &map));
+  CHECK(!DioramaLayerOrder_ParseSection("layers::", &group, &map));
+  CHECK(!DioramaLayerOrder_ParseSection("", &group, &map));
+}
+
+static void TestLineParsing(void) {
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  const char *error = NULL;
+
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2 = z:0.9 alpha:128", &error));
+  CHECK(room.planes[kPpuOverlaySource_Bg2].set_z);
+  CHECK(room.planes[kPpuOverlaySource_Bg2].set_alpha);
+  CHECK(room.planes[kPpuOverlaySource_Bg2].z == 0.9f);
+  CHECK(room.planes[kPpuOverlaySource_Bg2].alpha == 128);
+
+  /* z only: alpha must default to opaque, NOT to 0 (invisible). */
+  memset(&room, 0, sizeof(room));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg1 = z:0.55", &error));
+  CHECK(room.planes[kPpuOverlaySource_Bg1].alpha == 255);
+
+  /* Whitespace tolerance and the band planes. */
+  memset(&room, 0, sizeof(room));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "  bg2hi   =   z:0.21  ", &error));
+  CHECK(room.planes[kDioramaPlane_Bg2Hi].set_z);
+
+  /* A second line for the same plane refines rather than clobbers. */
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2hi = alpha:64", &error));
+  CHECK(room.planes[kDioramaPlane_Bg2Hi].z == 0.21f);
+  CHECK(room.planes[kDioramaPlane_Bg2Hi].alpha == 64);
+
+  /* Rejections, each with a reason for the log. */
+  const char *cases[] = {
+    "nosuchplane = z:0.5",
+    "bg1 z:0.5",            /* no '=' */
+    "bg1 = ",               /* no values */
+    "bg1 = z",              /* no colon */
+    "bg1 = z:",             /* empty value */
+    "bg1 = z:abc",
+    "bg1 = alpha:999",
+    "bg1 = alpha:-1",
+    "bg1 = colour:red",
+    "= z:0.5",              /* no plane */
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    DioramaRoomOverride tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    error = NULL;
+    if (DioramaLayerOrder_ParseLine(&tmp, cases[i], &error)) {
+      printf("FAIL accepted bad line: %s\n", cases[i]);
+      g_failures++;
+    } else if (!error) {
+      printf("FAIL rejected without a reason: %s\n", cases[i]);
+      g_failures++;
+    }
+  }
+}
+
+/* Export then re-import must round-trip: that is what makes the authored
+ * manifest reusable rather than a one-off. */
+static void TestFormatRoundTrips(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kPpuOverlaySource_Bg2].set_order = true;
+  room->planes[kPpuOverlaySource_Bg2].order = 5;
+  room->planes[kPpuOverlaySource_Bg2].set_z = true;
+  room->planes[kPpuOverlaySource_Bg2].z = 0.875f;
+  room->planes[kPpuOverlaySource_Bg2].set_alpha = true;
+  room->planes[kPpuOverlaySource_Bg2].alpha = 128;
+  room->planes[kPpuOverlaySource_Bg1].set_z = true;
+  room->planes[kPpuOverlaySource_Bg1].z = 0.5f;
+
+  char text[512];
+  size_t need = DioramaLayerOrder_FormatRoom(room, text, sizeof(text));
+  CHECK(need > 0 && need < sizeof(text));
+  CHECK(strstr(text, "[layers:01:02]") != NULL);
+  CHECK(strstr(text, "bg1 = z:0.5\n") != NULL);   /* only the authored knob */
+  CHECK(strstr(text, "bg2 = order:5 z:0.875 alpha:128") != NULL);
+
+  /* Feed it back through the parsers. */
+  DioramaRoomOverride reparsed;
+  memset(&reparsed, 0, sizeof(reparsed));
+  uint8_t group = 0, map = 0;
+  char *save = NULL;
+  char copy[512];
+  snprintf(copy, sizeof(copy), "%s", text);
+  for (char *line = strtok_r(copy, "\n", &save); line;
+       line = strtok_r(NULL, "\n", &save)) {
+    if (line[0] == '[') {
+      char section[64];
+      snprintf(section, sizeof(section), "%s", line + 1);
+      char *close = strchr(section, ']');
+      if (close) *close = '\0';
+      CHECK(DioramaLayerOrder_ParseSection(section, &group, &map));
+      continue;
+    }
+    const char *error = NULL;
+    CHECK(DioramaLayerOrder_ParseLine(&reparsed, line, &error));
+  }
+  CHECK(group == 0x01 && map == 0x02);
+  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].order == 5);
+  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].z == 0.875f);
+  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].alpha == 128);
+  CHECK(reparsed.planes[kPpuOverlaySource_Bg1].set_z);
+  CHECK(reparsed.planes[kPpuOverlaySource_Bg1].z == 0.5f);
+  /* BG1 never authored order or alpha, so the re-import must not invent them. */
+  CHECK(!reparsed.planes[kPpuOverlaySource_Bg1].set_order);
+  CHECK(!reparsed.planes[kPpuOverlaySource_Bg1].set_alpha);
+}
+
+/* An inactive room emits nothing, so a manifest never gains empty sections. */
+static void TestInactiveRoomEmitsNothing(void) {
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  room.used = true;
+  room.map_group = 0x01;
+  room.map_number = 0x02;
+  char text[64];
+  CHECK(DioramaLayerOrder_FormatRoom(&room, text, sizeof(text)) == 0);
+  CHECK(text[0] == '\0');
+}
+
+/* Truncation must be reported, not silently produce a half-written section. */
+static void TestFormatReportsTruncation(void) {
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  room.used = true;
+  room.map_group = 0x01;
+  room.map_number = 0x02;
+  room.planes[kPpuOverlaySource_Bg1].set_z = true;
+  room.planes[kPpuOverlaySource_Bg1].z = 0.5f;
+  char tiny[8];
+  size_t need = DioramaLayerOrder_FormatRoom(&room, tiny, sizeof(tiny));
+  CHECK(need >= sizeof(tiny));      /* caller can detect it did not fit */
+  CHECK(tiny[sizeof(tiny) - 1] == '\0');  /* still NUL-terminated */
+}
+
+static void TestTokenRoundTrip(void) {
+  static const int kPlanes[] = {
+    kDioramaPlane_Backdrop, kPpuOverlaySource_Bg1, kDioramaPlane_Bg1Hi,
+    kPpuOverlaySource_Bg2, kDioramaPlane_Bg2Hi, kPpuOverlaySource_Bg3,
+    kPpuOverlaySource_Obj, kDioramaPlane_Obj1, kDioramaPlane_Obj2,
+    kDioramaPlane_Obj3,
+  };
+  for (size_t i = 0; i < sizeof(kPlanes) / sizeof(kPlanes[0]); i++) {
+    const char *token = DioramaLayerOrder_PlaneToken(kPlanes[i]);
+    CHECK(token != NULL);
+    CHECK(DioramaLayerOrder_PlaneFromToken(token) == kPlanes[i]);
+  }
+  CHECK(DioramaLayerOrder_PlaneFromToken("nope") == -1);
+  CHECK(DioramaLayerOrder_PlaneFromToken(NULL) == -1);
+}
+
+/* Capacity is bounded and reported rather than overrunning. */
+static void TestTableCapacity(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  for (int i = 0; i < kDioramaRoomOverrideMax; i++) {
+    DioramaRoomOverride *room =
+        DioramaLayerOrder_FindOrAdd(&table, 0x01, (uint8_t)i);
+    CHECK(room != NULL);
+    room->planes[kPpuOverlaySource_Bg1].set_order = true;
+  }
+  CHECK(DioramaLayerOrder_FindOrAdd(&table, 0x7F, 0x7F) == NULL);
+  /* An existing room is still findable when full. */
+  CHECK(DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x00) != NULL);
+}
+
+int main(void) {
+  TestNoOverrideIsIdentity();
+  TestOverrideIsScopedToItsRoom();
+  TestOrderEditReordersPaint();
+  TestSortIsStableForUnnamedPlanes();
+  TestNonOrderEditDoesNotReorder();
+  TestAlphaOverride();
+  TestResetRoomRestoresDefaults();
+  TestResetSlotIsRecycled();
+  TestSectionParsing();
+  TestLineParsing();
+  TestFormatRoundTrips();
+  TestInactiveRoomEmitsNothing();
+  TestFormatReportsTruncation();
+  TestTokenRoundTrip();
+  TestTableCapacity();
+  if (g_failures) {
+    printf("diorama_layer_order_test: %d failure(s)\n", g_failures);
+    return 1;
+  }
+  printf("diorama_layer_order_test: all checks passed\n");
+  return 0;
+}
