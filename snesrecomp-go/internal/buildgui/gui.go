@@ -190,12 +190,15 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 	switch {
 	case endpoint == "" && request.Method == http.MethodGet:
 		response.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// The themed page draws its art with inline CSS gradients and inline
-		// SVG (data: URLs), so no bitmap ever ships or loads: `img-src` stays
-		// as tight as the artwork allows and no remote origin is reachable.
+		// The sky, clouds and columns are CSS; the cover art and the manual
+		// are served from this same origin, so 'self' covers everything and
+		// no remote origin is reachable. `frame-src 'self'` admits the
+		// manual's <iframe> (the browser's own PDF viewer) without opening
+		// `object-src`, which stays 'none'.
 		response.Header().Set("Content-Security-Policy",
 			"default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "+
-				"connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'")
+				"connect-src 'self'; img-src 'self'; frame-src 'self'; "+
+				"object-src 'none'; base-uri 'none'")
 		response.Header().Set("Cache-Control", "no-store")
 		response.Header().Set("Referrer-Policy", "no-referrer")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
@@ -203,6 +206,10 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 			html.EscapeString(app.options.Title), 1)
 		page = strings.Replace(page, "{{STEPS}}", renderStepList(), 1)
 		_, _ = io.WriteString(response, page)
+	case endpoint == "boxart.webp" && request.Method == http.MethodGet:
+		serveBoxArt(response, request)
+	case endpoint == "manual.pdf" && request.Method == http.MethodGet:
+		serveManual(response, request)
 	case endpoint == "status" && request.Method == http.MethodGet:
 		app.writeStatus(response)
 	case endpoint == "build" && request.Method == http.MethodPost:
@@ -523,8 +530,9 @@ h1 {
   background:linear-gradient(90deg,transparent,var(--gold) 12%,#fff2cd 50%,var(--gold) 88%,transparent); }
 .lede { max-width:60ch; color:#e8e2cf; margin:0 0 26px; text-shadow:0 1px 4px #0a132466; }
 
-.layout { display:grid; grid-template-columns:minmax(0,1fr) 224px; gap:22px; align-items:start; }
-@media (max-width:760px) { .layout { grid-template-columns:minmax(0,1fr); } }
+/* The cover is landscape (the SNES box front), so it sits ABOVE the form as a
+ * banner rather than in a narrow portrait sidebar. */
+.layout { display:grid; gap:22px; align-items:start; }
 
 .panel {
   background:var(--panel); backdrop-filter:blur(7px);
@@ -532,17 +540,50 @@ h1 {
   border-radius:4px; padding:22px; box-shadow:0 20px 60px #05091580;
 }
 
-/* Box art: an original stylised plate in the game's cover idiom (a winged
- * figure against the sky over a temple silhouette), drawn as inline SVG so it
- * ships as text and scales cleanly. Not a reproduction of the retail cover. */
-.boxart { display:flex; flex-direction:column; gap:9px; }
+/* Box art: the retail cover, embedded in the binary and served from this
+ * origin (see assets.go). Capped in width so it reads as a header plate
+ * rather than dominating the page on a wide display. */
+.boxart { margin:0; display:flex; flex-direction:column; align-items:center; gap:8px; }
 .boxart .frame {
   border:1px solid var(--gold-deep); border-radius:3px; overflow:hidden;
   box-shadow:0 12px 34px #05091599, inset 0 0 0 1px #ffe9b422; background:#0d1b34;
+  max-width:min(430px,100%);
 }
-.boxart svg { display:block; width:100%; height:auto; }
-.boxart figcaption { color:#efe7d0; font-size:.74rem; letter-spacing:.1em; text-transform:uppercase;
+.boxart img { display:block; width:100%; height:auto; }
+.boxart figcaption { color:#efe7d0; font-size:.74rem; letter-spacing:.14em; text-transform:uppercase;
   font-family:system-ui,-apple-system,sans-serif; text-align:center; text-shadow:0 1px 3px #0a1324; }
+
+/* Back-of-box reading material, shown while the build runs. Set as real text
+ * rather than a scan of the back cover: it stays legible at any window size,
+ * is selectable and screen-reader accessible, and costs bytes rather than
+ * another embedded image. */
+.blurb { margin-top:2px; }
+.blurb h2 { margin:0 0 4px; font-size:1.02rem; color:#fff3d6; letter-spacing:.02em; }
+.blurb h3 { margin:16px 0 4px; font-size:.9rem; font-style:italic; color:var(--gold); font-weight:600; }
+.blurb p { margin:0; color:#e4dece; font-size:.92rem; }
+.blurb .colophon { margin-top:16px; padding-top:12px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:.76rem; font-family:system-ui,-apple-system,sans-serif; }
+
+/* Manual reader. The <iframe> hosts the browser's own PDF viewer, so paging,
+ * zoom, search and printing come for free and no JS library ships. It is
+ * hidden until asked for: an 8 MB fetch and a viewer process are not worth
+ * starting for someone who only wants to build. */
+.reading { margin-top:0; }
+.manual { margin-top:26px; padding-top:20px; border-top:1px solid var(--line); }
+.manual-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+.manual-head h2 { margin:0; font-size:1.02rem; color:#fff3d6; letter-spacing:.02em; }
+.manual-actions { display:flex; align-items:center; gap:12px; }
+.linkbtn { color:var(--gold); font-size:.83rem; text-decoration:none; border-bottom:1px solid #a97f2c66;
+  font-family:system-ui,-apple-system,sans-serif; }
+.linkbtn:hover { color:#ffe9b8; border-bottom-color:var(--gold); }
+.manual-hint { margin:8px 0 0; color:var(--muted); font-size:.83rem;
+  font-family:system-ui,-apple-system,sans-serif; }
+#manual-frame {
+  display:block; width:100%; height:min(78vh,880px); margin-top:14px;
+  border:1px solid var(--gold-deep); border-radius:3px; background:#0d1b34;
+  box-shadow:0 12px 34px #05091599;
+}
+#manual-frame[hidden] { display:none; }
 
 label { display:block; font-weight:600; margin-bottom:8px; font-size:.95rem; letter-spacing:.02em; }
 input[type=file] {
@@ -664,6 +705,13 @@ pre {
   <p class="lede">Choose your legally obtained ROM. Everything runs on this computer with the
   toolchain packaged beside this builder &mdash; nothing is uploaded.</p>
 
+  <figure class="boxart">
+    <div class="frame">
+      <img src="boxart.webp" width="760" height="555" alt="ActRaiser Super Nintendo box art: the game's logo above a lightning storm over pyramids">
+    </div>
+    <figcaption>Create order from chaos</figcaption>
+  </figure>
+
   <div class="layout">
     <section class="panel">
       <form id="build-form">
@@ -698,61 +746,39 @@ pre {
       This page talks only to the builder on 127.0.0.1.</p>
     </section>
 
-    <figure class="boxart">
-      <div class="frame">
-        <svg viewBox="0 0 200 280" role="img" aria-labelledby="art-title">
-          <title id="art-title">Stylised cover plate: a winged figure above a temple at dawn</title>
-          <defs>
-            <linearGradient id="bsky" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#13305f"/><stop offset=".45" stop-color="#3f6ea8"/>
-              <stop offset=".78" stop-color="#c2d8e8"/><stop offset="1" stop-color="#efdcb2"/>
-            </linearGradient>
-            <linearGradient id="bstone" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#f3ecd9"/><stop offset="1" stop-color="#8d8368"/>
-            </linearGradient>
-            <linearGradient id="bwing" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#fff6dd"/><stop offset="1" stop-color="#d9b661"/>
-            </linearGradient>
-            <radialGradient id="bglow" cx=".5" cy=".42" r=".5">
-              <stop offset="0" stop-color="#ffe9b8" stop-opacity=".95"/>
-              <stop offset="1" stop-color="#ffe9b8" stop-opacity="0"/>
-            </radialGradient>
-          </defs>
-          <rect width="200" height="280" fill="url(#bsky)"/>
-          <circle cx="100" cy="118" r="62" fill="url(#bglow)"/>
-          <g fill="#ffffff" opacity=".5">
-            <ellipse cx="42" cy="74" rx="26" ry="7"/><ellipse cx="150" cy="58" rx="30" ry="8"/>
-            <ellipse cx="168" cy="98" rx="20" ry="6"/><ellipse cx="30" cy="112" rx="18" ry="5"/>
-          </g>
-          <!-- temple silhouette on the horizon -->
-          <g fill="#2c4670" opacity=".62">
-            <rect x="58" y="196" width="84" height="10"/>
-            <rect x="62" y="206" width="76" height="6"/>
-            <g>
-              <rect x="68" y="168" width="7" height="28"/><rect x="82" y="168" width="7" height="28"/>
-              <rect x="96" y="168" width="7" height="28"/><rect x="110" y="168" width="7" height="28"/>
-              <rect x="124" y="168" width="7" height="28"/>
-            </g>
-            <path d="M60 168h80l-40-22z"/>
-          </g>
-          <!-- winged figure -->
-          <g transform="translate(100 132)">
-            <path fill="url(#bwing)" d="M-6-10c-16-14-40-20-58-16 14 4 24 12 30 22-12-2-22 0-30 6 14 2 26 8 34 18 8-10 16-18 24-22z"/>
-            <path fill="url(#bwing)" d="M6-10c16-14 40-20 58-16-14 4-24 12-30 22 12-2 22 0 30 6-14 2-26 8-34 18-8-10-16-18-24-22z"/>
-            <path fill="url(#bstone)" d="M0-30c5 0 8 4 8 9s-3 9-8 9-8-4-8-9 3-9 8-9z"/>
-            <path fill="url(#bstone)" d="M-9-9h18l5 40-9 30h-10l-9-30z"/>
-            <rect x="-2" y="18" width="4" height="52" fill="#f6efdb"/>
-            <rect x="-11" y="26" width="22" height="4" fill="#e6c97a"/>
-          </g>
-          <rect x="6" y="6" width="188" height="268" fill="none" stroke="#e0b95f" stroke-opacity=".55"/>
-          <text x="100" y="252" text-anchor="middle" font-family="Georgia,serif" font-size="21"
-                fill="#fff6e0" letter-spacing="1.5">ACTRAISER</text>
-          <text x="100" y="266" text-anchor="middle" font-family="system-ui,sans-serif" font-size="7"
-                fill="#f0e3c2" letter-spacing="3.4">RECOMPILED</text>
-        </svg>
+    <section class="panel reading">
+      <div class="blurb">
+        <h2>Action &amp; Simulation</h2>
+        <p>Pulse-stopping action sequences combined with a Simulation Mode that lets you
+        forge a new civilization &mdash; a game built to use the Super NES to the full.</p>
+        <h3>Restore peace and order to your people's world</h3>
+        <p>Long ago you and your people built a peaceful land. Since then the evil Tanzra
+        and his Guardians have taken it for their own, and your once-tranquil world has
+        become a breeding ground for monsters. Injured, you withdrew to your Sky Palace
+        and fell into a deep sleep. Many years have passed; your wounds and your slumber
+        are behind you. Now you must punish Tanzra and give your people back the world
+        they knew &mdash; or lose their faith forever.</p>
+        <p class="colophon">Text and artwork &copy; 1990&ndash;1992 Quintet / Enix.
+        Reproduced from the retail packaging and manual for reference. This project ships
+        no game code or data &mdash; that is generated on this machine from your own ROM.</p>
       </div>
-      <figcaption>Static recompilation</figcaption>
-    </figure>
+
+      <div class="manual">
+        <div class="manual-head">
+          <h2>Instruction booklet</h2>
+          <div class="manual-actions">
+            <button id="manual-toggle" class="secondary" type="button"
+                    aria-expanded="false" aria-controls="manual-frame">Read the manual</button>
+            <a id="manual-open" class="linkbtn" href="manual.pdf" target="_blank" rel="noreferrer">Open in a new tab</a>
+          </div>
+        </div>
+        <p class="manual-hint">40 scanned pages. Your browser's own reader handles paging,
+        zoom and search &mdash; something to do while the build runs.</p>
+        <iframe id="manual-frame" title="ActRaiser instruction booklet" hidden></iframe>
+      </div>
+    </section>
+
+
   </div>
 </main>
 
@@ -821,6 +847,17 @@ form.addEventListener("submit",async event=>{
   phase.textContent="Preparing your ROM"; bar.classList.add("indeterminate");
   try { await responseJSON(await fetch("build",{method:"POST",body:new FormData(form)})); polling=true; refresh(); }
   catch(error){ show("failed",error.message); build.disabled=false; bar.classList.remove("indeterminate"); }
+});
+/* The manual is fetched only on first open: 8 MB and a PDF viewer process are
+ * not worth starting for someone who just wants to build. */
+const manualToggle=document.querySelector("#manual-toggle"), manualFrame=document.querySelector("#manual-frame");
+manualToggle.addEventListener("click",()=>{
+  const opening=manualFrame.hasAttribute("hidden");
+  if(opening && !manualFrame.getAttribute("src")) manualFrame.setAttribute("src","manual.pdf");
+  manualFrame.toggleAttribute("hidden",!opening);
+  manualToggle.setAttribute("aria-expanded",String(opening));
+  manualToggle.textContent=opening?"Hide the manual":"Read the manual";
+  if(opening) manualFrame.scrollIntoView({behavior:"smooth",block:"nearest"});
 });
 launch.addEventListener("click",async()=>{ try { await responseJSON(await fetch("launch",{method:"POST"})); show("succeeded","Game launched"); } catch(error){ show("failed",error.message); } });
 closeButton.addEventListener("click",async()=>{ try { await responseJSON(await fetch("close",{method:"POST"})); show("idle","Builder closed — you can close this tab"); build.disabled=true; launch.disabled=true; closeButton.disabled=true; } catch(error){ show("failed",error.message); } });
