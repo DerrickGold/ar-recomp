@@ -108,6 +108,7 @@ add_executable(ActRaiserRecomp
     src/diorama_scroll_math.c
     src/actraiser_ws_gap.c
     src/diorama_skybox_uv.c
+    src/diorama_layer_order.c
     src/dev_tools.c
     src/forced_input.c
     src/frame_slot.c
@@ -545,4 +546,17 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_diorama_skybox_uv_test PRIVATE m)
     add_test(NAME actraiser_diorama_skybox_uv
         COMMAND actraiser_diorama_skybox_uv_test)
+
+    # F3/F4 (handback 2026-07-26): per-room ($18,$19) layer z/alpha overrides.
+    # Pure -- no SDL, no PPU, no file I/O.
+    add_executable(actraiser_diorama_layer_order_test
+        tests/diorama_layer_order_test.c
+        src/diorama_layer_order.c
+    )
+    target_include_directories(actraiser_diorama_layer_order_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_diorama_layer_order
+        COMMAND actraiser_diorama_layer_order_test)
 endif()

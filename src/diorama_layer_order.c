@@ -1,0 +1,330 @@
+#include "diorama_layer_order.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Manifest tokens. These ARE the file grammar — renaming one invalidates every
+ * authored manifest, so they are deliberately terse and stable. */
+static const struct { int plane; const char *token; } kPlaneTokens[] = {
+  { kDioramaPlane_Backdrop, "backdrop" },
+  { kPpuOverlaySource_Bg1,  "bg1" },
+  { kDioramaPlane_Bg1Hi,    "bg1hi" },
+  { kPpuOverlaySource_Bg2,  "bg2" },
+  { kDioramaPlane_Bg2Hi,    "bg2hi" },
+  { kPpuOverlaySource_Bg3,  "bg3" },
+  { kPpuOverlaySource_Obj,  "obj0" },
+  { kDioramaPlane_Obj1,     "obj1" },
+  { kDioramaPlane_Obj2,     "obj2" },
+  { kDioramaPlane_Obj3,     "obj3" },
+};
+static const int kPlaneTokenCount =
+    (int)(sizeof(kPlaneTokens) / sizeof(kPlaneTokens[0]));
+
+const char *DioramaLayerOrder_PlaneToken(int plane) {
+  for (int i = 0; i < kPlaneTokenCount; i++)
+    if (kPlaneTokens[i].plane == plane) return kPlaneTokens[i].token;
+  return NULL;
+}
+
+int DioramaLayerOrder_PlaneFromToken(const char *token) {
+  if (!token) return -1;
+  for (int i = 0; i < kPlaneTokenCount; i++)
+    if (!strcmp(kPlaneTokens[i].token, token)) return kPlaneTokens[i].plane;
+  return -1;
+}
+
+const DioramaRoomOverride *DioramaLayerOrder_Find(
+    const DioramaLayerOrderTable *table, uint8_t map_group,
+    uint8_t map_number) {
+  if (!table) return NULL;
+  for (int i = 0; i < table->count; i++) {
+    const DioramaRoomOverride *room = &table->rooms[i];
+    if (room->used && room->map_group == map_group &&
+        room->map_number == map_number)
+      return room;
+  }
+  return NULL;
+}
+
+DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
+    DioramaLayerOrderTable *table, uint8_t map_group, uint8_t map_number) {
+  if (!table) return NULL;
+  for (int i = 0; i < table->count; i++) {
+    DioramaRoomOverride *room = &table->rooms[i];
+    if (room->used && room->map_group == map_group &&
+        room->map_number == map_number)
+      return room;
+  }
+  /* Reuse a slot vacated by a reset before growing. */
+  for (int i = 0; i < table->count; i++) {
+    if (!table->rooms[i].used) {
+      DioramaRoomOverride *room = &table->rooms[i];
+      memset(room, 0, sizeof(*room));
+      room->used = true;
+      room->map_group = map_group;
+      room->map_number = map_number;
+      return room;
+    }
+  }
+  if (table->count >= kDioramaRoomOverrideMax) return NULL;
+  DioramaRoomOverride *room = &table->rooms[table->count];
+  memset(room, 0, sizeof(*room));
+  room->used = true;
+  room->map_group = map_group;
+  room->map_number = map_number;
+  table->count++;
+  return room;
+}
+
+bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
+  if (!room || !room->used) return false;
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+    const DioramaPlaneOverride *o = &room->planes[plane];
+    if (o->set_order || o->set_z || o->set_alpha) return true;
+  }
+  return false;
+}
+
+void DioramaLayerOrder_ResetRoom(DioramaLayerOrderTable *table,
+                                 uint8_t map_group, uint8_t map_number) {
+  if (!table) return;
+  for (int i = 0; i < table->count; i++) {
+    DioramaRoomOverride *room = &table->rooms[i];
+    if (room->used && room->map_group == map_group &&
+        room->map_number == map_number) {
+      memset(room, 0, sizeof(*room));
+      /* Left !used so the slot is recycled; count is not decremented because
+       * later entries must keep their indices. */
+      return;
+    }
+  }
+}
+
+int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
+                              uint8_t map_group, uint8_t map_number,
+                              const DioramaResolvedLayer *defaults,
+                              int default_count,
+                              DioramaResolvedLayer *out, int capacity) {
+  if (!defaults || !out || default_count <= 0 || capacity <= 0) return 0;
+  int n = default_count < capacity ? default_count : capacity;
+
+  const DioramaRoomOverride *room =
+      DioramaLayerOrder_Find(table, map_group, map_number);
+  const bool active = DioramaLayerOrder_RoomIsActive(room);
+
+  /* Sort keys, parallel to `out`. A plane with no authored order keeps its
+   * built-in slot, so it cannot drift: only authored planes move. */
+  int keys[kDioramaPlane_Count > 32 ? kDioramaPlane_Count : 32];
+
+  for (int i = 0; i < n; i++) {
+    out[i] = defaults[i];
+    if (out[i].alpha == 0) out[i].alpha = kDioramaLayerAlphaOpaque;
+    keys[i] = i;  /* built-in slot */
+    if (!active) continue;
+    const DioramaPlaneOverride *o = NULL;
+    if (out[i].plane >= 0 && out[i].plane < kDioramaPlane_Count)
+      o = &room->planes[out[i].plane];
+    if (!o) continue;
+    if (o->set_z) out[i].z = o->z;
+    if (o->set_alpha) out[i].alpha = o->alpha;
+    if (o->set_order) keys[i] = o->order;
+  }
+  if (!active) return n;
+
+  /* Stable insertion sort on the paint key.
+   *
+   * Deliberately NOT a sort by z. diorama.c's default order is table order, and
+   * the two disagree: Bg2Hi (z=0.21) paints after Bg1 (z=0.50). Sorting by z
+   * would therefore reshuffle planes for an edit that changed nothing — an
+   * earlier revision of this file did exactly that, moving five planes on a
+   * no-op edit. Sorting on an explicit key that defaults to the built-in slot
+   * makes an un-authored plane provably immovable.
+   *
+   * Stability matters for the same reason it did before: the four OBJ planes
+   * share z and adjacent slots, and reshuffling them would change the sprite
+   * priority interleave the defaults get right. */
+  for (int i = 1; i < n; i++) {
+    DioramaResolvedLayer value = out[i];
+    int key = keys[i];
+    int j = i - 1;
+    while (j >= 0 && keys[j] > key) {
+      out[j + 1] = out[j];
+      keys[j + 1] = keys[j];
+      j--;
+    }
+    out[j + 1] = value;
+    keys[j + 1] = key;
+  }
+  return n;
+}
+
+/* ── manifest text ───────────────────────────────────────────────────── */
+
+static const char *SkipSpace(const char *p) {
+  while (*p == ' ' || *p == '\t') p++;
+  return p;
+}
+
+/* Copy the next whitespace-delimited word into `out`. Returns the position
+ * after it, or NULL when there is no word left. */
+static const char *NextWord(const char *p, char *out, size_t size) {
+  p = SkipSpace(p);
+  if (!*p) return NULL;
+  size_t n = 0;
+  while (*p && *p != ' ' && *p != '\t') {
+    if (n + 1 < size) out[n++] = *p;
+    p++;
+  }
+  out[n] = '\0';
+  return p;
+}
+
+bool DioramaLayerOrder_ParseSection(const char *section, uint8_t *out_group,
+                                    uint8_t *out_map) {
+  if (!section) return false;
+  static const char kPrefix[] = "layers:";
+  const size_t prefix_len = sizeof(kPrefix) - 1;
+  if (strncmp(section, kPrefix, prefix_len) != 0) return false;
+  const char *rest = section + prefix_len;
+
+  char *end = NULL;
+  long group = strtol(rest, &end, 16);
+  if (end == rest || !end || *end != ':') return false;
+  const char *map_text = end + 1;
+  long map = strtol(map_text, &end, 16);
+  if (end == map_text || !end || *end != '\0') return false;
+  if (group < 0 || group > 0xFF || map < 0 || map > 0xFF) return false;
+
+  if (out_group) *out_group = (uint8_t)group;
+  if (out_map) *out_map = (uint8_t)map;
+  return true;
+}
+
+bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
+                                 const char **out_error) {
+  if (out_error) *out_error = NULL;
+  if (!room || !line) {
+    if (out_error) *out_error = "no room";
+    return false;
+  }
+
+  /* "<plane> = <key:value> [<key:value>...]" */
+  const char *equals = strchr(line, '=');
+  if (!equals) {
+    if (out_error) *out_error = "expected 'plane = ...'";
+    return false;
+  }
+
+  char token[32];
+  const char *after = NextWord(line, token, sizeof(token));
+  if (!after || after > equals) {
+    if (out_error) *out_error = "missing plane name";
+    return false;
+  }
+  int plane = DioramaLayerOrder_PlaneFromToken(token);
+  if (plane < 0 || plane >= kDioramaPlane_Count) {
+    if (out_error) *out_error = "unknown plane";
+    return false;
+  }
+
+  /* Start from whatever the room already holds so a second line for the same
+   * plane refines rather than clobbers. */
+  DioramaPlaneOverride edit = room->planes[plane];
+  bool touched = false;
+  const char *p = equals + 1;
+  char word[64];
+  while ((p = NextWord(p, word, sizeof(word))) != NULL) {
+    if (!word[0]) break;
+    char *colon = strchr(word, ':');
+    if (!colon) {
+      if (out_error) *out_error = "expected key:value";
+      return false;
+    }
+    *colon = '\0';
+    const char *value = colon + 1;
+    if (!*value) {
+      if (out_error) *out_error = "empty value";
+      return false;
+    }
+    char *end = NULL;
+    if (!strcmp(word, "order")) {
+      long slot = strtol(value, &end, 10);
+      if (end == value || (end && *end) || slot < 0 ||
+          slot >= kDioramaPlane_Count * 4) {
+        if (out_error) *out_error = "bad order";
+        return false;
+      }
+      edit.order = (int)slot;
+      edit.set_order = true;
+      touched = true;
+    } else if (!strcmp(word, "z")) {
+      double z = strtod(value, &end);
+      if (end == value || (end && *end)) {
+        if (out_error) *out_error = "bad z";
+        return false;
+      }
+      edit.z = (float)z;
+      edit.set_z = true;
+      touched = true;
+    } else if (!strcmp(word, "alpha")) {
+      long a = strtol(value, &end, 10);
+      if (end == value || (end && *end) || a < 0 || a > 255) {
+        if (out_error) *out_error = "bad alpha (0-255)";
+        return false;
+      }
+      edit.alpha = (uint8_t)a;
+      edit.set_alpha = true;
+      touched = true;
+    } else {
+      if (out_error) *out_error = "unknown key";
+      return false;
+    }
+  }
+  if (!touched) {
+    if (out_error) *out_error = "no values";
+    return false;
+  }
+  /* A line that authored alpha:0 means it; one that never mentioned alpha must
+   * not leave a zeroed struct behind, which would render the plane invisible. */
+  if (!edit.set_alpha && edit.alpha == 0)
+    edit.alpha = kDioramaLayerAlphaOpaque;
+  room->planes[plane] = edit;
+  return true;
+}
+
+size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
+                                    char *buffer, size_t size) {
+  if (!DioramaLayerOrder_RoomIsActive(room)) {
+    if (buffer && size) buffer[0] = '\0';
+    return 0;
+  }
+  size_t total = 0;
+  /* Local helper: append and track the would-be length like snprintf. */
+#define APPEND(...)                                                        \
+  do {                                                                     \
+    size_t remaining = (total < size) ? size - total : 0;                   \
+    char *at = buffer ? buffer + (total < size ? total : size) : NULL;      \
+    int wrote = snprintf(at, remaining, __VA_ARGS__);                       \
+    if (wrote > 0) total += (size_t)wrote;                                  \
+  } while (0)
+
+  APPEND("[layers:%02X:%02X]\n", room->map_group, room->map_number);
+  /* Emit in table-token order, not plane-index order, so a diff between two
+   * exports is stable and readable. */
+  for (int i = 0; i < kPlaneTokenCount; i++) {
+    int plane = kPlaneTokens[i].plane;
+    const DioramaPlaneOverride *o = &room->planes[plane];
+    if (!o->set_order && !o->set_z && !o->set_alpha) continue;
+    /* Emit only the authored knobs, so a re-import reproduces exactly this
+     * override rather than pinning the two the author never touched. */
+    APPEND("%s =", kPlaneTokens[i].token);
+    if (o->set_order) APPEND(" order:%d", o->order);
+    if (o->set_z) APPEND(" z:%.4g", (double)o->z);
+    if (o->set_alpha) APPEND(" alpha:%u", (unsigned)o->alpha);
+    APPEND("\n");
+  }
+#undef APPEND
+  if (buffer && size) buffer[size - 1] = '\0';
+  return total;
+}
