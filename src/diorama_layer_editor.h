@@ -141,6 +141,16 @@ int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
                                  int level_index,
                                  DioramaEditorRow *out, int capacity);
 
+/* Copy `text` uppercased into `out`, always NUL-terminating.
+ *
+ * The menu is drawn in the game's own all-caps face, but the shape and direction
+ * names are lowercase because they are MANIFEST TOKENS -- renaming one would
+ * invalidate authored files, so they cannot simply be spelled in capitals. Three
+ * call sites needed the same conversion (two row values and the status line),
+ * which is why it is one function rather than three loops. ASCII only, which is
+ * all the token grammar allows. */
+void DioramaLayerEditor_Upper(char *out, size_t size, const char *text);
+
 /* Help text for the description panel: what the selected row does, and for a
  * plane row what its CURRENT shape costs. Never NULL.
  *

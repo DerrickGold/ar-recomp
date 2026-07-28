@@ -704,7 +704,50 @@ static void TestLevelTabsAreTheActionGroups(void) {
   CHECK(DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Ending) < 0);
 }
 
+/* The menu's all-caps conversion. Its bounds matter more than its letters: it
+ * writes into fixed row buffers, so a missing terminator or an overrun would
+ * corrupt whatever follows in the row struct. */
+static void TestUpperIsBoundedAndTerminated(void) {
+  char out[8];
+  DioramaLayerEditor_Upper(out, sizeof(out), "stack");
+  CHECK(!strcmp(out, "STACK"));
+
+  /* Truncation must still terminate: "backward" is 8 characters and the buffer
+   * holds 7 plus a NUL. */
+  DioramaLayerEditor_Upper(out, sizeof(out), "backward");
+  CHECK(!strcmp(out, "BACKWAR"));
+  CHECK(out[sizeof(out) - 1] == '\0');
+
+  /* Degenerate inputs: NULL text yields an empty string rather than reading it,
+   * and a zero-sized buffer is not written at all. */
+  DioramaLayerEditor_Upper(out, sizeof(out), NULL);
+  CHECK(out[0] == '\0');
+  char guard = 'x';
+  DioramaLayerEditor_Upper(&guard, 0, "stack");
+  CHECK(guard == 'x');
+
+  /* Non-letters pass through, since a value like "0.29" shares this path. */
+  DioramaLayerEditor_Upper(out, sizeof(out), "b2h.9");
+  CHECK(!strcmp(out, "B2H.9"));
+
+  /* Every token the grammar can produce fits the row buffers it is written into,
+   * so no live value is ever truncated -- the case above is deliberately a
+   * smaller buffer than any real one. */
+  char room[24];
+  for (int s = 0; s < kDioramaDepth_StrategyCount; s++) {
+    const char *name = DioramaLayerOrder_StrategyName((DioramaDepthStrategy)s);
+    DioramaLayerEditor_Upper(room, sizeof(room), name);
+    CHECK(strlen(room) == strlen(name));
+  }
+  for (int d = 0; d < kDioramaStack_DirectionCount; d++) {
+    const char *token = DioramaLayerOrder_StackDirectionToken(d);
+    DioramaLayerEditor_Upper(room, sizeof(room), token);
+    CHECK(strlen(room) == strlen(token));
+  }
+}
+
 int main(void) {
+  TestUpperIsBoundedAndTerminated();
   TestEachStrategyResolvesToItself();
   TestCycleWrapsThroughEveryStrategy();
   TestAuthoredStrategyIsNonZero();

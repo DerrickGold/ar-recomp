@@ -870,6 +870,25 @@ int main(void) {
    * doubles as a contact sheet: one BMP per (section, tab), which is the only
    * practical way to eyeball a layout change across the whole menu. */
   const char *preview_dir = getenv("AR_OVERLAY_PREVIEW_DIR");
+  /* Give the contact sheet a POPULATED layer editor. Without the hooks installed
+   * every level tab renders its "enter a stage here" notice, which is the one
+   * state that needs no review -- the layout worth eyeballing is a room with
+   * planes, one of them expanded into its parameters. Fillmore act 2 with the
+   * shipped rake on its water is the case the whole feature exists for. */
+  if (preview_dir && preview_dir[0]) {
+    SettingsOverlay_SetLayerEditorHooks(FakeLayerTable, FakeLayerRoom,
+                                        FakeLayerSave);
+    memset(&s_fake_layer_table, 0, sizeof(s_fake_layer_table));
+    s_fake_room_live = true;
+    DioramaRoomOverride *preview_room = DioramaLayerOrder_FindOrAdd(
+        &s_fake_layer_table, s_fake_group, s_fake_map);
+    if (preview_room) {
+      DioramaLayerEditor_SetStrategy(&preview_room->planes[kDioramaPlane_Bg2Hi],
+                                     kDioramaDepth_Stack);
+      DioramaLayerEditor_SetStrategy(&preview_room->planes[kPpuOverlaySource_Bg1],
+                                     kDioramaDepth_Rake);
+    }
+  }
   for (int section = 0; section < kDebugSectionCount; section++) {
     NavToSection(section);
     if (!renderer) continue;
@@ -887,6 +906,19 @@ int main(void) {
     CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
     for (int tab = 0; tab < tabs; tab++) {
       NavToTab(tab);
+      /* Park the cursor on the authored water plane so its parameter block is
+       * expanded in the shot -- the expansion is the layout decision most worth
+       * reviewing, and it is only visible on the selected plane. */
+      if (section == kSection_Layers &&
+          strcmp(SettingsOverlay_SelectedKey(), "") != 0) {
+        for (int guard = 0; guard < 32; guard++) {
+          if (!strcmp(SettingsOverlay_SelectedKey(), "bg2hi")) break;
+          CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+        }
+        /* B expands rather than edits, so the shot shows the parameters without
+         * changing the shape the room was seeded with. */
+        CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+      }
       char path[256];
       snprintf(path, sizeof(path), "%s/section%d-tab%d.bmp",
                preview_dir, section, tab);
