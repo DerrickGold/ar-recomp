@@ -68,6 +68,31 @@ enum {
   kDioramaVoxelCopiesDefault = 12,
 };
 
+/* The depth strategies a plane can use, as ONE enumeration.
+ *
+ * This exists for the layer editor: the point of the editor is to cycle a room's
+ * plane through the available strategies and watch the result, which needs a
+ * single ordered list with names -- not four independent keys the UI has to know
+ * to clear in the right combinations. The manifest keys stay as they are (they are
+ * more expressive, since a plane can carry a rake AND a thickness), so this is the
+ * editor's view of the same data, resolved from whichever keys are authored.
+ *
+ * Ordered cheapest-first so cycling forward from Flat escalates cost gradually,
+ * and so a room half-tuned by an author who ran out of budget stops somewhere
+ * sensible. Voxel is last because it is the only one that can cost 24 draws. */
+typedef enum DioramaDepthStrategy {
+  kDioramaDepth_Flat = 0,   /* no depth: a parallel sheet, as every room shipped */
+  kDioramaDepth_Rake,       /* tilt the plane linearly */
+  kDioramaDepth_Bow,        /* tilt it on a curve -- eases in, no shear at the top */
+  kDioramaDepth_Thick,      /* extrude a near face from the quad's bottom edge */
+  kDioramaDepth_Stack,      /* parallel repeats, faded: several things in depth */
+  kDioramaDepth_Voxel,      /* dense unfaded repeats: one solid object */
+  kDioramaDepth_StrategyCount,
+} DioramaDepthStrategy;
+
+/* Strategy name for the editor row and logs ("flat", "rake", ...). Never NULL. */
+const char *DioramaLayerOrder_StrategyName(DioramaDepthStrategy strategy);
+
 /* Which way a stack lays its copies, relative to the plane's own depth. Higher z
  * is NEARER the camera in this projection (the backdrop is z=0.00, the HUD z=0.95),
  * so Forward means toward the viewer.
@@ -115,6 +140,24 @@ typedef struct DioramaPlaneOverride {
    * without the data model hard-coding it. */
   bool set_rake;
   float rake;
+  /* BOW — a rake on a curve instead of a straight tilt.
+   *
+   * Same endpoints as a rake: the top edge keeps `z`, the bottom edge lands at
+   * `z + bow`. What differs is everything in between. A rake's depth is linear in
+   * t, so dz/dt is CONSTANT: every row is displaced in depth, including the ones
+   * near the top, which is why a raked layer's parallax reads uniformly
+   * exaggerated. A bow is quadratic, so dz/dt is 0 at the top and greatest at the
+   * bottom -- the layer keeps its original depth behaviour where it meets the sky
+   * and only bends forward near the fold, which is where it actually needs to
+   * reach the layer in front.
+   *
+   * Worth trying wherever a rake was the right idea but read as too much: it
+   * closes the same gap with the same number, concentrating the distortion where
+   * the geometry demands it instead of spreading it over the whole plane. Still a
+   * tilt, so it still spans a depth range and still has more than one parallax
+   * rate -- if that is unacceptable at all, the shape wanted is a stack. */
+  bool set_bow;
+  float bow;
   /* THICKNESS — the solid-volume alternative to a rake: extrude the plane's
    * BOTTOM edge forward from `z` to `z + thickness`, so the layer reads as a
    * block with a near face rather than an infinitely thin sheet.
@@ -231,6 +274,7 @@ typedef struct DioramaResolvedLayer {
   float z;
   uint8_t alpha;
   float rake;       /* bottom edge sits at z + rake; 0 = parallel, as today */
+  float bow;        /* same, but eased quadratically; 0 = no curve */
   float thickness;  /* extrude the bottom edge forward to z + thickness; 0 = flat */
   float stack;      /* fill depth by repeating the layer to z + stack; 0 = off */
   int stack_copies; /* resolved repeat count, 1..kDioramaStackMax */
@@ -239,6 +283,12 @@ typedef struct DioramaResolvedLayer {
    * because the geometry is identical -- only the fade and the cap differ. */
   bool stack_solid;
 } DioramaResolvedLayer;
+
+/* Which strategy a resolved plane is using, for the editor's label and for
+ * diagnostics. Derived, not stored: whichever authored key is most specific wins,
+ * in the same precedence the renderer applies. Flat when none is authored. */
+DioramaDepthStrategy DioramaLayerOrder_StrategyOf(
+    const DioramaResolvedLayer *layer);
 
 /* Resolve a copy count from an authored density and fill depth.
  *

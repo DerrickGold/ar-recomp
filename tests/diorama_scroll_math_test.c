@@ -508,6 +508,69 @@ int main(void) {
     CHECK(DioramaStackCopyIsRedundant(2, 5, kBoth));
   }
 
+  /* ── TILT: rake is linear, bow is eased ──────────────────────────────── */
+  {
+    const float kZ = 0.21f, kAmount = 0.29f;
+
+    /* THE NO-OP GUARANTEE: no tilt authored must return z untouched, exactly, so
+     * every unauthored room stays bit-identical. */
+    for (int i = 0; i <= 4; i++) {
+      float t = (float)i / 4.0f;
+      CHECK(DioramaTiltedRowDepth(kZ, 0.0f, 0.0f, t) == kZ);
+    }
+
+    /* Both land the BOTTOM edge in the same place -- they are the same fix with
+     * different distribution, so `bow:0.29` closes the gap `rake:0.29` closes. */
+    CHECK(near(DioramaTiltedRowDepth(kZ, kAmount, 0.0f, 1.0f), kZ + kAmount));
+    CHECK(near(DioramaTiltedRowDepth(kZ, 0.0f, kAmount, 1.0f), kZ + kAmount));
+    /* And both leave the TOP edge alone. */
+    CHECK(near(DioramaTiltedRowDepth(kZ, kAmount, 0.0f, 0.0f), kZ));
+    CHECK(near(DioramaTiltedRowDepth(kZ, 0.0f, kAmount, 0.0f), kZ));
+
+    /* THE DIFFERENCE, and the reason bow exists. A bow displaces LESS than a rake
+     * everywhere in between, so the upper rows keep their original depth and the
+     * parallax change is concentrated near the fold where it is needed. If this
+     * ever fails, bow has become a second spelling of rake. */
+    for (int i = 1; i < 4; i++) {
+      float t = (float)i / 4.0f;
+      float r = DioramaTiltedRowDepth(kZ, kAmount, 0.0f, t);
+      float b = DioramaTiltedRowDepth(kZ, 0.0f, kAmount, t);
+      CHECK(b < r);
+    }
+    /* Concretely at the midpoint: linear is half the displacement, quadratic a
+     * quarter. Hand-computed rather than via the function under test. */
+    CHECK(near(DioramaTiltedRowDepth(kZ, kAmount, 0.0f, 0.5f),
+               kZ + kAmount * 0.5f));
+    CHECK(near(DioramaTiltedRowDepth(kZ, 0.0f, kAmount, 0.5f),
+               kZ + kAmount * 0.25f));
+
+    /* Monotonic for a positive tilt either way: a non-monotonic plane would fold
+     * through itself. */
+    float prev_r = kZ - 1.0f, prev_b = kZ - 1.0f;
+    for (int i = 0; i <= 8; i++) {
+      float t = (float)i / 8.0f;
+      float r = DioramaTiltedRowDepth(kZ, kAmount, 0.0f, t);
+      float b = DioramaTiltedRowDepth(kZ, 0.0f, kAmount, t);
+      CHECK(r >= prev_r);
+      CHECK(b >= prev_b);
+      prev_r = r; prev_b = b;
+    }
+
+    /* Negative tilts go the other way, and a bow still eases. */
+    CHECK(near(DioramaTiltedRowDepth(kZ, 0.0f, -kAmount, 1.0f), kZ - kAmount));
+    CHECK(DioramaTiltedRowDepth(kZ, 0.0f, -kAmount, 0.5f) >
+          DioramaTiltedRowDepth(kZ, -kAmount, 0.0f, 0.5f));
+
+    /* They SUM: a gentle linear tilt with extra curve near the bottom. */
+    CHECK(near(DioramaTiltedRowDepth(kZ, 0.10f, 0.20f, 1.0f), kZ + 0.30f));
+    CHECK(near(DioramaTiltedRowDepth(kZ, 0.10f, 0.20f, 0.5f),
+               kZ + 0.10f * 0.5f + 0.20f * 0.25f));
+
+    /* t clamps, so a caller cannot project rows outside the layer. */
+    CHECK(near(DioramaTiltedRowDepth(kZ, kAmount, 0.0f, -1.0f), kZ));
+    CHECK(near(DioramaTiltedRowDepth(kZ, kAmount, 0.0f, 2.0f), kZ + kAmount));
+  }
+
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return 1; }
   puts("diorama_scroll_math_test: PASS");
   return 0;

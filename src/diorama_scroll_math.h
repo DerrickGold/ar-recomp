@@ -49,6 +49,21 @@ bool DioramaScrollPairIsInterpolable(const FrameSlot *curr,
 void DioramaInterpUvWindow(float region_u0, float region_u1, float du,
                            float slack, float *out_u0, float *out_u1);
 
+/* Depth of one ROW of a tilted plane, at 0..1 down the layer.
+ *
+ * `rake` displaces depth LINEARLY in t, so dz/dt is constant: every row moves,
+ * including those near the top, which is why a raked layer's parallax reads
+ * uniformly exaggerated -- the whole plane is spanning depth, not just the part
+ * that needed to. `bow` displaces it QUADRATICALLY, so dz/dt is 0 at the top and
+ * greatest at the bottom: the layer keeps its original depth behaviour where it
+ * meets the sky and bends forward only near the fold, which is where it has to
+ * reach the plane in front. Both land the bottom edge at z + (rake or bow).
+ *
+ * They sum, so a room can author a gentle linear tilt with an extra curve near the
+ * bottom. Returns z_world exactly when both are zero, which is what keeps every
+ * unauthored room bit-identical. */
+float DioramaTiltedRowDepth(float z_world, float rake, float bow, float t);
+
 /* THICKNESS: one vertex of the extruded near face ("skirt") below a layer.
  *
  * A thickness extrudes the plane's BOTTOM edge forward from `z` to
