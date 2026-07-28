@@ -34,6 +34,29 @@ int DioramaLayerOrder_PlaneFromToken(const char *token) {
   return -1;
 }
 
+static const char *const kStrategyNames[] = {
+  "flat", "rake", "bow", "thick", "stack", "voxel",
+};
+
+const char *DioramaLayerOrder_StrategyName(DioramaDepthStrategy strategy) {
+  if (strategy < 0 || strategy >= kDioramaDepth_StrategyCount) return "flat";
+  return kStrategyNames[strategy];
+}
+
+DioramaDepthStrategy DioramaLayerOrder_StrategyOf(
+    const DioramaResolvedLayer *l) {
+  if (!l) return kDioramaDepth_Flat;
+  /* Same precedence the renderer applies, most specific first. A plane can carry
+   * several keys at once -- the manifest deliberately allows it -- so this reports
+   * the one that dominates the look rather than pretending they are exclusive. */
+  if (l->stack > 0.0f && l->stack_solid) return kDioramaDepth_Voxel;
+  if (l->stack > 0.0f && l->stack_copies > 1) return kDioramaDepth_Stack;
+  if (l->thickness > 0.0f) return kDioramaDepth_Thick;
+  if (l->bow != 0.0f) return kDioramaDepth_Bow;
+  if (l->rake != 0.0f) return kDioramaDepth_Rake;
+  return kDioramaDepth_Flat;
+}
+
 static const struct { int direction; const char *token; } kStackDirTokens[] = {
   { kDioramaStack_Forward,  "forward" },
   { kDioramaStack_Backward, "backward" },
@@ -111,7 +134,7 @@ bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   if (!room || !room->used) return false;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     const DioramaPlaneOverride *o = &room->planes[plane];
-    if (o->set_order || o->set_z || o->set_alpha || o->set_rake ||
+    if (o->set_order || o->set_z || o->set_alpha || o->set_rake || o->set_bow ||
         o->set_thickness || o->set_stack || o->set_stack_copies ||
         o->set_stack_density || o->set_stack_direction || o->set_voxel ||
         o->set_voxel_copies)
@@ -163,6 +186,7 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
     if (o->set_z) out[i].z = o->z;
     if (o->set_alpha) out[i].alpha = o->alpha;
     if (o->set_rake) out[i].rake = o->rake;
+    if (o->set_bow) out[i].bow = o->bow;
     if (o->set_thickness) out[i].thickness = o->thickness;
     if (o->set_stack) out[i].stack = o->stack;
     if (o->set_stack_direction) out[i].stack_direction = o->stack_direction;
@@ -365,6 +389,17 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       edit.stack = (float)stack;
       edit.set_stack = true;
       touched = true;
+    } else if (!strcmp(word, "bow")) {
+      /* Signed like a rake, and the same range: a bow is a rake's curve, not a
+       * different quantity. */
+      double bow = strtod(value, &end);
+      if (end == value || (end && *end) || bow < -1.0 || bow > 1.0) {
+        if (out_error) *out_error = "bad bow (-1..1)";
+        return false;
+      }
+      edit.bow = (float)bow;
+      edit.set_bow = true;
+      touched = true;
     } else if (!strcmp(word, "voxel")) {
       double voxel = strtod(value, &end);
       if (end == value || (end && *end) || voxel < 0.0 || voxel > 1.0) {
@@ -466,6 +501,7 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     int plane = kPlaneTokens[i].plane;
     const DioramaPlaneOverride *o = &room->planes[plane];
     if (!o->set_order && !o->set_z && !o->set_alpha && !o->set_rake &&
+        !o->set_bow &&
         !o->set_thickness && !o->set_stack && !o->set_stack_copies &&
         !o->set_stack_density && !o->set_stack_direction && !o->set_voxel &&
         !o->set_voxel_copies)
@@ -477,6 +513,7 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     if (o->set_z) APPEND(" z:%.4g", (double)o->z);
     if (o->set_alpha) APPEND(" alpha:%u", (unsigned)o->alpha);
     if (o->set_rake) APPEND(" rake:%.4g", (double)o->rake);
+    if (o->set_bow) APPEND(" bow:%.4g", (double)o->bow);
     if (o->set_thickness) APPEND(" thick:%.4g", (double)o->thickness);
     if (o->set_stack) APPEND(" stack:%.4g", (double)o->stack);
     if (o->set_stack_copies) APPEND(" copies:%d", o->stack_copies);

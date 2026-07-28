@@ -720,6 +720,122 @@ static void TestVoxelResolve(void) {
   }
 }
 
+/* The STRATEGY enum is what the layer editor will cycle a plane through, so it has
+ * to name exactly one strategy per plane even though the manifest lets a plane
+ * carry several keys at once. */
+static void TestStrategyOf(void) {
+  DioramaResolvedLayer l;
+
+  /* An unauthored plane is Flat -- which is every plane in every shipped room, so
+   * getting this wrong mislabels the entire game. */
+  memset(&l, 0, sizeof(l));
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Flat);
+  CHECK(DioramaLayerOrder_StrategyOf(NULL) == kDioramaDepth_Flat);
+
+  memset(&l, 0, sizeof(l));
+  l.rake = 0.29f;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Rake);
+
+  memset(&l, 0, sizeof(l));
+  l.bow = 0.29f;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Bow);
+
+  memset(&l, 0, sizeof(l));
+  l.thickness = 0.20f;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Thick);
+
+  memset(&l, 0, sizeof(l));
+  l.stack = 0.29f; l.stack_copies = 4;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Stack);
+
+  memset(&l, 0, sizeof(l));
+  l.stack = 0.20f; l.stack_copies = 12; l.stack_solid = true;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Voxel);
+
+  /* PRECEDENCE, when a plane carries several. Most specific wins, matching the
+   * order the renderer applies them -- otherwise the editor's label would
+   * disagree with what is on screen. */
+  memset(&l, 0, sizeof(l));
+  l.rake = 0.29f; l.bow = 0.10f;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Bow);
+  l.thickness = 0.20f;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Thick);
+  l.stack = 0.29f; l.stack_copies = 4;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Stack);
+  l.stack_solid = true;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Voxel);
+
+  /* A stack depth with only ONE copy is not a stack -- the single copy is the
+   * plane itself -- so it must not be labelled one. */
+  memset(&l, 0, sizeof(l));
+  l.stack = 0.29f; l.stack_copies = 1;
+  CHECK(DioramaLayerOrder_StrategyOf(&l) == kDioramaDepth_Flat);
+
+  /* Every strategy has a distinct, non-empty name for the editor row. */
+  for (int a = 0; a < kDioramaDepth_StrategyCount; a++) {
+    const char *na = DioramaLayerOrder_StrategyName(a);
+    CHECK(na && na[0]);
+    for (int b = a + 1; b < kDioramaDepth_StrategyCount; b++)
+      CHECK(strcmp(na, DioramaLayerOrder_StrategyName(b)) != 0);
+  }
+  /* Out of range never returns NULL, since the editor prints it unconditionally. */
+  CHECK(DioramaLayerOrder_StrategyName(-1) != NULL);
+  CHECK(DioramaLayerOrder_StrategyName(kDioramaDepth_StrategyCount) != NULL);
+  /* Flat is 0 so a zeroed struct means "no depth", and the cheapest strategies
+   * come first so cycling forward escalates cost. */
+  CHECK(kDioramaDepth_Flat == 0);
+  CHECK(kDioramaDepth_Voxel == kDioramaDepth_StrategyCount - 1);
+}
+
+/* BOW resolves and round-trips like a rake, being the same quantity curved. */
+static void TestBowResolveAndRoundTrip(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kDioramaPlane_Bg2Hi].set_bow = true;
+  room->planes[kDioramaPlane_Bg2Hi].bow = 0.29f;
+
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  for (int i = 0; i < n; i++) {
+    if (out[i].plane == kDioramaPlane_Bg2Hi) {
+      CHECK(out[i].bow == 0.29f);
+      CHECK(out[i].rake == 0.0f);   /* independent of the linear tilt */
+      CHECK(DioramaLayerOrder_StrategyOf(&out[i]) == kDioramaDepth_Bow);
+    } else {
+      CHECK(out[i].bow == 0.0f);
+    }
+  }
+  /* A bow alone must not reorder. */
+  for (int i = 0; i < n; i++) CHECK(out[i].plane == kDefaults[i].plane);
+
+  DioramaRoomOverride parsed;
+  memset(&parsed, 0, sizeof(parsed));
+  const char *error = NULL;
+  CHECK(DioramaLayerOrder_ParseLine(&parsed, "bg2hi = bow:0.29", &error));
+  CHECK(parsed.planes[kDioramaPlane_Bg2Hi].bow == 0.29f);
+  CHECK(DioramaLayerOrder_ParseLine(&parsed, "bg1 = rake:0.1 bow:0.2", &error));
+  CHECK(parsed.planes[kPpuOverlaySource_Bg1].rake == 0.1f);
+  CHECK(parsed.planes[kPpuOverlaySource_Bg1].bow == 0.2f);
+  parsed.used = true; parsed.map_group = 0x01; parsed.map_number = 0x02;
+  CHECK(DioramaLayerOrder_RoomIsActive(&parsed));
+  char text[512];
+  CHECK(DioramaLayerOrder_FormatRoom(&parsed, text, sizeof(text)) > 0);
+  CHECK(strstr(text, "bow:0.29") != NULL);
+
+  const char *bad[] = { "bg2hi = bow:2", "bg2hi = bow:-2", "bg2hi = bow:abc" };
+  for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+    DioramaRoomOverride tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    error = NULL;
+    if (DioramaLayerOrder_ParseLine(&tmp, bad[i], &error)) {
+      printf("FAIL accepted bad bow line: %s\n", bad[i]);
+      g_failures++;
+    }
+  }
+}
+
 /* A rake-only room is a real override, so "Reset room" has something to undo and
  * the exporter must emit it. Getting RoomIsActive wrong here would make an
  * authored rake vanish on save. */
@@ -849,6 +965,8 @@ int main(void) {
   TestStackParseAndRoundTrip();
   TestStackDensityAndDirection();
   TestVoxelResolve();
+  TestBowResolveAndRoundTrip();
+  TestStrategyOf();
   TestRakeOnlyRoomIsActiveAndRoundTrips();
   TestRakeAndThicknessRejectBadValues();
   TestInactiveRoomEmitsNothing();

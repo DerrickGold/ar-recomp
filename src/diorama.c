@@ -831,12 +831,15 @@ bool Diorama_SaveLayerManifest(void) {
   fprintf(file,
           "# Diorama per-room layer overrides.\n"
           "# Section is [layers:GG:MM] with $18/$19 in hex; keys are\n"
-          "#   order:<slot>  z:<depth>  alpha:<0-255>  rake:<-1..1>"
+          "#   order:<slot>  z:<depth>  alpha:<0-255>  rake:<-1..1>  bow:<-1..1>"
           "  thick:<0..1>\n"
           "#   stack:<0..1>  copies:<1..8>  density:<per unit>  dir:<forward|"
           "backward|both>\n"
           "#   voxel:<0..1>  slices:<2..24>\n"
-          "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake),\n"
+          "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake);\n"
+          "# bow is the same tilt EASED, so the top keeps its original depth and\n"
+          "# only the bottom bends forward -- try bow first if a rake reads too\n"
+          "# strong.\n"
           "# which closes the void between two parallel planes at a tilted\n"
           "# camera. thick extrudes the plane's BOTTOM edge forward to\n"
           "# z+thickness instead, so the layer reads as a block with a near\n"
@@ -951,6 +954,7 @@ static const float kInterpUvSlackPx = 4.0f;
  * this costs no extra vertices and no extra draw calls; only the per-row z
  * changes. */
 static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
+                           float z_bow,
                            float u0, float v0, float u1, float v1,
                            float aspect_x, float height_scale,
                            int screen_w, int screen_h,
@@ -966,10 +970,9 @@ static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
       float t = (float)row / DIORAMA_SUBDIV_Y;
       float wx = (s - 0.5f) * aspect_x;
       float wy = (0.5f - t) * height_scale;
-      /* Branch rather than `z_world + z_rake * t` so an un-raked layer projects
-       * through the identical expression it always did -- bit-identical output
-       * for every room that authored nothing, which is nearly all of them. */
-      float wz = (z_rake == 0.0f) ? z_world : z_world + z_rake * t;
+      /* Linear rake plus eased bow; returns z_world untouched when both are zero,
+       * so an unauthored layer is bit-identical to what it always was. */
+      float wz = DioramaTiltedRowDepth(z_world, z_rake, z_bow, t);
       if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
                              &out_verts[vi].position))
         return;
@@ -1517,6 +1520,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       defaults[i].z = kDioramaLayers[i].z;
       defaults[i].alpha = kDioramaLayerAlphaOpaque;
       defaults[i].rake = 0.0f;
+      defaults[i].bow = 0.0f;
       defaults[i].thickness = 0.0f;
       defaults[i].stack = 0.0f;
       defaults[i].stack_copies = 0;
@@ -1535,6 +1539,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     if (!layer) continue;
     const float layer_z = resolved[i].z;
     const float layer_rake = resolved[i].rake;
+    const float layer_bow = resolved[i].bow;
     const float layer_thickness = resolved[i].thickness;
     const float layer_stack = resolved[i].stack;
     const int layer_stack_copies = resolved[i].stack_copies;
@@ -1627,7 +1632,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     DioramaInterpUvWindow(uv_v0, uv_v1, layer_dv, v_slack,
                           &layer_v0, &layer_v1);
     BuildLayerMesh(mvp,
-                   z_world, layer_rake, layer_u0, layer_v0,
+                   z_world, layer_rake, layer_bow, layer_u0, layer_v0,
                    layer_u1, layer_v1,
                    aspect_x, height_scale, out_w, out_h, shade,
                    verts, indices, &nv, &ni);
@@ -1683,7 +1688,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         copy_color.a *= copy_alpha;
         /* Rake is passed through so a room authoring both keeps every copy on
          * the same tilt rather than mixing tilted and flat slices. */
-        BuildLayerMesh(mvp, copy_z, layer_rake, layer_u0, layer_v0,
+        BuildLayerMesh(mvp, copy_z, layer_rake, layer_bow, layer_u0, layer_v0,
                        layer_u1, layer_v1, aspect_x, height_scale,
                        out_w, out_h, copy_color,
                        stack_verts, stack_indices, &stack_nv, &stack_ni);
@@ -1718,7 +1723,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       int skirt_nv = 0, skirt_ni = 0;
       SDL_Vertex skirt_verts[DIORAMA_VERTS_PER_LAYER];
       int skirt_indices[DIORAMA_INDICES_PER_LAYER];
-      BuildLayerSkirtMesh(mvp, z_world, layer_rake, layer_thickness,
+      BuildLayerSkirtMesh(mvp, z_world, layer_rake + layer_bow, layer_thickness,
                           layer_u0, layer_u1, layer_v1,
                           aspect_x, height_scale, out_w, out_h, shade,
                           skirt_verts, skirt_indices, &skirt_nv, &skirt_ni);

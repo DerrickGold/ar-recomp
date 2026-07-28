@@ -266,3 +266,19 @@ void DioramaStackCopyShaped(int index, int copies, float z_base, float depth,
   if (out_shade) *out_shade = shade;
   if (out_alpha) *out_alpha = alpha;
 }
+
+/* ── tilt: linear rake and eased bow ──────────────────────────────────── */
+
+float DioramaTiltedRowDepth(float z_world, float rake, float bow, float t) {
+  /* Early-out for the no-tilt case, which is nearly every layer in nearly every
+   * room. Note this is NOT what makes an unauthored layer bit-identical: for any
+   * z a layer actually uses, `z + 0*t + 0*t*t` already equals z exactly (the only
+   * float where it would not is -0.0). It is here because it is the common path
+   * and skipping two multiplies and two adds per vertex is free, and because it
+   * documents that no-tilt is exactly no-op. A mutation removing it therefore
+   * cannot be caught by a test, which is why there is no test asserting it. */
+  if (rake == 0.0f && bow == 0.0f) return z_world;
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
+  return z_world + rake * t + bow * t * t;
+}
