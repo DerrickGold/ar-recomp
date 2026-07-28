@@ -835,6 +835,7 @@ bool Diorama_SaveLayerManifest(void) {
           "  thick:<0..1>\n"
           "#   stack:<0..1>  copies:<1..8>  density:<per unit>  dir:<forward|"
           "backward|both>\n"
+          "#   voxel:<0..1>  slices:<2..24>\n"
           "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake),\n"
           "# which closes the void between two parallel planes at a tilted\n"
           "# camera. thick extrudes the plane's BOTTOM edge forward to\n"
@@ -843,8 +844,9 @@ bool Diorama_SaveLayerManifest(void) {
           "# gap with PARALLEL repeats -- unlike rake it never tilts, so the\n"
           "# layer keeps one parallax rate. dir picks which side of the plane to\n"
           "# fill (forward = toward the camera, the default); density sets slices\n"
-          "# per unit depth so spacing stays consistent across rooms. All\n"
-          "# compose.\n\n");
+          "# per unit depth so spacing stays consistent across rooms. voxel is a\n"
+          "# dense unfaded stack: it extrudes the layer as one SOLID object and,\n"
+          "# unlike thick, respects the art's silhouette. All compose.\n\n");
   int written = 0;
   for (int i = 0; i < g_layer_overrides.count; i++) {
     const DioramaRoomOverride *r = &g_layer_overrides.rooms[i];
@@ -1518,6 +1520,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       defaults[i].thickness = 0.0f;
       defaults[i].stack = 0.0f;
       defaults[i].stack_copies = 0;
+      defaults[i].stack_direction = kDioramaStack_Forward;
+      defaults[i].stack_solid = false;
     }
     extern uint8 g_ram[0x20000];
     resolved_count = DioramaLayerOrder_Resolve(
@@ -1535,6 +1539,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     const float layer_stack = resolved[i].stack;
     const int layer_stack_copies = resolved[i].stack_copies;
     const int layer_stack_dir = resolved[i].stack_direction;
+    const bool layer_stack_solid = resolved[i].stack_solid;
     if (layer->visible && !*layer->visible) continue;
     /* A5 (followup doc): with diorama_hud_flat on, BG3 is deliberately not
      * captured as a diorama layer (actraiser_rtl.c) and the anchored flat
@@ -1668,9 +1673,9 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         if (DioramaStackCopyIsRedundant(c, layer_stack_copies, layer_stack_dir))
           continue;
         float copy_z = z_world, copy_shade = 1.0f, copy_alpha = 1.0f;
-        DioramaStackCopyDirected(c, layer_stack_copies, z_world, layer_stack,
-                                 layer_stack_dir, &copy_z, &copy_shade,
-                                 &copy_alpha);
+        DioramaStackCopyShaped(c, layer_stack_copies, z_world, layer_stack,
+                               layer_stack_dir, layer_stack_solid, &copy_z,
+                               &copy_shade, &copy_alpha);
         SDL_FColor copy_color = shade;
         copy_color.r *= copy_shade;
         copy_color.g *= copy_shade;

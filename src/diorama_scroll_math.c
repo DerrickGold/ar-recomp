@@ -245,3 +245,24 @@ bool DioramaStackCopyIsRedundant(int index, int copies, int direction) {
   /* Forward and backward both start at the plane. */
   return index == 0;
 }
+
+/* Uniform tint on a voxel's copies. Not a depth falloff -- see the header: a solid
+ * object's back half must not read as fog. Just enough that an extruded layer is
+ * distinguishable from the flat one it replaces. */
+static const float kVoxelShade = 0.88f;
+
+void DioramaStackCopyShaped(int index, int copies, float z_base, float depth,
+                            int direction, bool solid, float *out_z,
+                            float *out_shade, float *out_alpha) {
+  float z = z_base, shade = 1.0f, alpha = 1.0f;
+  DioramaStackCopyDirected(index, copies, z_base, depth, direction, &z, &shade,
+                           &alpha);
+  if (solid) {
+    /* Depth is shared with the stack; only the falloff differs. */
+    shade = kVoxelShade;
+    alpha = 1.0f;
+  }
+  if (out_z) *out_z = z;
+  if (out_shade) *out_shade = shade;
+  if (out_alpha) *out_alpha = alpha;
+}

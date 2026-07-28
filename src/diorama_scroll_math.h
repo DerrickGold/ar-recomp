@@ -1,5 +1,6 @@
 #ifndef DIORAMA_SCROLL_MATH_H
 #define DIORAMA_SCROLL_MATH_H
+#include <stdbool.h>  /* the shape predicates below take/return bool */
 #include "present.h"   /* FrameSlot, DioramaScrollSnapshot, DioramaScrollDelta */
 
 /* R17/C4: "this present carries no sub-tick phase" — screenshots, the headless
@@ -117,6 +118,22 @@ void DioramaStackCopy(int index, int copies, float z_base, float depth,
 void DioramaStackCopyDirected(int index, int copies, float z_base, float depth,
                               int direction, float *out_z, float *out_shade,
                               float *out_alpha);
+
+/* Same again, with `solid` selecting a VOXEL fill: identical depth arithmetic, but
+ * no shade or alpha falloff.
+ *
+ * A stack fades so the eye reads separate things receding into the distance. A
+ * voxel must NOT fade, because it is one object with volume -- a falloff would
+ * make its own back half look like fog. The copies still carry the layer's own
+ * alpha, so a captured layer's transparent regions stay transparent and each art
+ * island extrudes itself; that silhouette behaviour is the reason a voxel exists
+ * rather than a thickness, whose skirt hangs from the quad's bottom edge.
+ *
+ * A slight uniform darkening is still applied so a voxel is distinguishable from
+ * the flat layer it extrudes; it does not vary with depth. */
+void DioramaStackCopyShaped(int index, int copies, float z_base, float depth,
+                            int direction, bool solid, float *out_z,
+                            float *out_shade, float *out_alpha);
 
 /* True when a copy at `index` of `copies` is worth drawing at all: in range and
  * not fully transparent. The caller's loop guard, so the "is this a wasted draw"

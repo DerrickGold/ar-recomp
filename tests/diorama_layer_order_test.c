@@ -603,6 +603,123 @@ static void TestStackDensityAndDirection(void) {
   }
 }
 
+/* VOXEL resolves onto the stack fields plus the solid flag, with its own higher
+ * cap: solidity is a function of how close consecutive slices land, so it needs
+ * many more than a stack whose job is to read as distinguishable layers. */
+static void TestVoxelResolve(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kPpuOverlaySource_Bg1].set_voxel = true;
+  room->planes[kPpuOverlaySource_Bg1].voxel = 0.20f;
+
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  for (int i = 0; i < n; i++) {
+    if (out[i].plane == kPpuOverlaySource_Bg1) {
+      CHECK(out[i].stack == 0.20f);        /* shares the stack's depth field */
+      CHECK(out[i].stack_solid);
+      /* A voxel default must be dense enough to read as solid, so it is much
+       * higher than the stack default -- otherwise `voxel:` alone looks striped. */
+      CHECK(out[i].stack_copies == kDioramaVoxelCopiesDefault);
+      CHECK(out[i].stack_copies > kDioramaStackCopiesDefault);
+    } else {
+      CHECK(!out[i].stack_solid);          /* per-plane, never global */
+      CHECK(out[i].stack == 0.0f);
+    }
+  }
+  /* Neither reorders nor tilts. */
+  for (int i = 0; i < n; i++) {
+    CHECK(out[i].plane == kDefaults[i].plane);
+    CHECK(out[i].rake == 0.0f);
+  }
+
+  /* An explicit slice count wins, and is clamped to the VOXEL cap (not the
+   * stack's), since that is the budget the author opted into. */
+  room->planes[kPpuOverlaySource_Bg1].set_voxel_copies = true;
+  room->planes[kPpuOverlaySource_Bg1].voxel_copies = kDioramaVoxelMax;
+  n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount,
+                                out, 16);
+  for (int i = 0; i < n; i++)
+    if (out[i].plane == kPpuOverlaySource_Bg1)
+      CHECK(out[i].stack_copies == kDioramaVoxelMax);
+  CHECK(kDioramaVoxelMax > kDioramaStackMax);
+
+  /* The resolve-side clamp is defence in depth: the PARSER already rejects
+   * slices > kDioramaVoxelMax, so a manifest cannot reach this -- but the editor
+   * and any future caller set the struct field directly, and an unclamped count
+   * blows the per-frame draw budget. Set it out of range on purpose. */
+  room->planes[kPpuOverlaySource_Bg1].voxel_copies = kDioramaVoxelMax + 50;
+  n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount,
+                                out, 16);
+  for (int i = 0; i < n; i++)
+    if (out[i].plane == kPpuOverlaySource_Bg1)
+      CHECK(out[i].stack_copies == kDioramaVoxelMax);
+
+  /* A voxel authored alongside a stack WINS -- it is the more specific intent,
+   * and silently blending the two would give neither. */
+  memset(&table, 0, sizeof(table));
+  room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kPpuOverlaySource_Bg1].set_stack = true;
+  room->planes[kPpuOverlaySource_Bg1].stack = 0.50f;
+  room->planes[kPpuOverlaySource_Bg1].set_voxel = true;
+  room->planes[kPpuOverlaySource_Bg1].voxel = 0.20f;
+  n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount,
+                                out, 16);
+  for (int i = 0; i < n; i++)
+    if (out[i].plane == kPpuOverlaySource_Bg1) {
+      CHECK(out[i].stack == 0.20f);
+      CHECK(out[i].stack_solid);
+    }
+
+  /* Parse, bounds, activity, round-trip. */
+  DioramaRoomOverride parsed;
+  memset(&parsed, 0, sizeof(parsed));
+  const char *error = NULL;
+  CHECK(DioramaLayerOrder_ParseLine(&parsed, "bg1 = voxel:0.20 slices:16",
+                                    &error));
+  CHECK(parsed.planes[kPpuOverlaySource_Bg1].voxel == 0.20f);
+  CHECK(parsed.planes[kPpuOverlaySource_Bg1].voxel_copies == 16);
+  parsed.used = true; parsed.map_group = 0x01; parsed.map_number = 0x02;
+  CHECK(DioramaLayerOrder_RoomIsActive(&parsed));
+  char text[512];
+  CHECK(DioramaLayerOrder_FormatRoom(&parsed, text, sizeof(text)) > 0);
+  CHECK(strstr(text, "voxel:0.2") != NULL);
+  CHECK(strstr(text, "slices:16") != NULL);
+
+  const char *bad[] = {
+    "bg1 = voxel:-0.1", "bg1 = voxel:9", "bg1 = voxel:abc",
+    "bg1 = slices:1",   /* one slice is not an extrusion */
+    "bg1 = slices:25",  /* past the voxel cap */
+    "bg1 = slices:abc",
+  };
+  for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+    DioramaRoomOverride tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    error = NULL;
+    if (DioramaLayerOrder_ParseLine(&tmp, bad[i], &error)) {
+      printf("FAIL accepted bad voxel line: %s\n", bad[i]);
+      g_failures++;
+    }
+  }
+
+  /* `slices:` with no `voxel:` is inert rather than inventing a depth -- but it
+   * still marks the room active so the value survives a round trip. */
+  DioramaLayerOrderTable lone;
+  memset(&lone, 0, sizeof(lone));
+  DioramaRoomOverride *r2 = DioramaLayerOrder_FindOrAdd(&lone, 0x02, 0x01);
+  r2->planes[kPpuOverlaySource_Bg1].set_voxel_copies = true;
+  r2->planes[kPpuOverlaySource_Bg1].voxel_copies = 16;
+  CHECK(DioramaLayerOrder_RoomIsActive(r2));
+  n = DioramaLayerOrder_Resolve(&lone, 0x02, 0x01, kDefaults, kDefaultCount,
+                                out, 16);
+  for (int i = 0; i < n; i++) {
+    CHECK(!out[i].stack_solid);
+    CHECK(out[i].stack == 0.0f);
+  }
+}
+
 /* A rake-only room is a real override, so "Reset room" has something to undo and
  * the exporter must emit it. Getting RoomIsActive wrong here would make an
  * authored rake vanish on save. */
@@ -731,6 +848,7 @@ int main(void) {
   TestStackResolve();
   TestStackParseAndRoundTrip();
   TestStackDensityAndDirection();
+  TestVoxelResolve();
   TestRakeOnlyRoomIsActiveAndRoundTrips();
   TestRakeAndThicknessRejectBadValues();
   TestInactiveRoomEmitsNothing();

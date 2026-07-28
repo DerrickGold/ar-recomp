@@ -113,7 +113,8 @@ bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
     const DioramaPlaneOverride *o = &room->planes[plane];
     if (o->set_order || o->set_z || o->set_alpha || o->set_rake ||
         o->set_thickness || o->set_stack || o->set_stack_copies ||
-        o->set_stack_density || o->set_stack_direction)
+        o->set_stack_density || o->set_stack_direction || o->set_voxel ||
+        o->set_voxel_copies)
       return true;
   }
   return false;
@@ -177,6 +178,22 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
     } else if (o->set_stack) {
       out[i].stack_copies = kDioramaStackCopiesDefault;
     }
+    /* A voxel resolves onto the SAME stack fields -- the geometry is identical,
+     * only the falloff and the cap differ -- plus the solid flag the renderer
+     * keys the fade off. Authored after the stack keys so a room that sets both
+     * gets the voxel, which is the more specific intent. */
+    if (o->set_voxel) {
+      out[i].stack = o->voxel;
+      out[i].stack_solid = true;
+      out[i].stack_copies = o->set_voxel_copies ? o->voxel_copies
+                                                : kDioramaVoxelCopiesDefault;
+      if (out[i].stack_copies > kDioramaVoxelMax)
+        out[i].stack_copies = kDioramaVoxelMax;
+    }
+    /* `slices:` with no `voxel:` is deliberately inert: a count without a depth
+     * is not a shape, and inventing a depth the author never asked for would be
+     * worse than doing nothing. It still marks the room active, so the value
+     * survives an export/re-import round trip. */
     if (o->set_order) keys[i] = o->order;
   }
   if (!active) return n;
@@ -348,6 +365,25 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       edit.stack = (float)stack;
       edit.set_stack = true;
       touched = true;
+    } else if (!strcmp(word, "voxel")) {
+      double voxel = strtod(value, &end);
+      if (end == value || (end && *end) || voxel < 0.0 || voxel > 1.0) {
+        if (out_error) *out_error = "bad voxel (0..1)";
+        return false;
+      }
+      edit.voxel = (float)voxel;
+      edit.set_voxel = true;
+      touched = true;
+    } else if (!strcmp(word, "slices")) {
+      long slices = strtol(value, &end, 10);
+      if (end == value || (end && *end) || slices < 2 ||
+          slices > kDioramaVoxelMax) {
+        if (out_error) *out_error = "bad slices (2..24)";
+        return false;
+      }
+      edit.voxel_copies = (int)slices;
+      edit.set_voxel_copies = true;
+      touched = true;
     } else if (!strcmp(word, "density")) {
       /* Copies per unit depth. Upper bound is generous because the resolved count
        * is clamped anyway; this only rejects nonsense. */
@@ -431,7 +467,8 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     const DioramaPlaneOverride *o = &room->planes[plane];
     if (!o->set_order && !o->set_z && !o->set_alpha && !o->set_rake &&
         !o->set_thickness && !o->set_stack && !o->set_stack_copies &&
-        !o->set_stack_density && !o->set_stack_direction)
+        !o->set_stack_density && !o->set_stack_direction && !o->set_voxel &&
+        !o->set_voxel_copies)
       continue;
     /* Emit only the authored knobs, so a re-import reproduces exactly this
      * override rather than pinning the two the author never touched. */
@@ -443,6 +480,8 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     if (o->set_thickness) APPEND(" thick:%.4g", (double)o->thickness);
     if (o->set_stack) APPEND(" stack:%.4g", (double)o->stack);
     if (o->set_stack_copies) APPEND(" copies:%d", o->stack_copies);
+    if (o->set_voxel) APPEND(" voxel:%.4g", (double)o->voxel);
+    if (o->set_voxel_copies) APPEND(" slices:%d", o->voxel_copies);
     if (o->set_stack_density) APPEND(" density:%.4g", (double)o->stack_density);
     if (o->set_stack_direction)
       APPEND(" dir:%s", DioramaLayerOrder_StackDirectionToken(
