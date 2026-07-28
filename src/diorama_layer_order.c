@@ -81,7 +81,9 @@ bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   if (!room || !room->used) return false;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     const DioramaPlaneOverride *o = &room->planes[plane];
-    if (o->set_order || o->set_z || o->set_alpha) return true;
+    if (o->set_order || o->set_z || o->set_alpha || o->set_rake ||
+        o->set_thickness)
+      return true;
   }
   return false;
 }
@@ -128,6 +130,8 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
     if (!o) continue;
     if (o->set_z) out[i].z = o->z;
     if (o->set_alpha) out[i].alpha = o->alpha;
+    if (o->set_rake) out[i].rake = o->rake;
+    if (o->set_thickness) out[i].thickness = o->thickness;
     if (o->set_order) keys[i] = o->order;
   }
   if (!active) return n;
@@ -276,6 +280,30 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       edit.alpha = (uint8_t)a;
       edit.set_alpha = true;
       touched = true;
+    } else if (!strcmp(word, "rake")) {
+      /* Signed: a negative rake tilts the bottom edge AWAY, which is the right
+       * shape for a ceiling. Bounded to one world unit so a typo cannot fling a
+       * plane through the camera. */
+      double rake = strtod(value, &end);
+      if (end == value || (end && *end) || rake < -1.0 || rake > 1.0) {
+        if (out_error) *out_error = "bad rake (-1..1)";
+        return false;
+      }
+      edit.rake = (float)rake;
+      edit.set_rake = true;
+      touched = true;
+    } else if (!strcmp(word, "thick")) {
+      /* Reserved: parsed and round-tripped so authored files survive, but
+       * nothing consumes it yet. Non-negative -- a thickness extrudes forward
+       * only; use rake for the other direction. */
+      double thickness = strtod(value, &end);
+      if (end == value || (end && *end) || thickness < 0.0 || thickness > 1.0) {
+        if (out_error) *out_error = "bad thick (0..1)";
+        return false;
+      }
+      edit.thickness = (float)thickness;
+      edit.set_thickness = true;
+      touched = true;
     } else {
       if (out_error) *out_error = "unknown key";
       return false;
@@ -315,13 +343,17 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
   for (int i = 0; i < kPlaneTokenCount; i++) {
     int plane = kPlaneTokens[i].plane;
     const DioramaPlaneOverride *o = &room->planes[plane];
-    if (!o->set_order && !o->set_z && !o->set_alpha) continue;
+    if (!o->set_order && !o->set_z && !o->set_alpha && !o->set_rake &&
+        !o->set_thickness)
+      continue;
     /* Emit only the authored knobs, so a re-import reproduces exactly this
      * override rather than pinning the two the author never touched. */
     APPEND("%s =", kPlaneTokens[i].token);
     if (o->set_order) APPEND(" order:%d", o->order);
     if (o->set_z) APPEND(" z:%.4g", (double)o->z);
     if (o->set_alpha) APPEND(" alpha:%u", (unsigned)o->alpha);
+    if (o->set_rake) APPEND(" rake:%.4g", (double)o->rake);
+    if (o->set_thickness) APPEND(" thick:%.4g", (double)o->thickness);
     APPEND("\n");
   }
 #undef APPEND

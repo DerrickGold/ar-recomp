@@ -67,6 +67,33 @@ typedef struct DioramaPlaneOverride {
   float z;
   bool set_alpha;
   uint8_t alpha;
+  /* RAKE — the layer stops being parallel to the screen and tilts in depth: its
+   * TOP edge keeps `z`, its BOTTOM edge sits at `z + rake`. Positive rakes the
+   * bottom toward the camera.
+   *
+   * This exists because two parallel planes at different depths leave a visible
+   * VOID between them once the diorama camera tilts — you see past the near
+   * plane's bottom edge into the gap. Fillmore act 2 is the reported case: the
+   * water is Bg2Hi at z=0.21 and the rock path is Bg1 at z=0.50, so the water
+   * appears to float behind a hole. Raking the water forward until its near edge
+   * meets the rock's depth closes the gap, and for a water surface viewed from
+   * an angle it is also the physically right shape -- a surface receding into
+   * the distance rather than a billboard.
+   *
+   * Free-form rather than "snap to the next layer": the converging target is a
+   * judgement call per room, and the editor can offer the snap as a preset
+   * without the data model hard-coding it. */
+  bool set_rake;
+  float rake;
+  /* THICKNESS — reserved, currently INERT. Intended as the solid-volume
+   * alternative to a rake: extrude the plane from `z` to `z + thickness` so it
+   * reads as a block with a near face, rather than a tilted surface. Parsed,
+   * stored, exported and shown by the editor so authored files do not have to
+   * be rewritten when it lands, but nothing consumes it yet. Kept distinct from
+   * `rake` because they are different shapes, not two spellings of one, and a
+   * room may eventually want both. */
+  bool set_thickness;
+  float thickness;
 } DioramaPlaneOverride;
 
 typedef struct DioramaRoomOverride {
@@ -86,6 +113,8 @@ typedef struct DioramaResolvedLayer {
   int plane;
   float z;
   uint8_t alpha;
+  float rake;       /* bottom edge sits at z + rake; 0 = parallel, as today */
+  float thickness;  /* reserved, inert -- see DioramaPlaneOverride */
 } DioramaResolvedLayer;
 
 /* Find a room, or NULL. Pure lookup, no insertion. */

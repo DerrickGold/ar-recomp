@@ -1,4 +1,6 @@
 #include "diorama.h"
+#include "actraiser_game.h"
+#include "diorama_layer_order.h"
 #include "diorama_skybox_uv.h"
 #include "camera_orbit.h"
 #include "diorama_scroll_math.h"   /* R17/C1: DioramaInterpUvWindow */
@@ -7,6 +9,7 @@
 #include "snes/ppu.h"
 #include "user_data_dir.h"
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -718,6 +721,140 @@ static const DioramaLayerDesc kDioramaLayers[] = {
 static const int kDioramaLayerCount =
     (int)(sizeof(kDioramaLayers) / sizeof(kDioramaLayers[0]));
 
+/* Per-room ($18,$19) layer overrides. The editor mutates this; the draw loop
+ * reads it. Empty by default, and DioramaLayerOrder_Resolve on an empty table
+ * returns the defaults verbatim in built-in order, so an unedited game is
+ * bit-identical to before this existed. */
+static DioramaLayerOrderTable g_layer_overrides;
+
+DioramaLayerOrderTable *Diorama_LayerOverrides(void) {
+  return &g_layer_overrides;
+}
+
+static const DioramaLayerDesc *DioramaDescForPlane(int plane) {
+  for (int i = 0; i < kDioramaLayerCount; i++)
+    if (kDioramaLayers[i].plane == plane) return &kDioramaLayers[i];
+  return NULL;
+}
+
+/* ── layer manifest I/O ──────────────────────────────────────────────────
+ *
+ * `diorama-layers.ini` beside settings.ini. Sections are rooms, bodies are
+ * planes:
+ *
+ *     [layers:01:02]          ; $18=01 $19=02 -- Fillmore act 2
+ *     bg2hi = rake:0.29       ; flood the water forward to meet the rock path
+ *     bg2   = z:0.30 alpha:200
+ *
+ * The grammar and every bound live in diorama_layer_order.c, which is pure and
+ * tested; this is only the file wrapper. A malformed line is reported and
+ * SKIPPED rather than aborting the load, so one typo cannot cost every other
+ * authored room. */
+static const char kLayerManifestLeaf[] = "diorama-layers.ini";
+
+void Diorama_LoadLayerManifest(void) {
+  char path[1024];
+  UserDataFile(path, sizeof path, kLayerManifestLeaf);
+  FILE *file = fopen(path, "r");
+  if (!file) return;  /* absent is the normal case, not an error */
+
+  memset(&g_layer_overrides, 0, sizeof(g_layer_overrides));
+  DioramaRoomOverride *room = NULL;
+  char line[512];
+  int rooms = 0, planes = 0, bad = 0, line_number = 0;
+  while (fgets(line, sizeof line, file)) {
+    line_number++;
+    char *at = line;
+    while (*at == ' ' || *at == '\t') at++;
+    /* Strip a trailing comment BEFORE trimming, so `bg2hi = rake:0.29  ; why`
+     * parses. The grammar in diorama_layer_order.c is whitespace-delimited
+     * key:value only and would reject the `;` as a malformed pair -- inline
+     * comments are a property of this file format, so they belong here rather
+     * than in the pure parser. Section lines never needed this (ParseSection
+     * only ever sees what is inside the brackets), which is exactly why the
+     * first documented example looked fine and its second line did not. */
+    for (char *scan = at; *scan; scan++) {
+      if (*scan == ';' || *scan == '#') { *scan = '\0'; break; }
+    }
+    char *end = at + strlen(at);
+    while (end > at && (end[-1] == '\n' || end[-1] == '\r' ||
+                        end[-1] == ' ' || end[-1] == '\t'))
+      *--end = '\0';
+    if (!*at) continue;
+
+    if (*at == '[') {
+      char *close = strchr(at, ']');
+      if (!close) { bad++; continue; }
+      *close = '\0';
+      uint8_t group = 0, map = 0;
+      if (!DioramaLayerOrder_ParseSection(at + 1, &group, &map)) {
+        /* Not one of ours -- a foreign section just ends the current room. */
+        room = NULL;
+        continue;
+      }
+      room = DioramaLayerOrder_FindOrAdd(&g_layer_overrides, group, map);
+      if (!room) {
+        fprintf(stderr, "[diorama-layers] %s:%d: table full, room dropped\n",
+                kLayerManifestLeaf, line_number);
+        bad++;
+      } else {
+        rooms++;
+      }
+      continue;
+    }
+    if (!room) continue;
+    const char *error = NULL;
+    if (DioramaLayerOrder_ParseLine(room, at, &error)) {
+      planes++;
+    } else {
+      bad++;
+      fprintf(stderr, "[diorama-layers] %s:%d: %s -- line skipped\n",
+              kLayerManifestLeaf, line_number, error ? error : "bad line");
+    }
+  }
+  fclose(file);
+  fprintf(stderr,
+          "[diorama-layers] loaded %s: %d room(s), %d plane override(s)%s\n",
+          path, rooms, planes, bad ? ", some lines skipped" : "");
+}
+
+bool Diorama_SaveLayerManifest(void) {
+  char path[1024];
+  UserDataFile(path, sizeof path, kLayerManifestLeaf);
+  FILE *file = fopen(path, "w");
+  if (!file) {
+    fprintf(stderr, "[diorama-layers] cannot write %s\n", path);
+    return false;
+  }
+  fprintf(file,
+          "# Diorama per-room layer overrides.\n"
+          "# Section is [layers:GG:MM] with $18/$19 in hex; keys are\n"
+          "#   order:<slot>  z:<depth>  alpha:<0-255>  rake:<-1..1>"
+          "  thick:<0..1>\n"
+          "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake),\n"
+          "# which closes the void between two parallel planes at a tilted\n"
+          "# camera. thick is reserved and currently has no effect.\n\n");
+  int written = 0;
+  for (int i = 0; i < g_layer_overrides.count; i++) {
+    const DioramaRoomOverride *r = &g_layer_overrides.rooms[i];
+    if (!DioramaLayerOrder_RoomIsActive(r)) continue;
+    char text[1024];
+    size_t need = DioramaLayerOrder_FormatRoom(r, text, sizeof text);
+    if (need == 0) continue;
+    if (need >= sizeof text) {
+      fprintf(stderr, "[diorama-layers] room %02X:%02X too long, skipped\n",
+              r->map_group, r->map_number);
+      continue;
+    }
+    fputs(text, file);
+    fputc('\n', file);
+    written++;
+  }
+  fclose(file);
+  fprintf(stderr, "[diorama-layers] wrote %s (%d room(s))\n", path, written);
+  return true;
+}
+
 /* ── 3D projection ───────────────────────────────────────────────────── */
 
 #define DIORAMA_SUBDIV_X 8
@@ -785,7 +922,22 @@ static const float kInterpUvSlackPx = 4.0f;
  * otherwise the same source rows would be stretched over the full height and
  * reserving the margin would read as a vertical zoom the moment the setting is
  * toggled. aspect_x is compensated by the caller for the same reason. */
-static void BuildLayerMesh(const float mvp[16], float z_world,
+/* `z_rake` tilts the plane in DEPTH: the top edge stays at `z_world`, the bottom
+ * edge lands at `z_world + z_rake`. Zero keeps the plane parallel to the screen,
+ * which is what every unedited room uses.
+ *
+ * Why this exists: two parallel planes at different depths leave a visible VOID
+ * between them once the camera tilts — you see past the near plane's bottom edge
+ * into the gap behind it. Fillmore act 2 is the reported case (water at Bg2Hi
+ * z=0.21, rock path at Bg1 z=0.50: the water reads as floating behind a hole).
+ * Raking the far plane forward until its near edge meets the near plane's depth
+ * closes the gap, and for a water surface seen at an angle it is also the right
+ * shape — a surface receding into the distance rather than a billboard.
+ *
+ * The mesh was already subdivided DIORAMA_SUBDIV_Y deep for the projection, so
+ * this costs no extra vertices and no extra draw calls; only the per-row z
+ * changes. */
+static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
                            float u0, float v0, float u1, float v1,
                            float aspect_x, float height_scale,
                            int screen_w, int screen_h,
@@ -801,7 +953,11 @@ static void BuildLayerMesh(const float mvp[16], float z_world,
       float t = (float)row / DIORAMA_SUBDIV_Y;
       float wx = (s - 0.5f) * aspect_x;
       float wy = (0.5f - t) * height_scale;
-      if (!ProjectWorldPoint(mvp, wx, wy, z_world, screen_w, screen_h,
+      /* Branch rather than `z_world + z_rake * t` so an un-raked layer projects
+       * through the identical expression it always did -- bit-identical output
+       * for every room that authored nothing, which is nearly all of them. */
+      float wz = (z_rake == 0.0f) ? z_world : z_world + z_rake * t;
+      if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
                              &out_verts[vi].position))
         return;
       out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
@@ -1270,8 +1426,32 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   int indices[DIORAMA_INDICES_PER_LAYER];
   int nv, ni;
 
-  for (int i = 0; i < kDioramaLayerCount; i++) {
-    const DioramaLayerDesc *layer = &kDioramaLayers[i];
+  /* Resolve this room's authored overrides once per frame. On an empty table
+   * this returns the built-in table verbatim, in built-in order, so an unedited
+   * room draws exactly as it did before overrides existed. */
+  DioramaResolvedLayer resolved[kDioramaLayerCount];
+  int resolved_count;
+  {
+    DioramaResolvedLayer defaults[kDioramaLayerCount];
+    for (int i = 0; i < kDioramaLayerCount; i++) {
+      defaults[i].plane = kDioramaLayers[i].plane;
+      defaults[i].z = kDioramaLayers[i].z;
+      defaults[i].alpha = kDioramaLayerAlphaOpaque;
+      defaults[i].rake = 0.0f;
+      defaults[i].thickness = 0.0f;
+    }
+    extern uint8 g_ram[0x20000];
+    resolved_count = DioramaLayerOrder_Resolve(
+        &g_layer_overrides, g_ram[kActRaiserWram_MapGroup],
+        g_ram[kActRaiserWram_CurrentMap], defaults, kDioramaLayerCount,
+        resolved, kDioramaLayerCount);
+  }
+
+  for (int i = 0; i < resolved_count; i++) {
+    const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
+    if (!layer) continue;
+    const float layer_z = resolved[i].z;
+    const float layer_rake = resolved[i].rake;
     if (layer->visible && !*layer->visible) continue;
     /* A5 (followup doc): with diorama_hud_flat on, BG3 is deliberately not
      * captured as a diorama layer (actraiser_rtl.c) and the anchored flat
@@ -1311,10 +1491,12 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       1.0f + (layer->shade.r - 1.0f) * shade_mix,
       1.0f + (layer->shade.g - 1.0f) * shade_mix,
       1.0f + (layer->shade.b - 1.0f) * shade_mix,
-      layer->shade.a,
+      /* Authored alpha multiplies the layer's built-in shade alpha, so an
+       * un-authored plane (255) is exactly today's value. */
+      layer->shade.a * ((float)resolved[i].alpha / 255.0f),
     };
 
-    float z_world = layer->z - 0.5f;
+    float z_world = layer_z - 0.5f;
     /* M7/§6.2-6.3: shift this layer's UV window by its BG's interpolated
      * sub-tick scroll delta. Each layer uses its OWN BG's delta (parallax:
      * BG2 typically scrolls slower than BG1), so the differing per-layer
@@ -1357,7 +1539,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     DioramaInterpUvWindow(uv_v0, uv_v1, layer_dv, v_slack,
                           &layer_v0, &layer_v1);
     BuildLayerMesh(mvp,
-                   z_world, layer_u0, layer_v0,
+                   z_world, layer_rake, layer_u0, layer_v0,
                    layer_u1, layer_v1,
                    aspect_x, height_scale, out_w, out_h, shade,
                    verts, indices, &nv, &ni);
@@ -1368,7 +1550,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     bool rim_light = layer->is_figure && RimLightEnabled(renderer);
     bool want_dof = !rim_light && layer->plane != kPpuOverlaySource_Bg3 &&
         DofBlurEnabled(renderer);
-    float dof_radius = want_dof ? DofRadiusForLayer(layer->z) : 0.0f;
+    float dof_radius = want_dof ? DofRadiusForLayer(layer_z) : 0.0f;
     if (dof_radius < 0.05f) dof_radius = 0.0f;
     bool want_edge = !rim_light && LayerGetsEdgeAA(layer->plane) &&
         EdgeAAEnabled(renderer);
