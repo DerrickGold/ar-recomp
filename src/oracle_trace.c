@@ -1,5 +1,7 @@
 #include "oracle_trace.h"
 
+#include "actraiser_game.h"   /* kActRaiserWram_MapGroup */
+
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -21,7 +23,16 @@
 enum {
   kWramByteCount = 0x20000,
   kWramLastAddress = kWramByteCount - 1,
-  kGameModeAddress = 0x18,
+  kGameModeAddress = kActRaiserWram_MapGroup,   /* $18 */
+  /* DELIBERATELY NOT kActRaiserWram_CurrentMap ($19). This trace has always read
+   * $1a, and runtime_diagnostics.c's equally-named constant reads $19 -- the two
+   * files defined the same name with different values, which is how this surfaced.
+   * $1a is documented nowhere in docs/ram-map.md, so I cannot tell from here
+   * whether it is a real second field this trace wants or a typo for $19. Left as
+   * it was because the trace's output has presumably been read and interpreted at
+   * that offset; changing it silently would invalidate past captures. Both files
+   * are env-gated diagnostics (AR_DUMP_ACT here), so nothing in normal play reads
+   * either. Resolve with a ROM: dump both bytes across a map change. */
   kGameSubmodeAddress = 0x1a,
   kGameFrameLowAddress = 0x88,
   kGameFrameHighAddress = 0x89,

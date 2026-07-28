@@ -1,5 +1,7 @@
 #include "runtime_diagnostics.h"
 
+#include "actraiser_game.h"   /* kActRaiserWram_MapGroup/_CurrentMap */
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,8 +20,12 @@
 
 enum {
   kWramByteCount = 0x20000,
-  kGameModeAddress = 0x18,
-  kGameSubmodeAddress = 0x19,
+  /* Use the canonical names rather than re-deriving the addresses: these are
+   * $18/$19, the map group and map number (actraiser_game.h). Two files
+   * previously defined their own kGameModeAddress/kGameSubmodeAddress pair and
+   * DISAGREED on the second one -- see the note in oracle_trace.c. */
+  kGameModeAddress = kActRaiserWram_MapGroup,
+  kGameSubmodeAddress = kActRaiserWram_CurrentMap,
   kTownLevelAddress = 0x0291,
   kDiagnosticPathCapacity = 320,
   kBlockHistoryCapacity = 256,

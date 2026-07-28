@@ -359,7 +359,8 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       touched = true;
     } else if (!strcmp(word, "alpha")) {
       long a = strtol(value, &end, 10);
-      if (end == value || (end && *end) || a < 0 || a > 255) {
+      if (end == value || (end && *end) || a < 0 ||
+          a > kDioramaLayerAlphaOpaque) {
         if (out_error) *out_error = "bad alpha (0-255)";
         return false;
       }

@@ -128,8 +128,9 @@ static bool EntryComplete(const HdReplacement *entry, const char *path,
     missing = "rect";
   else if (entry->plane == kHdPlane_Mode7 &&
            (entry->canvas_x1 <= entry->canvas_x0 || entry->canvas_x0 < 0 ||
-            entry->canvas_x1 > 1024 || entry->canvas_y0 < 0 ||
-            entry->canvas_y1 > 1024))
+            entry->canvas_x1 > kPpuMode7CanvasExtent ||
+            entry->canvas_y0 < 0 ||
+            entry->canvas_y1 > kPpuMode7CanvasExtent))
     missing = "canvas_rect";
   else if (!entry->condition_count) missing = "when";
   if (missing)

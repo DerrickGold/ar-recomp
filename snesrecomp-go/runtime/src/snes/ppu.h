@@ -122,6 +122,13 @@ enum {
  * texture sample is opaque are removed from the game frame (main+sub) and
  * rendered instead — through the live matrix, per-scanline HDMA included —
  * into the bound Mode-7 overlay surface at `scale` subsamples per axis. */
+/* Extent of one Mode-7 canvas instance, in canvas pixels. The matrix samples a
+ * 128x128 tilemap of 8x8 tiles, so a single instance spans 1024 in each axis and
+ * repeats beyond that. Distinct from any screen or texture dimension: it is the
+ * addressable space the transform reads, not anything that gets displayed at that
+ * size. Consumers validating a canvas rect bound against this. */
+enum { kPpuMode7CanvasExtent = 1024 };
+
 typedef struct PpuMode7Override {
   const uint32_t *rgba; /* ARGB words, width*height, row-major */
   int width, height;
