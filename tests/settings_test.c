@@ -21,6 +21,9 @@ bool g_gpu_shaders_active;
 bool g_sim_rim_mask_supported = true;
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
+/* F1's row-policy sink: the registry callback pokes the world-map module, which
+ * these tests do not link. */
+void SimWorldMap_SetRowPolicy(int policy) { (void)policy; }
 
 static int s_failures;
 static int s_observer_calls;
@@ -71,8 +74,9 @@ static void TestDefaultsAndMetadata(void) {
    * that, Controls added eight device/tuning rows plus 42 binding rows: 18
    * actions x keyboard+gamepad (12 SNES buttons and 6 analog camera axes),
    * plus 6 gamepad-only host actions. Presentation then gained the diorama
-   * edge-margin-fix A/B toggle (SPEC-backdrop-clip.md). */
-  CHECK(g_setting_desc_count == 226);
+   * edge-margin-fix A/B toggle (SPEC-backdrop-clip.md), and SIM 3D the
+   * world-map top-rows A/B selector (F1, sim_world_map_rows.h). */
+  CHECK(g_setting_desc_count == 227);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
