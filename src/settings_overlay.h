@@ -25,6 +25,29 @@ typedef void (*SettingsOverlayInspectorInfoProvider)(char *buffer,
 void SettingsOverlay_SetInspectorInfoProvider(
     SettingsOverlayInspectorInfoProvider provider);
 
+/* Layer-editor hooks (System-adjacent "Layers" section, developer-only).
+ *
+ * The editor mutates diorama.c's per-room override table and writes the manifest
+ * beside settings.ini. Both are injected rather than called directly because
+ * this file's test target links five sources and NOT diorama.c -- reaching into
+ * it here would drag the PPU and the SDL render path into the test. Same
+ * reasoning as the inspector provider above.
+ *
+ *   table  the override table to edit, or NULL when there is none (the section
+ *          then reports that instead of editing a table it does not have).
+ *   room   the live room: false when no diorama room is active, so the editor
+ *          says so rather than showing stale planes.
+ *   save   persist the manifest; called on an edit, not every frame.
+ */
+struct DioramaLayerOrderTable;
+typedef struct DioramaLayerOrderTable *(*SettingsOverlayLayerTableFn)(void);
+typedef bool (*SettingsOverlayLayerRoomFn)(uint8_t *out_group,
+                                           uint8_t *out_map);
+typedef bool (*SettingsOverlayLayerSaveFn)(void);
+void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
+                                         SettingsOverlayLayerRoomFn room,
+                                         SettingsOverlayLayerSaveFn save);
+
 bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);

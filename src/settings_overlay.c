@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "diorama_layer_editor.h"
 #include "input_map.h"
 #include "settings.h"
 #include "user_data_dir.h"
@@ -253,6 +254,16 @@ typedef struct MenuSection {
   const char *blurb;      /* shown in the description panel from the nav column */
   const MenuTab *tabs;
   int tab_count;
+  /* Rows built by this file rather than enumerated from the settings registry.
+   * Only the layer editor uses it: its rows depend on the room the player is
+   * standing in, so they cannot be static descriptors. A custom section's tabs
+   * carry an index rather than a SettingCategory. */
+  bool custom_rows;
+  /* Hidden entirely unless show_debug_settings is on. A whole SECTION collapses
+   * this way, not just its rows -- an authoring tool for someone who knows what
+   * a rake does to a parallax rate has no business in a player's menu, and
+   * hiding only its rows would leave an empty section in the nav column. */
+  bool debug_only;
 } MenuSection;
 
 #define TAB(cat, name) { kSettingCat_##cat, name, NULL, 0 }
@@ -301,11 +312,32 @@ static const MenuTab kTabsSystem[] = {
   TAB(Inspector, "Inspector"),
 };
 
+/* The layer editor's tabs are LEVELS ($18), not setting categories. The category
+ * field is unused for a custom section; the tab's position IS the level index,
+ * so this table must stay in step with diorama_layer_editor.c's kEditorLevels.
+ * A _Static_assert below pins the count; the names come from that module so
+ * there is only one place they are spelled. */
+static const MenuTab kTabsLayers[] = {
+  TAB(Presentation, "Fillmore"),
+  TAB(Presentation, "Bloodpool"),
+  TAB(Presentation, "Kasandora"),
+  TAB(Presentation, "Aitos"),
+  TAB(Presentation, "Marahna"),
+  TAB(Presentation, "Northwall"),
+  TAB(Presentation, "Death Heim"),
+};
+_Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
+                   kDioramaEditorLevelCount,
+               "one layer-editor tab per action map group");
+
 #undef TAB
 #undef PAGE_TAB
 
 #define SECTION(name, blurb, tabs) \
-  { name, blurb, tabs, (int)(sizeof(tabs) / sizeof((tabs)[0])) }
+  { name, blurb, tabs, (int)(sizeof(tabs) / sizeof((tabs)[0])), false, false }
+/* A section whose rows this file builds, and which is developer-only. */
+#define CUSTOM_DEBUG_SECTION(name, blurb, tabs) \
+  { name, blurb, tabs, (int)(sizeof(tabs) / sizeof((tabs)[0])), true, true }
 
 /* Icon maps below are indexed by position in this array — keep the two in the
  * same order. Restart/Exit are no longer promoted nav leaves: they are the
@@ -330,9 +362,17 @@ static const MenuSection kSections[] = {
           kTabsSave),
   SECTION("System", "Host commands, restart and exit, plus the scene inspector.",
           kTabsSystem),
+  /* Last deliberately: it is the only section that can vanish, and keeping it at
+   * the end means every other section's nav position is the same whether debug
+   * settings are on or off. tests/settings_overlay_test.c indexes sections
+   * positionally, so an insertion anywhere above here would renumber them. */
+  CUSTOM_DEBUG_SECTION("Layers",
+          "Author this room's diorama layer depth. Developer tool.",
+          kTabsLayers),
 };
 
 #undef SECTION
+#undef CUSTOM_DEBUG_SECTION
 
 enum {
   kSectionCount = (int)(sizeof(kSections) / sizeof(kSections[0])),
@@ -443,6 +483,28 @@ static int s_debug_panel_resize_start_height;
 static int s_debug_panel_resize_start_scale;
 static SettingsOverlayInspectorInfoProvider s_inspector_info_provider;
 
+/* ── Layer editor state ─────────────────────────────────────────────────
+ *
+ * The rows are rebuilt from diorama_layer_editor.c every time the list is
+ * enumerated, so the only state kept here is what the player has chosen: which
+ * plane is expanded. The override table itself lives in diorama.c and is
+ * reached through the two hooks below.
+ *
+ * WHY HOOKS RATHER THAN CALLING diorama.c DIRECTLY. This file's test target
+ * (CMakeLists.txt:377) links five sources and not diorama.c -- deliberately,
+ * since diorama.c drags in the PPU and SDL render path. Calling
+ * Diorama_LayerOverrides() here would force that whole closure into the test or
+ * force the test to stub it. Injecting the accessor keeps the overlay testable
+ * and follows the precedent already set by s_inspector_info_provider, which
+ * exists for the same reason. */
+static SettingsOverlayLayerTableFn s_layer_table_provider;
+static SettingsOverlayLayerRoomFn s_layer_room_provider;
+static SettingsOverlayLayerSaveFn s_layer_save_provider;
+/* Which plane's parameters are expanded, or -1. Held rather than derived from
+ * the cursor so the expansion does not collapse while the player steps DOWN
+ * through its own parameter rows. */
+static int s_layer_plane = -1;
+
 static void ClearSectionResetArm(void) {
   s_reset_armed_section = -1;
   s_reset_armed_until = 0;
@@ -451,6 +513,14 @@ static void ClearSectionResetArm(void) {
 void SettingsOverlay_SetInspectorInfoProvider(
     SettingsOverlayInspectorInfoProvider provider) {
   s_inspector_info_provider = provider;
+}
+
+void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
+                                         SettingsOverlayLayerRoomFn room,
+                                         SettingsOverlayLayerSaveFn save) {
+  s_layer_table_provider = table;
+  s_layer_room_provider = room;
+  s_layer_save_provider = save;
 }
 
 /* SDL3 render primitives take float rects. Layout math stays integer (it also
@@ -759,6 +829,27 @@ static const IconIndexMap kSectionIconMaps[kSectionCount] = {
     {14,11,11,11,14,14,14,14,14,14,14,14,11,11,11,14},
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
   },
+  { /* Layers -- three stacked planes receding in depth, which is what the
+     * section authors. Drawn here rather than lifted from the ROM because no
+     * game icon depicts layered planes; it follows the same framed convention
+     * (index 14 transparent, 11 frame, 15 field) as the borrowed ones. */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
+    {14,11,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
+    {14,11,14,14, 3, 3, 3, 3, 3, 3, 3, 3,14,14,11,14},
+    {14,11,14, 3, 5, 5, 5, 5, 5, 5, 5, 5, 3,14,11,14},
+    {14,11,14,14, 4, 4, 4, 4, 4, 4, 4, 4,14,14,11,14},
+    {14,11,14,15,14,14,14,14,14,14,14,14,15,14,11,14},
+    {14,11,14,14, 6, 6, 6, 6, 6, 6, 6, 6,14,14,11,14},
+    {14,11,14, 6,13,13,13,13,13,13,13,13, 6,14,11,14},
+    {14,11,14,14,12,12,12,12,12,12,12,12,14,14,11,14},
+    {14,11,14,15,14,14,14,14,14,14,14,14,15,14,11,14},
+    {14,11,14,14, 9, 9, 9, 9, 9, 9, 9, 9,14,14,11,14},
+    {14,11,14, 9,10,10,10,10,10,10,10,10, 9,14,11,14},
+    {14,11,14,14, 8, 8, 8, 8, 8, 8, 8, 8,14,14,11,14},
+    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
 };
 
 static SDL_Texture *s_icon_texture;
@@ -1041,9 +1132,34 @@ static SDL_Texture *CreateDialogFrameTexture(const uint8_t *rom_data,
  * section was last left on, so stepping away and back does not dump the
  * player at the top of a four-tab section. Rows are the visible descriptors
  * of the active tab's category, in descriptor-table order. */
+/* A whole section can be hidden, which tabs and rows could already do but
+ * sections could not -- the nav column was a fixed eight and said so. The layer
+ * editor is developer-only, and hiding only its rows would leave an empty
+ * section for a player to walk into. */
+static bool SectionHidden(int section) {
+  if (section < 0 || section >= kSectionCount) return true;
+  return kSections[section].debug_only && !g_settings.show_debug_settings;
+}
+
+static int VisibleSectionCount(void) {
+  int count = 0;
+  for (int i = 0; i < kSectionCount; i++)
+    if (!SectionHidden(i)) count++;
+  return count < 1 ? 1 : count;
+}
+
 static const MenuSection *ActiveSection(void) {
   if (s_section < 0) s_section = 0;
   if (s_section >= kSectionCount) s_section = kSectionCount - 1;
+  /* Never leave the cursor parked on a section that has just collapsed: turning
+   * debug settings off while standing in the layer editor must move focus out,
+   * not render a hidden section. Same rule ActiveTabIndex applies to tabs. */
+  if (SectionHidden(s_section)) {
+    for (int i = 1; i <= kSectionCount; i++) {
+      int candidate = (s_section + i) % kSectionCount;
+      if (!SectionHidden(candidate)) { s_section = candidate; break; }
+    }
+  }
   return &kSections[s_section];
 }
 
@@ -1130,7 +1246,65 @@ static bool RowBelongsToActiveTab(const SettingDesc *desc) {
          Settings_IsMenuVisible(desc);
 }
 
+/* ── Layer editor rows ───────────────────────────────────────────────────
+ *
+ * Rebuilt on demand rather than cached. The list depends on the live room, which
+ * changes as the player walks, and on which plane is expanded -- caching it
+ * would need invalidation on both, and the build is a few dozen snprintf calls
+ * on a menu that is only open while the game is paused. */
+static bool ActiveSectionIsCustom(void) {
+  return ActiveSection()->custom_rows;
+}
+
+/* Row-name suffix for SettingsOverlay_SelectedKey, so a test can navigate to
+ * "bg2hi.copies" rather than counting keypresses through a list whose shape
+ * changes with the active shape. These names are a TEST seam, not the manifest
+ * grammar -- the file's own keys live in diorama_layer_order.c -- but they are
+ * spelled the same so a failure message reads against the file. */
+static const char kLayerResetRoomKey[] = "layer_reset_room";
+static const char *LayerParamKey(DioramaEditorParam param) {
+  switch (param) {
+    case kDioramaEditorParam_Depth:     return "depth";
+    case kDioramaEditorParam_Copies:    return "copies";
+    case kDioramaEditorParam_Density:   return "density";
+    case kDioramaEditorParam_Direction: return "dir";
+    case kDioramaEditorParam_Z:         return "z";
+    case kDioramaEditorParam_Alpha:     return "alpha";
+    case kDioramaEditorParam_Order:     return "order";
+    case kDioramaEditorParam_None:
+    default:                            return "";
+  }
+}
+
+static int LayerEditorRows(DioramaEditorRow *rows, int capacity) {
+  if (!ActiveSectionIsCustom()) return 0;
+  DioramaEditorContext context;
+  memset(&context, 0, sizeof(context));
+  context.selected_plane = s_layer_plane;
+  if (s_layer_room_provider)
+    context.room_live = s_layer_room_provider(&context.map_group,
+                                              &context.map_number);
+  const DioramaLayerOrderTable *table =
+      s_layer_table_provider ? s_layer_table_provider() : NULL;
+  return DioramaLayerEditor_BuildRows(table, &context, ActiveTabIndex(), rows,
+                                      capacity);
+}
+
+/* The selected row, or NULL when the cursor is on a header (which is not
+ * selectable) or the section is not the editor. */
+static const DioramaEditorRow *SelectedLayerRow(DioramaEditorRow *rows,
+                                                int capacity, int *out_count) {
+  int n = LayerEditorRows(rows, capacity);
+  if (out_count) *out_count = n;
+  if (s_row < 0 || s_row >= n) return NULL;
+  return &rows[s_row];
+}
+
 static int TabSettingRowCount(void) {
+  if (ActiveSectionIsCustom()) {
+    DioramaEditorRow rows[kDioramaEditorRowMax];
+    return LayerEditorRows(rows, kDioramaEditorRowMax);
+  }
   SyncActiveTabPage();
   int count = 0;
   for (int i = 0; i < g_setting_desc_count; i++)
@@ -1140,8 +1314,13 @@ static int TabSettingRowCount(void) {
 
 /* Every populated tab ends with the same section-scoped action. Town 3D's
  * button therefore restores Scene + Camera + Light + Weather together no
- * matter which tab the player happens to be viewing. */
+ * matter which tab the player happens to be viewing.
+ *
+ * The layer editor is the exception: its rows are not registry descriptors, so
+ * "reset this section's settings to defaults" has nothing to act on. It carries
+ * its own per-room reset row instead, built into the list. */
 static int TabRowCount(void) {
+  if (ActiveSectionIsCustom()) return TabSettingRowCount();
   return TabSettingRowCount() + 1;
 }
 
@@ -1149,20 +1328,45 @@ static int TabRowCount(void) {
  * all would be dead, but every section here always has at least one row, so
  * the nav list is a fixed eight and never renumbers under the cursor. */
 static int NavPopulatedCount(void) {
-  return kSectionCount;
+  return VisibleSectionCount();
 }
 
+/* The selected section's position among the VISIBLE ones -- what the nav column
+ * draws at and what the test navigation counts in, since a hidden section
+ * occupies no row. */
+static int ActiveVisibleSectionPosition(void) {
+  int position = 0;
+  for (int i = 0; i < s_section; i++)
+    if (!SectionHidden(i)) position++;
+  return position;
+}
+
+/* Scrolls in VISIBLE positions, not raw section indices: with a hidden section
+ * present the two differ, and mixing them would scroll the column to a row that
+ * is not drawn. */
 static void EnsureSelectedNavVisible(void) {
   int visible = s_nav_visible_rows > 0 ? s_nav_visible_rows : 1;
-  if (s_section < s_nav_top_row) s_nav_top_row = s_section;
-  if (s_section >= s_nav_top_row + visible)
-    s_nav_top_row = s_section - visible + 1;
-  int maximum_top = kSectionCount > visible ? kSectionCount - visible : 0;
+  const int position = ActiveVisibleSectionPosition();
+  const int total = VisibleSectionCount();
+  if (position < s_nav_top_row) s_nav_top_row = position;
+  if (position >= s_nav_top_row + visible)
+    s_nav_top_row = position - visible + 1;
+  int maximum_top = total > visible ? total - visible : 0;
   if (s_nav_top_row > maximum_top) s_nav_top_row = maximum_top;
   if (s_nav_top_row < 0) s_nav_top_row = 0;
 }
 
 static const SettingDesc *SelectedDesc(void) {
+  /* A custom section has no descriptors, so matching one by row index would be
+   * meaningless -- row 3 of the layer editor is not "the third Presentation
+   * setting".
+   *
+   * Defence in depth, and knowingly untestable: every caller is already behind a
+   * Layer* early-return, so removing this guard changes no observable behaviour
+   * today. It is here because those guards are the thing a future edit is most
+   * likely to miss, and the failure would be silent -- a keypress on a layer row
+   * editing whatever descriptor happened to share its index. */
+  if (ActiveSectionIsCustom()) return NULL;
   SyncActiveTabPage();
   int row = 0;
   for (int i = 0; i < g_setting_desc_count; i++) {
@@ -1174,6 +1378,10 @@ static const SettingDesc *SelectedDesc(void) {
 }
 
 static bool SelectedRowIsSectionReset(void) {
+  /* The layer editor has no registry rows for a section reset to act on, and
+   * carries its own per-room reset instead. Without this guard the synthetic row
+   * would appear one past the end of its list and reset nothing. */
+  if (ActiveSectionIsCustom()) return false;
   return s_submenu_open && s_row == TabSettingRowCount();
 }
 
@@ -1397,7 +1605,77 @@ static void BeginValueHold(const SettingDesc *desc, int direction,
   StepNumeric(desc, direction, 1, false);  /* immediate fine step */
 }
 
+/* ── Layer editor dispatch ───────────────────────────────────────────────
+ *
+ * Mutating the override table from a key handler while diorama.c reads it in the
+ * draw loop is safe because there is exactly one thread: Phase 0 (#18/P13)
+ * removed the present thread, since SDL3's 2D render API is main-thread-only,
+ * and main.c:1151-1157 documents that all rendering now runs synchronously on
+ * the main thread. Key handling and drawing are therefore strictly ordered, and
+ * an edit lands before the next frame reads it -- which is what makes the
+ * editor's live A/B possible at all.
+ *
+ * Returns true when the row belonged to the editor, so the ordinary descriptor
+ * paths are skipped. */
+static DioramaPlaneOverride *LayerPlaneForRow(const DioramaEditorRow *row) {
+  if (!row || row->plane < 0 || !s_layer_table_provider) return NULL;
+  DioramaLayerOrderTable *table = s_layer_table_provider();
+  if (!table) return NULL;
+  uint8_t group = 0, map = 0;
+  if (!s_layer_room_provider || !s_layer_room_provider(&group, &map))
+    return NULL;
+  /* FindOrAdd, not Find: the first edit to a room is what creates its entry. A
+   * full table returns NULL and is reported rather than dropping the edit
+   * silently. */
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(table, group, map);
+  if (!room) return NULL;
+  return &room->planes[row->plane];
+}
+
+static void LayerSaveEdit(void) {
+  if (s_layer_save_provider && !s_layer_save_provider())
+    SetStatus("SAVE FAILED");
+}
+
+static bool LayerChangeSelected(int direction) {
+  if (!ActiveSectionIsCustom()) return false;
+  DioramaEditorRow rows[kDioramaEditorRowMax];
+  const DioramaEditorRow *row =
+      SelectedLayerRow(rows, kDioramaEditorRowMax, NULL);
+  if (!row || !row->selectable) return true;   /* owned, nothing to do */
+
+  if (row->kind == kDioramaEditorRow_ResetRoom) {
+    SetStatus("PRESS B TO RESET ROOM");
+    return true;
+  }
+
+  DioramaPlaneOverride *plane = LayerPlaneForRow(row);
+  if (!plane) {
+    SetStatus("NO ROOM TO EDIT");
+    return true;
+  }
+
+  if (row->kind == kDioramaEditorRow_Plane) {
+    DioramaDepthStrategy next =
+        DioramaLayerEditor_CycleStrategy(plane, direction);
+    /* Expanding the plane the player just changed puts its parameters under the
+     * cursor immediately, which is the next thing they want. */
+    s_layer_plane = row->plane;
+    SetStatus(DioramaLayerOrder_StrategyName(next));
+    LayerSaveEdit();
+    return true;
+  }
+
+  if (!DioramaLayerEditor_StepParam(plane, row->param, direction)) {
+    SetStatus("AT LIMIT");
+    return true;
+  }
+  LayerSaveEdit();
+  return true;
+}
+
 static void ChangeSelectedValue(int direction) {
+  if (LayerChangeSelected(direction)) return;
   if (SelectedRowIsSectionReset()) {
     SetStatus("PRESS B TO RESET SECTION");
     return;
@@ -1443,7 +1721,43 @@ static void ChangeSelectedValue(int direction) {
   }
 }
 
+/* Confirm on an editor row. A plane row toggles its parameter block rather than
+ * stepping the shape -- stepping is Left/Right, and a confirm that also stepped
+ * would make it impossible to expand a plane without changing it. */
+static bool LayerActivateSelected(void) {
+  if (!ActiveSectionIsCustom()) return false;
+  DioramaEditorRow rows[kDioramaEditorRowMax];
+  const DioramaEditorRow *row =
+      SelectedLayerRow(rows, kDioramaEditorRowMax, NULL);
+  if (!row || !row->selectable) return true;
+
+  if (row->kind == kDioramaEditorRow_ResetRoom) {
+    DioramaLayerOrderTable *table =
+        s_layer_table_provider ? s_layer_table_provider() : NULL;
+    uint8_t group = 0, map = 0;
+    if (!table || !s_layer_room_provider ||
+        !s_layer_room_provider(&group, &map)) {
+      SetStatus("NO ROOM TO RESET");
+      return true;
+    }
+    DioramaLayerOrder_ResetRoom(table, group, map);
+    s_layer_plane = -1;
+    SetStatus("ROOM RESET");
+    LayerSaveEdit();
+    return true;
+  }
+
+  if (row->kind == kDioramaEditorRow_Plane) {
+    s_layer_plane = (s_layer_plane == row->plane) ? -1 : row->plane;
+    return true;
+  }
+  /* A parameter row: confirm is one fine step up, matching what an Int
+   * descriptor row does elsewhere in this menu. */
+  return LayerChangeSelected(+1);
+}
+
 static void ActivateSelectedRow(void) {
+  if (LayerActivateSelected()) return;
   if (SelectedRowIsSectionReset()) {
     ConfirmOrResetActiveSection();
     return;
@@ -1466,7 +1780,35 @@ static void ActivateSelectedRow(void) {
   }
 }
 
+/* Reset (Y) on an editor row: clear exactly what the row names. A plane row
+ * clears the whole plane, a parameter row only its own key -- so backing out one
+ * experiment does not discard the rest of the room. */
+static bool LayerResetSelected(void) {
+  if (!ActiveSectionIsCustom()) return false;
+  DioramaEditorRow rows[kDioramaEditorRowMax];
+  const DioramaEditorRow *row =
+      SelectedLayerRow(rows, kDioramaEditorRowMax, NULL);
+  if (!row || !row->selectable) return true;
+  if (row->kind == kDioramaEditorRow_ResetRoom) return LayerActivateSelected();
+
+  DioramaPlaneOverride *plane = LayerPlaneForRow(row);
+  if (!plane) {
+    SetStatus("NO ROOM TO EDIT");
+    return true;
+  }
+  if (row->kind == kDioramaEditorRow_Plane) {
+    DioramaLayerEditor_ClearPlane(plane);
+    SetStatus("PLANE CLEARED");
+  } else {
+    DioramaLayerEditor_ClearParam(plane, row->param);
+    SetStatus("CLEARED");
+  }
+  LayerSaveEdit();
+  return true;
+}
+
 static void ResetSelectedValue(void) {
+  if (LayerResetSelected()) return;
   if (SelectedRowIsSectionReset()) {
     ConfirmOrResetActiveSection();
     return;
@@ -1482,10 +1824,18 @@ static void ResetSelectedValue(void) {
 static void MoveSection(int direction) {
   EndValueHold();
   ClearSectionResetArm();
-  s_section = (s_section + direction + kSectionCount) % kSectionCount;
+  /* Step over hidden sections rather than landing on one. The loop is bounded by
+   * the section count and ActiveSection() guarantees at least one is visible, so
+   * it always terminates on a real section. */
+  int step = direction < 0 ? -1 : 1;
+  for (int i = 0; i < kSectionCount; i++) {
+    s_section = (s_section + step + kSectionCount) % kSectionCount;
+    if (!SectionHidden(s_section)) break;
+  }
   s_row = 0;
   s_top_row = 0;
   s_tab_scroll = 0;
+  s_layer_plane = -1;
   SyncActiveTabPage();
   EnsureSelectedNavVisible();
 }
@@ -1503,12 +1853,45 @@ static void EnsureSelectedRowVisible(void) {
   if (s_top_row < 0) s_top_row = 0;
 }
 
+/* True when the row at `index` cannot take the cursor. Only the layer editor has
+ * such rows (its room caption and its not-in-this-level notice); every registry
+ * row is selectable, hence the early false. */
+static bool RowIsUnselectable(int index) {
+  if (!ActiveSectionIsCustom()) return false;
+  DioramaEditorRow rows[kDioramaEditorRowMax];
+  int n = LayerEditorRows(rows, kDioramaEditorRowMax);
+  if (index < 0 || index >= n) return false;
+  return !rows[index].selectable;
+}
+
+/* Pull the cursor off an unselectable row, forwards. Called wherever the row
+ * cursor is (re)seated at 0 -- entering a section, changing tab -- because row 0
+ * of the layer editor is the room caption. Registry sections have no such rows,
+ * so this is a no-op for them. */
+static void SkipUnselectableRow(void) {
+  if (!ActiveSectionIsCustom()) return;
+  int count = TabRowCount();
+  if (count <= 0) return;
+  for (int i = 0; i < count && RowIsUnselectable(s_row); i++)
+    s_row = (s_row + 1) % count;
+  /* A list that is ALL captions -- a level the player is not in -- leaves the
+   * cursor on the caption, which is correct: there is nothing to select, and the
+   * row is drawn as a notice rather than as a control. */
+}
+
 static void MoveRow(int direction) {
   int count = TabRowCount();
   if (count <= 0) return;
   EndValueHold();
   ClearSectionResetArm();
-  s_row = (s_row + direction + count) % count;
+  int step = direction < 0 ? -1 : 1;
+  /* Step past unselectable rows so the cursor never rests on a caption. Bounded
+   * by the row count: a list that is ALL captions (a level the player is not in)
+   * leaves the cursor where it was rather than spinning. */
+  for (int i = 0; i < count; i++) {
+    s_row = (s_row + step + count) % count;
+    if (!RowIsUnselectable(s_row)) break;
+  }
   EnsureSelectedRowVisible();
 }
 
@@ -1529,9 +1912,12 @@ static void MoveTab(int direction) {
   s_tab[s_section] = candidate;
   s_row = 0;
   s_top_row = 0;
+  /* A new level tab means a different room, so no plane stays expanded. */
+  s_layer_plane = -1;
   StopEditing();
   s_capture_desc = NULL;
   SyncActiveTabPage();
+  SkipUnselectableRow();
   EnsureSelectedRowVisible();
 }
 
@@ -1541,6 +1927,7 @@ static void EnterSection(void) {
   s_row = 0;
   s_top_row = 0;
   SyncActiveTabPage();
+  SkipUnselectableRow();
   EnsureSelectedRowVisible();
 }
 
@@ -1642,6 +2029,30 @@ void SettingsOverlay_Close(void) {
 
 const char *SettingsOverlay_SelectedKey(void) {
   if (!s_open) return "";
+  /* The layer editor's rows have no descriptor key, so they report a synthesized
+   * one: the plane token for a plane row ("bg2hi"), the token plus the parameter
+   * for a nested row ("bg2hi.copies"), and a fixed name for the room reset. The
+   * point is the same as for descriptor rows -- a test navigates to a row BY
+   * NAME instead of counting keypresses, which otherwise breaks every time the
+   * list's shape changes (and the shape here changes with the active shape). */
+  if (ActiveSectionIsCustom()) {
+    static char key[48];
+    DioramaEditorRow rows[kDioramaEditorRowMax];
+    const DioramaEditorRow *row =
+        SelectedLayerRow(rows, kDioramaEditorRowMax, NULL);
+    if (!row) return "";
+    if (row->kind == kDioramaEditorRow_ResetRoom) return kLayerResetRoomKey;
+    if (row->kind == kDioramaEditorRow_Header) return "";
+    const char *token = DioramaLayerOrder_PlaneToken(row->plane);
+    if (!token) return "";
+    if (row->kind == kDioramaEditorRow_Plane) {
+      snprintf(key, sizeof(key), "%s", token);
+    } else {
+      snprintf(key, sizeof(key), "%s.%s", token,
+               LayerParamKey(row->param));
+    }
+    return key;
+  }
   if (SelectedRowIsSectionReset()) return kSectionResetKey;
   const SettingDesc *desc = SelectedDesc();
   return desc && desc->key ? desc->key : "";
@@ -1652,8 +2063,21 @@ bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
                                         int *visible_rows,
                                         int *total_rows) {
   if (!s_open) return false;
+  /* ActiveSection() is what slides the cursor off a section that has just
+   * collapsed, so it must run before the position is read -- otherwise a caller
+   * that turns debug settings off and immediately queries would be told the
+   * cursor is still on a section the nav column no longer draws. */
+  (void)ActiveSection();
   EnsureSelectedNavVisible();
-  if (selected_ordinal) *selected_ordinal = s_section;
+  /* Positions among the VISIBLE sections, matching what the column draws and
+   * what top_ordinal counts in.
+   *
+   * Indistinguishable from reporting s_section while the only hideable section is
+   * the LAST one -- its raw index and its visible position are equal, so no test
+   * can tell the two apart today. Correct anyway, because it stops being equal
+   * the moment a hideable section is added anywhere else, and the symptom then
+   * would be a nav cursor that draws on the wrong row. */
+  if (selected_ordinal) *selected_ordinal = ActiveVisibleSectionPosition();
   if (top_ordinal) *top_ordinal = s_nav_top_row;
   if (visible_rows) *visible_rows = s_nav_visible_rows;
   if (total_rows) *total_rows = NavPopulatedCount();
@@ -2454,12 +2878,18 @@ static void DrawMenu(const MenuLayout *layout) {
   if (s_nav_visible_rows < 1) s_nav_visible_rows = 1;
   EnsureSelectedNavVisible();
 
-  for (int slot = 0; slot < kSectionCount; slot++) {
+  /* `section` walks every entry; `slot` counts only the drawn ones, so a hidden
+   * section leaves no gap in the column. The icon atlas is still indexed by the
+   * raw section, since it is built from the same table. */
+  int slot = -1;
+  for (int section = 0; section < kSectionCount; section++) {
+    if (SectionHidden(section)) continue;
+    slot++;
     if (slot < s_nav_top_row ||
         slot >= s_nav_top_row + s_nav_visible_rows)
       continue;
     int row_y = nav_first_y + (slot - s_nav_top_row) * kNavRowHeight;
-    bool current = slot == s_section;
+    bool current = section == s_section;
     /* The selected section keeps a tinted plate even after the player has
      * moved focus into the submenu, so the right-hand panel never looks
      * orphaned from the nav column. */
@@ -2473,14 +2903,14 @@ static void DrawMenu(const MenuLayout *layout) {
     /* The selected section lights up in the game's colored slot palette; the
      * rest stay grey, and a nav row that is not the current one dims slightly
      * so the cursor reads at a glance. */
-    DrawSectionIcon(layout, left_text_x, row_y, kIconSize, slot,
+    DrawSectionIcon(layout, left_text_x, row_y, kIconSize, section,
                     current, current ? 255 : 205);
     DrawTextN(layout, left_text_x + kIconSize + 4, row_y + 4,
-              kSections[slot].label, 11,
+              kSections[section].label, 11,
               current ? kText_Normal : kText_Dim);
   }
   DrawScrollBar(layout, left_x + left_width - 12, nav_first_y,
-                s_nav_visible_rows * kNavRowHeight, kSectionCount,
+                s_nav_visible_rows * kNavRowHeight, VisibleSectionCount(),
                 s_nav_visible_rows, s_nav_top_row, structure);
 
   /* ── Submenu header: section title, status, tab bar ───────────────────── */
@@ -2599,7 +3029,62 @@ static void DrawMenu(const MenuLayout *layout) {
   const SettingCategory category = ActiveTab()->category;
   int row_index = 0;
   int drawn_rows = 0;
-  for (int i = 0; i < g_setting_desc_count; i++) {
+
+  /* The layer editor draws its own rows and then skips the descriptor loop and
+   * the synthetic section-reset row entirely: it has no descriptors, and its
+   * reset is per-room and already in the list. */
+  const bool custom_rows = ActiveSectionIsCustom();
+  if (custom_rows) {
+    DioramaEditorRow rows[kDioramaEditorRowMax];
+    int n = LayerEditorRows(rows, kDioramaEditorRowMax);
+    for (int i = 0; i < n; i++) {
+      int row = row_index++;
+      if (row < s_top_row || row >= s_top_row + s_visible_rows) continue;
+      drawn_rows++;
+      int y = first_row_y + (row - s_top_row) * kRowHeight;
+      const DioramaEditorRow *entry = &rows[i];
+      const bool selected = s_submenu_open && row == s_row;
+
+      /* A rule above the reset row, matching how the Save and Extras tabs fence
+       * their destructive commands off from the settings above them. */
+      if (entry->kind == kDioramaEditorRow_ResetRoom)
+        FillLogicalRect(layout, right_x + 12, y - 3, right_width - 24, 1,
+                        ARGB(160, 190, 96, 76));
+      if (selected) {
+        FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
+                        kHighlight);
+        FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
+        DrawGlyph(layout, selector_x + ((SDL_GetTicks() / 250) & 1), y, '>',
+                  kText_Warning);
+      }
+
+      /* A caption is structure, not a control, so it takes the panel's structure
+       * color and no value styling. A nested parameter indents under its plane
+       * and dims, so the eye reads the grouping without a box. */
+      TextStyle style = s_submenu_open ? kText_Normal : kText_Dim;
+      int row_label_x = label_x + (entry->nested ? 3 * kGlyphSize : 0);
+      if (entry->kind == kDioramaEditorRow_Header) {
+        DrawSmallText(layout, row_label_x, y + 1, entry->label, structure);
+        if (entry->value[0])
+          DrawSmallText(layout, value_right - SmallTextWidth(entry->value),
+                        y + 1, entry->value, kGameGold);
+        continue;
+      }
+
+      int shown = CappedTextLength(entry->value, value_chars);
+      int label_chars = (value_right - shown * kGlyphSize - 12 -
+                         row_label_x - 4) / kGlyphSize;
+      if (label_chars < 1) label_chars = 1;
+      DrawTextN(layout, row_label_x, y, entry->label, label_chars,
+                entry->nested && !selected ? kText_Dim : style);
+      DrawTextRight(layout, value_right, y, entry->value, value_chars,
+                    entry->kind == kDioramaEditorRow_ResetRoom
+                        ? (s_submenu_open ? kText_Warning : kText_Dim)
+                        : (style == kText_Normal ? kText_Value : style));
+    }
+  }
+
+  for (int i = 0; !custom_rows && i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
     if (!RowBelongsToActiveTab(desc)) continue;
     int row = row_index++;
@@ -2688,8 +3173,9 @@ static void DrawMenu(const MenuLayout *layout) {
 
   /* Synthetic section action: it is deliberately outside the descriptor
    * registry because one button spans several registry categories/tabs and
-   * must never be written as a setting of its own. */
-  {
+   * must never be written as a setting of its own. Skipped for the layer
+   * editor, whose reset is per-room and part of its own list. */
+  if (!custom_rows) {
     int row = row_index++;
     if (row >= s_top_row && row < s_top_row + s_visible_rows) {
       drawn_rows++;
@@ -2740,7 +3226,47 @@ static void DrawMenu(const MenuLayout *layout) {
       s_submenu_open && SelectedRowIsSectionReset();
   const SettingDesc *selected = s_submenu_open ? SelectedDesc() : NULL;
   const int header_y = bottom_y + 8;
-  if (reset_selected) {
+  /* The editor's rows are not descriptors, so they carry their own header and
+   * help. Handled before the descriptor branches, which would otherwise fall
+   * through to the section blurb and say nothing about the selected row. */
+  DioramaEditorRow help_rows[kDioramaEditorRowMax];
+  const DioramaEditorRow *help_row =
+      (custom_rows && s_submenu_open)
+          ? SelectedLayerRow(help_rows, kDioramaEditorRowMax, NULL) : NULL;
+  if (help_row) {
+    DioramaDepthStrategy strategy = kDioramaDepth_Flat;
+    if (help_row->plane >= 0) {
+      const DioramaLayerOrderTable *table =
+          s_layer_table_provider ? s_layer_table_provider() : NULL;
+      uint8_t group = 0, map = 0;
+      if (table && s_layer_room_provider &&
+          s_layer_room_provider(&group, &map)) {
+        const DioramaRoomOverride *room =
+            DioramaLayerOrder_Find(table, group, map);
+        if (room)
+          strategy = DioramaLayerEditor_StrategyOfPlane(
+              &room->planes[help_row->plane]);
+      }
+    }
+    char label[64];
+    if (help_row->kind == kDioramaEditorRow_Plane)
+      snprintf(label, sizeof(label), "%s -- %s", help_row->label,
+               DioramaLayerOrder_StrategyName(strategy));
+    else
+      snprintf(label, sizeof(label), "%s", help_row->label);
+    DrawSmallText(layout, description_x, header_y, label, structure);
+    /* The right-hand slug says WHEN a change takes effect, which for these is
+     * always "the next frame" -- that immediacy is the point of the tool. */
+    static const char kApplyNow[] = "Live";
+    DrawSmallTextN(layout, panel_right - 12 - SmallTextWidth(kApplyNow),
+                   header_y, kApplyNow, description_chars, kMutedText);
+    FillLogicalRect(layout, description_x, header_y + 10,
+                    bottom_width - 24, 1, structure_dim);
+    DrawWrappedSmallText(layout, description_x, header_y + 14,
+                         DioramaLayerEditor_RowHelp(help_row->kind,
+                                                    help_row->param, strategy),
+                         description_chars, 4, ARGB(255, 208, 220, 232));
+  } else if (reset_selected) {
     char label[64], help[256];
     snprintf(label, sizeof(label), "Reset %s defaults", section->label);
     snprintf(help, sizeof(help),
@@ -2803,7 +3329,28 @@ static void DrawMenu(const MenuLayout *layout) {
     HINT("A/ESC", "cancel");
   } else if (s_submenu_open) {
     HINT("UP/DOWN", "select");
-    if (SelectedRowIsSectionReset()) {
+    if (help_row) {
+      /* The editor's verbs differ enough to be worth spelling out: Left/Right
+       * cycles the SHAPE on a plane row but steps a number on a parameter row,
+       * and B expands rather than edits. */
+      switch (help_row->kind) {
+        case kDioramaEditorRow_Plane:
+          HINT("LEFT/RIGHT", "shape");
+          HINT("B", "settings");
+          HINT("Y", "clear plane");
+          break;
+        case kDioramaEditorRow_ResetRoom:
+          HINT("B", "reset room");
+          break;
+        case kDioramaEditorRow_Header:
+          break;
+        default:
+          HINT("LEFT/RIGHT", "adjust");
+          HINT("Y", "clear");
+          break;
+      }
+      if (VisibleTabCount(s_section) > 1) HINT("L/R", "level");
+    } else if (SelectedRowIsSectionReset()) {
       HINT("B", "reset");
       if (VisibleTabCount(s_section) > 1) HINT("L/R", "tab");
     } else {

@@ -382,6 +382,11 @@ if(BUILD_TESTING)
         src/settings_overlay.c
         src/input_map.c
         src/user_data_dir.c
+        # The layer editor's row model. Pure, so it adds no SDL/PPU closure to
+        # this target -- which is the whole reason the overlay reaches the
+        # override table through injected hooks rather than calling diorama.c.
+        src/diorama_layer_editor.c
+        src/diorama_layer_order.c
     )
     target_include_directories(actraiser_settings_overlay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

@@ -353,6 +353,14 @@ const char *DioramaLayerOrder_PlaneToken(int plane);
 /* Inverse of PlaneToken. Returns -1 on an unknown token. */
 int DioramaLayerOrder_PlaneFromToken(const char *token);
 
+/* Iterate the drawable planes in MANIFEST ORDER — the order FormatRoom emits,
+ * which is not plane-index order. Exported so the layer editor can list planes
+ * the same way an export writes them without holding a second copy of the
+ * order; `index` runs 0..DioramaLayerOrder_PlaneCount()-1 and PlaneAt returns
+ * -1 outside it. */
+int DioramaLayerOrder_PlaneCount(void);
+int DioramaLayerOrder_PlaneAt(int index);
+
 /* Parse one manifest body line into `room`, e.g. "bg1 = z:0.55 alpha:255".
  * Returns false on a malformed line; `*out_error` (optional) gets a short
  * reason for the log. Whitespace-tolerant; a line may set z, alpha, or both. */

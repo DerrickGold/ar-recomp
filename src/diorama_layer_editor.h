@@ -141,6 +141,17 @@ int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
                                  int level_index,
                                  DioramaEditorRow *out, int capacity);
 
+/* Help text for the description panel: what the selected row does, and for a
+ * plane row what its CURRENT shape costs. Never NULL.
+ *
+ * Here rather than in the overlay because the trade-offs are properties of the
+ * shapes, not of the menu -- a rake's shear and a stack's inter-slice gaps are
+ * the same facts diorama-layers.ini documents, and one wording keeps them from
+ * drifting apart. `strategy` is ignored for rows that are not plane rows. */
+const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
+                                       DioramaEditorParam param,
+                                       DioramaDepthStrategy strategy);
+
 /* Cycle a plane's depth strategy by `direction` (+1/-1), wrapping.
  *
  * THIS IS THE LOAD-BEARING FUNCTION. The six strategies are NOT exclusive in

@@ -23,6 +23,21 @@ bool Diorama_IsActiveThisFrame(void) {
          ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]);
 }
 
+/* The live room for the layer editor: the ($18,$19) pair the draw loop keys its
+ * override lookup on (diorama.c:1532), reported only while a diorama room is
+ * actually running.
+ *
+ * The gate is Diorama_IsActiveThisFrame rather than just the map group, so the
+ * editor reports a room exactly when the renderer would apply its overrides --
+ * with the diorama off there is nothing on screen to compare, and offering to
+ * author a room whose settings would not be used is worse than saying so. */
+bool Diorama_LiveRoom(uint8_t *out_group, uint8_t *out_map) {
+  if (!Diorama_IsActiveThisFrame()) return false;
+  if (out_group) *out_group = g_ram[kActRaiserWram_MapGroup];
+  if (out_map) *out_map = g_ram[kActRaiserWram_CurrentMap];
+  return true;
+}
+
 /* The render margin widens while diorama mode is armed. Re-resolve geometry,
  * clear buffers at their new pitch, and rebind the PPU output surfaces. */
 void Diorama_OnModeChanged(void) {

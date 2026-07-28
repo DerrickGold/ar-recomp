@@ -1005,6 +1005,12 @@ int main(int argc, char **argv) {
   Diorama_LoadLayerManifest();
   SettingsOverlay_SetInspectorInfoProvider(
       HostDevTools_FormatInspectorInfo);
+  /* The layer editor (Settings > Layers, developer-only) edits the override
+   * table loaded above and writes the manifest back. Injected rather than called
+   * directly from the overlay so that file stays testable without diorama.c --
+   * see settings_overlay.h. */
+  SettingsOverlay_SetLayerEditorHooks(Diorama_LayerOverrides, Diorama_LiveRoom,
+                                      Diorama_SaveLayerManifest);
 
   RuntimeSettings_Install();
   /* After the action observer is installed: the pad's save/load-state
