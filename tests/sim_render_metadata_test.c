@@ -1,8 +1,12 @@
 #include "sim_render_metadata.h"
 
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "actraiser_game.h"
+#include "sim_world_map.h"
 
 static int failures;
 
@@ -32,6 +36,10 @@ static void TestFeatureDependencies(void) {
   CHECK(Sim3D_ResolveFeatureMask(all, 0, kSimView_Enhanced,
                                  true, true) == 0);
   CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_AuthenticPicker,
+                                 true, true) == 0);
+  /* Step 3 publishes the full-plane scene, but its presentation feature
+   * profile does not become effective until Step 4 adds Palace/UI ownership. */
+  CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_WorldNavigation,
                                  true, true) == 0);
   CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_Enhanced,
                                  false, true) == 0);
@@ -89,7 +97,7 @@ static void TestRecordPartitionAndClippedReset(void) {
 
   SimFrameData frame;
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, kSimFeature_All, 0, kSimFeature_All);
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_Enhanced);
   CHECK(frame.game_frame == 123);
   CHECK(frame.build_serial == 1);
@@ -131,7 +139,7 @@ static void TestRecordPartitionAndClippedReset(void) {
       atlas.build_serial, atlas.objects, atlas.object_count, true,
       64, 64, 28, 9, 0));
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, kSimFeature_All, 0, kSimFeature_All);
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.atlas_valid);
   CHECK(frame.atlas_width == 64 && frame.atlas_height == 64);
   CHECK(frame.atlas_used_width == 28 && frame.atlas_used_height == 9);
@@ -140,7 +148,7 @@ static void TestRecordPartitionAndClippedReset(void) {
 
   Write16(wram, kActRaiserWram_SimMapPickerFlag, 0x0100);
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, kSimFeature_All, 0, kSimFeature_All);
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   /* $7F:9215 is still published either way; only the resulting view depends
    * on the compiled picker policy. */
   CHECK(frame.picker_flag == 0x0100);
@@ -157,7 +165,7 @@ static void TestRecordPartitionAndClippedReset(void) {
   SimRenderMetadata_EndRecord(0);
   Write16(wram, kActRaiserWram_SimMapPickerFlag, 0);
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, false, kSimFeature_SeparatedComposite, 0, 0);
+      &frame, wram, false, false, kSimFeature_SeparatedComposite, 0, 0);
   CHECK(frame.build_serial == 2);
   CHECK(frame.source_count == 1);
   CHECK(frame.zero_oam_source_count == 1);
@@ -178,7 +186,7 @@ static void TestIntegrityFallback(void) {
 
   SimFrameData frame;
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, kSimFeature_All, 0, kSimFeature_All);
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!frame.metadata_valid);
   CHECK(frame.integrity_flags & kSimMetadataIntegrity_Overlap);
   /* Broken object metadata costs the sprites, not the view. Dropping the
@@ -207,7 +215,7 @@ static void TestMapPlaneSelectorTrait(void) {
 
   SimFrameData frame;
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, kSimFeature_All, 0, kSimFeature_All);
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.object_count == 1);
   CHECK(frame.objects[0].traits & kSimObjectTrait_MapPlane);
 
@@ -216,7 +224,7 @@ static void TestMapPlaneSelectorTrait(void) {
   SimRenderMetadata_RecordPart(0, 2u << 12);
   SimRenderMetadata_EndRecord(4);
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, kSimFeature_All, 0, kSimFeature_All);
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!(frame.objects[0].traits & kSimObjectTrait_MapPlane));
 }
 
@@ -345,7 +353,7 @@ static void TestVirtualHeightClassification(void) {
   SimRenderMetadata_EndRecord(4);
   SimFrameData frame;
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, kSimFeature_All, 0, kSimFeature_All);
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.object_count == 1);
   CHECK(frame.objects[0].height_class == kSimHeightClass_Flying);
   CHECK(frame.objects[0].virtual_height == kSimVirtualHeight_Flying);
@@ -395,8 +403,8 @@ static void TestHeightSlew(void) {
     SimRenderMetadata_RecordPart(0, 0);                                     \
     SimRenderMetadata_EndRecord(4);                                         \
     SimRenderMetadata_CaptureFrame(                                         \
-        &frame, wram, (master), kSimFeature_All, 0,                         \
-        kSimFeature_All);                                             \
+        &frame, wram, (master), false, kSimFeature_All, 0,                  \
+        kSimFeature_All);                                                   \
   } while (0)
 
   SimRenderMetadata_Reset();
@@ -473,7 +481,7 @@ static void TestObjColorMathPartition(void) {
 
   SimFrameData frame;
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, kSimFeature_All, 0, kSimFeature_All);
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.object_count == 3);
   CHECK(!frame.objects[0].color_math_eligible);
   CHECK(frame.objects[1].color_math_eligible);
@@ -509,7 +517,7 @@ static void TestAtlasDescriptorFallback(void) {
 
   SimFrameData frame;
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, kSimFeature_All, 0, kSimFeature_All);
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!frame.atlas_valid);
   CHECK(!frame.metadata_valid);
   CHECK(frame.integrity_flags & kSimMetadataIntegrity_AtlasRasterFailure);
@@ -895,7 +903,399 @@ static void TestShadowCasterSelection(void) {
   CHECK(Sim3D_ObjectCastsShadow(&person_object));
 }
 
-int main(void) {
+static void MakeDevelopedWorldMapAvailable(void) {
+  enum { kSyntheticRomSize = 0x100000 };
+  uint8_t *rom = (uint8_t *)calloc(1, kSyntheticRomSize);
+  CHECK(rom != NULL);
+  if (!rom) return;
+  CHECK(SimWorldMap_Init(rom, kSyntheticRomSize));
+  const uint8_t *baseline = SimWorldMap_Baseline();
+  CHECK(baseline != NULL);
+  if (baseline) SimWorldMap_PublishBuiltTilemap(baseline);
+  CHECK(SimWorldMap_DevelopedAvailable());
+  free(rom);
+}
+
+static void CheckSteadyWorldNavigation(const uint8 *wram) {
+  SimFrameData frame;
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, true, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_WorldNavigation);
+  CHECK(frame.master_enabled);
+  CHECK(frame.town == 0);
+  CHECK(frame.world_navigation_state_valid);
+  CHECK(frame.world_navigation.focus_x == 0x0300);
+  CHECK(frame.world_navigation.focus_y == 0x0200);
+  CHECK(frame.camera_x == 0x0280);
+  CHECK(frame.camera_y == 0x0190);
+  CHECK(frame.world_navigation.matrix[0] == 0x0200);
+  CHECK(frame.world_navigation.matrix[1] == 0);
+  CHECK(frame.world_navigation.matrix[2] == 0);
+  CHECK(frame.world_navigation.matrix[3] == 0x0200);
+  CHECK(memcmp(frame.world_navigation.matrix,
+               frame.world_navigation.next_matrix,
+               sizeof(frame.world_navigation.matrix)) == 0);
+  CHECK(frame.world_navigation.rotation == 0);
+  CHECK(frame.world_navigation.zoom_current == 0x040A);
+  CHECK(frame.world_navigation.zoom_target == 0x040A);
+  CHECK(frame.world_navigation.active_location == 1);
+  CHECK(frame.underlay_serial != 0);
+  CHECK(frame.underlay_origin_tile_x == 0);
+  CHECK(frame.underlay_origin_tile_y == 0);
+  CHECK(frame.world_navigation_scene.valid);
+  CHECK(frame.world_navigation_scene.texture_serial ==
+        frame.underlay_serial);
+  CHECK(frame.world_navigation_scene.texture_width == 1024);
+  CHECK(frame.world_navigation_scene.texture_height == 1024);
+  CHECK(frame.world_navigation_scene.tile_width == 128);
+  CHECK(frame.world_navigation_scene.tile_height == 128);
+  CHECK(frame.world_navigation_scene.ground[0].tile_x == 0);
+  CHECK(frame.world_navigation_scene.ground[0].tile_y == 0);
+  CHECK(frame.world_navigation_scene.ground[1].tile_x == 128);
+  CHECK(frame.world_navigation_scene.ground[1].tile_y == 0);
+  CHECK(frame.world_navigation_scene.ground[2].tile_x == 128);
+  CHECK(frame.world_navigation_scene.ground[2].tile_y == 128);
+  CHECK(frame.world_navigation_scene.ground[3].tile_x == 0);
+  CHECK(frame.world_navigation_scene.ground[3].tile_y == 128);
+  CHECK(frame.world_navigation_scene.active_location == 1);
+  CHECK(frame.world_navigation_scene.active_region_valid);
+  CHECK(frame.world_navigation_scene.active_region_x == 640);
+  CHECK(frame.world_navigation_scene.active_region_y == 384);
+  CHECK(frame.world_navigation_scene.active_region_width == 256);
+  CHECK(frame.world_navigation_scene.active_region_height == 256);
+  CHECK(SimWorldNavigationScene_LocationHaze(
+            &frame.world_navigation_scene, 768.0f, 512.0f, 104.0f) == 0.0f);
+  CHECK(SimWorldNavigationScene_LocationHaze(
+            &frame.world_navigation_scene, 640.0f, 384.0f, 104.0f) == 0.0f);
+  CHECK(SimWorldNavigationScene_LocationHaze(
+            &frame.world_navigation_scene, 500.0f, 384.0f, 104.0f) == 1.0f);
+  {
+    const float halfway = SimWorldNavigationScene_LocationHaze(
+        &frame.world_navigation_scene, 588.0f, 512.0f, 104.0f);
+    CHECK(halfway > 0.49f && halfway < 0.51f);
+  }
+  float screen_x = 0.0f, screen_y = 0.0f;
+  CHECK(SimWorldNavigationScene_ProjectSource(
+      &frame.world_navigation_scene, 768.0f, 512.0f,
+      &screen_x, &screen_y));
+  CHECK(fabsf(screen_x - 128.0f) < 0.001f);
+  CHECK(fabsf(screen_y - 112.0f) < 0.001f);
+  /* $0200 is 2.0 source pixels per screen pixel, so the steady visible
+   * 256x224 window covers exactly 512x448 source pixels. */
+  CHECK(SimWorldNavigationScene_ProjectSource(
+      &frame.world_navigation_scene, 512.0f, 288.0f,
+      &screen_x, &screen_y));
+  CHECK(fabsf(screen_x - 0.0f) < 0.001f);
+  CHECK(fabsf(screen_y - 0.0f) < 0.001f);
+  CHECK(frame.object_count == 0);
+  CHECK(frame.source_count == 0);
+  CHECK(!frame.metadata_valid);
+  CHECK(frame.effective_features == 0);
+}
+
+static void CheckAnimatedWorldNavigation(const uint8 *wram) {
+  SimFrameData frame;
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, false, true, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_WorldNavigation);
+  CHECK(frame.world_navigation_state_valid);
+  CHECK(frame.world_navigation.focus_x == 0x0348);
+  CHECK(frame.world_navigation.focus_y == 0x0238);
+  CHECK(frame.camera_x == 0x02C8);
+  CHECK(frame.camera_y == 0x01C8);
+  CHECK(frame.world_navigation.matrix[0] == (int16_t)0x00BC);
+  CHECK(frame.world_navigation.matrix[1] == (int16_t)0x026C);
+  CHECK(frame.world_navigation.matrix[2] == (int16_t)0xFD93);
+  CHECK(frame.world_navigation.matrix[3] == (int16_t)0x00BC);
+  CHECK(memcmp(frame.world_navigation.matrix,
+               frame.world_navigation.next_matrix,
+               sizeof(frame.world_navigation.matrix)) == 0);
+  CHECK(frame.world_navigation.rotation == 0x0034);
+  CHECK(frame.world_navigation.zoom_current == 0x0516);
+  CHECK(frame.world_navigation.zoom_target == 0x040A);
+  CHECK(frame.world_navigation.active_location == 1);
+  CHECK(frame.world_navigation_scene.valid);
+  float screen_x = 0.0f, screen_y = 0.0f;
+  CHECK(SimWorldNavigationScene_ProjectSource(
+      &frame.world_navigation_scene, 840.0f, 568.0f,
+      &screen_x, &screen_y));
+  CHECK(fabsf(screen_x - 128.0f) < 0.001f);
+  CHECK(fabsf(screen_y - 112.0f) < 0.001f);
+
+  /* Feed one authentic screen point through the captured Mode-7 matrix, then
+   * back through the host scene. This pins the sign/order of B and C as well
+   * as scale, which a centre-only check cannot do. */
+  const float authentic_x = 37.0f, authentic_y = 181.0f;
+  const float delta_x = authentic_x - 128.0f;
+  const float delta_y = authentic_y - 112.0f;
+  const float source_x = 840.0f +
+      ((float)(int16_t)0x00BC * delta_x +
+       (float)(int16_t)0x026C * delta_y) / 256.0f;
+  const float source_y = 568.0f +
+      ((float)(int16_t)0xFD93 * delta_x +
+       (float)(int16_t)0x00BC * delta_y) / 256.0f;
+  CHECK(SimWorldNavigationScene_ProjectSource(
+      &frame.world_navigation_scene, source_x, source_y,
+      &screen_x, &screen_y));
+  CHECK(fabsf(screen_x - authentic_x) < 0.001f);
+  CHECK(fabsf(screen_y - authentic_y) < 0.001f);
+}
+
+static void PopulateSteadyWorldNavigation(uint8 *wram) {
+  memset(wram, 0, kActRaiserWramSize);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
+  Write16(wram, kActRaiserWram_Bg1CameraX, 0x0280);
+  Write16(wram, kActRaiserWram_Bg1CameraY, 0x0190);
+  Write16(wram, kActRaiserWram_WorldFocusX, 0x0300);
+  Write16(wram, kActRaiserWram_WorldFocusY, 0x0200);
+  Write16(wram, kActRaiserWram_WorldMatrixA, 0x0200);
+  Write16(wram, kActRaiserWram_WorldMatrixD, 0x0200);
+  Write16(wram, kActRaiserWram_WorldNextMatrixA, 0x0200);
+  Write16(wram, kActRaiserWram_WorldNextMatrixD, 0x0200);
+  Write16(wram, kActRaiserWram_WorldZoomCurrent, 0x040A);
+  Write16(wram, kActRaiserWram_WorldZoomTarget, 0x040A);
+  wram[kActRaiserWram_WorldLocation] = 1;
+}
+
+static void PopulateAnimatedWorldNavigation(uint8 *wram) {
+  PopulateSteadyWorldNavigation(wram);
+  Write16(wram, kActRaiserWram_Bg1CameraX, 0x02C8);
+  Write16(wram, kActRaiserWram_Bg1CameraY, 0x01C8);
+  Write16(wram, kActRaiserWram_WorldFocusX, 0x0348);
+  Write16(wram, kActRaiserWram_WorldFocusY, 0x0238);
+  const uint16_t matrix[4] = {0x00BC, 0x026C, 0xFD93, 0x00BC};
+  for (int i = 0; i < 4; i++) {
+    Write16(wram, kActRaiserWram_WorldMatrixA + i * 2, matrix[i]);
+    Write16(wram, kActRaiserWram_WorldNextMatrixA + i * 2, matrix[i]);
+  }
+  Write16(wram, kActRaiserWram_WorldRotation, 0x0034);
+  Write16(wram, kActRaiserWram_WorldZoomCurrent, 0x0516);
+  Write16(wram, kActRaiserWram_WorldZoomTarget, 0x040A);
+}
+
+static void TestWorldNavigationFrameContract(void) {
+  uint8 steady[kActRaiserWramSize];
+  uint8 animated[kActRaiserWramSize];
+  PopulateSteadyWorldNavigation(steady);
+  PopulateAnimatedWorldNavigation(animated);
+  MakeDevelopedWorldMapAvailable();
+
+  /* The setting is independently off by default. State is still captured for
+   * diagnostics, but the authentic renderer remains the selected view. */
+  SimFrameData frame;
+  SimRenderMetadata_CaptureFrame(
+      &frame, steady, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_None);
+  CHECK(!frame.master_enabled);
+  CHECK(frame.world_navigation_state_valid);
+  CHECK(!frame.world_navigation_scene.valid);
+
+  CheckSteadyWorldNavigation(steady);
+  CheckAnimatedWorldNavigation(animated);
+  CHECK(!strcmp(Sim3D_ViewName(kSimView_WorldNavigation),
+                "world_navigation"));
+
+  /* The seventh ROM region is Death Heim, outside the six simulation-town
+   * origin table. Zero/unknown selector states have no clear-region cutout:
+   * presentation keeps the complete world hazed while the scene stays safe. */
+  steady[kActRaiserWram_WorldLocation] = 7;
+  SimRenderMetadata_CaptureFrame(
+      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_WorldNavigation);
+  CHECK(frame.world_navigation_scene.active_region_valid);
+  CHECK(frame.world_navigation_scene.active_region_x == 640);
+  CHECK(frame.world_navigation_scene.active_region_y == 0);
+  steady[kActRaiserWram_WorldLocation] = 0;
+  SimRenderMetadata_CaptureFrame(
+      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_WorldNavigation);
+  CHECK(!frame.world_navigation_scene.active_region_valid);
+  CHECK(SimWorldNavigationScene_LocationHaze(
+            &frame.world_navigation_scene, 768.0f, 512.0f, 104.0f) == 1.0f);
+  steady[kActRaiserWram_WorldLocation] = 8;
+  SimRenderMetadata_CaptureFrame(
+      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_WorldNavigation);
+  CHECK(!frame.world_navigation_scene.active_region_valid);
+  CHECK(SimWorldNavigationScene_LocationHaze(
+            &frame.world_navigation_scene, 0.0f, 0.0f, 104.0f) == 1.0f);
+  steady[kActRaiserWram_WorldLocation] = 1;
+
+  /* No complete HLE tilemap means fail closed to authentic Mode 7. */
+  SimWorldMap_Shutdown();
+  SimRenderMetadata_CaptureFrame(
+      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_AuthenticFallback);
+  CHECK(frame.underlay_serial == 0);
+  CHECK(frame.world_navigation_state_valid);
+  CHECK(!frame.world_navigation_scene.valid);
+
+  /* A singular current matrix cannot describe a complete host plane. The
+   * dedicated setting remains on, but scene construction fails closed to the
+   * authentic renderer for this frame. */
+  MakeDevelopedWorldMapAvailable();
+  memset(steady + kActRaiserWram_WorldMatrixA, 0, 8);
+  SimRenderMetadata_CaptureFrame(
+      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_AuthenticFallback);
+  CHECK(frame.master_enabled);
+  CHECK(!frame.world_navigation_scene.valid);
+
+  steady[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Title;
+  SimRenderMetadata_CaptureFrame(
+      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_None);
+  CHECK(!frame.world_navigation_state_valid);
+  CHECK(!frame.world_navigation_scene.valid);
+  SimWorldMap_Shutdown();
+}
+
+static void TestWorldNavigationCloudCeiling(void) {
+  const uint16_t altitude = kSimCloudAltitudeDefaultPx;
+  CHECK(SimWorldNavigationScene_CloudVisibility(
+            kSimWorldNavigationZoomNear, altitude) == 0.0f);
+  CHECK(SimWorldNavigationScene_CloudVisibility(
+            kSimWorldNavigationZoomMiddle, altitude) == 1.0f);
+  CHECK(SimWorldNavigationScene_CloudVisibility(
+            kSimWorldNavigationZoomFar, altitude) == 1.0f);
+  CHECK(SimWorldNavigationScene_CloudVisibility(
+            kSimWorldNavigationZoomNear, 0) == 1.0f);
+
+  const uint16_t crossing_zoom =
+      (uint16_t)(kSimWorldNavigationZoomNear + altitude * 4);
+  const float crossing = SimWorldNavigationScene_CloudVisibility(
+      crossing_zoom, altitude);
+  CHECK(crossing > 0.49f && crossing < 0.51f);
+  CHECK(SimWorldNavigationScene_CloudVisibility(
+            crossing_zoom - 16, altitude) < crossing);
+  CHECK(SimWorldNavigationScene_CloudVisibility(
+            crossing_zoom + 16, altitude) > crossing);
+
+  CHECK(SimWorldNavigationScene_MasterFadeAlpha(0) == 255);
+  CHECK(SimWorldNavigationScene_MasterFadeAlpha(1) == 238);
+  CHECK(SimWorldNavigationScene_MasterFadeAlpha(7) == 136);
+  CHECK(SimWorldNavigationScene_MasterFadeAlpha(14) == 17);
+  CHECK(SimWorldNavigationScene_MasterFadeAlpha(15) == 0);
+  CHECK(SimWorldNavigationScene_MasterFadeAlpha(255) == 0);
+}
+
+static void HideAllNavigationOam(uint16_t oam[256]) {
+  for (int slot = 0; slot < 128; slot++) {
+    oam[slot * 2] = 0xE000;
+    oam[slot * 2 + 1] = 0xE000;
+  }
+}
+
+static void TestWorldNavigationOamClassifier(void) {
+  uint16_t oam[256];
+  SimWorldNavigationComposition composition;
+  HideAllNavigationOam(oam);
+  CHECK(SimWorldNavigationScene_ClassifyOam(oam, &composition));
+  CHECK(composition.valid);
+  CHECK(composition.empty_animation);
+  CHECK(!composition.palace.visible);
+  CHECK(!composition.ui.visible);
+
+  /* Synthetic copy of gf782's ownership shape: 20 packed priority-3 UI
+   * entries, followed by the fixed 3x3 Palace and then hidden OAM. */
+  for (int slot = 0; slot < 20; slot++) {
+    oam[slot * 2] = (uint16_t)((0x11u << 8) | (uint8_t)(0x20 + slot));
+    oam[slot * 2 + 1] = (uint16_t)(0x3000u | (uint8_t)slot);
+  }
+  static const uint8_t palace_x[9] =
+      {104, 120, 136, 104, 120, 136, 104, 120, 136};
+  static const uint8_t palace_y[9] =
+      {81, 81, 81, 97, 97, 97, 113, 113, 113};
+  static const uint8_t palace_tile[9] =
+      {0x06, 0x08, 0x0A, 0x0C, 0x0E, 0x26, 0x60, 0x62, 0x64};
+  for (int i = 0; i < 9; i++) {
+    oam[(20 + i) * 2] =
+        (uint16_t)(palace_x[i] | ((uint16_t)palace_y[i] << 8));
+    oam[(20 + i) * 2 + 1] =
+        (uint16_t)(palace_tile[i] | 0x3200u);
+  }
+  CHECK(SimWorldNavigationScene_ClassifyOam(oam, &composition));
+  CHECK(composition.valid);
+  CHECK(!composition.empty_animation);
+  CHECK(composition.ui.visible);
+  CHECK(composition.ui.oam_first == 0);
+  CHECK(composition.ui.oam_count == 20);
+  CHECK(composition.palace.visible);
+  CHECK(composition.palace.oam_first == 20);
+  CHECK(composition.palace.oam_count == 9);
+
+  oam[20 * 2] ^= 1;  /* Palace no longer fills the fixed 3x3 grid. */
+  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
+  oam[20 * 2] ^= 1;
+  oam[29 * 2] = 0x1001;  /* Unexpected active OAM after the Palace. */
+  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
+}
+
+static uint8 *ReadWramFixture(const char *path) {
+  FILE *file = fopen(path, "rb");
+  if (!file) return NULL;
+  uint8 *wram = (uint8 *)malloc(kActRaiserWramSize);
+  const size_t got = wram ? fread(wram, 1, kActRaiserWramSize, file) : 0;
+  const int extra = fgetc(file);
+  fclose(file);
+  if (!wram || got != kActRaiserWramSize || extra != EOF) {
+    free(wram);
+    return NULL;
+  }
+  return wram;
+}
+
+static bool ReadOamFixture(const char *path, uint16_t oam[256]) {
+  FILE *file = fopen(path, "rb");
+  if (!file) return false;
+  uint8_t bytes[512];
+  const size_t got = fread(bytes, 1, sizeof(bytes), file);
+  const int extra = fgetc(file);
+  fclose(file);
+  if (got != sizeof(bytes) || extra != EOF) return false;
+  for (int i = 0; i < 256; i++)
+    oam[i] = (uint16_t)(bytes[i * 2] | ((uint16_t)bytes[i * 2 + 1] << 8));
+  return true;
+}
+
+static void TestCapturedWorldNavigationFixtures(const char *steady_path,
+                                                const char *animation_path,
+                                                const char *steady_oam_path,
+                                                const char *animation_oam_path) {
+  uint8 *steady = ReadWramFixture(steady_path);
+  uint8 *animation = ReadWramFixture(animation_path);
+  CHECK(steady != NULL);
+  CHECK(animation != NULL);
+  if (!steady || !animation) {
+    free(animation);
+    free(steady);
+    return;
+  }
+  MakeDevelopedWorldMapAvailable();
+  CheckSteadyWorldNavigation(steady);
+  CheckAnimatedWorldNavigation(animation);
+  if (steady_oam_path && animation_oam_path) {
+    uint16_t steady_oam[256], animation_oam[256];
+    SimWorldNavigationComposition composition;
+    CHECK(ReadOamFixture(steady_oam_path, steady_oam));
+    CHECK(ReadOamFixture(animation_oam_path, animation_oam));
+    CHECK(SimWorldNavigationScene_ClassifyOam(steady_oam, &composition));
+    CHECK(composition.valid && !composition.empty_animation);
+    CHECK(composition.ui.oam_first == 0);
+    CHECK(composition.ui.oam_count == 20);
+    CHECK(composition.palace.oam_first == 20);
+    CHECK(composition.palace.oam_count == 9);
+    CHECK(SimWorldNavigationScene_ClassifyOam(animation_oam, &composition));
+    CHECK(composition.valid && composition.empty_animation);
+  }
+  SimWorldMap_Shutdown();
+  puts("world-navigation fixture metadata: PASS");
+  free(animation);
+  free(steady);
+}
+
+int main(int argc, char **argv) {
   TestFeatureDependencies();
   TestRecordPartitionAndClippedReset();
   TestIntegrityFallback();
@@ -914,6 +1314,19 @@ int main(void) {
   TestObjColorMathPartition();
   TestAtlasDescriptorFallback();
   TestShadowCasterSelection();
+  TestWorldNavigationFrameContract();
+  TestWorldNavigationCloudCeiling();
+  TestWorldNavigationOamClassifier();
+  if ((argc == 4 || argc == 6) && strcmp(argv[1], "--fixtures") == 0)
+    TestCapturedWorldNavigationFixtures(
+        argv[2], argv[3], argc == 6 ? argv[4] : NULL,
+        argc == 6 ? argv[5] : NULL);
+  else if (argc != 1) {
+    fprintf(stderr,
+            "usage: %s [--fixtures STEADY_WRAM ANIMATION_WRAM "
+            "[STEADY_OAM ANIMATION_OAM]]\n", argv[0]);
+    failures++;
+  }
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);
     return 1;

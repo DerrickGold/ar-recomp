@@ -510,7 +510,7 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
          mode, g_ppu->inidisp & 0xf, g_ppu->screenEnabled[0],
          g_ppu->screenEnabled[1], g_ppu->extraLeftCur,
          g_ppu->extraRightCur);
-  if (s_sim_valid && s_sim.town) {
+  if (s_sim_valid && s_sim.view != kSimView_None) {
     Append(&panel,
            "SIM3D %s META %s SERIAL %u REQ$%03X EFF$%03X\n",
            Sim3D_ViewName(s_sim.view),
@@ -518,17 +518,47 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
            (unsigned)s_sim.build_serial,
            (unsigned)s_sim.requested_features,
            (unsigned)s_sim.effective_features);
-    Append(&panel, "ATLAS %s %ux%u USED %ux%u\n",
-           s_sim.atlas_valid ? "READY" : "UNAVAILABLE",
-           (unsigned)s_sim.atlas_width, (unsigned)s_sim.atlas_height,
-           (unsigned)s_sim.atlas_used_width,
-           (unsigned)s_sim.atlas_used_height);
-    Append(&panel, "FLAT %s STATUS %s MISMATCH %u HASH %016llX\n",
-           s_sim.separated_valid ? "READY" : "FALLBACK",
-           Sim3D_CaptureStatusName(
-               (Sim3DCaptureStatus)s_sim.separated_status),
-           (unsigned)s_sim.separated_mismatch_pixels,
-           (unsigned long long)s_sim.separated_hash);
+    if (s_sim.world_navigation_state_valid) {
+      const SimWorldNavigationFrame *navigation = &s_sim.world_navigation;
+      Append(&panel,
+             "WORLD FOCUS $%04X,$%04X M [%d,%d,%d,%d]\n"
+             "ROT $%04X ZOOM $%04X->$%04X LOC %u BRIGHT %u "
+             "MAPSER %u SCENE %s\n",
+             navigation->focus_x, navigation->focus_y,
+             navigation->matrix[0], navigation->matrix[1],
+             navigation->matrix[2], navigation->matrix[3],
+             navigation->rotation, navigation->zoom_current,
+             navigation->zoom_target, navigation->active_location,
+             (unsigned)s_sim.world_navigation_brightness,
+             (unsigned)s_sim.underlay_serial,
+             s_sim.world_navigation_scene.valid ? "READY" : "FALLBACK");
+      const SimWorldNavigationComposition *composition =
+          &s_sim.world_navigation_scene.composition;
+      Append(&panel,
+             "COMP %s%s UI %u+%u PALACE %u+%u FX L/C/B/H %u/%u/%u/%u\n",
+             composition->valid ? "READY" : "FALLBACK",
+             composition->empty_animation ? "/EMPTY" : "",
+             (unsigned)composition->ui.oam_first,
+             (unsigned)composition->ui.oam_count,
+             (unsigned)composition->palace.oam_first,
+             (unsigned)composition->palace.oam_count,
+             (unsigned)s_sim.world_navigation_lighting,
+             (unsigned)s_sim.world_navigation_clouds,
+             (unsigned)s_sim.world_navigation_backdrop,
+             (unsigned)s_sim.world_navigation_haze);
+    } else {
+      Append(&panel, "ATLAS %s %ux%u USED %ux%u\n",
+             s_sim.atlas_valid ? "READY" : "UNAVAILABLE",
+             (unsigned)s_sim.atlas_width, (unsigned)s_sim.atlas_height,
+             (unsigned)s_sim.atlas_used_width,
+             (unsigned)s_sim.atlas_used_height);
+      Append(&panel, "FLAT %s STATUS %s MISMATCH %u HASH %016llX\n",
+             s_sim.separated_valid ? "READY" : "FALLBACK",
+             Sim3D_CaptureStatusName(
+                 (Sim3DCaptureStatus)s_sim.separated_status),
+             (unsigned)s_sim.separated_mismatch_pixels,
+             (unsigned long long)s_sim.separated_hash);
+    }
   }
 
   Append(&report,
@@ -547,7 +577,7 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
          g_ppu->screenWindowed[0], g_ppu->screenWindowed[1],
          g_ppu->extraLeftCur, g_ppu->extraRightCur,
          g_ppu->extraLeftRight, g_ram[0x18], g_ram[0x19], mode);
-  if (s_sim_valid && s_sim.town) {
+  if (s_sim_valid && s_sim.view != kSimView_None) {
     Append(&report,
            "sim3d: view=%s metadata_valid=%d integrity=$%X serial=%u "
            "requested=$%03X effective=$%03X sources=%u fragments=%u "
@@ -563,6 +593,64 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
            (unsigned)s_sim.atlas_width, (unsigned)s_sim.atlas_height,
            (unsigned)s_sim.atlas_used_width,
            (unsigned)s_sim.atlas_used_height);
+    if (s_sim.world_navigation_state_valid) {
+      const SimWorldNavigationFrame *navigation = &s_sim.world_navigation;
+      Append(&report,
+             "world-navigation: focus=$%04X,$%04X scroll=$%04X,$%04X "
+             "matrix=[%d,%d,%d,%d] next=[%d,%d,%d,%d] "
+             "rotation=$%04X zoom=$%04X->$%04X location=%u brightness=%u "
+             "map_serial=%u "
+             "scene=%s texture=%ux%u "
+             "source_to_screen=[%.6g,%.6g,%.6g,%.6g,%.6g,%.6g]\n",
+             navigation->focus_x, navigation->focus_y,
+             s_sim.camera_x, s_sim.camera_y,
+             navigation->matrix[0], navigation->matrix[1],
+             navigation->matrix[2], navigation->matrix[3],
+             navigation->next_matrix[0], navigation->next_matrix[1],
+             navigation->next_matrix[2], navigation->next_matrix[3],
+             navigation->rotation, navigation->zoom_current,
+             navigation->zoom_target, navigation->active_location,
+             (unsigned)s_sim.world_navigation_brightness,
+             (unsigned)s_sim.underlay_serial,
+             s_sim.world_navigation_scene.valid ? "ready" : "fallback",
+             (unsigned)s_sim.world_navigation_scene.texture_width,
+             (unsigned)s_sim.world_navigation_scene.texture_height,
+             (double)s_sim.world_navigation_scene.source_to_screen[0],
+             (double)s_sim.world_navigation_scene.source_to_screen[1],
+             (double)s_sim.world_navigation_scene.source_to_screen[2],
+             (double)s_sim.world_navigation_scene.source_to_screen[3],
+             (double)s_sim.world_navigation_scene.source_to_screen[4],
+             (double)s_sim.world_navigation_scene.source_to_screen[5]);
+      Append(&report,
+             "world-navigation-active-region: valid=%d bounds=%u,%u %ux%u\n",
+             s_sim.world_navigation_scene.active_region_valid,
+             (unsigned)s_sim.world_navigation_scene.active_region_x,
+             (unsigned)s_sim.world_navigation_scene.active_region_y,
+             (unsigned)s_sim.world_navigation_scene.active_region_width,
+             (unsigned)s_sim.world_navigation_scene.active_region_height);
+      const SimWorldNavigationComposition *composition =
+          &s_sim.world_navigation_scene.composition;
+      Append(&report,
+             "world-navigation-composition: valid=%d empty=%d "
+             "ui=%u+%u bounds=%d,%d %ux%u "
+             "palace=%u+%u bounds=%d,%d %ux%u effects=%u/%u/%u/%u\n",
+             composition->valid, composition->empty_animation,
+             (unsigned)composition->ui.oam_first,
+             (unsigned)composition->ui.oam_count,
+             (int)composition->ui.screen_x, (int)composition->ui.screen_y,
+             (unsigned)composition->ui.width,
+             (unsigned)composition->ui.height,
+             (unsigned)composition->palace.oam_first,
+             (unsigned)composition->palace.oam_count,
+             (int)composition->palace.screen_x,
+             (int)composition->palace.screen_y,
+             (unsigned)composition->palace.width,
+             (unsigned)composition->palace.height,
+             (unsigned)s_sim.world_navigation_lighting,
+             (unsigned)s_sim.world_navigation_clouds,
+             (unsigned)s_sim.world_navigation_backdrop,
+             (unsigned)s_sim.world_navigation_haze);
+    }
     Append(&report,
            "sim3d-flat: valid=%d status=%s mismatch_pixels=%u hash=%016llX\n",
            s_sim.separated_valid,

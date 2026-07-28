@@ -70,8 +70,9 @@ static void TestDefaultsAndMetadata(void) {
    * that, Controls added eight device/tuning rows plus 42 binding rows: 18
    * actions x keyboard+gamepad (12 SNES buttons and 6 analog camera axes),
    * plus 6 gamepad-only host actions. Presentation then gained the diorama
-   * edge-margin-fix A/B toggle (SPEC-backdrop-clip.md). */
-  CHECK(g_setting_desc_count == 226);
+   * edge-margin-fix A/B toggle (SPEC-backdrop-clip.md), and navigation gained
+   * its separate off-by-default 3D scene switch. */
+  CHECK(g_setting_desc_count == 229);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -111,6 +112,9 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.warp_target == 0x0101);
   CHECK(!g_settings.scene_inspector);
   CHECK(!g_settings.sim3d_mode);
+  CHECK(!g_settings.sim3d_world_navigation);
+  CHECK(g_settings.sim3d_world_navigation_lighting);
+  CHECK(!g_settings.sim3d_world_navigation_clouds);
   /* The stage toggles are what the player's master switch resolves, so a
    * landed stage missing from these defaults is dead in normal play. They must
    * agree with kSim3DShippedFeatures; bump both as each visual gate passes. */
@@ -190,6 +194,12 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *inspector = Settings_Find("scene_inspector");
   const SettingDesc *dump_assets = Settings_Find("dump_scene_assets");
   const SettingDesc *sim_mode = Settings_Find("sim3d_mode");
+  const SettingDesc *world_navigation =
+      Settings_Find("sim3d_world_navigation");
+  const SettingDesc *world_navigation_lighting =
+      Settings_Find("sim3d_world_navigation_lighting");
+  const SettingDesc *world_navigation_clouds =
+      Settings_Find("sim3d_world_navigation_clouds");
   const SettingDesc *sim_reset = Settings_Find("sim3d_reset_camera");
   CHECK(display && display->type == kSettingType_Enum);
   CHECK(display && display->enum_count == kDisplayMode_PresetCount);
@@ -235,6 +245,12 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(dump_assets && dump_assets->category == kSettingCat_Inspector &&
         dump_assets->type == kSettingType_Action);
   CHECK(sim_mode && sim_mode->category == kSettingCat_Simulation);
+  CHECK(world_navigation &&
+        world_navigation->category == kSettingCat_Simulation &&
+        world_navigation->type == kSettingType_Bool);
+  CHECK(world_navigation_lighting && world_navigation_clouds);
+  CHECK(!Settings_IsAvailable(world_navigation_lighting));
+  CHECK(!Settings_IsAvailable(world_navigation_clouds));
   /* Camera rows (and the reset that restores them) are their own tab of the
    * Town 3D section, separate from the stage toggles. */
   CHECK(sim_reset && sim_reset->category == kSettingCat_SimCamera &&
@@ -256,6 +272,11 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_IsDebugOnly(Settings_Find("scene_inspector")));
   CHECK(Settings_IsDebugOnly(Settings_Find("dump_scene_assets")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_mode")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_world_navigation")));
+  CHECK(!Settings_IsDebugOnly(
+      Settings_Find("sim3d_world_navigation_lighting")));
+  CHECK(!Settings_IsDebugOnly(
+      Settings_Find("sim3d_world_navigation_clouds")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_shadows")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_camera_mode")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("diorama_skybox")));
@@ -305,11 +326,37 @@ static void TestDefaultsAndMetadata(void) {
 static void TestSim3DEnvironmentLabels(void) {
   ClearSettingsEnv();
   setenv("AR_SIM3D", "on", 1);
+  setenv("AR_SIM3D_WORLD_NAV", "on", 1);
+  setenv("AR_SIM3D_WORLD_NAV_LIGHTING", "off", 1);
+  setenv("AR_SIM3D_WORLD_NAV_CLOUDS", "on", 1);
   setenv("AR_SIM3D_SHADOWS", "off", 1);
   setenv("AR_SIM3D_HEIGHT", "off", 1);
   setenv("AR_SIM3D_PITCH", "350", 1);
   Settings_Init();
   CHECK(g_settings.sim3d_mode);
+  CHECK(g_settings.sim3d_world_navigation);
+  CHECK(!g_settings.sim3d_world_navigation_lighting);
+  CHECK(g_settings.sim3d_world_navigation_clouds);
+  CHECK(Settings_IsAvailable(
+      Settings_Find("sim3d_world_navigation_lighting")));
+  CHECK(Settings_IsAvailable(
+      Settings_Find("sim3d_world_navigation_clouds")));
+  /* Shared atmosphere rows must remain usable when navigation is the only
+   * 3D master. Town-only cull shape controls stay unavailable. */
+  g_settings.sim3d_mode = false;
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_backdrop")));
+  CHECK(Settings_IsAvailable(
+      Settings_Find("sim3d_backdrop_strength_pct")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_cull_haze")));
+  CHECK(Settings_IsAvailable(
+      Settings_Find("sim3d_underlay_haze_pct")));
+  CHECK(Settings_IsAvailable(
+      Settings_Find("sim3d_cull_haze_lead_px")));
+  CHECK(Settings_IsAvailable(
+      Settings_Find("sim3d_underlay_defocus_pct")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_cull_dim_pct")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_cull_corner_px")));
+  g_settings.sim3d_mode = true;
   /* Turning stages off by name is the only way to select a profile now, and
    * the fold must drop exactly those bits. */
   CHECK(!g_settings.sim3d_shadows && !g_settings.sim3d_virtual_height);

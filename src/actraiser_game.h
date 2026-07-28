@@ -89,7 +89,28 @@ enum {
   kActRaiserWram_PersistentMagicPoints = 0x0295,
   kActRaiserWram_MagicInventory = 0x0299,
 
+  /* World-navigation ($18/$19 = $00/$09) Mode-7 camera contract. The focus is
+   * the canonical world point under screen centre; the current and staged
+   * matrices are the exact transforms uploaded by $02:8384. */
+  kActRaiserWram_WorldFocusX = 0x0300,
+  kActRaiserWram_WorldFocusY = 0x0302,
+  kActRaiserWram_WorldMatrixA = 0x0304,
+  kActRaiserWram_WorldMatrixB = 0x0306,
+  kActRaiserWram_WorldMatrixC = 0x0308,
+  kActRaiserWram_WorldMatrixD = 0x030A,
+  kActRaiserWram_WorldNextMatrixA = 0x030C,
+  kActRaiserWram_WorldNextMatrixB = 0x030E,
+  kActRaiserWram_WorldNextMatrixC = 0x0310,
+  kActRaiserWram_WorldNextMatrixD = 0x0312,
+  kActRaiserWram_WorldRotation = 0x0314,
+  kActRaiserWram_WorldZoomCurrent = 0x0316,
+  kActRaiserWram_WorldZoomTarget = 0x0318,
+
   kActRaiserWram_DeathHeimEndingState = 0x0334,
+  /* $01:B6CA clears this, then writes the 1-based entry selected from the
+   * seven region table at $01:B73C. Zero means outside every border. The same
+   * value owns the world-map label and destination. */
+  kActRaiserWram_WorldLocation = 0x0341,
   kActRaiserWram_DeathHeimProgress = 0x0347,
   kActRaiserWram_CopRequest = 0x035A,
   kActRaiserWram_BrkSoundRequest = 0x035B,

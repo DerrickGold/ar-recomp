@@ -600,6 +600,57 @@ the current debugging process; this file is the case law.
     transferred bytes and handshake result. Host thread scheduling is not an emulated-time
     ordering guarantee.
 
+27. **Developed world underlay corrupt after a direct act-to-town transition — FIXED
+    2026-07-27 by owning the build.** The original underlay observed `$7E:C000-$FFFF` and tried
+    to infer whether the live shadow was trustworthy. That premise failed because an act can
+    return directly to the same town with no intervening world-map build: action entry writes a
+    durable contiguous prefix through row 79, and town frames use rows 0-7 as scratch. The
+    initial reproduction `runs/20260727-194600` logged `underlay repair policy: legacy`, so its
+    `settings.ini`-pinned `worldmap_top_rows` made the newer coherence gate inert; it proved the
+    shadow was corrupt, not that either gate worked. The captured symptom was structured action
+    garbage, not a coherent pristine/undeveloped map.
+
+    **Fix:** replace observation with construction. `$02:B475` was split into base load,
+    bounded/yield-free `$02:865C` development stamp, and VRAM upload. Production now runs the
+    pure `SimWorldMap_ComposeDeveloped` equivalent from immutable ROM tables plus explicit
+    `$7F:2000-$37FF`, `$7F:6B18-$6B23`, and `$7F:9101` inputs, publishing a host-owned tilemap
+    without touching CPU, WRAM, PPU, stack, direct page, or math-unit state. The transactional
+    ROM call survives only behind `AR_WORLDMAP_HLE_COMPARE=1`; direct-transition, steady `$09`,
+    and action-entry fixtures match it 16,384/16,384 bytes, with 447 genuine developed bytes
+    versus ROM. The trust gate, volatile-row fingerprint, coherence/staleness policy, fallback
+    baseline, `worldmap_top_rows`, and its four setting positions were deleted.
+
+    **Reusable lesson:** do not build correctness on the lifetime of a shared scratch buffer.
+    When the producer is bounded and separable, capture its real inputs and own the pure result.
+    A stale last-known-good copy would have preserved development, but remains inferior because
+    it still depends on a prior presentation visit.
+
+28. **World water was static in host-rendered navigation and town underlay — FIXED
+    2026-07-27.** The developed tilemap was correct, but the host decoded immutable character
+    ROM once and missed a presentation-time animation. `$02:AF86` is the distinct sim
+    `$19=0/9` path: every eight game frames it copies one 64-byte plane from
+    `$0A:B000/$B040/$B080/$B0C0` into the high bytes of both Mode-7 tile `$00` and `$AA`.
+    `$7E:00D7` retains that ROM source after `$DC` is drained. Navigation now mirrors the
+    retained phase into both host tiles and dirties only tilemap cells using those IDs. In town
+    mode `$D7` belongs to the unrelated WRAM-backed tile animation, so the outer underlay
+    continues the same four-phase/eight-tick world-water sequence from global frame `$88`.
+    **Reusable lesson:** a byte-identical map and static CHR dump are not a complete asset
+    contract; trace runtime character DMA and distinguish mode-specific meanings of shared
+    descriptors.
+
+29. **World-navigation effects appeared after fade-in and vanished before fade-out — FIXED
+    2026-07-27.** The capture gate required INIDISP brightness 15, so all partial-brightness
+    frames fell back to authentic Mode 7. That exposed a fully bright flat map until the fade
+    ended, then removed the host backdrop, haze, lighting, and clouds before fade-out began.
+    **Fix:** only forced blank rejects the enhanced view. Host-generated backdrop/world/effects
+    are composed at full intensity, then receive one exact black overlay with alpha
+    `(15-brightness)*17`; PPU-rasterized Palace/UI pixels, which already include hardware master
+    brightness, are drawn after that overlay to avoid double dimming. The backdrop capture is
+    likewise full-brightness. A gf380-451 trace holds the enhanced view from brightness 0
+    through 1-15 and back through 14-0, releasing only after the black endpoint.
+    **Reusable lesson:** brightness is scene data, not a validity condition. Preserve ownership
+    through a fade and apply the master transform exactly once to each content source.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

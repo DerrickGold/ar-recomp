@@ -4,14 +4,21 @@
 #include <string.h>
 
 /* ROM residency, all uncompressed and all verified byte-for-byte against a
- * live world-map capture (tilemap 16172/16384 and chr 16346/16384 identical,
- * the deltas being exactly the runtime edits; palette 512/512 identical). */
+ * live world-map capture (tilemap 16172/16384 and chr 16346/16384 identical;
+ * the 38 CHR deltas are exactly the animated water in tiles $00/$AA; palette
+ * 512/512 identical). */
 enum {
+  kWorldWaterFramesRomOffset = 0x053000, /* LoROM $0A:B000, 4 x 64B */
   kWorldTilemapRomOffset = 0x033341,  /* LoROM $06:B341, 128x128 bytes */
   kWorldTilesRomOffset = 0x070000,    /* LoROM $0E:8000, 256 x 64B 8bpp */
   kWorldPaletteRomOffset = 0x0E3F93,  /* LoROM $1C:BF93, 256 x BGR555 */
   kWorldTileCount = 256,
   kWorldTileBytes = 64,
+  kWorldWaterFrameCount = 4,
+  kWorldWaterSourceFirst = 0xB000,
+  kWorldWaterSourceStride = 0x40,
+  kWorldWaterTileFirst = 0x00,
+  kWorldWaterTileSecond = 0xAA,
 };
 
 /* Each town's window origin, derived as (world cathedral icon) minus (the
@@ -35,8 +42,12 @@ static const SimWorldTownWindow kTownWindows[6] = {
 
 static struct {
   bool available;
+  bool developed;
   uint8_t tilemap[kSimWorldMapBytes];
   uint8_t tiles[kWorldTileCount * kWorldTileBytes];
+  uint8_t water_frames[kWorldWaterFrameCount][kWorldTileBytes];
+  uint16_t water_source;
+  bool water_source_valid;
   uint32_t palette[256];
   uint32_t serial;
   /* One flag per tile (tilemap is one byte per tile, so this is indexed
@@ -50,8 +61,8 @@ static struct {
    * write-only and undefined, so baking only dirty tiles into it would leave
    * the rest as garbage from a previous unrelated use. */
   uint32_t pixels[kSimWorldMapPixels * kSimWorldMapPixels];
-  /* Pristine base copied into the transactional builder before it stamps the
-   * current simulation development over it. */
+  /* Pristine base copied into the pure builder before it stamps the current
+   * simulation development over it. */
   uint8_t baseline[kSimWorldMapBytes];
 } g_world;
 
@@ -67,7 +78,7 @@ static uint32_t ExpandBgr555(uint16_t value) {
 
 bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   memset(&g_world, 0, sizeof(g_world));
-  size_t needed = kWorldTilesRomOffset + kWorldTileCount * kWorldTileBytes;
+  size_t needed = kWorldPaletteRomOffset + 256 * 2;
   if (!rom_data || rom_size < needed) {
     fprintf(stderr,
             "[sim-worldmap] unavailable: ROM is %zu bytes, need %zu\n",
@@ -79,6 +90,8 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   /* Retain the pristine base for every owned build. */
   memcpy(g_world.baseline, g_world.tilemap, sizeof(g_world.baseline));
   memcpy(g_world.tiles, rom_data + kWorldTilesRomOffset, sizeof(g_world.tiles));
+  memcpy(g_world.water_frames, rom_data + kWorldWaterFramesRomOffset,
+         sizeof(g_world.water_frames));
   for (int i = 0; i < 256; i++) {
     const uint8_t *entry = rom_data + kWorldPaletteRomOffset + i * 2;
     g_world.palette[i] =
@@ -105,6 +118,7 @@ bool SimWorldMap_OriginForTown(uint8_t town, int *tile_x, int *tile_y) {
 
 int SimWorldMap_PublishBuiltTilemap(const uint8_t *tilemap) {
   if (!g_world.available || !tilemap) return 0;
+  g_world.developed = true;
   int changed = 0;
   for (size_t i = 0; i < sizeof(g_world.tilemap); i++) {
     if (g_world.tilemap[i] == tilemap[i]) continue;
@@ -117,13 +131,47 @@ int SimWorldMap_PublishBuiltTilemap(const uint8_t *tilemap) {
   return changed;
 }
 
+int SimWorldMap_SetWaterAnimationSource(uint16_t source) {
+  if (!g_world.available || source < kWorldWaterSourceFirst) return 0;
+  const unsigned displacement = source - kWorldWaterSourceFirst;
+  if (displacement % kWorldWaterSourceStride != 0) return 0;
+  const unsigned frame = displacement / kWorldWaterSourceStride;
+  if (frame >= kWorldWaterFrameCount ||
+      (g_world.water_source_valid && g_world.water_source == source))
+    return 0;
+
+  /* $02:AF86 performs two high-byte-only VRAM DMAs from the same 64-byte
+   * source: one to Mode-7 tile $00 and one to tile $AA. Mirror that operation
+   * in host-owned art rather than observing the resulting live VRAM. */
+  memcpy(g_world.tiles + kWorldWaterTileFirst * kWorldTileBytes,
+         g_world.water_frames[frame], kWorldTileBytes);
+  memcpy(g_world.tiles + kWorldWaterTileSecond * kWorldTileBytes,
+         g_world.water_frames[frame], kWorldTileBytes);
+  g_world.water_source = source;
+  g_world.water_source_valid = true;
+
+  int changed = 0;
+  for (size_t i = 0; i < sizeof(g_world.tilemap); i++) {
+    const uint8_t tile = g_world.tilemap[i];
+    if (tile != kWorldWaterTileFirst && tile != kWorldWaterTileSecond)
+      continue;
+    g_world.dirty[i] = 1;
+    changed++;
+  }
+  if (changed && ++g_world.serial == 0) g_world.serial = 1;
+  return changed;
+}
+
 uint32_t SimWorldMap_Serial(void) {
   return g_world.available ? g_world.serial : 0;
 }
 
-/* The retained pristine ROM tilemap. Exposed so the builder can seed its
- * transactional scratch without this module having to know how the build
- * works. */
+bool SimWorldMap_DevelopedAvailable(void) {
+  return g_world.available && g_world.developed;
+}
+
+/* The retained pristine ROM tilemap. Exposed as the pure builder's immutable
+ * base without this module having to know how composition works. */
 const uint8_t *SimWorldMap_Baseline(void) {
   return g_world.available ? g_world.baseline : NULL;
 }

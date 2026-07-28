@@ -120,6 +120,19 @@ run it after any bank00.cfg handler work.
 | `$02:AEEB` | `NmiGraphics_UploadHudBg3` | Verified | Streams the BG3 HUD from `$7F:B000` every frame and the lower portion when `$F1` requests it. | [rendering §2](rendering-engine.md#2-the-nmi-graphics-chain-02abf0) |
 | `$02:BF60` | `Dialog_DrawByType` | Mapped | Dispatches message-box/text composition by message ID; text and box occupy different BG layers. | [SEAMS function roles](SEAMS.md#function-roles-discovered-decomp-groundwork) |
 
+### World-map construction and navigation
+
+| Address | Candidate symbol | Status | Contract / observation | Evidence |
+|---|---|---|---|---|
+| `$02:B475` | `WorldMap_BuildAndUpload` | Verified | Three separable phases: copy/decompress the 16 KiB base into `$7E:C000`, call `$02:865C` to stamp development, then upload all `$4000` bytes through `$2118`. Presentation does not occur inside the development builder. | [rendering §13c](rendering-engine.md#13c-simulation-town-ground-extension-2026-07-22), [3D navigation spec](../ar-recomp-wave4/specs/SPEC-world-navigation-3d.md) |
+| `$02:865C` | `WorldMap_StampDevelopment` | Verified | Bounded, yield-free dynamic phase. Requires `$19=09` and destination pointer bank `$AA=7E`; consumes `$7F:9101`, the six enable words at `$7F:6B18`, town cells at `$7F:2000`, and tables `$02:8000/$8100/$87A5`; writes the developed overlay into `$7E:C000`. Production uses a pure state-free HLE; the ROM call remains only as an opt-in differential oracle. | [SEAMS world-map seam](SEAMS.md#logic-hardware-seam-inventory), [rendering §13c](rendering-engine.md#13c-simulation-town-ground-extension-2026-07-22) |
+| `$02:86D1` | `WorldMap_TranslateTownCells` | Verified | Walks one quadrant-paged 32x32 town map and translates ordinary cell IDs through `$02:8000`; a zero translation preserves the base-map tile. | [3D navigation spec](../ar-recomp-wave4/specs/SPEC-world-navigation-3d.md) |
+| `$02:8726` | `WorldMap_ExpandSpecialCells` | Verified | Scans aligned even cells and expands IDs `$E3-$EF` through 13 four-byte 2x2 replacements at `$02:8100`. | [3D navigation spec](../ar-recomp-wave4/specs/SPEC-world-navigation-3d.md) |
+| `$02:8213` | `WorldNavigation_UpdateInputAndZoom` | Mapped | Moves focus `$0300/$0302` in two-pixel steps, stages zoom target `$0318`, and drives the scripted transition path. Stable zoom states are near `$0206`, middle `$040A`, and far `$0562`. | [rendering §13h](rendering-engine.md#13h-world-navigation-full-plane-scene-2026-07-27), [3D navigation spec](../ar-recomp-wave4/specs/SPEC-world-navigation-3d.md) |
+| `$02:8384` | `WorldNavigation_UploadMode7Transform` | Verified | Uploads current matrix `$0304-$030A` to M7A-D and focus `$0300/$0302` to M7X/Y. The host capture carries the same values as an immutable affine scene. | [rendering §13h](rendering-engine.md#13h-world-navigation-full-plane-scene-2026-07-27) |
+| `$01:B6CA` | `WorldNavigation_SelectLocation` | Verified | Clears `$0341`, tests focus against the seven 256x256 rectangles at `$01:B73C`, then publishes the 1-based label/destination ID. Zero therefore means outside every town border. | [rendering §13h](rendering-engine.md#13h-world-navigation-full-plane-scene-2026-07-27), [ram map](ram-map.md) |
+| `$02:AF86` | `NmiGraphics_UploadWorldWater` | Verified | For sim `$19=0/9`, drains `$D7-$DC` from fixed ROM bank `$0A` and performs two high-byte-only 64-byte VRAM DMAs. On world navigation the destinations replace Mode-7 tiles `$00` and `$AA`; four sources `$B000/$B040/$B080/$B0C0` advance every eight game frames. | [rendering §7](rendering-engine.md#7-tile-animation), [SEAMS graphics pipeline](SEAMS.md#sim-mode-town-map-graphics-pipeline-vram-seam-mapped-2026-07-05) |
+
 ### Simulation camera, records, actors, and events
 
 | Address | Candidate symbol | Status | Contract / observation | Evidence |
@@ -237,6 +250,14 @@ the eventual symbol format.
 | ROM `$17:ECFB` | `DialogFont_CompressedTiles` | Verified | Compressed asset whose first word declares a `$1000`-byte 256-tile 8×8 2bpp output. Font tile indices correspond to character codes; decoded by `$02:C5C9` into BG3 character space. File offset `$0BECFB`. | [settings overlay assets](settings-system.md#34-host-overlay-integration-seam) |
 | ROM `$0D:C000` | `SkyPalace_BgCharacterBank` | Verified | `$4000`-byte BG character bank, byte-identical to VRAM `$0000-$1FFF` words in both gf460/gf668 Sky Palace captures. Contains dialog-frame chars `$CE/$CF/$DE/$DF/$EE/$FF`. File offset `$06C000`. | [rendering UI/dialog](rendering-engine.md#11-ui--dialog-compose-sim-engine) |
 | ROM `$1C:BF73` | `SkyPalace_DialogPalette7` | Verified | Exact 16-color CGRAM palette used by the 8×8 dialog-frame characters. File offset `$0E3F73`; stable across ordinary dialogue and submenu captures. | [rendering palette paths](rendering-engine.md#10-palette-paths) |
+| ROM `$02:8000-$80FF` | `WorldMap_OrdinaryCellTranslation` | Verified | 256-byte town-cell to world-tile translation table; zero means preserve the base tile. File offset `$010000`. | [rendering §13c](rendering-engine.md#13c-simulation-town-ground-extension-2026-07-22) |
+| ROM `$02:8100-$8133` | `WorldMap_SpecialCellExpansion` | Verified | Thirteen four-byte 2x2 replacements for aligned special cells `$E3-$EF`. File offset `$010100`. | [rendering §13c](rendering-engine.md#13c-simulation-town-ground-extension-2026-07-22) |
+| ROM `$02:87A5-$87B0` | `WorldMap_TownDestinations` | Verified | Six little-endian destination offsets into the 128x128 developed tilemap. File offset `$0107A5`. | [3D navigation spec](../ar-recomp-wave4/specs/SPEC-world-navigation-3d.md) |
+| ROM `$01:B73C-$B757` | `WorldNavigation_LocationRegions` | Verified | Seven `(x,y)` top-left pairs for 256x256 focus rectangles: Fillmore, Bloodpool, Kasandora, Aitos, Marahna, Northwall, Death Heim. File offset `$00B73C`. | [rendering §13h](rendering-engine.md#13h-world-navigation-full-plane-scene-2026-07-27) |
+| ROM `$06:B341-$F340` | `WorldMap_BaseTilemap` | Verified | Uncompressed row-major 128x128 Mode-7 tilemap, 16 KiB. File range `$033341-$037340`. | [rendering §13c](rendering-engine.md#13c-simulation-town-ground-extension-2026-07-22) |
+| ROM `$0A:B000-$B0FF` | `WorldMap_WaterAnimationFrames` | Verified | Four 64-byte 8bpp high-byte planes used to replace Mode-7 tiles `$00` and `$AA` every eight game frames. File range `$053000-$0530FF`. | [rendering §7](rendering-engine.md#7-tile-animation) |
+| ROM `$0E:8000-$BFFF` | `WorldMap_Mode7Characters` | Verified | 256 uncompressed 8x8 8bpp Mode-7 tiles, 64 bytes each. File range `$070000-$073FFF`; tiles `$00/$AA` receive the animated high-byte replacements. | [rendering §13c](rendering-engine.md#13c-simulation-town-ground-extension-2026-07-22) |
+| ROM `$1C:BF93-$C192` | `WorldMap_Palette` | Verified | Complete 256-entry BGR555 world palette, 512 bytes. File range `$0E3F93-$0E4192`. | [rendering §13c](rendering-engine.md#13c-simulation-town-ground-extension-2026-07-22) |
 
 ## Stable state anchors used by handwritten code
 
@@ -255,6 +276,11 @@ polymorphic fields and temporary direct-page values should remain local.
 | `$7E:0032/$0034` | `Bg2Width/Height` | BG2 world dimensions. |
 | `$7E:0088` | `GameFrame` | NMI-maintained game-frame counter. |
 | `$7E:0093` | `TileStreamRequestFlags` | BG1/BG2 row/column crossing flags. |
+| `$7E:00D7-$00DD` | `AnimationDmaDescriptor1` | Mode-dependent tile-animation descriptor. World navigation leaves a `$0A:B000/B040/B080/B0C0` water source in `$D7`; towns use unrelated WRAM-backed animation data. |
+| `$7E:0300/$0302` | `WorldFocusX/Y` | Canonical world point at authentic screen centre. |
+| `$7E:0304-$0312` | `WorldCurrentAndStagedMatrices` | Current and staged signed 8.8 Mode-7 A/B/C/D transforms. |
+| `$7E:0314/$0316/$0318` | `WorldRotation/ZoomCurrent/ZoomTarget` | World-navigation rotation and zoom state, including the act-entry spin/zoom. |
+| `$7E:0341` | `WorldLocation` | 1-based location-label/destination rectangle selected by `$01:B6CA`; zero outside all borders. |
 | `$7E:0380-$059F` | `OamShadow` | 512-byte low table plus 32-byte high table. |
 | `$7E:06A0+` | `ActionObjectTable` / `SimFixedRecords` | Mode-dependent resident object/record array. **80** stride-`$40` slots (`$06A0`-`$1AA0`; allocator bound in `$853D`), not 24. Key fields: `+$12` handler, `+$1E` yield-resume, `+$24` wait counter, `+$3E` stashed return frame. |
 | `$7E:08A0+` | `PlayerObject` | Action player slot inside the action-object table. |
@@ -268,6 +294,9 @@ polymorphic fields and temporary direct-page values should remain local.
 | `$7E:0347` | `DeathHeimProgress` | Boss-rush progress (`$19 - 1` after each boss); `7` = all bosses beaten. |
 | `$7E:035A/$035B` | `CopEventRequest` / `BrkSfxRequest` | Software-interrupt request ports (music/event id, SFX id). |
 | `$7F:6B18` | `RegionCompletionFlags` | Six-region completion bitset checked by the post-Death-Heim return stager. |
+| `$7E:C000-$FFFF` | `WorldMapScratch` | Shared scratch. It is a world-map shadow only during `$19=09` build/presentation; acts clobber rows 0-79 and towns reuse rows 0-7, so handwritten rendering must not treat it as persistent state. |
+| `$7F:2000-$37FF` | `TownTerrainCellMaps` | Six quadrant-paged 32x32 town maps consumed by the developed-world composer. |
+| `$7F:9101` | `WorldStateFlags` | Bit 0 controls the builder's 8x8 clear at tilemap offset `$0660`. |
 | `$7E:0A00+` | `SimWorldRecords` | 44 stride-38 simulation world records. |
 | `$7E:0AEE/$0AF0` | `SimCameraTargetX/Y` | Town camera-follow target. |
 | `$7E:3900/$3A02` | `Bg1ColumnRecord` / `Bg1RowRecord` | Fixed BG1 tile-upload records. |

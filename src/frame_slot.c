@@ -15,6 +15,7 @@
 #include "sim3d.h"
 #include "sim_render_metadata.h"
 #include "sim_town_canvas.h"
+#include "sim_world_navigation_capture.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "common_rtl.h"      /* g_ram, g_ppu */
@@ -160,6 +161,12 @@ Sim3DTuning BuildSim3DTuning(void) {
       .underlay_defocus_pct = g_settings.sim3d_underlay_defocus_pct,
       .cloud_altitude_px = g_settings.sim3d_cloud_altitude_px,
       .cloud_drift_pct = g_settings.sim3d_cloud_drift_pct,
+      .world_navigation_lighting =
+          g_settings.sim3d_world_navigation_lighting,
+      .world_navigation_clouds =
+          g_settings.sim3d_world_navigation_clouds,
+      .world_navigation_backdrop = g_settings.sim3d_backdrop,
+      .world_navigation_haze = g_settings.sim3d_cull_haze,
       .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
       .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
       .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
@@ -260,10 +267,12 @@ void FrameSlot_Capture(FrameSlot *dst) {
   } else {
     SimRenderMetadata_CaptureFrame(
         &dst->sim, g_ram, g_settings.sim3d_mode,
+        g_settings.sim3d_world_navigation,
         Settings_Sim3DRequestedFeatures(),
         g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&dst->sim, &tuning);
+    SimWorldNavigationCapture_Capture(&dst->sim, g_ppu);
     /* Accumulation itself happens once a frame at the always-run site below;
      * this only publishes the current canvas state into the slot. */
     dst->sim.town_canvas_serial = SimTownCanvas_Serial();

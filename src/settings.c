@@ -665,6 +665,33 @@ static bool Sim3DWorldUnderlayAvailable(void) {
 static bool Sim3DCloudShroudAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_CloudShroud);
 }
+static bool WorldNavigation3DEnabled(void) {
+  return g_settings.sim3d_world_navigation;
+}
+static bool WorldNavigationLightingAvailable(void) {
+  return WorldNavigation3DEnabled() &&
+      g_settings.sim3d_world_navigation_lighting;
+}
+static bool WorldNavigationCloudsAvailable(void) {
+  return WorldNavigation3DEnabled() &&
+      g_settings.sim3d_world_navigation_clouds;
+}
+static bool Sim3DOrWorldNavigationLightingAvailable(void) {
+  return Sim3DShadowsAvailable() || WorldNavigationLightingAvailable();
+}
+static bool Sim3DOrWorldNavigationShadowAvailable(void) {
+  return g_settings.sim3d_mode ||
+      (WorldNavigationLightingAvailable() &&
+       g_settings.sim3d_world_navigation_clouds);
+}
+static bool Sim3DOrWorldNavigationSoftShadowAvailable(void) {
+  return Sim3DSoftShadowsAvailable() ||
+      (WorldNavigationLightingAvailable() &&
+       g_settings.sim3d_world_navigation_clouds);
+}
+static bool Sim3DOrWorldNavigationCloudsAvailable(void) {
+  return Sim3DCloudShroudAvailable() || WorldNavigationCloudsAvailable();
+}
 static bool Sim3DDynamicCameraAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_GroundProjection) &&
       g_settings.sim3d_camera_mode == kSimCam_Dynamic;
@@ -672,8 +699,12 @@ static bool Sim3DDynamicCameraAvailable(void) {
 static bool Sim3DCullHazeAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_CullHaze);
 }
+static bool Sim3DOrWorldNavigationHazeAvailable(void) {
+  return Sim3DCullHazeAvailable() || WorldNavigation3DEnabled();
+}
 static bool Sim3DBackdropAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_Backdrop);
+  return Sim3DStageImplemented(kSimFeature_Backdrop) ||
+      WorldNavigation3DEnabled();
 }
 static bool Sim3DPickerEaseAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_PickerExitEase);
@@ -892,6 +923,29 @@ const SettingDesc g_setting_descs[] = {
                "picker modes automatically return to the authentic top-down view.",
                kSettingCat_Simulation, 0, false, Diorama_NewPpuCapable,
                NULL),
+  BOOL_SETTING(sim3d_world_navigation, "AR_SIM3D_WORLD_NAV",
+               "World navigation 3D",
+               "Render inter-town Sky Palace navigation as a full-world 3D "
+               "scene with a forced top-down camera.",
+               kSettingCat_Simulation, 0, false, Diorama_NewPpuCapable,
+               NULL),
+  BOOL_SETTING(sim3d_world_navigation_lighting,
+               "AR_SIM3D_WORLD_NAV_LIGHTING",
+               "World navigation lighting",
+               "Apply top-down colour treatment and directional cloud shadows "
+               "to the inter-town world. Uses the shared light controls and "
+               "does not require Simulation town 3D.",
+               kSettingCat_Simulation, 1, false,
+               WorldNavigation3DEnabled, NULL),
+  BOOL_SETTING(sim3d_world_navigation_clouds,
+               "AR_SIM3D_WORLD_NAV_CLOUDS",
+               "World navigation clouds",
+               "Draw world-anchored cloud banks over the full inter-town map. "
+               "The authentic zoom controls whether the camera is above the "
+               "cloud deck: bodies are visible while zoomed out and fade "
+               "away as the Palace descends below them.",
+               kSettingCat_Simulation, 0, false,
+               WorldNavigation3DEnabled, NULL),
   /* The enhanced renderer, stage by stage. Each is an ordinary toggle so a
    * stage can be turned on or off by name; `kSim3DShippedFeatures` is the one
    * list of stages with a shipped implementation, and the defaults here must
@@ -956,14 +1010,15 @@ const SettingDesc g_setting_descs[] = {
                kSettingCat_Simulation, 1, false, Sim3DCloudShroudAvailable,
                NULL),
   BOOL_SETTING(sim3d_cull_haze, "AR_SIM3D_CULL_HAZE_STAGE",
-               "Out-of-range ground fade",
+               "Local-area haze",
                "Fade the town ground into the distant world map outside the "
                "sprite-drawable window, so the bright area reads as where "
                "actors can be rather than as clouds having gaps. Unlike the "
-               "shroud this is continuous, so it explains the boundary even "
-               "where cover is thin. Needs the world map underlay.",
-               kSettingCat_Simulation, 1, false, Sim3DCullHazeAvailable,
-               NULL),
+               "shroud this is continuous. During 3D world navigation the "
+               "same stage keeps the ROM-selected location clear and hazes "
+               "the other regions.",
+               kSettingCat_Simulation, 1, false,
+               Sim3DOrWorldNavigationHazeAvailable, NULL),
   { "sim3d_camera_mode", "AR_SIM3D_CAMERA_MODE", "Camera mode",
     "Free Cam: manual orbit and zoom with the right mouse button, and the "
     "pose persists. Dynamic Cam: its own baseline pose, leaning toward the "
@@ -1004,8 +1059,9 @@ const SettingDesc g_setting_descs[] = {
                NULL),
   BOOL_SETTING(sim3d_backdrop, "AR_SIM3D_BACKDROP", "Atmospheric backdrop",
                "Draw a graded sky behind the finite ground instead of a flat "
-               "clear, anchored to the tilted map's own horizon so it stays "
-               "put as the camera pitches. Needs the ground projection.",
+               "clear. Town mode anchors it to the tilted map's horizon; "
+               "world navigation uses its synthetic horizon beyond the "
+               "finite world edges.",
                kSettingCat_Simulation, 1, false, Sim3DBackdropAvailable,
                NULL),
   BOOL_SETTING(sim3d_picker_exit_ease, "AR_SIM3D_PICKER_EASE",
@@ -1046,34 +1102,41 @@ const SettingDesc g_setting_descs[] = {
     Sim3D_ModeIsOn, NULL, NULL, NULL },
   { "sim3d_shadow_opacity_pct", "AR_SIM3D_SHADOW_OPACITY",
     "Shadow darkness",
-    "Darkness of the SIM ground shadow mask as a percentage; 0 skips the "
-    "shadow pass without disabling any other 3D stage.",
+    "Darkness of town object shadows and world-navigation cloud shadows as a "
+    "percentage; 0 skips the applicable shadow pass.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_shadow_opacity_pct, kSimShadowOpacityDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3D_ModeIsOn, NULL, NULL, NULL },
+    0, 100, 5, false, NULL, 0,
+    Sim3DOrWorldNavigationShadowAvailable, NULL, NULL, NULL },
   { "sim3d_light_azimuth_deg", "AR_SIM3D_LIGHT_AZIMUTH",
     "Light direction",
     "Compass direction the shadow is thrown, in degrees: 0 casts to the "
     "right, 90 away from the camera, 180 left, 270 toward the camera. Only "
-    "matters when the light is off vertical.",
+    "matters when the light is off vertical. Shared by town objects and "
+    "world-navigation cloud shadows.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_light_azimuth_deg, kSimLightAzimuthDefaultDeg,
-    0, 359, 15, false, NULL, 0, Sim3DShadowsAvailable, NULL, NULL, NULL },
+    0, 359, 15, false, NULL, 0,
+    Sim3DOrWorldNavigationLightingAvailable, NULL, NULL, NULL },
   { "sim3d_light_elevation_deg", "AR_SIM3D_LIGHT_ELEVATION",
     "Light height",
     "How high the light sits, in degrees above the ground: 90 is straight "
     "overhead and puts each shadow directly under its caster, lower values "
-    "push shadows further out along the light direction.",
+    "push shadows further out along the light direction. Lower values also "
+    "strengthen world navigation's warm colour treatment.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_light_elevation_deg, kSimLightElevationDefaultDeg,
-    20, 90, 5, false, NULL, 0, Sim3DShadowsAvailable, NULL, NULL, NULL },
+    20, 90, 5, false, NULL, 0,
+    Sim3DOrWorldNavigationLightingAvailable, NULL, NULL, NULL },
   { "sim3d_shadow_softness_pct", "AR_SIM3D_SHADOW_SOFTNESS",
     "Shadow softness",
     "Blur radius for the shadow mask, as a percentage. 0 keeps the hard "
-    "silhouette even with soft shadows enabled.",
+    "town silhouette; navigation clouds use it to spread their soft shadow "
+    "samples.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_shadow_softness_pct, kSimShadowSoftnessDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DSoftShadowsAvailable, NULL, NULL, NULL },
+    0, 100, 5, false, NULL, 0,
+    Sim3DOrWorldNavigationSoftShadowAvailable, NULL, NULL, NULL },
   { "sim3d_rim_strength_pct", "AR_SIM3D_RIM_STRENGTH",
     "Rim light strength",
     "Brightness of the lit edge added to sprite silhouettes, as a percentage. "
@@ -1084,19 +1147,20 @@ const SettingDesc g_setting_descs[] = {
   { "sim3d_underlay_haze_pct", "AR_SIM3D_UNDERLAY_HAZE",
     "World map haze",
     "How far the world map underlay fades toward the scene backdrop, as a "
-    "percentage. 0 draws it at full strength; 100 hides it entirely without "
-    "disabling any other 3D stage.",
+    "percentage. During world navigation this is the haze strength outside "
+    "the active labelled region. 0 draws it at full strength.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_haze_pct, kSimUnderlayHazeDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DWorldUnderlayAvailable, NULL, NULL,
-    NULL },
+    0, 100, 5, false, NULL, 0,
+    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL },
   { "sim3d_cloud_opacity_pct", "AR_SIM3D_CLOUD_OPACITY",
     "Cloud density",
-    "How opaque the cloud shroud becomes at full cover, as a percentage. 0 "
-    "draws no clouds without disabling any other 3D stage.",
+    "Opacity of town cloud banks and whole-world navigation weather, as a "
+    "percentage. 0 draws no clouds without disabling either stage.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_opacity_pct, kSimCloudOpacityDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+    0, 100, 5, false, NULL, 0,
+    Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL },
   { "sim3d_cloud_falloff_px", "AR_SIM3D_CLOUD_FALLOFF",
     "Cloud edge softness",
     "How far past the sprite-drawable edge the clouds take to reach full "
@@ -1131,7 +1195,8 @@ const SettingDesc g_setting_descs[] = {
     "actors can exist, so this reads as an area of effect rather than as "
     "sprites failing. It fades rather than dims so the target brightness is "
     "the world map's own, which is already hazed for distance. Zero keeps the "
-    "ground at full opacity everywhere.",
+    "ground at full opacity everywhere. World navigation uses the separate "
+    "World map haze strength for its active-location boundary.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_pct, kSimCullHazeDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
@@ -1148,12 +1213,13 @@ const SettingDesc g_setting_descs[] = {
   { "sim3d_cull_haze_lead_px", "AR_SIM3D_CULL_HAZE_LEAD",
     "Ground fade ramp width",
     "How many original pixels the fade takes to reach full strength, "
-    "measured inward from the sprite-drawable edge. Long on purpose: a "
-    "brightness step reads as a hard line across the ground, which is a worse "
-    "artifact than the uneven cloud cover it replaces.",
+    "measured from the active edge. In world navigation the ROM-selected "
+    "256x256 location stays fully clear and this ramp extends outward. Long "
+    "on purpose: a brightness step reads as a hard line.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_lead_px, kSimCullHazeLeadDefaultPx,
-    16, 512, 16, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+    16, 512, 16, false, NULL, 0,
+    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL },
   { "sim3d_cull_corner_px", "AR_SIM3D_CULL_CORNER",
     "Ground fade corner rounding",
     "How far the corners of the in-range area are rounded, in original "
@@ -1167,22 +1233,25 @@ const SettingDesc g_setting_descs[] = {
   { "sim3d_underlay_defocus_pct", "AR_SIM3D_DEFOCUS",
     "World map defocus",
     "How far out of focus the distant world map goes outside the "
-    "sprite-drawable window, as a percentage. Blur says \"too far away to "
+    "active town or location, as a percentage. Blur says \"too far away to "
     "resolve\" in a way dimming cannot, but it is a cheap downsample rather "
-    "than a real lens, so a partial mix reads as depth where a full one reads "
-    "as a smear. Zero keeps the map sharp everywhere.",
+    "than a real lens. Zero keeps the map sharp everywhere.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_defocus_pct, kSimUnderlayDefocusDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+    0, 100, 5, false, NULL, 0,
+    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL },
   { "sim3d_cloud_altitude_px", "AR_SIM3D_CLOUD_ALTITUDE",
     "Cloud altitude",
     "How far above the ground the cloud banks float, in original pixels. Zero "
     "lays them flat on the terrain, where they read as fog painted onto the "
     "map; lifting them puts them between the camera and the world, so they "
-    "pass over trees and flying actors instead of through them.",
+    "pass over trees and flying actors instead of through them. In top-down "
+    "world navigation it controls both directional shadow displacement and "
+    "the zoom point where the camera crosses the cloud deck.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_altitude_px, kSimCloudAltitudeDefaultPx,
-    0, 256, 8, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+    0, 256, 8, false, NULL, 0,
+    Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL },
   { "sim3d_cloud_drift_pct", "AR_SIM3D_CLOUD_DRIFT",
     "Cloud drift speed",
     "How fast the cloud banks move, as a percentage of their built-in rates. "
@@ -1191,10 +1260,11 @@ const SettingDesc g_setting_descs[] = {
     "them still.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_drift_pct, kSimCloudDriftDefaultPct,
-    0, 500, 10, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+    0, 500, 10, false, NULL, 0,
+    Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL },
   { "sim3d_backdrop_strength_pct", "AR_SIM3D_BACKDROP_STRENGTH",
     "Sky gradient strength",
-    "How far the sky is mixed from the town's own backdrop colour toward blue, "
+    "How far the sky is mixed from the scene's own backdrop colour toward blue, "
     "as a percentage. It brightens toward the horizon and deepens overhead. A "
     "town that picks a coloured backdrop tints the result; most pick black, "
     "which is why the sky is mixed toward a blue rather than derived from the "
@@ -1205,10 +1275,9 @@ const SettingDesc g_setting_descs[] = {
   { "sim3d_backdrop_horizon_pct", "AR_SIM3D_BACKDROP_HORIZON",
     "Sky horizon height",
     "Where the sky's bright end sits, as a percentage of screen height from "
-    "the top. The tilted map's real horizon is always far off screen, and the "
-    "sky is only visible fully zoomed out past the end of the extended map, "
-    "so this places the gradient where sky reads rather than where the ground "
-    "plane vanishes.",
+    "the top when the projected horizon is unavailable. This is the normal "
+    "world-navigation path and places the gradient where sky reads beyond "
+    "the finite map.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_backdrop_horizon_pct, kSimBackdropHorizonDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL },
@@ -1813,6 +1882,9 @@ static bool Settings_UsesLegacyEnvironmentSyntax(const SettingDesc *desc) {
          desc->field != &g_settings.audio_frequency &&
          desc->field != &g_settings.audio_samples &&
          desc->field != &g_settings.sim3d_mode &&
+         desc->field != &g_settings.sim3d_world_navigation &&
+         desc->field != &g_settings.sim3d_world_navigation_lighting &&
+         desc->field != &g_settings.sim3d_world_navigation_clouds &&
          desc->field != &g_settings.sim3d_diagnostic_layers &&
          desc->field != &g_settings.sim3d_tilt_x_mrad &&
          desc->field != &g_settings.sim3d_tilt_y_mrad &&

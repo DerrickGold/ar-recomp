@@ -769,8 +769,32 @@ SimRenderFeatureMask Sim3D_ResolveFeatureMask(
   return features;
 }
 
+static void CaptureWorldNavigationState(SimFrameData *dst,
+                                        const uint8 *wram) {
+  dst->world_navigation_state_valid = true;
+  SimWorldNavigationFrame *navigation = &dst->world_navigation;
+  navigation->focus_x =
+      ReadMirror16(wram, kActRaiserWram_WorldFocusX);
+  navigation->focus_y =
+      ReadMirror16(wram, kActRaiserWram_WorldFocusY);
+  for (int i = 0; i < 4; i++) {
+    navigation->matrix[i] = (int16_t)ReadMirror16(
+        wram, kActRaiserWram_WorldMatrixA + i * 2);
+    navigation->next_matrix[i] = (int16_t)ReadMirror16(
+        wram, kActRaiserWram_WorldNextMatrixA + i * 2);
+  }
+  navigation->rotation =
+      ReadMirror16(wram, kActRaiserWram_WorldRotation);
+  navigation->zoom_current =
+      ReadMirror16(wram, kActRaiserWram_WorldZoomCurrent);
+  navigation->zoom_target =
+      ReadMirror16(wram, kActRaiserWram_WorldZoomTarget);
+  navigation->active_location = wram[kActRaiserWram_WorldLocation];
+}
+
 void SimRenderMetadata_CaptureFrame(
-    SimFrameData *dst, const uint8 *wram, bool master_enabled,
+    SimFrameData *dst, const uint8 *wram, bool town_master_enabled,
+    bool world_navigation_enabled,
     SimRenderFeatureMask requested_features,
     uint32_t diagnostic_layer_mask,
     SimRenderFeatureMask implemented_features) {
@@ -779,7 +803,6 @@ void SimRenderMetadata_CaptureFrame(
   /* Zero is a deliberate "ground everything" tuning value, so a frame that is
    * never annotated must still default to the catalogue heights. */
   dst->height_scale_x100 = 100;
-  dst->master_enabled = master_enabled;
   dst->requested_features = requested_features & kSimFeature_All;
   dst->diagnostic_layer_mask = diagnostic_layer_mask;
   if (!wram) return;
@@ -787,78 +810,103 @@ void SimRenderMetadata_CaptureFrame(
   uint8_t map_group = wram[kActRaiserWram_MapGroup];
   uint8_t map_number = wram[kActRaiserWram_CurrentMap];
   bool town = ActRaiser_IsSimulationTown(map_group, map_number);
+  bool world_navigation =
+      map_group == kActRaiserMapGroup_NonAction &&
+      map_number == kActRaiserNonActionMap_WorldMap;
+  dst->master_enabled = town ? town_master_enabled
+      : world_navigation ? world_navigation_enabled : false;
   dst->town = town ? map_number : 0;
   int underlay_x = 0, underlay_y = 0;
-  if (town && SimWorldMap_OriginForTown(map_number, &underlay_x,
-                                        &underlay_y)) {
+  if (town && SimWorldMap_DevelopedAvailable() &&
+      SimWorldMap_OriginForTown(map_number, &underlay_x, &underlay_y)) {
     dst->underlay_serial = SimWorldMap_Serial();
     dst->underlay_origin_tile_x = (uint8_t)underlay_x;
     dst->underlay_origin_tile_y = (uint8_t)underlay_y;
+  } else if (world_navigation && SimWorldMap_DevelopedAvailable()) {
+    /* The navigation scene consumes the complete map, so its origin is zero. */
+    dst->underlay_serial = SimWorldMap_Serial();
   }
   dst->game_frame = ReadMirror16(wram, kActRaiserWram_GameFrame);
   dst->camera_x = ReadMirror16(wram, kActRaiserWram_Bg1CameraX);
   dst->camera_y = ReadMirror16(wram, kActRaiserWram_Bg1CameraY);
   dst->picker_flag =
       ReadMirror16(wram, kActRaiserWram_SimMapPickerFlag);
+  if (world_navigation) CaptureWorldNavigationState(dst, wram);
 
-  dst->build_serial = g_sim_metadata.build_serial;
-  dst->integrity_flags = g_sim_metadata.integrity_flags;
-  dst->atlas_valid = g_sim_metadata.atlas_valid;
-  dst->atlas_width = g_sim_metadata.atlas_width;
-  dst->atlas_height = g_sim_metadata.atlas_height;
-  dst->atlas_used_width = g_sim_metadata.atlas_used_width;
-  dst->atlas_used_height = g_sim_metadata.atlas_used_height;
-  if (g_sim_metadata.record_active)
-    dst->integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
-  dst->metadata_valid = g_sim_metadata.active && !dst->integrity_flags;
-  if (!town)
-    dst->view = kSimView_None;
+  if (town) {
+    dst->build_serial = g_sim_metadata.build_serial;
+    dst->integrity_flags = g_sim_metadata.integrity_flags;
+    dst->atlas_valid = g_sim_metadata.atlas_valid;
+    dst->atlas_width = g_sim_metadata.atlas_width;
+    dst->atlas_height = g_sim_metadata.atlas_height;
+    dst->atlas_used_width = g_sim_metadata.atlas_used_width;
+    dst->atlas_used_height = g_sim_metadata.atlas_used_height;
+    if (g_sim_metadata.record_active)
+      dst->integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
+    dst->metadata_valid = g_sim_metadata.active && !dst->integrity_flags;
 #if AR_SIM3D_PICKER_TOPDOWN
-  /* An active position picker owns the frame: the authentic flat view is
-   * pixel- and input-identical to the original game by construction. */
-  else if (dst->picker_flag)
-    dst->view = kSimView_AuthenticPicker;
+    /* An active position picker owns the frame: the authentic flat view is
+     * pixel- and input-identical to the original game by construction. */
+    if (dst->picker_flag)
+      dst->view = kSimView_AuthenticPicker;
+    else
 #endif
-  else
-    /* Broken object metadata deliberately does NOT drop the view. The ground,
-     * the projection and the camera come from the separated plane capture,
-     * which is gated separately; only the sprites depend on the metadata. A
-     * whole-screen perspective flash is a far worse artifact than a missing
-     * sprite for one frame, so the resolver clears the object stages instead
-     * and the view stays put. */
-    dst->view = kSimView_Enhanced;
-
-  dst->emitted_oam_count = g_sim_metadata.emitted_oam_count;
-  dst->claimed_oam_count = g_sim_metadata.claimed_oam_count;
-  dst->source_count = g_sim_metadata.source_count;
-  dst->zero_oam_source_count = g_sim_metadata.zero_oam_source_count;
-  dst->object_count = g_sim_metadata.object_count;
-  if (g_sim_metadata.world_started) {
-    uint16_t world_end = g_sim_metadata.last_oam_cursor / 4;
-    dst->world_oam_first = g_sim_metadata.world_oam_first;
-    if (world_end >= dst->world_oam_first)
-      dst->world_oam_count =
-          (uint8_t)(world_end - dst->world_oam_first);
-    if (dst->world_oam_count != g_sim_metadata.world_emitted_count) {
-      dst->integrity_flags |= kSimMetadataIntegrity_WorldSuffix;
-      dst->metadata_valid = false;
-    }
+      /* Broken object metadata deliberately does NOT drop the view. The
+       * ground, projection and camera have separate capture gates; only the
+       * sprites depend on this metadata. */
+      dst->view = kSimView_Enhanced;
+  } else if (!world_navigation || !world_navigation_enabled) {
+    dst->view = kSimView_None;
+  } else if (!SimWorldMap_DevelopedAvailable()) {
+    dst->view = kSimView_AuthenticFallback;
+  } else if (!SimWorldNavigationScene_Build(
+                 &dst->world_navigation_scene, &dst->world_navigation,
+                 dst->underlay_serial)) {
+    /* A singular camera transform cannot produce a complete host plane.
+     * Never expose a half-configured scene; keep the authentic renderer for
+     * this frame and let a later valid matrix recover automatically. */
+    dst->view = kSimView_AuthenticFallback;
+  } else {
+    dst->view = kSimView_WorldNavigation;
   }
-  memcpy(dst->sources, g_sim_metadata.sources,
-         sizeof(SimSourceRecord) * dst->source_count);
-  memcpy(dst->objects, g_sim_metadata.objects,
-         sizeof(SimRenderObject) * dst->object_count);
-  ApplyHeightSlew(dst, master_enabled);
+
+  /* The semantic record producer describes simulation-town records only.
+   * Never leak its last town build into a $09 frame: navigation OAM has a
+   * separate Palace/UI contract and will be captured explicitly in Step 4. */
+  if (town) {
+    dst->emitted_oam_count = g_sim_metadata.emitted_oam_count;
+    dst->claimed_oam_count = g_sim_metadata.claimed_oam_count;
+    dst->source_count = g_sim_metadata.source_count;
+    dst->zero_oam_source_count = g_sim_metadata.zero_oam_source_count;
+    dst->object_count = g_sim_metadata.object_count;
+    if (g_sim_metadata.world_started) {
+      uint16_t world_end = g_sim_metadata.last_oam_cursor / 4;
+      dst->world_oam_first = g_sim_metadata.world_oam_first;
+      if (world_end >= dst->world_oam_first)
+        dst->world_oam_count =
+            (uint8_t)(world_end - dst->world_oam_first);
+      if (dst->world_oam_count != g_sim_metadata.world_emitted_count) {
+        dst->integrity_flags |= kSimMetadataIntegrity_WorldSuffix;
+        dst->metadata_valid = false;
+      }
+    }
+    memcpy(dst->sources, g_sim_metadata.sources,
+           sizeof(SimSourceRecord) * dst->source_count);
+    memcpy(dst->objects, g_sim_metadata.objects,
+           sizeof(SimRenderObject) * dst->object_count);
+  }
+  ApplyHeightSlew(dst, dst->master_enabled);
 
   dst->effective_features = Sim3D_ResolveFeatureMask(
       dst->requested_features, implemented_features, dst->view,
-      master_enabled, dst->metadata_valid);
+      dst->master_enabled, dst->metadata_valid);
 }
 
 const char *Sim3D_ViewName(SimViewKind view) {
   switch (view) {
     case kSimView_None: return "none";
     case kSimView_Enhanced: return "enhanced";
+    case kSimView_WorldNavigation: return "world_navigation";
     case kSimView_AuthenticPicker: return "authentic_picker";
     case kSimView_AuthenticFallback: return "authentic_fallback";
   }
@@ -917,11 +965,26 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
                                   const uint8_t *rgba, int width, int height,
                                   int pitch) {
   TraceInitFromEnvironment();
-  if (!g_sim_d1_trace || !frame || !frame->town) return;
+  if (!g_sim_d1_trace || !frame || frame->view == kSimView_None) return;
 
   fprintf(g_sim_d1_trace,
           "{\"host_frame\":%u,\"game_frame\":%u,\"town\":%u,"
           "\"view\":\"%s\",\"picker_flag\":%u,"
+          "\"navigation_valid\":%s,\"world_focus\":[%u,%u],"
+          "\"world_scroll\":[%u,%u],"
+          "\"world_matrix\":[%d,%d,%d,%d],"
+          "\"world_next_matrix\":[%d,%d,%d,%d],"
+          "\"world_rotation\":%u,\"world_zoom\":[%u,%u],"
+          "\"world_location\":%u,\"world_brightness\":%u,"
+          "\"world_active_region\":[%s,%u,%u,%u,%u],"
+          "\"world_scene_valid\":%s,\"underlay_serial\":%u,"
+          "\"world_texture_serial\":%u,"
+          "\"world_texture_size\":[%u,%u],"
+          "\"world_source_to_screen\":[%.9g,%.9g,%.9g,%.9g,%.9g,%.9g],"
+          "\"world_composition_valid\":%s,"
+          "\"world_composition_empty\":%s,"
+          "\"world_palace\":[%u,%u,%d,%d,%u,%u],"
+          "\"world_ui\":[%u,%u,%d,%d,%u,%u],"
           "\"build_serial\":%u,\"master_enabled\":%s,"
           "\"requested\":%u,\"effective\":%u,"
           "\"metadata_valid\":%s,\"integrity_flags\":%u,"
@@ -933,6 +996,7 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           "\"projection_camera\":[%d,%d,%u],"
           "\"height_scale_x100\":%u,\"shadow_opacity_pct\":%u,"
           "\"shadow_softness_pct\":%u,\"light\":[%u,%u],"
+          "\"world_effects\":[%u,%u,%u,%u],"
           "\"picker_topdown\":%s,"
           "\"backdrop_argb\":%u,\"object_half_add\":%s,"
           "\"source_count\":%u,\"zero_oam_sources\":%u,"
@@ -943,6 +1007,55 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (unsigned)host_frame, (unsigned)frame->game_frame,
           (unsigned)frame->town,
           Sim3D_ViewName(frame->view), (unsigned)frame->picker_flag,
+          frame->world_navigation_state_valid ? "true" : "false",
+          (unsigned)frame->world_navigation.focus_x,
+          (unsigned)frame->world_navigation.focus_y,
+          (unsigned)frame->camera_x, (unsigned)frame->camera_y,
+          frame->world_navigation.matrix[0],
+          frame->world_navigation.matrix[1],
+          frame->world_navigation.matrix[2],
+          frame->world_navigation.matrix[3],
+          frame->world_navigation.next_matrix[0],
+          frame->world_navigation.next_matrix[1],
+          frame->world_navigation.next_matrix[2],
+          frame->world_navigation.next_matrix[3],
+          (unsigned)frame->world_navigation.rotation,
+          (unsigned)frame->world_navigation.zoom_current,
+          (unsigned)frame->world_navigation.zoom_target,
+          (unsigned)frame->world_navigation.active_location,
+          (unsigned)frame->world_navigation_brightness,
+          frame->world_navigation_scene.active_region_valid
+              ? "true" : "false",
+          (unsigned)frame->world_navigation_scene.active_region_x,
+          (unsigned)frame->world_navigation_scene.active_region_y,
+          (unsigned)frame->world_navigation_scene.active_region_width,
+          (unsigned)frame->world_navigation_scene.active_region_height,
+          frame->world_navigation_scene.valid ? "true" : "false",
+          (unsigned)frame->underlay_serial,
+          (unsigned)frame->world_navigation_scene.texture_serial,
+          (unsigned)frame->world_navigation_scene.texture_width,
+          (unsigned)frame->world_navigation_scene.texture_height,
+          (double)frame->world_navigation_scene.source_to_screen[0],
+          (double)frame->world_navigation_scene.source_to_screen[1],
+          (double)frame->world_navigation_scene.source_to_screen[2],
+          (double)frame->world_navigation_scene.source_to_screen[3],
+          (double)frame->world_navigation_scene.source_to_screen[4],
+          (double)frame->world_navigation_scene.source_to_screen[5],
+          frame->world_navigation_scene.composition.valid ? "true" : "false",
+          frame->world_navigation_scene.composition.empty_animation
+              ? "true" : "false",
+          (unsigned)frame->world_navigation_scene.composition.palace.oam_first,
+          (unsigned)frame->world_navigation_scene.composition.palace.oam_count,
+          (int)frame->world_navigation_scene.composition.palace.screen_x,
+          (int)frame->world_navigation_scene.composition.palace.screen_y,
+          (unsigned)frame->world_navigation_scene.composition.palace.width,
+          (unsigned)frame->world_navigation_scene.composition.palace.height,
+          (unsigned)frame->world_navigation_scene.composition.ui.oam_first,
+          (unsigned)frame->world_navigation_scene.composition.ui.oam_count,
+          (int)frame->world_navigation_scene.composition.ui.screen_x,
+          (int)frame->world_navigation_scene.composition.ui.screen_y,
+          (unsigned)frame->world_navigation_scene.composition.ui.width,
+          (unsigned)frame->world_navigation_scene.composition.ui.height,
           (unsigned)frame->build_serial,
           frame->master_enabled ? "true" : "false",
           (unsigned)frame->requested_features,
@@ -965,6 +1078,10 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (unsigned)frame->shadow_softness_pct,
           (unsigned)frame->light_azimuth_deg,
           (unsigned)frame->light_elevation_deg,
+          (unsigned)frame->world_navigation_lighting,
+          (unsigned)frame->world_navigation_clouds,
+          (unsigned)frame->world_navigation_backdrop,
+          (unsigned)frame->world_navigation_haze,
           AR_SIM3D_PICKER_TOPDOWN ? "true" : "false",
           (unsigned)frame->separated_backdrop_argb,
           frame->object_half_add ? "true" : "false",
