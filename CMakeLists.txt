@@ -114,6 +114,7 @@ add_executable(ActRaiserRecomp
     src/actraiser_ws_gap.c
     src/diorama_skybox_uv.c
     src/diorama_layer_order.c
+    src/diorama_layer_editor.c
     src/diorama_capture_blend.c
     src/dev_tools.c
     src/forced_input.c
@@ -584,4 +585,19 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_diorama_layer_order
         COMMAND actraiser_diorama_layer_order_test)
+
+    # The in-game layer editor's row model and strategy authoring. Pure for the
+    # same reason the depth shapes are: the overlay that consumes it is SDL, and
+    # its test target deliberately does not link diorama.c.
+    add_executable(actraiser_diorama_layer_editor_test
+        tests/diorama_layer_editor_test.c
+        src/diorama_layer_editor.c
+        src/diorama_layer_order.c
+    )
+    target_include_directories(actraiser_diorama_layer_editor_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_diorama_layer_editor
+        COMMAND actraiser_diorama_layer_editor_test)
 endif()
