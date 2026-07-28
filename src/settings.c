@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
 #include "input_map.h"
 #include <errno.h>
 #include <limits.h>
@@ -2793,8 +2794,8 @@ int Settings_VisibleX0(void) {
 
 int Settings_VisibleWidth(void) {
   return (g_settings.display_mode == kDisplayMode_43)
-             ? 256
-             : 256 + 2 * g_ws_display_extra;
+             ? kActRaiserAuthenticWidth
+             : kActRaiserAuthenticWidth + 2 * g_ws_display_extra;
 }
 
 int Settings_ExtendedAspectX(void) {

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
 #include "snes/ppu.h"
 
 extern uint8 g_ram[0x20000];
@@ -118,11 +119,12 @@ static bool MapLayerX(int layer, int scan_y, int screen_x,
   int hud_extra = g_ppu->extraLeftRight;
   if (layer == 2 && g_ppu->wsHudSplitHeight &&
       scan_y < g_ppu->wsHudSplitHeight && hud_extra) {
-    if (screen_x < -hud_extra || screen_x >= 256 + hud_extra)
+    if (screen_x < -hud_extra ||
+      screen_x >= kActRaiserAuthenticWidth + hud_extra)
       return false;
     if (g_ppu->wsHudLeftOnlyY < g_ppu->wsHudSplitHeight &&
         scan_y >= g_ppu->wsHudLeftOnlyY) {
-      if (screen_x >= 256 - hud_extra) return false;
+      if (screen_x >= kActRaiserAuthenticWidth - hud_extra) return false;
       *source_x = screen_x + hud_extra;
       *policy = "HUD-LEFT";
       return true;
@@ -160,9 +162,9 @@ static bool MapLayerX(int layer, int scan_y, int screen_x,
   }
 
   if (screen_x < -g_ppu->extraLeftCur ||
-      screen_x >= 256 + g_ppu->extraRightCur)
+      screen_x >= kActRaiserAuthenticWidth + g_ppu->extraRightCur)
     return false;
-  if (screen_x >= 0 && screen_x < 256) {
+  if (screen_x >= 0 && screen_x < kActRaiserAuthenticWidth) {
     *source_x = screen_x;
     *policy = "CENTER";
     return true;
@@ -181,7 +183,7 @@ static bool MapLayerX(int layer, int scan_y, int screen_x,
       *source_x = repeat ? screen_x - 256 : 510 - screen_x;
     *policy = repeat ? (repeat_band ? "REPEAT-BAND" : "REPEAT")
                      : "MIRROR";
-    return *source_x >= 0 && *source_x < 256;
+    return *source_x >= 0 && *source_x < kActRaiserAuthenticWidth;
   }
 
   bool clamp_band = g_ppu->wsClampY1[layer] >
@@ -198,7 +200,8 @@ static bool MapLayerX(int layer, int scan_y, int screen_x,
   if (screen_x < 0 && g_ppu->wsMarginGapL[layer]) {
     *source_x -= g_ppu->wsMarginGapL[layer];
     *policy = "WIDE-GAP-L";
-  } else if (screen_x >= 256 && g_ppu->wsMarginGapR[layer]) {
+  } else if (screen_x >= kActRaiserAuthenticWidth &&
+               g_ppu->wsMarginGapR[layer]) {
     *source_x += g_ppu->wsMarginGapR[layer];
     *policy = "WIDE-GAP-R";
   } else {
@@ -306,7 +309,7 @@ static int InspectObjects(TextBuilder *panel, TextBuilder *report) {
     if (row >= size) continue;
     int x = g_ppu->oam[index] & 0xff;
     x |= ((g_ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
-    if (x >= 256 + g_ppu->extraRightCur) x -= 512;
+    if (x >= kActRaiserAuthenticWidth + g_ppu->extraRightCur) x -= 512;
     int local_x = s.x - x;
     if (local_x < 0 || local_x >= size) continue;
 
@@ -481,7 +484,7 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
                                    bool inspect_objects) {
   if (!g_ppu || screen_y < 0 || screen_y >= 224 ||
       screen_x < -kPpuExtraLeftRight ||
-      screen_x >= 256 + kPpuExtraLeftRight)
+      screen_x >= kActRaiserAuthenticWidth + kPpuExtraLeftRight)
     return false;
 
   memset(&s, 0, sizeof(s));
