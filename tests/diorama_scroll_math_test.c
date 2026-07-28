@@ -455,6 +455,59 @@ int main(void) {
     CHECK(near(z, kBase));
   }
 
+  /* ── VOXEL: a SOLID extrusion, vs a stack's receding layers ──────────── */
+  {
+    const float kBase = 0.21f, kDepth = 0.20f;
+    const int kFwd = 0, kBoth = 2;
+    float z_s = 0.0f, sh_s = 0.0f, al_s = 0.0f;
+    float z_v = 0.0f, sh_v = 0.0f, al_v = 0.0f;
+
+    /* Same depth arithmetic as a stack -- a voxel is a stack geometrically, so
+     * any divergence here would be a bug, not a feature. */
+    for (int c = 0; c < 6; c++) {
+      DioramaStackCopyShaped(c, 6, kBase, kDepth, kFwd, false, &z_s, NULL, NULL);
+      DioramaStackCopyShaped(c, 6, kBase, kDepth, kFwd, true, &z_v, NULL, NULL);
+      CHECK(near(z_s, z_v));
+    }
+    /* And it agrees with the directed form it delegates to. */
+    float z_d = 0.0f;
+    DioramaStackCopyDirected(3, 6, kBase, kDepth, kFwd, &z_d, NULL, NULL);
+    DioramaStackCopyShaped(3, 6, kBase, kDepth, kFwd, false, &z_s, NULL, NULL);
+    CHECK(near(z_d, z_s));
+
+    /* THE DEFINING DIFFERENCE. A stack FADES with depth so the eye reads separate
+     * things receding. A voxel must NOT: it is one object with volume, and a
+     * falloff would make its own back half look like fog. */
+    DioramaStackCopyShaped(5, 6, kBase, kDepth, kFwd, false, NULL, &sh_s, &al_s);
+    DioramaStackCopyShaped(5, 6, kBase, kDepth, kFwd, true,  NULL, &sh_v, &al_v);
+    CHECK(sh_s < 1.0f && al_s < 1.0f);      /* stack recedes */
+    CHECK(near(al_v, 1.0f));                /* voxel stays opaque */
+    CHECK(sh_v > sh_s);                     /* and much less darkened */
+
+    /* Uniform, not depth-varying: every voxel slice gets the SAME treatment, which
+     * is what makes it read as solid. If this ever varies with index the shape has
+     * silently become a stack again. */
+    float first_sh = 0.0f, first_al = 0.0f;
+    DioramaStackCopyShaped(0, 8, kBase, kDepth, kFwd, true, NULL, &first_sh,
+                           &first_al);
+    for (int c = 1; c < 8; c++) {
+      DioramaStackCopyShaped(c, 8, kBase, kDepth, kFwd, true, NULL, &sh_v, &al_v);
+      CHECK(near(sh_v, first_sh));
+      CHECK(near(al_v, first_al));
+    }
+    /* Still tinted a little, or an extruded layer is indistinguishable from the
+     * flat one it replaced. */
+    CHECK(first_sh < 1.0f);
+    CHECK(first_sh > 0.5f);   /* but not so dark it reads as a shadow */
+
+    /* Direction still applies -- a voxel can extrude backward or straddle. */
+    DioramaStackCopyShaped(0, 5, kBase, kDepth, kBoth, true, &z_v, NULL, NULL);
+    CHECK(near(z_v, kBase - kDepth * 0.5f));
+    /* And the redundant-copy rule is direction-based, not shape-based. */
+    CHECK(DioramaStackCopyIsRedundant(0, 6, kFwd));
+    CHECK(DioramaStackCopyIsRedundant(2, 5, kBoth));
+  }
+
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return 1; }
   puts("diorama_scroll_math_test: PASS");
   return 0;

@@ -60,6 +60,12 @@ enum {
    * more copies stop looking better. */
   kDioramaStackMax = 8,
   kDioramaStackCopiesDefault = 3,
+  /* A voxel fill needs many more slices than a stack, because its whole point is
+   * to read as SOLID rather than as distinguishable layers -- and solidity is a
+   * function of how close consecutive slices land on screen. Kept as its own cap
+   * so authoring a voxel cannot silently raise the budget for ordinary stacks. */
+  kDioramaVoxelMax = 24,
+  kDioramaVoxelCopiesDefault = 12,
 };
 
 /* Which way a stack lays its copies, relative to the plane's own depth. Higher z
@@ -177,6 +183,34 @@ typedef struct DioramaPlaneOverride {
   float stack_density;
   bool set_stack_direction;
   int stack_direction;   /* DioramaStackDirection */
+  /* VOXEL — extrude the layer through depth by repeating it densely with NO
+   * fade, so it reads as one solid object rather than as separate slices.
+   *
+   * Mechanically a stack: parallel copies, so it inherits the stack's freedom
+   * from the rake's shear. What differs is intent, and therefore two settings --
+   * the falloff is off and the slice count is much higher (kDioramaVoxelMax).
+   *
+   * Why it is not just `thick` with more work. A thickness hangs its skirt from
+   * the QUAD's bottom edge, so it draws a straight band across the layer's whole
+   * width even where the art is transparent -- right for a cliff that spans the
+   * layer, wrong for a rock island with sky either side. A voxel's copies carry
+   * the layer's OWN alpha (a captured BG is mostly transparent with art islands;
+   * palette index 0 stays transparent, see ppu.c), so every island extrudes
+   * itself and the silhouette is respected for free. That is the case thick
+   * cannot express.
+   *
+   * Why it is not just `stack` with density cranked up: it can be authored that
+   * way, and that is precisely the point -- but the stack's cap and its fade are
+   * tuned for reading as depth LAYERS. Naming the solid intent separately means
+   * the defaults are right without every room restating them, and a reader can
+   * tell "several things at different depths" from "one object with volume".
+   *
+   * COST: the most expensive shape here, up to kDioramaVoxelMax draws of the
+   * whole layer. Use it on one plane in a room, not on all of them. */
+  bool set_voxel;
+  float voxel;
+  bool set_voxel_copies;
+  int voxel_copies;
 } DioramaPlaneOverride;
 
 typedef struct DioramaRoomOverride {
@@ -201,6 +235,9 @@ typedef struct DioramaResolvedLayer {
   float stack;      /* fill depth by repeating the layer to z + stack; 0 = off */
   int stack_copies; /* resolved repeat count, 1..kDioramaStackMax */
   int stack_direction; /* DioramaStackDirection */
+  /* Voxel: a solid extrusion. Resolves onto the same stack fields plus this flag,
+   * because the geometry is identical -- only the fade and the cap differ. */
+  bool stack_solid;
 } DioramaResolvedLayer;
 
 /* Resolve a copy count from an authored density and fill depth.
