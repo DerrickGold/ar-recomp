@@ -788,10 +788,6 @@ void SimRenderMetadata_CaptureFrame(
   uint8_t map_number = wram[kActRaiserWram_CurrentMap];
   bool town = ActRaiser_IsSimulationTown(map_group, map_number);
   dst->town = town ? map_number : 0;
-  /* Adopt the live Mode-7 shadow every frame the current map owns it, so the
-   * underlay shows neighbouring towns at their present development state
-   * rather than the ROM baseline. Cheap: a memcmp that usually matches. */
-  SimWorldMap_Refresh(wram, map_group, map_number);
   int underlay_x = 0, underlay_y = 0;
   if (town && SimWorldMap_OriginForTown(map_number, &underlay_x,
                                         &underlay_y)) {

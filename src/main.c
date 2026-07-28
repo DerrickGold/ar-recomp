@@ -58,6 +58,7 @@
 #include "user_data_dir.h"
 #include "sim_phase0_trace.h"
 #include "sim_render_metadata.h"
+#include "sim_world_map_build.h"
 #include "sim_render_atlas.h"
 #include "sim_town_canvas.h"
 #include "sim_world_map.h"
@@ -304,6 +305,10 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
 
   uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
   RtlDrawPpuFrame();
+  /* Own the developed world tilemap instead of observing $7E:C000, which acts
+   * and towns both reuse as unrelated scratch. This runs only on the game
+   * thread, after an emulated tick reached a stable frame boundary. */
+  SimWorldMap_BuildIfNeeded();
   /* #16: function-scope so the annotated sim outlives the block below and can
    * be published to FrameSlot_Capture around the HostDisplay_SubmitFrame tail. */
   SimFrameData sim;

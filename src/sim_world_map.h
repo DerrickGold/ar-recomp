@@ -5,8 +5,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "types.h"
-
 /* The Mode-7 world map, reused as an out-of-bounds ground extension under the
  * simulation towns.
  *
@@ -18,10 +16,10 @@
  *  - one world-map tile (8 authentic pixels) covers exactly one town map cell
  *    (16 authentic pixels), so the world map is the town at half linear
  *    resolution and each town is a 32x32-tile window of it;
- *  - `$7E:C000` holds a live 128x128 shadow of that tilemap which stays
- *    coherent while a town is active, so the underlay tracks world state
- *    (built cathedrals, roads, development tiers) rather than freezing at the
- *    ROM baseline.
+ *  - the game's bounded world-map overlay routine can be run transactionally
+ *    against the current simulation state, producing the developed 128x128
+ *    tilemap without presenting the world-map screen or trusting its shared
+ *    `$7E:C000` scratch buffer.
  *
  * Everything here is read-only with respect to the emulated machine. */
 
@@ -39,18 +37,6 @@ enum {
   kSimTownCellPixels = 16,
 };
 
-/* Rows 0-7 of the live shadow hold unrelated scratch while a town is active,
- * so they are only adopted from a world-map frame and otherwise keep the ROM
- * baseline.
- *
- * Northwall's window (origin y = 0) is the only town whose own developable land
- * lies in those rows, but that is NOT the same as saying only Northwall SEES
- * them: DrawSimWorldUnderlay draws the whole 1024x1024 map, so the strip renders
- * from every town at the far top edge in perspective. docs/ram-map.md and
- * docs/SEAMS.md both used to claim otherwise. This is F1's territory — see
- * sim_world_map_rows.h for the two candidate repairs and the runtime switch. */
-enum { kSimWorldMapVolatileRows = 8 };
-
 /* Loads the ROM blobs. Safe to call with a short/absent ROM: the module then
  * reports unavailable and every consumer degrades to drawing nothing. */
 bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size);
@@ -61,32 +47,18 @@ bool SimWorldMap_Available(void);
  * number, 1-6 (Fillmore..Northwall); anything else returns false. */
 bool SimWorldMap_OriginForTown(uint8_t town, int *tile_x, int *tile_y);
 
-/* Game thread, once a frame. Adopts the live shadow when the current map is
- * one whose code owns that buffer, and bumps the serial when the map changes.
- * Outside those maps the mirror is simply left alone. */
-void SimWorldMap_Refresh(const uint8 *wram, uint8_t map_group,
-                         uint8_t map_number);
-
-/* Select the rows-0-7 policy (F1's A/B — see sim_world_map_rows.h). Takes a
- * plain int rather than the enum so this header stays free of that dependency
- * for its many test consumers; out-of-range values fall back to legacy.
- * Set from the settings registry, so it can change mid-session. */
-void SimWorldMap_SetRowPolicy(int policy);
-
-/* Re-assert the ROM baseline over rows 0-7 and mark whatever changed dirty.
- * Returns the number of tiles repaired (0 when they already matched, which is
- * the steady state). Exposed so the A/B logging can report whether the policy
- * is actually doing anything. */
-int SimWorldMap_RestoreVolatileRows(void);
-
-/* Same, over the WHOLE tilemap. This is what the coherence gate uses: rows 8+
- * are F2's territory and have no other recovery path, because the tilemap is
- * mutated in place and the shadow diff only adopts bytes that differ. */
-int SimWorldMap_RestoreAllRows(void);
+/* Publish a complete tilemap produced by the owned ROM builder. Marks only
+ * changed tiles dirty and bumps the serial once if the image changed. Returns
+ * the number of changed tilemap bytes. */
+int SimWorldMap_PublishBuiltTilemap(const uint8_t *tilemap);
 
 /* Changes whenever the baked image would differ. Zero means "nothing usable
  * yet"; consumers compare against their own last-baked value. */
 uint32_t SimWorldMap_Serial(void);
+
+/* The retained pristine ROM tilemap (kSimWorldMapBytes), or NULL if the
+ * module is unavailable. */
+const uint8_t *SimWorldMap_Baseline(void);
 
 /* Bakes the mirror into `pixels` as ARGB8888, kSimWorldMapPixels square,
  * fully opaque throughout.

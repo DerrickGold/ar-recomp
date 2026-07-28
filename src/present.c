@@ -1592,7 +1592,7 @@ static void DrawSimRimLight(
  *
  * The town's ground quad is the captured 256-or-wider screen window; this
  * draws the same ground plane carried on past that window, textured with the
- * live Mode-7 world map at half the town's linear resolution. The whole
+ * owned developed world map at half the town's linear resolution. The whole
  * mapping is one affine chain in authentic pixels:
  *
  *   town pixel  = camera + (captured column - screen_x0)
