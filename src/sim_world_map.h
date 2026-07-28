@@ -41,7 +41,14 @@ enum {
 
 /* Rows 0-7 of the live shadow hold unrelated scratch while a town is active,
  * so they are only adopted from a world-map frame and otherwise keep the ROM
- * baseline. Only Northwall's window (origin y = 0) reaches them at all. */
+ * baseline.
+ *
+ * Northwall's window (origin y = 0) is the only town whose own developable land
+ * lies in those rows, but that is NOT the same as saying only Northwall SEES
+ * them: DrawSimWorldUnderlay draws the whole 1024x1024 map, so the strip renders
+ * from every town at the far top edge in perspective. docs/ram-map.md and
+ * docs/SEAMS.md both used to claim otherwise. This is F1's territory — see
+ * sim_world_map_rows.h for the two candidate repairs and the runtime switch. */
 enum { kSimWorldMapVolatileRows = 8 };
 
 /* Loads the ROM blobs. Safe to call with a short/absent ROM: the module then
@@ -59,6 +66,23 @@ bool SimWorldMap_OriginForTown(uint8_t town, int *tile_x, int *tile_y);
  * Outside those maps the mirror is simply left alone. */
 void SimWorldMap_Refresh(const uint8 *wram, uint8_t map_group,
                          uint8_t map_number);
+
+/* Select the rows-0-7 policy (F1's A/B — see sim_world_map_rows.h). Takes a
+ * plain int rather than the enum so this header stays free of that dependency
+ * for its many test consumers; out-of-range values fall back to legacy.
+ * Set from the settings registry, so it can change mid-session. */
+void SimWorldMap_SetRowPolicy(int policy);
+
+/* Re-assert the ROM baseline over rows 0-7 and mark whatever changed dirty.
+ * Returns the number of tiles repaired (0 when they already matched, which is
+ * the steady state). Exposed so the A/B logging can report whether the policy
+ * is actually doing anything. */
+int SimWorldMap_RestoreVolatileRows(void);
+
+/* Same, over the WHOLE tilemap. This is what the coherence gate uses: rows 8+
+ * are F2's territory and have no other recovery path, because the tilemap is
+ * mutated in place and the shadow diff only adopts bytes that differ. */
+int SimWorldMap_RestoreAllRows(void);
 
 /* Changes whenever the baked image would differ. Zero means "nothing usable
  * yet"; consumers compare against their own last-baked value. */

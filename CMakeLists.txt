@@ -96,6 +96,7 @@ add_executable(ActRaiserRecomp
     src/sim_render_metadata.c
     src/sim_render_atlas.c
     src/sim_world_map.c
+    src/sim_world_map_rows.c
     src/sim_town_canvas.c
     src/sim3d.c
     src/sim3d_camera.c
@@ -302,6 +303,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_world_map_test
         tests/sim_world_map_test.c
         src/sim_world_map.c
+        src/sim_world_map_rows.c
     )
     target_include_directories(actraiser_sim_world_map_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -333,6 +335,7 @@ if(BUILD_TESTING)
         tests/sim_render_metadata_test.c
         src/sim_render_metadata.c
         src/sim_world_map.c
+        src/sim_world_map_rows.c
     )
     target_include_directories(actraiser_sim_render_metadata_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -429,6 +432,7 @@ if(BUILD_TESTING)
         src/sim3d.c
         src/sim_render_metadata.c
         src/sim_world_map.c
+        src/sim_world_map_rows.c
         src/sim_town_canvas.c
         src/sim_render_atlas.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c
@@ -463,6 +467,7 @@ if(BUILD_TESTING)
         src/scene_inspector.c
         src/sim_render_metadata.c
         src/sim_world_map.c
+        src/sim_world_map_rows.c
     )
     target_include_directories(actraiser_scene_inspector_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

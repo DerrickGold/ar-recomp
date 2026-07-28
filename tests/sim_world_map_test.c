@@ -9,6 +9,7 @@
 
 #include "actraiser_game.h"
 #include "sim_world_map.h"
+#include "sim_world_map_rows.h"
 
 static int s_failures;
 #define CHECK(expression)                                                  \
@@ -21,7 +22,13 @@ static int s_failures;
   } while (0)
 
 enum {
-  kRomSize = 0x80000,
+  /* Must cover kPaletteOffset + 512, not just the tile art. At 0x80000 the
+   * palette write in BuildRom landed ~400 KB PAST the allocation (heap
+   * overflow), so every palette entry stayed zero and every tile baked to
+   * blue 0 — which made colour comparisons vacuously equal and hid real
+   * adoption/restore differences. Pre-existing; found while adding the F1
+   * row-policy tests, whose assertions distinguish tiles by colour. */
+  kRomSize = 0x100000,
   kTilemapOffset = 0x033341,
   kTilesOffset = 0x070000,
   kPaletteOffset = 0x0E3F93,
@@ -169,6 +176,268 @@ static void TestShadowAdoptionPolicy(void) {
   free(pixels);
   free(wram);
   free(rom);
+}
+
+/* F1 (2026-07-26 handback): the corrupt top band, and per the tester it does NOT
+ * reproduce every run. Rows 0-7 have exactly two possible histories — untouched
+ * ROM baseline, or shadow bytes adopted during a world-map visit — so the two
+ * candidate repairs are genuinely different and only one can be right. Both are
+ * implemented; these tests pin each one's contract so the on-device A/B is
+ * comparing what it claims to compare.
+ *
+ * The shared setup mirrors TestShadowAdoptionPolicy: shadow filled with $AB, so
+ * "row shows $AB" means adopted and "row shows tile 0" means baseline. */
+static void TestRowPolicyRestoreBaseline(void) {
+  uint8_t *rom = BuildRom();
+  uint8_t *wram = calloc(1, kWramSize);
+  uint32_t *pixels = calloc(kSimWorldMapPixels * kSimWorldMapPixels, 4);
+  /* The synthetic palette is a 5-bit blue ramp, so a tile's colour only carries
+   * `tile & 0x1F` — and row 0's baseline (BuildRom writes i & 0x7F) covers all 32
+   * of those values. So no shadow byte is distinguishable from the baseline by
+   * colour alone at an arbitrary position; the assertions below must compare each
+   * tile against ITS OWN expected colour via ColorForTile, never against a single
+   * "shadow colour". Getting this wrong made an earlier revision of this test
+   * pass only on an incremental build. */
+  const uint8_t kShadowByte = 0xDD;
+  memset(wram + kShadowWram, kShadowByte, kSimWorldMapBytes);
+
+  /* Reproduce the bug first, under the CURRENT policy: visit the world map so
+   * rows 0-7 adopt the shadow, then return to a town. Today the strip keeps the
+   * adopted bytes — which is the garbage in the screenshot when that region is
+   * not terrain. */
+  SimWorldMap_SetRowPolicy(kSimWorldRows_Legacy);
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction,
+                      kActRaiserNonActionMap_WorldMap);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1); /* back to town */
+  CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  /* Every row-0 tile now shows the ADOPTED shadow byte, not its own baseline. */
+  CHECK(pixels[0] == ColorForTile(kShadowByte));
+  CHECK(pixels[5 * kSimWorldMapTilePixels] == ColorForTile(kShadowByte));
+  CHECK(pixels[100 * kSimWorldMapTilePixels] == ColorForTile(kShadowByte));
+
+  /* RestoreBaseline repairs it — including retroactively. The policy is switched
+   * AFTER the bad adoption, exactly as toggling the setting mid-session would,
+   * so the restore must not depend on having been on from the start. */
+  SimWorldMap_SetRowPolicy(kSimWorldRows_RestoreBaseline);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  /* Each tile is back to ITS OWN baseline, which BuildRom set to (index & 0x7F).
+   * Tile 0's baseline is 0 — the same thing a ZEROED snapshot buffer would
+   * restore — so tile 0 alone cannot distinguish a real snapshot from a missing
+   * one. Tiles 5 and 100 have non-zero baselines and do: dropping the Init-time
+   * memcpy restores zeros and fails these two. */
+  CHECK(pixels[0] == ColorForTile(0));
+  CHECK(pixels[5 * kSimWorldMapTilePixels] == ColorForTile(5));
+  CHECK(pixels[100 * kSimWorldMapTilePixels] == ColorForTile(100));
+  /* Rows 8+ are untouched by this policy: it must repair the strip without
+   * discarding the live development that makes the underlay worth drawing. */
+  uint32_t row8 = pixels[(size_t)kSimWorldMapVolatileRows *
+                         kSimWorldMapTilePixels * kSimWorldMapPixels];
+  CHECK(row8 == ColorForTile(kShadowByte));
+
+  /* Steady state: once repaired, further town frames are a no-op. A restore that
+   * bumped the serial every frame would rebuild a 1024x1024 texture forever. */
+  uint32_t settled = SimWorldMap_Serial();
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  CHECK(SimWorldMap_Serial() == settled);
+  CHECK(SimWorldMap_RestoreVolatileRows() == 0);
+
+  /* On the world-map screen the live rows ARE the authentic view, so even this
+   * policy must show them rather than overwriting the screen the player is
+   * looking at. */
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction,
+                      kActRaiserNonActionMap_WorldMap);
+  CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  CHECK(pixels[0] == ColorForTile(kShadowByte));
+
+  free(pixels);
+  free(wram);
+  free(rom);
+  SimWorldMap_SetRowPolicy(kSimWorldRows_Legacy);
+}
+
+/* The coherence gate — F2's half, and the reason F1 and F2 are one defect.
+ *
+ * ShadowIsTrustworthy tests the map identity for THIS frame, but the corruption
+ * it guards against is durable in the buffer. It correctly refuses adoption while
+ * an act owns 7E:C000, then permits it on the first town frame afterwards — when
+ * the act's bytes are still sitting there. Adopting then is unrecoverable: the
+ * tilemap is mutated in place and the diff only takes bytes that DIFFER, so
+ * tilemap == shadow == garbage from then on with no serial bump to re-bake.
+ *
+ * This test reproduces that sequence under the legacy policy first, then shows
+ * the gate refusing it. */
+static void TestRowPolicyCoherenceGate(void) {
+  uint8_t *rom = BuildRom();
+  uint8_t *wram = calloc(1, kWramSize);
+  uint32_t *pixels = calloc(kSimWorldMapPixels * kSimWorldMapPixels, 4);
+  /* Stand in for what an act leaves behind: not terrain, and (crucially) a
+   * different value from the baseline so adoption is observable. */
+  const uint8_t kActGarbage = 0x9E;
+  const uint8_t kRealTerrain = 0x47;
+
+  /* --- the defect, under today's policy ------------------------------------ */
+  SimWorldMap_SetRowPolicy(kSimWorldRows_Legacy);
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+  /* A world-map frame establishes real terrain across the whole map. */
+  memset(wram + kShadowWram, kRealTerrain, kSimWorldMapBytes);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction,
+                      kActRaiserNonActionMap_WorldMap);
+  /* An act runs and leaves its own data in the same WRAM. Nothing is adopted
+   * while it owns the buffer — that part already works. */
+  memset(wram + kShadowWram, kActGarbage, kSimWorldMapBytes);
+  uint32_t during_act = SimWorldMap_Serial();
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_Fillmore, 1);
+  CHECK(SimWorldMap_Serial() == during_act);
+  /* Back in town. The buffer STILL holds the act's bytes, but the map identity
+   * now says "town", so legacy adopts them wholesale — including rows 8+. */
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  size_t row64 = (size_t)64 * kSimWorldMapTilePixels * kSimWorldMapPixels;
+  CHECK(pixels[row64] == ColorForTile(kActGarbage));  /* F2, reproduced */
+
+  /* --- the gate refuses it ------------------------------------------------- */
+  SimWorldMap_SetRowPolicy(kSimWorldRows_CoherenceGate);
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+  memset(wram + kShadowWram, kRealTerrain, kSimWorldMapBytes);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction,
+                      kActRaiserNonActionMap_WorldMap);
+  CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  CHECK(pixels[row64] == ColorForTile(kRealTerrain));  /* live map adopted */
+
+  memset(wram + kShadowWram, kActGarbage, kSimWorldMapBytes);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_Fillmore, 1);   /* the act */
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);  /* back to town */
+  CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  /* The act's bytes are refused. Rows 8+ show the ROM baseline — the undeveloped
+   * world, which is wrong-but-plausible rather than garbage. */
+  CHECK(pixels[row64] != ColorForTile(kActGarbage));
+  CHECK(pixels[row64] == ColorForTile((uint8_t)((64 * kSimWorldMapTiles) & 0x7F)));
+
+  /* It stays refused while the buffer is unverified, however many town frames
+   * pass — the gate is not a one-frame skip. */
+  for (int i = 0; i < 3; i++)
+    SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  CHECK(pixels[row64] != ColorForTile(kActGarbage));
+
+  /* A world-map frame is the evidence the buffer was rebuilt, so adoption
+   * resumes — otherwise the gate would permanently freeze the underlay at the
+   * ROM baseline and no development would ever show again. */
+  memset(wram + kShadowWram, kRealTerrain, kSimWorldMapBytes);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction,
+                      kActRaiserNonActionMap_WorldMap);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  CHECK(pixels[row64] == ColorForTile(kRealTerrain));
+
+  /* Steady state: no serial churn once the restore has nothing left to do. A
+   * gate that bumped every frame would rebuild a 1024x1024 texture forever. */
+  memset(wram + kShadowWram, kActGarbage, kSimWorldMapBytes);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_Fillmore, 1);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);  /* restores */
+  uint32_t settled = SimWorldMap_Serial();
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  CHECK(SimWorldMap_Serial() == settled);
+
+  free(pixels);
+  free(wram);
+  free(rom);
+  SimWorldMap_SetRowPolicy(kSimWorldRows_Legacy);
+}
+
+static void TestRowPolicyTrustShadow(void) {
+  uint8_t *rom = BuildRom();
+  uint8_t *wram = calloc(1, kWramSize);
+  uint32_t *pixels = calloc(kSimWorldMapPixels * kSimWorldMapPixels, 4);
+  const uint8_t kShadowByte = 0xC6;   /* again distinct from every other test */
+  memset(wram + kShadowWram, kShadowByte, kSimWorldMapBytes);
+
+  /* TrustShadow adopts rows 0-7 on a town map too — no world-map visit needed,
+   * which is the whole difference from legacy. */
+  SimWorldMap_SetRowPolicy(kSimWorldRows_TrustShadow);
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_NonAction, 1);
+  CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  CHECK(pixels[0] == ColorForTile(kShadowByte));
+
+  /* Still gated on map identity: an action stage shares the address but not the
+   * meaning, so trusting the shadow must not mean trusting it everywhere. */
+  uint32_t before = SimWorldMap_Serial();
+  memset(wram + kShadowWram, 0x11, kSimWorldMapBytes);
+  SimWorldMap_Refresh(wram, kActRaiserMapGroup_Fillmore, 1);
+  CHECK(SimWorldMap_Serial() == before);
+
+  free(pixels);
+  free(wram);
+  free(rom);
+  SimWorldMap_SetRowPolicy(kSimWorldRows_Legacy);
+}
+
+/* The policy arithmetic itself, independent of any ROM or bake. */
+static void TestRowPolicyPure(void) {
+  /* Legacy and RestoreBaseline both skip while adopting; TrustShadow does not. */
+  CHECK(SimWorldRows_FirstAdoptedRow(kSimWorldRows_Legacy, false, 8) == 8);
+  CHECK(SimWorldRows_FirstAdoptedRow(kSimWorldRows_RestoreBaseline, false, 8) == 8);
+  CHECK(SimWorldRows_FirstAdoptedRow(kSimWorldRows_TrustShadow, false, 8) == 0);
+  /* On the world-map screen every policy adopts from row 0. */
+  for (int p = 0; p <= 3; p++)
+    CHECK(SimWorldRows_FirstAdoptedRow((SimWorldRowPolicy)p, true, 8) == 0);
+  /* CoherenceGate keeps the rows-0-7 skip on a town map (the Sky Palace metatile
+   * page lands at 7E:C200 = rows 4-5), and still adopts from 0 on the world map. */
+  CHECK(SimWorldRows_FirstAdoptedRow(kSimWorldRows_CoherenceGate, false, 8) == 8);
+  CHECK(SimWorldRows_FirstAdoptedRow(kSimWorldRows_CoherenceGate, true, 8) == 0);
+
+  /* The incoherence predicate. Only CoherenceGate ever fires, so the other
+   * policies stay honest A/B comparisons against today's behaviour. */
+  CHECK(!SimWorldRows_ShadowIsIncoherent(kSimWorldRows_Legacy, true, false));
+  CHECK(!SimWorldRows_ShadowIsIncoherent(kSimWorldRows_RestoreBaseline, true, false));
+  CHECK(!SimWorldRows_ShadowIsIncoherent(kSimWorldRows_TrustShadow, true, false));
+  /* Trusted map, no rebuild seen -> the buffer is unverified, refuse it. */
+  CHECK(SimWorldRows_ShadowIsIncoherent(kSimWorldRows_CoherenceGate, true, false));
+  /* Rebuild seen -> coherent, adopt normally. Without this the underlay would
+   * freeze at the ROM baseline and no development would ever appear. */
+  CHECK(!SimWorldRows_ShadowIsIncoherent(kSimWorldRows_CoherenceGate, true, true));
+  /* An untrusted frame adopts nothing anyway, so it is never "incoherent". */
+  CHECK(!SimWorldRows_ShadowIsIncoherent(kSimWorldRows_CoherenceGate, false, false));
+  CHECK(!SimWorldRows_ShadowIsIncoherent(kSimWorldRows_CoherenceGate, false, true));
+
+  /* Only the whole-map policy needs the full baseline retained. A policy that
+   * restored rows it never snapshotted would silently restore zeros. */
+  CHECK(SimWorldRows_NeedsFullBaseline(kSimWorldRows_CoherenceGate));
+  CHECK(!SimWorldRows_NeedsFullBaseline(kSimWorldRows_RestoreBaseline));
+  CHECK(!SimWorldRows_NeedsFullBaseline(kSimWorldRows_Legacy));
+  CHECK(!SimWorldRows_NeedsFullBaseline(kSimWorldRows_TrustShadow));
+
+  /* Only RestoreBaseline restores, and never on the world-map screen. */
+  CHECK(!SimWorldRows_ShouldRestoreBaseline(kSimWorldRows_Legacy, false));
+  CHECK(!SimWorldRows_ShouldRestoreBaseline(kSimWorldRows_TrustShadow, false));
+  CHECK(SimWorldRows_ShouldRestoreBaseline(kSimWorldRows_RestoreBaseline, false));
+  CHECK(!SimWorldRows_ShouldRestoreBaseline(kSimWorldRows_RestoreBaseline, true));
+  /* The gate does its repair through the incoherence path, not this one. */
+  CHECK(!SimWorldRows_ShouldRestoreBaseline(kSimWorldRows_CoherenceGate, false));
+  /* Degenerate inputs must not produce a negative row or an OOB span. */
+  CHECK(SimWorldRows_FirstAdoptedRow(kSimWorldRows_Legacy, false, -1) == 0);
+  size_t begin = 123, end = 456;
+  SimWorldRows_BaselineSpan(8, 128, 16384, &begin, &end);
+  CHECK(begin == 0 && end == 1024);
+  SimWorldRows_BaselineSpan(0, 128, 16384, &begin, &end);
+  CHECK(begin == 0 && end == 0);
+  /* A bad constant must clamp rather than walk off the tilemap. */
+  SimWorldRows_BaselineSpan(9999, 128, 16384, &begin, &end);
+  CHECK(end == 16384);
+  /* Names are used in logs and the settings UI; never NULL, including for a
+   * value outside the enum (which SetRowPolicy coerces to legacy). */
+  CHECK(SimWorldRows_PolicyName(kSimWorldRows_Legacy) != NULL);
+  CHECK(SimWorldRows_PolicyName((SimWorldRowPolicy)99) != NULL);
+  CHECK(!strcmp(SimWorldRows_PolicyName(kSimWorldRows_RestoreBaseline),
+                "restore-baseline"));
+  CHECK(!strcmp(SimWorldRows_PolicyName(kSimWorldRows_TrustShadow),
+                "trust-shadow"));
+  CHECK(!strcmp(SimWorldRows_PolicyName(kSimWorldRows_CoherenceGate),
+                "coherence-gate"));
 }
 
 /* The bake is fully opaque everywhere. There is deliberately no hole for the
@@ -373,6 +642,10 @@ int main(void) {
   TestUnavailableRom();
   TestTownWindows();
   TestShadowAdoptionPolicy();
+  TestRowPolicyPure();
+  TestRowPolicyRestoreBaseline();
+  TestRowPolicyTrustShadow();
+  TestRowPolicyCoherenceGate();
   TestBakeIsFullyCovered();
   TestDirtyTrackingMatchesFullBake();
   TestDownsampleMatchesBake();

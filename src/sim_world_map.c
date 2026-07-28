@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "sim_world_map_rows.h"
 
 /* ROM residency, all uncompressed and all verified byte-for-byte against a
  * live world-map capture (tilemap 16172/16384 and chr 16346/16384 identical,
@@ -56,6 +57,23 @@ static struct {
    * write-only and undefined, so baking only dirty tiles into it would leave
    * the rest as garbage from a previous unrelated use. */
   uint32_t pixels[kSimWorldMapPixels * kSimWorldMapPixels];
+  /* Pristine ROM copy of the WHOLE tilemap, kept so a repair policy can put
+   * terrain back after the shadow was adopted over it. Retaining it is what
+   * makes any restore possible at all — g_world.tilemap is mutated in place, so
+   * the ROM value is otherwise gone once adopted, and the diff then sees
+   * tilemap == shadow and never corrects itself.
+   *
+   * The full 16 KB rather than just rows 0-7 because F2 is rows 8+ and they have
+   * no other recovery path. Negligible beside the 4 MB pixel buffer above. */
+  uint8_t baseline[kSimWorldMapBytes];
+  int row_policy;
+  /* Coherence tracking for kSimWorldRows_CoherenceGate. `shadow_rebuilt` means a
+   * world-map frame has been sampled since the last untrusted map, i.e. the game
+   * has demonstrably repopulated 7E:C000 and the shadow is its world map again.
+   * Cleared whenever an untrusted map is seen, because that map may own the
+   * buffer. This is the module's only evidence about the buffer's provenance —
+   * it cannot see the game's write cursor. */
+  bool shadow_rebuilt;
 } g_world;
 
 static uint32_t ExpandBgr555(uint16_t value) {
@@ -68,8 +86,47 @@ static uint32_t ExpandBgr555(uint16_t value) {
   return 0xFF000000u | (r << 16) | (g << 8) | b;
 }
 
+void SimWorldMap_SetRowPolicy(int policy) {
+  if (policy != kSimWorldRows_RestoreBaseline &&
+      policy != kSimWorldRows_TrustShadow &&
+      policy != kSimWorldRows_CoherenceGate)
+    policy = kSimWorldRows_Legacy;
+  g_world.row_policy = policy;
+}
+
+/* Restore [begin,end) of the tilemap from the retained ROM baseline, marking only
+ * what actually moved. Returns tiles repaired, so a caller can tell a real repair
+ * from the steady state (0) and avoid churning the serial every frame. */
+static int RestoreBaselineSpan(size_t begin, size_t end) {
+  if (!g_world.available) return 0;
+  if (end > sizeof(g_world.tilemap)) end = sizeof(g_world.tilemap);
+  int repaired = 0;
+  for (size_t i = begin; i < end; i++) {
+    if (g_world.tilemap[i] == g_world.baseline[i]) continue;
+    g_world.tilemap[i] = g_world.baseline[i];
+    g_world.dirty[i] = 1;
+    repaired++;
+  }
+  return repaired;
+}
+
+int SimWorldMap_RestoreVolatileRows(void) {
+  size_t begin = 0, end = 0;
+  SimWorldRows_BaselineSpan(kSimWorldMapVolatileRows, kSimWorldMapTiles,
+                            sizeof(g_world.tilemap), &begin, &end);
+  return RestoreBaselineSpan(begin, end);
+}
+
+int SimWorldMap_RestoreAllRows(void) {
+  return RestoreBaselineSpan(0, sizeof(g_world.tilemap));
+}
+
 bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
+  /* The policy is set from the settings registry before or after Init depending
+   * on boot order, so it must survive the wipe. */
+  int policy = g_world.row_policy;
   memset(&g_world, 0, sizeof(g_world));
+  g_world.row_policy = policy;
   size_t needed = kWorldTilesRomOffset + kWorldTileCount * kWorldTileBytes;
   if (!rom_data || rom_size < needed) {
     fprintf(stderr,
@@ -79,6 +136,8 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   }
   memcpy(g_world.tilemap, rom_data + kWorldTilemapRomOffset,
          sizeof(g_world.tilemap));
+  /* Snapshot the pristine map before anything can adopt over it. */
+  memcpy(g_world.baseline, g_world.tilemap, sizeof(g_world.baseline));
   memcpy(g_world.tiles, rom_data + kWorldTilesRomOffset, sizeof(g_world.tiles));
   for (int i = 0; i < 256; i++) {
     const uint8_t *entry = rom_data + kWorldPaletteRomOffset + i * 2;
@@ -116,19 +175,57 @@ static bool ShadowIsTrustworthy(uint8_t map_group, uint8_t map_number) {
 void SimWorldMap_Refresh(const uint8 *wram, uint8_t map_group,
                          uint8_t map_number) {
   if (!g_world.available || !wram) return;
-  if (!ShadowIsTrustworthy(map_group, map_number)) return;
+
+  const SimWorldRowPolicy policy = (SimWorldRowPolicy)g_world.row_policy;
+  const bool trusted = ShadowIsTrustworthy(map_group, map_number);
+  const bool on_world_map = (map_number == kActRaiserNonActionMap_WorldMap);
+
+  /* Track the buffer's provenance BEFORE the trust gate returns, because an
+   * untrusted map is exactly the event that invalidates it: that map may own
+   * 7E:C000 and leave its own bytes behind. A world-map frame is the only
+   * evidence the module has that the game repopulated the buffer. */
+  if (!trusted)
+    g_world.shadow_rebuilt = false;
+  else if (on_world_map)
+    g_world.shadow_rebuilt = true;
+
+  if (!trusted) return;
+
+  /* THE COHERENCE GATE (F1+F2 are one defect). ShadowIsTrustworthy tests the map
+   * identity for THIS frame, but the corruption it guards against is durable in
+   * the buffer: it correctly refuses adoption while an act owns 7E:C000, then
+   * permits it on the first town frame afterwards — when the act's bytes are
+   * still there. Adopting then is unrecoverable, because the tilemap is mutated
+   * in place and the diff only takes bytes that DIFFER, so tilemap == shadow ==
+   * garbage from then on, with no serial bump to trigger a re-bake.
+   *
+   * So on an unverified buffer, restore the retained ROM baseline instead of
+   * diffing against it, and adopt nothing this frame. Adoption resumes once a
+   * world-map frame has rebuilt the shadow. */
+  if (SimWorldRows_ShadowIsIncoherent(policy, trusted,
+                                      g_world.shadow_rebuilt)) {
+    if (SimWorldMap_RestoreAllRows() > 0 && ++g_world.serial == 0)
+      g_world.serial = 1;
+    return;
+  }
 
   const uint8_t *shadow = wram + kWorldShadowWram;
-  /* Rows 0-7 are scratch unless the world map itself is on screen. */
-  int first_row = (map_number == kActRaiserNonActionMap_WorldMap)
-      ? 0 : kSimWorldMapVolatileRows;
+  /* Rows 0-7 are scratch unless the world map itself is on screen — but which
+   * repair that calls for is exactly what F1's A/B decides, so the row range is
+   * a policy question now. Legacy reproduces the previous constant exactly. */
+  int first_row = SimWorldRows_FirstAdoptedRow(policy, on_world_map,
+                                              kSimWorldMapVolatileRows);
   size_t offset = (size_t)first_row * kSimWorldMapTiles;
   size_t length = sizeof(g_world.tilemap) - offset;
   /* Per-tile diff: adopt only the bytes that changed and mark just those tiles
    * dirty, so the next bake re-expands the palette for the handful that moved
-   * rather than all 16384. A wholesale change (a town switch, whose shadow is a
-   * different 128x128) naturally marks every differing tile, which is exactly
-   * the set the bake must redo. Serial still bumps once for the whole frame. */
+   * rather than all 16384. A wholesale change naturally marks every differing
+   * tile, which is exactly the set the bake must redo. Serial still bumps once
+   * for the whole frame.
+   *
+   * (An earlier comment here said a "town switch" brings a different 128x128.
+   * That was wrong: the shadow is ONE global world map — see the header — so a
+   * town switch changes the camera window, not the buffer.) */
   bool changed = false;
   for (size_t i = offset; i < offset + length; i++) {
     if (g_world.tilemap[i] == shadow[i]) continue;
@@ -136,6 +233,13 @@ void SimWorldMap_Refresh(const uint8 *wram, uint8_t map_group,
     g_world.dirty[i] = 1;
     changed = true;
   }
+  /* RestoreBaseline: undo any earlier adoption over rows 0-7. Runs after the
+   * loop so it wins, and every qualifying frame rather than once, so a strip
+   * adopted before the policy was switched on is still repaired. A no-op once
+   * the rows match, which is the steady state. */
+  if (SimWorldRows_ShouldRestoreBaseline(policy, on_world_map) &&
+      SimWorldMap_RestoreVolatileRows() > 0)
+    changed = true;
   if (!changed) return;
   if (++g_world.serial == 0) g_world.serial = 1;
 }

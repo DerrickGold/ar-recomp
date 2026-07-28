@@ -25,6 +25,9 @@ bool g_gpu_shaders_active;
 bool g_sim_rim_mask_supported = true;
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
+/* F1's row-policy sink: the registry callback pokes the world-map module, which
+ * these tests do not link. */
+void SimWorldMap_SetRowPolicy(int policy) { (void)policy; }
 
 static int s_failures;
 static int s_action_calls;
