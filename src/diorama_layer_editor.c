@@ -365,6 +365,93 @@ void DioramaLayerEditor_ClearPlane(DioramaPlaneOverride *p) {
   memset(p, 0, sizeof(*p));
 }
 
+/* ── help text ───────────────────────────────────────────────────────────
+ *
+ * Each shape's line names what it COSTS as well as what it does, because the
+ * whole reason five shapes exist is that each trades something different away,
+ * and a menu that only said what they do would make the choice look arbitrary.
+ * The wording tracks diorama-layers.ini deliberately -- same facts, one source.
+ */
+const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
+                                       DioramaEditorParam param,
+                                       DioramaDepthStrategy strategy) {
+  if (kind == kDioramaEditorRow_ResetRoom)
+    return "Clear every override in this room, restoring the built-in look. "
+           "The room stops being written to diorama-layers.ini entirely.";
+  if (kind == kDioramaEditorRow_Header)
+    return "The editor authors the room you are standing in. Walk into a stage "
+           "on this level to edit it.";
+
+  if (kind == kDioramaEditorRow_Plane) {
+    switch (strategy) {
+      case kDioramaDepth_Flat:
+        return "Flat: a sheet parallel to the screen, as every room shipped. "
+               "Left/Right picks a depth shape; B expands its settings.";
+      case kDioramaDepth_Rake:
+        return "Rake: tilts the plane, top edge keeps its depth and the bottom "
+               "comes forward. Right for a surface that recedes -- water, a "
+               "floor. COST: the plane's own rows end up at different depths, "
+               "so it picks up two parallax rates and shears as the camera "
+               "moves. Try bow if that shows.";
+      case kDioramaDepth_Bow:
+        return "Bow: the same tilt eased on a curve. The top keeps its original "
+               "depth and only the bottom bends forward, so the distortion sits "
+               "where the geometry needs it. Still a tilt, so still more than "
+               "one parallax rate.";
+      case kDioramaDepth_Thick:
+        return "Thick: extrudes the bottom edge forward into a near face, "
+               "leaving the plane's own art square to the camera. COST: the "
+               "skirt hangs from the QUAD's edge, so it bands across "
+               "transparent art. Use voxel for an island.";
+      case kDioramaDepth_Stack:
+        return "Stack: parallel repeats filling the gap, fading with distance. "
+               "Nothing tilts, so every copy has ONE parallax rate and the "
+               "layer keeps its flat motion. COST: copies are discrete, so gaps "
+               "remain between slices.";
+      case kDioramaDepth_Voxel:
+        return "Voxel: dense repeats with no fade, so the layer reads as one "
+               "solid object -- and because copies carry the layer's own alpha, "
+               "each art island extrudes itself and the silhouette survives. "
+               "COST: the most expensive shape here.";
+      default:
+        break;
+    }
+  }
+
+  switch (param) {
+    case kDioramaEditorParam_Depth:
+      return "How far the shape reaches, in the scene's own depth units. The "
+             "backdrop sits at 0.00 and the HUD at 0.95, so 0.29 is roughly the "
+             "gap between two neighbouring layers.";
+    case kDioramaEditorParam_Copies:
+      return "How many slices fill the depth. More closes the gaps between them "
+             "at one extra draw of the whole layer each -- which is why a stack "
+             "and a voxel have different caps.";
+    case kDioramaEditorParam_Density:
+      return "Slices per unit of depth, so the spacing you SEE stays the same "
+             "when the depth changes or the value is reused in another room. An "
+             "explicit count overrides this.";
+    case kDioramaEditorParam_Direction:
+      return "Which side of the plane to fill. Higher depth is nearer the "
+             "camera, so forward fills toward you -- what a layer sitting "
+             "behind what it should meet needs.";
+    case kDioramaEditorParam_Z:
+      return "This plane's depth in the projection. Also sets how blurred it is: "
+             "depth of field focuses on 0.50, so moving a plane changes its "
+             "focus as well as its position.";
+    case kDioramaEditorParam_Alpha:
+      return "This plane's opacity. Lets a room compensate for a translucency "
+             "the capture did not reproduce.";
+    case kDioramaEditorParam_Order:
+      return "Where the plane sits in the paint sequence, back to front. "
+             "Separate from depth on purpose, so reordering a plane does not "
+             "also refocus it.";
+    case kDioramaEditorParam_None:
+    default:
+      return "";
+  }
+}
+
 /* ── row building ────────────────────────────────────────────────────────  */
 
 static DioramaEditorRow *PushRow(DioramaEditorRow *out, int capacity,
@@ -539,12 +626,19 @@ int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
     SetText(row->value, sizeof(row->value), "HERE");
   }
 
-  /* Planes in manifest-token order, which is the order an export writes and so
-   * the order the player will see in the file. Deliberately NOT paint order:
-   * that changes as the player authors `order`, and a list that reshuffles
-   * under the cursor while editing is the failure mode to avoid. */
+  /* Planes in MANIFEST-TOKEN order (bg1, bg1hi, bg2, bg2hi, bg3, obj0..obj3),
+   * which is the order an export writes, so the list on screen matches the file
+   * the player will open. Iterating plane INDICES instead would interleave the
+   * priority bands (backdrop lands mid-list, since its enum value follows the
+   * engine sources), which is why this walks the token table.
+   *
+   * Deliberately NOT paint order either: that changes as the player authors
+   * `order`, and a list that reshuffles under the cursor mid-edit is the failure
+   * mode to avoid. */
   static const DioramaPlaneOverride kUnauthored;
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+  const int plane_count = DioramaLayerOrder_PlaneCount();
+  for (int i = 0; i < plane_count; i++) {
+    const int plane = DioramaLayerOrder_PlaneAt(i);
     const char *token = DioramaLayerOrder_PlaneToken(plane);
     if (!token) continue;   /* not a plane the diorama draws */
     const DioramaPlaneOverride *p = room ? &room->planes[plane] : &kUnauthored;

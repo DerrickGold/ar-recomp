@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include "diorama_layer_editor.h"
 #include "input_map.h"
 #include "settings.h"
 #include "settings_overlay.h"
@@ -67,6 +68,17 @@ enum {
   kSection_Cheats,
   kSection_Save,
   kSection_System,
+  /* Developer-only, so it is present in the nav column only while
+   * show_debug_settings is on. Last on purpose: every section above keeps the
+   * same ordinal whether it is shown or hidden. */
+  kSection_Layers,
+};
+/* Sections a player sees, and the total with developer tools revealed. Named so
+ * the assertions below say which one they mean rather than repeating an enum
+ * arithmetic expression that reads the same for both. */
+enum {
+  kPlayerSectionCount = kSection_Layers,
+  kDebugSectionCount = kSection_Layers + 1,
 };
 
 /* Call from the nav column (not inside a submenu). */
@@ -171,6 +183,190 @@ static void CheckMenuDeviceGateTruthTable(void) {
                                 keyboard, gamepad) == keyboard);
   CHECK(InputMap_ArbitrateState(kInputDevice_Gamepad, false, false,
                                 keyboard, gamepad) == keyboard);
+}
+
+/* ── Layer editor harness ────────────────────────────────────────────────
+ *
+ * The overlay reaches the override table through injected hooks precisely so
+ * this test can supply its own without linking diorama.c (which would drag in
+ * the PPU and the SDL render path). These fakes are the whole reason the
+ * indirection exists. */
+static DioramaLayerOrderTable s_fake_layer_table;
+static bool s_fake_room_live;
+static uint8_t s_fake_group = 0x01;   /* Fillmore */
+static uint8_t s_fake_map = 0x02;     /* act 2, the reported room */
+static int s_fake_saves;
+
+static DioramaLayerOrderTable *FakeLayerTable(void) {
+  return &s_fake_layer_table;
+}
+
+static bool FakeLayerRoom(uint8_t *group, uint8_t *map) {
+  if (!s_fake_room_live) return false;
+  if (group) *group = s_fake_group;
+  if (map) *map = s_fake_map;
+  return true;
+}
+
+static bool FakeLayerSave(void) {
+  s_fake_saves++;
+  return true;
+}
+
+/* Drive the Layers section the way a player would: keys only, no direct calls
+ * into the row model. What is asserted is the WIRING -- that a keypress reaches
+ * the override table, that the cursor never rests on a caption, that the section
+ * disappears without debug settings, and that an edit persists. The row model
+ * itself is covered by tests/diorama_layer_editor_test.c. */
+static void CheckLayerEditorSection(void) {
+  SettingsOverlay_SetLayerEditorHooks(FakeLayerTable, FakeLayerRoom,
+                                      FakeLayerSave);
+  memset(&s_fake_layer_table, 0, sizeof(s_fake_layer_table));
+  s_fake_room_live = true;
+  s_fake_saves = 0;
+
+  /* THE GATE the feature was asked for: developer-only means the section is not
+   * in the nav column at all for a player, not merely that its rows are. */
+  g_settings.show_debug_settings = false;
+  int total = -1;
+  CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, &total));
+  CHECK(total == kPlayerSectionCount);
+
+  /* Stepping DOWN from the last visible section must WRAP to the first, not walk
+   * onto the hidden one. Asserted from the section above it, since a wrap that
+   * landed on Layers would report an out-of-range position rather than 0.
+   *
+   * Without this the only evidence would be positional, and Layers is last -- so
+   * its raw index and its visible position coincide and a MoveSection that
+   * happily lands on a hidden section looks identical to one that skips it. */
+  NavToSection(kSection_System);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  int wrapped = -1;
+  CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, &total));
+  CHECK(wrapped == 0);
+  CHECK(total == kPlayerSectionCount);
+  /* And UP from the first must reach System, not the hidden section past it. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
+  CHECK(wrapped == kSection_System);
+
+  g_settings.show_debug_settings = true;
+  CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, &total));
+  CHECK(total == kDebugSectionCount);
+  /* With debug on, DOWN from System reaches Layers and its position is the last
+   * one -- which is what pins the reported ordinal to the VISIBLE numbering that
+   * the nav column draws in. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
+  CHECK(wrapped == kSection_Layers);
+
+  NavToSection(kSection_Layers);
+  /* Tab 0 is Fillmore, which is where the fake room is. */
+  NavToTab(0);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));   /* open submenu */
+
+  /* The cursor must never rest on the room caption, which is row 0 and is not
+   * selectable -- so opening the submenu has already stepped past it onto a real
+   * row. Asserted by name rather than by index. */
+  CHECK(strcmp(SettingsOverlay_SelectedKey(), "") != 0);
+
+  /* The list must contain NO row the editor does not own. Two ways it could:
+   * the synthetic "Reset <section> defaults" row (which has no registry
+   * categories to act on here), and a settings descriptor matched by row index
+   * because SelectedDesc walked the registry. Walking the whole list and
+   * requiring every row to report an editor-shaped key catches both -- an
+   * off-by-one row past the end reports "" and a descriptor reports its own key,
+   * neither of which is a plane token. */
+  {
+    int rows = 0;
+    CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, NULL));
+    /* Step through more rows than any tab has, checking each landing. */
+    for (int i = 0; i < 48; i++) {
+      const char *key = SettingsOverlay_SelectedKey();
+      CHECK(strcmp(key, "") != 0);
+      CHECK(strcmp(key, "reset_section_defaults") != 0);
+      /* Every editor key is a plane token, a "token.param", or the room reset. */
+      const bool known = !strcmp(key, "layer_reset_room") ||
+                         DioramaLayerOrder_PlaneFromToken(key) >= 0 ||
+                         strchr(key, '.') != NULL;
+      CHECK(known);
+      if (Settings_Find(key)) CHECK(!"editor row matched a settings descriptor");
+      rows++;
+      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+    }
+    CHECK(rows == 48);
+  }
+
+  /* Cycle the water plane's shape. Navigating by name, because the row list's
+   * shape changes with the active shape and a keypress count would break. */
+  RowToKey("bg2hi");
+  const int saves_before = s_fake_saves;
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_fake_saves > saves_before);   /* the edit was persisted */
+  const DioramaRoomOverride *room =
+      DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
+  CHECK(room != NULL);
+  CHECK(DioramaLayerOrder_RoomIsActive(room));
+  /* One Right from FLAT is RAKE, and cycling a plane expands it -- so its depth
+   * row now exists and is reachable. Both are contracts, not incidentals: the
+   * expansion is what puts the parameters under the cursor after a change. */
+  const DioramaPlaneOverride *water = &room->planes[kDioramaPlane_Bg2Hi];
+  CHECK(DioramaLayerEditor_StrategyOfPlane(water) == kDioramaDepth_Rake);
+  RowToKey("bg2hi.depth");
+  /* Stepping the depth row moves the rake itself, not some other key. */
+  const float rake_before = water->rake;
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(water->rake > rake_before);
+
+  /* The menu's reset verb is SNES Y, which defaults to the keyboard's A key
+   * (input_map.c:165) -- not SDLK_Y. Clearing the depth removes the SHAPE, since
+   * a rake of zero is not a shape, so the plane reads FLAT again. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
+  CHECK(DioramaLayerEditor_StrategyOfPlane(water) == kDioramaDepth_Flat);
+
+  /* Author two planes, then confirm the room reset clears both at once. */
+  RowToKey("bg2hi");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  RowToKey("bg1");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(DioramaLayerOrder_RoomIsActive(room));
+
+  RowToKey("layer_reset_room");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));   /* confirm */
+
+  /* A room with no overrides left must be INACTIVE, so Resolve returns the
+   * built-in table and the unedited-game guarantee holds. */
+  room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
+  CHECK(!room || !DioramaLayerOrder_RoomIsActive(room));
+
+  /* A level the player is not in explains itself rather than editing something.
+   * Bloodpool is tab 1; the fake room is Fillmore. */
+  NavToTab(1);
+  const int saves_at_foreign = s_fake_saves;
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_fake_saves == saves_at_foreign);   /* nothing authored */
+
+  /* And with no room live at all, no tab edits anything. */
+  NavToTab(0);
+  s_fake_room_live = false;
+  const int saves_offline = s_fake_saves;
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_fake_saves == saves_offline);
+  s_fake_room_live = true;
+
+  /* Turning debug settings off while standing IN the editor must move focus out
+   * rather than leave the cursor on a hidden section. */
+  g_settings.show_debug_settings = false;
+  int selected = -1;
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, &total));
+  CHECK(selected != kSection_Layers);
+  CHECK(total == kPlayerSectionCount);
+  g_settings.show_debug_settings = true;
+
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));   /* leave submenu */
+  /* Leave no hooks behind: later blocks drive other sections. */
+  SettingsOverlay_SetLayerEditorHooks(NULL, NULL, NULL);
 }
 
 int main(void) {
@@ -674,7 +870,7 @@ int main(void) {
    * doubles as a contact sheet: one BMP per (section, tab), which is the only
    * practical way to eyeball a layout change across the whole menu. */
   const char *preview_dir = getenv("AR_OVERLAY_PREVIEW_DIR");
-  for (int section = 0; section < kSection_System + 1; section++) {
+  for (int section = 0; section < kDebugSectionCount; section++) {
     NavToSection(section);
     if (!renderer) continue;
     SettingsOverlay_Render((SDL_Rect){0, 0, surface_width, surface_height});
@@ -682,7 +878,7 @@ int main(void) {
     CHECK(SettingsOverlay_GetNavigationState(
         &selected, &top, &visible, &total));
     CHECK(selected == section);
-    CHECK(total == kSection_System + 1);
+    CHECK(total == kDebugSectionCount);
     CHECK(selected >= top && selected < top + visible);
     if (!preview_dir || !preview_dir[0]) continue;
 
@@ -708,7 +904,7 @@ int main(void) {
    * System without Inspector, the dial rows gone). */
   if (renderer && preview_dir && preview_dir[0]) {
     g_settings.show_debug_settings = false;
-    for (int section = 0; section < kSection_System + 1; section++) {
+    for (int section = 0; section < kPlayerSectionCount; section++) {
       NavToSection(section);
       int tabs = 0;
       CHECK(SettingsOverlay_GetTabState(NULL, &tabs));
@@ -738,6 +934,10 @@ int main(void) {
   CHECK(SettingsOverlay_IsOpen());
   CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, false));
   CHECK(!SettingsOverlay_IsOpen());
+
+  SettingsOverlay_Open();
+  CheckLayerEditorSection();
+  SettingsOverlay_Close();
 
   /* Debug panels avoid the inspected point and can be moved without a click
    * falling through to the tool beneath them. */

@@ -34,6 +34,13 @@ int DioramaLayerOrder_PlaneFromToken(const char *token) {
   return -1;
 }
 
+int DioramaLayerOrder_PlaneCount(void) { return kPlaneTokenCount; }
+
+int DioramaLayerOrder_PlaneAt(int index) {
+  if (index < 0 || index >= kPlaneTokenCount) return -1;
+  return kPlaneTokens[index].plane;
+}
+
 static const char *const kStrategyNames[] = {
   "flat", "rake", "bow", "thick", "stack", "voxel",
 };

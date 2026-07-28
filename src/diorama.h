@@ -1,6 +1,7 @@
 #ifndef DIORAMA_H
 #define DIORAMA_H
 #include <stdbool.h>
+#include <stdint.h>
 #include <SDL3/SDL.h>
 #include "diorama_planes.h"
 
@@ -12,6 +13,12 @@ struct DioramaLayerOrderTable *Diorama_LayerOverrides(void);
  * at boot; save is the editor's "Export manifest". Absent file = no overrides. */
 void Diorama_LoadLayerManifest(void);
 bool Diorama_SaveLayerManifest(void);
+
+/* The room the draw loop is currently applying overrides to, for the layer
+ * editor. False when no diorama room is running, in which case the outputs are
+ * untouched -- so the editor reports a room exactly when authoring one would
+ * have a visible effect. */
+bool Diorama_LiveRoom(uint8_t *out_group, uint8_t *out_map);
 
 void Diorama_SeedCameraFromSettings(void);
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom);
