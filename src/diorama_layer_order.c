@@ -258,6 +258,31 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
 
 /* ── manifest text ───────────────────────────────────────────────────── */
 
+/* Parse one bounded float key. Returns false on a malformed or out-of-range
+ * value, leaving *out untouched.
+ *
+ * ONE helper rather than the range test repeated per key, because the obvious
+ * spelling of that test is WRONG FOR NaN: every comparison with NaN is false, so
+ * `v < lo || v > hi` accepts it, and strtod parses "nan", "NaN", "-nan" and
+ * "nan(0)" consuming the whole token so the trailing-character check passes too.
+ * Six keys had that shape. A NaN then survives into the vertex depth, where
+ * `rake == 0.0f` is false so the tilt branch is taken, and every projected
+ * vertex is non-finite -- so the layer silently vanishes while the load log
+ * still reports the override as applied.
+ *
+ * `!(v >= lo)` rather than `v < lo` is the load-bearing detail: it is true for
+ * NaN, so one expression rejects both out-of-range and non-finite values.
+ * (Infinities were already rejected by the range tests, being > any bound.) */
+static bool ParseBoundedFloat(const char *value, double lo, double hi,
+                              float *out) {
+  char *end = NULL;
+  double v = strtod(value, &end);
+  if (end == value || (end && *end)) return false;
+  if (!(v >= lo) || !(v <= hi)) return false;   /* also rejects NaN */
+  *out = (float)v;
+  return true;
+}
+
 static const char *SkipSpace(const char *p) {
   while (*p == ' ' || *p == '\t') p++;
   return p;
@@ -356,12 +381,21 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       edit.set_order = true;
       touched = true;
     } else if (!strcmp(word, "z")) {
-      double z = strtod(value, &end);
-      if (end == value || (end && *end)) {
-        if (out_error) *out_error = "bad z";
+      /* Bounded, unlike every earlier revision of this parser, which accepted
+       * any float at all. The scene places the backdrop at 0.00 and the HUD at
+       * 0.95, so a z outside 0..1 is not a deep layer -- it is a layer BEHIND
+       * the camera. `z:3` at the tightest legal camera pose gives a clip w of
+       * -0.23, Scene3D_ProjectWorldPoint rejects every vertex, BuildLayerMesh
+       * returns with no geometry, and the layer VANISHES with no diagnostic. A
+       * typo in a hand-edited file therefore looked like a renderer bug.
+       *
+       * The range is deliberately wider than the planes the game ships (0.00 ..
+       * 0.95) so authoring slightly outside the existing spread stays possible;
+       * it only excludes the values that cannot project. */
+      if (!ParseBoundedFloat(value, -1.0, 2.0, &edit.z)) {
+        if (out_error) *out_error = "bad z (-1..2)";
         return false;
       }
-      edit.z = (float)z;
       edit.set_z = true;
       touched = true;
     } else if (!strcmp(word, "alpha")) {
@@ -378,43 +412,35 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       /* Signed: a negative rake tilts the bottom edge AWAY, which is the right
        * shape for a ceiling. Bounded to one world unit so a typo cannot fling a
        * plane through the camera. */
-      double rake = strtod(value, &end);
-      if (end == value || (end && *end) || rake < -1.0 || rake > 1.0) {
+      if (!ParseBoundedFloat(value, -1.0, 1.0, &edit.rake)) {
         if (out_error) *out_error = "bad rake (-1..1)";
         return false;
       }
-      edit.rake = (float)rake;
       edit.set_rake = true;
       touched = true;
     } else if (!strcmp(word, "stack")) {
       /* Non-negative and same units as rake. Fills FORWARD (toward the camera),
        * matching thickness; a stack behind the plane would be hidden by it. */
-      double stack = strtod(value, &end);
-      if (end == value || (end && *end) || stack < 0.0 || stack > 1.0) {
+      if (!ParseBoundedFloat(value, 0.0, 1.0, &edit.stack)) {
         if (out_error) *out_error = "bad stack (0..1)";
         return false;
       }
-      edit.stack = (float)stack;
       edit.set_stack = true;
       touched = true;
     } else if (!strcmp(word, "bow")) {
       /* Signed like a rake, and the same range: a bow is a rake's curve, not a
        * different quantity. */
-      double bow = strtod(value, &end);
-      if (end == value || (end && *end) || bow < -1.0 || bow > 1.0) {
+      if (!ParseBoundedFloat(value, -1.0, 1.0, &edit.bow)) {
         if (out_error) *out_error = "bad bow (-1..1)";
         return false;
       }
-      edit.bow = (float)bow;
       edit.set_bow = true;
       touched = true;
     } else if (!strcmp(word, "voxel")) {
-      double voxel = strtod(value, &end);
-      if (end == value || (end && *end) || voxel < 0.0 || voxel > 1.0) {
+      if (!ParseBoundedFloat(value, 0.0, 1.0, &edit.voxel)) {
         if (out_error) *out_error = "bad voxel (0..1)";
         return false;
       }
-      edit.voxel = (float)voxel;
       edit.set_voxel = true;
       touched = true;
     } else if (!strcmp(word, "slices")) {
@@ -430,8 +456,13 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
     } else if (!strcmp(word, "density")) {
       /* Copies per unit depth. Upper bound is generous because the resolved count
        * is clamped anyway; this only rejects nonsense. */
+      /* Not ParseBoundedFloat: density's lower bound is EXCLUSIVE (zero slices
+       * per unit depth is not a density), and that helper's inclusive `>= lo`
+       * would admit 0. The NaN case is still covered, because `!(v > 0.0)` is
+       * true for NaN exactly as `!(v >= lo)` is. */
       double density = strtod(value, &end);
-      if (end == value || (end && *end) || density <= 0.0 || density > 1000.0) {
+      if (end == value || (end && *end) || !(density > 0.0) ||
+          !(density <= 1000.0)) {
         if (out_error) *out_error = "bad density (>0)";
         return false;
       }
@@ -461,12 +492,10 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       /* Non-negative: a thickness extrudes the bottom edge FORWARD only (toward
        * the camera). For the other direction, author a negative rake instead --
        * they are different shapes, so this is not an arbitrary restriction. */
-      double thickness = strtod(value, &end);
-      if (end == value || (end && *end) || thickness < 0.0 || thickness > 1.0) {
+      if (!ParseBoundedFloat(value, 0.0, 1.0, &edit.thickness)) {
         if (out_error) *out_error = "bad thick (0..1)";
         return false;
       }
-      edit.thickness = (float)thickness;
       edit.set_thickness = true;
       touched = true;
     } else {

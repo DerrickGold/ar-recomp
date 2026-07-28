@@ -891,6 +891,69 @@ static void TestRakeAndThicknessRejectBadValues(void) {
   CHECK(!room.planes[kPpuOverlaySource_Bg2].set_thickness);
 }
 
+/* NON-FINITE values, which every earlier version of this parser ACCEPTED.
+ *
+ * This test exists because the one above passed the whole time: it only ever
+ * tried finite out-of-range values, and the natural spelling of a range check --
+ * `v < lo || v > hi` -- is FALSE for NaN, since every comparison with NaN is.
+ * strtod also parses "nan"/"NaN"/"-nan"/"nan(0)" consuming the whole token, so
+ * the trailing-character check passed too. Six float keys had that shape.
+ *
+ * What it cost: a NaN survives into the vertex depth (`rake == 0.0f` is false,
+ * so the tilt branch runs), every projected vertex is non-finite, and the layer
+ * VANISHES -- while the load log still counts the override as applied. A typo
+ * therefore presented as a renderer bug with no diagnostic pointing at the file.
+ *
+ * Infinities were already rejected, being greater than any bound; they are
+ * asserted anyway so a future refactor cannot lose that for free. */
+static void TestNonFiniteValuesAreRejected(void) {
+  static const char *const kSpellings[] = {
+    "nan", "NaN", "-nan", "nan(0)", "inf", "-inf", "INF",
+  };
+  /* Every float key in the grammar. If a key is added without a bound, adding it
+   * here is what catches it. */
+  static const char *const kKeys[] = {
+    "z", "rake", "bow", "thick", "stack", "voxel", "density",
+  };
+  for (size_t k = 0; k < sizeof(kKeys) / sizeof(kKeys[0]); k++) {
+    for (size_t s = 0; s < sizeof(kSpellings) / sizeof(kSpellings[0]); s++) {
+      DioramaRoomOverride room;
+      memset(&room, 0, sizeof(room));
+      char line[64];
+      snprintf(line, sizeof(line), "bg2 = %s:%s", kKeys[k], kSpellings[s]);
+      const char *error = NULL;
+      CHECK(!DioramaLayerOrder_ParseLine(&room, line, &error));
+      CHECK(error != NULL);
+      /* And the room stays untouched, so a bad line cannot make an otherwise
+       * unauthored room active. */
+      CHECK(!DioramaLayerOrder_RoomIsActive(&room));
+    }
+  }
+}
+
+/* `z` is now bounded. It was the one float key with NO range check at all, and
+ * it is the REACHABLE version of the "plane behind the camera" hazard: `z:3` in
+ * a hand-edited manifest puts the plane past the near plane at the tightest
+ * legal camera pose, every vertex fails projection, and the layer disappears
+ * silently. No editor or in-memory writer needed. */
+static void TestZIsBounded(void) {
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  const char *error = NULL;
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2 = z:3", &error));
+  CHECK(error != NULL);
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2 = z:-99", &error));
+  CHECK(!DioramaLayerOrder_RoomIsActive(&room));
+
+  /* The range stays wider than the planes the game ships (0.00 .. 0.95) so a
+   * room can still author just outside the existing spread. */
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2 = z:0", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2 = z:0.95", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2 = z:1.5", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2 = z:-0.5", &error));
+  CHECK(room.planes[kPpuOverlaySource_Bg2].set_z);
+}
+
 static void TestInactiveRoomEmitsNothing(void) {
   DioramaRoomOverride room;
   memset(&room, 0, sizeof(room));
@@ -969,6 +1032,8 @@ int main(void) {
   TestStrategyOf();
   TestRakeOnlyRoomIsActiveAndRoundTrips();
   TestRakeAndThicknessRejectBadValues();
+  TestNonFiniteValuesAreRejected();
+  TestZIsBounded();
   TestInactiveRoomEmitsNothing();
   TestFormatReportsTruncation();
   TestTokenRoundTrip();
