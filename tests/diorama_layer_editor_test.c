@@ -746,7 +746,66 @@ static void TestUpperIsBoundedAndTerminated(void) {
   }
 }
 
+/* A fully authored room must FIT the buffer diorama.c formats it into, or
+ * Diorama_SaveLayerManifest skips the room and the author's work is gone on the
+ * next save. That buffer was 1024 and the true worst case is 1488, so this pins
+ * the number rather than trusting a guess.
+ *
+ * Every key at its widest rendering, which is what a HAND-EDITED manifest can
+ * hold -- the editor itself authors one shape per plane and stays near 640. */
+static void TestWorstCaseRoomFitsTheSaveBuffer(void) {
+  /* Must track the `char text[]` in Diorama_SaveLayerManifest. Not shared as a
+   * constant because that file is in no test binary; the comment there names this
+   * test, so the two cannot drift silently. */
+  enum { kSaveBufferBytes = 2048 };
+
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  room.used = true;
+  room.map_group = 0x01;
+  room.map_number = 0x02;
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+    DioramaPlaneOverride *p = &room.planes[plane];
+    p->set_order = true;      p->order = kDioramaPlane_Count * 4 - 1;
+    p->set_z = true;          p->z = -0.123456f;   /* widest %.4g */
+    p->set_alpha = true;      p->alpha = kDioramaLayerAlphaOpaque;
+    p->set_rake = true;       p->rake = -0.987654f;
+    p->set_bow = true;        p->bow = -0.987654f;
+    p->set_thickness = true;  p->thickness = 0.987654f;
+    p->set_stack = true;      p->stack = 0.987654f;
+    p->set_stack_copies = true;  p->stack_copies = kDioramaStackMax;
+    /* Widest density the GRAMMAR accepts: positive (the parser rejects <= 0, and
+     * the editor clamps to >= 1, so a negative one is unreachable and would make
+     * this a test of an impossible state) and as many characters as %.4g emits. */
+    p->set_stack_density = true; p->stack_density = 99.9876f;
+    /* "backward" is the longest direction token. */
+    p->set_stack_direction = true; p->stack_direction = kDioramaStack_Backward;
+    p->set_voxel = true;      p->voxel = 0.987654f;
+    p->set_voxel_copies = true;  p->voxel_copies = kDioramaVoxelMax;
+  }
+
+  char text[4096];
+  size_t need = DioramaLayerOrder_FormatRoom(&room, text, sizeof(text));
+  CHECK(need > 0);
+  CHECK(need < sizeof(text));          /* the probe's own buffer sufficed */
+  CHECK(need < (size_t)kSaveBufferBytes);   /* THE assertion */
+
+  /* And it must reload: a room that fits but does not parse back is no better. */
+  DioramaRoomOverride reloaded;
+  memset(&reloaded, 0, sizeof(reloaded));
+  reloaded.used = true;
+  char *save = NULL;
+  for (char *line = strtok_r(text, "\n", &save); line;
+       line = strtok_r(NULL, "\n", &save)) {
+    if (line[0] == '[' || !line[0]) continue;
+    const char *error = NULL;
+    CHECK(DioramaLayerOrder_ParseLine(&reloaded, line, &error));
+  }
+  CHECK(DioramaLayerOrder_RoomIsActive(&reloaded));
+}
+
 int main(void) {
+  TestWorstCaseRoomFitsTheSaveBuffer();
   TestUpperIsBoundedAndTerminated();
   TestEachStrategyResolvesToItself();
   TestCycleWrapsThroughEveryStrategy();
