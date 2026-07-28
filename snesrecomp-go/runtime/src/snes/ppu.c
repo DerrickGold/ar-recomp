@@ -254,8 +254,11 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
   capture->x1 = (int16_t)x1;
   capture->y0 = (int16_t)y0;
   capture->y1 = (int16_t)y1;
+  /* Whitelist, not a passthrough: an unknown bit is dropped rather than stored.
+   * Any flag added to ppu.h MUST be added here too or it is silently inert. */
   capture->flags = flags &
-      (kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkObjColorMath);
+      (kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkObjColorMath |
+       kPpuOverlayFlag_MarkBgHalfAdd);
   capture->oamFirst = 0;
   capture->oamCount = 0;
   return true;
@@ -1346,6 +1349,13 @@ static uint32 PpuCapturedOverlayColor(
   if (color && source == kPpuOverlaySource_Obj &&
       (capture->flags & kPpuOverlayFlag_MarkObjColorMath) &&
       ((pixel >> 8) & 0x0f) == 4)
+    color = (color & 0x00ffffffu) | 0x80000000u;
+  /* A half-added BG plane. Unconditional over the layer's own pixels, unlike the
+   * OBJ case: OBJ math is per-palette-group, whereas CGADSUB's BG bits apply to
+   * the whole layer, so eligibility was already decided by the caller when it
+   * set the flag. */
+  if (color && source != kPpuOverlaySource_Obj &&
+      (capture->flags & kPpuOverlayFlag_MarkBgHalfAdd))
     color = (color & 0x00ffffffu) | 0x80000000u;
   return color;
 }

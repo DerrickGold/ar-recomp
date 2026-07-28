@@ -326,6 +326,34 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
         (uint32)snes_frame_counter, &sim, g_pixels,
         g_snes_width, g_snes_height, g_snes_width * 4);
   }
+  /* AR_DIORAMA_DUMP_GF=<gf>[,<gf>...]: arm the Shift+D layer dump from a replay
+   * instead of the keyboard, so a diorama frame can be inspected headlessly.
+   * The PNGs keep the captured ALPHA, which is what makes F4's half-add
+   * annotation verifiable without looking at the screen. Same shape as
+   * AR_VRAMDUMP_GF. */
+  {
+    static const char *dump_list = NULL;
+    static bool dump_list_read;
+    static unsigned last_dumped_gf = (unsigned)-1;
+    if (!dump_list_read) {
+      dump_list_read = true;
+      dump_list = getenv("AR_DIORAMA_DUMP_GF");
+    }
+    if (dump_list && dump_list[0]) {
+      const unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+      if (gf != last_dumped_gf) {
+        for (const char *at = dump_list; at && *at;) {
+          if ((unsigned)strtoul(at, NULL, 0) == gf) {
+            last_dumped_gf = gf;
+            g_diorama_dump_pending = true;
+            break;
+          }
+          const char *comma = strchr(at, ',');
+          at = comma ? comma + 1 : NULL;
+        }
+      }
+    }
+  }
   if (g_diorama_dump_pending) {
     HostDevTools_DumpDioramaLayers();
     g_diorama_dump_pending = false;

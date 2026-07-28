@@ -110,6 +110,7 @@ add_executable(ActRaiserRecomp
     src/actraiser_ws_gap.c
     src/diorama_skybox_uv.c
     src/diorama_layer_order.c
+    src/diorama_capture_blend.c
     src/dev_tools.c
     src/forced_input.c
     src/frame_slot.c
@@ -551,6 +552,18 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_diorama_skybox_uv_test PRIVATE m)
     add_test(NAME actraiser_diorama_skybox_uv
         COMMAND actraiser_diorama_skybox_uv_test)
+
+    # F4 (handback 2026-07-26): which captured layers are half-added with the
+    # subscreen and so must carry 50% alpha. Pure -- no SDL, no PPU struct.
+    add_executable(actraiser_diorama_capture_blend_test
+        tests/diorama_capture_blend_test.c
+        src/diorama_capture_blend.c
+    )
+    target_include_directories(actraiser_diorama_capture_blend_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_diorama_capture_blend
+        COMMAND actraiser_diorama_capture_blend_test)
 
     # F3/F4 (handback 2026-07-26): per-room ($18,$19) layer z/alpha overrides.
     # Pure -- no SDL, no PPU, no file I/O.

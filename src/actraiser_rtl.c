@@ -9,6 +9,7 @@
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
 #include "actraiser_ws_gap.h"
+#include "diorama_capture_blend.h"
 #include "diorama_skybox_uv.h"
 #include "diorama_planes.h"
 #include "settings.h"
@@ -1249,15 +1250,57 @@ void ActRaiserDrawPpuFrame(void) {
       static const PpuOverlaySource kCaptureLayersCommon[] = {
         kPpuOverlaySource_Bg1, kPpuOverlaySource_Bg2, kPpuOverlaySource_Obj,
       };
+      /* F4 (2026-07-26 handback: "missing transparency on background layers in
+       * diorama mode"). SNES colour math is not reproduced by the capture, so a
+       * half-added BG used to arrive fully opaque and HIDE the planes behind it
+       * instead of tinting them. Annotate those planes so the compositor draws
+       * them at 50% instead — see kPpuOverlayFlag_MarkBgHalfAdd.
+       *
+       * Only the exact half-add-with-subscreen state qualifies, and it fails
+       * closed: a full add is not an alpha blend, and a subtract is not either,
+       * so both keep today's opaque capture rather than guessing.
+       * Measured in Fillmore act 2 as cgwsel=$02 cgadsub=$43.
+       *
+       * The policy itself lives in diorama_capture_blend.c so it can be tested
+       * without a ROM or a renderer. */
       for (int i = 0; i < (int)(sizeof(kCaptureLayersCommon) /
                                 sizeof(kCaptureLayersCommon[0])); i++) {
         PpuOverlaySource src = kCaptureLayersCommon[i];
         if (!g_diorama_layer_pixels[src])
           g_diorama_layer_pixels[src] = calloc(1, kPpuBufWidth * 4 * 240);
         PpuBindOverlaySurface(g_ppu, src, g_diorama_layer_pixels[src], pitch);
-        if (g_ppu->screenEnabled[0] & (1 << src))
-          PpuSetOverlayCapture(g_ppu, src, -g_ws_extra, 0, width, 224,
-                               kPpuOverlayFlag_RemoveFromGame);
+        if (g_ppu->screenEnabled[0] & (1 << src)) {
+          uint8_t flags = kPpuOverlayFlag_RemoveFromGame;
+          /* OBJ keeps its own per-palette-group flag; this one is BG-only. */
+          if (src != kPpuOverlaySource_Obj &&
+              DioramaCaptureBlend_LayerIsHalfAdded(
+                  (uint8_t)g_ppu->cgwsel, (uint8_t)g_ppu->cgadsub,
+                  (uint8_t)g_ppu->screenEnabled[1], (uint8_t)(1 << src))) {
+            flags |= kPpuOverlayFlag_MarkBgHalfAdd;
+            /* Once per source: this is a fidelity change to the captured image,
+             * so it should be visible in a log rather than inferred from
+             * pixels. Silent on every stage that does not use this math.
+             * AR_DIORAMA_BLEND_LOG=1 makes it per-frame instead, which is how
+             * to tell a stage that never qualifies from one that qualifies only
+             * on some frames (CGWSEL/CGADSUB are HDMA-writable per scanline, so
+             * the value at capture-setup time is not necessarily the value
+             * during scanout). */
+            static bool reported[kPpuOverlaySource_Count];
+            static int verbose = -1;
+            if (verbose < 0) verbose = getenv("AR_DIORAMA_BLEND_LOG") ? 1 : 0;
+            if (!reported[src] || verbose) {
+              reported[src] = true;
+              fprintf(stderr,
+                      "[diorama-blend] gf=%u BG%d half-added with subscreen "
+                      "(cgwsel=$%02x cgadsub=$%02x main=$%02x sub=$%02x) "
+                      "-> captured at 50%% alpha\n",
+                      ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+                      src + 1, g_ppu->cgwsel, g_ppu->cgadsub,
+                      g_ppu->screenEnabled[0], g_ppu->screenEnabled[1]);
+            }
+          }
+          PpuSetOverlayCapture(g_ppu, src, -g_ws_extra, 0, width, 224, flags);
+        }
       }
       /* BG3 needs its OWN branch, not just an on/off entry in the loop above:
        * PpuBindOverlaySurface is the ONLY thing that changes a source's
