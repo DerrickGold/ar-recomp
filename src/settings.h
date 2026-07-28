@@ -445,13 +445,6 @@ typedef struct Settings {
    * valid span where padding cannot reach it (Fix B). Off restores every
    * pre-fix path exactly, so this is a live A/B for the artifact. */
   bool diorama_margin_fix;
-  /* F1 (2026-07-26 handback): which repair to apply to the world-map underlay's
-   * top strip — rows 0-7, the only region SimWorldMap_Refresh does not adopt on
-   * a town map. Values are SimWorldRowPolicy (0 current / 1 restore-from-ROM /
-   * 2 trust-live); an int rather than the enum so settings.h keeps no dependency
-   * on the world-map module. Exactly one of the two repairs is correct and it
-   * cannot be determined without a ROM, so both ship behind this switch. */
-  int worldmap_top_rows;
   /* B6 (followup doc): put the layer stack inside a floor/ceiling/side-wall
    * enclosure so the level's off-screen edges are masked by box surfaces
    * instead of ending in void. Composes with B5: skybox fills the box's far

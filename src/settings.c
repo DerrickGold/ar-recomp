@@ -144,14 +144,6 @@ static void DisplayModeChanged(const SettingDesc *desc) {
  * settings tests, which link their own no-op. */
 void Diorama_OnModeChanged(void);
 
-/* Defined by sim_world_map.c. Same arrangement as Diorama_OnModeChanged: the
- * settings tests link their own no-op rather than the whole world-map module. */
-void SimWorldMap_SetRowPolicy(int policy);
-
-static void WorldMapTopRowsChanged(const SettingDesc *desc) {
-  SimWorldMap_SetRowPolicy(*(const int *)desc->field);
-}
-
 static void DioramaModeChanged(const SettingDesc *desc) {
   (void)desc;
   Diorama_OnModeChanged();
@@ -454,14 +446,6 @@ static const char *const kDisplayModeLabels[] = {
   "4:3 authentic",
   "Widescreen raw",
   "Widescreen full",
-};
-
-/* F1/F2's A/B (sim_world_map_rows.h). Order matches SimWorldRowPolicy. */
-static const char *const kWorldMapTopRowsLabels[] = {
-  "Current (skip)",
-  "Restore from ROM",
-  "Trust live data",
-  "Coherence gate",
 };
 
 static const char *const kPixelAspectLabels[] = {
@@ -1299,24 +1283,6 @@ const SettingDesc g_setting_descs[] = {
     kDioramaSky_Off, kDioramaSky_Both, 1, false,
     kDioramaSkyModeLabels, kDioramaSky_Count, Diorama_ModeIsOn, NULL,
     NULL, NULL },
-  /* F1/F2's A/B: the world-map underlay. Candidate repairs whose correctness
-   * depends on facts only reachable with a ROM, so they all ship and one
-   * on-device session decides. Coherence gate is the whole-map candidate and the
-   * one that also addresses F2 (the mostly-blank underlay after an act); the two
-   * before it only touch the top strip. See sim_world_map_rows.h and
-   * AB-TEST-worldmap-top-band.md. Default is Current, so nothing changes until
-   * it is deliberately switched. */
-  { "worldmap_top_rows", "AR_WORLDMAP_TOP_ROWS", "World map underlay repair",
-    "Repairs for the world-map underlay. Current keeps today's behaviour. "
-    "Restore from ROM re-asserts the ROM copy of the top strip, so it can never "
-    "show garbage but loses far-north development. Trust live data always adopts "
-    "the live map for that strip. Coherence gate is the broadest: it refuses the "
-    "whole live map on the first town frame after an act — when the buffer can "
-    "still hold that act's data — and shows the ROM copy until the world-map "
-    "screen has rebuilt it, which also addresses the blank underlay after an act.",
-    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
-    &g_settings.worldmap_top_rows, 0, 0, 3, 1, false,
-    kWorldMapTopRowsLabels, 4, NULL, WorldMapTopRowsChanged, NULL, NULL },
   /* One switch for all three parts of the margin fix (SPEC-backdrop-clip.md),
    * so the black wedge at a level bound can be A/B'd live: stand at the level
    * start and toggle. Default on; Off restores every pre-fix path byte for

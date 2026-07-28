@@ -984,11 +984,15 @@ other assignment of towns to icons has that property, which is what pins the
 table. Bloodpool and Fillmore share an edge, as do Aitos and Kasandora, so
 standing at one town's border shows the neighbour's real territory.
 
-The underlay tracks live state rather than the ROM baseline: `$7E:C000` holds a
-128x128 shadow of the Mode-7 tilemap which matches VRAM byte-for-byte on the
-world-map screen and stays coherent while a town is active, so cathedrals and
-roads appear as they currently stand. Rows 0-7 of that shadow are scratch
-during town mode and are only adopted from a world-map frame.
+The underlay tracks current development without observing `$7E:C000`. That
+range is shared scratch: action stages durably overwrite rows 0-79 and town
+frames reuse rows 0-7, so map identity cannot make a stale buffer trustworthy.
+The host instead owns the build. `$02:B475` cleanly separates into base
+copy/decompress, `JSL $02:865C`, then a `$2118` VRAM upload. The host already has
+the byte-identical ROM base, so on town entry and development-input changes it
+seeds that base transactionally, invokes only `$02:865C` and its two leaf
+helpers, copies out the complete developed map, and restores CPU, WRAM, and
+math-unit state. The closure has no wait, yield, or hardware-register path.
 
 **The full-town canvas.** The world map is half resolution, so the town's own
 off-screen territory deserves better. The game keeps the whole town's BG1
