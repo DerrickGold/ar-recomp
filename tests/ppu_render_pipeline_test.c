@@ -304,6 +304,30 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   CHECK(PpuSetOverlayOamRange(
       ppu, kActRaiserHudObjOamFirst, kActRaiserHudObjOamCount));
 
+  /* PpuSetOverlayCapture stores flags through a WHITELIST, so a flag that is
+   * declared in ppu.h but missing from that mask is accepted by the setter and
+   * then silently dropped -- the capture behaves as if the caller never asked.
+   * That is how kPpuOverlayFlag_MarkBgHalfAdd shipped inert on first attempt:
+   * the F4 log line reported "captured at 50% alpha" while every captured pixel
+   * came back 0xff. Assert every declared flag survives a round trip. */
+  {
+    const uint8_t kAllFlags = kPpuOverlayFlag_RemoveFromGame |
+                              kPpuOverlayFlag_MarkObjColorMath |
+                              kPpuOverlayFlag_MarkBgHalfAdd;
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0,
+                               kActRaiserAuthenticWidth,
+                               kActRaiserAuthenticHeight, kAllFlags));
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags == kAllFlags);
+    /* And an undeclared bit is still rejected -- the whitelist must stay a
+     * whitelist rather than becoming a passthrough. */
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0,
+                               kActRaiserAuthenticWidth,
+                               kActRaiserAuthenticHeight,
+                               (uint8_t)(kAllFlags | 0x80)));
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags == kAllFlags);
+    PpuClearOverlayCaptures(ppu);
+  }
+
   const int extra = 43;
   Sim3DCaptureRequest request = {
     .town = true,

@@ -67,6 +67,23 @@ enum {
    * palette groups 4-7 use alpha $80, groups 0-3 remain opaque. This is an
    * extraction-only annotation; it never changes authentic PPU scanout. */
   kPpuOverlayFlag_MarkObjColorMath = 2,
+  /* Same idea for a BG plane: this layer is HALF-ADDED with the subscreen, so
+   * its captured pixels carry alpha $80 and a host that composites the planes
+   * in depth order reproduces the blend as ordinary alpha. (main+sub)/2 is
+   * exactly a 50% source-over of the layer onto what is behind it, which is
+   * what the subscreen holds.
+   *
+   * Without this, a half-added BG is captured fully opaque and hides the planes
+   * behind it instead of tinting them -- the "background lost its transparency"
+   * report from 2026-07-26, measured in Fillmore act 2 as cgwsel=$02
+   * cgadsub=$43 (half, add, subscreen addend, math on BG1+BG2).
+   *
+   * The caller decides eligibility per source, because it is not simply "the
+   * CGADSUB bit is set": a layer that is ALSO on the subscreen is half-added
+   * with itself, which is the identity, and must stay opaque. In that measured
+   * frame BG1 is on the subscreen and BG2 is not, so only BG2 is marked.
+   * Extraction-only, like the OBJ flag: authentic scanout is untouched. */
+  kPpuOverlayFlag_MarkBgHalfAdd = 4,
 };
 
 /* Mode-7 canvas-space texture override (per-frame game policy, cleared with
