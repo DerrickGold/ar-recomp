@@ -34,6 +34,36 @@ enum {
   kPpuExtraLeftRight = 96,
   // Full internal width of the priority buffers (logical 256 + both borders).
   kPpuBufWidth = kPpuXPixels + kPpuExtraLeftRight * 2,
+  // Authentic visible scanline count. Distinct from kPpuXPixels' axis: 224 is
+  // how many lines are OUTPUT, and it is also the threshold above which an OAM
+  // Y byte is a negative (offscreen-top) position -- see kPpuObjYWrap.
+  kPpuYPixels = 224,
+  // OAM sprite POSITION WRAPS. These are properties of the OAM encoding, not of
+  // the screen size, and they are deliberately named separately from
+  // kPpuXPixels/kPpuYPixels even though two of them share those values:
+  //
+  //   X is 9 bits, so a sprite straddling the left edge is encoded as a large
+  //   positive value; subtracting the 512 modulus recovers the negative screen
+  //   position. The 512 is 2^9 -- the encoding's range -- NOT two screens.
+  //
+  //   Y is 8 bits with no sign bit, so the hardware treats anything at or above
+  //   224 as negative and subtracts the 256 modulus (2^8). The 224 threshold
+  //   happens to equal kPpuYPixels and the 256 modulus happens to equal
+  //   kPpuXPixels; both coincidences, and writing them as those constants would
+  //   imply they track the screen geometry, which they do not.
+  kPpuObjXWrap = 512,   // 2^9: the OAM X field's modulus
+  kPpuObjYWrap = 256,   // 2^8: the OAM Y field's modulus
+  kPpuObjYNegativeFrom = 224,  // Y at/above this is a negative position
+  // CGRAM entries. 256 because a palette index is one byte -- unrelated to
+  // kPpuXPixels sharing the value.
+  kPpuCgramEntries = 0x100,
+  // Distinct OBJ tile ids. 256 because the OAM attribute's tile field is one
+  // byte (the 9th bit selects which of the two name-base tables it indexes, so
+  // it widens the ADDRESS space, not the id space).
+  kPpuObjTileIds = 256,
+  // OAM low table, in 16-bit words: 128 sprites x 2 words. 256 for that reason,
+  // not because it matches any pixel dimension.
+  kPpuOamWords = 0x100,
 };
 
 typedef uint16_t PpuZbufType;
@@ -310,8 +340,8 @@ struct Ppu {
   void *pad2;
 
   // -- START OF SNAPSHOT, 0x10420 bytes
-  uint16_t cgram[0x100];
-  uint16_t oam[0x100];
+  uint16_t cgram[kPpuCgramEntries];
+  uint16_t oam[kPpuOamWords];
   uint8_t highOam[0x20];
   uint16_t vram[0x8000];
   // -- END OF SNAPSHOT

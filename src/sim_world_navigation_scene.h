@@ -19,6 +19,11 @@ typedef struct SimWorldNavigationFrame {
 } SimWorldNavigationFrame;
 
 enum {
+  /* OAM low table in 16-bit words (128 sprites x 2). Mirrors ppu.h's
+   * kPpuOamWords, declared here rather than included because this module is pure
+   * -- ppu.h would drag the whole PPU struct in. Cross-checked by a
+   * _Static_assert in sim_world_navigation_capture.c, which sees both. */
+  kSimWorldNavigationOamWords = 0x100,
   kSimWorldNavigationZoomNear = 0x0206,
   kSimWorldNavigationZoomMiddle = 0x040A,
   kSimWorldNavigationZoomFar = 0x0562,

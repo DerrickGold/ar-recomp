@@ -60,7 +60,9 @@ typedef struct {
   unsigned first_frame, last_frame;
 } SfxEntry;
 
-static SfxEntry s_sfx[256];
+/* One entry per SFX id; 256 because the id written to APU port 3 is a byte. */
+enum { kSfxIdCount = 256 };
+static SfxEntry s_sfx[kSfxIdCount];
 static int s_enabled = -1;
 
 /* The single request awaiting correlation. The mailbox holds one id at a time
@@ -226,7 +228,7 @@ void SfxCensus_Init(void) {
 
 static void WriteReport(FILE *f) {
   unsigned total_req = 0, total_corr = 0, ids = 0;
-  for (int i = 0; i < 256; i++) {
+  for (int i = 0; i < kSfxIdCount; i++) {
     if (!s_sfx[i].requests && !s_sfx[i].correlated) continue;
     ids++;
     total_req += s_sfx[i].requests;
@@ -246,7 +248,7 @@ static void WriteReport(FILE *f) {
   fprintf(f, "%-4s %-8s %-10s %-18s %-11s %-13s %-9s %s\n",
           "id", "requests", "keyons", "srcn(count)", "voices",
           "volL/volR", "pitch", "callers");
-  for (int i = 0; i < 256; i++) {
+  for (int i = 0; i < kSfxIdCount; i++) {
     SfxEntry *e = &s_sfx[i];
     if (!e->requests && !e->correlated) continue;
 
@@ -303,7 +305,7 @@ static void WriteReport(FILE *f) {
 void SfxCensus_Report(void) {
   if (!CensusEnabled()) return;
   unsigned any = s_orphan_total;
-  for (int i = 0; i < 256 && !any; i++)
+  for (int i = 0; i < kSfxIdCount && !any; i++)
     any = s_sfx[i].requests + s_sfx[i].correlated;
   if (!any) {
     fprintf(stderr, "[sfx-census] nothing captured\n");

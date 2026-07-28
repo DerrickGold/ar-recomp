@@ -56,13 +56,13 @@ static int PpuObjScreenX(const Ppu *ppu, uint8_t index) {
   x |= ((ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
   /* Preserve legitimate widescreen right-margin positions before applying
    * the SNES 9-bit wrap used for left-edge straddling sprites. */
-  if (x >= 256 + ppu->extraRightCur) x -= 512;
+  if (x >= kPpuXPixels + ppu->extraRightCur) x -= kPpuObjXWrap;
   return x;
 }
 
 static int PpuObjScreenY(const Ppu *ppu, uint8_t index) {
   int y = ppu->oam[index] >> 8;
-  return y >= 224 ? y - 256 : y;
+  return y >= kPpuObjYNegativeFrom ? y - kPpuObjYWrap : y;
 }
 
 static uint32 PpuObjTilePlane(Ppu *ppu, int attributes, int sprite_size,

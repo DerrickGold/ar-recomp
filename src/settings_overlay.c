@@ -356,12 +356,22 @@ typedef struct MenuLayout {
   int origin_y;
 } MenuLayout;
 
+/* Glyph-cache dimensions. Both are 256 for BYTE-INDEXING reasons and are not
+ * related to each other or to any pixel dimension:
+ *   TileIds   a tilemap entry names its tile with one byte.
+ *   CharCodes the dictionary maps one source byte to one tile id.
+ * The glyphs themselves are 8x8, which is why the coordinate guards below
+ * compare against 8 rather than either of these. */
+enum { kOverlayTileIds = 256, kOverlayCharCodes = 256 };
+
 static SDL_Renderer *s_renderer;
 static SDL_Texture *s_font_textures[kTextStyle_Count];
 static SDL_Texture *s_debug_font_texture;
 static SDL_Texture *s_dialog_frame_texture;
 static uint8_t s_font_tiles[kFontTileBytes];
-static bool s_glyph_defined[256];
+/* One flag per VRAM tile id the glyph cache can occupy; 256 because the id is
+ * a byte in the tilemap entry. */
+static bool s_glyph_defined[kOverlayTileIds];
 static bool s_open;
 static bool s_submenu_open;
 static int s_section;
@@ -488,7 +498,7 @@ static bool DecodeFontAsset(const uint8_t *rom_data, size_t rom_size) {
     rom_size - (size_t)kFontAssetOffset - 2,
     0,
   };
-  uint8_t dictionary[256];
+  uint8_t dictionary[kOverlayCharCodes];
   memset(dictionary, 0x20, sizeof(dictionary));
   unsigned write_position = 0xef;
   size_t output_position = 0;
@@ -530,7 +540,7 @@ static bool DecodeFontAsset(const uint8_t *rom_data, size_t rom_size) {
 }
 
 static void SetTilePixel(unsigned tile, int x, int y, unsigned value) {
-  if (tile >= 256 || x < 0 || x >= 8 || y < 0 || y >= 8)
+  if (tile >= kOverlayTileIds || x < 0 || x >= 8 || y < 0 || y >= 8)
     return;
   size_t offset = (size_t)tile * 16 + (size_t)y * 2;
   uint8_t mask = (uint8_t)(1u << (7 - x));
@@ -549,7 +559,7 @@ static bool FallbackGlyphDefined(unsigned ch) {
 }
 
 static void WriteFallbackGlyph(unsigned tile, unsigned source_ch) {
-  if (tile >= 256 || source_ch >= 128)
+  if (tile >= kOverlayTileIds || source_ch >= 128)
     return;
   memset(s_font_tiles + tile * 16, 0, 16);
   for (int row = 0; row < 7; row++) {
@@ -843,7 +853,7 @@ static SDL_Texture *CreateFontAtlas(TextStyle style) {
       (size_t)kFontAtlasWidth * kFontAtlasHeight, sizeof(uint32_t));
   if (!pixels) return NULL;
 
-  for (unsigned tile = 0; tile < 256; tile++) {
+  for (unsigned tile = 0; tile < kOverlayTileIds; tile++) {
     int tile_x = (int)(tile & 15) * kGlyphSize;
     int tile_y = (int)(tile >> 4) * kGlyphSize;
     for (int y = 0; y < kGlyphSize; y++) {
@@ -880,7 +890,7 @@ static SDL_Texture *CreateDebugFontAtlas(void) {
       sizeof(uint32_t));
   if (!pixels) return NULL;
 
-  for (unsigned ch = 0; ch < 256; ch++) {
+  for (unsigned ch = 0; ch < kOverlayCharCodes; ch++) {
     unsigned source_ch = ch;
     /* Lowercase is authored for real now; fold onto the capital only for the
      * handful of codepoints that still have no lowercase mask. */
