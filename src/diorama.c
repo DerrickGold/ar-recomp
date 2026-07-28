@@ -855,12 +855,23 @@ bool Diorama_SaveLayerManifest(void) {
   for (int i = 0; i < g_layer_overrides.count; i++) {
     const DioramaRoomOverride *r = &g_layer_overrides.rooms[i];
     if (!DioramaLayerOrder_RoomIsActive(r)) continue;
-    char text[1024];
+    /* Sized from the format, not guessed. A worst-case room -- every one of the
+     * ten planes carrying every key at its widest rendering (a negative 6-digit
+     * float, `dir:backward`, three-digit counts) -- measures 1488 bytes, so the
+     * 1024 this used to be silently DROPPED such a room on save. The editor
+     * cannot reach that size (it authors one shape per plane, so ~640 bytes), but
+     * a hand-edited manifest can, and losing it on the next save is the worst
+     * failure this file has: the author's own text is gone.
+     *
+     * The skip below is still the right fallback if the format ever grows again,
+     * and it reports rather than failing silently. */
+    char text[2048];
     size_t need = DioramaLayerOrder_FormatRoom(r, text, sizeof text);
     if (need == 0) continue;
     if (need >= sizeof text) {
-      fprintf(stderr, "[diorama-layers] room %02X:%02X too long, skipped\n",
-              r->map_group, r->map_number);
+      fprintf(stderr, "[diorama-layers] room %02X:%02X too long (%zu bytes), "
+                      "skipped -- report this, the buffer needs raising\n",
+              r->map_group, r->map_number, need);
       continue;
     }
     fputs(text, file);
