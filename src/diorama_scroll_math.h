@@ -77,4 +77,32 @@ void DioramaSkirtVertex(float t, float z_bottom, float y_bottom,
 /* Shade multiplier at the near lip of a skirt (t == 1). Exposed so the value is
  * named once rather than duplicated between the geometry and its test. */
 float DioramaSkirtNearShade(void);
+
+/* STACK: depth, shade and opacity of one copy in a stacked layer.
+ *
+ * A stack fills a depth gap by repeating the layer at intermediate depths instead
+ * of tilting it. Tilting (rake) puts a single plane's own rows at different
+ * depths, which gives that layer two different parallax rates within itself and
+ * shears it as the camera moves. Every copy here stays exactly parallel, so each
+ * has ONE depth and one parallax rate, and the layer keeps the flat poster-like
+ * motion the diorama is built on.
+ *
+ * `index` is 0 for the copy nearest the plane's own depth and `copies - 1` for the
+ * farthest into the gap; `copies` is clamped to >= 1. `depth` is the total fill,
+ * laid from `z_base` toward `z_base + depth`.
+ *
+ * Copy 0 sits AT z_base -- deliberately, so it coincides with the plane the caller
+ * already draws and the stack has no seam at its own front face. The caller
+ * therefore skips index 0 and draws 1..copies-1 as extra passes.
+ *
+ * `out_alpha` and `out_shade` both fall off with distance into the gap so the
+ * stack reads as receding volume rather than a smear of identical sprites. Alpha
+ * never reaches 0 for a valid index, since an invisible copy is a wasted draw. */
+void DioramaStackCopy(int index, int copies, float z_base, float depth,
+                      float *out_z, float *out_shade, float *out_alpha);
+
+/* True when a copy at `index` of `copies` is worth drawing at all: in range and
+ * not fully transparent. The caller's loop guard, so the "is this a wasted draw"
+ * rule lives with the arithmetic instead of being restated at the call site. */
+bool DioramaStackCopyIsVisible(int index, int copies);
 #endif

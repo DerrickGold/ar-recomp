@@ -162,3 +162,30 @@ void DioramaSkirtVertex(float t, float z_bottom, float y_bottom,
   if (out_z) *out_z = z_bottom + t * thickness;
   if (out_shade) *out_shade = 1.0f - (1.0f - kSkirtNearShade) * t;
 }
+
+/* ── stack: fill a depth gap with parallel copies ─────────────────────── */
+
+/* Falloff at the FARTHEST copy. Both are multipliers on the layer's own values,
+ * so a stacked translucent layer stays translucent. Not 0: a fully transparent
+ * copy is a draw call that paints nothing. */
+static const float kStackFarShade = 0.50f;
+static const float kStackFarAlpha = 0.35f;
+
+bool DioramaStackCopyIsVisible(int index, int copies) {
+  if (copies < 1) copies = 1;
+  return index >= 0 && index < copies;
+}
+
+void DioramaStackCopy(int index, int copies, float z_base, float depth,
+                      float *out_z, float *out_shade, float *out_alpha) {
+  if (copies < 1) copies = 1;
+  if (!(depth > 0.0f)) depth = 0.0f;      /* also catches NaN */
+  if (index < 0) index = 0;
+  if (index > copies - 1) index = copies - 1;
+  /* Fraction of the way into the gap. A single copy is entirely at z_base, which
+   * keeps `copies:1` a no-op rather than a division by zero. */
+  float f = (copies > 1) ? (float)index / (float)(copies - 1) : 0.0f;
+  if (out_z) *out_z = z_base + f * depth;
+  if (out_shade) *out_shade = 1.0f - (1.0f - kStackFarShade) * f;
+  if (out_alpha) *out_alpha = 1.0f - (1.0f - kStackFarAlpha) * f;
+}

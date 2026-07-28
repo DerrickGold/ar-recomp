@@ -745,6 +745,7 @@ static const DioramaLayerDesc *DioramaDescForPlane(int plane) {
  *     [layers:01:02]          ; $18=01 $19=02 -- Fillmore act 2
  *     bg2hi = rake:0.29       ; flood the water forward to meet the rock path
  *     bg1   = thick:0.20      ; give the rock path a near face
+ *     bg2hi = stack:0.29 copies:4  ; or fill the gap with parallel repeats
  *     bg2   = z:0.30 alpha:200
  *
  * The grammar and every bound live in diorama_layer_order.c, which is pure and
@@ -831,12 +832,14 @@ bool Diorama_SaveLayerManifest(void) {
           "# Diorama per-room layer overrides.\n"
           "# Section is [layers:GG:MM] with $18/$19 in hex; keys are\n"
           "#   order:<slot>  z:<depth>  alpha:<0-255>  rake:<-1..1>"
-          "  thick:<0..1>\n"
+          "  thick:<0..1>  stack:<0..1>  copies:<1..8>\n"
           "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake),\n"
           "# which closes the void between two parallel planes at a tilted\n"
           "# camera. thick extrudes the plane's BOTTOM edge forward to\n"
           "# z+thickness instead, so the layer reads as a block with a near\n"
-          "# face while its own art stays square to the camera. They compose.\n\n");
+          "# face while its own art stays square to the camera. stack fills the\n"
+          "# gap with `copies` PARALLEL repeats laid to z+stack -- unlike rake it\n"
+          "# never tilts, so the layer keeps one parallax rate. All compose.\n\n");
   int written = 0;
   for (int i = 0; i < g_layer_overrides.count; i++) {
     const DioramaRoomOverride *r = &g_layer_overrides.rooms[i];
@@ -1508,6 +1511,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       defaults[i].alpha = kDioramaLayerAlphaOpaque;
       defaults[i].rake = 0.0f;
       defaults[i].thickness = 0.0f;
+      defaults[i].stack = 0.0f;
+      defaults[i].stack_copies = 0;
     }
     extern uint8 g_ram[0x20000];
     resolved_count = DioramaLayerOrder_Resolve(
@@ -1522,6 +1527,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     const float layer_z = resolved[i].z;
     const float layer_rake = resolved[i].rake;
     const float layer_thickness = resolved[i].thickness;
+    const float layer_stack = resolved[i].stack;
+    const int layer_stack_copies = resolved[i].stack_copies;
     if (layer->visible && !*layer->visible) continue;
     /* A5 (followup doc): with diorama_hud_flat on, BG3 is deliberately not
      * captured as a diorama layer (actraiser_rtl.c) and the anchored flat
@@ -1613,6 +1620,53 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                    layer_u1, layer_v1,
                    aspect_x, height_scale, out_w, out_h, shade,
                    verts, indices, &nv, &ni);
+
+    /* STACK: fill the depth gap with PARALLEL copies of the layer, drawn behind
+     * the plane itself (back to front, so the painter's algorithm layers them
+     * correctly without a depth test).
+     *
+     * This is the alternative to a rake for the same void, and the reason it
+     * exists is that a rake tilts the plane: its rows end up at different
+     * depths, so the perspective divide gives one layer two different parallax
+     * rates and it shears as the camera moves, over-exaggerating that layer's
+     * parallax. Every copy here stays exactly parallel at ONE depth, so each has
+     * a single parallax rate and the layer keeps the flat poster-like motion the
+     * whole diorama is built on.
+     *
+     * Copy 0 is at the plane's own depth and is skipped -- the plane's own draw
+     * below IS that copy, so drawing it twice would just double-darken the front
+     * face. Copies run from the farthest inward so nearer copies land on top.
+     *
+     * Same deliberate exclusions as the skirt: no shadow pass, no DOF/rim shader
+     * (they key off a single depth and would be recomputed per copy for no
+     * visual gain), and not the backdrop plane. */
+    if (layer_stack > 0.0f && layer_stack_copies > 1 && !is_backdrop) {
+      int stack_nv = 0, stack_ni = 0;
+      SDL_Vertex stack_verts[DIORAMA_VERTS_PER_LAYER];
+      int stack_indices[DIORAMA_INDICES_PER_LAYER];
+      for (int c = layer_stack_copies - 1; c >= 1; c--) {
+        if (!DioramaStackCopyIsVisible(c, layer_stack_copies)) continue;
+        float copy_z = z_world, copy_shade = 1.0f, copy_alpha = 1.0f;
+        DioramaStackCopy(c, layer_stack_copies, z_world, layer_stack,
+                         &copy_z, &copy_shade, &copy_alpha);
+        SDL_FColor copy_color = shade;
+        copy_color.r *= copy_shade;
+        copy_color.g *= copy_shade;
+        copy_color.b *= copy_shade;
+        copy_color.a *= copy_alpha;
+        /* Rake is passed through so a room authoring both keeps every copy on
+         * the same tilt rather than mixing tilted and flat slices. */
+        BuildLayerMesh(mvp, copy_z, layer_rake, layer_u0, layer_v0,
+                       layer_u1, layer_v1, aspect_x, height_scale,
+                       out_w, out_h, copy_color,
+                       stack_verts, stack_indices, &stack_nv, &stack_ni);
+        if (stack_nv > 0) {
+          SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+          SDL_RenderGeometry(renderer, texture, stack_verts, stack_nv,
+                             stack_indices, stack_ni);
+        }
+      }
+    }
 
     /* THICKNESS: the extruded near face, drawn BEFORE the plane itself.
      *
