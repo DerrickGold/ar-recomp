@@ -1401,9 +1401,16 @@ void ActRaiserDrawPpuFrame(void) {
     Sim3DCaptureRequest request = {
       .town = town,
       .master_enabled = g_settings.sim3d_mode,
+      /* Mirror16, not ReadWram16: the picker flag lives at $7F:9215, so its
+       * constant is 0x19215 -- 17 bits. The low-WRAM helper takes a uint16 and
+       * silently truncated it to 0x9215, reading an unrelated byte pair in bank
+       * $7E, so the picker never activated. ActRaiser_ReadWramMirror16 exists
+       * precisely to make that impossible (actraiser_game.h) and every other
+       * reader of this address already used it -- this was the one call site that
+       * did not. -Wall reported it as "changes value from 102933 to 37397". */
       .picker_active = town && ActRaiser_SimMapPickerActiveForState(
           map_group, map_number,
-          ActRaiser_ReadWram16(kActRaiserWram_SimMapPickerFlag)),
+          ActRaiser_ReadWramMirror16(kActRaiserWram_SimMapPickerFlag)),
       .renderer_ready = g_sim3d_textures_ready,
       .diorama_active = g_diorama_frame_active,
       .requested_features = Settings_Sim3DRequestedFeatures(),

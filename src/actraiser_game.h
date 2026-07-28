@@ -224,6 +224,17 @@ enum {
   kActRaiserUnknownMapGroup = 0xFF,
 };
 
+/* Low-WRAM (bank $7E, addresses $0000-$FFFF) 16-bit access.
+ *
+ * The uint16 parameter is deliberate and load-bearing: passing a bank-$7F
+ * semantic constant here is a TRUNCATION BUG, and the narrow type is what makes
+ * the compiler say so. It has caught one real instance -- the sim map picker flag
+ * at $7F:9215 (constant 0x19215) was read through this helper and silently became
+ * 0x9215, so the picker never activated; -Wall reported "changes value from 102933
+ * to 37397" and it went unnoticed among the pre-existing warnings in that file.
+ *
+ * If the address you have is >= 0x10000, you want ActRaiser_ReadWramMirror16
+ * below. Do NOT widen this parameter to make a call compile. */
 static inline uint16 ActRaiser_ReadWram16(uint16 address) {
   return (uint16)(g_ram[address] |
                   (g_ram[(uint16)(address + 1)] << 8));
