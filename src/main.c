@@ -1114,6 +1114,10 @@ int main(int argc, char **argv) {
   OracleTrace_Init();
   ForcedInput_Init();
   InputReplay_Init();
+  /* A replay must not mutate the player's configuration, for the same reason it
+   * refuses to persist SRAM. Set from the same predicate so the two protections
+   * cannot drift apart. */
+  Settings_SetPersistenceEnabled(!InputReplay_ShouldProtectSaveData());
   ScheduledSettings_Init();
 
   if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
