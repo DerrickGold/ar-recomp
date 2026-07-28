@@ -293,9 +293,9 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       edit.set_rake = true;
       touched = true;
     } else if (!strcmp(word, "thick")) {
-      /* Reserved: parsed and round-tripped so authored files survive, but
-       * nothing consumes it yet. Non-negative -- a thickness extrudes forward
-       * only; use rake for the other direction. */
+      /* Non-negative: a thickness extrudes the bottom edge FORWARD only (toward
+       * the camera). For the other direction, author a negative rake instead --
+       * they are different shapes, so this is not an arbitrary restriction. */
       double thickness = strtod(value, &end);
       if (end == value || (end && *end) || thickness < 0.0 || thickness > 1.0) {
         if (out_error) *out_error = "bad thick (0..1)";

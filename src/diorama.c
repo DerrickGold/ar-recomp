@@ -744,6 +744,7 @@ static const DioramaLayerDesc *DioramaDescForPlane(int plane) {
  *
  *     [layers:01:02]          ; $18=01 $19=02 -- Fillmore act 2
  *     bg2hi = rake:0.29       ; flood the water forward to meet the rock path
+ *     bg1   = thick:0.20      ; give the rock path a near face
  *     bg2   = z:0.30 alpha:200
  *
  * The grammar and every bound live in diorama_layer_order.c, which is pure and
@@ -833,7 +834,9 @@ bool Diorama_SaveLayerManifest(void) {
           "  thick:<0..1>\n"
           "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake),\n"
           "# which closes the void between two parallel planes at a tilted\n"
-          "# camera. thick is reserved and currently has no effect.\n\n");
+          "# camera. thick extrudes the plane's BOTTOM edge forward to\n"
+          "# z+thickness instead, so the layer reads as a block with a near\n"
+          "# face while its own art stays square to the camera. They compose.\n\n");
   int written = 0;
   for (int i = 0; i < g_layer_overrides.count; i++) {
     const DioramaRoomOverride *r = &g_layer_overrides.rooms[i];
@@ -963,6 +966,72 @@ static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
       out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
                                               v0 + t * (v1 - v0) };
       out_verts[vi].color = color;
+      vi++;
+    }
+  }
+  *num_verts = vi;
+  TriangulateGrid(DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, out_indices, num_indices);
+}
+
+/* THICKNESS — extrude the plane's BOTTOM edge forward into a skirt, so the layer
+ * reads as a solid block with a near face rather than an infinitely thin sheet.
+ *
+ * This closes the same void a rake closes, but with the opposite shape and the
+ * opposite trade. A rake tilts the WHOLE plane, so the art stretches in depth and
+ * the layer stops being parallel to the screen — right for a water surface
+ * receding into the distance, wrong for a wall or a rock face, whose front should
+ * stay square to the camera. A thickness leaves the plane exactly where it was
+ * (so its art is untouched, bit for bit) and adds geometry BELOW its bottom edge
+ * that runs from `z` forward to `z + thickness`.
+ *
+ * The skirt is textured with the plane's BOTTOM SOURCE ROW, repeated down its
+ * height. That is the honest choice available: the capture is a flat 2D layer, so
+ * there is no side-face art to sample. Repeating the row that is already at the
+ * fold means the seam is invisible and the skirt reads as the same material
+ * continuing downward, which is what a cliff edge or a water wall looks like.
+ *
+ * Shaded darker with depth, because a real near face turned away from the light
+ * is not the same brightness as the top surface — without this the skirt reads as
+ * a smear of the bottom row rather than a separate surface. The gradient is what
+ * makes the fold legible.
+ *
+ * `v_bottom` is the layer's live bottom V, so the skirt tracks scroll
+ * interpolation with the plane rather than drifting against it.
+ */
+static void BuildLayerSkirtMesh(const float mvp[16], float z_world,
+                                float z_rake, float thickness,
+                                float u0, float u1, float v_bottom,
+                                float aspect_x, float height_scale,
+                                int screen_w, int screen_h,
+                                SDL_FColor color,
+                                SDL_Vertex *out_verts, int *out_indices,
+                                int *num_verts, int *num_indices) {
+  *num_verts = 0;
+  *num_indices = 0;
+  /* The plane's bottom edge is where the skirt starts, so it inherits the rake's
+   * bottom depth — otherwise a room authoring BOTH would tear at the fold. */
+  const float z_top = z_world + z_rake;
+  const float y_top = -0.5f * height_scale;
+  int vi = 0;
+  for (int row = 0; row <= DIORAMA_SUBDIV_Y; row++) {
+    for (int col = 0; col <= DIORAMA_SUBDIV_X; col++) {
+      float s = (float)col / DIORAMA_SUBDIV_X;
+      float t = (float)row / DIORAMA_SUBDIV_Y;
+      float wx = (s - 0.5f) * aspect_x;
+      /* The per-vertex arithmetic lives in diorama_scroll_math.c so it is unit
+       * tested without a renderer; this loop only assembles and projects. */
+      float wy = 0.0f, wz = 0.0f, shade_mul = 1.0f;
+      DioramaSkirtVertex(t, z_top, y_top, thickness, &wy, &wz, &shade_mul);
+      if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
+                             &out_verts[vi].position))
+        return;
+      /* Bottom source row, repeated down the whole skirt. */
+      out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0), v_bottom };
+      SDL_FColor c = color;
+      c.r *= shade_mul;
+      c.g *= shade_mul;
+      c.b *= shade_mul;
+      out_verts[vi].color = c;
       vi++;
     }
   }
@@ -1452,6 +1521,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     if (!layer) continue;
     const float layer_z = resolved[i].z;
     const float layer_rake = resolved[i].rake;
+    const float layer_thickness = resolved[i].thickness;
     if (layer->visible && !*layer->visible) continue;
     /* A5 (followup doc): with diorama_hud_flat on, BG3 is deliberately not
      * captured as a diorama layer (actraiser_rtl.c) and the anchored flat
@@ -1543,6 +1613,40 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                    layer_u1, layer_v1,
                    aspect_x, height_scale, out_w, out_h, shade,
                    verts, indices, &nv, &ni);
+
+    /* THICKNESS: the extruded near face, drawn BEFORE the plane itself.
+     *
+     * Order matters and is not arbitrary. SDL_RenderGeometry has no depth test
+     * (see the shoebox comment), so this is painter's algorithm: drawing the
+     * skirt first lets the plane's own bottom edge land on top of it, which
+     * keeps the fold crisp. Drawn the other way the skirt's top row would
+     * overwrite the plane's last scanline and the seam would shimmer as the
+     * camera moves.
+     *
+     * Deliberately plain: no shadow pass (a skirt is the underside of a layer
+     * that already cast one, so a second offset copy would double-darken), no
+     * DOF/rim shader (both are keyed to a single plane depth and the skirt spans
+     * a depth RANGE, so the radius would be wrong along it), and never the
+     * supersample path (that is for flat parallel art). Those are the honest
+     * limits of extruding a 2D capture, not oversights.
+     *
+     * `is_backdrop` layers are excluded: the backdrop is the infinite behind-
+     * everything fill drawn with BLENDMODE_NONE, so giving it a near face would
+     * paint an opaque band across the scene. */
+    if (layer_thickness > 0.0f && !is_backdrop) {
+      int skirt_nv = 0, skirt_ni = 0;
+      SDL_Vertex skirt_verts[DIORAMA_VERTS_PER_LAYER];
+      int skirt_indices[DIORAMA_INDICES_PER_LAYER];
+      BuildLayerSkirtMesh(mvp, z_world, layer_rake, layer_thickness,
+                          layer_u0, layer_u1, layer_v1,
+                          aspect_x, height_scale, out_w, out_h, shade,
+                          skirt_verts, skirt_indices, &skirt_nv, &skirt_ni);
+      if (skirt_nv > 0) {
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        SDL_RenderGeometry(renderer, texture, skirt_verts, skirt_nv,
+                           skirt_indices, skirt_ni);
+      }
+    }
 
     /* Determined up front (before the shadow/main draws) so B1b-crisp knows
      * whether this layer is eligible for the premultiplied supersample path

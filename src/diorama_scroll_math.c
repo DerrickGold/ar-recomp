@@ -141,3 +141,24 @@ DioramaScrollDelta ComputeDioramaScrollDeltaAt(
   }
   return d;
 }
+
+/* ── thickness: the extruded near face ────────────────────────────────── */
+
+/* How dark the near lip gets. 1.0 would make the fold invisible; too low reads
+ * as a black band rather than the same material turned away from the light. */
+static const float kSkirtNearShade = 0.55f;
+
+float DioramaSkirtNearShade(void) { return kSkirtNearShade; }
+
+void DioramaSkirtVertex(float t, float z_bottom, float y_bottom,
+                        float thickness, float *out_y, float *out_z,
+                        float *out_shade) {
+  if (!(thickness > 0.0f)) thickness = 0.0f;   /* also catches NaN */
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
+  /* Half the thickness in Y: the face drops as it comes forward, so a thick
+   * layer reads as a block instead of a tall wall. */
+  if (out_y) *out_y = y_bottom - t * thickness * 0.5f;
+  if (out_z) *out_z = z_bottom + t * thickness;
+  if (out_shade) *out_shade = 1.0f - (1.0f - kSkirtNearShade) * t;
+}

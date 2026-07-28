@@ -225,6 +225,78 @@ int main(void) {
     }
   }
 
+  /* ── THICKNESS: the extruded near face ("skirt") ────────────────────── */
+  {
+    const float kZ = 0.50f, kY = -0.5f, kThick = 0.20f;
+    float y = 0.0f, z = 0.0f, sh = 0.0f;
+
+    /* At the fold (t=0) the skirt must start EXACTLY on the plane's bottom edge
+     * and at full brightness. Any offset here is a visible seam, and any shade
+     * below 1 is a dark line along the fold. */
+    DioramaSkirtVertex(0.0f, kZ, kY, kThick, &y, &z, &sh);
+    CHECK(near(y, kY));
+    CHECK(near(z, kZ));
+    CHECK(near(sh, 1.0f));
+
+    /* At the near lip (t=1) it has come forward by the full thickness and
+     * dropped by half of it. */
+    DioramaSkirtVertex(1.0f, kZ, kY, kThick, &y, &z, &sh);
+    CHECK(near(z, kZ + kThick));
+    CHECK(near(y, kY - kThick * 0.5f));
+    CHECK(near(sh, DioramaSkirtNearShade()));
+    /* The shade must actually darken, or the fold is invisible -- the whole
+     * point of the gradient. */
+    CHECK(DioramaSkirtNearShade() < 1.0f);
+    CHECK(DioramaSkirtNearShade() > 0.0f);   /* not a black band either */
+
+    /* Monotonic forward in Z and downward in Y across the whole span: a
+     * non-monotonic face would self-intersect and z-fight against itself. */
+    float prev_z = kZ - 1.0f, prev_y = kY + 1.0f, prev_sh = 2.0f;
+    for (int i = 0; i <= 10; i++) {
+      DioramaSkirtVertex((float)i / 10.0f, kZ, kY, kThick, &y, &z, &sh);
+      CHECK(z >= prev_z);
+      CHECK(y <= prev_y);
+      CHECK(sh <= prev_sh);
+      prev_z = z; prev_y = y; prev_sh = sh;
+    }
+
+    /* THE NO-OP GUARANTEE. Zero thickness must collapse the skirt onto the fold
+     * for every t -- that is what makes an unauthored layer cost nothing, since
+     * the caller skips the draw entirely but the arithmetic must agree. */
+    for (int i = 0; i <= 4; i++) {
+      DioramaSkirtVertex((float)i / 4.0f, kZ, kY, 0.0f, &y, &z, &sh);
+      CHECK(near(y, kY));
+      CHECK(near(z, kZ));
+    }
+
+    /* A rake and a thickness COMPOSE: the caller passes the raked bottom edge as
+     * z_bottom, so the skirt starts where the raked plane ends rather than where
+     * the unraked plane would have. Getting this wrong tears the fold open,
+     * which is the exact defect thickness exists to close. */
+    const float kRake = 0.29f;
+    DioramaSkirtVertex(0.0f, kZ + kRake, kY, kThick, &y, &z, &sh);
+    CHECK(near(z, kZ + kRake));
+    DioramaSkirtVertex(1.0f, kZ + kRake, kY, kThick, &y, &z, &sh);
+    CHECK(near(z, kZ + kRake + kThick));
+
+    /* Degenerate inputs must not produce geometry above the fold or behind the
+     * plane: t is clamped and a negative thickness is treated as zero. A
+     * negative thickness is rejected at parse time, so this is defence in depth
+     * against a future caller, not dead code for the manifest path. */
+    DioramaSkirtVertex(-1.0f, kZ, kY, kThick, &y, &z, &sh);
+    CHECK(near(z, kZ) && near(y, kY));
+    DioramaSkirtVertex(2.0f, kZ, kY, kThick, &y, &z, &sh);
+    CHECK(near(z, kZ + kThick));
+    DioramaSkirtVertex(0.5f, kZ, kY, -0.5f, &y, &z, &sh);
+    CHECK(near(z, kZ) && near(y, kY));
+
+    /* NULL outputs are optional: a caller wanting only the depth must not crash. */
+    DioramaSkirtVertex(0.5f, kZ, kY, kThick, NULL, NULL, NULL);
+    float only_z = 0.0f;
+    DioramaSkirtVertex(1.0f, kZ, kY, kThick, NULL, &only_z, NULL);
+    CHECK(near(only_z, kZ + kThick));
+  }
+
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return 1; }
   puts("diorama_scroll_math_test: PASS");
   return 0;

@@ -85,13 +85,25 @@ typedef struct DioramaPlaneOverride {
    * without the data model hard-coding it. */
   bool set_rake;
   float rake;
-  /* THICKNESS — reserved, currently INERT. Intended as the solid-volume
-   * alternative to a rake: extrude the plane from `z` to `z + thickness` so it
-   * reads as a block with a near face, rather than a tilted surface. Parsed,
-   * stored, exported and shown by the editor so authored files do not have to
-   * be rewritten when it lands, but nothing consumes it yet. Kept distinct from
-   * `rake` because they are different shapes, not two spellings of one, and a
-   * room may eventually want both. */
+  /* THICKNESS — the solid-volume alternative to a rake: extrude the plane's
+   * BOTTOM edge forward from `z` to `z + thickness`, so the layer reads as a
+   * block with a near face rather than an infinitely thin sheet.
+   *
+   * Kept distinct from `rake` because they are different shapes, not two
+   * spellings of one, and a room may want both (they compose: the skirt starts
+   * at the raked bottom edge, so the fold does not tear).
+   *
+   * Which to reach for: a rake tilts the WHOLE plane, so its art stretches in
+   * depth and it stops being parallel to the screen -- right for a water surface
+   * receding into the distance, wrong for a rock face whose front should stay
+   * square to the camera. A thickness leaves the plane untouched and adds
+   * geometry below it, so the art is unchanged and only the fold is new.
+   *
+   * The skirt is textured with the plane's bottom source row repeated, shaded
+   * darker with depth. That is the honest limit of extruding a flat 2D capture:
+   * there is no side-face art to sample, so the row already at the fold is what
+   * continues, and the gradient is what makes the fold legible rather than a
+   * smear. */
   bool set_thickness;
   float thickness;
 } DioramaPlaneOverride;
@@ -114,7 +126,7 @@ typedef struct DioramaResolvedLayer {
   float z;
   uint8_t alpha;
   float rake;       /* bottom edge sits at z + rake; 0 = parallel, as today */
-  float thickness;  /* reserved, inert -- see DioramaPlaneOverride */
+  float thickness;  /* extrude the bottom edge forward to z + thickness; 0 = flat */
 } DioramaResolvedLayer;
 
 /* Find a room, or NULL. Pure lookup, no insertion. */

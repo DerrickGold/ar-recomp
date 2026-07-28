@@ -47,4 +47,34 @@ bool DioramaScrollPairIsInterpolable(const FrameSlot *curr,
  * Pure function of its arguments — no clock, no globals. */
 void DioramaInterpUvWindow(float region_u0, float region_u1, float du,
                            float slack, float *out_u0, float *out_u1);
+
+/* THICKNESS: one vertex of the extruded near face ("skirt") below a layer.
+ *
+ * A thickness extrudes the plane's BOTTOM edge forward from `z` to
+ * `z + thickness`, so the layer reads as a block with a near face instead of an
+ * infinitely thin sheet. This is the per-vertex arithmetic, extracted pure so the
+ * geometry is testable without a renderer -- the mesh assembly and projection stay
+ * in diorama.c (precedent: this file's own DioramaInterpUvWindow, and
+ * diorama_skybox_uv.c).
+ *
+ * `t` is 0 at the fold (the plane's bottom edge) and 1 at the near lip.
+ * `z_bottom` is the plane's bottom-edge depth -- z + rake, NOT z, so a room that
+ * authors both a rake and a thickness does not tear at the fold.
+ * `y_bottom` is the plane's bottom-edge world Y.
+ *
+ * The face drops in Y as it comes forward in Z, at half the thickness, so a thick
+ * layer reads as a block rather than a tall wall. `out_shade` is a multiplier that
+ * darkens with depth: a real near face turned away from the light is not the same
+ * brightness as the top surface, and without the gradient the skirt reads as a
+ * smear of the plane's bottom row rather than a separate surface.
+ *
+ * Clamps t to [0,1] and treats a non-positive thickness as zero, so a caller
+ * cannot produce geometry above the fold or behind the plane. */
+void DioramaSkirtVertex(float t, float z_bottom, float y_bottom,
+                        float thickness, float *out_y, float *out_z,
+                        float *out_shade);
+
+/* Shade multiplier at the near lip of a skirt (t == 1). Exposed so the value is
+ * named once rather than duplicated between the geometry and its test. */
+float DioramaSkirtNearShade(void);
 #endif
