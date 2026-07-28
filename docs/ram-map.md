@@ -82,23 +82,26 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | $7E:00C4-$00CA | — | fade gate/config + BG2SC page-flip anim counters ($C5 arm, $C7 page) |
 | $7E:00CB/$00CD/$00CE/$00CF | 2+1+1+1 | CGRAM upload descriptor: src addr/bank, CGADD, row count ($02:AE75) |
 | $7E:00D0-$00D6 | 7 | VRAM DMA descriptor slot 0: src16/bank/VMADD/size (size=0 idle; $02:AF30) |
-| $7E:00D7-$00DD | 7 | VRAM DMA descriptor slot 1 = tile-anim upload (armed by $02:BC56; frames at [$D9]:$D7 = $7F:B800+n*$E1) |
+| $7E:00D7-$00DD | 7 | VRAM DMA descriptor slot 1 = tile-anim upload. Action/town `$02:BC56` uses `[$D9]:$D7 = $7F:B800+n*$E1`; world navigation's `$02:AF86` instead fixes bank `$0A`, with `$D7 = $B000/$B040/$B080/$B0C0` for the four water frames. `$D7` remains after `$DC` is drained, so the host-owned map can synchronize phase without reading VRAM. |
 | $7E:00DE-$00E1 | 1+1+1+2 | tile-anim: tick period mask / frame count-1 / frame index / frame stride (bytes); $FF/$FF/-/0 = disabled |
 | $7E:00F1 | 1 | one-shot flag: re-stream BG3 map rows 4-26 ($7F:B100 -> VRAM $5880) next NMI |
 | $7F:B000-$B6BF | 1728 | HUD/BG3 tilemap compose buffer (rows 0-3 streamed every frame to VRAM $5800; rows 4-26 on $F1) |
 | $7F:0000-$1FFF | 8192 | **Full town BG1 tilemap**, the whole 64x64-tile (512x512 pixel) town, not just the on-screen window. Quadrant-paged: `$03:9C43` writes each cell's 2x2 tile block at `quadrant*2048 + (cellY & 15)*128 + (cellX & 15)*4`, four words at `+$00/+$02/+$40/+$42`. Row stride is 32 tiles, quadrant stride 32x32 tiles. A row-major read looks like an unrelated layer — it was mistaken for BG2 twice before `$9C43` was disassembled |
 | $7F:1000-$1FFF | 4096 | (Within the above.) The lower two quadrant pages happen to be the range the graphics orchestrator streams to VRAM; SEAMS' "BG tilemap → VRAM" row describes that upload, not a separate buffer |
-| $7F:2000-$37FF | 6144 | **Six town terrain cell maps**, one 32x32-cell, `$400`-byte block per town. Each block is quadrant-paged as four 16x16 pages at +0/+256/+512/+768. Cell values are metatile indices expanded through `$7E:3100` into the current town tilemap above; structure records' `+0/+1` cell X/Y address the active block. `$02:865C` consumes all six blocks when stamping the developed world map |
+| $7F:2000-$37FF | 6144 | **Six town terrain cell maps**, one 32x32-cell, `$400`-byte block per town. Each block is quadrant-paged as four 16x16 pages at +0/+256/+512/+768. Cell values are metatile indices expanded through `$7E:3100` into the current town tilemap above; structure records' `+0/+1` cell X/Y address the active block. `$02:865C` consumes all six blocks when stamping the authentic developed world map; the host's pure `SimWorldMap_ComposeDeveloped` reads the same bytes explicitly |
 | $7E:3100+ | 2048 | Metatile table: 8 bytes (four BG1 tilemap words) per metatile index, consumed by `$03:9C43`. Note the cell value is **not** a direct index — expansion is a write path the game runs on change, and cell → 2x2 block is only ~62-77% single-valued when inverted, so read `$7F:0000` rather than trying to rebuild it |
 | $7F:B800+ | var | Tile-animation frame buffers. Action mode and sim towns (`$18=0`, `$19!=0,9`) use these through `$02:AF30`; `$02:BAF5` captures sim-town pages `$B800/$B900/$BA00/$BB00`. Only the separate sim `$19=0 or 9` branch uses ROM bank `$0A` directly through `$02:AF86`. |
 
 ### Mode 7 / World Map
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:C000-$FFFF | 16384 | **Shared scratch; world-map tilemap shadow only while `$19=09` is being built/presented.** Row-major 128x128, one byte per tile, and byte-identical to Mode-7 VRAM after `$02:B475` completes. It is not persistent world-map state: action stages durably clobber rows 0-79 and town frames reuse rows 0-7. The host underlay therefore seeds the ROM base `$06:B341`, invokes only the separable `$02:865C` development overlay transactionally, harvests the result, and restores all WRAM. Tiles are `$0E:8000`, palette `$1C:BF93` |
-| $7E:0314 | 2 | Map rotation (intro zoom effect) |
-| $7E:0316 | 2 | Current zoom level |
-| $7E:0318 | 2 | Target zoom level |
+| $7E:C000-$FFFF | 16384 | **Shared scratch; world-map tilemap shadow only while `$19=09` is being built/presented.** Row-major 128x128, one byte per tile, and byte-identical to Mode-7 VRAM after `$02:B475` completes. It is not persistent world-map state: action stages durably clobber rows 0-79 and town frames reuse rows 0-7. Host rendering never reads or writes it: `SimWorldMap_ComposeDeveloped` builds a separate complete map from the ROM base and explicit simulation inputs. Static tiles are `$0E:8000`, palette `$1C:BF93`; tiles `$00/$AA` are replaced by the four water frames at `$0A:B000-$B0FF`. |
+| $7E:0300-$0303 | 4 | World-navigation focus X/Y in source pixels. At `$02:8213` movement advances these with `$22/$24`; the stable difference is the authentic half-screen `(128,112)` |
+| $7E:0304-$030B | 8 | Current signed Mode-7 A/B/C/D matrix uploaded for the displayed `$09` frame |
+| $7E:030C-$0313 | 8 | Staged next signed A/B/C/D matrix |
+| $7E:0314 | 2 | Scripted world-navigation in-plane rotation; remains active during the action-entry zoom-and-spin |
+| $7E:0316 | 2 | Current world-navigation zoom state |
+| $7E:0318 | 2 | Target world-navigation zoom state |
 
 ## Decompression State ($7E:00A0+)
 
@@ -211,7 +214,7 @@ see [save-format.md](save-format.md) §3.
 |---------|------|-------------|
 | $7E:033E | 1 | Temple action (0x00=Give Oracle, 0x01=Listen, 0x02=Take Offering) |
 | $7E:0334 | 1 | **Current song id** (RE-IDENTIFIED 2026-07-16 — earlier "Death Heim/ending state" reading was a misread of music state). The `[$A2]`-script song-change handler `$02:B64B` compares it to skip redundant reloads; written by ~10 play sites (`$00:828F/A370/F650/FF04`, `$01:8602/8754/8856`, `$02:8345/BD2A`, `$03:8262`); zeroed by the transition music-stop at `$00:83F2`. The old observations still hold reinterpreted: `$00:FEFC` "sets 1" = plays song 1 at final-boss teleport-out, `$00:F650` "sets 3" = starts song 3 after the returning `0701` sky fade-in — so it was always too late/irrelevant for the black-frame BG page swap (`$00:F5F0-$F619`, BG1SC/BG2SC `$64/$74`) |
-| $7E:0341 | 1 | Current town ID (also read by the `$00:A375` post-Death-Heim return stager as the pending destination) |
+| $7E:0341 | 1 | Active world-location ID, 1-7. `$01:B6CA` first clears it, then writes the entry whose 256x256 source-pixel region from ROM table `$01:B73C` contains the `$0300/$0302` focus; zero therefore means outside every town border. The location label and 3D navigation clear-region mask consume the same value; zero keeps the full world hazed. Also read by `$00:A375` as the pending post-Death-Heim destination |
 | $7E:0347 | 1 | Death Heim boss-rush progress: `$00:FEEC` writes `$19 - 1` after each boss (hub stager `$F3D4` warps to `$0347+2` next); 0x07 = final boss beaten |
 
 ## Debug / System
@@ -313,7 +316,7 @@ Arrays supporting up to 16 lairs (48 bytes each array):
 ### Flags
 | Address | Description |
 |---------|-------------|
-| $7F:9101 | Death Heim-related (bits 0x01, 0x02) |
+| $7F:9101 | World-state flags. `$02:865C` tests bit 0 before preserving an 8x8 block at world-tilemap offset `$0660`; when clear, that block is zeroed before town development is stamped. `$01:B6CA` also uses bit 0 to decide whether its location scan includes the seventh (Death Heim) rectangle. Bit 1 remains Death Heim-related but is not consumed by the host world-map composer. |
 | $7F:910B | Bloodpool bridge technology (bit 0x20) |
 
 ### Town Growth Points ($7F:9EFA+)

@@ -26,7 +26,7 @@
 | $05 | 0x028000-0x02FFFF | Map metadata, graphics, palettes | DATA |
 | $06-$07 | 0x030000-0x03FFFF | Mixed code and data | CODE+DATA |
 | $08-$09 | 0x040000-0x04FFFF | Audio samples (BRR format) | DATA |
-| $0A | 0x050000-0x057FFF | Town maps | DATA |
+| $0A | 0x050000-0x057FFF | Town maps, world-map water animation | DATA |
 | $0B | 0x058000-0x05FFFF | Mixed | CODE+DATA |
 | $0C-$0D | 0x060000-0x06FFFF | Uncompressed graphics | DATA |
 | $0E-$1C | 0x070000-0x0E7FFF | Compressed data (graphics, maps, sprites) | DATA |
@@ -166,6 +166,44 @@ to mistake for their neighbours.
 | 0x24C8A-0x258F2 | Ending sequence text |
 | 0x258F3-0x25EF2 | Text compression dictionary |
 
+### World-map construction, navigation, and presentation (mapped 2026-07-27)
+
+The native build is cleanly separable from Mode-7 presentation. `$02:B475`
+copies or decompresses the 16 KiB base into `$7E:C000`, calls the bounded and
+yield-free `$02:865C` development pass, then uploads the result through
+`$2118`. `$02:865C` requires `$19=09` and destination pointer bank `$AA=7E`,
+but it does not configure Mode 7, upload VRAM/CGRAM, or wait for a frame. Its
+only dynamic inputs are the six town cell maps at `$7F:2000-$37FF`, their
+enable words at `$7F:6B18-$6B23`, and `$7F:9101` bit 0.
+
+The host now implements that middle phase as a pure HLE and treats
+`$7E:C000-$FFFF` as shared scratch, not persistent map state. Fixture and live
+differential tests against the ROM routine match all 16,384 bytes. This matters
+for direct act-to-town transitions: action stages durably overwrite rows 0-79,
+while ordinary town frames reuse rows 0-7, so no fingerprint or staleness
+policy can make the shadow authoritative.
+
+| SNES address | File range | Meaning |
+|---|---:|---|
+| `$02:8000-$80FF` | `0x010000-0x0100FF` | 256-byte ordinary town-cell → world-tile translation; zero preserves the base tile |
+| `$02:8100-$8133` | `0x010100-0x010133` | Thirteen four-byte 2x2 expansions for special cells `$E3-$EF` |
+| `$02:87A5-$87B0` | `0x0107A5-0x0107B0` | Six little-endian destinations for the 32x32 town overlays |
+| `$01:B73C-$B757` | `0x00B73C-0x00B757` | Seven `(x,y)` top-left pairs for the 256x256 location-label regions |
+| `$06:B341-$F340` | `0x033341-0x037340` | Uncompressed row-major 128x128 base tilemap, 16 KiB |
+| `$0A:B000-$B0FF` | `0x053000-0x0530FF` | Four 64-byte water frames, selected every eight game frames |
+| `$0E:8000-$BFFF` | `0x070000-0x073FFF` | 256 uncompressed 8x8 8bpp Mode-7 characters, 64 bytes each |
+| `$1C:BF93-$C192` | `0x0E3F93-0x0E4192` | Complete 256-entry BGR555 world-map palette |
+
+World-navigation state is likewise explicit. `$02:8213` updates focus
+`$0300/$0302` and zoom target `$0318`; `$02:8384` uploads current matrix
+`$0304-$030A` and focus to the Mode-7 registers. `$01:B6CA` clears `$0341`,
+then selects the first `$01:B73C` rectangle containing the focus; zero means
+the Palace is outside every town border. `$02:AF86` supplies animation by
+copying one `$0A:B000/B040/B080/B0C0` high-byte plane into both Mode-7 tiles
+`$00` and `$AA`. See
+[rendering-engine.md §13h](rendering-engine.md#13h-world-navigation-full-plane-scene-2026-07-27)
+for the immutable host scene and fade/effects contract.
+
 ### Graphics & Maps
 | Range | Content |
 |-------|---------|
@@ -174,6 +212,7 @@ to mistake for their neighbours.
 | 0x2EE7F-0x2FF7F | Compressed graphics (LZSS) |
 | 0x2FF80-0x2FFFF | Map palettes |
 | 0x50000-0x52FFF | Town maps (base + obstacle layers) |
+| 0x53000-0x530FF | World-map water animation (four 64-byte frames) |
 | 0x60000-0x6FFFF | Uncompressed graphics (large block) |
 
 ### Audio Samples (0x40000-0x4FD2D)

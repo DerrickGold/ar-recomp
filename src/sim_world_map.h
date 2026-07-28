@@ -16,9 +16,9 @@
  *  - one world-map tile (8 authentic pixels) covers exactly one town map cell
  *    (16 authentic pixels), so the world map is the town at half linear
  *    resolution and each town is a 32x32-tile window of it;
- *  - the game's bounded world-map overlay routine can be run transactionally
- *    against the current simulation state, producing the developed 128x128
- *    tilemap without presenting the world-map screen or trusting its shared
+ *  - a pure host equivalent of the game's bounded overlay routine composes the
+ *    developed 128x128 tilemap from explicit ROM tables and simulation inputs,
+ *    without presenting the world-map screen or touching its shared
  *    `$7E:C000` scratch buffer.
  *
  * Everything here is read-only with respect to the emulated machine. */
@@ -42,15 +42,27 @@ enum {
 bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size);
 void SimWorldMap_Shutdown(void);
 bool SimWorldMap_Available(void);
+/* True only after the owned HLE has published a complete composition. Unlike
+ * Available, this never mistakes the pristine ROM baseline for current
+ * development. */
+bool SimWorldMap_DevelopedAvailable(void);
 
 /* Top-left world-map tile of `town`'s 32x32 window. `town` is the raw map
  * number, 1-6 (Fillmore..Northwall); anything else returns false. */
 bool SimWorldMap_OriginForTown(uint8_t town, int *tile_x, int *tile_y);
 
-/* Publish a complete tilemap produced by the owned ROM builder. Marks only
+/* Publish a complete tilemap produced by the owned HLE builder. Marks only
  * changed tiles dirty and bumps the serial once if the image changed. Returns
  * the number of changed tilemap bytes. */
 int SimWorldMap_PublishBuiltTilemap(const uint8_t *tilemap);
+
+/* Synchronize the two animated water tiles with the source retained in the
+ * authentic world-navigation DMA descriptor at $7E:00D7. Valid sources are
+ * the four 64-byte frames $0A:B000/$B040/$B080/$B0C0. The frame bytes come
+ * from immutable ROM; this never reads PPU VRAM or mutates emulated state.
+ * Returns the number of visible tilemap cells dirtied, or zero for an invalid
+ * or already-current source. */
+int SimWorldMap_SetWaterAnimationSource(uint16_t source);
 
 /* Changes whenever the baked image would differ. Zero means "nothing usable
  * yet"; consumers compare against their own last-baked value. */

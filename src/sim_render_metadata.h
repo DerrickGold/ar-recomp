@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "sim_world_navigation_scene.h"
 #include "types.h"
 
 /* Phase D1's immutable simulation-town render contract.  The producer is
@@ -67,6 +68,9 @@ typedef enum SimRenderFeature {
 typedef enum SimViewKind {
   kSimView_None,
   kSimView_Enhanced,
+  /* Inter-town map $09: full developed world with a forced perpendicular
+   * ground camera. Scripted in-plane rotation remains allowed. */
+  kSimView_WorldNavigation,
   kSimView_AuthenticPicker,
   kSimView_AuthenticFallback,
 } SimViewKind;
@@ -467,6 +471,17 @@ typedef struct SimFrameData {
   uint16_t camera_x, camera_y;
   uint16_t angel_x, angel_y;
   uint16_t picker_flag;
+  bool world_navigation_state_valid;
+  SimWorldNavigationFrame world_navigation;
+  /* INIDISP master brightness captured with the navigation OAM composition.
+   * Partial values remain enhanced frames: presentation fades the complete
+   * host world before drawing Palace/UI pixels that the PPU rasterizer has
+   * already brightness-adjusted. */
+  uint8_t world_navigation_brightness;
+  /* Step-3 full-world scene derived wholly on the game thread from the state
+   * above and the owned developed-map serial. The render thread consumes this
+   * value copy; invalid means authentic Mode 7 must own the frame. */
+  SimWorldNavigationScene world_navigation_scene;
   uint32_t build_serial;
   uint32_t integrity_flags;
   bool atlas_valid;
@@ -489,6 +504,8 @@ typedef struct SimFrameData {
   uint64_t separated_hash;
   uint32_t separated_backdrop_argb;
   bool object_half_add;
+  /* Simulation-town perspective camera only. World navigation keeps these
+   * zero and consumes world_navigation_scene's forced top-down affine map. */
   int16_t projection_pitch_mrad, projection_yaw_mrad;
   uint16_t projection_distance_x100;
   /* Resolved presentation tuning: percent of each classified virtual height.
@@ -548,6 +565,12 @@ typedef struct SimFrameData {
   uint16_t cloud_altitude_px;
   /* Cloud drift rate, percent. Zero holds the banks still. */
   uint16_t cloud_drift_pct;
+  /* Independent $09 effect gates. Compatible numeric atmosphere tuning is
+   * shared, but these never depend on the simulation-town master. */
+  uint8_t world_navigation_lighting;
+  uint8_t world_navigation_clouds;
+  uint8_t world_navigation_backdrop;
+  uint8_t world_navigation_haze;
   /* Whether the lit window's bottom edge is inset by the maximum draw lift. */
   uint8_t cull_lift_inset;
   /* Atmospheric backdrop gradient strength, percent. */
@@ -622,7 +645,8 @@ bool SimRenderMetadata_AtlasReady(void);
 
 /* Copies the completed producer into an immutable per-frame value. */
 void SimRenderMetadata_CaptureFrame(
-    SimFrameData *dst, const uint8 *wram, bool master_enabled,
+    SimFrameData *dst, const uint8 *wram, bool town_master_enabled,
+    bool world_navigation_enabled,
     SimRenderFeatureMask requested_features,
     uint32_t diagnostic_layer_mask,
     SimRenderFeatureMask implemented_features);

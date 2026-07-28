@@ -95,6 +95,10 @@ typedef struct Sim3DTuning {
   int underlay_defocus_pct;
   int cloud_altitude_px;
   int cloud_drift_pct;
+  int world_navigation_lighting;
+  int world_navigation_clouds;
+  int world_navigation_backdrop;
+  int world_navigation_haze;
   int cull_lift_inset;
   int backdrop_strength_pct;
   int backdrop_horizon_pct;
@@ -124,5 +128,9 @@ void Sim3D_ComposeFlatPixels(
  * the widescreen margin-gap fill (actraiser_ws_gap.h) and the sim-3D flat
  * composite cannot disagree about it. */
 uint32_t ActRaiser_BackdropArgb(const Ppu *ppu);
+/* World navigation composites its complete host scene at full intensity, then
+ * applies INIDISP master brightness once. This form prevents the backdrop
+ * from being darkened once during capture and again during composition. */
+uint32_t ActRaiser_BackdropArgbFullBrightness(const Ppu *ppu);
 
 #endif  /* SIM3D_H */

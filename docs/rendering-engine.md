@@ -226,6 +226,15 @@ Fillmore act 1 arrives with `$DE/$DF=$FF, $E1=0` — tile anim disabled.
   `$7F:B800/$B900/$BA00/$BB00`; later ticks re-upload one captured page to
   VRAM `$0000`. `$AF86`'s ROM-bank-$0A, high-byte-only dual upload belongs
   only to the separate `$19=0 or 9` non-town branch.
+- World navigation (`$18=0/$19=9`) uses `$02:AF86` to upload the same 64-byte
+  ROM frame into the high bytes of Mode-7 tile `$00` (VMADD `$0000`) and tile
+  `$AA` (VMADD `$2A80`). The four frames are `$0A:B000/$B040/$B080/$B0C0`;
+  a gf380-412 capture pins their order and eight-game-frame cadence. `$D7`
+  retains the selected source after NMI drains `$DC`.
+- The host-owned `SimWorldMap` mirrors that operation from immutable ROM
+  instead of sampling live VRAM. Navigation consumes the retained `$D7`
+  phase; simulation-town outer underlays continue the same pinned cycle from
+  the global game-frame clock because town `$D7` describes different art.
 - Recomp compatibility seam: `$02:BC56` is HLE'd to defer animation ticks
   while INIDISP force-blank is set. This prevents a slow SPC `$F0` ack from
   letting NMI upload the still-empty phase-0 buffer before `$BAF5` captures
@@ -988,11 +997,14 @@ The underlay tracks current development without observing `$7E:C000`. That
 range is shared scratch: action stages durably overwrite rows 0-79 and town
 frames reuse rows 0-7, so map identity cannot make a stale buffer trustworthy.
 The host instead owns the build. `$02:B475` cleanly separates into base
-copy/decompress, `JSL $02:865C`, then a `$2118` VRAM upload. The host already has
-the byte-identical ROM base, so on town entry and development-input changes it
-seeds that base transactionally, invokes only `$02:865C` and its two leaf
-helpers, copies out the complete developed map, and restores CPU, WRAM, and
-math-unit state. The closure has no wait, yield, or hardware-register path.
+copy/decompress, `JSL $02:865C`, then a `$2118` VRAM upload. The host already
+has the byte-identical ROM base and now implements the dynamic middle phase as
+the pure `SimWorldMap_ComposeDeveloped`: ordinary cells translate through
+`$02:8000`, `$E3-$EF` expand through `$02:8100`, and six quadrant-paged town
+maps land at the `$02:87A5` destinations. It rebuilds on town or world-navigation
+entry and on input changes, touching no emulator-visible state. The old bounded
+ROM call remains only behind `AR_WORLDMAP_HLE_COMPARE=1`; fixture and live
+differential checks match all 16,384 bytes.
 
 **The full-town canvas.** The world map is half resolution, so the town's own
 off-screen territory deserves better. The game keeps the whole town's BG1
@@ -1362,6 +1374,79 @@ every stage — ground, billboards, shadows, the cull boundary, the shroud —
 sees one camera. Adjusting the matrix afterwards would leave object anchors on
 the old one.
 
+## 13h. World-navigation full-plane scene (2026-07-27)
+
+Map `$09` reuses the owned developed world image but not the simulation-town
+scene graph. `SimWorldNavigationScene_Build` publishes exactly one 1024x1024
+texture serial and one four-corner plane over world-map tile coordinates
+`[0,128) x [0,128)`. There is no captured town rectangle to extend, so this
+path has no `kSimUnderlayMarginPixels`, full-town canvas, separated BG planes,
+semantic town records, object atlas, sprite cull window, focus-falloff mesh, or
+cloud shroud.
+
+The camera is an affine top-down transform, not the town's perspective camera.
+The captured signed 8.8 Mode-7 matrix maps screen deltas to texture-source
+deltas:
+
+```text
+[source x - focus x]   1     [ A  B ] [screen x - 128]
+[source y - focus y] = --- * [ C  D ] [screen y - 112]
+                         256
+```
+
+Scene construction inverts that 2x2 matrix once on the game thread and carries
+the resulting six-value source-to-authentic-screen affine map in the immutable
+`SimFrameData`. This keeps steady movement, zoom, and the action-entry spin on
+one exact camera model; the present thread does not infer a transform from PPU
+registers and does not read live WRAM.
+
+The full map is mandatory content for this view. It is not conditional on the
+town Ground projection or World map underlay stage toggles, and the independent
+`AR_SIM3D_WORLD_NAV` master does not require `AR_SIM3D`. Compatible
+lighting/weather/colour tuning is reused by two navigation-specific effect
+gates: `AR_SIM3D_WORLD_NAV_LIGHTING` (on by default) and
+`AR_SIM3D_WORLD_NAV_CLOUDS` (off by default). The latter reuses the town
+renderer's procedural field over the complete world with no sprite-window
+hole, cull cover, or underlay margin. Navigation uploads a padded 2x2 repeat
+and samples each drifting bank with one affine quad, avoiding both
+backend-dependent UV wrapping and geometry join seams. Light
+direction/elevation, shadow darkness/softness, cloud density/altitude, and
+drift remain immutable frame values. Cloud bodies use `$0316` as a camera
+height axis: the default deck is above the camera at near `$0206`, crossed
+smoothly during zoom, and visible at middle/far `$040A/$0562`. Ground shadows
+remain visible below the deck.
+
+The town atmospheric backdrop is also shared. Navigation uses its synthetic
+horizon because an affine top-down camera has no perspective horizon, filling
+every pixel exposed past the finite map during wide output and spin. `$0341`
+provides the authoritative active location: `$01:B6CA` selects one of seven
+256x256 source regions from ROM table `$01:B73C`, the same selection used for
+the label/destination. A world-space mesh keeps that region fully sharp and
+lit while blending the existing downsampled mip and backdrop haze over the
+surrounding world. `$01:B6CA` clears `$0341` before scanning; when the Palace
+is outside all borders, zero removes the clear-region cutout and the complete
+world remains hazed.
+
+A 2048x2048 high-fidelity world remains research. At that scale one world cell
+can receive its native 16x16 town footprint and each 32x32 town can occupy a
+512x512 window, but production must not switch until all six ROM tilesets,
+palettes, metatile translations, animated/development cells, seams, and far
+zoom mips can be reconstructed deterministically.
+
+The game thread classifies navigation OAM separately from town records. Steady
+navigation owns 20 packed priority-3 label/frame sprites followed by the
+Palace's fixed-centre 3x3 grid; tile IDs and grid traversal change during
+Palace animation, so position/attribute ownership is the invariant. An
+all-hidden OAM table is the valid action-entry composition. The PPU-backed
+capture rasterizes Palace and UI into separate immutable layers, and any other
+layout, non-Mode-7 state, or forced blank selects authentic Mode 7. Partial
+INIDISP brightness remains enhanced: presentation draws the full-intensity
+backdrop, developed ground, colour/location haze, and weather, applies one
+black master-fade overlay with exact 17/255 steps, then draws Palace/UI pixels
+whose PPU rasterization already applied the same brightness. A gf380-451 replay
+shows the view selected at brightness 0 before fade-in, retained through all
+15 steps and the complete fade-out, and released only after the black endpoint.
+
 ## 14. Open questions (all remaining, none blocks the §13 design)
 
 1. `$7F:B800` action-anim frame composer (find on an animated level:
@@ -1374,10 +1459,9 @@ the old one.
    in another context) — confirm from `$B825`'s filler constant per layer.
 5. Boss-arena window/HDMA effects vs margins (survey doc has the known
    full-width-window fix; iris wipes stay 256-centered — audit per boss).
-6. Sim-mode (Phase 4): widen town BG coverage and the world-only `ADAD/AE6F`
-   predicate; map `$02:AFCB` `$47F0` upload and `$02:8384`. The earlier
-   `$01:B1F8/$B7E9/$CE69/$CEEB` camera candidates were object-field writes;
-   the town camera writer is `$01:B4C6`.
+6. Map the remaining `$02:AFCB` `$47F0` sim upload. World-navigation
+   `$02:8384` is now verified as the current-matrix/focus Mode-7 register
+   uploader; the town camera writer remains `$01:B4C6`.
 7. Section config +27 -> `$F2` meaning; `$6A/$6E/$72` $2000-flag meaning.
 8. Native camera/world-edge clamp ownership and its presentation-aware wide
    bounds. Distinguish changing the gameplay camera limit from merely hiding or

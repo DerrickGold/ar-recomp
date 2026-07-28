@@ -564,13 +564,22 @@ it naturally when the relevant engine becomes active.
 ### Simulation 3D (`kSettingCat_Simulation`) — all PASSIVE (2026-07-22)
 
 Read by the game thread and resolved into the immutable `FrameSlot` payload;
-the present thread never reads them live. All are gated on `sim3d_mode` being
-on. The diagnostic layer mask is a developer control, not a shipped player
-setting.
+the present thread never reads them live. Town stages are gated on
+`sim3d_mode`; the forced-top-down world-navigation scene has its own independent
+off-by-default switch. The two master toggles are not conjunctive: world
+navigation can be enabled while Simulation town 3D is off. Compatible numeric
+lighting/weather/colour controls are shared by the `$09` art treatment, but
+town camera, canvas, billboard/atlas, cull-window, and cloud-shroud stages
+remain town-only. Navigation has separate effect gates, so sharing numeric
+tuning never makes either master imply the other. The diagnostic layer mask is
+a developer control, not a shipped player setting.
 
 | Setting | env | Type | Default | Note |
 |---|---|---|---|---|
 | Simulation town 3D | `AR_SIM3D` | bool | off | master toggle; requires the new PPU renderer |
+| World navigation 3D | `AR_SIM3D_WORLD_NAV` | bool | off | map `$09` only; forced top-down and driven by the game's focus/matrix/zoom state, with no free camera |
+| World navigation lighting | `AR_SIM3D_WORLD_NAV_LIGHTING` | bool | on | subordinate to World navigation 3D, not Simulation town 3D; applies the top-down colour grade and directional cloud shadows |
+| World navigation clouds | `AR_SIM3D_WORLD_NAV_CLOUDS` | bool | off | subordinate whole-map weather pass; cloud bodies fade out as near zoom takes the camera below the shared altitude, while ground shadows remain |
 | Separated layer capture | `AR_SIM3D_SEPARATED` | bool | on | every other stage depends on this one |
 | Ground projection | `AR_SIM3D_GROUND` | bool | on | |
 | Object billboards | `AR_SIM3D_BILLBOARDS` | bool | on | |
@@ -578,19 +587,24 @@ setting.
 | Ground shadows | `AR_SIM3D_SHADOWS` | bool | on | needs object billboards |
 | Soft shadows | `AR_SIM3D_SOFT_SHADOWS` | bool | on | blur the ground shadow mask; needs ground shadows |
 | Rim light | `AR_SIM3D_RIM_LIGHT` | bool | on | lit edge on billboard silhouettes; needs object billboards |
-| World map underlay | `AR_SIM3D_WORLD_UNDERLAY` | bool | on | extends the ground past the town edge with the live world map and the full-town canvas; needs the ground projection. Also gates the widened sprite emit margin |
-| Atmospheric backdrop | `AR_SIM3D_BACKDROP` | bool | off | Phase 5; greyed out until implemented |
+| World map underlay | `AR_SIM3D_WORLD_UNDERLAY` | bool | on | extends the ground past the town edge with the host-owned developed world map (including animated water) and the full-town canvas; needs the ground projection. Also gates the widened sprite emit margin |
+| Cloud shroud | `AR_SIM3D_CLOUDS` | bool | on | town-only distant/cull cover; navigation uses its separate whole-map switch above |
+| Local-area haze | `AR_SIM3D_CULL_HAZE_STAGE` | bool | on | town cull fade; in navigation keeps the ROM-selected `$0341` location clear and hazes surrounding regions, or the full map when `$0341=0` outside all borders |
+| Atmospheric backdrop | `AR_SIM3D_BACKDROP` | bool | on | shared graded sky behind finite town or world-navigation ground; does not require the town master when navigation is enabled |
 | Ease picker exit | `AR_SIM3D_PICKER_EASE` | bool | off | Phase 5; greyed out until implemented |
 | SIM diagnostic layers | `AR_SIM3D_DIAGNOSTIC_LAYERS` | mask | `0` | developer-only per-plane visibility; deliberately produces incomplete images |
-| Camera pitch / yaw / distance | `AR_SIM3D_PITCH` / `_YAW` / `_DISTANCE` | int | −350 / 0 / 0 (auto-fit) | milliradians, milliradians, hundredths; right-drag orbits and the wheel zooms |
+| Camera pitch / yaw / distance | `AR_SIM3D_PITCH` / `_YAW` / `_DISTANCE` | int | −575 / 0 / 300 | milliradians, milliradians, hundredths; right-drag orbits and the wheel zooms |
 | Object height scale | `AR_SIM3D_HEIGHT_SCALE` | int | 100 | percent of each classified flight plane. `0` grounds every billboard **without** disabling the height stage, so it is a real value and never doubles as "unset" — the frame capture defaults the field to 100 |
 | Flying sprite pop | `AR_SIM3D_HEIGHT_POP` | int | 5 | extra size for a flying sprite at its catalogue height, percent, normalized against that plane so the number means what it says. `0` leaves only the ~1% the lift genuinely produces. Scales lifted objects only, which is what makes it independent of camera distance |
-| Light direction | `AR_SIM3D_LIGHT_AZIMUTH` | int | 0 | compass direction the shadow is thrown, degrees: 0 right, 90 away from camera, 180 left, 270 toward camera. Inert at elevation 90 |
-| Light height | `AR_SIM3D_LIGHT_ELEVATION` | int | 85 | degrees above the ground. 90 is straight overhead and puts each shadow under its caster; lower pushes shadows out along the light direction. Shear is `cot(elevation)`, clamped so a near-horizon light cannot throw a shadow to infinity |
-| Shadow softness | `AR_SIM3D_SHADOW_SOFTNESS` | int | 35 | blur radius percent. `0` keeps the hard silhouette even with soft shadows on |
+| Light direction | `AR_SIM3D_LIGHT_AZIMUTH` | int | 90 | compass direction the shadow is thrown, degrees: 0 right, 90 away from camera, 180 left, 270 toward camera. Also controls navigation cloud-shadow displacement. Inert at elevation 90 |
+| Light height | `AR_SIM3D_LIGHT_ELEVATION` | int | 90 | degrees above the ground. 90 is straight overhead and puts each shadow under its caster; lower pushes shadows out along the light direction and strengthens the navigation dusk grade. Shear is `cot(elevation)`, clamped so a near-horizon light cannot throw a shadow to infinity |
+| Shadow softness | `AR_SIM3D_SHADOW_SOFTNESS` | int | 35 | town shadow-mask blur radius percent; for navigation clouds it spreads three low-alpha world-space shadow samples. `0` keeps one hard sample |
 | Rim light strength | `AR_SIM3D_RIM_STRENGTH` | int | 10 | brightness of the lit edge, percent. `0` leaves sprite colours untouched with the stage still enabled |
-| World map haze | `AR_SIM3D_UNDERLAY_HAZE` | int | 35 | how far the world-map underlay fades toward the scene backdrop, percent. `100` hides it without disabling any other stage. Governs the half-resolution world map only — the full-town canvas draws at full opacity, because it is the town being played |
-| Shadow darkness | `AR_SIM3D_SHADOW_OPACITY` | int | 45 | percent darkness of the D4a ground shadow mask. `0` skips the shadow pass entirely without disabling any other 3D stage, so the mask can be compared against itself without touching the stage toggle |
+| World map haze | `AR_SIM3D_UNDERLAY_HAZE` | int | 40 | town underlay fade and navigation haze strength outside the active location, percent |
+| Shadow darkness | `AR_SIM3D_SHADOW_OPACITY` | int | 60 | percent darkness of the D4a town ground shadow mask and navigation cloud shadows. `0` skips either shadow pass without disabling the rest of the scene |
+| Cloud density | `AR_SIM3D_CLOUD_OPACITY` | int | 35 | opacity of both town banks and whole-world navigation weather |
+| Cloud altitude | `AR_SIM3D_CLOUD_ALTITUDE` | int | 72 | authentic pixels above ground; determines navigation cloud-shadow displacement and where zoom crosses the cloud deck |
+| Cloud drift speed | `AR_SIM3D_CLOUD_DRIFT` | int | 100 | percent of the authored per-layer rates; `0` freezes both weather treatments |
 
 **Two registry rules these rows exercise.** A numeric default must lie on the
 row's own `step` grid — the descriptor round-trip test formats and re-parses

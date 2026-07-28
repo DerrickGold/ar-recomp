@@ -81,6 +81,14 @@ uint32_t ActRaiser_BackdropArgb(const Ppu *ppu) {
       ExpandColor5((color >> 10) & 0x1f, brightness);
 }
 
+uint32_t ActRaiser_BackdropArgbFullBrightness(const Ppu *ppu) {
+  uint32_t color = ppu->cgram[0];
+  return 0xff000000u |
+      (uint32_t)ExpandColor5(color & 0x1f, 15) << 16 |
+      (uint32_t)ExpandColor5((color >> 5) & 0x1f, 15) << 8 |
+      ExpandColor5((color >> 10) & 0x1f, 15);
+}
+
 static bool AllocatePlanes(void) {
   const size_t bytes =
       (size_t)kSim3DMaxWidth * kSim3DMaxHeight * sizeof(uint32_t);
@@ -848,16 +856,14 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
   }
 }
 
-/* One line whenever a town frame changes between rendering enhanced and
- * falling back to the authentic composite. A single dropped frame is a visible
- * flicker but is invisible in a status census, and reproducing it under a trace
- * is awkward; this makes the game report it in the console as it happens, with
- * the reason and the game frame to look up in AR_SIM3D_D1_TRACE. Transitions
- * only, so a healthy session prints at most a couple of lines per town entry. */
+/* One line whenever an enhanced-capable simulation view changes between the
+ * implemented town renderer and the authentic composite. World navigation is
+ * retained in the state machine even before its scene lands, so leaving a town
+ * for $09 resets cleanly without treating town==0 as "no simulation view." */
 void Sim3D_LogViewTransition(const SimFrameData *frame) {
   static int previous = -1;  /* -1 unknown, 0 authentic, 1 enhanced */
   static uint16_t previous_game_frame;
-  if (!frame || !frame->town) {
+  if (!frame || frame->view == kSimView_None) {
     previous = -1;
     return;
   }
@@ -980,6 +986,14 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
       (uint16_t)ClampTuning(tuning->cloud_altitude_px, 0, 512);
   frame->cloud_drift_pct =
       (uint16_t)ClampTuning(tuning->cloud_drift_pct, 0, 500);
+  frame->world_navigation_lighting =
+      tuning->world_navigation_lighting ? 1 : 0;
+  frame->world_navigation_clouds =
+      tuning->world_navigation_clouds ? 1 : 0;
+  frame->world_navigation_backdrop =
+      tuning->world_navigation_backdrop ? 1 : 0;
+  frame->world_navigation_haze =
+      tuning->world_navigation_haze ? 1 : 0;
   frame->cull_lift_inset = tuning->cull_lift_inset ? 1 : 0;
   frame->backdrop_strength_pct =
       (uint8_t)ClampTuning(tuning->backdrop_strength_pct, 0, 100);
@@ -1002,7 +1016,17 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   frame->separated_screen_sub = g_sim3d.screen_sub;
   frame->separated_brightness = g_sim3d.brightness;
   frame->object_half_add = g_sim3d.object_half_add;
-  frame->projection_pitch_mrad = (int16_t)pitch_mrad;
-  frame->projection_yaw_mrad = (int16_t)yaw_mrad;
-  frame->projection_distance_x100 = (uint16_t)distance_x100;
+  /* These three settings own only the simulation-town perspective camera.
+   * World navigation is driven by its captured affine scene and must not
+   * appear to inherit a free/dynamic town pose merely because both views
+   * share this tuning annotation pass. */
+  if (frame->view == kSimView_WorldNavigation) {
+    frame->projection_pitch_mrad = 0;
+    frame->projection_yaw_mrad = 0;
+    frame->projection_distance_x100 = 0;
+  } else {
+    frame->projection_pitch_mrad = (int16_t)pitch_mrad;
+    frame->projection_yaw_mrad = (int16_t)yaw_mrad;
+    frame->projection_distance_x100 = (uint16_t)distance_x100;
+  }
 }

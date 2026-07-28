@@ -1,74 +1,22 @@
-/* sim_world_map_build — build the world-map tilemap ourselves, on demand.
+/* Own the complete developed world tilemap without observing the game's shared
+ * $7E:C000 scratch.
  *
- * The underlay used to OBSERVE the live Mode-7 shadow at $7E:C000 and guess
- * whether it was trustworthy. That was forced by not being able to see the
- * game's write cursor, and every piece of trust machinery (the map-identity
- * gate, the rows-8+ fingerprint, the coherence policy, the staleness trade)
- * existed only to serve that guess. It is not needed if we can produce the
- * tilemap ourselves whenever we want it, which is what this file does.
+ * $02:B475 has three separable phases: load the pristine 16 KiB base, call
+ * $02:865C to stamp development, then upload through $2118. Production now
+ * performs the middle phase with the pure SimWorldMap_ComposeDeveloped HLE.
+ * It reads explicit simulation inputs and immutable ROM tables, and touches no
+ * CPU, WRAM, PPU, stack, direct page, or math-unit state.
  *
- * HOW THE GAME BUILDS IT (traced 2026-07-27, PC-capturing WRAM write trace over
- * $7E:C000..FFFF, saves/fillmore-sim.rec):
- *
- *   $02:B475  — reached from the bank-02 display-list interpreter ($02:B3EB
- *               opcode, script pointer in $A5). Three phases, in order:
- *                 1. fill $7E:C000..FFFF with a 16 KB base tilemap, either a
- *                    raw copy from the script's source pointer or, if $03 is
- *                    positive, an LZSS decompress via $02:C5C9;
- *                 2. JSL $02:865C — stamp the developed-region overlay;
- *                 3. upload $7E:C000..FFFF to VRAM through $2118.
- *
- * Phase 1's output is BYTE-IDENTICAL to the ROM blob at $06:B341 that
- * SimWorldMap_Init already loads as its baseline — verified by reconstructing
- * the traced writes and diffing: of the 447 bytes that differed from the ROM
- * baseline after a full build, ZERO came from phase 1 and all 447 came from
- * phase 2. So we do not need phase 1: we already have its result. Phase 3 is
- * pure presentation (Mode-7 VRAM DMA) and is exactly what we must NOT do.
- *
- * That leaves phase 2 as the only part worth owning, and it is small and safe:
- *
- *   $02:865C  — reads $19 (must be $09), $7F:9101 bit 0, and then for each of
- *               the six towns reads $7F:6B18+2n (0 = undeveloped, else the
- *               development tier) and stamps a 32x32-tile block via $02:86D1
- *               and $02:8726, sourced from $7F:2000 through the $02:80xx
- *               translation table and placed by the $02:87A5 offset table.
- *
- * Why calling it synchronously is safe, all measured rather than assumed:
- *
- *   - the static call closure is exactly {865C, 86D1, 8726}; 86D1 and 8726 are
- *     leaves. No yield helper, no vblank wait, no BRK/COP trap, and no
- *     hardware-register access anywhere in the closure — so this is NOT
- *     coroutine-based and cannot suspend mid-build;
- *   - its entire write footprint outside $7E:C000..FFFF is DP $0C/$0E/$10/$12,
- *     DP $A5..$A9, and stack $01DD..$01EA. All scratch, and all restored here
- *     anyway by the transaction below;
- *   - its inputs survive an act. $7F:2000..37FF (6 KB of stamp source) was
- *     byte-identical between a world-map-visited state and an act->town state,
- *     and $7F:6B18 correctly read 1 then 2 for Fillmore across a development
- *     step, which is the sim state we want to see.
- *
- * Preconditions it needs and does not set for itself:
- *   - $19 == $09. It returns immediately otherwise, which is why an act->town
- *     transition could never have produced a rebuild on its own. $18 is never
- *     read by this closure and does not need to impersonate world-map mode.
- *   - $AA == $7E. It sets $A8/$A9 to $C000 but never the bank byte of that
- *     `[$A8],Y` pointer, inheriting it from whoever ran before. Measured $7E in
- *     both sampled states; set explicitly here rather than trusted.
- *   - direct page zero, binary arithmetic, and 16-bit A/X at entry. The routine
- *     changes and restores its own width flags, but its first direct-page and
- *     stack operations assume the normal bank-02 calling convention.
- *
- * Both are forced inside the transaction and rolled back after, so the game
- * never observes either.
- *
- * The transaction protocol (snapshot g_cpu + all of g_ram + the emulated
- * multiply/divide unit, run the recompiled routine, harvest, restore) is the
- * same one actraiser_widescreen_bg.c uses to drive $02:B825/$02:B8A0 from the
- * host. */
+ * The old transactional call remains only as the opt-in
+ * AR_WORLDMAP_HLE_COMPARE diagnostic oracle. The traced closure
+ * {$02:865C,$02:86D1,$02:8726} is bounded and yield-free, so it is safe for
+ * differential diagnosis, but normal loading no longer depends on a synthetic
+ * CPU call or its fake $19/$AA preconditions. */
 
 #include "sim_world_map_build.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "actraiser_game.h"
@@ -77,6 +25,7 @@
 #include "cpu_state.h"
 #include "funcs.h"
 #include "sim_world_map.h"
+#include "sim_world_map_compose.h"
 #include "snes/snes.h"
 
 RecompReturn bank_02_865C_M0X0(CpuState *cpu);
@@ -91,28 +40,57 @@ enum {
   kDevelopmentTiers = 0x16B18, /* flat g_ram offset of $7F:6B18 */
   kDevelopmentTierBytes = 12,
   kWorldStateFlags = 0x19101,  /* flat g_ram offset of $7F:9101 */
+  /* `$02:AF86` drains this descriptor during world navigation but leaves its
+   * source address intact. It is one of $B000/$B040/$B080/$B0C0. */
+  kWorldWaterAnimationSource = 0x00D7,
+  kWorldWaterSourceFirst = 0xB000,
+  kWorldWaterSourceStride = 0x40,
+  kWorldWaterFrameMask = 3,
   /* $02:B499 JSL $02:865C leaves bank $02 + $B49C on the emulated stack. */
   kOverlayReturnBank = 0x02,
   kOverlayReturnAddress = 0xB49C,
 };
 
-static uint8 s_wram_snapshot[kActRaiserWramSize];
+typedef enum SimWorldMapBuildConsumer {
+  kBuildConsumer_None,
+  kBuildConsumer_Town,
+  kBuildConsumer_WorldNavigation,
+} SimWorldMapBuildConsumer;
+
+static SimWorldMapRomTables s_rom_tables;
+static bool s_rom_tables_available;
 static uint8 s_cached_source[kOverlaySourceBytes];
 static uint8 s_cached_tiers[kDevelopmentTierBytes];
 static uint8 s_cached_world_flag;
 static bool s_have_cached_inputs;
-static bool s_was_in_town;
+static SimWorldMapBuildConsumer s_previous_consumer;
 static uint8_t s_built_tilemap[kSimWorldMapBytes];
+static uint8_t s_oracle_tilemap[kSimWorldMapBytes];
 
-static bool BuildTilemap(const uint8_t *baseline, uint8_t *out) {
+bool SimWorldMapBuild_Init(const uint8_t *rom_data, size_t rom_size) {
+  s_rom_tables_available =
+      SimWorldMap_LoadRomTables(&s_rom_tables, rom_data, rom_size);
+  s_have_cached_inputs = false;
+  s_previous_consumer = kBuildConsumer_None;
+  if (!s_rom_tables_available)
+    fprintf(stderr,
+            "[sim-worldmap] HLE unavailable: ROM is too short for build tables\n");
+  return s_rom_tables_available;
+}
+
+/* Diagnostic-only copy of the bridge Step 1 replaces. This deliberately stays
+ * out of the production path unless AR_WORLDMAP_HLE_COMPARE is enabled. */
+static bool BuildTilemapOracle(const uint8_t *baseline, uint8_t *out) {
   if (!baseline || !out) return false;
 
+  uint8_t *wram_snapshot = (uint8_t *)malloc(kActRaiserWramSize);
+  if (!wram_snapshot) return false;
   CpuState cpu_snapshot = g_cpu;
   uint8 multiply_a = g_snes->multiplyA;
   uint16 multiply_result = g_snes->multiplyResult;
   uint16 divide_a = g_snes->divideA;
   uint16 divide_result = g_snes->divideResult;
-  memcpy(s_wram_snapshot, g_ram, sizeof(s_wram_snapshot));
+  memcpy(wram_snapshot, g_ram, kActRaiserWramSize);
 
   /* Phase 1, done for free: the base tilemap the game would have copied or
    * decompressed into the shadow is the ROM blob we already hold. */
@@ -159,13 +137,65 @@ static bool BuildTilemap(const uint8_t *baseline, uint8_t *out) {
   /* Transaction boundary: discard every game-visible write, including the
    * seeded baseline, the two forced preconditions and all the routine's
    * scratch. The game cannot tell this ran. */
-  memcpy(g_ram, s_wram_snapshot, sizeof(s_wram_snapshot));
+  memcpy(g_ram, wram_snapshot, kActRaiserWramSize);
   g_cpu = cpu_snapshot;
   g_snes->multiplyA = multiply_a;
   g_snes->multiplyResult = multiply_result;
   g_snes->divideA = divide_a;
   g_snes->divideResult = divide_result;
+  free(wram_snapshot);
   return ok;
+}
+
+static bool OracleComparisonEnabled(void) {
+  static bool initialized;
+  static bool enabled;
+  if (!initialized) {
+    const char *value = getenv("AR_WORLDMAP_HLE_COMPARE");
+    enabled = value && value[0] && strcmp(value, "0") != 0;
+    initialized = true;
+  }
+  return enabled;
+}
+
+static bool BuildTilemapHle(const uint8_t *baseline, uint8_t *out) {
+  if (!s_rom_tables_available) return false;
+
+  uint16_t enabled[kSimWorldMapTownCount];
+  for (int town = 0; town < kSimWorldMapTownCount; town++) {
+    const uint8_t *word = g_ram + kDevelopmentTiers + town * 2;
+    enabled[town] = (uint16_t)(word[0] | ((uint16_t)word[1] << 8));
+  }
+  const uint8_t (*town_maps)[kSimWorldMapTownCells] =
+      (const uint8_t (*)[kSimWorldMapTownCells])
+          (g_ram + kOverlaySource);
+  if (!SimWorldMap_ComposeDeveloped(
+          out, baseline, town_maps, enabled, g_ram[kWorldStateFlags],
+          &s_rom_tables))
+    return false;
+
+  if (!OracleComparisonEnabled()) return true;
+  if (!BuildTilemapOracle(baseline, s_oracle_tilemap)) {
+    fprintf(stderr, "[sim-worldmap] HLE oracle call failed\n");
+    return false;
+  }
+  if (memcmp(out, s_oracle_tilemap, kSimWorldMapBytes) == 0) {
+    fprintf(stderr, "[sim-worldmap] HLE/oracle parity: 16384/16384 bytes\n");
+    return true;
+  }
+
+  int mismatches = 0;
+  size_t first = 0;
+  for (size_t i = 0; i < kSimWorldMapBytes; i++) {
+    if (out[i] == s_oracle_tilemap[i]) continue;
+    if (!mismatches) first = i;
+    mismatches++;
+  }
+  fprintf(stderr,
+          "[sim-worldmap] HLE/oracle MISMATCH: %d bytes; first +$%04zX "
+          "HLE=$%02X oracle=$%02X\n",
+          mismatches, first, out[first], s_oracle_tilemap[first]);
+  return false;
 }
 
 static bool InputsChanged(void) {
@@ -187,29 +217,66 @@ static void CacheInputs(void) {
 void SimWorldMap_BuildIfNeeded(void) {
   const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
-  const bool in_town = ActRaiser_IsSimulationTown(map_group, map_number);
-  if (!in_town) {
-    s_was_in_town = false;
+  SimWorldMapBuildConsumer consumer = kBuildConsumer_None;
+  if (ActRaiser_IsSimulationTown(map_group, map_number))
+    consumer = kBuildConsumer_Town;
+  else if (map_group == kActRaiserMapGroup_NonAction &&
+           map_number == kActRaiserNonActionMap_WorldMap)
+    consumer = kBuildConsumer_WorldNavigation;
+
+  if (consumer == kBuildConsumer_None) {
+    s_previous_consumer = kBuildConsumer_None;
     return;
   }
-  if (s_was_in_town && !InputsChanged()) return;
 
-  const bool town_entry = !s_was_in_town;
+  /* The tilemap is owned by the HLE, but the authentic navigation clock still
+   * selects the water phase. Consume only that two-byte phase result; the art
+   * itself is copied from immutable ROM by SimWorldMap.
+   *
+   * Town mode reuses the same SimWorldMap as its outer underlay, but $D7 then
+   * belongs to the town's unrelated WRAM-backed tile animation. The captured
+   * navigation sequence pins the world-water cadence to the global game
+   * clock: B0C0 at gf381-384, B000 at 385-392, B040 at 393-400, B080 at
+   * 401-408, then B0C0. Continue that exact four-frame/eight-tick cycle in
+   * towns so the underlay does not freeze when navigation is absent. */
+  if (consumer == kBuildConsumer_WorldNavigation) {
+    const uint16_t source =
+        (uint16_t)(g_ram[kWorldWaterAnimationSource] |
+                   ((uint16_t)g_ram[kWorldWaterAnimationSource + 1] << 8));
+    SimWorldMap_SetWaterAnimationSource(source);
+  } else {
+    const uint16_t game_frame =
+        ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    const unsigned phase =
+        (((uint16_t)(game_frame - 1)) >> 3) & kWorldWaterFrameMask;
+    SimWorldMap_SetWaterAnimationSource(
+        (uint16_t)(kWorldWaterSourceFirst +
+                   phase * kWorldWaterSourceStride));
+  }
+
+  if (s_previous_consumer == consumer && !InputsChanged()) return;
+
+  const bool entry = s_previous_consumer != consumer;
   const uint8_t *baseline = SimWorldMap_Baseline();
-  if (!baseline || !BuildTilemap(baseline, s_built_tilemap)) {
-    /* Do not cache a failed attempt. The next rendered town frame retries. */
-    s_was_in_town = false;
-    fprintf(stderr, "[sim-worldmap] owned tilemap build failed; retrying\n");
+  if (!baseline || !BuildTilemapHle(baseline, s_built_tilemap)) {
+    /* Do not cache a failed attempt. The next supported frame retries. */
+    s_previous_consumer = kBuildConsumer_None;
+    fprintf(stderr, "[sim-worldmap] HLE tilemap build failed; retrying\n");
     return;
   }
 
   const int changed = SimWorldMap_PublishBuiltTilemap(s_built_tilemap);
   CacheInputs();
-  s_was_in_town = true;
+  s_previous_consumer = consumer;
+  const char *reason = "development change";
+  if (entry)
+    reason = consumer == kBuildConsumer_WorldNavigation
+        ? "world-navigation entry"
+        : "town entry";
   fprintf(stderr,
-          "[sim-worldmap] built from sim state at gf=%u after %s "
+          "[sim-worldmap] HLE built from sim state at gf=%u after %s "
           "(%d tile%s changed)\n",
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
-          town_entry ? "town entry" : "development change",
+          reason,
           changed, changed == 1 ? "" : "s");
 }

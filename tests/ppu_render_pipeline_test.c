@@ -23,6 +23,7 @@
 #include "sim3d.h"
 #include "sim_render_atlas.h"
 #include "sim_render_metadata.h"
+#include "sim_world_navigation_capture.h"
 
 /* main.c owns this global; the PPU line renderer reads it to pick new/old path. */
 bool g_new_ppu = false;
@@ -138,6 +139,44 @@ static void TestObjRangeRaster(void) {
   ppu_free(ppu);
 }
 
+static void TestWorldNavigationPartialBrightnessCapture(void) {
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  ppu_reset(ppu);
+  ppu->bgmode = 7;
+  ppu->cgram[0] = bgr555(31, 0, 0);
+  /* The action-entry form is the smallest valid navigation composition: all
+   * OAM hidden, so this test isolates eligibility from sprite raster data. */
+  for (int slot = 0; slot < 128; slot++) {
+    ppu->oam[slot * 2] = 0xE000;
+    ppu->oam[slot * 2 + 1] = 0xE000;
+  }
+
+  for (uint8_t brightness = 0; brightness <= 15; brightness++) {
+    SimFrameData frame = {0};
+    frame.view = kSimView_WorldNavigation;
+    frame.world_navigation_scene.valid = true;
+    ppu->inidisp = brightness;
+    CHECK(SimWorldNavigationCapture_Capture(&frame, ppu));
+    CHECK(frame.view == kSimView_WorldNavigation);
+    CHECK(frame.world_navigation_brightness == brightness);
+    CHECK(frame.separated_backdrop_argb == 0xffff0000u);
+    CHECK(frame.world_navigation_scene.composition.valid);
+    CHECK(frame.world_navigation_scene.composition.empty_animation);
+  }
+
+  SimFrameData blank = {0};
+  blank.view = kSimView_WorldNavigation;
+  blank.world_navigation_scene.valid = true;
+  ppu->inidisp = 0x8f;
+  CHECK(!SimWorldNavigationCapture_Capture(&blank, ppu));
+  CHECK(blank.view == kSimView_AuthenticFallback);
+  CHECK(blank.world_navigation_brightness == 15);
+
+  ppu_free(ppu);
+}
+
 static void BeginSimRecord(uint16_t record, bool world, uint16_t cursor,
                            uint16_t world_x, uint16_t world_y) {
   SimRenderMetadata_BeginRecord(
@@ -218,7 +257,7 @@ static void TestSemanticAtlasPacking(void) {
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
   SimFrameData frame;
   SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, 0, 0, 0);
+      &frame, wram, true, false, 0, 0, 0);
   /* The frame survives, which is the entire point of the reversal. */
   CHECK(frame.metadata_valid);
   CHECK(frame.atlas_valid);
@@ -554,6 +593,7 @@ static void TestCapturedPaddingReachesBudget(void) {
 }
 
 int main(void) {
+  TestWorldNavigationPartialBrightnessCapture();
   TestObjRangeRaster();
   TestSemanticAtlasPacking();
   TestSim3DFlatComposition();

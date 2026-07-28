@@ -151,10 +151,10 @@ typedef enum {
   kSettingCat_Display,
   kSettingCat_Presentation,      /* Diorama: layers, skybox, master toggle */
   kSettingCat_DioramaCamera,     /* Diorama: camera pose + reactive sway */
-  kSettingCat_Simulation,        /* Town 3D: master toggle + render stages */
+  kSettingCat_Simulation,        /* SIM 3D: town + world-navigation stages */
   kSettingCat_SimCamera,         /* Town 3D: camera pose + reactive sway */
-  kSettingCat_SimLighting,       /* Town 3D: light direction, shadow, rim */
-  kSettingCat_SimAtmosphere,     /* Town 3D: clouds, haze, cull, backdrop */
+  kSettingCat_SimLighting,       /* SIM 3D: compatible light/shadow tuning */
+  kSettingCat_SimAtmosphere,     /* SIM 3D: clouds, haze, cull, backdrop */
   kSettingCat_Graphics,
   kSettingCat_Audio,
   kSettingCat_Input,             /* device selection and analog tuning */
@@ -347,6 +347,14 @@ typedef struct Settings {
    * masks.  D1 exposes the controls while the implemented-capability mask is
    * still zero, so every selection safely resolves to authentic output. */
   bool sim3d_mode;
+  /* Inter-town map $09 as a forced-top-down 3D scene. Independent of the town
+   * master because it has no town canvas, separated layers, or free camera. */
+  bool sim3d_world_navigation;
+  /* World-navigation effects have their own stage gates. They share compatible
+   * numeric tuning with town 3D, but never inherit its master or its
+   * sprite-window/cull assumptions. */
+  bool sim3d_world_navigation_lighting;
+  bool sim3d_world_navigation_clouds;
   /* The enhanced renderer's stages. These toggles are the only stored form:
    * there is no feature mask setting and no A/B profile pair. Comparing two
    * builds of the scene means toggling stages across separate runs, which is

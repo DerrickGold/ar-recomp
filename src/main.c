@@ -59,6 +59,7 @@
 #include "sim_phase0_trace.h"
 #include "sim_render_metadata.h"
 #include "sim_world_map_build.h"
+#include "sim_world_navigation_capture.h"
 #include "sim_render_atlas.h"
 #include "sim_town_canvas.h"
 #include "sim_world_map.h"
@@ -317,10 +318,12 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
     SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram, g_ppu);
     SimRenderMetadata_CaptureFrame(
         &sim, g_ram, g_settings.sim3d_mode,
+        g_settings.sim3d_world_navigation,
         Settings_Sim3DRequestedFeatures(),
         g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&sim, &tuning);
+    SimWorldNavigationCapture_Capture(&sim, g_ppu);
     /* This site runs on every frame including headless, unlike
      * FrameSlot_Capture, which only runs when a present thread consumes it. */
     Sim3D_RenderTownCanvas(&sim, g_ram, g_ppu);
@@ -992,9 +995,10 @@ int main(int argc, char **argv) {
 
   if (!SettingsOverlay_Init(g_renderer, rom_data, rom_size))
     Die("SDL font atlas creation for settings overlay failed");
-  /* The world map underlay reads three uncompressed ROM blobs once. A failure
-   * is not fatal: the stage reports nothing usable and simply never draws. */
-  SimWorldMap_Init(rom_data, rom_size);
+  /* The world-map image and pure development-builder tables are immutable ROM
+   * data. Failure is not fatal: consumers retain the authentic presentation. */
+  if (SimWorldMap_Init(rom_data, rom_size))
+    SimWorldMapBuild_Init(rom_data, rom_size);
   /* Per-room diorama layer overrides. Absent file is the normal case and leaves
    * every room drawing as built. */
   Diorama_LoadLayerManifest();

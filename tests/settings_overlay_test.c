@@ -319,6 +319,9 @@ int main(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "sim3d_mode"));
   CHECK(!g_settings.sim3d_mode);
+  CHECK(!g_settings.sim3d_world_navigation);
+  CHECK(g_settings.sim3d_world_navigation_lighting);
+  CHECK(!g_settings.sim3d_world_navigation_clouds);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(g_settings.sim3d_mode);
   /* Walk to a stage toggle by key rather than counting rows: the stage list
@@ -636,6 +639,11 @@ int main(void) {
   CHECK(!Settings_IsMenuVisible(Settings_Find("scene_inspector")));
   /* ...while master toggles, major on/off effects, and camera mode stay. */
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_mode")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation")));
+  CHECK(Settings_IsMenuVisible(
+      Settings_Find("sim3d_world_navigation_lighting")));
+  CHECK(Settings_IsMenuVisible(
+      Settings_Find("sim3d_world_navigation_clouds")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_shadows")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_camera_mode")));
   CHECK(Settings_IsMenuVisible(Settings_Find("diorama_skybox")));
