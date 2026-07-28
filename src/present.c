@@ -169,7 +169,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
     scale_x = scale_y * (in->pixel_aspect == kPixelAspect_Crt43 ? 7.0 / 6.0 : 1.0);
   }
 
-  int tex_extra = (in->snes_width - 256) / 2;
+  int tex_extra = (in->snes_width - kFrameSlotAuthenticWidth) / 2;
   int height = in->hud_split_height;
   int player_y = in->hud_player_row_y;
   int enemy_y = in->hud_left_only_y;
@@ -200,7 +200,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
         kInspectorPresentation_HudBg, 0);
   }
 
-  int right_source_w = 256 - in->hud_right_start;
+  int right_source_w = kFrameSlotAuthenticWidth - in->hud_right_start;
   int right_dest_w = ScaledHudPixels(right_source_w, scale_x);
   src.x = tex_extra + in->hud_right_start;
   src.w = right_source_w;
@@ -233,7 +233,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
         kInspectorPresentation_HudBg, -in->extra_left_right);
 
     src.x = tex_extra + in->hud_right_start;
-    src.w = 256 - in->hud_right_start;
+    src.w = kFrameSlotAuthenticWidth - in->hud_right_start;
     dst.x = viewport.x + viewport.w - ScaledHudPixels(src.w, scale_x);
     dst.w = ScaledHudPixels(src.w, scale_x);
     AddHudPresentationChunk(
@@ -248,7 +248,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
     int low_h = height - enemy_y;
     src.x = tex_extra;
     src.y = enemy_y;
-    src.w = 256;
+    src.w = kFrameSlotAuthenticWidth;
     src.h = low_h;
     dst.x = viewport.x;
     dst.y = viewport.y + ScaledHudPixels(enemy_y, scale_y);
@@ -269,14 +269,14 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
    * into the framebuffer and hud_body_y1 stays 0. */
   if (in->hud_body_y1 > height) {
     int body_h = in->hud_body_y1 - height;
-    int body_dw = ScaledHudPixels(256, scale_x);
-    SDL_Rect body_src = { tex_extra, height, 256, body_h };
+    int body_dw = ScaledHudPixels(kFrameSlotAuthenticWidth, scale_x);
+    SDL_Rect body_src = { tex_extra, height, kFrameSlotAuthenticWidth, body_h };
     SDL_Rect body_dst = { viewport.x + (viewport.w - body_dw) / 2,
                           viewport.y + ScaledHudPixels(height, scale_y),
                           body_dw, ScaledHudPixels(body_h, scale_y) };
     AddHudPresentationChunk(
         chunks, &count, in->hud_bg_texture, body_src,
-        (SDL_Rect){ 0, height, 256, body_h }, body_dst,
+        (SDL_Rect){ 0, height, kFrameSlotAuthenticWidth, body_h }, body_dst,
         kInspectorPresentation_HudBg, 0);
   }
 
@@ -285,7 +285,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
    * validated OAM signatures; the caller resolves the icon x/y (from live
    * oam/highOam or the FrameSlot snapshot) and passes it in already
    * resolved, so this function stays free of oam[]/highOam[] entirely. */
-  if (in->hud_obj_texture && in->obj_icon_valid && in->obj_icon_x < 256) {
+  if (in->hud_obj_texture && in->obj_icon_valid && in->obj_icon_x < kFrameSlotAuthenticWidth) {
     int x = in->obj_icon_x, y = in->obj_icon_y;
     int icon_w = 16, icon_h = 16;
     SDL_Rect obj_src = { tex_extra + x, y, icon_w, icon_h };
@@ -464,7 +464,7 @@ static void PresentHdReplacements(const FrameSlot *slot, SDL_Rect viewport) {
 
   int vis_w = slot->visible_width;
   int vis_x0 = slot->visible_x0;
-  int extra = (slot->snes_width - 256) / 2;
+  int extra = (slot->snes_width - kFrameSlotAuthenticWidth) / 2;
   double scale_x = (double)viewport.w / vis_w;
   double scale_y = (double)viewport.h / slot->snes_height;
 

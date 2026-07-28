@@ -97,7 +97,8 @@ SDL_Texture *g_hud_obj_texture;
 InspectorPresentationSelection g_scene_inspector_presentation;
 static bool g_window_hidden;  /* true while MINIMIZED or HIDDEN: skip present */
 /* external: read by FrameSlot_Capture (frame_slot.c) */
-int g_snes_width = 256, g_snes_height = 224;
+int g_snes_width = kActRaiserAuthenticWidth,
+    g_snes_height = kActRaiserAuthenticHeight;
 /* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
  * active width can change live without reallocating storage; each frame uses
  * only the leading g_snes_width*4 bytes per row. */

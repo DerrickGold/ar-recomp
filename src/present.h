@@ -46,6 +46,22 @@ enum {
    * mistake produced. Cross-checked by FrameSlot_Capture's _Static_assert
    * against the real constant. */
   kFrameSlotLayerTextureWidth = 448,  /* kPpuBufWidth */
+  /* The authentic SNES screen width, mirroring actraiser_game.h's
+   * kActRaiserAuthenticWidth for the same D6 reason as the two constants above:
+   * present-time code must not include actraiser_game.h, which declares g_ram and
+   * a pile of live WRAM accessors this side of the wall must not touch.
+   *
+   * This is the width of the AUTHENTIC image inside a possibly-wider framebuffer.
+   * The widescreen layout is [extra][256][extra], so `(snes_width - this) / 2` is
+   * the left margin and HUD source rects are expressed against this rather than
+   * against snes_width -- the HUD is authored for the authentic window and is
+   * anchored, not stretched. Do not confuse it with snes_width (the whole
+   * framebuffer, which varies) or with kFrameSlotLayerTextureWidth (the allocated
+   * texture, which is fixed at 448 and is the U-axis denominator).
+   *
+   * Cross-checked against kActRaiserAuthenticWidth by a _Static_assert in
+   * frame_slot.c, the way kFrameSlotLayerTextureWidth is against kPpuBufWidth. */
+  kFrameSlotAuthenticWidth = 256,  /* kActRaiserAuthenticWidth */
 };
 enum { kFrameSlotOverlayFlag_RemoveFromGame = 1 };
 
