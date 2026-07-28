@@ -1661,7 +1661,13 @@ static bool LayerChangeSelected(int direction) {
     /* Expanding the plane the player just changed puts its parameters under the
      * cursor immediately, which is the next thing they want. */
     s_layer_plane = row->plane;
-    SetStatus(DioramaLayerOrder_StrategyName(next));
+    /* Uppercased to match every other status in this menu, which is drawn in the
+     * game's own all-caps face -- the strategy names are lowercase because they
+     * are manifest tokens. */
+    char status[24];
+    DioramaLayerEditor_Upper(status, sizeof(status),
+                             DioramaLayerOrder_StrategyName(next));
+    SetStatus(status);
     LayerSaveEdit();
     return true;
   }
@@ -3043,7 +3049,12 @@ static void DrawMenu(const MenuLayout *layout) {
       drawn_rows++;
       int y = first_row_y + (row - s_top_row) * kRowHeight;
       const DioramaEditorRow *entry = &rows[i];
-      const bool selected = s_submenu_open && row == s_row;
+      /* An unselectable row is never drawn as selected, even when the cursor sits
+       * on it -- which happens on a tab whose every row is a notice, since there
+       * is nothing for SkipUnselectableRow to move to. Highlighting it with the
+       * blinking cursor would invite a keypress that does nothing. */
+      const bool selected =
+          s_submenu_open && row == s_row && entry->selectable;
 
       /* A rule above the reset row, matching how the Save and Extras tabs fence
        * their destructive commands off from the settings above them. */
@@ -3328,7 +3339,9 @@ static void DrawMenu(const MenuLayout *layout) {
     HINT("RETURN", "apply");
     HINT("A/ESC", "cancel");
   } else if (s_submenu_open) {
-    HINT("UP/DOWN", "select");
+    /* Omitted when the only row is a notice: there is nothing to select, and
+     * offering the verb would suggest otherwise. */
+    if (!help_row || help_row->selectable) HINT("UP/DOWN", "select");
     if (help_row) {
       /* The editor's verbs differ enough to be worth spelling out: Left/Right
        * cycles the SHAPE on a plane row but steps a number on a parameter row,

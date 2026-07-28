@@ -365,6 +365,17 @@ void DioramaLayerEditor_ClearPlane(DioramaPlaneOverride *p) {
   memset(p, 0, sizeof(*p));
 }
 
+void DioramaLayerEditor_Upper(char *out, size_t size, const char *text) {
+  if (!out || size == 0) return;
+  size_t i = 0;
+  if (text) {
+    for (; text[i] && i + 1 < size; i++)
+      out[i] = (text[i] >= 'a' && text[i] <= 'z') ? (char)(text[i] - 'a' + 'A')
+                                                  : text[i];
+  }
+  out[i] = '\0';
+}
+
 /* ── help text ───────────────────────────────────────────────────────────
  *
  * Each shape's line names what it COSTS as well as what it does, because the
@@ -474,13 +485,9 @@ static void SetText(char *dst, size_t size, const char *text) {
 static void FormatPlaneValue(char *dst, size_t size,
                              const DioramaPlaneOverride *p) {
   const DioramaDepthStrategy strategy = DioramaLayerEditor_StrategyOfPlane(p);
-  const char *name = DioramaLayerOrder_StrategyName(strategy);
   char upper[16];
-  size_t i = 0;
-  for (; name[i] && i + 1 < sizeof(upper); i++)
-    upper[i] = (name[i] >= 'a' && name[i] <= 'z') ? (char)(name[i] - 32)
-                                                  : name[i];
-  upper[i] = '\0';
+  DioramaLayerEditor_Upper(upper, sizeof(upper),
+                           DioramaLayerOrder_StrategyName(strategy));
 
   switch (strategy) {
     case kDioramaDepth_Rake:  snprintf(dst, size, "%s %.2f", upper, (double)p->rake); break;
@@ -557,15 +564,11 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
                  (double)p->stack_density);
         break;
       case kDioramaEditorParam_Direction: {
-        const char *token = DioramaLayerOrder_StackDirectionToken(
-            p->set_stack_direction ? p->stack_direction : kDioramaStack_Forward);
-        char upper[16];
-        size_t j = 0;
-        for (; token[j] && j + 1 < sizeof(upper); j++)
-          upper[j] = (token[j] >= 'a' && token[j] <= 'z')
-              ? (char)(token[j] - 32) : token[j];
-        upper[j] = '\0';
-        SetText(row->value, sizeof(row->value), upper);
+        DioramaLayerEditor_Upper(
+            row->value, sizeof(row->value),
+            DioramaLayerOrder_StackDirectionToken(
+                p->set_stack_direction ? p->stack_direction
+                                       : kDioramaStack_Forward));
         break;
       }
       case kDioramaEditorParam_Z:
