@@ -2613,8 +2613,40 @@ static void Settings_SyncContainingDirectory(const char *path) {
 #endif
 }
 
+/* Set false for diagnostic runs (see Settings_SetPersistenceEnabled). Owned
+ * here rather than queried from input_replay.c so settings.c keeps no dependency
+ * on the replay module -- several test targets compile settings.c without it. */
+static bool s_persistence_enabled = true;
+
+void Settings_SetPersistenceEnabled(bool enabled) {
+  s_persistence_enabled = enabled;
+}
+
 bool Settings_Save(const char *path) {
   if (!path || !path[0]) return false;
+  /* A replay is a DIAGNOSTIC run and must not mutate the player's configuration
+   * — the same reason InputReplay_ShouldProtectSaveData already refuses to
+   * persist SRAM. Settings were not covered by that, and the gap is not
+   * theoretical: with `diorama_camera_mode = Dynamic Cam` the dynamic camera
+   * drifts its own baseline during a long replay, and the 500 ms dirty-flush in
+   * Diorama_FlushSettingsIfDirty then wrote that drift into the user's
+   * settings.ini (observed 2026-07-27: diorama_dyncam_baseline_distance_x100
+   * moved 294 -> 330 purely from replaying a recording).
+   *
+   * Guarded here rather than at the six call sites so no future writer can miss
+   * it. Reported once so a replay that expected to persist is not silently
+   * confusing. */
+  if (!s_persistence_enabled) {
+    static bool reported;
+    if (!reported) {
+      reported = true;
+      fprintf(stderr,
+              "[settings] persistence disabled — not writing %s "
+              "(diagnostic run)\n",
+              path);
+    }
+    return true;  /* not an error: the caller's intent is satisfied */
+  }
   size_t path_length = strlen(path);
   char *temporary = (char *)malloc(path_length + 5);
   if (!temporary) return false;

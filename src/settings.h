@@ -525,6 +525,17 @@ void Settings_FinalizeDisplayMode(void);
  * compatibility and returns false on I/O or parse errors. Save replaces the
  * target atomically and never rewrites the developer-owned config.ini. */
 bool Settings_Load(const char *path);
+/* Turn off every Settings_Save write for the process. A replay is a DIAGNOSTIC
+ * run and must not mutate the player's configuration -- the same reason
+ * InputReplay_ShouldProtectSaveData refuses to persist SRAM. Settings were not
+ * covered by that, and the gap was not theoretical: with
+ * `diorama_camera_mode = Dynamic Cam` the dynamic camera drifts its own baseline
+ * during a long replay and the 500 ms flush in Diorama_FlushSettingsIfDirty
+ * wrote that drift to settings.ini (observed 2026-07-27:
+ * diorama_dyncam_baseline_distance_x100 moved 294 -> 330 purely from replaying).
+ * Guarded inside Settings_Save so none of its callers can miss it. */
+void Settings_SetPersistenceEnabled(bool enabled);
+
 bool Settings_Save(const char *path);
 
 /* Descriptor/mutation API used by the host overlay and settings.ini loader.

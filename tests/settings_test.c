@@ -1005,7 +1005,35 @@ static void TestRimLightAvailabilityFollowsBlendSupport(void) {
   g_settings.sim3d_mode = restore_mode;
 }
 
+/* A diagnostic run must not mutate the player's configuration. Settings were not
+ * covered by the replay protection that already refuses to persist SRAM, and the
+ * gap was real: with Dynamic Cam the diorama camera drifts its own baseline
+ * during a long replay and the dirty-flush wrote that drift into settings.ini
+ * (observed 2026-07-27, diorama_dyncam_baseline_distance_x100 294 -> 330). */
+static void TestPersistenceCanBeDisabled(void) {
+  const char *path = "settings_persistence_probe.ini";
+  remove(path);
+
+  /* Disabled: reports success (the caller's intent is satisfied) but writes
+   * nothing at all — not even an empty or temporary file. */
+  Settings_SetPersistenceEnabled(false);
+  CHECK(Settings_Save(path));
+  FILE *probe = fopen(path, "r");
+  CHECK(probe == NULL);
+  if (probe) fclose(probe);
+
+  /* Re-enabled: saving works exactly as before, so the guard cannot strand a
+   * normal run with unsaveable settings. */
+  Settings_SetPersistenceEnabled(true);
+  CHECK(Settings_Save(path));
+  probe = fopen(path, "r");
+  CHECK(probe != NULL);
+  if (probe) fclose(probe);
+  remove(path);
+}
+
 int main(void) {
+  TestPersistenceCanBeDisabled();
   TestUserDataFile();
   TestRimLightAvailabilityFollowsBlendSupport();
   TestScalePercentToOutput();
