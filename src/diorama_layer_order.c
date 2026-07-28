@@ -82,7 +82,7 @@ bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     const DioramaPlaneOverride *o = &room->planes[plane];
     if (o->set_order || o->set_z || o->set_alpha || o->set_rake ||
-        o->set_thickness)
+        o->set_thickness || o->set_stack || o->set_stack_copies)
       return true;
   }
   return false;
@@ -132,6 +132,12 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
     if (o->set_alpha) out[i].alpha = o->alpha;
     if (o->set_rake) out[i].rake = o->rake;
     if (o->set_thickness) out[i].thickness = o->thickness;
+    if (o->set_stack) out[i].stack = o->stack;
+    /* A stack depth with no explicit count is the common authoring case, so it
+     * gets a usable default rather than silently resolving to zero copies (which
+     * would make `stack:` alone look broken). */
+    if (o->set_stack_copies) out[i].stack_copies = o->stack_copies;
+    else if (o->set_stack) out[i].stack_copies = kDioramaStackCopiesDefault;
     if (o->set_order) keys[i] = o->order;
   }
   if (!active) return n;
@@ -292,6 +298,27 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       edit.rake = (float)rake;
       edit.set_rake = true;
       touched = true;
+    } else if (!strcmp(word, "stack")) {
+      /* Non-negative and same units as rake. Fills FORWARD (toward the camera),
+       * matching thickness; a stack behind the plane would be hidden by it. */
+      double stack = strtod(value, &end);
+      if (end == value || (end && *end) || stack < 0.0 || stack > 1.0) {
+        if (out_error) *out_error = "bad stack (0..1)";
+        return false;
+      }
+      edit.stack = (float)stack;
+      edit.set_stack = true;
+      touched = true;
+    } else if (!strcmp(word, "copies")) {
+      long copies = strtol(value, &end, 10);
+      if (end == value || (end && *end) || copies < 1 ||
+          copies > kDioramaStackMax) {
+        if (out_error) *out_error = "bad copies (1..8)";
+        return false;
+      }
+      edit.stack_copies = (int)copies;
+      edit.set_stack_copies = true;
+      touched = true;
     } else if (!strcmp(word, "thick")) {
       /* Non-negative: a thickness extrudes the bottom edge FORWARD only (toward
        * the camera). For the other direction, author a negative rake instead --
@@ -344,7 +371,7 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     int plane = kPlaneTokens[i].plane;
     const DioramaPlaneOverride *o = &room->planes[plane];
     if (!o->set_order && !o->set_z && !o->set_alpha && !o->set_rake &&
-        !o->set_thickness)
+        !o->set_thickness && !o->set_stack && !o->set_stack_copies)
       continue;
     /* Emit only the authored knobs, so a re-import reproduces exactly this
      * override rather than pinning the two the author never touched. */
@@ -354,6 +381,8 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     if (o->set_alpha) APPEND(" alpha:%u", (unsigned)o->alpha);
     if (o->set_rake) APPEND(" rake:%.4g", (double)o->rake);
     if (o->set_thickness) APPEND(" thick:%.4g", (double)o->thickness);
+    if (o->set_stack) APPEND(" stack:%.4g", (double)o->stack);
+    if (o->set_stack_copies) APPEND(" copies:%d", o->stack_copies);
     APPEND("\n");
   }
 #undef APPEND

@@ -297,6 +297,85 @@ int main(void) {
     CHECK(near(only_z, kZ + kThick));
   }
 
+  /* ── STACK: fill a depth gap with PARALLEL copies ───────────────────── */
+  {
+    /* Fillmore act 2's real numbers: water Bg2Hi z=0.21, rock path Bg1 z=0.50.
+     * Higher z is nearer the camera, so the fill runs forward across the void. */
+    const float kBase = 0.21f, kDepth = 0.29f;
+    float z = 0.0f, sh = 0.0f, al = 0.0f;
+
+    /* Copy 0 sits EXACTLY on the plane's own depth, at full shade and opacity.
+     * That is what lets the caller skip it -- the plane's own draw IS copy 0, so
+     * any offset or dimming here would show as a seam or a double-darkened front
+     * face on every stacked layer. */
+    DioramaStackCopy(0, 4, kBase, kDepth, &z, &sh, &al);
+    CHECK(near(z, kBase));
+    CHECK(near(sh, 1.0f));
+    CHECK(near(al, 1.0f));
+
+    /* The last copy reaches exactly the far end of the authored fill -- so
+     * stack:0.29 on the water lands its farthest slice on the rock's own depth,
+     * which is what "fills the gap" has to mean. */
+    DioramaStackCopy(3, 4, kBase, kDepth, &z, &sh, &al);
+    CHECK(near(z, kBase + kDepth));
+    CHECK(sh < 1.0f);   /* recedes rather than smearing identical sprites */
+    CHECK(al < 1.0f);
+    CHECK(al > 0.0f);   /* never invisible: that would be a wasted draw call */
+
+    /* Evenly spaced and monotonic forward, dimming as it goes. Non-monotonic
+     * depth would make the painter's-algorithm draw order wrong. */
+    float prev_z = kBase - 1.0f, prev_al = 2.0f;
+    for (int c = 0; c < 4; c++) {
+      DioramaStackCopy(c, 4, kBase, kDepth, &z, &sh, &al);
+      CHECK(z >= prev_z);
+      CHECK(al <= prev_al);
+      CHECK(near(z, kBase + kDepth * (float)c / 3.0f));
+      prev_z = z; prev_al = al;
+    }
+
+    /* copies:1 is a no-op -- one copy is the plane itself. Must not divide by
+     * (copies-1) == 0. */
+    DioramaStackCopy(0, 1, kBase, kDepth, &z, &sh, &al);
+    CHECK(near(z, kBase) && near(sh, 1.0f) && near(al, 1.0f));
+
+    /* Zero depth collapses every copy onto the plane, whatever the count: a
+     * `copies:` with no `stack:` must not smear the layer across depth. */
+    for (int c = 0; c < 4; c++) {
+      DioramaStackCopy(c, 4, kBase, 0.0f, &z, NULL, NULL);
+      CHECK(near(z, kBase));
+    }
+
+    /* Degenerate inputs clamp instead of producing geometry outside the fill or
+     * dividing by zero. */
+    DioramaStackCopy(-5, 4, kBase, kDepth, &z, NULL, NULL);
+    CHECK(near(z, kBase));
+    DioramaStackCopy(99, 4, kBase, kDepth, &z, NULL, NULL);
+    CHECK(near(z, kBase + kDepth));
+    DioramaStackCopy(0, 0, kBase, kDepth, &z, NULL, NULL);
+    CHECK(near(z, kBase));
+    DioramaStackCopy(2, 4, kBase, -1.0f, &z, NULL, NULL);
+    CHECK(near(z, kBase));
+
+    /* The visibility guard the draw loop uses. */
+    CHECK(DioramaStackCopyIsVisible(0, 4));
+    CHECK(DioramaStackCopyIsVisible(3, 4));
+    CHECK(!DioramaStackCopyIsVisible(4, 4));
+    CHECK(!DioramaStackCopyIsVisible(-1, 4));
+    CHECK(DioramaStackCopyIsVisible(0, 0));   /* copies clamped to >= 1 */
+
+    /* NULL outputs are optional. */
+    DioramaStackCopy(1, 4, kBase, kDepth, NULL, NULL, NULL);
+
+    /* THE POINT OF THE SHAPE: every copy is at a SINGLE depth, so a stacked
+     * layer cannot acquire the two-parallax-rates shear a rake does. Nothing
+     * here returns a per-vertex or per-row depth -- the arithmetic is per COPY.
+     * If this ever grows a `t` parameter, that invariant has been lost. */
+    float za = 0.0f, zb = 0.0f;
+    DioramaStackCopy(2, 4, kBase, kDepth, &za, NULL, NULL);
+    DioramaStackCopy(2, 4, kBase, kDepth, &zb, NULL, NULL);
+    CHECK(near(za, zb));
+  }
+
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return 1; }
   puts("diorama_scroll_math_test: PASS");
   return 0;

@@ -389,6 +389,100 @@ static void TestRakeAndThicknessResolve(void) {
     CHECK(out[i].plane == kDefaults[i].plane);
 }
 
+/* STACK: a third shape for the same void. The reason it exists is that a rake
+ * TILTS the plane, which puts one layer's own rows at different depths -- so it
+ * picks up two parallax rates within itself and shears as the camera moves. A
+ * stack repeats the layer at parallel depths instead, so each copy has a single
+ * depth and the layer keeps one parallax rate. */
+static void TestStackResolve(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kDioramaPlane_Bg2Hi].set_stack = true;
+  room->planes[kDioramaPlane_Bg2Hi].stack = 0.29f;
+
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  CHECK(n == kDefaultCount);
+  for (int i = 0; i < n; i++) {
+    if (out[i].plane == kDioramaPlane_Bg2Hi) {
+      CHECK(out[i].stack == 0.29f);
+      /* A stack depth with NO explicit count must resolve to a usable default,
+       * or `stack:` alone silently draws nothing and looks broken. */
+      CHECK(out[i].stack_copies == kDioramaStackCopiesDefault);
+      CHECK(out[i].stack_copies > 1);
+    } else {
+      CHECK(out[i].stack == 0.0f);
+    }
+  }
+  /* A stack alone must not reorder: paint order is keyed on `order` only. */
+  for (int i = 0; i < n; i++) CHECK(out[i].plane == kDefaults[i].plane);
+  /* Nor tilt: stack and rake are independent shapes. */
+  for (int i = 0; i < n; i++) CHECK(out[i].rake == 0.0f);
+
+  /* An explicit count wins over the default. */
+  room->planes[kDioramaPlane_Bg2Hi].set_stack_copies = true;
+  room->planes[kDioramaPlane_Bg2Hi].stack_copies = 6;
+  n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount,
+                                out, 16);
+  for (int i = 0; i < n; i++)
+    if (out[i].plane == kDioramaPlane_Bg2Hi) CHECK(out[i].stack_copies == 6);
+}
+
+/* A stack-only room is a real override: "Reset room" must have something to undo
+ * and the exporter must emit it, or an authored stack vanishes on save. */
+static void TestStackParseAndRoundTrip(void) {
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  const char *error = NULL;
+
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2hi = stack:0.29 copies:4",
+                                    &error));
+  CHECK(room.planes[kDioramaPlane_Bg2Hi].set_stack);
+  CHECK(room.planes[kDioramaPlane_Bg2Hi].stack == 0.29f);
+  CHECK(room.planes[kDioramaPlane_Bg2Hi].set_stack_copies);
+  CHECK(room.planes[kDioramaPlane_Bg2Hi].stack_copies == 4);
+  room.used = true; room.map_group = 0x01; room.map_number = 0x02;
+  CHECK(DioramaLayerOrder_RoomIsActive(&room));
+
+  /* Bounds. copies must be >= 1 (zero copies is not a shape) and <= the cap,
+   * since every copy is another full-layer draw call. */
+  const char *bad[] = {
+    "bg2hi = stack:-0.1", "bg2hi = stack:9", "bg2hi = stack:abc",
+    "bg2hi = copies:0",   "bg2hi = copies:9", "bg2hi = copies:2.5",
+  };
+  for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+    DioramaRoomOverride tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    error = NULL;
+    if (DioramaLayerOrder_ParseLine(&tmp, bad[i], &error)) {
+      printf("FAIL accepted bad stack line: %s\n", bad[i]);
+      g_failures++;
+    } else if (!error) {
+      printf("FAIL rejected without a reason: %s\n", bad[i]);
+      g_failures++;
+    }
+  }
+
+  /* Export then re-import losslessly, so an authored stack survives a save. */
+  char text[512];
+  size_t need = DioramaLayerOrder_FormatRoom(&room, text, sizeof(text));
+  CHECK(need > 0 && need < sizeof(text));
+  CHECK(strstr(text, "stack:0.29") != NULL);
+  CHECK(strstr(text, "copies:4") != NULL);
+  DioramaRoomOverride reparsed;
+  memset(&reparsed, 0, sizeof(reparsed));
+  error = NULL;
+  CHECK(DioramaLayerOrder_ParseLine(&reparsed, "bg2hi = stack:0.29 copies:4",
+                                    &error));
+  CHECK(reparsed.planes[kDioramaPlane_Bg2Hi].stack == 0.29f);
+  CHECK(reparsed.planes[kDioramaPlane_Bg2Hi].stack_copies == 4);
+  /* And it must not invent the OTHER shapes it never authored. */
+  CHECK(!reparsed.planes[kDioramaPlane_Bg2Hi].set_rake);
+  CHECK(!reparsed.planes[kDioramaPlane_Bg2Hi].set_thickness);
+}
+
 /* A rake-only room is a real override, so "Reset room" has something to undo and
  * the exporter must emit it. Getting RoomIsActive wrong here would make an
  * authored rake vanish on save. */
@@ -514,6 +608,8 @@ int main(void) {
   TestLineParsing();
   TestFormatRoundTrips();
   TestRakeAndThicknessResolve();
+  TestStackResolve();
+  TestStackParseAndRoundTrip();
   TestRakeOnlyRoomIsActiveAndRoundTrips();
   TestRakeAndThicknessRejectBadValues();
   TestInactiveRoomEmitsNothing();

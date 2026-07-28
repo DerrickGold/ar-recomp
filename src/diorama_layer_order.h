@@ -53,6 +53,13 @@ enum {
   /* A room is identified by one (group, map) byte pair. */
   kDioramaRoomOverrideMax = 64,
   kDioramaLayerAlphaOpaque = 255,
+  /* Hard cap on stack copies per plane. Each copy is one more RenderGeometry
+   * call over the whole layer, so this bounds the worst case an authored file
+   * can impose on a frame: 10 planes x this, on top of the base pass. Chosen so
+   * a fully-authored room stays well inside a 60 Hz budget rather than because
+   * more copies stop looking better. */
+  kDioramaStackMax = 8,
+  kDioramaStackCopiesDefault = 3,
 };
 
 /* One plane's override within a room. Each knob has its own `set` flag so a
@@ -106,6 +113,36 @@ typedef struct DioramaPlaneOverride {
    * smear. */
   bool set_thickness;
   float thickness;
+  /* STACK — fill the depth gap by REPEATING the layer at intermediate depths,
+   * instead of tilting it (rake) or extruding a side face from it (thickness).
+   *
+   * `stack` is how deep to fill, in the same z units as `rake`: copies are laid
+   * from `z` toward `z + stack`. `stack_copies` is how many, 1..kDioramaStackMax.
+   *
+   * Why a third shape rather than a variant of the other two. A rake tilts the
+   * plane, which puts its own rows at DIFFERENT depths -- so the layer picks up
+   * two different parallax rates inside itself and shears as the camera moves,
+   * over-exaggerating that layer's parallax. That is the reported problem with
+   * the rake, and it is intrinsic to tilting rather than a tuning error: the
+   * perspective divide is per-vertex, so any plane spanning a depth range has a
+   * depth-dependent scale across its own surface. A stack never tilts anything.
+   * Every copy stays exactly parallel to the screen, so every copy has ONE
+   * parallax rate, and the layer as a whole keeps the flat, poster-like motion
+   * the diorama is built on -- it just occupies depth instead of being a sheet.
+   *
+   * The trade, stated honestly: copies are discrete, so the gap is filled by
+   * layered slices rather than continuous solid, and gaps remain BETWEEN slices.
+   * More copies close them at a linear cost in draw calls. This reads well for
+   * foliage, crowds, rain, cloud banks and rubble -- anything whose real-world
+   * form is many similar things at different depths -- and poorly for a surface
+   * that should be continuous, which is what thickness and rake are for.
+   *
+   * Copies fade and darken with depth so the stack reads as receding volume
+   * rather than as a smear of identical sprites. */
+  bool set_stack;
+  float stack;
+  bool set_stack_copies;
+  int stack_copies;
 } DioramaPlaneOverride;
 
 typedef struct DioramaRoomOverride {
@@ -127,6 +164,8 @@ typedef struct DioramaResolvedLayer {
   uint8_t alpha;
   float rake;       /* bottom edge sits at z + rake; 0 = parallel, as today */
   float thickness;  /* extrude the bottom edge forward to z + thickness; 0 = flat */
+  float stack;      /* fill depth by repeating the layer to z + stack; 0 = off */
+  int stack_copies; /* how many repeats, 1..kDioramaStackMax */
 } DioramaResolvedLayer;
 
 /* Find a room, or NULL. Pure lookup, no insertion. */
