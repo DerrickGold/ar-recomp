@@ -719,8 +719,19 @@ static const DioramaLayerDesc kDioramaLayers[] = {
   { kPpuOverlaySource_Bg3,  0.95f, { 1.0f,  1.0f,  1.0f,  1.0f },
     &g_settings.diorama_layer_bg3, false, true },
 };
-static const int kDioramaLayerCount =
-    (int)(sizeof(kDioramaLayers) / sizeof(kDioramaLayers[0]));
+/* An ENUM, not a `static const int`. In C a const object is not an integer
+ * constant expression, so using one as an array extent silently produces a
+ * VARIABLE-LENGTH ARRAY -- which is what the two resolved-layer arrays in the
+ * per-frame draw path were, allocating on the stack every frame with no bound
+ * the compiler could check. `-Wvla` reports it, but -Wall -Wextra do NOT imply
+ * -Wvla, so the build was silent about it.
+ *
+ * The neighbouring vertex buffers in the same function avoided this by using
+ * #define extents (DIORAMA_VERTS_PER_LAYER); an enum gets the same guarantee
+ * while keeping the count derived from the table rather than restated. */
+enum {
+  kDioramaLayerCount = (int)(sizeof(kDioramaLayers) / sizeof(kDioramaLayers[0]))
+};
 
 /* Per-room ($18,$19) layer overrides. The editor mutates this; the draw loop
  * reads it. Empty by default, and DioramaLayerOrder_Resolve on an empty table
