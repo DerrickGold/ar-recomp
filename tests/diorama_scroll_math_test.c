@@ -376,6 +376,85 @@ int main(void) {
     CHECK(near(za, zb));
   }
 
+  /* ── STACK DIRECTION and the redundant-copy rule ─────────────────────── */
+  {
+    const float kBase = 0.21f, kDepth = 0.29f;
+    float z = 0.0f, sh = 0.0f, al = 0.0f;
+    /* These must match DioramaStackDirection in diorama_layer_order.h. The pure
+     * module deliberately does not include that header, so this is the assertion
+     * that keeps the two numberings from drifting apart. */
+    const int kFwd = 0, kBack = 1, kBoth = 2;
+
+    /* FORWARD is the default and the reported case: Fillmore act 2's water
+     * (z=0.21) sits BEHIND the rock path (z=0.50), and higher z is nearer the
+     * camera, so the gap to fill is on the camera side. The far copy must land on
+     * the rock's depth. */
+    DioramaStackCopyDirected(3, 4, kBase, kDepth, kFwd, &z, NULL, NULL);
+    CHECK(near(z, kBase + kDepth));
+    CHECK(z > kBase);                    /* forward really means toward camera */
+    /* Unspecified direction must behave exactly as forward, so the pre-existing
+     * DioramaStackCopy callers keep their behaviour. */
+    float z_plain = 0.0f;
+    DioramaStackCopy(3, 4, kBase, kDepth, &z_plain, NULL, NULL);
+    CHECK(near(z_plain, z));
+
+    /* BACKWARD is the mirror: a foreground layer receding into the scene. */
+    DioramaStackCopyDirected(3, 4, kBase, kDepth, kBack, &z, NULL, NULL);
+    CHECK(near(z, kBase - kDepth));
+    CHECK(z < kBase);
+
+    /* BOTH centres the fill on the plane: index 0 is the FAR edge, the last is
+     * the near edge, and the span is still exactly `depth`. */
+    float z_far = 0.0f, z_near = 0.0f;
+    DioramaStackCopyDirected(0, 5, kBase, kDepth, kBoth, &z_far, NULL, NULL);
+    DioramaStackCopyDirected(4, 5, kBase, kDepth, kBoth, &z_near, NULL, NULL);
+    CHECK(near(z_far, kBase - kDepth * 0.5f));
+    CHECK(near(z_near, kBase + kDepth * 0.5f));
+    CHECK(near(z_near - z_far, kDepth));
+
+    /* Fade follows DISTANCE from the plane, not signed depth -- otherwise a
+     * backward or centred stack would brighten as it receded. */
+    DioramaStackCopyDirected(3, 4, kBase, kDepth, kBack, NULL, &sh, &al);
+    CHECK(sh < 1.0f && al < 1.0f);
+    /* Centred: the two EDGES are equally faded, and the middle is brightest. */
+    float sh_far = 0.0f, sh_mid = 0.0f, sh_near = 0.0f;
+    DioramaStackCopyDirected(0, 5, kBase, kDepth, kBoth, NULL, &sh_far, NULL);
+    DioramaStackCopyDirected(2, 5, kBase, kDepth, kBoth, NULL, &sh_mid, NULL);
+    DioramaStackCopyDirected(4, 5, kBase, kDepth, kBoth, NULL, &sh_near, NULL);
+    CHECK(near(sh_far, sh_near));
+    CHECK(sh_mid > sh_far);
+    CHECK(near(sh_mid, 1.0f));
+
+    /* THE REDUNDANT COPY. Drawing the copy that coincides with the plane would
+     * double-darken the front face; missing a non-redundant one leaves a gap. */
+    CHECK(DioramaStackCopyIsRedundant(0, 4, kFwd));
+    CHECK(!DioramaStackCopyIsRedundant(1, 4, kFwd));
+    CHECK(DioramaStackCopyIsRedundant(0, 4, kBack));
+    /* Centred: index 0 is the far EDGE and must be drawn. */
+    CHECK(!DioramaStackCopyIsRedundant(0, 5, kBoth));
+    /* An odd centred count has a copy exactly at the plane -- the midpoint. */
+    CHECK(DioramaStackCopyIsRedundant(2, 5, kBoth));
+    /* An even one does not, so nothing may be skipped. */
+    for (int c = 0; c < 4; c++)
+      CHECK(!DioramaStackCopyIsRedundant(c, 4, kBoth));
+    /* And the skipped midpoint really is at the plane's depth. */
+    DioramaStackCopyDirected(2, 5, kBase, kDepth, kBoth, &z, NULL, NULL);
+    CHECK(near(z, kBase));
+    /* Out-of-range is not "redundant", it is simply not drawn. */
+    CHECK(!DioramaStackCopyIsRedundant(-1, 4, kFwd));
+    CHECK(!DioramaStackCopyIsRedundant(9, 4, kFwd));
+
+    /* An unknown direction falls back to forward rather than producing garbage. */
+    DioramaStackCopyDirected(3, 4, kBase, kDepth, 99, &z, NULL, NULL);
+    CHECK(near(z, kBase + kDepth));
+
+    /* Degenerate inputs behave as they do for the undirected form. */
+    DioramaStackCopyDirected(2, 4, kBase, -1.0f, kBoth, &z, NULL, NULL);
+    CHECK(near(z, kBase));
+    DioramaStackCopyDirected(0, 0, kBase, kDepth, kBoth, &z, NULL, NULL);
+    CHECK(near(z, kBase));
+  }
+
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return 1; }
   puts("diorama_scroll_math_test: PASS");
   return 0;

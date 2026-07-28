@@ -101,8 +101,35 @@ float DioramaSkirtNearShade(void);
 void DioramaStackCopy(int index, int copies, float z_base, float depth,
                       float *out_z, float *out_shade, float *out_alpha);
 
+/* Same, with a direction (a DioramaStackDirection, passed as int so this header
+ * keeps no dependency on the override module).
+ *
+ * Forward lays copies from z_base toward z_base + depth, i.e. TOWARD the camera,
+ * since higher z is nearer in this projection. That is the default and what the
+ * reported Fillmore act 2 case needs -- its water sits behind the rock path, so
+ * the gap to fill is on the camera side. Backward is the mirror, for a foreground
+ * layer receding into the scene. Both centres the fill on the plane, for something
+ * the plane sits in the middle of.
+ *
+ * Shade and alpha fall off with DISTANCE from the plane, not with signed depth, so
+ * a Backward or Both stack recedes visually the same way a Forward one does rather
+ * than brightening as it goes. */
+void DioramaStackCopyDirected(int index, int copies, float z_base, float depth,
+                              int direction, float *out_z, float *out_shade,
+                              float *out_alpha);
+
 /* True when a copy at `index` of `copies` is worth drawing at all: in range and
  * not fully transparent. The caller's loop guard, so the "is this a wasted draw"
  * rule lives with the arithmetic instead of being restated at the call site. */
 bool DioramaStackCopyIsVisible(int index, int copies);
+
+/* True when this copy coincides with the plane's OWN depth, so the caller must
+ * skip it -- the plane's existing draw already covers it, and drawing both would
+ * double-darken the front face at that depth.
+ *
+ * Not simply "index == 0": that only holds for a one-sided fill. A centred (Both)
+ * stack puts index 0 at the FAR edge, and its redundant copy is the middle one --
+ * which exists only for an ODD count. Keeping this rule here rather than at the
+ * call site is what stops the two from disagreeing. */
+bool DioramaStackCopyIsRedundant(int index, int copies, int direction);
 #endif

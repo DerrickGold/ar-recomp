@@ -62,6 +62,23 @@ enum {
   kDioramaStackCopiesDefault = 3,
 };
 
+/* Which way a stack lays its copies, relative to the plane's own depth. Higher z
+ * is NEARER the camera in this projection (the backdrop is z=0.00, the HUD z=0.95),
+ * so Forward means toward the viewer.
+ *
+ * Forward is the default because the reported case needs it: Fillmore act 2's
+ * water sits BEHIND the rock path (z=0.21 vs 0.50), so the gap to fill is between
+ * the water and the camera. Backward exists for the mirror case -- a foreground
+ * layer that should recede into the scene behind it -- and Both spreads the fill
+ * either side of the plane, for something the plane sits in the MIDDLE of, like a
+ * cloud bank or a dust volume. */
+typedef enum DioramaStackDirection {
+  kDioramaStack_Forward = 0,   /* z .. z + depth  (toward the camera) */
+  kDioramaStack_Backward = 1,  /* z - depth .. z  (away from the camera) */
+  kDioramaStack_Both = 2,      /* z - depth/2 .. z + depth/2 */
+  kDioramaStack_DirectionCount,
+} DioramaStackDirection;
+
 /* One plane's override within a room. Each knob has its own `set` flag so a
  * room can author exactly one of them: `set_order` without `set_z` reorders
  * without touching depth-of-field, and vice versa. That also makes export /
@@ -141,8 +158,25 @@ typedef struct DioramaPlaneOverride {
    * rather than as a smear of identical sprites. */
   bool set_stack;
   float stack;
+  /* Copy count. Authoring this directly pins an EXACT number of slices, which is
+   * what you want when the look depends on the count itself (four distinct
+   * cloud banks, say). Mutually informative with `stack_density` below: an
+   * explicit count always wins, since it is the more specific instruction. */
   bool set_stack_copies;
   int stack_copies;
+  /* Copies per unit of depth, as a fraction of the fill. Density rather than an
+   * absolute count because slice SPACING is what the eye judges, and a fixed
+   * count gives different spacing in every room: `copies:4` across a 0.29 gap
+   * spaces slices 0.097 apart, but across a 0.10 gap only 0.033. Authoring a
+   * density instead keeps the visual result consistent as the gap changes, and
+   * lets one value be reused across rooms.
+   *
+   * Resolved to a count and clamped to kDioramaStackMax, so a large density on a
+   * deep fill cannot silently blow the per-frame draw budget. */
+  bool set_stack_density;
+  float stack_density;
+  bool set_stack_direction;
+  int stack_direction;   /* DioramaStackDirection */
 } DioramaPlaneOverride;
 
 typedef struct DioramaRoomOverride {
@@ -165,8 +199,25 @@ typedef struct DioramaResolvedLayer {
   float rake;       /* bottom edge sits at z + rake; 0 = parallel, as today */
   float thickness;  /* extrude the bottom edge forward to z + thickness; 0 = flat */
   float stack;      /* fill depth by repeating the layer to z + stack; 0 = off */
-  int stack_copies; /* how many repeats, 1..kDioramaStackMax */
+  int stack_copies; /* resolved repeat count, 1..kDioramaStackMax */
+  int stack_direction; /* DioramaStackDirection */
 } DioramaResolvedLayer;
+
+/* Resolve a copy count from an authored density and fill depth.
+ *
+ * Density is copies per unit depth, so the count scales with the gap and slice
+ * SPACING stays consistent across rooms -- which is what the eye judges. Always
+ * returns at least 2 for a non-zero fill (one copy is just the plane again, so a
+ * density that rounded to 1 would silently disable the stack), and never more
+ * than kDioramaStackMax, since each copy is another full-layer draw call.
+ * Returns 1 for a zero/negative depth or density, i.e. no stack. Pure. */
+int DioramaLayerOrder_StackCopiesForDensity(float depth, float density);
+
+/* Manifest token for a stack direction ("forward"/"backward"/"both"), and its
+ * inverse (-1 on an unknown token). These strings ARE the file grammar, so
+ * renaming one invalidates authored files. */
+const char *DioramaLayerOrder_StackDirectionToken(int direction);
+int DioramaLayerOrder_StackDirectionFromToken(const char *token);
 
 /* Find a room, or NULL. Pure lookup, no insertion. */
 const DioramaRoomOverride *DioramaLayerOrder_Find(
