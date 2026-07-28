@@ -9,6 +9,7 @@
  * this file at all. */
 #include "diorama_scroll_math.h"
 
+#include <math.h>    /* fabsf: symmetric fade for a centred stack */
 #include <stdio.h>   /* fprintf (AR_INTERP_LOG) */
 #include <stdlib.h>  /* getenv (AR_INTERP_LOG) */
 
@@ -188,4 +189,59 @@ void DioramaStackCopy(int index, int copies, float z_base, float depth,
   if (out_z) *out_z = z_base + f * depth;
   if (out_shade) *out_shade = 1.0f - (1.0f - kStackFarShade) * f;
   if (out_alpha) *out_alpha = 1.0f - (1.0f - kStackFarAlpha) * f;
+}
+
+/* Mirrors DioramaStackDirection (diorama_layer_order.h). Kept as local constants
+ * so this pure module does not depend on the override module's header; the test
+ * asserts the two agree. */
+enum { kStackDirForward = 0, kStackDirBackward = 1, kStackDirBoth = 2 };
+
+void DioramaStackCopyDirected(int index, int copies, float z_base, float depth,
+                              int direction, float *out_z, float *out_shade,
+                              float *out_alpha) {
+  if (copies < 1) copies = 1;
+  if (!(depth > 0.0f)) depth = 0.0f;
+  if (index < 0) index = 0;
+  if (index > copies - 1) index = copies - 1;
+  float f = (copies > 1) ? (float)index / (float)(copies - 1) : 0.0f;
+
+  float z = z_base, distance = f;
+  switch (direction) {
+    case kStackDirBackward:
+      z = z_base - f * depth;
+      break;
+    case kStackDirBoth:
+      /* Centred on the plane: index 0 is the far edge, the last is the near edge,
+       * and for an odd count the middle copy coincides with the plane itself.
+       * Distance-from-plane is a fold, so the fade is symmetric about the centre.
+       *
+       * A single copy is a special case: there is no span to centre, so it sits ON
+       * the plane rather than at (f-0.5) == -0.5, which would put the one copy of
+       * a degenerate stack at the far edge with nothing at the plane at all. */
+      if (copies > 1) {
+        z = z_base + (f - 0.5f) * depth;
+        distance = fabsf(f - 0.5f) * 2.0f;
+      }
+      break;
+    case kStackDirForward:
+    default:
+      z = z_base + f * depth;
+      break;
+  }
+  if (out_z) *out_z = z;
+  if (out_shade) *out_shade = 1.0f - (1.0f - kStackFarShade) * distance;
+  if (out_alpha) *out_alpha = 1.0f - (1.0f - kStackFarAlpha) * distance;
+}
+
+bool DioramaStackCopyIsRedundant(int index, int copies, int direction) {
+  if (copies < 1) copies = 1;
+  if (index < 0 || index >= copies) return false;
+  if (direction == kStackDirBoth) {
+    /* Offsets are (i/(copies-1) - 0.5)*depth, so a copy lands exactly on the
+     * plane only when copies is odd, at the midpoint index. */
+    if (copies < 2 || (copies % 2) == 0) return false;
+    return index == (copies - 1) / 2;
+  }
+  /* Forward and backward both start at the plane. */
+  return index == 0;
 }

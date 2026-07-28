@@ -34,6 +34,36 @@ int DioramaLayerOrder_PlaneFromToken(const char *token) {
   return -1;
 }
 
+static const struct { int direction; const char *token; } kStackDirTokens[] = {
+  { kDioramaStack_Forward,  "forward" },
+  { kDioramaStack_Backward, "backward" },
+  { kDioramaStack_Both,     "both" },
+};
+
+const char *DioramaLayerOrder_StackDirectionToken(int direction) {
+  for (size_t i = 0; i < sizeof(kStackDirTokens) / sizeof(kStackDirTokens[0]); i++)
+    if (kStackDirTokens[i].direction == direction) return kStackDirTokens[i].token;
+  return "forward";
+}
+
+int DioramaLayerOrder_StackDirectionFromToken(const char *token) {
+  if (!token) return -1;
+  for (size_t i = 0; i < sizeof(kStackDirTokens) / sizeof(kStackDirTokens[0]); i++)
+    if (!strcmp(kStackDirTokens[i].token, token)) return kStackDirTokens[i].direction;
+  return -1;
+}
+
+int DioramaLayerOrder_StackCopiesForDensity(float depth, float density) {
+  if (!(depth > 0.0f) || !(density > 0.0f)) return 1;   /* also catches NaN */
+  /* +1 because N slices span N-1 intervals: a density of 10 over a 0.2 fill wants
+   * 2 intervals and therefore 3 planes. */
+  float exact = depth * density;
+  int copies = (int)(exact + 0.5f) + 1;
+  if (copies < 2) copies = 2;
+  if (copies > kDioramaStackMax) copies = kDioramaStackMax;
+  return copies;
+}
+
 const DioramaRoomOverride *DioramaLayerOrder_Find(
     const DioramaLayerOrderTable *table, uint8_t map_group,
     uint8_t map_number) {
@@ -82,7 +112,8 @@ bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     const DioramaPlaneOverride *o = &room->planes[plane];
     if (o->set_order || o->set_z || o->set_alpha || o->set_rake ||
-        o->set_thickness || o->set_stack || o->set_stack_copies)
+        o->set_thickness || o->set_stack || o->set_stack_copies ||
+        o->set_stack_density || o->set_stack_direction)
       return true;
   }
   return false;
@@ -133,11 +164,19 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
     if (o->set_rake) out[i].rake = o->rake;
     if (o->set_thickness) out[i].thickness = o->thickness;
     if (o->set_stack) out[i].stack = o->stack;
-    /* A stack depth with no explicit count is the common authoring case, so it
-     * gets a usable default rather than silently resolving to zero copies (which
-     * would make `stack:` alone look broken). */
-    if (o->set_stack_copies) out[i].stack_copies = o->stack_copies;
-    else if (o->set_stack) out[i].stack_copies = kDioramaStackCopiesDefault;
+    if (o->set_stack_direction) out[i].stack_direction = o->stack_direction;
+    /* Count precedence: an explicit `copies` is the most specific instruction and
+     * wins; then a `density`, resolved against this room's own fill depth; then a
+     * plain `stack:` gets a usable default rather than silently resolving to zero
+     * copies, which would make the key look broken when authored alone. */
+    if (o->set_stack_copies) {
+      out[i].stack_copies = o->stack_copies;
+    } else if (o->set_stack_density) {
+      out[i].stack_copies = DioramaLayerOrder_StackCopiesForDensity(
+          out[i].stack, o->stack_density);
+    } else if (o->set_stack) {
+      out[i].stack_copies = kDioramaStackCopiesDefault;
+    }
     if (o->set_order) keys[i] = o->order;
   }
   if (!active) return n;
@@ -309,6 +348,26 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       edit.stack = (float)stack;
       edit.set_stack = true;
       touched = true;
+    } else if (!strcmp(word, "density")) {
+      /* Copies per unit depth. Upper bound is generous because the resolved count
+       * is clamped anyway; this only rejects nonsense. */
+      double density = strtod(value, &end);
+      if (end == value || (end && *end) || density <= 0.0 || density > 1000.0) {
+        if (out_error) *out_error = "bad density (>0)";
+        return false;
+      }
+      edit.stack_density = (float)density;
+      edit.set_stack_density = true;
+      touched = true;
+    } else if (!strcmp(word, "dir")) {
+      int dir = DioramaLayerOrder_StackDirectionFromToken(value);
+      if (dir < 0) {
+        if (out_error) *out_error = "bad dir (forward/backward/both)";
+        return false;
+      }
+      edit.stack_direction = dir;
+      edit.set_stack_direction = true;
+      touched = true;
     } else if (!strcmp(word, "copies")) {
       long copies = strtol(value, &end, 10);
       if (end == value || (end && *end) || copies < 1 ||
@@ -371,7 +430,8 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     int plane = kPlaneTokens[i].plane;
     const DioramaPlaneOverride *o = &room->planes[plane];
     if (!o->set_order && !o->set_z && !o->set_alpha && !o->set_rake &&
-        !o->set_thickness && !o->set_stack && !o->set_stack_copies)
+        !o->set_thickness && !o->set_stack && !o->set_stack_copies &&
+        !o->set_stack_density && !o->set_stack_direction)
       continue;
     /* Emit only the authored knobs, so a re-import reproduces exactly this
      * override rather than pinning the two the author never touched. */
@@ -383,6 +443,10 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     if (o->set_thickness) APPEND(" thick:%.4g", (double)o->thickness);
     if (o->set_stack) APPEND(" stack:%.4g", (double)o->stack);
     if (o->set_stack_copies) APPEND(" copies:%d", o->stack_copies);
+    if (o->set_stack_density) APPEND(" density:%.4g", (double)o->stack_density);
+    if (o->set_stack_direction)
+      APPEND(" dir:%s", DioramaLayerOrder_StackDirectionToken(
+                            o->stack_direction));
     APPEND("\n");
   }
 #undef APPEND

@@ -832,14 +832,19 @@ bool Diorama_SaveLayerManifest(void) {
           "# Diorama per-room layer overrides.\n"
           "# Section is [layers:GG:MM] with $18/$19 in hex; keys are\n"
           "#   order:<slot>  z:<depth>  alpha:<0-255>  rake:<-1..1>"
-          "  thick:<0..1>  stack:<0..1>  copies:<1..8>\n"
+          "  thick:<0..1>\n"
+          "#   stack:<0..1>  copies:<1..8>  density:<per unit>  dir:<forward|"
+          "backward|both>\n"
           "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake),\n"
           "# which closes the void between two parallel planes at a tilted\n"
           "# camera. thick extrudes the plane's BOTTOM edge forward to\n"
           "# z+thickness instead, so the layer reads as a block with a near\n"
           "# face while its own art stays square to the camera. stack fills the\n"
-          "# gap with `copies` PARALLEL repeats laid to z+stack -- unlike rake it\n"
-          "# never tilts, so the layer keeps one parallax rate. All compose.\n\n");
+          "# gap with PARALLEL repeats -- unlike rake it never tilts, so the\n"
+          "# layer keeps one parallax rate. dir picks which side of the plane to\n"
+          "# fill (forward = toward the camera, the default); density sets slices\n"
+          "# per unit depth so spacing stays consistent across rooms. All\n"
+          "# compose.\n\n");
   int written = 0;
   for (int i = 0; i < g_layer_overrides.count; i++) {
     const DioramaRoomOverride *r = &g_layer_overrides.rooms[i];
@@ -1529,6 +1534,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     const float layer_thickness = resolved[i].thickness;
     const float layer_stack = resolved[i].stack;
     const int layer_stack_copies = resolved[i].stack_copies;
+    const int layer_stack_dir = resolved[i].stack_direction;
     if (layer->visible && !*layer->visible) continue;
     /* A5 (followup doc): with diorama_hud_flat on, BG3 is deliberately not
      * captured as a diorama layer (actraiser_rtl.c) and the anchored flat
@@ -1633,9 +1639,19 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * a single parallax rate and the layer keeps the flat poster-like motion the
      * whole diorama is built on.
      *
-     * Copy 0 is at the plane's own depth and is skipped -- the plane's own draw
-     * below IS that copy, so drawing it twice would just double-darken the front
-     * face. Copies run from the farthest inward so nearer copies land on top.
+     * `dir` chooses which side of the plane gets filled: forward (toward the
+     * camera, the default and what Fillmore act 2 needs, since its water sits
+     * BEHIND the rock path), backward, or both. Copies are drawn in descending
+     * index, which is far-to-near for forward and near-to-far for backward -- for
+     * a backward stack that is still correct, because those copies are all behind
+     * the plane and the plane is drawn last over them either way. Only `both`
+     * genuinely interleaves, and its far half is drawn before its near half.
+     *
+     * Copy 0 coincides with the plane's own depth for a forward or backward
+     * stack, and is skipped -- the plane's own draw below IS that copy, so drawing
+     * it twice would double-darken the front face. A `both` stack has no copy at
+     * the plane unless the count is odd, so nothing is skipped wrongly; the index-0
+     * copy there is the far edge, which must be drawn.
      *
      * Same deliberate exclusions as the skirt: no shadow pass, no DOF/rim shader
      * (they key off a single depth and would be recomputed per copy for no
@@ -1644,11 +1660,17 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       int stack_nv = 0, stack_ni = 0;
       SDL_Vertex stack_verts[DIORAMA_VERTS_PER_LAYER];
       int stack_indices[DIORAMA_INDICES_PER_LAYER];
-      for (int c = layer_stack_copies - 1; c >= 1; c--) {
+      for (int c = layer_stack_copies - 1; c >= 0; c--) {
         if (!DioramaStackCopyIsVisible(c, layer_stack_copies)) continue;
+        /* Skip whichever copy coincides with the plane's own depth -- index 0 for
+         * a one-sided fill, the middle one for an odd-count centred fill. The
+         * rule lives in the pure module so it cannot drift from the geometry. */
+        if (DioramaStackCopyIsRedundant(c, layer_stack_copies, layer_stack_dir))
+          continue;
         float copy_z = z_world, copy_shade = 1.0f, copy_alpha = 1.0f;
-        DioramaStackCopy(c, layer_stack_copies, z_world, layer_stack,
-                         &copy_z, &copy_shade, &copy_alpha);
+        DioramaStackCopyDirected(c, layer_stack_copies, z_world, layer_stack,
+                                 layer_stack_dir, &copy_z, &copy_shade,
+                                 &copy_alpha);
         SDL_FColor copy_color = shade;
         copy_color.r *= copy_shade;
         copy_color.g *= copy_shade;

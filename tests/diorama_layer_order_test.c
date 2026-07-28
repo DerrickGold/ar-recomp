@@ -483,6 +483,126 @@ static void TestStackParseAndRoundTrip(void) {
   CHECK(!reparsed.planes[kDioramaPlane_Bg2Hi].set_thickness);
 }
 
+/* DENSITY resolves to a count against the room's own fill depth. Density rather
+ * than a bare count because slice SPACING is what the eye judges, and a fixed
+ * count spaces slices differently in every room: copies:4 over a 0.29 gap spaces
+ * them 0.097 apart, over a 0.10 gap only 0.033. */
+static void TestStackDensityAndDirection(void) {
+  /* Count grows with the gap at a fixed density, which is the whole point. */
+  int wide = DioramaLayerOrder_StackCopiesForDensity(0.60f, 14.0f);
+  int narrow = DioramaLayerOrder_StackCopiesForDensity(0.10f, 14.0f);
+  CHECK(wide > narrow);
+  /* Spacing stays roughly constant across those two, unlike a fixed count. */
+  float space_wide = 0.60f / (float)(wide - 1);
+  float space_narrow = 0.10f / (float)(narrow - 1);
+  CHECK(space_wide < space_narrow * 3.0f);
+
+  /* EXACT counts, computed by hand rather than by calling the function under
+   * test. N slices span N-1 intervals, so a density of D over a depth of P wants
+   * round(P*D) intervals and therefore round(P*D)+1 planes. Asserting only
+   * relative properties here let an off-by-one survive: without the +1 a 0.29
+   * fill at density 14 gives 4 slices instead of 5. */
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(0.29f, 14.0f) == 5);  /* 4.06 -> 4+1 */
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(0.20f, 10.0f) == 3);  /* 2.00 -> 2+1 */
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(0.50f, 6.0f) == 4);   /* 3.00 -> 3+1 */
+  /* A fractional interval count must ROUND, not truncate: 0.30 x 9 = 2.7 intervals
+   * is nearer 3 than 2, so 4 slices. Truncating would give 3 and quietly space
+   * them wider than the author asked for. The cases above are all whole or
+   * near-whole, so they cannot tell the two apart. */
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(0.30f, 9.0f) == 4);   /* 2.70 -> 3+1 */
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(0.13f, 20.0f) == 4);  /* 2.60 -> 3+1 */
+  /* Spacing therefore lands on the authored density's reciprocal: 0.20 over
+   * 3 slices = 2 intervals of 0.10, which is 1/density. */
+  {
+    int c = DioramaLayerOrder_StackCopiesForDensity(0.20f, 10.0f);
+    float spacing = 0.20f / (float)(c - 1);
+    CHECK(spacing > 0.099f && spacing < 0.101f);
+  }
+
+  /* Never 1 for a real fill: one copy is just the plane again, so a density that
+   * rounded down to 1 would silently disable the stack it was asked for. */
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(0.01f, 1.0f) >= 2);
+  /* Clamped to the cap, since every copy is another full-layer draw call. */
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(1.0f, 1000.0f) ==
+        kDioramaStackMax);
+  /* No fill or no density means no stack. */
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(0.0f, 14.0f) == 1);
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(0.29f, 0.0f) == 1);
+  CHECK(DioramaLayerOrder_StackCopiesForDensity(-1.0f, 14.0f) == 1);
+
+  /* Resolve: a density authored with a stack yields that count. */
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kDioramaPlane_Bg2Hi].set_stack = true;
+  room->planes[kDioramaPlane_Bg2Hi].stack = 0.29f;
+  room->planes[kDioramaPlane_Bg2Hi].set_stack_density = true;
+  room->planes[kDioramaPlane_Bg2Hi].stack_density = 14.0f;
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  /* Hand-computed, NOT via the function under test -- otherwise this assertion
+   * holds for any implementation, including a wrong one. */
+  for (int i = 0; i < n; i++)
+    if (out[i].plane == kDioramaPlane_Bg2Hi)
+      CHECK(out[i].stack_copies == 5);
+
+  /* An explicit count is the more specific instruction and must WIN over a
+   * density authored alongside it. */
+  room->planes[kDioramaPlane_Bg2Hi].set_stack_copies = true;
+  room->planes[kDioramaPlane_Bg2Hi].stack_copies = 2;
+  n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount,
+                                out, 16);
+  for (int i = 0; i < n; i++)
+    if (out[i].plane == kDioramaPlane_Bg2Hi) CHECK(out[i].stack_copies == 2);
+
+  /* Direction tokens round-trip, and default to forward. */
+  CHECK(DioramaLayerOrder_StackDirectionFromToken("forward") ==
+        kDioramaStack_Forward);
+  CHECK(DioramaLayerOrder_StackDirectionFromToken("backward") ==
+        kDioramaStack_Backward);
+  CHECK(DioramaLayerOrder_StackDirectionFromToken("both") == kDioramaStack_Both);
+  CHECK(DioramaLayerOrder_StackDirectionFromToken("sideways") == -1);
+  CHECK(DioramaLayerOrder_StackDirectionFromToken(NULL) == -1);
+  for (int d = 0; d < kDioramaStack_DirectionCount; d++)
+    CHECK(DioramaLayerOrder_StackDirectionFromToken(
+              DioramaLayerOrder_StackDirectionToken(d)) == d);
+  /* An unresolved plane keeps forward, so an unauthored room is unchanged. */
+  for (int i = 0; i < n; i++)
+    if (out[i].plane != kDioramaPlane_Bg2Hi)
+      CHECK(out[i].stack_direction == kDioramaStack_Forward);
+
+  /* Parse + export both keys. */
+  DioramaRoomOverride parsed;
+  memset(&parsed, 0, sizeof(parsed));
+  const char *error = NULL;
+  CHECK(DioramaLayerOrder_ParseLine(
+      &parsed, "bg2hi = stack:0.29 density:14 dir:both", &error));
+  CHECK(parsed.planes[kDioramaPlane_Bg2Hi].stack_density == 14.0f);
+  CHECK(parsed.planes[kDioramaPlane_Bg2Hi].stack_direction ==
+        kDioramaStack_Both);
+  parsed.used = true; parsed.map_group = 0x01; parsed.map_number = 0x02;
+  CHECK(DioramaLayerOrder_RoomIsActive(&parsed));
+  char text[512];
+  CHECK(DioramaLayerOrder_FormatRoom(&parsed, text, sizeof(text)) > 0);
+  CHECK(strstr(text, "density:14") != NULL);
+  CHECK(strstr(text, "dir:both") != NULL);
+
+  const char *bad[] = {
+    "bg2hi = density:0", "bg2hi = density:-3", "bg2hi = density:abc",
+    "bg2hi = dir:sideways", "bg2hi = dir:", "bg2hi = dir:1",
+  };
+  for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+    DioramaRoomOverride tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    error = NULL;
+    if (DioramaLayerOrder_ParseLine(&tmp, bad[i], &error)) {
+      printf("FAIL accepted bad line: %s\n", bad[i]);
+      g_failures++;
+    }
+  }
+}
+
 /* A rake-only room is a real override, so "Reset room" has something to undo and
  * the exporter must emit it. Getting RoomIsActive wrong here would make an
  * authored rake vanish on save. */
@@ -610,6 +730,7 @@ int main(void) {
   TestRakeAndThicknessResolve();
   TestStackResolve();
   TestStackParseAndRoundTrip();
+  TestStackDensityAndDirection();
   TestRakeOnlyRoomIsActiveAndRoundTrips();
   TestRakeAndThicknessRejectBadValues();
   TestInactiveRoomEmitsNothing();
