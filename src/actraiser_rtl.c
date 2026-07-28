@@ -138,7 +138,16 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
     }
   }
 
-  if (snes->forceNmi && !yielding && !getenv("AR_NO4210YIELD")) {
+  /* Latched: ActRaiser_ReadRdnmi runs on EVERY $4210 read, and the game polls
+   * that register inside spin loops -- potentially thousands of times a frame,
+   * not once. getenv is ~150ns here, so an unlatched read costs up to a few
+   * percent of the frame budget at spin-loop rates for a switch that cannot
+   * change mid-run. The other getenv calls in this file are in per-frame or
+   * per-event paths where 150ns is genuinely free and latching would only add
+   * state. */
+  static int no_4210_yield = -1;
+  if (no_4210_yield < 0) no_4210_yield = getenv("AR_NO4210YIELD") ? 1 : 0;
+  if (snes->forceNmi && !yielding && !no_4210_yield) {
     static const uint32_t kSpinBlocks[] = {
       0x019293, /* intro/menu/effect wait */
       0x0192AA, /* effect-loop wait */
@@ -344,7 +353,10 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * down out of page 1 into zero-page and clobbers game variables (the old
    * AF86/$2100 open-bus crash). So pop the frame here to keep S balanced, which
    * is exactly what the hardware routine does. */
-  if (!getenv("AR_NOPOP")) cpu->S = (uint16)(cpu->S + 2);
+  /* Latched for the same reason: this runs on every vblank yield. */
+  static int no_pop = -1;
+  if (no_pop < 0) no_pop = getenv("AR_NOPOP") ? 1 : 0;
+  if (!no_pop) cpu->S = (uint16)(cpu->S + 2);
 
   /* AR_YIELDLOG=1: dump the recomp call stack + SNES return address at each
    * vblank yield to see what the main thread is doing frame to frame. Read the
@@ -357,7 +369,7 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
             snes_frame_counter, cpu->S, cpu->A, cpu->P, top);
     for (int i = top - 1; i >= 0 && i >= top - 6; i--)
       fprintf(stderr, " %s", g_recomp_stack[i] ? g_recomp_stack[i] : "?");
-    uint16 sp = getenv("AR_NOPOP") ? cpu->S : (uint16)(cpu->S - 2);
+    uint16 sp = no_pop ? cpu->S : (uint16)(cpu->S - 2);
     uint16 rlo = g_ram[(uint16)(sp + 1)];
     uint16 rhi = g_ram[(uint16)(sp + 2)];
     fprintf(stderr, " ret~%02x:%04x\n", cpu->PB, (uint16)(((rhi << 8) | rlo) + 1));
