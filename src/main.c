@@ -990,6 +990,9 @@ int main(int argc, char **argv) {
   /* The world map underlay reads three uncompressed ROM blobs once. A failure
    * is not fatal: the stage reports nothing usable and simply never draws. */
   SimWorldMap_Init(rom_data, rom_size);
+  /* Per-room diorama layer overrides. Absent file is the normal case and leaves
+   * every room drawing as built. */
+  Diorama_LoadLayerManifest();
   SettingsOverlay_SetInspectorInfoProvider(
       HostDevTools_FormatInspectorInfo);
 

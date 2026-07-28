@@ -358,6 +358,92 @@ static void TestFormatRoundTrips(void) {
 }
 
 /* An inactive room emits nothing, so a manifest never gains empty sections. */
+/* The rake is what closes the visible void between two parallel planes once the
+ * diorama camera tilts (Fillmore act 2: water at Bg2Hi z=0.21 floating behind a
+ * gap, rock path at Bg1 z=0.50). Thickness ships parsed-but-inert alongside it. */
+static void TestRakeAndThicknessResolve(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kPpuOverlaySource_Bg2].set_rake = true;
+  room->planes[kPpuOverlaySource_Bg2].rake = 0.29f;
+  room->planes[kPpuOverlaySource_Bg2].set_thickness = true;
+  room->planes[kPpuOverlaySource_Bg2].thickness = 0.10f;
+
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                    kDefaultCount, out, 16);
+  CHECK(n == kDefaultCount);
+  for (int i = 0; i < n; i++) {
+    if (out[i].plane == kPpuOverlaySource_Bg2) {
+      CHECK(out[i].rake == 0.29f);
+      CHECK(out[i].thickness == 0.10f);
+    } else {
+      /* Every other plane stays parallel — a rake is per-plane, never global. */
+      CHECK(out[i].rake == 0.0f);
+      CHECK(out[i].thickness == 0.0f);
+    }
+  }
+  /* A rake alone must not reorder anything: paint order is keyed on `order`. */
+  for (int i = 0; i < n; i++)
+    CHECK(out[i].plane == kDefaults[i].plane);
+}
+
+/* A rake-only room is a real override, so "Reset room" has something to undo and
+ * the exporter must emit it. Getting RoomIsActive wrong here would make an
+ * authored rake vanish on save. */
+static void TestRakeOnlyRoomIsActiveAndRoundTrips(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kDioramaPlane_Bg2Hi].set_rake = true;
+  room->planes[kDioramaPlane_Bg2Hi].rake = -0.25f;
+  CHECK(DioramaLayerOrder_RoomIsActive(room));
+
+  char text[512];
+  size_t need = DioramaLayerOrder_FormatRoom(room, text, sizeof(text));
+  CHECK(need > 0 && need < sizeof(text));
+  CHECK(strstr(text, "bg2hi = rake:-0.25\n") != NULL);
+
+  DioramaRoomOverride reparsed;
+  memset(&reparsed, 0, sizeof(reparsed));
+  const char *error = NULL;
+  CHECK(DioramaLayerOrder_ParseLine(&reparsed, "bg2hi = rake:-0.25", &error));
+  CHECK(error == NULL);
+  CHECK(reparsed.planes[kDioramaPlane_Bg2Hi].set_rake);
+  CHECK(reparsed.planes[kDioramaPlane_Bg2Hi].rake == -0.25f);
+  /* Parsing a rake must not imply the other knobs. */
+  CHECK(!reparsed.planes[kDioramaPlane_Bg2Hi].set_z);
+  CHECK(!reparsed.planes[kDioramaPlane_Bg2Hi].set_order);
+  CHECK(!reparsed.planes[kDioramaPlane_Bg2Hi].set_thickness);
+
+  /* Both knobs together, and the reserved one round-trips even though nothing
+   * consumes it yet — otherwise authored files would silently lose it. */
+  memset(&reparsed, 0, sizeof(reparsed));
+  CHECK(DioramaLayerOrder_ParseLine(&reparsed, "bg2 = rake:0.3 thick:0.125",
+                                    &error));
+  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].rake == 0.3f);
+  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].thickness == 0.125f);
+}
+
+static void TestRakeAndThicknessRejectBadValues(void) {
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  const char *error = NULL;
+  /* Out of range in both directions — a typo must not fling a plane through
+   * the camera. */
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2 = rake:2.5", &error));
+  CHECK(error != NULL);
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2 = rake:-2.5", &error));
+  /* Thickness extrudes forward only; negative is a rake's job. */
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2 = thick:-0.1", &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2 = thick:9", &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2 = rake:abc", &error));
+  /* A rejected line leaves nothing behind. */
+  CHECK(!room.planes[kPpuOverlaySource_Bg2].set_rake);
+  CHECK(!room.planes[kPpuOverlaySource_Bg2].set_thickness);
+}
+
 static void TestInactiveRoomEmitsNothing(void) {
   DioramaRoomOverride room;
   memset(&room, 0, sizeof(room));
@@ -427,6 +513,9 @@ int main(void) {
   TestSectionParsing();
   TestLineParsing();
   TestFormatRoundTrips();
+  TestRakeAndThicknessResolve();
+  TestRakeOnlyRoomIsActiveAndRoundTrips();
+  TestRakeAndThicknessRejectBadValues();
   TestInactiveRoomEmitsNothing();
   TestFormatReportsTruncation();
   TestTokenRoundTrip();

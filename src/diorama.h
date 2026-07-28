@@ -4,6 +4,15 @@
 #include <SDL3/SDL.h>
 #include "diorama_planes.h"
 
+/* The per-room ($18,$19) layer override table the editor edits and the draw
+ * loop reads. Never NULL. Empty means "every room draws as built". */
+struct DioramaLayerOrderTable *Diorama_LayerOverrides(void);
+
+/* Load / write `diorama-layers.ini` (beside settings.ini). Load is called once
+ * at boot; save is the editor's "Export manifest". Absent file = no overrides. */
+void Diorama_LoadLayerManifest(void);
+bool Diorama_SaveLayerManifest(void);
+
 void Diorama_SeedCameraFromSettings(void);
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom);
 bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held);
