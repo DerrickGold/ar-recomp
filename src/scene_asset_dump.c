@@ -61,11 +61,16 @@ static uint32_t CrcTableEntry(uint32_t value) {
   return value;
 }
 
+/* CRC-32 lookup table size: 256 because the table is indexed by one byte. */
+enum { kCrcTableEntries = 256 };
+
 static uint32_t UpdateCrc(uint32_t crc, const uint8_t *data, size_t size) {
-  static uint32_t table[256];
+  /* CRC-32 byte-at-a-time lookup: 256 entries because the index is a byte. */
+  static uint32_t table[kCrcTableEntries];
   static bool initialized;
   if (!initialized) {
-    for (int i = 0; i < 256; i++) table[i] = CrcTableEntry((uint32_t)i);
+    for (int i = 0; i < kCrcTableEntries; i++)
+    table[i] = CrcTableEntry((uint32_t)i);
     initialized = true;
   }
   for (size_t i = 0; i < size; i++)
@@ -326,7 +331,7 @@ static bool WriteObjAtlas(const char *directory, const Ppu *ppu) {
     int base = name_select ? PPU_objTileAdr2(ppu) : PPU_objTileAdr1(ppu);
     for (int palette = 0; palette < 8; palette++) {
       int section = name_select * 8 + palette;
-      for (int tile = 0; tile < 256; tile++) {
+      for (int tile = 0; tile < kPpuObjTileIds; tile++) {
         int char_address = (base + tile * 16) & 0x7fff;
         int tile_x = (tile & 15) * 8;
         int tile_y = section * 128 + (tile >> 4) * 8;
@@ -462,9 +467,9 @@ static bool WriteMetadata(const char *directory, const Ppu *ppu,
     int x_raw = ppu->oam[index] & 0xff;
     x_raw |= ((ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
     int x = x_raw;
-    if (x >= 256 + ppu->extraRightCur) x -= 512;
+    if (x >= kPpuXPixels + ppu->extraRightCur) x -= kPpuObjXWrap;
     int y_raw = ppu->oam[index] >> 8;
-    int y = y_raw >= 224 ? y_raw - 256 : y_raw;
+    int y = y_raw >= kPpuObjYNegativeFrom ? y_raw - kPpuObjYWrap : y_raw;
     int oam1 = ppu->oam[index + 1];
     int size_bit =
         (ppu->highOam[index >> 3] >> ((index & 7) + 1)) & 1;

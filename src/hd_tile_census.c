@@ -83,7 +83,7 @@ typedef struct GroupDynamics {
 } GroupDynamics;
 
 static GroupDynamics g_group_dynamics[16];
-static uint16 g_prev_cgram[256];
+static uint16 g_prev_cgram[kPpuCgramEntries];
 static uint16 g_prev_cgram_gf;
 static int g_prev_cgram_valid;
 
@@ -190,8 +190,11 @@ static void DecodePlanar(const uint16 *words, int bpp, uint8 *out64) {
       int shift = 7 - px;
       uint32 bits01 = plane01 >> shift;
       uint32 bits23 = plane23 >> shift;
-      out64[row * 8 + px] = (uint8)((bits01 & 1) | (bits01 >> 7) & 2 |
-                                    (bits23 << 2) & 4 | (bits23 >> 5) & 8);
+      /* Parenthesised explicitly: & already binds tighter than |, so this is
+       * what the expression always meant, but -Wbitwise-op-parentheses is right
+       * that a reader of a bitplane decode should not have to know that. */
+      out64[row * 8 + px] = (uint8)((bits01 & 1) | ((bits01 >> 7) & 2) |
+                                    ((bits23 << 2) & 4) | ((bits23 >> 5) & 8));
     }
   }
 }
@@ -346,10 +349,14 @@ static void SurveyObjects(void) {
     int y = g_ppu->oam[index] >> 8;
     int size = kSpriteSizes[g_ppu->obsel >> 5]
                            [(g_ppu->highOam[index >> 3] >> ((index & 7) + 1)) & 1];
-    if (y >= 224 && y + size <= 256) continue; /* fully below the screen */
+    /* Y in the negative-position band (kPpuObjYNegativeFrom..kPpuObjYWrap) that
+     * never wraps back onto a visible line: fully below the screen. */
+    if (y >= kPpuObjYNegativeFrom && y + size <= kPpuObjYWrap) continue;
     int x = g_ppu->oam[index] & 0xff;
     x |= ((g_ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
-    if (x >= 256 && x + size <= 512) continue; /* fully off right/left */
+    /* X past the visible width but short of the 9-bit wrap: off to the right
+     * and not straddling back onto the left edge. */
+    if (x >= kPpuXPixels && x + size <= kPpuObjXWrap) continue;
     int oam1 = g_ppu->oam[index + 1];
     int obj_adr = (oam1 & 0x100) ? PPU_objTileAdr2(g_ppu)
                                  : PPU_objTileAdr1(g_ppu);
@@ -372,10 +379,11 @@ static void SurveyMode7(void) {
    * estimate under rotation is unreliable, so record every canvas tile that
    * is referenced by the tilemap. Coarse but complete, and the canvas is at
    * most 256 tiles. */
-  uint8 seen[256] = { 0 };
+  /* One flag per tile id; 256 because the OAM tile field is one byte. */
+  uint8 seen[kPpuObjTileIds] = { 0 };
   for (int i = 0; i < 128 * 128; i++)
     seen[g_ppu->vram[i] & 0xff] = 1;
-  for (int tile = 0; tile < 256; tile++) {
+  for (int tile = 0; tile < kPpuObjTileIds; tile++) {
     if (!seen[tile]) continue;
     uint8 bytes[64];
     for (int p = 0; p < 64; p++)

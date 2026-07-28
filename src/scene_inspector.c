@@ -301,7 +301,8 @@ static int InspectObjects(TextBuilder *panel, TextBuilder *report) {
   for (int slot = 0; slot < 128; slot++) {
     int index = slot * 2;
     int y = g_ppu->oam[index] >> 8;
-    int display_y = y >= 224 ? y - 256 : y;
+    int display_y =
+        y >= kPpuObjYNegativeFrom ? y - kPpuObjYWrap : y;
     int size_bit =
         (g_ppu->highOam[index >> 3] >> ((index & 7) + 1)) & 1;
     int size = sprite_sizes[PPU_objSize(g_ppu)][size_bit];
@@ -309,7 +310,8 @@ static int InspectObjects(TextBuilder *panel, TextBuilder *report) {
     if (row >= size) continue;
     int x = g_ppu->oam[index] & 0xff;
     x |= ((g_ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
-    if (x >= kActRaiserAuthenticWidth + g_ppu->extraRightCur) x -= 512;
+    if (x >= kActRaiserAuthenticWidth + g_ppu->extraRightCur)
+      x -= kPpuObjXWrap;
     int local_x = s.x - x;
     if (local_x < 0 || local_x >= size) continue;
 

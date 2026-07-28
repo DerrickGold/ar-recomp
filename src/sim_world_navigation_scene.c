@@ -159,11 +159,11 @@ float SimWorldNavigationScene_LocationHaze(
   return t * t * (3.0f - 2.0f * t);
 }
 
-static bool OamSlotHidden(const uint16_t oam[256], int slot) {
+static bool OamSlotHidden(const uint16_t oam[kSimWorldNavigationOamWords], int slot) {
   return (oam[slot * 2] >> 8) == 0xE0;
 }
 
-static bool PalaceSignatureAt(const uint16_t oam[256], int first) {
+static bool PalaceSignatureAt(const uint16_t oam[kSimWorldNavigationOamWords], int first) {
   if (first < 1 || first > 128 - 9) return false;
   unsigned occupied = 0;
   for (int i = 0; i < 9; i++) {
@@ -187,7 +187,7 @@ static bool PalaceSignatureAt(const uint16_t oam[256], int first) {
 }
 
 bool SimWorldNavigationScene_ClassifyOam(
-    const uint16_t oam[256],
+    const uint16_t oam[kSimWorldNavigationOamWords],
     SimWorldNavigationComposition *out) {
   if (!out) return false;
   memset(out, 0, sizeof(*out));

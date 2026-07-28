@@ -13,6 +13,10 @@ enum {
   kWorldTilesRomOffset = 0x070000,    /* LoROM $0E:8000, 256 x 64B 8bpp */
   kWorldPaletteRomOffset = 0x0E3F93,  /* LoROM $1C:BF93, 256 x BGR555 */
   kWorldTileCount = 256,
+  /* Palette entries. 256 because an 8bpp pixel is one byte -- it happens to
+   * equal kWorldTileCount and is not derived from it: the tile COUNT is how many
+   * tiles the ROM blob holds, this is how many colours a pixel can name. */
+  kWorldPaletteEntries = 256,
   kWorldTileBytes = 64,
   kWorldWaterFrameCount = 4,
   kWorldWaterSourceFirst = 0xB000,
@@ -48,7 +52,7 @@ static struct {
   uint8_t water_frames[kWorldWaterFrameCount][kWorldTileBytes];
   uint16_t water_source;
   bool water_source_valid;
-  uint32_t palette[256];
+  uint32_t palette[kWorldPaletteEntries];
   uint32_t serial;
   /* One flag per tile (tilemap is one byte per tile, so this is indexed
    * identically). A tile is dirty when its tilemap byte changed since it was
@@ -78,7 +82,7 @@ static uint32_t ExpandBgr555(uint16_t value) {
 
 bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   memset(&g_world, 0, sizeof(g_world));
-  size_t needed = kWorldPaletteRomOffset + 256 * 2;
+  size_t needed = kWorldPaletteRomOffset + kWorldPaletteEntries * 2;
   if (!rom_data || rom_size < needed) {
     fprintf(stderr,
             "[sim-worldmap] unavailable: ROM is %zu bytes, need %zu\n",
@@ -92,7 +96,7 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   memcpy(g_world.tiles, rom_data + kWorldTilesRomOffset, sizeof(g_world.tiles));
   memcpy(g_world.water_frames, rom_data + kWorldWaterFramesRomOffset,
          sizeof(g_world.water_frames));
-  for (int i = 0; i < 256; i++) {
+  for (int i = 0; i < kWorldPaletteEntries; i++) {
     const uint8_t *entry = rom_data + kWorldPaletteRomOffset + i * 2;
     g_world.palette[i] =
         ExpandBgr555((uint16_t)(entry[0] | ((uint16_t)entry[1] << 8)));

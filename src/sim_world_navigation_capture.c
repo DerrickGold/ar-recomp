@@ -38,6 +38,12 @@ static bool CaptureLayer(Ppu *ppu,
   return true;
 }
 
+/* The scene module is pure and cannot include ppu.h, so it declares its own OAM
+ * word count. This file sees both and is where the two are kept honest. */
+_Static_assert(kSimWorldNavigationOamWords == kPpuOamWords,
+               "sim_world_navigation_scene.h's mirrored OAM word count must "
+               "match ppu.h");
+
 bool SimWorldNavigationCapture_Capture(SimFrameData *frame, Ppu *ppu) {
   if (!frame || frame->view != kSimView_WorldNavigation ||
       !frame->world_navigation_scene.valid)
