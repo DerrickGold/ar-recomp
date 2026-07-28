@@ -3,6 +3,7 @@
 #include "diorama_layer_order.h"
 #include "diorama_skybox_uv.h"
 #include "camera_orbit.h"
+#include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
 #include "diorama_scroll_math.h"   /* R17/C1: DioramaInterpUvWindow */
 #include "scene3d_math.h"
 #include "settings.h"

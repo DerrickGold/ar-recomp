@@ -110,6 +110,7 @@ add_executable(ActRaiserRecomp
     src/diorama_host.c
     src/present.c
     src/diorama_scroll_math.c
+    src/diorama_depth_shapes.c
     src/actraiser_ws_gap.c
     src/diorama_skybox_uv.c
     src/diorama_layer_order.c
@@ -524,6 +525,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_diorama_scroll_math_test
         tests/diorama_scroll_math_test.c
         src/diorama_scroll_math.c
+        src/diorama_depth_shapes.c
     )
     target_include_directories(actraiser_diorama_scroll_math_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include "diorama_depth_shapes.h"
 #include "diorama_scroll_math.h"
 
 static int failures;
@@ -424,6 +425,14 @@ int main(void) {
     CHECK(near(sh_far, sh_near));
     CHECK(sh_mid > sh_far);
     CHECK(near(sh_mid, 1.0f));
+    /* And each EDGE must reach the SAME full falloff a one-sided stack's farthest
+     * copy reaches -- a centred fill is not a half-strength one. Asserting only
+     * symmetry let a mutation that halved the range survive, because both edges
+     * were still equal to each other. */
+    float sh_oneside = 0.0f;
+    DioramaStackCopyDirected(4, 5, kBase, kDepth, kFwd, NULL, &sh_oneside, NULL);
+    CHECK(near(sh_far, sh_oneside));
+    CHECK(near(sh_near, sh_oneside));
 
     /* THE REDUNDANT COPY. Drawing the copy that coincides with the plane would
      * double-darken the front face; missing a non-redundant one leaves a gap. */
