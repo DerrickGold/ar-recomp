@@ -1,5 +1,7 @@
 #include "hd_replacement_host.h"
 
+#include "actraiser_game.h"   /* kActRaiserAuthenticHeight */
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -18,7 +20,6 @@
 enum {
   kRgbaChannelCount = 4,
   kArgbBytesPerPixel = 4,
-  kActRaiserVisibleHeight = 224,
 };
 
 extern SDL_Renderer *g_renderer;
@@ -131,7 +132,7 @@ void HdReplacementHost_BindSurfaces(void) {
       const size_t active_pitch =
           (size_t)g_snes_width * kHdMode7Scale * kArgbBytesPerPixel;
       g_m7_overlay_pixels = calloc(
-          1, capacity_pitch * kActRaiserVisibleHeight * kHdMode7Scale);
+          1, capacity_pitch * kActRaiserAuthenticHeight * kHdMode7Scale);
       g_m7_texture = SDL_CreateTexture(
           g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
           kPpuBufWidth * kHdMode7Scale,

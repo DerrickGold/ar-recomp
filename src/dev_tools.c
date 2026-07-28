@@ -26,7 +26,6 @@
 
 enum {
   kArgbBytesPerPixel = 4,
-  kActRaiserVisibleHeight = 224,
   kHudScaleStepPercent = 25,
   kHudScaleMinimumPercent = 25,
   kHudScaleMaximumPercent = 400,
@@ -240,7 +239,7 @@ void DevTools_DumpDioramaLayers(const DevToolsContext *context) {
     snprintf(path, sizeof(path), "%s/%s_gf%u.png",
              directory, layers[i].name, game_frame);
     if (WritePngFromArgb(
-            path, pixels, context->snes_width, kActRaiserVisibleHeight))
+            path, pixels, context->snes_width, kActRaiserAuthenticHeight))
       dumped_count++;
   }
 
@@ -248,7 +247,7 @@ void DevTools_DumpDioramaLayers(const DevToolsContext *context) {
   snprintf(backdrop_path, sizeof(backdrop_path), "%s/backdrop_gf%u.png",
            directory, game_frame);
   if (WritePngFromArgb(backdrop_path, context->framebuffer_pixels,
-                       context->snes_width, kActRaiserVisibleHeight))
+                       context->snes_width, kActRaiserAuthenticHeight))
     dumped_count++;
   fprintf(stderr,
           "[diorama] dumped %d layer PNGs to %s/ (gf=%u, w=%d)\n",
