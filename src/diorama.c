@@ -786,12 +786,37 @@ void Diorama_LoadLayerManifest(void) {
     if (!*at) continue;
 
     if (*at == '[') {
+      /* EVERY failure below must clear `room`. A section line that does not
+       * resolve cannot leave the PREVIOUS room selected, or the plane lines that
+       * follow are silently applied to it -- so a one-character typo in a header
+       * changes a different room's rendering while reporting success. That was
+       * the behaviour until this comment: the unterminated-'[' arm incremented
+       * `bad` and continued without touching `room`. */
       char *close = strchr(at, ']');
-      if (!close) { bad++; continue; }
+      if (!close) {
+        fprintf(stderr,
+                "[diorama-layers] %s:%d: section missing ']' -- ignored, and "
+                "the plane lines under it are skipped\n",
+                kLayerManifestLeaf, line_number);
+        room = NULL;
+        bad++;
+        continue;
+      }
       *close = '\0';
       uint8_t group = 0, map = 0;
       if (!DioramaLayerOrder_ParseSection(at + 1, &group, &map)) {
-        /* Not one of ours -- a foreign section just ends the current room. */
+        /* Not one of ours -- a foreign section just ends the current room. That
+         * is legitimate (the file may grow other sections), so it is not
+         * counted as bad. But it IS worth a line: the grammar is strict
+         * ("layers:GG:MM", hex, nothing else), so `[layers:04:01 ]` with one
+         * stray space lands here and would otherwise drop a whole authored room
+         * with no output at all. Reported at a lower volume than an error. */
+        if (!strncmp(at + 1, "layers", 6))
+          fprintf(stderr,
+                  "[diorama-layers] %s:%d: '[%s]' is not a valid room header "
+                  "(expected [layers:GG:MM] in hex) -- its plane lines are "
+                  "skipped\n",
+                  kLayerManifestLeaf, line_number, at + 1);
         room = NULL;
         continue;
       }
