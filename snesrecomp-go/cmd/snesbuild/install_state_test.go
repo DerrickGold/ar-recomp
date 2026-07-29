@@ -32,9 +32,20 @@ func bundleFixture(t *testing.T) (root, utils string) {
 		}
 	}
 
+	// The builder itself, KEPT by the cleanup because run-build gates on it.
+	// Mode 0755 like the real bundle (packaging installs it with PROGRAMS), so
+	// the scripts' own `[ -x ]` predicate is what the tests can assert against.
+	if err := os.MkdirAll(filepath.Join(utils, "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(utils, "tools", "snesbuild"),
+		[]byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	// Build inputs (removable).
-	write(filepath.Join(utils, "tools", "snesbuild"), "binary")
 	write(filepath.Join(utils, "tools", "toolchain", "zig", "zig"), "zig")
+	write(filepath.Join(utils, "tools", "sdl3", "lib", "libSDL3.dylib"), "lib")
 	write(filepath.Join(utils, "src", "main.c"), "int main(void){return 0;}")
 	write(filepath.Join(utils, "src", "gen", "bank00.c"), "generated")
 	write(filepath.Join(utils, "recomp", "bank00.cfg"), "cfg")
@@ -179,7 +190,8 @@ func TestSlimRemovesOnlyBuildFiles(t *testing.T) {
 	}
 
 	mustBeGone := []string{
-		filepath.Join(utils, "tools"),
+		filepath.Join(utils, "tools", "toolchain"),
+		filepath.Join(utils, "tools", "sdl3"),
 		filepath.Join(utils, "src"),
 		filepath.Join(utils, "recomp"),
 		filepath.Join(utils, "snesrecomp-go"),
@@ -192,6 +204,13 @@ func TestSlimRemovesOnlyBuildFiles(t *testing.T) {
 	}
 
 	mustSurvive := []string{
+		// snesbuild ITSELF. Every run-build script gates on this before doing
+		// anything ([ -x "$UTILS/tools/snesbuild" ] || fail "This package looks
+		// incomplete"), so deleting it makes the launcher mode this cleanup
+		// transitions INTO unreachable -- and isSlimmableBundle uses it as the
+		// proof that this is a bundle at all, so the cleanup would destroy its
+		// own marker. It is 7.2 MB against the toolchain's 415 MB.
+		filepath.Join(utils, "tools", "snesbuild"),
 		// Runtime files inside utils/ -- the launcher cd's here.
 		filepath.Join(utils, "config.ini"),
 		filepath.Join(utils, "diorama-layers.ini"),
@@ -631,5 +650,62 @@ func TestCleanupStillWorksInARealBundle(t *testing.T) {
 	}
 	if err := slimInstall(utils, root, io.Discard); err != nil {
 		t.Fatalf("slimInstall refused a real bundle: %v", err)
+	}
+}
+
+// The cleanup transitions the install INTO launcher mode, so the way back into
+// launcher mode must survive it. Every run-build script opens with
+//
+//	[ -x "$UTILS/tools/snesbuild" ] || fail "This package looks incomplete."
+//
+// and that predicate is read from the REAL shipped scripts here rather than
+// restated, so moving the guard cannot silently unpin this test. Deleting all
+// of utils/tools passed every other assertion -- the game still ran, the state
+// still reported "launcher" -- while making that mode unreachable through the
+// documented entry point, and telling the user their package was corrupt.
+func TestCleanupLeavesRunBuildAbleToStart(t *testing.T) {
+	guards := map[string]string{
+		"run-build.sh":      "tools/snesbuild",
+		"run-build.command": "tools/snesbuild",
+		"run-build.bat":     `tools\snesbuild.exe`,
+	}
+	checked := 0
+	for script, needs := range guards {
+		source, err := os.ReadFile(filepath.Join("..", "..", "packaging", "scripts", script))
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		if !strings.Contains(string(source), needs) {
+			t.Fatalf("%s no longer references %q -- this test is unpinned from the "+
+				"real guard and must be updated", script, needs)
+		}
+		checked++
+	}
+	if checked != 3 {
+		t.Fatalf("checked %d scripts, want 3", checked)
+	}
+
+	root, utils := bundleFixture(t)
+	if err := slimInstall(utils, root, io.Discard); err != nil {
+		t.Fatalf("slimInstall: %v", err)
+	}
+	// The POSIX guard's own test: -x on utils/tools/snesbuild.
+	info, err := os.Stat(filepath.Join(utils, "tools", "snesbuild"))
+	if err != nil {
+		t.Fatalf("utils/tools/snesbuild is gone after the cleanup, so every "+
+			"run-build script aborts with \"This package looks incomplete\" and "+
+			"launcher mode cannot be reached: %v", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		t.Fatal("utils/tools/snesbuild survived but is not executable, so the " +
+			"scripts' [ -x ] guard still fails")
+	}
+	// And the cleanup must still have been worth doing.
+	state := detectInstallState(utils, root)
+	if state.CanRebuild {
+		t.Fatal("CanRebuild is still true after the cleanup")
+	}
+	if !state.CanLaunch {
+		t.Fatal("CanLaunch is false after the cleanup, so nothing can be played")
 	}
 }

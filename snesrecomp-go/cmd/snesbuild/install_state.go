@@ -32,7 +32,10 @@ import (
 //	  diorama-layers.ini        RUNTIME: authored layer overrides
 //	  game-assets/              RUNTIME: HD/audio replacement manifests
 //	  saves/                    RUNTIME: battery saves and generated metadata
-//	  src/  recomp/  third_party/  snesrecomp-go/  tools/   BUILD ONLY
+//	  src/  recomp/  third_party/  snesrecomp-go/          BUILD ONLY
+//	  tools/snesbuild           KEEP: run-build gates on it, and it is the
+//	                            only way back into launcher mode
+//	  tools/toolchain  tools/sdl3   BUILD ONLY (415 MB and 8.5 MB)
 //
 // The trap: utils/ is NOT a pure source drop. The generated launcher does
 // `cd "$ROOT/utils"` before exec'ing the binary from the bundle root, so
@@ -46,13 +49,28 @@ import (
 // something we do not own, and is left alone.
 //
 // Ordered biggest-first so the log reads usefully rather than alphabetically.
+// NOT "tools": that directory holds snesbuild ITSELF, and every run-build
+// script gates on it before doing anything else --
+//
+//	[ -x "$UTILS/tools/snesbuild" ] || fail "This package looks incomplete."
+//
+// so removing it makes the launcher mode this cleanup transitions INTO
+// unreachable through the documented entry point. isSlimmableBundle also uses
+// that binary as its proof-of-bundle, so a "delete tools" cleanup destroys its
+// own marker. The toolchain is the size anyway: 415 MB of the real bundle's
+// 431 MB under tools/, against 7.2 MB for snesbuild.
+//
+// tools/sdl3 IS removable: copySDLRuntime (internal/project/hermetic.go:255)
+// copies libSDL3 next to the game binary at link time, and the rpath is
+// @executable_path/$ORIGIN, so the game never reads it from here.
 var buildOnlySubtrees = []string{
-	"tools",         // snesbuild + the pinned Zig toolchain (the bulk of it)
-	"build",         // CMake/Zig scratch, incl. the fetched toolchain cache
-	"src",           // authored C sources, and src/gen's regenerated output
-	"recomp",        // the recompiler's per-bank .cfg inputs
-	"snesrecomp-go", // the runtime headers the hermetic build compiles against
-	"third_party",   // stb, vendored for the build
+	"tools/toolchain", // the pinned Zig toolchain -- 415 of tools/'s 431 MB
+	"tools/sdl3",      // headers + the lib the build links; the game has its own copy
+	"build",           // CMake/Zig scratch, incl. the fetched toolchain cache
+	"src",             // authored C sources, and src/gen's regenerated output
+	"recomp",          // the recompiler's per-bank .cfg inputs
+	"snesrecomp-go",   // the runtime headers the hermetic build compiles against
+	"third_party",     // stb, vendored for the build
 }
 
 // rebuildInputs must ALL exist for a rebuild to be possible. Deliberately the
