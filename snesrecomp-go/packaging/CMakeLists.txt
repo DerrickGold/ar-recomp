@@ -368,11 +368,24 @@ configure_file(README.txt.in ${CMAKE_BINARY_DIR}/README.txt @ONLY)
 install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/${_run_script} DESTINATION .)
 install(FILES ${CMAKE_BINARY_DIR}/README.txt DESTINATION .)
 
+# utils/ is the game's WORKING DIRECTORY at runtime, not just a source drop:
+# the generated launcher does `cd "$ROOT/utils"` before exec'ing the binary from
+# the bundle root (internal/project/install.go), and the binary is not detected
+# as a bundle (PortablePaths_IsBundle looks for game-assets/ beside the
+# EXECUTABLE, which ships under utils/), so nothing chdirs away again. Every
+# cwd-relative runtime file therefore belongs here -- config.ini is passed as a
+# bare `--config config.ini`, and diorama-layers.ini is resolved by UserDataFile,
+# which returns the bare leaf.
 install(FILES
     ${SNESBUILD_MODULE_DIR}/LICENSE
     ${SNESBUILD_MODULE_DIR}/ATTRIBUTION.md
     ${GAME_ROOT}/snesbuild.ini
     ${GAME_ROOT}/config.ini
+    # Authored per-room diorama layer overrides. Without this a packaged build
+    # silently lost every authored room: the loader treats an absent file as the
+    # normal case, so the only symptom was the 3D scene quietly rendering with
+    # stock geometry. It now says so at load when the file is missing.
+    ${GAME_ROOT}/diorama-layers.ini
     DESTINATION utils)
 
 # Buildable project source (authored input only; generated C is excluded and

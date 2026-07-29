@@ -770,7 +770,20 @@ void Diorama_LoadLayerManifest(void) {
   char path[1024];
   UserDataFile(path, sizeof path, kLayerManifestLeaf);
   FILE *file = fopen(path, "r");
-  if (!file) return;  /* absent is the normal case, not an error */
+  if (!file) {
+    /* Absent is legitimate -- an unauthored install renders stock geometry and
+     * that is correct. Say so anyway, at one line: this file is CWD-relative,
+     * and when a packaged build failed to ship it the only symptom was the 3D
+     * scene quietly losing every authored room, with nothing anywhere to
+     * distinguish "nothing authored" from "the manifest is not where the game
+     * is looking". The path is printed for exactly that reason. */
+    fprintf(stderr,
+            "[diorama-layers] %s not found (looked in the working directory) "
+            "-- no per-room layer overrides; the diorama renders stock "
+            "geometry\n",
+            path);
+    return;
+  }
 
   memset(&g_layer_overrides, 0, sizeof(g_layer_overrides));
   DioramaRoomOverride *room = NULL;
