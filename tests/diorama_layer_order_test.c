@@ -1011,6 +1011,281 @@ static void TestTableCapacity(void) {
   CHECK(DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x00) != NULL);
 }
 
+/* ── merge: the save path must preserve everything the editor does not own ──
+ *
+ * The whole reason this exists: the editor's save used to rewrite the file from
+ * the table, wiping the documentation preamble and every hand-written comment.
+ * These pin that it no longer does -- a user's file survives a save byte-for-byte
+ * except the managed section bodies. */
+
+static char *MergeToHeap(const DioramaLayerOrderTable *table,
+                         const char *existing, const char *preamble) {
+  size_t need = DioramaLayerOrder_MergeManifest(table, existing, preamble,
+                                                NULL, 0);
+  char *out = (char *)malloc(need + 1);
+  CHECK(out != NULL);
+  if (!out) return NULL;
+  size_t wrote = DioramaLayerOrder_MergeManifest(table, existing, preamble,
+                                                 out, need + 1);
+  /* The sizing pass and the writing pass must agree, or a caller that trusts
+   * the first to size its buffer overflows or truncates. */
+  CHECK(wrote == need);
+  return out;
+}
+
+static void TestMergePreservesUnownedContent(void) {
+  /* A file with a documentation preamble, a comment, a foreign section, and a
+   * managed section. Everything except the managed body must survive verbatim. */
+  const char *existing =
+      "# my own notes about this file\n"
+      "# do not delete me\n"
+      "\n"
+      "[notes:whatever]\n"
+      "this is not a layers section and must pass through\n"
+      "\n"
+      "[layers:01:02]  ; Fillmore act 2 -- this HEADER stays\n"
+      "bg2hi = rake:0.29\n";
+
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  CHECK(room != NULL);
+  /* The table now says stack, not rake -- the editor changed the shape. */
+  room->planes[kDioramaPlane_Bg2Hi].set_stack = true;
+  room->planes[kDioramaPlane_Bg2Hi].stack = 0.29f;
+  room->planes[kDioramaPlane_Bg2Hi].set_stack_copies = true;
+  room->planes[kDioramaPlane_Bg2Hi].stack_copies = 4;
+
+  char *out = MergeToHeap(&table, existing, NULL);
+  if (!out) return;
+
+  /* Every unowned line survived. */
+  CHECK(strstr(out, "# my own notes about this file\n") != NULL);
+  CHECK(strstr(out, "# do not delete me\n") != NULL);
+  CHECK(strstr(out, "[notes:whatever]\n") != NULL);
+  CHECK(strstr(out, "this is not a layers section and must pass through\n") != NULL);
+  /* The managed body was regenerated: rake gone, stack present. */
+  CHECK(strstr(out, "rake:0.29") == NULL);
+  CHECK(strstr(out, "bg2hi = stack:0.29 copies:4") != NULL);
+  /* No default preamble was injected, because the file already had content. */
+  CHECK(strstr(out, "THERE IS AN IN-GAME EDITOR") == NULL);
+  free(out);
+}
+
+static void TestMergeRegeneratesManagedSectionInPlace(void) {
+  /* The managed section is NOT at the end of the file. Its body must be replaced
+   * where it sits, and the content after it must remain after it. */
+  const char *existing =
+      "[layers:01:02]\n"
+      "bg2hi = rake:0.29\n"
+      "bg1 = z:0.5\n"
+      "\n"
+      "# a trailing comment that must stay BELOW the room\n";
+
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  CHECK(room != NULL);
+  room->planes[kDioramaPlane_Bg2Hi].set_bow = true;
+  room->planes[kDioramaPlane_Bg2Hi].bow = 0.2f;
+
+  char *out = MergeToHeap(&table, existing, NULL);
+  if (!out) return;
+
+  /* Old body gone, new body present, trailing comment still after it. */
+  CHECK(strstr(out, "rake:0.29") == NULL);
+  CHECK(strstr(out, "z:0.5") == NULL);   /* bg1 is no longer authored */
+  const char *bow = strstr(out, "bg2hi = bow:0.2");
+  const char *tail = strstr(out, "# a trailing comment");
+  CHECK(bow != NULL);
+  CHECK(tail != NULL);
+  CHECK(bow != NULL && tail != NULL && bow < tail);
+  free(out);
+}
+
+static void TestMergeAppendsNewRooms(void) {
+  /* A room the file has never mentioned is appended, without disturbing the
+   * existing content. */
+  const char *existing =
+      "# preamble\n"
+      "[layers:01:02]\n"
+      "bg2hi = rake:0.29\n";
+
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *keep = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  keep->planes[kDioramaPlane_Bg2Hi].set_rake = true;
+  keep->planes[kDioramaPlane_Bg2Hi].rake = 0.29f;
+  DioramaRoomOverride *fresh = DioramaLayerOrder_FindOrAdd(&table, 0x02, 0x01);
+  fresh->planes[kPpuOverlaySource_Bg1].set_thickness = true;
+  fresh->planes[kPpuOverlaySource_Bg1].thickness = 0.2f;
+
+  char *out = MergeToHeap(&table, existing, NULL);
+  if (!out) return;
+
+  CHECK(strstr(out, "# preamble\n") != NULL);
+  CHECK(strstr(out, "[layers:01:02]") != NULL);
+  const char *first = strstr(out, "[layers:01:02]");
+  const char *second = strstr(out, "[layers:02:01]");
+  CHECK(second != NULL);
+  CHECK(first != NULL && second != NULL && first < second);   /* appended AFTER */
+  CHECK(strstr(out, "bg1 = thick:0.2") != NULL);
+  free(out);
+}
+
+static void TestMergeSeedsPreambleOnlyForANewFile(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kDioramaPlane_Bg2Hi].set_rake = true;
+  room->planes[kDioramaPlane_Bg2Hi].rake = 0.29f;
+
+  const char *preamble = "# SHIPPED DOCS\n\n";
+
+  /* New file (NULL existing): preamble leads, room follows. */
+  char *fresh = MergeToHeap(&table, NULL, preamble);
+  if (fresh) {
+    CHECK(strncmp(fresh, "# SHIPPED DOCS\n", 15) == 0);
+    CHECK(strstr(fresh, "bg2hi = rake:0.29") != NULL);
+    free(fresh);
+  }
+
+  /* Existing file with its OWN preamble: the shipped one must NOT appear. */
+  char *kept = MergeToHeap(&table,
+                           "# the user's own header\n[layers:01:02]\nbg2hi = rake:0.29\n",
+                           preamble);
+  if (kept) {
+    CHECK(strstr(kept, "SHIPPED DOCS") == NULL);
+    CHECK(strstr(kept, "# the user's own header") != NULL);
+    free(kept);
+  }
+}
+
+static void TestMergeKeepsAnInactiveSectionsText(void) {
+  /* A room the editor RESET (now inactive) keeps its section text in the file
+   * rather than being silently deleted -- the table simply no longer applies it.
+   * A user who hand-authored comments around that section keeps them. */
+  const char *existing =
+      "[layers:01:02]\n"
+      "bg2hi = rake:0.29  ; I want to remember this value\n";
+
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  /* Room present in the table but INACTIVE (reset). */
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  CHECK(room != NULL);
+  DioramaLayerOrder_ResetRoom(&table, 0x01, 0x02);
+  CHECK(!DioramaLayerOrder_RoomIsActive(
+      DioramaLayerOrder_Find(&table, 0x01, 0x02)) ||
+        DioramaLayerOrder_Find(&table, 0x01, 0x02) == NULL);
+
+  char *out = MergeToHeap(&table, existing, NULL);
+  if (!out) return;
+  /* The section survived untouched -- it was not regenerated, and not deleted. */
+  CHECK(strstr(out, "[layers:01:02]") != NULL);
+  CHECK(strstr(out, "I want to remember this value") != NULL);
+  free(out);
+}
+
+static void TestMergeIsIdempotentAndRoundTrips(void) {
+  /* Saving twice with no change between must be a no-op, and the merged file
+   * must reload into the same table -- the file is still a valid manifest. */
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  room->planes[kDioramaPlane_Bg2Hi].set_stack = true;
+  room->planes[kDioramaPlane_Bg2Hi].stack = 0.29f;
+  room->planes[kDioramaPlane_Bg2Hi].set_stack_copies = true;
+  room->planes[kDioramaPlane_Bg2Hi].stack_copies = 4;
+
+  char *first = MergeToHeap(&table, "# docs\n\n", NULL);
+  if (!first) return;
+  char *second = MergeToHeap(&table, first, NULL);   /* feed it back in */
+  if (second) {
+    CHECK(strcmp(first, second) == 0);   /* idempotent */
+    free(second);
+  }
+
+  /* Re-parse the merged text: the managed room must come back identical. */
+  DioramaRoomOverride reloaded;
+  memset(&reloaded, 0, sizeof(reloaded));
+  reloaded.used = true;
+  char *scratch = strdup(first);
+  char *save = NULL;
+  for (char *line = strtok_r(scratch, "\n", &save); line;
+       line = strtok_r(NULL, "\n", &save)) {
+    char *at = line;
+    while (*at == ' ' || *at == '\t') at++;
+    for (char *s = at; *s; s++) if (*s == ';' || *s == '#') { *s = '\0'; break; }
+    char *end = at + strlen(at);
+    while (end > at && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+    if (!*at || *at == '[') continue;
+    const char *error = NULL;
+    CHECK(DioramaLayerOrder_ParseLine(&reloaded, at, &error));
+  }
+  const DioramaPlaneOverride *back = &reloaded.planes[kDioramaPlane_Bg2Hi];
+  CHECK(back->set_stack && back->stack == 0.29f);
+  CHECK(back->set_stack_copies && back->stack_copies == 4);
+  free(scratch);
+  free(first);
+}
+
+static void TestMergeSizingContract(void) {
+  /* The size-0 pass returns the exact length the write pass produces, and the
+   * write never exceeds the buffer -- the contract diorama.c relies on to size
+   * its allocation in one probe. */
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x03, 0x04);
+  room->planes[kPpuOverlaySource_Bg1].set_voxel = true;
+  room->planes[kPpuOverlaySource_Bg1].voxel = 0.18f;
+  room->planes[kPpuOverlaySource_Bg1].set_voxel_copies = true;
+  room->planes[kPpuOverlaySource_Bg1].voxel_copies = 14;
+
+  const char *existing = "# doc line one\n# doc line two\n\n[layers:03:04]\nbg1 = voxel:0.18 slices:14\n";
+  size_t need = DioramaLayerOrder_MergeManifest(&table, existing, NULL, NULL, 0);
+  CHECK(need > 0);
+
+  /* An exactly-sized buffer: result is NUL-terminated and full. */
+  char *exact = (char *)malloc(need + 1);
+  CHECK(exact != NULL);
+  if (exact) {
+    size_t wrote = DioramaLayerOrder_MergeManifest(&table, existing, NULL,
+                                                   exact, need + 1);
+    CHECK(wrote == need);
+    CHECK(strlen(exact) == need);
+    free(exact);
+  }
+
+  /* An UNDERSIZED buffer must not overflow and must stay terminated. */
+  char small[16];
+  memset(small, 0x7F, sizeof(small));
+  size_t wrote_small = DioramaLayerOrder_MergeManifest(&table, existing, NULL,
+                                                       small, sizeof(small));
+  CHECK(wrote_small == need);              /* still reports the true length */
+  CHECK(small[sizeof(small) - 1] == '\0'); /* never wrote past the end */
+
+  /* The NEW-FILE path writes the preamble through a different accumulator
+   * (OUT_TEXT); its size pass and write pass must agree just as tightly, or a
+   * first save into a fresh file mis-sizes. Exercised with a NULL existing so
+   * the preamble branch is taken. */
+  const char *preamble = "# a preamble whose exact length must be counted\n\n";
+  size_t new_need = DioramaLayerOrder_MergeManifest(&table, NULL, preamble,
+                                                    NULL, 0);
+  char *new_out = (char *)malloc(new_need + 1);
+  CHECK(new_out != NULL);
+  if (new_out) {
+    size_t new_wrote = DioramaLayerOrder_MergeManifest(&table, NULL, preamble,
+                                                       new_out, new_need + 1);
+    CHECK(new_wrote == new_need);
+    CHECK(strlen(new_out) == new_need);
+    /* The preamble is actually there and complete -- a miscount that happened to
+     * net out would still be caught by the substring. */
+    CHECK(strstr(new_out, "whose exact length must be counted") != NULL);
+    free(new_out);
+  }
+}
+
 int main(void) {
   TestNoOverrideIsIdentity();
   TestOverrideIsScopedToItsRoom();
@@ -1038,6 +1313,13 @@ int main(void) {
   TestFormatReportsTruncation();
   TestTokenRoundTrip();
   TestTableCapacity();
+  TestMergePreservesUnownedContent();
+  TestMergeRegeneratesManagedSectionInPlace();
+  TestMergeAppendsNewRooms();
+  TestMergeSeedsPreambleOnlyForANewFile();
+  TestMergeKeepsAnInactiveSectionsText();
+  TestMergeIsIdempotentAndRoundTrips();
+  TestMergeSizingContract();
   if (g_failures) {
     printf("diorama_layer_order_test: %d failure(s)\n", g_failures);
     return 1;
