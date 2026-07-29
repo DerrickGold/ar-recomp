@@ -55,13 +55,17 @@ keep just the game - it will tell you how much space that frees.
 
 Nothing you need to play is touched: the game, your settings, your saves and any
 music or graphics you added all stay. Afterwards run-build still works as a
-launcher, it simply no longer offers to build. If you ever do want to rebuild,
-download this package again.
+launcher, it simply no longer offers to build - so the builder itself is kept
+(it is small), and only the toolchain it needs goes. If you ever do want to
+rebuild, download this package again.
 
 You can also do it by hand. These folders inside "utils" are only for building
-and are safe to delete:
+and are safe to delete. Note it is "utils/tools/toolchain", not all of
+"utils/tools": that folder also holds the builder program itself, and run-build
+will not start without it.
 
-      utils/tools          the build toolchain (by far the largest)
+      utils/tools/toolchain  the compiler toolchain (by far the largest)
+      utils/tools/sdl3       build copy of a support library
       utils/build          leftover build scratch
       utils/src            the game's source code
       utils/recomp         recompiler configuration

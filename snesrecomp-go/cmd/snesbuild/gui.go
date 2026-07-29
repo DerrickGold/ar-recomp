@@ -168,6 +168,10 @@ func launchBuiltGame(result buildgui.Result) error {
 
 	command := exec.Command(result.BinaryPath, arguments...)
 	command.Dir = result.WorkingDir
+	// Its own process group, so closing the builder window (or Ctrl-C in it, or
+	// pressing "Close builder") does not signal the game to death. The previous
+	// `open`/`start` path got this for free; running the binary directly does not.
+	detachFromBuilder(command)
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("launch game: %w", err)
 	}
