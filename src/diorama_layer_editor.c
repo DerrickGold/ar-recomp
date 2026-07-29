@@ -204,38 +204,75 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
     case kDioramaEditorParam_Depth: {
       /* "Depth" is whichever key the active shape uses. One row rather than six
        * because the player is adjusting the magnitude of the shape in front of
-       * them; which field holds it is an implementation detail of the file. */
+       * them; which field holds it is an implementation detail of the file.
+       *
+       * A STEP THAT REACHES EXACTLY ZERO REMOVES THE SHAPE, rather than storing
+       * a zero magnitude with the flag still set. ClearParam(Depth) already had
+       * this rule, and stating it there but not here was the bug: a zero-valued
+       * shape keeps the room "authored" (RoomIsActive tests the FLAG, not the
+       * value) so it is written to diorama-layers.ini as `rake:0` -- an entry
+       * with no visible effect, no visible row, and enough to break the
+       * unedited-room-is-bit-identical guarantee. Holding Left through zero
+       * therefore now lands on genuine flat, exactly as cycling to flat does. */
+      float next;
       switch (strategy) {
-        case kDioramaDepth_Rake: {
-          float next = StepFloat(p->rake, direction, -1.0f, 1.0f);
+        case kDioramaDepth_Rake:
+          next = StepFloat(p->rake, direction, -1.0f, 1.0f);
           if (next == p->rake) return false;
-          p->rake = next; p->set_rake = true; return true;
-        }
-        case kDioramaDepth_Bow: {
-          float next = StepFloat(p->bow, direction, -1.0f, 1.0f);
+          break;
+        case kDioramaDepth_Bow:
+          next = StepFloat(p->bow, direction, -1.0f, 1.0f);
           if (next == p->bow) return false;
-          p->bow = next; p->set_bow = true; return true;
-        }
-        case kDioramaDepth_Thick: {
-          float next = StepFloat(p->thickness, direction, 0.0f, 1.0f);
+          break;
+        case kDioramaDepth_Thick:
+          next = StepFloat(p->thickness, direction, 0.0f, 1.0f);
           if (next == p->thickness) return false;
-          p->thickness = next; p->set_thickness = true; return true;
-        }
-        case kDioramaDepth_Stack: {
-          float next = StepFloat(p->stack, direction, 0.0f, 1.0f);
+          break;
+        case kDioramaDepth_Stack:
+          next = StepFloat(p->stack, direction, 0.0f, 1.0f);
           if (next == p->stack) return false;
-          p->stack = next; p->set_stack = true; return true;
-        }
-        case kDioramaDepth_Voxel: {
-          float next = StepFloat(p->voxel, direction, 0.0f, 1.0f);
+          break;
+        case kDioramaDepth_Voxel:
+          next = StepFloat(p->voxel, direction, 0.0f, 1.0f);
           if (next == p->voxel) return false;
-          p->voxel = next; p->set_voxel = true; return true;
-        }
+          break;
         case kDioramaDepth_Flat:
         case kDioramaDepth_StrategyCount:
         default:
           return false;   /* flat has no magnitude; the row is not listed */
       }
+      if (next == 0.0f) {
+        /* Zero is not a shape, so it must not be stored as one. But a rake and a
+         * bow are SIGNED -- a negative one tilts the bottom edge away, which is
+         * the right shape for a ceiling (diorama_layer_order.c:412) -- so simply
+         * clearing at zero would make the whole negative half of their range
+         * unreachable by stepping. Step THROUGH it instead: one more increment in
+         * the same direction, so holding Left on a rake goes 0.02, 0.01, -0.01
+         * and never rests on a zero-magnitude shape.
+         *
+         * The unsigned shapes (thick/stack/voxel) are clamped at 0 by StepFloat,
+         * so for them there is nothing beyond zero and clearing is correct: they
+         * land on genuine flat, exactly as cycling to flat does. */
+        const bool signed_shape = (strategy == kDioramaDepth_Rake ||
+                                   strategy == kDioramaDepth_Bow);
+        if (!signed_shape) {
+          /* Same treatment as ClearParam(Depth): drop every shape key, so the
+           * plane is indistinguishable from one never authored. */
+          ClearShapeKeys(p);
+          return true;
+        }
+        const float step = (float)kEditorParamStepPermille / 1000.0f;
+        next = direction < 0 ? -step : step;
+      }
+      switch (strategy) {
+        case kDioramaDepth_Rake:  p->rake = next;      p->set_rake = true; break;
+        case kDioramaDepth_Bow:   p->bow = next;       p->set_bow = true; break;
+        case kDioramaDepth_Thick: p->thickness = next; p->set_thickness = true; break;
+        case kDioramaDepth_Stack: p->stack = next;     p->set_stack = true; break;
+        case kDioramaDepth_Voxel: p->voxel = next;     p->set_voxel = true; break;
+        default: return false;
+      }
+      return true;
     }
     case kDioramaEditorParam_Copies: {
       /* A stack and a voxel have SEPARATE caps (8 vs 24) because a voxel's
@@ -253,7 +290,22 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
       if (strategy == kDioramaDepth_Stack) {
         int base = p->set_stack_copies ? p->stack_copies
                                        : kDioramaStackCopiesDefault;
-        int next = ClampInt(base + (direction < 0 ? -1 : 1), 1,
+        /* Floor of TWO, not the parser's 1. This is the one place the UI bound
+         * must be TIGHTER than the manifest's, so the general rule above ("mirror
+         * the parser") has an exception here.
+         *
+         * The renderer gates the stack pass on `copies > 1` (diorama.c:1717),
+         * because one copy coincides with the plane's own draw and is skipped as
+         * redundant -- so `copies:1` is a stack that renders NOTHING while
+         * StrategyOfPlane still reports "stack". Stepping down to it made the row
+         * say STACK 0.29 while the shape vanished from the screen: exactly the
+         * row-disagrees-with-renderer failure this module exists to prevent.
+         *
+         * The codebase already floors at 2 in the two other places that derive a
+         * count -- StackCopiesForDensity (diorama_layer_order.c) and the voxel
+         * arm just above -- so this is the outlier being brought into line. 2 is
+         * still accepted by the parser, so the manifest agreement holds. */
+        int next = ClampInt(base + (direction < 0 ? -1 : 1), 2,
                             kDioramaStackMax);
         if (p->set_stack_copies && next == p->stack_copies) return false;
         p->stack_copies = next; p->set_stack_copies = true;
