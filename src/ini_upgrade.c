@@ -6,6 +6,14 @@
 /* One line of an INI file, classified. The merge only needs to know three
  * things: where sections begin, which lines carry a key, and everything else
  * (comments, blanks, continuation junk) which is passed through untouched. */
+enum {
+  /* Longest section or key NAME the classifier will capture. INI names in these
+   * files are short (the longest shipped is "ExtendedAspectRatio", 19 chars); a
+   * longer one is truncated for COMPARISON only -- the line itself is always
+   * emitted in full, so a pathological name costs a missed match, never data. */
+  kIniNameMax = 128,
+};
+
 typedef enum {
   kIniLine_Other = 0,   /* comment, blank, or anything unparseable */
   kIniLine_Section,     /* [name] */
@@ -80,8 +88,8 @@ static bool IniNamesEqual(const char *a, const char *b) {
  */
 static bool IniHasKeyInSection(const char *text, const char *section,
                                const char *key) {
-  char current[128] = {0};
-  char name[128];
+  char current[kIniNameMax] = {0};
+  char name[kIniNameMax];
   for (const char *at = text; *at;) {
     size_t len = IniLineLength(at);
     IniLineKind kind = IniClassify(at, len, name, sizeof(name));
@@ -98,7 +106,7 @@ static bool IniHasKeyInSection(const char *text, const char *section,
 
 /* Does `text` contain the section `section` at all? */
 static bool IniHasSection(const char *text, const char *section) {
-  char name[128];
+  char name[kIniNameMax];
   for (const char *at = text; *at;) {
     size_t len = IniLineLength(at);
     if (IniClassify(at, len, name, sizeof(name)) == kIniLine_Section &&
@@ -117,20 +125,26 @@ static size_t IniMergeInto(const char *live, const char *shipped, char *buffer,
 
 #define EMIT(ptr, count)                                                    \
   do {                                                                      \
-    size_t n = (count);                                                     \
+    size_t emit_n = (count);                                                 \
     if (buffer && total < size) {                                           \
-      size_t room = size - total;                                           \
-      size_t copy = n < room ? n : (room ? room - 1 : 0);                    \
-      memcpy(buffer + total, (ptr), copy);                                   \
+      size_t emit_room = size - total;                                       \
+      size_t emit_copy = emit_n < emit_room                                  \
+          ? emit_n : (emit_room ? emit_room - 1 : 0);                        \
+      memcpy(buffer + total, (ptr), emit_copy);                              \
     }                                                                       \
-    total += n;                                                             \
+    total += emit_n;                                                        \
   } while (0)
+/* Macro locals are prefixed so they cannot shadow a caller's variable. The
+ * unprefixed spelling DID shadow the `at` line cursor in both walk loops below:
+ * harmless today because no EMIT_FMT argument references `at`, but the next edit
+ * that passed one would silently format the output pointer instead of the line.
+ * -Wshadow caught it; the prefix removes the trap rather than the warning. */
 #define EMIT_FMT(...)                                                       \
   do {                                                                      \
-    size_t room = (total < size) ? size - total : 0;                         \
-    char *at = buffer ? buffer + (total < size ? total : size) : NULL;        \
-    int wrote = snprintf(at, room, __VA_ARGS__);                             \
-    if (wrote > 0) total += (size_t)wrote;                                   \
+    size_t emit_room = (total < size) ? size - total : 0;                     \
+    char *emit_at = buffer ? buffer + (total < size ? total : size) : NULL;   \
+    int emit_wrote = snprintf(emit_at, emit_room, __VA_ARGS__);               \
+    if (emit_wrote > 0) total += (size_t)emit_wrote;                          \
   } while (0)
 
   if (live == NULL) live = "";
@@ -164,8 +178,8 @@ static size_t IniMergeInto(const char *live, const char *shipped, char *buffer,
    * new key in an EXISTING section has to be introduced with a header of its own
    * (we cannot insert into the middle without rewriting the user's file, which
    * this deliberately never does). */
-  char section[128] = {0};
-  char name[128];
+  char section[kIniNameMax] = {0};
+  char name[kIniNameMax];
 
   /* 2a: keys missing from sections the live file already has. */
   bool wrote_added_banner = false;
