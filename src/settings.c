@@ -1215,8 +1215,9 @@ const SettingDesc g_setting_descs[] = {
     "Ground fade ramp width",
     "How many original pixels the fade takes to reach full strength, "
     "measured from the active edge. In world navigation the ROM-selected "
-    "256x256 location stays fully clear and this ramp extends outward. Long "
-    "on purpose: a brightness step reads as a hard line.",
+    "256x256 location stays fully clear and this ramp extends outward. Short "
+    "by default so the town's own vision range stays bright; raise it to "
+    "trade that brightness for a softer transition.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_lead_px, kSimCullHazeLeadDefaultPx,
     16, 512, 16, false, NULL, 0,

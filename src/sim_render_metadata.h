@@ -233,11 +233,15 @@ enum {
    * there is worth more than the theoretical two-tier purity. Set it to 100
    * to get the argued behaviour back.
    *
-   * The ramp is much longer than the cloud lead on purpose: a step reads as a
-   * hard line across the ground, which would be a worse tell than the patchy
-   * cover it replaces. */
+   * The ramp used to default to 208 on the argument that a step reads as a
+   * hard line across the ground, worse than the patchy cover it replaces.
+   * That held while the fade was the only thing separating near from far, but
+   * the focus falloff and out-of-range darkening now carry that separation,
+   * and a 208px ramp spends most of its length dimming ground the player is
+   * actively working in. 16 (the minimum, one ramp step) keeps the town's own
+   * vision range bright and lets the fade do its job right at the edge. */
   kSimCullHazeDefaultPct = 50,
-  kSimCullHazeLeadDefaultPx = 208,
+  kSimCullHazeLeadDefaultPx = 16,
   /* How far out-of-range ground is taken toward black. Separate from the fade
    * above because they answer different questions: the fade decides which
    * layer is showing, this decides how lit it is. Multiplied into the colour,
