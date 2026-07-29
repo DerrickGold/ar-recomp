@@ -1617,7 +1617,7 @@ const SettingDesc g_setting_descs[] = {
               "Number of game frames advanced per rendered frame while turbo is active.",
               kSettingCat_Enhancements, 8, 2, 64, ParseTurboMultiplier, NULL),
   { "warp_target", "AR_WARP", "Warp target",
-    "Raw hexadecimal region/map target used by Warp now; see README for verified values.",
+    "Raw hexadecimal region/map target used by Warp now; see docs/manual.md for verified values.",
     kSettingType_Custom, kApply_Passive, kSettingCat_Extras,
     &g_settings.warp_target, 0x0101, 0, 0xffff, 1, false, NULL, 0,
     NULL, NULL, ParseWarpTarget, FormatWarpTarget },

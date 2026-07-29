@@ -7,8 +7,8 @@ calling the Go driver directly in any new script or CI step. They will be
 removed once nothing invokes them by name.
 
 **Keep for now** — some are still referenced from the docs (e.g. `tools/regen.sh`
-is cited as a fallback in `README.md` and `DEBUG.md`), so do not delete them
-until those references are updated.
+is cited as a fallback in `docs/contributing.md`, `docs/BUILD_TOOLING.md`, and
+`DEBUG.md`), so do not delete them until those references are updated.
 
 ## Python shims → `v2regen` (D9)
 

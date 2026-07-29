@@ -884,7 +884,7 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 
 - **Action milestone (2026-07-12):** every action level in regions `$01-$06`
   is fully playable and renders correctly in widescreen. The verified raw-map
-  warp targets are in the README and `docs/SEAMS.md`; do not assume the low byte
+  warp targets are in `docs/manual.md` and `docs/SEAMS.md`; do not assume the low byte
   is an act number (`0303`, not `0302`, enters Kasandora Act 2). Remaining
   action work is a presentation-aware camera/world-edge clamp. Death Heim
   `0701` currently reaches the first boss arena and crashes; after repair,
