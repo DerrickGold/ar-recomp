@@ -49,6 +49,7 @@
 #include "host_dev_tools.h"
 #include "host_display.h"
 #include "host_input.h"
+#include "ini_upgrade_apply.h"
 #include "input_replay.h"
 #include "oracle_trace.h"
 #include "portable_paths.h"
@@ -598,6 +599,15 @@ int main(int argc, char **argv) {
       fprintf(stderr, "[AR_DRIFT_FRAME] stack-drift tripwire armed at frame %s\n", v);
     } }
 #endif
+
+  /* Upgrade step, BEFORE anything reads a config file: merge the bundle's
+   * shipped defaults into the user's live copies, keeping every value they
+   * changed and adding only what is new in this version. A no-op in a developer
+   * checkout (no defaults/ directory) and silent when nothing changed.
+   *
+   * Here rather than only in the builder GUI because run-game starts the game
+   * directly, so a GUI-only upgrade would never run for those users. */
+  IniUpgrade_ApplyShippedDefaults();
 
   Settings_ClearConfigLayer();
   if (config_path)

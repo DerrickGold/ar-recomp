@@ -115,6 +115,8 @@ add_executable(ActRaiserRecomp
     src/diorama_skybox_uv.c
     src/diorama_layer_order.c
     src/diorama_layer_editor.c
+    src/ini_upgrade.c
+    src/ini_upgrade_apply.c
     src/diorama_capture_blend.c
     src/dev_tools.c
     src/forced_input.c
@@ -605,4 +607,18 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_diorama_layer_editor
         COMMAND actraiser_diorama_layer_editor_test)
+
+    # Upgrade-safe INI merging. Pure string transform -- no SDL, no I/O -- and it
+    # decides whether a user's settings survive extracting a new bundle over an
+    # existing install, so it is gated like any other correctness module.
+    add_executable(actraiser_ini_upgrade_test
+        tests/ini_upgrade_test.c
+        src/ini_upgrade.c
+        src/ini_upgrade_apply.c
+        src/user_data_dir.c
+    )
+    target_include_directories(actraiser_ini_upgrade_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_ini_upgrade COMMAND actraiser_ini_upgrade_test)
 endif()

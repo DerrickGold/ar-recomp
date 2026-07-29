@@ -380,13 +380,33 @@ install(FILES
     ${SNESBUILD_MODULE_DIR}/LICENSE
     ${SNESBUILD_MODULE_DIR}/ATTRIBUTION.md
     ${GAME_ROOT}/snesbuild.ini
-    ${GAME_ROOT}/config.ini
-    # Authored per-room diorama layer overrides. Without this a packaged build
-    # silently lost every authored room: the loader treats an absent file as the
-    # normal case, so the only symptom was the 3D scene quietly rendering with
-    # stock geometry. It now says so at load when the file is missing.
-    ${GAME_ROOT}/diorama-layers.ini
     DESTINATION utils)
+
+# USER-EDITABLE FILES SHIP AS DEFAULTS, NOT AS THE LIVE FILES.
+#
+# These three used to install straight to utils/, which made upgrading destructive:
+# extracting a new bundle over an existing install overwrote whatever the archive
+# carried, so a user lost their display settings (config.ini), every authored
+# diorama room (diorama-layers.ini), and their asset mappings
+# (game-assets/manifest.ini). Measured, not assumed -- a played install lost all
+# three. settings.ini and saves/ survived only because nothing ships them.
+#
+# Shipping to utils/defaults/ instead means extraction can only ever overwrite the
+# DEFAULTS. The game merges them forward at startup
+# (IniUpgrade_ApplyShippedDefaults): a value the user changed is kept, a key that
+# is new in this version is added. The live files are created from these on first
+# run and are never in the archive, so the clobber is structurally impossible
+# rather than merely warned about.
+#
+# The paths matter: utils/ is the game's working directory (the launcher cd's into
+# it), so the LIVE files must resolve there -- config.ini is passed as a bare
+# `--config config.ini` and diorama-layers.ini via UserDataFile's bare leaf.
+install(FILES
+    ${GAME_ROOT}/config.ini
+    ${GAME_ROOT}/diorama-layers.ini
+    DESTINATION utils/defaults)
+install(FILES ${GAME_ROOT}/game-assets/manifest.ini
+    DESTINATION utils/defaults/game-assets)
 
 # Buildable project source (authored input only; generated C is excluded and
 # regenerated locally from the user's ROM).
@@ -399,8 +419,9 @@ install(DIRECTORY ${GAME_ROOT}/third_party/stb/ DESTINATION utils/third_party/st
 install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime/ DESTINATION utils/snesrecomp-go/runtime
     PATTERN ".DS_Store" EXCLUDE)
 
-# game-assets: manifest template + empty media folders (no media ships).
-install(FILES ${GAME_ROOT}/game-assets/manifest.ini DESTINATION utils/game-assets)
+# game-assets: the empty media folders (no media ships). manifest.ini itself is a
+# user-editable file and ships under utils/defaults/game-assets/ above, so an
+# upgrade cannot overwrite the entries a user added.
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/templates/audio-README.txt
     DESTINATION utils/game-assets/audio RENAME README.txt)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/templates/hd-README.txt
