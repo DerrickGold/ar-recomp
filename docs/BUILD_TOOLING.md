@@ -163,10 +163,10 @@ official SDL headers with Valve's pinned Steam Runtime SDL shared library.
 Generic Linux archives still use the system SDL because there is no single
 portable upstream redistributable.
 
-**How a user runs it:** unpack the archive and run `run-build` **once**. The
-script starts `snesbuild gui`, a dependency-free local web interface bound to
-`127.0.0.1` behind a random per-session URL. The user selects a ROM, sees the
-live build log, and can launch the finished game. The ROM is copied locally as
+**How a user runs it:** unpack the archive and run `run-build`. The script starts
+`snesbuild gui`, a dependency-free local web interface bound to `127.0.0.1`
+behind a random per-session URL. The user selects a ROM, sees the live build log,
+and can launch the finished game. The ROM is copied locally as
 `utils/user-rom.sfc`; it is never sent over the network. The GUI runs the same
 hermetic regeneration/build APIs as the CLI, then does the two things that make
 play trivial:
@@ -178,6 +178,34 @@ play trivial:
    user opens `run-game` to play — every time, with no rebuild. (That generated
    script is created locally, so it is not Gatekeeper-quarantined — only the
    downloaded `run-build` triggers the one-time right-click-Open on macOS.)
+
+**Reopening it: the GUI is also a launcher.** It probes the filesystem at session
+start (`cmd/snesbuild/install_state.go`) and reports two INDEPENDENT capabilities,
+because they depend on different files:
+
+- **can launch** — the `run-game` launcher and the game binary are both present in
+  the output folder. Nothing about the toolchain matters.
+- **can rebuild** — every non-regenerable input is present: `recomp/`,
+  `snesbuild.ini`, `snesrecomp-go/runtime/`, `src/`. Deliberately *not* gated on
+  the Zig toolchain or `src/gen`, which the build fetches and regenerates —
+  gating on those would refuse a rebuild that would have succeeded.
+
+Their combination picks the page shape: `buildable` (the original ROM picker),
+`ready` (Play plus a rebuild option), `launcher` (Play only — the build UI is
+hidden entirely, not merely disabled), or `unusable`. The rebuild gate is enforced
+server-side as well as in the page, because a stale tab or a cleanup performed in
+another window would otherwise start a build that dies partway with a confusing
+toolchain error.
+
+**The "keep just the game" cleanup.** After a successful build the GUI offers to
+delete the build-only files, sized from an actual walk. It is an **allowlist** —
+`utils/{tools,build,src,recomp,snesrecomp-go,third_party}` — and never "delete
+`utils/`", because `utils/` is the game's runtime working directory: the launcher
+`cd`s into it, so `config.ini`, `diorama-layers.ini`, `game-assets/` and `saves/`
+resolve relative to it and sit beside the build inputs. Removing it wholesale
+would leave a game that starts without its settings, authored layer overrides, or
+saves. `slimInstall` also refuses unless a built game is present, so a mis-click
+cannot leave the user with neither a game nor the means to build one.
 
 `snesbuild` locates the bundled Zig and SDL beside its own executable
 (`utils/tools/`), and the built game links SDL via an rpath

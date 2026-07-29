@@ -128,8 +128,21 @@ nothing is uploaded. This takes a few minutes and happens once.
 
 ### 3. Play
 
-When the build finishes, press **Launch game** — and a `run-game` file appears
-in the folder. Open that any time afterwards to play instantly, with no rebuild.
+When the build finishes, press **Play** — and a `run-game` file appears in the
+folder. Open that any time afterwards to play instantly, with no rebuild.
+
+You can also just run `run-build` again. It detects the finished game and opens
+as a launcher: no ROM picker, no build step, just **Play** and the manual.
+
+### 4. Optionally, reclaim the space
+
+The build toolchain is most of the bundle's size and is only needed to build
+again. After a successful build the builder offers to remove it and keep just the
+game, telling you how much that frees.
+
+Your settings, saves and any added music or graphics are untouched — only
+build-only files go. `run-build` afterwards is launcher-only; to rebuild, download
+the bundle again.
 
 The bundle also carries the original 40-page instruction booklet, readable in
 the builder's **Manual** tab.
