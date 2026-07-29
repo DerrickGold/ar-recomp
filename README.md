@@ -134,7 +134,14 @@ folder. Open that any time afterwards to play instantly, with no rebuild.
 You can also just run `run-build` again. It detects the finished game and opens
 as a launcher: no ROM picker, no build step, just **Play** and the manual.
 
-### 4. Optionally, reclaim the space
+### 4. Upgrading later
+
+Extract a newer bundle straight over the folder. Your settings, saves, authored
+diorama rooms and asset entries are kept — the shipped defaults live in
+`utils/defaults/` and are merged forward on the next launch, so a value you
+changed always wins and only genuinely new settings are added.
+
+### 5. Optionally, reclaim the space
 
 The build toolchain is most of the bundle's size and is only needed to build
 again. After a successful build the builder offers to remove it and keep just the

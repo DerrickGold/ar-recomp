@@ -29,6 +29,24 @@ HOW TO PLAY
    opens as a launcher, so there is nothing to rebuild and no ROM to choose.
 
 
+UPGRADING TO A NEWER VERSION
+----------------------------
+Extract the new package over the top of this folder. Your settings, saves, and
+anything you customised are kept - the new version's settings are merged in
+alongside them, and you will see a line like
+
+      [upgrade] config.ini: 2 new settings added, your values kept
+
+the next time you play. If you changed a setting, your value always wins; only
+settings that are genuinely new in that version get added.
+
+The same is true of "diorama-layers.ini" and "game-assets/manifest.ini": your
+authored rooms and your own asset entries survive an upgrade.
+
+You will need your ROM again only if you want to REBUILD. If you just want to
+keep playing, the game is already built and nothing else is needed.
+
+
 OPTIONAL: FREE UP SPACE WHEN YOU ARE DONE BUILDING
 --------------------------------------------------
 Most of this folder is the build toolchain, and it is only needed if you want to
@@ -82,5 +100,8 @@ WHAT THE FOLDERS ARE
 - utils/          the build tools AND the files the game itself needs while
                   running - your settings, saves, and assets live here, so keep
                   it. See "free up space" above for what is safe to remove.
+- utils/defaults/ this version's stock settings, kept separately so upgrading
+                  never overwrites yours. Do not edit these; edit the copies in
+                  utils/ instead.
 
 Licensing and credits are in utils/LICENSE and utils/ATTRIBUTION.md.
