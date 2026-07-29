@@ -276,3 +276,115 @@ func TestSlimSummaryRoundsAndOmitsSmallSizes(t *testing.T) {
 		}
 	}
 }
+
+// The install state can change from OUTSIDE this process: the game is deleted,
+// the folder is moved, someone cleans up by hand. A cached answer would leave the
+// page offering Play for a game that is gone -- which is exactly what happened
+// before status re-probed (found by deleting the binary mid-session and watching
+// canLaunch stay true).
+func TestStatusReprobesSoAVanishedGameStopsBeingOffered(t *testing.T) {
+	present := true
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Launch:      func(Result) error { return nil },
+		Detect: func() InstallState {
+			if !present {
+				return InstallState{CanRebuild: true}
+			}
+			return InstallState{CanLaunch: true, CanRebuild: true,
+				Result: Result{BinaryPath: "/games/ActRaiserRecomp", WorkingDir: "/games/utils"}}
+		},
+	}, "token")
+
+	poll := func() status {
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+		var got status
+		if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return got
+	}
+
+	if first := poll(); !first.Install.CanLaunch || first.Mode != "ready" {
+		t.Fatalf("before: canLaunch=%v mode=%q", first.Install.CanLaunch, first.Mode)
+	}
+
+	present = false // someone deletes the game while the page is open
+
+	after := poll()
+	if after.Install.CanLaunch {
+		t.Fatal("still offering Play for a game that no longer exists")
+	}
+	if after.Mode != "buildable" {
+		t.Fatalf("mode = %q, want buildable", after.Mode)
+	}
+	// And the stale path is dropped, so Launch refuses instead of failing
+	// against a path that is gone.
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("launch status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+}
+
+// A build that succeeded in THIS session keeps its own paths: they are
+// authoritative, and re-probing must not overwrite them with a detected guess.
+func TestSessionBuildResultSurvivesReprobe(t *testing.T) {
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true,
+				Result: Result{BinaryPath: "/detected/game", WorkingDir: "/detected"}}
+		},
+	}, "token")
+	app.mu.Lock()
+	app.state = "succeeded"
+	app.result = Result{BinaryPath: "/built/game", WorkingDir: "/built"}
+	app.mu.Unlock()
+
+	app.refreshState()
+
+	app.mu.Lock()
+	got := app.result.BinaryPath
+	app.mu.Unlock()
+	if got != "/built/game" {
+		t.Fatalf("BinaryPath = %q, want this session's own build", got)
+	}
+}
+
+// A launchable install with NO run-game script must still launch: the host runs
+// the binary directly, so the script is optional. Guards the OutputPath-only
+// check that would otherwise refuse a launch the host can perform.
+func TestLaunchWorksWithoutARunGameScript(t *testing.T) {
+	launched := make(chan Result, 1)
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Launch:      func(result Result) error { launched <- result; return nil },
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true,
+				Result: Result{BinaryPath: "/games/ActRaiserRecomp",
+					WorkingDir: "/games/utils"}} // no OutputPath at all
+		},
+	}, "token")
+
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", recorder.Code, recorder.Body.String())
+	}
+	select {
+	case result := <-launched:
+		if result.BinaryPath != "/games/ActRaiserRecomp" {
+			t.Fatalf("BinaryPath = %q", result.BinaryPath)
+		}
+		if result.WorkingDir != "/games/utils" {
+			t.Fatalf("WorkingDir = %q, want the project dir", result.WorkingDir)
+		}
+	default:
+		t.Fatal("launch never reached the host")
+	}
+}

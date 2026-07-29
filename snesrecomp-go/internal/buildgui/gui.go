@@ -31,8 +31,21 @@ const (
 
 // Result describes the playable artifact produced by a successful build.
 type Result struct {
-	Message    string `json:"message"`
+	Message string `json:"message"`
+	// OutputPath is the generated run-game script: the way to play WITHOUT this
+	// GUI, which is its real purpose. Reported to the user so they know what to
+	// double-click later.
 	OutputPath string `json:"outputPath"`
+	// BinaryPath is the game executable, and WorkingDir the directory it must
+	// run from. The GUI launches these directly rather than shelling out to the
+	// script: going through the script hands off to the OS ("open", "start"),
+	// which reports success as soon as the HANDOFF works, so a missing or
+	// unrunnable binary looked like a successful launch. Invoking it here means
+	// a real failure reaches the user.
+	//
+	// Optional; with these empty the host falls back to the script.
+	BinaryPath string `json:"binaryPath,omitempty"`
+	WorkingDir string `json:"workingDir,omitempty"`
 }
 
 // Options configures one local GUI session.
@@ -230,11 +243,26 @@ func (app *application) detect() InstallState {
 func (app *application) refreshState() {
 	state := app.detect()
 	app.mu.Lock()
+	defer app.mu.Unlock()
 	app.install = state
-	if state.CanLaunch && app.result.OutputPath == "" {
-		app.result = state.Result
+	if state.CanLaunch {
+		// Adopt the detected artifacts unless THIS session built something,
+		// whose paths are authoritative. Keyed on BinaryPath rather than
+		// OutputPath: the run-game script is optional now, so a launchable
+		// install may legitimately have no script path at all.
+		if app.state != "succeeded" || app.result.BinaryPath == "" {
+			app.result = state.Result
+		}
+		return
 	}
-	app.mu.Unlock()
+	// The game went away (deleted, moved, or a folder renamed underneath us).
+	// Drop the stale result so Launch reports "nothing to launch" rather than
+	// failing against a path that no longer exists -- and so the page stops
+	// offering Play. A build that succeeded in THIS session keeps its message,
+	// since the log and its outcome are still what the user is reading.
+	if app.state != "succeeded" {
+		app.result = Result{}
+	}
 }
 
 // pageMode is the shape the page should take. Without a Detect hook every
@@ -291,6 +319,22 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 }
 
 func (app *application) writeStatus(response http.ResponseWriter) {
+	// Re-probe unless a build is running. The install state can change from
+	// OUTSIDE this process -- someone deletes the game, moves the folder, or
+	// cleans up by hand -- and a cached answer would leave the page offering a
+	// Play button for a game that is gone. Skipped mid-build because the tree is
+	// churning by definition and the probe would be noise; the post-build
+	// refresh covers that case.
+	//
+	// Cheap enough for a 500 ms poll: a handful of stats, plus a directory walk
+	// only when a build is present and the tools are still there.
+	app.mu.Lock()
+	building := app.state == "building"
+	app.mu.Unlock()
+	if !building {
+		app.refreshState()
+	}
+
 	app.mu.Lock()
 	current := status{
 		State: app.state, Log: app.log.String(), Error: app.errorMessage,
@@ -489,7 +533,11 @@ func (app *application) launch(response http.ResponseWriter) {
 		writeJSONError(response, http.StatusConflict, "finish a successful build first")
 		return
 	}
-	if result.OutputPath == "" {
+	// Either path is enough to launch: the binary (which the host runs directly)
+	// or the generated script (its fallback). Testing only OutputPath would
+	// refuse a launch the host could perform, since the script is optional now
+	// and a user may well have deleted it.
+	if result.BinaryPath == "" && result.OutputPath == "" {
 		writeJSONError(response, http.StatusConflict,
 			"no built game was found to launch")
 		return
