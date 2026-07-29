@@ -515,6 +515,10 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
   return true;
 }
 
+static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
+                                             size_t *total_io, char *buffer,
+                                             size_t size);
+
 size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
                                     char *buffer, size_t size) {
   if (!DioramaLayerOrder_RoomIsActive(room)) {
@@ -522,7 +526,19 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     return 0;
   }
   size_t total = 0;
-  /* Local helper: append and track the would-be length like snprintf. */
+  DioramaLayerOrder_FormatRoomBody(room, &total, buffer, size);
+  if (buffer && size) buffer[size - 1] = '\0';
+  return total;
+}
+
+/* The body of FormatRoom, factored out so the merge can regenerate one room's
+ * text into a running snprintf-style accumulator without a second copy of the
+ * emit rules. Appends to `*total` and writes into `buffer`/`size` exactly as
+ * FormatRoom does; caller owns the trailing NUL guarantee. */
+static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
+                                             size_t *total_io, char *buffer,
+                                             size_t size) {
+  size_t total = *total_io;
 #define APPEND(...)                                                        \
   do {                                                                     \
     size_t remaining = (total < size) ? size - total : 0;                   \
@@ -563,6 +579,182 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
     APPEND("\n");
   }
 #undef APPEND
+  *total_io = total;
+}
+
+/* True when the line, once leading space and any trailing `;`/`#` comment are
+ * removed, still has non-header content -- i.e. it is a plane-override line, the
+ * kind FormatRoomBody regenerates. Blank lines and comment-only lines return
+ * false: those are the user's, and the merge passes them through even inside a
+ * managed section, so a comment written next to a room survives the save. */
+static bool MergeLineIsPlaneBody(const char *line) {
+  const char *at = line;
+  while (*at == ' ' || *at == '\t') at++;
+  if (*at == '\0' || *at == '\n' || *at == '\r') return false;  /* blank */
+  if (*at == ';' || *at == '#') return false;                   /* comment */
+  if (*at == '[') return false;                                 /* a section */
+  /* Something is here before any comment marker: a plane line. */
+  return true;
+}
+
+/* Is `line` (a raw file line, possibly with leading space and a trailing
+ * newline) a section header "[...]"? If so and it is one of ours, report the
+ * room. Mirrors the loader's own header handling in diorama.c so the merge
+ * splits the file on exactly the sections the loader would recognise. */
+static bool MergeLineIsSection(const char *line, bool *is_ours,
+                               uint8_t *group, uint8_t *map) {
+  *is_ours = false;
+  const char *at = line;
+  while (*at == ' ' || *at == '\t') at++;
+  if (*at != '[') return false;
+  const char *close = strchr(at, ']');
+  if (!close) return true;   /* a malformed header, but still a section line */
+  char inner[64];
+  size_t n = 0;
+  for (const char *p = at + 1; p < close && n + 1 < sizeof(inner); p++)
+    inner[n++] = *p;
+  inner[n] = '\0';
+  uint8_t g = 0, m = 0;
+  if (DioramaLayerOrder_ParseSection(inner, &g, &m)) {
+    *is_ours = true;
+    if (group) *group = g;
+    if (map) *map = m;
+  }
+  return true;
+}
+
+size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
+                                       const char *existing,
+                                       const char *default_preamble,
+                                       char *buffer, size_t size) {
+  size_t total = 0;
+#define OUT(...)                                                            \
+  do {                                                                      \
+    size_t remaining = (total < size) ? size - total : 0;                    \
+    char *at = buffer ? buffer + (total < size ? total : size) : NULL;       \
+    int wrote = snprintf(at, remaining, __VA_ARGS__);                        \
+    if (wrote > 0) total += (size_t)wrote;                                   \
+  } while (0)
+#define OUT_TEXT(str)                                                       \
+  do {                                                                      \
+    size_t len = strlen(str);                                               \
+    if (buffer && total < size) {                                           \
+      size_t room_left = size - total;                                      \
+      size_t copy = len < room_left ? len : (room_left ? room_left - 1 : 0); \
+      memcpy(buffer + total, (str), copy);                                  \
+    }                                                                       \
+    total += len;                                                           \
+  } while (0)
+
+  if (existing == NULL) existing = "";
+
+  /* Tracks which managed rooms have been written, so an active room with no
+   * section in the file can be appended once at the end. Sized to the table's
+   * own capacity; a room index maps 1:1. */
+  bool written[kDioramaRoomOverrideMax];
+  memset(written, 0, sizeof(written));
+
+  /* A genuinely new file (nothing before its first managed section) gets the
+   * shipped preamble; an existing one keeps whatever it already has. "Managed
+   * section seen yet" is enough to decide, because the preamble is by definition
+   * everything before the first one. */
+  bool saw_managed_section = false;
+  bool wrote_any_line = false;
+
+  const char *cursor = existing;
+  bool skipping_managed_body = false;
+  while (*cursor) {
+    const char *newline = strchr(cursor, '\n');
+    size_t line_len = newline ? (size_t)(newline - cursor) + 1
+                              : strlen(cursor);
+    /* Copy the line into a small scratch buffer for inspection; long lines are
+     * still emitted in full, only the classification uses the prefix. */
+    char probe[128];
+    size_t probe_len = line_len < sizeof(probe) - 1 ? line_len : sizeof(probe) - 1;
+    memcpy(probe, cursor, probe_len);
+    probe[probe_len] = '\0';
+
+    bool is_ours = false;
+    uint8_t group = 0, map = 0;
+    if (MergeLineIsSection(probe, &is_ours, &group, &map)) {
+      if (is_ours && DioramaLayerOrder_Find(table, group, map) &&
+          DioramaLayerOrder_RoomIsActive(
+              DioramaLayerOrder_Find(table, group, map))) {
+        /* A section we manage and the table still marks active: regenerate its
+         * body here, then skip the file's old body until the next section. */
+        saw_managed_section = true;
+        const DioramaRoomOverride *room =
+            DioramaLayerOrder_Find(table, group, map);
+        size_t before = total;
+        DioramaLayerOrder_FormatRoomBody(room, &total, buffer, size);
+        (void)before;
+        wrote_any_line = true;
+        skipping_managed_body = true;
+        /* Mark it written so it is not appended again below. */
+        for (int i = 0; i < table->count; i++)
+          if (&table->rooms[i] == room) { written[i] = true; break; }
+        cursor += line_len;
+        continue;
+      }
+      /* Any other section (foreign, or one the table no longer marks active)
+       * ends a skip and passes through unchanged. */
+      if (is_ours) saw_managed_section = true;
+      skipping_managed_body = false;
+    } else if (skipping_managed_body && !MergeLineIsPlaneBody(probe)) {
+      /* Inside a managed section, but this is a blank or comment line, not a
+       * plane override -- it is the user's, so stop skipping and let it through.
+       * A comment written next to a room therefore survives the save. */
+      skipping_managed_body = false;
+    } else if (skipping_managed_body) {
+      /* A plane line under a managed section we just regenerated: drop it, since
+       * FormatRoomBody already emitted the current planes. */
+      cursor += line_len;
+      continue;
+    }
+
+    /* Pass the line through verbatim. */
+    if (buffer && total < size) {
+      size_t room_left = size - total;
+      size_t copy = line_len < room_left ? line_len : room_left - 1;
+      memcpy(buffer + total, cursor, copy);
+    }
+    total += line_len;
+    wrote_any_line = true;
+    cursor += line_len;
+  }
+
+  /* New file, or one with no managed section: emit the default preamble first.
+   * Done AFTER the walk only when nothing was preserved before a managed
+   * section -- for a new file `existing` was empty so nothing was written yet,
+   * and we want the preamble at the top. Rebuild in that case. */
+  if (!saw_managed_section && !wrote_any_line && default_preamble &&
+      default_preamble[0]) {
+    /* Empty input: start over with preamble + all active rooms. */
+    total = 0;
+    OUT_TEXT(default_preamble);
+    for (int i = 0; i < table->count; i++) {
+      const DioramaRoomOverride *room = &table->rooms[i];
+      if (!DioramaLayerOrder_RoomIsActive(room)) continue;
+      DioramaLayerOrder_FormatRoomBody(room, &total, buffer, size);
+      OUT("\n");
+      written[i] = true;
+    }
+    if (buffer && size) buffer[size - 1] = '\0';
+    return total;
+  }
+
+  /* Append any active room that had no section in the file. A blank line before
+   * each keeps them readable against whatever preceded. */
+  for (int i = 0; i < table->count; i++) {
+    const DioramaRoomOverride *room = &table->rooms[i];
+    if (written[i] || !DioramaLayerOrder_RoomIsActive(room)) continue;
+    /* Separate from prior content with a blank line, unless the file is empty. */
+    if (total > 0) OUT("\n");
+    DioramaLayerOrder_FormatRoomBody(room, &total, buffer, size);
+  }
+
+#undef OUT
+#undef OUT_TEXT
   if (buffer && size) buffer[size - 1] = '\0';
   return total;
 }

@@ -870,65 +870,103 @@ void Diorama_LoadLayerManifest(void) {
           path, rooms, planes, bad ? ", some lines skipped" : "");
 }
 
+/* The documentation a genuinely NEW manifest is seeded with. An existing file
+ * keeps whatever preamble it already has -- the whole point of the merge is that
+ * this text is never allowed to overwrite the user's. */
+static const char kLayerManifestPreamble[] =
+    "# Diorama per-room layer overrides.\n"
+    "#\n"
+    "# THERE IS AN IN-GAME EDITOR for this file: turn on \"Show developer\n"
+    "# settings\" (System > Game) and a \"Layers\" section appears in the settings\n"
+    "# menu. Left/Right cycles a plane through the shapes below and the result is\n"
+    "# on screen immediately. Every edit is written back here, so the two are\n"
+    "# interchangeable -- and your comments and layout are PRESERVED across a save.\n"
+    "#\n"
+    "# Section is [layers:GG:MM] with $18/$19 in hex; keys are\n"
+    "#   order:<slot>  z:<-1..2>  alpha:<0-255>  rake:<-1..1>  bow:<-1..1>"
+    "  thick:<0..1>\n"
+    "#   stack:<0..1>  copies:<1..8>  density:<per unit>  dir:<forward|"
+    "backward|both>\n"
+    "#   voxel:<0..1>  slices:<2..24>\n"
+    "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake); bow is\n"
+    "# the same tilt EASED. thick extrudes the bottom edge forward. stack fills\n"
+    "# the gap with PARALLEL repeats (no tilt, one parallax rate); dir picks which\n"
+    "# side to fill and density sets slices per unit depth. voxel is a dense\n"
+    "# unfaded stack -- one SOLID object that, unlike thick, respects the art's\n"
+    "# silhouette. All compose.\n\n";
+
 bool Diorama_SaveLayerManifest(void) {
   char path[1024];
   UserDataFile(path, sizeof path, kLayerManifestLeaf);
-  FILE *file = fopen(path, "w");
-  if (!file) {
-    fprintf(stderr, "[diorama-layers] cannot write %s\n", path);
+
+  /* Read the current file first, so the merge can preserve everything it does
+   * not own -- the preamble, hand-written comments, blank lines, and any section
+   * the editor has never touched. Absent is the normal first-write case. */
+  char *existing = NULL;
+  long existing_len = 0;
+  FILE *in = fopen(path, "rb");
+  if (in) {
+    if (fseek(in, 0, SEEK_END) == 0) {
+      existing_len = ftell(in);
+      if (existing_len < 0) existing_len = 0;
+      if (existing_len > (1 << 20)) existing_len = 1 << 20;  /* sanity cap */
+      rewind(in);
+      existing = (char *)malloc((size_t)existing_len + 1);
+      if (existing) {
+        size_t got = fread(existing, 1, (size_t)existing_len, in);
+        existing[got] = '\0';
+      }
+    }
+    fclose(in);
+  }
+
+  /* Size the merged output, then render it. Two passes over a pure function is
+   * cheaper and safer than guessing a bound -- and the merge preserves the whole
+   * input, so its size is roughly the file's size plus a room or two. */
+  size_t need = DioramaLayerOrder_MergeManifest(
+      &g_layer_overrides, existing, kLayerManifestPreamble, NULL, 0);
+  char *out = (char *)malloc(need + 1);
+  if (!out) {
+    free(existing);
+    fprintf(stderr, "[diorama-layers] out of memory writing %s\n", path);
     return false;
   }
-  fprintf(file,
-          "# Diorama per-room layer overrides.\n"
-          "# Section is [layers:GG:MM] with $18/$19 in hex; keys are\n"
-          "#   order:<slot>  z:<depth>  alpha:<0-255>  rake:<-1..1>  bow:<-1..1>"
-          "  thick:<0..1>\n"
-          "#   stack:<0..1>  copies:<1..8>  density:<per unit>  dir:<forward|"
-          "backward|both>\n"
-          "#   voxel:<0..1>  slices:<2..24>\n"
-          "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake);\n"
-          "# bow is the same tilt EASED, so the top keeps its original depth and\n"
-          "# only the bottom bends forward -- try bow first if a rake reads too\n"
-          "# strong.\n"
-          "# which closes the void between two parallel planes at a tilted\n"
-          "# camera. thick extrudes the plane's BOTTOM edge forward to\n"
-          "# z+thickness instead, so the layer reads as a block with a near\n"
-          "# face while its own art stays square to the camera. stack fills the\n"
-          "# gap with PARALLEL repeats -- unlike rake it never tilts, so the\n"
-          "# layer keeps one parallax rate. dir picks which side of the plane to\n"
-          "# fill (forward = toward the camera, the default); density sets slices\n"
-          "# per unit depth so spacing stays consistent across rooms. voxel is a\n"
-          "# dense unfaded stack: it extrudes the layer as one SOLID object and,\n"
-          "# unlike thick, respects the art's silhouette. All compose.\n\n");
-  int written = 0;
-  for (int i = 0; i < g_layer_overrides.count; i++) {
-    const DioramaRoomOverride *r = &g_layer_overrides.rooms[i];
-    if (!DioramaLayerOrder_RoomIsActive(r)) continue;
-    /* Sized from the format, not guessed. A worst-case room -- every one of the
-     * ten planes carrying every key at its widest rendering (a negative 6-digit
-     * float, `dir:backward`, three-digit counts) -- measures 1488 bytes, so the
-     * 1024 this used to be silently DROPPED such a room on save. The editor
-     * cannot reach that size (it authors one shape per plane, so ~640 bytes), but
-     * a hand-edited manifest can, and losing it on the next save is the worst
-     * failure this file has: the author's own text is gone.
-     *
-     * The skip below is still the right fallback if the format ever grows again,
-     * and it reports rather than failing silently. */
-    char text[2048];
-    size_t need = DioramaLayerOrder_FormatRoom(r, text, sizeof text);
-    if (need == 0) continue;
-    if (need >= sizeof text) {
-      fprintf(stderr, "[diorama-layers] room %02X:%02X too long (%zu bytes), "
-                      "skipped -- report this, the buffer needs raising\n",
-              r->map_group, r->map_number, need);
-      continue;
-    }
-    fputs(text, file);
-    fputc('\n', file);
-    written++;
+  size_t wrote = DioramaLayerOrder_MergeManifest(
+      &g_layer_overrides, existing, kLayerManifestPreamble, out, need + 1);
+  free(existing);
+
+  /* Write to a temp file and rename, so a crash mid-write cannot leave the
+   * user's manifest truncated -- this file may hold hand-authored content that
+   * is not reproducible from the table. */
+  char tmp[1088];
+  snprintf(tmp, sizeof tmp, "%s.tmp", path);
+  FILE *file = fopen(tmp, "wb");
+  if (!file) {
+    free(out);
+    fprintf(stderr, "[diorama-layers] cannot write %s\n", tmp);
+    return false;
+  }
+  size_t put = fwrite(out, 1, wrote, file);
+  free(out);
+  if (put != wrote || fflush(file) != 0) {
+    fclose(file);
+    remove(tmp);
+    fprintf(stderr, "[diorama-layers] short write to %s -- original kept\n", tmp);
+    return false;
   }
   fclose(file);
-  fprintf(stderr, "[diorama-layers] wrote %s (%d room(s))\n", path, written);
+  if (rename(tmp, path) != 0) {
+    remove(tmp);
+    fprintf(stderr, "[diorama-layers] could not replace %s -- original kept\n",
+            path);
+    return false;
+  }
+
+  int active = 0;
+  for (int i = 0; i < g_layer_overrides.count; i++)
+    if (DioramaLayerOrder_RoomIsActive(&g_layer_overrides.rooms[i])) active++;
+  fprintf(stderr, "[diorama-layers] wrote %s (%d room(s), comments preserved)\n",
+          path, active);
   return true;
 }
 

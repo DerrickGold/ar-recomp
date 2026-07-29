@@ -378,4 +378,38 @@ bool DioramaLayerOrder_ParseSection(const char *section, uint8_t *out_group,
 size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
                                     char *buffer, size_t size);
 
+/* Rewrite a manifest, PRESERVING everything the editor does not own.
+ *
+ * The naive save rewrites the whole file from the table, which destroys the
+ * documentation preamble, any hand-written comments, and any section the editor
+ * has never touched -- the file is one people are invited to edit, so wiping it
+ * on the next slider move is the worst thing this code can do. Instead this
+ * merges: `existing` is the file's current contents (may be NULL/empty on a
+ * first write), and every line is passed through UNCHANGED except the body of a
+ * section that resolves to a room the table currently marks active -- that body
+ * is regenerated in place from FormatRoom. Active rooms with no section already
+ * in the file are appended at the end.
+ *
+ * What this guarantees:
+ *   - the preamble, blank lines, standalone comments and any foreign or inactive
+ *     section survive byte-for-byte;
+ *   - a managed room's body is exactly what FormatRoom would emit, so the file
+ *     still round-trips;
+ *   - a room reset to inactive keeps its section header and body from the file
+ *     rather than being silently deleted -- clearing a room in the editor should
+ *     not erase a section the user may have hand-authored comments around. (The
+ *     table no longer applies it, which is the intended effect.)
+ *
+ * `default_preamble` is written only when `existing` is NULL or has no content
+ * before its first managed section -- i.e. a genuinely new file gets the shipped
+ * documentation, an existing file keeps whatever preamble it already has.
+ *
+ * snprintf contract: returns the byte count that WOULD be written, and never
+ * writes past `size`, so a caller sizes its buffer by calling once with size 0.
+ * Pure: no I/O, so it is fully testable. */
+size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
+                                       const char *existing,
+                                       const char *default_preamble,
+                                       char *buffer, size_t size);
+
 #endif /* DIORAMA_LAYER_ORDER_H */
