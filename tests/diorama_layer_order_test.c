@@ -1162,12 +1162,22 @@ static void TestMergeSeedsPreambleOnlyForANewFile(void) {
 }
 
 static void TestMergeKeepsAnInactiveSectionsText(void) {
-  /* A room the editor RESET (now inactive) keeps its section text in the file
-   * rather than being silently deleted -- the table simply no longer applies it.
-   * A user who hand-authored comments around that section keeps them. */
+  /* A room the editor RESET must actually STAY reset. Its plane lines are dropped
+   * -- otherwise the stale overrides remain in the file and the next load makes
+   * the room active again, silently undoing the reset the user asked for. The
+   * section HEADER and any standalone comments around it are kept, so the user's
+   * own annotations survive; only the machine-owned override lines go.
+   *
+   * An earlier revision of this test asserted the opposite (that an inline comment
+   * ON a plane line survived), which encoded the wrong priority: a comment
+   * attached to a dropped override cannot outlive it, and "Reset room" silently
+   * not persisting is far worse than losing a trailing note. Standalone comment
+   * lines are asserted below because those CAN be kept. */
   const char *existing =
+      "; a note ABOUT this room that must survive\n"
       "[layers:01:02]\n"
-      "bg2hi = rake:0.29  ; I want to remember this value\n";
+      "bg2hi = rake:0.29  ; an inline note, tied to the override\n"
+      "; a standalone note after it\n";
 
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
@@ -1181,9 +1191,91 @@ static void TestMergeKeepsAnInactiveSectionsText(void) {
 
   char *out = MergeToHeap(&table, existing, NULL);
   if (!out) return;
-  /* The section survived untouched -- it was not regenerated, and not deleted. */
+  /* The header and the standalone comments survive; the override does NOT. */
   CHECK(strstr(out, "[layers:01:02]") != NULL);
-  CHECK(strstr(out, "I want to remember this value") != NULL);
+  CHECK(strstr(out, "a note ABOUT this room that must survive") != NULL);
+  CHECK(strstr(out, "a standalone note after it") != NULL);
+  CHECK(strstr(out, "rake:0.29") == NULL);   /* the reset actually persisted */
+
+  /* And re-loading the merged file leaves the room INACTIVE, which is the whole
+   * point -- asserted through the parser rather than by eyeballing the text. */
+  DioramaRoomOverride reloaded;
+  memset(&reloaded, 0, sizeof(reloaded));
+  reloaded.used = true;
+  char *scratch = strdup(out);
+  char *save = NULL;
+  for (char *line = strtok_r(scratch, "\n", &save); line;
+       line = strtok_r(NULL, "\n", &save)) {
+    char *at = line;
+    while (*at == ' ' || *at == '\t') at++;
+    for (char *c = at; *c; c++) if (*c == ';' || *c == '#') { *c = '\0'; break; }
+    char *end = at + strlen(at);
+    while (end > at && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+    if (!*at || *at == '[') continue;
+    const char *error = NULL;
+    (void)DioramaLayerOrder_ParseLine(&reloaded, at, &error);
+  }
+  CHECK(!DioramaLayerOrder_RoomIsActive(&reloaded));
+  free(scratch);
+  free(out);
+}
+
+/* A COMMENT MID-BODY MUST NOT RESURRECT STALE OVERRIDES.
+ *
+ * Regression: an earlier fix made a comment inside a managed section end the
+ * body skip, so every plane line AFTER that comment survived. Because ParseLine
+ * refines rather than clobbers, the loader then applied those stale lines over the
+ * regenerated ones -- silently reverting the edit, and bringing back a plane the
+ * user had CLEARED. Found by an audit lens.
+ *
+ * The skip now ends only at the next SECTION header; comments and blanks still
+ * pass through, they just no longer re-arm the copy of old overrides. */
+static void TestMergeDropsStalePlaneLinesAfterAComment(void) {
+  const char *existing =
+      "[layers:01:02]\n"
+      "bg2hi = rake:0.29\n"
+      "; a note in the middle of the body\n"
+      "bg1 = z:0.6\n"
+      "bg3 = alpha:100\n";
+
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  CHECK(room != NULL);
+  if (!room) return;
+  /* The table authors ONLY bg2hi -- bg1 and bg3 were cleared in the editor. */
+  room->planes[kDioramaPlane_Bg2Hi].set_bow = true;
+  room->planes[kDioramaPlane_Bg2Hi].bow = 0.2f;
+
+  char *out = MergeToHeap(&table, existing, NULL);
+  if (!out) return;
+  CHECK(strstr(out, "bg2hi = bow:0.2") != NULL);      /* the live edit */
+  CHECK(strstr(out, "; a note in the middle") != NULL); /* comment survives */
+  CHECK(strstr(out, "bg1 = z:0.6") == NULL);          /* stale line GONE */
+  CHECK(strstr(out, "bg3 = alpha:100") == NULL);
+
+  /* Prove it through the PARSER, since the loader is what the bug fooled: the
+   * reloaded room must carry bow on bg2hi and nothing on bg1/bg3. */
+  DioramaRoomOverride back;
+  memset(&back, 0, sizeof(back));
+  back.used = true;
+  char *scratch = strdup(out);
+  char *save = NULL;
+  for (char *line = strtok_r(scratch, "\n", &save); line;
+       line = strtok_r(NULL, "\n", &save)) {
+    char *at = line;
+    while (*at == ' ' || *at == '\t') at++;
+    for (char *c = at; *c; c++) if (*c == ';' || *c == '#') { *c = '\0'; break; }
+    char *end = at + strlen(at);
+    while (end > at && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+    if (!*at || *at == '[') continue;
+    const char *error = NULL;
+    (void)DioramaLayerOrder_ParseLine(&back, at, &error);
+  }
+  CHECK(back.planes[kDioramaPlane_Bg2Hi].set_bow);
+  CHECK(!back.planes[kPpuOverlaySource_Bg1].set_z);
+  CHECK(!back.planes[kPpuOverlaySource_Bg3].set_alpha);
+  free(scratch);
   free(out);
 }
 
@@ -1320,6 +1412,7 @@ int main(void) {
   TestMergeKeepsAnInactiveSectionsText();
   TestMergeIsIdempotentAndRoundTrips();
   TestMergeSizingContract();
+  TestMergeDropsStalePlaneLinesAfterAComment();
   if (g_failures) {
     printf("diorama_layer_order_test: %d failure(s)\n", g_failures);
     return 1;
