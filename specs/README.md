@@ -1,0 +1,42 @@
+# specs/
+
+Design specs and implementation plans. One flat folder on purpose: dozens of
+source comments and doc references cite these by **bare filename**
+(`SPEC-backdrop-clip.md`, `ar-recomp-threading-impl.md`), so a file must never
+move again for a status change. Status lives in the table below.
+
+`docs/` is the companion and is *not* the same thing: it holds living reference
+that is continuously true (`ram-map.md`, `rom-map.md`, `rendering-engine.md`,
+`bug-ledger.md`, `progress.md`). A spec here describes work at a point in time —
+proposed, in progress, or done and kept for the reasoning behind the code.
+
+**Status in the table is derived from the code, not from each document's own
+header.** Several headers are stale; where they disagree, the table is right and
+the discrepancy is called out.
+
+## Status
+
+| Spec | Status | Notes |
+| --- | --- | --- |
+| [SPEC-wave4.md](SPEC-wave4.md) | **Implemented** | Combined Wave-4 spec (base `addd8f8`). All 15 wave-4 patches are integrated into `main`. |
+| [SPEC-backdrop-clip.md](SPEC-backdrop-clip.md) | **Implemented** | Fixes A, B and C all shipped — see the `Fix A/B/C (SPEC-backdrop-clip.md)` comments across `src/` and the A/B toggle in `settings.c`. ⚠️ The document's own header still says "NOT IMPLEMENTED"; that line is stale. |
+| [SPEC-world-navigation-3d.md](SPEC-world-navigation-3d.md) | **Mostly implemented** | WN1. Steps 1–4d plus visual tuning 5a/5b/5d/5e landed in `48f2495` ("feat: add 3D world navigation"). Step 4e still open. |
+| [SPEC-interp-jitter.md](SPEC-interp-jitter.md) | **Proposed** | IJ1. Scroll interpolation exists but ships **off by default** because of exactly this jitter. Primary hypothesis must be confirmed against data before any code changes (§7). |
+| [SPEC-render-resolution.md](SPEC-render-resolution.md) | **Proposed** | RR1. Decouple render resolution from window/display resolution. Awaiting the audit in §9. |
+| [SPEC-tile-extrusion.md](SPEC-tile-extrusion.md) | **Proposed** | WN2. Extruded 3D geometry for background tiles. Independent of WN1; not audited. Related: the `tiles` HD-replacement plane is parsed but reserved. |
+| [ar-recomp-threading-impl.md](ar-recomp-threading-impl.md) | **Implemented, partly superseded** | M0–M8: diorama mode, present thread, fixed timestep, GPU shader effects. ⚠️ The **present thread it specifies was later removed** — SDL3's 2D render API is main-thread-only; all rendering is now synchronous on the main thread (`main.c` §"Phase 0"). Read M5/D5/D6 as history. |
+| [ar-recomp-sim-rendering-plan.md](ar-recomp-sim-rendering-plan.md) | **Partly implemented** | Simulation-town 3D rendering. Phase 0 evidence tooling plus phases 1–4 and the D5a ground extension are done; D5a's checkpoint is known-failing on 24 purged atlas objects. Other towns still need art/layer work. |
+| [ar-recomp-followup-improvements.md](ar-recomp-followup-improvements.md) | **Planning** | Consolidated next-steps after `cc0b042`. Successor to `ar-recomp-threading-impl.md`. |
+| [ar-recomp-renderer-thread-map.md](ar-recomp-renderer-thread-map.md) | **Historical** | Thread-affinity audit of every SDL renderer call. Written to justify the present thread; kept because the affinity inventory is still accurate and was the evidence that led to removing that thread. |
+| [ar-recomp-renderer-thread-migration.md](ar-recomp-renderer-thread-migration.md) | **Historical** | Draft migration plan companion to the map above. Overtaken by removing the present thread outright. |
+
+## Conventions
+
+- `SPEC-*.md` — a specification for a discrete change, usually with a short code
+  (WN1, RR1, IJ1) that source comments cite.
+- `ar-recomp-*.md` — broader multi-milestone implementation plans.
+- Both are referenced from source by bare filename. Keep the names stable.
+- When a spec lands, update its row here rather than moving the file.
+
+Retired handover archives (wave patch series, A/B test writeups, handback notes)
+live under `archive/`, which is untracked.

@@ -153,6 +153,14 @@ ActRaiserRecomp/
 │   ├── BUILD_TOOLING.md       # cross-platform driver + binary-bundle roadmap
 │   └── progress.md            # ★ per-action-level / per-sim-mode-town /
 │                                 major-functionality status tracker
+├── specs/
+│   ├── README.md              # ★ index: every spec with its REAL status,
+│   │                             derived from the code (several documents'
+│   │                             own headers are stale)
+│   ├── SPEC-*.md              # specs for discrete changes; source comments
+│   │                             cite these by bare filename, so the folder
+│   │                             is flat and names never move
+│   └── ar-recomp-*.md         # broader multi-milestone implementation plans
 ├── recomp/
 │   ├── bank*.cfg              # hand-authored per-bank recompiler directives:
 │   │                             function addresses, entry m/x width pins,
@@ -203,7 +211,10 @@ tables, subsystem boundaries) as reverse-engineered so far, and `progress.md`
 tells you *what actually works today* (playability per stage/town + codebase
 metrics). `docs/settings-system.md` records the architecture and implementation
 of the live settings registry, persistent user settings, and host-side overlay
-UI.
+UI. `specs/README.md` is the fourth: `docs/` is what is *continuously true*,
+while `specs/` is work at a point in time — proposed, in progress, or done and
+kept for the reasoning behind the code. Read its index before starting a change
+in an area a spec already covers.
 
 ## Build instructions
 
