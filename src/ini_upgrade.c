@@ -125,7 +125,8 @@ static bool IniHasSection(const char *text, const char *section) {
 }
 
 /* Shared core. `buffer` may be NULL (sizing pass); `out_added` may be NULL. */
-static size_t IniMergeInto(const char *live, const char *shipped, char *buffer,
+static size_t IniMergeInto(const char *live, const char *shipped,
+                           IniUpgradeSectionKind kind, char *buffer,
                            size_t size, int *out_added) {
   size_t total = 0;
   int added = 0;
@@ -188,17 +189,26 @@ static size_t IniMergeInto(const char *live, const char *shipped, char *buffer,
   char section[kIniNameMax] = {0};
   char name[kIniNameMax];
 
-  /* 2a: keys missing from sections the live file already has. */
+  /* 2a: keys missing from sections the live file already has.
+   *
+   * SKIPPED ENTIRELY for a record file. There, a section the user has is a
+   * record they authored, and a key missing from it means they removed it --
+   * clearing a plane in the layer editor, pruning a manifest field. Appending it
+   * would undo that on the next launch, and would do so by re-stating the
+   * header, which both record parsers read as the start of a NEW entry: the
+   * result is a one-key stub that fails validation and is dropped with a warning
+   * on every launch forever, plus a duplicate header per cycle. Whole new
+   * records still arrive via 2b. See ini_upgrade.h. */
   bool wrote_added_banner = false;
-  for (const char *at = shipped; *at;) {
+  for (const char *at = (kind == kIniUpgrade_Namespaces) ? shipped : ""; *at;) {
     size_t len = IniLineLength(at);
-    IniLineKind kind = IniClassify(at, len, name, sizeof(name));
-    if (kind == kIniLine_Section) {
+    IniLineKind line_kind = IniClassify(at, len, name, sizeof(name));
+    if (line_kind == kIniLine_Section) {
       snprintf(section, sizeof(section), "%s", name);
       at += len;
       continue;
     }
-    if (kind == kIniLine_Key && IniHasSection(live, section) &&
+    if (line_kind == kIniLine_Key && IniHasSection(live, section) &&
         !IniHasKeyInSection(live, section, name)) {
       if (!wrote_added_banner) {
         EMIT_FMT("\n# ---- added by the upgrade: new settings in this version"
@@ -221,8 +231,8 @@ static size_t IniMergeInto(const char *live, const char *shipped, char *buffer,
   bool copying_new_section = false;
   for (const char *at = shipped; *at;) {
     size_t len = IniLineLength(at);
-    IniLineKind kind = IniClassify(at, len, name, sizeof(name));
-    if (kind == kIniLine_Section) {
+    IniLineKind line_kind = IniClassify(at, len, name, sizeof(name));
+    if (line_kind == kIniLine_Section) {
       snprintf(section, sizeof(section), "%s", name);
       copying_new_section = !IniHasSection(live, section);
       if (copying_new_section) {
@@ -240,7 +250,7 @@ static size_t IniMergeInto(const char *live, const char *shipped, char *buffer,
     }
     if (copying_new_section) {
       EMIT(at, len);
-      if (kind == kIniLine_Key) added++;
+      if (line_kind == kIniLine_Key) added++;
     }
     at += len;
   }
@@ -252,18 +262,20 @@ static size_t IniMergeInto(const char *live, const char *shipped, char *buffer,
   return total;
 }
 
-size_t IniUpgrade_Merge(const char *live, const char *shipped, char *buffer,
+size_t IniUpgrade_Merge(const char *live, const char *shipped,
+                        IniUpgradeSectionKind kind, char *buffer,
                         size_t size, int *out_added) {
-  return IniMergeInto(live, shipped, buffer, size, out_added);
+  return IniMergeInto(live, shipped, kind, buffer, size, out_added);
 }
 
-bool IniUpgrade_NeedsMerge(const char *live, const char *shipped) {
+bool IniUpgrade_NeedsMerge(const char *live, const char *shipped,
+                           IniUpgradeSectionKind kind) {
   /* A missing live file always needs seeding; otherwise it needs a merge only
    * when the sizing pass reports something would be appended. Checking `added`
    * rather than comparing lengths keeps this honest when the only difference is
    * the banner. */
   if (live == NULL || !*live) return shipped != NULL && *shipped != '\0';
   int added = 0;
-  (void)IniMergeInto(live, shipped, NULL, 0, &added);
+  (void)IniMergeInto(live, shipped, kind, NULL, 0, &added);
   return added > 0;
 }
