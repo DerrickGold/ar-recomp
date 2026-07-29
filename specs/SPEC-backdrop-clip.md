@@ -1,10 +1,29 @@
 <!-- Authored 2026-07-26 by a 4-lens investigation + 45-agent adversarial verify
-     (34 findings confirmed, 6 refuted). NOT IMPLEMENTED. Fix order: A, then C,
-     then B (B is inert wherever A applies). The lead's original one-line
-     "narrow the skybox UV" idea is Fix B here -- correct, but only the
-     FALLBACK, and only for Skybox-only mode. -->
+     (34 findings confirmed, 6 refuted). Fix order: A, then C, then B (B is
+     inert wherever A applies). The lead's original one-line "narrow the skybox
+     UV" idea is Fix B here -- correct, but only the FALLBACK, and only for
+     Skybox-only mode. -->
 
 # Diorama skybox / backdrop margin clipping — fix design
+
+**Status: IMPLEMENTED and confirmed in play (2026-07-28).** All three fixes
+landed in `b9dc4f3` ("fix: edge margin black wedge at level bounds, behind an
+A/B toggle"); the black wedge at level bounds is no longer observed.
+
+| Fix | Where it lives |
+| --- | --- |
+| **A** — pad captured layers out to the full margin budget instead of the live margin | `actraiser_rtl.c:952`, `ppu.c` merge loops |
+| **B** — crop the skybox quad's UV to BG2's actually valid span | `diorama_skybox_uv.c/h`, `present.c:3643`, latched via `FrameSlot` |
+| **C** — compositor writes only the ACTIVE window; gap strips take the scene backdrop, not black | `actraiser_ws_gap.c/h`, `actraiser_rtl.c:1062` |
+
+`g_settings.diorama_margin_fix` is a **live A/B** for the whole artifact — Off
+restores every pre-fix path exactly, which is how the fix was verified and how a
+regression would be confirmed. Covered by `actraiser_ws_gap_test.c`,
+`diorama_skybox_uv_test.c`, `ppu_render_pipeline_test.c` and `settings_test.c`.
+
+Everything below is the original design document, kept for the reasoning behind
+the code — in particular §1's verifier corrections, which are still the
+authority on why the fallback ordering is A → C → B.
 
 ## 1. Root cause (corrected)
 

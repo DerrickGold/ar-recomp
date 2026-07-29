@@ -19,7 +19,7 @@ the discrepancy is called out.
 | Spec | Status | Notes |
 | --- | --- | --- |
 | [SPEC-wave4.md](SPEC-wave4.md) | **Implemented** | Combined Wave-4 spec (base `addd8f8`). All 15 wave-4 patches are integrated into `main`. |
-| [SPEC-backdrop-clip.md](SPEC-backdrop-clip.md) | **Implemented** | Fixes A, B and C all shipped — see the `Fix A/B/C (SPEC-backdrop-clip.md)` comments across `src/` and the A/B toggle in `settings.c`. ⚠️ The document's own header still says "NOT IMPLEMENTED"; that line is stale. |
+| [SPEC-backdrop-clip.md](SPEC-backdrop-clip.md) | **Implemented — confirmed in play** | Fixes A, B and C all landed in `b9dc4f3`; black wedge at level bounds no longer observed (2026-07-28). Live A/B via `diorama_margin_fix`. |
 | [SPEC-world-navigation-3d.md](SPEC-world-navigation-3d.md) | **Mostly implemented** | WN1. Steps 1–4d plus visual tuning 5a/5b/5d/5e landed in `48f2495` ("feat: add 3D world navigation"). Step 4e still open. |
 | [SPEC-interp-jitter.md](SPEC-interp-jitter.md) | **Proposed** | IJ1. Scroll interpolation exists but ships **off by default** because of exactly this jitter. Primary hypothesis must be confirmed against data before any code changes (§7). |
 | [SPEC-render-resolution.md](SPEC-render-resolution.md) | **Proposed** | RR1. Decouple render resolution from window/display resolution. Awaiting the audit in §9. |
