@@ -65,6 +65,9 @@ func runGUI(args []string) error {
 		Detect: func() buildgui.InstallState {
 			return detectInstallState(root, outputDir)
 		},
+		MeasureSlim: func() int64 {
+			return measureSlimBytes(root)
+		},
 		Slim: func(output io.Writer) error {
 			return slimInstall(root, outputDir, output)
 		},

@@ -78,12 +78,57 @@ func TestDetectReportsBothCapabilitiesOnAFullBundle(t *testing.T) {
 	if !state.CanRebuild {
 		t.Fatal("CanRebuild = false with every build input present")
 	}
-	if !state.CanSlim || state.SlimBytes == 0 {
-		t.Fatalf("CanSlim = %v SlimBytes = %d, want a removable payload",
-			state.CanSlim, state.SlimBytes)
+	if !state.CanSlim {
+		t.Fatal("CanSlim = false with build-only subtrees present")
+	}
+	// Detect reports PRESENCE and leaves the size to measureSlimBytes, because
+	// it runs on every 500ms status poll and summing the trees means walking
+	// them. A size here would mean the walk crept back in.
+	if state.SlimBytes != 0 {
+		t.Fatalf("SlimBytes = %d from detectInstallState, want 0: sizing walks the "+
+			"tree and must stay out of the poll path (see measureSlimBytes)",
+			state.SlimBytes)
 	}
 	if state.Result.OutputPath == "" {
 		t.Fatal("no launcher path reported, so Play could not work")
+	}
+}
+
+// The size the offer quotes comes from measureSlimBytes, which walks. It must
+// count exactly the subtrees the cleanup removes -- quoting a figure that
+// includes files the cleanup keeps would promise space it cannot reclaim.
+func TestMeasureSlimBytesCountsOnlyTheRemovableSubtrees(t *testing.T) {
+	_, utils := bundleFixture(t)
+	payload := strings.Repeat("x", 4096)
+	write := func(relative string) {
+		t.Helper()
+		path := filepath.Join(utils, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := measureSlimBytes(utils)
+	if base == 0 {
+		t.Fatal("measureSlimBytes = 0 on a full bundle")
+	}
+
+	// A file in a REMOVED subtree must raise the figure...
+	write(filepath.Join("build", "objects", "big.o"))
+	withBuildFile := measureSlimBytes(utils)
+	if withBuildFile != base+int64(len(payload)) {
+		t.Fatalf("adding %d bytes under build/ moved the total by %d, want exactly that",
+			len(payload), withBuildFile-base)
+	}
+
+	// ...and a file the cleanup KEEPS must not, or the offer over-promises.
+	write(filepath.Join("game-assets", "hd", "tile.png"))
+	write(filepath.Join("saves", "another.srm"))
+	if kept := measureSlimBytes(utils); kept != withBuildFile {
+		t.Fatalf("total moved by %d after writing only KEPT files; the offer would "+
+			"promise space the cleanup does not reclaim", kept-withBuildFile)
 	}
 }
 
