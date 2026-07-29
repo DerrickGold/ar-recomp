@@ -564,7 +564,7 @@ it naturally when the relevant engine becomes active.
 ### Simulation 3D (`kSettingCat_Simulation`) — all PASSIVE (2026-07-22)
 
 Read by the game thread and resolved into the immutable `FrameSlot` payload;
-the present thread never reads them live. Town stages are gated on
+the present path never reads them live. Town stages are gated on
 `sim3d_mode`; the forced-top-down world-navigation scene has its own independent
 off-by-default switch. The two master toggles are not conjunctive: world
 navigation can be enabled while Simulation town 3D is off. Compatible numeric

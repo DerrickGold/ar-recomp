@@ -920,8 +920,9 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.frame_limit_fps, 60, 20, 480, 5, false, NULL, 0,
     FrameLimitActive, NULL, NULL, NULL },
   BOOL_SETTING(sim3d_mode, "AR_SIM3D", "Simulation town 3D",
-               "Tilt the simulation-town map into a projected ground plane; "
-               "picker modes automatically return to the authentic top-down view.",
+               "Tilt the simulation-town map into a projected ground plane. "
+               "Map pickers stay in the tilted space too (build with "
+               "AR_SIM3D_PICKER_TOPDOWN=1 to restore the flat picker view).",
                kSettingCat_Simulation, 0, false, Diorama_NewPpuCapable,
                NULL),
   BOOL_SETTING(sim3d_world_navigation, "AR_SIM3D_WORLD_NAV",
