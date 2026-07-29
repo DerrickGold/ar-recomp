@@ -391,18 +391,20 @@ size_t DioramaLayerOrder_FormatRoom(const DioramaRoomOverride *room,
  * in the file are appended at the end.
  *
  * What this guarantees:
- *   - the preamble, blank lines, standalone comments and any foreign or inactive
- *     section survive byte-for-byte;
+ *   - the preamble, blank lines, standalone comments and any FOREIGN section
+ *     survive byte-for-byte;
  *   - a managed room's body is exactly what FormatRoom would emit, so the file
  *     still round-trips;
- *   - a room reset to inactive keeps its section header and body from the file
- *     rather than being silently deleted -- clearing a room in the editor should
- *     not erase a section the user may have hand-authored comments around. (The
- *     table no longer applies it, which is the intended effect.)
+ *   - a room reset to inactive keeps its section header and any comments around
+ *     it, but its PLANE LINES are dropped. Both halves matter: keeping the header
+ *     means clearing a room does not erase a section the user wrote notes around,
+ *     and dropping the body is what makes "Reset room" persist -- leaving the
+ *     stale overrides in the file would make the next load read the room as
+ *     active again and silently undo the reset.
  *
- * `default_preamble` is written only when `existing` is NULL or has no content
- * before its first managed section -- i.e. a genuinely new file gets the shipped
- * documentation, an existing file keeps whatever preamble it already has.
+ * `default_preamble` is written only when `existing` is NULL or empty -- i.e. a
+ * genuinely new file gets the shipped documentation, and an existing file keeps
+ * whatever preamble it already has, since re-emitting ours would duplicate it.
  *
  * snprintf contract: returns the byte count that WOULD be written, and never
  * writes past `size`, so a caller sizes its buffer by calling once with size 0.

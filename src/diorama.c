@@ -1,5 +1,6 @@
 #include "diorama.h"
 #include "actraiser_game.h"
+#include "atomic_replace.h"
 #include "diorama_layer_order.h"
 #include "diorama_skybox_uv.h"
 #include "camera_orbit.h"
@@ -960,24 +961,17 @@ bool Diorama_SaveLayerManifest(void) {
     return false;
   }
   fclose(file);
-  /* Windows' rename() FAILS when the destination exists, unlike POSIX where it
-   * atomically replaces. Windows is a shipped target (packaging builds
-   * windows-x86_64/arm64), so without this every save after the first would fail
-   * and the user would silently stop getting their edits persisted. The same trap
-   * is documented in the GUI's own ROM staging (buildgui/gui.go:482).
-   *
-   * Remove-then-rename is not atomic, which is why the temp file is written and
-   * flushed FIRST: the window where neither file exists is between two cheap
-   * metadata operations, and the content is already safely on disk. POSIX skips
-   * the remove entirely, since the first rename succeeds there. */
-  if (rename(tmp, path) != 0) {
-    remove(path);
-    if (rename(tmp, path) != 0) {
-      remove(tmp);
-      fprintf(stderr, "[diorama-layers] could not replace %s -- original kept\n",
-              path);
-      return false;
-    }
+  /* One atomic replace on both platforms. A bare rename() FAILS on Windows when
+   * the destination exists (packaging builds windows-x86_64/arm64), so every save
+   * after the first would silently stop persisting the user's edits -- the same
+   * trap the GUI's own ROM staging documents at buildgui/gui.go:482. See
+   * atomic_replace.h; this file may hold hand-authored rooms that are not
+   * reproducible from the table, so "original kept" below must be TRUE. */
+  if (!AtomicReplaceFile(tmp, path)) {
+    remove(tmp);
+    fprintf(stderr, "[diorama-layers] could not replace %s -- original kept\n",
+            path);
+    return false;
   }
 
   int active = 0;

@@ -116,6 +116,7 @@ add_executable(ActRaiserRecomp
     src/diorama_layer_order.c
     src/diorama_layer_editor.c
     src/ini_upgrade.c
+    src/atomic_replace.c
     src/ini_upgrade_apply.c
     src/diorama_capture_blend.c
     src/dev_tools.c
@@ -616,6 +617,7 @@ if(BUILD_TESTING)
         src/ini_upgrade.c
         src/ini_upgrade_apply.c
         src/user_data_dir.c
+        src/atomic_replace.c
     )
     target_include_directories(actraiser_ini_upgrade_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
