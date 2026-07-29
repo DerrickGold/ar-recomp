@@ -391,7 +391,15 @@ static void TestSteppingStaysWithinParserBounds(void) {
 
         char text[1024];
         size_t need = DioramaLayerOrder_FormatRoom(&room, text, sizeof(text));
-        CHECK(need > 0 && need < sizeof(text));
+        /* Zero is a legitimate outcome now, not a failure: holding Left on an
+         * UNSIGNED shape's depth (thick/stack/voxel) steps it to zero, which
+         * removes the shape entirely -- so the room is inactive and there is
+         * nothing to emit. An earlier version of this test asserted `need > 0`
+         * unconditionally, which was encoding the bug where a zero-magnitude
+         * shape stayed authored and wrote a dead `stack:0` line. Only the upper
+         * bound is a real requirement here; what a zero-step should DO is
+         * asserted by TestSteppingToZeroClearsTheShape. */
+        CHECK(need < sizeof(text));
         char *save = NULL;
         DioramaRoomOverride reloaded;
         memset(&reloaded, 0, sizeof(reloaded));
@@ -804,7 +812,144 @@ static void TestWorstCaseRoomFitsTheSaveBuffer(void) {
   CHECK(DioramaLayerOrder_RoomIsActive(&reloaded));
 }
 
+/* THE INVARIANT THIS MODULE EXISTS FOR, asserted after STEPPING rather than only
+ * after authoring: what the editor's row says must be what the renderer draws.
+ *
+ * Two HIGH findings from the adversarial review both violated it, and both were
+ * reachable by holding one key:
+ *
+ *   1. Copies stepped down to 1. The renderer gates the stack pass on
+ *      `copies > 1` (diorama.c:1717) because one copy coincides with the plane's
+ *      own draw, so `copies:1` rendered NOTHING while the row still said STACK.
+ *   2. Depth stepped to exactly 0. The flag stayed set, so RoomIsActive (which
+ *      tests the flag, not the value) kept the room authored and wrote `rake:0`
+ *      to the manifest -- an entry with no effect and no visible row.
+ *
+ * The existing tests missed both because they only ever asserted on FRESHLY
+ * AUTHORED planes, or asserted only that stepped values re-parse (and both
+ * `copies:1` and `rake:0` parse fine). So this drives every parameter to both
+ * bounds and checks the invariant at every step. */
+static void TestSteppingNeverDisagreesWithTheRenderer(void) {
+  static const DioramaEditorParam kParams[] = {
+    kDioramaEditorParam_Depth, kDioramaEditorParam_Copies,
+    kDioramaEditorParam_Density,
+  };
+  for (int s = kDioramaDepth_Rake; s < kDioramaDepth_StrategyCount; s++) {
+    for (size_t k = 0; k < sizeof(kParams) / sizeof(kParams[0]); k++) {
+      for (int dir = -1; dir <= 1; dir += 2) {
+        DioramaLayerOrderTable table;
+        memset(&table, 0, sizeof(table));
+        DioramaRoomOverride *room =
+            DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+        CHECK(room != NULL);
+        if (!room) continue;
+        DioramaPlaneOverride *plane = &room->planes[kDioramaPlane_Bg2Hi];
+        DioramaLayerEditor_SetStrategy(plane, (DioramaDepthStrategy)s);
+
+        /* Far more presses than any range needs, checking after EVERY one. */
+        for (int press = 0; press < 200; press++) {
+          DioramaLayerEditor_StepParam(plane, kParams[k], dir);
+
+          DioramaResolvedLayer out[16];
+          int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
+                                           kDefaultCount, out, 16);
+          const DioramaResolvedLayer *layer =
+              FindResolved(out, n, kDioramaPlane_Bg2Hi);
+          CHECK(layer != NULL);
+          if (!layer) break;
+
+          /* (1) The two verdicts must agree, always. */
+          CHECK(DioramaLayerEditor_StrategyOfPlane(plane) ==
+                DioramaLayerOrder_StrategyOf(layer));
+
+          /* (2) Whatever shape is reported must actually DRAW. These are the
+           * renderer's own gates, copied from diorama.c:1683/1717/1770. */
+          switch (DioramaLayerEditor_StrategyOfPlane(plane)) {
+            case kDioramaDepth_Rake:  CHECK(layer->rake != 0.0f); break;
+            case kDioramaDepth_Bow:   CHECK(layer->bow != 0.0f); break;
+            case kDioramaDepth_Thick: CHECK(layer->thickness > 0.0f); break;
+            case kDioramaDepth_Stack:
+            case kDioramaDepth_Voxel:
+              CHECK(layer->stack > 0.0f);
+              CHECK(layer->stack_copies > 1);   /* the gate copies:1 failed */
+              break;
+            case kDioramaDepth_Flat:
+              /* (3) And flat must be GENUINELY flat: not one shape key left
+               * behind, or the room stays authored while drawing nothing. */
+              CHECK(!DioramaLayerOrder_RoomIsActive(room) ||
+                    plane->set_z || plane->set_alpha || plane->set_order);
+              CHECK(layer->rake == 0.0f);
+              CHECK(layer->bow == 0.0f);
+              CHECK(layer->thickness == 0.0f);
+              CHECK(layer->stack == 0.0f);
+              break;
+            default: break;
+          }
+        }
+      }
+    }
+  }
+}
+
+/* The specific sequences from the review, kept as named cases so a failure says
+ * which one broke rather than just "some step disagreed". */
+static void TestSteppingToZeroClearsTheShape(void) {
+  for (int s = kDioramaDepth_Rake; s < kDioramaDepth_StrategyCount; s++) {
+    DioramaLayerOrderTable table;
+    memset(&table, 0, sizeof(table));
+    DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+    CHECK(room != NULL);
+    if (!room) continue;
+    DioramaPlaneOverride *plane = &room->planes[kPpuOverlaySource_Bg1];
+    DioramaLayerEditor_SetStrategy(plane, (DioramaDepthStrategy)s);
+
+    /* Hold Left through zero. */
+    for (int press = 0; press < 40; press++)
+      DioramaLayerEditor_StepParam(plane, kDioramaEditorParam_Depth, -1);
+
+    /* A rake and a bow are SIGNED -- a negative one tilts the bottom edge away,
+     * the right shape for a ceiling -- so stepping down must pass THROUGH zero
+     * into the negative half rather than stopping there. If it cleared at zero
+     * instead, half of their authorable range would be unreachable from the UI
+     * while still being authorable by hand. */
+    if (s == kDioramaDepth_Rake || s == kDioramaDepth_Bow) {
+      CHECK(DioramaLayerEditor_StrategyOfPlane(plane) ==
+            (DioramaDepthStrategy)s);
+      /* And it is genuinely on the far side of zero, not parked at it. */
+      const float magnitude = (s == kDioramaDepth_Rake) ? plane->rake
+                                                        : plane->bow;
+      CHECK(magnitude < 0.0f);
+    } else {
+      CHECK(DioramaLayerEditor_StrategyOfPlane(plane) == kDioramaDepth_Flat);
+      CHECK(!DioramaLayerOrder_RoomIsActive(room));
+      /* And nothing is written for it -- the manifest gains no dead entry. */
+      char text[512];
+      CHECK(DioramaLayerOrder_FormatRoom(room, text, sizeof(text)) == 0);
+    }
+  }
+}
+
+static void TestStackCopiesNeverStepsBelowTwo(void) {
+  DioramaPlaneOverride plane;
+  memset(&plane, 0, sizeof(plane));
+  DioramaLayerEditor_SetStrategy(&plane, kDioramaDepth_Stack);
+  for (int i = 0; i < 50; i++)
+    DioramaLayerEditor_StepParam(&plane, kDioramaEditorParam_Copies, -1);
+  /* Two, not the parser's floor of one: one copy renders nothing. */
+  CHECK(plane.stack_copies == 2);
+  CHECK(!DioramaLayerEditor_StepParam(&plane, kDioramaEditorParam_Copies, -1));
+
+  /* The voxel arm always had this right; assert it so the two stay in step. */
+  DioramaLayerEditor_SetStrategy(&plane, kDioramaDepth_Voxel);
+  for (int i = 0; i < 50; i++)
+    DioramaLayerEditor_StepParam(&plane, kDioramaEditorParam_Copies, -1);
+  CHECK(plane.voxel_copies == 2);
+}
+
 int main(void) {
+  TestSteppingNeverDisagreesWithTheRenderer();
+  TestSteppingToZeroClearsTheShape();
+  TestStackCopiesNeverStepsBelowTwo();
   TestWorstCaseRoomFitsTheSaveBuffer();
   TestUpperIsBoundedAndTerminated();
   TestEachStrategyResolvesToItself();
