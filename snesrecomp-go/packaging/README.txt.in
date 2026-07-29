@@ -24,8 +24,35 @@ HOW TO PLAY
 
 3. Play - when the build finishes, a "run-game" file appears in this folder
    (run-game.command on macOS, run-game.bat on Windows, run-game.sh on Linux).
-   Press "Launch game" in the builder now. Later, open the run-game file
-   directly; it starts right away, with no rebuilding.
+   Press "Play" in the builder now. Later you can either open the run-game file
+   directly, or start run-build again: it notices the game is already built and
+   opens as a launcher, so there is nothing to rebuild and no ROM to choose.
+
+
+OPTIONAL: FREE UP SPACE WHEN YOU ARE DONE BUILDING
+--------------------------------------------------
+Most of this folder is the build toolchain, and it is only needed if you want to
+build again later. After a successful build the builder offers to remove it and
+keep just the game - it will tell you how much space that frees.
+
+Nothing you need to play is touched: the game, your settings, your saves and any
+music or graphics you added all stay. Afterwards run-build still works as a
+launcher, it simply no longer offers to build. If you ever do want to rebuild,
+download this package again.
+
+You can also do it by hand. These folders inside "utils" are only for building
+and are safe to delete:
+
+      utils/tools          the build toolchain (by far the largest)
+      utils/build          leftover build scratch
+      utils/src            the game's source code
+      utils/recomp         recompiler configuration
+      utils/snesrecomp-go  runtime headers used while building
+      utils/third_party    a support library used while building
+
+Do NOT delete anything else in "utils". The game runs from inside that folder,
+so "utils/config.ini", "utils/diorama-layers.ini", "utils/game-assets" and
+"utils/saves" all have to stay.
 
 
 IF SOMETHING GOES WRONG
@@ -49,8 +76,11 @@ folders beside it. Anything you don't add simply stays original.
 
 WHAT THE FOLDERS ARE
 --------------------
-- run-build.*     opens the graphical builder.
+- run-build.*     opens the graphical builder. After the game is built this
+                  opens as a launcher instead.
 - run-game.*      created by the build; press it to play, every time.
-- utils/          the build tools and game files. You can ignore this.
+- utils/          the build tools AND the files the game itself needs while
+                  running - your settings, saves, and assets live here, so keep
+                  it. See "free up space" above for what is safe to remove.
 
 Licensing and credits are in utils/LICENSE and utils/ATTRIBUTION.md.

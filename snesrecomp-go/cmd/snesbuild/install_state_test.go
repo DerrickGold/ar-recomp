@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -209,6 +210,34 @@ func TestEveryRebuildInputIsRequired(t *testing.T) {
 				t.Fatalf("CanRebuild = true without %s", relative)
 			}
 		})
+	}
+}
+
+// The bundle README tells users which folders they may delete by hand. That list
+// and the allowlist this code deletes must be the SAME list: if they drift, the
+// README either tells someone to remove a file the game needs, or omits one the
+// cleanup silently takes. Pinned against the real template rather than a copy.
+func TestBundleReadmeMatchesTheCleanupAllowlist(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join("..", "..", "packaging", "README.txt.in"))
+	if err != nil {
+		t.Skipf("bundle README not readable from here: %v", err)
+	}
+	text := string(readme)
+	for _, relative := range buildOnlySubtrees {
+		if !strings.Contains(text, "utils/"+relative) {
+			t.Errorf("README does not list utils/%s as safe to delete, but the "+
+				"cleanup removes it", relative)
+		}
+	}
+	// And the runtime files must be named as keep-these, since they share utils/
+	// with the build inputs and are the whole reason this is an allowlist.
+	for _, keep := range []string{
+		"utils/config.ini", "utils/diorama-layers.ini",
+		"utils/game-assets", "utils/saves",
+	} {
+		if !strings.Contains(text, keep) {
+			t.Errorf("README does not tell the user to keep %s", keep)
+		}
 	}
 }
 
