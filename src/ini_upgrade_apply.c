@@ -39,6 +39,16 @@ static const char *const kUpgradeLeaves[] = {
   "game-assets/manifest.ini",
 };
 
+enum {
+  /* Refuse to slurp anything absurd: these are hand-sized config files (the
+   * largest shipped is a few KB), so a multi-megabyte one means the path is
+   * wrong or the file is not what we think. Bailing out leaves the user's file
+   * untouched, which is the safe outcome. */
+  kIniUpgradeMaxFileBytes = 4 << 20,
+  /* Room for a live path plus the ".tmp" suffix and the "defaults/" prefix. */
+  kIniUpgradePathMax = 1088,
+};
+
 /* Read a whole file, or NULL. Caller frees. */
 static char *ReadWholeFile(const char *path) {
   FILE *file = fopen(path, "rb");
@@ -46,7 +56,7 @@ static char *ReadWholeFile(const char *path) {
   char *data = NULL;
   if (fseek(file, 0, SEEK_END) == 0) {
     long length = ftell(file);
-    if (length >= 0 && length < (4 << 20)) {   /* sanity cap */
+    if (length >= 0 && length < kIniUpgradeMaxFileBytes) {
       rewind(file);
       data = (char *)malloc((size_t)length + 1);
       if (data) {
@@ -62,7 +72,7 @@ static char *ReadWholeFile(const char *path) {
 /* Write `text` to `path` via a temp file + rename, so an interrupted write
  * cannot truncate a file that may hold unreproducible user content. */
 static bool WriteWholeFile(const char *path, const char *text, size_t length) {
-  char temporary[1088];
+  char temporary[kIniUpgradePathMax];
   snprintf(temporary, sizeof temporary, "%s.tmp", path);
   FILE *file = fopen(temporary, "wb");
   if (!file) return false;
@@ -88,7 +98,7 @@ void IniUpgrade_ApplyShippedDefaults(void) {
     char live_path[1024];
     UserDataFile(live_path, sizeof live_path, leaf);
 
-    char default_path[1088];
+    char default_path[kIniUpgradePathMax];
     snprintf(default_path, sizeof default_path, "defaults/%s", leaf);
 
     char *shipped = ReadWholeFile(default_path);

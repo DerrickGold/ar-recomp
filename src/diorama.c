@@ -902,6 +902,10 @@ bool Diorama_SaveLayerManifest(void) {
   /* Read the current file first, so the merge can preserve everything it does
    * not own -- the preamble, hand-written comments, blank lines, and any section
    * the editor has never touched. Absent is the normal first-write case. */
+  /* Cap on the manifest we will read back before merging. Generous next to a real
+   * file (the shipped one is ~4 KB) but bounded, so a wrong path or a corrupt
+   * file cannot make the save allocate without limit. */
+  enum { kManifestReadMax = 1 << 20 };
   char *existing = NULL;
   long existing_len = 0;
   FILE *in = fopen(path, "rb");
@@ -909,7 +913,7 @@ bool Diorama_SaveLayerManifest(void) {
     if (fseek(in, 0, SEEK_END) == 0) {
       existing_len = ftell(in);
       if (existing_len < 0) existing_len = 0;
-      if (existing_len > (1 << 20)) existing_len = 1 << 20;  /* sanity cap */
+      if (existing_len > kManifestReadMax) existing_len = kManifestReadMax;
       rewind(in);
       existing = (char *)malloc((size_t)existing_len + 1);
       if (existing) {
@@ -938,7 +942,8 @@ bool Diorama_SaveLayerManifest(void) {
   /* Write to a temp file and rename, so a crash mid-write cannot leave the
    * user's manifest truncated -- this file may hold hand-authored content that
    * is not reproducible from the table. */
-  char tmp[1088];
+  /* Room for the manifest path plus the ".tmp" suffix. */
+  char tmp[sizeof(path) + 64];
   snprintf(tmp, sizeof tmp, "%s.tmp", path);
   FILE *file = fopen(tmp, "wb");
   if (!file) {

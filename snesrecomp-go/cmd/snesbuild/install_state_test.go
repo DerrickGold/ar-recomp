@@ -408,3 +408,42 @@ func TestLaunchReportsAMissingOrUnrunnableGame(t *testing.T) {
 		t.Fatal("launching a directory reported success")
 	}
 }
+
+// The cleanup deletes directory trees, so it must not be able to follow a symlink
+// out of the bundle. os.RemoveAll removes the LINK rather than walking into its
+// target, which is what makes the allowlist safe -- but that is a property of the
+// stdlib rather than of this code, so it is pinned here: if a future refactor
+// swapped in a hand-rolled walker, this is what would catch it.
+func TestCleanupDoesNotFollowSymlinksOutOfTheBundle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs elevation on Windows")
+	}
+	root, utils := bundleFixture(t)
+
+	// Something valuable OUTSIDE the bundle, reachable only via a symlink that
+	// occupies one of the allowlisted names.
+	outside := t.TempDir()
+	treasure := filepath.Join(outside, "do-not-delete.txt")
+	if err := os.WriteFile(treasure, []byte("precious"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tools := filepath.Join(utils, "tools")
+	if err := os.RemoveAll(tools); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, tools); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	if err := slimInstall(utils, root, io.Discard); err != nil {
+		t.Fatalf("slimInstall: %v", err)
+	}
+
+	// The link is gone; what it pointed at is untouched.
+	if _, err := os.Lstat(tools); !os.IsNotExist(err) {
+		t.Fatal("the symlink survived the cleanup")
+	}
+	if _, err := os.Stat(treasure); err != nil {
+		t.Fatalf("cleanup followed the symlink and deleted outside the bundle: %v", err)
+	}
+}
