@@ -526,6 +526,17 @@ func (app *application) launch(response http.ResponseWriter) {
 	app.mu.Lock()
 	result, state, install := app.result, app.state, app.install
 	app.mu.Unlock()
+	// NEVER mid-build. Broadening the guard below to accept a DETECTED build made
+	// Play work during a rebuild, which launches the very binary the build is in
+	// the middle of overwriting -- at best a crash, at worst a half-written
+	// executable. Checked first and independently of CanLaunch, because the cached
+	// install state legitimately still says "launchable" while a rebuild runs
+	// (status deliberately skips re-probing mid-build, since the tree is churning).
+	if state == "building" {
+		writeJSONError(response, http.StatusConflict,
+			"a build is running -- wait for it to finish before playing")
+		return
+	}
 	// Launchable either because this session built it, or because a previous one
 	// did and the artifacts are still on disk. The second case is the whole
 	// point of detection -- it is what turns the builder into a launcher.
@@ -1173,7 +1184,12 @@ let slimDismissed=false, lastMode="";
 function applyMode(data){
   const mode=data.mode||"buildable", install=data.install||{};
   document.body.dataset.mode=mode;
-  playBox.hidden=!install.canLaunch;
+  /* Play is hidden while a build runs: the binary it would launch is being
+     overwritten. The server refuses it too (launch() checks state first) -- this
+     is only so the button does not sit there inviting the click. */
+  const building=(data.state==="building");
+  playBox.hidden=!install.canLaunch||building;
+  playButton.disabled=building;
   buildBox.hidden=(mode==="launcher");
   noBuild.hidden=(mode!=="launcher");
   slimDone.hidden=!data.slimDone;

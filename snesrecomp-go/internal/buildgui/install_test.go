@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -386,5 +387,55 @@ func TestLaunchWorksWithoutARunGameScript(t *testing.T) {
 		}
 	default:
 		t.Fatal("launch never reached the host")
+	}
+}
+
+// Play must be refused WHILE a build is running. Broadening the launch guard to
+// accept a DETECTED build (which is what turns the builder into a launcher) had
+// the side effect of permitting Play mid-rebuild -- launching the very binary the
+// build is overwriting. Found by an audit probe.
+//
+// The cached install state legitimately still says "launchable" during a build,
+// because status deliberately skips re-probing while the tree is churning, so the
+// build state has to be checked FIRST and independently.
+func TestLaunchRefusedWhileBuilding(t *testing.T) {
+	launchesDuringBuild := 0
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		// Counted rather than fatal: the second half of this test deliberately
+		// launches successfully once the build has finished, so a fatal here would
+		// fire on the legitimate call.
+		Launch: func(Result) error { launchesDuringBuild++; return nil },
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true,
+				Result: Result{BinaryPath: "/old/game", WorkingDir: "/old"}}
+		},
+	}, "token")
+
+	app.mu.Lock()
+	app.state = "building"
+	app.mu.Unlock()
+
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, "build is running") {
+		t.Fatalf("refusal does not explain why: %s", body)
+	}
+	if launchesDuringBuild != 0 {
+		t.Fatal("launched a game while the build was overwriting it")
+	}
+
+	// And once the build finishes, Play works again.
+	app.mu.Lock()
+	app.state = "idle"
+	app.mu.Unlock()
+	recorder = httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code == http.StatusConflict {
+		t.Fatalf("still refused after the build ended: %s", recorder.Body.String())
 	}
 }
