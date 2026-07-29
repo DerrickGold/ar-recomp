@@ -37,12 +37,24 @@ type Result struct {
 
 // Options configures one local GUI session.
 type Options struct {
-	Title        string
-	ProjectRoot  string
-	OpenBrowser  bool
-	Stdout       io.Writer
-	Build        func(context.Context, string, io.Writer) (Result, error)
-	Launch       func(Result) error
+	Title       string
+	ProjectRoot string
+	OpenBrowser bool
+	Stdout      io.Writer
+	Build       func(context.Context, string, io.Writer) (Result, error)
+	Launch      func(Result) error
+	// Detect reports what this copy of the bundle can currently do: launch an
+	// already-built game, run a rebuild, or reclaim space by removing the
+	// build-only files. Called at session start and again after a build or a
+	// cleanup, so the page always reflects the filesystem rather than only what
+	// happened in this process.
+	//
+	// Optional: with no Detect the GUI behaves as it always did, opening on a
+	// ROM picker. That keeps every existing caller and test working unchanged.
+	Detect func() InstallState
+	// Slim removes the build-only files, keeping everything the game needs to
+	// run. Optional; the cleanup offer is not shown when it is absent.
+	Slim         func(io.Writer) error
 	openURL      func(string) error
 	sessionToken string
 }
@@ -158,6 +170,17 @@ type status struct {
 	Message    string   `json:"message,omitempty"`
 	OutputPath string   `json:"outputPath,omitempty"`
 	Progress   progress `json:"progress"`
+	// Install is what this copy can do, and Mode is the page shape derived from
+	// it. Both are sent on every poll so the page never has to infer capability
+	// from state transitions it may have missed.
+	Install InstallState `json:"install"`
+	Mode    string       `json:"mode"`
+	// SlimSize is the human-readable reclaimable size ("612 MB"), empty when
+	// unknown or when there is nothing to reclaim.
+	SlimSize string `json:"slimSize,omitempty"`
+	// SlimDone is set once a cleanup has completed in this session, so the page
+	// can confirm it rather than silently dropping the offer.
+	SlimDone bool `json:"slimDone,omitempty"`
 }
 
 type application struct {
@@ -172,13 +195,55 @@ type application struct {
 	errorMessage string
 	result       Result
 	closeOnce    sync.Once
+	install      InstallState
+	slimDone     bool
+	slimming     bool
 }
 
 func newApplication(ctx context.Context, options Options, token string) *application {
-	return &application{
+	app := &application{
 		ctx: ctx, options: options, prefix: "/" + token + "/",
 		closed: make(chan struct{}), state: "idle",
 	}
+	// Adopt an existing build as this session's result, which is what makes
+	// Launch work without rebuilding first: the launch handler needs an
+	// OutputPath, and a freshly opened process has no other source for one.
+	app.install = app.detect()
+	if app.install.CanLaunch {
+		app.result = app.install.Result
+	}
+	return app
+}
+
+// detect re-probes the filesystem. Safe with no Detect hook: the zero
+// InstallState means "cannot launch, cannot rebuild", and refreshState below
+// keeps the legacy ROM-picker behaviour in that case.
+func (app *application) detect() InstallState {
+	if app.options.Detect == nil {
+		return InstallState{}
+	}
+	return app.options.Detect()
+}
+
+// refreshState recomputes install capability after something changed on disk.
+// Caller must NOT hold the mutex: Detect touches the filesystem.
+func (app *application) refreshState() {
+	state := app.detect()
+	app.mu.Lock()
+	app.install = state
+	if state.CanLaunch && app.result.OutputPath == "" {
+		app.result = state.Result
+	}
+	app.mu.Unlock()
+}
+
+// pageMode is the shape the page should take. Without a Detect hook every
+// session looks like the original builder, so existing callers are unaffected.
+func (app *application) pageMode(install InstallState) string {
+	if app.options.Detect == nil {
+		return "buildable"
+	}
+	return install.mode()
 }
 
 func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Request) {
@@ -216,6 +281,8 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		app.startBuild(response, request)
 	case endpoint == "launch" && request.Method == http.MethodPost:
 		app.launch(response)
+	case endpoint == "slim" && request.Method == http.MethodPost:
+		app.slim(response)
 	case endpoint == "close" && request.Method == http.MethodPost:
 		app.close(response)
 	default:
@@ -228,8 +295,17 @@ func (app *application) writeStatus(response http.ResponseWriter) {
 	current := status{
 		State: app.state, Log: app.log.String(), Error: app.errorMessage,
 		Message: app.result.Message, OutputPath: app.result.OutputPath,
+		Install: app.install, SlimDone: app.slimDone,
 	}
 	app.mu.Unlock()
+	current.Mode = app.pageMode(current.Install)
+	// Only offered while a cleanup is actually possible: no Slim hook means no
+	// offer, and an already-lean install has nothing left to remove.
+	if app.options.Slim != nil && current.Install.CanSlim {
+		current.SlimSize = slimSummary(current.Install.SlimBytes)
+	} else {
+		current.Install.CanSlim = false
+	}
 	// Derived outside the lock: computeProgress is pure and can be slow
 	// relative to a mutex hold (it scans the whole log tail on every poll).
 	current.Progress = computeProgress(current.Log, current.State)
@@ -237,10 +313,35 @@ func (app *application) writeStatus(response http.ResponseWriter) {
 }
 
 func (app *application) startBuild(response http.ResponseWriter, request *http.Request) {
+	// A build must be refused when its inputs are gone. Re-probed here rather
+	// than trusting the cached state, because a cleanup (or a manual deletion)
+	// can happen between a page load and this request, and the failure mode
+	// otherwise is a build that starts and then dies partway with a confusing
+	// toolchain error. Enforced SERVER-side deliberately: hiding the button is
+	// presentation, and presentation is not a guarantee.
+	if app.options.Detect != nil {
+		app.refreshState()
+		app.mu.Lock()
+		canRebuild := app.install.CanRebuild
+		app.mu.Unlock()
+		if !canRebuild {
+			writeJSONError(response, http.StatusConflict,
+				"this install no longer has the build tools — download the "+
+					"package again from the repository to rebuild")
+			return
+		}
+	}
+
 	app.mu.Lock()
 	if app.state == "building" {
 		app.mu.Unlock()
 		writeJSONError(response, http.StatusConflict, "a build is already running")
+		return
+	}
+	if app.slimming {
+		app.mu.Unlock()
+		writeJSONError(response, http.StatusConflict,
+			"wait for the cleanup to finish")
 		return
 	}
 	app.state = "building"
@@ -275,14 +376,18 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 	go func() {
 		result, buildErr := app.options.Build(app.ctx, romPath, &lockedLogWriter{app: app})
 		app.mu.Lock()
-		defer app.mu.Unlock()
 		if buildErr != nil {
 			app.state = "failed"
 			app.errorMessage = buildErr.Error()
+			app.mu.Unlock()
 			return
 		}
 		app.state = "succeeded"
 		app.result = result
+		app.mu.Unlock()
+		// Re-probe so the cleanup offer appears with a current size: the build
+		// just created most of what it would reclaim.
+		app.refreshState()
 	}()
 }
 
@@ -375,10 +480,18 @@ func (writer *lockedLogWriter) Write(data []byte) (int, error) {
 
 func (app *application) launch(response http.ResponseWriter) {
 	app.mu.Lock()
-	result, state := app.result, app.state
+	result, state, install := app.result, app.state, app.install
 	app.mu.Unlock()
-	if state != "succeeded" {
+	// Launchable either because this session built it, or because a previous one
+	// did and the artifacts are still on disk. The second case is the whole
+	// point of detection -- it is what turns the builder into a launcher.
+	if state != "succeeded" && !install.CanLaunch {
 		writeJSONError(response, http.StatusConflict, "finish a successful build first")
+		return
+	}
+	if result.OutputPath == "" {
+		writeJSONError(response, http.StatusConflict,
+			"no built game was found to launch")
 		return
 	}
 	if app.options.Launch == nil {
@@ -390,6 +503,55 @@ func (app *application) launch(response http.ResponseWriter) {
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]string{"state": "launched"})
+}
+
+// slim removes the build-only files and re-probes. Synchronous: deleting a
+// directory tree is fast next to a build, and the page's poll picks up the new
+// state immediately afterwards.
+func (app *application) slim(response http.ResponseWriter) {
+	if app.options.Slim == nil {
+		writeJSONError(response, http.StatusNotImplemented,
+			"cleanup is unavailable on this host")
+		return
+	}
+	app.mu.Lock()
+	if app.state == "building" {
+		app.mu.Unlock()
+		writeJSONError(response, http.StatusConflict,
+			"wait for the current build to finish")
+		return
+	}
+	if app.slimming {
+		app.mu.Unlock()
+		writeJSONError(response, http.StatusConflict, "cleanup is already running")
+		return
+	}
+	// Refuse when there is nothing to remove, so a double-click cannot delete
+	// a second time against a changed filesystem.
+	if !app.install.CanSlim {
+		app.mu.Unlock()
+		writeJSONError(response, http.StatusConflict,
+			"this install has no build files left to remove")
+		return
+	}
+	app.slimming = true
+	app.mu.Unlock()
+
+	err := app.options.Slim(&lockedLogWriter{app: app})
+
+	app.mu.Lock()
+	app.slimming = false
+	if err == nil {
+		app.slimDone = true
+	}
+	app.mu.Unlock()
+	app.refreshState()
+
+	if err != nil {
+		writeJSONError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]string{"state": "slimmed"})
 }
 
 func (app *application) close(response http.ResponseWriter) {
@@ -616,6 +778,40 @@ button.secondary {
 }
 button:disabled { opacity:.42; cursor:not-allowed; box-shadow:none; }
 
+/* PLAY BLOCK. In launcher mode this is the entire panel, so it has to carry the
+ * page rather than read as one control among several: the button is oversized
+ * and gold, and the heading states plainly that a game exists. */
+#play-box[hidden], #slim-box[hidden], #build-box[hidden], #nobuild[hidden],
+#slim-done[hidden] { display:none; }
+.play-head { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.play-title { font-size:1.15rem; color:#fff8e6; font-weight:600; letter-spacing:.01em; }
+.play-sub { color:var(--muted); font-size:.83rem; margin-top:2px;
+  font-family:system-ui,-apple-system,sans-serif; }
+.play-btn { margin-left:auto; font-size:1.05rem; padding:14px 30px; }
+/* A rebuild is secondary once a game exists, so the build block is separated
+ * from the play block by a rule rather than competing with it. */
+body[data-mode=ready] #build-box, body[data-mode=ready] #slim-box {
+  margin-top:20px; padding-top:18px; border-top:1px solid var(--line);
+}
+body[data-mode=ready] #rom-label::before { content:"Rebuild \2014 "; color:var(--muted); }
+/* Launcher mode: no build affordances at all, and the panel is quieter. */
+body[data-mode=launcher] #steps-box, body[data-mode=launcher] #log-box,
+body[data-mode=launcher] .privacy { display:none; }
+
+/* Cleanup offer. Framed as an opportunity, not a warning -- nothing is wrong,
+ * there is simply space to reclaim. */
+.slim-title { font-weight:600; color:#fff3d6; font-size:1rem; }
+.slim-copy { margin:6px 0 0; color:#e4dece; font-size:.88rem; max-width:64ch; }
+.slim-done { margin-top:18px; color:var(--ok); font-size:.9rem; font-weight:600;
+  font-family:system-ui,-apple-system,sans-serif; }
+button.quiet { background:none; border-color:transparent; box-shadow:none;
+  color:var(--muted); font-weight:600; }
+button.quiet:hover:not(:disabled) { color:var(--ink); }
+.notice { margin-top:18px; padding:13px 15px; border:1px solid var(--line);
+  border-left:3px solid var(--gold-deep); border-radius:3px; background:#0c142759;
+  color:#ded8c4; font-size:.86rem; font-family:system-ui,-apple-system,sans-serif; }
+.notice strong { color:#fff3d6; display:block; margin-bottom:3px; }
+
 /* ONE status line. The previous layout said the same thing three times -- a
  * phase label, a separate state line, and eight empty step circles -- before
  * the user had even chosen a file. */
@@ -762,15 +958,64 @@ pre {
   </div>
 
   <section class="panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build">
-    <form id="build-form">
-      <label for="rom">ActRaiser ROM (.sfc or .smc)</label>
-      <input id="rom" name="rom" type="file" accept=".sfc,.smc" required>
-      <div class="actions">
-        <button id="build" type="submit">Build game</button>
-        <button id="launch" class="secondary" type="button" disabled>Launch game</button>
-        <button id="close" class="secondary" type="button">Close builder</button>
+    <!-- PLAY BLOCK. Shown whenever a built game is on disk, whether this
+         session built it or a previous one did. In launcher mode it is the only
+         thing here. -->
+    <div id="play-box" hidden>
+      <div class="play-head">
+        <div>
+          <div class="play-title" id="play-title">Your game is built and ready</div>
+          <div class="play-sub" id="play-sub"></div>
+        </div>
+        <button id="play" type="button" class="play-btn">&#9654;&nbsp; Play</button>
       </div>
-    </form>
+    </div>
+
+    <!-- CLEANUP OFFER. Appears after a successful build, and on any install
+         that still carries removable build files. -->
+    <div id="slim-box" hidden>
+      <div class="slim-title">Free up space?</div>
+      <p class="slim-copy" id="slim-copy">
+        The build tools are only needed for future rebuilds. You can remove them
+        and keep just the game &mdash; and if you ever want to rebuild, download
+        the package again from the repository.
+      </p>
+      <div class="actions">
+        <button id="slim" type="button" class="secondary">Clean up build tools</button>
+        <button id="slim-dismiss" type="button" class="quiet">Keep them</button>
+      </div>
+    </div>
+
+    <div id="slim-done" hidden class="slim-done">
+      Build tools removed &mdash; this install is now just the game.
+    </div>
+
+    <!-- BUILD BLOCK. Hidden entirely in launcher mode: with the inputs gone
+         there is nothing a ROM picker could accomplish, and a disabled control
+         invites the question "why?" without answering it. -->
+    <div id="build-box">
+      <form id="build-form">
+        <label for="rom" id="rom-label">ActRaiser ROM (.sfc or .smc)</label>
+        <input id="rom" name="rom" type="file" accept=".sfc,.smc" required>
+        <div class="actions">
+          <button id="build" type="submit">Build game</button>
+          <button id="launch" class="secondary" type="button" disabled>Launch game</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Why building is unavailable. Only rendered in the modes where the
+         build block is hidden, so it explains an absence rather than
+         decorating a working page. -->
+    <div id="nobuild" hidden class="notice">
+      <strong>Rebuilding is unavailable in this copy.</strong>
+      The build tools were removed to save space. Download the package again from
+      the repository if you want to rebuild from a ROM.
+    </div>
+
+    <div class="actions" id="shell-actions">
+      <button id="close" class="secondary" type="button">Close</button>
+    </div>
 
     <div id="state" data-kind="idle">Ready to build &mdash; choose your ROM above</div>
 
@@ -865,6 +1110,51 @@ document.querySelector(".tabs").addEventListener("keydown",event=>{
 
 function show(kind,text){ state.dataset.kind=kind; state.textContent=text; }
 
+/* MODE. The server decides which shape the page takes (buildgui/install.go), so
+ * the page cannot disagree with what the server will actually permit -- the same
+ * reason the phase model lives server-side. Applied on every poll because a
+ * cleanup or a finished build changes capability mid-session. */
+const playBox=document.querySelector("#play-box"), playButton=document.querySelector("#play");
+const playTitle=document.querySelector("#play-title"), playSub=document.querySelector("#play-sub");
+const buildBox=document.querySelector("#build-box"), noBuild=document.querySelector("#nobuild");
+const slimBox=document.querySelector("#slim-box"), slimButton=document.querySelector("#slim");
+const slimCopy=document.querySelector("#slim-copy"), slimDone=document.querySelector("#slim-done");
+const slimDismiss=document.querySelector("#slim-dismiss");
+let slimDismissed=false, lastMode="";
+
+function applyMode(data){
+  const mode=data.mode||"buildable", install=data.install||{};
+  document.body.dataset.mode=mode;
+  playBox.hidden=!install.canLaunch;
+  buildBox.hidden=(mode==="launcher");
+  noBuild.hidden=(mode!=="launcher");
+  slimDone.hidden=!data.slimDone;
+  /* Offered only when the server says there is something to remove, and only
+   * once the game is actually playable -- reclaiming space before there is a
+   * working build would be the wrong trade. */
+  slimBox.hidden=!(install.canSlim && install.canLaunch && !slimDismissed && !data.slimDone);
+  if(data.slimSize) slimCopy.dataset.size=data.slimSize;
+  slimButton.textContent=data.slimSize
+    ? "Clean up build tools ("+data.slimSize+")" : "Clean up build tools";
+  if(mode==="launcher"){
+    playTitle.textContent="Ready to play";
+    playSub.textContent="This copy contains just the game.";
+  } else if(install.canLaunch && data.state!=="building"){
+    playTitle.textContent="Your game is built and ready";
+    playSub.textContent=install.result&&install.result.outputPath?install.result.outputPath:"";
+  }
+  if(mode==="unusable" && lastMode!==mode)
+    show("failed","This copy has neither a built game nor the tools to build one — download the package again.");
+  /* The masthead's call to action is wrong once nothing needs building. */
+  if(mode==="launcher" && lastMode!==mode){
+    document.querySelector("h1").textContent="ActRaiser";
+    document.querySelector(".lede").textContent=
+      "Your game is built and ready to play. The build tools are not part of this copy.";
+    document.querySelector("#tab-build").firstChild.textContent="Play";
+  }
+  lastMode=mode;
+}
+
 /* The phase list and percentage come from the server (buildgui/progress.go), so
  * the page never parses the build log itself -- one definition of the phase
  * model, and the dock cannot disagree with the step list. */
@@ -902,6 +1192,7 @@ async function refresh(){
   try {
     const data=await responseJSON(await fetch("status",{cache:"no-store"}));
     if(data.log){ log.textContent=data.log; log.scrollTop=log.scrollHeight; }
+    applyMode(data);
     paint(data.progress,data.state);
     if(data.state==="building"){
       show("building","Building — this can take a few minutes");
@@ -918,6 +1209,15 @@ async function refresh(){
       show("failed",data.error||"Build failed"); build.disabled=false; launch.disabled=true; polling=false;
       logBox.open=true;  /* a failure is the one time the log matters unprompted */
       announce("failed",data.error||"Build failed");
+    }
+    if(data.state==="idle"){
+      /* The original copy assumed nothing was built. Say what is actually
+       * true, so a returning user is not told to choose a ROM they do not
+       * need. */
+      const install=data.install||{};
+      if(data.mode==="launcher") show("idle","Ready to play");
+      else if(install.canLaunch){ show("idle","A built game is ready — Play, or rebuild below"); launch.disabled=false; }
+      else if(install.canRebuild) show("idle","Ready to build — choose your ROM above");
     }
   } catch(error) { show("failed",error.message); polling=false; announce("failed",error.message); }
   if(polling) setTimeout(refresh,500);
@@ -944,6 +1244,27 @@ async function doLaunch(){
 }
 launch.addEventListener("click",doLaunch);
 dockLaunch.addEventListener("click",doLaunch);
+playButton.addEventListener("click",doLaunch);
+
+slimDismiss.addEventListener("click",()=>{ slimDismissed=true; slimBox.hidden=true; });
+slimButton.addEventListener("click",async()=>{
+  slimButton.disabled=true; slimDismiss.disabled=true;
+  show("building","Removing build tools…");
+  try {
+    await responseJSON(await fetch("slim",{method:"POST"}));
+    /* One poll settles everything: the server has re-probed, so the offer
+     * disappears, the confirmation appears, and the page drops into launcher
+     * mode without the page having to guess any of it. */
+    await refresh();
+    show("succeeded","Build tools removed");
+  } catch(error){ show("failed",error.message); }
+  slimButton.disabled=false; slimDismiss.disabled=false;
+});
+
+/* First paint: ask the server what this copy can do before showing anything, so
+ * a returning user never sees the build form flash past on the way to a
+ * launcher. */
+refresh();
 closeButton.addEventListener("click",async()=>{
   try {
     await responseJSON(await fetch("close",{method:"POST"}));

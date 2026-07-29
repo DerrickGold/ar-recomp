@@ -59,6 +59,15 @@ func runGUI(args []string) error {
 			return buildFromGUI(ctx, values, root, outputDir, romPath, output)
 		},
 		Launch: launchBuiltGame,
+		// Lets the GUI open as a launcher beside an existing build, and refuse a
+		// rebuild whose inputs have been cleaned away. See install_state.go for
+		// the two file sets and why they differ.
+		Detect: func() buildgui.InstallState {
+			return detectInstallState(root, outputDir)
+		},
+		Slim: func(output io.Writer) error {
+			return slimInstall(root, outputDir, output)
+		},
 	})
 }
 
