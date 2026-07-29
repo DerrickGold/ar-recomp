@@ -107,16 +107,34 @@ func detectInstallState(root, outputDir string) buildgui.InstallState {
 	// the game is playable, since reclaiming space before there is a working
 	// build would trade away the ability to make one for nothing -- AND only in a
 	// real bundle, never a source checkout (see isSlimmableBundle).
+	//
+	// PRESENCE only, no sizing: this function runs on every status poll, and
+	// summing the trees means walking them. measureSlimBytes does that, from the
+	// two places the size can actually change.
 	if state.CanLaunch && isSlimmableBundle(root) {
 		for _, relative := range buildOnlySubtrees {
-			path := filepath.Join(root, relative)
-			if info, err := os.Stat(path); err == nil && info.IsDir() {
+			if info, err := os.Stat(filepath.Join(root, relative)); err == nil && info.IsDir() {
 				state.CanSlim = true
-				state.SlimBytes += directorySize(path)
+				break
 			}
 		}
 	}
 	return state
+}
+
+// measureSlimBytes sums the build-only subtrees. Split from detectInstallState
+// because it WALKS: ~24ms for 900 files, ~74ms for 3600. Wired to the GUI's
+// MeasureSlim hook, which runs at session start and after a build or cleanup --
+// not at the poll interval.
+func measureSlimBytes(root string) int64 {
+	var total int64
+	for _, relative := range buildOnlySubtrees {
+		path := filepath.Join(root, relative)
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			total += directorySize(path)
+		}
+	}
+	return total
 }
 
 // isSlimmableBundle reports whether `root` is a shipped bundle's utils/ directory

@@ -58,13 +58,26 @@ type Options struct {
 	Launch      func(Result) error
 	// Detect reports what this copy of the bundle can currently do: launch an
 	// already-built game, run a rebuild, or reclaim space by removing the
-	// build-only files. Called at session start and again after a build or a
-	// cleanup, so the page always reflects the filesystem rather than only what
-	// happened in this process.
+	// build-only files. Called at session start and again on every status poll,
+	// so the page always reflects the filesystem rather than only what happened
+	// in this process.
+	//
+	// MUST BE CHEAP: this runs at the poll interval. Report CanSlim from the
+	// PRESENCE of the build-only files, and leave SlimBytes zero -- sizing them
+	// means walking the tree, which belongs in MeasureSlim below.
 	//
 	// Optional: with no Detect the GUI behaves as it always did, opening on a
 	// ROM picker. That keeps every existing caller and test working unchanged.
 	Detect func() InstallState
+	// MeasureSlim sizes what the cleanup would reclaim. Split out from Detect
+	// because it walks the whole build tree -- measured at 24ms for ~900 files
+	// and 74ms for ~3600, which at a 500ms poll is 5-15% of a core spent
+	// re-deriving a number that only changes when a build or a cleanup runs.
+	// So it is called ONLY at those two moments, and its result is cached.
+	//
+	// Optional: without it the offer still appears, just with no size in it
+	// (slimSummary already returns "" for an unknown size).
+	MeasureSlim func() int64
 	// Slim removes the build-only files, keeping everything the game needs to
 	// run. Optional; the cleanup offer is not shown when it is absent.
 	Slim         func(io.Writer) error
@@ -211,6 +224,10 @@ type application struct {
 	install      InstallState
 	slimDone     bool
 	slimming     bool
+	// slimBytes caches MeasureSlim's walk. Refreshed only when the size can
+	// have changed -- session start, after a build, after a cleanup -- because
+	// Detect runs at the poll interval and must not walk the tree.
+	slimBytes int64
 }
 
 func newApplication(ctx context.Context, options Options, token string) *application {
@@ -222,6 +239,12 @@ func newApplication(ctx context.Context, options Options, token string) *applica
 	// Launch work without rebuilding first: the launch handler needs an
 	// OutputPath, and a freshly opened process has no other source for one.
 	app.install = app.detect()
+	// One walk at startup so a bundle that is ALREADY slimmable shows its size
+	// without waiting for a build that may never happen in this session.
+	if app.install.CanSlim && app.options.MeasureSlim != nil {
+		app.slimBytes = app.options.MeasureSlim()
+		app.install.SlimBytes = app.slimBytes
+	}
 	if app.install.CanLaunch {
 		app.result = app.install.Result
 	}
@@ -238,12 +261,36 @@ func (app *application) detect() InstallState {
 	return app.options.Detect()
 }
 
+// remeasureSlim refreshes the cached cleanup size. Separate from refreshState
+// because it walks the build tree: call it only where the size can actually
+// have changed, never from the status poll. Caller must NOT hold the mutex.
+func (app *application) remeasureSlim() {
+	var size int64
+	if app.options.MeasureSlim != nil {
+		size = app.options.MeasureSlim()
+	}
+	app.mu.Lock()
+	app.slimBytes = size
+	app.install.SlimBytes = size
+	app.mu.Unlock()
+}
+
 // refreshState recomputes install capability after something changed on disk.
 // Caller must NOT hold the mutex: Detect touches the filesystem.
+//
+// Deliberately does NOT re-measure the cleanup size -- see remeasureSlim. The
+// cached figure is carried over so a poll cannot blank a size the page is
+// already showing, and is dropped when there is nothing left to clean.
 func (app *application) refreshState() {
 	state := app.detect()
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if state.CanSlim && state.SlimBytes == 0 {
+		state.SlimBytes = app.slimBytes
+	}
+	if !state.CanSlim {
+		app.slimBytes = 0
+	}
 	app.install = state
 	if state.CanLaunch {
 		// Adopt the detected artifacts unless THIS session built something,
@@ -326,8 +373,9 @@ func (app *application) writeStatus(response http.ResponseWriter) {
 	// churning by definition and the probe would be noise; the post-build
 	// refresh covers that case.
 	//
-	// Cheap enough for a 500 ms poll: a handful of stats, plus a directory walk
-	// only when a build is present and the tools are still there.
+	// Cheap enough for a 500 ms poll: a bounded handful of stats. The directory
+	// WALK that sizes the cleanup is deliberately not here -- it costs 24ms at
+	// ~900 files and 74ms at ~3600, and is cached by remeasureSlim instead.
 	app.mu.Lock()
 	building := app.state == "building"
 	app.mu.Unlock()
@@ -430,7 +478,9 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 		app.result = result
 		app.mu.Unlock()
 		// Re-probe so the cleanup offer appears with a current size: the build
-		// just created most of what it would reclaim.
+		// just created most of what it would reclaim. This is one of the two
+		// moments the size can change, so it is one of the two that walk.
+		app.remeasureSlim()
 		app.refreshState()
 	}()
 }
@@ -604,6 +654,8 @@ func (app *application) slim(response http.ResponseWriter) {
 		app.slimDone = true
 	}
 	app.mu.Unlock()
+	// The other moment the size changes: the cleanup just removed the trees.
+	app.remeasureSlim()
 	app.refreshState()
 
 	if err != nil {

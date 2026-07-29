@@ -439,3 +439,92 @@ func TestLaunchRefusedWhileBuilding(t *testing.T) {
 		t.Fatalf("still refused after the build ended: %s", recorder.Body.String())
 	}
 }
+
+// The cleanup size comes from MeasureSlim, which WALKS the build tree. The
+// status poll runs twice a second, so the walk must NOT be on that path: the
+// figure is measured when it can have changed and cached in between.
+//
+// This is the regression that motivated the split -- Detect used to size the
+// trees itself, costing 24ms per poll at ~900 files and 74ms at ~3600.
+func TestSlimSizeIsMeasuredOnceAndCachedAcrossPolls(t *testing.T) {
+	measures := 0
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Slim:        func(io.Writer) error { return nil },
+		// A cheap probe: presence, no size -- exactly what the host now returns.
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true, CanSlim: true,
+				Result: Result{OutputPath: "run-game.sh"}}
+		},
+		MeasureSlim: func() int64 {
+			measures++
+			return 700 << 20
+		},
+	}, "token")
+
+	poll := func() status {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+		var got status
+		if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode status: %v", err)
+		}
+		return got
+	}
+
+	// Session start measures once, so an already-slimmable bundle shows a size
+	// without waiting for a build.
+	if measures != 1 {
+		t.Fatalf("MeasureSlim called %d times at startup, want 1", measures)
+	}
+	for i := 1; i <= 5; i++ {
+		got := poll()
+		if got.SlimSize != "700 MB" {
+			t.Fatalf("poll %d: SlimSize = %q, want 700 MB (the cached figure must "+
+				"survive a poll that does not re-measure)", i, got.SlimSize)
+		}
+	}
+	if measures != 1 {
+		t.Fatalf("MeasureSlim called %d times after 5 polls, want 1: the tree walk "+
+			"is back on the 500ms status path", measures)
+	}
+
+	// A cleanup IS a moment the size changes, so it re-measures.
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/slim", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("slim status = %d (%s)", recorder.Code, recorder.Body.String())
+	}
+	if measures != 2 {
+		t.Fatalf("MeasureSlim called %d times, want 2: a cleanup changes the size "+
+			"and must re-measure", measures)
+	}
+}
+
+// Without MeasureSlim the offer still appears; it just carries no figure. Keeps
+// the hook optional for callers that do not want to pay for a walk at all.
+func TestCleanupOfferSurvivesAMissingMeasureHook(t *testing.T) {
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Slim:        func(io.Writer) error { return nil },
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true, CanSlim: true,
+				Result: Result{OutputPath: "run-game.sh"}}
+		},
+	}, "token")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+	var got status
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if !got.Install.CanSlim {
+		t.Fatal("cleanup not offered with no MeasureSlim hook")
+	}
+	if got.SlimSize != "" {
+		t.Fatalf("SlimSize = %q with no way to measure, want empty", got.SlimSize)
+	}
+}
