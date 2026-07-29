@@ -427,11 +427,15 @@ func TestCleanupDoesNotFollowSymlinksOutOfTheBundle(t *testing.T) {
 	if err := os.WriteFile(treasure, []byte("precious"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	tools := filepath.Join(utils, "tools")
-	if err := os.RemoveAll(tools); err != nil {
+	// Point one of the OTHER allowlisted names at the outside directory, leaving
+	// utils/tools (and the tools/snesbuild bundle marker) intact -- otherwise the
+	// install would no longer look like a bundle and the cleanup would refuse for
+	// an unrelated reason, which would make this test pass vacuously.
+	linked := filepath.Join(utils, "third_party")
+	if err := os.RemoveAll(linked); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, tools); err != nil {
+	if err := os.Symlink(outside, linked); err != nil {
 		t.Skipf("cannot create a symlink here: %v", err)
 	}
 
@@ -440,10 +444,147 @@ func TestCleanupDoesNotFollowSymlinksOutOfTheBundle(t *testing.T) {
 	}
 
 	// The link is gone; what it pointed at is untouched.
-	if _, err := os.Lstat(tools); !os.IsNotExist(err) {
+	if _, err := os.Lstat(linked); !os.IsNotExist(err) {
 		t.Fatal("the symlink survived the cleanup")
 	}
 	if _, err := os.Stat(treasure); err != nil {
 		t.Fatalf("cleanup followed the symlink and deleted outside the bundle: %v", err)
+	}
+}
+
+// A FRESH bundle -- extracted, never built -- must report itself unlaunchable and
+// must not offer the cleanup. Found by an audit probe, and it was severe: the
+// bundle root ships run-build.command/.sh as executables (install(PROGRAMS) => 0755)
+// and the old exclusion-based heuristic only skipped run-game.*, so
+// findGameBinary returned run-build.command as "the game". That made CanLaunch and
+// CanSlim both true on a bundle with no game -- Play would fail, and accepting the
+// cleanup would delete the build tools, leaving the user unable to build at all.
+//
+// This is why findGameBinary now prefers the known target name and rejects script
+// extensions outright rather than trusting a deny-list.
+func TestFreshNeverBuiltBundleIsNotLaunchable(t *testing.T) {
+	root, utils := bundleFixture(t)
+	// Remove the built game, leaving a bundle as it ships.
+	removeBuiltGame(t, root)
+	// Re-create exactly what the packaging puts in the root.
+	for _, name := range []string{"run-build.command", "run-build.sh", "run-build.bat"} {
+		if err := os.WriteFile(filepath.Join(root, name),
+			[]byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.txt"),
+		[]byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := findGameBinary(root); got != "" {
+		t.Fatalf("findGameBinary = %q on a never-built bundle, want \"\"", got)
+	}
+	state := detectInstallState(utils, root)
+	if state.CanLaunch {
+		t.Fatal("CanLaunch = true on a bundle that has never been built")
+	}
+	if state.CanSlim {
+		t.Fatal("cleanup offered on a bundle that has never been built")
+	}
+	if !state.CanRebuild {
+		t.Fatal("CanRebuild = false on a complete fresh bundle")
+	}
+	// And the cleanup refuses outright, so even a forced call cannot strand them.
+	if err := slimInstall(utils, root, io.Discard); err == nil {
+		t.Fatal("slimInstall succeeded on a never-built bundle")
+	}
+	if _, err := os.Stat(filepath.Join(utils, "tools")); err != nil {
+		t.Fatalf("build tools were deleted from a never-built bundle: %v", err)
+	}
+}
+
+// The real game binary must still be found when it IS present, alongside the
+// bundle scripts -- the fix must not have thrown out the detection it exists for.
+func TestGameBinaryFoundAlongsideBundleScripts(t *testing.T) {
+	root, utils := bundleFixture(t)
+	for _, name := range []string{"run-build.command", "run-build.sh"} {
+		if err := os.WriteFile(filepath.Join(root, name),
+			[]byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := findGameBinary(root)
+	if filepath.Base(got) != gameBinaryName() {
+		t.Fatalf("findGameBinary = %q, want the game binary %q", got, gameBinaryName())
+	}
+	if state := detectInstallState(utils, root); !state.CanLaunch {
+		t.Fatal("CanLaunch = false with the real game present")
+	}
+}
+
+// THE DOCUMENTED DEVELOPER INVOCATION must never be able to delete source.
+// `snesbuild gui --root .` from a checkout (docs/BUILD_TOOLING.md:61) makes root
+// the repository root, so the cleanup allowlist -- src, recomp, tools,
+// third_party, snesrecomp-go, build -- names the developer's own tracked
+// directories. An audit probe ran it against a checkout-shaped fixture and it
+// deleted src/main.c, recomp/bank00.cfg and tools/canary.sh.
+//
+// isSlimmableBundle now requires positive proof of a bundle (tools/snesbuild
+// present) AND the absence of any source-tree marker, so a false negative merely
+// hides the offer while a false positive would destroy work.
+func TestCleanupRefusesInASourceCheckout(t *testing.T) {
+	repo := t.TempDir()
+	for _, dir := range []string{"src", "recomp", "tools", "third_party",
+		"snesrecomp-go/runtime", "build"} {
+		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	precious := map[string]string{
+		filepath.Join("src", "main.c"):        "authored source",
+		filepath.Join("recomp", "bank00.cfg"): "cfg",
+		filepath.Join("tools", "canary.sh"):   "#!/bin/sh\n",
+		"snesbuild.ini":                       "x",
+		"CMakeLists.txt":                      "project()", // the checkout marker
+	}
+	for name, body := range precious {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A checkout can legitimately have a built game in it too -- that is what
+	// `--root .` produces -- so its presence must not be what unlocks deletion.
+	installGameFixture(t, repo)
+	// Even the bundled tool being present must not be enough on its own.
+	if err := os.WriteFile(filepath.Join(repo, "tools", "snesbuild"),
+		[]byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	state := detectInstallState(repo, repo)
+	if state.CanSlim {
+		t.Error("cleanup offered inside a source checkout")
+	}
+	if err := slimInstall(repo, repo, io.Discard); err == nil {
+		t.Error("slimInstall succeeded inside a source checkout")
+	}
+	// Nothing was touched.
+	for name := range precious {
+		if _, err := os.Stat(filepath.Join(repo, name)); err != nil {
+			t.Errorf("cleanup removed the checkout's %s: %v", name, err)
+		}
+	}
+}
+
+// The mirror: a real bundle IS slimmable, so the guard has not simply disabled
+// the feature.
+func TestCleanupStillWorksInARealBundle(t *testing.T) {
+	root, utils := bundleFixture(t)
+	if !isSlimmableBundle(utils) {
+		t.Fatal("a bundle-shaped fixture was not recognised as slimmable")
+	}
+	state := detectInstallState(utils, root)
+	if !state.CanSlim {
+		t.Fatal("cleanup not offered on a real bundle with a built game")
+	}
+	if err := slimInstall(utils, root, io.Discard); err != nil {
+		t.Fatalf("slimInstall refused a real bundle: %v", err)
 	}
 }
