@@ -62,7 +62,7 @@ proven. It does not mean that the record or its state table is missing.
 | `$0E` | `$C8CD` | 1 | Spawn-list-driven special actor/controller | unresolved |
 | `$0F` | `$C8AA` | 1 | Spawn-list-driven special actor/controller | unresolved |
 | `$10` | `$C880` | 1 | Spawn-list-driven special actor/controller | unresolved |
-| `$11` | `$C7BF` | 2 | Town position/direction controller; observed with direction-cursor composition `$D2C4` | map-plane selector; authentic top-down while picker is active |
+| `$11` | `$C7BF` | 2 | Town position/direction controller; observed with direction-cursor composition `$D2C4` | map-plane selector; the picker now stays in the tilted 3D space (`AR_SIM3D_PICKER_TOPDOWN` is compiled out) |
 | `$12` | `$B9EC` | 16 | Blue Dragon | flying; ground-targeted attack effect |
 | `$13` | `$BE4F` | 16 | Napper Bat | flying with dynamic dive/carry phases |
 | `$14` | `$C237` | 16 | Red Demon | flying |

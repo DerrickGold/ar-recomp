@@ -1397,7 +1397,7 @@ deltas:
 Scene construction inverts that 2x2 matrix once on the game thread and carries
 the resulting six-value source-to-authentic-screen affine map in the immutable
 `SimFrameData`. This keeps steady movement, zoom, and the action-entry spin on
-one exact camera model; the present thread does not infer a transform from PPU
+one exact camera model; the present path does not infer a transform from PPU
 registers and does not read live WRAM.
 
 The full map is mandatory content for this view. It is not conditional on the

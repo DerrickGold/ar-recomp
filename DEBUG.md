@@ -964,8 +964,9 @@ A against B gives exact pixel coordinates, which is usually the whole diagnosis:
 outside the live area" immediately (ledger §23).
 
 Note the logging call lives beside `SimRenderMetadata_TraceFrame`, not in
-`FrameSlot_Capture` — the latter only runs when a present thread consumes the
-slot, so anything placed there is silent in headless replays.
+`FrameSlot_Capture` — the latter's only caller is now the dev-tools snapshot
+path (`dev_tools.c`), gated on a live renderer, so anything placed there is
+silent in headless replays. The normal per-frame path is `DrawAndPresentFrame`.
 
 **A replay only reproduces what its display geometry reproduces.** Replaying the
 user's own recording of §23 showed zero mismatches, because the headless replay

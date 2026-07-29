@@ -326,7 +326,8 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
     Sim3D_AnnotateFrame(&sim, &tuning);
     SimWorldNavigationCapture_Capture(&sim, g_ppu);
     /* This site runs on every frame including headless, unlike
-     * FrameSlot_Capture, which only runs when a present thread consumes it. */
+     * FrameSlot_Capture, whose only caller is the dev-tools snapshot path
+     * (dev_tools.c) and is gated on a live renderer. */
     Sim3D_RenderTownCanvas(&sim, g_ram, g_ppu);
     sim.town_canvas_serial = SimTownCanvas_Serial();
     Sim3D_LogViewTransition(&sim);
@@ -1354,7 +1355,7 @@ int main(int argc, char **argv) {
             /* Level warp: stage the game's own sim->act transition to the raw
              * registry target seeded by AR_WARP=<region_hex><map_hex>. The low byte is $19,
              * not a uniform act number (e.g. Kasandora act 2 is 0303). Press
-             * from a transition-capable state; see README + docs/SEAMS.md. */
+             * from a transition-capable state; see docs/manual.md + docs/SEAMS.md. */
             (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
           } else if (event.key.key == SDLK_F2) {
             /* On-demand FULL snapshot — each press writes a unique set of files
