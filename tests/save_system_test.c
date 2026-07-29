@@ -74,13 +74,25 @@ static void TestChecksumAndFields(void) {
   CHECK(!Save_ParseRegionState("active", &parsed));
 
 #ifdef ACTRAISER_SOURCE_DIR
+  /* A real battery save, as a sanity check that the codec agrees with the
+   * game's own writer. These fixtures live in test-saves/ and are gitignored
+   * (*.srm is ROM-derived; see docs/contributing.md), so a fresh clone
+   * legitimately has none — that is a skip, not a failure. Only a fixture
+   * that exists and fails to load or checksum is a real defect. */
   char fixture_path[1024];
-  snprintf(fixture_path, sizeof(fixture_path), "%s/save.sim-blank.bak.srm",
-           ACTRAISER_SOURCE_DIR);
-  uint8_t real[kActRaiserSramSize];
-  SaveError error = {{0}};
-  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, fixture_path, real, &error));
-  CHECK(Save_ChecksumValid(real));
+  snprintf(fixture_path, sizeof(fixture_path),
+           "%s/test-saves/save.sim-blank.bak.srm", ACTRAISER_SOURCE_DIR);
+  FILE *fixture = fopen(fixture_path, "rb");
+  if (fixture) {
+    fclose(fixture);
+    uint8_t real[kActRaiserSramSize];
+    SaveError error = {{0}};
+    CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, fixture_path, real, &error));
+    CHECK(Save_ChecksumValid(real));
+  } else {
+    printf("save system tests: skipping real-save fixture (%s absent)\n",
+           fixture_path);
+  }
 #endif
 }
 
