@@ -7,10 +7,17 @@
  * things: where sections begin, which lines carry a key, and everything else
  * (comments, blanks, continuation junk) which is passed through untouched. */
 enum {
-  /* Longest section or key NAME the classifier will capture. INI names in these
-   * files are short (the longest shipped is "ExtendedAspectRatio", 19 chars); a
-   * longer one is truncated for COMPARISON only -- the line itself is always
-   * emitted in full, so a pathological name costs a missed match, never data. */
+  /* Longest section or key NAME compared when deciding whether the live file
+   * already has a key. Measured against the real files: the longest shipped name
+   * is "[replace:title-swirl]" at 21 characters, so this is a ~6x margin.
+   *
+   * THE LIMIT, stated plainly: names are truncated to this length for COMPARISON,
+   * so two keys in one section differing ONLY past character 127 look identical
+   * and the second would not be appended. Verified reachable only with a
+   * synthetic 200-character key. The line itself is always emitted in full, so
+   * the failure mode is a setting that does not arrive -- never data loss, and
+   * never a corrupted file. Raising this is a one-line change if a format ever
+   * grows names that long. */
   kIniNameMax = 128,
 };
 
