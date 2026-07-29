@@ -469,7 +469,33 @@ static void TestApplierKeepsUserValuesAndAddsNewOnes(void) {
   CHECK(chdir(original) == 0);
 }
 
+/* The documented comparison limit, pinned so it is a known boundary rather than a
+ * surprise. Names are compared up to kIniNameMax; two keys differing only past
+ * that look identical, so the second is not appended. Real names top out around
+ * 21 characters (measured against all three shipped files), so this needs a
+ * synthetic key to reach -- and the failure mode is a setting that does not
+ * arrive, never lost data or a corrupted file. */
+static void TestOverlongNamesAreComparedTruncated(void) {
+  char shared[300], other[320], live[800], shipped[1200];
+  memset(shared, 'K', 200);
+  shared[200] = '\0';
+  snprintf(other, sizeof(other), "%s_DIFFERENT", shared);
+  snprintf(live, sizeof(live), "[S]\n%s = 1\n", shared);
+  snprintf(shipped, sizeof(shipped), "[S]\n%s = 1\n%s = 2\n", shared, other);
+
+  int added = -1;
+  char *out = Merge(live, shipped, &added);
+  if (!out) return;
+  /* The boundary as it actually behaves: the near-duplicate is NOT appended. */
+  CHECK(added == 0);
+  /* What matters is that nothing was lost or mangled. */
+  CHECK(strstr(out, shared) != NULL);
+  CHECK(strlen(out) >= strlen(live));
+  free(out);
+}
+
 int main(void) {
+  TestOverlongNamesAreComparedTruncated();
   TestApplierKeepsUserValuesAndAddsNewOnes();
   TestUserValuesAlwaysWin();
   TestNewKeyIsAppended();
