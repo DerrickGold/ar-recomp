@@ -125,10 +125,57 @@ func buildFromGUI(
 	return buildgui.Result{
 		Message:    "Build complete — your playable game is ready.",
 		OutputPath: installed.Launcher,
+		BinaryPath: installed.BinaryPath,
+		WorkingDir: root,
 	}, nil
 }
 
+// launchBuiltGame starts the game.
+//
+// PREFERRED PATH: run the binary directly, from the working directory the
+// generated script would have used, with the same arguments. The script is still
+// written and is still how you play without this GUI -- that is its actual
+// purpose -- but the GUI no longer goes THROUGH it, for two reasons:
+//
+//   - `open`/`start` report success once the OS accepts the handoff, so a
+//     missing, non-executable, or immediately-crashing game looked like a
+//     successful launch. Running the binary means Start() fails for real.
+//   - It is one fewer process hop, and it keeps working if the script is deleted.
+//
+// The argument list mirrors project.launcher(): the ROM path, then
+// `--config config.ini` resolved against the working directory.
 func launchBuiltGame(result buildgui.Result) error {
+	if result.BinaryPath == "" {
+		// Older Result (or a host that only knows the script): fall back to the
+		// previous behaviour rather than refusing to launch.
+		return launchViaScript(result)
+	}
+	info, err := os.Stat(result.BinaryPath)
+	if err != nil {
+		return fmt.Errorf("the built game is missing: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a runnable file", result.BinaryPath)
+	}
+	arguments := []string{}
+	if rom := findInstalledROM(result.WorkingDir); rom != "" {
+		arguments = append(arguments, rom)
+	}
+	arguments = append(arguments, "--config", "config.ini")
+
+	command := exec.Command(result.BinaryPath, arguments...)
+	command.Dir = result.WorkingDir
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("launch game: %w", err)
+	}
+	// Reaped in the background so a finished game does not linger as a zombie
+	// for the life of the builder; the GUI deliberately does not wait on it.
+	go func() { _ = command.Wait() }()
+	return nil
+}
+
+// launchViaScript is the pre-existing indirect path, kept as a fallback.
+func launchViaScript(result buildgui.Result) error {
 	if result.OutputPath == "" {
 		return fmt.Errorf("the completed build has no launcher")
 	}

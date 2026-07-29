@@ -79,16 +79,19 @@ var rebuildInputs = []string{
 func detectInstallState(root, outputDir string) buildgui.InstallState {
 	state := buildgui.InstallState{}
 
-	// CAN LAUNCH: the launcher and the binary it runs are both present. Checked
-	// as a pair -- a launcher without its binary would offer a Play button that
-	// fails, which is worse than not offering one.
-	if launcher, binary, ok := findInstalledGame(outputDir); ok {
+	// CAN LAUNCH: keyed on the BINARY, because that is what the GUI now runs.
+	// The run-game script is reported when present (it is how you play without
+	// the GUI) but its absence no longer hides the Play button -- the GUI does
+	// not need it, and someone who deleted the script should not lose the
+	// ability to launch from here.
+	if binary := findGameBinary(outputDir); binary != "" {
 		state.CanLaunch = true
 		state.Result = buildgui.Result{
 			Message:    "Your game is built and ready.",
-			OutputPath: launcher,
+			OutputPath: findLauncherScript(outputDir),
+			BinaryPath: binary,
+			WorkingDir: root,
 		}
-		_ = binary
 	}
 
 	// CAN REBUILD: every non-regenerable input is present.
@@ -115,30 +118,38 @@ func detectInstallState(root, outputDir string) buildgui.InstallState {
 	return state
 }
 
-// findInstalledGame looks for a launcher and its game binary in dir. Returns
-// their paths and whether both were found.
-func findInstalledGame(dir string) (launcher, binary string, ok bool) {
-	// The launcher's name is platform-specific and decided by
-	// project.InstallPlayable; probe every spelling so a bundle copied between
-	// platforms still reports honestly rather than appearing unbuilt.
+// findLauncherScript returns the generated run-game script in dir, or "".
+//
+// Every platform spelling is probed rather than only this host's, so a bundle
+// copied between machines still reports what is actually there.
+func findLauncherScript(dir string) string {
 	for _, name := range []string{"run-game.command", "run-game.sh", "run-game.bat"} {
 		candidate := filepath.Join(dir, name)
-		if info, err := os.Stat(candidate); err != nil || !info.Mode().IsRegular() {
-			continue
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+			return candidate
 		}
-		launcher = candidate
-		break
 	}
-	if launcher == "" {
-		return "", "", false
+	return ""
+}
+
+// findInstalledROM returns the ROM the launcher would pass to the game, or "".
+//
+// The GUI stores the user's ROM as user-rom.sfc in its project root
+// (buildgui.storeROM); game.sfc is the CLI's default name (project.DefaultPaths)
+// and is accepted so a GUI opened over a CLI-built tree still launches. Returned
+// as a BARE LEAF, matching what the generated script passes, so the game resolves
+// it against its working directory exactly as it would there.
+func findInstalledROM(dir string) string {
+	if dir == "" {
+		return ""
 	}
-	binary = findGameBinary(dir)
-	if binary == "" {
-		// A launcher whose binary is gone is a half-deleted install. Reporting
-		// "not launchable" is right: the Play button would fail.
-		return "", "", false
+	for _, name := range []string{"user-rom.sfc", "game.sfc"} {
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil &&
+			info.Mode().IsRegular() {
+			return name
+		}
 	}
-	return launcher, binary, true
+	return ""
 }
 
 // findGameBinary returns the installed game executable in dir, or "".
@@ -208,7 +219,7 @@ func slimInstall(root, outputDir string, output io.Writer) error {
 	// Refuse unless the game is actually playable. Otherwise a mis-click could
 	// remove the only means of producing one -- the user would be left with
 	// neither a game nor a way to build it.
-	if _, _, ok := findInstalledGame(outputDir); !ok {
+	if findGameBinary(outputDir) == "" {
 		return fmt.Errorf(
 			"no built game was found in %s, so the build tools are still needed",
 			outputDir)
