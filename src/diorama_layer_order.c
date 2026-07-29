@@ -654,11 +654,9 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
   bool written[kDioramaRoomOverrideMax];
   memset(written, 0, sizeof(written));
 
-  /* A genuinely new file (nothing before its first managed section) gets the
-   * shipped preamble; an existing one keeps whatever it already has. "Managed
-   * section seen yet" is enough to decide, because the preamble is by definition
-   * everything before the first one. */
-  bool saw_managed_section = false;
+  /* A genuinely new file gets the shipped preamble; an existing one keeps whatever
+   * it already has. The test is simply "did the walk below emit anything" -- see
+   * the branch after it. */
   bool wrote_any_line = false;
 
   const char *cursor = existing;
@@ -682,12 +680,34 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
               DioramaLayerOrder_Find(table, group, map))) {
         /* A section we manage and the table still marks active: regenerate its
          * body here, then skip the file's old body until the next section. */
-        saw_managed_section = true;
         const DioramaRoomOverride *room =
             DioramaLayerOrder_Find(table, group, map);
-        size_t before = total;
+        /* Preserve any inline comment the user put ON the header line
+         * ("[layers:01:02]  ; Fillmore act 2"). FormatRoomBody re-emits the header
+         * bare, so without this the label is silently dropped -- a small loss, but
+         * the same class as everything else this merge exists to prevent. Emitted
+         * as its own line before the regenerated body, since the body must start
+         * with the canonical header. */
+        {
+          const char *marker = NULL;
+          for (const char *scan = probe; *scan; scan++) {
+            if (*scan == ']') { marker = scan + 1; break; }
+          }
+          if (marker) {
+            while (*marker == ' ' || *marker == '\t') marker++;
+            if (*marker == ';' || *marker == '#') {
+              char note[128];
+              size_t note_len = 0;
+              for (; marker[note_len] && marker[note_len] != '\n' &&
+                     marker[note_len] != '\r' && note_len + 1 < sizeof(note);
+                   note_len++)
+                note[note_len] = marker[note_len];
+              note[note_len] = '\0';
+              if (note[0]) OUT("%s\n", note);
+            }
+          }
+        }
         DioramaLayerOrder_FormatRoomBody(room, &total, buffer, size);
-        (void)before;
         wrote_any_line = true;
         skipping_managed_body = true;
         /* Mark it written so it is not appended again below. */
@@ -696,18 +716,32 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
         cursor += line_len;
         continue;
       }
-      /* Any other section (foreign, or one the table no longer marks active)
-       * ends a skip and passes through unchanged. */
-      if (is_ours) saw_managed_section = true;
-      skipping_managed_body = false;
-    } else if (skipping_managed_body && !MergeLineIsPlaneBody(probe)) {
-      /* Inside a managed section, but this is a blank or comment line, not a
-       * plane override -- it is the user's, so stop skipping and let it through.
-       * A comment written next to a room therefore survives the save. */
-      skipping_managed_body = false;
-    } else if (skipping_managed_body) {
+      /* A section of OURS that the table no longer marks active is a room the
+       * editor RESET. Its header and comments pass through, but its plane lines
+       * must be dropped -- otherwise "Reset room" does not persist: the stale
+       * overrides stay in the file and the next load makes the room active again,
+       * silently undoing the reset the user asked for. Emptying the section rather
+       * than deleting it keeps any comments they wrote around it.
+       *
+       * A FOREIGN section (not ours at all) is passed through whole, bodies
+       * included -- we do not own it and must not touch it. */
+      if (is_ours) {
+        skipping_managed_body = true;   /* drop this reset room's plane lines */
+      } else {
+        skipping_managed_body = false;
+      }
+    } else if (skipping_managed_body && MergeLineIsPlaneBody(probe)) {
       /* A plane line under a managed section we just regenerated: drop it, since
-       * FormatRoomBody already emitted the current planes. */
+       * FormatRoomBody already emitted the current planes.
+       *
+       * The skip is NOT cleared by a comment or blank line, only by the next
+       * SECTION header. An earlier revision cleared it on the first non-plane
+       * line, which let every plane line AFTER a mid-body comment survive -- and
+       * because ParseLine refines rather than clobbers, the loader then applied
+       * those stale lines over the regenerated ones, silently reverting the edit.
+       * A plane the user CLEARED came back. Comments and blanks still pass
+       * through untouched (they fall to the verbatim copy below); the difference
+       * is that they no longer end the skip. */
       cursor += line_len;
       continue;
     }
@@ -723,13 +757,18 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
     cursor += line_len;
   }
 
-  /* New file, or one with no managed section: emit the default preamble first.
-   * Done AFTER the walk only when nothing was preserved before a managed
-   * section -- for a new file `existing` was empty so nothing was written yet,
-   * and we want the preamble at the top. Rebuild in that case. */
-  if (!saw_managed_section && !wrote_any_line && default_preamble &&
-      default_preamble[0]) {
-    /* Empty input: start over with preamble + all active rooms. */
+  /* EMPTY INPUT ONLY: seed a new file with the shipped preamble and every active
+   * room. `!wrote_any_line` is exactly "the walk above emitted nothing", which for
+   * a non-empty `existing` is impossible (every line is either passed through or
+   * regenerated). So this is the first-write path and nothing else.
+   *
+   * An earlier version also tested `!saw_managed_section` and its comment claimed
+   * the branch covered "a file with no managed section". It never did: such a file
+   * still has lines, so `wrote_any_line` is true and the branch is skipped -- which
+   * is CORRECT (an existing file must keep its own preamble, never gain ours), but
+   * the extra condition was dead and the comment described behaviour that does not
+   * exist. Both removed rather than left to mislead. */
+  if (!wrote_any_line && default_preamble && default_preamble[0]) {
     total = 0;
     OUT_TEXT(default_preamble);
     for (int i = 0; i < table->count; i++) {

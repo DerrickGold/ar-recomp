@@ -83,9 +83,16 @@ static bool WriteWholeFile(const char *path, const char *text, size_t length) {
     return false;
   }
   fclose(file);
+  /* Windows' rename() fails when the destination exists (POSIX replaces
+   * atomically), and Windows is a shipped target -- so without the retry every
+   * upgrade after the first would fail to write. The content is already flushed to
+   * the temp file, so the non-atomic window is between two metadata calls. */
   if (rename(temporary, path) != 0) {
-    remove(temporary);
-    return false;
+    remove(path);
+    if (rename(temporary, path) != 0) {
+      remove(temporary);
+      return false;
+    }
   }
   return true;
 }

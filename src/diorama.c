@@ -960,11 +960,24 @@ bool Diorama_SaveLayerManifest(void) {
     return false;
   }
   fclose(file);
+  /* Windows' rename() FAILS when the destination exists, unlike POSIX where it
+   * atomically replaces. Windows is a shipped target (packaging builds
+   * windows-x86_64/arm64), so without this every save after the first would fail
+   * and the user would silently stop getting their edits persisted. The same trap
+   * is documented in the GUI's own ROM staging (buildgui/gui.go:482).
+   *
+   * Remove-then-rename is not atomic, which is why the temp file is written and
+   * flushed FIRST: the window where neither file exists is between two cheap
+   * metadata operations, and the content is already safely on disk. POSIX skips
+   * the remove entirely, since the first rename succeeds there. */
   if (rename(tmp, path) != 0) {
-    remove(tmp);
-    fprintf(stderr, "[diorama-layers] could not replace %s -- original kept\n",
-            path);
-    return false;
+    remove(path);
+    if (rename(tmp, path) != 0) {
+      remove(tmp);
+      fprintf(stderr, "[diorama-layers] could not replace %s -- original kept\n",
+              path);
+      return false;
+    }
   }
 
   int active = 0;
