@@ -738,6 +738,120 @@ static void TestLeafNeverGoesBehindASettledPage(void) {
   }
 }
 
+/* THE INVARIANT THAT MAKES THE BOW SAFE, and the reason a bow is allowed where a
+ * free curl is not.
+ *
+ * A bowed sheet DOES fold back on itself in screen x near the hinge when it is
+ * edge-on -- measured ~14 px of overlap at the shipped amplitude -- so it
+ * genuinely self-occludes, and SDL_RenderGeometry has no depth test to sort it.
+ * Painter's order still renders it correctly for one reason only: the mesh emits
+ * u ascending, and z is MONOTONICALLY NON-DECREASING in u, so the later-drawn
+ * strip of any overlap is always the nearer one.
+ *
+ * Break monotonicity and the fold renders inside-out. That is why the amplitude
+ * is bounded rather than tuned by eye. */
+static void TestBowKeepsDepthMonotonicInU(void) {
+  for (int step = -200; step <= 200; step++) {
+    const float turn = (float)step / 200.0f;
+    float previous_z = -1.0f;
+    for (int iu = 0; iu <= 200; iu++) {
+      float x = 0, y = 0, z = 0;
+      ManualTurn_LeafPoint(turn, (float)iu / 200.0f, 0.5f, &x, &y, &z);
+      /* Non-decreasing, so the nearer part of a fold is always drawn later. */
+      CHECK(z >= previous_z - 1e-5f);
+      previous_z = z;
+    }
+  }
+}
+
+/* The bow must vanish wherever the sheet has to coincide with something else:
+ * flat at rest and at the landing, and pinned at the hinge and the free edge. */
+static void TestBowVanishesAtTheEndsAndEdges(void) {
+  /* At rest and landed: dead flat, or the sheet would not match the page. */
+  for (int iu = 0; iu <= 20; iu++) {
+    const float u = (float)iu / 20.0f;
+    CHECK(fabsf(ManualTurn_BowOffset(0.0f, u)) < 1e-6f);
+    CHECK(fabsf(ManualTurn_BowOffset(1.0f, u)) < 1e-5f);
+    CHECK(fabsf(ManualTurn_BowOffset(-1.0f, u)) < 1e-5f);
+  }
+  /* Pinned at both edges for every phase. */
+  for (int i = -20; i <= 20; i++) {
+    const float turn = (float)i / 20.0f;
+    CHECK(fabsf(ManualTurn_BowOffset(turn, 0.0f)) < 1e-6f);
+    CHECK(fabsf(ManualTurn_BowOffset(turn, 1.0f)) < 1e-5f);
+  }
+  /* And it actually bows in between -- a zero-amplitude "curl" would pass every
+   * assertion above while doing nothing. */
+  CHECK(ManualTurn_BowOffset(0.5f, 0.5f) > 0.01f);
+
+  /* The amplitude must stay inside the proven bound. */
+  CHECK(kManualCurlPermille <= kManualCurlMaxPermille);
+  float peak = 0.0f;
+  for (int i = -100; i <= 100; i++)
+    for (int iu = 0; iu <= 100; iu++) {
+      const float b = fabsf(ManualTurn_BowOffset((float)i / 100.0f,
+                                                 (float)iu / 100.0f));
+      if (b > peak) peak = b;
+    }
+  CHECK(peak <= (float)kManualCurlMaxPermille / 1000.0f + 1e-4f);
+}
+
+/* The bow must displace along the sheet's OWN NORMAL, not along +z.
+ *
+ * A probe that applied it as a bare z offset passed every other assertion: the
+ * ends stay pinned, z stays monotonic, the amplitude is bounded. But the sheet
+ * would balloon toward the camera instead of BENDING, and the give-away is that a
+ * normal-directed bow also shifts x -- by -bow*sin(angle), which is largest when
+ * the sheet is edge-on and exactly zero at rest and at the landing.
+ *
+ * Without this case the difference between "bends like paper" and "inflates like
+ * a balloon" is untested. */
+static void TestBowFollowsTheSurfaceNormal(void) {
+  /* Edge-on, mid-span: the bow is nearly all in x, because the sheet's normal is
+   * nearly horizontal there. */
+  float x = 0, y = 0, z = 0;
+  ManualTurn_LeafPoint(0.5f, 0.5f, 0.5f, &x, &y, &z);
+  const float bow = ManualTurn_BowOffset(0.5f, 0.5f);
+  const float angle = ManualTurn_HingeAngle(0.5f);
+  const float span = 0.5f * 0.5f;
+  /* x must be displaced from the rigid position by -bow*sin(angle). */
+  const float rigid_x = span * cosf(angle);
+  CHECK(fabsf((x - rigid_x) + bow * sinf(angle)) < 1e-4f);
+  /* And that displacement is real, not rounding. */
+  CHECK(fabsf(x - rigid_x) > 1e-3f);
+
+  /* Sweeping the phase, the x displacement must track sin(angle) -- zero at both
+   * ends, maximal edge-on. A +z-only bow leaves x untouched throughout. */
+  float peak_dx = 0.0f;
+  for (int i = 0; i <= 100; i++) {
+    const float turn = (float)i / 100.0f;
+    const float a = ManualTurn_HingeAngle(turn);
+    const float b = ManualTurn_BowOffset(turn, 0.5f);
+    float px = 0, py = 0, pz = 0;
+    ManualTurn_LeafPoint(turn, 0.5f, 0.5f, &px, &py, &pz);
+    const float expected_dx = -b * sinf(a);
+    CHECK(fabsf((px - 0.25f * cosf(a)) - expected_dx) < 1e-4f);
+    if (fabsf(expected_dx) > peak_dx) peak_dx = fabsf(expected_dx);
+  }
+  CHECK(peak_dx > 0.01f);   /* the normal really does tilt out of z */
+}
+
+/* At rest the bowed sheet must STILL be exactly the settled page -- the bow
+ * cannot reintroduce the mismatch that made a turn look like a resize. */
+static void TestBowedSheetStillMatchesThePageAtRest(void) {
+  float x = 0, y = 0, z = 0;
+  ManualTurn_LeafPoint(0.0f, 0.0f, 0.5f, &x, &y, &z);
+  CHECK(fabsf(x) < 1e-6f);
+  CHECK(fabsf(z) < 1e-6f);
+  ManualTurn_LeafPoint(0.0f, 1.0f, 0.5f, &x, &y, &z);
+  CHECK(fabsf(x - 0.5f) < 1e-6f);
+  CHECK(fabsf(z) < 1e-6f);
+  /* And landed, on the facing page's outer edge. */
+  ManualTurn_LeafPoint(1.0f, 1.0f, 0.5f, &x, &y, &z);
+  CHECK(fabsf(x + 0.5f) < 1e-4f);
+  CHECK(fabsf(z) < 1e-4f);
+}
+
 static void TestHingeSweepsAHalfTurnAndIsMonotonic(void) {
   CHECK(fabsf(ManualTurn_HingeAngle(0.0f)) < 1e-6f);
   CHECK(fabsf(ManualTurn_HingeAngle(1.0f) - (float)M_PI) < 1e-5f);
@@ -930,6 +1044,10 @@ int main(void) {
   TestTurnsAtTheCoversResolve();
 
   TestLeafNeverGoesBehindASettledPage();
+  TestBowKeepsDepthMonotonicInU();
+  TestBowVanishesAtTheEndsAndEdges();
+  TestBowFollowsTheSurfaceNormal();
+  TestBowedSheetStillMatchesThePageAtRest();
   TestHingeSweepsAHalfTurnAndIsMonotonic();
   TestBackwardTurnMirrorsTheHinge();
   TestTurnPivotsOnTheGutter();
