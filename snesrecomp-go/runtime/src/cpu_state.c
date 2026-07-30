@@ -34,6 +34,42 @@
 
 CpuState g_cpu;
 
+/* Cached environment probes for the per-access diagnostic hooks in
+ * cpu_read8/cpu_write8/cpu_write16 below.
+ *
+ * Those hooks run on every emulated WRAM access — millions per second — and an
+ * uncached getenv() there is not free: it takes the environment lock and walks
+ * the whole environ block. Measured at ~1% of frame time in town mode
+ * (__findenv_locked, ranking alongside ppu_runLine) purely to re-answer a
+ * question whose answer cannot change mid-run.
+ *
+ * `present` is kept separate from `value` so an unparseable setting keeps
+ * behaving exactly as it did when the guard was a bare getenv() truth test:
+ * the hook arms on the variable EXISTING, and the value is a separate filter
+ * that -1 disables. */
+typedef struct ArEnvProbe {
+    const char *name;
+    int present;     /* -1 until first read */
+    long value;      /* hex value, or -1 when unset */
+} ArEnvProbe;
+
+static int ar_env_probe(ArEnvProbe *probe, long *value_out) {
+    if (probe->present < 0) {
+        const char *e = getenv(probe->name);
+        probe->present = e ? 1 : 0;
+        probe->value = e ? (long)strtoul(e, NULL, 16) : -1;
+    }
+    if (value_out) *value_out = probe->value;
+    return probe->present;
+}
+
+static ArEnvProbe ar_probe_read0019  = { "AR_READ0019",  -1, -1 };
+static ArEnvProbe ar_probe_watch0019 = { "AR_WATCH0019", -1, -1 };
+static ArEnvProbe ar_probe_watch18   = { "AR_WATCH18",   -1, -1 };
+static ArEnvProbe ar_probe_watch14   = { "AR_WATCH14",   -1, -1 };
+static ArEnvProbe ar_probe_watch16   = { "AR_WATCH16",   -1, -1 };
+static ArEnvProbe ar_probe_watchobj  = { "AR_WATCHOBJ",  -1, -1 };
+
 /* Diagnostic accessors for files without the full CpuState definition
  * (e.g. snes.c, which only forward-declares it). */
 uint16 ar_cpu_S(void)  { return g_cpu.S; }
@@ -242,7 +278,7 @@ uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 addr) {
          * the value is really there, and whichever read call actually
          * observes it narrows down what's between the (apparently absent)
          * write and this read. */
-        if (off == 0x19 && getenv("AR_READ0019")) {
+        if (off == 0x19 && ar_env_probe(&ar_probe_read0019, NULL)) {
             static int n;
             if (n++ < 20000) {
                 extern int snes_frame_counter; extern const char *g_last_recomp_func;
@@ -346,7 +382,7 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 addr, uint8 v) {
          * instrumentation, then rewritten identically every frame after),
          * AR_WATCHOBJ would correctly stay silent forever after the first
          * transition. This settles it either way. */
-        if (off == 0x19 && getenv("AR_WATCH0019")) {
+        if (off == 0x19 && ar_env_probe(&ar_probe_watch0019, NULL)) {
             static int n;
             if (n++ < 200) {
                 extern int snes_frame_counter; extern const char *g_last_recomp_func;
@@ -378,7 +414,7 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 addr, uint8 v) {
         /* AR_WATCH18: trace game-mode byte $7E:0018 changes (overworld $18=0
          * vs action stage $18=1) — find who drives the mode transition and
          * what the display state is at that moment. */
-        if (off == 0x18 && old != v && getenv("AR_WATCH18")) {
+        if (off == 0x18 && old != v && ar_env_probe(&ar_probe_watch18, NULL)) {
             extern int snes_frame_counter; extern uint8 g_ram[0x20000];
             extern const char *g_last_recomp_func;
             extern const char *g_recomp_stack[]; extern int g_recomp_stack_top;
@@ -394,9 +430,8 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 addr, uint8 v) {
         /* AR_WATCHOBJ=<hexaddr>: trip when WRAM offset [addr,addr+0x3f) (one
          * object slot) is written — logs writer func + recomp stack + frame, to
          * find the spawner of an object (and why a sibling slot is never written). */
-        if (getenv("AR_WATCHOBJ")) {
-            static long wo = -2;
-            if (wo == -2) { const char *e = getenv("AR_WATCHOBJ"); wo = e ? (long)strtoul(e, NULL, 16) : -1; }
+        if (ar_env_probe(&ar_probe_watchobj, NULL)) {
+            long wo; ar_env_probe(&ar_probe_watchobj, &wo);
             if (wo >= 0 && off >= wo && off < wo + 0x40 && old != v) {
                 extern int snes_frame_counter; extern const char *g_recomp_stack[]; extern int g_recomp_stack_top;
                 extern const char *g_last_recomp_func;
@@ -453,7 +488,8 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 addr, uint16 v) {
          * upstream, e.g. the subtracted D:0094/D:0096 reference), or does
          * something clobber it between write and read (shouldn't be
          * possible per static read -- no calls in between -- but verify)? */
-        if ((off == 0x14 || off == 0x16) && getenv("AR_WATCH14")) {
+        if ((off == 0x14 || off == 0x16) &&
+            ar_env_probe(&ar_probe_watch14, NULL)) {
             extern int snes_frame_counter; extern const char *g_last_recomp_func;
             static int n;
             if (n++ < 4000)
@@ -467,7 +503,8 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 addr, uint16 v) {
          * copy of this block for why -- unconditional, catches a same-
          * value rewrite AR_WATCHOBJ's on-change filter would hide. A
          * 16-bit write at off==0x18 also touches 0x19 (the high byte). */
-        if ((off == 0x19 || off == 0x18) && getenv("AR_WATCH0019")) {
+        if ((off == 0x19 || off == 0x18) &&
+            ar_env_probe(&ar_probe_watch0019, NULL)) {
             static int n;
             if (n++ < 200) {
                 extern int snes_frame_counter; extern const char *g_last_recomp_func;
@@ -479,9 +516,8 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 addr, uint16 v) {
                 fprintf(stderr, "\n");
             }
         }
-        if (getenv("AR_WATCHOBJ")) {
-            static long wo = -2;
-            if (wo == -2) { const char *e = getenv("AR_WATCHOBJ"); wo = e ? (long)strtoul(e, NULL, 16) : -1; }
+        if (ar_env_probe(&ar_probe_watchobj, NULL)) {
+            long wo; ar_env_probe(&ar_probe_watchobj, &wo);
             if (wo >= 0 && off >= wo && off < wo + 0x40 && old != v) {
                 extern int snes_frame_counter; extern const char *g_recomp_stack[]; extern int g_recomp_stack_top;
                 extern const char *g_last_recomp_func;
@@ -498,9 +534,8 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 addr, uint16 v) {
          * who corrupts an object's $12 handler pointer to a data-table addr
          * ($AB3C action-level freeze). Logs the dest addr, the writing recomp
          * fn, m/x, and a short call stack. */
-        if (getenv("AR_WATCH16")) {
-            static int wv = -2;
-            if (wv == -2) { const char *e = getenv("AR_WATCH16"); wv = e ? (int)strtoul(e, NULL, 16) : -1; }
+        if (ar_env_probe(&ar_probe_watch16, NULL)) {
+            long wv; ar_env_probe(&ar_probe_watch16, &wv);
             if (wv >= 0 && v == (uint16)wv) {
                 extern int snes_frame_counter;
                 extern const char *g_recomp_stack[]; extern int g_recomp_stack_top;
