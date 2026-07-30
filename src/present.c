@@ -1037,10 +1037,20 @@ static void SimShadowLight(const FrameSlot *slot, float *light_x,
   *light_x = shear * cosf(azimuth);
   *light_y = shear * sinf(azimuth);
 }
-/* Footprint shrink per world unit of height. Tuned so a caster on the standard
- * 24px flight plane casts a ~70% shadow: enough to read as "up there" without
- * the shadow losing its shape. */
-static const float kSimShadowHeightShrink = 4.0f;
+/* Footprint shrink per world unit of height. A caster on the standard 24px
+ * flight plane sits at height_world = 24/224, so 6.0 puts its shadow at
+ * 1/(1 + 24/224*6) = ~61% -- enough to read as "up there" without the shadow
+ * losing its shape (4.0, the original value, gave ~70% and read as too close
+ * to the ground). This is the right knob for that reading rather than
+ * `height_scale_x100`: the height dial lifts the sprite AND shears its shadow,
+ * reframing the actor against the map, while this only resizes the footprint.
+ *
+ * Only casters with a nonzero classified height are affected, which is exactly
+ * the flying class -- the angel and enemy classes $12-$15 (Sim3D_ClassifyObject,
+ * sim_render_metadata.c) -- plus the 8px semi-grounded Napper pluck. Grounded
+ * townspeople, scene composites, and every fixed-tier object stay at
+ * footprint 1.0, so their silhouettes still meet their own feet. */
+static const float kSimShadowHeightShrink = 6.0f;
 
 /* Extra billboard scale on top of the perspective scale the lift already
  * produces. That true component is only about 1.5% at the standard flight
