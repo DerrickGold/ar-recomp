@@ -115,10 +115,9 @@ uint8_t g_hud_obj_pixels[
  * priority-band splits; see diorama_planes.h). Dedicated set separate from
  * the HUD/HD overlay buffers (BG3/OBJ reuse those for the widescreen HUD
  * split, and HD replacements claim per-source capture slots — see §4.3).
- * Allocated lazily on first diorama capture (actraiser_rtl.c); never freed
- * (matches the existing buffer convention — §D18). BG4 is never drawn in
- * Mode 1, so excluded; the backdrop slot stays NULL (RenderDiorama points
- * it at g_pixels). */
+ * Allocated lazily on first diorama capture (actraiser_rtl.c) and released at
+ * shutdown. BG4 is never drawn in Mode 1, so excluded; the backdrop slot
+ * stays NULL (RenderDiorama points it at g_pixels). */
 uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
 bool g_diorama_dump_pending;
 bool g_diorama_frame_active;
@@ -127,6 +126,35 @@ SDL_Texture *g_sim_obj_atlas_texture;
 SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
 SDL_Texture *g_sim3d_flat_texture;
 bool g_sim3d_textures_ready;
+
+static void DestroyDioramaTextures(void) {
+  for (int i = 0; i < kDioramaPlane_Count; i++) {
+    SDL_DestroyTexture(g_diorama_textures[i]);
+    g_diorama_textures[i] = NULL;
+  }
+}
+
+static void CreateDioramaTextures(void) {
+  uint8_t *zero_fill =
+      calloc(1, (size_t)kPpuBufWidth * g_snes_height * 4);
+  for (int i = 0; i < kDioramaPlane_Count; i++) {
+    if (i == kPpuOverlaySource_Bg4)
+      continue;
+    g_diorama_textures[i] = SDL_CreateTexture(
+        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+        kPpuBufWidth, g_snes_height);
+    if (!g_diorama_textures[i])
+      continue;
+    SDL_SetTextureBlendMode(g_diorama_textures[i],
+        i == kDioramaPlane_Backdrop ? SDL_BLENDMODE_NONE
+                                    : SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(g_diorama_textures[i], SDL_SCALEMODE_NEAREST);
+    if (zero_fill)
+      SDL_UpdateTexture(g_diorama_textures[i], NULL, zero_fill,
+                        kPpuBufWidth * 4);
+  }
+  free(zero_fill);
+}
 
 /* Widescreen master switch + per-side extra-column budget — the definitions
  * for the runner's widescreen.h externs (each game defines them; 0/false =
@@ -971,23 +999,7 @@ int main(int argc, char **argv) {
      * deterministically transparent black (not garbage) for the texture's
      * entire lifetime — every current and future consumer is safe without
      * needing its own clamp/inset workaround. */
-    uint8_t *zero_fill = calloc(1, (size_t)kPpuBufWidth * g_snes_height * 4);
-    for (int i = 0; i < kDioramaPlane_Count; i++) {
-      if (i == kPpuOverlaySource_Bg4) continue;
-      g_diorama_textures[i] = SDL_CreateTexture(g_renderer,
-          SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-          kPpuBufWidth, g_snes_height);
-      if (g_diorama_textures[i]) {
-        SDL_SetTextureBlendMode(g_diorama_textures[i],
-            i == kDioramaPlane_Backdrop ? SDL_BLENDMODE_NONE
-                                        : SDL_BLENDMODE_BLEND);
-        SDL_SetTextureScaleMode(g_diorama_textures[i], SDL_SCALEMODE_NEAREST);
-        if (zero_fill)
-          SDL_UpdateTexture(g_diorama_textures[i], NULL, zero_fill,
-                            kPpuBufWidth * 4);
-      }
-    }
-    free(zero_fill);
+    CreateDioramaTextures();
 
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
 
@@ -1237,6 +1249,11 @@ int main(int argc, char **argv) {
          * Init). DEVICE_LOST is unrecoverable. */
         case SDL_EVENT_RENDER_TARGETS_RESET:
         case SDL_EVENT_RENDER_DEVICE_RESET:
+          if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
+            Diorama_Shutdown(g_renderer);
+            DestroyDioramaTextures();
+            CreateDioramaTextures();
+          }
           HdReplacementHost_ReloadTextures();
           if (!SettingsOverlay_ReloadTextures(rom_data, rom_size))
             fprintf(stderr,
@@ -1739,6 +1756,8 @@ int main(int argc, char **argv) {
   HostAudio_Shutdown();
   HdReplacementHost_Shutdown();
   PresentSimUnderlay_Reset();
+  Diorama_Shutdown(g_renderer);
+  DestroyDioramaTextures();
   SDL_DestroyTexture(g_sim_obj_atlas_texture);
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
@@ -1752,6 +1771,10 @@ int main(int argc, char **argv) {
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);
   SDL_DestroyTexture(g_texture);
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+    free(g_diorama_layer_pixels[plane]);
+    g_diorama_layer_pixels[plane] = NULL;
+  }
   SDL_DestroyRenderer(g_renderer);
   SDL_DestroyWindow(g_window);
   SDL_Quit();
