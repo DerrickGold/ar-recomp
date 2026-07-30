@@ -226,12 +226,14 @@ enum {
    * underlay -- two tiers, no invented middle, and the canvas's own hard
    * 512x512 rectangle is fully transparent by the time it arrives.
    *
-   * The shipped default is 50 anyway, chosen by looking at it. The focus
+   * The shipped default is 10 anyway, chosen by looking at it. The focus
    * falloff landed after that reasoning and now carries much of the same
    * distinction: with the far field defocused, a partial fade no longer reads
-   * as a smeared gradient, and keeping some of the town's own detail out
-   * there is worth more than the theoretical two-tier purity. Set it to 100
-   * to get the argued behaviour back.
+   * as a smeared gradient, and keeping the town's own detail out there is
+   * worth more than the theoretical two-tier purity. 10 is a light touch --
+   * just enough to mark the boundary, with the defocus and the out-of-range
+   * darkening doing the rest of the near/far separation. Set it to 100 to get
+   * the argued behaviour back.
    *
    * The ramp used to default to 208 on the argument that a step reads as a
    * hard line across the ground, worse than the patchy cover it replaces.
@@ -240,7 +242,7 @@ enum {
    * and a 208px ramp spends most of its length dimming ground the player is
    * actively working in. 16 (the minimum, one ramp step) keeps the town's own
    * vision range bright and lets the fade do its job right at the edge. */
-  kSimCullHazeDefaultPct = 50,
+  kSimCullHazeDefaultPct = 10,
   kSimCullHazeLeadDefaultPx = 16,
   /* How far out-of-range ground is taken toward black. Separate from the fade
    * above because they answer different questions: the fade decides which
