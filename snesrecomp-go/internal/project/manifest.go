@@ -114,6 +114,20 @@ func RunnerSources(runtimeDir string) (sources, includeDirs []string, err error)
 // evaluation: within that block, any line that is a bare relative *.c path is
 // treated as a source entry. Returns human-readable warnings; empty when the
 // two lists agree or no matching CMake target exists.
+//
+// EXPECT NOTHING FROM THIS ON ActRaiser ITSELF, and do not read a clean result as
+// proof of agreement. That project's CMakeLists.txt now DERIVES its list from
+// snesbuild.ini (file(STRINGS ... REGEX "^source =")), so the block holds no
+// literal paths, the scan finds no CMake sources, and this returns nil -- there is
+// one list and nothing to drift. Two lists are what this was for, and one of the
+// reasons they were merged is that this function could not be reached where it
+// mattered: the hermetic caller below reads CMakeLists.txt from its own --root,
+// which in a shipped bundle is utils/ and has none, so the read fails and the
+// check silently passes.
+//
+// Kept rather than deleted because it costs nothing and resumes working by itself
+// if a literal list is ever pasted back -- and project's own test suite asserts
+// that it is not (TestCMakeListsDoesNotDuplicateTheSourceList).
 func ManifestDriftWarnings(root string, manifest Manifest) []string {
 	content, err := os.ReadFile(filepath.Join(root, "CMakeLists.txt"))
 	if err != nil {
