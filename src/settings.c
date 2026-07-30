@@ -1410,9 +1410,17 @@ const SettingDesc g_setting_descs[] = {
   INT_SETTING(diorama_depth_shade, NULL, "Depth shading",
               "Strength of the atmospheric darkening applied to farther planes.",
               kSettingCat_Presentation, 100, 0, 100, NULL, Diorama_ModeIsOn),
+  /* Default off: the backdrop plane is a finite quad drawn behind everything,
+   * and at a level bound the never-written margin columns read as an opaque
+   * black seam over the scene (SPEC-backdrop-clip.md contributor 3). With the
+   * plane hidden the skybox/clear shows through instead, which is what the
+   * tilted box wants in every mode. Turn it on to get the flat backdrop
+   * colour back. */
   BOOL_SETTING(diorama_layer_backdrop, NULL, "Show backdrop",
-               "Diorama: show the backdrop plane.",
-               kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
+               "Diorama: show the backdrop plane. Off by default — the plane "
+               "is finite, so at a level's start/end its unwritten margins "
+               "show as a black seam.",
+               kSettingCat_Presentation, 0, false, Diorama_ModeIsOn, NULL),
   BOOL_SETTING(diorama_layer_bg2, NULL, "Show BG2",
                "Diorama: show the BG2 parallax plane.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
