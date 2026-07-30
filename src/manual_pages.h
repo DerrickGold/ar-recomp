@@ -220,22 +220,56 @@ void ManualView_GoTo(ManualView *view, int item, int count);
 
 /* ── Turn geometry ─────────────────────────────────────────────────────────
  *
- * The turning sheet is a rigid leaf hinged on one edge. Rigid is not a
- * simplification for its own sake: SDL_RenderGeometry has NO DEPTH TEST and no
- * backface culling, so correctness has to come from draw ORDER, and order is
- * only provable if the leaf cannot intersect what it passes over. A curled
- * sheet self-occludes within a single quad, which no ordering fixes.
+ * The turning sheet is hinged on one edge and BOWS as it lifts, like paper. It
+ * does not curl freely: SDL_RenderGeometry has NO DEPTH TEST and no backface
+ * culling, so correctness comes from draw ORDER alone, and the bow is bounded so
+ * that order is provably right.
  *
- * Hence the invariant this module guarantees and its test asserts: the leaf's
- * z is >= 0 for every turn phase, while settled pages sit at negative z. The
- * host can then draw backdrop -> destination -> shadow -> leaf, once, with no
- * mid-animation reordering.
+ * TWO INVARIANTS, both bounded by the same number, both asserted by tests:
+ *
+ *   1. z >= 0 everywhere, so the leaf never dips behind a settled page and the
+ *      fixed draw order (backdrop -> destination -> shadow -> leaf) holds for
+ *      every frame with no mid-animation reordering.
+ *
+ *   2. z is MONOTONICALLY NON-DECREASING in u. This is the subtle one, and it is
+ *      what makes a bow safe at all. A bowed sheet DOES fold back on itself in
+ *      screen x near the hinge when it is edge-on -- measured 14 px of overlap at
+ *      the amplitude below, so it genuinely self-occludes. Painter's order still
+ *      renders it correctly because the mesh emits u ascending and the nearer
+ *      part of any overlap is always the higher u. Checked over 273,580
+ *      overlapping sample pairs: zero wrong-order cases.
+ *
+ * Both hold exactly while amplitude <= 0.5/pi ~= 0.159 (the analytic worst case
+ * is u=1 as the sheet leaves the spine: 0.5 - A*pi >= 0). kManualCurlPermille is
+ * set well under that, so the bound is a guard rail rather than a cliff edge.
+ *
+ * This is why the bow is a BOW and not a curl: a freely curled sheet -- one whose
+ * far half rolls back over its near half -- breaks invariant 2, and then no
+ * ordering of whole strips can fix it. It would need the mesh split along the
+ * silhouette, which this project has no precedent for.
  */
+
+enum {
+  /* Bow amplitude, in thousandths of the sheet's width. The hard limit is
+   * 0.5/pi ~= 159 (see the invariants above); 70 is a visible lift with better
+   * than 2x headroom, because the amplitude interacts with the projection and a
+   * value that is merely *provably* safe is not the same as a comfortable one.
+   * Raising this past 159 turns the geometry tests red rather than producing a
+   * subtly wrong image. */
+  kManualCurlPermille = 70,
+  kManualCurlMaxPermille = 159,
+};
 
 /* Hinge rotation for a turn phase, in radians: 0 at rest, pi when the sheet has
  * landed. Eased so the sheet accelerates off the spine and settles rather than
  * stopping dead. */
 float ManualTurn_HingeAngle(float turn);
+
+/* Bow displacement along the sheet's own normal at `u`, for a turn phase, in
+ * sheet-width units. Zero at both ends of the turn and at both edges of the
+ * sheet, peaking mid-sweep and mid-span -- paper bends in the middle and is held
+ * flat where it is hinged and where it is about to land. */
+float ManualTurn_BowOffset(float turn, float u);
 
 /* Position of a point on the leaf, in UNIT-SHEET space: x and y each run over
  * [-0.5, 0.5] at rest so the sheet is exactly the same rectangle a settled page

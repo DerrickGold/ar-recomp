@@ -311,6 +311,16 @@ float ManualTurn_HingeAngle(float turn) {
   return eased * (float)M_PI;
 }
 
+float ManualTurn_BowOffset(float turn, float u) {
+  const float cu = ClampF(u, 0.0f, 1.0f);
+  const float angle = ManualTurn_HingeAngle(turn);
+  const float amplitude = (float)kManualCurlPermille / 1000.0f;
+  /* sin(pi*u) pins the bow to zero at the hinge and the free edge; sin(angle)
+   * pins it to zero at rest and at the landing, so a settled sheet is exactly
+   * flat and coincides with the page beneath it. */
+  return amplitude * sinf((float)M_PI * cu) * sinf(angle);
+}
+
 void ManualTurn_LeafPoint(float turn, float u, float v,
                           float *out_x, float *out_y, float *out_z) {
   const float cu = ClampF(u, 0.0f, 1.0f);
@@ -336,8 +346,13 @@ void ManualTurn_LeafPoint(float turn, float u, float v,
    * single-page layout the caller maps this half-sheet onto the whole page, so
    * one geometry serves both. */
   const float span = cu * 0.5f;                /* 0 at the gutter, 0.5 at the edge */
-  float x = span * cosf(angle);
-  float z = span * sinf(angle);
+  /* The sheet BOWS along its own normal (-sin a, 0, cos a) as it lifts, so it
+   * reads as paper rather than a rotating board. Bounded: see the invariants in
+   * the header -- the bow folds the sheet slightly in screen x, and painter's
+   * order stays correct only because z remains monotonic in u. */
+  const float bow = ManualTurn_BowOffset(turn, cu);
+  float x = span * cosf(angle) - bow * sinf(angle);
+  float z = span * sinf(angle) + bow * cosf(angle);
   if (z < 0.0f) z = 0.0f;   /* the invariant: the leaf never goes behind a page */
   /* A backward turn lifts the LEFT leaf and lays it to the right. */
   if (turn < 0.0f) x = -x;
@@ -376,12 +391,25 @@ bool ManualTurn_SheetExtents(const float matrix[16],
 }
 
 float ManualTurn_LeafShade(float turn, float u) {
+  const float cu = ClampF(u, 0.0f, 1.0f);
   const float angle = ManualTurn_HingeAngle(turn);
   /* Brightest flat, dimmest edge-on: |cos| is 1 at rest and at the landing, and
    * 0 halfway. Floored so a sheet mid-turn is never pure black. */
   const float facing = fabsf(cosf(angle));
-  const float across = 0.85f + 0.15f * ClampF(u, 0.0f, 1.0f);
-  return ClampF((0.55f + 0.45f * facing) * across, 0.0f, 1.0f);
+
+  /* The bow's own contribution. Its slope along the sheet tilts the surface, so
+   * the highlight travels ACROSS the page as it turns instead of the whole sheet
+   * dimming uniformly -- without this the bow is present in the geometry but
+   * nearly invisible, since a bow of this amplitude moves few pixels.
+   * d/du of sin(pi*u) is pi*cos(pi*u): positive on the hinge half, negative on
+   * the outer half, zero at the crest. */
+  const float amplitude = (float)kManualCurlPermille / 1000.0f;
+  const float slope = amplitude * (float)M_PI * cosf((float)M_PI * cu) *
+                      sinf(angle);
+  const float bend = 1.0f - 0.55f * slope;
+
+  const float across = 0.85f + 0.15f * cu;
+  return ClampF((0.55f + 0.45f * facing) * across * bend, 0.0f, 1.0f);
 }
 
 bool ManualTurn_FrontFaceVisible(float turn) {
