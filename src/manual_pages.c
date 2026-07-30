@@ -186,7 +186,16 @@ bool ManualSpread_IsSingle(const ManualSpread *spread) {
   return (spread->left < 0) != (spread->right < 0);
 }
 
+bool ManualSpread_SingleOnRight(const ManualSpread *spread) {
+  if (!ManualSpread_IsSingle(spread)) return false;
+  return spread->right >= 0;
+}
+
 /* ── Reader kinematics ─────────────────────────────────────────────────────── */
+
+int ManualPages_LayoutPageWidths(bool spread_mode) {
+  return spread_mode ? 2 : 1;
+}
 
 static float ClampF(float v, float lo, float hi) {
   return v < lo ? lo : (v > hi ? hi : v);

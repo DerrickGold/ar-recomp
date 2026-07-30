@@ -116,8 +116,23 @@ bool ManualPages_SpreadAt(int page_count, int spread, ManualSpread *out);
 int ManualPages_SpreadForPage(int page_count, int page);
 
 /* True when the opening shows a single page (either cover, or a lone interior
- * page). The renderer centres those rather than parking them on one side. */
+ * page).
+ *
+ * NOTE FOR RENDERERS: this says how many pages are PRESENT, not how wide to lay
+ * the view out. Sizing a single-page opening to one page and a two-up one to two
+ * makes the whole view rescale by 2x the moment a cover is turned -- everything
+ * jumps mid-animation. In spread layout the area is ALWAYS two pages wide and a
+ * lone page occupies one half of it, which is also what the paper does: a front
+ * cover is one leaf of the opening it swings away from. */
 bool ManualSpread_IsSingle(const ManualSpread *spread);
+
+/* Which half a single-page opening occupies: true for the right (a front cover,
+ * which opens leftward), false for the left (a back cover). Meaningless, and
+ * false, for a two-up opening.
+ *
+ * The distinction is what keeps a cover on the correct side of the gutter while
+ * the layout width stays constant. */
+bool ManualSpread_SingleOnRight(const ManualSpread *spread);
 
 /* ── Reader kinematics ─────────────────────────────────────────────────────
  *
@@ -149,6 +164,19 @@ enum {
 };
 
 void ManualView_Init(ManualView *view);
+
+/* Width, in page-widths, that the view must be laid out to.
+ *
+ * ALWAYS 2 in spread layout and 1 otherwise -- deliberately NOT a function of the
+ * current opening. Sizing a single-page opening to one page and a two-up one to
+ * two rescales the whole view by 2x the instant a cover is turned, so every page
+ * visibly jumps mid-animation. A lone page occupies one half of the constant area
+ * instead, which is also what the paper does.
+ *
+ * Lives here rather than at the draw site because it is exactly the kind of
+ * one-line layout decision that looks obviously right and is the reason the
+ * animation glitched on covers. */
+int ManualPages_LayoutPageWidths(bool spread_mode);
 
 /* Fit `page_w x page_h` inside `view_w x view_h` preserving aspect, then apply
  * `zoom`. Writes the on-screen size in pixels. A page always fits at zoom 1
