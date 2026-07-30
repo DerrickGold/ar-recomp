@@ -1425,6 +1425,9 @@ void ActRaiserDrawPpuFrame(void) {
           ActRaiser_ReadWramMirror16(kActRaiserWram_SimMapPickerFlag)),
       .renderer_ready = g_sim3d_textures_ready,
       .diorama_active = g_diorama_frame_active,
+      /* The inspector panel is the only on-screen reader of the capture's
+       * diagnostic hash; with it off, that pass is skipped. */
+      .inspector_active = g_settings.scene_inspector,
       .requested_features = Settings_Sim3DRequestedFeatures(),
       .diagnostic_layer_mask = g_settings.sim3d_diagnostic_layers,
       .width = kActRaiserAuthenticWidth + 2 * g_ws_extra,
