@@ -157,6 +157,8 @@ void PpuClearOverlayBindings(Ppu *ppu) {
   memset(ppu->overlayRenderBuffer, 0, sizeof(ppu->overlayRenderBuffer));
   memset(ppu->overlayRenderPitch, 0, sizeof(ppu->overlayRenderPitch));
   memset(ppu->overlayRenderBands, 0, sizeof(ppu->overlayRenderBands));
+  memset(ppu->overlayRenderContentMask, 0,
+         sizeof(ppu->overlayRenderContentMask));
   PpuClearOverlayCaptures(ppu);
 }
 
@@ -175,6 +177,7 @@ bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
    * replacements) takes the source over. */
   memset(ppu->overlayRenderBands[source], 0,
          sizeof(ppu->overlayRenderBands[source]));
+  ppu->overlayRenderContentMask[source] = 0;
   /* A newly bound buffer's contents are unknown; force one full clear. */
   ppu->overlayRenderMaybeDirty[source] = pixels != NULL;
   if (!pixels)
@@ -190,10 +193,23 @@ bool PpuBindOverlayPrioSurface(Ppu *ppu, PpuOverlaySource source, int band,
       (pixels && !ppu->overlayRenderBuffer[source]))
     return false;
   ppu->overlayRenderBands[source][band - 1] = pixels;
+  ppu->overlayRenderContentMask[source] &= (uint8_t)~(1u << band);
   /* A newly bound buffer's contents are unknown; force one full clear. */
   if (pixels)
     ppu->overlayRenderMaybeDirty[source] = true;
   return true;
+}
+
+bool PpuOverlaySurfaceHasContent(const Ppu *ppu, PpuOverlaySource source,
+                                 int band) {
+  if (!ppu || (unsigned)source >= kPpuOverlaySource_Count ||
+      band < 0 || band > 3)
+    return false;
+  if (band == 0)
+    return ppu->overlayRenderBuffer[source] &&
+        (ppu->overlayRenderContentMask[source] & 1u);
+  return ppu->overlayRenderBands[source][band - 1] &&
+      (ppu->overlayRenderContentMask[source] & (1u << band));
 }
 
 void PpuClearOverlayCaptures(Ppu *ppu) {
@@ -441,6 +457,8 @@ static inline uint8 PpuMosaicAt(Ppu *ppu, int i) {
 
 void ppu_runLine(Ppu* ppu, int line) {
   if(line == 0) {
+    memset(ppu->overlayRenderContentMask, 0,
+           sizeof(ppu->overlayRenderContentMask));
     // Always-on: snapshot the OAM the scanline renderer is about to consume.
     debug_server_on_oam_render();
     if (PPU_mosaicSize(ppu) != ppu->lastMosaicModulo) {
@@ -1434,9 +1452,16 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
     }
   }
   if (!any_bands) {
-    for (int x = x0; x < x1; x++)
-      dst[x + texture_extra] = PpuCapturedOverlayColor(
+    bool has_content = false;
+    for (int x = x0; x < x1; x++) {
+      uint32 color = PpuCapturedOverlayColor(
           ppu, source, capture, src[x + kPpuExtraLeftRight]);
+      dst[x + texture_extra] = color;
+      if (color)
+        has_content = true;
+    }
+    if (has_content)
+      ppu->overlayRenderContentMask[source] |= 1u;
     return;
   }
 
@@ -1453,21 +1478,28 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
     0xff,  /* BG4: never rendered by this PPU (modes 1/7 only) */
     0x00,  /* OBJ routes by the top two bits instead */
   };
+  uint8_t content_mask = 0;
   for (int x = x0; x < x1; x++) {
     PpuZbufType zp = src[x + kPpuExtraLeftRight];
     uint32 color = PpuCapturedOverlayColor(ppu, source, capture, zp);
     if (!color)
       continue;
     uint32 *out = dst;
+    int content_band = 0;
     if (source == kPpuOverlaySource_Obj) {
       int band = zp >> 14;
-      if (band > 0 && band_dst[band - 1])
+      if (band > 0 && band_dst[band - 1]) {
         out = band_dst[band - 1];
+        content_band = band;
+      }
     } else if (band_dst[0] && (zp >> 8) >= kBgHiPrioMin[source]) {
       out = band_dst[0];
+      content_band = 1;
     }
     out[x + texture_extra] = color;
+    content_mask |= (uint8_t)(1u << content_band);
   }
+  ppu->overlayRenderContentMask[source] |= content_mask;
 }
 
 static PpuPixelPrioBufs *PpuBeginBackgroundOverlay(Ppu *ppu, uint y,

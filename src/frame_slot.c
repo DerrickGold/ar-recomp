@@ -12,6 +12,7 @@
 #include "present.h"
 #include "types.h"
 #include "settings.h"
+#include "diorama_planes.h"
 #include "sim3d.h"
 #include "sim_render_metadata.h"
 #include "sim_town_canvas.h"
@@ -107,6 +108,60 @@ enum {
   kSimRecordVelocityX = 0x1A,
   kSimRecordVelocityY = 0x1C,
 };
+
+static uint32_t DioramaPlaneBit(int plane) {
+  return 1u << (unsigned)plane;
+}
+
+static uint32_t CaptureDioramaPlaneRequestMask(void) {
+  _Static_assert(kDioramaPlane_Count <= 32,
+                 "diorama request mask needs one bit per plane");
+  uint32_t mask = 0;
+  if (g_settings.diorama_layer_backdrop &&
+      g_settings.diorama_skybox != kDioramaSky_Only)
+    mask |= DioramaPlaneBit(kDioramaPlane_Backdrop);
+  if (g_settings.diorama_layer_bg1)
+    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg1) |
+            DioramaPlaneBit(kDioramaPlane_Bg1Hi);
+  if (g_settings.diorama_layer_bg2)
+    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2) |
+            DioramaPlaneBit(kDioramaPlane_Bg2Hi);
+  else if (g_settings.diorama_skybox != kDioramaSky_Off)
+    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2);
+  if (g_settings.diorama_layer_obj)
+    mask |= DioramaPlaneBit(kPpuOverlaySource_Obj) |
+            DioramaPlaneBit(kDioramaPlane_Obj1) |
+            DioramaPlaneBit(kDioramaPlane_Obj2) |
+            DioramaPlaneBit(kDioramaPlane_Obj3);
+  if (g_settings.diorama_layer_bg3 && !g_settings.diorama_hud_flat)
+    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg3);
+  return mask;
+}
+
+static uint32_t CaptureDioramaPlaneContentMask(void) {
+  uint32_t mask = DioramaPlaneBit(kDioramaPlane_Backdrop);
+  static const struct {
+    PpuOverlaySource source;
+    uint8_t band;
+    uint8_t plane;
+  } kSurfaces[] = {
+    { kPpuOverlaySource_Bg1, 0, kPpuOverlaySource_Bg1 },
+    { kPpuOverlaySource_Bg2, 0, kPpuOverlaySource_Bg2 },
+    { kPpuOverlaySource_Bg3, 0, kPpuOverlaySource_Bg3 },
+    { kPpuOverlaySource_Obj, 0, kPpuOverlaySource_Obj },
+    { kPpuOverlaySource_Bg1, 1, kDioramaPlane_Bg1Hi },
+    { kPpuOverlaySource_Bg2, 1, kDioramaPlane_Bg2Hi },
+    { kPpuOverlaySource_Obj, 1, kDioramaPlane_Obj1 },
+    { kPpuOverlaySource_Obj, 2, kDioramaPlane_Obj2 },
+    { kPpuOverlaySource_Obj, 3, kDioramaPlane_Obj3 },
+  };
+  for (size_t i = 0; i < sizeof(kSurfaces) / sizeof(kSurfaces[0]); i++) {
+    if (PpuOverlaySurfaceHasContent(
+            g_ppu, kSurfaces[i].source, kSurfaces[i].band))
+      mask |= DioramaPlaneBit(kSurfaces[i].plane);
+  }
+  return mask;
+}
 
 /* The pose the projection is built from this frame.
  *
@@ -293,6 +348,12 @@ void FrameSlot_Capture(FrameSlot *dst) {
       Settings_ScalePercentToOutput(g_settings.hud_scale_percent);
 
   dst->diorama_active = g_diorama_frame_active;
+  dst->diorama_plane_request_mask = 0;
+  dst->diorama_plane_content_mask = 0;
+  if (dst->diorama_active) {
+    dst->diorama_plane_request_mask = CaptureDioramaPlaneRequestMask();
+    dst->diorama_plane_content_mask = CaptureDioramaPlaneContentMask();
+  }
 
   /* M7/§6.1: scroll snapshot for present-time interpolation. */
   dst->timestamp_ns = SDL_GetTicksNS();

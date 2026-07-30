@@ -58,7 +58,7 @@ static SDL_Texture *s_world_navigation_palace_texture;
 static SDL_Texture *s_world_navigation_ui_texture;
 static bool s_world_navigation_composition_alloc_failed;
 static bool s_world_navigation_composition_upload_valid;
-static uint32_t s_diorama_content_mask;
+static uint32_t s_diorama_uploaded_plane_mask;
 
 static SDL_FRect ToFRect(SDL_Rect r) {
   return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };
@@ -633,10 +633,13 @@ void PresentUpload(const FrameSlot *slot) {
     uint8_t *pixels[kDioramaPlane_Count];
     memcpy(pixels, g_diorama_layer_pixels, sizeof(pixels));
     pixels[kDioramaPlane_Backdrop] = g_pixels;
-    s_diorama_content_mask = Diorama_Upload(
-        g_diorama_textures, pixels, slot->snes_width, slot->snes_height);
+    uint32_t upload_mask = slot->diorama_plane_request_mask &
+                           slot->diorama_plane_content_mask;
+    s_diorama_uploaded_plane_mask = Diorama_Upload(
+        g_diorama_textures, pixels, slot->snes_width, slot->snes_height,
+        upload_mask);
   } else {
-    s_diorama_content_mask = 0;
+    s_diorama_uploaded_plane_mask = 0;
     SDL_Rect upload = { 0, 0, slot->snes_width, slot->snes_height };
     SDL_UpdateTexture(g_texture, &upload, g_pixels, slot->snes_width * 4);
   }
@@ -1786,7 +1789,7 @@ static bool s_world_navigation_cloud_alloc_failed;
  * STREAMING storage is uninitialized. Never reproducible on macOS/Metal, which
  * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
  * Vulkan/SDL_GPU (Steam Deck) bug. */
-void PresentSimUnderlay_Reset(void) {
+void PresentRendererResources_Reset(void) {
   if (s_hud_composite_texture)
     SDL_DestroyTexture(s_hud_composite_texture);
   s_hud_composite_texture = NULL;
@@ -3568,12 +3571,13 @@ void PresentComposite(const FrameSlot *slot,
     uint8_t *pixels[kDioramaPlane_Count];
     memcpy(pixels, g_diorama_layer_pixels, sizeof(pixels));
     pixels[kDioramaPlane_Backdrop] = g_pixels;
-    /* PresentUpload classified the immutable surfaces before releasing their
-     * producer. A NULL entry is already Diorama_Composite's established
-     * "plane absent" contract, and also prevents stale texture contents from
-     * resurfacing when a priority band becomes empty. */
+    /* PresentUpload recorded exactly which requested/content-bearing surfaces
+     * uploaded successfully before releasing their producer. A NULL entry is
+     * already Diorama_Composite's established "plane absent" contract, and
+     * also prevents stale texture contents from resurfacing after an empty
+     * priority band or failed upload. */
     for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-      if (!(s_diorama_content_mask & (1u << plane)))
+      if (!(s_diorama_uploaded_plane_mask & (1u << plane)))
         pixels[plane] = NULL;
     /* M7 interpolation (kSettingCat_Graphics "Scroll interpolation" row) is
      * OFF by default. Observed cause of a real bug: ActRaiser's BG2
