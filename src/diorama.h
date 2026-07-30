@@ -42,8 +42,11 @@ void Diorama_SetDragging(bool dragging);
  * residual main framebuffer. Planes with a NULL texture or pixels are
  * skipped. visible_width replaces an internal Settings_VisibleWidth() call
  * (M5 D3 — present-time code must not re-derive live settings state). */
-void Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
-                    int snes_width, int snes_height);
+/* Returns a bit per plane whose current CPU surface contains visible content.
+ * The compositor can null the other entries and avoid all render work for
+ * priority bands that captured no pixels this frame. */
+uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
+                        int snes_width, int snes_height);
 
 /* M7 (§6): per-BG-layer UV shift for present-time scroll interpolation.
  * Indexed by SNES BG number (0=BG1..3=BG4); Diorama_Composite maps each
@@ -96,6 +99,10 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        int bg2_valid_x0, int bg2_valid_x1);
+
+/* Releases renderer-owned supersample and optional GPU-effect resources.
+ * Call before destroying the renderer. */
+void Diorama_Shutdown(SDL_Renderer *renderer);
 
 void Diorama_FlushSettingsIfDirty(void);
 

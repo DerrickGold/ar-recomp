@@ -41,6 +41,7 @@ static SDL_GPUShader *g_blur_shader;
 static SDL_GPURenderState *g_blur_state;
 static bool g_blur_init_attempted;
 static bool g_blur_available;
+static SDL_GPUDevice *g_diorama_gpu_device;
 
 /* 3x3 weighted-box blur (9 taps, center weighted x2) as a cheap Gaussian
  * approximation — softens the existing hard-edged silhouette shadow into a
@@ -91,6 +92,7 @@ static void EnsureBlurShader(SDL_Renderer *renderer) {
                     "disabled (enable \"GPU shader effects\" in Graphics settings?)\n");
     return;
   }
+  g_diorama_gpu_device = device;
   SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   if (!(formats & SDL_GPU_SHADERFORMAT_MSL)) {
     fprintf(stderr, "[gpu-fx] this GPU backend doesn't support MSL "
@@ -235,6 +237,7 @@ static void EnsureRimLightShader(SDL_Renderer *renderer) {
                     "disabled (enable \"GPU shader effects\" in Graphics settings?)\n");
     return;
   }
+  g_diorama_gpu_device = device;
   SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   if (!(formats & SDL_GPU_SHADERFORMAT_MSL)) {
     fprintf(stderr, "[gpu-fx] this GPU backend doesn't support MSL "
@@ -364,6 +367,7 @@ static void EnsureDofEdgeShader(SDL_Renderer *renderer) {
                     "disabled (enable \"GPU shader effects\" in Graphics settings?)\n");
     return;
   }
+  g_diorama_gpu_device = device;
   SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   if (!(formats & SDL_GPU_SHADERFORMAT_MSL)) {
     fprintf(stderr, "[gpu-fx] this GPU backend doesn't support MSL "
@@ -448,16 +452,12 @@ static bool LayerGetsEdgeAA(int plane) {
  * whole texels per source texel, so LINEAR there interpolates smoothly
  * instead of stepping.
  *
- * Compositing the source (straight alpha) onto a transparent-black-cleared
- * intermediate with plain SDL_BLENDMODE_BLEND is a cheap, shader-free way to
- * premultiply: dstRGB = srcRGB*srcA + 0*(1-srcA) = srcRGB*srcA, dstA = srcA.
- * Premultiplying matters because the LINEAR sample blends across texel
- * boundaries — with straight alpha, blending a fully-transparent black texel
- * against an opaque colored one drags black into the result (a dark fringe);
- * premultiplied RGB is already zero wherever alpha is zero, so the blend
- * only ever mixes real color. The final draw then uses
- * SDL_BLENDMODE_BLEND_PREMULTIPLIED to composite that premultiplied result
- * onto the screen correctly.
+ * The intermediate keeps straight alpha and uses ordinary
+ * SDL_BLENDMODE_BLEND for the final draw. SDL exposes premultiplied blending,
+ * but it is not implemented reliably by every renderer: a backend can accept
+ * the mode yet draw the transparent part of a target texture as opaque black.
+ * Keeping the widely supported blend path is more important than the small
+ * fringe reduction premultiplication can provide on antialiased edge texels.
  *
  * Scoped to layers that DON'T have an M8 custom GPU shader bound (rim
  * light / DOF / edge-AA, all opt-in and off by default): those shaders do
@@ -475,7 +475,7 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
                                                      int w, int h) {
   if (g_diorama_ss_texture && g_diorama_ss_w == w && g_diorama_ss_h == h)
     return g_diorama_ss_texture;
-  if (g_diorama_ss_texture) SDL_DestroyTexture(g_diorama_ss_texture);
+  SDL_DestroyTexture(g_diorama_ss_texture);
   g_diorama_ss_texture = SDL_CreateTexture(
       renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
   g_diorama_ss_w = w;
@@ -486,10 +486,9 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
 }
 
 /* Renders `source` (a full kPpuBufWidth x snes_height layer texture, already
- * NEAREST-scaled) into the shared ×4 intermediate, premultiplied per the
- * comment above. Caller must have already set `source`'s blend mode to
- * SDL_BLENDMODE_BLEND. Returns NULL (caller falls back to `source`) if the
- * intermediate couldn't be (re)created.
+ * NEAREST-scaled) into the compact shared ×4 straight-alpha intermediate.
+ * Returns NULL (caller falls back to `source`) if the intermediate couldn't
+ * be (re)created.
  *
  * Live report (2026-07-21): a thin magenta/garbage-colored line was visible
  * at the diorama's right edge whenever a layer used this path (most
@@ -505,14 +504,12 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
  * this path from NEAREST (no cross-texel blending, so this boundary was
  * never sampled softly) to LINEAR, which is what actually exposed it. Fixed
  * by blitting only the VALID `{0,0,snes_width,snes_height}` source sub-rect
- * into the correspondingly-scaled sub-rect of the intermediate — the
- * remainder stays the transparent-black clear from above, so the LINEAR
- * boundary blend fades toward transparent/black instead of garbage. */
+ * into an intermediate sized to that exact active region. */
 static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
                                             SDL_Texture *source,
                                             int snes_width, int snes_height) {
   SDL_Texture *ss = EnsureDioramaSupersampleTexture(
-      renderer, kPpuBufWidth * kDioramaSupersample,
+      renderer, snes_width * kDioramaSupersample,
       snes_height * kDioramaSupersample);
   if (!ss) return NULL;
   SDL_SetRenderTarget(renderer, ss);
@@ -522,7 +519,11 @@ static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
   SDL_FRect src = { 0.0f, 0.0f, (float)snes_width, (float)snes_height };
   SDL_FRect dst = { 0.0f, 0.0f, (float)(snes_width * kDioramaSupersample),
                     (float)(snes_height * kDioramaSupersample) };
+  SDL_BlendMode old_blend = SDL_BLENDMODE_BLEND;
+  SDL_GetTextureBlendMode(source, &old_blend);
+  SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE);
   SDL_RenderTexture(renderer, source, &src, &dst);
+  SDL_SetTextureBlendMode(source, old_blend);
   SDL_SetRenderTarget(renderer, NULL);
   return ss;
 }
@@ -1207,15 +1208,58 @@ static void BuildQuadMesh(const float mvp[16],
 /* M5 (D6/buffer-ownership split): upload is separated from composite so the
  * present thread can release the game thread (safe to redraw pixels[]) right
  * after this returns, instead of after the full composite+vsync-present. */
-void Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
-                    int snes_width, int snes_height) {
+static bool DioramaPlaneHasContent(const uint8_t *pixels,
+                                   int width, int height) {
+  const uint32_t *words = (const uint32_t *)pixels;
+  size_t count = (size_t)width * height;
+  for (size_t i = 0; i < count; i++)
+    if (words[i])
+      return true;
+  return false;
+}
+
+static bool DioramaPlaneIsRequested(const DioramaLayerDesc *layer) {
+  int plane = layer->plane;
+  /* BG2 also feeds the skybox, whose existing behavior is independent of
+   * the in-box BG2 visibility toggle. */
+  bool feeds_skybox = plane == kPpuOverlaySource_Bg2 &&
+      g_settings.diorama_skybox != kDioramaSky_Off;
+  if (layer->visible && !*layer->visible && !feeds_skybox)
+    return false;
+  if (plane == kPpuOverlaySource_Bg3 && g_settings.diorama_hud_flat)
+    return false;
+  if (plane == kDioramaPlane_Backdrop &&
+      g_settings.diorama_skybox == kDioramaSky_Only)
+    return false;
+  return true;
+}
+
+uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
+                        int snes_width, int snes_height) {
   SDL_Rect upload = { 0, 0, snes_width, snes_height };
+  uint32_t content_mask = 0;
   for (int i = 0; i < kDioramaLayerCount; i++) {
-    int plane = kDioramaLayers[i].plane;
-    if (textures[plane] && pixels[plane])
+    const DioramaLayerDesc *layer = &kDioramaLayers[i];
+    int plane = layer->plane;
+    if (!DioramaPlaneIsRequested(layer))
+      continue;
+    if (!pixels[plane])
+      continue;
+    /* The residual PPU framebuffer has RGB with a zero alpha byte and an
+     * all-black frame is still meaningful, so it is always present. Captured
+     * overlay planes use zero for transparency and can be rejected with one
+     * linear scan. Empty priority bands are common; skipping one avoids its
+     * streaming upload, supersample clear/blit, shadow, and geometry passes. */
+    bool has_content = plane == kDioramaPlane_Backdrop ||
+        DioramaPlaneHasContent(pixels[plane], snes_width, snes_height);
+    if (!has_content)
+      continue;
+    content_mask |= 1u << plane;
+    if (textures[plane])
       SDL_UpdateTexture(textures[plane], &upload, pixels[plane],
                         snes_width * 4);
   }
+  return content_mask;
 }
 
 /* M7 (§6.1)/B1b (followup doc): which base-camera delta (0=BG1, 1=BG2) a
@@ -1866,17 +1910,35 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     if (!use_shader) {
       SDL_Texture *ss =
           BuildDioramaSupersample(renderer, texture, snes_width, snes_height);
-      if (ss) { draw_texture = ss; used_ss = true; }
+      if (ss) {
+        draw_texture = ss;
+        used_ss = true;
+      }
     }
     if (used_ss) {
       SDL_SetTextureBlendMode(draw_texture,
-          is_backdrop ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND_PREMULTIPLIED);
+          is_backdrop ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND);
+    }
+
+    /* Supersample targets contain only the active capture width, unlike the
+     * source textures whose allocation is kPpuBufWidth wide. Remap U into the
+     * compact target so its right edge is 1.0 instead of
+     * snes_width/kPpuBufWidth. Stack/skirt draws above still use the original
+     * source texture and therefore keep the original coordinates. */
+    SDL_Vertex ss_verts[DIORAMA_VERTS_PER_LAYER];
+    SDL_Vertex *draw_verts = verts;
+    if (used_ss) {
+      memcpy(ss_verts, verts, (size_t)nv * sizeof(ss_verts[0]));
+      float u_scale = (float)kPpuBufWidth / (float)snes_width;
+      for (int v = 0; v < nv; v++)
+        ss_verts[v].tex_coord.x *= u_scale;
+      draw_verts = ss_verts;
     }
 
     if (!is_backdrop && layer->casts_shadow) {
       float off = (float)out_h * 0.004f;
       SDL_Vertex shadow[DIORAMA_VERTS_PER_LAYER];
-      memcpy(shadow, verts, (size_t)nv * sizeof(shadow[0]));
+      memcpy(shadow, draw_verts, (size_t)nv * sizeof(shadow[0]));
       for (int v = 0; v < nv; v++) {
         shadow[v].position.x += off;
         shadow[v].position.y += off;
@@ -1929,7 +1991,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       SDL_SetGPURenderStateFragmentUniforms(g_dofedge_state, 0, &u, sizeof(u));
       SDL_SetGPURenderState(renderer, g_dofedge_state);
     }
-    SDL_RenderGeometry(renderer, draw_texture, verts, nv, indices, ni);
+    SDL_RenderGeometry(renderer, draw_texture, draw_verts, nv, indices, ni);
     if (rim_light || dof_or_edge)
       SDL_SetGPURenderState(renderer, NULL);
   }
@@ -1939,4 +2001,40 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                                     SDL_TEXTURE_ADDRESS_AUTO);
 
   return true;
+}
+
+void Diorama_Shutdown(SDL_Renderer *renderer) {
+  if (renderer)
+    SDL_SetGPURenderState(renderer, NULL);
+
+  SDL_DestroyTexture(g_diorama_ss_texture);
+  g_diorama_ss_texture = NULL;
+  g_diorama_ss_w = 0;
+  g_diorama_ss_h = 0;
+
+  SDL_DestroyGPURenderState(g_blur_state);
+  SDL_DestroyGPURenderState(g_rim_light_state);
+  SDL_DestroyGPURenderState(g_dofedge_state);
+  g_blur_state = NULL;
+  g_rim_light_state = NULL;
+  g_dofedge_state = NULL;
+
+  if (g_diorama_gpu_device) {
+    if (g_blur_shader)
+      SDL_ReleaseGPUShader(g_diorama_gpu_device, g_blur_shader);
+    if (g_rim_light_shader)
+      SDL_ReleaseGPUShader(g_diorama_gpu_device, g_rim_light_shader);
+    if (g_dofedge_shader)
+      SDL_ReleaseGPUShader(g_diorama_gpu_device, g_dofedge_shader);
+  }
+  g_blur_shader = NULL;
+  g_rim_light_shader = NULL;
+  g_dofedge_shader = NULL;
+  g_diorama_gpu_device = NULL;
+  g_blur_available = false;
+  g_rim_light_available = false;
+  g_dofedge_available = false;
+  g_blur_init_attempted = false;
+  g_rim_light_init_attempted = false;
+  g_dofedge_init_attempted = false;
 }
