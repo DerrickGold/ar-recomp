@@ -135,3 +135,73 @@ add_executable(game_unit_test
 		t.Fatalf("missing target: %v", warnings)
 	}
 }
+
+// snesbuild.ini is now the ONLY game source list: CMakeLists.txt reads it with
+// file(STRINGS ... REGEX "^source =") instead of repeating it. These two tests pin
+// that arrangement, and they exist because of how the duplication failed.
+//
+// src/atomic_replace.c was added to CMakeLists.txt and not to snesbuild.ini.
+// Nothing caught it until a user's bundle rebuild reached the LINKER:
+//
+//	error: undefined symbol: _AtomicReplaceFile
+//
+// ManifestDriftWarnings would have named the file exactly, but neither caller can
+// see it in practice: `doctor` is advisory, and the hermetic build's hard check
+// reads CMakeLists.txt from its own --root, which in a shipped bundle is utils/
+// and carries no CMakeLists.txt -- the read fails, the function returns nil, and
+// the guard is a silent no-op precisely where a user's rebuild runs.
+//
+// Note that a drift ASSERTION here would now be vacuous: with no literal sources
+// left in CMakeLists.txt, ManifestDriftWarnings has nothing to compare and returns
+// nil, so such a test would pass no matter what. It is replaced by the two real
+// invariants below rather than left to look like protection it no longer provides.
+
+// Every source the manifest names must exist. This is the check that has teeth in
+// a BUNDLE, where snesbuild.ini is the only list present and CMake never runs.
+func TestRealManifestSourcesAllExist(t *testing.T) {
+	// internal/project -> snesrecomp-go -> repo root.
+	root := filepath.Join("..", "..", "..")
+	manifest, err := LoadManifest(filepath.Join(root, ManifestFileName))
+	if err != nil {
+		t.Skipf("repository %s not readable from here: %v", ManifestFileName, err)
+	}
+	if len(manifest.Sources) == 0 {
+		t.Fatalf("%s declares no sources", ManifestFileName)
+	}
+	for _, source := range manifest.Sources {
+		if _, err := os.Stat(filepath.Join(root, source)); err != nil {
+			t.Errorf("%s lists %s, which does not exist", ManifestFileName, source)
+		}
+	}
+}
+
+// CMakeLists.txt must NOT carry its own copy of the game source list. If a literal
+// list is ever pasted back into the target, the two can silently diverge again --
+// so the single-source-of-truth property is asserted, not just documented.
+//
+// Scoped to the add_executable(ActRaiserRecomp ...) block: the unit-test targets
+// below it legitimately name their own sources.
+func TestCMakeListsDoesNotDuplicateTheSourceList(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	content, err := os.ReadFile(filepath.Join(root, "CMakeLists.txt"))
+	if err != nil {
+		t.Skipf("repository CMakeLists.txt not readable from here: %v", err)
+	}
+	start := strings.Index(string(content), "add_executable(ActRaiserRecomp")
+	if start < 0 {
+		t.Skip("game target not found")
+	}
+	block := string(content)[start:]
+	if end := strings.Index(block, "\n)"); end >= 0 {
+		block = block[:end]
+	}
+	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasSuffix(line, ".c") && !strings.ContainsAny(line, "${}() ") {
+			t.Errorf("CMakeLists.txt hardcodes %s in the game target; add it to %s "+
+				"instead -- CMake reads the list from there and a second copy is how "+
+				"src/atomic_replace.c went missing from a bundle rebuild", line,
+				ManifestFileName)
+		}
+	}
+}

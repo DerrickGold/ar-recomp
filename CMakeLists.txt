@@ -82,73 +82,58 @@ endif()
 # test tier below is independent of this target and always available.
 if(NOT AR_TESTS_ONLY)
 
+# THE GAME SOURCE LIST LIVES IN snesbuild.ini, AND THIS READS IT.
+#
+# There is exactly one list, and it is the one that SHIPS. snesbuild.ini is
+# installed into a bundle's utils/ (packaging/CMakeLists.txt) and is what a user's
+# `snesbuild build --hermetic` rebuild compiles from; this file is not shipped at
+# all. Keeping a second literal copy here meant the two could disagree, and when
+# they did the failure surfaced as a link error in a USER's bundle rebuild rather
+# than anywhere near the commit that caused it:
+#
+#     error: undefined symbol: _AtomicReplaceFile
+#
+# src/atomic_replace.c had been added here and not to the manifest. The drift was
+# detectable -- project.ManifestDriftWarnings names it exactly -- but its only
+# hard-failing caller reads CMakeLists.txt from the hermetic build's own --root,
+# which in a bundle is utils/ and carries no CMakeLists.txt: the read fails, the
+# check returns nothing, and it is a silent no-op precisely where the rebuild runs.
+#
+# So the duplication is removed rather than policed. TO ADD A SOURCE FILE, add a
+# `source = <path>` line to snesbuild.ini; both builds pick it up. Paths stay
+# relative to this directory, exactly as the literal list was.
+#
+# CMAKE_CONFIGURE_DEPENDS re-runs configure when the manifest changes, so editing
+# it does not require a manual cmake invocation to take effect.
+set(ACTRAISER_MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/snesbuild.ini)
+if(NOT EXISTS ${ACTRAISER_MANIFEST})
+    message(FATAL_ERROR "snesbuild.ini is missing; it holds the game source list")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ACTRAISER_MANIFEST})
+
+file(STRINGS ${ACTRAISER_MANIFEST} ACTRAISER_MANIFEST_SOURCE_LINES
+    REGEX "^[ \t]*source[ \t]*=")
+set(ACTRAISER_GAME_SOURCES "")
+foreach(_ar_line IN LISTS ACTRAISER_MANIFEST_SOURCE_LINES)
+    string(REGEX REPLACE "^[ \t]*source[ \t]*=[ \t]*" "" _ar_source "${_ar_line}")
+    string(STRIP "${_ar_source}" _ar_source)
+    if(NOT _ar_source STREQUAL "")
+        if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${_ar_source})
+            message(FATAL_ERROR
+                "snesbuild.ini lists ${_ar_source}, which does not exist")
+        endif()
+        list(APPEND ACTRAISER_GAME_SOURCES ${_ar_source})
+    endif()
+endforeach()
+# An empty list would otherwise link a game with no game in it.
+if(ACTRAISER_GAME_SOURCES STREQUAL "")
+    message(FATAL_ERROR "snesbuild.ini declares no `source =` entries")
+endif()
+
 add_executable(ActRaiserRecomp
     ${SNESRECOMP_RUNNER_SOURCES}
-    # game-specific runtime
-    src/config.c
-    src/settings.c
-    src/settings_overlay.c
-    src/input_map.c
-    src/camera_orbit.c
-    src/scene_inspector.c
-    src/scene_asset_dump.c
-    src/sim_phase0_trace.c
-    src/sim_render_metadata.c
-    src/sim_render_atlas.c
-    src/sim_world_map.c
-    src/sim_world_map_build.c
-    src/sim_world_map_compose.c
-    src/sim_world_navigation_scene.c
-    src/sim_world_navigation_capture.c
-    src/sim_town_canvas.c
-    src/sim3d.c
-    src/sim3d_camera.c
-    src/save_system.c
-    src/run_dir.c
-    src/scene3d_math.c
-    src/diorama.c
-    src/diorama_host.c
-    src/present.c
-    src/diorama_scroll_math.c
-    src/diorama_depth_shapes.c
-    src/actraiser_ws_gap.c
-    src/diorama_skybox_uv.c
-    src/diorama_layer_order.c
-    src/diorama_layer_editor.c
-    src/ini_upgrade.c
-    src/atomic_replace.c
-    src/ini_upgrade_apply.c
-    src/diorama_capture_blend.c
-    src/dev_tools.c
-    src/forced_input.c
-    src/frame_slot.c
-    src/host_audio.c
-    src/host_dev_tools.c
-    src/host_display.c
-    src/host_display_pacing.c
-    src/host_input.c
-    src/hd_replacement_host.c
-    src/input_replay.c
-    src/oracle_trace.c
-    src/portable_paths.c
-    src/runtime_diagnostics.c
-    src/runtime_settings.c
-    src/scheduled_settings.c
-    src/user_data_dir.c
-    src/main.c
-    src/actraiser_00.c
-    src/gen_stubs.c
-    src/actraiser_cpu_infra.c
-    src/actraiser_rtl.c
-    src/hd_replacements.c
-    src/music_replacements.c
-    src/sfx_census.c
-    third_party/stb/stb_vorbis.c
-    src/hd_tile_census.c
-    src/actraiser_widescreen_bg.c
-    src/actraiser_widescreen_sprites.c
-    src/actraiser_bugfixes.c
-    src/actraiser_spc_player.c
+    # game-specific runtime, from snesbuild.ini (see above)
+    ${ACTRAISER_GAME_SOURCES}
     # recompiled banks (generated)
     ${ACTRAISER_GEN_SOURCES}
 )
