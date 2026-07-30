@@ -342,14 +342,13 @@ static void DrawFrame(Poc *poc) {
   PageTexture *ref = LoadPage(poc, reference);
   if (!ref) { SDL_RenderPresent(poc->renderer); return; }
 
-  /* Two-up openings are twice as wide and must fit as ONE image, or the gutter
-   * falls off the sides. Keyed on the settled opening's shape so the layout does
-   * not change width mid-turn. */
-  ManualSpread shape = { -1, poc->view.item };
-  if (poc->spread_mode)
-    ManualPages_SpreadAt(poc->index.count, poc->view.item, &shape);
-  const bool two_up = poc->spread_mode && !ManualSpread_IsSingle(&shape);
-  const int fit_w = two_up ? ref->width * 2 : ref->width;
+  /* THE LAYOUT WIDTH IS CONSTANT IN SPREAD MODE: always two pages, whatever the
+   * current opening holds. Sizing a cover to one page and an interior opening to
+   * two rescaled the entire view by 2x the moment a cover was turned, so every
+   * page visibly jumped mid-animation. A lone page instead occupies ONE HALF of
+   * the same area -- which is also what the paper does, since a front cover is
+   * one leaf of the opening it swings away from. */
+  const int fit_w = ref->width * ManualPages_LayoutPageWidths(poc->spread_mode);
   float page_w = 0.0f, page_h = 0.0f;
   ManualView_FittedSize(fit_w, ref->height, view_w, view_h,
                         poc->view.zoom, &page_w, &page_h);
@@ -368,15 +367,16 @@ static void DrawFrame(Poc *poc) {
       ? poc->view.pan_y * (2.0f * half_y / page_h) : 0.0f;
 
   /* ManualTurn_LeafPoint already spans HALF the unit sheet (gutter at 0, outer
-   * edge at 0.5), so it is scaled by the full half-extent -- for a two-up
-   * opening that half IS one page, and for a single page it is the whole page
-   * pivoting about its centre. Halving it again renders the leaf at half size:
-   * measured 355.8 px against the page's 711.6. */
+   * edge at 0.5), so it is scaled by the full half-extent: that half IS one page
+   * in spread mode. Halving it again renders the leaf at half size -- measured
+   * 355.8 px against the page's 711.6. */
   const float sheet = half_x;
 
   /* ORDER IS THE WHOLE CORRECTNESS ARGUMENT, and it never changes mid-turn.
-   * 1. the settled pages, beneath everything. */
-  if (two_up) {
+   * 1. the settled pages, beneath everything. Each occupies its own half of the
+   *    constant-width area; a missing side simply draws nothing, which is what
+   *    keeps a cover on its correct half without resizing anything. */
+  if (poc->spread_mode) {
     DrawSheet(poc, frame.left_page, matrix, view_w, view_h,
               -half_x, 0.0f, half_y, pan_world_x, pan_world_y);
     DrawSheet(poc, frame.right_page, matrix, view_w, view_h,
@@ -441,14 +441,9 @@ static void DrawFrame(Poc *poc) {
 static void PageDimensions(Poc *poc, int *w, int *h) {
   *w = poc->index.count ? poc->index.pages[0].width : 739;
   *h = poc->index.count ? poc->index.pages[0].height : 1080;
-  /* A two-up opening is twice as wide, and the fit/zoom/pan clamps must use the
-   * width actually on screen or panning stops at the wrong place. */
-  if (poc->spread_mode) {
-    ManualSpread spread;
-    if (ManualPages_SpreadAt(poc->index.count, poc->view.item, &spread) &&
-        !ManualSpread_IsSingle(&spread))
-      *w *= 2;
-  }
+  /* Same constant width the draw path uses, from the same function, so the
+   * clamps cannot disagree with what is on screen. */
+  *w *= ManualPages_LayoutPageWidths(poc->spread_mode);
 }
 
 /* Items in the current layout: openings when two-up, pages otherwise. */

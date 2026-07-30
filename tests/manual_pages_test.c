@@ -643,6 +643,66 @@ static void TestTurnsAtTheCoversResolve(void) {
   }
 }
 
+/* THE LAYOUT WIDTH MUST NOT CHANGE BETWEEN OPENINGS.
+ *
+ * Sizing a single-page opening to one page and a two-up one to two makes the
+ * whole view rescale 2x the instant a cover is turned, so everything jumps
+ * mid-animation. The area is always two pages wide; a lone page takes one half.
+ * These assert the SIDE, which is what keeps a cover across the correct half. */
+/* The layout width must be CONSTANT across every opening, covers included. This
+ * is the invariant whose absence made the animation glitch on single pages: the
+ * area was one page wide on a cover and two on an interior opening, so the whole
+ * view rescaled 2x mid-turn. */
+static void TestLayoutWidthNeverDependsOnTheOpening(void) {
+  CHECK(ManualPages_LayoutPageWidths(true) == 2);
+  CHECK(ManualPages_LayoutPageWidths(false) == 1);
+
+  /* Walk every opening of the real booklet: the width must not move. */
+  const int pages = 40;
+  const int items = ManualPages_SpreadCount(pages);
+  const int expected = ManualPages_LayoutPageWidths(true);
+  for (int i = 0; i < items; i++) {
+    ManualSpread spread;
+    CHECK(ManualPages_SpreadAt(pages, i, &spread));
+    /* Whatever the opening holds -- one page or two -- the layout is the same. */
+    CHECK(ManualPages_LayoutPageWidths(true) == expected);
+    /* And the fitted size follows from that width alone, so it is identical on a
+     * cover and on an interior opening. */
+    float w = 0.0f, h = 0.0f;
+    ManualView_FittedSize(739 * expected, 1080, 1600, 1040, 1.0f, &w, &h);
+    CHECK(fabsf(w - 1423.3f) < 0.5f);
+    CHECK(fabsf(h - 1040.0f) < 0.5f);
+  }
+}
+
+static void TestSinglePageOpeningsPickTheCorrectHalf(void) {
+  const int pages = 40;
+  const int items = ManualPages_SpreadCount(pages);
+  ManualSpread spread;
+
+  /* Front cover: alone on the RIGHT, so it swings leftward like real paper. */
+  CHECK(ManualPages_SpreadAt(pages, 0, &spread));
+  CHECK(ManualSpread_IsSingle(&spread));
+  CHECK(ManualSpread_SingleOnRight(&spread));
+
+  /* Back cover: alone on the LEFT. */
+  CHECK(ManualPages_SpreadAt(pages, items - 1, &spread));
+  CHECK(ManualSpread_IsSingle(&spread));
+  CHECK(!ManualSpread_SingleOnRight(&spread));
+
+  /* A two-up opening has no "side" -- the query is meaningless and must not
+   * accidentally report the right half. */
+  CHECK(ManualPages_SpreadAt(pages, 5, &spread));
+  CHECK(!ManualSpread_IsSingle(&spread));
+  CHECK(!ManualSpread_SingleOnRight(&spread));
+
+  /* A lone ODD interior page sits on the left, because it is the left half of an
+   * opening whose right half does not exist. */
+  CHECK(ManualPages_SpreadAt(5, 2, &spread));
+  CHECK(ManualSpread_IsSingle(&spread));
+  CHECK(!ManualSpread_SingleOnRight(&spread));
+}
+
 /* ── The ordering invariant ───────────────────────────────────────────────── */
 
 /* THE load-bearing assertion of this module.
@@ -860,6 +920,8 @@ int main(void) {
   TestOddInteriorCountLeavesALonePage();
   TestDegenerateBookletSizes();
 
+  TestLayoutWidthNeverDependsOnTheOpening();
+  TestSinglePageOpeningsPickTheCorrectHalf();
   TestForwardTurnLeavesTheLeftPageAlone();
   TestBackwardTurnLeavesTheRightPageAlone();
   TestLeafShowsTheSheetsOwnTwoPages();
