@@ -41,7 +41,7 @@ static SDL_GPUShader *g_blur_shader;
 static SDL_GPURenderState *g_blur_state;
 static bool g_blur_init_attempted;
 static bool g_blur_available;
-static SDL_GPUDevice *g_diorama_gpu_device;
+static SDL_GPUDevice *g_diorama_shader_device;
 
 /* 3x3 weighted-box blur (9 taps, center weighted x2) as a cheap Gaussian
  * approximation — softens the existing hard-edged silhouette shadow into a
@@ -92,7 +92,7 @@ static void EnsureBlurShader(SDL_Renderer *renderer) {
                     "disabled (enable \"GPU shader effects\" in Graphics settings?)\n");
     return;
   }
-  g_diorama_gpu_device = device;
+  g_diorama_shader_device = device;
   SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   if (!(formats & SDL_GPU_SHADERFORMAT_MSL)) {
     fprintf(stderr, "[gpu-fx] this GPU backend doesn't support MSL "
@@ -237,7 +237,7 @@ static void EnsureRimLightShader(SDL_Renderer *renderer) {
                     "disabled (enable \"GPU shader effects\" in Graphics settings?)\n");
     return;
   }
-  g_diorama_gpu_device = device;
+  g_diorama_shader_device = device;
   SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   if (!(formats & SDL_GPU_SHADERFORMAT_MSL)) {
     fprintf(stderr, "[gpu-fx] this GPU backend doesn't support MSL "
@@ -367,7 +367,7 @@ static void EnsureDofEdgeShader(SDL_Renderer *renderer) {
                     "disabled (enable \"GPU shader effects\" in Graphics settings?)\n");
     return;
   }
-  g_diorama_gpu_device = device;
+  g_diorama_shader_device = device;
   SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   if (!(formats & SDL_GPU_SHADERFORMAT_MSL)) {
     fprintf(stderr, "[gpu-fx] this GPU backend doesn't support MSL "
@@ -1207,59 +1207,24 @@ static void BuildQuadMesh(const float mvp[16],
 
 /* M5 (D6/buffer-ownership split): upload is separated from composite so the
  * present thread can release the game thread (safe to redraw pixels[]) right
- * after this returns, instead of after the full composite+vsync-present. */
-static bool DioramaPlaneHasContent(const uint8_t *pixels,
-                                   int width, int height) {
-  const uint32_t *words = (const uint32_t *)pixels;
-  size_t count = (size_t)width * height;
-  for (size_t i = 0; i < count; i++)
-    if (words[i])
-      return true;
-  return false;
-}
-
-static bool DioramaPlaneIsRequested(const DioramaLayerDesc *layer) {
-  int plane = layer->plane;
-  /* BG2 also feeds the skybox, whose existing behavior is independent of
-   * the in-box BG2 visibility toggle. */
-  bool feeds_skybox = plane == kPpuOverlaySource_Bg2 &&
-      g_settings.diorama_skybox != kDioramaSky_Off;
-  if (layer->visible && !*layer->visible && !feeds_skybox)
-    return false;
-  if (plane == kPpuOverlaySource_Bg3 && g_settings.diorama_hud_flat)
-    return false;
-  if (plane == kDioramaPlane_Backdrop &&
-      g_settings.diorama_skybox == kDioramaSky_Only)
-    return false;
-  return true;
-}
-
+ * after this returns, instead of after the full composite+vsync-present). The
+ * caller supplies the frame-snapshotted request/content intersection; this
+ * function neither reads live settings nor rescans producer-owned pixels. */
 uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
-                        int snes_width, int snes_height) {
+                        int snes_width, int snes_height,
+                        uint32_t plane_mask) {
   SDL_Rect upload = { 0, 0, snes_width, snes_height };
-  uint32_t content_mask = 0;
+  uint32_t uploaded_mask = 0;
   for (int i = 0; i < kDioramaLayerCount; i++) {
-    const DioramaLayerDesc *layer = &kDioramaLayers[i];
-    int plane = layer->plane;
-    if (!DioramaPlaneIsRequested(layer))
+    int plane = kDioramaLayers[i].plane;
+    if (!(plane_mask & (1u << plane)) ||
+        !textures[plane] || !pixels[plane])
       continue;
-    if (!pixels[plane])
-      continue;
-    /* The residual PPU framebuffer has RGB with a zero alpha byte and an
-     * all-black frame is still meaningful, so it is always present. Captured
-     * overlay planes use zero for transparency and can be rejected with one
-     * linear scan. Empty priority bands are common; skipping one avoids its
-     * streaming upload, supersample clear/blit, shadow, and geometry passes. */
-    bool has_content = plane == kDioramaPlane_Backdrop ||
-        DioramaPlaneHasContent(pixels[plane], snes_width, snes_height);
-    if (!has_content)
-      continue;
-    content_mask |= 1u << plane;
-    if (textures[plane])
-      SDL_UpdateTexture(textures[plane], &upload, pixels[plane],
-                        snes_width * 4);
+    if (SDL_UpdateTexture(textures[plane], &upload, pixels[plane],
+                          snes_width * 4))
+      uploaded_mask |= 1u << plane;
   }
-  return content_mask;
+  return uploaded_mask;
 }
 
 /* M7 (§6.1)/B1b (followup doc): which base-camera delta (0=BG1, 1=BG2) a
@@ -2003,7 +1968,15 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   return true;
 }
 
-void Diorama_Shutdown(SDL_Renderer *renderer) {
+static SDL_GPUDevice *DioramaRendererGpuDevice(SDL_Renderer *renderer) {
+  if (!renderer)
+    return NULL;
+  SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
+  return (SDL_GPUDevice *)SDL_GetPointerProperty(
+      props, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL);
+}
+
+static void DioramaReleaseRendererResources(SDL_Renderer *renderer) {
   if (renderer)
     SDL_SetGPURenderState(renderer, NULL);
 
@@ -2012,29 +1985,46 @@ void Diorama_Shutdown(SDL_Renderer *renderer) {
   g_diorama_ss_w = 0;
   g_diorama_ss_h = 0;
 
-  SDL_DestroyGPURenderState(g_blur_state);
-  SDL_DestroyGPURenderState(g_rim_light_state);
-  SDL_DestroyGPURenderState(g_dofedge_state);
+  SDL_GPUDevice *current_device = DioramaRendererGpuDevice(renderer);
+  bool same_device = !g_diorama_shader_device ||
+      current_device == g_diorama_shader_device;
+  /* After a real device replacement the old device owns—and has already
+   * invalidated—its states and shaders. Do not feed those stale handles to the
+   * new device. An orderly shutdown, and reset backends that retain the same
+   * SDL_GPUDevice object, take the explicit release path. */
+  if (same_device) {
+    SDL_DestroyGPURenderState(g_blur_state);
+    SDL_DestroyGPURenderState(g_rim_light_state);
+    SDL_DestroyGPURenderState(g_dofedge_state);
+  }
   g_blur_state = NULL;
   g_rim_light_state = NULL;
   g_dofedge_state = NULL;
 
-  if (g_diorama_gpu_device) {
+  if (same_device && current_device) {
     if (g_blur_shader)
-      SDL_ReleaseGPUShader(g_diorama_gpu_device, g_blur_shader);
+      SDL_ReleaseGPUShader(current_device, g_blur_shader);
     if (g_rim_light_shader)
-      SDL_ReleaseGPUShader(g_diorama_gpu_device, g_rim_light_shader);
+      SDL_ReleaseGPUShader(current_device, g_rim_light_shader);
     if (g_dofedge_shader)
-      SDL_ReleaseGPUShader(g_diorama_gpu_device, g_dofedge_shader);
+      SDL_ReleaseGPUShader(current_device, g_dofedge_shader);
   }
   g_blur_shader = NULL;
   g_rim_light_shader = NULL;
   g_dofedge_shader = NULL;
-  g_diorama_gpu_device = NULL;
+  g_diorama_shader_device = NULL;
   g_blur_available = false;
   g_rim_light_available = false;
   g_dofedge_available = false;
   g_blur_init_attempted = false;
   g_rim_light_init_attempted = false;
   g_dofedge_init_attempted = false;
+}
+
+void Diorama_ResetRendererResources(SDL_Renderer *renderer) {
+  DioramaReleaseRendererResources(renderer);
+}
+
+void Diorama_Shutdown(SDL_Renderer *renderer) {
+  DioramaReleaseRendererResources(renderer);
 }

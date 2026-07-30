@@ -40,13 +40,13 @@ void Diorama_SetDragging(bool dragging);
  * present. textures[]/pixels[] are kDioramaPlane_Count-sized, indexed by
  * kDioramaPlane_*; the caller fills [kDioramaPlane_Backdrop] with the
  * residual main framebuffer. Planes with a NULL texture or pixels are
- * skipped. visible_width replaces an internal Settings_VisibleWidth() call
- * (M5 D3 — present-time code must not re-derive live settings state). */
-/* Returns a bit per plane whose current CPU surface contains visible content.
- * The compositor can null the other entries and avoid all render work for
- * priority bands that captured no pixels this frame. */
+ * skipped. `plane_mask` is the caller's immutable request/content
+ * intersection (M5 D3 — present-time code must not re-derive live settings
+ * state). Returns a bit per successfully uploaded plane so the compositor
+ * cannot resurface stale texture contents after an upload failure. */
 uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
-                        int snes_width, int snes_height);
+                        int snes_width, int snes_height,
+                        uint32_t plane_mask);
 
 /* M7 (§6): per-BG-layer UV shift for present-time scroll interpolation.
  * Indexed by SNES BG number (0=BG1..3=BG4); Diorama_Composite maps each
@@ -99,6 +99,10 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        int bg2_valid_x0, int bg2_valid_x1);
+
+/* Drops renderer-owned targets/effects after SDL_EVENT_RENDER_DEVICE_RESET so
+ * they are lazily recreated against the current device. */
+void Diorama_ResetRendererResources(SDL_Renderer *renderer);
 
 /* Releases renderer-owned supersample and optional GPU-effect resources.
  * Call before destroying the renderer. */

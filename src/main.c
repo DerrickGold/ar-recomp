@@ -1250,7 +1250,7 @@ int main(int argc, char **argv) {
         case SDL_EVENT_RENDER_TARGETS_RESET:
         case SDL_EVENT_RENDER_DEVICE_RESET:
           if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
-            Diorama_Shutdown(g_renderer);
+            Diorama_ResetRendererResources(g_renderer);
             DestroyDioramaTextures();
             CreateDioramaTextures();
           }
@@ -1262,7 +1262,7 @@ int main(int argc, char **argv) {
            * never notice the reset and would keep presenting discarded
            * contents for the rest of the session (a settled town never bumps
            * the underlay serial). Drop them so the next present re-bakes. */
-          PresentSimUnderlay_Reset();
+          PresentRendererResources_Reset();
           HostInput_RequestPausedRedraw();
           /* R17/C2: the retained re-present slot copies hd_entries[].texture
            * as raw SDL_Texture* (present.h). The host reload just destroyed
@@ -1755,7 +1755,7 @@ int main(int argc, char **argv) {
   OracleTrace_Shutdown();
   HostAudio_Shutdown();
   HdReplacementHost_Shutdown();
-  PresentSimUnderlay_Reset();
+  PresentRendererResources_Reset();
   Diorama_Shutdown(g_renderer);
   DestroyDioramaTextures();
   SDL_DestroyTexture(g_sim_obj_atlas_texture);

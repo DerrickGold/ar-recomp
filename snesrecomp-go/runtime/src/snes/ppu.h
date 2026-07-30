@@ -334,6 +334,11 @@ struct Ppu {
    * Set when a frame ends with the capture active (content was written) and
    * on (re)bind, since a caller-provided buffer's contents are unknown. */
   uint8_t overlayRenderMaybeDirty[kPpuOverlaySource_Count];
+  /* Exact content metadata for the most recently rendered frame. Bit 0 is the
+   * primary surface; bits 1..3 are the optional priority-band surfaces.
+   * Cleared at frame start and set only when scanout routes a nontransparent
+   * pixel to that destination. */
+  uint8_t overlayRenderContentMask[kPpuOverlaySource_Count];
   uint8_t m7OverlayMaybeDirty;
   /* Mode-7 override: persistent scaled surface binding + per-frame policy. */
   uint8_t *m7OverlayBuffer;
@@ -461,6 +466,12 @@ bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
 // so bind bands after their primary. NULL unbinds one band.
 bool PpuBindOverlayPrioSurface(Ppu *ppu, PpuOverlaySource source, int band,
                                uint8_t *pixels);
+
+// Reports whether scanout wrote any nontransparent pixel to an overlay surface
+// in the most recently rendered frame. band 0 is the primary; 1..3 select the
+// corresponding priority-band surface. Invalid or unbound inputs return false.
+bool PpuOverlaySurfaceHasContent(const Ppu *ppu, PpuOverlaySource source,
+                                 int band);
 
 // Clear per-frame capture policy, then configure an arbitrary screen-space
 // rectangle from BG1-BG4 or OBJ. With RemoveFromGame, pixels inside the rect

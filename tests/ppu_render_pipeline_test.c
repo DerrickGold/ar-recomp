@@ -399,6 +399,68 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   ppu_free(ppu);
 }
 
+static void TestOverlayContentMetadata(void) {
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  ppu_reset(ppu);
+
+  static uint8_t fb[kW * 2 * sizeof(uint32_t)];
+  static uint32_t primary[kW * 2];
+  static uint32_t high[kW * 2];
+  memset(fb, 0, sizeof(fb));
+  memset(primary, 0, sizeof(primary));
+  memset(high, 0, sizeof(high));
+
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = 1u << kActRaiserPpuLayer_Bg2;
+  ppu->cgram[0x21] = bgr555(31, 0, 31);
+  set_solid_4bpp_tile(ppu, 1, 1);
+  ppu->bgTileAdr = 0;
+  ppu->bgXsc[kActRaiserPpuLayer_Bg2] = 0x20;
+  for (int i = 0; i < 0x400; i++)
+    ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+
+  PpuBeginDrawing(ppu, fb, kW * sizeof(uint32_t), 0);
+  CHECK(PpuBindOverlaySurface(
+      ppu, kPpuOverlaySource_Bg2, (uint8_t *)primary,
+      kW * sizeof(uint32_t)));
+  CHECK(PpuBindOverlayPrioSurface(
+      ppu, kPpuOverlaySource_Bg2, 1, (uint8_t *)high));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 2, 0));
+
+  ppu_runLine(ppu, 0);
+  ppu_runLine(ppu, 1);
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 0));
+  CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 1));
+
+  /* The tile-priority bit routes the same art to the high surface. Frame start
+   * must clear the prior content bits before this line is rendered. */
+  for (int i = 0; i < 0x400; i++)
+    ppu->vram[0x2000 + i] |= 1u << 13;
+  ppu_runLine(ppu, 0);
+  ppu_runLine(ppu, 1);
+  CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 0));
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 1));
+
+  /* An active capture with its layer disabled still clears the surfaces, but
+   * correctly reports no content in either destination. */
+  ppu->screenEnabled[0] = 0;
+  ppu_runLine(ppu, 0);
+  ppu_runLine(ppu, 1);
+  CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 0));
+  CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 1));
+  CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 4));
+  CHECK(!PpuOverlaySurfaceHasContent(NULL, kPpuOverlaySource_Bg2, 0));
+
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
 /* Fix A (SPEC-backdrop-clip.md): a CAPTURED layer's synthesized mirror/repeat
  * padding must reach the full centering budget, not stop at the live per-side
  * margin — otherwise a host that samples the whole fixed capture span reads
@@ -598,6 +660,7 @@ int main(void) {
   TestSemanticAtlasPacking();
   TestSim3DFlatComposition();
   TestSim3DWidescreenHudCaptureHandoff();
+  TestOverlayContentMetadata();
   TestCapturedPaddingReachesBudget();
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));
