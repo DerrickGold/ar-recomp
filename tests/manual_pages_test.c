@@ -12,6 +12,7 @@
  */
 
 #include "manual_pages.h"
+#include "scene3d_math.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -274,11 +275,11 @@ static void TestTurnsStopAtBothEndsOfTheBooklet(void) {
   CHECK(!ManualView_BeginTurn(&view, -1, 40));   /* already on page 0 */
   CHECK(ManualView_BeginTurn(&view, +1, 40));
   while (ManualView_AdvanceTurn(&view, 0.05f, 0.35f)) { /* run it out */ }
-  CHECK(view.page == 1);
+  CHECK(view.item == 1);
 
   ManualView_GoTo(&view, 39, 40);
   CHECK(!ManualView_BeginTurn(&view, +1, 40));   /* past the last page */
-  CHECK(view.page == 39);
+  CHECK(view.item == 39);
 }
 
 /* A held key must not queue turns: each would abort the last mid-flight and the
@@ -306,7 +307,7 @@ static void TestTurnLandsAndResetsZoom(void) {
   int guard = 0;
   while (ManualView_AdvanceTurn(&view, 1.0f / 60.0f, 0.35f) && guard++ < 1000) {}
   CHECK(view.turn == 0.0f);
-  CHECK(view.page == 1);
+  CHECK(view.item == 1);
 }
 
 /* Frame-rate independence: the turn must take the same wall-clock time whether
@@ -330,8 +331,120 @@ static void TestDegenerateTurnDurationLandsImmediately(void) {
   ManualView_Init(&view);
   CHECK(ManualView_BeginTurn(&view, +1, 40));
   CHECK(!ManualView_AdvanceTurn(&view, 0.016f, 0.0f));
-  CHECK(view.page == 1);
+  CHECK(view.item == 1);
   CHECK(view.turn == 0.0f);
+}
+
+/* ── Spread layout ───────────────────────────────────────────────────────────
+ *
+ * PARITY IS THE FRAGILE PART. Off by one and every interior opening pairs the
+ * wrong halves, so a map drawn across the gutter shows its right half beside the
+ * NEXT page's left -- plausible-looking and completely wrong. These assert the
+ * real 40-page booklet page by page.
+ */
+
+static void TestSpreadLayoutOfTheRealBooklet(void) {
+  const int pages = 40;
+  /* front cover + 19 interior openings + back cover */
+  CHECK(ManualPages_SpreadCount(pages) == 21);
+
+  ManualSpread spread;
+  /* Front cover stands alone on the right, like a closed book opening. */
+  CHECK(ManualPages_SpreadAt(pages, 0, &spread));
+  CHECK(spread.left == -1 && spread.right == 0);
+  CHECK(ManualSpread_IsSingle(&spread));
+
+  /* First interior opening pairs pages 2 and 3 (1-based), i.e. indices 1 and 2. */
+  CHECK(ManualPages_SpreadAt(pages, 1, &spread));
+  CHECK(spread.left == 1 && spread.right == 2);
+  CHECK(!ManualSpread_IsSingle(&spread));
+
+  /* Every interior opening must be (odd, even) in index terms -- that IS the
+   * parity, and it is what keeps a two-page map together. */
+  for (int i = 1; i <= 19; i++) {
+    CHECK(ManualPages_SpreadAt(pages, i, &spread));
+    CHECK(spread.left == 2 * i - 1);
+    CHECK(spread.right == 2 * i);
+    CHECK(spread.left % 2 == 1);
+  }
+
+  /* Back cover alone on the left. */
+  CHECK(ManualPages_SpreadAt(pages, 20, &spread));
+  CHECK(spread.left == 39 && spread.right == -1);
+  CHECK(ManualSpread_IsSingle(&spread));
+
+  /* Out of range is refused, not clamped -- a clamp would silently show the
+   * wrong opening. */
+  CHECK(!ManualPages_SpreadAt(pages, 21, &spread));
+  CHECK(!ManualPages_SpreadAt(pages, -1, &spread));
+}
+
+/* Every page must appear exactly once across all openings, or the reader either
+ * hides a page or shows one twice. */
+static void TestEveryPageAppearsExactlyOnce(void) {
+  for (int pages = 1; pages <= 41; pages++) {
+    int seen[64];
+    memset(seen, 0, sizeof seen);
+    const int spreads = ManualPages_SpreadCount(pages);
+    for (int i = 0; i < spreads; i++) {
+      ManualSpread spread;
+      CHECK(ManualPages_SpreadAt(pages, i, &spread));
+      if (spread.left >= 0) seen[spread.left]++;
+      if (spread.right >= 0) seen[spread.right]++;
+    }
+    for (int p = 0; p < pages; p++) {
+      if (seen[p] != 1) {
+        printf("  page_count=%d: page %d appears %d time(s)\n", pages, p, seen[p]);
+        CHECK(seen[p] == 1);
+      }
+    }
+  }
+}
+
+/* SpreadForPage is the inverse of SpreadAt, so "jump to page N" lands on the
+ * opening that actually shows N. */
+static void TestSpreadForPageIsTheInverse(void) {
+  for (int pages = 1; pages <= 41; pages++) {
+    for (int p = 0; p < pages; p++) {
+      const int spread_index = ManualPages_SpreadForPage(pages, p);
+      CHECK(spread_index >= 0);
+      ManualSpread spread;
+      CHECK(ManualPages_SpreadAt(pages, spread_index, &spread));
+      CHECK(spread.left == p || spread.right == p);
+    }
+    CHECK(ManualPages_SpreadForPage(pages, -1) == -1);
+    CHECK(ManualPages_SpreadForPage(pages, pages) == -1);
+  }
+}
+
+/* An ODD interior count leaves one page without a partner. It must get its own
+ * opening rather than being dropped. */
+static void TestOddInteriorCountLeavesALonePage(void) {
+  /* 5 pages: cover, [2,3], [4], back cover(5). */
+  CHECK(ManualPages_SpreadCount(5) == 4);
+  ManualSpread spread;
+  CHECK(ManualPages_SpreadAt(5, 2, &spread));
+  CHECK(spread.left == 3 && spread.right == -1);
+  CHECK(ManualSpread_IsSingle(&spread));
+}
+
+static void TestDegenerateBookletSizes(void) {
+  CHECK(ManualPages_SpreadCount(0) == 0);
+  CHECK(ManualPages_SpreadCount(-3) == 0);
+  ManualSpread spread;
+  CHECK(!ManualPages_SpreadAt(0, 0, &spread));
+
+  /* One page: a cover and nothing else. */
+  CHECK(ManualPages_SpreadCount(1) == 1);
+  CHECK(ManualPages_SpreadAt(1, 0, &spread));
+  CHECK(spread.left == -1 && spread.right == 0);
+
+  /* Two pages: front and back, no interior. */
+  CHECK(ManualPages_SpreadCount(2) == 2);
+  CHECK(ManualPages_SpreadAt(2, 0, &spread));
+  CHECK(spread.right == 0 && spread.left == -1);
+  CHECK(ManualPages_SpreadAt(2, 1, &spread));
+  CHECK(spread.left == 1 && spread.right == -1);
 }
 
 /* ── The ordering invariant ───────────────────────────────────────────────── */
@@ -353,8 +466,16 @@ static void TestLeafNeverGoesBehindASettledPage(void) {
                              &x, &y, &z);
         CHECK(z >= 0.0f);
         CHECK(isfinite(x) && isfinite(y) && isfinite(z));
-        /* And it stays within the unit sheet, so it cannot swing off-screen. */
-        CHECK(fabsf(x) <= 1.001f);
+        /* The sheet is a UNIT sheet centred on the origin: x and y each stay
+         * within [-0.5, 0.5] so that at rest it is exactly the rectangle a
+         * settled page occupies. That coincidence is what makes the first frame
+         * of a turn invisible -- when the leaf was scaled independently it
+         * rendered at 80% of the page's height and the page appeared to shrink
+         * the moment it was touched. */
+        CHECK(fabsf(x) <= 0.501f);
+        CHECK(fabsf(y) <= 0.501f);
+        /* The lift cannot exceed the sheet's own width, since it is a rotation
+         * of that width out of the page. */
         CHECK(z <= 1.001f);
       }
     }
@@ -383,9 +504,109 @@ static void TestBackwardTurnMirrorsTheHinge(void) {
   float fx = 0, fy = 0, fz = 0, bx = 0, by = 0, bz = 0;
   ManualTurn_LeafPoint(0.5f, 1.0f, 0.5f, &fx, &fy, &fz);
   ManualTurn_LeafPoint(-0.5f, 1.0f, 0.5f, &bx, &by, &bz);
-  CHECK(fx * bx <= 0.0f);            /* opposite sides (or both at the spine) */
   CHECK(fabsf(fx + bx) < 1e-5f);     /* exact mirror */
   CHECK(fabsf(fz - bz) < 1e-5f);     /* same lift */
+}
+
+/* THE HINGE IS THE GUTTER. A forward turn lifts the right leaf and lays it on
+ * the left, so the free edge travels from +0.5 to exactly -0.5 -- covering the
+ * facing page and no more.
+ *
+ * Hinging on the sheet's own outer edge instead put the landed free edge at
+ * x = -1.5, a full sheet-width past the page: the leaf flipped onto empty space.
+ * My first version had exactly that bug and this case is what found it. */
+static void TestTurnPivotsOnTheGutter(void) {
+  float x = 0, y = 0, z = 0;
+
+  /* At rest: gutter edge at 0, free edge at +0.5, flat. */
+  ManualTurn_LeafPoint(0.0f, 0.0f, 0.5f, &x, &y, &z);
+  CHECK(fabsf(x) < 1e-5f);
+  CHECK(fabsf(z) < 1e-5f);
+  ManualTurn_LeafPoint(0.0f, 1.0f, 0.5f, &x, &y, &z);
+  CHECK(fabsf(x - 0.5f) < 1e-5f);
+  CHECK(fabsf(z) < 1e-5f);
+
+  /* Landed: the free edge has crossed to the facing page's outer edge, EXACTLY. */
+  ManualTurn_LeafPoint(1.0f, 1.0f, 0.5f, &x, &y, &z);
+  CHECK(fabsf(x + 0.5f) < 1e-5f);
+  CHECK(fabsf(z) < 1e-5f);
+
+  /* Halfway: standing upright on the gutter, lifted by its own half-width. */
+  ManualTurn_LeafPoint(0.5f, 1.0f, 0.5f, &x, &y, &z);
+  CHECK(fabsf(x) < 1e-4f);
+  CHECK(fabsf(z - 0.5f) < 1e-4f);
+
+  /* The gutter edge NEVER moves, at any phase -- it is the spine. */
+  for (int i = -100; i <= 100; i++) {
+    ManualTurn_LeafPoint((float)i / 100.0f, 0.0f, 0.5f, &x, &y, &z);
+    CHECK(fabsf(x) < 1e-5f);
+    CHECK(fabsf(z) < 1e-5f);
+  }
+
+  /* Full vertical extent regardless of phase, so the sheet is never short. */
+  float top = 0, bottom = 0, ignored = 0;
+  ManualTurn_LeafPoint(0.37f, 0.5f, 0.0f, &ignored, &top, &ignored);
+  ManualTurn_LeafPoint(0.37f, 0.5f, 1.0f, &ignored, &bottom, &ignored);
+  CHECK(fabsf(top + 0.5f) < 1e-5f);
+  CHECK(fabsf(bottom - 0.5f) < 1e-5f);
+}
+
+/* SheetExtents must make a z=0 unit sheet project to EXACTLY the requested pixel
+ * size. This is the arithmetic that replaced hand-picked scale factors. */
+static void TestSheetExtentsReproduceTheRequestedSize(void) {
+  const int view_w = 960, view_h = 1040;
+  const float page_w = 711.6f, page_h = 1040.0f;
+  /* Only the UNTILTED camera is asserted to the pixel. With a tilt the sheet is
+   * genuinely in perspective -- a step along world x also moves in screen y, and
+   * the near edge is larger than the far one -- so "one unit == N pixels" is not
+   * meant to hold and asserting it would be asserting the absence of perspective.
+   * What must hold for BOTH is that the flat page and the leaf agree, which
+   * TestTurnPivotsOnTheGutter and the ordering test cover. */
+  const float tilts[][2] = { { 0.0f, 0.0f } };
+  for (int t = 0; t < 1; t++) {
+    Scene3DCamera camera = { tilts[t][0], tilts[t][1], 2.6f, 0.9f };
+    float matrix[16];
+    Scene3D_BuildViewProjection(&camera, view_w, view_h, matrix);
+    float half_x = 0.0f, half_y = 0.0f;
+    CHECK(ManualTurn_SheetExtents(matrix, view_w, view_h, page_w, page_h,
+                                  &half_x, &half_y));
+    CHECK(half_x > 0.0f && half_y > 0.0f);
+
+    /* A one-unit step must be exactly the requested pixel count, on both axes.
+     * That equality IS the fix: hand-picked scale factors had the leaf at 80% of
+     * the page's height, so the page appeared to shrink at the start of a turn. */
+    Scene3DPoint left, right, top, bottom;
+    CHECK(Scene3D_ProjectWorldPoint(matrix, -half_x, 0.0f, 0.0f,
+                                    view_w, view_h, &left));
+    CHECK(Scene3D_ProjectWorldPoint(matrix, half_x, 0.0f, 0.0f,
+                                    view_w, view_h, &right));
+    CHECK(Scene3D_ProjectWorldPoint(matrix, 0.0f, half_y, 0.0f,
+                                    view_w, view_h, &top));
+    CHECK(Scene3D_ProjectWorldPoint(matrix, 0.0f, -half_y, 0.0f,
+                                    view_w, view_h, &bottom));
+    CHECK(fabsf((right.x - left.x) - page_w) < 0.05f);
+    CHECK(fabsf((bottom.y - top.y) - page_h) < 0.05f);
+
+    /* And the leaf at rest occupies the gutter-to-edge half of that, so its own
+     * span is exactly half the requested width. */
+    float lx0 = 0, ly0 = 0, lz0 = 0, lx1 = 0, ly1 = 0, lz1 = 0;
+    ManualTurn_LeafPoint(0.0f, 0.0f, 0.5f, &lx0, &ly0, &lz0);
+    ManualTurn_LeafPoint(0.0f, 1.0f, 0.5f, &lx1, &ly1, &lz1);
+    Scene3DPoint gutter, edge;
+    CHECK(Scene3D_ProjectWorldPoint(matrix, lx0 * 2.0f * half_x, 0.0f, 0.0f,
+                                    view_w, view_h, &gutter));
+    CHECK(Scene3D_ProjectWorldPoint(matrix, lx1 * 2.0f * half_x, 0.0f, 0.0f,
+                                    view_w, view_h, &edge));
+    CHECK(fabsf(fabsf(edge.x - gutter.x) - page_w * 0.5f) < 0.05f);
+  }
+  /* Degenerate inputs are refused rather than producing nonsense extents. */
+  float matrix[16];
+  Scene3DCamera camera = { 0.0f, 0.0f, 2.6f, 0.9f };
+  Scene3D_BuildViewProjection(&camera, view_w, view_h, matrix);
+  float hx = 0.0f, hy = 0.0f;
+  CHECK(!ManualTurn_SheetExtents(matrix, 0, view_h, page_w, page_h, &hx, &hy));
+  CHECK(!ManualTurn_SheetExtents(matrix, view_w, view_h, 0.0f, page_h, &hx, &hy));
+  CHECK(!ManualTurn_SheetExtents(NULL, view_w, view_h, page_w, page_h, &hx, &hy));
 }
 
 static void TestFaceFlipsAtTheHalfway(void) {
@@ -437,9 +658,17 @@ int main(void) {
   TestTurnDurationIsClockDriven();
   TestDegenerateTurnDurationLandsImmediately();
 
+  TestSpreadLayoutOfTheRealBooklet();
+  TestEveryPageAppearsExactlyOnce();
+  TestSpreadForPageIsTheInverse();
+  TestOddInteriorCountLeavesALonePage();
+  TestDegenerateBookletSizes();
+
   TestLeafNeverGoesBehindASettledPage();
   TestHingeSweepsAHalfTurnAndIsMonotonic();
   TestBackwardTurnMirrorsTheHinge();
+  TestTurnPivotsOnTheGutter();
+  TestSheetExtentsReproduceTheRequestedSize();
   TestFaceFlipsAtTheHalfway();
   TestShadeIsBoundedAndDimmestEdgeOn();
 

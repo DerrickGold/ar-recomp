@@ -617,6 +617,10 @@ if(BUILD_TESTING)
     add_executable(actraiser_manual_pages_test
         tests/manual_pages_test.c
         src/manual_pages.c
+        # ManualTurn_SheetExtents solves the sheet's world extents by probing the
+        # projection, so the module depends on scene3d_math -- the one place the
+        # settled page and the turning leaf are guaranteed to agree.
+        src/scene3d_math.c
     )
     target_include_directories(actraiser_manual_pages_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
