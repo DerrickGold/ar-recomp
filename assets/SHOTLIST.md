@@ -27,8 +27,7 @@ Both need ImageMagick 7 (`brew install imagemagick`).
 |---|---|---|
 | `title.png` | still | hero |
 | `builder-run-script.png` | still | unpacked bundle folder |
-| `builder-gui.png` | still | the local builder, idle |
-| `builder-progress.png` | still | the builder mid-build |
+| `builder-stages.webp` | **montage** | `builder-gui-1.webp` + `-2` + `-3` (idle, mid-build, done + manual) |
 | `widescreen-comparison.png` | **montage** | `comparison/bp-act2-normal.png` + `bp-act2-wide-fixed.png` |
 | `diorama.gif` | motion | camera orbiting a Fillmore stage |
 | `diorama-comparison.png` | **montage** | `diorama-off.png` + `diorama-hero.png` |
@@ -93,16 +92,30 @@ gets committed as a screenshot, so use your own work, not a rip or an upscale of
 the original. See
 [what can and can't be committed](../docs/contributing.md#what-can-and-cant-be-committed-here).
 
-**`builder-gui.png`** — the one shot where browser chrome *helps*: a visible
-`127.0.0.1` address bar is the fastest proof of the "nothing is uploaded" claim.
-Crop the session token out if you'd rather not show it (it's per-process and
-worthless once the builder closes).
+**`builder-gui-1/2/3.webp`** — the three builder captures, montaged into
+`builder-stages.webp` by `tools/make-readme-montages.sh`. Shoot all three at the
+SAME window size; the montage stacks them and an identical frame is what makes
+the three read as one sequence. Stage 1 is the ROM picker, stage 2 mid-build
+(any percentage), stage 3 the finished build with the **Manual** tab open.
+
+These are the shots where browser chrome *helps*: a visible `127.0.0.1` address
+bar is the fastest proof of the "nothing is uploaded" claim, so this montage is
+the one that is NOT `dechrome`'d. Crop the session token out if you'd rather not
+show it (it's per-process and worthless once the builder closes).
+
+**Why these are WebP when everything else is PNG.** They are UI over a smooth sky
+gradient, which is the worst case for PNG: truecolour costs 7.8 MB, and the
+256-colour quantise the SNES frames take for free visibly bands and mottles that
+gradient. WebP q82 is indistinguishable at 160 KB. The masters are LOSSLESS WebP
+(2.6x smaller than PNG, verified pixel-identical with `magick compare -metric AE`),
+so re-running the montage never compounds artifacts.
 
 ## Page weight
 
 The README ships about 16 MB of images, ~11 MB of which is the four GIFs.
 That's the ceiling of what feels reasonable; if you add more motion, retire
-some.
+some. The builder montage replaced two PNGs totalling 862 KB with one 160 KB
+figure, so it bought a little headroom back.
 
 **Never run ImageMagick's GIF optimisers over these files.** Both
 `-layers Optimize` and the OptimizeTransparency/OptimizeFrame pair produce
