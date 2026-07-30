@@ -868,14 +868,51 @@ static void TestHingeSweepsAHalfTurnAndIsMonotonic(void) {
   CHECK(first < middle);
 }
 
-/* The hinge is on opposite edges for the two directions, or a backward turn
- * would animate as though it were going forward. */
+/* The two directions must be exact mirrors, or a backward turn animates as though
+ * it were going forward.
+ *
+ * THE PROBE POINT MATTERS. This case used to sample turn=+-0.5 at u=1.0, which is
+ * doubly degenerate: HingeAngle(0.5) is exactly pi/2 so span*cos(angle) is 0, AND
+ * the bow vanishes at u=1 by construction. Both sides were ~1.6e-8 and the
+ * assertion compared zero to zero -- deleting `if (turn < 0.0f) x = -x;` left the
+ * whole suite green while every backward turn ran forwards. Sample AWAY from the
+ * degenerate phase, and assert the sign explicitly rather than only the symmetry:
+ * a mirror of two zeroes is still a mirror. */
 static void TestBackwardTurnMirrorsTheHinge(void) {
-  float fx = 0, fy = 0, fz = 0, bx = 0, by = 0, bz = 0;
-  ManualTurn_LeafPoint(0.5f, 1.0f, 0.5f, &fx, &fy, &fz);
-  ManualTurn_LeafPoint(-0.5f, 1.0f, 0.5f, &bx, &by, &bz);
-  CHECK(fabsf(fx + bx) < 1e-5f);     /* exact mirror */
-  CHECK(fabsf(fz - bz) < 1e-5f);     /* same lift */
+  /* Off-centre phases, where x is substantially non-zero on both sides. */
+  const float phases[] = { 0.15f, 0.3f, 0.7f, 0.85f };
+  for (size_t i = 0; i < sizeof phases / sizeof phases[0]; i++) {
+    const float t = phases[i];
+    float fx = 0, fy = 0, fz = 0, bx = 0, by = 0, bz = 0;
+    ManualTurn_LeafPoint(t, 1.0f, 0.5f, &fx, &fy, &fz);
+    ManualTurn_LeafPoint(-t, 1.0f, 0.5f, &bx, &by, &bz);
+    /* Substantial, so neither side can be an accidental zero. */
+    CHECK(fabsf(fx) > 0.05f);
+    CHECK(fabsf(bx) > 0.05f);
+    /* OPPOSITE SIGNS -- this is what a deleted mirror breaks. */
+    CHECK(fx * bx < 0.0f);
+    CHECK(fabsf(fx + bx) < 1e-5f);   /* and an exact mirror */
+    CHECK(fabsf(fz - bz) < 1e-5f);   /* same lift either way */
+  }
+
+  /* The landing is the strongest single assertion: a forward turn ends on the
+   * LEFT outer edge, a backward turn on the RIGHT. */
+  float x = 0, y = 0, z = 0;
+  ManualTurn_LeafPoint(1.0f, 1.0f, 0.5f, &x, &y, &z);
+  CHECK(fabsf(x + 0.5f) < 1e-4f);
+  ManualTurn_LeafPoint(-1.0f, 1.0f, 0.5f, &x, &y, &z);
+  CHECK(fabsf(x - 0.5f) < 1e-4f);
+
+  /* And across the whole sweep the sheet stays on its own side of the gutter
+   * until it crosses, so a mid-turn frame can never be on the wrong half. */
+  for (int i = 1; i < 50; i++) {
+    const float t = (float)i / 100.0f;     /* first half only: not yet crossed */
+    float fwd = 0, back = 0, ignored = 0;
+    ManualTurn_LeafPoint(t, 1.0f, 0.5f, &fwd, &ignored, &ignored);
+    ManualTurn_LeafPoint(-t, 1.0f, 0.5f, &back, &ignored, &ignored);
+    CHECK(fwd > 0.0f);    /* forward lifts from the RIGHT half */
+    CHECK(back < 0.0f);   /* backward from the LEFT */
+  }
 }
 
 /* THE HINGE IS THE GUTTER. A forward turn lifts the right leaf and lays it on
