@@ -257,7 +257,8 @@ static bool BuildFlatPage(SDL_Vertex *verts, int *indices,
 static bool BuildLeaf(SDL_Vertex *verts, int *indices, float turn,
                       const float matrix[16], int view_w, int view_h,
                       float sheet_w, float half_y,
-                      float pan_world_x, float pan_world_y, float alpha) {
+                      float pan_world_x, float pan_world_y,
+                      bool mirrored, float alpha) {
   int v = 0;
   for (int iv = 0; iv <= kPageSubdivV; iv++) {
     for (int iu = 0; iu <= kPageSubdivU; iu++) {
@@ -279,9 +280,10 @@ static bool BuildLeaf(SDL_Vertex *verts, int *indices, float turn,
       const float shade = ManualTurn_LeafShade(turn, u);
       verts[v].position.x = screen.x;
       verts[v].position.y = screen.y;
-      /* Past halfway the sheet's reverse faces us, so the texture must be
-       * mirrored in u or the page reads backwards. */
-      verts[v].tex_coord.x = ManualTurn_FrontFaceVisible(turn) ? u : 1.0f - u;
+      /* Whether u is flipped is decided by ManualTurn_ResolveFrame, not here: it
+       * depends on the turn DIRECTION as well as the visible face, and deciding
+       * it from the face alone reversed every backward turn. */
+      verts[v].tex_coord.x = mirrored ? 1.0f - u : u;
       verts[v].tex_coord.y = t;
       verts[v].color = (SDL_FColor){ shade, shade, shade, alpha };
       v++;
@@ -322,28 +324,31 @@ static void DrawFrame(Poc *poc) {
       ? ManualPages_SpreadCount(poc->index.count) : poc->index.count;
   if (items <= 0) { SDL_RenderPresent(poc->renderer); return; }
 
-  const bool turning = poc->view.turn != 0.0f;
-  const int settled_item = poc->view.item;
-  const int target_item = turning ? poc->view.turn_target : settled_item;
-
-  /* Resolve both openings to their page pairs. In single-page mode a "spread" is
-   * just one page on the right, so ONE code path serves both layouts. */
-  ManualSpread settled = { -1, settled_item };
-  ManualSpread target = { -1, target_item };
-  if (poc->spread_mode) {
-    ManualPages_SpreadAt(poc->index.count, settled_item, &settled);
-    ManualPages_SpreadAt(poc->index.count, target_item, &target);
+  /* EVERY page-identity decision comes from here. Doing it inline is what
+   * produced both of the reported faults: the underlying pages jumped to the
+   * destination on frame one, and a backward turn showed its leaf mirrored. */
+  ManualTurnFrame frame;
+  if (!ManualTurn_ResolveFrame(&poc->view, poc->index.count,
+                               poc->spread_mode, &frame)) {
+    SDL_RenderPresent(poc->renderer);
+    return;
   }
 
-  /* A reference page for the fit. Every page in this manual shares one geometry
-   * (LooksLikeAlbum guarantees it), so any present page will do. */
-  const int reference = settled.right >= 0 ? settled.right : settled.left;
+  /* A reference page for the fit. Every page shares one geometry here
+   * (LooksLikeAlbum guarantees it), so any visible page will do. */
+  const int reference = frame.right_page >= 0 ? frame.right_page
+                      : (frame.left_page >= 0 ? frame.left_page
+                                              : frame.leaf_page);
   PageTexture *ref = LoadPage(poc, reference);
   if (!ref) { SDL_RenderPresent(poc->renderer); return; }
 
-  /* A two-up spread is twice as wide, so it must fit as one wide image or the
-   * gutter falls off the sides of the window. */
-  const bool two_up = poc->spread_mode && !ManualSpread_IsSingle(&settled);
+  /* Two-up openings are twice as wide and must fit as ONE image, or the gutter
+   * falls off the sides. Keyed on the settled opening's shape so the layout does
+   * not change width mid-turn. */
+  ManualSpread shape = { -1, poc->view.item };
+  if (poc->spread_mode)
+    ManualPages_SpreadAt(poc->index.count, poc->view.item, &shape);
+  const bool two_up = poc->spread_mode && !ManualSpread_IsSingle(&shape);
   const int fit_w = two_up ? ref->width * 2 : ref->width;
   float page_w = 0.0f, page_h = 0.0f;
   ManualView_FittedSize(fit_w, ref->height, view_w, view_h,
@@ -362,83 +367,62 @@ static void DrawFrame(Poc *poc) {
   const float pan_world_y = page_h > 0.0f
       ? poc->view.pan_y * (2.0f * half_y / page_h) : 0.0f;
 
-  /* One SHEET's half-width in world units. For a spread that is half the fitted
-   * width (each page); for a single page it is the whole thing, centred. */
-  const float sheet = two_up ? half_x : half_x;
-  const float gutter = 0.0f;
+  /* ManualTurn_LeafPoint already spans HALF the unit sheet (gutter at 0, outer
+   * edge at 0.5), so it is scaled by the full half-extent -- for a two-up
+   * opening that half IS one page, and for a single page it is the whole page
+   * pivoting about its centre. Halving it again renders the leaf at half size:
+   * measured 355.8 px against the page's 711.6. */
+  const float sheet = half_x;
 
   /* ORDER IS THE WHOLE CORRECTNESS ARGUMENT, and it never changes mid-turn.
-   *
-   * 1. THE DESTINATION, underneath. During a forward turn the right leaf lifts
-   *    away, so what is revealed on the right is the TARGET opening's right page,
-   *    while the left side shows the target's left page once the leaf lands on it. */
+   * 1. the settled pages, beneath everything. */
   if (two_up) {
-    /* left half: outer edge -> gutter */
-    DrawSheet(poc, turning ? target.left : settled.left, matrix, view_w, view_h,
-              -sheet, gutter, half_y, pan_world_x, pan_world_y);
-    /* right half: gutter -> outer edge */
-    DrawSheet(poc, turning ? target.right : settled.right, matrix,
-              view_w, view_h, gutter, sheet, half_y, pan_world_x, pan_world_y);
+    DrawSheet(poc, frame.left_page, matrix, view_w, view_h,
+              -half_x, 0.0f, half_y, pan_world_x, pan_world_y);
+    DrawSheet(poc, frame.right_page, matrix, view_w, view_h,
+              0.0f, half_x, half_y, pan_world_x, pan_world_y);
   } else {
-    const int page = turning
-        ? (target.right >= 0 ? target.right : target.left)
-        : (settled.right >= 0 ? settled.right : settled.left);
-    DrawSheet(poc, page, matrix, view_w, view_h, -sheet, sheet, half_y,
+    const int page = frame.right_page >= 0 ? frame.right_page : frame.left_page;
+    DrawSheet(poc, page, matrix, view_w, view_h, -half_x, half_x, half_y,
               pan_world_x, pan_world_y);
   }
 
-  if (!turning) { SDL_RenderPresent(poc->renderer); return; }
-
-  /* 2/3. The turning leaf. Forward turns lift the settled opening's RIGHT page;
-   *      backward turns lift its LEFT page. */
-  const bool forward = poc->view.turn > 0.0f;
-  const int leaf_page = forward
-      ? (settled.right >= 0 ? settled.right : settled.left)
-      : (settled.left >= 0 ? settled.left : settled.right);
-  PageTexture *leaf = LoadPage(poc, leaf_page);
-  if (!leaf) { SDL_RenderPresent(poc->renderer); return; }
-
-  SDL_Vertex verts[kPageVerts];
-  int indices[kPageIndices];
-
-  /* 2. the shadow: the same mesh, darkened and offset. Cheap, and it is what
-   *    makes the sheet read as lifted rather than sliding. */
-  if (BuildLeaf(verts, indices, poc->view.turn, matrix, view_w, view_h,
-                sheet, half_y, pan_world_x, pan_world_y, 0.30f)) {
-    for (int i = 0; i < kPageVerts; i++) {
-      verts[i].position.x += 10.0f;
-      verts[i].position.y += 14.0f;
-      verts[i].color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 0.30f };
+  if (poc->view.turn != 0.0f && frame.leaf_page >= 0) {
+    PageTexture *leaf = LoadPage(poc, frame.leaf_page);
+    if (leaf) {
+      SDL_Vertex verts[kPageVerts];
+      int indices[kPageIndices];
+      /* 2. the shadow, offset toward the side the sheet is falling AWAY from, so
+       *    it reads as cast by a lifted page rather than pasted under it. */
+      if (BuildLeaf(verts, indices, poc->view.turn, matrix, view_w, view_h,
+                    sheet, half_y, pan_world_x, pan_world_y,
+                    frame.leaf_mirrored, 0.30f)) {
+        const float shadow_dx = frame.leaf_on_right ? 10.0f : -10.0f;
+        for (int i = 0; i < kPageVerts; i++) {
+          verts[i].position.x += shadow_dx;
+          verts[i].position.y += 14.0f;
+          verts[i].color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 0.30f };
+        }
+        SDL_RenderGeometry(poc->renderer, NULL, verts, kPageVerts,
+                           indices, kPageIndices);
+      }
+      /* 3. the leaf itself. */
+      if (BuildLeaf(verts, indices, poc->view.turn, matrix, view_w, view_h,
+                    sheet, half_y, pan_world_x, pan_world_y,
+                    frame.leaf_mirrored, 1.0f))
+        SDL_RenderGeometry(poc->renderer, leaf->texture, verts, kPageVerts,
+                           indices, kPageIndices);
     }
-    SDL_RenderGeometry(poc->renderer, NULL, verts, kPageVerts,
-                       indices, kPageIndices);
-  }
-
-  /* 3. the leaf. Past halfway its REVERSE faces us, which is the page on the
-   *    other side of that physical sheet -- in a booklet, the target opening's
-   *    facing page. */
-  if (BuildLeaf(verts, indices, poc->view.turn, matrix, view_w, view_h,
-                sheet, half_y, pan_world_x, pan_world_y, 1.0f)) {
-    const bool front = ManualTurn_FrontFaceVisible(poc->view.turn);
-    int face_page = leaf_page;
-    if (!front) {
-      face_page = forward
-          ? (target.left >= 0 ? target.left : leaf_page)
-          : (target.right >= 0 ? target.right : leaf_page);
-    }
-    PageTexture *face = LoadPage(poc, face_page);
-    if (face)
-      SDL_RenderGeometry(poc->renderer, face->texture, verts, kPageVerts,
-                         indices, kPageIndices);
   }
 
   if (poc->show_debug) {
     char line[256];
     snprintf(line, sizeof line,
-             "%s %d/%d  pages [%d|%d]  zoom %.2fx  turn %+.2f  %s  turn %.2fs",
+             "%s %d/%d  L%d R%d  leaf %d%s  zoom %.2fx  turn %+.2f  %s  %.2fs",
              poc->spread_mode ? "opening" : "page",
              poc->view.item + 1, items,
-             settled.left + 1, settled.right + 1,
+             frame.left_page + 1, frame.right_page + 1,
+             frame.leaf_page + 1, frame.leaf_mirrored ? "m" : "",
              (double)poc->view.zoom, (double)poc->view.turn,
              poc->tilt_3d ? "3D" : "flat", (double)poc->turn_seconds);
     SDL_SetRenderDrawColor(poc->renderer, 0, 0, 0, 190);

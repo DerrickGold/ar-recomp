@@ -447,6 +447,202 @@ static void TestDegenerateBookletSizes(void) {
   CHECK(spread.left == 1 && spread.right == -1);
 }
 
+/* ── What is on screen during a turn ─────────────────────────────────────────
+ *
+ * These two cases are the reported bugs: the underlying pages jumped to the
+ * destination on the first frame of a turn, and a backward turn showed the
+ * lifting page mirrored.
+ */
+
+/* THE CONTINUITY CONDITION. A page turn moves ONE sheet. The side it lifts FROM
+ * reveals the new page; the side it falls TOWARD is unchanged until the leaf's
+ * own back face covers it. Advancing both sides at once pops the stationary page
+ * to its new value on frame one. */
+static void TestForwardTurnLeavesTheLeftPageAlone(void) {
+  const int pages = 40;
+  ManualView view;
+  ManualView_Init(&view);
+  ManualView_GoTo(&view, 5, ManualPages_SpreadCount(pages));
+
+  ManualSpread settled;
+  CHECK(ManualPages_SpreadAt(pages, 5, &settled));
+  ManualSpread target;
+  CHECK(ManualPages_SpreadAt(pages, 6, &target));
+
+  ManualTurnFrame frame;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  CHECK(frame.left_page == settled.left);
+  CHECK(frame.right_page == settled.right);
+
+  CHECK(ManualView_BeginTurn(&view, +1, ManualPages_SpreadCount(pages)));
+  /* Through the WHOLE animation the left page must stay put... */
+  for (int i = 1; i < 40; i++) {
+    view.turn = (float)i / 40.0f;
+    CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+    CHECK(frame.left_page == settled.left);
+    /* ...while the right side shows what the lifting leaf uncovers. */
+    CHECK(frame.right_page == target.right);
+  }
+
+  /* And no pop at the boundary: what the leaf's back face carries at the end is
+   * exactly what the settled frame then draws on the left. */
+  view.turn = 0.99f;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  CHECK(!ManualTurn_FrontFaceVisible(view.turn));
+  const int landing = frame.leaf_page;
+  view.turn = 0.0f;
+  view.item = 6;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  CHECK(frame.left_page == landing);
+  CHECK(frame.left_page == target.left);
+}
+
+static void TestBackwardTurnLeavesTheRightPageAlone(void) {
+  const int pages = 40;
+  ManualView view;
+  ManualView_Init(&view);
+  ManualView_GoTo(&view, 6, ManualPages_SpreadCount(pages));
+
+  ManualSpread settled, target;
+  CHECK(ManualPages_SpreadAt(pages, 6, &settled));
+  CHECK(ManualPages_SpreadAt(pages, 5, &target));
+
+  CHECK(ManualView_BeginTurn(&view, -1, ManualPages_SpreadCount(pages)));
+  ManualTurnFrame frame;
+  for (int i = 1; i < 40; i++) {
+    view.turn = -(float)i / 40.0f;
+    CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+    CHECK(frame.right_page == settled.right);   /* unchanged */
+    CHECK(frame.left_page == target.left);      /* revealed */
+  }
+  /* Continuity at the boundary, mirrored. */
+  view.turn = -0.99f;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  const int landing = frame.leaf_page;
+  view.turn = 0.0f;
+  view.item = 5;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  CHECK(frame.right_page == landing);
+  CHECK(frame.right_page == target.right);
+}
+
+/* The leaf shows the page you were reading first, then the page you are turning
+ * to -- in BOTH directions. */
+static void TestLeafShowsTheSheetsOwnTwoPages(void) {
+  const int pages = 40;
+  ManualSpread settled, next, previous;
+  CHECK(ManualPages_SpreadAt(pages, 5, &settled));
+  CHECK(ManualPages_SpreadAt(pages, 6, &next));
+  CHECK(ManualPages_SpreadAt(pages, 4, &previous));
+
+  ManualView view;
+  ManualView_Init(&view);
+  ManualView_GoTo(&view, 5, ManualPages_SpreadCount(pages));
+  ManualTurnFrame frame;
+
+  view.turn = 0.2f;   view.turn_target = 6;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  CHECK(frame.leaf_page == settled.right);    /* the page being lifted */
+  view.turn = 0.8f;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  CHECK(frame.leaf_page == next.left);        /* its reverse */
+
+  view.turn = -0.2f;  view.turn_target = 4;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  CHECK(frame.leaf_page == settled.left);
+  view.turn = -0.8f;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  CHECK(frame.leaf_page == previous.right);
+}
+
+/* THE MIRROR TABLE. The leaf's u runs 0 at the gutter always, but a LEFT page
+ * meets the gutter on its right edge and a RIGHT page on its left -- so whether
+ * the texture is flipped depends on the direction AND the visible face. It is an
+ * exclusive-or. Mirroring on the face alone reverses every backward turn, which
+ * is the reported bug. */
+static void TestLeafMirrorIsDirectionXorFace(void) {
+  const int pages = 40;
+  ManualView view;
+  ManualView_Init(&view);
+  ManualView_GoTo(&view, 5, ManualPages_SpreadCount(pages));
+  ManualTurnFrame frame;
+
+  const struct { float turn; bool want_mirror; const char *why; } cases[] = {
+    {  0.2f, false, "forward, front: a RIGHT page, gutter on its left"  },
+    {  0.8f, true,  "forward, back: a LEFT page, gutter on its right"   },
+    { -0.2f, true,  "backward, front: a LEFT page"                      },
+    { -0.8f, false, "backward, back: a RIGHT page"                      },
+  };
+  for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+    view.turn = cases[i].turn;
+    view.turn_target = cases[i].turn > 0.0f ? 6 : 4;
+    CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+    if (frame.leaf_mirrored != cases[i].want_mirror)
+      printf("  turn %+.1f: mirrored=%d want %d (%s)\n", (double)cases[i].turn,
+             (int)frame.leaf_mirrored, (int)cases[i].want_mirror, cases[i].why);
+    CHECK(frame.leaf_mirrored == cases[i].want_mirror);
+  }
+  /* Forward and backward at the SAME face must disagree -- that is the xor, and
+   * it is what a face-only implementation gets wrong. */
+  view.turn = 0.2f;  view.turn_target = 6;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  const bool forward_front = frame.leaf_mirrored;
+  view.turn = -0.2f; view.turn_target = 4;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+  CHECK(frame.leaf_mirrored != forward_front);
+}
+
+/* Single-page mode must resolve through the same call, with no left side. */
+static void TestSinglePageModeResolves(void) {
+  const int pages = 40;
+  ManualView view;
+  ManualView_Init(&view);
+  ManualView_GoTo(&view, 7, pages);
+  ManualTurnFrame frame;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, false, &frame));
+  CHECK(frame.left_page == -1);
+  CHECK(frame.right_page == 7);
+
+  CHECK(ManualView_BeginTurn(&view, +1, pages));
+  view.turn = 0.3f;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, false, &frame));
+  CHECK(frame.right_page == 8);       /* revealed */
+  CHECK(frame.leaf_page == 7);        /* lifting */
+  view.turn = 0.8f;
+  CHECK(ManualTurn_ResolveFrame(&view, pages, false, &frame));
+  CHECK(frame.leaf_page >= 0);        /* a real page, never -1 */
+}
+
+/* Covers stand alone, so a turn off them must still resolve without asking for a
+ * page that does not exist. */
+static void TestTurnsAtTheCoversResolve(void) {
+  const int pages = 40;
+  const int items = ManualPages_SpreadCount(pages);
+  ManualView view;
+  ManualView_Init(&view);
+  ManualTurnFrame frame;
+
+  /* Front cover -> first interior opening. */
+  ManualView_GoTo(&view, 0, items);
+  CHECK(ManualView_BeginTurn(&view, +1, items));
+  for (int i = 1; i < 20; i++) {
+    view.turn = (float)i / 20.0f;
+    CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+    CHECK(frame.leaf_page >= 0 && frame.leaf_page < pages);
+    CHECK(frame.right_page < pages);
+    CHECK(frame.left_page < pages);
+  }
+
+  /* Last interior opening -> back cover. */
+  ManualView_GoTo(&view, items - 2, items);
+  CHECK(ManualView_BeginTurn(&view, +1, items));
+  for (int i = 1; i < 20; i++) {
+    view.turn = (float)i / 20.0f;
+    CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+    CHECK(frame.leaf_page >= 0 && frame.leaf_page < pages);
+  }
+}
+
 /* ── The ordering invariant ───────────────────────────────────────────────── */
 
 /* THE load-bearing assertion of this module.
@@ -663,6 +859,13 @@ int main(void) {
   TestSpreadForPageIsTheInverse();
   TestOddInteriorCountLeavesALonePage();
   TestDegenerateBookletSizes();
+
+  TestForwardTurnLeavesTheLeftPageAlone();
+  TestBackwardTurnLeavesTheRightPageAlone();
+  TestLeafShowsTheSheetsOwnTwoPages();
+  TestLeafMirrorIsDirectionXorFace();
+  TestSinglePageModeResolves();
+  TestTurnsAtTheCoversResolve();
 
   TestLeafNeverGoesBehindASettledPage();
   TestHingeSweepsAHalfTurnAndIsMonotonic();

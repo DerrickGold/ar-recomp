@@ -378,3 +378,69 @@ float ManualTurn_LeafShade(float turn, float u) {
 bool ManualTurn_FrontFaceVisible(float turn) {
   return ManualTurn_HingeAngle(turn) <= (float)M_PI * 0.5f;
 }
+
+bool ManualTurn_ResolveFrame(const ManualView *view, int page_count,
+                             bool spread_mode, ManualTurnFrame *out) {
+  if (!view || !out || page_count <= 0) return false;
+  memset(out, 0, sizeof *out);
+  out->left_page = -1;
+  out->right_page = -1;
+  out->leaf_page = -1;
+
+  const int items = spread_mode ? ManualPages_SpreadCount(page_count)
+                                : page_count;
+  if (items <= 0) return false;
+  const int settled_item = view->item < 0 ? 0
+                         : (view->item >= items ? items - 1 : view->item);
+
+  /* Single-page mode is the same shape with an empty left side, so the caller
+   * needs no second path. */
+  ManualSpread settled = { -1, settled_item };
+  if (spread_mode && !ManualPages_SpreadAt(page_count, settled_item, &settled))
+    return false;
+
+  const bool turning = view->turn != 0.0f;
+  if (!turning) {
+    out->left_page = settled.left;
+    out->right_page = settled.right;
+    return true;
+  }
+
+  const int target_item = view->turn_target < 0 ? 0
+                        : (view->turn_target >= items ? items - 1
+                                                      : view->turn_target);
+  ManualSpread target = { -1, target_item };
+  if (spread_mode && !ManualPages_SpreadAt(page_count, target_item, &target))
+    return false;
+
+  const bool forward = view->turn > 0.0f;
+  const bool front = ManualTurn_FrontFaceVisible(view->turn);
+  out->leaf_on_right = forward;
+
+  if (forward) {
+    /* The right leaf lifts. The left page is UNCHANGED -- it stays visible under
+     * the descending sheet -- and only the newly exposed right side advances. */
+    out->left_page = settled.left;
+    out->right_page = target.right;
+    out->leaf_page = front ? settled.right : target.left;
+  } else {
+    /* Mirror image: the left leaf lifts, the right page is unchanged. */
+    out->right_page = settled.right;
+    out->left_page = target.left;
+    out->leaf_page = front ? settled.left : target.right;
+  }
+
+  /* In single-page mode a "spread" has only a right page, so a backward turn
+   * would find nothing to lift. Fall back to whichever side exists. */
+  if (out->leaf_page < 0)
+    out->leaf_page = front
+        ? (settled.right >= 0 ? settled.right : settled.left)
+        : (target.right >= 0 ? target.right : target.left);
+
+  /* THE XOR. The leaf's u runs 0 at the gutter; a left page's gutter is its
+   * RIGHT edge, so its texture must be flipped. Which pages land on which face
+   * swaps with the direction, so mirroring on the face alone reverses every
+   * backward turn -- the bug this replaces. */
+  out->leaf_mirrored = (forward != front);
+  return true;
+}

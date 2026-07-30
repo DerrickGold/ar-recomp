@@ -252,4 +252,56 @@ float ManualTurn_LeafShade(float turn, float u);
  * halfway point that is the destination page's reverse. */
 bool ManualTurn_FrontFaceVisible(float turn);
 
+/* ── What is on screen during a turn ───────────────────────────────────────
+ *
+ * A page turn moves ONE sheet of paper. Its front is the page you were reading;
+ * its back is the page that ends up facing you. Everything else stays where it
+ * is. Getting that wrong in either direction produces a visible pop, so the
+ * whole assignment is resolved here and tested, rather than as conditionals at
+ * the draw site.
+ *
+ * FORWARD, opening N -> N+1. The right leaf lifts and falls to the left:
+ *
+ *     left side   L(N)      UNCHANGED -- it is still there, being covered
+ *     right side  R(N+1)    revealed as the leaf lifts away
+ *     leaf front  R(N)      the page you were reading
+ *     leaf back   L(N+1)    what the sheet's reverse carries
+ *
+ * At turn=1 the leaf's back has landed exactly where the new opening's left page
+ * is, and the right side already shows R(N+1) -- so nothing changes at the moment
+ * the animation ends. That continuity IS the correctness condition. Setting BOTH
+ * sides to the target when the turn starts (the obvious implementation) pops the
+ * left page to its new value on the first frame.
+ *
+ * BACKWARD is the mirror: the LEFT leaf lifts and falls to the right, the right
+ * side is unchanged, and the left side reveals the target's left page.
+ */
+
+typedef struct ManualTurnFrame {
+  /* Pages to draw flat, beneath the leaf. -1 for an empty side. */
+  int left_page;
+  int right_page;
+  /* The page whose image the leaf shows right now, and whether its texture must
+   * be mirrored in u. A LEFT page meets the gutter on its right edge and a RIGHT
+   * page on its left, while the leaf's u always runs 0 at the gutter -- so
+   * whether u must be flipped depends on BOTH the direction of the turn and
+   * which face is toward the viewer. It is an exclusive-or, not a property of
+   * the face alone; mirroring on the face only leaves every backward turn
+   * reversed. */
+  int leaf_page;
+  bool leaf_mirrored;
+  /* Which side of the gutter the leaf occupies: true when it is lifting from the
+   * right (a forward turn). The host needs this only for the shadow's offset. */
+  bool leaf_on_right;
+} ManualTurnFrame;
+
+/* Resolve everything visible for `view` over a `page_count`-page booklet.
+ *
+ * `spread_mode` selects openings versus single pages; in single-page mode the
+ * "left" side is always -1 and one page occupies the view, so the caller has one
+ * code path. Returns false if the view cannot be resolved at all, in which case
+ * nothing should be drawn. */
+bool ManualTurn_ResolveFrame(const ManualView *view, int page_count,
+                             bool spread_mode, ManualTurnFrame *out);
+
 #endif  /* MANUAL_PAGES_H */
