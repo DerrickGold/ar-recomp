@@ -27,6 +27,35 @@ dechrome() {
     -gravity north -chop 0x56 +repage "$2"
 }
 
+echo "==> builder-stages.webp (the builder, three moments)"
+# Replaces the old builder-gui.png + builder-progress.png pair: one figure showing
+# idle -> building -> done, which is what the README walks the reader through.
+#
+# NOT dechrome'd, unlike every montage below. The browser chrome is the POINT
+# here: a visible 127.0.0.1 address bar is the fastest proof of the "nothing is
+# uploaded" claim (assets/SHOTLIST.md). Only the drop-shadow border comes off.
+#
+# WEBP, also unlike the rest. These are UI captures over a smooth sky gradient,
+# which is close to the worst case for PNG: truecolour costs 7.8 MB, and
+# quantising to a 256-colour palette -- what the SNES frames below do for free --
+# visibly bands and mottles that gradient. WebP q82 is indistinguishable from
+# truecolour at 160 KB, so the figure is LIGHTER than the two PNGs it replaces.
+# The masters are lossless WebP for the same reason (2.6x smaller than PNG, and
+# verified pixel-identical), so regenerating never compounds artifacts.
+for n in 1 2 3; do
+  magick "$A/builder-gui-$n.webp" -bordercolor black -border 1 -trim +repage \
+    "$TMP/stage$n.png"
+done
+montage \
+  \( "$TMP/stage1.png" -set label 'Choose your ROM — nothing is uploaded' \) \
+  \( "$TMP/stage2.png" -set label 'Building — step list and progress dock' \) \
+  \( "$TMP/stage3.png" -set label 'Done — Launch game, and the original 40-page manual' \) \
+  -tile 1x3 -geometry +26+26 -background "$BG" -fill "$FG" \
+  -font "$FONT" -pointsize 64 \
+  "$TMP/stages.png"
+magick "$TMP/stages.png" -resize 1500x -strip \
+  -quality 82 -define webp:method=6 "$A/builder-stages.webp"
+
 echo "==> widescreen-comparison.png (4:3 vs 16:9, stacked)"
 dechrome "$A/comparison/bp-act2-normal.png"     "$TMP/ws-43.png"
 dechrome "$A/comparison/bp-act2-wide-fixed.png" "$TMP/ws-169.png"
@@ -98,8 +127,11 @@ done
 
 echo
 echo "Done:"
-for f in widescreen-comparison diorama-comparison shader-comparison hd-title-comparison; do
-  printf '  %-32s %s  %s\n' "$A/$f.png" \
-    "$(magick identify -format '%wx%h' "$A/$f.png")" \
-    "$(du -h "$A/$f.png" | cut -f1)"
+# builder-stages is deliberately absent from the quantise loop above and carries
+# its own extension -- see its section for why it is WebP and not a 256-colour PNG.
+for f in builder-stages.webp widescreen-comparison.png diorama-comparison.png \
+         shader-comparison.png hd-title-comparison.png; do
+  printf '  %-32s %s  %s\n' "$A/$f" \
+    "$(magick identify -format '%wx%h' "$A/$f")" \
+    "$(du -h "$A/$f" | cut -f1)"
 done

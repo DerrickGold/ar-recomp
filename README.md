@@ -118,13 +118,14 @@ Double-click `run-build.command` (macOS) or `run-build.bat` (Windows), or run
 loopback only, behind a per-process token. Choose your ROM and press **Build
 game**.
 
-![The local builder: box art masthead, ROM file picker, and Build game button](/assets/builder-gui.png)
-
 The game's C is generated on your computer from your ROM and compiled there.
 **Your ROM never leaves the machine** — the page talks only to `127.0.0.1`, and
 nothing is uploaded. This takes a few minutes and happens once.
 
-![Build in progress: numbered step list and the progress dock at the bottom of the page](/assets/builder-progress.png)
+![The local builder in three stages: the ROM picker with a Build game button; the build running with a step list and a progress dock at 38%; and the finished build showing the original instruction manual with a Launch game button](/assets/builder-stages.webp)
+
+The **Manual** tab carries the original 40-page instruction booklet, so it is
+there while you wait.
 
 ### 3. Play
 
