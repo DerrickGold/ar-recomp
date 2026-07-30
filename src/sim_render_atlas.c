@@ -18,18 +18,34 @@ static void ClearObjectAtlasFields(SimRenderObject *object) {
   object->atlas_valid = 0;
 }
 
+/* The packed rectangle the previous build wrote into. Only that region can hold
+ * stale pixels: the atlas starts zeroed and nothing has ever written outside
+ * the union of the rectangles cleared here, so the transparent padding the
+ * presenter's LINEAR sampling relies on is preserved without memsetting all
+ * 1 MB every frame. */
+static int s_dirty_width, s_dirty_height;
+
+static void ClearPackedRegion(void) {
+  for (int y = 0; y < s_dirty_height; y++)
+    memset(&g_sim_obj_atlas_pixels[(size_t)y * kSimObjAtlasWidth], 0,
+           (size_t)s_dirty_width * sizeof(uint32_t));
+  s_dirty_width = s_dirty_height = 0;
+}
+
 bool SimRenderAtlas_Build(Ppu *ppu, uint16 camera_x, uint16 camera_y) {
   SimAtlasBuildInput input;
   if (!SimRenderMetadata_CopyAtlasInput(&input))
     return false;
 
-  memset(g_sim_obj_atlas_pixels, 0, sizeof(g_sim_obj_atlas_pixels));
+  ClearPackedRegion();
   uint32_t failure = ppu ? 0 : kSimMetadataIntegrity_AtlasRasterFailure;
   int cursor_x = kAtlasPadding;
   int cursor_y = kAtlasPadding;
   int row_height = 0;
   int used_width = 0;
   int used_height = 0;
+  int written_width = 0;
+  int written_height = 0;
 
   /* Per-object failures purge that object and keep going; only a broken
    * contract (no PPU, or a source index outside the record array) fails the
@@ -85,6 +101,12 @@ bool SimRenderAtlas_Build(Ppu *ppu, uint16 camera_x, uint16 camera_y) {
     object->atlas_w = (uint16_t)width;
     object->atlas_h = (uint16_t)height;
     object->atlas_valid = 1;
+
+    /* Recorded BEFORE the raster, unlike used_*: a rasterizer that fails
+     * partway has still dirtied this rectangle, and next frame's clear has to
+     * cover it even though the object gets purged below. */
+    if (cursor_x + width > written_width) written_width = cursor_x + width;
+    if (cursor_y + height > written_height) written_height = cursor_y + height;
 
     uint32_t *destination =
         &g_sim_obj_atlas_pixels[cursor_y * kSimObjAtlasWidth + cursor_x];
@@ -149,9 +171,15 @@ bool SimRenderAtlas_Build(Ppu *ppu, uint16 camera_x, uint16 camera_y) {
     }
   }
 
+  s_dirty_width = written_width;
+  s_dirty_height = written_height;
+
   bool valid = failure == 0;
   if (!valid) {
-    memset(g_sim_obj_atlas_pixels, 0, sizeof(g_sim_obj_atlas_pixels));
+    /* Discard this frame's packing entirely -- and clear it now rather than
+     * leaving it for the next build, so a broken contract cannot leave
+     * half-rasterized pixels in a buffer the presenter may still upload. */
+    ClearPackedRegion();
     used_width = used_height = 0;
     for (uint16_t i = 0; i < input.object_count; i++)
       ClearObjectAtlasFields(&input.objects[i]);
