@@ -29,6 +29,9 @@ typedef struct Sim3DCaptureState {
   int width, height;
   int live_x0, live_x1;
   int hud_obj_priority;
+  int hud_obj_mask_width;
+  int hud_obj_mask_x0, hud_obj_mask_y0;
+  int hud_obj_mask_x1, hud_obj_mask_y1;
   Ppu *ppu;
   PpuOverlayCapture prior_captures[kPpuOverlaySource_Count];
   uint8_t *hud_bg_pixels;
@@ -139,6 +142,22 @@ static bool OverlayPolicyConflicts(const Ppu *ppu) {
   return false;
 }
 
+static void ClearPriorHudObjMask(void) {
+  int width = g_sim3d.hud_obj_mask_width;
+  int x0 = g_sim3d.hud_obj_mask_x0;
+  int y0 = g_sim3d.hud_obj_mask_y0;
+  int x1 = g_sim3d.hud_obj_mask_x1;
+  int y1 = g_sim3d.hud_obj_mask_y1;
+  if (width > 0 && x0 >= 0 && x1 <= width && x1 > x0 &&
+      y0 >= 0 && y1 <= kSim3DMaxHeight && y1 > y0) {
+    for (int y = y0; y < y1; y++)
+      memset(&g_sim3d_hud_obj_mask[(size_t)y * width + x0], 0,
+             (size_t)(x1 - x0) * sizeof(g_sim3d_hud_obj_mask[0]));
+  }
+  g_sim3d.hud_obj_mask_x0 = g_sim3d.hud_obj_mask_y0 = 0;
+  g_sim3d.hud_obj_mask_x1 = g_sim3d.hud_obj_mask_y1 = 0;
+}
+
 static bool PrepareHudHandoff(Ppu *ppu, int width) {
   const PpuOverlayCapture *bg3 =
       &ppu->overlayCaptures[kPpuOverlaySource_Bg3];
@@ -158,7 +177,12 @@ static bool PrepareHudHandoff(Ppu *ppu, int width) {
       ppu->overlayRenderBuffer[kPpuOverlaySource_Obj];
   g_sim3d.hud_bg_pitch = ppu->overlayRenderPitch[kPpuOverlaySource_Bg3];
   g_sim3d.hud_obj_pitch = ppu->overlayRenderPitch[kPpuOverlaySource_Obj];
-  memset(g_sim3d_hud_obj_mask, 0, sizeof(g_sim3d_hud_obj_mask));
+  /* Only the prior frame's nontransparent raster can be dirty. Remember the
+   * pitch it used because a display-mode change can alter `width` between
+   * captures; clearing the entire 448x240 ceiling here used to write 430 KB
+   * every enhanced town frame for a HUD icon that is at most 32x32 pixels. */
+  ClearPriorHudObjMask();
+  g_sim3d.hud_obj_mask_width = width;
   if (!g_sim3d.hud_obj) return true;
 
   int priority = (ppu->oam[obj->oamFirst * 2 + 1] >> 12) & 3;
@@ -180,15 +204,28 @@ static bool PrepareHudHandoff(Ppu *ppu, int width) {
     return false;
 
   int extra = (width - kActRaiserAuthenticWidth) / 2;
+  int mask_x0 = width, mask_y0 = kSim3DMaxHeight;
+  int mask_x1 = 0, mask_y1 = 0;
   for (int y = 0; y < raster_height; y++) {
     int screen_y = bounds.y0 + y;
     if (screen_y < 0 || screen_y >= kSim3DMaxHeight) continue;
     for (int x = 0; x < raster_width; x++) {
       int texture_x = bounds.x0 + x + extra;
       if (texture_x < 0 || texture_x >= width) continue;
-      g_sim3d_hud_obj_mask[(size_t)screen_y * width + texture_x] =
-          raster[(size_t)y * raster_width + x];
+      uint32_t pixel = raster[(size_t)y * raster_width + x];
+      if (!pixel) continue;
+      g_sim3d_hud_obj_mask[(size_t)screen_y * width + texture_x] = pixel;
+      if (texture_x < mask_x0) mask_x0 = texture_x;
+      if (screen_y < mask_y0) mask_y0 = screen_y;
+      if (texture_x + 1 > mask_x1) mask_x1 = texture_x + 1;
+      if (screen_y + 1 > mask_y1) mask_y1 = screen_y + 1;
     }
+  }
+  if (mask_x1 > mask_x0 && mask_y1 > mask_y0) {
+    g_sim3d.hud_obj_mask_x0 = mask_x0;
+    g_sim3d.hud_obj_mask_y0 = mask_y0;
+    g_sim3d.hud_obj_mask_x1 = mask_x1;
+    g_sim3d.hud_obj_mask_y1 = mask_y1;
   }
   g_sim3d.hud_obj_priority = priority;
   return true;
@@ -630,22 +667,59 @@ static uint32_t BuildDifference(const uint8_t *authentic_pixels,
   return mismatch;
 }
 
-static bool SkipHudPlanePixel(int plane, int x, int y) {
-  int extra = (g_sim3d.width - kActRaiserAuthenticWidth) / 2;
-  int screen_x = x - extra;
-  if (g_sim3d.hud_bg3 &&
-      (plane == kSim3DPlane_Bg3Low || plane == kSim3DPlane_Bg3High)) {
-    const PpuOverlayCapture *capture =
-        &g_sim3d.prior_captures[kPpuOverlaySource_Bg3];
-    if (screen_x >= capture->x0 && screen_x < capture->x1 &&
-        y >= capture->y0 && y < capture->y1)
-      return true;
+static uint32_t ComposeTownPixelWithoutHud(int x, int y,
+                                           bool skip_bg3, bool skip_obj) {
+  bool live = x >= g_sim3d.live_x0 && x < g_sim3d.live_x1;
+  bool hud_composite_span = g_sim3d.hud_bg3 &&
+      y < g_sim3d.prior_captures[kPpuOverlaySource_Bg3].y1;
+  uint32_t color = (live || hud_composite_span)
+      ? g_sim3d.backdrop_argb : 0xff000000u;
+
+  for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+    if (skip_bg3 &&
+        (plane == kSim3DPlane_Bg3Low || plane == kSim3DPlane_Bg3High))
+      continue;
+    if (skip_obj &&
+        plane == Sim3D_ObjPlaneForPriority(g_sim3d.hud_obj_priority))
+      continue;
+    /* Same live-area rule the composed side uses: a wrapped-negative OBJ
+     * rasterizes into margin columns the hardware leaves black. */
+    if (!live && !hud_composite_span) continue;
+    size_t index = (size_t)y * g_sim3d.width + x;
+    uint32_t pixel = ((uint32_t *)g_sim3d_layer_pixels[plane])[index];
+    if (!(pixel >> 24)) continue;
+    if (g_sim3d.object_half_add && IsObjPlane(plane) &&
+        ObjPixelUsesColorMath(pixel)) {
+      uint32_t bg1_high = ((uint32_t *)
+          g_sim3d_layer_pixels[kSim3DPlane_Bg1High])[index];
+      uint32_t bg1_low = ((uint32_t *)
+          g_sim3d_layer_pixels[kSim3DPlane_Bg1Low])[index];
+      uint32_t subscreen = bg1_high ? bg1_high : bg1_low;
+      color = subscreen
+          ? HalfAddRgb(OpaqueArgb(pixel), subscreen)
+          : OpaqueArgb(pixel);
+    } else {
+      color = OpaqueArgb(pixel);
+    }
   }
-  if (g_sim3d.hud_obj &&
-      plane == Sim3D_ObjPlaneForPriority(g_sim3d.hud_obj_priority) &&
-      g_sim3d_hud_obj_mask[(size_t)y * g_sim3d.width + x])
-    return true;
-  return false;
+  return color & 0x00ffffffu;
+}
+
+static void RestoreTownHudPixel(uint8_t *authentic_pixels,
+                                int authentic_pitch, int x, int y,
+                                bool skip_bg3, bool skip_obj) {
+  size_t index = (size_t)y * g_sim3d.width + x;
+  uint32_t color = ComposeTownPixelWithoutHud(x, y, skip_bg3, skip_obj);
+  ((uint32_t *)(authentic_pixels + (size_t)y * authentic_pitch))[x] = color;
+  g_sim3d_flat_pixels[index] = color | 0xff000000u;
+  if (skip_bg3) {
+    ((uint32_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3Low])[index] = 0;
+    ((uint32_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3High])[index] = 0;
+  }
+  if (skip_obj) {
+    int plane = Sim3D_ObjPlaneForPriority(g_sim3d.hud_obj_priority);
+    ((uint32_t *)g_sim3d_layer_pixels[plane])[index] = 0;
+  }
 }
 
 static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
@@ -685,68 +759,57 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
     }
   }
 
-  /* Rebuild the authentic framebuffer exactly as the original RemoveFromGame
-   * captures do: omit BG3's HUD rectangle and the validated HUD OAM pixels,
-   * then let lower hardware-rank planes show through. PPU framebuffers carry
-   * RGB with a zero alpha byte, unlike the ARGB plane textures. */
-  uint32_t enabled = (1u << kSim3DPlane_Count) - 1;
-  for (int y = 0; y < g_sim3d.height; y++) {
-    uint32_t *dst = (uint32_t *)(authentic_pixels +
-                                 (size_t)y * authentic_pitch);
-    bool hud_composite_span = g_sim3d.hud_bg3 &&
-        y < g_sim3d.prior_captures[kPpuOverlaySource_Bg3].y1;
-    for (int x = 0; x < g_sim3d.width; x++) {
-      bool live = x >= g_sim3d.live_x0 && x < g_sim3d.live_x1;
-      uint32_t color = (live || hud_composite_span)
-          ? g_sim3d.backdrop_argb : 0xff000000u;
-      for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-        if (!(enabled & (1u << plane)) || SkipHudPlanePixel(plane, x, y))
-          continue;
-        /* Same live-area rule the composed side uses: a wrapped-negative OBJ
-         * rasterizes into margin columns the hardware leaves black, and this
-         * rebuild feeds the authentic framebuffer, so letting it through here
-         * corrupts the very image the fidelity gate compares against. */
-        if (!live && !hud_composite_span) continue;
-        uint32_t pixel = ((uint32_t *)g_sim3d_layer_pixels[plane])[
-            (size_t)y * g_sim3d.width + x];
-        if (pixel >> 24) {
-          if (g_sim3d.object_half_add && IsObjPlane(plane) &&
-              ObjPixelUsesColorMath(pixel)) {
-            size_t index = (size_t)y * g_sim3d.width + x;
-            uint32_t bg1_high = ((uint32_t *)
-                g_sim3d_layer_pixels[kSim3DPlane_Bg1High])[index];
-            uint32_t bg1_low = ((uint32_t *)
-                g_sim3d_layer_pixels[kSim3DPlane_Bg1Low])[index];
-            uint32_t subscreen = bg1_high ? bg1_high : bg1_low;
-            color = subscreen
-                ? HalfAddRgb(OpaqueArgb(pixel), subscreen)
-                : OpaqueArgb(pixel);
-          } else {
-            color = OpaqueArgb(pixel);
-          }
-        }
+  /* The full-plane capture does not use RemoveFromGame, so the PPU framebuffer
+   * entering this function is already correct everywhere except the promoted
+   * HUD pixels. The D2 gate immediately above proved the separated composite
+   * agrees with that framebuffer byte-for-byte. Patch only the BG3 capture
+   * rectangle and the sparse OBJ raster instead of recompositing all ten planes
+   * over the entire frame, then scanning all ten planes over it a second time.
+   *
+   * Published SIM textures omit the HUD too; PresentSim3D adds the anchored
+   * host overlay after either A/B profile has rendered. */
+  int bg_x0 = 0, bg_y0 = 0, bg_x1 = 0, bg_y1 = 0;
+  if (g_sim3d.hud_bg3) {
+    const PpuOverlayCapture *capture =
+        &g_sim3d.prior_captures[kPpuOverlaySource_Bg3];
+    int extra = (g_sim3d.width - kActRaiserAuthenticWidth) / 2;
+    bg_x0 = capture->x0 + extra;
+    bg_x1 = capture->x1 + extra;
+    bg_y0 = capture->y0;
+    bg_y1 = capture->y1;
+    if (bg_x0 < 0) bg_x0 = 0;
+    if (bg_x1 > g_sim3d.width) bg_x1 = g_sim3d.width;
+    if (bg_y0 < 0) bg_y0 = 0;
+    if (bg_y1 > g_sim3d.height) bg_y1 = g_sim3d.height;
+    for (int y = bg_y0; y < bg_y1; y++) {
+      for (int x = bg_x0; x < bg_x1; x++) {
+        bool skip_obj = g_sim3d.hud_obj &&
+            g_sim3d_hud_obj_mask[(size_t)y * g_sim3d.width + x] != 0;
+        RestoreTownHudPixel(authentic_pixels, authentic_pitch, x, y,
+                            true, skip_obj);
       }
-      dst[x] = color & 0x00ffffffu;
+    }
+  }
+
+  if (g_sim3d.hud_obj) {
+    int obj_y1 = g_sim3d.hud_obj_mask_y1;
+    if (obj_y1 > g_sim3d.height) obj_y1 = g_sim3d.height;
+    for (int y = g_sim3d.hud_obj_mask_y0;
+         y < obj_y1; y++) {
+      for (int x = g_sim3d.hud_obj_mask_x0;
+           x < g_sim3d.hud_obj_mask_x1; x++) {
+        if (!g_sim3d_hud_obj_mask[(size_t)y * g_sim3d.width + x])
+          continue;
+        if (x >= bg_x0 && x < bg_x1 && y >= bg_y0 && y < bg_y1)
+          continue;  /* The BG3 loop patched the union once already. */
+        RestoreTownHudPixel(authentic_pixels, authentic_pitch, x, y,
+                            false, true);
+      }
     }
   }
 
   memcpy(g_sim3d.ppu->overlayCaptures, g_sim3d.prior_captures,
          sizeof(g_sim3d.prior_captures));
-
-  /* Published SIM textures omit the HUD too; PresentSim3D adds the same
-   * anchored host overlay as authentic flat presentation after either A/B
-   * profile has rendered. */
-  for (int y = 0; y < g_sim3d.height; y++) {
-    for (int x = 0; x < g_sim3d.width; x++) {
-      size_t index = (size_t)y * g_sim3d.width + x;
-      for (int plane = 0; plane < kSim3DPlane_Count; plane++)
-        if (SkipHudPlanePixel(plane, x, y))
-          ((uint32_t *)g_sim3d_layer_pixels[plane])[index] = 0;
-      g_sim3d_flat_pixels[index] =
-          ((uint32_t *)(authentic_pixels + (size_t)y * authentic_pitch))[x] |
-          0xff000000u;
-    }
-  }
 }
 
 /* Colour-math layer bit for a captured plane, matching CGADSUB's own layout
