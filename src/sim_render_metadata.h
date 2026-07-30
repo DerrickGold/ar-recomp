@@ -661,6 +661,9 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
                                   const SimFrameData *frame,
                                   const uint8_t *rgba, int width, int height,
                                   int pitch);
+/* True when that file is open, so producers can skip diagnostic-only work
+ * nothing is going to read. Safe to call before the first TraceFrame. */
+bool SimRenderMetadata_TraceArmed(void);
 void SimRenderMetadata_TraceClose(void);
 
 /* Test/reset seam.  Production does not need a frame-begin callback: the

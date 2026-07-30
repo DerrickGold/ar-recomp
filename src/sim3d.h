@@ -16,6 +16,11 @@ typedef struct Sim3DCaptureRequest {
   bool picker_active;
   bool renderer_ready;
   bool diorama_active;
+  /* A capture-diagnostics UI is on screen this frame (the scene inspector
+   * panel reports the composed-frame hash). Supplied by the host rather than
+   * read here so this module stays free of the settings layer; when nothing is
+   * displaying them, the diagnostic-only pixel passes are skipped. */
+  bool inspector_active;
   SimRenderFeatureMask requested_features;
   uint32_t diagnostic_layer_mask;
   int width, height;

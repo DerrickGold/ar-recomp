@@ -19,6 +19,7 @@ uint32_t g_sim3d_difference_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
 typedef struct Sim3DCaptureState {
   bool active;
   bool bindings_owned;
+  bool inspector_active;
   bool separated_valid;
   bool hud_handoff;
   bool hud_bg3;
@@ -197,6 +198,7 @@ bool Sim3D_BeginFrame(void) {
   bool restore_bindings = g_sim3d.bindings_owned;
   g_sim3d.active = false;
   g_sim3d.bindings_owned = false;
+  g_sim3d.inspector_active = false;
   g_sim3d.separated_valid = false;
   g_sim3d.hud_handoff = false;
   g_sim3d.hud_bg3 = false;
@@ -211,6 +213,9 @@ bool Sim3D_BeginFrame(void) {
 
 bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
   if (!ppu || !request || !request->town) return false;
+  /* Retained for FinishCapture, which is where the diagnostic-only passes are
+   * decided and which does not see the request. */
+  g_sim3d.inspector_active = request->inspector_active;
   if (!request->master_enabled) {
     g_sim3d.status = kSim3DCapture_MasterOff;
     return false;
@@ -501,36 +506,57 @@ static bool WritePpm(const char *path, const uint8_t *pixels,
 
 /* D2's deterministic checkpoint asks for one same-frame A/B/difference
  * triplet. This path is dormant unless the runner supplies an absolute
- * prefix; it does not participate in ordinary screenshots or presentation. */
-static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
-                                   int authentic_pitch,
-                                   uint16_t game_frame) {
-  static bool initialized;
-  static bool attempted;
-  static unsigned target_game_frame;
-  static bool on_mismatch;
-  static char prefix[768];
-  if (!initialized) {
-    initialized = true;
+ * prefix; it does not participate in ordinary screenshots or presentation.
+ *
+ * At file scope rather than inside MaybeDumpDemoArtifacts because
+ * Sim3D_FinishCapture has to know whether a dump could still fire BEFORE it
+ * decides to build the difference image the dump would write. */
+static struct {
+  bool initialized;
+  bool attempted;
+  bool on_mismatch;
+  unsigned target_game_frame;
+  char prefix[768];
+} g_demo_dump;
+
+/* "A dump could still fire", not "fires this frame": the on-mismatch trigger
+ * is undecidable until BuildDifference has produced the count, and the
+ * frame-number trigger needs the image already built by the time it fires. So
+ * the difference image is maintained for as long as the one-shot is unspent. */
+static bool DemoArtifactsArmable(void) {
+  if (!g_demo_dump.initialized) {
+    g_demo_dump.initialized = true;
     const char *value = getenv("AR_SIM3D_D2_DUMP_PREFIX");
-    if (value) snprintf(prefix, sizeof(prefix), "%s", value);
+    if (value)
+      snprintf(g_demo_dump.prefix, sizeof(g_demo_dump.prefix), "%s", value);
     value = getenv("AR_SIM3D_D2_DUMP_AT_GF");
-    target_game_frame = value && value[0]
+    g_demo_dump.target_game_frame = value && value[0]
         ? (unsigned)strtoul(value, NULL, 0) : 0;
     /* A fidelity failure cannot be dumped by frame number, because nobody
      * knows the number until after it happens. Arming this instead captures
      * the first frame that actually mismatches, which is the only frame worth
      * looking at. */
     value = getenv("AR_SIM3D_DUMP_ON_MISMATCH");
-    on_mismatch = value && value[0] && value[0] != '0';
+    g_demo_dump.on_mismatch = value && value[0] && value[0] != '0';
   }
-  bool triggered = on_mismatch ? g_sim3d.mismatch_pixels > 0
-                               : game_frame >= target_game_frame;
-  if (attempted || !prefix[0] || !triggered ||
+  return !g_demo_dump.attempted && g_demo_dump.prefix[0] != '\0';
+}
+
+static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
+                                   int authentic_pitch,
+                                   uint16_t game_frame) {
+  /* Armable first: it owns the one-time environment read, so the trigger
+   * fields below are not yet populated on the very first call. */
+  if (!DemoArtifactsArmable()) return;
+  const char *prefix = g_demo_dump.prefix;
+  bool triggered = g_demo_dump.on_mismatch
+      ? g_sim3d.mismatch_pixels > 0
+      : game_frame >= g_demo_dump.target_game_frame;
+  if (!triggered ||
       (g_sim3d.status != kSim3DCapture_Capturing &&
        g_sim3d.status != kSim3DCapture_Ready))
     return;
-  attempted = true;
+  g_demo_dump.attempted = true;
 
   char path_a[1024], path_b[1024], path_difference[1024], path_json[1024];
   snprintf(path_a, sizeof(path_a), "%s-A.ppm", prefix);
@@ -574,16 +600,20 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
           ok ? "written" : "failed", (unsigned)game_frame, prefix);
 }
 
+/* The mismatch COUNT is the fidelity gate and is always needed. The difference
+ * IMAGE is only ever read by MaybeDumpDemoArtifacts, so `write_image` is false
+ * in ordinary play -- which drops a full-frame (300 KB at 342x224) store pass
+ * from every enhanced town frame. */
 static uint32_t BuildDifference(const uint8_t *authentic_pixels,
-                                int authentic_pitch) {
+                                int authentic_pitch, bool write_image) {
   uint32_t mismatch = 0;
   for (int y = 0; y < g_sim3d.height; y++) {
     const uint32_t *authentic = (const uint32_t *)(
         authentic_pixels + (size_t)y * authentic_pitch);
     const uint32_t *flat =
         &g_sim3d_flat_pixels[(size_t)y * g_sim3d.width];
-    uint32_t *difference =
-        &g_sim3d_difference_pixels[(size_t)y * g_sim3d.width];
+    uint32_t *difference = write_image
+        ? &g_sim3d_difference_pixels[(size_t)y * g_sim3d.width] : NULL;
     for (int x = 0; x < g_sim3d.width; x++) {
       uint32_t a = authentic[x], b = flat[x];
       int ar = a >> 16 & 0xff, ag = a >> 8 & 0xff, ab = a & 0xff;
@@ -591,8 +621,9 @@ static uint32_t BuildDifference(const uint8_t *authentic_pixels,
       int dr = ar > br ? ar - br : br - ar;
       int dg = ag > bg ? ag - bg : bg - ag;
       int db = ab > bb ? ab - bb : bb - ab;
-      difference[x] = 0xff000000u | (uint32_t)dr << 16 |
-                      (uint32_t)dg << 8 | (uint32_t)db;
+      if (difference)
+        difference[x] = 0xff000000u | (uint32_t)dr << 16 |
+                        (uint32_t)dg << 8 | (uint32_t)db;
       if (dr || dg || db) mismatch++;
     }
   }
@@ -817,11 +848,21 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
       g_sim3d.live_x0, g_sim3d.live_x1, g_sim3d_layer_pixels, 0,
       g_sim3d.object_half_add, hud_span_rows);
 
-  uint32_t mismatch = BuildDifference(authentic_pixels, authentic_pitch);
+  bool dump_armable = DemoArtifactsArmable();
+  uint32_t mismatch =
+      BuildDifference(authentic_pixels, authentic_pitch, dump_armable);
   g_sim3d.mismatch_pixels = mismatch;
-  g_sim3d.separated_hash = HashRgb(
-      g_sim3d_flat_pixels, g_sim3d.width, g_sim3d.height,
-      g_sim3d.width * (int)sizeof(uint32_t));
+  /* The composed-frame hash has exactly three readers -- the scene inspector
+   * panel, the D1 metadata trace and the D2 dump's JSON -- and all three are
+   * off in ordinary play, where it was a full-frame FNV pass (three rounds per
+   * pixel) whose result was then discarded. Zero when nobody is looking, which
+   * is what BeginFrame already reports for a frame that never composed. */
+  g_sim3d.separated_hash =
+      (g_sim3d.inspector_active || dump_armable ||
+       SimRenderMetadata_TraceArmed())
+          ? HashRgb(g_sim3d_flat_pixels, g_sim3d.width, g_sim3d.height,
+                    g_sim3d.width * (int)sizeof(uint32_t))
+          : 0;
   /* A requested diagnostic dump is useful for failed fidelity gates too: it
    * preserves the authentic/composed/difference triplet that explains why
    * the frame remained on the authentic renderer. */
@@ -851,8 +892,11 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
         g_sim3d.diagnostic_layer_mask, g_sim3d.object_half_add,
         hud_span_rows);
     /* Keep A/B Difference useful for isolated-layer inspection without
-     * changing the full-composite fidelity result published above. */
-    BuildDifference(authentic_pixels, authentic_pitch);
+     * changing the full-composite fidelity result published above. The count
+     * is discarded here, so this whole pass exists only to refresh the image
+     * for a dump -- skip it outright when no dump can consume it. */
+    if (dump_armable)
+      BuildDifference(authentic_pixels, authentic_pitch, true);
   }
 }
 

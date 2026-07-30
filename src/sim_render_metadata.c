@@ -960,6 +960,16 @@ static void TraceInitFromEnvironment(void) {
   fprintf(stderr, "[sim3d-d1] metadata trace -> %s\n", path);
 }
 
+/* Whether anything will read this frame's trace fields. Sim3D_FinishCapture
+ * asks before spending a full-frame hash that only the trace, the scene
+ * inspector and the D2 dump ever consume. Forces the one-time environment
+ * read, so the answer is correct on the very first frame -- TraceFrame runs
+ * later in the same frame and finds it already done. */
+bool SimRenderMetadata_TraceArmed(void) {
+  TraceInitFromEnvironment();
+  return g_sim_d1_trace != NULL;
+}
+
 void SimRenderMetadata_TraceFrame(uint32_t host_frame,
                                   const SimFrameData *frame,
                                   const uint8_t *rgba, int width, int height,
