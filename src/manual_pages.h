@@ -73,6 +73,52 @@ int ManualPages_CarveAlbum(const uint8_t *data, size_t size,
  * between shipping the user's manual and shipping their letterhead. */
 bool ManualPages_LooksLikeAlbum(const ManualPageIndex *index, size_t size);
 
+/* ── Spread layout ─────────────────────────────────────────────────────────
+ *
+ * A real booklet is read as OPENINGS, not pages: the covers stand alone and
+ * everything between them is seen two-up. That is not decoration -- artwork
+ * (maps especially) is drawn across the gutter, and showing those halves on
+ * separate screens cuts the picture in two.
+ *
+ * So a 40-page manual is 21 openings:
+ *
+ *     opening  0 :  [   ] [ 1 ]     front cover, alone
+ *     opening  1 :  [ 2 ] [ 3 ]
+ *     opening  2 :  [ 4 ] [ 5 ]
+ *        ...
+ *     opening 19 :  [38 ] [39 ]
+ *     opening 20 :  [40 ] [   ]     back cover, alone
+ *
+ * (1-based above for readability; the API is 0-based.)
+ *
+ * PARITY IS THE WHOLE POINT AND IT IS EASY TO GET WRONG. Off by one and every
+ * interior opening pairs the wrong halves -- a map's right half sits beside the
+ * next page's left -- which looks almost plausible and is completely wrong. Hence
+ * a pure, tested layout rather than arithmetic inline at the draw site. */
+
+typedef struct ManualSpread {
+  /* Page index, or -1 for "no page on this side" -- the front cover has no left,
+   * the back cover no right, and an odd interior count leaves one lone page. */
+  int left;
+  int right;
+} ManualSpread;
+
+/* Number of openings for a booklet of `page_count` pages. Zero for an empty or
+ * negative count. */
+int ManualPages_SpreadCount(int page_count);
+
+/* The pages visible at `spread`. False if the index is out of range, leaving
+ * `out` untouched. */
+bool ManualPages_SpreadAt(int page_count, int spread, ManualSpread *out);
+
+/* The opening that shows `page`, or -1 if the page is out of range. The inverse
+ * of SpreadAt, so a "go to page N" jump can land on the right opening. */
+int ManualPages_SpreadForPage(int page_count, int page);
+
+/* True when the opening shows a single page (either cover, or a lone interior
+ * page). The renderer centres those rather than parking them on one side. */
+bool ManualSpread_IsSingle(const ManualSpread *spread);
+
 /* ── Reader kinematics ─────────────────────────────────────────────────────
  *
  * Zoom is a multiple of fit-to-view; pan is in FIT-RELATIVE units so it means
@@ -81,12 +127,17 @@ bool ManualPages_LooksLikeAlbum(const ManualPageIndex *index, size_t size);
  */
 
 typedef struct ManualView {
-  int page;         /* current page, always in [0, count) */
+  /* The current ITEM. In spread layout that is an OPENING index, not a page
+   * index -- named `item` rather than `page` because a field called `page`
+   * holding a spread number is exactly the lie that produces off-by-one bugs
+   * later. Every count passed to the functions below must match: page count in
+   * single layout, ManualPages_SpreadCount() in spread layout. */
+  int item;
   float zoom;       /* 1.0 == fit to view */
   float pan_x;      /* fit-relative, clamped to the zoomed overhang */
   float pan_y;
   float turn;       /* 0 == settled; ±(0,1] == a turn in flight */
-  int turn_target;  /* page the turn lands on; == page when settled */
+  int turn_target;  /* item the turn lands on; == item when settled */
 } ManualView;
 
 enum {
@@ -136,8 +187,8 @@ bool ManualView_BeginTurn(ManualView *view, int direction, int count);
 bool ManualView_AdvanceTurn(ManualView *view, float elapsed_seconds,
                             float turn_seconds);
 
-/* Jump straight to a page with no animation, clamped into range. */
-void ManualView_GoTo(ManualView *view, int page, int count);
+/* Jump straight to an item with no animation, clamped into range. */
+void ManualView_GoTo(ManualView *view, int item, int count);
 
 /* ── Turn geometry ─────────────────────────────────────────────────────────
  *
@@ -158,11 +209,39 @@ void ManualView_GoTo(ManualView *view, int page, int count);
  * stopping dead. */
 float ManualTurn_HingeAngle(float turn);
 
-/* Position of a point on the leaf. `u` runs 0 (hinge) to 1 (free edge), `v` 0
- * to 1 down the page. Writes leaf-local (x, y, z) in fit-relative units.
- * z is never negative, which is the ordering invariant above. */
+/* Position of a point on the leaf, in UNIT-SHEET space: x and y each run over
+ * [-0.5, 0.5] at rest so the sheet is exactly the same rectangle a settled page
+ * occupies, and z lifts out of the page toward the viewer.
+ *
+ * `u` runs 0 (hinge edge) to 1 (free edge) and `v` 0 to 1 down the page. The
+ * hinge sits on the sheet's own LEFT edge for a forward turn (x = -0.5) and its
+ * right edge for a backward one -- not at the origin, which would hinge the
+ * sheet about its middle and leave half the page behind it uncovered.
+ *
+ * At rest the sheet coincides with the settled page EXACTLY. That is what makes
+ * the start of a turn invisible; a mismatch here reads as the page changing size
+ * the moment it is touched. z is never negative, which is the ordering invariant
+ * above. */
 void ManualTurn_LeafPoint(float turn, float u, float v,
                           float *out_x, float *out_y, float *out_z);
+
+/* Half-extents, in world units, at which a z=0 unit sheet projects to exactly
+ * `page_w x page_h` pixels under `matrix`.
+ *
+ * THE REASON THIS EXISTS. A settled page and a turning leaf must occupy the same
+ * rectangle, and they cannot if one is drawn in pixel space and the other through
+ * a perspective projection with hand-picked scale factors -- the page visibly
+ * resized at the start of every turn. So the projection is the single source of
+ * truth for BOTH, and this solves for the extents rather than guessing them:
+ * at z=0 the mapping from world x/y to pixels is linear, so two probe points
+ * give the pixels-per-world-unit exactly.
+ *
+ * Returns false if the camera cannot project the probes at all, in which case
+ * the caller must fall back to drawing flat rather than draw something wrong. */
+bool ManualTurn_SheetExtents(const float matrix[16],
+                             int view_w, int view_h,
+                             float page_w, float page_h,
+                             float *out_half_x, float *out_half_y);
 
 /* Shade multiplier across the leaf, 0..1: the sheet catches less light as it
  * lifts, which is what sells the fold without a lighting model. */

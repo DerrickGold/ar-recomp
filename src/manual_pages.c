@@ -1,6 +1,8 @@
 #include "manual_pages.h"
 
 #include <math.h>
+
+#include "scene3d_math.h"
 #include <string.h>
 
 /* ── Album carving ─────────────────────────────────────────────────────────── */
@@ -131,6 +133,59 @@ bool ManualPages_LooksLikeAlbum(const ManualPageIndex *index, size_t size) {
   return true;
 }
 
+/* ── Spread layout ─────────────────────────────────────────────────────────── */
+
+/* Interior pages are everything but the two covers, paired two-up. Derived in
+ * one place so SpreadCount, SpreadAt and SpreadForPage cannot disagree. */
+static int InteriorSpreadCount(int page_count) {
+  if (page_count <= 2) return 0;
+  const int interior = page_count - 2;
+  return (interior + 1) / 2;          /* a lone last page still needs an opening */
+}
+
+int ManualPages_SpreadCount(int page_count) {
+  if (page_count <= 0) return 0;
+  if (page_count == 1) return 1;      /* a cover and nothing else */
+  /* front cover + interior openings + back cover */
+  return 1 + InteriorSpreadCount(page_count) + 1;
+}
+
+bool ManualPages_SpreadAt(int page_count, int spread, ManualSpread *out) {
+  if (!out || page_count <= 0) return false;
+  const int total = ManualPages_SpreadCount(page_count);
+  if (spread < 0 || spread >= total) return false;
+
+  if (spread == 0) {                  /* front cover, right-hand side */
+    out->left = -1;
+    out->right = 0;
+    return true;
+  }
+  if (spread == total - 1) {          /* back cover, left-hand side */
+    out->left = page_count - 1;
+    out->right = -1;
+    return true;
+  }
+  /* Interior opening `spread` (1-based among interiors) shows pages
+   * 2*spread-1 and 2*spread. The last one may have no right half. */
+  const int left = 2 * spread - 1;
+  const int right = left + 1;
+  out->left = left;
+  out->right = (right <= page_count - 2) ? right : -1;
+  return true;
+}
+
+int ManualPages_SpreadForPage(int page_count, int page) {
+  if (page_count <= 0 || page < 0 || page >= page_count) return -1;
+  if (page == 0) return 0;
+  if (page == page_count - 1) return ManualPages_SpreadCount(page_count) - 1;
+  return (page + 1) / 2;              /* inverse of 2*spread-1 / 2*spread */
+}
+
+bool ManualSpread_IsSingle(const ManualSpread *spread) {
+  if (!spread) return false;
+  return (spread->left < 0) != (spread->right < 0);
+}
+
 /* ── Reader kinematics ─────────────────────────────────────────────────────── */
 
 static float ClampF(float v, float lo, float hi) {
@@ -196,7 +251,7 @@ void ManualView_Zoom(ManualView *view, float factor,
 bool ManualView_BeginTurn(ManualView *view, int direction, int count) {
   if (!view || count <= 0 || direction == 0) return false;
   if (view->turn != 0.0f) return false;   /* already in flight */
-  const int target = view->page + (direction > 0 ? 1 : -1);
+  const int target = view->item + (direction > 0 ? 1 : -1);
   if (target < 0 || target >= count) return false;
   view->turn_target = target;
   view->turn = direction > 0 ? 1e-6f : -1e-6f;  /* nonzero == in flight */
@@ -211,7 +266,7 @@ bool ManualView_AdvanceTurn(ManualView *view, float elapsed_seconds,
                             float turn_seconds) {
   if (!view || view->turn == 0.0f) return false;
   if (!(turn_seconds > 0.0f)) {          /* degenerate duration: land at once */
-    view->page = view->turn_target;
+    view->item = view->turn_target;
     view->turn = 0.0f;
     return false;
   }
@@ -219,7 +274,7 @@ bool ManualView_AdvanceTurn(ManualView *view, float elapsed_seconds,
   const bool forward = view->turn > 0.0f;
   float progress = fabsf(view->turn) + step;
   if (progress >= 1.0f) {
-    view->page = view->turn_target;
+    view->item = view->turn_target;
     view->turn = 0.0f;
     return false;
   }
@@ -227,11 +282,11 @@ bool ManualView_AdvanceTurn(ManualView *view, float elapsed_seconds,
   return true;
 }
 
-void ManualView_GoTo(ManualView *view, int page, int count) {
+void ManualView_GoTo(ManualView *view, int item, int count) {
   if (!view || count <= 0) return;
-  view->page = page < 0 ? 0 : (page >= count ? count - 1 : page);
+  view->item = item < 0 ? 0 : (item >= count ? count - 1 : item);
   view->turn = 0.0f;
-  view->turn_target = view->page;
+  view->turn_target = view->item;
   view->zoom = 1.0f;
   view->pan_x = 0.0f;
   view->pan_y = 0.0f;
@@ -252,18 +307,63 @@ void ManualTurn_LeafPoint(float turn, float u, float v,
   const float cu = ClampF(u, 0.0f, 1.0f);
   const float cv = ClampF(v, 0.0f, 1.0f);
   const float angle = ManualTurn_HingeAngle(turn);
-  /* Rigid rotation about the hinge (the x=0 edge). The sheet is flat for every
-   * phase -- no curl -- which is what keeps it non-self-intersecting and lets
-   * one fixed draw order be correct for the whole animation. */
-  const float span = cu;
+  /* Rigid rotation about the hinge, which is the sheet's own left edge for a
+   * forward turn. The sheet stays flat at every phase -- no curl -- which keeps
+   * it from self-intersecting and lets ONE fixed draw order be correct for the
+   * whole animation.
+   *
+   * `cu` is the distance from the hinge across the full sheet width, so the free
+   * edge travels the sheet's whole span rather than half of it. Hinging at the
+   * origin instead would sweep only the right half and leave the left half of
+   * the page behind it permanently exposed. */
+  /* THE HINGE IS THE GUTTER, at x = 0 -- the book's spine, not the sheet's outer
+   * edge. A forward turn lifts the RIGHT leaf (x in [0, 0.5]) and lays it down on
+   * the left; `span` is measured from the gutter outward, so the free edge sweeps
+   * from +0.5 through the lift and lands at -0.5, exactly covering the facing
+   * page.
+   *
+   * Hinging on the sheet's own outer edge instead sent the free edge to x = -1.5
+   * -- a full sheet-width past the page, flipping onto empty space. In a
+   * single-page layout the caller maps this half-sheet onto the whole page, so
+   * one geometry serves both. */
+  const float span = cu * 0.5f;                /* 0 at the gutter, 0.5 at the edge */
   float x = span * cosf(angle);
   float z = span * sinf(angle);
   if (z < 0.0f) z = 0.0f;   /* the invariant: the leaf never goes behind a page */
-  /* Mirror for a backward turn so the hinge sits on the opposite edge. */
+  /* A backward turn lifts the LEFT leaf and lays it to the right. */
   if (turn < 0.0f) x = -x;
   if (out_x) *out_x = x;
-  if (out_y) *out_y = cv;
+  if (out_y) *out_y = cv - 0.5f;   /* centred, like the settled page */
   if (out_z) *out_z = z;
+}
+
+bool ManualTurn_SheetExtents(const float matrix[16],
+                             int view_w, int view_h,
+                             float page_w, float page_h,
+                             float *out_half_x, float *out_half_y) {
+  if (!matrix || view_w <= 0 || view_h <= 0) return false;
+  if (!(page_w > 0.0f) || !(page_h > 0.0f)) return false;
+
+  /* At z=0 the projection is linear in world x and y, so the scale is exactly
+   * the screen displacement of a one-unit step -- no search, no tuning. */
+  Scene3DPoint origin, unit_x, unit_y;
+  if (!Scene3D_ProjectWorldPoint(matrix, 0.0f, 0.0f, 0.0f,
+                                 view_w, view_h, &origin) ||
+      !Scene3D_ProjectWorldPoint(matrix, 1.0f, 0.0f, 0.0f,
+                                 view_w, view_h, &unit_x) ||
+      !Scene3D_ProjectWorldPoint(matrix, 0.0f, 1.0f, 0.0f,
+                                 view_w, view_h, &unit_y))
+    return false;
+
+  /* Take each axis's own dominant component: with a yaw the +x step also moves
+   * in screen y, and using the hypotenuse would over-shrink the sheet. */
+  const float pixels_per_x = fabsf(unit_x.x - origin.x);
+  const float pixels_per_y = fabsf(origin.y - unit_y.y);
+  if (!(pixels_per_x > 0.0f) || !(pixels_per_y > 0.0f)) return false;
+
+  if (out_half_x) *out_half_x = page_w * 0.5f / pixels_per_x;
+  if (out_half_y) *out_half_y = page_h * 0.5f / pixels_per_y;
+  return true;
 }
 
 float ManualTurn_LeafShade(float turn, float u) {

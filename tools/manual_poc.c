@@ -86,6 +86,7 @@ typedef struct Poc {
 
   ManualView view;
   bool tilt_3d;
+  bool spread_mode;      /* two-up openings, as a real booklet reads */
   bool show_debug;
   float turn_seconds;
   bool dragging;
@@ -182,24 +183,23 @@ static PageTexture *LoadPage(Poc *poc, int page) {
 
 /* ── Mesh building ──────────────────────────────────────────────────────────── */
 
-/* A flat page as a subdivided quad in screen space. Subdivided even when flat so
- * the vertex path is identical to the leaf's -- one code path to trust. */
-static void BuildFlatPage(SDL_Vertex *verts, int *indices,
-                          float cx, float cy, float w, float h, float shade) {
-  const float half_w = w * 0.5f, half_h = h * 0.5f;
-  int v = 0;
-  for (int iv = 0; iv <= kPageSubdivV; iv++) {
-    for (int iu = 0; iu <= kPageSubdivU; iu++) {
-      const float u = (float)iu / (float)kPageSubdivU;
-      const float t = (float)iv / (float)kPageSubdivV;
-      verts[v].position.x = cx - half_w + w * u;
-      verts[v].position.y = cy - half_h + h * t;
-      verts[v].tex_coord.x = u;
-      verts[v].tex_coord.y = t;
-      verts[v].color = (SDL_FColor){ shade, shade, shade, 1.0f };
-      v++;
-    }
-  }
+/* THE camera. Both the settled page and the turning leaf are projected through
+ * this one matrix, which is the whole fix for the page changing size the moment a
+ * turn started: previously the flat page was laid out in pixel space while the
+ * leaf went through a perspective projection with hand-picked scale factors, so
+ * the two never agreed. */
+static void ReaderCamera(bool tilt_3d, int view_w, int view_h, float out[16]) {
+  Scene3DCamera camera = {
+    .tilt_x = tilt_3d ? -0.35f : 0.0f,
+    .tilt_y = tilt_3d ? 0.22f : 0.0f,
+    .distance = 2.6f,
+    .fov_y = 0.9f,
+  };
+  Scene3D_BuildViewProjection(&camera, view_w, view_h, out);
+}
+
+/* Emit the shared triangle list for a (kPageSubdivU x kPageSubdivV) grid. */
+static void BuildGridIndices(int *indices) {
   int n = 0;
   for (int iv = 0; iv < kPageSubdivV; iv++) {
     for (int iu = 0; iu < kPageSubdivU; iu++) {
@@ -214,6 +214,40 @@ static void BuildFlatPage(SDL_Vertex *verts, int *indices,
   }
 }
 
+/* A settled page: the same unit sheet as the leaf, at rest, through the same
+ * projection -- NOT a pixel-space rectangle. Offsets by pan in world units so a
+ * zoomed page still pans. Returns false if any vertex fails to project. */
+static bool BuildFlatPage(SDL_Vertex *verts, int *indices,
+                          const float matrix[16], int view_w, int view_h,
+                          float x0, float x1, float half_y,
+                          float pan_world_x, float pan_world_y, float shade) {
+  int v = 0;
+  for (int iv = 0; iv <= kPageSubdivV; iv++) {
+    for (int iu = 0; iu <= kPageSubdivU; iu++) {
+      const float u = (float)iu / (float)kPageSubdivU;
+      const float t = (float)iv / (float)kPageSubdivV;
+      /* x0..x1 is where this SHEET sits: a spread's left half runs gutter-ward
+       * from its outer edge, the right half the other way, and a single page
+       * (either cover) spans the middle. Vertical extent is always the full
+       * sheet, so a page is never short. */
+      const float wx = (x0 + (x1 - x0) * u) - pan_world_x;
+      const float wy = (0.5f - t) * 2.0f * half_y + pan_world_y;
+      Scene3DPoint screen;
+      if (!Scene3D_ProjectWorldPoint(matrix, wx, wy, 0.0f,
+                                     view_w, view_h, &screen))
+        return false;
+      verts[v].position.x = screen.x;
+      verts[v].position.y = screen.y;
+      verts[v].tex_coord.x = u;
+      verts[v].tex_coord.y = t;
+      verts[v].color = (SDL_FColor){ shade, shade, shade, 1.0f };
+      v++;
+    }
+  }
+  BuildGridIndices(indices);
+  return true;
+}
+
 /* The turning leaf, projected through the game's own scene3d_math.
  *
  * Returns false if ANY vertex fails to project -- Scene3D_ProjectWorldPoint
@@ -221,22 +255,9 @@ static void BuildFlatPage(SDL_Vertex *verts, int *indices,
  * partially-projected vertex set turns it inside out. Rejecting the whole leaf
  * for one bad vertex is the documented contract. */
 static bool BuildLeaf(SDL_Vertex *verts, int *indices, float turn,
-                      int view_w, int view_h, float page_w, float page_h,
-                      bool tilt_3d, float alpha) {
-  Scene3DCamera camera = {
-    .tilt_x = tilt_3d ? -0.35f : 0.0f,
-    .tilt_y = tilt_3d ? 0.22f : 0.0f,
-    .distance = 2.6f,
-    .fov_y = 0.9f,
-  };
-  float matrix[16];
-  Scene3D_BuildViewProjection(&camera, view_w, view_h, matrix);
-
-  /* World units per fit-relative unit, so the leaf lands exactly on the flat
-   * page it replaces. */
-  const float sx = page_w / (float)view_w * 2.0f;
-  const float sy = page_h / (float)view_h * 2.0f;
-
+                      const float matrix[16], int view_w, int view_h,
+                      float sheet_w, float half_y,
+                      float pan_world_x, float pan_world_y, float alpha) {
   int v = 0;
   for (int iv = 0; iv <= kPageSubdivV; iv++) {
     for (int iu = 0; iu <= kPageSubdivU; iu++) {
@@ -244,8 +265,15 @@ static bool BuildLeaf(SDL_Vertex *verts, int *indices, float turn,
       const float t = (float)iv / (float)kPageSubdivV;
       float lx = 0.0f, ly = 0.0f, lz = 0.0f;
       ManualTurn_LeafPoint(turn, u, t, &lx, &ly, &lz);
+      /* Scaled by the SAME sheet width as the settled page, so at rest the leaf
+       * is pixel-for-pixel the page it lifts off. The hinge is the gutter (x=0),
+       * so lx runs 0..±0.5 of the sheet and lands on the facing page exactly.
+       * Lift shares the width scale: the rotation is in the x/z plane. */
       Scene3DPoint screen;
-      if (!Scene3D_ProjectWorldPoint(matrix, lx * sx, (ly - 0.5f) * sy, lz * sy,
+      if (!Scene3D_ProjectWorldPoint(matrix,
+                                     lx * 2.0f * sheet_w - pan_world_x,
+                                     -ly * 2.0f * half_y + pan_world_y,
+                                     lz * 2.0f * sheet_w,
                                      view_w, view_h, &screen))
         return false;
       const float shade = ManualTurn_LeafShade(turn, u);
@@ -259,22 +287,29 @@ static bool BuildLeaf(SDL_Vertex *verts, int *indices, float turn,
       v++;
     }
   }
-  int n = 0;
-  for (int iv = 0; iv < kPageSubdivV; iv++) {
-    for (int iu = 0; iu < kPageSubdivU; iu++) {
-      const int base = iv * (kPageSubdivU + 1) + iu;
-      indices[n++] = base;
-      indices[n++] = base + 1;
-      indices[n++] = base + kPageSubdivU + 1;
-      indices[n++] = base + 1;
-      indices[n++] = base + kPageSubdivU + 2;
-      indices[n++] = base + kPageSubdivU + 1;
-    }
-  }
+  BuildGridIndices(indices);
   return true;
 }
 
 /* ── Frame ──────────────────────────────────────────────────────────────────── */
+
+/* Draw one settled sheet: look up its texture, place it, render it. Returns
+ * false only if there was nothing to draw. */
+static bool DrawSheet(Poc *poc, int page, const float matrix[16],
+                      int view_w, int view_h, float x0, float x1, float half_y,
+                      float pan_x, float pan_y) {
+  if (page < 0) return false;
+  PageTexture *texture = LoadPage(poc, page);
+  if (!texture) return false;
+  SDL_Vertex verts[kPageVerts];
+  int indices[kPageIndices];
+  if (!BuildFlatPage(verts, indices, matrix, view_w, view_h, x0, x1, half_y,
+                     pan_x, pan_y, 1.0f))
+    return false;
+  SDL_RenderGeometry(poc->renderer, texture->texture, verts, kPageVerts,
+                     indices, kPageIndices);
+  return true;
+}
 
 static void DrawFrame(Poc *poc) {
   int view_w = 0, view_h = 0;
@@ -283,64 +318,128 @@ static void DrawFrame(Poc *poc) {
   SDL_SetRenderDrawColor(poc->renderer, 24, 22, 30, 255);
   SDL_RenderClear(poc->renderer);
 
+  const int items = poc->spread_mode
+      ? ManualPages_SpreadCount(poc->index.count) : poc->index.count;
+  if (items <= 0) { SDL_RenderPresent(poc->renderer); return; }
+
   const bool turning = poc->view.turn != 0.0f;
-  const int settled = poc->view.page;
-  const int destination = turning ? poc->view.turn_target : settled;
+  const int settled_item = poc->view.item;
+  const int target_item = turning ? poc->view.turn_target : settled_item;
 
-  PageTexture *under = LoadPage(poc, destination);
-  PageTexture *leaf = turning ? LoadPage(poc, settled) : NULL;
-  if (!under) under = leaf;
-  if (!under) return;
+  /* Resolve both openings to their page pairs. In single-page mode a "spread" is
+   * just one page on the right, so ONE code path serves both layouts. */
+  ManualSpread settled = { -1, settled_item };
+  ManualSpread target = { -1, target_item };
+  if (poc->spread_mode) {
+    ManualPages_SpreadAt(poc->index.count, settled_item, &settled);
+    ManualPages_SpreadAt(poc->index.count, target_item, &target);
+  }
 
+  /* A reference page for the fit. Every page in this manual shares one geometry
+   * (LooksLikeAlbum guarantees it), so any present page will do. */
+  const int reference = settled.right >= 0 ? settled.right : settled.left;
+  PageTexture *ref = LoadPage(poc, reference);
+  if (!ref) { SDL_RenderPresent(poc->renderer); return; }
+
+  /* A two-up spread is twice as wide, so it must fit as one wide image or the
+   * gutter falls off the sides of the window. */
+  const bool two_up = poc->spread_mode && !ManualSpread_IsSingle(&settled);
+  const int fit_w = two_up ? ref->width * 2 : ref->width;
   float page_w = 0.0f, page_h = 0.0f;
-  ManualView_FittedSize(under->width, under->height, view_w, view_h,
+  ManualView_FittedSize(fit_w, ref->height, view_w, view_h,
                         poc->view.zoom, &page_w, &page_h);
-  const float cx = (float)view_w * 0.5f - poc->view.pan_x;
-  const float cy = (float)view_h * 0.5f - poc->view.pan_y;
+
+  float matrix[16];
+  ReaderCamera(poc->tilt_3d, view_w, view_h, matrix);
+  float half_x = 0.0f, half_y = 0.0f;
+  if (!ManualTurn_SheetExtents(matrix, view_w, view_h, page_w, page_h,
+                               &half_x, &half_y)) {
+    SDL_RenderPresent(poc->renderer);
+    return;
+  }
+  const float pan_world_x = page_w > 0.0f
+      ? poc->view.pan_x * (2.0f * half_x / page_w) : 0.0f;
+  const float pan_world_y = page_h > 0.0f
+      ? poc->view.pan_y * (2.0f * half_y / page_h) : 0.0f;
+
+  /* One SHEET's half-width in world units. For a spread that is half the fitted
+   * width (each page); for a single page it is the whole thing, centred. */
+  const float sheet = two_up ? half_x : half_x;
+  const float gutter = 0.0f;
+
+  /* ORDER IS THE WHOLE CORRECTNESS ARGUMENT, and it never changes mid-turn.
+   *
+   * 1. THE DESTINATION, underneath. During a forward turn the right leaf lifts
+   *    away, so what is revealed on the right is the TARGET opening's right page,
+   *    while the left side shows the target's left page once the leaf lands on it. */
+  if (two_up) {
+    /* left half: outer edge -> gutter */
+    DrawSheet(poc, turning ? target.left : settled.left, matrix, view_w, view_h,
+              -sheet, gutter, half_y, pan_world_x, pan_world_y);
+    /* right half: gutter -> outer edge */
+    DrawSheet(poc, turning ? target.right : settled.right, matrix,
+              view_w, view_h, gutter, sheet, half_y, pan_world_x, pan_world_y);
+  } else {
+    const int page = turning
+        ? (target.right >= 0 ? target.right : target.left)
+        : (settled.right >= 0 ? settled.right : settled.left);
+    DrawSheet(poc, page, matrix, view_w, view_h, -sheet, sheet, half_y,
+              pan_world_x, pan_world_y);
+  }
+
+  if (!turning) { SDL_RenderPresent(poc->renderer); return; }
+
+  /* 2/3. The turning leaf. Forward turns lift the settled opening's RIGHT page;
+   *      backward turns lift its LEFT page. */
+  const bool forward = poc->view.turn > 0.0f;
+  const int leaf_page = forward
+      ? (settled.right >= 0 ? settled.right : settled.left)
+      : (settled.left >= 0 ? settled.left : settled.right);
+  PageTexture *leaf = LoadPage(poc, leaf_page);
+  if (!leaf) { SDL_RenderPresent(poc->renderer); return; }
 
   SDL_Vertex verts[kPageVerts];
   int indices[kPageIndices];
 
-  /* ORDER IS THE WHOLE CORRECTNESS ARGUMENT, and it never changes mid-turn.
-   * 1. the page being turned ONTO */
-  BuildFlatPage(verts, indices, cx, cy, page_w, page_h, 1.0f);
-  SDL_RenderGeometry(poc->renderer, under->texture, verts, kPageVerts,
-                     indices, kPageIndices);
+  /* 2. the shadow: the same mesh, darkened and offset. Cheap, and it is what
+   *    makes the sheet read as lifted rather than sliding. */
+  if (BuildLeaf(verts, indices, poc->view.turn, matrix, view_w, view_h,
+                sheet, half_y, pan_world_x, pan_world_y, 0.30f)) {
+    for (int i = 0; i < kPageVerts; i++) {
+      verts[i].position.x += 10.0f;
+      verts[i].position.y += 14.0f;
+      verts[i].color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 0.30f };
+    }
+    SDL_RenderGeometry(poc->renderer, NULL, verts, kPageVerts,
+                       indices, kPageIndices);
+  }
 
-  if (turning && leaf) {
-    /* 2. the leaf's shadow, as the same mesh darkened and offset. Cheap, and it
-     *    is what makes the sheet read as lifted rather than sliding. */
-    if (BuildLeaf(verts, indices, poc->view.turn, view_w, view_h,
-                  page_w, page_h, poc->tilt_3d, 0.30f)) {
-      for (int i = 0; i < kPageVerts; i++) {
-        verts[i].position.x += 10.0f;
-        verts[i].position.y += 14.0f;
-        verts[i].color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 0.30f };
-      }
-      SDL_RenderGeometry(poc->renderer, NULL, verts, kPageVerts,
-                         indices, kPageIndices);
+  /* 3. the leaf. Past halfway its REVERSE faces us, which is the page on the
+   *    other side of that physical sheet -- in a booklet, the target opening's
+   *    facing page. */
+  if (BuildLeaf(verts, indices, poc->view.turn, matrix, view_w, view_h,
+                sheet, half_y, pan_world_x, pan_world_y, 1.0f)) {
+    const bool front = ManualTurn_FrontFaceVisible(poc->view.turn);
+    int face_page = leaf_page;
+    if (!front) {
+      face_page = forward
+          ? (target.left >= 0 ? target.left : leaf_page)
+          : (target.right >= 0 ? target.right : leaf_page);
     }
-    /* 3. the leaf itself */
-    if (BuildLeaf(verts, indices, poc->view.turn, view_w, view_h,
-                  page_w, page_h, poc->tilt_3d, 1.0f)) {
-      SDL_Texture *face = ManualTurn_FrontFaceVisible(poc->view.turn)
-                              ? leaf->texture : under->texture;
-      SDL_RenderGeometry(poc->renderer, face, verts, kPageVerts,
+    PageTexture *face = LoadPage(poc, face_page);
+    if (face)
+      SDL_RenderGeometry(poc->renderer, face->texture, verts, kPageVerts,
                          indices, kPageIndices);
-    }
   }
 
   if (poc->show_debug) {
     char line[256];
-    float lx = 0.0f, ly = 0.0f;
-    ManualView_PanLimit(&poc->view, under->width, under->height,
-                        view_w, view_h, &lx, &ly);
     snprintf(line, sizeof line,
-             "page %d/%d  zoom %.2fx  pan %.0f,%.0f (limit %.0f,%.0f)  "
-             "turn %+.2f  tilt %s  turn_time %.2fs",
-             poc->view.page + 1, poc->index.count, (double)poc->view.zoom,
-             (double)poc->view.pan_x, (double)poc->view.pan_y,
-             (double)lx, (double)ly, (double)poc->view.turn,
+             "%s %d/%d  pages [%d|%d]  zoom %.2fx  turn %+.2f  %s  turn %.2fs",
+             poc->spread_mode ? "opening" : "page",
+             poc->view.item + 1, items,
+             settled.left + 1, settled.right + 1,
+             (double)poc->view.zoom, (double)poc->view.turn,
              poc->tilt_3d ? "3D" : "flat", (double)poc->turn_seconds);
     SDL_SetRenderDrawColor(poc->renderer, 0, 0, 0, 190);
     SDL_SetRenderDrawBlendMode(poc->renderer, SDL_BLENDMODE_BLEND);
@@ -358,6 +457,20 @@ static void DrawFrame(Poc *poc) {
 static void PageDimensions(Poc *poc, int *w, int *h) {
   *w = poc->index.count ? poc->index.pages[0].width : 739;
   *h = poc->index.count ? poc->index.pages[0].height : 1080;
+  /* A two-up opening is twice as wide, and the fit/zoom/pan clamps must use the
+   * width actually on screen or panning stops at the wrong place. */
+  if (poc->spread_mode) {
+    ManualSpread spread;
+    if (ManualPages_SpreadAt(poc->index.count, poc->view.item, &spread) &&
+        !ManualSpread_IsSingle(&spread))
+      *w *= 2;
+  }
+}
+
+/* Items in the current layout: openings when two-up, pages otherwise. */
+static int ItemCount(const Poc *poc) {
+  return poc->spread_mode ? ManualPages_SpreadCount(poc->index.count)
+                          : poc->index.count;
 }
 
 static bool HandleEvent(Poc *poc, const SDL_Event *event) {
@@ -375,13 +488,13 @@ static bool HandleEvent(Poc *poc, const SDL_Event *event) {
           if (poc->view.zoom > 1.001f)   /* zoomed in: arrows pan instead */
             ManualView_Pan(&poc->view, 60.0f, 0.0f, pw, ph, view_w, view_h);
           else
-            ManualView_BeginTurn(&poc->view, +1, poc->index.count);
+            ManualView_BeginTurn(&poc->view, +1, ItemCount(poc));
           break;
         case SDLK_LEFT: case SDLK_PAGEUP:
           if (poc->view.zoom > 1.001f)
             ManualView_Pan(&poc->view, -60.0f, 0.0f, pw, ph, view_w, view_h);
           else
-            ManualView_BeginTurn(&poc->view, -1, poc->index.count);
+            ManualView_BeginTurn(&poc->view, -1, ItemCount(poc));
           break;
         case SDLK_UP:
           ManualView_Pan(&poc->view, 0.0f, -60.0f, pw, ph, view_w, view_h);
@@ -389,9 +502,9 @@ static bool HandleEvent(Poc *poc, const SDL_Event *event) {
         case SDLK_DOWN:
           ManualView_Pan(&poc->view, 0.0f, 60.0f, pw, ph, view_w, view_h);
           break;
-        case SDLK_HOME: ManualView_GoTo(&poc->view, 0, poc->index.count); break;
+        case SDLK_HOME: ManualView_GoTo(&poc->view, 0, ItemCount(poc)); break;
         case SDLK_END:
-          ManualView_GoTo(&poc->view, poc->index.count - 1, poc->index.count);
+          ManualView_GoTo(&poc->view, ItemCount(poc) - 1, ItemCount(poc));
           break;
         case SDLK_EQUALS: case SDLK_KP_PLUS:
           ManualView_Zoom(&poc->view, 1.25f, pw, ph, view_w, view_h); break;
@@ -400,6 +513,20 @@ static bool HandleEvent(Poc *poc, const SDL_Event *event) {
         case SDLK_0:
           ManualView_Zoom(&poc->view, 0.0001f, pw, ph, view_w, view_h); break;
         case SDLK_F: poc->tilt_3d = !poc->tilt_3d; break;
+        case SDLK_S: {
+          /* Toggle layout, keeping the CURRENT PAGE in view rather than the item
+           * index -- opening 5 and page 5 are different places, so reusing the
+           * index would jump the reader somewhere arbitrary. */
+          ManualSpread spread = { -1, poc->view.item };
+          if (poc->spread_mode)
+            ManualPages_SpreadAt(poc->index.count, poc->view.item, &spread);
+          const int page = spread.right >= 0 ? spread.right : spread.left;
+          poc->spread_mode = !poc->spread_mode;
+          const int item = poc->spread_mode
+              ? ManualPages_SpreadForPage(poc->index.count, page) : page;
+          ManualView_GoTo(&poc->view, item < 0 ? 0 : item, ItemCount(poc));
+          break;
+        }
         case SDLK_D: poc->show_debug = !poc->show_debug; break;
         case SDLK_T:
           /* Turn duration is the single most subjective number here, so make it
@@ -449,6 +576,9 @@ int main(int argc, char **argv) {
   memset(&poc, 0, sizeof poc);
   poc.turn_seconds = 0.34f;
   poc.show_debug = true;
+  /* Spreads on by default: artwork (maps especially) is drawn across the gutter,
+   * so single-page is the mode that CUTS pictures in half, not the safe default. */
+  poc.spread_mode = true;
   ManualView_Init(&poc.view);
 
   FILE *file = fopen(path, "rb");
