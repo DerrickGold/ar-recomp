@@ -1738,6 +1738,7 @@ int main(int argc, char **argv) {
   OracleTrace_Shutdown();
   HostAudio_Shutdown();
   HdReplacementHost_Shutdown();
+  PresentSimUnderlay_Reset();
   SDL_DestroyTexture(g_sim_obj_atlas_texture);
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     SDL_DestroyTexture(g_sim3d_layer_textures[plane]);

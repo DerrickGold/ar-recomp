@@ -1086,6 +1086,7 @@ static SDL_Texture *s_sim_shadow_texture;
 static SDL_Texture *s_sim_shadow_scratch;
 static int s_sim_shadow_w, s_sim_shadow_h;
 static bool s_sim_shadow_alloc_failed;
+static bool s_sim_shadow_scratch_alloc_failed;
 
 static SDL_Texture *CreateSimShadowTarget(int w, int h) {
   SDL_Texture *texture = SDL_CreateTexture(
@@ -1104,15 +1105,11 @@ static SDL_Texture *EnsureSimShadowTexture(int w, int h) {
   if (s_sim_shadow_texture) SDL_DestroyTexture(s_sim_shadow_texture);
   if (s_sim_shadow_scratch) SDL_DestroyTexture(s_sim_shadow_scratch);
   s_sim_shadow_scratch = NULL;
+  s_sim_shadow_scratch_alloc_failed = false;
   s_sim_shadow_texture = CreateSimShadowTarget(w, h);
   s_sim_shadow_w = w;
   s_sim_shadow_h = h;
-  if (s_sim_shadow_texture) {
-    /* D4b's separable blur ping-pongs through a second target of the same
-     * size. It is allocated lazily: a hard-shadow run never pays for it, and
-     * failing to get it degrades softness without touching the mask. */
-    s_sim_shadow_scratch = CreateSimShadowTarget(w, h);
-  } else if (!s_sim_shadow_alloc_failed) {
+  if (!s_sim_shadow_texture && !s_sim_shadow_alloc_failed) {
     /* Geometry must survive a target-allocation failure; only the shadow
      * stage drops out. Logged once so it cannot flood a play session. */
     s_sim_shadow_alloc_failed = true;
@@ -1178,9 +1175,17 @@ static void BlurSimShadowAxis(SDL_Texture *source, SDL_Texture *destination,
  * is resolution-independent rather than shrinking as the window grows. */
 static void BlurSimShadowMask(SDL_Texture *mask, int w, int h,
                               unsigned softness_pct) {
-  if (!softness_pct || !s_sim_shadow_scratch) return;
+  if (!softness_pct) return;
   float radius = (float)softness_pct / 100.0f * (float)h * 0.02f;
   if (radius < 0.5f) return;
+  /* D4b's separable blur alone needs the second full-viewport target. Keep a
+   * hard-shadow run from reserving it, which is 31.6 MiB at 4K. Allocation
+   * failure degrades softness without touching the primary mask. */
+  if (!s_sim_shadow_scratch && !s_sim_shadow_scratch_alloc_failed) {
+    s_sim_shadow_scratch = CreateSimShadowTarget(w, h);
+    s_sim_shadow_scratch_alloc_failed = !s_sim_shadow_scratch;
+  }
+  if (!s_sim_shadow_scratch) return;
   BlurSimShadowAxis(mask, s_sim_shadow_scratch, w, h, radius, true);
   BlurSimShadowAxis(s_sim_shadow_scratch, mask, w, h, radius, false);
 }
@@ -1193,6 +1198,16 @@ static void DrawSimShadowMask(
     SDL_Rect source, SDL_Rect viewport, const float matrix[16]) {
   if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
   if (!slot->sim.shadow_opacity_pct) return;
+  bool any_caster = false;
+  for (size_t i = 0; i < slot->sim.object_count; i++) {
+    if (Sim3D_ObjectCastsShadow(&slot->sim.objects[i])) {
+      any_caster = true;
+      break;
+    }
+  }
+  /* An empty mask contributes nothing. Avoid a full-viewport target clear,
+   * optional fourteen-draw blur and full-viewport composite on such frames. */
+  if (!any_caster) return;
   SDL_Texture *mask = EnsureSimShadowTexture(viewport.w, viewport.h);
   if (!mask) return;
 
@@ -1605,9 +1620,31 @@ static void DrawSimRimLight(
     SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
     const float matrix[16]) {
   if (!slot->sim.rim_strength_pct) return;
+  if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
+  bool any_rim = false;
+  for (size_t i = 0; i < slot->sim.object_count; i++) {
+    const SimRenderObject *object = &slot->sim.objects[i];
+    if (object->atlas_valid && object->priority == priority &&
+        object->tier == kSimRecordTier_World &&
+        !(object->traits & kSimObjectTrait_MapPlane)) {
+      any_rim = true;
+      break;
+    }
+  }
+  /* The painter loop visits all four hardware OBJ priorities, but a town frame
+   * commonly uses only one or two. An empty band used to clear and composite a
+   * full-output target anyway; three of four bands were empty on every frame
+   * in the representative replay. */
+  if (!any_rim) return;
   SDL_Texture *rim = EnsureSimRimTexture(viewport.w, viewport.h);
   SDL_BlendMode mask_blend = SimRimMaskBlend();
   if (!rim || mask_blend == SDL_BLENDMODE_INVALID) return;
+  /*
+   * Probe the custom mask blend before drawing the fill. If the renderer
+   * rejects it, compositing after the mask pass would otherwise expose the
+   * unmasked fill for one priority band.
+   */
+  if (!SimApplyAtlasBlendMode(mask_blend)) return;
 
   /* Band width scales with the output so the rim does not thin out to nothing
    * as the window grows. */
@@ -1729,16 +1766,18 @@ static bool s_sim_cloud_alloc_failed;
 static SDL_Texture *s_world_navigation_cloud_texture;
 static bool s_world_navigation_cloud_alloc_failed;
 
-/* Called from the SDL_EVENT_RENDER_TARGETS_RESET / _DEVICE_RESET arm.
+/* Called from the SDL_EVENT_RENDER_TARGETS_RESET / _DEVICE_RESET arm and once
+ * during orderly shutdown.
  *
  * SDL_events.h documents _DEVICE_RESET as "The device has been reset and all
- * textures need to be recreated". Every texture dropped here is written ONLY
- * when its game-side serial changes (underlay/canvas) or exactly once at
- * creation (cloud noise), and none of those serials has any dependence on GPU
- * device state — so without this call the caches short-circuit forever and keep
- * handing back textures whose contents the driver discarded. In a settled town
- * the underlay serial can stay fixed indefinitely, so the damage does not
- * self-heal; only changing town would clear it.
+ * textures need to be recreated". This includes the size-keyed render targets
+ * above as well as resources written only when a game-side serial changes
+ * (underlay/canvas) or exactly once at creation (cloud noise). None of those
+ * cache keys has any dependence on GPU device state, so without this call the
+ * caches short-circuit forever and keep handing back textures whose contents
+ * the driver discarded. In a settled town the underlay serial can stay fixed
+ * indefinitely, so the damage does not self-heal; only changing town would
+ * clear it.
  *
  * The symptom is already documented for this exact texture class in
  * UploadSimTownCanvas below ("it showed as magenta"): freshly reallocated
@@ -1746,6 +1785,21 @@ static bool s_world_navigation_cloud_alloc_failed;
  * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
  * Vulkan/SDL_GPU (Steam Deck) bug. */
 void PresentSimUnderlay_Reset(void) {
+  if (s_hud_composite_texture)
+    SDL_DestroyTexture(s_hud_composite_texture);
+  s_hud_composite_texture = NULL;
+  s_hud_composite_w = s_hud_composite_h = 0;
+  if (s_sim_shadow_texture) SDL_DestroyTexture(s_sim_shadow_texture);
+  s_sim_shadow_texture = NULL;
+  if (s_sim_shadow_scratch) SDL_DestroyTexture(s_sim_shadow_scratch);
+  s_sim_shadow_scratch = NULL;
+  s_sim_shadow_w = s_sim_shadow_h = 0;
+  s_sim_shadow_alloc_failed = false;
+  s_sim_shadow_scratch_alloc_failed = false;
+  if (s_sim_rim_texture) SDL_DestroyTexture(s_sim_rim_texture);
+  s_sim_rim_texture = NULL;
+  s_sim_rim_w = s_sim_rim_h = 0;
+  g_sim_rim_mask_supported = true;
   if (s_sim_underlay_texture) SDL_DestroyTexture(s_sim_underlay_texture);
   s_sim_underlay_texture = NULL;
   if (s_sim_underlay_blur_texture)
