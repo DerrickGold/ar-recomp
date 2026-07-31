@@ -85,4 +85,22 @@ typedef enum ManualHintDevice {
  * the arrows and the d-pad pan when zoomed and page when not. Never NULL. */
 const char *ManualInput_HintText(ManualHintDevice device, bool zoomed);
 
+/* ── Analog panning ───────────────────────────────────────────────────────
+ *
+ * The d-pad pans in fixed steps, which is fine for nudging and miserable for
+ * crossing a zoomed two-page map. The left stick pans CONTINUOUSLY, and that
+ * cannot be driven from events: a stick held at full deflection emits nothing
+ * until it moves again, so the reader keeps the latest position and applies it
+ * every frame, scaled by elapsed time.
+ *
+ * Displacement of one axis, from SDL's raw -32768..32767 to -1..1.
+ * `deadzone_percent` is the player's own input_stick_deadzone, clamped the way
+ * input_map.c clamps it, so the manual honours the tuning they already did
+ * rather than inventing a second deadzone that disagrees.
+ *
+ * The deadzone is SUBTRACTED AND RESCALED, not merely tested: gating on it and
+ * then passing the raw value through means the stick jumps to deadzone speed the
+ * instant it engages, so there is no slow pan available at all. */
+float ManualInput_StickAxis(int raw, int deadzone_percent);
+
 #endif  /* MANUAL_INPUT_H */

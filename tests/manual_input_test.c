@@ -13,6 +13,7 @@
 
 #include "manual_input.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -204,6 +205,9 @@ static void TestTheHintNamesTheDeviceInHand(void) {
   CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true) ==
         kManualIntent_PanRight);
   CHECK(Mentions(pad_zoom, "D-PAD PANS"));
+  /* And the stick, which is the pan control someone will actually reach for on
+   * a zoomed page -- the d-pad only nudges. */
+  CHECK(Mentions(pad_zoom, "STICK"));
 
   /* The ROM's dialog font has no lower case, and the overlay draws '?' for any
    * glyph it lacks -- so a lower-case caption renders as a row of question
@@ -216,6 +220,63 @@ static void TestTheHintNamesTheDeviceInHand(void) {
         CHECK(!(text[i] >= 'a' && text[i] <= 'z'));
     }
   }
+}
+
+/* ── Analog panning ───────────────────────────────────────────────────────── */
+
+/* THE DEADZONE IS SUBTRACTED, NOT JUST TESTED.
+ *
+ * Gating on the deadzone and then passing the raw value through means the stick
+ * leaps to deadzone speed the moment it engages, so the slowest pan available is
+ * already a fast one and fine positioning on a zoomed page is impossible. The
+ * remainder of the travel has to be rescaled to the full range. */
+static void TestStickStartsFromRestAtTheDeadzoneEdge(void) {
+  const int dz = 20;   /* percent */
+  const int edge = 32767 * dz / 100;
+
+  /* Inside the deadzone: nothing at all, both directions and at the boundary. */
+  CHECK(ManualInput_StickAxis(0, dz) == 0.0f);
+  CHECK(ManualInput_StickAxis(edge, dz) == 0.0f);
+  CHECK(ManualInput_StickAxis(-edge, dz) == 0.0f);
+  CHECK(ManualInput_StickAxis(edge / 2, dz) == 0.0f);
+
+  /* Just past it: moving, but only just -- this is the assertion a bare
+   * threshold implementation fails, since it would report ~0.2 here. */
+  const float just_past = ManualInput_StickAxis(edge + 300, dz);
+  CHECK(just_past > 0.0f);
+  CHECK(just_past < 0.05f);
+
+  /* Full deflection reaches full speed, both ways, and the extremes SDL can
+   * actually deliver do not overshoot 1. */
+  CHECK(fabsf(ManualInput_StickAxis(32767, dz) - 1.0f) < 0.001f);
+  CHECK(fabsf(ManualInput_StickAxis(-32767, dz) + 1.0f) < 0.001f);
+  CHECK(fabsf(ManualInput_StickAxis(-32768, dz) + 1.0f) < 0.001f);
+
+  /* Monotone and sign-preserving across the range. */
+  float previous = -2.0f;
+  for (int raw = 0; raw <= 32767; raw += 512) {
+    const float value = ManualInput_StickAxis(raw, dz);
+    CHECK(value >= previous - 1e-6f);
+    CHECK(value >= 0.0f && value <= 1.0f);
+    CHECK(fabsf(ManualInput_StickAxis(-raw, dz) + value) < 1e-6f);
+    previous = value;
+  }
+}
+
+/* The player's own input_stick_deadzone drives this, and it is clamped exactly
+ * as input_map.c clamps it -- a deadzone that meant one thing in the game and
+ * another in the manual would be worse than no setting at all. */
+static void TestStickDeadzoneMatchesTheGamesClamp(void) {
+  /* Out-of-range settings clamp rather than misbehave: 0 becomes 5, 200
+   * becomes 90. Checked by behaviour, since the clamp is not exported. */
+  CHECK(ManualInput_StickAxis(32767 * 4 / 100, 0) == 0.0f);      /* under 5% */
+  CHECK(ManualInput_StickAxis(32767 * 6 / 100, 0) > 0.0f);       /* over 5% */
+  CHECK(ManualInput_StickAxis(32767 * 89 / 100, 200) == 0.0f);   /* under 90% */
+  CHECK(ManualInput_StickAxis(32767 * 95 / 100, 200) > 0.0f);    /* over 90% */
+
+  /* A larger deadzone must mean a smaller reading at the same displacement, or
+   * the setting is not doing anything. */
+  CHECK(ManualInput_StickAxis(20000, 40) < ManualInput_StickAxis(20000, 10));
 }
 
 /* ── The decode budget ────────────────────────────────────────────────────── */
@@ -313,6 +374,8 @@ int main(void) {
   TestUnmappedKeysMeanNothing();
   TestPadMirrorsTheKeyboardsLogic();
   TestTheHintNamesTheDeviceInHand();
+  TestStickStartsFromRestAtTheDeadzoneEdge();
+  TestStickDeadzoneMatchesTheGamesClamp();
 
   TestOneDecodePerFrame();
   TestEmptySidesAreSkipped();

@@ -60,13 +60,32 @@ ManualIntent ManualInput_PadIntent(SDL_GamepadButton button, bool zoomed) {
   }
 }
 
+float ManualInput_StickAxis(int raw, int deadzone_percent) {
+  /* Same clamp input_map.c applies, so a deadzone the player set once means the
+   * same thing in the manual as it does in the game. */
+  if (deadzone_percent < 5) deadzone_percent = 5;
+  if (deadzone_percent > 90) deadzone_percent = 90;
+  const float deadzone = 32767.0f * (float)deadzone_percent / 100.0f;
+
+  float value = (float)raw;
+  if (value > 32767.0f) value = 32767.0f;      /* -32768 is one past the top */
+  if (value < -32767.0f) value = -32767.0f;
+  const float magnitude = value < 0.0f ? -value : value;
+  if (magnitude <= deadzone) return 0.0f;
+
+  /* Rescale what is left of the travel to the full range, so the stick starts
+   * from a standstill at the edge of the deadzone instead of snapping. */
+  const float scaled = (magnitude - deadzone) / (32767.0f - deadzone);
+  return value < 0.0f ? -scaled : scaled;
+}
+
 const char *ManualInput_HintText(ManualHintDevice device, bool zoomed) {
   /* Upper case throughout: the ROM's dialog font has no lower-case glyphs, and
    * the overlay substitutes '?' for anything it cannot draw. */
   if (device == kManualHintDevice_Gamepad) {
     /* Named for what ManualInput_PadIntent actually maps. B closes because East
      * is "back" everywhere else in this menu. */
-    return zoomed ? "L/R PAGE   D-PAD PANS   A/X ZOOM   B BACK"
+    return zoomed ? "L/R PAGE   STICK OR D-PAD PANS   A/X ZOOM   B BACK"
                   : "L/R OR D-PAD PAGE   A/X ZOOM   B BACK";
   }
   return zoomed ? "ARROWS PAN   PGUP/PGDN PAGE   +/- ZOOM   DRAG PANS   ESC BACK"

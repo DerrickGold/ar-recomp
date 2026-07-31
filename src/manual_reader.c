@@ -77,6 +77,14 @@ static void BumpHint(void);
  * Every input handler sets this, so it follows whatever was last touched. */
 static ManualHintDevice s_hint_device;
 
+/* Latest left-stick position, -1..1, deadzone already removed. Held rather than
+ * consumed as it arrives: a stick parked at full deflection emits no further
+ * events, so panning has to be applied every frame from the last known position
+ * rather than driven by the events themselves. Written on the main thread, read
+ * by the draw -- two independent float stores, and a torn read costs one frame
+ * of slightly stale aim. */
+static float s_stick_x, s_stick_y;
+
 /* ── Loading ───────────────────────────────────────────────────────────────── */
 
 static void SetStatus(const char *fmt, ...) {
@@ -177,6 +185,9 @@ bool ManualReader_Open(void) {
    * a first frame captioned "ESC BACK" is instructions for absent hardware. */
   s_hint_device = InputMap_GamepadCount() > 0 ? kManualHintDevice_Gamepad
                                               : kManualHintDevice_Keyboard;
+  /* Cleared, or a stick held as the reader opened would pan on the first frame
+   * from a position nobody has touched since. */
+  s_stick_x = s_stick_y = 0.0f;
   BumpHint();
   fprintf(stderr, "[manual] opened (%s)\n", ManualReader_Status());
   return true;
@@ -288,12 +299,35 @@ bool ManualReader_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
 
 bool ManualReader_HandleGamepadEvent(const SDL_Event *event) {
   if (!s_reader.open || !event) return false;
-  if (event->type == SDL_EVENT_GAMEPAD_BUTTON_UP) return true;
-  if (event->type != SDL_EVENT_GAMEPAD_BUTTON_DOWN) return false;
-  s_hint_device = kManualHintDevice_Gamepad;
-  ApplyIntent(ManualInput_PadIntent((SDL_GamepadButton)event->gbutton.button,
-                                    Zoomed()),
-              s_last_viewport);
+
+  if (event->type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+    const float value = ManualInput_StickAxis(event->gaxis.value,
+                                              g_settings.input_stick_deadzone);
+    if (event->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX) s_stick_x = value;
+    else if (event->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY) s_stick_y = value;
+    else return true;              /* other axes: swallowed, see below */
+    /* Only a stick actually off centre counts as input. Otherwise the hint
+     * would be held up permanently by a stick resting inside its deadzone. */
+    if (value != 0.0f) {
+      s_hint_device = kManualHintDevice_Gamepad;
+      BumpHint();
+    }
+    return true;
+  }
+
+  if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+    s_hint_device = kManualHintDevice_Gamepad;
+    ApplyIntent(ManualInput_PadIntent((SDL_GamepadButton)event->gbutton.button,
+                                      Zoomed()),
+                s_last_viewport);
+    return true;
+  }
+
+  /* EVERY OTHER PAD EVENT IS SWALLOWED TOO, including button releases and the
+   * triggers. The reader is modal, and the overlay reads "not consumed" as
+   * "mine" -- so returning false here does not merely ignore the event, it hands
+   * it to the settings menu underneath, which then moves its selection behind a
+   * reader that is covering it. That is what axis motion used to do. */
   return true;
 }
 
@@ -634,8 +668,21 @@ void ManualReader_Render(SDL_Rect viewport) {
     const float elapsed = (float)((double)(now - s_reader.last_tick_ns) / 1e9);
     /* Clamped: a frame that took longer than a turn -- a stall, a breakpoint,
      * a window drag -- must not teleport the animation past its own end. */
-    ManualView_AdvanceTurn(&s_reader.view, elapsed < 0.25f ? elapsed : 0.25f,
-                           0.34f);
+    const float step = elapsed < 0.25f ? elapsed : 0.25f;
+    ManualView_AdvanceTurn(&s_reader.view, step, 0.34f);
+
+    /* Analog pan, per frame and scaled by time so its speed does not depend on
+     * the frame rate. Only when zoomed: at fit there is no overhang, so this
+     * would be a no-op that still cost a clamp every frame. */
+    if ((s_stick_x != 0.0f || s_stick_y != 0.0f) && Zoomed()) {
+      int pw = 0, ph = 0;
+      LayoutDimensions(&pw, &ph);
+      /* A full-deflection sweep crosses about one view height per second --
+       * enough to cross a zoomed spread without overshooting a column of text. */
+      const float speed = (float)view_h * 1.1f * step;
+      ManualView_Pan(&s_reader.view, s_stick_x * speed, s_stick_y * speed,
+                     pw, ph, view_w, view_h);
+    }
   }
   s_reader.last_tick_ns = now;
 
