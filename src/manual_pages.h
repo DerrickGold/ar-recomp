@@ -73,6 +73,26 @@ int ManualPages_CarveAlbum(const uint8_t *data, size_t size,
  * between shipping the user's manual and shipping their letterhead. */
 bool ManualPages_LooksLikeAlbum(const ManualPageIndex *index, size_t size);
 
+/* The geometry the whole booklet lays out to: the size shared by the most pages,
+ * ties going to the earliest.
+ *
+ * THE LAYOUT MUST NOT DEPEND ON WHICH PAGE IS DECODED. Taking the fit from
+ * whatever texture happens to be resident makes the view rescale as the reader
+ * pages through a book whose scans are not all identical, and makes the layout a
+ * function of decode TIMING -- the page size can change on the frame an
+ * asynchronous decode lands. The index already carries every page's dimensions,
+ * so the book's size is known before a single byte is decoded.
+ *
+ * For an album that passed LooksLikeAlbum this is just page 0's geometry, since
+ * uniformity is one of that predicate's tests. It earns its keep on the mixed
+ * albums a caller admits deliberately.
+ *
+ * NO ASPECT IS PRIVILEGED. A tall scan, a square one and a wide one are all just
+ * a width and a height here; nothing downstream may assume portrait. Returns
+ * false for an empty index, leaving the outputs untouched. */
+bool ManualPages_NominalGeometry(const ManualPageIndex *index,
+                                 int *out_w, int *out_h);
+
 /* ── Spread layout ─────────────────────────────────────────────────────────
  *
  * A real booklet is read as OPENINGS, not pages: the covers stand alone and
@@ -157,9 +177,21 @@ typedef struct ManualView {
 
 enum {
   /* Below 1.0 the page would float inside the view with nothing around it, and
-   * every pan would be a no-op. Above 6x a 739x1080 scan is showing paper
-   * texture, not text. */
+   * every pan would be a no-op. */
   kManualZoomMinPermille = 1000,
+  /* How far past the scan's OWN resolution the reader will magnify, in
+   * thousandths. Past this a page is showing JPEG blocks and paper grain rather
+   * than text, and the exact multiple where that happens is a property of the
+   * scan, not of the window.
+   *
+   * This replaces a flat 6x ceiling whose comment justified it as "above 6x a
+   * 739x1080 scan is showing paper texture" -- true of that scan, and wrong for
+   * every other one. A 900x900 GBC scan reaches the same mush at a much lower
+   * multiple of fit, because it starts closer to fit. */
+  kManualZoomNativePermille = 4000,
+  /* An absolute ceiling for the degenerate case: a tiny scan in a huge window
+   * fits at a large scale already, and the native rule alone would then permit
+   * an unbounded zoom. */
   kManualZoomMaxPermille = 6000,
 };
 
@@ -184,7 +216,21 @@ int ManualPages_LayoutPageWidths(bool spread_mode);
 void ManualView_FittedSize(int page_w, int page_h, int view_w, int view_h,
                            float zoom, float *out_w, float *out_h);
 
-/* Multiply the zoom about the view centre, clamped to the permille bounds, and
+/* The zoom range this page allows in this view.
+ *
+ * The ceiling is DERIVED FROM THE SCAN, not fixed: fit already displays the page
+ * at some multiple of its own pixels, and the useful limit is a fixed multiple of
+ * NATIVE resolution beyond that. A 739x1080 scan fitted into a small window is
+ * being shrunk, so it has room to magnify; the same window showing a 900x900 GBC
+ * scan is already near 1:1 and has almost none. One constant cannot serve both,
+ * which is what the old flat 6x was.
+ *
+ * Falls back to the absolute bounds when the geometry is degenerate, and always
+ * returns `*out_max >= *out_min` so a caller can clamp with it unconditionally. */
+void ManualView_ZoomLimit(int page_w, int page_h, int view_w, int view_h,
+                          float *out_min, float *out_max);
+
+/* Multiply the zoom about the view centre, clamped to ManualView_ZoomLimit, and
  * re-clamp pan so zooming out cannot leave the page parked off-centre. */
 void ManualView_Zoom(ManualView *view, float factor,
                      int page_w, int page_h, int view_w, int view_h);
@@ -247,9 +293,22 @@ void ManualView_GoTo(ManualView *view, int item, int count);
  *      the module cannot enforce it -- ManualTurn_DepthRisesWithU exists so a
  *      renderer can assert the premise it depends on.
  *
- * Both hold exactly while amplitude <= 0.5/pi ~= 0.159 (the analytic worst case
- * is u=1 as the sheet leaves the spine: 0.5 - A*pi >= 0). kManualCurlPermille is
- * set well under that, so the bound is a guard rail rather than a cliff edge.
+ * Both hold exactly while amplitude <= 0.5/pi ~= 0.159, and THE BINDING CASE IS
+ * THE HINGE, not the free edge. Writing the depth out,
+ *
+ *     z(u) = sin(a) * [ u/2 + A*sin(pi*u)*cos(a) ]
+ *
+ * the bracket is worst at a = pi, where it is u/2 - A*sin(pi*u). At the free edge
+ * sin(pi*u) is ZERO, so that end is trivially safe and cannot be the worst case;
+ * as u -> 0 the sine goes like pi*u and the bracket goes like u*(1/2 - A*pi),
+ * which is where 0.5 - A*pi >= 0 actually comes from. Measured: at A = 0.160,
+ * one thousandth over the bound, the first violation appears at u = 0.0285 --
+ * against the hinge, as the algebra says. (An earlier revision of this comment
+ * attributed the bound to u=1. The BOUND was right; the attribution pointed at
+ * the one place on the sheet where the bow vanishes.)
+ *
+ * kManualCurlPermille is set well under the bound, so it is a guard rail rather
+ * than a cliff edge.
  *
  * This is why the bow is a BOW and not a curl: a freely curled sheet -- one whose
  * far half rolls back over its near half -- breaks invariant 2, and then no
@@ -258,15 +317,28 @@ void ManualView_GoTo(ManualView *view, int item, int count);
  */
 
 enum {
-  /* Bow amplitude, in thousandths of the sheet's width. The hard limit is
-   * 0.5/pi ~= 159 (see the invariants above); 70 is a visible lift with better
-   * than 2x headroom, because the amplitude interacts with the projection and a
-   * value that is merely *provably* safe is not the same as a comfortable one.
-   * Raising this past 159 turns the geometry tests red rather than producing a
-   * subtly wrong image. */
+  /* Bow amplitude, in thousandths of the sheet's width. 70 is a visible lift
+   * with better than 2x headroom under the limit below, because the amplitude
+   * interacts with the projection and a value that is merely *provably* safe is
+   * not the same as a comfortable one. Raising this past the limit turns the
+   * geometry tests red rather than producing a subtly wrong image. */
   kManualCurlPermille = 70,
-  kManualCurlMaxPermille = 159,
+  /* THE DERIVED CEILING, floor(1000 * 0.5/pi). This is not a tuning knob and
+   * must never be raised to accommodate a larger amplitude: it is what the
+   * invariant proof above ALLOWS, so moving it does not make a bigger bow safe,
+   * it just stops the guard from reporting that the bow is unsafe.
+   *
+   * The guard used to be a plain `<=` comparison in a test, which the obvious
+   * edit -- raising the amplitude and the ceiling together -- satisfied happily.
+   * Two things stop that now: the static assertion below fires at COMPILE time
+   * for the amplitude, and a test independently recomputes floor(500/pi) and
+   * compares it to this constant, so moving the ceiling fails on its own. */
+  kManualCurlLimitPermille = 159,
 };
+
+_Static_assert(kManualCurlPermille <= kManualCurlLimitPermille,
+               "bow amplitude exceeds the 0.5/pi bound that makes the reader's "
+               "fixed draw order correct; raise nothing, lower kManualCurlPermille");
 
 /* Hinge rotation for a turn phase, in radians: 0 at rest, pi when the sheet has
  * landed. Eased so the sheet accelerates off the spine and settles rather than
@@ -312,6 +384,156 @@ bool ManualTurn_SheetExtents(const float matrix[16],
                              int view_w, int view_h,
                              float page_w, float page_h,
                              float *out_half_x, float *out_half_y);
+
+/* ── Where the turning sheet sits ──────────────────────────────────────────── */
+
+/* The solved placement of one opening and of the sheet that turns off it.
+ *
+ * ONE SHEET IS NOT ONE LAYOUT AREA, and conflating them is why single-page mode
+ * turned a HALF-WIDTH leaf. In spread layout the area is two pages wide, the
+ * hinge is the gutter at its centre, and the sheet is one half of it. In
+ * single-page layout the area is ONE page, the hinge is the page's own outer
+ * edge, and the sheet is the whole area -- twice the half-extent, not one of
+ * them. The renderer previously scaled both by `half_x`, which is correct for
+ * spreads and renders half a page in single-page mode.
+ *
+ * Everything here is in world units except `pixels`, so a renderer can place the
+ * sheet without re-deriving any of it -- and so the placement is testable, which
+ * a hand-written expression at the draw site was not. */
+typedef struct ManualSheet {
+  float half_x;    /* half-width of the LAYOUT area (both pages, in spreads) */
+  float half_y;    /* half-height of the layout area */
+  float hinge_x;   /* the turning sheet's hinge, for a FORWARD turn */
+  float width;     /* the turning sheet's own full width */
+  /* The sheet on screen. Anything a renderer would otherwise size in fixed
+   * pixels -- a drop shadow, a mesh cell -- has to come from these, or it is
+   * calibrated to whatever page shape happened to be in front of the author. */
+  float pixels_w;
+  float pixels_h;
+} ManualSheet;
+
+/* Solve the placement for a layout area that is `page_w x page_h` pixels on
+ * screen -- the WHOLE area, both pages in spread mode. False if the projection
+ * cannot be probed, in which case nothing should be drawn. */
+bool ManualSheet_Solve(const float matrix[16], int view_w, int view_h,
+                       float page_w, float page_h, bool spread_mode,
+                       ManualSheet *out);
+
+enum {
+  /* How close to the camera the sheet's highest point may come, in thousandths
+   * of the camera distance. 700 is not a taste value: it is just above the 661
+   * the ActRaiser manual already reaches, chosen so that the page shape this
+   * reader was built around keeps EXACTLY the camera it has today and only
+   * shapes that would otherwise break get a different one. */
+  kManualLiftClearancePermille = 700,
+};
+
+/* The vertical field of view to build the reader's camera with, given a sheet
+ * that is `sheet_pixels` wide on screen in a `view_h`-tall view.
+ *
+ * A SHEET LIFTS BY ITS OWN WIDTH. Rotating it about its hinge puts the free edge
+ * a full sheet-width off the page at the halfway point, so the wider the sheet
+ * is ON SCREEN, the deeper it reaches toward the camera. With a fixed fov that
+ * depth is a fixed fraction of the camera distance times the sheet's share of
+ * the view:
+ *
+ *     lift / distance = 2 * sheet_pixels * tan(fov/2) / view_h
+ *
+ * The ActRaiser spread lands at 0.66 of the distance, which is dramatic and
+ * works. A wide, short manual in single-page layout lands at 1.72 -- the leaf
+ * passes THROUGH the camera plane, Scene3D_ProjectWorldPoint refuses those
+ * vertices, and the renderer's documented response is to drop the whole leaf.
+ * The page turn simply does not draw.
+ *
+ * MOVING THE CAMERA CANNOT FIX THIS. The extents are solved from the projection,
+ * so pulling back scales the sheet up by the same factor and the ratio above is
+ * invariant. The lens is the only free variable: a wider sheet needs a longer
+ * one. Returns `preferred_fov` whenever it is already safe, so this is inert for
+ * every shape that already worked. */
+float ManualSheet_CameraFov(float sheet_pixels, int view_h, float preferred_fov);
+
+/* The sheet's on-screen width, before a camera exists to solve extents with.
+ *
+ * Needed because ManualSheet_CameraFov must run BEFORE the projection is built,
+ * and ManualSheet.pixels_w is only available after. Same rule, one definition:
+ * the layout area is two pages wide in spread mode and the sheet is one half. */
+float ManualSheet_PixelWidth(float page_w, bool spread_mode);
+
+/* World x of a leaf point whose unit-sheet x is `leaf_x` (as ManualTurn_LeafPoint
+ * returns it), for a turn of this sign.
+ *
+ * The hinge mirrors with the direction: a forward turn lifts from `hinge_x`, a
+ * backward one from its reflection, which is what puts the hinge on the page's
+ * far edge when the sheet swings the other way. `leaf_x` is already signed by
+ * ManualTurn_LeafPoint, so this only has to place and scale it. */
+float ManualTurn_LeafWorldX(const ManualSheet *sheet, float turn, float leaf_x);
+
+/* ── Mesh density ──────────────────────────────────────────────────────────── */
+
+/* SDL_RenderGeometry interpolates texture coordinates AFFINELY -- there is no
+ * perspective-correct interpolation and no way to ask for it. Across one mesh
+ * cell the true, perspective-correct texture parameter and the affine one
+ * deviate most at the cell's midpoint, by
+ *
+ *     |du| * |dw| / (2 * (w0 + w1))
+ *
+ * in parameter space, where w is the homogeneous depth at each end. Times the
+ * sheet's on-screen size that is a distance in PIXELS: the amount by which the
+ * scan's content is drawn in the wrong place. The scan's strokes are 1-2 px, so
+ * a few pixels of slip is legible as a smear.
+ *
+ * THE DENSITY CANNOT BE A CONSTANT, which is what it was. The deviation grows
+ * with the sheet's on-screen size and with how much depth it spans, so it is a
+ * function of the page's shape AND the window's:
+ *
+ *   - a fixed 16 columns measured 1.1 px on the 739x1080 page in a 1600x900
+ *     window -- the case it was tuned on -- and 4.0 px on a square or wide page
+ *     in the same window, because those fill the width instead of the height.
+ *   - the same 16 columns measured 6.5 px at 2560x1440. The constant was tuned
+ *     against one page in one window and silently degrades in both directions.
+ *   - along v the untilted sheet spans no depth at all, so rows cost nothing --
+ *     but with the 3D tilt on, 6 rows measured 4.7 px at 1600x900 and 7.5 px at
+ *     2560x1440. Anyone judging whether the tilt is worth keeping was judging a
+ *     mesh far too coarse for it.
+ *
+ * So the renderer solves the density for the sheet and camera it actually has.
+ * The error falls as 1/N^2 on each axis, which is what makes one measurement
+ * enough to solve for N rather than search. */
+
+enum {
+  /* Bounds on the solved density. The minimum is where the error is MEASURED
+   * before being scaled, so it must be fine enough for that measurement to be
+   * meaningful; the maximum bounds a renderer's vertex arrays, which is why it
+   * belongs in the header rather than at the call site. */
+  kManualMeshMinColumns = 8,
+  kManualMeshMaxColumns = 40,
+  kManualMeshMinRows = 4,
+  /* 16 leaves the tilted portrait page at 1.10 px on a 1440p display -- clamped
+   * rather than solved, and just over budget. 20 solves it. */
+  kManualMeshMaxRows = 20,
+  /* Target for the worst cell, in hundredths of a pixel. Under the scan's own
+   * 1-2 px stroke width, so the slip stays inside a stroke. */
+  kManualMeshBudgetCentipixels = 100,
+};
+
+typedef struct ManualMesh {
+  int columns;   /* subdivisions along u, across the bend */
+  int rows;      /* subdivisions along v, down the page */
+} ManualMesh;
+
+/* Worst affine-vs-perspective texture deviation over a whole turn, in screen
+ * pixels, for a `columns x rows` mesh of this sheet under this projection.
+ * Reported per axis: they are independent, and only the u axis carries the bend.
+ * Either output may be NULL. False if the projection cannot be probed. */
+bool ManualTurn_MeshUvError(const float matrix[16], const ManualSheet *sheet,
+                            int columns, int rows,
+                            float *out_column_px, float *out_row_px);
+
+/* Solve the coarsest mesh whose deviation stays within `budget_px`, clamped to
+ * the bounds above. Falls back to the minimum density on a projection it cannot
+ * probe -- a coarse sheet is a mild artefact, and refusing to draw is not. */
+void ManualTurn_SolveMesh(const float matrix[16], const ManualSheet *sheet,
+                          float budget_px, ManualMesh *out);
 
 /* Shade multiplier across the leaf, 0..1: the sheet catches less light as it
  * lifts, which is what sells the fold without a lighting model. */

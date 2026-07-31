@@ -133,6 +133,32 @@ bool ManualPages_LooksLikeAlbum(const ManualPageIndex *index, size_t size) {
   return true;
 }
 
+bool ManualPages_NominalGeometry(const ManualPageIndex *index,
+                                 int *out_w, int *out_h) {
+  if (!index || index->count <= 0) return false;
+
+  /* The most common geometry, ties to the earliest. Quadratic over a list capped
+   * at kManualMaxPages and computed once per book, which is cheaper than the
+   * sort it would take to do better and keeps the tie rule obvious. */
+  int best = -1, best_count = 0;
+  for (int i = 0; i < index->count; i++) {
+    /* A zero dimension is not a geometry. The carver cannot record one -- it
+     * reads the SOF and rejects a page without it -- but a hand-built index can
+     * hold one, and it must not win the vote and take the whole book with it. */
+    if (index->pages[i].width == 0 || index->pages[i].height == 0) continue;
+    int count = 0;
+    for (int j = 0; j < index->count; j++) {
+      if (index->pages[j].width == index->pages[i].width &&
+          index->pages[j].height == index->pages[i].height) count++;
+    }
+    if (count > best_count) { best_count = count; best = i; }
+  }
+  if (best < 0) return false;
+  if (out_w) *out_w = (int)index->pages[best].width;
+  if (out_h) *out_h = (int)index->pages[best].height;
+  return true;
+}
+
 /* ── Spread layout ─────────────────────────────────────────────────────────── */
 
 /* Interior pages are everything but the two covers, paired two-up. Derived in
@@ -245,11 +271,38 @@ void ManualView_Pan(ManualView *view, float dx, float dy,
   view->pan_y = ClampF(view->pan_y + dy, -ly, ly);
 }
 
+void ManualView_ZoomLimit(int page_w, int page_h, int view_w, int view_h,
+                          float *out_min, float *out_max) {
+  const float lo = (float)kManualZoomMinPermille / 1000.0f;
+  const float ceiling = (float)kManualZoomMaxPermille / 1000.0f;
+  if (out_min) *out_min = lo;
+  if (out_max) *out_max = ceiling;
+  if (page_w <= 0 || page_h <= 0 || view_w <= 0 || view_h <= 0) return;
+
+  /* Screen pixels per SOURCE pixel at zoom 1 -- the same fit ManualView_FittedSize
+   * applies, so the two cannot disagree about what "fit" means. */
+  const float sx = (float)view_w / (float)page_w;
+  const float sy = (float)view_h / (float)page_h;
+  const float fit = sx < sy ? sx : sy;
+  if (!(fit > 0.0f) || !isfinite(fit)) return;
+
+  /* Zoom is a multiple of fit, so the multiple of NATIVE resolution is fit*zoom.
+   * Solving that for the native ceiling is the whole rule: a scan being shrunk to
+   * fit has room to magnify, one already near 1:1 has almost none. */
+  float hi = ((float)kManualZoomNativePermille / 1000.0f) / fit;
+  if (hi > ceiling) hi = ceiling;
+  /* A scan displayed past the native ceiling at fit would compute a maximum
+   * below the minimum. Fit still has to be reachable, so the floor wins and the
+   * range collapses to exactly 1.0 rather than inverting. */
+  if (hi < lo) hi = lo;
+  if (out_max) *out_max = hi;
+}
+
 void ManualView_Zoom(ManualView *view, float factor,
                      int page_w, int page_h, int view_w, int view_h) {
   if (!view || !(factor > 0.0f) || !isfinite(factor)) return;
-  const float lo = (float)kManualZoomMinPermille / 1000.0f;
-  const float hi = (float)kManualZoomMaxPermille / 1000.0f;
+  float lo = 0.0f, hi = 0.0f;
+  ManualView_ZoomLimit(page_w, page_h, view_w, view_h, &lo, &hi);
   view->zoom = ClampF(view->zoom * factor, lo, hi);
   /* Re-clamp: zooming OUT shrinks the overhang, so a pan that was legal at the
    * old zoom would otherwise leave the page hanging off-centre with no input
@@ -353,7 +406,20 @@ void ManualTurn_LeafPoint(float turn, float u, float v,
   const float bow = ManualTurn_BowOffset(turn, cu);
   float x = span * cosf(angle) - bow * sinf(angle);
   float z = span * sinf(angle) + bow * cosf(angle);
-  if (z < 0.0f) z = 0.0f;   /* the invariant: the leaf never goes behind a page */
+  /* THE INVARIANT: the leaf never goes behind a page. Load-bearing, but as a
+   * NUMERICAL guard rather than a structural one, and the difference matters to
+   * anyone tempted to delete it.
+   *
+   * At the shipped amplitude the algebra leaves 0.5 - A*pi = 0.28 of margin (see
+   * the header), so z cannot go meaningfully negative. What it does go is
+   * -4.4e-08, at u=1 and a full turn: M_PI rounded to float is a hair ABOVE pi,
+   * so sinf() of it is a small NEGATIVE number, and z = 0.5*sinf(pi) inherits
+   * the sign. The clamp absorbs exactly that.
+   *
+   * An audit read the clamp as making the z>=0 test a tautology and proposed
+   * removing it; doing so turns the suite red in 200 places, all of them this
+   * one ulp. It is not a tautology and it is not covering for the bound. */
+  if (z < 0.0f) z = 0.0f;
   /* A backward turn lifts the LEFT leaf and lays it to the right. */
   if (turn < 0.0f) x = -x;
   if (out_x) *out_x = x;
@@ -367,6 +433,11 @@ bool ManualTurn_SheetExtents(const float matrix[16],
                              float *out_half_x, float *out_half_y) {
   if (!matrix || view_w <= 0 || view_h <= 0) return false;
   if (!(page_w > 0.0f) || !(page_h > 0.0f)) return false;
+  /* Finite, not merely positive. +Inf is > 0 and sails through the test above,
+   * then divides to +Inf extents and puts every vertex of the sheet at NaN --
+   * a silently blank reader rather than a refusal. No caller reaches this today;
+   * a host shim reading page dimensions from a file could. */
+  if (!isfinite(page_w) || !isfinite(page_h)) return false;
 
   /* At z=0 the projection is linear in world x and y, so the scale is exactly
    * the screen displacement of a one-unit step -- no search, no tuning. */
@@ -379,15 +450,208 @@ bool ManualTurn_SheetExtents(const float matrix[16],
                                  view_w, view_h, &unit_y))
     return false;
 
-  /* Take each axis's own dominant component: with a yaw the +x step also moves
-   * in screen y, and using the hypotenuse would over-shrink the sheet. */
+  /* Each axis's own screen component, not the hypotenuse of its step. With the
+   * reader's yaw a +x step does also move slightly in screen y, but the effect
+   * is 0.3% at this camera -- so this is a correctness detail, not a visible
+   * one, and the earlier comment's "would over-shrink the sheet" oversold it. */
   const float pixels_per_x = fabsf(unit_x.x - origin.x);
   const float pixels_per_y = fabsf(origin.y - unit_y.y);
   if (!(pixels_per_x > 0.0f) || !(pixels_per_y > 0.0f)) return false;
+  if (!isfinite(pixels_per_x) || !isfinite(pixels_per_y)) return false;
 
-  if (out_half_x) *out_half_x = page_w * 0.5f / pixels_per_x;
-  if (out_half_y) *out_half_y = page_h * 0.5f / pixels_per_y;
+  /* A camera can be degenerate enough (a near-zero fov) to project a unit step
+   * to a sliver, which divides out to an enormous extent. Enormous is arguably
+   * arithmetically right; NOT FINITE is not, and it is the one that reaches the
+   * renderer as NaN vertices. Reject on the result rather than trying to
+   * enumerate the cameras that produce it. */
+  const float half_x = page_w * 0.5f / pixels_per_x;
+  const float half_y = page_h * 0.5f / pixels_per_y;
+  if (!isfinite(half_x) || !isfinite(half_y)) return false;
+
+  if (out_half_x) *out_half_x = half_x;
+  if (out_half_y) *out_half_y = half_y;
   return true;
+}
+
+/* ── Where the turning sheet sits ──────────────────────────────────────────── */
+
+bool ManualSheet_Solve(const float matrix[16], int view_w, int view_h,
+                       float page_w, float page_h, bool spread_mode,
+                       ManualSheet *out) {
+  if (!out) return false;
+  memset(out, 0, sizeof *out);
+  float half_x = 0.0f, half_y = 0.0f;
+  if (!ManualTurn_SheetExtents(matrix, view_w, view_h, page_w, page_h,
+                               &half_x, &half_y))
+    return false;
+
+  out->half_x = half_x;
+  out->half_y = half_y;
+  if (spread_mode) {
+    /* Two pages wide, hinged on the gutter at the centre. The sheet is one half
+     * of the area -- which is one page. */
+    out->hinge_x = 0.0f;
+    out->width = half_x;
+    out->pixels_w = page_w * 0.5f;
+  } else {
+    /* One page wide, hinged on the page's own left edge, and the sheet is the
+     * WHOLE area: two half-extents, not one. Scaling it by half_x -- the spread
+     * rule applied to a layout that is not a spread -- is what drew a leaf half
+     * a page wide, hinged down the middle of the text. */
+    out->hinge_x = -half_x;
+    out->width = 2.0f * half_x;
+    out->pixels_w = page_w;
+  }
+  out->pixels_h = page_h;
+  return true;
+}
+
+float ManualSheet_PixelWidth(float page_w, bool spread_mode) {
+  return spread_mode ? page_w * 0.5f : page_w;
+}
+
+float ManualSheet_CameraFov(float sheet_pixels, int view_h, float preferred_fov) {
+  if (!(preferred_fov > 0.0f) || !isfinite(preferred_fov)) return preferred_fov;
+  if (!(sheet_pixels > 0.0f) || !isfinite(sheet_pixels) || view_h <= 0)
+    return preferred_fov;
+
+  /* Invert lift/distance = 2*sheet_pixels*tan(fov/2)/view_h for the fov at which
+   * the lift exactly meets the clearance. */
+  const float clearance = (float)kManualLiftClearancePermille / 1000.0f;
+  const float half_tangent = clearance * (float)view_h / (2.0f * sheet_pixels);
+  if (!isfinite(half_tangent) || !(half_tangent > 0.0f)) return preferred_fov;
+  const float fov = 2.0f * atanf(half_tangent);
+  if (!isfinite(fov) || !(fov > 0.0f)) return preferred_fov;
+  /* Only ever NARROWS. A sheet with room to spare keeps the preferred lens, so
+   * every page shape that already framed well is untouched by this. */
+  return fov < preferred_fov ? fov : preferred_fov;
+}
+
+float ManualTurn_LeafWorldX(const ManualSheet *sheet, float turn, float leaf_x) {
+  if (!sheet) return 0.0f;
+  /* ManualTurn_LeafPoint has already mirrored leaf_x for a backward turn, so the
+   * hinge has to mirror with it or the sheet lifts from one edge and lands a
+   * whole width away from where the page it covers actually is. */
+  const float hinge = (turn < 0.0f) ? -sheet->hinge_x : sheet->hinge_x;
+  return hinge + leaf_x * 2.0f * sheet->width;
+}
+
+/* ── Mesh density ──────────────────────────────────────────────────────────── */
+
+/* Homogeneous depth of a leaf point, placed and scaled exactly as the renderer
+ * places it. Sharing this with nothing would let the measurement drift away from
+ * the geometry it claims to measure. */
+static float LeafClipDepth(const float matrix[16], const ManualSheet *sheet,
+                           float turn, float u, float v) {
+  float lx = 0.0f, ly = 0.0f, lz = 0.0f;
+  ManualTurn_LeafPoint(turn, u, v, &lx, &ly, &lz);
+  return Scene3D_ClipDepth(matrix,
+                           ManualTurn_LeafWorldX(sheet, turn, lx),
+                           -ly * 2.0f * sheet->half_y,
+                           lz * 2.0f * sheet->width);
+}
+
+/* The midpoint deviation of affine from perspective-correct interpolation over
+ * one cell, in parameter space: |du| * |dw| / (2*(w0+w1)). Derived by equating
+ * the two at screen-space s=0.5; it is exact, not an approximation. */
+static float CellUvError(float span, float w0, float w1) {
+  if (!(w0 > 0.0f) || !(w1 > 0.0f)) return 0.0f;   /* behind the camera: skipped */
+  return span * fabsf(w1 - w0) / (2.0f * (w0 + w1));
+}
+
+bool ManualTurn_MeshUvError(const float matrix[16], const ManualSheet *sheet,
+                            int columns, int rows,
+                            float *out_column_px, float *out_row_px) {
+  if (out_column_px) *out_column_px = 0.0f;
+  if (out_row_px) *out_row_px = 0.0f;
+  if (!matrix || !sheet || columns < 1 || rows < 1) return false;
+  if (!isfinite(sheet->width) || !isfinite(sheet->half_y)) return false;
+
+  float worst_column = 0.0f, worst_row = 0.0f;
+  /* Sample the turn rather than solving for its worst phase: the depth spread
+   * peaks somewhere mid-sweep whose location moves with the camera, and 33
+   * phases is far cheaper than being clever once per layout change. */
+  enum { kPhases = 33 };
+  for (int p = 0; p <= kPhases; p++) {
+    const float turn = (float)p / (float)kPhases;
+    for (int c = 0; c < columns; c++) {
+      const float u0 = (float)c / (float)columns;
+      const float u1 = (float)(c + 1) / (float)columns;
+      const float e = CellUvError(u1 - u0,
+                                  LeafClipDepth(matrix, sheet, turn, u0, 0.5f),
+                                  LeafClipDepth(matrix, sheet, turn, u1, 0.5f)) *
+                      sheet->pixels_w;
+      if (e > worst_column) worst_column = e;
+    }
+    for (int r = 0; r < rows; r++) {
+      const float v0 = (float)r / (float)rows;
+      const float v1 = (float)(r + 1) / (float)rows;
+      const float e = CellUvError(v1 - v0,
+                                  LeafClipDepth(matrix, sheet, turn, 0.5f, v0),
+                                  LeafClipDepth(matrix, sheet, turn, 0.5f, v1)) *
+                      sheet->pixels_h;
+      if (e > worst_row) worst_row = e;
+    }
+  }
+  if (!isfinite(worst_column) || !isfinite(worst_row)) return false;
+  if (out_column_px) *out_column_px = worst_column;
+  if (out_row_px) *out_row_px = worst_row;
+  return true;
+}
+
+static int ClampI(int v, int lo, int hi) {
+  return v < lo ? lo : (v > hi ? hi : v);
+}
+
+/* First estimate for a density: the deviation falls as 1/N^2 on each axis, so
+ * one measurement solves for N instead of searching for it. */
+static int EstimateDensity(int measured_at, float measured_px, float budget_px,
+                           int lo, int hi) {
+  if (!(measured_px > budget_px)) return lo;
+  const float scale = sqrtf(measured_px / budget_px);
+  if (!isfinite(scale)) return hi;
+  return ClampI((int)ceilf((float)measured_at * scale), lo, hi);
+}
+
+void ManualTurn_SolveMesh(const float matrix[16], const ManualSheet *sheet,
+                          float budget_px, ManualMesh *out) {
+  if (!out) return;
+  /* The coarsest mesh is the fallback, deliberately. A sheet drawn slightly too
+   * coarse is a mild artefact; a sheet not drawn is a broken reader. */
+  out->columns = kManualMeshMinColumns;
+  out->rows = kManualMeshMinRows;
+  if (!matrix || !sheet || !(budget_px > 0.0f) || !isfinite(budget_px)) return;
+
+  float column_px = 0.0f, row_px = 0.0f;
+  if (!ManualTurn_MeshUvError(matrix, sheet, kManualMeshMinColumns,
+                              kManualMeshMinRows, &column_px, &row_px))
+    return;
+
+  int columns = EstimateDensity(kManualMeshMinColumns, column_px, budget_px,
+                                kManualMeshMinColumns, kManualMeshMaxColumns);
+  int rows = EstimateDensity(kManualMeshMinRows, row_px, budget_px,
+                             kManualMeshMinRows, kManualMeshMaxRows);
+
+  /* VERIFY, then bump. The 1/N^2 law is the leading term, not an identity --
+   * measured 8 -> 16 columns improves by 3.76x where the law predicts 4 -- so
+   * the estimate can land just over budget. Re-measuring and stepping up is a
+   * handful of iterations and turns "should be within budget" into "is", which
+   * is the difference between this being a bound and being a guess. */
+  for (int i = 0; i < 6; i++) {
+    if (!ManualTurn_MeshUvError(matrix, sheet, columns, rows,
+                                &column_px, &row_px))
+      break;
+    const bool columns_over = column_px > budget_px && columns < kManualMeshMaxColumns;
+    const bool rows_over = row_px > budget_px && rows < kManualMeshMaxRows;
+    if (!columns_over && !rows_over) break;
+    if (columns_over) columns = ClampI(columns + columns / 4 + 1,
+                                       kManualMeshMinColumns, kManualMeshMaxColumns);
+    if (rows_over) rows = ClampI(rows + rows / 4 + 1,
+                                 kManualMeshMinRows, kManualMeshMaxRows);
+  }
+
+  out->columns = columns;
+  out->rows = rows;
 }
 
 float ManualTurn_LeafShade(float turn, float u) {

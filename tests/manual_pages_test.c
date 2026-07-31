@@ -66,6 +66,48 @@ static size_t AppendJpeg(unsigned char *out, size_t at, int w, int h,
   return at;
 }
 
+/* ── Page shape ───────────────────────────────────────────────────────────────
+ *
+ * The reader was built around one 739x1080 portrait scan. A number of the tests
+ * below exist because a manual can also be square (Game Boy Color) or wide and
+ * short (Game Boy Advance), and several things that looked like constants turned
+ * out to be that one page's proportions written down.
+ *
+ * The shapes live in one table so adding one is a single line rather than an
+ * edit to every test that sweeps them. */
+static const struct ManualShape {
+  const char *name;
+  int w, h;
+} kShapes[] = {
+  { "portrait (ActRaiser)", 739, 1080 },
+  { "square (GBC)",         900,  900 },
+  { "wide (GBA)",          1000,  620 },
+  { "extreme",             1400,  500 },
+};
+enum { kShapeCount = sizeof kShapes / sizeof kShapes[0] };
+
+/* Windows to check every shape in. Portrait, landscape, and a high-density
+ * display -- the last because two of the defects these tests cover scale with
+ * the VIEW, and so were invisible at the size the reader was authored in. */
+static const int kViews[][2] = { { 1600, 900 }, { 960, 1040 }, { 2560, 1440 } };
+enum { kViewCount = sizeof kViews / sizeof kViews[0] };
+
+/* The reader's camera, built exactly as the renderer builds it: preferred lens,
+ * narrowed if this sheet would otherwise swing into it. Shared so the tests
+ * cannot drift away from the projection they claim to be measuring. */
+static void ShapeCamera(int pw, int ph, int view_w, int view_h, bool tilt,
+                        bool spread, float out_matrix[16], ManualSheet *out_sheet) {
+  float page_w = 0.0f, page_h = 0.0f;
+  ManualView_FittedSize(pw * ManualPages_LayoutPageWidths(spread), ph,
+                        view_w, view_h, 1.0f, &page_w, &page_h);
+  const float fov = ManualSheet_CameraFov(
+      ManualSheet_PixelWidth(page_w, spread), view_h, 0.9f);
+  Scene3DCamera camera = { tilt ? -0.35f : 0.0f, tilt ? 0.22f : 0.0f, 2.6f, fov };
+  Scene3D_BuildViewProjection(&camera, view_w, view_h, out_matrix);
+  CHECK(ManualSheet_Solve(out_matrix, view_w, view_h, page_w, page_h, spread,
+                          out_sheet));
+}
+
 static void TestCarvesEveryPageOfAnAlbum(void) {
   unsigned char *buf = (unsigned char *)calloc(1, 1 << 16);
   CHECK(buf != NULL);
@@ -770,21 +812,36 @@ static void TestLayoutWidthNeverDependsOnTheOpening(void) {
   CHECK(ManualPages_LayoutPageWidths(true) == 2);
   CHECK(ManualPages_LayoutPageWidths(false) == 1);
 
-  /* Walk every opening of the real booklet: the width must not move. */
+  /* Walk every opening of the real booklet: the fitted size must not move.
+   *
+   * Compared against the FIRST opening's size rather than a literal. The old
+   * form asserted a magic 1423.3, which pins the test to one page shape and one
+   * window and breaks on any legitimate change to either -- while checking
+   * nothing this does not. What matters is that the size is invariant across
+   * openings, so that is what is compared. */
   const int pages = 40;
   const int items = ManualPages_SpreadCount(pages);
   const int expected = ManualPages_LayoutPageWidths(true);
-  for (int i = 0; i < items; i++) {
-    ManualSpread spread;
-    CHECK(ManualPages_SpreadAt(pages, i, &spread));
-    /* Whatever the opening holds -- one page or two -- the layout is the same. */
-    CHECK(ManualPages_LayoutPageWidths(true) == expected);
-    /* And the fitted size follows from that width alone, so it is identical on a
-     * cover and on an interior opening. */
-    float w = 0.0f, h = 0.0f;
-    ManualView_FittedSize(739 * expected, 1080, 1600, 1040, 1.0f, &w, &h);
-    CHECK(fabsf(w - 1423.3f) < 0.5f);
-    CHECK(fabsf(h - 1040.0f) < 0.5f);
+
+  for (int s = 0; s < kShapeCount; s++) {
+    float first_w = 0.0f, first_h = 0.0f;
+    for (int i = 0; i < items; i++) {
+      ManualSpread spread;
+      CHECK(ManualPages_SpreadAt(pages, i, &spread));
+      /* Whatever the opening holds -- one page or two -- the layout is the same. */
+      CHECK(ManualPages_LayoutPageWidths(true) == expected);
+      float w = 0.0f, h = 0.0f;
+      ManualView_FittedSize(kShapes[s].w * expected, kShapes[s].h, 1600, 1040,
+                            1.0f, &w, &h);
+      if (i == 0) { first_w = w; first_h = h; }
+      CHECK(fabsf(w - first_w) < 0.001f);
+      CHECK(fabsf(h - first_h) < 0.001f);
+      /* Fit really did fit, on whichever axis constrained it. */
+      CHECK(w <= 1600.0f + 0.001f);
+      CHECK(h <= 1040.0f + 0.001f);
+    }
+    /* And a cover's single page is half the constant area, not a new layout. */
+    CHECK(first_w > 0.0f && first_h > 0.0f);
   }
 }
 
@@ -965,7 +1022,7 @@ static void TestBowVanishesAtTheEndsAndEdges(void) {
   CHECK(ManualTurn_BowOffset(0.5f, 0.5f) > 0.01f);
 
   /* The amplitude must stay inside the proven bound. */
-  CHECK(kManualCurlPermille <= kManualCurlMaxPermille);
+  CHECK(kManualCurlPermille <= kManualCurlLimitPermille);
   float peak = 0.0f;
   for (int i = -100; i <= 100; i++)
     for (int iu = 0; iu <= 100; iu++) {
@@ -973,7 +1030,7 @@ static void TestBowVanishesAtTheEndsAndEdges(void) {
                                                  (float)iu / 100.0f));
       if (b > peak) peak = b;
     }
-  CHECK(peak <= (float)kManualCurlMaxPermille / 1000.0f + 1e-4f);
+  CHECK(peak <= (float)kManualCurlLimitPermille / 1000.0f + 1e-4f);
 }
 
 /* The bow must displace along the sheet's OWN NORMAL, not along +z.
@@ -1196,6 +1253,388 @@ static void TestSheetExtentsReproduceTheRequestedSize(void) {
   CHECK(!ManualTurn_SheetExtents(NULL, view_w, view_h, page_w, page_h, &hx, &hy));
 }
 
+/* THE BOOK HAS A GEOMETRY; INDIVIDUAL PAGES ARE NOT IT.
+ *
+ * Taking the layout from whichever page is decoded makes the view rescale as the
+ * reader pages through a mixed album, and makes the page size depend on decode
+ * TIMING. The index knows every page's size before anything is decoded. */
+static void TestNominalGeometryIsTheBooksNotAPages(void) {
+  ManualPageIndex index;
+  memset(&index, 0, sizeof index);
+  int w = 0, h = 0;
+
+  CHECK(!ManualPages_NominalGeometry(&index, &w, &h));   /* empty */
+  CHECK(!ManualPages_NominalGeometry(NULL, &w, &h));
+
+  /* A uniform album is the easy case: every page agrees, so does the book. */
+  for (int i = 0; i < 12; i++) {
+    index.pages[i].width = 739;
+    index.pages[i].height = 1080;
+  }
+  index.count = 12;
+  CHECK(ManualPages_NominalGeometry(&index, &w, &h));
+  CHECK(w == 739 && h == 1080);
+
+  /* A mixed album takes the MAJORITY, not the first page -- a stray oversized
+   * scan at the front must not size the whole book. */
+  index.pages[0].width = 2000;
+  index.pages[0].height = 3000;
+  CHECK(ManualPages_NominalGeometry(&index, &w, &h));
+  CHECK(w == 739 && h == 1080);
+
+  /* Zero dimensions are not a geometry and must not win the vote even when they
+   * are the most common thing in the index. */
+  memset(&index, 0, sizeof index);
+  for (int i = 0; i < 9; i++) { index.pages[i].width = 0; index.pages[i].height = 0; }
+  index.pages[9].width = 900;  index.pages[9].height = 900;
+  index.pages[10].width = 900; index.pages[10].height = 900;
+  index.count = 11;
+  CHECK(ManualPages_NominalGeometry(&index, &w, &h));
+  CHECK(w == 900 && h == 900);
+
+  memset(&index, 0, sizeof index);
+  index.count = 3;
+  CHECK(!ManualPages_NominalGeometry(&index, &w, &h));   /* nothing but zeroes */
+}
+
+/* Carving is a byte walk over JPEG markers and has no business caring what shape
+ * the pages are. Asserted rather than assumed, since every existing fixture is
+ * 739x1080 and a dimension swap would pass all of them. */
+static void TestAlbumsCarveAtEveryPageShape(void) {
+  for (int s = 0; s < kShapeCount; s++) {
+    unsigned char *buf = (unsigned char *)calloc(1, 1 << 16);
+    CHECK(buf != NULL);
+    if (!buf) return;
+    size_t at = 0;
+    for (int i = 0; i < 6; i++)
+      at = AppendJpeg(buf, at, kShapes[s].w, kShapes[s].h, 1400);
+
+    ManualPageIndex index;
+    CHECK(ManualPages_CarveAlbum(buf, at, &index) == 6);
+    CHECK(ManualPages_LooksLikeAlbum(&index, at));
+    for (int i = 0; i < index.count; i++) {
+      CHECK(index.pages[i].width == (uint16_t)kShapes[s].w);
+      CHECK(index.pages[i].height == (uint16_t)kShapes[s].h);
+    }
+    int w = 0, h = 0;
+    CHECK(ManualPages_NominalGeometry(&index, &w, &h));
+    CHECK(w == kShapes[s].w && h == kShapes[s].h);
+    free(buf);
+  }
+}
+
+/* THE SINGLE-PAGE LEAF WAS HALF A PAGE WIDE.
+ *
+ * The renderer scaled the leaf by `half_x` in both layouts. In a spread that is
+ * right -- half the two-page area is one page. In single-page layout half the
+ * area is half a page, so the turning sheet was a half-width leaf hinged down
+ * the middle of the text. The header asserted the caller mapped it onto the
+ * whole page; no caller did.
+ *
+ * At rest the sheet must coincide with the page EXACTLY in both layouts, which
+ * is also what makes the first frame of a turn invisible. */
+static void TestTheLeafCoversItsWholeSheetInBothLayouts(void) {
+  for (int s = 0; s < kShapeCount; s++) {
+    for (int spread = 0; spread <= 1; spread++) {
+      float matrix[16];
+      ManualSheet sheet;
+      ShapeCamera(kShapes[s].w, kShapes[s].h, 1600, 900, false, spread != 0,
+                  matrix, &sheet);
+
+      /* Where the settled pages are drawn: the layout area spans +/- half_x, and
+       * in a spread the gutter splits it at 0. */
+      const float sheet_lo = spread ? 0.0f : -sheet.half_x;
+      const float sheet_hi = sheet.half_x;
+
+      float lx0 = 0.0f, lx1 = 0.0f, ly = 0.0f, lz = 0.0f;
+      ManualTurn_LeafPoint(0.0f, 0.0f, 0.5f, &lx0, &ly, &lz);
+      ManualTurn_LeafPoint(0.0f, 1.0f, 0.5f, &lx1, &ly, &lz);
+      const float world_lo = ManualTurn_LeafWorldX(&sheet, 1.0f, lx0);
+      const float world_hi = ManualTurn_LeafWorldX(&sheet, 1.0f, lx1);
+
+      /* The hinge edge and the free edge land on the sheet's own two edges. */
+      CHECK(fabsf(world_lo - sheet_lo) < 1e-4f);
+      CHECK(fabsf(world_hi - sheet_hi) < 1e-4f);
+      /* And the sheet is as wide as the area it turns off: one half in a spread,
+       * the whole thing on its own. THIS is the assertion the bug fails -- it
+       * measured half_x in both. */
+      CHECK(fabsf(sheet.width - (spread ? sheet.half_x : 2.0f * sheet.half_x))
+            < 1e-4f);
+    }
+  }
+}
+
+/* A backward turn lifts from the OTHER edge. With the hinge fixed the sheet
+ * lands a full width away from the page it is supposed to cover. */
+static void TestTheHingeMirrorsWithTheTurnDirection(void) {
+  for (int spread = 0; spread <= 1; spread++) {
+    float matrix[16];
+    ManualSheet sheet;
+    ShapeCamera(1000, 620, 1600, 900, false, spread != 0, matrix, &sheet);
+
+    float fx = 0.0f, bx = 0.0f, y = 0.0f, z = 0.0f;
+    ManualTurn_LeafPoint(0.0f, 0.0f, 0.5f, &fx, &y, &z);   /* hinge end, forward */
+    ManualTurn_LeafPoint(-0.0001f, 0.0f, 0.5f, &bx, &y, &z);
+    const float forward_hinge = ManualTurn_LeafWorldX(&sheet, 1.0f, fx);
+    const float backward_hinge = ManualTurn_LeafWorldX(&sheet, -1.0f, bx);
+    CHECK(fabsf(forward_hinge + backward_hinge) < 1e-4f);   /* reflections */
+
+    /* At rest a backward sheet covers the same rectangle as a forward one. */
+    float lx = 0.0f;
+    ManualTurn_LeafPoint(-0.0001f, 1.0f, 0.5f, &lx, &y, &z);
+    const float backward_free = ManualTurn_LeafWorldX(&sheet, -1.0f, lx);
+    ManualTurn_LeafPoint(0.0f, 1.0f, 0.5f, &lx, &y, &z);
+    const float forward_free = ManualTurn_LeafWorldX(&sheet, 1.0f, lx);
+    CHECK(fabsf(forward_free + backward_free) < 1e-3f);
+  }
+}
+
+/* THE SHEET MUST NEVER REACH THE CAMERA PLANE.
+ *
+ * A sheet lifts by its own WIDTH, so how deep it reaches is set by how much of
+ * the view it occupies. At a fixed fov a wide, short manual in single-page
+ * layout reached 1.72x the camera distance -- through the camera --
+ * Scene3D_ProjectWorldPoint refuses those vertices, and the renderer drops the
+ * whole leaf. The page turn silently does not draw.
+ *
+ * This is the load-bearing test for page-shape support, and it is the one the
+ * fixed 0.9 lens fails. */
+static void TestTheSheetNeverSwingsIntoTheCamera(void) {
+  for (int s = 0; s < kShapeCount; s++) {
+    for (int v = 0; v < kViewCount; v++) {
+      for (int spread = 0; spread <= 1; spread++) {
+        for (int tilt = 0; tilt <= 1; tilt++) {
+          float matrix[16];
+          ManualSheet sheet;
+          ShapeCamera(kShapes[s].w, kShapes[s].h, kViews[v][0], kViews[v][1],
+                      tilt != 0, spread != 0, matrix, &sheet);
+
+          float worst = 1e30f;
+          for (int p = -32; p <= 32; p++) {
+            const float turn = (float)p / 32.0f;
+            for (int ui = 0; ui <= 24; ui++) {
+              for (int vi = 0; vi <= 6; vi++) {
+                float lx = 0.0f, ly = 0.0f, lz = 0.0f;
+                ManualTurn_LeafPoint(turn, (float)ui / 24.0f, (float)vi / 6.0f,
+                                     &lx, &ly, &lz);
+                const float w = Scene3D_ClipDepth(
+                    matrix, ManualTurn_LeafWorldX(&sheet, turn, lx),
+                    -ly * 2.0f * sheet.half_y, lz * 2.0f * sheet.width);
+                if (w < worst) worst = w;
+                /* And every vertex must actually project -- which is the
+                 * consequence the renderer sees. */
+                Scene3DPoint screen;
+                CHECK(Scene3D_ProjectWorldPoint(
+                    matrix, ManualTurn_LeafWorldX(&sheet, turn, lx),
+                    -ly * 2.0f * sheet.half_y, lz * 2.0f * sheet.width,
+                    kViews[v][0], kViews[v][1], &screen));
+              }
+            }
+          }
+          if (!(worst > 0.0f))
+            printf("  %s %s %s in %dx%d: min clip depth %.3f\n", kShapes[s].name,
+                   spread ? "spread" : "single", tilt ? "tilt" : "flat",
+                   kViews[v][0], kViews[v][1], (double)worst);
+          CHECK(worst > 0.0f);
+        }
+      }
+    }
+  }
+}
+
+/* The lens only ever narrows, so every page shape that already framed correctly
+ * keeps exactly the camera it had. If this fails, the reader's existing look
+ * changed as a side effect of supporting other shapes. */
+static void TestTheLensOnlyNarrowsAndLeavesPortraitAlone(void) {
+  CHECK(ManualSheet_CameraFov(10.0f, 900, 0.9f) == 0.9f);   /* tiny sheet: inert */
+  CHECK(ManualSheet_CameraFov(4000.0f, 900, 0.9f) < 0.9f);  /* huge sheet: narrows */
+  /* Degenerate inputs return the preferred lens rather than a nonsense one. */
+  CHECK(ManualSheet_CameraFov(0.0f, 900, 0.9f) == 0.9f);
+  CHECK(ManualSheet_CameraFov(800.0f, 0, 0.9f) == 0.9f);
+  CHECK(ManualSheet_CameraFov(1.0f / 0.0f, 900, 0.9f) == 0.9f);
+
+  /* THE REAL MANUAL, in every window: unchanged, in spreads and on its own. */
+  for (int v = 0; v < kViewCount; v++) {
+    for (int spread = 0; spread <= 1; spread++) {
+      float page_w = 0.0f, page_h = 0.0f;
+      ManualView_FittedSize(739 * ManualPages_LayoutPageWidths(spread != 0), 1080,
+                            kViews[v][0], kViews[v][1], 1.0f, &page_w, &page_h);
+      CHECK(ManualSheet_CameraFov(ManualSheet_PixelWidth(page_w, spread != 0),
+                                  kViews[v][1], 0.9f) == 0.9f);
+    }
+  }
+  /* The clearance is the reason: it sits just above what portrait already
+   * reaches, so portrait is inside it and nothing else has to be special-cased. */
+  CHECK(kManualLiftClearancePermille > 661);
+}
+
+/* MESH DENSITY CANNOT BE A CONSTANT.
+ *
+ * SDL_RenderGeometry interpolates UVs affinely, and the deviation from
+ * perspective-correct grows with the sheet's on-screen size. A fixed 16x6 was
+ * measured against ONE page in ONE window; it is 4x over budget on a square or
+ * wide page and 6x over on a high-density display. */
+static void TestMeshDensityHoldsItsBudgetAtEveryShape(void) {
+  const float budget = (float)kManualMeshBudgetCentipixels / 100.0f;
+  bool fixed_ever_over = false;
+
+  for (int s = 0; s < kShapeCount; s++) {
+    for (int v = 0; v < kViewCount; v++) {
+      for (int spread = 0; spread <= 1; spread++) {
+        for (int tilt = 0; tilt <= 1; tilt++) {
+          float matrix[16];
+          ManualSheet sheet;
+          ShapeCamera(kShapes[s].w, kShapes[s].h, kViews[v][0], kViews[v][1],
+                      tilt != 0, spread != 0, matrix, &sheet);
+
+          ManualMesh mesh;
+          ManualTurn_SolveMesh(matrix, &sheet, budget, &mesh);
+          CHECK(mesh.columns >= kManualMeshMinColumns);
+          CHECK(mesh.columns <= kManualMeshMaxColumns);
+          CHECK(mesh.rows >= kManualMeshMinRows);
+          CHECK(mesh.rows <= kManualMeshMaxRows);
+
+          float column_px = 0.0f, row_px = 0.0f;
+          CHECK(ManualTurn_MeshUvError(matrix, &sheet, mesh.columns, mesh.rows,
+                                       &column_px, &row_px));
+          if (column_px > budget || row_px > budget)
+            printf("  %s %s %s in %dx%d: %dx%d -> %.2f / %.2f px\n",
+                   kShapes[s].name, spread ? "spread" : "single",
+                   tilt ? "tilt" : "flat", kViews[v][0], kViews[v][1],
+                   mesh.columns, mesh.rows, (double)column_px, (double)row_px);
+          CHECK(column_px <= budget);
+          CHECK(row_px <= budget);
+
+          /* The regression evidence: record whether the old constant would have
+           * blown the budget anywhere. If this stops being true the defect has
+           * been designed away and this test is measuring nothing. */
+          float old_column = 0.0f, old_row = 0.0f;
+          if (ManualTurn_MeshUvError(matrix, &sheet, 16, 6, &old_column, &old_row) &&
+              (old_column > budget * 2.0f || old_row > budget * 2.0f))
+            fixed_ever_over = true;
+        }
+      }
+    }
+  }
+  CHECK(fixed_ever_over);
+}
+
+/* Rows are free when the page is flat -- the untilted sheet spans no depth down
+ * the page, so nothing is gained by subdividing it. The density must collapse to
+ * the minimum there, or every flat frame pays for the tilt's problem. */
+static void TestFlatPagesPayNothingForRows(void) {
+  float matrix[16];
+  ManualSheet sheet;
+  ShapeCamera(739, 1080, 1600, 900, false, true, matrix, &sheet);
+  float column_px = 0.0f, row_px = 0.0f;
+  CHECK(ManualTurn_MeshUvError(matrix, &sheet, 16, kManualMeshMinRows,
+                               &column_px, &row_px));
+  CHECK(row_px == 0.0f);
+  ManualMesh mesh;
+  ManualTurn_SolveMesh(matrix, &sheet, 1.0f, &mesh);
+  CHECK(mesh.rows == kManualMeshMinRows);
+  /* The tilt is what costs rows, and it must cost MORE than flat does. */
+  ManualSheet tilted_sheet;
+  float tilted[16];
+  ShapeCamera(739, 1080, 1600, 900, true, true, tilted, &tilted_sheet);
+  ManualMesh tilted_mesh;
+  ManualTurn_SolveMesh(tilted, &tilted_sheet, 1.0f, &tilted_mesh);
+  CHECK(tilted_mesh.rows > mesh.rows);
+}
+
+/* ZOOM'S CEILING IS A PROPERTY OF THE SCAN.
+ *
+ * The old flat 6x was justified in-comment by "above 6x a 739x1080 scan is
+ * showing paper texture" -- a statement about one scan. A page that fits at
+ * nearly 1:1 has almost no room left; one being shrunk to fit has plenty. */
+static void TestZoomCeilingFollowsTheScanNotTheWindow(void) {
+  float lo = 0.0f, hi = 0.0f;
+
+  /* A big scan shrunk into a small window: room to magnify. */
+  ManualView_ZoomLimit(1478, 1080, 960, 1040, &lo, &hi);
+  CHECK(lo == 1.0f);
+  CHECK(hi > 4.0f);
+
+  /* The same window showing a scan already near its own resolution: much less. */
+  float small_hi = 0.0f;
+  ManualView_ZoomLimit(900, 900, 960, 1040, &lo, &small_hi);
+  CHECK(small_hi < hi);
+
+  /* Never inverted and never below fit, however extreme the mismatch. */
+  ManualView_ZoomLimit(10, 10, 4000, 4000, &lo, &hi);
+  CHECK(hi >= lo);
+  CHECK(lo == 1.0f);
+  /* And never past the absolute ceiling. */
+  ManualView_ZoomLimit(20000, 20000, 100, 100, &lo, &hi);
+  CHECK(hi <= (float)kManualZoomMaxPermille / 1000.0f);
+
+  /* Degenerate geometry falls back to the absolute bounds rather than dividing
+   * by zero. */
+  ManualView_ZoomLimit(0, 0, 0, 0, &lo, &hi);
+  CHECK(lo == (float)kManualZoomMinPermille / 1000.0f);
+  CHECK(hi == (float)kManualZoomMaxPermille / 1000.0f);
+
+  /* Zoom itself must honour the derived ceiling, not the absolute one: a
+   * near-native scan cannot be pushed to 6x by hammering the key. */
+  ManualView view;
+  ManualView_Init(&view);
+  for (int i = 0; i < 60; i++)
+    ManualView_Zoom(&view, 1.25f, 900, 900, 960, 1040);
+  CHECK(view.zoom <= small_hi + 1e-4f);
+  CHECK(view.zoom < (float)kManualZoomMaxPermille / 1000.0f);
+}
+
+/* The bow's ceiling is DERIVED, and must not be edited to accommodate a bigger
+ * bow. Raising the amplitude alone fails to compile; this is what stops the
+ * other half of that edit -- raising the ceiling to match. */
+static void TestTheCurlCeilingIsDerivedNotChosen(void) {
+  CHECK(kManualCurlLimitPermille == (int)(1000.0 * 0.5 / M_PI));
+  CHECK(kManualCurlPermille <= kManualCurlLimitPermille);
+
+  /* THE BINDING CASE IS THE HINGE, not the free edge. At u=1 the bow VANISHES,
+   * so that end cannot be what the bound is about -- an earlier comment said it
+   * was. Depth there is the rigid rotation alone.
+   *
+   * Compared against a tolerance rather than zero for the same reason the depth
+   * clamp exists: sinf(M_PI) is -8.7e-08, not 0, because M_PI rounds up in
+   * float. An `== 0.0f` here fails on the artefact, not on the property. */
+  CHECK(fabsf(ManualTurn_BowOffset(0.5f, 1.0f)) < 1e-6f);
+  CHECK(fabsf(ManualTurn_BowOffset(0.5f, 0.0f)) < 1e-6f);
+  CHECK(ManualTurn_BowOffset(0.5f, 0.5f) > 0.0f);
+
+  /* Near the hinge the rigid term goes like u/2 and the bow like A*pi*u, so the
+   * margin is u*(0.5 - A*pi) -- positive exactly while A is under the bound.
+   * Sampled where it actually binds. */
+  const float amplitude = (float)kManualCurlPermille / 1000.0f;
+  CHECK(0.5f - amplitude * (float)M_PI > 0.0f);
+  for (int i = 1; i <= 200; i++) {
+    const float u = (float)i / 4000.0f;    /* the first 5% of the sheet */
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+    ManualTurn_LeafPoint(1.0f, u, 0.5f, &x, &y, &z);
+    CHECK(z >= 0.0f);
+  }
+}
+
+static void TestSheetExtentsRejectsNonFiniteGeometry(void) {
+  float matrix[16];
+  Scene3DCamera camera = { 0.0f, 0.0f, 2.6f, 0.9f };
+  Scene3D_BuildViewProjection(&camera, 1600, 900, matrix);
+  float hx = 0.0f, hy = 0.0f;
+
+  /* +Inf is positive, so a bare `> 0` test admits it -- and it divides out to
+   * infinite extents and a sheet of NaN vertices, which draws as nothing at all
+   * rather than as a refusal. */
+  const float infinity = 1.0f / 0.0f;
+  CHECK(!ManualTurn_SheetExtents(matrix, 1600, 900, infinity, 1080.0f, &hx, &hy));
+  CHECK(!ManualTurn_SheetExtents(matrix, 1600, 900, 739.0f, infinity, &hx, &hy));
+  CHECK(!ManualTurn_SheetExtents(matrix, 1600, 900, infinity, infinity, &hx, &hy));
+
+  /* And a sheet solved from a refused projection reports failure rather than
+   * handing the renderer a zeroed placement it might draw. */
+  ManualSheet sheet;
+  CHECK(!ManualSheet_Solve(matrix, 1600, 900, infinity, 1080.0f, true, &sheet));
+}
+
 static void TestFaceFlipsAtTheHalfway(void) {
   CHECK(ManualTurn_FrontFaceVisible(0.0f));
   CHECK(!ManualTurn_FrontFaceVisible(1.0f));
@@ -1276,6 +1715,20 @@ int main(void) {
   TestSheetExtentsReproduceTheRequestedSize();
   TestFaceFlipsAtTheHalfway();
   TestShadeIsBoundedAndDimmestEdgeOn();
+
+  /* Page shape: a manual is not necessarily portrait, and the reader must not
+   * assume the one scan it was built around. */
+  TestNominalGeometryIsTheBooksNotAPages();
+  TestAlbumsCarveAtEveryPageShape();
+  TestTheLeafCoversItsWholeSheetInBothLayouts();
+  TestTheHingeMirrorsWithTheTurnDirection();
+  TestTheSheetNeverSwingsIntoTheCamera();
+  TestTheLensOnlyNarrowsAndLeavesPortraitAlone();
+  TestMeshDensityHoldsItsBudgetAtEveryShape();
+  TestFlatPagesPayNothingForRows();
+  TestZoomCeilingFollowsTheScanNotTheWindow();
+  TestTheCurlCeilingIsDerivedNotChosen();
+  TestSheetExtentsRejectsNonFiniteGeometry();
 
   if (g_failures) {
     printf("manual_pages_test: %d failure(s)\n", g_failures);
