@@ -235,9 +235,17 @@ void ManualView_GoTo(ManualView *view, int item, int count);
  *      what makes a bow safe at all. A bowed sheet DOES fold back on itself in
  *      screen x near the hinge when it is edge-on -- measured 14 px of overlap at
  *      the amplitude below, so it genuinely self-occludes. Painter's order still
- *      renders it correctly because the mesh emits u ascending and the nearer
- *      part of any overlap is always the higher u. Checked over 273,580
- *      overlapping sample pairs: zero wrong-order cases.
+ *      renders it correctly, but ONLY IF THE RENDERER EMITS ITS MESH WITH u AS
+ *      THE OUTER LOOP (column-major). Depth rises monotonically with u, so a
+ *      later-emitted triangle is a nearer one -- but row-major emission resets u
+ *      to 0 on every row, making depth jump BACKWARD at each row boundary and a
+ *      far triangle paint over a near one. Measured 6 out-of-order steps per
+ *      frame that way, versus 0 column-major. The sheet is constant in v, so
+ *      ordering by column costs nothing.
+ *
+ *      This is a CONSTRAINT ON THE RENDERER, not a property of this module, and
+ *      the module cannot enforce it -- ManualTurn_DepthRisesWithU exists so a
+ *      renderer can assert the premise it depends on.
  *
  * Both hold exactly while amplitude <= 0.5/pi ~= 0.159 (the analytic worst case
  * is u=1 as the sheet leaves the spine: 0.5 - A*pi >= 0). kManualCurlPermille is
@@ -308,6 +316,17 @@ bool ManualTurn_SheetExtents(const float matrix[16],
 /* Shade multiplier across the leaf, 0..1: the sheet catches less light as it
  * lifts, which is what sells the fold without a lighting model. */
 float ManualTurn_LeafShade(float turn, float u);
+
+/* True when the leaf's depth rises monotonically with u at this phase, sampled
+ * `samples` times across the sheet.
+ *
+ * This is the premise a painter's-order renderer depends on: it is what makes the
+ * later-emitted triangle the nearer one, and therefore what makes the bowed
+ * sheet's self-overlap resolve correctly with no depth test. Exported so a
+ * renderer (or its test) can assert the property rather than assume it -- the
+ * claim used to live only in this comment, and the comment was wrong about which
+ * way the mesh was emitted. */
+bool ManualTurn_DepthRisesWithU(float turn, int samples);
 
 /* Which face of the leaf is toward the viewer at this phase. With no backface
  * culling BOTH faces rasterise, so the host must pick the texture -- past the

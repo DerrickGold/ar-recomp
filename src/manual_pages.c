@@ -412,6 +412,19 @@ float ManualTurn_LeafShade(float turn, float u) {
   return ClampF((0.55f + 0.45f * facing) * across * bend, 0.0f, 1.0f);
 }
 
+bool ManualTurn_DepthRisesWithU(float turn, int samples) {
+  if (samples < 2) return false;
+  float previous = -1e30f;
+  for (int i = 0; i < samples; i++) {
+    const float u = (float)i / (float)(samples - 1);
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+    ManualTurn_LeafPoint(turn, u, 0.5f, &x, &y, &z);
+    if (z < previous - 1e-5f) return false;
+    previous = z;
+  }
+  return true;
+}
+
 bool ManualTurn_FrontFaceVisible(float turn) {
   return ManualTurn_HingeAngle(turn) <= (float)M_PI * 0.5f;
 }

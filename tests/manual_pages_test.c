@@ -117,6 +117,28 @@ static void TestLetterheadDocumentIsNotAnAlbum(void) {
   free(buf);
 }
 
+/* A SINGLE page is not an album, and the count rule must be what says so.
+ *
+ * The letterhead test above is rejected by the 80%-dominance rule, so the
+ * `count < 2` clause had no fixture of its own -- both weakening it to `< 1` and
+ * deleting it entirely left the suite green. A lone image that DOMINATES its
+ * container (a bare .jpg, or a one-page PDF) slips through every other rule. */
+static void TestASingleDominantImageIsNotAnAlbum(void) {
+  unsigned char *buf = (unsigned char *)calloc(1, 1 << 14);
+  CHECK(buf != NULL);
+  if (!buf) return;
+  /* One page filling essentially the whole container: dominance passes, geometry
+   * is trivially uniform, so ONLY the count rule can reject it. */
+  const size_t at = AppendJpeg(buf, 0, 739, 1080, 2000);
+  ManualPageIndex index;
+  CHECK(ManualPages_CarveAlbum(buf, at, &index) == 1);
+  uint64_t bytes = 0;
+  for (int i = 0; i < index.count; i++) bytes += index.pages[i].length;
+  CHECK(bytes * 100u >= (uint64_t)at * 80u);   /* dominance would pass */
+  CHECK(!ManualPages_LooksLikeAlbum(&index, at));   /* but it is not an album */
+  free(buf);
+}
+
 static void TestMixedGeometryIsNotAnAlbum(void) {
   unsigned char *buf = (unsigned char *)calloc(1, 1 << 16);
   CHECK(buf != NULL);
@@ -174,6 +196,97 @@ static void TestThumbnailEoiDoesNotTruncateAPage(void) {
     /* The page must run to the REAL EOI, not the decoy 20-odd bytes in. */
     CHECK(index.pages[0].length == total);
     CHECK(index.pages[0].width == 0x02E3);
+    CHECK(index.pages[0].height == 0x0438);
+  }
+}
+
+/* RESTART MARKERS. A scanner-produced JPEG often carries a DRI and RST0..RST7
+ * inside the scan; they are payload, not structure. Neither fixture emitted one,
+ * so deleting the RSTn clause from the scan walk left the suite green -- while
+ * real restart-interval pages carved as ZERO. */
+static void TestRestartMarkersInScanDataAreNotMistakenForStructure(void) {
+  unsigned char buf[4096];
+  memset(buf, 0, sizeof buf);
+  size_t at = 0;
+  const unsigned char head[] = { 0xFF, 0xD8 };
+  memcpy(buf + at, head, sizeof head); at += sizeof head;
+  /* DRI: define restart interval. */
+  const unsigned char dri[] = { 0xFF, 0xDD, 0x00, 0x04, 0x00, 0x01 };
+  memcpy(buf + at, dri, sizeof dri); at += sizeof dri;
+  const unsigned char sof[] = { 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x04, 0x38,
+                                0x02, 0xE3, 0x01, 0x01, 0x11, 0x00 };
+  memcpy(buf + at, sof, sizeof sof); at += sizeof sof;
+  const unsigned char sos[] = { 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01,
+                                0x00, 0x00, 0x3F, 0x00 };
+  memcpy(buf + at, sos, sizeof sos); at += sizeof sos;
+  /* Entropy data interleaved with all eight restart markers. */
+  for (int block = 0; block < 8; block++) {
+    for (int i = 0; i < 24; i++) {
+      const unsigned char byte = (unsigned char)(i * 11u + block);
+      buf[at++] = byte;
+      if (byte == 0xFF) buf[at++] = 0x00;
+    }
+    buf[at++] = 0xFF;
+    buf[at++] = (unsigned char)(0xD0 + block);   /* RSTn */
+  }
+  buf[at++] = 0xFF; buf[at++] = 0xD9;
+  const size_t total = at;
+
+  ManualPageIndex index;
+  CHECK(ManualPages_CarveAlbum(buf, total, &index) == 1);
+  if (index.count == 1) {
+    /* The page must span to the REAL EOI, past every restart marker. */
+    CHECK(index.pages[0].length == total);
+    CHECK(index.pages[0].width == 0x02E3);
+    CHECK(index.pages[0].height == 0x0438);
+  }
+}
+
+/* A COMPLETE NESTED JPEG inside an APPn segment -- an Exif thumbnail, which real
+ * scanner and camera output routinely carries.
+ *
+ * The existing decoy-EOI fixture has no nested SOI, so it does not exercise the
+ * `at = end` advance: with `at += 2` instead, the scan re-enters the page it just
+ * recorded and emits the THUMBNAIL as a second page. A 40-page album would carve
+ * as 80 pages of alternating page/thumbnail, and the geometry check would then
+ * reject the whole manual. */
+static void TestNestedThumbnailIsNotCarvedAsItsOwnPage(void) {
+  unsigned char buf[8192];
+  memset(buf, 0, sizeof buf);
+
+  /* Build a complete little JPEG to embed. */
+  unsigned char thumb[512];
+  const size_t thumb_len = AppendJpeg(thumb, 0, 160, 120, 40);
+  CHECK(thumb_len < sizeof thumb);
+
+  size_t at = 0;
+  buf[at++] = 0xFF; buf[at++] = 0xD8;                     /* outer SOI */
+  /* APP1 whose payload IS the complete thumbnail. */
+  const size_t seg = thumb_len + 2;
+  buf[at++] = 0xFF; buf[at++] = 0xE1;
+  buf[at++] = (unsigned char)(seg >> 8);
+  buf[at++] = (unsigned char)(seg & 0xFF);
+  memcpy(buf + at, thumb, thumb_len); at += thumb_len;
+  const unsigned char sof[] = { 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x04, 0x38,
+                                0x02, 0xE3, 0x01, 0x01, 0x11, 0x00 };
+  memcpy(buf + at, sof, sizeof sof); at += sizeof sof;
+  const unsigned char sos[] = { 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01,
+                                0x00, 0x00, 0x3F, 0x00 };
+  memcpy(buf + at, sos, sizeof sos); at += sizeof sos;
+  for (int i = 0; i < 300; i++) {
+    const unsigned char byte = (unsigned char)(i * 13u + 5u);
+    buf[at++] = byte;
+    if (byte == 0xFF) buf[at++] = 0x00;
+  }
+  buf[at++] = 0xFF; buf[at++] = 0xD9;                     /* outer EOI */
+  const size_t total = at;
+
+  ManualPageIndex index;
+  /* ONE page: the outer image. The nested thumbnail is part of it, not a page. */
+  CHECK(ManualPages_CarveAlbum(buf, total, &index) == 1);
+  if (index.count == 1) {
+    CHECK(index.pages[0].length == total);
+    CHECK(index.pages[0].width == 0x02E3);   /* the OUTER geometry, not 160x120 */
     CHECK(index.pages[0].height == 0x0438);
   }
 }
@@ -703,6 +816,59 @@ static void TestSinglePageOpeningsPickTheCorrectHalf(void) {
   CHECK(!ManualSpread_SingleOnRight(&spread));
 }
 
+/* DRIVE THE STATE MACHINE BACKWARDS THROUGH ITS REAL API.
+ *
+ * The two backward tests above set view.turn by HAND, so no test ever ran
+ * BeginTurn(-1) -> AdvanceTurn -> completion. That left the sign of the turn
+ * unguarded in two places: BeginTurn's initial direction, and AdvanceTurn's
+ * `forward` test that reapplies it. Both mutations survived the whole suite while
+ * making a backward turn animate forwards.
+ *
+ * The fix is to exercise the API the way the reader does, and assert the SIGN of
+ * turn at every step -- not just that it ends up on the right item, which both
+ * mutants also did. */
+static void TestBackwardTurnDrivenThroughTheRealApi(void) {
+  const int pages = 40;
+  const int items = ManualPages_SpreadCount(pages);
+  ManualView view;
+  ManualView_Init(&view);
+  ManualView_GoTo(&view, 6, items);
+
+  CHECK(ManualView_BeginTurn(&view, -1, items));
+  /* A backward turn must be NEGATIVE from the very first frame -- that sign is
+   * what tells the renderer which leaf lifts and which way it mirrors. */
+  CHECK(view.turn < 0.0f);
+  CHECK(view.turn_target == 5);
+
+  int steps = 0;
+  float previous = view.turn;
+  while (ManualView_AdvanceTurn(&view, 1.0f / 60.0f, 0.35f)) {
+    CHECK(view.turn < 0.0f);                    /* stays negative throughout */
+    CHECK(fabsf(view.turn) >= fabsf(previous)); /* magnitude only grows */
+    /* And the resolved frame agrees on the direction every single step. */
+    ManualTurnFrame frame;
+    CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+    CHECK(!frame.leaf_on_right);                /* backward lifts the LEFT leaf */
+    previous = view.turn;
+    if (++steps > 1000) break;
+  }
+  CHECK(steps > 3);                             /* it really animated */
+  CHECK(view.turn == 0.0f);
+  CHECK(view.item == 5);
+
+  /* Forward, for contrast: the same drive must be POSITIVE throughout. */
+  ManualView_GoTo(&view, 6, items);
+  CHECK(ManualView_BeginTurn(&view, +1, items));
+  CHECK(view.turn > 0.0f);
+  while (ManualView_AdvanceTurn(&view, 1.0f / 60.0f, 0.35f)) {
+    CHECK(view.turn > 0.0f);
+    ManualTurnFrame frame;
+    CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
+    CHECK(frame.leaf_on_right);                 /* forward lifts the RIGHT leaf */
+  }
+  CHECK(view.item == 7);
+}
+
 /* ── The ordering invariant ───────────────────────────────────────────────── */
 
 /* THE load-bearing assertion of this module.
@@ -750,6 +916,20 @@ static void TestLeafNeverGoesBehindASettledPage(void) {
  *
  * Break monotonicity and the fold renders inside-out. That is why the amplitude
  * is bounded rather than tuned by eye. */
+/* The renderer's mesh must be emitted with u as the OUTER loop, because depth
+ * rises with u and painter's order is the only thing resolving the bowed sheet's
+ * self-overlap. This asserts the module-side premise; the renderer's own ordering
+ * is a constraint the header now states explicitly. */
+static void TestDepthRisesWithUAtEveryPhase(void) {
+  for (int i = -100; i <= 100; i++) {
+    const float turn = (float)i / 100.0f;
+    CHECK(ManualTurn_DepthRisesWithU(turn, 200));
+  }
+  /* Degenerate sample counts are refused rather than reporting success. */
+  CHECK(!ManualTurn_DepthRisesWithU(0.5f, 1));
+  CHECK(!ManualTurn_DepthRisesWithU(0.5f, 0));
+}
+
 static void TestBowKeepsDepthMonotonicInU(void) {
   for (int step = -200; step <= 200; step++) {
     const float turn = (float)step / 200.0f;
@@ -1048,9 +1228,12 @@ static void TestShadeIsBoundedAndDimmestEdgeOn(void) {
 int main(void) {
   TestCarvesEveryPageOfAnAlbum();
   TestLetterheadDocumentIsNotAnAlbum();
+  TestASingleDominantImageIsNotAnAlbum();
   TestMixedGeometryIsNotAnAlbum();
   TestVectorDocumentYieldsNothing();
   TestThumbnailEoiDoesNotTruncateAPage();
+  TestNestedThumbnailIsNotCarvedAsItsOwnPage();
+  TestRestartMarkersInScanDataAreNotMistakenForStructure();
   TestCarveRespectsThePageCap();
 
   TestFitIsExactOnTheConstrainingAxis();
@@ -1073,6 +1256,7 @@ int main(void) {
 
   TestLayoutWidthNeverDependsOnTheOpening();
   TestSinglePageOpeningsPickTheCorrectHalf();
+  TestBackwardTurnDrivenThroughTheRealApi();
   TestForwardTurnLeavesTheLeftPageAlone();
   TestBackwardTurnLeavesTheRightPageAlone();
   TestLeafShowsTheSheetsOwnTwoPages();
@@ -1081,6 +1265,7 @@ int main(void) {
   TestTurnsAtTheCoversResolve();
 
   TestLeafNeverGoesBehindASettledPage();
+  TestDepthRisesWithUAtEveryPhase();
   TestBowKeepsDepthMonotonicInU();
   TestBowVanishesAtTheEndsAndEdges();
   TestBowFollowsTheSurfaceNormal();
