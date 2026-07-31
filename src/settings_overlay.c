@@ -311,6 +311,9 @@ static const MenuTab kTabsSystem[] = {
   TAB(Enhancements, "Game"),
   TAB(Inspector, "Inspector"),
 };
+static const MenuTab kTabsManual[] = {
+  TAB(Manual, "Manual"),
+};
 
 /* The layer editor's tabs are LEVELS ($18), not setting categories. The category
  * field is unused for a custom section; the tab's position IS the level index,
@@ -362,6 +365,11 @@ static const MenuSection kSections[] = {
           kTabsSave),
   SECTION("System", "Host commands, restart and exit, plus the scene inspector.",
           kTabsSystem),
+  /* Added at the END of the player-visible sections on purpose. Every section
+   * above keeps the nav position it already had, which matters because
+   * tests/settings_overlay_test.c indexes them positionally -- an insertion
+   * higher up renumbers the lot. */
+  SECTION("Manual", "Read the game's manual.", kTabsManual),
   /* Last deliberately: it is the only section that can vanish, and keeping it at
    * the end means every other section's nav position is the same whether debug
    * settings are on or off. tests/settings_overlay_test.c indexes sections
@@ -513,6 +521,20 @@ static void ClearSectionResetArm(void) {
 void SettingsOverlay_SetInspectorInfoProvider(
     SettingsOverlayInspectorInfoProvider provider) {
   s_inspector_info_provider = provider;
+}
+
+static SettingsOverlayManualHooks s_manual_hooks;
+
+void SettingsOverlay_SetManualHooks(const SettingsOverlayManualHooks *hooks) {
+  if (hooks) s_manual_hooks = *hooks;
+  else memset(&s_manual_hooks, 0, sizeof s_manual_hooks);
+}
+
+/* Inert until the host injects the reader, which is what lets a target that
+ * links this file without one -- the overlay's own test -- behave as though the
+ * manual does not exist. */
+static bool ManualIsOpen(void) {
+  return s_manual_hooks.is_open && s_manual_hooks.is_open();
 }
 
 void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
@@ -2024,6 +2046,10 @@ void SettingsOverlay_Open(void) {
 
 void SettingsOverlay_Close(void) {
   if (!s_open) return;
+  /* The reader is nested inside this overlay, so closing the overlay closes it
+   * too -- otherwise it would still believe it is open, and the next time the
+   * menu came up the player would land in the manual instead of the menu. */
+  if (s_manual_hooks.close) s_manual_hooks.close();
   StopEditing();
   EndValueHold();
   ClearSectionResetArm();
@@ -2249,6 +2275,11 @@ bool SettingsOverlay_HandleCaptureEvent(const SDL_Event *event) {
 
 bool SettingsOverlay_HandleGamepadEvent(const SDL_Event *event) {
   if (!s_open || !event) return false;
+  /* Before capture, so a pad press while reading pages the manual instead of
+   * being interpreted as menu navigation underneath it. */
+  if (ManualIsOpen() && s_manual_hooks.handle_pad &&
+      s_manual_hooks.handle_pad(event))
+    return true;
   if (SettingsOverlay_HandleCaptureEvent(event)) return true;
 
   InputAction action;
@@ -2335,6 +2366,13 @@ static bool MenuNavForBoundKey(SDL_Keycode key, MenuNav *out) {
 
 bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
   if (!s_open) return false;
+  /* The reader is modal while it is up, so it gets first refusal on every key.
+   * It declines exactly the ones that must never be captured -- F1, which closes
+   * the menu outright -- so there is always a key that exits, whatever state the
+   * reader has got itself into. */
+  if (ManualIsOpen() && s_manual_hooks.handle_key &&
+      s_manual_hooks.handle_key(key, pressed, repeat))
+    return true;
   if (key == SDLK_F2) return false;
   if (!pressed) {
     /* Releasing the key that began a held step ends it and flushes the write. */
@@ -3406,6 +3444,16 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
           s_renderer, &output_width, &output_height) ||
       output_width <= 0 || output_height <= 0)
     return;
+
+  /* THE MANUAL SUPERSEDES THE MENU, and draws instead of it rather than over it.
+   * The reader is a mode this overlay is in, not a peer of it -- s_open stays
+   * true throughout, so everything that asks whether the menu has the game
+   * suspended keeps getting one answer. Full output, not game_viewport: a page
+   * of text wants the window, not the letterboxed 4:3 area the game sits in. */
+  if (ManualIsOpen() && s_manual_hooks.render) {
+    s_manual_hooks.render((SDL_Rect){ 0, 0, output_width, output_height });
+    return;
+  }
 
   s_match_game_scale_percent =
       ((game_viewport.h * 100 + 112) / 224 + 12) / 25 * 25;

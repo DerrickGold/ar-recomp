@@ -818,6 +818,10 @@ static int FormatGamepadSlot(char *buffer, int buffer_size,
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
     kSettingCat_Inspector, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
     NULL, NULL }
+#define MANUAL_ACTION_SETTING(id, text, help) \
+  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
+    kSettingCat_Manual, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
+    NULL, NULL }
 #define SAVE_ACTION_SETTING(id, text, help) \
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
     kSettingCat_Save, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
@@ -1638,6 +1642,18 @@ const SettingDesc g_setting_descs[] = {
       "Export every resident BG tilemap, OBJ animation-tile atlas, all 128 "
       "OAM sprites, palettes, raw PPU memory, and a metadata index as PNG "
       "and data files in this run's diagnostic folder."),
+  /* The in-game manual. Its own section rather than a row under System > Tools:
+   * it is something a player reaches for, not a host command, and the reader it
+   * opens is a full mode rather than a toggle. */
+  MANUAL_ACTION_SETTING(
+      "manual_open", "Read the manual",
+      "Open the scanned game manual. Arrows or the shoulder buttons turn "
+      "pages, +/- zooms, Escape returns here."),
+  BOOL_SETTING(manual_spreads, NULL, "Two-page spreads",
+               "Show the manual as facing pages, the way the booklet reads. "
+               "Artwork drawn across the gutter stays whole; turn this off to "
+               "read one page at a time, which suits a wide, short manual.",
+               kSettingCat_Manual, true, false, NULL, NULL),
   ACTION_SETTING("toggle_pause", "Pause / resume",
                  "Toggle game pause after the settings overlay closes."),
   ACTION_SETTING("toggle_turbo", "Toggle turbo",
@@ -2255,6 +2271,7 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Extras: return "Tools";
     case kSettingCat_Enhancements: return "Game";
     case kSettingCat_Inspector: return "Inspector";
+    case kSettingCat_Manual: return "Manual";
     case kSettingCat_Count: break;
   }
   return "Unknown";

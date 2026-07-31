@@ -10,9 +10,16 @@
 #include "host_display.h"
 #include "snes/ppu.h"
 
-/* HD art substitution is PNG-only and decoded once when textures are loaded. */
+/* HD art substitution is PNG-only and decoded once when textures are loaded.
+ *
+ * This TU owns STB_IMAGE_IMPLEMENTATION for the WHOLE binary, so the format
+ * allowlist below is the binary's, not this file's. JPEG is here for the in-game
+ * manual (src/manual_reader.c), whose scanned pages are baseline JPEG -- the
+ * STBI_ONLY_* macros are a positive allowlist, so that is one line rather than a
+ * second implementation and a duplicate-symbol link error. */
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
 #define STBI_NO_LINEAR
 #define STBI_NO_HDR
 #include "stb_image.h"

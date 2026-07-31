@@ -627,6 +627,20 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_manual_pages_test PRIVATE m)
     add_test(NAME actraiser_manual_pages COMMAND actraiser_manual_pages_test)
+
+    # The reader's control scheme and its per-frame decode budget. Its own
+    # translation unit precisely so this target exists: manual_reader.c owns
+    # textures, a JPEG decoder and the window, and none of that has to be linked
+    # to assert that PageDown turns a page.
+    add_executable(actraiser_manual_input_test
+        tests/manual_input_test.c
+        src/manual_input.c
+    )
+    target_include_directories(actraiser_manual_input_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_manual_input_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_manual_input COMMAND actraiser_manual_input_test)
 endif()
 
 # ── Manual reader proof of concept (opt-in, not part of `all`) ────────────────

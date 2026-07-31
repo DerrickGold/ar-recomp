@@ -48,6 +48,27 @@ void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
                                          SettingsOverlayLayerRoomFn room,
                                          SettingsOverlayLayerSaveFn save);
 
+/* The in-game manual, injected for the same reason the layer editor is: the
+ * reader owns textures and an image decoder, and calling it directly from here
+ * would drag both into every target that links this file -- including
+ * tests/settings_overlay_test.c, which has no renderer at all.
+ *
+ * The reader is a MODE THIS OVERLAY IS IN, not a peer of it. While it is open
+ * SettingsOverlay_IsOpen() stays true, so nothing else in the host has to learn
+ * about a third state: the ~18 places that ask whether the menu has the game
+ * suspended keep getting one answer. Unhooked, every call below is inert and the
+ * overlay behaves exactly as it did before the manual existed. */
+typedef struct SettingsOverlayManualHooks {
+  bool (*is_open)(void);
+  void (*close)(void);
+  void (*render)(SDL_Rect viewport);
+  /* Return true to consume. The reader MUST decline the keys that close the
+   * menu outright, so a reader that fails to draw can never trap the player. */
+  bool (*handle_key)(SDL_Keycode key, bool pressed, bool repeat);
+  bool (*handle_pad)(const SDL_Event *event);
+} SettingsOverlayManualHooks;
+void SettingsOverlay_SetManualHooks(const SettingsOverlayManualHooks *hooks);
+
 bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);

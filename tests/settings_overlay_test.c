@@ -68,6 +68,9 @@ enum {
   kSection_Cheats,
   kSection_Save,
   kSection_System,
+  /* The in-game manual. Added at the end of the player-visible sections so
+   * every section above kept the ordinal it already had here. */
+  kSection_Manual,
   /* Developer-only, so it is present in the nav column only while
    * show_debug_settings is on. Last on purpose: every section above keeps the
    * same ordinal whether it is shown or hidden. */
@@ -238,22 +241,25 @@ static void CheckLayerEditorSection(void) {
    *
    * Without this the only evidence would be positional, and Layers is last -- so
    * its raw index and its visible position coincide and a MoveSection that
-   * happily lands on a hidden section looks identical to one that skips it. */
-  NavToSection(kSection_System);
+   * happily lands on a hidden section looks identical to one that skips it.
+   *
+   * Driven from Manual, the last PLAYER-visible section -- which is the property
+   * under test, not System specifically. */
+  NavToSection(kSection_Manual);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   int wrapped = -1;
   CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, &total));
   CHECK(wrapped == 0);
   CHECK(total == kPlayerSectionCount);
-  /* And UP from the first must reach System, not the hidden section past it. */
+  /* And UP from the first must reach Manual, not the hidden section past it. */
   CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
   CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
-  CHECK(wrapped == kSection_System);
+  CHECK(wrapped == kSection_Manual);
 
   g_settings.show_debug_settings = true;
   CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, &total));
   CHECK(total == kDebugSectionCount);
-  /* With debug on, DOWN from System reaches Layers and its position is the last
+  /* With debug on, DOWN from Manual reaches Layers and its position is the last
    * one -- which is what pins the reported ordinal to the VISIBLE numbering that
    * the nav column draws in. */
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
