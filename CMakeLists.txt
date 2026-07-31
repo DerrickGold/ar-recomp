@@ -642,26 +642,3 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_manual_input_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_manual_input COMMAND actraiser_manual_input_test)
 endif()
-
-# ── Manual reader proof of concept (opt-in, not part of `all`) ────────────────
-#
-# A standalone window that reads page images straight out of a scan-album PDF, so
-# the reader's FEEL -- turn timing, easing, zoom rate, the light on the leaf --
-# can be iterated with no ROM and no game boot. It links the game's own
-# manual_pages and scene3d_math plus stb, so what is tuned here is what ships.
-#
-# EXCLUDE_FROM_ALL: it is a development tool, and `all` must keep building only
-# the game and its tests.
-option(ACTRAISER_BUILD_MANUAL_POC "Build the standalone manual-reader demo" ON)
-if(ACTRAISER_BUILD_MANUAL_POC)
-    add_executable(manual_poc EXCLUDE_FROM_ALL
-        tools/manual_poc.c
-        src/manual_pages.c
-        src/scene3d_math.c
-    )
-    target_include_directories(manual_poc PRIVATE
-        ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/third_party/stb
-    )
-    target_link_libraries(manual_poc PRIVATE SDL3::SDL3 m)
-endif()
