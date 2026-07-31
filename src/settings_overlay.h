@@ -69,6 +69,30 @@ typedef struct SettingsOverlayManualHooks {
 } SettingsOverlayManualHooks;
 void SettingsOverlay_SetManualHooks(const SettingsOverlayManualHooks *hooks);
 
+/* ── The game's menu font, for a nested mode to draw with ──────────────────
+ *
+ * The overlay owns the font atlases: they are built from the ROM's own dialog
+ * glyphs, in the game's own menu colors. A nested mode that drew its text with
+ * SDL_RenderDebugText instead would be an 8-pixel developer font sitting inside
+ * a menu rendered from the game's -- which is what the manual reader did, and it
+ * was illegible on a large window.
+ *
+ * Coordinates and sizes are in RENDERER OUTPUT PIXELS, not the overlay's own
+ * scaled logical space, because a fullscreen mode is not laid out on the menu's
+ * grid and should not have to pretend it is. `scale` multiplies the 8x8 glyph;
+ * `alpha` fades the whole run and is what lets a hint line come and go without
+ * the caller reaching into the atlas. */
+enum { kSettingsOverlayGlyphSize = 8 };
+
+/* Output-pixel width a run would occupy. Lets a caller centre or box it without
+ * duplicating the glyph advance. */
+int SettingsOverlay_GameTextWidth(const char *text, int scale);
+
+/* Draw at output pixels. No-op before the atlases exist, so a caller does not
+ * have to know the overlay's initialisation order. */
+void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
+                                  const char *text);
+
 bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);
