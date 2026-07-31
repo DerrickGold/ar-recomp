@@ -363,13 +363,13 @@ static const MenuSection kSections[] = {
           kTabsCheats),
   SECTION("Save", "Inspect and stage edits to the battery save.",
           kTabsSave),
+  /* Before System: the manual is something a PLAYER reaches for, while System
+   * holds host commands, restart and exit. Inserting here renumbers everything
+   * below it, and tests/settings_overlay_test.c indexes sections positionally,
+   * so its enum moves with this. */
+  SECTION("Manual", "Read the game's manual.", kTabsManual),
   SECTION("System", "Host commands, restart and exit, plus the scene inspector.",
           kTabsSystem),
-  /* Added at the END of the player-visible sections on purpose. Every section
-   * above keeps the nav position it already had, which matters because
-   * tests/settings_overlay_test.c indexes them positionally -- an insertion
-   * higher up renumbers the lot. */
-  SECTION("Manual", "Read the game's manual.", kTabsManual),
   /* Last deliberately: it is the only section that can vanish, and keeping it at
    * the end means every other section's nav position is the same whether debug
    * settings are on or off. tests/settings_overlay_test.c indexes sections
@@ -2587,6 +2587,44 @@ static void DrawTextN(const MenuLayout *layout, int x, int y,
 static void DrawText(const MenuLayout *layout, int x, int y,
                      const char *text, TextStyle style) {
   DrawTextN(layout, x, y, text, 256, style);
+}
+
+/* ── The game font at output-pixel coordinates ─────────────────────────────
+ *
+ * For a nested fullscreen mode -- the manual reader -- which is not laid out on
+ * the menu's logical grid and so cannot go through DrawText's MenuLayout. Same
+ * atlas, same glyphs, same colors; only the coordinate space differs. */
+
+int SettingsOverlay_GameTextWidth(const char *text, int scale) {
+  if (!text || scale <= 0) return 0;
+  return (int)strlen(text) * kGlyphSize * scale;
+}
+
+void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
+                                  const char *text) {
+  if (!text || scale <= 0 || alpha == 0) return;
+  SDL_Texture *texture = s_font_textures[kText_Normal];
+  if (!s_renderer || !texture) return;
+
+  SDL_SetTextureAlphaMod(texture, alpha);
+  for (int i = 0; text[i]; i++) {
+    unsigned char ch = (unsigned char)text[i];
+    if (ch == ' ') continue;
+    if (!s_glyph_defined[ch]) ch = '?';
+    if (!s_glyph_defined[ch]) continue;
+    const SDL_FRect source = {
+      (float)((ch & 15) * kGlyphSize), (float)((ch >> 4) * kGlyphSize),
+      (float)kGlyphSize, (float)kGlyphSize,
+    };
+    const SDL_FRect destination = {
+      (float)(x + i * kGlyphSize * scale), (float)y,
+      (float)(kGlyphSize * scale), (float)(kGlyphSize * scale),
+    };
+    SDL_RenderTexture(s_renderer, texture, &source, &destination);
+  }
+  /* Restored: the atlas is shared with the menu's own drawing, which does not
+   * set an alpha of its own and would inherit this one. */
+  SDL_SetTextureAlphaMod(texture, 255);
 }
 
 static int CappedTextLength(const char *text, int max_chars) {

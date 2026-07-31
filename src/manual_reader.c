@@ -10,6 +10,8 @@
 #include "manual_pages.h"
 #include "scene3d_math.h"
 #include "settings.h"
+/* For the game's own menu font: the overlay owns the atlases. */
+#include "settings_overlay.h"
 
 /* Declarations only. src/hd_replacement_host.c owns STB_IMAGE_IMPLEMENTATION
  * for the whole binary; this file must not define it again. JPEG support is one
@@ -62,6 +64,10 @@ static struct {
   SDL_Vertex verts[kPageMaxVerts];
   int indices[kPageMaxIndices];
 } s_reader;
+
+/* Re-shows the hint line. Defined with the drawing it belongs to; declared here
+ * because opening the reader and every input handler bump it. */
+static void BumpHint(void);
 
 /* ── Loading ───────────────────────────────────────────────────────────────── */
 
@@ -158,6 +164,7 @@ bool ManualReader_Open(void) {
    * frame rather than from whenever the reader was last closed -- otherwise the
    * first turn after a long pause advances by the whole gap at once. */
   s_reader.last_tick_ns = 0;
+  BumpHint();
   fprintf(stderr, "[manual] opened (%s)\n", ManualReader_Status());
   return true;
 }
@@ -187,6 +194,10 @@ static void LayoutDimensions(int *out_w, int *out_h) {
 }
 
 static void ApplyIntent(ManualIntent intent, SDL_Rect viewport) {
+  /* ANY input brings the hint back, whatever it was -- someone reaching for a
+   * control is exactly who needs to be told what the controls are. One place,
+   * so keyboard, pad and mouse cannot drift apart. */
+  BumpHint();
   int pw = 0, ph = 0;
   LayoutDimensions(&pw, &ph);
   const int vw = viewport.w > 0 ? viewport.w : 1;
@@ -318,6 +329,7 @@ bool ManualReader_HandleMouse(const SDL_Event *event) {
 
     case SDL_EVENT_MOUSE_MOTION:
       if (s_dragging && have_point) {
+        BumpHint();
         int pw = 0, ph = 0;
         LayoutDimensions(&pw, &ph);
         /* Delta between converted points rather than the event's own xrel/yrel,
@@ -507,6 +519,73 @@ static bool BuildLeaf(const ManualMesh *density, float turn,
   return true;
 }
 
+/* ── The hint line ─────────────────────────────────────────────────────────
+ *
+ * The reader has no chrome, so every control is discoverable only by being told
+ * -- but a permanent bar across a page of a manual is the one thing a manual
+ * reader must not have. So it is shown, held, and then faded out, and any input
+ * brings it back.
+ *
+ * Drawn in the GAME'S OWN MENU FONT, through the overlay that owns the atlas.
+ * SDL_RenderDebugText is an 8-pixel developer font: fine in a standalone demo
+ * window, and unreadably small inside a menu on a large display, which is
+ * exactly how it looked. */
+enum {
+  kHintHoldMs = 3200,   /* fully lit after any input */
+  kHintFadeMs = 900,    /* then out over this long */
+};
+
+/* Bumped by every input, on the MAIN thread; read by the draw on the present
+ * thread. A word-sized store either lands or does not, and the only consequence
+ * of losing the race is that the hint fades one frame late. */
+static uint64_t s_hint_shown_ns;
+
+static void BumpHint(void) { s_hint_shown_ns = SDL_GetTicksNS(); }
+
+static uint8_t HintAlpha(uint64_t now) {
+  const uint64_t shown = s_hint_shown_ns;
+  if (shown == 0) return 0;
+  const double age_ms = (double)(now - shown) / 1e6;
+  if (age_ms <= (double)kHintHoldMs) return 255;
+  const double faded = age_ms - (double)kHintHoldMs;
+  if (faded >= (double)kHintFadeMs) return 0;
+  return (uint8_t)(255.0 * (1.0 - faded / (double)kHintFadeMs));
+}
+
+static void DrawHint(SDL_Rect viewport, uint64_t now, bool spread) {
+  const uint8_t alpha = HintAlpha(now);
+  if (alpha == 0) return;
+
+  char hint[192];
+  snprintf(hint, sizeof hint,
+           "%s %d/%d   ARROWS PAGE   +/- ZOOM   %s   ESC BACK",
+           spread ? "OPENING" : "PAGE", s_reader.view.item + 1, ItemCount(),
+           Zoomed() ? "DRAG TO PAN" : "CLICK A PAGE TO TURN");
+
+  /* Scaled to the window rather than fixed, so the line is the same physical
+   * size on a 720p handheld and a 4K display instead of shrinking to nothing on
+   * the one where there is most room for it. */
+  int scale = viewport.h / 320;
+  if (scale < 1) scale = 1;
+  if (scale > 4) scale = 4;
+  const int text_w = SettingsOverlay_GameTextWidth(hint, scale);
+  const int glyph = kSettingsOverlayGlyphSize * scale;
+  const int pad = glyph / 2;
+  const int bar_h = glyph + pad * 2;
+  const int x = viewport.x + (viewport.w - text_w) / 2;
+  const int y = viewport.y + viewport.h - bar_h + pad;
+
+  /* The backing plate fades with the text; a bar that outlived it would be a
+   * black stripe across the page for no reason. Alpha is scaled rather than
+   * fixed so the plate never survives the words it exists to make readable. */
+  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, (Uint8)(alpha * 150 / 255));
+  SDL_RenderFillRect(g_renderer, &(SDL_FRect){
+      (float)viewport.x, (float)(viewport.y + viewport.h - bar_h),
+      (float)viewport.w, (float)bar_h });
+  SettingsOverlay_DrawGameText(x, y, scale, alpha, hint);
+}
+
 static void DrawSheet(int page, const ManualMesh *density,
                       const float matrix[16], int view_w, int view_h, float x0,
                       float x1, float half_y, float pan_x, float pan_y) {
@@ -651,21 +730,5 @@ void ManualReader_Render(SDL_Rect viewport) {
     }
   }
 
-  /* A hint line. The reader has no chrome of its own and every control is
-   * discoverable only by being told, so this is the whole interface besides the
-   * pages. */
-  char hint[160];
-  const int items = ItemCount();
-  snprintf(hint, sizeof hint,
-           "%s %d/%d   arrows/L-R page   +/- zoom   %s   Esc back",
-           spread ? "Opening" : "Page", s_reader.view.item + 1, items,
-           Zoomed() ? "drag to pan" : "click a page to turn");
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 170);
-  SDL_RenderFillRect(g_renderer,
-                     &(SDL_FRect){ (float)viewport.x,
-                                   (float)(viewport.y + viewport.h) - 20.0f,
-                                   (float)viewport.w, 20.0f });
-  SDL_SetRenderDrawColor(g_renderer, 226, 220, 208, 255);
-  SDL_RenderDebugText(g_renderer, (float)viewport.x + 8.0f,
-                      (float)(viewport.y + viewport.h) - 14.0f, hint);
+  DrawHint(viewport, now, spread);
 }
