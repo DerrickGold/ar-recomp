@@ -54,10 +54,10 @@ build again later. After a successful build the builder offers to remove it and
 keep just the game - it will tell you how much space that frees.
 
 Nothing you need to play is touched: the game, your settings, your saves and any
-music or graphics you added all stay. Afterwards run-build still works as a
-launcher, it simply no longer offers to build - so the builder itself is kept
-(it is small), and only the toolchain it needs goes. If you ever do want to
-rebuild, download this package again.
+music or graphics you added, and the bundled manual all stay. Afterwards
+run-build still works as a launcher, it simply no longer offers to build - so
+the builder itself is kept (it is small), and only the toolchain it needs goes.
+If you ever do want to rebuild, download this package again.
 
 You can also do it by hand. These folders inside "utils" are only for building
 and are safe to delete. Note it is "utils/tools/toolchain", not all of
@@ -102,8 +102,9 @@ WHAT THE FOLDERS ARE
                   opens as a launcher instead.
 - run-game.*      created by the build; press it to play, every time.
 - utils/          the build tools AND the files the game itself needs while
-                  running - your settings, saves, and assets live here, so keep
-                  it. See "free up space" above for what is safe to remove.
+                  running - your settings, saves, manual, and assets live here,
+                  so keep it. See "free up space" above for what is safe to
+                  remove.
 - utils/defaults/ this version's stock settings, kept separately so upgrading
                   never overwrites yours. Do not edit these; edit the copies in
                   utils/ instead.

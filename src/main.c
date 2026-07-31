@@ -1038,11 +1038,16 @@ int main(int argc, char **argv) {
 
   /* The in-game manual, injected for the same reason: it owns textures and an
    * image decoder, and the overlay's own test links settings_overlay.c with no
-   * renderer at all. Nothing is loaded here -- the reader reads its file the
-   * first time a player actually opens it. */
+   * renderer at all. Nothing is loaded here -- the availability hook reads and
+   * indexes the file when the overlay first needs it; page textures remain lazy
+   * until the player opens the reader. */
   static const SettingsOverlayManualHooks kManualHooks = {
-    ManualReader_IsOpen, ManualReader_Close, ManualReader_Render,
-    ManualReader_HandleKey, ManualReader_HandleGamepadEvent,
+    .available = ManualReader_Available,
+    .is_open = ManualReader_IsOpen,
+    .close = ManualReader_Close,
+    .render = ManualReader_Render,
+    .handle_key = ManualReader_HandleKey,
+    .handle_pad = ManualReader_HandleGamepadEvent,
   };
   SettingsOverlay_SetManualHooks(&kManualHooks);
 
@@ -1265,6 +1270,10 @@ int main(int argc, char **argv) {
             DestroyDioramaTextures();
             CreateDioramaTextures();
           }
+          /* Manual pages are STATIC textures too. Drop their cache before any
+           * stale pointer can be mistaken for a resident page; the next manual
+           * frame re-decodes from the retained PDF bytes under its normal budget. */
+          ManualReader_DestroyTextures();
           HdReplacementHost_ReloadTextures();
           if (!SettingsOverlay_ReloadTextures(rom_data, rom_size))
             fprintf(stderr,
@@ -1793,6 +1802,7 @@ int main(int argc, char **argv) {
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
   SDL_DestroyTexture(g_sim3d_flat_texture);
+  ManualReader_DestroyTextures();
   SettingsOverlay_Destroy();
   /* Release the game coroutine's stack mapping / fiber. Safe here: the game
    * thread is this thread and the main loop has exited, so nothing can be

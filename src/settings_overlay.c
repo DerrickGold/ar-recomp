@@ -264,6 +264,9 @@ typedef struct MenuSection {
    * a rake does to a parallax rate has no business in a player's menu, and
    * hiding only its rows would leave an empty section in the nav column. */
   bool debug_only;
+  /* Hidden when the host has no manual input. Kept as section metadata rather
+   * than a label comparison so renaming the UI cannot change behavior. */
+  bool requires_manual;
 } MenuSection;
 
 #define TAB(cat, name) { kSettingCat_##cat, name, NULL, 0 }
@@ -336,11 +339,18 @@ _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
 #undef TAB
 #undef PAGE_TAB
 
-#define SECTION(name, blurb, tabs) \
-  { name, blurb, tabs, (int)(sizeof(tabs) / sizeof((tabs)[0])), false, false }
+#define SECTION(name_, blurb_, tabs_) \
+  { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
+    .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])) }
+#define MANUAL_SECTION(name_, blurb_, tabs_) \
+  { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
+    .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])), \
+    .requires_manual = true }
 /* A section whose rows this file builds, and which is developer-only. */
-#define CUSTOM_DEBUG_SECTION(name, blurb, tabs) \
-  { name, blurb, tabs, (int)(sizeof(tabs) / sizeof((tabs)[0])), true, true }
+#define CUSTOM_DEBUG_SECTION(name_, blurb_, tabs_) \
+  { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
+    .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])), \
+    .custom_rows = true, .debug_only = true }
 
 /* Icon maps below are indexed by position in this array — keep the two in the
  * same order. Restart/Exit are no longer promoted nav leaves: they are the
@@ -367,11 +377,11 @@ static const MenuSection kSections[] = {
    * holds host commands, restart and exit. Inserting here renumbers everything
    * below it, and tests/settings_overlay_test.c indexes sections positionally,
    * so its enum moves with this. */
-  SECTION("Manual", "Read the game's manual.", kTabsManual),
+  MANUAL_SECTION("Manual", "Read the game's manual.", kTabsManual),
   SECTION("System", "Host commands, restart and exit, plus the scene inspector.",
           kTabsSystem),
-  /* Last deliberately: it is the only section that can vanish, and keeping it at
-   * the end means every other section's nav position is the same whether debug
+  /* Last deliberately: it is the developer-only section, and keeping it at the
+   * end means every player section's nav position is the same whether debug
    * settings are on or off. tests/settings_overlay_test.c indexes sections
    * positionally, so an insertion anywhere above here would renumber them. */
   CUSTOM_DEBUG_SECTION("Layers",
@@ -380,6 +390,7 @@ static const MenuSection kSections[] = {
 };
 
 #undef SECTION
+#undef MANUAL_SECTION
 #undef CUSTOM_DEBUG_SECTION
 
 enum {
@@ -535,6 +546,10 @@ void SettingsOverlay_SetManualHooks(const SettingsOverlayManualHooks *hooks) {
  * manual does not exist. */
 static bool ManualIsOpen(void) {
   return s_manual_hooks.is_open && s_manual_hooks.is_open();
+}
+
+static bool ManualAvailable(void) {
+  return s_manual_hooks.available && s_manual_hooks.available();
 }
 
 void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
@@ -1155,12 +1170,14 @@ static SDL_Texture *CreateDialogFrameTexture(const uint8_t *rom_data,
  * player at the top of a four-tab section. Rows are the visible descriptors
  * of the active tab's category, in descriptor-table order. */
 /* A whole section can be hidden, which tabs and rows could already do but
- * sections could not -- the nav column was a fixed eight and said so. The layer
- * editor is developer-only, and hiding only its rows would leave an empty
- * section for a player to walk into. */
+ * sections could not. The layer editor is developer-only, and the Manual has no
+ * useful UI without an input PDF; hiding only their rows would leave empty/dead
+ * sections for a player to walk into. */
 static bool SectionHidden(int section) {
   if (section < 0 || section >= kSectionCount) return true;
-  return kSections[section].debug_only && !g_settings.show_debug_settings;
+  const MenuSection *candidate = &kSections[section];
+  if (candidate->debug_only && !g_settings.show_debug_settings) return true;
+  return candidate->requires_manual && !ManualAvailable();
 }
 
 static int VisibleSectionCount(void) {
@@ -2104,11 +2121,9 @@ bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
   /* Positions among the VISIBLE sections, matching what the column draws and
    * what top_ordinal counts in.
    *
-   * Indistinguishable from reporting s_section while the only hideable section is
-   * the LAST one -- its raw index and its visible position are equal, so no test
-   * can tell the two apart today. Correct anyway, because it stops being equal
-   * the moment a hideable section is added anywhere else, and the symptom then
-   * would be a nav cursor that draws on the wrong row. */
+   * This differs from s_section whenever Manual is absent: System and Layers
+   * close the gap left by its raw index. Reporting the raw index there would draw
+   * the nav cursor on the wrong row. */
   if (selected_ordinal) *selected_ordinal = ActiveVisibleSectionPosition();
   if (top_ordinal) *top_ordinal = s_nav_top_row;
   if (visible_rows) *visible_rows = s_nav_visible_rows;
