@@ -60,6 +60,19 @@ ManualIntent ManualInput_PadIntent(SDL_GamepadButton button, bool zoomed) {
   }
 }
 
+const char *ManualInput_HintText(ManualHintDevice device, bool zoomed) {
+  /* Upper case throughout: the ROM's dialog font has no lower-case glyphs, and
+   * the overlay substitutes '?' for anything it cannot draw. */
+  if (device == kManualHintDevice_Gamepad) {
+    /* Named for what ManualInput_PadIntent actually maps. B closes because East
+     * is "back" everywhere else in this menu. */
+    return zoomed ? "L/R PAGE   D-PAD PANS   A/X ZOOM   B BACK"
+                  : "L/R OR D-PAD PAGE   A/X ZOOM   B BACK";
+  }
+  return zoomed ? "ARROWS PAN   PGUP/PGDN PAGE   +/- ZOOM   DRAG PANS   ESC BACK"
+                : "ARROWS PAGE   +/- ZOOM   CLICK A PAGE TO TURN   ESC BACK";
+}
+
 int ManualInput_NextDecode(const int *wanted, int wanted_count,
                            bool (*cached)(int page, void *user), void *user) {
   if (!wanted || !cached) return -1;

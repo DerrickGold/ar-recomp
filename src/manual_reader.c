@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "host_display.h"
+#include "input_map.h"
 #include "manual_input.h"
 #include "manual_pages.h"
 #include "scene3d_math.h"
@@ -68,6 +69,13 @@ static struct {
 /* Re-shows the hint line. Defined with the drawing it belongs to; declared here
  * because opening the reader and every input handler bump it. */
 static void BumpHint(void);
+
+/* WHICH DEVICE THE HINT SHOULD DESCRIBE. Tracked rather than queried, because
+ * the question is "what is the player holding", and InputMap_GamepadIsActive
+ * answers the narrower "is a pad button down THIS INSTANT" -- true only while
+ * something is pressed, so a hint keyed off it would flicker between devices.
+ * Every input handler sets this, so it follows whatever was last touched. */
+static ManualHintDevice s_hint_device;
 
 /* ── Loading ───────────────────────────────────────────────────────────────── */
 
@@ -164,6 +172,11 @@ bool ManualReader_Open(void) {
    * frame rather than from whenever the reader was last closed -- otherwise the
    * first turn after a long pause advances by the whole gap at once. */
   s_reader.last_tick_ns = 0;
+  /* Seeded from what is PLUGGED IN, because the reader opens with no input of
+   * its own yet -- and on a handheld, where the pad is the only input there is,
+   * a first frame captioned "ESC BACK" is instructions for absent hardware. */
+  s_hint_device = InputMap_GamepadCount() > 0 ? kManualHintDevice_Gamepad
+                                              : kManualHintDevice_Keyboard;
   BumpHint();
   fprintf(stderr, "[manual] opened (%s)\n", ManualReader_Status());
   return true;
@@ -253,6 +266,7 @@ static bool Zoomed(void) { return s_reader.view.zoom > 1.001f; }
 bool ManualReader_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
   if (!s_reader.open) return false;
   (void)repeat;
+  if (pressed) s_hint_device = kManualHintDevice_Keyboard;
   if (!pressed) return true;   /* modal: swallow the release too */
 
   /* NEVER SWALLOWED. Escape leaves the reader, and if the reader is somehow
@@ -276,6 +290,7 @@ bool ManualReader_HandleGamepadEvent(const SDL_Event *event) {
   if (!s_reader.open || !event) return false;
   if (event->type == SDL_EVENT_GAMEPAD_BUTTON_UP) return true;
   if (event->type != SDL_EVENT_GAMEPAD_BUTTON_DOWN) return false;
+  s_hint_device = kManualHintDevice_Gamepad;
   ApplyIntent(ManualInput_PadIntent((SDL_GamepadButton)event->gbutton.button,
                                     Zoomed()),
               s_last_viewport);
@@ -287,6 +302,9 @@ static int s_drag_x, s_drag_y;
 
 bool ManualReader_HandleMouse(const SDL_Event *event) {
   if (!s_reader.open || !event) return false;
+  /* The mouse shares the keyboard's line: same sitting-at-a-desk case, and the
+   * click and drag hints only make sense beside the key ones. */
+  s_hint_device = kManualHintDevice_Keyboard;
   const SDL_Rect viewport = s_last_viewport;
 
   /* Window units to renderer-output pixels. Not the same thing on a high-DPI
@@ -557,10 +575,9 @@ static void DrawHint(SDL_Rect viewport, uint64_t now, bool spread) {
   if (alpha == 0) return;
 
   char hint[192];
-  snprintf(hint, sizeof hint,
-           "%s %d/%d   ARROWS PAGE   +/- ZOOM   %s   ESC BACK",
+  snprintf(hint, sizeof hint, "%s %d/%d   %s",
            spread ? "OPENING" : "PAGE", s_reader.view.item + 1, ItemCount(),
-           Zoomed() ? "DRAG TO PAN" : "CLICK A PAGE TO TURN");
+           ManualInput_HintText(s_hint_device, Zoomed()));
 
   /* Scaled to the window rather than fixed, so the line is the same physical
    * size on a 720p handheld and a 4K display instead of shrinking to nothing on

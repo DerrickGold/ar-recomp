@@ -64,4 +64,25 @@ ManualIntent ManualInput_PadIntent(SDL_GamepadButton button, bool zoomed);
 int ManualInput_NextDecode(const int *wanted, int wanted_count,
                            bool (*cached)(int page, void *user), void *user);
 
+/* ── What to TELL the player ──────────────────────────────────────────────
+ *
+ * The reader has no chrome, so its hint line is the only place its controls are
+ * ever named -- which makes a hint line that names the wrong device worse than
+ * none. On a handheld the pad is the only input there is, and a line reading
+ * "ESC BACK" is then instructions for a keyboard nobody is holding.
+ *
+ * The label lives here, beside the mapping it describes, so the two are edited
+ * together and a test can hold them to each other. */
+typedef enum ManualHintDevice {
+  /* Keyboard and mouse share a line: they are the same sitting-at-a-desk case,
+   * and both are usually present together. */
+  kManualHintDevice_Keyboard = 0,
+  kManualHintDevice_Gamepad,
+} ManualHintDevice;
+
+/* The controls half of the hint line -- no page counter, which is the caller's.
+ * `zoomed` selects the wording because the controls themselves change with it:
+ * the arrows and the d-pad pan when zoomed and page when not. Never NULL. */
+const char *ManualInput_HintText(ManualHintDevice device, bool zoomed);
+
 #endif  /* MANUAL_INPUT_H */
