@@ -5,6 +5,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -30,6 +32,45 @@ func TestEmbeddedAssetsArePresentAndWellFormed(t *testing.T) {
 	// A truncated PDF is the likely corruption; the trailer proves the tail.
 	if !bytes.Contains(manualPDF[max(0, len(manualPDF)-2048):], []byte("%%EOF")) {
 		t.Error("manual PDF has no EOF trailer; it may be truncated")
+	}
+}
+
+func TestBundledManualIsMaterializedForTheGame(t *testing.T) {
+	root := t.TempDir()
+	if err := materializeBundledManual(root); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "game-assets", "manual.pdf")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, manualPDF) {
+		t.Fatalf("materialized manual differs: got %d bytes, want %d",
+			len(got), len(manualPDF))
+	}
+}
+
+func TestBundledManualDoesNotOverwriteASuppliedManual(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "game-assets")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "manual.pdf")
+	const supplied = "future user-supplied manual"
+	if err := os.WriteFile(path, []byte(supplied), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := materializeBundledManual(root); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != supplied {
+		t.Fatalf("supplied manual was overwritten with %d bytes", len(got))
 	}
 }
 

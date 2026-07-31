@@ -146,7 +146,7 @@ actraiser-recomp-<platform>/
 └── utils/                  hidden: the whole build (ignore it)
     ├── snesbuild.ini, config.ini
     ├── recomp/ src/ third_party/stb/ snesrecomp-go/runtime/   authored source (no generated C)
-    ├── game-assets/        manifest template + empty audio/+hd/ (no media ships)
+    ├── game-assets/        manifest template + empty audio/+hd/; manual appears on first launch
     ├── tools/snesbuild     the driver (stripped, git-describe-stamped)
     ├── tools/toolchain/zig-*/   pinned C compiler (Zig 0.16.0)
     ├── tools/sdl3/         bundled SDL3 (macOS, Windows x86_64, Steam Deck)
@@ -154,9 +154,12 @@ actraiser-recomp-<platform>/
 ```
 
 The only things deliberately absent are the ROM (the user supplies it), the
-ROM-derived generated C (regenerated locally), and the media assets — the
-`game-assets/manifest.ini` ships as a template mapping every song/graphic slot
-so users drop in their own files. macOS and Windows x86_64 use SDL's official
+ROM-derived generated C (regenerated locally), and optional HD/music replacement
+assets. The stock manual is embedded in `snesbuild` and materialized as
+`utils/game-assets/manual.pdf` when the builder/launcher first starts; a manual
+already present there wins. `game-assets/manifest.ini` ships as a template
+mapping every song/graphic slot so users drop in their own files. macOS and
+Windows x86_64 use SDL's official
 redistributables (universal macOS `.dmg`; Windows mingw archive). The dedicated
 Steam Deck archive is always Linux x86_64 and combines matching-version pinned
 official SDL headers with Valve's pinned Steam Runtime SDL shared library.
@@ -203,9 +206,9 @@ delete the build-only files, sized from an actual walk. It is an **allowlist** �
 `utils/`", because `utils/` is the game's runtime working directory: the launcher
 `cd`s into it, so `config.ini`, `diorama-layers.ini`, `game-assets/` and `saves/`
 resolve relative to it and sit beside the build inputs. Removing it wholesale
-would leave a game that starts without its settings, authored layer overrides, or
-saves. `slimInstall` also refuses unless a built game is present, so a mis-click
-cannot leave the user with neither a game nor the means to build one.
+would leave a game that starts without its settings, authored layer overrides,
+manual, or saves. `slimInstall` also refuses unless a built game is present, so a
+mis-click cannot leave the user with neither a game nor the means to build one.
 
 `snesbuild` locates the bundled Zig and SDL beside its own executable
 (`utils/tools/`), and the built game links SDL via an rpath

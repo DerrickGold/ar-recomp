@@ -30,6 +30,15 @@ static int s_failures;
 static int s_action_calls;
 static const SettingDesc *s_action_desc;
 static int s_inspector_info_calls;
+static bool s_fake_manual_available = true;
+
+static bool FakeManualAvailable(void) {
+  return s_fake_manual_available;
+}
+
+static const SettingsOverlayManualHooks kFakeManualHooks = {
+  .available = FakeManualAvailable,
+};
 
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -82,6 +91,8 @@ enum {
 enum {
   kPlayerSectionCount = kSection_Layers,
   kDebugSectionCount = kSection_Layers + 1,
+  kPlayerSectionCountWithoutManual = kPlayerSectionCount - 1,
+  kSystemVisibleOrdinalWithoutManual = kSection_System - 1,
 };
 
 /* Call from the nav column (not inside a submenu). */
@@ -93,6 +104,51 @@ static void NavToSection(int target) {
     CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   }
   CHECK(!"section not reachable");
+}
+
+/* A build with no staged PDF must not advertise a dead Manual destination.
+ * Exercise this through the same availability hook used by main.c, including
+ * both directions around the hole so section movement cannot land on it. */
+static void CheckManualSectionAvailability(void) {
+  g_settings.show_debug_settings = false;
+  s_fake_manual_available = true;
+
+  int selected = -1;
+  int total = -1;
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, &total));
+  CHECK(total == kPlayerSectionCount);
+
+  NavToSection(kSection_Save);
+  s_fake_manual_available = false;
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, &total));
+  CHECK(selected == kSection_Save);
+  CHECK(total == kPlayerSectionCountWithoutManual);
+
+  /* DOWN skips the hidden raw Manual section and lands on System. Its visible
+   * ordinal closes the gap, then another DOWN wraps to Video. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
+  CHECK(selected == kSystemVisibleOrdinalWithoutManual);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
+  CHECK(selected == kSection_Video);
+
+  /* UP must likewise skip the missing section. Restoring availability inserts
+   * Manual back ahead of System and makes it reachable again. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
+  CHECK(selected == kSystemVisibleOrdinalWithoutManual);
+  s_fake_manual_available = true;
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, &total));
+  CHECK(selected == kSection_System);
+  CHECK(total == kPlayerSectionCount);
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
+  CHECK(selected == kSection_Manual);
+
+  /* Restore the fixture state expected by the exhaustive menu checks below. */
+  g_settings.show_debug_settings = true;
+  NavToSection(kSection_Video);
 }
 
 /* Tabs are remembered per section, so step forward (wrapping) until the
@@ -417,6 +473,7 @@ int main(void) {
   size_t rom_size = 0;
   uint8_t *rom_data = ReadOptionalRom(&rom_size);
   CHECK(SettingsOverlay_Init(renderer, rom_data, rom_size));
+  SettingsOverlay_SetManualHooks(&kFakeManualHooks);
   /* Device-reset recovery: rebuild every atlas in place. All rendering below
    * runs against the REBUILT textures, so a broken reload shows up in the
    * preview captures too. */
@@ -431,6 +488,7 @@ int main(void) {
 
   SettingsOverlay_Open();
   CHECK(SettingsOverlay_IsOpen());
+  CheckManualSectionAvailability();
   if (renderer) {
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
@@ -1035,6 +1093,7 @@ int main(void) {
     CHECK(!SettingsOverlay_BeginDebugPanelDrag(0, 0));
   }
 
+  SettingsOverlay_SetManualHooks(NULL);
   SettingsOverlay_Destroy();
   Settings_SetActionObserver(NULL);
   SDL_DestroyRenderer(renderer);

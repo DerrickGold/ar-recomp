@@ -3,7 +3,11 @@ package buildgui
 import (
 	"bytes"
 	_ "embed"
+	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -30,6 +34,58 @@ var boxArtWebP []byte
 //
 //go:embed assets/manual.pdf
 var manualPDF []byte
+
+// materializeBundledManual makes the builder's copy available to the game at
+// the runtime path it already reads. The live game-assets directory survives a
+// "keep just the game" cleanup, so this is a one-time handoff rather than a
+// build input that has to be retained with the toolchain.
+//
+// An existing file always wins. Today that lets a developer supply a different
+// album by hand; later it is the seam where the builder's converted user manual
+// will land without this fallback overwriting it on the next launch.
+func materializeBundledManual(root string) error {
+	destination := filepath.Join(root, "game-assets", "manual.pdf")
+	if info, err := os.Stat(destination); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("%s exists but is not a regular file", destination)
+		}
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect %s: %w", destination, err)
+	}
+
+	directory := filepath.Dir(destination)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return fmt.Errorf("create manual asset directory: %w", err)
+	}
+	temporary, err := os.CreateTemp(directory, ".manual-*")
+	if err != nil {
+		return fmt.Errorf("create temporary manual: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	defer func() {
+		_ = temporary.Close()
+		// After a successful rename this path no longer exists; otherwise this
+		// removes a partial temporary file from every error path.
+		_ = os.Remove(temporaryPath)
+	}()
+	if err := temporary.Chmod(0o644); err != nil {
+		return fmt.Errorf("set manual permissions: %w", err)
+	}
+	if _, err := temporary.Write(manualPDF); err != nil {
+		return fmt.Errorf("write bundled manual: %w", err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return fmt.Errorf("flush bundled manual: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close bundled manual: %w", err)
+	}
+	if err := os.Rename(temporaryPath, destination); err != nil {
+		return fmt.Errorf("install bundled manual: %w", err)
+	}
+	return nil
+}
 
 // assetModTime is a fixed timestamp for the embedded assets. Embedded files
 // have no meaningful mtime, and http.ServeContent needs one to answer

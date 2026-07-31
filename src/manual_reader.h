@@ -47,8 +47,9 @@
  * thread before any texture exists. Only decoding needs the present thread. */
 bool ManualReader_Load(void);
 
-/* True when a manual was found and looks like a real page album. The menu row
- * reads this to explain itself rather than opening onto nothing. */
+/* True when a manual was found and looks like a real page album, loading it on
+ * the first query. The overlay uses this to omit the whole Manual section rather
+ * than offering an action that can only fail. */
 bool ManualReader_Available(void);
 
 /* One line on what happened: the page count, or why there is no manual. Owned

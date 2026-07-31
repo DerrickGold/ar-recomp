@@ -85,6 +85,12 @@ static ManualHintDevice s_hint_device;
  * of slightly stale aim. */
 static float s_stick_x, s_stick_y;
 
+/* Mouse drag state is session state, not page state. It is reset on both sides
+ * of an open/close transition because the button-up that ended a drag can arrive
+ * after the reader has closed and main.c will then correctly route it elsewhere. */
+static bool s_dragging;
+static int s_drag_x, s_drag_y;
+
 /* ── Loading ───────────────────────────────────────────────────────────────── */
 
 static void SetStatus(const char *fmt, ...) {
@@ -151,7 +157,10 @@ bool ManualReader_Load(void) {
 }
 
 bool ManualReader_Available(void) {
-  return s_reader.load_attempted && s_reader.index.count > 0;
+  /* The overlay asks before it can decide whether the section exists. Keep the
+   * file work lazy until that first menu visit, then Load's one-shot gate makes
+   * every subsequent navigation/render query a cheap state read. */
+  return ManualReader_Load();
 }
 
 const char *ManualReader_Status(void) {
@@ -180,14 +189,22 @@ bool ManualReader_Open(void) {
    * frame rather than from whenever the reader was last closed -- otherwise the
    * first turn after a long pause advances by the whole gap at once. */
   s_reader.last_tick_ns = 0;
-  /* Seeded from what is PLUGGED IN, because the reader opens with no input of
-   * its own yet -- and on a handheld, where the pad is the only input there is,
-   * a first frame captioned "ESC BACK" is instructions for absent hardware. */
-  s_hint_device = InputMap_GamepadCount() > 0 ? kManualHintDevice_Gamepad
-                                              : kManualHintDevice_Keyboard;
+  /* Seed from the configured/active device because the reader opens with no
+   * input event of its own. A connected pad is not enough: Keyboard mode disables
+   * it, and in Auto the control that invoked the action is the useful answer. On
+   * a handheld Gamepad mode still gives the only-present controls immediately. */
+  const bool gamepad_connected = InputMap_GamepadCount() > 0;
+  const bool gamepad_preferred =
+      gamepad_connected &&
+      (g_settings.input_device == kInputDevice_Gamepad ||
+       (g_settings.input_device == kInputDevice_Auto &&
+        InputMap_GamepadIsActive()));
+  s_hint_device = gamepad_preferred ? kManualHintDevice_Gamepad
+                                    : kManualHintDevice_Keyboard;
   /* Cleared, or a stick held as the reader opened would pan on the first frame
    * from a position nobody has touched since. */
   s_stick_x = s_stick_y = 0.0f;
+  s_dragging = false;
   BumpHint();
   fprintf(stderr, "[manual] opened (%s)\n", ManualReader_Status());
   return true;
@@ -196,6 +213,7 @@ bool ManualReader_Open(void) {
 void ManualReader_Close(void) {
   if (!s_reader.open) return;
   s_reader.open = false;
+  s_dragging = false;
   fprintf(stderr, "[manual] closed\n");
 }
 
@@ -204,7 +222,13 @@ void ManualReader_DestroyTextures(void) {
     if (s_reader.cache[i].texture) SDL_DestroyTexture(s_reader.cache[i].texture);
     s_reader.cache[i].texture = NULL;
     s_reader.cache[i].page = -1;
+    s_reader.cache[i].used_at = 0;
   }
+  s_reader.clock = 0;
+  /* Texture creation/upload failures can be caused by the renderer being lost.
+   * Give those pages one fresh attempt after its replacement. Corrupt source
+   * pages may be decoded once more too, then return to the normal failure gate. */
+  s_reader.failed_count = 0;
 }
 
 /* ── Applying intent ───────────────────────────────────────────────────────── */
@@ -331,9 +355,6 @@ bool ManualReader_HandleGamepadEvent(const SDL_Event *event) {
   return true;
 }
 
-static bool s_dragging;
-static int s_drag_x, s_drag_y;
-
 bool ManualReader_HandleMouse(const SDL_Event *event) {
   if (!s_reader.open || !event) return false;
   /* The mouse shares the keyboard's line: same sitting-at-a-desk case, and the
@@ -439,10 +460,14 @@ static PageTexture *DecodePage(int page) {
   if (page < 0 || page >= s_reader.index.count) return NULL;
   if (AlreadyFailed(page)) return NULL;
 
-  PageTexture *slot = &s_reader.cache[0];
-  for (int i = 1; i < kCacheSlots; i++) {
+  PageTexture *slot = NULL;
+  for (int i = 0; i < kCacheSlots; i++) {
     if (!s_reader.cache[i].texture) { slot = &s_reader.cache[i]; break; }
-    if (s_reader.cache[i].used_at < slot->used_at) slot = &s_reader.cache[i];
+  }
+  if (!slot) {
+    slot = &s_reader.cache[0];
+    for (int i = 1; i < kCacheSlots; i++)
+      if (s_reader.cache[i].used_at < slot->used_at) slot = &s_reader.cache[i];
   }
 
   const ManualPageEntry *entry = &s_reader.index.pages[page];
@@ -468,7 +493,15 @@ static PageTexture *DecodePage(int page) {
     stbi_image_free(pixels);
     return NULL;
   }
-  SDL_UpdateTexture(texture, NULL, pixels, w * 4);
+  if (!SDL_UpdateTexture(texture, NULL, pixels, w * 4)) {
+    fprintf(stderr, "[manual] page %d: texture upload failed (%s)\n", page + 1,
+            SDL_GetError());
+    if (s_reader.failed_count < kMaxFailures)
+      s_reader.failed[s_reader.failed_count++] = page;
+    SDL_DestroyTexture(texture);
+    stbi_image_free(pixels);
+    return NULL;
+  }
   SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
   stbi_image_free(pixels);
 

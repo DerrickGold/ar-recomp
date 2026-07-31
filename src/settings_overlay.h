@@ -59,6 +59,9 @@ void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
  * suspended keep getting one answer. Unhooked, every call below is inert and the
  * overlay behaves exactly as it did before the manual existed. */
 typedef struct SettingsOverlayManualHooks {
+  /* Whether this build has a readable manual input. The entire Manual section
+   * is omitted when false; a dead action row is not a useful fallback. */
+  bool (*available)(void);
   bool (*is_open)(void);
   void (*close)(void);
   void (*render)(SDL_Rect viewport);

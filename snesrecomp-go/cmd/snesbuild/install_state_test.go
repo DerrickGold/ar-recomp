@@ -57,6 +57,7 @@ func bundleFixture(t *testing.T) (root, utils string) {
 	write(filepath.Join(utils, "config.ini"), "[video]")
 	write(filepath.Join(utils, "diorama-layers.ini"), "[layers:01:02]")
 	write(filepath.Join(utils, "game-assets", "manifest.ini"), "[hd]")
+	write(filepath.Join(utils, "game-assets", "manual.pdf"), "manual")
 	write(filepath.Join(utils, "saves", "battery.srm"), "save")
 
 	// The playable game in the bundle root.
@@ -215,6 +216,7 @@ func TestSlimRemovesOnlyBuildFiles(t *testing.T) {
 		filepath.Join(utils, "config.ini"),
 		filepath.Join(utils, "diorama-layers.ini"),
 		filepath.Join(utils, "game-assets", "manifest.ini"),
+		filepath.Join(utils, "game-assets", "manual.pdf"),
 		filepath.Join(utils, "saves", "battery.srm"),
 		// And the game itself.
 		filepath.Join(root, gameBinaryName()),

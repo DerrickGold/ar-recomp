@@ -30,7 +30,7 @@ import (
 //	<root>/utils/               the GUI's --root
 //	  config.ini                RUNTIME: the launcher cd's here first
 //	  diorama-layers.ini        RUNTIME: authored layer overrides
-//	  game-assets/              RUNTIME: HD/audio replacement manifests
+//	  game-assets/              RUNTIME: manual and HD/audio replacement assets
 //	  saves/                    RUNTIME: battery saves and generated metadata
 //	  src/  recomp/  third_party/  snesrecomp-go/          BUILD ONLY
 //	  tools/snesbuild           KEEP: run-build gates on it, and it is the

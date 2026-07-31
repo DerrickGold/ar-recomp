@@ -101,6 +101,12 @@ func Run(ctx context.Context, options Options) error {
 		}
 		return fmt.Errorf("GUI project root %s is unavailable: %w", root, statErr)
 	}
+	// The manual is already embedded in this executable for the builder's reader.
+	// Materialize the same bytes at the game's runtime path, including in launcher
+	// mode, without adding a duplicate PDF to the distribution archive.
+	if err := materializeBundledManual(root); err != nil {
+		return fmt.Errorf("prepare bundled manual: %w", err)
+	}
 	options.ProjectRoot = root
 	if options.Title == "" {
 		options.Title = "snesbuild"
