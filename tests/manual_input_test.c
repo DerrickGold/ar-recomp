@@ -137,6 +137,87 @@ static void TestPadMirrorsTheKeyboardsLogic(void) {
         kManualIntent_None);
 }
 
+/* ── The hint line ────────────────────────────────────────────────────────── */
+
+/* A HINT LINE THAT NAMES THE WRONG DEVICE IS WORSE THAN NO HINT LINE. On a
+ * handheld the pad is the only input there is, and "ESC BACK" is then
+ * instructions for hardware nobody is holding.
+ *
+ * These tie the LABEL to the MAPPING: every control the text names has to be one
+ * ManualInput_*Intent actually implements, and the close button it names has to
+ * be the one that actually closes. That is what makes this more than a spell
+ * check -- change the mapping without the caption and it goes red. */
+static bool Mentions(const char *text, const char *needle) {
+  return strstr(text, needle) != NULL;
+}
+
+static void TestTheHintNamesTheDeviceInHand(void) {
+  for (int zoomed = 0; zoomed <= 1; zoomed++) {
+    const bool z = zoomed != 0;
+    const char *kbd = ManualInput_HintText(kManualHintDevice_Keyboard, z);
+    const char *pad = ManualInput_HintText(kManualHintDevice_Gamepad, z);
+    CHECK(kbd && kbd[0]);
+    CHECK(pad && pad[0]);
+    CHECK(strcmp(kbd, pad) != 0);
+
+    /* Neither line may name the other device's controls. This is the actual
+     * defect being guarded: the reader shipped with the keyboard line shown to
+     * everyone, pad included. */
+    CHECK(!Mentions(pad, "ESC"));
+    CHECK(!Mentions(pad, "CLICK"));
+    CHECK(!Mentions(pad, "ARROWS"));
+    CHECK(!Mentions(kbd, "D-PAD"));
+    CHECK(!Mentions(kbd, "L/R"));
+
+    /* Each names the button that really closes, per the mapping above. */
+    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_EAST, z) ==
+          kManualIntent_Close);
+    CHECK(Mentions(pad, "B BACK"));
+    CHECK(Mentions(kbd, "ESC BACK"));
+
+    /* And each names a way to PAGE, which is the one thing a reader must be
+     * able to do. The shoulders page at any zoom; the arrows only when not. */
+    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, z) ==
+          kManualIntent_PageForward);
+    CHECK(Mentions(pad, "PAGE"));
+    CHECK(Mentions(kbd, "PAGE"));
+  }
+
+  /* Zoom changes the CONTROLS, so it has to change the words. When zoomed the
+   * arrows and the d-pad pan, and the line must say so rather than still
+   * claiming they page. */
+  const char *kbd_fit = ManualInput_HintText(kManualHintDevice_Keyboard, false);
+  const char *kbd_zoom = ManualInput_HintText(kManualHintDevice_Keyboard, true);
+  CHECK(strcmp(kbd_fit, kbd_zoom) != 0);
+  CHECK(ManualInput_KeyIntent(SDLK_RIGHT, true) == kManualIntent_PanRight);
+  CHECK(Mentions(kbd_zoom, "ARROWS PAN"));
+  CHECK(ManualInput_KeyIntent(SDLK_RIGHT, false) == kManualIntent_PageForward);
+  CHECK(Mentions(kbd_fit, "ARROWS PAGE"));
+  /* Zoomed, the keyboard line must still offer a way to turn -- the arrows are
+   * busy panning, so PageUp/PageDown is the only route and has to be named. */
+  CHECK(ManualInput_KeyIntent(SDLK_PAGEDOWN, true) == kManualIntent_PageForward);
+  CHECK(Mentions(kbd_zoom, "PGUP/PGDN"));
+
+  const char *pad_fit = ManualInput_HintText(kManualHintDevice_Gamepad, false);
+  const char *pad_zoom = ManualInput_HintText(kManualHintDevice_Gamepad, true);
+  CHECK(strcmp(pad_fit, pad_zoom) != 0);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true) ==
+        kManualIntent_PanRight);
+  CHECK(Mentions(pad_zoom, "D-PAD PANS"));
+
+  /* The ROM's dialog font has no lower case, and the overlay draws '?' for any
+   * glyph it lacks -- so a lower-case caption renders as a row of question
+   * marks. Cheap to assert, and invisible until someone looks at a screen. */
+  for (int device = 0; device <= 1; device++) {
+    for (int zoomed = 0; zoomed <= 1; zoomed++) {
+      const char *text =
+          ManualInput_HintText((ManualHintDevice)device, zoomed != 0);
+      for (int i = 0; text[i]; i++)
+        CHECK(!(text[i] >= 'a' && text[i] <= 'z'));
+    }
+  }
+}
+
 /* ── The decode budget ────────────────────────────────────────────────────── */
 
 typedef struct CacheFixture {
@@ -231,6 +312,7 @@ int main(void) {
   TestZoomAndJumpKeys();
   TestUnmappedKeysMeanNothing();
   TestPadMirrorsTheKeyboardsLogic();
+  TestTheHintNamesTheDeviceInHand();
 
   TestOneDecodePerFrame();
   TestEmptySidesAreSkipped();
