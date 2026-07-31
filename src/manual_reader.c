@@ -514,7 +514,7 @@ static PageTexture *DecodePage(int page) {
 
 /* ── Draw ──────────────────────────────────────────────────────────────────
  *
- * The same order the proof of concept established, and for the same reason:
+ * Drawn in one fixed order for a renderer with no depth test or backface culling:
  * SDL_RenderGeometry has no depth test and no backface culling, so correctness
  * comes from ONE fixed draw order -- backdrop, settled pages, shadow, leaf --
  * which is only valid because the turning leaf never dips behind a settled page.
@@ -747,9 +747,9 @@ void ManualReader_Render(SDL_Rect viewport) {
   ManualView_FittedSize(fit_w, nominal_h, view_w, view_h, s_reader.view.zoom,
                         &page_w, &page_h);
 
-  /* FLAT. The 3D tilt the proof of concept offered was judged worse for a page
-   * of dense text, so the shipped reader has no tilt to plumb -- the camera is
-   * square-on and the lens is the only thing solved. */
+  /* FLAT. A 3D tilt was judged worse for a page of dense text, so the reader has
+   * no tilt to plumb -- the camera is square-on and the lens is the only thing
+   * solved. */
   Scene3DCamera camera = {
     .tilt_x = 0.0f,
     .tilt_y = 0.0f,
