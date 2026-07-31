@@ -198,11 +198,19 @@ static void ReaderCamera(bool tilt_3d, int view_w, int view_h, float out[16]) {
   Scene3D_BuildViewProjection(&camera, view_w, view_h, out);
 }
 
-/* Emit the shared triangle list for a (kPageSubdivU x kPageSubdivV) grid. */
+/* Emit the shared triangle list for a (kPageSubdivU x kPageSubdivV) grid.
+ *
+ * COLUMN-MAJOR (u outer, v inner), and that ordering is load-bearing. With no
+ * depth test, the bowed sheet's self-overlap is resolved only by the later
+ * triangle being the nearer one, which holds because depth rises monotonically
+ * with u. Row-major emission resets u to 0 on every new row, so depth jumps
+ * BACKWARD at each row boundary and a far triangle paints over a near one --
+ * measured 6 out-of-order steps per frame, worst near a fully landed turn.
+ * The sheet is constant in v, so ordering columns costs nothing. */
 static void BuildGridIndices(int *indices) {
   int n = 0;
-  for (int iv = 0; iv < kPageSubdivV; iv++) {
-    for (int iu = 0; iu < kPageSubdivU; iu++) {
+  for (int iu = 0; iu < kPageSubdivU; iu++) {
+    for (int iv = 0; iv < kPageSubdivV; iv++) {
       const int base = iv * (kPageSubdivU + 1) + iu;
       indices[n++] = base;
       indices[n++] = base + 1;
