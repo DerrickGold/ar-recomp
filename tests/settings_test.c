@@ -71,8 +71,9 @@ static void TestDefaultsAndMetadata(void) {
    * actions x keyboard+gamepad (12 SNES buttons and 6 analog camera axes),
    * plus 6 gamepad-only host actions. Presentation then gained the diorama
    * edge-margin-fix A/B toggle (SPEC-backdrop-clip.md), and navigation gained
-   * its separate off-by-default 3D scene switch. */
-  CHECK(g_setting_desc_count == 229);
+   * its separate off-by-default 3D scene switch. The in-game manual then added
+   * two: the action that opens the reader, and its spreads/single-page choice. */
+  CHECK(g_setting_desc_count == 231);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);

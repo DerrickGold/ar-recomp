@@ -49,6 +49,7 @@
 #include "host_dev_tools.h"
 #include "host_display.h"
 #include "host_input.h"
+#include "manual_reader.h"
 #include "ini_upgrade_apply.h"
 #include "input_replay.h"
 #include "oracle_trace.h"
@@ -1035,6 +1036,16 @@ int main(int argc, char **argv) {
   SettingsOverlay_SetLayerEditorHooks(Diorama_LayerOverrides, Diorama_LiveRoom,
                                       Diorama_SaveLayerManifest);
 
+  /* The in-game manual, injected for the same reason: it owns textures and an
+   * image decoder, and the overlay's own test links settings_overlay.c with no
+   * renderer at all. Nothing is loaded here -- the reader reads its file the
+   * first time a player actually opens it. */
+  static const SettingsOverlayManualHooks kManualHooks = {
+    ManualReader_IsOpen, ManualReader_Close, ManualReader_Render,
+    ManualReader_HandleKey, ManualReader_HandleGamepadEvent,
+  };
+  SettingsOverlay_SetManualHooks(&kManualHooks);
+
   RuntimeSettings_Install();
   /* After the action observer is installed: the pad's save/load-state
    * bindings route through it. */
@@ -1444,6 +1455,14 @@ int main(int argc, char **argv) {
             (void)SettingsOverlay_HandleText(event.text.text);
           break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
+          /* The manual reader is modal and takes the mouse whole -- click to
+           * turn, drag to pan, wheel to zoom. Checked before every camera and
+           * inspector path below, all of which are gated on the overlay being
+           * CLOSED and so would otherwise silently ignore the reader. */
+          if (ManualReader_IsOpen()) {
+            (void)ManualReader_HandleMouse(&event);
+            break;
+          }
           /* Diorama owns right-drag (orbit) and middle-click (reset) while it
            * is on screen; §8.7 disables click-inspect in diorama for v1
            * because the flat hit-testing does not follow the tilted planes. */
@@ -1477,6 +1496,10 @@ int main(int argc, char **argv) {
           }
           break;
         case SDL_EVENT_MOUSE_MOTION:
+          if (ManualReader_IsOpen()) {
+            (void)ManualReader_HandleMouse(&event);
+            break;
+          }
           if (Diorama_IsDragging() && Diorama_IsActiveThisFrame()) {
             Diorama_AdjustCamera(event.motion.xrel * Diorama_DragRadPerPx(),
                                  event.motion.yrel * Diorama_DragRadPerPx(),
@@ -1497,6 +1520,10 @@ int main(int argc, char **argv) {
           }
           break;
         case SDL_EVENT_MOUSE_WHEEL:
+          if (ManualReader_IsOpen()) {
+            (void)ManualReader_HandleMouse(&event);
+            break;
+          }
           /* Wheel up zooms in, i.e. decreases the camera distance. */
           if (!SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame())
             Diorama_AdjustCamera(0.0f, 0.0f,
@@ -1508,6 +1535,10 @@ int main(int argc, char **argv) {
                 0.0f, 0.0f, -event.wheel.y * Diorama_ZoomStep());
           break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
+          if (ManualReader_IsOpen()) {
+            (void)ManualReader_HandleMouse(&event);
+            break;
+          }
           if (event.button.button == SDL_BUTTON_RIGHT) {
             Diorama_SetDragging(false);
             Sim3DCamera_SetDragging(false);

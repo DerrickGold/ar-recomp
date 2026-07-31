@@ -163,6 +163,7 @@ typedef enum {
   kSettingCat_Extras,        /* System > Tools: host commands + debug switch */
   kSettingCat_Enhancements,  /* System > Game: gameplay QoL (bridge, turbo) */
   kSettingCat_Inspector,
+  kSettingCat_Manual,        /* Manual: open the reader, and how it lays out */
   kSettingCat_Count,
 } SettingCategory;
 
@@ -283,6 +284,12 @@ typedef struct Settings {
   int turbo_multiplier;
   uint16 warp_target;
   bool scene_inspector;      /* click-to-inspect live PPU/asset identity */
+  /* In-game manual: two-up openings rather than one page at a time. On by
+   * default because artwork -- maps especially -- is drawn across the gutter,
+   * so single-page is the mode that CUTS pictures in half. Kept as a choice
+   * rather than removed: a wide, short manual reads better one page at a time,
+   * since a two-up spread of it is nearly 3:1 and fits to a strip. */
+  bool manual_spreads;
   /* Reveals developer-only rows in the settings overlay — the diorama/town
    * numeric tuning dials, layer A/B toggles, and the scene inspector tools.
    * Off (default) keeps the menu to the master toggles and major on/off
