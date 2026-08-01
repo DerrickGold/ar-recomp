@@ -34,12 +34,15 @@ bool CrtPost_Begin(SDL_Renderer *renderer);
 /* Resolve the scene target to the backbuffer through the CRT shader. Safe to
  * call unconditionally; does nothing if Begin did not engage.
  *
- * `scan_lines` is the SOURCE scanline count (g_snes_height), not a pixel
- * count — the beam profile is a property of the signal, not the window.
+ * `scan_columns`/`scan_lines` are the SOURCE dimensions (visible_width and
+ * g_snes_height), not pixel counts on screen — the beam profile and the
+ * horizontal bandwidth limit are properties of the signal, not the window, so
+ * they must hold still as it scales.
  * `image` is the letterboxed viewport the game picture occupies inside the
  * target, so curvature and scanlines apply to the picture and not to the
  * black bars around it. */
-void CrtPost_End(SDL_Renderer *renderer, int scan_lines, SDL_Rect image);
+void CrtPost_End(SDL_Renderer *renderer, int scan_columns, int scan_lines,
+                 SDL_Rect image);
 
 /* The target that "back to the base surface" means right now: NULL when the
  * effect is off, the scene target while it is engaged. */

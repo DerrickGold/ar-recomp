@@ -14,10 +14,12 @@ typedef struct {
   float output_w, output_h;
   float image_x, image_y, image_w, image_h;
   float scan_lines;
+  float scan_columns;
   float curvature;
   float scanline_depth;
   float mask_strength;
   float aberration;
+  float bandwidth;
   float vignette;
   float brightness;
 } CrtUniforms;
@@ -71,15 +73,29 @@ static CrtMode Mode(void) {
   return g_settings.crt_enabled ? kCrtMode_Full : kCrtMode_Off;
 }
 
+static void ReleaseScene(void) {
+  if (!s_scene) return;
+  SDL_DestroyTexture(s_scene);
+  s_scene = NULL;
+  s_scene_w = 0;
+  s_scene_h = 0;
+}
+
 static bool EnsureScene(SDL_Renderer *renderer, int width, int height) {
   if (s_scene && s_scene_w == width && s_scene_h == height) return true;
-  if (s_scene) {
-    SDL_DestroyTexture(s_scene);
-    s_scene = NULL;
-  }
+  ReleaseScene();
   if (width <= 0 || height <= 0) return false;
 
-  s_scene = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+  /* Prefer the renderer's own first texture format: hardcoding one risks a
+   * full-screen format conversion on every resolve. Falls back to RGBA8888
+   * where the property is unavailable. */
+  SDL_PixelFormat format = SDL_PIXELFORMAT_RGBA8888;
+  const SDL_PixelFormat *formats = (const SDL_PixelFormat *)
+      SDL_GetPointerProperty(SDL_GetRendererProperties(renderer),
+                             SDL_PROP_RENDERER_TEXTURE_FORMATS_POINTER, NULL);
+  if (formats && formats[0] != SDL_PIXELFORMAT_UNKNOWN) format = formats[0];
+
+  s_scene = SDL_CreateTexture(renderer, format,
                               SDL_TEXTUREACCESS_TARGET, width, height);
   if (!s_scene) {
     fprintf(stderr, "[crt] scene target %dx%d failed: %s\n", width, height,
@@ -129,15 +145,21 @@ static bool EnsureShader(SDL_Renderer *renderer) {
 }
 
 bool CrtPost_Begin(SDL_Renderer *renderer) {
-  if (!renderer || Mode() == kCrtMode_Off) return false;
+  const CrtMode mode = renderer ? Mode() : kCrtMode_Off;
+  if (mode == kCrtMode_Off) {
+    /* Switched off at runtime: hand back the scene target rather than leaving
+     * a full-window texture (~28MB at 4K) resident for a disabled feature. */
+    ReleaseScene();
+    return false;
+  }
+
+  /* Shader first: a machine without one gets the ORIGINAL path, and checking
+   * before allocating avoids reserving the target only to bail. */
+  if (mode == kCrtMode_Full && !EnsureShader(renderer)) return false;
 
   int width = 0, height = 0;
   SDL_GetRenderOutputSize(renderer, &width, &height);
   if (!EnsureScene(renderer, width, height)) return false;
-
-  /* A shaderless machine gets the ORIGINAL path, not a pointless extra copy —
-   * so bail before engaging rather than falling back to passthrough. */
-  if (Mode() == kCrtMode_Full && !EnsureShader(renderer)) return false;
 
   SDL_SetRenderTarget(renderer, s_scene);
   /* The target carries its own logical presentation state (SDL_render.h: "Each
@@ -149,7 +171,7 @@ bool CrtPost_Begin(SDL_Renderer *renderer) {
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
   SDL_RenderClear(renderer);
   s_engaged = true;
-  s_engaged_mode = Mode();
+  s_engaged_mode = mode;
   return true;
 }
 
@@ -177,7 +199,8 @@ static SDL_Rect ResolveImageRect(SDL_Renderer *renderer, SDL_Rect fallback) {
   return fallback;
 }
 
-void CrtPost_End(SDL_Renderer *renderer, int scan_lines, SDL_Rect image) {
+void CrtPost_End(SDL_Renderer *renderer, int scan_columns, int scan_lines,
+                 SDL_Rect image) {
   if (!s_engaged) return;
   s_engaged = false;
 
@@ -185,6 +208,23 @@ void CrtPost_End(SDL_Renderer *renderer, int scan_lines, SDL_Rect image) {
   image = ResolveImageRect(renderer, image);
 
   SDL_SetRenderTarget(renderer, NULL);
+
+  /* The resolve must cover the whole backbuffer, so logical presentation has to
+   * come off for the duration — but it gets PUT BACK.
+   *
+   * Leaving it disabled is not cosmetic: SDL_RenderReadPixels honours logical
+   * presentation, so a screenshot taken with the effect on came back a
+   * different SIZE than the same frame with it off (2128 vs 2140 rows here).
+   * That silently breaks both the passthrough byte-identical check and the
+   * visual A/B harness, neither of which would report anything more useful
+   * than "the images differ". More generally, a present-time helper has no
+   * business leaving renderer state changed behind it. */
+  int logical_w = 0, logical_h = 0;
+  SDL_RendererLogicalPresentation logical_mode =
+      SDL_LOGICAL_PRESENTATION_DISABLED;
+  SDL_GetRenderLogicalPresentation(renderer, &logical_w, &logical_h,
+                                   &logical_mode);
+
   SDL_SetRenderLogicalPresentation(renderer, 0, 0,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
@@ -207,10 +247,12 @@ void CrtPost_End(SDL_Renderer *renderer, int scan_lines, SDL_Rect image) {
     uniforms.image_w = (float)image.w;
     uniforms.image_h = (float)image.h;
     uniforms.scan_lines = (float)(scan_lines > 0 ? scan_lines : 224);
+    uniforms.scan_columns = (float)(scan_columns > 0 ? scan_columns : 256);
     uniforms.curvature = (float)g_settings.crt_curvature_x100 / 100.0f;
     uniforms.scanline_depth = (float)g_settings.crt_scanline_x100 / 100.0f;
     uniforms.mask_strength = (float)g_settings.crt_mask_x100 / 100.0f;
     uniforms.aberration = (float)g_settings.crt_aberration_x100 / 100.0f;
+    uniforms.bandwidth = (float)g_settings.crt_bandwidth_x100 / 100.0f;
     uniforms.vignette = (float)g_settings.crt_vignette_x100 / 100.0f;
     uniforms.brightness = (float)g_settings.crt_brightness_x100 / 100.0f;
 
@@ -223,12 +265,18 @@ void CrtPost_End(SDL_Renderer *renderer, int scan_lines, SDL_Rect image) {
 
   if (s_engaged_mode == kCrtMode_Full && s_state)
     SDL_SetGPURenderState(renderer, NULL);
+
+  SDL_SetRenderLogicalPresentation(renderer, logical_w, logical_h,
+                                   logical_mode);
 }
 
 SDL_Texture *CrtPost_BaseTarget(void) {
   return s_engaged ? s_scene : NULL;
 }
 
+/* Called from the host shutdown path. Not strictly required — the OS reclaims
+ * everything — but leaving a declared teardown uncalled reads as though cleanup
+ * happens when it does not, and it makes leak checkers useful here. */
 void CrtPost_Shutdown(void) {
   if (s_state) {
     SDL_DestroyGPURenderState(s_state);
@@ -238,10 +286,7 @@ void CrtPost_Shutdown(void) {
     SDL_ReleaseGPUShader(s_device, s_shader);
     s_shader = NULL;
   }
-  if (s_scene) {
-    SDL_DestroyTexture(s_scene);
-    s_scene = NULL;
-  }
+  ReleaseScene();
   s_engaged = false;
   s_shader_attempted = false;
 }

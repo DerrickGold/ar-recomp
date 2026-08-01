@@ -23,6 +23,7 @@
 #include "actraiser_rtl.h"
 #include "common_cpu_infra.h"
 #include "config.h"
+#include "crt_post.h"
 #include "settings.h"
 #include "settings_overlay.h"
 #include "input_map.h"
@@ -1839,6 +1840,9 @@ int main(int argc, char **argv) {
     free(g_diorama_layer_pixels[plane]);
     g_diorama_layer_pixels[plane] = NULL;
   }
+  /* Owns a full-window render target plus a GPU shader and render state, and
+   * all three must go before the renderer that created them. */
+  CrtPost_Shutdown();
   SDL_DestroyRenderer(g_renderer);
   SDL_DestroyWindow(g_window);
   SDL_Quit();
