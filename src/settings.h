@@ -156,6 +156,7 @@ typedef enum {
   kSettingCat_SimLighting,       /* SIM 3D: compatible light/shadow tuning */
   kSettingCat_SimAtmosphere,     /* SIM 3D: clouds, haze, cull, backdrop */
   kSettingCat_Graphics,
+  kSettingCat_Crt,               /* Video > CRT: fullscreen CRT post-process */
   kSettingCat_Audio,
   kSettingCat_Input,             /* device selection and analog tuning */
   kSettingCat_InputBinds,        /* one row per (device class, action) */
@@ -486,6 +487,29 @@ typedef struct Settings {
   bool gpu_fx_edgeaa;
   bool gpu_fx_shadow;
   bool gpu_interp_enabled;
+
+  /* CRT post-process (kSettingCat_Crt, the Video > CRT tab).
+   *
+   * Unlike the gpu_fx_* effects above — which are diorama-only — this is a
+   * fullscreen pass over the finished frame, so it applies to every render
+   * mode at once (flat, diorama, sim3D, world navigation). It needs the same
+   * "gpu" backend, so its rows gate on GpuShadersActive too.
+   *
+   * All knobs are x100 fixed point because the settings system is integer
+   * only; crt_post.c divides by 100 on the way to the shader. The defaults
+   * are the values that were tuned by eye against Fillmore Act 1 — treat
+   * them as the shipped look, not placeholders.
+   *
+   * Every knob except the master toggle is developer-only (Settings_IsDebugOnly
+   * hides Int rows in this category): they are for authoring the look, not
+   * things a player tunes for performance. */
+  bool crt_enabled;
+  int crt_curvature_x100;    /* barrel warp; 0 = flat glass                  */
+  int crt_scanline_x100;     /* beam darkening between source scanlines      */
+  int crt_mask_x100;         /* aperture-grille phosphor tint                */
+  int crt_aberration_x100;   /* RGB split, in output pixels                  */
+  int crt_vignette_x100;     /* corner falloff                               */
+  int crt_brightness_x100;   /* lifts the darkening mask+scanlines cause     */
   /* B1a (followup doc): mode-agnostic (works flat or diorama), unlike
    * gpu_interp_enabled's motion-smoothing which is diorama-only. Wired to
    * two mechanisms (main.c): SDL_SetRenderVSync off (applied at boot AND

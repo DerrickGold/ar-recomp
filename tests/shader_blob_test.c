@@ -37,6 +37,7 @@ typedef struct {
 } GpuShaderBlobs;
 
 #include "shaders/blur_frag.h"
+#include "shaders/crt_frag.h"
 #include "shaders/dof_edge_frag.h"
 #include "shaders/rim_frag.h"
 
@@ -56,6 +57,8 @@ static const struct {
 } kShaders[] = {
   { "blur",        { kBlurFragMSL, kBlurFragMSLSize,
                      kBlurFragSPV, kBlurFragSPVSize } },
+  { "crt",         { kCrtFragMSL, kCrtFragMSLSize,
+                     kCrtFragSPV, kCrtFragSPVSize } },
   { "dof_edge",    { kDofEdgeFragMSL, kDofEdgeFragMSLSize,
                      kDofEdgeFragSPV, kDofEdgeFragSPVSize } },
   { "rim",         { kRimFragMSL, kRimFragMSLSize,

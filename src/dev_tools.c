@@ -12,11 +12,13 @@
 
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "crt_post.h"
 #include "diorama.h"
 #include "diorama_scroll_math.h"
 #include "frame_slot.h"
 #include "host_display.h"
 #include "music_replacements.h"
+#include "present.h"
 #include "run_dir.h"
 #include "scene_asset_dump.h"
 #include "scene_inspector.h"
@@ -115,7 +117,16 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
   if (context->renderer && context->hud_bg_texture) {
     FrameSlot_Capture(&frame_slot);
     PresentUpload(&frame_slot);
+    /* Captures go through the CRT post chain too, so a screenshot shows what
+     * the player actually sees. Both calls are no-ops while CRT is off, which
+     * keeps the pixel-exact A/B harness comparing like with like. */
+    CrtPost_Begin(context->renderer);
     PresentComposite(&frame_slot, NULL, kInterpPhaseNone);
+    CrtPost_End(context->renderer, frame_slot.snes_height,
+                ComputePresentationViewport(
+                    context->renderer, frame_slot.ws_active,
+                    frame_slot.ignore_aspect_ratio, frame_slot.pixel_aspect,
+                    frame_slot.visible_width, frame_slot.snes_height));
     have_composite = true;
   }
   if (have_composite) {
