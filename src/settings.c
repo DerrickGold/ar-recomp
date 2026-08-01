@@ -1521,13 +1521,19 @@ const SettingDesc g_setting_descs[] = {
               "Horizontal red/blue split, in output pixels. Reads as beam "
               "convergence error; high values fringe hard edges heavily.",
               kSettingCat_Crt, 25, 0, 300, NULL, GpuShadersActive),
+  INT_SETTING(crt_bandwidth_x100, "AR_CRT_BAND", "Signal bandwidth",
+              "Horizontal smear between neighbouring pixels, in source "
+              "pixels. Composite and RF carried less bandwidth than the pixel "
+              "clock, which is what let dithered art blend into extra "
+              "apparent colours. Vertical detail stays sharp.",
+              kSettingCat_Crt, 30, 0, 200, NULL, GpuShadersActive),
   INT_SETTING(crt_vignette_x100, "AR_CRT_VIG", "Corner falloff",
               "Darkening toward the corners of the tube.",
               kSettingCat_Crt, 25, 0, 100, NULL, GpuShadersActive),
   INT_SETTING(crt_brightness_x100, "AR_CRT_BRIGHT", "Brightness",
               "Lifts the whole picture to compensate for the light the "
               "scanlines and phosphor mask absorb. 100 is unmodified.",
-              kSettingCat_Crt, 135, 50, 300, NULL, GpuShadersActive),
+              kSettingCat_Crt, 125, 50, 300, NULL, GpuShadersActive),
   { "audio_enabled", "AR_ENABLE_AUDIO", "Enable audio",
     "Pause or resume host audio output without changing emulated audio state.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,

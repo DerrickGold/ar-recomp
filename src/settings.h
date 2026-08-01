@@ -508,6 +508,7 @@ typedef struct Settings {
   int crt_scanline_x100;     /* beam darkening between source scanlines      */
   int crt_mask_x100;         /* aperture-grille phosphor tint                */
   int crt_aberration_x100;   /* RGB split, in output pixels                  */
+  int crt_bandwidth_x100;    /* horizontal signal smear, in SOURCE pixels    */
   int crt_vignette_x100;     /* corner falloff                               */
   int crt_brightness_x100;   /* lifts the darkening mask+scanlines cause     */
   /* B1a (followup doc): mode-agnostic (works flat or diorama), unlike

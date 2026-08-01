@@ -448,7 +448,8 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
       &slot,
       game_tick ? &s_previous_scroll : NULL,
       game_tick ? alpha : kInterpPhaseNone);
-  CrtPost_End(g_renderer, slot.snes_height, PresentImageRect(&slot));
+  CrtPost_End(g_renderer, slot.visible_width, slot.snes_height,
+              PresentImageRect(&slot));
   if (game_tick)
     FrameSlot_ExtractScrollSnapshot(&slot, &s_previous_scroll);
 
@@ -496,7 +497,8 @@ bool HostDisplay_TryRepresentFrame(float alpha,
       &s_retained_frame.slot,
       &s_retained_frame.previous_scroll,
       alpha);
-  CrtPost_End(g_renderer, s_retained_frame.slot.snes_height,
+  CrtPost_End(g_renderer, s_retained_frame.slot.visible_width,
+              s_retained_frame.slot.snes_height,
               PresentImageRect(&s_retained_frame.slot));
   ThrottlePresent(PresentIntervalNs(kHostDisplayPresent_GameTick));
   SDL_RenderPresent(g_renderer);

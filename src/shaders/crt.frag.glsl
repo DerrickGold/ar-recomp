@@ -50,15 +50,50 @@ layout(set = 3, binding = 0) uniform Context {
     float image_w;
     float image_h;
     float scan_lines;      /* source scanline count (224 for the SNES)        */
+    float scan_columns;    /* source visible width, for source-relative blur  */
     float curvature;       /* barrel amount; 0 = flat glass                   */
     float scanline_depth;  /* 0..1 beam darkening between lines               */
     float mask_strength;   /* 0..1 aperture-grille tint                       */
-    float aberration;      /* RGB split, in output pixels                     */
+    float aberration;      /* RGB split, in OUTPUT pixels (a tube property)   */
+    float bandwidth;       /* horizontal smear, in SOURCE pixels              */
     float vignette;        /* 0..1 corner falloff                             */
     float brightness;      /* compensates the darkening mask+scanlines cause  */
 };
 
 const float kPi = 3.14159265358979;
+
+/* ── Linear light ────────────────────────────────────────────────────────
+ * Beam intensity, phosphor absorption and lens falloff are all linear-light
+ * phenomena, but the frame arrives gamma-encoded. Modulating the encoded
+ * values directly (as the first version did) crushes midtones far harder than
+ * a real tube and forces the brightness knob up to compensate.
+ *
+ * Gamma 2.0 rather than the sRGB 2.2 curve on purpose: this runs on up to nine
+ * taps per pixel across the whole screen, and x*x / sqrt(x) are effectively
+ * free where pow() is not. The residual error against true sRGB is a few
+ * percent in the midtones — well below the tuning resolution of these knobs,
+ * and the defaults were set by eye against this curve anyway. */
+vec3 toLinear(vec3 c) { return c * c; }
+vec3 toGamma(vec3 c) { return sqrt(c); }
+
+vec3 sampleLinear(vec2 uv) { return toLinear(texture(u_texture, uv).rgb); }
+
+/* Horizontal signal bandwidth limit.
+ *
+ * Composite and RF carried far less horizontal bandwidth than the pixel clock,
+ * so neighbouring pixels smeared into each other ACROSS a line while the line
+ * structure itself stayed sharp. That asymmetry — soft horizontally, crisp
+ * vertically — is a large part of why a CRT reads differently from a sharp
+ * LCD, and it is what let dithered SNES art blend into apparent extra colours.
+ *
+ * Measured in SOURCE pixels, not output pixels: it models the signal feeding
+ * the tube, so it must stay put as the window scales. */
+vec3 sampleBand(vec2 uv, float dx) {
+    if (dx <= 0.0) return sampleLinear(uv);
+    return sampleLinear(uv) * 0.5
+         + sampleLinear(uv + vec2(dx, 0.0)) * 0.25
+         + sampleLinear(uv - vec2(dx, 0.0)) * 0.25;
+}
 
 /* Classic barrel warp, in image space. The asymmetric divisor makes the
  * horizontal bow a little gentler than the vertical, which is how real tubes
@@ -91,22 +126,42 @@ void main() {
     /* Back to texture space to sample the composited frame. */
     vec2 uv = (origin + warped * extent) / target;
 
-    /* Chromatic aberration: split the red and blue taps horizontally. */
+    /* One source pixel, expressed in texture-space width. */
+    float source_px = (scan_columns > 0.0)
+                    ? (image_w / scan_columns) / output_w
+                    : 1.0 / output_w;
+    float band = bandwidth * source_px;
+
+    /* Convergence error splits the channels horizontally; unlike the bandwidth
+     * limit this IS a tube property, so it stays in output pixels. Everything
+     * below is linear light. */
     vec3 col;
     if (aberration > 0.0) {
-        float dx = aberration / output_w;
-        col.r = texture(u_texture, uv + vec2(dx, 0.0)).r;
-        col.g = texture(u_texture, uv).g;
-        col.b = texture(u_texture, uv - vec2(dx, 0.0)).b;
+        float ab = aberration / output_w;
+        col.r = sampleBand(uv + vec2(ab, 0.0), band).r;
+        col.g = sampleBand(uv, band).g;
+        col.b = sampleBand(uv - vec2(ab, 0.0), band).b;
     } else {
-        col = texture(u_texture, uv).rgb;
+        col = sampleBand(uv, band);
     }
 
-    /* Beam profile across each source scanline: brightest at the line centre,
-     * falling toward the gap. */
+    /* Beam profile across each source scanline, with the width driven by how
+     * bright that part of the picture is.
+     *
+     * This is the difference between a convincing tube and stripes laid over
+     * the image. A real beam spreads as it is driven harder, so bright lines
+     * bloom across the gap until it nearly closes, while dark lines stay thin
+     * and the gap reads black. A constant-depth scanline (the first version)
+     * darkens everything equally, which is what makes the picture read as
+     * "image plus overlay" rather than as an emitting surface.
+     *
+     * Implemented as an exponent on the sine profile: below 1 flattens the
+     * curve toward a filled line, above 1 sharpens it to a narrow core. */
     if (scanline_depth > 0.0) {
-        float beam = sin(fract(warped.y * scan_lines) * kPi);
-        col *= mix(1.0, beam, scanline_depth);
+        float lum = clamp(dot(col, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+        float profile = sin(fract(warped.y * scan_lines) * kPi);
+        float sharpness = mix(1.6, 0.35, lum);
+        col *= mix(1.0, pow(max(profile, 0.0), sharpness), scanline_depth);
     }
 
     /* Aperture grille on the glass: uncurved, at output-pixel pitch. */
@@ -126,5 +181,5 @@ void main() {
 
     col *= brightness;
 
-    o_color = vec4(col, 1.0) * v_color;
+    o_color = vec4(toGamma(col), 1.0) * v_color;
 }

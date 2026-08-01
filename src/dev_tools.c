@@ -122,7 +122,8 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
      * keeps the pixel-exact A/B harness comparing like with like. */
     CrtPost_Begin(context->renderer);
     PresentComposite(&frame_slot, NULL, kInterpPhaseNone);
-    CrtPost_End(context->renderer, frame_slot.snes_height,
+    CrtPost_End(context->renderer, frame_slot.visible_width,
+                frame_slot.snes_height,
                 ComputePresentationViewport(
                     context->renderer, frame_slot.ws_active,
                     frame_slot.ignore_aspect_ratio, frame_slot.pixel_aspect,
