@@ -197,10 +197,11 @@ void RunDirInit(int argc, char **argv) {
   /* Engine-side writers (fn_census, crash dispatch log) key off this. */
   _putenv_s("AR_RUN_DIR", g_run_dir);
 
-  /* Default the always-on anomaly capture, but only if not already set
-   * (mirrors the POSIX setenv overwrite=0 semantics). */
-  if (!getenv("AR_TRACE_WATCH"))
-    _putenv_s("AR_TRACE_WATCH", "anom");
+  /* No AR_TRACE_WATCH default here, unlike the POSIX branch. Watch mode needs
+   * a memory-backed FILE* (funopen/fopencookie) that Windows has no spelling
+   * for, so ar_trace.c declines it with a diagnostic — and defaulting it on
+   * would print that diagnostic to every player's console on every boot.
+   * Setting AR_TRACE_WATCH explicitly still works and still explains itself. */
 
   write_run_info(argc, argv);
 

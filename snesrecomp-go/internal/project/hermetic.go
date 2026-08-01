@@ -28,9 +28,45 @@ type HermeticOptions struct {
 	Optimize      string // defaults to -O2
 	SDLIncludeDir string // discovered when empty and the manifest wants SDL3
 	SDLLibDir     string
-	Verbose       bool
-	Stdout        io.Writer
-	Stderr        io.Writer
+	// Target is a Zig target triple (e.g. "x86_64-windows-gnu"). Empty builds
+	// for the host. A cross target exists to answer "would this even build
+	// over there" without owning the hardware: `zig cc` carries the libc
+	// headers for every target it supports, so the compile and the link are
+	// the real ones, and only the run is missing. It never auto-discovers the
+	// host SDL3 (linking macOS SDL into a Windows binary would fail in a way
+	// that teaches nothing) -- see CrossSDL3Dir.
+	Target  string
+	Verbose bool
+	Stdout  io.Writer
+	Stderr  io.Writer
+}
+
+// TargetOS maps a Zig target triple to the GOOS-style name the rest of this
+// file switches on, so link flags follow the target rather than the host.
+// An empty target means the host.
+func TargetOS(target string) string {
+	if target == "" {
+		return runtime.GOOS
+	}
+	fields := strings.Split(target, "-")
+	if len(fields) < 2 {
+		return runtime.GOOS
+	}
+	switch fields[1] {
+	case "macos":
+		return "darwin"
+	default:
+		return fields[1]
+	}
+}
+
+// CrossSDL3Dir is where `snesbuild sdl stage --target <t>` puts the staged
+// redistributable, and where a cross build looks for SDL3 when no explicit
+// --sdl-include/--sdl-lib was given. Laid out as include/SDL3 + lib to match
+// what the distribution bundle ships, so the cross link exercises the same
+// headers and import library a real user's build would.
+func CrossSDL3Dir(buildDir, target string) string {
+	return filepath.Join(buildDir, "hermetic", target, "sdl3")
 }
 
 // HermeticBuild compiles the full project (runtime + game + generated
@@ -108,10 +144,11 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	for _, include := range manifest.Includes {
 		includeDirs = append(includeDirs, resolveUnder(paths.Root, include))
 	}
+	targetOS := TargetOS(options.Target)
 	sdlBundled := false
 	if manifest.UseSDL3 {
 		if options.SDLIncludeDir == "" || options.SDLLibDir == "" {
-			includeDir, libDir, bundled, sdlErr := discoverSDL3()
+			includeDir, libDir, bundled, sdlErr := resolveSDL3(options)
 			if sdlErr != nil {
 				return "", sdlErr
 			}
@@ -134,8 +171,12 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			options.SDLIncludeDir, options.SDLLibDir, map[bool]string{true: " (bundled)", false: ""}[sdlBundled])
 	}
 
-	compileArgs := []string{"cc", "-std=" + manifest.Std, options.Optimize, "-g",
-		"-w", "-Wno-implicit-function-declaration"}
+	compileArgs := []string{"cc"}
+	if options.Target != "" {
+		compileArgs = append(compileArgs, "-target", options.Target)
+	}
+	compileArgs = append(compileArgs, "-std="+manifest.Std, options.Optimize, "-g",
+		"-w", "-Wno-implicit-function-declaration")
 	for _, define := range manifest.Defines {
 		compileArgs = append(compileArgs, "-D"+define)
 	}
@@ -143,7 +184,16 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		compileArgs = append(compileArgs, "-I"+include)
 	}
 
-	objectDir := filepath.Join(paths.BuildDir, "hermetic", "obj")
+	// Each target gets its own output tree. Sharing one would be worse than
+	// slow: the flags hash below would invalidate everything on every switch,
+	// so a cross-check would silently throw away the developer's native
+	// objects and vice versa. Separate trees make a cross build cheap enough
+	// to run as a gate.
+	outputDir := filepath.Join(paths.BuildDir, "hermetic")
+	if options.Target != "" {
+		outputDir = filepath.Join(outputDir, options.Target)
+	}
+	objectDir := filepath.Join(outputDir, "obj")
 	if err := os.MkdirAll(objectDir, 0o755); err != nil {
 		return "", err
 	}
@@ -151,11 +201,11 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	// Invalidate every object when the flag set (or compiler) changes.
 	flagsDigest := sha256.Sum256([]byte(options.ZigPath + "\x00" + strings.Join(compileArgs, "\x00")))
 	flagsHash := hex.EncodeToString(flagsDigest[:])
-	flagsPath := filepath.Join(paths.BuildDir, "hermetic", "flags.sha256")
+	flagsPath := filepath.Join(outputDir, "flags.sha256")
 	previousFlags, _ := os.ReadFile(flagsPath)
 	flagsChanged := strings.TrimSpace(string(previousFlags)) != flagsHash
 
-	newestHeader := newestHeaderTime(includeDirs)
+	newestHeader := newestHeaderTime(includeDirs, paths.BuildDir)
 
 	type job struct{ source, object string }
 	var jobs []job
@@ -211,11 +261,15 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	fmt.Fprintf(options.Stdout, "hermetic: compile done in %.1fs; linking\n", time.Since(started).Seconds())
 
-	binary := filepath.Join(paths.BuildDir, "hermetic", manifest.Name)
-	if runtime.GOOS == "windows" {
+	binary := filepath.Join(outputDir, manifest.Name)
+	if targetOS == "windows" {
 		binary += ".exe"
 	}
-	linkArgs := []string{"cc", "-o", binary}
+	linkArgs := []string{"cc"}
+	if options.Target != "" {
+		linkArgs = append(linkArgs, "-target", options.Target)
+	}
+	linkArgs = append(linkArgs, "-o", binary)
 	for _, source := range sources {
 		linkArgs = append(linkArgs, filepath.Join(objectDir, objectName(paths.Root, source)))
 	}
@@ -223,11 +277,19 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		linkArgs = append(linkArgs, "-L"+options.SDLLibDir, "-lSDL3")
 		// Look for the SDL runtime beside the game binary first so a copied
 		// (bundled) library wins over system search paths.
-		switch runtime.GOOS {
+		switch targetOS {
 		case "darwin":
 			linkArgs = append(linkArgs, "-Wl,-rpath,@executable_path")
 		case "linux":
 			linkArgs = append(linkArgs, "-Wl,-rpath,$ORIGIN")
+		case "windows":
+			// No rpath equivalent is needed -- Windows searches the
+			// executable's own directory first -- but the ROM picker in
+			// launcher.c calls GetOpenFileNameA, and the common dialog
+			// library is not one lld links by default. Without this the
+			// Windows link fails on an undefined symbol after every
+			// translation unit has already compiled.
+			linkArgs = append(linkArgs, "-lcomdlg32")
 		}
 	}
 	linkArgs = append(linkArgs, manifest.Link...)
@@ -237,7 +299,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		return "", fmt.Errorf("link %s: %w\n%s", binary, err, strings.TrimSpace(string(output)))
 	}
 	if sdlBundled {
-		copied, copyErr := copySDLRuntime(options.SDLLibDir, filepath.Dir(binary))
+		copied, copyErr := copySDLRuntime(targetOS, options.SDLLibDir, filepath.Dir(binary))
 		if copyErr != nil {
 			return "", copyErr
 		}
@@ -252,9 +314,9 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 // copySDLRuntime places the bundled SDL shared libraries next to the built
 // game binary so it runs on machines with no system SDL at all (the rpath /
 // DLL search path already prefers the binary's own directory).
-func copySDLRuntime(libDir, binaryDir string) ([]string, error) {
+func copySDLRuntime(targetOS, libDir, binaryDir string) ([]string, error) {
 	var patterns []string
-	switch runtime.GOOS {
+	switch targetOS {
 	case "darwin":
 		patterns = []string{"libSDL3*.dylib"}
 	case "windows":
@@ -310,7 +372,15 @@ func objectFresh(source, object string, newestHeader time.Time) bool {
 // *.h mtime. Nested layouts like <include>/SDL3/SDL_render.h must count, so a
 // staleness check that only listed the top level would miss a header updated
 // one directory down. An unreadable subtree is skipped rather than fatal.
-func newestHeaderTime(includeDirs []string) time.Time {
+//
+// skipDir prunes the build directory. The manifest lists `include = .`, so
+// without this the walk descends into build/ and finds the SDL3 headers a
+// cross target stages there -- freshly copied, hence newer than every object,
+// so one `sdl stage` would make the NATIVE build recompile all 180 units
+// forever after. Pruning is safe precisely because a cross build passes its
+// staged include directory as its own entry in includeDirs: that walk starts
+// below the build directory and is never pruned.
+func newestHeaderTime(includeDirs []string, skipDir string) time.Time {
 	var newest time.Time
 	for _, directory := range includeDirs {
 		_ = filepath.WalkDir(directory, func(path string, entry os.DirEntry, err error) error {
@@ -319,6 +389,9 @@ func newestHeaderTime(includeDirs []string) time.Time {
 					return filepath.SkipDir
 				}
 				return nil
+			}
+			if entry.IsDir() && skipDir != "" && path == skipDir {
+				return filepath.SkipDir
 			}
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".h") {
 				return nil
@@ -354,6 +427,26 @@ func sdlLibDirHasLib(dir string) bool {
 		}
 	}
 	return false
+}
+
+// resolveSDL3 picks the SDL3 development files for the build's target. For a
+// host build that is discoverSDL3's usual search. For a cross build the host's
+// SDL3 is the one answer that is always wrong, so only the staged
+// redistributable under CrossSDL3Dir is accepted and the error names the
+// command that puts it there rather than letting the link fail with a wall of
+// unresolved symbols.
+func resolveSDL3(options HermeticOptions) (includeDir, libDir string, bundled bool, err error) {
+	if options.Target == "" {
+		return discoverSDL3()
+	}
+	base := CrossSDL3Dir(options.Paths.BuildDir, options.Target)
+	include, lib := filepath.Join(base, "include"), filepath.Join(base, "lib")
+	if directoryExists(filepath.Join(include, "SDL3")) && directoryExists(lib) {
+		return include, lib, true, nil
+	}
+	return "", "", false, fmt.Errorf(
+		"no staged SDL3 for target %s at %s; run `snesbuild sdl stage --target %s` "+
+			"or pass --sdl-include/--sdl-lib", options.Target, base, options.Target)
 }
 
 // discoverSDL3 finds SDL3 development files: a copy bundled beside the

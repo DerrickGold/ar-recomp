@@ -30,15 +30,22 @@ typedef uint16 VoidP;
 
 #define arraysize(x) sizeof(x)/sizeof(x[0])
 
+/* FORCEINLINE is deliberately NOT the spelling used here: <windows.h> defines
+ * its own FORCEINLINE behind #ifndef, so a project definition that lands first
+ * silently downgrades mingw's __forceinline to a plain C99 `inline`. winnt.h
+ * also file-scope-declares NtCurrentTeb/GetCurrentFiber/GetFiberData without
+ * `inline`, which under C99 turns each into an external definition -- every TU
+ * that includes <windows.h> then emits them and the link dies on duplicate
+ * symbols. Keeping the name private leaves the Win32 macro alone. */
 #ifdef _MSC_VER
 #define countof _countof
 #define NORETURN __declspec(noreturn)
-#define FORCEINLINE __forceinline
+#define SNES_FORCEINLINE __forceinline
 #define NOINLINE __declspec(noinline)
 #else
 #define countof(a) (sizeof(a)/sizeof(*(a)))
 #define NORETURN
-#define FORCEINLINE inline
+#define SNES_FORCEINLINE inline
 #define NOINLINE
 #endif
 
@@ -48,8 +55,8 @@ typedef uint16 VoidP;
 #define kDebugFlag 0
 #endif
 
-static FORCEINLINE int IntMin(int a, int b) { return a < b ? a : b; }
-static FORCEINLINE int IntMax(int a, int b) { return a > b ? a : b; }
+static SNES_FORCEINLINE int IntMin(int a, int b) { return a < b ? a : b; }
+static SNES_FORCEINLINE int IntMax(int a, int b) { return a > b ? a : b; }
 
 static inline uint16 swap16(uint16 v) { return (v << 8) | (v >> 8); }
 

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -173,5 +175,58 @@ func TestSteamDeckSDL3PinsAreVerifiedX8664Inputs(t *testing.T) {
 		len(runtimeSHA) != 64 {
 		t.Fatalf("invalid Deck SDL runtime pin: %q %q %q",
 			runtimeURL, runtimeSHA, runtimeArchive)
+	}
+}
+
+func TestTargetGo(t *testing.T) {
+	for triple, want := range map[string][2]string{
+		"x86_64-windows-gnu":  {"windows", "amd64"},
+		"aarch64-windows-gnu": {"windows", "arm64"},
+		"aarch64-macos-none":  {"darwin", "arm64"},
+		"x86_64-linux-gnu":    {"linux", "amd64"},
+	} {
+		goos, goarch, err := TargetGo(triple)
+		if err != nil {
+			t.Errorf("TargetGo(%q): %v", triple, err)
+			continue
+		}
+		if goos != want[0] || goarch != want[1] {
+			t.Errorf("TargetGo(%q) = %s/%s, want %s/%s", triple, goos, goarch, want[0], want[1])
+		}
+	}
+	// A bad triple must be rejected rather than defaulting to something that
+	// would stage the wrong platform's SDL.
+	for _, bad := range []string{"", "x86_64", "riscv64-linux-gnu", "x86_64-plan9-none"} {
+		if _, _, err := TargetGo(bad); err == nil {
+			t.Errorf("TargetGo(%q) should have failed", bad)
+		}
+	}
+}
+
+func TestStageSDL3RejectsTargetsWithoutRedistributable(t *testing.T) {
+	// Linux has no official SDL3 redistributable pin, and macOS ships a .dmg
+	// this path deliberately does not open. Both must fail before touching the
+	// network, with a message that names the way forward.
+	for _, target := range []string{"x86_64-linux-gnu", "aarch64-macos-none"} {
+		err := StageSDL3(target, t.TempDir(), filepath.Join(t.TempDir(), "sdl3"), nil)
+		if err == nil {
+			t.Fatalf("StageSDL3(%q) should have failed", target)
+		}
+	}
+}
+
+func TestStageSDL3IsIdempotent(t *testing.T) {
+	// An already-staged directory must short-circuit: `make check-cross` runs
+	// this on every invocation and must not re-download or re-extract.
+	stage := filepath.Join(t.TempDir(), "sdl3")
+	if err := os.MkdirAll(filepath.Join(stage, "include", "SDL3"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(stage, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An empty cache dir would force a download if the short-circuit missed.
+	if err := StageSDL3("x86_64-windows-gnu", filepath.Join(t.TempDir(), "empty"), stage, nil); err != nil {
+		t.Fatal(err)
 	}
 }

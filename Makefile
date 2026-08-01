@@ -27,6 +27,11 @@
 #   For the normal inner loop (after editing src/ or runtime C) just run
 #   `cmake --build --preset play` directly — no regen or reconfigure needed.
 #
+#   make check-cross  compile AND link the game for the platforms that cannot be
+#                     tested on this machine (currently Windows x86_64), using
+#                     the pinned Zig toolchain and the same SDL3 redistributable
+#                     the bundle ships. Proves the build, not the run.
+#
 # Cleaning (these are a full reset, not part of the inner loop — `make clean`
 # removes the generated C and build trees, so run `make dev` afterwards to get
 # back to a buildable state):
@@ -47,7 +52,7 @@ CLEAN_BUILD_DIRS := build build-release build-asan build-trace $(PACKAGING)/buil
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-cross clean clean-all clean-release clean-packaging-mounts
 
 dev:
 	@if [ -z "$$(ls src/gen/*.c 2>/dev/null)" ]; then \
@@ -73,6 +78,35 @@ $(addprefix release-,$(PLATFORMS)): release-%:
 	@rm -rf release/_CPack_Packages
 	@[ -n "$(KEEP_BUILD)" ] || rm -rf $(PACKAGING)/build/$*
 	@echo "Bundle written to $(CURDIR)/release/"
+
+# Cross-target link check. `zig cc` carries libc headers and a linker for every
+# target it supports, so the compile and the link are the real ones for that
+# platform -- only the run is missing. That is enough to catch the whole class
+# of breakage that is otherwise invisible from a Mac: #ifdef _WIN32 branches
+# nothing has ever compiled, macro collisions with <windows.h>, and system
+# libraries the link needs but nothing declares.
+#
+# Windows x86_64 is the only target listed because it is the only one with both
+# an official SDL3 redistributable to link against and no other way to test it
+# here. macOS is covered by building natively; Linux x86_64 is covered on the
+# Steam Deck. To check any other triple by hand, stage or supply its SDL and run
+#   snesbuild build --hermetic --target <triple> --sdl-include ... --sdl-lib ...
+CROSS_TARGETS := x86_64-windows-gnu
+
+check-cross:
+	@if [ -z "$$(ls src/gen/*.c 2>/dev/null)" ]; then \
+	  echo "=== regenerating (src/gen is empty) ==="; \
+	  go -C snesrecomp-go run ./cmd/snesbuild regen --root .. --rom $(ROM) --allow-stubs || exit 1; \
+	fi
+	go -C snesrecomp-go build -o build/snesbuild ./cmd/snesbuild
+	@./snesrecomp-go/build/snesbuild toolchain fetch --root .
+	@for t in $(CROSS_TARGETS); do \
+	  echo "=== cross-checking $$t ==="; \
+	  ./snesrecomp-go/build/snesbuild sdl stage --root . --target $$t \
+	    --cache-dir $(PACKAGING)/cache || exit 1; \
+	  ./snesrecomp-go/build/snesbuild build --hermetic --root . --target $$t || exit 1; \
+	done
+	@echo "Cross targets link cleanly: $(CROSS_TARGETS)"
 
 clean-packaging-mounts:
 	@/bin/sh "$(PACKAGING)/scripts/detach-macos-dmgs.sh" "$(abspath $(PACKAGING)/cache)"

@@ -188,6 +188,21 @@ v2regen baseline verify --actual src/gen \
   --archive build/baseline/generated-src.tar.gz
 ```
 
+A hermetic build can also target a platform this machine is not, which turns
+"does it still build on Windows?" into something answerable without a Windows
+box. `sdl stage` fetches and sha256-verifies the same pinned SDL3
+redistributable the platform bundle ships, so the link is the real one:
+
+```sh
+snesbuild sdl stage  --root . --target x86_64-windows-gnu
+snesbuild build --hermetic --root . --target x86_64-windows-gnu
+```
+
+Each target keeps a separate object tree under `build/hermetic/<target>/`, so
+cross checks and the native build stay independently incremental. A cross build
+never falls back to the host's SDL3; pass `--sdl-include`/`--sdl-lib` for
+targets with no official redistributable to stage.
+
 Run `v2regen help` or `v2regen <command> -h` for every option.
 Run `snesbuild help` or `snesbuild <command> -h` for project-driver options.
 

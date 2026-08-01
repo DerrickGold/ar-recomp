@@ -131,6 +131,18 @@ static FILE *open_watch_stream(void) {
   cookie_io_functions_t io = {NULL, watch_write_cookie, NULL, NULL};
   return fopencookie(NULL, "w", io);
 }
+#elif defined(_WIN32)
+/* msvcrt/ucrt has neither funopen nor fopencookie, so the in-memory stream has
+ * no spelling here at all. Watch mode is a developer diagnostic and the
+ * windowed AR_TRACE=<file> capture below is unaffected, so this degrades with
+ * a message rather than dragging a custom FILE implementation into the build.
+ * trace_init already treats a NULL stream as "watch mode off". */
+static FILE *open_watch_stream(void) {
+  (void)watch_write;
+  fprintf(stderr, "[ar_trace] AR_TRACE_WATCH needs funopen/fopencookie, which "
+                  "Windows has neither of; use AR_TRACE=<file> instead\n");
+  return NULL;
+}
 #else
 static FILE *open_watch_stream(void) {
   return funopen(NULL, NULL, watch_write, NULL, NULL);
