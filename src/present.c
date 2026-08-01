@@ -1535,7 +1535,7 @@ static void DrawSimObjectPriority(
  * version subtracted, which put the band OUTSIDE the silhouette: a halo
  * painted onto the background, which reads as the sprite glowing rather than
  * being lit, and which scales with strength so no amount of dialling it back
- * fixes the look. The action-stage rim shader (`kRimLightMSL`, diorama.c)
+ * fixes the look. The action-stage rim shader (src/shaders/rim.frag.glsl)
  * has the same in-place property by construction — its `edge` term is
  * multiplied by the pixel's own alpha — so both paths now light only pixels
  * the sprite already owns.

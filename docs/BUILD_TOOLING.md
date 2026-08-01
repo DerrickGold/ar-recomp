@@ -104,6 +104,51 @@ standard library for path handling, worker selection, process execution, RTS
 census deltas, and cross-platform exit status handling; it does not call
 `grep`, `find`, `cp`, `readlink`, `sysctl`, or other Unix utilities.
 
+## GPU shaders
+
+The optional GPU effects (rim lighting, depth of field, edge AA, soft shadow
+blur — `kSettingCat_Graphics`) need one shader per backend, and each backend
+speaks a different format: Vulkan wants SPIR-V, Metal wants MSL, D3D12 wants
+DXIL. **No shader compiler runs at build time.** The hermetic build has a
+pinned `zig cc` and nothing else, so requiring `glslc` there would break the
+one-download bundle premise; instead the compiled blobs are committed and both
+build paths simply compile C.
+
+| Path | What it is |
+|---|---|
+| `src/shaders/*.frag.glsl` | The authored source — the one place a shader is written |
+| `src/shaders/*_frag.h` | Generated **and committed**: byte arrays holding SPIR-V + MSL |
+| `tools/build_shaders.py` | Developer-only generator |
+| `tests/shader_blob_test.c` | Asserts every blob compiles on the live backend |
+
+```bash
+tools/build_shaders.py            # regenerate after editing any .frag.glsl
+```
+
+`--check` verifies the committed headers match their sources without writing,
+which is what CI should run. Regenerating needs `glslc` (Homebrew `shaderc`,
+Debian `glslc`) and `spirv-cross`; **building the game needs neither.**
+
+Because `src/` is installed wholesale into bundles, `src/shaders/` ships to all
+platforms with no packaging or leak-gate change.
+
+Two constraints worth knowing before touching a shader:
+
+- The authored GLSL must follow SDL's documented binding convention
+  (`SDL_gpu.h`, "Shader Resources"): fragment stage uses descriptor **set 2**
+  for sampled textures and **set 3** for uniform buffers, with SDL's render
+  pipeline supplying `COLOR0` at location 0 and `TEXCOORD0` at location 1. The
+  generator refuses to emit a blob whose Metal bindings drifted off those slots.
+- Uniform blocks must mirror their C struct field-for-field. Packing two floats
+  into a `vec2` where the C side has separate scalars shifts every later member.
+
+`main.c` requests the `gpu` renderer **with properties**, declaring SPIR-V and
+MSL and deliberately not DXIL, so SDL picks a backend this build can actually
+feed. Declaring nothing is how the effects were once macOS-only in practice.
+DXIL is a deliberate deferral for Windows machines with no Vulkan driver; the
+committed SPIR-V is valid `SDL_shadercross` input, so adding it later is
+additive.
+
 ## Self-contained distribution bundles
 
 `snesrecomp-go/packaging/` is a standalone CMake project (it compiles no C
