@@ -850,12 +850,35 @@ int main(int argc, char **argv) {
      * rather than dying — this is opt-in polish, not a requirement to run
      * at all. Settings_InitWithFile() has already run by this point, so
      * g_settings reflects settings.ini/config.ini/the legacy AR_GPU_SHADERS
-     * env var per the usual priority chain. */
+     * env var per the usual priority chain.
+     *
+     * The "gpu" backend is requested WITH PROPERTIES, not by name alone,
+     * because SDL picks the underlying GPU backend (Vulkan / Metal / D3D12)
+     * partly from the shader formats the app declares it can supply. We ship
+     * SPIR-V and MSL (src/shaders/, see diorama.c) and deliberately do NOT
+     * claim DXIL, so SDL will choose Vulkan or Metal — backends this build
+     * can actually feed — instead of landing on D3D12 and leaving every
+     * effect silently disabled. Declaring nothing here, as this code did
+     * before, is exactly how the effects came to be macOS-only in practice. */
     g_gpu_shaders_requested = g_settings.gpu_shaders_enabled;
     if (headless_video) {
       g_renderer = SDL_CreateRenderer(g_window, SDL_SOFTWARE_RENDERER);
     } else if (g_gpu_shaders_requested) {
-      g_renderer = SDL_CreateRenderer(g_window, SDL_GPU_RENDERER);
+      SDL_PropertiesID renderer_props = SDL_CreateProperties();
+      if (renderer_props) {
+        SDL_SetStringProperty(renderer_props,
+            SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER);
+        SDL_SetPointerProperty(renderer_props,
+            SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, g_window);
+        SDL_SetBooleanProperty(renderer_props,
+            SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
+        SDL_SetBooleanProperty(renderer_props,
+            SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
+        g_renderer = SDL_CreateRendererWithProperties(renderer_props);
+        SDL_DestroyProperties(renderer_props);
+      } else {
+        g_renderer = NULL;
+      }
       if (g_renderer) {
         g_gpu_shaders_active = true;
       } else {

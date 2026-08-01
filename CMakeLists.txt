@@ -407,6 +407,24 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_render_pipeline PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
 
+    # Generated-shader distribution guard: asserts the COMMITTED shader blobs
+    # (src/shaders/*_frag.h, produced by tools/build_shaders.py) are accepted by
+    # the live GPU backend, and that the per-format entrypoint name is real.
+    # Skips itself where no GPU device exists. Deliberately NOT run under the
+    # dummy video driver: it needs a genuine Metal/Vulkan device.
+    add_executable(actraiser_shader_blob_test
+        tests/shader_blob_test.c
+    )
+    target_include_directories(actraiser_shader_blob_test PRIVATE src)
+    target_link_libraries(actraiser_shader_blob_test PRIVATE
+        SDL3::SDL3
+        m
+    )
+    add_test(NAME actraiser_shader_blob
+        COMMAND actraiser_shader_blob_test)
+    set_tests_properties(actraiser_shader_blob PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy")
+
     # Phase 0 insurance: the whole SDL present pattern (window -> renderer ->
     # clear -> present -> readpixels) executed on the SDL_Init thread, proving
     # nothing in that sequence structurally needs a second thread once the
