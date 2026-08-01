@@ -275,6 +275,7 @@ typedef struct MenuSection {
 static const MenuTab kTabsVideo[] = {
   TAB(Display, "General"),
   TAB(Graphics, "Effects"),
+  TAB(Crt, "CRT"),
   TAB(Widescreen, "Widescreen"),
 };
 static const MenuTab kTabsDiorama[] = {

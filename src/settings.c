@@ -1493,6 +1493,41 @@ const SettingDesc g_setting_descs[] = {
                "Diorama: smooth background scroll motion between emulated "
                "frames on high-refresh (>60Hz) displays.",
                kSettingCat_Graphics, 0, false, Diorama_ModeIsOn, NULL),
+  /* CRT post-process (kSettingCat_Crt). One fullscreen pass at the end of
+   * presentation, so unlike the diorama-only gpu_fx_* rows above it covers
+   * every render mode at once. Needs the same "gpu" backend, hence the shared
+   * GpuShadersActive gate; the numeric rows below are developer-only
+   * (Settings_IsDebugOnly) because they author the look rather than trade it
+   * off against performance. Defaults are the tuned-by-eye values. */
+  BOOL_SETTING(crt_enabled, "AR_CRT", "CRT effect",
+               "Simulate a curved colour CRT: barrel glass, scanlines, "
+               "phosphor mask and corner falloff. Applies to every mode "
+               "(flat, diorama and 3D town) at once.",
+               kSettingCat_Crt, 0, false, GpuShadersActive, NULL),
+  INT_SETTING(crt_curvature_x100, "AR_CRT_CURVE", "Glass curvature",
+              "How far the tube bows the picture. 0 is flat glass; the "
+              "corners darken and the image pulls in as this rises.",
+              kSettingCat_Crt, 45, 0, 200, NULL, GpuShadersActive),
+  INT_SETTING(crt_scanline_x100, "AR_CRT_SCAN", "Scanline depth",
+              "How dark the gaps between the 224 source scanlines go. "
+              "Follows the signal, so the count holds at any window size.",
+              kSettingCat_Crt, 35, 0, 100, NULL, GpuShadersActive),
+  INT_SETTING(crt_mask_x100, "AR_CRT_MASK", "Phosphor mask",
+              "Strength of the red/green/blue aperture grille. Sits on the "
+              "glass at output-pixel pitch, so it does not warp with the "
+              "picture.",
+              kSettingCat_Crt, 40, 0, 100, NULL, GpuShadersActive),
+  INT_SETTING(crt_aberration_x100, "AR_CRT_ABERR", "Colour fringing",
+              "Horizontal red/blue split, in output pixels. Reads as beam "
+              "convergence error; high values fringe hard edges heavily.",
+              kSettingCat_Crt, 25, 0, 300, NULL, GpuShadersActive),
+  INT_SETTING(crt_vignette_x100, "AR_CRT_VIG", "Corner falloff",
+              "Darkening toward the corners of the tube.",
+              kSettingCat_Crt, 25, 0, 100, NULL, GpuShadersActive),
+  INT_SETTING(crt_brightness_x100, "AR_CRT_BRIGHT", "Brightness",
+              "Lifts the whole picture to compensate for the light the "
+              "scanlines and phosphor mask absorb. 100 is unmodified.",
+              kSettingCat_Crt, 135, 50, 300, NULL, GpuShadersActive),
   { "audio_enabled", "AR_ENABLE_AUDIO", "Enable audio",
     "Pause or resume host audio output without changing emulated audio state.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
@@ -2264,6 +2299,7 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_SimLighting: return "Town lighting";
     case kSettingCat_SimAtmosphere: return "Town atmosphere";
     case kSettingCat_Graphics: return "Graphics";
+    case kSettingCat_Crt: return "CRT";
     case kSettingCat_Audio: return "Audio";
     case kSettingCat_Input: return "Controls";
     case kSettingCat_InputBinds: return "Bindings";
@@ -2306,6 +2342,14 @@ bool Settings_IsDebugOnly(const SettingDesc *desc) {
                  Settings_CategoryIsSim3D(desc->category);
   if (three_d &&
       (desc->type == kSettingType_Int || desc->type == kSettingType_Mask))
+    return true;
+
+  /* Same reasoning for the CRT tab: the master toggle is the player control,
+   * while the seven numeric knobs behind it author the look. Their defaults
+   * were tuned by eye and are what the effect is meant to look like, so a
+   * player has no reason to move them — but a developer adjusting the tube
+   * wants them all on one panel. */
+  if (desc->category == kSettingCat_Crt && desc->type == kSettingType_Int)
     return true;
 
   /* A few Bool rows in those same categories are internal A/B or plumbing

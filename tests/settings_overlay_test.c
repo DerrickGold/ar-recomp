@@ -564,8 +564,10 @@ int main(void) {
   CHECK(g_settings.extended_aspect == kScreenAspect_1610);
 
   /* Widescreen is now a TAB of Video rather than its own nav entry, and
-   * switching tabs must swap the row list without leaving the section. */
-  NavToTab(2);
+   * switching tabs must swap the row list without leaving the section.
+   * Index 3: Video's tabs are General, Effects, CRT, Widescreen — this index
+   * moves whenever a tab is inserted before it. */
+  NavToTab(3);
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "ws_action"));
   NavToTab(0);
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "display_mode"));

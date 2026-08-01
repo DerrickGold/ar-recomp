@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "present.h"
+#include "crt_post.h"
 #include "types.h"
 #include "diorama.h"
 #include "diorama_skybox_uv.h"
@@ -442,7 +443,7 @@ static void PresentHudOverlayComposited(const FrameSlot *slot,
   for (int i = 0; i < count; i++)
     RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
                    chunks[i].output_destination);
-  SDL_SetRenderTarget(g_renderer, NULL);
+  SDL_SetRenderTarget(g_renderer, CrtPost_BaseTarget());
 
   SDL_FRect dst = ToFRect(viewport);
   SDL_RenderTexture(g_renderer, composite, NULL, &dst);
@@ -1315,7 +1316,7 @@ static void DrawSimShadowMask(
     BlurSimShadowMask(mask, viewport.w, viewport.h,
                       slot->sim.shadow_softness_pct);
 
-  SDL_SetRenderTarget(g_renderer, NULL);
+  SDL_SetRenderTarget(g_renderer, CrtPost_BaseTarget());
   if (clipped) SDL_SetRenderClipRect(g_renderer, &saved_clip);
 
   SDL_SetTextureAlphaMod(
@@ -1688,7 +1689,7 @@ static void DrawSimRimLight(
   SDL_SetTextureColorMod(g_sim_obj_atlas_texture, 255, 255, 255);
   SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
 
-  SDL_SetRenderTarget(g_renderer, NULL);
+  SDL_SetRenderTarget(g_renderer, CrtPost_BaseTarget());
   if (clipped) SDL_SetRenderClipRect(g_renderer, &saved_clip);
 
   SDL_SetTextureBlendMode(rim, SDL_BLENDMODE_ADD);
