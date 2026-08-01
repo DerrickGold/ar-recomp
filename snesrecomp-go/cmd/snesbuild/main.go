@@ -47,6 +47,8 @@ func run(args []string) error {
 		return runGUI(args[1:])
 	case "toolchain":
 		return runToolchain(args[1:])
+	case "sdl":
+		return runSDL(args[1:])
 	case "doctor":
 		return runDoctor(args[1:])
 	case "version", "--version":
@@ -72,6 +74,7 @@ Commands:
   all         Regenerate, configure, and compile in one command
   gui         Open the local graphical hermetic game builder
   toolchain   Report, fetch, or pin the hermetic C toolchain (Zig)
+  sdl         Stage the pinned SDL3 redistributable for a cross target
   doctor      Report host tools and project inputs
   version     Print the driver version and target platform
 
@@ -135,7 +138,7 @@ type buildFlags struct {
 	buildOnly                                                          bool
 	cmakeArgs                                                          stringList
 	hermetic                                                           bool
-	zig, sdlInclude, sdlLib, optimize                                  string
+	zig, sdlInclude, sdlLib, optimize, target                          string
 	verbose                                                            bool
 }
 
@@ -145,6 +148,8 @@ func addHermeticFlags(flags *flag.FlagSet, values *buildFlags) {
 	flags.StringVar(&values.sdlInclude, "sdl-include", "", "SDL3 header directory (default: auto-discover)")
 	flags.StringVar(&values.sdlLib, "sdl-lib", "", "SDL3 library directory (default: auto-discover)")
 	flags.StringVar(&values.optimize, "optimize", "-O2", "hermetic optimization level")
+	flags.StringVar(&values.target, "target", "",
+		"cross-compile to a Zig target triple, e.g. x86_64-windows-gnu (default: host)")
 	flags.BoolVar(&values.verbose, "verbose", false, "print each hermetic compile command")
 }
 
@@ -166,8 +171,9 @@ func (values *buildFlags) hermeticOptions() (project.HermeticOptions, error) {
 	}
 	return project.HermeticOptions{
 		Paths: paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
-		SDLIncludeDir: values.sdlInclude, SDLLibDir: values.sdlLib, Verbose: values.verbose,
-		Stdout: os.Stdout, Stderr: os.Stderr,
+		SDLIncludeDir: values.sdlInclude, SDLLibDir: values.sdlLib, Target: values.target,
+		Verbose: values.verbose,
+		Stdout:  os.Stdout, Stderr: os.Stderr,
 	}, nil
 }
 
@@ -347,6 +353,49 @@ func runToolchain(args []string) error {
 	default:
 		return fmt.Errorf("unknown toolchain subcommand %q (expected status, fetch, or pin)", subcommand)
 	}
+}
+
+// runSDL stages the pinned SDL3 redistributable for a cross target. It exists
+// so `build --hermetic --target <t>` has a real SDL to link against: the host's
+// own SDL3 is never right for another platform, and the point of a cross build
+// is to prove the link a user's machine would do, not an approximation of it.
+func runSDL(args []string) error {
+	flags := flag.NewFlagSet("sdl", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	buildDir := flags.String("build-dir", "build", "native build directory")
+	target := flags.String("target", "", "Zig target triple, e.g. x86_64-windows-gnu")
+	cacheDir := flags.String("cache-dir", "", "download cache (default <root>/build/toolchain)")
+	stageDir := flags.String("dir", "", "stage directory (default <build-dir>/hermetic/<target>/sdl3)")
+	subcommand := "stage"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		subcommand, args = args[0], args[1:]
+	}
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if subcommand != "stage" {
+		return fmt.Errorf("unknown sdl subcommand %q (expected stage)", subcommand)
+	}
+	if *target == "" {
+		return fmt.Errorf("sdl stage needs --target (e.g. --target x86_64-windows-gnu)")
+	}
+	cache := *cacheDir
+	if cache == "" {
+		cache = toolchainCacheDir(*root)
+	}
+	stage := *stageDir
+	if stage == "" {
+		// Resolve through Paths rather than joining by hand so an absolute
+		// --build-dir lands in the same place the build itself will look.
+		paths := project.DefaultPaths(*root)
+		paths.BuildDir = *buildDir
+		resolved, err := paths.Resolve()
+		if err != nil {
+			return err
+		}
+		stage = project.CrossSDL3Dir(resolved.BuildDir, *target)
+	}
+	return toolchain.StageSDL3(*target, cache, stage, os.Stdout)
 }
 
 func runDoctor(args []string) error {

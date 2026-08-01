@@ -89,6 +89,49 @@ under a second, a clean build roughly two minutes on an 8-core machine. The
 CMake path (`snesbuild build`, presets, tests, sanitizers) remains the
 developer workflow; hermetic is the distribution path.
 
+### Cross-target link checks
+
+`zig cc` ships libc headers and a linker for every target it supports, so the
+same command can build the game *for* a platform this machine is not. That
+turns "will the Windows build work?" from a question needing a Windows box into
+one command:
+
+```sh
+make check-cross                   # currently: Windows x86_64
+```
+
+which is equivalent to
+
+```sh
+snesbuild sdl stage  --root . --target x86_64-windows-gnu
+snesbuild build --hermetic --root . --target x86_64-windows-gnu
+```
+
+`sdl stage` downloads and sha256-verifies the *same* pinned SDL3
+redistributable the platform bundle ships and lays it out as
+`build/hermetic/<target>/sdl3/{include,lib}`. A cross build never falls back to
+the host's SDL3 — linking macOS SDL into a Windows binary would fail in a way
+that teaches nothing — so an unstaged target is an error naming the fix.
+
+Each target keeps its own object tree under `build/hermetic/<target>/`, so a
+cross check does not evict the native build's objects (and vice versa); both
+stay incremental.
+
+This proves the compile and the link, not the run. Its value is the class of
+breakage that is otherwise invisible from a Mac: `#ifdef _WIN32` branches
+nothing has ever compiled, macro collisions with `<windows.h>`, and system
+libraries the link needs but nothing declares. Introducing it caught exactly
+those three — a BSD-only `funopen` in `ar_trace.c`, a project `FORCEINLINE`
+that silently downgraded mingw's `__forceinline` and produced duplicate
+`NtCurrentTeb`/`GetCurrentFiber`/`GetFiberData` definitions in every
+translation unit including `<windows.h>`, and a missing `-lcomdlg32` for
+`launcher.c`'s ROM picker.
+
+Only Windows x86_64 is wired in, because it is the only platform with both an
+official SDL3 redistributable to link against and no other way to test it here:
+macOS is built natively, and Linux x86_64 is validated on the Steam Deck. Other
+triples work by hand with `--target` plus `--sdl-include`/`--sdl-lib`.
+
 ## Dependency boundary
 
 | Operation | Required on the user's machine |
@@ -282,8 +325,13 @@ across the whole bundle (≈145 first-party files scanned per archive).
    carry the `-dirty` stamp) and publish the artifacts + checksums.
 3. **Windows/generic Linux runtime validation.** All seven bundles cross-build
    and the full standalone flow is verified end-to-end on macOS. The game and
-   input path are now hardware-validated on Steam Deck; Windows SDL3/WinMain
-   and the generic Linux system-SDL fallback still need real-host runs.
+   input path are now hardware-validated on Steam Deck. Windows now
+   cross-compiles *and links* here via `make check-cross` (see above), which
+   closes the build question; what remains for Windows is purely runtime —
+   SDL3 window/GPU/audio init, the fiber-based coroutine path in
+   `actraiser_rtl.c`, and `MoveFileExA` save durability, none of which a link
+   can exercise. The generic Linux system-SDL fallback still needs a real-host
+   run.
 4. **`--allow-stubs` decision.** The one-click flow currently passes it so
    regen always completes; closing the hard-stub backlog would let the shipped
    flow drop it.

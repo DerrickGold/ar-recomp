@@ -11,6 +11,9 @@
 #include "cpu_trace.h"
 #include "debug_server.h"
 #include "audio_trace.h"
+#ifdef _WIN32
+#include <windows.h>   /* MoveFileExA: rotating the SRAM backup, see RtlWriteSram */
+#endif
 
 uint8 g_ram[0x20000];
 uint8 *g_sram;
@@ -1120,8 +1123,25 @@ void RtlReadSram(void) {
   }
 }
 
+/* Rotate the current save to .bak. A bare rename() would look right and be
+ * silently broken on Windows: rename() there refuses an existing destination,
+ * so the first rotation succeeds and every later one fails, freezing the backup
+ * at the first save the player ever made. MoveFileExA with
+ * MOVEFILE_REPLACE_EXISTING is the portable spelling -- the same pairing
+ * atomic_replace.c, save_system.c and settings.c already use. The result stays
+ * unchecked on purpose: a missing or unrotatable backup must not stop the real
+ * save below from being written. */
+static void RtlRotateSramBackup(void) {
+#ifdef _WIN32
+  (void)MoveFileExA(RTL_SRAM_FILE, RTL_SRAM_BAK_FILE,
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+#else
+  (void)rename(RTL_SRAM_FILE, RTL_SRAM_BAK_FILE);
+#endif
+}
+
 void RtlWriteSram(void) {
-  rename(RTL_SRAM_FILE, RTL_SRAM_BAK_FILE);
+  RtlRotateSramBackup();
   FILE *f = fopen(RTL_SRAM_FILE, "wb");
   if (f) {
     fwrite(g_sram, 1, g_sram_size, f);

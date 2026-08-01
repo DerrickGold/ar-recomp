@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -71,12 +72,12 @@ func TestNewestHeaderTime(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(directory, "a.h"), when, when); err != nil {
 		t.Fatal(err)
 	}
-	newest := newestHeaderTime([]string{directory, filepath.Join(directory, "missing")})
+	newest := newestHeaderTime([]string{directory, filepath.Join(directory, "missing")}, "")
 	if !newest.Equal(when.Truncate(time.Second)) && !newest.After(when.Add(-time.Second)) {
 		t.Fatalf("newest: %v want ~%v", newest, when)
 	}
 	// Scanning the nested dir directly still finds its own header.
-	nestedOnly := newestHeaderTime([]string{nested})
+	nestedOnly := newestHeaderTime([]string{nested}, "")
 	if nestedOnly.IsZero() {
 		t.Fatal("nested dir scan found nothing")
 	}
@@ -86,7 +87,7 @@ func TestNewestHeaderTime(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(nested, "deep.h"), deepWhen, deepWhen); err != nil {
 		t.Fatal(err)
 	}
-	recursive := newestHeaderTime([]string{directory})
+	recursive := newestHeaderTime([]string{directory}, "")
 	if !recursive.After(when.Add(-time.Second)) || recursive.Before(deepWhen.Add(-time.Second)) {
 		t.Fatalf("recursive scan missed nested/deep.h: got %v want ~%v", recursive, deepWhen)
 	}
@@ -151,5 +152,90 @@ add_executable(MyGame
 	}
 	if !strings.Contains(err.Error(), "src/late_addition.c") {
 		t.Fatalf("error names no drifted source: %v", err)
+	}
+}
+
+func TestTargetOSFromTriple(t *testing.T) {
+	for triple, want := range map[string]string{
+		"x86_64-windows-gnu":  "windows",
+		"aarch64-windows-gnu": "windows",
+		"x86_64-linux-gnu":    "linux",
+		// Zig spells Darwin "macos"; the rest of the build switches on GOOS
+		// names, so this is the one field that needs translating.
+		"aarch64-macos-none": "darwin",
+	} {
+		if got := TargetOS(triple); got != want {
+			t.Errorf("TargetOS(%q) = %q, want %q", triple, got, want)
+		}
+	}
+	// An empty target is a host build, and a malformed one must not silently
+	// pick some other platform's link flags.
+	if got := TargetOS(""); got != runtime.GOOS {
+		t.Errorf("TargetOS(\"\") = %q, want host %q", got, runtime.GOOS)
+	}
+	if got := TargetOS("nonsense"); got != runtime.GOOS {
+		t.Errorf("TargetOS(\"nonsense\") = %q, want host %q", got, runtime.GOOS)
+	}
+}
+
+func TestResolveSDL3CrossRequiresStagedCopy(t *testing.T) {
+	buildDir := t.TempDir()
+	options := HermeticOptions{Target: "x86_64-windows-gnu"}
+	options.BuildDir = buildDir
+
+	// Nothing staged: the error must name the fix rather than letting the
+	// build reach a link failure, and must never fall back to the host SDL.
+	_, _, _, err := resolveSDL3(options)
+	if err == nil {
+		t.Fatal("expected an error when no cross SDL3 is staged")
+	}
+	if !strings.Contains(err.Error(), "sdl stage") {
+		t.Fatalf("error should point at `snesbuild sdl stage`: %v", err)
+	}
+
+	staged := CrossSDL3Dir(buildDir, options.Target)
+	if err := os.MkdirAll(filepath.Join(staged, "include", "SDL3"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(staged, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	include, lib, bundled, err := resolveSDL3(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if include != filepath.Join(staged, "include") || lib != filepath.Join(staged, "lib") {
+		t.Fatalf("staged dirs not used: %s %s", include, lib)
+	}
+	// Reported as bundled so the DLL is copied beside the cross-built binary,
+	// matching what the distribution bundle does.
+	if !bundled {
+		t.Error("a staged cross SDL3 is a bundled copy")
+	}
+}
+
+func TestNewestHeaderTimeSkipsBuildDir(t *testing.T) {
+	root := t.TempDir()
+	buildDir := filepath.Join(root, "build")
+	writeTestFile(t, filepath.Join(root, "src", "game.h"), "int a;\n")
+	// A cross target stages SDL3 headers under the build directory. Because
+	// the manifest lists `include = .`, an unpruned walk would see these and
+	// mark every native object stale on the next build.
+	staged := filepath.Join(buildDir, "hermetic", "x86_64-windows-gnu", "sdl3", "include", "SDL3")
+	writeTestFile(t, filepath.Join(staged, "SDL.h"), "int b;\n")
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(staged, "SDL.h"), future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	pruned := newestHeaderTime([]string{root}, buildDir)
+	if !pruned.Before(future) {
+		t.Fatalf("build dir was not pruned: got %v, staged header is %v", pruned, future)
+	}
+	// The cross build passes its staged include dir explicitly; that walk
+	// starts below the build directory and must still see the header.
+	direct := newestHeaderTime([]string{filepath.Dir(staged)}, buildDir)
+	if !direct.Equal(future) {
+		t.Fatalf("explicit staged include dir should still count: got %v", direct)
 	}
 }
