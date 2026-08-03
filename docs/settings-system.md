@@ -650,7 +650,17 @@ the D1 trace.
 
 ### Randomizer (`kSettingCat_RandoSeed` / `_RandoEnemies` / `_RandoItems` / `_RandoSim`) — 2026-08-03
 
-A top-level **Randomizer** section beside Cheats, four tabs. Backed by
+A **Randomizer** section, four tabs. **Developer-gated** (`show_debug_settings`)
+at both levels — the section carries `debug_only` so the nav column omits it,
+and all four categories are `Settings_IsDebugOnly` so no row can surface from
+elsewhere. It sits with Layers at the end of `kSections[]` so revealing it
+cannot renumber any player-visible section.
+
+The gate is about readiness, not capability: every table is verified against the
+ROM, but no seeded run has been played end to end, so it must not read as a
+finished feature. `AR_RANDO*` env vars and a hand-edited `settings.ini` still
+work — the master defaults off, so a player sees no change either way. Lift the
+gate once a randomized playthrough has been validated. Backed by
 `src/randomizer.c`, which is not a per-frame gate like the rest of this registry:
 it rewrites the loaded ROM image. `Randomizer_Init` snapshots the cart buffer
 (`cart_load` copies, so the live image is `g_snes->cart->rom`) and every row's

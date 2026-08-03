@@ -76,14 +76,14 @@ enum {
   kSection_Audio,
   kSection_Controls,
   kSection_Cheats,
-  /* The content randomizer, beside Cheats because both change how the game
-   * plays rather than how it looks or what the host does. */
-  kSection_Randomizer,
   kSection_Save,
   /* The in-game manual: a player-facing section, so it sits ahead of System's
    * host commands. */
   kSection_Manual,
   kSection_System,
+  /* Developer-only until a seeded run has been played end to end, so it sits
+   * with Layers rather than among the player sections. */
+  kSection_Randomizer,
   /* Developer-only, so it is present in the nav column only while
    * show_debug_settings is on. Last on purpose: every section above keeps the
    * same ordinal whether it is shown or hidden. */
@@ -93,7 +93,9 @@ enum {
  * the assertions below say which one they mean rather than repeating an enum
  * arithmetic expression that reads the same for both. */
 enum {
-  kPlayerSectionCount = kSection_Layers,
+  /* The first hidden section marks the end of the player-visible run; both
+   * sections past it are debug-gated. */
+  kPlayerSectionCount = kSection_Randomizer,
   kDebugSectionCount = kSection_Layers + 1,
   kPlayerSectionCountWithoutManual = kPlayerSectionCount - 1,
   kSystemVisibleOrdinalWithoutManual = kSection_System - 1,
@@ -316,12 +318,25 @@ static void CheckLayerEditorSection(void) {
   CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
   CHECK(wrapped == kSection_System);
 
+  /* The randomizer is gated at BOTH levels: its section is debug_only so the
+   * nav column omits it (asserted by the count above), and its rows are
+   * debug-only so nothing can surface them from another tab. Checked with the
+   * flag still off, which is the state a player ships with. */
+  CHECK(!Settings_IsMenuVisible(Settings_Find("rando_enable")));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("rando_statue_drops")));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("rando_lair_types")));
+
   g_settings.show_debug_settings = true;
   CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, &total));
   CHECK(total == kDebugSectionCount);
-  /* With debug on, DOWN from System reaches Layers and its position is the last
-   * one -- which is what pins the reported ordinal to the VISIBLE numbering that
-   * the nav column draws in. */
+  /* ...and revealed by the same flag, so the gate is a switch and not a wall. */
+  CHECK(Settings_IsMenuVisible(Settings_Find("rando_enable")));
+  /* With debug on, DOWN from System reaches the first hidden section and one
+   * more DOWN reaches the last -- which is what pins the reported ordinal to
+   * the VISIBLE numbering that the nav column draws in. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
+  CHECK(wrapped == kSection_Randomizer);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
   CHECK(wrapped == kSection_Layers);
