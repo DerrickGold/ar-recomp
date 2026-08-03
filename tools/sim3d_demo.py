@@ -50,6 +50,9 @@ SIM3D_STAGE_ENV = (
     "AR_SIM3D_SEPARATED", "AR_SIM3D_GROUND", "AR_SIM3D_BILLBOARDS",
     "AR_SIM3D_HEIGHT", "AR_SIM3D_SHADOWS", "AR_SIM3D_SOFT_SHADOWS",
     "AR_SIM3D_RIM_LIGHT", "AR_SIM3D_WORLD_UNDERLAY", "AR_SIM3D_CLOUDS",
+    "AR_SIM3D_CULL_HAZE_STAGE", "AR_SIM3D_BACKDROP",
+    "AR_SIM3D_PICKER_EASE", "AR_SIM3D_EFFECT_LIGHTING",
+    "AR_SIM3D_PARTICLES",
 )
 # Only these D3c presentation classes may lift a billboard off the ground.
 LIFTED_HEIGHT_CLASSES = ("flying", "flying_projectile", "semi_grounded")
@@ -57,6 +60,7 @@ LIFTED_HEIGHT_CLASSES = ("flying", "flying_projectile", "semi_grounded")
 CONTACT_EXACT_HEIGHT_CLASSES = ("ground_effect", "ground_strike")
 MAP_PLANE_TRAIT = 1 << 0
 NO_SHADOW_TRAIT = 1 << 2
+SIM_EFFECT_VISIBLE = 1 << 0
 # kSimHeightSlewStep in sim_render_metadata.h.
 HEIGHT_SLEW_STEP = 4
 
@@ -286,7 +290,9 @@ def read_object_evidence(path: Path) -> dict:
     return evidence
 
 
-def read_d1_metadata(path: Path) -> tuple[dict, list[str]]:
+def read_d1_metadata(path: Path,
+                     allowed_unpacked_atlas_objects: list[dict] | None = None
+                     ) -> tuple[dict, list[str]]:
     """Validate D1 metadata and D2's flat-composite gate while streaming."""
     errors: list[str] = []
     error_count = 0
@@ -322,6 +328,21 @@ def read_d1_metadata(path: Path) -> tuple[dict, list[str]]:
     picker_exit_frames: list[dict] = []
     previous_view = None
     first_serial = last_serial = None
+    effect_frame_count = visible_effect_frame_count = max_effects = 0
+    visible_effect_instance_count = 0
+    effect_metadata_invalid_frames = 0
+    effect_overflow_total = effect_overflow_max = 0
+    effect_kind_counts: dict[str, int] = {}
+    effect_phase_counts: dict[str, dict[str, int]] = {}
+    effect_compositions: dict[str, set[int]] = {}
+    effect_generations: dict[str, set[int]] = {}
+    effect_carry: dict[tuple[str, int, int], dict] = {}
+    allowed_unpacked = {
+        (int(item["game_frame"]), int(item["record"]),
+         int(item["composition"]))
+        for item in (allowed_unpacked_atlas_objects or [])
+    }
+    observed_unpacked: set[tuple[int, int, int]] = set()
 
     def issue(line_number: int, message: str) -> None:
         nonlocal error_count
@@ -389,6 +410,7 @@ def read_d1_metadata(path: Path) -> tuple[dict, list[str]]:
 
             sources = frame.get("sources", [])
             objects = frame.get("objects", [])
+            effects = frame.get("effects", [])
             frame_source_records = {int(source.get("record", 0))
                                     for source in sources}
             shadow_opacity_values.add(int(frame.get("shadow_opacity_pct", 0)))
@@ -426,6 +448,29 @@ def read_d1_metadata(path: Path) -> tuple[dict, list[str]]:
             max_sources = max(max_sources, len(sources))
             max_objects = max(max_objects, len(objects))
             max_emitted = max(max_emitted, emitted)
+            max_effects = max(max_effects, len(effects))
+            effect_frame_count += bool(effects)
+            frame_visible_effects = sum(
+                (int(effect.get("flags", 0)) & SIM_EFFECT_VISIBLE) != 0
+                for effect in effects)
+            visible_effect_frame_count += frame_visible_effects > 0
+            visible_effect_instance_count += frame_visible_effects
+            if int(frame.get("effect_visible_count", -1)) != \
+                    frame_visible_effects:
+                issue(line_number,
+                      "effect_visible_count does not match visible flags")
+            effect_metadata_valid = bool(
+                frame.get("effect_metadata_valid", False))
+            effect_metadata_invalid_frames += not effect_metadata_valid
+            effect_overflow = int(frame.get("effect_overflow_count", -1))
+            if effect_overflow < 0:
+                issue(line_number, "effect_overflow_count is missing")
+                effect_overflow = 0
+            effect_overflow_total += effect_overflow
+            effect_overflow_max = max(effect_overflow_max, effect_overflow)
+            if effect_overflow and effect_metadata_valid:
+                issue(line_number,
+                      "effect overflow did not invalidate effect metadata")
             frame_atlas_valid = bool(frame.get("atlas_valid"))
             atlas_valid_frames += frame_atlas_valid
             object_atlas_valid = sum(bool(obj.get("atlas_valid"))
@@ -455,8 +500,17 @@ def read_d1_metadata(path: Path) -> tuple[dict, list[str]]:
             for object_index, obj in enumerate(objects):
                 if not bool(obj.get("atlas_valid")):
                     if frame_atlas_valid:
-                        issue(line_number,
-                              f"object {object_index} lacks an atlas rect")
+                        descriptor = (
+                            int(frame.get("game_frame", -1)),
+                            int(obj.get("record", -1)),
+                            int(obj.get("composition", -1)),
+                        )
+                        if descriptor in allowed_unpacked:
+                            observed_unpacked.add(descriptor)
+                        else:
+                            issue(line_number,
+                                  f"object {object_index} lacks an atlas rect: "
+                                  f"{descriptor!r}")
                     continue
                 rect = [int(value) for value in obj.get("atlas", [])]
                 local = [int(value) for value in
@@ -486,6 +540,82 @@ def read_d1_metadata(path: Path) -> tuple[dict, list[str]]:
                 issue(line_number, "source_count does not match sources[]")
             if int(frame.get("object_count", -1)) != len(objects):
                 issue(line_number, "object_count does not match objects[]")
+            if int(frame.get("effect_count", -1)) != len(effects):
+                issue(line_number, "effect_count does not match effects[]")
+            for effect_index, effect in enumerate(effects):
+                kind = str(effect.get("kind_name", "missing"))
+                phase = str(effect.get("phase_name", "missing"))
+                effect_kind_counts[kind] = effect_kind_counts.get(kind, 0) + 1
+                phase_counts = effect_phase_counts.setdefault(kind, {})
+                phase_counts[phase] = phase_counts.get(phase, 0) + 1
+                effect_compositions.setdefault(kind, set()).add(
+                    int(effect.get("composition", 0)))
+                generation = int(effect.get("generation", 0))
+                effect_generations.setdefault(kind, set()).add(generation)
+                source_index = int(effect.get("source_index", -1))
+                if source_index < 0 or source_index >= len(sources):
+                    issue(line_number,
+                          f"effect {effect_index} source index is out of bounds")
+                    continue
+                source = sources[source_index]
+                world = [int(value) for value in effect.get("world", [])]
+                geometry = effect.get("geometry", {})
+                if int(effect.get("record", -1)) != int(source["record"]) or \
+                        int(effect.get("composition", -1)) != int(
+                            source["composition"]):
+                    issue(line_number,
+                          f"effect {effect_index} does not match its source")
+                if world != [int(source["x"]), int(source["y"])]:
+                    issue(line_number,
+                          f"effect {effect_index} world anchor drifted")
+                if generation <= 0:
+                    issue(line_number,
+                          f"effect {effect_index} has invalid generation")
+                geometry_kind = str(geometry.get("kind_name", "missing"))
+                geometry_space = str(geometry.get("space_name", "missing"))
+                if geometry_kind not in {"point", "segment", "area", "scene"}:
+                    issue(line_number,
+                          f"effect {effect_index} has unknown geometry "
+                          f"{geometry_kind!r}")
+                if geometry_space not in {"record_local", "world_local", "screen"}:
+                    issue(line_number,
+                          f"effect {effect_index} has unknown space "
+                          f"{geometry_space!r}")
+                if geometry_kind == "point" and \
+                        len(geometry.get("point", [])) != 3:
+                    issue(line_number,
+                          f"effect {effect_index} has malformed point geometry")
+                if phase in {"missing", "unknown", "none"}:
+                    issue(line_number,
+                          f"effect {effect_index} has invalid phase {phase!r}")
+
+                key = (kind, int(effect.get("record", -1)), generation)
+                current = {
+                    "serial": serial,
+                    "age": int(effect.get("age_ticks", -1)),
+                    "phase": phase,
+                    "phase_ticks": int(effect.get("phase_ticks", -1)),
+                    "pulse_generation": int(
+                        effect.get("pulse_generation", -1)),
+                    "pulse_ticks": int(effect.get("pulse_ticks", -1)),
+                }
+                previous = effect_carry.get(key)
+                if current["age"] < 0 or current["phase_ticks"] < 0 or \
+                        current["pulse_generation"] < 0 or \
+                        current["pulse_ticks"] < 0:
+                    issue(line_number,
+                          f"effect {effect_index} has malformed lifecycle ages")
+                if previous and serial == previous["serial"] + 1:
+                    if current["age"] != min(previous["age"] + 1, 0xFFFF):
+                        issue(line_number,
+                              f"effect {effect_index} lifecycle age skipped")
+                    expected_phase_ticks = (
+                        min(previous["phase_ticks"] + 1, 0xFFFF)
+                        if phase == previous["phase"] else 0)
+                    if current["phase_ticks"] != expected_phase_ticks:
+                        issue(line_number,
+                              f"effect {effect_index} phase age skipped")
+                effect_carry[key] = current
             if emitted != claimed:
                 issue(line_number, f"emitted {emitted} != claimed {claimed}")
             if sum(int(source["oam_count"]) for source in sources) != emitted:
@@ -631,6 +761,8 @@ def read_d1_metadata(path: Path) -> tuple[dict, list[str]]:
                 if int(world_objects[0]["oam_first"]) != world_first:
                     issue(line_number, "world suffix begins at the wrong slot")
 
+    for descriptor in sorted(allowed_unpacked - observed_unpacked):
+        issue(0, f"allowed unpacked atlas object was not observed: {descriptor!r}")
     if error_count > len(errors):
         errors.append(f"D1 metadata: {error_count - len(errors)} more error(s)")
     summary = {
@@ -648,6 +780,26 @@ def read_d1_metadata(path: Path) -> tuple[dict, list[str]]:
         "max_source_count": max_sources,
         "max_object_count": max_objects,
         "max_emitted_oam_count": max_emitted,
+        "effect_frame_count": effect_frame_count,
+        "visible_effect_frame_count": visible_effect_frame_count,
+        "visible_effect_instance_count": visible_effect_instance_count,
+        "max_effect_count": max_effects,
+        "effect_metadata_invalid_frame_count": effect_metadata_invalid_frames,
+        "effect_overflow_count_total": effect_overflow_total,
+        "effect_overflow_count_max": effect_overflow_max,
+        "effect_kind_counts": effect_kind_counts,
+        "effect_phase_counts": {
+            kind: dict(sorted(counts.items()))
+            for kind, counts in sorted(effect_phase_counts.items())
+        },
+        "effect_generation_counts": {
+            kind: len(generations)
+            for kind, generations in sorted(effect_generations.items())
+        },
+        "effect_compositions": {
+            kind: [f"${value:04X}" for value in sorted(values)]
+            for kind, values in sorted(effect_compositions.items())
+        },
         "atlas_valid_frame_count": atlas_valid_frames,
         "atlas_valid_object_count": atlas_valid_count,
         "atlas_invalid_object_count": atlas_invalid_count,
@@ -692,7 +844,11 @@ def read_d1_metadata(path: Path) -> tuple[dict, list[str]]:
 def validate_d1_summary(summary: dict, expected: dict) -> list[str]:
     errors: list[str] = []
     exact_fields = ("requested", "effective", "integrity_flags",
-                    "separated_statuses", "projection_cameras")
+                    "separated_statuses", "projection_cameras",
+                    "effect_frame_count", "visible_effect_frame_count",
+                    "visible_effect_instance_count", "max_effect_count",
+                    "effect_kind_counts", "effect_phase_counts",
+                    "effect_generation_counts", "effect_compositions")
     for field in exact_fields:
         if field in expected and summary[field] != expected[field]:
             errors.append(
@@ -713,6 +869,8 @@ def validate_d1_summary(summary: dict, expected: dict) -> list[str]:
         "height_ramp_steps_min": "height_ramp_step_count",
         "shadow_casters_min": "shadow_caster_count",
         "shadow_lifted_casters_min": "shadow_caster_lifted_count",
+        "effect_frames_min": "effect_frame_count",
+        "max_effects_min": "max_effect_count",
     }
     for expected_field, summary_field in minima.items():
         if expected_field in expected and \
@@ -729,6 +887,10 @@ def validate_d1_summary(summary: dict, expected: dict) -> list[str]:
         "separated_mismatch_pixels_total_max":
             "separated_mismatch_pixels_total",
         "height_slew_violations_max": "height_slew_violation_count",
+        "effect_metadata_invalid_frames_max":
+            "effect_metadata_invalid_frame_count",
+        "effect_overflow_total_max": "effect_overflow_count_total",
+        "effect_overflow_max": "effect_overflow_count_max",
     }
     for expected_field, summary_field in maxima.items():
         if expected_field in expected and \
@@ -765,6 +927,19 @@ def validate_d1_summary(summary: dict, expected: dict) -> list[str]:
             errors.append(
                 f"D1 height class {height_class}: expected none, "
                 f"got {census[height_class]}")
+    for kind, minimum in expected.get("effect_kind_minimums", {}).items():
+        actual = summary.get("effect_kind_counts", {}).get(kind, 0)
+        if actual < int(minimum):
+            errors.append(
+                f"D1 effect kind {kind}: expected at least {minimum}, "
+                f"got {actual}")
+    allowed_effect_kinds = set(expected.get("allowed_effect_kinds", []))
+    if allowed_effect_kinds:
+        unexpected = set(summary.get("effect_kind_counts", {})) - \
+            allowed_effect_kinds
+        if unexpected:
+            errors.append(
+                f"D1 unexpected effect kinds: {sorted(unexpected)!r}")
     # The picker contract is asserted either way, but which contract applies is
     # a build-time property of the binary, not of the manifest.
     # A checkpoint that never opens a picker cannot exercise either picker
@@ -949,7 +1124,8 @@ def validate_d2_artifacts(prefix: Path) -> tuple[dict, list[str]]:
 
 
 def validate_d3_artifact(output: Path, label: str, picker_topdown: bool,
-                         max_differing_pixels: int | None = None
+                         max_differing_pixels: int | None = None,
+                         expect_picker_unchanged: bool = False
                          ) -> tuple[dict, list[str]]:
     """Retain and compare the two requested geometry-profile readbacks."""
     candidates = sorted(path for path in output.glob("runs/*/shot.ppm")
@@ -1022,10 +1198,15 @@ def validate_d3_artifact(output: Path, label: str, picker_topdown: bool,
     # exactly where the stage under test differs -- which the B/A comparison
     # above already measures. Requiring equality there would assert the
     # opposite of the shipped behaviour.
-    if picker_topdown and picker_differing_pixels:
+    if expect_picker_unchanged and picker_differing_pixels:
+        errors.append(
+            f"{label} changed {picker_differing_pixels} picker pixels even "
+            "though no effect emitter exists during that frame")
+    elif picker_topdown and picker_differing_pixels:
         errors.append(
             f"{label} picker fallback differs by {picker_differing_pixels} pixels")
-    if not picker_topdown and not picker_differing_pixels and \
+    if not expect_picker_unchanged and not picker_topdown and \
+            not picker_differing_pixels and \
             differing_pixels:
         errors.append(
             f"{label} projected picker frame is identical across profiles "
@@ -1265,8 +1446,10 @@ def main() -> int:
                      checkpoint.get("d4a_visual") or
                      checkpoint.get("d4b_visual") or
                      checkpoint.get("d4c_visual") or
-                     checkpoint.get("d5a_visual"))
-    d3_label = ("D5a" if checkpoint.get("d5a_visual")
+                     checkpoint.get("d5a_visual") or
+                     checkpoint.get("effect_visual"))
+    d3_label = ("Lightning" if checkpoint.get("effect_visual")
+                else "D5a" if checkpoint.get("d5a_visual")
                 else "D4c" if checkpoint.get("d4c_visual")
                 else "D4b" if checkpoint.get("d4b_visual")
                 else "D4a" if checkpoint.get("d4a_visual")
@@ -1438,10 +1621,11 @@ def main() -> int:
         if not d1_trace.is_file():
             raise RuntimeError(
                 f"checkpoint produced no D1 metadata trace; see {console}")
-        d1_summary, d1_errors = read_d1_metadata(d1_trace)
+        d1_expected = checkpoint.get("expect", {}).get("d1_metadata", {})
+        d1_summary, d1_errors = read_d1_metadata(
+            d1_trace, d1_expected.get("allowed_unpacked_atlas_objects"))
         errors.extend(d1_errors)
-        errors.extend(validate_d1_summary(
-            d1_summary, checkpoint.get("expect", {}).get("d1_metadata", {})))
+        errors.extend(validate_d1_summary(d1_summary, d1_expected))
         hash_compare = compare_d1_framebuffer_hashes(
             d1_trace, d1_authentic_trace)
         if hash_compare["mismatch_count"]:
@@ -1461,7 +1645,9 @@ def main() -> int:
         d3_artifact, d3_errors = validate_d3_artifact(output, d3_label,
                                                       picker_topdown,
                                                       checkpoint.get(
-                                                          "max_differing_pixels"))
+                                                          "max_differing_pixels"),
+                                                      bool(checkpoint.get(
+                                                          "expect_picker_unchanged")))
         errors.extend(d3_errors)
         summary[f"{d3_label.lower()}_visual"] = d3_artifact
     report = {

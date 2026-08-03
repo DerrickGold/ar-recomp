@@ -2,6 +2,7 @@
 
 #include "diorama_layer_editor.h"
 #include "input_map.h"
+#include "render_capabilities.h"
 #include "settings.h"
 #include "randomizer.h"
 #include "settings_overlay.h"
@@ -24,7 +25,8 @@ uint8 g_ram[0x20000];
 bool g_gpu_shaders_active;
 /* W4-2: present.c owns the real value (latched when a renderer rejects the rim
  * mask blend mode); stubbed true here so the row's availability is exercised. */
-bool g_sim_rim_mask_supported = true;
+bool Present_SimRimMaskSupported(void) { return true; }
+bool Present_SimEffectRendererSupported(void) { return true; }
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
 static int s_failures;

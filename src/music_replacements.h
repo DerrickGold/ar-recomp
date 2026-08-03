@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "types.h"
 #include "hd_replacements.h" /* shared HdCondition gate grammar */
 
@@ -86,6 +87,15 @@ void MusicReplacements_SetHostPaused(bool paused);
 
 /* Combined native/host pause state, exposed for diagnostics and tests. */
 bool MusicReplacements_IsPlaybackPaused(void);
+
+/* Snapshot the currently selected enhanced one-shot under the APU lock.
+ * Returns a nonzero generation token only while a non-looping replacement
+ * session is current, including after its decoder reaches the natural end.
+ * `completed` is true only for that natural end; authentic playback, looping
+ * replacements, open/decode failure, and stopped sessions return token 0.
+ * A caller may latch the token and later require the same token before acting,
+ * preventing an unrelated track change from satisfying the completion test. */
+uint64_t MusicReplacements_GetOneShotSnapshot(bool *completed);
 
 /* One-line identity for read-only diagnostics. Names a matching manifest
  * track even when it is currently playing through the authentic SPC path. */

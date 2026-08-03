@@ -544,8 +544,9 @@ void Randomizer_Reroll(void) {
   /* Cheap, and it only has to be unpredictable to a human choosing a run. */
   static uint64 counter;
   Rng r;
-  RngSeed(&r, (uint32)(uintptr_t)&counter ^ (uint32)(counter += 0x9E3779B9u),
-          (uint32)counter);
+  counter += 0x9E3779B9u;
+  const uint32 counter_seed = (uint32)counter;
+  RngSeed(&r, (uint32)(uintptr_t)&counter ^ counter_seed, counter_seed);
   long seed = (long)(RngNext(&r) % 1000000000u);
   const SettingDesc *d = Settings_Find("rando_seed");
   if (d) Settings_SetLong(d, seed);

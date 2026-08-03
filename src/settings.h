@@ -394,6 +394,8 @@ typedef struct Settings {
   bool sim3d_shadows;
   bool sim3d_soft_shadows;
   bool sim3d_rim_light;
+  bool sim3d_effect_lighting;
+  bool sim3d_particles;
   bool sim3d_world_underlay;
   bool sim3d_cloud_shroud;
   bool sim3d_cull_haze;

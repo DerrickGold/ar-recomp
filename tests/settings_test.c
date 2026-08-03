@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "config.h"
 #include "input_map.h"
+#include "render_capabilities.h"
 #include "settings.h"
 #include "user_data_dir.h"
 
@@ -18,7 +19,17 @@ uint8 g_ram[0x20000];
 bool g_gpu_shaders_active;
 /* W4-2: present.c owns the real value (latched when a renderer rejects the rim
  * mask blend mode); stubbed true here so the row's availability is exercised. */
-bool g_sim_rim_mask_supported = true;
+static bool s_sim_rim_mask_supported = true;
+bool Present_SimRimMaskSupported(void) {
+  return s_sim_rim_mask_supported;
+}
+/* Lightning effects use SDL's built-in additive blend. As with the rim mask,
+ * present.c latches an actual backend rejection; this renderer-free harness
+ * supplies the optimistic initial capability. */
+static bool s_sim_effect_renderer_supported = true;
+bool Present_SimEffectRendererSupported(void) {
+  return s_sim_effect_renderer_supported;
+}
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
 static int s_failures;
@@ -76,7 +87,7 @@ static void TestDefaultsAndMetadata(void) {
    * The content randomizer then added eleven: master, seed and reroll on Seed;
    * health, damage, type shuffle and its range on Enemies; drops and placement
    * on Items; lair positions and monsters on Simulation. */
-  CHECK(g_setting_desc_count == 250);
+  CHECK(g_setting_desc_count == 252);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -131,6 +142,8 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim3d_backdrop);
   CHECK(g_settings.sim3d_soft_shadows);
   CHECK(g_settings.sim3d_rim_light);
+  CHECK(g_settings.sim3d_effect_lighting);
+  CHECK(g_settings.sim3d_particles);
   CHECK(!g_settings.sim3d_picker_exit_ease);
   CHECK(g_settings.sim3d_diagnostic_layers == 0);
   /* Camera baseline captured from a tuned session (2026-07-22), not derived:
@@ -369,7 +382,8 @@ static void TestSim3DEnvironmentLabels(void) {
          kSimFeature_ObjectBillboards | kSimFeature_SoftShadows |
          kSimFeature_RimLight | kSimFeature_WorldUnderlay |
          kSimFeature_CloudShroud | kSimFeature_CullHaze |
-         kSimFeature_Backdrop));
+         kSimFeature_Backdrop | kSimFeature_EffectLighting |
+         kSimFeature_Particles));
   CHECK(g_settings.sim3d_tilt_x_mrad == 350);
   ClearSettingsEnv();
 }
@@ -1017,12 +1031,11 @@ static void TestUserDataFile(void) {
  * nothing. present.c owns the real flag and latches it on the first failed
  * SDL_SetTextureBlendMode; this drives the availability predicate directly. */
 static void TestRimLightAvailabilityFollowsBlendSupport(void) {
-  extern bool g_sim_rim_mask_supported;
   const SettingDesc *rim = Settings_Find("sim3d_rim_light");
   CHECK(rim != NULL);
   if (!rim) return;
 
-  const bool restore_support = g_sim_rim_mask_supported;
+  const bool restore_support = s_sim_rim_mask_supported;
   const int restore_mode = g_settings.sim3d_mode;
 
   /* The row is gated on BOTH the sim-3D stage being enabled and the blend mode
@@ -1030,16 +1043,16 @@ static void TestRimLightAvailabilityFollowsBlendSupport(void) {
    * wrong reason (unavailable either way) and prove nothing. */
   g_settings.sim3d_mode = 1;
 
-  g_sim_rim_mask_supported = true;
+  s_sim_rim_mask_supported = true;
   CHECK(Settings_IsAvailable(rim));
 
   /* Unsupported blend mode alone must remove the row. */
-  g_sim_rim_mask_supported = false;
+  s_sim_rim_mask_supported = false;
   CHECK(!Settings_IsAvailable(rim));
 
   /* Restoring support brings it back — so the flag is demonstrably what decides
    * it, not some unrelated precondition. */
-  g_sim_rim_mask_supported = true;
+  s_sim_rim_mask_supported = true;
   CHECK(Settings_IsAvailable(rim));
 
   /* The stage gate still dominates: no blend support in the world makes an
@@ -1047,7 +1060,25 @@ static void TestRimLightAvailabilityFollowsBlendSupport(void) {
   g_settings.sim3d_mode = 0;
   CHECK(!Settings_IsAvailable(rim));
 
-  g_sim_rim_mask_supported = restore_support;
+  s_sim_rim_mask_supported = restore_support;
+  g_settings.sim3d_mode = restore_mode;
+}
+
+static void TestEffectAvailabilityFollowsRendererSupport(void) {
+  const SettingDesc *lighting = Settings_Find("sim3d_effect_lighting");
+  const SettingDesc *particles = Settings_Find("sim3d_particles");
+  CHECK(lighting != NULL && particles != NULL);
+  if (!lighting || !particles) return;
+  const bool restore_support = s_sim_effect_renderer_supported;
+  const int restore_mode = g_settings.sim3d_mode;
+  g_settings.sim3d_mode = 1;
+  s_sim_effect_renderer_supported = true;
+  CHECK(Settings_IsAvailable(lighting));
+  CHECK(Settings_IsAvailable(particles));
+  s_sim_effect_renderer_supported = false;
+  CHECK(!Settings_IsAvailable(lighting));
+  CHECK(!Settings_IsAvailable(particles));
+  s_sim_effect_renderer_supported = restore_support;
   g_settings.sim3d_mode = restore_mode;
 }
 
@@ -1082,6 +1113,7 @@ int main(void) {
   TestPersistenceCanBeDisabled();
   TestUserDataFile();
   TestRimLightAvailabilityFollowsBlendSupport();
+  TestEffectAvailabilityFollowsRendererSupport();
   TestScalePercentToOutput();
   TestFrameLimitInterval();
   TestDefaultsAndMetadata();

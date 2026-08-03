@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "randomizer.h"
+#include "render_capabilities.h"
 #include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
 #include "input_map.h"
 #include <errno.h>
@@ -603,6 +604,8 @@ static const struct {
   { kSimFeature_Shadows, &g_settings.sim3d_shadows },
   { kSimFeature_SoftShadows, &g_settings.sim3d_soft_shadows },
   { kSimFeature_RimLight, &g_settings.sim3d_rim_light },
+  { kSimFeature_EffectLighting, &g_settings.sim3d_effect_lighting },
+  { kSimFeature_Particles, &g_settings.sim3d_particles },
   { kSimFeature_WorldUnderlay, &g_settings.sim3d_world_underlay },
   { kSimFeature_CloudShroud, &g_settings.sim3d_cloud_shroud },
   { kSimFeature_CullHaze, &g_settings.sim3d_cull_haze },
@@ -652,14 +655,23 @@ static bool Sim3DSoftShadowsAvailable(void) {
  * the row out rather than offering a toggle that cannot do anything: an option
  * that silently does nothing is the dishonesty findings R8 and R13 were about.
  *
- * A plain bool rather than an accessor so the ROM-free tests can stub it with
- * one definition, matching g_gpu_shaders_active above. Defaults to true: the
- * mode is assumed usable until a set actually fails, so a backend that supports
- * it never sees the row disappear. */
-extern bool g_sim_rim_mask_supported;
+ * The read-only accessor is stubbed by ROM-free tests. It defaults to true in
+ * present.c and atomically latches false when a backend rejects the mode. */
+/* The standard effect path verifies additive blending and untextured geometry
+ * independently. A backend failure in either half greys both rows because both
+ * current stages use the same batched pass; future shader/target capabilities
+ * must get their own flags instead of broadening either of these. */
 static bool Sim3DRimLightAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_RimLight) &&
-      g_sim_rim_mask_supported;
+      Present_SimRimMaskSupported();
+}
+static bool Sim3DEffectLightingAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_EffectLighting) &&
+      Present_SimEffectRendererSupported();
+}
+static bool Sim3DParticlesAvailable(void) {
+  return Sim3DStageImplemented(kSimFeature_Particles) &&
+      Present_SimEffectRendererSupported();
 }
 static bool Sim3DWorldUnderlayAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_WorldUnderlay);
@@ -1021,6 +1033,19 @@ const SettingDesc g_setting_descs[] = {
                "light strength.",
                kSettingCat_Simulation, 1, false, Sim3DRimLightAvailable,
                NULL),
+  BOOL_SETTING(sim3d_effect_lighting, "AR_SIM3D_EFFECT_LIGHTING",
+               "Effect lighting",
+               "Add transient local illumination when simulation miracles "
+               "and enemy attacks emit light. Uses portable additive SDL "
+               "geometry and does not require GPU shader effects.",
+               kSettingCat_Simulation, 1, false,
+               Sim3DEffectLightingAvailable, NULL),
+  BOOL_SETTING(sim3d_particles, "AR_SIM3D_PARTICLES", "Effect particles",
+               "Add deterministic host particles synchronized to simulation "
+               "miracles and enemy attacks. Uses the same captured effect "
+               "lifecycle as Effect lighting.",
+               kSettingCat_Simulation, 1, false,
+               Sim3DParticlesAvailable, NULL),
   BOOL_SETTING(sim3d_world_underlay, "AR_SIM3D_WORLD_UNDERLAY",
                "World map underlay",
                "Extend the ground past the town edge with the live world "
@@ -2074,6 +2099,8 @@ static bool Settings_UsesLegacyEnvironmentSyntax(const SettingDesc *desc) {
          desc->field != &g_settings.sim3d_shadows &&
          desc->field != &g_settings.sim3d_soft_shadows &&
          desc->field != &g_settings.sim3d_rim_light &&
+         desc->field != &g_settings.sim3d_effect_lighting &&
+         desc->field != &g_settings.sim3d_particles &&
          desc->field != &g_settings.sim3d_world_underlay &&
          desc->field != &g_settings.sim3d_cloud_shroud &&
          desc->field != &g_settings.sim3d_cull_haze &&

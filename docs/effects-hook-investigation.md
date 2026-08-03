@@ -1,10 +1,11 @@
 # Particle and lighting effect hook investigation
 
 Status: **static lifecycle, animation, geometry, and anchor mapping complete** for the four
-action magics, the five simulation miracles, and the four simulation enemy classes. Existing
-live captures independently verify the miracle cloud family and Blue Dragon strike. Magical
-Fire has been exercised in action mode; the other three action spells still need the short live
-acceptance sweep in [Validation remaining](#validation-remaining).
+action magics, the five simulation miracles, and the four simulation enemy classes. The first
+presentation slice, simulation Lightning, is implemented and replay-validated. Existing live
+captures independently verify the miracle cloud family and Blue Dragon strike. Magical Fire has
+been exercised in action mode; the other three action spells still need the short live acceptance
+sweep in [Validation remaining](#validation-remaining).
 
 This document is deliberately implementation-neutral. It identifies the authentic 60 Hz game
 state that an enhanced renderer can observe without changing damage, timing, object allocation,
@@ -208,6 +209,48 @@ Two shared enemy transitions are also already identifiable if the visual pass ex
 The alternative composition family `$EC14-$EC35` remains unobserved in live miracle captures and
 must not be used as the identity for Lightning or Rain.
 
+## Implemented Lightning miracle slice
+
+The first enhanced effect now follows the minimum contract above without adding gameplay state:
+
+- `SimFrameData` captures the user/posted miracle lifecycle words on the authentic logic tick and
+  publishes a `lightning_miracle` effect instance for a valid world record of type `$02` throughout
+  the complete kind-1 lifecycle. The cloud (`$D9E5`) and four visible bolt compositions
+  (`$DA4B/$DAA1/$DAF7/$DB5C`) become explicit semantic phases rather than presentation-specific
+  intensity values.
+- A host-only generation identifies each lifecycle even when the same WRAM record is reused.
+  Lifecycle age, phase age, visible-pulse generation/age, and terminal flags are captured once per
+  authentic build tick, so replayed presentation frames cannot advance an emitter accidentally.
+- The strike point comes from the decoded composition endpoint relative to that record's current
+  world origin. Effect metadata carries a reusable point/segment/area/scene geometry contract and
+  record-local/world-local/screen coordinate space. Projection shares the billboard's town camera,
+  ground plane, and depth-scale helper, so camera movement and diorama pitch keep the light attached
+  to the bolt.
+- `Effect lighting` adds a brief scene flash and local ground glow. `Particles` adds deterministic
+  strike sparks keyed by record address, lifecycle generation, pulse generation, and particle
+  index. Style is mapped from semantic phase in the renderer; no brightness or particle-count
+  policy leaks into the capture layer. Neither effect advances on presentation-only frames or
+  reads live WRAM during rendering.
+- Both stages use SDL's renderer-provided additive blend and untextured geometry rather than a
+  platform shader. That keeps the core path common to Metal, Vulkan, Direct3D, software, and
+  headless renderers without claiming pixel-identical rasterization. Ground light, scene flash,
+  and particles are separate ordered passes, and each geometry class is submitted as one batch.
+  The renderer verifies the blend mode SDL actually applied, restores all state after each pass,
+  and latches additive-blend and geometry failures as separate capabilities so both stages fail
+  closed.
+- Fixed direction vectors and lifecycle-relative integer hashes avoid platform math-library drift.
+  Metadata capacity is explicit; overflow invalidates only effect metadata for that frame and
+  suppresses both enhanced stages instead of drawing a partial, misleading result.
+- Settings expose independent `sim3d_effect_lighting` and `sim3d_particles` switches, with
+  `AR_SIM3D_EFFECT_LIGHTING` and `AR_SIM3D_PARTICLES` environment overrides for deterministic
+  capture.
+
+`D6a-lightning-miracle` replays the existing `sim-actions.rec` fixture at the first visible bolt
+frame. It asserts the exact 240-tick lifecycle, 12 visible effect frames, semantic phase and
+generation totals, zero overflow, and all four exact bolt compositions. It validates source/effect
+accounting, captures the enhanced and disabled-stage images, and proves the authentic framebuffer
+hash is unchanged because this remains a presentation-only pass.
+
 ## Suggested first hook boundary
 
 The least invasive host boundary is a read-only metadata pass after authentic object updates and
@@ -215,8 +258,10 @@ before/alongside enhanced presentation:
 
 1. Detect semantic start/end from the controller, miracle driver, or enemy class/state.
 2. Enumerate the relevant live action slots or simulation records.
-3. Publish instance address, kind, anchor, current composition/visual, transform, and phase.
-4. Let the particle/light renderer maintain host-only emitter state keyed by instance address.
+3. Publish instance address, lifecycle generation/ages, kind, semantic phase, geometry/space,
+   current composition, transform, and completion flags.
+4. Derive presentation style from those semantic fields and key any renderer-only emitter state by
+   instance address plus lifecycle generation.
 5. Retire emitters when the slot/record frees or the outer semantic lifecycle ends.
 
 This preserves the original sprites as the synchronization authority. It also lets lighting gate
@@ -225,16 +270,18 @@ frames, or Red Demon body-only alternation.
 
 ## Validation remaining
 
-No additional decompilation is required for the requested design discussion. Before implementing
-the renderer, run one focused acceptance capture:
+No additional decompilation is required for the mapped effect families. Lightning miracle capture,
+classification, positioning, portable rendering, and the feature-off baseline are now covered by
+`D6a-lightning-miracle`. Before expanding the renderer, finish these focused acceptance captures:
 
 1. Enable `AR_ALL_MAGIC=1` and `AR_INF_MP=1`; cast all four spells in a scrollable action stage.
 2. Log the controller kind and cohort slot `status, X/Y, +0A/+0C/+0E/+10, +20, +22, +28` each
    tick. Confirm the decoded timing, clone count, and slot reuse for IDs 2-4.
-3. Cast simulation Lightning, Rain, and Sunlight once. Confirm class-2/class-3 state transitions,
-   `$0502/$0503` compositions, and the `$923E=0..140` sunlight ramp.
-4. Capture one Blue Dragon, Red Demon, and Skull Head attack to confirm the statically decoded
-   state windows against live presentation.
+3. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the
+   `$923E=0..140` sunlight ramp before implementing their distinct weather/scene-light styles.
+4. Add the already-recorded Blue Dragon strike to the shared Lightning renderer, then capture one
+   Red Demon and Skull Head attack to confirm their statically decoded state windows against live
+   presentation.
 
 This is an acceptance gate, not a discovery gate: all hook addresses, instance identities,
 graphics compositions, positions, transforms, and lifecycle end conditions needed by the effect

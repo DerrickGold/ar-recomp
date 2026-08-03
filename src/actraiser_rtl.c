@@ -15,6 +15,7 @@
 #include "diorama_planes.h"
 #include "settings.h"
 #include "hd_replacements.h"
+#include "music_replacements.h"
 #include "sfx_census.h"
 #include "sim_render_atlas.h"
 #include "sim3d.h"
@@ -82,6 +83,7 @@ void ActRaiser_YieldToHost(void) {
  * cadence. */
 static unsigned g_action_load_armed_frames;
 static unsigned g_action_load_hold_frames;
+static uint64_t g_action_load_one_shot_token;
 extern volatile int g_ar_in_interrupt;
 
 static void ActRaiser_OnInidispWrite(uint8_t value) {
@@ -94,6 +96,7 @@ static void ActRaiser_OnInidispWrite(uint8_t value) {
     return;
 
   g_action_load_armed_frames = frames;
+  g_action_load_one_shot_token = 0;
   if (getenv("AR_LOADPACELOG")) {
     fprintf(stderr,
             "[load-pace] f=%d block=$%06X dest-group=$%02X: armed %u "
@@ -130,11 +133,27 @@ static void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
               g_ppu ? g_ppu->inidisp : 0);
     }
     g_action_load_armed_frames = 0;
+    g_action_load_one_shot_token = 0;
     return;
   }
 
   const unsigned frames = g_action_load_armed_frames;
   g_action_load_armed_frames = 0;
+  bool one_shot_completed = false;
+  const uint64_t one_shot_token =
+      MusicReplacements_GetOneShotSnapshot(&one_shot_completed);
+  if (ActionLoadPacing_ShouldReleaseForOneShot(
+          frames, one_shot_token, one_shot_token, one_shot_completed)) {
+    if (getenv("AR_LOADPACELOG")) {
+      fprintf(stderr,
+              "[load-pace] f=%d action mode=$%02X/$%02X: HD one-shot "
+              "already complete; skipped %u-frame forced-blank hold\n",
+              snes_frame_counter, g_ram[kActRaiserWram_MapGroup],
+              g_ram[kActRaiserWram_CurrentMap], frames);
+    }
+    return;
+  }
+  g_action_load_one_shot_token = one_shot_token;
   g_action_load_hold_frames = frames - 1;
   if (getenv("AR_LOADPACELOG")) {
     fprintf(stderr,
@@ -404,6 +423,7 @@ void ActRaiser_FullSnapshot(const char *prefix) {
 static void game_coroutine(void) {
   g_action_load_armed_frames = 0;
   g_action_load_hold_frames = 0;
+  g_action_load_one_shot_token = 0;
   cpu_state_init(&g_cpu, g_ram);
   g_cpu_brk_hook = ActRaiser_BrkHook;
   g_cpu_cop_hook = ActRaiser_CopHook;
@@ -2084,8 +2104,29 @@ void RunOneFrameOfGame(void) {
   { extern int ar_trace_active(void); extern void ar_trace_frame(const char *);
     if (ar_trace_active()) ar_trace_frame("vblank"); }  /* frame boundary marker */
   if (g_action_load_hold_frames) {
-    g_action_load_hold_frames--;
-    return;
+    bool one_shot_completed = false;
+    uint64_t one_shot_token = 0;
+    if (g_action_load_one_shot_token) {
+      one_shot_token =
+          MusicReplacements_GetOneShotSnapshot(&one_shot_completed);
+    }
+    if (ActionLoadPacing_ShouldReleaseForOneShot(
+            g_action_load_hold_frames, g_action_load_one_shot_token,
+            one_shot_token, one_shot_completed)) {
+      if (getenv("AR_LOADPACELOG")) {
+        fprintf(stderr,
+                "[load-pace] f=%d HD one-shot complete; released forced "
+                "blank %u frame(s) early\n",
+                snes_frame_counter, g_action_load_hold_frames);
+      }
+      g_action_load_hold_frames = 0;
+      g_action_load_one_shot_token = 0;
+    } else {
+      g_action_load_hold_frames--;
+      if (!g_action_load_hold_frames)
+        g_action_load_one_shot_token = 0;
+      return;
+    }
   }
   g_snes->forceNmi = true;
   g_snes->nmiAvail = true;   /* fresh RDNMI ($4210 bit7) vblank token this frame */
