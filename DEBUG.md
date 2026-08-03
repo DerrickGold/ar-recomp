@@ -705,7 +705,12 @@ bug, §10):
 
 ## 4. Per-frame observation logs
 
-All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
+The yield-site logs below fire when emulated logic reaches its vblank wait
+(`actraiser_rtl.c`). During the deliberate world-to-action load hold, host
+display/audio frames continue while NMI and the game-frame counter remain
+stopped, so `AR_FRAMELOG`/`AR_OBJLOG`/`AR_PPULOG`/`AR_YIELDLOG` intentionally
+pause. `AR_GFLOG` is sampled by the host input path instead and continues to
+show the frozen `$0088` against the advancing host frame:
 
 - **`AR_FRAMELOG=1`** — `[frame] f=N gf=N push+DELTA callsite=BB:PPPP … joy=…
   pos=X,Y d=DX,DY vel=VX,VY h=… state=… boost=… crest=…`. A steady push-delta with the timer ticking = engine running;
@@ -724,6 +729,13 @@ All fire once per host frame at the vblank-wait yield (`actraiser_rtl.c`):
 - **`AR_YIELDLOG=1`** — recomp call stack + SNES return address at each vblank yield. For
   "what is the main loop doing frame to frame."
 - **`AR_GFLOG=1`** — logs the game-frame counter per frame.
+- **`AR_LOADPACELOG=1`** — logs the exact `$00:843E` force-blank arm, the
+  pre-`$2140=$F0` hold trigger, and any discarded stale arm. The normal
+  transition has 315 inserted display/audio-only frames so the shared cue can
+  finish over black; `f` advances while `$0088` and gameplay remain stopped.
+- **`AR_NO_ACTION_LOAD_PACING=1`** — diagnostic fidelity bypass: disables only
+  the collapsed action-loader hold and restores the formerly immediate
+  transition. Use for A/B attribution, not normal play.
 - **`AR_SETTING_SET=<key>=<value>`** with optional
   **`AR_SETTING_AT_GF=<N>`** — apply one descriptor-backed runtime setting at
   logical game frame N (default 0). This is the Phase-2 headless/live-mutation
@@ -1274,7 +1286,7 @@ pipeline; `tools/regen.sh` is now only a compatibility launcher.
     roots are another: Bloodpool act 2's exit dispatch ring supplied six roots, whose fixpoint was
     12 entries. Always inspect `dump_dispatch_log.json` for non-benign `found:0` before declaring
     the static closure complete.
-- **`tools/rom_info.py`**, **`tools/lzss_decompress.py`** — ROM header / LZSS data helpers.
+- **`tools/rom_info.py`**, **`tools/quintet_lzss.py`** — ROM header / LZSS data helpers.
 
 > **Static can't find everything.** M/X-tracking bugs are self-consistent in the emitted output;
 > the dispatch model makes nearly everything "reachable"; handler pointers are computed at
@@ -1684,6 +1696,10 @@ AR_APUPROF=<ms>        per-frame stall attribution: any game frame >= <ms> (bare
 Shift+F9 mid-bug + ring exact-1/N-speed in one mode? quit/Shift+F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
 find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
 v2regen rts-webs       Go static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
+AR_RANDO=1 + AR_RANDO_*  content randomizer (src/randomizer.c, Randomizer section in the menu). Seeds and options: AR_RANDO_SEED, AR_RANDO_ENEMY_HP/ATK (percent), AR_RANDO_ENEMY_TYPES + AR_RANDO_ENEMY_SCOPE, AR_RANDO_DROPS, AR_RANDO_STATUES, AR_RANDO_LAIRS, AR_RANDO_LAIR_TYPES. Prints a one-line `[randomizer] seed N applied: ...` summary at boot. It rewrites the loaded ROM image, so with the master OFF the image is byte-exact stock — leave it off for A/B captures and oracle runs
+act_collision.py       action-stage terrain collision map, ROM-only via `--map MODE,SUB` (follows the $05:8000 asset script to the map + metatile blobs and decompresses them — works for all 49 action maps, no dump needed) or `--wram <dump>` from an F2 snapshot. `--png` renders it, `--probe X,Y` classifies a tile, `--check` validates that map's bank-$0A placements. Both paths verified equal on all 12288 tiles of Fillmore act 1. SEAMS "Content / randomizer seams" §5b
+quintet_lzss.py        faithful port of the game's LZSS `$02:C5C9`/`$C639`/`$C66C` (bit-packed; ring pre-filled with $20, cursor at $EF; match len = nibble+2). `--verify` checks two known blobs byte-for-byte against saves/dump_wram.bin, `--selfcheck` cross-checks the bit reader against a literal $C66C transcription. CAUTION: a naive byte-aligned LZSS decoder appears to work on this data (it consumes the stream and emits plausible bytes) but is wrong — always validate a decoder against a known blob before trusting its output
+act_content.py         static dump of the CONTENT tables a rebalance/randomizer touches: `--tables` per-region object-type records (ATK `+7` / HP `+8` / score `+9` / flags / handler), `--levels` the bank-$0A level layout streams (player start, terrain damage boxes, 4-byte object placements + `$FC/$FD/$FE/$FF` opcodes), `--census` per-stage type + statue-drop summary, `--lairs` the 24-entry sim monster-lair seed table. Read SEAMS "Content / randomizer seams" first — several handlers overwrite HP at runtime, so a table edit is not the whole story
 town_structs.py        decode a town's 128-slot structure-record array from any WRAM dump (F2 snapshot / exit dump): per-slot type/cell/state, bridge count, TABLE FULL marker (--all = all six towns; SEAMS town §7). Same 4-byte layout sits in SRAM at 0x600+town*0x200 (save-format §3.4)
 AR_BRIDGEFIX_DEBUG=1   [bridgefix] structure-system observability via the hle'd allocator+miracle hooks: bridge allocations, table-full events, slot steals, miracle hits on bridges; =2 = every allocation + every miracle record hit (src/actraiser_bugfixes.c)
 find_yield_helpers.py  yield-helper census BY SHAPE (pull/peek of caller frame -> object-field store) + every JSR site's continuation vs cfg; exit!=0 = unregistered = future silent soft-lock (§7.20). Run after ANY bank00.cfg handler work; --lines = paste-ready fixes

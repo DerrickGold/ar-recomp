@@ -165,6 +165,10 @@ typedef enum {
   kSettingCat_Enhancements,  /* System > Game: gameplay QoL (bridge, turbo) */
   kSettingCat_Inspector,
   kSettingCat_Manual,        /* Manual: open the reader, and how it lays out */
+  kSettingCat_RandoSeed,     /* Randomizer: master, seed, and what it applied */
+  kSettingCat_RandoEnemies,  /* Randomizer: enemy stats and type shuffling */
+  kSettingCat_RandoItems,    /* Randomizer: statue drops and placement */
+  kSettingCat_RandoSim,      /* Randomizer: sim-mode monster lairs */
   kSettingCat_Count,
 } SettingCategory;
 
@@ -338,6 +342,22 @@ typedef struct Settings {
   bool cheat_no_knockback;   /* full-invuln "ignore hits"; on/off */
   uint8 pin_count;
   SettingsPin pins[32];
+
+  /* Randomizer (src/randomizer.c). Every field is read only by the ROM-image
+   * transform, so changing one re-runs the transform rather than moving a
+   * per-frame gate: stat edits land at the next spawn, placement edits at the
+   * next level load. Master defaults OFF so the stock image stays byte-exact
+   * for the A/B visual-regression harness. */
+  bool rando_enable;
+  int  rando_seed;
+  int  rando_enemy_hp;        /* percent of stock HP,  100 = unchanged */
+  int  rando_enemy_atk;       /* percent of stock ATK, 100 = unchanged */
+  int  rando_enemy_types;     /* RandomizerMode */
+  int  rando_enemy_scope;     /* RandomizerScope */
+  int  rando_statue_drops;    /* RandomizerMode */
+  int  rando_statue_spots;    /* RandomizerMode (shuffle only in practice) */
+  int  rando_lair_spots;      /* RandomizerMode */
+  int  rando_lair_types;      /* RandomizerMode */
 
   /* Widescreen behavior. All default ON; the per-frame gates read these. */
   bool ws_action;             /* AR_WS_ACTION            action stages wide */

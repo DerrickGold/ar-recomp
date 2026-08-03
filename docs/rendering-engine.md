@@ -31,6 +31,13 @@ game logic (per frame, between vblank yields)
 NMI $00:8520 -> $02:ABF0 (the complete graphics uploader, see §2)
 ```
 
+Large scene loads are the intentional exception to that per-frame pipeline.
+`$00:8433/$843E` waits for vblank, disables NMI through `$4200`, and forces
+blank through INIDISP `$2100=$80`; the action loader then performs its bulk
+CPU work before the next NMI. The recomp preserves the otherwise-collapsed
+interval as display/audio-only host frames, so `$0088`, object logic, tile
+animation, and the NMI upload chain above do not advance during the black hold.
+
 ## 2. The NMI graphics chain ($02:ABF0)
 
 Common head: `STZ $420C` (HDMA off), then:

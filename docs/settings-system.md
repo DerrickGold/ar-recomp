@@ -372,7 +372,7 @@ live:
 | Path | Mechanism | Settings | Cost |
 |---|---|---|---|
 | **PASSIVE** | Existing gate reads the field every frame. Menu writes struct → next frame reflects it. No extra code. | 11 cheat controls, 9 widescreen behaviors, host HUD scale, dialogue blip | free |
-| **CALLBACK** | The host observer performs one live update: master gain copies to an atomic callback mirror; display callbacks resize/rebind the preallocated video surfaces; window/fullscreen/stretch controls update SDL; audio enable pauses/resumes the device. | master volume, screen/pixel aspect, renderer path, window scale, fullscreen, ignore-aspect, audio-device toggle | small |
+| **CALLBACK** | The host observer performs one live update: master gain and output mute copy to atomic callback mirrors; display callbacks resize/rebind the preallocated video surfaces; window/fullscreen/stretch controls update SDL. | master volume, output mute, screen/pixel aspect, renderer path, window scale, fullscreen, ignore-aspect | small |
 | **RESTART** | Requires host-device reinitialization unsafe to perform from the current callback path. | audio frequency/samples (audio-device reopen; audio thread) | real work |
 | **ACTION** | Not stored toggles — commands the menu invokes. | turbo, snapshot, pause, restart/exit, save-editor import/export/apply | reuse existing host paths; developer-only warp and quick-state hotkeys are omitted from the menu |
 | **SAVE** | Transactional mutation of the canonical `g_sram` image + mandatory checksum recompute; optional commit through the active `.srm` or `.ini` backend. Takes effect **the next time the game loads the save from its own title menu** — no app restart. See §4.1. | paged progress/status/magic/item/score staging, save import/export actions | small, but see the §4.1 hazard |
@@ -443,11 +443,21 @@ would be a mislabeled duplicate of the implemented master control.
   `MusicReplacements_ApplySetting()` while game execution is paused: off stops
   the stream and clears `g_dsp_voice_mute_srcn_min`, while on reselects and
   starts a replacement for the remembered current `(src, song)` immediately.
-  Native `$F2` pause and host-owned pause/settings-overlay state suspend the
-  Vorbis decoder without closing it or advancing its cursor; the same-song
-  resume command continues at the saved frame rather than restarting the OGG.
-  The authentic SPC sequencer continues running beneath a replacement, so
-  disabling resumes it in place. Note the srcn>=0x0C voice-gate
+  Native `$F2` pause suspends the Vorbis decoder without closing it or
+  advancing its cursor. Host-owned pause/settings-overlay state additionally
+  pauses the SDL stream device itself, freezing replacement music, authentic
+  SPC sequencing, and SFX together; the same-song resume command continues at
+  the saved frame rather than restarting the OGG. `audio_enabled=off` is instead
+  a final-output mute: the callback keeps rendering silently so authentic SPC,
+  replacement OGG, and MSU timelines continue together. During ordinary
+  unpaused replacement playback the authentic SPC sequencer continues
+  underneath, so disabling the replacement resumes it in place. Replacement
+  enable/disable therefore guarantees command and pause parity, not identical
+  musical position: enabling during a song starts its OGG at frame zero, while
+  disabling reveals the authentic sequencer at its current position. An
+  unexpected loop seek/decoder failure releases the music voice gate and falls
+  back to authentic audio instead of leaving permanent silence. Note the
+  srcn>=0x0C voice-gate
   discovery here is ALSO prerequisite work for the music/SFX slider problem
   above: if the srcn split proves stable across all modes, option 1 becomes
   "scale srcn>=0x0C voices" rather than full voice-ownership RE.
@@ -638,6 +648,38 @@ It is deliberately *not* a runtime setting — it changes a fidelity contract
 the checkpoints assert against, so it is pinned at build time and reported in
 the D1 trace.
 
+### Randomizer (`kSettingCat_RandoSeed` / `_RandoEnemies` / `_RandoItems` / `_RandoSim`) — 2026-08-03
+
+A top-level **Randomizer** section beside Cheats, four tabs. Backed by
+`src/randomizer.c`, which is not a per-frame gate like the rest of this registry:
+it rewrites the loaded ROM image. `Randomizer_Init` snapshots the cart buffer
+(`cart_load` copies, so the live image is `g_snes->cart->rom`) and every row's
+`on_change` calls `Randomizer_Apply`, which restores the pristine snapshot and
+re-runs the enabled passes. Re-applying is therefore idempotent, and turning the
+master off gives back a byte-exact stock image — which is what keeps an
+unrandomized run valid for the A/B visual-regression harness.
+
+Timing is a consequence of what each table feeds: stat edits land at the next
+spawn, placement edits at the next level load. Nothing needs a restart.
+
+| Tab | Key | Type | Default | Notes |
+|---|---|---|---|---|
+| Seed | `rando_enable` | Bool | off | Master. Always available; every other row gates on it plus a usable snapshot |
+| Seed | `rando_seed` | Int 0-999999999 | 1 | Each pass derives its own stream from `(seed, pass id)`, so toggling one option never shifts what another produces — that is what makes a seed shareable |
+| Seed | `rando_reroll` | Action | — | Draw a fresh seed and re-apply |
+| Enemies | `rando_enemy_hp` | Int 10-1000 (%) | 100 | Scales record byte `+8` in all eight region tables |
+| Enemies | `rando_enemy_atk` | Int 10-1000 (%) | 100 | Scales record byte `+7` |
+| Enemies | `rando_enemy_types` | Off/Shuffle | Off | Permutes the placement type byte; bosses (flag `$4000`) and the bit-7 common types are excluded |
+| Enemies | `rando_enemy_scope` | Within map / Within act | Within act | Act is the widest SAFE range: all maps of an act share one `$7E:4000` animation blob |
+| Items | `rando_statue_drops` | Off/Shuffle/Random | Off | Placement byte 2, the item id `$00:879D` applies |
+| Items | `rando_statue_spots` | Off/Shuffle | Off | Permutes statue tiles **within a wave** — a `$FE` gate despawns everything before it, so a cross-wave move could strand an item behind a passed checkpoint |
+| Simulation | `rando_lair_spots` | Off/Shuffle | Off | Permutes each town's four lair cells among themselves; kept in-town because nothing validates a lair against terrain |
+| Simulation | `rando_lair_types` | Off/Shuffle/Random | Off | Monster class per lair; any town can host any of the four |
+
+**Known limitation.** About a dozen boss handlers write their own HP at runtime
+(enumerated in SEAMS "Content / randomizer seams" §1) and ignore the stat pass.
+The summary line counts records rewritten, not enemies actually affected.
+
 ### Extras: bridge-limit enhancement — v2 (2026-07-17)
 
 The v1 toggles (bridge slot reuse, lightning destruction) were withdrawn the
@@ -675,7 +717,7 @@ structure allocation).
 | Fullscreen | `Fullscreen` / `AR_FULLSCREEN` | bool | off | CALLBACK; desktop-fullscreen |
 | New renderer | `NewRenderer` / `AR_NEW_RENDERER` | bool | on | CALLBACK; live in 4:3, widescreen forces the new path while active |
 | Ignore aspect | `IgnoreAspectRatio` / `AR_IGNORE_ASPECT_RATIO` | bool | off | CALLBACK |
-| Enable audio | `EnableAudio` / `AR_ENABLE_AUDIO` | bool | on | CALLBACK; lazily opens then pauses/resumes the device |
+| Enable audio | `EnableAudio` / `AR_ENABLE_AUDIO` | bool | on | CALLBACK; atomically mutes/unmutes the completed mix while all audio timelines keep advancing |
 | Audio freq | `AudioFreq` / `AR_AUDIO_FREQ` | enum 32.04/44.1/48 kHz | 44.1 kHz | RESTART; numeric `32040`/`44100`/`48000` remain accepted |
 | Audio samples | `AudioSamples` / `AR_AUDIO_SAMPLES` | int | 2048 | RESTART |
 | Bridge-free limit | `AR_FIX_BRIDGE_LIMIT` | bool | off (sticky) | PASSIVE; Extras category; completed bridges migrate to the checksummed SRAM extension and stop consuming structure records |

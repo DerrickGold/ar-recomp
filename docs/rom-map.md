@@ -59,7 +59,28 @@
 ### Game Data Tables
 - **0x1B40E-0x1B431**: Experience level requirements (population-based)
 - **0x1B432-0x1B455**: Experience level max SP values
-- **0x1B825-0x1B8FC**: Lair enemy data
+- **0x1B825-0x1B8FC** (`$03:B825`): **Monster-lair seed table** — 24 records × 9 bytes
+  (4 lairs per town × 6 towns), installed by `$03:B7C6`:
+  `[cellX, cellY, imageId, monsterType, count, respawnDelay(word), worldRecordAddr(word)]`.
+  X/Y are 16px town-map cells 0..31. Dump with `tools/act_content.py --lairs`; field
+  semantics in SEAMS "Content / randomizer seams" §6 and ram-map "Monster Lair Data".
+
+### Action content tables (mapped 2026-08-02 — SEAMS "Content / randomizer seams")
+
+| SNES address | File range | Meaning |
+|---|---:|---|
+| `$0A:B100` | `0x53100` | **Action level index** — `(key, offset)` word pairs, `$FFFF` terminated, key = `$19<<8 \| $18`. **50 entries = 49 action MAPS + 1 special (`$18=$00 $19=$09`)** — these are maps, not acts: an act spans several consecutive `$19` maps (Fillmore 4, Bloodpool 8, Kasandora 6, Aitos 7, Marahna 8, Northwall 8, Death Heim 8). The 12 acts are 6 kingdoms × 2, with act 2 beginning at `$19` = 2/2/3/4/4/5 for regions `$01-$06` |
+| `$0A:B1CA-$C50x` | `0x531CA+` | **Action level layout streams** — per stage: player start (3B), `$FF`-terminated 5-byte terrain damage boxes, then 4-byte object placements `[tileX, tileY, $38 param, type]` with opcodes `$FC` goto / `$FD` reserve N slots / `$FE` checkpoint+wave gate / `$FF` end. Loader `$00:92CB`/`$00:941C` |
+| `$06:A000-$A3FF` | `0x32000` | **Item sprites**, one 16×16 (128 B) per item id `$00-$07`; DMA'd to VRAM `$2D80` by `$00:96C3` when a statue breaks |
+| `$06:A800+` | `0x32800` | Common/ROM-resident animation table used by the statue (type `$80`, anim `$08` = frame `$0D`) |
+| `$06:8000+` | `0x30000` | Common/ROM-resident animation table used by the player and the other `$8x` common types |
+| `$02:9013` | `0x11013` | **Professional-mode stage order** — 14 words, XBA'd into `$1A`/`$1B` by `$00:8781` |
+| compressed blobs | linear offsets in the script | **Blob formats.** All are bit-packed Quintet LZSS (`$02:C5C9`; port = `tools/quintet_lzss.py`). Animation blobs (bit-0 cmds) and metatile tables (bit-5) start with a 16-bit decompressed size then the stream. Map blobs (bit-4) start `[widthChunks][heightChunks][size16]` — the width byte is `$2F`, the chunk-column count. Metatile tables are stored **byte-swapped** relative to `$7E:2100` |
+| `$05:8000` | `0x028000` | **Per-map asset script** — walked by the VM at `$02:B1F7`. Entries `[$18, $19, cmd…, $00]` after a 3-byte `"SY\0"` header; each command dispatches on its highest set bit (operand sizes 6/6/7/4/1/3/5/6 for bits 7..0). **Pointers inside are 24-bit LINEAR file offsets**, converted by `$02:B4C0` as `bank = L>>15`, `addr = $8000\|(L&$7FFF)`. Bit-0 commands load the OBJ animation/composition blob to `$7E:4000` (objects) or `$7E:5000` (boss); dump with `tools/act_content.py --assets` |
+
+The per-region object-type tables at `$00:96AF/$A8F6/$B449/$C11E/$CD9B/$D928/$E722/$F39A`
+(already listed above) are the **enemy stat tables**: each 12-byte record carries ATK at `+7`,
+HP at `+8` and death score at `+9`. `tools/act_content.py --tables` decodes all eight.
 
 ### Sprite identity and action OBJ assets
 
@@ -68,9 +89,11 @@
 | `$00:95DD-$95EC` | `0x015DD-0x015EC` | Eight action handler-table pointers: `$96AF,$A8F6,$B449,$C11E,$CD9B,$D928,$E722,$F39A` for `$18=$00-$07` |
 | `$01:E099+` | `0x0E099+` | Town world-object type → behavior/animation-data pointer table |
 | `$01:E7D9+` | `0x0E7D9+` | Parallel town world-object type → sprite-frame pointer table; frame lists continue around `$01:E838` |
-| `$06:A000+` | `0x32000+` | Dynamic action magic/effect overlay sources selected from object `$38`; uploaded to VRAM `$2D80` |
-| `$06:A400+` | `0x32400+` | Action magic-selection table/source used by `$02:BC9E`; uploaded to VRAM `$2D40` |
+| `$06:A000+` | `0x32000+` | Conditional 128-byte dynamic action effect-overlay windows selected from polymorphic object `+38`; uploaded to VRAM `$2D80` only for objects with `+30 & $0040` and an idle upload descriptor. Not a universal spell-ID table |
+| `$06:A400+` | `0x32400+` | Selected action-magic character windows used by `$02:BC9E`: 256 bytes at `$A400 + (id-1)*$80` for IDs 1-4, uploaded to VRAM `$2D40` |
 | `$07:8000-$9FFF` | `0x38000-0x39FFF` | Common action OBJ atlas, 8192 bytes copied to VRAM `$2000-$2FFF` at level entry |
+| `$07:C000+` | `0x3C000+` | Magical Fire and Magical Stardust animation state tables, four-byte sequence entries, and seven-byte OAM compositions |
+| `$07:C800+` | `0x3C800+` | Magical Aura and Magical Light animation state tables and OAM compositions; Light includes two authored 16x224 beam columns |
 | `$07:D040-$D09F` | `0x3D040-0x3D09F` | Action OBJ palettes, 96 bytes copied to CGRAM `$C0-$EF` |
 
 The bank-0 action handler tables are sparse object-type arrays with no explicit

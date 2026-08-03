@@ -72,8 +72,11 @@ static void TestDefaultsAndMetadata(void) {
    * plus 6 gamepad-only host actions. Presentation then gained the diorama
    * edge-margin-fix A/B toggle (SPEC-backdrop-clip.md), and navigation gained
    * its separate off-by-default 3D scene switch. The in-game manual then added
-   * two: the action that opens the reader, and its spreads/single-page choice. */
-  CHECK(g_setting_desc_count == 239);
+   * two: the action that opens the reader, and its spreads/single-page choice.
+   * The content randomizer then added eleven: master, seed and reroll on Seed;
+   * health, damage, type shuffle and its range on Enemies; drops and placement
+   * on Items; lair positions and monsters on Simulation. */
+  CHECK(g_setting_desc_count == 250);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);

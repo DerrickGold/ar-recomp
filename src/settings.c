@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "randomizer.h"
 #include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
 #include "input_map.h"
 #include <errno.h>
@@ -792,6 +793,26 @@ static int FormatGamepadSlot(char *buffer, int buffer_size,
                   text, "Press Enter, then the button to bind. " \
                   "Y resets it to the default.")
 
+/* ---- Randomizer support. Enum labels and availability/refresh callbacks for
+ * the descriptors below; the transform itself lives in src/randomizer.c. */
+static const char *const kRandoModeLabels[] = { "Off", "Shuffle", "Random" };
+static const char *const kRandoShuffleLabels[] = { "Off", "Shuffle" };
+static const char *const kRandoScopeLabels[] = { "Within map", "Within act" };
+
+static bool RandoAvailable(void) {
+  return Randomizer_IsAvailable() && g_settings.rando_enable;
+}
+static bool RandoEnemyTypesOn(void) {
+  return RandoAvailable() && g_settings.rando_enemy_types != kRandomMode_Off;
+}
+/* Any randomizer row changing re-runs the whole transform. It restores the
+ * pristine image first, so re-applying is idempotent and toggling a row off
+ * genuinely gives back stock data. */
+static void RandoChanged(const SettingDesc *desc) {
+  (void)desc;
+  Randomizer_Apply();
+}
+
 #define BOOL_SETTING(id, env_name, text, help, cat, def, is_sticky, active, changed) \
   { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
     &g_settings.id, def, 0, 1, 1, is_sticky, NULL, 0, active, changed, \
@@ -1535,7 +1556,8 @@ const SettingDesc g_setting_descs[] = {
               "scanlines and phosphor mask absorb. 100 is unmodified.",
               kSettingCat_Crt, 125, 50, 300, NULL, GpuShadersActive),
   { "audio_enabled", "AR_ENABLE_AUDIO", "Enable audio",
-    "Pause or resume host audio output without changing emulated audio state.",
+    "Mute or unmute output while authentic and enhanced audio timelines keep "
+    "running.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
     &g_settings.audio_enabled, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
@@ -1674,6 +1696,75 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Custom, kApply_Passive, kSettingCat_Extras,
     &g_settings.warp_target, 0x0101, 0, 0xffff, 1, false, NULL, 0,
     NULL, NULL, ParseWarpTarget, FormatWarpTarget },
+  /* ---- Randomizer (src/randomizer.c). Descriptors only; every one of these
+   * is read by the ROM-image transform, which re-runs whenever one changes. */
+  BOOL_SETTING(rando_enable, "AR_RANDO", "Randomizer",
+               "Rewrite the game's content tables from the seed below. Off "
+               "restores the stock ROM image byte for byte. Stat changes take "
+               "effect at the next spawn, placement changes at the next level "
+               "load.",
+               kSettingCat_RandoSeed, 0, false, NULL, RandoChanged),
+  INT_SETTING(rando_seed, "AR_RANDO_SEED", "Seed",
+              "Runs with the same seed and the same options are identical. "
+              "Each option draws from its own stream, so toggling one does not "
+              "shift what another produces.",
+              kSettingCat_RandoSeed, 1, 0, 999999999, NULL, RandoAvailable),
+  { "rando_reroll", NULL, "New seed",
+    "Draw a fresh random seed and re-apply.",
+    kSettingType_Action, kApply_Action, kSettingCat_RandoSeed,
+    NULL, 0, 0, 0, 0, false, NULL, 0, RandoAvailable, NULL, NULL, NULL },
+
+  INT_SETTING(rando_enemy_hp, "AR_RANDO_ENEMY_HP", "Enemy health",
+              "Percent of stock hit points for every enemy and boss. A handful "
+              "of bosses set their own HP at runtime and ignore this.",
+              kSettingCat_RandoEnemies, 100, 10, 1000, NULL, RandoAvailable),
+  INT_SETTING(rando_enemy_atk, "AR_RANDO_ENEMY_ATK", "Enemy damage",
+              "Percent of stock contact and attack damage for every enemy.",
+              kSettingCat_RandoEnemies, 100, 10, 1000, NULL, RandoAvailable),
+  { "rando_enemy_types", "AR_RANDO_ENEMY_TYPES", "Enemy types",
+    "Shuffle which enemy stands where. Bosses and item statues are left alone.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_RandoEnemies,
+    &g_settings.rando_enemy_types, kRandomMode_Off, kRandomMode_Off,
+    kRandomMode_Shuffle, 1, false, kRandoShuffleLabels, 2,
+    RandoAvailable, RandoChanged, NULL, NULL },
+  { "rando_enemy_scope", "AR_RANDO_ENEMY_SCOPE", "Enemy shuffle range",
+    "How far an enemy may move. Act is the widest safe range: every map of an "
+    "act shares one animation set, so a type moved inside an act still draws "
+    "correctly.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_RandoEnemies,
+    &g_settings.rando_enemy_scope, kRandomScope_Act, kRandomScope_Map,
+    kRandomScope_Act, 1, false, kRandoScopeLabels, kRandomScope_Count,
+    RandoEnemyTypesOn, RandoChanged, NULL, NULL },
+
+  { "rando_statue_drops", "AR_RANDO_DROPS", "Statue drops",
+    "What the breakable statues hold. Shuffle redistributes the items a map "
+    "already has; Random rolls each one fresh.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_RandoItems,
+    &g_settings.rando_statue_drops, kRandomMode_Off, kRandomMode_Off,
+    kRandomMode_Random, 1, false, kRandoModeLabels, kRandomMode_Count,
+    RandoAvailable, RandoChanged, NULL, NULL },
+  { "rando_statue_spots", "AR_RANDO_STATUES", "Statue placement",
+    "Swap the statues of a map between each other's positions. Every result is "
+    "somewhere a statue already stood, so none can end up unreachable.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_RandoItems,
+    &g_settings.rando_statue_spots, kRandomMode_Off, kRandomMode_Off,
+    kRandomMode_Shuffle, 1, false, kRandoShuffleLabels, 2,
+    RandoAvailable, RandoChanged, NULL, NULL },
+
+  { "rando_lair_spots", "AR_RANDO_LAIRS", "Lair positions",
+    "Swap each town's four monster lairs between their own positions. Kept "
+    "within a town because nothing in the game checks a lair against terrain.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_RandoSim,
+    &g_settings.rando_lair_spots, kRandomMode_Off, kRandomMode_Off,
+    kRandomMode_Shuffle, 1, false, kRandoShuffleLabels, 2,
+    RandoAvailable, RandoChanged, NULL, NULL },
+  { "rando_lair_types", "AR_RANDO_LAIR_TYPES", "Lair monsters",
+    "Which monster each lair sends out. Any town can host any of the four.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_RandoSim,
+    &g_settings.rando_lair_types, kRandomMode_Off, kRandomMode_Off,
+    kRandomMode_Random, 1, false, kRandoModeLabels, kRandomMode_Count,
+    RandoAvailable, RandoChanged, NULL, NULL },
+
   BOOL_SETTING(scene_inspector, "AR_SCENE_INSPECTOR", "Scene inspector",
                "Click the game to pause and identify BG tiles, OAM sprites, "
                "VRAM addresses, palettes, hashes, and manifest gates.",
@@ -2314,6 +2405,10 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Enhancements: return "Game";
     case kSettingCat_Inspector: return "Inspector";
     case kSettingCat_Manual: return "Manual";
+    case kSettingCat_RandoSeed: return "Seed";
+    case kSettingCat_RandoEnemies: return "Enemies";
+    case kSettingCat_RandoItems: return "Items";
+    case kSettingCat_RandoSim: return "Simulation";
     case kSettingCat_Count: break;
   }
   return "Unknown";

@@ -252,6 +252,32 @@ target_link_libraries(ActRaiserRecomp PRIVATE
 endif() # NOT AR_TESTS_ONLY
 
 if(BUILD_TESTING)
+    add_executable(actraiser_action_load_pacing_test
+        tests/action_load_pacing_test.c
+    )
+    target_include_directories(actraiser_action_load_pacing_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_action_load_pacing
+        COMMAND actraiser_action_load_pacing_test)
+
+    add_executable(actraiser_host_audio_pause_test
+        tests/host_audio_pause_test.c
+        src/host_audio.c
+    )
+    target_include_directories(actraiser_host_audio_pause_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_host_audio_pause_test PRIVATE
+        SDL3::SDL3
+        m
+    )
+    add_test(NAME actraiser_host_audio_pause
+        COMMAND actraiser_host_audio_pause_test)
+    set_tests_properties(actraiser_host_audio_pause PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy")
+
     add_executable(actraiser_host_display_pacing_test
         tests/host_display_pacing_test.c
         src/host_display_pacing.c
@@ -351,6 +377,10 @@ if(BUILD_TESTING)
         tests/settings_test.c
         src/config.c
         src/settings.c
+        # settings.c's randomizer rows call into the transform for their
+        # availability gate and their on-change refresh. It is pure ROM-buffer
+        # work with no SDL/PPU closure, so linking it here costs nothing.
+        src/randomizer.c
         src/input_map.c
         src/user_data_dir.c
     )
@@ -367,6 +397,7 @@ if(BUILD_TESTING)
         tests/settings_overlay_test.c
         src/config.c
         src/settings.c
+        src/randomizer.c
         src/settings_overlay.c
         src/input_map.c
         src/user_data_dir.c

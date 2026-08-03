@@ -55,6 +55,7 @@
 #include "input_replay.h"
 #include "oracle_trace.h"
 #include "portable_paths.h"
+#include "randomizer.h"
 #include "runtime_settings.h"
 #include "runtime_diagnostics.h"
 #include "scheduled_settings.h"
@@ -576,6 +577,16 @@ static void RunOuterIterationHousekeeping(void) {
       write_error_reported = false;
     }
   }
+}
+
+/* One application-level host-pause edge owns both transport layers. The order
+ * matters: stop the device before latching the OGG decoder, then release the
+ * decoder before resuming the device, so no callback can advance only one
+ * source across the edge. */
+static void ApplyHostAudioPause(bool paused) {
+  if (paused) HostAudio_SetHostPaused(true);
+  MusicReplacements_SetHostPaused(paused);
+  if (!paused) HostAudio_SetHostPaused(false);
 }
 
 int main(int argc, char **argv) {
@@ -1102,6 +1113,13 @@ int main(int argc, char **argv) {
   Snes *snes = SnesInit(rom_data, (int)rom_size);
   if (!snes) Die("SnesInit failed");
 
+  /* Randomizer: cart_load COPIES the image, so the buffer the game actually
+   * reads is the cart's, not rom_data. Register that one and apply before the
+   * game coroutine starts. With the master off this restores a byte-exact
+   * stock image, so an unrandomized run stays valid for the A/B harness. */
+  if (Randomizer_Init(snes->cart->rom, snes->cart->romSize))
+    Randomizer_Apply();
+
   HdReplacementHost_BindSurfaces();
   ActRaiser_RebindPpuOutputSurfaces();
   /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
@@ -1620,13 +1638,13 @@ int main(int argc, char **argv) {
 
     HostInput_ApplyAnalogCamera();
 
-    /* Host-owned pauses do not issue the game's native SPC $F2 command. Keep
-     * the HD decoder aligned explicitly; its independent driver-pause latch
-     * still prevents resume until both pause reasons have cleared. */
-    MusicReplacements_SetHostPaused(
-        HostInput_IsPaused() || SettingsOverlay_IsOpen());
+    /* Host-owned pauses do not issue the game's native SPC $F2 command. The
+     * coordinator above freezes authentic music, replacement music, and SFX. */
+    const bool host_paused =
+        HostInput_IsPaused() || SettingsOverlay_IsOpen();
+    ApplyHostAudioPause(host_paused);
 
-    if (HostInput_IsPaused() || SettingsOverlay_IsOpen()) {
+    if (host_paused) {
       /* §3.4: don't accumulate wall-clock time spent paused — otherwise
        * unpausing would fire a burst of catch-up ticks. last_time_ns is
        * re-stamped every paused iteration below, so it's always "just now"

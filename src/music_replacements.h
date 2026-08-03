@@ -78,9 +78,10 @@ void MusicReplacements_InstallHooks(void);
 void MusicReplacements_ApplySetting(void);
 
 /* Suspend/resume the replacement decoder for host-owned pauses (P and the
- * settings overlay). Native in-game pause is tracked independently from the
- * driver's $F2 command. Neither path closes the stream or advances its cursor;
- * playback resumes only after both pause reasons clear. */
+ * settings overlay). HostAudio gates the whole SDL device at the same edge so
+ * authentic SPC/SFX stop too. Native in-game pause is tracked independently
+ * from the driver's $F2 command. Neither path closes the replacement stream or
+ * advances its cursor; playback resumes only after both pause reasons clear. */
 void MusicReplacements_SetHostPaused(bool paused);
 
 /* Combined native/host pause state, exposed for diagnostics and tests. */

@@ -3560,6 +3560,23 @@ void PresentComposite(const FrameSlot *slot,
                       float alpha) {
   if (!g_renderer || !g_texture) return;
 
+  /* The action map group becomes live while the world-to-action transition
+   * is still holding the SNES in hardware forced blank. That makes Diorama's
+   * host-side gate true before the first action frame is actually visible.
+   * Unlike the ordinary PPU scanout, Diorama does not pass through INIDISP:
+   * its navy clear, shoebox, skybox, HUD, and host overlays would therefore
+   * leak through an otherwise fully blank transition (the gf=976 snapshot is
+   * the captured example). Treat forced blank as the master output gate it is
+   * on hardware and return before drawing any host-owned layer or overlay. */
+  if (slot->diorama_active && (slot->inidisp & 0x80)) {
+    SDL_SetRenderTarget(g_renderer, CrtPost_BaseTarget());
+    SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
+                                     SDL_LOGICAL_PRESENTATION_DISABLED);
+    SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
+    SDL_RenderClear(g_renderer);
+    return;
+  }
+
   if (slot->sim.view == kSimView_Enhanced && slot->sim.separated_valid) {
     PresentSim3D(slot);
     return;

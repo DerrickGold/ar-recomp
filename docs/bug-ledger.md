@@ -651,6 +651,32 @@ the current debugging process; this file is the case law.
     **Reusable lesson:** brightness is scene data, not a validity condition. Preserve ownership
     through a fade and apply the master transform exactly once to each content source.
 
+30. **World-to-action music was cut off early, and Diorama leaked through the black load — FIXED
+    2026-08-03.** Both authentic SPC music and replacement music failed the same way, ruling out
+    an end-of-stream callback. The static recomp executed the action loader's decompression and
+    graphics copies as one host call, collapsing a hardware interval during which `$00:8433`
+    disables NMI and `$00:843E` writes `INIDISP=$80`. The next `$2140=$F0` therefore halted the
+    Advent cue almost immediately. In the matching Fillmore oracle, the action-mode game clock
+    remains fixed across host frames 1193-1517 (323 frames); recomp already retained eight frames
+    of authentic APU acknowledgement wait, leaving 315 collapsed frames.
+
+    **Fix:** an exact `$843E` INIDISP hook arms only non-action-to-action loads. A pre-APU-port
+    seam, invoked before the APU lock, yields immediately before the loader's `$F0`, then
+    `RunOneFrameOfGame` advances 315 display/audio-only frames without NMI before allowing the
+    halt through. This does not delay or otherwise change gameplay: `$0088`, timers, input, and
+    object logic remain stopped, while the shared Advent transition cue gets its intended
+    playback interval over a black screen for every action destination. The arm is discarded
+    unless the trigger still occurs in forced-blank action mode, preventing an obviously stale
+    transition from pausing a later `$F0`. Diorama now
+    treats the frame-snapshotted INIDISP force-blank bit as a master output gate and returns after
+    a pure-black clear, before drawing the navy room shell, skybox, HUD, inspector, or settings
+    overlay. A replay capture during the hold contains exactly one RGB color with min/max/mean 0.
+
+    **Reusable lesson:** static recompilation can collapse elapsed hardware time even when control
+    flow and audio commands are correct. Reproduce disabled-NMI CPU intervals explicitly, keep
+    audio locks outside coroutine yields, and require every host-owned compositor to honor the
+    PPU's master blank rather than assuming a black SNES framebuffer is sufficient.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of
