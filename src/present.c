@@ -30,6 +30,7 @@
 #include "settings_overlay.h"
 #include "scene_inspector.h"
 #include "scene3d_math.h"
+#include "render_capabilities.h"
 #include "sim_render_atlas.h"
 #include "sim_town_canvas.h"
 #include "sim_world_map.h"
@@ -972,6 +973,425 @@ static float SimTexturePointDepthScale(
       reference_depth);
 }
 
+/* Simulation effects use the renderer abstraction's standard additive blend
+ * and untextured geometry, not a backend shader. That is a portable API path,
+ * but not a promise of pixel-identical rasterization across Metal, Vulkan,
+ * Direct3D and software. Capability is verified at the point of use: SDL may
+ * legally substitute the closest blend mode, so a successful set is followed
+ * by a get-and-compare. Any rejection or substitution fails the stages closed. */
+static SDL_AtomicInt s_sim_effect_add_supported = { .value = 1 };
+static SDL_AtomicInt s_sim_effect_geometry_supported = { .value = 1 };
+
+typedef struct SimEffectRenderState {
+  SDL_BlendMode blend;
+  Uint8 r, g, b, a;
+} SimEffectRenderState;
+
+static void DisableSimEffectAdd(const char *operation) {
+  if (!SDL_CompareAndSwapAtomicInt(
+          &s_sim_effect_add_supported, 1, 0))
+    return;
+  fprintf(stderr,
+          "[sim3d-effects] additive pass unavailable at %s (%s) — "
+          "effect lighting and particles disabled\n",
+          operation, SDL_GetError());
+}
+
+static void DisableSimEffectGeometry(const char *operation) {
+  if (!SDL_CompareAndSwapAtomicInt(
+          &s_sim_effect_geometry_supported, 1, 0))
+    return;
+  fprintf(stderr,
+          "[sim3d-effects] geometry pass unavailable at %s (%s) — "
+          "effect lighting and particles disabled\n",
+          operation, SDL_GetError());
+}
+
+static bool SimEffectRendererAvailable(void) {
+  return SDL_GetAtomicInt(&s_sim_effect_add_supported) != 0 &&
+      SDL_GetAtomicInt(&s_sim_effect_geometry_supported) != 0;
+}
+
+bool Present_SimEffectRendererSupported(void) {
+  return SimEffectRendererAvailable();
+}
+
+static bool BeginSimEffectAdd(SimEffectRenderState *state) {
+  if (!state || !SimEffectRendererAvailable()) return false;
+  if (!SDL_GetRenderDrawBlendMode(g_renderer, &state->blend) ||
+      !SDL_GetRenderDrawColor(g_renderer, &state->r, &state->g,
+                              &state->b, &state->a)) {
+    DisableSimEffectAdd("state capture");
+    return false;
+  }
+  if (!SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_ADD)) {
+    SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
+    DisableSimEffectAdd("blend set");
+    return false;
+  }
+  SDL_BlendMode applied = SDL_BLENDMODE_INVALID;
+  if (!SDL_GetRenderDrawBlendMode(g_renderer, &applied) ||
+      applied != SDL_BLENDMODE_ADD) {
+    SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
+    DisableSimEffectAdd("blend verification");
+    return false;
+  }
+  return true;
+}
+
+static void EndSimEffectAdd(const SimEffectRenderState *state) {
+  if (!state) return;
+  bool color_ok = SDL_SetRenderDrawColor(
+      g_renderer, state->r, state->g, state->b, state->a);
+  bool blend_ok = SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
+  if (!color_ok || !blend_ok) DisableSimEffectAdd("state restore");
+}
+
+static bool ProjectSimAnchorAndScale(
+    const float matrix[16], SDL_Rect source, SDL_Rect viewport,
+    float texture_x, float texture_y, float height_world,
+    float reference_depth, Scene3DPoint *anchor,
+    float *scale_x, float *scale_y) {
+  if (!ProjectSimTexturePoint(matrix, source, viewport, texture_x, texture_y,
+                              height_world, anchor))
+    return false;
+  float depth_scale = SimTexturePointDepthScale(
+      matrix, source, viewport, texture_x, texture_y, height_world,
+      reference_depth);
+  if (depth_scale <= 0.0f) return false;
+  if (scale_x) *scale_x = (float)viewport.w / source.w * depth_scale;
+  if (scale_y) *scale_y = (float)viewport.h / source.h * depth_scale;
+  return true;
+}
+
+static bool ProjectSimEffectPoint(
+    const FrameSlot *slot, const SimEffectInstance *effect,
+    const SimEffectLocalPoint *local, SDL_Rect source, SDL_Rect viewport,
+    const Scene3DCamera *camera, const float matrix[16],
+    Scene3DPoint *point, float *scale_x, float *scale_y) {
+  if (!local || effect->geometry.kind != kSimEffectGeometry_Point) return false;
+  int record_screen_x = (int16_t)(uint16_t)(
+      effect->world_x - slot->sim.camera_x);
+  int record_screen_y = (int16_t)(uint16_t)(
+      effect->world_y - slot->sim.camera_y);
+  float texture_x = slot->ws_extra + record_screen_x;
+  float texture_y = record_screen_y;
+  float height_world = SimHeightWorldUnits(source, local->height, 100);
+
+  switch ((SimEffectGeometrySpace)effect->geometry.space) {
+    case kSimEffectSpace_Screen:
+      point->x = viewport.x + local->x * (float)viewport.w / source.w;
+      point->y = viewport.y + local->y * (float)viewport.h / source.h;
+      if (scale_x) *scale_x = (float)viewport.w / source.w;
+      if (scale_y) *scale_y = (float)viewport.h / source.h;
+      return true;
+    case kSimEffectSpace_WorldLocal:
+      texture_x += local->x;
+      texture_y += local->y;
+      return ProjectSimAnchorAndScale(
+          matrix, source, viewport, texture_x, texture_y, height_world,
+          Scene3D_AutoFitDistance(camera->fov_y), point, scale_x, scale_y);
+    case kSimEffectSpace_RecordLocal:
+      break;
+    default:
+      return false;
+  }
+
+  Scene3DPoint anchor;
+  float sx, sy;
+  if (!ProjectSimAnchorAndScale(
+          matrix, source, viewport, texture_x, texture_y, height_world,
+          Scene3D_AutoFitDistance(camera->fov_y), &anchor, &sx, &sy))
+    return false;
+  point->x = anchor.x + local->x * sx;
+  point->y = anchor.y + local->y * sy;
+  if (scale_x) *scale_x = sx;
+  if (scale_y) *scale_y = sy;
+  return true;
+}
+
+enum { kSimLightningParticleCount = 12 };
+
+typedef struct SimEffectStyle {
+  float strength;
+  uint8_t particle_count;
+} SimEffectStyle;
+
+static bool SimLightningStyle(const SimEffectInstance *effect,
+                              SimEffectStyle *style) {
+  if (!effect || !style || effect->kind != kSimEffect_LightningMiracle)
+    return false;
+  switch ((SimEffectPhase)effect->phase) {
+    case kSimEffectPhase_LightningLead:
+      *style = (SimEffectStyle){
+        210.0f / 255.0f, kSimLightningParticleCount };
+      return true;
+    case kSimEffectPhase_LightningBranch:
+      *style = (SimEffectStyle){
+        235.0f / 255.0f, kSimLightningParticleCount };
+      return true;
+    case kSimEffectPhase_LightningImpactA:
+    case kSimEffectPhase_LightningImpactB:
+      *style = (SimEffectStyle){ 1.0f, kSimLightningParticleCount };
+      return true;
+    case kSimEffectPhase_None:
+    case kSimEffectPhase_LightningCloud:
+      return false;
+  }
+  return false;
+}
+
+typedef struct SimEffectBatch {
+  SDL_Vertex *vertices;
+  int *indices;
+  int vertex_count, index_count;
+  int vertex_capacity, index_capacity;
+  bool overflow;
+} SimEffectBatch;
+
+static bool SimEffectBatchReserve(SimEffectBatch *batch,
+                                  int vertices, int indices) {
+  if (!batch || vertices < 0 || indices < 0 ||
+      batch->vertex_count + vertices > batch->vertex_capacity ||
+      batch->index_count + indices > batch->index_capacity) {
+    if (batch) batch->overflow = true;
+    return false;
+  }
+  return true;
+}
+
+static bool SubmitSimEffectBatch(SimEffectBatch *batch) {
+  if (!batch || batch->overflow) {
+    static bool logged;
+    if (!logged) {
+      logged = true;
+      fprintf(stderr,
+              "[sim3d-effects] internal geometry batch capacity exceeded — "
+              "effect pass skipped\n");
+    }
+    return false;
+  }
+  if (!batch->index_count) return true;
+  if (SDL_RenderGeometry(g_renderer, NULL, batch->vertices,
+                         batch->vertex_count, batch->indices,
+                         batch->index_count))
+    return true;
+  DisableSimEffectGeometry("geometry submit");
+  return false;
+}
+
+static const float kSimEffectCircle32[32][2] = {
+  { 1.0f, 0.0f }, { 0.980785f, 0.195090f },
+  { 0.923880f, 0.382683f }, { 0.831470f, 0.555570f },
+  { 0.707107f, 0.707107f }, { 0.555570f, 0.831470f },
+  { 0.382683f, 0.923880f }, { 0.195090f, 0.980785f },
+  { 0.0f, 1.0f }, { -0.195090f, 0.980785f },
+  { -0.382683f, 0.923880f }, { -0.555570f, 0.831470f },
+  { -0.707107f, 0.707107f }, { -0.831470f, 0.555570f },
+  { -0.923880f, 0.382683f }, { -0.980785f, 0.195090f },
+  { -1.0f, 0.0f }, { -0.980785f, -0.195090f },
+  { -0.923880f, -0.382683f }, { -0.831470f, -0.555570f },
+  { -0.707107f, -0.707107f }, { -0.555570f, -0.831470f },
+  { -0.382683f, -0.923880f }, { -0.195090f, -0.980785f },
+  { 0.0f, -1.0f }, { 0.195090f, -0.980785f },
+  { 0.382683f, -0.923880f }, { 0.555570f, -0.831470f },
+  { 0.707107f, -0.707107f }, { 0.831470f, -0.555570f },
+  { 0.923880f, -0.382683f }, { 0.980785f, -0.195090f },
+};
+
+static bool AppendSimLightningGlow(
+    SimEffectBatch *batch, const FrameSlot *slot,
+    const SimEffectInstance *effect, const SimEffectStyle *style,
+    SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
+    const float matrix[16]) {
+  enum { kSegments = 32 };
+  if (!SimEffectBatchReserve(batch, kSegments + 1, kSegments * 3))
+    return false;
+  Scene3DPoint strike;
+  float scale_x, scale_y;
+  if (!ProjectSimEffectPoint(
+          slot, effect, &effect->geometry.data.point, source, viewport,
+          camera, matrix, &strike, &scale_x, &scale_y))
+    return true;
+
+  int base_vertex = batch->vertex_count;
+  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    { strike.x, strike.y },
+    { 0.48f, 0.72f, 1.0f, 0.46f * style->strength },
+    { 0.0f, 0.0f },
+  };
+  float radius_x = 30.0f * scale_x;
+  float radius_y = 12.0f * scale_y;
+  if (radius_x < 3.0f) radius_x = 3.0f;
+  if (radius_y < 2.0f) radius_y = 2.0f;
+  for (int i = 0; i < kSegments; i++) {
+    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+      { strike.x + kSimEffectCircle32[i][0] * radius_x,
+        strike.y + kSimEffectCircle32[i][1] * radius_y },
+      { 0.20f, 0.42f, 1.0f, 0.0f },
+      { 0.0f, 0.0f },
+    };
+    batch->indices[batch->index_count++] = base_vertex;
+    batch->indices[batch->index_count++] = base_vertex + i + 1;
+    batch->indices[batch->index_count++] =
+        base_vertex + (i + 1) % kSegments + 1;
+  }
+  return true;
+}
+
+static uint32_t SimEffectHash(uint32_t value) {
+  value ^= value >> 16;
+  value *= 0x7FEB352Du;
+  value ^= value >> 15;
+  value *= 0x846CA68Bu;
+  return value ^ (value >> 16);
+}
+
+static bool AppendSimLightningParticles(
+    SimEffectBatch *batch, const FrameSlot *slot,
+    const SimEffectInstance *effect, SDL_Rect source, SDL_Rect viewport,
+    const Scene3DCamera *camera, const float matrix[16]) {
+  if (!effect->pulse_generation || effect->ticks_since_visible > 5) return true;
+  Scene3DPoint strike;
+  float scale_x, scale_y;
+  if (!ProjectSimEffectPoint(
+          slot, effect, &effect->geometry.data.point, source, viewport,
+          camera, matrix, &strike, &scale_x, &scale_y))
+    return true;
+  float output_scale = (fabsf(scale_x) + fabsf(scale_y)) * 0.5f;
+  if (output_scale < 0.5f) output_scale = 0.5f;
+  SimEffectStyle style = { 1.0f, kSimLightningParticleCount };
+  SimLightningStyle(effect, &style);
+  float strength = style.strength;
+  unsigned particle_count = style.particle_count;
+
+  for (uint32_t i = 0; i < particle_count; i++) {
+    uint32_t seed = SimEffectHash(
+        (uint32_t)effect->record_address * 0x9E3779B9u ^
+        effect->generation * 0x85EBCA6Bu ^
+        effect->pulse_generation * 0xC2B2AE35u ^ i * 0x27D4EB2Fu);
+    unsigned spawn_delay = i / 4u;
+    if (effect->pulse_ticks < spawn_delay) continue;
+    unsigned age = effect->pulse_ticks - spawn_delay;
+    unsigned lifetime = 6u + (seed & 3u);
+    if (age >= lifetime) continue;
+    if (!SimEffectBatchReserve(batch, 4, 6)) return false;
+
+    float t = lifetime > 1 ? (float)age / (float)(lifetime - 1) : 1.0f;
+    const float *direction = kSimEffectCircle32[(seed >> 16) & 31u];
+    float distance = (4.0f + 22.0f * t) * output_scale;
+    float arc = 4.0f * t * (1.0f - t);
+    float x = strike.x + direction[0] * distance;
+    float y = strike.y + direction[1] * distance * 0.42f -
+        arc * 12.0f * output_scale;
+    float size = (1.8f - 1.15f * t) * output_scale;
+    if (size < 0.75f) size = 0.75f;
+    SDL_FColor color = { 0.62f, 0.82f, 1.0f,
+                         (1.0f - t) * strength };
+    int base_vertex = batch->vertex_count;
+    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+      { x, y - size }, color, { 0.0f, 0.0f } };
+    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+      { x + size, y }, color, { 0.0f, 0.0f } };
+    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+      { x, y + size }, color, { 0.0f, 0.0f } };
+    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+      { x - size, y }, color, { 0.0f, 0.0f } };
+    static const int diamond[] = { 0, 1, 2, 0, 2, 3 };
+    for (int n = 0; n < 6; n++)
+      batch->indices[batch->index_count++] = base_vertex + diamond[n];
+  }
+  return true;
+}
+
+static void DrawSimEffectGroundLighting(
+    const FrameSlot *slot, bool lighting, SDL_Rect source, SDL_Rect viewport,
+    const Scene3DCamera *camera, const float matrix[16]) {
+  if (!lighting || !slot->sim.effect_visible_count ||
+      !SimEffectRendererAvailable())
+    return;
+  enum {
+    kVertices = kSimMaxEffectInstances * 33,
+    kIndices = kSimMaxEffectInstances * 32 * 3,
+  };
+  SDL_Vertex vertices[kVertices];
+  int indices[kIndices];
+  SimEffectBatch batch = {
+    .vertices = vertices, .indices = indices,
+    .vertex_capacity = kVertices, .index_capacity = kIndices,
+  };
+  for (uint8_t i = 0; i < slot->sim.effect_count; i++) {
+    const SimEffectInstance *effect = &slot->sim.effects[i];
+    SimEffectStyle style;
+    if (!(effect->flags & kSimEffectFlag_Visible) ||
+        !SimLightningStyle(effect, &style))
+      continue;
+    if (!AppendSimLightningGlow(&batch, slot, effect, &style, source,
+                                 viewport, camera, matrix))
+      break;
+  }
+  if (!batch.index_count && !batch.overflow) return;
+  SimEffectRenderState state;
+  if (!BeginSimEffectAdd(&state)) return;
+  SubmitSimEffectBatch(&batch);
+  EndSimEffectAdd(&state);
+}
+
+static void DrawSimEffectSceneFlash(const FrameSlot *slot, bool lighting,
+                                    SDL_Rect viewport) {
+  if (!lighting || !slot->sim.effect_visible_count ||
+      !SimEffectRendererAvailable())
+    return;
+  float strongest = 0.0f;
+  for (uint8_t i = 0; i < slot->sim.effect_count; i++) {
+    SimEffectStyle style;
+    if ((slot->sim.effects[i].flags & kSimEffectFlag_Visible) &&
+        SimLightningStyle(&slot->sim.effects[i], &style) &&
+        style.strength > strongest)
+      strongest = style.strength;
+  }
+  if (strongest <= 0.0f) return;
+  SimEffectRenderState state;
+  if (!BeginSimEffectAdd(&state)) return;
+  bool color_ok = SDL_SetRenderDrawColor(
+      g_renderer, 96, 150, 255, (Uint8)(strongest * 12.0f));
+  SDL_FRect flash = ToFRect(viewport);
+  bool fill_ok = color_ok && SDL_RenderFillRect(g_renderer, &flash);
+  if (!fill_ok) DisableSimEffectAdd("scene flash");
+  EndSimEffectAdd(&state);
+}
+
+static void DrawSimEffectParticles(
+    const FrameSlot *slot, bool particles, SDL_Rect source, SDL_Rect viewport,
+    const Scene3DCamera *camera, const float matrix[16]) {
+  if (!particles || !slot->sim.effect_count ||
+      !SimEffectRendererAvailable())
+    return;
+  enum {
+    kParticlesPerEffect = kSimLightningParticleCount,
+    kVertices = kSimMaxEffectInstances * kParticlesPerEffect * 4,
+    kIndices = kSimMaxEffectInstances * kParticlesPerEffect * 6,
+  };
+  SDL_Vertex vertices[kVertices];
+  int indices[kIndices];
+  SimEffectBatch batch = {
+    .vertices = vertices, .indices = indices,
+    .vertex_capacity = kVertices, .index_capacity = kIndices,
+  };
+  for (uint8_t i = 0; i < slot->sim.effect_count; i++) {
+    const SimEffectInstance *effect = &slot->sim.effects[i];
+    if (effect->kind != kSimEffect_LightningMiracle) continue;
+    if (!AppendSimLightningParticles(&batch, slot, effect, source, viewport,
+                                      camera, matrix))
+      break;
+  }
+  if (!batch.index_count && !batch.overflow) return;
+  SimEffectRenderState state;
+  if (!BeginSimEffectAdd(&state)) return;
+  SubmitSimEffectBatch(&batch);
+  EndSimEffectAdd(&state);
+}
+
 static bool SimObjectIsPromotedHud(const FrameSlot *slot,
                                    const SimRenderObject *object) {
   const FrameSlotOverlayCapture *capture =
@@ -1486,18 +1906,15 @@ static void DrawSimObjectPriority(
           ? SimHeightWorldUnits(source, object->virtual_height,
                                 slot->sim.height_scale_x100)
           : 0.0f;
-      if (!ProjectSimTexturePoint(
+      if (!ProjectSimAnchorAndScale(
               matrix, source, viewport, texture_anchor_x, texture_anchor_y,
-              height_world, &anchor))
+              height_world, Scene3D_AutoFitDistance(camera->fov_y),
+              &anchor, &scale_x, &scale_y))
         continue;
-      float depth_scale = SimTexturePointDepthScale(
-          matrix, source, viewport, texture_anchor_x, texture_anchor_y,
-          height_world, Scene3D_AutoFitDistance(camera->fov_y));
-      if (depth_scale <= 0.0f) continue;
-      depth_scale *= SimBillboardHeightPop(source, height_world,
-                                           slot->sim.height_pop_pct);
-      scale_x *= depth_scale;
-      scale_y *= depth_scale;
+      float height_pop = SimBillboardHeightPop(
+          source, height_world, slot->sim.height_pop_pct);
+      scale_x *= height_pop;
+      scale_y *= height_pop;
     } else {
       anchor.x = viewport.x +
           (texture_anchor_x - source.x) * flat_scale_x;
@@ -1573,12 +1990,16 @@ static SDL_Texture *EnsureSimRimTexture(int w, int h) {
  * happens the mode is "composed but unproven", which is why this returns
  * SDL_BLENDMODE_INVALID once a set has actually failed rather than optimistically
  * forever. */
-/* Reads true until a set actually fails; settings.c gates the "Rim light" row on
- * it (declared there as an extern bool, matching g_gpu_shaders_active). */
-bool g_sim_rim_mask_supported = true;
+/* Reads true until a set actually fails. Settings sees this only through the
+ * atomic, read-only capability accessor below. */
+static SDL_AtomicInt s_sim_rim_mask_supported = { .value = 1 };
+
+bool Present_SimRimMaskSupported(void) {
+  return SDL_GetAtomicInt(&s_sim_rim_mask_supported) != 0;
+}
 
 static SDL_BlendMode SimRimMaskBlend(void) {
-  if (!g_sim_rim_mask_supported) return SDL_BLENDMODE_INVALID;
+  if (!Present_SimRimMaskSupported()) return SDL_BLENDMODE_INVALID;
   static SDL_BlendMode mode = SDL_BLENDMODE_INVALID;
   if (mode == SDL_BLENDMODE_INVALID)
     mode = SDL_ComposeCustomBlendMode(
@@ -1594,8 +2015,7 @@ static SDL_BlendMode SimRimMaskBlend(void) {
  * exactly the untrimmed silhouette W4-1 fixed. */
 static bool SimApplyAtlasBlendMode(SDL_BlendMode blend) {
   if (SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, blend)) return true;
-  if (g_sim_rim_mask_supported) {
-    g_sim_rim_mask_supported = false;
+  if (SDL_CompareAndSwapAtomicInt(&s_sim_rim_mask_supported, 1, 0)) {
     fprintf(stderr,
             "[sim3d-rim] this renderer rejected the rim mask blend mode (%s) — "
             "rim light disabled\n", SDL_GetError());
@@ -1805,7 +2225,9 @@ void PresentRendererResources_Reset(void) {
   if (s_sim_rim_texture) SDL_DestroyTexture(s_sim_rim_texture);
   s_sim_rim_texture = NULL;
   s_sim_rim_w = s_sim_rim_h = 0;
-  g_sim_rim_mask_supported = true;
+  SDL_SetAtomicInt(&s_sim_rim_mask_supported, 1);
+  SDL_SetAtomicInt(&s_sim_effect_add_supported, 1);
+  SDL_SetAtomicInt(&s_sim_effect_geometry_supported, 1);
   if (s_sim_underlay_texture) SDL_DestroyTexture(s_sim_underlay_texture);
   s_sim_underlay_texture = NULL;
   if (s_sim_underlay_blur_texture)
@@ -3241,6 +3663,9 @@ static void RenderSimProfile(const FrameSlot *slot,
   bool shadows = billboards && (features & kSimFeature_Shadows) != 0;
   bool soft_shadows = shadows && (features & kSimFeature_SoftShadows) != 0;
   bool rim_light = billboards && (features & kSimFeature_RimLight) != 0;
+  bool effect_lighting = ground &&
+      (features & kSimFeature_EffectLighting) != 0;
+  bool particles = ground && (features & kSimFeature_Particles) != 0;
   bool underlay = ground && (features & kSimFeature_WorldUnderlay) != 0;
   bool clouds = underlay && (features & kSimFeature_CloudShroud) != 0;
   bool cull_haze = underlay && (features & kSimFeature_CullHaze) != 0;
@@ -3344,6 +3769,13 @@ static void RenderSimProfile(const FrameSlot *slot,
     .screen_x0 = slot->sim.underlay_screen_x0,
   };
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+    /* Ground illumination belongs above the complete visible BG1 ground but
+     * below the highest world-object rank. Keeping this seam explicit avoids
+     * the prototype's unconditional over-paint of every actor while retaining
+     * the authentic painter order of lower object ranks and BG layers. */
+    if (plane == kSim3DPlane_Obj3)
+      DrawSimEffectGroundLighting(slot, effect_lighting, source, viewport,
+                                  &camera, matrix);
     if (!(enabled_planes & (1u << plane))) continue;
     if (SimPlaneIsMenu(plane)) continue;
     if (billboards) {
@@ -3377,6 +3809,12 @@ static void RenderSimProfile(const FrameSlot *slot,
     } else
       SDL_RenderTexture(g_renderer, texture, &src, &dst);
   }
+
+  /* Scene flash intentionally reaches the completed world; sparks are
+   * emissive foreground detail. Both remain below atmospheric cover and every
+   * fixed-tier menu plane, so neither can tint UI. */
+  DrawSimEffectSceneFlash(slot, effect_lighting, viewport);
+  DrawSimEffectParticles(slot, particles, source, viewport, &camera, matrix);
 
   /* Over the objects. The shroud's whole purpose is to cover ground that can
    * never hold an actor, so anything it hides must be hidden completely --

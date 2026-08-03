@@ -672,10 +672,20 @@ the current debugging process; this file is the case law.
     a pure-black clear, before drawing the navy room shell, skybox, HUD, inspector, or settings
     overlay. A replay capture during the hold contains exactly one RGB color with min/max/mean 0.
 
+    **HD-short-track policy (2026-08-03):** 315 frames remains the authentic upper bound, but the
+    hold latches the generation of an active non-looping replacement. If that exact one-shot
+    naturally completes, the hold releases before the next `$F0`; a token mismatch, looping
+    track, missing replacement, decoder failure, or authentic fallback cannot release it. Advent
+    is explicitly `loop=0` in the manifest. This avoids extending a pure-black silent tail when a
+    custom HD cue is shorter than the authentic load interval without turning PCM silence or an
+    unrelated track change into timing authority.
+
     **Reusable lesson:** static recompilation can collapse elapsed hardware time even when control
     flow and audio commands are correct. Reproduce disabled-NMI CPU intervals explicitly, keep
     audio locks outside coroutine yields, and require every host-owned compositor to honor the
-    PPU's master blank rather than assuming a black SNES framebuffer is sufficient.
+    PPU's master blank rather than assuming a black SNES framebuffer is sufficient. If enhanced
+    content is allowed to shorten an accuracy hold, latch explicit content identity and natural
+    completion; never infer it from instantaneous silence.
 
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 

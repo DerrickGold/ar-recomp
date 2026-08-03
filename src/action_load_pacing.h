@@ -13,8 +13,10 @@
  * so the collapsed CPU-side map/graphics work accounts for the other 315.
  * The top-level transition and Advent cue are shared by action destination
  * groups 1-7, so this is intentionally one presentation/audio pacing value,
- * not per-level gameplay timing. Fillmore supplies the frame-exact oracle;
- * NMI and the game clock remain stopped for every inserted frame.
+ * not per-level gameplay timing. Fillmore supplies the frame-exact oracle and
+ * therefore the maximum hold. A matching enhanced one-shot may shorten it
+ * after naturally completing; NMI and the game clock remain stopped for every
+ * frame that is actually inserted.
  */
 enum {
   kActionLoadPacingForceBlankBlock = 0x00843E,
@@ -58,6 +60,17 @@ static inline ActionLoadPacingTriggerDecision ActionLoadPacing_EvaluateTrigger(
   if (map_group < 0x01 || map_group > 0x07 || !(inidisp & 0x80))
     return kActionLoadPacingTrigger_Discard;
   return kActionLoadPacingTrigger_Hold;
+}
+
+/* The oracle-derived hold remains the upper bound. It may end early only when
+ * the exact enhanced one-shot present at the trigger reaches its natural end.
+ * Requiring two matching nonzero generation tokens prevents a stopped,
+ * failed, looping, authentic, or newly changed track from releasing the hold. */
+static inline int ActionLoadPacing_ShouldReleaseForOneShot(
+    unsigned remaining_frames, uint64_t latched_token,
+    uint64_t current_token, int current_completed) {
+  return remaining_frames != 0 && latched_token != 0 &&
+         latched_token == current_token && current_completed;
 }
 
 #endif  // ACTION_LOAD_PACING_H

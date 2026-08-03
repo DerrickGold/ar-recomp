@@ -42,7 +42,7 @@ single `coverage.json` linking every individual report.
 | `D0-fillmore-idle` | ordinary Fillmore town frames with no picker |
 | `D0-fillmore-picker` | Direct the People / Building Direction via ROM entry `$01:972F` |
 | `D0-fillmore-repeat-picker` | Direct the People / Building Direction followed by two targeted miracles via `$01:9754` |
-| `D0-fillmore-actions` | Direct the People / Building Direction, all five targeted-miracle picker calls and resolved kinds `1-5`, Napper ground-pluck, Blue Demon lightning, grounded people, and ground fire |
+| `D0-fillmore-actions` | Direct the People / Building Direction, all five targeted-miracle picker calls and resolved kinds `1-5`, Napper ground-pluck, Blue Dragon lightning, grounded people, and ground fire |
 | `D0-fillmore-wide-full-edge` | widescreen map-edge behaviour |
 
 Phase 0 is the scope of *this* document. Later phases add their own checkpoints
@@ -61,13 +61,14 @@ to the same manifest and runner; their results are recorded in
 | `D4c-rim-light` | lit edge on billboard silhouettes |
 | `D2-margin-object-exit` | D2 byte-exactness when an object exits into a collapsed widescreen margin (ledger §23) |
 | `D5a-world-underlay` | world-map underlay + full-town canvas; asserts the D2 gate stays at zero mismatch, so the extension is present-side only |
+| `D6a-lightning-miracle` | full 240-tick Lightning lifecycle with semantic phases/generation, 12 exact visible frames, batched additive local light and deterministic pulse-relative particles, strict overflow accounting, exact feature-off baseline, and authentic-framebuffer non-interference |
 
 The checkpoint asserts the five ROM routine entries at `$01:9754` and the exact
 resolved miracle-kind set `1-5` from `$7F:90EB`. The current `sim-actions.rec`
 trace also contains these stable special-object facts:
 
 - Napper ground-pluck: `$E71B/$E73A/$E75E`, record type `$13`;
-- Blue Demon building lightning: `$E1BD/$E209/$E255`, record type `$12`;
+- Blue Dragon building lightning: `$E1BD/$E209/$E255`, record type `$12`;
 - grounded people observed across `$E676-$E6B5`, record type `$19`;
 - ground fire: `$E6CA/$E6D0/$E6D6`, observed on `$10/$12/$13` records.
 
@@ -94,7 +95,7 @@ position-placement path and was not observed in this recording. It uses the same
 semantic `$7F:9215` authentic-view switch, so it does not block the rendering
 contract, but its gameplay command should be identified before calling the full
 picker catalogue complete. No additional Direct the People, targeted-miracle,
-Napper, Blue Demon, or fire recording is required.
+Napper, Blue Dragon, or fire recording is required.
 
 Every future `.rec` fixture must preserve its boot SRAM and gameplay-affecting
 settings. A recording without those inputs is not deterministic: live save

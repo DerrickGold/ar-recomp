@@ -47,6 +47,7 @@ static int s_current_song = -1;
  * pause, which keeps authentic SPC music and SFX aligned with this cursor. */
 static bool s_driver_paused;
 static bool s_host_paused;
+static uint64_t s_next_session_token;
 
 static bool PlaybackPaused(void) {
   return s_driver_paused || s_host_paused;
@@ -59,6 +60,7 @@ static bool PlaybackPaused(void) {
 static struct {
   const MusicReplacement *session; /* non-NULL = DSP music voices muted */
   stb_vorbis *v;                   /* NULL once a one-shot stream ends */
+  uint64_t token;                  /* nonzero generation for identity latching */
   uint32 pos;                      /* read cursor, frames */
   uint32 loop_start, loop_end;     /* resolved (loop_end always <= total) */
   unsigned total;                  /* file length, frames */
@@ -343,6 +345,8 @@ static void StartSession(const MusicReplacement *entry, int song) {
   }
   s.session = entry;
   s.v = v;
+  if (++s_next_session_token == 0) ++s_next_session_token;
+  s.token = s_next_session_token;
   s.pos = 0;
   s.total = entry->file_frames;
   s.loop = entry->loop;
@@ -586,6 +590,7 @@ void MusicReplacements_InstallHooks(void) {
   s_current_song = -1;
   s_driver_paused = false;
   s_host_paused = false;
+  s_next_session_token = 0;
   g_rtl_spc_upload_hook = OnSpcUpload;
   g_rtl_apu_port_hook = OnApuPortWrite;
   g_rtl_music_mix_hook = MixMusic;
@@ -625,6 +630,18 @@ bool MusicReplacements_IsPlaybackPaused(void) {
   bool paused = PlaybackPaused();
   RtlApuUnlock();
   return paused;
+}
+
+uint64_t MusicReplacements_GetOneShotSnapshot(bool *completed) {
+  if (completed) *completed = false;
+  RtlApuLock();
+  uint64_t token = 0;
+  if (s.session && !s.loop) {
+    token = s.token;
+    if (completed) *completed = s.v == NULL;
+  }
+  RtlApuUnlock();
+  return token;
 }
 
 void MusicReplacements_FormatPlaybackStatus(char *buffer, size_t buffer_size) {

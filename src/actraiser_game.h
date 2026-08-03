@@ -149,7 +149,14 @@ enum {
   kActRaiserWram_SimPendingWorldType = 0x17CA1,
   kActRaiserWram_SimAimedMapCellX = 0x190E1,
   kActRaiserWram_SimAimedMapCellY = 0x190E5,
+  /* Shared miracle lifecycle. These are full $7F mirror addresses, just like
+   * the picker and kind fields around them. The presentation snapshot reads
+   * them on the game thread; present.c must never read this live state. */
+  kActRaiserWram_SimUserMiracleActive = 0x190E9,
   kActRaiserWram_SimMiracleKind = 0x190EB,
+  kActRaiserWram_SimMiracleVisualComplete = 0x190F1,
+  kActRaiserWram_SimMiracleActorDone = 0x190F3,
+  kActRaiserWram_SimPostedMiracleActive = 0x190F5,
   kActRaiserWram_SimMapPickerFlag = 0x19215,
 };
 

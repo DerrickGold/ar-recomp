@@ -36,6 +36,51 @@ static SimMetadataProducer g_sim_metadata;
 static FILE *g_sim_d1_trace;
 static bool g_sim_d1_trace_env_checked;
 
+typedef struct SimEffectLifetime {
+  bool active;
+  bool visible;
+  uint8_t kind;
+  uint8_t phase;
+  uint32_t generation;
+  uint32_t pulse_generation;
+  uint32_t last_build_serial;
+  uint16_t age_ticks;
+  uint16_t phase_ticks;
+  uint16_t pulse_ticks;
+  uint16_t ticks_since_visible;
+} SimEffectLifetime;
+
+static SimEffectLifetime
+    g_effect_lifetimes[kActRaiserSimWorldRecordCount];
+static uint32_t g_next_effect_generation;
+static int RecordIndex(uint16_t record_address, bool world_record);
+
+static uint16_t SaturatingTick(uint16_t value) {
+  return value == UINT16_MAX ? value : (uint16_t)(value + 1);
+}
+
+static uint32_t NextEffectGeneration(void) {
+  if (++g_next_effect_generation == 0) ++g_next_effect_generation;
+  return g_next_effect_generation;
+}
+
+static void ClearEffectLifetimes(void) {
+  memset(g_effect_lifetimes, 0, sizeof(g_effect_lifetimes));
+}
+
+static void RetireEffectKind(SimEffectKind kind) {
+  for (size_t i = 0;
+       i < sizeof(g_effect_lifetimes) / sizeof(g_effect_lifetimes[0]); i++)
+    if (g_effect_lifetimes[i].active &&
+        g_effect_lifetimes[i].kind == kind)
+      memset(&g_effect_lifetimes[i], 0, sizeof(g_effect_lifetimes[i]));
+}
+
+static void ResetEffectLifetimes(void) {
+  ClearEffectLifetimes();
+  g_next_effect_generation = 0;
+}
+
 /* D3c classification tables.  Every entry is transcribed from the locked
  * height policy in docs/sim-object-catalog.md; the renderer must never
  * rediscover a height from OAM attributes or pixel shape. */
@@ -79,6 +124,229 @@ static bool IsAngelArrowComposition(uint16_t composition) {
 static bool IsBuildingZapComposition(uint16_t composition) {
   return composition == 0xE1BD || composition == 0xE209 ||
       composition == 0xE255;
+}
+
+typedef struct LightningMiraclePhaseDesc {
+  uint16_t composition;
+  int16_t strike_y;
+  uint8_t phase;
+} LightningMiraclePhaseDesc;
+
+static const LightningMiraclePhaseDesc kLightningMiraclePhases[] = {
+  { 0xD9E5, 64, kSimEffectPhase_LightningCloud },
+  { 0xDA4B, 60, kSimEffectPhase_LightningLead },
+  { 0xDAA1, 60, kSimEffectPhase_LightningBranch },
+  { 0xDAF7, 64, kSimEffectPhase_LightningImpactA },
+  { 0xDB5C, 64, kSimEffectPhase_LightningImpactB },
+};
+
+static const LightningMiraclePhaseDesc *FindLightningMiraclePhase(
+    uint16_t composition) {
+  for (size_t i = 0;
+       i < sizeof(kLightningMiraclePhases) / sizeof(kLightningMiraclePhases[0]);
+       i++)
+    if (kLightningMiraclePhases[i].composition == composition)
+      return &kLightningMiraclePhases[i];
+  return NULL;
+}
+
+bool Sim3D_IsLightningMiracleComposition(uint16_t composition) {
+  const LightningMiraclePhaseDesc *desc =
+      FindLightningMiraclePhase(composition);
+  return desc && desc->phase != kSimEffectPhase_LightningCloud;
+}
+
+const char *Sim3D_EffectKindName(SimEffectKind kind) {
+  switch (kind) {
+    case kSimEffect_None: return "none";
+    case kSimEffect_LightningMiracle: return "lightning_miracle";
+  }
+  return "unknown";
+}
+
+const char *Sim3D_EffectPhaseName(SimEffectPhase phase) {
+  switch (phase) {
+    case kSimEffectPhase_None: return "none";
+    case kSimEffectPhase_LightningCloud: return "lightning_cloud";
+    case kSimEffectPhase_LightningLead: return "lightning_lead";
+    case kSimEffectPhase_LightningBranch: return "lightning_branch";
+    case kSimEffectPhase_LightningImpactA: return "lightning_impact_a";
+    case kSimEffectPhase_LightningImpactB: return "lightning_impact_b";
+  }
+  return "unknown";
+}
+
+const char *Sim3D_EffectGeometryName(SimEffectGeometryKind kind) {
+  switch (kind) {
+    case kSimEffectGeometry_None: return "none";
+    case kSimEffectGeometry_Point: return "point";
+    case kSimEffectGeometry_Segment: return "segment";
+    case kSimEffectGeometry_Area: return "area";
+    case kSimEffectGeometry_Scene: return "scene";
+  }
+  return "unknown";
+}
+
+const char *Sim3D_EffectSpaceName(SimEffectGeometrySpace space) {
+  switch (space) {
+    case kSimEffectSpace_RecordLocal: return "record_local";
+    case kSimEffectSpace_WorldLocal: return "world_local";
+    case kSimEffectSpace_Screen: return "screen";
+  }
+  return "unknown";
+}
+
+static bool EffectPhaseVisible(SimEffectPhase phase) {
+  switch (phase) {
+    case kSimEffectPhase_LightningLead:
+    case kSimEffectPhase_LightningBranch:
+    case kSimEffectPhase_LightningImpactA:
+    case kSimEffectPhase_LightningImpactB:
+      return true;
+    case kSimEffectPhase_None:
+    case kSimEffectPhase_LightningCloud:
+      return false;
+  }
+  return false;
+}
+
+static void UpdateEffectLifetime(SimEffectLifetime *lifetime,
+                                 uint32_t build_serial,
+                                 SimEffectKind kind,
+                                 SimEffectPhase phase,
+                                 bool visible) {
+  /* CaptureFrame may be asked for the same immutable producer build by a
+   * screenshot or paused redraw. Never turn that into another effect tick. */
+  if (lifetime->active && lifetime->last_build_serial == build_serial &&
+      lifetime->kind == kind)
+    return;
+
+  bool continuous = lifetime->active && lifetime->kind == kind &&
+      lifetime->last_build_serial + 1 == build_serial;
+  if (!continuous) {
+    *lifetime = (SimEffectLifetime){
+      .active = true,
+      .visible = visible,
+      .kind = kind,
+      .phase = phase,
+      .generation = NextEffectGeneration(),
+      .pulse_generation = visible ? 1u : 0u,
+      .last_build_serial = build_serial,
+      .ticks_since_visible = visible ? 0 : UINT16_MAX,
+    };
+    return;
+  }
+
+  lifetime->age_ticks = SaturatingTick(lifetime->age_ticks);
+  lifetime->phase_ticks = lifetime->phase == phase
+      ? SaturatingTick(lifetime->phase_ticks) : 0;
+  if (visible) {
+    if (lifetime->visible) {
+      lifetime->pulse_ticks = SaturatingTick(lifetime->pulse_ticks);
+    } else {
+      if (++lifetime->pulse_generation == 0)
+        ++lifetime->pulse_generation;
+      lifetime->pulse_ticks = 0;
+    }
+    lifetime->ticks_since_visible = 0;
+  } else if (lifetime->pulse_generation) {
+    lifetime->pulse_ticks = SaturatingTick(lifetime->pulse_ticks);
+    lifetime->ticks_since_visible = lifetime->visible ? 1 :
+        SaturatingTick(lifetime->ticks_since_visible);
+  } else {
+    lifetime->ticks_since_visible = UINT16_MAX;
+  }
+  lifetime->visible = visible;
+  lifetime->phase = phase;
+  lifetime->last_build_serial = build_serial;
+}
+
+static void CaptureEffectInstances(SimFrameData *dst) {
+  dst->effect_metadata_valid = dst->metadata_valid;
+  dst->effect_count = 0;
+  dst->effect_visible_count = 0;
+  dst->effect_overflow_count = 0;
+
+  /* Kind is retained by the ROM, so require one of the two authentic outer
+   * lifecycles as well as the class-2 record. Composition then supplies the
+   * semantic sub-phase; only the four bolt phases are visibly emissive. */
+  if (!dst->metadata_valid) {
+    /* Source identity is no longer trustworthy. Retire every tracker rather
+     * than accidentally joining a later valid record to an old generation. */
+    ClearEffectLifetimes();
+    return;
+  }
+  bool lifecycle_active = dst->miracle_kind == 1 &&
+      (dst->miracle_user_active || dst->miracle_posted_active);
+  if (!lifecycle_active) {
+    RetireEffectKind(kSimEffect_LightningMiracle);
+    return;
+  }
+
+  for (uint8_t i = 0; i < dst->source_count; i++) {
+    const SimSourceRecord *source = &dst->sources[i];
+    const LightningMiraclePhaseDesc *phase_desc =
+        FindLightningMiraclePhase(source->composition);
+    SimEffectPhase phase = phase_desc
+        ? (SimEffectPhase)phase_desc->phase : kSimEffectPhase_None;
+    if (source->tier != kSimRecordTier_World || source->type != 0x02 ||
+        phase == kSimEffectPhase_None)
+      continue;
+
+    int record_index = RecordIndex(source->record_address, true);
+    if (record_index < 0) continue;
+    bool visible = EffectPhaseVisible(phase);
+    SimEffectLifetime *lifetime = &g_effect_lifetimes[record_index];
+    UpdateEffectLifetime(lifetime, dst->build_serial,
+                         kSimEffect_LightningMiracle, phase, visible);
+
+    SimEffectInstance effect = {
+      .generation = lifetime->generation,
+      .pulse_generation = lifetime->pulse_generation,
+      .record_address = source->record_address,
+      .composition = source->composition,
+      .world_x = source->world_x,
+      .world_y = source->world_y,
+      .age_ticks = lifetime->age_ticks,
+      .phase_ticks = lifetime->phase_ticks,
+      .pulse_ticks = lifetime->pulse_ticks,
+      .ticks_since_visible = lifetime->ticks_since_visible,
+      .geometry = {
+        .kind = kSimEffectGeometry_Point,
+        .space = kSimEffectSpace_RecordLocal,
+        .data.point = { .x = 8, .y = phase_desc->strike_y, .height = 0 },
+      },
+      .source_index = i,
+      .kind = kSimEffect_LightningMiracle,
+      .phase = phase,
+      .flags = (visible ? kSimEffectFlag_Visible : 0) |
+          (dst->miracle_user_active ? kSimEffectFlag_UserLifecycle : 0) |
+          (dst->miracle_posted_active ? kSimEffectFlag_PostedLifecycle : 0) |
+          (dst->miracle_visual_complete ? kSimEffectFlag_VisualComplete : 0) |
+          (dst->miracle_actor_done ? kSimEffectFlag_ActorDone : 0),
+    };
+    if (visible && dst->effect_visible_count != UINT8_MAX)
+      dst->effect_visible_count++;
+    if (dst->effect_count < kSimMaxEffectInstances) {
+      dst->effects[dst->effect_count++] = effect;
+    } else {
+      if (dst->effect_overflow_count != UINT8_MAX)
+        dst->effect_overflow_count++;
+      dst->effect_metadata_valid = false;
+    }
+  }
+
+  /* A lifecycle word can outlast its actor. Explicitly retire tracked slots
+   * that were absent from this immutable producer build, so immediate record
+   * reuse can never inherit an old generation. */
+  for (size_t i = 0;
+       i < sizeof(g_effect_lifetimes) / sizeof(g_effect_lifetimes[0]); i++) {
+    SimEffectLifetime *lifetime = &g_effect_lifetimes[i];
+    if (lifetime->active &&
+        lifetime->kind == kSimEffect_LightningMiracle &&
+        lifetime->last_build_serial != dst->build_serial)
+      memset(lifetime, 0, sizeof(*lifetime));
+  }
 }
 
 static bool IsNapperPluckComposition(uint16_t composition) {
@@ -238,6 +506,7 @@ static void BeginBuild(void) {
 void SimRenderMetadata_Reset(void) {
   memset(&g_sim_metadata, 0, sizeof(g_sim_metadata));
   SimRenderMetadata_ResetHeightSlew();
+  ResetEffectLifetimes();
 }
 
 void SimRenderMetadata_BeginRecord(
@@ -740,7 +1009,8 @@ SimRenderFeatureMask Sim3D_ResolveFeatureMask(
   if (!metadata_valid)
     features &= ~(kSimFeature_ObjectBillboards | kSimFeature_VirtualHeight |
                   kSimFeature_Shadows | kSimFeature_SoftShadows |
-                  kSimFeature_RimLight);
+                  kSimFeature_RimLight | kSimFeature_EffectLighting |
+                  kSimFeature_Particles);
 
   if (!(features & kSimFeature_ObjectBillboards))
     features &= ~(kSimFeature_VirtualHeight | kSimFeature_Shadows |
@@ -755,7 +1025,8 @@ SimRenderFeatureMask Sim3D_ResolveFeatureMask(
    * view/projection transform as the town's own ground mesh. With the flat
    * view there is no plane to extend and no transform to share. */
   if (!(features & kSimFeature_GroundProjection))
-    features &= ~kSimFeature_WorldUnderlay;
+    features &= ~(kSimFeature_WorldUnderlay | kSimFeature_EffectLighting |
+                  kSimFeature_Particles);
   /* Both cull cues describe the same boundary on the extended ground. Without
    * the extension there is no out-of-range ground to mark, and the finite
    * town's own edge already says everything there is to say. */
@@ -831,6 +1102,16 @@ void SimRenderMetadata_CaptureFrame(
   dst->camera_y = ReadMirror16(wram, kActRaiserWram_Bg1CameraY);
   dst->picker_flag =
       ReadMirror16(wram, kActRaiserWram_SimMapPickerFlag);
+  dst->miracle_kind =
+      ReadMirror16(wram, kActRaiserWram_SimMiracleKind);
+  dst->miracle_user_active =
+      ReadMirror16(wram, kActRaiserWram_SimUserMiracleActive);
+  dst->miracle_posted_active =
+      ReadMirror16(wram, kActRaiserWram_SimPostedMiracleActive);
+  dst->miracle_visual_complete =
+      ReadMirror16(wram, kActRaiserWram_SimMiracleVisualComplete);
+  dst->miracle_actor_done =
+      ReadMirror16(wram, kActRaiserWram_SimMiracleActorDone);
   if (world_navigation) CaptureWorldNavigationState(dst, wram);
 
   if (town) {
@@ -870,6 +1151,10 @@ void SimRenderMetadata_CaptureFrame(
     dst->view = kSimView_WorldNavigation;
   }
 
+  /* Leaving town retires every live emitter, but generation stays monotonic so
+   * an old queued FrameSlot can never alias a newly allocated record on re-entry. */
+  if (!town) ClearEffectLifetimes();
+
   /* The semantic record producer describes simulation-town records only.
    * Never leak its last town build into a $09 frame: navigation OAM has a
    * separate Palace/UI contract and will be captured explicitly in Step 4. */
@@ -894,12 +1179,16 @@ void SimRenderMetadata_CaptureFrame(
            sizeof(SimSourceRecord) * dst->source_count);
     memcpy(dst->objects, g_sim_metadata.objects,
            sizeof(SimRenderObject) * dst->object_count);
+    CaptureEffectInstances(dst);
   }
   ApplyHeightSlew(dst, dst->master_enabled);
 
   dst->effective_features = Sim3D_ResolveFeatureMask(
       dst->requested_features, implemented_features, dst->view,
       dst->master_enabled, dst->metadata_valid);
+  if (!dst->effect_metadata_valid)
+    dst->effective_features &= ~(kSimFeature_EffectLighting |
+                                 kSimFeature_Particles);
 }
 
 const char *Sim3D_ViewName(SimViewKind view) {
@@ -980,6 +1269,7 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
   fprintf(g_sim_d1_trace,
           "{\"host_frame\":%u,\"game_frame\":%u,\"town\":%u,"
           "\"view\":\"%s\",\"picker_flag\":%u,"
+          "\"miracle\":[%u,%u,%u,%u,%u],"
           "\"navigation_valid\":%s,\"world_focus\":[%u,%u],"
           "\"world_scroll\":[%u,%u],"
           "\"world_matrix\":[%d,%d,%d,%d],"
@@ -1010,13 +1300,21 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           "\"picker_topdown\":%s,"
           "\"backdrop_argb\":%u,\"object_half_add\":%s,"
           "\"source_count\":%u,\"zero_oam_sources\":%u,"
-          "\"object_count\":%u,\"emitted_oam_count\":%u,"
+          "\"object_count\":%u,\"effect_metadata_valid\":%s,"
+          "\"effect_count\":%u,\"effect_visible_count\":%u,"
+          "\"effect_overflow_count\":%u,"
+          "\"emitted_oam_count\":%u,"
           "\"claimed_oam_count\":%u,\"world_oam_first\":%u,"
           "\"world_oam_count\":%u,\"framebuffer_hash\":\"%016llx\","
           "\"sources\":[",
           (unsigned)host_frame, (unsigned)frame->game_frame,
           (unsigned)frame->town,
           Sim3D_ViewName(frame->view), (unsigned)frame->picker_flag,
+          (unsigned)frame->miracle_kind,
+          (unsigned)frame->miracle_user_active,
+          (unsigned)frame->miracle_posted_active,
+          (unsigned)frame->miracle_visual_complete,
+          (unsigned)frame->miracle_actor_done,
           frame->world_navigation_state_valid ? "true" : "false",
           (unsigned)frame->world_navigation.focus_x,
           (unsigned)frame->world_navigation.focus_y,
@@ -1098,6 +1396,10 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (unsigned)frame->source_count,
           (unsigned)frame->zero_oam_source_count,
           (unsigned)frame->object_count,
+          frame->effect_metadata_valid ? "true" : "false",
+          (unsigned)frame->effect_count,
+          (unsigned)frame->effect_visible_count,
+          (unsigned)frame->effect_overflow_count,
           (unsigned)frame->emitted_oam_count,
           (unsigned)frame->claimed_oam_count,
           (unsigned)frame->world_oam_first,
@@ -1149,6 +1451,72 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
             object->local_x1, object->local_y1,
             (unsigned)object->atlas_x, (unsigned)object->atlas_y,
             (unsigned)object->atlas_w, (unsigned)object->atlas_h);
+  }
+  fputs("],\"effects\":[", g_sim_d1_trace);
+  for (unsigned i = 0; i < frame->effect_count; i++) {
+    const SimEffectInstance *effect = &frame->effects[i];
+    if (i) fputc(',', g_sim_d1_trace);
+    fprintf(g_sim_d1_trace,
+            "{\"kind\":%u,\"kind_name\":\"%s\","
+            "\"phase\":%u,\"phase_name\":\"%s\",\"flags\":%u,"
+            "\"generation\":%u,\"pulse_generation\":%u,"
+            "\"age_ticks\":%u,\"phase_ticks\":%u,"
+            "\"pulse_ticks\":%u,\"ticks_since_visible\":%u,"
+            "\"record\":%u,\"source_index\":%u,\"composition\":%u,"
+            "\"world\":[%u,%u],\"geometry\":{"
+            "\"kind\":%u,\"kind_name\":\"%s\","
+            "\"space\":%u,\"space_name\":\"%s\"",
+            (unsigned)effect->kind,
+            Sim3D_EffectKindName((SimEffectKind)effect->kind),
+            (unsigned)effect->phase,
+            Sim3D_EffectPhaseName((SimEffectPhase)effect->phase),
+            (unsigned)effect->flags,
+            (unsigned)effect->generation,
+            (unsigned)effect->pulse_generation,
+            (unsigned)effect->age_ticks,
+            (unsigned)effect->phase_ticks,
+            (unsigned)effect->pulse_ticks,
+            (unsigned)effect->ticks_since_visible,
+            (unsigned)effect->record_address,
+            (unsigned)effect->source_index,
+            (unsigned)effect->composition,
+            (unsigned)effect->world_x, (unsigned)effect->world_y,
+            (unsigned)effect->geometry.kind,
+            Sim3D_EffectGeometryName(
+                (SimEffectGeometryKind)effect->geometry.kind),
+            (unsigned)effect->geometry.space,
+            Sim3D_EffectSpaceName(
+                (SimEffectGeometrySpace)effect->geometry.space));
+    switch ((SimEffectGeometryKind)effect->geometry.kind) {
+      case kSimEffectGeometry_Point:
+        fprintf(g_sim_d1_trace, ",\"point\":[%d,%d,%d]",
+                effect->geometry.data.point.x,
+                effect->geometry.data.point.y,
+                effect->geometry.data.point.height);
+        break;
+      case kSimEffectGeometry_Segment:
+        fprintf(g_sim_d1_trace,
+                ",\"segment\":[[%d,%d,%d],[%d,%d,%d]]",
+                effect->geometry.data.segment.start.x,
+                effect->geometry.data.segment.start.y,
+                effect->geometry.data.segment.start.height,
+                effect->geometry.data.segment.end.x,
+                effect->geometry.data.segment.end.y,
+                effect->geometry.data.segment.end.height);
+        break;
+      case kSimEffectGeometry_Area:
+        fprintf(g_sim_d1_trace, ",\"area\":[%d,%d,%d,%d,%d]",
+                effect->geometry.data.area.x,
+                effect->geometry.data.area.y,
+                effect->geometry.data.area.width,
+                effect->geometry.data.area.height,
+                effect->geometry.data.area.elevation);
+        break;
+      case kSimEffectGeometry_None:
+      case kSimEffectGeometry_Scene:
+        break;
+    }
+    fputs("}}", g_sim_d1_trace);
   }
   fputs("]}\n", g_sim_d1_trace);
   fflush(g_sim_d1_trace);

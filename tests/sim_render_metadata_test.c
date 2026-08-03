@@ -52,6 +52,8 @@ static void TestFeatureDependencies(void) {
   CHECK(!(resolved & kSimFeature_Shadows));
   CHECK(!(resolved & kSimFeature_SoftShadows));
   CHECK(!(resolved & kSimFeature_RimLight));
+  CHECK(resolved & kSimFeature_EffectLighting);
+  CHECK(resolved & kSimFeature_Particles);
   CHECK(resolved & kSimFeature_GroundProjection);
   CHECK(resolved & kSimFeature_Backdrop);
 
@@ -67,6 +69,195 @@ static void TestFeatureDependencies(void) {
       all, all, kSimView_Enhanced, true, true);
   CHECK(resolved & kSimFeature_Shadows);
   CHECK(resolved & kSimFeature_SoftShadows);
+
+  SimRenderFeatureMask no_ground = all & ~kSimFeature_GroundProjection;
+  resolved = Sim3D_ResolveFeatureMask(
+      no_ground, all, kSimView_Enhanced, true, true);
+  CHECK(!(resolved & kSimFeature_EffectLighting));
+  CHECK(!(resolved & kSimFeature_Particles));
+
+  resolved = Sim3D_ResolveFeatureMask(
+      all, all, kSimView_Enhanced, true, false);
+  CHECK(!(resolved & kSimFeature_EffectLighting));
+  CHECK(!(resolved & kSimFeature_Particles));
+}
+
+static void TestLightningMiracleEffectCapture(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  Write16(wram, kActRaiserWram_SimMiracleKind, 1);
+  Write16(wram, kActRaiserWram_SimUserMiracleActive, 1);
+  Write16(wram, kActRaiserWram_SimMiracleVisualComplete, 0x1234);
+  Write16(wram, kActRaiserWram_SimMiracleActorDone, 0x5678);
+
+  CHECK(Sim3D_IsLightningMiracleComposition(0xDA4B));
+  CHECK(Sim3D_IsLightningMiracleComposition(0xDAA1));
+  CHECK(Sim3D_IsLightningMiracleComposition(0xDAF7));
+  CHECK(Sim3D_IsLightningMiracleComposition(0xDB5C));
+  CHECK(!Sim3D_IsLightningMiracleComposition(0xD9E5));
+
+  static const struct {
+    uint16_t composition;
+    SimEffectPhase phase;
+    uint16_t strike_y;
+    uint16_t age_ticks, phase_ticks, pulse_ticks, ticks_since_visible;
+    uint32_t pulse_generation;
+    bool visible;
+  } sequence[] = {
+    { 0xD9E5, kSimEffectPhase_LightningCloud,   64, 0, 0, 0, UINT16_MAX, 0, false },
+    { 0xDA4B, kSimEffectPhase_LightningLead,    60, 1, 0, 0, 0,          1, true  },
+    { 0xDA4B, kSimEffectPhase_LightningLead,    60, 2, 1, 1, 0,          1, true  },
+    { 0xDAA1, kSimEffectPhase_LightningBranch,  60, 3, 0, 2, 0,          1, true  },
+    { 0xD9E5, kSimEffectPhase_LightningCloud,   64, 4, 0, 3, 1,          1, false },
+    { 0xDB5C, kSimEffectPhase_LightningImpactB, 64, 5, 0, 0, 0,          2, true  },
+  };
+
+  SimRenderMetadata_Reset();
+  SimFrameData frame;
+  uint32_t generation = 0;
+  for (size_t i = 0; i < sizeof(sequence) / sizeof(sequence[0]); i++) {
+    SimRenderMetadata_BeginRecord(
+        kActRaiserWram_SimWorldRecords, true, false,
+        sequence[i].composition, 152, 112, 0x02, 2, 0, 0);
+    SimRenderMetadata_RecordPart(0, 2u << 12);
+    SimRenderMetadata_EndRecord(4);
+    SimRenderMetadata_CaptureFrame(
+        &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+    CHECK(frame.metadata_valid);
+    CHECK(frame.effect_metadata_valid);
+    CHECK(frame.effect_count == 1);
+    CHECK(frame.effect_visible_count == (sequence[i].visible ? 1 : 0));
+    CHECK(frame.effect_overflow_count == 0);
+    const SimEffectInstance *effect = &frame.effects[0];
+    if (!generation) generation = effect->generation;
+    CHECK(effect->generation == generation);
+    CHECK(effect->pulse_generation == sequence[i].pulse_generation);
+    CHECK(effect->age_ticks == sequence[i].age_ticks);
+    CHECK(effect->phase_ticks == sequence[i].phase_ticks);
+    CHECK(effect->pulse_ticks == sequence[i].pulse_ticks);
+    CHECK(effect->ticks_since_visible == sequence[i].ticks_since_visible);
+    CHECK(effect->kind == kSimEffect_LightningMiracle);
+    CHECK(effect->phase == sequence[i].phase);
+    CHECK(effect->record_address == kActRaiserWram_SimWorldRecords);
+    CHECK(effect->source_index == 0);
+    CHECK(effect->composition == sequence[i].composition);
+    CHECK(effect->world_x == 152 && effect->world_y == 112);
+    CHECK(effect->geometry.kind == kSimEffectGeometry_Point);
+    CHECK(effect->geometry.space == kSimEffectSpace_RecordLocal);
+    CHECK(effect->geometry.data.point.x == 8);
+    CHECK(effect->geometry.data.point.y == sequence[i].strike_y);
+    CHECK(effect->geometry.data.point.height == 0);
+    CHECK(((effect->flags & kSimEffectFlag_Visible) != 0) ==
+          sequence[i].visible);
+    CHECK(effect->flags & kSimEffectFlag_UserLifecycle);
+    CHECK(effect->flags & kSimEffectFlag_VisualComplete);
+    CHECK(effect->flags & kSimEffectFlag_ActorDone);
+  }
+
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_LightningMiracle),
+                "lightning_miracle"));
+  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_LightningImpactB),
+                "lightning_impact_b"));
+  CHECK(!strcmp(Sim3D_EffectGeometryName(kSimEffectGeometry_Point), "point"));
+  CHECK(!strcmp(Sim3D_EffectSpaceName(kSimEffectSpace_RecordLocal),
+                "record_local"));
+
+  /* Recapturing one immutable producer build must not advance lifecycle age. */
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effects[0].age_ticks == 5);
+  CHECK(frame.effects[0].pulse_ticks == 0);
+
+  /* Either authentic outer lifecycle is sufficient; kind alone is not. */
+  Write16(wram, kActRaiserWram_SimUserMiracleActive, 0);
+  Write16(wram, kActRaiserWram_SimPostedMiracleActive, 1);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 1);
+  CHECK(!(frame.effects[0].flags & kSimEffectFlag_UserLifecycle));
+  CHECK(frame.effects[0].flags & kSimEffectFlag_PostedLifecycle);
+  Write16(wram, kActRaiserWram_SimPostedMiracleActive, 0);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 0);
+  Write16(wram, kActRaiserWram_SimUserMiracleActive, 1);
+  Write16(wram, kActRaiserWram_SimMiracleKind, 2);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 0);
+
+  /* Lifecycle context cannot turn an unrelated composition or class into an
+   * emitter. These are separate producer builds so stale tracker state cannot
+   * accidentally make the assertion pass. */
+  Write16(wram, kActRaiserWram_SimMiracleKind, 1);
+  SimRenderMetadata_BeginRecord(
+      kActRaiserWram_SimWorldRecords, true, false, 0xDA22,
+      152, 112, 0x02, 2, 0, 0);
+  SimRenderMetadata_RecordPart(0, 2u << 12);
+  SimRenderMetadata_EndRecord(4);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 0);
+  SimRenderMetadata_BeginRecord(
+      kActRaiserWram_SimWorldRecords, true, false, 0xDA4B,
+      152, 112, 0x03, 2, 0, 0);
+  SimRenderMetadata_RecordPart(0, 2u << 12);
+  SimRenderMetadata_EndRecord(4);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 0);
+
+  /* Stopping the outer lifecycle retires identity even if the same immutable
+   * producer build is recaptured immediately with the slot reused. */
+  Write16(wram, kActRaiserWram_SimMiracleKind, 1);
+  SimRenderMetadata_BeginRecord(
+      kActRaiserWram_SimWorldRecords, true, false, 0xDA4B,
+      152, 112, 0x02, 2, 0, 0);
+  SimRenderMetadata_RecordPart(0, 2u << 12);
+  SimRenderMetadata_EndRecord(4);
+  Write16(wram, kActRaiserWram_SimUserMiracleActive, 0);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 0);
+  Write16(wram, kActRaiserWram_SimUserMiracleActive, 1);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].generation != generation);
+  CHECK(frame.effects[0].age_ticks == 0);
+}
+
+static void TestEffectOverflowFailsClosed(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  Write16(wram, kActRaiserWram_SimMiracleKind, 1);
+  Write16(wram, kActRaiserWram_SimUserMiracleActive, 1);
+  SimRenderMetadata_Reset();
+
+  const int emitter_count = kSimMaxEffectInstances + 1;
+  for (int i = 0; i < emitter_count; i++) {
+    uint16_t record = (uint16_t)(kActRaiserWram_SimWorldRecords +
+        i * kActRaiserSimWorldRecordStride);
+    uint16_t cursor = (uint16_t)(i * 4);
+    SimRenderMetadata_BeginRecord(
+        record, true, false, 0xDA4B, (uint16_t)(100 + i), 112,
+        0x02, 2, 0, cursor);
+    SimRenderMetadata_RecordPart(cursor, 2u << 12);
+    SimRenderMetadata_EndRecord((uint16_t)(cursor + 4));
+  }
+
+  SimFrameData frame;
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.metadata_valid);
+  CHECK(!frame.effect_metadata_valid);
+  CHECK(frame.effect_count == kSimMaxEffectInstances);
+  CHECK(frame.effect_visible_count == emitter_count);
+  CHECK(frame.effect_overflow_count == 1);
+  CHECK(!(frame.effective_features & kSimFeature_EffectLighting));
+  CHECK(!(frame.effective_features & kSimFeature_Particles));
 }
 
 static void TestRecordPartitionAndClippedReset(void) {
@@ -1297,6 +1488,8 @@ static void TestCapturedWorldNavigationFixtures(const char *steady_path,
 
 int main(int argc, char **argv) {
   TestFeatureDependencies();
+  TestLightningMiracleEffectCapture();
+  TestEffectOverflowFailsClosed();
   TestRecordPartitionAndClippedReset();
   TestIntegrityFallback();
   TestMapPlaneSelectorTrait();

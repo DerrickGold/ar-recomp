@@ -57,6 +57,14 @@ int main(void) {
             315, 0x08, 0x80, 0, 0xF0, 0) ==
         kActionLoadPacingTrigger_Discard);
 
+  /* Only natural completion of the exact enhanced one-shot latched at the
+   * trigger may shorten the oracle-derived upper bound. */
+  CHECK(ActionLoadPacing_ShouldReleaseForOneShot(100, 7, 7, 1));
+  CHECK(!ActionLoadPacing_ShouldReleaseForOneShot(0, 7, 7, 1));
+  CHECK(!ActionLoadPacing_ShouldReleaseForOneShot(100, 0, 0, 1));
+  CHECK(!ActionLoadPacing_ShouldReleaseForOneShot(100, 7, 8, 1));
+  CHECK(!ActionLoadPacing_ShouldReleaseForOneShot(100, 7, 7, 0));
+
   if (s_failures) {
     fprintf(stderr, "action_load_pacing_test: %d failure(s)\n", s_failures);
     return 1;

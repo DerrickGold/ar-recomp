@@ -14,6 +14,11 @@
 enum {
   kSimMaxSourceRecords = 92,  /* 48 fixed + 44 world records. */
   kSimMaxRenderObjects = 128, /* At most one priority run per OAM slot. */
+  /* One semantic emitter per relevant record, not one per particle. Thirty-two
+   * covers the largest mapped 4x4 impact cohort plus its parent and leaves
+   * room for overlapping families. Overflow is still reported and fails the
+   * effect stages closed; this is a capacity, never a truncation policy. */
+  kSimMaxEffectInstances = 32,
 };
 
 /* Build-time switch for the authentic top-down picker view.
@@ -62,7 +67,11 @@ typedef enum SimRenderFeature {
    * failing. Continuous and hole-free, which is what lets the shroud above it
    * be thin. */
   kSimFeature_CullHaze = 1u << 11,
-  kSimFeature_All = (1u << 12) - 1,
+  /* Host-authored transient illumination and deterministic particles. They
+   * are separate gates so either half can be A/B tested independently. */
+  kSimFeature_EffectLighting = 1u << 12,
+  kSimFeature_Particles = 1u << 13,
+  kSimFeature_All = (1u << 14) - 1,
 } SimRenderFeature;
 
 typedef enum SimViewKind {
@@ -167,7 +176,7 @@ SimObjectClassification Sim3D_ClassifyObject(
 
 const char *Sim3D_HeightClassName(SimHeightClass height_class);
 
-/* Stages with a shipped implementation, as of D4a. `Sim3D_ImplementedFeatures`
+/* Stages with a shipped implementation. `Sim3D_ImplementedFeatures`
  * reports these once a frame captures cleanly; the settings menu uses the
  * constant directly so a stage can still be configured outside a town, where
  * nothing has been captured yet. Extend it as each visual gate passes. */
@@ -177,7 +186,8 @@ enum {
       kSimFeature_ObjectBillboards | kSimFeature_VirtualHeight |
       kSimFeature_Shadows | kSimFeature_SoftShadows | kSimFeature_RimLight |
       kSimFeature_WorldUnderlay | kSimFeature_CloudShroud |
-      kSimFeature_CullHaze | kSimFeature_Backdrop,
+      kSimFeature_CullHaze | kSimFeature_Backdrop |
+      kSimFeature_EffectLighting | kSimFeature_Particles,
 };
 
 /* Default D4a shadow darkness, percent of full black. */
@@ -367,6 +377,92 @@ typedef struct SimRenderObject {
   uint8_t atlas_valid;
 } SimRenderObject;
 
+typedef enum SimEffectKind {
+  kSimEffect_None = 0,
+  kSimEffect_LightningMiracle,
+} SimEffectKind;
+
+typedef enum SimEffectPhase {
+  kSimEffectPhase_None = 0,
+  kSimEffectPhase_LightningCloud,
+  kSimEffectPhase_LightningLead,
+  kSimEffectPhase_LightningBranch,
+  kSimEffectPhase_LightningImpactA,
+  kSimEffectPhase_LightningImpactB,
+} SimEffectPhase;
+
+typedef enum SimEffectGeometryKind {
+  kSimEffectGeometry_None = 0,
+  kSimEffectGeometry_Point,
+  kSimEffectGeometry_Segment,
+  kSimEffectGeometry_Area,
+  kSimEffectGeometry_Scene,
+} SimEffectGeometryKind;
+
+typedef enum SimEffectGeometrySpace {
+  kSimEffectSpace_RecordLocal = 0,
+  kSimEffectSpace_WorldLocal,
+  kSimEffectSpace_Screen,
+} SimEffectGeometrySpace;
+
+typedef enum SimEffectFlag {
+  kSimEffectFlag_Visible = 1u << 0,
+  kSimEffectFlag_UserLifecycle = 1u << 1,
+  kSimEffectFlag_PostedLifecycle = 1u << 2,
+  kSimEffectFlag_VisualComplete = 1u << 3,
+  kSimEffectFlag_ActorDone = 1u << 4,
+} SimEffectFlag;
+
+typedef struct SimEffectLocalPoint {
+  int16_t x, y;
+  /* Authentic pixels above the projected ground. Zero is on the map plane. */
+  int16_t height;
+} SimEffectLocalPoint;
+
+typedef struct SimEffectGeometry {
+  uint8_t kind;
+  uint8_t space;
+  union {
+    SimEffectLocalPoint point;
+    struct {
+      SimEffectLocalPoint start, end;
+    } segment;
+    struct {
+      int16_t x, y, width, height, elevation;
+    } area;
+  } data;
+} SimEffectGeometry;
+
+/* Presentation-ready semantic emitter, derived on the game thread from one
+ * captured source record. The record address is only a slot; generation makes
+ * recycled occupants distinct. `age_ticks` and `phase_ticks` are authentic
+ * logic-tick ages and are idempotent when one build is captured more than once.
+ * Pulse fields identify a contiguous visible emission within the longer
+ * lifecycle, so renderer particles never infer birth from a wall/global clock.
+ * World position remains in authentic town pixels and geometry is local to it. */
+typedef struct SimEffectInstance {
+  uint32_t generation;
+  uint32_t pulse_generation;
+  uint16_t record_address;
+  uint16_t composition;
+  uint16_t world_x, world_y;
+  uint16_t age_ticks;
+  uint16_t phase_ticks;
+  uint16_t pulse_ticks;
+  uint16_t ticks_since_visible;
+  SimEffectGeometry geometry;
+  uint8_t source_index;
+  uint8_t kind;
+  uint8_t phase;
+  uint8_t flags;
+} SimEffectInstance;
+
+bool Sim3D_IsLightningMiracleComposition(uint16_t composition);
+const char *Sim3D_EffectKindName(SimEffectKind kind);
+const char *Sim3D_EffectPhaseName(SimEffectPhase phase);
+const char *Sim3D_EffectGeometryName(SimEffectGeometryKind kind);
+const char *Sim3D_EffectSpaceName(SimEffectGeometrySpace space);
+
 /* D4a caster selection. Kept beside the classifier rather than in the renderer
  * so "what casts a shadow" stays one data question: a world-tier object with
  * usable atlas art that D3c did not mark MapPlane or NoShadow. Ground-anchored
@@ -477,6 +573,13 @@ typedef struct SimFrameData {
   uint16_t camera_x, camera_y;
   uint16_t angel_x, angel_y;
   uint16_t picker_flag;
+  /* Raw lifecycle words stay diagnostic; effects[] below is the only
+   * presentation-facing interpretation. */
+  uint16_t miracle_kind;
+  uint16_t miracle_user_active;
+  uint16_t miracle_posted_active;
+  uint16_t miracle_visual_complete;
+  uint16_t miracle_actor_done;
   bool world_navigation_state_valid;
   SimWorldNavigationFrame world_navigation;
   /* INIDISP master brightness captured with the navigation OAM composition.
@@ -602,8 +705,13 @@ typedef struct SimFrameData {
   uint8_t source_count;
   uint8_t zero_oam_source_count;
   uint16_t object_count;
+  bool effect_metadata_valid;
+  uint8_t effect_count;
+  uint8_t effect_visible_count;
+  uint8_t effect_overflow_count;
   SimSourceRecord sources[kSimMaxSourceRecords];
   SimRenderObject objects[kSimMaxRenderObjects];
+  SimEffectInstance effects[kSimMaxEffectInstances];
 } SimFrameData;
 
 /* Game-thread handoff between the semantic record producer and the atlas
