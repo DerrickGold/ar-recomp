@@ -353,6 +353,12 @@ _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
   { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
     .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])), \
     .requires_manual = true }
+/* Developer-only, but with ordinary registry-backed rows. Distinct from
+ * CUSTOM_DEBUG_SECTION, which also owns its own row model. */
+#define DEBUG_SECTION(name_, blurb_, tabs_) \
+  { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
+    .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])), \
+    .debug_only = true }
 /* A section whose rows this file builds, and which is developer-only. */
 #define CUSTOM_DEBUG_SECTION(name_, blurb_, tabs_) \
   { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
@@ -378,8 +384,6 @@ static const MenuSection kSections[] = {
           kTabsControls),
   SECTION("Cheats", "Gameplay assists and raw memory pins.",
           kTabsCheats),
-  SECTION("Randomizer", "Reseed the game's enemies, statues and lairs.",
-          kTabsRandomizer),
   SECTION("Save", "Inspect and stage edits to the battery save.",
           kTabsSave),
   /* Before System: the manual is something a PLAYER reaches for, while System
@@ -389,6 +393,14 @@ static const MenuSection kSections[] = {
   MANUAL_SECTION("Manual", "Read the game's manual.", kTabsManual),
   SECTION("System", "Host commands, restart and exit, plus the scene inspector.",
           kTabsSystem),
+  /* Developer-only until a randomized run has actually been played end to end.
+   * Every table it rewrites is verified against the ROM, but no seed has been
+   * played through, so it must not read as a finished player feature. Placed
+   * with the other hidden section so revealing it cannot renumber any
+   * player-visible section. */
+  DEBUG_SECTION("Randomizer",
+          "Reseed the game's enemies, statues and lairs. UNTESTED.",
+          kTabsRandomizer),
   /* Last deliberately: it is the developer-only section, and keeping it at the
    * end means every player section's nav position is the same whether debug
    * settings are on or off. tests/settings_overlay_test.c indexes sections
@@ -400,6 +412,7 @@ static const MenuSection kSections[] = {
 
 #undef SECTION
 #undef MANUAL_SECTION
+#undef DEBUG_SECTION
 #undef CUSTOM_DEBUG_SECTION
 
 enum {
@@ -844,30 +857,6 @@ static const IconIndexMap kSectionIconMaps[] = {
     {14,13,14,14,11,11,14,14,14,14,11,11,11,11,11,14},
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
   },
-  { /* Randomizer <- sim composition $01:D128, the red/blue double arrow the
-     * game uses for its own swap/exchange menu glyph. Lifted from the sim
-     * object catalog (docs/research/sim-object-catalog/spawn_compositions_01.png,
-     * row 4 col 1) rather than the Sky Palace sheet the icons above came from,
-     * so its colours were quantised onto kIconSelectPalette: dark green, yellow,
-     * red and pale blue land within 2 units, the vivid blue and orange are the
-     * nearest available. */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
-    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
-    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
-    {14, 7,14,15,11,15,15,15,15,15,15, 1,15,14, 7,14},
-    {14, 7,14,11,11,15,15,15,15,15,15, 1, 1,14, 7,14},
-    {14,14,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1,14,14},
-    {14,11,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1, 1,14},
-    {14, 5,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1,10,14},
-    {14,14, 5,11,11, 5, 5, 5,10,10,10, 1, 1,10,14,14},
-    {14, 7,14, 5,11,15,15,15,15,15,15, 1,10,14, 7,14},
-    {14, 7,14,15, 5,15,15,15,15,15,15,10,15,14, 7,14},
-    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
-    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
-    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
   { /* Save <- game icon #16 */
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
     {14,11,14, 7,13,13, 7,14,14,14,14,14,11,11,11,14},
@@ -923,6 +912,30 @@ static const IconIndexMap kSectionIconMaps[] = {
     {14,11,14,15, 4, 5, 4, 5, 5, 5, 5, 4,15,14,11,14},
     {14,11,14,14, 4, 4, 4, 5, 5, 5, 5, 3,14,14,11,14},
     {14,11,11,11,14,14,14,14,14,14,14,14,11,11,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Randomizer <- sim composition $01:D128, the red/blue double arrow the
+     * game uses for its own swap/exchange menu glyph. Lifted from the sim
+     * object catalog (docs/research/sim-object-catalog/spawn_compositions_01.png,
+     * row 4 col 1) rather than the Sky Palace sheet the icons above came from,
+     * so its colours were quantised onto kIconSelectPalette: dark green, yellow,
+     * red and pale blue land within 2 units, the vivid blue and orange are the
+     * nearest available. */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
+    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
+    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
+    {14, 7,14,15,11,15,15,15,15,15,15, 1,15,14, 7,14},
+    {14, 7,14,11,11,15,15,15,15,15,15, 1, 1,14, 7,14},
+    {14,14,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1,14,14},
+    {14,11,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1, 1,14},
+    {14, 5,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1,10,14},
+    {14,14, 5,11,11, 5, 5, 5,10,10,10, 1, 1,10,14,14},
+    {14, 7,14, 5,11,15,15,15,15,15,15, 1,10,14, 7,14},
+    {14, 7,14,15, 5,15,15,15,15,15,15,10,15,14, 7,14},
+    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
+    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
+    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
   },
   { /* Layers -- three stacked planes receding in depth, which is what the

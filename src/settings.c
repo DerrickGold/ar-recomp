@@ -2427,6 +2427,17 @@ bool Settings_IsDebugOnly(const SettingDesc *desc) {
   /* The scene inspector and its asset dump are development tools end to end. */
   if (desc->category == kSettingCat_Inspector) return true;
 
+  /* The randomizer is verified against the ROM but has never been played
+   * through, so it stays behind the debug flag until a seeded run has been
+   * validated. Gated by category rather than by key so a row moved to another
+   * randomizer tab keeps the gate. Its section is debug_only too — hiding only
+   * the rows would leave an empty section in the nav column. */
+  if (desc->category == kSettingCat_RandoSeed ||
+      desc->category == kSettingCat_RandoEnemies ||
+      desc->category == kSettingCat_RandoItems ||
+      desc->category == kSettingCat_RandoSim)
+    return true;
+
   /* The granular widescreen flags are all preset by Screen ratio / Render
    * profile; toggling them individually is a developer A/B, not a player
    * control. The whole Widescreen tab collapses when debug is off. */
