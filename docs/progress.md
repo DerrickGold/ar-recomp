@@ -217,7 +217,7 @@ The remaining widescreen backlog is:
 | Boot / title screen | ✅ | |
 | Save / load (in-game state) | ✅ | Checksum-gated continue path confirmed (`AR_SAVECHECK`) |
 | Action-stage combat | ✅ | Every ordinary action level plus the complete Death Heim boss rush, final boss, and return transition is fully playable. Open `$00:B8AB` spell-projectile garbage variant (`DEBUG.md` #19) remains a separate unconverted-code edge case. |
-| Magic casting | 🟡 | WORKS as of 2026-07-07 (was dead — blocked by our own knockback cheat, `DEBUG.md` #18); Fire verified in-stage; other 3 spells' effects pending validation (`AR_ALL_MAGIC` cheat added for exactly this) |
+| Magic casting | 🟡 | WORKS as of 2026-07-07 (was dead — blocked by our own knockback cheat, `DEBUG.md` #18). 2026-08-02: all four spells' controller/slot lifecycles, animation banks, timing, transforms, and composition geometry are statically mapped in `effects-hook-investigation.md`; Fire is verified in-stage, while Stardust/Aura/Light still need the focused live acceptance sweep (`AR_ALL_MAGIC`/`AR_INF_MP`) |
 | Sim-mode town simulation | 🟡 | Fillmore ✅ end-to-end; Bloodpool entry/lightning partial; full Bloodpool plus Kasandora/Aitos/Marahna/Northwall baselines pending. Reward web and multi-actor cutscenes fixed 2026-07-07 (`DEBUG.md` #18b/§7.17). |
 | Scroll/MP persistence | ✅ | `$0295` persistent / `$21` working-copy model mapped + grant verified across modes (2026-07-07) |
 | Audio (music/SPC) | 🟡 | SPC upload handshake and boss-music playback fixed; a narrower "voice/SFX key-on" gap was reported and its current status isn't confirmed — verify before marking ✅ |

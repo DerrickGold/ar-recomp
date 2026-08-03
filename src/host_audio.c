@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <SDL3/SDL.h>
 
@@ -22,6 +23,7 @@ enum {
 };
 
 static SDL_Mutex *s_audio_mutex;
+static SDL_AtomicInt s_output_enabled;
 static SDL_AtomicInt s_master_volume_percent;
 static SDL_AtomicInt s_rejected_chunk_count;
 static SDL_AudioStream *s_audio_stream;
@@ -29,6 +31,7 @@ static SDL_ThreadID s_game_thread_id;
 static int s_requested_frequency_hz;
 static int s_requested_buffer_frames;
 static bool s_audio_open;
+static bool s_host_paused;
 
 extern int ApuProfEnabled(void);
 extern uint64_t g_apuprof_lockwait_ns;
@@ -88,6 +91,7 @@ static void SDLCALL AudioCallback(void *userdata, SDL_AudioStream *stream,
 
   const int volume_percent =
       SDL_GetAtomicInt(&s_master_volume_percent);
+  const bool output_enabled = SDL_GetAtomicInt(&s_output_enabled) != 0;
   int remaining_bytes = additional_bytes;
   while (remaining_bytes > 0) {
     const int chunk_bytes =
@@ -97,7 +101,12 @@ static void SDLCALL AudioCallback(void *userdata, SDL_AudioStream *stream,
     RtlRenderAudio((int16_t *)audio_chunk,
                    chunk_bytes / kAudioBytesPerFrame,
                    kAudioChannelCount);
-    if (volume_percent != kFullVolumePercent) {
+    /* "Enable audio" is an output mute, not a transport pause. Keep rendering
+     * while muted so authentic SPC, replacement OGG, and MSU cursors all
+     * advance together; silence only the completed mix sent to SDL. */
+    if (!output_enabled) {
+      memset(audio_chunk, 0, (size_t)chunk_bytes);
+    } else if (volume_percent != kFullVolumePercent) {
       int16_t *samples = (int16_t *)audio_chunk;
       const int sample_count = chunk_bytes / kAudioBytesPerSample;
       for (int sample_index = 0; sample_index < sample_count; sample_index++) {
@@ -196,6 +205,8 @@ bool HostAudio_Init(int requested_frequency_hz, int requested_buffer_frames,
                     int master_volume_percent, bool enabled) {
   s_requested_frequency_hz = requested_frequency_hz;
   s_requested_buffer_frames = requested_buffer_frames;
+  SDL_SetAtomicInt(&s_output_enabled, 0);
+  s_host_paused = false;
   HostAudio_SetMasterVolumePercent(master_volume_percent);
 
   s_audio_mutex = SDL_CreateMutex();
@@ -208,14 +219,30 @@ bool HostAudio_Init(int requested_frequency_hz, int requested_buffer_frames,
   return true;
 }
 
-void HostAudio_SetEnabled(bool enabled) {
+static void ApplyHostPauseState(void) {
   if (!s_audio_mutex) return;
-  if (enabled) {
-    if (OpenAudioStream())
-      SDL_ResumeAudioStreamDevice(s_audio_stream);
-  } else if (s_audio_open) {
-    SDL_PauseAudioStreamDevice(s_audio_stream);
+  if (!s_host_paused) {
+    if (OpenAudioStream() &&
+        !SDL_ResumeAudioStreamDevice(s_audio_stream)) {
+      fprintf(stderr, "[audio] resume failed: %s\n", SDL_GetError());
+    }
+  } else if (s_audio_open &&
+             !SDL_PauseAudioStreamDevice(s_audio_stream)) {
+    fprintf(stderr, "[audio] pause failed: %s\n", SDL_GetError());
   }
+}
+
+void HostAudio_SetEnabled(bool enabled) {
+  SDL_SetAtomicInt(&s_output_enabled, enabled ? 1 : 0);
+  /* Init and a prior open failure reach here without a stream. Once open, a
+   * mute toggle is purely atomic and need not issue a redundant device resume. */
+  if (!s_audio_open) ApplyHostPauseState();
+}
+
+void HostAudio_SetHostPaused(bool paused) {
+  if (s_host_paused == paused) return;
+  s_host_paused = paused;
+  ApplyHostPauseState();
 }
 
 void HostAudio_SetMasterVolumePercent(int master_volume_percent) {
@@ -234,4 +261,6 @@ void HostAudio_Shutdown(void) {
   s_audio_mutex = NULL;
   s_game_thread_id = 0;
   s_audio_open = false;
+  SDL_SetAtomicInt(&s_output_enabled, 0);
+  s_host_paused = false;
 }

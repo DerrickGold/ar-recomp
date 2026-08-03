@@ -16,12 +16,15 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 ### Platformer Stats
 | Address | Size | Description | Notes |
 |---------|------|-------------|-------|
-| $7E:001C | 1 | Lives remaining | |
-| $7E:001D | 1 | Current HP | |
-| $7E:001E | 1 | Maximum HP | |
-| $7E:001F | 2 | Score | BCD format |
-| $7E:0021 | 1 | Magic points | |
+| $7E:001C | 1 | Lives remaining | BCD, cap `$99`. Award = `$00:8850`; act entry loads it from persistent `$02AB` (`$02:84D7`) |
+| $7E:001D | 1 | Current HP | Set to `$1E` at stage entry (`$00:83CF`); damaged by `$00:8A21` (`$1D -= toucher.$2A`) and by terrain boxes (`$00:8C75`) |
+| $7E:001E | 1 | Maximum HP | 8 at new game (`$02:BE5F`); **level-up `$03:B3DF` INCs it, hard cap `$18` (24)**; professional mode starts at 24 (`$02:AB20`). SRAM `$70:1246` |
+| $7E:001F | 2 | Score | BCD format; `$00:873C` adds and saturates at `$9999` |
+| $7E:0021 | 1 | Magic points | Act working copy; loaded from persistent `$0295` at `$02:84E0`. Scroll pickup INCs only this (`$00:887E`), cap `$FF` |
+| $7E:00E3 | 1 | Heal queue | Pending HP refill; `$00:88D6` drains 1 HP every 4th frame while `$1D < $1E`. Set by item ids `$04`/`$05` |
+| $7E:00E4 | 1 | Sword power-up | `$80` = item id `$03` collected; `$00:9DC8` then gives the player ATK 2 instead of 1. Never ticks down — cleared on act change |
 | $7E:00E6 | 2 | Time remaining | BCD format |
+| $7E:0349 | 2 | **Professional Mode** | Nonzero = pro mode. Doubles enemy ATK/HP when exactly 1 (`$00:9679`/`$968C`), rewrites statue drops (`$00:962B`), and indexes the stage-order table `$02:9013` at act clear (`$00:8781`) |
 | $7E:08BC | 1 | Player **Crest** walking-cycle phase | TAS terminology; interacts with Boost to determine normal/pre-jump movement cadence. Player object `$08A0 + $1C`. |
 | $7E:08C4 | 1 | Player **Boost** walking-speed countdown | Can produce temporary 3 px/frame movement; player object `$08A0 + $24`. Extended `AR_FRAMELOG=1` records both fields with input and position delta. |
 
@@ -58,6 +61,23 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | $7E:009A | 2 | high-table write cursor (starts $0580) |
 | $7E:009C | 2 | high-table bit slots remaining in current byte (4..1) |
 | $7E:009E | 2 | current object's flip/attr word (obj+$28 ^ $0100) |
+
+### Action magic objects (action mode only)
+
+| Address / field | Size | Description |
+|---|---:|---|
+| `$7E:06A0-$1A9F` | 80 × `$40` | Action object slots. Magic cohort slots are `$06A0-$0820`; cast controller is `$0860`; player is `$08A0` |
+| slot `+00` | 2 | Status. `$4000/$8000` high states are inactive/free; spell actors normally use active values 0 or `$0800` |
+| slot `+02/+04` | 2+2 | World-space hot-point X/Y, updated by the spell handler and projected with camera `$22/$24` |
+| slot `+06/+08` | 2+2 | Current per-tick X/Y velocity decoded by `$00:8E2F`; flip bits mirror the authored deltas |
+| slot `+0A/+0C/+0E/+10` | 2 each | Current composition left/top/right/bottom extents after flip selection |
+| slot `+16/+18` | 2+2 | Animation-table address/bank (`$07:C000` Fire/Stardust, `$07:C800` Aura/Light) |
+| slot `+1A/+1C` | 2+2 | Animation state and entry index |
+| slot `+20/+22/+24` | 2 each | Current composition pointer, visual ID, and animation wait counter |
+| slot `+28` | 2 | Attribute/transform word; bits `$4000/$8000` select horizontal/vertical coordinate choices |
+| slot `+38` | 2 | Polymorphic spell-local counter. Controller `$0860+38` is selected spell ID; cohort spells reuse `+38` for repeat counts |
+| slot `+3A` | 2 | Spawner backlink; the cast controller points back to the player |
+| `$7E:00F4/$00F8/$00F9` | 2 each | Input-enable mask, cast-active gate, and cast-transition state used by `$9DE1-$9F10` |
 
 ### Town simulation render records and camera auxiliaries
 
@@ -102,6 +122,16 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | $7E:0314 | 2 | Scripted world-navigation in-plane rotation; remains active during the action-entry zoom-and-spin |
 | $7E:0316 | 2 | Current world-navigation zoom state |
 | $7E:0318 | 2 | Target world-navigation zoom state |
+
+## Action terrain collision (mapped 2026-08-02 — SEAMS "Content / randomizer seams" §5b)
+| Address | Size | Description |
+|---------|------|-------------|
+| $7E:0014 / $7E:0016 | 2 each | Collision probe inputs: tile X / tile Y in 16px units, consumed by the oracle `$00:91C3`. (Also reused as generic DP scratch elsewhere — see DEBUG.md §0) |
+| $7E:002E / $7E:0030 | 2 each | Level width / height in **pixels**. `$2F`, the high byte of the width, doubles as the **chunk-column count** in the map index formula |
+| $7E:0084 / $7E:0086 | 2 each | Level width / height in **16px tiles**. `$00:91C3` bounds-checks against these: `tileX >= $84` returns `$0F` (wall), `tileY >= $86` returns `$00` (empty) |
+| $7E:05A0 | 256 | **Metatile id → 4-bit quadrant-solidity attribute** (bit0 TL, bit1 TR, bit2 BL, bit3 BR). Built at level entry by `$02:BAC1` from bit 1 of each sub-tile's tilemap word. `$00` empty, `$0F` solid, `$03` top-half (standable platform), `$06`/`$09` the two slope diagonals |
+| $7E:2100 | varies | Metatile definitions, 8 bytes each = four 16-bit BG tilemap words in TL, TR, BL, BR order. LZSS-decompressed at level entry |
+| $7E:8000 | varies | **Metatile-id map**, one byte per 16px tile, stored in 16×16-tile chunks: `index = ((ty>>4)*$2F + (tx>>4))*256 + (ty&15)*16 + (tx&15)`. LZSS-decompressed at level entry. Fillmore act 1 = 256×48 tiles = 16×3 chunks = `$3000` bytes |
 
 ## Decompression State ($7E:00A0+)
 
@@ -294,23 +324,29 @@ AR_WRAM_TRACE=structrec.jsonl AR_TRACE_LO=0x16BE7 AR_TRACE_HI=0x16DE6 \
 | $7F:7C1D | Record-scan remaining counter |
 | $7F:7C9D/$7C9F/$7CA1 | Pending allocation request: cell X, cell Y, type byte |
 | $7F:90E1/$90E5 | Miracle aimed map cell X/Y (`$96EA/$96EC >> 4`); `$90E3/$90E7` = square-aligned copies |
-| $7F:90EB | Miracle kind for structure damage (0 silent clear, 1 lightning, ≥4 earthquake = whole map) |
+| $7F:90E9 | User-miracle operation active; set by `$01:97E5`, cleared after the full effect/menu cleanup. Posted enemy/script effects use `$90F5` instead |
+| $7F:90EB | Active miracle kind: 0 silent clear, 1 Lightning, 2 Rain, 3 Sunlight, 4 Earthquake, 5 Wind |
+| $7F:90F1/$90F3/$90F5 | Lightning/Rain visual actor finished; overall effect complete; posted/scripted-driver marker |
 | $7F:90F7 | Structure-visual refresh flag set by `$03:B274` |
+| $7F:9218/$921C/$923E | Wind remaining ticks (120); Earthquake remaining ticks (180); Sunlight phase (0-140) |
 | $7F:9250-$7F:954F | Per-town built-square lists, `$80` each: 64 × 2-byte **square**-coord pairs (x,y ≤ 7), `$FFFF` = empty (append/dedup `$03:8EC1`; staged pair `$9550/$9552`; cursors `$9554+`; persisted at SRAM `0x0300+town*0x80`) |
-| $7F:96E8/$96EA/$96EC | Miracle hit post from bank-01 effect actors: kind, pixel X, pixel Y (consumed by master-loop `$03:820F`) |
+| $7F:96E8/$96EA/$96EC | Miracle/effect post: kind, pixel X, pixel Y, consumed by master-loop `$03:820F`; Skull Head uses it to request shared Earthquake kind 4 |
 
 ### Monster Lair Data ($7F:9500+)
-Arrays supporting up to 16 lairs (48 bytes each array):
+Eight parallel arrays of **24 two-byte entries** (48 bytes each) — **4 lairs per town × 6 towns**,
+indexed as `town*8 + slot*2` (`$03:B7A3` uses `LDY #$0004` against a base of `town*8`; the installer
+`$03:B7C6` loops `$18` = 24 times). Seeded from ROM `$03:B825` (24 × 9 bytes) and saved/restored
+through SRAM by `$03:A850`. Corrected 2026-08-02 — the arrays are **not** 16 lairs of 3 bytes.
 | Address | Description |
 |---------|-------------|
-| $7F:9568-$7F:9597 | Lair X positions on town map |
-| $7F:9598-$7F:95C7 | Lair Y positions |
-| $7F:95C8-$7F:95F7 | Lair imagery ID |
-| $7F:95F8-$7F:9627 | Monster type |
-| $7F:9628-$7F:9657 | Respawn delay |
-| $7F:9658-$7F:9687 | Respawn countdown |
-| $7F:9688-$7F:96B7 | WRAM address of monster statistics |
-| $7F:96B8-$7F:96E7 | Remaining monster count |
+| $7F:9568-$7F:9597 | Lair X on town map — **16px cell units, 0..31**; selector square = X>>2 |
+| $7F:9598-$7F:95C7 | Lair Y (same units). Spawn position = (X*16+$18, Y*16+8), written to world record +$0A/+$0C by `$03:B99C` |
+| $7F:95C8-$7F:95F7 | Lair imagery ID; also carries runtime state bits ($8000 tested by `$03:B4EA`/`$B99C`, $2000 set by `$03:BAB6`, $1000 skips the respawn countdown) |
+| $7F:95F8-$7F:9627 | Monster type — this value becomes the spawned world record's class field +$0E |
+| $7F:9628-$7F:9657 | Respawn delay (reload value) |
+| $7F:9658-$7F:9687 | Respawn countdown (`$03:B9BB` DECs; reloads from $9628 at 0) |
+| $7F:9688-$7F:96B7 | **World-record address** the lair's monster occupies — always $0B30/$0B56/$0B7C/$0BA2 = `$0A00`-array records 8-11 |
+| $7F:96B8-$7F:96E7 | Remaining monster count (population). `$03:BB04` DECs per kill; `$03:BAC8` subtracts 10 for a miracle strike |
 | $7F:9750 | Lightning sequence trigger |
 
 ### Flags

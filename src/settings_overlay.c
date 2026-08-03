@@ -318,6 +318,12 @@ static const MenuTab kTabsSystem[] = {
 static const MenuTab kTabsManual[] = {
   TAB(Manual, "Manual"),
 };
+static const MenuTab kTabsRandomizer[] = {
+  TAB(RandoSeed, "Seed"),
+  TAB(RandoEnemies, "Enemies"),
+  TAB(RandoItems, "Items"),
+  TAB(RandoSim, "Simulation"),
+};
 
 /* The layer editor's tabs are LEVELS ($18), not setting categories. The category
  * field is unused for a custom section; the tab's position IS the level index,
@@ -372,6 +378,8 @@ static const MenuSection kSections[] = {
           kTabsControls),
   SECTION("Cheats", "Gameplay assists and raw memory pins.",
           kTabsCheats),
+  SECTION("Randomizer", "Reseed the game's enemies, statues and lairs.",
+          kTabsRandomizer),
   SECTION("Save", "Inspect and stage edits to the battery save.",
           kTabsSave),
   /* Before System: the manual is something a PLAYER reaches for, while System
@@ -722,7 +730,12 @@ static const uint32_t kIconSelectPalette[16] = {
 
 typedef uint8_t IconIndexMap[kIconSize][kIconSize];
 
-static const IconIndexMap kSectionIconMaps[kSectionCount] = {
+/* Deliberately UNSIZED: with an explicit [kSectionCount] a short initializer
+ * list is legal C and silently zero-fills the tail, which is exactly how the
+ * Manual section shipped with no icon, pushed every icon after it onto the
+ * wrong section, and left Layers drawing a blank. Sizing from the list and
+ * asserting the count turns that into a build failure. */
+static const IconIndexMap kSectionIconMaps[] = {
   { /* Display <- game icon #11 */
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
     {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
@@ -831,6 +844,30 @@ static const IconIndexMap kSectionIconMaps[kSectionCount] = {
     {14,13,14,14,11,11,14,14,14,14,11,11,11,11,11,14},
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
   },
+  { /* Randomizer <- sim composition $01:D128, the red/blue double arrow the
+     * game uses for its own swap/exchange menu glyph. Lifted from the sim
+     * object catalog (docs/research/sim-object-catalog/spawn_compositions_01.png,
+     * row 4 col 1) rather than the Sky Palace sheet the icons above came from,
+     * so its colours were quantised onto kIconSelectPalette: dark green, yellow,
+     * red and pale blue land within 2 units, the vivid blue and orange are the
+     * nearest available. */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
+    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
+    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
+    {14, 7,14,15,11,15,15,15,15,15,15, 1,15,14, 7,14},
+    {14, 7,14,11,11,15,15,15,15,15,15, 1, 1,14, 7,14},
+    {14,14,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1,14,14},
+    {14,11,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1, 1,14},
+    {14, 5,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1,10,14},
+    {14,14, 5,11,11, 5, 5, 5,10,10,10, 1, 1,10,14,14},
+    {14, 7,14, 5,11,15,15,15,15,15,15, 1,10,14, 7,14},
+    {14, 7,14,15, 5,15,15,15,15,15,15,10,15,14, 7,14},
+    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
+    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
+    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
   { /* Save <- game icon #16 */
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
     {14,11,14, 7,13,13, 7,14,14,14,14,14,11,11,11,14},
@@ -847,6 +884,27 @@ static const IconIndexMap kSectionIconMaps[kSectionCount] = {
     {14,14,12,10, 7, 7, 7, 5, 6,12,15,15,15,14,11,14},
     {14,12,10, 7, 7, 8,13, 7, 5, 6,13,14,14,14,11,14},
     {14,12,10, 7, 7, 7, 7, 7, 7, 5, 6,13,14,11,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Manual -- an open book. Drawn rather than lifted from the ROM: no game
+     * icon reads as "documentation", and this section had NO icon at all until
+     * 2026-08-03, which silently shifted every icon after it by one and left
+     * the last section (Layers) on the zero-filled tail of this array. */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
+    {14,11,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
+    {14,11,14, 6, 6, 6, 6,14,14, 6, 6, 6, 6,14,11,14},
+    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
+    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
+    {14,11,14,13, 4, 4, 4,14,14, 4, 4, 4,13,14,11,14},
+    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
+    {14,11,14,13, 4, 4, 4,14,14, 4, 4, 4,13,14,11,14},
+    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
+    {14,11,14,13, 4, 4, 4,14,14, 4, 4, 4,13,14,11,14},
+    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
+    {14,11,14,12,12,12,12,12,12,12,12,12,12,14,11,14},
+    {14,11,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
+    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
   },
   { /* Extras <- game icon #54 */
@@ -889,6 +947,9 @@ static const IconIndexMap kSectionIconMaps[kSectionCount] = {
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
   },
 };
+_Static_assert((int)(sizeof(kSectionIconMaps) / sizeof(kSectionIconMaps[0]))
+                   == kSectionCount,
+               "one nav icon per menu section");
 
 static SDL_Texture *s_icon_texture;
 

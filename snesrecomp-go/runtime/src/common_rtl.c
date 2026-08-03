@@ -302,6 +302,8 @@ void WriteReg(uint16 reg, uint8 value) {
   }
   if (reg >= 0x2100 && reg < 0x2140) {
     ppu_write(g_ppu, reg & 0xff, value);
+    if (reg == 0x2100 && g_rtl_inidisp_hook)
+      g_rtl_inidisp_hook(value);
   } else if (reg >= 0x2140 && reg < 0x2180) {
     RtlApuWrite(reg, value);
   } else if (reg >= 0x2180 && reg < 0x2184) {
@@ -488,14 +490,20 @@ void rtl_accumulate_apu_catchup(void) {
 /* Game-installable audio observation seams (all optional, NULL by default):
  *   g_rtl_apu_port_hook    every $2140-$2143 write, CPU thread, APU lock held
  *                          (observation only — the write still happens)
+ *   g_rtl_apu_port_pace_hook before each $2140-$2143 write, CPU thread, before
+ *                          the APU lock; may yield for game-specific timing
  *   g_rtl_spc_upload_hook  after each successful HLE SPC image upload, with
  *                          the 24-bit ROM source address (the song identity)
+ *   g_rtl_inidisp_hook      after each CPU $2100 write, on the game coroutine;
+ *                          may yield to preserve game-specific load timing
  *   g_rtl_music_mix_hook   inside RtlRenderAudio's locked region after the
  *                          MSU-1 mix — same contract as msu1_mix
- * Installed by ActRaiser's music_replacements.c for manifest-driven music
- * streaming; other games leave them NULL (zero behavior change). */
+ * Installed by ActRaiser's game layers for load pacing and manifest-driven
+ * music streaming; other games leave them NULL (zero behavior change). */
 void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val) = NULL;
+void (*g_rtl_apu_port_pace_hook)(uint8_t port, uint8_t val) = NULL;
 void (*g_rtl_spc_upload_hook)(uint32_t src) = NULL;
+void (*g_rtl_inidisp_hook)(uint8_t val) = NULL;
 void (*g_rtl_music_mix_hook)(int16_t *buf, int frames) = NULL;
 
 void RtlApuWrite(uint16 adr, uint8 val) {
@@ -510,6 +518,8 @@ void RtlApuWrite(uint16 adr, uint8 val) {
     }
     return;
   }
+  if (g_rtl_apu_port_pace_hook)
+    g_rtl_apu_port_pace_hook((uint8_t)(adr & 0x3), val);
   // Catch the APU up to the current cycle, then SCHEDULE the port write
   // in APU-sample time rather than mutating inPorts at wall time.
   //

@@ -3,6 +3,7 @@
 #include "diorama_layer_editor.h"
 #include "input_map.h"
 #include "settings.h"
+#include "randomizer.h"
 #include "settings_overlay.h"
 
 #include <SDL3/SDL.h>
@@ -75,6 +76,9 @@ enum {
   kSection_Audio,
   kSection_Controls,
   kSection_Cheats,
+  /* The content randomizer, beside Cheats because both change how the game
+   * plays rather than how it looks or what the host does. */
+  kSection_Randomizer,
   kSection_Save,
   /* The in-game manual: a player-facing section, so it sits ahead of System's
    * host commands. */
@@ -321,6 +325,51 @@ static void CheckLayerEditorSection(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
   CHECK(wrapped == kSection_Layers);
+
+  /* Give the randomizer a ROM image to own before touching its rows: its gated
+   * rows require a snapshot, and a synthetic buffer exercises Init/Apply's
+   * bounds handling on a degenerate image at the same time. */
+  {
+    static uint8_t fake_rom[0x100000];
+    CHECK(Randomizer_Init(fake_rom, (uint32_t)sizeof fake_rom));
+  }
+  /* The randomizer section: four tabs, and every row the player edits must be
+   * reachable by name. Its rows are gated on the master being on and on the ROM
+   * snapshot existing, so this drives the master first -- otherwise the gated
+   * rows are legitimately absent and "reachable" would prove nothing. Seed sits
+   * on tab 0 beside the master; the per-area rows are on their own tabs. */
+  NavToSection(kSection_Randomizer);
+  {
+    int tabs = 0;
+    CHECK(SettingsOverlay_GetTabState(NULL, &tabs));
+    CHECK(tabs == 4);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));   /* into the rows */
+  NavToTab(0);
+  RowToKey("rando_enable");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));  /* master on */
+  CHECK(g_settings.rando_enable);
+  NavToTab(0);
+  RowToKey("rando_seed");
+  RowToKey("rando_reroll");
+  NavToTab(1);
+  RowToKey("rando_enemy_hp");
+  RowToKey("rando_enemy_types");
+  NavToTab(2);
+  RowToKey("rando_statue_drops");
+  RowToKey("rando_statue_spots");
+  NavToTab(3);
+  RowToKey("rando_lair_spots");
+  RowToKey("rando_lair_types");
+  /* Turning the master back off must retract the gated rows, which is what
+   * stops the menu offering edits that would do nothing. */
+  NavToTab(0);
+  RowToKey("rando_enable");
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+  CHECK(!g_settings.rando_enable);
+  CHECK(!Settings_IsAvailable(Settings_Find("rando_seed")));
+  /* Back out to the nav column so the sections below start where they expect. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 
   NavToSection(kSection_Layers);
   /* Tab 0 is Fillmore, which is where the fake room is. */

@@ -10,6 +10,7 @@
 #include "diorama.h"
 #include "host_audio.h"
 #include "host_dev_tools.h"
+#include "randomizer.h"
 #include "host_display.h"
 #include "host_input.h"
 #include "manual_reader.h"
@@ -143,6 +144,9 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
     /* Returns false when there is no manual to show, which the overlay reports
      * as a failed action rather than opening onto an empty reader. */
     if (!ManualReader_Open()) return false;
+  } else if (!strcmp(desc->key, "rando_reroll")) {
+    if (!Randomizer_IsAvailable()) return false;
+    Randomizer_Reroll();
   } else if (!strcmp(desc->key, "diorama_reset")) {
     Diorama_ResetCamera();
   } else if (!strcmp(desc->key, "sim3d_reset_camera")) {

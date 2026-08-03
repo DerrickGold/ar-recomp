@@ -34,7 +34,7 @@ identity are the perishable, expensive-to-rederive parts.
 | Song upload (image identity) | `$02:9964` HLE — stage 1 (`$9A56` block image) + stage 2 (BRR streaming) | APU ports + ARAM | "load song N's sequence + instruments" | image src addr = song identity (`06:AC00` = common sample bank, `1A:94B8` = title = song 7); song table `$02:C7E5` (17 entries, 3-byte ptrs, all enumerated in `game-assets/manifest.ini`); more pointers inline in the `[$A2]` command scripts read via `$02:B4C0` | 🟢 |
 | **BRR sample bank (per-sample!)** | stage 2 of the `$9964` HLE (`RtlUploadSpcImageFromDpInternal`, common_rtl.c) | ARAM `$3000-$6E67` (common) / `$795F+` (per-song) | "install instrument waveforms" | chunk pool at ROM `$08:8000` — length-prefixed `[len16][BRR data]` chunks, selected by index; script = image terminator's target word (lo byte = count, hi byte onward = chunk indices); dest base = WRAM `$0358` | 🟢 |
 | Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
-| Final PCM out | `RtlRenderAudio` (common_rtl.c) → continuous `dsp_getSamplesResampled` + MSU-1/OGG mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | native DSP stays 32.04 kHz; actual SDL rate controls time-based resampling, so frequency/buffer changes preserve pitch; `audio_master_volume` applies atomic post-mix gain here | 🟢 |
+| Final PCM out | `RtlRenderAudio` (common_rtl.c) → continuous `dsp_getSamplesResampled` + MSU-1/OGG mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | native DSP stays 32.04 kHz; actual SDL rate controls time-based resampling, so frequency/buffer changes preserve pitch; `audio_master_volume` applies atomic post-mix gain and `audio_enabled` applies an atomic post-mix mute without stopping any cursor | 🟢 |
 | Raw APU port write | `RtlApuWrite` (`$2140-$2143`) | APU I/O | low-level handshake / param | — | 🔴 |
 | **Voice key-on observation** | `g_dsp_voice_kon_hook` (dsp.c, fires once per applied key-on) | DSP `KON` | "voice C started sample S" | `(ch, srcn, decodeOffset, volL, volR, pitch)`; NULL by default; installed by `sfx_census.c`. Called on whichever thread is cycling the APU, APU lock held. Must be invoked **after** `decodeOffset` is resolved from the directory — earlier and it reports the previous note's advancing decode cursor | 🟢 |
 
@@ -119,6 +119,13 @@ values and nonzero port-2 ids to catch them in play.
    grammar, sampled at song start) select level/state-dependent variants;
    first matching entry wins, ungated entry = fallback. `music_replacements`
    setting / `AR_MUSIC_REPLACEMENTS` toggles live; `AR_MUSICLOG=1` traces.
+   The transport contract is event parity, not sample-position parity: native
+   `$F0`/`$F2`/play commands are mirrored, and a host pause gates the whole SDL
+   device, while an output mute keeps the callback running silently so SPC,
+   OGG, and MSU cursors advance together. Toggling replacement on mid-song
+   starts the OGG at frame zero because authentic and arranged tracks have no
+   general position mapping. Unexpected loop-seek failure releases the DSP
+   music gate and falls back to authentic playback.
    Known gap: driver-side fades aren't captured yet (streams hard-stop on
    `$F0` exactly when the driver halts, so transitions stay correct).
 2. **Instrument-level replacement (per-sample HD swap).** Stage 2 of the HLE installs each
@@ -227,7 +234,7 @@ auto-persists SRAM, so a later replay starts from different state and diverges.
 | **Mode 7 world navigation (mapped/host-owned 2026-07-27)** | `$02:8213` moves focus `$0300/$0302` and stages zoom `$0318`; `$02:83CD` derives matrices from rotation `$0314`/zoom `$0316`; `$02:8384` uploads `$0304-$030A` + focus; `$01:B6CA` selects location `$0341` from `$01:B73C`; `$02:B475` builds/uploads the map; `$02:AF86` animates water | PPU Mode 7 plus host full-plane scene | "move, zoom, and spin over the developed world; enter an act" | focus, signed 8.8 matrix, current/target zoom, Palace/UI OAM, active-location ID, host-owned map serial | 🟡 Host forced-top-down rendering, the action-entry spin/zoom snapshot, OAM composition, water, lighting/weather/haze/backdrop, and full fade ownership are implemented and trace/fixture tested. Remaining acceptance is a complete manual movement/destination and action-entry sweep; other Mode-7 screens are not covered by this row. |
 | Brightness / forced blank | `$2100` INIDISP | PPU | "fade in/out, blank during build" | 4-bit master brightness + forced-blank bit | 🟡 World navigation now remains enhanced for every non-forced-blank brightness step: host layers receive one exact black overlay `(15-brightness)*17`, then already-brightness-adjusted Palace/UI captures are drawn. Forced blank still fails closed to authentic black. Other presentation modes remain to audit. |
 | Palette load | CGRAM writes | CGRAM (15-bit ×256) | "set palette N" | **palette id / table TBD** | 🔴→🟡 |
-| **Action OBJ atlas + effect overlays** | `$02:BC9E`: ROM `$07:8000-$07:9FFF` → VRAM `$2000-$2FFF`, palette `$07:D040-$D09F` → CGRAM `$C0-$EF`, then magic-selected `$06:A400+` → VRAM `$2D40` (128 words). `$00:96C3-$96F5`: object `$38` selects `$06:A000+` → descriptor slot 0 → VRAM `$2D80` (128 bytes). | VRAM/CGRAM | "load the shared action atlas and replace the reserved magic/effect tiles" | common atlas plus magic/effect selector; **not a per-enemy sheet allocator** | 🟡 loaders and destinations mapped; individual selector-to-effect names still need cataloguing |
+| **Action OBJ atlas + effect overlays** | `$02:BC9E`: ROM `$07:8000-$07:9FFF` → VRAM `$2000-$2FFF`, palette `$07:D040-$D09F` → CGRAM `$C0-$EF`, then 256 bytes from `$06:A400 + (selected_magic-1)*$80` → VRAM `$2D40`. `$00:96C3-$96F5`: only for an object with `+$30 & $0040` and an idle descriptor, `(object.+38 & $FF)` selects 128 bytes at `$06:A000+n*$80` → VRAM `$2D80`. | VRAM/CGRAM | "load the shared action atlas and replace reserved effect tiles" | common atlas plus selected-magic window; dynamic `+38` is polymorphic and **not** a universal spell ID (the spell handlers use it as repeat counts) | 🟡 selected-magic mapping and all four spell composition/animation banks are catalogued; unrelated dynamic-overlay values remain to classify |
 | Sim-mode object sprite/behavior identity | ROM tables `$01:E099` (behavior/anim data ptrs) + `$01:E7D9` (sprite-frame ptrs), one 16-bit entry per object type — see "Sim-mode object/sprite spawn & OAM-build system" below | not VRAM directly — feeds world record `+00`/`+08`, which downstream OAM code (`ADAD`/`AE6F`) reads | "this object type's behavior and frame-composition asset" | **located 2026-07-01; bases corrected 2026-07-02** | 🟡 identity/assigner/emitter chain mapped; ROM character-upload identity remains to be catalogued |
 | Sim-mode per-frame building/icon update | `$01:8000` (bank 1) — see "Sim-mode dispatch structure" below | VRAM/OAM (downstream, not yet traced) | "update this frame's city/building/icon visuals" | region (`$19`) gates which sub-block runs; several `JSR (abs,X)` tables (`$2920`, `$208E`, `$B420`) select per-building/icon variants | 🔴 (dispatch structure mapped; the actual VRAM writes inside the deep `$018170+` body not yet traced) |
 
@@ -685,7 +692,10 @@ the two object tiers (see #4):
 
 - `$033C` = list id, `$033D` = cycle sub-variant (0-3 = a rotating variant selector the oracle
   advances every ~180 frames — day-cycle/blink phases; 4 = the special B1C7 tail pass).
-- `bank_01_CFF2(A)` = store A into `$033C/D`, call `AC36`. `bank_01_AC36(X=entry)` =
+- `bank_01_CFF2(A)` takes the packed value **`A = (list << 8) | variant`**: it stores A's low
+  byte to `$033D`, `XBA`s, stores the high byte to `$033C`, then calls `AC36`. Thus `$0502`
+  means list 5, variant 2 (the live miracle-lightning sequence), not list 2, variant 5.
+  `bank_01_AC36(X=entry)` =
   `entry.+02/+06 = ROM[$01:A227[list*2] + sub*2]` (script ptr), `+04=0`, `+00=1` — assign +
   activate a stride-`$12` process (tier 1).
 - `$01:D072(A=type, Y=record)` = the stride-`$26` twin: `record.+00 = ROM[$01:E099 + type*2]`
@@ -1094,10 +1104,17 @@ End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
    `$F8`==0 (no cast in progress) → `$02AC`!=0 (equipped) → player state `$08D0`
    `BIT #$2008` CLEAR (not hurt/INVULN — the AR_NO_KNOCKBACK interaction, see dev-config) →
    `$21`>0 (MP).
-6. **Cast**: `DEC $21`; `$08D0 |= $0010`; `INC $F9`; `STZ $F4`; `JSR $862A/$8E2F/$8623`
-   (effect spawn chain). The spell-projectile objects run in the bank-0 object system —
-   **first-ever-executed 2026-07-07; `$00:B8AB` garbage-variant is the open item there
-   (DEBUG.md #19)**.
+6. **Cast acceptance**: `DEC $21`; `$08D0 |= $0010`; `INC $F9`; `STZ $F4`.
+7. **Controller and lifetime**: `$00:9E89` creates controller slot `$0860`, copies `$02AC` to
+   controller `+38`, stores the player backlink, and increments the player's cast reference.
+   `$00:9F13` dispatches IDs 1-4 to `$9F25/$9F71/$9FBB/$9FFA`. `$00:A035` waits until every
+   cohort slot `$06A0-$0820` is free; `$A054` clears the player reference and frees the
+   controller. The player remains input-locked at `$9EAB` until that reference clears.
+8. **Per-instance presentation**: the four spells are not one uniform projectile shape. Fire is
+   four mirrored sweeping objects; Stardust is four staggered, four-launch actors; Aura is four
+   moving mirrored orbs; Light is one centre flare plus two full-height beam columns. Exact
+   slots, timings, animation states, composition geometry, miracle lifecycles, and enemy attack
+   reuse are mapped in [effects-hook-investigation.md](effects-hook-investigation.md).
 
 ---
 
@@ -1107,7 +1124,7 @@ End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
 |---|---|---|---|---|---|
 | VBlank wait | `$00:8418`, `$02:A85E` (HLE → `ActRaiser_WaitForVblank`); inline 3-read spins (`$01:9284` et al) | RDNMI `$4210` | "wait one frame" | Three-tier model (`snes.c`): HLE'd routines yield; the 7 statically-whitelisted inline spin blocks (`kSpinBlocks`, from `find_yield_points.py`) yield once per read in the coroutine; in NON-yieldable contexts (NMI/IRQ — e.g. the mode-`$85` story-event wait chain `$01:9270→8C43→9284`) whitelisted spins FAST-EXIT bit7=1, unpaced (a hang there is otherwise unbreakable — bug-ledger §7.16); `[4210-wedge]` tripwire names the refusing gate if a spin ever sticks 4096 reads | 🟢 |
 | NMI handler | `$8520` (`NmiHandler`) | NMI | "per-frame vblank service" | game frame `$0088` bumped here | 🟢 |
-| Frame coroutine | `RunOneFrameOfGame` (`actraiser_rtl.c`) | — | host frame ↔ game frame mapping | coroutine yields at vblank-wait | 🟢 |
+| Frame coroutine | `RunOneFrameOfGame` (`actraiser_rtl.c`) | — | host frame ↔ game frame mapping | Normally resumes the coroutine to its vblank wait and then runs NMI. The action-load pacing seam can instead consume a host frame with display/audio advancing while NMI is disabled and `$0088` remains fixed. | 🟢 |
 
 ---
 
@@ -1115,17 +1132,22 @@ End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
 
 **The hard constraint first.** ActRaiser's entire notion of time is the **60 Hz (NTSC) logic tick**:
 every timer, event trigger, physics step, animation-script advance, and the `$0088` game-frame
-counter is keyed to one tick == one `NmiHandler` == one `RunOneFrameOfGame`. You therefore **cannot
-speed up the logic** to get smoothness — that *is* the pacing. The only correct way to a higher
-refresh rate is the classic **fixed-timestep logic + interpolated presentation** split: keep ticking
-logic at exactly 60 Hz, and render *extra, interpolated* frames between ticks at the monitor's rate.
+counter is keyed to one tick == one `NmiHandler`. A normal `RunOneFrameOfGame` call supplies that
+tick. The intentional exception is a hardware-faithful load interval with `$4200` NMI disabled:
+the host still advances display/audio frames while `RunOneFrameOfGame` consumes its calibrated
+hold without running logic or changing `$0088`. You therefore **cannot speed up the logic** to get
+smoothness — that *is* the pacing. The only correct way to a higher refresh rate is the classic
+**fixed-timestep logic + interpolated presentation** split: keep ticking logic at exactly 60 Hz,
+and render *extra, interpolated* frames between ticks at the monitor's rate.
 
-**The tick boundary (the seam you must preserve).** `RunOneFrameOfGame` = one atomic 60 Hz logic
-tick (host yields to the game coroutine, which runs until its next vblank-wait, then NMI services
-the frame). The `AR_TRACE` **`frame`** channel marks both edges (`vblank` = tick about to run,
-`nmi` = tick serviced) — use it to *verify the tick cadence is clean* before building on it (a mode
-that yields N times per tick — the 1/N-speed pacing-bug class, DEBUG.md §7.12/§7.13 — would break a
-naïve accumulator; those must be fixed first).
+**The tick boundary (the seam you must preserve).** Outside an explicit NMI-disabled load hold,
+`RunOneFrameOfGame` supplies one atomic 60 Hz logic tick: the host resumes the game coroutine,
+which runs until its next vblank-wait, then NMI services the frame. The `AR_TRACE` **`frame`**
+channel marks the edges (`vblank` = host frame boundary, `nmi` = logic tick serviced); a run of
+`vblank` markers without `nmi` is expected only for the calibrated action load. Use the pairing to
+*verify the tick cadence is clean* before building on it (a mode that yields N times per tick —
+the 1/N-speed pacing-bug class, DEBUG.md §7.12/§7.13 — would break a naïve accumulator; those must
+be fixed first).
 
 **The presentable-state seams to interpolate** (all live in `g_ppu`, read by `RtlDrawPpuFrame` →
 `g_pixels`; snapshot each at tick N-1 and N, lerp for in-between presents), in order of visible payoff:
@@ -1476,14 +1498,14 @@ promote a row to a real address once confirmed (a wrong cheat address is worse t
 | Seam | Where (RAM / routine) | Mod use | Kind | Status / how to find |
 |---|---|---|---|---|
 | Player HP (current) | `$1D` | infinite health (pin), god-mode | 🅥 | **WIRED** — `AR_INF_HP=1` (high-water auto-pin) or `=<n>`; per-frame in `ActRaiser_ApplyCheats` (actraiser_rtl.c). |
-| Player max HP / bar size | TBD | bigger/smaller health bar | 🅥/🅒 | find the HP-init constant (new-game / stage-entry sets `$1D` to max) — `AR_WATCHOBJ`/`AR_WATCH16` on `$1D` at stage start; the writer's immediate is max. |
+| Player max HP / bar size | `$1E` | bigger/smaller health bar | 🅥/🅒 | **FOUND 2026-08-02.** `$1E` = max HP, `$1D` = current; stage entry does `LDA $1E; STA $1D` (`$00:83CF`). Authorities: new game `$02:BE5F` sets `$1E = 8`; **level-up `$03:B3DF` does `LDA $1E; CMP #$18; BCS skip; INC A; STA $1E` + mirrors into Angel max HP `$0287`** — so max HP is `8 + (level-1)`, hard-capped at 24. Professional mode starts at 24 (`$02:AB20`). Persisted to SRAM `$70:1246` (`$03:A7F3`), restored at `$03:A9FC`. |
 | Invincibility frames (i-frames) | i-frame timer `$08C6` (+$26); **invuln flag = `$08D0` bit `0x2000`** (the gate) | **no-knockback / invuln** (speedrun "ignore hits") | 🅥 | **WIRED** — `AR_NO_KNOCKBACK=1` pins timer `$08C6`=0xFF AND sets flag `$08D0\|=0x2000` each frame -> invuln from frame ONE. (Hit-check gates on the FLAG; the game sets it on a hit and clears it when the timer hits 0 — so pin timer + set flag = permanent, no first-hit needed. `=26` alone only worked after one hit.) On hit: handler -> `$9C64` (hurt), knockback into `$08A6/$08A8`. **Confirmed 2026-07-12:** this pinned authentic invulnerability state also suppresses water drag; disable it for terrain/movement-physics validation and timing-sensitive recordings. |
-| Player lives | TBD (RAM or SRAM) | infinite / set N lives | 🅥 | watch the lives display value, `AR_WATCH16` on it; the death routine decrements it. |
-| Player sword damage (dealt) | routine that subtracts enemy HP | one-hit kills, weak sword | 🅒 | `AR_WATCHOBJ` on an enemy slot's HP field while you hit it → the writer is the damage routine; the amount is its operand. |
-| Player sword length / reach | TBD (hitbox/collision calc) | double reach | 🅒 | the sword-vs-enemy hit test — the attack hitbox extent (a constant offset from player X). Hardest (geometry); find via the attack-frame collision routine. |
+| Player lives | `$1C` (BCD), persistent copy `$02AB` | infinite / set N lives | 🅥 | **FOUND 2026-08-02.** `$00:8850` = award-a-life (`$1C` BCD `+1`, capped `$99`; the 1UP item's effect); `$00:8861` = the paired decrement family. Act entry loads `$1C` from `$02AB` (`$02:84D7`); professional mode forces `$1C = 4` (`$02:AB13`). |
+| Player sword damage (dealt) | player object `$08A0` field `+$2A` (`$08CA`), written by `$00:9DC8` | one-hit kills, weak sword | 🅒/🅥 | **FOUND 2026-08-02.** All melee/contact damage is one field: `$00:8AF9` does `victim.$2C -= attacker.$2A`. The player's `$2A` is (re)set every swing by `$00:9DC8`: **1 normally, 2 while the sword power-up `$E4` is nonzero**. Spawned magic/projectile objects carry their own `$2A` (e.g. `$00:9D00` sets 2). Pin `$08CA` for a one-hit-kill cheat. |
+| Player sword length / reach | attack-frame composition record (`obj $20` +0..+3 → `$0A/$0C/$0E/$10`) | double reach | 🅒 | **FOUND 2026-08-02.** Hitboxes are **per animation frame**, not constants: `$00:8E2F` loads the current frame's composition and writes left/right extents to `$0A`/`$0E` and up/down to `$0C`/`$10` (mirrored when the object faces left). `$00:8A3C`'s AABB test reads only those four fields, so widening reach = scaling `$08AA/$08AE` after `$8E2F` runs, or editing the composition record in the per-act `$7E:4000` blob. |
 | Player fly / moonjump | Y-**position** = `$08A4` (+$04) | moonjump / fly | 🅥 | **WIRED** — `AR_MOONJUMP=1`, speed from `AR_MOONJUMP_SPEED` (default 6 px/frame). Moves Y-pos up while the game's normal jump button (SNES B) is held (`ActRaiser_ApplyCheats`); no separate cheat binding. NOTE: uses Y-pos, NOT Y-vel `$08A8` — `$08A8` is "Y-velocity" only in the AIR state (polymorphic field); writing it while grounded did nothing. |
-| Boss HP / health bar | boss object slot HP field (offset TBD) | set boss HP, instant-kill | 🅥/🅒 | boss HP lives in the boss object's slot (we have `saves/act1-boss*.bin` snapshots). `AR_WATCHOBJ` on the boss slot while damaging it → the HP field + the boss-damage writer. |
-| Enemy HP (general) | object slot HP field (offset TBD) | — | 🅥 | same as boss — a per-object HP field in the `$06A0` table (offset not yet mapped). |
+| Boss HP / health bar | boss object slot `+$2C`; initial value = spawn record byte `+8` | set boss HP, instant-kill | 🅥/🅒 | **FOUND 2026-08-02.** Same field as every other object. Every stock boss record ships `HP = 24, ATK = 1` and flag `$4000` (which routes death to `$00:A54A` instead of `$00:8892`). Several boss handlers **overwrite** `$2C` at runtime for later phases (`$00:F912` sets `$8032`; `$00:FC96` sets 2) — see the content-seams section: editing only the record does not cover those. |
+| Enemy HP (general) | object slot `+$2C`; initial value = spawn record byte `+8` | global HP scale, one-hit kills | 🅥/🅒 | **FOUND 2026-08-02.** `$00:8AF9`: `victim.$2C -= attacker.$2A`; `≤ 0` → death (`$00:8892`, or `$00:A54A` when flag `$4000`), `> 0` → SFX `$02` + hit-flash `$26 = 8`. Initial HP comes from the per-region object record (`tools/act_content.py --tables`). Professional mode (`$0349`) already doubles `ATK`/`HP` at `$00:9679`/`$00:968C` when they are exactly 1 — that is the ready-made global-difficulty hook. |
 | Act score / population | TBD (likely SRAM, per-act) | force score thresholds → sim gating | 🅥/🅒 | the routine that compares act score/population to a threshold to gate sim-mode progression — `AR_WATCH16` on the displayed score; find the threshold-compare site. |
 | Action-stage timer | `$E6`/`$E7` (BCD) | freeze timer / infinite time | 🅥 | **WIRED** — `AR_FREEZE_TIMER=1` pins `$E6/$E7` (per-frame in `ActRaiser_ApplyCheats`). |
 
@@ -1500,11 +1522,493 @@ promote a row to a real address once confirmed (a wrong cheat address is worse t
 > | +$1C | `$08BC` | **Crest** walking-cycle phase; increments while beginning movement (TAS terminology) |
 > | +$24 | `$08C4` | **Boost** walking-speed countdown; cycles with Crest and can temporarily produce 3 px/frame movement |
 > | +$26 | `$08C6` | **i-frame timer** (set 0x20 on hit, counts down) |
+> | +$2A | `$08CA` | **ATK — damage this object deals** (`$00:8AF9`/`$00:8A24`). Player: 1, or 2 while `$E4` (sword power-up) is set |
+> | +$2C | `$08CC` | **HP** for non-player objects. (The *player's* HP is DP `$1D`, not this field — the player is damaged by `$00:8A21`, a separate path from the object-vs-object one) |
+> | +$2E | `$08CE` | **score awarded on death** (low byte → `$00:873C`, BCD add into `$1F`) |
 > | +$30 | `$08D0` | flags — bit `0x2000` = invuln (set during i-frames) |
 >
-> Still TBD and highest-value: the **HP field offset** (player/boss/enemy share the `$06A0`-table
-> layout) — find once → unlocks boss-HP, enemy-HP, and damage seams together. Keep promoting these
-> into `ram-map.md`.
+> **The HP field offset is now found: `+$2C`, with `+$2A` = ATK and `+$2E` = death score** — one
+> shared layout for player, enemies and bosses. See "Content / randomizer seams" below for the ROM
+> tables that seed them. Keep promoting these into `ram-map.md`.
+
+---
+
+## Content / randomizer seams (mapped 2026-08-02)
+
+> **Provenance note.** Unlike the rest of this file, this section came from a *directed* static
+> investigation (a randomizer feasibility question), not from chasing a bug. Everything below is
+> ROM-static evidence — disassembly plus table decodes — cross-checked against one live WRAM
+> snapshot (`saves/dump_wram.bin`, `$18=01 $19=01`). Nothing here has been exercised by writing to
+> the tables and playing, so treat the *shapes* as established and the *behavioural consequences of
+> editing them* as untested.
+
+`tools/act_content.py` prints every table in this section from the stock ROM
+(`--tables`, `--levels`, `--census`, `--lairs`), so a proposed edit can be diffed against the
+original.
+
+### The one fact that ties it all together
+
+Every action-mode combat interaction is three bytes of one object record. In the `$06A0` table
+(stride `$40`, 80 slots):
+
+| Field | Meaning | Seeded from |
+|---|---|---|
+| `+$2A` | **ATK** — damage this object deals to whatever it hits | spawn record byte `+7` |
+| `+$2C` | **HP** — remaining hit points | spawn record byte `+8` |
+| `+$2E` | **score** awarded when this object dies | spawn record byte `+9` |
+
+- **Object vs object** — `$00:8A3C` is the combat loop. Outer `Y` walks all 80 slots looking for
+  `$30 & $0001` (an "attacker" — the player's swung sword, a projectile, a magic effect); inner `X`
+  walks all 80 looking for anything whose AABB overlaps. On a hit, `$00:8AF9`:
+  `victim.$2C = victim.$2C - attacker.$2A`. Result `> 0` → SFX `$02` and hit-flash `$26 = 8`;
+  result `≤ 0` → `STZ $2C` and the death branch.
+- **Object vs player** — a separate path (`$00:89B4`…`$00:8A2F`): `$1D = $1D - toucher.$2A`,
+  clamped at 0. Same `$2A`, different victim field (the player's HP is DP `$1D`, not `+$2C`).
+- **Death** — `$00:8892`: award `$2E` into the BCD score (`$00:873C`), install death-animation
+  handler `$12 = $A382`, set `$1A = $FF`, `$30 |= $0038`. If `$30 & $1000`, repeat on the *next*
+  slot (that is how multi-slot bosses die as a unit). Objects with flag `$4000` instead route to
+  the boss-death handler `$00:A54A`.
+- **AABB geometry** is `$0A/$0C/$0E/$10` (left/up/right/down extents), and those come from the
+  **current animation frame's composition record**, refreshed every time `$00:8E2F` advances the
+  animation. Hitboxes are therefore per-frame data, not per-object constants.
+
+### 1. Enemy and boss stats — the per-region object-type tables
+
+Region (`$18`) → the 8-pointer list at `$00:95DD` → that region's object-type table → a **12-byte
+spawn record** at `B`, with the object's primary handler at `B+$0C`. The spawn dispatcher
+`$00:9557`/`$00:95F0` copies:
+
+| Record | → object field | Meaning |
+|---|---|---|
+| `+0` word | `$16` | animation/composition table base (see §5) |
+| `+2` byte | `$18` lo | data bank of that table — `$7E`/`$7F` for act enemies, `$06` for player/common |
+| `+3` byte | `$28` hi | spawn sub-parameter |
+| `+4` word | `$30` | flags — `$0001` attacker, `$0200` pickup item, `$4000` boss, `$8000`/`$0030`/… behavioural |
+| `+6` byte | `$1A` | initial animation index |
+| **`+7` byte** | **`$2A`** | **ATK** |
+| **`+8` byte** | **`$2C`** | **HP** |
+| **`+9` byte** | **`$2E`** | **score on death** |
+| `+A` word | `$14` | secondary/polymorphic field. **`$A3E1` here = "this enemy respawns"** |
+
+Table bases, indexed by `$18`: `$96AF $A8F6 $B449 $C11E $CD9B $D928 $E722 $F39A`. A table value is
+only decoded as a record when the spawning object's `$38 != $FF`; with `$38 == $FF` (`$00:9590`)
+the value is installed as `$12` directly and **no stats are copied at all**.
+
+Stock shape (full dump: `tools/act_content.py --tables`):
+
+- Ordinary enemies are `ATK 1, HP 1-5`, score `$10`-`$40`. A few outliers: Fillmore `$13` = `ATK 2
+  HP 6`, Kasandora `$11` = `ATK 1 HP 5`, Northwall `$19` = `ATK 2 HP 5`, Aitos `$13` = `ATK 1 HP 10`.
+- **Every stock boss is `ATK 1, HP 24`** with flag `$4000` and animation base `$5000` (the boss
+  blob, §5). Each kingdom has exactly two: score `$50` = the act-1 boss, score `$80` = the act-2
+  boss. Death Heim's table holds the six rush bosses (all score `$80`, all with `$14 = $FE89`, the
+  teleport-out sequencer) plus the final boss `$F80F` (score `$50`).
+- `$14 = $A3E1` marks the respawning enemies. `$00:A382`'s tail is the mechanism: when the death
+  animation ends and `$14 != 0`, it re-runs `$00:95ED` against the saved record base `$32`, sets
+  `$26 = $0258` (600 frames), and installs `$12 = $14`. `$A3E1` then counts `$26` down **only while
+  the object is offscreen** (`$30 & $0400`) and restarts the handler at `$32 + $0C`. Clearing `$14`
+  makes an enemy type non-respawning; changing `$0258` retunes the delay globally.
+
+**Caveat that matters for a randomizer:** the record byte is only the *initial* HP. These handlers
+overwrite `$2C` at runtime and will ignore a table edit:
+
+| Site | Writes HP | Context |
+|---|---|---|
+| `$00:F912` | `$8032` | Death Heim (bit 15 set — effectively unkillable by damage) |
+| `$00:FC96` | `2` | Death Heim |
+| `$00:C2C5` `$00:C932` `$00:D35E` `$00:D43B` `$00:DA4D` `$00:E026` `$00:EA7B` `$00:F045` `$00:F15D` `$00:FCE2` | `1` | per-handler sub-object / phase spawns |
+| `$00:AD9E` | reads `$2C` → child's `$38` | Fillmore boss passes its own HP to a spawned part |
+
+Runtime ATK overrides are the same story: `$00:9D03` = 2, `$00:EEC8` = 7, `$00:F80B` = 2,
+`$00:FD31` = 3, `$00:EF1C` = `DEC $2A`.
+
+**There is already a global difficulty modifier in the ROM: `$0349` = Professional Mode.**
+`$02:AB05` starts it (`$0349 = 1`, lives 4, max HP 24, magic 0, score 0, stage `$1A/$1B = $01/$01`);
+`$00:8781` advances it at act clear by stepping the 14-entry stage-order table at `$02:9013`
+(the twelve acts in order, then `$18=$07` Death Heim, then `$18=$08` the ending). Its two content
+effects are exactly the hooks a difficulty randomizer wants:
+
+- `$00:9679` / `$00:968C`: if `$2A == 1` → 2, if `$2C == 1` → 2 (skipped when `$30 & $0201`, i.e.
+  for attackers and pickups). Note it only promotes the value **1**, so it is a "weak enemies get
+  twice as tough" rule, not a multiplier.
+- `$00:962B`-`$00:9645`: rewrites statue contents — item `$00` (magic) → `$02` (screen clear),
+  item `$03` (sword power-up) → `$01` (1UP).
+
+### 2. Statues (item containers) — object type `$80`
+
+The "gargoyle statue" is **object type `$80`**, and it is a single global type, not a per-region
+one: `$00:9557` tests bit 7 of the requested type first (`BIT #$0080`) and forces region table
+`$96AF` when set. So types `$80`-`$83` are the shared/common objects (`$80` statue, `$83` player)
+and every region reaches the same records.
+
+Record `$00:96B7`: animation base `$06:A800` anim `$08`, flags **`$0210`**, **ATK 0, HP 1**, score 0,
+no respawn, handler `$00:96C3`. Rendering the composition confirms the object visually: a 16×40
+two-column figure on a pedestal with arms raised holding a 2×2 orb (the orb is the palette-2 part
+that shatters).
+
+Life cycle:
+
+1. **Intact** — `$30 & $0010` is set, which the player-contact scan (`$00:89C9`, `BIT #$0499`)
+   rejects, so you cannot walk into a statue and collect it.
+2. **Broken** — one sword hit takes `$2C` 1 → 0. Because `$30 & $0200` (pickup) is set, `$00:8B14`
+   does **not** kill the object; it sets `$30 |= $0040` instead.
+3. **Reveal** — `$00:96C3` sees `$0040`, allocates a second slot via `$00:8538` (which
+   `$00:8581`-copies the whole 64-byte record, carrying `$38` along), DMAs the item graphic from
+   ROM **`$06:A000 + itemId*$80`** (one 16×16 sprite each) to the reserved OBJ VRAM window `$2D80`,
+   then hands the original slot `$30 = $0030` (shatter puff, anim `$09`) and the new slot
+   `$30 = $0220` (collectible, anim `$0A`). Both get handler `$00:972A`, which animates once and
+   frees the slot — that is the "grab it before it fades" timer.
+4. **Collect** — the player-contact path `$00:8A00` sees `$30 & $0200`, calls `$00:879D` with the
+   object's `$38`, and frees the slot.
+
+### 3. Statue drops — the item-effect table
+
+**`$00:879D` is the item dispatcher**, item id in `A`, sourced from the object's `$38`:
+
+| id | Sprite (`$06:A000 + id*$80`) | Effect | Code |
+|---|---|---|---|
+| `$00` | scroll | **magic +1** — `INC $21`, capped `$FF` | `$00:87B9` → `$00:8875` |
+| `$01` | heart / 1UP | **extra life** — `$1C` BCD `+1`, capped `$99` | `$00:87C3` → `$00:8850` |
+| `$02` | winged figure | **screen clear** — walks the object table from the player slot up and `$00:8892`s every eligible object (objects with `$30 & $0200`, i.e. other statues, get flagged `$0040` = broken instead) | `$00:87CD` → `$00:87D1` |
+| `$03` | sword | **sword power-up** — `$E4 = $80`; `$00:9DC8` then sets the player's ATK to 2 instead of 1. Never decremented: it lasts until the act ends (`$02:84E5`/`$02:BD43`/`$00:8784` clear it) | `$00:880B` |
+| `$04` | urn | **heal ¼ max** — `$E3 = $1E >> 2` | `$00:8815` |
+| `$05` | fruit | **full heal** — `$E3 = $1E - $1D` | `$00:8821` |
+| `$06` | (text) | **+100** score (BCD) | `$00:882E` |
+| `$07`+ | (text) | **+50** score (BCD) — this is the `else` arm, so any id ≥ 7 lands here | `$00:883E` |
+
+`$E3` is a *heal queue*, not an instant grant: `$00:88D6` ticks it every 4th frame
+(`$88 & 3 == 0`), `DEC $E3` + `INC $1D` while `$1D < $1E`. That is the visible refill animation.
+
+Placement of the 69 statues and which id each holds lives entirely in the level stream (§4) as the
+`$38` byte of a `type = $80` entry, so **adding, removing, moving and re-rolling statues is all one
+edit to one 4-byte record** — no separate statue table exists. Stock distribution
+(`tools/act_content.py --census`): full heal ×25, 1UP ×14, magic ×9, +100 ×9, +50 ×5, heal¼ ×4,
+screen clear ×2, sword power-up ×1 (Aitos map 2 only).
+
+### 4. Level layouts — the bank-`$0A` placement streams
+
+`$00:92CB` is the level-entry loader: DB = `$0A`, zero the whole object table, reserve slots 0-7,
+then look up the stage in the index at **`$0A:B100`** — `(key word, offset word)` pairs terminated
+by `$FFFF`, where the key is compared against the 16-bit `$18` (so key = `$19 << 8 | $18`).
+
+**50 entries are listed, and they are MAPS, not acts.** An act spans several consecutive `$19`
+maps — Fillmore has 4, Bloodpool 8, Kasandora 6, Aitos 7, Marahna 8, Northwall 8, Death Heim 8,
+plus one special (`$18=$00 $19=$09`, the ending montage) = 49 action maps + 1. The game has **12
+acts** (6 kingdoms × 2); act 2 begins at `$19` = 2/2/3/4/4/5 for regions `$01-$06` (ram-map
+`$7E:0019`), which is exactly what the professional-mode order table `$02:9013` enumerates — it
+lists each act by its *entry* map. So Bloodpool act 2 is a seven-map run, not one level.
+
+Each map blob is three parts, in order:
+
+1. **Player start** (3 bytes): tile X, tile Y, param → `$34`, `$36`, `$38`, then spawned as type
+   `$83`/`$82`/`$81` depending on `$FC`/`$0341`/`$032C` (`$00:932E`). Tile units are 16 px
+   (`value << 4`).
+2. **Terrain damage boxes** (`$00:93A9`): 5-byte records `x0, x1, y0, y1, damage`, `$FF`-terminated,
+   expanded into 10-byte RAM records at `$1AE4` (`x`, `width`, `y`, `height`, `byte4`) with the
+   count at `$1AE2`. `$00:8C44` tests the player against them each frame: when `byte4 & $0080` it
+   sets the player's `$30 |= $8000` (a state flag, not a subtraction — the pit/instant-loss class,
+   not chased further), otherwise `$1D -= byte4`. All stock boxes use `byte4 = $01`. These are the
+   lava/spike/pit zones.
+3. **Object placement list** (`$00:941C`), 4-byte entries, one per object slot. Slot allocation is
+   fixed by the loader: slots 0-7 are marked free up front, **slot 8 is the player**, slots 9-16 are
+   reserved free (`$00:9308`), and the placement list therefore fills **from slot 17 upward** —
+   63 entries maximum before `$00:853D`'s `CPY #$1AA0` bound:
+
+   | Byte | Meaning |
+   |---|---|
+   | 0 | tile X (`<< 4` → `$34`) — values `$FC`-`$FF` are opcodes, see below |
+   | 1 | tile Y (`<< 4` → `$36`) |
+   | 2 | spawn param → `$38`. **For `type = $80` this is the item id**; for ordinary enemies it is a behaviour variant |
+   | 3 | object type → `$00:9557` (bit 7 set = common table `$96AF`) |
+
+   Stream opcodes:
+
+   | Byte 0 | Size | Meaning |
+   |---|---|---|
+   | `$FF` | 1 | end of list — the current slot gets status `$8000` |
+   | `$FE` | 5 | **checkpoint / wave gate.** Installs handler `$00:A813` with `$34/$36` = the trip point and `$02/$04` = the respawn point, and stashes the *stream cursor* in `$38`. When the player passes the trip point, `$00:A813` despawns everything (`$00:874E`), moves the checkpoint into `$032E/$0330`, and `$00:94F2` spawns the rest of the list into free slots. This is how a level is cut into waves/rooms |
+   | `$FD` | 2 | reserve N slots (status `$4000`) without spawning |
+   | `$FC` | 3 | goto absolute bank-`$0A` address (word) |
+
+   Only 8 stages use a `$FE` gate; the rest spawn their whole population at entry.
+
+**So all five placement questions are the same edit.** Adding a statue = inserting a
+`tileX, tileY, itemId, $80` record. Moving one = changing bytes 0-1. Re-rolling its drop = byte 2.
+Swapping an enemy = byte 3. Two mechanical constraints:
+
+- **The list is slot-allocating.** Every non-opcode entry consumes one of the 80 `$06A0` slots
+  starting at 17. Inserting entries shifts every later object's slot. Handlers that hard-code slot
+  numbers (Fillmore's bridge segments are slots 36-49, the Death Heim victory driver is slot 50 —
+  see "Object & spawn-handler model") will break, and the whole list plus everything spawned at
+  runtime has to fit in the 63 remaining slots.
+- **Records are variable length in the stream but fixed-length in RAM**, so a rewrite has to keep
+  `$FC` goto targets consistent. Prefer replacing entries in place over inserting.
+
+### 5. Can enemies move between regions? (the loading constraint)
+
+Three different asset layers have to line up, and only two of them are global:
+
+| Layer | Scope | Where |
+|---|---|---|
+| Behaviour/handler | **per region** — the type index means something different in each of the 8 tables | `$00:95DD` tables; handlers all live in bank `$00`, so the *code* is reachable from anywhere |
+| OBJ tile atlas | **global** — `$02:BC9E` copies the same ROM `$07:8000-$9FFF` (8 KB) into VRAM `$2000`-`$2FFF` and the same palettes `$07:D040-$D09F` into CGRAM `$C0-$EF`, at every act entry, unconditionally | `$02:BC9E`, called from `$00:8366` |
+| Animation + composition data | **per act** — LZSS-compressed, loaded by one command of the per-map asset script (below). `$02:B69C` reads a flag + a 3-byte pointer, takes the decompressed size from the blob's own first word, and decompresses to `$7E:4000` (flag 0) or `$7E:5000` (flag nonzero) | `$02:B69C` → `$02:C5C9` |
+
+Object records name their animation table by `(base $16, bank $18)`. Act enemies use
+`($4000, $7E)`; bosses use `($5000, $7E)`; the player and the statue use `($8000/$A800, $06)` —
+ROM-resident, which is why they work in every act. Verified against `saves/dump_wram.bin`
+(Fillmore act 1): `$7E:4000` holds a live animation table (`92 03` = frame-pointer-table offset,
+then per-animation script offsets), and its bytes appear **nowhere** in the ROM uncompressed.
+
+Consequence: **transplanting an enemy across regions is not free.** Pointing Fillmore type `$1B`
+at Bloodpool's record makes the handler run, but its animation indices resolve against whatever
+`$7E:4000` blob the *current* act loaded, so it will draw the wrong frames (or garbage). The
+practical options are, in increasing order of work: (a) shuffle types *within* a region — always
+safe, since the same blob is loaded; (b) shuffle whole stages; (c) build a per-act allow-list of
+importable enemies by checking that the source and destination blobs agree on the frame ids the
+handler uses.
+
+Formats for (c), both established:
+
+- **Animation table** (`$00:8E2F`): word at `+0` = offset of the frame-pointer table; word at
+  `(anim + 1) * 2` = offset of that animation's script. Script = 4-byte frames
+  `[frameId, duration, dX, dY]`, `frameId = $FF` ends/loops.
+- **Composition record** (`$00:8D68`): `+0` word = X extents (normal/flipped) → `$0A`/`$0E`;
+  `+2` word = Y extents → `$0C`/`$10`; `+4` byte = part count; then N × 7-byte parts
+  `[flags(bit0 = 16×16), Xnormal, Xflipped, Ynormal, Yflipped, tile+attr word]`. Tile ids ≥ `$100`
+  resolve into the global `$07:8000` atlas (`ROM $07:8000 + (tile - $100) * 32`) — verified by
+  rendering the statue.
+
+#### The per-map asset script (mapped 2026-08-02) — this is what decides the allow-list
+
+`$02:B1F7` is the **first call in the action level-entry sequence** (`$00:8325`). It walks a script
+table at **`$05:8000`** (cursor in the long pointer `$A2`):
+
+- `$02:B250` seeks: entries are `[$18 byte, $19 byte, command bytes…, $00]`, and non-matching
+  entries are skipped by the operand-size chain at `$02:B264`. The table opens with a 3-byte
+  `"SY\0"` header entry that matches nothing.
+- Each command byte dispatches on its **highest set bit**, MSB first:
+
+  | bit | handler | operand bytes |
+  |---|---|---|
+  | 7 | `$02:B28E` — VRAM char/tile upload | 6 |
+  | 6 | `$02:B330` — CGRAM/palette load (writes `$2121` then streams `$2122`) | 6 |
+  | 5 | `$02:B363` — **metatile definition table** (selector at operand 3: `$01` → `$7E:2100` BG1, `$02` → `$7E:2900` BG2). 2048 bytes, stored **byte-swapped** | 7 |
+  | 4 | `$02:B3EB` — **generic WRAM data load** (selector at operand 0: `$01` → the BG1 metatile-id map at `$7E:8000`, i.e. the collision layer; `$02` → the BG2 map at `$7E:C000`). Blob header is `[widthChunks][heightChunks][size16]`, and the width/height bytes are what set the level dimensions `$2E`/`$30` | 4 |
+  | 3 | `$02:B4E8` | 1 |
+  | 2 | `$02:B631` | 3 |
+  | 1 | `$02:B63B` — script-driven song change (already documented in the Audio section) | 5 |
+  | 0 | `$02:B69C` — **OBJ animation/composition blob** | 6 |
+
+- **Script pointers are 24-bit LINEAR ROM file offsets**, not SNES addresses. `$02:B4C0` converts
+  in place: `bank = L >> 15`, `addr = $8000 | (L & $7FFF)`. Cross-check: the dialog-font command in
+  every map's script carries `$0BECFB`, which converts to `$17:ECFB` — exactly the font address
+  already documented in the Graphics section from an independent investigation.
+- A bit-0 command's operands are `[destFlag, ignored, ignored, srcLo, srcHi, srcBank]`;
+  `destFlag == 0` → `$7E:4000` (ordinary objects), nonzero → `$7E:5000` (boss). The blob's own
+  first word is the decompressed size, stream starts at +2.
+
+**The result (`tools/act_content.py --assets`): only 13 of the 49 action maps load an object blob.
+Every other map inherits whatever is already in `$7E:4000`.** The 13 load points are Fillmore 1/2,
+Bloodpool 1/2, Kasandora 1/3, Aitos 1/4, Marahna 1/4, Northwall 1/5, Death Heim 1 — i.e. **exactly
+the twelve act-entry maps plus the Death Heim hub**, which independently reproduces the act
+boundaries (`$19` = 2/2/3/4/4/5) derived from `$7E:0019` and the professional-mode order table.
+
+So the enemy-animation allow-list is **per act**, and it is a partition with no sharing:
+
+- **Within one act, enemies can be shuffled freely across all its maps** — Bloodpool act 2's seven
+  maps share one blob, so anything legal in map 2 is legal in map 8.
+- **Across acts**, a type's frame ids resolve against a different blob. Two routes: match frame ids
+  by decompressing both blobs, or — much cheaper — **swap the 3-byte blob pointer in the script**
+  so the destination act loads the source act's animation set wholesale.
+- **Boss blobs are all distinct** (19 of them, one per boss-bearing map). That makes boss shuffling
+  a two-part edit that is now fully specified: swap the object-table record *and* the boss blob
+  pointer at its `$05:xxxx` command.
+
+> **Open:** tile ids `< $100` were not chased. If enemy art below `$100` is per-act OBJ char, that
+> is a fourth layer and tightens (c) further. `$02:BC9E` alone does not cover it.
+
+> **Anomaly, unresolved:** the `$18=$00 $19=$09` stage entry spawns types `$05`/`$06`, but region
+> table `$96AF` bounds at four entries. `$00:8340` only calls the level loader when `$18 != 0`, so
+> this stage is probably reached through a different path; do not model region `$00` from this row
+> without checking.
+
+### 5b. Action terrain collision (mapped 2026-08-02)
+
+This is the piece a placement randomizer cannot work without: given a tile, is it ground?
+
+**`$00:91C3` is the collision oracle.** Inputs are 16px tile coordinates in DP `$14` (X) and `$16`
+(Y) — **the same units as the placement stream** — and it returns a terrain attribute in `A`. It has
+14 call sites, all inside the `$00:8F30-$91C2` terrain module. Two out-of-bounds behaviours matter:
+`tileX >= $84` returns `$0F` (past the right edge reads as *wall*), `tileY >= $86` returns `$00`
+(below the map reads as *empty*, i.e. you fall out).
+
+Two WRAM structures feed it, both built at level entry:
+
+| Where | What |
+|---|---|
+| `$7E:8000` | **metatile-id map**, one byte per 16px tile |
+| `$7E:05A0` | **metatile id → attribute**, 256 bytes, built by `$02:BAC1` |
+
+**Map indexing is chunked, not linear.** `$00:91C3` composes the index as
+
+```
+index = ( (tileY>>4) * $2F  +  (tileX>>4) ) * 256   +   (tileY & 15) * 16  +  (tileX & 15)
+```
+
+i.e. the map is cut into **16×16-tile chunks (256×256 px)**, chunks stored row-major with `$2F`
+chunks per row, and each chunk stored row-major internally. `$2F` is the high byte of the level
+pixel width `$2E`, so *chunk columns = width >> 8*. The `(tileY>>4)` term arrives by a subtlety
+worth flagging for a decompilation: `$91D0`'s `ASL A ×4` leaves `tileY>>4` in the accumulator's
+**hidden high byte**, and `$91D7`'s `SEP #$20; LDA $2F; JSR $846E` then multiplies `$2F` by it —
+`$00:846E` is the 8×8→16 hardware multiply (`$4202/$4203` → `$4216/$4217`), and the `XBA` inside it
+is what picks up that high byte. Verified against `saves/dump_wram.bin`: Fillmore act 1 is
+4096×768 px = 256×48 tiles = 16×3 chunks, with `$2F = 16`.
+
+**The attribute is a 4-bit quadrant-solidity mask** — one bit per 8×8 quadrant of the 16×16
+metatile, `bit0 TL, bit1 TR, bit2 BL, bit3 BR`. `$02:BAC1` derives it at level entry by reading
+**bit 1 of the high byte of each of the metatile's four sub-tile tilemap words** (the metatile
+definitions live at `$7E:2100`, 8 bytes each) and packing them. So collision is carried in a spare
+tile-number bit of the art itself — there is no separate collision layer.
+
+How the terrain module reads it:
+
+| Attribute | Meaning | Tested at |
+|---|---|---|
+| `$00` | empty | `$9038`, `$915A` |
+| `$0F` | fully solid — walls, ceiling | `$8F4D` (wall probe), `$8FD0` (head bump), `$9150` |
+| `& $0003 == $0003` | **top half solid** — the "stand on this" surface predicate | `$905B`, `$9076`, `$91AC` |
+| `& $000C` | bottom half solid — underside / step | `$91A2` |
+| `$06` | **slope `/`** — `$00:90A9` derives the Y snap from `objX & $0E` | `$901C`, `$902E` |
+| `$09` | **slope `\`** — `$00:9084` uses `~objX & $0E`, the mirror | `$9024`, `$9033` |
+| anything else nonzero | treated as solid ground | `$903D` |
+
+The two slope values are exactly the two *diagonal* bit patterns (`$06` = TR+BL, `$09` = TL+BR), so
+the mask encoding and the slope encoding are the same scheme, not two systems.
+
+Confirmed empirically on the Fillmore act-1 dump: all 18 metatiles with attribute `$03` have
+quadrant bits `[1,1,0,0]` (top half) and every one of the 59 tiles using them has empty space both
+above and below — they are the level's thin floating platforms. Rendering the whole map produces a
+coherent side-scrolling level (continuous ground line, hills, platforms), which is the check that
+the index formula is right: a wrong formula produces noise.
+
+**Placement Y is a ground line, not a body position.** `$00:96A4`, at the tail of the spawn-record
+apply, does `objY = objY - obj.$10` after `$00:969B` has loaded frame 0 (which is what sets the
+down-extent `$10`). So a placement's `tileY*16` is where the object's **feet** land, and the sprite
+is lifted by its own height. A randomizer that writes placements without accounting for this will
+sink every object into the floor by 8-24 px.
+
+That gives a validation predicate, implemented as `tools/act_collision.py --check`: a well-formed
+ground placement has `tileY` **standable** and the tiles above it clear. Run against stock Fillmore
+act 1, **all three statues, the player start and every ground enemy pass**, with 16 objects flagged
+"airborne" — types `$00/$01/$03/$06/$07/$08/$09`, i.e. the flying enemies. Stock data validating
+clean under the predicate is the evidence that the predicate matches the game's own discipline.
+
+**Offline as of 2026-08-02.** The whole chain is now resolved and the collision map for every
+action map can be built from the ROM alone (`tools/act_collision.py --map MODE,SUB`):
+
+1. the per-map asset script (§5) supplies two pointers — a **bit-4 command with selector `$01`**
+   (the metatile-id map) and a **bit-5 command with selector `$01`** (the metatile definitions).
+   Selector `$02` in each case is the BG2 layer's equivalent, not the collision layer;
+2. the map blob's header is `[widthChunks][heightChunks][size16]` followed by the bit-packed
+   stream. **`widthChunks` IS `$2F`** — the chunk-column count in the index formula comes straight
+   out of the blob, which is why the level's pixel width is always a multiple of 256;
+3. the metatile blob is 2048 bytes (256 metatiles × 8) stored **byte-swapped** relative to
+   `$7E:2100`;
+4. rebuild the `$05A0` attribute table exactly as `$02:BAC1` does.
+
+This needed a faithful decompressor, which is now `tools/quintet_lzss.py` — a direct port of
+`$02:C5C9` / `$C639` / `$C66C`. Note for anyone tempted to reach for a stock Quintet LZSS routine:
+this stream is **bit-packed rather than byte-aligned**, the ring is pre-filled with `$20` (not zero)
+and its write cursor starts at `$EF`. A byte-aligned decoder consumes the stream and emits
+plausible-looking output while being wrong, so validate any decoder against a known blob first —
+that is what `--verify` exists for. (A guessed implementation lived at `tools/lzss_decompress.py`
+until 2026-08-03; it was deleted rather than fixed, because wrong-but-plausible output is a trap.)
+
+Evidence the port is exact:
+
+- the two animation blobs named by Fillmore act 1's script (`$0CD695` objects, `$03EFC7` boss)
+  decompress **byte-identical** to `$7E:4000` / `$7E:5000` in `saves/dump_wram.bin`
+  (`tools/quintet_lzss.py --verify`);
+- the map blob `$0AF131` decompresses byte-identical to `$7E:8000`, and the ROM-built attribute
+  table plus all **12288** tile attributes match the WRAM-built ones exactly;
+- the dialog font `$0BECFB` decompresses to exactly `$1000` bytes, the size documented
+  independently in the Graphics section;
+- `--selfcheck` cross-checks the uniform bit reader against a literal transcription of both
+  `$02:C66C` spellings (the nibble read straddling a byte boundary is the easiest part to misread).
+
+All **49 action maps** now build offline. The remaining softness is in `--check`'s heuristics, not
+the map: the assumed 2-tile body height should become the animation frame's real down-extent `$10`,
+which is itself now obtainable since the per-act blobs decompress.
+
+### 6. Sim-mode monster lairs — positions, types and populations
+
+The seed table is **ROM `$03:B825`** (file `0x1B825`), **24 records × 9 bytes**, installed by
+`$03:B7C6` into eight parallel 24-entry word arrays in WRAM. (`ram-map.md`'s "up to 16 lairs" is
+wrong — the loop counter at `$03:B7C9` is `$18` = 24, and `$03:B7A3`'s lookup uses `LDY #$0004`
+against a base of `town * 8`, i.e. **4 lairs per town × 6 towns**.)
+
+| Byte | WRAM array | Meaning |
+|---|---|---|
+| `+0` | `$7F:9568 + i*2` | **lair X** — 16 px town-map cell, 0..31 |
+| `+1` | `$7F:9598 + i*2` | **lair Y** — same units |
+| `+2` | `$7F:95C8 + i*2` | lair image id (also carries state bits at runtime: `$8000`, `$2000`, `$1000`) |
+| `+3` | `$7F:95F8 + i*2` | **monster type** — this is the world-record class written to record `+$0E` |
+| `+4` | `$7F:96B8 + i*2` | **remaining monster count** (the lair's population) |
+| `+5` word | `$7F:9628` and `$7F:9658` | respawn delay, copied into the countdown at install |
+| `+7` word | `$7F:9688 + i*2` | **world-record address** the lair's monster occupies |
+
+Position semantics, from `$03:B99C` (the spawner) and `$03:B7A3` (the "is there a lair on this
+square?" test):
+
+- The spawned monster's world position is `(X * 16 + $18, Y * 16 + 8)` written to record `+$0A`/`+$0C`.
+- A lair's **selector square** is `cell >> 2`, matching the 8×8 square grid the build UI and the
+  `$7F:9250` built-square lists use. All 24 stock lairs sit on multiples of 4, i.e. exactly on
+  square centres.
+- Spawning is gated on the world record being free (`+$10 & $8000`) and on the countdown
+  `$7F:9658` reaching 0, at which point it reloads from `$7F:9628`.
+
+The four `+7` values are `$0B30 / $0B56 / $0B7C / $0BA2` — world-object records **8, 9, 10 and 11**
+of the `$0A00` array (stride `$26`). That is also exactly the `$130`-byte block `$03:813F` stages
+into `$0B30,Y`, tying this table to the sim-mode spawn section above. Lair slot *k* of the current
+town always drives record `8+k`, so a randomizer can move a lair freely but **cannot add a fifth
+lair to a town** without extending both the 4-per-town lookup stride (`town * 8`, `LDY #$0004`) and
+the record allocation.
+
+Stock table (`tools/act_content.py --lairs`); types are `$12` Blue Dragon, `$13` Napper Bat,
+`$14` Red Demon, `$15` Skull Head:
+
+| Town | lairs `(X, Y, image, type, count, respawn)` |
+|---|---|
+| Fillmore | `(00,10,03,Dragon,200,1) (18,08,05,Bat,100,1) (10,1C,05,Bat,100,1) (04,04,05,Bat,100,1)` |
+| Bloodpool | `(04,18,04,Demon,100,1) (00,04,05,Bat,50,1) (10,1C,03,Dragon,90,1) (1C,10,03,Dragon,90,1)` |
+| Kasandora | `(18,04,03,Dragon,110,1) (10,04,04,Demon,125,1) (18,18,04,Demon,125,1) (10,10,05,Bat,90,1)` |
+| Aitos | `(04,04,03,Dragon,80,1) (08,10,06,Skull,80,$8D) (18,08,03,Dragon,80,1) (04,18,03,Dragon,80,1)` |
+| Marahna | `(04,04,04,Demon,50,1) (00,18,05,Bat,60,1) (18,18,03,Dragon,50,1) (08,0C,03,Dragon,50,1)` |
+| Northwall | `(18,10,0A,Skull,30,$64) (10,0C,09,Skull,30,$64) (10,18,07,Dragon,60,1) (04,08,08,Demon,60,1)` |
+
+Population is also written at runtime: `$03:B4F3` (`INC`) and `$03:B52B` grow it, `$03:BB04`
+(`DEC`) is the per-kill decrement (matched by comparing the lair's `$7F:9688` record address
+against the dying actor), and `$03:BAC0`-`$BAD7` is the miracle/earthquake path — subtract 10,
+clamp at 0, then award 10 growth points via `$03:B54E`.
+
+> **Untested caveat for lair randomization:** nothing in `$03:B7C6` validates a lair position
+> against terrain. The build/road map (`$7F:6800`, seeded from ROM `$03:DCFA`) and the water/obstacle
+> layout are independent data, so a randomly placed lair could land in water or inside the town
+> centre. Any lair shuffler should filter candidate squares against the road/obstruction bits
+> documented in `ram-map.md` "Road Construction Encoding".
+
+### 7. Persistent player economy (the values a randomizer would also want to touch)
+
+| Value | Working copy | Persistent copy | Notes |
+|---|---|---|---|
+| HP | `$1D` | — | reset to `$1E` at every stage entry (`$00:83CF`) |
+| Max HP | `$1E` | SRAM `$70:1246` | 8 at new game, `+1` per level, cap 24 (`$03:B3DF`) |
+| Lives | `$1C` (BCD) | `$02AB` | loaded at act entry `$02:84D7` |
+| Magic charges | `$21` | `$0295` | loaded at act entry `$02:84E0`; act pickups only touch `$21` |
+| Score | `$1F` (BCD) | per-act records at `$02B3` | `$00:873C` adds, saturates at `$9999` |
+| Sword power-up | `$E4` | — | `$80` = doubled sword ATK, cleared on act change |
+| Heal queue | `$E3` | — | drained 1 HP per 4 frames by `$00:88D6` |
+| Professional mode | `$0349` | — | see §1 |
 
 ---
 
@@ -1525,7 +2029,38 @@ establishes or changes a semantic identity.
 | `$00:8525` `IrqHandler` | IRQ (named) |
 | `$00:8915` | object loop — dispatch each active object's `$12` handler |
 | `$00:8526`/`852F` | COP / BRK syscall entry (audio events) |
-| `$00:9557` | spawn dispatcher (reads `$18`, indexes per-act handler table at `$95DD`) |
+| `$00:9557` | spawn dispatcher (reads `$18`, indexes per-act handler table at `$95DD`; **type bit 7 set forces the common table `$96AF`**) |
+| `$00:95F0` | **spawn record → object field copier** — the 12-byte record decode (ATK `+7`→`$2A`, HP `+8`→`$2C`, score `+9`→`$2E`, flags, animation base/bank). Also the professional-mode (`$0349`) ATK/HP promotion and statue-drop rewrite. |
+| `$00:92CB` | **action level loader** — DB=`$0A`, clears the object table, finds the stage in the `$0A:B100` index, then runs player start / terrain boxes / object list |
+| `$00:93A9` | terrain damage-box loader — 5-byte ROM records → 10-byte RAM records at `$1AE4`, count `$1AE2` |
+| `$00:941C` / `$00:94F2` | **object placement-list walker** (initial batch / wave-gate continuation). 4-byte entries + `$FC`/`$FD`/`$FE`/`$FF` opcodes |
+| `$00:A813` / `$00:A82D` | **checkpoint + wave gate** — trips on player position, clears remaining objects (`$00:874E`), moves the respawn point into `$032E/$0330`, spawns the next batch from the stashed stream cursor |
+| `$00:8A3C` | **object-vs-object combat loop** — AABB over all 80 slots; `$00:8AF9` is the single damage subtraction `victim.$2C -= attacker.$2A` |
+| `$00:8892` | **enemy death** — award `$2E` score, install death animation `$A382`, follow `$30 & $1000` to the next slot for multi-slot bosses |
+| `$00:A382` / `$00:A3E1` | **death animation + respawn**: when field `$14` is nonzero, `$A382` re-runs the spawn from record base `$32`, arms `$26 = $0258` and installs `$14` as the handler; `$A3E1` counts that down while offscreen and restarts the enemy |
+| `$00:A54A` | **boss death** (selected by object flag `$4000` instead of `$00:8892`) |
+| `$00:879D` | **item-effect dispatcher** — item id in `A` (from the pickup object's `$38`): 0 magic, 1 life, 2 screen clear, 3 sword power-up, 4 heal ¼, 5 full heal, 6 +100, ≥7 +50 |
+| `$00:96C3` | **statue-break handler** (object type `$80`) — uploads `$06:A000 + id*$80` to VRAM `$2D80` and splits the record into a shatter effect plus the timed collectible |
+| `$00:8E2F` | **animation stepper** — resolves `(base $16, bank $18, anim $1A, frame $1C)` to a composition record in `$20`, and refreshes the AABB extents `$0A/$0C/$0E/$10` from it. Hitboxes are per-frame data |
+| `$00:91C3` | **terrain collision oracle** — tile coords in `$14`/`$16` → 4-bit quadrant-solidity attribute, via the chunked map at `$7E:8000` and the table at `$7E:05A0`. See "Content / randomizer seams" §5b |
+| `$00:846E` | 8×8→16 hardware multiply (`$4202/$4203` → `$4216/$4217`); the `XBA` picks the multiplicand out of A's hidden high byte, which is how `$91C3` gets `tileY>>4` into the chunk-row term |
+| `$02:BAC1` | **collision attribute-table builder** — packs bit 1 of each of a metatile's four sub-tile tilemap words (`$7E:2100`, 8 bytes/metatile) into the 4-bit mask at `$7E:05A0` |
+| `$00:8FAD` / `$00:8FE7` | player head-bump probe (tests `$0F`) / ground probe (dispatches `$00`, `$06` slope, `$09` slope, else solid) |
+| `$00:8F30-$8F56` | horizontal wall probe — 3 vertical samples at the leading edge (from `$00:916E`'s facing-aware hitbox pick), blocked on `$0F` |
+| `$00:96A4` | spawn Y ground-anchor adjust — `objY -= obj.$10` after frame 0 loads, so a placement's `tileY` is the object's **feet**, not its body |
+| `$00:8D68` | **sprite builder** — walks the composition's 7-byte parts into the OAM shadow (see the Graphics table row for the surrounding pipeline) |
+| `$00:8781` | professional-mode act advance — `INC $0349`, step the stage-order table `$02:9013` into `$1A/$1B` |
+| `$02:AB05` | **professional-mode start** — `$0349=1`, lives 4, max HP 24, magic 0, score 0, stage `$01/$01` |
+| `$02:B1F7` / `$02:B250` / `$02:B264` | **per-map asset-script VM** — first call of action level entry; seeks the `($18,$19)` entry in the table at `$05:8000` and dispatches command bytes by highest set bit (skip chain `$B264` gives operand sizes) |
+| `$02:B4C0` | asset-script pointer read + **linear→LoROM fixup** (`bank = L>>15`, `addr = $8000\|(L&$7FFF)`) into the decompressor source `$A5-$A7` |
+| `$02:B69C` | per-act OBJ animation/composition blob decompress — flag + source pointer from the asset script, size from the blob's own first word, dest `$7E:4000` (objects) or `$7E:5000` (boss) |
+| `$02:C5C9` / `$C639` / `$C66C` | **Quintet LZSS decompressor** — 256-byte ring at `$7E:2000` pre-filled with `$20`, write cursor starting at `$EF`, control bits in `$AE`. **Bit-packed, not byte-aligned**: `$C639` reads 8 bits and `$C66C` the 4-bit match length (len = n+2) by shifting `$B7/$B8` by the current bit phase. Ported byte-exact in `tools/quintet_lzss.py` |
+| `$02:B3EB` | generic WRAM data load — selector, pointer, then `[widthChunks][heightChunks][size16]` from the blob; sets level dims `$2E`/`$30` and hands off to `$02:B446` (raw copy or decompress, dest from the `$0046,X` table) |
+| `$02:B363` | metatile definition table load — 2048 bytes to `$7E:2100` (BG1) or `$7E:2900` (BG2), stored byte-swapped in ROM |
+| `$02:B330` | CGRAM/palette load |
+| `$03:B7C6` | **monster-lair installer** — ROM `$03:B825`, 24 × 9 bytes → the eight `$7F:95xx/96xx` arrays |
+| `$03:B99C` | **lair monster spawner** — gates on population + free world record + respawn countdown, then writes `(cellX*16+$18, cellY*16+8)` and the monster type into the record |
+| `$03:B3D4` | **level-up** — `$0291`+1, max HP `$1E`+1 capped at 24, Angel max/current HP `$0287`/`$0286`+1 |
 | `$03:9156` | **act→sim transition handler dispatcher** (relocates stack to `$1FFF`, RTS-trick chain through `$9B22`/`$9B4A`/`$9195`) |
 | `$03:8053` | **enter-sim SETUP** (runs on ANY entry to `$18=00`, incl. act→sim AND a warp to `$18=00`). Sequence of `JSR`s (`$9156`, `$AC8E`, …) → `$8193` → `$C147` → `$B20C`/`$B21F`. The 2026-06-26 act→sim hang in this cascade was a 1-byte SNES-stack leak per call in `$01:B898`'s jump-table RTS-trick, fixed via `indirect_dispatch B8C0 … ret:B8C2` (bank01.cfg) — see the `$01:B898` row below and bug-ledger §7.7. |
 | `$01:B898` | **per-record per-type dispatcher, called once per active actor record every frame** (from the `$8193` master loop — see the sim-mode town architecture section above for the full chain into the spawn battery). `$B8C0` PHA-dispatches through the handler table at `$01:B8D0` keyed by object type, returns to `$B8C2`. History of THREE separate bugs found at this one site, in order: (1) a 1-byte SNES-stack leak that hung the act→sim transition (fixed 2026-06-26, see `$03:8053` above); (2) the table's `count` was left capped at 16 as a workaround for a since-fixed label-emission bug, but town actor types are 18/19 — above the cap, so their class handlers never dispatched (fixed 2026-07-02: bumped to the real bound, 26); (3) even at count=26, `idx:X` was wrong AT THIS SITE specifically — the ROM wraps the table read in `PHX($B8AE)/PLX($B8BB)`, so by the `PHA/RTS` dispatch X has been restored to the RECORD POINTER, not the type index (fixed 2026-07-02: switched to the value-keyed `idx:A` form, which reads the PHA'd table word instead of a register). This is the site responsible for the sim-mode actor-spawn corruption/freeze (`DEBUG.md` #18-25) — NOT the earlier stack-leak hang, a different bug at the same address. |
@@ -1550,7 +2085,7 @@ establishes or changes a semantic identity.
 | `$03:F5BE` | **per-town handler dispatcher** (PHY/PHA/SEP/RTS trick; 6-town outer table `$03:F5ED`, packed inner lists `$F5F9-$F620`, 14 handlers `$F621+`). Was silently dead in the recomp until the `idx:A`/`sep:` `indirect_dispatch` fix (2026-07-02) — the town-corruption/freeze root cause. |
 | `$03:F46E`/`$F479`/`$F484`/`$F497` | **lair-bitmask helpers**: test / set / clear a per-town lair bit; `$F497` computes the bit + cell (scratch `$7E:914F`) from the WRAM-pointer tables `$03:DCA2` (open-lair masks `$7E:9107+`) / `$DCAE` (spawned masks `$7E:911F+`). |
 | `$01:AC36` | **process-script assigner**: `entry.+02/+06 = ROM[$01:A227[$033C*2] + $033D*2]`, `+04=0`, `+00=1`. The stride-12 tier's spawn primitive. |
-| `$01:CFF2` | thin wrapper: `A -> $033C/$033D`, `JSR $AC36`. The sweep's per-entry call. |
+| `$01:CFF2` | thin wrapper: packed `A=(list<<8)|variant` → high byte `$033C`, low byte `$033D`, then `JSR $AC36`. The sweep's per-entry call. |
 | `$01:AA56` | **town-entry sweep driver**: staging restore (via `$03:813F`) + walk the stride-12 table calling `CFF2(entry.+0E)` per entry. |
 | `$01:8029` / `$01:B1C7` / `$01:B52F` / `$01:B6AE` | town-init wrapper (`8029` → `B1C7` = `CFF2`+`AC70`); `B52F` = switch-all-processes-to-variant pass; `B6AE` = hide-all pass. `$03:CFB3` = hide-sweep on town EXIT. |
 | `$01:D072` | **actor spawner** (stride-26 tier): `record.+00 = ROM[$01:E099+type*2]`, `+02 = ptr-4`, `+04 = 1`. Reached via the 56-routine per-type battery `$01:BA23-$C793` (each battery routine sets type-specific fields then `JSR $D072`). |

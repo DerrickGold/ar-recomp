@@ -335,6 +335,12 @@ int RtlGetAudioOutputRate(void);
 void RtlRenderAudio(int16 *audio_buffer, int samples, int channels);
 bool RtlUploadSpcImageFromDp(CpuState *cpu);
 bool RtlRunFrame(uint32 inputs);
+
+/* Optional game-owned pacing seams. Both run on the game coroutine with no
+ * runtime lock held: INIDISP after a CPU $2100 write, APU immediately before
+ * the corresponding port write. */
+extern void (*g_rtl_inidisp_hook)(uint8_t val);
+extern void (*g_rtl_apu_port_pace_hook)(uint8_t port, uint8_t val);
 void RtlReadSram();
 void RtlWriteSram();
 // Copy a legacy saves/<legacy_title>.srm forward to the generic saves/save.srm

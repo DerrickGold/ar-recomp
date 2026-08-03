@@ -43,7 +43,8 @@ static uint32 s_loaded_src; /* most recent SPC image upload source */
 static int s_current_song = -1;
 /* Native pause ($F2) and host pause (P/settings overlay) are independent.
  * Either one suspends decoding without closing the Vorbis stream or moving
- * its cursor. */
+ * its cursor. HostAudio additionally gates the entire SDL device for the host
+ * pause, which keeps authentic SPC music and SFX aligned with this cursor. */
 static bool s_driver_paused;
 static bool s_host_paused;
 
@@ -160,9 +161,10 @@ static void ProbeEntryFile(MusicReplacement *entry) {
     return;
   }
   /* Degenerate loop regions fall back to whole-file looping. */
-  if (entry->loop_end &&
-      (entry->loop_end <= entry->loop_start ||
-       entry->loop_end > entry->file_frames)) {
+  if (entry->loop_start >= entry->file_frames ||
+      (entry->loop_end &&
+       (entry->loop_end <= entry->loop_start ||
+        entry->loop_end > entry->file_frames))) {
     fprintf(stderr, "[music-manifest] [music:%s] bad loop points %u..%u "
             "(file has %u frames) — looping whole file\n", entry->name,
             entry->loop_start, entry->loop_end, entry->file_frames);
@@ -458,6 +460,7 @@ static void MixMusic(int16_t *out, int out_frames) {
     return;
 
   const MusicReplacement *entry = s.session;
+  const int gain = s.gain_percent;
   int output_rate = RtlGetAudioOutputRate();
   if (output_rate <= 0) output_rate = 44100;
   const double phase0 = s.src_carry;      /* carried sub-sample resample phase */
@@ -470,6 +473,7 @@ static void MixMusic(int16_t *out, int out_frames) {
 
   static int16_t src[MUSIC_MAX_BLOCK_FRAMES * 2];
   int filled = 0;
+  bool decoder_failed = false;
   while (filled < src_frames) {
     bool hit = false;
     int run = MusicLoop_NextRun(s.pos, src_frames - filled, s.loop_start,
@@ -480,31 +484,46 @@ static void MixMusic(int16_t *out, int out_frames) {
           s.v, 2, src + (size_t)filled * 2, run * 2);
     filled += got;
     s.pos += (uint32)got;
-    if (got < run) hit = true; /* decoder came up short: treat as end */
+    bool decoder_short = got < run;
+    if (decoder_short) hit = true;
     if (hit) {
       if (!s.loop) {
-        /* One-shot ended: keep the session (music voices stay muted — the
-         * silent SPC sequencer must not fade back in) but close the file. */
-        stb_vorbis_close(s.v);
-        s.v = NULL;
+        if (decoder_short) {
+          /* A declared one-shot ends only at its resolved boundary. EOF before
+           * that is a decode failure and must release the authentic fallback. */
+          decoder_failed = true;
+        } else {
+          /* One-shot ended: keep the session (music voices stay muted — the
+           * silent SPC sequencer must not fade back in) but close the file. */
+          stb_vorbis_close(s.v);
+          s.v = NULL;
+        }
         break;
       }
       if (stb_vorbis_seek(s.v, s.loop_start)) {
         s.pos = s.loop_start;
       } else {
-        stb_vorbis_close(s.v);
-        s.v = NULL;
+        decoder_failed = true;
         break;
       }
-      if (got == 0 && run == 0 && filled == 0 && s.pos >= s.total)
-        break; /* degenerate file: avoid spinning */
+      /* A malformed or externally modified entry can have no decodable span
+       * after the seek. Treat that as a stream failure instead of spinning in
+       * this callback or leaving authentic music muted forever. */
+      uint32 loop_end = s.loop_end ? s.loop_end : s.total;
+      if (got == 0 && run == 0 && s.pos >= loop_end) {
+        decoder_failed = true;
+        break;
+      }
     }
   }
-  if (filled <= 0) return;
+  if (filled <= 0) {
+    if (decoder_failed)
+      EndSession("decoder failure — authentic fallback");
+    return;
+  }
   memset(src + (size_t)filled * 2, 0,
          (size_t)(src_frames - filled) * 2 * sizeof(int16_t));
 
-  const int gain = s.gain_percent;
   /* True rate ratio (not the integer src_frames/out_frames) so the phase we
    * carry in s.src_carry stays consistent with the per-block decode count. */
   const double step = (double)entry->file_rate / (double)output_rate;
@@ -558,6 +577,8 @@ static void MixMusic(int16_t *out, int out_frames) {
               entry->name, s.pos, s.total, peak);
     }
   }
+  if (decoder_failed)
+    EndSession("decoder failure — authentic fallback");
 }
 
 void MusicReplacements_InstallHooks(void) {

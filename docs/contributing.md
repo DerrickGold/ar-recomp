@@ -256,7 +256,7 @@ ActRaiserRecomp/
 │   └── runtime/               # bundled C runtime + SNES hardware model
 ├── tools/
 │   ├── regen.sh                # compatibility launcher for Go snesbuild
-│   ├── rom_info.py, lzss_decompress.py, ... — game/trace analysis tools
+│   ├── rom_info.py, quintet_lzss.py, ... — game/trace analysis tools
 │   └── oracle/                 # differential-testing harness vs. real snes9x
 ├── tests/                      # golden-image + replay regression tests
 ├── release/                    # produced distribution bundles — NOT committed

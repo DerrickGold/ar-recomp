@@ -271,7 +271,6 @@ same pair of co-located records at one world position:
 | `$DA4B/$DAA1/$DAF7/$DB5C` | 17-20 | 64x76-80, y `-16..64` | 2 | cloud + lightning bolt |
 | `$DC77/$DBC1/$DC1C/$DCD2` | 18 | 64x72, y `-16..56` | 2 | cloud + rain streaks |
 | `$DA22` | 8 | 64x32, y `+40..+72` | 7 | the ROM's own ground shadow ellipse |
-| `$D993` | 12 | 64x64, y `-24..40` | 6 | related effect frame |
 
 Two facts drive the policy. The bolt and rain frames are *one composition*
 whose art already spans from the cloud down to the ground, so any presentation
@@ -296,8 +295,9 @@ ground-anchored in the first place.
 on the ground with everything standing there in front of it.
 
 The catalogue's `$EC14-$EC35` "angel cloud tiles used by rain, thunder" entry
-does not describe this path: the observed thunder, rain, and wind miracles all
-use `$D993-$DCD2`. `$EC14-$EC35` remains unobserved live.
+does not describe this path: the observed thunder, rain, and wind miracles use
+the `$D9E5-$DCD2` cloud family. `$D993` is the separate hollow selection-square
+cursor documented above, and `$EC14-$EC35` remains unobserved live.
 
 The angel's `$A627-$A792` pose frames are **not** a reliable angel signal.
 A type-`$04` miracle effect record was observed holding `$A627` during the
