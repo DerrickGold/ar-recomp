@@ -116,7 +116,7 @@ typedef enum {
  * still match its own InputClass/InputAction counts. */
 enum {
   kSettingsInputClasses = 2,
-  kSettingsInputActions = 24,
+  kSettingsInputActions = 25,
 };
 
 typedef enum {
@@ -340,6 +340,11 @@ typedef struct Settings {
   bool cheat_moonjump;
   int  cheat_moonjump_speed;
   bool cheat_no_knockback;   /* full-invuln "ignore hits"; on/off */
+  /* Arms the "Cycle magic spell" input action (kInputAction_MagicCycle). The
+   * binding alone does nothing; this is the switch that makes it live, and
+   * while it is on the presentation layer shows a cheat badge so a recording
+   * or bug report can never be mistaken for stock behaviour. */
+  bool cheat_magic_cycle;
   uint8 pin_count;
   SettingsPin pins[32];
 
@@ -435,6 +440,11 @@ typedef struct Settings {
   int sim3d_dyncam_baseline_distance_x100;
   int sim3d_reactive_strength;   /* sim lean + kick scale, % */
 
+  /* Portable action-stage spell polish. Independent of Town 3D and diorama:
+   * the same captured lifecycle is projected through either action renderer. */
+  bool action_effect_lighting;
+  bool action_effect_particles;
+
   /* Diorama 3D presentation. Camera angles are scaled ints (no float setting
    * type); the live DioramaCamera is seeded from these and writes back on
    * every adjustment, so the menu and the mouse controls share one source of
@@ -444,6 +454,7 @@ typedef struct Settings {
   int  diorama_tilt_y_mrad;      /* camera yaw, milliradians */
   int  diorama_distance_x100;    /* camera distance, hundredths */
   int  diorama_depth_shade;      /* % strength of per-plane depth shading */
+  int  diorama_vertical_extend;  /* scanlines of world drawn above the screen */
   bool diorama_layer_bg1;
   bool diorama_layer_bg2;
   bool diorama_layer_bg3;

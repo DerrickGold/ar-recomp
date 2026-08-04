@@ -340,6 +340,48 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_game COMMAND actraiser_game_test)
 
+    add_executable(actraiser_action_effects_test
+        tests/action_effects_test.c
+        src/action_effects.c
+    )
+    target_include_directories(actraiser_action_effects_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_action_effects COMMAND actraiser_action_effects_test)
+
+    add_executable(actraiser_action_effect_render_test
+        tests/action_effect_render_test.c
+        src/action_effect_render.c
+    )
+    target_include_directories(actraiser_action_effect_render_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_action_effect_render_test PRIVATE
+        SDL3::SDL3
+        m
+    )
+    add_test(NAME actraiser_action_effect_render
+        COMMAND actraiser_action_effect_render_test)
+
+    add_executable(actraiser_diorama_projection_test
+        tests/diorama_projection_test.c
+        src/diorama_projection.c
+        src/diorama_depth_shapes.c
+        src/scene3d_math.c
+    )
+    target_include_directories(actraiser_diorama_projection_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_diorama_projection_test PRIVATE
+        SDL3::SDL3
+        m
+    )
+    add_test(NAME actraiser_diorama_projection
+        COMMAND actraiser_diorama_projection_test)
+
     add_executable(actraiser_sim_phase0_trace_test
         tests/sim_phase0_trace_test.c
         src/sim_phase0_trace.c
@@ -372,6 +414,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME actraiser_sim_render_metadata
         COMMAND actraiser_sim_render_metadata_test)
+
+    add_executable(actraiser_sim_visual_patches_test
+        tests/sim_visual_patches_test.c
+        src/sim_visual_patches.c
+    )
+    target_include_directories(actraiser_sim_visual_patches_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_sim_visual_patches
+        COMMAND actraiser_sim_visual_patches_test)
 
     add_executable(actraiser_settings_test
         tests/settings_test.c

@@ -36,6 +36,10 @@ static bool s_key_down[SDL_SCANCODE_COUNT];
 static bool s_pad_button_down[SDL_GAMEPAD_BUTTON_COUNT];
 static int s_pad_axis_value[SDL_GAMEPAD_AXIS_COUNT];
 static uint32 s_host_axis_held;
+/* Press-edge memory for keyboard-bound edge host actions; SDL auto-repeat
+ * would otherwise re-fire them for as long as the key is down. Kept separate
+ * from s_host_axis_held so it never feeds InputMap_GamepadIsActive. */
+static uint32 s_host_key_held;
 
 static InputMapActionFn s_action_handler;
 
@@ -199,6 +203,11 @@ static const struct {
   [kInputAction_Turbo]     = { "Fast forward", 0, kInputBind_None, 0 },
   [kInputAction_SaveState] = { "Save state", 0, kInputBind_None, 0 },
   [kInputAction_LoadState] = { "Load state", 0, kInputBind_None, 0 },
+  /* M is free of every hard-wired hotkey and every default pad-action key.
+   * No pad default: the cheat must not ride a button a normal session
+   * presses, and every remaining pad button is already spoken for. */
+  [kInputAction_MagicCycle] = { "Cycle magic spell", SDL_SCANCODE_M,
+                                kInputBind_None, 0 },
 
   /* Right stick orbits, triggers zoom — the layout any 3D game trains for.
    * The keyboard column is left unbound: the desktop path is the mouse
@@ -535,6 +544,7 @@ SettingChangeResult InputMap_ApplyBinding(const SettingDesc *desc,
 void InputMap_Clear(void) {
   s_key_bits = s_pad_bits = s_stick_bits = 0;
   s_host_axis_held = 0;
+  s_host_key_held = 0;
   memset(s_key_down, 0, sizeof(s_key_down));
   memset(s_pad_button_down, 0, sizeof(s_pad_button_down));
   memset(s_pad_axis_value, 0, sizeof(s_pad_axis_value));
@@ -556,9 +566,27 @@ void InputMap_HandleKey(int scancode, bool pressed) {
   if (scancode >= 0 && scancode < SDL_SCANCODE_COUNT)
     s_key_down[scancode] = pressed;
   uint32 want = INPUT_BIND_MAKE(kInputBind_Key, scancode, false);
-  for (int a = 0; a < kInputAction_PadCount; a++)
-    if (g_settings.input_bind[kInputClass_Keyboard][a] == want)
+  for (int a = 0; a < kInputAction_Count; a++) {
+    if (g_settings.input_bind[kInputClass_Keyboard][a] != want) continue;
+    if (a < kInputAction_PadCount) {
       SetActionBit(&s_key_bits, (InputAction)a, pressed);
+    } else if (INPUT_ACTION_IS_ANALOG(a)) {
+      /* Polled, not dispatched — see InputMap_AnalogAction. */
+    } else {
+      /* Edge host action on the keyboard. Only rows that settings.c actually
+       * publishes a keyboard binding for can land here: the menu/pause/state
+       * actions store kInputBind_None (0), which never equals a real
+       * scancode's binding word, so their hard-wired hotkeys stay the only
+       * keyboard path to them (input_map.h). SDL delivers auto-repeat as more
+       * key-down events and main.c does not filter them, so track held state
+       * per action and fire only on the true press edge. */
+      bool was_held = (s_host_key_held & (1u << a)) != 0;
+      if (pressed) s_host_key_held |= 1u << a;
+      else s_host_key_held &= ~(1u << a);
+      if (pressed && !was_held && s_action_handler)
+        s_action_handler((InputAction)a);
+    }
+  }
 }
 
 /* Axis magnitude at which a stick/trigger counts as "pressed" for a binding.

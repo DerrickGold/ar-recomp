@@ -292,6 +292,38 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
 - Budget reality (user snapshots, 16:9): max 60/128 entries live, margin
   sprites present and correct — **no OAM pressure in act 1 even wide**.
 
+### 9a. Host action-spell lighting and particles
+
+`ActionEffects_CaptureFrame` is the game-thread boundary for presentation-only
+spell metadata. The first implemented family, Magical Fire, requires the live
+kind-1 controller and all per-slot animation/composition/transform identity;
+it publishes the four mirrored actors separately rather than collapsing them
+to one player-centred fireball. The capture publishes generic point/rectangle/
+segment geometry, authentic OBJ priority, and separate actor, phase, and pulse
+clocks. Those clocks advance by captured emulation ticks and therefore freeze
+during paused or retained-slot redraws. Observer state is explicit, not hidden
+inside the capture module, and savestate loads reset it before the next frame.
+
+`DrawActionEffects` runs after the authentic action image and before flat HUD,
+HD-replacement, inspector, and settings overlays. Flat mode uses the resolved
+physical viewport. Diorama mode receives a `DioramaProjection` value from the
+same composite call that drew the OBJ planes: camera matrix, capture mesh
+dimensions, BG1/OBJ interpolated UV window, output dimensions, and the exact
+authored depth/rake/bow of all four OBJ priority planes are not re-derived from
+live state. The explicit render policy is a world overlay above the composed
+world and below HUD/HD UI.
+
+`action_effect_render.c` converts the captured kind/phase/geometry into a
+bounded, renderer-independent batch; unknown values fail closed. Its Fire
+pulse is an authored-tick integer triangle wave, avoiding cross-libm sine
+variance. `present.c` only supplies flat/diorama projection and submits through
+the same verified SDL additive blend plus untextured batched geometry used by
+town effects; no optional Metal/Vulkan shader pipeline is required.
+
+`action_effect_lighting` and `action_effect_particles` are independent,
+default-on Graphics settings. Backend rejection latches the shared host-effect
+capability off and both stages fail closed.
+
 ## 10. Palette paths
 
 - General descriptor: game sets `$CB/$CD` (src), `$CE` (CGADD), `$CF`
@@ -1219,9 +1251,10 @@ exists to remove.
 ## 13e. Colour math the D2 gate accepts (2026-07-22)
 
 The separated capture reproduces the frame from individual layers, so any PPU
-colour math has to be reproduced too or the byte-exact fidelity gate rejects
-the frame and the view drops to authentic. The gate therefore fails closed on
-anything not shown to be reproducible, and three states are currently accepted:
+colour math has to be reproduced too or the byte-exact fidelity gate reports a
+mismatch on the frame (since ledger §31 it reports rather than drops — the
+checkpoints are where that fails the build). Only states shown to be
+reproducible are accepted, and there are currently three:
 
 1. **No-op** — `cgwsel == 0`, `fixedColor == 0`, no half/subtract. The PPU's
    own fast path proves nothing happens.
@@ -1267,9 +1300,11 @@ second effect layered on this one and wants its own evidence.
 ### Failure mode
 
 Benign by construction. If the reproduction is ever wrong the D2 gate sees a
-pixel mismatch and drops to authentic — the same behaviour as before the state
-was accepted at all, so a mistake here costs the enhanced view for those
-frames and never correctness.
+pixel mismatch and reports it, and the affected pixels render with the wrong
+colour-math result for those frames — a bounded, local error rather than a
+correctness risk. Since ledger §31 the gate no longer drops the frame to the
+authentic view; the checkpoints, which assert zero mismatching pixels, are
+where a wrong reproduction is caught.
 
 ## 13f. Simulation-town sky (2026-07-22)
 
@@ -1453,6 +1488,95 @@ black master-fade overlay with exact 17/255 steps, then draws Palace/UI pixels
 whose PPU rasterization already applied the same brightness. A gf380-451 replay
 shows the view selected at brightness 0 before fade-in, retained through all
 15 steps and the complete fade-out, and released only after the black endpoint.
+
+## 13i. Vertical extend — widescreen's transpose (2026-08-03)
+
+Diorama-only, default off (`diorama_vertical_extend`, 0..32 scanlines). Renders
+world ABOVE the authentic 224-line viewport so the tilted view fills screen
+height the framing was otherwise wasting, instead of shrinking the image.
+
+### The ceiling is OAM, not taste
+
+`kPpuExtraTopBottom = 32` is forced by the hardware encoding, not chosen:
+
+| axis | OAM field | modulus | screen | free range |
+|---|---|---|---|---|
+| X | 9 bits | 512 | 256 | `[256,512)` — a whole screen, unambiguous |
+| Y | 8 bits | 256 | 224 | `[224,256)` — 32 lines, **already means "above"** |
+
+So the horizontal margins could carve a right-hand band out of the spare half
+(`ppu.c` `PpuObjScreenX`), while vertically the only expressible off-screen
+positions ARE the above-screen ones. That makes the top band free — those
+sprites already render correctly, `ppu_evaluateSprites` compares `line - y` in
+uint8 arithmetic, which is the same mod-256 wrap the hardware does, so a
+negative line needs no special case — and makes a bottom band useless: a sprite
+below line 224 is indistinguishable from one above line 0, so the game's own
+object coordinates carry nothing usable there. `g_ws_extra_bottom` is therefore
+pinned at 0; the background half of the bottom path is implemented and inert.
+
+### Geometry
+
+Row 0 of every captured surface is screen y = `-ws_extra_top`, the exact
+transpose of column 0 meaning screen x = `-ws_extra`. `PpuOutputRow` is the one
+place that mapping lives; it degenerates to the historic `y - 1` at zero margin,
+which is what keeps authentic output bit-identical.
+
+Two traps, both found by measurement rather than by reading:
+
+1. **`PpuSetOverlayCapture` clamped `y0` to 0** (while correctly allowing a
+   negative `x`). The band rendered and was then silently clipped away — empty
+   top band, no error anywhere. Bounds are now the render target's on both axes.
+2. **`y == 0` early-returns** in the overlay clear/write paths. They were
+   defensive against the line-0 frame-setup pass, which never reaches the line
+   renderer; with a margin, line 0 became the real scanline directly above the
+   screen and the guard dropped that row from every plane.
+3. **The render target's origin is NOT the captures' origin.** Applying it to
+   every overlay destination slid the promoted BG3 HUD, the HUD OBJ icon, HD
+   replacements and the sim atlases down by the margin while their consumers
+   went on reading authentic rows — every one of them mis-sampling by exactly
+   `extraTopCur`, which is what "the UI is on the wrong tile positions" looks
+   like. Fixed by `PpuOverlayRow`: **row 0 of a surface is the first row that
+   surface's own capture rectangle asked for**, so only a capture that reaches
+   above the screen (`y0 < 0` — the diorama band, and nothing else) shifts, and
+   every other capture keeps writing absolute authentic rows exactly as before.
+   The host side needs the same discipline: `ActRaiser_DioramaHudObjFinish`
+   writes to two destinations with two different origins and must bias only the
+   diorama-plane one. Measured, action stage, extend 0 vs 32: the HUD occupies
+   rows `[11..26]` in **both**, while the BG2 plane grows `[0..223]` → `[0..255]`.
+
+`Diorama_Composite` normalizes world height against the AUTHENTIC 224, not the
+captured height — dividing by the capture would make the taller plane span the
+same 1.0 world unit, so the auto-fit would frame it to the same screen height
+and the only visible effect would be everything ~14% smaller. It then shifts the
+world up by half the added height (folded into the MVP so layers, skirts, depth
+shapes, shoebox and `Diorama_ProjectCapturedPoint` cannot disagree), because the
+meshes are symmetric about `wy = 0` and every new row arrives at the top.
+Measured at the shipped defaults: authentic y=0 and y=224 land on screen at
+102.06 and 1149.67 with extend 0 AND 32 — unmoved — while the new capture top
+projects to −62, filling the dead region above.
+
+### What the band actually contains
+
+Verified in Fillmore act 1 (replay `saves/fillmore-act.rec`, diorama flipped on
+at gf 1200, camera_y 400 in a 768-tall level so 32 rows are genuinely
+available): BG2's band is 32/32 rows of real scenery, 28 of them distinct, not a
+held copy of the first visible row. BG1 is empty there — and empty in the
+adjacent VISIBLE rows too, because that part of the level is sky.
+
+This is the axis where the §4 streaming seams show. Column strips decode a
+512px-tall window of a taller level and leave filler (`$04E`) outside it, so a
+band placed over stale rows shows the same "black staircase" the widescreen
+survey hit. Repairing that is the row-strip work in §13.2's fix family and has
+NOT been done — which is why the default is 0 and the maximum is small.
+
+`AR_VEXT_LOG=1` prints the resolved margin with the camera/scroll state that
+produced it, plus a `[vext-rows]` line showing where the HUD and the diorama
+plane actually landed — the direct regression check for trap 3, since the two
+must respond to the margin differently (HUD fixed, plane shifted).
+`AR_VEXT_TILES=1` dumps the raw BG1 tilemap ids the band reads next to the
+first visible row. Deliberately a raw dump and not a verdict: a first cut that
+classified "uniform row" as filler reported 100% filler, because an all-sky BG1
+row is uniform too.
 
 ## 14. Open questions (all remaining, none blocks the §13 design)
 

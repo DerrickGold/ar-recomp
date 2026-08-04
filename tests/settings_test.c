@@ -23,12 +23,12 @@ static bool s_sim_rim_mask_supported = true;
 bool Present_SimRimMaskSupported(void) {
   return s_sim_rim_mask_supported;
 }
-/* Lightning effects use SDL's built-in additive blend. As with the rim mask,
- * present.c latches an actual backend rejection; this renderer-free harness
- * supplies the optimistic initial capability. */
-static bool s_sim_effect_renderer_supported = true;
-bool Present_SimEffectRendererSupported(void) {
-  return s_sim_effect_renderer_supported;
+/* Simulation and action effects use SDL's built-in additive blend. As with
+ * the rim mask, present.c latches an actual backend rejection; this
+ * renderer-free harness supplies the optimistic initial capability. */
+static bool s_effect_renderer_supported = true;
+bool Present_EffectRendererSupported(void) {
+  return s_effect_renderer_supported;
 }
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
@@ -86,8 +86,10 @@ static void TestDefaultsAndMetadata(void) {
    * two: the action that opens the reader, and its spreads/single-page choice.
    * The content randomizer then added eleven: master, seed and reroll on Seed;
    * health, damage, type shuffle and its range on Enemies; drops and placement
-   * on Items; lair positions and monsters on Simulation. */
-  CHECK(g_setting_desc_count == 252);
+   * on Items; lair positions and monsters on Simulation. The magic-spell
+   * cycle then added three: the Cheats-tab toggle that arms it, plus its
+   * keyboard and gamepad binding rows. */
+  CHECK(g_setting_desc_count == 258);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -144,6 +146,8 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim3d_rim_light);
   CHECK(g_settings.sim3d_effect_lighting);
   CHECK(g_settings.sim3d_particles);
+  CHECK(g_settings.action_effect_lighting);
+  CHECK(g_settings.action_effect_particles);
   CHECK(!g_settings.sim3d_picker_exit_ease);
   CHECK(g_settings.sim3d_diagnostic_layers == 0);
   /* Camera baseline captured from a tuned session (2026-07-22), not derived:
@@ -843,6 +847,22 @@ static void TestInputBindings(void) {
   /* Host actions are gamepad-only; there is no keyboard twin. */
   CHECK(Settings_Find("bind_key_menu") == NULL);
 
+  /* Magic cycle is the deliberate exception (input_map.h): a debug control,
+   * not a route into or out of the menu, so it carries BOTH rows. It defaults
+   * to keyboard M and to no pad button at all — the cheat must not ride a
+   * button an ordinary session presses. Binding it is still inert until the
+   * Cheats tab arms it, so the default row is safe to publish. */
+  const SettingDesc *key_cycle = Settings_Find("bind_key_magic_cycle");
+  const SettingDesc *pad_cycle = Settings_Find("bind_pad_magic_cycle");
+  CHECK(key_cycle && pad_cycle);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_MagicCycle] ==
+        INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_M, false));
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_MagicCycle] ==
+        0);
+  const SettingDesc *cycle_cheat = Settings_Find("cheat_magic_cycle");
+  CHECK(cycle_cheat != NULL);
+  CHECK(!g_settings.cheat_magic_cycle);
+
   CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_B] ==
         INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_Z, false));
   CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_B] ==
@@ -1067,18 +1087,27 @@ static void TestRimLightAvailabilityFollowsBlendSupport(void) {
 static void TestEffectAvailabilityFollowsRendererSupport(void) {
   const SettingDesc *lighting = Settings_Find("sim3d_effect_lighting");
   const SettingDesc *particles = Settings_Find("sim3d_particles");
-  CHECK(lighting != NULL && particles != NULL);
-  if (!lighting || !particles) return;
-  const bool restore_support = s_sim_effect_renderer_supported;
+  const SettingDesc *action_lighting =
+      Settings_Find("action_effect_lighting");
+  const SettingDesc *action_particles =
+      Settings_Find("action_effect_particles");
+  CHECK(lighting != NULL && particles != NULL &&
+        action_lighting != NULL && action_particles != NULL);
+  if (!lighting || !particles || !action_lighting || !action_particles) return;
+  const bool restore_support = s_effect_renderer_supported;
   const int restore_mode = g_settings.sim3d_mode;
   g_settings.sim3d_mode = 1;
-  s_sim_effect_renderer_supported = true;
+  s_effect_renderer_supported = true;
   CHECK(Settings_IsAvailable(lighting));
   CHECK(Settings_IsAvailable(particles));
-  s_sim_effect_renderer_supported = false;
+  CHECK(Settings_IsAvailable(action_lighting));
+  CHECK(Settings_IsAvailable(action_particles));
+  s_effect_renderer_supported = false;
   CHECK(!Settings_IsAvailable(lighting));
   CHECK(!Settings_IsAvailable(particles));
-  s_sim_effect_renderer_supported = restore_support;
+  CHECK(!Settings_IsAvailable(action_lighting));
+  CHECK(!Settings_IsAvailable(action_particles));
+  s_effect_renderer_supported = restore_support;
   g_settings.sim3d_mode = restore_mode;
 }
 

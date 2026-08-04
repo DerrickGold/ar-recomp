@@ -7,6 +7,6 @@
  * The present thread owns detection and reset; callers must not mutate the
  * underlying latches or depend on which backend operation rejected them. */
 bool Present_SimRimMaskSupported(void);
-bool Present_SimEffectRendererSupported(void);
+bool Present_EffectRendererSupported(void);
 
 #endif

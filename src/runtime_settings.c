@@ -8,6 +8,7 @@
 
 #include "actraiser_rtl.h"
 #include "diorama.h"
+#include "frame_slot.h"
 #include "host_audio.h"
 #include "host_dev_tools.h"
 #include "randomizer.h"
@@ -132,6 +133,7 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
     fprintf(stderr, "State saved.\n");
   } else if (!strcmp(desc->key, "load_state")) {
     RtlSaveLoad(kSaveLoad_Load, 0);
+    FrameSlot_ResetActionEffects();
     HostDisplay_InvalidatePresentHistory();
     fprintf(stderr, "State loaded.\n");
   } else if (!strcmp(desc->key, "warp_now")) {

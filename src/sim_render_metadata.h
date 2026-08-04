@@ -326,6 +326,10 @@ typedef struct SimSourceRecord {
   uint16_t world_x, world_y;
   uint16_t type;
   uint16_t semantic_state;
+  /* Raw +$06 is polymorphic. Ordinary world actors use it as flags; the
+   * town-creation world processes retain animation script base $A8BB here.
+   * Capture the source fact and let exact semantic classifiers interpret it. */
+  uint16_t record_word06;
   uint16_t status;
   uint16_t oam_first;
   uint8_t oam_count;
@@ -333,6 +337,13 @@ typedef struct SimSourceRecord {
   uint16_t fragment_count;
   uint8_t tier;
   uint8_t alternate_attributes;
+  /* Palettes selected by the parts this record actually emitted. The same
+   * composition address can name different runtime-built art: scripted red
+   * fire and post-Lightning blue fire both use $E6CA/$E6D0/$E6D6, but their
+   * OAM parts select palettes 1 and 2 respectively. Keep that distinction at
+   * the producer boundary instead of asking presentation to infer colour from
+   * a pointer or from the shared CGRAM. */
+  uint8_t obj_palette_mask;
   /* D5a cull evidence. The emitter's biased composition origin, plus how many
    * of the record's parts the sprite window rejected and why.
    *
@@ -380,7 +391,19 @@ typedef struct SimRenderObject {
 typedef enum SimEffectKind {
   kSimEffect_None = 0,
   kSimEffect_LightningMiracle,
+  kSimEffect_BlueDragonLightning,
+  kSimEffect_TownCreationLightning,
+  kSimEffect_RedDemonFire,
+  kSimEffect_GroundFire,
+  kSimEffect_HouseFire,
 } SimEffectKind;
+
+typedef enum SimEffectColorFamily {
+  kSimEffectColor_None = 0,
+  kSimEffectColor_LightningBlue,
+  kSimEffectColor_FireRed,
+  kSimEffectColor_FireBlue,
+} SimEffectColorFamily;
 
 typedef enum SimEffectPhase {
   kSimEffectPhase_None = 0,
@@ -389,6 +412,25 @@ typedef enum SimEffectPhase {
   kSimEffectPhase_LightningBranch,
   kSimEffectPhase_LightningImpactA,
   kSimEffectPhase_LightningImpactB,
+  kSimEffectPhase_BlueDragonAttack,
+  kSimEffectPhase_BlueDragonBoltA,
+  kSimEffectPhase_BlueDragonBoltB,
+  kSimEffectPhase_BlueDragonBoltC,
+  kSimEffectPhase_TownCreationGap,
+  kSimEffectPhase_TownCreationBoltA,
+  kSimEffectPhase_TownCreationBoltB,
+  kSimEffectPhase_TownCreationBoltC,
+  kSimEffectPhase_TownCreationBoltD,
+  kSimEffectPhase_RedDemonAttack,
+  kSimEffectPhase_RedFireSmall,
+  kSimEffectPhase_RedFireMedium,
+  kSimEffectPhase_RedFireLarge,
+  kSimEffectPhase_GroundFireA,
+  kSimEffectPhase_GroundFireB,
+  kSimEffectPhase_GroundFireC,
+  kSimEffectPhase_HouseFireA,
+  kSimEffectPhase_HouseFireB,
+  kSimEffectPhase_HouseFireC,
 } SimEffectPhase;
 
 typedef enum SimEffectGeometryKind {
@@ -411,6 +453,7 @@ typedef enum SimEffectFlag {
   kSimEffectFlag_PostedLifecycle = 1u << 2,
   kSimEffectFlag_VisualComplete = 1u << 3,
   kSimEffectFlag_ActorDone = 1u << 4,
+  kSimEffectFlag_RecordLifecycle = 1u << 5,
 } SimEffectFlag;
 
 typedef struct SimEffectLocalPoint {
@@ -454,12 +497,14 @@ typedef struct SimEffectInstance {
   uint8_t source_index;
   uint8_t kind;
   uint8_t phase;
+  uint8_t color_family;
   uint8_t flags;
 } SimEffectInstance;
 
 bool Sim3D_IsLightningMiracleComposition(uint16_t composition);
 const char *Sim3D_EffectKindName(SimEffectKind kind);
 const char *Sim3D_EffectPhaseName(SimEffectPhase phase);
+const char *Sim3D_EffectColorName(SimEffectColorFamily color);
 const char *Sim3D_EffectGeometryName(SimEffectGeometryKind kind);
 const char *Sim3D_EffectSpaceName(SimEffectGeometrySpace space);
 
@@ -737,6 +782,10 @@ void SimRenderMetadata_BeginRecord(
     uint16_t composition, uint16_t world_x, uint16_t world_y,
     uint16_t type, uint16_t semantic_state, uint16_t status,
     uint16_t oam_cursor_before);
+/* Publish the open record's raw +$06 word. Kept separate from BeginRecord so
+ * older synthetic producers that do not model polymorphic fields default to
+ * zero and therefore fail closed for classifiers that require it. */
+void SimRenderMetadata_RecordWord06(uint16_t value);
 /* The emitter's biased composition origin for the record now open. Separate
  * from BeginRecord so the D1 producer contract and its callers are unchanged;
  * a record without this call simply has no cull-lead anchor. */

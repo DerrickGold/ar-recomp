@@ -497,7 +497,8 @@ void Randomizer_Apply(void) {
   if (!Randomizer_IsAvailable()) return;
 
   /* Always restore first: passes must never compound across re-applies, and
-   * turning the master off has to give back the stock image exactly. */
+   * turning the master off has to give back the exact baseline registered by
+   * main (including deterministic visual-data adjustments applied first). */
   memcpy(g_rom_live, g_rom_pristine, g_rom_size);
   memset(&g_summary, 0, sizeof g_summary);
 

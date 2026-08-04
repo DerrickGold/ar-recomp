@@ -15,6 +15,15 @@ void ActRaiser_RebindPpuOutputSurfaces(void);
  * the frame-slot capture (see the latch's comment). `bg2_margin_source` is a
  * DioramaBg2MarginSource. Any pointer may be NULL. */
 void ActRaiser_LiveMargins(int *left, int *right, int *bg2_margin_source);
+int ActRaiser_LiveVerticalMargin(void);
+
+/* The OAM slots the widescreen HUD-icon promote validated for the frame being
+ * drawn, or false when it promoted nothing. This is the ONLY reliable answer to
+ * "which sprites are the flat HUD icon": overlayCaptures[Obj] carries an OAM
+ * range too, but diorama mode overwrites that capture with its own full-frame
+ * 0..127 scene claim, so reading the range back from there silently loses the
+ * icon exactly when the diorama is on. Either pointer may be NULL. */
+bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count);
 void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
 /* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown.
@@ -22,6 +31,18 @@ void RunOneFrameOfGame(void);
 void ActRaiser_DestroyGameCoroutine(void);
 int ActRaiser_ReadRdnmi(Snes *snes);
 bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
+
+/* Debug aid: queue one action-stage spell-cycle step. Called from the host
+ * input path; the request is consumed at the next frame boundary inside
+ * ActRaiser_ApplyCheats, which is where WRAM and VRAM are quiet. Requests do
+ * not stack — a burst of presses advances the selection once per frame at
+ * most, and the request is dropped entirely if the cheat is disarmed, the
+ * player is not in an action stage, or a cast is still resolving. */
+void ActRaiser_RequestMagicCycle(void);
+/* 0 when no spell is selected, else 1..4 ($02AC). Published into the frame
+ * slot so the presentation layer can name the armed cheat's current spell
+ * without reading live WRAM off the game thread. */
+uint8 ActRaiser_SelectedMagic(void);
 
 /* BG-only widescreen presentation helpers. These never replace the game's OAM
  * builder or normal tile streamers. The Sky Palace pair temporarily decodes a

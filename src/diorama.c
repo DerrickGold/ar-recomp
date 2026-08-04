@@ -1223,18 +1223,23 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
   static const SDL_FColor kSkyboxDim = { 0.78f, 0.78f, 0.85f, 1.0f };
   static const SDL_FColor kSkyboxFull = { 1.0f, 1.0f, 1.0f, 1.0f };
   SDL_FColor tint = dim ? kSkyboxDim : kSkyboxFull;
+  /* Same reasoning as u1, on the other axis: the BG2 texture is allocated
+   * kPpuBufHeight tall and only the leading snes_height rows are ever written,
+   * so stretching V to 1.0 would drag never-written rows across the bottom of
+   * the sky. Was correct implicitly while the allocation matched the content. */
+  float v1 = (float)snes_height / (float)kPpuBufHeight;
   SDL_Vertex verts[4] = {
     { { 0.0f, 0.0f },                   tint, { u0, 0.0f } },
     { { (float)out_w, 0.0f },           tint, { u1, 0.0f } },
-    { { (float)out_w, (float)out_h },   tint, { u1, 1.0f } },
-    { { 0.0f, (float)out_h },           tint, { u0, 1.0f } },
+    { { (float)out_w, (float)out_h },   tint, { u1, v1 } },
+    { { 0.0f, (float)out_h },           tint, { u0, v1 } },
   };
   int indices[6] = { 0, 1, 2, 0, 2, 3 };
   SDL_SetTextureBlendMode(bg2_texture, SDL_BLENDMODE_NONE);
   bool blur = SkyboxBlurEnabled(renderer);
   if (blur) {
     BlurUniforms u = {
-      1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height,
+      1.0f / (float)kPpuBufWidth, 1.0f / (float)kPpuBufHeight,
       blur_radius, 0.0f,
     };
     SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
@@ -1367,7 +1372,9 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
-                       int bg2_valid_x0, int bg2_valid_x1) {
+                       int bg2_valid_x0, int bg2_valid_x1,
+                       DioramaProjection *out_projection) {
+  if (out_projection) memset(out_projection, 0, sizeof(*out_projection));
   if (!renderer || !cam_pose) return false;
 
   SDL_SetRenderLogicalPresentation(renderer, 0, 0,
@@ -1430,20 +1437,39 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   float uv_u0 = slack_px / (float)kPpuBufWidth;
   float uv_u1 = ((float)snes_width - slack_px) / (float)kPpuBufWidth;
   float uv_slack = slack_px / (float)kPpuBufWidth;
-  float uv_v0 = slack_px / tex_h;
-  float uv_v1 = 1.0f - slack_px / tex_h;
-  float v_slack = slack_px / tex_h;
-  /* The mesh spans the full unit height by default (BuildLayerMesh's
-   * wy = 0.5 - t); scale it to match the narrowed V window so the image is
-   * cropped symmetrically rather than stretched. */
-  float height_scale = (tex_h - 2.0f * slack_px) / tex_h;
+  /* V now divides by the TEXTURE height the way U always divided by the
+   * texture width. The old form (`1 - slack/tex_h`) silently assumed the
+   * texture was exactly as tall as its content, which stopped being true once
+   * the planes were allocated at kPpuBufHeight to hold the vertical margin. */
+  float uv_v0 = slack_px / (float)kPpuBufHeight;
+  float uv_v1 = (tex_h - slack_px) / (float)kPpuBufHeight;
+  float v_slack = slack_px / (float)kPpuBufHeight;
+  /* World height is normalized against the AUTHENTIC 224 lines, not against
+   * the captured height -- this is the whole point of the vertical extend.
+   * Dividing by tex_h would make the taller capture span the same 1.0 world
+   * unit, so the auto-fit below would frame the bigger plane to the same
+   * screen height and the only visible effect would be that everything got
+   * ~14% SMALLER. Normalizing against 224 instead keeps the authentic band
+   * exactly where it was and lets the extra scanlines project past the top
+   * edge, into screen space the tilt was previously wasting.
+   *
+   * `- 2*slack` is the R17/C1 interpolation crop, unchanged: it matches the
+   * mesh to the narrowed V window so the image crops rather than stretches. */
+  float height_scale =
+      (tex_h - 2.0f * slack_px) / (float)kActRaiserAuthenticHeight;
 
   float par = 1.0f;
   if (active_pixel_aspect == kPixelAspect_Crt43 && !ignore_aspect_ratio)
     par = 7.0f / 6.0f;
-  float aspect_x =
-      ((float)snes_width - 2.0f * slack_px) / (tex_h - 2.0f * slack_px) * par;
-  float vis_half_w = 0.5f * (float)visible_width / tex_h * par;
+  /* The width expressions keep their exact previous FORM -- only the vertical
+   * reference swaps from the captured height to the authentic one. With no
+   * margin the two are equal and every value here is bit-identical to before,
+   * interpolating or not; with a margin the quad grows only in height, which
+   * is the intended asymmetry. */
+  float aspect_x = ((float)snes_width - 2.0f * slack_px) /
+      ((float)kActRaiserAuthenticHeight - 2.0f * slack_px) * par;
+  float vis_half_w =
+      0.5f * (float)visible_width / (float)kActRaiserAuthenticHeight * par;
 
   float screen_aspect = (float)out_w / (float)out_h;
   float tan_half = tanf(kDioramaFovY * 0.5f);
@@ -1478,6 +1504,55 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
 
   float mvp[16];
   BuildViewProjection(&cam, out_w, out_h, mvp);
+
+  /* Re-center the world on the AUTHENTIC band. Every extra scanline the
+   * vertical extend captures is added at the TOP, but the meshes are all built
+   * symmetrically about wy = 0 (`wy = (0.5 - t) * height_scale`), so a taller
+   * capture would hang half its new height below the screen and slide the
+   * authentic image DOWN by the other half -- pushing content off the bottom
+   * to make room at the top, which is the opposite of the point.
+   *
+   * Shifting the world UP by half the added height puts the authentic band
+   * back at exactly [-0.5, +0.5], where it has always been and where the
+   * auto-fit frames it, and leaves the new rows entirely above it.
+   *
+   * Folded into the MVP rather than passed to each mesh builder so that the
+   * layers, thickness skirts, depth shapes, shoebox AND
+   * Diorama_ProjectCapturedPoint (which projects through this same matrix)
+   * cannot disagree about it. Column-major post-multiply by translate(0,d,0):
+   * only the last column changes, by d times the second. d is 0 when there is
+   * no vertical margin, leaving the matrix untouched. */
+  {
+    float extra_rows = tex_h - (float)kActRaiserAuthenticHeight;
+    float d = 0.5f * extra_rows / (float)kActRaiserAuthenticHeight;
+    if (d != 0.0f)
+      for (int r = 0; r < 4; r++)
+        mvp[12 + r] += d * mvp[4 + r];
+  }
+
+  /* Action objects follow BG1's stable camera/interpolation delta in this
+   * compositor (DioramaLayerBgIndex maps every OBJ band to index 0). Publish
+   * that exact resolved window rather than asking present.c to recreate it. */
+  if (out_projection) {
+    float object_du = interpolating ? scroll_delta->bg_du[0] : 0.0f;
+    float object_dv = interpolating ? scroll_delta->bg_dv[0] : 0.0f;
+    DioramaInterpUvWindow(uv_u0, uv_u1, object_du, uv_slack,
+                          &out_projection->object_u0,
+                          &out_projection->object_u1);
+    DioramaInterpUvWindow(uv_v0, uv_v1, object_dv, v_slack,
+                          &out_projection->object_v0,
+                          &out_projection->object_v1);
+    memcpy(out_projection->matrix, mvp, sizeof(mvp));
+    out_projection->aspect_x = aspect_x;
+    out_projection->height_scale = height_scale;
+    out_projection->texture_width = kPpuBufWidth;
+    /* The ALLOCATED height, matching texture_width's allocated width, because
+     * Diorama_ProjectCapturedPoint divides a texture row by this to get V and
+     * the uv_v window above is now expressed in the same allocated space. */
+    out_projection->texture_height = kPpuBufHeight;
+    out_projection->output_width = out_w;
+    out_projection->output_height = out_h;
+  }
 
   /* B6 (followup doc): drawn before the per-layer loop below — painter's
    * algorithm, the box surrounds the stack. */
@@ -1515,6 +1590,30 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         &g_layer_overrides, g_ram[kActRaiserWram_MapGroup],
         g_ram[kActRaiserWram_CurrentMap], defaults, kDioramaLayerCount,
         resolved, kDioramaLayerCount);
+  }
+
+  /* Publish the exact authored shape of each OBJ priority plane. Enhanced
+   * action effects remain a world overlay, but their registration now follows
+   * the same parallax/rake/bow as the source sprite band. */
+  if (out_projection) {
+    for (int i = 0; i < resolved_count; i++) {
+      int priority = -1;
+      switch (resolved[i].plane) {
+        case kPpuOverlaySource_Obj: priority = 0; break;
+        case kDioramaPlane_Obj1: priority = 1; break;
+        case kDioramaPlane_Obj2: priority = 2; break;
+        case kDioramaPlane_Obj3: priority = 3; break;
+        default: break;
+      }
+      if (priority < 0) continue;
+      out_projection->object_planes[priority] =
+          (DioramaObjectPlaneProjection){
+            .valid = true,
+            .z_world = resolved[i].z - 0.5f,
+            .rake = resolved[i].rake,
+            .bow = resolved[i].bow,
+          };
+    }
   }
 
   for (int i = 0; i < resolved_count; i++) {
@@ -1748,18 +1847,23 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
           is_backdrop ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND);
     }
 
-    /* Supersample targets contain only the active capture width, unlike the
-     * source textures whose allocation is kPpuBufWidth wide. Remap U into the
-     * compact target so its right edge is 1.0 instead of
-     * snes_width/kPpuBufWidth. Stack/skirt draws above still use the original
-     * source texture and therefore keep the original coordinates. */
+    /* Supersample targets contain only the active capture region, unlike the
+     * source textures whose allocation is kPpuBufWidth x kPpuBufHeight. Remap
+     * BOTH axes into the compact target so its right/bottom edges are 1.0
+     * instead of snes_width/kPpuBufWidth and snes_height/kPpuBufHeight. V used
+     * to need no remap because the texture was exactly as tall as its content;
+     * the vertical margin ended that. Stack/skirt draws above still use the
+     * original source texture and therefore keep the original coordinates. */
     SDL_Vertex ss_verts[DIORAMA_VERTS_PER_LAYER];
     SDL_Vertex *draw_verts = verts;
     if (used_ss) {
       memcpy(ss_verts, verts, (size_t)nv * sizeof(ss_verts[0]));
       float u_scale = (float)kPpuBufWidth / (float)snes_width;
-      for (int v = 0; v < nv; v++)
+      float v_scale = (float)kPpuBufHeight / (float)snes_height;
+      for (int v = 0; v < nv; v++) {
         ss_verts[v].tex_coord.x *= u_scale;
+        ss_verts[v].tex_coord.y *= v_scale;
+      }
       draw_verts = ss_verts;
     }
 
@@ -1780,7 +1884,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       bool shadow_blur = ShadowBlurEnabled(renderer);
       if (shadow_blur) {
         BlurUniforms u = {
-          1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height, 3.0f, 0.0f,
+          1.0f / (float)kPpuBufWidth, 1.0f / (float)kPpuBufHeight, 3.0f, 0.0f,
         };
         SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
         SDL_SetGPURenderState(renderer, g_blur_state);
@@ -1798,7 +1902,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * loses to the other. */
     if (rim_light) {
       RimLightUniforms u = {
-        1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height, 0.33f, 0.0f,
+        1.0f / (float)kPpuBufWidth, 1.0f / (float)kPpuBufHeight, 0.33f, 0.0f,
       };
       SDL_SetGPURenderStateFragmentUniforms(g_rim_light_state, 0, &u, sizeof(u));
       SDL_SetGPURenderState(renderer, g_rim_light_state);
@@ -1811,7 +1915,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
        * plane edge once a shift saturated). Use layer_u0/u1/v0/v1 directly so
        * the two can no longer disagree. */
       DofEdgeUniforms u = {
-        1.0f / (float)kPpuBufWidth, 1.0f / (float)snes_height, dof_radius,
+        1.0f / (float)kPpuBufWidth, 1.0f / (float)kPpuBufHeight, dof_radius,
         layer_u0, layer_u1,
         layer_v0, layer_v1,
         want_edge ? 2.0f : 0.0f, 0.0f,
@@ -1827,6 +1931,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   if (interpolating)
     SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_AUTO,
                                     SDL_TEXTURE_ADDRESS_AUTO);
+
+  if (out_projection) out_projection->valid = true;
 
   return true;
 }

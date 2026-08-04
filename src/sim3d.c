@@ -890,6 +890,23 @@ static void ApplyFixedColorAdd(void) {
   }
 }
 
+/* With the gate no longer vetoing, a mismatch produces no view transition and
+ * would otherwise be silent -- and `[sim3d-view]` was the whole first step of
+ * the DEBUG.md playbook for this symptom. Report the edges only: mismatching
+ * frames tend to arrive in runs, and one line per frame would bury the console
+ * exactly when something is wrong. */
+static void ReportFidelityChange(uint32_t mismatch, uint16_t game_frame) {
+  static int previous = -1;  /* -1 unknown, 0 matching, 1 mismatching */
+  int current = mismatch ? 1 : 0;
+  if (current == previous) return;
+  if (previous != -1 || current)
+    fprintf(stderr,
+            "[sim3d-d2] gf=%u fidelity %s (mismatch=%u px, view retained)\n",
+            (unsigned)game_frame, current ? "lost" : "regained",
+            (unsigned)mismatch);
+  previous = current;
+}
+
 void Sim3D_FinishCapture(uint8_t *authentic_pixels,
                          int authentic_pitch, uint16_t game_frame) {
   if (!g_sim3d.active || !authentic_pixels ||
@@ -927,22 +944,28 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
                     g_sim3d.width * (int)sizeof(uint32_t))
           : 0;
   /* A requested diagnostic dump is useful for failed fidelity gates too: it
-   * preserves the authentic/composed/difference triplet that explains why
-   * the frame remained on the authentic renderer. */
+   * preserves the authentic/composed/difference triplet that names which
+   * pixels the recomposition got wrong. Since the gate stopped vetoing this is
+   * the only way to see them, the frame itself having been kept. */
   MaybeDumpDemoArtifacts(authentic_pixels, authentic_pitch, game_frame);
 
-  if (mismatch) {
-    g_sim3d.status = kSim3DCapture_PixelMismatch;
-    RestoreTownHudPolicy(authentic_pixels, authentic_pitch);
-    return;
-  }
   if (!SimRenderMetadata_AtlasReady()) {
     g_sim3d.status = kSim3DCapture_AtlasInvalid;
     RestoreTownHudPolicy(authentic_pixels, authentic_pitch);
     return;
   }
+  /* The D2 pixel gate measures but no longer vetoes (ledger §31). Dropping a
+   * mismatching frame to the authentic composite traded a few wrong pixels for
+   * a whole-screen perspective change, and a one-frame flat flash reads as a
+   * far worse artifact than the mismatch it hides -- the same argument §24
+   * already accepted for the object-metadata gate. Strictness belongs in the
+   * checkpoints, where it is free: they still assert
+   * separated_mismatch_pixels_total == 0, and the count and status below still
+   * carry the failure into the D1 trace and the console. */
   g_sim3d.separated_valid = true;
-  g_sim3d.status = kSim3DCapture_Ready;
+  g_sim3d.status = mismatch ? kSim3DCapture_PixelMismatch
+                            : kSim3DCapture_Ready;
+  ReportFidelityChange(mismatch, game_frame);
   RestoreTownHudPolicy(authentic_pixels, authentic_pitch);
 
   /* A nonzero diagnostic mask intentionally produces an incomplete A1 while
@@ -1016,11 +1039,15 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
     return;
   }
   if (!ppu) return;
-  /* Only render alongside a capture that passed the D2 byte-equality gate.
-   * The canvas draws the same tiles the authentic frame does, so a frame the
-   * gate rejected is a frame whose PPU state is not understood, and the
-   * off-screen extension should not be trusted to interpret it either. */
-  if (!g_sim3d.separated_valid || g_sim3d.status != kSim3DCapture_Ready)
+  /* Only render alongside a capture that actually composed. A pixel mismatch
+   * no longer disqualifies the frame: the canvas has to follow whatever the
+   * separated view does, or removing the D2 veto would just trade one
+   * whole-screen flash for the ground extension popping in and out on the same
+   * frames. The statuses that still block here are the ones where no usable
+   * plane capture exists at all. */
+  if (!g_sim3d.separated_valid ||
+      (g_sim3d.status != kSim3DCapture_Ready &&
+       g_sim3d.status != kSim3DCapture_PixelMismatch))
     return;
   SimTownCanvas_Render(frame->town, wram, ppu->vram, ppu->cgram,
                        PPU_brightness(ppu), g_sim3d.backdrop_argb);

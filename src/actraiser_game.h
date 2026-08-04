@@ -116,6 +116,7 @@ enum {
   kActRaiserWram_BrkSoundRequest = 0x035B,
 
   kActRaiserWram_ActionObjectTable = 0x06A0,
+  kActRaiserWram_MagicController = 0x0860,
   kActRaiserWram_PlayerObject = 0x08A0,
   kActRaiserWram_PlayerPositionX = 0x08A2,
   kActRaiserWram_PlayerPositionY = 0x08A4,
@@ -169,6 +170,7 @@ enum {
 
   kActRaiserActionObjectStride = 0x40,
   kActRaiserActionObjectCount = 80,
+  kActRaiserActionMagicCohortCount = 7,
   kActRaiserSimFixedRecordStride = 0x12,
   kActRaiserSimFixedRecordCount = 48,
   kActRaiserSimWorldRecordStride = 0x26,
@@ -222,14 +224,48 @@ enum {
   kActRaiserSkyPalaceMagicRightAttr = 0x79,
 
   kActRaiserTransitionRequestBit = 0x80,
+  kActRaiserObjectStatus_InactiveMask = 0xC000,
   kActRaiserObjectStatus_End = 0x8000,
   kActRaiserObjectStatus_NoDraw = 0x2000,
   kActRaiserObjectStatus_IneligibleMask = 0x4C00,
   kActRaiserObjectFlag_OutsideActivation = 0x0400,
+  kActRaiserObjectFlip_Horizontal = 0x4000,
+  kActRaiserObjectFlip_Vertical = 0x8000,
+  kActRaiserObjectFlip_Mask = 0xC000,
   kActRaiserPlayerFlag_Invulnerable = 0x2000,
   kActRaiserPlayerFlag_InvulnerableHighByte = 0x20,
   kActRaiserUnknownMapGroup = 0xFF,
 };
+
+/* Stable layout of one $40-byte action object. Some fields are polymorphic
+ * outside the animation/sprite pipeline; these names describe the established
+ * rendering contract shared by the authentic OAM builder and host observers. */
+typedef enum ActRaiserActionObjectField {
+  kActRaiserActionObject_Status = 0x00,
+  kActRaiserActionObject_WorldX = 0x02,
+  kActRaiserActionObject_WorldY = 0x04,
+  kActRaiserActionObject_VelocityX = 0x06,
+  kActRaiserActionObject_VelocityY = 0x08,
+  kActRaiserActionObject_LeftExtent = 0x0A,
+  kActRaiserActionObject_TopExtent = 0x0C,
+  kActRaiserActionObject_RightExtent = 0x0E,
+  kActRaiserActionObject_BottomExtent = 0x10,
+  kActRaiserActionObject_Handler = 0x12,
+  kActRaiserActionObject_AnimationAddress = 0x16,
+  /* BYTE. +$16..+$18 is one 24-bit pointer (addr16 + bank8); the byte at +$19
+   * is the record's base OAM attribute, not the pointer's high half. Read this
+   * field 8-bit — a 16-bit read silently returns bank | attributes<<8. */
+  kActRaiserActionObject_AnimationBank = 0x18,
+  kActRaiserActionObject_BaseAttributes = 0x19,   /* byte; mirrors +$29 */
+  kActRaiserActionObject_AnimationState = 0x1A,
+  kActRaiserActionObject_AnimationIndex = 0x1C,
+  kActRaiserActionObject_Composition = 0x20,
+  kActRaiserActionObject_Visual = 0x22,
+  kActRaiserActionObject_Wait = 0x24,
+  kActRaiserActionObject_FlipAttributes = 0x28,
+  kActRaiserActionObject_Flags = 0x30,
+  kActRaiserActionObject_LocalCounter = 0x38,
+} ActRaiserActionObjectField;
 
 /* Low-WRAM (bank $7E, addresses $0000-$FFFF) 16-bit access.
  *

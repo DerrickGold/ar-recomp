@@ -228,6 +228,316 @@ static void TestLightningMiracleEffectCapture(void) {
   CHECK(frame.effects[0].age_ticks == 0);
 }
 
+static void TestTownCreationLightningEffectCapture(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  const uint16_t records[] = {
+    0x0E02, 0x0E28,
+  };
+  static const struct {
+    uint16_t composition;
+    SimEffectPhase phase;
+    uint32_t pulse_generation;
+    uint16_t phase_ticks;
+    uint16_t ticks_since_visible;
+    bool visible;
+  } sequence[] = {
+    { 0xE9CC, kSimEffectPhase_TownCreationBoltA, 1, 0, 0, true },
+    { 0xE9CC, kSimEffectPhase_TownCreationBoltA, 1, 1, 0, true },
+    { 0xE527, kSimEffectPhase_TownCreationGap,   1, 0, 1, false },
+    { 0xE527, kSimEffectPhase_TownCreationGap,   1, 1, 2, false },
+    { 0xEA27, kSimEffectPhase_TownCreationBoltB, 2, 0, 0, true },
+    { 0xEA27, kSimEffectPhase_TownCreationBoltB, 2, 1, 0, true },
+    { 0xE527, kSimEffectPhase_TownCreationGap,   2, 0, 1, false },
+    { 0xE527, kSimEffectPhase_TownCreationGap,   2, 1, 2, false },
+    { 0xEA82, kSimEffectPhase_TownCreationBoltC, 3, 0, 0, true },
+    { 0xEA82, kSimEffectPhase_TownCreationBoltC, 3, 1, 0, true },
+    { 0xE527, kSimEffectPhase_TownCreationGap,   3, 0, 1, false },
+    { 0xE527, kSimEffectPhase_TownCreationGap,   3, 1, 2, false },
+    { 0xEAEC, kSimEffectPhase_TownCreationBoltD, 4, 0, 0, true },
+    { 0xEAEC, kSimEffectPhase_TownCreationBoltD, 4, 1, 0, true },
+    { 0xE527, kSimEffectPhase_TownCreationGap,   4, 0, 1, false },
+    { 0xE527, kSimEffectPhase_TownCreationGap,   4, 1, 2, false },
+  };
+
+  SimRenderMetadata_Reset();
+  SimFrameData frame;
+  uint32_t generations[2] = {0};
+  for (size_t tick = 0; tick < sizeof(sequence) / sizeof(sequence[0]); tick++) {
+    uint16_t cursor = 0;
+    for (size_t strike = 0; strike < 2; strike++) {
+      SimRenderMetadata_BeginRecord(
+          records[strike], true, false, sequence[tick].composition,
+          (uint16_t)(0x0150 + strike * 0x10), 0x0068,
+          0x000E, 0, 0, cursor);
+      SimRenderMetadata_RecordWord06(0xA8BB);
+      SimRenderMetadata_RecordPart(cursor, 2u << 9);
+      cursor = (uint16_t)(cursor + 4);
+      SimRenderMetadata_EndRecord(cursor);
+    }
+    SimRenderMetadata_CaptureFrame(
+        &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+    CHECK(frame.metadata_valid);
+    CHECK(frame.effect_metadata_valid);
+    CHECK(frame.effect_count == 2);
+    CHECK(frame.effect_visible_count == (sequence[tick].visible ? 2 : 0));
+    for (size_t strike = 0; strike < 2; strike++) {
+      const SimEffectInstance *effect = &frame.effects[strike];
+      if (!generations[strike]) generations[strike] = effect->generation;
+      CHECK(effect->generation == generations[strike]);
+      CHECK(effect->record_address == records[strike]);
+      CHECK(effect->source_index == strike);
+      CHECK(frame.sources[strike].tier == kSimRecordTier_World);
+      CHECK(frame.sources[strike].type == 0x000E);
+      CHECK(frame.sources[strike].record_word06 == 0xA8BB);
+      CHECK(effect->kind == kSimEffect_TownCreationLightning);
+      CHECK(effect->phase == sequence[tick].phase);
+      CHECK(effect->color_family == kSimEffectColor_LightningBlue);
+      CHECK(effect->age_ticks == tick);
+      CHECK(effect->phase_ticks == sequence[tick].phase_ticks);
+      CHECK(effect->pulse_generation == sequence[tick].pulse_generation);
+      CHECK(effect->ticks_since_visible ==
+            sequence[tick].ticks_since_visible);
+      CHECK(effect->geometry.kind == kSimEffectGeometry_Point);
+      CHECK(effect->geometry.space == kSimEffectSpace_RecordLocal);
+      CHECK(effect->geometry.data.point.x == 8);
+      CHECK(effect->geometry.data.point.y == 80);
+      CHECK(effect->geometry.data.point.height == 0);
+      CHECK(effect->world_x == (uint16_t)(0x0150 + strike * 0x10));
+      CHECK(effect->world_y == 0x0068);
+      CHECK(effect->flags & kSimEffectFlag_RecordLifecycle);
+      CHECK(((effect->flags & kSimEffectFlag_Visible) != 0) ==
+            sequence[tick].visible);
+    }
+    CHECK(generations[0] != generations[1]);
+  }
+
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_TownCreationLightning),
+                "town_creation_lightning"));
+  CHECK(!strcmp(Sim3D_EffectPhaseName(
+                    kSimEffectPhase_TownCreationBoltD),
+                "town_creation_bolt_d"));
+
+  /* World tier, process identity, script base, and an exact composition are
+   * all required. In particular, $E527 also belongs to cursor lists 40-48. */
+  SimRenderMetadata_Reset();
+  SimRenderMetadata_BeginRecord(
+      records[0], true, false, 0xE9CC, 0x0150, 0x0068,
+      0x000D, 0, 0, 0);
+  SimRenderMetadata_RecordWord06(0xA8BB);
+  SimRenderMetadata_RecordPart(0, 2u << 9);
+  SimRenderMetadata_EndRecord(4);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 0);
+  SimRenderMetadata_BeginRecord(
+      records[0], true, false, 0xE527, 0x0150, 0x0068,
+      0x000E, 0, 0, 0);
+  SimRenderMetadata_RecordWord06(0xA840);
+  SimRenderMetadata_RecordPart(0, 0);
+  SimRenderMetadata_EndRecord(4);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 0);
+
+  SimRenderMetadata_BeginRecord(
+      kActRaiserWram_SimFixedRecords, false, false, 0xE9CC,
+      0x0150, 0x0068, 0x000E, 0, 0, 0);
+  SimRenderMetadata_RecordWord06(0xA8BB);
+  SimRenderMetadata_RecordPart(0, 2u << 9);
+  SimRenderMetadata_EndRecord(4);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 0);
+}
+
+static void TestEnemyLightningAndFireEffectCapture(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  SimFrameData frame;
+  const uint16_t record = kActRaiserWram_SimWorldRecords;
+
+  #define CAPTURE_EFFECT(type_, state_, composition_, palette_) do {       \
+    SimRenderMetadata_BeginRecord(                                        \
+        record, true, false, (composition_), 0x00F1, 0x0056,              \
+        (type_), (state_), 0, 0);                                         \
+    SimRenderMetadata_RecordPart(0, (uint16_t)(palette_) << 9);            \
+    SimRenderMetadata_EndRecord(4);                                       \
+    SimRenderMetadata_CaptureFrame(                                       \
+        &frame, wram, true, false, kSimFeature_All, 0,                    \
+        kSimFeature_All);                                                 \
+  } while (0)
+
+  SimRenderMetadata_Reset();
+  CAPTURE_EFFECT(0x12, 6, 0xE13F, 2);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effect_visible_count == 0);
+  CHECK(frame.effects[0].kind == kSimEffect_BlueDragonLightning);
+  CHECK(frame.effects[0].color_family == kSimEffectColor_LightningBlue);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_BlueDragonAttack);
+  CHECK(frame.effects[0].flags & kSimEffectFlag_RecordLifecycle);
+  CHECK(!(frame.effects[0].flags & kSimEffectFlag_Visible));
+  uint32_t dragon_generation = frame.effects[0].generation;
+
+  CAPTURE_EFFECT(0x12, 6, 0xE1BD, 2);
+  CHECK(frame.effects[0].generation == dragon_generation);
+  CHECK(frame.effects[0].age_ticks == 1);
+  CHECK(frame.effects[0].pulse_generation == 1);
+  CHECK(frame.effects[0].pulse_ticks == 0);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_BlueDragonBoltA);
+  CHECK(frame.effects[0].geometry.data.point.x == 8);
+  CHECK(frame.effects[0].geometry.data.point.y == 52);
+  CHECK(frame.effects[0].geometry.data.point.height == 0);
+
+  CAPTURE_EFFECT(0x12, 6, 0xE13F, 2);
+  CHECK(frame.effects[0].ticks_since_visible == 1);
+  CAPTURE_EFFECT(0x12, 6, 0xE209, 2);
+  CHECK(frame.effects[0].pulse_generation == 2);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_BlueDragonBoltB);
+  CAPTURE_EFFECT(0x12, 6, 0xE255, 2);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_BlueDragonBoltC);
+  CHECK(frame.effects[0].geometry.data.point.y == 56);
+
+  /* The bolt art alone is not a lifecycle: state 6 is the semantic gate. */
+  CAPTURE_EFFECT(0x12, 5, 0xE1BD, 2);
+  CHECK(frame.effect_count == 0);
+
+  SimRenderMetadata_Reset();
+  CAPTURE_EFFECT(0x14, 7, 0xE300, 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effect_visible_count == 0);
+  CHECK(frame.effects[0].kind == kSimEffect_RedDemonFire);
+  CHECK(frame.effects[0].color_family == kSimEffectColor_FireRed);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_RedDemonAttack);
+  uint32_t demon_generation = frame.effects[0].generation;
+
+  CAPTURE_EFFECT(0x14, 7, 0xE340, 1);
+  CHECK(frame.effects[0].generation == demon_generation);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_RedFireSmall);
+  CHECK(frame.effects[0].geometry.data.point.y == 18);
+  CHECK(frame.effects[0].geometry.data.point.height ==
+        kSimVirtualHeight_Flying);
+  CAPTURE_EFFECT(0x14, 7, 0xE35A, 1);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_RedFireMedium);
+  CHECK(frame.effects[0].geometry.data.point.y == 20);
+  CAPTURE_EFFECT(0x14, 8, 0xE383, 1);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_RedFireLarge);
+  CHECK(frame.effects[0].geometry.data.point.y == 22);
+  CAPTURE_EFFECT(0x14, 9, 0xE300, 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effect_visible_count == 0);
+  CAPTURE_EFFECT(0x14, 10, 0xE383, 1);
+  CHECK(frame.effect_count == 0);
+
+  /* Ground fire is composition-owned and deliberately survives a record-class
+   * transition. Its colour is not: the runtime-built compositions select OBJ
+   * palette 1 for the scripted red blaze and palette 2 for post-Lightning blue
+   * fire, even though both families use these exact pointer values. */
+  SimRenderMetadata_Reset();
+  CAPTURE_EFFECT(0x10, 0, 0xE6CA, 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effect_visible_count == 1);
+  CHECK(frame.sources[0].obj_palette_mask == (1u << 1));
+  CHECK(frame.effects[0].kind == kSimEffect_GroundFire);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_GroundFireA);
+  CHECK(frame.effects[0].color_family == kSimEffectColor_FireRed);
+  uint32_t fire_generation = frame.effects[0].generation;
+  CAPTURE_EFFECT(0x12, 0, 0xE6D0, 1);
+  CHECK(frame.effects[0].generation == fire_generation);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_GroundFireB);
+  CHECK(frame.effects[0].color_family == kSimEffectColor_FireRed);
+  CHECK(frame.effects[0].pulse_ticks == 1);
+  CAPTURE_EFFECT(0x13, 0, 0xE6D6, 2);
+  CHECK(frame.effects[0].generation == fire_generation);
+  CHECK(frame.sources[0].obj_palette_mask == (1u << 2));
+  CHECK(frame.effects[0].phase == kSimEffectPhase_GroundFireC);
+  CHECK(frame.effects[0].color_family == kSimEffectColor_FireBlue);
+  CHECK(frame.effects[0].geometry.data.point.x == 8);
+  CHECK(frame.effects[0].geometry.data.point.y == 8);
+  CHECK(frame.effects[0].geometry.data.point.height == 0);
+  CAPTURE_EFFECT(0x13, 0, 0xE6DC, 2);
+  CHECK(frame.effect_count == 0);
+
+  /* Run 20260803-130945 identified the scripted house blaze as three
+   * world-tier $0A01 records on the dedicated $A838 loop. Its 16x16 art is
+   * grounded at local (8,16), and the phase loop must remain one continuous
+   * emitter rather than respawning particles every source-frame change. */
+  SimRenderMetadata_Reset();
+  CAPTURE_EFFECT(0x0A01, 2, 0xDD2D, 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effect_visible_count == 1);
+  CHECK(frame.effects[0].kind == kSimEffect_HouseFire);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_HouseFireA);
+  CHECK(frame.effects[0].color_family == kSimEffectColor_FireRed);
+  CHECK(frame.effects[0].geometry.data.point.x == 8);
+  CHECK(frame.effects[0].geometry.data.point.y == 16);
+  CHECK(frame.effects[0].geometry.data.point.height == 0);
+  uint32_t house_fire_generation = frame.effects[0].generation;
+  CAPTURE_EFFECT(0x0A01, 2, 0xDD33, 1);
+  CHECK(frame.effects[0].generation == house_fire_generation);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_HouseFireB);
+  CHECK(frame.effects[0].pulse_generation == 1);
+  CHECK(frame.effects[0].pulse_ticks == 1);
+  CAPTURE_EFFECT(0x0A01, 2, 0xDD39, 1);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_HouseFireC);
+  CHECK(frame.effects[0].pulse_ticks == 2);
+
+  /* Reproduce the three simultaneous records in snap_00_gf19950 rather than
+   * proving only an isolated synthetic slot. */
+  static const uint16_t house_records[] = { 0x0F0C, 0x0F32, 0x0F58 };
+  static const uint16_t house_x[] = { 0x00F0, 0x00F0, 0x00C0 };
+  static const uint16_t house_y[] = { 0x0080, 0x0090, 0x00B0 };
+  SimRenderMetadata_Reset();
+  for (size_t i = 0; i < 3; i++) {
+    SimRenderMetadata_BeginRecord(
+        house_records[i], true, false, 0xDD33, house_x[i], house_y[i],
+        0x0A01, 2, 0, (uint16_t)(i * 4));
+    SimRenderMetadata_RecordPart((uint16_t)(i * 4), 1u << 9);
+    SimRenderMetadata_EndRecord((uint16_t)((i + 1) * 4));
+  }
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 3);
+  CHECK(frame.effect_visible_count == 3);
+  for (size_t i = 0; i < 3; i++) {
+    CHECK(frame.effects[i].record_address == house_records[i]);
+    CHECK(frame.effects[i].world_x == house_x[i]);
+    CHECK(frame.effects[i].world_y == house_y[i]);
+    CHECK(frame.effects[i].kind == kSimEffect_HouseFire);
+    CHECK(frame.effects[i].phase == kSimEffectPhase_HouseFireB);
+  }
+  CHECK(frame.effects[0].generation != frame.effects[1].generation);
+  CHECK(frame.effects[1].generation != frame.effects[2].generation);
+
+  /* Neither the packed event identity nor neighbouring composition bytes are
+   * sufficient on their own. */
+  CAPTURE_EFFECT(0x0001, 2, 0xDD2D, 1);
+  CHECK(frame.effect_count == 0);
+  CAPTURE_EFFECT(0x0A01, 2, 0xDD2E, 1);
+  CHECK(frame.effect_count == 0);
+
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_BlueDragonLightning),
+                "blue_dragon_lightning"));
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_RedDemonFire),
+                "red_demon_fire"));
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_GroundFire),
+                "ground_fire"));
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_HouseFire),
+                "house_fire"));
+  CHECK(!strcmp(Sim3D_EffectColorName(kSimEffectColor_FireRed),
+                "fire_red"));
+  CHECK(!strcmp(Sim3D_EffectColorName(kSimEffectColor_FireBlue),
+                "fire_blue"));
+  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_RedFireLarge),
+                "red_fire_large"));
+  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_HouseFireC),
+                "house_fire_c"));
+
+  #undef CAPTURE_EFFECT
+}
+
 static void TestEffectOverflowFailsClosed(void) {
   uint8 wram[kActRaiserWramSize] = {0};
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
@@ -487,10 +797,15 @@ static void TestVirtualHeightClassification(void) {
     { "building zap", kSimRecordTier_World, 0x12, 9, world, 0xE209,
       kSimHeightClass_GroundEffect, 0,
       kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow },
-    { "struck ground", kSimRecordTier_World, 0x19, 0, world, 0xEA00,
+    { "town creation bolt", kSimRecordTier_World, 0x000E, 0,
+      0x0E02, 0xEA82,
       kSimHeightClass_GroundEffect, 0,
       kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow },
+    { "town creation range interior", kSimRecordTier_World, 0x19, 0,
+      world, 0xEA00, kSimHeightClass_Grounded, 0, 0 },
     { "ground fire", kSimRecordTier_World, 0x19, 0, world, 0xE6D0,
+      kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow },
+    { "scripted house fire", kSimRecordTier_World, 0x0A01, 2, world, 0xDD33,
       kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow },
     { "napper pluck", kSimRecordTier_World, 0x13, 11, world, 0xE73A,
       kSimHeightClass_SemiGrounded, kSimVirtualHeight_SemiGrounded, 0 },
@@ -1489,6 +1804,8 @@ static void TestCapturedWorldNavigationFixtures(const char *steady_path,
 int main(int argc, char **argv) {
   TestFeatureDependencies();
   TestLightningMiracleEffectCapture();
+  TestTownCreationLightningEffectCapture();
+  TestEnemyLightningAndFireEffectCapture();
   TestEffectOverflowFailsClosed();
   TestRecordPartitionAndClippedReset();
   TestIntegrityFallback();

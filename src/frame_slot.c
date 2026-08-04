@@ -17,6 +17,7 @@
 #include "sim_render_metadata.h"
 #include "sim_town_canvas.h"
 #include "sim_world_navigation_capture.h"
+#include "action_effects.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "common_rtl.h"      /* g_ram, g_ppu */
@@ -69,6 +70,11 @@ static float g_diorama_vely_avg = 4.0f;
  * setting, and a session parked in the settings menu cannot recalibrate the
  * averages against a frozen pause velocity. */
 static int g_capture_ticks;   /* ticks since previous capture; 0 while paused */
+static ActionEffectObserver s_action_effect_observer;
+
+void FrameSlot_ResetActionEffects(void) {
+  ActionEffectObserver_Reset(&s_action_effect_observer);
+}
 
 static float NormalizeReactiveVelocity(int16_t v, float *avg) {
   static const float kFloor = 4.0f;
@@ -315,6 +321,34 @@ void FrameSlot_Capture(FrameSlot *dst) {
    * reactive-camera statistics above use. */
   dst->capture_ticks = (uint8_t)g_capture_ticks;
 
+  ActionEffects_CaptureFrame(&s_action_effect_observer, &dst->action_effects,
+                             g_ram,
+                             kActRaiserWramSize, g_capture_ticks);
+  dst->action_effect_lighting = g_settings.action_effect_lighting;
+  dst->action_effect_particles = g_settings.action_effect_particles;
+  /* Capture-side twin of present.c's "[action-fx] first spell geometry
+   * submitted". Together the two lines localise any future silence: neither
+   * means no spell was ever identified in WRAM, capture-only means the
+   * identification works but the renderer never drew it. Chasing that
+   * distinction by hand is what cost a session when the animation-bank read
+   * was the wrong width (docs/bug-ledger.md §32). */
+  if (dst->action_effects.effect_count) {
+    static bool announced;
+    if (!announced) {
+      announced = true;
+      fprintf(stderr, "[action-fx] first spell captured: kind=%u part(s)=%u "
+              "visible=%u (lighting=%d particles=%d)\n",
+              dst->action_effects.controller_kind,
+              dst->action_effects.effect_count,
+              dst->action_effects.visible_count,
+              g_settings.action_effect_lighting,
+              g_settings.action_effect_particles);
+    }
+  }
+  dst->magic_cycle_armed = g_settings.cheat_magic_cycle;
+  dst->magic_cycle_selected =
+      g_settings.cheat_magic_cycle ? ActRaiser_SelectedMagic() : 0;
+
   /* D2 publishes only the pitch-zero separated-composite capability, and
    * only after its same-frame CPU oracle found zero differing pixels. */
   if (s_pending_annotated_sim) {
@@ -342,6 +376,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->ignore_aspect_ratio = g_settings.ignore_aspect_ratio;
   dst->visible_x0 = Settings_VisibleX0();
   dst->visible_width = Settings_VisibleWidth();
+  /* Latched, not read from g_ppu, for the same reason extra_left_cur is. */
+  dst->ws_extra_top = ActRaiser_LiveVerticalMargin();
   /* Density-corrected here, at the D6 producer, so present.c consumes a value
    * already expressed in PHYSICAL output pixels (0 = auto passes through). */
   dst->hud_scale_percent =
@@ -476,9 +512,12 @@ void FrameSlot_Capture(FrameSlot *dst) {
       d->oamFirst = src->oamFirst; d->oamCount = src->oamCount;
     }
 
+    ActRaiser_HudObjIconRange(&dst->hud_icon_first, &dst->hud_icon_count);
+
     /* Only needed when an OBJ overlay/HUD icon is active this frame (§2.8
      * cost note). */
-    if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount) {
+    if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount ||
+        dst->hud_icon_count) {
       _Static_assert(sizeof(dst->oam) == sizeof(g_ppu->oam), "oam size (D18)");
       _Static_assert(sizeof(dst->high_oam) == sizeof(g_ppu->highOam),
                      "highOam size (D18)");

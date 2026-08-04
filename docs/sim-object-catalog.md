@@ -89,14 +89,15 @@ as follows:
 | `$01-$08` | Blue Dragon bodies and directional frames | flying actor |
 | `$09-$0B` (`$E1BD/$E209/$E255`) | Building-zap lightning animation | ground-targeted effect at the selected building tile |
 | `$0C` | Unreferenced one-part identity; blank in captured tiles | unresolved |
-| `$0D-$17` | Red Demon bodies and fire/attack frames | flying actor or attached effect |
+| `$0D-$14` | Red Demon body/attack frames | flying actor |
+| `$15-$17` (`$E340/$E35A/$E383`) | Palette-1 Red Demon fire, small through large | effect attached to the flying actor |
 | `$18-$1F` | Napper Bat flight/dive frames | flying/dynamic |
 | `$20-$22` | Skull Head bodies | flying |
 | `$23-$25` | Shared explosion/ring sequence | effect; no shadow |
 | `$26` | Unreferenced one-part identity; blank in captured tiles | unresolved |
 | `$27-$2E` | Bat-with-passenger/carrying silhouettes | flying/dynamic; passenger attached |
 | `$2F-$33` | Groups of people sprites | grounded group |
-| `$34-$36` (`$E6CA/$E6D0/$E6D6`) | Ground fire animation | map-height ground effect |
+| `$34-$36` (`$E6CA/$E6D0/$E6D6`) | Runtime-built ground-fire animation; emitted palette 1 is scripted red, palette 2 is post-Lightning blue | map-height ground effect |
 | `$37-$39` | Blue orb effect sequence | effect; no shadow |
 | `$3A-$3C` (`$E71B/$E73A/$E75E`) | Napper plucking people from the ground | semi-grounded/near-ground dynamic phase |
 | `$3D`, `$3F` | Skull Head alternate/helper frames | flying |
@@ -128,7 +129,7 @@ They contain these broad groups:
 | `$E99C-$E9C6` | Eight sailboat frames: two each facing down, up, right, and left; the paired animation changes the sail | water plane; no flight shadow |
 | `$D993` | 64x64 hollow path/area selection square (palette 6) | map-plane cursor, like `$D233-$D302`; never billboarded |
 | `$D9E5-$DCD2` | Miracle cloud family (see below) | map-plane effect; record-origin anchor; ROM supplies its own shadow |
-| `$E9CC-$EAEC` | Lightning and struck-ground/house effects | ground-targeted effect; no independent altitude |
+| `$E9CC/$EA27/$EA82/$EAEC` | Town-creation lightning frames initialized by selector `$0504`; live records are world process `$000E` with script base `$A8BB` in raw `+$06`; `$E527` is the interleaved offscreen gap | ground-targeted effect; record-origin anchor; no independent altitude or shadow |
 | `$EBE8-$EC09` | People/horse scene metatiles | grounded scene composite, not a flying actor |
 | `$EC14-$EC35` | Angel cloud tiles used by rain, thunder, and other miracles | flying effect |
 | `$EC40-$EDF8` | Large aggregate strips/grids and event effects | effect/controller, not one physical actor |
@@ -187,10 +188,19 @@ need a depth curve or attachment rule:
   as the angel. Anchor its billboard at the record origin and do not give it a
   shadow. Its `+$1A/+$1C` velocity, collision, and `$01:B473` lifetime/culling
   remain authentic gameplay behavior, not presentation inputs to rewrite.
-- Blue Dragon remains on its flight plane while compositions `$E1BD/$E209/$E255`
-  are projected to the selected building/ground position.
+- Blue Dragon state 6 moves the record to its selected building/ground target. The entire
+  33-frame state uses the `ground_strike` plane so ordinary body-frame gaps stay attached to the
+  bolt; only `$E1BD/$E209/$E255` are emissive.
 - Napper compositions `$E71B/$E73A/$E75E` are the semi-grounded plucking phase.
-- Fire compositions `$E6CA/$E6D0/$E6D6` are grounded effects.
+- Red Demon `$E340/$E35A/$E383` fire stays attached to its 24-pixel flight plane.
+  `$E6CA/$E6D0/$E6D6` is a grounded effect in both palette-1 red and palette-2 blue variants;
+  the shared address alone does not identify its colour.
+- Scripted burning houses use packed world identity `$0A01` and the separate palette-1
+  `$DD2D/$DD33/$DD39` family. Each composition is one 16x16 part, so the record-local ground
+  contact is `(8,16)`. Classify it as `ground_effect`/`NoShadow`; do not merge it with the shared
+  red/blue `$E6CA` family. The screen-upright glow and ember source are lifted four authentic
+  pixels to `(8,12)` so both center within the flame silhouette without changing its semantic
+  ground contact.
 - Selection cursors and miracle targeting are screen/world overlays and should
   trigger the top-down camera transition rather than participate in shadows.
 - All non-enemy world graphics—people, groups of people, animals, boats, and
@@ -322,6 +332,11 @@ Coverage observed in the canonical 12,000-frame Fillmore action replay:
 | `grounded` | 16,535 | people, groups, scene composites |
 | `map_plane` | 6,183 | `$D233-$D302` selectors |
 | `water_plane` | 0 | Fillmore spawns no sailboats; unit-tested only |
+
+Run `20260803-130945` adds three simultaneous `$0A01/$DD33` burning-house records outside the
+canonical replay counts above. Their exact three-frame family and ground classification are
+unit-tested; the table remains an honest report of the original 12,000-frame replay rather than
+silently mixing datasets.
 
 ## Human-reviewed classification reference
 

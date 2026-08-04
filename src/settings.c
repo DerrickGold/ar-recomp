@@ -27,7 +27,7 @@ static SettingsActionObserver s_action_observer;
  * s_config_layer, and Settings_InitWithFile aborts the moment the table
  * outgrows it, so a cap that tracks the count exactly turns every new setting
  * into a crash on boot. */
-enum { kSettingsMaxDescriptors = 256, kSettingsLayerValueSize = 512 };
+enum { kSettingsMaxDescriptors = 320, kSettingsLayerValueSize = 512 };
 typedef struct SettingsLayerValue {
   bool present;
   bool legacy_env_syntax;
@@ -667,11 +667,11 @@ static bool Sim3DRimLightAvailable(void) {
 }
 static bool Sim3DEffectLightingAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_EffectLighting) &&
-      Present_SimEffectRendererSupported();
+      Present_EffectRendererSupported();
 }
 static bool Sim3DParticlesAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_Particles) &&
-      Present_SimEffectRendererSupported();
+      Present_EffectRendererSupported();
 }
 static bool Sim3DWorldUnderlayAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_WorldUnderlay);
@@ -731,6 +731,9 @@ static bool Sim3DPickerEaseAvailable(void) {
  * back if the "gpu" driver isn't available on this machine (main.c). */
 extern bool g_gpu_shaders_active;
 static bool GpuShadersActive(void) { return g_gpu_shaders_active; }
+static bool ActionEffectRendererAvailable(void) {
+  return Present_EffectRendererSupported();
+}
 
 static const char *const kInputDeviceLabels[kInputDevice_Count] = {
   "Auto", "Keyboard", "Gamepad",
@@ -1457,6 +1460,19 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_distance_x100, 0, 0, 2000, 25, false, NULL, 0,
     Diorama_ModeIsOn, NULL, NULL, NULL },
+  /* Scanlines of real world revealed ABOVE the authentic 224-line viewport,
+   * the vertical counterpart of the widescreen side margins. Defaults to 0
+   * (authentic framing) because the band is where the level's vertical tilemap
+   * streaming shows its seams: column strips decode only a 512px-tall window,
+   * and rows outside it hold filler until a row strip covers them
+   * (rendering-engine.md §4). 32 is the hard ceiling, set by the 8-bit OAM Y
+   * encoding rather than by taste -- see kPpuExtraTopBottom. */
+  { "diorama_vertical_extend", NULL, "Vertical extend",
+    "Scanlines of extra world drawn above the screen so the tilted view fills "
+    "more height. 0 keeps the authentic 224-line frame.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_vertical_extend, 0, 0, 32, 4, false, NULL, 0,
+    Diorama_ModeIsOn, NULL, NULL, NULL },
   INT_SETTING(diorama_depth_shade, NULL, "Depth shading",
               "Strength of the atmospheric darkening applied to farther planes.",
               kSettingCat_Presentation, 100, 0, 100, NULL, Diorama_ModeIsOn),
@@ -1502,6 +1518,18 @@ const SettingDesc g_setting_descs[] = {
                "60fps pixel update rate (see Scroll interpolation for "
                "smoother diorama motion).",
                kSettingCat_Graphics, 0, false, NULL, NULL),
+  BOOL_SETTING(action_effect_lighting, "AR_ACTION_EFFECT_LIGHTING",
+               "Action spell lighting",
+               "Add transient local illumination to action-stage magic. Uses "
+               "portable SDL additive geometry in both flat and diorama mode.",
+               kSettingCat_Graphics, 1, false,
+               ActionEffectRendererAvailable, NULL),
+  BOOL_SETTING(action_effect_particles, "AR_ACTION_EFFECT_PARTICLES",
+               "Action spell particles",
+               "Add deterministic host particles synchronized to captured "
+               "action-stage spell actors.",
+               kSettingCat_Graphics, 1, false,
+               ActionEffectRendererAvailable, NULL),
   /* M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish). The
    * backend switch needs a restart (SDL's renderer backend is fixed at
    * SDL_CreateRenderer); the effect rows below apply live and are only
@@ -1696,6 +1724,18 @@ const SettingDesc g_setting_descs[] = {
   BINDING_HOST_SETTING(kInputAction_Turbo, "turbo", "Fast forward"),
   BINDING_HOST_SETTING(kInputAction_SaveState, "savestate", "Save state"),
   BINDING_HOST_SETTING(kInputAction_LoadState, "loadstate", "Load state"),
+  /* The one host action with a keyboard row (input_map.h): it is a debug
+     control, not a way in or out of the menu, so a bad rebind costs nothing.
+     Inert until the Cheats tab's "Cycle magic spell" toggle arms it. */
+  BINDING_SETTING(kInputAction_MagicCycle, kInputClass_Keyboard,
+                  "bind_key_magic_cycle", "Cycle magic spell",
+                  "Debug aid; needs the Cycle magic spell cheat. Press "
+                  "Enter, then the key to bind. Y resets it to the default."),
+  BINDING_SETTING(kInputAction_MagicCycle, kInputClass_Gamepad,
+                  "bind_pad_magic_cycle", "Cycle magic spell",
+                  "Debug aid; needs the Cycle magic spell cheat. Press "
+                  "Enter, then the button to bind. Y resets it to the "
+                  "default."),
 
   /* This is an optional gameplay enhancement rather than a bug fix: the
    * original 128-record structure cap is authentic. Completed bridges move
@@ -1725,7 +1765,7 @@ const SettingDesc g_setting_descs[] = {
    * is read by the ROM-image transform, which re-runs whenever one changes. */
   BOOL_SETTING(rando_enable, "AR_RANDO", "Randomizer",
                "Rewrite the game's content tables from the seed below. Off "
-               "restores the stock ROM image byte for byte. Stat changes take "
+               "restores the non-randomized ROM baseline. Stat changes take "
                "effect at the next spawn, placement changes at the next level "
                "load.",
                kSettingCat_RandoSeed, 0, false, NULL, RandoChanged),
@@ -1988,6 +2028,12 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Bool, kApply_Passive, kSettingCat_Cheats,
     &g_settings.cheat_no_knockback, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
+  BOOL_SETTING(cheat_magic_cycle, "AR_MAGIC_CYCLE", "Cycle magic spell",
+               "Arm the Cycle magic spell control (Controls tab) to step "
+               "through the spells you have unlocked during an action stage, "
+               "reloading that spell's OBJ tiles. A cheat badge is shown "
+               "while this is on.",
+               kSettingCat_Cheats, 0, false, NULL, NULL),
   { "pins", "AR_PIN", "Custom PAR pins",
     "Comma-separated 7Exxxxvv/7Fxxxxvv codes, enforced every frame.",
     kSettingType_Custom, kApply_Passive, kSettingCat_Cheats,

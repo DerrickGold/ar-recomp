@@ -62,6 +62,10 @@ to the same manifest and runner; their results are recorded in
 | `D2-margin-object-exit` | D2 byte-exactness when an object exits into a collapsed widescreen margin (ledger §23) |
 | `D5a-world-underlay` | world-map underlay + full-town canvas; asserts the D2 gate stays at zero mismatch, so the extension is present-side only |
 | `D6a-lightning-miracle` | full 240-tick Lightning lifecycle with semantic phases/generation, 12 exact visible frames, batched additive local light and deterministic pulse-relative particles, strict overflow accounting, exact feature-off baseline, and authentic-framebuffer non-interference |
+| `D6b-blue-ground-fire` | 1,123 palette-2 ground-fire ticks across 29 lifecycles, all three exact compositions, four concurrent emitters, continuous rising particles/local light, and the exact feature-off baseline |
+| `D6c-blue-dragon-lightning` | one exact 33-tick class-`$12` strike lifecycle, including both three-frame bolt bursts and the non-emissive body-frame gaps, through the shared portable lightning renderer |
+| New-town creation lightning (live source capture + unit coverage; post-fix replay pending) | run `20260803-133014` resolves world records `$0E02/$0E28`, process `$000E`, raw `+$06 == $A8BB`, positions `$0150/$0068` and `$0160/$0068`; two independent records are covered through all four `$01:A8BB` bolt phases and their two-tick `$E527` gaps with exact `(8,80)` impact geometry, stable lifecycle generations, and four distinct pulse generations |
+| Scripted burning houses (live captures + unit coverage; presentation-offset replay pending) | run `20260803-130945` frame 19,950 proves three simultaneous world `$0A01/$DD33` records; ROM crawl proves the palette-1 `$01:A838` loop `$DD2D/$DD33/$DD39`, exact 16x16 bounds and one-tick source cadence. Metadata asserts continuous lifecycle and `(8,16)` semantic ground contact; the signature-checked visual patch holds each source frame four ticks. Run `20260803-134746` proves glow and particles should be presented four pixels inside the art at `(8,12)` |
 
 The checkpoint asserts the five ROM routine entries at `$01:9754` and the exact
 resolved miracle-kind set `1-5` from `$7F:90EB`. The current `sim-actions.rec`
@@ -71,6 +75,14 @@ trace also contains these stable special-object facts:
 - Blue Dragon building lightning: `$E1BD/$E209/$E255`, record type `$12`;
 - grounded people observed across `$E676-$E6B5`, record type `$19`;
 - ground fire: `$E6CA/$E6D0/$E6D6`, observed on `$10/$12/$13` records.
+- scripted burning houses: packed identity `$0A01`, `$DD2D/$DD33/$DD39`; three concurrent
+  `$DD33` records observed in run `20260803-130945` frame 19,950.
+
+Separately, run `20260803-133014`, the ROM crawl, and the metadata unit sequence
+cover new-town creation lightning as world process `$000E` retaining script
+base `$A8BB` in raw `+$06`: `$E9CC/$EA27/$EA82/$EAEC`, with `$E527` as the
+nonvisible lifecycle gap. That run captured the authentic source records before
+the corrected hook; a post-fix replay is still required for visual acceptance.
 
 Run `python3 tools/sim3d_demo.py --all` for the current suite result; it writes
 one `coverage.json` linking every individual report. Pinning a specific past

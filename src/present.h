@@ -8,6 +8,7 @@
 #include "hd_replacements.h"
 #include "diorama.h"
 #include "sim_render_metadata.h"
+#include "action_effects.h"
 
 /* M5 (ar-recomp-threading-impl.md Appendix D). FrameSlot is the ONE contract
  * for everything present-time rendering reads: it is populated by the single
@@ -121,6 +122,13 @@ typedef struct FrameSlot {
   bool ignore_aspect_ratio;
   int visible_x0;
   int visible_width;
+  /* Vertical margin the PPU actually rendered for this frame (the transpose of
+   * ws_extra). snes_height stays the AUTHENTIC visible height, so the captured
+   * surfaces are snes_height + ws_extra_top rows tall and authentic scanline 0
+   * lives at row ws_extra_top -- just as texture column 0 is screen
+   * x = -ws_extra. Zero on every non-diorama frame, which is what keeps the
+   * flat presentation path (which assumes row 0) correct by construction. */
+  int ws_extra_top;
   int hud_scale_percent;
 
   /* Diorama gate (D14 — Diorama_IsActiveThisFrame() result for this frame). */
@@ -138,6 +146,19 @@ typedef struct FrameSlot {
    * private.  All effective visual bits are zero until their render stages
    * land, so adding this contract cannot change the authentic composite. */
   SimFrameData sim;
+
+  /* Action-stage spell lifecycle, captured from WRAM beside the frame it
+   * decorates. The payload is inert outside a positively identified spell. */
+  ActionEffectFrame action_effects;
+  bool action_effect_lighting;
+  bool action_effect_particles;
+
+  /* "Cycle magic spell" cheat state, snapshotted rather than read live so the
+   * present thread never touches g_settings or WRAM. While armed the composite
+   * draws a badge naming the current spell: a spell-swapped session must be
+   * self-evidently non-stock in any screenshot, recording, or bug report. */
+  bool magic_cycle_armed;
+  uint8_t magic_cycle_selected;   /* 0 = none, else 1..4 */
 
   /* M7 (§6.1)/B1b (followup doc): per-frame camera snapshot for present-time
    * interpolation. timestamp_ns is when THIS slot was captured
@@ -286,9 +307,20 @@ typedef struct FrameSlot {
 
   FrameSlotOverlayCapture overlay_captures[kFrameSlotOverlaySourceCount];
 
-  /* OBJ HUD-icon promotion. Only populated when
-   * overlay_captures[Obj].oamCount != 0 (§2.8 cost note); oam_valid says
-   * whether this frame actually filled them. */
+  /* OBJ HUD-icon promotion. The OAM slots ActRaiser_WidescreenHudObjPromote
+   * validated this frame, latched from ActRaiser_HudObjIconRange; a zero count
+   * means it promoted nothing.
+   *
+   * Do NOT re-derive this from overlay_captures[Obj].oamFirst/oamCount. That
+   * range is whatever policy claimed the ONE OBJ capture slot last, and in
+   * diorama mode that is the full-frame 0..127 scene claim, not the icon —
+   * which is exactly how the icon used to get lost and fall back to being
+   * drawn centered with the scene instead of anchored right. */
+  uint8_t hud_icon_first, hud_icon_count;
+
+  /* oam/high_oam are only populated when there is an OBJ overlay or a promoted
+   * icon to resolve (§2.8 cost note); oam_valid says whether this frame
+   * actually filled them. */
   bool oam_valid;
   uint16_t oam[0x100];
   uint8_t high_oam[0x20];

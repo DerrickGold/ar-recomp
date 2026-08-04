@@ -63,6 +63,7 @@
 #include "sim_phase0_trace.h"
 #include "sim_render_metadata.h"
 #include "sim_world_map_build.h"
+#include "sim_visual_patches.h"
 #include "sim_world_navigation_capture.h"
 #include "sim_render_atlas.h"
 #include "sim_town_canvas.h"
@@ -105,7 +106,11 @@ int g_snes_width = kActRaiserAuthenticWidth,
     g_snes_height = kActRaiserAuthenticHeight;
 /* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
  * active width can change live without reallocating storage; each frame uses
- * only the leading g_snes_width*4 bytes per row. */
+ * only the leading g_snes_width*4 bytes per row. Rows follow the same rule on
+ * the other axis: capacity for the full vertical margin band, of which a frame
+ * uses only 224 + g_ws_extra_top + g_ws_extra_bottom. */
+_Static_assert(kHostDisplayFramebufferHeight >= kPpuBufHeight,
+               "frame surfaces must hold every row the PPU can render");
 uint8_t g_pixels[
     kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
 uint8_t g_hud_bg_pixels[
@@ -138,14 +143,20 @@ static void DestroyDioramaTextures(void) {
 }
 
 static void CreateDioramaTextures(void) {
+  /* Allocated at the PPU's full render-target size on BOTH axes, for the same
+   * reason: kPpuBufWidth already covered every widescreen margin without a
+   * realloc, and kPpuBufHeight now does the same for the vertical band. Only
+   * the leading snes_width x (snes_height + ws_extra_top) region is uploaded
+   * each frame; Diorama_Composite's UV window is expressed against these
+   * allocated dimensions. */
   uint8_t *zero_fill =
-      calloc(1, (size_t)kPpuBufWidth * g_snes_height * 4);
+      calloc(1, (size_t)kPpuBufWidth * kPpuBufHeight * 4);
   for (int i = 0; i < kDioramaPlane_Count; i++) {
     if (i == kPpuOverlaySource_Bg4)
       continue;
     g_diorama_textures[i] = SDL_CreateTexture(
         g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kPpuBufWidth, g_snes_height);
+        kPpuBufWidth, kPpuBufHeight);
     if (!g_diorama_textures[i])
       continue;
     SDL_SetTextureBlendMode(g_diorama_textures[i],
@@ -171,6 +182,20 @@ int g_ws_extra;
  * tilt reveals real content, while the flat presentation keeps showing the
  * user's chosen aspect. */
 int g_ws_display_extra;
+/* The vertical transpose of g_ws_extra: scanlines the PPU renders above line 0
+ * and below line 223 this frame, already clamped to real world space by
+ * ActRaiser_ApplyWidescreenPolicy. Diorama-only (nothing in the flat path is
+ * prepared for a non-zero frame origin), and 0 restores authentic 224-line
+ * output everywhere.
+ *
+ * g_ws_extra_bottom stays 0 for now and is not merely unwired: OAM Y is 8-bit
+ * with a 256 modulus against a 224-line screen, so a sprite below the screen is
+ * indistinguishable from one above it and the game's object coordinates carry
+ * no usable data down there. The top band has no such problem -- those
+ * positions are already what OAM encodes -- which is why it is the half that
+ * ships. See kPpuExtraTopBottom. */
+int g_ws_extra_top;
+int g_ws_extra_bottom;
 
 extern Snes *g_snes;
 extern Ppu *g_ppu;
@@ -1113,10 +1138,21 @@ int main(int argc, char **argv) {
   Snes *snes = SnesInit(rom_data, (int)rom_size);
   if (!snes) Die("SnesInit failed");
 
+  /* Keep deterministic visual source-data adjustments below cart_load (which
+   * copies rom_data) and above Randomizer_Init (which snapshots the live cart
+   * as its non-randomized restore baseline). A signature mismatch is safe but
+   * important: it means effects metadata and the running visual script would
+   * no longer share the investigated USA-ROM contract. */
+  if (!SimVisualPatches_Apply(snes->cart->rom, snes->cart->romSize))
+    fprintf(stderr,
+            "[sim-visuals] house-fire cadence patch skipped: "
+            "unexpected ROM signature\n");
+
   /* Randomizer: cart_load COPIES the image, so the buffer the game actually
    * reads is the cart's, not rom_data. Register that one and apply before the
-   * game coroutine starts. With the master off this restores a byte-exact
-   * stock image, so an unrandomized run stays valid for the A/B harness. */
+   * game coroutine starts. Its pristine snapshot deliberately includes the
+   * deterministic visual adjustments above, so later option changes restore
+   * a stable non-randomized baseline instead of erasing them. */
   if (Randomizer_Init(snes->cart->rom, snes->cart->romSize))
     Randomizer_Apply();
 
@@ -1232,6 +1268,7 @@ int main(int argc, char **argv) {
       int slot = atoi(ls);
       for (int i = 0; i < 4; i++) RtlRunFrame(0);
       RtlSaveLoad(kSaveLoad_Load, slot);
+      FrameSlot_ResetActionEffects();
       fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
     } }
 

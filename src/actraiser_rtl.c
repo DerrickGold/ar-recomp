@@ -13,6 +13,7 @@
 #include "diorama_capture_blend.h"
 #include "diorama_skybox_uv.h"
 #include "diorama_planes.h"
+#include "host_display.h"   /* kHostDisplayFramebufferHeight */
 #include "settings.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
@@ -764,6 +765,95 @@ enum {
   kBgTilemapPageMask = 0xFC,
 };
 
+/* Per-frame VERTICAL margin policy — the transpose of the bounded-world side
+ * margin clamp in ActRaiser_ApplyWidescreenPolicy, and deliberately built the
+ * same way: ask the game's own camera and layer-dimension state how much world
+ * actually exists past the viewport edge, and never request more than that.
+ *
+ * The camera routine at $02:B091 clamps V to [0, $30 - $E1] with $E1 = 225 --
+ * the hardcoded viewport height, exactly as the H clamp's $100 is the
+ * hardcoded 256 width (rendering-engine.md §6). So `camera_y` IS the number of
+ * world rows above the viewport, and `height - 225 - camera_y` the number
+ * below. At the top of a level both the camera and the available margin are 0,
+ * which is what stops the band from showing the void the level ends at.
+ *
+ * Action stages only. Simulation towns get their 3D treatment from sim3d.c and
+ * the world map is Mode 7, whose per-scanline matrix cannot be extrapolated
+ * past the visible band (see PpuDrawBackground_mode7). */
+static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
+                                                uint8_t map_number) {
+  extern int g_ws_extra_top;
+  extern int g_ws_extra_bottom;
+  extern bool Diorama_IsActiveThisFrame(void);
+
+  g_ws_extra_top = 0;
+  g_ws_extra_bottom = 0;
+
+  int budget = g_settings.diorama_vertical_extend;
+  if (budget > 0 && Diorama_IsActiveThisFrame() &&
+      ActRaiser_IsActionMapGroup(map_group) &&
+      !ActRaiser_IsSimulationTown(map_group, map_number)) {
+    if (budget > kPpuExtraTopBottom) budget = kPpuExtraTopBottom;
+    int camera_y = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+    int available_top = camera_y;
+    if (available_top < 0) available_top = 0;
+    g_ws_extra_top = available_top < budget ? available_top : budget;
+    /* No bottom band: see g_ws_extra_bottom (main.c). The world below the
+     * viewport is streamed and drawable, but every sprite standing on it would
+     * be drawn at a negative screen Y instead, so the band would show
+     * background with the actors missing. */
+  }
+  PpuSetExtraVerticalSpace(g_ppu, g_ws_extra_top, g_ws_extra_bottom);
+
+  /* AR_VEXT_TILES=1: classify the BG1 tilemap rows the band will read. A
+   * "uniform" row (one tile id repeated across the whole ring width) is the
+   * column-strip FILLER signature (rendering-engine.md §4) -- the band is
+   * showing a row no row-strip has refreshed. Logged with cam_y's 256-page
+   * phase because that is the suspected predictor. */
+  /* AR_VEXT_TILES=1: dump the BG1 tilemap ids the band reads, next to the first
+   * VISIBLE row, so a filler row is distinguishable from a legitimately uniform
+   * one (an all-sky row is uniform too -- that false positive is why the first
+   * cut of this probe reported 100%). Column-strip filler is a row whose ids do
+   * not belong to the surrounding content (rendering-engine.md §4). */
+  if (getenv("AR_VEXT_TILES") && g_ws_extra_top > 0) {
+    int base = PPU_bgTilemapAdr(g_ppu, 0);
+    bool wider = PPU_bgTilemapWider(g_ppu, 0);
+    bool higher = PPU_bgTilemapHigher(g_ppu, 0);
+    int cam_y = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+    char buf[512]; int n = 0;
+    for (int py = cam_y - g_ws_extra_top; py < cam_y + 16; py += 8) {
+      int off = base + (((py >> 3) & 0x1f) << 5);
+      if ((py & 0x100) && higher) off += wider ? 0x800 : 0x400;
+      unsigned ids[4];
+      for (int k = 0; k < 4; k++)
+        ids[k] = g_ppu->vram[(off + k * 7) & 0x7fff] & 0x3ff;
+      n += snprintf(buf + n, sizeof(buf) - (size_t)n, "%s%03X,%03X,%03X,%03X",
+                    py == cam_y ? " | vis:" : (n ? " " : ""),
+                    ids[0], ids[1], ids[2], ids[3]);
+      if (n >= (int)sizeof(buf) - 32) break;
+    }
+    fprintf(stderr, "[vext-tiles] gf=%u camY=%4d phase=%3d band: %s\n",
+            ActRaiser_ReadWram16(kActRaiserWram_GameFrame), cam_y,
+            cam_y & 0xFF, buf);
+  }
+
+  if (getenv("AR_VEXT_LOG")) {
+    static unsigned last;
+    unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    if (gf != last) {
+      last = gf;
+      fprintf(stderr,
+              "[vext] gf=%u top=%d camY=%d bg1H=%d vscroll=%d/%d "
+              "screenEn=$%02x bg1tm=$%04x\n",
+              gf, g_ws_extra_top,
+              ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY),
+              ActRaiser_ReadWram16(kActRaiserWram_Bg1Height),
+              g_ppu->vScroll[0], g_ppu->vScroll[1],
+              g_ppu->screenEnabled[0], PPU_bgTilemapAdr(g_ppu, 0));
+    }
+  }
+}
+
 static void ActRaiser_ApplyWidescreenPolicy(void) {
   extern bool g_ws_active;
   extern int g_ws_extra;
@@ -1183,6 +1273,27 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   }
 }
 
+/* The OAM slots ActRaiser_WidescreenHudObjPromote validated THIS frame.
+ *
+ * Kept separately from overlayCaptures[Obj] on purpose: the diorama block
+ * further down ActRaiserDrawPpuFrame legitimately re-captures OBJ as a
+ * full-frame scene layer over OAM slots 0..127, and PpuSetOverlayCapture
+ * resets oamFirst/oamCount, so the capture stops being able to answer "which
+ * sprites are the flat HUD icon" the moment the diorama is on. Anything that
+ * needs that answer must read this record via ActRaiser_HudObjIconRange
+ * instead of re-deriving it from the capture. */
+static uint8_t s_hud_obj_icon_first;
+static uint8_t s_hud_obj_icon_count;
+
+bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count) {
+  /* Writes both outputs on every path, including "nothing promoted" (0/0):
+   * FrameSlot slots are recycled, so leaving them untouched would republish
+   * the previous occupant's icon range on a frame that has no icon. */
+  if (first) *first = s_hud_obj_icon_first;
+  if (count) *count = s_hud_obj_icon_count;
+  return s_hud_obj_icon_count != 0;
+}
+
 /* Promote a validated fixed-screen HUD icon from the first four OAM slots.
  * Action's $00:923A icon uses tiles $D4-$D7. Simulation's 2026-07-16 Fillmore
  * capture proves the hourglass uses the same slots at x=$94/$9B, y=$0B/$13.
@@ -1190,6 +1301,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
  * lower tiles $FC-$FF, with horizontal flip on each right half. No OAM/WRAM
  * state is changed; the host later places the icon beside the right HUD group. */
 static void ActRaiser_WidescreenHudObjPromote(void) {
+  s_hud_obj_icon_first = 0;
+  s_hud_obj_icon_count = 0;
   if (!g_ppu || !g_ppu->extraLeftRight)
     return;
 
@@ -1245,9 +1358,12 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
       if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
                                0, 0, kActRaiserAuthenticWidth,
                                kActRaiserSimulationHudHeight,
-                               kPpuOverlayFlag_RemoveFromGame))
-        PpuSetOverlayOamRange(g_ppu, found_slot,
-                              kActRaiserSkyPalaceMagicOamCount);
+                               kPpuOverlayFlag_RemoveFromGame) &&
+          PpuSetOverlayOamRange(g_ppu, found_slot,
+                                kActRaiserSkyPalaceMagicOamCount)) {
+        s_hud_obj_icon_first = (uint8_t)found_slot;
+        s_hud_obj_icon_count = kActRaiserSkyPalaceMagicOamCount;
+      }
       return;
     }
     /* Town sim: hourglass is a 4-sprite animated icon in OAM slots 0-3. */
@@ -1284,9 +1400,141 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
   if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
                            0, 0, kActRaiserAuthenticWidth,
                            capture_height,
-                           kPpuOverlayFlag_RemoveFromGame))
-    PpuSetOverlayOamRange(g_ppu, kActRaiserHudObjOamFirst,
-                          kActRaiserHudObjOamCount);
+                           kPpuOverlayFlag_RemoveFromGame) &&
+      PpuSetOverlayOamRange(g_ppu, kActRaiserHudObjOamFirst,
+                            kActRaiserHudObjOamCount)) {
+    s_hud_obj_icon_first = kActRaiserHudObjOamFirst;
+    s_hud_obj_icon_count = kActRaiserHudObjOamCount;
+  }
+}
+
+/* Split the promoted HUD icon back out of the diorama's OBJ planes. The
+ * action-mode counterpart of sim3d.c's PrepareHudHandoff/RestoreTownHudPolicy
+ * pair, and the reason the selected-magic icon is pinned beside the right HUD
+ * group in diorama mode instead of riding the tilted scene at its authentic
+ * centre-screen X.
+ *
+ * Why this is needed at all: ActRaiser_WidescreenHudObjPromote captures the
+ * icon's four OAM slots into g_hud_obj_pixels for present.c to anchor, but the
+ * diorama block later in this same frame re-captures OBJ as a full-frame scene
+ * layer over slots 0..127 -- a strictly wider claim on the ONE capture slot the
+ * PPU gives each source, and PpuSetOverlayCapture resets the OAM range as it
+ * lands. That claim is right for the player and enemies and wrong for the HUD
+ * icon, and there is no second OBJ capture to put the icon in, so the split has
+ * to happen on captured pixels rather than on capture policy.
+ *
+ * Two phases, for the same reason sim3d has two:
+ *
+ *   Prepare, BEFORE scanout -- rasterize the icon's own OAM range. It must run
+ *     here because the frame's mid-scanline IRQ handlers and HDMA rewrite VRAM
+ *     and CGRAM as the picture is drawn: rasterizing afterwards reads whatever
+ *     tile data the game streamed in next and yields a fully transparent icon,
+ *     which is exactly the silent failure this comment exists to prevent.
+ *   Finish, AFTER scanout -- publish that raster to g_hud_obj_pixels for the
+ *     anchored overlay and clear the same pixels from the diorama plane that
+ *     holds the icon's priority band, which only has content once scanout has
+ *     run. The diorama's OBJ capture is RemoveFromGame, so the icon is already
+ *     out of the backdrop frame; only the plane needs erasing. */
+enum { kActRaiserHudIconRasterLimit = 64 };
+static uint32_t s_hud_icon_raster[kActRaiserHudIconRasterLimit *
+                                  kActRaiserHudIconRasterLimit];
+static PpuObjRangeBounds s_hud_icon_bounds;
+static int s_hud_icon_priority;
+static bool s_hud_icon_ready;
+
+static void ActRaiser_DioramaHudObjPrepare(void) {
+  extern bool g_diorama_frame_active;
+
+  s_hud_icon_ready = false;
+  /* Only the flat-HUD variant anchors a host overlay. With diorama_hud_flat
+   * off the whole status bar is deliberately a tilted plane (see the A5/A7
+   * note in the capture block), and the icon belongs on it. */
+  if (!g_ppu || !g_diorama_frame_active || !g_settings.diorama_hud_flat ||
+      !s_hud_obj_icon_count)
+    return;
+
+  const uint8_t first = s_hud_obj_icon_first;
+  const uint8_t count = s_hud_obj_icon_count;
+  const int priority = (g_ppu->oam[first * 2 + 1] >> 12) & 3;
+  PpuObjRangeBounds bounds;
+  if (!PpuGetObjRangeBounds(g_ppu, first, count, (uint8_t)priority, &bounds))
+    return;
+  const int raster_width = bounds.x1 - bounds.x0;
+  const int raster_height = bounds.y1 - bounds.y0;
+  /* The promoted signatures are 16x16 (action/sim) and 16x8 (Sky Palace); this
+   * ceiling is slack, not a target, and a range that overruns it is refused
+   * rather than clipped. */
+  if (raster_width <= 0 || raster_height <= 0 ||
+      raster_width > kActRaiserHudIconRasterLimit ||
+      raster_height > kActRaiserHudIconRasterLimit)
+    return;
+  if (!PpuRasterizeObjRange(g_ppu, first, count, (uint8_t)priority, &bounds,
+                            s_hud_icon_raster, raster_width, raster_height,
+                            (size_t)raster_width * sizeof(uint32_t)))
+    return;
+
+  s_hud_icon_bounds = bounds;
+  s_hud_icon_priority = priority;
+  s_hud_icon_ready = true;
+}
+
+static void ActRaiser_DioramaHudObjFinish(int width) {
+  extern uint8_t *g_diorama_layer_pixels[];
+  extern uint8_t g_hud_obj_pixels[];
+
+  /* Rows of g_hud_obj_pixels this pass last wrote. present.c uploads that
+   * surface over the FULL capture height (224 rows in diorama mode), so rows
+   * left behind by an earlier icon position would persist in the texture;
+   * clearing just them beats a 224-row blanket memset for a 16x16 icon. */
+  static int last_y0, last_y1;
+  static size_t last_pitch;
+
+  if (!s_hud_icon_ready || width <= 0 || width > kPpuBufWidth) return;
+
+  const int raster_width = s_hud_icon_bounds.x1 - s_hud_icon_bounds.x0;
+  const int raster_height = s_hud_icon_bounds.y1 - s_hud_icon_bounds.y0;
+  /* Band index == OAM priority (ppu.c's priority-split resolve does
+   * band = z >> 14, and SPRITE_PRIO_TO_PRIO puts the OAM priority in those two
+   * bits), so this is the same plane the diorama's kPrioBands table bound. */
+  uint32_t *plane = (uint32_t *)g_diorama_layer_pixels[
+      s_hud_icon_priority ? kDioramaPlane_Obj1 + (s_hud_icon_priority - 1)
+                          : kPpuOverlaySource_Obj];
+  const size_t pitch = (size_t)width * 4;
+  const int extra = (width - kActRaiserAuthenticWidth) / 2;
+  /* Two destinations, two row origins. g_hud_obj_pixels is consumed in
+   * authentic screen space (the promoted HUD overlay), so it indexes by
+   * screen_y. The diorama PLANE is consumed in capture space, whose row 0 is
+   * screen y = -g_ws_extra_top, so the hole punched in it must carry that
+   * offset -- otherwise the icon is erased from the wrong rows and a ghost of
+   * it stays in the tilted OBJ plane. Zero without a vertical margin. */
+  extern int g_ws_extra_top;
+  const int plane_row_bias = g_ws_extra_top;
+
+  /* Clear at the pitch the rows were WRITTEN at: a display-mode change between
+   * frames alters `width`, and clearing at the new one would walk off the old
+   * rows and leave the icon's last position smeared in the texture. */
+  if (last_pitch)
+    for (int y = last_y0; y < last_y1; y++)
+      memset(g_hud_obj_pixels + (size_t)y * last_pitch, 0, last_pitch);
+  last_y0 = last_y1 = 0;
+  last_pitch = pitch;
+
+  for (int y = 0; y < raster_height; y++) {
+    const int screen_y = s_hud_icon_bounds.y0 + y;
+    if (screen_y < 0 || screen_y >= kActRaiserAuthenticHeight) continue;
+    uint32_t *dst = (uint32_t *)(g_hud_obj_pixels + (size_t)screen_y * pitch);
+    for (int x = 0; x < raster_width; x++) {
+      const int texture_x = s_hud_icon_bounds.x0 + x + extra;
+      if (texture_x < 0 || texture_x >= width) continue;
+      const uint32_t pixel = s_hud_icon_raster[(size_t)y * raster_width + x];
+      if (!pixel) continue;
+      dst[texture_x] = pixel;
+      if (plane)
+        plane[(size_t)(screen_y + plane_row_bias) * width + texture_x] = 0;
+      if (!last_y1) last_y0 = screen_y;
+      if (screen_y + 1 > last_y1) last_y1 = screen_y + 1;
+    }
+  }
 }
 
 /* Fix B (SPEC-backdrop-clip.md): margin geometry of the last rendered frame,
@@ -1294,6 +1542,7 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
 static int s_live_margin_left;
 static int s_live_margin_right;
 static int s_live_bg2_margin_source;
+static int s_live_margin_top;
 
 void ActRaiserDrawPpuFrame(void) {
   /* Overlay bindings are host-owned and persistent; capture policy is
@@ -1302,6 +1551,12 @@ void ActRaiserDrawPpuFrame(void) {
     ActRaiser_RebindPpuOutputSurfaces();
   PpuClearOverlayCaptures(g_ppu);
   ActRaiser_ApplyWidescreenPolicy();
+  /* Outside ApplyWidescreenPolicy, not inside it: that function early-returns
+   * when widescreen is off, and the vertical margin must be re-resolved (most
+   * often back to zero) on EVERY frame regardless -- a stale band would
+   * otherwise survive a mode change. */
+  ActRaiser_ApplyVerticalMarginPolicy(g_ram[kActRaiserWram_MapGroup],
+                                      g_ram[kActRaiserWram_CurrentMap]);
   /* Stage D reconnaissance: read-only classification of objects that intersect
    * a live side margin but remain outside the authentic activation window. */
   ActRaiser_WidescreenSpriteActivationProbe();
@@ -1337,8 +1592,18 @@ void ActRaiserDrawPpuFrame(void) {
     if (want_capture) {
       extern bool g_ws_active;
       extern int g_ws_extra;
+      extern int g_ws_extra_top;
+      extern int g_ws_extra_bottom;
       int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
       size_t pitch = (size_t)width * 4;
+      /* Capture rectangles are expressed in AUTHENTIC screen space, so
+       * the vertical band starts at a negative y exactly as the side
+       * margins start at -g_ws_extra. The PPU maps that onto row 0 of the
+       * destination surface (PpuOutputRow), so a plane's texture row 0 is
+       * screen y = -g_ws_extra_top -- the transpose of column 0 meaning
+       * screen x = -g_ws_extra. */
+      int capture_height =
+          kActRaiserAuthenticHeight + g_ws_extra_top + g_ws_extra_bottom;
       /* A7/A5 (followup doc): BG3 (the status bar) is excluded from this
        * diorama capture loop whenever diorama_hud_flat is on (default) —
        * leaving the line-906 widescreen HUD split capture (PpuSetOverlayCapture
@@ -1378,7 +1643,7 @@ void ActRaiserDrawPpuFrame(void) {
                                 sizeof(kCaptureLayersCommon[0])); i++) {
         PpuOverlaySource src = kCaptureLayersCommon[i];
         if (!g_diorama_layer_pixels[src])
-          g_diorama_layer_pixels[src] = calloc(1, kPpuBufWidth * 4 * 240);
+          g_diorama_layer_pixels[src] = calloc(1, kPpuBufWidth * 4 * kHostDisplayFramebufferHeight);
         PpuBindOverlaySurface(g_ppu, src, g_diorama_layer_pixels[src], pitch);
         if (g_ppu->screenEnabled[0] & (1 << src)) {
           uint8_t flags = kPpuOverlayFlag_RemoveFromGame;
@@ -1410,7 +1675,8 @@ void ActRaiserDrawPpuFrame(void) {
                       g_ppu->screenEnabled[0], g_ppu->screenEnabled[1]);
             }
           }
-          PpuSetOverlayCapture(g_ppu, src, -g_ws_extra, 0, width, 224, flags);
+          PpuSetOverlayCapture(g_ppu, src, -g_ws_extra, -g_ws_extra_top,
+                               width, capture_height, flags);
         }
       }
       /* BG3 needs its OWN branch, not just an on/off entry in the loop above:
@@ -1464,13 +1730,14 @@ void ActRaiserDrawPpuFrame(void) {
       } else {
         if (!g_diorama_layer_pixels[kPpuOverlaySource_Bg3])
           g_diorama_layer_pixels[kPpuOverlaySource_Bg3] =
-              calloc(1, kPpuBufWidth * 4 * 240);
+              calloc(1, kPpuBufWidth * 4 * kHostDisplayFramebufferHeight);
         PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3,
                               g_diorama_layer_pixels[kPpuOverlaySource_Bg3],
                               pitch);
         if (g_ppu->screenEnabled[0] & (1 << kPpuOverlaySource_Bg3))
-          PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3, -g_ws_extra, 0,
-                               width, 224, kPpuOverlayFlag_RemoveFromGame);
+          PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3, -g_ws_extra,
+                               -g_ws_extra_top, width, capture_height,
+                               kPpuOverlayFlag_RemoveFromGame);
       }
       if (g_ppu->screenEnabled[0] & (1 << kPpuOverlaySource_Obj))
         PpuSetOverlayOamRange(g_ppu, 0, 128);
@@ -1491,7 +1758,7 @@ void ActRaiserDrawPpuFrame(void) {
       for (int i = 0; i < (int)(sizeof(kPrioBands) / sizeof(kPrioBands[0])); i++) {
         if (!g_diorama_layer_pixels[kPrioBands[i].plane])
           g_diorama_layer_pixels[kPrioBands[i].plane] =
-              calloc(1, kPpuBufWidth * 4 * 240);
+              calloc(1, kPpuBufWidth * 4 * kHostDisplayFramebufferHeight);
         PpuBindOverlayPrioSurface(g_ppu, kPrioBands[i].src,
                                   kPrioBands[i].band,
                                   g_diorama_layer_pixels[kPrioBands[i].plane]);
@@ -1583,8 +1850,29 @@ void ActRaiserDrawPpuFrame(void) {
         ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
   }
 
+  /* Must precede the scanline loop: the IRQ handlers and HDMA below rewrite
+   * VRAM/CGRAM mid-picture, so this is the last point at which the icon's tile
+   * data is still the data the frame is being drawn with. */
+  ActRaiser_DioramaHudObjPrepare();
+
   for (int i = 0; i <= 224; i++) {
     ppu_runLine(g_ppu, i);
+    /* Vertical top margin (diorama). Placed HERE, not before the loop, for two
+     * reasons that both have to hold:
+     *
+     *  - ppu_runLine(0) is the frame's setup pass (mosaic table, sprite
+     *    overflow flags, the overlay content mask). Rendering an above-screen
+     *    scanline before it would use last frame's state.
+     *  - no HDMA channel has advanced yet, so these lines see the register
+     *    values the frame STARTED with. That is the hold-first policy: there is
+     *    no authentic per-scanline state above line 1 to reproduce, and holding
+     *    the first line's is the only choice that is stable frame to frame.
+     *
+     * Rendered top-down so the band reads in the same order as the screen. */
+    if (i == 0) {
+      for (int m = g_ppu->extraTopCur; m >= 1; m--)
+        ppu_runMarginLine(g_ppu, 1 - m);
+    }
     for (int ch = 0; ch < 8; ch++)
       SimpleHdma_DoLine(&hdma_chans[ch]);
     if (i == trigger) {
@@ -1599,6 +1887,14 @@ void ActRaiserDrawPpuFrame(void) {
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
   }
+  /* Bottom margin, after the authentic loop, so these lines see the registers
+   * the last visible scanline left behind (hold-last, the mirror of the
+   * hold-first policy above). Inert today -- ActRaiser_ApplyWidescreenPolicy
+   * never requests a bottom band, because OAM cannot express a below-screen
+   * sprite (see g_ws_extra_bottom, main.c) -- but the loop is here so the
+   * background half is already correct if that changes. */
+  for (int m = 1; m <= g_ppu->extraBottomCur; m++)
+    ppu_runMarginLine(g_ppu, 224 + m);
   {
     extern uint8_t g_pixels[];
     extern int g_ws_extra;
@@ -1606,6 +1902,9 @@ void ActRaiserDrawPpuFrame(void) {
     Sim3D_FinishCapture(
         g_pixels, width * 4,
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
+    /* After scanout (the diorama planes only hold this frame's sprites now) and
+     * before FrameSlot_Capture publishes them to the present thread. */
+    ActRaiser_DioramaHudObjFinish(width);
   }
   /* Fix B (SPEC-backdrop-clip.md): latch the margin state the frame was ACTUALLY
    * rendered with, here, rather than letting FrameSlot_Capture read live g_ppu.
@@ -1615,6 +1914,38 @@ void ActRaiserDrawPpuFrame(void) {
    * would silently describe a different frame than the pixels came from. That
    * path is !diorama_mode-gated today, so the bug would be latent rather than
    * live; latching makes it impossible either way. */
+  s_live_margin_top = g_ppu->extraTopCur;
+
+  if (getenv("AR_VEXT_LOG")) {
+    /* Where each destination's content actually LANDED, which is the check that
+     * catches the row-origin class of bug: the HUD surfaces are consumed in
+     * AUTHENTIC screen space and must not move when the vertical margin
+     * changes, while the diorama planes are consumed in CAPTURE space and must
+     * move by exactly the margin. Both on one line so a regression in either
+     * is one diff apart. */
+    extern uint8_t g_hud_bg_pixels[];
+    extern uint8_t *g_diorama_layer_pixels[];
+    extern int g_ws_extra;
+    int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+    size_t pitch = (size_t)width * 4;
+    int hud0 = -1, hud1 = -1, plane0 = -1, plane1 = -1;
+    for (int y = 0; y < kHostDisplayFramebufferHeight; y++) {
+      const uint32_t *r = (const uint32_t *)(g_hud_bg_pixels + (size_t)y * pitch);
+      for (int x = 0; x < width; x++)
+        if (r[x]) { if (hud0 < 0) hud0 = y; hud1 = y; break; }
+    }
+    const uint8_t *bg2 = g_diorama_layer_pixels[kPpuOverlaySource_Bg2];
+    if (bg2)
+      for (int y = 0; y < kHostDisplayFramebufferHeight; y++) {
+        const uint32_t *r = (const uint32_t *)(bg2 + (size_t)y * pitch);
+        for (int x = 0; x < width; x++)
+          if (r[x]) { if (plane0 < 0) plane0 = y; plane1 = y; break; }
+      }
+    fprintf(stderr,
+            "[vext-rows] gf=%u top=%d hudbg=[%d..%d] bg2plane=[%d..%d]\n",
+            ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+            (int)g_ppu->extraTopCur, hud0, hud1, plane0, plane1);
+  }
   s_live_margin_left = g_ppu->extraLeftCur;
   s_live_margin_right = g_ppu->extraRightCur;
   s_live_bg2_margin_source = DioramaBg2MarginSource_Classify(
@@ -1631,6 +1962,12 @@ void ActRaiserDrawPpuFrame(void) {
 
 /* See the latch above. Reports the margin geometry of the most recently rendered
  * frame, which is what a consumer of that frame's captured pixels must use. */
+/* Same latch, same reason (see ActRaiser_LiveMargins): the vertical band the
+ * frame was ACTUALLY rendered with, not whatever g_ppu holds by the time the
+ * frame slot is captured. Separate accessor rather than more out-params so
+ * the existing three-way callers stay untouched. */
+int ActRaiser_LiveVerticalMargin(void) { return s_live_margin_top; }
+
 void ActRaiser_LiveMargins(int *left, int *right, int *bg2_margin_source) {
   if (left) *left = s_live_margin_left;
   if (right) *right = s_live_margin_right;
@@ -1652,53 +1989,90 @@ static void ActRaiser_ReloadSelectedMagicTiles(uint8 selector) {
         cpu_read16(&g_cpu, 0x06, (uint16)(source + word * 2));
 }
 
-/* AR_MAGIC_CYCLE=1 reserves one SNES button as an action-mode spell-cycle
- * edge. The mask is in the auto-joypad word returned by SwapInputBits;
- * AR_MAGIC_CYCLE_BTN defaults to $0020 = L ($0010 = R). This stays env-backed
- * for now so it can be used while the descriptor/overlay work is in flight.
- * The configured input is consumed before NMI samples the controller, making
- * arbitrary remaps safe instead of also triggering their original action. */
+static const char *const kActRaiserMagicNames[] = {
+  "none", "Magical Fire", "Magical Stardust", "Magical Aura", "Magical Light"
+};
+
+uint8 ActRaiser_SelectedMagic(void) {
+  uint8 selected = g_ram[kActRaiserWram_SelectedMagic];
+  return selected <= 4 ? selected : 0;
+}
+
+/* Set by the host input thread's edge dispatch, consumed once per frame by
+ * ActRaiser_ApplyMagicCycle. Both sides run on the main thread (the present
+ * thread is the one that was split out), so a plain flag is sufficient and a
+ * held key cannot queue a burst: it is cleared unconditionally on read. */
+static bool s_magic_cycle_requested;
+
+void ActRaiser_RequestMagicCycle(void) { s_magic_cycle_requested = true; }
+
+/* Which spells the save actually owns. The four inventory bytes $0299-$029C
+ * hold spell ids (1..4) or 0 for an empty slot, and they are NOT sorted or
+ * positional — All magic writes 1/2/3/4 in order, but a real save fills them
+ * in pickup order. Collect the distinct ids so the cycle visits each unlocked
+ * spell exactly once, in canonical Fire/Stardust/Aura/Light order rather than
+ * in whatever order the player happened to find them. */
+static unsigned ActRaiser_UnlockedMagic(uint8 out[4]) {
+  bool present[5] = { false, false, false, false, false };
+  for (unsigned slot = 0; slot < 4; slot++) {
+    uint8 id = g_ram[kActRaiserWram_MagicInventory + slot];
+    if (id >= 1 && id <= 4) present[id] = true;
+  }
+  unsigned count = 0;
+  for (uint8 id = 1; id <= 4; id++)
+    if (present[id]) out[count++] = id;
+  return count;
+}
+
+/* Debug aid: step the action-stage spell selection to the next spell the save
+ * has unlocked. Armed by the "Cycle magic spell" cheat and triggered by the
+ * kInputAction_MagicCycle binding (keyboard or pad) — it no longer reserves a
+ * SNES button, so it cannot shadow L in normal play. */
 static void ActRaiser_ApplyMagicCycle(void) {
-  static int enabled = -1;
-  static uint16 button_mask;
-  static uint16 previous_buttons;
-  if (enabled < 0) {
-    const char *e = getenv("AR_MAGIC_CYCLE");
-    const char *b = getenv("AR_MAGIC_CYCLE_BTN");
-    enabled = e && e[0] && e[0] != '0';
-    button_mask = (b && b[0]) ? (uint16)strtoul(b, NULL, 0) : 0x0020;
-    if (!button_mask) enabled = 0;
+  bool requested = s_magic_cycle_requested;
+  s_magic_cycle_requested = false;
+
+  if (!requested || !g_settings.cheat_magic_cycle) return;
+
+  /* Action stages only: $02AC and the $2D40 tile window are act-mode state,
+   * and the sim-mode equip menu owns the selection there. Gated here rather
+   * than at the call site so a press made in town is dropped outright instead
+   * of firing the moment the next act loads. */
+  if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+    fprintf(stderr, "[magic-cycle] not in an action stage; ignored\n");
+    return;
   }
 
-  uint16 buttons = SwapInputBits(g_snes->input1_currentState);
-  uint16 pressed = (uint16)(buttons & button_mask);
-  uint16 was_pressed = (uint16)(previous_buttons & button_mask);
-  previous_buttons = buttons;
-
-  if (!enabled ||
-      !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
-    return;
-
-  /* Reserve/consume the configured button for this aid. SwapInputBits is its
-   * own inverse, converting the SNES auto-joypad mask back to runner input. */
-  g_snes->input1_currentState &= (uint16)~SwapInputBits(button_mask);
-  if (!pressed || was_pressed) return;
-
+  /* $00F8 is the act-mode cast state. Rewriting $02AC mid-cast would leave
+   * the in-flight spell's actors running against the new spell's tiles. */
   if (g_ram[kActRaiserWram_MagicCastState] != 0) {
     fprintf(stderr, "[magic-cycle] cast still active; selection unchanged\n");
     return;
   }
 
-  static const char *const names[] = {
-    "none", "Magical Fire", "Magical Stardust", "Magical Aura",
-    "Magical Light"
-  };
+  uint8 unlocked[4];
+  unsigned count = ActRaiser_UnlockedMagic(unlocked);
+  if (!count) {
+    fprintf(stderr, "[magic-cycle] no spells unlocked; selection unchanged "
+            "(enable the All magic cheat to test every spell)\n");
+    return;
+  }
+
+  /* Advance past the current selection, wrapping. An unknown or unowned
+   * current value (including 0 / "none") starts the cycle at the first
+   * unlocked spell rather than being treated as an error. */
   uint8 current = g_ram[kActRaiserWram_SelectedMagic];
-  uint8 next = (current >= 1 && current < 4) ? (uint8)(current + 1) : 1;
+  unsigned index = 0;
+  for (unsigned i = 0; i < count; i++) {
+    if (unlocked[i] == current) { index = (i + 1) % count; break; }
+  }
+  uint8 next = unlocked[index];
+
   g_ram[kActRaiserWram_SelectedMagic] = next;
   ActRaiser_ReloadSelectedMagicTiles(next);
-  fprintf(stderr, "[magic-cycle] selected %u/4: %s ($02AC=$%02X, "
-          "VRAM $2D40 refreshed)\n", (unsigned)next, names[next], next);
+  fprintf(stderr, "[magic-cycle] selected %s (%u of %u unlocked, $02AC=$%02X, "
+          "VRAM $2D40 refreshed)\n", kActRaiserMagicNames[next],
+          index + 1, count, next);
 }
 
 /* Host-side cheat hooks (debug-menu scaffold). All settings-gated and seeded
@@ -1785,10 +2159,13 @@ void ActRaiser_ApplyCheats(void) {
     g_ram[kActRaiserWram_AngelCurrentHp] =
         g_ram[kActRaiserWram_AngelMaximumHp];
 
-  if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) return;
-
-  /* Live action-stage magic selection/asset reload for effect testing. */
+  /* Live action-stage magic selection/asset reload for effect testing. Above
+   * the action-stage gate so a request made outside an act is consumed and
+   * discarded rather than queued until the next act loads; the handler
+   * applies the gate itself. */
   ActRaiser_ApplyMagicCycle();
+
+  if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) return;
 
   /* AR_INF_HP: infinite health. =1 -> auto: pin player HP ($1D) to the
    * high-water max seen this stage (self-calibrates to "full" once you've been

@@ -21,7 +21,7 @@ extern void ar_vramraw(uint16_t vaddr, uint8_t val, int port);
 
 extern bool g_new_ppu;
 void PpuDrawWholeLineOldPpu(Ppu *ppu, int line);
-static void PpuDrawWholeLine(Ppu *ppu, uint y);
+static void PpuDrawWholeLine(Ppu *ppu, int y);
 
 static bool ppu_evaluateSprites(Ppu* ppu, int line);
 static uint16_t ppu_getVramRemap(Ppu* ppu);
@@ -261,8 +261,14 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
   int x0 = IntMax(x, -kPpuExtraLeftRight);
   int x1 = requested_x1 < kPpuXPixels + kPpuExtraLeftRight
       ? (int)requested_x1 : kPpuXPixels + kPpuExtraLeftRight;
-  int y0 = IntMax(y, 0);
-  int y1 = requested_y1 < 240 ? (int)requested_y1 : 240;
+  /* Symmetric with the x clamp above. These used to be `IntMax(y, 0)` and a
+   * hardcoded 240, which silently swallowed any above-screen capture rectangle
+   * -- a vertical margin would render its band and then have it clipped away
+   * here, producing an empty top band with no error anywhere. The bounds are
+   * the render target's, exactly as the x bounds are. */
+  int y0 = IntMax(y, -kPpuExtraTopBottom);
+  int y1 = requested_y1 < kPpuYPixels + kPpuExtraTopBottom
+      ? (int)requested_y1 : kPpuYPixels + kPpuExtraTopBottom;
   if (x1 <= x0 || y1 <= y0)
     return false;
   PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
@@ -340,7 +346,12 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom) {
   // distinction.
   ppu->extraLeftCur = (uint8_t)IntMin(IntMax(left, 0), ppu->extraLeftRight);
   ppu->extraRightCur = (uint8_t)IntMin(IntMax(right, 0), ppu->extraLeftRight);
-  ppu->extraBottomCur = (uint8_t)IntMin(IntMax(bottom, 0), 16);
+  ppu->extraBottomCur = (uint8_t)IntMin(IntMax(bottom, 0), kPpuExtraTopBottom);
+}
+
+void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom) {
+  ppu->extraTopCur = (uint8_t)IntMin(IntMax(top, 0), kPpuExtraTopBottom);
+  ppu->extraBottomCur = (uint8_t)IntMin(IntMax(bottom, 0), kPpuExtraTopBottom);
 }
 
 void PpuSetWidescreenHudSplit(Ppu *ppu, uint8_t height, uint8_t left_end,
@@ -455,6 +466,95 @@ static inline uint8 PpuMosaicAt(Ppu *ppu, int i) {
   return ppu->mosaicModulo[(unsigned)i < (unsigned)kPpuXPixels ? i : (i < 0 ? 0 : kPpuXPixels - 1)];
 }
 
+// The same table read on the Y axis, where a vertical margin scanline can be
+// negative (above the screen) instead of merely out of range. Clamping like
+// PpuMosaicAt would flatten the whole top band onto one mosaic row, so extend
+// the pattern arithmetically instead: the table is built as
+// mosaicModulo[i] == i - (i % mod), which is exact for negative i too once the
+// C remainder's sign is corrected.
+static inline int PpuMosaicRow(const Ppu *ppu, int y) {
+  if ((unsigned)y < (unsigned)kPpuXPixels)
+    return ppu->mosaicModulo[y];
+  int mod = ppu->lastMosaicModulo;
+  if (mod <= 1)
+    return y;
+  int phase = y % mod;
+  return y - (phase < 0 ? phase + mod : phase);
+}
+
+// Authentic scanline `y` (1-based, as the line renderer numbers them) maps to
+// this row of the RENDER TARGET (renderBuffer). With no vertical margin this is
+// the historic `y - 1` identity.
+static inline int PpuOutputRow(const Ppu *ppu, int y) {
+  return y - 1 + ppu->extraTopCur;
+}
+
+// Destination row for a captured scanline, which is NOT the same rule.
+//
+// Row 0 of an overlay surface is the first row that surface's own capture
+// rectangle asked for. A capture reaching ABOVE the screen (y0 < 0 -- only the
+// diorama's vertical band does this) therefore receives those rows at the top
+// of its surface, while every capture starting at or below screen row 0 keeps
+// writing at ABSOLUTE authentic rows exactly as it always has.
+//
+// Using the render target's origin here instead was a real bug: it silently
+// slid every OTHER capture destination down by the margin -- the promoted BG3
+// HUD, the HUD OBJ icon, HD replacements, the sim atlases -- while their
+// consumers went on reading authentic rows, so all of them mis-sampled by
+// exactly extraTopCur. Only the diorama planes are consumed in shifted space,
+// and this makes that opt-in explicit rather than global.
+static inline int PpuOverlayRow(const PpuOverlayCapture *capture, int screen_y) {
+  return capture->y0 < 0 ? screen_y - capture->y0 : screen_y;
+}
+
+// Scanline -> tilemap row for one BG layer. A vertical top-margin scanline is
+// numbered <= 0, so `y + vScroll` can go negative and the caller's subsequent
+// `(y >> 3) & 0x1f` / `y & 0x100` / `y & 0x7` would sign-extend instead of
+// wrapping. Masking to the 10-bit scroll width restores the hardware wrap
+// (row -31 at vScroll 0 becomes 993, which selects tile row 28 and fine row 1
+// exactly as 481 does in a 512-tall tilemap).
+//
+// This is a no-op for every non-negative y: none of those three expressions
+// reads a bit above 0x3ff, so authentic output is unchanged bit for bit.
+static inline int PpuBgTilemapRow(const Ppu *ppu, int y, uint layer) {
+  return (int)((uint)(y + ppu->vScroll[layer]) & 0x3ff);
+}
+
+// The body of one rendered scanline, shared by the authentic loop and by the
+// vertical-margin bands. `line` is 1-based and may fall outside [1,kPpuYPixels]
+// when a margin is active; every consumer below either handles that range or is
+// explicitly clamped at its call site.
+static void PpuRenderLine(Ppu *ppu, int line) {
+  // Cache the brightness computation
+  PpuUpdateBrightnessCache(ppu);
+
+  // evaluate sprites
+  ClearBackdrop(&ppu->objBuffer);
+  if (ppu->overlayRenderBuffer[kPpuOverlaySource_Obj])
+    memset(&ppu->overlayBuffers[kPpuOverlaySource_Obj], 0,
+           sizeof(ppu->overlayBuffers[kPpuOverlaySource_Obj]));
+  /* Above-screen lines work without a special case: `line - 1` goes negative,
+   * and ppu_evaluateSprites compares it against the OAM Y byte in uint8
+   * arithmetic, which is the same mod-256 wrap the hardware applies. A sprite
+   * parked at OAM Y 251 is at screen -5 both before and after this change. */
+  ppu->lineHasSprites = !PPU_forcedBlank(ppu) && ppu_evaluateSprites(ppu, line - 1);
+
+  if (g_new_ppu) {
+    PpuDrawWholeLine(ppu, line);
+  } else {
+    PpuDrawWholeLineOldPpu(ppu, line);
+  }
+}
+
+void ppu_runMarginLine(Ppu *ppu, int line) {
+  /* The old 256-wide renderer has no widescreen margins either; keeping the
+   * vertical band new-PPU-only means one path to reason about, and the host
+   * already forces g_new_ppu on whenever widescreen is active. */
+  if (!g_new_ppu)
+    return;
+  PpuRenderLine(ppu, line);
+}
+
 void ppu_runLine(Ppu* ppu, int line) {
   if(line == 0) {
     memset(ppu->overlayRenderContentMask, 0,
@@ -478,21 +578,7 @@ void ppu_runLine(Ppu* ppu, int line) {
     ppu->timeOver = false;
     ppu->evenFrame = !ppu->evenFrame;
   } else {
-    // Cache the brightness computation
-    PpuUpdateBrightnessCache(ppu);
-
-    // evaluate sprites
-    ClearBackdrop(&ppu->objBuffer);
-    if (ppu->overlayRenderBuffer[kPpuOverlaySource_Obj])
-      memset(&ppu->overlayBuffers[kPpuOverlaySource_Obj], 0,
-             sizeof(ppu->overlayBuffers[kPpuOverlaySource_Obj]));
-    ppu->lineHasSprites = !PPU_forcedBlank(ppu) && ppu_evaluateSprites(ppu, line - 1);
-
-    if (g_new_ppu) {
-      PpuDrawWholeLine(ppu, line);
-    } else {
-      PpuDrawWholeLineOldPpu(ppu, line);
-    }
+    PpuRenderLine(ppu, line);
   }
 }
 
@@ -515,7 +601,11 @@ static inline int PpuLayerExtra(Ppu *ppu, uint layer, int y, int extra) {
    * not grant BG1/BG2 or sprites any additional world visibility. Their
    * outside-live-margin pixels remain the cleared backdrop, while the BG3 HUD
    * split below supplies the fixed-screen status pixels. */
-  if (layer == 5 && ppu->wsHudSplitHeight &&
+  /* `y >= 1` because a vertical top-margin scanline is numbered <= 0, and
+   * "above the HUD split" is not "inside" it -- without the lower bound every
+   * above-screen line would be treated as a status-bar line. The other bands
+   * below are half-open ranges starting at 0, so they already exclude it. */
+  if (layer == 5 && ppu->wsHudSplitHeight && y >= 1 &&
       y < ppu->wsHudSplitHeight && ppu->extraLeftRight)
     return ppu->extraLeftRight;
 
@@ -673,7 +763,7 @@ static void PpuApplyMarginGap(Ppu *ppu, uint layer, PpuWindows *win, int16 *bias
 
 // Draw a whole line of a 4bpp background layer into bgBuffers
 static void PpuDrawBackground_4bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
-                                   uint y, bool sub, uint layer,
+                                   int y, bool sub, uint layer,
                                    PpuZbufType zhi, PpuZbufType zlo) {
 #define DO_PIXEL(i) do { \
   pixel = (bits >> i) & 1 | (bits >> (7 + i)) & 2 | (bits >> (14 + i)) & 4 | (bits >> (21 + i)) & 8; \
@@ -689,7 +779,7 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer, y) : PpuWindows_Clear(&win, ppu, layer, y);
   int16 ws_bias[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
   PpuApplyMarginGap(ppu, layer, &win, ws_bias);
-  y += ppu->vScroll[layer];
+  y = PpuBgTilemapRow(ppu, y, layer);
   int sc_offs = PPU_bgTilemapAdr(ppu, layer) + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && PPU_bgTilemapHigher(ppu, layer))
     sc_offs += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
@@ -774,7 +864,7 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
 
 // Draw a whole line of a 2bpp background layer into bgBuffers
 static void PpuDrawBackground_2bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
-                                   uint y, bool sub, uint layer,
+                                   int y, bool sub, uint layer,
                                    PpuZbufType zhi, PpuZbufType zlo) {
 #define DO_PIXEL(i) do { \
   pixel = (bits >> i) & 1 | (bits >> (7 + i)) & 2; \
@@ -856,7 +946,7 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
   } else {
     PpuApplyMarginGap(ppu, layer, &win, ws_bias);
   }
-  y += ppu->vScroll[layer];
+  y = PpuBgTilemapRow(ppu, y, layer);
   int sc_offs = PPU_bgTilemapAdr(ppu, layer) + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && PPU_bgTilemapHigher(ppu, layer))
     sc_offs += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
@@ -945,7 +1035,7 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
 
 // Draw a whole line of a 4bpp background layer into bgBuffers, with mosaic applied
 static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu,
-                                          PpuPixelPrioBufs *dstbuf, uint y,
+                                          PpuPixelPrioBufs *dstbuf, int y,
                                           bool sub, uint layer,
                                           PpuZbufType zhi,
                                           PpuZbufType zlo) {
@@ -957,7 +1047,7 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu,
     return;  // layer is completely hidden
   PpuWindows win;
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer, y) : PpuWindows_Clear(&win, ppu, layer, y);
-  y = ppu->mosaicModulo[y] + ppu->vScroll[layer];
+  y = PpuBgTilemapRow(ppu, PpuMosaicRow(ppu, y), layer);
   int sc_offs = PPU_bgTilemapAdr(ppu, layer) + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && PPU_bgTilemapHigher(ppu, layer))
     sc_offs += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
@@ -1047,7 +1137,7 @@ static void PpuMergePaddedBackground(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
 
 static void PpuDrawBackground_4bpp_policy(Ppu *ppu,
                                           PpuPixelPrioBufs *dstbuf,
-                                          uint y, bool sub,
+                                          int y, bool sub,
                                           uint layer, PpuZbufType zhi,
                                           PpuZbufType zlo, bool mosaic) {
   uint8_t padding = ppu->wsLayerMirror | ppu->wsLayerRepeat;
@@ -1106,7 +1196,7 @@ static void PpuDrawBackground_2bpp_mosaic(Ppu *ppu,
     return;  // layer is completely hidden
   PpuWindows win;
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer, y) : PpuWindows_Clear(&win, ppu, layer, y);
-  y = ppu->mosaicModulo[y] + ppu->vScroll[layer];
+  y = PpuBgTilemapRow(ppu, PpuMosaicRow(ppu, y), layer);
   int sc_offs = PPU_bgTilemapAdr(ppu, layer) + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && PPU_bgTilemapHigher(ppu, layer))
     sc_offs += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
@@ -1166,7 +1256,7 @@ static void PpuDrawBackground_2bpp_mosaic(Ppu *ppu,
  * warps apply to the substituted art. Subsamples keep their texture alpha
  * (host blends edges over the authentic frame); removal itself is decided
  * by the base sample so translucent art fringes never punch holes. */
-static bool PpuMode7OverrideSample(Ppu *ppu, bool sub, int screen_x, uint y,
+static bool PpuMode7OverrideSample(Ppu *ppu, bool sub, int screen_x, int y,
                                    uint32 xpos, uint32 ypos, int dx, int dy) {
   const PpuMode7Override *ov = &ppu->m7Override;
   if (!ov->wrap && (xpos > 0x3ffff || ypos > 0x3ffff))
@@ -1183,7 +1273,11 @@ static bool PpuMode7OverrideSample(Ppu *ppu, bool sub, int screen_x, uint y,
                              ov->width +
                          (uint64)fx * ov->width / span_x];
   bool remove = (base >> 24) >= 0x80;
-  if (sub || y == 0)
+  /* y < 1 is a vertical top-margin scanline. The m7 overlay is consumed in
+   * authentic screen space and mode 7 holds its edge row across the band
+   * anyway, so there is no row here to write -- and writing one would index
+   * before the surface. */
+  if (sub || y < 1)
     return remove;
 
   int scale = ppu->m7OverlayScale;
@@ -1228,7 +1322,7 @@ static bool PpuMode7OverrideSample(Ppu *ppu, bool sub, int screen_x, uint y,
 }
 
 static void PpuDrawBackground_mode7(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
-                                    uint y, bool sub, PpuZbufType z) {
+                                    int y, bool sub, PpuZbufType z) {
   int layer = 0;
   if (!IS_SCREEN_ENABLED(ppu, sub, layer))
     return;  // layer is completely hidden
@@ -1244,10 +1338,22 @@ static void PpuDrawBackground_mode7(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
   int clippedV = vScroll - yCenter;
   clippedH = (clippedH & 0x2000) ? (clippedH | ~1023) : (clippedH & 1023);
   clippedV = (clippedV & 0x2000) ? (clippedV | ~1023) : (clippedV & 1023);
+  /* Mode 7 is the one layer a vertical margin cannot honestly extend: the
+   * transform is driven by the per-scanline m7matrix, and HDMA supplies no
+   * entries outside the visible band, so there is no matrix for an
+   * above/below-screen row -- only an extrapolation we would be inventing.
+   * Clamp to the nearest authentic scanline instead, which HOLDS the edge row
+   * across the margin. ActRaiser reaches mode 7 on the world map, where the
+   * host leaves the vertical margin at 0 and this is dead code.
+   *
+   * `my` is that clamped row and drives the transform only; `y` stays the true
+   * scanline so the override sampler below still writes the row it belongs to
+   * rather than re-writing the edge row once per margin line. */
+  int my = y < 1 ? 1 : (y > kPpuYPixels ? kPpuYPixels : y);
   uint8 mosaic_enabled = PPU_mosaicEnabled(ppu, 0);
   if (mosaic_enabled)
-    y = ppu->mosaicModulo[y];
-  uint32 ry = PPU_m7yFlip(ppu) ? 255 - y : y;
+    my = ppu->mosaicModulo[my];
+  uint32 ry = PPU_m7yFlip(ppu) ? 255 - my : my;
   uint32 m7startX = (ppu->m7matrix[0] * clippedH & ~63) + (ppu->m7matrix[1] * ry & ~63) +
     (ppu->m7matrix[1] * clippedV & ~63) + (xCenter << 8);
   uint32 m7startY = (ppu->m7matrix[2] * clippedH & ~63) + (ppu->m7matrix[3] * ry & ~63) +
@@ -1316,7 +1422,7 @@ static void PpuDrawBackground_mode7(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
   }
 }
 
-static void PpuDrawSprites(Ppu *ppu, uint y, uint sub, bool clear_backdrop) {
+static void PpuDrawSprites(Ppu *ppu, int y, uint sub, bool clear_backdrop) {
   int layer = 4;
   if (!IS_SCREEN_ENABLED(ppu, sub, layer))
     return;  // layer is completely hidden
@@ -1383,10 +1489,17 @@ static uint32 PpuCapturedOverlayColor(
  * when it is already all-transparent (the usual case); a surface written last
  * frame is cleared for one more full frame, then its dirty flag drops on the
  * final line. */
-static void PpuClearOverlayRenderLine(Ppu *ppu, uint y) {
-  if (y == 0) return;
-  int screen_y = (int)y - 1;
-  bool last_line = screen_y == 223;
+/* No `y == 0` early-out here (nor in PpuWriteOverlayRenderLine below). It was
+ * defensive -- ppu_runLine's line-0 branch is the frame SETUP pass and returns
+ * before ever reaching the line renderer, so this could not be called with 0.
+ * With a vertical margin, line 0 became a real scanline: the one directly
+ * above the visible screen (screen_y == -1). Keeping the guard silently
+ * dropped that row from every captured plane. */
+static void PpuClearOverlayRenderLine(Ppu *ppu, int y) {
+  /* `last_line` must track the last line actually RENDERED, not authentic 223,
+   * or the dirty flag would drop mid-frame and leave the bottom band stale. */
+  int screen_y = y - 1;
+  bool last_line = screen_y == kPpuYPixels - 1 + ppu->extraBottomCur;
   for (int source = 0; source < kPpuOverlaySource_Count; source++) {
     uint8_t *pixels = ppu->overlayRenderBuffer[source];
     uint32_t pitch = ppu->overlayRenderPitch[source];
@@ -1396,11 +1509,14 @@ static void PpuClearOverlayRenderLine(Ppu *ppu, uint y) {
     bool active = capture->x1 > capture->x0 && capture->y1 > capture->y0;
     if (!active && !ppu->overlayRenderMaybeDirty[source])
       continue;
-    memset(pixels + (size_t)screen_y * pitch, 0, pitch);
+    int row = PpuOverlayRow(capture, screen_y);
+    if (row < 0)
+      continue;
+    memset(pixels + (size_t)row * pitch, 0, pitch);
     for (int band = 0; band < 3; band++) {
       uint8_t *band_pixels = ppu->overlayRenderBands[source][band];
       if (band_pixels)
-        memset(band_pixels + (size_t)screen_y * pitch, 0, pitch);
+        memset(band_pixels + (size_t)row * pitch, 0, pitch);
     }
     if (last_line)
       ppu->overlayRenderMaybeDirty[source] = active;
@@ -1408,11 +1524,15 @@ static void PpuClearOverlayRenderLine(Ppu *ppu, uint y) {
   if (ppu->m7OverlayBuffer && ppu->m7OverlayPitch) {
     bool active = ppu->m7Override.rgba != NULL;
     if (active || ppu->m7OverlayMaybeDirty) {
-      for (int r = 0; r < ppu->m7OverlayScale; r++)
-        memset(ppu->m7OverlayBuffer +
-                   ((size_t)screen_y * ppu->m7OverlayScale + r) *
-                       ppu->m7OverlayPitch,
-               0, ppu->m7OverlayPitch);
+      /* Authentic row: the m7 overlay is not an overlayCaptures[] destination
+       * and its consumer indexes it in authentic screen space. Mode 7 never
+       * runs with a vertical margin anyway (see PpuDrawBackground_mode7). */
+      if (screen_y >= 0)
+        for (int r = 0; r < ppu->m7OverlayScale; r++)
+          memset(ppu->m7OverlayBuffer +
+                     ((size_t)screen_y * ppu->m7OverlayScale + r) *
+                         ppu->m7OverlayPitch,
+                 0, ppu->m7OverlayPitch);
       if (last_line)
         ppu->m7OverlayMaybeDirty = active;
     }
@@ -1420,10 +1540,17 @@ static void PpuClearOverlayRenderLine(Ppu *ppu, uint y) {
 }
 
 static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
-                                      uint y) {
-  if (y == 0) return;
-  int screen_y = (int)y - 1;
+                                      int y) {
+  /* Two different coordinates from here on, identical only when no vertical
+   * margin is active: `screen_y` is the AUTHENTIC screen row the capture
+   * rectangle is expressed in (negative above the screen), `row` is where it
+   * lands in the taller destination surface. A host that wants the margin
+   * scanlines captured widens its rect to [-extraTop, 224+extraBottom). */
+  int screen_y = y - 1;
   if (!PpuOverlayActiveOnLine(ppu, source, screen_y))
+    return;
+  int row = PpuOverlayRow(&ppu->overlayCaptures[source], screen_y);
+  if (row < 0)
     return;
 
   uint32_t pitch = ppu->overlayRenderPitch[source];
@@ -1439,7 +1566,7 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
     return;
 
   uint32 *dst = (uint32 *)(ppu->overlayRenderBuffer[source] +
-                            (size_t)screen_y * pitch);
+                            (size_t)row * pitch);
   const PpuZbufType *src = ppu->overlayBuffers[source].data;
 
   uint32 *band_dst[3] = { NULL, NULL, NULL };
@@ -1447,7 +1574,7 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
   for (int band = 0; band < 3; band++) {
     uint8_t *base = ppu->overlayRenderBands[source][band];
     if (base) {
-      band_dst[band] = (uint32 *)(base + (size_t)screen_y * pitch);
+      band_dst[band] = (uint32 *)(base + (size_t)row * pitch);
       any_bands = true;
     }
   }
@@ -1502,7 +1629,7 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
   ppu->overlayRenderContentMask[source] |= content_mask;
 }
 
-static PpuPixelPrioBufs *PpuBeginBackgroundOverlay(Ppu *ppu, uint y,
+static PpuPixelPrioBufs *PpuBeginBackgroundOverlay(Ppu *ppu, int y,
                                                    bool sub, uint layer) {
   int screen_y = (int)y - 1;
   PpuOverlaySource source = (PpuOverlaySource)layer;
@@ -1513,7 +1640,7 @@ static PpuPixelPrioBufs *PpuBeginBackgroundOverlay(Ppu *ppu, uint y,
   return &ppu->overlayBuffers[source];
 }
 
-static void PpuFinishBackgroundOverlay(Ppu *ppu, uint y, bool sub,
+static void PpuFinishBackgroundOverlay(Ppu *ppu, int y, bool sub,
                                        uint layer,
                                        PpuPixelPrioBufs *layerbuf) {
   PpuOverlaySource source = (PpuOverlaySource)layer;
@@ -1590,10 +1717,10 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
   }
 }
 
-static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
+static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
   PpuClearOverlayRenderLine(ppu, y);
   if (PPU_forcedBlank(ppu)) {
-    uint8 *dst = &ppu->renderBuffer[(y - 1) * ppu->renderPitch];
+    uint8 *dst = &ppu->renderBuffer[(size_t)PpuOutputRow(ppu, y) * ppu->renderPitch];
     size_t n = sizeof(uint32) * (256 + ppu->extraLeftRight * 2);
     memset(dst, 0, n);
     return;
@@ -1625,7 +1752,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   uint32 cw_clip_math = ((cwin.bits & kCwBitsMod[PPU_clipMode(ppu)]) ^ kCwBitsMod[PPU_clipMode(ppu) + 4]) |
     ((cwin.bits & kCwBitsMod[PPU_preventMathMode(ppu)]) ^ kCwBitsMod[PPU_preventMathMode(ppu) + 4]) << 8;
 
-  uint32 *dst = (uint32*)&ppu->renderBuffer[(y - 1) * ppu->renderPitch], *dst_org = dst;
+  uint32 *dst = (uint32*)&ppu->renderBuffer[(size_t)PpuOutputRow(ppu, y) * ppu->renderPitch], *dst_org = dst;
 
   /* Normal scanlines cover only the finite world's live side margins. HUD
    * split lines cover the full presentation budget so their edge-anchored BG3
