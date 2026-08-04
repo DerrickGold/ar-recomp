@@ -1563,11 +1563,42 @@ available): BG2's band is 32/32 rows of real scenery, 28 of them distinct, not a
 held copy of the first visible row. BG1 is empty there — and empty in the
 adjacent VISIBLE rows too, because that part of the level is sky.
 
-This is the axis where the §4 streaming seams show. Column strips decode a
-512px-tall window of a taller level and leave filler (`$04E`) outside it, so a
-band placed over stale rows shows the same "black staircase" the widescreen
-survey hit. Repairing that is the row-strip work in §13.2's fix family and has
-NOT been done — which is why the default is 0 and the maximum is small.
+### Streaming repair (the band's rows are decoded, not inherited)
+
+This is the axis where the §4 streaming seams show. A column strip decodes a
+512px-tall window keyed to `cameraY & 0xFF00` and writes filler outside it;
+row strips are its only refresher. The band reads rows ABOVE the camera, so
+whenever `cameraY & 0xFF` is smaller than the band height those rows fall below
+the page origin, outside the decode window, and the band inherits filler.
+
+Repaired by `ws_build_band_rows` (actraiser_widescreen_bg.c) — the direct
+transpose of `ws_build_visible_row`'s existing horizontal page-hole workaround.
+It drives the game's own `$02:B8A0` row decoder for `world_y = camY - k*16` and
+drains the record into VRAM host-side, inside the same WRAM/CPU snapshot
+transaction the side margins already use, so the band carries true map content
+and no game state is perturbed.
+
+It must run on the COLUMN path as well as the row path: rebuilding columns is
+precisely what re-stomps the band, and moving down builds the leading edge
+256px BELOW the camera, refreshing nothing above it.
+
+Measured, Fillmore act 2, extend 32, `AR_VEXT_BANDFIX` off vs on:
+
+| frame | BG1 band rows with content | opaque px |
+|---|---|---|
+| gf 2549 (camY 520, page phase 8) | 9/32 → **32/32** | 1462 → **5091** |
+| gf 2999 | 32/32 | 2985 → **5124** |
+| gf 3179 | 32/32 | 4686 → **5153** |
+
+gf 2549 is the low-page-phase frame the mechanism predicts, and it is the one
+that improves most — diagnosis and fix agree. VISIBLE rows are byte-identical in
+every case: the repair touches only the band. Across four action replays, 2926
+row builds with zero decoder rejections, and the cost is inside run-to-run
+timing noise (~0.3%) because the refresh only runs on frames where the camera
+actually moved. `AR_VEXT_BANDFIX=0` restores the pre-repair behaviour.
+
+The default is still 0: the repair is validated on Fillmore acts 1-2 and
+level 1, not across every stage.
 
 `AR_VEXT_LOG=1` prints the resolved margin with the camera/scroll state that
 produced it, plus a `[vext-rows]` line showing where the HUD and the diorama

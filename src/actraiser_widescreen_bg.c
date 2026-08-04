@@ -125,16 +125,16 @@ typedef struct WsRefreshKey {
   uint8 current_map;
   uint8 destination_map;
   uint8 destination_map_group;
-  uint16 margin_left, margin_right;
+  uint16 margin_left, margin_right, margin_top;
   WsLayerRefreshKey layer[2];
 } WsRefreshKey;
 
 /* WsRefreshKey has no padding: the four uint8s (offsets 0-3) fill exactly to the
  * offset-4 uint16 boundary, and every remaining member is uint16, so the whole
- * struct is 52 bytes with no gaps. That is what makes the refresh-key memcmp in
+ * struct is 54 bytes with no gaps. That is what makes the refresh-key memcmp in
  * ActRaiser_WidescreenMarginRefresh exact. If this assert ever fires, a field was
  * reordered or a sub-uint16 field added — the memcmp is no longer byte-exact. */
-_Static_assert(sizeof(WsRefreshKey) == 52,
+_Static_assert(sizeof(WsRefreshKey) == 54,
     "WsRefreshKey gained padding; the refresh-key memcmp is no longer exact");
 
 static WsRefreshKey s_refresh_key;
@@ -641,6 +641,55 @@ static void ws_build_visible_row(CpuState *cpu, uint16 layer_x,
   }
 }
 
+/* Vertical band (diorama vertical extend) — the transpose of the horizontal
+ * page-hole workaround in ws_build_visible_row above, and it exists for the
+ * same reason on the other axis.
+ *
+ * A column strip decodes a 512px-tall window keyed to `cameraY & 0xFF00` and
+ * writes FILLER outside it (rendering-engine.md §4); row strips are the only
+ * thing that ever refreshes those cells. The band reads rows ABOVE the camera,
+ * so whenever `cameraY & 0xFF` is smaller than the band height those rows sit
+ * below the page origin, outside the decode window, and the band shows filler
+ * instead of world. Rebuilding the columns re-stomps them, which is why this
+ * has to run on the column path too, not only when the camera moves in Y.
+ *
+ * Each row is built through the same game decoder + host drain transaction the
+ * side margins use, so the band carries true map content rather than anything
+ * synthesized here. `world_y` is 16px-aligned because that is the metatile
+ * granularity $B8A0 decodes at. */
+static int ws_band_rows_enabled(void) {
+  /* AR_VEXT_BANDFIX=0 restores the pre-fix behaviour (band left on whatever the
+   * column strips wrote) so the two can be A/B'd from one binary, the same way
+   * AR_WS_BGREFRESH gates the side-margin refresh. */
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *e = getenv("AR_VEXT_BANDFIX");
+    enabled = !(e && e[0] == '0');
+  }
+  return enabled;
+}
+
+static void ws_build_band_rows(CpuState *cpu, uint16 layer_state_offset,
+                               uint16 row_y, int band_px,
+                               int *built, int *requested) {
+  if (band_px <= 0 || !ws_band_rows_enabled())
+    return;
+  /* Same shape guards the row path uses: a layer with no real world width, or
+   * one under three pages tall, has no off-screen rows worth decoding. */
+  if (ActRaiser_ReadWram16((uint16)(kBgState_Width + layer_state_offset)) <
+          kActRaiserTownWorldWidth ||
+      g_ram[(uint16)(kBgState_Height + 1 + layer_state_offset)] < 3)
+    return;
+  int rows = (band_px + 0xF) / 0x10;
+  for (int k = 1; k <= rows; k++) {
+    int world_y = (int)row_y - k * 0x10;
+    if (world_y < 0)
+      break;
+    ws_build_visible_row(cpu, layer_state_offset, (uint16)world_y,
+                         built, requested);
+  }
+}
+
 void ActRaiser_WidescreenMarginRefresh(void) {
   if (!ActRaiser_WidescreenBgRefreshEnabled() ||
       !g_ws_active || !g_ppu || !g_snes) {
@@ -661,7 +710,11 @@ void ActRaiser_WidescreenMarginRefresh(void) {
     s_refresh_key_valid = 0;
     return;
   }
-  if (g_ppu->extraLeftCur == 0 && g_ppu->extraRightCur == 0) {
+  /* extraTopCur counts: a diorama vertical band with no side margins still
+   * needs its rows decoded, and bailing here would leave it on whatever the
+   * column strips last left behind. */
+  if (g_ppu->extraLeftCur == 0 && g_ppu->extraRightCur == 0 &&
+      g_ppu->extraTopCur == 0) {
     s_refresh_key_valid = 0;
     return;
   }
@@ -674,6 +727,7 @@ void ActRaiser_WidescreenMarginRefresh(void) {
   key.destination_map_group = g_ram[kActRaiserWram_DestinationMapGroup];
   key.margin_left = g_ppu->extraLeftCur;
   key.margin_right = g_ppu->extraRightCur;
+  key.margin_top = g_ppu->extraTopCur;
   for (int layer = 0; layer < 2; layer++) {
     uint16 layer_state_offset = (uint16)(layer * kBgStateStride);
     WsLayerRefreshKey *layer_key = &key.layer[layer];
@@ -772,6 +826,11 @@ void ActRaiser_WidescreenMarginRefresh(void) {
               cpu, layer_state_offset, (uint16)world_x, world_y);
         }
       }
+      /* The strips just written above left filler in every row outside their
+       * page-keyed 512px window, which includes the band whenever the camera
+       * sits near a page boundary. Refresh it before the transaction closes. */
+      ws_build_band_rows(cpu, layer_state_offset, row_y[layer],
+                         g_ppu->extraTopCur, &built_rows, &requested_rows);
     }
   } else {
     for (int layer = 0; layer < 2; layer++) {
@@ -797,6 +856,12 @@ void ActRaiser_WidescreenMarginRefresh(void) {
             break;
         }
       }
+      /* Moving DOWN builds the leading edge 256px BELOW the camera, so nothing
+       * above it is refreshed and the band would keep whatever it had. Moving
+       * UP the loop above stops at row_y, one row short of the band. Either
+       * way the band needs its own build. */
+      ws_build_band_rows(cpu, layer_state_offset, row_y[layer],
+                         g_ppu->extraTopCur, &built_rows, &requested_rows);
     }
   }
 
