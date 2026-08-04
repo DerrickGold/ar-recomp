@@ -856,6 +856,17 @@ show the frozen `$0088` against the advancing host frame:
    act 1 flat never left the world map with diorama on at boot. Replay flat into
    the stage, flip after (**open question**: why margin width moves game-logic
    timing at all).
+2c. **Isolate settings without touching the user's `settings.ini`**:
+   `AR_SETTINGS_PATH=<file>` wins over the resolved user-data path, so an A/B
+   is two generated .ini copies differing in one key rather than an edit to a
+   live config. `AR_DIORAMA_DUMP_GF=g1,g2,...` arms the Shift+D per-layer dump
+   from a replay, writing `runs/<ts>/diorama_dump/<layer>_gf<N>.png` — the right
+   probe when the question is about a CAPTURED plane, since the `AR_SHOT_*` PPM
+   is the game framebuffer and in diorama mode that is only the residual
+   backdrop (largely uniform, and it will not discriminate a shifted image from
+   an unchanged one — a real trap, hit while verifying §13i).
+   `AR_VEXT_LOG=1` prints the resolved vertical-extend margin per game frame
+   with the camera/scroll state behind it.
 3. **Compare NUMERICALLY, never by eye**: slice pixel rows/columns in python
    (`px[(y*w+x)*3]`...). HARD LESSON: pillarboxed shots with dark world content were
    repeatedly misread as widescreen when eyeballing PNGs — a whole survey phase was
@@ -961,7 +972,19 @@ the console. Two entries per town entry are normal and benign: the ROM holds
 forced blank (`INIDISP=$80`) while it loads, then fades in over ~16 frames, and
 a forced-blank frame fails the PPU gate by design.
 
-When the status is `pixel_mismatch`, arm the dump instead of guessing which
+**Since ledger §31 a pixel mismatch is no longer one of the causes.** The D2
+byte-equality gate measures and reports but does not veto: a mismatching frame
+keeps the enhanced view and shows the few wrong pixels, because a one-frame
+whole-screen perspective flash reads as a far worse artifact than the mismatch
+it was hiding. Such a frame produces no `[sim3d-view]` transition at all —
+look for `[sim3d-d2] gf=... fidelity lost/regained (mismatch=N px, view
+retained)` instead, which brackets each run of mismatching frames. So a
+`[sim3d-view]` fallback now always means the capture never composed
+(`UnsupportedPpu`, `UnsupportedColorMath`, `Picker`, `AtlasInvalid`, …), which
+narrows the search considerably. The checkpoints still assert zero mismatching
+pixels, so this weakened nothing that guards a composition regression.
+
+When you see `fidelity lost`, arm the dump instead of guessing which
 pixels differ — a fidelity failure cannot be dumped by frame number because
 nobody knows the number until after it happens:
 

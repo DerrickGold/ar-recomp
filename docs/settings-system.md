@@ -665,9 +665,10 @@ gate once a randomized playthrough has been validated. Backed by
 it rewrites the loaded ROM image. `Randomizer_Init` snapshots the cart buffer
 (`cart_load` copies, so the live image is `g_snes->cart->rom`) and every row's
 `on_change` calls `Randomizer_Apply`, which restores the pristine snapshot and
-re-runs the enabled passes. Re-applying is therefore idempotent, and turning the
-master off gives back a byte-exact stock image — which is what keeps an
-unrandomized run valid for the A/B visual-regression harness.
+re-runs the enabled passes. The snapshot is taken after deterministic visual-data
+adjustments (currently the signature-checked scripted-house-fire cadence patch),
+so re-applying is idempotent and turning the master off gives back that exact
+non-randomized baseline without erasing presentation fixes.
 
 Timing is a consequence of what each table feeds: stat edits land at the next
 spawn, placement edits at the next level load. Nothing needs a restart.

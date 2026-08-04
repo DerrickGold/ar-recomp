@@ -249,21 +249,27 @@ def read_object_evidence(path: Path) -> dict:
     if not path.is_file():
         return categories
     for line in path.read_text(errors="replace").splitlines():
-        if "[simcat]" not in line or "tier=W" not in line:
+        if "[simcat]" not in line:
             continue
         fields = dict(re.findall(r"([a-zA-Z0-9_]+)=([^ ]+)", line))
         try:
             frame = int(fields["frame"], 16)
+            tier = fields["tier"]
+            identity = int(fields["type" if tier == "W" else "list"], 16)
             event = {
                 "game_frame": int(fields["gf"], 10),
                 "composition": frame,
                 "record": int(fields["rec"], 16),
-                "type": int(fields["type"], 16),
+                "type": identity,
             }
         except (KeyError, ValueError):
             continue
-        if frame in (0xE1BD, 0xE209, 0xE255):
-            category = "blue_demon_lightning"
+        if tier == "F" and frame in (0xE9CC, 0xEA27, 0xEA82, 0xEAEC):
+            category = "town_creation_lightning"
+        elif tier != "W":
+            continue
+        elif frame in (0xE1BD, 0xE209, 0xE255):
+            category = "blue_dragon_lightning"
         elif frame in (0xE71B, 0xE73A, 0xE75E):
             category = "napper_ground_pluck"
         elif frame in (0xE6CA, 0xE6D0, 0xE6D6):
@@ -334,6 +340,7 @@ def read_d1_metadata(path: Path,
     effect_overflow_total = effect_overflow_max = 0
     effect_kind_counts: dict[str, int] = {}
     effect_phase_counts: dict[str, dict[str, int]] = {}
+    effect_color_counts: dict[str, dict[str, int]] = {}
     effect_compositions: dict[str, set[int]] = {}
     effect_generations: dict[str, set[int]] = {}
     effect_carry: dict[tuple[str, int, int], dict] = {}
@@ -548,6 +555,9 @@ def read_d1_metadata(path: Path,
                 effect_kind_counts[kind] = effect_kind_counts.get(kind, 0) + 1
                 phase_counts = effect_phase_counts.setdefault(kind, {})
                 phase_counts[phase] = phase_counts.get(phase, 0) + 1
+                color = str(effect.get("color_name", "missing"))
+                color_counts = effect_color_counts.setdefault(kind, {})
+                color_counts[color] = color_counts.get(color, 0) + 1
                 effect_compositions.setdefault(kind, set()).add(
                     int(effect.get("composition", 0)))
                 generation = int(effect.get("generation", 0))
@@ -627,8 +637,14 @@ def read_d1_metadata(path: Path,
             for source_index, source in enumerate(sources):
                 first = int(source["oam_first"])
                 count = int(source["oam_count"])
+                palette_mask = int(source.get("obj_palette_mask", -1))
                 fragment_first = int(source["fragment_first"])
                 fragment_count = int(source["fragment_count"])
+                if palette_mask < 0 or palette_mask > 0xFF or \
+                        (count and not palette_mask):
+                    issue(line_number,
+                          f"source {source_index} has invalid OBJ palette mask "
+                          f"{palette_mask}")
                 if first != cursor:
                     issue(line_number,
                           f"source {source_index} starts {first}, expected {cursor}")
@@ -792,6 +808,10 @@ def read_d1_metadata(path: Path,
             kind: dict(sorted(counts.items()))
             for kind, counts in sorted(effect_phase_counts.items())
         },
+        "effect_color_counts": {
+            kind: dict(sorted(counts.items()))
+            for kind, counts in sorted(effect_color_counts.items())
+        },
         "effect_generation_counts": {
             kind: len(generations)
             for kind, generations in sorted(effect_generations.items())
@@ -848,6 +868,7 @@ def validate_d1_summary(summary: dict, expected: dict) -> list[str]:
                     "effect_frame_count", "visible_effect_frame_count",
                     "visible_effect_instance_count", "max_effect_count",
                     "effect_kind_counts", "effect_phase_counts",
+                    "effect_color_counts",
                     "effect_generation_counts", "effect_compositions")
     for field in exact_fields:
         if field in expected and summary[field] != expected[field]:
@@ -940,6 +961,41 @@ def validate_d1_summary(summary: dict, expected: dict) -> list[str]:
         if unexpected:
             errors.append(
                 f"D1 unexpected effect kinds: {sorted(unexpected)!r}")
+    for kind, kind_expected in expected.get("effect_expectations", {}).items():
+        actual_count = summary.get("effect_kind_counts", {}).get(kind, 0)
+        if "instance_ticks" in kind_expected and \
+                actual_count != int(kind_expected["instance_ticks"]):
+            errors.append(
+                f"D1 effect {kind} instance_ticks: expected "
+                f"{kind_expected['instance_ticks']}, got {actual_count}")
+        actual_phases = summary.get("effect_phase_counts", {}).get(kind, {})
+        if "phase_counts" in kind_expected and \
+                actual_phases != kind_expected["phase_counts"]:
+            errors.append(
+                f"D1 effect {kind} phase_counts: expected "
+                f"{kind_expected['phase_counts']!r}, got {actual_phases!r}")
+        actual_colors = summary.get("effect_color_counts", {}).get(kind, {})
+        if "color_counts" in kind_expected and \
+                actual_colors != kind_expected["color_counts"]:
+            errors.append(
+                f"D1 effect {kind} color_counts: expected "
+                f"{kind_expected['color_counts']!r}, got {actual_colors!r}")
+        actual_generations = summary.get(
+            "effect_generation_counts", {}).get(kind, 0)
+        if "generation_count" in kind_expected and \
+                actual_generations != int(kind_expected["generation_count"]):
+            errors.append(
+                f"D1 effect {kind} generation_count: expected "
+                f"{kind_expected['generation_count']}, "
+                f"got {actual_generations}")
+        actual_compositions = summary.get(
+            "effect_compositions", {}).get(kind, [])
+        if "compositions" in kind_expected and \
+                actual_compositions != kind_expected["compositions"]:
+            errors.append(
+                f"D1 effect {kind} compositions: expected "
+                f"{kind_expected['compositions']!r}, "
+                f"got {actual_compositions!r}")
     # The picker contract is asserted either way, but which contract applies is
     # a build-time property of the binary, not of the manifest.
     # A checkpoint that never opens a picker cannot exercise either picker
@@ -1448,7 +1504,8 @@ def main() -> int:
                      checkpoint.get("d4c_visual") or
                      checkpoint.get("d5a_visual") or
                      checkpoint.get("effect_visual"))
-    d3_label = ("Lightning" if checkpoint.get("effect_visual")
+    d3_label = (str(checkpoint.get("effect_visual_label", "Lightning"))
+                if checkpoint.get("effect_visual")
                 else "D5a" if checkpoint.get("d5a_visual")
                 else "D4c" if checkpoint.get("d4c_visual")
                 else "D4b" if checkpoint.get("d4b_visual")

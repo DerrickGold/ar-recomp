@@ -16,10 +16,11 @@
  *
  * The first twelve actions ARE that bit order (bit index == enum value), which
  * is the layout SwapInputBits translates into the SNES auto-joypad word. The
- * host actions after them are gamepad-only: keyboard hotkeys (Esc/F1, P, T,
- * F5, F7) stay hard-wired in main.c so a rebind cannot strand a desktop player
- * without a way back into the menu. On a Steam Deck there is no keyboard at
- * all, so the pad needs its own way to reach the overlay. */
+ * host actions after them are gamepad-only (except MagicCycle, see below):
+ * keyboard hotkeys (Esc/F1, P, T, F5, F7) stay hard-wired in main.c so a
+ * rebind cannot strand a desktop player without a way back into the menu. On a
+ * Steam Deck there is no keyboard at all, so the pad needs its own way to
+ * reach the overlay. */
 typedef enum {
   kInputAction_B = 0,
   kInputAction_Y,
@@ -42,6 +43,12 @@ typedef enum {
   kInputAction_SaveState,
   kInputAction_LoadState,
   kInputAction_CamReset,
+  /* Debug aid, not gameplay: cycles the action-stage spell selection. Inert
+   * unless the "Cycle magic spell" cheat is armed, so binding it costs a
+   * normal player nothing. Unlike the other host actions this one HAS a
+   * keyboard row — it is a testing control a desktop developer reaches for,
+   * and it cannot strand anyone the way a rebound menu key could. */
+  kInputAction_MagicCycle,
   kInputAction_EdgeEnd,
 
   /* Analog camera actions. Unlike everything above these are POLLED, not

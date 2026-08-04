@@ -687,6 +687,94 @@ the current debugging process; this file is the case law.
     content is allowed to shorten an accuracy hold, latch explicit content identity and natural
     completion; never infer it from instantaneous silence.
 
+31. **One-frame flat flash in an enhanced town — FIXED 2026-08-03 (policy change; the D2 pixel
+    gate no longer vetoes).** Reported as "graphical flicker when the town construction cycle
+    triggers". The console named it without a rebuild, exactly as §23 promised:
+    `[sim3d-view] gf=17681 enhanced -> authentic (pixel_mismatch, integrity=$0, mismatch=8 px)`
+    followed by a return to enhanced on the very next frame. Eight pixels out of 446x224 cost a
+    whole-screen perspective change for one frame.
+
+    **Not a recurrence of §23**, whose margin-column fix (`clip_to_live` in
+    `ComposeFlatPixelsPolicy`) is intact and whose `D2-margin-object-exit` checkpoint still
+    reports zero mismatching pixels. Nor was the reported correlation real: that run held exactly
+    one fallback across five town visits and ~50 `development change` events, and it landed 522
+    frames after the nearest construction event. The construction cycle was when the user
+    happened to be looking, not what triggered it.
+
+    **Fix (deliberately not a pixel fix):** `Sim3D_FinishCapture` still builds the difference,
+    still publishes `separated_mismatch_pixels`, and still sets `kSim3DCapture_PixelMismatch` —
+    but it no longer clears `separated_valid`, so the enhanced view is retained. The town-canvas
+    gate had to be widened to accept `PixelMismatch` alongside `Ready` in the same change, or the
+    veto would simply have moved: the ground extension would pop out on precisely the frames the
+    view now keeps. Because a retained frame produces no view transition, `[sim3d-view]` goes
+    quiet on these, so a new `[sim3d-d2] gf=... fidelity lost/regained (mismatch=N px, view
+    retained)` line reports the *edges* of a mismatching run — mismatches arrive in bursts and
+    one line per frame would bury the console exactly when something is wrong.
+
+    Frames the capture never composed still fall back, and always did: forced blank during a
+    town's load fade-in is `kSim3DCapture_UnsupportedPpu`, decided in `Sim3D_BeginCapture` before
+    any comparison exists. Removing the pixel veto does not touch it.
+
+    **Reusable lessons:**
+    - **A fidelity gate has two separable questions: is it measuring correctly, and what should
+      it do about a failure?** §23 and §24 both answered the first. This entry only changes the
+      second, and completes the migration §24 started for the object-metadata gate: fail-closed
+      belongs in the checkpoints, where strictness is free, not in the player's frame. All the
+      D2 checkpoints still assert `separated_mismatch_pixels_total == 0`, so a real composition
+      regression is still caught — it just no longer flashes at the player first.
+    - **When you remove a veto, find every gate that was keyed on it.** The pixel gate was read
+      in two places, and fixing only the obvious one converts a full-screen flash into a
+      ground-extension pop on identical frames — a quieter version of the same bug.
+    - **"Watch it fail" applies to removals too, and needs a probe that discriminates.** A
+      temporary forced `mismatch = 8` over four frames showed the old code emitting the user's
+      exact `enhanced -> authentic` signature and the new code emitting `fidelity lost` with the
+      view retained. Without running the pre-change build against the same probe, "no fallback
+      appeared" would equally have described a probe that never fired.
+    - **A reported trigger is a report about attention, not causation.** Check the frame distance
+      between the symptom and the event it is attributed to before designing around the
+      correlation.
+
+32. **Action-stage spell lighting and particles never drew a single pixel — FIXED 2026-08-03
+    (one field read at the wrong width).** Reported as "the new particle and lighting
+    implementation isn't activating or running". Every layer was correctly wired — the sources
+    were in `snesbuild.ini`, both settings defaulted on, `FrameSlot_Capture` called
+    `ActionEffects_CaptureFrame` every frame, `DrawActionEffects` was called from all four
+    present paths — and nothing rendered, with no error anywhere.
+
+    **Root cause:** `ReadActionObject` read `kActRaiserActionObject_AnimationBank` (+$18) as a
+    16-bit word. It is a BYTE. +$16..+$18 is one 24-bit animation pointer (addr16 then bank8),
+    and +$19 is a separate field: the record's base OAM attribute byte, mirroring the live copy
+    at +$29. `MagicalFireObjectIsActive` therefore compared `$3907` (bank $07 | attributes $39)
+    against the expected `$0007`, rejected every fire part, and published an empty frame.
+    `visible_count` stayed 0, so `DrawActionEffects` returned at its first line forever.
+
+    **How it was found without a rebuild:** the user's run directory already contained the
+    answer. `runs/20260803-162833/snapshots/snap_00_gf1913.wram.bin` was captured mid-cast —
+    four live fire parts in the cohort at $06A0/$06E0/$0720/$0760, controller kind 1 at
+    $0898 — so each of the identity predicate's seven clauses could be evaluated against real
+    bytes in a few lines of Python. Six passed; exactly one failed. No instrumentation, no
+    second run.
+
+    **Why the tests passed anyway:** `SeedFireSlot` wrote `Write16(address + 0x18, 0x0007)`,
+    a full word of zeroes in the high byte. The fixture had been derived from the same
+    assumption as the code, so it asserted the code against itself. The fixture now writes the
+    two bytes independently ($07 then $39), and `TestLiveWramRecordIsRecognized` replays the
+    snapshot's 64-byte record verbatim. Under the old read the suite now fails 50 checks.
+
+    **Reusable lessons:**
+    - **A hand-written fixture that shares the code's assumption proves nothing.** Both were
+      written from the same reading of the record layout, so the only thing the test could
+      detect was a typo. Real captured bytes are the only fixture no one chose.
+    - **When a whole feature is silently inert, evaluate its gate predicate clause by clause
+      against one known-good state before instrumenting anything.** The bug was a single
+      failing clause out of seven, and the state that exercised it had already been captured.
+    - **Grep the codebase for every other reader of a field before trusting your own width.**
+      `actraiser_widescreen_sprites.c` read this same field 8-bit in three places. One grep
+      would have shown the disagreement at authoring time.
+    - **A path that can be entirely inert needs one line of proof that it ran.**
+      `[action-fx] first spell geometry submitted: ...` now fires once per process, so
+      "nothing happens" is answerable from `console.log` alone.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

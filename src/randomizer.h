@@ -40,7 +40,7 @@ typedef enum {
 
 /* Read-only account of the last apply, for the menu to display. */
 typedef struct {
-  bool applied;              /* false = stock ROM image is live */
+  bool applied;              /* false = non-randomized baseline is live */
   uint32 seed;
   int enemy_records;         /* stat records rescaled */
   int statue_drops;          /* type-$80 placements whose item id changed */

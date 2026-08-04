@@ -348,10 +348,15 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
       bg3_capture->y1 <= kHostDisplayFramebufferHeight)
     inputs->hud_body_y1 = (uint8_t)bg3_capture->y1;
 
-  const PpuOverlayCapture *obj_capture =
-      &context->ppu->overlayCaptures[kPpuOverlaySource_Obj];
-  if (obj_capture->oamCount == kHudObjectCaptureCount) {
-    const int first = obj_capture->oamFirst;
+  /* Same source of truth the present path uses (present.c's
+   * BuildProjectionInputsFromSlot): the promote's latched range, not
+   * overlayCaptures[Obj], whose OAM range diorama mode replaces with its
+   * full-frame scene claim. Reading the capture here would make the inspector's
+   * hit-test disagree with what was actually drawn. */
+  uint8_t icon_first = 0, icon_count = 0;
+  ActRaiser_HudObjIconRange(&icon_first, &icon_count);
+  if (icon_count == kHudObjectCaptureCount) {
+    const int first = icon_first;
     inputs->obj_icon_x = (context->ppu->oam[first * 2] & 0xff) |
         ((context->ppu->highOam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;
     inputs->obj_icon_y = context->ppu->oam[first * 2] >> 8;

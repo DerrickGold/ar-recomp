@@ -36,22 +36,6 @@ extern RecompReturn bank_00_923A_M0X0(CpuState *cpu);
 
 RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu);
 
-typedef enum ActionObjectField {
-  kActionObject_Status = 0x00,
-  kActionObject_WorldX = 0x02,
-  kActionObject_WorldY = 0x04,
-  kActionObject_LeftExtent = 0x0A,
-  kActionObject_TopExtent = 0x0C,
-  kActionObject_RightExtent = 0x0E,
-  kActionObject_BottomExtent = 0x10,
-  kActionObject_Handler = 0x12,
-  kActionObject_Type = 0x16,
-  kActionObject_DefinitionBank = 0x18,
-  kActionObject_Definition = 0x20,
-  kActionObject_FlipAttributes = 0x28,
-  kActionObject_Flags = 0x30,
-} ActionObjectField;
-
 typedef enum SimRecordField {
   kSimRecord_Behavior = 0x00,
   kSimRecord_ScriptCursor = 0x02,
@@ -191,7 +175,7 @@ void ActRaiser_WidescreenSpriteActivationProbe(void) {
         kActRaiserWram_ActionObjectTable +
         slot * kActRaiserActionObjectStride);
     uint16 status = ActRaiser_ReadWram16(
-        (uint16)(object_address + kActionObject_Status));
+        (uint16)(object_address + kActRaiserActionObject_Status));
     if (status & kActRaiserObjectStatus_End)
       break;
 
@@ -199,43 +183,43 @@ void ActRaiser_WidescreenSpriteActivationProbe(void) {
     int eligible = !(status & kActRaiserObjectStatus_IneligibleMask);
     int vertical = eligible && ws_axis_visible(
         ActRaiser_ReadWram16(
-            (uint16)(object_address + kActionObject_WorldY)),
+            (uint16)(object_address + kActRaiserActionObject_WorldY)),
         ActRaiser_ReadWram16(
-            (uint16)(object_address + kActionObject_TopExtent)),
+            (uint16)(object_address + kActRaiserActionObject_TopExtent)),
         ActRaiser_ReadWram16(
-            (uint16)(object_address + kActionObject_BottomExtent)),
+            (uint16)(object_address + kActRaiserActionObject_BottomExtent)),
         camera_y, 0, kActRaiserAuthenticHeight, NULL, NULL);
     int authentic = vertical && ws_axis_visible(
         ActRaiser_ReadWram16(
-            (uint16)(object_address + kActionObject_WorldX)),
+            (uint16)(object_address + kActRaiserActionObject_WorldX)),
         ActRaiser_ReadWram16(
-            (uint16)(object_address + kActionObject_LeftExtent)),
+            (uint16)(object_address + kActRaiserActionObject_LeftExtent)),
         ActRaiser_ReadWram16(
-            (uint16)(object_address + kActionObject_RightExtent)),
+            (uint16)(object_address + kActRaiserActionObject_RightExtent)),
         camera_x, 0, kActRaiserAuthenticWidth,
         &screen_left, &screen_right);
     int wide = vertical && ws_axis_visible(
         ActRaiser_ReadWram16(
-            (uint16)(object_address + kActionObject_WorldX)),
+            (uint16)(object_address + kActRaiserActionObject_WorldX)),
         ActRaiser_ReadWram16(
-            (uint16)(object_address + kActionObject_LeftExtent)),
+            (uint16)(object_address + kActRaiserActionObject_LeftExtent)),
         ActRaiser_ReadWram16(
-            (uint16)(object_address + kActionObject_RightExtent)),
+            (uint16)(object_address + kActRaiserActionObject_RightExtent)),
         camera_x, -margin_left,
         kActRaiserAuthenticWidth + margin_right,
         &screen_left, &screen_right);
     int candidate = wide && !authentic;
 
     uint16 flags = ActRaiser_ReadWram16(
-        (uint16)(object_address + kActionObject_Flags));
+        (uint16)(object_address + kActRaiserActionObject_Flags));
     uint16 handler = ActRaiser_ReadWram16(
-        (uint16)(object_address + kActionObject_Handler));
+        (uint16)(object_address + kActRaiserActionObject_Handler));
     uint8 definition_bank =
-        g_ram[(uint16)(object_address + kActionObject_DefinitionBank)];
+        g_ram[(uint16)(object_address + kActRaiserActionObject_AnimationBank)];
     uint16 definition_address = ActRaiser_ReadWram16(
-        (uint16)(object_address + kActionObject_Definition));
+        (uint16)(object_address + kActRaiserActionObject_Composition));
     uint16 object_type = ActRaiser_ReadWram16(
-        (uint16)(object_address + kActionObject_Type));
+        (uint16)(object_address + kActRaiserActionObject_AnimationAddress));
     WsActivationCandidate *previous = &prior[slot];
 
     if (candidate) {
@@ -368,7 +352,8 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
 
   for (;;) {
     uint16 status = cpu_read16(
-        cpu, cpu->DB, (uint16)(object_address + kActionObject_Status));
+        cpu, cpu->DB,
+        (uint16)(object_address + kActRaiserActionObject_Status));
     if (status & kActRaiserObjectStatus_End) {
       terminal_status = status;
       break;
@@ -376,22 +361,22 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
     if (!(status & kActRaiserObjectStatus_IneligibleMask)) {
       uint16 world_x = cpu_read16(
           cpu, cpu->DB,
-          (uint16)(object_address + kActionObject_WorldX));
+          (uint16)(object_address + kActRaiserActionObject_WorldX));
       uint16 world_y = cpu_read16(
           cpu, cpu->DB,
-          (uint16)(object_address + kActionObject_WorldY));
+          (uint16)(object_address + kActRaiserActionObject_WorldY));
       uint16 left_extent = cpu_read16(
           cpu, cpu->DB,
-          (uint16)(object_address + kActionObject_LeftExtent));
+          (uint16)(object_address + kActRaiserActionObject_LeftExtent));
       uint16 top_extent = cpu_read16(
           cpu, cpu->DB,
-          (uint16)(object_address + kActionObject_TopExtent));
+          (uint16)(object_address + kActRaiserActionObject_TopExtent));
       uint16 right_extent = cpu_read16(
           cpu, cpu->DB,
-          (uint16)(object_address + kActionObject_RightExtent));
+          (uint16)(object_address + kActRaiserActionObject_RightExtent));
       uint16 bottom_extent = cpu_read16(
           cpu, cpu->DB,
-          (uint16)(object_address + kActionObject_BottomExtent));
+          (uint16)(object_address + kActRaiserActionObject_BottomExtent));
       int vertical = ws_scan_axis_visible(
           world_y, top_extent, bottom_extent, camera_y, 0, 0,
           kActRaiserAuthenticHeight);
@@ -431,7 +416,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
 
       uint16 flags = cpu_read16(
           cpu, cpu->DB,
-          (uint16)(object_address + kActionObject_Flags));
+          (uint16)(object_address + kActRaiserActionObject_Flags));
       uint16 next_flags = activation
           ? (uint16)(flags & ~kActRaiserObjectFlag_OutsideActivation)
           : (uint16)(flags | kActRaiserObjectFlag_OutsideActivation);
@@ -444,16 +429,16 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
             world_x + right_extent - camera_x);
         uint16 handler = cpu_read16(
             cpu, cpu->DB,
-            (uint16)(object_address + kActionObject_Handler));
+            (uint16)(object_address + kActRaiserActionObject_Handler));
         uint16 object_type = cpu_read16(
             cpu, cpu->DB,
-            (uint16)(object_address + kActionObject_Type));
+            (uint16)(object_address + kActRaiserActionObject_AnimationAddress));
         uint8 definition_bank = cpu_read8(
             cpu, cpu->DB,
-            (uint16)(object_address + kActionObject_DefinitionBank));
+            (uint16)(object_address + kActRaiserActionObject_AnimationBank));
         uint16 definition_address = cpu_read16(
             cpu, cpu->DB,
-            (uint16)(object_address + kActionObject_Definition));
+            (uint16)(object_address + kActRaiserActionObject_Composition));
         fprintf(stderr,
                 "[ws-activation-state] gf=%u slot=%u obj=$%04X "
                 "$0400=%u->%u mode=%s authentic=%d draw=%d active=%d "
@@ -471,7 +456,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
                 definition_address);
       }
       cpu_write16(cpu, cpu->DB,
-                  (uint16)(object_address + kActionObject_Flags),
+                  (uint16)(object_address + kActRaiserActionObject_Flags),
                   next_flags);
     }
     object_address =
@@ -518,26 +503,27 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
 
   uint16 screen_origin_x = (uint16)(
       cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActionObject_WorldX)) -
+                 (uint16)(object_address + kActRaiserActionObject_WorldX)) -
       cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActionObject_LeftExtent)) -
+                 (uint16)(object_address + kActRaiserActionObject_LeftExtent)) -
       ws_dp16(cpu, kSpriteDp_CameraOriginX));
   uint16 screen_origin_y = (uint16)(
       cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActionObject_WorldY)) -
+                 (uint16)(object_address + kActRaiserActionObject_WorldY)) -
       cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActionObject_TopExtent)) -
+                 (uint16)(object_address + kActRaiserActionObject_TopExtent)) -
       ws_dp16(cpu, kSpriteDp_CameraOriginY));
   ws_dp16w(cpu, kSpriteDp_ScreenOriginX, screen_origin_x);
   ws_dp16w(cpu, kSpriteDp_ScreenOriginY, screen_origin_y);
 
   uint16 flip_attributes = (uint16)(
       cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActionObject_FlipAttributes)) ^
+                 (uint16)(object_address +
+                          kActRaiserActionObject_FlipAttributes)) ^
       kObjectFlipAttributeXor);
   ws_dp16w(cpu, kSpriteDp_FlipAttributes, flip_attributes);
   if (cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActionObject_Flags)) &
+                 (uint16)(object_address + kActRaiserActionObject_Flags)) &
       kObjectSpriteAttributeBiasFlags) {
     ws_dp16w(cpu, kSpriteDp_AttributeBias,
              (uint16)(ws_dp16(cpu, kSpriteDp_AttributeBias) |
@@ -546,10 +532,10 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
 
   uint8 definition_bank = cpu_read8(
       cpu, cpu->DB,
-      (uint16)(object_address + kActionObject_DefinitionBank));
+      (uint16)(object_address + kActRaiserActionObject_AnimationBank));
   uint16 definition_address = (uint16)(
       cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActionObject_Definition)) +
+                 (uint16)(object_address + kActRaiserActionObject_Composition)) +
       kActionDefinitionHeaderBytes);
   uint16 component_count =
       cpu_read8(cpu, definition_bank, definition_address);
@@ -1204,6 +1190,8 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
           : 0,
       cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_Status)),
       oam_before);
+  SimRenderMetadata_RecordWord06(cpu_read16(
+      cpu, cpu->DB, (uint16)(record + kSimRecord_ActorFlags)));
   /* The biased origin the window predicate below is about to be applied to,
    * handed over rather than re-derived: see SimRenderMetadata_RecordAnchor. */
   SimRenderMetadata_RecordAnchor((int16_t)base_x, (int16_t)base_y);

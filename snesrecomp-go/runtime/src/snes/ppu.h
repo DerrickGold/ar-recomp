@@ -38,6 +38,20 @@ enum {
   // how many lines are OUTPUT, and it is also the threshold above which an OAM
   // Y byte is a negative (offscreen-top) position -- see kPpuObjYWrap.
   kPpuYPixels = 224,
+  // Maximum vertical expansion *per side*, the compile-time ceiling for the
+  // runtime ppu->extraTopCur/extraBottomCur (default 0 = authentic 224-line
+  // output). 32 is not an arbitrary budget: OAM Y is EIGHT bits with a 256
+  // modulus against a 224-line screen, so the only sprite positions outside
+  // the visible band that the encoding can express at all are the 32 in
+  // [kPpuObjYNegativeFrom, kPpuObjYWrap) -- which is exactly the above-screen
+  // band. Asking for more top margin than this renders backgrounds with no
+  // sprites on them; asking for bottom margin re-uses that same range and is
+  // therefore ambiguous with above-screen sprites (see ppu_evaluateSprites).
+  // Contrast the horizontal axis, where X is NINE bits (kPpuObjXWrap = 512)
+  // against a 256-wide screen and the whole upper half is free for margins.
+  kPpuExtraTopBottom = 32,
+  // Full internal height of the render target (224 + both bands).
+  kPpuBufHeight = kPpuYPixels + kPpuExtraTopBottom * 2,
   // OAM sprite POSITION WRAPS. These are properties of the OAM encoding, not of
   // the screen size, and they are deliberately named separately from
   // kPpuXPixels/kPpuYPixels even though two of them share those values:
@@ -255,7 +269,17 @@ struct Ppu {
   // pixel buffer (xbgr)
   // times 2 for even and odd frame
 
-  uint8_t extraLeftCur, extraRightCur, extraLeftRight, extraBottomCur;
+  uint8_t extraLeftCur, extraRightCur, extraLeftRight;
+  // Vertical margin, the transpose of extraLeftCur/extraRightCur: scanlines
+  // rendered ABOVE line 1 and BELOW line 224, showing world the authentic
+  // viewport crops. Both clamp to kPpuExtraTopBottom and default to 0, so a
+  // caller that never touches them gets bit-identical 224-line output.
+  //
+  // Unlike the horizontal pair there is no separate centering budget: the
+  // render target is always allocated for the full kPpuExtraTopBottom band
+  // (see PpuVerticalOrigin), because nothing needs to pillarbox vertically --
+  // a host that wants fewer lines just crops the ones it asked for.
+  uint8_t extraTopCur, extraBottomCur;
   // Widescreen HUD split (see PpuSetWidescreenHudSplit). 0 height = off.
   uint8_t wsHudSplitHeight, wsHudLeftEnd, wsHudRightStart;
   uint8_t wsHudPlayerRowY;
@@ -523,6 +547,44 @@ void PpuSetExtraSpaceCentered(Ppu *ppu, uint8_t budget);
 // scroll/room-bounds state drives the visible margin dynamically (Zelda),
 // versus PpuSetExtraSpace's fixed symmetric border (SMW).
 void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom);
+
+// Vertical margin, in scanlines above line 1 and below line 224 (each clamped
+// to kPpuExtraTopBottom, negative inputs to 0). (0,0) restores authentic
+// 224-line rendering exactly. The frontend drives the whole loop -- see
+// ppu_runMarginLine -- so setting this alone renders nothing extra; it tells
+// the line renderer where the authentic band sits inside the taller target and
+// how far the margin bands are allowed to reach.
+//
+// `top` is the axis that works: above-screen sprite positions are already
+// expressible in OAM (see kPpuExtraTopBottom), so those scanlines get real
+// backgrounds AND real sprites. `bottom` gets backgrounds only -- the OAM Y
+// encoding cannot distinguish a sprite below line 224 from one above line 0,
+// so the game's own object coordinates carry no usable data down there.
+void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom);
+
+// Row within the render target that authentic scanline 0 occupies. The host
+// allocates kPpuBufHeight rows and crops what it wants around this origin.
+static inline int PpuVerticalOrigin(const Ppu *ppu) {
+  return ppu->extraTopCur;
+}
+
+// Total scanlines the current margin configuration renders.
+static inline int PpuRenderedHeight(const Ppu *ppu) {
+  return kPpuYPixels + ppu->extraTopCur + ppu->extraBottomCur;
+}
+
+// Render one margin scanline. `line` is the ordinary 1-based PPU line number
+// extended past its authentic range: <= 0 for the top band (0 is the scanline
+// directly above line 1), > kPpuYPixels for the bottom band. ppu_runLine's
+// line-0 frame setup must already have run this frame; this entry point is
+// deliberately separate so that "line 0" keeps meaning that setup and never
+// collides with the first above-screen scanline.
+//
+// Per-scanline register state (HDMA, windows) has no authentic value outside
+// the visible band, so the caller decides the policy by WHEN it calls this:
+// before the authentic loop the registers still hold their pre-frame values
+// (hold-first), after it they hold the last line's (hold-last).
+void ppu_runMarginLine(Ppu *ppu, int line);
 
 // Widescreen HUD split (opt-in, configured by the game frontend): for
 // scanlines < height, BG3 (layer 2) is drawn as up to three chunks — source

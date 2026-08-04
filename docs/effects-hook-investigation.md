@@ -1,15 +1,22 @@
 # Particle and lighting effect hook investigation
 
 Status: **static lifecycle, animation, geometry, and anchor mapping complete** for the four
-action magics, the five simulation miracles, and the four simulation enemy classes. The first
-presentation slice, simulation Lightning, is implemented and replay-validated. Existing live
-captures independently verify the miracle cloud family and Blue Dragon strike. Magical Fire has
-been exercised in action mode; the other three action spells still need the short live acceptance
-sweep in [Validation remaining](#validation-remaining).
+action magics, the five simulation miracles, and the four simulation enemy classes. Simulation
+Lightning, Blue Dragon lightning, and palette-selected ground fire are implemented; the blue
+post-Lightning variant is replay-validated and the scripted red variant is live-capture-validated.
+The distinct scripted burning-house family is mapped from run `20260803-130945` and implemented
+with exact lifecycle, lighting, particle, ground-contact, and source-cadence handling.
+Palette-1 Red Demon fire is implemented with ROM-semantic unit coverage; a live
+Red Demon capture remains its visual acceptance gate. Magical Fire now has a host-side captured
+lifecycle plus portable lighting/particle implementation for flat and diorama presentation; its
+new visual pass and the other three action spells still need the short live acceptance sweep in
+[Validation remaining](#validation-remaining).
 
-This document is deliberately implementation-neutral. It identifies the authentic 60 Hz game
-state that an enhanced renderer can observe without changing damage, timing, object allocation,
-or the original sprite renderer. It is the companion to [SEAMS.md](SEAMS.md),
+The lifecycle mapping in this document is deliberately implementation-neutral. It identifies the
+authentic 60 Hz game state that an enhanced renderer can observe without changing damage,
+gameplay timing, or object allocation. The one explicit source-art exception is the
+signature-checked burning-house frame hold documented below; it changes only that looping sprite's
+visual cadence, not its actor-owned lifetime. This is the companion to [SEAMS.md](SEAMS.md),
 [rendering-engine.md](rendering-engine.md), and [sim-object-catalog.md](sim-object-catalog.md).
 
 ## Conclusions that affect the visual design
@@ -30,6 +37,21 @@ or the original sprite renderer. It is the companion to [SEAMS.md](SEAMS.md),
 5. **Blue Dragon lightning is not the miracle driver.** Class `$12`, state 6 is its own
    33-frame strike lifecycle. Lightning frames alternate with ordinary dragon frames every
    tick on the same record after that record is moved to the target plane.
+6. **Composition address does not determine ground-fire colour.** Red Demon charge fire uses
+   `$E340/$E35A/$E383` on the demon's 24-pixel flight plane. Ground fire uses the runtime-built
+   `$E6CA/$E6D0/$E6D6` records at map height for both the scripted red blaze and post-Lightning
+   blue fire. Their emitted OAM parts select palette 1 and 2 respectively while live CGRAM contains
+   both colour ramps, so the producer must capture the selected OBJ palette.
+7. **Burning houses are a third fire system.** Run `20260803-130945`, frame 19,950 contains three
+   world records at `$0F0C/$0F32/$0F58`, all with packed identity `$0A01` and current composition
+   `$DD33`. Their shared script `$01:A838` cycles `$DD2D/$DD33/$DD39`; each composition is one
+   palette-1 16x16 part at local `(0,0)`. The record origin is the sprite top-left, so ground
+   illumination semantics attach to contact `(8,16)`. Run `20260803-134746` shows that drawing the
+   radial light and particle source at that same point biases both beneath the opaque flame;
+   presentation therefore lifts both four authentic pixels to local `(8,12)`. This family is
+   unrelated to `$E6CA/$E6D0/$E6D6`.
+   The ROM authors every source frame at one 60 Hz tick, producing a 20-cycle-per-second flicker;
+   the enhanced baseline deliberately holds each frame for four logic ticks (15 source fps).
 
 These findings leave no ROM-decompilation blocker to choosing particle and light styles. They
 also mean the first implementation should expose per-instance metadata, rather than a single
@@ -70,6 +92,34 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   no composition-derived union or foot anchor is needed.
 - `tools/action_magic_catalog.py` decodes both animation banks, all relevant state steps, both
   coordinate choices, culling extents, anchor-relative geometry, tile IDs, timing, and velocity.
+
+### Magical Fire implementation slice (2026-08-03)
+
+- `action_effects.c` positively identifies controller `$0860+$38 == 1` and exact cohort slots
+  `$06A0/$06E0/$0720/$0760`. Each slot must retain animation table `$07:C000`, a Fire visual
+  `5..43`, a nonzero composition, and its expected flip pair. Any ambiguous controller, bank,
+  visual, composition, or transform fails closed instead of decorating a reused action slot.
+- `FrameSlot_Capture` publishes one immutable instance per active slot with world hot point,
+  velocity, unsigned culling extents, animation state/index, current composition/visual, flip flags,
+  semantic geometry, authentic OBJ priority, actor/pulse generations, and separate actor/phase/pulse
+  tick clocks. State 2 versus 3 resolves Fire visual 12's phase ambiguity. A paused host redraw
+  passes zero elapsed ticks, so emitter clocks freeze with the game rather than advancing at display
+  refresh rate. The observer is explicit state and is reset on every savestate load.
+- `action_effect_render.c` owns spell style and geometry extraction; `present.c` only projects and
+  submits its bounded batch. The renderer centres each glow on the published rectangle, then emits
+  quadrant-aware embers from all four mirrored actors. Its pulse is an integer triangle wave rather
+  than `libm` sine, so authored-tick output is repeatable across platforms. Unknown effect, phase,
+  geometry, layer, or priority values fail closed.
+- Flat mode maps through the resolved presentation viewport. Diorama mode consumes the compositor's
+  exact resolved matrix, mesh dimensions, BG1 interpolation window, and the source OBJ priority
+  plane's authored depth/rake/bow, keeping the overlay registered without reading live WRAM,
+  duplicating camera auto-fit, or guessing a parallel depth. Enhanced light/embers intentionally
+  remain a world overlay above the composed world and below HUD/HD UI; source priority is retained
+  for projection now and priority-aware masking later.
+- Both modes share the same capability-checked SDL additive/untextured-geometry path as simulation
+  effects. No platform shader is required. Settings expose independent `action_effect_lighting`
+  and `action_effect_particles` switches (`AR_ACTION_EFFECT_LIGHTING` /
+  `AR_ACTION_EFFECT_PARTICLES`), both on by default.
 
 ### Simulation coordinate contract
 
@@ -166,6 +216,7 @@ variant 5.
 | `$0501` | co-located class-8 companion | `$01:A897` | `$DA22` ground-shadow ellipse |
 | `$0502` | Lightning active phase | `$01:A89B` | `$DA4B/$DAA1/$DAF7/$D9E5/$DB5C/$D9E5`, authored durations 2/2/2/1/2/4, loop |
 | `$0503` | Rain active phase | `$01:A8AE` | `$DBC1/$DC1C/$DC77/$DCD2`, four ticks each, loop |
+| `$0504` | new-town two-person creation strikes | `$01:A8BB` | `$E9CC/$E527/$EA27/$E527/$EA82/$E527/$EAEC/$E527`, two ticks each, loop; `$E527` is an offscreen gap sentinel |
 
 The decoded geometry is:
 
@@ -175,6 +226,19 @@ The decoded geometry is:
 | `$DA22` | 8 | 64x32, y `+40..72` | 7 | separate shadow record |
 | `$DA4B/$DAA1/$DAF7/$DB5C` | 17-20 | 64x76-80, y `-16..64` | 2 | cloud and bolt in one composition |
 | `$DBC1/$DC1C/$DC77/$DCD2` | 18 | 64x72, y `-16..56` | 2 | cloud and rain in one composition |
+| `$E9CC/$EA27` | 18 | x `1..14` / `4..14`, y `-56..84` | 2 | town-creation bolt frames; terminal 8x8 tile is centred at local `(8,80)` |
+| `$EA82/$EAEC` | 21 | x `0..16`, y `-56..88` | 2 | town-creation impact frames; terminal 16x16 block is also centred at local `(8,80)` |
+
+Run `20260803-133014` resolves the town-creation pair as stride-`$26` world records, not the
+fixed/process tier inferred from the initializer. Frame 750 contains record `$0E02`; frame 867
+contains `$0E02` and `$0E28`. Both expose process identity `$000E` in `+$0E`, retain script base
+`$A8BB` in polymorphic raw `+$06`, and place the strikes at `$0150/$0068` and `$0160/$0068`.
+The combination `(world tier, process $000E, raw +$06 $A8BB, exact phase composition)` is the
+hook. Including `$E527` only under that script identity preserves one lifecycle through the
+authored blank gaps without misclassifying the same sentinel in cursor lists 40-48. The two
+world slots are independent emitters, so simultaneous strikes receive separate generation/pulse
+state while the scene flash still selects the strongest style instead of adding two full-screen
+flashes.
 
 ### Miracle catalogue
 
@@ -198,9 +262,9 @@ provides the visible sub-phase.
 | Skull Head, class `$15` | state 7 in `$01:C4E5/$C6F0`; after 24 wind-up ticks it posts miracle kind 4 through `$7F:96E8`, and `$03:820F` invokes `$01:9840` | no separate bolt sprite; the resulting global effect is the shared 180-tick Earthquake lifecycle | local charge particles may follow class/state; quake dust/shake should follow shared miracle kind 4 so scripted and enemy earthquakes match |
 | Napper Bat, class `$13` | state 5 in `$01:BE4F` is the ground-pluck attack phase | `$E71B/$E73A/$E75E` reach toward the ground; no distinct emissive projectile or lightning family was found | no required light hook in the initial scope; composition/state remain available if ground dust is later desired |
 
-Two shared enemy transitions are also already identifiable if the visual pass expands:
+Two shared enemy transitions are also identifiable:
 
-- Class states 0 use behavior 22: ground-fire `$E6CA/$E6D0/$E6D6` for 8 ticks each,
+- Class states 0 use behavior 22: ground fire `$E6CA/$E6D0/$E6D6` for 8 ticks each,
   followed by orb frames `$E6DC/$E6F1/$E706` for 5 ticks each.
 - Common terminal state 15 changes into the effect path using behavior 39: burst
   `$E4E8/$E4FD/$E512`, 4 ticks each. Track the record/composition through the class change rather
@@ -209,9 +273,9 @@ Two shared enemy transitions are also already identifiable if the visual pass ex
 The alternative composition family `$EC14-$EC35` remains unobserved in live miracle captures and
 must not be used as the identity for Lightning or Rain.
 
-## Implemented Lightning miracle slice
+## Implemented simulation lightning and fire slice
 
-The first enhanced effect now follows the minimum contract above without adding gameplay state:
+The enhanced simulation effects follow the minimum contract above without adding gameplay state:
 
 - `SimFrameData` captures the user/posted miracle lifecycle words on the authentic logic tick and
   publishes a `lightning_miracle` effect instance for a valid world record of type `$02` throughout
@@ -221,17 +285,36 @@ The first enhanced effect now follows the minimum contract above without adding 
 - A host-only generation identifies each lifecycle even when the same WRAM record is reused.
   Lifecycle age, phase age, visible-pulse generation/age, and terminal flags are captured once per
   authentic build tick, so replayed presentation frames cannot advance an emitter accidentally.
+- The same producer publishes Blue Dragon class `$12`, state 6 for the full 33-frame attack while
+  marking only `$E1BD/$E209/$E255` emissive. It publishes Red Demon class `$14`, states 7-9 while
+  marking only `$E340/$E35A/$E383` emissive. Ground-fire lifecycle is composition-owned, so the
+  same generation survives the observed `$10/$12/$13` record-class changes without guessing which
+  system spawned it; its red/blue style comes from the captured palette mask, not that lifecycle.
+- World-tier process `$000E` town-creation records with raw `+$06 == $A8BB` publish
+  `town_creation_lightning` across the complete `$01:A8BB` loop. Four exact bolt phases are
+  visible and `$E527` is a non-emissive gap inside the same record lifecycle, so particles pulse
+  once per authored strike frame rather than restarting as unrelated effects. Two active records
+  remain two independent emitters.
+- Scripted burning-house records publish `house_fire` only for the exact combination of world tier,
+  packed identity `$0A01`, and `$DD2D/$DD33/$DD39`. The three visible source phases share one
+  record-owned pulse and use local `(8,16)` as their semantic ground contact. Renderer style lifts
+  their glow and particle origins to `(8,12)`, leaving source classification unchanged.
+  `sim_visual_patches.c`
+  validates the complete `$01:A838` script signature before changing its three duration bytes from
+  one to four; it runs on the live cart before the randomizer snapshots its restore baseline and
+  leaves the image untouched on any mismatch. No renderer or metadata callback writes game state.
 - The strike point comes from the decoded composition endpoint relative to that record's current
   world origin. Effect metadata carries a reusable point/segment/area/scene geometry contract and
   record-local/world-local/screen coordinate space. Projection shares the billboard's town camera,
   ground plane, and depth-scale helper, so camera movement and diorama pitch keep the light attached
   to the bolt.
-- `Effect lighting` adds a brief scene flash and local ground glow. `Particles` adds deterministic
-  strike sparks keyed by record address, lifecycle generation, pulse generation, and particle
-  index. Style is mapped from semantic phase in the renderer; no brightness or particle-count
-  policy leaks into the capture layer. Neither effect advances on presentation-only frames or
-  reads live WRAM during rendering.
-- Both stages use SDL's renderer-provided additive blend and untextured geometry rather than a
+- `Effect lighting` adds a brief scene flash and local lightning/fire glow. `Particles` adds
+  deterministic strike sparks or continuously cycling rising embers keyed by record address,
+  lifecycle generation, pulse generation, kind, and particle index. Style is mapped from semantic
+  phase in the renderer; no brightness or particle-count policy leaks into the capture layer.
+  Neither effect advances on presentation-only frames or reads live WRAM during rendering.
+- All implemented action and simulation stages use SDL's renderer-provided additive blend and
+  untextured geometry rather than a
   platform shader. That keeps the core path common to Metal, Vulkan, Direct3D, software, and
   headless renderers without claiming pixel-identical rasterization. Ground light, scene flash,
   and particles are separate ordered passes, and each geometry class is submitted as one batch.
@@ -250,6 +333,14 @@ frame. It asserts the exact 240-tick lifecycle, 12 visible effect frames, semant
 generation totals, zero overflow, and all four exact bolt compositions. It validates source/effect
 accounting, captures the enhanced and disabled-stage images, and proves the authentic framebuffer
 hash is unchanged because this remains a presentation-only pass.
+
+`D6b-blue-ground-fire` captures four concurrent impact fires and asserts 1,123 lifecycle ticks,
+29 generations, and the exact three-composition animation. Of those ticks, 635 emit palette-2 OAM
+and are explicitly blue; 488 are outside the sprite window and deliberately retain no colour style.
+`D6c-blue-dragon-lightning` captures
+the first attack and asserts one 33-tick generation: 27 non-emissive attack frames plus two exact
+three-frame bolt bursts. Both retain the strict feature-off comparison and authentic-framebuffer
+non-interference checks.
 
 ## Suggested first hook boundary
 
@@ -270,17 +361,22 @@ frames, or Red Demon body-only alternation.
 
 ## Validation remaining
 
-No additional decompilation is required for the mapped effect families. Lightning miracle capture,
-classification, positioning, portable rendering, and the feature-off baseline are now covered by
-`D6a-lightning-miracle`. Before expanding the renderer, finish these focused acceptance captures:
+No additional decompilation is required for the mapped effect families. Simulation Lightning,
+Blue Dragon lightning, and blue ground fire now have strict replay coverage. The scripted red fire
+has a frame-11,645 native snapshot proving palette-1 emission from the shared ground-fire pointers.
+Run `20260803-130945` frame 19,950 separately proves the burning-house `$0A01/$A838/$DD33`
+identity and placement; its post-implementation visual acceptance capture remains to be taken.
+Before final visual tuning, finish these focused acceptance captures:
 
-1. Enable `AR_ALL_MAGIC=1` and `AR_INF_MP=1`; cast all four spells in a scrollable action stage.
+1. Enable `AR_ALL_MAGIC=1` and `AR_INF_MP=1`; cast Magical Fire with both flat and diorama action
+   presentation and visually accept attachment, coverage, intensity, lifecycle end, and pause
+   behavior. Then cast the other three spells in a scrollable action stage.
 2. Log the controller kind and cohort slot `status, X/Y, +0A/+0C/+0E/+10, +20, +22, +28` each
    tick. Confirm the decoded timing, clone count, and slot reuse for IDs 2-4.
 3. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the
    `$923E=0..140` sunlight ramp before implementing their distinct weather/scene-light styles.
-4. Add the already-recorded Blue Dragon strike to the shared Lightning renderer, then capture one
-   Red Demon and Skull Head attack to confirm their statically decoded state windows against live
+4. Capture one Red Demon attack to visually accept its elevated red flame attachment, and one Skull
+   Head attack to confirm the statically decoded Earthquake-posting window against live
    presentation.
 
 This is an acceptance gate, not a discovery gate: all hook addresses, instance identities,

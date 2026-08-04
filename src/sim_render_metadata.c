@@ -8,6 +8,11 @@
 #include "actraiser_game.h"
 #include "sim_world_map.h"
 
+_Static_assert(kSimMaxSourceRecords ==
+                   kActRaiserSimFixedRecordCount +
+                       kActRaiserSimWorldRecordCount,
+               "effect/source tracker capacity must cover both SIM tiers");
+
 typedef struct SimMetadataProducer {
   bool active;
   bool record_active;
@@ -41,6 +46,7 @@ typedef struct SimEffectLifetime {
   bool visible;
   uint8_t kind;
   uint8_t phase;
+  uint8_t color_family;
   uint32_t generation;
   uint32_t pulse_generation;
   uint32_t last_build_serial;
@@ -50,10 +56,14 @@ typedef struct SimEffectLifetime {
   uint16_t ticks_since_visible;
 } SimEffectLifetime;
 
-static SimEffectLifetime
-    g_effect_lifetimes[kActRaiserSimWorldRecordCount];
+/* Fixed and world records are separate address spaces with overlapping local
+ * indices. Keep both tiers in the same bounded tracker without letting fixed
+ * slot N alias world slot N; current semantic emitters happen to be world
+ * records, but fixed-tier effects remain representable without aliasing. */
+static SimEffectLifetime g_effect_lifetimes[kSimMaxSourceRecords];
 static uint32_t g_next_effect_generation;
 static int RecordIndex(uint16_t record_address, bool world_record);
+static int EffectLifetimeIndex(const SimSourceRecord *source);
 
 static uint16_t SaturatingTick(uint16_t value) {
   return value == UINT16_MAX ? value : (uint16_t)(value + 1);
@@ -66,14 +76,6 @@ static uint32_t NextEffectGeneration(void) {
 
 static void ClearEffectLifetimes(void) {
   memset(g_effect_lifetimes, 0, sizeof(g_effect_lifetimes));
-}
-
-static void RetireEffectKind(SimEffectKind kind) {
-  for (size_t i = 0;
-       i < sizeof(g_effect_lifetimes) / sizeof(g_effect_lifetimes[0]); i++)
-    if (g_effect_lifetimes[i].active &&
-        g_effect_lifetimes[i].kind == kind)
-      memset(&g_effect_lifetimes[i], 0, sizeof(g_effect_lifetimes[i]));
 }
 
 static void ResetEffectLifetimes(void) {
@@ -89,12 +91,15 @@ enum {
   kSimRecordClass_Angel = 0x0C,
   kSimRecordClass_EnemyFirst = 0x12,
   kSimRecordClass_BlueDragon = 0x12,
+  kSimRecordClass_RedDemon = 0x14,
   kSimRecordClass_EnemyLast = 0x15,
   /* $01:B9EC state 6 is the Blue Dragon's building strike. The canonical
    * replay holds it for exactly the 33 frames that bracket every
    * $E1BD/$E209/$E255 bolt, and the ROM drops the record onto the target
    * itself, so the body must share the bolt's plane for those frames. */
   kSimRecordState_BlueDragonStrike = 6,
+  kSimRecordState_RedDemonAttackFirst = 7,
+  kSimRecordState_RedDemonAttackLast = 9,
   /* The miracle cloud family's own ground shadow ellipse. Inside the
    * $D9E5-$DCD2 range but not part of what hangs in the sky. */
   kSimComposition_MiracleCloudShadow = 0xDA22,
@@ -124,6 +129,44 @@ static bool IsAngelArrowComposition(uint16_t composition) {
 static bool IsBuildingZapComposition(uint16_t composition) {
   return composition == 0xE1BD || composition == 0xE209 ||
       composition == 0xE255;
+}
+
+typedef struct TownCreationLightningPhaseDesc {
+  uint16_t composition;
+  int16_t strike_y;
+  uint8_t phase;
+} TownCreationLightningPhaseDesc;
+
+/* Spawn selector $0504 initializes script $01:A8BB. Live run 20260803-133014
+ * shows the resulting actors as world-tier process $000E records whose raw
+ * +$06 retains $A8BB. Each visible bolt is held for two ticks and followed by
+ * two ticks of the deliberately offscreen $E527 sentinel. All four terminate
+ * at local (8,80): the first pair end in one 8x8 tile at (4,76), while the
+ * last pair end in a 16x16 impact block at (0,72). Their shared centre also
+ * keeps particle tails stationary in gaps. */
+static const TownCreationLightningPhaseDesc kTownCreationLightningPhases[] = {
+  { 0xE9CC, 80, kSimEffectPhase_TownCreationBoltA },
+  { 0xE527, 80, kSimEffectPhase_TownCreationGap },
+  { 0xEA27, 80, kSimEffectPhase_TownCreationBoltB },
+  { 0xEA82, 80, kSimEffectPhase_TownCreationBoltC },
+  { 0xEAEC, 80, kSimEffectPhase_TownCreationBoltD },
+};
+
+static const TownCreationLightningPhaseDesc *FindTownCreationLightningPhase(
+    uint16_t composition) {
+  for (size_t i = 0;
+       i < sizeof(kTownCreationLightningPhases) /
+           sizeof(kTownCreationLightningPhases[0]);
+       i++)
+    if (kTownCreationLightningPhases[i].composition == composition)
+      return &kTownCreationLightningPhases[i];
+  return NULL;
+}
+
+static bool IsTownCreationLightningComposition(uint16_t composition) {
+  const TownCreationLightningPhaseDesc *phase =
+      FindTownCreationLightningPhase(composition);
+  return phase && phase->phase != kSimEffectPhase_TownCreationGap;
 }
 
 typedef struct LightningMiraclePhaseDesc {
@@ -160,6 +203,12 @@ const char *Sim3D_EffectKindName(SimEffectKind kind) {
   switch (kind) {
     case kSimEffect_None: return "none";
     case kSimEffect_LightningMiracle: return "lightning_miracle";
+    case kSimEffect_BlueDragonLightning: return "blue_dragon_lightning";
+    case kSimEffect_TownCreationLightning:
+      return "town_creation_lightning";
+    case kSimEffect_RedDemonFire: return "red_demon_fire";
+    case kSimEffect_GroundFire: return "ground_fire";
+    case kSimEffect_HouseFire: return "house_fire";
   }
   return "unknown";
 }
@@ -172,6 +221,35 @@ const char *Sim3D_EffectPhaseName(SimEffectPhase phase) {
     case kSimEffectPhase_LightningBranch: return "lightning_branch";
     case kSimEffectPhase_LightningImpactA: return "lightning_impact_a";
     case kSimEffectPhase_LightningImpactB: return "lightning_impact_b";
+    case kSimEffectPhase_BlueDragonAttack: return "blue_dragon_attack";
+    case kSimEffectPhase_BlueDragonBoltA: return "blue_dragon_bolt_a";
+    case kSimEffectPhase_BlueDragonBoltB: return "blue_dragon_bolt_b";
+    case kSimEffectPhase_BlueDragonBoltC: return "blue_dragon_bolt_c";
+    case kSimEffectPhase_TownCreationGap: return "town_creation_gap";
+    case kSimEffectPhase_TownCreationBoltA: return "town_creation_bolt_a";
+    case kSimEffectPhase_TownCreationBoltB: return "town_creation_bolt_b";
+    case kSimEffectPhase_TownCreationBoltC: return "town_creation_bolt_c";
+    case kSimEffectPhase_TownCreationBoltD: return "town_creation_bolt_d";
+    case kSimEffectPhase_RedDemonAttack: return "red_demon_attack";
+    case kSimEffectPhase_RedFireSmall: return "red_fire_small";
+    case kSimEffectPhase_RedFireMedium: return "red_fire_medium";
+    case kSimEffectPhase_RedFireLarge: return "red_fire_large";
+    case kSimEffectPhase_GroundFireA: return "ground_fire_a";
+    case kSimEffectPhase_GroundFireB: return "ground_fire_b";
+    case kSimEffectPhase_GroundFireC: return "ground_fire_c";
+    case kSimEffectPhase_HouseFireA: return "house_fire_a";
+    case kSimEffectPhase_HouseFireB: return "house_fire_b";
+    case kSimEffectPhase_HouseFireC: return "house_fire_c";
+  }
+  return "unknown";
+}
+
+const char *Sim3D_EffectColorName(SimEffectColorFamily color) {
+  switch (color) {
+    case kSimEffectColor_None: return "none";
+    case kSimEffectColor_LightningBlue: return "lightning_blue";
+    case kSimEffectColor_FireRed: return "fire_red";
+    case kSimEffectColor_FireBlue: return "fire_blue";
   }
   return "unknown";
 }
@@ -202,9 +280,28 @@ static bool EffectPhaseVisible(SimEffectPhase phase) {
     case kSimEffectPhase_LightningBranch:
     case kSimEffectPhase_LightningImpactA:
     case kSimEffectPhase_LightningImpactB:
+    case kSimEffectPhase_BlueDragonBoltA:
+    case kSimEffectPhase_BlueDragonBoltB:
+    case kSimEffectPhase_BlueDragonBoltC:
+    case kSimEffectPhase_TownCreationBoltA:
+    case kSimEffectPhase_TownCreationBoltB:
+    case kSimEffectPhase_TownCreationBoltC:
+    case kSimEffectPhase_TownCreationBoltD:
+    case kSimEffectPhase_RedFireSmall:
+    case kSimEffectPhase_RedFireMedium:
+    case kSimEffectPhase_RedFireLarge:
+    case kSimEffectPhase_GroundFireA:
+    case kSimEffectPhase_GroundFireB:
+    case kSimEffectPhase_GroundFireC:
+    case kSimEffectPhase_HouseFireA:
+    case kSimEffectPhase_HouseFireB:
+    case kSimEffectPhase_HouseFireC:
       return true;
     case kSimEffectPhase_None:
     case kSimEffectPhase_LightningCloud:
+    case kSimEffectPhase_BlueDragonAttack:
+    case kSimEffectPhase_TownCreationGap:
+    case kSimEffectPhase_RedDemonAttack:
       return false;
   }
   return false;
@@ -214,6 +311,7 @@ static void UpdateEffectLifetime(SimEffectLifetime *lifetime,
                                  uint32_t build_serial,
                                  SimEffectKind kind,
                                  SimEffectPhase phase,
+                                 SimEffectColorFamily color_family,
                                  bool visible) {
   /* CaptureFrame may be asked for the same immutable producer build by a
    * screenshot or paused redraw. Never turn that into another effect tick. */
@@ -229,6 +327,7 @@ static void UpdateEffectLifetime(SimEffectLifetime *lifetime,
       .visible = visible,
       .kind = kind,
       .phase = phase,
+      .color_family = color_family,
       .generation = NextEffectGeneration(),
       .pulse_generation = visible ? 1u : 0u,
       .last_build_serial = build_serial,
@@ -258,7 +357,203 @@ static void UpdateEffectLifetime(SimEffectLifetime *lifetime,
   }
   lifetime->visible = visible;
   lifetime->phase = phase;
+  if (color_family != kSimEffectColor_None)
+    lifetime->color_family = color_family;
   lifetime->last_build_serial = build_serial;
+}
+
+typedef struct SimEffectCaptureDesc {
+  SimEffectKind kind;
+  SimEffectPhase phase;
+  SimEffectColorFamily color_family;
+  SimEffectGeometry geometry;
+  uint8_t flags;
+} SimEffectCaptureDesc;
+
+static SimEffectGeometry EffectPointGeometry(int16_t x, int16_t y,
+                                             int16_t height) {
+  return (SimEffectGeometry){
+    .kind = kSimEffectGeometry_Point,
+    .space = kSimEffectSpace_RecordLocal,
+    .data.point = { .x = x, .y = y, .height = height },
+  };
+}
+
+static SimEffectPhase BlueDragonPhase(uint16_t composition, int16_t *strike_y) {
+  *strike_y = 56;
+  switch (composition) {
+    case 0xE1BD:
+      *strike_y = 52;
+      return kSimEffectPhase_BlueDragonBoltA;
+    case 0xE209:
+      *strike_y = 52;
+      return kSimEffectPhase_BlueDragonBoltB;
+    case 0xE255:
+      return kSimEffectPhase_BlueDragonBoltC;
+  }
+  return kSimEffectPhase_BlueDragonAttack;
+}
+
+static SimEffectPhase RedDemonPhase(uint16_t composition, int16_t *flame_y) {
+  *flame_y = 20;
+  switch (composition) {
+    case 0xE340:
+      *flame_y = 18;
+      return kSimEffectPhase_RedFireSmall;
+    case 0xE35A:
+      return kSimEffectPhase_RedFireMedium;
+    case 0xE383:
+      *flame_y = 22;
+      return kSimEffectPhase_RedFireLarge;
+  }
+  return kSimEffectPhase_RedDemonAttack;
+}
+
+static SimEffectPhase GroundFirePhase(uint16_t composition) {
+  switch (composition) {
+    case 0xE6CA: return kSimEffectPhase_GroundFireA;
+    case 0xE6D0: return kSimEffectPhase_GroundFireB;
+    case 0xE6D6: return kSimEffectPhase_GroundFireC;
+  }
+  return kSimEffectPhase_None;
+}
+
+static SimEffectPhase HouseFirePhase(uint16_t composition) {
+  /* Script $01:A838. These are three complete 16x16 compositions, not a
+   * pointer range: the six bytes between each address are part records. */
+  switch (composition) {
+    case 0xDD2D: return kSimEffectPhase_HouseFireA;
+    case 0xDD33: return kSimEffectPhase_HouseFireB;
+    case 0xDD39: return kSimEffectPhase_HouseFireC;
+  }
+  return kSimEffectPhase_None;
+}
+
+static SimEffectColorFamily GroundFireColor(
+    const SimSourceRecord *source) {
+  if (!source) return kSimEffectColor_None;
+  /* These are exact live observations, not a palette-colour heuristic. CGRAM
+   * is shared and contains both ramps in both captures; it is the palette
+   * selected by each emitted OAM part that distinguishes the runtime art. A
+   * mixed or absent mask is intentionally unsupported so an ambiguous record
+   * cannot receive confidently wrong lighting. */
+  if (source->obj_palette_mask == (1u << 1))
+    return kSimEffectColor_FireRed;
+  if (source->obj_palette_mask == (1u << 2))
+    return kSimEffectColor_FireBlue;
+  return kSimEffectColor_None;
+}
+
+static bool ClassifyEffectSource(const SimFrameData *frame,
+                                 const SimSourceRecord *source,
+                                 SimEffectCaptureDesc *desc) {
+  if (!frame || !source || !desc) return false;
+
+  /* Run 20260803-133014 proves the two creation bolts are world-tier process
+   * records: +$0E is $000E and polymorphic +$06 retains script base $A8BB.
+   * Requiring both fields lets $E527 keep one lifecycle through authored gaps
+   * without turning the same sentinel in cursor lists 40-48 into lightning. */
+  if (source->tier == kSimRecordTier_World && source->type == 0x000E &&
+      source->record_word06 == 0xA8BB) {
+    const TownCreationLightningPhaseDesc *phase =
+        FindTownCreationLightningPhase(source->composition);
+    if (!phase) return false;
+    *desc = (SimEffectCaptureDesc){
+      .kind = kSimEffect_TownCreationLightning,
+      .phase = (SimEffectPhase)phase->phase,
+      .color_family = kSimEffectColor_LightningBlue,
+      .geometry = EffectPointGeometry(8, phase->strike_y, 0),
+      .flags = kSimEffectFlag_RecordLifecycle,
+    };
+    return true;
+  }
+
+  if (source->tier != kSimRecordTier_World) return false;
+
+  /* The scripted burning-house actors use class byte $01 and retain spawn
+   * list $0A in the adjacent high byte, which the captured +$0E identity
+   * publishes as $0A01. Requiring that packed identity as well as one of the
+   * three exact $A838 frames avoids classifying unrelated list-10 setup art
+   * or another class-$01 town actor as fire. */
+  SimEffectPhase house_fire_phase = HouseFirePhase(source->composition);
+  if (source->type == 0x0A01 &&
+      house_fire_phase != kSimEffectPhase_None) {
+    *desc = (SimEffectCaptureDesc){
+      .kind = kSimEffect_HouseFire,
+      .phase = house_fire_phase,
+      .color_family = kSimEffectColor_FireRed,
+      .geometry = EffectPointGeometry(8, 16, 0),
+      .flags = kSimEffectFlag_RecordLifecycle,
+    };
+    return true;
+  }
+
+  bool miracle_lifecycle = frame->miracle_kind == 1 &&
+      (frame->miracle_user_active || frame->miracle_posted_active);
+  if (source->type == 0x02 && miracle_lifecycle) {
+    const LightningMiraclePhaseDesc *phase =
+        FindLightningMiraclePhase(source->composition);
+    if (!phase) return false;
+    *desc = (SimEffectCaptureDesc){
+      .kind = kSimEffect_LightningMiracle,
+      .phase = (SimEffectPhase)phase->phase,
+      .color_family = kSimEffectColor_LightningBlue,
+      .geometry = EffectPointGeometry(8, phase->strike_y, 0),
+      .flags =
+          (frame->miracle_user_active ? kSimEffectFlag_UserLifecycle : 0) |
+          (frame->miracle_posted_active ?
+              kSimEffectFlag_PostedLifecycle : 0) |
+          (frame->miracle_visual_complete ?
+              kSimEffectFlag_VisualComplete : 0) |
+          (frame->miracle_actor_done ? kSimEffectFlag_ActorDone : 0),
+    };
+    return true;
+  }
+
+  if (source->type == kSimRecordClass_BlueDragon &&
+      source->semantic_state == kSimRecordState_BlueDragonStrike) {
+    int16_t strike_y;
+    SimEffectPhase phase = BlueDragonPhase(source->composition, &strike_y);
+    *desc = (SimEffectCaptureDesc){
+      .kind = kSimEffect_BlueDragonLightning,
+      .phase = phase,
+      .color_family = kSimEffectColor_LightningBlue,
+      .geometry = EffectPointGeometry(8, strike_y, 0),
+      .flags = kSimEffectFlag_RecordLifecycle,
+    };
+    return true;
+  }
+
+  if (source->type == kSimRecordClass_RedDemon &&
+      source->semantic_state >= kSimRecordState_RedDemonAttackFirst &&
+      source->semantic_state <= kSimRecordState_RedDemonAttackLast) {
+    int16_t flame_y;
+    SimEffectPhase phase = RedDemonPhase(source->composition, &flame_y);
+    *desc = (SimEffectCaptureDesc){
+      .kind = kSimEffect_RedDemonFire,
+      .phase = phase,
+      .color_family = kSimEffectColor_FireRed,
+      /* Red Demon attack art is attached to the class's proven 24px flight
+       * plane. Renderer height scaling is applied later from the FrameSlot. */
+      .geometry = EffectPointGeometry(
+          8, flame_y, kSimVirtualHeight_Flying),
+      .flags = kSimEffectFlag_RecordLifecycle,
+    };
+    return true;
+  }
+
+  SimEffectPhase fire_phase = GroundFirePhase(source->composition);
+  if (fire_phase != kSimEffectPhase_None) {
+    *desc = (SimEffectCaptureDesc){
+      .kind = kSimEffect_GroundFire,
+      .phase = fire_phase,
+      .color_family = GroundFireColor(source),
+      .geometry = EffectPointGeometry(8, 8, 0),
+      .flags = kSimEffectFlag_RecordLifecycle,
+    };
+    return true;
+  }
+  return false;
 }
 
 static void CaptureEffectInstances(SimFrameData *dst) {
@@ -267,38 +562,23 @@ static void CaptureEffectInstances(SimFrameData *dst) {
   dst->effect_visible_count = 0;
   dst->effect_overflow_count = 0;
 
-  /* Kind is retained by the ROM, so require one of the two authentic outer
-   * lifecycles as well as the class-2 record. Composition then supplies the
-   * semantic sub-phase; only the four bolt phases are visibly emissive. */
   if (!dst->metadata_valid) {
     /* Source identity is no longer trustworthy. Retire every tracker rather
      * than accidentally joining a later valid record to an old generation. */
     ClearEffectLifetimes();
     return;
   }
-  bool lifecycle_active = dst->miracle_kind == 1 &&
-      (dst->miracle_user_active || dst->miracle_posted_active);
-  if (!lifecycle_active) {
-    RetireEffectKind(kSimEffect_LightningMiracle);
-    return;
-  }
-
   for (uint8_t i = 0; i < dst->source_count; i++) {
     const SimSourceRecord *source = &dst->sources[i];
-    const LightningMiraclePhaseDesc *phase_desc =
-        FindLightningMiraclePhase(source->composition);
-    SimEffectPhase phase = phase_desc
-        ? (SimEffectPhase)phase_desc->phase : kSimEffectPhase_None;
-    if (source->tier != kSimRecordTier_World || source->type != 0x02 ||
-        phase == kSimEffectPhase_None)
-      continue;
+    SimEffectCaptureDesc desc;
+    if (!ClassifyEffectSource(dst, source, &desc)) continue;
 
-    int record_index = RecordIndex(source->record_address, true);
+    int record_index = EffectLifetimeIndex(source);
     if (record_index < 0) continue;
-    bool visible = EffectPhaseVisible(phase);
+    bool visible = EffectPhaseVisible(desc.phase);
     SimEffectLifetime *lifetime = &g_effect_lifetimes[record_index];
-    UpdateEffectLifetime(lifetime, dst->build_serial,
-                         kSimEffect_LightningMiracle, phase, visible);
+    UpdateEffectLifetime(lifetime, dst->build_serial, desc.kind,
+                         desc.phase, desc.color_family, visible);
 
     SimEffectInstance effect = {
       .generation = lifetime->generation,
@@ -311,19 +591,12 @@ static void CaptureEffectInstances(SimFrameData *dst) {
       .phase_ticks = lifetime->phase_ticks,
       .pulse_ticks = lifetime->pulse_ticks,
       .ticks_since_visible = lifetime->ticks_since_visible,
-      .geometry = {
-        .kind = kSimEffectGeometry_Point,
-        .space = kSimEffectSpace_RecordLocal,
-        .data.point = { .x = 8, .y = phase_desc->strike_y, .height = 0 },
-      },
+      .geometry = desc.geometry,
       .source_index = i,
-      .kind = kSimEffect_LightningMiracle,
-      .phase = phase,
-      .flags = (visible ? kSimEffectFlag_Visible : 0) |
-          (dst->miracle_user_active ? kSimEffectFlag_UserLifecycle : 0) |
-          (dst->miracle_posted_active ? kSimEffectFlag_PostedLifecycle : 0) |
-          (dst->miracle_visual_complete ? kSimEffectFlag_VisualComplete : 0) |
-          (dst->miracle_actor_done ? kSimEffectFlag_ActorDone : 0),
+      .kind = desc.kind,
+      .phase = desc.phase,
+      .color_family = lifetime->color_family,
+      .flags = desc.flags | (visible ? kSimEffectFlag_Visible : 0),
     };
     if (visible && dst->effect_visible_count != UINT8_MAX)
       dst->effect_visible_count++;
@@ -336,14 +609,13 @@ static void CaptureEffectInstances(SimFrameData *dst) {
     }
   }
 
-  /* A lifecycle word can outlast its actor. Explicitly retire tracked slots
-   * that were absent from this immutable producer build, so immediate record
-   * reuse can never inherit an old generation. */
+  /* Outer lifecycle words and enemy states can outlast their visible actors.
+   * Retire every slot absent from this immutable producer build, so immediate
+   * record reuse cannot inherit an old kind or generation. */
   for (size_t i = 0;
        i < sizeof(g_effect_lifetimes) / sizeof(g_effect_lifetimes[0]); i++) {
     SimEffectLifetime *lifetime = &g_effect_lifetimes[i];
     if (lifetime->active &&
-        lifetime->kind == kSimEffect_LightningMiracle &&
         lifetime->last_build_serial != dst->build_serial)
       memset(lifetime, 0, sizeof(*lifetime));
   }
@@ -352,11 +624,6 @@ static void CaptureEffectInstances(SimFrameData *dst) {
 static bool IsNapperPluckComposition(uint16_t composition) {
   return composition == 0xE71B || composition == 0xE73A ||
       composition == 0xE75E;
-}
-
-static bool IsGroundFireComposition(uint16_t composition) {
-  return composition == 0xE6CA || composition == 0xE6D0 ||
-      composition == 0xE6D6;
 }
 
 SimObjectClassification Sim3D_ClassifyObject(
@@ -373,8 +640,20 @@ SimObjectClassification Sim3D_ClassifyObject(
     result.traits = kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow;
     return result;
   }
+  /* The $0504 initializer creates world process-$000E town-creation bolts.
+   * Their coordinates and art are authored against the town ground just like
+   * the building-zap family. Exact composition starts only: the bytes between
+   * $E9CC and $EAEC are part records, not additional identities. The effect
+   * classifier separately requires raw +$06 == $A8BB for lifecycle identity. */
+  if (IsTownCreationLightningComposition(composition)) {
+    result.height_class = kSimHeightClass_GroundEffect;
+    result.traits = kSimObjectTrait_RecordOriginAnchor |
+        kSimObjectTrait_NoShadow;
+    return result;
+  }
   /* Fixed records are screen-relative UI/effects; they never gain a height,
-   * an anchor policy, or a shadow. */
+   * an anchor policy, or a shadow unless an exact ground-owned family above
+   * says otherwise. */
   if (tier != kSimRecordTier_World) return result;
 
   /* Composition overrides come first because a classified state can leave the
@@ -387,8 +666,7 @@ SimObjectClassification Sim3D_ClassifyObject(
         kSimObjectTrait_NoShadow;
     return result;
   }
-  if (IsBuildingZapComposition(composition) ||
-      CompositionIn(composition, 0xE9CC, 0xEAEC)) {
+  if (IsBuildingZapComposition(composition)) {
     /* Lightning and struck-ground effects belong to the target tile, not to
      * the flying record that requested them. */
     result.height_class = kSimHeightClass_GroundEffect;
@@ -396,7 +674,12 @@ SimObjectClassification Sim3D_ClassifyObject(
         kSimObjectTrait_NoShadow;
     return result;
   }
-  if (IsGroundFireComposition(composition)) {
+  if (GroundFirePhase(composition) != kSimEffectPhase_None) {
+    result.height_class = kSimHeightClass_GroundEffect;
+    result.traits = kSimObjectTrait_NoShadow;
+    return result;
+  }
+  if (HouseFirePhase(composition) != kSimEffectPhase_None) {
     result.height_class = kSimHeightClass_GroundEffect;
     result.traits = kSimObjectTrait_NoShadow;
     return result;
@@ -496,6 +779,14 @@ static int RecordIndex(uint16_t record_address, bool world_record) {
   return index < count ? index : -1;
 }
 
+static int EffectLifetimeIndex(const SimSourceRecord *source) {
+  if (!source) return -1;
+  bool world = source->tier == kSimRecordTier_World;
+  int local = RecordIndex(source->record_address, world);
+  if (local < 0) return -1;
+  return world ? kActRaiserSimFixedRecordCount + local : local;
+}
+
 static void BeginBuild(void) {
   uint32_t next_serial = g_sim_metadata.build_serial + 1;
   memset(&g_sim_metadata, 0, sizeof(g_sim_metadata));
@@ -573,6 +864,11 @@ void SimRenderMetadata_RecordAnchor(int16_t base_x, int16_t base_y) {
   source->anchor_valid = 1;
 }
 
+void SimRenderMetadata_RecordWord06(uint16_t value) {
+  if (!g_sim_metadata.record_active) return;
+  g_sim_metadata.sources[g_sim_metadata.current_source].record_word06 = value;
+}
+
 void SimRenderMetadata_RecordClippedPart(uint8_t reason) {
   if (!g_sim_metadata.record_active) return;
   SimSourceRecord *source =
@@ -596,6 +892,7 @@ void SimRenderMetadata_RecordPart(uint16_t oam_cursor,
   SimSourceRecord *source =
       &g_sim_metadata.sources[g_sim_metadata.current_source];
   uint8_t priority = (uint8_t)((attributes >> 12) & 3);
+  uint8_t obj_palette = (uint8_t)((attributes >> 9) & 7);
   uint8_t color_math_eligible = (attributes & 0x0800) != 0;
   if (g_sim_metadata.claimed_oam[slot])
     g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overlap;
@@ -605,6 +902,7 @@ void SimRenderMetadata_RecordPart(uint16_t oam_cursor,
   }
   g_sim_metadata.emitted_oam_count++;
   source->oam_count++;
+  source->obj_palette_mask |= (uint8_t)(1u << obj_palette);
 
   if (source->tier == kSimRecordTier_World) {
     if (!g_sim_metadata.world_started) {
@@ -1410,14 +1708,18 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
     if (i) fputc(',', g_sim_d1_trace);
     fprintf(g_sim_d1_trace,
             "{\"record\":%u,\"tier\":%u,\"composition\":%u,"
-            "\"type\":%u,\"state\":%u,\"x\":%u,\"y\":%u,"
+            "\"type\":%u,\"state\":%u,\"word06\":%u,"
+            "\"x\":%u,\"y\":%u,"
             "\"oam_first\":%u,\"oam_count\":%u,"
+            "\"obj_palette_mask\":%u,"
             "\"fragment_first\":%u,\"fragment_count\":%u}",
             (unsigned)source->record_address, (unsigned)source->tier,
             (unsigned)source->composition, (unsigned)source->type,
-            (unsigned)source->semantic_state, (unsigned)source->world_x,
+            (unsigned)source->semantic_state,
+            (unsigned)source->record_word06, (unsigned)source->world_x,
             (unsigned)source->world_y, (unsigned)source->oam_first,
             (unsigned)source->oam_count,
+            (unsigned)source->obj_palette_mask,
             (unsigned)source->fragment_first,
             (unsigned)source->fragment_count);
   }
@@ -1458,7 +1760,8 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
     if (i) fputc(',', g_sim_d1_trace);
     fprintf(g_sim_d1_trace,
             "{\"kind\":%u,\"kind_name\":\"%s\","
-            "\"phase\":%u,\"phase_name\":\"%s\",\"flags\":%u,"
+            "\"phase\":%u,\"phase_name\":\"%s\","
+            "\"color_family\":%u,\"color_name\":\"%s\",\"flags\":%u,"
             "\"generation\":%u,\"pulse_generation\":%u,"
             "\"age_ticks\":%u,\"phase_ticks\":%u,"
             "\"pulse_ticks\":%u,\"ticks_since_visible\":%u,"
@@ -1470,6 +1773,9 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
             Sim3D_EffectKindName((SimEffectKind)effect->kind),
             (unsigned)effect->phase,
             Sim3D_EffectPhaseName((SimEffectPhase)effect->phase),
+            (unsigned)effect->color_family,
+            Sim3D_EffectColorName(
+                (SimEffectColorFamily)effect->color_family),
             (unsigned)effect->flags,
             (unsigned)effect->generation,
             (unsigned)effect->pulse_generation,

@@ -107,7 +107,7 @@
       }
     },
     "D0-fillmore-actions": {
-      "description": "Fillmore miracle, Napper, Blue Demon lightning, and house-fire behavior coverage",
+      "description": "Fillmore miracle, Napper, Blue Dragon lightning, and house-fire behavior coverage",
       "replay": "saves/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
@@ -172,7 +172,7 @@
           5
         ],
         "object_evidence": [
-          "blue_demon_lightning",
+          "blue_dragon_lightning",
           "napper_ground_pluck",
           "ground_fire",
           "ground_people"
@@ -286,7 +286,7 @@
           5
         ],
         "object_evidence": [
-          "blue_demon_lightning",
+          "blue_dragon_lightning",
           "napper_ground_pluck",
           "ground_fire",
           "ground_people"
@@ -409,7 +409,7 @@
           5
         ],
         "object_evidence": [
-          "blue_demon_lightning",
+          "blue_dragon_lightning",
           "napper_ground_pluck",
           "ground_fire",
           "ground_people"
@@ -1574,6 +1574,7 @@
       "quit_frames": 1700,
       "timeout_seconds": 120,
       "effect_visual": true,
+      "effect_visual_label": "Lightning",
       "d3a_shot_game_frame": 1393,
       "env": {
         "AR_SIM3D": "1",
@@ -1639,39 +1640,287 @@
               "composition": 53811
             }
           ],
-          "effect_frame_count": 240,
-          "visible_effect_frame_count": 12,
-          "visible_effect_instance_count": 12,
-          "max_effect_count": 1,
+          "effect_frames_min": 240,
+          "max_effects_min": 1,
           "effect_metadata_invalid_frames_max": 0,
           "effect_overflow_total_max": 0,
           "effect_overflow_max": 0,
-          "allowed_effect_kinds": [
-            "lightning_miracle"
-          ],
-          "effect_kind_counts": {
-            "lightning_miracle": 240
-          },
-          "effect_phase_counts": {
+          "effect_expectations": {
             "lightning_miracle": {
-              "lightning_branch": 4,
-              "lightning_cloud": 228,
-              "lightning_impact_a": 2,
-              "lightning_impact_b": 2,
-              "lightning_lead": 4
+              "instance_ticks": 240,
+              "generation_count": 1,
+              "phase_counts": {
+                "lightning_branch": 4,
+                "lightning_cloud": 228,
+                "lightning_impact_a": 2,
+                "lightning_impact_b": 2,
+                "lightning_lead": 4
+              },
+              "compositions": [
+                "$D9E5",
+                "$DA4B",
+                "$DAA1",
+                "$DAF7",
+                "$DB5C"
+              ]
             }
           },
-          "effect_generation_counts": {
-            "lightning_miracle": 1
+          "requested": [
+            12415
+          ],
+          "effective": [
+            0,
+            12415
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "on",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off",
+        "AR_SIM3D_CULL_HAZE_STAGE": "off",
+        "AR_SIM3D_BACKDROP": "off",
+        "AR_SIM3D_PICKER_EASE": "off",
+        "AR_SIM3D_EFFECT_LIGHTING": "off",
+        "AR_SIM3D_PARTICLES": "off"
+      },
+      "max_differing_pixels": 270000,
+      "expect_picker_unchanged": true
+    },
+    "D6b-blue-ground-fire": {
+      "description": "Palette-2 blue ground fire emitted by Lightning impact children and shared enemy transitions, with continuous local light and rising particles",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 1700,
+      "timeout_seconds": 120,
+      "effect_visual": true,
+      "effect_visual_label": "BlueFire",
+      "d3a_shot_game_frame": 1456,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "on",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off",
+        "AR_SIM3D_CULL_HAZE_STAGE": "off",
+        "AR_SIM3D_BACKDROP": "off",
+        "AR_SIM3D_PICKER_EASE": "off",
+        "AR_SIM3D_EFFECT_LIGHTING": "on",
+        "AR_SIM3D_PARTICLES": "on"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 700,
+          "valid_frames_min": 700,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 300,
+          "separated_ready_frames_min": 300,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 700,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 2,
+          "accounting_errors_max": 0,
+          "allowed_unpacked_atlas_objects": [
+            {
+              "game_frame": 642,
+              "record": 2788,
+              "composition": 42811
+            },
+            {
+              "game_frame": 642,
+              "record": 3548,
+              "composition": 53811
+            }
+          ],
+          "effect_frames_min": 334,
+          "max_effects_min": 5,
+          "effect_metadata_invalid_frames_max": 0,
+          "effect_overflow_total_max": 0,
+          "effect_overflow_max": 0,
+          "effect_expectations": {
+            "ground_fire": {
+              "instance_ticks": 1123,
+              "generation_count": 29,
+              "phase_counts": {
+                "ground_fire_a": 672,
+                "ground_fire_b": 227,
+                "ground_fire_c": 224
+              },
+              "color_counts": {
+                "fire_blue": 635,
+                "none": 488
+              },
+              "compositions": [
+                "$E6CA",
+                "$E6D0",
+                "$E6D6"
+              ]
+            }
           },
-          "effect_compositions": {
-            "lightning_miracle": [
-              "$D9E5",
-              "$DA4B",
-              "$DAA1",
-              "$DAF7",
-              "$DB5C"
-            ]
+          "requested": [
+            12415
+          ],
+          "effective": [
+            0,
+            12415
+          ]
+        }
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "on",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off",
+        "AR_SIM3D_CULL_HAZE_STAGE": "off",
+        "AR_SIM3D_BACKDROP": "off",
+        "AR_SIM3D_PICKER_EASE": "off",
+        "AR_SIM3D_EFFECT_LIGHTING": "off",
+        "AR_SIM3D_PARTICLES": "off"
+      },
+      "max_differing_pixels": 270000,
+      "expect_picker_unchanged": true
+    },
+    "D6c-blue-dragon-lightning": {
+      "description": "Blue Dragon state-6 building strike using the shared lightning renderer while preserving body-frame gaps inside one record lifecycle",
+      "replay": "saves/sim-actions.rec",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "quit_frames": 4800,
+      "timeout_seconds": 180,
+      "effect_visual": true,
+      "effect_visual_label": "BlueDragon",
+      "d3a_shot_game_frame": 4690,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "on",
+        "AR_SIM3D_WORLD_UNDERLAY": "off",
+        "AR_SIM3D_CLOUDS": "off",
+        "AR_SIM3D_CULL_HAZE_STAGE": "off",
+        "AR_SIM3D_BACKDROP": "off",
+        "AR_SIM3D_PICKER_EASE": "off",
+        "AR_SIM3D_EFFECT_LIGHTING": "on",
+        "AR_SIM3D_PARTICLES": "on"
+      },
+      "expect": {
+        "towns": [
+          1
+        ],
+        "views": [
+          "authentic_picker",
+          "enhanced_candidate",
+          "out_of_scope"
+        ],
+        "ppu_modes": [
+          9
+        ],
+        "picker_frames_min": 1,
+        "d1_metadata": {
+          "frame_count_min": 3000,
+          "valid_frames_min": 3000,
+          "invalid_frames_max": 0,
+          "fallback_frames_max": 0,
+          "integrity_flags": [
+            0
+          ],
+          "separated_valid_frames_min": 2000,
+          "separated_ready_frames_min": 2000,
+          "separated_mismatch_pixels_max": 0,
+          "separated_mismatch_pixels_total_max": 0,
+          "max_sources_min": 1,
+          "max_objects_min": 1,
+          "unique_hashes_min": 2,
+          "atlas_valid_frames_min": 3000,
+          "atlas_valid_objects_min": 1,
+          "atlas_invalid_objects_max": 2,
+          "accounting_errors_max": 0,
+          "allowed_unpacked_atlas_objects": [
+            {
+              "game_frame": 642,
+              "record": 2788,
+              "composition": 42811
+            },
+            {
+              "game_frame": 642,
+              "record": 3548,
+              "composition": 53811
+            }
+          ],
+          "effect_frames_min": 702,
+          "max_effects_min": 1,
+          "effect_metadata_invalid_frames_max": 0,
+          "effect_overflow_total_max": 0,
+          "effect_overflow_max": 0,
+          "effect_expectations": {
+            "blue_dragon_lightning": {
+              "instance_ticks": 33,
+              "generation_count": 1,
+              "phase_counts": {
+                "blue_dragon_attack": 27,
+                "blue_dragon_bolt_a": 2,
+                "blue_dragon_bolt_b": 2,
+                "blue_dragon_bolt_c": 2
+              },
+              "compositions": [
+                "$E101",
+                "$E13F",
+                "$E17D",
+                "$E19D",
+                "$E1BD",
+                "$E209",
+                "$E255"
+              ]
+            }
           },
           "requested": [
             12415

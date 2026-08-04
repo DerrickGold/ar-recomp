@@ -235,6 +235,12 @@ static void OnGamepadHostAction(InputAction action) {
     case kInputAction_LoadState:
       (void)RuntimeSettings_HandleAction(Settings_Find("load_state"));
       break;
+    case kInputAction_MagicCycle:
+      /* Only records the request. The selection write and the OBJ tile
+       * reload belong to the game thread's frame boundary, where nothing
+       * else is touching WRAM or VRAM. */
+      ActRaiser_RequestMagicCycle();
+      break;
     default:
       break;
   }

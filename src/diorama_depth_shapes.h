@@ -61,6 +61,10 @@ void DioramaSkirtVertex(float t, float z_bottom, float y_bottom,
  * named once rather than duplicated between the geometry and its test. */
 float DioramaSkirtNearShade(void);
 
+/* Depth of a captured-plane row. t is its normalized top-to-bottom position;
+ * rake is linear and bow is eased quadratically. */
+float DioramaTiltedRowDepth(float z_world, float rake, float bow, float t);
+
 /* STACK: depth, shade and opacity of one copy in a stacked layer.
  *
  * A stack fills a depth gap by repeating the layer at intermediate depths instead

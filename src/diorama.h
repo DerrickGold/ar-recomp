@@ -75,6 +75,36 @@ typedef struct DioramaCameraPose {
   float distance;
 } DioramaCameraPose;
 
+enum { kDioramaObjectPriorityCount = 4 };
+
+typedef struct DioramaObjectPlaneProjection {
+  bool valid;
+  float z_world;
+  float rake;
+  float bow;
+} DioramaObjectPlaneProjection;
+
+/* Resolved action-OBJ projection for presentation-only overlays. The
+ * compositor publishes the same camera, mesh dimensions, interpolated BG1 UV
+ * window, and per-room OBJ plane shapes used by the captured sprite planes;
+ * consumers therefore cannot duplicate auto-fit or guess a parallel depth. */
+typedef struct DioramaProjection {
+  bool valid;
+  float matrix[16];
+  float object_u0, object_v0, object_u1, object_v1;
+  float aspect_x, height_scale;
+  int texture_width, texture_height;
+  int output_width, output_height;
+  DioramaObjectPlaneProjection object_planes[kDioramaObjectPriorityCount];
+} DioramaProjection;
+
+/* Maps a captured framebuffer point onto its authentic action OBJ priority
+ * plane. scale_x/scale_y are the projected lengths of one captured pixel. */
+bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
+                                  float capture_x, float capture_y,
+                                  unsigned obj_priority, SDL_FPoint *point,
+                                  float *scale_x, float *scale_y);
+
 /* B4-kick (followup doc): boost's "zoom-punch" multiplies the RESOLVED
  * distance (1.0 = no change) rather than offsetting DioramaCameraPose's
  * distance field directly — cam_pose->distance is often the 0 "auto-fit"
@@ -98,7 +128,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
-                       int bg2_valid_x0, int bg2_valid_x1);
+                       int bg2_valid_x0, int bg2_valid_x1,
+                       DioramaProjection *out_projection);
 
 /* Drops renderer-owned targets/effects after SDL_EVENT_RENDER_DEVICE_RESET so
  * they are lazily recreated against the current device. */
