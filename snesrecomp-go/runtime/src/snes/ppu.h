@@ -280,6 +280,10 @@ struct Ppu {
   // (see PpuVerticalOrigin), because nothing needs to pillarbox vertically --
   // a host that wants fewer lines just crops the ones it asked for.
   uint8_t extraTopCur, extraBottomCur;
+  // OAM Y byte the game uses to park unused sprite slots, honoured only on
+  // vertical-margin scanlines. See PpuSetObjMarginHideY.
+  uint8_t objMarginHideY;
+  bool objMarginHideYValid;
   // Widescreen HUD split (see PpuSetWidescreenHudSplit). 0 height = off.
   uint8_t wsHudSplitHeight, wsHudLeftEnd, wsHudRightStart;
   uint8_t wsHudPlayerRowY;
@@ -561,6 +565,17 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom);
 // encoding cannot distinguish a sprite below line 224 from one above line 0,
 // so the game's own object coordinates carry no usable data down there.
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom);
+
+// Tell the PPU which OAM Y byte means "this slot is unused" for this game, so
+// a vertical top margin does not render the pile of parked sprites sitting
+// there. Any value outside 0..255 disables the filter (the default).
+//
+// This has to come from the frontend: the parking row is a GAME convention, not
+// something the hardware marks. ActRaiser clears its shadow OAM to $E0, i.e.
+// screen y -32 -- inside a 32-line band, at screen centre. The filter applies
+// ONLY to margin scanlines, because a tall sprite parked there still legitimately
+// reaches authentic lines and must keep drawing on them.
+void PpuSetObjMarginHideY(Ppu *ppu, int y);
 
 // Row within the render target that authentic scanline 0 occupies. The host
 // allocates kPpuBufHeight rows and crops what it wants around this origin.
