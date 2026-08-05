@@ -1579,6 +1579,38 @@ they collide exactly, with nothing left over. Shifting would displace genuinely
 above-screen sprites, which are the whole point of the band. Parked and real
 share the encoding; only the game's RESERVED marker value separates them.
 
+### The real sprite ceiling is culling, not the Y field
+
+Worth stating plainly, because the obvious conclusion is wrong. The 8-bit OAM Y
+is NOT what kept sprites out of the band. `ActRaiser_ObjectVisibilityScanWide`
+threaded real margins through `ws_scan_axis_visible` on the horizontal axis from
+Stage D1 onward, but passed `0, 0` on the vertical one — and `draw`,
+`authentic` and `activation` are all gated on `vertical &&`. An object above the
+viewport failed that test, the sprite builder was never called for it, and no
+OAM entry existed at all. A wider Y field would have been widening a field that
+nothing ever wrote.
+
+Threading `draw_t` (from `extraTopCur`) into a separate `vertical_draw` fixes
+that. **DRAW only** — activation keeps the authentic window, because widening it
+changes how long objects stay alive, which is game logic rather than
+presentation, and is exactly the coupling §13 item 7 records as the historical
+source of inert enemies.
+
+The bound matters: a part landing more than 32 rows above the screen encodes as
+a POSITIVE Y and would draw mid-screen, so the window is capped by
+`extraTopBottom`. The gate proving that does not happen is that the AUTHENTIC
+rows of every OBJ plane stay byte-identical — measured across 64 plane dumps,
+0 mismatches, while band OBJ pixels rose 614 → 746. Across three action replays
+the vertical window admits 1-5 objects per frame on roughly half of all frames
+(2618 / 14954 / 9084 unlocks), so it is doing continuous work, not firing on a
+handful of frames. `AR_VEXT_OBJDRAW=0` disables it independently of
+`ws_margin_objects`; `AR_VEXT_LOG=1` reports `objs_unlocked=` per frame.
+
+Only after this does the Y encoding become the binding constraint — and the
+answer there is not "an extra bit" (the OAM is the game's own structure,
+computed and truncated in native object code) but a per-slot true-Y sideband,
+the shape `SimRenderMetadata_RecordPart` already uses.
+
 ### What the band actually contains
 
 Verified in Fillmore act 1 (replay `saves/fillmore-act.rec`, diorama flipped on
