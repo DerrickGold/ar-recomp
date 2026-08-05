@@ -1580,83 +1580,54 @@ off the top. Measured, 3420x2128:
 `pin == 0` (no band) short-circuits to the untouched matrix, so extend 0 is
 byte-identical by construction.
 
-### The parked-sprite pile (trap 4)
+### Sprite position above the screen: the exact-Y sideband
 
-A game parks its unused OAM slots off-screen, and "off-screen above" is the
-only place the 8-bit Y encoding can express — so the parking row lands INSIDE
-the band and every inactive slot draws there at once. ActRaiser clears its
-shadow OAM to `Y=$E0` (DEBUG.md §4c), which is screen y **-32**: exactly the
-first row of a 32-line band. Measured in a live snapshot: **103 of 128 slots**
-at X=128 (screen centre), all drawing tile `$80` — one garbled blob dead centre
-above the scene.
+Three separate symptoms in the band all had one cause, and all three are gone
+for the same reason.
 
-`PpuSetObjMarginHideY` takes the marker from the frontend, because it is a GAME
-convention the PPU cannot infer, and applies it **only on margin scanlines**.
-That scoping is load-bearing, not defensive: a 64-tall sprite parked at -32
-spans screen rows -32..31 and so does reach authentic lines, where the game
-intends it drawn. `AR_VEXT_PARKFIX=0` A/Bs it.
+The OAM Y field is 8 bits against a 224-line screen, so it does not say where a
+sprite is — only where it is **modulo 256**. Everything outside the visible band
+collapses into the same values:
 
-Note what does NOT work: re-mapping the negative Y range to clear the band, the
-way `PpuObjScreenX` moves the wrap threshold with the screen width. X has 9 bits
-against a 256-wide screen, so there is a spare screen to shift into; Y has 8
-bits against 224, so the negative range is 32 values and the band is 32 lines —
-they collide exactly, with nothing left over. Shifting would displace genuinely
-above-screen sprites, which are the whole point of the band. Parked and real
-share the encoding; only the game's RESERVED marker value separates them.
+| what it really is | OAM Y | what the band drew |
+|---|---|---|
+| slot parked off-screen (ActRaiser clears its shadow to `$E0`) | 224 | 103 of 128 slots stacked at screen centre — one garbled blob |
+| sprite hanging off the screen BOTTOM (e.g. y=215) | 215 | `row = (uint8)(line - y)` wraps: rows 9..15 drawn at the top of the band as detached fragments |
+| sprite genuinely ABOVE the screen | 224..255 | correct — the one case that works |
 
-### The real sprite ceiling is culling, not the Y field
+The first two were originally patched by *inferring intent from the byte* — a
+`$E0` marker filter and a "reject positive Y on band lines" rule. Both worked,
+both were guesses, and neither could lift the −32 ceiling.
 
-Worth stating plainly, because the obvious conclusion is wrong. The 8-bit OAM Y
-is NOT what kept sprites out of the band. `ActRaiser_ObjectVisibilityScanWide`
-threaded real margins through `ws_scan_axis_visible` on the horizontal axis from
-Stage D1 onward, but passed `0, 0` on the vertical one — and `draw`,
-`authentic` and `activation` are all gated on `vertical &&`. An object above the
-viewport failed that test, the sprite builder was never called for it, and no
-OAM entry existed at all. A wider Y field would have been widening a field that
-nothing ever wrote.
+`PpuSetObjYOverride` removes the ambiguity at the source instead. ActRaiser's
+action sprite emitter is a host HLE (`ActRaiser_BuildObjectSprites`), and it
+computes the position as a full 16-bit value and only then truncates it to the
+byte — so the exact value is available at the write site. The override carries
+the **un-truncated form of exactly what the byte encodes**, not a recomputed
+"true" position: that is what makes a slot with an override render identically
+wherever the byte was not already lossy.
 
-Threading `draw_t` (from `extraTopCur`) into a separate `vertical_draw` fixes
-that. **DRAW only** — activation keeps the authentic window, because widening it
-changes how long objects stay alive, which is game logic rather than
-presentation, and is exactly the coupling §13 item 7 records as the historical
-source of inert enemies.
+The rule on above-screen scanlines becomes: **draw only from slots that have an
+override.** A parked slot was never written by the emitter, so it has none. A
+bottom-edge sprite has one saying +215, which yields a negative row on a band
+line by ordinary signed arithmetic and is never considered. A part more than 32
+rows up — which used to alias to a POSITIVE byte and draw mid-screen — now
+carries its real negative value and stays in the band. Slots without an override
+(the HUD, emitted by recompiled ROM at positive Y) keep the authentic mod-256
+path untouched; for `y` and `line` both in `[0,224)` the two agree exactly,
+because a negative difference could only alias into `[0,height)` at
+`line - y <= -256 + height`, which those ranges cannot reach.
 
-The bound matters: a part landing more than 32 rows above the screen encodes as
-a POSITIVE Y and would draw mid-screen, so the window is capped by
-`extraTopBottom`. The gate proving that does not happen is that the AUTHENTIC
-rows of every OBJ plane stay byte-identical — measured across 64 plane dumps,
-0 mismatches, while band OBJ pixels rose 614 → 746. Across three action replays
-the vertical window admits 1-5 objects per frame on roughly half of all frames
-(2618 / 14954 / 9084 unlocks), so it is doing continuous work, not firing on a
-handful of frames. `AR_VEXT_OBJDRAW=0` disables it independently of
-`ws_margin_objects`; `AR_VEXT_LOG=1` reports `objs_unlocked=` per frame.
+With position no longer routed through the byte, the emitter's own vertical cull
+(`biased_y < kSpriteBiasedHeight`, i.e. screen rows `[-16, 224)` — the ROM's
+draw bias already grants 16 rows up) widens by the live band with no clamp. That
+was the missing tree head: an object 24 rows above the screen, eight past the
+ROM's allowance, whose BG neck stub the band decoded correctly while the OBJ
+head was dropped.
 
-Only after this does the Y encoding become the binding constraint — and the
-answer there is not "an extra bit" (the OAM is the game's own structure,
-computed and truncated in native object code) but a per-slot true-Y sideband,
-the shape `SimRenderMetadata_RecordPart` already uses.
-
-### Bottom-edge sprites wrapping into the band (trap 5)
-
-The parked pile is not the only thing the mod-256 arithmetic drags into the
-band, and this one does NOT show up as a negative Y in an OAM dump — looking
-for that is a dead end. `ppu_evaluateSprites` selects with
-`row = (uint8)(line - y); if (row < spriteHeight)`. On band line -32, a sprite
-sitting at a perfectly ordinary POSITIVE y=215 gives `row = 9`, so a 16-tall
-sprite draws its rows 9..15 at the very top of the band: its lower portion,
-detached, floating above the scene. Any sprite within roughly a sprite-height
-of the screen bottom does this. It is invisible authentically only because
-lines above 0 were never rendered.
-
-Fixed by admitting, on above-screen scanlines, ONLY sprites whose Y byte is in
-the encoding's negative range — i.e. genuinely above the screen. Measured on a
-live snapshot: 4 slots at Y=215 (two 2-tile objects) producing exactly the two
-fragments seen on screen; in replay, band OBJ pixels 296/206/34 -> 0 across the
-frames where it fires, authentic rows byte-identical. Rare but real: 12 frames
-of 8000 in Fillmore act 2, 8 of 4446 in level 1 — which is why an eight-frame
-dump sample showed no delta and the live game showed it immediately.
-`AR_VEXT_WRAPFIX=0` A/Bs it; `AR_VEXT_LOG=1` reports `wrap_rejects=` counting
-sprites actually removed from the band (not slots examined).
+Measured, Fillmore act 2 at extend 32: band OBJ pixels 104 → 570, 0 → 466,
+104 → 735 on the frames where it fires, with the AUTHENTIC rows of all 32
+plane dumps byte-identical, attract frame and flat widescreen byte-identical.
 
 ### What the band actually contains
 

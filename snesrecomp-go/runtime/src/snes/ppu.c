@@ -20,7 +20,6 @@ extern void ar_vramraw(uint16_t vaddr, uint8_t val, int port);
 
 
 extern bool g_new_ppu;
-unsigned g_vext_wrap_rejects;
 void PpuDrawWholeLineOldPpu(Ppu *ppu, int line);
 static void PpuDrawWholeLine(Ppu *ppu, int y);
 
@@ -350,13 +349,20 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom) {
   ppu->extraBottomCur = (uint8_t)IntMin(IntMax(bottom, 0), kPpuExtraTopBottom);
 }
 
-void PpuSetObjMarginHideY(Ppu *ppu, int y) {
-  if (y < 0 || y > 0xFF) {
-    ppu->objMarginHideYValid = false;
+void PpuClearObjYOverrides(Ppu *ppu) {
+  memset(ppu->objYOverrideValid, 0, sizeof(ppu->objYOverrideValid));
+}
+
+void PpuSetObjYOverride(Ppu *ppu, uint8_t slot, int y) {
+  if (slot >= 128)
     return;
-  }
-  ppu->objMarginHideY = (uint8_t)y;
-  ppu->objMarginHideYValid = true;
+  /* Clamp to int16 rather than wrap: a position this far out is off-screen on
+   * any axis the renderer cares about, and a wrap would re-introduce exactly
+   * the aliasing the override exists to remove. */
+  if (y < INT16_MIN) y = INT16_MIN;
+  else if (y > INT16_MAX) y = INT16_MAX;
+  ppu->objYOverride[slot] = (int16_t)y;
+  ppu->objYOverrideValid[slot] = 1;
 }
 
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom) {
@@ -1937,43 +1943,40 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
    * margin scanlines ONLY, and that scoping is load-bearing rather than
    * defensive: a 64-tall sprite parked at -32 spans screen rows -32..31 and so
    * DOES reach authentic lines, where the game intends it to be drawn. */
-  bool hide_parked = ppu->objMarginHideYValid && line < 0;
-  /* Above-screen scanlines admit ONLY sprites that are genuinely above the
-   * screen, i.e. whose Y byte is in the encoding's negative range. Without
-   * this, `row` below wraps a sprite sitting near the screen BOTTOM back into
-   * the band: at y=215 and line=-32 the uint8 arithmetic gives row 9, so a
-   * 16-tall sprite draws its rows 9..15 at the very top of the band. That is
-   * the same mod-256 wrap that makes above-screen positions work at all, read
-   * from the other direction, and it is invisible authentically because lines
-   * above 0 were never rendered. Measured: 4 live sprites at Y=215 producing
-   * two floating fragments. */
-  /* AR_VEXT_WRAPFIX=0 restores the wrap for A/B from one binary, like the other
-   * vertical-extend switches. */
-  static int wrapfix = -1;
-  if (wrapfix < 0) {
-    const char *e = getenv("AR_VEXT_WRAPFIX");
-    wrapfix = !(e && e[0] == '0');
-  }
-  bool above_only = wrapfix && line < 0;
+  /* Above-screen scanlines draw ONLY from slots whose exact Y the frontend
+   * supplied (PpuSetObjYOverride). The OAM byte cannot distinguish a parked
+   * slot, a sprite hanging off the bottom, and a sprite genuinely above the
+   * top -- all three land in the same values -- so up here a slot without an
+   * override has no position that can be trusted, and guessing produced both
+   * the parked-pile blob and the detached bottom-edge fragments.
+   *
+   * Where an override exists the test is ordinary signed arithmetic, so a
+   * sprite at +215 simply yields a negative row on a band line and is never
+   * considered. Where one does not, the authentic mod-256 byte path runs
+   * untouched: for y and line both in [0,224) the two agree exactly, because a
+   * negative difference could only alias into [0,height) at line - y <= -256 +
+   * height, which those ranges cannot reach. */
+  const bool above = line < 0;
   for(int i = 0; i < 128; i++) {
-    uint8_t y = ppu->oam[index] >> 8;
-    if (hide_parked && y == ppu->objMarginHideY) {
+    const int slot = index >> 1;
+    const bool exact = ppu->objYOverrideValid[slot] != 0;
+    if (above && !exact) {
       index += 2;
       continue;
     }
-    // check if the sprite is on this line and get the sprite size
-    uint8_t row = line - y;
     int spriteSize = PpuObjSizeForIndex(ppu, index);
     int spriteHeight = PPU_objInterlace(ppu) ? spriteSize / 2 : spriteSize;
-    if (above_only && row < spriteHeight && y < kPpuObjYNegativeFrom) {
-      /* Counted here rather than at the top of the loop so the tally means
-       * "sprites this actually removed from the band", not "slots examined". */
-      extern unsigned g_vext_wrap_rejects;
-      g_vext_wrap_rejects++;
-      index += 2;
-      continue;
+    uint8_t row;
+    bool on_line;
+    if (exact) {
+      int row_signed = line - (int)ppu->objYOverride[slot];
+      on_line = row_signed >= 0 && row_signed < spriteHeight;
+      row = (uint8_t)row_signed;
+    } else {
+      row = (uint8_t)(line - (int)(ppu->oam[index] >> 8));
+      on_line = row < spriteHeight;
     }
-    if(row < spriteHeight) {
+    if(on_line) {
       // in y-range, get the x location, using the high bit as well
       int x = PpuObjScreenX(ppu, index);
       // SNES OAM x is 9-bit; values >255 normally wrap to negative so sprites

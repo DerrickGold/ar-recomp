@@ -806,14 +806,6 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
   PpuSetExtraVerticalSpace(g_ppu, g_ws_extra_top, g_ws_extra_bottom);
   /* Only meaningful while a band exists, and re-applied every frame because
    * ppu_reset zeroes the field like the rest of the margin state. */
-  {
-    /* AR_VEXT_PARKFIX=0 disables the filter so the parked pile can be A/B'd
-     * from one binary, like AR_VEXT_BANDFIX for the streaming repair. */
-    static int on = -1;
-    if (on < 0) { const char *e = getenv("AR_VEXT_PARKFIX"); on = !(e && e[0] == '0'); }
-    PpuSetObjMarginHideY(
-        g_ppu, (on && g_ws_extra_top > 0) ? kActRaiserOamHideY : -1);
-  }
 
   /* AR_VEXT_TILES=1: classify the BG1 tilemap rows the band will read. A
    * "uniform" row (one tile id repeated across the whole ring width) is the
@@ -1953,13 +1945,10 @@ void ActRaiserDrawPpuFrame(void) {
       }
     fprintf(stderr,
             "[vext-rows] gf=%u top=%d hudbg=[%d..%d] bg2plane=[%d..%d] "
-            "objs_unlocked=%u wrap_rejects=%u\n",
+            "objs_unlocked=%u\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
             (int)g_ppu->extraTopCur, hud0, hud1, plane0, plane1,
-            ActRaiser_VextUnlockedObjects(),
-            ({ extern unsigned g_vext_wrap_rejects;
-               unsigned n = g_vext_wrap_rejects;
-               g_vext_wrap_rejects = 0; n; }));
+            ActRaiser_VextUnlockedObjects());
   }
   s_live_margin_left = g_ppu->extraLeftCur;
   s_live_margin_right = g_ppu->extraRightCur;

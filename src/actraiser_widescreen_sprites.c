@@ -316,6 +316,12 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
     g_ram[kActRaiserOamShadow + offset] = 0x80;
     g_ram[kActRaiserOamShadow + offset + 1] = 0xE0;
   }
+  /* Paired with the clear above: a slot this frame's emitter does not write
+   * keeps the $E0 park value, and an override left over from last frame would
+   * make that stale position look authoritative. Clearing here means "no
+   * override" and "not emitted" are the same statement. */
+  if (g_ppu)
+    PpuClearObjYOverrides(g_ppu);
 
   cpu->A = saved_stack_pointer;
   cpu->X = 0;
@@ -584,10 +590,12 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
 
   int margin_left = 0;
   int margin_right = 0;
+  int margin_top = 0;
   if (ws_sprite_widen_enabled() && g_ppu &&
       ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
     margin_left = g_ppu->extraLeftCur;
     margin_right = g_ppu->extraRightCur;
+    margin_top = g_ppu->extraTopCur;
   }
 
   for (;;) {
@@ -604,13 +612,29 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
     uint16 biased_y = (uint16)(
         component_offset_y + ws_dp16(cpu, kSpriteDp_ScreenOriginY));
 
-    if (biased_y < kSpriteBiasedHeight) {
+    /* Widened by the live vertical band, mirroring wide_x/wide_bound on the
+     * other axis below. The authentic window is [-kSpriteDrawBias, 224) in
+     * screen rows -- the ROM's own draw bias already grants 16 rows above the
+     * screen, and the tree-head report was an object 24 rows up, just past it. */
+    uint16 wide_y = (uint16)(biased_y + margin_top);
+    uint16 wide_bound_y = (uint16)(kSpriteBiasedHeight + margin_top);
+    if (wide_y < wide_bound_y) {
       /* CMP failed with carry clear, so the ROM's SBC #$0010 stores y-$11. */
       uint16 stored_y = (uint16)(biased_y - (kSpriteDrawBias + 1));
       cpu_write16(cpu, definition_bank,
                   (uint16)(kActRaiserOamShadow + oam_offset +
                            kOamYFieldOffset),
                   stored_y);
+      /* The same value the byte above encodes, computed without the truncation.
+       * NOT a recomputed "true" position: keeping it byte-equivalent is what
+       * makes an override render identically wherever the 8-bit field was not
+       * already lossy. screen_origin_y is signed, component_offset_y is a small
+       * unsigned part offset. */
+      if (g_ppu)
+        PpuSetObjYOverride(
+            g_ppu, (uint8)(oam_offset >> 2),
+            (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
+                (int)component_offset_y - (kSpriteDrawBias + 1));
 
       uint16 tile_attributes = (uint16)(
           cpu_read8(cpu, definition_bank,

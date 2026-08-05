@@ -280,10 +280,9 @@ struct Ppu {
   // (see PpuVerticalOrigin), because nothing needs to pillarbox vertically --
   // a host that wants fewer lines just crops the ones it asked for.
   uint8_t extraTopCur, extraBottomCur;
-  // OAM Y byte the game uses to park unused sprite slots, honoured only on
-  // vertical-margin scanlines. See PpuSetObjMarginHideY.
-  uint8_t objMarginHideY;
-  bool objMarginHideYValid;
+  // Per-slot exact OAM Y from the frontend. See PpuSetObjYOverride.
+  int16_t objYOverride[128];
+  uint8_t objYOverrideValid[128];
   // Widescreen HUD split (see PpuSetWidescreenHudSplit). 0 height = off.
   uint8_t wsHudSplitHeight, wsHudLeftEnd, wsHudRightStart;
   uint8_t wsHudPlayerRowY;
@@ -566,16 +565,29 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom);
 // so the game's own object coordinates carry no usable data down there.
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom);
 
-// Tell the PPU which OAM Y byte means "this slot is unused" for this game, so
-// a vertical top margin does not render the pile of parked sprites sitting
-// there. Any value outside 0..255 disables the filter (the default).
+// Exact per-slot OAM Y, for a frontend that owns the sprite emitter.
 //
-// This has to come from the frontend: the parking row is a GAME convention, not
-// something the hardware marks. ActRaiser clears its shadow OAM to $E0, i.e.
-// screen y -32 -- inside a 32-line band, at screen centre. The filter applies
-// ONLY to margin scanlines, because a tall sprite parked there still legitimately
-// reaches authentic lines and must keep drawing on them.
-void PpuSetObjMarginHideY(Ppu *ppu, int y);
+// The OAM Y field is 8 bits against a 224-line screen, so it cannot say where a
+// sprite is -- only where it is modulo 256. Everything outside the visible band
+// is therefore ambiguous: a slot parked above the screen, a sprite hanging off
+// the bottom, and a sprite genuinely above the top all land in the same byte
+// values, and a vertical margin renders all three in the same place.
+//
+// An override carries the UN-TRUNCATED form of exactly the value the byte
+// encodes -- not a recomputed "true" position -- so a slot with one renders
+// identically wherever the byte was not lossy, and differs only where the 8-bit
+// field aliased. That makes the ambiguity disappear at the source instead of
+// being guessed at from the byte.
+//
+// Slots WITHOUT an override keep the authentic mod-256 byte path untouched, and
+// are not drawn on above-screen scanlines at all: nothing outside the emitter
+// the frontend owns has a position that can be trusted up there.
+//
+// Call PpuClearObjYOverrides once per frame wherever the shadow OAM is cleared,
+// then PpuSetObjYOverride per slot as the emitter writes it. `slot` indexes
+// sprites (0..127), matching ppu->oam word-pair order.
+void PpuClearObjYOverrides(Ppu *ppu);
+void PpuSetObjYOverride(Ppu *ppu, uint8_t slot, int y);
 
 // Row within the render target that authentic scanline 0 occupies. The host
 // allocates kPpuBufHeight rows and crops what it wants around this origin.
