@@ -64,13 +64,6 @@ enum {
   kActRaiserWram_Lives = 0x001C,
   kActRaiserWram_PlayerHp = 0x001D,
   kActRaiserWram_WorkingMagicPoints = 0x0021,
-  /* OAM Y byte ActRaiser writes into every UNUSED shadow-OAM slot each frame
-   * (DEBUG.md §4c: "the shadow is cleared to y=$E0 each frame, so non-$E0 = a
-   * real entry"). Under the 8-bit OAM Y encoding $E0 is screen y -32, i.e. the
-   * first row of a 32-line vertical margin -- so the band renders the whole
-   * parked pile unless the PPU is told what the marker means. */
-  kActRaiserOamHideY = 0x00E0,
-
   kActRaiserWram_Bg1CameraX = 0x0022,
   kActRaiserWram_Bg1CameraY = 0x0024,
   kActRaiserWram_Bg2CameraX = 0x0026,
