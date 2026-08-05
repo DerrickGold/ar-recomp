@@ -1948,7 +1948,7 @@ void ActRaiserDrawPpuFrame(void) {
             "objs_unlocked=%u\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
             (int)g_ppu->extraTopCur, hud0, hud1, plane0, plane1,
-            ActRaiser_VextUnlockedObjects());
+            ActRaiser_TakeVextUnlockedObjects());
   }
   s_live_margin_left = g_ppu->extraLeftCur;
   s_live_margin_right = g_ppu->extraRightCur;

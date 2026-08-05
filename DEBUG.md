@@ -866,7 +866,16 @@ show the frozen `$0088` against the advancing host frame:
    backdrop (largely uniform, and it will not discriminate a shifted image from
    an unchanged one — a real trap, hit while verifying §13i).
    `AR_VEXT_LOG=1` prints the resolved vertical-extend margin per game frame
-   with the camera/scroll state behind it.
+   with the camera/scroll state behind it, plus a `[vext-rows]` line giving
+   where the HUD and the diorama plane actually landed — those two must respond
+   to the margin in OPPOSITE ways (HUD fixed in authentic rows, plane shifted by
+   the margin), which is the direct regression check for the row-origin class of
+   bug. `AR_VEXT_BANDFIX=0` / `AR_VEXT_OBJDRAW=0` disable the band's tilemap
+   decode and its object draw-window independently, both A/B-able from one
+   binary. `AR_VEXT_TILES=1` dumps the raw BG1 tilemap ids the band reads —
+   deliberately a raw dump and not a verdict, since a first cut that classified
+   "uniform row" as filler reported 100% filler (an all-sky BG1 row is uniform
+   too). Design and the full trap list: rendering-engine.md §13i.
 3. **Compare NUMERICALLY, never by eye**: slice pixel rows/columns in python
    (`px[(y*w+x)*3]`...). HARD LESSON: pillarboxed shots with dark world content were
    repeatedly misread as widescreen when eyeballing PNGs — a whole survey phase was

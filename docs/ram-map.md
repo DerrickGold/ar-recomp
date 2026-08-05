@@ -49,7 +49,7 @@ The 544-byte shadow and DMA are common, but action (`$00:8C98/$00:8D68`)
 and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill |
+| $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill. Both details are load-bearing for the diorama vertical band: the y field is 8 bits mod 256 against 224 lines, so the `$E0` park value IS screen -32 and collides with genuine above-screen positions, and a sprite near the screen BOTTOM aliases into the band through the same wrap. `PpuSetObjYOverride` carries the emitter's un-truncated y beside this table — see rendering-engine.md §13i |
 | $7E:0580 | 32 | OAM high table shadow: 2 bits/sprite (bit0 = x bit 8, bit1 = size), packed 4 sprites/byte |
 | $7E:0000 | 1 | (during sprite build) high-table bit accumulator — bits ROR'd in from the top, flushed every 4 sprites |
 | $7E:000C/$000E | 2 ea | sprite-build counters/scratch; exact ownership is routine-specific. Town `ADAD/AE6F` obtains the part count from byte 0 of the frame definition, not from world record `+0E`. |

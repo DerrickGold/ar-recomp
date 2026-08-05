@@ -289,9 +289,11 @@ static int ws_scan_axis_visible(uint16 pos, uint16 leading, uint16 trailing,
  * high-table flush, which the historical scan port did not. */
 /* Count of objects admitted by the vertical draw window that the authentic
  * 224-line window would have culled -- i.e. what the band actually unlocks.
- * Reported per frame under AR_VEXT_LOG. */
+ * Reported per frame under AR_VEXT_LOG. "Take" because reading CLEARS it:
+ * the count is per-frame, and a plain getter name would invite a second caller
+ * that silently zeroes the first one's reading. */
 static unsigned s_vext_unlocked;
-unsigned ActRaiser_VextUnlockedObjects(void) {
+unsigned ActRaiser_TakeVextUnlockedObjects(void) {
   unsigned n = s_vext_unlocked; s_vext_unlocked = 0; return n;
 }
 

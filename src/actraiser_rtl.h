@@ -16,7 +16,7 @@ void ActRaiser_RebindPpuOutputSurfaces(void);
  * DioramaBg2MarginSource. Any pointer may be NULL. */
 void ActRaiser_LiveMargins(int *left, int *right, int *bg2_margin_source);
 int ActRaiser_LiveVerticalMargin(void);
-unsigned ActRaiser_VextUnlockedObjects(void);
+unsigned ActRaiser_TakeVextUnlockedObjects(void);
 
 /* The OAM slots the widescreen HUD-icon promote validated for the frame being
  * drawn, or false when it promoted nothing. This is the ONLY reliable answer to
