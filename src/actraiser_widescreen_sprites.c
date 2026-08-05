@@ -287,6 +287,14 @@ static int ws_scan_axis_visible(uint16 pos, uint16 leading, uint16 trailing,
  * use separate horizontal windows and retain independent fidelity switches.
  * This reproduces the ROM's PHP/PLP stack byte and its normal two-bit-per-slot
  * high-table flush, which the historical scan port did not. */
+/* Count of objects admitted by the vertical draw window that the authentic
+ * 224-line window would have culled -- i.e. what the band actually unlocks.
+ * Reported per frame under AR_VEXT_LOG. */
+static unsigned s_vext_unlocked;
+unsigned ActRaiser_VextUnlockedObjects(void) {
+  unsigned n = s_vext_unlocked; s_vext_unlocked = 0; return n;
+}
+
 RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   cpu_mirrors_to_p(cpu);
   cpu_write8(cpu, 0x00, cpu->S, cpu->P);
@@ -342,6 +350,29 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   }
   int draw_l = ws_margin_objects_enabled() ? live_l : 0;
   int draw_r = ws_margin_objects_enabled() ? live_r : 0;
+  /* Vertical draw window (diorama vertical extend). The horizontal axis has
+   * threaded real margins through this scan since Stage D1; the vertical one
+   * passed 0,0, so an object above the viewport failed the `vertical` test, the
+   * sprite builder was never called for it, and NO OAM entry existed at all.
+   * That -- not the 8-bit Y field -- is what actually kept sprites out of the
+   * band: a wider Y would have been widening a field nothing ever wrote.
+   *
+   * DRAW only. Activation keeps the authentic window: widening it changes how
+   * long objects stay alive, which is game logic rather than presentation, and
+   * is the coupling §13 item 7 records as the historical source of inert
+   * enemies. Bounded by extraTopCur (<= 32) because a part landing more than
+   * 32 rows above the screen would encode as a POSITIVE Y and draw mid-screen;
+   * the visible-rows gate below is what proves that is not happening.
+   * AR_VEXT_OBJDRAW=0 disables it independently of ws_margin_objects. */
+  int live_t = 0;
+  if (g_ppu && ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
+    live_t = g_ppu->extraTopCur;
+  static int vext_obj_draw = -1;
+  if (vext_obj_draw < 0) {
+    const char *e = getenv("AR_VEXT_OBJDRAW");
+    vext_obj_draw = !(e && e[0] == '0');
+  }
+  int draw_t = (vext_obj_draw && ws_margin_objects_enabled()) ? live_t : 0;
   int activation_wide = ws_margin_activation_enabled();
   int activation_l = activation_wide ? live_l : 0;
   int activation_r = activation_wide ? live_r : 0;
@@ -380,11 +411,18 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
       int vertical = ws_scan_axis_visible(
           world_y, top_extent, bottom_extent, camera_y, 0, 0,
           kActRaiserAuthenticHeight);
+      /* `left` extends the window in the negative direction (see
+       * ws_scan_axis_visible: edge0 = pos - leading - camera + left), which on
+       * this axis is upward. Identical to `vertical` when draw_t is 0. */
+      int vertical_draw = draw_t
+          ? ws_scan_axis_visible(world_y, top_extent, bottom_extent, camera_y,
+                                 draw_t, 0, kActRaiserAuthenticHeight)
+          : vertical;
       int authentic = vertical &&
           ws_scan_axis_visible(world_x, left_extent, right_extent,
                                camera_x, 0, 0,
                                kActRaiserAuthenticWidth);
-      int draw = vertical &&
+      int draw = vertical_draw &&
           ws_scan_axis_visible(world_x, left_extent, right_extent,
                                camera_x, draw_l, draw_r,
                                kActRaiserAuthenticWidth);
@@ -392,6 +430,8 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
           world_x, left_extent, right_extent, camera_x,
           activation_l, activation_r, kActRaiserAuthenticWidth);
 
+      if (vertical_draw && !vertical)
+        s_vext_unlocked++;   /* object the band exposes that 224 would cull */
       if (draw && !(status & kActRaiserObjectStatus_NoDraw)) {
         cpu->X = object_address;
         cpu->Y = oam_offset;
