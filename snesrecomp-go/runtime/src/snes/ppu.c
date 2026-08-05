@@ -20,6 +20,7 @@ extern void ar_vramraw(uint16_t vaddr, uint8_t val, int port);
 
 
 extern bool g_new_ppu;
+unsigned g_vext_wrap_rejects;
 void PpuDrawWholeLineOldPpu(Ppu *ppu, int line);
 static void PpuDrawWholeLine(Ppu *ppu, int y);
 
@@ -1937,6 +1938,23 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
    * defensive: a 64-tall sprite parked at -32 spans screen rows -32..31 and so
    * DOES reach authentic lines, where the game intends it to be drawn. */
   bool hide_parked = ppu->objMarginHideYValid && line < 0;
+  /* Above-screen scanlines admit ONLY sprites that are genuinely above the
+   * screen, i.e. whose Y byte is in the encoding's negative range. Without
+   * this, `row` below wraps a sprite sitting near the screen BOTTOM back into
+   * the band: at y=215 and line=-32 the uint8 arithmetic gives row 9, so a
+   * 16-tall sprite draws its rows 9..15 at the very top of the band. That is
+   * the same mod-256 wrap that makes above-screen positions work at all, read
+   * from the other direction, and it is invisible authentically because lines
+   * above 0 were never rendered. Measured: 4 live sprites at Y=215 producing
+   * two floating fragments. */
+  /* AR_VEXT_WRAPFIX=0 restores the wrap for A/B from one binary, like the other
+   * vertical-extend switches. */
+  static int wrapfix = -1;
+  if (wrapfix < 0) {
+    const char *e = getenv("AR_VEXT_WRAPFIX");
+    wrapfix = !(e && e[0] == '0');
+  }
+  bool above_only = wrapfix && line < 0;
   for(int i = 0; i < 128; i++) {
     uint8_t y = ppu->oam[index] >> 8;
     if (hide_parked && y == ppu->objMarginHideY) {
@@ -1947,6 +1965,14 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     uint8_t row = line - y;
     int spriteSize = PpuObjSizeForIndex(ppu, index);
     int spriteHeight = PPU_objInterlace(ppu) ? spriteSize / 2 : spriteSize;
+    if (above_only && row < spriteHeight && y < kPpuObjYNegativeFrom) {
+      /* Counted here rather than at the top of the loop so the tally means
+       * "sprites this actually removed from the band", not "slots examined". */
+      extern unsigned g_vext_wrap_rejects;
+      g_vext_wrap_rejects++;
+      index += 2;
+      continue;
+    }
     if(row < spriteHeight) {
       // in y-range, get the x location, using the high bit as well
       int x = PpuObjScreenX(ppu, index);

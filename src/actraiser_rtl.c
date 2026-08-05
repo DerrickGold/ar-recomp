@@ -1953,10 +1953,13 @@ void ActRaiserDrawPpuFrame(void) {
       }
     fprintf(stderr,
             "[vext-rows] gf=%u top=%d hudbg=[%d..%d] bg2plane=[%d..%d] "
-            "objs_unlocked=%u\n",
+            "objs_unlocked=%u wrap_rejects=%u\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
             (int)g_ppu->extraTopCur, hud0, hud1, plane0, plane1,
-            ActRaiser_VextUnlockedObjects());
+            ActRaiser_VextUnlockedObjects(),
+            ({ extern unsigned g_vext_wrap_rejects;
+               unsigned n = g_vext_wrap_rejects;
+               g_vext_wrap_rejects = 0; n; }));
   }
   s_live_margin_left = g_ppu->extraLeftCur;
   s_live_margin_right = g_ppu->extraRightCur;

@@ -1611,6 +1611,28 @@ answer there is not "an extra bit" (the OAM is the game's own structure,
 computed and truncated in native object code) but a per-slot true-Y sideband,
 the shape `SimRenderMetadata_RecordPart` already uses.
 
+### Bottom-edge sprites wrapping into the band (trap 5)
+
+The parked pile is not the only thing the mod-256 arithmetic drags into the
+band, and this one does NOT show up as a negative Y in an OAM dump — looking
+for that is a dead end. `ppu_evaluateSprites` selects with
+`row = (uint8)(line - y); if (row < spriteHeight)`. On band line -32, a sprite
+sitting at a perfectly ordinary POSITIVE y=215 gives `row = 9`, so a 16-tall
+sprite draws its rows 9..15 at the very top of the band: its lower portion,
+detached, floating above the scene. Any sprite within roughly a sprite-height
+of the screen bottom does this. It is invisible authentically only because
+lines above 0 were never rendered.
+
+Fixed by admitting, on above-screen scanlines, ONLY sprites whose Y byte is in
+the encoding's negative range — i.e. genuinely above the screen. Measured on a
+live snapshot: 4 slots at Y=215 (two 2-tile objects) producing exactly the two
+fragments seen on screen; in replay, band OBJ pixels 296/206/34 -> 0 across the
+frames where it fires, authentic rows byte-identical. Rare but real: 12 frames
+of 8000 in Fillmore act 2, 8 of 4446 in level 1 — which is why an eight-frame
+dump sample showed no delta and the live game showed it immediately.
+`AR_VEXT_WRAPFIX=0` A/Bs it; `AR_VEXT_LOG=1` reports `wrap_rejects=` counting
+sprites actually removed from the band (not slots examined).
+
 ### What the band actually contains
 
 Verified in Fillmore act 1 (replay `saves/fillmore-act.rec`, diorama flipped on
