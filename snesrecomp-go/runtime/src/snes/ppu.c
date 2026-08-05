@@ -346,7 +346,13 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom) {
   // distinction.
   ppu->extraLeftCur = (uint8_t)IntMin(IntMax(left, 0), ppu->extraLeftRight);
   ppu->extraRightCur = (uint8_t)IntMin(IntMax(right, 0), ppu->extraLeftRight);
-  ppu->extraBottomCur = (uint8_t)IntMin(IntMax(bottom, 0), kPpuExtraTopBottom);
+  /* `bottom` is deliberately NOT applied. It is a zelda3-inherited overscan
+   * parameter that every caller here passes 0 for, and the vertical band gave
+   * extraBottomCur a real meaning with a real owner -- PpuSetExtraVerticalSpace.
+   * Writing it from two places made the field's value depend on which policy
+   * ran last, which happened to be correct only by call ordering. The parameter
+   * stays for signature compatibility with the upstream shape. */
+  (void)bottom;
 }
 
 void PpuClearObjYOverrides(Ppu *ppu) {

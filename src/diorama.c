@@ -1368,7 +1368,16 @@ static void DrawDioramaShoebox(SDL_Renderer *renderer, const float mvp[16],
 /* The BG1 gameplay plane's depth, matching kDioramaLayers' entry for it. The
  * vertical-shift solve needs a reference depth and this is the layer the eye
  * reads as "the picture". */
-static const float kDioramaZ_Bg1Ref = 0.50f;
+/* Depth the vertical-shift solve measures against: the BG1 gameplay plane, the
+ * layer the eye reads as "the picture". Looked up from kDioramaLayers rather
+ * than restated as a constant -- a second copy of 0.50f would silently stop
+ * tracking the table the moment a room override or a table edit moved BG1. */
+static float DioramaBg1ReferenceZ(void) {
+  for (int i = 0; i < kDioramaLayerCount; i++)
+    if (kDioramaLayers[i].plane == kPpuOverlaySource_Bg1)
+      return kDioramaLayers[i].z;
+  return 0.50f;
+}
 
 /* How far to lift the world so the vertical band reads correctly.
  *
@@ -1391,82 +1400,86 @@ static const float kDioramaZ_Bg1Ref = 0.50f;
  *
  * Both endpoints are what those cases already wanted, there is no jump between
  * them, and `pin == 0` (no band) short-circuits to the untouched matrix. */
+/* Projected top and bottom of the drawn content for a candidate lift, or false
+ * if either endpoint is unprojectable. One helper instead of two near-identical
+ * bodies, and a plain function instead of macros -- the previous macro pair hid
+ * a `return` from the caller's control flow, which is exactly the kind of thing
+ * that made the "always apply the bottom floor" branch easy to get wrong. */
+static bool DioramaContentExtent(const float mvp[16], float half, float lift,
+                                 float z_ref, int out_w, int out_h,
+                                 float *out_top, float *out_bottom) {
+  float m[16];
+  memcpy(m, mvp, sizeof(m));
+  for (int r = 0; r < 4; r++) m[12 + r] += lift * mvp[4 + r];
+  Scene3DPoint top, bottom;
+  if (!Scene3D_ProjectWorldPoint(m, 0.0f, half, z_ref,
+                                 out_w, out_h, &top) ||
+      !Scene3D_ProjectWorldPoint(m, 0.0f, -half, z_ref,
+                                 out_w, out_h, &bottom))
+    return false;
+  if (out_top) *out_top = top.y;
+  if (out_bottom) *out_bottom = bottom.y;
+  return true;
+}
+
+/* Bisect `lift` in [lo,hi] for the largest value still satisfying `too_low`.
+ * Both solves below are the same monotone search: a bigger lift moves content
+ * up, so each measured quantity falls as the lift grows. */
+static float DioramaBisectLift(const float mvp[16], float half, float z_ref,
+                               int out_w, int out_h, float lo, float hi,
+                               float target, bool use_centre) {
+  for (int i = 0; i < 24; i++) {
+    float mid = 0.5f * (lo + hi), top, bottom;
+    if (!DioramaContentExtent(mvp, half, mid, z_ref, out_w, out_h, &top, &bottom))
+      return hi;
+    float value = use_centre ? 0.5f * (top + bottom) : bottom;
+    if (value > target) lo = mid; else hi = mid;
+  }
+  return 0.5f * (lo + hi);
+}
+
 static float DioramaVerticalShift(const float mvp[16], float height_scale,
                                   float pin, int out_w, int out_h) {
   if (pin <= 0.0f)
     return 0.0f;
   const float half = 0.5f * height_scale;
   const float target = 0.5f * (float)out_h;
-  /* Projected centre of the drawn content for a candidate lift. The reference
-   * depth is the BG1 plane (kDioramaZ_Bg1Ref): planes at other depths project
-   * to different extents, and the gameplay layer is the one the eye reads as
-   * "the picture". */
-  float shifted[16];
-  #define CENTRE_AT(d_, out_) do {                                        \
-    memcpy(shifted, mvp, sizeof(shifted));                                \
-    for (int r_ = 0; r_ < 4; r_++) shifted[12 + r_] += (d_) * mvp[4 + r_];\
-    Scene3DPoint top_, bot_;                                              \
-    if (!Scene3D_ProjectWorldPoint(shifted, 0.0f, half, kDioramaZ_Bg1Ref, \
-                                   out_w, out_h, &top_) ||                \
-        !Scene3D_ProjectWorldPoint(shifted, 0.0f, -half, kDioramaZ_Bg1Ref,\
-                                   out_w, out_h, &bot_))                  \
-      return pin;   /* unprojectable: keep the documented pinned default */\
-    (out_) = 0.5f * (top_.y + bot_.y);                                    \
-  } while (0)
+  const float z_ref = DioramaBg1ReferenceZ();
+  float top, bottom, centre_0, centre_pin;
 
-  /* Projected bottom of the drawn content for a candidate lift. */
-  #define BOTTOM_AT(d_, out_, fail_) do {                                   \
-    memcpy(shifted, mvp, sizeof(shifted));                                  \
-    for (int r_ = 0; r_ < 4; r_++) shifted[12 + r_] += (d_) * mvp[4 + r_];  \
-    Scene3DPoint b_;                                                        \
-    if (!Scene3D_ProjectWorldPoint(shifted, 0.0f, -half, kDioramaZ_Bg1Ref,  \
-                                   out_w, out_h, &b_)) { fail_; }           \
-    (out_) = b_.y;                                                          \
-  } while (0)
+  if (!DioramaContentExtent(mvp, half, 0.0f, z_ref, out_w, out_h, &top, &bottom))
+    return pin;               /* unprojectable: keep the pinned default */
+  centre_0 = 0.5f * (top + bottom);
 
-  float centre, d;
-  CENTRE_AT(0.0f, centre);
-  if (centre <= target) {
-    d = 0.0f;             /* already at or above centre: lifting would worsen it */
+  float d;
+  if (centre_0 <= target) {
+    d = 0.0f;                 /* already at or above centre; lifting worsens it */
   } else {
-    CENTRE_AT(pin, centre);
-    if (centre >= target) {
-      d = pin;            /* even a full pin does not reach centre */
-    } else {
-      float lo = 0.0f, hi = pin;
-      for (int i = 0; i < 24; i++) {
-        float mid = 0.5f * (lo + hi);
-        CENTRE_AT(mid, centre);
-        if (centre > target) lo = mid; else hi = mid;
-      }
-      d = 0.5f * (lo + hi);
-    }
+    if (!DioramaContentExtent(mvp, half, pin, z_ref, out_w, out_h, &top, &bottom))
+      return pin;
+    centre_pin = 0.5f * (top + bottom);
+    d = (centre_pin >= target)
+        ? pin                 /* even a full pin does not reach centre */
+        : DioramaBisectLift(mvp, half, z_ref, out_w, out_h, 0.0f, pin,
+                            target, true);
   }
-  /* Fall through to the bottom floor in EVERY branch -- including d = 0, which
-   * is exactly the case where a flat camera at a tight fit would otherwise
-   * centre by cropping the playfield. */
 
   /* Floor the lift so centring never drops the content's BOTTOM further past
    * the viewport than a full pin would. Centring spends slack; when the content
    * is already taller than the window there is none, and a smaller lift only
    * buys losing rows off the bottom of the PLAYFIELD -- strictly worse than
-   * losing band rows off the top, which is what the pin gives up. */
+   * losing band rows off the top, which is what the pin gives up.
+   *
+   * Applies in EVERY branch above, including d = 0: that is precisely the flat
+   * camera at a tight fit, where centring would otherwise crop the playfield. */
   float bottom_now, bottom_pin;
-  BOTTOM_AT(d, bottom_now, return pin);
-  BOTTOM_AT(pin, bottom_pin, return pin);
-  if (bottom_now > (float)out_h && bottom_pin < bottom_now) {
-    float blo = d, bhi = pin, bv;
-    for (int i = 0; i < 24; i++) {
-      float mid = 0.5f * (blo + bhi);
-      BOTTOM_AT(mid, bv, return pin);
-      if (bv > (float)out_h) blo = mid; else bhi = mid;
-    }
-    d = 0.5f * (blo + bhi);
-    if (d > pin) d = pin;
-  }
-  #undef BOTTOM_AT
-  #undef CENTRE_AT
-  return d;
+  if (!DioramaContentExtent(mvp, half, d, z_ref, out_w, out_h, NULL, &bottom_now) ||
+      !DioramaContentExtent(mvp, half, pin, z_ref, out_w, out_h, NULL, &bottom_pin))
+    return pin;
+  if (bottom_now > (float)out_h && bottom_pin < bottom_now)
+    d = DioramaBisectLift(mvp, half, z_ref, out_w, out_h, d, pin,
+                          (float)out_h, false);
+  return d > pin ? pin : d;
 }
 
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
