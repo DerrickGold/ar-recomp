@@ -1547,13 +1547,38 @@ Two traps, both found by measurement rather than by reading:
 `Diorama_Composite` normalizes world height against the AUTHENTIC 224, not the
 captured height — dividing by the capture would make the taller plane span the
 same 1.0 world unit, so the auto-fit would frame it to the same screen height
-and the only visible effect would be everything ~14% smaller. It then shifts the
-world up by half the added height (folded into the MVP so layers, skirts, depth
-shapes, shoebox and `Diorama_ProjectCapturedPoint` cannot disagree), because the
-meshes are symmetric about `wy = 0` and every new row arrives at the top.
-Measured at the shipped defaults: authentic y=0 and y=224 land on screen at
-102.06 and 1149.67 with extend 0 AND 32 — unmoved — while the new capture top
-projects to −62, filling the dead region above.
+and the only visible effect would be everything ~14% smaller. It then lifts the
+world (folded into the MVP so layers, skirts, depth shapes, shoebox and
+`Diorama_ProjectCapturedPoint` cannot disagree), because the meshes are
+symmetric about `wy = 0` and every new row arrives at the top.
+
+### Sizing that lift (trap 6)
+
+Half the added height pins the authentic band perfectly — and is wrong on its
+own. It is a fixed WORLD-space offset whose SCREEN effect depends on pitch:
+pitching down tilts the plane so its projected centre sits low, leaving slack
+above, and a full pin spends exactly that slack. That is why every pitched
+configuration measured as well-centred and hid the problem. A flat camera has no
+such slack — the composition already sat centred — so a full pin drives the
+whole box against the top edge and opens a large gap along the bottom (reported
+from a flat free-cam run, measured at 144px of top bias).
+
+`DioramaVerticalShift` lifts by the pin but never past the point where the drawn
+content is vertically centred in the viewport, with a floor so centring never
+drops the content's bottom further past the viewport than a full pin would: when
+the content is already taller than the window there is no slack to spend, and a
+smaller lift only buys losing PLAYFIELD rows off the bottom instead of band rows
+off the top. Measured, 3420x2128:
+
+| camera | before | after |
+|---|---|---|
+| flat, zoomed out | top-flush, all slack at the bottom | gaps **314 top / 314 bottom** |
+| flat, auto-fit (content overflows) | crops 152 of playfield | bottom held at the window edge |
+| pitch 0.20 dist 3.25 | centre +11.8 | **unchanged** (still a full pin) |
+| pitch 0.175 dist 5.75 | centre +6.0 | **unchanged** |
+
+`pin == 0` (no band) short-circuits to the untouched matrix, so extend 0 is
+byte-identical by construction.
 
 ### The parked-sprite pile (trap 4)
 

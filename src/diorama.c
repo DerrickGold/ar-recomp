@@ -1365,6 +1365,110 @@ static void DrawDioramaShoebox(SDL_Renderer *renderer, const float mvp[16],
   }
 }
 
+/* The BG1 gameplay plane's depth, matching kDioramaLayers' entry for it. The
+ * vertical-shift solve needs a reference depth and this is the layer the eye
+ * reads as "the picture". */
+static const float kDioramaZ_Bg1Ref = 0.50f;
+
+/* How far to lift the world so the vertical band reads correctly.
+ *
+ * `pin` is half the added height -- the shift that keeps the AUTHENTIC band
+ * exactly where it was and lets every new row bleed off the top. That is the
+ * right answer only while the composition has empty space up there to spend.
+ * It is a fixed WORLD-space offset, but its SCREEN effect depends on pitch:
+ * pitching down tilts the plane so its projected centre sits low, leaving slack
+ * above, and `pin` happens to consume exactly that. At a flat camera there is
+ * no such slack -- the content already sat centred -- so `pin` pushes the whole
+ * box against the top edge and opens a large gap along the bottom. Reported
+ * from a flat free-cam run and measured there at 144px of top bias.
+ *
+ * So: lift by `pin`, but never past the point where the drawn content is
+ * vertically centred in the viewport. Increasing d moves content up, so the
+ * projected centre falls monotonically and a bisection is exact enough.
+ *
+ *   flat camera   -> centring shift is 0            -> d = 0, content centred
+ *   pitched down  -> centring shift exceeds `pin`   -> d = pin, band pinned
+ *
+ * Both endpoints are what those cases already wanted, there is no jump between
+ * them, and `pin == 0` (no band) short-circuits to the untouched matrix. */
+static float DioramaVerticalShift(const float mvp[16], float height_scale,
+                                  float pin, int out_w, int out_h) {
+  if (pin <= 0.0f)
+    return 0.0f;
+  const float half = 0.5f * height_scale;
+  const float target = 0.5f * (float)out_h;
+  /* Projected centre of the drawn content for a candidate lift. The reference
+   * depth is the BG1 plane (kDioramaZ_Bg1Ref): planes at other depths project
+   * to different extents, and the gameplay layer is the one the eye reads as
+   * "the picture". */
+  float shifted[16];
+  #define CENTRE_AT(d_, out_) do {                                        \
+    memcpy(shifted, mvp, sizeof(shifted));                                \
+    for (int r_ = 0; r_ < 4; r_++) shifted[12 + r_] += (d_) * mvp[4 + r_];\
+    Scene3DPoint top_, bot_;                                              \
+    if (!Scene3D_ProjectWorldPoint(shifted, 0.0f, half, kDioramaZ_Bg1Ref, \
+                                   out_w, out_h, &top_) ||                \
+        !Scene3D_ProjectWorldPoint(shifted, 0.0f, -half, kDioramaZ_Bg1Ref,\
+                                   out_w, out_h, &bot_))                  \
+      return pin;   /* unprojectable: keep the documented pinned default */\
+    (out_) = 0.5f * (top_.y + bot_.y);                                    \
+  } while (0)
+
+  /* Projected bottom of the drawn content for a candidate lift. */
+  #define BOTTOM_AT(d_, out_, fail_) do {                                   \
+    memcpy(shifted, mvp, sizeof(shifted));                                  \
+    for (int r_ = 0; r_ < 4; r_++) shifted[12 + r_] += (d_) * mvp[4 + r_];  \
+    Scene3DPoint b_;                                                        \
+    if (!Scene3D_ProjectWorldPoint(shifted, 0.0f, -half, kDioramaZ_Bg1Ref,  \
+                                   out_w, out_h, &b_)) { fail_; }           \
+    (out_) = b_.y;                                                          \
+  } while (0)
+
+  float centre, d;
+  CENTRE_AT(0.0f, centre);
+  if (centre <= target) {
+    d = 0.0f;             /* already at or above centre: lifting would worsen it */
+  } else {
+    CENTRE_AT(pin, centre);
+    if (centre >= target) {
+      d = pin;            /* even a full pin does not reach centre */
+    } else {
+      float lo = 0.0f, hi = pin;
+      for (int i = 0; i < 24; i++) {
+        float mid = 0.5f * (lo + hi);
+        CENTRE_AT(mid, centre);
+        if (centre > target) lo = mid; else hi = mid;
+      }
+      d = 0.5f * (lo + hi);
+    }
+  }
+  /* Fall through to the bottom floor in EVERY branch -- including d = 0, which
+   * is exactly the case where a flat camera at a tight fit would otherwise
+   * centre by cropping the playfield. */
+
+  /* Floor the lift so centring never drops the content's BOTTOM further past
+   * the viewport than a full pin would. Centring spends slack; when the content
+   * is already taller than the window there is none, and a smaller lift only
+   * buys losing rows off the bottom of the PLAYFIELD -- strictly worse than
+   * losing band rows off the top, which is what the pin gives up. */
+  float bottom_now, bottom_pin;
+  BOTTOM_AT(d, bottom_now, return pin);
+  BOTTOM_AT(pin, bottom_pin, return pin);
+  if (bottom_now > (float)out_h && bottom_pin < bottom_now) {
+    float blo = d, bhi = pin, bv;
+    for (int i = 0; i < 24; i++) {
+      float mid = 0.5f * (blo + bhi);
+      BOTTOM_AT(mid, bv, return pin);
+      if (bv > (float)out_h) blo = mid; else bhi = mid;
+    }
+    d = 0.5f * (blo + bhi);
+    if (d > pin) d = pin;
+  }
+  #undef BOTTOM_AT
+  #undef CENTRE_AT
+  return d;
+}
+
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int active_pixel_aspect, bool ignore_aspect_ratio,
                        int visible_width, SDL_Texture *textures[],
@@ -1524,7 +1628,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
    * no vertical margin, leaving the matrix untouched. */
   {
     float extra_rows = tex_h - (float)kActRaiserAuthenticHeight;
-    float d = 0.5f * extra_rows / (float)kActRaiserAuthenticHeight;
+    float pin = 0.5f * extra_rows / (float)kActRaiserAuthenticHeight;
+    float d = DioramaVerticalShift(mvp, height_scale, pin, out_w, out_h);
     if (d != 0.0f)
       for (int r = 0; r < 4; r++)
         mvp[12 + r] += d * mvp[4 + r];
