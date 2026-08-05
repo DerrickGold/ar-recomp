@@ -168,6 +168,25 @@ edges in the handlers.
 | 3 Magical Aura | `$9FBB`; four player-born slots with all flip combinations | bank `$07:C800`; state 3 = 116 ticks, 60 entries alternating visuals 10/11, each a four-part 32x32 orb; normal path velocity sum `(-76,-71)` before flip mirroring | one moving emitter per active slot; follow slot `+02/+04` every tick rather than treating this as a stationary halo |
 | 4 Magical Light | `$9FFA`; centre `$07A0`, side columns `$07E0/$0820`; right/left side is horizontally mirrored | bank `$07:C800`; all three last 99 authored ticks. Centre visuals 5-9 grow to 9 parts with union `x -17..16, y -71..25`. Side visuals 1-4 are 14 stacked 16x16 parts: `16x224`, `y -112..112`; late velocities 1/2/4/6/8 separate the mirrored columns | centre flare and two column emitters. Gate beam lighting by side composition/visual so the 24-tick pre-beam visual does not receive full intensity |
 
+**Magical Stardust launch geometry, and why it looks wrong in widescreen (2026-08-05).**
+`$00:A0E8` picks one of two launch sites from a random byte: `rand < $80` births the star at
+the TOP edge (`world_y = camera_y & $FFF8`, screen y 0, `world_x = camera_x + $80..$FF`);
+`rand >= $80` births it at the RIGHT edge (`world_x = camera_x + $100`, i.e. screen x **256**,
+with `world_y = (camera_y + rand-$80) & $FFF8`, screen y **0..120**).
+
+Two properties of that second path matter for any enhanced presentation. Screen x 256 is one
+pixel outside the authentic window — the ROM is using "just offscreen" to hide the birth — and
+the Y range tops out at exactly the player's own screen line, so about 12% of casts start a
+star at the player's feet. Neither is visible on original hardware. At 446-wide with margin
+objects enabled the birth point is on screen, which reads as "stardust spawning in the ground".
+Accepted as authentic; see bug-ledger.md §33 for the full derivation, the measured/proven/
+predicted split, and why it is not OAM wrapping.
+
+Actors are also CREATED on the player with zero velocity before that handler relocates them,
+which is what "not retained at the player" above means. Presentation must distinguish the two
+by MOTION — they share animation state 0 and visual 0 — or it decorates a stationary actor
+standing on the player.
+
 The animation data is independent of the tile upload:
 
 - `$02:BC9E` loads the common action atlas `$07:8000-$9FFF` and action palettes

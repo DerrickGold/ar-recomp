@@ -92,7 +92,7 @@ HP at `+8` and death score at `+9`. `tools/act_content.py --tables` decodes all 
 | `$06:A000+` | `0x32000+` | Conditional 128-byte dynamic action effect-overlay windows selected from polymorphic object `+38`; uploaded to VRAM `$2D80` only for objects with `+30 & $0040` and an idle upload descriptor. Not a universal spell-ID table |
 | `$06:A400+` | `0x32400+` | Selected action-magic character windows used by `$02:BC9E`: 256 bytes at `$A400 + (id-1)*$80` for IDs 1-4, uploaded to VRAM `$2D40` |
 | `$07:8000-$9FFF` | `0x38000-0x39FFF` | Common action OBJ atlas, 8192 bytes copied to VRAM `$2000-$2FFF` at level entry |
-| `$07:C000+` | `0x3C000+` | Magical Fire and Magical Stardust animation state tables, four-byte sequence entries, and seven-byte OAM compositions |
+| `$07:C000+` | `0x3C000+` | Magical Fire and Magical Stardust animation state tables, four-byte sequence entries, and seven-byte OAM compositions. Compositions OBSERVED live (2026-08-05): Stardust flight `$C13F` (state 0, visual 0, 16x16), Stardust burst `$C14B` at visual 1 (8x8) growing to `$C199` at visual 4 (32x32); Fire bloom `$C352` (state 3, visual $12, 52x25). Useful as identity anchors — the animation pointer alone cannot tell Fire from Stardust, since both live in this bank. |
 | `$07:C800+` | `0x3C800+` | Magical Aura and Magical Light animation state tables and OAM compositions; Light includes two authored 16x224 beam columns |
 | `$07:D040-$D09F` | `0x3D040-0x3D09F` | Action OBJ palettes, 96 bytes copied to CGRAM `$C0-$EF` |
 

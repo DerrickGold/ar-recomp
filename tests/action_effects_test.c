@@ -77,11 +77,18 @@ static void TestControllerAndSlotIdentity(void) {
   ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 0);
 
+  /* The controller kind, not the animation pointer, is what names a spell:
+   * Fire and Stardust genuinely share bank $07:C000. But sharing a bank is not
+   * enough to BE that spell — Stardust's stages are exact (state 0/visual 0 in
+   * flight, state 1/visuals 1-4 bursting), so Fire-shaped records under kind 2
+   * match nothing and are censused rather than mislabelled as flying stars.
+   * This is the property an earlier catch-all rule gave away. */
   SeedFireCast(wram, 13);
   Write16(wram, kActRaiserWram_MagicController + 0x38, 2);
   ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
-  CHECK(frame.effect_count == 0);
   CHECK(frame.controller_kind == 2);
+  CHECK(frame.effect_count == 0);
+  CHECK(frame.unmatched_count == 4);
 
   SeedFireCast(wram, 13);
   Write16(wram, kActRaiserWram_MagicController + 0x00, 0x4000);
@@ -265,8 +272,160 @@ static void TestLiveWramRecordIsRecognized(void) {
   CHECK((frame.effects[0].flags & kActionEffectFlag_FlipVertical) == 0);
 }
 
+/* Generic cohort seeding for the spells whose rules are transcribed rather
+ * than measured. Raw offsets on purpose, same as SeedFireSlot: the fixture is
+ * an independent statement of the WRAM contract, not a mirror of the field
+ * enum the production code uses. */
+static void SeedSlot(uint8_t *wram, unsigned cohort, uint16_t animation,
+                     uint8_t bank, uint16_t state, uint16_t visual,
+                     uint16_t flips) {
+  size_t address = kActRaiserWram_ActionObjectTable +
+      cohort * kActRaiserActionObjectStride;
+  Write16(wram, address + 0x00, 0x0000);          /* active */
+  Write16(wram, address + 0x02, (uint16_t)(200 + cohort * 30));
+  Write16(wram, address + 0x04, (uint16_t)(150 + cohort * 10));
+  Write16(wram, address + 0x0A, 12);
+  Write16(wram, address + 0x0C, 12);
+  Write16(wram, address + 0x0E, 12);
+  Write16(wram, address + 0x10, 12);
+  Write16(wram, address + 0x16, animation);
+  wram[address + 0x18] = bank;
+  wram[address + 0x19] = 0x39;                    /* the separate byte at +$19 */
+  Write16(wram, address + 0x1A, state);
+  Write16(wram, address + 0x22, visual);
+  Write16(wram, address + 0x20, 0xD100);          /* composition must be set */
+  Write16(wram, address + 0x28, flips);
+}
+
+static void BeginCast(uint8_t *wram, uint16_t controller_kind) {
+  memset(wram, 0, kActRaiserWramSize);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  Write16(wram, kActRaiserWram_MagicController + 0x00, 0x0000);
+  Write16(wram, kActRaiserWram_MagicController + 0x38, controller_kind);
+}
+
+/* Every spell the catalogue documents must be positively identified, with the
+ * right kind, phase and role. Fire is pinned elsewhere by real captured bytes;
+ * these three are pinned to the ROM analysis they were transcribed from, so a
+ * later correction from the live census has to update the test with it. */
+static void TestEverySpellIsIdentified(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionEffectFrame frame;
+  ActionEffectObserver observer = {0};
+
+  /* 2 Stardust, MEASURED from runs/20260805-073012: a star in flight is
+   * state 0 / visual 0 carrying velocity (-8,+8); a burst is state 1 over
+   * visuals 1..4. Both stages must be told apart, because they are styled as
+   * different substances — a burning projectile and the cold sparkle it
+   * detonates into — and only the flight stage is oriented to its heading. */
+  BeginCast(wram, 2);
+  for (unsigned slot = 0; slot < 4; slot++)
+    SeedSlot(wram, slot, 0xC000, 0x07, 1, 3, 0x0000);
+  ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 4);
+  CHECK(frame.effects[0].kind == kActionEffect_MagicalStardust);
+  CHECK(frame.effects[0].phase == kActionEffectPhase_StardustBurst);
+  CHECK(frame.effects[0].role == kActionEffectRole_Body);
+  CHECK(frame.unmatched_count == 0);
+
+  BeginCast(wram, 2);
+  SeedSlot(wram, 0, 0xC000, 0x07, 0, 0, 0x0000);
+  /* The measured 45-degree descent, which the renderer turns the comet body
+   * and the flame trail to face. */
+  Write16(wram, kActRaiserWram_ActionObjectTable + 0x06, (uint16_t)-8);
+  Write16(wram, kActRaiserWram_ActionObjectTable + 0x08, 8);
+  ActionEffectObserver_Reset(&observer);
+  ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].phase == kActionEffectPhase_StardustLaunch);
+  CHECK(frame.effects[0].velocity_x == -8);
+  CHECK(frame.effects[0].velocity_y == 8);
+  CHECK(frame.unmatched_count == 0);
+
+  /* The SAME state and visual with zero velocity is the pre-launch actor,
+   * measured at spawn sitting on the player at world (308,520) before the
+   * launch handler relocates it to the viewport edge. Motion is the only
+   * discriminator, and getting it wrong is what drew a comet at the player's
+   * feet ("stardust spawning in the ground"). It must still be IDENTIFIED, so
+   * that a genuinely unknown stage is what reaches the census. */
+  BeginCast(wram, 2);
+  SeedSlot(wram, 0, 0xC000, 0x07, 0, 0, 0x0000);
+  Write16(wram, kActRaiserWram_ActionObjectTable + 0x06, 0);
+  Write16(wram, kActRaiserWram_ActionObjectTable + 0x08, 0);
+  ActionEffectObserver_Reset(&observer);
+  ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].phase == kActionEffectPhase_StardustPreLaunch);
+  CHECK(frame.unmatched_count == 0);
+
+  /* 3 Aura: four flip combinations, $07:C800, state 3, visuals 10/11. */
+  BeginCast(wram, 3);
+  static const uint16_t kAuraFlips[] = { 0x0000, 0x4000, 0x8000, 0xC000 };
+  for (unsigned slot = 0; slot < 4; slot++)
+    SeedSlot(wram, slot, 0xC800, 0x07, 3, 10 + (slot & 1), kAuraFlips[slot]);
+  ActionEffectObserver_Reset(&observer);
+  ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 4);
+  CHECK(frame.effects[0].kind == kActionEffect_MagicalAura);
+  CHECK(frame.effects[0].phase == kActionEffectPhase_AuraOrb);
+
+  /* 4 Light: centre $07A0 and the two mirrored columns $07E0/$0820. The role
+   * split is the whole point — the centre flare and the beams are styled
+   * separately and must never be merged. */
+  BeginCast(wram, 4);
+  SeedSlot(wram, 4, 0xC800, 0x07, 1, 7, 0x0000);   /* centre, visuals 5-9 */
+  SeedSlot(wram, 5, 0xC800, 0x07, 1, 2, 0x0000);   /* column, visuals 1-4 */
+  SeedSlot(wram, 6, 0xC800, 0x07, 1, 2, 0x4000);   /* mirrored column */
+  ActionEffectObserver_Reset(&observer);
+  ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 3);
+  CHECK(frame.effects[0].role == kActionEffectRole_Centre);
+  CHECK(frame.effects[0].phase == kActionEffectPhase_LightFlare);
+  CHECK(frame.effects[1].role == kActionEffectRole_Column);
+  CHECK(frame.effects[1].phase == kActionEffectPhase_LightBeam);
+  /* A column outside the beam visuals is the pre-beam stage, which must be
+   * identified (so it can be drawn dim) rather than dropped. */
+  SeedSlot(wram, 5, 0xC800, 0x07, 1, 12, 0x0000);
+  ActionEffectObserver_Reset(&observer);
+  ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effects[1].phase == kActionEffectPhase_LightBeamCharge);
+}
+
+/* An active slot the table does not describe must be REPORTED, not silently
+ * dropped and not rendered on a guess. This is the mechanism that makes the
+ * transcribed rules self-correcting against a real cast. */
+static void TestUnmatchedSlotsAreCensused(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionEffectFrame frame;
+  ActionEffectObserver observer = {0};
+
+  /* Fire's controller, but one slot running an animation nobody declared. */
+  SeedFireCast(wram, 13);
+  SeedSlot(wram, 2, 0xB000, 0x05, 9, 99, 0x8000);
+  ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 3);
+  CHECK(frame.unmatched_count == 1);
+  CHECK(frame.unmatched[0].record_address == 0x0720);
+  CHECK(frame.unmatched[0].animation_address == 0xB000);
+  CHECK(frame.unmatched[0].animation_bank == 0x05);
+  CHECK(frame.unmatched[0].visual == 99);
+
+  /* An entirely unknown spell ID renders nothing but still censuses every
+   * live slot, which is what a not-yet-mapped spell should look like. */
+  BeginCast(wram, 9);
+  for (unsigned slot = 0; slot < 3; slot++)
+    SeedSlot(wram, slot, 0xC000, 0x07, 1, 3, 0x0000);
+  ActionEffectObserver_Reset(&observer);
+  ActionEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+  CHECK(frame.visible_count == 0);
+  CHECK(frame.unmatched_count == 3);
+}
+
 int main(void) {
   TestControllerAndSlotIdentity();
+  TestEverySpellIsIdentified();
+  TestUnmatchedSlotsAreCensused();
   TestCapturedFieldsAndGeometry();
   TestLiveWramRecordIsRecognized();
   TestLifecycleUsesEmulationTicks();

@@ -28,7 +28,10 @@ enum {
   /* Embers belong to the burst, not to a part, so this is a whole-effect
    * budget rather than a per-instance one — four quadrants must not each
    * throw their own separate spray. */
-  kActionEffectMaxEmbers = 48,
+  /* 64, not 48: an impact splits this budget across every simultaneous burst
+   * (Stardust detonates up to four at once), and a dozen sparks per blast is
+   * too thin to read once half of them are still inside the source sprite. */
+  kActionEffectMaxEmbers = 64,
 
   kActionEffectRenderMaxVertices =
       kActionEffectMaxGlows * kActionEffectGlowVertices +

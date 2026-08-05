@@ -379,7 +379,7 @@ applying when their action or simulation engine becomes active.
 | `AR_MOONJUMP=1` | enable moonjump; hold the normal jump button to fly upward (`AR_MOONJUMP_SPEED`, default 6 px/frame) |
 | `AR_NO_KNOCKBACK=1` | permanent invincibility — no damage, no hitstun. Magic-aware: invulnerability drops only for the 1-2 frames where a spell cast actually fires |
 | `AR_ALL_MAGIC=1` | unlocks all four spells in the equip menu |
-| `AR_MAGIC_CYCLE=1` | reserves SNES L (`Q`) during action mode to cycle Fire → Stardust → Aura → Light and reload each spell's resident OBJ tiles; `AR_MAGIC_CYCLE_BTN=<mask>` changes the button (`0x0020`=L, `0x0010`=R) |
+| `AR_MAGIC_CYCLE=1` | legacy seed for the **Cheats > Cycle magic spell** toggle. Arms the rebindable *Cycle magic spell* control (Settings > Controls; default keyboard `M`, no pad default) which steps through the spells the save has UNLOCKED during an action stage and reloads each one's resident OBJ tiles. No longer reserves a SNES button, so `AR_MAGIC_CYCLE_BTN` is gone. A cheat badge is drawn while it is armed. |
 | `AR_RANGED_SWORD=1` | sword fires a projectile |
 | `AR_INF_MP=1` (or `=<n>`) | infinite magic scrolls (pins the working count; never written to the save file) |
 | `AR_INF_SP=1` | sim mode: infinite SP (miracle points), self-calibrating to your max |

@@ -345,6 +345,72 @@ void FrameSlot_Capture(FrameSlot *dst) {
               g_settings.action_effect_particles);
     }
   }
+  /* Spawn probe for the reported "Stardust starts at ground level" bug. The
+   * catalogue says a star's launch position is chosen at the VIEWPORT TOP/
+   * RIGHT EDGE and it then descends; if it instead appears at the ground it
+   * exits the bottom of the screen almost immediately. Mid-flight snapshots
+   * cannot distinguish those, so this reports the FIRST frame of each actor
+   * (age_ticks 0) with the camera and the screen-relative Y that the launch
+   * arithmetic is supposed to have produced. Bounded so a 16-launch cast
+   * cannot flood the log. */
+  if (dst->action_effects.effect_count) {
+    static unsigned spawn_reports;
+    int16_t camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
+    int16_t camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+    int ground = (int)(ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionY) -
+                       camera_y + 16);
+    for (uint8_t i = 0;
+         i < dst->action_effects.effect_count && spawn_reports < 24u; i++) {
+      const ActionEffectInstance *e = &dst->action_effects.effects[i];
+      /* Two distinct moments, and confusing them is what made the first pass
+       * at this misleading:
+       *   CREATE — the actor appears on the player, still (velocity 0).
+       *   LAUNCH — the handler has relocated it and given it a velocity. THIS
+       *            is the position the catalogue says should be the viewport
+       *            top/right edge, and the one to compare against the ground.
+       * phase_ticks resets on every phase change, so ==0 is the entry frame. */
+      const char *moment = NULL;
+      if (e->phase == kActionEffectPhase_StardustPreLaunch && !e->age_ticks)
+        moment = "CREATE";
+      else if (e->phase == kActionEffectPhase_StardustLaunch &&
+               !e->phase_ticks)
+        moment = "LAUNCH";
+      if (!moment) continue;
+      spawn_reports++;
+      fprintf(stderr,
+              "[action-fx spawn] %s slot=$%04X world=(%d,%d) cam=(%d,%d) "
+              "screen=(%d,%d) vel=(%d,%d) age=%u "
+              "[viewport top screen_y=0, ground screen_y~%d]\n",
+              moment, e->record_address, e->world_x, e->world_y,
+              camera_x, camera_y, e->world_x - camera_x, e->world_y - camera_y,
+              e->velocity_x, e->velocity_y, e->age_ticks, ground);
+    }
+  }
+
+  /* Census: an active cohort slot the spell table did not recognise. Magical
+   * Fire's rules are measured, but Stardust/Aura/Light were transcribed from
+   * the ROM analysis and have never been seen against live WRAM — so rather
+   * than render them on a guess, an unrecognised slot prints its exact
+   * identity here. One cast of each spell (Cheats > Cycle magic spell) turns
+   * these lines into corrected rules in action_effects.c. Rate-limited to one
+   * report per controller kind so a 99-tick cast cannot flood the log. */
+  if (dst->action_effects.unmatched_count) {
+    static uint16_t reported_kinds;
+    uint16_t bit = (uint16_t)(1u << (dst->action_effects.controller_kind & 15));
+    if (!(reported_kinds & bit)) {
+      reported_kinds |= bit;
+      for (uint8_t i = 0; i < dst->action_effects.unmatched_count; i++) {
+        const ActionEffectUnmatched *u = &dst->action_effects.unmatched[i];
+        fprintf(stderr,
+                "[action-fx census] spell=%u slot=$%04X unmatched: "
+                "anim=$%02X:%04X state=%u visual=%u comp=$%04X "
+                "flip=$%04X status=$%04X\n",
+                dst->action_effects.controller_kind, u->record_address,
+                u->animation_bank, u->animation_address, u->animation_state,
+                u->visual, u->composition, u->flip_attributes, u->status);
+      }
+    }
+  }
   dst->magic_cycle_armed = g_settings.cheat_magic_cycle;
   dst->magic_cycle_selected =
       g_settings.cheat_magic_cycle ? ActRaiser_SelectedMagic() : 0;
