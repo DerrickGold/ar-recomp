@@ -7,16 +7,59 @@
 /* Presentation-only action-stage effects. The game-thread capture owns every
  * WRAM read and publishes this small value-copy through FrameSlot; present.c
  * must never infer spell identity from live game state. */
+/* Values match the ROM's spell IDs at controller +$38 ($00:9F13 dispatches
+ * 1/2/3/4 to $9F25/$9F71/$9FBB/$9FFA), so the captured kind IS the game's own
+ * identity rather than a presentation-side renumbering. */
 typedef enum ActionEffectKind {
   kActionEffect_None = 0,
-  kActionEffect_MagicalFire,
+  kActionEffect_MagicalFire = 1,
+  kActionEffect_MagicalStardust = 2,
+  kActionEffect_MagicalAura = 3,
+  kActionEffect_MagicalLight = 4,
+  kActionEffect_KindCount,
 } ActionEffectKind;
 
+/* One entry per authored visual stage a style may want to distinguish. These
+ * are presentation phases, not ROM animation states: several map from a state
+ * number, others from a visual range where the state is shared (see
+ * docs/effects-hook-investigation.md "Spell catalogue"). */
 typedef enum ActionEffectPhase {
   kActionEffectPhase_None = 0,
   kActionEffectPhase_FireIgnition,
   kActionEffectPhase_FireBloom,
+  /* Stardust relaunches four times per actor; each relaunch restarts the
+   * particle clock through pulse_key.
+   *
+   * PreLaunch is created at the player with zero velocity, BEFORE the launch
+   * handler
+   * relocates it to the viewport edge. Shares the flying star's animation
+   * state and visual, so motion is the only thing that separates them. It is
+   * identified (so it is not censused as unknown) but deliberately carries no
+   * style, and therefore draws nothing: decorating it put a comet on the
+   * player's feet, which is what "stardust spawns in the ground" actually
+   * was. */
+  kActionEffectPhase_StardustPreLaunch,
+  kActionEffectPhase_StardustLaunch,
+  kActionEffectPhase_StardustBurst,
+  kActionEffectPhase_AuraOrb,
+  kActionEffectPhase_LightFlare,
+  /* The column's pre-beam stage. Held deliberately dim: the investigation
+   * calls out that the 24-tick pre-beam visual must not get full intensity. */
+  kActionEffectPhase_LightBeamCharge,
+  kActionEffectPhase_LightBeam,
+  kActionEffectPhase_Count,
 } ActionEffectPhase;
+
+/* Which structural part of a spell an instance is. Most spells are N
+ * equivalent clones (Body); Magical Light is the exception the investigation
+ * flags — a stationary centre flare plus two mirrored 16x224 beam columns,
+ * which want completely different styling from each other. */
+typedef enum ActionEffectRole {
+  kActionEffectRole_Body = 0,
+  kActionEffectRole_Centre,
+  kActionEffectRole_Column,
+  kActionEffectRole_Count,
+} ActionEffectRole;
 
 /* Action spell parts are emitted into an authentic OBJ priority band. The
  * enhanced pass is currently an intentional world-light overlay (above the
@@ -85,11 +128,28 @@ typedef struct ActionEffectInstance {
   uint16_t pulse_ticks;
   uint8_t kind;
   uint8_t phase;
+  uint8_t role;
   uint8_t flags;
   uint8_t obj_priority;
   uint8_t render_layer;
   ActionEffectGeometry geometry;
 } ActionEffectInstance;
+
+/* Diagnostic payload: the raw identity of a cohort slot that was ACTIVE while
+ * the controller was live but which no spell rule matched. Nothing renders
+ * from this — it exists so a single play session can correct the rule table
+ * against real WRAM instead of against the ROM analysis it was written from.
+ * Fire's rules are measured; the other three are transcribed and unproven. */
+typedef struct ActionEffectUnmatched {
+  uint16_t record_address;
+  uint16_t status;
+  uint16_t animation_address;
+  uint16_t animation_state;
+  uint16_t visual;
+  uint16_t composition;
+  uint16_t flip_attributes;
+  uint8_t animation_bank;
+} ActionEffectUnmatched;
 
 typedef struct ActionEffectFrame {
   uint16_t game_frame;
@@ -97,6 +157,8 @@ typedef struct ActionEffectFrame {
   uint8_t effect_count;
   uint8_t visible_count;
   ActionEffectInstance effects[kActionEffectMaxInstances];
+  uint8_t unmatched_count;
+  ActionEffectUnmatched unmatched[kActionEffectMaxInstances];
 } ActionEffectFrame;
 
 /* Observer state is explicit so savestate/restart boundaries can reset it and

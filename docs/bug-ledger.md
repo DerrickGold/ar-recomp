@@ -775,6 +775,68 @@ the current debugging process; this file is the case law.
       `[action-fx] first spell geometry submitted: ...` now fires once per process, so
       "nothing happens" is answerable from `console.log` alone.
 
+33. **Magical Stardust appears to spawn at ground level — NOT A BUG, ACCEPTED 2026-08-05
+    (authentic ROM behaviour revealed by widescreen; revisit after true OAM positioning).**
+    Reported as "sometimes we get stardust comets spawning in the ground — the in-flight dust
+    starts from ground level then goes off screen". Deliberately left unchanged; this entry
+    exists so the next person does not re-derive it.
+
+    **Not the dispatch miss.** The run carried two `dispmiss` anomalies and the obvious
+    suspicion was that they were related. They are not, on four independent checks: no magic
+    handler executes anywhere in either anomaly window (`$9F71`, `$A0E8`, `$9F13`, `$A0B8`,
+    `$A188`, `$9E89` all absent); the identical pair `00896F -> 0082ED` appears in *every*
+    run that produces an anomaly file, including runs predating this work and runs where
+    Stardust was never cast; the anomalies fire before the spell is even selected; and
+    `progress.md` already classifies ordinary `$896F` loop returns as benign noise.
+
+    **The mechanism, from the ROM's own launch handler `$00:A0E8`.** A random byte selects
+    one of two launch sites:
+
+    | Path | Condition | `world_x` | `world_y` | screen |
+    |---|---|---|---|---|
+    | top edge | `rand < $80` | `camera_x + $80..$FF` | `camera_y & $FFF8` | y = 0 |
+    | right edge | `rand >= $80` | `camera_x + $100` | `(camera_y + rand-$80) & $FFF8` | y = 0..120 |
+
+    Two consequences. First, `screen_x = 256` on the right-edge path is one pixel past the
+    authentic 256-wide window — the ROM is using "just offscreen" as the place to hide a
+    star before it flies in. Second, the right-edge Y range tops out at **exactly 120, the
+    player's own screen line** (ground is 120+16). Roughly **12% of casts** launch at
+    screen_y >= 96, i.e. at the player's feet.
+
+    On original hardware neither is visible: the star is born offscreen and only enters the
+    frame once it has travelled left. This build renders **446 wide with 95 extra columns per
+    side**, with `ws_margin_objects` and `ws_margin_activation` both on, so framebuffer
+    x = 95+256 = 351 is comfortably inside the frame. The hiding place is no longer hidden.
+
+    **Explicitly NOT OAM wrapping**, which was the first alternative considered: the launch Y
+    stays within 0..120 and never approaches the 8-bit wrap boundary, and the effect layer
+    projects from WRAM world coordinates rather than from OAM, so a wrapped sprite would
+    diverge visibly from its glow rather than travel with it.
+
+    **Confidence, stated honestly:**
+    - MEASURED: the create-frame position (all four actors born on the player at world
+      (308,520) with velocity (0,0)) — `runs/20260805-074959`, `[action-fx spawn]`.
+    - STATICALLY PROVEN: both launch paths, from `tools/dis65.py 00:A0E8` cross-checked
+      against the generated `bank_00_A0E8_M0X0` in `src/gen/bank00_part04_v2.c`, which is a
+      faithful translation (DP-relative camera reads, the `&$FFF8` mask, the `+$100` offset).
+      The distribution above is computed from that instruction sequence.
+    - PREDICTED, not yet captured: a launch-frame line showing screen_y near 120 at
+      screen_x 256. `frame_slot.c`'s probe already reports `LAUNCH` (phase entry, i.e.
+      `phase_ticks == 0`) alongside `CREATE`; one cast confirms it.
+
+    **Reusable lessons:**
+    - **"Just offscreen" is a load-bearing hiding place, and widescreen removes it.** Any ROM
+      that parks an actor a few pixels outside the 256-wide window is relying on it being
+      invisible. Expect a class of these, not one.
+    - **Separate the CREATE frame from the LAUNCH frame before diagnosing a spawn.** The
+      first probe fired on `age_ticks == 0` and reported the actor sitting on the player,
+      which is real but is not the launch — and led to a confident wrong answer. The frame
+      that matters is the one where the handler has relocated the actor and given it a
+      velocity.
+    - **A visual report and the code's own arithmetic can both be right.** Nothing here was
+      broken in the ROM or in the port; the distribution simply has a tail that authentic
+      hardware never showed.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

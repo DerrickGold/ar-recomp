@@ -67,14 +67,18 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | Address / field | Size | Description |
 |---|---:|---|
 | `$7E:06A0-$1A9F` | 80 × `$40` | Action object slots. Magic cohort slots are `$06A0-$0820`; cast controller is `$0860`; player is `$08A0` |
+<!-- inserted 2026-08-05: RNG state, found while deriving Stardust's launch site -->
+
+| `$7E:02D0-$02E0` | 17 | **PRNG state pool.** `$00:84C0` advances it (a carry-chain `ADC` down the pool, then a multi-byte counter increment) and returns the byte at `$02D1` in A. Every randomized spell decision goes through it — e.g. Magical Stardust's launch site picks top-vs-right edge and its Y offset from one call (`$00:A0E8`, see bug-ledger.md §33). |
+
 | slot `+00` | 2 | Status. `$4000/$8000` high states are inactive/free; spell actors normally use active values 0 or `$0800` |
 | slot `+02/+04` | 2+2 | World-space hot-point X/Y, updated by the spell handler and projected with camera `$22/$24` |
 | slot `+06/+08` | 2+2 | Current per-tick X/Y velocity decoded by `$00:8E2F`; flip bits mirror the authored deltas |
 | slot `+0A/+0C/+0E/+10` | 2 each | Current composition left/top/right/bottom extents after flip selection |
-| slot `+16/+18` | 2+2 | Animation-table address/bank (`$07:C000` Fire/Stardust, `$07:C800` Aura/Light) |
+| slot `+16..+18` | 2+**1** | Animation-table pointer: 16-bit address at `+16` then a **single BANK BYTE at `+18`** (`$07:C000` Fire/Stardust, `$07:C800` Aura/Light). **`+19` is a SEPARATE field, not the pointer's high half** — live Magical Fire reads `$3907` as a word there, so a 16-bit read of `+18` silently yields `bank \| next<<8`. This entry previously read "2+2" and that misreading is exactly what left the action-spell effects drawing nothing (bug-ledger.md §32). Corroborated by `$00:95F0`, which copies spawn-record bytes `+2/+3` into `$18`/`$28` as BYTES. |
 | slot `+1A/+1C` | 2+2 | Animation state and entry index |
 | slot `+20/+22/+24` | 2 each | Current composition pointer, visual ID, and animation wait counter |
-| slot `+28` | 2 | Attribute/transform word; bits `$4000/$8000` select horizontal/vertical coordinate choices |
+| slot `+28`/`+29` | 1+1 (see note) | Attribute/transform. Masking the 16-bit read at `+28` with `$C000` selects the horizontal/vertical flip, which works because the bits live in the **byte at `+29`**; `+28`'s own byte measured `$00` on every spell actor observed, and `$00:95F0` writes `+28` byte-wise. Treat as two bytes rather than one word until a case is found that needs the low half. `+19` carries the same base attribute value as `+29`. |
 | slot `+38` | 2 | Polymorphic spell-local counter. Controller `$0860+38` is selected spell ID; cohort spells reuse `+38` for repeat counts |
 | slot `+3A` | 2 | Spawner backlink; the cast controller points back to the player |
 | `$7E:00F4/$00F8/$00F9` | 2 each | Input-enable mask, cast-active gate, and cast-transition state used by `$9DE1-$9F10` |

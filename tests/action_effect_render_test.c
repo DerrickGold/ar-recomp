@@ -147,8 +147,74 @@ static void TestCapacityIsDerivedFromPublishedLimits(void) {
   CHECK(clustered.vertex_count == 2 * kActionEffectGlowVertices);
 }
 
+/* A spell routinely runs several stages at once — every measured Stardust
+ * snapshot had flying stars and detonating ones alive together. Styling must
+ * therefore be resolved PER PART, and nothing burst-wide may depend on which
+ * part happens to be listed first.
+ *
+ * This is the regression that shipped: mode, palette and ember count were all
+ * read from the anchor (the first visible part), so simply reordering the
+ * frame changed how every other part was drawn. Reordering is exactly what
+ * happens naturally as slots retire mid-cast. */
+static ActionEffectInstance Star(int world_x, uint8_t phase,
+                                 int16_t velocity_x, int16_t velocity_y) {
+  ActionEffectInstance effect = {
+    .pulse_generation = 3,
+    .record_address = (uint16_t)(0x06A0 + world_x),
+    .world_x = (int16_t)world_x,
+    .world_y = 200,
+    .velocity_x = velocity_x,
+    .velocity_y = velocity_y,
+    .visual = 2,
+    .phase_ticks = 6,
+    .pulse_ticks = 6,
+    .kind = kActionEffect_MagicalStardust,
+    .phase = phase,
+    .role = kActionEffectRole_Body,
+    .flags = kActionEffectFlag_Visible,
+    .obj_priority = 0,
+    .render_layer = kActionEffectRenderLayer_WorldOverlay,
+    .geometry = {
+      .kind = kActionEffectGeometry_Rect,
+      .data.rect = { -16.0f, -16.0f, 16.0f, 16.0f },
+    },
+  };
+  return effect;
+}
+
+static void TestMixedStagesAreOrderIndependent(void) {
+  /* Far apart so they stay two clusters rather than merging into one. */
+  ActionEffectInstance flying =
+      Star(100, kActionEffectPhase_StardustLaunch, -8, 8);
+  ActionEffectInstance bursting =
+      Star(4000, kActionEffectPhase_StardustBurst, 0, 0);
+
+  ActionEffectFrame flight_first = { .effect_count = 2 };
+  flight_first.effects[0] = flying;
+  flight_first.effects[1] = bursting;
+
+  ActionEffectFrame burst_first = { .effect_count = 2 };
+  burst_first.effects[0] = bursting;
+  burst_first.effects[1] = flying;
+
+  ActionEffectRenderBatch a, b;
+  CHECK(ActionEffectRender_Build(&flight_first, true, true, IdentityProjection,
+                                 NULL, &a));
+  CHECK(ActionEffectRender_Build(&burst_first, true, true, IdentityProjection,
+                                 NULL, &b));
+  /* Same parts in either order must produce the same amount of geometry: one
+   * spill plus two bodies, and one whole-burst ember budget. Under the old
+   * anchor-driven styling the ember count alone differed by ~15% between
+   * these two frames. */
+  CHECK(a.vertex_count == b.vertex_count);
+  CHECK(a.index_count == b.index_count);
+  CHECK(a.vertex_count == 3 * kActionEffectGlowVertices +
+                              kActionEffectMaxEmbers * 4);
+}
+
 int main(void) {
   TestFeatureSwitchesAndDeterminism();
+  TestMixedStagesAreOrderIndependent();
   TestClocksAndValidation();
   TestCapacityIsDerivedFromPublishedLimits();
   if (g_failures) {
