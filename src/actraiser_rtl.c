@@ -804,6 +804,16 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
      * background with the actors missing. */
   }
   PpuSetExtraVerticalSpace(g_ppu, g_ws_extra_top, g_ws_extra_bottom);
+  /* Only meaningful while a band exists, and re-applied every frame because
+   * ppu_reset zeroes the field like the rest of the margin state. */
+  {
+    /* AR_VEXT_PARKFIX=0 disables the filter so the parked pile can be A/B'd
+     * from one binary, like AR_VEXT_BANDFIX for the streaming repair. */
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("AR_VEXT_PARKFIX"); on = !(e && e[0] == '0'); }
+    PpuSetObjMarginHideY(
+        g_ppu, (on && g_ws_extra_top > 0) ? kActRaiserOamHideY : -1);
+  }
 
   /* AR_VEXT_TILES=1: classify the BG1 tilemap rows the band will read. A
    * "uniform" row (one tile id repeated across the whole ring width) is the

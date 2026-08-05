@@ -1555,6 +1555,30 @@ Measured at the shipped defaults: authentic y=0 and y=224 land on screen at
 102.06 and 1149.67 with extend 0 AND 32 — unmoved — while the new capture top
 projects to −62, filling the dead region above.
 
+### The parked-sprite pile (trap 4)
+
+A game parks its unused OAM slots off-screen, and "off-screen above" is the
+only place the 8-bit Y encoding can express — so the parking row lands INSIDE
+the band and every inactive slot draws there at once. ActRaiser clears its
+shadow OAM to `Y=$E0` (DEBUG.md §4c), which is screen y **-32**: exactly the
+first row of a 32-line band. Measured in a live snapshot: **103 of 128 slots**
+at X=128 (screen centre), all drawing tile `$80` — one garbled blob dead centre
+above the scene.
+
+`PpuSetObjMarginHideY` takes the marker from the frontend, because it is a GAME
+convention the PPU cannot infer, and applies it **only on margin scanlines**.
+That scoping is load-bearing, not defensive: a 64-tall sprite parked at -32
+spans screen rows -32..31 and so does reach authentic lines, where the game
+intends it drawn. `AR_VEXT_PARKFIX=0` A/Bs it.
+
+Note what does NOT work: re-mapping the negative Y range to clear the band, the
+way `PpuObjScreenX` moves the wrap threshold with the screen width. X has 9 bits
+against a 256-wide screen, so there is a spare screen to shift into; Y has 8
+bits against 224, so the negative range is 32 values and the band is 32 lines —
+they collide exactly, with nothing left over. Shifting would displace genuinely
+above-screen sprites, which are the whole point of the band. Parked and real
+share the encoding; only the game's RESERVED marker value separates them.
+
 ### What the band actually contains
 
 Verified in Fillmore act 1 (replay `saves/fillmore-act.rec`, diorama flipped on

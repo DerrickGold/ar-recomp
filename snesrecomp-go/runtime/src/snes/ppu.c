@@ -349,6 +349,15 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom) {
   ppu->extraBottomCur = (uint8_t)IntMin(IntMax(bottom, 0), kPpuExtraTopBottom);
 }
 
+void PpuSetObjMarginHideY(Ppu *ppu, int y) {
+  if (y < 0 || y > 0xFF) {
+    ppu->objMarginHideYValid = false;
+    return;
+  }
+  ppu->objMarginHideY = (uint8_t)y;
+  ppu->objMarginHideYValid = true;
+}
+
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom) {
   ppu->extraTopCur = (uint8_t)IntMin(IntMax(top, 0), kPpuExtraTopBottom);
   ppu->extraBottomCur = (uint8_t)IntMin(IntMax(bottom, 0), kPpuExtraTopBottom);
@@ -1915,8 +1924,25 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
   uint8_t index = PPU_objPriority(ppu) ? (ppu->oamaddl & 0xfe) : 0;
   int spritesFound = 0;
   int tilesFound = 0;
+  /* A game parks its unused OAM slots somewhere off-screen, and "off-screen
+   * above" is the only place the 8-bit Y encoding can express -- so the parking
+   * row lands INSIDE a vertical top margin and every inactive slot draws there
+   * at once. ActRaiser clears its shadow OAM to Y=$E0 (screen -32), which is
+   * exactly the first row of a 32-line band: measured 103 of 128 slots stacked
+   * at X=128 (screen centre) all drawing tile $80.
+   *
+   * The frontend supplies the marker because it is the game's own convention,
+   * not something the PPU can infer (see PpuSetObjMarginHideY). Scoped to
+   * margin scanlines ONLY, and that scoping is load-bearing rather than
+   * defensive: a 64-tall sprite parked at -32 spans screen rows -32..31 and so
+   * DOES reach authentic lines, where the game intends it to be drawn. */
+  bool hide_parked = ppu->objMarginHideYValid && line < 0;
   for(int i = 0; i < 128; i++) {
     uint8_t y = ppu->oam[index] >> 8;
+    if (hide_parked && y == ppu->objMarginHideY) {
+      index += 2;
+      continue;
+    }
     // check if the sprite is on this line and get the sprite size
     uint8_t row = line - y;
     int spriteSize = PpuObjSizeForIndex(ppu, index);
