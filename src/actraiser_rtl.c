@@ -418,6 +418,17 @@ void ActRaiser_FullSnapshot(const char *prefix) {
     f = fopen(path, "wb"); if (f) { fwrite(g_ppu->cgram, 2, 0x100, f); fclose(f); }
     snprintf(path, sizeof path, "%s.oam.bin", prefix);
     f = fopen(path, "wb"); if (f) { fwrite(g_ppu->oam, 2, 0x100, f); fclose(f); }
+    /* The HIGH table, as its own file so the 512-byte .oam.bin layout every
+     * existing parser assumes stays exactly that. Without it a snapshot cannot
+     * place or size a sprite at all: the high table carries each slot's X bit 8
+     * and its size-large bit, so an OAM-only dump silently reads every sprite as
+     * small and as x = (x & 0xff). That is a 256-pixel ambiguity — a sprite
+     * staged off the RIGHT edge decodes as one sitting mid-screen. Cost a
+     * diagnosis on 2026-08-05 (an off-screen staged sprite revealed by the
+     * diorama vertical band could not be located from its snapshot). */
+    snprintf(path, sizeof path, "%s.highoam.bin", prefix);
+    f = fopen(path, "wb");
+    if (f) { fwrite(g_ppu->highOam, 1, sizeof g_ppu->highOam, f); fclose(f); }
   }
 }
 
@@ -1444,6 +1455,26 @@ static PpuObjRangeBounds s_hud_icon_bounds;
 static int s_hud_icon_priority;
 static bool s_hud_icon_ready;
 
+/* The icon-footprint restore layer (see the block comment in
+ * ActRaiser_DioramaHudObjPrepare): per footprint pixel, the colour and the
+ * priority band of the sprite the promoted icon was covering. Static rather
+ * than stack — three 64x64 scratch buffers is 36 KB, well past a sane frame. */
+enum { kActRaiserHudRestoreNone = 0xFF };
+static uint32_t s_hud_restore_argb[kActRaiserHudIconRasterLimit *
+                                   kActRaiserHudIconRasterLimit];
+static uint8_t s_hud_restore_prio[kActRaiserHudIconRasterLimit *
+                                  kActRaiserHudIconRasterLimit];
+static uint32_t s_hud_restore_slot[kActRaiserHudIconRasterLimit *
+                                   kActRaiserHudIconRasterLimit];
+
+/* g_diorama_layer_pixels[] index for an OBJ priority band. Band N is the plane
+ * the diorama's kPrioBands table bound for band N, and band == OAM priority
+ * (ppu.c's split does band = z >> 14, and SPRITE_PRIO_TO_PRIO puts the OAM
+ * priority in those two bits). Band 0 is the primary source slot. */
+static int ActRaiser_DioramaObjPlaneForPriority(int priority) {
+  return priority ? kDioramaPlane_Obj1 + (priority - 1) : kPpuOverlaySource_Obj;
+}
+
 static void ActRaiser_DioramaHudObjPrepare(void) {
   extern bool g_diorama_frame_active;
 
@@ -1478,6 +1509,73 @@ static void ActRaiser_DioramaHudObjPrepare(void) {
   s_hud_icon_bounds = bounds;
   s_hud_icon_priority = priority;
   s_hud_icon_ready = true;
+
+  /* --- Restore layer: what the promoted sprites were HIDING ---------------
+   *
+   * Every captured OBJ pixel competes in ONE shared z-buffer
+   * (ppu.c `overlayBuffers[kPpuOverlaySource_Obj]`: first opaque writer wins,
+   * OAM walked in slot order); only at scanout is the surviving pixel routed
+   * to the plane matching its own priority. The promoted icon is the LEADING
+   * slot range, so wherever it overlaps a world sprite it wins the z-test and
+   * that sprite's pixels are never captured into ANY plane.
+   *
+   * That is correct on hardware -- the icon is in front, so it hides what is
+   * behind it. It stops being correct the moment we MOVE the icon to the HUD
+   * anchor: zeroing it out of its own band then leaves a hole shaped like the
+   * icon cut out of whatever stood behind it. Found 2026-08-05 as a bite taken
+   * out of a level gargoyle, and it needs only an on-screen overlap, so it is
+   * independent of the vertical band.
+   *
+   * Fix: replay the same first-writer-wins rule over the icon's footprint with
+   * the promoted slots REMOVED, keeping each restored pixel's colour AND the
+   * priority band it belongs to. Rasterised here, pre-scanout, for exactly the
+   * reason the icon is -- mid-frame IRQ/HDMA rewrite VRAM and CGRAM.
+   *
+   * Not a full re-render: the hardware sprite-per-line limits are not replayed,
+   * so a footprint contested by more than 34 slivers on a line could restore a
+   * pixel the PPU would have dropped. Bounded by a 16x16 HUD icon, and failing
+   * that way (showing the sprite) beats failing the other (a hole). */
+  memset(s_hud_restore_prio, kActRaiserHudRestoreNone,
+         (size_t)raster_width * raster_height);
+  uint8_t index = PPU_objPriority(g_ppu) ? (uint8_t)(g_ppu->oamaddl & 0xfe) : 0;
+  for (int evaluated = 0; evaluated < 128;
+       evaluated++, index = (uint8_t)(index + 2)) {
+    const int slot = index >> 1;
+    if (slot >= first && slot < first + count)
+      continue;                       /* the promoted sprites themselves */
+    const int slot_priority = (g_ppu->oam[slot * 2 + 1] >> 12) & 3;
+    PpuObjRangeBounds sb;
+    if (!PpuGetObjRangeBounds(g_ppu, (uint8_t)slot, 1, (uint8_t)slot_priority,
+                              &sb))
+      continue;
+    /* Cheap reject before rasterising: most slots cannot touch the icon. */
+    if (sb.x1 <= bounds.x0 || sb.x0 >= bounds.x1 ||
+        sb.y1 <= bounds.y0 || sb.y0 >= bounds.y1)
+      continue;
+    const int sw = sb.x1 - sb.x0, sh = sb.y1 - sb.y0;
+    if (sw <= 0 || sh <= 0 ||
+        sw > kActRaiserHudIconRasterLimit || sh > kActRaiserHudIconRasterLimit)
+      continue;
+    if (!PpuRasterizeObjRange(g_ppu, (uint8_t)slot, 1, (uint8_t)slot_priority,
+                              &sb, s_hud_restore_slot, sw, sh,
+                              (size_t)sw * sizeof(uint32_t)))
+      continue;
+    for (int y = 0; y < sh; y++) {
+      const int fy = sb.y0 + y - bounds.y0;
+      if (fy < 0 || fy >= raster_height) continue;
+      for (int x = 0; x < sw; x++) {
+        const int fx = sb.x0 + x - bounds.x0;
+        if (fx < 0 || fx >= raster_width) continue;
+        const size_t fi = (size_t)fy * raster_width + fx;
+        if (s_hud_restore_prio[fi] != kActRaiserHudRestoreNone)
+          continue;                   /* an earlier slot already won here */
+        const uint32_t px = s_hud_restore_slot[(size_t)y * sw + x];
+        if (!px) continue;
+        s_hud_restore_argb[fi] = px;
+        s_hud_restore_prio[fi] = (uint8_t)slot_priority;
+      }
+    }
+  }
 }
 
 static void ActRaiser_DioramaHudObjFinish(int width) {
@@ -1499,8 +1597,7 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
    * band = z >> 14, and SPRITE_PRIO_TO_PRIO puts the OAM priority in those two
    * bits), so this is the same plane the diorama's kPrioBands table bound. */
   uint32_t *plane = (uint32_t *)g_diorama_layer_pixels[
-      s_hud_icon_priority ? kDioramaPlane_Obj1 + (s_hud_icon_priority - 1)
-                          : kPpuOverlaySource_Obj];
+      ActRaiser_DioramaObjPlaneForPriority(s_hud_icon_priority)];
   const size_t pitch = (size_t)width * 4;
   const int extra = (width - kActRaiserAuthenticWidth) / 2;
   /* Two destinations, two row origins. g_hud_obj_pixels is consumed in
@@ -1531,8 +1628,23 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
       const uint32_t pixel = s_hud_icon_raster[(size_t)y * raster_width + x];
       if (!pixel) continue;
       dst[texture_x] = pixel;
-      if (plane)
-        plane[(size_t)(screen_y + plane_row_bias) * width + texture_x] = 0;
+      const size_t plane_index =
+          (size_t)(screen_y + plane_row_bias) * width + texture_x;
+      if (plane) plane[plane_index] = 0;
+      /* Hand the pixel back to whatever the icon was covering, in ITS band --
+       * the capture never recorded it, because the icon won the shared OBJ
+       * z-test here. Only inside the icon's OPAQUE footprint: where the icon
+       * was transparent the real capture already placed the right pixel in the
+       * right band. Ordered after the zero above so a restore into the icon's
+       * own band survives it. */
+      const size_t footprint_index = (size_t)y * raster_width + x;
+      const uint8_t restore_priority = s_hud_restore_prio[footprint_index];
+      if (restore_priority != kActRaiserHudRestoreNone) {
+        uint32_t *restore_plane = (uint32_t *)g_diorama_layer_pixels[
+            ActRaiser_DioramaObjPlaneForPriority(restore_priority)];
+        if (restore_plane)
+          restore_plane[plane_index] = s_hud_restore_argb[footprint_index];
+      }
       if (!last_y1) last_y0 = screen_y;
       if (screen_y + 1 > last_y1) last_y1 = screen_y + 1;
     }

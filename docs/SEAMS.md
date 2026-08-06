@@ -236,6 +236,7 @@ auto-persists SRAM, so a later replay starts from different state and diverges.
 | Palette load | CGRAM writes | CGRAM (15-bit ×256) | "set palette N" | **palette id / table TBD** | 🔴→🟡 |
 | **Action OBJ atlas + effect overlays** | `$02:BC9E`: ROM `$07:8000-$07:9FFF` → VRAM `$2000-$2FFF`, palette `$07:D040-$D09F` → CGRAM `$C0-$EF`, then 256 bytes from `$06:A400 + (selected_magic-1)*$80` → VRAM `$2D40`. `$00:96C3-$96F5`: only for an object with `+$30 & $0040` and an idle descriptor, `(object.+38 & $FF)` selects 128 bytes at `$06:A000+n*$80` → VRAM `$2D80`. | VRAM/CGRAM | "load the shared action atlas and replace reserved effect tiles" | common atlas plus selected-magic window; dynamic `+38` is polymorphic and **not** a universal spell ID (the spell handlers use it as repeat counts) | 🟡 selected-magic mapping and all four spell composition/animation banks are catalogued; unrelated dynamic-overlay values remain to classify |
 | **Action spell host presentation** | game-thread `ActionEffects_CaptureFrame` after authentic scanout → immutable `FrameSlot.action_effects` → pure bounded `ActionEffectRender_Build` → `DrawActionEffects` world overlay before HUD/HD overlays | capability-checked SDL additive untextured geometry | "decorate positively identified action spell actors without changing their gameplay or source art" | shared action-object ABI; explicit resettable observer with actor/phase/pulse clocks; generic geometry + OBJ priority metadata; Magical Fire controller `$0860+$38=1`, exact `$06A0-$0760` cohort, `$07:C000` animation identity, current `+20/+22/+28` and unsigned extents; diorama consumes the exact compositor-published priority-plane depth/rake/bow | 🟡 All four spells implemented against a data-driven rule table (controller kind → slots/roles/phases) with ROM-free capture, deterministic batch, capacity, fail-closed, and flat+diorama projection tests. Magical Fire is MEASURED (pinned to a real WRAM snapshot) and confirmed rendering live; Stardust/Aura/Light rules are TRANSCRIBED from the ROM analysis and unproven against live WRAM — an unrecognised active cohort slot is censused to `[action-fx census]` rather than rendered on a guess, so one cast of each corrects the table. |
+| **Fixed-screen HUD OBJ icon promotion (host, mapped 2026-08-05)** | `ActRaiser_WidescreenHudObjPromote` (actraiser_rtl.c) validates the icon in OAM and claims a `RemoveFromGame` OBJ capture over it; `ActRaiser_HudObjIconRange` publishes the validated slots; `FrameSlot.hud_icon_first/count` carries them to `present.c`, which anchors the icon beside the right HUD group | OAM capture → `g_hud_obj_pixels` host overlay surface | "pin the fixed-screen magic/hourglass icon to the widescreen HUD instead of leaving it at its authentic centre-screen X" | **action magic icon = OAM slots 0-3, tiles `$D4-$D7`, x `$94/$9C`, y `$0B/$13`, attr `$3C` → OBJ priority 3, palette 6 (CGRAM `$E0-$EF`, inside the `$07:D040` atlas palette upload), no flip.** Sim hourglass reuses slots 0-3 with animated tiles; Sky Palace scans for a 2-sprite 16×8 signature because dialog sprites shift its slots | 🟢 promotion + anchoring validated flat and diorama. See the host constraints below — the OAM range is a property of the capture, not a standing fact, and reading it back from `overlayCaptures[Obj]` is how the icon gets lost |
 | Sim-mode object sprite/behavior identity | ROM tables `$01:E099` (behavior/anim data ptrs) + `$01:E7D9` (sprite-frame ptrs), one 16-bit entry per object type — see "Sim-mode object/sprite spawn & OAM-build system" below | not VRAM directly — feeds world record `+00`/`+08`, which downstream OAM code (`ADAD`/`AE6F`) reads | "this object type's behavior and frame-composition asset" | **located 2026-07-01; bases corrected 2026-07-02** | 🟡 identity/assigner/emitter chain mapped; ROM character-upload identity remains to be catalogued |
 | Sim-mode per-frame building/icon update | `$01:8000` (bank 1) — see "Sim-mode dispatch structure" below | VRAM/OAM (downstream, not yet traced) | "update this frame's city/building/icon visuals" | region (`$19`) gates which sub-block runs; several `JSR (abs,X)` tables (`$2920`, `$208E`, `$B420`) select per-building/icon variants | 🔴 (dispatch structure mapped; the actual VRAM writes inside the deep `$018170+` body not yet traced) |
 
@@ -289,6 +290,59 @@ at 256px, so the optimized path draws both raw on the symmetric canvas
 (`repeat=$00`), removing two clears and priority merges per scanline. Direct
 testing on 2026-07-14 confirmed both the full-width raster effect and removal
 of the isolated-repeat performance regression.
+
+### OBJ overlay-capture constraints (host, learned 2026-08-05 the hard way)
+
+Four properties of the PPU overlay-capture API that are invisible at the call
+site and each cost a debugging session:
+
+1. **One capture per source, and the OAM range belongs to the capture.**
+   `PpuSetOverlayCapture` resets `oamFirst`/`oamCount` to 0 as it lands. So any
+   later policy that claims the same source silently drops the earlier policy's
+   OAM range. This is exactly how the selected-magic icon got lost: the promote
+   claims OBJ over slots 0-3, then diorama mode re-claims OBJ as a full-frame
+   scene layer over slots 0-127. Both claims are correct in isolation; the
+   second simply wins.
+2. **Therefore `overlayCaptures[Obj]` cannot answer "which sprites are the HUD
+   icon."** It answers "what claimed the OBJ capture last." Use
+   `ActRaiser_HudObjIconRange` (actraiser_rtl.h), which the promote latches
+   independently of the capture. `present.c` and `dev_tools.c` both read it, so
+   the anchored draw and the inspector hit-test cannot disagree.
+3. **OBJ band index == OAM priority.** ppu.c's priority-split resolve does
+   `band = z >> 14`, and `SPRITE_PRIO_TO_PRIO` puts the OAM priority in those
+   two bits — so band N is the plane the diorama's `kPrioBands` table bound for
+   band N (`kDioramaPlane_ObjN`; band 0 is the primary `kPpuOverlaySource_Obj`).
+   A pixel lands in exactly one band.
+4. **`PpuRasterizeObjRange` must be called BEFORE the scanline loop.** The
+   frame's mid-picture IRQ handlers and HDMA rewrite VRAM and CGRAM as the
+   picture is drawn, so rasterizing after scanout reads whatever tile data the
+   game streamed in next and returns a fully transparent raster — with no error.
+   `sim3d.c` splits `PrepareHudHandoff` (pre-scanout) from
+   `RestoreTownHudPolicy` (post-scanout) for this reason, and
+   `ActRaiser_DioramaHudObjPrepare`/`…Finish` mirror it.
+
+5. **Promoting a sprite leaves a HOLE in whatever it was occluding.** Every
+   captured OBJ pixel competes in ONE shared z-buffer
+   (`overlayBuffers[kPpuOverlaySource_Obj]`, first opaque writer wins, OAM
+   walked in slot order); the per-priority band split happens later, at
+   scanout, on the pixel that already won. So a promoted sprite in the LEADING
+   slots wins every overlap, and the sprite behind it is never captured into
+   any plane at all. Correct on hardware — the promoted sprite is in front.
+   Wrong the instant the host MOVES it: zeroing it out of its band then leaves
+   a hole shaped like it, cut out of the scene. Diagnosed 2026-08-05 as a bite
+   taken out of a level gargoyle that the magic icon overlapped; it needs only
+   an on-screen overlap, so it is independent of the vertical band.
+
+When a capture-policy conflict means the icon has to be separated from captured
+*pixels* rather than by capture *policy*, the pattern is: rasterize the icon's
+own OAM range before scanout, publish it to the flat overlay surface after
+scanout, clear those pixels from the scene plane that holds the icon's priority
+band, **and restore what it was covering** — replay the same first-writer-wins
+rule over its footprint with the promoted slots removed, keeping each restored
+pixel's colour and the priority band it belongs to, then write those back.
+`ActRaiser_DioramaHudObjPrepare`/`…Finish` do exactly this. The restore does not
+replay the hardware per-line sprite limits, so it fails toward showing a sprite
+the PPU would have dropped rather than toward a hole.
 
 > **The asset-substitution seam is the loaders, not the draws.** When you find the routines that
 > copy graphics ROM→VRAM and select animation frames, capture the table index they use — that

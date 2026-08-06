@@ -217,7 +217,7 @@ Two-byte entries per town.
 | $7E:0299 | 9 | Magic inventory |
 | $7E:02A2 | 9 | Offerings inventory |
 | $7E:02AB | 1 | Number of lives (max-HP-style grant handler `$01:9CBD` INCs it) |
-| $7E:02AC | 1 | Selected/equipped magic ID (`0` none, `1..4` Fire/Stardust/Aura/Light); save-backed at SRAM `$145D`, while the high bit of `$0299-$029C` marks the inventory slot containing that selection |
+| $7E:02AC | 1 | Selected/equipped magic ID (`0` none, `1..4` Fire/Stardust/Aura/Light); save-backed at SRAM `$145D`, while the high bit of `$0299-$029C` marks the inventory slot containing that selection. **`$02AC = 0` does not suppress the HUD icon's sprites:** the game still emits OAM slots 0-3 with the complete icon signature (tiles `$D4-$D7`, x `$94/$9C`, y `$0B/$13`, attr `$3C`), but `$02:BC9E` leaves the VRAM `$2D40` window zeroed, so the icon renders as nothing. Measured 2026-08-05. Any check keyed on the OAM signature therefore "succeeds" on a blank icon — validate against VRAM `$2D40` (or `$02AC`) if you need to know it is actually *visible* |
 
 **SRAM correspondence (USA ROM, 2026-07-16).** The persistent status block is
 linear: for `$0282-$02AC`, the corresponding save offset is generally WRAM +
