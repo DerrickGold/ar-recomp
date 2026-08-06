@@ -29,7 +29,10 @@ static DevToolsContext CurrentContext(void) {
     .hud_bg_texture = g_hud_bg_texture,
     .hud_obj_texture = g_hud_obj_texture,
     .ppu = g_ppu,
-    .framebuffer_pixels = g_pixels,
+    .framebuffer_pixels = g_pixels + (size_t)kPpuObjApron * 4,
+    .framebuffer_pitch =
+        (g_snes_width + kPpuObjApron * 2) * 4,
+    .obj_apron = kPpuObjApron,
     .hud_bg_pixels = g_hud_bg_pixels,
     .hud_obj_pixels = g_hud_obj_pixels,
     .diorama_layer_pixels = g_diorama_layer_pixels,

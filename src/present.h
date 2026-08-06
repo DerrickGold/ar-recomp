@@ -47,7 +47,7 @@ enum {
    * not by snes_width; see IJ1 in diorama_scroll_math.c for the artifact that
    * mistake produced. Cross-checked by FrameSlot_Capture's _Static_assert
    * against the real constant. */
-  kFrameSlotLayerTextureWidth = 448,  /* kPpuSurfaceWidth */
+  kFrameSlotLayerTextureWidth = 576,  /* kPpuSurfaceWidth (448 + 64*2) */
   /* The authentic SNES screen width, mirroring actraiser_game.h's
    * kActRaiserAuthenticWidth for the same D6 reason as the two constants above:
    * present-time code must not include actraiser_game.h, which declares g_ram and
@@ -131,6 +131,12 @@ typedef struct FrameSlot {
    * x = -ws_extra. Zero on every non-diorama frame, which is what keeps the
    * flat presentation path (which assumes row 0) correct by construction. */
   int ws_extra_top;
+  /* Columns of RESOLVE apron each captured surface carries per side beyond the
+   * displayed span. Distinct from ws_extra, which is DISPLAY margin: the apron
+   * is never shown as extra world, it is headroom so a sprite is fully
+   * resolved before it reaches the visible plane edge instead of being clipped
+   * as it crosses. Screen x = 0 sits at surface column obj_apron + ws_extra. */
+  int obj_apron;
   int hud_scale_percent;
 
   /* Diorama gate (D14 — Diorama_IsActiveThisFrame() result for this frame). */

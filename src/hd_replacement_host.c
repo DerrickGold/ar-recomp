@@ -195,7 +195,15 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
   if (!g_ppu) return;
 
   const size_t pitch = (size_t)g_snes_width * kArgbBytesPerPixel;
-  PpuBeginDrawing(g_ppu, g_pixels, pitch, 0);
+  /* The main framebuffer is bound APRON-WIDE: it doubles as the diorama's
+   * backdrop plane, and every other diorama plane is apron-wide, so a narrow
+   * backdrop would composite offset from the layers by the apron. The
+   * compositor centres the scanline span in it (PpuSurfaceApron), so screen
+   * x = 0 lands at column apron + ws_extra. Readers of g_pixels therefore
+   * offset by kPpuObjApron columns -- see present.c's flat upload. */
+  const size_t frame_pitch =
+      (size_t)(g_snes_width + kPpuObjApron * 2) * kArgbBytesPerPixel;
+  PpuBeginDrawing(g_ppu, g_pixels, frame_pitch, 0);
   PpuClearOverlayBindings(g_ppu);
   PpuBindOverlaySurface(
       g_ppu, kPpuOverlaySource_Bg3,

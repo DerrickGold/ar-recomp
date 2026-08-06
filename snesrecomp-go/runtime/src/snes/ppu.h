@@ -49,7 +49,7 @@ enum {
   // sprite. Deliberately NOT folded into kPpuBufWidth: widening the line
   // buffers would pay ClearBackdrop memsets over apron columns on every line
   // of every frame for room only the capture path uses.
-  kPpuObjApron = 0,
+  kPpuObjApron = 64,
   // THE SURFACE WIDTH: allocation width of every host ARGB overlay/plane
   // surface, and therefore the denominator every normalized-U computation
   // divides by. Distinct from kPpuBufWidth on purpose -- see the apron note.
@@ -647,6 +647,18 @@ bool PpuGetPartBounds(const PpuObjPart *parts, int count,
 bool PpuRasterizeParts(Ppu *ppu, const PpuObjPart *parts, int count,
                        const PpuObjRangeBounds *bounds, uint32_t *pixels,
                        int width, int height, size_t pitch);
+
+// Columns of apron a surface bound at `pitch` carries per side. Derived from
+// the pitch rather than assumed, because the apron is a RUNTIME bind decision
+// (diorama binds wide, flat binds narrow) while kPpuObjApron is only the
+// compile-time capacity. Content for screen x lands at column
+// x + PpuSurfaceOriginX(ppu, pitch).
+static inline int PpuSurfaceApron(const Ppu *ppu, size_t pitch) {
+  int width = (int)(pitch / sizeof(uint32_t));
+  int scanline_span = kPpuXPixels + ppu->extraLeftRight * 2;
+  int apron = (width - scanline_span) / 2;
+  return apron > 0 ? apron : 0;
+}
 
 // Row within the render target that authentic scanline 0 occupies. The host
 // allocates kPpuBufHeight rows and crops what it wants around this origin.

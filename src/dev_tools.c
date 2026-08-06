@@ -161,7 +161,8 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
   fprintf(file, "P6\n%d %d\n255\n", visible_width, context->snes_height);
   for (int y = 0; y < context->snes_height; y++) {
     const uint8_t *row = context->framebuffer_pixels +
-        ((size_t)y * context->snes_width + visible_x) * kArgbBytesPerPixel;
+        (size_t)y * context->framebuffer_pitch +
+        (size_t)visible_x * kArgbBytesPerPixel;
     for (int x = 0; x < visible_width; x++) {
       fputc(row[x * kArgbBytesPerPixel + 2], file);
       fputc(row[x * kArgbBytesPerPixel + 1], file);
@@ -198,12 +199,13 @@ void DevTools_TakeFullSnapshot(const DevToolsContext *context) {
 }
 
 static bool WritePngFromArgb(const char *path, const uint8_t *argb_pixels,
-                             int width, int height) {
+                             int width, int height, size_t source_pitch) {
   const size_t row_bytes = (size_t)width * kArgbBytesPerPixel;
+  if (!source_pitch) source_pitch = row_bytes;
   uint8_t *rgba = malloc(row_bytes * (size_t)height);
   if (!rgba) return false;
   for (int y = 0; y < height; y++) {
-    const uint8_t *source = argb_pixels + (size_t)y * row_bytes;
+    const uint8_t *source = argb_pixels + (size_t)y * source_pitch;
     uint8_t *destination = rgba + (size_t)y * row_bytes;
     for (int x = 0; x < width; x++) {
       destination[0] = source[2];
@@ -250,8 +252,14 @@ void DevTools_DumpDioramaLayers(const DevToolsContext *context) {
     char path[344];
     snprintf(path, sizeof(path), "%s/%s_gf%u.png",
              directory, layers[i].name, game_frame);
+    /* Dump the FULL apron-wide surface, not just the displayed span: the whole
+     * point of the apron is content resolved beyond the display edge, and a
+     * dump cropped to the display window could not show it. */
     if (WritePngFromArgb(
-            path, pixels, context->snes_width, kActRaiserAuthenticHeight))
+            path, pixels, context->snes_width + context->obj_apron * 2,
+            kActRaiserAuthenticHeight,
+            (size_t)(context->snes_width + context->obj_apron * 2) *
+                kArgbBytesPerPixel))
       dumped_count++;
   }
 
@@ -259,7 +267,8 @@ void DevTools_DumpDioramaLayers(const DevToolsContext *context) {
   snprintf(backdrop_path, sizeof(backdrop_path), "%s/backdrop_gf%u.png",
            directory, game_frame);
   if (WritePngFromArgb(backdrop_path, context->framebuffer_pixels,
-                       context->snes_width, kActRaiserAuthenticHeight))
+                       context->snes_width, kActRaiserAuthenticHeight,
+                       (size_t)context->framebuffer_pitch))
     dumped_count++;
   fprintf(stderr,
           "[diorama] dumped %d layer PNGs to %s/ (gf=%u, w=%d)\n",
