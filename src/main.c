@@ -389,9 +389,13 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
     sim.town_canvas_serial = SimTownCanvas_Serial();
     Sim3D_LogViewTransition(&sim);
     SceneInspector_SetSimFrameData(&sim);
+    /* g_pixels is bound apron-wide; offset past the apron so the trace sees
+     * the authentic frame at column 0, as it always has. */
     SimRenderMetadata_TraceFrame(
-        (uint32)snes_frame_counter, &sim, g_pixels,
-        g_snes_width, g_snes_height, g_snes_width * 4);
+        (uint32)snes_frame_counter, &sim,
+        g_pixels + (size_t)kPpuObjApron * 4,
+        g_snes_width, g_snes_height,
+        (g_snes_width + kPpuObjApron * 2) * 4);
   }
   /* AR_DIORAMA_DUMP_GF=<gf>[,<gf>...]: arm the Shift+D layer dump from a replay
    * instead of the keyboard, so a diorama frame can be inspected headlessly.

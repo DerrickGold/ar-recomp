@@ -1755,7 +1755,9 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
   PpuClearOverlayRenderLine(ppu, y);
   if (PPU_forcedBlank(ppu)) {
     uint8 *dst = &ppu->renderBuffer[(size_t)PpuOutputRow(ppu, y) * ppu->renderPitch];
-    size_t n = sizeof(uint32) * (256 + ppu->extraLeftRight * 2);
+    /* Clear the WHOLE bound row, apron included: a forced-blank line must not
+     * leave last frame's apron content standing beside a blanked centre. */
+    size_t n = ppu->renderPitch;
     memset(dst, 0, n);
     return;
   }
@@ -1795,7 +1797,14 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
   int composite_left = ppu->extraLeftCur;
   if (ppu->wsHudSplitHeight && y < ppu->wsHudSplitHeight)
     composite_left = ppu->extraLeftRight;
-  dst += (ppu->extraLeftRight - composite_left);
+  /* + the apron so the scanline span sits CENTRED in a wider surface, matching
+   * where PpuWriteOverlayRenderLine's pitch-derived texture_extra puts the
+   * captured layers. Without it the backdrop plane (this buffer) would be
+   * flush-left while every captured plane was centred, and the diorama would
+   * composite them offset from each other by the apron. Zero when the surface
+   * is bound at scanline width, which is every non-diorama bind. */
+  dst += ppu->extraLeftRight - composite_left +
+         PpuSurfaceApron(ppu, ppu->renderPitch);
 
   uint32 windex = 0;
   do {

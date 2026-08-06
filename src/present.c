@@ -647,12 +647,18 @@ void PresentUpload(const FrameSlot *slot) {
      * vertical margin, and their row 0 IS the top of that band -- so the upload
      * covers snes_height + ws_extra_top rows starting at row 0. */
     s_diorama_uploaded_plane_mask = Diorama_Upload(
-        g_diorama_textures, pixels, slot->snes_width,
+        g_diorama_textures, pixels, slot->snes_width + slot->obj_apron * 2,
         slot->snes_height + slot->ws_extra_top, upload_mask);
   } else {
     s_diorama_uploaded_plane_mask = 0;
     SDL_Rect upload = { 0, 0, slot->snes_width, slot->snes_height };
-    SDL_UpdateTexture(g_texture, &upload, g_pixels, slot->snes_width * 4);
+    /* g_pixels is bound apron-wide (it doubles as the diorama backdrop plane),
+     * so the authentic frame starts kPpuObjApron columns in. Offset the source
+     * and use the real pitch; the upload rect is unchanged. */
+    SDL_UpdateTexture(
+        g_texture, &upload,
+        g_pixels + (size_t)slot->obj_apron * 4,
+        (size_t)(slot->snes_width + slot->obj_apron * 2) * 4);
   }
 
   /* A7 (followup doc): this used to sit behind the diorama branch's early
@@ -4475,7 +4481,7 @@ void PresentComposite(const FrameSlot *slot,
                         slot->bg2_margin_source, kFrameSlotLayerTextureWidth,
                         &bg2_valid_x0, &bg2_valid_x1);
     DioramaProjection action_projection;
-    if (!Diorama_Composite(g_renderer, slot->snes_width,
+    if (!Diorama_Composite(g_renderer, slot->snes_width + slot->obj_apron * 2,
                            slot->snes_height + slot->ws_extra_top,
                            slot->pixel_aspect, slot->ignore_aspect_ratio,
                            slot->visible_width, g_diorama_textures, pixels,

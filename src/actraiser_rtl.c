@@ -1720,7 +1720,12 @@ void ActRaiserDrawPpuFrame(void) {
       extern int g_ws_extra_top;
       extern int g_ws_extra_bottom;
       int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
-      size_t pitch = (size_t)width * 4;
+      /* Apron-wide, matching the main framebuffer bind: the capture rect stays
+       * scanline-bounded (the scanline path cannot fill apron columns), but the
+       * wider pitch makes PpuWriteOverlayRenderLine's texture_extra centre the
+       * captured span, leaving the apron columns free for capture-time part
+       * rasterization to fill. */
+      size_t pitch = (size_t)(width + kPpuObjApron * 2) * 4;
       /* Capture rectangles are expressed in AUTHENTIC screen space, so
        * the vertical band starts at a negative y exactly as the side
        * margins start at -g_ws_extra. The PPU maps that onto row 0 of the
@@ -2024,8 +2029,11 @@ void ActRaiserDrawPpuFrame(void) {
     extern uint8_t g_pixels[];
     extern int g_ws_extra;
     int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+    /* g_pixels is bound apron-wide; the authentic frame starts kPpuObjApron
+     * columns in. Offset the base and pass the real pitch. */
     Sim3D_FinishCapture(
-        g_pixels, width * 4,
+        g_pixels + (size_t)kPpuObjApron * 4,
+        (width + kPpuObjApron * 2) * 4,
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
     /* After scanout (the diorama planes only hold this frame's sprites now) and
      * before FrameSlot_Capture publishes them to the present thread. */

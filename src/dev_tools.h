@@ -19,7 +19,14 @@ typedef struct DevToolsContext {
   SDL_Texture *hud_bg_texture;
   SDL_Texture *hud_obj_texture;
   Ppu *ppu;
+  /* Points at the AUTHENTIC frame's first column: g_pixels is bound apron-wide
+   * (it doubles as the diorama backdrop plane), so the host offsets past the
+   * apron. framebuffer_pitch is the real row stride, which is therefore wider
+   * than snes_width * 4. */
   const uint8_t *framebuffer_pixels;
+  int framebuffer_pitch;
+  /* Resolve apron per side on the captured layer surfaces (see FrameSlot). */
+  int obj_apron;
   const uint8_t *hud_bg_pixels;
   const uint8_t *hud_obj_pixels;
   uint8_t *const *diorama_layer_pixels;
