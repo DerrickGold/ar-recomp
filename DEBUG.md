@@ -876,11 +876,34 @@ show the frozen `$0088` against the advancing host frame:
    deliberately a raw dump and not a verdict, since a first cut that classified
    "uniform row" as filler reported 100% filler (an all-sky BG1 row is uniform
    too). Design and the full trap list: rendering-engine.md §13i.
+2d. **Stage the SAVE STATE a repro needs, without touching the player's save**:
+   `AR_SAVE_NATIVE_PATH=<copy.srm>` redirects the native SRAM backend, and an
+   `AR_SETTINGS_PATH` ini with `save_edit_armed = On` plus the staged
+   `kSettingCat_Save` keys applies boot edits into that copy
+   (`[save-editor] boot edits applied for this session`). Copy the .srm first;
+   the edit path is a real write. Worked example — the selected-magic HUD icon
+   is INVISIBLE in every checked-in `.rec` fixture, because they all reach
+   Fillmore with empty magic slots and `$02:BC9E` then leaves the icon's VRAM
+   `$2D40` window zeroed (ram-map `$02AC`). The OAM signature still validates,
+   so a promote/anchor check "passes" against an icon made entirely of
+   transparent pixels — most of a session was lost to that. Stage it with:
+   `save_edit_armed = On`, `save_magic_slot_1 = Magical Fire`,
+   `save_equipped_magic = Magical Fire`.
 3. **Compare NUMERICALLY, never by eye**: slice pixel rows/columns in python
    (`px[(y*w+x)*3]`...). HARD LESSON: pillarboxed shots with dark world content were
    repeatedly misread as widescreen when eyeballing PNGs — a whole survey phase was
    mis-verified that way. Margin checks = count nonblack margin rows + spot-sample
    exact pixel values at the seam columns (x = extra-1, extra, extra+256-1, ...).
+   3b. **Sweep the WHOLE frame, not the region you expect the change in.** A
+   fix that MOVES something leaves the rest of the pipeline pointing at the old
+   place, and that residue lands somewhere you are not cropping. The HUD-icon
+   anchoring fix (2026-08-05) was verified against the top 440 output rows —
+   correct, and it missed a shader-effect artifact ~500 rows lower that the user
+   found by looking at the whole screenshot. For "did this move X?" the cheap
+   decisive tool is a numeric A/B DIFF of the full frame with the feature
+   toggled (`np.abs(on-off).sum(2) > threshold`, then print the differing
+   bbox in authentic coords) — it reports every place the change reached,
+   including the ones you did not predict.
 4. **Faithful byte-identity gate** for any renderer/engine change: capture the
    deterministic attract frame (`AR_HEADLESS=1 AR_QUIT_FRAMES=1300 AR_SHOT_AT_GF=900`)
    before and after; `cmp` must be identical when the feature is off. (The WRAM
@@ -1719,6 +1742,7 @@ SNESREF_MX_OUT / AR_MX_OUT + tools/oracle/diff_mx.py  snes9x CPU m/x ground-trut
 AR_TRAPFN=<fnsubstr>   who entered this (garbage) variant: call stack + 40-block m-path
 AR_DISPMISSALL=1       unregistered handler (grep -v 00896f)     (then register in cfg + regen)
 AR_MXCHECK=1           emitter m/x analysis wrong on direct calls
+AR_OBJSLOTLOG=1        object -> OAM-slot map, one line per emitted action object per frame (ActRaiser_BuildObjectSprites): `obj=$XXXX slot=N screen=(x,y) anim=$BB:AAAA comps=N`. THE tool for "which object owns these OAM slots / what is this sprite on screen" — the OAM alone cannot answer it. Found the magic-swap flourish (obj $10E0, anim $06:A9C1) in one run; its screen= column also gives an object's whole flight path when grepped over frames
 AR_WATCHOBJ=<addr>     who writes this object slot (also fires on indirect + DMA writes, tagged [wobj-ind]/[wobj-dma])
 AR_WATCH16=<val>       who writes this 16-bit value (also fires on indirect + DMA writes, tagged [watch16-ind]/[watch16-dma])
 AR_MXCHECK / AR_CALLMX + generated dispatch switch  verify wrong-width routing (§5)

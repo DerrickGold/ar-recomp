@@ -1483,7 +1483,17 @@ int main(int argc, char **argv) {
              * not a uniform act number (e.g. Kasandora act 2 is 0303). Press
              * from a transition-capable state; see docs/manual.md + docs/SEAMS.md. */
             (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
-          } else if (event.key.key == SDLK_F2) {
+          } else if (event.key.key == SDLK_F2 || event.key.key == SDLK_C) {
+            /* C is the one-hand alias for F2, deliberately NOT gated on
+             * `!event.key.repeat`: holding it fires on every key repeat, which
+             * is how you sweep a glitch that only shows for a frame or two
+             * without knowing its game-frame up front. Each press is still a
+             * full snapshot (~21 MB of .ppm alone), so a long hold writes GBs
+             * — for a REPLAY prefer the deterministic sweep, which captures
+             * exact frames and costs nothing to repeat:
+             *   AR_INPUT_REPLAY=<rec> AR_SHOT_EVERY=1 AR_SHOT_FROM=a AR_SHOT_TO=b
+             *   AR_INPUT_REPLAY=<rec> AR_VRAMDUMP_GF=g1,g2,...
+             * Use the key to find the moment, those to pin it. */
             /* On-demand FULL snapshot — each press writes a unique set of files
              * tagged with the game-frame: WRAM + VRAM + CGRAM + OAM (via
              * ActRaiser_FullSnapshot) plus a .ppm screenshot. Lets several

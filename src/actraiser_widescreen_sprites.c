@@ -590,6 +590,16 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   definition_address++;
   ws_dp16w(cpu, kSpriteDp_ComponentCount, component_count);
 
+  if (getenv("AR_OBJSLOTLOG")) {
+    fprintf(stderr,
+            "[objslot] gf=%u obj=$%04X slot=%u screen=(%d,%d) "
+            "anim=$%02X:%04X comps=%u\n",
+            ActRaiser_ReadWram16(kActRaiserWram_GameFrame), object_address,
+            (unsigned)(oam_offset >> 2), (int)(int16)screen_origin_x,
+            (int)(int16)screen_origin_y, definition_bank, definition_address,
+            component_count);
+  }
+
   int margin_left = 0;
   int margin_right = 0;
   int margin_top = 0;
