@@ -176,7 +176,7 @@ bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
   if ((unsigned)source >= kPpuOverlaySource_Count ||
       (pixels && (!pitch || pitch % sizeof(uint32_t) != 0 ||
                   pitch / sizeof(uint32_t) < kPpuXPixels ||
-                  pitch / sizeof(uint32_t) > kPpuBufWidth)))
+                  pitch / sizeof(uint32_t) > kPpuSurfaceWidth)))
     return false;
   ppu->overlayRenderBuffer[source] = pixels;
   ppu->overlayRenderPitch[source] = pixels ? (uint32_t)pitch : 0;
@@ -231,7 +231,7 @@ bool PpuBindMode7OverlaySurface(Ppu *ppu, uint8_t *pixels, size_t pitch,
   if (pixels && (scale < 1 || scale > 4 || !pitch ||
                  pitch % sizeof(uint32_t) != 0 ||
                  pitch / sizeof(uint32_t) < (size_t)kPpuXPixels * scale ||
-                 pitch / sizeof(uint32_t) > (size_t)kPpuBufWidth * scale))
+                 pitch / sizeof(uint32_t) > (size_t)kPpuSurfaceWidth * scale))
     return false;
   ppu->m7OverlayBuffer = pixels;
   ppu->m7OverlayPitch = pixels ? (uint32_t)pitch : 0;

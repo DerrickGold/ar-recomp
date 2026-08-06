@@ -35,11 +35,11 @@ extern SDL_Texture *g_hud_obj_texture;
 extern int g_snes_width;
 extern int g_snes_height;
 extern uint8_t g_pixels[
-    kPpuBufWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
+    kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_bg_pixels[
-    kPpuBufWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
+    kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_obj_pixels[
-    kPpuBufWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
+    kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
 extern bool g_ws_active;
 extern int g_ws_extra;
 extern Ppu *g_ppu;
@@ -135,14 +135,14 @@ void HdReplacementHost_BindSurfaces(void) {
     if (entry->plane == kHdPlane_Mode7 && entry->pixels &&
         !g_m7_overlay_pixels && g_renderer) {
       const size_t capacity_pitch =
-          (size_t)kPpuBufWidth * kHdMode7Scale * kArgbBytesPerPixel;
+          (size_t)kPpuSurfaceWidth * kHdMode7Scale * kArgbBytesPerPixel;
       const size_t active_pitch =
           (size_t)g_snes_width * kHdMode7Scale * kArgbBytesPerPixel;
       g_m7_overlay_pixels = calloc(
           1, capacity_pitch * kActRaiserAuthenticHeight * kHdMode7Scale);
       g_m7_texture = SDL_CreateTexture(
           g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-          kPpuBufWidth * kHdMode7Scale,
+          kPpuSurfaceWidth * kHdMode7Scale,
           g_snes_height * kHdMode7Scale);
       if (g_m7_overlay_pixels && g_m7_texture) {
         SDL_SetTextureBlendMode(g_m7_texture, SDL_BLENDMODE_BLEND);
@@ -169,7 +169,7 @@ void HdReplacementHost_BindSurfaces(void) {
         s_overlay_pixels[source])
       continue;
     s_overlay_pixels[source] = calloc(
-        1, (size_t)kPpuBufWidth * kArgbBytesPerPixel *
+        1, (size_t)kPpuSurfaceWidth * kArgbBytesPerPixel *
             kHostDisplayFramebufferHeight);
     if (s_overlay_pixels[source])
       PpuBindOverlaySurface(

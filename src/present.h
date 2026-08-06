@@ -38,7 +38,8 @@ enum {
   kFrameSlotOverlay_Bg4 = 3,
   kFrameSlotOverlay_Obj = 4,
   kFrameSlotOverlaySourceCount = 5,  /* kPpuOverlaySource_Count */
-  /* Mirrors ppu.h's kPpuBufWidth (256 + 96*2), for the same D6 reason as the
+  /* Mirrors ppu.h's kPpuSurfaceWidth (the SURFACE allocation width, which is
+   * kPpuBufWidth plus the apron per side), for the same D6 reason as the
    * overlay enum above: present-time code must not include ppu.h. It is the
    * ALLOCATED width of every layer texture, and therefore the denominator that
    * normalizes the U axis — the capture occupies only the leading snes_width
@@ -46,7 +47,7 @@ enum {
    * not by snes_width; see IJ1 in diorama_scroll_math.c for the artifact that
    * mistake produced. Cross-checked by FrameSlot_Capture's _Static_assert
    * against the real constant. */
-  kFrameSlotLayerTextureWidth = 448,  /* kPpuBufWidth */
+  kFrameSlotLayerTextureWidth = 448,  /* kPpuSurfaceWidth */
   /* The authentic SNES screen width, mirroring actraiser_game.h's
    * kActRaiserAuthenticWidth for the same D6 reason as the two constants above:
    * present-time code must not include actraiser_game.h, which declares g_ram and
@@ -61,7 +62,8 @@ enum {
    * texture, which is fixed at 448 and is the U-axis denominator).
    *
    * Cross-checked against kActRaiserAuthenticWidth by a _Static_assert in
-   * frame_slot.c, the way kFrameSlotLayerTextureWidth is against kPpuBufWidth. */
+   * frame_slot.c, the way kFrameSlotLayerTextureWidth is against
+   * kPpuSurfaceWidth. */
   kFrameSlotAuthenticWidth = 256,  /* kActRaiserAuthenticWidth */
 };
 enum { kFrameSlotOverlayFlag_RemoveFromGame = 1 };

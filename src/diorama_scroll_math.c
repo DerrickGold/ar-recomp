@@ -83,13 +83,13 @@ DioramaScrollDelta ComputeDioramaScrollDeltaAt(
   /* IJ1: the U denominator is the TEXTURE width, not the visible width.
    *
    * These deltas are consumed as normalized UV offsets into the diorama layer
-   * textures, which are allocated kPpuBufWidth (448) wide — the widescreen
+   * textures, which are allocated kPpuSurfaceWidth (448) wide — the widescreen
    * headroom — with the capture occupying only the leading snes_width columns.
    * diorama.c normalizes its U window the same way (uv_u1 = snes_width /
-   * kPpuBufWidth), and its shader uniforms pass the U texel size as
-   * 1/kPpuBufWidth. So one source column is 1/448 of U, NOT 1/snes_width.
+   * kPpuSurfaceWidth), and its shader uniforms pass the U texel size as
+   * 1/kPpuSurfaceWidth. So one source column is 1/448 of U, NOT 1/snes_width.
    *
-   * Dividing by snes_width made every horizontal shift kPpuBufWidth/snes_width
+   * Dividing by snes_width made every horizontal shift kPpuSurfaceWidth/snes_width
    * too large — 1.75x with widescreen off. That is why interpolation jittered
    * during STEADY walking, not just on velocity changes: at t->1 the displayed
    * camera sat at P + 1.75*delta, while the next tick's t=0 lands at

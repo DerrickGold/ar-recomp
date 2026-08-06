@@ -1180,7 +1180,7 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
                               float blur_radius,
                               int bg2_valid_x0, int bg2_valid_x1) {
   if (!bg2_texture) return;
-  float uv_u1 = (float)snes_width / (float)kPpuBufWidth;
+  float uv_u1 = (float)snes_width / (float)kPpuSurfaceWidth;
   /* Same live report: a visible lighter/garbage-colored strip appeared at
    * the screen's right edge. Root cause: the blur shader samples texels up
    * to `radius` away from each fragment (src/shaders/blur.frag.glsl) —
@@ -1208,10 +1208,10 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
    * off, the original expression runs unchanged. */
   float u0, u1;
   if (g_settings.diorama_margin_fix) {
-    DioramaSkyboxUvRange(kPpuBufWidth, bg2_valid_x0, bg2_valid_x1,
+    DioramaSkyboxUvRange(kPpuSurfaceWidth, bg2_valid_x0, bg2_valid_x1,
                          blur_radius, &u0, &u1);
   } else {
-    float margin_u = (blur_radius + 1.0f) / (float)kPpuBufWidth;
+    float margin_u = (blur_radius + 1.0f) / (float)kPpuSurfaceWidth;
     u0 = margin_u;
     u1 = uv_u1 - margin_u;
     if (u1 < u0) u1 = u0;  /* degenerate guard for a pathologically narrow capture */
@@ -1239,7 +1239,7 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
   bool blur = SkyboxBlurEnabled(renderer);
   if (blur) {
     BlurUniforms u = {
-      1.0f / (float)kPpuBufWidth, 1.0f / (float)kPpuBufHeight,
+      1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight,
       blur_radius, 0.0f,
     };
     SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
@@ -1551,9 +1551,9 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
    * width and comfortably exceeds one tick of camera motion at walking speed
    * (a few px), so a normal shift never saturates. */
   const float slack_px = interpolating ? kInterpUvSlackPx : 0.0f;
-  float uv_u0 = slack_px / (float)kPpuBufWidth;
-  float uv_u1 = ((float)snes_width - slack_px) / (float)kPpuBufWidth;
-  float uv_slack = slack_px / (float)kPpuBufWidth;
+  float uv_u0 = slack_px / (float)kPpuSurfaceWidth;
+  float uv_u1 = ((float)snes_width - slack_px) / (float)kPpuSurfaceWidth;
+  float uv_slack = slack_px / (float)kPpuSurfaceWidth;
   /* V now divides by the TEXTURE height the way U always divided by the
    * texture width. The old form (`1 - slack/tex_h`) silently assumed the
    * texture was exactly as tall as its content, which stopped being true once
@@ -1663,7 +1663,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     memcpy(out_projection->matrix, mvp, sizeof(mvp));
     out_projection->aspect_x = aspect_x;
     out_projection->height_scale = height_scale;
-    out_projection->texture_width = kPpuBufWidth;
+    out_projection->texture_width = kPpuSurfaceWidth;
     /* The ALLOCATED height, matching texture_width's allocated width, because
      * Diorama_ProjectCapturedPoint divides a texture row by this to get V and
      * the uv_v window above is now expressed in the same allocated space. */
@@ -1976,7 +1976,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     SDL_Vertex *draw_verts = verts;
     if (used_ss) {
       memcpy(ss_verts, verts, (size_t)nv * sizeof(ss_verts[0]));
-      float u_scale = (float)kPpuBufWidth / (float)snes_width;
+      float u_scale = (float)kPpuSurfaceWidth / (float)snes_width;
       float v_scale = (float)kPpuBufHeight / (float)snes_height;
       for (int v = 0; v < nv; v++) {
         ss_verts[v].tex_coord.x *= u_scale;
@@ -2002,7 +2002,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       bool shadow_blur = ShadowBlurEnabled(renderer);
       if (shadow_blur) {
         BlurUniforms u = {
-          1.0f / (float)kPpuBufWidth, 1.0f / (float)kPpuBufHeight, 3.0f, 0.0f,
+          1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight, 3.0f, 0.0f,
         };
         SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
         SDL_SetGPURenderState(renderer, g_blur_state);
@@ -2020,7 +2020,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * loses to the other. */
     if (rim_light) {
       RimLightUniforms u = {
-        1.0f / (float)kPpuBufWidth, 1.0f / (float)kPpuBufHeight, 0.33f, 0.0f,
+        1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight, 0.33f, 0.0f,
       };
       SDL_SetGPURenderStateFragmentUniforms(g_rim_light_state, 0, &u, sizeof(u));
       SDL_SetGPURenderState(renderer, g_rim_light_state);
@@ -2033,7 +2033,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
        * plane edge once a shift saturated). Use layer_u0/u1/v0/v1 directly so
        * the two can no longer disagree. */
       DofEdgeUniforms u = {
-        1.0f / (float)kPpuBufWidth, 1.0f / (float)kPpuBufHeight, dof_radius,
+        1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight, dof_radius,
         layer_u0, layer_u1,
         layer_v0, layer_v1,
         want_edge ? 2.0f : 0.0f, 0.0f,

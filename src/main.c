@@ -112,11 +112,11 @@ int g_snes_width = kActRaiserAuthenticWidth,
 _Static_assert(kHostDisplayFramebufferHeight >= kPpuBufHeight,
                "frame surfaces must hold every row the PPU can render");
 uint8_t g_pixels[
-    kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 uint8_t g_hud_bg_pixels[
-    kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 uint8_t g_hud_obj_pixels[
-    kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 
 /* Diorama per-plane capture buffers, indexed by kDioramaPlane_* (engine
  * sources = the priority-0 remainder of each layer, appended entries = the
@@ -150,13 +150,13 @@ static void CreateDioramaTextures(void) {
    * each frame; Diorama_Composite's UV window is expressed against these
    * allocated dimensions. */
   uint8_t *zero_fill =
-      calloc(1, (size_t)kPpuBufWidth * kPpuBufHeight * 4);
+      calloc(1, (size_t)kPpuSurfaceWidth * kPpuBufHeight * 4);
   for (int i = 0; i < kDioramaPlane_Count; i++) {
     if (i == kPpuOverlaySource_Bg4)
       continue;
     g_diorama_textures[i] = SDL_CreateTexture(
         g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kPpuBufWidth, kPpuBufHeight);
+        kPpuSurfaceWidth, kPpuBufHeight);
     if (!g_diorama_textures[i])
       continue;
     SDL_SetTextureBlendMode(g_diorama_textures[i],
@@ -165,7 +165,7 @@ static void CreateDioramaTextures(void) {
     SDL_SetTextureScaleMode(g_diorama_textures[i], SDL_SCALEMODE_NEAREST);
     if (zero_fill)
       SDL_UpdateTexture(g_diorama_textures[i], NULL, zero_fill,
-                        kPpuBufWidth * 4);
+                        kPpuSurfaceWidth * 4);
   }
   free(zero_fill);
 }
@@ -951,7 +951,7 @@ int main(int argc, char **argv) {
 
     g_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kPpuBufWidth, g_snes_height);
+      kPpuSurfaceWidth, g_snes_height);
     if (!g_texture) Die("SDL_CreateTexture failed");
     /* The base framebuffer is opaque: the PPU writes RGB with the alpha byte
      * left 0 (see ppu_old.c). SDL2 defaulted new textures to BLENDMODE_NONE so
@@ -967,10 +967,10 @@ int main(int argc, char **argv) {
 
     g_hud_bg_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kPpuBufWidth, g_snes_height);
+      kPpuSurfaceWidth, g_snes_height);
     g_hud_obj_texture = SDL_CreateTexture(g_renderer,
       SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kPpuBufWidth, g_snes_height);
+      kPpuSurfaceWidth, g_snes_height);
     if (!g_hud_bg_texture || !g_hud_obj_texture)
       Die("SDL_CreateTexture for HUD overlay failed");
     SDL_SetTextureBlendMode(g_hud_bg_texture, SDL_BLENDMODE_BLEND);

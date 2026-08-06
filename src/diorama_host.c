@@ -46,11 +46,11 @@ void Diorama_OnModeChanged(void) {
 
   HostDisplay_ResolveVideoGeometry(false);
   memset(g_pixels, 0,
-         kPpuBufWidth * 4 * kHostDisplayFramebufferHeight);
+         kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
   memset(g_hud_bg_pixels, 0,
-         kPpuBufWidth * 4 * kHostDisplayFramebufferHeight);
+         kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
   memset(g_hud_obj_pixels, 0,
-         kPpuBufWidth * 4 * kHostDisplayFramebufferHeight);
+         kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
   ActRaiser_RebindPpuOutputSurfaces();
   HostInput_RequestPausedRedraw();
   HostDisplay_InvalidatePresentHistory();

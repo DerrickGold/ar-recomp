@@ -40,11 +40,11 @@ extern bool g_ws_active;
 extern int g_ws_extra;
 extern int g_ws_display_extra;
 extern uint8_t g_pixels[
-    kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_bg_pixels[
-    kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_obj_pixels[
-    kPpuBufWidth * 4 * kHostDisplayFramebufferHeight];
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 
 const uint64_t kHostDisplayEmulationFrameIntervalNs = 16639267ull;
 int g_active_pixel_aspect = kPixelAspect_Crt43;
