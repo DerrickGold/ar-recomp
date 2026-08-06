@@ -564,7 +564,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
      * is the denominator that normalizes every U-axis offset into the layer
      * textures. Dividing by snes_width instead cost 1.75x too much horizontal
      * interpolation shift. */
-    _Static_assert(kFrameSlotLayerTextureWidth == kPpuBufWidth,
+    _Static_assert(kFrameSlotLayerTextureWidth == kPpuSurfaceWidth,
                    "present.h's mirrored layer texture width must match ppu.h");
     _Static_assert(kFrameSlotAuthenticWidth == kActRaiserAuthenticWidth,
                    "present.h's mirrored authentic width must match "

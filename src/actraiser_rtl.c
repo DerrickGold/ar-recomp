@@ -1589,7 +1589,7 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
   static int last_y0, last_y1;
   static size_t last_pitch;
 
-  if (!s_hud_icon_ready || width <= 0 || width > kPpuBufWidth) return;
+  if (!s_hud_icon_ready || width <= 0 || width > kPpuSurfaceWidth) return;
 
   const int raster_width = s_hud_icon_bounds.x1 - s_hud_icon_bounds.x0;
   const int raster_height = s_hud_icon_bounds.y1 - s_hud_icon_bounds.y0;
@@ -1768,7 +1768,7 @@ void ActRaiserDrawPpuFrame(void) {
                                 sizeof(kCaptureLayersCommon[0])); i++) {
         PpuOverlaySource src = kCaptureLayersCommon[i];
         if (!g_diorama_layer_pixels[src])
-          g_diorama_layer_pixels[src] = calloc(1, kPpuBufWidth * 4 * kHostDisplayFramebufferHeight);
+          g_diorama_layer_pixels[src] = calloc(1, kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
         PpuBindOverlaySurface(g_ppu, src, g_diorama_layer_pixels[src], pitch);
         if (g_ppu->screenEnabled[0] & (1 << src)) {
           uint8_t flags = kPpuOverlayFlag_RemoveFromGame;
@@ -1855,7 +1855,7 @@ void ActRaiserDrawPpuFrame(void) {
       } else {
         if (!g_diorama_layer_pixels[kPpuOverlaySource_Bg3])
           g_diorama_layer_pixels[kPpuOverlaySource_Bg3] =
-              calloc(1, kPpuBufWidth * 4 * kHostDisplayFramebufferHeight);
+              calloc(1, kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
         PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3,
                               g_diorama_layer_pixels[kPpuOverlaySource_Bg3],
                               pitch);
@@ -1883,7 +1883,7 @@ void ActRaiserDrawPpuFrame(void) {
       for (int i = 0; i < (int)(sizeof(kPrioBands) / sizeof(kPrioBands[0])); i++) {
         if (!g_diorama_layer_pixels[kPrioBands[i].plane])
           g_diorama_layer_pixels[kPrioBands[i].plane] =
-              calloc(1, kPpuBufWidth * 4 * kHostDisplayFramebufferHeight);
+              calloc(1, kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
         PpuBindOverlayPrioSurface(g_ppu, kPrioBands[i].src,
                                   kPrioBands[i].band,
                                   g_diorama_layer_pixels[kPrioBands[i].plane]);

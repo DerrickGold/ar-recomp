@@ -33,7 +33,27 @@ enum {
   // 448-pixel internal width, comfortably past 16:9 at 224 lines.
   kPpuExtraLeftRight = 96,
   // Full internal width of the priority buffers (logical 256 + both borders).
+  // THE LINE-BUFFER WIDTH: how many columns the per-scanline renderer can fill.
+  // Bounded by the 9-bit OAM X encoding (kWsExtraMax = 95 in widescreen.h),
+  // not by memory, so it does not grow for the apron.
   kPpuBufWidth = kPpuXPixels + kPpuExtraLeftRight * 2,
+  // ── Display width vs resolve width ───────────────────────────────────────
+  // The apron: extra columns per side that host ARGB SURFACES carry beyond the
+  // line-buffer width, so a sprite can be fully resolved before it reaches the
+  // visible edge instead of being clipped as it crosses it. Content for those
+  // columns cannot come from the scanline path -- that path is bounded by the
+  // display margins and by the 9-bit encoding -- so it arrives from
+  // capture-time part rasterization (PpuRasterizeParts) instead.
+  //
+  // 64 = one maximum sprite width, the smallest apron that can hold a whole
+  // sprite. Deliberately NOT folded into kPpuBufWidth: widening the line
+  // buffers would pay ClearBackdrop memsets over apron columns on every line
+  // of every frame for room only the capture path uses.
+  kPpuObjApron = 0,
+  // THE SURFACE WIDTH: allocation width of every host ARGB overlay/plane
+  // surface, and therefore the denominator every normalized-U computation
+  // divides by. Distinct from kPpuBufWidth on purpose -- see the apron note.
+  kPpuSurfaceWidth = kPpuBufWidth + kPpuObjApron * 2,
   // Authentic visible scanline count. Distinct from kPpuXPixels' axis: 224 is
   // how many lines are OUTPUT, and it is also the threshold above which an OAM
   // Y byte is a negative (offscreen-top) position -- see kPpuObjYWrap.
@@ -488,7 +508,7 @@ bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
 
 // Clear/bind persistent transparent ARGB host-overlay surfaces. Bindings survive
 // ppu_reset; capture rectangles do not and are configured by game policy each
-// frame. Surfaces are 256-kPpuBufWidth pixels wide and use the same full-frame
+// frame. Surfaces are 256-kPpuSurfaceWidth pixels wide and use the same full-frame
 // coordinate system as renderBuffer.
 // Passing NULL disables extraction for that source. Call ClearBindings once
 // after PPU creation so a frontend can explicitly own all optional surfaces.
