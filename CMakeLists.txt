@@ -554,6 +554,23 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_ppu_render_pipeline PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
 
+    # Pins the exact-vs-decoded OAM position equivalence over the whole in-cap
+    # window (Phase 1's byte-identity claim), the divergence at the wrap
+    # threshold, and range-vs-explicit-part rasterization identity.
+    add_executable(actraiser_ppu_exact_pos_test
+        tests/ppu_exact_pos_test.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu_old.c
+    )
+    target_include_directories(actraiser_ppu_exact_pos_test PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_ppu_exact_pos_test PRIVATE m)
+    add_test(NAME actraiser_ppu_exact_pos
+        COMMAND actraiser_ppu_exact_pos_test)
+
     add_executable(actraiser_hd_manifest_test
         tests/hd_manifest_test.c
         src/hd_replacements.c

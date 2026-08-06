@@ -323,7 +323,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * make that stale position look authoritative. Clearing here means "no
    * override" and "not emitted" are the same statement. */
   if (g_ppu)
-    PpuClearObjYOverrides(g_ppu);
+    PpuClearObjExactPositions(g_ppu);
 
   cpu->A = saved_stack_pointer;
   cpu->X = 0;
@@ -650,16 +650,6 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
                   (uint16)(kActRaiserOamShadow + oam_offset +
                            kOamYFieldOffset),
                   stored_y);
-      /* The same value the byte above encodes, computed without the truncation.
-       * NOT a recomputed "true" position: keeping it byte-equivalent is what
-       * makes an override render identically wherever the 8-bit field was not
-       * already lossy. screen_origin_y is signed, component_offset_y is a small
-       * unsigned part offset. */
-      if (g_ppu)
-        PpuSetObjYOverride(
-            g_ppu, (uint8)(oam_offset >> 2),
-            (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
-                (int)component_offset_y - (kSpriteDrawBias + 1));
 
       uint16 tile_attributes = (uint16)(
           cpu_read8(cpu, definition_bank,
@@ -708,6 +698,24 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
                                   (uint16)(definition_address +
                                            kActionPartFlags)) & 1) << 7));
         g_ram[(uint16)(cpu->D + 0x00)] = acc;
+
+        /* Publish the exact position now that BOTH axes are stored and the
+         * slot is committed. This used to happen at the Y-accept point above,
+         * which leaked: a part that passed Y, published, then failed X was
+         * re-parked in OAM while the stale override stayed valid -- a band
+         * scanline would draw the parked tile at the failed part's Y with X
+         * decoding to the parked 128. Values are the un-truncated forms of
+         * exactly what the stored bytes encode (screen_origin is signed, the
+         * component offsets are small unsigned part offsets), which is what
+         * keeps a slot with an exact position byte-identical wherever the
+         * encoding was not lossy. */
+        if (g_ppu)
+          PpuSetObjExactPosition(
+              g_ppu, (uint8)(oam_offset >> 2),
+              (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginX) +
+                  (int)component_offset_x - kSpriteDrawBias,
+              (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
+                  (int)component_offset_y - (kSpriteDrawBias + 1));
 
         uint16 slots = (uint16)(
             ws_dp16(cpu, kSpriteDp_OamHighSlotsRemaining) - 1);
