@@ -1433,7 +1433,11 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
 17. **OPEN — partial actor sprites in sim cutscenes (2026-07-06).** Two sightings, likely one
     cause: (a) lair-sealing shows ONLY the energy-ball person; the others that "attack" the lair
     never appear; (b) Bloodpool post-act1 lightning cutscene spawns 2 people (2 bolts) but only
-    the LEFT one is visible. Pattern: multi-actor spawns render exactly ONE actor. Prior partial
+    the LEFT one is visible. Pattern: multi-actor spawns render exactly ONE actor. **Timeline
+    note (2026-08-05):** any re-test observation made on a 2026-08-03..08-05 build in a
+    POST-ACT cutscene may instead have been ledger §34 (stale exact-Y overrides relocating
+    cutscene OAM slots — fixed). These 07-06 sightings predate the sideband and stand; re-test
+    on a current build before triaging. Prior partial
     finding likely related: the **`$9FCD` dispatcher family** (`A21A/A27F/A498/A4A8/A4B8 →
     $9FCD ×4 each`, same `PHY;BRL` idiom as `$9D4D` — `find_tailcall_past_end.py`) was never
     registered/triaged. First moves: play the cutscene with watch mode on (any dispmiss →

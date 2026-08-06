@@ -163,7 +163,7 @@ Keyboard only, not re-bindable:
 | `T` | turbo — fast-forward at 8 game frames per rendered frame (`AR_TURBO_MULT` to change) |
 | `F5` / `F7` | save / load state |
 | `F6` | level warp (see [Level warp](#level-warp)) |
-| `F2` | full diagnostic snapshot (WRAM/VRAM/CGRAM/OAM + screenshot) |
+| `F2` or `C` | full diagnostic snapshot (WRAM/VRAM/CGRAM/OAM/high-OAM + screenshot). `C` is the one-hand alias and repeats while held — one snapshot per key repeat — for sweeping a glitch that only lasts a frame. Each is ~21 MB, so a long hold writes GBs; on a replay prefer `AR_SHOT_EVERY` / `AR_VRAMDUMP_GF` to capture exact frames instead |
 | `F3` | toggle scene inspector; left-click pauses/inspects, drag its panel to move it, right-click clears/resumes |
 | `F9` | cycle 4:3 authentic → widescreen raw → widescreen full (requires `ExtendedAspectRatio`; paused BG/crop changes redraw immediately, sprite/activation changes apply next game frame) |
 | `Shift`+`F9` | dump diagnostic state |
