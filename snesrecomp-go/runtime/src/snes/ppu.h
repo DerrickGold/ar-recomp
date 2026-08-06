@@ -175,6 +175,17 @@ typedef struct PpuObjRangeBounds {
   int16_t x0, y0, x1, y1;
 } PpuObjRangeBounds;
 
+/* One resolved sprite part: exact position, attribute word, size. The atom
+ * every OBJ position consumer operates on -- OAM is one way to obtain parts,
+ * not the only one. Priority is deliberately NOT a separate field: it lives in
+ * tile_attr bits 12-13, and a second copy would drift from the authoritative
+ * one. */
+typedef struct PpuObjPart {
+  int16_t x, y;        /* exact screen position, free of the 8/9-bit moduli */
+  uint16_t tile_attr;  /* OAM attribute word: tile, palette, priority, flips */
+  uint8_t size;        /* square sprite edge in pixels (8/16/32/64) */
+} PpuObjPart;
+
 enum {
   kPpuRenderFlags_NewRenderer = 1,
   // Render mode7 upsampled by 4x4
@@ -280,9 +291,10 @@ struct Ppu {
   // (see PpuVerticalOrigin), because nothing needs to pillarbox vertically --
   // a host that wants fewer lines just crops the ones it asked for.
   uint8_t extraTopCur, extraBottomCur;
-  // Per-slot exact OAM Y from the frontend. See PpuSetObjYOverride.
-  int16_t objYOverride[128];
-  uint8_t objYOverrideValid[128];
+  // Per-slot exact position from the frontend. See PpuSetObjExactPosition.
+  int16_t objPosX[128];
+  int16_t objPosY[128];
+  uint8_t objPosValid[128];
   // Widescreen HUD split (see PpuSetWidescreenHudSplit). 0 height = off.
   uint8_t wsHudSplitHeight, wsHudLeftEnd, wsHudRightStart;
   uint8_t wsHudPlayerRowY;
@@ -565,29 +577,56 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom);
 // so the game's own object coordinates carry no usable data down there.
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom);
 
-// Exact per-slot OAM Y, for a frontend that owns the sprite emitter.
+// Exact per-slot OAM position, for a frontend that owns the sprite emitter.
 //
-// The OAM Y field is 8 bits against a 224-line screen, so it cannot say where a
-// sprite is -- only where it is modulo 256. Everything outside the visible band
-// is therefore ambiguous: a slot parked above the screen, a sprite hanging off
-// the bottom, and a sprite genuinely above the top all land in the same byte
-// values, and a vertical margin renders all three in the same place.
+// OAM X is 9 bits (mod 512) against a 256-wide screen and Y is 8 bits
+// (mod 256) against a 224-line screen, so neither field says where a sprite
+// IS -- only where it is modulo the encoding. Everything outside the visible
+// screen is therefore ambiguous: a parked slot, a sprite hanging off one edge,
+// and a sprite off the opposite edge land in the same values.
 //
-// An override carries the UN-TRUNCATED form of exactly the value the byte
-// encodes -- not a recomputed "true" position -- so a slot with one renders
-// identically wherever the byte was not lossy, and differs only where the 8-bit
-// field aliased. That makes the ambiguity disappear at the source instead of
-// being guessed at from the byte.
+// An exact position carries the UN-TRUNCATED form of exactly the value the
+// stored bytes encode -- not a recomputed "true" position -- so a slot with one
+// renders identically wherever the bytes were not lossy, and differs only where
+// the encoding aliased. That makes the ambiguity disappear at the source
+// instead of being guessed at from the bytes.
 //
-// Slots WITHOUT an override keep the authentic mod-256 byte path untouched, and
-// are not drawn on above-screen scanlines at all: nothing outside the emitter
-// the frontend owns has a position that can be trusted up there.
+// Slots WITHOUT an exact position keep the authentic modular byte decode
+// untouched, and are not drawn on above-screen scanlines at all: nothing
+// outside the emitter the frontend owns has a position that can be trusted up
+// there.
 //
-// Call PpuClearObjYOverrides once per frame wherever the shadow OAM is cleared,
-// then PpuSetObjYOverride per slot as the emitter writes it. `slot` indexes
-// sprites (0..127), matching ppu->oam word-pair order.
-void PpuClearObjYOverrides(Ppu *ppu);
-void PpuSetObjYOverride(Ppu *ppu, uint8_t slot, int y);
+// Call PpuClearObjExactPositions once per frame wherever the shadow OAM is
+// cleared, then PpuSetObjExactPosition per slot at the point the emitter FULLY
+// commits the slot (both axes stored). Publishing earlier leaks: an emitter
+// that accepts Y, publishes, then rejects X re-parks the slot in OAM while the
+// stale exact position stays valid. `slot` indexes sprites (0..127), matching
+// ppu->oam word-pair order.
+void PpuClearObjExactPositions(Ppu *ppu);
+void PpuSetObjExactPosition(Ppu *ppu, uint8_t slot, int x, int y);
+
+// ── Part resolution ──────────────────────────────────────────────────────
+// Decode OAM slots [first, first+count) into parts, in the renderer's
+// priority-rotation order (earlier entries own an overlapping opaque pixel, so
+// array order IS paint order). Every part must carry `priority` in its
+// attribute word or the whole resolve fails, matching the range API's
+// contract. Exact positions are consulted, which is the point: bounds and
+// rasterization then agree with the scanline evaluator about where sprites
+// are.
+bool PpuResolveObjSlots(Ppu *ppu, uint8_t first, uint8_t count,
+                        uint8_t priority, PpuObjPart *out_parts,
+                        int max_parts, int *out_count);
+
+// Union bounding box of explicit parts. False when count <= 0.
+bool PpuGetPartBounds(const PpuObjPart *parts, int count,
+                      PpuObjRangeBounds *out);
+
+// Rasterize explicit parts into `pixels` (ARGB, `bounds->x0/y0` at the top
+// left), clipping to the buffer. Screen-independent: no scanline limits, no
+// viewport clipping -- the caller chooses the window by choosing the bounds.
+bool PpuRasterizeParts(Ppu *ppu, const PpuObjPart *parts, int count,
+                       const PpuObjRangeBounds *bounds, uint32_t *pixels,
+                       int width, int height, size_t pitch);
 
 // Row within the render target that authentic scanline 0 occupies. The host
 // allocates kPpuBufHeight rows and crops what it wants around this origin.

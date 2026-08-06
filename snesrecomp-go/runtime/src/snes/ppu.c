@@ -52,6 +52,13 @@ static int PpuObjSizeForIndex(const Ppu *ppu, uint8_t index) {
 }
 
 static int PpuObjScreenX(const Ppu *ppu, uint8_t index) {
+  /* An exact position from the emitter bypasses the 9-bit decode: within the
+   * representable window the two are equal by construction (the emitter
+   * publishes the un-truncated form of the stored bytes), and beyond it only
+   * the exact value is meaningful. Slots without one -- HUD sprites emitted by
+   * recompiled ROM, parked slots -- keep the authentic modular decode. */
+  if (ppu->objPosValid[index >> 1])
+    return ppu->objPosX[index >> 1];
   int x = ppu->oam[index] & 0xff;
   x |= ((ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
   /* Preserve legitimate widescreen right-margin positions before applying
@@ -61,6 +68,8 @@ static int PpuObjScreenX(const Ppu *ppu, uint8_t index) {
 }
 
 static int PpuObjScreenY(const Ppu *ppu, uint8_t index) {
+  if (ppu->objPosValid[index >> 1])
+    return ppu->objPosY[index >> 1];
   int y = ppu->oam[index] >> 8;
   return y >= kPpuObjYNegativeFrom ? y - kPpuObjYWrap : y;
 }
@@ -355,20 +364,23 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom) {
   (void)bottom;
 }
 
-void PpuClearObjYOverrides(Ppu *ppu) {
-  memset(ppu->objYOverrideValid, 0, sizeof(ppu->objYOverrideValid));
+void PpuClearObjExactPositions(Ppu *ppu) {
+  memset(ppu->objPosValid, 0, sizeof(ppu->objPosValid));
 }
 
-void PpuSetObjYOverride(Ppu *ppu, uint8_t slot, int y) {
+void PpuSetObjExactPosition(Ppu *ppu, uint8_t slot, int x, int y) {
   if (slot >= 128)
     return;
   /* Clamp to int16 rather than wrap: a position this far out is off-screen on
    * any axis the renderer cares about, and a wrap would re-introduce exactly
-   * the aliasing the override exists to remove. */
+   * the aliasing the exact position exists to remove. */
+  if (x < INT16_MIN) x = INT16_MIN;
+  else if (x > INT16_MAX) x = INT16_MAX;
   if (y < INT16_MIN) y = INT16_MIN;
   else if (y > INT16_MAX) y = INT16_MAX;
-  ppu->objYOverride[slot] = (int16_t)y;
-  ppu->objYOverrideValid[slot] = 1;
+  ppu->objPosX[slot] = (int16_t)x;
+  ppu->objPosY[slot] = (int16_t)y;
+  ppu->objPosValid[slot] = 1;
 }
 
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom) {
@@ -1843,25 +1855,46 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
 
 }
 
-bool PpuGetObjRangeBounds(Ppu *ppu, uint8_t first, uint8_t count,
-                          uint8_t priority, PpuObjRangeBounds *out) {
-  if (!ppu || !out || !count || first >= 128 || count > 128 - first ||
-      priority > 3)
+bool PpuResolveObjSlots(Ppu *ppu, uint8_t first, uint8_t count,
+                        uint8_t priority, PpuObjPart *out_parts,
+                        int max_parts, int *out_count) {
+  if (!ppu || !out_parts || !out_count || !count || first >= 128 ||
+      count > 128 - first || priority > 3)
     return false;
-
-  int x0 = 32767, y0 = 32767, x1 = -32768, y1 = -32768;
-  for (int slot = first; slot < first + count; slot++) {
-    uint8_t index = (uint8_t)(slot * 2);
+  int n = 0;
+  /* Renderer's priority-rotation order, not slot order: earlier entries own an
+   * overlapping opaque pixel, so array order IS paint order. Bounds are
+   * order-independent, rasterization is not. */
+  uint8_t index = PPU_objPriority(ppu) ? (ppu->oamaddl & 0xfe) : 0;
+  for (int evaluated = 0; evaluated < 128; evaluated++, index += 2) {
+    int slot = index >> 1;
+    if (slot < first || slot >= first + count)
+      continue;
     int attributes = ppu->oam[index + 1];
     if (((attributes >> 12) & 3) != priority)
       return false;
-    int size = PpuObjSizeForIndex(ppu, index);
-    int x = PpuObjScreenX(ppu, index);
-    int y = PpuObjScreenY(ppu, index);
-    x0 = IntMin(x0, x);
-    y0 = IntMin(y0, y);
-    x1 = IntMax(x1, x + size);
-    y1 = IntMax(y1, y + size);
+    if (n >= max_parts)
+      return false;
+    out_parts[n].x = (int16_t)PpuObjScreenX(ppu, index);
+    out_parts[n].y = (int16_t)PpuObjScreenY(ppu, index);
+    out_parts[n].tile_attr = (uint16_t)attributes;
+    out_parts[n].size = (uint8_t)PpuObjSizeForIndex(ppu, index);
+    n++;
+  }
+  *out_count = n;
+  return true;
+}
+
+bool PpuGetPartBounds(const PpuObjPart *parts, int count,
+                      PpuObjRangeBounds *out) {
+  if (!parts || !out || count <= 0)
+    return false;
+  int x0 = 32767, y0 = 32767, x1 = -32768, y1 = -32768;
+  for (int i = 0; i < count; i++) {
+    x0 = IntMin(x0, parts[i].x);
+    y0 = IntMin(y0, parts[i].y);
+    x1 = IntMax(x1, parts[i].x + parts[i].size);
+    y1 = IntMax(y1, parts[i].y + parts[i].size);
   }
   if (x1 <= x0 || y1 <= y0)
     return false;
@@ -1872,17 +1905,11 @@ bool PpuGetObjRangeBounds(Ppu *ppu, uint8_t first, uint8_t count,
   return true;
 }
 
-bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
-                          uint8_t priority, const PpuObjRangeBounds *bounds,
-                          uint32_t *pixels, int width, int height,
-                          size_t pitch) {
-  PpuObjRangeBounds actual;
-  if (!pixels || !bounds || width <= 0 || height <= 0 ||
-      pitch < (size_t)width * sizeof(uint32_t) ||
-      !PpuGetObjRangeBounds(ppu, first, count, priority, &actual) ||
-      actual.x0 != bounds->x0 || actual.y0 != bounds->y0 ||
-      actual.x1 != bounds->x1 || actual.y1 != bounds->y1 ||
-      width != actual.x1 - actual.x0 || height != actual.y1 - actual.y0)
+bool PpuRasterizeParts(Ppu *ppu, const PpuObjPart *parts, int count,
+                       const PpuObjRangeBounds *bounds, uint32_t *pixels,
+                       int width, int height, size_t pitch) {
+  if (!ppu || !parts || !bounds || !pixels || count <= 0 || width <= 0 ||
+      height <= 0 || pitch < (size_t)width * sizeof(uint32_t))
     return false;
 
   for (int y = 0; y < height; y++)
@@ -1890,27 +1917,23 @@ bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
            (size_t)width * sizeof(uint32_t));
   PpuUpdateBrightnessCache(ppu);
 
-  /* Scan all OAM in the renderer's priority-rotation order and filter to the
-   * semantic range. Earlier entries own an overlapping opaque pixel. */
-  uint8_t index = PPU_objPriority(ppu) ? (ppu->oamaddl & 0xfe) : 0;
-  for (int evaluated = 0; evaluated < 128; evaluated++, index += 2) {
-    int slot = index >> 1;
-    if (slot < first || slot >= first + count)
-      continue;
-
-    int attributes = ppu->oam[index + 1];
-    if (((attributes >> 12) & 3) != priority)
-      return false;
-    int size = PpuObjSizeForIndex(ppu, index);
-    int x = PpuObjScreenX(ppu, index);
-    int y = PpuObjScreenY(ppu, index);
+  /* Array order is paint order; earlier parts own an overlapping opaque
+   * pixel. The dy/dx clips are no-ops when `bounds` is the parts' own union
+   * (the range wrappers below) and become the window crop for an explicit
+   * caller whose bounds are narrower than the parts they cover. */
+  for (int i = 0; i < count; i++) {
+    const PpuObjPart *part = &parts[i];
+    int attributes = part->tile_attr;
+    int size = part->size;
     bool h_flipped = (attributes & 0x4000) != 0;
     bool v_flipped = (attributes & 0x8000) != 0;
     int palette_base = 0x80 + 16 * ((attributes >> 9) & 7);
 
     for (int display_row = 0; display_row < size; display_row++) {
       int source_row = v_flipped ? size - 1 - display_row : display_row;
-      int dy = y + display_row - actual.y0;
+      int dy = part->y + display_row - bounds->y0;
+      if (dy < 0 || dy >= height)
+        continue;
       uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (size_t)dy * pitch);
       for (int col = 0; col < size; col += 8) {
         uint32 plane =
@@ -1919,7 +1942,9 @@ bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
           int pixel = PpuObjTilePixel(plane, px, h_flipped);
           if (!pixel)
             continue;
-          int dx = x + col + px - actual.x0;
+          int dx = part->x + col + px - bounds->x0;
+          if (dx < 0 || dx >= width)
+            continue;
           if (!dst[dx])
             dst[dx] = PpuObjColor(ppu, palette_base + pixel);
         }
@@ -1927,6 +1952,41 @@ bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
     }
   }
   return true;
+}
+
+/* Range entry points: resolve OAM to parts, then run the part core. Thin
+ * wrappers so OAM-backed and explicit-part callers cannot disagree about
+ * bounds or paint rules. */
+enum { kPpuMaxObjParts = 128 };
+
+bool PpuGetObjRangeBounds(Ppu *ppu, uint8_t first, uint8_t count,
+                          uint8_t priority, PpuObjRangeBounds *out) {
+  PpuObjPart parts[kPpuMaxObjParts];
+  int n = 0;
+  if (!out ||
+      !PpuResolveObjSlots(ppu, first, count, priority, parts,
+                          kPpuMaxObjParts, &n))
+    return false;
+  return PpuGetPartBounds(parts, n, out);
+}
+
+bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
+                          uint8_t priority, const PpuObjRangeBounds *bounds,
+                          uint32_t *pixels, int width, int height,
+                          size_t pitch) {
+  PpuObjPart parts[kPpuMaxObjParts];
+  int n = 0;
+  PpuObjRangeBounds actual;
+  if (!bounds ||
+      !PpuResolveObjSlots(ppu, first, count, priority, parts,
+                          kPpuMaxObjParts, &n) ||
+      !PpuGetPartBounds(parts, n, &actual) ||
+      actual.x0 != bounds->x0 || actual.y0 != bounds->y0 ||
+      actual.x1 != bounds->x1 || actual.y1 != bounds->y1 ||
+      width != actual.x1 - actual.x0 || height != actual.y1 - actual.y0)
+    return false;
+  return PpuRasterizeParts(ppu, parts, n, &actual, pixels, width, height,
+                           pitch);
 }
 
 static bool ppu_evaluateSprites(Ppu* ppu, int line) {
@@ -1950,7 +2010,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
    * defensive: a 64-tall sprite parked at -32 spans screen rows -32..31 and so
    * DOES reach authentic lines, where the game intends it to be drawn. */
   /* Above-screen scanlines draw ONLY from slots whose exact Y the frontend
-   * supplied (PpuSetObjYOverride). The OAM byte cannot distinguish a parked
+   * supplied (PpuSetObjExactPosition). The OAM byte cannot distinguish a parked
    * slot, a sprite hanging off the bottom, and a sprite genuinely above the
    * top -- all three land in the same values -- so up here a slot without an
    * override has no position that can be trusted, and guessing produced both
@@ -1965,7 +2025,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
   const bool above = line < 0;
   for(int i = 0; i < 128; i++) {
     const int slot = index >> 1;
-    const bool exact = ppu->objYOverrideValid[slot] != 0;
+    const bool exact = ppu->objPosValid[slot] != 0;
     if (above && !exact) {
       index += 2;
       continue;
@@ -1975,7 +2035,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     uint8_t row;
     bool on_line;
     if (exact) {
-      int row_signed = line - (int)ppu->objYOverride[slot];
+      int row_signed = line - (int)ppu->objPosY[slot];
       on_line = row_signed >= 0 && row_signed < spriteHeight;
       row = (uint8_t)row_signed;
     } else {
