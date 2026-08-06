@@ -109,6 +109,25 @@ static inline void ws_dp16w(CpuState *cpu, uint16 off, uint16 v) {
   g_ram[(uint16)(a + 1)] = (uint8)(v >> 8);
 }
 
+/* THE emitter cull predicate — every biased-window test on both axes and in
+ * both modes goes through here, so the four sites cannot drift apart the way
+ * they had (action X and sim X each hand-rolled the widening, action Y gained
+ * its own variant with the vertical band, and sim Y had no margin term at all
+ * without that absence being visible as a decision).
+ *
+ * The emitters test in BIASED unsigned space: a coordinate is in the window
+ * [-bias - margin_neg, limit - bias + margin_pos) exactly when
+ * (biased + margin_neg) < (limit + margin_neg + margin_pos) in uint16
+ * arithmetic — coordinates above the window wrap to large values and fail,
+ * reproducing the ROM's single unsigned compare. margin_neg extends the
+ * window in the NEGATIVE screen direction (left/up), margin_pos in the
+ * positive. Both zero = the authentic window, bit for bit. */
+static inline int ws_biased_in_window(uint16 biased, int margin_neg,
+                                      int margin_pos, uint16 biased_limit) {
+  return (uint16)(biased + (uint16)margin_neg) <
+         (uint16)(biased_limit + (uint16)margin_neg + (uint16)margin_pos);
+}
+
 static int ws_sprite_widen_enabled(void) {
   return g_settings.ws_sprites;
 }
@@ -637,13 +656,11 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
     uint16 biased_y = (uint16)(
         component_offset_y + ws_dp16(cpu, kSpriteDp_ScreenOriginY));
 
-    /* Widened by the live vertical band, mirroring wide_x/wide_bound on the
-     * other axis below. The authentic window is [-kSpriteDrawBias, 224) in
-     * screen rows -- the ROM's own draw bias already grants 16 rows above the
-     * screen, and the tree-head report was an object 24 rows up, just past it. */
-    uint16 wide_y = (uint16)(biased_y + margin_top);
-    uint16 wide_bound_y = (uint16)(kSpriteBiasedHeight + margin_top);
-    if (wide_y < wide_bound_y) {
+    /* Widened by the live vertical band, mirroring the X site below. The
+     * authentic window is [-kSpriteDrawBias, 224) in screen rows -- the ROM's
+     * own draw bias already grants 16 rows above the screen, and the tree-head
+     * report was an object 24 rows up, just past it. */
+    if (ws_biased_in_window(biased_y, margin_top, 0, kSpriteBiasedHeight)) {
       /* CMP failed with carry clear, so the ROM's SBC #$0010 stores y-$11. */
       uint16 stored_y = (uint16)(biased_y - (kSpriteDrawBias + 1));
       cpu_write16(cpu, definition_bank,
@@ -682,10 +699,8 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
        * (x+L)<$110+L+R => screen-x in [-16-L,256+R). The 16px left reach is
        * exactly ActRaiser's maximum OAM tile width. The historical fixed-64
        * reach over-emitted invisible definitions and is intentionally gone. */
-      uint16 wide_x = (uint16)(biased_x + margin_left);
-      uint16 wide_bound =
-          (uint16)(kSpriteBiasedWidth + margin_left + margin_right);
-      if (wide_x < wide_bound) {
+      if (ws_biased_in_window(biased_x, margin_left, margin_right,
+                              kSpriteBiasedWidth)) {
         uint16 screen_x = (uint16)(biased_x - kSpriteDrawBias);
         cpu_write8(cpu, definition_bank,
                    (uint16)(kActRaiserOamShadow + oam_offset),
@@ -1306,11 +1321,8 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
         base_x + ws_sim_part_offset(cpu_read8(
                      cpu, cpu->DB, (uint16)(part + 1))));
     const int authentic_x = x_biased < kSimOamBiasedWidth;
-    const uint16 wide_x = (uint16)(x_biased + margin_left);
-    const uint16 wide_bound = (uint16)(
-        kSimOamBiasedWidth + margin_left + margin_right);
-
-    if (wide_x < wide_bound) {
+    if (ws_biased_in_window(x_biased, margin_left, margin_right,
+                            kSimOamBiasedWidth)) {
       const uint16 screen_x = (uint16)(x_biased - 0x0010);
       cpu_write8(cpu, cpu->DB, (uint16)(0x0380 + oam), (uint8)screen_x);
 
@@ -1330,7 +1342,15 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
       const uint16 y_biased = (uint16)(
           base_y + ws_sim_part_offset(cpu_read8(
                        cpu, cpu->DB, (uint16)(part + 2))));
-      if (y_biased < kSimOamBiasedHeight) {
+      /* margin 0,0 is a DECISION, not an omission: the sim vertical window
+       * stays authentic. Ledger §25 measured what widening it does — parts
+       * above the screen draw rows INSIDE the authentic 224-line viewport.
+       * The sim emitter also does not publish exact positions yet: within
+       * these windows exact and decoded differ precisely in the ledger-24
+       * mis-decode cases, so publishing would start healing atlas purges
+       * here rather than in the sim phases where the delta is measured.
+       * Both arrive with the synthetic part channel (plan Phase 5). */
+      if (ws_biased_in_window(y_biased, 0, 0, kSimOamBiasedHeight)) {
         const uint8 screen_y = (uint8)(y_biased - 0x0011);
         cpu_write8(cpu, cpu->DB, (uint16)(0x0381 + oam), screen_y);
 
