@@ -837,6 +837,46 @@ the current debugging process; this file is the case law.
       broken in the ROM or in the port; the distribution simply has a tail that authentic
       hardware never showed.
 
+34. **Parked OAM slots drew as garbage sprites in the first sim cutscene after an act — FIXED
+    2026-08-05 (host lifecycle, 2 lines).** Tan 16×16 chunks at screen x=0, y≈104..155 on the
+    temple cutscene's black surround, pixel-static for the whole scene, and only when action
+    mode had run earlier (`runs/20260805-221944` snaps 02–05).
+
+    **Root cause — the exact-Y sideband outlived the emitter that owns it.** The action object
+    scan (`ActRaiser_ObjectVisibilityScanWide`, the `$00:8C98` seam) publishes
+    `PpuSetObjYOverride` for every sprite part it emits and clears the array at the top of each
+    scan — which was the ONLY clear, and the scan never runs outside action maps. Exiting an
+    act therefore left the final frame's overrides valid indefinitely. The sprite evaluator
+    prefers a valid override over the OAM Y byte on EVERY scanline (not just band lines), so
+    when the cutscene re-parked those slots (x=0, y=$E0, tile $000, flip HV) the parked entries
+    rendered anyway at the stale action Ys — OBJ tile $000 of the cutscene's own sheet (OBSEL
+    base $2000), 16×16, HV-flipped, palette group 8. Direct-to-sim was clean because no scan
+    ever ran. The enhanced town view masked it (sim3d composes sprites from the atlas, not the
+    scanline OBJ output); the authentic town fallback was affected too.
+
+    *Fix:* `ActRaiserDrawPpuFrame` clears the overrides on every non-action frame, beside the
+    per-frame `PpuClearOverlayCaptures` reset (same rule: no prior mode may leak). Deliberately
+    NOT unconditional: an action pause/freeze frame skips the scan with OAM frozen and must
+    keep drawing its band sprites from the overrides that emitted them. Hardened variant if the
+    class recurs (any OAM rewrite that bypasses the seam): store the expected OAM Y byte with
+    each override and ignore overrides whose byte no longer matches.
+
+    **Reusable lessons:**
+    - **A host sideband keyed to game state needs an owner for every mode, including "none".**
+      A cache rebuilt by a mode-specific writer needs a mode-independent reset point; the frame
+      driver's top-of-frame policy block is that point in this codebase.
+    - **Palette scoring identifies a mystery pixel's producer.** Scoring the corrupt pixels'
+      RGB against every 16-color CGRAM group of both the corrupt and a reference snapshot said
+      "cutscene OBJ palette group 8, live-rendered" in one step — eliminating stale-texture and
+      stale-VRAM theories wholesale before reading any code.
+    - **Then correlate a rendered candidate tile against the capture.** Rendering OBJ tile $000
+      from the snapshot VRAM at each OBSEL base and matching opacity masks against the PPM
+      (372/512 at base $2000, HV-flipped) turned "looks like act-1 branch stubs" (wrong — it
+      was the cutscene's own sheet) into an identified producer with an address.
+    - **The snapshot bundle (ppm+vram+cgram+oam) answers "which layer could draw this?"
+      exhaustively offline.** Every BG page at every plausible base ruled out, OAM parked —
+      leaving only a host-side Y source, which is what it was.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

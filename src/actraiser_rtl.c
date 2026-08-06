@@ -1664,6 +1664,17 @@ void ActRaiserDrawPpuFrame(void) {
   if (Sim3D_BeginFrame())
     ActRaiser_RebindPpuOutputSurfaces();
   PpuClearOverlayCaptures(g_ppu);
+  /* The exact-Y OAM sideband (PpuSetObjYOverride) is action-owned state,
+   * rebuilt by ActRaiser_ObjectVisibilityScanWide at every object scan — a
+   * scan that never runs outside action maps. An override that survives the
+   * exit resurrects slots the next scene PARKS: the sprite evaluator trusts a
+   * valid override over the OAM Y byte on every line, so the first sim
+   * cutscene drew parked tile-$000 slots at the last action frame's Ys.
+   * Non-action frames only: action pause/freeze frames skip the scan with
+   * OAM frozen, and their band sprites must keep rendering from the same
+   * overrides that drew them. */
+  if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
+    PpuClearObjYOverrides(g_ppu);
   ActRaiser_ApplyWidescreenPolicy();
   /* Outside ApplyWidescreenPolicy, not inside it: that function early-returns
    * when widescreen is off, and the vertical margin must be re-resolved (most

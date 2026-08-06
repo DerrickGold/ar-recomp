@@ -591,13 +591,26 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   ws_dp16w(cpu, kSpriteDp_ComponentCount, component_count);
 
   if (getenv("AR_OBJSLOTLOG")) {
+    /* world= and cam= are what separate a genuinely world-placed object from
+     * one the game is driving along a SCREEN path by rewriting its world
+     * coordinate every frame. For the first, screen = world - cam and a wider
+     * viewport legitimately reveals it earlier; for the second, world - cam is
+     * pinned and there is nothing further out to reveal. */
     fprintf(stderr,
-            "[objslot] gf=%u obj=$%04X slot=%u screen=(%d,%d) "
-            "anim=$%02X:%04X comps=%u\n",
+            "[objslot] gf=%u obj=$%04X slot=%u screen=(%d,%d) world=(%d,%d) "
+            "cam=(%d,%d) anim=$%02X:%04X comps=%u\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame), object_address,
             (unsigned)(oam_offset >> 2), (int)(int16)screen_origin_x,
-            (int)(int16)screen_origin_y, definition_bank, definition_address,
-            component_count);
+            (int)(int16)screen_origin_y,
+            (int)cpu_read16(cpu, cpu->DB,
+                            (uint16)(object_address +
+                                     kActRaiserActionObject_WorldX)),
+            (int)cpu_read16(cpu, cpu->DB,
+                            (uint16)(object_address +
+                                     kActRaiserActionObject_WorldY)),
+            (int)ws_dp16(cpu, kSpriteDp_CameraOriginX),
+            (int)ws_dp16(cpu, kSpriteDp_CameraOriginY),
+            definition_bank, definition_address, component_count);
   }
 
   int margin_left = 0;

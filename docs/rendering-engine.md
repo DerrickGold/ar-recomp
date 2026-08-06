@@ -1629,6 +1629,18 @@ Measured, Fillmore act 2 at extend 32: band OBJ pixels 104 → 570, 0 → 466,
 104 → 735 on the frames where it fires, with the AUTHENTIC rows of all 32
 plane dumps byte-identical, attract frame and flat widescreen byte-identical.
 
+**Lifecycle (2026-08-05, ledger §34): the sideband is action-owned and must
+not outlive its emitter.** It is rebuilt from scratch by every
+`ActRaiser_ObjectVisibilityScanWide` pass (cleared at the top of the scan) —
+and because the renderer prefers a valid override over the byte on EVERY line,
+not only band lines, it must not survive the scan going silent:
+`ActRaiserDrawPpuFrame` clears it on every non-action frame. Before that clear
+existed, the last action frame's overrides persisted into sim mode and re-drew
+slots the temple cutscene had parked (x=0/y=$E0/tile $000/flip HV) at their
+stale action Ys. The clear is gated on the map group rather than unconditional
+because an action pause frame skips the scan with OAM frozen, and must keep
+drawing its band sprites from the same overrides that emitted them.
+
 ### What the band actually contains
 
 Verified in Fillmore act 1 (replay `saves/fillmore-act.rec`, diorama flipped on
