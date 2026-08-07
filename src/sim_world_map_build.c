@@ -43,8 +43,7 @@ enum {
   /* `$02:AF86` drains this descriptor during world navigation but leaves its
    * source address intact. It is one of $B000/$B040/$B080/$B0C0. */
   kWorldWaterAnimationSource = 0x00D7,
-  kWorldWaterSourceFirst = 0xB000,
-  kWorldWaterSourceStride = 0x40,
+  /* kWorldWaterSourceFirst / kWorldWaterSourceStride shared via sim_world_map.h. */
   kWorldWaterFrameMask = 3,
   /* $02:B499 JSL $02:865C leaves bank $02 + $B49C on the emulated stack. */
   kOverlayReturnBank = 0x02,

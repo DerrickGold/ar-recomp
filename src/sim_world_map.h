@@ -37,6 +37,15 @@ enum {
   kSimTownCellPixels = 16,
 };
 
+/* The water-animation source descriptor is one of $B000/$B040/$B080/$B0C0
+ * (see docs/rom-map.md). sim_world_map_build.c CONSTRUCTS the value from these
+ * and sim_world_map.c VALIDATES against them, so the producer and the validator
+ * must share one definition rather than each holding a copy free to drift. */
+enum {
+  kWorldWaterSourceFirst = 0xB000,
+  kWorldWaterSourceStride = 0x40,
+};
+
 /* Loads the ROM blobs. Safe to call with a short/absent ROM: the module then
  * reports unavailable and every consumer degrades to drawing nothing. */
 bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size);

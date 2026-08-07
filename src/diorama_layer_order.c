@@ -137,14 +137,20 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
   return room;
 }
 
+/* True when the author set any of a plane's twelve override knobs. RoomIsActive
+ * and the per-plane emit skip in FormatRoomBody must agree on this exact set, so
+ * it lives in one place. NOT the same as the editor's shape-only clear subset. */
+static bool PlaneOverrideIsAuthored(const DioramaPlaneOverride *o) {
+  return o->set_order || o->set_z || o->set_alpha || o->set_rake || o->set_bow ||
+         o->set_thickness || o->set_stack || o->set_stack_copies ||
+         o->set_stack_density || o->set_stack_direction || o->set_voxel ||
+         o->set_voxel_copies;
+}
+
 bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   if (!room || !room->used) return false;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
-    const DioramaPlaneOverride *o = &room->planes[plane];
-    if (o->set_order || o->set_z || o->set_alpha || o->set_rake || o->set_bow ||
-        o->set_thickness || o->set_stack || o->set_stack_copies ||
-        o->set_stack_density || o->set_stack_direction || o->set_voxel ||
-        o->set_voxel_copies)
+    if (PlaneOverrideIsAuthored(&room->planes[plane]))
       return true;
   }
   return false;
@@ -553,11 +559,7 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
   for (int i = 0; i < kPlaneTokenCount; i++) {
     int plane = kPlaneTokens[i].plane;
     const DioramaPlaneOverride *o = &room->planes[plane];
-    if (!o->set_order && !o->set_z && !o->set_alpha && !o->set_rake &&
-        !o->set_bow &&
-        !o->set_thickness && !o->set_stack && !o->set_stack_copies &&
-        !o->set_stack_density && !o->set_stack_direction && !o->set_voxel &&
-        !o->set_voxel_copies)
+    if (!PlaneOverrideIsAuthored(o))
       continue;
     /* Emit only the authored knobs, so a re-import reproduces exactly this
      * override rather than pinning the two the author never touched. */

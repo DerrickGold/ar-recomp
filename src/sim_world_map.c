@@ -19,8 +19,8 @@ enum {
   kWorldPaletteEntries = 256,
   kWorldTileBytes = 64,
   kWorldWaterFrameCount = 4,
-  kWorldWaterSourceFirst = 0xB000,
-  kWorldWaterSourceStride = 0x40,
+  /* kWorldWaterSourceFirst / kWorldWaterSourceStride are shared with the
+   * builder — see sim_world_map.h. */
   kWorldWaterTileFirst = 0x00,
   kWorldWaterTileSecond = 0xAA,
 };
