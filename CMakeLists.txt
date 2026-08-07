@@ -546,6 +546,7 @@ if(BUILD_TESTING)
         tests/ppu_render_pipeline_test.c
         src/sim/sim3d.c
         src/sim/sim_render_metadata.c
+        src/sim/sim_render_metadata_trace.c
         src/sim/sim_world_map.c
         src/sim/sim_world_navigation_scene.c
         src/sim/sim_world_navigation_capture.c
