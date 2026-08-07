@@ -19,4 +19,22 @@ enum {
   kDioramaPlane_Count
 };
 
+/* Can this plane ever hold pixels in the resolve apron?
+ *
+ * ONLY the OBJ planes. Everything else is filled exclusively by the scanline
+ * path, which is bounded by the display margins and by kPpuExtraLeftRight and
+ * therefore cannot reach an apron column; the apron pass
+ * (ActRaiser_DioramaApronFinish) writes OBJ planes and nothing else. The
+ * backdrop is the residual main framebuffer, whose apron the compositor never
+ * touches either.
+ *
+ * Consequence, and the reason this predicate exists rather than being folded
+ * into a comment: uploading the apron columns of a plane that can never fill
+ * them is uploading known zeros. Measured at 0.79 MB per frame, ~47 MB/s at
+ * 60fps, which was most of what the apron cost in steady state. */
+static inline bool DioramaPlaneCanCarryApron(int plane) {
+  return plane == kPpuOverlaySource_Obj || plane == kDioramaPlane_Obj1 ||
+         plane == kDioramaPlane_Obj2 || plane == kDioramaPlane_Obj3;
+}
+
 #endif  /* DIORAMA_PLANES_H */

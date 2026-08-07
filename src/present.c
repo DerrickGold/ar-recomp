@@ -649,7 +649,7 @@ void PresentUpload(const FrameSlot *slot) {
      * covers snes_height + ws_extra_top rows starting at row 0. */
     s_diorama_uploaded_plane_mask = Diorama_Upload(
         g_diorama_textures, pixels, slot->snes_width + slot->obj_apron * 2,
-        slot->snes_height + slot->ws_extra_top, upload_mask);
+        slot->snes_height + slot->ws_extra_top, slot->obj_apron, upload_mask);
   } else {
     s_diorama_uploaded_plane_mask = 0;
     SDL_Rect upload = { 0, 0, slot->snes_width, slot->snes_height };

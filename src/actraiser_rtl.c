@@ -1768,20 +1768,26 @@ static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
                              (size_t)w * sizeof(uint32_t)))
         continue;
 
+      /* The destination columns are a contiguous run, so resolve the base once
+       * per part instead of mapping and bounds-checking every pixel. The run is
+       * inside the surface by construction: `win` was clipped to an apron band,
+       * and a band's columns are always within [0, surface_width). */
+      const int base_col = ActionApron_SurfaceColumn(geom, win.x0);
+      if (base_col < 0 || base_col + w > surface_width)
+        continue;
+
       for (int y = 0; y < h; y++) {
         /* Plane rows are CAPTURE space: row 0 is screen y = -g_ws_extra_top,
          * the same bias ActRaiser_DioramaHudObjFinish applies. */
         const int row = win.y0 + y + g_ws_extra_top;
         if (row < 0 || row >= rows)
           continue;
+        const size_t row_base = (size_t)row * surface_width + base_col;
         for (int x = 0; x < w; x++) {
           uint32_t pixel = scratch[(size_t)y * w + x];
           if (!pixel)
             continue;
-          const int col = ActionApron_SurfaceColumn(geom, win.x0 + x);
-          if (col < 0 || col >= surface_width)
-            continue;
-          const size_t index = (size_t)row * surface_width + col;
+          const size_t index = row_base + x;
           bool claimed = false;
           for (int p = 0; p < 4 && !claimed; p++)
             if (planes[p] && planes[p][index])

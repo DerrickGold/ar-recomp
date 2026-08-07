@@ -606,6 +606,75 @@ static int ws_build_row(CpuState *cpu, uint16 layer_x, uint16 world_x,
   return ws_drain_row_record(record_buffer, tilemap_base);
 }
 
+/* TEMPORARY PROBE (AR_ROWDBG=1): trace one row build's three phases and the
+ * ring columns each phase leaves behind, so a phase that never runs is
+ * distinguishable from one that runs and writes the wrong content. */
+static const char *s_rowdbg_tag = "view";
+static int ws_rowdbg_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *e = getenv("AR_ROWDBG");
+    enabled = (e && e[0] && e[0] != '0');
+  }
+  return enabled;
+}
+
+/* TEMPORARY A/B (AR_WS_NEIGHSTEP=512): the neighbour row is built 256px from
+ * the page origin, so its record starts 32 ring columns out of phase with the
+ * page row. That is only harmless if the decoder indexes its record by absolute
+ * ring column rather than from its own world_x. Building at 512 instead puts
+ * the neighbour in the SAME ring phase as the page row, which is correct under
+ * either convention -- so a tilemap diff between the two settles it. */
+static int ws_neighbour_step(void) {
+  static int step = -1;
+  if (step < 0) {
+    const char *e = getenv("AR_WS_NEIGHSTEP");
+    step = (e && atoi(e) == 512) ? 512 : kActRaiserAuthenticWidth;
+  }
+  return step;
+}
+
+/* FNV-1a over both tilemaps: a single number per refresh that an A/B run can
+ * diff without dumping 8KB of VRAM per frame. */
+static void ws_rowdbg_hash(const char *when) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *e = getenv("AR_ROWDBG_HASH");
+    enabled = (e && e[0] && e[0] != '0');
+  }
+  if (!enabled)
+    return;
+  uint32 h = 2166136261u;
+  for (int i = 0; i < 2 * (int)kActRaiserTilemapWords; i++) {
+    uint16 v = g_ppu->vram[kActRaiserBg1TilemapVram + i];
+    h = (h ^ (v & 0xFF)) * 16777619u;
+    h = (h ^ (v >> 8)) * 16777619u;
+  }
+  fprintf(stderr, "[rowhash] gf=%u %s %08X\n",
+          ActRaiser_ReadWram16(kActRaiserWram_GameFrame), when, h);
+}
+static void ws_rowdbg_cols(const char *phase, uint16 layer_x, uint16 world_y,
+                           int lo, int hi) {
+  if (!ws_rowdbg_enabled())
+    return;
+  const uint16 base = layer_x == 0 ? kActRaiserBg1TilemapVram
+                                   : kActRaiserBg2TilemapVram;
+  int ty = world_y >> 3;
+  char buf[512];
+  int n = 0;
+  for (int col = lo; col <= hi; col++) {
+    uint16 a = (uint16)(base + ((ty & 0x1F) << 5) + (col & 0x1F) +
+                        (col >= 32 ? kTilemapPageWords : 0) +
+                        ((ty & 0x20) ? 0x800 : 0));
+    n += snprintf(buf + n, sizeof(buf) - (size_t)n, "%s%03X",
+                  n ? " " : "", g_ppu->vram[a] & 0x3FF);
+    if (n >= (int)sizeof(buf) - 8)
+      break;
+  }
+  fprintf(stderr, "[rowdbg]   BG%d %-14s wy=%4d ty=%2d cols%d..%d: %s\n",
+          layer_x == 0 ? 1 : 2, phase, world_y, ty, lo, hi, buf);
+}
+
 /* Build the authentic page-aligned row band plus a neighboring band when a
  * wide margin falls outside its 512px span. This directly addresses the
  * phase hole documented in rendering-engine.md without changing $B8A0. */
@@ -619,25 +688,51 @@ static void ws_build_visible_row(CpuState *cpu, uint16 layer_x,
   int view_left = (int)camera_x - (int)g_ppu->extraLeftCur;
   int view_right = (int)camera_x + kActRaiserAuthenticWidth +
                    (int)g_ppu->extraRightCur;
+  /* A/B: the guard uses the LARGER of the two candidate steps in both arms so
+   * the set of build sites is identical and only the built world_x varies.
+   * Otherwise pageX=256 silently drops the left neighbour in the 512 arm and
+   * the diff measures "built vs not built" instead of content. */
+  int want_left = view_left < (int)page_aligned_x &&
+                  page_aligned_x >= kActRaiserTownWorldWidth;
+  int want_right = view_right > (int)page_aligned_x + kActRaiserTownWorldWidth &&
+                   (uint32)page_aligned_x + kActRaiserTownWorldWidth <
+                       world_width;
+
+  if (ws_rowdbg_enabled())
+    fprintf(stderr,
+            "[rowdbg] BG%d %s gf=%u wy=%4d camX=%4d pageX=%4d view=[%d,%d) "
+            "L=%d R=%d%s\n",
+            layer_x == 0 ? 1 : 2,
+            s_rowdbg_tag, ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+            world_y, camera_x, page_aligned_x, view_left, view_right,
+            want_left, want_right,
+            want_right ? "" : "  <-- no right neighbour");
 
   (*requested)++;
-  *built += ws_build_row(cpu, layer_x, page_aligned_x, world_y, -1, -1);
+  int ok_page = ws_build_row(cpu, layer_x, page_aligned_x, world_y, -1, -1);
+  *built += ok_page;
+  ws_rowdbg_cols(ok_page ? "after-page" : "PAGE-FAILED", layer_x, world_y,
+                 0, 63);
 
-  if (view_left < (int)page_aligned_x &&
-      page_aligned_x >= kActRaiserAuthenticWidth) {
+  if (want_left) {
     (*requested)++;
-    *built += ws_build_row(
+    int ok = ws_build_row(
         cpu, layer_x,
-        (uint16)(page_aligned_x - kActRaiserAuthenticWidth), world_y,
+        (uint16)(page_aligned_x - ws_neighbour_step()), world_y,
         view_left, page_aligned_x);
+    *built += ok;
+    ws_rowdbg_cols(ok ? "after-left" : "LEFT-FAILED", layer_x, world_y,
+                 0, 63);
   }
-  if (view_right > (int)page_aligned_x + kActRaiserTownWorldWidth &&
-      (uint32)page_aligned_x + kActRaiserAuthenticWidth < world_width) {
+  if (want_right) {
     (*requested)++;
-    *built += ws_build_row(
+    int ok = ws_build_row(
         cpu, layer_x,
-        (uint16)(page_aligned_x + kActRaiserAuthenticWidth), world_y,
+        (uint16)(page_aligned_x + ws_neighbour_step()), world_y,
         (int)page_aligned_x + kActRaiserTownWorldWidth, view_right);
+    *built += ok;
+    ws_rowdbg_cols(ok ? "after-right" : "RIGHT-FAILED", layer_x, world_y,
+                 0, 63);
   }
 }
 
@@ -681,6 +776,7 @@ static void ws_build_band_rows(CpuState *cpu, uint16 layer_state_offset,
       g_ram[(uint16)(kBgState_Height + 1 + layer_state_offset)] < 3)
     return;
   int rows = (band_px + 0xF) / 0x10;
+  s_rowdbg_tag = "band";
   for (int k = 1; k <= rows; k++) {
     int world_y = (int)row_y - k * 0x10;
     if (world_y < 0)
@@ -688,6 +784,7 @@ static void ws_build_band_rows(CpuState *cpu, uint16 layer_state_offset,
     ws_build_visible_row(cpu, layer_state_offset, (uint16)world_y,
                          built, requested);
   }
+  s_rowdbg_tag = "view";
 }
 
 void ActRaiser_WidescreenMarginRefresh(void) {
@@ -864,6 +961,8 @@ void ActRaiser_WidescreenMarginRefresh(void) {
                          g_ppu->extraTopCur, &built_rows, &requested_rows);
     }
   }
+
+  ws_rowdbg_hash("post-refresh");
 
   /* Transaction boundary: discard every game-visible scratch write. */
   memcpy(g_ram, s_wram_snapshot, sizeof(s_wram_snapshot));
