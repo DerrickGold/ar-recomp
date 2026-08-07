@@ -955,6 +955,54 @@ the current debugging process; this file is the case law.
       constant moved, and CMake had not rebuilt it when ctest ran. Verify the build is current
       before believing a green suite.
 
+37. **Isolated tile fragments welded to the left/right edge of the vertical-extend band —
+    FIXED 2026-08-06.** Reported as "streaming artifacts at the LEFT and RIGHT edges that
+    self-correct after a moment"; captured as a floating wood block walking right
+    (`runs/20260806-224602`) and a foliage sliver walking left (`runs/20260806-231345`).
+
+    **Root cause — a per-pixel drain span under a 16px-quantized refresh key.**
+    `WsLayerRefreshKey::camera_x_tile` quantizes the camera to 16px, but
+    `ws_build_visible_row` derived its neighbour-band drain range from the exact
+    `camera_x`. After a rebuild the camera keeps moving up to 15px, sweeping 1–2 fresh
+    tile columns into the margin that the last drain never covered. Undrained does not
+    mean empty: the page-aligned FULL drain has already filled all 64 ring columns, so
+    those cells hold real world content 512px away. Walking right at camX=1276 the last
+    rebuild (camX=1264) drained to tile 201 while 202–203 were on screen → a tree trunk
+    with nothing under it. Walking left at camX=321 the rebuild at 335 drained tiles
+    30–31 while view_left had swept back to 28 → a foliage sliver. Fix: derive the span
+    from `camera_x & ~0xF` (`+ 15` on the right). See rendering-engine.md §12b.
+
+    A second, independent bug found on the way: `ws_build_band_rows` stepped `k*16` down
+    from `row_y = camera_y & ~0xF` starting at `k=1`, assuming `camera_y` was 16px-aligned.
+    At camY=504/32px band it built `[464,496)` for a band spanning `[472,504)`, leaving
+    the band's bottom 8px row unbuilt — and that row is above the camera, so the game's
+    streamer never refreshes it either. Now selected by intersection with the band.
+
+    **Reusable lessons:**
+    - **A cache key and the work it guards must agree on granularity.** The key said "this
+      refresh covers a 16px window"; the drain said "this refresh covers exactly where the
+      camera is now". Every bug here was that gap. When work is cached on a quantized key,
+      the work must cover the whole quantum — the column-strip loops already did (their
+      `+ 1` strip), which is why only the rows were broken.
+    - **"Self-corrects as it scrolls" is a cadence signature, not a decode signature.** It
+      says the content is right whenever the work runs and stale in between — look at what
+      gates the work, not at the decoder. Two snapshots 118 frames apart with the camera
+      parked were byte-identical, which killed the "transient decode gap" framing early.
+    - **Prove the exoneration, don't argue it.** The prime suspect (band rows missing the
+      neighbour builds) was wrong twice over — they call the same `ws_build_visible_row`,
+      and 0 of 154 neighbour builds ever failed. The ±256 neighbour offset was cleared by
+      an A/B against ±512 with **build sites held fixed in both arms**; the first attempt
+      varied the guard too, so pageX=256 dropped the left neighbour and the diff measured
+      "built vs not built". A contaminated A/B looks exactly like a real signal.
+    - **When the world is static, self-consistency is a free oracle.** A displayed
+      (tile column, tile row) must read the same value every frame; contradictions are
+      provable staleness. 4 in 28818 samples before, 0 after — with no reference image and
+      no baseline binary.
+    - **Byte-identity gates that stop before the feature starts are not gates.** The
+      attract and flat-widescreen shots land at gf=900, before act entry, and the headless
+      diorama capture composites no band. All three stayed identical through both bugs.
+      Compare §36's version of this same lesson — this is the second time.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of
