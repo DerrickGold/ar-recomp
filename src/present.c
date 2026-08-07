@@ -285,11 +285,13 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
         kInspectorPresentation_HudBg, 0);
   }
 
-  /* Action's selected-magic icon (4 OAM, 16x16), simulation's hourglass
-   * (4 OAM, 16x16), and Sky Palace's magic icon (2 OAM, 16x8) are separately
-   * validated OAM signatures; the caller resolves the icon x/y (from live
-   * oam/highOam or the FrameSlot snapshot) and passes it in already
-   * resolved, so this function stays free of oam[]/highOam[] entirely. */
+  /* Action's selected-magic icon (4 OAM), simulation's hourglass (4 OAM), and
+   * Sky Palace's magic icon (4 OAM for Magical Fire, 1 for the other three
+   * spells) are separately validated OAM signatures; the caller resolves the
+   * icon x/y (from live oam/highOam or the FrameSlot snapshot) and passes it in
+   * already resolved, so this function stays free of oam[]/highOam[] entirely.
+   * Every one of those signatures covers the same 16x16 footprint, which is why
+   * the slot COUNT never reaches this far and one chunk size serves them all. */
   if (in->hud_obj_texture && in->obj_icon_valid && in->obj_icon_x < kFrameSlotAuthenticWidth) {
     int x = in->obj_icon_x, y = in->obj_icon_y;
     int icon_w = 16, icon_h = 16;
@@ -374,9 +376,12 @@ static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) 
    * that legitimately overwrote the icon's capture, so keying off it dropped
    * obj_icon_valid and the icon fell back to whatever the scene did with it
    * (drawn tilted and centered rather than anchored beside the right group).
-   * The 4-slot count still gates the 16x16 chunk below — Sky Palace's 2-slot
-   * 16x8 icon is handled by sim3d's own anchored overlay, not here. */
-  if (slot->oam_valid && slot->hud_icon_count == 4) {
+   *
+   * Any nonzero count, not ==4: the promote only ever latches a range it has
+   * validated as a 16x16 HUD icon, and Sky Palace spends 1 slot on that icon
+   * for three of the four spells and 4 for Magical Fire. Demanding 4 here was
+   * the second half of the bug that stranded those three at centre screen. */
+  if (slot->oam_valid && slot->hud_icon_count) {
     int first = slot->hud_icon_first;
     in.obj_icon_x = (slot->oam[first * 2] & 0xff) |
         ((slot->high_oam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;

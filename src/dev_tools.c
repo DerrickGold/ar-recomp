@@ -33,7 +33,6 @@ enum {
   kHudScaleMaximumPercent = 400,
   kHudScaleDefaultPercent = 100,
   kPercentScale = 100,
-  kHudObjectCaptureCount = 4,
 };
 
 static void EnsureDirectoryExists(const char *path) {
@@ -364,7 +363,7 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
    * hit-test disagree with what was actually drawn. */
   uint8_t icon_first = 0, icon_count = 0;
   ActRaiser_HudObjIconRange(&icon_first, &icon_count);
-  if (icon_count == kHudObjectCaptureCount) {
+  if (icon_count) {
     const int first = icon_first;
     inputs->obj_icon_x = (context->ppu->oam[first * 2] & 0xff) |
         ((context->ppu->highOam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;
