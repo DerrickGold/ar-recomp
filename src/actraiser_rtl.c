@@ -17,7 +17,7 @@
 #include "settings.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
-#include "sfx_census.h"
+#include "dev/sfx_census.h"
 #include "sim_render_atlas.h"
 #include "sim3d.h"
 #include "common_cpu_infra.h"

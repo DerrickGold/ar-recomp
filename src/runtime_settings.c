@@ -10,7 +10,7 @@
 #include "diorama.h"
 #include "frame_slot.h"
 #include "host_audio.h"
-#include "host_dev_tools.h"
+#include "dev/host_dev_tools.h"
 #include "randomizer.h"
 #include "host_display.h"
 #include "host_input.h"

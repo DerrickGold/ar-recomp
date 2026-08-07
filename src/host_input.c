@@ -13,7 +13,7 @@
 #include "input_replay.h"
 #include "present.h"
 #include "runtime_settings.h"
-#include "scene_inspector.h"
+#include "dev/scene_inspector.h"
 #include "settings.h"
 #include "settings_overlay.h"
 #include "sim3d.h"

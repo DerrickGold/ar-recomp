@@ -30,7 +30,7 @@
 #include "diorama_scroll_math.h"
 #include "hd_replacement_host.h"
 #include "settings_overlay.h"
-#include "scene_inspector.h"
+#include "dev/scene_inspector.h"
 #include "scene3d_math.h"
 #include "render_capabilities.h"
 #include "sim_render_atlas.h"
