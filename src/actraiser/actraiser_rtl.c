@@ -10,9 +10,9 @@
 #include "actraiser_game.h"
 #include "action/action_load_pacing.h"
 #include "actraiser_ws_gap.h"
-#include "diorama_capture_blend.h"
-#include "diorama_skybox_uv.h"
-#include "diorama_planes.h"
+#include "diorama/diorama_capture_blend.h"
+#include "diorama/diorama_skybox_uv.h"
+#include "diorama/diorama_planes.h"
 #include "host/host_display.h"   /* kHostDisplayFramebufferHeight */
 #include "settings.h"
 #include "hd_replacements.h"

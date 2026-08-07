@@ -12,7 +12,7 @@
 #include "present.h"
 #include "types.h"
 #include "settings.h"
-#include "diorama_planes.h"
+#include "diorama/diorama_planes.h"
 #include "sim3d.h"
 #include "sim_render_metadata.h"
 #include "sim_town_canvas.h"

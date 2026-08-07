@@ -7,7 +7,7 @@
 
 #include "actraiser_rtl.h"
 #include "common_cpu_infra.h"
-#include "diorama.h"
+#include "diorama/diorama.h"
 #include "forced_input.h"
 #include "input_map.h"
 #include "input_replay.h"

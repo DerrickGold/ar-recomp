@@ -7,7 +7,7 @@
 #include <SDL3/SDL.h>
 
 #include "actraiser_rtl.h"
-#include "diorama.h"
+#include "diorama/diorama.h"
 #include "frame_slot.h"
 #include "host/host_audio.h"
 #include "dev/host_dev_tools.h"

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "diorama_layer_editor.h"
+#include "diorama/diorama_layer_editor.h"
 #include "input_map.h"
 #include "settings.h"
 #include "user_data_dir.h"
