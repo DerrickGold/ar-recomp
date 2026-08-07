@@ -51,7 +51,7 @@
 #include "host_dev_tools.h"
 #include "host_display.h"
 #include "host_input.h"
-#include "manual_reader.h"
+#include "manual/manual_reader.h"
 #include "ini_upgrade_apply.h"
 #include "input_replay.h"
 #include "oracle_trace.h"

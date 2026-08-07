@@ -749,7 +749,7 @@ if(BUILD_TESTING)
     # fixed draw order correct on a renderer with no depth test.
     add_executable(actraiser_manual_pages_test
         tests/manual_pages_test.c
-        src/manual_pages.c
+        src/manual/manual_pages.c
         # ManualTurn_SheetExtents solves the sheet's world extents by probing the
         # projection, so the module depends on scene3d_math -- the one place the
         # settled page and the turning leaf are guaranteed to agree.
@@ -757,6 +757,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_manual_pages_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/manual
     )
     target_link_libraries(actraiser_manual_pages_test PRIVATE m)
     add_test(NAME actraiser_manual_pages COMMAND actraiser_manual_pages_test)
@@ -767,10 +768,11 @@ if(BUILD_TESTING)
     # to assert that PageDown turns a page.
     add_executable(actraiser_manual_input_test
         tests/manual_input_test.c
-        src/manual_input.c
+        src/manual/manual_input.c
     )
     target_include_directories(actraiser_manual_input_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/manual
     )
     target_link_libraries(actraiser_manual_input_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_manual_input COMMAND actraiser_manual_input_test)
