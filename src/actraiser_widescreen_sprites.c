@@ -19,6 +19,7 @@
  * sprite/projectile predicates authentic. */
 
 #include "cpu_state.h"
+#include "action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "settings.h"
@@ -375,8 +376,18 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
     live_l = g_ppu->extraLeftCur;
     live_r = g_ppu->extraRightCur;
   }
-  int draw_l = ws_margin_objects_enabled() ? live_l : 0;
-  int draw_r = ws_margin_objects_enabled() ? live_r : 0;
+  /* The apron widens the DRAW window because this predicate gates whether the
+   * sprite builder is called at all -- leaving it at the display margin would
+   * stop the builder from ever seeing the parts the apron exists to hold.
+   * Safe against the "real OAM is never widened" invariant by construction: the
+   * builder's own X cull is still the display window, so an object admitted
+   * only by this widening has every part REJECTED and parks its slot instead of
+   * consuming one. ACTIVATION is deliberately untouched (see below) -- how long
+   * an object lives is game logic, not presentation. */
+  const ActionApronGeometry scan_apron = ActRaiser_ObjApronGeometry();
+  ActionApron_BeginFrame();
+  int draw_l = ws_margin_objects_enabled() ? live_l + scan_apron.apron : 0;
+  int draw_r = ws_margin_objects_enabled() ? live_r + scan_apron.apron : 0;
   /* Vertical draw window (diorama vertical extend). The horizontal axis has
    * threaded real margins through this scan since Stage D1; the vertical one
    * passed 0,0, so an object above the viewport failed the `vertical` test, the
@@ -642,6 +653,15 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
     margin_top = g_ppu->extraTopCur;
   }
 
+  /* The RESOLVE window is the display window widened by the apron. It gates
+   * ONLY the apron channel below -- the OAM window keeps margin_left/right
+   * untouched, which is what makes "real OAM is never widened" structural
+   * rather than a rule someone has to remember. Inert (equal to the display
+   * window) whenever the apron is not live. */
+  const ActionApronGeometry apron_geom = ActRaiser_ObjApronGeometry();
+  const int resolve_left = margin_left + apron_geom.apron;
+  const int resolve_right = margin_right + apron_geom.apron;
+
   for (;;) {
     flip_attributes = ws_dp16(cpu, kSpriteDp_FlipAttributes);
     uint16 y_offsets = (uint16)(
@@ -771,6 +791,27 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
         cpu_write16(cpu, definition_bank,
                     (uint16)(kActRaiserOamShadow + oam_offset),
                     kParkedActionOamEntry);
+
+        /* The slot STAYS parked -- this part never reaches real OAM. If it
+         * lands in the apron, it rides the host part channel instead, carrying
+         * the exact position the 9-bit OAM X could not represent out here.
+         * Same expressions as the exact-position publish on the accept side, so
+         * an apron part and an OAM part describe position identically. */
+        if (apron_geom.apron > 0 &&
+            ws_biased_in_window(biased_x, resolve_left, resolve_right,
+                                kSpriteBiasedWidth)) {
+          const int part_large = cpu_read8(
+              cpu, definition_bank,
+              (uint16)(definition_address + kActionPartFlags)) & 1;
+          ActionApron_AddPart(
+              &apron_geom,
+              (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginX) +
+                  (int)component_offset_x - kSpriteDrawBias,
+              (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
+                  (int)component_offset_y - (kSpriteDrawBias + 1),
+              rendered_attributes,
+              (uint8_t)PpuObjSizeForSizeBit(g_ppu, part_large));
+        }
       }
     }
 

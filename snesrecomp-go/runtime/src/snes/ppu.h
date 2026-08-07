@@ -431,6 +431,13 @@ struct Ppu {
 #define PPU_forcedBlank(ppu) (ppu->inidisp & 0x80)
 
 #define PPU_objSize(ppu) (ppu->obsel >> 5)
+/* [OBJSEL size select][high-table size bit] -> pixel size. Exposed because a
+ * host that builds parts WITHOUT an OAM slot (the action apron channel) still
+ * has to agree with PpuResolveObjSlots about how big they are. */
+extern const uint8_t kPpuSpriteSizes[8][2];
+static inline int PpuObjSizeForSizeBit(const Ppu *ppu, int large) {
+  return ppu ? kPpuSpriteSizes[PPU_objSize(ppu)][large ? 1 : 0] : 0;
+}
 #define PPU_objTileAdr1(ppu) ((ppu->obsel & 7) << 13)
 #define PPU_objTileAdr2(ppu) (PPU_objTileAdr1(ppu) + (((ppu->obsel & 0x18) + 8) << 9))
 
