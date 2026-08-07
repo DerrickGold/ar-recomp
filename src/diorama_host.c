@@ -4,8 +4,8 @@
 
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
-#include "host_display.h"
-#include "host_input.h"
+#include "host/host_display.h"
+#include "host/host_input.h"
 #include "settings.h"
 #include "snes/ppu.h"
 

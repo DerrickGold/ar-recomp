@@ -13,7 +13,7 @@
 #include "diorama_capture_blend.h"
 #include "diorama_skybox_uv.h"
 #include "diorama_planes.h"
-#include "host_display.h"   /* kHostDisplayFramebufferHeight */
+#include "host/host_display.h"   /* kHostDisplayFramebufferHeight */
 #include "settings.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"

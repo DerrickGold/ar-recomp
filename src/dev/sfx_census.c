@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "sfx_census.h"
-#include "host_audio.h"
+#include "host/host_audio.h"
 #include "run_dir.h"
 
 /* Engine seams. The APU mutex is recursive, so handlers may take it even when

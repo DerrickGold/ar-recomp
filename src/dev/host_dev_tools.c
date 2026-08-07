@@ -3,7 +3,7 @@
 
 #include "dev_tools.h"
 #include "diorama_planes.h"
-#include "host_input.h"
+#include "host/host_input.h"
 #include "present.h"
 #include "scene_inspector.h"
 #include "settings.h"

@@ -16,7 +16,7 @@
 #include "diorama.h"
 #include "diorama_scroll_math.h"
 #include "frame_slot.h"
-#include "host_display.h"
+#include "host/host_display.h"
 #include "music_replacements.h"
 #include "present.h"
 #include "run_dir.h"
