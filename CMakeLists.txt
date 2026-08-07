@@ -263,10 +263,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_host_audio_pause_test
         tests/host_audio_pause_test.c
-        src/host_audio.c
+        src/host/host_audio.c
     )
     target_include_directories(actraiser_host_audio_pause_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/host
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_host_audio_pause_test PRIVATE
@@ -280,10 +281,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_host_display_pacing_test
         tests/host_display_pacing_test.c
-        src/host_display_pacing.c
+        src/host/host_display_pacing.c
     )
     target_include_directories(actraiser_host_display_pacing_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/host
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_host_display_pacing

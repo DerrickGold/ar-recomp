@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "host_display.h"
+#include "host/host_display.h"
 #include "input_map.h"
 #include "manual_input.h"
 #include "manual_pages.h"

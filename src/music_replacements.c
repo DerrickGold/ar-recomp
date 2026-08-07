@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "music_replacements.h"
-#include "host_audio.h"
+#include "host/host_audio.h"
 #include "settings.h"
 
 #define STB_VORBIS_HEADER_ONLY

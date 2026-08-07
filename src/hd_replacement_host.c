@@ -8,7 +8,7 @@
 
 #include "actraiser_rtl.h"
 #include "hd_replacements.h"
-#include "host_display.h"
+#include "host/host_display.h"
 #include "snes/ppu.h"
 
 /* HD art substitution is PNG-only and decoded once when textures are loaded.
