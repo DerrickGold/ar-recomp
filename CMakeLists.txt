@@ -583,23 +583,25 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_scene_inspector_test
         tests/scene_inspector_test.c
-        src/scene_inspector.c
+        src/dev/scene_inspector.c
         src/sim_render_metadata.c
         src/sim_world_map.c
         src/sim_world_navigation_scene.c
     )
     target_include_directories(actraiser_scene_inspector_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/dev
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_scene_inspector COMMAND actraiser_scene_inspector_test)
 
     add_executable(actraiser_scene_asset_dump_test
         tests/scene_asset_dump_test.c
-        src/scene_asset_dump.c
+        src/dev/scene_asset_dump.c
     )
     target_include_directories(actraiser_scene_asset_dump_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/dev
         ${CMAKE_SOURCE_DIR}/third_party/stb
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
