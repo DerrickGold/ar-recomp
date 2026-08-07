@@ -1307,13 +1307,20 @@ bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count) {
   return s_hud_obj_icon_count != 0;
 }
 
-/* Promote a validated fixed-screen HUD icon from the first four OAM slots.
- * Action's $00:923A icon uses tiles $D4-$D7. Simulation's 2026-07-16 Fillmore
- * capture proves the hourglass uses the same slots at x=$94/$9B, y=$0B/$13.
- * ROM frames $01:DD4B/$DD60/$DD75/$DD8A cycle upper tiles $EC-$EF and paired
- * lower tiles $FC-$FF, with horizontal flip on each right half. No OAM/WRAM
- * state is changed; the host later places the icon beside the right HUD group. */
+/* Promote a validated fixed-screen HUD icon out of OAM.
+ *
+ * Action's $00:923A icon uses tiles $D4-$D7 in the first four slots.
+ * Simulation's 2026-07-16 Fillmore capture proves the hourglass uses the same
+ * slots at x=$94/$9B, y=$0B/$13; ROM frames $01:DD4B/$DD60/$DD75/$DD8A cycle
+ * upper tiles $EC-$EF and paired lower tiles $FC-$FF, with horizontal flip on
+ * each right half. Sky Palace's selected-magic icon is neither fixed-slot nor
+ * fixed-shape and is scanned for -- see ActRaiser_SkyPalaceMagicIconSlots.
+ *
+ * All three land on the same 16x16 footprint, which is what lets the host draw
+ * whatever this promotes as one 16x16 chunk beside the right HUD group. No
+ * OAM/WRAM state is changed. */
 static void ActRaiser_WidescreenHudObjPromote(void) {
+  enum { kActRaiserPpuOamSlots = kPpuOamWords / 2 };
   s_hud_obj_icon_first = 0;
   s_hud_obj_icon_count = 0;
   if (!g_ppu || !g_ppu->extraLeftRight)
@@ -1347,24 +1354,55 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
              map_number >= kActRaiserSimulationTown_First &&
              map_number <= kActRaiserNonActionMap_SkyPalace) {
     if (map_number == kActRaiserNonActionMap_SkyPalace) {
-      /* Sky Palace magic icon shifts OAM slots when dialog sprites appear;
-       * scan for the 4-sprite signature instead of hardcoding a slot. */
-      int found_slot = -1;
-      for (int s = kActRaiserSkyPalaceMagicOamFirst; s <= 124; s++) {
+      /* Sky Palace magic icon shifts OAM slots when dialog sprites appear, and
+       * changes SHAPE with the selected spell (see the two forms documented on
+       * ActRaiser_SkyPalaceMagicIconSlots) -- so scan for the signature rather
+       * than hardcoding either a slot or a slot count. */
+      const int large_px = PpuObjSizeForSizeBit(g_ppu, 1);
+      int found_slot = -1, found_count = 0;
+      for (int s = kActRaiserSkyPalaceMagicOamFirst;
+           s < kActRaiserPpuOamSlots && found_slot < 0; s++) {
+        const int index = s * 2;
+        const int large = (g_ppu->highOam[s >> 2] >> ((s & 3) * 2 + 1)) & 1;
+        const int count = ActRaiser_SkyPalaceMagicIconSlots(
+            (uint8)g_ppu->oam[index], (uint8)(g_ppu->oam[index] >> 8),
+            (uint8)(g_ppu->oam[index + 1] >> 8), large, large_px);
+        if (!count || s + count > kActRaiserPpuOamSlots)
+          continue;
+        /* The lead slot matched. The quad form spends three more slots on the
+         * same icon, so confirm those before claiming the range; the single
+         * large slot has no companions and this loop is a no-op for it. */
         int ok = 1;
-        for (int i = 0; i < kActRaiserSkyPalaceMagicOamCount && ok; i++) {
-          int index = (s + i) * 2;
-          uint8 y = (uint8)(g_ppu->oam[index] >> 8);
-          uint8 attr = (uint8)(g_ppu->oam[index + 1] >> 8);
-          uint8 expected_y = i < 2
-              ? kActRaiserHudObjUpperY : kActRaiserHudObjLowerY;
-          uint8 expected_attr = (i & 1)
-              ? kActRaiserSkyPalaceMagicRightAttr
-              : kActRaiserSkyPalaceMagicLeftAttr;
-          if (y != expected_y || attr != expected_attr)
+        for (int i = 1; i < count && ok; i++) {
+          const int q = (s + i) * 2;
+          uint8 expected_y = 0, expected_attr = 0;
+          ActRaiser_SkyPalaceMagicQuadSlot(i, &expected_y, &expected_attr);
+          if ((uint8)(g_ppu->oam[q] >> 8) != expected_y ||
+              (uint8)(g_ppu->oam[q + 1] >> 8) != expected_attr)
             ok = 0;
         }
-        if (ok) { found_slot = s; break; }
+        if (!ok)
+          continue;
+        found_slot = s;
+        found_count = count;
+      }
+      /* AR_HUDICON=1: one line per change of scan outcome, the same
+       * change-triggered shape as the [widescreen] policy line above. This is
+       * the answer to "why is the magic icon still at centre screen?" — a
+       * slot=-1 line names the spell whose OAM shape the scan does not know,
+       * which is exactly how the four-small-slots/one-large-slot split was
+       * found. Costs a getenv and three compares per Sky Palace frame. */
+      if (getenv("AR_HUDICON")) {
+        static int last_spell = -1, last_slot = -2, last_count = -1;
+        int spell = g_ram[kActRaiserWram_SelectedMagic];
+        if (spell != last_spell || found_slot != last_slot ||
+            found_count != last_count) {
+          last_spell = spell; last_slot = found_slot; last_count = found_count;
+          fprintf(stderr,
+                  "[hud-icon] gf=%u sky-palace spell=%d -> slot=%d count=%d\n",
+                  (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+                  spell, found_slot, found_count);
+        }
       }
       if (found_slot < 0)
         return;
@@ -1372,10 +1410,9 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
                                0, 0, kActRaiserAuthenticWidth,
                                kActRaiserSimulationHudHeight,
                                kPpuOverlayFlag_RemoveFromGame) &&
-          PpuSetOverlayOamRange(g_ppu, found_slot,
-                                kActRaiserSkyPalaceMagicOamCount)) {
+          PpuSetOverlayOamRange(g_ppu, found_slot, found_count)) {
         s_hud_obj_icon_first = (uint8_t)found_slot;
-        s_hud_obj_icon_count = kActRaiserSkyPalaceMagicOamCount;
+        s_hud_obj_icon_count = (uint8_t)found_count;
       }
       return;
     }
@@ -1494,9 +1531,9 @@ static void ActRaiser_DioramaHudObjPrepare(void) {
     return;
   const int raster_width = bounds.x1 - bounds.x0;
   const int raster_height = bounds.y1 - bounds.y0;
-  /* The promoted signatures are 16x16 (action/sim) and 16x8 (Sky Palace); this
-   * ceiling is slack, not a target, and a range that overruns it is refused
-   * rather than clipped. */
+  /* Every promoted signature is 16x16, whether the ROM spent four small slots
+   * on it or one large one; this ceiling is slack, not a target, and a range
+   * that overruns it is refused rather than clipped. */
   if (raster_width <= 0 || raster_height <= 0 ||
       raster_width > kActRaiserHudIconRasterLimit ||
       raster_height > kActRaiserHudIconRasterLimit)

@@ -217,11 +217,13 @@ enum {
   kActRaiserSimulationHourglassLeftAttr = 0x31,
   kActRaiserSimulationHourglassRightAttr = 0x71,
   kActRaiserSkyPalaceMagicOamFirst = 6,
-  kActRaiserSkyPalaceMagicOamCount = 4,
+  kActRaiserSkyPalaceMagicQuadOamCount = 4,
+  kActRaiserSkyPalaceMagicWholeOamCount = 1,
   kActRaiserSkyPalaceMagicX = 0x94,
   kActRaiserSkyPalaceMagicY = 0x0B,
   kActRaiserSkyPalaceMagicLeftAttr = 0x39,
   kActRaiserSkyPalaceMagicRightAttr = 0x79,
+  kActRaiserSkyPalaceMagicIconSize = 16,
 
   kActRaiserTransitionRequestBit = 0x80,
   kActRaiserObjectStatus_InactiveMask = 0xC000,
@@ -334,6 +336,56 @@ static inline int ActRaiser_SimMapPickerActive(void) {
       g_ram[kActRaiserWram_MapGroup],
       g_ram[kActRaiserWram_CurrentMap],
       ActRaiser_ReadWramMirror16(kActRaiserWram_SimMapPickerFlag));
+}
+
+/* Does an OAM slot with these attributes START the Sky Palace selected-magic
+ * HUD icon, and if so how many slots does the icon occupy? Pure so the promote,
+ * and its test, agree on one answer; `large` is the slot's high-OAM size bit
+ * and `large_px` what OBSEL currently resolves that bit to.
+ *
+ * The ROM draws the SAME 16x16 framed icon two different ways, and which way
+ * depends on the spell. Measured from runs/20260806-232552, one snapshot per
+ * spell with all four unlocked:
+ *
+ *   Magical Fire      FOUR small sprites -- tiles $67,$67,$77,$77 at
+ *                     (148,11) (156,11) (148,19) (156,19), attrs $39/$79
+ *                     alternating, so each right half is an H-flip of the left.
+ *   Stardust/Aura/    ONE large sprite -- tile $84/$86/$88 at (148,11),
+ *   Light             attr $39, no companion slots at all.
+ *
+ * Only the quad was ever recognised, so selecting any spell but Fire left the
+ * icon unpromoted: it stayed in the game's own OAM and drew at its authentic
+ * centre-screen X while the rest of the HUD moved to the widescreen anchor.
+ *
+ * The size bit is the discriminator rather than the tile number, because the
+ * tile set is per-spell and the shape is not. For the single-sprite form the
+ * resolved size must be exactly 16: OBSEL decides what "large" means, present.c
+ * projects this icon as a fixed 16x16 chunk, and a large that is not 16 is
+ * something else wearing this position. The quad deliberately does NOT check
+ * size -- it is the long-proven Fire path, and its four slots already pin the
+ * footprint at 2x2 sprites. */
+static inline int ActRaiser_SkyPalaceMagicIconSlots(uint8 x, uint8 y,
+                                                    uint8 attr, int large,
+                                                    int large_px) {
+  if (x != kActRaiserSkyPalaceMagicX || y != kActRaiserSkyPalaceMagicY ||
+      attr != kActRaiserSkyPalaceMagicLeftAttr)
+    return 0;
+  if (!large)
+    return kActRaiserSkyPalaceMagicQuadOamCount;
+  return large_px == kActRaiserSkyPalaceMagicIconSize
+      ? kActRaiserSkyPalaceMagicWholeOamCount : 0;
+}
+
+/* The per-slot expectation for slot `first + i` of the four-sprite quad form,
+ * for the caller that already got kActRaiserSkyPalaceMagicQuadOamCount above
+ * and now has to confirm the three companions. */
+static inline void ActRaiser_SkyPalaceMagicQuadSlot(int i, uint8 *y,
+                                                    uint8 *attr) {
+  if (y)
+    *y = i < 2 ? kActRaiserHudObjUpperY : kActRaiserHudObjLowerY;
+  if (attr)
+    *attr = (i & 1) ? kActRaiserSkyPalaceMagicRightAttr
+                    : kActRaiserSkyPalaceMagicLeftAttr;
 }
 
 #endif  /* ACTRAISER_GAME_H */
