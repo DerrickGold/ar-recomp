@@ -1599,7 +1599,9 @@ The first two were originally patched by *inferring intent from the byte* — a
 `$E0` marker filter and a "reject positive Y on band lines" rule. Both worked,
 both were guesses, and neither could lift the −32 ceiling.
 
-`PpuSetObjYOverride` removes the ambiguity at the source instead. ActRaiser's
+`PpuSetObjExactPosition` removes the ambiguity at the source instead (Y-only as
+`PpuSetObjYOverride` when the band shipped; generalised to both axes on
+2026-08-06 for §13j's apron, which needs the same escape on X). ActRaiser's
 action sprite emitter is a host HLE (`ActRaiser_BuildObjectSprites`), and it
 computes the position as a full 16-bit value and only then truncates it to the
 byte — so the exact value is available at the write site. The override carries
@@ -1694,6 +1696,106 @@ must respond to the margin differently (HUD fixed, plane shifted).
 first visible row. Deliberately a raw dump and not a verdict: a first cut that
 classified "uniform row" as filler reported 100% filler, because an all-sky BG1
 row is uniform too.
+
+## 13j. The OBJ apron — display margin vs resolve margin (2026-08-06)
+
+Diorama-only. Captured OBJ planes are `kPpuObjApron = 64` columns WIDER per side
+than the span the diorama displays. Those columns are **resolve headroom and are
+never shown**.
+
+### One constant was playing two roles
+
+Before this, the captured/emitted region and the displayed region were the same
+width, so "entering the viewport" and "hitting the buffer edge" happened at the
+same instant. A part straddling the edge was not clipped — it was **abandoned
+mid-write**. Measured on object `$10E0` (Fillmore act 1, `saves/artifacts2.rec`
+gf1636), per-column occupancy across authentic columns 336→372:
+
+```
+before  0 6 10 22 27 28 29 35 37 38 36 40 40 41 41 │ buffer ends
+after   0 6 10 22 27 28 29 35 37 38 36 40 40 41 41 41 41 40 40 37 36
+        34 33 26 25 23 20 18 17 16 11 0
+```
+
+The object is 30 columns wide; the buffer held 15 and stopped **mid-plateau**.
+A complete silhouette rises, plateaus and falls — stopping at the plateau is the
+signature of the buffer running out, not of a sprite that shape. In a diorama
+the cut is conspicuous because the scene is drawn as an INSET plane, so the edge
+lands visibly inside the picture rather than at the screen border.
+
+### Why the apron is NOT displayed (the finding that shaped the design)
+
+The instinct is to show the extra columns so the object appears whole. That is
+wrong, and the reason is a hard cap elsewhere:
+
+**Background rendering is bounded by `kPpuExtraLeftRight = 96` columns per side,
+and the diorama already spends 95 of them.** So the apron can only ever hold OBJ
+pixels. Displaying it would show sprites floating over empty background — worse
+than the artifact it was meant to fix. Making BG follow would mean raising
+`kPpuExtraLeftRight`, widening the per-scanline line buffers and extending
+tilemap streaming, which is exactly the per-line cost the width split declined.
+
+The corollary is worth stating plainly because it is easy to talk yourself out
+of: **clipping at the shown edge is inherent to any finite shown region and the
+apron does not remove it.** `$10E0` is still cut at the display edge. It is cut
+cleanly instead of raggedly. Anyone who finds the remaining fragment
+objectionable wants SUPPRESSION (widen the emitter's object-level cull so a
+straddling object is not drawn at all, the way flat widescreen already behaves)
+— a different, cheaper change that trades a ragged edge for a pop-in.
+
+### What it actually buys
+
+- **DOF / edge-AA / rim shaders only.** They sample the source texture across
+  the whole `uv_u0..uv_u1` window and DO reach past the display edge, where they
+  previously blended the last real texel against nothing. `DrawDioramaSkybox`
+  documents the same failure for BG2 and works around it by insetting the UV
+  range; the apron fixes it properly. **With GPU shaders off, filling the apron
+  changes no pixel** — `BuildDioramaSupersample` blits the display window into
+  its own target and the final draw samples that, whose edges clamp. The
+  headless harness has no GPU device, so it cannot demonstrate this benefit.
+- **The machinery the sim synthetic part channel needs**, built where a
+  byte-identity gate can keep it honest.
+
+### Geometry, and the invariant everything rests on
+
+Screen x = 0 sits at surface column `apron + ws_extra`; the display window is
+the MIDDLE of the surface. The apron bands are screen x
+`[-(ws_extra+apron), -ws_extra)` and `[256+ws_extra, 256+ws_extra+apron)`, which
+map to surface columns `[0, apron)` and `[apron+display, surface_width)`.
+
+**No apron column is ever a display column.** Capture-time rasterization writes
+only the two bands — enforced structurally by handing `PpuRasterizeParts` the
+band as its `bounds` — so the display window stays byte-identical by
+construction rather than by care. `tests/action_obj_apron_test.c` pins it.
+
+### Real OAM is never widened
+
+A part outside the display window stays PARKED in the OAM shadow exactly as the
+ROM left it and rides a host part list instead, carrying its exact position
+(these coordinates are outside what the 9-bit OAM X can represent — see
+`kWsExtraMax = 95`, §13i's table). Only the object-level draw predicate widens,
+because it gates whether the sprite builder runs at all; an object admitted
+solely by that widening has every part rejected and parks a slot rather than
+consuming one. Nothing writes OAM differently, so the invariant cannot drift.
+
+Rasterization mirrors the hardware: OAM order decides who owns an overlapping
+pixel through ONE shared z-test, and only the survivor's priority picks a plane.
+So parts draw one at a time in list order and a pixel already opaque in ANY of
+the four OBJ planes is skipped — first-writer-wins across bands, using the
+planes themselves as the claimed-set (they start empty because
+`PpuClearOverlayRenderLine` clears the full bound pitch every frame).
+
+`kPpuObjApron = 0` collapses every site to its pre-apron expression and is the
+A/B lever; verified byte-identical against a from-source pre-apron build.
+
+### Trap: two widths, one variable
+
+Three separate consumers read apron-wide surfaces with the DISPLAY width and
+produced three distinct visible regressions in one commit (sheared HUD, black
+stripe down the backdrop, HUD icon loose in the scene — ledger §36). The
+arithmetic is trivial; the bug is always *which width am I holding*. Use
+`ActionApron_SurfacePitch` / `ActionApron_DisplayOffset` /
+`ActionApron_SurfaceColumn` rather than open-coding it.
 
 ## 14. Open questions (all remaining, none blocks the §13 design)
 
