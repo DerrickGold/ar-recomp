@@ -14,7 +14,7 @@
 #include "randomizer.h"
 #include "host_display.h"
 #include "host_input.h"
-#include "manual_reader.h"
+#include "manual/manual_reader.h"
 #include "music_replacements.h"
 #include "save_system.h"
 #include "settings_overlay.h"
