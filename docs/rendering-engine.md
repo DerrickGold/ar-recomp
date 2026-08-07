@@ -704,21 +704,35 @@ bundled runtime's widescreen/PPU interfaces:
   the generic OBJ overlay buffer; every other OBJ remains on the normal sprite
   path. Earlier render-scoped OAM coordinate mutation is gone, so emulated
   state, savestates, future DMA, and game logic remain authentic.
-- Simulation's hourglass (town maps 1-6) is also slots 0-3. Sky Palace's
-  selected-magic icon is a separate OAM capture path: the game dynamically
-  allocates its 4 OAM sprites (dialog Yes/No icons can push the magic icon to
+- Simulation's hourglass (town maps 1-6) is also slots 0-3. The Fillmore
+  snapshot at `runs/20260716-172322/snapshots/snap_00_gf1378` identifies
+  fixed/overlay record 23 (`$083E`, live frame pointer `$01:DD4B`) and its OAM
+  signature: left/right x `$94/$9B`, upper/lower y `$0B/$13`, and output
+  attributes `$31/$71` (the right halves are horizontally flipped). ROM
+  compositions at `$01:DD4B/$DD60/$DD75/$DD8A` prove four animation phases:
+  paired upper tiles `$EC-$EF` and lower tiles `$FC-$FF`. Validation accepts
+  only that range and requires both halves and the `+$10` lower-tile
+  relationship. The same host placement then pins the 16px capture four native
+  pixels before simulation's right/score group.
+- Sky Palace's selected-magic icon is a separate OAM capture path: the game
+  dynamically allocates its sprites (dialog Yes/No icons can push the icon to
   higher slots), so the host scans OAM from slot 6 onward for the signature
-  (y `$0B`/`$13`, attrs `$39`/`$79` mirrored pairs) rather than hardcoding a
-  slot index. The Fillmore snapshot at
-  `runs/20260716-172322/snapshots/snap_00_gf1378` identifies fixed/overlay
-  record 23 (`$083E`, live frame pointer `$01:DD4B`) and its OAM signature:
-  left/right x `$94/$9B`, upper/lower y `$0B/$13`, and output attributes
-  `$31/$71` (the right halves are horizontally flipped). ROM compositions at
-  `$01:DD4B/$DD60/$DD75/$DD8A` prove four animation phases: paired upper tiles
-  `$EC-$EF` and lower tiles `$FC-$FF`. Validation accepts only that range and
-  requires both halves and the `+$10` lower-tile relationship. The same host
-  placement then pins the 16px capture four native pixels before simulation's
-  right/score group.
+  rather than hardcoding a slot index.
+- **That icon has two OAM shapes, one per spell (corrected 2026-08-06).** The
+  ROM draws the same 16x16 framed icon at the same fixed position (x `$94`,
+  y `$0B`, attr `$39`) two different ways, measured one snapshot per spell in
+  `runs/20260806-232552`: **Magical Fire** spends FOUR 8x8 sprites (tiles
+  `$67/$67/$77/$77`, y `$0B`/`$13`, attrs `$39`/`$79` mirrored pairs), while
+  **Stardust/Aura/Light** spend ONE 16x16 sprite (tile `$84`/`$86`/`$88`,
+  attr `$39`) with no companion slots. `ActRaiser_SkyPalaceMagicIconSlots`
+  (actraiser_game.h) is the single predicate both the promote and its test read;
+  it discriminates on the high-OAM **size bit**, not the tile number, because
+  the tile set is per-spell and the shape is not. The single-sprite form also
+  requires OBSEL to resolve "large" to exactly 16, since the host projects this
+  icon as a fixed 16x16 chunk. Until this was found, only Fire's quad was
+  recognised, so the other three spells were never promoted and drew at their
+  authentic centre-screen X while the rest of the HUD moved — ledger §38.
+  `AR_HUDICON=1` reports the scan outcome (slot and count, misses included).
 - `src/main.c` binds generic BG3/OBJ surfaces, then uploads the game and those
   two captured surfaces separately. It
   renders the game with the normal logical-size/PAR transform, then composites

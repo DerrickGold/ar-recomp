@@ -1003,6 +1003,60 @@ the current debugging process; this file is the case law.
       diorama capture composites no band. All three stayed identical through both bugs.
       Compare §36's version of this same lesson — this is the second time.
 
+38. **Three of four Sky Palace spells drew their magic icon at authentic centre screen —
+    FIXED 2026-08-06 (`3316329`).** Reported from live play: the icon follows the HUD anchor
+    for Magical Fire and stays stuck in the middle for the other three. Captured as one
+    snapshot per spell in `runs/20260806-232552`.
+
+    **Root cause — the same picture, two different OAM spends.** The reported suspicion was
+    that each spell uses a different set of object slots. It doesn't: all four put the icon
+    in the same slot at the same fixed screen position (x `$94`, y `$0B`, attr `$39`). What
+    changes is the SHAPE.
+
+    - Magical Fire: **four** 8x8 sprites, tiles `$67/$67/$77/$77`, attrs `$39/$79/$39/$79`,
+      each row's right half an H-flip of the left.
+    - Stardust / Aura / Light: **one** 16x16 sprite, tile `$84/$86/$88`, attr `$39`, with no
+      companion slots at all.
+
+    Both render the identical 16x16 framed icon. `ActRaiser_WidescreenHudObjPromote`'s scan
+    validated the four-slot form and nothing else, so three spells were never promoted,
+    `RemoveFromGame` never fired, and the ROM's own centre-screen draw stood while the rest
+    of the HUD moved to the widescreen anchor.
+
+    **A second gate would have swallowed the fix.** `present.c`
+    (`BuildProjectionInputsFromSlot`) and `dev_tools.c` both required `hud_icon_count == 4`
+    before anchoring the chunk. Repairing only the scan would have promoted the icon and
+    still drawn nothing.
+
+    **Fix:** `ActRaiser_SkyPalaceMagicIconSlots` in `actraiser_game.h` — one pure predicate
+    returning 4, 1 or 0, read by both the promote and its test. The size bit discriminates
+    rather than the tile number (the tile set is per-spell, the shape is not); the
+    single-sprite form additionally requires OBSEL's "large" to resolve to exactly 16, since
+    `present.c` projects a fixed 16x16 chunk. Fire's quad keeps its original checks. Both
+    consumers now accept any nonzero count. See rendering-engine.md §13.1.
+
+    **Reusable lessons:**
+    - **"Which slots?" and "what shape?" are different questions, and OAM answers the second
+      for free.** Dumping all 128 slots per variant side by side — position, tile, attribute,
+      size bit — took one script and made the answer unambiguous. Theorising about slot
+      allocation could not have found it, because the scan was already slot-agnostic.
+    - **The ROM's OAM spend is an authoring choice, not a property of the picture.** Four
+      mirrored 8x8s and one 16x16 are the same 16 pixels; which one you get depends on how
+      the art filled the tile budget. A sprite signature should key on screen-space
+      invariants — position, attribute, footprint — never on how many slots the ROM spent.
+    - **A magic count shared between a producer and its consumers is a coupling, and the
+      consumer copies fail silently.** The promote latched a count; two readers independently
+      compared it against a literal `4`. Grep the count, not just the producer, before
+      believing a signature fix is complete.
+    - **A signature scan that can decline should be able to say so.** The scan returned
+      silently on a miss, so the failure was only ever visible as a misplaced icon.
+      `AR_HUDICON=1` now prints one change-triggered line per outcome; a `slot=-1` line
+      naming the spell turns this class of bug from a visual puzzle into a one-run answer.
+    - **A signature documented from the one variant in front of you reads as complete.**
+      §13.1 had asserted since 2026-07-15 that this icon *is* four mirrored sprites — true of
+      every capture that existed then, and wrong about the feature. Same shape of mistake as
+      the bug itself, one layer up.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of
