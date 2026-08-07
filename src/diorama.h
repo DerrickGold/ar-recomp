@@ -121,7 +121,13 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
  * skybox quad uses it — it is a screen-space quad, so cropping its source is
  * free. Deliberately NOT applied to the per-layer loop: those quads are
  * world-registered against BG1, and narrowing their UV would desync them. */
+/* obj_apron: columns of RESOLVE apron the bound surfaces carry per side. The
+ * displayed span is [obj_apron, obj_apron+snes_width) -- snes_width stays the
+ * DISPLAY width, so the mesh, aspect_x and the camera fit are unaffected by the
+ * apron and apron 0 reproduces the pre-apron geometry exactly. Only the UV
+ * window and the supersample source rect move. */
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
+                       int obj_apron,
                        int active_pixel_aspect, bool ignore_aspect_ratio,
                        int visible_width, SDL_Texture *textures[],
                        uint8_t *pixels[],

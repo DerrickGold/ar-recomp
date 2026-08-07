@@ -4476,13 +4476,18 @@ void PresentComposite(const FrameSlot *slot,
      * corresponds to. They are equal today; keeping them distinct is what makes
      * that stay true if either ever moves. */
     int bg2_valid_x0 = 0, bg2_valid_x1 = kFrameSlotLayerTextureWidth;
-    DioramaBg2ValidSpan(slot->ws_extra, slot->extra_left_right,
+    /* + obj_apron: the span is in SURFACE columns, and screen x = 0 sits at
+     * column obj_apron + ws_extra now that the surfaces carry resolve headroom
+     * on both sides. Without it the skybox would crop its sky an apron early. */
+    DioramaBg2ValidSpan(slot->ws_extra + slot->obj_apron,
+                        slot->extra_left_right,
                         slot->extra_left_cur, slot->extra_right_cur,
                         slot->bg2_margin_source, kFrameSlotLayerTextureWidth,
                         &bg2_valid_x0, &bg2_valid_x1);
     DioramaProjection action_projection;
-    if (!Diorama_Composite(g_renderer, slot->snes_width + slot->obj_apron * 2,
+    if (!Diorama_Composite(g_renderer, slot->snes_width,
                            slot->snes_height + slot->ws_extra_top,
+                           slot->obj_apron,
                            slot->pixel_aspect, slot->ignore_aspect_ratio,
                            slot->visible_width, g_diorama_textures, pixels,
                            &scroll_delta, &final_cam, distance_scale,

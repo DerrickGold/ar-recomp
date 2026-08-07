@@ -369,7 +369,7 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
  * by blitting only the VALID `{0,0,snes_width,snes_height}` source sub-rect
  * into an intermediate sized to that exact active region. */
 static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
-                                            SDL_Texture *source,
+                                            SDL_Texture *source, int obj_apron,
                                             int snes_width, int snes_height) {
   SDL_Texture *ss = EnsureDioramaSupersampleTexture(
       renderer, snes_width * kDioramaSupersample,
@@ -379,7 +379,13 @@ static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
   SDL_RenderClear(renderer);
-  SDL_FRect src = { 0.0f, 0.0f, (float)snes_width, (float)snes_height };
+  /* Starts at the APRON, not at column 0: the displayed span is the MIDDLE of
+   * an apron-wide surface. Blitting from 0 copied the empty left apron in and
+   * pushed the content right -- which on the backdrop (the one BLENDMODE_NONE
+   * layer, so transparent reads as black) showed as a permanent black stripe
+   * down the left edge, fixed in place regardless of level progression. */
+  SDL_FRect src = { (float)obj_apron, 0.0f, (float)snes_width,
+                    (float)snes_height };
   SDL_FRect dst = { 0.0f, 0.0f, (float)(snes_width * kDioramaSupersample),
                     (float)(snes_height * kDioramaSupersample) };
   SDL_BlendMode old_blend = SDL_BLENDMODE_BLEND;
@@ -1175,12 +1181,17 @@ static int DioramaLayerBgIndex(int plane) {
  * Plane+skybox wants the fuller blur since the in-box copy stays sharp and
  * the skybox is deliberately meant to read as unfocused backdrop. */
 static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
-                              int snes_width, int snes_height,
+                              int obj_apron, int snes_width, int snes_height,
                               int out_w, int out_h, bool dim,
                               float blur_radius,
                               int bg2_valid_x0, int bg2_valid_x1) {
   if (!bg2_texture) return;
-  float uv_u1 = (float)snes_width / (float)kPpuSurfaceWidth;
+  /* [obj_apron, obj_apron+snes_width) -- the DISPLAYED span, which sits in the
+   * middle of an apron-wide surface. bg2_valid_x0/x1 arrive already in the same
+   * surface-column space (the caller offsets them), so the margin-fix branch
+   * below needs no apron term of its own. */
+  float uv_u0_base = (float)obj_apron / (float)kPpuSurfaceWidth;
+  float uv_u1 = (float)(obj_apron + snes_width) / (float)kPpuSurfaceWidth;
   /* Same live report: a visible lighter/garbage-colored strip appeared at
    * the screen's right edge. Root cause: the blur shader samples texels up
    * to `radius` away from each fragment (src/shaders/blur.frag.glsl) —
@@ -1212,7 +1223,7 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
                          blur_radius, &u0, &u1);
   } else {
     float margin_u = (blur_radius + 1.0f) / (float)kPpuSurfaceWidth;
-    u0 = margin_u;
+    u0 = uv_u0_base + margin_u;
     u1 = uv_u1 - margin_u;
     if (u1 < u0) u1 = u0;  /* degenerate guard for a pathologically narrow capture */
   }
@@ -1483,6 +1494,7 @@ static float DioramaVerticalShift(const float mvp[16], float height_scale,
 }
 
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
+                       int obj_apron,
                        int active_pixel_aspect, bool ignore_aspect_ratio,
                        int visible_width, SDL_Texture *textures[],
                        uint8_t *pixels[],
@@ -1529,7 +1541,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       pixels[kPpuOverlaySource_Bg2]) {
     bool both = g_settings.diorama_skybox == kDioramaSky_Both;
     DrawDioramaSkybox(renderer, textures[kPpuOverlaySource_Bg2],
-                      snes_width, snes_height, out_w, out_h, both,
+                      obj_apron, snes_width, snes_height, out_w, out_h, both,
                       both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly,
                       bg2_valid_x0, bg2_valid_x1);
   }
@@ -1551,8 +1563,13 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
    * width and comfortably exceeds one tick of camera motion at walking speed
    * (a few px), so a normal shift never saturates. */
   const float slack_px = interpolating ? kInterpUvSlackPx : 0.0f;
-  float uv_u0 = slack_px / (float)kPpuSurfaceWidth;
-  float uv_u1 = ((float)snes_width - slack_px) / (float)kPpuSurfaceWidth;
+  /* The UV window is the DISPLAYED span [obj_apron, obj_apron+snes_width), not
+   * the whole surface: the apron carries resolve headroom, never extra world to
+   * show. Sampling from column 0 dragged both empty apron bands into every
+   * plane and widened the picture by 2*apron. */
+  float uv_u0 = ((float)obj_apron + slack_px) / (float)kPpuSurfaceWidth;
+  float uv_u1 =
+      ((float)(obj_apron + snes_width) - slack_px) / (float)kPpuSurfaceWidth;
   float uv_slack = slack_px / (float)kPpuSurfaceWidth;
   /* V now divides by the TEXTURE height the way U always divided by the
    * texture width. The old form (`1 - slack/tex_h`) silently assumed the
@@ -1953,8 +1970,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     SDL_Texture *draw_texture = texture;
     bool used_ss = false;
     if (!use_shader) {
-      SDL_Texture *ss =
-          BuildDioramaSupersample(renderer, texture, snes_width, snes_height);
+      SDL_Texture *ss = BuildDioramaSupersample(
+          renderer, texture, obj_apron, snes_width, snes_height);
       if (ss) {
         draw_texture = ss;
         used_ss = true;
@@ -1976,10 +1993,16 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     SDL_Vertex *draw_verts = verts;
     if (used_ss) {
       memcpy(ss_verts, verts, (size_t)nv * sizeof(ss_verts[0]));
+      /* U is a scale AND an offset now: the supersample target holds the
+       * displayed span alone, which begins at surface column obj_apron rather
+       * than at 0. A pure scale would map the apron into the target and shift
+       * every crisp-path layer right by apron*kDioramaSupersample texels. V
+       * needs no offset -- the vertical band's row 0 IS the surface's row 0. */
       float u_scale = (float)kPpuSurfaceWidth / (float)snes_width;
+      float u_bias = (float)obj_apron / (float)snes_width;
       float v_scale = (float)kPpuBufHeight / (float)snes_height;
       for (int v = 0; v < nv; v++) {
-        ss_verts[v].tex_coord.x *= u_scale;
+        ss_verts[v].tex_coord.x = ss_verts[v].tex_coord.x * u_scale - u_bias;
         ss_verts[v].tex_coord.y *= v_scale;
       }
       draw_verts = ss_verts;
