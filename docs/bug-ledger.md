@@ -877,6 +877,84 @@ the current debugging process; this file is the case law.
       exhaustively offline.** Every BG page at every plausible base ruled out, OAM parked —
       leaving only a host-side Y source, which is what it was.
 
+35. **Object `$10E0` rendered as a clipped fragment floating inside the diorama — CAUSE
+    MEASURED, MITIGATED 2026-08-06 (the OBJ apron); the fragment itself is EXPECTED.** Fillmore
+    act 1 with diorama on: an 8-column sliver of a sprite hanging in mid-air near the right of
+    the scene (`saves/artifacts2.rec` gf1632-1640).
+
+    **It is a real, world-placed object, not corruption.** `AR_OBJSLOTLOG=1` shows its world
+    position holding at (704,560) across gf1632-1637 while the camera scrolls 331→341, so
+    screen = world − cam slides 365→355 — whereas the player (`$08A0`) has world climbing
+    473→481 in lockstep with the camera and screen pinned at 128. The camera is scrolling
+    toward something that is genuinely there.
+
+    **Root cause: the captured region and the displayed region were one width**, so "entering
+    the viewport" and "hitting the buffer edge" happened at the same instant and the part was
+    *abandoned mid-write* rather than clipped. Occupancy per authentic column 336→372 was
+    `0 6 10 22 27 28 29 35 37 38 36 40 40 41 41` and then nothing — stopping mid-plateau. A
+    complete silhouette rises, plateaus and falls; the object is 30 columns wide and the buffer
+    held 15. It reads as corruption rather than as something leaving the screen only because
+    the diorama draws its scene as an INSET plane, so the cut lands visibly inside the picture.
+
+    Flat widescreen never shows it: its margin budget of 52 puts the object entirely outside
+    the window, so it is simply not drawn. Clean.
+
+    *Mitigation:* the OBJ apron (rendering-engine.md §13j) gives the buffer 64 columns of
+    resolve headroom per side, so the part is now rasterized whole and the profile continues
+    past the display edge and terminates naturally.
+
+    **The fragment is STILL cut at the display edge, and that is correct.** Clipping at the
+    shown edge is inherent to any finite shown region — the apron makes the cut clean, it does
+    not remove it. Widening what is SHOWN is not available: BG rendering is capped at
+    `kPpuExtraLeftRight = 96` columns/side and the diorama already spends 95, so the extra
+    columns would show sprites over empty background. If the remaining fragment is judged
+    objectionable, the lever is SUPPRESSION — widen the emitter's object-level cull so a
+    straddling object is not drawn at all, as flat widescreen already behaves — which trades a
+    ragged edge for a pop-in. Deliberately left unbundled: that is a taste call to make while
+    looking at both.
+
+36. **Three visible regressions from ONE commit, all the same mistake: reading an apron-wide
+    surface with the DISPLAY width — FIXED 2026-08-06 (`5780294`).** Reported from live play as
+    "our HUD is now fucked" and "the backdrop has an edge that shouldn't exist, a permanent
+    black stripe".
+
+    Making the captured surfaces 64 columns wider per side left three consumers still using the
+    old width:
+
+    - **HUD sheared across the top of the screen.** The diorama capture block bound
+      `g_hud_bg_pixels` at the apron-wide PLANE pitch, while `PresentUpload` uploads that
+      surface at `snes_width*4`. Rows written 128 columns apart and read 446 apart is a shear.
+      That surface is not a diorama plane — it feeds the anchored flat HUD overlay — so it
+      binds narrow.
+    - **Permanent black stripe down the left of the backdrop.** `Diorama_Composite` was handed
+      the apron-wide width, so its UV window and `BuildDioramaSupersample` both sampled from
+      column 0: the empty left apron came in as content and pushed the picture right. Visible
+      on the backdrop specifically because it is the one `BLENDMODE_NONE` layer, so transparent
+      reads as black.
+    - **A full-size fire icon floating mid-scene** (found by pixel-diff, not reported).
+      `ActRaiser_DioramaHudObjFinish` indexes TWO destinations — the narrow HUD overlay and the
+      apron-wide OBJ plane — with one `width`. The punch-out that erases the promoted HUD icon
+      from the tilted plane landed at the wrong stride and column, so the icon was never erased
+      and rode the OBJ plane into the scene.
+
+    **Reusable lessons:**
+    - **When one constant splits into two, the risk is not the definition — it is every
+      consumer that never learned.** The arithmetic is trivial; the bug is always *which width
+      am I holding*. The durable fix was naming it (`ActionApron_SurfacePitch`,
+      `ActionApron_DisplayOffset`, `ActionApron_SurfaceColumn`) at all 15 open-coded sites, so
+      each call states the answer rather than implying it.
+    - **A function that writes two DIFFERENT surfaces is the dangerous shape**, and no naming
+      convention catches it — the parameter is singular and correct for one of them. Look for
+      these first when a width changes.
+    - **Byte-identity gates cannot see a mode they do not exercise.** Attract and flat
+      widescreen stayed byte-identical through all three bugs, because the apron is
+      diorama-only. A from-source build of the pre-change commit, compared on a DIORAMA frame,
+      is what found them — see the harness note about `AR_HEADLESS_VIDEO`.
+    - **A stale test binary reports a pass that never ran.** The commit that introduced these
+      claimed "36/36 tests"; `diorama_scroll_math_test` had in fact been failing since the
+      constant moved, and CMake had not rebuilt it when ctest ran. Verify the build is current
+      before believing a green suite.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

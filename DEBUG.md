@@ -865,6 +865,33 @@ show the frozen `$0088` against the advancing host frame:
    is the game framebuffer and in diorama mode that is only the residual
    backdrop (largely uniform, and it will not discriminate a shifted image from
    an unchanged one — a real trap, hit while verifying §13i).
+
+   **To A/B the COMPOSITED diorama image (not just a captured plane), add
+   `AR_HEADLESS_VIDEO=1`.** Headless alone has no renderer, so
+   `DevTools_WriteFramebufferPpm` falls back to dumping `g_pixels` and every
+   present-side change compares equal — the run proves nothing. With it, the
+   shot goes through `PresentUpload` + `PresentComposite` + the CRT chain, i.e.
+   what the player sees. The full incantation, which needs all four:
+
+   ```sh
+   AR_HEADLESS=1 AR_HEADLESS_VIDEO=1 AR_WS_HEADLESS=1 \
+   AR_SETTINGS_PATH=<flat>.ini AR_INPUT_REPLAY=saves/artifacts2.rec \
+   AR_DIORAMA_AT=1630 AR_SHOT_AT_GF=1636 AR_QUIT_FRAMES=4000 \
+   ./build-release/ActRaiserRecomp ar.sfc --config dev-config.ini
+   ```
+
+   `AR_WS_HEADLESS=1` or widescreen silently cannot engage (symptom:
+   `[shot] ... margins=0/0 mode=4:3 authentic`), and `AR_DIORAMA_AT` rather than
+   a diorama-on .ini because booting with it on desyncs a game-frame-keyed
+   replay (2b above). Budget **~2.5 host frames per game frame** when sizing
+   `AR_QUIT_FRAMES`: too small fails SILENTLY, with no `[shot]` line and no
+   error. Caveat: this path has no GPU device, so the DOF/edge-AA/rim shaders
+   are disabled — it cannot verify anything that only those passes do (§13j).
+
+   `AR_APRONLOG=1` reports the OBJ apron channel per frame: parts this frame
+   plus cumulative peak and overflow. Peak/overflow are the sizing verdict for
+   `kActionApronMaxParts` — measured peak 16 against a capacity of 128 over
+   ~2200 diorama frames, so the answer is measured rather than guessed.
    `AR_VEXT_LOG=1` prints the resolved vertical-extend margin per game frame
    with the camera/scroll state behind it, plus a `[vext-rows]` line giving
    where the HUD and the diorama plane actually landed — those two must respond
@@ -1747,6 +1774,7 @@ AR_TRAPFN=<fnsubstr>   who entered this (garbage) variant: call stack + 40-block
 AR_DISPMISSALL=1       unregistered handler (grep -v 00896f)     (then register in cfg + regen)
 AR_MXCHECK=1           emitter m/x analysis wrong on direct calls
 AR_OBJSLOTLOG=1        object -> OAM-slot map, one line per emitted action object per frame (ActRaiser_BuildObjectSprites): `obj=$XXXX slot=N screen=(x,y) anim=$BB:AAAA comps=N`. THE tool for "which object owns these OAM slots / what is this sprite on screen" — the OAM alone cannot answer it. Found the magic-swap flourish (obj $10E0, anim $06:A9C1) in one run; its screen= column also gives an object's whole flight path when grepped over frames
+AR_APRONLOG=1          OBJ apron channel per frame: `[apron] gf=N parts=N peak=N overflow=N`. peak/overflow are the SIZING verdict for kActionApronMaxParts (measured peak 16 vs capacity 128 over ~2200 diorama frames). A non-zero overflow means parts were dropped and the apron is incomplete on those frames; the plane dumps will show a truncated sprite in the band. Diorama-only
 AR_WATCHOBJ=<addr>     who writes this object slot (also fires on indirect + DMA writes, tagged [wobj-ind]/[wobj-dma])
 AR_WATCH16=<val>       who writes this 16-bit value (also fires on indirect + DMA writes, tagged [watch16-ind]/[watch16-dma])
 AR_MXCHECK / AR_CALLMX + generated dispatch switch  verify wrong-width routing (§5)

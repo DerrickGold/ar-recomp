@@ -49,7 +49,7 @@ The 544-byte shadow and DMA are common, but action (`$00:8C98/$00:8D68`)
 and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill. Both details are load-bearing for the diorama vertical band: the y field is 8 bits mod 256 against 224 lines, so the `$E0` park value IS screen -32 and collides with genuine above-screen positions, and a sprite near the screen BOTTOM aliases into the band through the same wrap. `PpuSetObjYOverride` carries the emitter's un-truncated y beside this table — see rendering-engine.md §13i |
+| $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill. Both details are load-bearing for the diorama vertical band: the y field is 8 bits mod 256 against 224 lines, so the `$E0` park value IS screen -32 and collides with genuine above-screen positions, and a sprite near the screen BOTTOM aliases into the band through the same wrap. `PpuSetObjExactPosition` carries the emitter's un-truncated x AND y beside this table — see rendering-engine.md §13i (the band) and §13j (the apron) |
 | $7E:0580 | 32 | OAM high table shadow: 2 bits/sprite (bit0 = x bit 8, bit1 = size), packed 4 sprites/byte |
 | $7E:0000 | 1 | (during sprite build) high-table bit accumulator — bits ROR'd in from the top, flushed every 4 sprites |
 | $7E:000C/$000E | 2 ea | sprite-build counters/scratch; exact ownership is routine-specific. Town `ADAD/AE6F` obtains the part count from byte 0 of the frame definition, not from world record `+0E`. |
@@ -61,6 +61,23 @@ and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 | $7E:009A | 2 | high-table write cursor (starts $0580) |
 | $7E:009C | 2 | high-table bit slots remaining in current byte (4..1) |
 | $7E:009E | 2 | current object's flip/attr word (obj+$28 ^ $0100) |
+
+**The 7-byte sprite-definition part** the builder walks (ROM, at bank obj+`$18`
+/ pointer obj+`$20`+5, after a 4-byte header plus a 1-byte part count):
+
+| Offset | Size | Field |
+|---:|---:|---|
+| +0 | 1 | flags — **bit 0 is the OAM size bit**, ROR'd into the high-table accumulator alongside x bit 8 |
+| +1 | 2 | x offsets: low byte = unflipped, high byte = used when the composition is H-flipped |
+| +3 | 2 | y offsets: low byte = unflipped, high byte = used when V-flipped |
+| +5 | 2 | tile + attribute word, XORed with the composition's flip word and OR'd with the `$008F` attr bias |
+
+Both offset pairs carry BOTH orientations rather than being negated at runtime,
+which is why an H-flipped part is not simply mirrored about the object origin.
+Bit 0 of +0 is the only route to a part's pixel SIZE: it selects between the two
+entries `OBSEL` picks, so a host that builds a part WITHOUT an OAM slot (the OBJ
+apron channel, rendering-engine.md §13j) must read it here and resolve through
+`PpuObjSizeForSizeBit` — there is no size information in the tile/attr word.
 
 ### Action magic objects (action mode only)
 
