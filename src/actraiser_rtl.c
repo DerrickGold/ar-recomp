@@ -1589,7 +1589,11 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
   static int last_y0, last_y1;
   static size_t last_pitch;
 
-  if (!s_hud_icon_ready || width <= 0 || width > kPpuSurfaceWidth) return;
+  /* Bound against the PLANE width -- the wider of the two destinations, and the
+   * one the apron grew. Both surfaces are allocated kPpuSurfaceWidth wide. */
+  if (!s_hud_icon_ready || width <= 0 ||
+      width + kPpuObjApron * 2 > kPpuSurfaceWidth)
+    return;
 
   const int raster_width = s_hud_icon_bounds.x1 - s_hud_icon_bounds.x0;
   const int raster_height = s_hud_icon_bounds.y1 - s_hud_icon_bounds.y0;
@@ -1600,6 +1604,15 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
       ActRaiser_DioramaObjPlaneForPriority(s_hud_icon_priority)];
   const size_t pitch = (size_t)width * 4;
   const int extra = (width - kActRaiserAuthenticWidth) / 2;
+  /* TWO destinations, TWO widths. g_hud_obj_pixels stays at the DISPLAY width
+   * (it is a screen-anchored overlay); the diorama OBJ planes are bound
+   * APRON-wide. One `width` indexing both put the punch-out at the wrong stride
+   * and the wrong column, so the promoted icon was never erased from the tilted
+   * plane -- it rode the OBJ plane into the scene as a full-size sprite (the
+   * priority-3 fire icon floating mid-scene, measured at gf1636 of
+   * saves/artifacts2.rec). Zero apron collapses these back to `width`/`extra`. */
+  const int plane_width = width + kPpuObjApron * 2;
+  const int plane_extra = extra + kPpuObjApron;
   /* Two destinations, two row origins. g_hud_obj_pixels is consumed in
    * authentic screen space (the promoted HUD overlay), so it indexes by
    * screen_y. The diorama PLANE is consumed in capture space, whose row 0 is
@@ -1629,7 +1642,8 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
       if (!pixel) continue;
       dst[texture_x] = pixel;
       const size_t plane_index =
-          (size_t)(screen_y + plane_row_bias) * width + texture_x;
+          (size_t)(screen_y + plane_row_bias) * plane_width +
+          (s_hud_icon_bounds.x0 + x + plane_extra);
       if (plane) plane[plane_index] = 0;
       /* Hand the pixel back to whatever the icon was covering, in ITS band --
        * the capture never recorded it, because the icon won the shared OBJ
@@ -1824,8 +1838,16 @@ void ActRaiserDrawPpuFrame(void) {
        * self-healing regardless of toggle history. */
       if (g_settings.diorama_hud_flat) {
         extern uint8_t g_hud_bg_pixels[];
+        /* The NARROW pitch, deliberately -- not the apron-wide `pitch` the
+         * diorama planes bind at. This surface is not a diorama plane: it feeds
+         * the anchored flat HUD overlay, which present.c uploads at
+         * snes_width*4 (PresentUpload's hud rect). Binding it apron-wide made
+         * the PPU write rows 2*kPpuObjApron columns apart while the upload read
+         * them snes_width apart, shearing the HUD across the top of the screen.
+         * The apron is resolve headroom for content that slides in past a
+         * tilted plane's edge; a screen-anchored HUD has no such edge. */
         PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3, g_hud_bg_pixels,
-                              pitch);
+                              (size_t)width * 4);
         /* Do NOT issue the generic wide capture here — the line-906
          * HUD-split-specific capture region (0,0,kActRaiserAuthenticWidth,
          * hud_split_height) stays the authority for this source's X range;
@@ -2068,10 +2090,15 @@ void ActRaiserDrawPpuFrame(void) {
         if (r[x]) { if (hud0 < 0) hud0 = y; hud1 = y; break; }
     }
     const uint8_t *bg2 = g_diorama_layer_pixels[kPpuOverlaySource_Bg2];
+    /* The plane's own pitch, not the HUD's: the diorama planes are bound
+     * apron-wide. A diagnostic that exists to catch origin bugs must not carry
+     * one, and the wrong stride would slide its reported rows a little further
+     * every row it walked. */
+    const size_t plane_pitch = (size_t)(width + kPpuObjApron * 2) * 4;
     if (bg2)
       for (int y = 0; y < kHostDisplayFramebufferHeight; y++) {
-        const uint32_t *r = (const uint32_t *)(bg2 + (size_t)y * pitch);
-        for (int x = 0; x < width; x++)
+        const uint32_t *r = (const uint32_t *)(bg2 + (size_t)y * plane_pitch);
+        for (int x = 0; x < width + kPpuObjApron * 2; x++)
           if (r[x]) { if (plane0 < 0) plane0 = y; plane1 = y; break; }
       }
     fprintf(stderr,
