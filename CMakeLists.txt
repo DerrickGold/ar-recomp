@@ -314,10 +314,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_town_canvas_test
         tests/sim_town_canvas_test.c
-        src/sim_town_canvas.c
+        src/sim/sim_town_canvas.c
     )
     target_include_directories(actraiser_sim_town_canvas_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_town_canvas
@@ -325,11 +326,12 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_world_map_test
         tests/sim_world_map_test.c
-        src/sim_world_map.c
-        src/sim_world_map_compose.c
+        src/sim/sim_world_map.c
+        src/sim/sim_world_map_compose.c
     )
     target_include_directories(actraiser_sim_world_map_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_world_map COMMAND actraiser_sim_world_map_test)
@@ -390,10 +392,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_phase0_trace_test
         tests/sim_phase0_trace_test.c
-        src/sim_phase0_trace.c
+        src/sim/sim_phase0_trace.c
     )
     target_include_directories(actraiser_sim_phase0_trace_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_phase0_trace
@@ -401,12 +404,13 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_render_metadata_test
         tests/sim_render_metadata_test.c
-        src/sim_render_metadata.c
-        src/sim_world_map.c
-        src/sim_world_navigation_scene.c
+        src/sim/sim_render_metadata.c
+        src/sim/sim_world_map.c
+        src/sim/sim_world_navigation_scene.c
     )
     target_include_directories(actraiser_sim_render_metadata_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_render_metadata_test PRIVATE m)
@@ -423,10 +427,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_visual_patches_test
         tests/sim_visual_patches_test.c
-        src/sim_visual_patches.c
+        src/sim/sim_visual_patches.c
     )
     target_include_directories(actraiser_sim_visual_patches_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
     )
     add_test(NAME actraiser_sim_visual_patches
         COMMAND actraiser_sim_visual_patches_test)
@@ -537,19 +542,20 @@ if(BUILD_TESTING)
     # BLENDMODE_BLEND black-screen regression with genuine emulator output.
     add_executable(actraiser_ppu_render_pipeline_test
         tests/ppu_render_pipeline_test.c
-        src/sim3d.c
-        src/sim_render_metadata.c
-        src/sim_world_map.c
-        src/sim_world_navigation_scene.c
-        src/sim_world_navigation_capture.c
-        src/sim_town_canvas.c
-        src/sim_render_atlas.c
+        src/sim/sim3d.c
+        src/sim/sim_render_metadata.c
+        src/sim/sim_world_map.c
+        src/sim/sim_world_navigation_scene.c
+        src/sim/sim_world_navigation_capture.c
+        src/sim/sim_town_canvas.c
+        src/sim/sim_render_atlas.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu_old.c
     )
     target_include_directories(actraiser_ppu_render_pipeline_test PRIVATE
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_ppu_render_pipeline_test PRIVATE
@@ -591,12 +597,13 @@ if(BUILD_TESTING)
     add_executable(actraiser_scene_inspector_test
         tests/scene_inspector_test.c
         src/dev/scene_inspector.c
-        src/sim_render_metadata.c
-        src/sim_world_map.c
-        src/sim_world_navigation_scene.c
+        src/sim/sim_render_metadata.c
+        src/sim/sim_world_map.c
+        src/sim/sim_world_navigation_scene.c
     )
     target_include_directories(actraiser_scene_inspector_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
         ${CMAKE_SOURCE_DIR}/src/dev
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )

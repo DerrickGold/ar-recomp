@@ -1,7 +1,7 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 #include "types.h"
-#include "sim_render_metadata.h"
+#include "sim/sim_render_metadata.h"
 
 /* Live runtime settings — the first slice of the g_settings refactor described
  * in docs/settings-system.md (§3.1/§4). Existing cheat and widescreen behavior

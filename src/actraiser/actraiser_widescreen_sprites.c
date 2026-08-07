@@ -23,7 +23,7 @@
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "settings.h"
-#include "sim_render_metadata.h"
+#include "sim/sim_render_metadata.h"
 #include "snes/ppu.h"
 
 #include <stdio.h>

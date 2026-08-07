@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-#include "sim_render_metadata.h"
+#include "sim/sim_render_metadata.h"
 
 enum {
   kSceneInspectorBg1 = 1 << 0,

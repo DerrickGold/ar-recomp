@@ -7,7 +7,7 @@
 #include "types.h"
 #include "hd_replacements.h"
 #include "diorama/diorama.h"
-#include "sim_render_metadata.h"
+#include "sim/sim_render_metadata.h"
 #include "action/action_effects.h"
 
 /* M5 (ar-recomp-threading-impl.md Appendix D). FrameSlot is the ONE contract
