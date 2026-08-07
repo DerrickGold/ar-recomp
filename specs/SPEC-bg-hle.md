@@ -12,7 +12,13 @@ host margin refresher and its two cadence bugs), `docs/bug-ledger.md` §37.
 ## 1. The level map is already decompressed in WRAM
 
 The premise this track started from — "we would have to reverse the bank-$0A
-compressed level stream" — is **wrong, and in our favour**.
+compressed level stream to decode backgrounds" — is **wrong, and in our favour**.
+
+To be precise, because the loose version of this claim is misleading: ROM→WRAM
+decompression absolutely happens, **once, at level entry**. What does not happen
+is any per-frame ROM access. "Streaming" in `rendering-engine.md` §4 means
+WRAM→VRAM — feeding the 64×64 tilemap ring — and the HLE replaces only that
+half. The loader stays exactly as it is.
 
 `$02:B8A0` never touches ROM. It reads the level map out of **WRAM bank `$7E`**,
 where level entry has already expanded it. The map is a flat array of 256-byte
@@ -42,10 +48,39 @@ word_k = ( $7E:[State52 + id*8 + k*2] & State54 ) | (State6B << 8)
 priority / flip) in the high byte. `$02:BED3` is nothing but the SNES hardware
 multiply (`$4202/$4203` → `$4216/$4217`).
 
-**Consequence: there is no format to reverse, no compression to decode, and no
-opaque decoder state.** The five "opaque" words are a WRAM base pointer, a table
-pointer, a mask, an attribute byte, and a width. A complete native background
-decoder is roughly the twenty lines above.
+**Consequence: the HLE has no format to reverse, no compression to decode, and
+no opaque decoder state.** The five "opaque" words are a WRAM base pointer, a
+table pointer, a mask, an attribute byte, and a width. A complete native
+background decoder is roughly the twenty lines above.
+
+### 1.1 Residency — measured, and its limits
+
+The whole level map is resident simultaneously, not a window around the camera.
+On Fillmore (`runs/20260806-224602`, `runs/20260806-231345`):
+
+- Rendering **every** page straight from WRAM with the camera at x=1276 produces
+  coherent level geometry across the full 4096px — `tools/` render prototype,
+  §6. Not a camera-local window.
+- 36/48 BG1 pages carry content at once (the empty ones are the sky row);
+  BG2 18/18.
+- The map bytes are **byte-identical between two independent runs** whose
+  cameras are 955px apart — 12288 + 4608 bytes, 0 differences. A camera-followed
+  window cannot do that.
+- Cost: **16.5 KB of 128 KB WRAM** (BG1 `$7E:8000`, 16×3 pages; BG2 `$7E:C000`,
+  9×2). At 256 bytes per 256×256 page a level twice this size on both axes is
+  still only 66 KB, so full residency is affordable in general.
+
+Independent corroboration: BG2's map base `$7E:C000` is exactly the range the
+world-map shadow-clobber investigation recorded as "act clobbers
+`$7E:C000..E7EF`" — two unrelated investigations landing on the same address.
+
+**Limit of the claim.** Verified on Fillmore act 1/2 only, from four snapshots.
+Other acts are unchecked, and so is what happens at a mid-level room transition.
+The addressing contains no windowing mechanism at all — `page_index` is computed
+from absolute world coordinates with no bounds test and no sliding base — so
+paging would have to be layered on top by the loader rather than expressed here.
+That makes full residency likely everywhere, but BH1 must confirm it across a
+playthrough rather than assume it.
 
 ## 2. Validation — the oracle already passes
 
