@@ -18,6 +18,7 @@
 #include <unistd.h>
 #endif
 
+#include "action_obj_apron.h"
 #include "snes/ppu.h"
 #include "types.h"
 #include "actraiser_rtl.h"
@@ -393,9 +394,9 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
      * the authentic frame at column 0, as it always has. */
     SimRenderMetadata_TraceFrame(
         (uint32)snes_frame_counter, &sim,
-        g_pixels + (size_t)kPpuObjApron * 4,
+        g_pixels + ActionApron_DisplayOffset(kPpuObjApron),
         g_snes_width, g_snes_height,
-        (g_snes_width + kPpuObjApron * 2) * 4);
+        ActionApron_SurfacePitch(g_snes_width, kPpuObjApron));
   }
   /* AR_DIORAMA_DUMP_GF=<gf>[,<gf>...]: arm the Shift+D layer dump from a replay
    * instead of the keyboard, so a diorama frame can be inspected headlessly.

@@ -672,6 +672,21 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_diorama_skybox_uv
         COMMAND actraiser_diorama_skybox_uv_test)
 
+    # The action OBJ apron channel: where the two resolve bands sit in surface
+    # columns, what is admitted into them, and the capacity's overflow
+    # accounting. The negative property (an apron column is NEVER a display
+    # column) is what the phase's byte-identity gate rests on.
+    add_executable(actraiser_action_obj_apron_test
+        tests/action_obj_apron_test.c
+        src/action_obj_apron.c
+    )
+    target_include_directories(actraiser_action_obj_apron_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_action_obj_apron
+        COMMAND actraiser_action_obj_apron_test)
+
     # F4 (handback 2026-07-26): which captured layers are half-added with the
     # subscreen and so must carry 50% alpha. Pure -- no SDL, no PPU struct.
     add_executable(actraiser_diorama_capture_blend_test
