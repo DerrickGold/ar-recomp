@@ -26,7 +26,7 @@ static void PpuDrawWholeLine(Ppu *ppu, int y);
 static bool ppu_evaluateSprites(Ppu* ppu, int line);
 static uint16_t ppu_getVramRemap(Ppu* ppu);
 
-static const uint8_t kPpuSpriteSizes[8][2] = {
+const uint8_t kPpuSpriteSizes[8][2] = {
   {8, 16}, {8, 32}, {8, 64}, {16, 32},
   {16, 64}, {32, 64}, {16, 32}, {16, 32}
 };
@@ -48,7 +48,7 @@ static void PpuUpdateBrightnessCache(Ppu *ppu) {
 
 static int PpuObjSizeForIndex(const Ppu *ppu, uint8_t index) {
   int large = (ppu->highOam[index >> 3] >> ((index & 7) + 1)) & 1;
-  return kPpuSpriteSizes[PPU_objSize(ppu)][large];
+  return PpuObjSizeForSizeBit(ppu, large);
 }
 
 static int PpuObjScreenX(const Ppu *ppu, uint8_t index) {

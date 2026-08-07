@@ -1665,6 +1665,129 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
   }
 }
 
+ActionApronGeometry ActRaiser_ObjApronGeometry(void) {
+  extern bool g_ws_active;
+  extern int g_ws_extra;
+  ActionApronGeometry g = { g_ws_extra, 0 };
+  /* The same condition host_display.c uses to pin the margin budget to
+   * kWsExtraMax. Read from settings + geometry rather than from a per-frame
+   * diorama flag on purpose: the emitter runs during game logic, BEFORE
+   * ActRaiserDrawPpuFrame sets g_diorama_frame_active, so a per-frame flag
+   * would be one frame stale exactly when it matters. */
+  if (g_settings.diorama_mode && g_ws_active)
+    g.apron = kPpuObjApron;
+  return g;
+}
+
+/* Draw the apron part channel into the captured OBJ planes.
+ *
+ * Runs AFTER scanout, so the planes already hold this frame's in-window
+ * sprites, and writes ONLY the two apron column bands. Never the display
+ * window: those columns are scanout's, and writing them would both double-draw
+ * a straddling part (with no z-test against the sprites it lost to) and break
+ * the byte-identity gate this phase is judged on. The clip is structural --
+ * PpuRasterizeParts takes the band as its `bounds` and crops to it.
+ *
+ * Ordering and band routing follow the hardware: OAM order decides who owns an
+ * overlapping pixel via ONE shared z-test, and only the survivor's priority
+ * decides which plane it lands on (see PpuWriteOverlayRenderLine's
+ * priority-split resolve). So parts are drawn one at a time in list order and a
+ * pixel already opaque in ANY of the four OBJ planes is left alone -- which is
+ * exactly first-writer-wins across bands, with the planes themselves as the
+ * claimed-set. That works because PpuClearOverlayRenderLine clears the full
+ * bound pitch, apron included, every frame. */
+static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
+  extern uint8_t *g_diorama_layer_pixels[];
+  extern int g_ws_extra_top;
+
+  if (!geom || geom->apron <= 0 || !g_ppu || !ActionApron_Count())
+    return;
+
+  /* AR_APRONLOG=1: the channel's sizing verdict. peak/overflow answer "is
+   * kActionApronMaxParts right?" without guessing, which is what the plan asks
+   * for instead of assuming a capacity. */
+  if (getenv("AR_APRONLOG"))
+    fprintf(stderr, "[apron] gf=%u parts=%d peak=%d overflow=%d\n",
+            ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+            ActionApron_Count(), ActionApron_PeakCount(),
+            ActionApron_Overflow());
+
+  const int surface_width = ActionApron_SurfaceWidth(geom);
+  if (surface_width > kPpuSurfaceWidth)
+    return;
+  const PpuObjPart *parts = ActionApron_Parts();
+  const int count = ActionApron_Count();
+  const int rows = kActRaiserAuthenticHeight + g_ws_extra_top;
+
+  /* Big enough for the largest SNES sprite (64x64). */
+  static uint32_t scratch[64 * 64];
+
+  int spans[2][2];
+  ActionApron_LeftSpan(geom, &spans[0][0], &spans[0][1]);
+  ActionApron_RightSpan(geom, &spans[1][0], &spans[1][1]);
+
+  for (int i = 0; i < count; i++) {
+    const PpuObjPart *part = &parts[i];
+    const int priority = (part->tile_attr >> 12) & 3;
+    uint32_t *plane = (uint32_t *)g_diorama_layer_pixels[
+        ActRaiser_DioramaObjPlaneForPriority(priority)];
+    if (!plane)
+      continue;
+    const bool color_math =
+        (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].flags &
+         kPpuOverlayFlag_MarkObjColorMath) &&
+        ActionApron_PartUsesColorMath(part->tile_attr);
+
+    for (int band = 0; band < 2; band++) {
+      /* Intersect the part with this apron band; skip when it does not reach. */
+      PpuObjRangeBounds win;
+      win.x0 = (int16_t)(part->x > spans[band][0] ? part->x : spans[band][0]);
+      win.x1 = (int16_t)(part->x + part->size < spans[band][1]
+                             ? part->x + part->size
+                             : spans[band][1]);
+      if (win.x1 <= win.x0)
+        continue;
+      win.y0 = part->y;
+      win.y1 = (int16_t)(part->y + part->size);
+      const int w = win.x1 - win.x0, h = win.y1 - win.y0;
+      if (w <= 0 || h <= 0 || w > 64 || h > 64)
+        continue;
+      if (!PpuRasterizeParts(g_ppu, part, 1, &win, scratch, w, h,
+                             (size_t)w * sizeof(uint32_t)))
+        continue;
+
+      for (int y = 0; y < h; y++) {
+        /* Plane rows are CAPTURE space: row 0 is screen y = -g_ws_extra_top,
+         * the same bias ActRaiser_DioramaHudObjFinish applies. */
+        const int row = win.y0 + y + g_ws_extra_top;
+        if (row < 0 || row >= rows)
+          continue;
+        for (int x = 0; x < w; x++) {
+          uint32_t pixel = scratch[(size_t)y * w + x];
+          if (!pixel)
+            continue;
+          const int col = ActionApron_SurfaceColumn(geom, win.x0 + x);
+          if (col < 0 || col >= surface_width)
+            continue;
+          const size_t index = (size_t)row * surface_width + col;
+          bool claimed = false;
+          for (int p = 0; p < 4 && !claimed; p++) {
+            const uint32_t *other = (const uint32_t *)g_diorama_layer_pixels[
+                ActRaiser_DioramaObjPlaneForPriority(p)];
+            if (other && other[index])
+              claimed = true;
+          }
+          if (claimed)
+            continue;
+          if (color_math)
+            pixel = (pixel & 0x00ffffffu) | 0x80000000u;
+          plane[index] = pixel;
+        }
+      }
+    }
+  }
+}
+
 /* Fix B (SPEC-backdrop-clip.md): margin geometry of the last rendered frame,
  * latched at the end of ActRaiserDrawPpuFrame. See ActRaiser_LiveMargins. */
 static int s_live_margin_left;
@@ -2060,6 +2183,12 @@ void ActRaiserDrawPpuFrame(void) {
     /* After scanout (the diorama planes only hold this frame's sprites now) and
      * before FrameSlot_Capture publishes them to the present thread. */
     ActRaiser_DioramaHudObjFinish(width);
+    /* After the HUD-icon promote, not before: that pass PUNCHES the promoted
+     * icon out of the OBJ planes, and the apron's claimed-set test reads those
+     * planes. Running first would let a hole it is about to punch look like
+     * free space. */
+    const ActionApronGeometry apron_geom = ActRaiser_ObjApronGeometry();
+    ActRaiser_DioramaApronFinish(&apron_geom);
   }
   /* Fix B (SPEC-backdrop-clip.md): latch the margin state the frame was ACTUALLY
    * rendered with, here, rather than letting FrameSlot_Capture read live g_ppu.

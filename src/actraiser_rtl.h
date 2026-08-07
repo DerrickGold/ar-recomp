@@ -1,12 +1,21 @@
 #ifndef ACTRAISER_RTL_H
 #define ACTRAISER_RTL_H
 
+#include "action_obj_apron.h"
 #include "common_rtl.h"
 #include "common_cpu_infra.h"
 #include "snes/snes_regs.h"
 
 void ActRaiserDrawPpuFrame(void);
 void ActRaiser_RebindPpuOutputSurfaces(void);
+
+/* The apron geometry in force this frame, or {ws_extra, 0} when the apron is
+ * not live. `apron == 0` is the disable lever the whole phase rides on: every
+ * apron-aware site collapses to its pre-apron expression, so callers test that
+ * rather than re-deriving the policy. Live only under the diorama margin policy
+ * (host_display.c pins g_ws_extra to kWsExtraMax there), because flat mode
+ * never samples the columns the apron would fill. */
+ActionApronGeometry ActRaiser_ObjApronGeometry(void);
 
 /* Fix B (SPEC-backdrop-clip.md): the widescreen margin geometry the most recent
  * frame was actually RENDERED with, latched at the end of ActRaiserDrawPpuFrame.
