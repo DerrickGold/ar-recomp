@@ -44,8 +44,11 @@ void Diorama_SetDragging(bool dragging);
  * intersection (M5 D3 — present-time code must not re-derive live settings
  * state). Returns a bit per successfully uploaded plane so the compositor
  * cannot resurface stale texture contents after an upload failure. */
+/* `snes_width` is the FULL surface width including both aprons; `obj_apron` is
+ * the per-side apron so planes that cannot hold apron content upload only their
+ * display columns (see DioramaPlaneCanCarryApron). */
 uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
-                        int snes_width, int snes_height,
+                        int snes_width, int snes_height, int obj_apron,
                         uint32_t plane_mask);
 
 /* M7 (§6): per-BG-layer UV shift for present-time scroll interpolation.

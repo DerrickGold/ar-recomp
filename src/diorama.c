@@ -1080,17 +1080,30 @@ static void BuildQuadMesh(const float mvp[16],
  * caller supplies the frame-snapshotted request/content intersection; this
  * function neither reads live settings nor rescans producer-owned pixels. */
 uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
-                        int snes_width, int snes_height,
+                        int snes_width, int snes_height, int obj_apron,
                         uint32_t plane_mask) {
-  SDL_Rect upload = { 0, 0, snes_width, snes_height };
+  /* `snes_width` is the FULL surface width (display + both aprons); the pitch
+   * is always that, because that is how the buffers are laid out. What varies
+   * is the destination RECT: a plane that can never hold apron content gets
+   * only its display columns uploaded, because the apron columns are known
+   * zeros and the textures were zero-filled at creation, so nothing ever
+   * changes there. Skipping them is ~47 MB/s at 60fps -- most of the apron's
+   * steady-state cost. */
+  const size_t pitch = (size_t)snes_width * 4;
+  const int display_width = snes_width - obj_apron * 2;
+  SDL_Rect upload_full = { 0, 0, snes_width, snes_height };
+  SDL_Rect upload_display = { obj_apron, 0, display_width, snes_height };
   uint32_t uploaded_mask = 0;
   for (int i = 0; i < kDioramaLayerCount; i++) {
     int plane = kDioramaLayers[i].plane;
     if (!(plane_mask & (1u << plane)) ||
         !textures[plane] || !pixels[plane])
       continue;
-    if (SDL_UpdateTexture(textures[plane], &upload, pixels[plane],
-                          snes_width * 4))
+    const bool wide = obj_apron > 0 && DioramaPlaneCanCarryApron(plane);
+    const SDL_Rect *rect = wide ? &upload_full : &upload_display;
+    const uint8_t *src =
+        wide ? pixels[plane] : pixels[plane] + (size_t)obj_apron * 4;
+    if (SDL_UpdateTexture(textures[plane], rect, src, pitch))
       uploaded_mask |= 1u << plane;
   }
   return uploaded_mask;
