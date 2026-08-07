@@ -17,7 +17,7 @@
 #include "sim_render_metadata.h"
 #include "sim_town_canvas.h"
 #include "sim_world_navigation_capture.h"
-#include "action_effects.h"
+#include "action/action_effects.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "common_rtl.h"      /* g_ram, g_ppu */

@@ -8,7 +8,7 @@
 #endif
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
-#include "action_load_pacing.h"
+#include "action/action_load_pacing.h"
 #include "actraiser_ws_gap.h"
 #include "diorama_capture_blend.h"
 #include "diorama_skybox_uv.h"
