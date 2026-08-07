@@ -464,6 +464,7 @@ if(BUILD_TESTING)
         src/atomic_replace.c
         src/randomizer.c
         src/settings_overlay.c
+        src/settings_overlay_debug_panel.c
         src/input_map.c
         src/user_data_dir.c
         # The layer editor's row model. Pure, so it adds no SDL/PPU closure to
