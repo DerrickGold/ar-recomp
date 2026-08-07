@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "snes_bgr555.h"
 #include "snes/ppu.h"
 
 _Static_assert(kSim3DMaxWidth == kPpuBufWidth,
@@ -65,11 +66,6 @@ int Sim3D_ObjPlaneForPriority(int priority) {
     kSim3DPlane_Obj2, kSim3DPlane_Obj3,
   };
   return priority >= 0 && priority < 4 ? planes[priority] : -1;
-}
-
-static uint8_t ExpandColor5(uint32_t value, int brightness) {
-  uint32_t expanded = (value << 3) | (value >> 2);
-  return (uint8_t)(expanded * (uint32_t)brightness / 15);
 }
 
 /* Shared with actraiser_rtl.c's margin-gap fill (Fix C, SPEC-backdrop-clip.md)

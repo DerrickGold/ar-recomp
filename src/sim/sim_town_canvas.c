@@ -1,5 +1,6 @@
 #include "sim_town_canvas.h"
 
+#include "snes_bgr555.h"
 #include <string.h>
 
 enum {
@@ -43,13 +44,6 @@ bool SimTownCanvas_TakeDirtyRect(int *x, int *y, int *width, int *height) {
   g_canvas.dirty_x0 = g_canvas.dirty_y0 = kSimTownCanvasPixels;
   g_canvas.dirty_x1 = g_canvas.dirty_y1 = 0;
   return true;
-}
-
-/* Same 5-bit expansion and brightness scaling the captured planes use, so a
- * canvas pixel and the authentic pixel of the same tile agree exactly. */
-static uint8_t ExpandColor5(uint32_t value, int brightness) {
-  uint32_t expanded = (value << 3) | (value >> 2);
-  return (uint8_t)(expanded * (uint32_t)brightness / 15);
 }
 
 static uint32_t PaletteArgb(uint16_t colour, int brightness) {
