@@ -212,16 +212,6 @@ void NORETURN Die(const char *error) {
   exit(1);
 }
 
-/* SDL3 render primitives take float rects. All internal geometry is integer
- * SNES-pixel math, so convert only at the SDL draw call. */
-static SDL_FRect ToFRect(SDL_Rect r) {
-  return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };
-}
-
-void OpenGLRenderer_Create(struct RendererFuncs *funcs) {
-  (void)funcs;
-}
-
 static void RtlDrawPpuFrame(void) {
   g_rtl_game_info->draw_ppu_frame();
 }
