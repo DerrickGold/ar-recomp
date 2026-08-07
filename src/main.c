@@ -29,8 +29,8 @@
 #include "settings_overlay.h"
 #include "input_map.h"
 #include "dev/scene_inspector.h"
-#include "diorama.h"
-#include "diorama_scroll_math.h"  /* kInterpPhaseNone */
+#include "diorama/diorama.h"
+#include "diorama/diorama_scroll_math.h"  /* kInterpPhaseNone */
 #include "forced_input.h"
 #include "save_system.h"
 #include "hd_replacement_host.h"

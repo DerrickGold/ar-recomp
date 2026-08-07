@@ -21,7 +21,7 @@
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "crt_post.h"
-#include "diorama_scroll_math.h"
+#include "diorama/diorama_scroll_math.h"
 #include "frame_slot.h"
 #include "host_display_pacing.h"
 #include "present.h"

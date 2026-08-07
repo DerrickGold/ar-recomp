@@ -372,12 +372,13 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_diorama_projection_test
         tests/diorama_projection_test.c
-        src/diorama_projection.c
-        src/diorama_depth_shapes.c
+        src/diorama/diorama_projection.c
+        src/diorama/diorama_depth_shapes.c
         src/scene3d_math.c
     )
     target_include_directories(actraiser_diorama_projection_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/diorama
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_diorama_projection_test PRIVATE
@@ -461,11 +462,12 @@ if(BUILD_TESTING)
         # The layer editor's row model. Pure, so it adds no SDL/PPU closure to
         # this target -- which is the whole reason the overlay reaches the
         # override table through injected hooks rather than calling diorama.c.
-        src/diorama_layer_editor.c
-        src/diorama_layer_order.c
+        src/diorama/diorama_layer_editor.c
+        src/diorama/diorama_layer_order.c
     )
     target_include_directories(actraiser_settings_overlay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/diorama
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_settings_overlay_test PRIVATE
@@ -643,11 +645,12 @@ if(BUILD_TESTING)
     # present.c with the wall-clock injected so t is controllable (Test gap 2).
     add_executable(actraiser_diorama_scroll_math_test
         tests/diorama_scroll_math_test.c
-        src/diorama_scroll_math.c
-        src/diorama_depth_shapes.c
+        src/diorama/diorama_scroll_math.c
+        src/diorama/diorama_depth_shapes.c
     )
     target_include_directories(actraiser_diorama_scroll_math_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/diorama
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_diorama_scroll_math_test PRIVATE SDL3::SDL3 m)
@@ -671,10 +674,11 @@ if(BUILD_TESTING)
     # margin reproduces the pre-fix UV values exactly.
     add_executable(actraiser_diorama_skybox_uv_test
         tests/diorama_skybox_uv_test.c
-        src/diorama_skybox_uv.c
+        src/diorama/diorama_skybox_uv.c
     )
     target_include_directories(actraiser_diorama_skybox_uv_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/diorama
     )
     target_link_libraries(actraiser_diorama_skybox_uv_test PRIVATE m)
     add_test(NAME actraiser_diorama_skybox_uv
@@ -700,10 +704,11 @@ if(BUILD_TESTING)
     # subscreen and so must carry 50% alpha. Pure -- no SDL, no PPU struct.
     add_executable(actraiser_diorama_capture_blend_test
         tests/diorama_capture_blend_test.c
-        src/diorama_capture_blend.c
+        src/diorama/diorama_capture_blend.c
     )
     target_include_directories(actraiser_diorama_capture_blend_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/diorama
     )
     add_test(NAME actraiser_diorama_capture_blend
         COMMAND actraiser_diorama_capture_blend_test)
@@ -712,10 +717,11 @@ if(BUILD_TESTING)
     # Pure -- no SDL, no PPU, no file I/O.
     add_executable(actraiser_diorama_layer_order_test
         tests/diorama_layer_order_test.c
-        src/diorama_layer_order.c
+        src/diorama/diorama_layer_order.c
     )
     target_include_directories(actraiser_diorama_layer_order_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/diorama
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_diorama_layer_order
@@ -726,11 +732,12 @@ if(BUILD_TESTING)
     # its test target deliberately does not link diorama.c.
     add_executable(actraiser_diorama_layer_editor_test
         tests/diorama_layer_editor_test.c
-        src/diorama_layer_editor.c
-        src/diorama_layer_order.c
+        src/diorama/diorama_layer_editor.c
+        src/diorama/diorama_layer_order.c
     )
     target_include_directories(actraiser_diorama_layer_editor_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/diorama
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_diorama_layer_editor

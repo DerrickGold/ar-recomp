@@ -6,7 +6,7 @@
 #include <SDL3/SDL.h>
 #include "types.h"
 #include "hd_replacements.h"
-#include "diorama.h"
+#include "diorama/diorama.h"
 #include "sim_render_metadata.h"
 #include "action/action_effects.h"
 
