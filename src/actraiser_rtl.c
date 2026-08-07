@@ -1595,6 +1595,7 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
       width + kPpuObjApron * 2 > kPpuSurfaceWidth)
     return;
 
+
   const int raster_width = s_hud_icon_bounds.x1 - s_hud_icon_bounds.x0;
   const int raster_height = s_hud_icon_bounds.y1 - s_hud_icon_bounds.y0;
   /* Band index == OAM priority (ppu.c's priority-split resolve does
@@ -1610,9 +1611,13 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
    * and the wrong column, so the promoted icon was never erased from the tilted
    * plane -- it rode the OBJ plane into the scene as a full-size sprite (the
    * priority-3 fire icon floating mid-scene, measured at gf1636 of
-   * saves/artifacts2.rec). Zero apron collapses these back to `width`/`extra`. */
-  const int plane_width = width + kPpuObjApron * 2;
-  const int plane_extra = extra + kPpuObjApron;
+   * saves/artifacts2.rec).
+   *
+   * The plane side goes through the apron geometry rather than re-deriving it,
+   * so this function and the apron pass cannot disagree about where a screen
+   * column lands -- disagreeing is exactly what the bug WAS. */
+  const ActionApronGeometry plane_geom = { extra, kPpuObjApron };
+  const int plane_width = ActionApron_SurfaceWidth(&plane_geom);
   /* Two destinations, two row origins. g_hud_obj_pixels is consumed in
    * authentic screen space (the promoted HUD overlay), so it indexes by
    * screen_y. The diorama PLANE is consumed in capture space, whose row 0 is
@@ -1643,7 +1648,7 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
       dst[texture_x] = pixel;
       const size_t plane_index =
           (size_t)(screen_y + plane_row_bias) * plane_width +
-          (s_hud_icon_bounds.x0 + x + plane_extra);
+          ActionApron_SurfaceColumn(&plane_geom, s_hud_icon_bounds.x0 + x);
       if (plane) plane[plane_index] = 0;
       /* Hand the pixel back to whatever the icon was covering, in ITS band --
        * the capture never recorded it, because the icon won the shared OBJ
@@ -1726,11 +1731,18 @@ static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
   ActionApron_LeftSpan(geom, &spans[0][0], &spans[0][1]);
   ActionApron_RightSpan(geom, &spans[1][0], &spans[1][1]);
 
+  /* Resolved once, not per pixel: the claimed-set test below reads all four,
+   * and re-deriving them inside the innermost loop made the plane mapping the
+   * hottest thing in the pass. */
+  uint32_t *planes[4];
+  for (int p = 0; p < 4; p++)
+    planes[p] = (uint32_t *)g_diorama_layer_pixels[
+        ActRaiser_DioramaObjPlaneForPriority(p)];
+
   for (int i = 0; i < count; i++) {
     const PpuObjPart *part = &parts[i];
     const int priority = (part->tile_attr >> 12) & 3;
-    uint32_t *plane = (uint32_t *)g_diorama_layer_pixels[
-        ActRaiser_DioramaObjPlaneForPriority(priority)];
+    uint32_t *plane = planes[priority];
     if (!plane)
       continue;
     const bool color_math =
@@ -1771,12 +1783,9 @@ static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
             continue;
           const size_t index = (size_t)row * surface_width + col;
           bool claimed = false;
-          for (int p = 0; p < 4 && !claimed; p++) {
-            const uint32_t *other = (const uint32_t *)g_diorama_layer_pixels[
-                ActRaiser_DioramaObjPlaneForPriority(p)];
-            if (other && other[index])
+          for (int p = 0; p < 4 && !claimed; p++)
+            if (planes[p] && planes[p][index])
               claimed = true;
-          }
           if (claimed)
             continue;
           if (color_math)
@@ -1862,7 +1871,7 @@ void ActRaiserDrawPpuFrame(void) {
        * wider pitch makes PpuWriteOverlayRenderLine's texture_extra centre the
        * captured span, leaving the apron columns free for capture-time part
        * rasterization to fill. */
-      size_t pitch = (size_t)(width + kPpuObjApron * 2) * 4;
+      size_t pitch = ActionApron_SurfacePitch(width, kPpuObjApron);
       /* Capture rectangles are expressed in AUTHENTIC screen space, so
        * the vertical band starts at a negative y exactly as the side
        * margins start at -g_ws_extra. The PPU maps that onto row 0 of the
@@ -2177,8 +2186,8 @@ void ActRaiserDrawPpuFrame(void) {
     /* g_pixels is bound apron-wide; the authentic frame starts kPpuObjApron
      * columns in. Offset the base and pass the real pitch. */
     Sim3D_FinishCapture(
-        g_pixels + (size_t)kPpuObjApron * 4,
-        (width + kPpuObjApron * 2) * 4,
+        g_pixels + ActionApron_DisplayOffset(kPpuObjApron),
+        ActionApron_SurfacePitch(width, kPpuObjApron),
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
     /* After scanout (the diorama planes only hold this frame's sprites now) and
      * before FrameSlot_Capture publishes them to the present thread. */
@@ -2223,7 +2232,7 @@ void ActRaiserDrawPpuFrame(void) {
      * apron-wide. A diagnostic that exists to catch origin bugs must not carry
      * one, and the wrong stride would slide its reported rows a little further
      * every row it walked. */
-    const size_t plane_pitch = (size_t)(width + kPpuObjApron * 2) * 4;
+    const size_t plane_pitch = ActionApron_SurfacePitch(width, kPpuObjApron);
     if (bg2)
       for (int y = 0; y < kHostDisplayFramebufferHeight; y++) {
         const uint32_t *r = (const uint32_t *)(bg2 + (size_t)y * plane_pitch);

@@ -1,3 +1,4 @@
+#include "action_obj_apron.h"
 #include "hd_replacement_host.h"
 
 #include "actraiser_game.h"   /* kActRaiserAuthenticHeight */
@@ -202,7 +203,7 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
    * x = 0 lands at column apron + ws_extra. Readers of g_pixels therefore
    * offset by kPpuObjApron columns -- see present.c's flat upload. */
   const size_t frame_pitch =
-      (size_t)(g_snes_width + kPpuObjApron * 2) * kArgbBytesPerPixel;
+      ActionApron_SurfacePitch(g_snes_width, kPpuObjApron);
   PpuBeginDrawing(g_ppu, g_pixels, frame_pitch, 0);
   PpuClearOverlayBindings(g_ppu);
   PpuBindOverlaySurface(

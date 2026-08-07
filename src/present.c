@@ -19,6 +19,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "action_obj_apron.h"
 #include "present.h"
 #include "action_effect_render.h"
 #include "crt_post.h"
@@ -657,8 +658,8 @@ void PresentUpload(const FrameSlot *slot) {
      * and use the real pitch; the upload rect is unchanged. */
     SDL_UpdateTexture(
         g_texture, &upload,
-        g_pixels + (size_t)slot->obj_apron * 4,
-        (size_t)(slot->snes_width + slot->obj_apron * 2) * 4);
+        g_pixels + ActionApron_DisplayOffset(slot->obj_apron),
+        ActionApron_SurfacePitch(slot->snes_width, slot->obj_apron));
   }
 
   /* A7 (followup doc): this used to sit behind the diorama branch's early
