@@ -39,7 +39,7 @@
 #include "run_dir.h"
 #include "launcher.h"
 #include "util.h"
-#include "actraiser_spc_player.h"
+#include "actraiser/actraiser_spc_player.h"
 #include "actraiser_game.h"
 #include "snes/snes.h"
 #include "cpu_trace.h"

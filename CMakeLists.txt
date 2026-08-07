@@ -658,10 +658,11 @@ if(BUILD_TESTING)
     # fill. Pure, so it needs neither SDL nor the PPU.
     add_executable(actraiser_ws_gap_test
         tests/actraiser_ws_gap_test.c
-        src/actraiser_ws_gap.c
+        src/actraiser/actraiser_ws_gap.c
     )
     target_include_directories(actraiser_ws_gap_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/actraiser
     )
     add_test(NAME actraiser_ws_gap COMMAND actraiser_ws_gap_test)
 
