@@ -3,6 +3,7 @@
 #include "render_capabilities.h"
 #include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
 #include "input_map.h"
+#include "atomic_replace.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -2868,15 +2869,6 @@ bool Settings_Load(const char *path) {
   return Settings_LoadInternal(path, false, 0, false);
 }
 
-static bool Settings_ReplaceFile(const char *temporary, const char *path) {
-#ifdef _WIN32
-  return MoveFileExA(temporary, path,
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-#else
-  return rename(temporary, path) == 0;
-#endif
-}
-
 /* Durability half of the atomic write — see the long note in
  * save_system.c's WriteAtomic. MOVEFILE_WRITE_THROUGH's documented flush
  * guarantee is worded for the cross-volume copy+delete case, and POSIX
@@ -2975,7 +2967,7 @@ bool Settings_Save(const char *path) {
   if (success && !Settings_FlushFileData(file)) success = false;
   if (fclose(file) != 0) success = false;
 
-  if (success && !Settings_ReplaceFile(temporary, path)) {
+  if (success && !AtomicReplaceFile(temporary, path)) {
     fprintf(stderr, "[settings] cannot replace %s: %s\n", path,
             strerror(errno));
     success = false;
