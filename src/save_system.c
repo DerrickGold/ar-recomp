@@ -1,4 +1,5 @@
 #include "save_system.h"
+#include "atomic_replace.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -405,21 +406,6 @@ static void SyncContainingDirectory(const char *path) {
 #endif
 }
 
-/* Named SaveReplaceFileAtomic, not ReplaceFile: <windows.h> (winbase.h)
- * defines ReplaceFile as a UNICODE-selected alias for ReplaceFileW/A, so a
- * bare `static bool ReplaceFile(...)` here is macro-rewritten and collides
- * with the Win32 prototype — the Windows build would not compile. Same class
- * as the CopyFile->CopyFileA collision fixed earlier, and the reason
- * settings.c spells its twin Settings_ReplaceFile. */
-static bool SaveReplaceFileAtomic(const char *temporary, const char *path) {
-#ifdef _WIN32
-  return MoveFileExA(temporary, path,
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-#else
-  return rename(temporary, path) == 0;
-#endif
-}
-
 static bool WriteAtomic(const char *path, WriteBodyFn body,
                         const void *context, SaveError *error) {
   size_t length = strlen(path);
@@ -453,7 +439,7 @@ static bool WriteAtomic(const char *path, WriteBodyFn body,
     success = Fail(error, "error syncing %s: %s", temporary, strerror(errno));
   if (fclose(file) != 0)
     success = Fail(error, "error closing %s", temporary);
-  if (success && !SaveReplaceFileAtomic(temporary, path))
+  if (success && !AtomicReplaceFile(temporary, path))
     success = Fail(error, "cannot replace %s: %s", path, strerror(errno));
   /* Make the directory entry itself durable, so the rename cannot be lost
    * while the (already-synced) file contents survive. Best-effort: a failure

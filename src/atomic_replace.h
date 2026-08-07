@@ -19,12 +19,13 @@
  * MoveFileExA(MOVEFILE_REPLACE_EXISTING) is the actual primitive: a genuine
  * atomic replace with no window where neither file exists. save_system.c and
  * settings.c each grew their own private copy of this before it was worth
- * sharing; this is that copy, made common rather than written a fourth time.
+ * sharing; both now call this one, the single implementation.
  *
  * NOT named ReplaceFile: <windows.h> defines that as a UNICODE-selected alias
  * for ReplaceFileW/A, so a bare `ReplaceFile` here would be macro-rewritten and
- * collide with the Win32 prototype -- the same trap already documented at
- * save_system.c's SaveReplaceFileAtomic.
+ * collide with the Win32 prototype -- which is why the callers that used to
+ * spell their private copies SaveReplaceFileAtomic / Settings_ReplaceFile
+ * avoided the bare name too.
  *
  * Returns false with errno/GetLastError() set by the underlying call. On
  * failure the destination is untouched, so a caller's "original kept" message

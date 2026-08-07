@@ -440,6 +440,7 @@ if(BUILD_TESTING)
         tests/settings_test.c
         src/config.c
         src/settings.c
+        src/atomic_replace.c
         # settings.c's randomizer rows call into the transform for their
         # availability gate and their on-change refresh. It is pure ROM-buffer
         # work with no SDL/PPU closure, so linking it here costs nothing.
@@ -460,6 +461,7 @@ if(BUILD_TESTING)
         tests/settings_overlay_test.c
         src/config.c
         src/settings.c
+        src/atomic_replace.c
         src/randomizer.c
         src/settings_overlay.c
         src/input_map.c
@@ -638,6 +640,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_save_system_test
         tests/save_system_test.c
         src/save_system.c
+        src/atomic_replace.c
     )
     target_include_directories(actraiser_save_system_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
