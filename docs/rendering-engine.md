@@ -528,6 +528,58 @@ All CPU, WRAM, and math-unit state is restored, and only range-checked words in
 that layer's 4KiB tilemap persist. This is source-only and uses already-emitted
 routines; no regeneration is required.
 
+### 12b. Margin drain spans must match the REFRESH CADENCE, not the camera (2026-08-06)
+
+§12a gave the host refresher the right *rows*. This entry is about the right
+*columns*, and it corrects two things the vertical-extend work inherited.
+
+**The row record is indexed by absolute ring column.** `$B8A0` fills its record
+so that record slot `c` is the tile whose world index is `≡ c (mod 64)` — NOT
+slot 0 = the record's own `world_x`. This is why `ws_drain_row_record_range` can
+compute `col = tile & 0x3F` and read the record at that same index, and why a
+neighbouring band built at `page ± 256` (ring phase 32 away from the page row)
+still lands correctly. **Proven, not assumed:** building the neighbours at
+`± 512` instead — same ring phase as the page row, therefore correct under
+*either* indexing convention — produces byte-identical tilemaps across a full
+replay, provided the build-site guards are held fixed in both arms. (Vary the
+guard too and pageX=256 silently drops the left neighbour, so the diff measures
+"built vs not built" and tells you nothing. That mistake costs a run.)
+
+**The drain span must cover the whole refresh window, not the current pixel.**
+`WsLayerRefreshKey::camera_x_tile` quantizes the camera to 16px, so after a
+rebuild the camera keeps moving up to 15px before the next one fires. Deriving
+the drain range from the exact `camera_x` leaves the outermost one or two margin
+tile columns undrained for the rest of that window — and **undrained is not
+empty**: the page-aligned *full* drain has already written all 64 ring columns,
+so those cells hold real world content from 512px away. The result is a
+convincing fragment of the wrong place welded to the extreme edge, clearing at
+the next 16px boundary. Walking left strands it on the left edge, walking right
+on the right edge; the self-correction is what made it read as a transient
+streaming glitch rather than a coverage bug.
+
+Fix: compute `view_left`/`view_right` from `camera_x & ~0xF` (and `+ 15` on the
+right), making the drained span a superset of anything displayable before the
+next rebuild. The column-strip loops always did this — that is what their `+ 1`
+strip is for; only the row drains were still per-pixel.
+
+**The vertical band must be selected by intersection, not by a step count.**
+`ws_build_band_rows` stepped `k * 16` down from `row_y = camera_y & ~0xF`
+starting at `k = 1`, which assumes `camera_y` is already 16px-aligned. At
+`camera_y = 504` with a 32px band it built `[464, 496)` for a band spanning
+`[472, 504)` — missing the band's bottom 8px row entirely. That row sits above
+the camera, so the game's own streamer never refreshes it either, and it stays
+stale until vertical motion happens to rebuild it. Select rows by intersection
+with `[camera_y - band_px, camera_y)` instead; correct at every phase, no
+separate alignment case.
+
+**Verification technique worth reusing.** The world is static, so a given
+(world tile column, tile row) must read the same tilemap value every time it is
+DISPLAYED. Recording that map over a replay and reporting contradictions turns
+"does the margin ever show the wrong place?" into a number: 4 contradictions in
+28818 displayed-tile samples before the fix, 0 after. Pixel gates could not see
+it — the attract and flat-widescreen shot frames land before act entry, and the
+headless diorama capture composites no band.
+
 ## 13. Widescreen design constraints (read before the next implementation)
 
 Facts the next design must satisfy (all trace/disasm-proven above):

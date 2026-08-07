@@ -903,6 +903,16 @@ show the frozen `$0088` against the advancing host frame:
    deliberately a raw dump and not a verdict, since a first cut that classified
    "uniform row" as filler reported 100% filler (an all-sky BG1 row is uniform
    too). Design and the full trap list: rendering-engine.md §13i.
+
+   **For "is the margin showing the wrong place?", use the static-world oracle
+   rather than a reference image.** The level does not change, so a given (world
+   tile column, tile row) must read the same tilemap value every time it is
+   DISPLAYED. Record that map across a replay and report contradictions: each one
+   is provable staleness, with no baseline binary and no golden frame. This is
+   what closed ledger §37 (4 contradictions in 28818 displayed-tile samples
+   before the fix, 0 after) after the pixel gates had reported clean — they land
+   at gf=900, before act entry, and the headless diorama capture composites no
+   band. Generalizes to any host-built cell whose source data is immutable.
 2d. **Stage the SAVE STATE a repro needs, without touching the player's save**:
    `AR_SAVE_NATIVE_PATH=<copy.srm>` redirects the native SRAM backend, and an
    `AR_SETTINGS_PATH` ini with `save_edit_armed = On` plus the staged
