@@ -67,9 +67,9 @@ Input binding is done from the settings overlay, not from this file.
 | `IgnoreAspectRatio` | disable logical-size aspect correction and stretch to the window |
 | `EnableAudio`, `AudioFreq`, `AudioSamples` | audio output settings; enable/disable is live, frequency cycles through `32040`/`44100`/`48000` Hz, and format changes apply on restart |
 
-These legacy names are staged into the same descriptor registry used by the
-menu and `settings.ini`; `g_config` is no longer consulted by runtime video or
-audio code.
+These legacy names are staged directly into the same descriptor registry used
+by the menu and `settings.ini`; the config parser keeps no state of its own, and
+runtime video and audio code reads only `g_settings`.
 
 ### Persistent user settings (`settings.ini`)
 
