@@ -1,0 +1,123 @@
+# T2a — Split the sim3D / world-navigation renderer out of `present.c`
+
+**Status: SPEC ONLY — not executed.** This split was analysed in depth on a
+ROM-less machine and deliberately **not** applied there, because `present.c`
+is not compiled by the `AR_TESTS_ONLY` test tier and no ROM was available, so
+the only local oracle is `cc -fsyntax-only`. A syntax check cannot detect the
+errors that matter for this file (a mis-extracted function body or a static
+wrongly shared between the two translation units compiles clean and renders
+wrong). Three scripted attempts each produced a different structural mis-slice
+that only surfaced as an undefined-symbol error — evidence that this extraction
+must be executed where it can be **linked and run against a ROM**.
+
+Execute this on a machine that can build the full game target and visually
+confirm sim-mode 3D output is unchanged.
+
+## Goal
+
+`present.c` is ~4,551 lines; ~58% of it is the sim-mode 3D + world-navigation
+renderer, interleaved with the flat/diorama present path. Move that renderer to
+a new `src/present_sim3d.c`, leaving `present.c` with the flat/diorama path and
+the public entry points. Introduce `src/present_internal.h` for the symbols the
+two translation units share. **No behaviour change** — every moved definition
+is moved verbatim; the rendered output must be byte-identical.
+
+## The partition (verified by usage analysis)
+
+**Moves to `present_sim3d.c` (~96 definitions):** every function, type, enum,
+and file-static whose name matches `Sim` / `WorldNavigation` / `Underlay`, PLUS
+these that the name filter misses but usage proves are sim-only (each has zero
+remaining users in `present.c` after the sim functions leave):
+
+- Types/enums: `SimCullFade`, the anonymous `kSimGround{Columns,Rows,VertexCount,IndexCount}`
+  enum, `SimEffectParticleMotion`, `SimEffectStyle`, `kSimMaxParticlesPerEffect`
+  enum, `SimBillboardPassKind`, `SimObjectTierFilter`, `SimBillboardPass`,
+  `SimCloudLayer`, `SimDynamicCameraState`, `kSimShadowBlurTaps` enum, and the
+  anonymous enums local to sim functions (verify each block's constants are
+  referenced only by moved code before moving).
+- Const data: `kEffectCircle32` (`static const float[32][2]`), `kSimCloudLayers`.
+- Statics incl. multi-declarator ones: all `s_sim_*` and
+  `s_world_navigation_*` including the paired `s_sim_shadow_w, s_sim_shadow_h`
+  and `s_sim_rim_w, s_sim_rim_h`, and `g_sim_dyncam`, `kPi`, and the `kSim*`
+  tuning constants.
+
+**STAYS in `present.c` (public entry points — never move, even though they
+touch sim statics):** `PresentComposite`, `PresentUpload`,
+`PresentRendererResources_Reset`, `Present_EffectRendererSupported`,
+`Present_SimRimMaskSupported`, `ComputePresentationViewport`, `FrameSlot_Capture`.
+
+## The boundary — `present_internal.h`
+
+Not a public API (that is `present.h`). Contents:
+
+1. **Full definitions** of the two effect types both files need by-value/field
+   access — move these OUT of `present.c` into the header:
+   `EffectRenderState`, `EffectBatch`.
+2. **Prototypes of 10 shared helpers** that stay defined in `present.c` and are
+   called by the sim renderer — and must be **de-static'd** in `present.c`:
+   `ToFRect`, `ApplyLogicalPresentation`, `PresentHudOverlayComposited`,
+   `PresentSceneInspector`, `PresentCheatBadge`, `EffectRendererAvailable`,
+   `DisableEffectAdd`, `BeginEffectAdd`, `EndEffectAdd`, `SubmitEffectBatch`.
+   (`ComputePresentationViewport` is already public in `present.h` — do not
+   redeclare.)
+3. **Prototypes of the sim entry points** defined in `present_sim3d.c` and
+   called back by `present.c`: `PresentSim3D`, `PresentWorldNavigation3D`,
+   `UploadSimTownCanvas`, `UploadWorldNavigationComposition`, plus the new
+   `PresentSim3D_ResetResources`.
+
+`present_sim3d.c` also needs the `extern` block of presentation-resource
+globals (`g_renderer`, `g_texture`, `g_hud_bg/obj_texture`, `g_pixels`,
+`g_hud_bg/obj_pixels`, `g_diorama_textures[]`, `g_diorama_layer_pixels[]`,
+`g_sim_obj_atlas_texture`, `g_sim3d_layer_textures[]`, `g_sim3d_flat_texture`)
+— copy it verbatim from `present.c`'s top.
+
+## The one function that must be SPLIT, not moved
+
+`PresentRendererResources_Reset` (present.c:2513-2556) frees both HUD-composite
+(stay) and sim (move) textures. Split it:
+
+- **Keep in `present.c`:** lines 2514-2517 (`s_hud_composite_*`) and 2529-2530
+  (`SDL_SetAtomicInt(&s_effect_add_supported/…_geometry_supported, 1)`), then
+  add a call to `PresentSim3D_ResetResources();`.
+- **Move to `present_sim3d.c`** as the body of a new
+  `void PresentSim3D_ResetResources(void)`: lines 2518-2528 and 2531-2555 (all
+  the `s_sim_*` / `s_world_navigation_*` frees). Place this function **after**
+  the sim static definitions in the new file (C requires file-scope statics be
+  declared before use — putting it at the top fails to compile).
+
+⚠️ When implementing the splice, anchor on the *unique* `PresentRendererResources_Reset`
+function, not a bare `if (s_sim_shadow_texture)` text match — that substring
+also appears inside `EnsureSimShadowTexture`, and matching the wrong one
+silently extracts the wrong body (this bug occurred in all three scripted
+attempts).
+
+## `present_sim3d.c` include block
+
+Mirror `present.c`'s includes plus `present_internal.h`. Verify against the
+compiler; the sim code uses SDL, math, the diorama headers (scroll/skybox),
+`scene3d_math.h`, `render_capabilities.h`, and the `sim/*` headers.
+
+## Verification (MUST run on the ROM machine)
+
+1. `cc -fsyntax-only -Werror=implicit-function-declaration` on **both** TUs —
+   necessary but NOT sufficient (this is all the origin machine could do).
+2. Full game link: `cmake --build --preset play`. A missing shared-helper
+   declaration or a mis-partitioned static surfaces here as an undefined or
+   duplicate symbol.
+3. **Run with a ROM and visually confirm render-identity** of: an action-stage
+   frame (flat + diorama, to prove the stay-path is intact), a SIM town 3D
+   scene (`PresentSim3D`), and a world-navigation scene
+   (`PresentWorldNavigation3D`). Compare against a pre-split build. This is the
+   only check that validates correctness; everything above only validates that
+   it builds.
+4. If a frame capture / golden-image path exists, diff sim-mode frames
+   before/after for byte-identity.
+
+## Why this is worth doing carefully, not fast
+
+`present.c` carries the D6 no-live-globals invariant (it must never read
+`g_ppu`/`g_settings` live; all state comes via `const FrameSlot *`). Both
+resulting files must preserve that. The split does not widen the contract —
+`present_internal.h` exposes only present.c internals to the sim TU, not live
+game state — but a careless extraction that pulls in a live global would break
+the invariant the whole file exists to enforce.
