@@ -9,7 +9,7 @@
 
 #include "types.h"
 #include "present.h"   /* InspectorPresentationSelection, FrameSlot */
-#include "sim3d.h"     /* Sim3DTuning */
+#include "sim/sim3d.h"     /* Sim3DTuning */
 
 /* Host/game state read by FrameSlot_Capture. main.c owns turbo, the inspector
  * selection, and the frame dimensions; host_display.c owns pixel-aspect

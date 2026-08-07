@@ -18,7 +18,7 @@
 #include "music_replacements.h"
 #include "save_system.h"
 #include "settings_overlay.h"
-#include "sim3d.h"
+#include "sim/sim3d.h"
 #include "user_data_dir.h"
 
 static RuntimeLifecycleRequest s_lifecycle_request;

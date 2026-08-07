@@ -16,7 +16,7 @@
 #include "dev/scene_inspector.h"
 #include "settings.h"
 #include "settings_overlay.h"
-#include "sim3d.h"
+#include "sim/sim3d.h"
 
 /* FrameSlot_Capture records turbo in the immutable presentation snapshot. */
 uint8 g_turbo;
