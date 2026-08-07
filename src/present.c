@@ -7,13 +7,13 @@
  * point (D6) — it's cheaper than relying on discipline/grep.
  *
  * It's fine to extern the presentation *resources* below (renderer, window,
- * textures, the raw pixel buffers) — see the M5 plan's buffer-ownership
- * note: those are boot-created once and, thanks to the present-thread
- * handshake (real SDL_CreateThread, condition-var protocol, quiesce,
- * synchronous headless fallback), are exclusively read here between the
- * game thread's Upload release and its next RtlDrawPpuFrame call. That's a
- * different race class than g_ppu/g_settings, and it's closed by the
- * handshake, not by this file's isolation. */
+ * textures, the raw pixel buffers): those are boot-created once and, since
+ * Phase 0 removed the present thread (#18/P13), are read only here on the
+ * single render/main thread — the same thread that runs RtlDrawPpuFrame and
+ * the Upload/Composite phases, so nothing reads them concurrently. The D6
+ * isolation above is a separate and still-enforced rule: it is about not
+ * reading LIVE g_ppu/g_settings state (which the frame slot must carry
+ * instead), not about cross-thread access, which no longer exists. */
 
 #include <SDL3/SDL.h>
 #include <math.h>

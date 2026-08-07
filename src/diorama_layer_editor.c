@@ -294,7 +294,8 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
          * must be TIGHTER than the manifest's, so the general rule above ("mirror
          * the parser") has an exception here.
          *
-         * The renderer gates the stack pass on `copies > 1` (diorama.c:1717),
+         * The renderer gates the stack pass on `copies > 1` (the stack loop
+         * in DrawDiorama, diorama.c),
          * because one copy coincides with the plane's own draw and is skipped as
          * redundant -- so `copies:1` is a stack that renders NOTHING while
          * StrategyOfPlane still reports "stack". Stepping down to it made the row

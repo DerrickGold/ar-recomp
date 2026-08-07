@@ -3,8 +3,9 @@
 
 /* Q3: FrameSlot_Capture — the sole game-thread FrameSlot producer — was
  * extracted out of main.c into frame_slot.c. FrameSlot_Capture itself is
- * declared in present.h:248; this header exposes the main.c-owned globals it
- * reads and the shared Sim3DTuning builder it and DrawAndPresentFrame share. */
+ * declared in present.h (with the FrameSlot type); this header exposes the
+ * main.c-owned globals it reads and the shared Sim3DTuning builder it and
+ * DrawAndPresentFrame share. */
 
 #include "types.h"
 #include "present.h"   /* InspectorPresentationSelection, FrameSlot */

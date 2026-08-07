@@ -2303,14 +2303,14 @@ void ActRaiserDrawPpuFrame(void) {
   ActRaiser_WidescreenSkyPalaceRestore();
 }
 
-/* See the latch above. Reports the margin geometry of the most recently rendered
- * frame, which is what a consumer of that frame's captured pixels must use. */
 /* Same latch, same reason (see ActRaiser_LiveMargins): the vertical band the
  * frame was ACTUALLY rendered with, not whatever g_ppu holds by the time the
  * frame slot is captured. Separate accessor rather than more out-params so
  * the existing three-way callers stay untouched. */
 int ActRaiser_LiveVerticalMargin(void) { return s_live_margin_top; }
 
+/* See the latch above. Reports the margin geometry of the most recently rendered
+ * frame, which is what a consumer of that frame's captured pixels must use. */
 void ActRaiser_LiveMargins(int *left, int *right, int *bg2_margin_source) {
   if (left) *left = s_live_margin_left;
   if (right) *right = s_live_margin_right;

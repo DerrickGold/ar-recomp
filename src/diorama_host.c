@@ -24,8 +24,8 @@ bool Diorama_IsActiveThisFrame(void) {
 }
 
 /* The live room for the layer editor: the ($18,$19) pair the draw loop keys its
- * override lookup on (diorama.c:1532), reported only while a diorama room is
- * actually running.
+ * override lookup on (the DioramaLayerOrder_Resolve call in diorama.c), reported
+ * only while a diorama room is actually running.
  *
  * The gate is Diorama_IsActiveThisFrame rather than just the map group, so the
  * editor reports a room exactly when the renderer would apply its overrides --
