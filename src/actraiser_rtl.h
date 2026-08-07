@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_RTL_H
 #define ACTRAISER_RTL_H
 
-#include "action_obj_apron.h"
+#include "action/action_obj_apron.h"
 #include "common_rtl.h"
 #include "common_cpu_infra.h"
 #include "snes/snes_regs.h"

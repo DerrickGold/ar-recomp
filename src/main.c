@@ -18,7 +18,7 @@
 #include <unistd.h>
 #endif
 
-#include "action_obj_apron.h"
+#include "action/action_obj_apron.h"
 #include "snes/ppu.h"
 #include "types.h"
 #include "actraiser_rtl.h"

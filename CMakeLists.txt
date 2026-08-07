@@ -257,6 +257,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_action_load_pacing_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/action
     )
     add_test(NAME actraiser_action_load_pacing
         COMMAND actraiser_action_load_pacing_test)
@@ -344,20 +345,22 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_action_effects_test
         tests/action_effects_test.c
-        src/action_effects.c
+        src/action/action_effects.c
     )
     target_include_directories(actraiser_action_effects_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/action
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_effects COMMAND actraiser_action_effects_test)
 
     add_executable(actraiser_action_effect_render_test
         tests/action_effect_render_test.c
-        src/action_effect_render.c
+        src/action/action_effect_render.c
     )
     target_include_directories(actraiser_action_effect_render_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/action
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_action_effect_render_test PRIVATE
@@ -682,10 +685,11 @@ if(BUILD_TESTING)
     # column) is what the phase's byte-identity gate rests on.
     add_executable(actraiser_action_obj_apron_test
         tests/action_obj_apron_test.c
-        src/action_obj_apron.c
+        src/action/action_obj_apron.c
     )
     target_include_directories(actraiser_action_obj_apron_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/action
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_obj_apron

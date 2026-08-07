@@ -19,9 +19,9 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include "action_obj_apron.h"
+#include "action/action_obj_apron.h"
 #include "present.h"
-#include "action_effect_render.h"
+#include "action/action_effect_render.h"
 #include "crt_post.h"
 #include "types.h"
 #include "diorama.h"

@@ -8,7 +8,7 @@
 #include "hd_replacements.h"
 #include "diorama.h"
 #include "sim_render_metadata.h"
-#include "action_effects.h"
+#include "action/action_effects.h"
 
 /* M5 (ar-recomp-threading-impl.md Appendix D). FrameSlot is the ONE contract
  * for everything present-time rendering reads: it is populated by the single

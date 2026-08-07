@@ -19,7 +19,7 @@
  * sprite/projectile predicates authentic. */
 
 #include "cpu_state.h"
-#include "action_obj_apron.h"
+#include "action/action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "settings.h"
