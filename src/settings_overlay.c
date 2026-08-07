@@ -3001,7 +3001,24 @@ static int SnapPanelEdge(int origin, int edge) {
   return origin + ((edge - origin) / kGlyphSize) * kGlyphSize;
 }
 
-static void DrawMenu(const MenuLayout *layout) {
+/* Fixed panel geometry for one DrawMenu pass, computed once and handed to each
+ * section renderer. Section chrome draws in the game steel-blue (structure /
+ * structure_dim = kSteelBlue / kSteelDim); the cursor/selection uses menu
+ * yellow. Extracted from the former single 560-line DrawMenu; the section
+ * bodies are unchanged. */
+typedef struct MenuChrome {
+  int margin;
+  int panel_right;
+  int top_y, top_height;
+  int bottom_y, bottom_height;
+  int left_x, left_width;
+  int right_x, right_width;
+  int bottom_width;
+  int right_text_x;
+  int value_right, scroll_x;
+} MenuChrome;
+
+static MenuChrome ComputeMenuChrome(const MenuLayout *layout) {
   const int margin = 8;
   const int gap = 8;
   const int left_width = 152;
@@ -3017,23 +3034,31 @@ static void DrawMenu(const MenuLayout *layout) {
   const int right_x = left_x + left_width + gap;
   const int right_width = panel_right - right_x;
   const int bottom_width = panel_right - margin;
+  MenuChrome c = {
+      .margin = margin,
+      .panel_right = panel_right,
+      .top_y = top_y,
+      .top_height = top_height,
+      .bottom_y = bottom_y,
+      .bottom_height = bottom_height,
+      .left_x = left_x,
+      .left_width = left_width,
+      .right_x = right_x,
+      .right_width = right_width,
+      .bottom_width = bottom_width,
+      .right_text_x = right_x + 12,
+      .value_right = right_x + right_width - 16,
+      .scroll_x = right_x + right_width - 13,
+  };
+  return c;
+}
 
-  DrawDialogPanel(layout, left_x, top_y, left_width, top_height);
-  DrawDialogPanel(layout, right_x, top_y, right_width, top_height);
-  DrawDialogPanel(layout, margin, bottom_y, bottom_width, bottom_height);
-
-  const MenuSection *section = ActiveSection();
-  /* The section accent tints only its 16x16 icon (baked into the atlas); all
-   * chrome here is the shared game steel-blue, and the cursor/selection is the
-   * game's menu yellow. */
+static void DrawMenuNavColumn(const MenuLayout *layout, const MenuChrome *c) {
+  const int left_x = c->left_x;
+  const int left_width = c->left_width;
+  const int top_y = c->top_y;
+  const int top_height = c->top_height;
   const uint32_t structure = kSteelBlue;
-  const uint32_t structure_dim = kSteelDim;
-  SyncActiveTabPage();
-
-  /* SDL3 removed SDL_TICKS_PASSED; SDL_GetTicks is now 64-bit and never wraps
-   * in practice, so a direct comparison is exact. */
-  if (s_status[0] && SDL_GetTicks() >= s_status_until)
-    s_status[0] = 0;
 
   /* ── Nav column ──────────────────────────────────────────────────────── */
   const int left_text_x = left_x + 10;
@@ -3085,13 +3110,21 @@ static void DrawMenu(const MenuLayout *layout) {
                 s_nav_visible_rows * kNavRowHeight, VisibleSectionCount(),
                 s_nav_visible_rows, s_nav_top_row, structure);
 
+}
+
+static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
+                          const MenuSection *section) {
+  const int right_x = c->right_x;
+  const int right_width = c->right_width;
+  const int top_y = c->top_y;
+  const int right_text_x = c->right_text_x;
+  const int value_right = c->value_right;
+  const uint32_t structure_dim = kSteelDim;
+
   /* ── Submenu header: section title, status, tab bar ───────────────────── */
-  const int right_text_x = right_x + 12;
   const int right_title_y = top_y + 8;
   /* The value column stops short of the frame so the scrollbar has a gutter
    * of its own instead of overlapping a value. */
-  const int value_right = right_x + right_width - 16;
-  const int scroll_x = right_x + right_width - 13;
 
   /* The submenu header is always the active section, so its icon takes the
    * colored selected palette. */
@@ -3184,6 +3217,23 @@ static void DrawMenu(const MenuLayout *layout) {
   FillLogicalRect(layout, right_x + 10, rule_y, right_width - 20, 1,
                   structure_dim);
 
+
+  return rule_y;
+}
+
+static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
+                         const MenuSection *section, int rule_y,
+                         bool custom_rows) {
+  const int right_x = c->right_x;
+  const int right_width = c->right_width;
+  const int top_y = c->top_y;
+  const int top_height = c->top_height;
+  const int right_text_x = c->right_text_x;
+  const int value_right = c->value_right;
+  const int scroll_x = c->scroll_x;
+  const uint32_t structure = kSteelBlue;
+  const uint32_t structure_dim = kSteelDim;
+
   /* ── Rows ─────────────────────────────────────────────────────────────── */
   const int first_row_y = rule_y + 6;
   const int selector_x = right_x + 12;
@@ -3205,7 +3255,6 @@ static void DrawMenu(const MenuLayout *layout) {
   /* The layer editor draws its own rows and then skips the descriptor loop and
    * the synthetic section-reset row entirely: it has no descriptors, and its
    * reset is per-room and already in the list. */
-  const bool custom_rows = ActiveSectionIsCustom();
   if (custom_rows) {
     DioramaEditorRow rows[kDioramaEditorRowMax];
     int n = LayerEditorRows(rows, kDioramaEditorRowMax);
@@ -3396,6 +3445,18 @@ static void DrawMenu(const MenuLayout *layout) {
                       (right_width - 24) / kDebugGlyphWidth, 6);
   }
 
+}
+
+static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
+                           const MenuSection *section, bool custom_rows) {
+  const int margin = c->margin;
+  const int panel_right = c->panel_right;
+  const int bottom_y = c->bottom_y;
+  const int bottom_height = c->bottom_height;
+  const int bottom_width = c->bottom_width;
+  const uint32_t structure = kSteelBlue;
+  const uint32_t structure_dim = kSteelDim;
+
   /* ── Description panel ────────────────────────────────────────────────── */
   const int description_x = margin + 12;
   const int description_chars = (bottom_width - 24) / kDebugGlyphWidth;
@@ -3561,6 +3622,34 @@ static void DrawMenu(const MenuLayout *layout) {
     DrawSmallText(layout, hint_x, hint_y, hints[i + 1], kHintColor);
     hint_x += SmallTextWidth(hints[i + 1]) + 11;
   }
+}
+
+static void DrawMenu(const MenuLayout *layout) {
+  const MenuChrome chrome = ComputeMenuChrome(layout);
+
+  /* Three framed panels: nav column (left), submenu (top-right), and the
+   * description/hint strip (bottom). */
+  DrawDialogPanel(layout, chrome.left_x, chrome.top_y, chrome.left_width,
+                  chrome.top_height);
+  DrawDialogPanel(layout, chrome.right_x, chrome.top_y, chrome.right_width,
+                  chrome.top_height);
+  DrawDialogPanel(layout, chrome.margin, chrome.bottom_y, chrome.bottom_width,
+                  chrome.bottom_height);
+
+  const MenuSection *section = ActiveSection();
+  SyncActiveTabPage();
+
+  /* SDL3 removed SDL_TICKS_PASSED; SDL_GetTicks is now 64-bit and never wraps
+   * in practice, so a direct comparison is exact. */
+  if (s_status[0] && SDL_GetTicks() >= s_status_until)
+    s_status[0] = 0;
+
+  const bool custom_rows = ActiveSectionIsCustom();
+
+  DrawMenuNavColumn(layout, &chrome);
+  const int rule_y = DrawMenuHeader(layout, &chrome, section);
+  DrawMenuRows(layout, &chrome, section, rule_y, custom_rows);
+  DrawMenuFooter(layout, &chrome, section, custom_rows);
 }
 
 
