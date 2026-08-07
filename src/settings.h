@@ -413,12 +413,12 @@ typedef struct Settings {
   int sim3d_height_scale_x100; /* virtual-height scale, percent of the
                                 * classified plane; 100 = catalogue default */
   int sim3d_shadow_opacity_pct; /* ground shadow darkness, percent; 0 = off */
-  int sim3d_height_pop_pct;
+  int sim3d_height_pop_pct;      /* extra billboard scale at the catalogue
+                                  * flight plane, percent; 0 = true perspective */
   int sim3d_light_azimuth_deg;   /* direction the shadow is thrown */
   int sim3d_light_elevation_deg; /* 90 = straight overhead, no offset */
   int sim3d_shadow_softness_pct; /* D4b blur radius; 0 = hard shadow */
-  int sim3d_rim_strength_pct;    /* D4c rim contribution; 0 = unlit sprites */     /* extra billboard scale at the catalogue
-                                 * flight plane, percent; 0 = true perspective */
+  int sim3d_rim_strength_pct;    /* D4c rim contribution; 0 = unlit sprites */
   int sim3d_underlay_haze_pct;   /* world-map underlay fade; 100 = hidden */
   int sim3d_cloud_opacity_pct;   /* shroud density; 0 = no clouds */
   int sim3d_cloud_falloff_px;    /* clear-to-full ramp, authentic px */

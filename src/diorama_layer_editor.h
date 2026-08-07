@@ -165,8 +165,8 @@ const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
 /* Cycle a plane's depth strategy by `direction` (+1/-1), wrapping.
  *
  * THIS IS THE LOAD-BEARING FUNCTION. The six strategies are NOT exclusive in
- * the data model: rake and bow SUM (diorama.c:1727 passes rake+bow to the
- * skirt), and DioramaLayerOrder_StrategyOf reports whichever key DOMINATES
+ * the data model: rake and bow SUM (BuildLayerSkirtMesh in diorama.c passes
+ * rake+bow to the skirt), and DioramaLayerOrder_StrategyOf reports whichever key DOMINATES
  * rather than the only one set. So selecting a strategy means clearing every
  * key that would otherwise dominate or add to it, not merely setting one.
  * Getting that wrong silently draws a different shape than the row claims.

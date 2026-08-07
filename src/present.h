@@ -19,13 +19,13 @@
  * Pixel buffers (g_pixels, g_hud_bg_pixels, g_hud_obj_pixels,
  * g_m7_overlay_pixels, g_diorama_layer_pixels[], g_sim_obj_atlas_pixels) are
  * deliberately NOT copied
- * here — see the M5 plan's buffer-ownership note. Safety for those comes from
- * the present-thread handshake (the game thread does not touch them again
- * until the present thread's upload phase has finished reading them), not
- * from copying or double-buffering. FrameSlot only carries the small
- * scalar/derived state that the present thread's COMPOSITE phase reads
- * concurrently with the game thread's NEXT tick — that race is real
- * regardless of buffer strategy (§2.8/D3). */
+ * here. Safety for those comes from single-threaded ordering: since Phase 0
+ * removed the present thread (#18/P13), Upload reads them on the same thread
+ * that produced them (RtlDrawPpuFrame), before the next tick overwrites them,
+ * so there is no reader/writer race to close. FrameSlot still carries the
+ * small scalar/derived state Composite needs, because that keeps present.c
+ * off live g_ppu/g_settings (the D6 isolation rule), not for any thread
+ * reason (§2.8/D3). */
 
 /* Mirrors ppu.h's kPpuOverlaySource_* / kPpuOverlayFlag_RemoveFromGame.
  * present.c does not include ppu.h (D6), so the order/value is pinned here
@@ -150,9 +150,9 @@ typedef struct FrameSlot {
   uint32_t diorama_plane_content_mask;
 
   /* D1 simulation-town semantic payload.  This value-copy is the only form
-   * the present thread may consume; the HLE producer remains game-thread
-   * private.  All effective visual bits are zero until their render stages
-   * land, so adding this contract cannot change the authentic composite. */
+   * present-time code may consume; the live HLE producer state stays private
+   * (the D6 rule).  All effective visual bits are zero until their render
+   * stages land, so adding this contract cannot change the authentic composite. */
   SimFrameData sim;
 
   /* Action-stage spell lifecycle, captured from WRAM beside the frame it
@@ -161,8 +161,8 @@ typedef struct FrameSlot {
   bool action_effect_lighting;
   bool action_effect_particles;
 
-  /* "Cycle magic spell" cheat state, snapshotted rather than read live so the
-   * present thread never touches g_settings or WRAM. While armed the composite
+  /* "Cycle magic spell" cheat state, snapshotted rather than read live so
+   * present-time code never touches g_settings or WRAM (D6). While armed the composite
    * draws a badge naming the current spell: a spell-swapped session must be
    * self-evidently non-stock in any screenshot, recording, or bug report. */
   bool magic_cycle_armed;
@@ -408,10 +408,9 @@ SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer, bool ws_active,
 /* M7: the small subset of a FrameSlot that scroll interpolation needs from
  * the PREVIOUS frame. Deliberately its own tiny type rather than a second
  * `const FrameSlot *` — see the long comment on FrameSlot's timestamp_ns
- * field for why reading a second live FrameSlot for "prev" would race the
- * game thread. The present thread keeps exactly one of these as its own
- * thread-local state, updated after each composite via
- * FrameSlot_ExtractScrollSnapshot. */
+ * field for why reusing a live FrameSlot for "prev" would misread the
+ * current frame's data. The caller keeps exactly one of these, updated after
+ * each composite via FrameSlot_ExtractScrollSnapshot. */
 typedef struct DioramaScrollSnapshot {
   uint64_t timestamp_ns;
   int16_t bg1_camera_x, bg1_camera_y;
@@ -424,12 +423,12 @@ typedef struct DioramaScrollSnapshot {
 void FrameSlot_ExtractScrollSnapshot(const FrameSlot *slot,
                                     DioramaScrollSnapshot *out);
 
-/* --- Present-time entry points (M5.2: still called synchronously from the
- * game thread; M5.3 moves these onto the present thread). Split into an
+/* --- Present-time entry points. Called synchronously on the render/main
+ * thread (Phase 0 removed the present thread, #18/P13). Still split into an
  * Upload phase (SDL_UpdateTexture only) and a Composite phase (SDL_RenderTexture
- * + SDL_RenderPresent) per the M5 plan's buffer-ownership decision: the game
- * thread is safe to redraw into the pixel buffers as soon as Upload returns,
- * well before Composite's vsync block finishes. */
+ * + SDL_RenderPresent): the split is retained because it keeps the texture
+ * uploads grouped ahead of the vsync-blocking present, not for any cross-thread
+ * handoff. */
 void PresentUpload(const FrameSlot *slot);
 /* prev_scroll: the scroll snapshot from the frame shown immediately before
  * this one (M7 interpolation, diorama mode only). NULL disables

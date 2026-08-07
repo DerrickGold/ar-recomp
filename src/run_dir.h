@@ -18,7 +18,8 @@
 void RunDirInit(int argc, char **argv);
 
 /* Rebase bare-filename output env vars (AR_TRACE_WATCH / AR_TRACE /
- * AR_INPUT_RECORD / AR_DRIFT_LOG / AR_MX_OUT / AR_WRAM_TRACE) into the run
+ * AR_INPUT_RECORD / AR_DRIFT_LOG / AR_MX_OUT / AR_WRAM_TRACE / AR_SIM3D_TRACE /
+ * AR_SIM3D_D1_TRACE) into the run
  * dir — call once right after ParseConfigFile so ini-provided values (e.g.
  * `AR_TRACE_WATCH = anom` in dev-config.ini) are covered too. Values
  * containing '/' are left alone. */

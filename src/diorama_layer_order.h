@@ -30,14 +30,14 @@
  * IMPORTANT — why `order` is SEPARATE from `z`, which an earlier revision of
  * this module got wrong. diorama.c's paint order is the literal order of the
  * kDioramaLayers table and nothing sorts by z (no qsort in diorama.c; the file
- * notes at :1106 that SDL_RenderGeometry has no depth test). Crucially the two
+ * notes at each SDL_RenderGeometry call that it has no depth test). Crucially the two
  * do NOT agree today: Bg2Hi (z=0.21) is painted at slot 7, AFTER Bg1 (z=0.50)
  * at slot 5. So "sort by ascending z when an override is active" is not a
  * refinement of the default order — it is a DIFFERENT order, and it reshuffled
  * five planes even for an edit that changed nothing.
  *
  * `z` also feeds the depth-of-field radius: DofRadiusForLayer(layer->z) against
- * a focal plane hardcoded to BG1's 0.50 (diorama.c:153, :1371). Moving a plane's
+ * a focal plane hardcoded to BG1's 0.50 (kDofFocalZ in diorama.c). Moving a plane's
  * z to reorder it would therefore silently change how blurred it is — pushing
  * BG2 from 0.20 to 0.52 drops its blur below the cutoff and the water would
  * turn sharp. Keeping the two keys distinct lets a room reorder without
