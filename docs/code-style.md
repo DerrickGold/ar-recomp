@@ -256,16 +256,23 @@ that the list is short, named, and honest.
 
 | File / symbol | Logic lines | Note |
 |---|---|---|
-| `main()` in `src/main.c:612` | **1,311** | worst single artifact in the tree — boot, config, and loop tangled in one function |
-| `settings_overlay.c` | 2,479 | largest logic file; resisted two extraction passes |
-| `present_sim3d.c` | 2,443 | product of the T2a split; has its own stage seams (ground / billboards / shadows / rim / clouds / underlay / effects) not yet cut |
-| `actraiser_rtl.c` | 1,815 | contains `ActRaiserDrawPpuFrame` (455) and `ActRaiser_ApplyWidescreenPolicy` (418) |
+| `settings_overlay.c` | **2,479** | largest logic file; resisted two extraction passes. Seams are text/glyph measurement and the tab/section/row navigation model — real, but a long tail of small helpers rather than two subsystems |
+| `present_sim3d.c` | 1,953 | product of the T2a split, minus the world-map renderer. Remaining stage seams: effects/particles, clouds, shadows, ground, billboards, cull |
+| `actraiser_rtl.c` | 1,815 | contains `ActRaiserDrawPpuFrame` (455) and `ActRaiser_ApplyWidescreenPolicy` (418). **Deprioritized deliberately**: this is the HLE seam against ROM behaviour, where mistakes are subtlest and the oracles weakest. High risk, moderate reward |
+| `main.c` | 1,246 | the file, not a function — `main()` itself is now 14 lines over eight named phases. Largest remaining is `AppLoop_PumpEvents` (390), kept whole on purpose: one flat switch, every arm independent |
 | `diorama.c` | 1,175 | at budget, watch it |
+
+Retired from this list: `main()` at 1,311 lines (decomposed into boot phases) and
+`present_world_nav.c` (split out at 530 logic lines, for isolation rather than
+size — see its file header).
 
 `settings.c` is deliberately **not** on this list: 3,069 total but 1,250 logic,
 and see [Where data lives](#where-data-lives) for why splitting its table is the
 wrong move.
 
-Known coverage gap: `PresentWorldNavigation3D` has no automated render coverage —
-no checkpoint sets `AR_SIM3D_WORLD_NAV` and no staged replay reaches world-map
-travel. Staging that seed/replay pair is the missing regression asset.
+Known coverage gap: the world-map navigation renderer has no automated render
+coverage — no checkpoint sets `AR_SIM3D_WORLD_NAV` and no staged replay reaches
+world-map travel, so an A/B of it compares equal whether or not it works. It now
+lives alone in `src/present_world_nav.c` so the gap is visible in the file
+listing rather than only here. Staging a world-map SRAM seed + replay and adding
+a checkpoint for it is the missing regression asset.
