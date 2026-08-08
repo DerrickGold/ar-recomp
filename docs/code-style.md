@@ -103,6 +103,35 @@ and should be left alone.
 Split data out when it is bulky *and* self-contained. Otherwise let it sit next to
 the code that owns it.
 
+### In code, or in a file on disk?
+
+> Externalize what a **user or modder** should be able to change without
+> rebuilding, or what a **build step** consumes to generate code. Keep in code
+> what only a programmer can meaningfully change — especially anything the
+> compiler currently checks for you.
+
+This repo already follows that line: `settings.ini`, `diorama-layers.ini`,
+`game-assets/manifest.ini` and the music manifest are all end-user surface, and
+`recomp/symbols.toml` is build-time input that *generates* cfg directives. Both
+kinds earn their file.
+
+The settings **descriptor table** is the instructive counter-example, because it
+looks externalizable and is not. Five of its columns — `field`, `available`,
+`on_change`, `parse`, `format` — are code references, which is exactly the 75
+file-private symbols measured above. Moving the table to TOML/JSON would not
+remove a table; it would add two (a name→function-pointer registry and a
+name→struct-offset registry), hand-maintained, to resolve what the file names.
+
+The decisive cost is losing the compiler. Today a typo'd callback or a bad enum
+is a build error. Externalized, it is a runtime error on a user's machine at
+boot — and settings is the worst subsystem for that, since a failure there can
+lock someone out of the very graphics options they need in order to launch.
+
+The version that *would* be worth it, if localization ever becomes a goal, is
+externalizing `label` and `tooltip` alone: genuinely pure strings, genuinely
+worth non-programmer editing, and able to fail soft (missing key falls back to
+the built-in English) rather than failing the boot.
+
 ## Put the decision on the thing it describes
 
 A per-row property belongs on the row, not in a predicate that enumerates rows
