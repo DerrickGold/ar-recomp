@@ -609,18 +609,46 @@ static void ApplyHostAudioPause(bool paused) {
   if (!paused) HostAudio_SetHostPaused(false);
 }
 
-int main(int argc, char **argv) {
-  setvbuf(stdout, NULL, _IONBF, 0);
-  setvbuf(stderr, NULL, _IONBF, 0);
 
-  const char *rom_path = NULL;
-  const char *config_path = NULL;
+/* ---------------------------------------------------------------------------
+ * Boot decomposition.
+ *
+ * main() was a single 1,311-line function: argument parsing, config, SDL and
+ * window/renderer/texture creation, subsystem injection, the frame loop, and
+ * teardown, all inline. It is now a sequence of named phases over one context.
+ *
+ * ORDER IS THE CONTRACT HERE. Nearly every phase below documents something that
+ * must happen before or after something else -- the portable chdir before any
+ * relative path resolves, the shipped-defaults upgrade before any config read,
+ * RunDirInit before anything prints, the widescreen budget before presentation
+ * resources are allocated, the visual patches between cart_load and
+ * Randomizer_Init. These are called in exactly the order the inline code ran.
+ * Do not reorder them to make the call site read more nicely.
+ * ------------------------------------------------------------------------- */
+typedef struct AppBoot {
+  const char *rom_path;
+  const char *config_path;
+  uint8 *rom_data;
+  size_t rom_size;
+  bool headless;        /* no window/renderer; PPU emulation still runs */
+  bool headless_video;  /* headless, but with a hidden-window renderer */
+  bool video;           /* !headless || headless_video */
+  bool ws_headless;     /* opt a headless run into the configured wide geometry */
+  Snes *snes;
+} AppBoot;
+
+/* Argument parsing, the portable-bundle chdir, the per-run artifact dir, the
+ * shipped-defaults ini upgrade, the config layer, and the ROM read.
+ * Returns a process exit code on failure, or -1 to continue booting. */
+static int AppBoot_ParseArgs(AppBoot *app, int argc, char **argv) {
+  app->rom_path = NULL;
+  app->config_path = NULL;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
-      config_path = argv[++i];
+      app->config_path = argv[++i];
     } else if (argv[i][0] != '-') {
-      rom_path = argv[i];
+      app->rom_path = argv[i];
     }
   }
 
@@ -635,11 +663,11 @@ int main(int argc, char **argv) {
    * and any relative file access. */
   static char rom_abs[1024], config_abs[1024];
   if (PortablePaths_IsBundle()) {
-    if (rom_path && snesrecomp_abspath(rom_path, rom_abs, sizeof rom_abs))
-      rom_path = rom_abs;
-    if (config_path &&
-        snesrecomp_abspath(config_path, config_abs, sizeof config_abs))
-      config_path = config_abs;
+    if (app->rom_path && snesrecomp_abspath(app->rom_path, rom_abs, sizeof rom_abs))
+      app->rom_path = rom_abs;
+    if (app->config_path &&
+        snesrecomp_abspath(app->config_path, config_abs, sizeof config_abs))
+      app->config_path = config_abs;
     snesrecomp_anchor_to_exe_dir();
   }
 
@@ -671,8 +699,8 @@ int main(int argc, char **argv) {
   IniUpgrade_ApplyShippedDefaults();
 
   Settings_ClearConfigLayer();
-  if (config_path)
-    ParseConfigFile(config_path);
+  if (app->config_path)
+    ParseConfigFile(app->config_path);
   else
     ParseConfigFile("config.ini");
 
@@ -680,29 +708,35 @@ int main(int argc, char **argv) {
    * filenames into the per-run dir (see run_dir.h). */
   RunDirRebaseEnvOutputs();
 
-  if (!rom_path) {
+  if (!app->rom_path) {
     fprintf(stderr, "Usage: %s <rom.sfc> [--config config.ini]\n", argv[0]);
     return 1;
   }
 
-  size_t rom_size = 0;
-  uint8 *rom_data = ReadWholeFile(rom_path, &rom_size);
-  if (!rom_data) {
-    fprintf(stderr, "Error: cannot open ROM file '%s'\n", rom_path);
+  app->rom_size = 0;
+  app->rom_data = ReadWholeFile(app->rom_path, &app->rom_size);
+  if (!app->rom_data) {
+    fprintf(stderr, "Error: cannot open ROM file '%s'\n", app->rom_path);
     return 1;
   }
-  fprintf(stderr, "Loaded ROM: %s (%zu bytes)\n", rom_path, rom_size);
+  fprintf(stderr, "Loaded ROM: %s (%zu bytes)\n", app->rom_path, app->rom_size);
+  return -1;
+}
 
+/* Resolve headless/video mode and the widescreen budget, then load settings and
+ * finalize the display mode. Must precede any presentation-resource allocation:
+ * the display presets are only authoritative once g_ws_active/g_ws_extra are. */
+static void AppBoot_ResolveDisplayAndSettings(AppBoot *app) {
   /* Headless mode for the differential-oracle harness: no window/renderer,
    * run uncapped. PPU emulation still runs (HDMA/IRQ timing affects game
    * state); only the on-screen present is skipped. Parallels snesref's
    * SNESREF_HEADLESS. */
-  bool headless = getenv("AR_HEADLESS") && getenv("AR_HEADLESS")[0]
+  app->headless = getenv("AR_HEADLESS") && getenv("AR_HEADLESS")[0]
                   && getenv("AR_HEADLESS")[0] != '0';
-  bool headless_video = headless && getenv("AR_HEADLESS_VIDEO") &&
+  app->headless_video = app->headless && getenv("AR_HEADLESS_VIDEO") &&
                         getenv("AR_HEADLESS_VIDEO")[0] &&
                         getenv("AR_HEADLESS_VIDEO")[0] != '0';
-  bool video = !headless || headless_video;
+  app->video = !app->headless || app->headless_video;
 
   /* Widescreen budget from config. internal_width = 224 * (ax/ay) display
    * units, divided by the 7:6 pixel stretch when the 4:3-corrected look is
@@ -711,9 +745,9 @@ int main(int argc, char **argv) {
    * runs force authentic geometry so comparisons never see wide framebuffers,
    * unless AR_WS_HEADLESS=1 explicitly opts a visual-regression run into the
    * configured wide geometry. The oracle harness leaves it unset. */
-  bool ws_headless = getenv("AR_WS_HEADLESS") && getenv("AR_WS_HEADLESS")[0]
+  app->ws_headless = getenv("AR_WS_HEADLESS") && getenv("AR_WS_HEADLESS")[0]
                      && getenv("AR_WS_HEADLESS")[0] != '0';
-  HostDisplay_SetWidescreenRuntimeAllowed(!headless || ws_headless);
+  HostDisplay_SetWidescreenRuntimeAllowed(!app->headless || app->ws_headless);
   /* Resolve application and game settings before allocating presentation
    * resources. Known config.ini values were staged by ParseConfigFile;
    * settings.ini overrides them, and real environment variables win last.
@@ -731,6 +765,12 @@ int main(int argc, char **argv) {
   /* Display presets depend on whether the resolved aspect selected a wide
    * budget. Finalize only after g_ws_active/g_ws_extra are authoritative. */
   Settings_FinalizeDisplayMode();
+}
+
+/* The AR_MXCHECK / AR_MXHIST / AR_EXITMX / AR_CALLMX / AR_TRAPFN family: runtime
+ * m/x invariant checks and call-stack traps. All diagnostic, all opt-in, and all
+ * resolved once here so no hot path pays a getenv. */
+static void AppBoot_ArmDiagnostics(void) {
   /* AR_MXCHECK=1: enable the per-function-entry m/x invariant check
    * (validates the emitter's static m/x analysis on every direct call). */
   { extern int g_ar_mx_check; const char *e = getenv("AR_MXCHECK");
@@ -763,6 +803,135 @@ int main(int argc, char **argv) {
     const char *e = getenv("AR_TRAPFN");
     g_ar_trapfn = (e && e[0]) ? e : 0; }
 
+}
+
+/* Every presentation texture, created once the renderer exists: the base
+ * framebuffer, the HUD BG/OBJ planes, the Mode-7 overlay, the D1b semantic OBJ
+ * atlas, the D2 SIM capture family, and the diorama planes. Split out of
+ * AppBoot_CreateVideo, which otherwise carried SDL init, window creation and
+ * renderer configuration in the same 300 lines. */
+static void AppBoot_CreatePresentationTextures(AppBoot *app) {
+  g_texture = SDL_CreateTexture(g_renderer,
+    SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+    kPpuSurfaceWidth, g_snes_height);
+  if (!g_texture) Die("SDL_CreateTexture failed");
+  /* The base framebuffer is opaque: the PPU writes RGB with the alpha byte
+   * left 0 (see ppu_old.c). SDL2 defaulted new textures to BLENDMODE_NONE so
+   * that alpha was ignored, but SDL3 defaults them to BLENDMODE_BLEND — which
+   * would blend those alpha-0 pixels to fully transparent and present a BLACK
+   * screen. Force NONE to restore the SDL2 opaque blit. (The HUD/overlay
+   * textures below deliberately keep BLEND; they carry real alpha.) */
+  SDL_SetTextureBlendMode(g_texture, SDL_BLENDMODE_NONE);
+  /* SDL3 textures default to linear filtering; the SDL2 build set the global
+   * SDL_HINT_RENDER_SCALE_QUALITY=0 (nearest). Set nearest per-texture so
+   * the pixel-art framebuffer and HUD planes upscale crisply. */
+  SDL_SetTextureScaleMode(g_texture, SDL_SCALEMODE_NEAREST);
+
+  g_hud_bg_texture = SDL_CreateTexture(g_renderer,
+    SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+    kPpuSurfaceWidth, g_snes_height);
+  g_hud_obj_texture = SDL_CreateTexture(g_renderer,
+    SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+    kPpuSurfaceWidth, g_snes_height);
+  if (!g_hud_bg_texture || !g_hud_obj_texture)
+    Die("SDL_CreateTexture for HUD overlay failed");
+  SDL_SetTextureBlendMode(g_hud_bg_texture, SDL_BLENDMODE_BLEND);
+  SDL_SetTextureBlendMode(g_hud_obj_texture, SDL_BLENDMODE_BLEND);
+  /* Nearest filtering (see g_texture above; the global scale-quality hint
+   * SDL2 relied on is gone in SDL3). */
+  SDL_SetTextureScaleMode(g_hud_bg_texture, SDL_SCALEMODE_NEAREST);
+  SDL_SetTextureScaleMode(g_hud_obj_texture, SDL_SCALEMODE_NEAREST);
+
+  /* D1b semantic OBJ atlas. It is uploaded every supported SIM frame but is
+   * not selected by the compositor until the later separated-composite
+   * capability lands, keeping this checkpoint visually authentic. */
+  g_sim_obj_atlas_texture = SDL_CreateTexture(
+      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+      kSimObjAtlasWidth, kSimObjAtlasHeight);
+  if (g_sim_obj_atlas_texture) {
+    SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(g_sim_obj_atlas_texture, SDL_SCALEMODE_NEAREST);
+    /* Static storage is zero-initialized before the game thread starts. */
+    SDL_UpdateTexture(g_sim_obj_atlas_texture, NULL,
+                      g_sim_obj_atlas_pixels, kSimObjAtlasPitch);
+  } else {
+    fprintf(stderr, "[sim3d-d1] semantic atlas texture unavailable: %s\n",
+            SDL_GetError());
+  }
+
+  /* D2's observational Mode-1 capture family. Layer textures are retained
+   * for inspector/future geometry use; the pitch-zero reference and its
+   * absolute-difference image have dedicated opaque streaming textures. */
+  g_sim3d_textures_ready = true;
+  for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+    g_sim3d_layer_textures[plane] = SDL_CreateTexture(
+        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+        kSim3DMaxWidth, kSim3DMaxHeight);
+    if (!g_sim3d_layer_textures[plane]) {
+      g_sim3d_textures_ready = false;
+      break;
+    }
+    SDL_SetTextureBlendMode(g_sim3d_layer_textures[plane],
+                            SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(g_sim3d_layer_textures[plane],
+                            SDL_SCALEMODE_NEAREST);
+  }
+  g_sim3d_flat_texture = SDL_CreateTexture(
+      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+      kSim3DMaxWidth, kSim3DMaxHeight);
+  if (!g_sim3d_flat_texture)
+    g_sim3d_textures_ready = false;
+  if (g_sim3d_textures_ready) {
+    SDL_SetTextureBlendMode(g_sim3d_flat_texture, SDL_BLENDMODE_NONE);
+    SDL_SetTextureScaleMode(g_sim3d_flat_texture, SDL_SCALEMODE_NEAREST);
+  } else {
+    fprintf(stderr, "[sim3d-d2] capture textures unavailable: %s\n",
+            SDL_GetError());
+    for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+      SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
+      g_sim3d_layer_textures[plane] = NULL;
+    }
+    SDL_DestroyTexture(g_sim3d_flat_texture);
+    g_sim3d_flat_texture = NULL;
+  }
+
+  HdReplacementHost_LoadTextures();
+
+  /* One streaming texture per diorama plane (priority bands included).
+   * Only the backdrop is opaque — every other plane alpha-blends. */
+  /* Live report (2026-07-21): a persistent pink/garbage-colored line at
+   * the diorama's right edge, root-caused across two failed attempts (the
+   * B1b-crisp supersample copy, then suspected in the DOF/edge-AA shader)
+   * before landing on the actual source: every consumer that ever samples
+   * near the true edge of what Diorama_Upload writes (u=uv_u1 =
+   * snes_width/kPpuBufWidth, always < 1.0 — the buffer is allocated at
+   * the PPU's max width but a layer's real captured content is narrower,
+   * capped by kWsExtraMax's SNES OAM-wrap hardware limit) can reach into
+   * columns snes_width..kPpuBufWidth-1, which Diorama_Upload's
+   * SDL_UpdateTexture never touches. SDL_TEXTUREACCESS_STREAMING content
+   * is undefined until written (no zero guarantee, confirmed non-zero in
+   * practice on this backend), so that tail is genuine garbage, not just
+   * theoretically risky — and every fix so far (B1b's UV-window clamp,
+   * B1b-crisp's valid-subrect blit, the skybox blur's UV inset) was
+   * patching ONE consumer at a time as each was discovered, while the DOF/
+   * edge-AA shader's own unclamped blur sampling proved there would always
+   * be another. Fix it once at the SOURCE instead: zero-fill each
+   * texture's FULL extent immediately after creation, before any real
+   * frame ever writes into it. Diorama_Upload only ever touches the valid
+   * {0,0,snes_width,snes_height} sub-rect afterward, so the margin stays
+   * deterministically transparent black (not garbage) for the texture's
+   * entire lifetime — every current and future consumer is safe without
+   * needing its own clamp/inset workaround. */
+  CreateDioramaTextures();
+
+  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
+}
+
+/* SDL init, window, renderer, and every presentation texture. The window/renderer
+ * body is skipped for a pure-headless run; a headless_video run takes it with a
+ * hidden window so the present path still executes for frame capture.
+ * Returns a process exit code if SDL_Init fails, or -1 to continue booting. */
+static int AppBoot_CreateVideo(AppBoot *app) {
   /* App metadata, BEFORE SDL_Init — SDL documents that it "should be called as
    * early as possible, before SDL_Init", and it cannot be retrofitted later.
    * The identifier "must be in reverse-domain format" and is what "desktop
@@ -774,15 +943,15 @@ int main(int argc, char **argv) {
   SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_TYPE_STRING, "game");
 
   SDL_InitFlags sdl_flags = SDL_INIT_AUDIO;
-  if (video) sdl_flags |= SDL_INIT_VIDEO;
-  if (!headless) sdl_flags |= SDL_INIT_GAMEPAD;
+  if (app->video) sdl_flags |= SDL_INIT_VIDEO;
+  if (!app->headless) sdl_flags |= SDL_INIT_GAMEPAD;
   /* SDL3 returns true on success (the SDL2 0-on-success convention flipped). */
   if (!SDL_Init(sdl_flags)) {
     fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return 1;
   }
 
-  if (video) {
+  if (app->video) {
     /* Which backend SDL actually chose. A "dummy"/"offscreen" driver makes
      * every video call succeed while nothing reaches the screen (audio is
      * unaffected), so a silent window is otherwise indistinguishable from a
@@ -853,7 +1022,7 @@ int main(int argc, char **argv) {
      * pixels. */
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE |
         SDL_WINDOW_HIGH_PIXEL_DENSITY |
-        (headless_video ? SDL_WINDOW_HIDDEN : 0) |
+        (app->headless_video ? SDL_WINDOW_HIDDEN : 0) |
         (g_settings.window_mode != kWindowMode_Windowed
              ? SDL_WINDOW_FULLSCREEN : 0);
     /* SDL3 SDL_CreateWindow no longer takes an x,y position; it is created at
@@ -893,7 +1062,7 @@ int main(int argc, char **argv) {
      * effect silently disabled. Declaring nothing here, as this code did
      * before, is exactly how the effects came to be macOS-only in practice. */
     g_gpu_shaders_requested = g_settings.gpu_shaders_enabled;
-    if (headless_video) {
+    if (app->headless_video) {
       g_renderer = SDL_CreateRenderer(g_window, SDL_SOFTWARE_RENDERER);
     } else if (g_gpu_shaders_requested) {
       SDL_PropertiesID renderer_props = SDL_CreateProperties();
@@ -929,12 +1098,12 @@ int main(int argc, char **argv) {
      * vsync stops SDL_RenderPresent from blocking the present thread until
      * the display's next refresh; see the present-cadence read below for
      * the other half (redrawing often enough for that to matter). */
-    if (!headless_video)
+    if (!app->headless_video)
       HostDisplay_ApplyRefreshVsync();
 
     /* Exclusive fullscreen needs its video mode set after creation; borderless
      * and windowed are already handled by the creation flag. */
-    if (!headless_video && g_settings.window_mode == kWindowMode_Exclusive)
+    if (!app->headless_video && g_settings.window_mode == kWindowMode_Exclusive)
       HostDisplay_ApplyWindowMode();
     HostDisplay_UpdateProperties();
 
@@ -944,120 +1113,7 @@ int main(int argc, char **argv) {
      * ignore_aspect_ratio stretches instead). */
     HostDisplay_RecomputeLogicalPresentation();
 
-    g_texture = SDL_CreateTexture(g_renderer,
-      SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kPpuSurfaceWidth, g_snes_height);
-    if (!g_texture) Die("SDL_CreateTexture failed");
-    /* The base framebuffer is opaque: the PPU writes RGB with the alpha byte
-     * left 0 (see ppu_old.c). SDL2 defaulted new textures to BLENDMODE_NONE so
-     * that alpha was ignored, but SDL3 defaults them to BLENDMODE_BLEND — which
-     * would blend those alpha-0 pixels to fully transparent and present a BLACK
-     * screen. Force NONE to restore the SDL2 opaque blit. (The HUD/overlay
-     * textures below deliberately keep BLEND; they carry real alpha.) */
-    SDL_SetTextureBlendMode(g_texture, SDL_BLENDMODE_NONE);
-    /* SDL3 textures default to linear filtering; the SDL2 build set the global
-     * SDL_HINT_RENDER_SCALE_QUALITY=0 (nearest). Set nearest per-texture so
-     * the pixel-art framebuffer and HUD planes upscale crisply. */
-    SDL_SetTextureScaleMode(g_texture, SDL_SCALEMODE_NEAREST);
-
-    g_hud_bg_texture = SDL_CreateTexture(g_renderer,
-      SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kPpuSurfaceWidth, g_snes_height);
-    g_hud_obj_texture = SDL_CreateTexture(g_renderer,
-      SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kPpuSurfaceWidth, g_snes_height);
-    if (!g_hud_bg_texture || !g_hud_obj_texture)
-      Die("SDL_CreateTexture for HUD overlay failed");
-    SDL_SetTextureBlendMode(g_hud_bg_texture, SDL_BLENDMODE_BLEND);
-    SDL_SetTextureBlendMode(g_hud_obj_texture, SDL_BLENDMODE_BLEND);
-    /* Nearest filtering (see g_texture above; the global scale-quality hint
-     * SDL2 relied on is gone in SDL3). */
-    SDL_SetTextureScaleMode(g_hud_bg_texture, SDL_SCALEMODE_NEAREST);
-    SDL_SetTextureScaleMode(g_hud_obj_texture, SDL_SCALEMODE_NEAREST);
-
-    /* D1b semantic OBJ atlas. It is uploaded every supported SIM frame but is
-     * not selected by the compositor until the later separated-composite
-     * capability lands, keeping this checkpoint visually authentic. */
-    g_sim_obj_atlas_texture = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kSimObjAtlasWidth, kSimObjAtlasHeight);
-    if (g_sim_obj_atlas_texture) {
-      SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
-      SDL_SetTextureScaleMode(g_sim_obj_atlas_texture, SDL_SCALEMODE_NEAREST);
-      /* Static storage is zero-initialized before the game thread starts. */
-      SDL_UpdateTexture(g_sim_obj_atlas_texture, NULL,
-                        g_sim_obj_atlas_pixels, kSimObjAtlasPitch);
-    } else {
-      fprintf(stderr, "[sim3d-d1] semantic atlas texture unavailable: %s\n",
-              SDL_GetError());
-    }
-
-    /* D2's observational Mode-1 capture family. Layer textures are retained
-     * for inspector/future geometry use; the pitch-zero reference and its
-     * absolute-difference image have dedicated opaque streaming textures. */
-    g_sim3d_textures_ready = true;
-    for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-      g_sim3d_layer_textures[plane] = SDL_CreateTexture(
-          g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-          kSim3DMaxWidth, kSim3DMaxHeight);
-      if (!g_sim3d_layer_textures[plane]) {
-        g_sim3d_textures_ready = false;
-        break;
-      }
-      SDL_SetTextureBlendMode(g_sim3d_layer_textures[plane],
-                              SDL_BLENDMODE_BLEND);
-      SDL_SetTextureScaleMode(g_sim3d_layer_textures[plane],
-                              SDL_SCALEMODE_NEAREST);
-    }
-    g_sim3d_flat_texture = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kSim3DMaxWidth, kSim3DMaxHeight);
-    if (!g_sim3d_flat_texture)
-      g_sim3d_textures_ready = false;
-    if (g_sim3d_textures_ready) {
-      SDL_SetTextureBlendMode(g_sim3d_flat_texture, SDL_BLENDMODE_NONE);
-      SDL_SetTextureScaleMode(g_sim3d_flat_texture, SDL_SCALEMODE_NEAREST);
-    } else {
-      fprintf(stderr, "[sim3d-d2] capture textures unavailable: %s\n",
-              SDL_GetError());
-      for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-        SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
-        g_sim3d_layer_textures[plane] = NULL;
-      }
-      SDL_DestroyTexture(g_sim3d_flat_texture);
-      g_sim3d_flat_texture = NULL;
-    }
-
-    HdReplacementHost_LoadTextures();
-
-    /* One streaming texture per diorama plane (priority bands included).
-     * Only the backdrop is opaque — every other plane alpha-blends. */
-    /* Live report (2026-07-21): a persistent pink/garbage-colored line at
-     * the diorama's right edge, root-caused across two failed attempts (the
-     * B1b-crisp supersample copy, then suspected in the DOF/edge-AA shader)
-     * before landing on the actual source: every consumer that ever samples
-     * near the true edge of what Diorama_Upload writes (u=uv_u1 =
-     * snes_width/kPpuBufWidth, always < 1.0 — the buffer is allocated at
-     * the PPU's max width but a layer's real captured content is narrower,
-     * capped by kWsExtraMax's SNES OAM-wrap hardware limit) can reach into
-     * columns snes_width..kPpuBufWidth-1, which Diorama_Upload's
-     * SDL_UpdateTexture never touches. SDL_TEXTUREACCESS_STREAMING content
-     * is undefined until written (no zero guarantee, confirmed non-zero in
-     * practice on this backend), so that tail is genuine garbage, not just
-     * theoretically risky — and every fix so far (B1b's UV-window clamp,
-     * B1b-crisp's valid-subrect blit, the skybox blur's UV inset) was
-     * patching ONE consumer at a time as each was discovered, while the DOF/
-     * edge-AA shader's own unclamped blur sampling proved there would always
-     * be another. Fix it once at the SOURCE instead: zero-fill each
-     * texture's FULL extent immediately after creation, before any real
-     * frame ever writes into it. Diorama_Upload only ever touches the valid
-     * {0,0,snes_width,snes_height} sub-rect afterward, so the margin stays
-     * deterministically transparent black (not garbage) for the texture's
-     * entire lifetime — every current and future consumer is safe without
-     * needing its own clamp/inset workaround. */
-    CreateDioramaTextures();
-
-    SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
+    AppBoot_CreatePresentationTextures(app);
 
     /* Take keyboard focus on launch. A window created by SDL is ordered in
      * but the process is not necessarily activated — launched from a terminal
@@ -1068,17 +1124,23 @@ int main(int argc, char **argv) {
      * Deliberately last in the video setup so focus lands on a window that is
      * fully configured, and skipped for headless_video (that window is
      * SDL_WINDOW_HIDDEN and must never steal focus from a batch run). */
-    if (!headless_video && !SDL_RaiseWindow(g_window))
+    if (!app->headless_video && !SDL_RaiseWindow(g_window))
       fprintf(stderr, "[window] could not raise to foreground: %s\n",
               SDL_GetError());
   }
+  return -1;
+}
 
-  if (!SettingsOverlay_Init(g_renderer, rom_data, rom_size))
+/* Overlay, world map, diorama manifest, the injected overlay hooks (layer editor,
+ * manual), input, and music. Injection rather than direct calls is what keeps
+ * settings_overlay.c testable with no renderer at all -- see settings_overlay.h. */
+static void AppBoot_InstallSubsystems(AppBoot *app) {
+  if (!SettingsOverlay_Init(g_renderer, app->rom_data, app->rom_size))
     Die("SDL font atlas creation for settings overlay failed");
   /* The world-map image and pure development-builder tables are immutable ROM
    * data. Failure is not fatal: consumers retain the authentic presentation. */
-  if (SimWorldMap_Init(rom_data, rom_size))
-    SimWorldMapBuild_Init(rom_data, rom_size);
+  if (SimWorldMap_Init(app->rom_data, app->rom_size))
+    SimWorldMapBuild_Init(app->rom_data, app->rom_size);
   /* Per-room diorama layer overrides. Absent file is the normal case and leaves
    * every room drawing as built. */
   Diorama_LoadLayerManifest();
@@ -1128,17 +1190,22 @@ int main(int argc, char **argv) {
   SfxCensus_Init();
 
   g_spc_player = ActRaiserSpcPlayer_Create();
+}
 
+/* Register the game, bring up the SNES, apply the deterministic visual patches
+ * (which must sit between cart_load and Randomizer_Init), fill power-on WRAM and
+ * battery SRAM, load the persisted save, and honour AR_LOADSTATE. */
+static void AppBoot_StartGame(AppBoot *app) {
   RtlRegisterGame(&kActRaiserGameInfo);
-  Snes *snes = SnesInit(rom_data, (int)rom_size);
-  if (!snes) Die("SnesInit failed");
+  app->snes = SnesInit(app->rom_data, (int)app->rom_size);
+  if (!app->snes) Die("SnesInit failed");
 
   /* Keep deterministic visual source-data adjustments below cart_load (which
    * copies rom_data) and above Randomizer_Init (which snapshots the live cart
    * as its non-randomized restore baseline). A signature mismatch is safe but
    * important: it means effects metadata and the running visual script would
    * no longer share the investigated USA-ROM contract. */
-  if (!SimVisualPatches_Apply(snes->cart->rom, snes->cart->romSize))
+  if (!SimVisualPatches_Apply(app->snes->cart->rom, app->snes->cart->romSize))
     fprintf(stderr,
             "[sim-visuals] house-fire cadence patch skipped: "
             "unexpected ROM signature\n");
@@ -1148,7 +1215,7 @@ int main(int argc, char **argv) {
    * game coroutine starts. Its pristine snapshot deliberately includes the
    * deterministic visual adjustments above, so later option changes restore
    * a stable non-randomized baseline instead of erasing them. */
-  if (Randomizer_Init(snes->cart->rom, snes->cart->romSize))
+  if (Randomizer_Init(app->snes->cart->rom, app->snes->cart->romSize))
     Randomizer_Apply();
 
   HdReplacementHost_BindSurfaces();
@@ -1266,29 +1333,17 @@ int main(int argc, char **argv) {
       FrameSlot_ResetActionEffects();
       fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
     } }
+}
 
-  /* Phase 0 (MY-AUDIT-render-off-thread) + #18/P13: there is no present
-   * thread. SDL3's 2D render API is main-thread-only (SDL_render.h:46-47) and
-   * PresentThreadFn was the sole contract violator, which is why the default
-   * GL/EGL backend would not boot on Wayland. All rendering runs synchronously
-   * on this (the main) thread via HostDisplay_SubmitFrame. Fixed-timestep
-   * decoupling is preserved by the M6 accumulator (owns the emulated tick
-   * rate) plus vsync (SDL_RenderPresent blocks briefly when vsync is on). */
-
-  bool running = true;
-  uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
-
-  /* M6/§3.1,§3.3: fixed-timestep accumulator, non-headless only. */
-  static const int kMaxCatchupFrames = 3;     /* spiral-of-death cap, §3.1 */
-  uint64_t accumulator = 0;
-  uint64_t last_time_ns = SDL_GetTicksNS();
-
-  while (running) {
-    SDL_Event event;
+/* The SDL event pump. One long switch over event types -- flat and skimmable
+ * the way a dispatch table is, since every arm is independent. Clears
+ * *running on quit. */
+static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
+  SDL_Event event;
     while (SDL_PollEvent(&event)) {
       switch (event.type) {
         case SDL_EVENT_QUIT:
-          running = false;
+          *running = false;
           break;
         /* Dragging the window to another monitor, or that monitor changing
          * mode, can change the refresh rate the Vsync row reports — and the
@@ -1349,7 +1404,7 @@ int main(int argc, char **argv) {
            * frame re-decodes from the retained PDF bytes under its normal budget. */
           ManualReader_DestroyTextures();
           HdReplacementHost_ReloadTextures();
-          if (!SettingsOverlay_ReloadTextures(rom_data, rom_size))
+          if (!SettingsOverlay_ReloadTextures(app->rom_data, app->rom_size))
             fprintf(stderr,
                     "[settings-menu] atlas reload after device reset failed\n");
           /* The sim-3D caches are serial-gated on GAME state, so they would
@@ -1369,7 +1424,7 @@ int main(int argc, char **argv) {
           break;
         case SDL_EVENT_RENDER_DEVICE_LOST:
           fprintf(stderr, "[render] device lost, cannot recover — exiting\n");
-          running = false;
+          *running = false;
           break;
         case SDL_EVENT_KEY_DOWN:
           /* An armed binding row consumes the raw key: it needs the scancode,
@@ -1672,6 +1727,29 @@ int main(int argc, char **argv) {
           break;
       }
     }
+}
+
+/* The frame loop: pump events, then either service a host pause, step uncapped
+ * (headless), or advance the M6 fixed-timestep accumulator. */
+static void AppRunMainLoop(AppBoot *app) {
+  /* Phase 0 (MY-AUDIT-render-off-thread) + #18/P13: there is no present
+   * thread. SDL3's 2D render API is main-thread-only (SDL_render.h:46-47) and
+   * PresentThreadFn was the sole contract violator, which is why the default
+   * GL/EGL backend would not boot on Wayland. All rendering runs synchronously
+   * on this (the main) thread via HostDisplay_SubmitFrame. Fixed-timestep
+   * decoupling is preserved by the M6 accumulator (owns the emulated tick
+   * rate) plus vsync (SDL_RenderPresent blocks briefly when vsync is on). */
+
+  bool running = true;
+  uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
+
+  /* M6/§3.1,§3.3: fixed-timestep accumulator, non-headless only. */
+  static const int kMaxCatchupFrames = 3;     /* spiral-of-death cap, §3.1 */
+  uint64_t accumulator = 0;
+  uint64_t last_time_ns = SDL_GetTicksNS();
+
+  while (running) {
+    AppLoop_PumpEvents(app, &running);
 
     if (RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None) {
       running = false;
@@ -1712,7 +1790,7 @@ int main(int argc, char **argv) {
        * game_tick=false (R16): no tick ran, so this must not feed M7's scroll
        * history or its tick-span average. */
       bool presented = false;
-      if (!headless && !g_window_hidden) {
+      if (!app->headless && !g_window_hidden) {
         const HostDisplayPresentMode present_mode =
             SettingsOverlay_IsOpen()
                 ? kHostDisplayPresent_Menu
@@ -1733,7 +1811,7 @@ int main(int argc, char **argv) {
 
     ScheduledSettings_ApplyIfDue();
 
-    if (headless) {
+    if (app->headless) {
       /* §3.6: headless keeps the OLD model verbatim — uncapped by default,
        * exactly one tick per outer iteration, no present thread. The
        * oracle/replay tooling depends on this running as fast as the CPU
@@ -1850,7 +1928,11 @@ int main(int argc, char **argv) {
           presented, g_window_hidden, produced_frame);
     }
   }
+}
 
+/* Teardown, in strict reverse-dependency order: everything owning a texture, a
+ * shader, or render state goes before the renderer that created it. */
+static int AppShutdown(AppBoot *app, char **argv) {
   /* D10's present-thread join is gone with the thread itself (#18/P13):
    * nothing can be mid-render here, so teardown below (SettingsOverlay_Destroy
    * + the DestroyTexture block + SDL_DestroyRenderer) is safe in source order.
@@ -1906,7 +1988,7 @@ int main(int argc, char **argv) {
   SDL_DestroyRenderer(g_renderer);
   SDL_DestroyWindow(g_window);
   SDL_Quit();
-  free(rom_data);
+  free(app->rom_data);
 
   if (RuntimeSettings_LifecycleRequest() == kRuntimeLifecycle_Restart) {
     fprintf(stderr, "[lifecycle] restarting process\n");
@@ -1919,4 +2001,23 @@ int main(int argc, char **argv) {
     return 1;
   }
   return 0;
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  setvbuf(stdout, NULL, _IONBF, 0);
+  setvbuf(stderr, NULL, _IONBF, 0);
+
+  AppBoot app = {0};
+  int rc = AppBoot_ParseArgs(&app, argc, argv);
+  if (rc >= 0) return rc;
+
+  AppBoot_ResolveDisplayAndSettings(&app);
+  AppBoot_ArmDiagnostics();
+  rc = AppBoot_CreateVideo(&app);
+  if (rc >= 0) return rc;
+  AppBoot_InstallSubsystems(&app);
+  AppBoot_StartGame(&app);
+  AppRunMainLoop(&app);
+  return AppShutdown(&app, argv);
 }
