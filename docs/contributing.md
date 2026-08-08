@@ -276,6 +276,12 @@ today* (playability per stage/town + codebase metrics).
 `docs/settings-system.md` records the architecture and implementation of the
 live settings registry, persistent user settings, and host-side overlay UI.
 
+`docs/code-style.md` is the one to read before *writing*: size budgets, how to
+derive a file split and declare its seam, where data belongs, and the
+verification tiers a render-affecting change has to clear. It also carries the
+current debt register, so you can tell deliberate structure from accumulated
+sprawl.
+
 `specs/README.md` is the fourth: `docs/` is what is *continuously true*, while
 `specs/` is work at a point in time — proposed, in progress, or done and kept
 for the reasoning behind the code. Read its index before starting a change in an
