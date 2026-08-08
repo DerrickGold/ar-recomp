@@ -24,10 +24,17 @@ is moved verbatim; the rendered output must be byte-identical.
 
 ## The partition (verified by usage analysis)
 
-**Moves to `present_sim3d.c` (~96 definitions):** every function, type, enum,
-and file-static whose name matches `Sim` / `WorldNavigation` / `Underlay`, PLUS
-these that the name filter misses but usage proves are sim-only (each has zero
-remaining users in `present.c` after the sim functions leave):
+Do NOT trust a hardcoded count — derive the set. The rule is: a definition
+MOVES if, after the sim functions leave, it has zero remaining users in
+`present.c`. Roughly ~65 functions + ~35 file-statics/types (order-of-100
+definitions, ~58% of the file); the exact set falls out of the derivation
+below. The three scripted attempts here disagreed on the total by a few
+because the name filter alone is incomplete — hence the usage rule.
+
+**Moves to `present_sim3d.c`:** every function, type, enum, and file-static
+whose name matches `Sim` / `WorldNavigation` / `Underlay`, PLUS these that the
+name filter misses but usage proves are sim-only (each has zero remaining users
+in `present.c` after the sim functions leave):
 
 - Types/enums: `SimCullFade`, the anonymous `kSimGround{Columns,Rows,VertexCount,IndexCount}`
   enum, `SimEffectParticleMotion`, `SimEffectStyle`, `kSimMaxParticlesPerEffect`
