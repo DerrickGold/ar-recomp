@@ -1,6 +1,34 @@
 # T2d — Replace the legacy-env exclusion list with a per-row `SettingDesc` flag
 
-**Status: SPEC ONLY — not executed.** The equivalence guard rail and baseline
+**Status: EXECUTED**, under the guard rail below — the post-refactor probe diffs
+empty against `legacy_env_baseline.tsv`, and an additional in-binary crosscheck
+compiled the old chain and the new flag side by side and confirmed all 258
+descriptors agree. `Settings_UsesLegacyEnvironmentSyntax` is now
+`return !desc->modern_env;`.
+
+**The mechanism differs from this spec's recommendation.** Option 2 (a post-init
+pass mutating the descriptors) was rejected on contact with the code:
+`g_setting_descs` is `const` and lives in `.rodata`, and making it writable to
+set a flag at boot is a worse trade than the churn it saves. What shipped instead
+costs neither: `modern_env` is the **last** member of `SettingDesc`, so all 258
+positional rows zero-initialize it to legacy — today's behaviour — and only the
+60 modern rows needed an edit. The 41 literal rows carry
+`.modern_env = true` as a *designated* initializer, which cannot land in the
+wrong field however many positional values a row supplies, and the 19 modern
+`BOOL_SETTING` rows use a new `BOOL_SETTING_MODERN` sibling rather than a tenth
+parameter on all 63 bool rows.
+
+Also worth recording: this spec's claim that the split is not category-derivable
+was re-measured rather than assumed. Category, type, apply kind, sticky, and the
+presence of each of the `parse` / `format` / `enum_labels` / `available` /
+`on_change` hooks were each tested as a discriminator, and **every one of them
+mixes**. A per-row statement really is the only honest mechanism.
+
+The original analysis follows.
+
+---
+
+**Original status: SPEC ONLY — not executed.** The equivalence guard rail and baseline
 were built and are attached; the refactor itself was deferred because it is
 high-churn (touches ~17 descriptor macros + 74 literal rows across the
 258-descriptor table) and load-bearing (parse polarity of every AR_* knob),

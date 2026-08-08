@@ -1,6 +1,18 @@
 # T2a — Split the sim3D / world-navigation renderer out of `present.c`
 
-**Status: SPEC ONLY — not executed.** This split was analysed in depth on a
+**Status: EXECUTED.** Applied on a machine with a ROM and a linkable game
+target. `present.c` is 4,551 -> 1,262 lines; the renderer is `src/present_sim3d.c`
+with `src/present_internal.h` as the boundary, and the world-map half was
+subsequently split again into `src/present_world_nav.c`
+(`src/present_sim3d_internal.h`). What the execution found that this spec did not
+anticipate is recorded at the end, under
+[Execution notes](#execution-notes-what-the-spec-did-not-anticipate).
+
+The original analysis follows, kept for the reasoning behind the partition.
+
+---
+
+**Original status: SPEC ONLY — not executed.** This split was analysed in depth on a
 ROM-less machine and deliberately **not** applied there, because `present.c`
 is not compiled by the `AR_TESTS_ONLY` test tier and no ROM was available, so
 the only local oracle is `cc -fsyntax-only`. A syntax check cannot detect the
@@ -128,3 +140,58 @@ resulting files must preserve that. The split does not widen the contract —
 `present_internal.h` exposes only present.c internals to the sim TU, not live
 game state — but a careless extraction that pulls in a live global would break
 the invariant the whole file exists to enforce.
+
+---
+
+## Execution notes (what the spec did not anticipate)
+
+Recorded after the fact, because each cost time and each generalizes.
+
+1. **The derivation rule was right and sufficient.** Run as a usage closure over
+   a lossless top-level chunking of the file, it independently found every
+   sim-only definition the name filter misses — `kEffectCircle32`, `kPi`,
+   `CloudHash`/`CloudSmooth`/`CloudNoise` — and independently kept all ten shared
+   helpers plus `EffectRenderState`/`EffectBatch` on the `present.c` side. No
+   hand-tuning of the partition was needed. **Do not seed the closure with a
+   case-insensitive `WorldNavigation` match**: it does not match the snake_case
+   statics (`s_world_navigation_*`), which silently pins them on the wrong side.
+
+2. **The extern block is DECLARATIONS, not definitions.** `g_sim_obj_atlas_texture`,
+   `g_sim3d_layer_textures[]` and `g_sim3d_flat_texture` are owned by `main.c`.
+   They must be **duplicated** into both files, not moved — `PresentUpload` stays
+   and still touches them. The spec's "copy it verbatim" was right for the new
+   file but the originals must also stay put.
+
+3. **`s_sim_rim_mask_supported` crosses in both directions.** It is written by the
+   moved rim path and read by `Present_SimRimMaskSupported()`, which stays as a
+   public entry point. It ended up owned by the sim TU and `extern`'d through the
+   boundary header. Any static in that shape needs an explicit decision.
+
+4. **`PresentRendererResources_Reset` splits once per split.** The same surgery
+   was needed again when the world-map renderer came out of `present_sim3d.c`
+   (`PresentWorldNav_ResetResources`). Expect a reset split every time this family
+   divides; it is the one function that touches every subsystem's textures.
+
+5. **`extern` arrays have no size.** `sizeof(kSimCloudLayers)` could not follow the
+   code across a TU boundary; the owning file now publishes `kSimCloudLayerCount`
+   beside the table. Any `sizeof`-over-a-shared-table has the same problem.
+
+### How it was actually verified
+
+The spec asked for a visual confirmation; the repo supports something stronger.
+`tools/sim3d_demo.py` stages a per-checkpoint SRAM seed + settings fixture, so its
+frames are real content — 20/20 validation-error sets and all 156 rendered PPM
+frames came out byte-identical to the pre-split build. That was backed by 28
+headless composited frames (SIM on a pinned seed, action stage flat, action stage
+diorama) and a line-conservation check showing exactly 16 changed lines, each an
+enumerated de-static.
+
+**The trap worth repeating:** an unstaged replay sits on the title screen and
+compares byte-equal, so an A/B built that way "passes" while testing nothing. One
+was written and believed here until the frames were converted to PNG and looked
+at. Always look at a frame. See `docs/code-style.md` for the rule.
+
+**Still not covered:** the world-map navigation renderer. No checkpoint sets
+`AR_SIM3D_WORLD_NAV` and no staged replay reaches world-map travel, so it rests on
+the clean link plus a manual confirmation. It was given its own translation unit
+so that gap is visible in the file listing.
