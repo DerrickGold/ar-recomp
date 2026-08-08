@@ -833,6 +833,15 @@ static void RandoChanged(const SettingDesc *desc) {
   { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
     &g_settings.id, def, 0, 1, 1, is_sticky, NULL, 0, active, changed, \
     NULL, NULL }
+/* Same row, but its env var is a modern alias parsed like settings.ini rather
+ * than with the historical AR_* leading-zero/default-polarity rules. A separate
+ * macro rather than a parameter on BOOL_SETTING: only 19 of the 63 bool rows are
+ * modern, and the split is not derivable from any other field (see modern_env in
+ * settings.h), so naming it at the call site is what keeps it honest. */
+#define BOOL_SETTING_MODERN(id, env_name, text, help, cat, def, is_sticky, active, changed) \
+  { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
+    &g_settings.id, def, 0, 1, 1, is_sticky, NULL, 0, active, changed, \
+    NULL, NULL, true }
 #define INT_SETTING(id, env_name, text, help, cat, def, lo, hi, parser, active) \
   { #id, env_name, text, help, kSettingType_Int, kApply_Passive, cat, \
     &g_settings.id, def, lo, hi, 1, false, NULL, 0, active, NULL, \
@@ -916,63 +925,63 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.extended_aspect, kScreenAspect_43,
     kScreenAspect_43, kScreenAspect_Stretch, 1, false,
     kScreenAspectLabels, kScreenAspect_Count, NULL, OnScreenRatioChanged,
-    ParseExtendedAspect, NULL },
+    ParseExtendedAspect, NULL, .modern_env = true },
   { "pixel_aspect", "AR_ASPECT_PAR", "Pixel aspect",
     "Use the original 4:3 CRT pixel stretch or square output pixels.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.pixel_aspect, kPixelAspect_Crt43,
     kPixelAspect_Square, kPixelAspect_Crt43, 1, false,
     kPixelAspectLabels, kPixelAspect_Count, NULL, NULL,
-    ParsePixelAspect, NULL },
+    ParsePixelAspect, NULL, .modern_env = true },
   { "window_mode", "AR_WINDOW_MODE", "Window mode",
     "Windowed, borderless desktop-fullscreen, or exclusive fullscreen.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.window_mode, kWindowMode_Windowed,
     kWindowMode_Windowed, kWindowMode_Exclusive, 1, false,
-    kWindowModeLabels, kWindowMode_Count, NULL, NULL, NULL, NULL },
+    kWindowModeLabels, kWindowMode_Count, NULL, NULL, NULL, NULL, .modern_env = true },
   { "window_scale", "AR_WINDOW_SCALE", "Render scale",
     "Internal render/upscale multiple of the SNES output. Higher values "
     "render more detail (3D town and Mode 7) and downsample to the window.",
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.window_scale, 3, 1, 8, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL },
+    NULL, NULL, NULL, NULL, .modern_env = true },
   { "new_renderer", "AR_NEW_RENDERER", "New renderer",
     "Use the modern PPU renderer; widescreen always requires this renderer.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Display,
     &g_settings.new_renderer, 1, 0, 1, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL },
+    NULL, NULL, NULL, NULL, .modern_env = true },
   { "ignore_aspect_ratio", "AR_IGNORE_ASPECT_RATIO", "Stretch to window",
     "Ignore the configured display aspect and stretch output to the whole "
     "window. Now folded into Screen ratio > Stretch.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Display,
     &g_settings.ignore_aspect_ratio, 0, 0, 1, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL },
+    NULL, NULL, NULL, NULL, .modern_env = true },
   { "refresh_mode", "AR_REFRESH_MODE", "Refresh rate",
     "Vsync locks to your display's refresh; Unlimited disables vsync; Limit "
     "caps to a chosen FPS.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.refresh_mode, kRefreshMode_Vsync,
     kRefreshMode_Vsync, kRefreshMode_Limit, 1, false,
-    kRefreshModeLabels, kRefreshMode_Count, NULL, NULL, NULL, NULL },
+    kRefreshModeLabels, kRefreshMode_Count, NULL, NULL, NULL, NULL, .modern_env = true },
   { "frame_limit_fps", "AR_FRAME_LIMIT_FPS", "Frame limit",
     "Target frames per second when Refresh rate is Limit; independent of the "
     "display refresh.",
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.frame_limit_fps, 60, 20, 480, 5, false, NULL, 0,
-    FrameLimitActive, NULL, NULL, NULL },
-  BOOL_SETTING(sim3d_mode, "AR_SIM3D", "Simulation town 3D",
+    FrameLimitActive, NULL, NULL, NULL, .modern_env = true },
+  BOOL_SETTING_MODERN(sim3d_mode, "AR_SIM3D", "Simulation town 3D",
                "Tilt the simulation-town map into a projected ground plane. "
                "Map pickers stay in the tilted space too (build with "
                "AR_SIM3D_PICKER_TOPDOWN=1 to restore the flat picker view).",
                kSettingCat_Simulation, 0, false, Diorama_NewPpuCapable,
                NULL),
-  BOOL_SETTING(sim3d_world_navigation, "AR_SIM3D_WORLD_NAV",
+  BOOL_SETTING_MODERN(sim3d_world_navigation, "AR_SIM3D_WORLD_NAV",
                "World navigation 3D",
                "Render inter-town Sky Palace navigation as a full-world 3D "
                "scene with a forced top-down camera.",
                kSettingCat_Simulation, 0, false, Diorama_NewPpuCapable,
                NULL),
-  BOOL_SETTING(sim3d_world_navigation_lighting,
+  BOOL_SETTING_MODERN(sim3d_world_navigation_lighting,
                "AR_SIM3D_WORLD_NAV_LIGHTING",
                "World navigation lighting",
                "Apply top-down colour treatment and directional cloud shadows "
@@ -980,7 +989,7 @@ const SettingDesc g_setting_descs[] = {
                "does not require Simulation town 3D.",
                kSettingCat_Simulation, 1, false,
                WorldNavigation3DEnabled, NULL),
-  BOOL_SETTING(sim3d_world_navigation_clouds,
+  BOOL_SETTING_MODERN(sim3d_world_navigation_clouds,
                "AR_SIM3D_WORLD_NAV_CLOUDS",
                "World navigation clouds",
                "Draw world-anchored cloud banks over the full inter-town map. "
@@ -994,63 +1003,63 @@ const SettingDesc g_setting_descs[] = {
    * list of stages with a shipped implementation, and the defaults here must
    * agree with it. A stage missing from both is invisible in normal play no
    * matter how it is tuned. */
-  BOOL_SETTING(sim3d_separated_composite, "AR_SIM3D_SEPARATED",
+  BOOL_SETTING_MODERN(sim3d_separated_composite, "AR_SIM3D_SEPARATED",
                "Separated layer capture",
                "Rebuild the town from captured semantic layers and the object "
                "atlas instead of the authentic composite. Every other stage "
                "below depends on this one.",
                kSettingCat_Simulation, 1, false, Sim3DSeparatedAvailable,
                NULL),
-  BOOL_SETTING(sim3d_ground_projection, "AR_SIM3D_GROUND",
+  BOOL_SETTING_MODERN(sim3d_ground_projection, "AR_SIM3D_GROUND",
                "Ground projection",
                "Project the map through the oblique camera instead of drawing "
                "it flat.",
                kSettingCat_Simulation, 1, false, Sim3DGroundAvailable,
                NULL),
-  BOOL_SETTING(sim3d_object_billboards, "AR_SIM3D_BILLBOARDS",
+  BOOL_SETTING_MODERN(sim3d_object_billboards, "AR_SIM3D_BILLBOARDS",
                "Object billboards",
                "Draw world records as individually placed sprites standing on "
                "the projected ground.",
                kSettingCat_Simulation, 1, false, Sim3DBillboardsAvailable,
                NULL),
-  BOOL_SETTING(sim3d_virtual_height, "AR_SIM3D_HEIGHT",
+  BOOL_SETTING_MODERN(sim3d_virtual_height, "AR_SIM3D_HEIGHT",
                "Object heights",
                "Lift flying actors and effects onto their classified height "
                "above the map. Needs object billboards.",
                kSettingCat_Simulation, 1, false, Sim3DVirtualHeightAvailable,
                NULL),
-  BOOL_SETTING(sim3d_shadows, "AR_SIM3D_SHADOWS", "Ground shadows",
+  BOOL_SETTING_MODERN(sim3d_shadows, "AR_SIM3D_SHADOWS", "Ground shadows",
                "Cast per-object shadows onto the ground only. Needs object "
                "billboards; darkness is set by Shadow darkness below.",
                kSettingCat_Simulation, 1, false, Sim3DShadowsAvailable,
                NULL),
-  BOOL_SETTING(sim3d_soft_shadows, "AR_SIM3D_SOFT_SHADOWS",
+  BOOL_SETTING_MODERN(sim3d_soft_shadows, "AR_SIM3D_SOFT_SHADOWS",
                "Soft shadows",
                "Blur the ground shadow mask instead of leaving a hard "
                "silhouette edge. Needs ground shadows; radius is set by "
                "Shadow softness.",
                kSettingCat_Simulation, 1, false, Sim3DSoftShadowsAvailable,
                NULL),
-  BOOL_SETTING(sim3d_rim_light, "AR_SIM3D_RIM_LIGHT", "Rim light",
+  BOOL_SETTING_MODERN(sim3d_rim_light, "AR_SIM3D_RIM_LIGHT", "Rim light",
                "Add a lit edge to billboard silhouettes on the side facing "
                "the light. Needs object billboards; brightness is set by Rim "
                "light strength.",
                kSettingCat_Simulation, 1, false, Sim3DRimLightAvailable,
                NULL),
-  BOOL_SETTING(sim3d_effect_lighting, "AR_SIM3D_EFFECT_LIGHTING",
+  BOOL_SETTING_MODERN(sim3d_effect_lighting, "AR_SIM3D_EFFECT_LIGHTING",
                "Effect lighting",
                "Add transient local illumination when simulation miracles "
                "and enemy attacks emit light. Uses portable additive SDL "
                "geometry and does not require GPU shader effects.",
                kSettingCat_Simulation, 1, false,
                Sim3DEffectLightingAvailable, NULL),
-  BOOL_SETTING(sim3d_particles, "AR_SIM3D_PARTICLES", "Effect particles",
+  BOOL_SETTING_MODERN(sim3d_particles, "AR_SIM3D_PARTICLES", "Effect particles",
                "Add deterministic host particles synchronized to simulation "
                "miracles and enemy attacks. Uses the same captured effect "
                "lifecycle as Effect lighting.",
                kSettingCat_Simulation, 1, false,
                Sim3DParticlesAvailable, NULL),
-  BOOL_SETTING(sim3d_world_underlay, "AR_SIM3D_WORLD_UNDERLAY",
+  BOOL_SETTING_MODERN(sim3d_world_underlay, "AR_SIM3D_WORLD_UNDERLAY",
                "World map underlay",
                "Extend the ground past the town edge with the live world "
                "map, so the neighbouring regions are visible instead of "
@@ -1058,14 +1067,14 @@ const SettingDesc g_setting_descs[] = {
                "set by World map haze.",
                kSettingCat_Simulation, 1, false, Sim3DWorldUnderlayAvailable,
                NULL),
-  BOOL_SETTING(sim3d_cloud_shroud, "AR_SIM3D_CLOUDS", "Cloud shroud",
+  BOOL_SETTING_MODERN(sim3d_cloud_shroud, "AR_SIM3D_CLOUDS", "Cloud shroud",
                "Cover the extended ground with drifting cloud banks. Sprites "
                "can only be drawn near the camera, so the far ground is always "
                "actor-free; the clouds read that as distance instead of as an "
                "empty town. Needs the world map underlay.",
                kSettingCat_Simulation, 1, false, Sim3DCloudShroudAvailable,
                NULL),
-  BOOL_SETTING(sim3d_cull_haze, "AR_SIM3D_CULL_HAZE_STAGE",
+  BOOL_SETTING_MODERN(sim3d_cull_haze, "AR_SIM3D_CULL_HAZE_STAGE",
                "Local-area haze",
                "Fade the town ground into the distant world map outside the "
                "sprite-drawable window, so the bright area reads as where "
@@ -1084,7 +1093,7 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.sim3d_camera_mode, kSimCam_Dynamic,
     kSimCam_Free, kSimCam_Dynamic, 1, false,
     kSimCamModeLabels, kSimCam_Count, Sim3DGroundAvailable, NULL,
-    NULL, NULL },
+    NULL, NULL, .modern_env = true },
   /* Dynamic Cam's dedicated pose. Defaults are the captured baseline (see the
    * sim3d defaults note above), so the shipped Dynamic view is the one that
    * was actually tuned rather than whatever Free Cam was last left at. */
@@ -1092,18 +1101,18 @@ const SettingDesc g_setting_descs[] = {
     "Dynamic Cam's resting pitch in milliradians; the lean works around this.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_dyncam_baseline_tilt_x_mrad, -575, -700, 700, 25, false,
-    NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
+    NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_dyncam_baseline_tilt_y_mrad", NULL, "Dynamic baseline yaw",
     "Dynamic Cam's resting yaw in milliradians; the lean works around this.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_dyncam_baseline_tilt_y_mrad, 0, -700, 700, 20, false,
-    NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
+    NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_dyncam_baseline_distance_x100", NULL, "Dynamic baseline distance",
     "Dynamic Cam's resting camera distance (hundredths); 0 auto-fits.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_dyncam_baseline_distance_x100, 300, 0, 2000, 25, false,
-    NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
-  BOOL_SETTING(sim3d_cull_lift_inset, "AR_SIM3D_LIFT_INSET",
+    NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
+  BOOL_SETTING_MODERN(sim3d_cull_lift_inset, "AR_SIM3D_LIFT_INSET",
                "Account for flight height at the edge",
                "Pull the bottom of the in-range area in by the height flying "
                "actors are drawn at. The lit ground can only describe the "
@@ -1113,14 +1122,14 @@ const SettingDesc g_setting_descs[] = {
                "the near edge.",
                kSettingCat_Simulation, 1, false, Sim3DCullHazeAvailable,
                NULL),
-  BOOL_SETTING(sim3d_backdrop, "AR_SIM3D_BACKDROP", "Atmospheric backdrop",
+  BOOL_SETTING_MODERN(sim3d_backdrop, "AR_SIM3D_BACKDROP", "Atmospheric backdrop",
                "Draw a graded sky behind the finite ground instead of a flat "
                "clear. Town mode anchors it to the tilted map's horizon; "
                "world navigation uses its synthetic horizon beyond the "
                "finite world edges.",
                kSettingCat_Simulation, 1, false, Sim3DBackdropAvailable,
                NULL),
-  BOOL_SETTING(sim3d_picker_exit_ease, "AR_SIM3D_PICKER_EASE",
+  BOOL_SETTING_MODERN(sim3d_picker_exit_ease, "AR_SIM3D_PICKER_EASE",
                "Ease picker exit",
                "Ease the return from a completed map picker instead of "
                "cutting; not implemented yet.",
@@ -1132,22 +1141,22 @@ const SettingDesc g_setting_descs[] = {
     "zero shows the selected complete profile.",
     kSettingType_Mask, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_diagnostic_layers, 0, 0, 0xFFFF, 1, false,
-    NULL, 0, Sim3D_ModeIsOn, NULL, NULL, NULL },
+    NULL, 0, Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_tilt_y_mrad", "AR_SIM3D_YAW", "Camera yaw",
     "SIM free-camera yaw in milliradians; right-drag horizontally to adjust.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_tilt_y_mrad, 0, -700, 700, 20, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL },
+    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_tilt_x_mrad", "AR_SIM3D_PITCH", "Camera pitch",
     "SIM free-camera pitch in milliradians; right-drag vertically to adjust.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_tilt_x_mrad, -575, -700, 700, 25, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL },
+    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_distance_x100", "AR_SIM3D_DISTANCE", "Camera distance",
     "SIM camera distance in hundredths; 0 auto-fits, and the mouse wheel zooms.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_distance_x100, 300, 0, 2000, 25, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL },
+    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_height_scale_x100", "AR_SIM3D_HEIGHT_SCALE",
     "Object height scale",
     "Scale every classified SIM flight plane as a percentage of its "
@@ -1155,7 +1164,7 @@ const SettingDesc g_setting_descs[] = {
     "billboard without disabling the height stage.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_height_scale_x100, 100, 0, 400, 10, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL },
+    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_shadow_opacity_pct", "AR_SIM3D_SHADOW_OPACITY",
     "Shadow darkness",
     "Darkness of town object shadows and world-navigation cloud shadows as a "
@@ -1163,7 +1172,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_shadow_opacity_pct, kSimShadowOpacityDefaultPct,
     0, 100, 5, false, NULL, 0,
-    Sim3DOrWorldNavigationShadowAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationShadowAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_light_azimuth_deg", "AR_SIM3D_LIGHT_AZIMUTH",
     "Light direction",
     "Compass direction the shadow is thrown, in degrees: 0 casts to the "
@@ -1173,7 +1182,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_light_azimuth_deg, kSimLightAzimuthDefaultDeg,
     0, 359, 15, false, NULL, 0,
-    Sim3DOrWorldNavigationLightingAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationLightingAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_light_elevation_deg", "AR_SIM3D_LIGHT_ELEVATION",
     "Light height",
     "How high the light sits, in degrees above the ground: 90 is straight "
@@ -1183,7 +1192,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_light_elevation_deg, kSimLightElevationDefaultDeg,
     20, 90, 5, false, NULL, 0,
-    Sim3DOrWorldNavigationLightingAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationLightingAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_shadow_softness_pct", "AR_SIM3D_SHADOW_SOFTNESS",
     "Shadow softness",
     "Blur radius for the shadow mask, as a percentage. 0 keeps the hard "
@@ -1192,14 +1201,14 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_shadow_softness_pct, kSimShadowSoftnessDefaultPct,
     0, 100, 5, false, NULL, 0,
-    Sim3DOrWorldNavigationSoftShadowAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationSoftShadowAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_rim_strength_pct", "AR_SIM3D_RIM_STRENGTH",
     "Rim light strength",
     "Brightness of the lit edge added to sprite silhouettes, as a percentage. "
     "0 leaves sprite colours untouched even with rim light enabled.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_rim_strength_pct, kSimRimStrengthDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DRimLightAvailable, NULL, NULL, NULL },
+    0, 100, 5, false, NULL, 0, Sim3DRimLightAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_underlay_haze_pct", "AR_SIM3D_UNDERLAY_HAZE",
     "World map haze",
     "How far the world map underlay fades toward the scene backdrop, as a "
@@ -1208,7 +1217,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_haze_pct, kSimUnderlayHazeDefaultPct,
     0, 100, 5, false, NULL, 0,
-    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_opacity_pct", "AR_SIM3D_CLOUD_OPACITY",
     "Cloud density",
     "Opacity of town cloud banks and whole-world navigation weather, as a "
@@ -1216,7 +1225,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_opacity_pct, kSimCloudOpacityDefaultPct,
     0, 100, 5, false, NULL, 0,
-    Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_falloff_px", "AR_SIM3D_CLOUD_FALLOFF",
     "Cloud edge softness",
     "How far past the sprite-drawable edge the clouds take to reach full "
@@ -1224,7 +1233,7 @@ const SettingDesc g_setting_descs[] = {
     "approach; larger values keep a long hazy gradient.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_falloff_px, kSimCloudFalloffDefaultPx,
-    16, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+    16, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_inset_px", "AR_SIM3D_CLOUD_INSET",
     "Cloud edge overlap",
     "How far inside the sprite-drawable edge the cloud cover starts building, "
@@ -1234,7 +1243,7 @@ const SettingDesc g_setting_descs[] = {
     "clear band where actors vanish into nothing.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_inset_px, kSimCloudInsetDefaultPx,
-    0, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+    0, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_lead_px", "AR_SIM3D_CULL_LEAD",
     "Cloud lead on culled sprites",
     "How far before the sprite-drawable edge a record's own cloud cover "
@@ -1243,7 +1252,7 @@ const SettingDesc g_setting_descs[] = {
     "moment ahead of the cloud that should have hidden it.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_lead_px, kSimCullLeadDefaultPx,
-    8, 256, 8, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL },
+    8, 256, 8, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_haze_pct", "AR_SIM3D_CULL_HAZE",
     "Out-of-range ground fade",
     "How far the town ground fades toward the distant world map outside the "
@@ -1255,7 +1264,7 @@ const SettingDesc g_setting_descs[] = {
     "World map haze strength for its active-location boundary.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_pct, kSimCullHazeDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_dim_pct", "AR_SIM3D_CULL_DIM",
     "Out-of-range darkening",
     "How far the ground outside the sprite-drawable window is darkened, as a "
@@ -1265,7 +1274,7 @@ const SettingDesc g_setting_descs[] = {
     "far field darker instead of hazier.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_dim_pct, kSimCullDimDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_haze_lead_px", "AR_SIM3D_CULL_HAZE_LEAD",
     "Ground fade ramp width",
     "How many original pixels the fade takes to reach full strength, "
@@ -1276,7 +1285,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_lead_px, kSimCullHazeLeadDefaultPx,
     16, 512, 16, false, NULL, 0,
-    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_corner_px", "AR_SIM3D_CULL_CORNER",
     "Ground fade corner rounding",
     "How far the corners of the in-range area are rounded, in original "
@@ -1286,7 +1295,7 @@ const SettingDesc g_setting_descs[] = {
     "sprite the window was going to take away.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_corner_px, kSimCullCornerDefaultPx,
-    0, 256, 8, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL },
+    0, 256, 8, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_underlay_defocus_pct", "AR_SIM3D_DEFOCUS",
     "World map defocus",
     "How far out of focus the distant world map goes outside the "
@@ -1296,7 +1305,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_defocus_pct, kSimUnderlayDefocusDefaultPct,
     0, 100, 5, false, NULL, 0,
-    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_altitude_px", "AR_SIM3D_CLOUD_ALTITUDE",
     "Cloud altitude",
     "How far above the ground the cloud banks float, in original pixels. Zero "
@@ -1308,7 +1317,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_altitude_px, kSimCloudAltitudeDefaultPx,
     0, 256, 8, false, NULL, 0,
-    Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_drift_pct", "AR_SIM3D_CLOUD_DRIFT",
     "Cloud drift speed",
     "How fast the cloud banks move, as a percentage of their built-in rates. "
@@ -1318,7 +1327,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_drift_pct, kSimCloudDriftDefaultPct,
     0, 500, 10, false, NULL, 0,
-    Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL },
+    Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_backdrop_strength_pct", "AR_SIM3D_BACKDROP_STRENGTH",
     "Sky gradient strength",
     "How far the sky is mixed from the scene's own backdrop colour toward blue, "
@@ -1328,7 +1337,7 @@ const SettingDesc g_setting_descs[] = {
     "backdrop alone. Zero is the flat fill the projected view used before.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_backdrop_strength_pct, kSimBackdropStrengthDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL },
+    0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_backdrop_horizon_pct", "AR_SIM3D_BACKDROP_HORIZON",
     "Sky horizon height",
     "Where the sky's bright end sits, as a percentage of screen height from "
@@ -1337,7 +1346,7 @@ const SettingDesc g_setting_descs[] = {
     "the finite map.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_backdrop_horizon_pct, kSimBackdropHorizonDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL },
+    0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_reactive_strength", "AR_SIM3D_REACTIVE",
     "Camera reactivity",
     "How far the town camera leans toward the angel's direction of travel and "
@@ -1345,7 +1354,7 @@ const SettingDesc g_setting_descs[] = {
     "camera at the pose the pitch/yaw/zoom settings describe.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_reactive_strength, 100, 0, 200, 10, false, NULL, 0,
-    Sim3DDynamicCameraAvailable, NULL, NULL, NULL },
+    Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_height_pop_pct", "AR_SIM3D_HEIGHT_POP",
     "Flying sprite pop",
     "Extra size for a flying sprite at its catalogue height, as a percentage. "
@@ -1354,7 +1363,7 @@ const SettingDesc g_setting_descs[] = {
     "with it.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_height_pop_pct, 0, 0, 50, 1, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL },
+    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
   SIM_ACTION_SETTING("sim3d_reset_camera", "Reset camera",
                      "Return the camera mode in use to its default pitch, yaw, and distance."),
   BOOL_SETTING(diorama_mode, NULL, "Diorama 3D",
@@ -1614,7 +1623,7 @@ const SettingDesc g_setting_descs[] = {
     "running.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
     &g_settings.audio_enabled, 1, 0, 1, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL },
+    NULL, NULL, NULL, NULL, .modern_env = true },
   { "audio_frequency", "AR_AUDIO_FREQ", "Audio frequency",
     "Auto matches the audio device's native rate. 32.04 kHz is raised to 44.1 "
     "(SDL's device minimum).",
@@ -1622,12 +1631,12 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.audio_frequency, kAudioFrequency_Auto,
     kAudioFrequency_32040, kAudioFrequency_Auto, 1, false,
     kAudioFrequencyLabels, kAudioFrequency_Count, NULL, NULL,
-    ParseAudioFrequency, NULL },
+    ParseAudioFrequency, NULL, .modern_env = true },
   { "audio_samples", "AR_AUDIO_SAMPLES", "Audio buffer samples",
     "Set the host audio callback buffer size on the next device initialization.",
     kSettingType_Int, kApply_Restart, kSettingCat_Audio,
     &g_settings.audio_samples, 2048, 64, 8192, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL },
+    NULL, NULL, NULL, NULL, .modern_env = true },
   { "audio_master_volume", "AR_AUDIO_VOLUME", "Master volume",
     "Scale the final game output, including music, sound effects, and MSU-1 audio.",
     kSettingType_Int, kApply_Callback, kSettingCat_Audio,
@@ -2097,70 +2106,15 @@ static int Settings_FindIndexByEnvironment(const char *env) {
   return -1;
 }
 
+/* T2d: this was a ~60-clause chain of `desc->field != &g_settings.<row>`
+ * pointer comparisons sitting a thousand lines away from the table it
+ * described, so a new modern setting whose author did not think to come here
+ * silently inherited the legacy AR_* parse. The answer now lives on the row
+ * itself (see modern_env in settings.h). The classification is unchanged for
+ * all 258 descriptors -- 198 legacy, 60 modern -- proven by diffing the probe
+ * dump against the pre-refactor baseline vector. */
 static bool Settings_UsesLegacyEnvironmentSyntax(const SettingDesc *desc) {
-  /* These Phase-4 application variables are new aliases and use the same
-   * human-readable parser as settings.ini. Older AR_* game knobs retain their
-   * exact historical leading-zero/default-polarity behavior. */
-  return desc->field != &g_settings.extended_aspect &&
-         desc->field != &g_settings.pixel_aspect &&
-         desc->field != &g_settings.window_scale &&
-         desc->field != &g_settings.window_mode &&
-         desc->field != &g_settings.new_renderer &&
-         desc->field != &g_settings.ignore_aspect_ratio &&
-         desc->field != &g_settings.refresh_mode &&
-         desc->field != &g_settings.frame_limit_fps &&
-         desc->field != &g_settings.audio_enabled &&
-         desc->field != &g_settings.audio_frequency &&
-         desc->field != &g_settings.audio_samples &&
-         desc->field != &g_settings.sim3d_mode &&
-         desc->field != &g_settings.sim3d_world_navigation &&
-         desc->field != &g_settings.sim3d_world_navigation_lighting &&
-         desc->field != &g_settings.sim3d_world_navigation_clouds &&
-         desc->field != &g_settings.sim3d_diagnostic_layers &&
-         desc->field != &g_settings.sim3d_tilt_x_mrad &&
-         desc->field != &g_settings.sim3d_tilt_y_mrad &&
-         desc->field != &g_settings.sim3d_distance_x100 &&
-         desc->field != &g_settings.sim3d_height_scale_x100 &&
-         desc->field != &g_settings.sim3d_shadow_opacity_pct &&
-         desc->field != &g_settings.sim3d_height_pop_pct &&
-         desc->field != &g_settings.sim3d_light_azimuth_deg &&
-         desc->field != &g_settings.sim3d_light_elevation_deg &&
-         desc->field != &g_settings.sim3d_shadow_softness_pct &&
-         desc->field != &g_settings.sim3d_rim_strength_pct &&
-         desc->field != &g_settings.sim3d_underlay_haze_pct &&
-         desc->field != &g_settings.sim3d_cloud_opacity_pct &&
-         desc->field != &g_settings.sim3d_cloud_falloff_px &&
-         desc->field != &g_settings.sim3d_cloud_inset_px &&
-         desc->field != &g_settings.sim3d_cull_lead_px &&
-         desc->field != &g_settings.sim3d_cull_haze_pct &&
-         desc->field != &g_settings.sim3d_cull_dim_pct &&
-         desc->field != &g_settings.sim3d_cull_haze_lead_px &&
-         desc->field != &g_settings.sim3d_cull_corner_px &&
-         desc->field != &g_settings.sim3d_underlay_defocus_pct &&
-         desc->field != &g_settings.sim3d_cloud_altitude_px &&
-         desc->field != &g_settings.sim3d_cloud_drift_pct &&
-         desc->field != &g_settings.sim3d_separated_composite &&
-         desc->field != &g_settings.sim3d_ground_projection &&
-         desc->field != &g_settings.sim3d_object_billboards &&
-         desc->field != &g_settings.sim3d_virtual_height &&
-         desc->field != &g_settings.sim3d_shadows &&
-         desc->field != &g_settings.sim3d_soft_shadows &&
-         desc->field != &g_settings.sim3d_rim_light &&
-         desc->field != &g_settings.sim3d_effect_lighting &&
-         desc->field != &g_settings.sim3d_particles &&
-         desc->field != &g_settings.sim3d_world_underlay &&
-         desc->field != &g_settings.sim3d_cloud_shroud &&
-         desc->field != &g_settings.sim3d_cull_haze &&
-         desc->field != &g_settings.sim3d_cull_lift_inset &&
-         desc->field != &g_settings.sim3d_camera_mode &&
-         desc->field != &g_settings.sim3d_dyncam_baseline_tilt_x_mrad &&
-         desc->field != &g_settings.sim3d_dyncam_baseline_tilt_y_mrad &&
-         desc->field != &g_settings.sim3d_dyncam_baseline_distance_x100 &&
-         desc->field != &g_settings.sim3d_backdrop_strength_pct &&
-         desc->field != &g_settings.sim3d_backdrop_horizon_pct &&
-         desc->field != &g_settings.sim3d_reactive_strength &&
-         desc->field != &g_settings.sim3d_backdrop &&
-         desc->field != &g_settings.sim3d_picker_exit_ease;
+  return !desc->modern_env;
 }
 
 static bool Settings_StageConfigIndex(int index, const char *value,

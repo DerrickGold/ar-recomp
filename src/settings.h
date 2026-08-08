@@ -221,6 +221,17 @@ struct SettingDesc {
   SettingChangedFn on_change;
   bool (*parse)(const char *text, void *field);
   SettingFormatFn format;
+  /* T2d: false (the zero default every positional row already gets) means this
+   * setting's AR_* environment seed keeps the historical leading-zero /
+   * default-polarity parse. Set it true -- via `.modern_env = true` on a
+   * literal row, or BOOL_SETTING_MODERN -- for settings whose env var is a
+   * modern alias parsed by the same human-readable parser as settings.ini.
+   * The distinction is NOT derivable from any other field here (category, type,
+   * apply kind and the parse/format hooks were all measured and all mix), which
+   * is why it is stated per row. It must be LAST: rows initialize positionally,
+   * so a new trailing member is the only one that stays zero without touching
+   * all 258 of them. */
+  bool modern_env;
 };
 
 typedef enum {
