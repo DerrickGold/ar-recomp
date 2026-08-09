@@ -541,7 +541,11 @@ static void RunOuterIterationHousekeeping(void) {
     if (warp_at >= 0 && !warp_fired) {
       const unsigned gf =
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      if (gf >= (unsigned)warp_at) {
+      /* The power-on fill value is numerically above ordinary scheduled
+       * frames. Ignore it just like AR_DIORAMA_AT below, or windowed startup
+       * can stage a warp before the game has initialized its transition
+       * state. */
+      if (gf != kPowerOnGameFrameSentinel && gf >= (unsigned)warp_at) {
         warp_fired = true;
         (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
       }
@@ -1728,6 +1732,19 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
     }
 }
 
+/* Keep automated runs bounded in either presentation path. This used to be
+ * checked only inside the headless branch, which meant an otherwise identical
+ * real-compositor capture could not exit cleanly after writing its artifact. */
+static bool DevTools_ShouldAutoQuit(void) {
+  static int quit_frames = -2;
+  if (quit_frames == -2) {
+    const char *value = getenv("AR_QUIT_FRAMES");
+    quit_frames = value ? atoi(value) : -1;
+  }
+  extern int snes_frame_counter;
+  return quit_frames > 0 && snes_frame_counter >= quit_frames;
+}
+
 /* The frame loop: pump events, then either service a host pause, step uncapped
  * (headless), or advance the M6 fixed-timestep accumulator. */
 static void AppRunMainLoop(AppBoot *app) {
@@ -1819,11 +1836,7 @@ static void AppRunMainLoop(AppBoot *app) {
       RunOuterIterationHousekeeping();
       DrawAndPresentFrame(true, kInterpPhaseNone);
 
-      extern int snes_frame_counter;
-      static int quit_frames = -2;
-      if (quit_frames == -2) { const char *q = getenv("AR_QUIT_FRAMES");
-        quit_frames = q ? atoi(q) : -1; }
-      if (quit_frames > 0 && snes_frame_counter >= quit_frames) running = false;
+      if (DevTools_ShouldAutoQuit()) running = false;
       /* AR_PACE=1: throttle headless to ~60fps so the emulated SPC (advanced
        * in real time by the audio thread) stays in sync with the game thread —
        * a faithful reproduction of normal play, vs. the default headless turbo
@@ -1867,6 +1880,7 @@ static void AppRunMainLoop(AppBoot *app) {
         accumulator -= kHostDisplayEmulationFrameIntervalNs;
         produced_frame = true;
       }
+      if (DevTools_ShouldAutoQuit()) running = false;
 
       /* R17/C4: the sub-tick phase, taken AFTER the drain — whatever wall-clock
        * time has accrued toward the next tick but has not yet produced one.
