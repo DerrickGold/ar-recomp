@@ -356,6 +356,21 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_action_effects COMMAND actraiser_action_effects_test)
 
+    # SPEC-bg-hle BH2: the action-stage WRAM world decoder is a pure source
+    # provider. This target pins page addressing, metatile expansion, finite
+    # bounds, atomic publication, and exact-byte cache invalidation without a
+    # ROM, generated banks, or the PPU.
+    add_executable(actraiser_action_bg_world_test
+        tests/action_bg_world_test.c
+        src/action/action_bg_world.c
+    )
+    target_include_directories(actraiser_action_bg_world_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/action
+    )
+    add_test(NAME actraiser_action_bg_world
+        COMMAND actraiser_action_bg_world_test)
+
     add_executable(actraiser_action_effect_render_test
         tests/action_effect_render_test.c
         src/action/action_effect_render.c
