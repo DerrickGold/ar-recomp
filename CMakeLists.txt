@@ -371,6 +371,19 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_bg_world
         COMMAND actraiser_action_bg_world_test)
 
+    add_executable(actraiser_action_bg_test
+        tests/actraiser_action_bg_test.c
+        src/action/action_bg_world.c
+        src/actraiser/actraiser_action_bg.c
+    )
+    target_include_directories(actraiser_action_bg_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/action
+        ${CMAKE_SOURCE_DIR}/src/actraiser
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_action_bg COMMAND actraiser_action_bg_test)
+
     add_executable(actraiser_action_effect_render_test
         tests/action_effect_render_test.c
         src/action/action_effect_render.c

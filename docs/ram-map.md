@@ -38,7 +38,12 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:002E/$0030 | 2+2 | **BG1 layer = LEVEL pixel width/height** (Fillmore act1: 4096x768) — the camera clamp bounds |
 | $7E:0032/$0034 | 2+2 | BG2 layer width/height (scroll clamps only if width >= $300, else wraps) |
 | $7E:003A-$0045 | 12 | per-plane parallax ratio nibbles (from section config table $02:893E+7..12) |
+| $7E:0046/$004A | 2 ea | BG1/BG2 action map-page bases, indexed by layer stride 4; each points at the live chunk-paged metatile-id map in WRAM. |
+| $7E:0048/$004C | 2 ea | BG1/BG2 tilemap VRAM word bases. Ordinary action world layers agree with PPU BGSC and own a 64x64 ring (`$6000/$7000`); disagreement or a non-64x64 BGSC is provider-ineligible. |
+| $7E:0052/$0056 | 2 ea | BG1/BG2 metatile-definition table bases in WRAM; four little-endian tile words per metatile. |
+| $7E:0054/$0058 | 2 ea | BG1/BG2 tile-word masks applied before the layer attribute merge. |
 | $7E:005E/$0060/$0062/$0064 | 2 ea | record-buffer cursors: BG1col $3900 / BG1row $3A02 / BG2col $3B04 / BG2row $3C06 |
+| $7E:006B/$006F | 1 ea | BG1/BG2 action tile-word attribute merges (palette/priority bits), indexed by layer stride 4. Together with `$46/$52/$54`, these are the complete `ActionBgWorld` decoder records. |
 | $7E:007C/$007E | 2+2 | camera H/V delta this frame (16-bit signed; strip triggers) |
 | $7E:008E | 1 | parallax disable bits (bit0 BG2H, bit1 BG2V = script-driven) |
 | $7E:0093 | 1 | strip-request flags: $80 BG1col $40 BG1row $20 BG2col $10 BG2row (set by $02:B091 on 16px crossings, TRB-consumed by dispatcher $02:B127) |
