@@ -814,17 +814,7 @@ RecompReturn ActRaiser_TileAnimationTick(CpuState *cpu) {
  * AR_WS_SURVEY=1 forces raw symmetric margins in EVERY mode — the Phase-2
  * artifact-survey knob (stale tiles/pop-in expected; not for normal play). */
 enum {
-  kAitosParallaxMapFirst = 0x01,
-  kAitosParallaxMapLast = 0x03,
-  kNorthwallParallaxMapFirst = 0x01,
-  kNorthwallParallaxMapLast = 0x05,
-  kNorthwallBossParallaxMap = 0x08,
-  kBloodpoolAct1Map = 0x01,
-  kBloodpoolWaterStartY = 136,
-  kDeathHeimFogStartY = 144,
-  kEndingSkyBg1TilemapPage = 0x64,
-  kEndingSkyBg2TilemapPage = 0x74,
-  kBgTilemapPageMask = 0xFC,
+  kNoActionBgPlanSource = -1,
 };
 
 /* Per-frame VERTICAL margin policy — the transpose of the bounded-world side
@@ -962,6 +952,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   uint8 hud_split_right_start = 0;
   uint8 hud_player_row_y = 0;
   uint8 hud_left_only_y = 0;
+  int bg_plan_valid = 0;
+  int bg_plan_source_bg1 = kNoActionBgPlanSource;
+  int bg_plan_source_bg2 = kNoActionBgPlanSource;
   /* True when the current wide world has finite horizontal bounds. The PPU
    * still owns the fixed centering budget; this policy narrows the live left
    * and right margins as the camera approaches either world edge. */
@@ -1027,110 +1020,22 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * binary. AR_WS_BGREFRESH=0 returns exactly to Stage A (raw wide renderer,
      * stale/wrapped margin BG) without changing the action geometry. */
     wide = g_settings.ws_action;
-    bounded_world_margins =
-        wide && ActRaiser_WidescreenBgRefreshEnabled();
-
-    /* Some action sections declare BG2 as a single 256x256 screen
-     * ($32/$34=$0100) while BG1 is the scrolling world. There is no BG2 world
-     * data to decode into side margins, and its offscreen tilemap half is
-     * scratch/stale storage. The margin refresher therefore skips it; pad its
-     * authentic render (or clamp it) instead of exposing frozen tiles. */
-    uint16 bg2_width = ActRaiser_ReadWram16(kActRaiserWram_Bg2Width);
-    if (bg2_width < kActRaiserTownWorldWidth) {
-      /* A 256-wide decorative BG2 has no real margin data. By default pad from
-       * its authentic rendered image; AR_WS_BG2_MIRROR=0 restores the proven
-       * clamp for A/B testing in the same binary.
-       *
-       * Bloodpool's mostly symmetric decoration benefits from reflection.
-       * Aitos act 1 (raw maps $01-$03), Northwall maps $01-$05 and $08, and
-       * Death Heim maps $02-$08 show moving cloud/snow/mountain bands; reflection
-       * reverses their slope/motion at each boundary. Cyclically repeat the
-       * already-rendered scanline there so every parallax/raster band continues
-       * in the same direction without exposing stale BG2 VRAM. */
-      int bg2_mirror = g_settings.ws_bg2_padding;
-      if (!bg2_mirror) {
-        clamp |= kActRaiserBgLayerMask_Bg2;
-      } else if ((map_group == kActRaiserMapGroup_Aitos &&
-                  map_number >= kAitosParallaxMapFirst &&
-                  map_number <= kAitosParallaxMapLast) ||
-                 (map_group == kActRaiserMapGroup_Northwall &&
-                  ((map_number >= kNorthwallParallaxMapFirst &&
-                    map_number <= kNorthwallParallaxMapLast) ||
-                   map_number == kNorthwallBossParallaxMap)) ||
-                 (map_group == kActRaiserMapGroup_DeathHeim &&
-                  map_number >= kActRaiserDeathHeimMap_FirstBoss &&
-                  map_number <= kActRaiserDeathHeimMap_FinalBoss)) {
-        repeat |= kActRaiserBgLayerMask_Bg2;
-      } else {
-        mirror |= kActRaiserBgLayerMask_Bg2;
-      }
-    }
-
-    /* Bloodpool Act 1 ($02:$01) is another mixed-content narrow BG2. Its
-     * static mountain silhouette benefits from the normal reflected margins,
-     * but tile row 17 and below is animated water. Reflecting those lower
-     * scanlines reverses the apparent flow at both authentic-screen seams.
-     * Keep reflection above y=136 and cyclically continue the already-rendered
-     * water scanline below it. When AR_WS_BG2_MIRROR=0 selected the authentic
-     * clamp fallback, leave the repeat band disabled as part of that A/B gate. */
-    if (wide && map_group == kActRaiserMapGroup_Bloodpool &&
-        map_number == kBloodpoolAct1Map &&
-        (mirror & kActRaiserBgLayerMask_Bg2)) {
-      repeat_band_layer = 1;  /* BG2 */
-      repeat_band_y0 = kBloodpoolWaterStartY;
-      repeat_band_y1 = kActRaiserAuthenticHeight;
-    }
-
-    /* Death Heim's boss-warp room ($07:$01) is already composed as a bounded
-     * SNES-width scene: BG1 is the central causeway, while BG2 contains both
-     * the face statues and the animated fog/water. Open the full symmetric
-     * canvas despite camera X=0. During the boss rush, clamp both scenery
-     * layers and cyclically continue only BG2's border/fog rows; the split at
-     * tile row 18 (screen Y=144) is below every face and above the water.
-     *
-     * After the final boss, $0347=$07. The fade-to-black/removal sequencer at
-     * $00:F5C2-$F5EF then selects the sky maps by writing BG1SC/BG2SC=$64/$74
-     * at $F5F0-$F619, before its fade-in. Use those live page bases as the
-     * exact render handoff; $0334=$03 is retained as a settled-state fallback
-     * but is written much later at $F650. Keep the causeway BG1 bounded, but
-     * mirror the whole live BG2 scanline so the non-periodic cloud edges join
-     * cleanly at both margins. */
-    if (wide && map_group == kActRaiserMapGroup_DeathHeim &&
-        map_number == kActRaiserDeathHeimMap_Hub) {
-      const int ending_sky_pages =
-          (g_ppu->bgXsc[0] & kBgTilemapPageMask) ==
-              kEndingSkyBg1TilemapPage &&
-          (g_ppu->bgXsc[1] & kBgTilemapPageMask) ==
-              kEndingSkyBg2TilemapPage;
-      bounded_world_margins = 0;
-      if (g_ram[kActRaiserWram_DeathHeimProgress] >=
-              kActRaiserDeathHeimProgress_FinalBossBeaten &&
-          (ending_sky_pages ||
-           g_ram[kActRaiserWram_DeathHeimEndingState] >=
-               kActRaiserDeathHeimEndingState_SkySettled)) {
-        clamp |= kActRaiserBgLayerMask_Bg1;
-        mirror |= kActRaiserBgLayerMask_Bg2;
-      } else {
-        clamp |= kActRaiserBgLayerMask_Bg1AndBg2;
-        repeat_band_layer = 1;  /* BG2 */
-        repeat_band_y0 = kDeathHeimFogStartY;
-        repeat_band_y1 = kActRaiserAuthenticHeight;
-      }
-    }
-
-    /* Death Heim's final arena ($07:$08) stacks two 256px star-road layers
-     * and applies independent scanline/sine motion. Both live BGSC registers
-     * select 32x32 tilemaps ($60/$70), so native tile fetch already wraps at
-     * 256px with the current per-line scroll. The generic world-edge budget
-     * was the only reason the margins stayed black. Open the symmetric canvas
-     * and draw both layers raw: this preserves their raster phase and avoids
-     * the isolated-buffer clear/merge cost of presentation-layer repeat. */
-    if (wide && map_group == kActRaiserMapGroup_DeathHeim &&
-        map_number == kActRaiserDeathHeimMap_FinalBoss) {
-      bounded_world_margins = 0;
-      clamp &= (uint8)~kActRaiserBgLayerMask_Bg1AndBg2;
-      mirror &= (uint8)~kActRaiserBgLayerMask_Bg1AndBg2;
-      repeat &= (uint8)~kActRaiserBgLayerMask_Bg1AndBg2;
+    ActionBgPlan bg_plan;
+    ActionBgPresentationPolicy bg_policy;
+    if (ActRaiserActionBg_BuildPlan(
+            g_ram, kActRaiserWramSize, g_ppu,
+            g_settings.ws_bg2_padding, &bg_plan, &bg_policy)) {
+      bg_plan_valid = 1;
+      bg_plan_source_bg1 = bg_plan.layer[0].source;
+      bg_plan_source_bg2 = bg_plan.layer[1].source;
+      clamp = bg_policy.clamp_layers;
+      mirror = bg_policy.mirror_layers;
+      repeat = bg_policy.repeat_layers;
+      repeat_band_layer = bg_policy.repeat_band_layer;
+      repeat_band_y0 = bg_policy.repeat_band_y0;
+      repeat_band_y1 = bg_policy.repeat_band_y1;
+      bounded_world_margins = wide && bg_policy.bound_canvas_to_world &&
+          ActRaiser_WidescreenBgRefreshEnabled();
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
@@ -1267,7 +1172,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
              last_repeat_band_y0 = -1, last_repeat_band_y1 = -1,
              last_hud_split_height = -1, last_hud_split_left_end = -1,
              last_hud_split_right_start = -1,
-             last_hud_left_only_y = -1;
+             last_hud_left_only_y = -1, last_bg_plan_valid = -1,
+             last_bg_plan_source_bg1 = -2, last_bg_plan_source_bg2 = -2;
   if (wide != last_wide || clamp != last_clamp || mirror != last_mirror ||
       repeat != last_repeat ||
       repeat_band_layer != last_repeat_band_layer ||
@@ -1276,7 +1182,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       hud_split_height != last_hud_split_height ||
       hud_split_left_end != last_hud_split_left_end ||
       hud_split_right_start != last_hud_split_right_start ||
-      hud_left_only_y != last_hud_left_only_y) {
+      hud_left_only_y != last_hud_left_only_y ||
+      bg_plan_valid != last_bg_plan_valid ||
+      bg_plan_source_bg1 != last_bg_plan_source_bg1 ||
+      bg_plan_source_bg2 != last_bg_plan_source_bg2) {
     last_wide = wide;
     last_clamp = clamp;
     last_mirror = mirror;
@@ -1288,15 +1197,27 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     last_hud_split_left_end = hud_split_left_end;
     last_hud_split_right_start = hud_split_right_start;
     last_hud_left_only_y = hud_left_only_y;
+    last_bg_plan_valid = bg_plan_valid;
+    last_bg_plan_source_bg1 = bg_plan_source_bg1;
+    last_bg_plan_source_bg2 = bg_plan_source_bg2;
     fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s "
             "clamp=%02x mirror=%02x repeat=%02x rband=%d/%u-%u "
-            "hud=%u/%u/%u left-only-y=%u\n",
+            "hud=%u/%u/%u left-only-y=%u bg-plan=%d source=%s/%s\n",
             (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
             map_group, map_number, wide ? "WIDE" : "pillarbox",
             clamp, mirror, repeat, repeat_band_layer,
             (unsigned)repeat_band_y0, (unsigned)repeat_band_y1,
             (unsigned)hud_split_height, (unsigned)hud_split_left_end,
-            (unsigned)hud_split_right_start, (unsigned)hud_left_only_y);
+            (unsigned)hud_split_right_start, (unsigned)hud_left_only_y,
+            bg_plan_valid,
+            bg_plan_valid
+                ? ActionBgSourceKind_Name(
+                      (ActionBgSourceKind)bg_plan_source_bg1)
+                : "none",
+            bg_plan_valid
+                ? ActionBgSourceKind_Name(
+                      (ActionBgSourceKind)bg_plan_source_bg2)
+                : "none");
   }
   /* AR_WS_LAYERS=1: dump per-frame PPU layer/tilemap state — which BG a
    * margin artifact lives on, and whether that BG's tilemap is 32-wide (wraps

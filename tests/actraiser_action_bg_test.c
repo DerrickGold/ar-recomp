@@ -8,6 +8,7 @@
 
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
+#include "snes/ppu.h"
 
 static int failures;
 #define CHECK(e) do { if (!(e)) { \
@@ -180,9 +181,45 @@ static void TestRingAndComparison(void) {
   free(wram);
 }
 
+static void TestFramePlanCapture(void) {
+  uint8_t *wram = BuildWram();
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(ppu != NULL);
+  if (!wram || !ppu) {
+    free(ppu);
+    free(wram);
+    return;
+  }
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  wram[kActRaiserWram_CurrentMap] = 1;
+  Write16(wram, kActRaiserWram_Bg2Width, 256);
+  ppu->bgXsc[0] = 0x63;
+  ppu->bgXsc[1] = 0x70;
+
+  ActionBgPlan plan;
+  ActionBgPresentationPolicy policy;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.valid);
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(policy.mirror_layers == kActRaiserBgLayerMask_Bg2);
+  CHECK(policy.repeat_band_layer == kActRaiserPpuLayer_Bg2);
+  CHECK(policy.repeat_band_y0 == 136 && policy.repeat_band_y1 == 224);
+
+  wram[kActRaiserWram_CurrentMap] = 9;
+  memset(&plan, 0xA5, sizeof(plan));
+  CHECK(!ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(!plan.valid && policy.repeat_band_layer == -1);
+  free(ppu);
+  free(wram);
+}
+
 int main(void) {
   TestCapture();
   TestRingAndComparison();
+  TestFramePlanCapture();
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);
     return 1;

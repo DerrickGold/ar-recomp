@@ -386,6 +386,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_action_bg_test
         tests/actraiser_action_bg_test.c
+        src/action/action_bg_plan.c
         src/action/action_bg_world.c
         src/actraiser/actraiser_action_bg.c
     )

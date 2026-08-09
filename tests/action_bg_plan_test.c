@@ -66,6 +66,12 @@ static void TestValidationAndFallback(void) {
   memset(&policy, 0xA5, sizeof(policy));
   CHECK(!ActionBgPlan_CompilePresentation(&plan, &policy));
   CHECK(policy.repeat_band_layer == -1 && !policy.clamp_layers);
+  CHECK(!strcmp(ActionBgSourceKind_Name(kActionBgSource_NativeTilemap),
+                "native"));
+  CHECK(!strcmp(ActionBgSourceKind_Name(kActionBgSource_WorldMap), "world"));
+  CHECK(!strcmp(ActionBgSourceKind_Name(kActionBgSource_AuthenticViewport),
+                "viewport"));
+  CHECK(!strcmp(ActionBgSourceKind_Name((ActionBgSourceKind)99), "unknown"));
 }
 
 static void TestOrdinaryWorldAndNativeSource(void) {

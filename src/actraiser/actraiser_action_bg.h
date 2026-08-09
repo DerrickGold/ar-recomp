@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "action/action_bg_plan.h"
 #include "action/action_bg_world.h"
 
 struct Ppu;
@@ -69,6 +70,13 @@ bool ActRaiserActionBg_CompareLayer(
     const ActRaiserActionBgLayerSnapshot *snapshot,
     const uint16_t *vram, size_t vram_words,
     ActRaiserActionBgCompareResult *result);
+
+/* Capture the complete action-background decision record and build its pure
+ * BH3 plan plus temporary PPU-policy projection. No renderer state is changed. */
+bool ActRaiserActionBg_BuildPlan(
+    const uint8_t *wram, size_t wram_size, const struct Ppu *ppu,
+    bool decorative_padding_enabled, ActionBgPlan *plan,
+    ActionBgPresentationPolicy *presentation);
 
 /* Default-off frame observer. `AR_ACTION_BG_HLE_COMPARE=1` enables it; it only
  * reads WRAM/PPU state and never binds a renderer provider or mutates emulated
