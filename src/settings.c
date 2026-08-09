@@ -975,6 +975,15 @@ const SettingDesc g_setting_descs[] = {
                "AR_SIM3D_PICKER_TOPDOWN=1 to restore the flat picker view).",
                kSettingCat_Simulation, 0, false, Diorama_NewPpuCapable,
                NULL),
+  { "sim_view_range", "AR_SIM_VIEW_RANGE", "Extended actor range",
+    "Gameplay-affecting. Keep simulation actors and projectiles alive and "
+    "host-renderable this many original pixels beyond the authentic view. "
+    "Larger values increase pressure on the game's fixed 44 world-record "
+    "slots; 0 preserves authentic lifetime.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim_view_range, 0, 0, 256, 16, false, NULL, 0,
+    Sim3D_ModeIsOn, NULL, NULL, NULL,
+    .modern_env = true, .player_visible = true },
   BOOL_SETTING_MODERN(sim3d_world_navigation, "AR_SIM3D_WORLD_NAV",
                "World navigation 3D",
                "Render inter-town Sky Palace navigation as a full-world 3D "
@@ -2111,7 +2120,7 @@ static int Settings_FindIndexByEnvironment(const char *env) {
  * described, so a new modern setting whose author did not think to come here
  * silently inherited the legacy AR_* parse. The answer now lives on the row
  * itself (see modern_env in settings.h). The classification is unchanged for
- * all 258 descriptors -- 198 legacy, 60 modern -- proven by diffing the probe
+ * all 259 descriptors -- 198 legacy, 61 modern -- proven by diffing the probe
  * dump against the pre-refactor baseline vector. */
 static bool Settings_UsesLegacyEnvironmentSyntax(const SettingDesc *desc) {
   return !desc->modern_env;
@@ -2451,6 +2460,7 @@ bool Settings_CategoryIsSim3D(SettingCategory category) {
 
 bool Settings_IsDebugOnly(const SettingDesc *desc) {
   if (!desc || !desc->key) return false;
+  if (desc->player_visible) return false;
 
   /* The scene inspector and its asset dump are development tools end to end. */
   if (desc->category == kSettingCat_Inspector) return true;

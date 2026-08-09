@@ -27,7 +27,7 @@ typedef struct Sim3DCaptureRequest {
 } Sim3DCaptureRequest;
 
 enum {
-  kSim3DMaxWidth = 448,  /* kPpuBufWidth, asserted in sim3d.c */
+  kSim3DMaxWidth = 512,  /* kPpuBufWidth, asserted in sim3d.c */
   kSim3DMaxHeight = 240,
 };
 
@@ -112,6 +112,7 @@ typedef struct Sim3DTuning {
    * stays linkable without the widescreen sprite unit, which the focused
    * tests do not build. */
   int sprite_margin_left, sprite_margin_right;
+  int sprite_margin_top, sprite_margin_bottom;
 } Sim3DTuning;
 
 void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning);

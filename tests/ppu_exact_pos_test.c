@@ -65,10 +65,10 @@ static void write_slot0(Ppu *ppu, int screen_x, int screen_y) {
 int main(void) {
   Ppu *ppu = ppu_init();
   ppu_reset(ppu);
-  /* The display cap the wrap threshold anchors to: 95 per side (kWsExtraMax's
+  /* The display cap the wrap threshold anchors to: 120 per side (kWsExtraMax's
    * value, restated because widescreen.h is a runner header the PPU must not
    * depend on). PpuSetExtraSpace clamps to kPpuExtraLeftRight. */
-  enum { kCap = 95 };
+  enum { kCap = 120 };
   PpuSetExtraSpace(ppu, kCap);
 
   /* 8x8 sprites (obsel size 0, high size bit clear). */

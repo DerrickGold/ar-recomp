@@ -216,7 +216,6 @@ enum {
   kActRaiserSimulationHourglassLowerTileOffset = 0x10,
   kActRaiserSimulationHourglassLeftAttr = 0x31,
   kActRaiserSimulationHourglassRightAttr = 0x71,
-  kActRaiserSkyPalaceMagicOamFirst = 6,
   kActRaiserSkyPalaceMagicQuadOamCount = 4,
   kActRaiserSkyPalaceMagicWholeOamCount = 1,
   kActRaiserSkyPalaceMagicX = 0x94,
@@ -312,7 +311,47 @@ static inline int ActRaiser_IsActionMapGroup(uint8 map_group) {
  * a presentation layer asking "where can a sprite actually appear?" gets the
  * same answer the emitter gives rather than re-deriving it. Zero outside a
  * simulation town or when widescreen sprite widening is off. */
-void ActRaiser_SimSpriteMargins(int *left, int *right);
+typedef struct ActRaiserSimSpriteRangePolicy {
+  int real_oam_horizontal;
+  int extended_horizontal;
+  int extended_vertical;
+  int lifetime;
+} ActRaiserSimSpriteRangePolicy;
+
+/* Pure policy split: display geometry may widen real OAM horizontally, while
+ * the player range independently raises host-only reach and gameplay lifetime.
+ * Keeping this outside the live emitter makes 4:3/Wide Raw behavior unit
+ * testable instead of depending on a ROM replay to catch preset coupling. */
+static inline ActRaiserSimSpriteRangePolicy
+ActRaiser_ResolveSimSpriteRangePolicy(bool sim3d_enabled, int view_range,
+                                     bool wide_real_oam_enabled,
+                                     int widescreen_extra) {
+  if (view_range < 0) view_range = 0;
+  if (widescreen_extra < 0) widescreen_extra = 0;
+  int real_oam = wide_real_oam_enabled ? widescreen_extra : 0;
+  int gameplay_range = sim3d_enabled ? view_range : 0;
+  return (ActRaiserSimSpriteRangePolicy){
+    .real_oam_horizontal = real_oam,
+    .extended_horizontal = gameplay_range > real_oam
+        ? gameplay_range : real_oam,
+    .extended_vertical = gameplay_range,
+    .lifetime = gameplay_range,
+  };
+}
+
+void ActRaiser_SimSpriteMargins(int *left, int *right,
+                                int *top, int *bottom);
+typedef enum ActRaiserExactPositionOwner {
+  kActRaiserExactPositionOwner_None = 0,
+  kActRaiserExactPositionOwner_Action,
+  kActRaiserExactPositionOwner_Sim,
+} ActRaiserExactPositionOwner;
+/* Exact-position state is persistent across paused redraws, so ownership is
+ * explicit rather than inferred from a one-shot frame latch. Each emitter
+ * marks the sideband immediately after clearing it; scene validation clears a
+ * mismatched owner before scanout. */
+void ActRaiser_MarkExactPositionOwner(ActRaiserExactPositionOwner owner);
+ActRaiserExactPositionOwner ActRaiser_GetExactPositionOwner(void);
 
 static inline int ActRaiser_IsSimulationTown(uint8 map_group,
                                              uint8 map_number) {
@@ -379,13 +418,70 @@ static inline int ActRaiser_SkyPalaceMagicIconSlots(uint8 x, uint8 y,
 /* The per-slot expectation for slot `first + i` of the four-sprite quad form,
  * for the caller that already got kActRaiserSkyPalaceMagicQuadOamCount above
  * and now has to confirm the three companions. */
-static inline void ActRaiser_SkyPalaceMagicQuadSlot(int i, uint8 *y,
+static inline void ActRaiser_SkyPalaceMagicQuadSlot(int i, uint8 *x, uint8 *y,
                                                     uint8 *attr) {
+  if (x)
+    *x = (uint8)(kActRaiserSkyPalaceMagicX + (i & 1) * 8);
   if (y)
     *y = i < 2 ? kActRaiserHudObjUpperY : kActRaiserHudObjLowerY;
   if (attr)
     *attr = (i & 1) ? kActRaiserSkyPalaceMagicRightAttr
                     : kActRaiserSkyPalaceMagicLeftAttr;
+}
+
+/* Find the selected-magic icon in a raw OAM snapshot. Its allocation is not
+ * merely shifted between higher slots: runs/20260808-214848 proves Fire at
+ * slots 0-3 with no dialog sprites and slots 6-9 when dialog owns slots 0-5.
+ * The complete table therefore has to be searched from slot zero.
+ *
+ * Kept pure so captured layouts can exercise the same range and companion
+ * validation used by the live promotion path. `oam` contains two words per
+ * slot (XY, then tile/attribute); `high_oam` contains four two-bit entries per
+ * byte. On a miss the outputs are always reset to -1/0. */
+static inline int ActRaiser_FindSkyPalaceMagicIcon(
+    const uint16 *oam, const uint8 *high_oam, int oam_slots, int large_px,
+    int *found_slot, int *found_count) {
+  int slot = -1;
+  int count = 0;
+
+  if (oam && high_oam) {
+    for (int s = 0; s < oam_slots && slot < 0; s++) {
+      const int index = s * 2;
+      const int large =
+          (high_oam[s >> 2] >> ((s & 3) * 2 + 1)) & 1;
+      const int candidate = ActRaiser_SkyPalaceMagicIconSlots(
+          (uint8)oam[index], (uint8)(oam[index] >> 8),
+          (uint8)(oam[index + 1] >> 8), large, large_px);
+      if (!candidate || s + candidate > oam_slots)
+        continue;
+
+      /* A single large icon has no companions. Fire's quad must retain the
+       * measured 2x2 footprint, mirrored-right-half attributes, and four-small
+       * OAM shape. Tiles stay deliberately unchecked because shape, not art,
+       * is the invariant this promotion owns. */
+      int ok = 1;
+      for (int i = 1; i < candidate && ok; i++) {
+        const int q = (s + i) * 2;
+        uint8 expected_x = 0, expected_y = 0, expected_attr = 0;
+        const int companion_large =
+            (high_oam[(s + i) >> 2] >> (((s + i) & 3) * 2 + 1)) & 1;
+        ActRaiser_SkyPalaceMagicQuadSlot(
+            i, &expected_x, &expected_y, &expected_attr);
+        if ((uint8)oam[q] != expected_x ||
+            (uint8)(oam[q] >> 8) != expected_y ||
+            (uint8)(oam[q + 1] >> 8) != expected_attr || companion_large)
+          ok = 0;
+      }
+      if (ok) {
+        slot = s;
+        count = candidate;
+      }
+    }
+  }
+
+  if (found_slot) *found_slot = slot;
+  if (found_count) *found_count = count;
+  return slot >= 0;
 }
 
 #endif  /* ACTRAISER_GAME_H */

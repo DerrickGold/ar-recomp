@@ -982,27 +982,39 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
   }
 }
 
-/* One line whenever an enhanced-capable simulation view changes between the
- * implemented town renderer and the authentic composite. World navigation is
- * retained in the state machine even before its scene lands, so leaving a town
- * for $09 resets cleanly without treating town==0 as "no simulation view." */
+/* One line whenever the simulation presentation changes ownership or loses a
+ * usable separated composite. `None` is a real observable state: resetting to
+ * unknown there hid the 1-3 frame drops this diagnostic exists to explain.
+ * Keep an authentic picker/dialogue fallback distinct from an enhanced view
+ * whose capture failed, because only the latter points at the D1/D2 pipeline. */
 void Sim3D_LogViewTransition(const SimFrameData *frame) {
-  static int previous = -1;  /* -1 unknown, 0 authentic, 1 enhanced */
+  enum {
+    kLoggedView_Unknown = -1,
+    kLoggedView_None,
+    kLoggedView_AuthenticFallback,
+    kLoggedView_EnhancedInvalid,
+    kLoggedView_Enhanced,
+  };
+  static int previous = kLoggedView_Unknown;
   static uint16_t previous_game_frame;
-  if (!frame || frame->view == kSimView_None) {
-    previous = -1;
-    return;
-  }
-  int current = (frame->view == kSimView_Enhanced && frame->separated_valid)
-      ? 1 : 0;
+  if (!frame) return;
+  int current = frame->view == kSimView_None
+      ? kLoggedView_None
+      : frame->view != kSimView_Enhanced
+          ? kLoggedView_AuthenticFallback
+          : frame->separated_valid
+              ? kLoggedView_Enhanced : kLoggedView_EnhancedInvalid;
   if (current != previous) {
-    if (previous >= 0)
+    static const char *const names[] = {
+      "none", "authentic (view fallback)",
+      "authentic (enhanced capture invalid)", "enhanced",
+    };
+    if (previous != kLoggedView_Unknown)
       fprintf(stderr,
               "[sim3d-view] gf=%u %s -> %s (%s, view=%s, integrity=$%X,"
               " mismatch=%u px) after %u frame(s)\n",
               (unsigned)frame->game_frame,
-              previous ? "enhanced" : "authentic",
-              current ? "enhanced" : "authentic",
+              names[previous], names[current],
               Sim3D_CaptureStatusName((Sim3DCaptureStatus)
                                       frame->separated_status),
               Sim3D_ViewName(frame->view),
@@ -1012,7 +1024,7 @@ void Sim3D_LogViewTransition(const SimFrameData *frame) {
     /* The registers only when they are the reason. Printing them on every
      * transition would bury the one line that matters under the ordinary
      * picker and dialogue flips. */
-    if (previous >= 0 &&
+    if (previous != kLoggedView_Unknown &&
         frame->separated_status == kSim3DCapture_UnsupportedColorMath)
       fprintf(stderr,
               "[sim3d-view]   colour math: cgwsel=$%02X cgadsub=$%02X"
@@ -1085,24 +1097,29 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
       (uint16_t)ClampTuning(tuning->cloud_falloff_px, 1, 2048);
   frame->cloud_inset_px =
       (uint16_t)ClampTuning(tuning->cloud_inset_px, 0, 2048);
-  /* The shroud clears exactly what OAM can populate: the authentic window
-   * plus the emitter's own live margins, expressed in captured-texture
-   * columns. Asking the emitter rather than re-deriving it means the two
-   * cannot drift apart. */
+  /* The shroud clears exactly what the real-OAM plus synthetic part channels
+   * can populate: the authentic window plus their shared extended margins,
+   * expressed in captured-texture columns. Asking the producer rather than
+   * re-deriving it means drawable reach and cover cannot drift apart. */
   {
     int screen_x0 = g_sim3d.width > kActRaiserAuthenticWidth
         ? (g_sim3d.width - kActRaiserAuthenticWidth) / 2 : 0;
     int clear_x0 = screen_x0 - tuning->sprite_margin_left;
     int clear_x1 = screen_x0 + kActRaiserAuthenticWidth +
         tuning->sprite_margin_right;
-    frame->cloud_clear_x0 = (uint16_t)(clear_x0 < 0 ? 0 : clear_x0);
-    frame->cloud_clear_x1 = (uint16_t)clear_x1;
+    frame->cloud_clear_x0 = (int16_t)clear_x0;
+    frame->cloud_clear_x1 = (int16_t)clear_x1;
+    frame->cloud_clear_y0 = (int16_t)-tuning->sprite_margin_top;
+    frame->cloud_clear_y1 = (int16_t)(
+        kActRaiserAuthenticHeight + tuning->sprite_margin_bottom);
   }
   /* The same margins unconverted, for the per-record cull predicate. That
    * evaluates in the emitter's biased coordinates, not captured-texture
    * columns, so it cannot use cloud_clear_*. */
   frame->sprite_margin_left = (int16_t)tuning->sprite_margin_left;
   frame->sprite_margin_right = (int16_t)tuning->sprite_margin_right;
+  frame->sprite_margin_top = (int16_t)tuning->sprite_margin_top;
+  frame->sprite_margin_bottom = (int16_t)tuning->sprite_margin_bottom;
   frame->cull_lead_px = (uint16_t)ClampTuning(tuning->cull_lead_px, 1, 512);
   frame->cull_haze_pct = (uint8_t)ClampTuning(tuning->cull_haze_pct, 0, 100);
   frame->cull_dim_pct = (uint8_t)ClampTuning(tuning->cull_dim_pct, 0, 100);

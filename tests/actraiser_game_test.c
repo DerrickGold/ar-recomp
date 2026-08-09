@@ -14,6 +14,27 @@ static int failures;
   }                                                                         \
 } while (0)
 
+static void TestSimSpriteRangePolicy(void) {
+  ActRaiserSimSpriteRangePolicy policy =
+      ActRaiser_ResolveSimSpriteRangePolicy(true, 256, false, 0);
+  CHECK(policy.real_oam_horizontal == 0);
+  CHECK(policy.extended_horizontal == 256);
+  CHECK(policy.extended_vertical == 256);
+  CHECK(policy.lifetime == 256);
+
+  policy = ActRaiser_ResolveSimSpriteRangePolicy(true, 64, true, 120);
+  CHECK(policy.real_oam_horizontal == 120);
+  CHECK(policy.extended_horizontal == 120);
+  CHECK(policy.extended_vertical == 64);
+  CHECK(policy.lifetime == 64);
+
+  policy = ActRaiser_ResolveSimSpriteRangePolicy(false, 256, true, 72);
+  CHECK(policy.real_oam_horizontal == 72);
+  CHECK(policy.extended_horizontal == 72);
+  CHECK(policy.extended_vertical == 0);
+  CHECK(policy.lifetime == 0);
+}
+
 static void TestSimulationTownScope(void) {
   CHECK(!ActRaiser_IsSimulationTown(kActRaiserMapGroup_NonAction,
                                     kActRaiserNonActionMap_Title));
@@ -73,11 +94,13 @@ static void TestSkyPalaceMagicIconShapes(void) {
   CHECK(ActRaiser_SkyPalaceMagicIconSlots(148, 0x0B, 0x39, 0, kLarge16) ==
         kActRaiserSkyPalaceMagicQuadOamCount);
   {
+    const uint8 quad_x[4]    = { 0x94, 0x9C, 0x94, 0x9C };
     const uint8 quad_y[4]    = { 0x0B, 0x0B, 0x13, 0x13 };
     const uint8 quad_attr[4] = { 0x39, 0x79, 0x39, 0x79 };
     for (int i = 0; i < kActRaiserSkyPalaceMagicQuadOamCount; i++) {
-      uint8 y = 0, attr = 0;
-      ActRaiser_SkyPalaceMagicQuadSlot(i, &y, &attr);
+      uint8 x = 0, y = 0, attr = 0;
+      ActRaiser_SkyPalaceMagicQuadSlot(i, &x, &y, &attr);
+      CHECK(x == quad_x[i]);
       CHECK(y == quad_y[i]);
       CHECK(attr == quad_attr[i]);
     }
@@ -106,11 +129,98 @@ static void TestSkyPalaceMagicIconShapes(void) {
   CHECK(ActRaiser_SkyPalaceMagicIconSlots(32, 45, 0x3D, 1, kLarge16) == 0);
 }
 
+/* Exact leading OAM words from the two user snapshots in
+ * runs/20260808-214848. With no dialog, Fire is the first allocation in slots
+ * 0-3; the menu/dialog layout owns slots 0-5 and moves the same icon to 6-9.
+ * Starting the scan at the formerly observed slot 6 therefore worked only in
+ * the second state. */
+static void TestSkyPalaceMagicIconScanRange(void) {
+  static const uint16 kNoDialogOam[] = {
+    0x0B94, 0x3967, 0x0B9C, 0x7967,
+    0x1394, 0x3977, 0x139C, 0x7977,
+    0x6878, 0x2002,
+  };
+  static const uint8 kNoDialogHighOam[] = { 0x00, 0x02 };
+  static const uint16 kDialogOam[] = {
+    0x2D20, 0x3920, 0x2D32, 0x3F22, 0x2D42, 0x3F24,
+    0x3D20, 0x3D28, 0x4D20, 0x3D2E, 0x5D20, 0x3D44,
+    0x0B94, 0x3967, 0x0B9C, 0x7967, 0x1394, 0x3977,
+    0x139C, 0x7977, 0x6778, 0x2000,
+  };
+  static const uint8 kDialogHighOam[] = { 0xAA, 0x0A, 0xA0 };
+  /* Stardust's captured one-large-sprite form at slot 6. The preceding six
+   * zeroed slots deliberately prove the scanner decodes slot 6's size bit
+   * from high-OAM byte 1, bit 5 rather than relying on Fire's small form. */
+  static const uint16 kWholeIconOam[] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0x0B94, 0x3984,
+  };
+  static const uint8 kWholeIconHighOam[] = { 0x00, 0x20 };
+  static const uint16 kNoIconOam[] = { 0, 0 };
+  static const uint8 kNoIconHighOam[] = { 0 };
+  uint16 malformed_oam[
+      sizeof(kNoDialogOam) / sizeof(kNoDialogOam[0])];
+  uint8 malformed_high_oam[
+      sizeof(kNoDialogHighOam) / sizeof(kNoDialogHighOam[0])];
+  const int kLarge16 = 16;
+  int slot = -1, count = 0;
+
+  CHECK(ActRaiser_FindSkyPalaceMagicIcon(
+      kNoDialogOam, kNoDialogHighOam,
+      (int)(sizeof(kNoDialogOam) / sizeof(kNoDialogOam[0]) / 2),
+      kLarge16, &slot, &count));
+  CHECK(slot == 0);
+  CHECK(count == kActRaiserSkyPalaceMagicQuadOamCount);
+
+  /* A lead-slot match must not claim three unrelated followers. */
+  memcpy(malformed_oam, kNoDialogOam, sizeof(malformed_oam));
+  malformed_oam[2] = (uint16)((malformed_oam[2] & 0xFF00) | 0x009D);
+  CHECK(!ActRaiser_FindSkyPalaceMagicIcon(
+      malformed_oam, kNoDialogHighOam,
+      (int)(sizeof(malformed_oam) / sizeof(malformed_oam[0]) / 2),
+      kLarge16, &slot, &count));
+
+  memcpy(malformed_high_oam, kNoDialogHighOam,
+         sizeof(malformed_high_oam));
+  malformed_high_oam[0] |= 0x08;  /* slot 1 large bit */
+  CHECK(!ActRaiser_FindSkyPalaceMagicIcon(
+      kNoDialogOam, malformed_high_oam,
+      (int)(sizeof(kNoDialogOam) / sizeof(kNoDialogOam[0]) / 2),
+      kLarge16, &slot, &count));
+
+  slot = -1;
+  count = 0;
+  CHECK(ActRaiser_FindSkyPalaceMagicIcon(
+      kDialogOam, kDialogHighOam,
+      (int)(sizeof(kDialogOam) / sizeof(kDialogOam[0]) / 2),
+      kLarge16, &slot, &count));
+  CHECK(slot == 6);
+  CHECK(count == kActRaiserSkyPalaceMagicQuadOamCount);
+
+  slot = -1;
+  count = 0;
+  CHECK(ActRaiser_FindSkyPalaceMagicIcon(
+      kWholeIconOam, kWholeIconHighOam,
+      (int)(sizeof(kWholeIconOam) / sizeof(kWholeIconOam[0]) / 2),
+      kLarge16, &slot, &count));
+  CHECK(slot == 6);
+  CHECK(count == kActRaiserSkyPalaceMagicWholeOamCount);
+
+  slot = 99;
+  count = 99;
+  CHECK(!ActRaiser_FindSkyPalaceMagicIcon(
+      kNoIconOam, kNoIconHighOam, 1, kLarge16, &slot, &count));
+  CHECK(slot == -1);
+  CHECK(count == 0);
+}
+
 int main(void) {
+  TestSimSpriteRangePolicy();
   TestSimulationTownScope();
   TestPurePickerPredicate();
   TestLivePickerPredicate();
   TestSkyPalaceMagicIconShapes();
+  TestSkyPalaceMagicIconScanRange();
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);
     return 1;

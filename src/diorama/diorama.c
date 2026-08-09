@@ -1835,9 +1835,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     }
     /* B1b (followup doc) follow-up: the diorama capture only ever fills the
      * captured sub-region of the texture — the sliver beyond it, up to the
-     * texture's true width (kPpuBufWidth vs the diorama capture's max width,
-     * capped at kWsExtraMax=95 per side by the SNES OAM-wrap hard limit,
-     * one short of kPpuExtraLeftRight=96 — widescreen.h), is genuinely never
+     * texture's true width (kPpuBufWidth=512 vs the diorama capture's maximum
+     * 496 pixels at kWsExtraMax=120 per side — widescreen.h), is genuinely never
      * written (SDL streaming textures have undefined initial content, not
      * zeroed). SDL_TEXTURE_ADDRESS_CLAMP (above) only guards against going
      * outside [0,1] of the TEXTURE — it does nothing for a coordinate that's

@@ -19,27 +19,28 @@ enum { kAuthentic = 256 };
 
 int main(void) {
   /* The live diorama geometry: kWsExtraMax margin, kPpuObjApron headroom. */
-  const ActionApronGeometry g = { 95, 64 };
+  const ActionApronGeometry g = { 120, 64 };
   const int surface = ActionApron_SurfaceWidth(&g);
-  CHECK(surface == kAuthentic + 2 * 95 + 2 * 64);   /* 574 */
+  CHECK(surface == kAuthentic + 2 * 120 + 2 * 64);  /* 624 */
   CHECK(surface <= kPpuSurfaceWidth);               /* fits the allocation */
 
   /* Screen x = 0 sits at apron + ws_extra; the display window is the middle. */
-  CHECK(ActionApron_SurfaceColumn(&g, 0) == 64 + 95);
-  CHECK(ActionApron_SurfaceColumn(&g, -95) == 64);
-  CHECK(ActionApron_SurfaceColumn(&g, kAuthentic + 95 - 1) == surface - 64 - 1);
+  CHECK(ActionApron_SurfaceColumn(&g, 0) == 64 + 120);
+  CHECK(ActionApron_SurfaceColumn(&g, -120) == 64);
+  CHECK(ActionApron_SurfaceColumn(&g, kAuthentic + 120 - 1) ==
+        surface - 64 - 1);
 
   int l0, l1, r0, r1;
   ActionApron_LeftSpan(&g, &l0, &l1);
   ActionApron_RightSpan(&g, &r0, &r1);
-  CHECK(l0 == -(95 + 64) && l1 == -95);
-  CHECK(r0 == kAuthentic + 95 && r1 == kAuthentic + 95 + 64);
+  CHECK(l0 == -(120 + 64) && l1 == -120);
+  CHECK(r0 == kAuthentic + 120 && r1 == kAuthentic + 120 + 64);
   CHECK(l1 - l0 == 64 && r1 - r0 == 64);
 
   /* THE invariant: every apron column is outside [apron, apron+display). */
   {
     const int display_lo = 64;
-    const int display_hi = 64 + kAuthentic + 2 * 95;
+    const int display_hi = 64 + kAuthentic + 2 * 120;
     for (int x = l0; x < l1; x++) {
       const int c = ActionApron_SurfaceColumn(&g, x);
       CHECK(c >= 0 && c < display_lo);
@@ -58,9 +59,9 @@ int main(void) {
    * apron band: the emitter's reject branch fires for parts that missed the
    * OAM window for any reason, including ones far outside it. */
   CHECK(!ActionApron_PartTouchesApron(&g, 0, 16));        /* mid-screen */
-  CHECK(!ActionApron_PartTouchesApron(&g, -95, 16));      /* flush left edge */
-  CHECK(ActionApron_PartTouchesApron(&g, -96, 16));       /* one col into left */
-  CHECK(ActionApron_PartTouchesApron(&g, kAuthentic + 90, 16)); /* straddles */
+  CHECK(!ActionApron_PartTouchesApron(&g, -120, 16));     /* flush left edge */
+  CHECK(ActionApron_PartTouchesApron(&g, -121, 16));      /* one col into left */
+  CHECK(ActionApron_PartTouchesApron(&g, kAuthentic + 115, 16)); /* straddles */
   CHECK(ActionApron_PartTouchesApron(&g, r1 - 1, 16));    /* last apron col */
   CHECK(!ActionApron_PartTouchesApron(&g, r1, 16));       /* just past it */
   CHECK(!ActionApron_PartTouchesApron(&g, l0 - 16, 16));  /* just before it */
@@ -69,15 +70,15 @@ int main(void) {
   /* Apron 0 is the phase's disable lever: no span, so nothing is ever
    * admitted and every consumer collapses to its pre-apron form. */
   {
-    const ActionApronGeometry off = { 95, 0 };
+    const ActionApronGeometry off = { 120, 0 };
     int a0, a1, b0, b1;
     ActionApron_LeftSpan(&off, &a0, &a1);
     ActionApron_RightSpan(&off, &b0, &b1);
     CHECK(a1 == a0 && b1 == b0);
-    CHECK(ActionApron_SurfaceWidth(&off) == kAuthentic + 2 * 95);
-    CHECK(ActionApron_SurfaceColumn(&off, 0) == 95);
-    CHECK(!ActionApron_PartTouchesApron(&off, kAuthentic + 90, 16));
-    CHECK(!ActionApron_AddPart(&off, kAuthentic + 90, 0, 0, 16));
+    CHECK(ActionApron_SurfaceWidth(&off) == kAuthentic + 2 * 120);
+    CHECK(ActionApron_SurfaceColumn(&off, 0) == 120);
+    CHECK(!ActionApron_PartTouchesApron(&off, kAuthentic + 115, 16));
+    CHECK(!ActionApron_AddPart(&off, kAuthentic + 115, 0, 0, 16));
   }
 
   /* Colour math follows CGADSUB's OBJ rule: palettes 4-7 only. Bits 9-11 of
@@ -91,11 +92,11 @@ int main(void) {
   /* Channel: stores exactly what it was handed, rejects what misses. */
   ActionApron_BeginFrame();
   CHECK(ActionApron_Count() == 0);
-  CHECK(ActionApron_AddPart(&g, kAuthentic + 90, 12, 0x2345, 16));
+  CHECK(ActionApron_AddPart(&g, kAuthentic + 115, 12, 0x2345, 16));
   CHECK(ActionApron_Count() == 1);
   {
     const PpuObjPart *p = ActionApron_Parts();
-    CHECK(p[0].x == kAuthentic + 90 && p[0].y == 12);
+    CHECK(p[0].x == kAuthentic + 115 && p[0].y == 12);
     CHECK(p[0].tile_attr == 0x2345 && p[0].size == 16);
   }
   CHECK(!ActionApron_AddPart(&g, 0, 0, 0x2345, 16));   /* mid-screen: refused */
@@ -112,7 +113,7 @@ int main(void) {
   {
     const int before = ActionApron_Overflow();
     for (int i = 0; i < kActionApronMaxParts + 8; i++)
-      ActionApron_AddPart(&g, kAuthentic + 90, i & 63, 0x2345, 16);
+      ActionApron_AddPart(&g, kAuthentic + 115, i & 63, 0x2345, 16);
     CHECK(ActionApron_Count() == kActionApronMaxParts);
     CHECK(ActionApron_Overflow() == before + 8);
     CHECK(ActionApron_PeakCount() >= kActionApronMaxParts);

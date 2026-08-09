@@ -851,7 +851,7 @@ show the frozen `$0088` against the advancing host frame:
 2b. **Presentation modes that change the margin budget must be switched MID-RUN**:
    `AR_DIORAMA_AT=<gameframe>` flips Diorama 3D on through the same descriptor
    path as the `D` hotkey. Booting with `diorama_mode = On` forces the margin
-   budget to `kWsExtraMax` (95 vs the aspect-derived 72), and that desyncs a
+   budget to `kWsExtraMax` (120 vs the aspect-derived 72), and that desyncs a
    game-frame-keyed replay outright — the same recording that reaches Fillmore
    act 1 flat never left the world map with diorama on at boot. Replay flat into
    the stage, flip after (**open question**: why margin width moves game-logic

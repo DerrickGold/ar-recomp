@@ -1057,6 +1057,24 @@ the current debugging process; this file is the case law.
       every capture that existed then, and wrong about the feature. Same shape of mistake as
       the bug itself, one layer up.
 
+39. **Red brick courses above the grey Fillmore act-2 castle wall — RESOLVED AS
+    OFF-SCREEN ART 2026-08-08.** The suspicious band occupied roughly SNES rows 6-27 in a
+    tilted diorama capture. It did not align to the 40-row action HUD split, leaving either a
+    palette-state error or authentic level art as the plausible causes.
+
+    `runs/20260808-220824` pinned the symptom to a 32-line vertical extension. A deterministic
+    A/B then replayed `fillmore-title.rec`, staged `$01:$03`, enabled diorama at gf 2000 and
+    captured gf 2200 with only `diorama_vertical_extend` changed from 32 to 0
+    (`runs/20260808-222048` versus `runs/20260808-222203`). The red courses exist wholly in
+    the 32 newly exposed world rows; the authentic viewport begins on grey brick in both
+    arms. Moving the band across the first HDMA update did not change the red rows and was
+    therefore rejected rather than shipped.
+
+    **Conclusion:** the renderer is decoding genuine map content above the stock viewport,
+    exactly as vertical extend requests. It is not HUD colour bleed and not an authentic
+    4:3 defect. The feature remains opt-in/default 0; hiding particular off-screen art is a
+    per-room presentation choice, not grounds for rewriting the level's palette.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

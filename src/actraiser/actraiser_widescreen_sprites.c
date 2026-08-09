@@ -317,6 +317,16 @@ unsigned ActRaiser_TakeVextUnlockedObjects(void) {
   unsigned n = s_vext_unlocked; s_vext_unlocked = 0; return n;
 }
 
+static ActRaiserExactPositionOwner s_exact_position_owner;
+
+void ActRaiser_MarkExactPositionOwner(ActRaiserExactPositionOwner owner) {
+  s_exact_position_owner = owner;
+}
+
+ActRaiserExactPositionOwner ActRaiser_GetExactPositionOwner(void) {
+  return s_exact_position_owner;
+}
+
 RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   cpu_mirrors_to_p(cpu);
   cpu_write8(cpu, 0x00, cpu->S, cpu->P);
@@ -342,8 +352,10 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * keeps the $E0 park value, and an override left over from last frame would
    * make that stale position look authoritative. Clearing here means "no
    * override" and "not emitted" are the same statement. */
-  if (g_ppu)
+  if (g_ppu) {
     PpuClearObjExactPositions(g_ppu);
+    ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_Action);
+  }
 
   cpu->A = saved_stack_pointer;
   cpu->X = 0;
@@ -880,59 +892,94 @@ static uint16 ws_sim_part_offset(uint8 v) {
   return v >= 0x81 ? (uint16)(0xFF00 | v) : (uint16)v;
 }
 
-static void ws_sim_live_margins(int *left, int *right) {
-  *left = 0;
-  *right = 0;
-  if (!g_ws_active || !ws_sim_sprite_widen_enabled() ||
-      !ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+/* Three policies share finite-town geometry but deliberately receive separate
+ * requested ranges. The emitter is a presentation limit, the extended channel
+ * describes host-renderable reach, and the lifetime predicate changes gameplay
+ * by destroying the projectile record. */
+static void ws_sim_margins_for_range(int horizontal_range, int vertical_range,
+                                     int *left, int *right,
+                                     int *top, int *bottom) {
+  *left = *right = *top = *bottom = 0;
+  if (!ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
                                   g_ram[kActRaiserWram_CurrentMap]))
     return;
+
+  if (horizontal_range < 0) horizontal_range = 0;
+  if (horizontal_range > kActRaiserTownCameraMaximumX)
+    horizontal_range = kActRaiserTownCameraMaximumX;
+  if (vertical_range < 0) vertical_range = 0;
+  if (vertical_range > kActRaiserTownCameraMaximumY)
+    vertical_range = kActRaiserTownCameraMaximumY;
 
   int camera_x = (int)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
   if (camera_x < 0) camera_x = 0;
   if (camera_x > kActRaiserTownCameraMaximumX)
     camera_x = kActRaiserTownCameraMaximumX;
-  *left = camera_x < g_ws_extra ? camera_x : g_ws_extra;
+  *left = camera_x < horizontal_range ? camera_x : horizontal_range;
   int available_right = kActRaiserTownCameraMaximumX - camera_x;
-  *right = available_right < g_ws_extra ? available_right : g_ws_extra;
+  *right = available_right < horizontal_range
+      ? available_right : horizontal_range;
+
+  int camera_y = (int)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+  if (camera_y < 0) camera_y = 0;
+  if (camera_y > kActRaiserTownCameraMaximumY)
+    camera_y = kActRaiserTownCameraMaximumY;
+  *top = camera_y < vertical_range ? camera_y : vertical_range;
+  int available_bottom = kActRaiserTownCameraMaximumY - camera_y;
+  *bottom = available_bottom < vertical_range
+      ? available_bottom : vertical_range;
 }
 
-void ActRaiser_SimSpriteMargins(int *left, int *right) {
-  ws_sim_live_margins(left, right);
+static void ws_sim_emit_margins(int range, int *left, int *right,
+                                int *top, int *bottom) {
+  if (!g_ws_active || !ws_sim_sprite_widen_enabled()) {
+    *left = *right = *top = *bottom = 0;
+    return;
+  }
+  ws_sim_margins_for_range(range, 0, left, right, top, bottom);
 }
 
-/* Widening the SIM sprite emitter for the 3D view: PROTOTYPED, MEASURED, AND
- * REVERTED 2026-07-22. Recorded because both directions look obviously right
- * and both are wrong.
+static void ws_sim_extended_margins(int horizontal_range, int vertical_range,
+                                    int *left, int *right,
+                                    int *top, int *bottom) {
+  ws_sim_margins_for_range(horizontal_range, vertical_range,
+                           left, right, top, bottom);
+}
+
+static void ws_sim_lifetime_margins(int range, int *left, int *right,
+                                    int *top, int *bottom) {
+  ws_sim_margins_for_range(range, range, left, right, top, bottom);
+}
+
+static ActRaiserSimSpriteRangePolicy ws_sim_range_policy(void) {
+  return ActRaiser_ResolveSimSpriteRangePolicy(
+      g_settings.sim3d_mode, g_settings.sim_view_range,
+      g_ws_active && ws_sim_sprite_widen_enabled(), g_ws_extra);
+}
+
+void ActRaiser_SimSpriteMargins(int *left, int *right,
+                                int *top, int *bottom) {
+  ActRaiserSimSpriteRangePolicy policy = ws_sim_range_policy();
+  ws_sim_extended_margins(policy.extended_horizontal,
+                          policy.extended_vertical,
+                          left, right, top, bottom);
+}
+
+/* Directly widening REAL OAM to the whole finite town was prototyped and
+ * reverted in 2026-07 (ledger 24/25). Horizontally it admitted +16.9% parts
+ * but exposed the modular 9-bit X decode; vertically it made above-screen
+ * parts draw pixels inside the authentic viewport. Exact positions now remove
+ * the decode ambiguity for accepted slots, but full-town real emission would
+ * still consume hardware OAM and change the authentic sprite set.
  *
- * HORIZONTAL. Lifting the emitter's predicate from the widescreen `g_ws_extra`
- * cap to the whole finite town admitted +16.9% more sprites, left the
- * source-record count byte-identical (so it stayed observational), and passed
- * the D2 gate at zero mismatch. It still had to come out: OAM X is nine bits
- * over a 512-wide town, so once the margin reaches the wrap the emitter admits
- * parts on both sides of it, and enemies appear wrapped onto the opposite edge
- * of the map. The same wrap is what blew up a multi-part composition's union
- * bounding box past the 512-pixel atlas (ledger 24). The `g_ws_extra` cap was
- * doing more than bounding the widescreen margin; it was keeping the emitter
- * clear of the wrap.
- *
- * VERTICAL. PpuObjScreenY reads the Y byte as `y >= 224 ? y - 256 : y`, so it
- * expresses screen rows -32..223: the 32 rows above the screen look free, and
- * there is no ninth Y bit to extend downward with. But a part at row -5 with a
- * 16-pixel body draws rows 0..10 -- inside the authentic 224-row viewport --
- * so admitting them makes sprite pixels appear that the original game hides.
- * A checkpoint run confirmed it by failing the authentic-framebuffer
- * comparison (ledger 25).
- *
- * Whichever direction, the emitter must never feed `ws_sim_live_margins`'s
- * consumer either: that predicate's false result *destroys* the record
- * ($B44B branches to destruction on carry set), so widening it would change
- * projectile lifetime and world-record slot pressure -- gameplay, not
- * presentation.
- *
- * The area the 3D view draws but OAM cannot populate is instead shrouded, so
- * an empty extension never reads as missing actors. See the cloud shroud in
- * `src/present.c`. */
+ * The policies above preserve that boundary explicitly: real OAM reaches only
+ * the displayed horizontal margins and keeps the authentic vertical window;
+ * the extended channel carries every additional part at an exact signed
+ * position without touching OAM. `sim_view_range` raises that channel together
+ * with the lifetime predicate as an overt gameplay setting, because the latter
+ * destroys a projectile record on failure and changes 44-slot world pressure.
+ * Fog and the cloud shroud consume the same extended four-axis margins, so
+ * cover follows what the host can actually draw. */
 
 /* AR_SIMCAT=1 is a read-only ROM-research probe for the simulation rendering
  * catalogue.  The composition leaves are the one place where record identity,
@@ -1210,8 +1257,10 @@ RecompReturn ActRaiser_SimProjectileVisible(CpuState *cpu) {
   const uint16 record = cpu->X;
   const uint16 camera_x = ws_dp16(cpu, kActRaiserWram_Bg1CameraX);
   const uint16 camera_y = ws_dp16(cpu, kActRaiserWram_Bg1CameraY);
-  int margin_left = 0, margin_right = 0;
-  ws_sim_live_margins(&margin_left, &margin_right);
+  int margin_left = 0, margin_right = 0, margin_top = 0, margin_bottom = 0;
+  ws_sim_lifetime_margins(ws_sim_range_policy().lifetime,
+                          &margin_left, &margin_right,
+                          &margin_top, &margin_bottom);
 
   /* Preserve the original DP scratch value even though the widened upper
    * bound itself remains host-local. */
@@ -1268,18 +1317,20 @@ RecompReturn ActRaiser_SimProjectileVisible(CpuState *cpu) {
       if (cpu->_flag_C) {
         culled = 1;
       } else {
-        ws_sim_cmp16(cpu, value, camera_y);
+        const uint16 wide_top = (uint16)(camera_y - margin_top);
+        const uint16 wide_bottom = (uint16)(vertical_bottom + margin_bottom);
+        ws_sim_cmp16(cpu, value, wide_top);
         if (!cpu->_flag_C) {
           culled = 1;
         } else {
-          ws_sim_cmp16(cpu, value, vertical_bottom);
+          ws_sim_cmp16(cpu, value, wide_bottom);
           culled = cpu->_flag_C;
         }
       }
     }
   }
 
-  if (!culled && (margin_left || margin_right) &&
+  if (!culled && (margin_left || margin_right || margin_top || margin_bottom) &&
       ws_sim_sprite_debug_enabled()) {
     const uint16 x4 = (uint16)(
         cpu_read16(cpu, cpu->DB,
@@ -1316,8 +1367,19 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
   const int world_record = record >= kActRaiserWram_SimWorldRecords &&
                            record < world_records_end;
   int margin_left = 0, margin_right = 0;
-  if (world_record)
-    ws_sim_live_margins(&margin_left, &margin_right);
+  int margin_top = 0, margin_bottom = 0;
+  int extended_left = 0, extended_right = 0;
+  int extended_top = 0, extended_bottom = 0;
+  if (world_record) {
+    ActRaiserSimSpriteRangePolicy policy = ws_sim_range_policy();
+    ws_sim_emit_margins(policy.real_oam_horizontal,
+                        &margin_left, &margin_right,
+                        &margin_top, &margin_bottom);
+    ws_sim_extended_margins(policy.extended_horizontal,
+                            policy.extended_vertical,
+                            &extended_left, &extended_right,
+                            &extended_top, &extended_bottom);
+  }
 
   const uint16 base_x = (uint16)(
       cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_WorldX)) -
@@ -1332,7 +1394,7 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
       cpu, cpu->DB, (uint16)(record + kSimRecord_Composition));
   const uint16 oam_before = ws_dp16(cpu, 0x98);
   ws_sim_catalog_record(cpu, record, world_record, part, oam_before);
-  SimRenderMetadata_BeginRecord(
+  bool began_build = SimRenderMetadata_BeginRecord(
       record, world_record != 0, alternate_attr != 0, part,
       cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_WorldX)),
       cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_WorldY)),
@@ -1343,6 +1405,10 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
           : 0,
       cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_Status)),
       oam_before);
+  if (began_build && g_ppu) {
+    PpuClearObjExactPositions(g_ppu);
+    ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_Sim);
+  }
   SimRenderMetadata_RecordWord06(cpu_read16(
       cpu, cpu->DB, (uint16)(record + kSimRecord_ActorFlags)));
   /* The biased origin the window predicate below is about to be applied to,
@@ -1361,6 +1427,9 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
     const uint16 x_biased = (uint16)(
         base_x + ws_sim_part_offset(cpu_read8(
                      cpu, cpu->DB, (uint16)(part + 1))));
+    const uint16 y_biased = (uint16)(
+        base_y + ws_sim_part_offset(cpu_read8(
+                     cpu, cpu->DB, (uint16)(part + 2))));
     const int authentic_x = x_biased < kSimOamBiasedWidth;
     if (ws_biased_in_window(x_biased, margin_left, margin_right,
                             kSimOamBiasedWidth)) {
@@ -1380,18 +1449,11 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
         high &= (uint8)~(mask << 1);
       cpu_write8(cpu, cpu->DB, highp, high);
 
-      const uint16 y_biased = (uint16)(
-          base_y + ws_sim_part_offset(cpu_read8(
-                       cpu, cpu->DB, (uint16)(part + 2))));
       /* margin 0,0 is a DECISION, not an omission: the sim vertical window
        * stays authentic. Ledger §25 measured what widening it does — parts
-       * above the screen draw rows INSIDE the authentic 224-line viewport.
-       * The sim emitter also does not publish exact positions yet: within
-       * these windows exact and decoded differ precisely in the ledger-24
-       * mis-decode cases, so publishing would start healing atlas purges
-       * here rather than in the sim phases where the delta is measured.
-       * Both arrive with the synthetic part channel (plan Phase 5). */
-      if (ws_biased_in_window(y_biased, 0, 0, kSimOamBiasedHeight)) {
+       * above the screen draw rows INSIDE the authentic 224-line viewport. */
+      if (ws_biased_in_window(y_biased, margin_top, margin_bottom,
+                              kSimOamBiasedHeight)) {
         const uint8 screen_y = (uint8)(y_biased - 0x0011);
         cpu_write8(cpu, cpu->DB, (uint16)(0x0381 + oam), screen_y);
 
@@ -1402,6 +1464,18 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
             : (uint16)(raw_attr | ws_dp16(cpu, 0x8F));
         cpu_write16(cpu, cpu->DB, (uint16)(0x0382 + oam), attr);
         SimRenderMetadata_RecordPart(oam, attr);
+        if (g_ppu) {
+          PpuObjPart resolved = {
+            .x = (int16_t)((int)(int16_t)x_biased - 0x10),
+            .y = (int16_t)((int)(int16_t)y_biased - 0x11),
+            .tile_attr = attr,
+            .size = (uint8_t)PpuObjSizeForSizeBit(
+                g_ppu, cpu_read8(cpu, cpu->DB, part) & 0x01),
+          };
+          PpuSetObjExactPosition(g_ppu, (uint8_t)(oam / 4),
+                                 resolved.x, resolved.y);
+          SimRenderMetadata_RecordExactOamPart(&resolved);
+        }
         final_a = attr;
 
         if (world_record && !authentic_x && ws_sim_sprite_debug_enabled()) {
@@ -1435,11 +1509,52 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
         /* The ROM has already touched x/high bits at this point, then parks
          * the unallocated low-table slot without advancing either cursor. */
         cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
-        SimRenderMetadata_RecordClippedPart(kSimClip_Vertical);
+        if (world_record && g_ppu &&
+            ws_biased_in_window(y_biased, extended_top, extended_bottom,
+                                kSimOamBiasedHeight)) {
+          const uint16 raw_attr =
+              cpu_read16(cpu, cpu->DB, (uint16)(part + 3));
+          const uint16 attr = alternate_attr
+              ? (uint16)((raw_attr & 0xF1FF) | 0x0600 | ws_dp16(cpu, 0x8F))
+              : (uint16)(raw_attr | ws_dp16(cpu, 0x8F));
+          const PpuObjPart synthetic = {
+            .x = (int16_t)((int)(int16_t)x_biased - 0x10),
+            .y = (int16_t)((int)(int16_t)y_biased - 0x11),
+            .tile_attr = attr,
+            .size = (uint8_t)PpuObjSizeForSizeBit(
+                g_ppu, cpu_read8(cpu, cpu->DB, part) & 0x01),
+          };
+          SimRenderMetadata_RecordSyntheticPart(oam, &synthetic);
+        } else {
+          SimRenderMetadata_RecordClippedPart(kSimClip_Vertical);
+        }
       }
     } else {
       cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
-      SimRenderMetadata_RecordClippedPart(kSimClip_Horizontal);
+      if (world_record && g_ppu &&
+          ws_biased_in_window(x_biased, extended_left, extended_right,
+                              kSimOamBiasedWidth)) {
+        if (ws_biased_in_window(y_biased, extended_top, extended_bottom,
+                                kSimOamBiasedHeight)) {
+          const uint16 raw_attr =
+              cpu_read16(cpu, cpu->DB, (uint16)(part + 3));
+          const uint16 attr = alternate_attr
+              ? (uint16)((raw_attr & 0xF1FF) | 0x0600 | ws_dp16(cpu, 0x8F))
+              : (uint16)(raw_attr | ws_dp16(cpu, 0x8F));
+          const PpuObjPart synthetic = {
+            .x = (int16_t)((int)(int16_t)x_biased - 0x10),
+            .y = (int16_t)((int)(int16_t)y_biased - 0x11),
+            .tile_attr = attr,
+            .size = (uint8_t)PpuObjSizeForSizeBit(
+                g_ppu, cpu_read8(cpu, cpu->DB, part) & 0x01),
+          };
+          SimRenderMetadata_RecordSyntheticPart(oam, &synthetic);
+        } else {
+          SimRenderMetadata_RecordClippedPart(kSimClip_Vertical);
+        }
+      } else {
+        SimRenderMetadata_RecordClippedPart(kSimClip_Horizontal);
+      }
     }
 
     {

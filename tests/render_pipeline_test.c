@@ -38,7 +38,7 @@ static int s_failures;
   } \
 } while (0)
 
-enum { kBufW = 448, kBufH = 240, kSnesW = 256, kSnesH = 224 };
+enum { kBufW = 512, kBufH = 240, kSnesW = 256, kSnesH = 224 };
 
 /* Read one ARGB8888 pixel from a converted readback surface. */
 static uint32_t SurfacePixel(SDL_Surface *s, int x, int y) {

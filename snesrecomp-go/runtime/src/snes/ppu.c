@@ -1795,16 +1795,37 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
    * chunks survive at a level boundary. PpuLayerExtra made the color-window
    * spans use the matching full interval above. */
   int composite_left = ppu->extraLeftCur;
-  if (ppu->wsHudSplitHeight && y < ppu->wsHudSplitHeight)
+  int composite_right = ppu->extraRightCur;
+  if (ppu->wsHudSplitHeight && y < ppu->wsHudSplitHeight) {
     composite_left = ppu->extraLeftRight;
+    composite_right = ppu->extraLeftRight;
+  }
   /* + the apron so the scanline span sits CENTRED in a wider surface, matching
    * where PpuWriteOverlayRenderLine's pitch-derived texture_extra puts the
    * captured layers. Without it the backdrop plane (this buffer) would be
    * flush-left while every captured plane was centred, and the diorama would
    * composite them offset from each other by the apron. Zero when the surface
    * is bound at scanline width, which is every non-diorama bind. */
-  dst += ppu->extraLeftRight - composite_left +
-         PpuSurfaceApron(ppu, ppu->renderPitch);
+  int surface_apron = PpuSurfaceApron(ppu, ppu->renderPitch);
+  uint32 *scanline_start = dst_org + surface_apron;
+
+  /* Finite worlds can contract either live margin while keeping a fixed-size
+   * presentation surface. Those newly inactive columns were outside the
+   * compositor's write span and therefore retained pixels from the preceding
+   * frame. Clear only the collapsed strips; the live interval below is still
+   * authored entirely by the authentic color-window compositor. */
+  if (composite_left < ppu->extraLeftRight) {
+    memset(scanline_start, 0,
+           (size_t)(ppu->extraLeftRight - composite_left) * sizeof(uint32));
+  }
+  if (composite_right < ppu->extraLeftRight) {
+    uint32 *right_gap = scanline_start + ppu->extraLeftRight +
+                          kPpuXPixels + composite_right;
+    memset(right_gap, 0,
+           (size_t)(ppu->extraLeftRight - composite_right) * sizeof(uint32));
+  }
+
+  dst = scanline_start + ppu->extraLeftRight - composite_left;
 
   uint32 windex = 0;
   do {

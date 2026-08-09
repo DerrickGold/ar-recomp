@@ -29,13 +29,15 @@ enum {
   // Maximum widescreen expansion *per side*, baked into the priority-buffer
   // capacity. This is a compile-time ceiling only; the actual extra columns
   // rendered each frame are the runtime ppu->extraLeftCur/extraRightCur, which
-  // default to 0 (authentic 256-wide output). 96 per side allows up to a
-  // 448-pixel internal width, comfortably past 16:9 at 224 lines.
-  kPpuExtraLeftRight = 96,
+  // default to 0 (authentic 256-wide output). 128 per side gives a 512-pixel
+  // line buffer; the frontend's smaller live cap leaves tilemap-streaming
+  // slack while this compile-time allocation remains a power of two.
+  kPpuExtraLeftRight = 128,
   // Full internal width of the priority buffers (logical 256 + both borders).
   // THE LINE-BUFFER WIDTH: how many columns the per-scanline renderer can fill.
-  // Bounded by the 9-bit OAM X encoding (kWsExtraMax = 95 in widescreen.h),
-  // not by memory, so it does not grow for the apron.
+  // Bounded by the background tilemap ring and frontend streaming policy
+  // (kWsExtraMax in widescreen.h), not by the host allocation. It does not
+  // grow for the OBJ apron.
   kPpuBufWidth = kPpuXPixels + kPpuExtraLeftRight * 2,
   // ── Display width vs resolve width ───────────────────────────────────────
   // The apron: extra columns per side that host ARGB SURFACES carry beyond the

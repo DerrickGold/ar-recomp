@@ -88,8 +88,9 @@ static void TestDefaultsAndMetadata(void) {
    * health, damage, type shuffle and its range on Enemies; drops and placement
    * on Items; lair positions and monsters on Simulation. The magic-spell
    * cycle then added three: the Cheats-tab toggle that arms it, plus its
-   * keyboard and gamepad binding rows. */
-  CHECK(g_setting_desc_count == 258);
+   * keyboard and gamepad binding rows. The sim synthetic-part work added one
+   * measured, gameplay-affecting actor-range row. */
+  CHECK(g_setting_desc_count == 259);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -129,6 +130,13 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.warp_target == 0x0101);
   CHECK(!g_settings.scene_inspector);
   CHECK(!g_settings.sim3d_mode);
+  CHECK(g_settings.sim_view_range == 0);
+  {
+    const SettingDesc *range = Settings_Find("sim_view_range");
+    CHECK(range && range->type == kSettingType_Int &&
+          range->minval == 0 && range->maxval == 256 && range->step == 16 &&
+          range->player_visible);
+  }
   CHECK(!g_settings.sim3d_world_navigation);
   CHECK(g_settings.sim3d_world_navigation_lighting);
   CHECK(!g_settings.sim3d_world_navigation_clouds);
@@ -293,6 +301,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_IsDebugOnly(Settings_Find("scene_inspector")));
   CHECK(Settings_IsDebugOnly(Settings_Find("dump_scene_assets")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_mode")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("sim_view_range")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_world_navigation")));
   CHECK(!Settings_IsDebugOnly(
       Settings_Find("sim3d_world_navigation_lighting")));

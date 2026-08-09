@@ -45,12 +45,14 @@ extern bool g_ws_active;
 // clamped to room bounds) is set separately via PpuSetExtraSideSpace.
 extern int g_ws_extra;
 
-// Hard cap on g_ws_extra from the SNES 9-bit OAM x space (see ppu.c and
-// ENHANCEMENTS Rule 5): the wrap threshold is 256+extra and the widest
-// left-margin sprite tiles sit at 512-(64+extra), which must stay >= the
-// threshold => 2*extra <= 192 => extra <= 95. Beyond this, outer-margin
-// sprites are unrepresentable. Every consumer clamps to this same constant.
-enum { kWsExtraMax = 95 };
+// Hard live-margin cap. Exact-position sidebands removed OAM X as the binding
+// limit; the remaining one is the PPU's 64-tile (512-pixel) background ring.
+// A 120-pixel margin produces a 496-pixel view, leaving 16 pixels of ring
+// slack. Refreshing at 8-pixel camera steps means the view can move at most 7
+// pixels before the next decode, and an 8-pixel tile-alignment phase still
+// fits inside the ring. 127 would sometimes require 65 tile columns and alias
+// one edge onto the other. Every consumer clamps to this same constant.
+enum { kWsExtraMax = 120 };
 
 // Per-frame present: copy the PPU's rendered framebuffer `src` (rows of
 // row_bytes = snes_width*4, as written by the line renderer at that pitch)

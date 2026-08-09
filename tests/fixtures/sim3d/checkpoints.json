@@ -496,6 +496,7 @@
       "d3a_shot_game_frame": 700,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -602,6 +603,7 @@
       "d3a_shot_game_frame": 700,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -712,6 +714,7 @@
         "AR_ASPECT_PAR": "0",
         "AR_DISPLAY_MODE": "2",
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-225",
         "AR_SIM3D_YAW": "-20",
         "AR_SIM3D_DISTANCE": "275",
@@ -800,6 +803,7 @@
       "d3a_shot_game_frame": 700,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -918,6 +922,7 @@
       "headless_video": true,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -1014,6 +1019,7 @@
       "d3a_shot_game_frame": 700,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -1127,6 +1133,7 @@
       "d3a_shot_game_frame": 700,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -1253,6 +1260,7 @@
       "d3a_shot_game_frame": 700,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -1384,6 +1392,7 @@
         "AR_WS_HEADLESS": "1",
         "AR_EXTENDED_ASPECT_RATIO": "16:9",
         "AR_DISPLAY_MODE": "2",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -1445,6 +1454,7 @@
       "d3a_shot_game_frame": 700,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -1578,6 +1588,7 @@
       "d3a_shot_game_frame": 1393,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -1706,6 +1717,7 @@
       "d3a_shot_game_frame": 1456,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
@@ -1834,6 +1846,7 @@
       "d3a_shot_game_frame": 4690,
       "env": {
         "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
         "AR_SIM3D_PITCH": "-350",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",

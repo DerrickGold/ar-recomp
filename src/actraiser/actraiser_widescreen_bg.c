@@ -68,6 +68,9 @@ enum {
   kUploadRecordBytes = 0x102,
   kUploadChunkWords = 0x20,
   kTilemapPageWords = 0x400,
+  kMetatileSizePixels = kMetatileSizeTiles * kTileSizePixels,
+  kTilemapRingPixels = kTilemapWidthTiles * kTileSizePixels,
+  kMarginRefreshStepPixels = 8,
 
   kBgState_CameraX = 0x22,
   kBgState_CameraY = 0x24,
@@ -98,16 +101,42 @@ enum {
   kDecoderDp_State52 = 0xA5,
 };
 
+_Static_assert((kMarginRefreshStepPixels &
+                (kMarginRefreshStepPixels - 1)) == 0,
+               "margin refresh step must be a power of two");
+_Static_assert(kPpuExtraLeftRight >= kWsExtraMax,
+               "PPU line buffer must hold the live widescreen cap");
+_Static_assert(kPpuBufWidth >=
+                   kActRaiserAuthenticWidth + 2 * kWsExtraMax,
+               "PPU line buffer must hold the maximum live view");
+_Static_assert(kTilemapRingPixels -
+                   (kActRaiserAuthenticWidth + 2 * kWsExtraMax) >=
+                   (kMarginRefreshStepPixels - 1) + kTileSizePixels,
+               "tilemap ring needs drift plus tile-alignment slack");
+
+static int ws_align_down_metatile(int value) {
+  int remainder = value % kMetatileSizePixels;
+  if (remainder < 0) remainder += kMetatileSizePixels;
+  return value - remainder;
+}
+
+static int ws_align_up_metatile(int value) {
+  int aligned = ws_align_down_metatile(value);
+  return aligned == value ? value : aligned + kMetatileSizePixels;
+}
+
 static uint16 s_sky_palace_bg2_backup[kActRaiserTilemapWords];
 static int s_sky_palace_restore_pending;
 
-/* The original streamers update a layer when the camera crosses a 16px map
- * boundary, not on every scanout.  Keep the host-only margin decoder on that
- * same cadence.  This is particularly important in rooms with two wide
- * layers: rebuilding every visible margin strip for BG1 and BG2 on every
- * rendered frame is enough to miss the host's 60Hz presentation deadline. */
+/* The original streamers update on 16px map boundaries. The wider host margin
+ * decoder uses the named 8px step above: the maximum view's ring slack cannot
+ * safely wait for the next original boundary, while rebuilding every scanout
+ * is too expensive in rooms with two wide layers. */
 typedef struct WsLayerRefreshKey {
-  uint16 camera_x_tile;
+  /* Eight-pixel cadence is load-bearing at kWsExtraMax=120: the 496-pixel
+   * view leaves only 16 pixels of a 512-pixel tilemap ring, so a 16-pixel key
+   * could expose a new edge tile before the next refresh. */
+  uint16 camera_x_step;
   uint16 camera_y_page;
   uint16 width;
   uint16 height;
@@ -618,8 +647,8 @@ static void ws_build_visible_row(CpuState *cpu, uint16 layer_x,
   uint16 page_aligned_x = (uint16)(camera_x & 0xFF00);
   /* Drain the whole span this refresh is responsible for, not the span the
    * camera happens to show on THIS pixel. The refresh key quantizes camera_x to
-   * 16px (WsLayerRefreshKey::camera_x_tile), so after a rebuild the camera goes
-   * on moving up to 15px before the next one. Deriving the drain range from the
+   * 8px (WsLayerRefreshKey::camera_x_step), so after a rebuild the camera goes
+   * on moving up to 7px before the next one. Deriving the drain range from the
    * exact camera_x therefore leaves the outermost one or two margin tile columns
    * undrained for the rest of the window -- and undrained does not mean empty:
    * the page-aligned full drain above has already filled those ring columns with
@@ -632,9 +661,11 @@ static void ws_build_visible_row(CpuState *cpu, uint16 layer_x,
    * drained span a superset of anything that can be displayed before the next
    * rebuild. The column-strip loops below already do this (hence their `+ 1`
    * strip); only the row drains were still per-pixel. */
-  int quantized_x = (int)(camera_x & 0xFFF0);
+  int quantized_x = (int)(camera_x &
+      (uint16)~(kMarginRefreshStepPixels - 1));
   int view_left = quantized_x - (int)g_ppu->extraLeftCur;
-  int view_right = quantized_x + 0xF + kActRaiserAuthenticWidth +
+  int view_right = quantized_x + (kMarginRefreshStepPixels - 1) +
+                   kActRaiserAuthenticWidth +
                    (int)g_ppu->extraRightCur;
 
   (*requested)++;
@@ -764,8 +795,9 @@ void ActRaiser_WidescreenMarginRefresh(void) {
   for (int layer = 0; layer < 2; layer++) {
     uint16 layer_state_offset = (uint16)(layer * kBgStateStride);
     WsLayerRefreshKey *layer_key = &key.layer[layer];
-    layer_key->camera_x_tile = (uint16)(ActRaiser_ReadWram16((uint16)(
-        kBgState_CameraX + layer_state_offset)) & 0xFFF0);
+    layer_key->camera_x_step = (uint16)(ActRaiser_ReadWram16((uint16)(
+        kBgState_CameraX + layer_state_offset)) &
+        (uint16)~(kMarginRefreshStepPixels - 1));
     layer_key->camera_y_page = (uint16)(ActRaiser_ReadWram16((uint16)(
         kBgState_CameraY + layer_state_offset)) & 0xFF00);
     layer_key->width = ActRaiser_ReadWram16((uint16)(
@@ -835,24 +867,34 @@ void ActRaiser_WidescreenMarginRefresh(void) {
 
       uint16 world_y = (uint16)(ActRaiser_ReadWram16((uint16)(
           kBgState_CameraY + layer_state_offset)) & 0xFF00);
-      uint16 left_col = (uint16)(camera_x & 0xFFF0);
-      uint16 right_col = (uint16)(
-          (camera_x + kActRaiserAuthenticWidth) & 0xFFF0);
-      int left_strips = g_ppu->extraLeftCur
-          ? (g_ppu->extraLeftCur + 15) / 16 + 1 : 0;
-      int right_strips = g_ppu->extraRightCur
-          ? (g_ppu->extraRightCur + 15) / 16 + 1 : 0;
+      /* Decode the union of columns that can become visible while this 8px
+       * refresh key holds. Work from the interval itself instead of adding a
+       * guessed extra strip to each side: at the 120px maximum those guesses
+       * would cover 33 metatile columns and alias a 32-column ring. The union
+       * below is at most 512px after 16px alignment, by construction of
+       * kWsExtraMax. */
+      int refresh_x = (int)(camera_x &
+          (uint16)~(kMarginRefreshStepPixels - 1));
+      int view_left = refresh_x - (int)g_ppu->extraLeftCur;
+      int view_right = refresh_x + (kMarginRefreshStepPixels - 1) +
+                       kActRaiserAuthenticWidth +
+                       (int)g_ppu->extraRightCur;
+      int left_first = ws_align_down_metatile(view_left);
+      int left_end = ws_align_up_metatile(refresh_x);
+      int right_first = ws_align_down_metatile(
+          refresh_x + kActRaiserAuthenticWidth);
+      int right_end = ws_align_up_metatile(view_right);
 
-      for (int m = 1; m <= left_strips; m++) {
-        int world_x = (int)left_col - m * 16;
+      for (int world_x = left_first; world_x < left_end;
+           world_x += kMetatileSizePixels) {
         if (world_x >= 0 && world_x < (int)world_width) {
           requested_columns++;
           built_columns += ws_build_strip(
               cpu, layer_state_offset, (uint16)world_x, world_y);
         }
       }
-      for (int m = 0; m <= right_strips; m++) {
-        int world_x = (int)right_col + m * 16;
+      for (int world_x = right_first; world_x < right_end;
+           world_x += kMetatileSizePixels) {
         if (world_x >= 0 && world_x < (int)world_width) {
           requested_columns++;
           built_columns += ws_build_strip(

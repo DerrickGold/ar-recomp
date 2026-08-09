@@ -11,7 +11,7 @@
 #include <math.h>
 #include <stdio.h>
 
-enum { kTexWidth = 448, kBudget = 95, kAuthentic = 256, kCapture = 446 };
+enum { kTexWidth = 512, kBudget = 120, kAuthentic = 256, kCapture = 496 };
 
 static int g_failures;
 
@@ -75,37 +75,37 @@ static void TestValidSpan(void) {
   int x0, x1;
 
   /* Level start, wide BG2 fetched from tilemap: the left margin collapsed, so
-   * only 351 of 446 columns hold content. This is the case Fix B exists for. */
+   * only 376 of 496 columns hold content. This is the case Fix B exists for. */
   Span(kBudget, kBudget, 0, kBudget, kBg2Margin_Live, &x0, &x1);
-  ExpectInt("start x0", x0, 95);
-  ExpectInt("start x1", x1, 446);
+  ExpectInt("start x0", x0, 120);
+  ExpectInt("start x1", x1, 496);
 
   /* Level end: the collapse is on the other side. Asymmetry matters — a
    * symmetric inset would needlessly crop the still-valid side. */
   Span(kBudget, kBudget, kBudget, 0, kBg2Margin_Live, &x0, &x1);
   ExpectInt("end x0", x0, 0);
-  ExpectInt("end x1", x1, 351);
+  ExpectInt("end x1", x1, 376);
 
   /* Post-Fix-A majority: padding reached the budget, so the span is the whole
    * capture regardless of how far the live margin collapsed. */
   Span(kBudget, kBudget, 0, kBudget, kBg2Margin_Padded, &x0, &x1);
   ExpectInt("padded x0", x0, 0);
-  ExpectInt("padded x1", x1, 446);
+  ExpectInt("padded x1", x1, 496);
 
   /* Mid-level, no collapse: full span, so the fix is inert. */
   Span(kBudget, kBudget, kBudget, kBudget, kBg2Margin_Live, &x0, &x1);
   ExpectInt("mid x0", x0, 0);
-  ExpectInt("mid x1", x1, 446);
+  ExpectInt("mid x1", x1, 496);
 
   /* Clamped BG2 has no margin content at all — centre 256 only. */
   Span(kBudget, kBudget, 0, kBudget, kBg2Margin_Clamped, &x0, &x1);
-  ExpectInt("clamped x0", x0, 95);
-  ExpectInt("clamped x1", x1, 351);
+  ExpectInt("clamped x0", x0, 120);
+  ExpectInt("clamped x1", x1, 376);
 
   /* A fully bounded screen renders only the authentic 256. */
   Span(kBudget, kBudget, 0, 0, kBg2Margin_Live, &x0, &x1);
-  ExpectInt("bounded x0", x0, 95);
-  ExpectInt("bounded x1", x1, 351);
+  ExpectInt("bounded x0", x0, 120);
+  ExpectInt("bounded x1", x1, 376);
 
   /* Degenerate: g_ws_extra == 0 (4:3). The span is exactly the authentic 256
    * starting at column 0, i.e. identical to today's behaviour. */
@@ -117,14 +117,14 @@ static void TestValidSpan(void) {
    * out-of-range span. */
   Span(kBudget, kBudget, 200, -5, kBg2Margin_Live, &x0, &x1);
   ExpectInt("clamped-input x0", x0, 0);
-  ExpectInt("clamped-input x1", x1, 351);
+  ExpectInt("clamped-input x1", x1, 376);
 }
 
 /* THE no-op guarantee. Wherever the span is the full capture, the UV range must
  * equal the pre-fix expression exactly:
- *     margin_u = (radius + 1) / 448
+ *     margin_u = (radius + 1) / 512
  *     u0 = margin_u
- *     u1 = snes_width / 448 - margin_u        (snes_width == 446)
+ *     u1 = snes_width / 512 - margin_u        (snes_width == 496)
  */
 static void TestUvRangeMatchesLegacyOnFullSpan(void) {
   const float radii[] = { 1.0f, 3.0f };
@@ -144,18 +144,18 @@ static void TestUvRangeCropsNarrowedSpan(void) {
   float u0, u1;
   /* Level start with radius 1: the blur inset must still apply at the NEW
    * boundary, or the kernel pulls the black columns back across it. */
-  DioramaSkyboxUvRange(kTexWidth, 95, kCapture, 1.0f, &u0, &u1);
-  ExpectFloat("start u0", u0, (95.0f + 2.0f) / (float)kTexWidth);
+  DioramaSkyboxUvRange(kTexWidth, 120, kCapture, 1.0f, &u0, &u1);
+  ExpectFloat("start u0", u0, (120.0f + 2.0f) / (float)kTexWidth);
   ExpectFloat("start u1", u1, ((float)kCapture - 2.0f) / (float)kTexWidth);
 
-  DioramaSkyboxUvRange(kTexWidth, 95, kCapture, 3.0f, &u0, &u1);
-  ExpectFloat("start u0 r3", u0, (95.0f + 4.0f) / (float)kTexWidth);
+  DioramaSkyboxUvRange(kTexWidth, 120, kCapture, 3.0f, &u0, &u1);
+  ExpectFloat("start u0 r3", u0, (120.0f + 4.0f) / (float)kTexWidth);
   ExpectFloat("start u1 r3", u1, ((float)kCapture - 4.0f) / (float)kTexWidth);
 
   /* The cropped range must be strictly inside the full one — the whole point. */
   float full_u0, full_u1;
   DioramaSkyboxUvRange(kTexWidth, 0, kCapture, 1.0f, &full_u0, &full_u1);
-  DioramaSkyboxUvRange(kTexWidth, 95, kCapture, 1.0f, &u0, &u1);
+  DioramaSkyboxUvRange(kTexWidth, 120, kCapture, 1.0f, &u0, &u1);
   if (!(u0 > full_u0)) {
     printf("FAIL cropped u0 (%.6f) must exceed full u0 (%.6f)\n", u0, full_u0);
     g_failures++;
@@ -165,7 +165,7 @@ static void TestUvRangeCropsNarrowedSpan(void) {
 /* An absurd radius must not invert the range into sampling backwards. */
 static void TestUvRangeNeverInverts(void) {
   float u0, u1;
-  DioramaSkyboxUvRange(kTexWidth, 95, 351, 200.0f, &u0, &u1);
+  DioramaSkyboxUvRange(kTexWidth, 120, 376, 200.0f, &u0, &u1);
   if (u1 < u0) {
     printf("FAIL inverted range: u0=%.6f u1=%.6f\n", u0, u1);
     g_failures++;

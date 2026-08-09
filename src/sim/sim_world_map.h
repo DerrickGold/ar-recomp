@@ -87,7 +87,8 @@ const uint8_t *SimWorldMap_Baseline(void);
  * Deliberately no punch-out for the town being played. An earlier version
  * blanked the town's own 32x32-tile window to guarantee nothing was drawn
  * twice, which left a large black hole: the window is the town's whole
- * 512x512-pixel territory, but the town's ground quad only draws the ~446x224
+ * 512x512-pixel territory, but the town's ground quad draws at most the
+ * 496x224 live view
  * of it the camera can see, so the remainder had nothing to fill it. Overlap
  * is instead handled by draw order — the town's ground quad is opaque and
  * drawn on top — and beyond it the world map's own half-resolution depiction
