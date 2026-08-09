@@ -979,6 +979,35 @@ frame over native, below the accepted 0.10 ms BH5 budget. The feature remains
 default-off pending later-room soak/default promotion; native streamers and the
 ring stay as fallback and oracle.
 
+BH6 closes the post-scanout policy seam. `ActRaiser_ApplyWidescreenPolicy`
+publishes the resolved `ActionBgPlan` into a pending frame record before
+scanout; the draw tail latches that value, the live side margins, and the
+independent captured-padding flag only after the pixels have been produced.
+`FrameSlot_Capture` value-copies all of it. This ordering is load-bearing:
+`ActRaiser_RebindPpuOutputSurfaces` may reset live PPU margin/policy fields
+before presentation, so reading or reverse-classifying `g_ppu` there would
+describe the next bind rather than the captured frame.
+
+The diorama consumer now calls `DioramaBgValidSpanPlan_Build` with BG2's exact
+default edge and every authentic-row override band. It translates each band by
+the captured vertical-extension origin and emits one skybox quad per distinct
+horizontal extent. Mirror/repeat rows use the fixed budget only when the
+latched capture-padding flag says the PPU synthesized that budget; raw/world
+rows use asymmetric live margins, and clamp/transparent rows use the authentic
+256 columns. Thus Bloodpool's mirror/repeat split remains full width while the
+Death Heim hub's clamp/repeat split remains two independently mapped regions.
+The removed `DioramaBg2MarginSource` could express neither distinction and no
+longer exists in the runtime or `FrameSlot` ABI.
+
+Normal action frames retain the canonical plan. Explicit 4:3, Wide Raw,
+`AR_WS_ONLYBG`, and `AR_WS_CLAMP` changes are projected at their producer site;
+non-action scenes start from a native/raw plan and receive the exact final
+clamp/mirror/repeat projection. That small inverse adapter is pure and tested;
+it preserves source/world metadata, rejects conflicting or malformed policy,
+and never reads PPU state. Focused live matrices cover Bloodpool, Aitos,
+Northwall, every raw Death Heim room, and both deliberately native-only Death
+Heim endpoints; see `docs/bg-hle-census.md` BH6.
+
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color
 math state that a binary-memory-only snapshot used to leave implicit.

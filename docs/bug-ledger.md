@@ -1107,6 +1107,21 @@ the current debugging process; this file is the case law.
     discontinuity: both regions consume one finite tile-word source while the
     live PPU still performs character decode, priority and color math.
 
+    **BH6 handoff correction (2026-08-09):** the diorama no longer infers one
+    BG2 extent from live PPU masks after scanout. The resolved `ActionBgPlan`,
+    including every authentic-row edge band, is latched beside the produced
+    pixels and copied through `FrameSlot`; the independent capture-padding bit
+    records whether mirror/repeat actually reached the fixed budget. This does
+    not change Fillmore's vertical-bound fix, but closes the same provenance
+    class at the next boundary: a later surface rebind cannot make presentation
+    describe different policy than the captured rows. The former scalar
+    conservatively called every banded layer "clamped"; Bloodpool's
+    Mirror→Repeat rows now correctly coalesce full-width, while Death Heim's
+    Clamp→Repeat fog remains two exact skybox spans. Focused provider matrices
+    `runs/bg-hle-matrix-20260809-151719.json` and
+    `runs/bg-hle-matrix-20260809-151437.json`, plus native-only `0701`/`0708`
+    endpoints, pass with zero mismatch.
+
     **Reusable lesson:** a resident tilemap address is not automatically a spatial world
     coordinate outside hardware-visible scanlines. An A/B that confines a symptom to an
     extension proves the extension triggers it; source-layer isolation plus independent

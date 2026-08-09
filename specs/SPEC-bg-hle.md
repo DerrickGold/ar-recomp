@@ -1,13 +1,15 @@
 # SPEC-bg-hle — action background world provider and scene plan
 
-**Status: In progress (BH5 authentic-world provider complete).** The mapped
+**Status: In progress (BH6 exact presentation handoff complete).** The mapped
 decoder, offline oracle, pure `ActionBgWorld`, differential observer, and
 `ActionBgPlan` policy matrix now feed a generic frame-scoped PPU virtual
 tilemap seam. `AR_ACTION_BG_HLE=1` remains default-off; eligible world layers
 own both the authentic 256x224 viewport and synthetic margins after an exact
 live-ring preflight. Decorative/native layers retain the existing isolated
-mirror/repeat/raw paths. Later-room BH1/BH6 coverage, broad soak/default-on
-promotion, and behavior-neutral legacy cleanup remain open.
+mirror/repeat/raw paths. The resolved per-layer/per-band plan now crosses the
+immutable `FrameSlot` handoff and drives diorama row spans without reverse-
+classifying PPU masks. Broad soak/default-on promotion and behavior-neutral
+legacy cleanup remain open.
 
 This spec replaces the narrower original BH1 proposal. It keeps that proposal's
 measured decoder evidence, but expands the target from "decode more margin
@@ -392,13 +394,14 @@ provider changes rendering.
 ### 5.6 Immutable presentation handoff
 
 Diorama/present code may not inspect live `g_ppu` or reclassify policy masks.
-The resolved plan, or a bounded presentation-only projection of it, is copied
-into `FrameSlot` after scanout.
+The resolved plan is copied into `FrameSlot` after scanout together with the
+independent capture-padding execution fact.
 
-It must express validity per layer and per band. The current
-`DioramaBg2MarginSource` scalar cannot represent Death Heim's banded BG2 and is
-therefore a migration target. Consumers should ask the frame-owned plan which
-texture rows/columns are live, padded or absent.
+It expresses validity per layer and per band. BH6 removed the former
+`DioramaBg2MarginSource` scalar because it could not represent Death Heim's
+banded BG2. Consumers now ask the frame-owned plan which texture rows/columns
+are live, padded or absent; explicit global overrides are projected at the
+producer before scanout, never inferred at presentation time.
 
 ---
 
@@ -753,6 +756,35 @@ frame pacing.
 
 ### BH6 — unified decorative/mixed policy and exact diorama handoff
 
+**Implementation status (2026-08-09): complete, default-off HLE unchanged.**
+`ActRaiser_ApplyWidescreenPolicy` retains the canonical `ActionBgPlan` for an
+ordinary action frame and projects explicit 4:3/Wide Raw/debug overrides at the
+same producer site. Non-action frames receive a native/raw plan projected from
+the policy actually sent to the PPU. The resolved value and the independent
+`wsPadCapturedToBudget` execution fact are latched after scanout, copied by
+`FrameSlot_Capture`, and consumed without a live PPU/settings read.
+
+The old `DioramaBg2MarginSource` enum, scalar field, PPU-mask classifier and
+single-span API are removed. `DioramaBgValidSpanPlan_Build` evaluates the exact
+BG2 edge at every captured row, shifts authentic band coordinates by the live
+vertical-extension origin, and coalesces only adjacent rows with identical
+spans. The skybox emits one screen-space quad per distinct span. Bloodpool's
+Mirror→Repeat policy correctly coalesces to a full-width result; Death Heim's
+Clamp→Repeat fog remains two spans, so the lower repeated band is no longer
+over-cropped to the upper clamp.
+
+The ROM-free policy matrix still classifies all 49 action maps and now pins the
+native projection, explicit overrides, malformed-policy fail-closed behavior,
+Bloodpool, Aitos, Northwall and both Death Heim hub presentations. Live provider
+matrices passed Bloodpool `0201`, Aitos `0401`, Northwall `0601` and Death Heim
+`0702-$0707`; native-only hub `0701` and final starfield `0708` passed their
+expected fallback paths. The successful manifests are
+`runs/bg-hle-matrix-20260809-151719.json`,
+`runs/bg-hle-matrix-20260809-151432.json`,
+`runs/bg-hle-matrix-20260809-151437.json`, and
+`runs/bg-hle-matrix-20260809-151438.json`. Debug/release builds and all 41 tests
+pass.
+
 **Work**
 
 - Make the plan the only source of map-specific action background decisions.
@@ -801,7 +833,6 @@ flip.
 - `AR_WS_BGREFRESH`, `ws_bgrefresh` and their production setting plumbing;
 - duplicated map-specific background classification from
   `ActRaiser_ApplyWidescreenPolicy`;
-- `DioramaBg2MarginSource` and its scalar reverse-classification;
 - old PPU policy masks/setters only where the new plan has no remaining runtime
   or cross-project consumer;
 - `PpuSetVerticalMarginLayerClip` if provider bounds completely subsume it and a
