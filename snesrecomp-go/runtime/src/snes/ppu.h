@@ -13,6 +13,25 @@
 
 typedef struct Ppu Ppu;
 
+/* Optional frame-scoped tilemap source for a 4bpp BG layer. The callback owns
+ * only the 16-bit SNES tilemap word; character pixels, palette, priority,
+ * windows, mosaic and color math continue through the ordinary PPU path.
+ * Returning false is a valid transparent finite-world result. Once a binding
+ * is accepted the callback must be total: provider failure is resolved before
+ * binding, never midway through a scanline. */
+typedef bool (*PpuVirtualTilemapLookup)(const void *context,
+                                       int32_t tile_x, int32_t tile_y,
+                                       uint16_t *entry);
+
+typedef struct PpuVirtualTilemapBinding {
+  PpuVirtualTilemapLookup lookup;
+  const void *context;
+  int32_t camera_x;
+  int32_t camera_y;
+  uint16_t hscroll_anchor;
+  uint16_t vscroll_anchor;
+} PpuVirtualTilemapBinding;
+
 typedef struct BgLayer {
   uint16_t xhScroll;
   uint16_t xvScroll;
@@ -319,6 +338,9 @@ struct Ppu {
   // Authentic lines are never clipped. See PpuSetVerticalMarginLayerClip.
   uint8_t verticalMarginLayerClip;
   uint8_t verticalMarginTopRows[4];
+  /* Render-only, frame-scoped policy. This host state is outside both
+   * savestate regions and ppu_reset deliberately does not preserve it. */
+  PpuVirtualTilemapBinding virtualTilemap[4];
   // Per-slot exact position from the frontend. See PpuSetObjExactPosition.
   int16_t objPosX[128];
   int16_t objPosY[128];
@@ -622,6 +644,16 @@ void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom);
 // while a bounded BG2 parallax plane is still at camera Y=0. Re-apply each
 // frame after PpuSetExtraVerticalSpace; that setter clears all layer clips.
 void PpuSetVerticalMarginLayerClip(Ppu *ppu, uint8_t layer, int top_rows);
+
+// Bind a finite virtual tilemap to the synthetic margins of a 4bpp BG layer.
+// Authentic x=[0,256), scanlines y=[1,224] continue to use the native VRAM
+// ring. `hscroll_anchor`/`vscroll_anchor` are the 10-bit PPU phases matching
+// the full camera values at bind time; live per-line scroll changes are added
+// as signed wrapped deltas. NULL clears one layer. PpuSetExtraSpace,
+// PpuSetExtraSpaceCentered and ppu_reset clear every layer binding.
+bool PpuSetVirtualTilemap(Ppu *ppu, uint8_t layer,
+                          const PpuVirtualTilemapBinding *binding);
+void PpuClearVirtualTilemaps(Ppu *ppu);
 
 // Exact per-slot OAM position, for a frontend that owns the sprite emitter.
 //
