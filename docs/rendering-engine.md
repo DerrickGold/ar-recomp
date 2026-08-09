@@ -909,7 +909,7 @@ the owning 4 KiB tilemap before directly copying to VRAM. Consequently its
 only persistent state is BG1/BG2 tilemap content. `AR_WS_BGREFRESH=0` removes
 the transaction entirely for a byte-identical Stage-A A/B run.
 
-The successor HLE is currently observable but not selectable. With
+The successor HLE tile source is currently observable but not selectable. With
 `AR_ACTION_BG_HLE_COMPARE=1`, `src/actraiser/actraiser_action_bg.c` captures the
 same two low-WRAM decoder records after the native/Stage-B refresh, expands
 them through the bounded `ActionBgWorld`, and compares every tile touched by
@@ -919,6 +919,16 @@ or comparison failures are counted as explicit fail-closed reasons. It writes
 no emulated state and does not affect scanout. The first deterministic Fillmore
 act-2 replay produced 6,729,804 matching tile words; enabling the observer left
 the final WRAM, SRAM, dispatch log, and state dump byte-identical.
+
+Scene policy is selectable now, without selecting HLE pixels. The pure
+`ActionBgPlan` owns all 49 known action-map classifications and compiles into
+the existing PPU clamp/mirror/repeat setters. The ActRaiser adapter is its only
+live-state capture site; `actraiser_rtl.c` no longer contains the map-specific
+action background table. A pre/post integration oracle found byte-identical
+framebuffers, PPU snapshots, WRAM/SRAM, dispatch logs, and final state across
+the 12 entry census, representative wide policies, and vertical/diorama cases.
+Diagnostics name each planned source, while scanout still fetches every tilemap
+word from native VRAM.
 
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color
