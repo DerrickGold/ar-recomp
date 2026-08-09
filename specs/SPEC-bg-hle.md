@@ -512,6 +512,23 @@ must leave a working fallback and a measurement that proves its own behavior.
   final arena and Fillmore act-2 vertical extension.
 - Capture final framebuffer plus individual priority planes.
 
+**Tooling status (2026-08-09).** `tools/bg_hle_census.py` now accepts snapshot
+prefixes or complete run trees and emits human or JSONL records. It validates
+both finite WRAM source spans, hashes the exact map/definition bytes to expose
+mutation variants, records descriptors and ROM SHA-256, derives per-layer CHR
+bases, checks live Mode-1/BGSC/ring ownership, and compares every authentic
+viewport tile word with VRAM. Full snapshots now include `.ppu.json` with the
+PPU, color-math, window, scroll, and active presentation registers needed to
+avoid inferred CHR/BGSC assumptions. A ROM-free Python suite pins matching,
+positive-mismatch, missing-metadata, and discovery behavior.
+
+The retained corpus currently contains 29 full snapshots but only six action
+captures across raw maps `$01/$02` and `$01/$03`. All 10,984 sampled tile words
+match; only the two new `$01/$02` captures carry complete PPU metadata. This
+inventory proves the tooling and identifies the coverage gap; it does not close
+BH1. Region `$02-$07`, required policy scenes, transitions, and priority-plane
+captures remain to be collected.
+
 **Gate**
 
 - Every in-scope world layer is either proven resident/decodable or explicitly

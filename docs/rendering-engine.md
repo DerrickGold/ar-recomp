@@ -920,6 +920,12 @@ no emulated state and does not affect scanout. The first deterministic Fillmore
 act-2 replay produced 6,729,804 matching tile words; enabling the observer left
 the final WRAM, SRAM, dispatch log, and state dump byte-identical.
 
+`ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
+This pins the BGSC geometry, character bases, enables, scroll, window and color
+math state that a binary-memory-only snapshot used to leave implicit.
+`tools/bg_hle_census.py` consumes both new and legacy snapshots, but marks old
+captures' PPU eligibility unknown rather than substituting assumed registers.
+
 The decoder is intentionally scheduled at the authentic streamer's tile
 cadence, not at scanout cadence. A host-only key contains the action room,
 current margins, each camera rounded to its 16px column (vertical position to
