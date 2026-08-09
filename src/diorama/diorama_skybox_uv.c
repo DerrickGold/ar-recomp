@@ -1,7 +1,5 @@
 #include "diorama_skybox_uv.h"
 
-/* BG2 is PPU layer 1. */
-enum { kBg2LayerBit = 1u << 1 };
 enum { kAuthenticWidth = 256 };
 
 static int ClampInt(int value, int low, int high) {
@@ -10,21 +8,11 @@ static int ClampInt(int value, int low, int high) {
   return value;
 }
 
-int DioramaBg2MarginSource_Classify(uint8_t ws_clamp, uint8_t ws_mirror,
-                                    uint8_t ws_repeat, bool bg2_repeat_band) {
-  /* Order matters. A clamp bit wins outright: PpuLayerExtra returns 0 for a
-   * clamped layer, so no margin is rendered regardless of anything else. A
-   * repeat BAND applies to some rows only, which one span cannot express, so it
-   * is folded into the conservative answer rather than the optimistic one. */
-  if (ws_clamp & kBg2LayerBit) return kBg2Margin_Clamped;
-  if (bg2_repeat_band) return kBg2Margin_Clamped;
-  if ((ws_mirror | ws_repeat) & kBg2LayerBit) return kBg2Margin_Padded;
-  return kBg2Margin_Live;
-}
-
-void DioramaBg2ValidSpan(int ws_extra, int budget, int live_left, int live_right,
-                         int margin_source, int tex_width,
-                         int *out_x0, int *out_x1) {
+static void ValidSpanForEdge(int ws_extra, int budget,
+                             int live_left, int live_right,
+                             bool pad_captured_to_budget,
+                             ActionBgEdgeMode edge, int tex_width,
+                             int *out_x0, int *out_x1) {
   if (!out_x0 || !out_x1) return;
   if (tex_width <= 0) { *out_x0 = 0; *out_x1 = 0; return; }
   if (ws_extra < 0) ws_extra = 0;
@@ -33,18 +21,21 @@ void DioramaBg2ValidSpan(int ws_extra, int budget, int live_left, int live_right
   live_right = ClampInt(live_right, 0, budget);
 
   int margin_left, margin_right;
-  switch (margin_source) {
-    case kBg2Margin_Padded:
+  switch (edge) {
+    case kActionBgEdge_Mirror:
+    case kActionBgEdge_Repeat:
       /* Fix A synthesized padding out to the whole budget. */
-      margin_left = budget;
-      margin_right = budget;
+      margin_left = pad_captured_to_budget ? budget : live_left;
+      margin_right = pad_captured_to_budget ? budget : live_right;
       break;
-    case kBg2Margin_Clamped:
+    case kActionBgEdge_Clamp:
+    case kActionBgEdge_Transparent:
       /* Nothing outside the authentic 256 was ever drawn. */
       margin_left = 0;
       margin_right = 0;
       break;
-    case kBg2Margin_Live:
+    case kActionBgEdge_LiveWorld:
+    case kActionBgEdge_RawWrap:
     default:
       margin_left = live_left;
       margin_right = live_right;
@@ -71,22 +62,6 @@ static ActionBgEdgeMode EdgeAtCaptureRow(const ActionBgLayerPlan *layer,
   return edge;
 }
 
-static int MarginSourceForEdge(ActionBgEdgeMode edge,
-                               bool pad_captured_to_budget) {
-  switch (edge) {
-    case kActionBgEdge_Clamp:
-    case kActionBgEdge_Transparent:
-      return kBg2Margin_Clamped;
-    case kActionBgEdge_Mirror:
-    case kActionBgEdge_Repeat:
-      return pad_captured_to_budget ? kBg2Margin_Padded : kBg2Margin_Live;
-    case kActionBgEdge_LiveWorld:
-    case kActionBgEdge_RawWrap:
-    default:
-      return kBg2Margin_Live;
-  }
-}
-
 void DioramaBgValidSpanPlan_Build(
     int ws_extra, int budget, int live_left, int live_right,
     bool pad_captured_to_budget, const ActionBgLayerPlan *layer,
@@ -98,12 +73,10 @@ void DioramaBgValidSpanPlan_Build(
 
   for (int y = 0; y < capture_height; y++) {
     int x0 = 0, x1 = 0;
-    DioramaBg2ValidSpan(
-        ws_extra, budget, live_left, live_right,
-        MarginSourceForEdge(
-            EdgeAtCaptureRow(layer, authentic_y0, y),
-            pad_captured_to_budget),
-        tex_width, &x0, &x1);
+    ValidSpanForEdge(ws_extra, budget, live_left, live_right,
+                     pad_captured_to_budget,
+                     EdgeAtCaptureRow(layer, authentic_y0, y),
+                     tex_width, &x0, &x1);
     if (out->count) {
       DioramaBgValidSpan *previous = &out->spans[out->count - 1];
       if (previous->y1 == y && previous->x0 == x0 && previous->x1 == x1) {

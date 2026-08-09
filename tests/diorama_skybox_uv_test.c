@@ -31,44 +31,24 @@ static void ExpectFloat(const char *label, float got, float want) {
   }
 }
 
-static void Span(int ws_extra, int budget, int live_l, int live_r, int source,
-                 int *x0, int *x1) {
-  DioramaBg2ValidSpan(ws_extra, budget, live_l, live_r, source, kTexWidth,
-                      x0, x1);
+static ActionBgLayerPlan Layer(ActionBgEdgeMode edge) {
+  return (ActionBgLayerPlan) {
+    .valid = true,
+    .source = kActionBgSource_AuthenticViewport,
+    .default_edge = edge,
+  };
 }
 
-/* The classification drives everything else, so pin each policy combination. */
-static void TestClassify(void) {
-  const uint8_t bg1 = 1u << 0, bg2 = 1u << 1;
-  ExpectInt("mirror -> Padded",
-            DioramaBg2MarginSource_Classify(0, bg2, 0, false),
-            kBg2Margin_Padded);
-  ExpectInt("repeat -> Padded",
-            DioramaBg2MarginSource_Classify(0, 0, bg2, false),
-            kBg2Margin_Padded);
-  ExpectInt("clamp -> Clamped",
-            DioramaBg2MarginSource_Classify(bg2, 0, 0, false),
-            kBg2Margin_Clamped);
-  /* A clamp bit wins outright: PpuLayerExtra returns 0 before consulting
-   * anything else, so no margin is rendered whatever the other bits say. */
-  ExpectInt("clamp beats mirror",
-            DioramaBg2MarginSource_Classify(bg2, bg2, 0, false),
-            kBg2Margin_Clamped);
-  /* A repeat BAND varies per scanline; one span cannot express that, so the
-   * conservative answer is required. */
-  ExpectInt("repeat band -> Clamped (conservative)",
-            DioramaBg2MarginSource_Classify(0, 0, 0, true),
-            kBg2Margin_Clamped);
-  ExpectInt("no policy -> Live",
-            DioramaBg2MarginSource_Classify(0, 0, 0, false),
-            kBg2Margin_Live);
-  /* BG1's policy must not leak into BG2's classification. */
-  ExpectInt("bg1 clamp ignored",
-            DioramaBg2MarginSource_Classify(bg1, 0, 0, false),
-            kBg2Margin_Live);
-  ExpectInt("bg1 mirror ignored",
-            DioramaBg2MarginSource_Classify(0, bg1, 0, false),
-            kBg2Margin_Live);
+static void Span(int ws_extra, int budget, int live_l, int live_r,
+                 ActionBgEdgeMode edge, bool pad_captured_to_budget,
+                 int *x0, int *x1) {
+  ActionBgLayerPlan layer = Layer(edge);
+  DioramaBgValidSpanPlan spans;
+  DioramaBgValidSpanPlan_Build(
+      ws_extra, budget, live_l, live_r, pad_captured_to_budget,
+      &layer, 0, 1, kTexWidth, &spans);
+  *x0 = spans.count ? spans.spans[0].x0 : 0;
+  *x1 = spans.count ? spans.spans[0].x1 : 0;
 }
 
 static void TestValidSpan(void) {
@@ -76,56 +56,54 @@ static void TestValidSpan(void) {
 
   /* Level start, wide BG2 fetched from tilemap: the left margin collapsed, so
    * only 376 of 496 columns hold content. This is the case Fix B exists for. */
-  Span(kBudget, kBudget, 0, kBudget, kBg2Margin_Live, &x0, &x1);
+  Span(kBudget, kBudget, 0, kBudget, kActionBgEdge_RawWrap, false,
+       &x0, &x1);
   ExpectInt("start x0", x0, 120);
   ExpectInt("start x1", x1, 496);
 
   /* Level end: the collapse is on the other side. Asymmetry matters — a
    * symmetric inset would needlessly crop the still-valid side. */
-  Span(kBudget, kBudget, kBudget, 0, kBg2Margin_Live, &x0, &x1);
+  Span(kBudget, kBudget, kBudget, 0, kActionBgEdge_RawWrap, false,
+       &x0, &x1);
   ExpectInt("end x0", x0, 0);
   ExpectInt("end x1", x1, 376);
 
   /* Post-Fix-A majority: padding reached the budget, so the span is the whole
    * capture regardless of how far the live margin collapsed. */
-  Span(kBudget, kBudget, 0, kBudget, kBg2Margin_Padded, &x0, &x1);
+  Span(kBudget, kBudget, 0, kBudget, kActionBgEdge_Mirror, true,
+       &x0, &x1);
   ExpectInt("padded x0", x0, 0);
   ExpectInt("padded x1", x1, 496);
 
   /* Mid-level, no collapse: full span, so the fix is inert. */
-  Span(kBudget, kBudget, kBudget, kBudget, kBg2Margin_Live, &x0, &x1);
+  Span(kBudget, kBudget, kBudget, kBudget, kActionBgEdge_RawWrap, false,
+       &x0, &x1);
   ExpectInt("mid x0", x0, 0);
   ExpectInt("mid x1", x1, 496);
 
   /* Clamped BG2 has no margin content at all — centre 256 only. */
-  Span(kBudget, kBudget, 0, kBudget, kBg2Margin_Clamped, &x0, &x1);
+  Span(kBudget, kBudget, 0, kBudget, kActionBgEdge_Clamp, true,
+       &x0, &x1);
   ExpectInt("clamped x0", x0, 120);
   ExpectInt("clamped x1", x1, 376);
 
   /* A fully bounded screen renders only the authentic 256. */
-  Span(kBudget, kBudget, 0, 0, kBg2Margin_Live, &x0, &x1);
+  Span(kBudget, kBudget, 0, 0, kActionBgEdge_RawWrap, false, &x0, &x1);
   ExpectInt("bounded x0", x0, 120);
   ExpectInt("bounded x1", x1, 376);
 
   /* Degenerate: g_ws_extra == 0 (4:3). The span is exactly the authentic 256
    * starting at column 0, i.e. identical to today's behaviour. */
-  Span(0, 0, 0, 0, kBg2Margin_Live, &x0, &x1);
+  Span(0, 0, 0, 0, kActionBgEdge_RawWrap, false, &x0, &x1);
   ExpectInt("no-widescreen x0", x0, 0);
   ExpectInt("no-widescreen x1", x1, 256);
 
   /* Defensive: margins beyond the budget clamp rather than producing an
    * out-of-range span. */
-  Span(kBudget, kBudget, 200, -5, kBg2Margin_Live, &x0, &x1);
+  Span(kBudget, kBudget, 200, -5, kActionBgEdge_RawWrap, false,
+       &x0, &x1);
   ExpectInt("clamped-input x0", x0, 0);
   ExpectInt("clamped-input x1", x1, 376);
-}
-
-static ActionBgLayerPlan Layer(ActionBgEdgeMode edge) {
-  return (ActionBgLayerPlan) {
-    .valid = true,
-    .source = kActionBgSource_AuthenticViewport,
-    .default_edge = edge,
-  };
 }
 
 static void ExpectSpan(const char *label, const DioramaBgValidSpan *span,
@@ -251,7 +229,6 @@ static void TestUvRangeNeverInverts(void) {
 }
 
 int main(void) {
-  TestClassify();
   TestValidSpan();
   TestBandedValidSpans();
   TestUvRangeMatchesLegacyOnFullSpan();

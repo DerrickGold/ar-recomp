@@ -9,6 +9,7 @@
 #include "diorama/diorama.h"
 #include "sim/sim_render_metadata.h"
 #include "action/action_effects.h"
+#include "action/action_bg_plan.h"
 
 /* M5 (ar-recomp-threading-impl.md Appendix D). FrameSlot is the ONE contract
  * for everything present-time rendering reads: it is populated by the single
@@ -309,7 +310,14 @@ typedef struct FrameSlot {
    * exists to fix. */
   uint8_t extra_left_cur;
   uint8_t extra_right_cur;
-  uint8_t bg2_margin_source; /* DioramaBg2MarginSource */
+  /* BH6: exact plan that produced the captured BG1/BG2 planes. Ordinary action
+   * frames preserve canonical source metadata and all row bands; explicit
+   * global overrides retain source metadata but project their executed edges.
+   * Non-action frames carry a native-source projection of the applied policy.
+   * `bg_capture_pad_to_budget` is deliberately separate: it is a frame-level
+   * capture execution fact, not a map-specific edge decision. */
+  ActionBgPlan action_bg_plan;
+  bool bg_capture_pad_to_budget;
   uint8_t inidisp;
   uint8_t bg_mode;  /* PPU_mode(g_ppu) == (g_ppu->bgmode & 7) */
 

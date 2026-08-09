@@ -1197,12 +1197,11 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
                               int obj_apron, int snes_width, int snes_height,
                               int out_w, int out_h, bool dim,
                               float blur_radius,
-                              int bg2_valid_x0, int bg2_valid_x1) {
-  if (!bg2_texture) return;
+                              const DioramaBgValidSpanPlan *valid_spans) {
+  if (!bg2_texture || snes_height <= 0) return;
   /* [obj_apron, obj_apron+snes_width) -- the DISPLAYED span, which sits in the
-   * middle of an apron-wide surface. bg2_valid_x0/x1 arrive already in the same
-   * surface-column space (the caller offsets them), so the margin-fix branch
-   * below needs no apron term of its own. */
+   * middle of an apron-wide surface. The valid spans arrive already in the same
+   * surface-column space, so the margin-fix branch needs no apron term. */
   float uv_u0_base = (float)obj_apron / (float)kPpuSurfaceWidth;
   float uv_u1 = (float)(obj_apron + snes_width) / (float)kPpuSurfaceWidth;
   /* Same live report: a visible lighter/garbage-colored strip appeared at
@@ -1224,22 +1223,6 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
    * own interpolation clamp around the per-layer loop that runs after this
    * returns). Costs an imperceptible crop of the sky content, not a
    * rendering defect. */
-  /* Fix B (SPEC-backdrop-clip.md): map U over BG2's ACTUALLY VALID span, not the
-   * whole fixed capture. Where Fix A padded the margins out to the budget the
-   * span IS the whole capture, so this is bit-identical to the pre-fix math;
-   * where it could not (a wide BG2 fetched from tilemap, or a clamped one) the
-   * sky stretches a little instead of showing a black wedge. With the setting
-   * off, the original expression runs unchanged. */
-  float u0, u1;
-  if (g_settings.diorama_margin_fix) {
-    DioramaSkyboxUvRange(kPpuSurfaceWidth, bg2_valid_x0, bg2_valid_x1,
-                         blur_radius, &u0, &u1);
-  } else {
-    float margin_u = (blur_radius + 1.0f) / (float)kPpuSurfaceWidth;
-    u0 = uv_u0_base + margin_u;
-    u1 = uv_u1 - margin_u;
-    if (u1 < u0) u1 = u0;  /* degenerate guard for a pathologically narrow capture */
-  }
   /* Live report (2026-07-21): {0.30,0.30,0.40} read as jarringly dark for
    * Plane+skybox — the intent is a subtle cue that this is background, not
    * a heavy tint. Lightened substantially; still a touch cool/blue like the
@@ -1247,17 +1230,6 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
   static const SDL_FColor kSkyboxDim = { 0.78f, 0.78f, 0.85f, 1.0f };
   static const SDL_FColor kSkyboxFull = { 1.0f, 1.0f, 1.0f, 1.0f };
   SDL_FColor tint = dim ? kSkyboxDim : kSkyboxFull;
-  /* Same reasoning as u1, on the other axis: the BG2 texture is allocated
-   * kPpuBufHeight tall and only the leading snes_height rows are ever written,
-   * so stretching V to 1.0 would drag never-written rows across the bottom of
-   * the sky. Was correct implicitly while the allocation matched the content. */
-  float v1 = (float)snes_height / (float)kPpuBufHeight;
-  SDL_Vertex verts[4] = {
-    { { 0.0f, 0.0f },                   tint, { u0, 0.0f } },
-    { { (float)out_w, 0.0f },           tint, { u1, 0.0f } },
-    { { (float)out_w, (float)out_h },   tint, { u1, v1 } },
-    { { 0.0f, (float)out_h },           tint, { u0, v1 } },
-  };
   int indices[6] = { 0, 1, 2, 0, 2, 3 };
   SDL_SetTextureBlendMode(bg2_texture, SDL_BLENDMODE_NONE);
   bool blur = SkyboxBlurEnabled(renderer);
@@ -1269,7 +1241,54 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
     SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
     SDL_SetGPURenderState(renderer, g_blur_state);
   }
-  SDL_RenderGeometry(renderer, bg2_texture, verts, 4, indices, 6);
+
+  /* Fix B/BH6: render each row band over its own actually-valid U span. This
+   * is the distinction the former scalar lost in Death Heim: the clamped upper
+   * image stretches from the authentic 256, while the repeating fog below it
+   * uses the fully padded capture. Equivalent adjacent spans are coalesced by
+   * DioramaBgValidSpanPlan_Build, so ordinary rooms still issue one draw with
+   * the exact legacy coordinates. The disabled A/B gate likewise forces one
+   * legacy full-capture draw. */
+  DioramaBgValidSpan legacy = {
+    .y0 = 0, .y1 = snes_height,
+    .x0 = obj_apron, .x1 = obj_apron + snes_width,
+  };
+  const DioramaBgValidSpan *spans = &legacy;
+  unsigned span_count = 1;
+  if (g_settings.diorama_margin_fix && valid_spans && valid_spans->count) {
+    spans = valid_spans->spans;
+    span_count = valid_spans->count;
+    if (span_count > kDioramaBgMaxValidSpans)
+      span_count = kDioramaBgMaxValidSpans;
+  }
+  for (unsigned i = 0; i < span_count; i++) {
+    int y0 = spans[i].y0 < 0 ? 0 : spans[i].y0;
+    int y1 = spans[i].y1 > snes_height ? snes_height : spans[i].y1;
+    if (y1 <= y0) continue;
+    float u0, u1;
+    if (g_settings.diorama_margin_fix) {
+      DioramaSkyboxUvRange(kPpuSurfaceWidth, spans[i].x0, spans[i].x1,
+                           blur_radius, &u0, &u1);
+    } else {
+      float margin_u = (blur_radius + 1.0f) / (float)kPpuSurfaceWidth;
+      u0 = uv_u0_base + margin_u;
+      u1 = uv_u1 - margin_u;
+      if (u1 < u0) u1 = u0;
+    }
+    const float draw_y0 =
+        (float)out_h * ((float)y0 / (float)snes_height);
+    const float draw_y1 =
+        (float)out_h * ((float)y1 / (float)snes_height);
+    const float v0 = (float)y0 / (float)kPpuBufHeight;
+    const float v1 = (float)y1 / (float)kPpuBufHeight;
+    SDL_Vertex verts[4] = {
+      { { 0.0f, draw_y0 },         tint, { u0, v0 } },
+      { { (float)out_w, draw_y0 }, tint, { u1, v0 } },
+      { { (float)out_w, draw_y1 }, tint, { u1, v1 } },
+      { { 0.0f, draw_y1 },         tint, { u0, v1 } },
+    };
+    SDL_RenderGeometry(renderer, bg2_texture, verts, 4, indices, 6);
+  }
   if (blur) SDL_SetGPURenderState(renderer, NULL);
 }
 
@@ -1515,7 +1534,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
-                       int bg2_valid_x0, int bg2_valid_x1,
+                       const DioramaBgValidSpanPlan *bg2_valid_spans,
                        DioramaProjection *out_projection) {
   if (out_projection) memset(out_projection, 0, sizeof(*out_projection));
   if (!renderer || !cam_pose) return false;
@@ -1583,7 +1602,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     DrawDioramaSkybox(renderer, textures[kPpuOverlaySource_Bg2],
                       obj_apron, snes_width, snes_height, out_w, out_h, both,
                       both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly,
-                      bg2_valid_x0, bg2_valid_x1);
+                      bg2_valid_spans);
   }
 
   float tex_h = (float)snes_height;

@@ -200,6 +200,61 @@ bool ActionBgPlan_CompilePresentation(
   return true;
 }
 
+void ActionBgPlan_InitNative(ActionBgPlan *out) {
+  if (!out) return;
+  *out = (ActionBgPlan){ .valid = true };
+  for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+    out->layer[layer].valid = true;
+    out->layer[layer].source = kActionBgSource_NativeTilemap;
+    out->layer[layer].default_edge = kActionBgEdge_RawWrap;
+  }
+}
+
+bool ActionBgPlan_ApplyPresentationPolicy(
+    ActionBgPlan *plan, const ActionBgPresentationPolicy *policy) {
+  if (!plan || !policy || !plan->valid) return false;
+  const uint8_t owned_mask = (1u << kActionBgPlanLayerCount) - 1u;
+  const uint8_t clamp = policy->clamp_layers & owned_mask;
+  const uint8_t mirror = policy->mirror_layers & owned_mask;
+  const uint8_t repeat = policy->repeat_layers & owned_mask;
+  if ((clamp & mirror) || (clamp & repeat) || (mirror & repeat) ||
+      policy->repeat_band_layer < -1 ||
+      policy->repeat_band_layer >= kActionBgPlanLayerCount ||
+      (policy->repeat_band_layer >= 0 &&
+       (policy->repeat_band_y0 >= policy->repeat_band_y1 ||
+        policy->repeat_band_y1 > kAuthenticHeight)))
+    return false;
+
+  ActionBgPlan built = *plan;
+  built.bound_canvas_to_world = policy->bound_canvas_to_world;
+  for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+    ActionBgLayerPlan *layer_plan = &built.layer[layer];
+    const uint8_t mask = (uint8_t)(1u << layer);
+    layer_plan->valid = true;
+    layer_plan->band_count = 0;
+    if (clamp & mask)
+      layer_plan->default_edge = kActionBgEdge_Clamp;
+    else if (mirror & mask)
+      layer_plan->default_edge = kActionBgEdge_Mirror;
+    else if (repeat & mask)
+      layer_plan->default_edge = kActionBgEdge_Repeat;
+    else
+      layer_plan->default_edge = kActionBgEdge_RawWrap;
+  }
+  if (policy->repeat_band_layer >= 0) {
+    ActionBgLayerPlan *layer_plan =
+        &built.layer[policy->repeat_band_layer];
+    layer_plan->bands[0] = (ActionBgBand) {
+      .y0 = policy->repeat_band_y0,
+      .y1 = policy->repeat_band_y1,
+      .edge = kActionBgEdge_Repeat,
+    };
+    layer_plan->band_count = 1;
+  }
+  *plan = built;
+  return true;
+}
+
 const char *ActionBgSourceKind_Name(ActionBgSourceKind source) {
   switch (source) {
     case kActionBgSource_NativeTilemap: return "native";

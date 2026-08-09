@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <SDL3/SDL.h>
 #include "diorama_planes.h"
+#include "diorama_skybox_uv.h"
 
 /* The per-room ($18,$19) layer override table the editor edits and the draw
  * loop reads. Never NULL. Empty means "every room draws as built". */
@@ -124,11 +125,11 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
  * compositor renders in viewport-local coordinates and restores the full
  * renderer viewport before returning.
  *
- * bg2_valid_x0/x1 (Fix B, SPEC-backdrop-clip.md): the half-open TEXTURE-column
- * span of BG2's actually-rendered content, from DioramaBg2ValidSpan. Only the
- * skybox quad uses it — it is a screen-space quad, so cropping its source is
- * free. Deliberately NOT applied to the per-layer loop: those quads are
- * world-registered against BG1, and narrowing their UV would desync them. */
+ * bg2_valid_spans (Fix B/BH6): exact capture-row and texture-column regions of
+ * BG2's rendered content. Only the skybox uses them — it is screen-space, so
+ * each row band can crop/stretch independently. They are deliberately NOT
+ * applied to the per-layer loop: those quads are world-registered against BG1,
+ * and narrowing their UV would desync them. */
 /* obj_apron: columns of RESOLVE apron the bound surfaces carry per side. The
  * displayed span is [obj_apron, obj_apron+snes_width) -- snes_width stays the
  * DISPLAY width, so the mesh, aspect_x and the camera fit are unaffected by the
@@ -143,7 +144,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
-                       int bg2_valid_x0, int bg2_valid_x1,
+                       const DioramaBgValidSpanPlan *bg2_valid_spans,
                        DioramaProjection *out_projection);
 
 /* Drops renderer-owned targets/effects after SDL_EVENT_RENDER_DEVICE_RESET so

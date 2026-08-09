@@ -2,6 +2,7 @@
 #define ACTRAISER_RTL_H
 
 #include "action/action_obj_apron.h"
+#include "action/action_bg_plan.h"
 #include "common_rtl.h"
 #include "common_cpu_infra.h"
 #include "snes/snes_regs.h"
@@ -21,9 +22,12 @@ ActionApronGeometry ActRaiser_ObjApronGeometry(void);
  * frame was actually RENDERED with, latched at the end of ActRaiserDrawPpuFrame.
  * A consumer of that frame's captured pixels must use this rather than reading
  * g_ppu->extraLeftCur/extraRightCur, which can be zeroed between the draw and
- * the frame-slot capture (see the latch's comment). `bg2_margin_source` is a
- * DioramaBg2MarginSource. Any pointer may be NULL. */
-void ActRaiser_LiveMargins(int *left, int *right, int *bg2_margin_source);
+ * the frame-slot capture (see the latch's comment). Any pointer may be NULL. */
+void ActRaiser_LiveMargins(int *left, int *right);
+/* The resolved per-layer/per-band background plan and capture-padding fact
+ * belonging to those same pixels. Returns false only for an invalid plan. */
+bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
+                                bool *pad_captured_to_budget);
 int ActRaiser_LiveVerticalMargin(void);
 unsigned ActRaiser_TakeVextUnlockedObjects(void);
 

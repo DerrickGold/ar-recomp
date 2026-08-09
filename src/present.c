@@ -1171,21 +1171,24 @@ void PresentComposite(const FrameSlot *slot,
         slot->diorama_dyncam_event_boost);
     }
 
-    /* Fix B (SPEC-backdrop-clip.md): resolve BG2's valid captured span from the
-     * slot alone (D6 — this file never reads live g_ppu). ws_extra, not
+    /* Fix B/BH6: resolve BG2's row-banded valid capture spans from the slot
+     * alone (D6 — this file never reads live g_ppu). ws_extra, not
      * extra_left_right, is the offset: the capture pitch and Diorama_Upload's
      * rect are both derived from ws_extra, so it is what texture column 0
      * corresponds to. They are equal today; keeping them distinct is what makes
      * that stay true if either ever moves. */
-    int bg2_valid_x0 = 0, bg2_valid_x1 = kFrameSlotLayerTextureWidth;
-    /* + obj_apron: the span is in SURFACE columns, and screen x = 0 sits at
+    DioramaBgValidSpanPlan bg2_valid_spans;
+    /* + obj_apron: each span is in SURFACE columns, and screen x = 0 sits at
      * column obj_apron + ws_extra now that the surfaces carry resolve headroom
      * on both sides. Without it the skybox would crop its sky an apron early. */
-    DioramaBg2ValidSpan(slot->ws_extra + slot->obj_apron,
-                        slot->extra_left_right,
-                        slot->extra_left_cur, slot->extra_right_cur,
-                        slot->bg2_margin_source, kFrameSlotLayerTextureWidth,
-                        &bg2_valid_x0, &bg2_valid_x1);
+    DioramaBgValidSpanPlan_Build(
+        slot->ws_extra + slot->obj_apron,
+        slot->extra_left_right,
+        slot->extra_left_cur, slot->extra_right_cur,
+        slot->bg_capture_pad_to_budget,
+        &slot->action_bg_plan.layer[kActionBgPlanLayerCount - 1],
+        slot->ws_extra_top, slot->snes_height + slot->ws_extra_top,
+        kFrameSlotLayerTextureWidth, &bg2_valid_spans);
     SDL_Rect viewport = ComputePresentationViewport(
         g_renderer, slot->ignore_aspect_ratio, slot->pixel_aspect,
         slot->visible_width, slot->snes_height);
@@ -1197,7 +1200,7 @@ void PresentComposite(const FrameSlot *slot,
                            slot->visible_width, viewport,
                            g_diorama_textures, pixels,
                            &scroll_delta, &final_cam, distance_scale,
-                           bg2_valid_x0, bg2_valid_x1, &action_projection))
+                           &bg2_valid_spans, &action_projection))
       return;
     DrawActionEffects(slot, viewport, &action_projection);
     /* A7/A5 (followup doc): the diorama branch used to skip the widescreen
