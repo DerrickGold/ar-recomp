@@ -791,6 +791,16 @@ show the frozen `$0088` against the advancing host frame:
   `AR_VEXT_BANDFIX=0 AR_ACTION_BG_HLE=1` remain the decisive side/top positive
   controls: both match the corrected reference, while disabling HLE too
   restores the deliberately broken legacy arm.
+  BH6 adds no separate environment switch: the resolved `ActionBgPlan` is now
+  latched after scanout and copied into `FrameSlot` on every run. Normal action
+  frames retain exact default edges and bands; 4:3, Wide Raw, `AR_WS_ONLYBG`
+  and `AR_WS_CLAMP` publish their executed override instead. The diorama
+  consumer builds row-specific BG2 spans from that immutable value plus the
+  latched capture-padding fact. If investigating a band, reproduce it with
+  `actraiser_action_bg_plan_test` and `actraiser_diorama_skybox_uv_test` first:
+  the former pins all 49 map policies and the latter pins Bloodpool's coalesced
+  Mirror→Repeat span and Death Heim's distinct Clamp→Repeat spans, including a
+  shifted vertical-extension origin.
 - **`AR_WS_SKYPALACE_BG=0`** — disable the Sky Palace `$00/$07` render-only
   source-map repair and restore historical raw-wide output with dialogue
   staging visible in the margins. Default-on reads the 16x16 metatile page at

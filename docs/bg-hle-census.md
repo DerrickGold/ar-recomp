@@ -247,6 +247,50 @@ This closes BH5's implementation and current evidence gate. It does not fill
 the natural Northwall boss transition or the Death Heim ending-tail gaps, make
 the feature default-on, or authorize deleting the native streamers/ring oracle.
 
+## BH6 exact decorative/diorama handoff — 2026-08-09
+
+BH6 removes the last lossy policy seam after scanout. The canonical action
+`ActionBgPlan` is now latched with the pixels, copied into `FrameSlot`, and
+consumed as exact BG1/BG2 source, edge and row-band metadata. Explicit 4:3,
+Wide Raw and diagnostic overrides are projected at the producer where they are
+applied; non-action scenes receive a native-source projection of their executed
+policy. `present.c` does not inspect `g_ppu` or reverse-classify masks.
+
+The old `DioramaBg2MarginSource` scalar could only call a banded layer
+"clamped." Its replacement evaluates the plan in captured-row space, including
+the vertical-extension origin, and builds up to `2*kActionBgMaxBands+1` exact
+row/column spans. Equivalent spans coalesce: Bloodpool `0201` is full width in
+both its mirrored upper rows and repeated water rows. Non-equivalent spans stay
+separate: Death Heim's pre-ending hub stretches its clamped upper sky from the
+authentic 256 columns while its repeated fog band samples the fully padded
+capture. The skybox draws one quad per resulting span; ordinary one-span rooms
+retain the legacy coordinates and draw count.
+
+The live focused evidence is split according to real source ownership:
+
+- `runs/bg-hle-matrix-20260809-151719.json`: provider-enabled Bloodpool `0201`,
+  Aitos `0401`, and Northwall `0601`;
+- `runs/bg-hle-matrix-20260809-151437.json`: provider-enabled Death Heim
+  rematches `0702-$0707` at the documented early 410/420 capture window;
+- `runs/bg-hle-matrix-20260809-151432.json`: native-only short hub `0701` at
+  500/600, before its natural handoff to `0702`;
+- `runs/bg-hle-matrix-20260809-151438.json`: native-only final starfield `0708`.
+
+The nine provider-owned targets bind 10,364/10,364 eligible layer-frames,
+perform 9,401,719 exact preflight comparisons and 74,602,976 provider lookups
+with zero provider mismatch/outside result. Together with hub/final, the focused
+set performs 10,129,970 runtime comparator checks with zero mismatch or
+unexpected fallback. The `0705` comparator still records its already-explained
+finite BG2 exits; provider preflight remains zero-outside and the plan keeps that
+decorative layer native.
+
+ROM-free tests pin native-plan initialization, policy override validation,
+all 49 map classifications, Bloodpool's 136..224 band, Death Heim's 144..224
+band and both ending-sky selectors, plus exact row-span behavior with a 16-row
+vertical extension. Debug and release builds succeed; 40 sandbox-safe tests and
+the macOS display-dependent shader test pass (41/41). BH6 is complete. BH7's
+full lifecycle soak and default promotion remain open.
+
 ### Rejected Northwall `0608` shortcut
 
 `0608` does enter map `$06/$08` for about 23 live frames. At frames 410/420 its

@@ -10,10 +10,18 @@
 landed in `b9dc4f3` ("fix: edge margin black wedge at level bounds, behind an
 A/B toggle"); the black wedge at level bounds is no longer observed.
 
+**BH6 supersession (2026-08-09):** the root-cause and A/C implementation below
+remain current, but B's scalar handoff is now historical. Commits `f13d19f` and
+`963b4cb` replace `DioramaBg2MarginSource`, `bg2_margin_source`, PPU-mask reverse
+classification, and the one-span API with the resolved `ActionBgPlan` carried
+through `FrameSlot` plus exact row-banded spans. The old names below are kept as
+the original fix design, not as live API guidance. See `SPEC-bg-hle.md` BH6 and
+`docs/rendering-engine.md` for the current contract.
+
 | Fix | Where it lives |
 | --- | --- |
 | **A** — pad captured layers out to the full margin budget instead of the live margin | `actraiser_rtl.c:952`, `ppu.c` merge loops |
-| **B** — crop the skybox quad's UV to BG2's actually valid span | `diorama_skybox_uv.c/h`, `present.c:3643`, latched via `FrameSlot` |
+| **B** — crop each skybox row band's UV to BG2's actually valid span | `diorama_skybox_uv.c/h`, resolved plan latched via `FrameSlot` |
 | **C** — compositor writes only the ACTIVE window; gap strips take the scene backdrop, not black | `actraiser_ws_gap.c/h`, `actraiser_rtl.c:1062` |
 
 `g_settings.diorama_margin_fix` is a **live A/B** for the whole artifact — Off
