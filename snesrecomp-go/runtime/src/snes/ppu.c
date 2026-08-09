@@ -340,7 +340,8 @@ bool PpuSetVirtualTilemap(Ppu *ppu, uint8_t layer,
     return true;
   }
   if (!binding->lookup || binding->hscroll_anchor > 0x3ff ||
-      binding->vscroll_anchor > 0x3ff)
+      binding->vscroll_anchor > 0x3ff ||
+      (binding->flags & ~kPpuVirtualTilemapFlag_IncludeAuthentic))
     return false;
   ppu->virtualTilemap[layer] = *binding;
   return true;
@@ -876,12 +877,13 @@ static inline bool PpuVirtualCoordinate(int64_t value, int32_t *out) {
 static bool PpuVirtualTilemapOwnsSpan(
     const PpuVirtualTilemapBinding *binding, int y, int x0, int x1) {
   return binding->lookup &&
-      (y < 1 || y > kPpuYPixels || x1 <= 0 || x0 >= kPpuXPixels);
+      ((binding->flags & kPpuVirtualTilemapFlag_IncludeAuthentic) ||
+       y < 1 || y > kPpuYPixels || x1 <= 0 || x0 >= kPpuXPixels);
 }
 
-/* Draw one synthetic-margin span from a virtual tilemap word source. The live
- * PPU still owns every stage after lookup: tile graphics come from VRAM and
- * the ordinary z/color word feeds palette, windows and color math unchanged. */
+/* Draw one span from a virtual tilemap word source. The live PPU still owns
+ * every stage after lookup: tile graphics come from VRAM and the ordinary
+ * z/color word feeds palette, windows and color math unchanged. */
 static void PpuDrawVirtualTilemapSpan(
     Ppu *ppu, PpuPixelPrioBufs *dstbuf,
     const PpuVirtualTilemapBinding *binding, uint layer,

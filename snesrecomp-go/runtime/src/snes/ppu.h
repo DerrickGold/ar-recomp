@@ -23,6 +23,12 @@ typedef bool (*PpuVirtualTilemapLookup)(const void *context,
                                        int32_t tile_x, int32_t tile_y,
                                        uint16_t *entry);
 
+enum {
+  /* Default is synthetic margins only. Callers may opt a proven world layer
+   * into provider ownership of the authentic 256x224 viewport too. */
+  kPpuVirtualTilemapFlag_IncludeAuthentic = 1,
+};
+
 typedef struct PpuVirtualTilemapBinding {
   PpuVirtualTilemapLookup lookup;
   const void *context;
@@ -30,6 +36,7 @@ typedef struct PpuVirtualTilemapBinding {
   int32_t camera_y;
   uint16_t hscroll_anchor;
   uint16_t vscroll_anchor;
+  uint8_t flags;
 } PpuVirtualTilemapBinding;
 
 typedef struct BgLayer {
@@ -645,12 +652,13 @@ void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom);
 // frame after PpuSetExtraVerticalSpace; that setter clears all layer clips.
 void PpuSetVerticalMarginLayerClip(Ppu *ppu, uint8_t layer, int top_rows);
 
-// Bind a finite virtual tilemap to the synthetic margins of a 4bpp BG layer.
-// Authentic x=[0,256), scanlines y=[1,224] continue to use the native VRAM
-// ring. `hscroll_anchor`/`vscroll_anchor` are the 10-bit PPU phases matching
-// the full camera values at bind time; live per-line scroll changes are added
-// as signed wrapped deltas. NULL clears one layer. PpuSetExtraSpace,
-// PpuSetExtraSpaceCentered and ppu_reset clear every layer binding.
+// Bind a finite virtual tilemap to a 4bpp BG layer. By default, authentic
+// x=[0,256), scanlines y=[1,224] continue to use the native VRAM ring;
+// kPpuVirtualTilemapFlag_IncludeAuthentic opts a proven layer into provider
+// ownership there too. `hscroll_anchor`/`vscroll_anchor` are the 10-bit PPU
+// phases matching the full camera values at bind time; live per-line scroll
+// changes are added as signed wrapped deltas. NULL clears one layer.
+// PpuSetExtraSpace, PpuSetExtraSpaceCentered and ppu_reset clear all bindings.
 bool PpuSetVirtualTilemap(Ppu *ppu, uint8_t layer,
                           const PpuVirtualTilemapBinding *binding);
 void PpuClearVirtualTilemaps(Ppu *ppu);
