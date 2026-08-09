@@ -41,7 +41,8 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
             &projected_point))
       return false;
     projected[sample] = (SDL_FPoint){
-      projected_point.x, projected_point.y,
+      (float)projection->output_x + projected_point.x,
+      (float)projection->output_y + projected_point.y,
     };
   }
   *point = projected[0];

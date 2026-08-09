@@ -30,6 +30,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "presentation_geometry.h"
+
 static int s_failures;
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -99,9 +101,34 @@ int main(void) {
   SDL_Rect src_i = { (kBufW - kSnesW) / 2, 0, kSnesW, kSnesH };
   SDL_FRect src_f = { (float)src_i.x, 0.0f, (float)kSnesW, (float)kSnesH };
 
-  /* LETTERBOX logical presentation, matching the widescreen present path. */
-  CHECK(SDL_SetRenderLogicalPresentation(
-      renderer, kSnesW, kSnesH, SDL_LOGICAL_PRESENTATION_LETTERBOX));
+  /* Authentic 4:3 presentation is aspect-correct even when widescreen content
+   * is inactive. This is the regression guard for resize/fullscreen stretching:
+   * only the explicit Stretch setting may select SDL's stretch mode. */
+  CHECK(PresentationGeometry_ApplyLogical(
+      renderer, false, true, kSnesW, kSnesH));
+  {
+    int logical_w = 0, logical_h = 0;
+    SDL_RendererLogicalPresentation mode =
+        SDL_LOGICAL_PRESENTATION_DISABLED;
+    CHECK(SDL_GetRenderLogicalPresentation(
+        renderer, &logical_w, &logical_h, &mode));
+    CHECK(logical_w == kSnesW * 7);
+    CHECK(logical_h == kSnesH * 6);
+    CHECK(mode == SDL_LOGICAL_PRESENTATION_LETTERBOX);
+
+    SDL_Rect viewport = PresentationGeometry_CalculateViewport(
+        kWinW, kWinH, false, true, kSnesW, kSnesH);
+    CHECK(viewport.x == 160 && viewport.y == 0);
+    CHECK(viewport.w == 960 && viewport.h == 720);
+    SDL_Rect stretched = PresentationGeometry_CalculateViewport(
+        kWinW, kWinH, true, true, kSnesW, kSnesH);
+    CHECK(stretched.x == 0 && stretched.y == 0);
+    CHECK(stretched.w == kWinW && stretched.h == kWinH);
+    SDL_Rect letterboxed = PresentationGeometry_CalculateViewport(
+        800, 800, false, true, kSnesW, kSnesH);
+    CHECK(letterboxed.x == 0 && letterboxed.y == 100);
+    CHECK(letterboxed.w == 800 && letterboxed.h == 600);
+  }
 
   /* Regression guard for the output-size function choice: while a logical
    * presentation is active, SDL_GetRenderOutputSize must still report the
@@ -110,7 +137,7 @@ int main(void) {
    * shrunk to the logical content region. main.c/settings_overlay.c compute
    * viewports and map mouse clicks in physical-pixel space, so they must use
    * the former — using the latter double-letterboxes overlays and mis-maps
-   * clicks in widescreen mode. The window is 256x224 * 3 = 768x672. */
+   * clicks in widescreen mode. */
   {
     int true_w = 0, true_h = 0, cur_w = 0, cur_h = 0;
     CHECK(SDL_GetRenderOutputSize(renderer, &true_w, &true_h));
@@ -119,11 +146,9 @@ int main(void) {
             true_w, true_h, cur_w, cur_h);
     /* True output must equal the physical window (ignores presentation). */
     CHECK(true_w == kWinW && true_h == kWinH);
-    /* The logical-adjusted width is the 256:224 content region fitted (with
-     * pillarbars) into the 16:9 window, so it must be narrower than the true
-     * width. That gap is precisely what double-letterboxes overlays and
-     * mis-maps clicks if the wrong function is used for physical geometry. */
-    CHECK(cur_w < true_w);
+    /* The logical-adjusted width is the authentic 4:3 content region fitted
+     * (with 160px pillarbars) into the 16:9 window. */
+    CHECK(cur_w == 960 && cur_h == 720);
   }
 
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
@@ -131,7 +156,12 @@ int main(void) {
   CHECK(SDL_RenderTexture(renderer, texture, &src_f, NULL));
   CHECK(SDL_RenderPresent(renderer));
 
-  /* SDL3 SDL_RenderReadPixels RETURNS a surface (SDL2 filled a buffer). */
+  /* Read the physical target rather than SDL's logical content crop so the
+   * regression can inspect the actual pillar bars. Changing presentation
+   * state after submission does not alter the pixels already rendered. SDL3
+   * SDL_RenderReadPixels returns a surface (SDL2 filled a buffer). */
+  CHECK(SDL_SetRenderLogicalPresentation(
+      renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED));
   SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);
   CHECK(raw != NULL);
   SDL_Surface *argb =
@@ -140,6 +170,7 @@ int main(void) {
   CHECK(argb != NULL);
 
   if (argb) {
+    CHECK(argb->w == kWinW && argb->h == kWinH);
     /* The frame must not be black. Under a BLENDMODE_NONE blit the RGB is
      * preserved and the alpha becomes the opaque render target's, so read-back
      * pixels match fill_opaque (compare RGB only, ignoring alpha). If the
@@ -169,6 +200,17 @@ int main(void) {
      * a border — proves the blit is neither offset nor flipped into black. */
     uint32_t center = SurfacePixel(argb, argb->w / 2, argb->h / 2);
     CHECK((center & rgb_mask) == (fill_opaque & rgb_mask));
+
+    /* Exact 4:3 boundaries in a 1280x720 output: 160 black pixels on each
+     * side, with content beginning at x=160 and ending after x=1119. */
+    CHECK((SurfacePixel(argb, 0, argb->h / 2) & rgb_mask) == 0);
+    CHECK((SurfacePixel(argb, 159, argb->h / 2) & rgb_mask) == 0);
+    CHECK((SurfacePixel(argb, 160, argb->h / 2) & rgb_mask) ==
+          (fill_opaque & rgb_mask));
+    CHECK((SurfacePixel(argb, 1119, argb->h / 2) & rgb_mask) ==
+          (fill_opaque & rgb_mask));
+    CHECK((SurfacePixel(argb, 1120, argb->h / 2) & rgb_mask) == 0);
+    CHECK((SurfacePixel(argb, 1279, argb->h / 2) & rgb_mask) == 0);
 
     SDL_DestroySurface(argb);
   }

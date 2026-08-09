@@ -43,7 +43,7 @@ static DevToolsContext CurrentContext(void) {
     .pixel_aspect = g_active_pixel_aspect,
     .widescreen_extra = g_ws_extra,
     .widescreen_active = g_ws_active,
-    .ignore_aspect_ratio = g_settings.ignore_aspect_ratio,
+    .ignore_aspect_ratio = Settings_IgnoreAspectRatio(),
     .paused = HostInput_IsPaused(),
     .turbo = HostInput_IsTurbo(),
   };

@@ -179,9 +179,9 @@ bool CrtPost_Begin(SDL_Renderer *renderer) {
  *
  * The two present paths letterbox by different mechanisms, so neither source
  * alone is right. Flat mode leaves SDL's logical presentation active and lets
- * SDL do the letterboxing, so SDL itself knows the rect. The widescreen and 3D
- * paths disable logical presentation and compute their own viewport, which the
- * caller passes in. Ask SDL first, fall back to the caller.
+ * SDL do the letterboxing, so SDL itself knows the rect. The 3D paths disable
+ * logical presentation and compute their own viewport, which the caller passes
+ * in. Ask SDL first, fall back to the caller.
  *
  * MUST be called while the scene target is still bound: logical presentation
  * state is per-target. */

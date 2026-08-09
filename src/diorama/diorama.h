@@ -97,6 +97,7 @@ typedef struct DioramaProjection {
   float object_u0, object_v0, object_u1, object_v1;
   float aspect_x, height_scale;
   int texture_width, texture_height;
+  int output_x, output_y;
   int output_width, output_height;
   DioramaObjectPlaneProjection object_planes[kDioramaObjectPriorityCount];
 } DioramaProjection;
@@ -119,6 +120,10 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
  * 4th DioramaCameraPose field — that struct is reused verbatim for
  * FrameSlot's settings snapshots (main.c), which have no kick state at all.
  *
+ * `viewport` is the aspect-fit game rectangle in physical output pixels. The
+ * compositor renders in viewport-local coordinates and restores the full
+ * renderer viewport before returning.
+ *
  * bg2_valid_x0/x1 (Fix B, SPEC-backdrop-clip.md): the half-open TEXTURE-column
  * span of BG2's actually-rendered content, from DioramaBg2ValidSpan. Only the
  * skybox quad uses it — it is a screen-space quad, so cropping its source is
@@ -132,7 +137,8 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int obj_apron,
                        int active_pixel_aspect, bool ignore_aspect_ratio,
-                       int visible_width, SDL_Texture *textures[],
+                       int visible_width, SDL_Rect viewport,
+                       SDL_Texture *textures[],
                        uint8_t *pixels[],
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,

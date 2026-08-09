@@ -815,8 +815,21 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
      * background with the actors missing. */
   }
   PpuSetExtraVerticalSpace(g_ppu, g_ws_extra_top, g_ws_extra_bottom);
-  /* Only meaningful while a band exists, and re-applied every frame because
-   * ppu_reset zeroes the field like the rest of the margin state. */
+  /* The capture height is governed by BG1 because that is the foreground world
+   * the camera follows, but every world layer has its OWN camera. Clip each
+   * layer independently before its camera reaches row 0: otherwise a BG2 at
+   * Y=0 wraps negative synthetic lines to the bottom of its tilemap while BG1
+   * legitimately extends above the viewport. Fillmore act 2 exposed that as
+   * red BG2 geometry half-added over its grey BG1 castle wall. The setter is
+   * presentation-only and authentic lines remain bit-identical. */
+  if (g_ws_extra_top > 0) {
+    PpuSetVerticalMarginLayerClip(
+        g_ppu, kActRaiserPpuLayer_Bg1,
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
+    PpuSetVerticalMarginLayerClip(
+        g_ppu, kActRaiserPpuLayer_Bg2,
+        ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraY));
+  }
 
   /* AR_VEXT_TILES=1: classify the BG1 tilemap rows the band will read. A
    * "uniform" row (one tile id repeated across the whole ring width) is the

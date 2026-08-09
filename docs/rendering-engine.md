@@ -1590,18 +1590,42 @@ transpose of column 0 meaning screen x = `-ws_extra`. `PpuOutputRow` is the one
 place that mapping lives; it degenerates to the historic `y - 1` at zero margin,
 which is what keeps authentic output bit-identical.
 
-The band is real off-screen level content, not a synthesized continuation of
-the first visible row. That distinction is visible in Fillmore act 2's castle:
-the 32 rows immediately above the authentic viewport contain red brick courses,
-while the first authentic rows are grey. A deterministic vext-32/vext-0 A/B
-(`fillmore-title.rec`, direct `$01:$03` transition, screenshot gf 2200) confines
-the red pixels to the added rows. The same result appears in the live captures
-at `runs/20260808-220824`. This rules out HUD palette leakage: enabling the
-feature deliberately reveals authored map data the SNES viewport never showed.
-It remains default-off; room-specific visual taste belongs in the vertical-
-extend setting or room presentation policy, not in a palette correction.
+The band contains real off-screen world rows only while the individual layer
+has world above its own camera. That qualification is load-bearing: the capture
+height follows BG1, but BG1 and BG2 have independent cameras and dimensions.
+The PPU tilemap is a cyclic address space, not a declaration that the bottom of
+a bounded layer is spatially adjacent to its top. Negative scanlines do not
+exist on SNES hardware, so blindly applying the hardware wrap to them can expose
+resident tilemap data from the opposite world edge.
 
-Two traps, both found by measurement rather than by reading:
+Fillmore act 2 is the measured counterexample that corrected the first version
+of this documentation. At gf 2200, BG1 is at `$24=$05E8` in a `$30=$0700`-high
+world and legitimately owns all 32 requested rows above the viewport. BG2 is
+independently at `$28=$0000` with `$34=$0200` height and owns **zero**. The old
+`PpuBgTilemapRow` path mapped margin line -31 to 10-bit row 993; a 64-row-high
+tilemap selects physical pixel row 481, so lines -31..-1 read BG2's bottom
+rows 481..511 before authentic line 1 restarts at its transparent top. Direct
+snapshot rendering proves BG1 is grey there and the bottom of BG2 contains the
+red structures. The priority-split capture locates them on BG2-high, whose
+half-add flag makes the grey BG1 bricks beneath look red. The repro has
+`HDMAEN=$00`; neither HDMA nor HUD palette state creates the cutoff.
+
+The original vext-32/vext-0 A/B (`runs/20260808-222048` versus
+`runs/20260808-222203`) proved only that the pixels were confined to the added
+rows; it did **not** prove spatial provenance. Plane dump
+`runs/20260809-082943/diorama_dump/bg2_hi_gf2200.png` isolates the pre-fix red
+band, while `runs/20260809-085004/diorama_dump/bg2_hi_gf2200.png` is transparent
+after the fix with byte-identical WRAM (`b74e3362...`).
+
+`PpuSetVerticalMarginLayerClip` is the boundary contract. The frontend gives
+BG1 and BG2 the number of real rows above their respective `$24/$28` cameras;
+on synthetic lines farther away, that layer is transparent rather than wrapped.
+Authentic lines bypass the clip, and a deeper layer can remain visible while a
+shallower layer has reached its top. The global band still follows BG1 because
+BG1 is the foreground world/camera that determines whether there is a scene to
+extend at all.
+
+The early capture/row traps, all found by measurement rather than by reading:
 
 1. **`PpuSetOverlayCapture` clamped `y0` to 0** (while correctly allowing a
    negative `x`). The band rendered and was then silently clipped away — empty
@@ -1623,6 +1647,10 @@ Two traps, both found by measurement rather than by reading:
    writes to two destinations with two different origins and must bias only the
    diorama-plane one. Measured, action stage, extend 0 vs 32: the HUD occupies
    rows `[11..26]` in **both**, while the BG2 plane grows `[0..223]` → `[0..255]`.
+4. **The layers do not share a vertical world edge.** Using BG1's available-top
+   count to size the band is correct, but treating that as permission for every
+   BG is not. Each bounded world layer needs its own camera-derived clip or its
+   negative synthetic rows wrap to the opposite edge of the resident tilemap.
 
 `Diorama_Composite` normalizes world height against the AUTHENTIC 224, not the
 captured height — dividing by the capture would make the taller plane span the

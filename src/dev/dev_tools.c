@@ -124,8 +124,8 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
     CrtPost_End(context->renderer, frame_slot.visible_width,
                 frame_slot.snes_height,
                 ComputePresentationViewport(
-                    context->renderer, frame_slot.ws_active,
-                    frame_slot.ignore_aspect_ratio, frame_slot.pixel_aspect,
+                    context->renderer, frame_slot.ignore_aspect_ratio,
+                    frame_slot.pixel_aspect,
                     frame_slot.visible_width, frame_slot.snes_height));
     have_composite = true;
   }
@@ -283,8 +283,8 @@ void DevTools_AdjustHudOutputScale(const DevToolsContext *context,
   int current_percent = g_settings.hud_scale_percent;
   if (!current_percent && context->renderer) {
     const SDL_Rect viewport = ComputePresentationViewport(
-        context->renderer, context->widescreen_active,
-        context->ignore_aspect_ratio, context->pixel_aspect,
+        context->renderer, context->ignore_aspect_ratio,
+        context->pixel_aspect,
         Settings_VisibleWidth(), context->snes_height);
     current_percent =
         (viewport.h * kPercentScale + context->snes_height / 2) /
@@ -383,8 +383,8 @@ bool DevTools_InspectWindowPoint(const DevToolsContext *context,
     return false;
 
   const SDL_Rect viewport = ComputePresentationViewport(
-      context->renderer, context->widescreen_active,
-      context->ignore_aspect_ratio, context->pixel_aspect,
+      context->renderer, context->ignore_aspect_ratio,
+      context->pixel_aspect,
       Settings_VisibleWidth(), context->snes_height);
   int output_width = 0;
   int output_height = 0;

@@ -43,6 +43,7 @@
  * constants (not live state) — fine to pull in just for those. */
 #include "settings.h"
 #include "present_internal.h"
+#include "presentation_geometry.h"
 
 
 extern SDL_Renderer *g_renderer;
@@ -254,43 +255,32 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
   return count;
 }
 
-SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer, bool ws_active,
+SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer,
                                      bool ignore_aspect_ratio,
                                      int pixel_aspect, int visible_width,
                                      int snes_height) {
   int out_w = 0, out_h = 0;
   SDL_GetRenderOutputSize(renderer, &out_w, &out_h);
-  SDL_Rect viewport = { 0, 0, out_w, out_h };
-  if (!ws_active || ignore_aspect_ratio || out_w <= 0 || out_h <= 0)
-    return viewport;
-
-  int logical_w = visible_width * (pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
-  int logical_h = snes_height * (pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
-  if ((int64_t)out_w * logical_h > (int64_t)out_h * logical_w) {
-    viewport.w = (int)((int64_t)out_h * logical_w / logical_h);
-    viewport.x = (out_w - viewport.w) / 2;
-  } else {
-    viewport.h = (int)((int64_t)out_w * logical_h / logical_w);
-    viewport.y = (out_h - viewport.h) / 2;
-  }
-  return viewport;
+  return PresentationGeometry_CalculateViewport(
+      out_w, out_h, ignore_aspect_ratio,
+      pixel_aspect == kPixelAspect_Crt43, visible_width, snes_height);
 }
 
 void ApplyLogicalPresentation(const FrameSlot *slot) {
   if (!g_renderer) return;
-  if (slot->ws_active && !slot->ignore_aspect_ratio) {
-    if (slot->pixel_aspect == kPixelAspect_Crt43)
-      SDL_SetRenderLogicalPresentation(g_renderer, slot->visible_width * 7,
-                                       slot->snes_height * 6,
-                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
-    else
-      SDL_SetRenderLogicalPresentation(g_renderer, slot->visible_width,
-                                       slot->snes_height,
-                                       SDL_LOGICAL_PRESENTATION_LETTERBOX);
-  } else {
+  /* The explicit Stretch path draws directly in output coordinates, and must
+   * leave logical presentation disabled so readback and host-owned overlays
+   * continue to use physical output pixels. Aspect-fit mode needs SDL's
+   * letterbox transform for the base framebuffer. */
+  if (slot->ignore_aspect_ratio) {
     SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
                                      SDL_LOGICAL_PRESENTATION_DISABLED);
+    return;
   }
+  PresentationGeometry_ApplyLogical(
+      g_renderer, false,
+      slot->pixel_aspect == kPixelAspect_Crt43,
+      slot->visible_width, slot->snes_height);
 }
 
 static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) {
@@ -345,15 +335,10 @@ static void PresentHudOverlay(const FrameSlot *slot, SDL_Rect viewport) {
 }
 
 /* A7 (followup doc), diorama variant. A straight port of PresentHudOverlay
- * into the diorama branch (multiple chunk blits directly against the
- * diorama's raw full-output viewport) produced visible seams between the
- * ACT/TIME/SCORE bands. Root cause: BuildHudPresentationChunks derives
- * scale_x/scale_y from the viewport it's handed, and the flat branch always
- * hands it the aspect-locked viewport from ComputePresentationViewport
- * (letterboxed to preserve pixel_aspect); the diorama branch instead hands
- * it the UNCORRECTED full output rect (diorama.c's 3D scene intentionally
- * fills edge-to-edge, ignoring pixel_aspect), so scale_x and scale_y came
- * out mismatched and the bands didn't line up.
+ * into the diorama branch produced visible seams between the ACT/TIME/SCORE
+ * bands because the scene and overlay followed different viewport policies.
+ * Both branches now receive the same aspect-fit viewport; retaining a single
+ * composite texture also makes per-chunk rounding self-contained.
  *
  * Reconstruct the whole HUD into one dedicated texture first (recreated
  * whenever the output size changes — same resolution the chunks would have
@@ -877,7 +862,7 @@ static bool ProjectActionEffectPoint(
   float capture_x = (float)slot->ws_extra + screen_x + local_x;
   float capture_y = (float)screen_y + local_y;
 
-  if (context->diorama_projection)
+  if (context->diorama_projection) {
     /* +ws_extra_top for the same reason capture_x carries +ws_extra: the
      * diorama samples TEXTURE space, whose row 0 is screen y = -ws_extra_top.
      * The flat path below keeps the authentic screen y, and never sees a
@@ -886,6 +871,7 @@ static bool ProjectActionEffectPoint(
         context->diorama_projection, capture_x,
         capture_y + (float)slot->ws_extra_top,
         effect->obj_priority, point, NULL, NULL);
+  }
 
   point->x = context->viewport.x +
       (capture_x - (float)slot->visible_x0) * context->viewport.w /
@@ -1200,18 +1186,19 @@ void PresentComposite(const FrameSlot *slot,
                         slot->extra_left_cur, slot->extra_right_cur,
                         slot->bg2_margin_source, kFrameSlotLayerTextureWidth,
                         &bg2_valid_x0, &bg2_valid_x1);
+    SDL_Rect viewport = ComputePresentationViewport(
+        g_renderer, slot->ignore_aspect_ratio, slot->pixel_aspect,
+        slot->visible_width, slot->snes_height);
     DioramaProjection action_projection;
     if (!Diorama_Composite(g_renderer, slot->snes_width,
                            slot->snes_height + slot->ws_extra_top,
                            slot->obj_apron,
                            slot->pixel_aspect, slot->ignore_aspect_ratio,
-                           slot->visible_width, g_diorama_textures, pixels,
+                           slot->visible_width, viewport,
+                           g_diorama_textures, pixels,
                            &scroll_delta, &final_cam, distance_scale,
                            bg2_valid_x0, bg2_valid_x1, &action_projection))
       return;
-    int out_w = 0, out_h = 0;
-    SDL_GetRenderOutputSize(g_renderer, &out_w, &out_h);
-    SDL_Rect viewport = { 0, 0, out_w, out_h };
     DrawActionEffects(slot, viewport, &action_projection);
     /* A7/A5 (followup doc): the diorama branch used to skip the widescreen
      * HUD anchoring entirely — BG3 (ACT/TIME/SCORE, HP, boss health)
@@ -1240,13 +1227,14 @@ void PresentComposite(const FrameSlot *slot,
   }
 
   ApplyLogicalPresentation(slot);
+  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   SDL_RenderClear(g_renderer);
   SDL_Rect src = { slot->visible_x0, 0, slot->visible_width, slot->snes_height };
   SDL_FRect src_f = ToFRect(src);
   SDL_RenderTexture(g_renderer, g_texture, &src_f, NULL);
 
   SDL_Rect viewport = ComputePresentationViewport(
-      g_renderer, slot->ws_active, slot->ignore_aspect_ratio,
+      g_renderer, slot->ignore_aspect_ratio,
       slot->pixel_aspect, slot->visible_width, slot->snes_height);
   SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);

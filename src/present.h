@@ -400,7 +400,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
                                const HudProjectionInputs *inputs,
                                HudPresentationChunk *chunks);
 
-SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer, bool ws_active,
+SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer,
                                      bool ignore_aspect_ratio,
                                      int pixel_aspect, int visible_width,
                                      int snes_height);

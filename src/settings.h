@@ -49,8 +49,8 @@ typedef enum {
   kWindowMode_Count,
 } WindowMode;
 
-/* Present pacing. Vsync locks to the display; Unlimited disables vsync so the
- * present thread never blocks; Limit paces to frame_limit_fps. */
+/* Present pacing. Vsync locks to the display; Unlimited disables vsync and
+ * uses a soft 2x detected-refresh cap; Limit paces to frame_limit_fps. */
 typedef enum {
   kRefreshMode_Vsync = 0,
   kRefreshMode_Unlimited,
@@ -265,8 +265,7 @@ typedef struct Settings {
    * output window in 0.25x steps; 100 is one source pixel per output pixel. */
   int menu_scale_percent;
   /* Master toggle for manifest-driven HD graphics replacements
-   * (game-assets/manifest.ini). Silently inert when the manifest/art files
-   * are absent or the run is headless (no overlay bindings). */
+   * (game-assets/manifest.ini). The menu disables it when no art loaded. */
   bool hd_replacements;
 
   /* Application presentation settings. Video buffers reserve the PPU's
@@ -274,12 +273,11 @@ typedef struct Settings {
    * render width without reallocating emulated state. */
   int extended_aspect;
   int pixel_aspect;
-  int window_scale;         /* render/upscale multiple of the SNES height */
+  int window_scale;         /* windowed client-size multiple */
   int window_mode;          /* WindowMode: windowed / borderless / exclusive */
   bool new_renderer;
-  /* Derived from extended_aspect == kScreenAspect_Stretch; kept as its own
-   * field because many runtime readers (present.c, diorama.c, main.c) gate on
-   * it. Settings keep it in sync via OnScreenRatioChanged. */
+  /* Load-only compatibility alias. Runtime code must use
+   * Settings_IgnoreAspectRatio(), derived from extended_aspect. */
   bool ignore_aspect_ratio;
   int refresh_mode;         /* RefreshMode: vsync / unlimited / limit */
   int frame_limit_fps;      /* target FPS when refresh_mode == Limit */
@@ -564,13 +562,7 @@ typedef struct Settings {
   int crt_bandwidth_x100;    /* horizontal signal smear, in SOURCE pixels    */
   int crt_vignette_x100;     /* corner falloff                               */
   int crt_brightness_x100;   /* lifts the darkening mask+scanlines cause     */
-  /* B1a (followup doc): mode-agnostic (works flat or diorama), unlike
-   * gpu_interp_enabled's motion-smoothing which is diorama-only. Wired to
-   * two mechanisms (main.c): SDL_SetRenderVSync off (applied at boot AND
-   * live via OnRuntimeSettingChanged, quiesced like every other
-   * renderer-mutating setting), and the present thread's idle-redraw
-   * cadence drops to ~4ms so disabling vsync actually has somewhere to
-   * re-present faster into. */
+  /* Load-only compatibility alias for refresh_mode == Unlimited. */
   bool uncapped_framerate;
 
   /* Input mapping. The dimensions mirror input_map.h's InputClass /
@@ -656,6 +648,10 @@ const char *Settings_ChangeResultName(SettingChangeResult result);
  * overwrite them; descriptor mutations of individual widescreen fields
  * automatically reclassify the resulting FULL/RAW/CUSTOM combination. */
 void Settings_SetDisplayMode(int mode);
+/* Reconcile a pre-change render profile after screen/PAR geometry updates.
+ * Wide RAW/FULL/CUSTOM survives a wide-to-wide change; entering wide from 4:3
+ * selects FULL, and losing the wide framebuffer selects authentic 4:3. */
+void Settings_ReconcileDisplayModeAfterGeometryChange(int previous_mode);
 int  Settings_CycleDisplayMode(void);
 const char *Settings_DisplayModeName(int mode);
 
@@ -674,7 +670,13 @@ bool Diorama_NewPpuCapable(void);
 bool Sim3D_ModeIsOn(void);
 int Settings_ExtendedAspectX(void);
 int Settings_ExtendedAspectY(void);
+bool Settings_IgnoreAspectRatio(void);
 int Settings_AudioFrequencyHz(void);
+
+/* HD replacements are only actionable when at least one manifest image was
+ * decoded and uploaded. The host publishes that resource state after load. */
+void Settings_SetHdReplacementsAvailable(bool available);
+bool Settings_HdReplacementsAvailable(void);
 
 /* The host display's detected refresh rate in whole Hz (0 = unknown). main.c
  * pushes it from SDL at boot and whenever the window's display/mode changes;
