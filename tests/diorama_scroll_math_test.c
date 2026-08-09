@@ -134,10 +134,10 @@ int main(void) {
    * exactly the bug this replaced. */
   {
     /* Against the real surface width, not a literal: the apron moved that
-     * constant from 448 to 576 and every hard-coded copy here went stale at
-     * once. `span` is the written content span the window must stay inside. */
+     * constant from 448 to 576, and the BG-width track moved it again to 640.
+     * `span` is the written content span the window must stay inside. */
     const float tex = (float)kFrameSlotLayerTextureWidth;
-    const float span = 446.0f;
+    const float span = 496.0f;
     const float slack = 4.0f / tex;                  /* kInterpUvSlackPx / tex */
     const float r0 = slack, r1 = span / tex - slack;
     const float width = r1 - r0;

@@ -37,8 +37,9 @@ single `coverage.json` linking every individual report.
 
 **One metric is NOT deterministic, and it will waste your time if you assume it
 is.** `D5a-world-underlay`'s "B/A profiles changed N output pixels" varies
-run-to-run on the *same binary* — measured 213680 / 213690 / 213695 / 213711
-across repeated runs, a 31px spread on 213k (0.015%). The sim cloud layers drift
+run-to-run on the *same binary*. The checkpoint now pins Free Cam explicitly;
+a representative post-pin run changed 174147 pixels and stayed below its
+200000-pixel ceiling, but the exact total still moves slightly. The sim cloud layers drift
 on wall-clock (`present.c` feeds `SDL_GetTicks()` into
 `Scene3D_WrappedTextureOffset`), so a faster or slower build samples a different
 cloud phase. Two consecutive runs happening to agree does not make it stable —

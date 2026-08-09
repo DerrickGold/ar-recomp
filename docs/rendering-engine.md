@@ -715,9 +715,11 @@ bundled runtime's widescreen/PPU interfaces:
   relationship. The same host placement then pins the 16px capture four native
   pixels before simulation's right/score group.
 - Sky Palace's selected-magic icon is a separate OAM capture path: the game
-  dynamically allocates its sprites (dialog Yes/No icons can push the icon to
-  higher slots), so the host scans OAM from slot 6 onward for the signature
-  rather than hardcoding a slot index.
+  dynamically allocates its sprites. With no dialog sprites the icon can occupy
+  slots 0-3; dialog/menu sprites can push the same icon to slots 6-9 (both
+  layouts measured in `runs/20260808-214848`). The host therefore scans the
+  complete OAM table from slot 0 for the signature rather than imposing a
+  minimum slot or hardcoding an index.
 - **That icon has two OAM shapes, one per spell (corrected 2026-08-06).** The
   ROM draws the same 16x16 framed icon at the same fixed position (x `$94`,
   y `$0B`, attr `$39`) two different ways, measured one snapshot per spell in
@@ -1250,9 +1252,10 @@ the safe direction.
 Lifting the camera instead does not work and the reasoning is worth keeping.
 The emitter reaches `base_y` through `dp $96`, which is one value for every
 record, so biasing it moves grounded records too; it trades the bottom edge for
-the top; and the vertical window cannot move at all, because OAM's Y byte has
-no ninth bit and `ActRaiser_SimProjectileVisible`'s false result destroys the
-record, making the predicate gameplay rather than presentation.
+the top; and it cannot extend real OAM's authentic vertical window. The exact
+synthetic channel can extend drawable reach, but only `sim_view_range` moves it
+together with `ActRaiser_SimProjectileVisible`: that predicate's false result
+destroys the record, making range gameplay rather than camera presentation.
 
 ### Mesh density is a correctness constraint
 
@@ -1587,6 +1590,17 @@ transpose of column 0 meaning screen x = `-ws_extra`. `PpuOutputRow` is the one
 place that mapping lives; it degenerates to the historic `y - 1` at zero margin,
 which is what keeps authentic output bit-identical.
 
+The band is real off-screen level content, not a synthesized continuation of
+the first visible row. That distinction is visible in Fillmore act 2's castle:
+the 32 rows immediately above the authentic viewport contain red brick courses,
+while the first authentic rows are grey. A deterministic vext-32/vext-0 A/B
+(`fillmore-title.rec`, direct `$01:$03` transition, screenshot gf 2200) confines
+the red pixels to the added rows. The same result appears in the live captures
+at `runs/20260808-220824`. This rules out HUD palette leakage: enabling the
+feature deliberately reveals authored map data the SNES viewport never showed.
+It remains default-off; room-specific visual taste belongs in the vertical-
+extend setting or room presentation policy, not in a palette correction.
+
 Two traps, both found by measurement rather than by reading:
 
 1. **`PpuSetOverlayCapture` clamped `y0` to 0** (while correctly allowing a
@@ -1697,17 +1711,18 @@ Measured, Fillmore act 2 at extend 32: band OBJ pixels 104 → 570, 0 → 466,
 104 → 735 on the frames where it fires, with the AUTHENTIC rows of all 32
 plane dumps byte-identical, attract frame and flat widescreen byte-identical.
 
-**Lifecycle (2026-08-05, ledger §34): the sideband is action-owned and must
-not outlive its emitter.** It is rebuilt from scratch by every
-`ActRaiser_ObjectVisibilityScanWide` pass (cleared at the top of the scan) —
-and because the renderer prefers a valid override over the byte on EVERY line,
-not only band lines, it must not survive the scan going silent:
-`ActRaiserDrawPpuFrame` clears it on every non-action frame. Before that clear
-existed, the last action frame's overrides persisted into sim mode and re-drew
-slots the temple cutscene had parked (x=0/y=$E0/tile $000/flip HV) at their
-stale action Ys. The clear is gated on the map group rather than unconditional
-because an action pause frame skips the scan with OAM frozen, and must keep
-drawing its band sprites from the same overrides that emitted them.
+**Lifecycle (2026-08-05, expanded 2026-08-08; ledger §34): the sideband has
+explicit action and simulation-town owners and must not outlive either
+emitter.** Action rebuilds it from scratch in every
+`ActRaiser_ObjectVisibilityScanWide` pass. The simulation composition pass now
+does the same while publishing exact atlas parts. Because the renderer prefers
+a valid override over the byte on EVERY line, `ActRaiserDrawPpuFrame` tracks
+which owner supplied the current positions and clears them on every other
+scene. Before that ownership clear existed, the last action frame's overrides
+persisted into sim mode and re-drew slots the temple cutscene had parked
+(x=0/y=$E0/tile $000/flip HV) at their stale action Ys. A redraw where the
+emulated game did not advance keeps its owner's positions: action pause frames
+and paused simulation towns both have frozen OAM and no new emitter pass.
 
 ### What the band actually contains
 
@@ -1794,12 +1809,12 @@ lands visibly inside the picture rather than at the screen border.
 The instinct is to show the extra columns so the object appears whole. That is
 wrong, and the reason is a hard cap elsewhere:
 
-**Background rendering is bounded by `kPpuExtraLeftRight = 96` columns per side,
-and the diorama already spends 95 of them.** So the apron can only ever hold OBJ
-pixels. Displaying it would show sprites floating over empty background — worse
-than the artifact it was meant to fix. Making BG follow would mean raising
-`kPpuExtraLeftRight`, widening the per-scanline line buffers and extending
-tilemap streaming, which is exactly the per-line cost the width split declined.
+**Background rendering now ends at `kPpuExtraLeftRight = 128` columns per side,
+and the live diorama view ends at `kWsExtraMax = 120`.** The apron remains a
+separate 64-column resolve band beyond both, so it can only ever hold OBJ
+pixels. Displaying it would show sprites floating over empty background. The BG
+width track deliberately widened the scanline buffers and accelerated tilemap
+refresh without changing that resolve-only contract.
 
 The corollary is worth stating plainly because it is easy to talk yourself out
 of: **clipping at the shown edge is inherent to any finite shown region and the
@@ -1838,8 +1853,9 @@ construction rather than by care. `tests/action_obj_apron_test.c` pins it.
 
 A part outside the display window stays PARKED in the OAM shadow exactly as the
 ROM left it and rides a host part list instead, carrying its exact position
-(these coordinates are outside what the 9-bit OAM X can represent — see
-`kWsExtraMax = 95`, §13i's table). Only the object-level draw predicate widens,
+(these coordinates can be outside what the 9-bit OAM X can identify
+unambiguously; the exact-position sideband is what made the live cap independent
+of OAM). Only the object-level draw predicate widens,
 because it gates whether the sprite builder runs at all; an object admitted
 solely by that widening has every part rejected and parks a slot rather than
 consuming one. Nothing writes OAM differently, so the invariant cannot drift.

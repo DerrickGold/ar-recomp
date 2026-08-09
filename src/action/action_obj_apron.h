@@ -30,16 +30,16 @@
  *   - It is the machinery the sim synthetic part channel needs (plan Phases
  *     5-6), built where a byte-identity gate can prove it.
  *
- * The apron can only ever hold OBJ pixels: background rendering is bounded by
- * kPpuExtraLeftRight = 96 columns per side and the diorama already spends 95 of
- * them. That is why the apron is not displayed -- showing it would show sprites
- * over empty background.
+ * The apron can only ever hold OBJ pixels. The widened background line buffer
+ * ends at kPpuExtraLeftRight=128 and the live view ends at kWsExtraMax=120;
+ * neither extends into these additional 64 columns. That is why the apron is
+ * not displayed -- showing it would show sprites over empty background.
  *
  * INVARIANT, and the reason this is a separate channel rather than a wider
  * emit window: real OAM is NEVER widened. A part outside the display window
  * stays parked in the OAM shadow exactly as the ROM left it, and rides here
  * instead, carrying its EXACT position rather than the lossy 9-bit/8-bit
- * encoding (which cannot represent these positions -- see kWsExtraMax = 95). */
+ * encoding. */
 
 enum {
   /* Capacity, not a truncation policy: overflow is counted and reported, never

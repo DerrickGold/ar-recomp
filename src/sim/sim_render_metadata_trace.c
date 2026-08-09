@@ -88,8 +88,10 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           "\"effect_count\":%u,\"effect_visible_count\":%u,"
           "\"effect_overflow_count\":%u,"
           "\"emitted_oam_count\":%u,"
-          "\"claimed_oam_count\":%u,\"world_oam_first\":%u,"
-          "\"world_oam_count\":%u,\"framebuffer_hash\":\"%016llx\","
+          "\"claimed_oam_count\":%u,\"synthetic_part_count\":%u,"
+          "\"synthetic_part_overflow_count\":%u,\"world_oam_first\":%u,"
+          "\"world_oam_count\":%u,\"world_record_occupancy\":%u,"
+          "\"framebuffer_hash\":\"%016llx\","
           "\"sources\":[",
           (unsigned)host_frame, (unsigned)frame->game_frame,
           (unsigned)frame->town,
@@ -186,8 +188,11 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (unsigned)frame->effect_overflow_count,
           (unsigned)frame->emitted_oam_count,
           (unsigned)frame->claimed_oam_count,
+          (unsigned)frame->synthetic_part_count,
+          (unsigned)frame->synthetic_part_overflow_count,
           (unsigned)frame->world_oam_first,
           (unsigned)frame->world_oam_count,
+          (unsigned)frame->world_record_occupancy,
           (unsigned long long)FrameHash(rgba, width, height, pitch));
   for (unsigned i = 0; i < frame->source_count; i++) {
     const SimSourceRecord *source = &frame->sources[i];
@@ -197,7 +202,7 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
             "\"type\":%u,\"state\":%u,\"word06\":%u,"
             "\"x\":%u,\"y\":%u,"
             "\"oam_first\":%u,\"oam_count\":%u,"
-            "\"obj_palette_mask\":%u,"
+            "\"synthetic_parts\":%u,\"obj_palette_mask\":%u,"
             "\"fragment_first\":%u,\"fragment_count\":%u}",
             (unsigned)source->record_address, (unsigned)source->tier,
             (unsigned)source->composition, (unsigned)source->type,
@@ -205,6 +210,7 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
             (unsigned)source->record_word06, (unsigned)source->world_x,
             (unsigned)source->world_y, (unsigned)source->oam_first,
             (unsigned)source->oam_count,
+            (unsigned)source->synthetic_parts,
             (unsigned)source->obj_palette_mask,
             (unsigned)source->fragment_first,
             (unsigned)source->fragment_count);
@@ -220,6 +226,7 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
             "\"virtual_height\":%d,\"classified_height\":%d,"
             "\"casts_shadow\":%s,\"color_math_eligible\":%s,"
             "\"oam_first\":%u,\"oam_count\":%u,"
+            "\"part_count\":%u,\"synthetic_part_count\":%u,"
             "\"foot_x\":%d,\"foot_y\":%d,\"atlas_valid\":%s,"
             "\"local_bounds\":[%d,%d,%d,%d],"
             "\"atlas\":[%u,%u,%u,%u]}",
@@ -233,7 +240,10 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
             Sim3D_ObjectCastsShadow(object) ? "true" : "false",
             object->color_math_eligible ? "true" : "false",
             (unsigned)object->oam_first,
-            (unsigned)object->oam_count, object->foot_x, object->foot_y,
+            (unsigned)object->oam_count,
+            (unsigned)object->part_count,
+            (unsigned)object->synthetic_part_count,
+            object->foot_x, object->foot_y,
             object->atlas_valid ? "true" : "false",
             object->local_x0, object->local_y0,
             object->local_x1, object->local_y1,

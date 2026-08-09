@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "sim_world_navigation_scene.h"
+#include "snes/ppu.h"
 #include "types.h"
 
 /* Phase D1's immutable simulation-town render contract.  The producer is
@@ -14,6 +15,12 @@
 enum {
   kSimMaxSourceRecords = 92,  /* 48 fixed + 44 world records. */
   kSimMaxRenderObjects = 128, /* At most one priority run per OAM slot. */
+  /* OAM-backed and host-only parts in emitter order. Synthetic parts do not
+   * consume one of the 128 hardware slots. ROM checkpoints measured at most
+   * 50 OAM parts and 15 synthetic parts (not necessarily in the same frame)
+   * across ranges 0..256; 192 leaves almost 3x headroom over their summed
+   * upper bound. Overflow fails closed and is published in diagnostics. */
+  kSimMaxResolvedParts = 192,
   /* One semantic emitter per relevant record, not one per particle. Thirty-two
    * covers the largest mapped 4x4 impact cohort plus its parent and leaves
    * room for overlapping families. Overflow is still reported and fails the
@@ -318,6 +325,7 @@ typedef enum SimMetadataIntegrityFlag {
   kSimMetadataIntegrity_WorldSuffix = 1u << 5,
   kSimMetadataIntegrity_AtlasOverflow = 1u << 6,
   kSimMetadataIntegrity_AtlasRasterFailure = 1u << 7,
+  kSimMetadataIntegrity_PartContract = 1u << 8,
 } SimMetadataIntegrityFlag;
 
 typedef struct SimSourceRecord {
@@ -357,6 +365,7 @@ typedef struct SimSourceRecord {
   uint8_t anchor_valid;
   uint8_t clip_reason;
   uint16_t clipped_parts;
+  uint16_t synthetic_parts;
 } SimSourceRecord;
 
 typedef struct SimRenderObject {
@@ -367,6 +376,11 @@ typedef struct SimRenderObject {
   uint16_t semantic_state;
   uint16_t oam_first;
   uint8_t oam_count;
+  /* Complete exact parts in emitter order. The atlas uses these only when the
+   * count proves every OAM-backed and synthetic part in this fragment arrived. */
+  uint16_t part_first;
+  uint8_t part_count;
+  uint8_t synthetic_part_count;
   uint8_t priority;
   uint8_t source_index;
   uint8_t tier;
@@ -515,9 +529,10 @@ const char *Sim3D_EffectSpaceName(SimEffectGeometrySpace space);
  * actor's own feet. */
 /* Cloud-shroud cover at one point, 0..1.
  *
- * Pure, and deliberately separate from the renderer: the shroud exists to hide
- * ground that OAM cannot populate, so "how covered is this point" is a
- * statement about the sprite-drawable rectangle, not about clouds.
+ * Pure, and deliberately separate from the renderer: the shroud explains the
+ * boundary of the complete real-OAM plus synthetic-part actor channel, so
+ * "how covered is this point" is a statement about the sprite-drawable
+ * rectangle, not about clouds.
  *
  * The ramp starts `inset` pixels INSIDE the rectangle and reaches full cover
  * `falloff` pixels outside it, so cover is already substantial at the edge
@@ -560,8 +575,9 @@ float Sim3D_CloudCoverage(float x, float y, float clear_x0, float clear_x1,
  * and the thing that hides it are the same arithmetic rather than two
  * derivations that agree by inspection. */
 float Sim3D_CullProximity(int16_t anchor_x, int16_t anchor_y,
-                          int margin_left, int margin_right, int lead,
-                          int corner, int lift_inset);
+                          int margin_left, int margin_right,
+                          int margin_top, int margin_bottom,
+                          int lead, int corner, int lift_inset);
 
 /* Whether a record should carry cover this frame, and how much.
  *
@@ -570,8 +586,9 @@ float Sim3D_CullProximity(int16_t anchor_x, int16_t anchor_y,
  * finite town, or a destroyed projectile is legitimately absent and putting a
  * cloud over it would assert something false. Returns 0 for those. */
 float Sim3D_SourceCullCover(const SimSourceRecord *source,
-                            int margin_left, int margin_right, int lead,
-                            int corner, int lift_inset);
+                            int margin_left, int margin_right,
+                            int margin_top, int margin_bottom,
+                            int lead, int corner, int lift_inset);
 
 /* How far above its record the renderer draws this source, in authentic
  * pixels, after the presentation height scale.
@@ -694,11 +711,13 @@ typedef struct SimFrameData {
   /* Sprite-drawable span in captured-texture columns. The shroud clears
    * exactly the region OAM can populate, so it is derived from the same
    * margins the emitter uses rather than guessed at present time. */
-  uint16_t cloud_clear_x0, cloud_clear_x1;
+  int16_t cloud_clear_x0, cloud_clear_x1;
+  int16_t cloud_clear_y0, cloud_clear_y1;
   /* The live widescreen margins the emitter used this frame, published so the
    * renderer can evaluate the cull predicate on the same window the emitter
    * did rather than reconstructing it from cloud_clear_*. */
   int16_t sprite_margin_left, sprite_margin_right;
+  int16_t sprite_margin_top, sprite_margin_bottom;
   /* How far ahead of the sprite-window edge cull cover reaches full strength,
    * in authentic pixels. */
   uint16_t cull_lead_px;
@@ -746,7 +765,10 @@ typedef struct SimFrameData {
   uint16_t underlay_screen_x0;
   uint16_t emitted_oam_count;
   uint16_t claimed_oam_count;
+  uint16_t synthetic_part_count;
+  uint16_t synthetic_part_overflow_count;
   uint8_t world_oam_first, world_oam_count;
+  uint8_t world_record_occupancy;
   uint8_t source_count;
   uint8_t zero_oam_source_count;
   uint16_t object_count;
@@ -765,7 +787,9 @@ typedef struct SimFrameData {
 typedef struct SimAtlasBuildInput {
   uint32_t build_serial;
   uint16_t object_count;
+  uint16_t part_count;
   SimRenderObject objects[kSimMaxRenderObjects];
+  PpuObjPart parts[kSimMaxResolvedParts];
 } SimAtlasBuildInput;
 
 /* Pure dependency resolver.  implemented_features is a capability mask, not
@@ -777,7 +801,8 @@ SimRenderFeatureMask Sim3D_ResolveFeatureMask(
     SimViewKind view, bool master_enabled, bool metadata_valid);
 
 /* Game-thread producer API used by the faithful SIM composition leaves. */
-void SimRenderMetadata_BeginRecord(
+/* True when this call began a new per-frame build. */
+bool SimRenderMetadata_BeginRecord(
     uint16_t record_address, bool world_record, bool alternate_attributes,
     uint16_t composition, uint16_t world_x, uint16_t world_y,
     uint16_t type, uint16_t semantic_state, uint16_t status,
@@ -791,6 +816,9 @@ void SimRenderMetadata_RecordWord06(uint16_t value);
  * a record without this call simply has no cull-lead anchor. */
 void SimRenderMetadata_RecordAnchor(int16_t base_x, int16_t base_y);
 void SimRenderMetadata_RecordPart(uint16_t oam_cursor, uint16_t attributes);
+void SimRenderMetadata_RecordExactOamPart(const PpuObjPart *part);
+void SimRenderMetadata_RecordSyntheticPart(uint16_t oam_cursor,
+                                           const PpuObjPart *part);
 /* One composition part the sprite window rejected. Counted per part rather
  * than per record because a wide composition can straddle the edge, and a
  * record that lost half its parts is already visibly wrong. */

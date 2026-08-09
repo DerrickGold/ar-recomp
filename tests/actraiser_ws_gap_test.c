@@ -13,7 +13,7 @@
 #define kSentinel 0xDEADBEEFu
 #define kFill     0xFF1030A0u
 
-enum { kBudget = 95, kAuthentic = 256, kWidth = kAuthentic + 2 * kBudget,
+enum { kBudget = 120, kAuthentic = 256, kWidth = kAuthentic + 2 * kBudget,
        kHeight = 8 };
 
 static int g_failures;

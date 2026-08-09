@@ -388,7 +388,7 @@ if (en < 0) { ...getenv("AR_ALL_MAGIC")... }
 if (en) { ... }
 ```
 
-Aspect now uses the renderer's compile-time maximum 448-pixel capacity while
+Aspect now uses the renderer's compile-time maximum 512-pixel capacity while
 retaining an active pitch of `256 + 2*extra`. Ratio or pixel-shape changes
 recompute `extra`, rebind the PPU and overlay surfaces with that pitch, and
 select the matching texture subrect. The emulated PPU/WRAM state is untouched,
@@ -562,7 +562,7 @@ it naturally when the relevant engine becomes active.
 |---|---|---|---|---|
 | Wide action stages | `AR_WS_ACTION` | bool | on | master action-geometry toggle |
 | Wide simulation towns | `AR_WS_SIM` | bool | on | master toggle; applies `$01:B4C6` map-edge caps, keeps BG2/dialogs clamped, and gates the separate world-sprite setting |
-| Wide simulation sprites | `AR_WS_SIM_SPRITES` | bool | on | widens ADAD/AE6F horizontal emission only for `$0A00-$1087` world records and the dedicated `$0B0A` angel-arrow lifetime leaf `$B473`. Fixed/UI records, hard world bounds, and vertical rules stay authentic |
+| Wide simulation sprites | `AR_WS_SIM_SPRITES` | bool | on | widens ADAD/AE6F real-OAM horizontal emission for `$0A00-$1087` world records; host-only exact parts can extend farther through `Extended actor range`. Fixed/UI records and hard world bounds stay authentic |
 | BG margin refresh | `AR_WS_BGREFRESH` | bool | on | true-content margins vs stale/wrapped |
 | Sky Palace BG2 source repair | `AR_WS_SKYPALACE_BG` | bool | on | render-only ROM source-map margin decode; off restores raw-wide dialogue staging. Validated 2026-07-13 (byte-identical to the boot colonnade) |
 | Widen sprites | `AR_WS_SPRITES` | bool | on | emit sprites into margins |
@@ -571,7 +571,7 @@ it naturally when the relevant engine becomes active.
 | Decorative BG2 padding | `AR_WS_BG2_MIRROR` | bool | on | stage policy chooses reflection or cyclic repeat; off clamps the 256-wide BG2. Keep env name for compatibility |
 | Clamp override | `AR_WS_CLAMP` | mask | none | manual per-layer mask; already uncached/live |
 
-### Simulation 3D (`kSettingCat_Simulation`) — all PASSIVE (2026-07-22)
+### Simulation 3D (`kSettingCat_Simulation`) (updated 2026-08-08)
 
 Read by the game thread and resolved into the immutable `FrameSlot` payload;
 the present path never reads them live. Town stages are gated on
@@ -582,11 +582,15 @@ lighting/weather/colour controls are shared by the `$09` art treatment, but
 town camera, canvas, billboard/atlas, cull-window, and cloud-shroud stages
 remain town-only. Navigation has separate effect gates, so sharing numeric
 tuning never makes either master imply the other. The diagnostic layer mask is
-a developer control, not a shipped player setting.
+a developer control, not a shipped player setting. `Extended actor range` is
+the deliberate exception to the otherwise presentation-only controls: it
+extends projectile lifetime and can change world-record pressure, so the menu
+labels it gameplay-affecting.
 
 | Setting | env | Type | Default | Note |
 |---|---|---|---|---|
 | Simulation town 3D | `AR_SIM3D` | bool | off | master toggle; requires the new PPU renderer |
+| Extended actor range | `AR_SIM_VIEW_RANGE` | int | 0 | gameplay-affecting extra reach for lifetime, exact synthetic parts, fog, and cloud-shroud clearing; 0 preserves authentic lifetime. Independent of the display preset: 4:3 and Wide Raw keep real OAM authentic but still honor this host/lifetime range. Range 0–256 in 16-pixel steps. ROM replays measured a peak of 12/44 occupied world records at every sampled value (0, 64, 128, 192, 256), with 15 synthetic parts and no overflow at 256 |
 | World navigation 3D | `AR_SIM3D_WORLD_NAV` | bool | off | map `$09` only; forced top-down and driven by the game's focus/matrix/zoom state, with no free camera |
 | World navigation lighting | `AR_SIM3D_WORLD_NAV_LIGHTING` | bool | on | subordinate to World navigation 3D, not Simulation town 3D; applies the top-down colour grade and directional cloud shadows |
 | World navigation clouds | `AR_SIM3D_WORLD_NAV_CLOUDS` | bool | off | subordinate whole-map weather pass; cloud bodies fade out as near zoom takes the camera below the shared altitude, while ground shadows remain |

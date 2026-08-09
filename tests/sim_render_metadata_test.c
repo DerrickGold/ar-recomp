@@ -570,6 +570,67 @@ static void TestEffectOverflowFailsClosed(void) {
   CHECK(!(frame.effective_features & kSimFeature_Particles));
 }
 
+static void TestResolvedPartOverflowFailsClosed(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  SimRenderMetadata_Reset();
+
+  Begin(kActRaiserWram_SimWorldRecords, true, 0xE71B, 0);
+  const PpuObjPart synthetic = {
+    .x = 258,
+    .y = 112,
+    .tile_attr = 2u << 12,
+    .size = 16,
+  };
+  for (int i = 0; i <= kSimMaxResolvedParts; i++)
+    SimRenderMetadata_RecordSyntheticPart(0, &synthetic);
+  SimRenderMetadata_EndRecord(0);
+
+  SimFrameData frame;
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(!frame.metadata_valid);
+  CHECK(frame.integrity_flags & kSimMetadataIntegrity_Overflow);
+  CHECK(frame.synthetic_part_count == kSimMaxResolvedParts);
+  CHECK(frame.synthetic_part_overflow_count == 1);
+}
+
+static void TestResolvedPartContractFailsClosed(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  const PpuObjPart part = {
+    .x = 258,
+    .y = 112,
+    .tile_attr = 2u << 12,
+    .size = 16,
+  };
+
+  SimRenderMetadata_Reset();
+  Begin(kActRaiserWram_SimWorldRecords, true, 0xE71B, 0);
+  SimRenderMetadata_RecordPart(0, 2u << 12);
+  PpuObjPart wrong_priority = part;
+  wrong_priority.tile_attr = 3u << 12;
+  SimRenderMetadata_RecordExactOamPart(&wrong_priority);
+  SimRenderMetadata_EndRecord(4);
+
+  SimFrameData frame;
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(!frame.metadata_valid);
+  CHECK(frame.integrity_flags & kSimMetadataIntegrity_PartContract);
+
+  SimRenderMetadata_Reset();
+  Begin(kActRaiserWram_SimWorldRecords, true, 0xE71B, 0);
+  SimRenderMetadata_RecordSyntheticPart(2, &part);  /* unaligned cursor */
+  SimRenderMetadata_EndRecord(0);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(!frame.metadata_valid);
+  CHECK(frame.integrity_flags & kSimMetadataIntegrity_PartContract);
+}
+
 static void TestRecordPartitionAndClippedReset(void) {
   uint8 wram[kActRaiserWramSize] = {0};
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
@@ -1095,41 +1156,50 @@ static void TestCullProximity(void) {
   const int x1 = kSimSpriteWindowBiasedWidth + mr;
 
   /* Deep inside the window is clear, and the edge itself is already total. */
-  CHECK(Sim3D_CullProximity(136, 120, ml, mr, lead, sq, li) == 0.0f);
-  CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, lead, sq, li) == 1.0f);
-  CHECK(Sim3D_CullProximity((int16_t)-ml, 120, ml, mr, lead, sq, li) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, sq, li) == 0.0f);
+  CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, 0, 0, lead, sq, li) == 1.0f);
+  CHECK(Sim3D_CullProximity((int16_t)-ml, 120, ml, mr, 0, 0, lead, sq, li) == 1.0f);
   /* Past the edge stays saturated rather than overshooting. */
-  CHECK(Sim3D_CullProximity((int16_t)(x1 + 400), 120, ml, mr, lead, sq, li)
+  CHECK(Sim3D_CullProximity((int16_t)(x1 + 400), 120, ml, mr, 0, 0, lead, sq, li)
         == 1.0f);
 
   /* The ramp lives entirely inside the window: `lead` px short of the edge is
    * where it starts, and it rises monotonically from there. */
-  CHECK(Sim3D_CullProximity((int16_t)(x1 - lead), 120, ml, mr, lead, sq, li)
+  CHECK(Sim3D_CullProximity((int16_t)(x1 - lead), 120, ml, mr, 0, 0, lead, sq, li)
         == 0.0f);
-  float near = Sim3D_CullProximity((int16_t)(x1 - 8), 120, ml, mr, lead, sq, li);
-  float far = Sim3D_CullProximity((int16_t)(x1 - 40), 120, ml, mr, lead, sq, li);
+  float near = Sim3D_CullProximity((int16_t)(x1 - 8), 120, ml, mr, 0, 0, lead, sq, li);
+  float far = Sim3D_CullProximity((int16_t)(x1 - 40), 120, ml, mr, 0, 0, lead, sq, li);
   CHECK(near > far && far > 0.0f && near < 1.0f);
 
-  /* Vertical is tested too, and never gains the margins -- OAM's Y byte has
-   * no ninth bit, so the emitter cannot widen that axis. */
-  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight, ml, mr, lead,
+  /* With zero vertical margins the authentic top/bottom edges retain their
+   * old behavior. */
+  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight, ml, mr, 0, 0, lead,
                             sq, li) == 1.0f);
-  CHECK(Sim3D_CullProximity(136, -1, ml, mr, lead, sq, li) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, -1, ml, mr, 0, 0, lead, sq, li) == 1.0f);
+  /* Exact synthetic parts make top/bottom reach explicit. The same old edge
+   * is now inside the clear window, and the cues move to the new boundaries. */
+  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight,
+                            ml, mr, 32, 48, lead, sq, li) == 0.0f);
+  CHECK(Sim3D_CullProximity(136,
+                            kSimSpriteWindowBiasedHeight + 48,
+                            ml, mr, 32, 48, lead, sq, li) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, -32, ml, mr, 32, 48,
+                            lead, sq, li) == 1.0f);
 
   /* A corner is covered at least as much as either edge meeting there. */
-  float corner = Sim3D_CullProximity((int16_t)(x1 - 16), 8, ml, mr, lead, sq, li);
+  float corner = Sim3D_CullProximity((int16_t)(x1 - 16), 8, ml, mr, 0, 0, lead, sq, li);
   CHECK(corner >=
-        Sim3D_CullProximity((int16_t)(x1 - 16), 120, ml, mr, lead, sq, li));
+        Sim3D_CullProximity((int16_t)(x1 - 16), 120, ml, mr, 0, 0, lead, sq, li));
 
   /* A degenerate lead is a hard edge, not a division by zero. */
-  CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, sq, li) == 0.0f);
-  CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, 0, sq, li) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, 0, sq, li) == 0.0f);
+  CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, 0, 0, 0, sq, li) == 1.0f);
 
   /* Widening the margins moves the window, so the same record is further
    * from the edge and earns less cover. That is the whole reason the
    * predicate is evaluated against the live margins. */
-  float narrow = Sim3D_CullProximity(300, 120, 0, 0, lead, sq, li);
-  float wide = Sim3D_CullProximity(300, 120, 64, 64, lead, sq, li);
+  float narrow = Sim3D_CullProximity(300, 120, 0, 0, 0, 0, lead, sq, li);
+  float wide = Sim3D_CullProximity(300, 120, 64, 64, 0, 0, lead, sq, li);
   CHECK(narrow > wide);
 }
 
@@ -1142,34 +1212,34 @@ static void TestCullCornerRounding(void) {
 
   /* Flat edges are unmoved: the rounded distance still reads zero exactly on
    * the edge, so the cull boundary itself does not shift. */
-  CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, lead, radius, li) == 1.0f);
-  CHECK(Sim3D_CullProximity((int16_t)-ml, 120, ml, mr, lead, radius, li) == 1.0f);
-  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight, ml, mr, lead,
+  CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, 0, 0, lead, radius, li) == 1.0f);
+  CHECK(Sim3D_CullProximity((int16_t)-ml, 120, ml, mr, 0, 0, lead, radius, li) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight, ml, mr, 0, 0, lead,
                             radius, li) == 1.0f);
 
   /* The centre stays clear whatever the radius says. */
-  CHECK(Sim3D_CullProximity(136, 120, ml, mr, lead, radius, li) == 0.0f);
+  CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, radius, li) == 0.0f);
 
   /* Diagonals gain cover, which is what rounds the corner inward. */
   for (int inset = 0; inset <= 40; inset += 8) {
     float flat = Sim3D_CullProximity((int16_t)(x1 - inset),
                                      (int16_t)(kSimSpriteWindowBiasedHeight -
                                                inset),
-                                     ml, mr, lead, 0, li);
+                                     ml, mr, 0, 0, lead, 0, li);
     float round = Sim3D_CullProximity((int16_t)(x1 - inset),
                                       (int16_t)(kSimSpriteWindowBiasedHeight -
                                                 inset),
-                                      ml, mr, lead, radius, li);
+                                      ml, mr, 0, 0, lead, radius, li);
     CHECK(round >= flat);
   }
 
   /* An absurd radius is clamped to the shorter half-extent rather than
    * collapsing the window or reaching past it. */
-  CHECK(Sim3D_CullProximity(136, 120, ml, mr, lead, 100000, li) >= 0.0f);
-  CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, lead, 100000, li) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, 100000, li) >= 0.0f);
+  CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, 0, 0, lead, 100000, li) == 1.0f);
   /* Negative is treated as no rounding. */
-  CHECK(Sim3D_CullProximity((int16_t)(x1 - 16), 8, ml, mr, lead, -50, li) ==
-        Sim3D_CullProximity((int16_t)(x1 - 16), 8, ml, mr, lead, 0, li));
+  CHECK(Sim3D_CullProximity((int16_t)(x1 - 16), 8, ml, mr, 0, 0, lead, -50, li) ==
+        Sim3D_CullProximity((int16_t)(x1 - 16), 8, ml, mr, 0, 0, lead, 0, li));
 }
 
 /* Cover is only ever created by the sprite window. A record the game itself
@@ -1186,33 +1256,41 @@ static void TestSourceCullCover(void) {
     .clipped_parts = 3,
     .clip_reason = kSimClip_Horizontal,
   };
-  CHECK(Sim3D_SourceCullCover(&clipping, ml, mr, lead, sq, li) > 0.9f);
+  CHECK(Sim3D_SourceCullCover(&clipping, ml, mr, 0, 0, lead, sq, li) > 0.9f);
 
   /* Approaching but not yet clipped still earns cover -- that is the lead. */
   SimSourceRecord approaching = clipping;
   approaching.clipped_parts = 0;
   approaching.clip_reason = 0;
-  CHECK(Sim3D_SourceCullCover(&approaching, ml, mr, lead, sq, li) > 0.0f);
+  CHECK(Sim3D_SourceCullCover(&approaching, ml, mr, 0, 0, lead, sq, li) > 0.0f);
 
   /* No parts and no clipping: the record never asked to be drawn. */
   SimSourceRecord silent = clipping;
   silent.oam_count = 0;
   silent.clipped_parts = 0;
   silent.clip_reason = 0;
-  CHECK(Sim3D_SourceCullCover(&silent, ml, mr, lead, sq, li) == 0.0f);
+  CHECK(Sim3D_SourceCullCover(&silent, ml, mr, 0, 0, lead, sq, li) == 0.0f);
+
+  /* A synthetic-only record is drawable even though it consumed no OAM. */
+  SimSourceRecord synthetic = clipping;
+  synthetic.oam_count = 0;
+  synthetic.clipped_parts = 0;
+  synthetic.synthetic_parts = 1;
+  CHECK(Sim3D_SourceCullCover(&synthetic, ml, mr, 0, 0,
+                              lead, sq, li) > 0.9f);
 
   /* Fixed-tier furniture is screen space and has no town position. */
   SimSourceRecord fixed = clipping;
   fixed.tier = kSimRecordTier_Fixed;
-  CHECK(Sim3D_SourceCullCover(&fixed, ml, mr, lead, sq, li) == 0.0f);
+  CHECK(Sim3D_SourceCullCover(&fixed, ml, mr, 0, 0, lead, sq, li) == 0.0f);
 
   /* A producer that never supplied an anchor must not be read as one at the
    * origin -- every pre-D5a caller drives BeginRecord without one. */
   SimSourceRecord anchorless = clipping;
   anchorless.anchor_valid = 0;
-  CHECK(Sim3D_SourceCullCover(&anchorless, ml, mr, lead, sq, li) == 0.0f);
+  CHECK(Sim3D_SourceCullCover(&anchorless, ml, mr, 0, 0, lead, sq, li) == 0.0f);
 
-  CHECK(Sim3D_SourceCullCover(NULL, ml, mr, lead, sq, li) == 0.0f);
+  CHECK(Sim3D_SourceCullCover(NULL, ml, mr, 0, 0, lead, sq, li) == 0.0f);
 }
 
 /* The lit window's bottom inset. It exists so the ground-painted boundary is
@@ -1224,37 +1302,37 @@ static void TestCullLiftInset(void) {
 
   /* The bottom edge moves up by the inset: what used to be the boundary is
    * now well past it, and the new boundary sits `inset` rows higher. */
-  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - inset), ml, mr, lead, sq,
+  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - inset), ml, mr, 0, 0, lead, sq,
                             inset) == 1.0f);
   /* ...and a record that far in was still clear without the inset. */
-  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - inset), ml, mr, lead, sq,
+  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - inset), ml, mr, 0, 0, lead, sq,
                             0) < 1.0f);
 
   /* A lifted record culls on its unlifted anchor, so the test that matters is
    * that the anchor's cull row is already fully covered. */
-  CHECK(Sim3D_CullProximity(136, (int16_t)bottom, ml, mr, lead, sq, inset)
+  CHECK(Sim3D_CullProximity(136, (int16_t)bottom, ml, mr, 0, 0, lead, sq, inset)
         == 1.0f);
 
   /* The TOP edge is untouched -- lift is toward negative y, so that side is
    * already conservative and insetting it would only cost bright area. */
-  CHECK(Sim3D_CullProximity(136, 0, ml, mr, lead, sq, inset) ==
-        Sim3D_CullProximity(136, 0, ml, mr, lead, sq, 0));
-  CHECK(Sim3D_CullProximity(136, (int16_t)(0 + inset), ml, mr, lead, sq,
+  CHECK(Sim3D_CullProximity(136, 0, ml, mr, 0, 0, lead, sq, inset) ==
+        Sim3D_CullProximity(136, 0, ml, mr, 0, 0, lead, sq, 0));
+  CHECK(Sim3D_CullProximity(136, (int16_t)(0 + inset), ml, mr, 0, 0, lead, sq,
                             inset) ==
-        Sim3D_CullProximity(136, (int16_t)(0 + inset), ml, mr, lead, sq, 0));
+        Sim3D_CullProximity(136, (int16_t)(0 + inset), ml, mr, 0, 0, lead, sq, 0));
 
   /* Horizontal is untouched too: the lift is vertical. */
   CHECK(Sim3D_CullProximity((int16_t)(kSimSpriteWindowBiasedWidth + mr), 120,
-                            ml, mr, lead, sq, inset) == 1.0f);
-  CHECK(Sim3D_CullProximity(136, 120, ml, mr, lead, sq, inset) ==
-        Sim3D_CullProximity(136, 120, ml, mr, lead, sq, 0));
+                            ml, mr, 0, 0, lead, sq, inset) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, sq, inset) ==
+        Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, sq, 0));
 
   /* An absurd inset cannot invert the window or collapse it onto a line. */
-  CHECK(Sim3D_CullProximity(136, 120, ml, mr, lead, sq, 100000) >= 0.0f);
-  CHECK(Sim3D_CullProximity(136, 120, ml, mr, lead, sq, 100000) <= 1.0f);
+  CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, sq, 100000) >= 0.0f);
+  CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, sq, 100000) <= 1.0f);
   /* Negative is treated as none. */
-  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - 8), ml, mr, lead, sq, -9)
-        == Sim3D_CullProximity(136, (int16_t)(bottom - 8), ml, mr, lead, sq,
+  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - 8), ml, mr, 0, 0, lead, sq, -9)
+        == Sim3D_CullProximity(136, (int16_t)(bottom - 8), ml, mr, 0, 0, lead, sq,
                                0));
 }
 
@@ -1807,6 +1885,8 @@ int main(int argc, char **argv) {
   TestTownCreationLightningEffectCapture();
   TestEnemyLightningAndFireEffectCapture();
   TestEffectOverflowFailsClosed();
+  TestResolvedPartOverflowFailsClosed();
+  TestResolvedPartContractFailsClosed();
   TestRecordPartitionAndClippedReset();
   TestIntegrityFallback();
   TestMapPlaneSelectorTrait();

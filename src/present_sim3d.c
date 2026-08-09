@@ -71,7 +71,7 @@ typedef struct SimCullFade {
    * the last canvas texel cannot form a hard vertical/horizontal seam. */
   float extent_x0, extent_y0, extent_x1, extent_y1;
   float extent_feather;
-  int margin_left, margin_right;
+  int margin_left, margin_right, margin_top, margin_bottom;
   int screen_x0;
 } SimCullFade;
 
@@ -84,7 +84,8 @@ static float SimCullProximityAt(const SimCullFade *fade, float texture_x,
   int16_t biased_x = (int16_t)(texture_x - (float)fade->screen_x0 + 16.0f);
   int16_t biased_y = (int16_t)(texture_y - (float)source.y + 17.0f);
   return Sim3D_CullProximity(biased_x, biased_y, fade->margin_left,
-                             fade->margin_right, fade->lead,
+                             fade->margin_right, fade->margin_top,
+                             fade->margin_bottom, fade->lead,
                              fade->corner, fade->lift_inset);
 }
 
@@ -1948,8 +1949,8 @@ static void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
 
   float clear_x0 = (float)slot->sim.cloud_clear_x0;
   float clear_x1 = (float)slot->sim.cloud_clear_x1;
-  float clear_y0 = (float)source.y;
-  float clear_y1 = (float)(source.y + source.h);
+  float clear_y0 = (float)(source.y + slot->sim.cloud_clear_y0);
+  float clear_y1 = (float)(source.y + slot->sim.cloud_clear_y1);
   float falloff = (float)slot->sim.cloud_falloff_px;
   float inset = (float)slot->sim.cloud_inset_px;
   float opacity = (float)slot->sim.cloud_opacity_pct / 100.0f;
@@ -2340,7 +2341,9 @@ static void DrawSimCullMarkers(const FrameSlot *slot, SDL_Rect source,
   for (unsigned i = 0; i < slot->sim.source_count; i++) {
     const SimSourceRecord *record = &slot->sim.sources[i];
     float cover = Sim3D_SourceCullCover(record, slot->sim.sprite_margin_left,
-                                        slot->sim.sprite_margin_right, lead,
+                                        slot->sim.sprite_margin_right,
+                                        slot->sim.sprite_margin_top,
+                                        slot->sim.sprite_margin_bottom, lead,
                                         slot->sim.cull_corner_px, lift_inset);
     if (cover <= 0.0f) continue;
 
@@ -2415,6 +2418,8 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
     .dim = (float)slot->sim.cull_dim_pct / 100.0f,
     .margin_left = slot->sim.sprite_margin_left,
     .margin_right = slot->sim.sprite_margin_right,
+    .margin_top = slot->sim.sprite_margin_top,
+    .margin_bottom = slot->sim.sprite_margin_bottom,
     .screen_x0 = slot->sim.underlay_screen_x0,
   };
   /* The blurred copy takes the dim but not the fade: it is the layer being
@@ -2463,6 +2468,8 @@ static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
     .extent_feather = (float)kSimTownExtentFeatherPixels,
     .margin_left = slot->sim.sprite_margin_left,
     .margin_right = slot->sim.sprite_margin_right,
+    .margin_top = slot->sim.sprite_margin_top,
+    .margin_bottom = slot->sim.sprite_margin_bottom,
     .screen_x0 = slot->sim.underlay_screen_x0,
   };
   DrawSimGroundExtension(
@@ -2617,6 +2624,8 @@ static void RenderSimProfile(const FrameSlot *slot,
     .extent_feather = underlay ? (float)kSimTownExtentFeatherPixels : 0.0f,
     .margin_left = slot->sim.sprite_margin_left,
     .margin_right = slot->sim.sprite_margin_right,
+    .margin_top = slot->sim.sprite_margin_top,
+    .margin_bottom = slot->sim.sprite_margin_bottom,
     .screen_x0 = slot->sim.underlay_screen_x0,
   };
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {

@@ -10,6 +10,8 @@ _Static_assert(kSimMaxSourceRecords ==
                    kActRaiserSimFixedRecordCount +
                        kActRaiserSimWorldRecordCount,
                "effect/source tracker capacity must cover both SIM tiers");
+_Static_assert(kSimMaxResolvedParts <= UINT8_MAX,
+               "SimRenderObject part counters must hold the part capacity");
 
 typedef struct SimMetadataProducer {
   bool active;
@@ -21,6 +23,9 @@ typedef struct SimMetadataProducer {
   uint16_t last_oam_cursor;
   uint16_t emitted_oam_count;
   uint16_t claimed_oam_count;
+  uint16_t part_count;
+  uint16_t synthetic_part_count;
+  uint16_t synthetic_part_overflow_count;
   uint16_t world_emitted_count;
   uint8_t world_oam_first;
   bool atlas_valid;
@@ -33,6 +38,7 @@ typedef struct SimMetadataProducer {
   uint8_t claimed_oam[128];
   SimSourceRecord sources[kSimMaxSourceRecords];
   SimRenderObject objects[kSimMaxRenderObjects];
+  PpuObjPart parts[kSimMaxResolvedParts];
 } SimMetadataProducer;
 
 static SimMetadataProducer g_sim_metadata;
@@ -796,7 +802,7 @@ void SimRenderMetadata_Reset(void) {
   ResetEffectLifetimes();
 }
 
-void SimRenderMetadata_BeginRecord(
+bool SimRenderMetadata_BeginRecord(
     uint16_t record_address, bool world_record, bool alternate_attributes,
     uint16_t composition, uint16_t world_x, uint16_t world_y,
     uint16_t type, uint16_t semantic_state, uint16_t status,
@@ -805,9 +811,10 @@ void SimRenderMetadata_BeginRecord(
    * order.  <= (not merely <) also recognizes a one-record pass repeated on
    * the next emulated tick.  A clipped record followed by a later record at
    * the same zero cursor does not reset because its address increased. */
-  if (!g_sim_metadata.active ||
+  bool began_build = !g_sim_metadata.active ||
       (oam_cursor_before == 0 &&
-       record_address <= g_sim_metadata.last_record_address))
+       record_address <= g_sim_metadata.last_record_address);
+  if (began_build)
     BeginBuild();
 
   if (g_sim_metadata.record_active)
@@ -829,7 +836,7 @@ void SimRenderMetadata_BeginRecord(
   if (g_sim_metadata.source_count >= kSimMaxSourceRecords) {
     g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
     g_sim_metadata.record_active = false;
-    return;
+    return began_build;
   }
 
   uint8_t source_index = g_sim_metadata.source_count++;
@@ -849,6 +856,7 @@ void SimRenderMetadata_BeginRecord(
   };
   g_sim_metadata.current_source = source_index;
   g_sim_metadata.record_active = true;
+  return began_build;
 }
 
 void SimRenderMetadata_RecordAnchor(int16_t base_x, int16_t base_y) {
@@ -873,6 +881,75 @@ void SimRenderMetadata_RecordClippedPart(uint8_t reason) {
   if (source->clipped_parts < 0xFFFF) source->clipped_parts++;
 }
 
+static SimRenderObject *RecordObjectForPart(uint16_t slot,
+                                            uint16_t attributes,
+                                            bool oam_backed) {
+  SimSourceRecord *source =
+      &g_sim_metadata.sources[g_sim_metadata.current_source];
+  uint8_t priority = (uint8_t)((attributes >> 12) & 3);
+  uint8_t color_math_eligible = (attributes & 0x0800) != 0;
+  SimRenderObject *prior = g_sim_metadata.object_count
+      ? &g_sim_metadata.objects[g_sim_metadata.object_count - 1] : NULL;
+  if (prior && prior->source_index == g_sim_metadata.current_source &&
+      prior->priority == priority &&
+      prior->color_math_eligible == color_math_eligible &&
+      (!oam_backed || prior->oam_first + prior->oam_count == slot))
+    return prior;
+
+  if (g_sim_metadata.object_count >= kSimMaxRenderObjects) {
+    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
+    return NULL;
+  }
+  SimObjectClassification classification = Sim3D_ClassifyObject(
+      source->tier, source->type, source->semantic_state,
+      source->record_address, source->composition);
+  SimRenderObject *object =
+      &g_sim_metadata.objects[g_sim_metadata.object_count++];
+  *object = (SimRenderObject){
+    .record_address = source->record_address,
+    .composition = source->composition,
+    .world_x = source->world_x,
+    .world_y = source->world_y,
+    .type = source->type,
+    .semantic_state = source->semantic_state,
+    .oam_first = slot,
+    .part_first = g_sim_metadata.part_count,
+    .priority = priority,
+    .source_index = g_sim_metadata.current_source,
+    .tier = source->tier,
+    .color_math_eligible = color_math_eligible,
+    .traits = classification.traits,
+    .height_class = classification.height_class,
+    .virtual_height = classification.virtual_height,
+    .classified_height = classification.virtual_height,
+    .foot_x = (int16_t)source->world_x,
+    .foot_y = (int16_t)source->world_y,
+    /* Atlas and local bounds are deliberately invalid until the shared PPU
+     * rasterizer lands; zero must never be interpreted as a packed rect. */
+    .atlas_valid = 0,
+  };
+  return object;
+}
+
+static bool AppendExactPart(SimRenderObject *object,
+                            const PpuObjPart *part, bool synthetic) {
+  if (!object || !part || !part->size ||
+      object->part_first + object->part_count != g_sim_metadata.part_count) {
+    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
+    return false;
+  }
+  if (g_sim_metadata.part_count >= kSimMaxResolvedParts) {
+    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
+    if (synthetic && g_sim_metadata.synthetic_part_overflow_count < UINT16_MAX)
+      g_sim_metadata.synthetic_part_overflow_count++;
+    return false;
+  }
+  g_sim_metadata.parts[g_sim_metadata.part_count++] = *part;
+  object->part_count++;
+  if (synthetic) object->synthetic_part_count++;
+  return true;
+}
+
 void SimRenderMetadata_RecordPart(uint16_t oam_cursor,
                                   uint16_t attributes) {
   if (!g_sim_metadata.record_active) {
@@ -887,9 +964,7 @@ void SimRenderMetadata_RecordPart(uint16_t oam_cursor,
   uint16_t slot = (uint16_t)(oam_cursor / 4);
   SimSourceRecord *source =
       &g_sim_metadata.sources[g_sim_metadata.current_source];
-  uint8_t priority = (uint8_t)((attributes >> 12) & 3);
   uint8_t obj_palette = (uint8_t)((attributes >> 9) & 7);
-  uint8_t color_math_eligible = (attributes & 0x0800) != 0;
   if (g_sim_metadata.claimed_oam[slot])
     g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overlap;
   else {
@@ -910,48 +985,50 @@ void SimRenderMetadata_RecordPart(uint16_t oam_cursor,
     g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_WorldSuffix;
   }
 
-  SimRenderObject *prior = g_sim_metadata.object_count
-      ? &g_sim_metadata.objects[g_sim_metadata.object_count - 1] : NULL;
-  if (prior && prior->source_index == g_sim_metadata.current_source &&
-      prior->priority == priority &&
-      prior->color_math_eligible == color_math_eligible &&
-      prior->oam_first + prior->oam_count == slot) {
-    prior->oam_count++;
-    return;
-  }
+  SimRenderObject *object = RecordObjectForPart(slot, attributes, true);
+  if (object) object->oam_count++;
+}
 
-  if (g_sim_metadata.object_count >= kSimMaxRenderObjects) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
+void SimRenderMetadata_RecordExactOamPart(const PpuObjPart *part) {
+  if (!g_sim_metadata.record_active || !g_sim_metadata.object_count || !part) {
+    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
     return;
   }
-  SimObjectClassification classification = Sim3D_ClassifyObject(
-      source->tier, source->type, source->semantic_state,
-      source->record_address, source->composition);
   SimRenderObject *object =
-      &g_sim_metadata.objects[g_sim_metadata.object_count++];
-  *object = (SimRenderObject){
-    .record_address = source->record_address,
-    .composition = source->composition,
-    .world_x = source->world_x,
-    .world_y = source->world_y,
-    .type = source->type,
-    .semantic_state = source->semantic_state,
-    .oam_first = slot,
-    .oam_count = 1,
-    .priority = priority,
-    .source_index = g_sim_metadata.current_source,
-    .tier = source->tier,
-    .color_math_eligible = color_math_eligible,
-    .traits = classification.traits,
-    .height_class = classification.height_class,
-    .virtual_height = classification.virtual_height,
-    .classified_height = classification.virtual_height,
-    .foot_x = (int16_t)source->world_x,
-    .foot_y = (int16_t)source->world_y,
-    /* Atlas and local bounds are deliberately invalid until the shared PPU
-     * rasterizer lands; zero must never be interpreted as a packed rect. */
-    .atlas_valid = 0,
-  };
+      &g_sim_metadata.objects[g_sim_metadata.object_count - 1];
+  if (object->source_index != g_sim_metadata.current_source ||
+      object->priority != (uint8_t)((part->tile_attr >> 12) & 3) ||
+      object->color_math_eligible != ((part->tile_attr & 0x0800) != 0)) {
+    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
+    return;
+  }
+  AppendExactPart(object, part, false);
+}
+
+void SimRenderMetadata_RecordSyntheticPart(uint16_t oam_cursor,
+                                           const PpuObjPart *part) {
+  if (!g_sim_metadata.record_active || !part || !part->size ||
+      (oam_cursor & 3) || oam_cursor > kActRaiserOamLowTableBytes) {
+    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
+    return;
+  }
+  if (g_sim_metadata.part_count >= kSimMaxResolvedParts) {
+    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
+    if (g_sim_metadata.synthetic_part_overflow_count < UINT16_MAX)
+      g_sim_metadata.synthetic_part_overflow_count++;
+    return;
+  }
+  SimSourceRecord *source =
+      &g_sim_metadata.sources[g_sim_metadata.current_source];
+  SimRenderObject *object = RecordObjectForPart(
+      (uint16_t)(oam_cursor / 4), part->tile_attr, false);
+  if (!object) return;
+  if (!AppendExactPart(object, part, true)) return;
+  uint8_t obj_palette = (uint8_t)((part->tile_attr >> 9) & 7);
+  source->obj_palette_mask |= (uint8_t)(1u << obj_palette);
+  if (source->synthetic_parts < UINT16_MAX) source->synthetic_parts++;
+  if (g_sim_metadata.synthetic_part_count < UINT16_MAX)
+    g_sim_metadata.synthetic_part_count++;
 }
 
 void SimRenderMetadata_EndRecord(uint16_t oam_cursor_after) {
@@ -982,8 +1059,11 @@ bool SimRenderMetadata_CopyAtlasInput(SimAtlasBuildInput *out) {
   memset(out, 0, sizeof(*out));
   out->build_serial = g_sim_metadata.build_serial;
   out->object_count = g_sim_metadata.object_count;
+  out->part_count = g_sim_metadata.part_count;
   memcpy(out->objects, g_sim_metadata.objects,
          sizeof(SimRenderObject) * out->object_count);
+  memcpy(out->parts, g_sim_metadata.parts,
+         sizeof(PpuObjPart) * out->part_count);
   return true;
 }
 
@@ -1147,7 +1227,7 @@ float Sim3D_CloudCoverage(float x, float y, float clear_x0, float clear_x1,
   float distance = dx > dy ? dx : dy;
 
   /* The inset is in pixels but the rectangle's two axes are very different
-   * sizes -- roughly 446 wide against 224 tall -- so an inset the horizontal
+   * sizes -- roughly 496 wide against 224 tall -- so an inset the horizontal
    * axis shrugs off can swallow the vertical one from both sides and veil the
    * middle of the screen. Cap it at a quarter of the shorter half-extent so
    * the playable centre stays clear whatever the setting says. */
@@ -1165,17 +1245,18 @@ float Sim3D_CloudCoverage(float x, float y, float clear_x0, float clear_x1,
 }
 
 float Sim3D_CullProximity(int16_t anchor_x, int16_t anchor_y,
-                          int margin_left, int margin_right, int lead,
-                          int corner, int lift_inset) {
+                          int margin_left, int margin_right,
+                          int margin_top, int margin_bottom,
+                          int lead, int corner, int lift_inset) {
   if (lead <= 0) lead = 1;
 
-  /* The window the emitter actually tests against. Horizontal gains the live
-   * widescreen margins; vertical never does -- OAM's Y byte has no ninth bit,
-   * so the emitter cannot widen it and neither may this. */
+  /* The complete host-renderable window. Real OAM remains vertically
+   * authentic, but exact synthetic parts provide the explicit top/bottom
+   * reach, so the cues must follow those margins rather than the byte decode. */
   float x0 = (float)(-margin_left);
   float x1 = (float)(kSimSpriteWindowBiasedWidth + margin_right);
-  float y0 = 0.0f;
-  float y1 = (float)kSimSpriteWindowBiasedHeight;
+  float y0 = (float)(-margin_top);
+  float y1 = (float)(kSimSpriteWindowBiasedHeight + margin_bottom);
   /* Bottom only; see the header. Clamped so an absurd inset cannot invert the
    * window or collapse it onto a line. */
   if (lift_inset > 0) {
@@ -1228,8 +1309,9 @@ float Sim3D_CullProximity(int16_t anchor_x, int16_t anchor_y,
 }
 
 float Sim3D_SourceCullCover(const SimSourceRecord *source,
-                            int margin_left, int margin_right, int lead,
-                            int corner, int lift_inset) {
+                            int margin_left, int margin_right,
+                            int margin_top, int margin_bottom,
+                            int lead, int corner, int lift_inset) {
   if (!source || !source->anchor_valid) return 0.0f;
 
   /* World-tier records only. Fixed-tier records are HUD and cursor furniture
@@ -1240,14 +1322,17 @@ float Sim3D_SourceCullCover(const SimSourceRecord *source,
   /* A record with no parts at all never asked to be drawn. Only the sprite
    * window may create cover, so a record that emitted nothing AND was never
    * clipped is the game's own decision, not ours to hide. */
-  if (!source->oam_count && !source->clipped_parts) return 0.0f;
+  if (!source->oam_count && !source->synthetic_parts &&
+      !source->clipped_parts)
+    return 0.0f;
 
   /* Deliberately the record's own anchor, NOT where the renderer draws it.
    * See Sim3D_SourceDrawLift: when the cover arrives and where it goes are
    * two different questions, and this is the first one. */
   return Sim3D_CullProximity(source->anchor_x, source->anchor_y,
-                             margin_left, margin_right, lead, corner,
-                             lift_inset);
+                             margin_left, margin_right,
+                             margin_top, margin_bottom,
+                             lead, corner, lift_inset);
 }
 
 int16_t Sim3D_MaxDrawLift(unsigned height_scale_x100) {
@@ -1409,6 +1494,12 @@ void SimRenderMetadata_CaptureFrame(
   if (world_navigation) CaptureWorldNavigationState(dst, wram);
 
   if (town) {
+    for (int i = 0; i < kActRaiserSimWorldRecordCount; i++) {
+      uint32_t address = kActRaiserWram_SimWorldRecords +
+          i * kActRaiserSimWorldRecordStride;
+      if (ReadMirror16(wram, address) != 0)
+        dst->world_record_occupancy++;
+    }
     dst->build_serial = g_sim_metadata.build_serial;
     dst->integrity_flags = g_sim_metadata.integrity_flags;
     dst->atlas_valid = g_sim_metadata.atlas_valid;
@@ -1455,6 +1546,9 @@ void SimRenderMetadata_CaptureFrame(
   if (town) {
     dst->emitted_oam_count = g_sim_metadata.emitted_oam_count;
     dst->claimed_oam_count = g_sim_metadata.claimed_oam_count;
+    dst->synthetic_part_count = g_sim_metadata.synthetic_part_count;
+    dst->synthetic_part_overflow_count =
+        g_sim_metadata.synthetic_part_overflow_count;
     dst->source_count = g_sim_metadata.source_count;
     dst->zero_oam_source_count = g_sim_metadata.zero_oam_source_count;
     dst->object_count = g_sim_metadata.object_count;

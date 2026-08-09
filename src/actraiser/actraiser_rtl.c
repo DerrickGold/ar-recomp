@@ -1356,36 +1356,13 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
     if (map_number == kActRaiserNonActionMap_SkyPalace) {
       /* Sky Palace magic icon shifts OAM slots when dialog sprites appear, and
        * changes SHAPE with the selected spell (see the two forms documented on
-       * ActRaiser_SkyPalaceMagicIconSlots) -- so scan for the signature rather
-       * than hardcoding either a slot or a slot count. */
+       * ActRaiser_SkyPalaceMagicIconSlots) -- so scan the complete OAM table
+       * for the signature rather than hardcoding either a slot or a count. */
       const int large_px = PpuObjSizeForSizeBit(g_ppu, 1);
       int found_slot = -1, found_count = 0;
-      for (int s = kActRaiserSkyPalaceMagicOamFirst;
-           s < kActRaiserPpuOamSlots && found_slot < 0; s++) {
-        const int index = s * 2;
-        const int large = (g_ppu->highOam[s >> 2] >> ((s & 3) * 2 + 1)) & 1;
-        const int count = ActRaiser_SkyPalaceMagicIconSlots(
-            (uint8)g_ppu->oam[index], (uint8)(g_ppu->oam[index] >> 8),
-            (uint8)(g_ppu->oam[index + 1] >> 8), large, large_px);
-        if (!count || s + count > kActRaiserPpuOamSlots)
-          continue;
-        /* The lead slot matched. The quad form spends three more slots on the
-         * same icon, so confirm those before claiming the range; the single
-         * large slot has no companions and this loop is a no-op for it. */
-        int ok = 1;
-        for (int i = 1; i < count && ok; i++) {
-          const int q = (s + i) * 2;
-          uint8 expected_y = 0, expected_attr = 0;
-          ActRaiser_SkyPalaceMagicQuadSlot(i, &expected_y, &expected_attr);
-          if ((uint8)(g_ppu->oam[q] >> 8) != expected_y ||
-              (uint8)(g_ppu->oam[q + 1] >> 8) != expected_attr)
-            ok = 0;
-        }
-        if (!ok)
-          continue;
-        found_slot = s;
-        found_count = count;
-      }
+      ActRaiser_FindSkyPalaceMagicIcon(
+          g_ppu->oam, g_ppu->highOam, kActRaiserPpuOamSlots, large_px,
+          &found_slot, &found_count);
       /* AR_HUDICON=1: one line per change of scan outcome, the same
        * change-triggered shape as the [widescreen] policy line above. This is
        * the answer to "why is the magic icon still at centre screen?" — a
@@ -1465,7 +1442,7 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
  * centre-screen X.
  *
  * Why this is needed at all: ActRaiser_WidescreenHudObjPromote captures the
- * icon's four OAM slots into g_hud_obj_pixels for present.c to anchor, but the
+ * icon's OAM range into g_hud_obj_pixels for present.c to anchor, but the
  * diorama block later in this same frame re-captures OBJ as a full-frame scene
  * layer over slots 0..127 -- a strictly wider claim on the ONE capture slot the
  * PPU gives each source, and PpuSetOverlayCapture resets the OAM range as it
@@ -1848,29 +1825,38 @@ static int s_live_bg2_margin_source;
 static int s_live_margin_top;
 
 void ActRaiserDrawPpuFrame(void) {
+  const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
+  const uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
+  const bool action = ActRaiser_IsActionMapGroup(map_group);
+  const bool sim_town = ActRaiser_IsSimulationTown(map_group, map_number);
+
   /* Overlay bindings are host-owned and persistent; capture policy is
    * game-owned and rebuilt every frame so no prior mode can leak a region. */
   if (Sim3D_BeginFrame())
     ActRaiser_RebindPpuOutputSurfaces();
   PpuClearOverlayCaptures(g_ppu);
-  /* The exact-position OAM sideband (PpuSetObjExactPosition) is action-owned
-   * state, rebuilt by ActRaiser_ObjectVisibilityScanWide at every object scan
-   * — a scan that never runs outside action maps. An override that survives
-   * the exit resurrects slots the next scene PARKS: the sprite evaluator
-   * trusts a valid override over the OAM bytes on every line, so the first
-   * sim cutscene drew parked tile-$000 slots at the last action frame's Ys
-   * (ledger §34). Non-action frames only: action pause/freeze frames skip the
-   * scan with OAM frozen, and their band sprites must keep rendering from the
-   * same overrides that drew them. */
-  if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
+  /* Exact-position overrides have two owners. Action rebuilds them during
+   * its object scan and deliberately keeps them over pause/freeze redraws.
+   * A sim town rebuilds its own sideband during the composition pass and must
+   * likewise keep it over a redraw where the emulated game did not advance.
+   * Any other scene clears the prior owner's positions: a stale action value
+   * can resurrect a parked sim slot, while a stale sim value can displace the
+   * next non-town scene (ledger §34). */
+  const ActRaiserExactPositionOwner expected_owner = action
+      ? kActRaiserExactPositionOwner_Action
+      : sim_town ? kActRaiserExactPositionOwner_Sim
+                 : kActRaiserExactPositionOwner_None;
+  if (expected_owner == kActRaiserExactPositionOwner_None ||
+      ActRaiser_GetExactPositionOwner() != expected_owner) {
     PpuClearObjExactPositions(g_ppu);
+    ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_None);
+  }
   ActRaiser_ApplyWidescreenPolicy();
   /* Outside ApplyWidescreenPolicy, not inside it: that function early-returns
    * when widescreen is off, and the vertical margin must be re-resolved (most
    * often back to zero) on EVERY frame regardless -- a stale band would
    * otherwise survive a mode change. */
-  ActRaiser_ApplyVerticalMarginPolicy(g_ram[kActRaiserWram_MapGroup],
-                                      g_ram[kActRaiserWram_CurrentMap]);
+  ActRaiser_ApplyVerticalMarginPolicy(map_group, map_number);
   /* Stage D reconnaissance: read-only classification of objects that intersect
    * a live side margin but remain outside the authentic activation window. */
   ActRaiser_WidescreenSpriteActivationProbe();

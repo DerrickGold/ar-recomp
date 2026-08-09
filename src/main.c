@@ -105,7 +105,7 @@ static bool g_window_hidden;  /* true while MINIMIZED or HIDDEN: skip present */
 /* external: read by FrameSlot_Capture (frame_slot.c) */
 int g_snes_width = kActRaiserAuthenticWidth,
     g_snes_height = kActRaiserAuthenticHeight;
-/* Framebuffer sized for the PPU's full widescreen budget (448 wide) so the
+/* Framebuffer sized for the PPU's full widescreen budget (512 wide) so the
  * active width can change live without reallocating storage; each frame uses
  * only the leading g_snes_width*4 bytes per row. Rows follow the same rule on
  * the other axis: capacity for the full vertical margin band, of which a frame
@@ -906,7 +906,7 @@ static void AppBoot_CreatePresentationTextures(AppBoot *app) {
    * near the true edge of what Diorama_Upload writes (u=uv_u1 =
    * snes_width/kPpuBufWidth, always < 1.0 — the buffer is allocated at
    * the PPU's max width but a layer's real captured content is narrower,
-   * capped by kWsExtraMax's SNES OAM-wrap hardware limit) can reach into
+   * capped by kWsExtraMax's tilemap-ring streaming limit) can reach into
    * columns snes_width..kPpuBufWidth-1, which Diorama_Upload's
    * SDL_UpdateTexture never touches. SDL_TEXTUREACCESS_STREAMING content
    * is undefined until written (no zero guarantee, confirmed non-zero in

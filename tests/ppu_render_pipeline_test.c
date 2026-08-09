@@ -217,6 +217,51 @@ static void TestSemanticAtlasPacking(void) {
   CHECK(g_sim_obj_atlas_pixels[1 * kSimObjAtlasWidth + 1] ==
         0xffffffffu);
 
+  /* A mixed real/synthetic composition is packed from exact parts in emitter
+   * order. The second part sits past OAM's positive-X decode boundary: an OAM
+   * byte would alias it to the opposite side, while the explicit channel keeps
+   * the union at its real 16-pixel width. Real OAM consumption stays one slot. */
+  ppu_reset(ppu);
+  ppu->inidisp = 0x0f;
+  ppu->cgram[0x81] = bgr555(31, 31, 31);
+  set_solid_4bpp_tile(ppu, 0, 1);
+  SimRenderMetadata_Reset();
+  BeginSimRecord(kActRaiserWram_SimWorldRecords, true, 0, 250, 30);
+  {
+    const PpuObjPart real = {250, 30, 1u << 12, 8};
+    const PpuObjPart synthetic = {258, 30, 1u << 12, 8};
+    SimRenderMetadata_RecordPart(0, real.tile_attr);
+    SimRenderMetadata_RecordExactOamPart(&real);
+    SimRenderMetadata_RecordSyntheticPart(4, &synthetic);
+    SimRenderMetadata_EndRecord(4);
+    ppu->oam[0] = (uint16_t)(250 | (30 << 8));
+    ppu->oam[1] = real.tile_attr;
+    PpuSetObjExactPosition(ppu, 0, real.x, real.y);
+  }
+  CHECK(SimRenderAtlas_Build(ppu, 0, 0));
+  CHECK(SimRenderMetadata_CopyAtlasInput(&atlas));
+  CHECK(atlas.object_count == 1);
+  CHECK(atlas.part_count == 2);
+  CHECK(atlas.objects[0].oam_count == 1);
+  CHECK(atlas.objects[0].part_count == 2);
+  CHECK(atlas.objects[0].synthetic_part_count == 1);
+  CHECK(atlas.objects[0].atlas_valid);
+  CHECK(atlas.objects[0].atlas_w == 16);
+  CHECK(atlas.objects[0].atlas_h == 8);
+  CHECK(atlas.objects[0].local_x0 == 0);
+  CHECK(atlas.objects[0].local_x1 == 16);
+  {
+    uint8_t wram[kActRaiserWramSize] = {0};
+    wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+    wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+    SimFrameData mixed;
+    SimRenderMetadata_CaptureFrame(&mixed, wram, true, false, 0, 0, 0);
+    CHECK(mixed.emitted_oam_count == 1);
+    CHECK(mixed.synthetic_part_count == 1);
+    CHECK(mixed.synthetic_part_overflow_count == 0);
+    CHECK(mixed.sources[0].synthetic_parts == 1);
+  }
+
   /* Fifty independent 64x64 fragments cannot all fit with the mandatory
    * gutter in a 512x512 atlas.
    *
@@ -471,7 +516,8 @@ static void TestOverlayContentMetadata(void) {
  * and after the fix, so it is the guard against a flat-mode regression.
  */
 static void TestCapturedPaddingReachesBudget(void) {
-  enum { kBudget = 95, kLiveRight = 95, kCaptureWidth = 256 + 2 * kBudget };
+  enum { kBudget = 120, kLiveRight = 120,
+         kCaptureWidth = 256 + 2 * kBudget };
   const int bg2 = kActRaiserPpuLayer_Bg2;
 
   Ppu *ppu = ppu_init();
@@ -529,7 +575,7 @@ static void TestCapturedPaddingReachesBudget(void) {
                                kPpuOverlayFlag_RemoveFromGame));
     ppu_runLine(ppu, 1);
 
-    /* Column 0 of the capture is screen x = -95, i.e. the far end of the
+    /* Column 0 of the capture is screen x = -120, i.e. the far end of the
      * collapsed left margin. */
     if (enabled) {
       left_on = capture[0];
@@ -640,7 +686,7 @@ static void TestCapturedPaddingReachesBudget(void) {
     ppu_runLine(ppu, 1);   /* screen y = 0, inside the split */
 
     const uint32_t *row = (const uint32_t *)(const void *)fb;
-    /* Screen x = -95 .. -1 is the collapsed left margin: it must stay backdrop
+    /* Screen x = -120 .. -1 is the collapsed left margin: it must stay backdrop
      * even though the padding feature is enabled, because this frame's BG2 went
      * to bgBuffers rather than an overlay buffer. */
     CHECK((row[0] & 0xffffffu) == 0);
@@ -649,6 +695,36 @@ static void TestCapturedPaddingReachesBudget(void) {
      * blank framebuffer cannot make the two checks above pass for free. */
     CHECK((row[kBudget + 10] & 0xffffffu) != 0);
     CHECK((row[kCaptureWidth - 1] & 0xffffffu) != 0);
+  }
+
+  /* A normal (non-HUD) scanline writes only the live finite-world interval.
+   * Seed the fixed-width target with a loud stale value, contract each side by
+   * one pixel, and prove the two columns that just left the interval are
+   * explicitly blacked rather than retaining the previous frame. */
+  {
+    ppu_reset(ppu);
+    memset(fb, 0x5a, sizeof(fb));
+    ppu->inidisp = 0x0f;
+    ppu->bgmode = 1;
+    ppu->screenEnabled[0] = (uint8_t)(1u << bg2);
+    ppu->cgram[0] = bgr555(0, 0, 0);
+    ppu->cgram[0x21] = bgr555(31, 0, 31);
+    set_solid_4bpp_tile(ppu, 1, 1);
+    ppu->bgTileAdr = 0;
+    ppu->bgXsc[bg2] = 0x20 | 0x3;
+    for (int i = 0; i < 0x1000; i++)
+      ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+    PpuSetExtraSpace(ppu, kBudget);
+    PpuSetExtraSideSpace(ppu, kBudget - 1, kBudget - 1, 0);
+
+    PpuBeginDrawing(ppu, fb, kCaptureWidth * 4, 0);
+    ppu_runLine(ppu, 1);
+
+    const uint32_t *row = (const uint32_t *)(const void *)fb;
+    CHECK(row[0] == 0);
+    CHECK(row[kCaptureWidth - 1] == 0);
+    CHECK((row[1] & 0xffffffu) != 0);
+    CHECK((row[kCaptureWidth - 2] & 0xffffffu) != 0);
   }
 
   g_new_ppu = saved_new_ppu;

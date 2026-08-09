@@ -308,7 +308,9 @@ def read_d1_metadata(path: Path,
     separated_valid_count = separated_ready_count = 0
     separated_mismatch_total = separated_mismatch_max = 0
     max_atlas_used_width = max_atlas_used_height = 0
-    max_sources = max_objects = max_emitted = 0
+    max_sources = max_objects = max_emitted = max_synthetic_parts = 0
+    max_world_record_occupancy = 0
+    synthetic_overflow_total = synthetic_overflow_max = 0
     requested_features: set[int] = set()
     effective_features: set[int] = set()
     integrity_flags: set[int] = set()
@@ -452,9 +454,19 @@ def read_d1_metadata(path: Path,
             previous_view = view
             emitted = int(frame.get("emitted_oam_count", 0))
             claimed = int(frame.get("claimed_oam_count", 0))
+            synthetic_parts = int(frame.get("synthetic_part_count", 0))
+            synthetic_overflow = int(
+                frame.get("synthetic_part_overflow_count", 0))
             max_sources = max(max_sources, len(sources))
             max_objects = max(max_objects, len(objects))
             max_emitted = max(max_emitted, emitted)
+            max_synthetic_parts = max(max_synthetic_parts, synthetic_parts)
+            max_world_record_occupancy = max(
+                max_world_record_occupancy,
+                int(frame.get("world_record_occupancy", 0)))
+            synthetic_overflow_total += synthetic_overflow
+            synthetic_overflow_max = max(
+                synthetic_overflow_max, synthetic_overflow)
             max_effects = max(max_effects, len(effects))
             effect_frame_count += bool(effects)
             frame_visible_effects = sum(
@@ -796,6 +808,10 @@ def read_d1_metadata(path: Path,
         "max_source_count": max_sources,
         "max_object_count": max_objects,
         "max_emitted_oam_count": max_emitted,
+        "max_synthetic_part_count": max_synthetic_parts,
+        "max_world_record_occupancy": max_world_record_occupancy,
+        "synthetic_part_overflow_count_total": synthetic_overflow_total,
+        "synthetic_part_overflow_count_max": synthetic_overflow_max,
         "effect_frame_count": effect_frame_count,
         "visible_effect_frame_count": visible_effect_frame_count,
         "visible_effect_instance_count": visible_effect_instance_count,
@@ -1338,6 +1354,15 @@ def check_stage_pinning(name: str, checkpoint: dict) -> None:
                 f"unpinned stages inherit the shipped default and will change "
                 f"under this checkpoint when a stage lands. Missing: "
                 f"{', '.join(missing)}")
+
+        camera_pose = ("AR_SIM3D_PITCH", "AR_SIM3D_YAW",
+                       "AR_SIM3D_DISTANCE")
+        if any(key in block for key in camera_pose) and \
+                "AR_SIM3D_CAMERA_MODE" not in block:
+            raise ValueError(
+                f"checkpoint {name} {block_name} pins a SIM 3D camera pose "
+                f"without AR_SIM3D_CAMERA_MODE; the pose would silently "
+                f"change meaning with the shipped camera-mode default")
 
 
 def run_suite(args: argparse.Namespace, checkpoints: dict) -> int:

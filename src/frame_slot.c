@@ -197,7 +197,9 @@ static SimCameraPose Sim3D_ActivePose(void) {
  * former inline literals (same field list, same sources). */
 Sim3DTuning BuildSim3DTuning(void) {
   int sim_margin_left = 0, sim_margin_right = 0;
-  ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right);
+  int sim_margin_top = 0, sim_margin_bottom = 0;
+  ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right,
+                             &sim_margin_top, &sim_margin_bottom);
   SimCameraPose sim_pose = Sim3D_ActivePose();
   return (Sim3DTuning){
       .pitch_mrad = sim_pose.pitch_mrad,
@@ -232,7 +234,9 @@ Sim3DTuning BuildSim3DTuning(void) {
       .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
       .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
       .sprite_margin_left = sim_margin_left,
-      .sprite_margin_right = sim_margin_right };
+      .sprite_margin_right = sim_margin_right,
+      .sprite_margin_top = sim_margin_top,
+      .sprite_margin_bottom = sim_margin_bottom };
 }
 
 static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {

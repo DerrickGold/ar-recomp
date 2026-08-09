@@ -62,9 +62,26 @@ bool SimRenderAtlas_Build(Ppu *ppu, uint16 camera_x, uint16 camera_y) {
    * no longer costs the frame. */
   for (uint16_t i = 0; !failure && i < input.object_count; i++) {
     SimRenderObject *object = &input.objects[i];
+    PpuObjPart oam_parts[128];
+    const PpuObjPart *parts = NULL;
+    int part_count = 0;
     PpuObjRangeBounds bounds;
-    if (!PpuGetObjRangeBounds(ppu, (uint8_t)object->oam_first,
-                              object->oam_count, object->priority, &bounds)) {
+    bool explicit_complete = object->part_count > 0 &&
+        object->part_count ==
+            object->oam_count + object->synthetic_part_count &&
+        object->part_first + object->part_count <= input.part_count;
+    if (explicit_complete) {
+      parts = &input.parts[object->part_first];
+      part_count = object->part_count;
+    } else if (object->oam_count &&
+               PpuResolveObjSlots(
+                   ppu, (uint8_t)object->oam_first, object->oam_count,
+                   object->priority, oam_parts,
+                   (int)(sizeof(oam_parts) / sizeof(oam_parts[0])),
+                   &part_count)) {
+      parts = oam_parts;
+    }
+    if (!parts || !PpuGetPartBounds(parts, part_count, &bounds)) {
       ClearObjectAtlasFields(object);
       continue;
     }
@@ -110,10 +127,8 @@ bool SimRenderAtlas_Build(Ppu *ppu, uint16 camera_x, uint16 camera_y) {
 
     uint32_t *destination =
         &g_sim_obj_atlas_pixels[cursor_y * kSimObjAtlasWidth + cursor_x];
-    if (!PpuRasterizeObjRange(
-            ppu, (uint8_t)object->oam_first, object->oam_count,
-            object->priority, &bounds, destination, width, height,
-            kSimObjAtlasPitch)) {
+    if (!PpuRasterizeParts(ppu, parts, part_count, &bounds, destination,
+                           width, height, kSimObjAtlasPitch)) {
       ClearObjectAtlasFields(object);
       continue;
     }

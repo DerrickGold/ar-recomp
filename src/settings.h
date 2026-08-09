@@ -228,10 +228,15 @@ struct SettingDesc {
    * modern alias parsed by the same human-readable parser as settings.ini.
    * The distinction is NOT derivable from any other field here (category, type,
    * apply kind and the parse/format hooks were all measured and all mix), which
-   * is why it is stated per row. It must be LAST: rows initialize positionally,
-   * so a new trailing member is the only one that stays zero without touching
-   * all 258 of them. */
+   * is why it is stated per row. Tail metadata stays after every positional
+   * field so old rows safely receive zero defaults. */
   bool modern_env;
+  /* Explicit exception to category/type-derived debug visibility. Numeric 3D
+   * rows are normally authoring controls, but a small number are intentional
+   * player-facing gameplay choices. Keep that policy on the descriptor instead
+   * of teaching Settings_IsDebugOnly key strings. Must remain a tail field for
+   * the positional-row compatibility described above. */
+  bool player_visible;
 };
 
 typedef enum {
@@ -391,6 +396,10 @@ typedef struct Settings {
    * masks.  D1 exposes the controls while the implemented-capability mask is
    * still zero, so every selection safely resolves to authentic output. */
   bool sim3d_mode;
+  /* Extra host-renderable range around the authentic sim window. Raising it
+   * also extends projectile lifetime and can increase world-record pressure,
+   * so this is intentionally labelled gameplay-affecting. */
+  int sim_view_range;
   /* Inter-town map $09 as a forced-top-down 3D scene. Independent of the town
    * master because it has no town canvas, separated layers, or free camera. */
   bool sim3d_world_navigation;

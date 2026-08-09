@@ -47,7 +47,7 @@ enum {
    * not by snes_width; see IJ1 in diorama_scroll_math.c for the artifact that
    * mistake produced. Cross-checked by FrameSlot_Capture's _Static_assert
    * against the real constant. */
-  kFrameSlotLayerTextureWidth = 576,  /* kPpuSurfaceWidth (448 + 64*2) */
+  kFrameSlotLayerTextureWidth = 640,  /* kPpuSurfaceWidth (512 + 64*2) */
   /* The authentic SNES screen width, mirroring actraiser_game.h's
    * kActRaiserAuthenticWidth for the same D6 reason as the two constants above:
    * present-time code must not include actraiser_game.h, which declares g_ram and
@@ -59,7 +59,7 @@ enum {
    * against snes_width -- the HUD is authored for the authentic window and is
    * anchored, not stretched. Do not confuse it with snes_width (the whole
    * framebuffer, which varies) or with kFrameSlotLayerTextureWidth (the allocated
-   * texture, which is fixed at 448 and is the U-axis denominator).
+   * texture, which is fixed at 640 and is the U-axis denominator).
    *
    * Cross-checked against kActRaiserAuthenticWidth by a _Static_assert in
    * frame_slot.c, the way kFrameSlotLayerTextureWidth is against
