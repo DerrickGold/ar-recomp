@@ -120,6 +120,78 @@ static void TestValidSpan(void) {
   ExpectInt("clamped-input x1", x1, 376);
 }
 
+static ActionBgLayerPlan Layer(ActionBgEdgeMode edge) {
+  return (ActionBgLayerPlan) {
+    .valid = true,
+    .source = kActionBgSource_AuthenticViewport,
+    .default_edge = edge,
+  };
+}
+
+static void ExpectSpan(const char *label, const DioramaBgValidSpan *span,
+                       int y0, int y1, int x0, int x1) {
+  char part[96];
+  snprintf(part, sizeof(part), "%s y0", label);
+  ExpectInt(part, span->y0, y0);
+  snprintf(part, sizeof(part), "%s y1", label);
+  ExpectInt(part, span->y1, y1);
+  snprintf(part, sizeof(part), "%s x0", label);
+  ExpectInt(part, span->x0, x0);
+  snprintf(part, sizeof(part), "%s x1", label);
+  ExpectInt(part, span->x1, x1);
+}
+
+static void TestBandedValidSpans(void) {
+  DioramaBgValidSpanPlan spans;
+  ActionBgLayerPlan layer = Layer(kActionBgEdge_RawWrap);
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
+                               &layer, 0, 224, kTexWidth, &spans);
+  ExpectInt("raw span count", spans.count, 1);
+  ExpectSpan("raw", &spans.spans[0], 0, 224, 120, 496);
+
+  layer = Layer(kActionBgEdge_Mirror);
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
+                               &layer, 0, 224, kTexWidth, &spans);
+  ExpectInt("padded mirror span count", spans.count, 1);
+  ExpectSpan("padded mirror", &spans.spans[0], 0, 224, 0, 496);
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, false,
+                               &layer, 0, 224, kTexWidth, &spans);
+  ExpectSpan("unpadded mirror", &spans.spans[0], 0, 224, 120, 496);
+
+  /* Bloodpool's Mirror default and Repeat water band have the same full-budget
+   * extent. Exact evaluation can therefore coalesce them without the old,
+   * incorrect conservative clamp. */
+  layer.bands[0] = (ActionBgBand) {
+    .y0 = 136, .y1 = 224, .edge = kActionBgEdge_Repeat,
+  };
+  layer.band_count = 1;
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
+                               &layer, 16, 240, kTexWidth, &spans);
+  ExpectInt("Bloodpool span count", spans.count, 1);
+  ExpectSpan("Bloodpool", &spans.spans[0], 0, 240, 0, 496);
+
+  /* Death Heim's upper clamp and lower repeating fog genuinely need distinct
+   * UV spans. The authentic y=144 boundary moves down by the 16-row vertical
+   * extension in the captured texture. */
+  layer = Layer(kActionBgEdge_Clamp);
+  layer.bands[0] = (ActionBgBand) {
+    .y0 = 144, .y1 = 224, .edge = kActionBgEdge_Repeat,
+  };
+  layer.band_count = 1;
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
+                               &layer, 16, 240, kTexWidth, &spans);
+  ExpectInt("Death Heim span count", spans.count, 2);
+  ExpectSpan("Death Heim upper", &spans.spans[0], 0, 160, 120, 376);
+  ExpectSpan("Death Heim fog", &spans.spans[1], 160, 240, 0, 496);
+
+  /* A zeroed/invalid frame slot stays safely bounded by its live margins. */
+  layer = (ActionBgLayerPlan){ 0 };
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, 0, true,
+                               &layer, 0, 224, kTexWidth, &spans);
+  ExpectInt("invalid span count", spans.count, 1);
+  ExpectSpan("invalid", &spans.spans[0], 0, 224, 120, 376);
+}
+
 /* THE no-op guarantee. Wherever the span is the full capture, the UV range must
  * equal the pre-fix expression exactly:
  *     margin_u = (radius + 1) / 512
@@ -181,6 +253,7 @@ static void TestUvRangeNeverInverts(void) {
 int main(void) {
   TestClassify();
   TestValidSpan();
+  TestBandedValidSpans();
   TestUvRangeMatchesLegacyOnFullSpan();
   TestUvRangeCropsNarrowedSpan();
   TestUvRangeNeverInverts();

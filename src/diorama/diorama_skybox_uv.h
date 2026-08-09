@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "action/action_bg_plan.h"
+
 /* Fix B (SPEC-backdrop-clip.md): the skybox quad fills the viewport and maps its
  * U range over the FIXED capture span, but the PPU only ever renders within the
  * live per-side margin — which collapses to 0 as a finite world's camera reaches
@@ -52,6 +54,32 @@ int DioramaBg2MarginSource_Classify(uint8_t ws_clamp, uint8_t ws_mirror,
 void DioramaBg2ValidSpan(int ws_extra, int budget, int live_left, int live_right,
                          int margin_source, int tex_width,
                          int *out_x0, int *out_x1);
+
+/* Exact row-banded form used by the BH6 frame handoff. Action background edge
+ * bands are expressed in authentic scanlines, while a captured diorama plane
+ * can begin with `authentic_y0` rows of vertical extension. Each result entry
+ * therefore describes both a half-open capture-row interval and the valid
+ * texture-column interval for those rows.
+ *
+ * Adjacent rows with the same horizontal span are coalesced. Four input bands
+ * can introduce at most eight boundaries, hence the fixed 2*N+1 capacity. */
+enum { kDioramaBgMaxValidSpans = kActionBgMaxBands * 2 + 1 };
+
+typedef struct DioramaBgValidSpan {
+  int y0, y1;
+  int x0, x1;
+} DioramaBgValidSpan;
+
+typedef struct DioramaBgValidSpanPlan {
+  uint8_t count;
+  DioramaBgValidSpan spans[kDioramaBgMaxValidSpans];
+} DioramaBgValidSpanPlan;
+
+void DioramaBgValidSpanPlan_Build(
+    int ws_extra, int budget, int live_left, int live_right,
+    bool pad_captured_to_budget, const ActionBgLayerPlan *layer,
+    int authentic_y0, int capture_height, int tex_width,
+    DioramaBgValidSpanPlan *out);
 
 /* Map a texture-column span to the skybox quad's U range.
  *
