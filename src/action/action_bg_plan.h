@@ -14,15 +14,9 @@ enum {
 };
 
 typedef struct ActionBgLayerState {
-  uint16_t camera_x;
-  uint16_t camera_y;
   uint16_t world_width;
   uint16_t world_height;
-  uint16_t map_page;
   uint16_t tilemap_base;
-  uint16_t metatile_table;
-  uint16_t word_mask;
-  uint8_t attributes;
   uint8_t bgsc;
 } ActionBgLayerState;
 

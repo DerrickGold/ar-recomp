@@ -210,6 +210,21 @@ def decoded_word(wram, layout, tile_x, tile_y):
             (layout["attributes"] << 8))
 
 
+def authentic_tile_bounds(camera_x, camera_y):
+    """Return the exact tile interval sampled by native PPU scanout.
+
+    Horizontal pixels are 0..255. ActRaiser's PPU scanlines are numbered
+    1..224, so the vertical interval intentionally has different endpoints.
+    Keep this arithmetic identical to ActRaiserActionBg_CompareLayer.
+    """
+    return (
+        camera_x // 8,
+        (camera_x + AUTHENTIC_WIDTH - 1) // 8,
+        (camera_y + 1) // 8,
+        (camera_y + AUTHENTIC_HEIGHT) // 8,
+    )
+
+
 def compare_view(wram, vram, layout):
     result = {
         "available": bool(vram) and layout["valid"],
@@ -221,10 +236,8 @@ def compare_view(wram, vram, layout):
     if not result["available"]:
         return result
     camera_x, camera_y = layout["camera"]
-    first_x = camera_x // 8
-    first_y = camera_y // 8
-    last_x = (camera_x + AUTHENTIC_WIDTH - 1) // 8
-    last_y = (camera_y + AUTHENTIC_HEIGHT - 1) // 8
+    first_x, last_x, first_y, last_y = authentic_tile_bounds(
+        camera_x, camera_y)
     world_width, world_height = layout["world_tiles"]
     for tile_y in range(first_y, last_y + 1):
         for tile_x in range(first_x, last_x + 1):
