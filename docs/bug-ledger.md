@@ -1097,8 +1097,15 @@ the current debugging process; this file is the case law.
     Repeating the HLE arm with `AR_VEXT_BANDFIX=0` remained byte-identical
     (`runs/20260809-133545`). Thus BG2-high transparency no longer relies on
     repaired negative VRAM-ring rows once the provider is bound; BG1 continues
-    from its independently valid finite world, and the authentic centre stays
-    native.
+    from its independently valid finite world.
+
+    **BH5 confirmation (2026-08-09):** authentic world-layer pixels now use the
+    same provider after an exact live-ring/scroll/bounds preflight. The gf-2200
+    nine-plane dump in `runs/20260809-144640` remains byte-identical to the
+    native reference, and `runs/20260809-144702` remains identical with
+    `AR_VEXT_BANDFIX=0`. This rules out a hidden centre-versus-extension source
+    discontinuity: both regions consume one finite tile-word source while the
+    live PPU still performs character decode, priority and color math.
 
     **Reusable lesson:** a resident tilemap address is not automatically a spatial world
     coordinate outside hardware-visible scanlines. An A/B that confines a symptom to an

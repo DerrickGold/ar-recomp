@@ -1,12 +1,13 @@
 # SPEC-bg-hle — action background world provider and scene plan
 
-**Status: In progress (BH4 synthetic-margin provider complete).** The mapped
+**Status: In progress (BH5 authentic-world provider complete).** The mapped
 decoder, offline oracle, pure `ActionBgWorld`, differential observer, and
 `ActionBgPlan` policy matrix now feed a generic frame-scoped PPU virtual
-tilemap seam. `AR_ACTION_BG_HLE=1` is default-off and supplies only pixels
-outside the authentic 256x224 viewport; the centre remains on the native ring.
-Decorative/native layers retain the existing isolated mirror/repeat/raw paths.
-BH5 centre ownership and the remaining BH1 acceptance census are still open.
+tilemap seam. `AR_ACTION_BG_HLE=1` remains default-off; eligible world layers
+own both the authentic 256x224 viewport and synthetic margins after an exact
+live-ring preflight. Decorative/native layers retain the existing isolated
+mirror/repeat/raw paths. Later-room BH1/BH6 coverage, broad soak/default-on
+promotion, and behavior-neutral legacy cleanup remain open.
 
 This spec replaces the narrower original BH1 proposal. It keeps that proposal's
 measured decoder evidence, but expands the target from "decode more margin
@@ -336,7 +337,7 @@ dimension may control an allocation or index.
 The SNES runtime does not know ActRaiser map IDs or scene policy. It receives a
 generic `PpuVirtualTilemapBinding` for Mode-1 BG1/BG2. The binding contains a
 total tile-word-or-transparent callback, opaque context, full camera anchors,
-and matching 10-bit scroll anchors. BH4 implements these invariants:
+and matching 10-bit scroll anchors. BH4/BH5 implement these invariants:
 
 - binding is all-or-nothing per layer for the frame;
 - the provider supplies tilemap words only;
@@ -694,6 +695,44 @@ ring rows when HLE is enabled.
   color math and HBlank scroll still affect provider tiles.
 
 ### BH5 — provider owns the authentic world layer
+
+**Implementation status (2026-08-09): complete, default-off.** The generic
+binding now has an explicit `kPpuVirtualTilemapFlag_IncludeAuthentic` ownership
+flag. Without it, BH4 remains margin-only. With it, window spans inside the
+authentic viewport use the same provider word path while the live PPU continues
+to own VRAM character pixels, CGRAM, z/priority resolution, windows, mosaic,
+main/subscreen, brightness, transparency, and color math. A real-PPU test
+constructs equivalent native/provider 64x64 rings and proves byte-identical
+full-row pixels and priority words in normal and mosaic rendering.
+
+The ActRaiser adapter sets that flag only after all structural BH4 checks plus
+three authentic-centre gates: the full camera must match the live 10-bit PPU
+scroll phase, every displayed tile word must match the resident native ring,
+and no displayed coordinate may be outside the finite world. Any failure clears
+the layer binding for that frame. Preflight/eligible/bound/mismatch/outside and
+fallback counters make that decision observable. Authentic 4:3 uses the same
+modern-PPU handoff even with zero margins; wide-raw and the legacy renderer
+remain native comparison paths.
+
+The provider-enabled 12-entry matrix manifest
+`runs/bg-hle-matrix-20260809-145341.json` records 19,522 eligible-and-bound
+layer-frames, 18,216,295 exact preflight tile checks, and 150,579,968 provider
+tile fetches with zero phase, edge, mismatch, outside, invalid, allocation, or
+bind-divergence result. For every target, all 17 artifacts match the earlier
+native matrix byte-for-byte: final framebuffer, WRAM, SRAM, dispatch/state, and
+two complete PPU snapshots. Separate wide `0101`/`0201`/`0401` replays retain
+world/world, mixed mirror+repeat, and cyclic decorative policies with exact
+screenshots and state. Fillmore act-2 diorama gf 2200 again matches all nine
+layer/priority planes, including with `AR_VEXT_BANDFIX=0`.
+
+The maximum-span performance gate used Aitos `0401` BG1, the largest censused
+world at 4096x1024, on the 496-pixel presentation with the comparator disabled.
+Three release/headless samples measured native median 2.298703 s and HLE median
+2.426934 s over 1,900 frames: +0.128231 s total, 0.067 ms/emulated frame, or
+0.4% of a 60 Hz frame budget. The accepted BH5 budget is at most 0.10 ms/frame
+at this worst measured span; the implementation passes. The 5.6% headless
+throughput ratio is retained in the evidence rather than hidden by real-time
+frame pacing.
 
 **Work**
 

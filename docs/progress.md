@@ -36,10 +36,11 @@ confirmed fully playable with widescreen enabled. Across those passes:
 Death Heim (`$07`/`70X`), the distinct boss-rush/final-boss flow, is done:
 user-verified end-to-end on 2026-07-14, playing through every boss to the end
 (see the region table). Finite action-world side margins now clamp from the
-live BG1 camera/dimensions. The default-off BH4 background HLE can additionally
-supply finite BG1/BG2 tile words directly in side/top synthetic margins while
-leaving the native centre and decorative layers unchanged. Remaining work is
-HLE acceptance/soak and centre ownership, not another camera-edge design.
+live BG1 camera/dimensions. The default-off BH5 background HLE now supplies
+finite BG1/BG2 tile words across eligible authentic world layers and side/top
+synthetic margins after an exact live-ring preflight. Decorative layers remain
+native mirror/repeat/clamp sources. Remaining work is later-room acceptance,
+soak/default promotion, and cleanup—not another camera-edge design.
 
 No generated ROM-derived source is committed; reproducible builds materialize
 the registered handlers from `recomp/*.cfg`.
@@ -175,12 +176,13 @@ backend tests pass; the outstanding manual gate is representative Apply and
 save → Restart Game → Continue checks across those pages.
 The remaining widescreen backlog is:
 
-1. **Finish action-background HLE acceptance.** BH4's default-off synthetic-
-   margin provider is implemented and representative wide/diorama A/Bs are
-   byte-identical, including positive controls with the legacy ring repairs
-   disabled. Complete the remaining census, migrate eligible authentic-centre
-   pixels in BH5, soak all rooms/transitions, then retire only the duplicated
-   host ring-repair transaction. Native streamers and the VRAM ring remain.
+1. **Finish action-background HLE acceptance.** BH5's default-off full-world
+   provider passes the 12-entry authentic matrix, representative wide mixed/
+   cyclic policies, nine diorama priority planes, legacy-repair-off controls,
+   and the maximum-span performance budget. Complete the remaining natural
+   boss/ending transitions and soak all rooms/lifecycle changes before default
+   promotion; then retire only the duplicated host ring-repair transaction.
+   Native streamers and the VRAM ring remain fallback/oracle infrastructure.
 2. **Freeze simulation baselines.** Complete Bloodpool and all four untested
    towns using the town matrix. The old `simdev.rec`/`lairseal.rec` files no
    longer reach a town viewport from the current SRAM, so new direct captures
@@ -235,7 +237,7 @@ The remaining widescreen backlog is:
 | Bridge structure-cap fix (sim) | 🟡 | 2026-07-17: structure-record system fully mapped + SRAM-validated (SEAMS town §7, save-format §3.4: 128 × 4-byte records per town, allocator `$03:9D9F`, census `$03:C07F`, miracle damage `$03:B274`, bridge immunity row `$A435`; record format confirmed against real saves incl. both bridge orientation variants). v1 slot-reuse/lightning designs were withdrawn after they erased bridges on reconstruction. v2 uses a validated/deduplicated completed-bridge sidecar: `$9D9F` migrates, `$C07E` restores support, `$9CFB` restores `$E1/$E2` marks, and `$89F0` decodes the native rebuild program to restore the visible metatile after `$9D4D`. Sidecar-only checksum changes are shadowed until a normal ROM save transaction, with a persistence regression test. Marks-only visual capture correctly failed (black bridge), establishing the second render seam; generated build + replacement screenshot are the remaining acceptance gate. |
 | Build / platform targets | 🟡 | macOS (arm64, primary development platform) and Steam Deck are built and played on regularly — both confirmed working end to end from the distribution bundle. All seven bundles (macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64/arm64, steam-deck) cross-build from one machine because the Go module is CGO-free, but **Windows and generic Linux have not been run end to end by this project** — no CI, no `.vcxproj`, no verified launch. Treat those bundles as untested. See `docs/BUILD_TOOLING.md` for the packaging design and the open signing/notarisation gaps. |
 | Debug tooling | ✅ | 2026-07-07 toolkit: `dis65`/`romxref`/`wram`/`resolve_miss`/`cycle.sh` — anomaly capture → auto-triage → proposed cfg patch loop (`DEBUG.md` §1) |
-| Action widescreen BG/sprites | 🟡 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, finite camera edges, sprites, activation, narrow-BG2 mirror/repeat policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. 2026-08-09 `SPEC-bg-hle.md`: bounded `ActionBgWorld`, the 49-map `ActionBgPlan`, differential census, and default-off BH4 virtual margin provider are implemented. The generic PPU seam leaves the native centre intact and preserves live VRAM/CGRAM, priority, windows, transparency, mosaic, color math, and scroll effects. Representative `0101`/`0201`/`0401` wide A/Bs match screenshots and final emulated state; Fillmore gf-2200 matches all nine diorama priority planes, including with legacy horizontal/vertical ring repair disabled. Entry census remains 19,072,823 zero-mismatch runtime comparisons plus 43,999 offline checks. Direct Death Heim handoffs add 6,646,861 in-world matches; hub/final remain native by plan. Remaining: later-room census gaps, BH5 authentic-centre ownership, complete soak/default flip, then behavior-neutral cleanup. |
+| Action widescreen BG/sprites | 🟡 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, finite camera edges, sprites, activation, narrow-BG2 mirror/repeat policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. 2026-08-09 `SPEC-bg-hle.md`: bounded `ActionBgWorld`, the 49-map `ActionBgPlan`, differential census, and default-off BH5 full-world provider are implemented. After exact phase/tile/bounds preflight, eligible authentic and margin pixels use provider tile words while live VRAM/CGRAM, priority, windows, transparency, mosaic, color math, and scroll effects remain native PPU stages. The provider-enabled 12-entry matrix binds 19,522/19,522 eligible layer-frames with 18,216,295 zero-mismatch/outside preflight checks; all 204 framebuffer/state/PPU artifacts match native. Fresh `0101`/`0201`/`0401` wide A/Bs and Fillmore gf-2200's nine diorama planes are exact, including with legacy vertical repair disabled. Maximum-span cost is 0.067 ms/frame, below the 0.10 ms budget. Direct Death Heim handoffs add 6,646,861 in-world oracle matches; hub/final remain native by plan. Remaining: natural later-room/ending gaps, complete soak/default flip, then behavior-neutral cleanup. |
 
 ## Codebase metrics (objective, automated — refreshed 2026-07-12)
 
