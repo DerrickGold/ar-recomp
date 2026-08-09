@@ -42,6 +42,13 @@ TARGET_NAMES = {
     "0605": "Northwall act 2",
     "0608": "Northwall act 2 boss",
     "0701": "Death Heim hub",
+    "0702": "Death Heim rematch room 1",
+    "0703": "Death Heim rematch room 2",
+    "0704": "Death Heim rematch room 3",
+    "0705": "Death Heim rematch room 4",
+    "0706": "Death Heim rematch room 5",
+    "0707": "Death Heim rematch room 6",
+    "0708": "Death Heim final boss",
 }
 
 RUN_DIRECTORY_RE = re.compile(r"\[run-dir\] (runs/[^ ]+) \(")
@@ -59,6 +66,10 @@ COMPARATOR_RE = re.compile(
 class MatrixError(Exception):
     """A target run did not satisfy the evidence contract."""
 
+    def __init__(self, message, run_directory=None):
+        super().__init__(message)
+        self.run_directory = run_directory
+
 
 def parse_targets(value):
     targets = []
@@ -69,7 +80,7 @@ def parse_targets(value):
                 "target must be four hexadecimal digits: %s" % raw_target)
         if target not in TARGET_NAMES:
             raise argparse.ArgumentTypeError(
-                "target is not in the verified table: %s" % target)
+                "target is not in the known action-map table: %s" % target)
         if target not in targets:
             targets.append(target)
     if not targets:
@@ -205,8 +216,13 @@ def run_target(args, target, rom_hash):
         raise MatrixError("run directory missing from process log")
     if not os.path.isabs(run_directory):
         run_directory = os.path.join(args.cwd, run_directory)
-    return inspect_run(
-        target, run_directory, log, rom_hash, len(args.capture_frames))
+    try:
+        return inspect_run(
+            target, run_directory, log, rom_hash, len(args.capture_frames))
+    except MatrixError as error:
+        if error.run_directory is None:
+            error.run_directory = run_directory
+        raise
 
 
 def write_manifest(path, args, rom_hash, results):
@@ -292,12 +308,15 @@ def main(argv=None):
                 result["run_directory"]), flush=True)
         except (MatrixError, OSError) as error:
             failed = True
-            results.append({
+            failure = {
                 "target": target,
                 "name": TARGET_NAMES[target],
                 "status": "fail",
                 "error": str(error),
-            })
+            }
+            if isinstance(error, MatrixError) and error.run_directory:
+                failure["run_directory"] = error.run_directory
+            results.append(failure)
             print("      FAIL %s" % error, file=sys.stderr, flush=True)
             if args.fail_fast:
                 break

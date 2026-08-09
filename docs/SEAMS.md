@@ -1322,7 +1322,7 @@ Verified entry targets from direct runs:
 | `$03` Kasandora | `0301` | `0303` | `0302` loads invalid/garbage state |
 | `$04` Aitos | `0401` | `0404` | |
 | `$05` Marahna | `0501` | `0504` | |
-| `$06` Northwall | `0601` | `0605` | `0608` is the Act 2 boss arena |
+| `$06` Northwall | `0601` | `0605` | `0608` selects the Act 2 boss map, but a direct non-action warp has invalid patterned CHR and self-exits; it is not a visual baseline |
 | `$07` Death Heim | `0701` | — | boss-rush hub; verified end-to-end through every rematch and the final boss (2026-07-14) |
 
 **Fidelity limit (2026-07-12):** the current test workflow reaches Fillmore
