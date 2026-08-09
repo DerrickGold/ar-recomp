@@ -88,5 +88,6 @@ typedef struct ActionBgPresentationPolicy {
 bool ActionBgPlan_Build(const ActionBgFrameState *state, ActionBgPlan *out);
 bool ActionBgPlan_CompilePresentation(
     const ActionBgPlan *plan, ActionBgPresentationPolicy *out);
+const char *ActionBgSourceKind_Name(ActionBgSourceKind source);
 
 #endif  /* ACTION_BG_PLAN_H */

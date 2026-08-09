@@ -156,6 +156,54 @@ bool ActRaiserActionBg_CompareLayer(
   return true;
 }
 
+bool ActRaiserActionBg_BuildPlan(
+    const uint8_t *wram, size_t wram_size, const struct Ppu *ppu,
+    bool decorative_padding_enabled, ActionBgPlan *plan,
+    ActionBgPresentationPolicy *presentation) {
+  if (plan) memset(plan, 0, sizeof(*plan));
+  if (presentation) {
+    memset(presentation, 0, sizeof(*presentation));
+    presentation->repeat_band_layer = -1;
+  }
+  if (!wram || !ppu || !plan || !presentation ||
+      wram_size <= kActRaiserWram_DeathHeimProgress)
+    return false;
+
+  ActionBgFrameState state = {
+    .map_group = wram[kActRaiserWram_MapGroup],
+    .map_number = wram[kActRaiserWram_CurrentMap],
+    .death_heim_progress = wram[kActRaiserWram_DeathHeimProgress],
+    .death_heim_ending_state = wram[kActRaiserWram_DeathHeimEndingState],
+    .decorative_padding_enabled = decorative_padding_enabled,
+  };
+  for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
+    ActRaiserActionBgLayerSnapshot snapshot;
+    if (!ActRaiserActionBg_CaptureLayer(
+            wram, wram_size, layer, ppu->bgXsc[layer], &snapshot))
+      return false;
+    state.layer[layer] = (ActionBgLayerState) {
+      .camera_x = snapshot.camera_x,
+      .camera_y = snapshot.camera_y,
+      .world_width = snapshot.decode.world_width,
+      .world_height = snapshot.decode.world_height,
+      .map_page = snapshot.decode.map_page,
+      .tilemap_base = snapshot.tilemap_base,
+      .metatile_table = snapshot.decode.metatile_table,
+      .word_mask = snapshot.decode.word_mask,
+      .attributes = snapshot.decode.attributes,
+      .bgsc = snapshot.bgsc,
+    };
+  }
+  if (!ActionBgPlan_Build(&state, plan) ||
+      !ActionBgPlan_CompilePresentation(plan, presentation)) {
+    memset(plan, 0, sizeof(*plan));
+    memset(presentation, 0, sizeof(*presentation));
+    presentation->repeat_band_layer = -1;
+    return false;
+  }
+  return true;
+}
+
 static const char *FallbackName(ActRaiserActionBgFallbackReason reason) {
   static const char *const names[kActRaiserActionBgFallback_Count] = {
     [kActRaiserActionBgFallback_ForcedBlank] = "forced-blank",

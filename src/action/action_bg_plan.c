@@ -199,3 +199,12 @@ bool ActionBgPlan_CompilePresentation(
   *out = built;
   return true;
 }
+
+const char *ActionBgSourceKind_Name(ActionBgSourceKind source) {
+  switch (source) {
+    case kActionBgSource_NativeTilemap: return "native";
+    case kActionBgSource_WorldMap: return "world";
+    case kActionBgSource_AuthenticViewport: return "viewport";
+    default: return "unknown";
+  }
+}
