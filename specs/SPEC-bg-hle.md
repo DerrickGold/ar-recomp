@@ -1,8 +1,10 @@
 # SPEC-bg-hle — action background world provider and scene plan
 
-**Status: Proposed (BH1).** The action-level decode is mapped and the offline
-oracle exists. No production C decoder, virtual tilemap provider, or unified
-scene plan is implemented.
+**Status: In progress (BH2 foundation).** The action-level decode is mapped,
+the offline oracle exists, and the pure production `ActionBgWorld` decoder plus
+its ROM-free contract suite are implemented. The complete BH1 census, runtime
+differential adapter, virtual tilemap provider, and unified scene plan remain
+open; no production pixel path consumes the decoder yet.
 
 This spec replaces the narrower original BH1 proposal. It keeps that proposal's
 measured decoder evidence, but expands the target from "decode more margin
@@ -519,6 +521,22 @@ must leave a working fallback and a measurement that proves its own behavior.
 No production rendering changes.
 
 ### BH2 — pure C world decoder and differential oracle
+
+**Implementation status (2026-08-09): decoder foundation implemented, gate not
+yet claimed.** `src/action/action_bg_world.c` now validates the complete WRAM
+map/table spans, snapshots the exact source bytes, expands the finite world into
+scratch tile-word storage, and atomically publishes only after success. Its
+128-KiB WRAM bound derives a maximum of 512 pages / 524,288 expanded tile words
+without accepting an unchecked level dimension. Lookup distinguishes a valid
+out-of-world coordinate from provider failure; reset and malformed input fail
+closed. `tests/action_bg_world_test.c` covers page crossings, all metatile
+quadrants, mask/attribute/flip/priority preservation, negative and finite
+bounds, exact-byte cache invalidation, failed-publication retention, reset, and
+the maximum storage case. The module is included in the shipped source manifest
+but deliberately has no production caller, so this slice cannot change output.
+
+The runtime `AR_ACTION_BG_HLE_COMPARE=1` adapter and the complete BH1 replay
+matrix remain required before BH2's zero-mismatch gate can pass.
 
 **Work**
 
