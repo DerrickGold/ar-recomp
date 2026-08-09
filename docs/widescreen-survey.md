@@ -407,6 +407,9 @@ native/HLE seams untouched.
    The shared path is enabled for `$18=$01-$07`; regions `$01-$06` were directly
    validated at this stage. Death Heim `$07`, blocked by its first-boss crash at
    the time, was subsequently repaired and validated end-to-end on 2026-07-14.
+   **Historical note (BH8, 2026-08-09):** the default HLE provider superseded
+   and removed this host transaction after exact pre/post matrices.
+   `AR_WS_BGREFRESH` now parses only as a hidden load-only compatibility alias.
 3. **Stage C (validated 2026-07-12)**: widen only per-sprite emission for
    already-authentically-active objects. `$0400` activation remains authentic.
    A full direct-play pass of Fillmore act 1 with `AR_WS_SPRDBG=1` found no
@@ -818,7 +821,8 @@ is broken at its first boss transition.
   map descriptor and rebuilds only at the original streamer's 16px/map-page
   cadence; partial builds retry. `AR_PERF` also emits `[draw-perf]` so the next
   run measures this previously hidden phase directly. This source-only fix does
-  not require regeneration.
+  not require regeneration. BH8 later removed the complete refresher/cache once
+  the bounded provider owned the same pixels; this remains performance history.
 - The same slow F9 dispatch ring discovered one additional live ungenerated
   object root, `$BD90`; its closure is `$BD90/$BD9F/$BDA5/$BDAE`. It is separate
   from the slowdown—missing dispatches return immediately—but was added to the

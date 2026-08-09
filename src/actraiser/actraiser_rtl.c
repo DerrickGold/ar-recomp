@@ -1082,13 +1082,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     }
   } else if (!survey && ActRaiser_IsActionMapGroup(map_group)) {
     /* Validated action-wide path, shared by all seven action-region handler
-     * tables. Original tile streamers remain active; a separate host-side
-     * transaction refreshes only BG tilemap VRAM margins with true map data,
+     * tables. Original tile streamers remain active for the authentic ring and
+     * oracle; the bounded HLE provider supplies eligible world coordinates,
      * while the audited $8C98/$8D68 seams widen drawing and activation.
-     *
-     * AR_WS_ACTION=0 restores the pillarboxed action baseline in the same
-     * binary. AR_WS_BGREFRESH=0 returns exactly to Stage A (raw wide renderer,
-     * stale/wrapped margin BG) without changing the action geometry. */
+     * AR_WS_ACTION=0 restores the pillarboxed action baseline. */
     wide = g_settings.ws_action;
     ActionBgPresentationPolicy bg_policy;
     if (ActRaiserActionBg_BuildPlan(
@@ -1104,8 +1101,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       repeat_band_layer = bg_policy.repeat_band_layer;
       repeat_band_y0 = bg_policy.repeat_band_y0;
       repeat_band_y1 = bg_policy.repeat_band_y1;
-      bounded_world_margins = wide && bg_policy.bound_canvas_to_world &&
-          ActRaiser_WidescreenBgRefreshEnabled();
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
@@ -1223,13 +1218,25 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (bg_hle_allowed && bg_plan_valid) {
       bg_hle_bindings = ActRaiserActionBg_BindPlan(
           g_ram, kActRaiserWramSize, &bg_plan, g_ppu);
-      /* The legacy path can enforce finite side bounds only when its VRAM
-       * margin refresh is active. A bound BG1 provider owns those finite
-       * coordinates directly, so retain the same edge geometry even when the
-       * ring-repair feature is deliberately disabled for a positive control. */
+      /* A bound BG1 provider owns the finite action canvas. If any planned
+       * world layer cannot bind, clamp that layer to its authentic viewport
+       * instead of exposing stale/wrapped ring cells in synthetic margins.
+       * Wide Raw never reaches this block and remains intentionally raw. */
       if ((bg_hle_bindings & kActRaiserBgLayerMask_Bg1) &&
           bg_plan.bound_canvas_to_world)
         bounded_world_margins = 1;
+      uint8 visible_bg_layers = 0;
+      if (!(g_ppu->inidisp & 0x80) && (g_ppu->bgmode & 7u) == 1u) {
+        visible_bg_layers = (uint8)(
+            (g_ppu->screenEnabled[0] | g_ppu->screenEnabled[1]) &
+            ((1u << kActionBgPlanLayerCount) - 1u));
+      }
+      uint8 fallback_world_layers = ActionBgPlan_ClampUnboundWorldLayers(
+          &bg_plan, bg_hle_bindings, visible_bg_layers);
+      if (fallback_world_layers) {
+        clamp |= fallback_world_layers;
+        PpuSetWidescreenLayerClamp(g_ppu, clamp);
+      }
     }
     if (bounded_world_margins) {
       /* Clamp each side to real BG1 world space. Action width is section
@@ -1959,13 +1966,9 @@ void ActRaiserDrawPpuFrame(void) {
   /* Stage D reconnaissance: read-only classification of objects that intersect
    * a live side margin but remain outside the authentic activation window. */
   ActRaiser_WidescreenSpriteActivationProbe();
-  /* Stage B: populate BG1/BG2 margin tilemap cells transactionally before
-   * scanline rendering. No-op under AR_WS_BGREFRESH=0 and outside action. */
-  ActRaiser_WidescreenMarginRefresh();
   /* SPEC-bg-hle BH2 differential observer. Default-off and read-only: even
    * when enabled it compares the pure WRAM world against the native ring but
-   * never supplies a tile to scanout. Running after the transactional margin
-   * refresh observes the exact ring the PPU is about to render. */
+   * never supplies a tile to scanout. */
   ActRaiserActionBg_ObserveFrame(g_ram, kActRaiserWramSize, g_ppu);
   /* Sky Palace: synthesize only BG2's offscreen margin columns from its ROM
    * source page. The paired restore after scanout preserves UI staging. */

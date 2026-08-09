@@ -1133,6 +1133,17 @@ the current debugging process; this file is the case law.
     gates, and a real compositor A/B pass. The provider is now default-on with
     exact `AR_ACTION_BG_HLE=0` as the native control.
 
+    **BH8 cleanup confirmation (2026-08-09):** the legacy action-world ring
+    transaction, builder trampolines, partial drains, 128 KiB snapshot, and
+    vertical-band repair are removed. Old `AR_WS_BGREFRESH` configuration is a
+    hidden load-only alias. If a planned provider layer cannot bind, the frame
+    plan now records an authentic-viewport clamp instead of allowing stale ring
+    margins. Pre/post 4:3, Wide Full, and diorama-32 matrices accept all 612
+    artifacts: framebuffers/state/PPU registers/authentic rings are exact; seven
+    full-VRAM snapshots differ only in 1,390 provider-owned offscreen tilemap
+    words the deleted transaction no longer writes. Native streamers/ring/oracle
+    and the independent Sky Palace repair remain.
+
     **Reusable lesson:** a resident tilemap address is not automatically a spatial world
     coordinate outside hardware-visible scanlines. An A/B that confines a symptom to an
     extension proves the extension triggers it; source-layer isolation plus independent

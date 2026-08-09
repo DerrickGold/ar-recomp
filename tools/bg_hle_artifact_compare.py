@@ -10,6 +10,9 @@ The default policy requires every byte to match. ``--framebuffer-policy
 authentic-center`` retains that exact contract for emulated state and PPU
 snapshots, requires the centered 256-pixel authentic viewport to match, and
 reports (but accepts) intentional HLE differences confined to side margins.
+``--snapshot-vram-policy provider-owned`` accepts changed VRAM words only inside
+an eligible BG1/BG2 64x64 tilemap whose authentic-ring census is exact on both
+sides. This pins the intentional BH8 removal of offscreen host repair writes.
 """
 
 import argparse
@@ -35,6 +38,8 @@ SNAPSHOT_SUFFIXES = (
     ".ppu.json",
 )
 AUTHENTIC_WIDTH = 256
+VRAM_WORDS = 0x8000
+TILEMAP_WORDS_64X64 = 0x1000
 
 
 class ArtifactCompareError(Exception):
@@ -144,7 +149,7 @@ def load_manifest(path):
                 "target %s is not a completed pass in %s" % (target, path))
         if target in by_target:
             raise ArtifactCompareError("duplicate target %s in %s" % (target, path))
-        by_target[target] = run_directory
+        by_target[target] = result
     return by_target, len(capture_frames)
 
 
@@ -174,10 +179,99 @@ def discover_artifacts(run_directory, snapshot_count):
     return artifacts
 
 
-def compare_manifests(left_path, right_path, framebuffer_policy="exact"):
+def read_vram_words(path):
+    try:
+        with open(path, "rb") as source:
+            payload = source.read()
+    except OSError as error:
+        raise ArtifactCompareError("cannot read %s: %s" % (path, error))
+    if len(payload) != VRAM_WORDS * 2:
+        raise ArtifactCompareError("invalid VRAM payload: %s" % path)
+    return [payload[index] | (payload[index + 1] << 8)
+            for index in range(0, len(payload), 2)]
+
+
+def snapshot_record(result, relative):
+    name = os.path.basename(relative)[:-len(".vram.bin")]
+    matches = [record for record in result.get("snapshots", [])
+               if os.path.basename(record.get("snapshot", "")) == name]
+    if len(matches) != 1:
+        raise ArtifactCompareError(
+            "cannot resolve census metadata for %s target %s" %
+            (relative, result.get("target")))
+    return matches[0]
+
+
+def eligible_tilemap_ranges(record):
+    ranges = []
+    for layer in record.get("layers", []):
+        comparison = layer.get("comparison", {})
+        ppu = layer.get("ppu", {})
+        base = layer.get("tilemap_base")
+        if (not comparison.get("available") or
+                comparison.get("mismatches") != 0 or
+                comparison.get("outside_world") != 0 or
+                ppu.get("eligible") is not True or
+                not isinstance(base, int) or
+                base < 0 or base + TILEMAP_WORDS_64X64 > VRAM_WORDS):
+            continue
+        ranges.append((base, base + TILEMAP_WORDS_64X64))
+    return ranges
+
+
+def compact_word_ranges(addresses):
+    if not addresses:
+        return []
+    ranges = []
+    first = previous = addresses[0]
+    for address in addresses[1:]:
+        if address != previous + 1:
+            ranges.append([first, previous + 1])
+            first = address
+        previous = address
+    ranges.append([first, previous + 1])
+    return ranges
+
+
+def format_word_ranges(ranges, limit=8):
+    shown = ranges[:limit]
+    text = ",".join("$%04X-$%04X" % (start, end - 1)
+                    for start, end in shown)
+    if len(ranges) > limit:
+        text += ",...(+%d ranges)" % (len(ranges) - limit)
+    return text
+
+
+def compare_provider_owned_vram(left_path, right_path, left_result,
+                                right_result, relative):
+    left_words = read_vram_words(left_path)
+    right_words = read_vram_words(right_path)
+    changed = [address for address, words in
+               enumerate(zip(left_words, right_words)) if words[0] != words[1]]
+    left_ranges = eligible_tilemap_ranges(
+        snapshot_record(left_result, relative))
+    right_ranges = eligible_tilemap_ranges(
+        snapshot_record(right_result, relative))
+    shared_ranges = [entry for entry in left_ranges if entry in right_ranges]
+    outside = [address for address in changed
+               if not any(start <= address < end
+                          for start, end in shared_ranges)]
+    return {
+        "changed_words": len(changed),
+        "ranges": compact_word_ranges(changed),
+        "outside_provider_tilemaps": len(outside),
+        "outside_ranges": compact_word_ranges(outside),
+    }
+
+
+def compare_manifests(left_path, right_path, framebuffer_policy="exact",
+                      snapshot_vram_policy="exact"):
     if framebuffer_policy not in ("exact", "authentic-center"):
         raise ArtifactCompareError(
             "unknown framebuffer policy: %s" % framebuffer_policy)
+    if snapshot_vram_policy not in ("exact", "provider-owned"):
+        raise ArtifactCompareError(
+            "unknown snapshot VRAM policy: %s" % snapshot_vram_policy)
     left, left_snapshots = load_manifest(left_path)
     right, right_snapshots = load_manifest(right_path)
     if left_snapshots != right_snapshots:
@@ -193,26 +287,43 @@ def compare_manifests(left_path, right_path, framebuffer_policy="exact"):
 
     mismatches = []
     framebuffer_differences = []
+    vram_differences = []
     compared = 0
     for target in sorted(left):
-        left_artifacts = discover_artifacts(left[target], left_snapshots)
-        right_artifacts = discover_artifacts(right[target], right_snapshots)
+        left_result = left[target]
+        right_result = right[target]
+        left_run = left_result["run_directory"]
+        right_run = right_result["run_directory"]
+        left_artifacts = discover_artifacts(left_run, left_snapshots)
+        right_artifacts = discover_artifacts(right_run, right_snapshots)
         if left_artifacts != right_artifacts:
             raise ArtifactCompareError(
                 "artifact sets differ for target %s" % target)
         for relative in left_artifacts:
             compared += 1
-            left_hash = file_sha256(os.path.join(left[target], relative))
-            right_hash = file_sha256(os.path.join(right[target], relative))
+            left_artifact = os.path.join(left_run, relative)
+            right_artifact = os.path.join(right_run, relative)
+            left_hash = file_sha256(left_artifact)
+            right_hash = file_sha256(right_artifact)
             if left_hash != right_hash:
                 if (relative == "shot.ppm" and
                         framebuffer_policy == "authentic-center"):
                     comparison = compare_authentic_center(
-                        os.path.join(left[target], relative),
-                        os.path.join(right[target], relative))
+                        left_artifact, right_artifact)
                     if comparison.get("center_pixels") == 0:
                         comparison["target"] = target
                         framebuffer_differences.append(comparison)
+                        continue
+                if (relative.endswith(".vram.bin") and
+                        snapshot_vram_policy == "provider-owned"):
+                    comparison = compare_provider_owned_vram(
+                        left_artifact, right_artifact, left_result,
+                        right_result, relative)
+                    if (comparison["changed_words"] and
+                            not comparison["outside_provider_tilemaps"]):
+                        comparison["target"] = target
+                        comparison["artifact"] = relative
+                        vram_differences.append(comparison)
                         continue
                 mismatches.append({
                     "target": target,
@@ -228,6 +339,8 @@ def compare_manifests(left_path, right_path, framebuffer_policy="exact"):
         "artifacts": compared,
         "framebuffer_policy": framebuffer_policy,
         "framebuffer_differences": framebuffer_differences,
+        "snapshot_vram_policy": snapshot_vram_policy,
+        "vram_differences": vram_differences,
         "mismatches": mismatches,
     }
 
@@ -240,11 +353,17 @@ def main(argv=None):
         "--framebuffer-policy", choices=("exact", "authentic-center"),
         default="exact",
         help="exact full frame, or exact centered 256px plus reported margins")
+    parser.add_argument(
+        "--snapshot-vram-policy", choices=("exact", "provider-owned"),
+        default="exact",
+        help="exact VRAM, or allow changes confined to provider-eligible "
+             "tilemaps with exact authentic-ring census")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
         result = compare_manifests(
-            args.left_manifest, args.right_manifest, args.framebuffer_policy)
+            args.left_manifest, args.right_manifest, args.framebuffer_policy,
+            args.snapshot_vram_policy)
     except ArtifactCompareError as error:
         print("bg_hle_artifact_compare: %s" % error, file=sys.stderr)
         return 2
@@ -260,16 +379,23 @@ def main(argv=None):
               (len(result["mismatches"]), result["artifacts"]))
     else:
         changed = result["framebuffer_differences"]
-        if changed:
+        vram = result["vram_differences"]
+        if changed or vram:
             pixels = sum(item["changed_pixels"] for item in changed)
+            words = sum(item["changed_words"] for item in vram)
             print("%d targets, %d artifacts accepted; %d margin pixels differ "
-                  "across %d framebuffer(s), authentic centers exact" % (
+                  "across %d framebuffer(s), %d provider-owned VRAM words "
+                  "differ across %d snapshot(s)" % (
                       result["targets"], result["artifacts"], pixels,
-                      len(changed)))
+                      len(changed), words, len(vram)))
             for item in changed:
                 print("  %s margins=%d/%d bbox=%s" % (
                     item["target"], item["left_margin_pixels"],
                     item["right_margin_pixels"], item["bounds"]))
+            for item in vram:
+                print("  %s %s words=%d ranges=%s" % (
+                    item["target"], item["artifact"], item["changed_words"],
+                    format_word_ranges(item["ranges"])))
         else:
             print("%d targets, %d artifacts exact" %
                   (result["targets"], result["artifacts"]))

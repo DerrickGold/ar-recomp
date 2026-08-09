@@ -215,6 +215,7 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *frequency = Settings_Find("audio_frequency");
   const SettingDesc *screen_ratio = Settings_Find("extended_aspect");
   const SettingDesc *stretch = Settings_Find("ignore_aspect_ratio");
+  const SettingDesc *legacy_bg_refresh = Settings_Find("ws_bgrefresh");
   const SettingDesc *bridge_limit = Settings_Find("fix_bridge_limit");
   const SettingDesc *save_backend = Settings_Find("save_backend");
   const SettingDesc *save_fillmore = Settings_Find("save_prog_fillmore");
@@ -253,6 +254,9 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(screen_ratio && screen_ratio->category == kSettingCat_Display);
   CHECK(stretch && stretch->category == kSettingCat_Display);
   CHECK(!Settings_IsMenuVisible(stretch));
+  CHECK(legacy_bg_refresh &&
+        legacy_bg_refresh->category == kSettingCat_Widescreen);
+  CHECK(!Settings_IsMenuVisible(legacy_bg_refresh));
   CHECK(!Settings_IsMenuVisible(Settings_Find("uncapped_framerate")));
   CHECK(!Settings_IsMenuVisible(Settings_Find("sim3d_picker_exit_ease")));
   /* Screen ratio > Stretch derives the ignore-aspect field the runtime reads. */
@@ -498,6 +502,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(!FileContains(saved_path, "ignore_aspect_ratio ="));
   CHECK(!FileContains(saved_path, "uncapped_framerate ="));
   CHECK(!FileContains(saved_path, "sim3d_picker_exit_ease ="));
+  CHECK(!FileContains(saved_path, "ws_bgrefresh ="));
   CHECK(FileContains(saved_path, "warp_target = 0101"));
   CHECK(FileContains(saved_path, "save_backend = native-srm"));
   CHECK(FileContains(saved_path, "save_prog_fillmore = Leave as-is"));
@@ -566,7 +571,7 @@ static void TestLegacySeedEncodings(void) {
   Settings_Init();
   CHECK(g_settings.display_mode == kDisplayMode_WideRaw);
   CHECK(g_settings.ws_action && g_settings.ws_sim);
-  CHECK(!g_settings.ws_bgrefresh && !g_settings.ws_sprites);
+  CHECK(!g_settings.ws_sprites);
 }
 
 static void TestMutationApi(void) {

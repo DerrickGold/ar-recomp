@@ -95,6 +95,11 @@ bool ActionBgPlan_CompilePresentation(
 void ActionBgPlan_InitNative(ActionBgPlan *out);
 bool ActionBgPlan_ApplyPresentationPolicy(
     ActionBgPlan *plan, const ActionBgPresentationPolicy *policy);
+/* Convert planned world layers that did not receive a provider binding into
+ * authentic-viewport clamps. Returns the PPU clamp mask to add for this frame.
+ * Native/decorative layers and successfully bound world layers are unchanged. */
+uint8_t ActionBgPlan_ClampUnboundWorldLayers(
+    ActionBgPlan *plan, uint8_t bound_layers, uint8_t visible_layers);
 const char *ActionBgSourceKind_Name(ActionBgSourceKind source);
 
 #endif  /* ACTION_BG_PLAN_H */

@@ -355,6 +355,47 @@ display-dependent shader test covers that code. Debug and release builds and
 all 41 tests pass. BH7 is complete. BH8 owns behavior-neutral retirement of
 duplicated host repair code; native streamers, ring, fallback, and oracle remain.
 
+## BH8 legacy ring-repair retirement — 2026-08-09
+
+The final consumer census separated the action-world transaction from the
+unrelated Sky Palace repair in `actraiser_widescreen_bg.c`. BH8 removes
+`ActRaiser_WidescreenMarginRefresh`, its 128 KiB WRAM/CPU/math snapshot,
+`WsRefreshKey`, the `$B825/$B8A0` host-call trampolines, full/partial record
+drains, visible/band row builders, and `AR_VEXT_BANDFIX`. The native game's
+streamers and upload drains remain; HLE does not replace or mutate them.
+
+`ws_bgrefresh` and `AR_WS_BGREFRESH` remain only as a hidden load-only alias so
+old settings parse without warnings. They are excluded from display-preset
+inference, runtime decisions, the menu, and newly saved settings. If a planned
+world layer cannot bind, the pure
+`ActionBgPlan_ClampUnboundWorldLayers` fallback reclassifies just that layer as
+an authentic-viewport clamp. This avoids stale/wrapped synthetic margins while
+preserving native center rendering. Wide Raw bypasses provider/fallback policy
+and remains deliberately raw.
+
+Three complete pre/post-cleanup comparisons pass:
+
+- authentic 4:3: `runs/bg-hle-matrix-bh7-default.json` versus
+  `runs/bg-hle-matrix-bh8-default.json`;
+- Wide Full: `runs/bg-hle-matrix-bh7-full-default.json` versus
+  `runs/bg-hle-matrix-bh8-full-default.json`;
+- diorama-32: `runs/bg-hle-matrix-bh7-diorama32-default.json` versus
+  `runs/bg-hle-matrix-bh8-diorama32-default.json`.
+
+All 612 artifacts are accepted by the explicit BH8 comparison contract. Every
+framebuffer, WRAM/SRAM/dispatch/state artifact, PPU register JSON, and
+authentic-ring census is exact. Two Wide Full and five diorama full-VRAM files
+contain 1,390 changed words; every address lies inside the provider-eligible
+BG1/BG2 `$6000-$7FFF` tilemap ranges and both snapshots have zero authentic-ring
+mismatch/outside result. These are the intended offscreen cells the deleted
+transaction no longer writes. The reusable comparator option is
+`--snapshot-vram-policy provider-owned`; it rejects any changed word outside an
+eligible, zero-mismatch tilemap. Provider matrices still report expected
+bindings. The plan helper and load-only migration behavior have ROM-free unit
+coverage. `PpuSetVerticalMarginLayerClip` is retained: it remains the generic
+bound for non-provider/native or decorative layers in a shared vertical band,
+not a duplicate world decoder.
+
 ### Rejected Northwall `0608` shortcut
 
 `0608` does enter map `$06/$08` for about 23 live frames. At frames 410/420 its
