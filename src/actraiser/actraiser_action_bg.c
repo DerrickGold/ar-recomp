@@ -27,9 +27,18 @@ typedef struct ActRaiserActionBgObserver {
   bool map_valid;
   bool forced_blank;
   int enabled;
+  int hle_enabled;
 } ActRaiserActionBgObserver;
 
-static ActRaiserActionBgObserver s_observer = { .enabled = -1 };
+typedef struct ActRaiserActionBgProvider {
+  const ActionBgWorld *world;
+} ActRaiserActionBgProvider;
+
+static ActRaiserActionBgObserver s_observer = {
+  .enabled = -1,
+  .hle_enabled = -1,
+};
+static ActRaiserActionBgProvider s_provider[kActionBgLayerCount];
 
 _Static_assert(kActionBgLayerCount == 2,
                "ActRaiser action HLE currently owns BG1/BG2 only");
@@ -223,10 +232,20 @@ static bool CompareEnabled(void) {
     s_observer.enabled = value && value[0] && value[0] != '0';
     if (s_observer.enabled)
       fprintf(stderr,
-              "[action-bg-hle] differential observer enabled; rendering "
-              "remains native\n");
+              "[action-bg-hle] differential observer enabled\n");
   }
   return s_observer.enabled != 0;
+}
+
+static bool HleEnabled(void) {
+  if (s_observer.hle_enabled < 0) {
+    const char *value = getenv("AR_ACTION_BG_HLE");
+    s_observer.hle_enabled = value && value[0] && value[0] != '0';
+    if (s_observer.hle_enabled)
+      fprintf(stderr,
+              "[action-bg-hle] synthetic-margin provider enabled\n");
+  }
+  return s_observer.hle_enabled != 0;
 }
 
 static void ResetWorlds(void) {
@@ -265,6 +284,17 @@ static void RecordFallback(ActRaiserActionBgFallbackReason reason,
   fputc('\n', stderr);
 }
 
+/* The optional comparator observes the same preconditions later in the frame.
+ * Keep shared fallback counters event-based rather than double-counting one
+ * rejected layer merely because both diagnostics are enabled. */
+static void RecordProviderFallback(
+    ActRaiserActionBgFallbackReason reason, unsigned layer,
+    uint8_t map_group, uint8_t map_number,
+    const ActRaiserActionBgLayerSnapshot *snapshot) {
+  if (!CompareEnabled())
+    RecordFallback(reason, layer, map_group, map_number, snapshot);
+}
+
 static ActionBgWorld *WorldForLayer(unsigned layer, uint8_t map_group,
                                     uint8_t map_number) {
   if (s_observer.world[layer]) return s_observer.world[layer];
@@ -273,6 +303,134 @@ static ActionBgWorld *WorldForLayer(unsigned layer, uint8_t map_group,
     RecordFallback(kActRaiserActionBgFallback_Allocation, layer,
                    map_group, map_number, NULL);
   return s_observer.world[layer];
+}
+
+static bool SyncFrameIdentity(const uint8_t *wram, size_t wram_size) {
+  if (!wram || wram_size < kActRaiserWram_GameFrame + 2)
+    return false;
+  const uint8_t map_group = wram[kActRaiserWram_MapGroup];
+  const uint8_t map_number = wram[kActRaiserWram_CurrentMap];
+  if (!ActRaiser_IsActionMapGroup(map_group)) {
+    if (s_observer.map_valid) ActRaiserActionBg_Reset();
+    return false;
+  }
+  const uint16_t game_frame = ReadWram16(wram, kActRaiserWram_GameFrame);
+  const bool backwards = s_observer.frame_valid &&
+      game_frame < s_observer.last_game_frame &&
+      !(s_observer.last_game_frame == UINT16_MAX && game_frame == 0);
+  const bool new_map = !s_observer.map_valid ||
+      s_observer.map_group != map_group ||
+      s_observer.map_number != map_number;
+  if (new_map || backwards) ResetWorlds();
+  s_observer.map_group = map_group;
+  s_observer.map_number = map_number;
+  s_observer.map_valid = true;
+  s_observer.last_game_frame = game_frame;
+  s_observer.frame_valid = true;
+  return true;
+}
+
+static bool ProviderLookup(const void *context, int32_t tile_x,
+                           int32_t tile_y, uint16_t *entry) {
+  const ActRaiserActionBgProvider *provider = context;
+  s_observer.diagnostics.provider_lookups++;
+  const ActionBgLookupResult result = provider && provider->world
+      ? ActionBgWorld_Lookup(provider->world, tile_x, tile_y, entry)
+      : kActionBgLookup_ProviderFailure;
+  if (result == kActionBgLookup_Tile) {
+    s_observer.diagnostics.provider_tiles++;
+    return true;
+  }
+  if (result == kActionBgLookup_OutsideWorld)
+    s_observer.diagnostics.provider_outside_world++;
+  return false;
+}
+
+uint8_t ActRaiserActionBg_BindPlan(
+    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
+    struct Ppu *ppu) {
+  PpuClearVirtualTilemaps(ppu);
+  if (!HleEnabled() || !wram || !ppu || !plan || !plan->valid ||
+      !SyncFrameIdentity(wram, wram_size))
+    return 0;
+  const uint8_t map_group = wram[kActRaiserWram_MapGroup];
+  const uint8_t map_number = wram[kActRaiserWram_CurrentMap];
+  if (!ActRaiser_IsActionMapGroup(map_group)) return 0;
+  s_observer.diagnostics.provider_frames++;
+  if (ppu->inidisp & 0x80) {
+    if (!s_observer.forced_blank) ResetWorlds();
+    s_observer.forced_blank = true;
+    for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
+      if (plan->layer[layer].source == kActionBgSource_WorldMap)
+        RecordProviderFallback(kActRaiserActionBgFallback_ForcedBlank, layer,
+                               map_group, map_number, NULL);
+    return 0;
+  }
+  s_observer.forced_blank = false;
+  if ((ppu->bgmode & 7u) != 1u) {
+    for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
+      if (plan->layer[layer].source == kActionBgSource_WorldMap)
+        RecordProviderFallback(kActRaiserActionBgFallback_WrongMode, layer,
+                               map_group, map_number, NULL);
+    return 0;
+  }
+
+  uint8_t bound = 0;
+  const uint8_t enabled = ppu->screenEnabled[0] | ppu->screenEnabled[1];
+  for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
+    const ActionBgLayerPlan *layer_plan = &plan->layer[layer];
+    if (!layer_plan->valid ||
+        layer_plan->source != kActionBgSource_WorldMap)
+      continue;
+    ActRaiserActionBgLayerSnapshot snapshot;
+    if (!ActRaiserActionBg_CaptureLayer(
+            wram, wram_size, layer, ppu->bgXsc[layer], &snapshot) ||
+        layer_plan->default_edge != kActionBgEdge_LiveWorld ||
+        layer_plan->world_width != snapshot.decode.world_width ||
+        layer_plan->world_height != snapshot.decode.world_height) {
+      RecordProviderFallback(kActRaiserActionBgFallback_InvalidSource, layer,
+                             map_group, map_number, NULL);
+      continue;
+    }
+    if (!(enabled & (1u << layer))) {
+      RecordProviderFallback(kActRaiserActionBgFallback_LayerDisabled, layer,
+                             map_group, map_number, &snapshot);
+      continue;
+    }
+    if (!ActRaiserActionBg_WorldRingEligible(
+            &snapshot, sizeof(ppu->vram) / sizeof(ppu->vram[0]))) {
+      RecordProviderFallback(kActRaiserActionBgFallback_NativeTilemap, layer,
+                             map_group, map_number, &snapshot);
+      continue;
+    }
+    ActionBgWorld *world = WorldForLayer(layer, map_group, map_number);
+    if (!world) continue;
+    const uint32_t before = ActionBgWorld_Serial(world);
+    if (!ActionBgWorld_Update(world, &snapshot.decode)) {
+      RecordProviderFallback(kActRaiserActionBgFallback_InvalidSource, layer,
+                             map_group, map_number, &snapshot);
+      continue;
+    }
+    if (ActionBgWorld_Serial(world) != before)
+      s_observer.diagnostics.layer_activations++;
+    s_provider[layer].world = world;
+    const PpuVirtualTilemapBinding binding = {
+      .lookup = ProviderLookup,
+      .context = &s_provider[layer],
+      .camera_x = snapshot.camera_x,
+      .camera_y = snapshot.camera_y,
+      .hscroll_anchor = (uint16_t)(ppu->hScroll[layer] & 0x3ff),
+      .vscroll_anchor = (uint16_t)(ppu->vScroll[layer] & 0x3ff),
+    };
+    if (!PpuSetVirtualTilemap(ppu, (uint8_t)layer, &binding)) {
+      RecordProviderFallback(kActRaiserActionBgFallback_InvalidSource, layer,
+                             map_group, map_number, &snapshot);
+      continue;
+    }
+    bound |= (uint8_t)(1u << layer);
+    s_observer.diagnostics.provider_layers++;
+  }
+  return bound;
 }
 
 static void ObserveLayer(const uint8_t *wram, size_t wram_size,
@@ -354,28 +512,10 @@ static void ObserveLayer(const uint8_t *wram, size_t wram_size,
 void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
                                     const struct Ppu *ppu) {
   if (!CompareEnabled() || !wram || !ppu ||
-      wram_size < kActRaiserWram_GameFrame + 2)
+      !SyncFrameIdentity(wram, wram_size))
     return;
   const uint8_t map_group = wram[kActRaiserWram_MapGroup];
   const uint8_t map_number = wram[kActRaiserWram_CurrentMap];
-  if (!ActRaiser_IsActionMapGroup(map_group)) {
-    if (s_observer.map_valid) ActRaiserActionBg_Reset();
-    return;
-  }
-
-  const uint16_t game_frame = ReadWram16(wram, kActRaiserWram_GameFrame);
-  const bool backwards = s_observer.frame_valid &&
-      game_frame < s_observer.last_game_frame &&
-      !(s_observer.last_game_frame == UINT16_MAX && game_frame == 0);
-  const bool new_map = !s_observer.map_valid ||
-      s_observer.map_group != map_group ||
-      s_observer.map_number != map_number;
-  if (new_map || backwards) ResetWorlds();
-  s_observer.map_group = map_group;
-  s_observer.map_number = map_number;
-  s_observer.map_valid = true;
-  s_observer.last_game_frame = game_frame;
-  s_observer.frame_valid = true;
   s_observer.diagnostics.frames_observed++;
 
   if (ppu->inidisp & 0x80) {
@@ -433,8 +573,22 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics
                 .fallbacks[kActRaiserActionBgFallback_CompareFailure]);
   }
+  if (s_observer.hle_enabled > 0 &&
+      s_observer.diagnostics.provider_frames) {
+    fprintf(stderr,
+            "[action-bg-hle] provider-summary frames=%" PRIu64
+            " layers=%" PRIu64 " lookups=%" PRIu64
+            " tiles=%" PRIu64 " outside=%" PRIu64 "\n",
+            s_observer.diagnostics.provider_frames,
+            s_observer.diagnostics.provider_layers,
+            s_observer.diagnostics.provider_lookups,
+            s_observer.diagnostics.provider_tiles,
+            s_observer.diagnostics.provider_outside_world);
+  }
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
     ActionBgWorld_Destroy(s_observer.world[layer]);
   memset(&s_observer, 0, sizeof(s_observer));
   s_observer.enabled = -1;
+  s_observer.hle_enabled = -1;
+  memset(s_provider, 0, sizeof(s_provider));
 }

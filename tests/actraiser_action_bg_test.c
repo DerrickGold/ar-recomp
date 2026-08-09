@@ -21,6 +21,28 @@ enum {
   kVramWords = 0x8000,
 };
 
+/* This ROM-free adapter target does not link the scanline renderer. The real
+ * PPU seam is exercised end-to-end by ppu_render_pipeline_test; these bounded
+ * stubs let this target pin ActRaiser's plan/decoder-to-binding decisions. */
+void PpuClearVirtualTilemaps(Ppu *ppu) {
+  if (ppu) memset(ppu->virtualTilemap, 0, sizeof(ppu->virtualTilemap));
+}
+
+bool PpuSetVirtualTilemap(Ppu *ppu, uint8_t layer,
+                          const PpuVirtualTilemapBinding *binding) {
+  if (!ppu || layer >= 2) return false;
+  if (!binding) {
+    memset(&ppu->virtualTilemap[layer], 0,
+           sizeof(ppu->virtualTilemap[layer]));
+    return true;
+  }
+  if (!binding->lookup || binding->hscroll_anchor > 0x3ff ||
+      binding->vscroll_anchor > 0x3ff)
+    return false;
+  ppu->virtualTilemap[layer] = *binding;
+  return true;
+}
+
 static void Write16(uint8_t *bytes, size_t address, uint16_t value) {
   bytes[address] = (uint8_t)value;
   bytes[address + 1] = (uint8_t)(value >> 8);
@@ -216,10 +238,82 @@ static void TestFramePlanCapture(void) {
   free(wram);
 }
 
+static void TestFramePlanBinding(void) {
+  uint8_t *wram = BuildWram();
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(ppu != NULL);
+  if (!wram || !ppu) {
+    free(ppu);
+    free(wram);
+    return;
+  }
+  CHECK(setenv("AR_ACTION_BG_HLE", "1", 1) == 0);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  wram[kActRaiserWram_CurrentMap] = 1;
+  Write16(wram, kActRaiserWram_GameFrame, 100);
+  /* Narrow BG2 is presentation-owned, so only finite BG1 may bind. */
+  Write16(wram, kActRaiserWram_Bg2Width, 256);
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = kActRaiserBgLayerMask_Bg1 |
+                          kActRaiserBgLayerMask_Bg2;
+  ppu->bgXsc[0] = 0x63;
+  ppu->bgXsc[1] = 0x73;
+  ppu->hScroll[0] = 0x413;
+  ppu->vScroll[0] = 0x807;
+
+  ActionBgPlan plan;
+  ActionBgPresentationPolicy policy;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[0];
+  CHECK(binding->lookup != NULL && binding->context != NULL);
+  CHECK(binding->camera_x == 13 && binding->camera_y == 7);
+  CHECK(binding->hscroll_anchor == 0x13);
+  CHECK(binding->vscroll_anchor == 7);
+  CHECK(ppu->virtualTilemap[1].lookup == NULL);
+
+  ActionBgWorld *reference = ActionBgWorld_Create();
+  ActRaiserActionBgLayerSnapshot snapshot;
+  uint16_t expected = 0, actual = 0;
+  CHECK(reference != NULL);
+  CHECK(ActRaiserActionBg_CaptureLayer(
+      wram, kActRaiserWramSize, 0, ppu->bgXsc[0], &snapshot));
+  CHECK(ActionBgWorld_Update(reference, &snapshot.decode));
+  CHECK(ActionBgWorld_Lookup(reference, 0, 0, &expected) ==
+        kActionBgLookup_Tile);
+  CHECK(binding->lookup(binding->context, 0, 0, &actual));
+  CHECK(actual == expected);
+  CHECK(!binding->lookup(binding->context, 64, 0, &actual));
+  ActionBgWorld_Destroy(reference);
+
+  /* Every rejected frame clears the previous binding rather than mixing a
+   * stale HLE layer with a new native plan. */
+  plan.layer[0].source = kActionBgSource_NativeTilemap;
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) == 0);
+  CHECK(ppu->virtualTilemap[0].lookup == NULL);
+  plan.layer[0].source = kActionBgSource_WorldMap;
+  ppu->bgmode = 7;
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) == 0);
+  CHECK(ppu->virtualTilemap[0].lookup == NULL);
+
+  ActRaiserActionBg_Shutdown();
+  CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
+  free(ppu);
+  free(wram);
+}
+
 int main(void) {
   TestCapture();
   TestRingAndComparison();
   TestFramePlanCapture();
+  TestFramePlanBinding();
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);
     return 1;

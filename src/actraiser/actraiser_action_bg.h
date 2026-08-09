@@ -52,6 +52,11 @@ typedef struct ActRaiserActionBgDiagnostics {
   uint64_t tiles_compared;
   uint64_t mismatches;
   uint64_t outside_world;
+  uint64_t provider_frames;
+  uint64_t provider_layers;
+  uint64_t provider_lookups;
+  uint64_t provider_tiles;
+  uint64_t provider_outside_world;
   uint64_t fallbacks[kActRaiserActionBgFallback_Count];
 } ActRaiserActionBgDiagnostics;
 
@@ -77,6 +82,15 @@ bool ActRaiserActionBg_BuildPlan(
     const uint8_t *wram, size_t wram_size, const struct Ppu *ppu,
     bool decorative_padding_enabled, ActionBgPlan *plan,
     ActionBgPresentationPolicy *presentation);
+
+/* Default-off BH4 renderer adapter. With `AR_ACTION_BG_HLE=1`, publish and
+ * bind every plan layer whose source is a finite world map. Only synthetic
+ * margins consume these bindings; authentic pixels remain on the native ring.
+ * Returns the bitmask of bound PPU layers. The function always clears prior
+ * bindings first, so a rejected/disabled frame fails closed. */
+uint8_t ActRaiserActionBg_BindPlan(
+    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
+    struct Ppu *ppu);
 
 /* Default-off frame observer. `AR_ACTION_BG_HLE_COMPARE=1` enables it; it only
  * reads WRAM/PPU state and never binds a renderer provider or mutates emulated
