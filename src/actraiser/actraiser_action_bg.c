@@ -18,6 +18,7 @@ typedef struct ActRaiserActionBgObserver {
   ActionBgWorld *world[kActionBgLayerCount];
   ActRaiserActionBgDiagnostics diagnostics;
   uint32_t reported_mismatch_serial[kActionBgLayerCount];
+  uint32_t reported_outside_serial[kActionBgLayerCount];
   uint16_t last_game_frame;
   uint8_t map_group;
   uint8_t map_number;
@@ -101,6 +102,8 @@ bool ActRaiserActionBg_CompareLayer(
     memset(result, 0, sizeof(*result));
     result->first_tile_x = -1;
     result->first_tile_y = -1;
+    result->first_outside_tile_x = -1;
+    result->first_outside_tile_y = -1;
   }
   if (!world || !snapshot || !vram || !result ||
       !ActRaiserActionBg_WorldRingEligible(snapshot, vram_words))
@@ -109,6 +112,8 @@ bool ActRaiserActionBg_CompareLayer(
   ActRaiserActionBgCompareResult built = {
     .first_tile_x = -1,
     .first_tile_y = -1,
+    .first_outside_tile_x = -1,
+    .first_outside_tile_y = -1,
   };
   const int first_x = snapshot->camera_x >> 3;
   const int first_y = snapshot->camera_y >> 3;
@@ -122,6 +127,10 @@ bool ActRaiserActionBg_CompareLayer(
       const ActionBgLookupResult lookup =
           ActionBgWorld_Lookup(world, tile_x, tile_y, &hle);
       if (lookup == kActionBgLookup_OutsideWorld) {
+        if (!built.outside_world) {
+          built.first_outside_tile_x = tile_x;
+          built.first_outside_tile_y = tile_y;
+        }
         built.outside_world++;
         continue;
       }
@@ -176,6 +185,7 @@ static void ResetWorlds(void) {
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
     ActionBgWorld_Reset(s_observer.world[layer]);
     s_observer.reported_mismatch_serial[layer] = 0;
+    s_observer.reported_outside_serial[layer] = 0;
   }
 }
 
@@ -264,6 +274,21 @@ static void ObserveLayer(const uint8_t *wram, size_t wram_size,
   s_observer.diagnostics.tiles_compared += comparison.compared;
   s_observer.diagnostics.mismatches += comparison.mismatches;
   s_observer.diagnostics.outside_world += comparison.outside_world;
+  if (comparison.outside_world &&
+      s_observer.reported_outside_serial[layer] != serial) {
+    s_observer.reported_outside_serial[layer] = serial;
+    fprintf(stderr,
+            "[action-bg-hle] finite-edge gf=%u map=%02X/%02X BG%u "
+            "serial=%u count=%zu first=(%d,%d) camera=(%u,%u) "
+            "world=%ux%u\n",
+            ReadWram16(wram, kActRaiserWram_GameFrame),
+            map_group, map_number, layer + 1, serial,
+            comparison.outside_world,
+            comparison.first_outside_tile_x,
+            comparison.first_outside_tile_y,
+            snapshot.camera_x, snapshot.camera_y,
+            snapshot.decode.world_width, snapshot.decode.world_height);
+  }
   if (comparison.mismatches &&
       s_observer.reported_mismatch_serial[layer] != serial) {
     s_observer.reported_mismatch_serial[layer] = serial;
