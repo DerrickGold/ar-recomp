@@ -72,9 +72,9 @@ typedef struct ActionBgPlan {
   ActionBgLayerPlan layer[kActionBgPlanLayerCount];
 } ActionBgPlan;
 
-/* Migration projection into the existing post-raster PPU policy. FrameSlot now
- * carries ActionBgPlan itself; this mask adapter remains only at the PPU setter
- * boundary until the behavior-neutral BH8 cleanup. */
+/* Mechanical projection into the generic post-raster PPU policy. Map-specific
+ * classification remains in ActionBgPlan; these masks exist only at the PPU
+ * setter boundary and for deliberate global/debug presentation overrides. */
 typedef struct ActionBgPresentationPolicy {
   uint8_t clamp_layers;
   uint8_t mirror_layers;

@@ -396,6 +396,33 @@ coverage. `PpuSetVerticalMarginLayerClip` is retained: it remains the generic
 bound for non-provider/native or decorative layers in a shared vertical band,
 not a duplicate world decoder.
 
+### Final policy/setter census
+
+`ActionBgPlan` remains the sole action-map classifier. The explicit map switch
+in `ActRaiser_ApplyWidescreenPolicy` covers simulation, Sky Palace, Mode 7,
+title, and other non-action scenes; it does not duplicate any of the 49 action
+decisions. `ActionBgPresentationPolicy` remains a mechanical conversion between
+the plan and generic PPU masks, plus the deliberate 4:3/Wide Raw/debug override
+projection. It contains no map table.
+
+Whole-layer clamp/mirror/repeat, repeat-band, and vertical per-layer clip all
+have live consumers and remain. The scanline clamp-band prototype had no caller
+at all; the margin-source-gap path had only a permanently-zero ActRaiser local.
+BH8 removes both prototypes end to end from the PPU, raster loops, scene
+inspector, frontend, and current docs. Sky Palace's ROM-source reconstruction
+had already superseded the failed gap experiment.
+
+The rebuilt-release post-census manifests are:
+
+- `runs/bg-hle-matrix-bh8-final-43.json`;
+- `runs/bg-hle-matrix-bh8-final-full.json`;
+- `runs/bg-hle-matrix-bh8-final-diorama32.json`.
+
+Each is 204/204 byte-exact against its accepted post-ring-repair BH8 baseline,
+for 612/612 exact artifacts total. All 36 matrix targets report zero provider
+mismatch, debug and release builds pass, and the full suite passes 41/41. This
+closes BH8.
+
 ### Rejected Northwall `0608` shortcut
 
 `0608` does enter map `$06/$08` for about 23 live frames. At frames 410/420 its

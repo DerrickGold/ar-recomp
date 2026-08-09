@@ -84,7 +84,7 @@ bool ActRaiserActionBg_CompareLayer(
     ActRaiserActionBgCompareResult *result);
 
 /* Capture the complete action-background decision record and build its pure
- * BH3 plan plus temporary PPU-policy projection. No renderer state is changed. */
+ * plan plus the mechanical generic-PPU projection. No renderer state changes. */
 bool ActRaiserActionBg_BuildPlan(
     const uint8_t *wram, size_t wram_size, const struct Ppu *ppu,
     bool decorative_padding_enabled, ActionBgPlan *plan,

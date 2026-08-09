@@ -1012,7 +1012,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   uint8 repeat = 0;
   int repeat_band_layer = -1;
   uint8 repeat_band_y0 = 0, repeat_band_y1 = 0;
-  int bg2_gap = 0;  /* margin source gap px/side for BG2 (UI staging strip) */
   uint8 hud_split_height = 0;
   uint8 hud_split_left_end = 0;
   uint8 hud_split_right_start = 0;
@@ -1137,13 +1136,13 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * and sprite/activation seams are disabled by the RAW preset's ws_* flags. */
   if (g_settings.display_mode == kDisplayMode_43) {
     wide = 0; clamp = 0; mirror = 0; repeat = 0;
-    bg2_gap = 0; bounded_world_margins = 0;
+    bounded_world_margins = 0;
     repeat_band_layer = -1;
     bg_hle_allowed = 0;
     project_final_bg_policy = true;
   } else if (g_settings.display_mode == kDisplayMode_WideRaw) {
     wide = 1; clamp = 0; mirror = 0; repeat = 0;
-    bg2_gap = 0; bounded_world_margins = 0;
+    bounded_world_margins = 0;
     repeat_band_layer = -1;
     bg_hle_allowed = 0;
     project_final_bg_policy = true;
@@ -1203,10 +1202,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (repeat_band_layer >= 0)
       PpuSetWidescreenLayerRepeatBand(g_ppu, (uint8)repeat_band_layer,
                                       repeat_band_y0, repeat_band_y1);
-    if (bg2_gap)
-      PpuSetWidescreenLayerMarginGap(
-          g_ppu, kActRaiserPpuLayer_Bg2,
-          (uint8)bg2_gap, (uint8)bg2_gap);
     if (hud_split_height)
       PpuSetWidescreenHudSplit(g_ppu, hud_split_height,
                                hud_split_left_end, hud_split_right_start,

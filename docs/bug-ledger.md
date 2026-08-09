@@ -1144,6 +1144,15 @@ the current debugging process; this file is the case law.
     words the deleted transaction no longer writes. Native streamers/ring/oracle
     and the independent Sky Palace repair remain.
 
+    The final consumer census removed two additional inert renderer prototypes:
+    scanline clamp-band had no caller, and margin-source-gap had only a
+    permanently-zero frontend local. Their setters, PPU state, raster and
+    inspector branches are gone. Whole-layer clamp/mirror/repeat, repeat-band,
+    vertical per-layer clip, and the mechanical plan-to-PPU projection all have
+    live consumers and remain. Rebuilt-release 4:3, Wide Full, and diorama-32
+    matrices are byte-exact against the accepted post-repair baseline (612/612
+    artifacts), and the suite passes 41/41. BH8 is complete.
+
     **Reusable lesson:** a resident tilemap address is not automatically a spatial world
     coordinate outside hardware-visible scanlines. An A/B that confines a symptom to an
     extension proves the extension triggers it; source-layer isolation plus independent
