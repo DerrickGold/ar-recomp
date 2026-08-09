@@ -937,11 +937,16 @@ were eligible at entry; BG2 split into six eligible layers, four explicit
 The first special-room sweep adds an important boundary. Death Heim
 `$0702-$0707` has eligible BG1/native-32x32 BG2 and passes 1,032,404 more
 runtime comparisons; hub `$0701` and final `$0708` are deliberately native
-32x32 scenes. All direct room frames are coherent, but the natural handoff
-sequence remains open. Northwall `$0608` is a rejected shortcut: its BG1 tile
-words match the ring while live CHR renders as patterned garbage before the
-room self-exits. Therefore BH2 tile-word parity cannot stand in for BH1 CHR
-residency or BH5 pixel/priority parity.
+32x32 scenes. A subsequent native route followed the real hub/victory loaders
+through `0701 -> 0702 -> 0703 -> 0701 -> 0704 -> 0705 -> 0701 -> 0706`; eight
+source activations and 6,646,861 in-world comparisons all matched. Its 364
+finite exits are one explained `0705` BG2 frame: that decorative world is only
+256px wide while camera X is 104, so the authentic viewport begins beyond tile
+X 31. This is policy input for isolated repeat/clamp, not a decoder mismatch.
+The `0707`/`0708`/ending tail remains open. Northwall `$0608` is a rejected
+shortcut: its BG1 tile words match the ring while live CHR renders as patterned
+garbage before the room self-exits. Therefore BH2 tile-word parity cannot stand
+in for BH1 CHR residency or BH5 pixel/priority parity.
 
 The decoder is intentionally scheduled at the authentic streamer's tile
 cadence, not at scanout cadence. A host-only key contains the action room,

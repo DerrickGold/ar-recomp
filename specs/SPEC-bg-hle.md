@@ -532,14 +532,19 @@ eligible; four BG2 samples are explicit 32x32 native/decorative layers, while
 two more are disabled at the sampled entry state. Exact per-target evidence and
 limitations are in `docs/bg-hle-census.md`. This broadens BH1 substantially but
 does not close it: later-room policy/HDMA handoffs, priority planes, deliberate
-positive controls, the natural Northwall boss transition, and the complete
+positive controls, the natural Northwall boss transition, and the tail of the
 Death Heim handoff flow remain. Direct `$0701-$0708` captures now classify
 every Death Heim room: hub/final backgrounds are native 32x32, while rematch
 rooms `$02-$07` expose eligible BG1 plus native 32x32 BG2 and add 1,032,404
-zero-mismatch comparisons. These are coherent source/visual samples, not a
-substitute for the natural boss-rush sequence. The tempting `0608` shortcut is
-explicitly rejected: tile words match, but its CHR is visibly corrupt and the
-room self-exits, proving tile parity alone is not a pixel/residency gate.
+zero-mismatch comparisons. A native `0701 -> 0702 -> 0703 -> 0701 -> 0704 ->
+0705 -> 0701 -> 0706` run then proved eight live source replacements across
+the game's own victory/hub loader with 6,646,861 in-world comparisons and zero
+mismatch. Its sole finite exit is an explained narrow BG2 boundary in `0705`:
+world width 256, camera X 104, first outside tile X 32. The borrowed replay
+stops during `0706`'s post-boss coroutine, so `0707`/`0708`/ending remain open.
+The tempting `0608` shortcut is explicitly rejected: tile words match, but its
+CHR is visibly corrupt and the room self-exits, proving tile parity alone is
+not a pixel/residency gate.
 
 **Gate**
 
@@ -575,6 +580,12 @@ over 7,276 layer-frames with zero mismatches and zero unexpected world-edge
 lookups. A disabled/enabled A/B produced byte-identical final WRAM, SRAM,
 dispatch log, and state dump. This is one checkpoint, not the complete BH1
 matrix; that matrix remains required before BH2's zero-mismatch gate can pass.
+
+The comparator now also preserves the first finite-edge coordinate separately
+from mismatch diagnostics. The Death Heim handoff run used that distinction to
+classify 364 `0705` BG2 lookups as one expected narrow-world frame rather than
+silently treating missing decorative art as a decoder failure. All 6,646,861
+in-world samples in that run still matched.
 
 **Work**
 
