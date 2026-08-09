@@ -75,6 +75,347 @@ static void set_solid_4bpp_tile(Ppu *ppu, int tile, int color) {
   }
 }
 
+typedef struct VirtualTilemapFixture {
+  int min_x, max_x;
+  int min_y, max_y;
+  uint16_t even_entry;
+  uint16_t odd_entry;
+  int calls;
+  int first_x, last_x;
+  int first_y, last_y;
+} VirtualTilemapFixture;
+
+static bool lookup_virtual_tile(const void *context, int32_t tile_x,
+                                int32_t tile_y, uint16_t *entry) {
+  VirtualTilemapFixture *map = (VirtualTilemapFixture *)context;
+  if (!map || !entry) return false;
+  if (!map->calls) {
+    map->first_x = map->last_x = tile_x;
+    map->first_y = map->last_y = tile_y;
+  } else {
+    if (tile_x < map->first_x) map->first_x = tile_x;
+    if (tile_x > map->last_x) map->last_x = tile_x;
+    if (tile_y < map->first_y) map->first_y = tile_y;
+    if (tile_y > map->last_y) map->last_y = tile_y;
+  }
+  map->calls++;
+  if (tile_x < map->min_x || tile_x > map->max_x ||
+      tile_y < map->min_y || tile_y > map->max_y)
+    return false;
+  *entry = (tile_x & 1) ? map->odd_entry : map->even_entry;
+  return true;
+}
+
+static uint32_t rgb555(int r5, int g5, int b5) {
+  return (uint32_t)expand5(r5) << 16 |
+      (uint32_t)expand5(g5) << 8 | expand5(b5);
+}
+
+static void setup_virtual_bg(Ppu *ppu, int extra, uint8_t *fb,
+                             size_t pitch) {
+  const int bg1 = kActRaiserPpuLayer_Bg1;
+  ppu_reset(ppu);
+  memset(fb, 0, pitch);
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = (uint8_t)(1u << bg1);
+  ppu->cgram[0] = bgr555(0, 0, 0);
+  ppu->cgram[0x11] = bgr555(31, 0, 0);  /* native: red */
+  ppu->cgram[0x21] = bgr555(0, 0, 31);  /* provider even: blue */
+  ppu->cgram[0x31] = bgr555(0, 31, 0);  /* provider odd: green */
+  ppu->cgram[0x41] = bgr555(31, 31, 0); /* BG2 priority probe: yellow */
+  set_solid_4bpp_tile(ppu, 1, 1);
+  set_solid_4bpp_tile(ppu, 2, 1);
+  set_solid_4bpp_tile(ppu, 3, 1);
+  set_solid_4bpp_tile(ppu, 4, 1);
+  ppu->bgTileAdr = 0;
+  ppu->bgXsc[bg1] = 0x20 | 3;
+  for (int i = 0; i < 0x1000; i++)
+    ppu->vram[0x2000 + i] = (uint16_t)(1 | (1 << 10));
+  ppu->hScroll[bg1] = 8;
+  ppu->vScroll[bg1] = 0;
+  PpuSetExtraSpace(ppu, (uint8_t)extra);
+  PpuBeginDrawing(ppu, fb, pitch, 0);
+}
+
+static void render_first_line(Ppu *ppu) {
+  ppu_runLine(ppu, 0);
+  ppu_runLine(ppu, 1);
+}
+
+static void TestVirtualTilemapMargins(void) {
+  enum { kExtra = 8, kWidth = kW + kExtra * 2 };
+  const int bg1 = kActRaiserPpuLayer_Bg1;
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint8_t fb[kWidth * 4];
+  static uint32_t center_pixels[kW];
+  static PpuZbufType center_priority[kW];
+
+  /* The unbound pass is the exact native reference for both resolved pixels
+   * and the PPU's priority/color words. */
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  render_first_line(ppu);
+  memcpy(center_pixels, (uint32_t *)(void *)fb + kExtra,
+         sizeof(center_pixels));
+  memcpy(center_priority,
+         ppu->bgBuffers[0].data + kPpuExtraLeftRight,
+         sizeof(center_priority));
+
+  VirtualTilemapFixture map = {
+    .min_x = 0, .max_x = 33, .min_y = 0, .max_y = 0,
+    .even_entry = (uint16_t)(2 | (2 << 10)),
+    .odd_entry = (uint16_t)(3 | (3 << 10)),
+  };
+  PpuVirtualTilemapBinding binding = {
+    .lookup = lookup_virtual_tile,
+    .context = &map,
+    .camera_x = 8,
+    .camera_y = 0,
+    .hscroll_anchor = 8,
+    .vscroll_anchor = 0,
+  };
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  const uint32_t *row = (const uint32_t *)(const void *)fb;
+  CHECK(row[0] == rgb555(0, 0, 31));
+  CHECK(row[kWidth - 1] == rgb555(0, 31, 0));
+  CHECK(memcmp(row + kExtra, center_pixels, sizeof(center_pixels)) == 0);
+  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,
+               center_priority, sizeof(center_priority)) == 0);
+
+  /* CGRAM stays live: the same provider tile word immediately follows a
+   * palette swap without rebuilding or mutating the virtual map. */
+  const uint32_t old_left = row[0];
+  ppu->cgram[0x21] = bgr555(31, 0, 31);
+  render_first_line(ppu);
+  row = (const uint32_t *)(const void *)fb;
+  CHECK(row[0] == rgb555(31, 0, 31));
+  CHECK(row[0] != old_left);
+
+  /* A false lookup is a transparent finite-world edge, not wrapped VRAM. */
+  map.max_x = 32;
+  render_first_line(ppu);
+  row = (const uint32_t *)(const void *)fb;
+  CHECK(row[kWidth - 1] == 0);
+  CHECK(row[kExtra] == center_pixels[0]);
+
+  /* Windows are evaluated before lookup. A hardware window ending at 255 is
+   * extended through the right widescreen margin by the existing policy. */
+  map.max_x = 33;
+  ppu->screenWindowed[0] = (uint8_t)(1u << bg1);
+  ppu->windowsel = kWindow1Enabled;
+  ppu->window1left = 200;
+  ppu->window1right = 255;
+  render_first_line(ppu);
+  row = (const uint32_t *)(const void *)fb;
+  CHECK(row[kWidth - 1] == 0);
+  CHECK(row[kExtra + 199] == center_pixels[199]);
+  CHECK(row[kExtra + 200] == 0);
+
+  /* Binding is transactional and frame policy cannot leak through either a
+   * widescreen-policy reset or a PPU reset. */
+  PpuVirtualTilemapBinding bad = binding;
+  bad.hscroll_anchor = 0x400;
+  CHECK(!PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &bad));
+  CHECK(!PpuSetVirtualTilemap(ppu, 2, &binding));
+  CHECK(ppu->virtualTilemap[bg1].lookup == lookup_virtual_tile);
+  PpuSetExtraSpace(ppu, kExtra);
+  CHECK(ppu->virtualTilemap[bg1].lookup == NULL);
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  ppu_reset(ppu);
+  CHECK(ppu->virtualTilemap[bg1].lookup == NULL);
+
+  ppu_free(ppu);
+  g_new_ppu = saved_new_ppu;
+}
+
+static void TestVirtualTilemapEffects(void) {
+  enum { kExtra = 8, kWidth = kW + kExtra * 2 };
+  const int bg1 = kActRaiserPpuLayer_Bg1;
+  const int bg2 = kActRaiserPpuLayer_Bg2;
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint8_t fb[kWidth * 4];
+
+  VirtualTilemapFixture map = {
+    .min_x = -8, .max_x = 64, .min_y = -8, .max_y = 64,
+    .even_entry = (uint16_t)(2 | (2 << 10)),
+    .odd_entry = (uint16_t)(3 | (3 << 10) | 0x2000),
+  };
+  PpuVirtualTilemapBinding binding = {
+    .lookup = lookup_virtual_tile,
+    .context = &map,
+    .camera_x = 8,
+    .camera_y = 0,
+    .hscroll_anchor = 0,
+    .vscroll_anchor = 0,
+  };
+
+  /* Signed 10-bit anchoring preserves the nearest phase displacement across
+   * wrap: current 0 vs anchor 1023 is +1, and the reverse is -1. */
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  ppu->hScroll[bg1] = 0;
+  binding.camera_x = 7;
+  binding.hscroll_anchor = 0x3ff;
+  map.calls = 0;
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  CHECK(map.first_x == 0);
+
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  ppu->hScroll[bg1] = 0x3ff;
+  binding.camera_x = 8;
+  binding.hscroll_anchor = 0;
+  map.calls = 0;
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  CHECK(map.first_x == -1);
+
+  /* A live per-line scroll change shifts virtual world lookup rather than
+   * freezing the margin at the frame anchor (the HBlank/HDMA contract). */
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  ppu->hScroll[bg1] = 0;
+  binding.camera_x = 8;
+  binding.hscroll_anchor = 0;
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  uint32_t before_scroll = ((const uint32_t *)(const void *)fb)[0];
+  ppu->hScroll[bg1] = 8;
+  render_first_line(ppu);
+  uint32_t after_scroll = ((const uint32_t *)(const void *)fb)[0];
+  CHECK(before_scroll == rgb555(0, 0, 31));
+  CHECK(after_scroll == rgb555(0, 31, 0));
+
+  /* BG priority is still resolved in the shared z buffer. BG2 high priority
+   * covers the provider's low-priority even tile on the left; BG1 high
+   * priority covers BG2 on the right. */
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  ppu->screenEnabled[0] |= (uint8_t)(1u << bg2);
+  ppu->bgXsc[bg2] = 0x30 | 3;
+  for (int i = 0; i < 0x1000; i++)
+    ppu->vram[0x3000 + i] = (uint16_t)(4 | (4 << 10) | 0x2000);
+  ppu->hScroll[bg1] = ppu->hScroll[bg2] = 0;
+  ppu->vScroll[bg1] = ppu->vScroll[bg2] = 0;
+  binding.camera_x = 8;
+  binding.hscroll_anchor = 0;
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  const uint32_t *row = (const uint32_t *)(const void *)fb;
+  CHECK(row[0] == rgb555(31, 31, 0));
+  CHECK(row[kWidth - 1] == rgb555(0, 31, 0));
+
+  /* Color math remains downstream of the provider. Enabling fixed-color add
+   * for BG1 changes its margin pixel without changing the lookup result. */
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  ppu->hScroll[bg1] = 0;
+  map.even_entry = (uint16_t)(1 | (1 << 10));
+  binding.camera_x = 8;
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  const uint32_t no_math = ((const uint32_t *)(const void *)fb)[0];
+  ppu->fixedColor = bgr555(0, 0, 15);
+  ppu->cgadsub = 1u << bg1;
+  render_first_line(ppu);
+  const uint32_t with_math = ((const uint32_t *)(const void *)fb)[0];
+  CHECK(no_math == rgb555(31, 0, 0));
+  CHECK(with_math != no_math);
+  CHECK((with_math & 0xff) != 0);
+
+  /* Flip and mosaic are applied to the live VRAM character data. Tile 2 has
+   * only source x=0 opaque; mosaic size 4 expands that pixel to four columns,
+   * while H-flip moves it to the opposite edge. */
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  memset(&ppu->vram[2 * 16], 0, 16 * sizeof(ppu->vram[0]));
+  for (int y = 0; y < 8; y++)
+    ppu->vram[2 * 16 + y] = 1u << 7;
+  ppu->hScroll[bg1] = 0;
+  map.even_entry = (uint16_t)(2 | (2 << 10));
+  binding.camera_x = 8;
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  row = (const uint32_t *)(const void *)fb;
+  CHECK(row[0] == rgb555(0, 0, 31));
+  CHECK(row[1] == 0);
+  ppu->mosaic = (uint8_t)((3 << 4) | (1u << bg1));
+  render_first_line(ppu);
+  row = (const uint32_t *)(const void *)fb;
+  CHECK(row[0] == rgb555(0, 0, 31));
+  CHECK(row[1] == rgb555(0, 0, 31));
+  CHECK(row[2] == rgb555(0, 0, 31));
+  CHECK(row[3] == rgb555(0, 0, 31));
+  map.even_entry |= 0x4000;
+  ppu->mosaic = 0;
+  render_first_line(ppu);
+  row = (const uint32_t *)(const void *)fb;
+  CHECK(row[0] == 0);
+  CHECK(row[7] == rgb555(0, 0, 31));
+
+  ppu_free(ppu);
+  g_new_ppu = saved_new_ppu;
+}
+
+static void TestVirtualTilemapVerticalMargin(void) {
+  enum { kTop = 8, kRows = kTop + 1 };
+  const int bg1 = kActRaiserPpuLayer_Bg1;
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint8_t fb[kW * kRows * 4];
+
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = (uint8_t)(1u << bg1);
+  ppu->cgram[0x11] = bgr555(31, 0, 0);
+  ppu->cgram[0x21] = bgr555(0, 0, 31);
+  set_solid_4bpp_tile(ppu, 1, 1);
+  set_solid_4bpp_tile(ppu, 2, 1);
+  ppu->bgXsc[bg1] = 0x20 | 3;
+  for (int i = 0; i < 0x1000; i++)
+    ppu->vram[0x2000 + i] = (uint16_t)(1 | (1 << 10));
+  PpuSetExtraSpace(ppu, 0);
+  PpuSetExtraVerticalSpace(ppu, kTop, 0);
+  PpuBeginDrawing(ppu, fb, kW * sizeof(uint32_t), 0);
+
+  VirtualTilemapFixture map = {
+    .min_x = 0, .max_x = 31, .min_y = 0, .max_y = 0,
+    .even_entry = (uint16_t)(2 | (2 << 10)),
+    .odd_entry = (uint16_t)(2 | (2 << 10)),
+  };
+  PpuVirtualTilemapBinding binding = {
+    .lookup = lookup_virtual_tile,
+    .context = &map,
+    .camera_x = 0,
+    .camera_y = 6,
+    .hscroll_anchor = 0,
+    .vscroll_anchor = 0x3ff,
+  };
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  ppu_runLine(ppu, 0);
+  for (int line = 1 - kTop; line <= 0; line++)
+    ppu_runMarginLine(ppu, line);
+  ppu_runLine(ppu, 1);
+  const uint32_t *pixels = (const uint32_t *)(const void *)fb;
+  for (int row = 0; row < kTop; row++)
+    CHECK(pixels[row * kW] == rgb555(0, 0, 31));
+  CHECK(pixels[kTop * kW] == rgb555(31, 0, 0));
+  CHECK(map.first_y == 0 && map.last_y == 0);
+
+  ppu_free(ppu);
+  g_new_ppu = saved_new_ppu;
+}
+
 static void TestObjRangeRaster(void) {
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
@@ -852,6 +1193,9 @@ int main(void) {
   TestOverlayContentMetadata();
   TestVerticalMarginLayerClip();
   TestCapturedPaddingReachesBudget();
+  TestVirtualTilemapMargins();
+  TestVirtualTilemapEffects();
+  TestVirtualTilemapVerticalMargin();
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));
 

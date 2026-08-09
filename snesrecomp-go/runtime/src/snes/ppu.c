@@ -320,6 +320,30 @@ static inline void PpuResetLayerClamps(Ppu *ppu) {
   memset(ppu->wsRepeatY1, 0, sizeof(ppu->wsRepeatY1));
   memset(ppu->wsMarginGapL, 0, sizeof(ppu->wsMarginGapL));
   memset(ppu->wsMarginGapR, 0, sizeof(ppu->wsMarginGapR));
+  PpuClearVirtualTilemaps(ppu);
+}
+
+void PpuClearVirtualTilemaps(Ppu *ppu) {
+  if (ppu)
+    memset(ppu->virtualTilemap, 0, sizeof(ppu->virtualTilemap));
+}
+
+bool PpuSetVirtualTilemap(Ppu *ppu, uint8_t layer,
+                          const PpuVirtualTilemapBinding *binding) {
+  /* The current renderer exposes virtual words only for Mode-1's 4bpp
+   * BG1/BG2 paths. Do not accept a binding that scanout would silently ignore. */
+  if (!ppu || layer >= 2)
+    return false;
+  if (!binding) {
+    memset(&ppu->virtualTilemap[layer], 0,
+           sizeof(ppu->virtualTilemap[layer]));
+    return true;
+  }
+  if (!binding->lookup || binding->hscroll_anchor > 0x3ff ||
+      binding->vscroll_anchor > 0x3ff)
+    return false;
+  ppu->virtualTilemap[layer] = *binding;
+  return true;
 }
 
 void PpuSetExtraSpace(Ppu *ppu, uint8_t extra) {
@@ -506,12 +530,17 @@ static inline void ClearBackdrop(PpuPixelPrioBufs *buf) {
 }
 
 // mosaicModulo is sized for the logical 256-wide screen, but widescreen window
-// edges can fall in the border (negative on the left, >=256 on the right).
-// Clamp the lookup so the rare mosaic+widescreen combination stays in-bounds;
-// border mosaic alignment is approximate but never reads out of range. With
-// extra==0 (authentic) every index is already in [0,256), so this is a no-op.
-static inline uint8 PpuMosaicAt(Ppu *ppu, int i) {
-  return ppu->mosaicModulo[(unsigned)i < (unsigned)kPpuXPixels ? i : (i < 0 ? 0 : kPpuXPixels - 1)];
+// edges can fall in either border. Extend its x-(x%mod) pattern arithmetically
+// there, just as PpuMosaicRow does vertically. Clamping to entry 0/255 made the
+// right-border run length reach zero for some mosaic sizes.
+static inline int PpuMosaicAt(Ppu *ppu, int i) {
+  if ((unsigned)i < (unsigned)kPpuXPixels)
+    return ppu->mosaicModulo[i];
+  int mod = ppu->lastMosaicModulo;
+  if (mod <= 1)
+    return i;
+  int phase = i % mod;
+  return i - (phase < 0 ? phase + mod : phase);
 }
 
 // The same table read on the Y axis, where a vertical margin scanline can be
@@ -823,6 +852,105 @@ static void PpuApplyMarginGap(Ppu *ppu, uint layer, PpuWindows *win, int16 *bias
   }
 }
 
+/* Difference between two hardware scroll phases, choosing the nearest signed
+ * displacement. In particular 0 - 1023 is +1, while 1023 - 0 is -1. */
+static inline int PpuVirtualScrollDelta(uint16_t current, uint16_t anchor) {
+  int delta = ((int)current - (int)anchor) & 0x3ff;
+  return delta >= 0x200 ? delta - 0x400 : delta;
+}
+
+static inline int32_t PpuFloorDiv8(int64_t value) {
+  int64_t result = value / 8;
+  if (value < 0 && value % 8)
+    result--;
+  return (int32_t)result;
+}
+
+static inline bool PpuVirtualCoordinate(int64_t value, int32_t *out) {
+  if (value < INT32_MIN || value > INT32_MAX)
+    return false;
+  *out = (int32_t)value;
+  return true;
+}
+
+static bool PpuVirtualTilemapOwnsSpan(
+    const PpuVirtualTilemapBinding *binding, int y, int x0, int x1) {
+  return binding->lookup &&
+      (y < 1 || y > kPpuYPixels || x1 <= 0 || x0 >= kPpuXPixels);
+}
+
+/* Draw one synthetic-margin span from a virtual tilemap word source. The live
+ * PPU still owns every stage after lookup: tile graphics come from VRAM and
+ * the ordinary z/color word feeds palette, windows and color math unchanged. */
+static void PpuDrawVirtualTilemapSpan(
+    Ppu *ppu, PpuPixelPrioBufs *dstbuf,
+    const PpuVirtualTilemapBinding *binding, uint layer,
+    int x0, int x1, int source_y, PpuZbufType zhi, PpuZbufType zlo,
+    bool mosaic) {
+  int64_t world_y64 = (int64_t)binding->camera_y + source_y +
+      PpuVirtualScrollDelta(ppu->vScroll[layer],
+                            binding->vscroll_anchor);
+  int32_t world_y;
+  if (!PpuVirtualCoordinate(world_y64, &world_y))
+    return;
+  const int32_t tile_y = PpuFloorDiv8(world_y);
+  const int fine_y = (int)(world_y64 - (int64_t)tile_y * 8);
+  const int x_delta = PpuVirtualScrollDelta(
+      ppu->hScroll[layer], binding->hscroll_anchor);
+  const int tile_base = PPU_bgTileAdr(ppu, layer);
+
+  int screen_x = x0;
+  PpuZbufType *dstz = dstbuf->data + x0 + kPpuExtraLeftRight;
+  while (screen_x < x1) {
+    const int sample_x = screen_x;
+    int run = 1;
+    if (mosaic) {
+      run = PPU_mosaicSize(ppu) -
+          (screen_x - PpuMosaicAt(ppu, screen_x));
+      run = IntMin(run, x1 - screen_x);
+    }
+    int64_t world_x64 = (int64_t)binding->camera_x + sample_x + x_delta;
+    int32_t world_x;
+    if (!PpuVirtualCoordinate(world_x64, &world_x)) {
+      dstz += run;
+      screen_x += run;
+      continue;
+    }
+    const int32_t tile_x = PpuFloorDiv8(world_x);
+    const int fine_x = (int)(world_x64 - (int64_t)tile_x * 8);
+    if (!mosaic)
+      run = IntMin(8 - fine_x, x1 - screen_x);
+
+    uint16_t tile = 0;
+    if (binding->lookup(binding->context, tile_x, tile_y, &tile)) {
+      int tile_row = (tile & 0x8000) ? 7 - fine_y : fine_y;
+      const uint16_t *address =
+          &ppu->vram[(tile_base + (tile & 0x3ff) * 16 + tile_row) &
+                     0x7fff];
+      uint32_t plane = address[0] | (uint32_t)address[8] << 16;
+      PpuZbufType z = (tile & 0x2000) ? zhi : zlo;
+      if (mosaic) {
+        int pixel = PpuObjTilePixel(plane, fine_x,
+                                    (tile & 0x4000) != 0);
+        if (pixel) {
+          PpuZbufType value = z + ((tile & 0x1c00) >> 6) + pixel;
+          for (int i = 0; i < run; i++)
+            if (z > dstz[i]) dstz[i] = value;
+        }
+      } else {
+        for (int i = 0; i < run; i++) {
+          int pixel = PpuObjTilePixel(plane, fine_x + i,
+                                      (tile & 0x4000) != 0);
+          if (pixel && z > dstz[i])
+            dstz[i] = z + ((tile & 0x1c00) >> 6) + pixel;
+        }
+      }
+    }
+    dstz += run;
+    screen_x += run;
+  }
+}
+
 // Draw a whole line of a 4bpp background layer into bgBuffers
 static void PpuDrawBackground_4bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
                                    int y, bool sub, uint layer,
@@ -841,7 +969,14 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer, y) : PpuWindows_Clear(&win, ppu, layer, y);
   int16 ws_bias[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
   PpuApplyMarginGap(ppu, layer, &win, ws_bias);
-  y = PpuBgTilemapRow(ppu, y, layer);
+  const PpuVirtualTilemapBinding *virtual_tilemap =
+      &ppu->virtualTilemap[layer];
+  const int screen_y = y;
+  if (virtual_tilemap->lookup) {
+    PpuWindowsSplit(&win, ws_bias, 0);
+    PpuWindowsSplit(&win, ws_bias, kPpuXPixels);
+  }
+  y = PpuBgTilemapRow(ppu, screen_y, layer);
   int sc_offs = PPU_bgTilemapAdr(ppu, layer) + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && PPU_bgTilemapHigher(ppu, layer))
     sc_offs += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
@@ -855,6 +990,14 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
   for (size_t windex = 0; windex < win.nr; windex++) {
     if (win.bits & (1 << windex))
       continue;  // layer is disabled for this window part
+    if (PpuVirtualTilemapOwnsSpan(
+            virtual_tilemap, screen_y, win.edges[windex],
+            win.edges[windex + 1])) {
+      PpuDrawVirtualTilemapSpan(
+          ppu, dstbuf, virtual_tilemap, layer, win.edges[windex],
+          win.edges[windex + 1], screen_y, zhi, zlo, false);
+      continue;
+    }
     uint x = win.edges[windex] + ppu->hScroll[layer] + ws_bias[windex];
     uint w = win.edges[windex + 1] - win.edges[windex];
     PpuZbufType *dstz = dstbuf->data + win.edges[windex] + kPpuExtraLeftRight;
@@ -1109,7 +1252,16 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu,
     return;  // layer is completely hidden
   PpuWindows win;
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer, y) : PpuWindows_Clear(&win, ppu, layer, y);
-  y = PpuBgTilemapRow(ppu, PpuMosaicRow(ppu, y), layer);
+  const PpuVirtualTilemapBinding *virtual_tilemap =
+      &ppu->virtualTilemap[layer];
+  const int screen_y = y;
+  int16 ws_bias[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+  if (virtual_tilemap->lookup) {
+    PpuWindowsSplit(&win, ws_bias, 0);
+    PpuWindowsSplit(&win, ws_bias, kPpuXPixels);
+  }
+  const int mosaic_y = PpuMosaicRow(ppu, screen_y);
+  y = PpuBgTilemapRow(ppu, mosaic_y, layer);
   int sc_offs = PPU_bgTilemapAdr(ppu, layer) + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && PPU_bgTilemapHigher(ppu, layer))
     sc_offs += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
@@ -1123,6 +1275,14 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu,
   for (size_t windex = 0; windex < win.nr; windex++) {
     if (win.bits & (1 << windex))
       continue;  // layer is disabled for this window part
+    if (PpuVirtualTilemapOwnsSpan(
+            virtual_tilemap, screen_y, win.edges[windex],
+            win.edges[windex + 1])) {
+      PpuDrawVirtualTilemapSpan(
+          ppu, dstbuf, virtual_tilemap, layer, win.edges[windex],
+          win.edges[windex + 1], mosaic_y, zhi, zlo, true);
+      continue;
+    }
     int sx = win.edges[windex];
     PpuZbufType *dstz = dstbuf->data + sx + kPpuExtraLeftRight;
     PpuZbufType *dstz_end = dstbuf->data + win.edges[windex + 1] + kPpuExtraLeftRight;
