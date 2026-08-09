@@ -1037,10 +1037,13 @@ captures' PPU eligibility unknown rather than substituting assumed registers.
 `tools/bg_hle_matrix.py` builds on that format with a generated flat settings
 fixture and the verified non-action warp seam. The 2026-08-09 region `$01-$06`
 ordinary-entry sweep passed 12/12 targets: 19,072,823 runtime comparisons and
-43,999 offline snapshot checks with zero mismatch, plus twelve distinct
-256x224 framebuffers inspected as a 4x3 contact sheet. All twelve BG1 layers
-were eligible at entry; BG2 split into six eligible layers, four explicit
-32x32 decorative/native layers, and two disabled samples. See
+44,779 offline snapshot checks with zero mismatch after correcting the census
+to PPU scanlines `1..224`, plus twelve distinct 256x224 framebuffers inspected
+as a 4x3 contact sheet. The historical manifest's embedded 43,999 total used
+the former `0..223` offline interval; its captured snapshots and runtime
+comparisons are unchanged. All twelve BG1 layers were eligible at entry; BG2
+split into six eligible layers, four explicit 32x32 decorative/native layers,
+and two disabled samples. See
 `docs/bg-hle-census.md` for the table and the still-open special-room gate.
 
 The first special-room sweep adds an important boundary. Death Heim

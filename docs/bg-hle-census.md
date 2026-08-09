@@ -51,8 +51,8 @@ Totals:
 - 12/12 target runs passed;
 - 19,072,823 authentic runtime tile-word comparisons, zero mismatches and zero
   unexpected finite-world exits;
-- 24 PPU-complete snapshots and 43,999 independent offline ring comparisons,
-  zero mismatches;
+- 24 PPU-complete snapshots and 44,779 independent offline ring comparisons
+  under the corrected PPU scanline interval, zero mismatches;
 - zero wrong-mode, invalid-source, allocation, or comparison failures;
 - expected fail-closed states: 7,752 layer-frames during load force-blank,
   2,370 disabled-layer frames, and 4,439 native-tilemap frames;
@@ -60,6 +60,13 @@ Totals:
   definition hash, and descriptor variant per target/layer);
 - 12 valid 256x224 framebuffers, 12 distinct hashes. The 4x3 contact sheet was
   visually inspected in target order and every entry shows its intended stage.
+
+Post-acceptance audit note (2026-08-09): the original manifest embeds 43,999
+offline checks because that version of the census modeled output rows `0..223`.
+Runtime scanout and the provider preflight correctly use PPU scanlines `1..224`.
+Re-evaluating the same 24 immutable snapshots with the corrected tool produces
+44,779 checks with the same zero mismatch/outside result. The captured artifacts
+and 19,072,823 runtime comparisons are unchanged.
 
 All twelve BG1 entry layers are world-provider eligible. Six BG2 layers are
 eligible. Four entry BG2 layers explicitly expose a 32x32 PPU tilemap and remain
@@ -391,10 +398,15 @@ mismatch/outside result. These are the intended offscreen cells the deleted
 transaction no longer writes. The reusable comparator option is
 `--snapshot-vram-policy provider-owned`; it rejects any changed word outside an
 eligible, zero-mismatch tilemap. Provider matrices still report expected
-bindings. The plan helper and load-only migration behavior have ROM-free unit
-coverage. `PpuSetVerticalMarginLayerClip` is retained: it remains the generic
-bound for non-provider/native or decorative layers in a shared vertical band,
-not a duplicate world decoder.
+bindings. The comparator also requires identical manifest format, ROM hash,
+replay, warp/capture/quit frames, and display/diorama fixture before inspecting
+artifacts. Binary path and provider mode remain deliberate A/B dimensions. Each
+requested `vd_gfN` snapshot must contain its own complete WRAM, VRAM, CGRAM,
+OAM, high-OAM, and PPU-register set; a matching total assembled from incomplete
+prefixes is rejected. The plan helper and load-only migration behavior have
+ROM-free unit coverage. `PpuSetVerticalMarginLayerClip` is retained: it remains
+the generic bound for non-provider/native or decorative layers in a shared
+vertical band, not a duplicate world decoder.
 
 ### Final policy/setter census
 

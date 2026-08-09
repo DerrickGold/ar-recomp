@@ -193,15 +193,9 @@ bool ActRaiserActionBg_BuildPlan(
             wram, wram_size, layer, ppu->bgXsc[layer], &snapshot))
       return false;
     state.layer[layer] = (ActionBgLayerState) {
-      .camera_x = snapshot.camera_x,
-      .camera_y = snapshot.camera_y,
       .world_width = snapshot.decode.world_width,
       .world_height = snapshot.decode.world_height,
-      .map_page = snapshot.decode.map_page,
       .tilemap_base = snapshot.tilemap_base,
-      .metatile_table = snapshot.decode.metatile_table,
-      .word_mask = snapshot.decode.word_mask,
-      .attributes = snapshot.decode.attributes,
       .bgsc = snapshot.bgsc,
     };
   }

@@ -837,6 +837,7 @@ static void ActRaiser_ProjectBgPresentationPolicy(
     ActionBgPlan *plan, uint8 clamp, uint8 mirror, uint8 repeat,
     int repeat_band_layer, uint8 repeat_band_y0, uint8 repeat_band_y1,
     bool bound_canvas_to_world) {
+  static bool reported_invalid_policy;
   if (!plan) return;
   ActionBgPresentationPolicy policy = {
     .clamp_layers = clamp,
@@ -847,10 +848,17 @@ static void ActRaiser_ProjectBgPresentationPolicy(
     .repeat_band_y1 = repeat_band_y1,
     .bound_canvas_to_world = bound_canvas_to_world,
   };
-  /* All callers use already-validated production masks/bands. A failure still
-   * leaves the prior plan untouched, which is safer than publishing a partial
-   * override into FrameSlot. */
-  (void)ActionBgPlan_ApplyPresentationPolicy(plan, &policy);
+  if (ActionBgPlan_ApplyPresentationPolicy(plan, &policy)) return;
+
+  /* All callers use production masks/bands, so rejection is an invariant
+   * failure. Publish a deterministic native plan rather than leaving stale
+   * source/edge metadata in FrameSlot, and report it once for diagnosis. */
+  ActionBgPlan_InitNative(plan);
+  if (!reported_invalid_policy) {
+    reported_invalid_policy = true;
+    fprintf(stderr,
+            "ERROR: invalid background presentation policy; using native plan\n");
+  }
 }
 
 /* Per-frame VERTICAL margin policy — the transpose of the bounded-world side

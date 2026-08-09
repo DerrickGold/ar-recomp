@@ -2,9 +2,11 @@
 """Compare deterministic action-background matrix artifacts by target.
 
 The matrix manifest intentionally stores run directories rather than duplicating
-every file hash. This acceptance tool pins the complete comparison contract:
-five final artifacts plus six components for every requested PPU snapshot.
-Console/perf logs are diagnostic and deliberately excluded.
+every file hash. This acceptance tool pins capture provenance plus the complete
+artifact contract: five final artifacts and all six components for each exact
+requested PPU snapshot frame. Console/perf logs are diagnostic and deliberately
+excluded. Provider mode and binary path are comparison dimensions, not capture
+provenance, so a native/provider or old/new-binary A/B remains valid.
 
 The default policy requires every byte to match. ``--framebuffer-policy
 authentic-center`` retains that exact contract for emulated state and PPU
@@ -40,6 +42,23 @@ SNAPSHOT_SUFFIXES = (
 AUTHENTIC_WIDTH = 256
 VRAM_WORDS = 0x8000
 TILEMAP_WORDS_64X64 = 0x1000
+MANIFEST_FORMAT = 1
+PROVENANCE_FIELDS = (
+    "format",
+    "rom_sha256",
+    "replay",
+    "warp_frame",
+    "capture_frames",
+    "quit_frames",
+    "settings_fixture",
+)
+LEGACY_SETTINGS_FIXTURES = {
+    "generated flat defaults; Diorama off": {
+        "display_mode": "43",
+        "diorama": False,
+        "diorama_vertical_extend": 0,
+    },
+}
 
 
 class ArtifactCompareError(Exception):
@@ -134,26 +153,74 @@ def load_manifest(path):
             manifest = json.load(source)
     except (OSError, ValueError) as error:
         raise ArtifactCompareError("cannot read %s: %s" % (path, error))
+    if not isinstance(manifest, dict):
+        raise ArtifactCompareError("manifest root is not an object: %s" % path)
     results = manifest.get("results")
     capture_frames = manifest.get("capture_frames")
     if not isinstance(results, list) or not results:
         raise ArtifactCompareError("manifest has no results: %s" % path)
     if not isinstance(capture_frames, list) or not capture_frames:
         raise ArtifactCompareError("manifest has no capture frames: %s" % path)
+    if (any(type(frame) is not int or frame < 0 for frame in capture_frames) or
+            len(set(capture_frames)) != len(capture_frames)):
+        raise ArtifactCompareError("manifest has invalid capture frames: %s" % path)
+    missing_provenance = [field for field in PROVENANCE_FIELDS
+                          if field not in manifest]
+    if missing_provenance:
+        raise ArtifactCompareError(
+            "manifest missing provenance %s: %s" %
+            (",".join(missing_provenance), path))
+    if manifest["format"] != MANIFEST_FORMAT:
+        raise ArtifactCompareError(
+            "unsupported manifest format %r: %s" %
+            (manifest["format"], path))
+    rom_sha256 = manifest["rom_sha256"]
+    if (not isinstance(rom_sha256, str) or len(rom_sha256) != 64 or
+            any(char not in "0123456789abcdefABCDEF" for char in rom_sha256)):
+        raise ArtifactCompareError("manifest has invalid ROM hash: %s" % path)
+    if not isinstance(manifest["replay"], str) or not manifest["replay"]:
+        raise ArtifactCompareError("manifest has invalid replay: %s" % path)
+    for field in ("warp_frame", "quit_frames"):
+        if type(manifest[field]) is not int or manifest[field] < 0:
+            raise ArtifactCompareError(
+                "manifest has invalid %s: %s" % (field, path))
+    if not isinstance(manifest["settings_fixture"], (dict, str)):
+        raise ArtifactCompareError(
+            "manifest has invalid settings fixture: %s" % path)
     by_target = {}
     for result in results:
+        if not isinstance(result, dict):
+            raise ArtifactCompareError("manifest result is not an object: %s" % path)
         target = result.get("target")
         run_directory = result.get("run_directory")
-        if result.get("status") != "pass" or not target or not run_directory:
+        if (result.get("status") != "pass" or
+                not isinstance(target, str) or not target or
+                not isinstance(run_directory, str) or not run_directory):
             raise ArtifactCompareError(
                 "target %s is not a completed pass in %s" % (target, path))
         if target in by_target:
             raise ArtifactCompareError("duplicate target %s in %s" % (target, path))
         by_target[target] = result
-    return by_target, len(capture_frames)
+    provenance = {field: manifest[field] for field in PROVENANCE_FIELDS}
+    settings_fixture = provenance["settings_fixture"]
+    if isinstance(settings_fixture, str):
+        provenance["settings_fixture"] = LEGACY_SETTINGS_FIXTURES.get(
+            settings_fixture, settings_fixture)
+    return {
+        "targets": by_target,
+        "capture_frames": tuple(capture_frames),
+        "provenance": provenance,
+    }
 
 
-def discover_artifacts(run_directory, snapshot_count):
+def snapshot_component(name):
+    for suffix in SNAPSHOT_SUFFIXES:
+        if name.endswith(suffix):
+            return name[:-len(suffix)], suffix
+    return None
+
+
+def discover_artifacts(run_directory, capture_frames):
     artifacts = list(FINAL_ARTIFACTS)
     snapshot_directory = os.path.join(run_directory, "snapshots")
     try:
@@ -161,17 +228,31 @@ def discover_artifacts(run_directory, snapshot_count):
     except OSError as error:
         raise ArtifactCompareError(
             "cannot inspect %s: %s" % (snapshot_directory, error))
-    components = [
-        os.path.join("snapshots", name)
-        for name in names
-        if name.endswith(SNAPSHOT_SUFFIXES)
-    ]
-    expected_components = snapshot_count * len(SNAPSHOT_SUFFIXES)
-    if len(components) != expected_components:
+    components_by_prefix = {}
+    for name in names:
+        component = snapshot_component(name)
+        if component is None:
+            continue
+        prefix, suffix = component
+        components_by_prefix.setdefault(prefix, set()).add(suffix)
+    expected_prefixes = {"vd_gf%d" % frame for frame in capture_frames}
+    if set(components_by_prefix) != expected_prefixes:
         raise ArtifactCompareError(
-            "%s has %d snapshot components, expected %d" %
-            (run_directory, len(components), expected_components))
-    artifacts.extend(components)
+            "%s snapshot prefixes differ: found=%s expected=%s" %
+            (run_directory, sorted(components_by_prefix),
+             sorted(expected_prefixes)))
+    required_suffixes = set(SNAPSHOT_SUFFIXES)
+    for prefix in sorted(expected_prefixes):
+        suffixes = components_by_prefix[prefix]
+        if suffixes != required_suffixes:
+            raise ArtifactCompareError(
+                "%s snapshot %s components differ: missing=%s extra=%s" %
+                (run_directory, prefix,
+                 sorted(required_suffixes - suffixes),
+                 sorted(suffixes - required_suffixes)))
+        artifacts.extend(
+            os.path.join("snapshots", prefix + suffix)
+            for suffix in SNAPSHOT_SUFFIXES)
     for relative in artifacts:
         if not os.path.isfile(os.path.join(run_directory, relative)):
             raise ArtifactCompareError(
@@ -272,12 +353,21 @@ def compare_manifests(left_path, right_path, framebuffer_policy="exact",
     if snapshot_vram_policy not in ("exact", "provider-owned"):
         raise ArtifactCompareError(
             "unknown snapshot VRAM policy: %s" % snapshot_vram_policy)
-    left, left_snapshots = load_manifest(left_path)
-    right, right_snapshots = load_manifest(right_path)
-    if left_snapshots != right_snapshots:
+    left_manifest = load_manifest(left_path)
+    right_manifest = load_manifest(right_path)
+    left_provenance = left_manifest["provenance"]
+    right_provenance = right_manifest["provenance"]
+    differing_provenance = [
+        field for field in PROVENANCE_FIELDS
+        if left_provenance[field] != right_provenance[field]
+    ]
+    if differing_provenance:
         raise ArtifactCompareError(
-            "capture count differs: %d vs %d" %
-            (left_snapshots, right_snapshots))
+            "manifest provenance differs: %s" %
+            ",".join(differing_provenance))
+    left = left_manifest["targets"]
+    right = right_manifest["targets"]
+    capture_frames = left_manifest["capture_frames"]
     if set(left) != set(right):
         missing_left = sorted(set(right) - set(left))
         missing_right = sorted(set(left) - set(right))
@@ -294,8 +384,8 @@ def compare_manifests(left_path, right_path, framebuffer_policy="exact",
         right_result = right[target]
         left_run = left_result["run_directory"]
         right_run = right_result["run_directory"]
-        left_artifacts = discover_artifacts(left_run, left_snapshots)
-        right_artifacts = discover_artifacts(right_run, right_snapshots)
+        left_artifacts = discover_artifacts(left_run, capture_frames)
+        right_artifacts = discover_artifacts(right_run, capture_frames)
         if left_artifacts != right_artifacts:
             raise ArtifactCompareError(
                 "artifact sets differ for target %s" % target)

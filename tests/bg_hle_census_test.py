@@ -88,16 +88,31 @@ class BgHleCensusTest(unittest.TestCase):
                 output.write(payload + suffix.encode("ascii"))
 
     @staticmethod
-    def _write_artifact_manifest(path, run_directory):
+    def _write_artifact_manifest(path, run_directory, **overrides):
+        manifest = {
+            "format": 1,
+            "rom_sha256": "0" * 64,
+            "replay": "/fixtures/action.rec",
+            "warp_frame": 4,
+            "capture_frames": [10],
+            "quit_frames": 20,
+            "settings_fixture": {
+                "display_mode": "43",
+                "diorama": False,
+                "diorama_vertical_extend": 0,
+            },
+            "provider_enabled": True,
+            "provider_binding_expected": True,
+            "provider_setting": "default",
+            "results": [{
+                "target": "0101",
+                "status": "pass",
+                "run_directory": run_directory,
+            }],
+        }
+        manifest.update(overrides)
         with open(path, "w", encoding="utf-8") as output:
-            json.dump({
-                "capture_frames": [10],
-                "results": [{
-                    "target": "0101",
-                    "status": "pass",
-                    "run_directory": run_directory,
-                }],
-            }, output)
+            json.dump(manifest, output)
 
     @staticmethod
     def _write_ppm(path, width, height, pixels):
@@ -119,11 +134,31 @@ class BgHleCensusTest(unittest.TestCase):
                 self.assertTrue(layer["ppu"]["eligible"])
                 self.assertEqual(layer["comparison"]["mismatches"], 0)
                 self.assertGreater(layer["comparison"]["compared"], 0)
+                first_x, last_x, first_y, last_y = (
+                    census.authentic_tile_bounds(*layer["camera"]))
+                sampled = ((last_x - first_x + 1) *
+                           (last_y - first_y + 1))
+                self.assertEqual(
+                    layer["comparison"]["compared"] +
+                    layer["comparison"]["outside_world"], sampled)
             self.assertFalse(census.snapshot_failed(record, True))
             summary = census.build_summary([record])
             self.assertEqual(summary["action_maps"], 1)
             self.assertEqual(summary["groups"]["01/02/BG1"]["map_variants"], 1)
             self.assertEqual(summary["groups"]["01/02/BG1"]["mismatches"], 0)
+
+    def test_authentic_tile_bounds_pin_all_vertical_scroll_phases(self):
+        expected_first_rows = [10, 10, 10, 10, 10, 10, 10, 11]
+        expected_row_counts = [29, 29, 29, 29, 29, 29, 29, 28]
+        for phase in range(8):
+            with self.subTest(phase=phase):
+                first_x, last_x, first_y, last_y = (
+                    census.authentic_tile_bounds(13, 80 + phase))
+                self.assertEqual((first_x, last_x), (1, 33))
+                self.assertEqual(first_y, expected_first_rows[phase])
+                self.assertEqual(last_y, 38)
+                self.assertEqual(last_y - first_y + 1,
+                                 expected_row_counts[phase])
 
     def test_matrix_parsers_pin_verified_targets_and_summary(self):
         self.assertEqual(matrix.parse_targets("0201,0202,0201"),
@@ -231,6 +266,72 @@ class BgHleCensusTest(unittest.TestCase):
             self.assertEqual(len(result["mismatches"]), 1)
             self.assertEqual(result["mismatches"][0]["artifact"], "shot.ppm")
 
+    def test_artifact_compare_rejects_capture_provenance_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            left_run = os.path.join(directory, "left")
+            right_run = os.path.join(directory, "right")
+            self._write_artifact_run(left_run, b"same-")
+            self._write_artifact_run(right_run, b"same-")
+            left_manifest = os.path.join(directory, "left.json")
+            right_manifest = os.path.join(directory, "right.json")
+            self._write_artifact_manifest(left_manifest, left_run)
+            drift_cases = {
+                "rom_sha256": "1" * 64,
+                "replay": "/fixtures/other.rec",
+                "warp_frame": 5,
+                "capture_frames": [11],
+                "quit_frames": 21,
+                "settings_fixture": {
+                    "display_mode": "full",
+                    "diorama": False,
+                    "diorama_vertical_extend": 0,
+                },
+            }
+            for field, value in drift_cases.items():
+                with self.subTest(field=field):
+                    self._write_artifact_manifest(
+                        right_manifest, right_run, **{field: value})
+                    with self.assertRaisesRegex(
+                            artifact_compare.ArtifactCompareError, field):
+                        artifact_compare.compare_manifests(
+                            left_manifest, right_manifest)
+
+            # Provider mode and binary are intentional A/B dimensions rather
+            # than capture provenance; differing values remain comparable.
+            self._write_artifact_manifest(
+                right_manifest, right_run,
+                provider_enabled=False,
+                provider_binding_expected=False,
+                provider_setting="disabled",
+                binary="/tmp/other-build/ActRaiserRecomp")
+            result = artifact_compare.compare_manifests(
+                left_manifest, right_manifest)
+            self.assertEqual(result["mismatches"], [])
+
+    def test_artifact_compare_requires_every_component_per_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            left_run = os.path.join(directory, "left")
+            right_run = os.path.join(directory, "right")
+            self._write_artifact_run(left_run, b"same-")
+            self._write_artifact_run(right_run, b"same-")
+            left_manifest = os.path.join(directory, "left.json")
+            right_manifest = os.path.join(directory, "right.json")
+            self._write_artifact_manifest(left_manifest, left_run)
+            self._write_artifact_manifest(right_manifest, right_run)
+
+            # Keep the old total component count while moving one component to
+            # a different prefix. Count-only validation accepted this shape.
+            os.remove(os.path.join(
+                right_run, "snapshots", "vd_gf10.ppu.json"))
+            with open(os.path.join(
+                    right_run, "snapshots", "vd_gf11.ppu.json"), "wb") as output:
+                output.write(b"extra")
+            with self.assertRaisesRegex(
+                    artifact_compare.ArtifactCompareError,
+                    "snapshot prefixes differ"):
+                artifact_compare.compare_manifests(
+                    left_manifest, right_manifest)
+
     def test_artifact_compare_can_pin_authentic_center_and_report_margins(self):
         with tempfile.TemporaryDirectory() as directory:
             left_run = os.path.join(directory, "left")
@@ -321,9 +422,10 @@ class BgHleCensusTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fixture = CensusFixture(directory)
             layout = census.decode_layout(fixture.wram, 0)
+            first_x, _, first_y, _ = census.authentic_tile_bounds(
+                *layout["camera"])
             address = census.ring_address(
-                layout["tilemap_base"], layout["camera"][0] // 8,
-                layout["camera"][1] // 8)
+                layout["tilemap_base"], first_x, first_y)
             fixture.vram[address] ^= 1
             fixture.write(include_ppu=False)
             record = census.analyze_snapshot(fixture.prefix)
@@ -347,9 +449,10 @@ class BgHleCensusTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fixture = CensusFixture(directory)
             layout = census.decode_layout(fixture.wram, 0)
+            first_x, _, first_y, _ = census.authentic_tile_bounds(
+                *layout["camera"])
             address = census.ring_address(
-                layout["tilemap_base"], layout["camera"][0] // 8,
-                layout["camera"][1] // 8)
+                layout["tilemap_base"], first_x, first_y)
             fixture.vram[address] ^= 1
             fixture.write()
             with open(fixture.prefix + ".ppu.json", "r", encoding="utf-8") as source:

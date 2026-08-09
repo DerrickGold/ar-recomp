@@ -237,11 +237,8 @@ Sketch, not frozen ABI:
 
 ```c
 typedef struct ActionBgLayerState {
-  uint16_t camera_x, camera_y;
-  uint16_t width, height;
-  uint16_t map_page, tilemap_base;
-  uint16_t metatile_table, word_mask;
-  uint8_t attributes;
+  uint16_t world_width, world_height;
+  uint16_t tilemap_base;
   uint8_t bgsc;
 } ActionBgLayerState;
 
@@ -253,9 +250,11 @@ typedef struct ActionBgFrameState {
 } ActionBgFrameState;
 ```
 
-Only fields that affect background ownership belong here. If a future rule
-needs another value, adding it to this record and its capture site makes the
-dependency compiler-visible.
+Only the four layer fields currently consumed by ownership classification
+belong here. Decoder inputs and camera position remain in the adapter/provider
+records instead of coupling the pure policy DTO to state it does not use. If a
+future rule needs another value, adding it here and at its capture site makes
+that dependency compiler-visible.
 
 ### 5.2 Pure scene plan
 
@@ -528,22 +527,29 @@ prefixes or complete run trees and emits human or JSONL records. It validates
 both finite WRAM source spans, hashes the exact map/definition bytes to expose
 mutation variants, records descriptors and ROM SHA-256, derives per-layer CHR
 bases, checks live Mode-1/BGSC/ring ownership, and compares every authentic
-viewport tile word with VRAM. Full snapshots now include `.ppu.json` with the
-PPU, color-math, window, scroll, and active presentation registers needed to
-avoid inferred CHR/BGSC assumptions. A ROM-free Python suite pins matching,
-positive-mismatch, missing-metadata, and discovery behavior.
+viewport tile word with VRAM. Its interval is the runtime's exact horizontal
+pixels `0..255` and PPU scanlines `1..224`; ROM-free tests pin all eight
+fractional vertical phases. Full snapshots now include `.ppu.json` with the PPU,
+color-math, window, scroll, and active presentation registers needed to avoid
+inferred CHR/BGSC assumptions. The Python suite also pins matching, positive
+mismatch, missing metadata, discovery, manifest provenance, and complete
+per-frame snapshot components.
 
 The repeatable ordinary-entry runner (`tools/bg_hle_matrix.py`) now covers both
 act entries for regions `$01-$06`. Its isolated flat-settings run produced 24
-PPU-complete snapshots, 12 visually inspected distinct framebuffers, 43,999
-offline ring checks, and 19,072,823 runtime comparisons with zero mismatches or
-unexpected provider failures. All BG1 entry layers and six BG2 entry layers are
-eligible; four BG2 samples are explicit 32x32 native/decorative layers, while
-two more are disabled at the sampled entry state. Exact per-target evidence and
-limitations are in `docs/bg-hle-census.md`. This broadens BH1 substantially but
-does not close it: later-room policy/HDMA handoffs, priority planes, deliberate
-positive controls, the natural Northwall boss transition, and the tail of the
-Death Heim handoff flow remain. Direct `$0701-$0708` captures now classify
+PPU-complete snapshots, 12 visually inspected distinct framebuffers, 44,779
+corrected offline ring checks, and 19,072,823 runtime comparisons with zero
+mismatches or unexpected provider failures. The historical manifest retains
+its pre-audit 43,999 count from the former `0..223` offline interval; replaying
+the immutable snapshots through the corrected `1..224` census produces the
+44,779 total with zero mismatch/outside. All BG1 entry layers and six BG2 entry
+layers are eligible; four BG2 samples are explicit 32x32 native/decorative
+layers, while two more are disabled at the sampled entry state. Exact per-target
+evidence and limitations are in `docs/bg-hle-census.md`. This broadens BH1
+substantially but does not close it: later-room policy/HDMA handoffs, priority
+planes, deliberate positive controls, the natural Northwall boss transition,
+and the tail of the Death Heim handoff flow remain. Direct `$0701-$0708`
+captures now classify
 every Death Heim room: hub/final backgrounds are native 32x32, while rematch
 rooms `$02-$07` expose eligible BG1 plus native 32x32 BG2 and add 1,032,404
 zero-mismatch comparisons. A native `0701 -> 0702 -> 0703 -> 0701 -> 0704 ->
