@@ -762,10 +762,6 @@ show the frozen `$0088` against the advancing host frame:
   asymmetric margins capped by camera `$22` and the 512px `$01:B4C6` world
   bounds; BG2 remains center-clamped for dialogs. It also acts as the master
   gate for the separate `AR_WS_SIM_SPRITES` world-sprite/projectile policy.
-- **`AR_WS_BGREFRESH=0`** — restore investigation Stage A: raw wide action
-  renderer with stale/wrapped margins. Unset/nonzero selects Stage B: isolated
-  true-content BG1/BG2 margin refresh. Both modes retain the original recompiled
-  BG streamers and OAM builder.
 - **`AR_ACTION_BG_HLE_COMPARE=1`** — enable the optional, read-only BH2
   differential observer. For each eligible action BG1/BG2 frame it decodes the
   finite WRAM world with `ActionBgWorld` and compares every authentic 256x224
@@ -776,7 +772,7 @@ show the frozen `$0088` against the advancing host frame:
   `invalid`/`compare` fallback blocks `SPEC-bg-hle.md` BH2; use the same replay
   without the variable to prove final emulator-state identity.
 - **`AR_ACTION_BG_HLE=0`** — disable the default-on BH7 virtual tilemap source
-  for a native A/B. Unset, empty, or any nonzero value enables it for eligible
+  for an authentic-center/native-ring A/B. Unset, empty, or any nonzero value enables it for eligible
   action BG1/BG2 world layers. After the full camera matches the
   live PPU scroll phase and every authentic tile word matches the resident ring
   with zero finite exits, the provider owns both the authentic 256x224 viewport
@@ -788,9 +784,11 @@ show the frozen `$0088` against the advancing host frame:
   remain native controls. Look for `hle=01/02/03` on widescreen policy lines and
   the shutdown `provider-summary`, whose `preflight`, `eligible`, and `layers`
   fields must show zero mismatch/outside and no eligible/bound divergence.
-  `AR_WS_BGREFRESH=0` and `AR_VEXT_BANDFIX=0` remain the decisive side/top
-  positive controls: both match the corrected reference, while disabling HLE too
-  restores the deliberately broken legacy arm.
+  BH8 retired the transactional ring repair: an unbound planned world layer now
+  clamps to its authentic viewport instead of exposing stale/wrapped synthetic
+  margins. Use Wide Raw for the deliberately raw presentation control. The old
+  `AR_WS_BGREFRESH` is a load-only alias and `AR_VEXT_BANDFIX` is retired; neither
+  has a runtime effect.
   BH6 adds no separate environment switch: the resolved `ActionBgPlan` is now
   latched after scanout and copied into `FrameSlot` on every run. Normal action
   frames retain exact default edges and bands; 4:3, Wide Raw, `AR_WS_ONLYBG`
@@ -901,7 +899,10 @@ show the frozen `$0088` against the advancing host frame:
    paired manifests with `tools/bg_hle_artifact_compare.py`; its default policy
    requires full-frame identity, while `--framebuffer-policy authentic-center`
    still requires exact state and centered 256 pixels and reports/localizes
-   accepted synthetic-margin improvements.
+   accepted synthetic-margin improvements. BH8 cleanup comparisons may add
+   `--snapshot-vram-policy provider-owned`: it accepts changed VRAM words only
+   inside an eligible BG1/BG2 tilemap whose authentic-ring census is exact on
+   both sides, and rejects every other VRAM delta.
 2b. **Presentation modes that change the margin budget must be switched MID-RUN**:
    `AR_DIORAMA_AT=<gameframe>` flips Diorama 3D on through the same descriptor
    path as the `D` hotkey. Booting with `diorama_mode = On` forces the margin
@@ -951,9 +952,9 @@ show the frozen `$0088` against the advancing host frame:
    where the HUD and the diorama plane actually landed — those two must respond
    to the margin in OPPOSITE ways (HUD fixed in authentic rows, plane shifted by
    the margin), which is the direct regression check for the row-origin class of
-   bug. `AR_VEXT_BANDFIX=0` / `AR_VEXT_OBJDRAW=0` disable the band's tilemap
-   decode and its object draw-window independently, both A/B-able from one
-   binary. `AR_VEXT_TILES=1` dumps the raw BG1 tilemap ids the band reads —
+   bug. `AR_VEXT_OBJDRAW=0` disables the band's object draw-window for an A/B;
+   provider tile words no longer have a separate ring-repair toggle.
+   `AR_VEXT_TILES=1` dumps the raw BG1 tilemap ids the band reads —
    deliberately a raw dump and not a verdict, since a first cut that classified
    "uniform row" as filler reported 100% filler (an all-sky BG1 row is uniform
    too). Design and the full trap list: rendering-engine.md §13i.

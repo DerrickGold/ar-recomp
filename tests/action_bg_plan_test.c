@@ -123,6 +123,43 @@ static void TestResolvedPresentationProjection(void) {
   CHECK(!memcmp(&plan, &before, sizeof(plan)));
 }
 
+static void TestUnboundWorldFallback(void) {
+  ActionBgFrameState state = State(1, 1);
+  ActionBgPlan plan = Build(&state);
+  CHECK(ActionBgPlan_ClampUnboundWorldLayers(&plan, 1, 3) == 2);
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+  CHECK(!plan.layer[1].band_count);
+
+  plan = Build(&state);
+  CHECK(!ActionBgPlan_ClampUnboundWorldLayers(&plan, 3, 3));
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+
+  state = State(2, 1);
+  state.layer[1].world_width = 256;
+  plan = Build(&state);
+  CHECK(ActionBgPlan_ClampUnboundWorldLayers(&plan, 0, 3) == 1);
+  CHECK(plan.layer[0].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_Clamp);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].band_count == 1);
+
+  state = State(1, 1);
+  plan = Build(&state);
+  CHECK(ActionBgPlan_ClampUnboundWorldLayers(&plan, 0, 1) == 1);
+  CHECK(plan.layer[0].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
+
+  memset(&plan, 0, sizeof(plan));
+  CHECK(!ActionBgPlan_ClampUnboundWorldLayers(&plan, 0, 3));
+  CHECK(!ActionBgPlan_ClampUnboundWorldLayers(NULL, 0, 3));
+}
+
 static void TestOrdinaryWorldAndNativeSource(void) {
   ActionBgFrameState state = State(1, 1);
   ActionBgPlan plan = Build(&state);
@@ -250,6 +287,7 @@ static void TestEveryKnownMapClassifies(void) {
 int main(void) {
   TestValidationAndFallback();
   TestResolvedPresentationProjection();
+  TestUnboundWorldFallback();
   TestOrdinaryWorldAndNativeSource();
   TestNarrowDecorativeBg2();
   TestBloodpoolBand();

@@ -450,6 +450,10 @@ is only HALF true.** Widescreen has two distinct halves, and only one is baked:
   and the HUD/overlay buffers, which the FrameSlot memcpy captures. No race.
 - The extra-columns rendering (the internal 256→448 wide framebuffer). Baked.
 
+BH8 note (2026-08-09): `ActRaiser_WidescreenMarginRefresh` was retired after
+the bounded provider's default-on acceptance. Provider scanout is still baked
+before `FrameSlot`; the Sky Palace and sprite statements remain current.
+
 **Computed at PRESENT time, reading LIVE `g_ppu` fields — NOT baked, RACE RISK:**
 The widescreen HUD split is re-projected every present from live PPU state.
 `BuildHudPresentationChunks` (main.c:1146-1263) reads, at present time:
@@ -747,6 +751,9 @@ per-layer and ARE available to the diorama.** Verified against the code:
   tilemap VRAM words"). Sky Palace decodes a ROM metatile page into offscreen BG2
   columns. Both populate VRAM *before* `ppu_runLine`, so the PPU draws the margin
   tiles as part of BG1/BG2 — and the BG1/BG2 overlay capture picks them up.
+- **BH8 update:** action world margins now enter the same captured BG planes
+  through the virtual tile-word provider during scanout. Only the separate Sky
+  Palace temporary VRAM patch remains in `actraiser_widescreen_bg.c`.
 - **Sprite margins** (`actraiser_widescreen_sprites.c`): the hacks widen
   per-definition emission and margin-object drawing into **OAM** ("keeps the wide
   viewport inside the 512px world **before OAM is composed**", lines 13-14). They

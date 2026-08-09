@@ -255,6 +255,26 @@ bool ActionBgPlan_ApplyPresentationPolicy(
   return true;
 }
 
+uint8_t ActionBgPlan_ClampUnboundWorldLayers(
+    ActionBgPlan *plan, uint8_t bound_layers, uint8_t visible_layers) {
+  if (!plan || !plan->valid) return 0;
+  uint8_t clamp_layers = 0;
+  for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+    ActionBgLayerPlan *layer_plan = &plan->layer[layer];
+    const uint8_t layer_mask = (uint8_t)(1u << layer);
+    if (!layer_plan->valid ||
+        layer_plan->source != kActionBgSource_WorldMap ||
+        !(visible_layers & layer_mask) ||
+        (bound_layers & layer_mask))
+      continue;
+    clamp_layers |= layer_mask;
+    layer_plan->source = kActionBgSource_AuthenticViewport;
+    layer_plan->default_edge = kActionBgEdge_Clamp;
+    layer_plan->band_count = 0;
+  }
+  return clamp_layers;
+}
+
 const char *ActionBgSourceKind_Name(ActionBgSourceKind source) {
   switch (source) {
     case kActionBgSource_NativeTilemap: return "native";

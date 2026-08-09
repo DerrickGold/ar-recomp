@@ -145,12 +145,16 @@ typedef struct Settings {
   struct { uint32 off; uint8 val; } pins[32];
 
   /* Widescreen behavior (per-frame policy) */
-  bool ws_action, ws_sim, ws_bgrefresh, ws_skypalace_bg, ws_sprites,
+  bool ws_action, ws_sim, ws_skypalace_bg, ws_sprites,
        ws_margin_objects, ws_margin_activation, ws_bg2_padding,
        ws_sim_sprites;
 } Settings;
 extern Settings g_settings;
 ```
+
+The concrete struct retains `ws_bgrefresh` for one settings-migration window,
+but it is a hidden load-only alias and is intentionally omitted from this
+runtime-policy sketch. No runtime or display-preset decision reads it.
 
 #### Deterministic render profiles (implemented)
 
@@ -563,7 +567,7 @@ it naturally when the relevant engine becomes active.
 | Wide action stages | `AR_WS_ACTION` | bool | on | master action-geometry toggle |
 | Wide simulation towns | `AR_WS_SIM` | bool | on | master toggle; applies `$01:B4C6` map-edge caps, keeps BG2/dialogs clamped, and gates the separate world-sprite setting |
 | Wide simulation sprites | `AR_WS_SIM_SPRITES` | bool | on | widens ADAD/AE6F real-OAM horizontal emission for `$0A00-$1087` world records; host-only exact parts can extend farther through `Extended actor range`. Fixed/UI records and hard world bounds stay authentic |
-| BG margin refresh | `AR_WS_BGREFRESH` | bool | on | true-content margins vs stale/wrapped |
+| Legacy BG margin refresh | `AR_WS_BGREFRESH` | load-only bool | ignored | hidden compatibility alias; BH8 removed the transaction and settings saves omit this row |
 | Sky Palace BG2 source repair | `AR_WS_SKYPALACE_BG` | bool | on | render-only ROM source-map margin decode; off restores raw-wide dialogue staging. Validated 2026-07-13 (byte-identical to the boot colonnade) |
 | Widen sprites | `AR_WS_SPRITES` | bool | on | emit sprites into margins |
 | Draw margin objects | `AR_WS_MARGIN_OBJECTS` | bool | on | object draw coverage in margins |

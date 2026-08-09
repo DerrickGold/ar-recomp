@@ -267,6 +267,56 @@ class BgHleCensusTest(unittest.TestCase):
             self.assertEqual(
                 result["mismatches"][0]["framebuffer"]["center_pixels"], 1)
 
+    def test_artifact_compare_accepts_only_censused_provider_vram(self):
+        with tempfile.TemporaryDirectory() as directory:
+            left_run = os.path.join(directory, "left")
+            right_run = os.path.join(directory, "right")
+            self._write_artifact_run(left_run, b"same-")
+            self._write_artifact_run(right_run, b"same-")
+            left_manifest = os.path.join(directory, "left.json")
+            right_manifest = os.path.join(directory, "right.json")
+            self._write_artifact_manifest(left_manifest, left_run)
+            self._write_artifact_manifest(right_manifest, right_run)
+            left_vram = [0] * artifact_compare.VRAM_WORDS
+            right_vram = list(left_vram)
+            right_vram[0x6001] = 1
+            for run, words in ((left_run, left_vram),
+                               (right_run, right_vram)):
+                with open(os.path.join(
+                        run, "snapshots", "vd_gf10.vram.bin"), "wb") as output:
+                    output.write(struct.pack("<%dH" % len(words), *words))
+            for manifest_path, run in ((left_manifest, left_run),
+                                       (right_manifest, right_run)):
+                with open(manifest_path, "r", encoding="utf-8") as source:
+                    manifest = json.load(source)
+                manifest["results"][0]["snapshots"] = [{
+                    "snapshot": os.path.join(run, "snapshots", "vd_gf10"),
+                    "layers": [{
+                        "tilemap_base": 0x6000,
+                        "ppu": {"eligible": True},
+                        "comparison": {
+                            "available": True,
+                            "mismatches": 0,
+                            "outside_world": 0,
+                        },
+                    }],
+                }]
+                with open(manifest_path, "w", encoding="utf-8") as output:
+                    json.dump(manifest, output)
+
+            result = artifact_compare.compare_manifests(
+                left_manifest, right_manifest, snapshot_vram_policy="provider-owned")
+            self.assertEqual(result["mismatches"], [])
+            self.assertEqual(result["vram_differences"][0]["changed_words"], 1)
+
+            right_vram[0x5000] = 1
+            with open(os.path.join(
+                    right_run, "snapshots", "vd_gf10.vram.bin"), "wb") as output:
+                output.write(struct.pack("<%dH" % len(right_vram), *right_vram))
+            result = artifact_compare.compare_manifests(
+                left_manifest, right_manifest, snapshot_vram_policy="provider-owned")
+            self.assertEqual(len(result["mismatches"]), 1)
+
     def test_positive_mismatch_and_missing_ppu_are_distinct(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = CensusFixture(directory)

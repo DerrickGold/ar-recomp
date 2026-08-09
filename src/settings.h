@@ -381,7 +381,9 @@ typedef struct Settings {
   /* Widescreen behavior. All default ON; the per-frame gates read these. */
   bool ws_action;             /* AR_WS_ACTION            action stages wide */
   bool ws_sim;                /* AR_WS_SIM               sim town wide */
-  bool ws_bgrefresh;          /* AR_WS_BGREFRESH         true-content margins */
+  /* Load-only compatibility alias. Action true-content margins are owned by
+   * the default HLE provider; runtime code must not consume this field. */
+  bool ws_bgrefresh;          /* retired AR_WS_BGREFRESH */
   bool ws_skypalace_bg;       /* AR_WS_SKYPALACE_BG      sky palace BG2 repair */
   bool ws_sprites;            /* AR_WS_SPRITES           widen sprite emission */
   bool ws_margin_objects;     /* AR_WS_MARGIN_OBJECTS    draw margin objects */

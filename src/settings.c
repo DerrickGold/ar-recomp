@@ -2149,10 +2149,10 @@ const SettingDesc g_setting_descs[] = {
                "Enable wide geometry in simulation towns.",
                kSettingCat_Widescreen, 1, false, NULL,
                WidescreenSettingChanged),
-  BOOL_SETTING(ws_bgrefresh, "AR_WS_BGREFRESH", "BG margin refresh",
-               "Decode true action tilemap content into side margins.",
-               kSettingCat_Widescreen, 1, false, NULL,
-               WidescreenSettingChanged),
+  BOOL_SETTING(ws_bgrefresh, "AR_WS_BGREFRESH", "Legacy BG margin refresh",
+               "Load-only compatibility alias; action world margins now use "
+               "the bounded HLE provider.",
+               kSettingCat_Widescreen, 1, false, NULL, NULL),
   BOOL_SETTING(ws_skypalace_bg, "AR_WS_SKYPALACE_BG", "Sky Palace BG repair",
                "Reconstruct box-free colonnade tiles in BG2 margins.",
                kSettingCat_Widescreen, 1, false, NULL,
@@ -2257,6 +2257,7 @@ static bool Settings_IsLoadOnly(const SettingDesc *desc) {
   return desc &&
       (desc->field == &g_settings.ignore_aspect_ratio ||
        desc->field == &g_settings.uncapped_framerate ||
+       desc->field == &g_settings.ws_bgrefresh ||
        desc->field == &g_settings.sim3d_picker_exit_ease);
 }
 
@@ -2687,7 +2688,6 @@ static int InferDisplayMode(void) {
     return kDisplayMode_43;
 
   const bool raw = g_settings.ws_action && g_settings.ws_sim &&
-                   !g_settings.ws_bgrefresh &&
                    !g_settings.ws_skypalace_bg &&
                    !g_settings.ws_sprites &&
                    !g_settings.ws_margin_objects &&
@@ -2698,7 +2698,6 @@ static int InferDisplayMode(void) {
     return kDisplayMode_WideRaw;
 
   const bool full = g_settings.ws_action && g_settings.ws_sim &&
-                    g_settings.ws_bgrefresh &&
                     g_settings.ws_skypalace_bg &&
                     g_settings.ws_sprites &&
                     g_settings.ws_margin_objects &&
@@ -2746,6 +2745,7 @@ static bool ApplyBootLayerValue(const SettingDesc *desc, const char *text,
       ? ApplyLegacyEnvironmentValue(desc, text)
       : Settings_SetText(desc, text) != kSettingChange_Rejected;
   if (ok && desc->category == kSettingCat_Widescreen &&
+      !Settings_IsLoadOnly(desc) &&
       rank > s_boot_widescreen_rank)
     s_boot_widescreen_rank = rank;
   return ok;
@@ -3049,7 +3049,6 @@ void Settings_SetDisplayMode(int mode) {
 
   g_settings.ws_action            = wide;
   g_settings.ws_sim               = wide;
-  g_settings.ws_bgrefresh         = corrections;
   g_settings.ws_skypalace_bg      = corrections;
   g_settings.ws_sprites           = corrections;
   g_settings.ws_margin_objects    = corrections;

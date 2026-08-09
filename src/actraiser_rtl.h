@@ -58,11 +58,9 @@ void ActRaiser_RequestMagicCycle(void);
  * without reading live WRAM off the game thread. */
 uint8 ActRaiser_SelectedMagic(void);
 
-/* BG-only widescreen presentation helpers. These never replace the game's OAM
- * builder or normal tile streamers. The Sky Palace pair temporarily decodes a
- * box-free source map into only BG2's margin columns, then restores game VRAM. */
-int ActRaiser_WidescreenBgRefreshEnabled(void);
-void ActRaiser_WidescreenMarginRefresh(void);
+/* BG-only widescreen presentation helpers. The Sky Palace pair temporarily
+ * decodes a box-free source map into only BG2's margin columns, then restores
+ * game VRAM. Action world margins use the bounded HLE provider. */
 void ActRaiser_WidescreenSkyPalacePrepare(void);
 void ActRaiser_WidescreenSkyPalaceRestore(void);
 void ActRaiser_WidescreenSpriteActivationProbe(void);

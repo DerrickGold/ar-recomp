@@ -859,19 +859,47 @@ the existing shader test rather than that run. Debug and release builds and all
 Cleanup is a separate behavior-neutral change after BH7, not part of the default
 flip.
 
-**Remove or retire, subject to a final consumer census**
+**Implementation status (2026-08-09): in progress; legacy world-ring repair
+retired.** The action-world portion of `actraiser_widescreen_bg.c` is removed:
+`ActRaiser_WidescreenMarginRefresh`, `WsRefreshKey`, both builder trampolines,
+all full/partial record drains, `ws_build_visible_row`, `ws_build_band_rows`,
+the 128 KiB WRAM/CPU/math transaction, and `AR_VEXT_BANDFIX` no longer exist.
+`ws_bgrefresh`/`AR_WS_BGREFRESH` remain only as a hidden load-only alias for old
+files and are omitted from new saves, preset inference, and runtime policy.
+
+The provider owns eligible world coordinates. If a planned world layer cannot
+bind, `ActionBgPlan_ClampUnboundWorldLayers` converts only that layer to an
+authentic-viewport clamp; it never exposes stale/wrapped synthetic ring cells.
+Wide Raw bypasses this path and remains the explicit raw control. The native
+streamers, upload drains, 64x64 VRAM ring, authentic PPU path, and differential
+oracle are unchanged. Sky Palace's unrelated ROM-source reconstruction remains
+in the now-focused `actraiser_widescreen_bg.c`.
+
+Pre/post-cleanup 12-entry matrices in authentic 4:3, Wide Full, and diorama
+vertical extension 32 accept all 612 artifacts under the explicit BH8 contract.
+All framebuffers, emulated state, PPU registers, and authentic-ring comparisons
+are exact. Seven full-VRAM snapshots contain the intended removal footprint:
+1,390 changed words, all confined to provider-eligible `$6000-$7FFF` tilemaps
+with zero authentic-ring mismatch. The focused provider/plan/settings/PPU/
+diorama tests pass. Remaining BH8 work is the final map-policy/setter consumer
+census, broader release gates, and final docs.
+
+**Removed or retired in the first BH8 slice**
 
 - action-world portions of `ActRaiser_WidescreenMarginRefresh`;
 - `WsRefreshKey`, row/column builder trampolines, partial drains and the 128 KiB
   WRAM/CPU/math snapshot transaction;
 - `ws_build_visible_row`, `ws_build_band_rows` and `AR_VEXT_BANDFIX`;
 - `AR_WS_BGREFRESH`, `ws_bgrefresh` and their production setting plumbing;
+
+**Still subject to the final consumer census**
+
 - duplicated map-specific background classification from
   `ActRaiser_ApplyWidescreenPolicy`;
 - old PPU policy masks/setters only where the new plan has no remaining runtime
   or cross-project consumer;
-- `PpuSetVerticalMarginLayerClip` if provider bounds completely subsume it and a
-  repository-wide census finds no other user.
+- `PpuSetVerticalMarginLayerClip` is retained: native/decorative layers can share
+  the vertical extension without a provider and still need independent bounds.
 
 **Retain**
 

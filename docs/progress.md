@@ -184,9 +184,16 @@ The remaining widescreen backlog is:
    Five paired 12-entry presentation matrices cover 4:3, Wide Full, Wide Raw,
    and diorama vertical extension 0/32; long Fillmore and natural Death Heim
    runs, same-frame/rebind/reset/savestate/geometry gates, a real compositor
-   A/B, debug/release builds, and 41/41 tests pass. Retire only duplicated host
-   ring-repair machinery in BH8, preserving native streamers, the VRAM ring,
-   fallback/oracle paths, and decorative mirror/repeat behavior. The natural
+   A/B, debug/release builds, and 41/41 tests pass. BH8 has now removed the
+   duplicated host ring-repair transaction, builder trampolines, and 128 KiB
+   snapshot; 4:3, Wide Full, and diorama-32 accept all 612 artifacts. Every
+   framebuffer/state/PPU register/authentic ring is exact; seven full-VRAM
+   snapshots differ only where the deleted transaction formerly wrote
+   provider-owned offscreen tilemap cells. The retired
+   setting is a hidden load-only alias and unbound world layers clamp safely to
+   the authentic viewport. Complete the final policy/setter census while
+   preserving native streamers, the VRAM ring, fallback/oracle paths, and
+   decorative mirror/repeat behavior. The natural
    Northwall boss and automated Death Heim ending-tail captures remain useful
    archival BH1 evidence gaps, not blockers to the classified default path.
 2. **Freeze simulation baselines.** Complete Bloodpool and all four untested

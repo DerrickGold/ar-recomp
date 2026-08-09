@@ -893,25 +893,27 @@ at y>=140 is never captured — on the settled frame. `AR_TITLELOG=1` prints
 the per-frame gate inputs used to derive this signature. Parser/evaluator
 unit tests: `tests/hd_manifest_test.c`.
 
-### 13.2 Stage-B implementation refinement (2026-07-12)
+### 13.2 Stage-B implementation refinement (2026-07-12; retired by BH8)
 
 The earlier `widescreen-bg` implementation proved the map-decoding idea but
 did not isolate it: that branch also hle-replaced `$8C98/$8D68`, hle-wrapped
 both streamers, and restored only selected DP scratch after calling `$B825`.
 
-Main keeps all four original routines and places the validated
+At that checkpoint, main kept all four original routines and placed the validated
 margin decoder in `src/actraiser_widescreen_bg.c`. Static audit of
 `$B825->$B90D` shows only upload-record WRAM writes, DP `$0E`, and `$BED3`
 multiply-register use; there are no PPU/OAM/CGRAM writes. The host wrapper
 therefore snapshots/restores the full `CpuState`, all 128 KiB WRAM, and SNES
 math state. It validates the fixed record cursor and every destination against
 the owning 4 KiB tilemap before directly copying to VRAM. Consequently its
-only persistent state is BG1/BG2 tilemap content. `AR_WS_BGREFRESH=0` removes
-the transaction entirely for a byte-identical Stage-A A/B run.
+only persistent state was BG1/BG2 tilemap content. `AR_WS_BGREFRESH=0` removed
+the transaction for a byte-identical Stage-A A/B. BH8 later deleted this whole
+host transaction after the default HLE provider passed the broader BH7 gates;
+the setting name is now only a hidden load-only compatibility alias.
 
 The successor HLE tile source is observable independently. With
 `AR_ACTION_BG_HLE_COMPARE=1`, `src/actraiser/actraiser_action_bg.c` captures the
-same two low-WRAM decoder records after the native/Stage-B refresh, expands
+same two low-WRAM decoder records, expands
 them through the bounded `ActionBgWorld`, and compares every tile touched by
 the authentic 256x224 viewport with the live 64x64 VRAM ring. Invalid modes,
 disabled layers, non-64x64/native tilemaps, malformed sources, and allocation
@@ -950,13 +952,12 @@ and cleared on reset and every frame-policy rebuild. The real-PPU harness pins
 each of those effects plus signed `0/$3FF` scroll wrap and unchanged centre
 priority words.
 
-Representative integration gates are exact. Wide `0101`, `0201`, and `0401`
-off/on pairs match screenshots, WRAM, SRAM, dispatch logs, and state dumps.
-With legacy `AR_WS_BGREFRESH=0`, HLE `0101` still matches the corrected
-reference, while disabling both produces a different screenshot. Fillmore act
-2 diorama gf 2200 matches all nine layer/priority PNGs off/on and continues to
-match with `AR_VEXT_BANDFIX=0`; therefore the synthetic band can now come from
-the finite world rather than repaired VRAM ring rows.
+The historical positive controls established ownership before deletion: Wide
+`0101`, `0201`, and `0401` pairs matched screenshots and state; HLE remained
+correct with the then-live `AR_WS_BGREFRESH=0` and `AR_VEXT_BANDFIX=0` repairs
+disabled. BH8 removes both repair paths. An unbound planned world layer is now
+reclassified to an authentic-viewport clamp by the pure plan helper, so failure
+cannot expose stale ring margins. Wide Raw remains the explicit raw control.
 
 BH5 adds `kPpuVirtualTilemapFlag_IncludeAuthentic`. The ActRaiser adapter sets
 it only when the full camera agrees with the live 10-bit PPU scroll phase and
@@ -1907,7 +1908,7 @@ available): BG2's band is 32/32 rows of real scenery, 28 of them distinct, not a
 held copy of the first visible row. BG1 is empty there — and empty in the
 adjacent VISIBLE rows too, because that part of the level is sky.
 
-### Streaming repair (the band's rows are decoded, not inherited)
+### Historical streaming repair (superseded by the HLE provider in BH8)
 
 This is the axis where the §4 streaming seams show. A column strip decodes a
 512px-tall window keyed to `cameraY & 0xFF00` and writes filler outside it;
@@ -1915,12 +1916,12 @@ row strips are its only refresher. The band reads rows ABOVE the camera, so
 whenever `cameraY & 0xFF` is smaller than the band height those rows fall below
 the page origin, outside the decode window, and the band inherits filler.
 
-Repaired by `ws_build_band_rows` (actraiser_widescreen_bg.c) — the direct
+The former repair used `ws_build_band_rows` — the direct
 transpose of `ws_build_visible_row`'s existing horizontal page-hole workaround.
-It drives the game's own `$02:B8A0` row decoder for `world_y = camY - k*16` and
-drains the record into VRAM host-side, inside the same WRAM/CPU snapshot
-transaction the side margins already use, so the band carries true map content
-and no game state is perturbed.
+It drove the game's own `$02:B8A0` row decoder for `world_y = camY - k*16` and
+drained the record into VRAM host-side, inside the same WRAM/CPU snapshot
+transaction the side margins used, so the band carried true map content and no
+game state was perturbed.
 
 It must run on the COLUMN path as well as the row path: rebuilding columns is
 precisely what re-stomps the band, and moving down builds the leading edge
@@ -1939,9 +1940,12 @@ that improves most — diagnosis and fix agree. VISIBLE rows are byte-identical 
 every case: the repair touches only the band. Across four action replays, 2926
 row builds with zero decoder rejections, and the cost is inside run-to-run
 timing noise (~0.3%) because the refresh only runs on frames where the camera
-actually moved. `AR_VEXT_BANDFIX=0` restores the pre-repair behaviour.
+actually moved. At that phase `AR_VEXT_BANDFIX=0` restored the pre-repair
+behavior. BH8 removed the function, transaction, and switch after pre/post
+diorama-32 matrices matched all 204 artifacts; bounded provider tile words now
+supply the band directly.
 
-The default is still 0: the repair is validated on Fillmore acts 1-2 and
+The vertical-extension default is still 0: the presentation is validated on Fillmore acts 1-2 and
 level 1, not across every stage.
 
 `AR_VEXT_LOG=1` prints the resolved margin with the camera/scroll state that
