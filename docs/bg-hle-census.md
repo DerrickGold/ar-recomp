@@ -87,8 +87,9 @@ This is an entry census, not the complete BH1 gate:
 - these BH1 matrix runs predate BH4: they do not bind an HLE tile source or
   display a provider margin lookup.
 
-The later provider seam remains default-off, and these entry samples alone are
-not enough to close BH1 or delete any legacy background path.
+These entry samples alone were not enough to close BH1 or promote/delete any
+background path. BH7 later promoted the provider using the broader evidence
+set below; this paragraph records the limits of the original BH1 matrix.
 
 ## Special action rooms — 2026-08-09
 
@@ -169,10 +170,11 @@ synthetic margins while the same setters still execute decorative policy.
 
 ## BH4 synthetic-margin provider — 2026-08-09
 
-The generic PPU provider and ActRaiser binding adapter are implemented behind
-default-off `AR_ACTION_BG_HLE=1`. Only plan layers classified `world` bind, and
-only pixels outside the authentic 256x224 rectangle consume them. The centre
-remains the native ring.
+At the BH4 checkpoint, the generic PPU provider and ActRaiser binding adapter
+were implemented behind default-off `AR_ACTION_BG_HLE=1`. Only plan layers
+classified `world` bound, and only pixels outside the authentic 256x224
+rectangle consumed them. The centre remained the native ring. BH5 expanded
+ownership and BH7 later promoted the full provider; see below.
 
 The focused evidence set is presentation-aware:
 
@@ -243,9 +245,10 @@ runs measured medians of 2.298703 s native and 2.426934 s HLE over 1,900 frames:
 the worst measured span (0.4% of a 60 Hz frame budget; 5.6% of unpaced headless
 throughput).
 
-This closes BH5's implementation and current evidence gate. It does not fill
-the natural Northwall boss transition or the Death Heim ending-tail gaps, make
-the feature default-on, or authorize deleting the native streamers/ring oracle.
+This closed BH5's implementation and then-current evidence gate. It did not by
+itself fill the natural Northwall boss transition or Death Heim ending-tail
+gaps, promote the provider, or authorize deleting the native streamers/ring
+oracle. BH7 promotion is recorded below.
 
 ## BH6 exact decorative/diorama handoff — 2026-08-09
 
@@ -288,8 +291,69 @@ ROM-free tests pin native-plan initialization, policy override validation,
 all 49 map classifications, Bloodpool's 136..224 band, Death Heim's 144..224
 band and both ending-sky selectors, plus exact row-span behavior with a 16-row
 vertical extension. Debug and release builds succeed; 40 sandbox-safe tests and
-the macOS display-dependent shader test pass (41/41). BH6 is complete. BH7's
-full lifecycle soak and default promotion remain open.
+the macOS display-dependent shader test pass (41/41). BH6 is complete.
+
+## BH7 default-on acceptance — 2026-08-09
+
+The provider is now the default for eligible action world layers. Unset, empty,
+or nonzero `AR_ACTION_BG_HLE` enables it; exact `AR_ACTION_BG_HLE=0` is the
+native A/B. Wide Raw deliberately remains unbound, and every validation failure
+still falls back atomically per layer and frame.
+
+Five paired 12-entry matrices cover authentic 4:3, Wide Full, Wide Raw, and
+diorama vertical extension 0 and 32:
+
+- `runs/bg-hle-matrix-bh7-{default,native}.json`;
+- `runs/bg-hle-matrix-bh7-full-{default,native}.json`;
+- `runs/bg-hle-matrix-bh7-raw-{default,native}.json`;
+- `runs/bg-hle-matrix-bh7-diorama0-{default,native}.json`;
+- `runs/bg-hle-matrix-bh7-diorama32-{default,native}.json`.
+
+All five pairs pass 12/12 targets. Each pair compares 204 framebuffer, state,
+and PPU artifacts. Four are byte-exact throughout. Wide Full `0301` has one
+intentional provider improvement: 30 pixels at x=25 in the synthetic left
+margin become transparent because BG2 camera X is 0 while BG1 camera X is 1;
+the provider honors BG2's independent finite bound instead of wrapping one sky
+column from the resident ring. The centered authentic viewport and all state
+artifacts remain exact. `tools/bg_hle_artifact_compare.py` with
+`--framebuffer-policy authentic-center` accepts only this class: all non-image
+artifacts and the centered 256 pixels must be exact, and any accepted margin
+delta is counted and localized.
+
+Long natural Fillmore act-2 replays run to game frame 9425 in Wide Full
+(`runs/20260809-154717` / `154729`), Wide Raw (`154808` / `154816`), and
+diorama-32 (`154845` / `154908`). Full and Raw compare 34 and 38 artifacts;
+diorama compares 47 including nine late layer/priority planes. All are exact.
+The Full provider completed 259,105,056 lookups and the diorama provider
+372,401,760, with zero phase, mismatch, outside, invalid, allocation, or bind
+defect. Raw correctly published no provider binding.
+
+A continuous natural Death Heim route (`runs/20260809-154223` / `154230`) goes
+`0701 -> 0702 -> 0703 -> 0701 -> 0704 -> 0705 -> 0701 -> 0706`. It produced
+9,608 evaluated frames, eight source activations, 7,376 eligible/bound
+layer-frames, and 53,189,472 successful provider lookups with zero provider
+preflight defect. All 65 paired artifacts are exact. The comparator's 377
+finite BG2 exits in `0705` remain the documented decorative-layer observation;
+that layer is deliberately native. Historical human playthrough evidence covers
+every boss and the ending; natural `0608` and automated `0707`/`0708` ending-tail
+captures remain named BH1 archival gaps.
+
+Lifecycle evidence includes same-game-frame paused redraw and policy rebind,
+explicit provider reset, fresh-process startup/restart ownership, savestate load
+(`runs/20260809-154310` / `154310-1`), and a live Wide Full to 4:3 settings/
+geometry transition (`runs/20260809-154604` / `154606`). The savestate pair is
+5/5 exact; the geometry pair is 25/25 exact. `AR_LOADSTATE` diagnostics must
+redirect `AR_SAVE_NATIVE_PATH` to a disposable copy (or use replay protection),
+because a loaded state may otherwise auto-persist its SRAM to the player's
+native save.
+
+Finally, a real non-headless Cocoa diorama-32 run
+(`runs/20260809-153921` / `154008`) exercised the ordinary compositor and
+matched all 14 framebuffer/state/layer artifacts. That host exposed no GPU
+device, so GPU-only post-process effects were not part of this A/B; the existing
+display-dependent shader test covers that code. Debug and release builds and
+all 41 tests pass. BH7 is complete. BH8 owns behavior-neutral retirement of
+duplicated host repair code; native streamers, ring, fallback, and oracle remain.
 
 ### Rejected Northwall `0608` shortcut
 

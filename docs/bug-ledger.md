@@ -1122,10 +1122,43 @@ the current debugging process; this file is the case law.
     `runs/bg-hle-matrix-20260809-151437.json`, plus native-only `0701`/`0708`
     endpoints, pass with zero mismatch.
 
+    **BH7 default-on confirmation (2026-08-09):** five paired 12-entry
+    presentation matrices cover 4:3, Wide Full, Wide Raw, and diorama vertical
+    extension 0/32. Every authentic center and state/PPU artifact is exact. The
+    only full-frame difference is an intended 30-pixel correction at x=25 in
+    Wide Full `0301`: BG2 camera X=0 is independently finite while BG1 camera
+    X=1, so the provider returns transparent instead of wrapping one native-ring
+    sky column into the synthetic left margin. Long Fillmore Full/Raw/diorama
+    runs, a natural Death Heim transition soak, lifecycle/savestate/geometry
+    gates, and a real compositor A/B pass. The provider is now default-on with
+    exact `AR_ACTION_BG_HLE=0` as the native control.
+
     **Reusable lesson:** a resident tilemap address is not automatically a spatial world
     coordinate outside hardware-visible scanlines. An A/B that confines a symptom to an
     extension proves the extension triggers it; source-layer isolation plus independent
     camera/bounds state is required before calling it off-screen art.
+
+40. **Windowed diagnostics could run forever or warp during power-on — FIXED
+    2026-08-09.** BH7 needed the ordinary non-headless compositor, a scheduled
+    action-stage warp, and an unattended exit. Two harness assumptions prevented
+    that combination: `AR_QUIT_FRAMES` was checked only inside the headless loop,
+    and `AR_WARP_AT` treated the power-on game-frame sentinel `$5555` as a real
+    initialized counter. The first left a successful windowed run open forever;
+    the second fired the warp before game initialization and produced a coherent
+    but irrelevant world-map capture.
+
+    **Fix:** `DevTools_ShouldAutoQuit()` now owns the host-frame limit and is
+    called by both headless and windowed loops. Scheduled warp uses the same
+    `$5555` sentinel guard already used by scheduled diorama switching. The
+    corrected compositor pair is `runs/20260809-153921` /
+    `runs/20260809-154008`: action entry occurs at game frame 402, diorama
+    switches after initialization, the requested artifacts are captured, and
+    both processes exit at their host-frame bound.
+
+    **Reusable lessons:** scheduled probes keyed to a logical clock must reject
+    every documented invalid/sentinel representation before ordering it against
+    a target. A harness limit that only works in headless mode cannot safely
+    bound the renderer path whose behavior it is meant to validate.
 
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 

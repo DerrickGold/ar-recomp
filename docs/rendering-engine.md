@@ -930,7 +930,8 @@ the 12 entry census, representative wide policies, and vertical/diorama cases.
 Diagnostics name each planned source.
 
 BH4 first made the finite-world source selectable only for synthetic margins.
-`AR_ACTION_BG_HLE=1` asks `ActRaiserActionBg_BindPlan` to validate each planned
+At that checkpoint, explicit `AR_ACTION_BG_HLE=1` asked
+`ActRaiserActionBg_BindPlan` to validate each planned
 world layer, atomically update its `ActionBgWorld`, and bind a generic
 `PpuVirtualTilemapBinding`. The binding carries the full per-layer camera and
 the matching 10-bit PPU scroll phase. Scanout adds the nearest signed live
@@ -975,9 +976,9 @@ and PPU-snapshot artifacts are byte-identical to the earlier native matrix.
 Fresh wide mixed/cyclic replays and the gf-2200 nine-plane diorama gate are also
 exact, including with the vertical ring repair disabled. At the 4096x1024 Aitos
 world and maximum 496px span, release/headless median cost is 0.067 ms/emulated
-frame over native, below the accepted 0.10 ms BH5 budget. The feature remains
-default-off pending later-room soak/default promotion; native streamers and the
-ring stay as fallback and oracle.
+frame over native, below the accepted 0.10 ms BH5 budget. BH7 later promoted
+this validated path to default-on; native streamers and the ring stay active as
+fallback and oracle.
 
 BH6 closes the post-scanout policy seam. `ActRaiser_ApplyWidescreenPolicy`
 publishes the resolved `ActionBgPlan` into a pending frame record before
@@ -1007,6 +1008,25 @@ it preserves source/world metadata, rejects conflicting or malformed policy,
 and never reads PPU state. Focused live matrices cover Bloodpool, Aitos,
 Northwall, every raw Death Heim room, and both deliberately native-only Death
 Heim endpoints; see `docs/bg-hle-census.md` BH6.
+
+BH7 makes the provider the ordinary path: unset, empty, or nonzero
+`AR_ACTION_BG_HLE` enables it, while exact `AR_ACTION_BG_HLE=0` preserves the
+native A/B. Five paired 12-entry matrices cover 4:3, Wide Full, Wide Raw, and
+diorama vertical extension 0/32. Every authentic center and state/PPU artifact
+is exact. The sole full-frame delta is an intended 30-pixel correction in the
+synthetic left margin of Wide Full `0301`: independent BG2 camera/bounds reject
+a wrapped native-ring sky column. The artifact comparator's
+`authentic-center` policy still requires exact state and centered 256 pixels and
+reports every accepted margin delta.
+
+Long natural Fillmore replays cover Full, Raw, and diorama-32 through game frame
+9425; a continuous Death Heim route covers hub/rematch transitions through
+`0706`; provider preflight and runtime lookups report zero unexpected defect.
+Same-frame redraw/rebind/reset, savestate load, fresh restart, and live Wide
+Full-to-4:3 geometry change are covered. A non-headless Cocoa diorama-32 A/B
+also matches all 14 ordinary-compositor artifacts. Debug/release builds and all
+41 tests pass. See `docs/bg-hle-census.md` BH7 for manifests, counters, and the
+remaining historical natural-transition evidence gaps.
 
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color
