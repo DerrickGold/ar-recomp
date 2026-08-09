@@ -56,6 +56,73 @@ void DioramaBg2ValidSpan(int ws_extra, int budget, int live_left, int live_right
   if (*out_x1 < *out_x0) *out_x1 = *out_x0;
 }
 
+static ActionBgEdgeMode EdgeAtCaptureRow(const ActionBgLayerPlan *layer,
+                                         int authentic_y0, int capture_y) {
+  if (!layer || !layer->valid || layer->band_count > kActionBgMaxBands)
+    return kActionBgEdge_RawWrap;
+  ActionBgEdgeMode edge = layer->default_edge;
+  const int authentic_y = capture_y - authentic_y0;
+  for (unsigned i = 0; i < layer->band_count; i++) {
+    const ActionBgBand *band = &layer->bands[i];
+    if (band->y0 < band->y1 && authentic_y >= (int)band->y0 &&
+        authentic_y < (int)band->y1)
+      edge = band->edge;
+  }
+  return edge;
+}
+
+static int MarginSourceForEdge(ActionBgEdgeMode edge,
+                               bool pad_captured_to_budget) {
+  switch (edge) {
+    case kActionBgEdge_Clamp:
+    case kActionBgEdge_Transparent:
+      return kBg2Margin_Clamped;
+    case kActionBgEdge_Mirror:
+    case kActionBgEdge_Repeat:
+      return pad_captured_to_budget ? kBg2Margin_Padded : kBg2Margin_Live;
+    case kActionBgEdge_LiveWorld:
+    case kActionBgEdge_RawWrap:
+    default:
+      return kBg2Margin_Live;
+  }
+}
+
+void DioramaBgValidSpanPlan_Build(
+    int ws_extra, int budget, int live_left, int live_right,
+    bool pad_captured_to_budget, const ActionBgLayerPlan *layer,
+    int authentic_y0, int capture_height, int tex_width,
+    DioramaBgValidSpanPlan *out) {
+  if (!out) return;
+  *out = (DioramaBgValidSpanPlan){ 0 };
+  if (capture_height <= 0 || tex_width <= 0) return;
+
+  for (int y = 0; y < capture_height; y++) {
+    int x0 = 0, x1 = 0;
+    DioramaBg2ValidSpan(
+        ws_extra, budget, live_left, live_right,
+        MarginSourceForEdge(
+            EdgeAtCaptureRow(layer, authentic_y0, y),
+            pad_captured_to_budget),
+        tex_width, &x0, &x1);
+    if (out->count) {
+      DioramaBgValidSpan *previous = &out->spans[out->count - 1];
+      if (previous->y1 == y && previous->x0 == x0 && previous->x1 == x1) {
+        previous->y1 = y + 1;
+        continue;
+      }
+    }
+    /* The bound follows from the fixed band capacity. Treat malformed input
+     * as fail-closed rather than writing past the handoff record. */
+    if (out->count >= kDioramaBgMaxValidSpans) return;
+    out->spans[out->count++] = (DioramaBgValidSpan) {
+      .y0 = y,
+      .y1 = y + 1,
+      .x0 = x0,
+      .x1 = x1,
+    };
+  }
+}
+
 void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,
                           float blur_radius, float *out_u0, float *out_u1) {
   if (!out_u0 || !out_u1) return;
