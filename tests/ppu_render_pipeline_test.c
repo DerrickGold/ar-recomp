@@ -506,6 +506,119 @@ static void TestOverlayContentMetadata(void) {
   ppu_free(ppu);
 }
 
+/* A vertical margin is shared by every captured plane, but the planes do not
+ * necessarily share a camera. Fillmore act 2 has BG1 deep in a tall castle
+ * while BG2 remains at Y=0; blindly wrapping BG2's negative margin rows reads
+ * red high-priority geometry from the bottom of its 512px tilemap. Prove the
+ * layer-local clip removes only that wrapped BG2 contribution, preserves BG1,
+ * and cannot affect the first authentic scanline. */
+static void TestVerticalMarginLayerClip(void) {
+  enum { kTop = 32, kRows = kTop + 1, kPitch = kW * 4 };
+  const int bg1 = kActRaiserPpuLayer_Bg1;
+  const int bg2 = kActRaiserPpuLayer_Bg2;
+
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  static uint8_t fb[kW * kRows * 4];
+  static uint32_t bg1_capture[kW * kRows];
+  static uint32_t bg2_capture[kW * kRows];
+  uint32_t authentic_bg2 = 0;
+
+  static const int clip_cases[] = { -1, 0, 4 };
+  for (size_t case_index = 0;
+       case_index < sizeof(clip_cases) / sizeof(clip_cases[0]);
+       case_index++) {
+    const int clip_rows = clip_cases[case_index];
+    ppu_reset(ppu);
+    memset(fb, 0, sizeof(fb));
+    memset(bg1_capture, 0, sizeof(bg1_capture));
+    memset(bg2_capture, 0, sizeof(bg2_capture));
+
+    ppu->inidisp = 0x0f;
+    ppu->bgmode = 1;
+    ppu->screenEnabled[0] = (uint8_t)((1u << bg1) | (1u << bg2));
+    ppu->cgram[0x11] = bgr555(0, 0, 31); /* BG1 palette 1, blue */
+    ppu->cgram[0x21] = bgr555(31, 0, 0); /* BG2 palette 2, red */
+    ppu->cgram[0x22] = bgr555(0, 31, 0); /* BG2 palette 2, green */
+    set_solid_4bpp_tile(ppu, 1, 1);
+    set_solid_4bpp_tile(ppu, 2, 2);
+    set_solid_4bpp_tile(ppu, 3, 1);
+    ppu->bgTileAdr = 0;
+
+    /* 32x64 tilemaps. At vScroll 0, margin line -31 selects pixel row
+     * 993 -> physical row 481 in this 512px map (the same wrap as the live
+     * Fillmore BG2). BG1 is blue throughout. BG2 is red in the wrapped bottom
+     * half but green on authentic row 1, making provenance unambiguous. */
+    ppu->bgXsc[bg1] = 0x30 | 0x2;
+    ppu->bgXsc[bg2] = 0x20 | 0x2;
+    for (int i = 0; i < 0x800; i++) {
+      ppu->vram[0x3000 + i] = (uint16_t)(3 | (1 << 10));
+      ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+    }
+    for (int x = 0; x < 32; x++)
+      ppu->vram[0x2000 + x] = (uint16_t)(2 | (2 << 10));
+    ppu->hScroll[bg1] = ppu->hScroll[bg2] = 0;
+    ppu->vScroll[bg1] = ppu->vScroll[bg2] = 0;
+
+    PpuSetExtraVerticalSpace(ppu, kTop, 0);
+    if (clip_rows >= 0)
+      PpuSetVerticalMarginLayerClip(ppu, (uint8_t)bg2, clip_rows);
+    PpuBeginDrawing(ppu, fb, kPitch, 0);
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
+                                (uint8_t *)bg1_capture, kPitch));
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                                (uint8_t *)bg2_capture, kPitch));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1,
+                               0, -kTop, kW, kRows,
+                               kPpuOverlayFlag_RemoveFromGame));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+                               0, -kTop, kW, kRows,
+                               kPpuOverlayFlag_RemoveFromGame));
+
+    ppu_runLine(ppu, 0);
+    for (int line = 1 - kTop; line <= 0; line++)
+      ppu_runMarginLine(ppu, line);
+    ppu_runLine(ppu, 1);
+
+    /* BG1 was not clipped and keeps its valid extended world in every arm. */
+    CHECK((bg1_capture[0] & 0xffffffu) != 0);
+    CHECK((bg1_capture[(kRows - 1) * kW] & 0xffffffu) != 0);
+    /* Authentic BG2 row 1 is green and must be identical regardless of the
+     * synthetic-margin policy. */
+    const uint32_t authentic = bg2_capture[(kRows - 1) * kW];
+    CHECK((authentic & 0xffffffu) != 0);
+    if (!authentic_bg2)
+      authentic_bg2 = authentic;
+    else
+      CHECK(authentic == authentic_bg2);
+
+    if (clip_rows < 0) {
+      /* Legacy/unbounded behavior: bottom-of-map red wraps into the band. */
+      CHECK((bg2_capture[0] & 0xffffffu) != 0);
+      CHECK(bg2_capture[0] != authentic);
+    } else if (clip_rows == 0) {
+      /* Camera Y=0: BG2 owns no rows above the viewport. */
+      for (int row = 0; row < kTop; row++)
+        CHECK(bg2_capture[row * kW] == 0);
+    } else {
+      /* Four real rows above: line -4 is five rows away and clipped, while
+       * line -3 is four rows away and still rendered. */
+      CHECK(bg2_capture[27 * kW] == 0);
+      CHECK((bg2_capture[28 * kW] & 0xffffffu) != 0);
+    }
+
+    PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, NULL, 0);
+    PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+  }
+
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
 /* Fix A (SPEC-backdrop-clip.md): a CAPTURED layer's synthesized mirror/repeat
  * padding must reach the full centering budget, not stop at the live per-side
  * margin — otherwise a host that samples the whole fixed capture span reads
@@ -737,6 +850,7 @@ int main(void) {
   TestSim3DFlatComposition();
   TestSim3DWidescreenHudCaptureHandoff();
   TestOverlayContentMetadata();
+  TestVerticalMarginLayerClip();
   TestCapturedPaddingReachesBudget();
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));

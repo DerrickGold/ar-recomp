@@ -9,6 +9,7 @@
 #include "actraiser_rtl.h"
 #include "hd_replacements.h"
 #include "host/host_display.h"
+#include "settings.h"
 #include "snes/ppu.h"
 
 /* HD art substitution is PNG-only and decoded once when textures are loaded.
@@ -54,6 +55,7 @@ uint8_t *g_m7_overlay_pixels;
 SDL_Texture *g_m7_texture;
 
 void HdReplacementHost_LoadTextures(void) {
+  Settings_SetHdReplacementsAvailable(false);
   const char *manifest_path = getenv("AR_HD_MANIFEST");
   if (!manifest_path || !manifest_path[0])
     manifest_path = "game-assets/manifest.ini";
@@ -128,6 +130,7 @@ void HdReplacementHost_LoadTextures(void) {
   }
   fprintf(stderr, "[hd-manifest] %d entries, %d with art\n",
           g_hd_replacement_count, loaded_art_count);
+  Settings_SetHdReplacementsAvailable(loaded_art_count > 0);
 }
 
 void HdReplacementHost_BindSurfaces(void) {
@@ -232,6 +235,7 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
 }
 
 void HdReplacementHost_Shutdown(void) {
+  Settings_SetHdReplacementsAvailable(false);
   for (int i = 0; i < g_hd_replacement_count; i++) {
     if (g_hd_replacements[i].texture)
       SDL_DestroyTexture((SDL_Texture *)g_hd_replacements[i].texture);

@@ -25,6 +25,7 @@
 #include "frame_slot.h"
 #include "host_display_pacing.h"
 #include "present.h"
+#include "presentation_geometry.h"
 #include "present_cadence_metrics.h"
 #include "settings.h"
 #include "snes/ppu.h"
@@ -200,22 +201,10 @@ void HostDisplay_CalculateWindowSize(int scale, int *width, int *height) {
 
 void HostDisplay_RecomputeLogicalPresentation(void) {
   if (!g_window || !g_renderer) return;
-  const int visible_width = Settings_VisibleWidth();
-  if (g_settings.ignore_aspect_ratio) {
-    SDL_SetRenderLogicalPresentation(
-        g_renderer, visible_width, g_snes_height,
-        SDL_LOGICAL_PRESENTATION_STRETCH);
-    return;
-  }
-  if (g_active_pixel_aspect == kPixelAspect_Crt43) {
-    SDL_SetRenderLogicalPresentation(
-        g_renderer, visible_width * 7, g_snes_height * 6,
-        SDL_LOGICAL_PRESENTATION_LETTERBOX);
-  } else {
-    SDL_SetRenderLogicalPresentation(
-        g_renderer, visible_width, g_snes_height,
-        SDL_LOGICAL_PRESENTATION_LETTERBOX);
-  }
+  PresentationGeometry_ApplyLogical(
+      g_renderer, Settings_IgnoreAspectRatio(),
+      g_active_pixel_aspect == kPixelAspect_Crt43,
+      Settings_VisibleWidth(), g_snes_height);
 }
 
 void HostDisplay_ApplyWindowScale(void) {
@@ -234,6 +223,7 @@ void HostDisplay_ApplyWindowScale(void) {
 }
 
 void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
+  const int previous_display_mode = g_settings.display_mode;
   s_active_aspect_x = Settings_ExtendedAspectX();
   s_active_aspect_y = Settings_ExtendedAspectY();
   g_active_pixel_aspect = g_settings.pixel_aspect;
@@ -268,8 +258,9 @@ void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
   g_new_ppu = g_settings.new_renderer || g_ws_active;
 
   if (apply_runtime_changes) {
-    Settings_SetDisplayMode(
-        g_ws_active ? kDisplayMode_WideFull : kDisplayMode_43);
+    /* Aspect/PAR changes alter the framebuffer budget, not the selected HLE
+     * correction profile. */
+    Settings_ReconcileDisplayModeAfterGeometryChange(previous_display_mode);
     memset(g_pixels, 0, sizeof(g_pixels));
     memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
     memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
@@ -414,7 +405,7 @@ static void ReportPresentPerformance(uint32_t render_start_ms,
  * SDL's own answer and ignores this. */
 static SDL_Rect PresentImageRect(const FrameSlot *slot) {
   return ComputePresentationViewport(
-      g_renderer, slot->ws_active, slot->ignore_aspect_ratio,
+      g_renderer, slot->ignore_aspect_ratio,
       slot->pixel_aspect, slot->visible_width, slot->snes_height);
 }
 

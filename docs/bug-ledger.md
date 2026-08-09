@@ -1057,23 +1057,43 @@ the current debugging process; this file is the case law.
       every capture that existed then, and wrong about the feature. Same shape of mistake as
       the bug itself, one layer up.
 
-39. **Red brick courses above the grey Fillmore act-2 castle wall — RESOLVED AS
-    OFF-SCREEN ART 2026-08-08.** The suspicious band occupied roughly SNES rows 6-27 in a
-    tilted diorama capture. It did not align to the 40-row action HUD split, leaving either a
-    palette-state error or authentic level art as the plausible causes.
+39. **Red brick courses above the grey Fillmore act-2 castle wall — CORRECTED:
+    BG2 BOTTOM-OF-TILEMAP WRAP, FIXED 2026-08-09.** The suspicious band occupied roughly
+    SNES rows 6-27 in a tilted diorama capture. It did not align to the 40-row action HUD
+    split, initially leaving either a palette-state error or authentic level art as the
+    plausible causes.
 
     `runs/20260808-220824` pinned the symptom to a 32-line vertical extension. A deterministic
     A/B then replayed `fillmore-title.rec`, staged `$01:$03`, enabled diorama at gf 2000 and
     captured gf 2200 with only `diorama_vertical_extend` changed from 32 to 0
     (`runs/20260808-222048` versus `runs/20260808-222203`). The red courses exist wholly in
-    the 32 newly exposed world rows; the authentic viewport begins on grey brick in both
-    arms. Moving the band across the first HDMA update did not change the red rows and was
-    therefore rejected rather than shipped.
+    the 32 newly exposed rows; the authentic viewport begins on grey brick in both arms.
+    That established confinement, not provenance. The first conclusion — genuine map rows
+    spatially above the castle — was wrong.
 
-    **Conclusion:** the renderer is decoding genuine map content above the stock viewport,
-    exactly as vertical extend requests. It is not HUD colour bleed and not an authentic
-    4:3 defect. The feature remains opt-in/default 0; hiding particular off-screen art is a
-    per-room presentation choice, not grounds for rewriting the level's palette.
+    Directly rendering the snapshot's resident layers separates the source. BG1 contains
+    only the grey castle wall. BG2 contains red structures at the bottom of its 256x512
+    logical tilemap, and the priority-plane dump puts the offending pixels on BG2-high.
+    At gf 2200 the independent world state is BG1 `$24/$30=$05E8/$0700`, but BG2
+    `$28/$34=$0000/$0200`. The synthetic line mapper changed BG2 line -31 to 10-bit row
+    993, which selects physical row 481 of a 512px tilemap; lines -31..-1 therefore sampled
+    bottom rows 481..511 before the authentic screen restarted at transparent row 1. BG2's
+    existing half-add capture then tinted the real grey BG1 bricks red. `HDMAEN=$00` in the
+    repro, ruling out the earlier first-HDMA theory as well.
+
+    **Fix:** `PpuSetVerticalMarginLayerClip` gives BG1 and BG2 separate available-top counts
+    from cameras `$24/$28`. A layer beyond its own top is transparent on synthetic rows
+    rather than cyclically wrapped; authentic rows never take the clip. The regression test
+    covers unbounded legacy wrap, zero available rows, a four-row partial bound, BG1/BG2
+    independence, and an unchanged first authentic BG2 line. Deterministic gf-2200 replay
+    `runs/20260809-085004` removes all pixels from the BG2-high band while keeping BG1 and
+    producing the same WRAM SHA-256 `b74e3362...` as the original arm. Pre-fix isolated plane:
+    `runs/20260809-082943/diorama_dump/bg2_hi_gf2200.png`.
+
+    **Reusable lesson:** a resident tilemap address is not automatically a spatial world
+    coordinate outside hardware-visible scanlines. An A/B that confines a symptom to an
+    extension proves the extension triggers it; source-layer isolation plus independent
+    camera/bounds state is required before calling it off-screen art.
 
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 

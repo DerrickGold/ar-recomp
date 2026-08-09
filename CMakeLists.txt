@@ -495,7 +495,9 @@ if(BUILD_TESTING)
     # asserts the read-back frame is not black (the prior SDL3 attempt's bug).
     add_executable(actraiser_render_pipeline_test
         tests/render_pipeline_test.c
+        src/presentation_geometry.c
     )
+    target_include_directories(actraiser_render_pipeline_test PRIVATE src)
     target_link_libraries(actraiser_render_pipeline_test PRIVATE
         SDL3::SDL3
         m

@@ -558,13 +558,49 @@ bool Diorama_NewPpuCapable(void) {
   return g_settings.new_renderer || g_ws_active;
 }
 
-/* Screen ratio now carries the old "Stretch to window" toggle as its fourth
- * option; keep the ignore_aspect_ratio field (which the runtime readers gate
- * on) derived from it. */
+/* Screen ratio owns stretching. Keep the old bool as a load-only alias so
+ * existing config.ini/settings.ini files still migrate cleanly, but never let
+ * runtime code acquire a second source of truth. A legacy true enables the
+ * modern Stretch enum; false is intentionally a no-op because old generated
+ * files commonly contain both `extended_aspect = 16:9` and
+ * `ignore_aspect_ratio = Off`. */
 static void OnScreenRatioChanged(const SettingDesc *desc) {
   (void)desc;
   g_settings.ignore_aspect_ratio =
       g_settings.extended_aspect == kScreenAspect_Stretch;
+}
+
+static void OnLegacyStretchChanged(const SettingDesc *desc) {
+  if (*(const bool *)desc->field)
+    g_settings.extended_aspect = kScreenAspect_Stretch;
+  g_settings.ignore_aspect_ratio = Settings_IgnoreAspectRatio();
+}
+
+/* Refresh rate superseded the old uncapped bool. Preserve the useful half of
+ * that legacy setting by migrating On to Unlimited; Off leaves an explicitly
+ * selected modern refresh mode alone. */
+static void OnLegacyUncappedChanged(const SettingDesc *desc) {
+  if (*(const bool *)desc->field)
+    g_settings.refresh_mode = kRefreshMode_Unlimited;
+}
+
+static bool WidescreenActive(void) { return g_ws_active; }
+static bool WindowScaleAvailable(void) {
+  return g_settings.window_mode == kWindowMode_Windowed;
+}
+
+static bool s_hd_replacements_available;
+static bool HdReplacementsAvailable(void) {
+  return s_hd_replacements_available;
+}
+
+static bool DioramaFreeCameraAvailable(void) {
+  return Diorama_ModeIsOn() &&
+      g_settings.diorama_camera_mode == kDioramaCam_Free;
+}
+static bool DioramaDynamicCameraAvailable(void) {
+  return Diorama_ModeIsOn() &&
+      g_settings.diorama_camera_mode == kDioramaCam_Dynamic;
 }
 
 /* The frame-limit FPS row only matters when Refresh rate is Limit. */
@@ -623,30 +659,52 @@ SimRenderFeatureMask Settings_Sim3DRequestedFeatures(void) {
   return mask;
 }
 
-/* Stages that exist in the contract but have no shipped implementation yet.
- * They stay visible and requestable -- the resolver records them as requested
- * and clears them from the effective mask -- but are greyed out so the menu
- * never implies an effect that will not appear. */
+/* The requested-feature contract also reserves future stages. The resolver
+ * records and clears unimplemented bits for traces, while Settings_IsLoadOnly
+ * keeps those prototypes out of the user menu/save file until they ship. */
 static bool Sim3DStageImplemented(SimRenderFeatureMask bit) {
   return g_settings.sim3d_mode && (kSim3DShippedFeatures & bit) != 0;
 }
 static bool Sim3DSeparatedAvailable(void) {
   return Sim3DStageImplemented(kSimFeature_SeparatedComposite);
 }
+static bool Sim3DSeparatedEnabled(void) {
+  return Sim3DSeparatedAvailable() && g_settings.sim3d_separated_composite;
+}
 static bool Sim3DGroundAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_GroundProjection);
+  return Sim3DSeparatedEnabled() &&
+      Sim3DStageImplemented(kSimFeature_GroundProjection);
+}
+static bool Sim3DGroundEnabled(void) {
+  return Sim3DGroundAvailable() && g_settings.sim3d_ground_projection;
 }
 static bool Sim3DBillboardsAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_ObjectBillboards);
+  return Sim3DSeparatedEnabled() &&
+      Sim3DStageImplemented(kSimFeature_ObjectBillboards);
+}
+static bool Sim3DBillboardsEnabled(void) {
+  return Sim3DBillboardsAvailable() && g_settings.sim3d_object_billboards;
 }
 static bool Sim3DVirtualHeightAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_VirtualHeight);
+  return Sim3DBillboardsEnabled() &&
+      Sim3DStageImplemented(kSimFeature_VirtualHeight);
+}
+static bool Sim3DVirtualHeightEnabled(void) {
+  return Sim3DVirtualHeightAvailable() && g_settings.sim3d_virtual_height;
 }
 static bool Sim3DShadowsAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_Shadows);
+  return Sim3DBillboardsEnabled() &&
+      Sim3DStageImplemented(kSimFeature_Shadows);
+}
+static bool Sim3DShadowsEnabled(void) {
+  return Sim3DShadowsAvailable() && g_settings.sim3d_shadows;
 }
 static bool Sim3DSoftShadowsAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_SoftShadows);
+  return Sim3DShadowsEnabled() &&
+      Sim3DStageImplemented(kSimFeature_SoftShadows);
+}
+static bool Sim3DSoftShadowsEnabled(void) {
+  return Sim3DSoftShadowsAvailable() && g_settings.sim3d_soft_shadows;
 }
 /* W4-2: the rim mask needs a CUSTOM blend mode, and
  * SDL_ComposeCustomBlendMode cannot report whether the backend supports one —
@@ -663,22 +721,36 @@ static bool Sim3DSoftShadowsAvailable(void) {
  * current stages use the same batched pass; future shader/target capabilities
  * must get their own flags instead of broadening either of these. */
 static bool Sim3DRimLightAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_RimLight) &&
+  return Sim3DBillboardsEnabled() &&
+      Sim3DStageImplemented(kSimFeature_RimLight) &&
       Present_SimRimMaskSupported();
 }
+static bool Sim3DRimLightEnabled(void) {
+  return Sim3DRimLightAvailable() && g_settings.sim3d_rim_light;
+}
 static bool Sim3DEffectLightingAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_EffectLighting) &&
+  return Sim3DGroundEnabled() &&
+      Sim3DStageImplemented(kSimFeature_EffectLighting) &&
       Present_EffectRendererSupported();
 }
 static bool Sim3DParticlesAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_Particles) &&
+  return Sim3DGroundEnabled() &&
+      Sim3DStageImplemented(kSimFeature_Particles) &&
       Present_EffectRendererSupported();
 }
 static bool Sim3DWorldUnderlayAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_WorldUnderlay);
+  return Sim3DGroundEnabled() &&
+      Sim3DStageImplemented(kSimFeature_WorldUnderlay);
+}
+static bool Sim3DWorldUnderlayEnabled(void) {
+  return Sim3DWorldUnderlayAvailable() && g_settings.sim3d_world_underlay;
 }
 static bool Sim3DCloudShroudAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_CloudShroud);
+  return Sim3DWorldUnderlayEnabled() &&
+      Sim3DStageImplemented(kSimFeature_CloudShroud);
+}
+static bool Sim3DCloudShroudEnabled(void) {
+  return Sim3DCloudShroudAvailable() && g_settings.sim3d_cloud_shroud;
 }
 static bool WorldNavigation3DEnabled(void) {
   return g_settings.sim3d_world_navigation;
@@ -692,37 +764,54 @@ static bool WorldNavigationCloudsAvailable(void) {
       g_settings.sim3d_world_navigation_clouds;
 }
 static bool Sim3DOrWorldNavigationLightingAvailable(void) {
-  return Sim3DShadowsAvailable() || WorldNavigationLightingAvailable();
+  return Sim3DShadowsEnabled() || WorldNavigationLightingAvailable();
 }
 static bool Sim3DOrWorldNavigationShadowAvailable(void) {
-  return g_settings.sim3d_mode ||
+  return Sim3DShadowsEnabled() ||
       (WorldNavigationLightingAvailable() &&
        g_settings.sim3d_world_navigation_clouds);
 }
 static bool Sim3DOrWorldNavigationSoftShadowAvailable(void) {
-  return Sim3DSoftShadowsAvailable() ||
+  return Sim3DSoftShadowsEnabled() ||
       (WorldNavigationLightingAvailable() &&
        g_settings.sim3d_world_navigation_clouds);
 }
 static bool Sim3DOrWorldNavigationCloudsAvailable(void) {
-  return Sim3DCloudShroudAvailable() || WorldNavigationCloudsAvailable();
+  return Sim3DCloudShroudEnabled() || WorldNavigationCloudsAvailable();
+}
+static bool Sim3DFreeCameraAvailable(void) {
+  return Sim3DGroundEnabled() &&
+      g_settings.sim3d_camera_mode == kSimCam_Free;
 }
 static bool Sim3DDynamicCameraAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_GroundProjection) &&
+  return Sim3DGroundEnabled() &&
       g_settings.sim3d_camera_mode == kSimCam_Dynamic;
 }
 static bool Sim3DCullHazeAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_CullHaze);
+  return Sim3DWorldUnderlayEnabled() &&
+      Sim3DStageImplemented(kSimFeature_CullHaze);
+}
+static bool Sim3DCullHazeEnabled(void) {
+  return Sim3DCullHazeAvailable() && g_settings.sim3d_cull_haze;
 }
 static bool Sim3DOrWorldNavigationHazeAvailable(void) {
   return Sim3DCullHazeAvailable() || WorldNavigation3DEnabled();
 }
+static bool Sim3DOrWorldNavigationHazeEnabled(void) {
+  return Sim3DCullHazeEnabled() ||
+      (WorldNavigation3DEnabled() && g_settings.sim3d_cull_haze);
+}
 static bool Sim3DBackdropAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_Backdrop) ||
+  return (Sim3DGroundEnabled() &&
+          Sim3DStageImplemented(kSimFeature_Backdrop)) ||
       WorldNavigation3DEnabled();
 }
+static bool Sim3DBackdropEnabled(void) {
+  return Sim3DBackdropAvailable() && g_settings.sim3d_backdrop;
+}
 static bool Sim3DPickerEaseAvailable(void) {
-  return Sim3DStageImplemented(kSimFeature_PickerExitEase);
+  return Sim3DSeparatedEnabled() &&
+      Sim3DStageImplemented(kSimFeature_PickerExitEase);
 }
 
 /* Graphics availability gate (kSettingCat_Graphics): the per-effect rows
@@ -900,10 +989,10 @@ static void RandoChanged(const SettingDesc *desc) {
 const SettingDesc g_setting_descs[] = {
   { "display_mode", "AR_DISPLAY_MODE", "Render profile",
     "Switch between authentic 4:3, uncorrected wide output, and full HLE widescreen.",
-    kSettingType_Enum, kApply_Action, kSettingCat_Display,
+    kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.display_mode, kDisplayMode_WideFull, kDisplayMode_43,
     kDisplayMode_WideFull, 1, false, kDisplayModeLabels,
-    kDisplayMode_PresetCount, NULL, DisplayModeChanged, NULL, NULL },
+    kDisplayMode_PresetCount, WidescreenActive, DisplayModeChanged, NULL, NULL },
   { "hud_scale_percent", "AR_HUD_SCALE", "HUD output scale",
     "Scale the promoted HUD after game upscaling; 100 is native 1x output "
     "pixels. Set it anywhere; it takes effect where the HUD shows.",
@@ -917,7 +1006,7 @@ const SettingDesc g_setting_descs[] = {
     NULL, NULL, ParseMenuScale, FormatMenuScale },
   BOOL_SETTING(hd_replacements, "AR_HD_REPLACEMENTS", "HD replacements",
                "Substitute HD art per game-assets/manifest.ini entries when their art is present.",
-               kSettingCat_Display, 1, false, NULL, NULL),
+               kSettingCat_Display, 1, false, HdReplacementsAvailable, NULL),
   { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Screen ratio",
     "Output aspect: authentic 4:3, widescreen 16:9 / 16:10, or Stretch to "
     "fill the whole window. Video geometry updates live.",
@@ -939,26 +1028,26 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.window_mode, kWindowMode_Windowed,
     kWindowMode_Windowed, kWindowMode_Exclusive, 1, false,
     kWindowModeLabels, kWindowMode_Count, NULL, NULL, NULL, NULL, .modern_env = true },
-  { "window_scale", "AR_WINDOW_SCALE", "Render scale",
-    "Internal render/upscale multiple of the SNES output. Higher values "
-    "render more detail (3D town and Mode 7) and downsample to the window.",
+  { "window_scale", "AR_WINDOW_SCALE", "Window scale",
+    "Size of the window as a multiple of the game output. This only changes "
+    "the window in Windowed mode; fullscreen uses the display's resolution.",
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.window_scale, 3, 1, 8, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL, .modern_env = true },
+    WindowScaleAvailable, NULL, NULL, NULL, .modern_env = true },
   { "new_renderer", "AR_NEW_RENDERER", "New renderer",
     "Use the modern PPU renderer; widescreen always requires this renderer.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Display,
     &g_settings.new_renderer, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL, .modern_env = true },
   { "ignore_aspect_ratio", "AR_IGNORE_ASPECT_RATIO", "Stretch to window",
-    "Ignore the configured display aspect and stretch output to the whole "
-    "window. Now folded into Screen ratio > Stretch.",
+    "Legacy compatibility alias for Screen ratio > Stretch.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Display,
     &g_settings.ignore_aspect_ratio, 0, 0, 1, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL, .modern_env = true },
+    NULL, OnLegacyStretchChanged, NULL, NULL, .modern_env = true },
   { "refresh_mode", "AR_REFRESH_MODE", "Refresh rate",
-    "Vsync locks to your display's refresh; Unlimited disables vsync; Limit "
-    "caps to a chosen FPS.",
+    "Vsync locks to your display's refresh; Unlimited disables vsync and "
+    "soft-caps presentation at twice a detected host refresh; Limit caps to "
+    "a chosen FPS.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.refresh_mode, kRefreshMode_Vsync,
     kRefreshMode_Vsync, kRefreshMode_Limit, 1, false,
@@ -1101,7 +1190,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Enum, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_camera_mode, kSimCam_Dynamic,
     kSimCam_Free, kSimCam_Dynamic, 1, false,
-    kSimCamModeLabels, kSimCam_Count, Sim3DGroundAvailable, NULL,
+    kSimCamModeLabels, kSimCam_Count, Sim3DGroundEnabled, NULL,
     NULL, NULL, .modern_env = true },
   /* Dynamic Cam's dedicated pose. Defaults are the captured baseline (see the
    * sim3d defaults note above), so the shipped Dynamic view is the one that
@@ -1129,7 +1218,7 @@ const SettingDesc g_setting_descs[] = {
                "flying actor is drawn above the edge and appears to vanish "
                "over clear ground. Costs a little of the bright area along "
                "the near edge.",
-               kSettingCat_Simulation, 1, false, Sim3DCullHazeAvailable,
+               kSettingCat_Simulation, 1, false, Sim3DCullHazeEnabled,
                NULL),
   BOOL_SETTING_MODERN(sim3d_backdrop, "AR_SIM3D_BACKDROP", "Atmospheric backdrop",
                "Draw a graded sky behind the finite ground instead of a flat "
@@ -1150,22 +1239,22 @@ const SettingDesc g_setting_descs[] = {
     "zero shows the selected complete profile.",
     kSettingType_Mask, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_diagnostic_layers, 0, 0, 0xFFFF, 1, false,
-    NULL, 0, Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
+    NULL, 0, Sim3DSeparatedEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_tilt_y_mrad", "AR_SIM3D_YAW", "Camera yaw",
     "SIM free-camera yaw in milliradians; right-drag horizontally to adjust.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_tilt_y_mrad, 0, -700, 700, 20, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
+    Sim3DFreeCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_tilt_x_mrad", "AR_SIM3D_PITCH", "Camera pitch",
     "SIM free-camera pitch in milliradians; right-drag vertically to adjust.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_tilt_x_mrad, -575, -700, 700, 25, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
+    Sim3DFreeCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_distance_x100", "AR_SIM3D_DISTANCE", "Camera distance",
     "SIM camera distance in hundredths; 0 auto-fits, and the mouse wheel zooms.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_distance_x100, 300, 0, 2000, 25, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
+    Sim3DFreeCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_height_scale_x100", "AR_SIM3D_HEIGHT_SCALE",
     "Object height scale",
     "Scale every classified SIM flight plane as a percentage of its "
@@ -1173,7 +1262,7 @@ const SettingDesc g_setting_descs[] = {
     "billboard without disabling the height stage.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_height_scale_x100, 100, 0, 400, 10, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
+    Sim3DVirtualHeightEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_shadow_opacity_pct", "AR_SIM3D_SHADOW_OPACITY",
     "Shadow darkness",
     "Darkness of town object shadows and world-navigation cloud shadows as a "
@@ -1217,7 +1306,7 @@ const SettingDesc g_setting_descs[] = {
     "0 leaves sprite colours untouched even with rim light enabled.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_rim_strength_pct, kSimRimStrengthDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DRimLightAvailable, NULL, NULL, NULL, .modern_env = true },
+    0, 100, 5, false, NULL, 0, Sim3DRimLightEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_underlay_haze_pct", "AR_SIM3D_UNDERLAY_HAZE",
     "World map haze",
     "How far the world map underlay fades toward the scene backdrop, as a "
@@ -1226,7 +1315,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_haze_pct, kSimUnderlayHazeDefaultPct,
     0, 100, 5, false, NULL, 0,
-    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL, .modern_env = true },
+    Sim3DOrWorldNavigationHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_opacity_pct", "AR_SIM3D_CLOUD_OPACITY",
     "Cloud density",
     "Opacity of town cloud banks and whole-world navigation weather, as a "
@@ -1242,7 +1331,7 @@ const SettingDesc g_setting_descs[] = {
     "approach; larger values keep a long hazy gradient.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_falloff_px, kSimCloudFalloffDefaultPx,
-    16, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL, .modern_env = true },
+    16, 512, 16, false, NULL, 0, Sim3DCloudShroudEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_inset_px", "AR_SIM3D_CLOUD_INSET",
     "Cloud edge overlap",
     "How far inside the sprite-drawable edge the cloud cover starts building, "
@@ -1252,7 +1341,7 @@ const SettingDesc g_setting_descs[] = {
     "clear band where actors vanish into nothing.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_inset_px, kSimCloudInsetDefaultPx,
-    0, 512, 16, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL, .modern_env = true },
+    0, 512, 16, false, NULL, 0, Sim3DCloudShroudEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_lead_px", "AR_SIM3D_CULL_LEAD",
     "Cloud lead on culled sprites",
     "How far before the sprite-drawable edge a record's own cloud cover "
@@ -1261,7 +1350,7 @@ const SettingDesc g_setting_descs[] = {
     "moment ahead of the cloud that should have hidden it.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_lead_px, kSimCullLeadDefaultPx,
-    8, 256, 8, false, NULL, 0, Sim3DCloudShroudAvailable, NULL, NULL, NULL, .modern_env = true },
+    8, 256, 8, false, NULL, 0, Sim3DCloudShroudEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_haze_pct", "AR_SIM3D_CULL_HAZE",
     "Out-of-range ground fade",
     "How far the town ground fades toward the distant world map outside the "
@@ -1273,7 +1362,7 @@ const SettingDesc g_setting_descs[] = {
     "World map haze strength for its active-location boundary.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_pct, kSimCullHazeDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL, .modern_env = true },
+    0, 100, 5, false, NULL, 0, Sim3DCullHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_dim_pct", "AR_SIM3D_CULL_DIM",
     "Out-of-range darkening",
     "How far the ground outside the sprite-drawable window is darkened, as a "
@@ -1283,7 +1372,7 @@ const SettingDesc g_setting_descs[] = {
     "far field darker instead of hazier.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_dim_pct, kSimCullDimDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL, .modern_env = true },
+    0, 100, 5, false, NULL, 0, Sim3DCullHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_haze_lead_px", "AR_SIM3D_CULL_HAZE_LEAD",
     "Ground fade ramp width",
     "How many original pixels the fade takes to reach full strength, "
@@ -1294,7 +1383,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_lead_px, kSimCullHazeLeadDefaultPx,
     16, 512, 16, false, NULL, 0,
-    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL, .modern_env = true },
+    Sim3DOrWorldNavigationHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_corner_px", "AR_SIM3D_CULL_CORNER",
     "Ground fade corner rounding",
     "How far the corners of the in-range area are rounded, in original "
@@ -1304,7 +1393,7 @@ const SettingDesc g_setting_descs[] = {
     "sprite the window was going to take away.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_corner_px, kSimCullCornerDefaultPx,
-    0, 256, 8, false, NULL, 0, Sim3DCullHazeAvailable, NULL, NULL, NULL, .modern_env = true },
+    0, 256, 8, false, NULL, 0, Sim3DCullHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_underlay_defocus_pct", "AR_SIM3D_DEFOCUS",
     "World map defocus",
     "How far out of focus the distant world map goes outside the "
@@ -1314,7 +1403,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_defocus_pct, kSimUnderlayDefocusDefaultPct,
     0, 100, 5, false, NULL, 0,
-    Sim3DOrWorldNavigationHazeAvailable, NULL, NULL, NULL, .modern_env = true },
+    Sim3DOrWorldNavigationHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_altitude_px", "AR_SIM3D_CLOUD_ALTITUDE",
     "Cloud altitude",
     "How far above the ground the cloud banks float, in original pixels. Zero "
@@ -1346,7 +1435,7 @@ const SettingDesc g_setting_descs[] = {
     "backdrop alone. Zero is the flat fill the projected view used before.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_backdrop_strength_pct, kSimBackdropStrengthDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL, .modern_env = true },
+    0, 100, 5, false, NULL, 0, Sim3DBackdropEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_backdrop_horizon_pct", "AR_SIM3D_BACKDROP_HORIZON",
     "Sky horizon height",
     "Where the sky's bright end sits, as a percentage of screen height from "
@@ -1355,7 +1444,7 @@ const SettingDesc g_setting_descs[] = {
     "the finite map.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_backdrop_horizon_pct, kSimBackdropHorizonDefaultPct,
-    0, 100, 5, false, NULL, 0, Sim3DBackdropAvailable, NULL, NULL, NULL, .modern_env = true },
+    0, 100, 5, false, NULL, 0, Sim3DBackdropEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_reactive_strength", "AR_SIM3D_REACTIVE",
     "Camera reactivity",
     "How far the town camera leans toward the angel's direction of travel and "
@@ -1372,20 +1461,19 @@ const SettingDesc g_setting_descs[] = {
     "with it.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_height_pop_pct, 0, 0, 50, 1, false, NULL, 0,
-    Sim3D_ModeIsOn, NULL, NULL, NULL, .modern_env = true },
+    Sim3DVirtualHeightEnabled, NULL, NULL, NULL, .modern_env = true },
   SIM_ACTION_SETTING("sim3d_reset_camera", "Reset camera",
                      "Return the camera mode in use to its default pitch, yaw, and distance."),
   BOOL_SETTING(diorama_mode, NULL, "Diorama 3D",
                "Render action-stage layers as tilted 3D planes (action stages only; needs the new renderer).",
                kSettingCat_Presentation, 0, false, Diorama_NewPpuCapable,
                DioramaModeChanged),
-  /* B4-mode/B4-split/B4-baseline (followup doc): Dynamic Cam snaps the
-   * render camera to its own dedicated baseline pose (see
-   * diorama_dyncam_baseline_* below) — reactive sway (velocity-lean, pan,
-   * event kicks) is later checkpoints, not wired yet. */
+  /* Free and Dynamic cameras own independent poses. Dynamic applies velocity
+   * lean and event kicks around its baseline; switching modes restores the
+   * selected mode's own camera instead of carrying the other pose across. */
   { "diorama_camera_mode", NULL, "Camera mode",
-    "Free Cam: manual orbit/zoom, persists. Dynamic Cam: snaps to its own "
-    "baseline pose (reactive sway from gameplay motion lands in a later update).",
+    "Free Cam: manual orbit and zoom, with a persistent pose. Dynamic Cam: "
+    "leans with gameplay motion and reacts to impacts around its own baseline.",
     kSettingType_Enum, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_camera_mode, kDioramaCam_Free,
     kDioramaCam_Free, kDioramaCam_Dynamic, 1, false,
@@ -1399,21 +1487,22 @@ const SettingDesc g_setting_descs[] = {
     "Dynamic Cam's resting yaw in milliradians; sway leans around this, not 0.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_dyncam_baseline_tilt_y_mrad, 0, -700, 700, 20, false,
-    NULL, 0, Diorama_ModeIsOn, NULL, NULL, NULL },
+    NULL, 0, DioramaDynamicCameraAvailable, NULL, NULL, NULL },
   { "diorama_dyncam_baseline_tilt_x_mrad", NULL, "Dynamic baseline pitch",
     "Dynamic Cam's resting pitch in milliradians; sway leans around this, not 0.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_dyncam_baseline_tilt_x_mrad, 200, -700, 700, 25, false,
-    NULL, 0, Diorama_ModeIsOn, NULL, NULL, NULL },
+    NULL, 0, DioramaDynamicCameraAvailable, NULL, NULL, NULL },
   { "diorama_dyncam_baseline_distance_x100", NULL, "Dynamic baseline distance",
     "Dynamic Cam's resting camera distance (hundredths); 0 auto-fits the frame.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_dyncam_baseline_distance_x100, 0, 0, 2000, 25, false,
-    NULL, 0, Diorama_ModeIsOn, NULL, NULL, NULL },
+    NULL, 0, DioramaDynamicCameraAvailable, NULL, NULL, NULL },
   INT_SETTING(diorama_reactive_strength, NULL, "Reactive strength",
               "Dynamic Cam: how strongly the camera sways with gameplay "
               "motion; 0 holds it fixed at the baseline pose.",
-              kSettingCat_DioramaCamera, 35, 0, 100, NULL, Diorama_ModeIsOn),
+              kSettingCat_DioramaCamera, 35, 0, 100, NULL,
+              DioramaDynamicCameraAvailable),
   /* B5 (followup doc): promotes BG2 to an enveloping dimmed+DoF'd skybox so
    * camera tilt/yaw/zoom never reveals the void past the finite backdrop
    * quad's edges. Off keeps today's look; see the DioramaSkyMode comment
@@ -1462,12 +1551,12 @@ const SettingDesc g_setting_descs[] = {
     "Diorama camera yaw in milliradians; negative swings the left edge toward you.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_tilt_y_mrad, -180, -700, 700, 20, false, NULL, 0,
-    Diorama_ModeIsOn, NULL, NULL, NULL },
+    DioramaFreeCameraAvailable, NULL, NULL, NULL },
   { "diorama_tilt_x_mrad", NULL, "Camera pitch",
     "Diorama camera pitch in milliradians; 0 keeps sprites planted on their platforms.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_tilt_x_mrad, 0, -700, 700, 25, false, NULL, 0,
-    Diorama_ModeIsOn, NULL, NULL, NULL },
+    DioramaFreeCameraAvailable, NULL, NULL, NULL },
   /* M5 dead-zone note: 0 is the auto-fit sentinel and the usable minimum is
    * kDioramaDistMin (200, i.e. 2.0x) — values 1-199 are a reachable "dead
    * zone" the range alone can't exclude (0..2000 must stay contiguous to
@@ -1478,7 +1567,7 @@ const SettingDesc g_setting_descs[] = {
     "Diorama camera distance (hundredths); 0 auto-fits the frame to the window.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_distance_x100, 0, 0, 2000, 25, false, NULL, 0,
-    Diorama_ModeIsOn, NULL, NULL, NULL },
+    DioramaFreeCameraAvailable, NULL, NULL, NULL },
   /* Scanlines of real world revealed ABOVE the authentic 224-line viewport,
    * the vertical counterpart of the widescreen side margins. Defaults to 0
    * (authentic framing) because the band is where the level's vertical tilemap
@@ -1525,18 +1614,11 @@ const SettingDesc g_setting_descs[] = {
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
   PRESENTATION_ACTION_SETTING("diorama_reset", "Reset defaults",
                               "Return all diorama controls to their defaults."),
-  /* B1a (followup doc): mode-agnostic (flat or diorama) — unlike the GPU
-   * shader rows below, doesn't need gpu_shaders_enabled/GpuShadersActive at
-   * all. Live-applies through OnRuntimeSettingChanged (main.c), which calls
-   * SDL_SetRenderVSync under the same quiesce every other renderer-mutating
-   * setting gets. */
+  /* Load-only migration alias; Refresh rate is the sole live control. */
   BOOL_SETTING(uncapped_framerate, NULL, "Uncapped framerate",
-               "Disable vsync so the present thread isn't blocked waiting for "
-               "the display's refresh. Lowers input-to-photon latency and "
-               "steadies pacing; on a 60Hz display this doesn't raise the "
-               "60fps pixel update rate (see Scroll interpolation for "
-               "smoother diorama motion).",
-               kSettingCat_Graphics, 0, false, NULL, NULL),
+               "Legacy compatibility alias for Refresh rate > Unlimited.",
+               kSettingCat_Graphics, 0, false, NULL,
+               OnLegacyUncappedChanged),
   BOOL_SETTING(action_effect_lighting, "AR_ACTION_EFFECT_LIGHTING",
                "Action spell lighting",
                "Add transient local illumination to action-stage magic. Uses "
@@ -2167,8 +2249,20 @@ bool Settings_IsAvailable(const SettingDesc *desc) {
           !desc->available || desc->available());
 }
 
+/* Kept in the registry so old files/env values parse without warnings and so
+ * descriptor indexes stay stable, but these are not active user settings.
+ * The picker easing bit remains a reserved trace/prototyping input until an
+ * implementation ships. */
+static bool Settings_IsLoadOnly(const SettingDesc *desc) {
+  return desc &&
+      (desc->field == &g_settings.ignore_aspect_ratio ||
+       desc->field == &g_settings.uncapped_framerate ||
+       desc->field == &g_settings.sim3d_picker_exit_ease);
+}
+
 bool Settings_IsMenuVisible(const SettingDesc *desc) {
   if (!desc || !desc->key) return false;
+  if (Settings_IsLoadOnly(desc)) return false;
   /* Developer-only rows collapse out of the menu unless explicitly enabled.
    * Checked first so a debug row is hidden regardless of its category rules. */
   if (Settings_IsDebugOnly(desc) && !g_settings.show_debug_settings)
@@ -2508,18 +2602,14 @@ bool Settings_IsDebugOnly(const SettingDesc *desc) {
    * toggles, and the flat-HUD A/B curiosity. */
   static const char *const kDebugKeys[] = {
     "sim3d_separated_composite", "sim3d_cull_lift_inset",
-    "sim3d_picker_exit_ease",
     /* Town 3D stages that should never be off in normal play — turning them
      * off just breaks the projection. */
     "sim3d_ground_projection", "sim3d_object_billboards", "sim3d_virtual_height",
     "diorama_layer_bg1", "diorama_layer_bg2", "diorama_layer_bg3",
     "diorama_layer_obj", "diorama_layer_backdrop", "diorama_hud_flat",
     /* The modern renderer is required for widescreen and every 3D mode; there
-     * is no reason for a player to disable it. The stretched-aspect field is
-     * driven by Screen ratio, and the old ignore-aspect toggle folded into it.
-     * The Refresh rate row now owns vsync, so the old uncapped-framerate bool
-     * is redundant in the menu. */
-    "new_renderer", "ignore_aspect_ratio", "uncapped_framerate",
+     * is no reason for a player to disable it. */
+    "new_renderer",
   };
   for (size_t i = 0; i < sizeof(kDebugKeys) / sizeof(kDebugKeys[0]); i++)
     if (!strcmp(desc->key, kDebugKeys[i])) return true;
@@ -2918,7 +3008,9 @@ bool Settings_Save(const char *path) {
   char value[512];
   for (int i = 0; success && i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (desc->type == kSettingType_Action) continue;
+    if (desc->type == kSettingType_Action ||
+        Settings_IsLoadOnly(desc))
+      continue;
     /* CUSTOM is derived from the individual widescreen rows. Omitting the
      * preset lets those rows reconstruct it without a contradictory action. */
     if (desc->field == &g_settings.display_mode &&
@@ -2964,6 +3056,19 @@ void Settings_SetDisplayMode(int mode) {
   g_settings.ws_margin_activation = corrections;
   g_settings.ws_bg2_padding       = corrections;
   g_settings.ws_sim_sprites       = corrections;
+}
+
+void Settings_ReconcileDisplayModeAfterGeometryChange(int previous_mode) {
+  if (!g_ws_active) {
+    Settings_SetDisplayMode(kDisplayMode_43);
+  } else if (previous_mode == kDisplayMode_43 ||
+             previous_mode < kDisplayMode_43 ||
+             previous_mode > kDisplayMode_Custom) {
+    Settings_SetDisplayMode(kDisplayMode_WideFull);
+  } else {
+    /* RAW/FULL/CUSTOM already own the exact ws_* state to preserve. */
+    g_settings.display_mode = previous_mode;
+  }
 }
 
 int Settings_CycleDisplayMode(void) {
@@ -3028,6 +3133,18 @@ int Settings_ExtendedAspectY(void) {
     case kScreenAspect_Stretch: return 9;
     default: return 0;
   }
+}
+
+bool Settings_IgnoreAspectRatio(void) {
+  return g_settings.extended_aspect == kScreenAspect_Stretch;
+}
+
+void Settings_SetHdReplacementsAvailable(bool available) {
+  s_hd_replacements_available = available;
+}
+
+bool Settings_HdReplacementsAvailable(void) {
+  return s_hd_replacements_available;
 }
 
 static int s_host_refresh_hz;

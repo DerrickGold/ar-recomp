@@ -313,6 +313,12 @@ struct Ppu {
   // (see PpuVerticalOrigin), because nothing needs to pillarbox vertically --
   // a host that wants fewer lines just crops the ones it asked for.
   uint8_t extraTopCur, extraBottomCur;
+  // Synthetic top-margin rows available per BG layer before that layer reaches
+  // its own bounded world edge. A set bit clips rows farther above the viewport
+  // to transparent instead of letting the tilemap address wrap to its bottom.
+  // Authentic lines are never clipped. See PpuSetVerticalMarginLayerClip.
+  uint8_t verticalMarginLayerClip;
+  uint8_t verticalMarginTopRows[4];
   // Per-slot exact position from the frontend. See PpuSetObjExactPosition.
   int16_t objPosX[128];
   int16_t objPosY[128];
@@ -605,6 +611,17 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom);
 // encoding cannot distinguish a sprite below line 224 from one above line 0,
 // so the game's own object coordinates carry no usable data down there.
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom);
+
+// Bound one BG layer independently within the synthetic TOP margin. `top_rows`
+// is the number of real world scanlines immediately above the authentic
+// viewport for BG(layer+1), clamped to kPpuExtraTopBottom. Rows farther above
+// are transparent for that layer instead of wrapping through its tilemap.
+//
+// This does not change authentic scanlines or the other BG layers. It exists
+// for mixed-depth scenes where (for example) BG1 is deep inside a tall level
+// while a bounded BG2 parallax plane is still at camera Y=0. Re-apply each
+// frame after PpuSetExtraVerticalSpace; that setter clears all layer clips.
+void PpuSetVerticalMarginLayerClip(Ppu *ppu, uint8_t layer, int top_rows);
 
 // Exact per-slot OAM position, for a frontend that owns the sprite emitter.
 //

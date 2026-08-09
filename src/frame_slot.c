@@ -443,7 +443,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->pixel_aspect = g_active_pixel_aspect;
   dst->ws_active = g_ws_active;
   dst->ws_extra = g_ws_extra;
-  dst->ignore_aspect_ratio = g_settings.ignore_aspect_ratio;
+  dst->ignore_aspect_ratio = Settings_IgnoreAspectRatio();
   dst->visible_x0 = Settings_VisibleX0();
   dst->visible_width = Settings_VisibleWidth();
   /* Latched, not read from g_ppu, for the same reason extra_left_cur is. */

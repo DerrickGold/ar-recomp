@@ -239,12 +239,14 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   if (desc->field == &g_settings.window_mode && g_window) {
     HostDisplay_ApplyWindowMode();
     HostDisplay_UpdateProperties();
+    HostDisplay_ApplyWindowScale();
   }
   if ((desc->field == &g_settings.refresh_mode ||
        desc->field == &g_settings.uncapped_framerate) && g_renderer)
     HostDisplay_ApplyRefreshVsync();
   if (desc->field == &g_settings.extended_aspect ||
-      desc->field == &g_settings.pixel_aspect) {
+      desc->field == &g_settings.pixel_aspect ||
+      desc->field == &g_settings.ignore_aspect_ratio) {
     HostDisplay_ResolveVideoGeometry(true);
     HostInput_RequestPausedRedraw();
     return;
@@ -260,9 +262,8 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   if (desc->field == &g_settings.window_scale)
     HostDisplay_ApplyWindowScale();
   else if (desc->field == &g_settings.display_mode ||
-           desc->field == &g_settings.ignore_aspect_ratio ||
            desc->category == kSettingCat_Widescreen)
-    HostDisplay_RecomputeLogicalPresentation();
+    HostDisplay_ApplyWindowScale();
   if (desc->category == kSettingCat_Display ||
       desc->category == kSettingCat_Widescreen ||
       Settings_CategoryIsSim3D(desc->category))

@@ -536,7 +536,7 @@ bool PresentWorldNavigation3D(const FrameSlot *slot) {
     return false;
 
   SDL_Rect viewport = ComputePresentationViewport(
-      g_renderer, slot->ws_active, slot->ignore_aspect_ratio,
+      g_renderer, slot->ignore_aspect_ratio,
       slot->pixel_aspect, slot->visible_width, slot->snes_height);
   SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);

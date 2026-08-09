@@ -1509,7 +1509,8 @@ static float DioramaVerticalShift(const float mvp[16], float height_scale,
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int obj_apron,
                        int active_pixel_aspect, bool ignore_aspect_ratio,
-                       int visible_width, SDL_Texture *textures[],
+                       int visible_width, SDL_Rect viewport,
+                       SDL_Texture *textures[],
                        uint8_t *pixels[],
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,
@@ -1523,7 +1524,31 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);
   int out_w = 0, out_h = 0;
   SDL_GetRenderOutputSize(renderer, &out_w, &out_h);
-  if (out_w <= 0 || out_h <= 0) return false;
+  if (out_w <= 0 || out_h <= 0 || viewport.x < 0 || viewport.y < 0 ||
+      viewport.w <= 0 || viewport.h <= 0 ||
+      viewport.x + viewport.w > out_w || viewport.y + viewport.h > out_h)
+    return false;
+
+  /* The 3D compositor works in coordinates local to the game viewport. This
+   * keeps the same projection math at any window size while SDL offsets and
+   * clips the result into the aspect-fit rectangle. RenderClear deliberately
+   * ignores SDL's viewport, so clear the full target to black first when bars
+   * are needed, then fill only the game area with Diorama's navy backdrop. */
+  const bool viewport_is_output =
+      viewport.x == 0 && viewport.y == 0 &&
+      viewport.w == out_w && viewport.h == out_h;
+  if (!viewport_is_output) {
+    SDL_SetRenderViewport(renderer, NULL);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
+    SDL_SetRenderViewport(renderer, &viewport);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(renderer, 20, 20, 30, 255);
+    SDL_RenderFillRect(renderer, &(SDL_FRect){
+        0.0f, 0.0f, (float)viewport.w, (float)viewport.h});
+  }
+  out_w = viewport.w;
+  out_h = viewport.h;
 
   bool interpolating = scroll_delta && scroll_delta->active;
   /* §6.4: SDL_RenderGeometry's default SDL_TEXTURE_ADDRESS_AUTO wraps UVs
@@ -1535,8 +1560,10 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_CLAMP,
                                     SDL_TEXTURE_ADDRESS_CLAMP);
 
-  SDL_SetRenderDrawColor(renderer, 20, 20, 30, 255);
-  SDL_RenderClear(renderer);
+  if (viewport_is_output) {
+    SDL_SetRenderDrawColor(renderer, 20, 20, 30, 255);
+    SDL_RenderClear(renderer);
+  }
 
   /* B5 (followup doc): drawn before the per-layer loop below — painter's
    * algorithm, skybox is the farthest thing in the scene. Same
@@ -1698,6 +1725,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * Diorama_ProjectCapturedPoint divides a texture row by this to get V and
      * the uv_v window above is now expressed in the same allocated space. */
     out_projection->texture_height = kPpuBufHeight;
+    out_projection->output_x = viewport.x;
+    out_projection->output_y = viewport.y;
     out_projection->output_width = out_w;
     out_projection->output_height = out_h;
   }
@@ -2084,6 +2113,9 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   if (interpolating)
     SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_AUTO,
                                     SDL_TEXTURE_ADDRESS_AUTO);
+
+  if (!viewport_is_output)
+    SDL_SetRenderViewport(renderer, NULL);
 
   if (out_projection) out_projection->valid = true;
 

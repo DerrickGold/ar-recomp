@@ -1092,12 +1092,9 @@ static int AppBoot_CreateVideo(AppBoot *app) {
       g_renderer = SDL_CreateRenderer(g_window, NULL);
     }
     if (!g_renderer) Die("SDL_CreateRenderer failed");
-    /* B1a (followup doc): "Uncapped framerate" row (kSettingCat_Graphics).
-     * This is the mechanism the toggle actually needs to change something —
-     * a bare setting with nothing reading it would be inert. Disabling
-     * vsync stops SDL_RenderPresent from blocking the present thread until
-     * the display's next refresh; see the present-cadence read below for
-     * the other half (redrawing often enough for that to matter). */
+    /* Apply the selected refresh policy after renderer creation. Disabling
+     * vsync stops SDL_RenderPresent from blocking until the next refresh; the
+     * pacing path supplies the selected unlimited/limited cadence. */
     if (!app->headless_video)
       HostDisplay_ApplyRefreshVsync();
 
@@ -1110,7 +1107,7 @@ static int AppBoot_CreateVideo(AppBoot *app) {
     /* Aspect-correct letterboxing via SDL's logical presentation — one
      * implementation shared with the resize/settings paths so boot and runtime
      * can never disagree (4:3-PAR encodes the 7:6 stretch in the logical size;
-     * ignore_aspect_ratio stretches instead). */
+     * Screen ratio > Stretch opts out of aspect fitting). */
     HostDisplay_RecomputeLogicalPresentation();
 
     AppBoot_CreatePresentationTextures(app);

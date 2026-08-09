@@ -75,6 +75,20 @@ static void TestPriorityPlaneShapeIsApplied(void) {
   CHECK(Near(raked.x - flat.x, 12.5f));
 }
 
+static void TestOutputViewportOriginIsApplied(void) {
+  DioramaProjection projection = Projection();
+  projection.output_x = 120;
+  projection.output_y = 40;
+  SDL_FPoint point;
+  float scale_x = 0.0f, scale_y = 0.0f;
+  CHECK(Diorama_ProjectCapturedPoint(
+      &projection, 50.0f, 25.0f, 0, &point, &scale_x, &scale_y));
+  CHECK(Near(point.x, 170.0f));
+  CHECK(Near(point.y, 90.0f));
+  CHECK(Near(scale_x, 1.0f));
+  CHECK(Near(scale_y, 1.0f));
+}
+
 static void TestInvalidInputsFailClosed(void) {
   DioramaProjection projection = Projection();
   SDL_FPoint point = { 17.0f, 29.0f };
@@ -95,6 +109,7 @@ static void TestInvalidInputsFailClosed(void) {
 int main(void) {
   TestRegisteredProjectionAndScale();
   TestPriorityPlaneShapeIsApplied();
+  TestOutputViewportOriginIsApplied();
   TestInvalidInputsFailClosed();
   if (g_failures) {
     fprintf(stderr, "%d diorama projection test(s) failed\n", g_failures);

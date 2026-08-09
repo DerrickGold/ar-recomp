@@ -2744,7 +2744,7 @@ void PresentSim3D(const FrameSlot *slot) {
   SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   SDL_RenderClear(g_renderer);
   SDL_Rect viewport = ComputePresentationViewport(
-      g_renderer, slot->ws_active, slot->ignore_aspect_ratio,
+      g_renderer, slot->ignore_aspect_ratio,
       slot->pixel_aspect, slot->visible_width, slot->snes_height);
   SDL_Rect source = { slot->visible_x0, 0,
                       slot->visible_width, slot->snes_height };

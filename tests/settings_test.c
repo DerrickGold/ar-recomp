@@ -232,6 +232,7 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *sim_reset = Settings_Find("sim3d_reset_camera");
   CHECK(display && display->type == kSettingType_Enum);
   CHECK(display && display->enum_count == kDisplayMode_PresetCount);
+  CHECK(display && display->apply == kApply_Callback);
   CHECK(volume && volume->category == kSettingCat_Audio);
   CHECK(volume && volume->apply == kApply_Callback);
   CHECK(volume && volume->minval == 0 && volume->maxval == 100 &&
@@ -251,6 +252,9 @@ static void TestDefaultsAndMetadata(void) {
         frequency->apply == kApply_Restart);
   CHECK(screen_ratio && screen_ratio->category == kSettingCat_Display);
   CHECK(stretch && stretch->category == kSettingCat_Display);
+  CHECK(!Settings_IsMenuVisible(stretch));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("uncapped_framerate")));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("sim3d_picker_exit_ease")));
   /* Screen ratio > Stretch derives the ignore-aspect field the runtime reads. */
   CHECK(Settings_SetLong(screen_ratio, kScreenAspect_Stretch) ==
         kSettingChange_Applied);
@@ -491,6 +495,9 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(FileContains(saved_path, "cheat_moonjump = On"));
   CHECK(FileContains(saved_path, "cheat_moonjump_speed = 9"));
   CHECK(!FileContains(saved_path, "cheat_moonjump_button"));
+  CHECK(!FileContains(saved_path, "ignore_aspect_ratio ="));
+  CHECK(!FileContains(saved_path, "uncapped_framerate ="));
+  CHECK(!FileContains(saved_path, "sim3d_picker_exit_ease ="));
   CHECK(FileContains(saved_path, "warp_target = 0101"));
   CHECK(FileContains(saved_path, "save_backend = native-srm"));
   CHECK(FileContains(saved_path, "save_prog_fillmore = Leave as-is"));
@@ -1066,11 +1073,15 @@ static void TestRimLightAvailabilityFollowsBlendSupport(void) {
 
   const bool restore_support = s_sim_rim_mask_supported;
   const int restore_mode = g_settings.sim3d_mode;
+  const bool restore_separated = g_settings.sim3d_separated_composite;
+  const bool restore_billboards = g_settings.sim3d_object_billboards;
 
   /* The row is gated on BOTH the sim-3D stage being enabled and the blend mode
    * being usable, so enable the stage first — otherwise this would pass for the
    * wrong reason (unavailable either way) and prove nothing. */
   g_settings.sim3d_mode = 1;
+  g_settings.sim3d_separated_composite = true;
+  g_settings.sim3d_object_billboards = true;
 
   s_sim_rim_mask_supported = true;
   CHECK(Settings_IsAvailable(rim));
@@ -1091,6 +1102,8 @@ static void TestRimLightAvailabilityFollowsBlendSupport(void) {
 
   s_sim_rim_mask_supported = restore_support;
   g_settings.sim3d_mode = restore_mode;
+  g_settings.sim3d_separated_composite = restore_separated;
+  g_settings.sim3d_object_billboards = restore_billboards;
 }
 
 static void TestEffectAvailabilityFollowsRendererSupport(void) {
@@ -1105,7 +1118,11 @@ static void TestEffectAvailabilityFollowsRendererSupport(void) {
   if (!lighting || !particles || !action_lighting || !action_particles) return;
   const bool restore_support = s_effect_renderer_supported;
   const int restore_mode = g_settings.sim3d_mode;
+  const bool restore_separated = g_settings.sim3d_separated_composite;
+  const bool restore_ground = g_settings.sim3d_ground_projection;
   g_settings.sim3d_mode = 1;
+  g_settings.sim3d_separated_composite = true;
+  g_settings.sim3d_ground_projection = true;
   s_effect_renderer_supported = true;
   CHECK(Settings_IsAvailable(lighting));
   CHECK(Settings_IsAvailable(particles));
@@ -1118,6 +1135,139 @@ static void TestEffectAvailabilityFollowsRendererSupport(void) {
   CHECK(!Settings_IsAvailable(action_particles));
   s_effect_renderer_supported = restore_support;
   g_settings.sim3d_mode = restore_mode;
+  g_settings.sim3d_separated_composite = restore_separated;
+  g_settings.sim3d_ground_projection = restore_ground;
+}
+
+static void TestVideoSettingAudit(void) {
+  const char *legacy_path = "settings-video-legacy-test.ini";
+  const char *saved_path = "settings-video-saved-test.ini";
+  ClearSettingsEnv();
+  g_ws_active = true;
+  g_ws_extra = g_ws_display_extra = 43;
+  Settings_Init();
+
+  const SettingDesc *display = Settings_Find("display_mode");
+  const SettingDesc *window_scale = Settings_Find("window_scale");
+  const SettingDesc *hd = Settings_Find("hd_replacements");
+  const SettingDesc *stretch = Settings_Find("ignore_aspect_ratio");
+  const SettingDesc *uncapped = Settings_Find("uncapped_framerate");
+  CHECK(display && window_scale && hd && stretch && uncapped);
+
+  CHECK(Settings_IsAvailable(display));
+  g_ws_active = false;
+  CHECK(!Settings_IsAvailable(display));
+  g_ws_active = true;
+
+  g_settings.window_mode = kWindowMode_Windowed;
+  CHECK(Settings_IsAvailable(window_scale));
+  g_settings.window_mode = kWindowMode_Borderless;
+  CHECK(!Settings_IsAvailable(window_scale));
+  g_settings.window_mode = kWindowMode_Windowed;
+
+  Settings_SetHdReplacementsAvailable(false);
+  CHECK(!Settings_IsAvailable(hd));
+  Settings_SetHdReplacementsAvailable(true);
+  CHECK(Settings_IsAvailable(hd));
+  Settings_SetHdReplacementsAvailable(false);
+
+  /* Rebuilding wide geometry must not reset the correction profile. */
+  Settings_SetDisplayMode(kDisplayMode_WideRaw);
+  const bool raw_sprites = g_settings.ws_sprites;
+  Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_WideRaw);
+  CHECK(g_settings.display_mode == kDisplayMode_WideRaw);
+  CHECK(g_settings.ws_sprites == raw_sprites);
+  g_settings.ws_sprites = true;
+  g_settings.display_mode = kDisplayMode_Custom;
+  Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_Custom);
+  CHECK(g_settings.display_mode == kDisplayMode_Custom);
+  CHECK(g_settings.ws_sprites);
+  g_ws_active = false;
+  Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_Custom);
+  CHECK(g_settings.display_mode == kDisplayMode_43);
+  CHECK(!g_settings.ws_action && !g_settings.ws_sprites);
+  g_ws_active = true;
+  Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_43);
+  CHECK(g_settings.display_mode == kDisplayMode_WideFull);
+  CHECK(g_settings.ws_action && g_settings.ws_sprites);
+
+  /* Camera pose rows only affect their own active camera. */
+  g_settings.diorama_mode = true;
+  g_settings.diorama_camera_mode = kDioramaCam_Free;
+  CHECK(Settings_IsAvailable(Settings_Find("diorama_tilt_x_mrad")));
+  CHECK(!Settings_IsAvailable(
+      Settings_Find("diorama_dyncam_baseline_tilt_x_mrad")));
+  CHECK(!Settings_IsAvailable(Settings_Find("diorama_reactive_strength")));
+  g_settings.diorama_camera_mode = kDioramaCam_Dynamic;
+  CHECK(!Settings_IsAvailable(Settings_Find("diorama_tilt_x_mrad")));
+  CHECK(Settings_IsAvailable(
+      Settings_Find("diorama_dyncam_baseline_tilt_x_mrad")));
+  CHECK(Settings_IsAvailable(Settings_Find("diorama_reactive_strength")));
+
+  /* Town 3D availability mirrors the resolver's parent dependencies. */
+  g_settings.sim3d_mode = true;
+  g_settings.sim3d_separated_composite = true;
+  g_settings.sim3d_ground_projection = true;
+  g_settings.sim3d_object_billboards = true;
+  g_settings.sim3d_virtual_height = true;
+  g_settings.sim3d_shadows = true;
+  g_settings.sim3d_soft_shadows = true;
+  g_settings.sim3d_world_underlay = true;
+  g_settings.sim3d_cloud_shroud = true;
+  g_settings.sim3d_cull_haze = true;
+  g_settings.sim3d_camera_mode = kSimCam_Dynamic;
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_reactive_strength")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_tilt_x_mrad")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_soft_shadows")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_cloud_falloff_px")));
+
+  g_settings.sim3d_camera_mode = kSimCam_Free;
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_reactive_strength")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_tilt_x_mrad")));
+  g_settings.sim3d_object_billboards = false;
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_virtual_height")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_shadows")));
+  g_settings.sim3d_object_billboards = true;
+  g_settings.sim3d_shadows = false;
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_soft_shadows")));
+  g_settings.sim3d_shadows = true;
+  g_settings.sim3d_world_underlay = false;
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_cloud_shroud")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_cull_haze_pct")));
+  g_settings.sim3d_world_navigation = true;
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_cull_haze")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_underlay_haze_pct")));
+  g_settings.sim3d_separated_composite = false;
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_ground_projection")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_camera_mode")));
+
+  /* Old generated files carried both keys. False aliases must not override a
+   * modern ratio/mode, while true aliases still migrate to the replacement. */
+  CHECK(WriteTextFile(
+      legacy_path,
+      "extended_aspect = 16:10\n"
+      "ignore_aspect_ratio = Off\n"
+      "refresh_mode = Limit\n"
+      "uncapped_framerate = Off\n"));
+  Settings_InitWithFile(legacy_path);
+  CHECK(g_settings.extended_aspect == kScreenAspect_1610);
+  CHECK(!Settings_IgnoreAspectRatio());
+  CHECK(g_settings.refresh_mode == kRefreshMode_Limit);
+
+  CHECK(WriteTextFile(
+      legacy_path,
+      "ignore_aspect_ratio = On\n"
+      "uncapped_framerate = On\n"));
+  Settings_InitWithFile(legacy_path);
+  CHECK(g_settings.extended_aspect == kScreenAspect_Stretch);
+  CHECK(Settings_IgnoreAspectRatio());
+  CHECK(g_settings.refresh_mode == kRefreshMode_Unlimited);
+  CHECK(Settings_Save(saved_path));
+  CHECK(!FileContains(saved_path, "ignore_aspect_ratio ="));
+  CHECK(!FileContains(saved_path, "uncapped_framerate ="));
+
+  remove(legacy_path);
+  remove(saved_path);
 }
 
 /* A diagnostic run must not mutate the player's configuration. Settings were not
@@ -1155,6 +1305,7 @@ int main(void) {
   TestScalePercentToOutput();
   TestFrameLimitInterval();
   TestDefaultsAndMetadata();
+  TestVideoSettingAudit();
   TestSim3DEnvironmentLabels();
   TestConfigSettingsEnvironmentPrecedence();
   TestLegacySeedEncodings();

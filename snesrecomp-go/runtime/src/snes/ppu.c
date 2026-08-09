@@ -386,6 +386,20 @@ void PpuSetObjExactPosition(Ppu *ppu, uint8_t slot, int x, int y) {
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom) {
   ppu->extraTopCur = (uint8_t)IntMin(IntMax(top, 0), kPpuExtraTopBottom);
   ppu->extraBottomCur = (uint8_t)IntMin(IntMax(bottom, 0), kPpuExtraTopBottom);
+  /* Layer bounds are per-frame frontend policy, like the horizontal layer
+   * clamps reset by PpuSetExtraSpace. A scene/mode transition must not inherit
+   * the preceding room's camera limits. */
+  ppu->verticalMarginLayerClip = 0;
+  memset(ppu->verticalMarginTopRows, 0,
+         sizeof(ppu->verticalMarginTopRows));
+}
+
+void PpuSetVerticalMarginLayerClip(Ppu *ppu, uint8_t layer, int top_rows) {
+  if (layer >= 4)
+    return;
+  ppu->verticalMarginTopRows[layer] =
+      (uint8_t)IntMin(IntMax(top_rows, 0), kPpuExtraTopBottom);
+  ppu->verticalMarginLayerClip |= (uint8_t)(1u << layer);
 }
 
 void PpuSetWidescreenHudSplit(Ppu *ppu, uint8_t height, uint8_t left_end,
@@ -552,6 +566,20 @@ static inline int PpuOverlayRow(const PpuOverlayCapture *capture, int screen_y) 
 // reads a bit above 0x3ff, so authentic output is unchanged bit for bit.
 static inline int PpuBgTilemapRow(const Ppu *ppu, int y, uint layer) {
   return (int)((uint)(y + ppu->vScroll[layer]) & 0x3ff);
+}
+
+// Whether BG `layer` owns this synthetic top-margin line. `y` is the PPU's
+// 1-based scanline coordinate, so line 0 is one row above authentic line 1,
+// line -1 is two rows above, and so on. Tilemap wrapping remains correct while
+// those rows are inside the layer's world; only the rows beyond a frontend-
+// supplied finite-world edge become transparent. Authentic and bottom-margin
+// lines retain their existing behavior.
+static inline bool PpuBgVisibleOnMarginLine(const Ppu *ppu, int y,
+                                            uint layer) {
+  if (y >= 1 || layer >= 4 ||
+      !(ppu->verticalMarginLayerClip & (1u << layer)))
+    return true;
+  return 1 - y <= ppu->verticalMarginTopRows[layer];
 }
 
 // The body of one rendered scanline, shared by the authentic loop and by the
@@ -1718,34 +1746,42 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
       PpuDrawSprites(ppu, y, sub, true);
 
     bool mosaic_size = PPU_mosaicSize(ppu) > 1;
-    PpuPixelPrioBufs *layerbuf =
-        PpuBeginBackgroundOverlay(ppu, y, sub, 0);
-    PpuDrawBackground_4bpp_policy(
-        ppu, layerbuf, y, sub, 0, 0xc000, 0x8000,
-        mosaic_size && PPU_mosaicEnabled(ppu, 0));
-    PpuFinishBackgroundOverlay(ppu, y, sub, 0, layerbuf);
+    PpuPixelPrioBufs *layerbuf;
+    if (PpuBgVisibleOnMarginLine(ppu, y, 0)) {
+      layerbuf = PpuBeginBackgroundOverlay(ppu, y, sub, 0);
+      PpuDrawBackground_4bpp_policy(
+          ppu, layerbuf, y, sub, 0, 0xc000, 0x8000,
+          mosaic_size && PPU_mosaicEnabled(ppu, 0));
+      PpuFinishBackgroundOverlay(ppu, y, sub, 0, layerbuf);
+    }
 
-    layerbuf = PpuBeginBackgroundOverlay(ppu, y, sub, 1);
-    PpuDrawBackground_4bpp_policy(
-        ppu, layerbuf, y, sub, 1, 0xb100, 0x7100,
-        mosaic_size && PPU_mosaicEnabled(ppu, 1));
-    PpuFinishBackgroundOverlay(ppu, y, sub, 1, layerbuf);
+    if (PpuBgVisibleOnMarginLine(ppu, y, 1)) {
+      layerbuf = PpuBeginBackgroundOverlay(ppu, y, sub, 1);
+      PpuDrawBackground_4bpp_policy(
+          ppu, layerbuf, y, sub, 1, 0xb100, 0x7100,
+          mosaic_size && PPU_mosaicEnabled(ppu, 1));
+      PpuFinishBackgroundOverlay(ppu, y, sub, 1, layerbuf);
+    }
 
     uint bg3prio = PPU_bg3priority(ppu) ? 0xf200 : 0x3200;
-    layerbuf = PpuBeginBackgroundOverlay(ppu, y, sub, 2);
-    if (mosaic_size && PPU_mosaicEnabled(ppu, 2))
-      PpuDrawBackground_2bpp_mosaic(ppu, layerbuf, y, sub, 2,
-                                    bg3prio, 0x1200);
-    else
-      PpuDrawBackground_2bpp(ppu, layerbuf, y, sub, 2,
-                             bg3prio, 0x1200);
-    PpuFinishBackgroundOverlay(ppu, y, sub, 2, layerbuf);
+    if (PpuBgVisibleOnMarginLine(ppu, y, 2)) {
+      layerbuf = PpuBeginBackgroundOverlay(ppu, y, sub, 2);
+      if (mosaic_size && PPU_mosaicEnabled(ppu, 2))
+        PpuDrawBackground_2bpp_mosaic(ppu, layerbuf, y, sub, 2,
+                                      bg3prio, 0x1200);
+      else
+        PpuDrawBackground_2bpp(ppu, layerbuf, y, sub, 2,
+                               bg3prio, 0x1200);
+      PpuFinishBackgroundOverlay(ppu, y, sub, 2, layerbuf);
+    }
   } else {
     // mode 7
-    PpuPixelPrioBufs *layerbuf =
-        PpuBeginBackgroundOverlay(ppu, y, sub, 0);
-    PpuDrawBackground_mode7(ppu, layerbuf, y, sub, 0x5000);
-    PpuFinishBackgroundOverlay(ppu, y, sub, 0, layerbuf);
+    if (PpuBgVisibleOnMarginLine(ppu, y, 0)) {
+      PpuPixelPrioBufs *layerbuf =
+          PpuBeginBackgroundOverlay(ppu, y, sub, 0);
+      PpuDrawBackground_mode7(ppu, layerbuf, y, sub, 0x5000);
+      PpuFinishBackgroundOverlay(ppu, y, sub, 0, layerbuf);
+    }
     if (ppu->lineHasSprites)
       PpuDrawSprites(ppu, y, sub, false);
   }
