@@ -934,6 +934,15 @@ were eligible at entry; BG2 split into six eligible layers, four explicit
 32x32 decorative/native layers, and two disabled samples. See
 `docs/bg-hle-census.md` for the table and the still-open special-room gate.
 
+The first special-room sweep adds an important boundary. Death Heim
+`$0702-$0707` has eligible BG1/native-32x32 BG2 and passes 1,032,404 more
+runtime comparisons; hub `$0701` and final `$0708` are deliberately native
+32x32 scenes. All direct room frames are coherent, but the natural handoff
+sequence remains open. Northwall `$0608` is a rejected shortcut: its BG1 tile
+words match the ring while live CHR renders as patterned garbage before the
+room self-exits. Therefore BH2 tile-word parity cannot stand in for BH1 CHR
+residency or BH5 pixel/priority parity.
+
 The decoder is intentionally scheduled at the authentic streamer's tile
 cadence, not at scanout cadence. A host-only key contains the action room,
 current margins, each camera rounded to its 16px column (vertical position to

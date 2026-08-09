@@ -532,7 +532,14 @@ eligible; four BG2 samples are explicit 32x32 native/decorative layers, while
 two more are disabled at the sampled entry state. Exact per-target evidence and
 limitations are in `docs/bg-hle-census.md`. This broadens BH1 substantially but
 does not close it: later-room policy/HDMA handoffs, priority planes, deliberate
-positive controls, Northwall boss, and Death Heim remain.
+positive controls, the natural Northwall boss transition, and the complete
+Death Heim handoff flow remain. Direct `$0701-$0708` captures now classify
+every Death Heim room: hub/final backgrounds are native 32x32, while rematch
+rooms `$02-$07` expose eligible BG1 plus native 32x32 BG2 and add 1,032,404
+zero-mismatch comparisons. These are coherent source/visual samples, not a
+substitute for the natural boss-rush sequence. The tempting `0608` shortcut is
+explicitly rejected: tile words match, but its CHR is visibly corrupt and the
+room self-exits, proving tile parity alone is not a pixel/residency gate.
 
 **Gate**
 

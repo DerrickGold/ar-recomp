@@ -414,7 +414,7 @@ Kasandora Act 2 begins at `0303`.
 | Kasandora | `0301` | `0303` | Do not use `0302` as an Act 2 shortcut |
 | Aitos | `0401` | `0404` | |
 | Marahna | `0501` | `0504` | |
-| Northwall | `0601` | `0605` | `0608` directly enters the Act 2 boss arena for focused testing |
+| Northwall | `0601` | `0605` | `0608` selects the boss map but is **not** a valid standalone visual baseline: from a non-action warp it leaves patterned/garbage CHR and self-exits. Reach the boss naturally from `0605` for acceptance. |
 | Death Heim | `0701` | — | Boss-rush hub; verified end-to-end through every rematch and the final boss (2026-07-14) |
 
 Set the target before launch, enter a transition-capable state, then press

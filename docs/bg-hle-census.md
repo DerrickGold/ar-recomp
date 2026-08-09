@@ -87,3 +87,47 @@ This is an entry census, not the complete BH1 gate:
 The provider seam therefore remains default-off/unimplemented. The evidence is
 enough to proceed with special-room census work, not enough to claim BH1/BH2 or
 delete any legacy background path.
+
+## Special action rooms — 2026-08-09
+
+Death Heim needed earlier captures because `$0701` is a short hub and naturally
+hands off to `$0702` before the ordinary matrix's game frame 900. The hub was
+captured at frames 500/600; direct room selectors `$0702-$0708` were captured at
+410/420, after the action load hold but before the borrowed replay could affect
+the room transition.
+
+| Target | Scene | BG1 | BG2 | Runtime comparisons | Visual result |
+| --- | --- | --- | --- | ---: | --- |
+| `0701` | Death Heim hub | native 32x32 | native 32x32 | 189,312 | coherent hub; naturally hands to `0702` |
+| `0702` | rematch room 1 | eligible | native 32x32 | 171,680 | coherent |
+| `0703` | rematch room 2 | eligible | native 32x32 | 172,576 | coherent |
+| `0704` | rematch room 3 | eligible | native 32x32 | 171,680 | coherent |
+| `0705` | rematch room 4 | eligible | native 32x32 | 172,212 | coherent |
+| `0706` | rematch room 5 | eligible | native 32x32 | 172,576 | coherent |
+| `0707` | rematch room 6 | eligible | native 32x32 | 171,680 | coherent |
+| `0708` | final boss starfield | native 32x32 | native 32x32 | 0 | coherent native starfield |
+
+The seven direct room frames are distinct and were visually inspected as one
+contact sheet. Rooms `$0702-$0707` contribute 1,032,404 runtime comparisons
+with zero mismatch; all their offline snapshot comparisons also match. `$0708`
+is not a comparator omission: both displayed background layers explicitly use
+32x32 native maps, so the world provider correctly declines them.
+
+This establishes source eligibility for every raw Death Heim room, but direct
+room selectors are still not a natural boss-rush playthrough. The complete hub
+→ rematch → hub → final → ending handoff remains an acceptance and mutation
+census gate.
+
+### Rejected Northwall `0608` shortcut
+
+`0608` does enter map `$06/$08` for about 23 live frames. At frames 410/420 its
+BG1 finite map matches the native ring (43,877 runtime comparisons, zero
+mismatch) and BG2 is an explicit 32x32 native layer. The framebuffer is not a
+valid boss-arena baseline: it shows patterned/garbage CHR, then the shortcut
+self-exits to Sky Palace before frame 500. This is direct proof that tile-word
+parity alone does not establish character-data residency or a coherent scene.
+
+The earlier documentation calling `0608` a verified focused-test target was
+too strong. Keep its tile-source evidence, reject its framebuffer, and obtain a
+natural Northwall act-2 boss transition before closing BH1 or any pixel-parity
+gate.

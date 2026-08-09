@@ -97,6 +97,7 @@ class BgHleCensusTest(unittest.TestCase):
     def test_matrix_parsers_pin_verified_targets_and_summary(self):
         self.assertEqual(matrix.parse_targets("0201,0202,0201"),
                          ["0201", "0202"])
+        self.assertEqual(matrix.parse_targets("0701,0708"), ["0701", "0708"])
         self.assertEqual(matrix.parse_targets_as_frames("900,0x4b0"),
                          [900, 1200])
         log = (
@@ -119,6 +120,11 @@ class BgHleCensusTest(unittest.TestCase):
             metadata = matrix.inspect_ppm(path)
             self.assertEqual((metadata["width"], metadata["height"]), (2, 1))
             self.assertEqual(len(metadata["sha256"]), 64)
+
+    def test_matrix_error_retains_failed_run_artifact_path(self):
+        error = matrix.MatrixError("wrong map", "/tmp/run-1")
+        self.assertEqual(str(error), "wrong map")
+        self.assertEqual(error.run_directory, "/tmp/run-1")
 
     def test_positive_mismatch_and_missing_ppu_are_distinct(self):
         with tempfile.TemporaryDirectory() as directory:
