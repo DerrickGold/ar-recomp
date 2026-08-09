@@ -766,7 +766,7 @@ show the frozen `$0088` against the advancing host frame:
   renderer with stale/wrapped margins. Unset/nonzero selects Stage B: isolated
   true-content BG1/BG2 margin refresh. Both modes retain the original recompiled
   BG streamers and OAM builder.
-- **`AR_ACTION_BG_HLE_COMPARE=1`** — enable the default-off, read-only BH2
+- **`AR_ACTION_BG_HLE_COMPARE=1`** — enable the optional, read-only BH2
   differential observer. For each eligible action BG1/BG2 frame it decodes the
   finite WRAM world with `ActionBgWorld` and compares every authentic 256x224
   tile fetch to the resident 64x64 VRAM ring. Rendering remains native. A
@@ -775,8 +775,9 @@ show the frozen `$0088` against the advancing host frame:
   outside-world lookups, and fallback counts. Any mismatch or unexpected
   `invalid`/`compare` fallback blocks `SPEC-bg-hle.md` BH2; use the same replay
   without the variable to prove final emulator-state identity.
-- **`AR_ACTION_BG_HLE=1`** — enable the default-off BH5 virtual tilemap source
-  for eligible action BG1/BG2 world layers. After the full camera matches the
+- **`AR_ACTION_BG_HLE=0`** — disable the default-on BH7 virtual tilemap source
+  for a native A/B. Unset, empty, or any nonzero value enables it for eligible
+  action BG1/BG2 world layers. After the full camera matches the
   live PPU scroll phase and every authentic tile word matches the resident ring
   with zero finite exits, the provider owns both the authentic 256x224 viewport
   and synthetic margins for that layer. Any contradiction clears the binding
@@ -787,9 +788,8 @@ show the frozen `$0088` against the advancing host frame:
   remain native controls. Look for `hle=01/02/03` on widescreen policy lines and
   the shutdown `provider-summary`, whose `preflight`, `eligible`, and `layers`
   fields must show zero mismatch/outside and no eligible/bound divergence.
-  `AR_WS_BGREFRESH=0 AR_ACTION_BG_HLE=1` and
-  `AR_VEXT_BANDFIX=0 AR_ACTION_BG_HLE=1` remain the decisive side/top positive
-  controls: both match the corrected reference, while disabling HLE too
+  `AR_WS_BGREFRESH=0` and `AR_VEXT_BANDFIX=0` remain the decisive side/top
+  positive controls: both match the corrected reference, while disabling HLE too
   restores the deliberately broken legacy arm.
   BH6 adds no separate environment switch: the resolved `ActionBgPlan` is now
   latched after scanout and copied into `FrameSlot` on every run. Normal action
@@ -895,6 +895,13 @@ show the frozen `$0088` against the advancing host frame:
    captures two snapshots plus a framebuffer, validates the runtime comparator,
    and writes an ignored JSON manifest under `runs/`. `--targets 0201,0605`
    narrows a sweep; `--fail-fast` is useful while changing the harness.
+   `--display-mode 43|raw|full`, `--diorama`, and
+   `--vertical-extend 0..32` create explicit presentation fixtures. Wide Raw is
+   expected to remain native even when the provider setting is on. Compare
+   paired manifests with `tools/bg_hle_artifact_compare.py`; its default policy
+   requires full-frame identity, while `--framebuffer-policy authentic-center`
+   still requires exact state and centered 256 pixels and reports/localizes
+   accepted synthetic-margin improvements.
 2b. **Presentation modes that change the margin budget must be switched MID-RUN**:
    `AR_DIORAMA_AT=<gameframe>` flips Diorama 3D on through the same descriptor
    path as the `D` hotkey. Booting with `diorama_mode = On` forces the margin
@@ -965,7 +972,10 @@ show the frozen `$0088` against the advancing host frame:
    `AR_SETTINGS_PATH` ini with `save_edit_armed = On` plus the staged
    `kSettingCat_Save` keys applies boot edits into that copy
    (`[save-editor] boot edits applied for this session`). Copy the .srm first;
-   the edit path is a real write. Worked example — the selected-magic HUD icon
+   the edit path is a real write. Use the same redirect with `AR_LOADSTATE`:
+   loading a state can auto-persist its SRAM into the active native backend even
+   when the diagnostic only intends to render one frame. Worked example — the
+   selected-magic HUD icon
    is INVISIBLE in every checked-in `.rec` fixture, because they all reach
    Fillmore with empty magic slots and `$02:BC9E` then leaves the icon's VRAM
    `$2D40` window zeroed (ram-map `$02AC`). The OAM signature still validates,
@@ -1712,7 +1722,8 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
   quit cleanly). Records `{game_frame, inputs}` keyed by `$7E:0088`, so it replays frame-exact
   in **both** the recomp and the oracle (one file drives both).
 - **Replay:** `AR_HEADLESS=1 AR_INPUT_REPLAY=saves/<name>.bin ./build/ActRaiserRecomp ar.sfc`.
-  Auto-stops at end of recording. `AR_QUIT_FRAMES=N` to cap.
+  Auto-stops at end of recording. `AR_QUIT_FRAMES=N` caps either headless or
+  windowed diagnostics, so ordinary-compositor runs can terminate unattended.
 - **Dumps:** `AR_DUMP_AT_GF=N` (WRAM/SRAM/state at game-frame N → `saves/dump_*`),
   `AR_DUMP_ACT=1` (each action-stage frame). The watchdog auto-dumps `saves/dump_state.txt`
   (call stack + block-history ring) on a hang.
@@ -1854,7 +1865,7 @@ AR_SIMDEV=1 / AR_SIMDEV2=1   dev-cycle gate-branch probes (cpu_trace.h; retarget
 AR_SIMWALK=1           town-actor script executor: script byte + behavior state ($+12) + script ptr ($+16) at $01:CD41/$CD5E — "actor spawns but is frozen" (§7.14)
 AR_VRAMWATCH=1         BG-tilemap VRAM-write tracer: who writes a VRAM region + game func, gated AR_VW_LO/HI (game-frame) + AR_VW_VLO/VHI (vram addr) — graphics-corruption hunts (§7.15)
 AR_LAIRDMA=1           logs each VRAM-targeting DMA's source ($7E/$7F buffer + first bytes) + dest + size (dma.c) — finds the garbage tilemap/tile-gfx SOURCE behind a corrupt strip (§7.15)
-AR_LOADSTATE=<slot>    boot-time savestate load (main.c). CAVEAT: renders the state but game LOGIC won't advance (coroutine host-stack not restored) — not usable to resume/instrument from a captured moment
+AR_LOADSTATE=<slot>    boot-time savestate load (main.c). CAVEAT: renders the state but game LOGIC won't advance (coroutine host-stack not restored) — not usable to resume/instrument from a captured moment; redirect AR_SAVE_NATIVE_PATH to a disposable copy because state SRAM may auto-persist
 AR_AUDIODBG=1          DSP health: mvol/mute/output peak/SPC cyc-per-ms/pending KON  (peak=0 = silence GENERATED, not a device problem)
 AR_KONLOG=1            DSP key-on writes + per-voice state at key-on (vol/pitch/ADSR/BRR first-bytes — all-zero BRR = samples never uploaded, §7.11)
 AR_APULOG=1            APU port traffic + SPC upload blocks (+ stage2 sample-chunk streaming)

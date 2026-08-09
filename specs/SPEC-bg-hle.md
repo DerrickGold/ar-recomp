@@ -1,15 +1,16 @@
 # SPEC-bg-hle — action background world provider and scene plan
 
-**Status: In progress (BH6 exact presentation handoff complete).** The mapped
+**Status: In progress (BH7 default-on acceptance complete; BH8 cleanup next).** The mapped
 decoder, offline oracle, pure `ActionBgWorld`, differential observer, and
 `ActionBgPlan` policy matrix now feed a generic frame-scoped PPU virtual
-tilemap seam. `AR_ACTION_BG_HLE=1` remains default-off; eligible world layers
+tilemap seam. The provider is enabled when `AR_ACTION_BG_HLE` is unset or
+nonzero; exact `AR_ACTION_BG_HLE=0` retains the native A/B. Eligible world layers
 own both the authentic 256x224 viewport and synthetic margins after an exact
 live-ring preflight. Decorative/native layers retain the existing isolated
 mirror/repeat/raw paths. The resolved per-layer/per-band plan now crosses the
 immutable `FrameSlot` handoff and drives diorama row spans without reverse-
-classifying PPU masks. Broad soak/default-on promotion and behavior-neutral
-legacy cleanup remain open.
+classifying PPU masks. BH7's cross-presentation, transition and lifecycle gates
+are complete. Behavior-neutral legacy cleanup remains open as BH8.
 
 This spec replaces the narrower original BH1 proposal. It keeps that proposal's
 measured decoder evidence, but expands the target from "decode more margin
@@ -652,7 +653,8 @@ This phase proves ownership and classification independently of decoding.
 
 ### BH4 — virtual provider for synthetic margins only
 
-**Implementation status (2026-08-09): complete, default-off.**
+**Implementation status (2026-08-09): complete.** This phase originally shipped
+default-off; BH7 later promoted the validated full provider to default-on.
 `PpuVirtualTilemapBinding` is render-only host state outside both savestate
 regions and is cleared by `ppu_reset`, every widescreen policy reset, and the
 ActRaiser per-frame adapter. The Mode-1 4bpp renderer splits window spans at
@@ -699,7 +701,8 @@ ring rows when HLE is enabled.
 
 ### BH5 — provider owns the authentic world layer
 
-**Implementation status (2026-08-09): complete, default-off.** The generic
+**Implementation status (2026-08-09): complete.** This phase originally shipped
+default-off; BH7 later promoted it to default-on. The generic
 binding now has an explicit `kPpuVirtualTilemapFlag_IncludeAuthentic` ownership
 flag. Without it, BH4 remains margin-only. With it, window spans inside the
 authentic viewport use the same provider word path while the live PPU continues
@@ -742,8 +745,9 @@ frame pacing.
 - Extend provider sampling to the authentic center for eligible world layers.
 - Compare HLE and native tile words/pixels/priority planes on every displayed
   authentic coordinate.
-- Keep the feature default-off behind `AR_ACTION_BG_HLE=1` and expose counters
-  for eligible layers, native fallbacks and mismatches.
+- Keep the feature default-off during BH5 behind `AR_ACTION_BG_HLE=1` and expose
+  counters for eligible layers, native fallbacks and mismatches. BH7 supersedes
+  the rollout state while retaining exact `AR_ACTION_BG_HLE=0` as the native A/B.
 
 **Gate**
 
@@ -756,7 +760,8 @@ frame pacing.
 
 ### BH6 — unified decorative/mixed policy and exact diorama handoff
 
-**Implementation status (2026-08-09): complete, default-off HLE unchanged.**
+**Implementation status (2026-08-09): complete.** BH6 did not itself change the
+then-default-off rollout state; BH7 subsequently promoted the same path.
 `ActRaiser_ApplyWidescreenPolicy` retains the canonical `ActionBgPlan` for an
 ordinary action frame and projects explicit 4:3/Wide Raw/debug overrides at the
 same producer site. Non-action frames receive a native/raw plan projected from
@@ -801,6 +806,36 @@ pass.
 - No present-side live-state reads are introduced.
 
 ### BH7 — default-on soak and release acceptance
+
+**Implementation status (2026-08-09): complete, default-on.** Unset, empty, or
+nonzero `AR_ACTION_BG_HLE` enables the provider; exact `=0` disables it. The
+native streamers and VRAM ring remain active as fallback and oracle.
+
+Five paired 12-entry presentation matrices cover authentic 4:3, Wide Full,
+Wide Raw, diorama vertical extension 0, and diorama vertical extension 32.
+All state and PPU artifacts and every authentic center are exact. Wide Raw
+deliberately has no provider binding. Wide Full `0301` contains the one intended
+improvement: 30 pixels in the synthetic left margin become transparent because
+BG2's independent finite bound is honored instead of wrapping a native-ring sky
+column; the centered 256 pixels and all emulated state remain exact.
+
+Long natural Fillmore act-2 runs cover Wide Full, Wide Raw, and diorama-32
+through game frame 9425. A continuous Death Heim route covers
+`0701 -> 0702 -> 0703 -> 0701 -> 0704 -> 0705 -> 0701 -> 0706`, including eight
+source activations and the existing decorative `0705` classification. Across
+that route the provider bound all 7,376 eligible layer-frames and completed
+53,189,472 successful lookups with zero provider defect; all 65 paired artifacts
+are exact. The historical human playthrough still covers every boss through the
+ending. The natural Northwall `0608` and automated Death Heim ending-tail
+captures remain named BH1 archival gaps, not an unclassified provider path.
+
+Lifecycle gates cover same-frame paused redraw and PPU-policy rebind, explicit
+provider reset, fresh-process restart, savestate load, and a live Wide Full to
+4:3 settings/geometry transition. A real non-headless Cocoa diorama-32 run
+exercised the ordinary compositor and matched all 14 native artifacts; the
+machine had no GPU device, so GPU-only post-process shaders remain covered by
+the existing shader test rather than that run. Debug and release builds and all
+41 tests pass.
 
 **Work**
 

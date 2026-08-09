@@ -981,6 +981,11 @@ a global once in the boot init block. Not for end users; at most a hidden
 `AR_PERF`, `AR_PACE`, `AR_QUIT_FRAMES`, `AR_NO_RUN_DIR`, `AR_CTACTION`,
 `AR_RTSDISP_MISS`, `AR_OBJLOG`, `AR_PPULOG`, `AR_FRAMELOG`.
 
+`AR_QUIT_FRAMES` is a host-frame diagnostic bound in both headless and windowed
+runs; keeping it outside settings is intentional even though it now also makes
+ordinary-compositor probes terminate unattended. Scheduled game-frame probes
+such as `AR_WARP_AT` ignore the power-on `$5555` counter sentinel.
+
 **Dead config fields — parsed but zero consumers.** Do not expose these as
 menu settings; they currently do nothing (template leftovers from the upstream
 runtime base). Either wire them up first or omit them: `NoSpriteLimits`,
