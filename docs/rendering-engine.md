@@ -929,7 +929,7 @@ framebuffers, PPU snapshots, WRAM/SRAM, dispatch logs, and final state across
 the 12 entry census, representative wide policies, and vertical/diorama cases.
 Diagnostics name each planned source.
 
-BH4 makes the finite-world source selectable only for synthetic margins.
+BH4 first made the finite-world source selectable only for synthetic margins.
 `AR_ACTION_BG_HLE=1` asks `ActRaiserActionBg_BindPlan` to validate each planned
 world layer, atomically update its `ActionBgWorld`, and bind a generic
 `PpuVirtualTilemapBinding`. The binding carries the full per-layer camera and
@@ -937,8 +937,9 @@ the matching 10-bit PPU scroll phase. Scanout adds the nearest signed live
 phase delta on every line, so HBlank/HDMA motion survives across the 1024px
 hardware wrap. Only x outside 0..255 or scanlines outside 1..224 call the
 provider; the authentic centre keeps the original pointer-walking VRAM-ring
-path byte-for-byte. A finite miss is transparent. Native/decorative sources
-stay on raw, mirror, repeat, or clamp presentation from the plan.
+path byte-for-byte unless the explicit BH5 ownership flag described below is
+set. A finite miss is transparent. Native/decorative sources stay on raw,
+mirror, repeat, or clamp presentation from the plan.
 
 The provider changes only the tilemap word. Character bits remain live VRAM,
 and the resulting z/color word continues through the existing palette,
@@ -954,8 +955,29 @@ With legacy `AR_WS_BGREFRESH=0`, HLE `0101` still matches the corrected
 reference, while disabling both produces a different screenshot. Fillmore act
 2 diorama gf 2200 matches all nine layer/priority PNGs off/on and continues to
 match with `AR_VEXT_BANDFIX=0`; therefore the synthetic band can now come from
-the finite world rather than repaired VRAM ring rows. The feature remains
-default-off until BH5 and the broader soak phases complete.
+the finite world rather than repaired VRAM ring rows.
+
+BH5 adds `kPpuVirtualTilemapFlag_IncludeAuthentic`. The ActRaiser adapter sets
+it only when the full camera agrees with the live 10-bit PPU scroll phase and
+an exact 1-based-scanline viewport comparison finds zero native-ring mismatch
+and zero finite-world exit. The whole layer falls back for that frame on any
+contradiction; diagnostics separately count preflight, eligible, bound, phase,
+edge, mismatch, and runtime lookup results. The modern PPU can bind at authentic
+4:3 with zero margins, while wide-raw and the legacy renderer remain native
+controls. Character/palette/raster/priority ownership after the tile word is
+unchanged.
+
+The provider-enabled 12-entry matrix
+`runs/bg-hle-matrix-20260809-145341.json` bound all 19,522 eligible layer-frames,
+performed 18,216,295 zero-mismatch/zero-outside preflight checks, and issued
+150,579,968 successful provider fetches. All 204 framebuffer, emulated-state,
+and PPU-snapshot artifacts are byte-identical to the earlier native matrix.
+Fresh wide mixed/cyclic replays and the gf-2200 nine-plane diorama gate are also
+exact, including with the vertical ring repair disabled. At the 4096x1024 Aitos
+world and maximum 496px span, release/headless median cost is 0.067 ms/emulated
+frame over native, below the accepted 0.10 ms BH5 budget. The feature remains
+default-off pending later-room soak/default promotion; native streamers and the
+ring stay as fallback and oracle.
 
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color

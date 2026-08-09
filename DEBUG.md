@@ -775,17 +775,22 @@ show the frozen `$0088` against the advancing host frame:
   outside-world lookups, and fallback counts. Any mismatch or unexpected
   `invalid`/`compare` fallback blocks `SPEC-bg-hle.md` BH2; use the same replay
   without the variable to prove final emulator-state identity.
-- **`AR_ACTION_BG_HLE=1`** — enable the default-off BH4 virtual tilemap source
-  for action BG1/BG2 synthetic margins. Eligible `ActionBgPlan` world layers
-  supply SNES tilemap words outside the authentic 256x224 viewport; the centre
-  still reads the native VRAM ring, and live VRAM characters, CGRAM, windows,
-  priority, HDMA scroll, mosaic, brightness, transparency, and color math stay
-  in the ordinary PPU. Narrow decorative/native layers do not bind. Look for
-  `hle=01/02/03` on the `[widescreen]` line and the shutdown
-  `provider-summary`. `AR_WS_BGREFRESH=0 AR_ACTION_BG_HLE=1` is the decisive
-  side-margin positive control; `AR_VEXT_BANDFIX=0 AR_ACTION_BG_HLE=1` does the
-  same for diorama top rows. Both should match the normal corrected reference,
-  while disabling HLE as well restores the deliberately broken legacy arm.
+- **`AR_ACTION_BG_HLE=1`** — enable the default-off BH5 virtual tilemap source
+  for eligible action BG1/BG2 world layers. After the full camera matches the
+  live PPU scroll phase and every authentic tile word matches the resident ring
+  with zero finite exits, the provider owns both the authentic 256x224 viewport
+  and synthetic margins for that layer. Any contradiction clears the binding
+  for the frame. Live VRAM characters, CGRAM, windows, priority, HDMA scroll,
+  mosaic, brightness, transparency, and color math stay in the ordinary PPU;
+  narrow decorative/native layers remain on mirror/repeat/clamp/raw policy.
+  The modern PPU path also binds in authentic 4:3; wide-raw and the legacy PPU
+  remain native controls. Look for `hle=01/02/03` on widescreen policy lines and
+  the shutdown `provider-summary`, whose `preflight`, `eligible`, and `layers`
+  fields must show zero mismatch/outside and no eligible/bound divergence.
+  `AR_WS_BGREFRESH=0 AR_ACTION_BG_HLE=1` and
+  `AR_VEXT_BANDFIX=0 AR_ACTION_BG_HLE=1` remain the decisive side/top positive
+  controls: both match the corrected reference, while disabling HLE too
+  restores the deliberately broken legacy arm.
 - **`AR_WS_SKYPALACE_BG=0`** — disable the Sky Palace `$00/$07` render-only
   source-map repair and restore historical raw-wide output with dialogue
   staging visible in the margins. Default-on reads the 16x16 metatile page at

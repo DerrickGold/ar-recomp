@@ -190,8 +190,62 @@ The focused evidence set is presentation-aware:
   scroll changes, signed scroll wrap, flips, mosaic, vertical bounds, and
   reset/fail-closed behavior.
 
-This closes BH4, not BH1/BH5: the remaining census gaps and authentic-centre
-provider migration still require their own gates.
+This closes BH4. BH5's authentic-centre handoff is recorded below; the later-
+room/natural-transition gaps in BH1 remain separate from renderer ownership.
+
+## BH5 authentic-world provider — 2026-08-09
+
+`kPpuVirtualTilemapFlag_IncludeAuthentic` extends the generic binding without
+changing BH4's default margin-only contract. ActRaiser opts a world layer into
+full ownership only when its full camera matches the live 10-bit scroll phase,
+the exact displayed tile range has zero decoder/native-ring mismatches, and no
+displayed coordinate is outside the finite world. Unknown flags, the legacy
+PPU, raw-wide presentation, narrow/decorative sources, and every failed
+precondition retain the native path. Diagnostics distinguish preflight layers,
+tiles, mismatches, finite exits, eligible layers, successful bindings, and
+runtime lookups.
+
+The provider-enabled authentic-4:3 entry command is:
+
+```sh
+python3 tools/bg_hle_matrix.py --enable-provider
+```
+
+Manifest: `runs/bg-hle-matrix-20260809-145341.json`. Results:
+
+- 12/12 targets passed; 19,522 eligible layer-frames all bound;
+- 18,216,295 authentic preflight tile comparisons, zero mismatch/outside;
+- 150,579,968 provider tile fetches, zero finite exits;
+- zero scroll-phase, invalid-source, allocation, comparison, or bind-divergence
+  fallbacks;
+- all 204 compared artifacts are byte-identical to the earlier native matrix:
+  12 final framebuffers, final WRAM/SRAM/dispatch/state per target, and two
+  complete PPU snapshots per target.
+
+The corrected comparator now follows the PPU's authentic 1-based scanline range
+(`1..224`) rather than checking an unused row above fractional cameras. Its
+same-run total is 19,315,975 matching native-ring words. The provider total is
+lower by design because `ActionBgPlan` keeps narrow/authentic-viewport layers
+native even when their raw 64x64 ring happens to be comparator-readable.
+
+Presentation gates were repeated independently of the 4:3 matrix. Wide `0101`,
+mixed Bloodpool `0201`, and cyclic Aitos `0401` match native screenshots plus
+WRAM/SRAM/dispatch/state in `runs/20260809-140151`,
+`runs/20260809-144615`, and `runs/20260809-144621`. Fillmore act-2 diorama gf
+2200 in `runs/20260809-144640` matches all nine native layer/priority PNGs and
+final state; `runs/20260809-144702` remains exact with the legacy vertical-band
+repair disabled.
+
+The maximum-span benchmark used the largest censused world, Aitos `0401` BG1
+(4096x1024), at 496 pixels with the comparator disabled. Three release/headless
+runs measured medians of 2.298703 s native and 2.426934 s HLE over 1,900 frames:
+0.067 ms/frame added. This passes the explicit BH5 ceiling of 0.10 ms/frame at
+the worst measured span (0.4% of a 60 Hz frame budget; 5.6% of unpaced headless
+throughput).
+
+This closes BH5's implementation and current evidence gate. It does not fill
+the natural Northwall boss transition or the Death Heim ending-tail gaps, make
+the feature default-on, or authorize deleting the native streamers/ring oracle.
 
 ### Rejected Northwall `0608` shortcut
 
