@@ -1090,6 +1090,16 @@ the current debugging process; this file is the case law.
     producing the same WRAM SHA-256 `b74e3362...` as the original arm. Pre-fix isolated plane:
     `runs/20260809-082943/diorama_dump/bg2_hi_gf2200.png`.
 
+    **BH4 confirmation (2026-08-09):** the default-off action-background virtual
+    tilemap path independently enforces the same finite boundary. At gf 2200,
+    HLE off/on produced byte-identical hashes for all nine diorama layer and
+    priority-plane PNGs (`runs/20260809-133400` / `runs/20260809-133441`).
+    Repeating the HLE arm with `AR_VEXT_BANDFIX=0` remained byte-identical
+    (`runs/20260809-133545`). Thus BG2-high transparency no longer relies on
+    repaired negative VRAM-ring rows once the provider is bound; BG1 continues
+    from its independently valid finite world, and the authentic centre stays
+    native.
+
     **Reusable lesson:** a resident tilemap address is not automatically a spatial world
     coordinate outside hardware-visible scanlines. An A/B that confines a symptom to an
     extension proves the extension triggers it; source-layer isolation plus independent
