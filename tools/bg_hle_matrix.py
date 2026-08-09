@@ -4,7 +4,8 @@
 The runner starts from the deterministic replay's transition-capable world-map
 window, stages each verified raw warp target, captures two stable game frames,
 enables the read-only runtime comparator, and validates the resulting snapshots
-with ``bg_hle_census.py``. It never enables a background provider.
+with ``bg_hle_census.py``. Pass ``--enable-provider`` to exercise the
+default-off renderer handoff under the same evidence contract.
 
     python3 tools/bg_hle_matrix.py
     python3 tools/bg_hle_matrix.py --targets 0201,0202 --fail-fast
@@ -62,6 +63,15 @@ COMPARATOR_RE = re.compile(
     r"invalid:(?P<invalid>\d+),alloc:(?P<alloc>\d+),"
     r"(?:phase:(?P<phase>\d+),edge:(?P<edge>\d+),)?"
     r"compare:(?P<compare>\d+)\}")
+PROVIDER_RE = re.compile(
+    r"\[action-bg-hle\] provider-summary frames=(?P<frames>\d+) "
+    r"preflight=\{layers:(?P<preflight_layers>\d+),"
+    r"tiles:(?P<preflight_tiles>\d+),"
+    r"mismatches:(?P<preflight_mismatches>\d+),"
+    r"outside:(?P<preflight_outside>\d+)\} "
+    r"eligible=(?P<eligible>\d+) layers=(?P<layers>\d+) "
+    r"lookups=(?P<lookups>\d+) tiles=(?P<tiles>\d+) "
+    r"outside=(?P<outside>\d+)")
 
 
 class MatrixError(Exception):
@@ -99,6 +109,31 @@ def parse_comparator_summary(log):
     }
 
 
+def parse_provider_summary(log):
+    matches = list(PROVIDER_RE.finditer(log))
+    if not matches:
+        return None
+    return {key: int(value) for key, value in matches[-1].groupdict().items()}
+
+
+def validate_provider_summary(provider, expected):
+    if not expected:
+        if provider is not None:
+            raise MatrixError("provider unexpectedly enabled")
+        return
+    if provider is None:
+        raise MatrixError("provider summary missing")
+    for field in ("preflight_mismatches", "preflight_outside"):
+        if provider[field]:
+            raise MatrixError("provider %s=%d" % (field, provider[field]))
+    if not provider["preflight_layers"] or not provider["eligible"]:
+        raise MatrixError("provider had no eligible layers")
+    if provider["eligible"] != provider["layers"]:
+        raise MatrixError(
+            "provider eligible=%d but bound=%d" %
+            (provider["eligible"], provider["layers"]))
+
+
 def parse_run_directory(log):
     match = RUN_DIRECTORY_RE.search(log)
     return match.group(1) if match else None
@@ -128,7 +163,8 @@ def inspect_ppm(path):
     }
 
 
-def inspect_run(target, run_directory, log, rom_hash, expected_snapshots):
+def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
+                expect_provider=False):
     comparator = parse_comparator_summary(log)
     if comparator is None:
         raise MatrixError("runtime comparator summary missing")
@@ -136,6 +172,8 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots):
                   "compare"):
         if comparator[field]:
             raise MatrixError("comparator %s=%d" % (field, comparator[field]))
+    provider = parse_provider_summary(log)
+    validate_provider_summary(provider, expect_provider)
     snapshot_directory = os.path.join(run_directory, "snapshots")
     try:
         prefixes = bg_hle_census.discover_prefixes([snapshot_directory])
@@ -178,6 +216,7 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots):
         "name": TARGET_NAMES[target],
         "run_directory": run_directory,
         "comparator": comparator,
+        "provider": provider,
         "census": bg_hle_census.build_summary(records),
         "snapshots": records,
         "framebuffer": framebuffer,
@@ -197,6 +236,7 @@ def run_target(args, target, rom_hash):
         environment.update({
             "AR_HEADLESS": "1",
             "AR_ACTION_BG_HLE_COMPARE": "1",
+            "AR_ACTION_BG_HLE": "1" if args.enable_provider else "0",
             "AR_INPUT_REPLAY": args.replay,
             "AR_SETTINGS_PATH": settings_path,
             "AR_WARP": target,
@@ -223,7 +263,8 @@ def run_target(args, target, rom_hash):
         run_directory = os.path.join(args.cwd, run_directory)
     try:
         return inspect_run(
-            target, run_directory, log, rom_hash, len(args.capture_frames))
+            target, run_directory, log, rom_hash, len(args.capture_frames),
+            args.enable_provider)
     except MatrixError as error:
         if error.run_directory is None:
             error.run_directory = run_directory
@@ -242,6 +283,7 @@ def write_manifest(path, args, rom_hash, results):
         "capture_frames": args.capture_frames,
         "quit_frames": args.quit_frames,
         "settings_fixture": "generated flat defaults; Diorama off",
+        "provider_enabled": args.enable_provider,
         "results": results,
     }
     with open(path, "w", encoding="utf-8") as output:
@@ -276,6 +318,8 @@ def parse_args(argv):
     parser.add_argument("--manifest",
                         help="output JSON (default: runs/bg-hle-matrix-<time>.json)")
     parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument("--enable-provider", action="store_true",
+                        help="enable and validate the BH5 renderer provider")
     return parser.parse_args(argv)
 
 
@@ -308,8 +352,12 @@ def main(argv=None):
             result = run_target(args, target, rom_hash)
             results.append(result)
             comparator = result["comparator"]
-            print("      PASS tiles=%d mismatches=0 native-fallbacks=%d run=%s" % (
-                comparator["tiles"], comparator["native"],
+            provider = result["provider"]
+            provider_text = ""
+            if provider:
+                provider_text = " provider-layers=%d" % provider["layers"]
+            print("      PASS tiles=%d mismatches=0 native-fallbacks=%d%s run=%s" % (
+                comparator["tiles"], comparator["native"], provider_text,
                 result["run_directory"]), flush=True)
         except (MatrixError, OSError) as error:
             failed = True

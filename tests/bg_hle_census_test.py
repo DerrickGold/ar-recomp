@@ -117,6 +117,22 @@ class BgHleCensusTest(unittest.TestCase):
         summary = matrix.parse_comparator_summary(log)
         self.assertEqual(summary["phase"], 2)
         self.assertEqual(summary["edge"], 1)
+        provider_log = (
+            "[action-bg-hle] provider-summary frames=10 "
+            "preflight={layers:8,tiles:7000,mismatches:0,outside:0} "
+            "eligible=8 layers=8 lookups=9000 tiles=8900 outside=100\n")
+        provider = matrix.parse_provider_summary(provider_log)
+        self.assertEqual(provider["preflight_tiles"], 7000)
+        self.assertEqual(provider["layers"], 8)
+        self.assertEqual(provider["outside"], 100)
+        matrix.validate_provider_summary(provider, True)
+        bad_provider = dict(provider, preflight_mismatches=1)
+        with self.assertRaises(matrix.MatrixError):
+            matrix.validate_provider_summary(bad_provider, True)
+        with self.assertRaises(matrix.MatrixError):
+            matrix.validate_provider_summary(None, True)
+        with self.assertRaises(matrix.MatrixError):
+            matrix.validate_provider_summary(provider, False)
 
     def test_matrix_inspects_framebuffer_header_and_hash(self):
         with tempfile.TemporaryDirectory() as directory:
