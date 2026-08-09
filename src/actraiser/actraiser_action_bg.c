@@ -244,10 +244,17 @@ static bool CompareEnabled(void) {
 static bool HleEnabled(void) {
   if (s_observer.hle_enabled < 0) {
     const char *value = getenv("AR_ACTION_BG_HLE");
-    s_observer.hle_enabled = value && value[0] && value[0] != '0';
+    /* BH7: provider ownership is the production default. Keep one exact
+     * explicit-off A/B (`AR_ACTION_BG_HLE=0`); an absent or empty variable
+     * selects the default, while any non-zero value remains a compatible
+     * explicit-on spelling for older harnesses. */
+    s_observer.hle_enabled = !value || !value[0] || value[0] != '0';
     if (s_observer.hle_enabled)
       fprintf(stderr,
               "[action-bg-hle] full world-layer provider enabled\n");
+    else
+      fprintf(stderr,
+              "[action-bg-hle] provider disabled by AR_ACTION_BG_HLE=0\n");
   }
   return s_observer.hle_enabled != 0;
 }

@@ -249,7 +249,8 @@ static void TestFramePlanBinding(void) {
     free(wram);
     return;
   }
-  CHECK(setenv("AR_ACTION_BG_HLE", "1", 1) == 0);
+  /* BH7 production default: an absent variable must exercise the provider. */
+  CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
   wram[kActRaiserWram_CurrentMap] = 1;
   Write16(wram, kActRaiserWram_GameFrame, 100);
@@ -352,6 +353,22 @@ static void TestFramePlanBinding(void) {
       wram, kActRaiserWramSize, &plan, ppu) == 0);
   CHECK(ppu->virtualTilemap[0].lookup == NULL);
 
+  ActRaiserActionBg_Shutdown();
+
+  /* The native A/B remains exact and frame-scoped: after resetting the cached
+   * environment decision, explicit 0 must clear/decline every binding. */
+  CHECK(setenv("AR_ACTION_BG_HLE", "0", 1) == 0);
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = kActRaiserBgLayerMask_Bg1 |
+                          kActRaiserBgLayerMask_Bg2;
+  plan.layer[0].source = kActionBgSource_WorldMap;
+  Write16(wram, kActRaiserWram_Bg1CameraX, 13);
+  ppu->hScroll[0] = 13;
+  Write16(wram, kActRaiserWram_GameFrame, 104);
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) == 0);
+  CHECK(ppu->virtualTilemap[0].lookup == NULL);
+  CHECK(ActRaiserActionBg_GetDiagnostics()->provider_frames == 0);
   ActRaiserActionBg_Shutdown();
   CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
   free(ppu);
