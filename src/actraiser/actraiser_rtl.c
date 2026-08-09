@@ -927,7 +927,25 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   /* Virtual tilemaps are frame-scoped. Clear before the inactive early return
    * so leaving widescreen cannot retain the prior action room's provider. */
   PpuClearVirtualTilemaps(g_ppu);
-  if (!g_ws_active) return;
+  if (!g_ws_active) {
+    /* BH5 owns eligible authentic world layers independently of presentation
+     * width. Keep the native 4:3 path in the same default-off provider census;
+     * decorative policy is irrelevant without margins, but its source
+     * classification remains the authority for which layers may bind. The
+     * legacy renderer cannot consume this host seam, so fail closed there. */
+    extern bool g_new_ppu;
+    if (g_new_ppu &&
+        ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+      ActionBgPlan plan;
+      ActionBgPresentationPolicy presentation;
+      if (ActRaiserActionBg_BuildPlan(
+              g_ram, kActRaiserWramSize, g_ppu,
+              g_settings.ws_bg2_padding, &plan, &presentation))
+        ActRaiserActionBg_BindPlan(
+            g_ram, kActRaiserWramSize, &plan, g_ppu);
+    }
+    return;
+  }
   static int survey = -1;
   if (survey < 0) {
     const char *e = getenv("AR_WS_SURVEY");
