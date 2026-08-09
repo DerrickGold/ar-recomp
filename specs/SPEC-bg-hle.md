@@ -21,6 +21,7 @@ tiles" to a complete action-background HLE boundary:
 Companion references:
 
 - `docs/rendering-engine.md` §3-§7, §12a/§12b, §13 and §13i;
+- `docs/bg-hle-census.md` for the live coverage ledger and exact gaps;
 - `docs/SEAMS.md`, Graphics/PPU rows;
 - `docs/bug-ledger.md` §37 and §39;
 - `docs/code-style.md` for module boundaries and render verification.
@@ -522,12 +523,16 @@ PPU, color-math, window, scroll, and active presentation registers needed to
 avoid inferred CHR/BGSC assumptions. A ROM-free Python suite pins matching,
 positive-mismatch, missing-metadata, and discovery behavior.
 
-The retained corpus currently contains 29 full snapshots but only six action
-captures across raw maps `$01/$02` and `$01/$03`. All 10,984 sampled tile words
-match; only the two new `$01/$02` captures carry complete PPU metadata. This
-inventory proves the tooling and identifies the coverage gap; it does not close
-BH1. Region `$02-$07`, required policy scenes, transitions, and priority-plane
-captures remain to be collected.
+The repeatable ordinary-entry runner (`tools/bg_hle_matrix.py`) now covers both
+act entries for regions `$01-$06`. Its isolated flat-settings run produced 24
+PPU-complete snapshots, 12 visually inspected distinct framebuffers, 43,999
+offline ring checks, and 19,072,823 runtime comparisons with zero mismatches or
+unexpected provider failures. All BG1 entry layers and six BG2 entry layers are
+eligible; four BG2 samples are explicit 32x32 native/decorative layers, while
+two more are disabled at the sampled entry state. Exact per-target evidence and
+limitations are in `docs/bg-hle-census.md`. This broadens BH1 substantially but
+does not close it: later-room policy/HDMA handoffs, priority planes, deliberate
+positive controls, Northwall boss, and Death Heim remain.
 
 **Gate**
 

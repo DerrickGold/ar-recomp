@@ -925,6 +925,14 @@ This pins the BGSC geometry, character bases, enables, scroll, window and color
 math state that a binary-memory-only snapshot used to leave implicit.
 `tools/bg_hle_census.py` consumes both new and legacy snapshots, but marks old
 captures' PPU eligibility unknown rather than substituting assumed registers.
+`tools/bg_hle_matrix.py` builds on that format with a generated flat settings
+fixture and the verified non-action warp seam. The 2026-08-09 region `$01-$06`
+ordinary-entry sweep passed 12/12 targets: 19,072,823 runtime comparisons and
+43,999 offline snapshot checks with zero mismatch, plus twelve distinct
+256x224 framebuffers inspected as a 4x3 contact sheet. All twelve BG1 layers
+were eligible at entry; BG2 split into six eligible layers, four explicit
+32x32 decorative/native layers, and two disabled samples. See
+`docs/bg-hle-census.md` for the table and the still-open special-room gate.
 
 The decoder is intentionally scheduled at the authentic streamer's tile
 cadence, not at scanout cadence. A host-only key contains the action room,

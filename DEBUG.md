@@ -863,6 +863,12 @@ show the frozen `$0088` against the advancing host frame:
    finite WRAM map/table spans, records source variants and CHR/BGSC ownership,
    and compares every authentic viewport tile with live VRAM. Old snapshots
    without `.ppu.json` remain decodable but report PPU eligibility as unknown.
+   `python3 tools/bg_hle_matrix.py` runs the 12 verified region `$01-$06` act
+   entries through that contract. It generates a flat/Diorama-off settings
+   fixture per child process (never reads or writes the user's live settings),
+   captures two snapshots plus a framebuffer, validates the runtime comparator,
+   and writes an ignored JSON manifest under `runs/`. `--targets 0201,0605`
+   narrows a sweep; `--fail-fast` is useful while changing the harness.
 2b. **Presentation modes that change the margin budget must be switched MID-RUN**:
    `AR_DIORAMA_AT=<gameframe>` flips Diorama 3D on through the same descriptor
    path as the `D` hotkey. Booting with `diorama_mode = On` forces the margin
