@@ -924,6 +924,9 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
 static void ActRaiser_ApplyWidescreenPolicy(void) {
   extern bool g_ws_active;
   extern int g_ws_extra;
+  /* Virtual tilemaps are frame-scoped. Clear before the inactive early return
+   * so leaving widescreen cannot retain the prior action room's provider. */
+  PpuClearVirtualTilemaps(g_ppu);
   if (!g_ws_active) return;
   static int survey = -1;
   if (survey < 0) {
@@ -955,6 +958,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   int bg_plan_valid = 0;
   int bg_plan_source_bg1 = kNoActionBgPlanSource;
   int bg_plan_source_bg2 = kNoActionBgPlanSource;
+  int bg_hle_allowed = 0;
+  uint8 bg_hle_bindings = 0;
+  ActionBgPlan bg_plan = { 0 };
   /* True when the current wide world has finite horizontal bounds. The PPU
    * still owns the fixed centering budget; this policy narrows the live left
    * and right margins as the camera approaches either world edge. */
@@ -1020,7 +1026,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * binary. AR_WS_BGREFRESH=0 returns exactly to Stage A (raw wide renderer,
      * stale/wrapped margin BG) without changing the action geometry. */
     wide = g_settings.ws_action;
-    ActionBgPlan bg_plan;
     ActionBgPresentationPolicy bg_policy;
     if (ActRaiserActionBg_BuildPlan(
             g_ram, kActRaiserWramSize, g_ppu,
@@ -1028,6 +1033,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       bg_plan_valid = 1;
       bg_plan_source_bg1 = bg_plan.layer[0].source;
       bg_plan_source_bg2 = bg_plan.layer[1].source;
+      bg_hle_allowed = wide;
       clamp = bg_policy.clamp_layers;
       mirror = bg_policy.mirror_layers;
       repeat = bg_policy.repeat_layers;
@@ -1047,6 +1053,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       if (L >= 0 && L < 4) g_ppu->screenEnabled[0] = (uint8)(1u << L);
       wide = 1; clamp = 0; mirror = 0; repeat = 0;  /* raw tilemap data */
       repeat_band_layer = -1;
+      bg_hle_allowed = 0;
     } }
   /* AR_WS_CLAMP=<hex mask>: override the per-layer clamp for tuning. */
   { const char *cm = getenv("AR_WS_CLAMP");
@@ -1054,6 +1061,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       wide = 1; clamp = (uint8)strtoul(cm, NULL, 16);
       mirror = 0; repeat = 0;
       repeat_band_layer = -1;
+      bg_hle_allowed = 0;
     } }
   /* Capture presets are final policy overrides, intentionally after the
    * scene-specific rules and diagnostic clamp knob. This makes promotional
@@ -1070,10 +1078,12 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     wide = 0; clamp = 0; mirror = 0; repeat = 0;
     bg2_gap = 0; bounded_world_margins = 0;
     repeat_band_layer = -1;
+    bg_hle_allowed = 0;
   } else if (g_settings.display_mode == kDisplayMode_WideRaw) {
     wide = 1; clamp = 0; mirror = 0; repeat = 0;
     bg2_gap = 0; bounded_world_margins = 0;
     repeat_band_layer = -1;
+    bg_hle_allowed = 0;
   }
 
   /* Host-overlay HUD layout. BG3 rows 0-3 are the live status compose band
@@ -1142,6 +1152,17 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3,
                            0, 0, kActRaiserAuthenticWidth, hud_split_height,
                            kPpuOverlayFlag_RemoveFromGame);
+    if (bg_hle_allowed && bg_plan_valid) {
+      bg_hle_bindings = ActRaiserActionBg_BindPlan(
+          g_ram, kActRaiserWramSize, &bg_plan, g_ppu);
+      /* The legacy path can enforce finite side bounds only when its VRAM
+       * margin refresh is active. A bound BG1 provider owns those finite
+       * coordinates directly, so retain the same edge geometry even when the
+       * ring-repair feature is deliberately disabled for a positive control. */
+      if ((bg_hle_bindings & kActRaiserBgLayerMask_Bg1) &&
+          bg_plan.bound_canvas_to_world)
+        bounded_world_margins = 1;
+    }
     if (bounded_world_margins) {
       /* Clamp each side to real BG1 world space. Action width is section
        * state $2E; simulation towns are the fixed 512px world proven by
@@ -1173,7 +1194,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
              last_hud_split_height = -1, last_hud_split_left_end = -1,
              last_hud_split_right_start = -1,
              last_hud_left_only_y = -1, last_bg_plan_valid = -1,
-             last_bg_plan_source_bg1 = -2, last_bg_plan_source_bg2 = -2;
+             last_bg_plan_source_bg1 = -2, last_bg_plan_source_bg2 = -2,
+             last_bg_hle_bindings = -1;
   if (wide != last_wide || clamp != last_clamp || mirror != last_mirror ||
       repeat != last_repeat ||
       repeat_band_layer != last_repeat_band_layer ||
@@ -1185,7 +1207,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       hud_left_only_y != last_hud_left_only_y ||
       bg_plan_valid != last_bg_plan_valid ||
       bg_plan_source_bg1 != last_bg_plan_source_bg1 ||
-      bg_plan_source_bg2 != last_bg_plan_source_bg2) {
+      bg_plan_source_bg2 != last_bg_plan_source_bg2 ||
+      bg_hle_bindings != last_bg_hle_bindings) {
     last_wide = wide;
     last_clamp = clamp;
     last_mirror = mirror;
@@ -1200,9 +1223,11 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     last_bg_plan_valid = bg_plan_valid;
     last_bg_plan_source_bg1 = bg_plan_source_bg1;
     last_bg_plan_source_bg2 = bg_plan_source_bg2;
+    last_bg_hle_bindings = bg_hle_bindings;
     fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s "
             "clamp=%02x mirror=%02x repeat=%02x rband=%d/%u-%u "
-            "hud=%u/%u/%u left-only-y=%u bg-plan=%d source=%s/%s\n",
+            "hud=%u/%u/%u left-only-y=%u bg-plan=%d source=%s/%s "
+            "hle=%02x\n",
             (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
             map_group, map_number, wide ? "WIDE" : "pillarbox",
             clamp, mirror, repeat, repeat_band_layer,
@@ -1217,7 +1242,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
             bg_plan_valid
                 ? ActionBgSourceKind_Name(
                       (ActionBgSourceKind)bg_plan_source_bg2)
-                : "none");
+                : "none",
+            bg_hle_bindings);
   }
   /* AR_WS_LAYERS=1: dump per-frame PPU layer/tilemap state — which BG a
    * margin artifact lives on, and whether that BG's tilemap is 32-wide (wraps
