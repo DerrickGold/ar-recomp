@@ -111,6 +111,12 @@ class BgHleCensusTest(unittest.TestCase):
         summary = matrix.parse_comparator_summary(log)
         self.assertEqual(summary["tiles"], 7000)
         self.assertEqual(summary["native"], 3)
+        self.assertEqual(summary["phase"], 0)
+        self.assertEqual(summary["edge"], 0)
+        log = log.replace("alloc:0,compare:0", "alloc:0,phase:2,edge:1,compare:0")
+        summary = matrix.parse_comparator_summary(log)
+        self.assertEqual(summary["phase"], 2)
+        self.assertEqual(summary["edge"], 1)
 
     def test_matrix_inspects_framebuffer_header_and_hash(self):
         with tempfile.TemporaryDirectory() as directory:

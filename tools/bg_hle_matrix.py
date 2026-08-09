@@ -60,6 +60,7 @@ COMPARATOR_RE = re.compile(
     r"fallbacks=\{blank:(?P<blank>\d+),mode:(?P<mode>\d+),"
     r"disabled:(?P<disabled>\d+),native:(?P<native>\d+),"
     r"invalid:(?P<invalid>\d+),alloc:(?P<alloc>\d+),"
+    r"(?:phase:(?P<phase>\d+),edge:(?P<edge>\d+),)?"
     r"compare:(?P<compare>\d+)\}")
 
 
@@ -92,7 +93,10 @@ def parse_comparator_summary(log):
     matches = list(COMPARATOR_RE.finditer(log))
     if not matches:
         return None
-    return {key: int(value) for key, value in matches[-1].groupdict().items()}
+    return {
+        key: int(value) if value is not None else 0
+        for key, value in matches[-1].groupdict().items()
+    }
 
 
 def parse_run_directory(log):
@@ -128,7 +132,8 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots):
     comparator = parse_comparator_summary(log)
     if comparator is None:
         raise MatrixError("runtime comparator summary missing")
-    for field in ("mismatches", "invalid", "alloc", "compare"):
+    for field in ("mismatches", "invalid", "alloc", "phase", "edge",
+                  "compare"):
         if comparator[field]:
             raise MatrixError("comparator %s=%d" % (field, comparator[field]))
     snapshot_directory = os.path.join(run_directory, "snapshots")
