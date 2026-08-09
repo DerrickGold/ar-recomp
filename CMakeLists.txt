@@ -373,6 +373,17 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_bg_world
         COMMAND actraiser_action_bg_world_test)
 
+    add_executable(actraiser_action_bg_plan_test
+        tests/action_bg_plan_test.c
+        src/action/action_bg_plan.c
+    )
+    target_include_directories(actraiser_action_bg_plan_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/action
+    )
+    add_test(NAME actraiser_action_bg_plan
+        COMMAND actraiser_action_bg_plan_test)
+
     add_executable(actraiser_action_bg_test
         tests/actraiser_action_bg_test.c
         src/action/action_bg_world.c
