@@ -12,6 +12,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import bg_hle_census as census  # noqa: E402
+import bg_hle_matrix as matrix  # noqa: E402
 
 
 def write_u16(data, address, value):
@@ -92,6 +93,32 @@ class BgHleCensusTest(unittest.TestCase):
             self.assertEqual(summary["action_maps"], 1)
             self.assertEqual(summary["groups"]["01/02/BG1"]["map_variants"], 1)
             self.assertEqual(summary["groups"]["01/02/BG1"]["mismatches"], 0)
+
+    def test_matrix_parsers_pin_verified_targets_and_summary(self):
+        self.assertEqual(matrix.parse_targets("0201,0202,0201"),
+                         ["0201", "0202"])
+        self.assertEqual(matrix.parse_targets_as_frames("900,0x4b0"),
+                         [900, 1200])
+        log = (
+            "[run-dir] runs/20260809-123456 (console.log)\n"
+            "[action-bg-hle] summary frames=10 activations=2 layers=8 "
+            "tiles=7000 mismatches=0 outside=0 "
+            "fallbacks={blank:4,mode:0,disabled:0,native:3,invalid:0,"
+            "alloc:0,compare:0}\n")
+        self.assertEqual(matrix.parse_run_directory(log),
+                         "runs/20260809-123456")
+        summary = matrix.parse_comparator_summary(log)
+        self.assertEqual(summary["tiles"], 7000)
+        self.assertEqual(summary["native"], 3)
+
+    def test_matrix_inspects_framebuffer_header_and_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "shot.ppm")
+            with open(path, "wb") as output:
+                output.write(b"P6\n2 1\n255\n\x00\x01\x02\x03\x04\x05")
+            metadata = matrix.inspect_ppm(path)
+            self.assertEqual((metadata["width"], metadata["height"]), (2, 1))
+            self.assertEqual(len(metadata["sha256"]), 64)
 
     def test_positive_mismatch_and_missing_ppu_are_distinct(self):
         with tempfile.TemporaryDirectory() as directory:
