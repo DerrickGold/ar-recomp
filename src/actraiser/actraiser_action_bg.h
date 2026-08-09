@@ -27,6 +27,8 @@ typedef struct ActRaiserActionBgCompareResult {
   size_t outside_world;
   int first_tile_x;
   int first_tile_y;
+  int first_outside_tile_x;
+  int first_outside_tile_y;
   uint16_t first_hle;
   uint16_t first_native;
 } ActRaiserActionBgCompareResult;

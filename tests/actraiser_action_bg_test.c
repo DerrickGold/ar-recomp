@@ -134,6 +134,8 @@ static void TestRingAndComparison(void) {
   CHECK(result.compared == 33u * 29u);
   CHECK(result.mismatches == 0 && result.outside_world == 0);
   CHECK(result.first_tile_x == -1 && result.first_tile_y == -1);
+  CHECK(result.first_outside_tile_x == -1 &&
+        result.first_outside_tile_y == -1);
 
   const int changed_x = snapshot.camera_x >> 3;
   const int changed_y = snapshot.camera_y >> 3;
@@ -157,6 +159,8 @@ static void TestRingAndComparison(void) {
   CHECK(result.compared == 2u * 29u);
   CHECK(result.outside_world == 31u * 29u);
   CHECK(result.mismatches == 0);
+  CHECK(result.first_outside_tile_x == 64 &&
+        result.first_outside_tile_y == 0);
 
   snapshot.bgsc = 0x62;
   CHECK(!ActRaiserActionBg_WorldRingEligible(&snapshot, kVramWords));
