@@ -99,6 +99,12 @@ class BgHleCensusTest(unittest.TestCase):
                 }],
             }, output)
 
+    @staticmethod
+    def _write_ppm(path, width, height, pixels):
+        with open(path, "wb") as output:
+            output.write(b"P6\n%d %d\n255\n" % (width, height))
+            output.write(pixels)
+
     def test_matching_snapshot_and_ppu_eligibility(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = CensusFixture(directory)
@@ -224,6 +230,42 @@ class BgHleCensusTest(unittest.TestCase):
                 left_manifest, right_manifest)
             self.assertEqual(len(result["mismatches"]), 1)
             self.assertEqual(result["mismatches"][0]["artifact"], "shot.ppm")
+
+    def test_artifact_compare_can_pin_authentic_center_and_report_margins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            left_run = os.path.join(directory, "left")
+            right_run = os.path.join(directory, "right")
+            self._write_artifact_run(left_run, b"same-")
+            self._write_artifact_run(right_run, b"same-")
+            left_manifest = os.path.join(directory, "left.json")
+            right_manifest = os.path.join(directory, "right.json")
+            self._write_artifact_manifest(left_manifest, left_run)
+            self._write_artifact_manifest(right_manifest, right_run)
+            width, height = 258, 2
+            left = bytearray(width * height * 3)
+            right = bytearray(left)
+            right[0:3] = b"\x01\x02\x03"
+            self._write_ppm(os.path.join(left_run, "shot.ppm"),
+                            width, height, left)
+            self._write_ppm(os.path.join(right_run, "shot.ppm"),
+                            width, height, right)
+            result = artifact_compare.compare_manifests(
+                left_manifest, right_manifest, "authentic-center")
+            self.assertEqual(result["mismatches"], [])
+            self.assertEqual(
+                result["framebuffer_differences"][0]["left_margin_pixels"], 1)
+            self.assertEqual(
+                result["framebuffer_differences"][0]["center_pixels"], 0)
+
+            center_offset = 3
+            right[center_offset:center_offset + 3] = b"\x04\x05\x06"
+            self._write_ppm(os.path.join(right_run, "shot.ppm"),
+                            width, height, right)
+            result = artifact_compare.compare_manifests(
+                left_manifest, right_manifest, "authentic-center")
+            self.assertEqual(len(result["mismatches"]), 1)
+            self.assertEqual(
+                result["mismatches"][0]["framebuffer"]["center_pixels"], 1)
 
     def test_positive_mismatch_and_missing_ppu_are_distinct(self):
         with tempfile.TemporaryDirectory() as directory:
