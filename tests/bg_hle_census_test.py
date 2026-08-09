@@ -13,6 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import bg_hle_census as census  # noqa: E402
 import bg_hle_matrix as matrix  # noqa: E402
+import bg_hle_artifact_compare as artifact_compare  # noqa: E402
 
 
 def write_u16(data, address, value):
@@ -74,6 +75,29 @@ class CensusFixture:
 
 
 class BgHleCensusTest(unittest.TestCase):
+    @staticmethod
+    def _write_artifact_run(directory, payload):
+        os.makedirs(os.path.join(directory, "snapshots"))
+        for name in artifact_compare.FINAL_ARTIFACTS:
+            with open(os.path.join(directory, name), "wb") as output:
+                output.write(payload + name.encode("ascii"))
+        for suffix in artifact_compare.SNAPSHOT_SUFFIXES:
+            with open(os.path.join(directory, "snapshots", "vd_gf10" + suffix),
+                      "wb") as output:
+                output.write(payload + suffix.encode("ascii"))
+
+    @staticmethod
+    def _write_artifact_manifest(path, run_directory):
+        with open(path, "w", encoding="utf-8") as output:
+            json.dump({
+                "capture_frames": [10],
+                "results": [{
+                    "target": "0101",
+                    "status": "pass",
+                    "run_directory": run_directory,
+                }],
+            }, output)
+
     def test_matching_snapshot_and_ppu_eligibility(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = CensusFixture(directory)
@@ -134,6 +158,16 @@ class BgHleCensusTest(unittest.TestCase):
         with self.assertRaises(matrix.MatrixError):
             matrix.validate_provider_summary(provider, False)
 
+        default_args = matrix.parse_args([])
+        self.assertEqual(default_args.provider_mode, "default")
+        self.assertTrue(matrix.provider_expected(default_args))
+        off_args = matrix.parse_args(["--disable-provider"])
+        self.assertEqual(off_args.provider_mode, "disabled")
+        self.assertFalse(matrix.provider_expected(off_args))
+        on_args = matrix.parse_args(["--enable-provider"])
+        self.assertEqual(on_args.provider_mode, "enabled")
+        self.assertTrue(matrix.provider_expected(on_args))
+
     def test_matrix_inspects_framebuffer_header_and_hash(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "shot.ppm")
@@ -147,6 +181,29 @@ class BgHleCensusTest(unittest.TestCase):
         error = matrix.MatrixError("wrong map", "/tmp/run-1")
         self.assertEqual(str(error), "wrong map")
         self.assertEqual(error.run_directory, "/tmp/run-1")
+
+    def test_matrix_artifact_compare_pins_complete_contract(self):
+        with tempfile.TemporaryDirectory() as directory:
+            left_run = os.path.join(directory, "left")
+            right_run = os.path.join(directory, "right")
+            self._write_artifact_run(left_run, b"same-")
+            self._write_artifact_run(right_run, b"same-")
+            left_manifest = os.path.join(directory, "left.json")
+            right_manifest = os.path.join(directory, "right.json")
+            self._write_artifact_manifest(left_manifest, left_run)
+            self._write_artifact_manifest(right_manifest, right_run)
+            result = artifact_compare.compare_manifests(
+                left_manifest, right_manifest)
+            self.assertEqual(result["targets"], 1)
+            self.assertEqual(result["artifacts"], 11)
+            self.assertEqual(result["mismatches"], [])
+
+            with open(os.path.join(right_run, "shot.ppm"), "wb") as output:
+                output.write(b"different")
+            result = artifact_compare.compare_manifests(
+                left_manifest, right_manifest)
+            self.assertEqual(len(result["mismatches"]), 1)
+            self.assertEqual(result["mismatches"][0]["artifact"], "shot.ppm")
 
     def test_positive_mismatch_and_missing_ppu_are_distinct(self):
         with tempfile.TemporaryDirectory() as directory:

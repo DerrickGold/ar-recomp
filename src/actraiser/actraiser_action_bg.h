@@ -90,7 +90,7 @@ bool ActRaiserActionBg_BuildPlan(
     bool decorative_padding_enabled, ActionBgPlan *plan,
     ActionBgPresentationPolicy *presentation);
 
-/* Default-off BH4/BH5 renderer adapter. With `AR_ACTION_BG_HLE=1`, publish and
+/* Default-on BH7 renderer adapter. Unless `AR_ACTION_BG_HLE=0`, publish and
  * bind every plan layer whose source is a finite world map. A zero-mismatch,
  * zero-outside comparison against the exact live native viewport is required
  * before provider ownership includes authentic pixels. Returns the bitmask of

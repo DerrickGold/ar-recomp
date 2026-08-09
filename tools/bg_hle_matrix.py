@@ -4,8 +4,9 @@
 The runner starts from the deterministic replay's transition-capable world-map
 window, stages each verified raw warp target, captures two stable game frames,
 enables the read-only runtime comparator, and validates the resulting snapshots
-with ``bg_hle_census.py``. Pass ``--enable-provider`` to exercise the
-default-off renderer handoff under the same evidence contract.
+with ``bg_hle_census.py``. The BH7 default arm omits `AR_ACTION_BG_HLE` and
+expects the provider. Pass ``--disable-provider`` for the explicit native A/B;
+``--enable-provider`` remains as a compatibility spelling for explicit-on.
 
     python3 tools/bg_hle_matrix.py
     python3 tools/bg_hle_matrix.py --targets 0201,0202 --fail-fast
@@ -224,6 +225,10 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
     }
 
 
+def provider_expected(args):
+    return args.provider_mode != "disabled"
+
+
 def run_target(args, target, rom_hash):
     with tempfile.TemporaryDirectory(prefix="actraiser-bg-hle-") as temporary:
         settings_path = os.path.join(temporary, "settings.ini")
@@ -236,7 +241,6 @@ def run_target(args, target, rom_hash):
         environment.update({
             "AR_HEADLESS": "1",
             "AR_ACTION_BG_HLE_COMPARE": "1",
-            "AR_ACTION_BG_HLE": "1" if args.enable_provider else "0",
             "AR_INPUT_REPLAY": args.replay,
             "AR_SETTINGS_PATH": settings_path,
             "AR_WARP": target,
@@ -246,6 +250,11 @@ def run_target(args, target, rom_hash):
             "AR_SHOT_AT_GF": str(args.capture_frames[0]),
             "AR_QUIT_FRAMES": str(args.quit_frames),
         })
+        environment.pop("AR_ACTION_BG_HLE", None)
+        if args.provider_mode == "enabled":
+            environment["AR_ACTION_BG_HLE"] = "1"
+        elif args.provider_mode == "disabled":
+            environment["AR_ACTION_BG_HLE"] = "0"
         command = [args.binary, args.rom, "--config", args.config]
         completed = subprocess.run(
             command, cwd=args.cwd, env=environment, stdout=subprocess.PIPE,
@@ -264,7 +273,7 @@ def run_target(args, target, rom_hash):
     try:
         return inspect_run(
             target, run_directory, log, rom_hash, len(args.capture_frames),
-            args.enable_provider)
+            provider_expected(args))
     except MatrixError as error:
         if error.run_directory is None:
             error.run_directory = run_directory
@@ -283,7 +292,8 @@ def write_manifest(path, args, rom_hash, results):
         "capture_frames": args.capture_frames,
         "quit_frames": args.quit_frames,
         "settings_fixture": "generated flat defaults; Diorama off",
-        "provider_enabled": args.enable_provider,
+        "provider_enabled": provider_expected(args),
+        "provider_setting": args.provider_mode,
         "results": results,
     }
     with open(path, "w", encoding="utf-8") as output:
@@ -318,8 +328,16 @@ def parse_args(argv):
     parser.add_argument("--manifest",
                         help="output JSON (default: runs/bg-hle-matrix-<time>.json)")
     parser.add_argument("--fail-fast", action="store_true")
-    parser.add_argument("--enable-provider", action="store_true",
-                        help="enable and validate the BH5 renderer provider")
+    provider = parser.add_mutually_exclusive_group()
+    provider.add_argument(
+        "--enable-provider", dest="provider_mode", action="store_const",
+        const="enabled",
+        help="explicitly enable and validate the provider (compatibility arm)")
+    provider.add_argument(
+        "--disable-provider", dest="provider_mode", action="store_const",
+        const="disabled",
+        help="disable the provider for the native BH7 A/B")
+    parser.set_defaults(provider_mode="default")
     return parser.parse_args(argv)
 
 
