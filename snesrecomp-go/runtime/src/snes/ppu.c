@@ -314,12 +314,8 @@ static inline void PpuResetLayerClamps(Ppu *ppu) {
   ppu->wsLayerMirror = 0;
   ppu->wsLayerRepeat = 0;
   ppu->wsPadCapturedToBudget = 0;
-  memset(ppu->wsClampY0, 0, sizeof(ppu->wsClampY0));
-  memset(ppu->wsClampY1, 0, sizeof(ppu->wsClampY1));
   memset(ppu->wsRepeatY0, 0, sizeof(ppu->wsRepeatY0));
   memset(ppu->wsRepeatY1, 0, sizeof(ppu->wsRepeatY1));
-  memset(ppu->wsMarginGapL, 0, sizeof(ppu->wsMarginGapL));
-  memset(ppu->wsMarginGapR, 0, sizeof(ppu->wsMarginGapR));
   PpuClearVirtualTilemaps(ppu);
 }
 
@@ -475,28 +471,6 @@ void PpuSetWidescreenLayerRepeat(Ppu *ppu, uint8_t mask) {
   // samples the opposite authentic edge so raster-scrolled art continues in
   // the same direction instead of reversing at the widescreen boundary.
   ppu->wsLayerRepeat = mask;
-}
-
-void PpuSetWidescreenLayerMarginGap(Ppu *ppu, uint8_t layer, uint8_t left_px,
-                                    uint8_t right_px) {
-  // Margins of BG(layer+1) skip the first left_px/right_px offscreen pixels
-  // (the game's UI staging columns) and sample the tilemap beyond them. See
-  // ppu.h; re-apply per frame (the extra-space setters reset it).
-  if (layer < 4) {
-    ppu->wsMarginGapL[layer] = left_px;
-    ppu->wsMarginGapR[layer] = right_px;
-  }
-}
-
-void PpuSetWidescreenLayerClampBand(Ppu *ppu, uint8_t layer, uint8_t y0,
-                                    uint8_t y1) {
-  // Clamp BG(layer+1) to the authentic 256 on scanlines [y0,y1) only. See
-  // ppu.h. y1<=y0 disables the band. Re-apply per frame (the extra-space
-  // setters reset it), like the other widescreen setters.
-  if (layer < 4) {
-    ppu->wsClampY0[layer] = y0;
-    ppu->wsClampY1[layer] = y1;
-  }
 }
 
 void PpuSetWidescreenLayerRepeatBand(Ppu *ppu, uint8_t layer, uint8_t y0,
@@ -675,7 +649,7 @@ void ppu_runLine(Ppu* ppu, int line) {
 }
 
 typedef struct PpuWindows {
-  // Up to 5 window spans + 2 margin-gap splits (PpuApplyMarginGap) = 7 spans,
+  // Up to 5 window spans + 2 virtual-provider boundary splits = 7 spans,
   // 8 edges.
   int16 edges[8];
   uint8 nr;
@@ -710,11 +684,6 @@ static inline int PpuLayerExtra(Ppu *ppu, uint layer, int y, int extra) {
     // margins while the wide world layers beside it still extend.
     if ((ppu->wsLayerClamp | ppu->wsLayerMirror | ppu->wsLayerRepeat) &
         (1u << layer))
-      return 0;
-    // Per-layer clamp band: clamp only the rows a bounded UI element occupies,
-    // so wide world content on the same layer stays wide above/below it.
-    if (ppu->wsClampY1[layer] > ppu->wsClampY0[layer] &&
-        y >= ppu->wsClampY0[layer] && y < ppu->wsClampY1[layer])
       return 0;
     // A repeat band is first rendered only in the authentic center, then its
     // isolated scanline is merged into the margins by the 4bpp policy path.
@@ -829,27 +798,6 @@ static void PpuWindowsSplit(PpuWindows *win, int16 *bias, int xpos) {
       win->nr++;
       return;
     }
-  }
-}
-
-// Widescreen margin source gap (PpuSetWidescreenLayerMarginGap): games park
-// UI-construction tiles in the tilemap columns just past the visible screen
-// (an offscreen staging area — invisible on hardware, exposed by widescreen
-// margins). Skip those columns: split the window spans at the authentic
-// screen edges and bias the tilemap fetch of the margin sub-spans outward by
-// the gap, so margins show the layer's content BEYOND the staging strip while
-// the game keeps its offscreen scratch. No-op at gap 0 or without margins.
-static void PpuApplyMarginGap(Ppu *ppu, uint layer, PpuWindows *win, int16 *bias) {
-  int gl = ppu->wsMarginGapL[layer], gr = ppu->wsMarginGapR[layer];
-  if (!(gl | gr) || !(ppu->extraLeftCur | ppu->extraRightCur))
-    return;
-  PpuWindowsSplit(win, bias, 0);
-  PpuWindowsSplit(win, bias, 256);
-  for (uint k = 0; k < win->nr; k++) {
-    if (win->edges[k + 1] <= 0)
-      bias[k] = (int16)(bias[k] - gl);
-    else if (win->edges[k] >= 256)
-      bias[k] = (int16)(bias[k] + gr);
   }
 }
 
@@ -970,7 +918,6 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
   PpuWindows win;
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer, y) : PpuWindows_Clear(&win, ppu, layer, y);
   int16 ws_bias[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-  PpuApplyMarginGap(ppu, layer, &win, ws_bias);
   const PpuVirtualTilemapBinding *virtual_tilemap =
       &ppu->virtualTilemap[layer];
   const int screen_y = y;
@@ -1150,8 +1097,6 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
       ws_bias[0] = hud_extra;
       ws_bias[4] = -(int16)hud_extra;
     }
-  } else {
-    PpuApplyMarginGap(ppu, layer, &win, ws_bias);
   }
   y = PpuBgTilemapRow(ppu, y, layer);
   int sc_offs = PPU_bgTilemapAdr(ppu, layer) + (((y >> 3) & 0x1f) << 5);

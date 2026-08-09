@@ -186,27 +186,14 @@ static bool MapLayerX(int layer, int scan_y, int screen_x,
     return *source_x >= 0 && *source_x < kActRaiserAuthenticWidth;
   }
 
-  bool clamp_band = g_ppu->wsClampY1[layer] >
-                        g_ppu->wsClampY0[layer] &&
-                    scan_y >= g_ppu->wsClampY0[layer] &&
-                    scan_y < g_ppu->wsClampY1[layer];
-  if ((g_ppu->wsLayerClamp & bit) || clamp_band)
+  if (g_ppu->wsLayerClamp & bit)
     return false;
   if (layer == 2 &&
       !(g_ppu->wsBg3WidenY && scan_y >= g_ppu->wsBg3WidenY))
     return false;
 
   *source_x = screen_x;
-  if (screen_x < 0 && g_ppu->wsMarginGapL[layer]) {
-    *source_x -= g_ppu->wsMarginGapL[layer];
-    *policy = "WIDE-GAP-L";
-  } else if (screen_x >= kActRaiserAuthenticWidth &&
-               g_ppu->wsMarginGapR[layer]) {
-    *source_x += g_ppu->wsMarginGapR[layer];
-    *policy = "WIDE-GAP-R";
-  } else {
-    *policy = "WIDE";
-  }
+  *policy = "WIDE";
   return true;
 }
 

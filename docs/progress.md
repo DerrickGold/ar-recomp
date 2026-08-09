@@ -43,8 +43,8 @@ native mirror/repeat/clamp sources. BH6 now carries that same per-layer/per-band
 plan through the post-scanout `FrameSlot` handoff: Bloodpool and Death Heim
 bands reach diorama exactly, with no scalar PPU-mask reclassification. Five
 presentation matrices, long Full/Raw/diorama replays, a natural Death Heim
-transition soak, lifecycle gates and a real compositor A/B pass. Remaining work
-is behavior-neutral BH8 cleanup—not another camera-edge or presentation design.
+transition soak, lifecycle gates and a real compositor A/B pass. BH8's
+behavior-neutral repair and dead-policy cleanup is now complete.
 
 No generated ROM-derived source is committed; reproducible builds materialize
 the registered handlers from `recomp/*.cfg`.
@@ -178,9 +178,9 @@ the reference editor. Import/export does not change the active backend, and
 session-only changes remain distinct from explicit writes. Automated codec/
 backend tests pass; the outstanding manual gate is representative Apply and
 save → Restart Game → Continue checks across those pages.
-The remaining widescreen backlog is:
+Current widescreen work/status is:
 
-1. **Complete action-background HLE cleanup.** BH7 is accepted and default-on.
+1. **Action-background HLE and cleanup — complete.** BH7 is accepted and default-on.
    Five paired 12-entry presentation matrices cover 4:3, Wide Full, Wide Raw,
    and diorama vertical extension 0/32; long Fillmore and natural Death Heim
    runs, same-frame/rebind/reset/savestate/geometry gates, a real compositor
@@ -191,9 +191,11 @@ The remaining widescreen backlog is:
    snapshots differ only where the deleted transaction formerly wrote
    provider-owned offscreen tilemap cells. The retired
    setting is a hidden load-only alias and unbound world layers clamp safely to
-   the authentic viewport. Complete the final policy/setter census while
-   preserving native streamers, the VRAM ring, fallback/oracle paths, and
-   decorative mirror/repeat behavior. The natural
+   the authentic viewport. The final census removed the unused scanline
+   clamp-band and margin-source-gap PPU prototypes while retaining live
+   clamp/mirror/repeat/repeat-band, vertical clip, native streamers, the VRAM
+   ring, and fallback/oracle paths. Three rebuilt-release matrices are
+   612/612 byte-exact against the accepted post-repair baseline. The natural
    Northwall boss and automated Death Heim ending-tail captures remain useful
    archival BH1 evidence gaps, not blockers to the classified default path.
 2. **Freeze simulation baselines.** Complete Bloodpool and all four untested
@@ -250,7 +252,7 @@ The remaining widescreen backlog is:
 | Bridge structure-cap fix (sim) | 🟡 | 2026-07-17: structure-record system fully mapped + SRAM-validated (SEAMS town §7, save-format §3.4: 128 × 4-byte records per town, allocator `$03:9D9F`, census `$03:C07F`, miracle damage `$03:B274`, bridge immunity row `$A435`; record format confirmed against real saves incl. both bridge orientation variants). v1 slot-reuse/lightning designs were withdrawn after they erased bridges on reconstruction. v2 uses a validated/deduplicated completed-bridge sidecar: `$9D9F` migrates, `$C07E` restores support, `$9CFB` restores `$E1/$E2` marks, and `$89F0` decodes the native rebuild program to restore the visible metatile after `$9D4D`. Sidecar-only checksum changes are shadowed until a normal ROM save transaction, with a persistence regression test. Marks-only visual capture correctly failed (black bridge), establishing the second render seam; generated build + replacement screenshot are the remaining acceptance gate. |
 | Build / platform targets | 🟡 | macOS (arm64, primary development platform) and Steam Deck are built and played on regularly — both confirmed working end to end from the distribution bundle. All seven bundles (macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64/arm64, steam-deck) cross-build from one machine because the Go module is CGO-free, but **Windows and generic Linux have not been run end to end by this project** — no CI, no `.vcxproj`, no verified launch. Treat those bundles as untested. See `docs/BUILD_TOOLING.md` for the packaging design and the open signing/notarisation gaps. |
 | Debug tooling | ✅ | 2026-07-07 toolkit: `dis65`/`romxref`/`wram`/`resolve_miss`/`cycle.sh` — anomaly capture → auto-triage → proposed cfg patch loop (`DEBUG.md` §1) |
-| Action widescreen BG/sprites | 🟡 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, finite camera edges, sprites, activation, narrow-BG2 mirror/repeat policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. 2026-08-09 `SPEC-bg-hle.md`: bounded `ActionBgWorld`, the 49-map `ActionBgPlan`, full-world provider, and exact diorama handoff are implemented. The provider is default-on with exact `AR_ACTION_BG_HLE=0` native fallback. After exact phase/tile/bounds preflight, eligible authentic and margin pixels use provider tile words while live VRAM/CGRAM, priority, windows, transparency, mosaic, color math, and scroll effects remain native PPU stages. Five paired 12-entry presentation matrices, long Fillmore Full/Raw/diorama-32 runs, a natural Death Heim transition soak, lifecycle/rebind/savestate/geometry gates, and a real compositor A/B pass; every authentic center and state artifact is exact. Wide Full `0301` intentionally corrects 30 synthetic-margin pixels at BG2's finite edge. Maximum-span cost remains 0.067 ms/frame, below the 0.10 ms budget. BH8 behavior-neutral cleanup remains; native streamers/ring and decorative paths stay as fallback/oracle infrastructure. |
+| Action widescreen BG/sprites | 🟢 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, finite camera edges, sprites, activation, narrow-BG2 mirror/repeat policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. 2026-08-09 `SPEC-bg-hle.md`: bounded `ActionBgWorld`, the 49-map `ActionBgPlan`, full-world provider, and exact diorama handoff are implemented. The provider is default-on with exact `AR_ACTION_BG_HLE=0` native fallback. After exact phase/tile/bounds preflight, eligible authentic and margin pixels use provider tile words while live VRAM/CGRAM, priority, windows, transparency, mosaic, color math, and scroll effects remain native PPU stages. Five paired 12-entry presentation matrices, long Fillmore Full/Raw/diorama-32 runs, a natural Death Heim transition soak, lifecycle/rebind/savestate/geometry gates, and a real compositor A/B pass; every authentic center and state artifact is exact. Wide Full `0301` intentionally corrects 30 synthetic-margin pixels at BG2's finite edge. Maximum-span cost remains 0.067 ms/frame, below the 0.10 ms budget. BH8 removed the duplicate ring repair and unused clamp-band/margin-source-gap PPU prototypes; three final release matrices are 612/612 byte-exact. Native streamers/ring and live decorative paths remain as fallback/oracle infrastructure. |
 
 ## Codebase metrics (objective, automated — refreshed 2026-07-12)
 

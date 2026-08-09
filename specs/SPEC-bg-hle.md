@@ -1,6 +1,6 @@
 # SPEC-bg-hle — action background world provider and scene plan
 
-**Status: In progress (BH7 default-on acceptance complete; BH8 cleanup next).** The mapped
+**Status: Complete (BH1-BH8 accepted 2026-08-09).** The mapped
 decoder, offline oracle, pure `ActionBgWorld`, differential observer, and
 `ActionBgPlan` policy matrix now feed a generic frame-scoped PPU virtual
 tilemap seam. The provider is enabled when `AR_ACTION_BG_HLE` is unset or
@@ -10,7 +10,8 @@ live-ring preflight. Decorative/native layers retain the existing isolated
 mirror/repeat/raw paths. The resolved per-layer/per-band plan now crosses the
 immutable `FrameSlot` handoff and drives diorama row spans without reverse-
 classifying PPU masks. BH7's cross-presentation, transition and lifecycle gates
-are complete. Behavior-neutral legacy cleanup remains open as BH8.
+are complete. BH8 removed the duplicated repair transaction and unused PPU
+policy prototypes after exact pre/post acceptance.
 
 This spec replaces the narrower original BH1 proposal. It keeps that proposal's
 measured decoder evidence, but expands the target from "decode more margin
@@ -859,8 +860,8 @@ the existing shader test rather than that run. Debug and release builds and all
 Cleanup is a separate behavior-neutral change after BH7, not part of the default
 flip.
 
-**Implementation status (2026-08-09): in progress; legacy world-ring repair
-retired.** The action-world portion of `actraiser_widescreen_bg.c` is removed:
+**Implementation status (2026-08-09): complete.** The action-world portion of
+`actraiser_widescreen_bg.c` is removed:
 `ActRaiser_WidescreenMarginRefresh`, `WsRefreshKey`, both builder trampolines,
 all full/partial record drains, `ws_build_visible_row`, `ws_build_band_rows`,
 the 128 KiB WRAM/CPU/math transaction, and `AR_VEXT_BANDFIX` no longer exist.
@@ -881,8 +882,8 @@ All framebuffers, emulated state, PPU registers, and authentic-ring comparisons
 are exact. Seven full-VRAM snapshots contain the intended removal footprint:
 1,390 changed words, all confined to provider-eligible `$6000-$7FFF` tilemaps
 with zero authentic-ring mismatch. The focused provider/plan/settings/PPU/
-diorama tests pass. Remaining BH8 work is the final map-policy/setter consumer
-census, broader release gates, and final docs.
+diorama tests pass. The final map-policy/setter census and release gates are
+also complete.
 
 **Removed or retired in the first BH8 slice**
 
@@ -892,14 +893,28 @@ census, broader release gates, and final docs.
 - `ws_build_visible_row`, `ws_build_band_rows` and `AR_VEXT_BANDFIX`;
 - `AR_WS_BGREFRESH`, `ws_bgrefresh` and their production setting plumbing;
 
-**Still subject to the final consumer census**
+**Final consumer census**
 
-- duplicated map-specific background classification from
-  `ActRaiser_ApplyWidescreenPolicy`;
-- old PPU policy masks/setters only where the new plan has no remaining runtime
-  or cross-project consumer;
-- `PpuSetVerticalMarginLayerClip` is retained: native/decorative layers can share
-  the vertical extension without a provider and still need independent bounds.
+- `ActionBgPlan` is the sole owner of all 49 action-map source/edge/band
+  classifications. The explicit switch left in `ActRaiser_ApplyWidescreenPolicy`
+  covers non-action scenes, not a second action classifier.
+- `ActionBgPresentationPolicy` and its compile/apply helpers remain as a
+  mechanical boundary to the generic PPU masks and deliberate global/debug
+  overrides; they contain no map-specific decisions.
+- whole-layer clamp/mirror/repeat and repeat-band setters remain live. The plan
+  executes mirror/repeat/repeat-band for decorative layers, and non-action
+  scenes still execute whole-layer clamp.
+- the unused scanline clamp-band and margin-source-gap prototypes are removed
+  end to end: setters, `Ppu` fields, reset/raster/inspector branches, the
+  permanently-zero ActRaiser caller plumbing, and current documentation.
+- `PpuSetVerticalMarginLayerClip` remains live: native/decorative layers can
+  share vertical extension without a provider and still need independent
+  bounds.
+
+After this final deletion, rebuilt-release 4:3, Wide Full, and diorama-32
+matrices are byte-exact against the accepted post-ring-repair baseline:
+204/204 artifacts in each presentation, 612/612 total. Debug/release builds and
+all 41 tests pass.
 
 **Retain**
 

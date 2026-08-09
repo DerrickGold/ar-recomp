@@ -384,22 +384,11 @@ struct Ppu {
   // rendered 256px scanline into the margins. Unlike reflection, this keeps
   // raster/HDMA parallax moving in the same direction across the seam.
   uint8_t wsLayerRepeat;
-  // Per-layer widescreen clamp BAND (see PpuSetWidescreenLayerClampBand): on
-  // scanlines [y0,y1) layer L is clamped to the authentic 256, while it still
-  // extends into the margins outside that band. This is the generic "overlay
-  // plane" ("BG2.5"): a bounded UI element (dialog box, menu panel) sharing a
-  // layer with genuinely-wide world content (pillars) — clamp only the rows the
-  // UI occupies so the world layer stays wide above/below it. y1<=y0 = off.
-  uint8_t wsClampY0[4], wsClampY1[4];
   // Per-layer cyclic-repeat BAND (see PpuSetWidescreenLayerRepeatBand): on
   // scanlines [y0,y1), repeat the authentic rendered scanline into both
   // margins. This takes precedence over a whole-layer clamp on those rows,
   // allowing animated/raster content to share a BG with bounded scenery.
   uint8_t wsRepeatY0[4], wsRepeatY1[4];
-  // Widescreen margin source gap per layer, in pixels per side (see
-  // PpuSetWidescreenLayerMarginGap): margins skip the first N offscreen
-  // columns (games' UI staging area) and sample the tilemap beyond them.
-  uint8_t wsMarginGapL[4], wsMarginGapR[4];
   uint8_t lastMosaicModulo;
   uint8_t lastBrightnessMult;
   bool lineHasSprites;
@@ -822,14 +811,6 @@ void PpuSetWidescreenLayerRepeat(Ppu *ppu, uint8_t mask);
 // Re-apply per frame: the extra-space setters reset it.
 void PpuSetWidescreenPadCapturedToBudget(Ppu *ppu, uint8_t enabled);
 
-// Clamp BG(layer+1) to the authentic 256 on scanlines [y0,y1) only (the generic
-// "overlay plane" / BG2.5): a bounded UI element sharing a layer with wide world
-// content is confined to the center on its own rows, while the layer stays wide
-// above and below. y1<=y0 disables. Re-apply per frame (the extra-space setters
-// reset it). Independent of the whole-layer clamp and the BG3 widen/split.
-void PpuSetWidescreenLayerClampBand(Ppu *ppu, uint8_t layer, uint8_t y0,
-                                    uint8_t y1);
-
 // Cyclically repeat BG(layer+1)'s authentic rendered scanline into the margins
 // on scanlines [y0,y1) only. This is the banded form of
 // PpuSetWidescreenLayerRepeat: it preserves per-line scroll, tile animation,
@@ -838,17 +819,6 @@ void PpuSetWidescreenLayerClampBand(Ppu *ppu, uint8_t layer, uint8_t y0,
 // 4bpp BG1/BG2 path. y1<=y0 disables. Re-apply per frame.
 void PpuSetWidescreenLayerRepeatBand(Ppu *ppu, uint8_t layer, uint8_t y0,
                                      uint8_t y1);
-
-// Widescreen margin source gap: the margins of BG(layer+1) skip the first
-// left_px/right_px pixels past the authentic screen edges and sample the
-// tilemap beyond them. For games that park UI-construction tiles in the
-// offscreen columns adjacent to the visible screen (a staging area that
-// hardware never shows but widescreen margins would expose) — the gap keeps
-// the staging strip invisible while the layer still fills the margins with
-// its real repeating/world content. Applies to the 4bpp/2bpp BG paths
-// (mosaic lines fall back to ungapped). 0/0 = off. Re-apply per frame.
-void PpuSetWidescreenLayerMarginGap(Ppu *ppu, uint8_t layer, uint8_t left_px,
-                                    uint8_t right_px);
 
 int PpuGetCurrentRenderScale(Ppu *ppu, uint32_t render_flags);
 

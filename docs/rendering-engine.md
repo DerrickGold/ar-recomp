@@ -825,7 +825,7 @@ pause: right click, F3, or P clears the selection and resumes only in that case,
 so inspecting a frame that was already manually paused preserves that state.
 
 For Mode 1/0 BG candidates it reports the layer/bpp, scroll and widescreen
-source policy (center, wide, margin gap, clamp absence, mirror/repeat band, or
+source policy (center, wide, clamp absence, mirror/repeat band, or
 promoted-HUD anchor), tilemap entry and VRAM word address, character word
 address, tile number, sampled pixel, CGRAM index, palette, priority, and flips.
 For OBJ candidates it reports every containing OAM slot, sprite size/rectangle,
@@ -1944,6 +1944,17 @@ actually moved. At that phase `AR_VEXT_BANDFIX=0` restored the pre-repair
 behavior. BH8 removed the function, transaction, and switch after pre/post
 diorama-32 matrices matched all 204 artifacts; bounded provider tile words now
 supply the band directly.
+
+BH8's final consumer census also removed the unused scanline clamp-band and
+margin-source-gap renderer prototypes. Neither had a live nonzero caller; their
+setters, `Ppu` fields, reset/raster branches, scene-inspector interpretations,
+and frontend plumbing are gone. Whole-layer clamp/mirror/repeat, the live
+repeat-band used by Bloodpool/Death Heim presentation, and
+`PpuSetVerticalMarginLayerClip` remain. `ActionBgPresentationPolicy` is retained
+only as the mechanical boundary between the map-owned `ActionBgPlan` and the
+game-agnostic PPU masks/global diagnostic overrides. Three final release
+matrices are byte-exact against the post-ring-repair baseline (612/612
+artifacts).
 
 The vertical-extension default is still 0: the presentation is validated on Fillmore acts 1-2 and
 level 1, not across every stage.

@@ -789,6 +789,10 @@ show the frozen `$0088` against the advancing host frame:
   margins. Use Wide Raw for the deliberately raw presentation control. The old
   `AR_WS_BGREFRESH` is a load-only alias and `AR_VEXT_BANDFIX` is retired; neither
   has a runtime effect.
+  BH8's final consumer census also retired the unused scanline clamp-band and
+  margin-source-gap PPU prototypes. Whole-layer clamp/mirror/repeat,
+  repeat-band, vertical per-layer clip, the native ring, and Sky Palace source
+  repair are live and deliberately retained.
   BH6 adds no separate environment switch: the resolved `ActionBgPlan` is now
   latched after scanout and copied into `FrameSlot` on every run. Normal action
   frames retain exact default edges and bands; 4:3, Wide Raw, `AR_WS_ONLYBG`
@@ -899,7 +903,7 @@ show the frozen `$0088` against the advancing host frame:
    paired manifests with `tools/bg_hle_artifact_compare.py`; its default policy
    requires full-frame identity, while `--framebuffer-policy authentic-center`
    still requires exact state and centered 256 pixels and reports/localizes
-   accepted synthetic-margin improvements. BH8 cleanup comparisons may add
+   accepted synthetic-margin improvements. BH8 repair-removal comparisons may add
    `--snapshot-vram-policy provider-owned`: it accepts changed VRAM words only
    inside an eligible BG1/BG2 tilemap whose authentic-ring census is exact on
    both sides, and rejects every other VRAM delta.

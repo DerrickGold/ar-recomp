@@ -164,14 +164,13 @@ no generated-code change. `AR_WS_SKYPALACE_BG=0` restores raw-wide output.
 boot-composed colonnade (scratch cols 56-63, rows 18-31), and the user
 confirmed clean margins in both the dialogue and submenu states.
 
-**Engine widescreen primitives built along the way** (all game-agnostic,
-inert unless set, reset per frame by the extra-space setters):
+**Engine widescreen primitives built along the way.** The whole-layer clamp
+remains live. BH8's final consumer census removed the unused scanline clamp-band
+and margin-source-gap setters, fields, raster branches, and inspector labels:
+neither primitive had a production or test caller, and Sky Palace's traced ROM
+source had superseded the failed margin-gap experiment.
+
 - `PpuSetWidescreenLayerClamp(ppu, mask)` — whole-layer 256 clamp.
-- `PpuSetWidescreenLayerClampBand(ppu, layer, y0, y1)` — clamp one layer only
-  on a scanline band ("BG2.5" overlay; for wide-layer + bounded-UI-band).
-- `PpuSetWidescreenLayerMarginGap(ppu, layer, l_px, r_px)` — margins skip the
-  first N offscreen pixels (staging strip) and sample beyond (4bpp/2bpp paths;
-  for games whose offscreen area DOES continue — check first!).
 
 ## Policy implemented after this survey
 
@@ -246,8 +245,8 @@ Policy (ActRaiser_ApplyWidescreenPolicy action branch, $18=01-07):
   side has led); >64px camera jump resets the segment. Fixes streaming pop AND
   level-start/end wrapped columns with NO per-level bounds data. Margins ramp
   4px/frame (easing, not popping). Applied via PpuSetExtraSideSpace.
-- HUD band: PpuSetWidescreenLayerClampBand(BG1/BG2, 0, 48) — filler rows
-  clamped, HUD gets black side panels, world wide below y=48.
+- HUD band: the now-retired scanline clamp-band prototype clamped BG1/BG2
+  rows 0-47, giving the HUD black side panels while leaving world rows wide.
 
 **White-player "corruption" = PRE-EXISTING cheat interplay, NOT widescreen**:
 player always uses sprite palette 7; the hit flash WHITENS CGRAM row 7 and
@@ -349,11 +348,11 @@ satisfy. Highlights that supersede parts of this doc's earlier notes:
   (`$82ED`, then `$80B4/$8078/$82ED`): zero m/x leaks and zero garbage variants.
   They are the same class seen in the earlier wide runs and provide no sprite-
   corruption signal.
-- The console does reveal a real renderer bug: UBSan reports index 5 into the
-  four-entry `wsClampY0/wsClampY1` arrays. `PpuWindows_Calc` uses logical layer
-  5 for the color-math window, but `PpuLayerExtra` assumed every caller was
-  BG1-BG4. Pillarbox usually masks the bad read; wide composition may not. The
-  investigation branch now guards BG-only clamp metadata with `layer < 4`.
+- The console did reveal a real renderer bug in the former scanline clamp-band
+  prototype: UBSan reported index 5 into its four-entry arrays.
+  `PpuWindows_Calc` uses logical layer 5 for the color-math window, but
+  `PpuLayerExtra` had assumed every caller was BG1-BG4. The investigation branch
+  added the correct guard; BH8 later removed the unused prototype entirely.
 
 ### Why the earlier branches did not isolate backgrounds
 

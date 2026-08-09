@@ -57,13 +57,13 @@ Three orthogonal extensions to the scanline renderer (ppu.c):
 
 ## Widescreen compatibility
 
-The WRAM/VRAM/OAM-level widescreen HLE (margin tilemap refresh, Sky Palace
-BG2 synthesis, sprite margin emission, activation-window extension) operates
-on emulated state upstream of the renderer and is untouched by N-x — it
-fixes what the renderer samples, not how densely. The renderer-level
-widescreen features (layer clamp/mirror/repeat, repeat bands, margin gaps,
-extra-columns budget, negative-x windows) live inside the loops being
-N-x-ified and port as game-pixel-space logic (subpixel x / N); they are
+The source/OAM-level widescreen HLE (bounded action-background provider, Sky
+Palace BG2 synthesis, sprite margin emission, activation-window extension)
+operates upstream of dense rasterization and is untouched by N-x — it fixes
+what the renderer samples, not how densely. The renderer-level widescreen
+features (layer clamp/mirror/repeat, repeat bands, extra-columns budget,
+negative-x windows) live inside the loops being N-x-ified and port as
+game-pixel-space logic (subpixel x / N); they are
 covered by the phase-1 N=1 byte-identical gate, and the N>1 visual
 regression matrix MUST include the AR_WS_HEADLESS widescreen scenes (action
 margins, Sky Palace, sim towns, HUD split). Known 1x-pitch assumptions to
