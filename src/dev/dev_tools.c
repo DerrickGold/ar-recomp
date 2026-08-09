@@ -193,7 +193,7 @@ void DevTools_TakeFullSnapshot(const DevToolsContext *context) {
     fclose(screenshot);
   }
   fprintf(stderr,
-          "[snap] -> %s.{wram,vram,cgram,oam,ppm} (gf=%u)\n",
+          "[snap] -> %s.{wram,vram,cgram,oam,ppu.json,ppm} (gf=%u)\n",
           prefix, game_frame);
 }
 

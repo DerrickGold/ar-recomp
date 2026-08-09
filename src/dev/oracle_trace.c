@@ -146,7 +146,7 @@ static void DumpRequestedVramFrames(const uint8_t *wram) {
         DumpPpuRegisters(game_frame);
         fprintf(stderr,
                 "[vramdump] gf=%u -> "
-                "%s.{wram,vram,cgram,oam}.bin\n",
+                "%s.{wram,vram,cgram,oam}.bin + .ppu.json\n",
                 game_frame, snapshot_prefix);
       }
       return;

@@ -399,15 +399,64 @@ static void ActRaiser_CopHook(CpuState *cpu) {
   }
 }
 
+static void ActRaiser_WritePpuSnapshotMetadata(const char *prefix,
+                                                const Ppu *ppu) {
+  if (!prefix || !ppu) return;
+  char path[384];
+  snprintf(path, sizeof path, "%s.ppu.json", prefix);
+  FILE *file = fopen(path, "w");
+  if (!file) return;
+  fprintf(file,
+          "{\n"
+          "  \"format\": 1,\n"
+          "  \"inidisp\": %u, \"bgmode\": %u, \"mosaic\": %u,\n"
+          "  \"bg_sc\": [%u, %u, %u, %u],\n"
+          "  \"bg_tile_adr\": %u,\n"
+          "  \"hscroll\": [%u, %u, %u, %u],\n"
+          "  \"vscroll\": [%u, %u, %u, %u],\n"
+          "  \"screen_main\": %u, \"screen_sub\": %u,\n"
+          "  \"window_main\": %u, \"window_sub\": %u,\n"
+          "  \"windowsel\": %u, \"wbgobjlog\": %u,\n"
+          "  \"window_edges\": [%u, %u, %u, %u],\n"
+          "  \"cgwsel\": %u, \"cgadsub\": %u, \"setini\": %u,\n"
+          "  \"widescreen\": {\"left\": %u, \"right\": %u, "
+          "\"top\": %u, \"bottom\": %u, \"clamp\": %u, "
+          "\"mirror\": %u, \"repeat\": %u}\n"
+          "}\n",
+          (unsigned)ppu->inidisp, (unsigned)ppu->bgmode,
+          (unsigned)ppu->mosaic,
+          (unsigned)ppu->bgXsc[0], (unsigned)ppu->bgXsc[1],
+          (unsigned)ppu->bgXsc[2], (unsigned)ppu->bgXsc[3],
+          (unsigned)ppu->bgTileAdr,
+          (unsigned)ppu->hScroll[0], (unsigned)ppu->hScroll[1],
+          (unsigned)ppu->hScroll[2], (unsigned)ppu->hScroll[3],
+          (unsigned)ppu->vScroll[0], (unsigned)ppu->vScroll[1],
+          (unsigned)ppu->vScroll[2], (unsigned)ppu->vScroll[3],
+          (unsigned)ppu->screenEnabled[0],
+          (unsigned)ppu->screenEnabled[1],
+          (unsigned)ppu->screenWindowed[0],
+          (unsigned)ppu->screenWindowed[1],
+          (unsigned)ppu->windowsel, (unsigned)ppu->wbgobjlog,
+          (unsigned)ppu->window1left, (unsigned)ppu->window1right,
+          (unsigned)ppu->window2left, (unsigned)ppu->window2right,
+          (unsigned)ppu->cgwsel, (unsigned)ppu->cgadsub,
+          (unsigned)ppu->setini,
+          (unsigned)ppu->extraLeftCur, (unsigned)ppu->extraRightCur,
+          (unsigned)ppu->extraTopCur, (unsigned)ppu->extraBottomCur,
+          (unsigned)ppu->wsLayerClamp, (unsigned)ppu->wsLayerMirror,
+          (unsigned)ppu->wsLayerRepeat);
+  fclose(file);
+}
+
 /* Dump the full internal state (everything but the framebuffer, which the
  * caller writes as a .ppm) so an on-demand snapshot captures both the picture
  * AND the internals: WRAM, plus the PPU memory the WRAM dump can't see — VRAM
  * (BG tilemaps + tiles), CGRAM (palette), OAM (sprites). Critical for the
  * bridge bug, whose tiles live in VRAM, invisible to any WRAM-only diff.
- * Writes <prefix>.{wram,vram,cgram,oam}.bin. */
+ * Writes <prefix>.{wram,vram,cgram,oam}.bin plus PPU register metadata. */
 void ActRaiser_FullSnapshot(const char *prefix) {
   extern Ppu *g_ppu;
-  char path[96];
+  char path[384];
   FILE *f;
   snprintf(path, sizeof path, "%s.wram.bin", prefix);
   f = fopen(path, "wb");
@@ -430,6 +479,7 @@ void ActRaiser_FullSnapshot(const char *prefix) {
     snprintf(path, sizeof path, "%s.highoam.bin", prefix);
     f = fopen(path, "wb");
     if (f) { fwrite(g_ppu->highOam, 1, sizeof g_ppu->highOam, f); fclose(f); }
+    ActRaiser_WritePpuSnapshotMetadata(prefix, g_ppu);
   }
 }
 

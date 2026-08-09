@@ -856,7 +856,13 @@ show the frozen `$0088` against the advancing host frame:
    §9) drives the exact same frames every run.
 2. **Screenshots at fixed game-frames**: `AR_SHOT_AT_GF=N` / `AR_SHOT_EVERY=N` —
    PPMs land in `runs/<ts>/`. `AR_VRAMDUMP_GF=g1,g2,...` adds headless FULL
-   snapshots (wram+vram+cgram+oam) at exact game-frames — no window needed.
+   snapshots (wram+vram+cgram+oam plus `.ppu.json` register provenance) at exact
+   game-frames — no window needed. Run
+   `python3 tools/bg_hle_census.py --strict --require-ppu <snapshot-dir>` for a
+   machine-checked action-BG source/ring census. It hashes `ar.sfc`, validates
+   finite WRAM map/table spans, records source variants and CHR/BGSC ownership,
+   and compares every authentic viewport tile with live VRAM. Old snapshots
+   without `.ppu.json` remain decodable but report PPU eligibility as unknown.
 2b. **Presentation modes that change the margin budget must be switched MID-RUN**:
    `AR_DIORAMA_AT=<gameframe>` flips Diorama 3D on through the same descriptor
    path as the `D` hotkey. Booting with `diorama_mode = On` forces the margin

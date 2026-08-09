@@ -252,6 +252,8 @@ target_link_libraries(ActRaiserRecomp PRIVATE
 endif() # NOT AR_TESTS_ONLY
 
 if(BUILD_TESTING)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+
     add_executable(actraiser_action_load_pacing_test
         tests/action_load_pacing_test.c
     )
@@ -383,6 +385,14 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_bg COMMAND actraiser_action_bg_test)
+
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME actraiser_bg_hle_census
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/bg_hle_census_test.py)
+        set_tests_properties(actraiser_bg_hle_census PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+    endif()
 
     add_executable(actraiser_action_effect_render_test
         tests/action_effect_render_test.c
