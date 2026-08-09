@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ROM-free contract tests for tools/bg_hle_census.py."""
 
+import argparse
 import json
 import os
 import struct
@@ -160,13 +161,32 @@ class BgHleCensusTest(unittest.TestCase):
 
         default_args = matrix.parse_args([])
         self.assertEqual(default_args.provider_mode, "default")
-        self.assertTrue(matrix.provider_expected(default_args))
+        self.assertTrue(matrix.provider_setting_enabled(default_args))
+        self.assertTrue(matrix.provider_binding_expected(default_args))
         off_args = matrix.parse_args(["--disable-provider"])
         self.assertEqual(off_args.provider_mode, "disabled")
-        self.assertFalse(matrix.provider_expected(off_args))
+        self.assertFalse(matrix.provider_setting_enabled(off_args))
+        self.assertFalse(matrix.provider_binding_expected(off_args))
         on_args = matrix.parse_args(["--enable-provider"])
         self.assertEqual(on_args.provider_mode, "enabled")
-        self.assertTrue(matrix.provider_expected(on_args))
+        self.assertTrue(matrix.provider_setting_enabled(on_args))
+        self.assertTrue(matrix.provider_binding_expected(on_args))
+
+        raw_args = matrix.parse_args(["--display-mode", "raw"])
+        self.assertTrue(matrix.provider_setting_enabled(raw_args))
+        self.assertFalse(matrix.provider_binding_expected(raw_args))
+        full_args = matrix.parse_args([
+            "--display-mode", "full", "--diorama",
+            "--vertical-extend", "32",
+        ])
+        self.assertTrue(matrix.provider_binding_expected(full_args))
+        fixture = matrix.settings_fixture(full_args)
+        self.assertIn("display_mode = Widescreen full\n", fixture)
+        self.assertIn("extended_aspect = 16:10\n", fixture)
+        self.assertIn("diorama_mode = On\n", fixture)
+        self.assertIn("diorama_vertical_extend = 32\n", fixture)
+        with self.assertRaises(argparse.ArgumentTypeError):
+            matrix.parse_vertical_extend("33")
 
     def test_matrix_inspects_framebuffer_header_and_hash(self):
         with tempfile.TemporaryDirectory() as directory:
