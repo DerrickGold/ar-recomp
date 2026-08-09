@@ -909,6 +909,17 @@ the owning 4 KiB tilemap before directly copying to VRAM. Consequently its
 only persistent state is BG1/BG2 tilemap content. `AR_WS_BGREFRESH=0` removes
 the transaction entirely for a byte-identical Stage-A A/B run.
 
+The successor HLE is currently observable but not selectable. With
+`AR_ACTION_BG_HLE_COMPARE=1`, `src/actraiser/actraiser_action_bg.c` captures the
+same two low-WRAM decoder records after the native/Stage-B refresh, expands
+them through the bounded `ActionBgWorld`, and compares every tile touched by
+the authentic 256x224 viewport with the live 64x64 VRAM ring. Invalid modes,
+disabled layers, non-64x64/native tilemaps, malformed sources, and allocation
+or comparison failures are counted as explicit fail-closed reasons. It writes
+no emulated state and does not affect scanout. The first deterministic Fillmore
+act-2 replay produced 6,729,804 matching tile words; enabling the observer left
+the final WRAM, SRAM, dispatch log, and state dump byte-identical.
+
 The decoder is intentionally scheduled at the authentic streamer's tile
 cadence, not at scanout cadence. A host-only key contains the action room,
 current margins, each camera rounded to its 16px column (vertical position to

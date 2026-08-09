@@ -1,10 +1,10 @@
 # SPEC-bg-hle — action background world provider and scene plan
 
-**Status: In progress (BH2 foundation).** The action-level decode is mapped,
-the offline oracle exists, and the pure production `ActionBgWorld` decoder plus
-its ROM-free contract suite are implemented. The complete BH1 census, runtime
-differential adapter, virtual tilemap provider, and unified scene plan remain
-open; no production pixel path consumes the decoder yet.
+**Status: In progress (BH2 differential validation).** The action-level decode
+is mapped, the offline oracle exists, and the pure production `ActionBgWorld`
+decoder, ROM-free contract suite, and default-off runtime differential observer
+are implemented. The complete BH1 census, virtual tilemap provider, and unified
+scene plan remain open; no production pixel path consumes the decoder yet.
 
 This spec replaces the narrower original BH1 proposal. It keeps that proposal's
 measured decoder evidence, but expands the target from "decode more margin
@@ -522,8 +522,8 @@ No production rendering changes.
 
 ### BH2 — pure C world decoder and differential oracle
 
-**Implementation status (2026-08-09): decoder foundation implemented, gate not
-yet claimed.** `src/action/action_bg_world.c` now validates the complete WRAM
+**Implementation status (2026-08-09): decoder and differential observer
+implemented, gate not yet claimed.** `src/action/action_bg_world.c` validates the complete WRAM
 map/table spans, snapshots the exact source bytes, expands the finite world into
 scratch tile-word storage, and atomically publishes only after success. Its
 128-KiB WRAM bound derives a maximum of 512 pages / 524,288 expanded tile words
@@ -532,11 +532,20 @@ out-of-world coordinate from provider failure; reset and malformed input fail
 closed. `tests/action_bg_world_test.c` covers page crossings, all metatile
 quadrants, mask/attribute/flip/priority preservation, negative and finite
 bounds, exact-byte cache invalidation, failed-publication retention, reset, and
-the maximum storage case. The module is included in the shipped source manifest
-but deliberately has no production caller, so this slice cannot change output.
+the maximum storage case. `src/actraiser/actraiser_action_bg.c` captures the two
+live low-WRAM layer records, validates their 64x64 PPU ring ownership, and
+compares every authentic 256x224 tile fetch against resident VRAM. It resets on
+room/load discontinuities, classifies every fail-closed fallback, and never
+binds a virtual source or writes CPU, WRAM, VRAM, CGRAM, OAM, or PPU state.
+`tests/actraiser_action_bg_test.c` covers capture bounds, ring quadrant
+addressing, fractional-camera coverage, finite world edges, a positive mismatch
+control, and provider-ineligible layouts.
 
-The runtime `AR_ACTION_BG_HLE_COMPARE=1` adapter and the complete BH1 replay
-matrix remain required before BH2's zero-mismatch gate can pass.
+The first deterministic Fillmore act-2 replay compared 6,729,804 tile words
+over 7,276 layer-frames with zero mismatches and zero unexpected world-edge
+lookups. A disabled/enabled A/B produced byte-identical final WRAM, SRAM,
+dispatch log, and state dump. This is one checkpoint, not the complete BH1
+matrix; that matrix remains required before BH2's zero-mismatch gate can pass.
 
 **Work**
 

@@ -72,6 +72,13 @@ enum {
   kActRaiserWram_Bg1Height = 0x0030,
   kActRaiserWram_Bg2Width = 0x0032,
   kActRaiserWram_Bg2Height = 0x0034,
+  /* Action background decoder state, indexed by
+   * layer*kActRaiserBgLayerStateStride (BG1=0, BG2=4). */
+  kActRaiserWram_BgMapPage = 0x0046,
+  kActRaiserWram_BgTilemapBase = 0x0048,
+  kActRaiserWram_BgMetatileTable = 0x0052,
+  kActRaiserWram_BgWordMask = 0x0054,
+  kActRaiserWram_BgAttributes = 0x006B,
   kActRaiserWram_GameFrame = 0x0088,
   kActRaiserWram_InputHeldHigh = 0x00A0,
   kActRaiserWram_ActionTimerLow = 0x00E6,

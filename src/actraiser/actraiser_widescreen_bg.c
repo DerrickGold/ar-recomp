@@ -76,13 +76,13 @@ enum {
   kBgState_CameraY = 0x24,
   kBgState_Width = 0x2E,
   kBgState_Height = 0x30,
-  kBgState_Decoder46 = 0x46,
-  kBgState_Decoder48 = 0x48,
-  kBgState_Decoder52 = 0x52,
-  kBgState_Decoder54 = 0x54,
+  kBgState_Decoder46 = kActRaiserWram_BgMapPage,
+  kBgState_Decoder48 = kActRaiserWram_BgTilemapBase,
+  kBgState_Decoder52 = kActRaiserWram_BgMetatileTable,
+  kBgState_Decoder54 = kActRaiserWram_BgWordMask,
   kBgState_ColumnRecordCursor = 0x5E,
   kBgState_RowRecordCursor = 0x60,
-  kBgState_Decoder6B = 0x6B,
+  kBgState_Decoder6B = kActRaiserWram_BgAttributes,
   kBgStateStride = kActRaiserBgLayerStateStride,
 
   /* Caller-populated direct-page contract for $02:B825/$02:B8A0. These

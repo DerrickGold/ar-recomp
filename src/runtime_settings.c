@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 
 #include "actraiser_rtl.h"
+#include "actraiser/actraiser_action_bg.h"
 #include "diorama/diorama.h"
 #include "frame_slot.h"
 #include "host/host_audio.h"
@@ -134,6 +135,7 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   } else if (!strcmp(desc->key, "load_state")) {
     RtlSaveLoad(kSaveLoad_Load, 0);
     FrameSlot_ResetActionEffects();
+    ActRaiserActionBg_Reset();
     HostDisplay_InvalidatePresentHistory();
     fprintf(stderr, "State loaded.\n");
   } else if (!strcmp(desc->key, "warp_now")) {

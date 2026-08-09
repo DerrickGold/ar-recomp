@@ -40,6 +40,7 @@
 #include "launcher.h"
 #include "util.h"
 #include "actraiser/actraiser_spc_player.h"
+#include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
 #include "snes/snes.h"
 #include "cpu_trace.h"
@@ -1328,6 +1329,7 @@ static void AppBoot_StartGame(AppBoot *app) {
       for (int i = 0; i < 4; i++) RtlRunFrame(0);
       RtlSaveLoad(kSaveLoad_Load, slot);
       FrameSlot_ResetActionEffects();
+      ActRaiserActionBg_Reset();
       fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
     } }
 }
@@ -1949,6 +1951,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
                     ? "restart" : "exit");
   SimPhase0Trace_Close();
   SimRenderMetadata_TraceClose();
+  ActRaiserActionBg_Shutdown();
 
   /* Before tearing down audio: the census reads only its own accumulators,
    * but the report should land while the run dir is still current. */

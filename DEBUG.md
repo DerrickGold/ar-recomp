@@ -766,6 +766,15 @@ show the frozen `$0088` against the advancing host frame:
   renderer with stale/wrapped margins. Unset/nonzero selects Stage B: isolated
   true-content BG1/BG2 margin refresh. Both modes retain the original recompiled
   BG streamers and OAM builder.
+- **`AR_ACTION_BG_HLE_COMPARE=1`** — enable the default-off, read-only BH2
+  differential observer. For each eligible action BG1/BG2 frame it decodes the
+  finite WRAM world with `ActionBgWorld` and compares every authentic 256x224
+  tile fetch to the resident 64x64 VRAM ring. Rendering remains native. A
+  mismatch line includes map, layer, source serial, coordinate, and both tile
+  words; shutdown prints aggregate frames/activations/layers/tiles/mismatches,
+  outside-world lookups, and fallback counts. Any mismatch or unexpected
+  `invalid`/`compare` fallback blocks `SPEC-bg-hle.md` BH2; use the same replay
+  without the variable to prove final emulator-state identity.
 - **`AR_WS_SKYPALACE_BG=0`** — disable the Sky Palace `$00/$07` render-only
   source-map repair and restore historical raw-wide output with dialogue
   staging visible in the margins. Default-on reads the 16x16 metatile page at

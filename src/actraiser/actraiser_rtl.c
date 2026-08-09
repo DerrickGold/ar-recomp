@@ -8,6 +8,7 @@
 #endif
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
+#include "actraiser_action_bg.h"
 #include "action/action_load_pacing.h"
 #include "actraiser_ws_gap.h"
 #include "diorama/diorama_capture_blend.h"
@@ -1876,6 +1877,11 @@ void ActRaiserDrawPpuFrame(void) {
   /* Stage B: populate BG1/BG2 margin tilemap cells transactionally before
    * scanline rendering. No-op under AR_WS_BGREFRESH=0 and outside action. */
   ActRaiser_WidescreenMarginRefresh();
+  /* SPEC-bg-hle BH2 differential observer. Default-off and read-only: even
+   * when enabled it compares the pure WRAM world against the native ring but
+   * never supplies a tile to scanout. Running after the transactional margin
+   * refresh observes the exact ring the PPU is about to render. */
+  ActRaiserActionBg_ObserveFrame(g_ram, kActRaiserWramSize, g_ppu);
   /* Sky Palace: synthesize only BG2's offscreen margin columns from its ROM
    * source page. The paired restore after scanout preserves UI staging. */
   ActRaiser_WidescreenSkyPalacePrepare();
