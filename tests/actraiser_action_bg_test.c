@@ -298,11 +298,35 @@ static void TestFramePlanBinding(void) {
 
   const ActRaiserActionBgDiagnostics *diagnostics =
       ActRaiserActionBg_GetDiagnostics();
-  CHECK(diagnostics->provider_preflight_layers == 1);
-  CHECK(diagnostics->provider_preflight_tiles == 33u * 28u);
+  CHECK(diagnostics->layer_activations == 1);
+
+  /* A paused redraw owns the same logical game frame. Rebinding must remain
+   * valid without rebuilding the immutable world; a geometry/resize callback
+   * may clear the frame-scoped PPU seam first, so pin that sequence too. */
+  PpuClearVirtualTilemaps(ppu);
+  CHECK(ppu->virtualTilemap[0].lookup == NULL);
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  CHECK(ppu->virtualTilemap[0].lookup != NULL);
+  CHECK(diagnostics->layer_activations == 1);
+
+  /* Savestate/restart invalidation discards provider-owned caches. The next
+   * render may still carry the same game-frame value and must rebuild cleanly
+   * rather than mistaking it for a stale paused redraw. */
+  PpuClearVirtualTilemaps(ppu);
+  ActRaiserActionBg_Reset();
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  CHECK(ppu->virtualTilemap[0].lookup != NULL);
+  CHECK(diagnostics->layer_activations == 2);
+
+  CHECK(diagnostics->provider_preflight_layers == 3);
+  CHECK(diagnostics->provider_preflight_tiles == 3u * 33u * 28u);
   CHECK(diagnostics->provider_preflight_mismatches == 0);
   CHECK(diagnostics->provider_preflight_outside_world == 0);
-  CHECK(diagnostics->provider_eligible_layers == 1);
+  CHECK(diagnostics->provider_eligible_layers == 3);
 
   /* Any authentic contradiction rejects the whole layer for that frame. */
   const int changed_x = snapshot.camera_x >> 3;
