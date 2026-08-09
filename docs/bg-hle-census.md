@@ -151,6 +151,22 @@ capture while showing live boss graphics. This confirms the direct `0702`
 source identity, but savestate execution itself is not used as handoff evidence
 because the host coroutine stack cannot be resumed from that format.
 
+## Scene-policy parity — 2026-08-09
+
+BH3 moved the action-specific clamp/mirror/repeat decisions into the pure
+`ActionBgPlan` without changing the tile source. Its ROM-free matrix classifies
+all 49 known action maps and pins every current exception, including Bloodpool's
+`136..224` repeat band and the two Death Heim hub presentations.
+
+The pre-migration executable was retained as an oracle. Old and new builds were
+run across the complete 12-entry census, five wide source/policy classes, and
+three vertical/diorama cases. Framebuffers, full PPU snapshots, WRAM, SRAM,
+dispatch logs, and final state dumps were byte-identical; emitted PPU policy
+masks and bands also matched. Runtime diagnostics now add the resolved source
+for each layer (`world`, `viewport`, or `native`). The plan is therefore the
+production policy owner, but it still drives the old PPU setters and does not
+yet supply a tile word.
+
 ### Rejected Northwall `0608` shortcut
 
 `0608` does enter map `$06/$08` for about 23 live frames. At frames 410/420 its

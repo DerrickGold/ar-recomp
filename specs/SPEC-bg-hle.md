@@ -1,10 +1,12 @@
 # SPEC-bg-hle — action background world provider and scene plan
 
-**Status: In progress (BH2 differential validation).** The action-level decode
+**Status: In progress (BH3 policy parity complete).** The action-level decode
 is mapped, the offline oracle exists, and the pure production `ActionBgWorld`
-decoder, ROM-free contract suite, and default-off runtime differential observer
-are implemented. The complete BH1 census, virtual tilemap provider, and unified
-scene plan remain open; no production pixel path consumes the decoder yet.
+decoder, differential observer, and `ActionBgPlan` policy matrix are
+implemented. Production action policy now comes from that plan but still
+compiles into the existing PPU setters; the complete BH1 census and virtual
+tilemap provider remain open, and no production pixel path consumes the decoder
+yet.
 
 This spec replaces the narrower original BH1 proposal. It keeps that proposal's
 measured decoder evidence, but expands the target from "decode more margin
@@ -604,6 +606,27 @@ in-world samples in that run still matched.
 - ROM-free suite and full release suite pass.
 
 ### BH3 — pure scene plan with current-policy parity
+
+**Implementation status (2026-08-09): complete.**
+`src/action/action_bg_plan.c` classifies all 49 known action maps from a plain
+frame record, including provider ownership, independent finite worlds, disabled
+decorative padding, the Bloodpool water band, Aitos/Northwall/Death Heim cyclic
+layers, both Death Heim hub states, and the final arena's authored raw wrap.
+Invalid maps or non-page dimensions zero the result and fail closed. A bounded
+migration projection compiles the plan into the pre-existing clamp, mirror,
+repeat and repeat-band setters; native PPU tilemap fetch remains unchanged.
+
+`src/actraiser/actraiser_action_bg.c` is now the sole live capture adapter, and
+the action branch in `ActRaiser_ApplyWidescreenPolicy` is a short capture/apply
+call instead of its former map-specific classification block. Diagnostics name
+each layer source as `world`, `viewport`, or `native`. The ROM-free matrix tests
+every valid map and every exceptional rule. A preserved pre-change executable
+and the integrated build produced byte-identical framebuffers, PPU snapshots,
+WRAM, SRAM, dispatch logs and final state across all 12 ordinary entries, five
+wide policy classes (`0101`, `0201`, `0401`, `0701`, `0708`), and three
+vertical/diorama cases (`0102`, `0201`, `0701`). The emitted clamp/mirror/repeat
+policies were identical. All 41 ROM-free tests pass (the SDL shader platform
+test requires access to the macOS video service).
 
 **Work**
 
