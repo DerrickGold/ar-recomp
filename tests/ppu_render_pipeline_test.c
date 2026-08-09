@@ -143,6 +143,18 @@ static void render_first_line(Ppu *ppu) {
   ppu_runLine(ppu, 1);
 }
 
+static void fill_virtual_native_ring(Ppu *ppu, uint16_t even_entry,
+                                     uint16_t odd_entry) {
+  for (int tile_y = 0; tile_y < 64; tile_y++) {
+    for (int tile_x = 0; tile_x < 64; tile_x++) {
+      int address = 0x2000 + (tile_x & 31) + ((tile_y & 31) << 5) +
+          ((tile_x & 32) ? 0x400 : 0) +
+          ((tile_y & 32) ? 0x800 : 0);
+      ppu->vram[address] = (tile_x & 1) ? odd_entry : even_entry;
+    }
+  }
+}
+
 static void TestVirtualTilemapMargins(void) {
   enum { kExtra = 8, kWidth = kW + kExtra * 2 };
   const int bg1 = kActRaiserPpuLayer_Bg1;
@@ -221,6 +233,9 @@ static void TestVirtualTilemapMargins(void) {
    * widescreen-policy reset or a PPU reset. */
   PpuVirtualTilemapBinding bad = binding;
   bad.hscroll_anchor = 0x400;
+  CHECK(!PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &bad));
+  bad = binding;
+  bad.flags = 0x80;
   CHECK(!PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &bad));
   CHECK(!PpuSetVirtualTilemap(ppu, 2, &binding));
   CHECK(ppu->virtualTilemap[bg1].lookup == lookup_virtual_tile);
@@ -357,6 +372,82 @@ static void TestVirtualTilemapEffects(void) {
   row = (const uint32_t *)(const void *)fb;
   CHECK(row[0] == 0);
   CHECK(row[7] == rgb555(0, 0, 31));
+
+  ppu_free(ppu);
+  g_new_ppu = saved_new_ppu;
+}
+
+static void TestVirtualTilemapAuthenticParity(void) {
+  const int bg1 = kActRaiserPpuLayer_Bg1;
+  const bool saved_new_ppu = g_new_ppu;
+  const uint16_t even_entry = (uint16_t)(2 | (2 << 10));
+  const uint16_t odd_entry = (uint16_t)(3 | (3 << 10) | 0x2000);
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint8_t fb[kW * 4];
+  static uint32_t native_pixels[kW];
+  static PpuZbufType native_priority[kW];
+
+  VirtualTilemapFixture map = {
+    .min_x = 0, .max_x = 63, .min_y = 0, .max_y = 63,
+    .even_entry = even_entry,
+    .odd_entry = odd_entry,
+  };
+  const PpuVirtualTilemapBinding binding = {
+    .lookup = lookup_virtual_tile,
+    .context = &map,
+    .camera_x = 8,
+    .camera_y = 0,
+    .hscroll_anchor = 8,
+    .vscroll_anchor = 0,
+    .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
+  };
+
+  /* A full-viewport provider with the same words as the native 64x64 ring
+   * must be indistinguishable at both the resolved-pixel and priority-word
+   * boundaries. The lookup range proves the authentic span was provider-owned. */
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  fill_virtual_native_ring(ppu, even_entry, odd_entry);
+  render_first_line(ppu);
+  memcpy(native_pixels, fb, sizeof(native_pixels));
+  memcpy(native_priority,
+         ppu->bgBuffers[0].data + kPpuExtraLeftRight,
+         sizeof(native_priority));
+
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  fill_virtual_native_ring(ppu, even_entry, odd_entry);
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  CHECK(map.calls > 0);
+  CHECK(map.first_x == 1 && map.last_x == 32);
+  CHECK(map.first_y == 0 && map.last_y == 0);
+  CHECK(memcmp(fb, native_pixels, sizeof(native_pixels)) == 0);
+  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,
+               native_priority, sizeof(native_priority)) == 0);
+
+  /* Mosaic samples a coarser set of source pixels, but ownership must remain
+   * invisible there as well. */
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  fill_virtual_native_ring(ppu, even_entry, odd_entry);
+  ppu->mosaic = (uint8_t)((3 << 4) | (1u << bg1));
+  render_first_line(ppu);
+  memcpy(native_pixels, fb, sizeof(native_pixels));
+  memcpy(native_priority,
+         ppu->bgBuffers[0].data + kPpuExtraLeftRight,
+         sizeof(native_priority));
+
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  fill_virtual_native_ring(ppu, even_entry, odd_entry);
+  ppu->mosaic = (uint8_t)((3 << 4) | (1u << bg1));
+  map.calls = 0;
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  CHECK(map.calls > 0);
+  CHECK(memcmp(fb, native_pixels, sizeof(native_pixels)) == 0);
+  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,
+               native_priority, sizeof(native_priority)) == 0);
 
   ppu_free(ppu);
   g_new_ppu = saved_new_ppu;
@@ -1195,6 +1286,7 @@ int main(void) {
   TestCapturedPaddingReachesBudget();
   TestVirtualTilemapMargins();
   TestVirtualTilemapEffects();
+  TestVirtualTilemapAuthenticParity();
   TestVirtualTilemapVerticalMargin();
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));

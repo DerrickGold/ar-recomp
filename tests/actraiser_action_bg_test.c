@@ -37,7 +37,8 @@ bool PpuSetVirtualTilemap(Ppu *ppu, uint8_t layer,
     return true;
   }
   if (!binding->lookup || binding->hscroll_anchor > 0x3ff ||
-      binding->vscroll_anchor > 0x3ff)
+      binding->vscroll_anchor > 0x3ff ||
+      (binding->flags & ~kPpuVirtualTilemapFlag_IncludeAuthentic))
     return false;
   ppu->virtualTilemap[layer] = *binding;
   return true;
