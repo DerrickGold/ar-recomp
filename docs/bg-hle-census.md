@@ -77,7 +77,9 @@ This is an entry census, not the complete BH1 gate:
   evidence, not a gameplay acceptance run for every target;
 - each target samples the early room at two times. Mid-level BGSC handoffs,
   bosses, narrow mixed-policy scanline bands, and ending transitions remain;
-- Northwall boss target `0608` and Death Heim `$07/$01-$08` remain uncaptured;
+- the native Death Heim route is now covered through `$0706`, but `$0707`,
+  `$0708`, and the ending handoff still need the same continuous-run evidence;
+  Northwall boss target `0608` still needs a natural act-2 transition;
 - the framebuffers are authentic flat composites, but individual priority-plane
   captures and deliberate visual positive controls remain open;
 - full-level rasterisation from resident WRAM still needs CHR-aware visual
@@ -117,6 +119,37 @@ This establishes source eligibility for every raw Death Heim room, but direct
 room selectors are still not a natural boss-rush playthrough. The complete hub
 → rematch → hub → final → ending handoff remains an acceptance and mutation
 census gate.
+
+### Native Death Heim handoffs
+
+A second run started only at the real `$0701` hub, pinned the documented slot-50
+boss HP field to one, and let the game's own victory driver, progress counter,
+hub objects, fades, and action-to-action loader select every later room. It
+progressed through this sequence without another map warp:
+
+```text
+0701 -> 0702 -> 0703 -> 0701 -> 0704 -> 0705 -> 0701 -> 0706
+```
+
+The observer rebuilt eight layer sources across those replacements and compared
+6,646,861 in-world tile fetches with zero mismatch. Ten PPU-complete snapshots
+in `runs/20260809-120758/` independently identify six maps, one exact source
+variant per map/layer, and zero offline mismatch. The borrowed replay ends while
+`0706` is in its post-boss coroutine, so this evidence does not promote the
+uncaptured `0707`/`0708`/ending tail to verified.
+
+The same run explains its only 364 out-of-world lookups. At GF 5293 in `0705`,
+BG2 declares a finite 256x256 world while its camera is `(104,0)`. A 256px
+authentic viewport therefore starts requesting tile X=32 beyond that decorative
+layer. This is an expected narrow-layer presentation boundary, reported
+separately from decoder failure and mismatch; it is exactly the input that the
+existing isolated repeat/clamp policy must carry into the scene plan.
+
+Finally, the authentic mid-fight savestate `saves/save0.sav` at `$0702` produces
+the same map hash, definition hash, and decoder descriptor as the direct-room
+capture while showing live boss graphics. This confirms the direct `0702`
+source identity, but savestate execution itself is not used as handoff evidence
+because the host coroutine stack cannot be resumed from that format.
 
 ### Rejected Northwall `0608` shortcut
 
