@@ -74,6 +74,55 @@ static void TestValidationAndFallback(void) {
   CHECK(!strcmp(ActionBgSourceKind_Name((ActionBgSourceKind)99), "unknown"));
 }
 
+static void TestResolvedPresentationProjection(void) {
+  ActionBgPlan plan;
+  ActionBgPlan_InitNative(&plan);
+  CHECK(plan.valid && plan.layer[0].valid && plan.layer[1].valid);
+  CHECK(plan.layer[0].source == kActionBgSource_NativeTilemap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_RawWrap);
+
+  ActionBgPresentationPolicy policy = {
+    .clamp_layers = 2,
+    .repeat_band_layer = 1,
+    .repeat_band_y0 = 144,
+    .repeat_band_y1 = 224,
+    .bound_canvas_to_world = true,
+  };
+  CHECK(ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_RawWrap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+  CHECK(plan.layer[1].band_count == 1);
+  CHECK(plan.layer[1].bands[0].y0 == 144 &&
+        plan.layer[1].bands[0].y1 == 224 &&
+        plan.layer[1].bands[0].edge == kActionBgEdge_Repeat);
+  CHECK(plan.bound_canvas_to_world);
+
+  /* Global raw/4:3 projection retains the canonical source seam while removing
+   * decorative edges and bands that were not executed for that frame. */
+  plan.layer[1].source = kActionBgSource_AuthenticViewport;
+  policy = (ActionBgPresentationPolicy){ .repeat_band_layer = -1 };
+  CHECK(ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_RawWrap);
+  CHECK(!plan.layer[1].band_count && !plan.bound_canvas_to_world);
+
+  ActionBgPlan before = plan;
+  policy = (ActionBgPresentationPolicy) {
+    .clamp_layers = 2,
+    .mirror_layers = 2,
+    .repeat_band_layer = -1,
+  };
+  CHECK(!ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
+  CHECK(!memcmp(&plan, &before, sizeof(plan)));
+  policy = (ActionBgPresentationPolicy) {
+    .repeat_band_layer = 1,
+    .repeat_band_y0 = 224,
+    .repeat_band_y1 = 144,
+  };
+  CHECK(!ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
+  CHECK(!memcmp(&plan, &before, sizeof(plan)));
+}
+
 static void TestOrdinaryWorldAndNativeSource(void) {
   ActionBgFrameState state = State(1, 1);
   ActionBgPlan plan = Build(&state);
@@ -200,6 +249,7 @@ static void TestEveryKnownMapClassifies(void) {
 
 int main(void) {
   TestValidationAndFallback();
+  TestResolvedPresentationProjection();
   TestOrdinaryWorldAndNativeSource();
   TestNarrowDecorativeBg2();
   TestBloodpoolBand();

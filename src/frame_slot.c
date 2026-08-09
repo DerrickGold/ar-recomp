@@ -548,11 +548,12 @@ void FrameSlot_Capture(FrameSlot *dst) {
     /* Fix B: from the latch, NOT g_ppu — see the field comment in present.h and
      * the latch in ActRaiserDrawPpuFrame. */
     {
-      int live_left = 0, live_right = 0, bg2_source = 0;
-      ActRaiser_LiveMargins(&live_left, &live_right, &bg2_source);
+      int live_left = 0, live_right = 0;
+      ActRaiser_LiveMargins(&live_left, &live_right);
       dst->extra_left_cur = (uint8_t)live_left;
       dst->extra_right_cur = (uint8_t)live_right;
-      dst->bg2_margin_source = (uint8_t)bg2_source;
+      ActRaiser_LiveActionBgPlan(&dst->action_bg_plan,
+                                 &dst->bg_capture_pad_to_budget);
     }
     dst->inidisp = g_ppu->inidisp;
     dst->bg_mode = (uint8_t)PPU_mode(g_ppu);

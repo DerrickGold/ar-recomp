@@ -72,9 +72,9 @@ typedef struct ActionBgPlan {
   ActionBgLayerPlan layer[kActionBgPlanLayerCount];
 } ActionBgPlan;
 
-/* Temporary migration projection into the existing post-raster PPU policy.
- * Once BH6 carries ActionBgPlan itself through FrameSlot, this adapter can be
- * deleted without changing the planner. */
+/* Migration projection into the existing post-raster PPU policy. FrameSlot now
+ * carries ActionBgPlan itself; this mask adapter remains only at the PPU setter
+ * boundary until the behavior-neutral BH8 cleanup. */
 typedef struct ActionBgPresentationPolicy {
   uint8_t clamp_layers;
   uint8_t mirror_layers;
@@ -88,6 +88,13 @@ typedef struct ActionBgPresentationPolicy {
 bool ActionBgPlan_Build(const ActionBgFrameState *state, ActionBgPlan *out);
 bool ActionBgPlan_CompilePresentation(
     const ActionBgPlan *plan, ActionBgPresentationPolicy *out);
+/* Exact native/raw plan used for non-action frames, plus the inverse adapter
+ * used only when a global/debug override deliberately replaces the canonical
+ * action policy. The adapter retains source/world metadata while replacing all
+ * layer edges and bands from `policy`; it never reads PPU state. */
+void ActionBgPlan_InitNative(ActionBgPlan *out);
+bool ActionBgPlan_ApplyPresentationPolicy(
+    ActionBgPlan *plan, const ActionBgPresentationPolicy *policy);
 const char *ActionBgSourceKind_Name(ActionBgSourceKind source);
 
 #endif  /* ACTION_BG_PLAN_H */

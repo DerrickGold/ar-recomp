@@ -12,7 +12,6 @@
 #include "action/action_load_pacing.h"
 #include "actraiser_ws_gap.h"
 #include "diorama/diorama_capture_blend.h"
-#include "diorama/diorama_skybox_uv.h"
 #include "diorama/diorama_planes.h"
 #include "host/host_display.h"   /* kHostDisplayFramebufferHeight */
 #include "settings.h"
@@ -817,6 +816,43 @@ enum {
   kNoActionBgPlanSource = -1,
 };
 
+/* ApplyWidescreenPolicy resolves these before scanout; the draw tail promotes
+ * them into the live latch beside the exact margins after the pixels exist.
+ * Keeping pending and live values separate prevents a surface rebind between
+ * scanout and FrameSlot_Capture from describing the next policy state. */
+static ActionBgPlan s_pending_action_bg_plan;
+static bool s_pending_bg_capture_pad_to_budget;
+
+static ActionBgPlan ActRaiser_NativeBgPresentationPlan(void) {
+  ActionBgPlan plan;
+  ActionBgPlan_InitNative(&plan);
+  return plan;
+}
+
+/* Project an explicit final PPU policy into a plan without inspecting PPU
+ * masks after the fact. This is used for non-action scenes and deliberate
+ * global/debug overrides. The normal action path retains the canonical plan
+ * verbatim, so map-specific action classification has only one owner. */
+static void ActRaiser_ProjectBgPresentationPolicy(
+    ActionBgPlan *plan, uint8 clamp, uint8 mirror, uint8 repeat,
+    int repeat_band_layer, uint8 repeat_band_y0, uint8 repeat_band_y1,
+    bool bound_canvas_to_world) {
+  if (!plan) return;
+  ActionBgPresentationPolicy policy = {
+    .clamp_layers = clamp,
+    .mirror_layers = mirror,
+    .repeat_layers = repeat,
+    .repeat_band_layer = (int8_t)repeat_band_layer,
+    .repeat_band_y0 = repeat_band_y0,
+    .repeat_band_y1 = repeat_band_y1,
+    .bound_canvas_to_world = bound_canvas_to_world,
+  };
+  /* All callers use already-validated production masks/bands. A failure still
+   * leaves the prior plan untouched, which is safer than publishing a partial
+   * override into FrameSlot. */
+  (void)ActionBgPlan_ApplyPresentationPolicy(plan, &policy);
+}
+
 /* Per-frame VERTICAL margin policy — the transpose of the bounded-world side
  * margin clamp in ActRaiser_ApplyWidescreenPolicy, and deliberately built the
  * same way: ask the game's own camera and layer-dimension state how much world
@@ -927,6 +963,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   /* Virtual tilemaps are frame-scoped. Clear before the inactive early return
    * so leaving widescreen cannot retain the prior action room's provider. */
   PpuClearVirtualTilemaps(g_ppu);
+  s_pending_action_bg_plan = ActRaiser_NativeBgPresentationPlan();
+  s_pending_bg_capture_pad_to_budget = false;
   if (!g_ws_active) {
     /* BH5 owns eligible authentic world layers independently of presentation
      * width. Keep the native 4:3 path in the same default-off provider census;
@@ -940,9 +978,16 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       ActionBgPresentationPolicy presentation;
       if (ActRaiserActionBg_BuildPlan(
               g_ram, kActRaiserWramSize, g_ppu,
-              g_settings.ws_bg2_padding, &plan, &presentation))
+              g_settings.ws_bg2_padding, &plan, &presentation)) {
+        s_pending_action_bg_plan = plan;
+        /* No side columns are rendered in this mode. Preserve source ownership
+         * for the authentic provider, but describe the executed presentation
+         * as raw/live so a mirror decision cannot imply nonexistent padding. */
+        ActRaiser_ProjectBgPresentationPolicy(
+            &s_pending_action_bg_plan, 0, 0, 0, -1, 0, 0, false);
         ActRaiserActionBg_BindPlan(
             g_ram, kActRaiserWramSize, &plan, g_ppu);
+      }
     }
     return;
   }
@@ -979,6 +1024,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   int bg_hle_allowed = 0;
   uint8 bg_hle_bindings = 0;
   ActionBgPlan bg_plan = { 0 };
+  bool project_final_bg_policy = false;
   /* True when the current wide world has finite horizontal bounds. The PPU
    * still owns the fixed centering budget; this policy narrows the live left
    * and right margins as the camera approaches either world edge. */
@@ -1072,6 +1118,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       wide = 1; clamp = 0; mirror = 0; repeat = 0;  /* raw tilemap data */
       repeat_band_layer = -1;
       bg_hle_allowed = 0;
+      project_final_bg_policy = true;
     } }
   /* AR_WS_CLAMP=<hex mask>: override the per-layer clamp for tuning. */
   { const char *cm = getenv("AR_WS_CLAMP");
@@ -1080,6 +1127,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       mirror = 0; repeat = 0;
       repeat_band_layer = -1;
       bg_hle_allowed = 0;
+      project_final_bg_policy = true;
     } }
   /* Capture presets are final policy overrides, intentionally after the
    * scene-specific rules and diagnostic clamp knob. This makes promotional
@@ -1097,11 +1145,13 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     bg2_gap = 0; bounded_world_margins = 0;
     repeat_band_layer = -1;
     bg_hle_allowed = 0;
+    project_final_bg_policy = true;
   } else if (g_settings.display_mode == kDisplayMode_WideRaw) {
     wide = 1; clamp = 0; mirror = 0; repeat = 0;
     bg2_gap = 0; bounded_world_margins = 0;
     repeat_band_layer = -1;
     bg_hle_allowed = 0;
+    project_final_bg_policy = true;
   }
 
   /* Host-overlay HUD layout. BG3 rows 0-3 are the live status compose band
@@ -1204,6 +1254,25 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     PpuSetExtraSpaceCentered(g_ppu, (uint8)g_ws_extra);
     PpuSetWidescreenLayerClamp(g_ppu, 0);
   }
+  /* BH6 immutable handoff. In the ordinary action path the pure plan survives
+   * unchanged, including Bloodpool/Death Heim row bands. Other scene types and
+   * explicit global overrides are projected from the final local variables
+   * that were just passed to the PPU; there is no present-side mask reversal. */
+  if (bg_plan_valid)
+    s_pending_action_bg_plan = bg_plan;
+  if (!bg_plan_valid || project_final_bg_policy || !wide) {
+    ActRaiser_ProjectBgPresentationPolicy(
+        &s_pending_action_bg_plan,
+        wide ? clamp : 0, wide ? mirror : 0, wide ? repeat : 0,
+        wide ? repeat_band_layer : -1,
+        repeat_band_y0, repeat_band_y1,
+        wide && bounded_world_margins);
+  } else {
+    s_pending_action_bg_plan.bound_canvas_to_world =
+        bounded_world_margins;
+  }
+  s_pending_bg_capture_pad_to_budget =
+      g_ppu->wsPadCapturedToBudget != 0;
   /* One line per policy flip — cheap, and makes "why isn't this screen
    * wide?" diagnosable from any console.log (mode bytes included). */
   static int last_wide = -1, last_clamp = -1, last_mirror = -1,
@@ -1850,8 +1919,9 @@ static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
  * latched at the end of ActRaiserDrawPpuFrame. See ActRaiser_LiveMargins. */
 static int s_live_margin_left;
 static int s_live_margin_right;
-static int s_live_bg2_margin_source;
 static int s_live_margin_top;
+static ActionBgPlan s_live_action_bg_plan;
+static bool s_live_bg_capture_pad_to_budget;
 
 void ActRaiserDrawPpuFrame(void) {
   const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
@@ -2311,10 +2381,9 @@ void ActRaiserDrawPpuFrame(void) {
   }
   s_live_margin_left = g_ppu->extraLeftCur;
   s_live_margin_right = g_ppu->extraRightCur;
-  s_live_bg2_margin_source = DioramaBg2MarginSource_Classify(
-      g_ppu->wsLayerClamp, g_ppu->wsLayerMirror, g_ppu->wsLayerRepeat,
-      g_ppu->wsRepeatY1[kActRaiserPpuLayer_Bg2] >
-          g_ppu->wsRepeatY0[kActRaiserPpuLayer_Bg2]);
+  s_live_action_bg_plan = s_pending_action_bg_plan;
+  s_live_bg_capture_pad_to_budget =
+      s_pending_bg_capture_pad_to_budget;
 
   /* Sky Palace BG2 is prepared at the top of this function and ALWAYS restored
    * here at the end. ActRaiserDrawPpuFrame has no early returns, so a pending
@@ -2331,10 +2400,17 @@ int ActRaiser_LiveVerticalMargin(void) { return s_live_margin_top; }
 
 /* See the latch above. Reports the margin geometry of the most recently rendered
  * frame, which is what a consumer of that frame's captured pixels must use. */
-void ActRaiser_LiveMargins(int *left, int *right, int *bg2_margin_source) {
+void ActRaiser_LiveMargins(int *left, int *right) {
   if (left) *left = s_live_margin_left;
   if (right) *right = s_live_margin_right;
-  if (bg2_margin_source) *bg2_margin_source = s_live_bg2_margin_source;
+}
+
+bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
+                                bool *pad_captured_to_budget) {
+  if (out) *out = s_live_action_bg_plan;
+  if (pad_captured_to_budget)
+    *pad_captured_to_budget = s_live_bg_capture_pad_to_budget;
+  return s_live_action_bg_plan.valid;
 }
 
 /* Reload the selector-dependent part of the action OBJ atlas after a live
