@@ -84,11 +84,11 @@ This is an entry census, not the complete BH1 gate:
   captures and deliberate visual positive controls remain open;
 - full-level rasterisation from resident WRAM still needs CHR-aware visual
   review outside Fillmore;
-- no HLE tile source is bound and no margin lookup is displayed.
+- these BH1 matrix runs predate BH4: they do not bind an HLE tile source or
+  display a provider margin lookup.
 
-The provider seam therefore remains default-off/unimplemented. The evidence is
-enough to proceed with special-room census work, not enough to claim BH1/BH2 or
-delete any legacy background path.
+The later provider seam remains default-off, and these entry samples alone are
+not enough to close BH1 or delete any legacy background path.
 
 ## Special action rooms — 2026-08-09
 
@@ -164,8 +164,34 @@ three vertical/diorama cases. Framebuffers, full PPU snapshots, WRAM, SRAM,
 dispatch logs, and final state dumps were byte-identical; emitted PPU policy
 masks and bands also matched. Runtime diagnostics now add the resolved source
 for each layer (`world`, `viewport`, or `native`). The plan is therefore the
-production policy owner, but it still drives the old PPU setters and does not
-yet supply a tile word.
+production policy owner. BH4 now additionally consumes its world sources for
+synthetic margins while the same setters still execute decorative policy.
+
+## BH4 synthetic-margin provider — 2026-08-09
+
+The generic PPU provider and ActRaiser binding adapter are implemented behind
+default-off `AR_ACTION_BG_HLE=1`. Only plan layers classified `world` bind, and
+only pixels outside the authentic 256x224 rectangle consume them. The centre
+remains the native ring.
+
+The focused evidence set is presentation-aware:
+
+- wide `0101` world/world, `0201` world/mixed mirror+repeat viewport, and
+  `0401` world/cyclic viewport have exact off/on screenshots, WRAM, SRAM,
+  dispatch logs, and state dumps;
+- `0101` with `AR_WS_BGREFRESH=0` plus HLE is byte-identical to the corrected
+  reference screenshot and final state, while disabling both produces a
+  different screenshot (provider-active positive control);
+- Fillmore act 2 gf 2200 off/on matches all nine diorama layer/priority PNGs;
+  the HLE arm remains identical with `AR_VEXT_BANDFIX=0`, proving the top band
+  no longer relies on host-repaired ring rows;
+- the real-PPU synthetic suite pins centre priority-word identity, finite
+  transparency, palette swaps, priority, windows, fixed-color math, live
+  scroll changes, signed scroll wrap, flips, mosaic, vertical bounds, and
+  reset/fail-closed behavior.
+
+This closes BH4, not BH1/BH5: the remaining census gaps and authentic-centre
+provider migration still require their own gates.
 
 ### Rejected Northwall `0608` shortcut
 

@@ -1,12 +1,12 @@
 # SPEC-bg-hle — action background world provider and scene plan
 
-**Status: In progress (BH3 policy parity complete).** The action-level decode
-is mapped, the offline oracle exists, and the pure production `ActionBgWorld`
-decoder, differential observer, and `ActionBgPlan` policy matrix are
-implemented. Production action policy now comes from that plan but still
-compiles into the existing PPU setters; the complete BH1 census and virtual
-tilemap provider remain open, and no production pixel path consumes the decoder
-yet.
+**Status: In progress (BH4 synthetic-margin provider complete).** The mapped
+decoder, offline oracle, pure `ActionBgWorld`, differential observer, and
+`ActionBgPlan` policy matrix now feed a generic frame-scoped PPU virtual
+tilemap seam. `AR_ACTION_BG_HLE=1` is default-off and supplies only pixels
+outside the authentic 256x224 viewport; the centre remains on the native ring.
+Decorative/native layers retain the existing isolated mirror/repeat/raw paths.
+BH5 centre ownership and the remaining BH1 acceptance census are still open.
 
 This spec replaces the narrower original BH1 proposal. It keeps that proposal's
 measured decoder evidence, but expands the target from "decode more margin
@@ -333,9 +333,10 @@ dimension may control an allocation or index.
 
 ### 5.4 Generic PPU virtual-tilemap seam
 
-The SNES runtime must not know ActRaiser map IDs or scene policy. It receives a
-generic, frame-scoped provider binding for a BG layer. The exact API is a BH3
-design deliverable, but it must satisfy these invariants:
+The SNES runtime does not know ActRaiser map IDs or scene policy. It receives a
+generic `PpuVirtualTilemapBinding` for Mode-1 BG1/BG2. The binding contains a
+total tile-word-or-transparent callback, opaque context, full camera anchors,
+and matching 10-bit scroll anchors. BH4 implements these invariants:
 
 - binding is all-or-nothing per layer for the frame;
 - the provider supplies tilemap words only;
@@ -358,9 +359,10 @@ world uses full 16-bit cameras. For each layer, the binding must carry:
 
 The PPU resolves a signed phase delta from the current hardware scroll to the
 anchor and adds that delta to the full camera. This preserves per-line HDMA
-while avoiding a false wrap every 1024 pixels. BH3 must pin the signed-wrap
-formula with synthetic tests at `0/$3FF` and with an HDMA action capture before
-using the provider outside margins.
+while avoiding a false wrap every 1024 pixels. Synthetic tests pin both
+`current=0, anchor=$3FF => +1` and the reverse `=> -1`; a live scroll change
+then moves the requested provider tile without rebinding, exercising the same
+per-line state HDMA changes.
 
 ### 5.5 Edge operators belong at two different stages
 
@@ -645,6 +647,34 @@ test requires access to the macOS video service).
 This phase proves ownership and classification independently of decoding.
 
 ### BH4 — virtual provider for synthetic margins only
+
+**Implementation status (2026-08-09): complete, default-off.**
+`PpuVirtualTilemapBinding` is render-only host state outside both savestate
+regions and is cleared by `ppu_reset`, every widescreen policy reset, and the
+ActRaiser per-frame adapter. The Mode-1 4bpp renderer splits window spans at
+the authentic x edges and calls the provider only on side margins or on
+scanlines outside 1..224. Native centre traversal is unchanged. Provider words
+still use live VRAM characters and the existing z/color pipeline; mosaic uses
+the same route, including an exact arithmetic continuation of mosaic phase
+outside x=0..255. A false callback result is transparent finite-world space.
+
+`ActRaiserActionBg_BindPlan` binds only `kActionBgSource_WorldMap` layers whose
+live decoder record, dimensions, Mode-1 state, enable mask, and 64x64 ring
+ownership all validate. Full cameras and the live PPU phases are captured per
+layer. Narrow/decorative and native/raw plan sources never bind. Shutdown
+reports provider frames, bound layers, lookups, tiles, and finite exits.
+
+The real-PPU synthetic suite proves native-centre pixel and priority-word
+identity plus palette changes, transparent bounds, priority, windows, fixed
+color math, HBlank scroll, signed wrap, flips, mosaic, vertical margins, and
+reset/fail-closed behavior. Deterministic wide A/Bs at `0101`, `0201`, and
+`0401` produced byte-identical screenshots, WRAM, SRAM, dispatch logs, and
+state dumps. Fillmore with `AR_WS_BGREFRESH=0` plus HLE matched the corrected
+reference exactly; disabling both changed the screenshot, proving the provider
+was active. Diorama Fillmore act 2 at gf 2200 produced nine byte-identical
+layer/priority PNGs with HLE off/on, and remained identical with
+`AR_VEXT_BANDFIX=0`, proving synthetic top rows no longer depend on repaired
+ring rows when HLE is enabled.
 
 **Work**
 

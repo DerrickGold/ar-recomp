@@ -909,7 +909,7 @@ the owning 4 KiB tilemap before directly copying to VRAM. Consequently its
 only persistent state is BG1/BG2 tilemap content. `AR_WS_BGREFRESH=0` removes
 the transaction entirely for a byte-identical Stage-A A/B run.
 
-The successor HLE tile source is currently observable but not selectable. With
+The successor HLE tile source is observable independently. With
 `AR_ACTION_BG_HLE_COMPARE=1`, `src/actraiser/actraiser_action_bg.c` captures the
 same two low-WRAM decoder records after the native/Stage-B refresh, expands
 them through the bounded `ActionBgWorld`, and compares every tile touched by
@@ -927,8 +927,35 @@ live-state capture site; `actraiser_rtl.c` no longer contains the map-specific
 action background table. A pre/post integration oracle found byte-identical
 framebuffers, PPU snapshots, WRAM/SRAM, dispatch logs, and final state across
 the 12 entry census, representative wide policies, and vertical/diorama cases.
-Diagnostics name each planned source, while scanout still fetches every tilemap
-word from native VRAM.
+Diagnostics name each planned source.
+
+BH4 makes the finite-world source selectable only for synthetic margins.
+`AR_ACTION_BG_HLE=1` asks `ActRaiserActionBg_BindPlan` to validate each planned
+world layer, atomically update its `ActionBgWorld`, and bind a generic
+`PpuVirtualTilemapBinding`. The binding carries the full per-layer camera and
+the matching 10-bit PPU scroll phase. Scanout adds the nearest signed live
+phase delta on every line, so HBlank/HDMA motion survives across the 1024px
+hardware wrap. Only x outside 0..255 or scanlines outside 1..224 call the
+provider; the authentic centre keeps the original pointer-walking VRAM-ring
+path byte-for-byte. A finite miss is transparent. Native/decorative sources
+stay on raw, mirror, repeat, or clamp presentation from the plan.
+
+The provider changes only the tilemap word. Character bits remain live VRAM,
+and the resulting z/color word continues through the existing palette,
+transparency, tile flip, priority, window, mosaic, main/subscreen, brightness,
+and color-math paths. Its bindings are render-only, excluded from savestates,
+and cleared on reset and every frame-policy rebuild. The real-PPU harness pins
+each of those effects plus signed `0/$3FF` scroll wrap and unchanged centre
+priority words.
+
+Representative integration gates are exact. Wide `0101`, `0201`, and `0401`
+off/on pairs match screenshots, WRAM, SRAM, dispatch logs, and state dumps.
+With legacy `AR_WS_BGREFRESH=0`, HLE `0101` still matches the corrected
+reference, while disabling both produces a different screenshot. Fillmore act
+2 diorama gf 2200 matches all nine layer/priority PNGs off/on and continues to
+match with `AR_VEXT_BANDFIX=0`; therefore the synthetic band can now come from
+the finite world rather than repaired VRAM ring rows. The feature remains
+default-off until BH5 and the broader soak phases complete.
 
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color
