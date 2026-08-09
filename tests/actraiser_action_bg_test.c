@@ -154,15 +154,16 @@ static void TestRingAndComparison(void) {
   ActRaiserActionBgCompareResult result;
   CHECK(ActRaiserActionBg_CompareLayer(
       world, &snapshot, vram, kVramWords, &result));
-  /* Camera phases 13/7 expose 33 by 29 unique tile cells. */
-  CHECK(result.compared == 33u * 29u);
+  /* Authentic x=0..255 and PPU scanlines 1..224 expose 33 by 28 cells at
+   * camera phases 13/7. */
+  CHECK(result.compared == 33u * 28u);
   CHECK(result.mismatches == 0 && result.outside_world == 0);
   CHECK(result.first_tile_x == -1 && result.first_tile_y == -1);
   CHECK(result.first_outside_tile_x == -1 &&
         result.first_outside_tile_y == -1);
 
   const int changed_x = snapshot.camera_x >> 3;
-  const int changed_y = snapshot.camera_y >> 3;
+  const int changed_y = (snapshot.camera_y + 1) >> 3;
   size_t changed_address = 0;
   CHECK(ActRaiserActionBg_RingAddress(snapshot.tilemap_base,
                                       changed_x, changed_y,
@@ -180,11 +181,11 @@ static void TestRingAndComparison(void) {
   snapshot.camera_x = 500;
   CHECK(ActRaiserActionBg_CompareLayer(
       world, &snapshot, vram, kVramWords, &result));
-  CHECK(result.compared == 2u * 29u);
-  CHECK(result.outside_world == 31u * 29u);
+  CHECK(result.compared == 2u * 28u);
+  CHECK(result.outside_world == 31u * 28u);
   CHECK(result.mismatches == 0);
   CHECK(result.first_outside_tile_x == 64 &&
-        result.first_outside_tile_y == 0);
+        result.first_outside_tile_y == 1);
 
   snapshot.bgsc = 0x62;
   CHECK(!ActRaiserActionBg_WorldRingEligible(&snapshot, kVramWords));
@@ -259,7 +260,7 @@ static void TestFramePlanBinding(void) {
                           kActRaiserBgLayerMask_Bg2;
   ppu->bgXsc[0] = 0x63;
   ppu->bgXsc[1] = 0x73;
-  ppu->hScroll[0] = 0x413;
+  ppu->hScroll[0] = 0x40D;
   ppu->vScroll[0] = 0x807;
 
   ActionBgPlan plan;
@@ -268,28 +269,75 @@ static void TestFramePlanBinding(void) {
       wram, kActRaiserWramSize, ppu, true, &plan, &policy));
   CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
   CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+
+  ActionBgWorld *reference = ActionBgWorld_Create();
+  ActRaiserActionBgLayerSnapshot snapshot;
+  CHECK(reference != NULL);
+  CHECK(ActRaiserActionBg_CaptureLayer(
+      wram, kActRaiserWramSize, 0, ppu->bgXsc[0], &snapshot));
+  CHECK(ActionBgWorld_Update(reference, &snapshot.decode));
+  PopulateNativeRing(reference, &snapshot, ppu->vram);
   CHECK(ActRaiserActionBg_BindPlan(
       wram, kActRaiserWramSize, &plan, ppu) ==
       kActRaiserBgLayerMask_Bg1);
   const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[0];
   CHECK(binding->lookup != NULL && binding->context != NULL);
   CHECK(binding->camera_x == 13 && binding->camera_y == 7);
-  CHECK(binding->hscroll_anchor == 0x13);
+  CHECK(binding->hscroll_anchor == 13);
   CHECK(binding->vscroll_anchor == 7);
+  CHECK(binding->flags == kPpuVirtualTilemapFlag_IncludeAuthentic);
   CHECK(ppu->virtualTilemap[1].lookup == NULL);
 
-  ActionBgWorld *reference = ActionBgWorld_Create();
-  ActRaiserActionBgLayerSnapshot snapshot;
   uint16_t expected = 0, actual = 0;
-  CHECK(reference != NULL);
-  CHECK(ActRaiserActionBg_CaptureLayer(
-      wram, kActRaiserWramSize, 0, ppu->bgXsc[0], &snapshot));
-  CHECK(ActionBgWorld_Update(reference, &snapshot.decode));
   CHECK(ActionBgWorld_Lookup(reference, 0, 0, &expected) ==
         kActionBgLookup_Tile);
   CHECK(binding->lookup(binding->context, 0, 0, &actual));
   CHECK(actual == expected);
   CHECK(!binding->lookup(binding->context, 64, 0, &actual));
+
+  const ActRaiserActionBgDiagnostics *diagnostics =
+      ActRaiserActionBg_GetDiagnostics();
+  CHECK(diagnostics->provider_preflight_layers == 1);
+  CHECK(diagnostics->provider_preflight_tiles == 33u * 28u);
+  CHECK(diagnostics->provider_preflight_mismatches == 0);
+  CHECK(diagnostics->provider_preflight_outside_world == 0);
+  CHECK(diagnostics->provider_eligible_layers == 1);
+
+  /* Any authentic contradiction rejects the whole layer for that frame. */
+  const int changed_x = snapshot.camera_x >> 3;
+  const int changed_y = (snapshot.camera_y + 1) >> 3;
+  size_t changed_address = 0;
+  CHECK(ActRaiserActionBg_RingAddress(snapshot.tilemap_base,
+                                      changed_x, changed_y,
+                                      kVramWords, &changed_address));
+  ppu->vram[changed_address] ^= 1;
+  Write16(wram, kActRaiserWram_GameFrame, 101);
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) == 0);
+  CHECK(ppu->virtualTilemap[0].lookup == NULL);
+  CHECK(diagnostics->provider_preflight_mismatches == 1);
+  CHECK(diagnostics->fallbacks[kActRaiserActionBgFallback_CompareFailure] == 1);
+  ppu->vram[changed_address] ^= 1;
+
+  /* The finite decoder may report a valid outside-world coordinate, but the
+   * full authentic handoff requires every displayed cell to exist. */
+  Write16(wram, kActRaiserWram_Bg1CameraX, 500);
+  ppu->hScroll[0] = 500;
+  Write16(wram, kActRaiserWram_GameFrame, 102);
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) == 0);
+  CHECK(diagnostics->provider_preflight_outside_world == 31u * 28u);
+  CHECK(diagnostics->fallbacks[kActRaiserActionBgFallback_AuthenticEdge] == 1);
+
+  /* Camera/PPU phase disagreement means the comparison would address a
+   * different native cell than scanout, so it fails before preflight. */
+  Write16(wram, kActRaiserWram_Bg1CameraX, 13);
+  ppu->hScroll[0] = 14;
+  Write16(wram, kActRaiserWram_GameFrame, 103);
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) == 0);
+  CHECK(diagnostics->fallbacks[kActRaiserActionBgFallback_ScrollPhase] == 1);
+  ppu->hScroll[0] = 13;
   ActionBgWorld_Destroy(reference);
 
   /* Every rejected frame clears the previous binding rather than mixing a

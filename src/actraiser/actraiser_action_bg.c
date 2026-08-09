@@ -125,11 +125,13 @@ bool ActRaiserActionBg_CompareLayer(
     .first_outside_tile_y = -1,
   };
   const int first_x = snapshot->camera_x >> 3;
-  const int first_y = snapshot->camera_y >> 3;
+  /* Authentic PPU scanlines are numbered 1..224. Horizontal pixels remain
+   * 0..255, so the two axes intentionally have different inclusive ranges. */
+  const int first_y = (snapshot->camera_y + 1) >> 3;
   const int last_x = (snapshot->camera_x +
                       kActRaiserAuthenticWidth - 1) >> 3;
   const int last_y = (snapshot->camera_y +
-                      kActRaiserAuthenticHeight - 1) >> 3;
+                      kActRaiserAuthenticHeight) >> 3;
   for (int tile_y = first_y; tile_y <= last_y; tile_y++) {
     for (int tile_x = first_x; tile_x <= last_x; tile_x++) {
       uint16_t hle = 0;
@@ -221,6 +223,8 @@ static const char *FallbackName(ActRaiserActionBgFallbackReason reason) {
     [kActRaiserActionBgFallback_NativeTilemap] = "native-tilemap",
     [kActRaiserActionBgFallback_InvalidSource] = "invalid-world-source",
     [kActRaiserActionBgFallback_Allocation] = "allocation-failure",
+    [kActRaiserActionBgFallback_ScrollPhase] = "scroll-phase-mismatch",
+    [kActRaiserActionBgFallback_AuthenticEdge] = "authentic-world-edge",
     [kActRaiserActionBgFallback_CompareFailure] = "compare-failure",
   };
   return reason < kActRaiserActionBgFallback_Count ? names[reason] : "unknown";
@@ -243,7 +247,7 @@ static bool HleEnabled(void) {
     s_observer.hle_enabled = value && value[0] && value[0] != '0';
     if (s_observer.hle_enabled)
       fprintf(stderr,
-              "[action-bg-hle] synthetic-margin provider enabled\n");
+              "[action-bg-hle] full world-layer provider enabled\n");
   }
   return s_observer.hle_enabled != 0;
 }
@@ -291,7 +295,10 @@ static void RecordProviderFallback(
     ActRaiserActionBgFallbackReason reason, unsigned layer,
     uint8_t map_group, uint8_t map_number,
     const ActRaiserActionBgLayerSnapshot *snapshot) {
-  if (!CompareEnabled())
+  if (!CompareEnabled() ||
+      reason == kActRaiserActionBgFallback_ScrollPhase ||
+      reason == kActRaiserActionBgFallback_AuthenticEdge ||
+      reason == kActRaiserActionBgFallback_CompareFailure)
     RecordFallback(reason, layer, map_group, map_number, snapshot);
 }
 
@@ -344,6 +351,40 @@ static bool ProviderLookup(const void *context, int32_t tile_x,
   if (result == kActionBgLookup_OutsideWorld)
     s_observer.diagnostics.provider_outside_world++;
   return false;
+}
+
+static void ReportComparison(
+    const uint8_t *wram, unsigned layer, uint8_t map_group,
+    uint8_t map_number, const ActRaiserActionBgLayerSnapshot *snapshot,
+    uint32_t serial, const ActRaiserActionBgCompareResult *comparison) {
+  if (comparison->outside_world &&
+      s_observer.reported_outside_serial[layer] != serial) {
+    s_observer.reported_outside_serial[layer] = serial;
+    fprintf(stderr,
+            "[action-bg-hle] finite-edge gf=%u map=%02X/%02X BG%u "
+            "serial=%u count=%zu first=(%d,%d) camera=(%u,%u) "
+            "world=%ux%u\n",
+            ReadWram16(wram, kActRaiserWram_GameFrame),
+            map_group, map_number, layer + 1, serial,
+            comparison->outside_world,
+            comparison->first_outside_tile_x,
+            comparison->first_outside_tile_y,
+            snapshot->camera_x, snapshot->camera_y,
+            snapshot->decode.world_width, snapshot->decode.world_height);
+  }
+  if (comparison->mismatches &&
+      s_observer.reported_mismatch_serial[layer] != serial) {
+    s_observer.reported_mismatch_serial[layer] = serial;
+    fprintf(stderr,
+            "[action-bg-hle] MISMATCH gf=%u map=%02X/%02X BG%u "
+            "serial=%u count=%zu/%zu first=(%d,%d) "
+            "hle=$%04X native=$%04X\n",
+            ReadWram16(wram, kActRaiserWram_GameFrame),
+            map_group, map_number, layer + 1, serial,
+            comparison->mismatches, comparison->compared,
+            comparison->first_tile_x, comparison->first_tile_y,
+            comparison->first_hle, comparison->first_native);
+  }
 }
 
 uint8_t ActRaiserActionBg_BindPlan(
@@ -403,6 +444,14 @@ uint8_t ActRaiserActionBg_BindPlan(
                              map_group, map_number, &snapshot);
       continue;
     }
+    if ((snapshot.camera_x & 0x3ffu) !=
+            (ppu->hScroll[layer] & 0x3ffu) ||
+        (snapshot.camera_y & 0x3ffu) !=
+            (ppu->vScroll[layer] & 0x3ffu)) {
+      RecordProviderFallback(kActRaiserActionBgFallback_ScrollPhase, layer,
+                             map_group, map_number, &snapshot);
+      continue;
+    }
     ActionBgWorld *world = WorldForLayer(layer, map_group, map_number);
     if (!world) continue;
     const uint32_t before = ActionBgWorld_Serial(world);
@@ -413,6 +462,31 @@ uint8_t ActRaiserActionBg_BindPlan(
     }
     if (ActionBgWorld_Serial(world) != before)
       s_observer.diagnostics.layer_activations++;
+    const uint32_t serial = ActionBgWorld_Serial(world);
+    ActRaiserActionBgCompareResult comparison;
+    if (!ActRaiserActionBg_CompareLayer(
+            world, &snapshot, ppu->vram,
+            sizeof(ppu->vram) / sizeof(ppu->vram[0]), &comparison)) {
+      RecordProviderFallback(kActRaiserActionBgFallback_CompareFailure, layer,
+                             map_group, map_number, &snapshot);
+      continue;
+    }
+    s_observer.diagnostics.provider_preflight_layers++;
+    s_observer.diagnostics.provider_preflight_tiles += comparison.compared;
+    s_observer.diagnostics.provider_preflight_mismatches +=
+        comparison.mismatches;
+    s_observer.diagnostics.provider_preflight_outside_world +=
+        comparison.outside_world;
+    ReportComparison(wram, layer, map_group, map_number, &snapshot, serial,
+                     &comparison);
+    if (comparison.mismatches || comparison.outside_world) {
+      const ActRaiserActionBgFallbackReason reason = comparison.mismatches
+          ? kActRaiserActionBgFallback_CompareFailure
+          : kActRaiserActionBgFallback_AuthenticEdge;
+      RecordProviderFallback(reason, layer, map_group, map_number, &snapshot);
+      continue;
+    }
+    s_observer.diagnostics.provider_eligible_layers++;
     s_provider[layer].world = world;
     const PpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
@@ -421,6 +495,7 @@ uint8_t ActRaiserActionBg_BindPlan(
       .camera_y = snapshot.camera_y,
       .hscroll_anchor = (uint16_t)(ppu->hScroll[layer] & 0x3ff),
       .vscroll_anchor = (uint16_t)(ppu->vScroll[layer] & 0x3ff),
+      .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
     };
     if (!PpuSetVirtualTilemap(ppu, (uint8_t)layer, &binding)) {
       RecordProviderFallback(kActRaiserActionBgFallback_InvalidSource, layer,
@@ -480,33 +555,8 @@ static void ObserveLayer(const uint8_t *wram, size_t wram_size,
   s_observer.diagnostics.tiles_compared += comparison.compared;
   s_observer.diagnostics.mismatches += comparison.mismatches;
   s_observer.diagnostics.outside_world += comparison.outside_world;
-  if (comparison.outside_world &&
-      s_observer.reported_outside_serial[layer] != serial) {
-    s_observer.reported_outside_serial[layer] = serial;
-    fprintf(stderr,
-            "[action-bg-hle] finite-edge gf=%u map=%02X/%02X BG%u "
-            "serial=%u count=%zu first=(%d,%d) camera=(%u,%u) "
-            "world=%ux%u\n",
-            ReadWram16(wram, kActRaiserWram_GameFrame),
-            map_group, map_number, layer + 1, serial,
-            comparison.outside_world,
-            comparison.first_outside_tile_x,
-            comparison.first_outside_tile_y,
-            snapshot.camera_x, snapshot.camera_y,
-            snapshot.decode.world_width, snapshot.decode.world_height);
-  }
-  if (comparison.mismatches &&
-      s_observer.reported_mismatch_serial[layer] != serial) {
-    s_observer.reported_mismatch_serial[layer] = serial;
-    fprintf(stderr,
-            "[action-bg-hle] MISMATCH gf=%u map=%02X/%02X BG%u "
-            "serial=%u count=%zu/%zu first=(%d,%d) hle=$%04X native=$%04X\n",
-            ReadWram16(wram, kActRaiserWram_GameFrame),
-            map_group, map_number, layer + 1, serial,
-            comparison.mismatches, comparison.compared,
-            comparison.first_tile_x, comparison.first_tile_y,
-            comparison.first_hle, comparison.first_native);
-  }
+  ReportComparison(wram, layer, map_group, map_number, &snapshot, serial,
+                   &comparison);
 }
 
 void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
@@ -551,6 +601,7 @@ void ActRaiserActionBg_Shutdown(void) {
             " fallbacks={blank:%" PRIu64 ",mode:%" PRIu64
             ",disabled:%" PRIu64 ",native:%" PRIu64
             ",invalid:%" PRIu64 ",alloc:%" PRIu64
+            ",phase:%" PRIu64 ",edge:%" PRIu64
             ",compare:%" PRIu64 "}\n",
             s_observer.diagnostics.frames_observed,
             s_observer.diagnostics.layer_activations,
@@ -571,15 +622,27 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics
                 .fallbacks[kActRaiserActionBgFallback_Allocation],
             s_observer.diagnostics
+                .fallbacks[kActRaiserActionBgFallback_ScrollPhase],
+            s_observer.diagnostics
+                .fallbacks[kActRaiserActionBgFallback_AuthenticEdge],
+            s_observer.diagnostics
                 .fallbacks[kActRaiserActionBgFallback_CompareFailure]);
   }
   if (s_observer.hle_enabled > 0 &&
       s_observer.diagnostics.provider_frames) {
     fprintf(stderr,
             "[action-bg-hle] provider-summary frames=%" PRIu64
-            " layers=%" PRIu64 " lookups=%" PRIu64
+            " preflight={layers:%" PRIu64 ",tiles:%" PRIu64
+            ",mismatches:%" PRIu64 ",outside:%" PRIu64 "}"
+            " eligible=%" PRIu64 " layers=%" PRIu64
+            " lookups=%" PRIu64
             " tiles=%" PRIu64 " outside=%" PRIu64 "\n",
             s_observer.diagnostics.provider_frames,
+            s_observer.diagnostics.provider_preflight_layers,
+            s_observer.diagnostics.provider_preflight_tiles,
+            s_observer.diagnostics.provider_preflight_mismatches,
+            s_observer.diagnostics.provider_preflight_outside_world,
+            s_observer.diagnostics.provider_eligible_layers,
             s_observer.diagnostics.provider_layers,
             s_observer.diagnostics.provider_lookups,
             s_observer.diagnostics.provider_tiles,

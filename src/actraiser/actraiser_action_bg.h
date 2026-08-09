@@ -41,6 +41,8 @@ typedef enum ActRaiserActionBgFallbackReason {
   kActRaiserActionBgFallback_NativeTilemap,
   kActRaiserActionBgFallback_InvalidSource,
   kActRaiserActionBgFallback_Allocation,
+  kActRaiserActionBgFallback_ScrollPhase,
+  kActRaiserActionBgFallback_AuthenticEdge,
   kActRaiserActionBgFallback_CompareFailure,
   kActRaiserActionBgFallback_Count,
 } ActRaiserActionBgFallbackReason;
@@ -53,6 +55,11 @@ typedef struct ActRaiserActionBgDiagnostics {
   uint64_t mismatches;
   uint64_t outside_world;
   uint64_t provider_frames;
+  uint64_t provider_preflight_layers;
+  uint64_t provider_preflight_tiles;
+  uint64_t provider_preflight_mismatches;
+  uint64_t provider_preflight_outside_world;
+  uint64_t provider_eligible_layers;
   uint64_t provider_layers;
   uint64_t provider_lookups;
   uint64_t provider_tiles;
@@ -83,11 +90,12 @@ bool ActRaiserActionBg_BuildPlan(
     bool decorative_padding_enabled, ActionBgPlan *plan,
     ActionBgPresentationPolicy *presentation);
 
-/* Default-off BH4 renderer adapter. With `AR_ACTION_BG_HLE=1`, publish and
- * bind every plan layer whose source is a finite world map. Only synthetic
- * margins consume these bindings; authentic pixels remain on the native ring.
- * Returns the bitmask of bound PPU layers. The function always clears prior
- * bindings first, so a rejected/disabled frame fails closed. */
+/* Default-off BH4/BH5 renderer adapter. With `AR_ACTION_BG_HLE=1`, publish and
+ * bind every plan layer whose source is a finite world map. A zero-mismatch,
+ * zero-outside comparison against the exact live native viewport is required
+ * before provider ownership includes authentic pixels. Returns the bitmask of
+ * bound PPU layers. The function always clears prior bindings first, so a
+ * rejected/disabled frame fails closed. */
 uint8_t ActRaiserActionBg_BindPlan(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
     struct Ppu *ppu);
