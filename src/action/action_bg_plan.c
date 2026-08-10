@@ -155,6 +155,11 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
       plan->layer[layer].role = kActionBgLayerRole_Backdrop;
       plan->layer[layer].source = kActionBgSource_NativeTilemap;
       plan->layer[layer].default_edge = kActionBgEdge_RawWrap;
+      /* 0708 is an authored two-plane raster scene. Its 256px native maps
+       * intentionally wrap across the complete wide canvas, so discard any
+       * narrow-decorative cap applied before this special-room override. */
+      plan->layer[layer].horizontal_extent = AvailableHorizontalExtent();
+      plan->layer[layer].vertical_extent = AvailableVerticalExtent();
       plan->layer[layer].band_count = 0;
     }
     plan->layer[0].role = kActionBgLayerRole_Scene;

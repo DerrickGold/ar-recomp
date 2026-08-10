@@ -451,6 +451,10 @@ static void TestDeathHeimStates(void) {
   CHECK(plan.layer[0].role == kActionBgLayerRole_Scene);
   CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
   CHECK(plan.layer[0].default_edge == kActionBgEdge_RawWrap);
+  CHECK(plan.layer[0].horizontal_extent.mode ==
+        kActionBgExtent_Available);
+  CHECK(plan.layer[1].horizontal_extent.mode ==
+        kActionBgExtent_Available);
   CHECK(!policy.clamp_layers && !policy.mirror_layers &&
         !policy.repeat_layers && !policy.bound_canvas_to_world);
 }
