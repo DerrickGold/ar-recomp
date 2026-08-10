@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { kExtentStep = 4 };
+enum { kExtentStep = 4, kAuthenticWidth = 256, kAuthenticHeight = 224 };
 
 typedef struct ActionBgBandDraft {
   bool used;
@@ -663,4 +663,62 @@ const char *ActionBgTuner_RowHelp(const ActionBgTunerRow *row) {
     default:
       return "Session-local action background extent authoring.";
   }
+}
+
+static void PushGuide(ActionBgTunerGuide *out, int capacity, int *count,
+                      int layer, int x0, int y0, int x1, int y1) {
+  if (!out || !count || *count >= capacity) return;
+  out[(*count)++] = (ActionBgTunerGuide) {
+    .x0 = (int16_t)x0,
+    .y0 = (int16_t)y0,
+    .x1 = (int16_t)x1,
+    .y1 = (int16_t)y1,
+    .layer = (uint8_t)layer,
+  };
+}
+
+int ActionBgTuner_BuildGuides(const ActionBgPlan *plan,
+                              ActionBgTunerGuide *out, int capacity) {
+  if (!out || capacity <= 0 || !ActionBgPlan_Validate(plan)) return 0;
+  int count = 0;
+  for (int layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+    const ActionBgLayerPlan *layer_plan = &plan->layer[layer];
+    for (int y = 0; y < kAuthenticHeight;) {
+      ActionBgRowPolicy row;
+      if (!ActionBgLayerPlan_ResolveRow(layer_plan, y, &row)) return 0;
+      int y1 = y + 1;
+      for (; y1 < kAuthenticHeight; y1++) {
+        ActionBgRowPolicy next;
+        if (!ActionBgLayerPlan_ResolveRow(layer_plan, y1, &next) ||
+            next.horizontal_extent.mode != row.horizontal_extent.mode ||
+            next.horizontal_extent.left != row.horizontal_extent.left ||
+            next.horizontal_extent.right != row.horizontal_extent.right)
+          break;
+      }
+      if (row.horizontal_extent.mode == kActionBgExtent_Fixed) {
+        PushGuide(out, capacity, &count, layer,
+                  -(int)row.horizontal_extent.left, y,
+                  -(int)row.horizontal_extent.left, y1);
+        PushGuide(out, capacity, &count, layer,
+                  kAuthenticWidth + row.horizontal_extent.right, y,
+                  kAuthenticWidth + row.horizontal_extent.right, y1);
+      }
+      y = y1;
+    }
+    if (layer_plan->vertical_extent.mode == kActionBgExtent_Fixed) {
+      const ActionBgHorizontalExtent *horizontal =
+          &layer_plan->horizontal_extent;
+      int x0 = horizontal->mode == kActionBgExtent_Fixed
+          ? -(int)horizontal->left : 0;
+      int x1 = horizontal->mode == kActionBgExtent_Fixed
+          ? kAuthenticWidth + horizontal->right : kAuthenticWidth;
+      PushGuide(out, capacity, &count, layer,
+                x0, -(int)layer_plan->vertical_extent.top,
+                x1, -(int)layer_plan->vertical_extent.top);
+      PushGuide(out, capacity, &count, layer,
+                x0, kAuthenticHeight + layer_plan->vertical_extent.bottom,
+                x1, kAuthenticHeight + layer_plan->vertical_extent.bottom);
+    }
+  }
+  return count;
 }

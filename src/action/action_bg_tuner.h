@@ -12,6 +12,10 @@
  * Nothing is persisted or coupled to diorama-layers.ini. */
 
 enum { kActionBgTunerRowMax = 32 };
+enum {
+  kActionBgTunerGuideMax = kActionBgPlanLayerCount *
+      (2 * (2 * kActionBgMaxBands + 1) + 2),
+};
 
 typedef struct ActionBgTunerLimits {
   uint16_t left, right, top, bottom;
@@ -57,6 +61,11 @@ typedef enum ActionBgTunerResult {
   kActionBgTunerResult_Reset,
 } ActionBgTunerResult;
 
+typedef struct ActionBgTunerGuide {
+  int16_t x0, y0, x1, y1;
+  uint8_t layer;
+} ActionBgTunerGuide;
+
 /* Frame lifecycle. BeginFrame removes stale live-room visibility; ObservePlan
  * publishes the current canonical action room and atomically resets sparse
  * draft overrides when the room changes. Guides remain a session preference,
@@ -82,5 +91,11 @@ ActionBgTunerResult ActionBgTuner_Change(const ActionBgTunerRow *row,
 ActionBgTunerResult ActionBgTuner_Activate(const ActionBgTunerRow *row);
 ActionBgTunerResult ActionBgTuner_ResetRow(const ActionBgTunerRow *row);
 const char *ActionBgTuner_RowHelp(const ActionBgTunerRow *row);
+
+/* Resolve fixed caps into line segments in authentic-screen coordinates.
+ * Horizontal band overrides split vertical guide lines exactly where the PPU
+ * policy changes. Available/Inherit regions emit no false boundary. */
+int ActionBgTuner_BuildGuides(const ActionBgPlan *plan,
+                              ActionBgTunerGuide *out, int capacity);
 
 #endif  /* ACTION_BG_TUNER_H */

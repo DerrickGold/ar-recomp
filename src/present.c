@@ -19,6 +19,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "action/action_bg_tuner.h"
 #include "action/action_obj_apron.h"
 #include "present.h"
 #include "action/action_effect_render.h"
@@ -959,6 +960,51 @@ static void PresentCheatBadge(const FrameSlot *slot, SDL_Rect viewport) {
   SettingsOverlay_DrawGameText(x, y, scale, 255, text);
 }
 
+/* Developer authoring overlay for Settings > Layers > BG Extents. Segments
+ * arrive in authentic-screen coordinates from the immutable plan in FrameSlot;
+ * mapping them here keeps the pure row/guide model independent of SDL and keeps
+ * present.c isolated from the live tuner singleton. BG1 is cyan, BG2 orange. */
+static void PresentActionBgExtentGuides(const FrameSlot *slot,
+                                        SDL_Rect viewport) {
+  if (!slot || !slot->action_bg_extent_guides || viewport.w <= 0 ||
+      viewport.h <= 0 || slot->visible_width <= 0)
+    return;
+  ActionBgTunerGuide guides[kActionBgTunerGuideMax];
+  int count = ActionBgTuner_BuildGuides(
+      &slot->action_bg_plan, guides, kActionBgTunerGuideMax);
+  if (!count) return;
+
+  SDL_BlendMode old_blend = SDL_BLENDMODE_NONE;
+  Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
+  SDL_GetRenderDrawBlendMode(g_renderer, &old_blend);
+  SDL_GetRenderDrawColor(g_renderer, &old_r, &old_g, &old_b, &old_a);
+  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+  const float scale_x = (float)viewport.w / (float)slot->visible_width;
+  const float scale_y =
+      (float)viewport.h / (float)kFrameSlotAuthenticHeight;
+  const float authentic_x0 =
+      ((float)slot->visible_width - (float)kFrameSlotAuthenticWidth) * 0.5f;
+  for (int i = 0; i < count; i++) {
+    const ActionBgTunerGuide *guide = &guides[i];
+    if (guide->layer == 0)
+      SDL_SetRenderDrawColor(g_renderer, 48, 220, 255, 220);
+    else
+      SDL_SetRenderDrawColor(g_renderer, 255, 96, 48, 220);
+    float x0 = viewport.x + (authentic_x0 + guide->x0) * scale_x;
+    float x1 = viewport.x + (authentic_x0 + guide->x1) * scale_x;
+    float y0 = viewport.y + guide->y0 * scale_y;
+    float y1 = viewport.y + guide->y1 * scale_y;
+    SDL_RenderLine(g_renderer, x0, y0, x1, y1);
+    /* One adjacent line remains legible over both bright and dark pixel art. */
+    if (guide->x0 == guide->x1)
+      SDL_RenderLine(g_renderer, x0 + 1.0f, y0, x1 + 1.0f, y1);
+    else
+      SDL_RenderLine(g_renderer, x0, y0 + 1.0f, x1, y1 + 1.0f);
+  }
+  SDL_SetRenderDrawColor(g_renderer, old_r, old_g, old_b, old_a);
+  SDL_SetRenderDrawBlendMode(g_renderer, old_blend);
+}
+
 /* Terminal host UI is deliberately outside the CRT scene. One scoped physical
  * output coordinate space covers the inspector marker/panel, cheat disclosure,
  * manual and settings menu, then restores the backbuffer state for callers. */
@@ -966,6 +1012,7 @@ void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport) {
   if (!slot || !g_renderer) return;
   PresentationOutputState output_state;
   if (!PresentationGeometry_PushFullOutput(g_renderer, &output_state)) return;
+  PresentActionBgExtentGuides(slot, viewport);
   PresentSceneInspector(slot, viewport);
   PresentCheatBadge(slot, viewport);
   SettingsOverlay_Render(viewport);
