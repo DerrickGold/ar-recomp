@@ -27,6 +27,13 @@ There are four distinct bounds. They must not be collapsed into one scalar.
    outside the authentic viewport. `ActionBgPlan` owns this independently for
    BG1 and BG2.
 
+The plan also records each layer's semantic role. A unique `playfield` may own
+finite-world horizontal canvas bounds; a special native `scene` may anchor
+vertical presentation without pretending to be platform art; `backdrop` layers
+never become canvas owners merely because they occupy BG1 or BG2. Invalid,
+unclassified or ambiguous role sets fail closed. This keeps canvas policy from
+reintroducing a hard-coded PPU layer-number convention.
+
 The extent is expressed as extra presentation pixels on each side of the
 authentic viewport. Horizontal values are left/right; vertical values are
 top/bottom. They are caps, not requests to manufacture pixels. A 64-pixel cap

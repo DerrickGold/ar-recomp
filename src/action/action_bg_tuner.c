@@ -199,6 +199,7 @@ static const char *UpperSource(ActionBgSourceKind source) {
 static const char *UpperRole(ActionBgLayerRole role) {
   switch (role) {
     case kActionBgLayerRole_Playfield: return "PLAYFIELD";
+    case kActionBgLayerRole_Scene: return "SCENE";
     case kActionBgLayerRole_Backdrop: return "BACKDROP";
     case kActionBgLayerRole_Unclassified: return "UNCLASSIFIED";
     default: return "UNKNOWN";

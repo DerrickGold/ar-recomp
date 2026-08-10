@@ -42,6 +42,7 @@ typedef enum ActionBgSourceKind {
 typedef enum ActionBgLayerRole {
   kActionBgLayerRole_Unclassified = 0,
   kActionBgLayerRole_Playfield,
+  kActionBgLayerRole_Scene,
   kActionBgLayerRole_Backdrop,
 } ActionBgLayerRole;
 
@@ -143,6 +144,18 @@ bool ActionBgPlan_ApplyPresentationPolicy(
  * Native/decorative layers and successfully bound world layers are unchanged. */
 uint8_t ActionBgPlan_ClampUnboundWorldLayers(
     ActionBgPlan *plan, uint8_t bound_layers, uint8_t visible_layers);
+/* Return the unique semantic playfield layer, or -1 for invalid, absent, or
+ * ambiguous plans. Unlike CanvasOwner this does not require a finite provider
+ * source or an active horizontal world bound. */
+int ActionBgPlan_PlayfieldLayer(const ActionBgPlan *plan);
+/* Return the unique primary plane that anchors vertical scene growth. Ordinary
+ * action rooms use their playfield; special native raster rooms may nominate a
+ * scene plane without falsely classifying it as platform art. */
+int ActionBgPlan_PrimaryLayer(const ActionBgPlan *plan);
+/* Return the unique finite-world layer authorized to bound the global action
+ * canvas, or -1 when the plan is invalid, unbounded, ambiguous, or has no
+ * provider-backed playfield. */
+int ActionBgPlan_CanvasOwner(const ActionBgPlan *plan);
 const char *ActionBgSourceKind_Name(ActionBgSourceKind source);
 const char *ActionBgLayerRole_Name(ActionBgLayerRole role);
 const char *ActionBgEdgeMode_Name(ActionBgEdgeMode edge);

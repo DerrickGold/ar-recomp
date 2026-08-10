@@ -74,6 +74,7 @@ static void TestValidationAndFallback(void) {
   CHECK(!strcmp(ActionBgSourceKind_Name((ActionBgSourceKind)99), "unknown"));
   CHECK(!strcmp(ActionBgLayerRole_Name(kActionBgLayerRole_Playfield),
                 "playfield"));
+  CHECK(!strcmp(ActionBgLayerRole_Name(kActionBgLayerRole_Scene), "scene"));
   CHECK(!strcmp(ActionBgLayerRole_Name(kActionBgLayerRole_Backdrop),
                 "backdrop"));
   CHECK(!strcmp(ActionBgLayerRole_Name((ActionBgLayerRole)99), "unknown"));
@@ -272,6 +273,43 @@ static void TestUnboundWorldFallback(void) {
   CHECK(!ActionBgPlan_ClampUnboundWorldLayers(NULL, 0, 3));
 }
 
+static void TestCanvasOwner(void) {
+  ActionBgFrameState state = State(1, 1);
+  ActionBgPlan plan = Build(&state);
+  CHECK(ActionBgPlan_PlayfieldLayer(&plan) == 0);
+  CHECK(ActionBgPlan_PrimaryLayer(&plan) == 0);
+  CHECK(ActionBgPlan_CanvasOwner(&plan) == 0);
+
+  plan.bound_canvas_to_world = false;
+  CHECK(ActionBgPlan_CanvasOwner(&plan) == -1);
+  plan.bound_canvas_to_world = true;
+  plan.layer[0].source = kActionBgSource_AuthenticViewport;
+  CHECK(ActionBgPlan_PlayfieldLayer(&plan) == 0);
+  CHECK(ActionBgPlan_CanvasOwner(&plan) == -1);
+
+  plan = Build(&state);
+  plan.layer[1].role = kActionBgLayerRole_Playfield;
+  CHECK(ActionBgPlan_PlayfieldLayer(&plan) == -1);
+  CHECK(ActionBgPlan_PrimaryLayer(&plan) == -1);
+  CHECK(ActionBgPlan_CanvasOwner(&plan) == -1);
+
+  state = State(7, 8);
+  state.layer[0].world_width = 256;
+  state.layer[1].world_width = 256;
+  plan = Build(&state);
+  CHECK(ActionBgPlan_PlayfieldLayer(&plan) == -1);
+  CHECK(ActionBgPlan_PrimaryLayer(&plan) == 0);
+  CHECK(ActionBgPlan_CanvasOwner(&plan) == -1);
+
+  ActionBgPlan_InitNative(&plan);
+  CHECK(ActionBgPlan_PlayfieldLayer(&plan) == -1);
+  CHECK(ActionBgPlan_PrimaryLayer(&plan) == -1);
+  CHECK(ActionBgPlan_CanvasOwner(&plan) == -1);
+  CHECK(ActionBgPlan_PlayfieldLayer(NULL) == -1);
+  CHECK(ActionBgPlan_PrimaryLayer(NULL) == -1);
+  CHECK(ActionBgPlan_CanvasOwner(NULL) == -1);
+}
+
 static void TestOrdinaryWorldAndNativeSource(void) {
   ActionBgFrameState state = State(1, 1);
   ActionBgPlan plan = Build(&state);
@@ -385,7 +423,7 @@ static void TestDeathHeimStates(void) {
   policy = Compile(&plan);
   CHECK(plan.layer[0].source == kActionBgSource_NativeTilemap);
   CHECK(plan.layer[1].source == kActionBgSource_NativeTilemap);
-  CHECK(plan.layer[0].role == kActionBgLayerRole_Backdrop);
+  CHECK(plan.layer[0].role == kActionBgLayerRole_Scene);
   CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
   CHECK(plan.layer[0].default_edge == kActionBgEdge_RawWrap);
   CHECK(!policy.clamp_layers && !policy.mirror_layers &&
@@ -402,7 +440,7 @@ static void TestEveryKnownMapClassifies(void) {
       CHECK(plan.valid);
       CHECK(ActionBgPlan_Validate(&plan));
       CHECK(plan.layer[0].role ==
-            (group == 7 && map == 8 ? kActionBgLayerRole_Backdrop
+            (group == 7 && map == 8 ? kActionBgLayerRole_Scene
                                     : kActionBgLayerRole_Playfield));
       CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
       for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
@@ -420,6 +458,7 @@ int main(void) {
   TestResolvedPresentationProjection();
   TestExtentValidationAndRowResolution();
   TestUnboundWorldFallback();
+  TestCanvasOwner();
   TestOrdinaryWorldAndNativeSource();
   TestNarrowDecorativeBg2();
   TestBloodpoolBand();
