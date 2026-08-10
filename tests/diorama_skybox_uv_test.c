@@ -149,10 +149,12 @@ static void TestBandedValidSpans(void) {
   };
   layer.band_count = 1;
   DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
-                               &layer, 16, 240, kTexWidth, &spans);
+                               &layer, 16, 256, kTexWidth, &spans);
   ExpectInt("Bloodpool span count", spans.count, 2);
   ExpectSpan("Bloodpool sky", &spans.spans[0], 0, 152, 120, 376);
-  ExpectSpan("Bloodpool water", &spans.spans[1], 152, 240, 0, 496);
+  /* The lower 16 rows are synthetic, but the water family reaches the
+   * authentic y=224 boundary and therefore owns that adjacent margin too. */
+  ExpectSpan("Bloodpool water", &spans.spans[1], 152, 256, 0, 496);
 
   /* Death Heim's upper clamp and lower repeating fog genuinely need distinct
    * UV spans. The authentic y=144 boundary moves down by the 16-row vertical
@@ -167,10 +169,10 @@ static void TestBandedValidSpans(void) {
   };
   layer.band_count = 1;
   DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
-                               &layer, 16, 240, kTexWidth, &spans);
+                               &layer, 16, 256, kTexWidth, &spans);
   ExpectInt("Death Heim span count", spans.count, 2);
   ExpectSpan("Death Heim upper", &spans.spans[0], 0, 160, 120, 376);
-  ExpectSpan("Death Heim fog", &spans.spans[1], 160, 240, 0, 496);
+  ExpectSpan("Death Heim fog", &spans.spans[1], 160, 256, 0, 496);
 
   /* A zeroed/invalid frame slot stays safely bounded by its live margins. */
   layer = (ActionBgLayerPlan){ 0 };

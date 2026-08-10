@@ -1256,6 +1256,39 @@ the current debugging process; this file is the case law.
     producer/consumer must carry the two bounds explicitly; inferring a single
     added height loses the authentic origin and breaks asymmetric finite edges.
 
+43. **Vertical backdrop extension reflected a moving edge band — FIXED
+    2026-08-10.** Bloodpool snapshot
+    `runs/20260810-114943/snapshots/snap_00_gf8076` showed the lower river
+    moving coherently in the authentic screen while its offscreen bottom-gap
+    fill reflected at both side seams. The frame policy itself was correct:
+    BG2 defaulted to Mirror for the unique moon/cloud family and rows
+    `136..224` selected Repeat plus an Available horizontal extent for water.
+    The new rows below the screen were the missing case. Both the plan resolver
+    and PPU raster treated every row outside `0..223` as the layer default, so
+    the synthetic continuation discarded both parts of the water-band policy.
+
+    **Fix:** an authentic band with `y0=0` or `y1=224` now owns the adjacent
+    synthetic vertical margin. The rule is inferred from the existing bounds;
+    internal bands and the unrelated edge still fall back to the layer default.
+    The PPU projects its 1-based render line into the same 0-based clamped
+    policy row for repeat selection and horizontal extent lookup, keeping the
+    two decisions inseparable. The immutable plan resolver supplies the same
+    result to Diorama UV-span construction. This also gives Death Heim's
+    `144..224` fog band the correct bottom-margin continuation without a room
+    special case or new policy field.
+
+    Regressions cover top/internal/bottom canonical row resolution, Bloodpool
+    and Death Heim Diorama bottom spans, and a real-PPU asymmetric-edge fixture
+    that distinguishes Repeat from Mirror while pinning the Available band
+    extent. Debug and release application builds succeed. The complete 44-test
+    suite passes; as usual, its display-backed shader test requires ordinary
+    macOS display access and passes there.
+
+    **Reusable lesson:** a row band represents a content family, not merely a
+    slice of a capture buffer. If the family reaches an authentic boundary,
+    synthetic rows on that side must retain all of its coupled policy—not just
+    its pixels or edge mode—otherwise animation direction and extent can split.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of
