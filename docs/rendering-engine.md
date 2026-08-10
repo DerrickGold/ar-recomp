@@ -1102,11 +1102,13 @@ continues each authentic scanline: left `x<0` samples `256+x`, while right
 `x>=256` samples `x-256`. Because the copy happens after that scanline's tile
 decode/window/current scroll state, all bands keep the same direction and tile
 animation remains automatic. Bloodpool acts 1 and 2 are now both mixed: their
-upper moon/cloud family keeps the mirror edge classification but a fixed `0/0`
-extent prevents that unique art from re-entering either side margin; BG2 tile
-row 17 downward (`y=136-223`) explicitly removes the cap and cyclically repeats
-the live water scanline. Neither padding mode reads the stale offscreen tilemap
-half or mutates emulated state.
+upper moon/cloud family keeps the mirror edge classification, while BG2 tile
+row 17 downward (`y=136-223`) removes the horizontal cap and cyclically repeats
+the live water scanline. `0202` retains the conservative fixed `0/0` upper cap;
+live authoring in `runs/20260810-122509` establishes asymmetric `76/100` limits
+for `0201`, allowing its reflection only through the known-good interval before
+unique landmarks repeat. Neither padding mode reads the stale offscreen
+tilemap half or mutates emulated state.
 
 Northwall (`$18=06`, raw maps `$19=01-$05`) uses the same narrow,
 parallax-cloud BG2 construction and therefore selects the same cyclic-repeat
@@ -1229,13 +1231,16 @@ scanout, latches the same immutable value through `FrameSlot`, and lets Diorama
 build one UV span per distinct row policy. The presenter never reverses live
 PPU masks or reads `g_ppu` after scanout.
 
-The first canonical result is the requested Bloodpool composition: BG1 keeps
-the wide playable platform layer, BG2's unique moon/cloud family stops at the
-authentic side boundaries, and rows `136..224` keep repeating water across the
-canvas. Against the pre-policy Wide Full census, all 204 artifacts are
-accepted; 4,074 pixels change only in the two Bloodpool side margins, with
-every authentic center and state/PPU/VRAM artifact exact. The complete twelve
-ordinary entries also pass 4:3, Wide Raw and Diorama-32. Settings -> Layers ->
+The canonical Bloodpool composition keeps BG1 as the wide playable platform
+layer and rows `136..224` as repeating water across the canvas. BG2's unique
+upper moon/cloud family is independently capped: `0201` uses the live-tuned
+fixed `76/100` interval from `runs/20260810-122509`, while `0202` retains the
+conservative `0/0` boundary. The initial all-`0/0` baseline accepted all 204
+Wide Full artifacts against the pre-policy census—4,074 changed pixels, all in
+the two Bloodpool side margins, with every authentic center and state/PPU/VRAM
+artifact exact—and the complete twelve ordinary entries passed 4:3, Wide Raw
+and Diorama-32. The later `0201` tuning supersedes only that room's synthetic
+upper margin. Settings -> Layers ->
 BG Extents exposes a non-persistent sparse draft, A/B, colored guides and a
 normalized log dump without creating a second canonical policy store. Its
 per-BG `ignore side bounds` shortcut resolves the layer and all of its row

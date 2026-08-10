@@ -16,6 +16,8 @@ enum {
   kBloodpoolFirstMap = 1,
   kBloodpoolLastMoonWaterMap = 2,
   kBloodpoolWaterStartY = 136,
+  kBloodpoolAct1BackdropLeft = 76,
+  kBloodpoolAct1BackdropRight = 100,
   kDeathHeimHub = 1,
   kDeathHeimFirstBoss = 2,
   kDeathHeimLastBoss = 7,
@@ -128,6 +130,13 @@ static void ClassifyNarrowBg2(const ActionBgFrameState *state,
   if (state->map_group == kBloodpool &&
       state->map_number >= kBloodpoolFirstMap &&
       state->map_number <= kBloodpoolLastMoonWaterMap) {
+    /* Live authoring in runs/20260810-122509 established asymmetric room for
+     * 0201's unique upper composition before reflected landmarks repeat. 0202
+     * retains the conservative 0/0 default until independently tuned. */
+    if (state->map_number == kBloodpoolFirstMap) {
+      bg2->horizontal_extent = FixedHorizontalExtent(
+          kBloodpoolAct1BackdropLeft, kBloodpoolAct1BackdropRight);
+    }
     bg2->bands[0] = (ActionBgBand) {
       .y0 = kBloodpoolWaterStartY,
       .y1 = kAuthenticHeight,

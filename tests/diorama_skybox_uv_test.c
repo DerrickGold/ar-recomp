@@ -138,10 +138,12 @@ static void TestBandedValidSpans(void) {
                                &layer, 0, 224, kTexWidth, &spans);
   ExpectSpan("unpadded mirror", &spans.spans[0], 0, 224, 120, 496);
 
-  /* Bloodpool's unique upper moon/cloud family is authentic-width while the
-   * repeat-safe water remains available across the full capture. */
+  /* Bloodpool 0201's unique upper moon/cloud family uses its tuned asymmetric
+   * cap while the repeat-safe water remains available across the full capture. */
   layer.horizontal_extent = (ActionBgHorizontalExtent) {
     .mode = kActionBgExtent_Fixed,
+    .left = 76,
+    .right = 100,
   };
   layer.bands[0] = (ActionBgBand) {
     .y0 = 136, .y1 = 224, .edge = kActionBgEdge_Repeat,
@@ -151,7 +153,7 @@ static void TestBandedValidSpans(void) {
   DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
                                &layer, 16, 256, kTexWidth, &spans);
   ExpectInt("Bloodpool span count", spans.count, 2);
-  ExpectSpan("Bloodpool sky", &spans.spans[0], 0, 152, 120, 376);
+  ExpectSpan("Bloodpool sky", &spans.spans[0], 0, 152, 44, 476);
   /* The lower 16 rows are synthetic, but the water family reaches the
    * authentic y=224 boundary and therefore owns that adjacent margin too. */
   ExpectSpan("Bloodpool water", &spans.spans[1], 152, 256, 0, 496);

@@ -401,14 +401,23 @@ static void TestBloodpoolBand(void) {
   ActionBgPlan plan = Build(&state);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
   CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
-  CHECK(!plan.layer[1].horizontal_extent.left &&
-        !plan.layer[1].horizontal_extent.right);
+  CHECK(plan.layer[1].horizontal_extent.left == 76 &&
+        plan.layer[1].horizontal_extent.right == 100);
   CHECK(plan.layer[1].band_count == 1);
   CHECK(plan.layer[1].bands[0].y0 == 136 &&
         plan.layer[1].bands[0].y1 == 224 &&
         plan.layer[1].bands[0].edge == kActionBgEdge_Repeat);
   CHECK(plan.layer[1].bands[0].horizontal_extent.mode ==
         kActionBgExtent_Available);
+  ActionBgRowPolicy row;
+  CHECK(ActionBgLayerPlan_ResolveRow(&plan.layer[1], 100, &row));
+  CHECK(row.edge == kActionBgEdge_Mirror);
+  CHECK(row.horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(row.horizontal_extent.left == 76 &&
+        row.horizontal_extent.right == 100);
+  CHECK(ActionBgLayerPlan_ResolveRow(&plan.layer[1], 180, &row));
+  CHECK(row.edge == kActionBgEdge_Repeat);
+  CHECK(row.horizontal_extent.mode == kActionBgExtent_Available);
   ActionBgPresentationPolicy policy = Compile(&plan);
   CHECK(policy.mirror_layers == 2 && policy.repeat_band_layer == 1);
   CHECK(policy.repeat_band_y0 == 136 && policy.repeat_band_y1 == 224);
@@ -423,6 +432,8 @@ static void TestBloodpoolBand(void) {
   plan = Build(&state);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
   CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(!plan.layer[1].horizontal_extent.left &&
+        !plan.layer[1].horizontal_extent.right);
   CHECK(plan.layer[1].band_count == 1);
   CHECK(plan.layer[1].bands[0].y0 == 136 &&
         plan.layer[1].bands[0].y1 == 224 &&
