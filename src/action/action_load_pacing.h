@@ -27,7 +27,7 @@ enum {
       kActionLoadPacingExistingWaitFrames,
 };
 
-static inline unsigned ActionLoadPacing_Frames(
+static inline unsigned ActionLoadPacing_ForceBlankHoldFrames(
     uint8_t map_group, uint8_t destination_map_group,
     uint32_t block_pc, uint8_t inidisp) {
   const int is_world_to_action =

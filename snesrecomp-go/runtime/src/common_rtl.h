@@ -40,6 +40,10 @@ extern uint64_t g_main_cpu_cycles_estimate;
 extern uint64_t g_apu_pace_cycles_estimate;
 extern uint64_t g_apu_last_sync_cycles;
 void rtl_accumulate_apu_catchup(void);
+/* Bounded game-specific pacing seam: discard main-CPU touch credit while a
+ * statically collapsed interval is being represented by a live host audio
+ * consumer. No-consumer/headless execution retains handshake catch-up. */
+void RtlSetApuCatchupSuppressed(bool suppressed);
 
 #define GET_BYTE(p) (*(uint8*)(p))
 

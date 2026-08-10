@@ -54,6 +54,7 @@ uint64_t g_main_cpu_cycles_estimate = 0;
 // for >5 s and trips the per-frame watchdog (measured, 2026-06-09).
 uint64_t g_apu_pace_cycles_estimate = 0;
 uint64_t g_apu_last_sync_cycles = 0;
+static bool s_apu_touch_catchup_suppressed;
 
 /* ---- AR_APUPROF: per-frame APU-stall profiler (diagnostic only) --------
  * The main loop zeroes these before each game frame and prints one line
@@ -123,6 +124,7 @@ void RtlReset(int mode) {
   g_main_cpu_cycles_estimate = 0;
   g_apu_pace_cycles_estimate = 0;
   g_apu_last_sync_cycles = 0;
+  s_apu_touch_catchup_suppressed = false;
   snes_reset(g_snes, true);
   SnesEnterNativeMode();
   ppu_reset(g_ppu);
@@ -447,10 +449,26 @@ uint8 *IndirPtr_Slow(LongPtr ptr, uint16 offs) {
 void rtl_accumulate_apu_catchup(void) {
   uint64_t delta = g_apu_pace_cycles_estimate - g_apu_last_sync_cycles;
   g_apu_last_sync_cycles = g_apu_pace_cycles_estimate;
+  /* Detect a live output consumer before deciding what to do with touch
+   * credit. Suppression protects audible playback only: an unpaced/headless
+   * run with no draining callback still needs accelerated APU handshakes to
+   * finish instead of blocking for several seconds of wall time. */
+  static uint32_t last_sample_read;
+  static uint64_t consume_seen_ms, wall_last_ms;
+  Dsp *dsp = g_snes->apu->dsp;
+  uint64_t now_ms = audio_trace_wall_ms();
+  uint32_t rd = dsp->sampleRead;
+  if (rd != last_sample_read) {
+    last_sample_read = rd;
+    consume_seen_ms = now_ms;
+  }
+  int consumer_active = consume_seen_ms != 0 &&
+                        now_ms - consume_seen_ms < 250;
   // 2/7 is about 1/3.5 (main MHz / APU MHz). Floor of zero is fine -- short deltas
   // (back-to-back APU touches with no block hooks between them) just don't
   // advance APU on this pass; cycles accumulate for the next touch.
-  g_snes->apuCatchupCycles += (double)delta * 2.0 / 7.0;
+  if (!s_apu_touch_catchup_suppressed || !consumer_active)
+    g_snes->apuCatchupCycles += (double)delta * 2.0 / 7.0;
 
   // Real-time baseline when nothing is draining the DSP output ring
   // (EnableAudio=0, headless runs, the pre-callback boot window, a
@@ -464,17 +482,6 @@ void rtl_accumulate_apu_catchup(void) {
   // Consumer presence is inferred from sampleRead movement, so this is
   // automatic per game and per moment, no config.
   {
-    static uint32_t last_sample_read;
-    static uint64_t consume_seen_ms, wall_last_ms;
-    Dsp *dsp = g_snes->apu->dsp;
-    uint64_t now_ms = audio_trace_wall_ms();
-    uint32_t rd = dsp->sampleRead;
-    if (rd != last_sample_read) {
-      last_sample_read = rd;
-      consume_seen_ms = now_ms;
-    }
-    int consumer_active = consume_seen_ms != 0 &&
-                          now_ms - consume_seen_ms < 250;
     uint32_t baseline = 0;
     if (!consumer_active && wall_last_ms != 0) {
       uint64_t elapsed = now_ms - wall_last_ms;
@@ -485,6 +492,20 @@ void rtl_accumulate_apu_catchup(void) {
     wall_last_ms = now_ms;
     audio_trace_on_pace(consumer_active, baseline);
   }
+}
+
+void RtlSetApuCatchupSuppressed(bool suppressed) {
+  RtlApuLock();
+  s_apu_touch_catchup_suppressed = suppressed;
+  /* Credit accumulated before or during the collapsed interval must not be
+   * converted into a burst after the gate changes. Align both cursors and
+   * discard the pending touch balance. A live audio callback remains the
+   * authoritative clock; rtl_accumulate_apu_catchup leaves the suppression
+   * inert when no consumer is draining. */
+  g_apu_last_sync_cycles = g_apu_pace_cycles_estimate;
+  if (g_snes)
+    g_snes->apuCatchupCycles = 0.0;
+  RtlApuUnlock();
 }
 
 /* Game-installable audio observation seams (all optional, NULL by default):

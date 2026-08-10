@@ -90,27 +90,53 @@ extern volatile int g_ar_in_interrupt;
 static void ActRaiser_OnInidispWrite(uint8_t value) {
   uint32_t block = 0;
   (void)ar_block_history(&block, 1);
-  unsigned frames = ActionLoadPacing_Frames(
+  unsigned frames = ActionLoadPacing_ForceBlankHoldFrames(
       g_ram[kActRaiserWram_MapGroup],
       g_ram[kActRaiserWram_DestinationMapGroup], block, value);
   if (!frames || getenv("AR_NO_ACTION_LOAD_PACING"))
     return;
 
   g_action_load_armed_frames = frames;
-  g_action_load_one_shot_token = 0;
+  /* The loader's many APU-port polls are statically collapsed into this one
+   * host call. Converting their synthetic touch credit into SPC cycles fills
+   * the DSP ring and drops roughly five seconds of authentic Advent audio
+   * before the host can present it. Begin the calibrated hold at force blank,
+   * before those polls: the audio thread advances the sequencer and makes its
+   * acknowledgement ready while the black frame is being presented. The
+   * loader then resumes without double-advancing the SPC. */
+  RtlSetApuCatchupSuppressed(true);
+  bool one_shot_completed = false;
+  const uint64_t one_shot_token =
+      MusicReplacements_GetOneShotSnapshot(&one_shot_completed);
+  if (ActionLoadPacing_ShouldReleaseForOneShot(
+          frames, one_shot_token, one_shot_token, one_shot_completed)) {
+    g_action_load_armed_frames = 0;
+    g_action_load_one_shot_token = 0;
+    RtlSetApuCatchupSuppressed(false);
+    if (getenv("AR_LOADPACELOG")) {
+      fprintf(stderr,
+              "[load-pace] f=%d block=$%06X dest-group=$%02X: HD "
+              "one-shot already complete; skipped %u-frame hold\n",
+              snes_frame_counter, block,
+              g_ram[kActRaiserWram_DestinationMapGroup], frames);
+    }
+    return;
+  }
+  g_action_load_one_shot_token = one_shot_token;
+  g_action_load_hold_frames = frames - 1;
   if (getenv("AR_LOADPACELOG")) {
     fprintf(stderr,
-            "[load-pace] f=%d block=$%06X dest-group=$%02X: armed %u "
-            "collapsed CPU frames\n",
+            "[load-pace] f=%d block=$%06X dest-group=$%02X: holding "
+            "forced blank for %u frames; suppressing collapsed APU catch-up\n",
             snes_frame_counter, block,
             g_ram[kActRaiserWram_DestinationMapGroup], frames);
   }
+  ActRaiser_YieldToHost();
 }
 
-/* Stop immediately before the action script's $F0 halt command. This is late
- * enough that $18/$19 have entered action mode, but early enough that Advent
- * is still playing. RtlApuWrite invokes this seam before taking the APU lock,
- * so suspending the game coroutine cannot starve or deadlock audio. */
+/* Match the action script's $F0 halt command after the force-blank hold has
+ * already elapsed. RtlApuWrite invokes this seam before taking the APU lock,
+ * so releasing the collapsed-touch gate cannot race the audio callback. */
 static void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
   extern Ppu *g_ppu;
   const ActionLoadPacingTriggerDecision decision =
@@ -135,35 +161,21 @@ static void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
     }
     g_action_load_armed_frames = 0;
     g_action_load_one_shot_token = 0;
+    RtlSetApuCatchupSuppressed(false);
     return;
   }
 
   const unsigned frames = g_action_load_armed_frames;
   g_action_load_armed_frames = 0;
-  bool one_shot_completed = false;
-  const uint64_t one_shot_token =
-      MusicReplacements_GetOneShotSnapshot(&one_shot_completed);
-  if (ActionLoadPacing_ShouldReleaseForOneShot(
-          frames, one_shot_token, one_shot_token, one_shot_completed)) {
-    if (getenv("AR_LOADPACELOG")) {
-      fprintf(stderr,
-              "[load-pace] f=%d action mode=$%02X/$%02X: HD one-shot "
-              "already complete; skipped %u-frame forced-blank hold\n",
-              snes_frame_counter, g_ram[kActRaiserWram_MapGroup],
-              g_ram[kActRaiserWram_CurrentMap], frames);
-    }
-    return;
-  }
-  g_action_load_one_shot_token = one_shot_token;
-  g_action_load_hold_frames = frames - 1;
+  RtlSetApuCatchupSuppressed(false);
+  g_action_load_one_shot_token = 0;
   if (getenv("AR_LOADPACELOG")) {
     fprintf(stderr,
-            "[load-pace] f=%d action mode=$%02X/$%02X: holding forced blank "
-            "for %u frames before APU halt $F0\n",
+            "[load-pace] f=%d action mode=$%02X/$%02X: completed %u-frame "
+            "forced-blank hold; releasing APU halt $F0\n",
             snes_frame_counter, g_ram[kActRaiserWram_MapGroup],
             g_ram[kActRaiserWram_CurrentMap], frames);
   }
-  ActRaiser_YieldToHost();
 }
 
 /* Keep ActRaiser's data-driven object-loop recovery policy out of the shared
@@ -486,6 +498,7 @@ static void game_coroutine(void) {
   g_action_load_armed_frames = 0;
   g_action_load_hold_frames = 0;
   g_action_load_one_shot_token = 0;
+  RtlSetApuCatchupSuppressed(false);
   cpu_state_init(&g_cpu, g_ram);
   g_cpu_brk_hook = ActRaiser_BrkHook;
   g_cpu_cop_hook = ActRaiser_CopHook;
@@ -2943,6 +2956,10 @@ void RunOneFrameOfGame(void) {
       }
       g_action_load_hold_frames = 0;
       g_action_load_one_shot_token = 0;
+      /* A short enhanced cue is allowed to end the accuracy hold. Its muted
+       * authentic sequencer may not have reached the loader acknowledgement,
+       * so restore touch catch-up for the remaining collapsed work. */
+      RtlSetApuCatchupSuppressed(false);
     } else {
       g_action_load_hold_frames--;
       if (!g_action_load_hold_frames)
