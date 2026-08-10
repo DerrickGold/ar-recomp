@@ -205,8 +205,19 @@ static void TestExtentValidationAndRowResolution(void) {
   CHECK(!row.horizontal_extent.left && !row.horizontal_extent.right);
 
   CHECK(ActionBgLayerPlan_ResolveRow(&layer, 240, &row));
+  CHECK(row.edge == kActionBgEdge_Repeat);
+  CHECK(row.horizontal_extent.mode == kActionBgExtent_Available);
+
+  /* Internal bands cannot leak into the top margin. Once the first band is
+   * anchored at row zero, however, the same family owns that margin. */
+  CHECK(ActionBgLayerPlan_ResolveRow(&layer, -16, &row));
   CHECK(row.edge == kActionBgEdge_Mirror);
+  layer.bands[0].y0 = 0;
+  CHECK(ActionBgLayerPlan_ResolveRow(&layer, -16, &row));
+  CHECK(row.edge == kActionBgEdge_Repeat);
   CHECK(row.horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(row.horizontal_extent.left == 48 &&
+        row.horizontal_extent.right == 64);
   CHECK(!ActionBgLayerPlan_ResolveRow(NULL, 0, &row));
   CHECK(!ActionBgLayerPlan_ResolveRow(&layer, 0, NULL));
 

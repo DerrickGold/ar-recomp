@@ -504,6 +504,14 @@ resolve rows `136..224` as an available repeat-safe water band, leaving the
 moon/cloud family above it authentic-width. Death Heim `0701` applies the same
 explicit fixed/available split at its established fog boundary `144`.
 
+An authentic band with `y0=0` or `y1=224` also governs the adjacent vertical
+extension rows. This keeps the band's edge strategy and horizontal extent as
+one content-family value: Bloodpool water and Death Heim fog continue cyclically
+below the screen instead of falling back to the unique-art Mirror/Clamp default.
+Bands that stop before an edge do not leak into either synthetic margin. The
+rule is inferred from the existing bounds, so the census gains no second map
+table or runtime source of truth.
+
 Fresh Wide Full captures show the intended composition in both Bloodpool acts:
 the moon/cloud plane terminates at the authentic side boundaries, BG1 platforms
 continue into the margins, and lower water still fills them. For `0201`, the

@@ -1196,7 +1196,7 @@ static void TestLayerPresentationExtents(void) {
       ppu, (uint8_t)bg2, 3, 5,
       kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
   PpuSetWidescreenLayerExtentBand(
-      ppu, (uint8_t)bg2, 2, 3,
+      ppu, (uint8_t)bg2, 1, 2,
       kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
 
   PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
@@ -1275,6 +1275,87 @@ static void TestLayerPresentationExtents(void) {
   CHECK((bottom_capture[(bottom_y0 + 1) * kW] & 0xffffffu) != 0);
   CHECK(bottom_capture[(bottom_y0 + 2) * kW] == 0);
   CHECK(bottom_capture[(bottom_y0 + 3) * kW] == 0);
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
+/* A row band that reaches the bottom of the authentic viewport describes the
+ * same content family in the synthetic bottom margin. Bloodpool's moving water
+ * is the motivating case: falling back to the BG2 default there reflects the
+ * animation and reverses its apparent direction. This fixture also pins the
+ * band's Available extent, because retaining the default 0/0 cap would leave
+ * the margin transparent even if repeat mode itself were selected. */
+static void TestBottomMarginInheritsEdgeBand(void) {
+  enum {
+    kBudget = 8,
+    kWidth = kW + 2 * kBudget,
+    kRows = kPpuYPixels + 1,
+  };
+  const int bg2 = kActRaiserPpuLayer_Bg2;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  static uint8_t fb[kWidth * kRows * 4];
+  static uint32_t capture[kWidth * kRows];
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  memset(capture, 0, sizeof(capture));
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = (uint8_t)(1u << bg2);
+  ppu->cgram[0x21] = bgr555(31, 0, 31);
+  ppu->cgram[0x22] = bgr555(0, 31, 31);
+  set_solid_4bpp_tile(ppu, 1, 1);
+  set_solid_4bpp_tile(ppu, 2, 2);
+  ppu->bgTileAdr = 0;
+  ppu->bgXsc[bg2] = 0x20 | 3;
+  for (int i = 0; i < 0x1000; i++)
+    ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+  /* Give the last tile column a different color, making reflection and cyclic
+   * continuation observably different at both side seams. */
+  for (int i = 31; i < 0x1000; i += 32)
+    ppu->vram[0x2000 + i] = (uint16_t)(2 | (2 << 10));
+
+  PpuSetExtraSpace(ppu, kBudget);
+  PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
+  PpuSetWidescreenLayerRepeatBand(ppu, (uint8_t)bg2, 136, 224);
+  PpuSetWidescreenPadCapturedToBudget(ppu, 1);
+  PpuSetWidescreenLayerExtent(
+      ppu, (uint8_t)bg2, 0, 0,
+      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
+  PpuSetWidescreenLayerExtentBand(
+      ppu, (uint8_t)bg2, 136, 224,
+      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
+  PpuSetExtraVerticalSpace(ppu, 0, 1);
+
+  PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                              (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+                             -kBudget, kPpuYPixels, kWidth, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
+  ppu_runLine(ppu, kPpuYPixels);
+  ppu_runMarginLine(ppu, kPpuYPixels + 1);
+
+  const uint32_t *row = capture + kPpuYPixels * kWidth;
+  const uint32_t left_margin = row[kBudget - 1];       /* screen x=-1 */
+  const uint32_t left_source = row[kBudget + 255];
+  const uint32_t reflected_left_source = row[kBudget + 1];
+  CHECK((left_margin & 0xffffffu) != 0);
+  CHECK(left_margin == left_source);
+  CHECK(left_margin != reflected_left_source);
+
+  const uint32_t right_margin = row[kBudget + kW];     /* screen x=256 */
+  const uint32_t right_source = row[kBudget];
+  const uint32_t reflected_right_source = row[kBudget + 254];
+  CHECK((right_margin & 0xffffffu) != 0);
+  CHECK(right_margin == right_source);
+  CHECK(right_margin != reflected_right_source);
 
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   g_new_ppu = saved_new_ppu;
@@ -1516,6 +1597,7 @@ int main(void) {
   TestVerticalMarginBottomLayerClip();
   TestVerticalMarginExactObj();
   TestLayerPresentationExtents();
+  TestBottomMarginInheritsEdgeBand();
   TestCapturedPaddingReachesBudget();
   TestVirtualTilemapMargins();
   TestVirtualTilemapEffects();

@@ -1244,6 +1244,26 @@ vertical bounds` shortcut resolves that layer's top/bottom extent to available.
 Both retain stored caps for exact restoration and cannot outgrow the shared
 canvas, finite world, or source/edge availability.
 
+Vertical extension makes one additional row-policy rule load-bearing: a band
+with `y0=0` or `y1=224` owns the synthetic margin adjacent to that authentic
+boundary. Internal bands remain bounded and outside rows at an unrelated edge
+still use the layer default. This is derived from the existing half-open band
+bounds rather than stored as another override. Both the immutable
+`ActionBgPlan` row resolver and the mechanical PPU projection apply the rule,
+including the band's horizontal extent.
+
+Bloodpool run `runs/20260810-114943/snapshots/snap_00_gf8076` exposed the
+omission: BG2 was correctly classified as whole-layer Mirror with a
+`136..224` Repeat/Available water band, but scanlines below row 223 reverted to
+Mirror plus the upper art's fixed extent. The authentic water and its synthetic
+bottom continuation therefore moved in opposite apparent directions. PPU band
+lookup now translates its internal 1-based line to the authored 0-based row
+and clamps synthetic lines to row 0 or 223. Thus Bloodpool water and Death Heim
+fog retain cyclic continuation below the screen, while their unique upper art
+remains bounded. A real-PPU fixture uses different colors at the two authentic
+edges to prove the bottom margin samples the opposite edge (Repeat), not the
+near edge (Mirror), and that the Available band extent survives there.
+
 ## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
 
 The enhanced town renderer is designed in `ar-recomp-sim-rendering-plan.md`

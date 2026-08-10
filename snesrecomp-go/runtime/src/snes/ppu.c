@@ -706,14 +706,29 @@ typedef struct PpuWindows {
   uint8 bits;
 } PpuWindows;
 
+/* Background policy is authored in 0-based authentic screen rows, while the
+ * scanline renderer receives 1-based lines. Synthetic rows inherit the nearest
+ * authentic edge row. Consequently, only a band with y0=0 or y1=224 can
+ * extend into the corresponding vertical margin. */
+static inline int PpuLayerPolicyRow(int line) {
+  if (line <= 1) return 0;
+  if (line >= kPpuYPixels) return kPpuYPixels - 1;
+  return line - 1;
+}
+
 static inline uint16 PpuLayerHorizontalExtent(const Ppu *ppu, uint layer,
                                               int y, bool right) {
   if (layer >= 4) return kPpuWidescreenExtentAvailable;
-  if ((unsigned)y < (unsigned)kPpuYPixels)
-    return right ? ppu->wsLayerExtentRight[layer][y]
-                 : ppu->wsLayerExtentLeft[layer][y];
-  return right ? ppu->wsLayerExtentRightDefault[layer]
-               : ppu->wsLayerExtentLeftDefault[layer];
+  int row = PpuLayerPolicyRow(y);
+  return right ? ppu->wsLayerExtentRight[layer][row]
+               : ppu->wsLayerExtentLeft[layer][row];
+}
+
+static inline bool PpuLayerInRepeatBand(const Ppu *ppu, uint layer, int y) {
+  if (layer >= 4 || ppu->wsRepeatY1[layer] <= ppu->wsRepeatY0[layer])
+    return false;
+  int row = PpuLayerPolicyRow(y);
+  return row >= ppu->wsRepeatY0[layer] && row < ppu->wsRepeatY1[layer];
 }
 
 static inline int PpuLimitLayerExtra(const Ppu *ppu, uint layer, int y,
@@ -754,8 +769,7 @@ static inline int PpuLayerExtra(Ppu *ppu, uint layer, int y, int extra,
       return 0;
     // A repeat band is first rendered only in the authentic center, then its
     // isolated scanline is merged into the margins by the 4bpp policy path.
-    if (ppu->wsRepeatY1[layer] > ppu->wsRepeatY0[layer] &&
-        y >= ppu->wsRepeatY0[layer] && y < ppu->wsRepeatY1[layer])
+    if (PpuLayerInRepeatBand(ppu, layer, y))
       return 0;
     extra = PpuLimitLayerExtra(ppu, layer, y, extra, right);
   }
@@ -1382,9 +1396,7 @@ static void PpuDrawBackground_4bpp_policy(Ppu *ppu,
                                           uint layer, PpuZbufType zhi,
                                           PpuZbufType zlo, bool mosaic) {
   uint8_t padding = ppu->wsLayerMirror | ppu->wsLayerRepeat;
-  bool repeat_band = layer < 4 &&
-      ppu->wsRepeatY1[layer] > ppu->wsRepeatY0[layer] &&
-      y >= ppu->wsRepeatY0[layer] && y < ppu->wsRepeatY1[layer];
+  bool repeat_band = PpuLayerInRepeatBand(ppu, layer, y);
   if (!(padding & (1u << layer)) && !repeat_band) {
     if (mosaic)
       PpuDrawBackground_4bpp_mosaic(ppu, dstbuf, y, sub,

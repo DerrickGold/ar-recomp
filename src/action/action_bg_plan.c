@@ -273,6 +273,29 @@ bool ActionBgPlan_Validate(const ActionBgPlan *plan) {
   return true;
 }
 
+static const ActionBgBand *FindRowBand(const ActionBgLayerPlan *layer,
+                                      int authentic_y) {
+  /* A content family that reaches an authentic viewport edge continues into
+   * that edge's synthetic presentation margin. This is deliberately derived
+   * from the band's existing bounds: it adds no second flag or policy source,
+   * and an internal band can never leak outside the authentic viewport. */
+  if (authentic_y < 0) {
+    if (!layer->band_count || layer->bands[0].y0 != 0) return NULL;
+    return &layer->bands[0];
+  }
+  if (authentic_y >= kAuthenticHeight) {
+    if (!layer->band_count) return NULL;
+    const ActionBgBand *last = &layer->bands[layer->band_count - 1];
+    return last->y1 == kAuthenticHeight ? last : NULL;
+  }
+  for (unsigned i = 0; i < layer->band_count; i++) {
+    const ActionBgBand *band = &layer->bands[i];
+    if (authentic_y >= (int)band->y0 && authentic_y < (int)band->y1)
+      return band;
+  }
+  return NULL;
+}
+
 bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
                                   int authentic_y,
                                   ActionBgRowPolicy *out) {
@@ -282,14 +305,11 @@ bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
     .edge = layer->default_edge,
     .horizontal_extent = layer->horizontal_extent,
   };
-  for (unsigned i = 0; i < layer->band_count; i++) {
-    const ActionBgBand *band = &layer->bands[i];
-    if (authentic_y < (int)band->y0 || authentic_y >= (int)band->y1)
-      continue;
+  const ActionBgBand *band = FindRowBand(layer, authentic_y);
+  if (band) {
     resolved.edge = band->edge;
     if (band->horizontal_extent.mode != kActionBgExtent_Inherit)
       resolved.horizontal_extent = band->horizontal_extent;
-    break;
   }
   *out = resolved;
   return true;

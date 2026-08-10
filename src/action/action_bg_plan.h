@@ -104,9 +104,11 @@ typedef struct ActionBgPlan {
   ActionBgLayerPlan layer[kActionBgPlanLayerCount];
 } ActionBgPlan;
 
-/* Fully resolved policy for one authentic scanline. Signed rows outside
- * 0..223 deliberately use the layer default; bands identify authentic content
- * families, not capture-space rows. */
+/* Fully resolved policy for one authentic or synthetic presentation row.
+ * Bands identify authentic content families rather than capture-space rows.
+ * A band with y0=0 or y1=224 owns the adjacent synthetic margin so an
+ * edge-anchored moving family continues with the same strategy and extent;
+ * other outside rows use the layer default. */
 typedef struct ActionBgRowPolicy {
   ActionBgEdgeMode edge;
   ActionBgHorizontalExtent horizontal_extent;

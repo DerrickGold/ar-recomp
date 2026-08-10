@@ -388,14 +388,16 @@ struct Ppu {
   // raster/HDMA parallax moving in the same direction across the seam.
   uint8_t wsLayerRepeat;
   // Per-layer cyclic-repeat BAND (see PpuSetWidescreenLayerRepeatBand): on
-  // scanlines [y0,y1), repeat the authentic rendered scanline into both
-  // margins. This takes precedence over a whole-layer clamp on those rows,
+  // authentic rows [y0,y1), repeat the rendered scanline into both margins.
+  // A band with y0=0 or y1=224 also owns that adjacent synthetic vertical
+  // margin. This takes precedence over a whole-layer clamp on those rows,
   // allowing animated/raster content to share a BG with bounded scenery.
   uint8_t wsRepeatY0[4], wsRepeatY1[4];
   // Independent presentation caps for BG1-BG4. Horizontal caps are resolved
-  // per authentic scanline so mixed-content row bands can differ. Scanlines
-  // outside the authentic interval use the defaults. UINT16_MAX means the
-  // existing edge/source/canvas availability is uncapped.
+  // per authentic scanline so mixed-content row bands can differ. Synthetic
+  // rows inherit the nearest authentic edge row, so edge-anchored bands retain
+  // their caps there. UINT16_MAX means the existing edge/source/canvas
+  // availability is uncapped.
   uint16_t wsLayerExtentLeftDefault[4], wsLayerExtentRightDefault[4];
   uint16_t wsLayerExtentTop[4], wsLayerExtentBottom[4];
   uint16_t wsLayerExtentLeft[4][kPpuYPixels];
@@ -825,11 +827,12 @@ void PpuSetWidescreenLayerRepeat(Ppu *ppu, uint8_t mask);
 void PpuSetWidescreenPadCapturedToBudget(Ppu *ppu, uint8_t enabled);
 
 // Cyclically repeat BG(layer+1)'s authentic rendered scanline into the margins
-// on scanlines [y0,y1) only. This is the banded form of
-// PpuSetWidescreenLayerRepeat: it preserves per-line scroll, tile animation,
-// transparency, priority, and color math, and takes precedence over a
-// whole-layer clamp for the selected rows. Currently supported by the Mode-1
-// 4bpp BG1/BG2 path. y1<=y0 disables. Re-apply per frame.
+// on authentic rows [y0,y1) only. A band with y0=0 or y1=224 also
+// applies throughout that adjacent synthetic vertical margin. This is the
+// banded form of PpuSetWidescreenLayerRepeat: it preserves per-line scroll,
+// tile animation, transparency, priority, and color math, and takes precedence
+// over a whole-layer clamp for the selected rows. Currently supported by the
+// Mode-1 4bpp BG1/BG2 path. y1<=y0 disables. Re-apply per frame.
 void PpuSetWidescreenLayerRepeatBand(Ppu *ppu, uint8_t layer, uint8_t y0,
                                      uint8_t y1);
 
