@@ -204,6 +204,15 @@ diorama and Town 3D numeric tuning dials, their per-layer and per-stage A/B
 toggles, the granular widescreen flags, and the scene inspector. With it off,
 the menu keeps to the master toggles and the major on/off effects.
 
+The developer-only **Layers → BG Extents** tab is a live action-stage authoring
+tool. Open BG1 or BG2 to inspect its playfield/scene/backdrop role and source,
+change its edge strategy or per-side horizontal/vertical cap, and tune the
+horizontal cap of any canonical row band. `Apply draft` performs the live A/B;
+`Extent guides` draws BG1 in cyan and BG2 in orange; `Print draft` writes the
+resolved plan to the run log. Drafts reset when the room changes, start
+disabled, are never written to `settings.ini`, and never modify
+`diorama-layers.ini`. Press `Y` on a row to restore its canonical value.
+
 ### The overlay's artwork
 
 The overlay decodes ActRaiser's 256-tile 2bpp dialog font and its native

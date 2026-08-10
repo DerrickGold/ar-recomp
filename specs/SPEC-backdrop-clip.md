@@ -18,6 +18,12 @@ through `FrameSlot` plus exact row-banded spans. The old names below are kept as
 the original fix design, not as live API guidance. See `SPEC-bg-hle.md` BH6 and
 `docs/rendering-engine.md` for the current contract.
 
+**Per-layer extent supersession (2026-08-10):** mirror/repeat remains the edge
+source described here, but it no longer implies that every row occupies the
+whole canvas. `SPEC-bg-layer-extents.md` is authoritative for the independent
+presentation cap: Bloodpool's upper moon/cloud family is now fixed to the
+authentic viewport while its `136..224` water band remains repeat-available.
+
 | Fix | Where it lives |
 | --- | --- |
 | **A** — pad captured layers out to the full margin budget instead of the live margin | `actraiser_rtl.c:952`, `ppu.c` merge loops |
@@ -42,7 +48,7 @@ At a level bound the PPU's **live** per-side margin collapses (`ActRaiser_ApplyW
 | Lead's assumption | Verified truth |
 |---|---|
 | `texture_extra` might be `kPpuExtraLeftRight`(96) | **Confirmed as the lead wrote it**: `texture_extra` derives from the bound *pitch* (`ppu.c:1371-1373`), pitch = `(256+2*g_ws_extra)*4` (`actraiser_rtl.c:1212-1213`), so `texture_extra == g_ws_extra == 95` in diorama mode. Texture column of screen x is `x + 95`. The UV **denominator is still `kPpuBufWidth` = 448** (textures are 448 wide, `src/main.c:929-931`; only `[0,446)` is uploaded). No off-by-one. |
-| `bounded_world_margins` active by default? | **Yes, in the configuration where the symptom exists.** At implementation time `ws_bgrefresh` supplied the finite-world gate. BH7 made the bounded provider default-on, and BH8 removed that transaction/setting from runtime policy: a bound BG1 provider now supplies the finite canvas directly, while an unbound world layer clamps to the authentic viewport. The symptom still needs widescreen plus Diorama and a visible skybox/backdrop contributor. |
+| `bounded_world_margins` active by default? | **Yes, in the configuration where the symptom exists.** At implementation time `ws_bgrefresh` supplied the finite-world gate. BH7 made the bounded provider default-on, and BH8 removed that transaction/setting from runtime policy: a bound provider on the role-selected playfield now supplies the finite canvas directly, while an unbound world layer clamps to the authentic viewport. The symptom still needs widescreen plus Diorama and a visible skybox/backdrop contributor. |
 | "The dead columns might be stale/garbage" | **No** — deterministically `0x00000000` (transparent), from `PpuClearOverlayRenderLine`'s full-pitch memset (`ppu.c:1341`), `PpuBeginBackgroundOverlay`'s memset (`ppu.c:1439-1440`), `PpuObjColor` returning 0 for index 0 (`ppu.c:88-89`), and the creation-time full-extent zero-fill (`src/main.c:926-939`). Nothing to sanitize; Option C is safe. |
 | "Option C's stretch is imperceptible" | **No.** Span 446 → 351 at `camera_x==0` = **1.27x**, and it *animates* over 95 px of camera travel (~24-48 frames), with `u1` pinned and `u0` sliding — a one-sided pan+zoom whose apparent scroll rate fights BG2's parallax. This is why Option C must be the *fallback*, not the primary fix. |
 | "Option C fixes the symptom" | **Only in `kDioramaSky_Only`.** In `Both` the backdrop plane draws *after* the skybox and covers it; in `Off` no skybox is drawn at all. |

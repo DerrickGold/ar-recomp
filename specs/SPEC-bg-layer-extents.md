@@ -1,6 +1,6 @@
 # Action background layer extents
 
-Status: implementation plan, contract frozen 2026-08-09
+Status: implemented and validated 2026-08-10
 
 This work separates the size of the presentation canvas from the area each
 action background layer is allowed to occupy. The playable layer may therefore
@@ -118,11 +118,12 @@ view. The extent view is keyed to the live action `($18,$19)` room even when
 Diorama mode is off. It displays canonical and resolved source state and edits
 an opt-in draft layered over `ActionBgPlan`.
 
-The view supports BG1/BG2, default or band selection, edge mode, left/right and
-top/bottom caps, band start/end, visible guides, canonical/draft A/B, reset and
-normalized export. Drafts are not ordinary player settings and do not share
-`diorama-layers.ini`. They are disabled by default; shipped canonical policy
-remains the only default runtime source of truth.
+The view supports BG1/BG2, edge mode, left/right and top/bottom caps, read-only
+canonical band intervals with independently editable horizontal caps, visible
+guides, canonical/draft A/B, reset, and a normalized plan dump to the log.
+Source and semantic role remain read-only. Drafts are not ordinary player
+settings and do not share `diorama-layers.ini`. They are disabled by default;
+shipped canonical policy remains the only default runtime source of truth.
 
 ## 6. Baseline and acceptance
 
@@ -165,3 +166,32 @@ wide.
 Death Heim acceptance keeps four state classes distinct: pre-ending `0701`
 clamp/repeat bands, the ending-sky page handoff, cyclic `0702-0707` rematch
 parallax, and the native raw-wrap `0708` raster arena.
+
+## 7. Final validation
+
+The canonical Wide Full twelve-entry matrix accepts all 204 artifacts against
+the pre-policy census under the authentic-center contract. Only Bloodpool
+`0201/0202` changes: 4,074 framebuffer pixels, all in synthetic side margins;
+every authentic center, state dump, PPU snapshot and provider-owned VRAM word
+remains exact. Both Bloodpool entries also pass the complete 4:3 and Wide Raw
+controls. The complete ordinary-entry matrix passes in 4:3, Wide Raw and
+Diorama-32 with zero provider mismatch.
+
+Death Heim `0702-0707` passes in Wide Full and Diorama-32; the Wide Full set
+is 102/102 artifacts byte-exact to the frozen baseline. The pre-ending `0701`
+controls remain 17/17 exact in Wide Full and Diorama-32. Native `0708` remains
+17/17 exact in both modes after its special-room classifier explicitly resets
+both raster planes to available extents. That reset is load-bearing: allowing
+the earlier generic narrow-BG2 cap to survive removed the starfield from the
+side margins even though its final edge strategy was correctly `RawWrap`.
+
+The release build and all 44 tests pass (the display-backed shader test was run
+with a real display outside the headless sandbox). Focused action-plan, tuner,
+PPU pipeline, settings-overlay and Diorama tests also pass under ASan/UBSan. A
+`-Wall -Wextra -Wpedantic -Wshadow` audit reports no warning in the changed
+production files.
+
+A pinned `$0347=7` shortcut reaches the real `0701` `$64/$74` BGSC handoff but
+stays black, so it is rejected as a visual ending fixture. The natural ending
+tail remains useful archival/manual evidence; it is not represented as an
+automated pixel-parity gate here.
