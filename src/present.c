@@ -579,12 +579,12 @@ void PresentUpload(const FrameSlot *slot) {
     pixels[kDioramaPlane_Backdrop] = g_pixels;
     uint32_t upload_mask = slot->diorama_plane_request_mask &
                            slot->diorama_plane_content_mask;
-    /* The captured surfaces are taller than the authentic frame by exactly the
-     * vertical margin, and their row 0 IS the top of that band -- so the upload
-     * covers snes_height + ws_extra_top rows starting at row 0. */
+    /* Row 0 is the top of the captured world band. Upload both sides; the
+     * authentic frame begins at ws_extra_top and the lower band follows it. */
     s_diorama_uploaded_plane_mask = Diorama_Upload(
         g_diorama_textures, pixels, slot->snes_width + slot->obj_apron * 2,
-        slot->snes_height + slot->ws_extra_top, slot->obj_apron, upload_mask);
+        slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
+        slot->obj_apron, upload_mask);
   } else {
     s_diorama_uploaded_plane_mask = 0;
     SDL_Rect upload = { 0, 0, slot->snes_width, slot->snes_height };
@@ -1247,14 +1247,17 @@ void PresentCompositeScene(const FrameSlot *slot,
         slot->extra_left_cur, slot->extra_right_cur,
         slot->bg_capture_pad_to_budget,
         &slot->action_bg_plan.layer[kActionBgPlanLayerCount - 1],
-        slot->ws_extra_top, slot->snes_height + slot->ws_extra_top,
+        slot->ws_extra_top,
+        slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
         kFrameSlotLayerTextureWidth, &bg2_valid_spans);
     SDL_Rect viewport = ComputePresentationViewport(
         g_renderer, slot->ignore_aspect_ratio, slot->pixel_aspect,
         slot->visible_width, slot->snes_height);
     DioramaProjection action_projection;
     if (!Diorama_Composite(g_renderer, slot->snes_width,
-                           slot->snes_height + slot->ws_extra_top,
+                           slot->snes_height + slot->ws_extra_top +
+                               slot->ws_extra_bottom,
+                           slot->ws_extra_top,
                            slot->obj_apron,
                            slot->pixel_aspect, slot->ignore_aspect_ratio,
                            slot->visible_width, viewport,

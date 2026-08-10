@@ -12,6 +12,7 @@ enum {
   kActionBgLayerCount = 2,
   kActionBgRingTiles = 64,
   kActionBgRingWords = kActionBgRingTiles * kActionBgRingTiles,
+  kActionBgCameraViewportHeight = 225,
 };
 
 typedef struct ActRaiserActionBgObserver {
@@ -47,6 +48,20 @@ _Static_assert(kActRaiserBgLayerStateStride == 4,
 
 static uint16_t ReadWram16(const uint8_t *wram, size_t address) {
   return (uint16_t)(wram[address] | ((uint16_t)wram[address + 1] << 8));
+}
+
+void ActRaiserActionBg_ResolveVerticalMargins(
+    int camera_y, int world_height, int budget,
+    int *top, int *bottom) {
+  if (budget < 0) budget = 0;
+  int available_top = camera_y > 0 ? camera_y : 0;
+  int available_bottom =
+      world_height - kActionBgCameraViewportHeight - camera_y;
+  if (available_bottom < 0) available_bottom = 0;
+  if (available_top > budget) available_top = budget;
+  if (available_bottom > budget) available_bottom = budget;
+  if (top) *top = available_top;
+  if (bottom) *bottom = available_bottom;
 }
 
 bool ActRaiserActionBg_CaptureLayer(

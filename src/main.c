@@ -149,7 +149,8 @@ static void CreateDioramaTextures(void) {
   /* Allocated at the PPU's full render-target size on BOTH axes, for the same
    * reason: kPpuBufWidth already covered every widescreen margin without a
    * realloc, and kPpuBufHeight now does the same for the vertical band. Only
-   * the leading snes_width x (snes_height + ws_extra_top) region is uploaded
+   * the leading snes_width x
+   * (snes_height + ws_extra_top + ws_extra_bottom) region is uploaded
    * each frame; Diorama_Composite's UV window is expressed against these
    * allocated dimensions. */
   uint8_t *zero_fill =
@@ -187,16 +188,12 @@ int g_ws_extra;
 int g_ws_display_extra;
 /* The vertical transpose of g_ws_extra: scanlines the PPU renders above line 0
  * and below line 223 this frame, already clamped to real world space by
- * ActRaiser_ApplyWidescreenPolicy. Diorama-only (nothing in the flat path is
+ * ActRaiser_ApplyVerticalMarginPolicy. Diorama-only (nothing in the flat path is
  * prepared for a non-zero frame origin), and 0 restores authentic 224-line
  * output everywhere.
- *
- * g_ws_extra_bottom stays 0 for now and is not merely unwired: OAM Y is 8-bit
- * with a 256 modulus against a 224-line screen, so a sprite below the screen is
- * indistinguishable from one above it and the game's object coordinates carry
- * no usable data down there. The top band has no such problem -- those
- * positions are already what OAM encodes -- which is why it is the half that
- * ships. See kPpuExtraTopBottom. */
+ * Exact signed positions published by the action HLE emitter disambiguate OAM
+ * Y in both bands; margin scanlines ignore slots without that sideband. See
+ * kPpuExtraTopBottom. */
 int g_ws_extra_top;
 int g_ws_extra_bottom;
 

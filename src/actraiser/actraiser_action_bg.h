@@ -83,6 +83,14 @@ bool ActRaiserActionBg_CompareLayer(
     const uint16_t *vram, size_t vram_words,
     ActRaiserActionBgCompareResult *result);
 
+/* Resolve the real finite-world rows immediately above and below ActRaiser's
+ * authentic 224-line action viewport. The game clamps its camera against
+ * world_height - 225, so the lower expression intentionally uses 225 rather
+ * than 224. Each result is independently capped by budget. */
+void ActRaiserActionBg_ResolveVerticalMargins(
+    int camera_y, int world_height, int budget,
+    int *top, int *bottom);
+
 /* Capture the complete action-background decision record and build its pure
  * plan plus the mechanical generic-PPU projection. No renderer state changes. */
 bool ActRaiserActionBg_BuildPlan(

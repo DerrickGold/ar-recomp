@@ -484,6 +484,9 @@ static void CheckLayerEditorSection(void) {
     canonical.layer[1].world_width = 256;
     canonical.layer[1].world_height = 256;
     canonical.layer[1].default_edge = kActionBgEdge_Mirror;
+    canonical.layer[1].vertical_extent = (ActionBgVerticalExtent) {
+      .mode = kActionBgExtent_Fixed, .top = 8, .bottom = 12,
+    };
     ActionBgTuner_ResetSession();
     CHECK(ActionBgTuner_ObservePlan(
         1, 1, &canonical, (ActionBgTunerLimits){120, 120, 32, 32}));
@@ -500,6 +503,14 @@ static void CheckLayerEditorSection(void) {
     CHECK(ActionBgTuner_ApplyDraft(&unbounded));
     CHECK(unbounded.layer[1].horizontal_extent.mode ==
           kActionBgExtent_Available);
+    RowToKey("bg2.ignore_vertical_bounds");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    unbounded = canonical;
+    CHECK(ActionBgTuner_ApplyDraft(&unbounded));
+    CHECK(unbounded.layer[1].vertical_extent.mode ==
+          kActionBgExtent_Available);
+    CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
+    RowToKey("bg2.ignore_side_bounds");
     CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
     RowToKey("bg2.horizontal");
     CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));

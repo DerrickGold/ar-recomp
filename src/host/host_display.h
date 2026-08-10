@@ -13,10 +13,10 @@ typedef enum HostDisplayPresentMode {
 /* Row capacity of every host-side ARGB frame surface. 240 covered the authentic
  * 224 lines plus the 239-line overscan mode; it now also has to cover the
  * diorama's vertical margin bands, so it tracks the PPU's own render-target
- * height (224 + 2*kPpuExtraTopBottom = 288). Authentic scanline 0 sits at row
+ * height (224 + 2*kPpuExtraTopBottom = 352). Authentic scanline 0 sits at row
  * PpuVerticalOrigin(ppu) -- NOT row 0 -- whenever a top margin is live, exactly
  * as texture column 0 means screen x = -ws_extra on the horizontal axis. */
-enum { kHostDisplayFramebufferHeight = 288 };
+enum { kHostDisplayFramebufferHeight = 352 };
 
 /* 262 scanlines * 1364 master-clock dots / 21.477272 MHz = 60.0988 Hz. */
 extern const uint64_t kHostDisplayEmulationFrameIntervalNs;

@@ -448,7 +448,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->visible_x0 = Settings_VisibleX0();
   dst->visible_width = Settings_VisibleWidth();
   /* Latched, not read from g_ppu, for the same reason extra_left_cur is. */
-  dst->ws_extra_top = ActRaiser_LiveVerticalMargin();
+  ActRaiser_LiveVerticalMargins(
+      &dst->ws_extra_top, &dst->ws_extra_bottom);
   dst->obj_apron = kPpuObjApron;
   /* Density-corrected here, at the D6 producer, so present.c consumes a value
    * already expressed in PHYSICAL output pixels (0 = auto passes through). */

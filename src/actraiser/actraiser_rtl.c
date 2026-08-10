@@ -1008,15 +1008,10 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
     if (budget > kPpuExtraTopBottom) budget = kPpuExtraTopBottom;
     const int layer_offset =
         primary_layer * kActRaiserBgLayerStateStride;
-    int camera_y = ActRaiser_ReadWram16(
-        kActRaiserWram_Bg1CameraY + layer_offset);
-    int available_top = camera_y;
-    if (available_top < 0) available_top = 0;
-    g_ws_extra_top = available_top < budget ? available_top : budget;
-    /* No bottom band: see g_ws_extra_bottom (main.c). The world below the
-     * viewport is streamed and drawable, but every sprite standing on it would
-     * be drawn at a negative screen Y instead, so the band would show
-     * background with the actors missing. */
+    ActRaiserActionBg_ResolveVerticalMargins(
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY + layer_offset),
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1Height + layer_offset),
+        budget, &g_ws_extra_top, &g_ws_extra_bottom);
   }
   PpuSetExtraVerticalSpace(g_ppu, g_ws_extra_top, g_ws_extra_bottom);
   /* The role catalog chooses the primary plane that governs capture height,
@@ -1025,13 +1020,17 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
    * synthetic lines to the bottom of its tilemap while the playfield
    * legitimately extends above the viewport. Fillmore act 2 exposed that as
    * red BG2 geometry half-added over its grey BG1 castle wall. */
-  if (g_ws_extra_top > 0) {
-    PpuSetVerticalMarginLayerClip(
-        g_ppu, kActRaiserPpuLayer_Bg1,
-        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
-    PpuSetVerticalMarginLayerClip(
-        g_ppu, kActRaiserPpuLayer_Bg2,
-        ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraY));
+  if (g_ws_extra_top > 0 || g_ws_extra_bottom > 0) {
+    for (int layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+      const int offset = layer * kActRaiserBgLayerStateStride;
+      int top_rows = 0, bottom_rows = 0;
+      ActRaiserActionBg_ResolveVerticalMargins(
+          ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY + offset),
+          ActRaiser_ReadWram16(kActRaiserWram_Bg1Height + offset),
+          budget, &top_rows, &bottom_rows);
+      PpuSetVerticalMarginLayerClip(
+          g_ppu, (uint8_t)layer, top_rows, bottom_rows);
+    }
   }
 
   /* AR_VEXT_TILES=1: dump the primary tilemap ids the band reads next to the
@@ -1896,6 +1895,7 @@ ActionApronGeometry ActRaiser_ObjApronGeometry(void) {
 static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
   extern uint8_t *g_diorama_layer_pixels[];
   extern int g_ws_extra_top;
+  extern int g_ws_extra_bottom;
 
   if (!geom || geom->apron <= 0 || !g_ppu || !ActionApron_Count())
     return;
@@ -1914,7 +1914,8 @@ static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
     return;
   const PpuObjPart *parts = ActionApron_Parts();
   const int count = ActionApron_Count();
-  const int rows = kActRaiserAuthenticHeight + g_ws_extra_top;
+  const int rows = kActRaiserAuthenticHeight +
+      g_ws_extra_top + g_ws_extra_bottom;
 
   /* Big enough for the largest SNES sprite (64x64). */
   static uint32_t scratch[64 * 64];
@@ -2000,6 +2001,7 @@ static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
 static int s_live_margin_left;
 static int s_live_margin_right;
 static int s_live_margin_top;
+static int s_live_margin_bottom;
 static ActionBgPlan s_live_action_bg_plan;
 static bool s_live_bg_capture_pad_to_budget;
 
@@ -2382,10 +2384,8 @@ void ActRaiserDrawPpuFrame(void) {
   }
   /* Bottom margin, after the authentic loop, so these lines see the registers
    * the last visible scanline left behind (hold-last, the mirror of the
-   * hold-first policy above). Inert today -- ActRaiser_ApplyWidescreenPolicy
-   * never requests a bottom band, because OAM cannot express a below-screen
-   * sprite (see g_ws_extra_bottom, main.c) -- but the loop is here so the
-   * background half is already correct if that changes. */
+   * hold-first policy above). Exact signed OBJ positions make these rows
+   * unambiguous even though the stored OAM Y byte itself wraps at 256. */
   for (int m = 1; m <= g_ppu->extraBottomCur; m++)
     ppu_runMarginLine(g_ppu, 224 + m);
   {
@@ -2417,6 +2417,7 @@ void ActRaiserDrawPpuFrame(void) {
    * path is !diorama_mode-gated today, so the bug would be latent rather than
    * live; latching makes it impossible either way. */
   s_live_margin_top = g_ppu->extraTopCur;
+  s_live_margin_bottom = g_ppu->extraBottomCur;
 
   if (getenv("AR_VEXT_LOG")) {
     /* Where each destination's content actually LANDED, which is the check that
@@ -2449,10 +2450,12 @@ void ActRaiserDrawPpuFrame(void) {
           if (r[x]) { if (plane0 < 0) plane0 = y; plane1 = y; break; }
       }
     fprintf(stderr,
-            "[vext-rows] gf=%u top=%d hudbg=[%d..%d] bg2plane=[%d..%d] "
+            "[vext-rows] gf=%u top=%d bottom=%d hudbg=[%d..%d] "
+            "bg2plane=[%d..%d] "
             "objs_unlocked=%u\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
-            (int)g_ppu->extraTopCur, hud0, hud1, plane0, plane1,
+            (int)g_ppu->extraTopCur, (int)g_ppu->extraBottomCur,
+            hud0, hud1, plane0, plane1,
             ActRaiser_TakeVextUnlockedObjects());
   }
   s_live_margin_left = g_ppu->extraLeftCur;
@@ -2468,11 +2471,13 @@ void ActRaiserDrawPpuFrame(void) {
   ActRaiser_WidescreenSkyPalaceRestore();
 }
 
-/* Same latch, same reason (see ActRaiser_LiveMargins): the vertical band the
+/* Same latch, same reason (see ActRaiser_LiveMargins): the vertical bands the
  * frame was ACTUALLY rendered with, not whatever g_ppu holds by the time the
- * frame slot is captured. Separate accessor rather than more out-params so
- * the existing three-way callers stay untouched. */
-int ActRaiser_LiveVerticalMargin(void) { return s_live_margin_top; }
+ * frame slot is captured. */
+void ActRaiser_LiveVerticalMargins(int *top, int *bottom) {
+  if (top) *top = s_live_margin_top;
+  if (bottom) *bottom = s_live_margin_bottom;
+}
 
 /* See the latch above. Reports the margin geometry of the most recently rendered
  * frame, which is what a consumer of that frame's captured pixels must use. */
