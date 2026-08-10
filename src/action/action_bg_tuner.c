@@ -135,10 +135,11 @@ bool ActionBgTuner_ApplyDraft(ActionBgPlan *plan) {
   if (!s_tuner.draft_enabled) return true;
   ActionBgPlan built;
   if (!BuildEffectivePlan(&built, true)) return false;
-  /* Source/world metadata must belong to the canonical plan the caller just
-   * observed. A stale caller cannot replace a different room's plan. */
+  /* Role/source/world metadata must belong to the canonical plan the caller
+   * just observed. A stale caller cannot replace a different room's plan. */
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
-    if (plan->layer[layer].source != s_tuner.canonical.layer[layer].source ||
+    if (plan->layer[layer].role != s_tuner.canonical.layer[layer].role ||
+        plan->layer[layer].source != s_tuner.canonical.layer[layer].source ||
         plan->layer[layer].world_width !=
             s_tuner.canonical.layer[layer].world_width ||
         plan->layer[layer].world_height !=
@@ -195,6 +196,15 @@ static const char *UpperSource(ActionBgSourceKind source) {
   }
 }
 
+static const char *UpperRole(ActionBgLayerRole role) {
+  switch (role) {
+    case kActionBgLayerRole_Playfield: return "PLAYFIELD";
+    case kActionBgLayerRole_Backdrop: return "BACKDROP";
+    case kActionBgLayerRole_Unclassified: return "UNCLASSIFIED";
+    default: return "UNKNOWN";
+  }
+}
+
 static void SetRowText(ActionBgTunerRow *row, const char *key,
                        const char *label, const char *value) {
   if (!row) return;
@@ -231,7 +241,8 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
   ActionBgTunerRow *row = PushRow(
       out, capacity, count, kActionBgTunerRow_Layer, layer, -1);
   snprintf(key, sizeof(key), "bg%d", layer + 1);
-  snprintf(value, sizeof(value), "%s%s",
+  snprintf(value, sizeof(value), "%s %s%s",
+           UpperRole(canonical->role),
            UpperSource(canonical->source),
            s_tuner.selected_layer == layer ? " OPEN" : "");
   SetRowText(row, key, layer ? "BG2" : "BG1", value);
@@ -528,9 +539,10 @@ static void PrintDraft(void) {
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     const ActionBgLayerPlan *p = &plan.layer[layer];
     fprintf(stderr,
-            "[action-bg-tuner] BG%u source=%s edge=%s "
+            "[action-bg-tuner] BG%u role=%s source=%s edge=%s "
             "horizontal=%s:%u,%u vertical=%s:%u,%u\n",
-            layer + 1, ActionBgSourceKind_Name(p->source),
+            layer + 1, ActionBgLayerRole_Name(p->role),
+            ActionBgSourceKind_Name(p->source),
             ActionBgEdgeMode_Name(p->default_edge),
             ActionBgExtentMode_Name(p->horizontal_extent.mode),
             p->horizontal_extent.left, p->horizontal_extent.right,

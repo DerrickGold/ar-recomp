@@ -12,10 +12,12 @@ static int failures;
 static ActionBgPlan Plan(void) {
   ActionBgPlan plan;
   ActionBgPlan_InitNative(&plan);
+  plan.layer[0].role = kActionBgLayerRole_Playfield;
   plan.layer[0].source = kActionBgSource_WorldMap;
   plan.layer[0].world_width = 4096;
   plan.layer[0].world_height = 512;
   plan.layer[0].default_edge = kActionBgEdge_LiveWorld;
+  plan.layer[1].role = kActionBgLayerRole_Backdrop;
   plan.layer[1].source = kActionBgSource_AuthenticViewport;
   plan.layer[1].world_width = 256;
   plan.layer[1].world_height = 256;
@@ -138,6 +140,11 @@ static void TestResetAndAtomicity(void) {
   ActionBgPlan wrong = canonical;
   wrong.layer[0].world_width++;
   ActionBgPlan before = wrong;
+  CHECK(!ActionBgTuner_ApplyDraft(&wrong));
+  CHECK(!memcmp(&wrong, &before, sizeof(wrong)));
+  wrong = canonical;
+  wrong.layer[0].role = kActionBgLayerRole_Backdrop;
+  before = wrong;
   CHECK(!ActionBgTuner_ApplyDraft(&wrong));
   CHECK(!memcmp(&wrong, &before, sizeof(wrong)));
 

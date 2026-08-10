@@ -35,6 +35,16 @@ typedef enum ActionBgSourceKind {
   kActionBgSource_AuthenticViewport,
 } ActionBgSourceKind;
 
+/* Semantic ownership is independent of source mechanics. It lets global
+ * canvas policy grow a verified playfield without assuming that a particular
+ * PPU layer always serves that role. Non-action/native projections remain
+ * unclassified and therefore cannot opt themselves into canvas growth. */
+typedef enum ActionBgLayerRole {
+  kActionBgLayerRole_Unclassified = 0,
+  kActionBgLayerRole_Playfield,
+  kActionBgLayerRole_Backdrop,
+} ActionBgLayerRole;
+
 typedef enum ActionBgEdgeMode {
   kActionBgEdge_Transparent = 0,
   kActionBgEdge_LiveWorld,
@@ -75,6 +85,7 @@ typedef struct ActionBgBand {
 
 typedef struct ActionBgLayerPlan {
   bool valid;
+  ActionBgLayerRole role;
   ActionBgSourceKind source;
   ActionBgEdgeMode default_edge;
   uint16_t world_width;
@@ -133,6 +144,7 @@ bool ActionBgPlan_ApplyPresentationPolicy(
 uint8_t ActionBgPlan_ClampUnboundWorldLayers(
     ActionBgPlan *plan, uint8_t bound_layers, uint8_t visible_layers);
 const char *ActionBgSourceKind_Name(ActionBgSourceKind source);
+const char *ActionBgLayerRole_Name(ActionBgLayerRole role);
 const char *ActionBgEdgeMode_Name(ActionBgEdgeMode edge);
 const char *ActionBgExtentMode_Name(ActionBgExtentMode mode);
 
