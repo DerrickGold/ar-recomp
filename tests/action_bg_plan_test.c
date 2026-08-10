@@ -368,8 +368,10 @@ static void TestNarrowDecorativeBg2(void) {
   CHECK(Compile(&plan).clamp_layers == 2);
 
   const uint8_t repeat_cases[][2] = {
-    { 4, 1 }, { 4, 3 }, { 6, 1 }, { 6, 5 }, { 6, 8 },
-    { 7, 2 }, { 7, 7 },
+    /* Moving cloud/snow families retained from the legacy widescreen policy. */
+    { 4, 1 }, { 4, 2 }, { 4, 3 },
+    { 6, 1 }, { 6, 2 }, { 6, 3 }, { 6, 4 }, { 6, 5 }, { 6, 8 },
+    { 7, 2 }, { 7, 3 }, { 7, 4 }, { 7, 5 }, { 7, 6 }, { 7, 7 },
   };
   for (size_t i = 0; i < sizeof(repeat_cases) / sizeof(repeat_cases[0]); i++) {
     state = State(repeat_cases[i][0], repeat_cases[i][1]);

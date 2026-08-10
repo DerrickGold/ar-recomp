@@ -1264,6 +1264,16 @@ remains bounded. A real-PPU fixture uses different colors at the two authentic
 edges to prove the bottom margin samples the opposite edge (Repeat), not the
 near edge (Mirror), and that the Available band extent survives there.
 
+This boundary-band rule is complementary to the previously audited moving
+cloud/snow policy. Aitos `0401-0403`, Northwall `0601-0605` and `0608`, and
+Death Heim `0702-0707` classify the complete narrow BG2 as cyclic Repeat, so
+every authentic and synthetic top/bottom row already preserves its motion
+direction; they do not need a `y0=0` band. `0708` remains the intentional
+native RawWrap exception for its two-plane raster scene. The planner test lists
+every member rather than only range endpoints, and the real-PPU fixture now
+proves same-direction cyclic sampling on a synthetic top row as well as the
+Bloodpool bottom band.
+
 ## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
 
 The enhanced town renderer is designed in `ar-recomp-sim-rendering-plan.md`
