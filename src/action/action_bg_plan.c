@@ -160,7 +160,7 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
        * narrow-decorative cap applied before this special-room override. */
       plan->layer[layer].horizontal_extent = AvailableHorizontalExtent();
       plan->layer[layer].vertical_extent = AvailableVerticalExtent();
-      plan->layer[layer].band_count = 0;
+      ClearBands(&plan->layer[layer]);
     }
     plan->layer[0].role = kActionBgLayerRole_Scene;
     return;
@@ -171,7 +171,7 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     plan->layer[layer].source = kActionBgSource_AuthenticViewport;
     plan->layer[layer].default_edge = kActionBgEdge_Clamp;
-    plan->layer[layer].band_count = 0;
+    ClearBands(&plan->layer[layer]);
   }
   plan->layer[1].horizontal_extent = FixedHorizontalExtent(0, 0);
   if (DeathHeimEndingSky(state)) {

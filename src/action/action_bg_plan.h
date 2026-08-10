@@ -5,8 +5,9 @@
 #include <stdint.h>
 
 /* Pure action-background scene policy (SPEC-bg-hle BH3). The planner owns
- * source and edge classification only; live PPU registers still own pixels,
- * raster effects, priority, windows, palette and color math. */
+ * semantic roles, source/edge classification, and presentation extents; live
+ * PPU registers still own pixels, raster effects, priority, windows, palette
+ * and color math. */
 
 enum {
   kActionBgPlanLayerCount = 2,

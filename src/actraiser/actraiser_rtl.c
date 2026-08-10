@@ -875,6 +875,105 @@ static void ActRaiser_ProjectBgPresentationPolicy(
   }
 }
 
+/* Build and publish the one canonical action-background decision before any
+ * generic/debug presentation override runs. Draft application is explicit:
+ * native 4:3 still observes the room for authoring but cannot apply synthetic
+ * margin policy, while the normal wide path may A/B its session draft. */
+static bool ActRaiser_ResolveActionBgPlan(
+    uint8 map_group, uint8 map_number, bool apply_tuner_draft,
+    ActionBgPlan *plan, ActionBgPresentationPolicy *presentation) {
+  if (!plan || !presentation ||
+      !ActRaiserActionBg_BuildPlan(
+          g_ram, kActRaiserWramSize, g_ppu,
+          g_settings.ws_bg2_padding, plan, presentation) ||
+      !ActionBgTuner_ObservePlan(
+          map_group, map_number, plan,
+          (ActionBgTunerLimits) {
+            kPpuExtraLeftRight, kPpuExtraLeftRight,
+            kPpuExtraTopBottom, kPpuExtraTopBottom,
+          }))
+    return false;
+  if (apply_tuner_draft && !ActionBgTuner_ApplyDraft(plan)) return false;
+  return ActionBgPlan_CompilePresentation(plan, presentation);
+}
+
+/* Resolve the finite playfield's remaining horizontal world space without
+ * applying it. Keeping this calculation separate leaves the ordered PPU
+ * setters and final immutable plan handoff together in the caller. */
+static bool ActRaiser_CalculateCanvasMargins(
+    uint8 map_group, uint8 map_number, int canvas_layer, int budget,
+    int *margin_left, int *margin_right) {
+  if (!margin_left || !margin_right || canvas_layer < 0 ||
+      canvas_layer >= kActionBgPlanLayerCount || budget < 0)
+    return false;
+  const int layer_offset = canvas_layer * kActRaiserBgLayerStateStride;
+  const int camera_x = ActRaiser_ReadWram16(
+      kActRaiserWram_Bg1CameraX + layer_offset);
+  const int world_width = ActRaiser_IsSimulationTown(map_group, map_number)
+      ? kActRaiserTownWorldWidth
+      : ActRaiser_ReadWram16(kActRaiserWram_Bg1Width + layer_offset);
+  int available_left = camera_x;
+  int available_right =
+      world_width - kActRaiserAuthenticWidth - camera_x;
+  if (available_left < 0) available_left = 0;
+  if (available_right < 0) available_right = 0;
+  *margin_left = available_left < budget ? available_left : budget;
+  *margin_right = available_right < budget ? available_right : budget;
+  return true;
+}
+
+static void ActRaiser_LogWidescreenLayers(void) {
+  if (!getenv("AR_WS_LAYERS")) return;
+  static int last_frame = -1;
+  const unsigned game_frame =
+      ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+  if ((int)game_frame == last_frame) return;
+  last_frame = (int)game_frame;
+  fprintf(stderr,
+          "[ws-layers] gf=%u mode=%d main=%02x sub=%02x "
+          "wsel=%06x cgwsel=%02x cgadsub=%02x",
+          game_frame, g_ppu->bgmode & 7,
+          g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
+          g_ppu->windowsel, g_ppu->cgwsel, g_ppu->cgadsub);
+  for (int layer = 0; layer < 4; layer++)
+    fprintf(stderr, " BG%d[w%d h%02x hs=%d]", layer + 1,
+            g_ppu->bgXsc[layer] & 1, g_ppu->bgXsc[layer] & 0xfc,
+            g_ppu->hScroll[layer]);
+  fprintf(stderr, " win1=[%d,%d] win2=[%d,%d]\n",
+          g_ppu->window1left, g_ppu->window1right,
+          g_ppu->window2left, g_ppu->window2right);
+}
+
+/* The compositor writes only the active window. Finite action/town worlds can
+ * leave steady strips at the framebuffer edges, so clear them every frame;
+ * other modes retain the change-triggered full clear. */
+static void ActRaiser_ClearWidescreenMarginGaps(bool bounded_world_margins) {
+  static int last_left = -1, last_right = -1;
+  const int left = g_ppu->extraLeftCur;
+  const int right = g_ppu->extraRightCur;
+  if (bounded_world_margins && g_ppu->renderBuffer) {
+    /* In flat mode these strips are intentional black pillarbox. In Diorama
+     * the framebuffer is an opaque backdrop plane, so use its own backdrop
+     * colour when the accepted margin repair is active. */
+    const uint32 gap_fill =
+        (g_settings.diorama_mode && g_settings.diorama_margin_fix)
+            ? ActRaiser_BackdropArgb(g_ppu)
+            : 0u;
+    ActRaiserFillMarginGaps(
+        g_ppu->renderBuffer, g_ppu->renderPitch,
+        kActRaiserAuthenticHeight, g_ppu->extraLeftRight,
+        left, right, gap_fill);
+    last_left = left;
+    last_right = right;
+  } else if (left != last_left || right != last_right) {
+    last_left = left;
+    last_right = right;
+    if (g_ppu->renderBuffer)
+      memset(g_ppu->renderBuffer, 0,
+             (size_t)g_ppu->renderPitch * kActRaiserAuthenticHeight);
+  }
+}
+
 /* Per-frame VERTICAL margin policy — the transpose of the bounded-world side
  * margin clamp in ActRaiser_ApplyWidescreenPolicy, and deliberately built the
  * same way: ask the game's own camera and layer-dimension state how much world
@@ -1006,16 +1105,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
         ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
       ActionBgPlan plan;
       ActionBgPresentationPolicy presentation;
-      if (ActRaiserActionBg_BuildPlan(
-              g_ram, kActRaiserWramSize, g_ppu,
-              g_settings.ws_bg2_padding, &plan, &presentation)) {
-        ActionBgTuner_ObservePlan(
-            g_ram[kActRaiserWram_MapGroup],
-            g_ram[kActRaiserWram_CurrentMap], &plan,
-            (ActionBgTunerLimits) {
-              kPpuExtraLeftRight, kPpuExtraLeftRight,
-              kPpuExtraTopBottom, kPpuExtraTopBottom,
-            });
+      if (ActRaiser_ResolveActionBgPlan(
+              g_ram[kActRaiserWram_MapGroup],
+              g_ram[kActRaiserWram_CurrentMap], false,
+              &plan, &presentation)) {
         s_pending_action_bg_plan = plan;
         /* No side columns are rendered in this mode. Preserve source ownership
          * for the authentic provider, but describe the executed presentation
@@ -1126,28 +1219,18 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * AR_WS_ACTION=0 restores the pillarboxed action baseline. */
     wide = g_settings.ws_action;
     ActionBgPresentationPolicy bg_policy;
-    if (ActRaiserActionBg_BuildPlan(
-            g_ram, kActRaiserWramSize, g_ppu,
-            g_settings.ws_bg2_padding, &bg_plan, &bg_policy)) {
-      ActionBgTuner_ObservePlan(
-          map_group, map_number, &bg_plan,
-          (ActionBgTunerLimits) {
-            kPpuExtraLeftRight, kPpuExtraLeftRight,
-            kPpuExtraTopBottom, kPpuExtraTopBottom,
-          });
-      if (ActionBgTuner_ApplyDraft(&bg_plan) &&
-          ActionBgPlan_CompilePresentation(&bg_plan, &bg_policy)) {
-        bg_plan_valid = 1;
-        bg_plan_source_bg1 = bg_plan.layer[0].source;
-        bg_plan_source_bg2 = bg_plan.layer[1].source;
-        bg_hle_allowed = wide;
-        clamp = bg_policy.clamp_layers;
-        mirror = bg_policy.mirror_layers;
-        repeat = bg_policy.repeat_layers;
-        repeat_band_layer = bg_policy.repeat_band_layer;
-        repeat_band_y0 = bg_policy.repeat_band_y0;
-        repeat_band_y1 = bg_policy.repeat_band_y1;
-      }
+    if (ActRaiser_ResolveActionBgPlan(
+            map_group, map_number, true, &bg_plan, &bg_policy)) {
+      bg_plan_valid = 1;
+      bg_plan_source_bg1 = bg_plan.layer[0].source;
+      bg_plan_source_bg2 = bg_plan.layer[1].source;
+      bg_hle_allowed = wide;
+      clamp = bg_policy.clamp_layers;
+      mirror = bg_policy.mirror_layers;
+      repeat = bg_policy.repeat_layers;
+      repeat_band_layer = bg_policy.repeat_band_layer;
+      repeat_band_y0 = bg_policy.repeat_band_y0;
+      repeat_band_y1 = bg_policy.repeat_band_y1;
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
@@ -1288,22 +1371,11 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       /* Clamp each side to the catalogued playfield's real world space.
        * Simulation towns use BG1 and the fixed 512px world proven by
        * $01:B4C6's camera clamp. Outside [0,width) stays transparent/clear. */
-      const int layer_offset = canvas_layer * kActRaiserBgLayerStateStride;
-      int camera_x = ActRaiser_ReadWram16(
-          kActRaiserWram_Bg1CameraX + layer_offset);
-      int world_width = ActRaiser_IsSimulationTown(map_group, map_number)
-          ? kActRaiserTownWorldWidth
-          : ActRaiser_ReadWram16(kActRaiserWram_Bg1Width + layer_offset);
-      int available_left = camera_x;
-      int available_right =
-          world_width - kActRaiserAuthenticWidth - camera_x;
-      if (available_left < 0) available_left = 0;
-      if (available_right < 0) available_right = 0;
-      int margin_left = available_left < g_ws_extra
-          ? available_left : g_ws_extra;
-      int margin_right = available_right < g_ws_extra
-          ? available_right : g_ws_extra;
-      PpuSetExtraSideSpace(g_ppu, margin_left, margin_right, 0);
+      int margin_left = 0, margin_right = 0;
+      if (ActRaiser_CalculateCanvasMargins(
+              map_group, map_number, canvas_layer, g_ws_extra,
+              &margin_left, &margin_right))
+        PpuSetExtraSideSpace(g_ppu, margin_left, margin_right, 0);
     }
   } else {
     PpuSetExtraSpaceCentered(g_ppu, (uint8)g_ws_extra);
@@ -1388,56 +1460,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
                 : "none",
             bg_hle_bindings);
   }
-  /* AR_WS_LAYERS=1: dump per-frame PPU layer/tilemap state — which BG a
-   * margin artifact lives on, and whether that BG's tilemap is 32-wide (wraps
-   * into the margin) or 64-wide (real content). Temporary Phase-4 probe. */
-  if (getenv("AR_WS_LAYERS")) {
-    static int lf = -1;
-    unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-    if ((int)game_frame != lf) {
-      lf = (int)game_frame;
-      fprintf(stderr, "[ws-layers] gf=%u mode=%d main=%02x sub=%02x wsel=%06x cgwsel=%02x cgadsub=%02x",
-              game_frame, g_ppu->bgmode & 7,
-              g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
-              g_ppu->windowsel, g_ppu->cgwsel, g_ppu->cgadsub);
-      for (int L = 0; L < 4; L++)
-        fprintf(stderr, " BG%d[w%d h%02x hs=%d]", L + 1,
-                (g_ppu->bgXsc[L] & 1), (g_ppu->bgXsc[L] & 0xfc),
-                g_ppu->hScroll[L]);
-      fprintf(stderr, " win1=[%d,%d] win2=[%d,%d]\n",
-              g_ppu->window1left, g_ppu->window1right,
-              g_ppu->window2left, g_ppu->window2right);
-    }
-  }
-  /* The compositor writes only the active window. Finite action/town worlds
-   * can leave steady gap strips at the framebuffer edges, so clear those gaps
-   * every frame. Other modes retain the change-triggered full clear. */
-  static int last_l = -1, last_r = -1;
-  int l = g_ppu->extraLeftCur, r = g_ppu->extraRightCur;
-  if (bounded_world_margins && g_ppu->renderBuffer) {
-    /* Fix C (SPEC-backdrop-clip.md). In flat mode these strips are the intended
-     * pillarbox at a world edge and stay black. In diorama mode this same
-     * framebuffer becomes the backdrop PLANE, drawn with SDL_BLENDMODE_NONE
-     * behind the whole stack, so black here paints an opaque wedge across ~a
-     * fifth of the screen; the scene's own backdrop colour makes it continuous.
-     * Gating on diorama_mode is what keeps flat output byte-identical, and the
-     * settings gate keeps the old behaviour available for the A/B. */
-    uint32 gap_fill =
-        (g_settings.diorama_mode && g_settings.diorama_margin_fix)
-            ? ActRaiser_BackdropArgb(g_ppu)
-            : 0u;
-    ActRaiserFillMarginGaps(g_ppu->renderBuffer, g_ppu->renderPitch,
-                            kActRaiserAuthenticHeight,
-                            g_ppu->extraLeftRight, l, r, gap_fill);
-    last_l = l;
-    last_r = r;
-  } else if (l != last_l || r != last_r) {
-    last_l = l;
-    last_r = r;
-    if (g_ppu->renderBuffer)
-      memset(g_ppu->renderBuffer, 0,
-             (size_t)g_ppu->renderPitch * kActRaiserAuthenticHeight);
-  }
+  ActRaiser_LogWidescreenLayers();
+  ActRaiser_ClearWidescreenMarginGaps(bounded_world_margins != 0);
 }
 
 /* The OAM slots ActRaiser_WidescreenHudObjPromote validated THIS frame.

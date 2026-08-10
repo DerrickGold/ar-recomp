@@ -241,6 +241,7 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
   const ActionBgLayerDraft *draft = &s_tuner.layer[layer];
   ActionBgTunerRow *row = PushRow(
       out, capacity, count, kActionBgTunerRow_Layer, layer, -1);
+  if (!row) return;
   snprintf(key, sizeof(key), "bg%d", layer + 1);
   snprintf(value, sizeof(value), "%s %s%s",
            UpperRole(canonical->role),
@@ -252,6 +253,7 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
   ActionBgEdgeMode edge = draft->edge_set
       ? draft->edge : canonical->default_edge;
   row = PushRow(out, capacity, count, kActionBgTunerRow_Edge, layer, -1);
+  if (!row) return;
   snprintf(key, sizeof(key), "bg%d.edge", layer + 1);
   SetRowText(row, key, "edge strategy", UpperEdge(edge));
   row->nested = true;
@@ -259,16 +261,19 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
   ActionBgHorizontalExtent horizontal = EffectiveHorizontal(layer);
   row = PushRow(out, capacity, count,
                 kActionBgTunerRow_HorizontalMode, layer, -1);
+  if (!row) return;
   snprintf(key, sizeof(key), "bg%d.horizontal", layer + 1);
   SetRowText(row, key, "horizontal cap", UpperExtent(horizontal.mode));
   row->nested = true;
   if (horizontal.mode == kActionBgExtent_Fixed) {
     row = PushRow(out, capacity, count, kActionBgTunerRow_Left, layer, -1);
+    if (!row) return;
     snprintf(key, sizeof(key), "bg%d.left", layer + 1);
     snprintf(value, sizeof(value), "%u px", horizontal.left);
     SetRowText(row, key, "left", value);
     row->nested = true;
     row = PushRow(out, capacity, count, kActionBgTunerRow_Right, layer, -1);
+    if (!row) return;
     snprintf(key, sizeof(key), "bg%d.right", layer + 1);
     snprintf(value, sizeof(value), "%u px", horizontal.right);
     SetRowText(row, key, "right", value);
@@ -278,16 +283,19 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
   ActionBgVerticalExtent vertical = EffectiveVertical(layer);
   row = PushRow(out, capacity, count,
                 kActionBgTunerRow_VerticalMode, layer, -1);
+  if (!row) return;
   snprintf(key, sizeof(key), "bg%d.vertical", layer + 1);
   SetRowText(row, key, "vertical cap", UpperExtent(vertical.mode));
   row->nested = true;
   if (vertical.mode == kActionBgExtent_Fixed) {
     row = PushRow(out, capacity, count, kActionBgTunerRow_Top, layer, -1);
+    if (!row) return;
     snprintf(key, sizeof(key), "bg%d.top", layer + 1);
     snprintf(value, sizeof(value), "%u px", vertical.top);
     SetRowText(row, key, "top", value);
     row->nested = true;
     row = PushRow(out, capacity, count, kActionBgTunerRow_Bottom, layer, -1);
+    if (!row) return;
     snprintf(key, sizeof(key), "bg%d.bottom", layer + 1);
     snprintf(value, sizeof(value), "%u px", vertical.bottom);
     SetRowText(row, key, "bottom", value);
@@ -298,6 +306,7 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
     const ActionBgBand *canonical_band = &canonical->bands[band];
     row = PushRow(out, capacity, count,
                   kActionBgTunerRow_BandHeader, layer, (int)band);
+    if (!row) return;
     snprintf(value, sizeof(value), "%s", UpperEdge(canonical_band->edge));
     snprintf(key, sizeof(key), "bg%d.band%u", layer + 1, band);
     char label[32];
@@ -310,18 +319,21 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
         EffectiveBandHorizontal(layer, (int)band);
     row = PushRow(out, capacity, count,
                   kActionBgTunerRow_BandMode, layer, (int)band);
+    if (!row) return;
     snprintf(key, sizeof(key), "bg%d.band%u.horizontal", layer + 1, band);
     SetRowText(row, key, "band cap", UpperExtent(band_extent.mode));
     row->nested = true;
     if (band_extent.mode == kActionBgExtent_Fixed) {
       row = PushRow(out, capacity, count,
                     kActionBgTunerRow_BandLeft, layer, (int)band);
+      if (!row) return;
       snprintf(key, sizeof(key), "bg%d.band%u.left", layer + 1, band);
       snprintf(value, sizeof(value), "%u px", band_extent.left);
       SetRowText(row, key, "band left", value);
       row->nested = true;
       row = PushRow(out, capacity, count,
                     kActionBgTunerRow_BandRight, layer, (int)band);
+      if (!row) return;
       snprintf(key, sizeof(key), "bg%d.band%u.right", layer + 1, band);
       snprintf(value, sizeof(value), "%u px", band_extent.right);
       SetRowText(row, key, "band right", value);
@@ -335,6 +347,7 @@ int ActionBgTuner_BuildRows(ActionBgTunerRow *out, int capacity) {
   int count = 0;
   ActionBgTunerRow *row = PushRow(
       out, capacity, &count, kActionBgTunerRow_Header, -1, -1);
+  if (!row) return count;
   if (!s_tuner.live) {
     SetRowText(row, "", "Enter an action stage to tune", "");
     return count;
@@ -346,17 +359,23 @@ int ActionBgTuner_BuildRows(ActionBgTunerRow *out, int capacity) {
   SetRowText(row, "", "Live action room", value);
 
   row = PushRow(out, capacity, &count, kActionBgTunerRow_Apply, -1, -1);
+  if (!row) return count;
   SetRowText(row, "bg_tuner.apply", "apply draft",
              s_tuner.draft_enabled ? "ON" : "OFF");
   row = PushRow(out, capacity, &count, kActionBgTunerRow_Guides, -1, -1);
+  if (!row) return count;
   SetRowText(row, "bg_tuner.guides", "extent guides",
              s_tuner.guides_enabled ? "ON" : "OFF");
-  for (int layer = 0; layer < kActionBgPlanLayerCount; layer++)
+  for (int layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     PushLayerRows(out, capacity, &count, layer);
+    if (count >= capacity) return count;
+  }
   row = PushRow(out, capacity, &count, kActionBgTunerRow_Print, -1, -1);
+  if (!row) return count;
   SetRowText(row, "bg_tuner.print", "print draft", "LOG");
   row->separator_before = true;
   row = PushRow(out, capacity, &count, kActionBgTunerRow_Reset, -1, -1);
+  if (!row) return count;
   SetRowText(row, "bg_tuner.reset", "reset draft", "RESET");
   return count;
 }

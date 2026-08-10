@@ -258,7 +258,7 @@ that the list is short, named, and honest.
 |---|---|---|
 | `settings_overlay.c` | **2,479** | largest logic file; resisted two extraction passes. Seams are text/glyph measurement and the tab/section/row navigation model — real, but a long tail of small helpers rather than two subsystems |
 | `present_sim3d.c` | 1,953 | product of the T2a split, minus the world-map renderer. Remaining stage seams: effects/particles, clouds, shadows, ground, billboards, cull |
-| `actraiser_rtl.c` | 1,815 | contains `ActRaiserDrawPpuFrame` (455) and `ActRaiser_ApplyWidescreenPolicy` (418). **Deprioritized deliberately**: this is the HLE seam against ROM behaviour, where mistakes are subtlest and the oracles weakest. High risk, moderate reward |
+| `actraiser_rtl.c` | 1,815 | contains `ActRaiserDrawPpuFrame` (455) and `ActRaiser_ApplyWidescreenPolicy` (now 388 physical/~283 logic lines). The 2026-08-10 background-extent cleanup extracted canonical plan/tuner resolution, finite-canvas arithmetic, diagnostics and margin-gap clearing while retaining one ordered PPU application/handoff path. Further decomposition remains **deprioritized deliberately**: this is the HLE seam against ROM behaviour, where mistakes are subtlest and the oracles weakest. High risk, moderate reward |
 | `main.c` | 1,246 | the file, not a function — `main()` itself is now 14 lines over eight named phases. Largest remaining is `AppLoop_PumpEvents` (390), kept whole on purpose: one flat switch, every arm independent |
 | `diorama.c` | 1,175 | at budget, watch it |
 

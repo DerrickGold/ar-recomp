@@ -35,6 +35,13 @@ static ActionBgPlan Build(ActionBgFrameState *state) {
   return plan;
 }
 
+static bool BandIsClear(const ActionBgBand *band) {
+  return band && !band->y0 && !band->y1 &&
+      band->edge == kActionBgEdge_Transparent &&
+      band->horizontal_extent.mode == kActionBgExtent_Inherit &&
+      !band->horizontal_extent.left && !band->horizontal_extent.right;
+}
+
 static ActionBgPresentationPolicy Compile(const ActionBgPlan *plan) {
   ActionBgPresentationPolicy policy;
   memset(&policy, 0xA5, sizeof(policy));
@@ -455,6 +462,10 @@ static void TestDeathHeimStates(void) {
         kActionBgExtent_Available);
   CHECK(plan.layer[1].horizontal_extent.mode ==
         kActionBgExtent_Available);
+  CHECK(!plan.layer[0].band_count && !plan.layer[1].band_count);
+  for (int layer = 0; layer < kActionBgPlanLayerCount; layer++)
+    for (int band = 0; band < kActionBgMaxBands; band++)
+      CHECK(BandIsClear(&plan.layer[layer].bands[band]));
   CHECK(!policy.clamp_layers && !policy.mirror_layers &&
         !policy.repeat_layers && !policy.bound_canvas_to_world);
 }
