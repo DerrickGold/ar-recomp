@@ -1,6 +1,6 @@
 #include "diorama_skybox_uv.h"
 
-enum { kAuthenticWidth = 256 };
+enum { kAuthenticWidth = 256, kAuthenticHeight = 224 };
 
 static int ClampInt(int value, int low, int high) {
   if (value < low) return low;
@@ -8,11 +8,11 @@ static int ClampInt(int value, int low, int high) {
   return value;
 }
 
-static void ValidSpanForEdge(int ws_extra, int budget,
-                             int live_left, int live_right,
-                             bool pad_captured_to_budget,
-                             ActionBgEdgeMode edge, int tex_width,
-                             int *out_x0, int *out_x1) {
+static void ValidSpanForPolicy(int ws_extra, int budget,
+                               int live_left, int live_right,
+                               bool pad_captured_to_budget,
+                               const ActionBgRowPolicy *policy, int tex_width,
+                               int *out_x0, int *out_x1) {
   if (!out_x0 || !out_x1) return;
   if (tex_width <= 0) { *out_x0 = 0; *out_x1 = 0; return; }
   if (ws_extra < 0) ws_extra = 0;
@@ -21,7 +21,7 @@ static void ValidSpanForEdge(int ws_extra, int budget,
   live_right = ClampInt(live_right, 0, budget);
 
   int margin_left, margin_right;
-  switch (edge) {
+  switch (policy ? policy->edge : kActionBgEdge_RawWrap) {
     case kActionBgEdge_Mirror:
     case kActionBgEdge_Repeat:
       /* Fix A synthesized padding out to the whole budget. */
@@ -41,18 +41,28 @@ static void ValidSpanForEdge(int ws_extra, int budget,
       margin_right = live_right;
       break;
   }
+  if (policy && policy->horizontal_extent.mode == kActionBgExtent_Fixed) {
+    if (margin_left > policy->horizontal_extent.left)
+      margin_left = policy->horizontal_extent.left;
+    if (margin_right > policy->horizontal_extent.right)
+      margin_right = policy->horizontal_extent.right;
+  }
 
   *out_x0 = ClampInt(ws_extra - margin_left, 0, tex_width);
   *out_x1 = ClampInt(ws_extra + kAuthenticWidth + margin_right, 0, tex_width);
   if (*out_x1 < *out_x0) *out_x1 = *out_x0;
 }
 
-static ActionBgEdgeMode EdgeAtCaptureRow(const ActionBgLayerPlan *layer,
-                                         int authentic_y0, int capture_y) {
-  ActionBgRowPolicy policy;
-  return ActionBgLayerPlan_ResolveRow(
-             layer, capture_y - authentic_y0, &policy)
-      ? policy.edge : kActionBgEdge_RawWrap;
+static bool RowWithinVerticalExtent(const ActionBgLayerPlan *layer,
+                                    int authentic_y) {
+  if (!layer || layer->vertical_extent.mode != kActionBgExtent_Fixed)
+    return true;
+  if (authentic_y < 0)
+    return -authentic_y <= layer->vertical_extent.top;
+  if (authentic_y >= kAuthenticHeight)
+    return authentic_y - (kAuthenticHeight - 1) <=
+        layer->vertical_extent.bottom;
+  return true;
 }
 
 void DioramaBgValidSpanPlan_Build(
@@ -63,13 +73,22 @@ void DioramaBgValidSpanPlan_Build(
   if (!out) return;
   *out = (DioramaBgValidSpanPlan){ 0 };
   if (capture_height <= 0 || tex_width <= 0) return;
+  const bool layer_valid = ActionBgLayerPlan_Validate(layer);
 
   for (int y = 0; y < capture_height; y++) {
     int x0 = 0, x1 = 0;
-    ValidSpanForEdge(ws_extra, budget, live_left, live_right,
-                     pad_captured_to_budget,
-                     EdgeAtCaptureRow(layer, authentic_y0, y),
-                     tex_width, &x0, &x1);
+    const int authentic_y = y - authentic_y0;
+    ActionBgRowPolicy policy = {
+      .edge = kActionBgEdge_RawWrap,
+      .horizontal_extent = { .mode = kActionBgExtent_Available },
+    };
+    if (layer_valid)
+      ActionBgLayerPlan_ResolveRow(layer, authentic_y, &policy);
+    if (!layer_valid || RowWithinVerticalExtent(layer, authentic_y)) {
+      ValidSpanForPolicy(ws_extra, budget, live_left, live_right,
+                         pad_captured_to_budget, &policy,
+                         tex_width, &x0, &x1);
+    }
     if (out->count) {
       DioramaBgValidSpan *previous = &out->spans[out->count - 1];
       if (previous->y1 == y && previous->x0 == x0 && previous->x1 == x1) {

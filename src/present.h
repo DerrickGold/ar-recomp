@@ -310,12 +310,13 @@ typedef struct FrameSlot {
    * exists to fix. */
   uint8_t extra_left_cur;
   uint8_t extra_right_cur;
-  /* BH6: exact plan that produced the captured BG1/BG2 planes. Ordinary action
-   * frames preserve canonical source metadata and all row bands; explicit
-   * global overrides retain source metadata but project their executed edges.
-   * Non-action frames carry a native-source projection of the applied policy.
-   * `bg_capture_pad_to_budget` is deliberately separate: it is a frame-level
-   * capture execution fact, not a map-specific edge decision. */
+  /* BH6/extents: exact plan that produced the captured BG1/BG2 planes.
+   * Ordinary action frames preserve canonical source, per-side extents, and
+   * row bands; explicit global overrides retain source metadata but project
+   * their executed edges. Non-action frames carry a native-source projection
+   * of the applied policy. `bg_capture_pad_to_budget` is deliberately
+   * separate: it is a frame-level capture execution fact, not a map-specific
+   * edge decision. */
   ActionBgPlan action_bg_plan;
   bool bg_capture_pad_to_budget;
   uint8_t inidisp;
