@@ -139,6 +139,7 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
       plan->layer[layer].default_edge = kActionBgEdge_RawWrap;
       plan->layer[layer].band_count = 0;
     }
+    plan->layer[0].role = kActionBgLayerRole_Scene;
     return;
   }
   if (state->map_number != kDeathHeimHub) return;
@@ -392,6 +393,37 @@ uint8_t ActionBgPlan_ClampUnboundWorldLayers(
   return clamp_layers;
 }
 
+static int FindPrimaryRoleLayer(const ActionBgPlan *plan, bool allow_scene) {
+  int primary = -1;
+  for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+    const ActionBgLayerRole role = plan->layer[layer].role;
+    if (role != kActionBgLayerRole_Playfield &&
+        !(allow_scene && role == kActionBgLayerRole_Scene))
+      continue;
+    if (primary >= 0) return -1;
+    primary = (int)layer;
+  }
+  return primary;
+}
+
+int ActionBgPlan_PlayfieldLayer(const ActionBgPlan *plan) {
+  return ActionBgPlan_Validate(plan)
+      ? FindPrimaryRoleLayer(plan, false) : -1;
+}
+
+int ActionBgPlan_PrimaryLayer(const ActionBgPlan *plan) {
+  return ActionBgPlan_Validate(plan)
+      ? FindPrimaryRoleLayer(plan, true) : -1;
+}
+
+int ActionBgPlan_CanvasOwner(const ActionBgPlan *plan) {
+  if (!ActionBgPlan_Validate(plan) || !plan->bound_canvas_to_world) return -1;
+  const int owner = FindPrimaryRoleLayer(plan, false);
+  if (owner < 0 || plan->layer[owner].source != kActionBgSource_WorldMap)
+    return -1;
+  return owner;
+}
+
 const char *ActionBgSourceKind_Name(ActionBgSourceKind source) {
   switch (source) {
     case kActionBgSource_NativeTilemap: return "native";
@@ -405,6 +437,7 @@ const char *ActionBgLayerRole_Name(ActionBgLayerRole role) {
   switch (role) {
     case kActionBgLayerRole_Unclassified: return "unclassified";
     case kActionBgLayerRole_Playfield: return "playfield";
+    case kActionBgLayerRole_Scene: return "scene";
     case kActionBgLayerRole_Backdrop: return "backdrop";
     default: return "unknown";
   }

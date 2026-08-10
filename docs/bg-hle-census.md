@@ -454,8 +454,9 @@ gate.
 The layer-extent work adds a semantic role alongside source and edge policy.
 This is intentionally not inferred in the presenter from a PPU layer number:
 the immutable `ActionBgPlan` now states whether each plane is the scrolling
-playfield, a backdrop, or unclassified non-action/native content. The role is
-metadata only at this checkpoint and does not change the canvas or any pixel.
+playfield, a special primary scene, a backdrop, or unclassified non-action
+content. The role is metadata only at this checkpoint and does not change the
+canvas or any pixel.
 
 A fresh default-provider Wide Full matrix is recorded locally as
 `runs/bg-layer-extents-census-full.json`. All twelve ordinary action entries
@@ -473,7 +474,7 @@ classification:
 | `0701` pre-ending | playfield / captured viewport | backdrop / captured viewport | bounded upper statue/face art and repeat-safe fog `144..224` remain separate policies |
 | `0701` ending sky | playfield / captured viewport | backdrop / captured viewport | the page/state handoff replaces the fog band and remains a separately tuned backdrop |
 | `0702`-`0707` | playfield / finite world | backdrop / 256x256 viewport | rematch parallax is cyclic; the playfield may grow independently |
-| `0708` | backdrop / native raster | backdrop / native raster | no playfield owns canvas growth; retain the native raw presentation |
+| `0708` | primary scene / native raster | backdrop / native raster | no playfield owns finite-world growth; BG1 still anchors the native Diorama raster presentation |
 
 The ordinary entry worlds observed in this fresh matrix are, respectively,
 BG1/BG2: `4096x768/2304x512`, `2048x1280/2048x1280`,
@@ -485,7 +486,7 @@ BG1/BG2: `4096x768/2304x512`, `2048x1280/2048x1280`,
 `256x256` to `512x512`; every BG2 is the intended 256x256 decorative plane.
 
 `ActionBgPlan` assigns playfield/backdrop roles for all 49 recognized action
-map IDs and tests the full matrix. `0708` is the explicit two-backdrop
+map IDs and tests the full matrix. `0708` is the explicit scene/backdrop
 exception. `ActionBgPlan_InitNative` leaves roles unclassified, so simulation,
 Sky Palace, Mode 7, title and other non-action projections cannot accidentally
 opt into future action-canvas growth. The live BG Extents tuner displays and

@@ -900,11 +900,17 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
   g_ws_extra_bottom = 0;
 
   int budget = g_settings.diorama_vertical_extend;
+  const int primary_layer =
+      ActionBgPlan_PrimaryLayer(&s_pending_action_bg_plan);
   if (budget > 0 && Diorama_IsActiveThisFrame() &&
       ActRaiser_IsActionMapGroup(map_group) &&
-      !ActRaiser_IsSimulationTown(map_group, map_number)) {
+      !ActRaiser_IsSimulationTown(map_group, map_number) &&
+      primary_layer >= 0) {
     if (budget > kPpuExtraTopBottom) budget = kPpuExtraTopBottom;
-    int camera_y = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+    const int layer_offset =
+        primary_layer * kActRaiserBgLayerStateStride;
+    int camera_y = ActRaiser_ReadWram16(
+        kActRaiserWram_Bg1CameraY + layer_offset);
     int available_top = camera_y;
     if (available_top < 0) available_top = 0;
     g_ws_extra_top = available_top < budget ? available_top : budget;
@@ -914,13 +920,12 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
      * background with the actors missing. */
   }
   PpuSetExtraVerticalSpace(g_ppu, g_ws_extra_top, g_ws_extra_bottom);
-  /* The capture height is governed by BG1 because that is the foreground world
-   * the camera follows, but every world layer has its OWN camera. Clip each
-   * layer independently before its camera reaches row 0: otherwise a BG2 at
-   * Y=0 wraps negative synthetic lines to the bottom of its tilemap while BG1
+  /* The role catalog chooses the primary plane that governs capture height,
+   * but every layer has its OWN camera. Clip each layer independently
+   * before its camera reaches row 0: otherwise a BG2 at Y=0 wraps negative
+   * synthetic lines to the bottom of its tilemap while the playfield
    * legitimately extends above the viewport. Fillmore act 2 exposed that as
-   * red BG2 geometry half-added over its grey BG1 castle wall. The setter is
-   * presentation-only and authentic lines remain bit-identical. */
+   * red BG2 geometry half-added over its grey BG1 castle wall. */
   if (g_ws_extra_top > 0) {
     PpuSetVerticalMarginLayerClip(
         g_ppu, kActRaiserPpuLayer_Bg1,
@@ -930,21 +935,18 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
         ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraY));
   }
 
-  /* AR_VEXT_TILES=1: classify the BG1 tilemap rows the band will read. A
-   * "uniform" row (one tile id repeated across the whole ring width) is the
-   * column-strip FILLER signature (rendering-engine.md §4) -- the band is
-   * showing a row no row-strip has refreshed. Logged with cam_y's 256-page
-   * phase because that is the suspected predictor. */
-  /* AR_VEXT_TILES=1: dump the BG1 tilemap ids the band reads, next to the first
-   * VISIBLE row, so a filler row is distinguishable from a legitimately uniform
-   * one (an all-sky row is uniform too -- that false positive is why the first
-   * cut of this probe reported 100%). Column-strip filler is a row whose ids do
-   * not belong to the surrounding content (rendering-engine.md §4). */
+  /* AR_VEXT_TILES=1: dump the primary tilemap ids the band reads next to the
+   * first visible row. A filler row is one whose ids do not belong to the
+   * surrounding content; merely being uniform is insufficient because a real
+   * all-sky row is uniform too (rendering-engine.md §4). */
   if (getenv("AR_VEXT_TILES") && g_ws_extra_top > 0) {
-    int base = PPU_bgTilemapAdr(g_ppu, 0);
-    bool wider = PPU_bgTilemapWider(g_ppu, 0);
-    bool higher = PPU_bgTilemapHigher(g_ppu, 0);
-    int cam_y = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+    int base = PPU_bgTilemapAdr(g_ppu, primary_layer);
+    bool wider = PPU_bgTilemapWider(g_ppu, primary_layer);
+    bool higher = PPU_bgTilemapHigher(g_ppu, primary_layer);
+    const int layer_offset =
+        primary_layer * kActRaiserBgLayerStateStride;
+    int cam_y = ActRaiser_ReadWram16(
+        kActRaiserWram_Bg1CameraY + layer_offset);
     char buf[512]; int n = 0;
     for (int py = cam_y - g_ws_extra_top; py < cam_y + 16; py += 8) {
       int off = base + (((py >> 3) & 0x1f) << 5);
@@ -962,19 +964,24 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
             cam_y & 0xFF, buf);
   }
 
-  if (getenv("AR_VEXT_LOG")) {
+  if (getenv("AR_VEXT_LOG") && primary_layer >= 0) {
     static unsigned last;
     unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     if (gf != last) {
       last = gf;
       fprintf(stderr,
-              "[vext] gf=%u top=%d camY=%d bg1H=%d vscroll=%d/%d "
-              "screenEn=$%02x bg1tm=$%04x\n",
-              gf, g_ws_extra_top,
-              ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY),
-              ActRaiser_ReadWram16(kActRaiserWram_Bg1Height),
-              g_ppu->vScroll[0], g_ppu->vScroll[1],
-              g_ppu->screenEnabled[0], PPU_bgTilemapAdr(g_ppu, 0));
+              "[vext] gf=%u top=%d layer=%d camY=%d worldH=%d "
+              "vscroll=%d/%d screenEn=$%02x tilemap=$%04x\n",
+              gf, g_ws_extra_top, primary_layer + 1,
+              ActRaiser_ReadWram16(
+                  kActRaiserWram_Bg1CameraY +
+                  primary_layer * kActRaiserBgLayerStateStride),
+              ActRaiser_ReadWram16(
+                  kActRaiserWram_Bg1Height +
+                  primary_layer * kActRaiserBgLayerStateStride),
+              g_ppu->vScroll[primary_layer], g_ppu->vScroll[1],
+              g_ppu->screenEnabled[0],
+              PPU_bgTilemapAdr(g_ppu, primary_layer));
     }
   }
 }
@@ -1058,6 +1065,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * still owns the fixed centering budget; this policy narrows the live left
    * and right margins as the camera approaches either world edge. */
   int bounded_world_margins = 0;
+  int canvas_layer = -1;
   if (!survey && map_group == kActRaiserMapGroup_NonAction) {
     switch (map_number) {
       case kActRaiserNonActionMap_SkyPalace:
@@ -1093,6 +1101,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
          * separate ADAD/AE6F and B473 ports use this same $01-$06 range. */
         wide = g_settings.ws_sim;
         bounded_world_margins = wide;
+        canvas_layer = kActRaiserPpuLayer_Bg1;
         clamp = kActRaiserBgLayerMask_Bg2;
         break;
       }
@@ -1252,13 +1261,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (bg_hle_allowed && bg_plan_valid) {
       bg_hle_bindings = ActRaiserActionBg_BindPlan(
           g_ram, kActRaiserWramSize, &bg_plan, g_ppu);
-      /* A bound BG1 provider owns the finite action canvas. If any planned
-       * world layer cannot bind, clamp that layer to its authentic viewport
-       * instead of exposing stale/wrapped ring cells in synthetic margins.
-       * Wide Raw never reaches this block and remains intentionally raw. */
-      if ((bg_hle_bindings & kActRaiserBgLayerMask_Bg1) &&
-          bg_plan.bound_canvas_to_world)
-        bounded_world_margins = 1;
+      /* If any planned world layer cannot bind, clamp that layer to its
+       * authentic viewport instead of exposing stale/wrapped ring cells in
+       * synthetic margins. Wide Raw never reaches this block. */
       uint8 visible_bg_layers = 0;
       if (!(g_ppu->inidisp & 0x80) && (g_ppu->bgmode & 7u) == 1u) {
         visible_bg_layers = (uint8)(
@@ -1271,15 +1276,24 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
         clamp |= fallback_world_layers;
         PpuSetWidescreenLayerClamp(g_ppu, clamp);
       }
+      /* The role catalog, not a PPU layer-number convention, owns the finite
+       * action canvas. A missing, ambiguous, or unbound owner fails closed to
+       * the already-rendered symmetric presentation. */
+      canvas_layer = ActionBgPlan_CanvasOwner(&bg_plan);
+      if (canvas_layer >= 0 &&
+          (bg_hle_bindings & (uint8)(1u << canvas_layer)))
+        bounded_world_margins = 1;
     }
     if (bounded_world_margins) {
-      /* Clamp each side to real BG1 world space. Action width is section
-       * state $2E; simulation towns are the fixed 512px world proven by
-       * $01:B4C6's camera clamp. Outside [0,width) stays black. */
-      int camera_x = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
+      /* Clamp each side to the catalogued playfield's real world space.
+       * Simulation towns use BG1 and the fixed 512px world proven by
+       * $01:B4C6's camera clamp. Outside [0,width) stays transparent/clear. */
+      const int layer_offset = canvas_layer * kActRaiserBgLayerStateStride;
+      int camera_x = ActRaiser_ReadWram16(
+          kActRaiserWram_Bg1CameraX + layer_offset);
       int world_width = ActRaiser_IsSimulationTown(map_group, map_number)
           ? kActRaiserTownWorldWidth
-          : ActRaiser_ReadWram16(kActRaiserWram_Bg1Width);
+          : ActRaiser_ReadWram16(kActRaiserWram_Bg1Width + layer_offset);
       int available_left = camera_x;
       int available_right =
           world_width - kActRaiserAuthenticWidth - camera_x;
