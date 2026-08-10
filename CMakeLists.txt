@@ -515,6 +515,7 @@ if(BUILD_TESTING)
         src/randomizer.c
         src/settings_overlay.c
         src/settings_overlay_debug_panel.c
+        src/presentation_geometry.c
         src/input_map.c
         src/user_data_dir.c
         # The layer editor's row model. Pure, so it adds no SDL/PPU closure to
@@ -539,6 +540,10 @@ if(BUILD_TESTING)
         COMMAND actraiser_settings_overlay_test)
     set_tests_properties(actraiser_settings_overlay_minimum PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;AR_OVERLAY_TEST_SIZE=464x208")
+    add_test(NAME actraiser_settings_overlay_pillarbox
+        COMMAND actraiser_settings_overlay_test)
+    set_tests_properties(actraiser_settings_overlay_pillarbox PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;AR_OVERLAY_TEST_SIZE=1280x720")
 
     # SDL3 render-pipeline regression guard: presents a known framebuffer
     # through the same texture/FRect/logical-presentation path main.c uses and
@@ -556,6 +561,24 @@ if(BUILD_TESTING)
         COMMAND actraiser_render_pipeline_test)
     set_tests_properties(actraiser_render_pipeline PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+
+    # Scene -> CRT resolve -> host UI sequencing. The tiny present_frame.c
+    # orchestrator is linked against test stubs so this remains deterministic
+    # and GPU-free while guarding the order that keeps UI above pillar bars.
+    add_executable(actraiser_present_frame_order_test
+        tests/present_frame_order_test.c
+        src/present_frame.c
+    )
+    target_include_directories(actraiser_present_frame_order_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_present_frame_order_test PRIVATE
+        SDL3::SDL3
+        m
+    )
+    add_test(NAME actraiser_present_frame_order
+        COMMAND actraiser_present_frame_order_test)
 
     # Generated-shader distribution guard: asserts the COMMITTED shader blobs
     # (src/shaders/*_frag.h, produced by tools/build_shaders.py) are accepted by

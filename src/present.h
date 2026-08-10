@@ -193,11 +193,11 @@ typedef struct FrameSlot {
    *
    * NOTE ON "prev": interpolation needs this slot's data PLUS the previous
    * frame's, so the caller keeps its own DioramaScrollSnapshot (below) and
-   * passes it to PresentComposite; the slot itself only ever carries the
+   * passes it to PresentFrame; the slot itself only ever carries the
    * CURRENT frame. Historically this note warned against reading the
    * alternate entry of a double-buffered slot array (the M5.3 present thread
    * could be writing it); that array and thread are gone (#18/P13), but the
-   * separate prev snapshot remains the interface — PresentComposite is given
+   * separate prev snapshot remains the interface — PresentFrame is given
    * prev explicitly rather than inferring it. */
   uint64_t timestamp_ns;
   /* R17/C3: emulated ticks between the previous capture and this one — the
@@ -220,7 +220,7 @@ typedef struct FrameSlot {
    * interpolation outright when either slot was captured under turbo. */
   bool turbo_active;
   /* kSettingCat_Graphics "Scroll interpolation" row, snapshotted here (not
-   * read live from present.c per D6) so PresentComposite knows whether to
+   * read live from present.c per D6) so PresentFrame knows whether to
    * even attempt interpolation for this frame. */
   bool interp_setting_enabled;
   /* A5 (followup doc) "Flat HUD" row, snapshotted here (not read live from
@@ -433,8 +433,8 @@ void FrameSlot_ExtractScrollSnapshot(const FrameSlot *slot,
 
 /* --- Present-time entry points. Called synchronously on the render/main
  * thread (Phase 0 removed the present thread, #18/P13). Still split into an
- * Upload phase (SDL_UpdateTexture only) and a Composite phase (SDL_RenderTexture
- * + SDL_RenderPresent): the split is retained because it keeps the texture
+ * Upload phase (SDL_UpdateTexture only) and a resolved frame phase
+ * (SDL_RenderTexture + post-process + host UI): the split keeps the texture
  * uploads grouped ahead of the vsync-blocking present, not for any cross-thread
  * handoff. */
 void PresentUpload(const FrameSlot *slot);
@@ -451,7 +451,11 @@ void PresentUpload(const FrameSlot *slot);
  * it is a parameter rather than a FrameSlot field: the slot stays immutable
  * after capture, and one retained slot can be re-composited at several
  * different phases (which is the whole point of the re-present). */
-void PresentComposite(const FrameSlot *slot,
+/* Owns the complete draw order: scene target begin, mode-specific scene,
+ * post-process resolve, then full-output host UI. The returned viewport is the
+ * exact image rect selected by the resolve (SDL's logical rect where active,
+ * otherwise the calculated fallback). SDL_RenderPresent remains caller-owned. */
+SDL_Rect PresentFrame(const FrameSlot *slot,
                       const DioramaScrollSnapshot *prev_scroll,
                       float alpha);
 

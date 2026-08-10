@@ -61,9 +61,11 @@ in `present.c` after the sim functions leave):
   tuning constants.
 
 **STAYS in `present.c` (public entry points — never move, even though they
-touch sim statics):** `PresentComposite`, `PresentUpload`,
+touch sim statics):** `PresentCompositeScene`, `PresentUpload`,
 `PresentRendererResources_Reset`, `Present_EffectRendererSupported`,
 `Present_SimRimMaskSupported`, `ComputePresentationViewport`, `FrameSlot_Capture`.
+The later terminal-order cleanup added the public `PresentFrame` orchestrator in
+`present_frame.c`; it calls the internal scene compositor named above.
 
 ## The boundary — `present_internal.h`
 

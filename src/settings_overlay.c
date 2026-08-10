@@ -8,6 +8,7 @@
 
 #include "diorama/diorama_layer_editor.h"
 #include "input_map.h"
+#include "presentation_geometry.h"
 #include "settings.h"
 #include "user_data_dir.h"
 
@@ -3621,6 +3622,11 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
       output_width <= 0 || output_height <= 0)
     return;
 
+  /* Direct callers get the same full-output behavior as the final host-UI
+   * pass, without inheriting or leaking the game's renderer view state. */
+  PresentationOutputState output_state;
+  if (!PresentationGeometry_PushFullOutput(s_renderer, &output_state)) return;
+
   /* THE MANUAL SUPERSEDES THE MENU, and draws instead of it rather than over it.
    * The reader is a mode this overlay is in, not a peer of it -- s_open stays
    * true throughout, so everything that asks whether the menu has the game
@@ -3628,6 +3634,7 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
    * of text wants the window, not the letterboxed 4:3 area the game sits in. */
   if (ManualIsOpen() && s_manual_hooks.render) {
     s_manual_hooks.render((SDL_Rect){ 0, 0, output_width, output_height });
+    PresentationGeometry_PopFullOutput(s_renderer, &output_state);
     return;
   }
 
@@ -3647,4 +3654,5 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
 
   SDL_SetRenderDrawBlendMode(s_renderer, old_blend_mode);
   SDL_SetRenderDrawColor(s_renderer, old_r, old_g, old_b, old_a);
+  PresentationGeometry_PopFullOutput(s_renderer, &output_state);
 }

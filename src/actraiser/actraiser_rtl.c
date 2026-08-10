@@ -2038,7 +2038,7 @@ void ActRaiserDrawPpuFrame(void) {
        * ... kPpuOverlaySource_Bg3 ... RemoveFromGame, above) standing instead
        * of being overridden by this block. That capture feeds
        * g_hud_bg_pixels/g_hud_bg_texture exactly as in flat mode, which is
-       * what lets PresentComposite's diorama branch call
+       * what lets PresentCompositeScene's diorama branch call
        * PresentHudOverlayComposited (present.c) and get the same widescreen
        * HUD anchoring (ACT/TIME/SCORE spread, boss-health full width) flat
        * mode already has. Before A7 BG3 was unconditionally rebound here, so

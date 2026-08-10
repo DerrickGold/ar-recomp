@@ -26,7 +26,6 @@
 #include "diorama/diorama_planes.h"
 #include "diorama/diorama_scroll_math.h"
 #include "hd_replacement_host.h"
-#include "settings_overlay.h"
 #include "dev/scene_inspector.h"
 #include "scene3d_math.h"
 #include "render_capabilities.h"
@@ -591,9 +590,6 @@ bool PresentWorldNavigation3D(const FrameSlot *slot) {
     return false;
   }
   SDL_SetRenderClipRect(g_renderer, NULL);
-  PresentSceneInspector(slot, viewport);
-  PresentCheatBadge(slot, viewport);
-  SettingsOverlay_Render(viewport);
   ApplyLogicalPresentation(slot);
   return true;
 }

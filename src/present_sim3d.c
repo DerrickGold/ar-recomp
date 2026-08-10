@@ -25,7 +25,6 @@
 #include "diorama/diorama_planes.h"
 #include "diorama/diorama_scroll_math.h"
 #include "hd_replacement_host.h"
-#include "settings_overlay.h"
 #include "dev/scene_inspector.h"
 #include "scene3d_math.h"
 #include "render_capabilities.h"
@@ -2758,9 +2757,6 @@ void PresentSim3D(const FrameSlot *slot) {
    * from the SIM profile, so the established anchored compositor remains the
    * single HUD presentation path for both the flat and projected views. */
   PresentHudOverlayComposited(slot, viewport);
-  PresentSceneInspector(slot, viewport);
-  PresentCheatBadge(slot, viewport);
-  SettingsOverlay_Render(viewport);
   ApplyLogicalPresentation(slot);
 }
 /* T2a: the sim half of PresentRendererResources_Reset. present.c keeps the
