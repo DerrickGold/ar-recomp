@@ -1262,6 +1262,9 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
       span_count = kDioramaBgMaxValidSpans;
   }
   for (unsigned i = 0; i < span_count; i++) {
+    /* A fixed vertical extent is represented by an empty horizontal span for
+     * those capture rows. Do not stretch a single boundary texel across it. */
+    if (spans[i].x1 <= spans[i].x0) continue;
     int y0 = spans[i].y0 < 0 ? 0 : spans[i].y0;
     int y1 = spans[i].y1 > snes_height ? snes_height : spans[i].y1;
     if (y1 <= y0) continue;

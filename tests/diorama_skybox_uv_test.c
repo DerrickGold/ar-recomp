@@ -172,6 +172,84 @@ static void TestBandedValidSpans(void) {
   ExpectSpan("invalid", &spans.spans[0], 0, 224, 120, 376);
 }
 
+static void TestExtentValidSpans(void) {
+  DioramaBgValidSpanPlan spans;
+  ActionBgLayerPlan layer = Layer(kActionBgEdge_Mirror);
+  layer.horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = 48,
+    .right = 64,
+  };
+  layer.bands[0] = (ActionBgBand) {
+    .y0 = 136,
+    .y1 = 224,
+    .edge = kActionBgEdge_Repeat,
+    .horizontal_extent = { .mode = kActionBgExtent_Available },
+  };
+  layer.band_count = 1;
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
+                               &layer, 16, 240, kTexWidth, &spans);
+  ExpectInt("fixed/band span count", spans.count, 2);
+  ExpectSpan("fixed upper", &spans.spans[0], 0, 152, 72, 440);
+  ExpectSpan("available band", &spans.spans[1], 152, 240, 0, 496);
+
+  /* A cap cannot manufacture pixels that the live-world edge did not render. */
+  layer = Layer(kActionBgEdge_RawWrap);
+  layer.horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = 100,
+    .right = 64,
+  };
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, false,
+                               &layer, 0, 1, kTexWidth, &spans);
+  ExpectInt("source-limited span count", spans.count, 1);
+  ExpectSpan("source-limited", &spans.spans[0], 0, 1, 120, 440);
+
+  /* Fixed vertical extents become transparent capture-row intervals. A
+   * 12-row top and 2-row bottom retain authentic rows between them. */
+  layer = Layer(kActionBgEdge_RawWrap);
+  layer.vertical_extent = (ActionBgVerticalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .top = 12,
+    .bottom = 2,
+  };
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false,
+                               &layer, 16, 244, kTexWidth, &spans);
+  ExpectInt("vertical span count", spans.count, 3);
+  ExpectSpan("vertical top clipped", &spans.spans[0], 0, 4, 0, 0);
+  ExpectSpan("vertical visible", &spans.spans[1], 4, 242, 0, 496);
+  ExpectSpan("vertical bottom clipped", &spans.spans[2], 242, 244, 0, 0);
+
+  /* Exercise the fixed-capacity proof: four isolated overrides create nine
+   * horizontal runs, plus one clipped run above and below. */
+  layer = Layer(kActionBgEdge_Mirror);
+  layer.horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = 32,
+    .right = 32,
+  };
+  layer.vertical_extent = (ActionBgVerticalExtent) {
+    .mode = kActionBgExtent_Fixed,
+  };
+  for (int i = 0; i < kActionBgMaxBands; i++) {
+    layer.bands[i] = (ActionBgBand) {
+      .y0 = (uint16_t)(10 + i * 20),
+      .y1 = (uint16_t)(20 + i * 20),
+      .edge = kActionBgEdge_Repeat,
+      .horizontal_extent = { .mode = kActionBgExtent_Available },
+    };
+  }
+  layer.band_count = kActionBgMaxBands;
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, true,
+                               &layer, 1, 226, kTexWidth, &spans);
+  ExpectInt("maximum span count", spans.count,
+            kDioramaBgMaxValidSpans);
+  ExpectSpan("maximum top", &spans.spans[0], 0, 1, 0, 0);
+  ExpectSpan("maximum bottom",
+             &spans.spans[kDioramaBgMaxValidSpans - 1],
+             225, 226, 0, 0);
+}
+
 /* THE no-op guarantee. Wherever the span is the full capture, the UV range must
  * equal the pre-fix expression exactly:
  *     margin_u = (radius + 1) / 512
@@ -233,6 +311,7 @@ static void TestUvRangeNeverInverts(void) {
 int main(void) {
   TestValidSpan();
   TestBandedValidSpans();
+  TestExtentValidSpans();
   TestUvRangeMatchesLegacyOnFullSpan();
   TestUvRangeCropsNarrowedSpan();
   TestUvRangeNeverInverts();

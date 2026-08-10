@@ -29,8 +29,9 @@
  * texture-column interval for those rows.
  *
  * Adjacent rows with the same horizontal span are coalesced. Four input bands
- * can introduce at most eight boundaries, hence the fixed 2*N+1 capacity. */
-enum { kDioramaBgMaxValidSpans = kActionBgMaxBands * 2 + 1 };
+ * can introduce at most eight horizontal-policy boundaries; fixed top/bottom
+ * extents can add one transparent interval on each side. */
+enum { kDioramaBgMaxValidSpans = kActionBgMaxBands * 2 + 3 };
 
 typedef struct DioramaBgValidSpan {
   int y0, y1;
