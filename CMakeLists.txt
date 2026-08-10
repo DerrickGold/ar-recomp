@@ -762,6 +762,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_diorama_skybox_uv_test
         tests/diorama_skybox_uv_test.c
         src/diorama/diorama_skybox_uv.c
+        src/action/action_bg_plan.c
     )
     target_include_directories(actraiser_diorama_skybox_uv_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
