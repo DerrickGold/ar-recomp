@@ -512,6 +512,13 @@ Bands that stop before an edge do not leak into either synthetic margin. The
 rule is inferred from the existing bounds, so the census gains no second map
 table or runtime source of truth.
 
+The older upper-cloud cases remain whole-layer cyclic policies, not top bands:
+Aitos `0401-0403`, Northwall `0601-0605`/`0608`, and Death Heim
+`0702-0707`. Whole-layer Repeat naturally applies to synthetic vertical rows
+on either side, retaining the established same-direction parallax behavior.
+The all-map planner assertions and a real-PPU top-margin direction probe now pin
+that distinction explicitly.
+
 Fresh Wide Full captures show the intended composition in both Bloodpool acts:
 the moon/cloud plane terminates at the authentic side boundaries, BG1 platforms
 continue into the margins, and lower water still fills them. For `0201`, the

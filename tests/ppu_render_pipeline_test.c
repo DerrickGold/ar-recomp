@@ -1287,7 +1287,7 @@ static void TestLayerPresentationExtents(void) {
  * animation and reverses its apparent direction. This fixture also pins the
  * band's Available extent, because retaining the default 0/0 cap would leave
  * the margin transparent even if repeat mode itself were selected. */
-static void TestBottomMarginInheritsEdgeBand(void) {
+static void TestMovingEdgePoliciesInVerticalMargins(void) {
   enum {
     kBudget = 8,
     kWidth = kW + 2 * kBudget,
@@ -1342,20 +1342,49 @@ static void TestBottomMarginInheritsEdgeBand(void) {
   ppu_runLine(ppu, kPpuYPixels);
   ppu_runMarginLine(ppu, kPpuYPixels + 1);
 
-  const uint32_t *row = capture + kPpuYPixels * kWidth;
-  const uint32_t left_margin = row[kBudget - 1];       /* screen x=-1 */
-  const uint32_t left_source = row[kBudget + 255];
-  const uint32_t reflected_left_source = row[kBudget + 1];
+  const uint32_t *bottom_row = capture + kPpuYPixels * kWidth;
+  const uint32_t left_margin =
+      bottom_row[kBudget - 1];                          /* screen x=-1 */
+  const uint32_t left_source = bottom_row[kBudget + 255];
+  const uint32_t reflected_left_source = bottom_row[kBudget + 1];
   CHECK((left_margin & 0xffffffu) != 0);
   CHECK(left_margin == left_source);
   CHECK(left_margin != reflected_left_source);
 
-  const uint32_t right_margin = row[kBudget + kW];     /* screen x=256 */
-  const uint32_t right_source = row[kBudget];
-  const uint32_t reflected_right_source = row[kBudget + 254];
+  const uint32_t right_margin =
+      bottom_row[kBudget + kW];                         /* screen x=256 */
+  const uint32_t right_source = bottom_row[kBudget];
+  const uint32_t reflected_right_source = bottom_row[kBudget + 254];
   CHECK((right_margin & 0xffffffu) != 0);
   CHECK(right_margin == right_source);
   CHECK(right_margin != reflected_right_source);
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+
+  /* Aitos, Northwall, and the Death Heim rematches use whole-layer Repeat for
+   * moving cloud/snow BG2. Pin the synthetic TOP margin separately: it does not
+   * need a row band and must never fall back to reflection there. */
+  memset(fb, 0, sizeof(fb));
+  memset(capture, 0, sizeof(capture));
+  PpuSetExtraSpace(ppu, kBudget);
+  PpuSetWidescreenLayerRepeat(ppu, (uint8_t)(1u << bg2));
+  PpuSetWidescreenPadCapturedToBudget(ppu, 1);
+  PpuSetExtraVerticalSpace(ppu, 1, 0);
+  PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                              (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+                             -kBudget, -1, kWidth, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
+  ppu_runMarginLine(ppu, 0);
+
+  const uint32_t *top_row = capture;
+  CHECK((top_row[kBudget - 1] & 0xffffffu) != 0);
+  CHECK(top_row[kBudget - 1] == top_row[kBudget + 255]);
+  CHECK(top_row[kBudget - 1] != top_row[kBudget + 1]);
+  CHECK((top_row[kBudget + kW] & 0xffffffu) != 0);
+  CHECK(top_row[kBudget + kW] == top_row[kBudget]);
+  CHECK(top_row[kBudget + kW] != top_row[kBudget + 254]);
 
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   g_new_ppu = saved_new_ppu;
@@ -1597,7 +1626,7 @@ int main(void) {
   TestVerticalMarginBottomLayerClip();
   TestVerticalMarginExactObj();
   TestLayerPresentationExtents();
-  TestBottomMarginInheritsEdgeBand();
+  TestMovingEdgePoliciesInVerticalMargins();
   TestCapturedPaddingReachesBudget();
   TestVirtualTilemapMargins();
   TestVirtualTilemapEffects();

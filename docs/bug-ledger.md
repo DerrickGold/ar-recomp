@@ -1280,9 +1280,13 @@ the current debugging process; this file is the case law.
     Regressions cover top/internal/bottom canonical row resolution, Bloodpool
     and Death Heim Diorama bottom spans, and a real-PPU asymmetric-edge fixture
     that distinguishes Repeat from Mirror while pinning the Available band
-    extent. Debug and release application builds succeed. The complete 44-test
-    suite passes; as usual, its display-backed shader test requires ordinary
-    macOS display access and passes there.
+    extent. A follow-up legacy-policy audit confirms that Aitos `0401-0403`,
+    Northwall `0601-0605`/`0608`, and Death Heim `0702-0707` retain their
+    whole-layer Repeat classification for moving upper clouds/snow; every map
+    member and a synthetic top-row direction probe are pinned explicitly.
+    Debug and release application builds succeed. The complete 44-test suite
+    passes; as usual, its display-backed shader test requires ordinary macOS
+    display access and passes there.
 
     **Reusable lesson:** a row band represents a content family, not merely a
     slice of a capture buffer. If the family reaches an authentic boundary,
