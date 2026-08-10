@@ -1294,6 +1294,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     s_pending_action_bg_plan.bound_canvas_to_world =
         bounded_world_margins;
   }
+  ActRaiserActionBg_ApplyPlanExtents(&s_pending_action_bg_plan, g_ppu);
   s_pending_bg_capture_pad_to_budget =
       g_ppu->wsPadCapturedToBudget != 0;
   /* One line per policy flip — cheap, and makes "why isn't this screen

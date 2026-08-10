@@ -44,6 +44,42 @@ bool PpuSetVirtualTilemap(Ppu *ppu, uint8_t layer,
   return true;
 }
 
+void PpuSetWidescreenLayerExtent(Ppu *ppu, uint8_t layer,
+                                 uint16_t left, uint16_t right,
+                                 uint16_t top, uint16_t bottom) {
+  if (!ppu || layer >= 4) return;
+  ppu->wsLayerExtentLeftDefault[layer] = left;
+  ppu->wsLayerExtentRightDefault[layer] = right;
+  ppu->wsLayerExtentTop[layer] = top;
+  ppu->wsLayerExtentBottom[layer] = bottom;
+  for (int y = 0; y < kPpuYPixels; y++) {
+    ppu->wsLayerExtentLeft[layer][y] = left;
+    ppu->wsLayerExtentRight[layer][y] = right;
+  }
+}
+
+void PpuSetWidescreenLayerExtentBand(Ppu *ppu, uint8_t layer,
+                                     uint8_t y0, uint8_t y1,
+                                     uint16_t left, uint16_t right) {
+  if (!ppu || layer >= 4 || y0 >= y1 || y1 > kPpuYPixels) return;
+  for (int y = y0; y < y1; y++) {
+    ppu->wsLayerExtentLeft[layer][y] = left;
+    ppu->wsLayerExtentRight[layer][y] = right;
+  }
+}
+
+static void ResetExtentStub(Ppu *ppu) {
+  memset(ppu->wsLayerExtentLeftDefault, 0xff,
+         sizeof(ppu->wsLayerExtentLeftDefault));
+  memset(ppu->wsLayerExtentRightDefault, 0xff,
+         sizeof(ppu->wsLayerExtentRightDefault));
+  memset(ppu->wsLayerExtentTop, 0xff, sizeof(ppu->wsLayerExtentTop));
+  memset(ppu->wsLayerExtentBottom, 0xff,
+         sizeof(ppu->wsLayerExtentBottom));
+  memset(ppu->wsLayerExtentLeft, 0xff, sizeof(ppu->wsLayerExtentLeft));
+  memset(ppu->wsLayerExtentRight, 0xff, sizeof(ppu->wsLayerExtentRight));
+}
+
 static void Write16(uint8_t *bytes, size_t address, uint16_t value) {
   bytes[address] = (uint8_t)value;
   bytes[address + 1] = (uint8_t)(value >> 8);
@@ -240,6 +276,66 @@ static void TestFramePlanCapture(void) {
   free(wram);
 }
 
+static void TestPlanExtentProjection(void) {
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  ResetExtentStub(ppu);
+
+  ActionBgPlan plan;
+  ActionBgPlan_InitNative(&plan);
+  ActionBgLayerPlan *bg2 = &plan.layer[kActRaiserPpuLayer_Bg2];
+  bg2->default_edge = kActionBgEdge_Mirror;
+  bg2->horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = 48,
+    .right = 64,
+  };
+  bg2->vertical_extent = (ActionBgVerticalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .top = 12,
+    .bottom = 7,
+  };
+  bg2->bands[0] = (ActionBgBand) {
+    .y0 = 136,
+    .y1 = 224,
+    .edge = kActionBgEdge_Repeat,
+    .horizontal_extent = {
+      .mode = kActionBgExtent_Available,
+    },
+  };
+  bg2->band_count = 1;
+  CHECK(ActionBgPlan_Validate(&plan));
+
+  CHECK(ActRaiserActionBg_ApplyPlanExtents(&plan, ppu));
+  CHECK(ppu->wsLayerExtentLeftDefault[kActRaiserPpuLayer_Bg1] ==
+        kPpuWidescreenExtentAvailable);
+  CHECK(ppu->wsLayerExtentLeftDefault[kActRaiserPpuLayer_Bg2] == 48);
+  CHECK(ppu->wsLayerExtentRightDefault[kActRaiserPpuLayer_Bg2] == 64);
+  CHECK(ppu->wsLayerExtentTop[kActRaiserPpuLayer_Bg2] == 12);
+  CHECK(ppu->wsLayerExtentBottom[kActRaiserPpuLayer_Bg2] == 7);
+  CHECK(ppu->wsLayerExtentLeft[kActRaiserPpuLayer_Bg2][100] == 48);
+  CHECK(ppu->wsLayerExtentRight[kActRaiserPpuLayer_Bg2][100] == 64);
+  CHECK(ppu->wsLayerExtentLeft[kActRaiserPpuLayer_Bg2][136] ==
+        kPpuWidescreenExtentAvailable);
+  CHECK(ppu->wsLayerExtentRight[kActRaiserPpuLayer_Bg2][223] ==
+        kPpuWidescreenExtentAvailable);
+
+  /* The per-frame reset restores available everywhere, and rejection is
+   * atomic: an invalid plan cannot partially restage caps. */
+  ResetExtentStub(ppu);
+  CHECK(ppu->wsLayerExtentLeft[kActRaiserPpuLayer_Bg2][100] ==
+        kPpuWidescreenExtentAvailable);
+  ActionBgPlan invalid = plan;
+  invalid.layer[1].bands[0].y1 = 225;
+  CHECK(!ActRaiserActionBg_ApplyPlanExtents(&invalid, ppu));
+  CHECK(ppu->wsLayerExtentLeft[kActRaiserPpuLayer_Bg2][100] ==
+        kPpuWidescreenExtentAvailable);
+  CHECK(!ActRaiserActionBg_ApplyPlanExtents(&plan, NULL));
+
+  free(ppu);
+}
+
 static void TestFramePlanBinding(void) {
   uint8_t *wram = BuildWram();
   Ppu *ppu = calloc(1, sizeof(*ppu));
@@ -403,6 +499,7 @@ int main(void) {
   TestCapture();
   TestRingAndComparison();
   TestFramePlanCapture();
+  TestPlanExtentProjection();
   TestFramePlanBinding();
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);

@@ -1051,6 +1051,126 @@ static void TestVerticalMarginLayerClip(void) {
   ppu_free(ppu);
 }
 
+/* Layer extents cap presentation independently of the global canvas and of the
+ * edge strategy. The first two rows prove a band can remove the default cap;
+ * the vertical arm proves only synthetic rows are removed. */
+static void TestLayerPresentationExtents(void) {
+  enum { kBudget = 8, kWidth = kW + 2 * kBudget };
+  const int bg2 = kActRaiserPpuLayer_Bg2;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  static uint8_t fb[kWidth * 5 * 4];
+  static uint32_t capture[kWidth * 3];
+
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  memset(capture, 0, sizeof(capture));
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = (uint8_t)(1u << bg2);
+  ppu->cgram[0x21] = bgr555(31, 0, 31);
+  set_solid_4bpp_tile(ppu, 1, 1);
+  ppu->bgTileAdr = 0;
+  ppu->bgXsc[bg2] = 0x20 | 3;
+  for (int i = 0; i < 0x1000; i++)
+    ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+
+  PpuSetExtraSpace(ppu, kBudget);
+  PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
+  PpuSetWidescreenPadCapturedToBudget(ppu, 1);
+  PpuSetWidescreenLayerExtent(
+      ppu, (uint8_t)bg2, 3, 5,
+      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
+  PpuSetWidescreenLayerExtentBand(
+      ppu, (uint8_t)bg2, 2, 3,
+      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
+
+  PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                              (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+                             -kBudget, 0, kWidth, 3,
+                             kPpuOverlayFlag_RemoveFromGame));
+  ppu_runLine(ppu, 1);
+  ppu_runLine(ppu, 2);
+
+  /* Default row: only three left and five right extension pixels survive. */
+  CHECK(capture[kBudget - 4] == 0);
+  CHECK((capture[kBudget - 3] & 0xffffffu) != 0);
+  CHECK((capture[kBudget + kW + 4] & 0xffffffu) != 0);
+  CHECK(capture[kBudget + kW + 5] == 0);
+  CHECK((capture[kBudget + 10] & 0xffffffu) != 0);
+  /* Band row: available removes the layer default cap and reaches the budget. */
+  CHECK((capture[kWidth] & 0xffffffu) != 0);
+  CHECK((capture[2 * kWidth - 1] & 0xffffffu) != 0);
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+
+  enum { kTop = 4, kRows = kTop + 1 };
+  static uint32_t vertical_capture[kW * kRows];
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  memset(vertical_capture, 0, sizeof(vertical_capture));
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = (uint8_t)(1u << bg2);
+  ppu->cgram[0x21] = bgr555(31, 0, 31);
+  set_solid_4bpp_tile(ppu, 1, 1);
+  ppu->bgTileAdr = 0;
+  ppu->bgXsc[bg2] = 0x20 | 3;
+  for (int i = 0; i < 0x1000; i++)
+    ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+  PpuSetExtraVerticalSpace(ppu, kTop, 0);
+  PpuSetWidescreenLayerExtent(
+      ppu, (uint8_t)bg2,
+      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable,
+      2, kPpuWidescreenExtentAvailable);
+  PpuBeginDrawing(ppu, fb, kW * 4, 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                              (uint8_t *)vertical_capture, kW * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+                             0, -kTop, kW, kRows,
+                             kPpuOverlayFlag_RemoveFromGame));
+  ppu_runLine(ppu, 0);
+  for (int line = 1 - kTop; line <= 0; line++)
+    ppu_runMarginLine(ppu, line);
+  ppu_runLine(ppu, 1);
+  CHECK(vertical_capture[0] == 0);
+  CHECK(vertical_capture[kW] == 0);
+  CHECK((vertical_capture[2 * kW] & 0xffffffu) != 0);
+  CHECK((vertical_capture[3 * kW] & 0xffffffu) != 0);
+  CHECK((vertical_capture[4 * kW] & 0xffffffu) != 0);
+
+  enum { kBottom = 3, kBottomRows = kBottom + 1 };
+  static uint32_t bottom_capture[kW * (kPpuYPixels + kBottom)];
+  memset(bottom_capture, 0, sizeof(bottom_capture));
+  PpuSetWidescreenLayerExtent(
+      ppu, (uint8_t)bg2,
+      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable,
+      kPpuWidescreenExtentAvailable, 1);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                              (uint8_t *)bottom_capture, kW * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+                             0, kPpuYPixels - 1, kW, kBottomRows,
+                             kPpuOverlayFlag_RemoveFromGame));
+  ppu_runLine(ppu, kPpuYPixels);
+  for (int line = kPpuYPixels + 1;
+       line <= kPpuYPixels + kBottom; line++)
+    ppu_runMarginLine(ppu, line);
+  const int bottom_y0 = kPpuYPixels - 1;
+  CHECK((bottom_capture[(bottom_y0 + 0) * kW] & 0xffffffu) != 0);
+  CHECK((bottom_capture[(bottom_y0 + 1) * kW] & 0xffffffu) != 0);
+  CHECK(bottom_capture[(bottom_y0 + 2) * kW] == 0);
+  CHECK(bottom_capture[(bottom_y0 + 3) * kW] == 0);
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
 /* Fix A (SPEC-backdrop-clip.md): a CAPTURED layer's synthesized mirror/repeat
  * padding must reach the full centering budget, not stop at the live per-side
  * margin — otherwise a host that samples the whole fixed capture span reads
@@ -1283,6 +1403,7 @@ int main(void) {
   TestSim3DWidescreenHudCaptureHandoff();
   TestOverlayContentMetadata();
   TestVerticalMarginLayerClip();
+  TestLayerPresentationExtents();
   TestCapturedPaddingReachesBudget();
   TestVirtualTilemapMargins();
   TestVirtualTilemapEffects();
