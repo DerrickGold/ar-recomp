@@ -49,17 +49,10 @@ static void ValidSpanForEdge(int ws_extra, int budget,
 
 static ActionBgEdgeMode EdgeAtCaptureRow(const ActionBgLayerPlan *layer,
                                          int authentic_y0, int capture_y) {
-  if (!layer || !layer->valid || layer->band_count > kActionBgMaxBands)
-    return kActionBgEdge_RawWrap;
-  ActionBgEdgeMode edge = layer->default_edge;
-  const int authentic_y = capture_y - authentic_y0;
-  for (unsigned i = 0; i < layer->band_count; i++) {
-    const ActionBgBand *band = &layer->bands[i];
-    if (band->y0 < band->y1 && authentic_y >= (int)band->y0 &&
-        authentic_y < (int)band->y1)
-      edge = band->edge;
-  }
-  return edge;
+  ActionBgRowPolicy policy;
+  return ActionBgLayerPlan_ResolveRow(
+             layer, capture_y - authentic_y0, &policy)
+      ? policy.edge : kActionBgEdge_RawWrap;
 }
 
 void DioramaBgValidSpanPlan_Build(

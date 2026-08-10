@@ -58,6 +58,23 @@ static bool WorldRingEligible(const ActionBgLayerState *layer) {
   return (layer->bgsc & 3u) == 3u && layer->tilemap_base == ppu_base;
 }
 
+static ActionBgHorizontalExtent AvailableHorizontalExtent(void) {
+  return (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Available,
+  };
+}
+
+static ActionBgVerticalExtent AvailableVerticalExtent(void) {
+  return (ActionBgVerticalExtent) {
+    .mode = kActionBgExtent_Available,
+  };
+}
+
+static void ClearBands(ActionBgLayerPlan *layer) {
+  layer->band_count = 0;
+  memset(layer->bands, 0, sizeof(layer->bands));
+}
+
 static ActionBgLayerPlan BaseLayerPlan(const ActionBgLayerState *state) {
   const bool world = WorldRingEligible(state);
   return (ActionBgLayerPlan) {
@@ -68,6 +85,8 @@ static ActionBgLayerPlan BaseLayerPlan(const ActionBgLayerState *state) {
                           : kActionBgEdge_RawWrap,
     .world_width = state->world_width,
     .world_height = state->world_height,
+    .horizontal_extent = AvailableHorizontalExtent(),
+    .vertical_extent = AvailableVerticalExtent(),
   };
 }
 
@@ -155,7 +174,87 @@ bool ActionBgPlan_Build(const ActionBgFrameState *state, ActionBgPlan *out) {
   ClassifyNarrowBg2(state, &built.layer[1]);
   if (state->map_group == kDeathHeim)
     ClassifyDeathHeim(state, &built);
+  if (!ActionBgPlan_Validate(&built)) return false;
   *out = built;
+  return true;
+}
+
+static bool ValidSource(ActionBgSourceKind source) {
+  return source >= kActionBgSource_NativeTilemap &&
+      source <= kActionBgSource_AuthenticViewport;
+}
+
+static bool ValidEdge(ActionBgEdgeMode edge) {
+  return edge >= kActionBgEdge_Transparent && edge <= kActionBgEdge_RawWrap;
+}
+
+static bool ValidExtentMode(ActionBgExtentMode mode, bool allow_inherit) {
+  return (allow_inherit && mode == kActionBgExtent_Inherit) ||
+      mode == kActionBgExtent_Available || mode == kActionBgExtent_Fixed;
+}
+
+static bool ValidHorizontalExtent(const ActionBgHorizontalExtent *extent,
+                                  bool allow_inherit) {
+  if (!extent || !ValidExtentMode(extent->mode, allow_inherit)) return false;
+  /* Canonicalize modes that do not consume numeric caps. This prevents stale
+   * draft values from surviving mode changes and keeps value-record memcmp
+   * meaningful at the immutable frame handoff. */
+  return extent->mode == kActionBgExtent_Fixed ||
+      (!extent->left && !extent->right);
+}
+
+static bool ValidVerticalExtent(const ActionBgVerticalExtent *extent) {
+  if (!extent || !ValidExtentMode(extent->mode, false)) return false;
+  return extent->mode == kActionBgExtent_Fixed ||
+      (!extent->top && !extent->bottom);
+}
+
+bool ActionBgLayerPlan_Validate(const ActionBgLayerPlan *layer) {
+  if (!layer || !layer->valid || !ValidSource(layer->source) ||
+      !ValidEdge(layer->default_edge) ||
+      !ValidHorizontalExtent(&layer->horizontal_extent, false) ||
+      !ValidVerticalExtent(&layer->vertical_extent) ||
+      layer->band_count > kActionBgMaxBands)
+    return false;
+
+  uint16_t preceding_y1 = 0;
+  for (unsigned i = 0; i < layer->band_count; i++) {
+    const ActionBgBand *band = &layer->bands[i];
+    if (band->y0 >= band->y1 || band->y1 > kAuthenticHeight ||
+        (i && band->y0 < preceding_y1) || !ValidEdge(band->edge) ||
+        !ValidHorizontalExtent(&band->horizontal_extent, true))
+      return false;
+    preceding_y1 = band->y1;
+  }
+  return true;
+}
+
+bool ActionBgPlan_Validate(const ActionBgPlan *plan) {
+  if (!plan || !plan->valid) return false;
+  for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++)
+    if (!ActionBgLayerPlan_Validate(&plan->layer[layer])) return false;
+  return true;
+}
+
+bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
+                                  int authentic_y,
+                                  ActionBgRowPolicy *out) {
+  if (out) memset(out, 0, sizeof(*out));
+  if (!out || !ActionBgLayerPlan_Validate(layer)) return false;
+  ActionBgRowPolicy resolved = {
+    .edge = layer->default_edge,
+    .horizontal_extent = layer->horizontal_extent,
+  };
+  for (unsigned i = 0; i < layer->band_count; i++) {
+    const ActionBgBand *band = &layer->bands[i];
+    if (authentic_y < (int)band->y0 || authentic_y >= (int)band->y1)
+      continue;
+    resolved.edge = band->edge;
+    if (band->horizontal_extent.mode != kActionBgExtent_Inherit)
+      resolved.horizontal_extent = band->horizontal_extent;
+    break;
+  }
+  *out = resolved;
   return true;
 }
 
@@ -165,7 +264,7 @@ bool ActionBgPlan_CompilePresentation(
     memset(out, 0, sizeof(*out));
     out->repeat_band_layer = -1;
   }
-  if (!plan || !out || !plan->valid) return false;
+  if (!plan || !out || !ActionBgPlan_Validate(plan)) return false;
 
   ActionBgPresentationPolicy built = { .repeat_band_layer = -1 };
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
@@ -207,12 +306,14 @@ void ActionBgPlan_InitNative(ActionBgPlan *out) {
     out->layer[layer].valid = true;
     out->layer[layer].source = kActionBgSource_NativeTilemap;
     out->layer[layer].default_edge = kActionBgEdge_RawWrap;
+    out->layer[layer].horizontal_extent = AvailableHorizontalExtent();
+    out->layer[layer].vertical_extent = AvailableVerticalExtent();
   }
 }
 
 bool ActionBgPlan_ApplyPresentationPolicy(
     ActionBgPlan *plan, const ActionBgPresentationPolicy *policy) {
-  if (!plan || !policy || !plan->valid) return false;
+  if (!policy || !ActionBgPlan_Validate(plan)) return false;
   const uint8_t owned_mask = (1u << kActionBgPlanLayerCount) - 1u;
   const uint8_t clamp = policy->clamp_layers & owned_mask;
   const uint8_t mirror = policy->mirror_layers & owned_mask;
@@ -231,7 +332,9 @@ bool ActionBgPlan_ApplyPresentationPolicy(
     ActionBgLayerPlan *layer_plan = &built.layer[layer];
     const uint8_t mask = (uint8_t)(1u << layer);
     layer_plan->valid = true;
-    layer_plan->band_count = 0;
+    ClearBands(layer_plan);
+    layer_plan->horizontal_extent = AvailableHorizontalExtent();
+    layer_plan->vertical_extent = AvailableVerticalExtent();
     if (clamp & mask)
       layer_plan->default_edge = kActionBgEdge_Clamp;
     else if (mirror & mask)
@@ -251,13 +354,14 @@ bool ActionBgPlan_ApplyPresentationPolicy(
     };
     layer_plan->band_count = 1;
   }
+  if (!ActionBgPlan_Validate(&built)) return false;
   *plan = built;
   return true;
 }
 
 uint8_t ActionBgPlan_ClampUnboundWorldLayers(
     ActionBgPlan *plan, uint8_t bound_layers, uint8_t visible_layers) {
-  if (!plan || !plan->valid) return 0;
+  if (!ActionBgPlan_Validate(plan)) return 0;
   uint8_t clamp_layers = 0;
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     ActionBgLayerPlan *layer_plan = &plan->layer[layer];
@@ -270,7 +374,9 @@ uint8_t ActionBgPlan_ClampUnboundWorldLayers(
     clamp_layers |= layer_mask;
     layer_plan->source = kActionBgSource_AuthenticViewport;
     layer_plan->default_edge = kActionBgEdge_Clamp;
-    layer_plan->band_count = 0;
+    layer_plan->horizontal_extent = AvailableHorizontalExtent();
+    layer_plan->vertical_extent = AvailableVerticalExtent();
+    ClearBands(layer_plan);
   }
   return clamp_layers;
 }
@@ -280,6 +386,27 @@ const char *ActionBgSourceKind_Name(ActionBgSourceKind source) {
     case kActionBgSource_NativeTilemap: return "native";
     case kActionBgSource_WorldMap: return "world";
     case kActionBgSource_AuthenticViewport: return "viewport";
+    default: return "unknown";
+  }
+}
+
+const char *ActionBgEdgeMode_Name(ActionBgEdgeMode edge) {
+  switch (edge) {
+    case kActionBgEdge_Transparent: return "transparent";
+    case kActionBgEdge_LiveWorld: return "world";
+    case kActionBgEdge_Clamp: return "clamp";
+    case kActionBgEdge_Mirror: return "mirror";
+    case kActionBgEdge_Repeat: return "repeat";
+    case kActionBgEdge_RawWrap: return "raw";
+    default: return "unknown";
+  }
+}
+
+const char *ActionBgExtentMode_Name(ActionBgExtentMode mode) {
+  switch (mode) {
+    case kActionBgExtent_Inherit: return "inherit";
+    case kActionBgExtent_Available: return "available";
+    case kActionBgExtent_Fixed: return "fixed";
     default: return "unknown";
   }
 }

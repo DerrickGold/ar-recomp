@@ -36,6 +36,8 @@ static ActionBgLayerPlan Layer(ActionBgEdgeMode edge) {
     .valid = true,
     .source = kActionBgSource_AuthenticViewport,
     .default_edge = edge,
+    .horizontal_extent = { .mode = kActionBgExtent_Available },
+    .vertical_extent = { .mode = kActionBgExtent_Available },
   };
 }
 

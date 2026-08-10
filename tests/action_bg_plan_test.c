@@ -72,6 +72,13 @@ static void TestValidationAndFallback(void) {
   CHECK(!strcmp(ActionBgSourceKind_Name(kActionBgSource_AuthenticViewport),
                 "viewport"));
   CHECK(!strcmp(ActionBgSourceKind_Name((ActionBgSourceKind)99), "unknown"));
+  CHECK(!strcmp(ActionBgEdgeMode_Name(kActionBgEdge_LiveWorld), "world"));
+  CHECK(!strcmp(ActionBgEdgeMode_Name(kActionBgEdge_Repeat), "repeat"));
+  CHECK(!strcmp(ActionBgEdgeMode_Name((ActionBgEdgeMode)99), "unknown"));
+  CHECK(!strcmp(ActionBgExtentMode_Name(kActionBgExtent_Inherit), "inherit"));
+  CHECK(!strcmp(ActionBgExtentMode_Name(kActionBgExtent_Available),
+                "available"));
+  CHECK(!strcmp(ActionBgExtentMode_Name((ActionBgExtentMode)99), "unknown"));
 }
 
 static void TestResolvedPresentationProjection(void) {
@@ -80,6 +87,8 @@ static void TestResolvedPresentationProjection(void) {
   CHECK(plan.valid && plan.layer[0].valid && plan.layer[1].valid);
   CHECK(plan.layer[0].source == kActionBgSource_NativeTilemap);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_RawWrap);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[0].vertical_extent.mode == kActionBgExtent_Available);
 
   ActionBgPresentationPolicy policy = {
     .clamp_layers = 2,
@@ -105,6 +114,10 @@ static void TestResolvedPresentationProjection(void) {
   CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_RawWrap);
   CHECK(!plan.layer[1].band_count && !plan.bound_canvas_to_world);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+  ActionBgBand empty_bands[kActionBgMaxBands] = { 0 };
+  CHECK(!memcmp(plan.layer[1].bands, empty_bands, sizeof(empty_bands)));
 
   ActionBgPlan before = plan;
   policy = (ActionBgPresentationPolicy) {
@@ -121,6 +134,96 @@ static void TestResolvedPresentationProjection(void) {
   };
   CHECK(!ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
   CHECK(!memcmp(&plan, &before, sizeof(plan)));
+}
+
+static ActionBgLayerPlan ExtentLayer(void) {
+  return (ActionBgLayerPlan) {
+    .valid = true,
+    .source = kActionBgSource_AuthenticViewport,
+    .default_edge = kActionBgEdge_Mirror,
+    .horizontal_extent = {
+      .mode = kActionBgExtent_Fixed,
+      .left = 48,
+      .right = 64,
+    },
+    .vertical_extent = {
+      .mode = kActionBgExtent_Available,
+    },
+  };
+}
+
+static void TestExtentValidationAndRowResolution(void) {
+  ActionBgLayerPlan layer = ExtentLayer();
+  layer.bands[0] = (ActionBgBand) {
+    .y0 = 32,
+    .y1 = 80,
+    .edge = kActionBgEdge_Repeat,
+    /* Zero initialization is the behavior-neutral inherit spelling. */
+  };
+  layer.bands[1] = (ActionBgBand) {
+    .y0 = 136,
+    .y1 = 224,
+    .edge = kActionBgEdge_Repeat,
+    .horizontal_extent = {
+      .mode = kActionBgExtent_Available,
+    },
+  };
+  layer.band_count = 2;
+  CHECK(ActionBgLayerPlan_Validate(&layer));
+
+  ActionBgRowPolicy row;
+  memset(&row, 0xA5, sizeof(row));
+  CHECK(ActionBgLayerPlan_ResolveRow(&layer, -16, &row));
+  CHECK(row.edge == kActionBgEdge_Mirror);
+  CHECK(row.horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(row.horizontal_extent.left == 48 &&
+        row.horizontal_extent.right == 64);
+
+  CHECK(ActionBgLayerPlan_ResolveRow(&layer, 40, &row));
+  CHECK(row.edge == kActionBgEdge_Repeat);
+  CHECK(row.horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(row.horizontal_extent.left == 48 &&
+        row.horizontal_extent.right == 64);
+
+  CHECK(ActionBgLayerPlan_ResolveRow(&layer, 136, &row));
+  CHECK(row.edge == kActionBgEdge_Repeat);
+  CHECK(row.horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(!row.horizontal_extent.left && !row.horizontal_extent.right);
+
+  CHECK(ActionBgLayerPlan_ResolveRow(&layer, 240, &row));
+  CHECK(row.edge == kActionBgEdge_Mirror);
+  CHECK(row.horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(!ActionBgLayerPlan_ResolveRow(NULL, 0, &row));
+  CHECK(!ActionBgLayerPlan_ResolveRow(&layer, 0, NULL));
+
+  ActionBgLayerPlan invalid = layer;
+  invalid.horizontal_extent.mode = kActionBgExtent_Inherit;
+  CHECK(!ActionBgLayerPlan_Validate(&invalid));
+  invalid = layer;
+  invalid.horizontal_extent.mode = kActionBgExtent_Available;
+  invalid.horizontal_extent.left = 1;
+  CHECK(!ActionBgLayerPlan_Validate(&invalid));
+  invalid = layer;
+  invalid.vertical_extent.mode = kActionBgExtent_Inherit;
+  CHECK(!ActionBgLayerPlan_Validate(&invalid));
+  invalid = layer;
+  invalid.bands[1].y0 = 64;
+  CHECK(!ActionBgLayerPlan_Validate(&invalid));
+  invalid = layer;
+  invalid.bands[1].y1 = 225;
+  CHECK(!ActionBgLayerPlan_Validate(&invalid));
+  invalid = layer;
+  invalid.bands[0].horizontal_extent.mode = kActionBgExtent_Inherit;
+  invalid.bands[0].horizontal_extent.right = 1;
+  CHECK(!ActionBgLayerPlan_Validate(&invalid));
+
+  ActionBgPlan plan = { .valid = true };
+  plan.layer[0] = layer;
+  plan.layer[1] = ExtentLayer();
+  CHECK(ActionBgPlan_Validate(&plan));
+  plan.layer[1].valid = false;
+  CHECK(!ActionBgPlan_Validate(&plan));
+  CHECK(!ActionBgPlan_Validate(NULL));
 }
 
 static void TestUnboundWorldFallback(void) {
@@ -167,6 +270,8 @@ static void TestOrdinaryWorldAndNativeSource(void) {
   CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
   CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
   CHECK(plan.bound_canvas_to_world);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[0].vertical_extent.mode == kActionBgExtent_Available);
   ActionBgPresentationPolicy policy = Compile(&plan);
   CHECK(!policy.clamp_layers && !policy.mirror_layers &&
         !policy.repeat_layers && policy.bound_canvas_to_world);
@@ -223,6 +328,8 @@ static void TestBloodpoolBand(void) {
   CHECK(plan.layer[1].bands[0].y0 == 136 &&
         plan.layer[1].bands[0].y1 == 224 &&
         plan.layer[1].bands[0].edge == kActionBgEdge_Repeat);
+  CHECK(plan.layer[1].bands[0].horizontal_extent.mode ==
+        kActionBgExtent_Inherit);
   ActionBgPresentationPolicy policy = Compile(&plan);
   CHECK(policy.mirror_layers == 2 && policy.repeat_band_layer == 1);
   CHECK(policy.repeat_band_y0 == 136 && policy.repeat_band_y1 == 224);
@@ -280,6 +387,13 @@ static void TestEveryKnownMapClassifies(void) {
       ActionBgPlan plan;
       CHECK(ActionBgPlan_Build(&state, &plan));
       CHECK(plan.valid);
+      CHECK(ActionBgPlan_Validate(&plan));
+      for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+        CHECK(plan.layer[layer].horizontal_extent.mode ==
+              kActionBgExtent_Available);
+        CHECK(plan.layer[layer].vertical_extent.mode ==
+              kActionBgExtent_Available);
+      }
     }
   }
 }
@@ -287,6 +401,7 @@ static void TestEveryKnownMapClassifies(void) {
 int main(void) {
   TestValidationAndFallback();
   TestResolvedPresentationProjection();
+  TestExtentValidationAndRowResolution();
   TestUnboundWorldFallback();
   TestOrdinaryWorldAndNativeSource();
   TestNarrowDecorativeBg2();

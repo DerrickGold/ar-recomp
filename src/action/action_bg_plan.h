@@ -44,10 +44,33 @@ typedef enum ActionBgEdgeMode {
   kActionBgEdge_RawWrap,
 } ActionBgEdgeMode;
 
+/* An extent limits presentation outside the authentic viewport; it never
+ * creates pixels that the selected edge/source cannot provide. `Inherit` is
+ * valid only on a row band. `Available` applies no additional cap. */
+typedef enum ActionBgExtentMode {
+  kActionBgExtent_Inherit = 0,
+  kActionBgExtent_Available,
+  kActionBgExtent_Fixed,
+} ActionBgExtentMode;
+
+typedef struct ActionBgHorizontalExtent {
+  ActionBgExtentMode mode;
+  uint16_t left;
+  uint16_t right;
+} ActionBgHorizontalExtent;
+
+typedef struct ActionBgVerticalExtent {
+  ActionBgExtentMode mode;
+  uint16_t top;
+  uint16_t bottom;
+} ActionBgVerticalExtent;
+
 typedef struct ActionBgBand {
   uint16_t y0;
   uint16_t y1;
   ActionBgEdgeMode edge;
+  /* Inherit by default, so existing edge-only bands retain the layer extent. */
+  ActionBgHorizontalExtent horizontal_extent;
 } ActionBgBand;
 
 typedef struct ActionBgLayerPlan {
@@ -56,6 +79,8 @@ typedef struct ActionBgLayerPlan {
   ActionBgEdgeMode default_edge;
   uint16_t world_width;
   uint16_t world_height;
+  ActionBgHorizontalExtent horizontal_extent;
+  ActionBgVerticalExtent vertical_extent;
   uint8_t band_count;
   ActionBgBand bands[kActionBgMaxBands];
 } ActionBgLayerPlan;
@@ -65,6 +90,14 @@ typedef struct ActionBgPlan {
   bool bound_canvas_to_world;
   ActionBgLayerPlan layer[kActionBgPlanLayerCount];
 } ActionBgPlan;
+
+/* Fully resolved policy for one authentic scanline. Signed rows outside
+ * 0..223 deliberately use the layer default; bands identify authentic content
+ * families, not capture-space rows. */
+typedef struct ActionBgRowPolicy {
+  ActionBgEdgeMode edge;
+  ActionBgHorizontalExtent horizontal_extent;
+} ActionBgRowPolicy;
 
 /* Mechanical projection into the generic post-raster PPU policy. Map-specific
  * classification remains in ActionBgPlan; these masks exist only at the PPU
@@ -80,6 +113,11 @@ typedef struct ActionBgPresentationPolicy {
 } ActionBgPresentationPolicy;
 
 bool ActionBgPlan_Build(const ActionBgFrameState *state, ActionBgPlan *out);
+bool ActionBgLayerPlan_Validate(const ActionBgLayerPlan *layer);
+bool ActionBgPlan_Validate(const ActionBgPlan *plan);
+bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
+                                  int authentic_y,
+                                  ActionBgRowPolicy *out);
 bool ActionBgPlan_CompilePresentation(
     const ActionBgPlan *plan, ActionBgPresentationPolicy *out);
 /* Exact native/raw plan used for non-action frames, plus the inverse adapter
@@ -95,5 +133,7 @@ bool ActionBgPlan_ApplyPresentationPolicy(
 uint8_t ActionBgPlan_ClampUnboundWorldLayers(
     ActionBgPlan *plan, uint8_t bound_layers, uint8_t visible_layers);
 const char *ActionBgSourceKind_Name(ActionBgSourceKind source);
+const char *ActionBgEdgeMode_Name(ActionBgEdgeMode edge);
+const char *ActionBgExtentMode_Name(ActionBgExtentMode mode);
 
 #endif  /* ACTION_BG_PLAN_H */
