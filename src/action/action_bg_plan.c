@@ -75,10 +75,12 @@ static void ClearBands(ActionBgLayerPlan *layer) {
   memset(layer->bands, 0, sizeof(layer->bands));
 }
 
-static ActionBgLayerPlan BaseLayerPlan(const ActionBgLayerState *state) {
+static ActionBgLayerPlan BaseLayerPlan(const ActionBgLayerState *state,
+                                       ActionBgLayerRole role) {
   const bool world = WorldRingEligible(state);
   return (ActionBgLayerPlan) {
     .valid = true,
+    .role = role,
     .source = world ? kActionBgSource_WorldMap
                     : kActionBgSource_NativeTilemap,
     .default_edge = world ? kActionBgEdge_LiveWorld
@@ -132,6 +134,7 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
   if (state->map_number == kDeathHeimFinalBoss) {
     plan->bound_canvas_to_world = false;
     for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+      plan->layer[layer].role = kActionBgLayerRole_Backdrop;
       plan->layer[layer].source = kActionBgSource_NativeTilemap;
       plan->layer[layer].default_edge = kActionBgEdge_RawWrap;
       plan->layer[layer].band_count = 0;
@@ -169,8 +172,10 @@ bool ActionBgPlan_Build(const ActionBgFrameState *state, ActionBgPlan *out) {
     .valid = true,
     .bound_canvas_to_world = true,
   };
-  for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++)
-    built.layer[layer] = BaseLayerPlan(&state->layer[layer]);
+  built.layer[0] = BaseLayerPlan(
+      &state->layer[0], kActionBgLayerRole_Playfield);
+  built.layer[1] = BaseLayerPlan(
+      &state->layer[1], kActionBgLayerRole_Backdrop);
   ClassifyNarrowBg2(state, &built.layer[1]);
   if (state->map_group == kDeathHeim)
     ClassifyDeathHeim(state, &built);
@@ -182,6 +187,11 @@ bool ActionBgPlan_Build(const ActionBgFrameState *state, ActionBgPlan *out) {
 static bool ValidSource(ActionBgSourceKind source) {
   return source >= kActionBgSource_NativeTilemap &&
       source <= kActionBgSource_AuthenticViewport;
+}
+
+static bool ValidRole(ActionBgLayerRole role) {
+  return role >= kActionBgLayerRole_Unclassified &&
+      role <= kActionBgLayerRole_Backdrop;
 }
 
 static bool ValidEdge(ActionBgEdgeMode edge) {
@@ -210,7 +220,8 @@ static bool ValidVerticalExtent(const ActionBgVerticalExtent *extent) {
 }
 
 bool ActionBgLayerPlan_Validate(const ActionBgLayerPlan *layer) {
-  if (!layer || !layer->valid || !ValidSource(layer->source) ||
+  if (!layer || !layer->valid || !ValidRole(layer->role) ||
+      !ValidSource(layer->source) ||
       !ValidEdge(layer->default_edge) ||
       !ValidHorizontalExtent(&layer->horizontal_extent, false) ||
       !ValidVerticalExtent(&layer->vertical_extent) ||
@@ -386,6 +397,15 @@ const char *ActionBgSourceKind_Name(ActionBgSourceKind source) {
     case kActionBgSource_NativeTilemap: return "native";
     case kActionBgSource_WorldMap: return "world";
     case kActionBgSource_AuthenticViewport: return "viewport";
+    default: return "unknown";
+  }
+}
+
+const char *ActionBgLayerRole_Name(ActionBgLayerRole role) {
+  switch (role) {
+    case kActionBgLayerRole_Unclassified: return "unclassified";
+    case kActionBgLayerRole_Playfield: return "playfield";
+    case kActionBgLayerRole_Backdrop: return "backdrop";
     default: return "unknown";
   }
 }

@@ -474,10 +474,12 @@ static void CheckLayerEditorSection(void) {
   {
     ActionBgPlan canonical;
     ActionBgPlan_InitNative(&canonical);
+    canonical.layer[0].role = kActionBgLayerRole_Playfield;
     canonical.layer[0].source = kActionBgSource_WorldMap;
     canonical.layer[0].world_width = 4096;
     canonical.layer[0].world_height = 512;
     canonical.layer[0].default_edge = kActionBgEdge_LiveWorld;
+    canonical.layer[1].role = kActionBgLayerRole_Backdrop;
     canonical.layer[1].source = kActionBgSource_AuthenticViewport;
     canonical.layer[1].world_width = 256;
     canonical.layer[1].world_height = 256;

@@ -72,6 +72,11 @@ static void TestValidationAndFallback(void) {
   CHECK(!strcmp(ActionBgSourceKind_Name(kActionBgSource_AuthenticViewport),
                 "viewport"));
   CHECK(!strcmp(ActionBgSourceKind_Name((ActionBgSourceKind)99), "unknown"));
+  CHECK(!strcmp(ActionBgLayerRole_Name(kActionBgLayerRole_Playfield),
+                "playfield"));
+  CHECK(!strcmp(ActionBgLayerRole_Name(kActionBgLayerRole_Backdrop),
+                "backdrop"));
+  CHECK(!strcmp(ActionBgLayerRole_Name((ActionBgLayerRole)99), "unknown"));
   CHECK(!strcmp(ActionBgEdgeMode_Name(kActionBgEdge_LiveWorld), "world"));
   CHECK(!strcmp(ActionBgEdgeMode_Name(kActionBgEdge_Repeat), "repeat"));
   CHECK(!strcmp(ActionBgEdgeMode_Name((ActionBgEdgeMode)99), "unknown"));
@@ -85,6 +90,7 @@ static void TestResolvedPresentationProjection(void) {
   ActionBgPlan plan;
   ActionBgPlan_InitNative(&plan);
   CHECK(plan.valid && plan.layer[0].valid && plan.layer[1].valid);
+  CHECK(plan.layer[0].role == kActionBgLayerRole_Unclassified);
   CHECK(plan.layer[0].source == kActionBgSource_NativeTilemap);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_RawWrap);
   CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
@@ -197,6 +203,9 @@ static void TestExtentValidationAndRowResolution(void) {
   CHECK(!ActionBgLayerPlan_ResolveRow(&layer, 0, NULL));
 
   ActionBgLayerPlan invalid = layer;
+  invalid.role = (ActionBgLayerRole)99;
+  CHECK(!ActionBgLayerPlan_Validate(&invalid));
+  invalid = layer;
   invalid.horizontal_extent.mode = kActionBgExtent_Inherit;
   CHECK(!ActionBgLayerPlan_Validate(&invalid));
   invalid = layer;
@@ -268,6 +277,8 @@ static void TestOrdinaryWorldAndNativeSource(void) {
   ActionBgPlan plan = Build(&state);
   CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
   CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].role == kActionBgLayerRole_Playfield);
+  CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
   CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
   CHECK(plan.bound_canvas_to_world);
   CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
@@ -374,6 +385,8 @@ static void TestDeathHeimStates(void) {
   policy = Compile(&plan);
   CHECK(plan.layer[0].source == kActionBgSource_NativeTilemap);
   CHECK(plan.layer[1].source == kActionBgSource_NativeTilemap);
+  CHECK(plan.layer[0].role == kActionBgLayerRole_Backdrop);
+  CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
   CHECK(plan.layer[0].default_edge == kActionBgEdge_RawWrap);
   CHECK(!policy.clamp_layers && !policy.mirror_layers &&
         !policy.repeat_layers && !policy.bound_canvas_to_world);
@@ -388,6 +401,10 @@ static void TestEveryKnownMapClassifies(void) {
       CHECK(ActionBgPlan_Build(&state, &plan));
       CHECK(plan.valid);
       CHECK(ActionBgPlan_Validate(&plan));
+      CHECK(plan.layer[0].role ==
+            (group == 7 && map == 8 ? kActionBgLayerRole_Backdrop
+                                    : kActionBgLayerRole_Playfield));
+      CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
       for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
         CHECK(plan.layer[layer].horizontal_extent.mode ==
               kActionBgExtent_Available);
