@@ -577,6 +577,9 @@ void FrameSlot_Capture(FrameSlot *dst) {
     _Static_assert(kFrameSlotAuthenticWidth == kActRaiserAuthenticWidth,
                    "present.h's mirrored authentic width must match "
                    "actraiser_game.h");
+    _Static_assert(kFrameSlotAuthenticHeight == kActRaiserAuthenticHeight,
+                   "present.h's mirrored authentic height must match "
+                   "actraiser_game.h");
     for (int i = 0; i < kFrameSlotOverlaySourceCount; i++) {
       const PpuOverlayCapture *src = &g_ppu->overlayCaptures[i];
       FrameSlotOverlayCapture *d = &dst->overlay_captures[i];

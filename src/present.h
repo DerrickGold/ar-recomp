@@ -49,8 +49,8 @@ enum {
    * mistake produced. Cross-checked by FrameSlot_Capture's _Static_assert
    * against the real constant. */
   kFrameSlotLayerTextureWidth = 640,  /* kPpuSurfaceWidth (512 + 64*2) */
-  /* The authentic SNES screen width, mirroring actraiser_game.h's
-   * kActRaiserAuthenticWidth for the same D6 reason as the two constants above:
+  /* The authentic SNES screen dimensions, mirroring actraiser_game.h's
+   * kActRaiserAuthenticWidth/Height for the same D6 reason as the constants above:
    * present-time code must not include actraiser_game.h, which declares g_ram and
    * a pile of live WRAM accessors this side of the wall must not touch.
    *
@@ -62,10 +62,10 @@ enum {
    * framebuffer, which varies) or with kFrameSlotLayerTextureWidth (the allocated
    * texture, which is fixed at 640 and is the U-axis denominator).
    *
-   * Cross-checked against kActRaiserAuthenticWidth by a _Static_assert in
-   * frame_slot.c, the way kFrameSlotLayerTextureWidth is against
-   * kPpuSurfaceWidth. */
+   * Both are cross-checked against their actraiser_game.h counterparts by
+   * _Static_asserts in frame_slot.c. */
   kFrameSlotAuthenticWidth = 256,  /* kActRaiserAuthenticWidth */
+  kFrameSlotAuthenticHeight = 224, /* kActRaiserAuthenticHeight */
 };
 enum { kFrameSlotOverlayFlag_RemoveFromGame = 1 };
 

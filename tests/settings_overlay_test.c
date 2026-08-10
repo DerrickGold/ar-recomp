@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "diorama_layer_editor.h"
+#include "action/action_bg_tuner.h"
 #include "input_map.h"
 #include "render_capabilities.h"
 #include "settings.h"
@@ -467,6 +468,49 @@ static void CheckLayerEditorSection(void) {
   room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
   CHECK(!room || !DioramaLayerOrder_RoomIsActive(room));
 
+  /* The final Layers tab is a separate, session-only action-BG tuner. It uses
+   * the live canonical plan even when Diorama itself is not the provider, and
+   * must never write diorama-layers.ini through the hooks above. */
+  {
+    ActionBgPlan canonical;
+    ActionBgPlan_InitNative(&canonical);
+    canonical.layer[0].source = kActionBgSource_WorldMap;
+    canonical.layer[0].world_width = 4096;
+    canonical.layer[0].world_height = 512;
+    canonical.layer[0].default_edge = kActionBgEdge_LiveWorld;
+    canonical.layer[1].source = kActionBgSource_AuthenticViewport;
+    canonical.layer[1].world_width = 256;
+    canonical.layer[1].world_height = 256;
+    canonical.layer[1].default_edge = kActionBgEdge_Mirror;
+    ActionBgTuner_ResetSession();
+    CHECK(ActionBgTuner_ObservePlan(
+        1, 1, &canonical, (ActionBgTunerLimits){120, 120, 32, 32}));
+    const int saves_before_bg_tuner = s_fake_saves;
+    NavToTab(kDioramaEditorLevelCount);
+    RowToKey("bg_tuner.apply");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    CHECK(ActionBgTuner_DraftEnabled());
+    RowToKey("bg2");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    RowToKey("bg2.horizontal");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    RowToKey("bg2.left");
+    CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+    ActionBgPlan applied = canonical;
+    CHECK(ActionBgTuner_ApplyDraft(&applied));
+    CHECK(applied.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+    CHECK(applied.layer[1].horizontal_extent.left == 116);
+    RowToKey("bg_tuner.guides");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    CHECK(ActionBgTuner_GuidesEnabled());
+    CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
+    CHECK(!ActionBgTuner_GuidesEnabled());
+    RowToKey("bg_tuner.reset");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(!ActionBgTuner_DraftEnabled());
+    CHECK(s_fake_saves == saves_before_bg_tuner);
+  }
+
   /* A level the player is not in explains itself rather than editing something.
    * Bloodpool is tab 1; the fake room is Fillmore. */
   NavToTab(1);
@@ -495,6 +539,7 @@ static void CheckLayerEditorSection(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));   /* leave submenu */
   /* Leave no hooks behind: later blocks drive other sections. */
   SettingsOverlay_SetLayerEditorHooks(NULL, NULL, NULL);
+  ActionBgTuner_ResetSession();
 }
 
 int main(void) {

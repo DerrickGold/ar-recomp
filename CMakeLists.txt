@@ -535,6 +535,10 @@ if(BUILD_TESTING)
         # override table through injected hooks rather than calling diorama.c.
         src/diorama/diorama_layer_editor.c
         src/diorama/diorama_layer_order.c
+        # The live BG Extents tab is another pure custom-row model. Runtime
+        # injection happens through its session singleton; no PPU/SDL closure.
+        src/action/action_bg_plan.c
+        src/action/action_bg_tuner.c
     )
     target_include_directories(actraiser_settings_overlay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

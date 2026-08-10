@@ -150,9 +150,40 @@ static void TestResetAndAtomicity(void) {
   CHECK(!ActionBgTuner_GuidesEnabled());
 }
 
+static void TestGuideSegments(void) {
+  ActionBgPlan plan = Plan();
+  plan.layer[1].horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = 48,
+    .right = 64,
+  };
+  plan.layer[1].bands[0].horizontal_extent =
+      (ActionBgHorizontalExtent){ .mode = kActionBgExtent_Available };
+  plan.layer[1].vertical_extent = (ActionBgVerticalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .top = 12,
+    .bottom = 4,
+  };
+  ActionBgTunerGuide guides[kActionBgTunerGuideMax];
+  int count = ActionBgTuner_BuildGuides(
+      &plan, guides, kActionBgTunerGuideMax);
+  CHECK(count == 4);
+  CHECK(guides[0].layer == 1 && guides[0].x0 == -48 &&
+        guides[0].x1 == -48 && guides[0].y0 == 0 && guides[0].y1 == 136);
+  CHECK(guides[1].x0 == 320 && guides[1].x1 == 320 &&
+        guides[1].y0 == 0 && guides[1].y1 == 136);
+  CHECK(guides[2].x0 == -48 && guides[2].x1 == 320 &&
+        guides[2].y0 == -12 && guides[2].y1 == -12);
+  CHECK(guides[3].x0 == -48 && guides[3].x1 == 320 &&
+        guides[3].y0 == 228 && guides[3].y1 == 228);
+  CHECK(ActionBgTuner_BuildGuides(NULL, guides,
+                                  kActionBgTunerGuideMax) == 0);
+}
+
 int main(void) {
   TestDraftLifecycle();
   TestResetAndAtomicity();
+  TestGuideSegments();
   if (failures) {
     fprintf(stderr, "action bg tuner: %d failure(s)\n", failures);
     return 1;
