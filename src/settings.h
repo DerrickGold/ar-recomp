@@ -474,7 +474,7 @@ typedef struct Settings {
   int  diorama_tilt_y_mrad;      /* camera yaw, milliradians */
   int  diorama_distance_x100;    /* camera distance, hundredths */
   int  diorama_depth_shade;      /* % strength of per-plane depth shading */
-  int  diorama_vertical_extend;  /* scanlines of world drawn above the screen */
+  int  diorama_vertical_extend;  /* real world scanlines drawn per vertical side */
   bool diorama_layer_bg1;
   bool diorama_layer_bg2;
   bool diorama_layer_bg3;

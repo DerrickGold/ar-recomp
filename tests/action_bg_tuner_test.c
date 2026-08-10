@@ -222,6 +222,52 @@ static void TestIgnoreSideBounds(void) {
   CHECK(!strcmp(Find(rows, count, "bg2.ignore_side_bounds")->value, "OFF"));
 }
 
+static void TestIgnoreVerticalBounds(void) {
+  ActionBgTuner_ResetSession();
+  ActionBgPlan canonical = Plan();
+  canonical.layer[0].vertical_extent = (ActionBgVerticalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .top = 12,
+    .bottom = 20,
+  };
+  CHECK(ActionBgPlan_Validate(&canonical));
+  CHECK(ActionBgTuner_ObservePlan(
+      2, 1, &canonical, (ActionBgTunerLimits){120, 120, 64, 64}));
+
+  ActionBgTunerRow rows[kActionBgTunerRowMax];
+  int count = Rows(rows);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg1")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  ActionBgTunerRow *ignore = Find(
+      rows, count, "bg1.ignore_vertical_bounds");
+  CHECK(ignore != NULL && !strcmp(ignore->value, "OFF"));
+  CHECK(strstr(ActionBgTuner_RowHelp(ignore), "Finite world edges") != NULL);
+  CHECK(ActionBgTuner_Change(ignore, +1) == kActionBgTunerResult_Changed);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg_tuner.apply")) ==
+        kActionBgTunerResult_Changed);
+
+  ActionBgPlan applied = canonical;
+  CHECK(ActionBgTuner_ApplyDraft(&applied));
+  CHECK(applied.layer[0].vertical_extent.mode ==
+        kActionBgExtent_Available);
+  CHECK(applied.layer[0].vertical_extent.top == 0);
+  CHECK(applied.layer[0].vertical_extent.bottom == 0);
+
+  /* Turning the shortcut back off restores the authored asymmetric cap. */
+  CHECK(ActionBgTuner_Change(ignore, -1) == kActionBgTunerResult_Changed);
+  applied = canonical;
+  CHECK(ActionBgTuner_ApplyDraft(&applied));
+  CHECK(applied.layer[0].vertical_extent.mode == kActionBgExtent_Fixed);
+  CHECK(applied.layer[0].vertical_extent.top == 12);
+  CHECK(applied.layer[0].vertical_extent.bottom == 20);
+  CHECK(ActionBgTuner_Change(ignore, +1) == kActionBgTunerResult_Changed);
+  CHECK(ActionBgTuner_ResetRow(ignore) == kActionBgTunerResult_Reset);
+  count = Rows(rows);
+  CHECK(!strcmp(Find(rows, count,
+                     "bg1.ignore_vertical_bounds")->value, "OFF"));
+}
+
 static void TestGuideSegments(void) {
   ActionBgPlan plan = Plan();
   plan.layer[1].horizontal_extent = (ActionBgHorizontalExtent) {
@@ -290,7 +336,7 @@ static void TestRowCapacity(void) {
   CHECK(ActionBgTuner_Activate(bg1_row) == kActionBgTunerResult_Changed);
   const int full_count = ActionBgTuner_BuildRows(
       rows, kActionBgTunerRowMax);
-  CHECK(full_count == 31);
+  CHECK(full_count == 32);
 
   ActionBgTunerRow untouched;
   memset(&untouched, 0xa5, sizeof(untouched));
@@ -308,6 +354,7 @@ int main(void) {
   TestDraftLifecycle();
   TestResetAndAtomicity();
   TestIgnoreSideBounds();
+  TestIgnoreVerticalBounds();
   TestGuideSegments();
   TestRowCapacity();
   if (failures) {

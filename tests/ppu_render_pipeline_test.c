@@ -998,7 +998,8 @@ static void TestVerticalMarginLayerClip(void) {
 
     PpuSetExtraVerticalSpace(ppu, kTop, 0);
     if (clip_rows >= 0)
-      PpuSetVerticalMarginLayerClip(ppu, (uint8_t)bg2, clip_rows);
+      PpuSetVerticalMarginLayerClip(
+          ppu, (uint8_t)bg2, clip_rows, kTop);
     PpuBeginDrawing(ppu, fb, kPitch, 0);
     CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
                                 (uint8_t *)bg1_capture, kPitch));
@@ -1047,6 +1048,115 @@ static void TestVerticalMarginLayerClip(void) {
     PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   }
 
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
+/* The bottom half of the same contract. A layer can reach its finite-world
+ * floor before the primary playfield does; rows after that point must become
+ * transparent rather than wrapping to the layer's top. */
+static void TestVerticalMarginBottomLayerClip(void) {
+  enum { kBottom = 8, kRows = kBottom + 1, kPitch = kW * 4 };
+  const int bg2 = kActRaiserPpuLayer_Bg2;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  static uint8_t fb[kW * (kPpuYPixels + kBottom) * 4];
+  static uint32_t capture[kW * (kPpuYPixels + kBottom)];
+
+  static const int clip_cases[] = { -1, 0, 4 };
+  for (size_t case_index = 0;
+       case_index < sizeof(clip_cases) / sizeof(clip_cases[0]);
+       case_index++) {
+    const int clip_rows = clip_cases[case_index];
+    ppu_reset(ppu);
+    memset(fb, 0, sizeof(fb));
+    memset(capture, 0, sizeof(capture));
+    ppu->inidisp = 0x0f;
+    ppu->bgmode = 1;
+    ppu->screenEnabled[0] = (uint8_t)(1u << bg2);
+    ppu->cgram[0x21] = bgr555(31, 0, 31);
+    set_solid_4bpp_tile(ppu, 1, 1);
+    ppu->bgXsc[bg2] = 0x20 | 3;
+    for (int i = 0; i < 0x1000; i++)
+      ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
+
+    PpuSetExtraVerticalSpace(ppu, 0, kBottom);
+    if (clip_rows >= 0)
+      PpuSetVerticalMarginLayerClip(ppu, (uint8_t)bg2, 0, clip_rows);
+    PpuBeginDrawing(ppu, fb, kPitch, 0);
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                                (uint8_t *)capture, kPitch));
+    CHECK(PpuSetOverlayCapture(
+        ppu, kPpuOverlaySource_Bg2, 0, kPpuYPixels - 1,
+        kW, kRows, kPpuOverlayFlag_RemoveFromGame));
+    ppu_runLine(ppu, kPpuYPixels);
+    for (int line = kPpuYPixels + 1;
+         line <= kPpuYPixels + kBottom; line++)
+      ppu_runMarginLine(ppu, line);
+
+    const int base = kPpuYPixels - 1;
+    CHECK((capture[base * kW] & 0xffffffu) != 0);
+    if (clip_rows < 0) {
+      CHECK((capture[(base + kBottom) * kW] & 0xffffffu) != 0);
+    } else {
+      for (int row = 1; row <= clip_rows; row++)
+        CHECK((capture[(base + row) * kW] & 0xffffffu) != 0);
+      for (int row = clip_rows + 1; row <= kBottom; row++)
+        CHECK(capture[(base + row) * kW] == 0);
+    }
+    PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+  }
+
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
+/* OAM Y aliases a below-screen sprite into the above-screen byte range. The
+ * exact signed sideband disambiguates it; without that sideband neither
+ * vertical margin may trust the slot. */
+static void TestVerticalMarginExactObj(void) {
+  enum { kBottom = 8, kPitch = kW * 4, kSpriteY = 228 };
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  static uint8_t fb[kW * (kPpuYPixels + kBottom) * 4];
+  static uint32_t capture[kW * (kPpuYPixels + kBottom)];
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  memset(capture, 0, sizeof(capture));
+  ppu->inidisp = 0x0f;
+  ppu->screenEnabled[0] = 1u << 4;  /* OBJ */
+  ppu->cgram[0x81] = bgr555(31, 31, 0);
+  set_solid_4bpp_tile(ppu, 0, 1);
+  ppu->oam[0] = (uint16_t)(24 | ((kSpriteY & 0xff) << 8));
+  ppu->oam[1] = 0;
+  PpuSetExtraVerticalSpace(ppu, 0, kBottom);
+  PpuBeginDrawing(ppu, fb, kPitch, 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj,
+                              (uint8_t *)capture, kPitch));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Obj, 0, 0, kW,
+      kPpuYPixels + kBottom, kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(ppu, 0, 1));
+
+  PpuSetObjExactPosition(ppu, 0, 24, kSpriteY);
+  ppu_runLine(ppu, 0);
+  ppu_runMarginLine(ppu, kSpriteY + 1);
+  CHECK((capture[kSpriteY * kW + 24] & 0xffffffu) != 0);
+
+  PpuClearObjExactPositions(ppu);
+  ppu_runLine(ppu, 0);
+  ppu_runMarginLine(ppu, kSpriteY + 1);
+  CHECK(capture[kSpriteY * kW + 24] == 0);
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, NULL, 0);
   g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
@@ -1403,6 +1513,8 @@ int main(void) {
   TestSim3DWidescreenHudCaptureHandoff();
   TestOverlayContentMetadata();
   TestVerticalMarginLayerClip();
+  TestVerticalMarginBottomLayerClip();
+  TestVerticalMarginExactObj();
   TestLayerPresentationExtents();
   TestCapturedPaddingReachesBudget();
   TestVirtualTilemapMargins();

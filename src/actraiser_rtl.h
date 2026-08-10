@@ -28,7 +28,9 @@ void ActRaiser_LiveMargins(int *left, int *right);
  * belonging to those same pixels. Returns false only for an invalid plan. */
 bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
                                 bool *pad_captured_to_budget);
-int ActRaiser_LiveVerticalMargin(void);
+/* Vertical geometry latched with the last rendered frame. Either pointer may
+ * be NULL. */
+void ActRaiser_LiveVerticalMargins(int *top, int *bottom);
 unsigned ActRaiser_TakeVextUnlockedObjects(void);
 
 /* The OAM slots the widescreen HUD-icon promote validated for the frame being

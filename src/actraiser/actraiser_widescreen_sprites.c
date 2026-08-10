@@ -410,19 +410,22 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * DRAW only. Activation keeps the authentic window: widening it changes how
    * long objects stay alive, which is game logic rather than presentation, and
    * is the coupling §13 item 7 records as the historical source of inert
-   * enemies. Bounded by extraTopCur (<= 32) because a part landing more than
-   * 32 rows above the screen would encode as a POSITIVE Y and draw mid-screen;
-   * the visible-rows gate below is what proves that is not happening.
+   * enemies. Margin-only scanlines accept committed exact positions, so the
+   * ambiguous wrapped OAM Y byte cannot alias an offscreen part into the wrong
+   * band.
    * AR_VEXT_OBJDRAW=0 disables it independently of ws_margin_objects. */
-  int live_t = 0;
-  if (g_ppu && ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
+  int live_t = 0, live_b = 0;
+  if (g_ppu && ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
     live_t = g_ppu->extraTopCur;
+    live_b = g_ppu->extraBottomCur;
+  }
   static int vext_obj_draw = -1;
   if (vext_obj_draw < 0) {
     const char *e = getenv("AR_VEXT_OBJDRAW");
     vext_obj_draw = !(e && e[0] == '0');
   }
   int draw_t = (vext_obj_draw && ws_margin_objects_enabled()) ? live_t : 0;
+  int draw_b = (vext_obj_draw && ws_margin_objects_enabled()) ? live_b : 0;
   int activation_wide = ws_margin_activation_enabled();
   int activation_l = activation_wide ? live_l : 0;
   int activation_r = activation_wide ? live_r : 0;
@@ -463,10 +466,10 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
           kActRaiserAuthenticHeight);
       /* `left` extends the window in the negative direction (see
        * ws_scan_axis_visible: edge0 = pos - leading - camera + left), which on
-       * this axis is upward. Identical to `vertical` when draw_t is 0. */
-      int vertical_draw = draw_t
+       * this axis is upward. Identical to `vertical` when both margins are 0. */
+      int vertical_draw = (draw_t || draw_b)
           ? ws_scan_axis_visible(world_y, top_extent, bottom_extent, camera_y,
-                                 draw_t, 0, kActRaiserAuthenticHeight)
+                                 draw_t, draw_b, kActRaiserAuthenticHeight)
           : vertical;
       int authentic = vertical &&
           ws_scan_axis_visible(world_x, left_extent, right_extent,
@@ -658,11 +661,13 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   int margin_left = 0;
   int margin_right = 0;
   int margin_top = 0;
+  int margin_bottom = 0;
   if (ws_sprite_widen_enabled() && g_ppu &&
       ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
     margin_left = g_ppu->extraLeftCur;
     margin_right = g_ppu->extraRightCur;
     margin_top = g_ppu->extraTopCur;
+    margin_bottom = g_ppu->extraBottomCur;
   }
 
   /* The RESOLVE window is the display window widened by the apron. It gates
@@ -688,11 +693,12 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
     uint16 biased_y = (uint16)(
         component_offset_y + ws_dp16(cpu, kSpriteDp_ScreenOriginY));
 
-    /* Widened by the live vertical band, mirroring the X site below. The
+    /* Widened by both live vertical bands, mirroring the X site below. The
      * authentic window is [-kSpriteDrawBias, 224) in screen rows -- the ROM's
      * own draw bias already grants 16 rows above the screen, and the tree-head
      * report was an object 24 rows up, just past it. */
-    if (ws_biased_in_window(biased_y, margin_top, 0, kSpriteBiasedHeight)) {
+    if (ws_biased_in_window(biased_y, margin_top, margin_bottom,
+                            kSpriteBiasedHeight)) {
       /* CMP failed with carry clear, so the ROM's SBC #$0010 stores y-$11. */
       uint16 stored_y = (uint16)(biased_y - (kSpriteDrawBias + 1));
       cpu_write16(cpu, definition_bank,

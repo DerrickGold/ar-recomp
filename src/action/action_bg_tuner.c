@@ -19,6 +19,7 @@ typedef struct ActionBgLayerDraft {
    * caps so switching it off restores the exact layer and band values the
    * tuner was holding instead of destroying that work. */
   bool ignore_side_bounds;
+  bool ignore_vertical_bounds;
   bool horizontal_set;
   ActionBgHorizontalExtent horizontal;
   bool vertical_set;
@@ -139,6 +140,11 @@ static bool BuildEffectivePlan(ActionBgPlan *out, bool apply_draft) {
         dst->horizontal_extent = available;
         for (unsigned band = 0; band < dst->band_count; band++)
           dst->bands[band].horizontal_extent = available;
+      }
+      if (draft->ignore_vertical_bounds) {
+        dst->vertical_extent = (ActionBgVerticalExtent) {
+          .mode = kActionBgExtent_Available,
+        };
       }
     }
   }
@@ -281,6 +287,14 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
   snprintf(key, sizeof(key), "bg%d.ignore_side_bounds", layer + 1);
   SetRowText(row, key, "ignore side bounds",
              draft->ignore_side_bounds ? "ON" : "OFF");
+  row->nested = true;
+
+  row = PushRow(out, capacity, count,
+                kActionBgTunerRow_IgnoreVerticalBounds, layer, -1);
+  if (!row) return;
+  snprintf(key, sizeof(key), "bg%d.ignore_vertical_bounds", layer + 1);
+  SetRowText(row, key, "ignore vertical bounds",
+             draft->ignore_vertical_bounds ? "ON" : "OFF");
   row->nested = true;
 
   ActionBgHorizontalExtent horizontal = EffectiveHorizontal(layer);
@@ -487,6 +501,9 @@ ActionBgTunerResult ActionBgTuner_Change(const ActionBgTunerRow *row,
     case kActionBgTunerRow_IgnoreSideBounds:
       draft->ignore_side_bounds = !draft->ignore_side_bounds;
       return kActionBgTunerResult_Changed;
+    case kActionBgTunerRow_IgnoreVerticalBounds:
+      draft->ignore_vertical_bounds = !draft->ignore_vertical_bounds;
+      return kActionBgTunerResult_Changed;
     case kActionBgTunerRow_HorizontalMode: {
       ActionBgHorizontalExtent *extent = EditableHorizontal(row->layer);
       ActionBgTunerResult result = ChangeMode(&extent->mode, false, direction);
@@ -655,6 +672,9 @@ ActionBgTunerResult ActionBgTuner_ResetRow(const ActionBgTunerRow *row) {
     case kActionBgTunerRow_IgnoreSideBounds:
       draft->ignore_side_bounds = false;
       return kActionBgTunerResult_Reset;
+    case kActionBgTunerRow_IgnoreVerticalBounds:
+      draft->ignore_vertical_bounds = false;
+      return kActionBgTunerResult_Reset;
     case kActionBgTunerRow_HorizontalMode:
     case kActionBgTunerRow_Left:
     case kActionBgTunerRow_Right:
@@ -701,6 +721,10 @@ const char *ActionBgTuner_RowHelp(const ActionBgTunerRow *row) {
       return "Let this background use every horizontally available canvas "
              "pixel past its Diorama side guides. The shared canvas and edge "
              "strategy still apply; stored caps return unchanged when off.";
+    case kActionBgTunerRow_IgnoreVerticalBounds:
+      return "Let this background use every vertically available canvas row "
+             "past its Diorama top/bottom guides. Finite world edges still "
+             "apply; stored caps return unchanged when off.";
     case kActionBgTunerRow_HorizontalMode:
     case kActionBgTunerRow_VerticalMode:
       return "Available uses every pixel the source and canvas can supply. "

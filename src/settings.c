@@ -1568,18 +1568,18 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_distance_x100, 0, 0, 2000, 25, false, NULL, 0,
     DioramaFreeCameraAvailable, NULL, NULL, NULL },
-  /* Scanlines of real world revealed ABOVE the authentic 224-line viewport,
+  /* Scanlines of real world revealed on EACH side of the authentic viewport,
    * the vertical counterpart of the widescreen side margins. Defaults to 0
    * (authentic framing) because the band is where the level's vertical tilemap
    * streaming shows its seams: column strips decode only a 512px-tall window,
    * and rows outside it hold filler until a row strip covers them
-   * (rendering-engine.md §4). 32 is the hard ceiling, set by the 8-bit OAM Y
-   * encoding rather than by taste -- see kPpuExtraTopBottom. */
+   * (rendering-engine.md §4). 64 covers the measured 48px camera jump while
+   * exact signed OBJ positions avoid the 8-bit OAM Y ambiguity. */
   { "diorama_vertical_extend", NULL, "Vertical extend",
-    "Scanlines of extra world drawn above the screen so the tilted view fills "
-    "more height. 0 keeps the authentic 224-line frame.",
+    "Scanlines of extra world drawn above and below the screen. 0 keeps the "
+    "authentic 224-line frame.",
     kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
-    &g_settings.diorama_vertical_extend, 0, 0, 32, 4, false, NULL, 0,
+    &g_settings.diorama_vertical_extend, 0, 0, 64, 4, false, NULL, 0,
     Diorama_ModeIsOn, NULL, NULL, NULL },
   INT_SETTING(diorama_depth_shade, NULL, "Depth shading",
               "Strength of the atmospheric darkening applied to farther planes.",

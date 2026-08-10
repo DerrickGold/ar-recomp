@@ -1484,8 +1484,9 @@ static float DioramaBisectLift(const float mvp[16], float half, float z_ref,
   return 0.5f * (lo + hi);
 }
 
-static float DioramaVerticalShift(const float mvp[16], float height_scale,
-                                  float pin, int out_w, int out_h) {
+static float DioramaPositiveVerticalShift(const float mvp[16],
+                                          float height_scale,
+                                          float pin, int out_w, int out_h) {
   if (pin <= 0.0f)
     return 0.0f;
   const float half = 0.5f * height_scale;
@@ -1528,7 +1529,25 @@ static float DioramaVerticalShift(const float mvp[16], float height_scale,
   return d > pin ? pin : d;
 }
 
+/* The established solver is expressed as an upward lift. Mirror both world Y
+ * and projected screen Y to reuse it exactly when a bottom-heavy capture asks
+ * for a downward shift; mirroring twice preserves the source orientation while
+ * turning original lift -d into mirrored lift +d. */
+static float DioramaVerticalShift(const float mvp[16], float height_scale,
+                                  float pin, int out_w, int out_h) {
+  if (pin >= 0.0f)
+    return DioramaPositiveVerticalShift(
+        mvp, height_scale, pin, out_w, out_h);
+  float mirrored[16];
+  memcpy(mirrored, mvp, sizeof(mirrored));
+  for (int r = 0; r < 4; r++) mirrored[4 + r] = -mirrored[4 + r];
+  for (int c = 0; c < 4; c++) mirrored[c * 4 + 1] = -mirrored[c * 4 + 1];
+  return -DioramaPositiveVerticalShift(
+      mirrored, height_scale, -pin, out_w, out_h);
+}
+
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
+                       int authentic_y0,
                        int obj_apron,
                        int active_pixel_aspect, bool ignore_aspect_ratio,
                        int visible_width, SDL_Rect viewport,
@@ -1540,7 +1559,9 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
                        DioramaProjection *out_projection) {
   if (out_projection) memset(out_projection, 0, sizeof(*out_projection));
-  if (!renderer || !cam_pose) return false;
+  if (!renderer || !cam_pose || authentic_y0 < 0 ||
+      authentic_y0 + kActRaiserAuthenticHeight > snes_height)
+    return false;
 
   SDL_SetRenderLogicalPresentation(renderer, 0, 0,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);
@@ -1701,16 +1722,11 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   float mvp[16];
   BuildViewProjection(&cam, out_w, out_h, mvp);
 
-  /* Re-center the world on the AUTHENTIC band. Every extra scanline the
-   * vertical extend captures is added at the TOP, but the meshes are all built
-   * symmetrically about wy = 0 (`wy = (0.5 - t) * height_scale`), so a taller
-   * capture would hang half its new height below the screen and slide the
-   * authentic image DOWN by the other half -- pushing content off the bottom
-   * to make room at the top, which is the opposite of the point.
-   *
-   * Shifting the world UP by half the added height puts the authentic band
-   * back at exactly [-0.5, +0.5], where it has always been and where the
-   * auto-fit frames it, and leaves the new rows entirely above it.
+  /* Re-center around the AUTHENTIC band. Meshes are symmetric around wy=0,
+   * while the captured source may have different numbers of rows above and
+   * below the authentic 224. Their difference, not their sum, is the required
+   * pin: equal margins naturally remain centred; a top-heavy capture shifts up
+   * and a bottom-heavy capture shifts down.
    *
    * Folded into the MVP rather than passed to each mesh builder so that the
    * layers, thickness skirts, depth shapes, shoebox AND
@@ -1719,8 +1735,10 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
    * only the last column changes, by d times the second. d is 0 when there is
    * no vertical margin, leaving the matrix untouched. */
   {
-    float extra_rows = tex_h - (float)kActRaiserAuthenticHeight;
-    float pin = 0.5f * extra_rows / (float)kActRaiserAuthenticHeight;
+    float bottom_rows = tex_h - (float)authentic_y0 -
+        (float)kActRaiserAuthenticHeight;
+    float pin = 0.5f * ((float)authentic_y0 - bottom_rows) /
+        (float)kActRaiserAuthenticHeight;
     float d = DioramaVerticalShift(mvp, height_scale, pin, out_w, out_h);
     if (d != 0.0f)
       for (int r = 0; r < 4; r++)

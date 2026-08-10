@@ -91,16 +91,14 @@ enum {
   kPpuWidescreenExtentAvailable = UINT16_MAX,
   // Maximum vertical expansion *per side*, the compile-time ceiling for the
   // runtime ppu->extraTopCur/extraBottomCur (default 0 = authentic 224-line
-  // output). 32 is not an arbitrary budget: OAM Y is EIGHT bits with a 256
-  // modulus against a 224-line screen, so the only sprite positions outside
-  // the visible band that the encoding can express at all are the 32 in
-  // [kPpuObjYNegativeFrom, kPpuObjYWrap) -- which is exactly the above-screen
-  // band. Asking for more top margin than this renders backgrounds with no
-  // sprites on them; asking for bottom margin re-uses that same range and is
-  // therefore ambiguous with above-screen sprites (see ppu_evaluateSprites).
-  // Contrast the horizontal axis, where X is NINE bits (kPpuObjXWrap = 512)
-  // against a 256-wide screen and the whole upper half is free for margins.
-  kPpuExtraTopBottom = 32,
+  // output). OAM's 8-bit Y is ambiguous outside the authentic viewport, but
+  // frontends that widen the emitter publish an exact signed position for each
+  // committed slot. Margin scanlines therefore accept exact slots only (see
+  // ppu_evaluateSprites) instead of treating the byte encoding as a range
+  // limit. 64 covers the measured 48px action-camera jump while keeping the
+  // fixed capture budget modest; it is presentation capacity, not gameplay
+  // camera range.
+  kPpuExtraTopBottom = 64,
   // Full internal height of the render target (224 + both bands).
   kPpuBufHeight = kPpuYPixels + kPpuExtraTopBottom * 2,
   // OAM sprite POSITION WRAPS. These are properties of the OAM encoding, not of
@@ -342,12 +340,14 @@ struct Ppu {
   // (see PpuVerticalOrigin), because nothing needs to pillarbox vertically --
   // a host that wants fewer lines just crops the ones it asked for.
   uint8_t extraTopCur, extraBottomCur;
-  // Synthetic top-margin rows available per BG layer before that layer reaches
-  // its own bounded world edge. A set bit clips rows farther above the viewport
-  // to transparent instead of letting the tilemap address wrap to its bottom.
-  // Authentic lines are never clipped. See PpuSetVerticalMarginLayerClip.
+  // Synthetic margin rows available per BG layer before that layer reaches
+  // either bounded world edge. A set bit clips rows farther outside the
+  // viewport to transparent instead of letting the tilemap address wrap to the
+  // opposite edge. Authentic lines are never clipped. See
+  // PpuSetVerticalMarginLayerClip.
   uint8_t verticalMarginLayerClip;
   uint8_t verticalMarginTopRows[4];
+  uint8_t verticalMarginBottomRows[4];
   /* Render-only, frame-scoped policy. This host state is outside both
    * savestate regions and ppu_reset deliberately does not preserve it. */
   PpuVirtualTilemapBinding virtualTilemap[4];
@@ -634,23 +634,25 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom);
 // the line renderer where the authentic band sits inside the taller target and
 // how far the margin bands are allowed to reach.
 //
-// `top` is the axis that works: above-screen sprite positions are already
-// expressible in OAM (see kPpuExtraTopBottom), so those scanlines get real
-// backgrounds AND real sprites. `bottom` gets backgrounds only -- the OAM Y
-// encoding cannot distinguish a sprite below line 224 from one above line 0,
-// so the game's own object coordinates carry no usable data down there.
+// Sprite positions outside the authentic viewport are ambiguous in OAM's
+// 8-bit Y. Margin scanlines therefore draw only slots carrying an exact signed
+// position from the frontend. A frontend that widens its draw predicate and
+// publishes those positions gets real backgrounds and sprites on both sides;
+// one that does not gets backgrounds only, without aliased/parked OBJ garbage.
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom);
 
-// Bound one BG layer independently within the synthetic TOP margin. `top_rows`
-// is the number of real world scanlines immediately above the authentic
-// viewport for BG(layer+1), clamped to kPpuExtraTopBottom. Rows farther above
-// are transparent for that layer instead of wrapping through its tilemap.
+// Bound one BG layer independently within both synthetic vertical margins.
+// `top_rows`/`bottom_rows` are the real world scanlines immediately outside the
+// authentic viewport for BG(layer+1), clamped to kPpuExtraTopBottom. Rows
+// farther out are transparent for that layer instead of wrapping through its
+// tilemap.
 //
 // This does not change authentic scanlines or the other BG layers. It exists
 // for mixed-depth scenes where (for example) BG1 is deep inside a tall level
 // while a bounded BG2 parallax plane is still at camera Y=0. Re-apply each
 // frame after PpuSetExtraVerticalSpace; that setter clears all layer clips.
-void PpuSetVerticalMarginLayerClip(Ppu *ppu, uint8_t layer, int top_rows);
+void PpuSetVerticalMarginLayerClip(Ppu *ppu, uint8_t layer,
+                                   int top_rows, int bottom_rows);
 
 // Bind a finite virtual tilemap to a 4bpp BG layer. By default, authentic
 // x=[0,256), scanlines y=[1,224] continue to use the native VRAM ring;

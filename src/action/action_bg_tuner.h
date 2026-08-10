@@ -28,6 +28,7 @@ typedef enum ActionBgTunerRowKind {
   kActionBgTunerRow_Layer,
   kActionBgTunerRow_Edge,
   kActionBgTunerRow_IgnoreSideBounds,
+  kActionBgTunerRow_IgnoreVerticalBounds,
   kActionBgTunerRow_HorizontalMode,
   kActionBgTunerRow_Left,
   kActionBgTunerRow_Right,

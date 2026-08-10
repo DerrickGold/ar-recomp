@@ -159,6 +159,31 @@ static void TestCapture(void) {
   free(wram);
 }
 
+static void TestVerticalMargins(void) {
+  int top = -1, bottom = -1;
+  ActRaiserActionBg_ResolveVerticalMargins(232, 512, 64, &top, &bottom);
+  CHECK(top == 64 && bottom == 55);
+
+  /* The reported 2026-08-10 jump moves the camera from 232 to 184. A 64-row
+   * symmetric budget keeps world row 436 visible in both captures; the old
+   * top-only capture ended at row 408 after the jump. */
+  ActRaiserActionBg_ResolveVerticalMargins(184, 512, 64, &top, &bottom);
+  CHECK(top == 64 && bottom == 64);
+  CHECK(436 >= 184 - top && 436 < 184 + 224 + bottom);
+  CHECK(436 >= 232 - 64 && 436 < 232 + 224 + 55);
+
+  ActRaiserActionBg_ResolveVerticalMargins(0, 512, 64, &top, &bottom);
+  CHECK(top == 0 && bottom == 64);
+  ActRaiserActionBg_ResolveVerticalMargins(287, 512, 64, &top, &bottom);
+  CHECK(top == 64 && bottom == 0);
+  ActRaiserActionBg_ResolveVerticalMargins(100, 200, 64, &top, &bottom);
+  CHECK(top == 64 && bottom == 0);
+  ActRaiserActionBg_ResolveVerticalMargins(100, 512, -1, &top, &bottom);
+  CHECK(top == 0 && bottom == 0);
+  ActRaiserActionBg_ResolveVerticalMargins(8, 512, 4, NULL, &bottom);
+  CHECK(bottom == 4);
+}
+
 static void PopulateNativeRing(const ActionBgWorld *world,
                                const ActRaiserActionBgLayerSnapshot *snapshot,
                                uint16_t *vram) {
@@ -497,6 +522,7 @@ static void TestFramePlanBinding(void) {
 
 int main(void) {
   TestCapture();
+  TestVerticalMargins();
   TestRingAndComparison();
   TestFramePlanCapture();
   TestPlanExtentProjection();

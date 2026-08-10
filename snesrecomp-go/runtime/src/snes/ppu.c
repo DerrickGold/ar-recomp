@@ -424,13 +424,18 @@ void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom) {
   ppu->verticalMarginLayerClip = 0;
   memset(ppu->verticalMarginTopRows, 0,
          sizeof(ppu->verticalMarginTopRows));
+  memset(ppu->verticalMarginBottomRows, 0,
+         sizeof(ppu->verticalMarginBottomRows));
 }
 
-void PpuSetVerticalMarginLayerClip(Ppu *ppu, uint8_t layer, int top_rows) {
+void PpuSetVerticalMarginLayerClip(Ppu *ppu, uint8_t layer,
+                                   int top_rows, int bottom_rows) {
   if (layer >= 4)
     return;
   ppu->verticalMarginTopRows[layer] =
       (uint8_t)IntMin(IntMax(top_rows, 0), kPpuExtraTopBottom);
+  ppu->verticalMarginBottomRows[layer] =
+      (uint8_t)IntMin(IntMax(bottom_rows, 0), kPpuExtraTopBottom);
   ppu->verticalMarginLayerClip |= (uint8_t)(1u << layer);
 }
 
@@ -624,9 +629,11 @@ static inline bool PpuBgVisibleOnMarginLine(const Ppu *ppu, int y,
         rows <= ppu->verticalMarginTopRows[layer];
   }
   if (y > kPpuYPixels) {
+    int rows = y - kPpuYPixels;
     uint16 cap = ppu->wsLayerExtentBottom[layer];
-    return cap == kPpuWidescreenExtentAvailable ||
-        y - kPpuYPixels <= cap;
+    if (cap != kPpuWidescreenExtentAvailable && rows > cap) return false;
+    return !(ppu->verticalMarginLayerClip & (1u << layer)) ||
+        rows <= ppu->verticalMarginBottomRows[layer];
   }
   return true;
 }
@@ -644,10 +651,8 @@ static void PpuRenderLine(Ppu *ppu, int line) {
   if (ppu->overlayRenderBuffer[kPpuOverlaySource_Obj])
     memset(&ppu->overlayBuffers[kPpuOverlaySource_Obj], 0,
            sizeof(ppu->overlayBuffers[kPpuOverlaySource_Obj]));
-  /* Above-screen lines work without a special case: `line - 1` goes negative,
-   * and ppu_evaluateSprites compares it against the OAM Y byte in uint8
-   * arithmetic, which is the same mod-256 wrap the hardware applies. A sprite
-   * parked at OAM Y 251 is at screen -5 both before and after this change. */
+  /* Margin lines use the frontend's exact signed OBJ sideband; authentic lines
+   * retain the ordinary OAM path for slots without one. */
   ppu->lineHasSprites = !PPU_forcedBlank(ppu) && ppu_evaluateSprites(ppu, line - 1);
 
   if (g_new_ppu) {
@@ -2251,12 +2256,12 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
    * margin scanlines ONLY, and that scoping is load-bearing rather than
    * defensive: a 64-tall sprite parked at -32 spans screen rows -32..31 and so
    * DOES reach authentic lines, where the game intends it to be drawn. */
-  /* Above-screen scanlines draw ONLY from slots whose exact Y the frontend
+  /* Margin scanlines draw ONLY from slots whose exact Y the frontend
    * supplied (PpuSetObjExactPosition). The OAM byte cannot distinguish a parked
    * slot, a sprite hanging off the bottom, and a sprite genuinely above the
-   * top -- all three land in the same values -- so up here a slot without an
-   * override has no position that can be trusted, and guessing produced both
-   * the parked-pile blob and the detached bottom-edge fragments.
+   * top -- all three land in the same values -- so outside the authentic band
+   * a slot without an override has no position that can be trusted. Guessing
+   * produced both the parked-pile blob above and aliased top sprites below.
    *
    * Where an override exists the test is ordinary signed arithmetic, so a
    * sprite at +215 simply yields a negative row on a band line and is never
@@ -2264,11 +2269,11 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
    * untouched: for y and line both in [0,224) the two agree exactly, because a
    * negative difference could only alias into [0,height) at line - y <= -256 +
    * height, which those ranges cannot reach. */
-  const bool above = line < 0;
+  const bool margin_line = line < 0 || line >= kPpuYPixels;
   for(int i = 0; i < 128; i++) {
     const int slot = index >> 1;
     const bool exact = ppu->objPosValid[slot] != 0;
-    if (above && !exact) {
+    if (margin_line && !exact) {
       index += 2;
       continue;
     }

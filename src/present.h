@@ -127,11 +127,13 @@ typedef struct FrameSlot {
   int visible_width;
   /* Vertical margin the PPU actually rendered for this frame (the transpose of
    * ws_extra). snes_height stays the AUTHENTIC visible height, so the captured
-   * surfaces are snes_height + ws_extra_top rows tall and authentic scanline 0
+   * surfaces are snes_height + ws_extra_top + ws_extra_bottom rows tall and
+   * authentic scanline 0
    * lives at row ws_extra_top -- just as texture column 0 is screen
    * x = -ws_extra. Zero on every non-diorama frame, which is what keeps the
    * flat presentation path (which assumes row 0) correct by construction. */
   int ws_extra_top;
+  int ws_extra_bottom;
   /* Columns of RESOLVE apron each captured surface carries per side beyond the
    * displayed span. Distinct from ws_extra, which is DISPLAY margin: the apron
    * is never shown as extra world, it is headroom so a sprite is fully
