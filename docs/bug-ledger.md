@@ -687,6 +687,20 @@ the current debugging process; this file is the case law.
     content is allowed to shorten an accuracy hold, latch explicit content identity and natural
     completion; never infer it from instantaneous silence.
 
+    **Authentic-SPC follow-up (2026-08-09):** the original command-timing trace was insufficient.
+    A forced-warp reproduction skipped the real Advent upload (`1C:A7CC`), while a natural
+    Fillmore replay showed the authentic DSP at peak 16,049 immediately before force blank and
+    peak 0 for every callback during the old hold. The collapsed loader's APU polls had already
+    generated 159,846 CPU-side native samples in one host call; the 8,192-sample DSP FIFO dropped
+    140,589 of them across 22,696 overflow runs, fast-forwarding Advent to silence before the hold
+    began. Moving the same 315-frame hold to `$00843E`, before those polls, and suppressing only
+    redundant touch catch-up while a live consumer drains audio makes the callback the single
+    clock for the interval. The matching `$F0` now releases an already-completed hold instead of
+    starting one. Unpaced/headless runs retain fast handshake catch-up. The natural authentic
+    replay now carries nonzero Advent PCM throughout the intended black interval and reports
+    `cpu=6590`, `dropped=0`; the replacement replay advances `advent.ogg` from frame 329,351 at
+    force blank to 563,408 at `$F0`, also with zero drops.
+
 31. **One-frame flat flash in an enhanced town — FIXED 2026-08-03 (policy change; the D2 pixel
     gate no longer vetoes).** Reported as "graphical flicker when the town construction cycle
     triggers". The console named it without a rebuild, exactly as §23 promised:

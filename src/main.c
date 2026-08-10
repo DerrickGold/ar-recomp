@@ -44,6 +44,7 @@
 #include "actraiser_game.h"
 #include "snes/snes.h"
 #include "cpu_trace.h"
+#include "audio_trace.h"
 #include "debug_server.h"
 #include "widescreen.h"
 #include "present.h"
@@ -1970,6 +1971,20 @@ static int AppShutdown(AppBoot *app, char **argv) {
   /* Before tearing down audio: the census reads only its own accumulators,
    * but the report should land while the run dir is still current. */
   SfxCensus_Report();
+  if (getenv("AR_AUDIODBG")) {
+    AudioTraceStats stats;
+    audio_trace_get_stats(&stats);
+    fprintf(stderr,
+            "[audiodbg] summary produced=%llu cpu=%llu audio=%llu "
+            "consumed=%llu dropped=%llu/%llu-runs highwater=%u\n",
+            (unsigned long long)stats.produced,
+            (unsigned long long)stats.produced_cpu,
+            (unsigned long long)stats.produced_audio,
+            (unsigned long long)stats.consumed,
+            (unsigned long long)stats.dropped,
+            (unsigned long long)stats.drop_runs,
+            stats.occupancy_highwater);
+  }
 
   InputReplay_Shutdown();
   OracleTrace_Shutdown();

@@ -17,19 +17,20 @@ int main(void) {
   CHECK(kActionLoadPacingInsertedFrames == 315);
 
   for (uint8_t map_group = 0x01; map_group <= 0x07; map_group++) {
-    CHECK(ActionLoadPacing_Frames(
+    CHECK(ActionLoadPacing_ForceBlankHoldFrames(
               0x00, map_group,
               kActionLoadPacingForceBlankBlock, 0x8f) == 315);
   }
 
-  CHECK(ActionLoadPacing_Frames(
+  CHECK(ActionLoadPacing_ForceBlankHoldFrames(
             0x00, 0x00, kActionLoadPacingForceBlankBlock, 0x80) == 0);
-  CHECK(ActionLoadPacing_Frames(
+  CHECK(ActionLoadPacing_ForceBlankHoldFrames(
             0x08, 0x08, kActionLoadPacingForceBlankBlock, 0x80) == 0);
-  CHECK(ActionLoadPacing_Frames(
+  CHECK(ActionLoadPacing_ForceBlankHoldFrames(
             0x01, 0x01, kActionLoadPacingForceBlankBlock, 0x80) == 0);
-  CHECK(ActionLoadPacing_Frames(0x00, 0x01, 0x00843D, 0x80) == 0);
-  CHECK(ActionLoadPacing_Frames(
+  CHECK(ActionLoadPacing_ForceBlankHoldFrames(
+            0x00, 0x01, 0x00843D, 0x80) == 0);
+  CHECK(ActionLoadPacing_ForceBlankHoldFrames(
             0x00, 0x01, kActionLoadPacingForceBlankBlock, 0x0f) == 0);
 
   CHECK(ActionLoadPacing_EvaluateTrigger(
