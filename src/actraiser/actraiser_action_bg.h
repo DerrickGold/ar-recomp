@@ -90,6 +90,12 @@ bool ActRaiserActionBg_BuildPlan(
     bool decorative_padding_enabled, ActionBgPlan *plan,
     ActionBgPresentationPolicy *presentation);
 
+/* Resolve a validated plan's extent inheritance into the generic runtime PPU
+ * caps. Call after PpuSetExtraSpace, which resets the frame-scoped caps.
+ * Source selection and edge strategy remain separate seams. */
+bool ActRaiserActionBg_ApplyPlanExtents(
+    const ActionBgPlan *plan, struct Ppu *ppu);
+
 /* Default-on BH7 renderer adapter. Unless `AR_ACTION_BG_HLE=0`, publish and
  * bind every plan layer whose source is a finite world map. A zero-mismatch,
  * zero-outside comparison against the exact live native viewport is required

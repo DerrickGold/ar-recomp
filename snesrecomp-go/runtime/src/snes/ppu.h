@@ -86,6 +86,9 @@ enum {
   // how many lines are OUTPUT, and it is also the threshold above which an OAM
   // Y byte is a negative (offscreen-top) position -- see kPpuObjYWrap.
   kPpuYPixels = 224,
+  // Sentinel for a layer extent with no additional presentation cap. The
+  // source/edge/global canvas still supply their ordinary bounds.
+  kPpuWidescreenExtentAvailable = UINT16_MAX,
   // Maximum vertical expansion *per side*, the compile-time ceiling for the
   // runtime ppu->extraTopCur/extraBottomCur (default 0 = authentic 224-line
   // output). 32 is not an arbitrary budget: OAM Y is EIGHT bits with a 256
@@ -389,6 +392,14 @@ struct Ppu {
   // margins. This takes precedence over a whole-layer clamp on those rows,
   // allowing animated/raster content to share a BG with bounded scenery.
   uint8_t wsRepeatY0[4], wsRepeatY1[4];
+  // Independent presentation caps for BG1-BG4. Horizontal caps are resolved
+  // per authentic scanline so mixed-content row bands can differ. Scanlines
+  // outside the authentic interval use the defaults. UINT16_MAX means the
+  // existing edge/source/canvas availability is uncapped.
+  uint16_t wsLayerExtentLeftDefault[4], wsLayerExtentRightDefault[4];
+  uint16_t wsLayerExtentTop[4], wsLayerExtentBottom[4];
+  uint16_t wsLayerExtentLeft[4][kPpuYPixels];
+  uint16_t wsLayerExtentRight[4][kPpuYPixels];
   uint8_t lastMosaicModulo;
   uint8_t lastBrightnessMult;
   bool lineHasSprites;
@@ -819,6 +830,23 @@ void PpuSetWidescreenPadCapturedToBudget(Ppu *ppu, uint8_t enabled);
 // 4bpp BG1/BG2 path. y1<=y0 disables. Re-apply per frame.
 void PpuSetWidescreenLayerRepeatBand(Ppu *ppu, uint8_t layer, uint8_t y0,
                                      uint8_t y1);
+
+// Limit one BG layer's contribution outside the authentic 256x224 viewport.
+// Each fixed value is a maximum number of presentation pixels on that side;
+// kPpuWidescreenExtentAvailable leaves that side governed by the existing
+// edge/source/canvas availability. Caps never manufacture pixels and never
+// remove authentic pixels. Re-apply after PpuSetExtraSpace each frame.
+void PpuSetWidescreenLayerExtent(Ppu *ppu, uint8_t layer,
+                                 uint16_t left, uint16_t right,
+                                 uint16_t top, uint16_t bottom);
+
+// Override the horizontal caps for one half-open authentic scanline band.
+// The coordinate convention deliberately matches
+// PpuSetWidescreenLayerRepeatBand so a repeat strategy and its extent change
+// on the same raster line. Invalid/empty bands are ignored.
+void PpuSetWidescreenLayerExtentBand(Ppu *ppu, uint8_t layer,
+                                     uint8_t y0, uint8_t y1,
+                                     uint16_t left, uint16_t right);
 
 int PpuGetCurrentRenderScale(Ppu *ppu, uint32_t render_flags);
 

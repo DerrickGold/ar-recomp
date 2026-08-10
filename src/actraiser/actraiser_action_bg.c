@@ -209,6 +209,54 @@ bool ActRaiserActionBg_BuildPlan(
   return true;
 }
 
+static uint16_t PpuExtentCap(ActionBgExtentMode mode, uint16_t fixed) {
+  return mode == kActionBgExtent_Fixed
+      ? fixed : kPpuWidescreenExtentAvailable;
+}
+
+static bool HorizontalExtentsEqual(const ActionBgHorizontalExtent *a,
+                                   const ActionBgHorizontalExtent *b) {
+  return a->mode == b->mode && a->left == b->left && a->right == b->right;
+}
+
+bool ActRaiserActionBg_ApplyPlanExtents(const ActionBgPlan *plan, Ppu *ppu) {
+  if (!ppu || !ActionBgPlan_Validate(plan)) return false;
+  for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+    const ActionBgLayerPlan *layer_plan = &plan->layer[layer];
+    const ActionBgHorizontalExtent *horizontal =
+        &layer_plan->horizontal_extent;
+    const ActionBgVerticalExtent *vertical = &layer_plan->vertical_extent;
+    /* PpuSetExtraSpace already reset every side to Available. Avoid touching
+     * 224 row entries on the behavior-neutral majority; only a real default
+     * cap needs to seed the arrays before band overrides refine them. */
+    if (horizontal->mode == kActionBgExtent_Fixed ||
+        vertical->mode == kActionBgExtent_Fixed) {
+      PpuSetWidescreenLayerExtent(
+          ppu, (uint8_t)layer,
+          PpuExtentCap(horizontal->mode, horizontal->left),
+          PpuExtentCap(horizontal->mode, horizontal->right),
+          PpuExtentCap(vertical->mode, vertical->top),
+          PpuExtentCap(vertical->mode, vertical->bottom));
+    }
+    /* Validation guarantees sorted, non-overlapping bands. Inherit requires
+     * no write because the default has already seeded the row arrays (or the
+     * per-frame reset left them Available). */
+    for (unsigned i = 0; i < layer_plan->band_count; i++) {
+      const ActionBgBand *band = &layer_plan->bands[i];
+      if (band->horizontal_extent.mode != kActionBgExtent_Inherit &&
+          !HorizontalExtentsEqual(horizontal, &band->horizontal_extent)) {
+        PpuSetWidescreenLayerExtentBand(
+            ppu, (uint8_t)layer, band->y0, band->y1,
+            PpuExtentCap(band->horizontal_extent.mode,
+                         band->horizontal_extent.left),
+            PpuExtentCap(band->horizontal_extent.mode,
+                         band->horizontal_extent.right));
+      }
+    }
+  }
+  return true;
+}
+
 static const char *FallbackName(ActRaiserActionBgFallbackReason reason) {
   static const char *const names[kActRaiserActionBgFallback_Count] = {
     [kActRaiserActionBgFallback_ForcedBlank] = "forced-blank",

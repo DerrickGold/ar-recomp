@@ -103,11 +103,13 @@ static uint32 PpuObjColor(Ppu *ppu, int palette_index) {
       ppu->brightnessMult[(color >> 10) & 0x1f];
 }
 
+static inline void PpuResetLayerClamps(Ppu *ppu);
 
 Ppu* ppu_init(void) {
   /* ppu_reset preserves host-owned render bindings. Start them deterministically
    * NULL before the first reset instead of reading indeterminate malloc data. */
   Ppu* ppu = calloc(1, sizeof(Ppu));
+  if (ppu) PpuResetLayerClamps(ppu);
   return ppu;
 }
 
@@ -145,6 +147,7 @@ void ppu_reset(Ppu* ppu) {
     ppu->m7OverlayMaybeDirty = ppu->m7OverlayBuffer != NULL;
   }
   ppu->vramIncrement = 1;
+  PpuResetLayerClamps(ppu);
 }
 
 void ppu_saveload(Ppu *ppu, SaveLoadInfo *sli) {
@@ -306,9 +309,9 @@ bool PpuSetOverlayOamRange(Ppu *ppu, uint8_t first, uint8_t count) {
   return true;
 }
 
-// Clear the per-frame widescreen layer-policy state (clamp, padding, bands).
-// The game policy re-applies these every frame after choosing the margin mode,
-// so resetting here keeps stale clamps from a previous frame/mode from leaking.
+// Clear the per-frame widescreen layer-policy state (clamps, extents, padding,
+// bands, and virtual tilemap bindings). The game policy re-applies these every
+// frame after choosing the margin mode, so a previous room cannot leak policy.
 static inline void PpuResetLayerClamps(Ppu *ppu) {
   ppu->wsLayerClamp = 0;
   ppu->wsLayerMirror = 0;
@@ -316,6 +319,14 @@ static inline void PpuResetLayerClamps(Ppu *ppu) {
   ppu->wsPadCapturedToBudget = 0;
   memset(ppu->wsRepeatY0, 0, sizeof(ppu->wsRepeatY0));
   memset(ppu->wsRepeatY1, 0, sizeof(ppu->wsRepeatY1));
+  memset(ppu->wsLayerExtentLeftDefault, 0xff,
+         sizeof(ppu->wsLayerExtentLeftDefault));
+  memset(ppu->wsLayerExtentRightDefault, 0xff,
+         sizeof(ppu->wsLayerExtentRightDefault));
+  memset(ppu->wsLayerExtentTop, 0xff, sizeof(ppu->wsLayerExtentTop));
+  memset(ppu->wsLayerExtentBottom, 0xff, sizeof(ppu->wsLayerExtentBottom));
+  memset(ppu->wsLayerExtentLeft, 0xff, sizeof(ppu->wsLayerExtentLeft));
+  memset(ppu->wsLayerExtentRight, 0xff, sizeof(ppu->wsLayerExtentRight));
   PpuClearVirtualTilemaps(ppu);
 }
 
@@ -483,6 +494,30 @@ void PpuSetWidescreenLayerRepeatBand(Ppu *ppu, uint8_t layer, uint8_t y0,
   }
 }
 
+void PpuSetWidescreenLayerExtent(Ppu *ppu, uint8_t layer,
+                                 uint16_t left, uint16_t right,
+                                 uint16_t top, uint16_t bottom) {
+  if (!ppu || layer >= 4) return;
+  ppu->wsLayerExtentLeftDefault[layer] = left;
+  ppu->wsLayerExtentRightDefault[layer] = right;
+  ppu->wsLayerExtentTop[layer] = top;
+  ppu->wsLayerExtentBottom[layer] = bottom;
+  for (int y = 0; y < kPpuYPixels; y++) {
+    ppu->wsLayerExtentLeft[layer][y] = left;
+    ppu->wsLayerExtentRight[layer][y] = right;
+  }
+}
+
+void PpuSetWidescreenLayerExtentBand(Ppu *ppu, uint8_t layer,
+                                     uint8_t y0, uint8_t y1,
+                                     uint16_t left, uint16_t right) {
+  if (!ppu || layer >= 4 || y0 >= y1 || y1 > kPpuYPixels) return;
+  for (int y = y0; y < y1; y++) {
+    ppu->wsLayerExtentLeft[layer][y] = left;
+    ppu->wsLayerExtentRight[layer][y] = right;
+  }
+}
+
 bool ppu_checkOverscan(Ppu* ppu) {
   // called at (0,225)
   ppu->frameOverscan = PPU_overscan(ppu); // set if we have a overscan-frame
@@ -576,14 +611,24 @@ static inline int PpuBgTilemapRow(const Ppu *ppu, int y, uint layer) {
 // 1-based scanline coordinate, so line 0 is one row above authentic line 1,
 // line -1 is two rows above, and so on. Tilemap wrapping remains correct while
 // those rows are inside the layer's world; only the rows beyond a frontend-
-// supplied finite-world edge become transparent. Authentic and bottom-margin
-// lines retain their existing behavior.
+// supplied finite-world edge become transparent. Independent presentation
+// caps may also limit either vertical side without affecting authentic lines.
 static inline bool PpuBgVisibleOnMarginLine(const Ppu *ppu, int y,
                                             uint layer) {
-  if (y >= 1 || layer >= 4 ||
-      !(ppu->verticalMarginLayerClip & (1u << layer)))
-    return true;
-  return 1 - y <= ppu->verticalMarginTopRows[layer];
+  if (layer >= 4) return true;
+  if (y < 1) {
+    int rows = 1 - y;
+    uint16 cap = ppu->wsLayerExtentTop[layer];
+    if (cap != kPpuWidescreenExtentAvailable && rows > cap) return false;
+    return !(ppu->verticalMarginLayerClip & (1u << layer)) ||
+        rows <= ppu->verticalMarginTopRows[layer];
+  }
+  if (y > kPpuYPixels) {
+    uint16 cap = ppu->wsLayerExtentBottom[layer];
+    return cap == kPpuWidescreenExtentAvailable ||
+        y - kPpuYPixels <= cap;
+  }
+  return true;
 }
 
 // The body of one rendered scanline, shared by the authentic loop and by the
@@ -656,11 +701,28 @@ typedef struct PpuWindows {
   uint8 bits;
 } PpuWindows;
 
+static inline uint16 PpuLayerHorizontalExtent(const Ppu *ppu, uint layer,
+                                              int y, bool right) {
+  if (layer >= 4) return kPpuWidescreenExtentAvailable;
+  if ((unsigned)y < (unsigned)kPpuYPixels)
+    return right ? ppu->wsLayerExtentRight[layer][y]
+                 : ppu->wsLayerExtentLeft[layer][y];
+  return right ? ppu->wsLayerExtentRightDefault[layer]
+               : ppu->wsLayerExtentLeftDefault[layer];
+}
+
+static inline int PpuLimitLayerExtra(const Ppu *ppu, uint layer, int y,
+                                     int extra, bool right) {
+  uint16 cap = PpuLayerHorizontalExtent(ppu, layer, y, right);
+  return cap != kPpuWidescreenExtentAvailable && extra > cap ? cap : extra;
+}
+
 // Per-layer widescreen side margin. BG3 (layer 2) carries the HUD and is
 // clamped to the authentic 256-wide region so a BG3 status bar never tiles into
 // the margins -- EXCEPT on scanlines >= wsBg3WidenY, where the game renders
 // level content on BG3 (e.g. SMW water) that should fill 16:9 like BG1/BG2.
-static inline int PpuLayerExtra(Ppu *ppu, uint layer, int y, int extra) {
+static inline int PpuLayerExtra(Ppu *ppu, uint layer, int y, int extra,
+                                bool right) {
   /* A promoted HUD line composites across the complete presentation canvas
    * even when a finite world's live margin is narrower. Layer 5 is the color
    * window used by the final compositor; widening only that logical layer does
@@ -690,6 +752,7 @@ static inline int PpuLayerExtra(Ppu *ppu, uint layer, int y, int extra) {
     if (ppu->wsRepeatY1[layer] > ppu->wsRepeatY0[layer] &&
         y >= ppu->wsRepeatY0[layer] && y < ppu->wsRepeatY1[layer])
       return 0;
+    extra = PpuLimitLayerExtra(ppu, layer, y, extra, right);
   }
   if (layer != 2)
     return extra;
@@ -697,8 +760,10 @@ static inline int PpuLayerExtra(Ppu *ppu, uint layer, int y, int extra) {
 }
 
 static void PpuWindows_Clear(PpuWindows *win, Ppu *ppu, uint layer, int y) {
-  win->edges[0] = -PpuLayerExtra(ppu, layer, y, ppu->extraLeftCur);
-  win->edges[1] = 256 + PpuLayerExtra(ppu, layer, y, ppu->extraRightCur);
+  win->edges[0] = -PpuLayerExtra(
+      ppu, layer, y, ppu->extraLeftCur, false);
+  win->edges[1] = 256 +
+      PpuLayerExtra(ppu, layer, y, ppu->extraRightCur, true);
   win->nr = 1;
   win->bits = 0;
 }
@@ -709,8 +774,10 @@ static void PpuWindows_Calc(PpuWindows *win, Ppu *ppu, uint layer, int y) {
   // Algorithm from Snes9x
   uint32 winflags = GET_WINDOW_FLAGS(ppu, layer);
   uint nr = 1;
-  int window_right = 256 + PpuLayerExtra(ppu, layer, y, ppu->extraRightCur);
-  win->edges[0] = -PpuLayerExtra(ppu, layer, y, ppu->extraLeftCur);
+  int window_right = 256 +
+      PpuLayerExtra(ppu, layer, y, ppu->extraRightCur, true);
+  win->edges[0] = -PpuLayerExtra(
+      ppu, layer, y, ppu->extraLeftCur, false);
   win->edges[1] = window_right;
   uint i, j;
   int t;
@@ -1345,6 +1412,8 @@ static void PpuDrawBackground_4bpp_policy(Ppu *ppu,
                   dstbuf == &ppu->overlayBuffers[layer];
   int margin_left = captured ? (int)ppu->extraLeftRight : (int)ppu->extraLeftCur;
   int margin_right = captured ? (int)ppu->extraLeftRight : (int)ppu->extraRightCur;
+  margin_left = PpuLimitLayerExtra(ppu, layer, y, margin_left, false);
+  margin_right = PpuLimitLayerExtra(ppu, layer, y, margin_right, true);
   PpuMergePaddedBackground(ppu, dstbuf, &layerbuf,
                            repeat_band ||
                            (ppu->wsLayerRepeat & (1u << layer)) != 0,
