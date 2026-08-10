@@ -18,6 +18,7 @@
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_navigation_capture.h"
 #include "action/action_effects.h"
+#include "action/action_bg_tuner.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "common_rtl.h"      /* g_ram, g_ppu */
@@ -554,6 +555,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
       dst->extra_right_cur = (uint8_t)live_right;
       ActRaiser_LiveActionBgPlan(&dst->action_bg_plan,
                                  &dst->bg_capture_pad_to_budget);
+      dst->action_bg_extent_guides = ActionBgTuner_GuidesEnabled();
     }
     dst->inidisp = g_ppu->inidisp;
     dst->bg_mode = (uint8_t)PPU_mode(g_ppu);
