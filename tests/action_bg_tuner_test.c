@@ -157,6 +157,71 @@ static void TestResetAndAtomicity(void) {
   CHECK(!ActionBgTuner_GuidesEnabled());
 }
 
+static void TestIgnoreSideBounds(void) {
+  ActionBgTuner_ResetSession();
+  ActionBgPlan canonical = Plan();
+  canonical.layer[1].horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = 12,
+    .right = 20,
+  };
+  canonical.layer[1].bands[0].horizontal_extent =
+      (ActionBgHorizontalExtent) {
+        .mode = kActionBgExtent_Fixed,
+        .left = 4,
+        .right = 8,
+      };
+  CHECK(ActionBgPlan_Validate(&canonical));
+  CHECK(ActionBgTuner_ObservePlan(
+      2, 1, &canonical, (ActionBgTunerLimits){120, 120, 32, 32}));
+
+  ActionBgTunerRow rows[kActionBgTunerRowMax];
+  int count = Rows(rows);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  ActionBgTunerRow *ignore = Find(rows, count, "bg2.ignore_side_bounds");
+  CHECK(ignore != NULL);
+  CHECK(!strcmp(ignore->value, "OFF"));
+  CHECK(strstr(ActionBgTuner_RowHelp(ignore), "stored caps") != NULL);
+  CHECK(ActionBgTuner_Change(ignore, +1) == kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  ignore = Find(rows, count, "bg2.ignore_side_bounds");
+  CHECK(ignore != NULL && !strcmp(ignore->value, "ON"));
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg_tuner.apply")) ==
+        kActionBgTunerResult_Changed);
+
+  ActionBgPlan applied = canonical;
+  CHECK(ActionBgTuner_ApplyDraft(&applied));
+  CHECK(applied.layer[1].horizontal_extent.mode ==
+        kActionBgExtent_Available);
+  CHECK(applied.layer[1].horizontal_extent.left == 0);
+  CHECK(applied.layer[1].horizontal_extent.right == 0);
+  CHECK(applied.layer[1].bands[0].horizontal_extent.mode ==
+        kActionBgExtent_Available);
+  CHECK(applied.layer[1].bands[0].horizontal_extent.left == 0);
+  CHECK(applied.layer[1].bands[0].horizontal_extent.right == 0);
+  CHECK(ActionBgPlan_Validate(&applied));
+
+  /* The shortcut is non-destructive: switching it off restores both the
+   * layer cap and the more-specific row-band cap byte for byte. */
+  CHECK(ActionBgTuner_Change(ignore, -1) == kActionBgTunerResult_Changed);
+  applied = canonical;
+  CHECK(ActionBgTuner_ApplyDraft(&applied));
+  CHECK(applied.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(applied.layer[1].horizontal_extent.left == 12);
+  CHECK(applied.layer[1].horizontal_extent.right == 20);
+  CHECK(applied.layer[1].bands[0].horizontal_extent.mode ==
+        kActionBgExtent_Fixed);
+  CHECK(applied.layer[1].bands[0].horizontal_extent.left == 4);
+  CHECK(applied.layer[1].bands[0].horizontal_extent.right == 8);
+
+  CHECK(ActionBgTuner_Change(ignore, +1) == kActionBgTunerResult_Changed);
+  CHECK(ActionBgTuner_ResetRow(ignore) == kActionBgTunerResult_Reset);
+  count = Rows(rows);
+  CHECK(!strcmp(Find(rows, count, "bg2.ignore_side_bounds")->value, "OFF"));
+}
+
 static void TestGuideSegments(void) {
   ActionBgPlan plan = Plan();
   plan.layer[1].horizontal_extent = (ActionBgHorizontalExtent) {
@@ -225,7 +290,7 @@ static void TestRowCapacity(void) {
   CHECK(ActionBgTuner_Activate(bg1_row) == kActionBgTunerResult_Changed);
   const int full_count = ActionBgTuner_BuildRows(
       rows, kActionBgTunerRowMax);
-  CHECK(full_count == 30);
+  CHECK(full_count == 31);
 
   ActionBgTunerRow untouched;
   memset(&untouched, 0xa5, sizeof(untouched));
@@ -242,6 +307,7 @@ static void TestRowCapacity(void) {
 int main(void) {
   TestDraftLifecycle();
   TestResetAndAtomicity();
+  TestIgnoreSideBounds();
   TestGuideSegments();
   TestRowCapacity();
   if (failures) {

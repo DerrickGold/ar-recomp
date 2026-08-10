@@ -121,6 +121,13 @@ an opt-in draft layered over `ActionBgPlan`.
 The view supports BG1/BG2, edge mode, left/right and top/bottom caps, read-only
 canonical band intervals with independently editable horizontal caps, visible
 guides, canonical/draft A/B, reset, and a normalized plan dump to the log.
+Each BG also has an **ignore side bounds** A/B shortcut. It resolves that
+plane's default and every canonical row-band horizontal extent to `available`
+without overwriting the stored cap edits, so a playfield can fill the shared
+Diorama/widescreen canvas while a landmark backdrop remains inside its tuned
+vertical side guides. Switching the shortcut off restores the exact layer and
+band caps. It does not enlarge the shared canvas or override the layer's source
+and edge strategy, so it cannot manufacture pixels that are unavailable.
 Source and semantic role remain read-only. Drafts are not ordinary player
 settings and do not share `diorama-layers.ini`. They are disabled by default;
 shipped canonical policy remains the only default runtime source of truth.

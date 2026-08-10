@@ -15,6 +15,10 @@ typedef struct ActionBgBandDraft {
 typedef struct ActionBgLayerDraft {
   bool edge_set;
   ActionBgEdgeMode edge;
+  /* Debug A/B over the normal extent policy. Kept separate from the authored
+   * caps so switching it off restores the exact layer and band values the
+   * tuner was holding instead of destroying that work. */
+  bool ignore_side_bounds;
   bool horizontal_set;
   ActionBgHorizontalExtent horizontal;
   bool vertical_set;
@@ -122,6 +126,19 @@ static bool BuildEffectivePlan(ActionBgPlan *out, bool apply_draft) {
             (int)layer, dst->bands[band].y0, dst->bands[band].y1, false);
         if (band_draft && band_draft->horizontal_set)
           dst->bands[band].horizontal_extent = band_draft->horizontal;
+      }
+      /* Resolve the convenience toggle last. A layer can contain fixed row
+       * bands even when its default extent is available (Bloodpool/Death Heim),
+       * so ignoring the side boundary means removing every horizontal cap on
+      * that plane, not just changing the layer default. Source/edge rules still
+      * decide whether pixels actually exist outside the authentic viewport. */
+      if (draft->ignore_side_bounds) {
+        const ActionBgHorizontalExtent available = {
+          .mode = kActionBgExtent_Available,
+        };
+        dst->horizontal_extent = available;
+        for (unsigned band = 0; band < dst->band_count; band++)
+          dst->bands[band].horizontal_extent = available;
       }
     }
   }
@@ -256,6 +273,14 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
   if (!row) return;
   snprintf(key, sizeof(key), "bg%d.edge", layer + 1);
   SetRowText(row, key, "edge strategy", UpperEdge(edge));
+  row->nested = true;
+
+  row = PushRow(out, capacity, count,
+                kActionBgTunerRow_IgnoreSideBounds, layer, -1);
+  if (!row) return;
+  snprintf(key, sizeof(key), "bg%d.ignore_side_bounds", layer + 1);
+  SetRowText(row, key, "ignore side bounds",
+             draft->ignore_side_bounds ? "ON" : "OFF");
   row->nested = true;
 
   ActionBgHorizontalExtent horizontal = EffectiveHorizontal(layer);
@@ -459,6 +484,9 @@ ActionBgTunerResult ActionBgTuner_Change(const ActionBgTunerRow *row,
       draft->edge_set = true;
       return kActionBgTunerResult_Changed;
     }
+    case kActionBgTunerRow_IgnoreSideBounds:
+      draft->ignore_side_bounds = !draft->ignore_side_bounds;
+      return kActionBgTunerResult_Changed;
     case kActionBgTunerRow_HorizontalMode: {
       ActionBgHorizontalExtent *extent = EditableHorizontal(row->layer);
       ActionBgTunerResult result = ChangeMode(&extent->mode, false, direction);
@@ -624,6 +652,9 @@ ActionBgTunerResult ActionBgTuner_ResetRow(const ActionBgTunerRow *row) {
     case kActionBgTunerRow_Edge:
       draft->edge_set = false;
       return kActionBgTunerResult_Reset;
+    case kActionBgTunerRow_IgnoreSideBounds:
+      draft->ignore_side_bounds = false;
+      return kActionBgTunerResult_Reset;
     case kActionBgTunerRow_HorizontalMode:
     case kActionBgTunerRow_Left:
     case kActionBgTunerRow_Right:
@@ -666,6 +697,10 @@ const char *ActionBgTuner_RowHelp(const ActionBgTunerRow *row) {
     case kActionBgTunerRow_Edge:
       return "Choose how this layer supplies pixels outside the authentic "
              "viewport. The extent remains an independent maximum.";
+    case kActionBgTunerRow_IgnoreSideBounds:
+      return "Let this background use every horizontally available canvas "
+             "pixel past its Diorama side guides. The shared canvas and edge "
+             "strategy still apply; stored caps return unchanged when off.";
     case kActionBgTunerRow_HorizontalMode:
     case kActionBgTunerRow_VerticalMode:
       return "Available uses every pixel the source and canvas can supply. "
