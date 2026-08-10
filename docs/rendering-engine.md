@@ -1239,9 +1239,10 @@ ordinary entries also pass 4:3, Wide Raw and Diorama-32. Settings -> Layers ->
 BG Extents exposes a non-persistent sparse draft, A/B, colored guides and a
 normalized log dump without creating a second canonical policy store. Its
 per-BG `ignore side bounds` shortcut resolves the layer and all of its row
-bands to the available horizontal extent for the A/B, while retaining the
-stored caps for exact restoration; it cannot outgrow the shared canvas or
-source/edge availability.
+bands to the available horizontal extent for the A/B. The independent `ignore
+vertical bounds` shortcut resolves that layer's top/bottom extent to available.
+Both retain stored caps for exact restoration and cannot outgrow the shared
+canvas, finite world, or source/edge availability.
 
 ## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
 
@@ -1753,37 +1754,40 @@ whose PPU rasterization already applied the same brightness. A gf380-451 replay
 shows the view selected at brightness 0 before fade-in, retained through all
 15 steps and the complete fade-out, and released only after the black endpoint.
 
-## 13i. Vertical extend — widescreen's transpose (2026-08-03)
+## 13i. Vertical extend — widescreen's transpose (2026-08-03, symmetric 2026-08-10)
 
-Diorama-only, default off (`diorama_vertical_extend`, 0..32 scanlines). Renders
-world ABOVE the authentic 224-line viewport so the tilted view fills screen
-height the framing was otherwise wasting, instead of shrinking the image.
+Diorama-only, default off (`diorama_vertical_extend`, 0..64 scanlines per
+side). Renders finite world ABOVE AND BELOW the authentic 224-line viewport so
+camera motion does not immediately discard useful platform art at the opposite
+edge. The actual top and bottom counts resolve independently against the
+primary layer's camera and world height.
 
-### The ceiling is OAM, not taste
+### OAM bytes are not the ceiling
 
-`kPpuExtraTopBottom = 32` is forced by the hardware encoding, not chosen:
+The hardware encoding explains why synthetic vertical rows need an exact
+position channel:
 
 | axis | OAM field | modulus | screen | free range |
 |---|---|---|---|---|
 | X | 9 bits | 512 | 256 | `[256,512)` — a whole screen, unambiguous |
 | Y | 8 bits | 256 | 224 | `[224,256)` — 32 lines, **already means "above"** |
 
-So the horizontal margins could carve a right-hand band out of the spare half
-(`ppu.c` `PpuObjScreenX`), while vertically the only expressible off-screen
-positions ARE the above-screen ones. That makes the top band free — those
-sprites already render correctly, `ppu_evaluateSprites` compares `line - y` in
-uint8 arithmetic, which is the same mod-256 wrap the hardware does, so a
-negative line needs no special case — and makes a bottom band useless: a sprite
-below line 224 is indistinguishable from one above line 0, so the game's own
-object coordinates carry nothing usable there. `g_ws_extra_bottom` is therefore
-pinned at 0; the background half of the bottom path is implemented and inert.
+Vertically, a parked slot, a sprite below line 223 and a sprite above line 0 can
+all encode to the same byte. `PpuSetObjExactPosition` carries the signed value
+the action HLE emitter had before truncation. Margin scanlines therefore accept
+only committed exact slots; authentic lines retain the normal OAM path for any
+slot without one. OAM no longer limits presentation capacity. The current
+`kPpuExtraTopBottom = 64` is a bounded host budget chosen to cover the measured
+48px camera move in `runs/20260810-112529`, not a gameplay-camera range.
 
 ### Geometry
 
 Row 0 of every captured surface is screen y = `-ws_extra_top`, the exact
-transpose of column 0 meaning screen x = `-ws_extra`. `PpuOutputRow` is the one
-place that mapping lives; it degenerates to the historic `y - 1` at zero margin,
-which is what keeps authentic output bit-identical.
+transpose of column 0 meaning screen x = `-ws_extra`; total capture height is
+`top + 224 + bottom`. `PpuOutputRow` is the one place that mapping lives; it
+degenerates to the historic `y - 1` at zero margin, which is what keeps
+authentic output bit-identical. Synthetic top rows use hold-first PPU state and
+bottom rows use the symmetric hold-last state after authentic scanout.
 
 The band contains real off-screen world rows only while the individual layer
 has world above its own camera. That qualification is load-bearing: the capture
@@ -1813,12 +1817,22 @@ band, while `runs/20260809-085004/diorama_dump/bg2_hi_gf2200.png` is transparent
 after the fix with byte-identical WRAM (`b74e3362...`).
 
 `PpuSetVerticalMarginLayerClip` is the boundary contract. The frontend gives
-BG1 and BG2 the number of real rows above their respective `$24/$28` cameras;
-on synthetic lines farther away, that layer is transparent rather than wrapped.
-Authentic lines bypass the clip, and a deeper layer can remain visible while a
-shallower layer has reached its top. The global band still follows BG1 because
-BG1 is the foreground world/camera that determines whether there is a scene to
-extend at all.
+BG1 and BG2 independent real-row counts above and below their respective
+`$24/$28` cameras, using dimensions `$30/$34`. For a camera `c`, height `h` and
+budget `b`, top is `min(b,c)` and bottom is `min(b,max(0,h-225-c))`, matching
+the game's `$02:B091` camera clamp. Synthetic rows farther away are transparent
+rather than wrapped. Authentic lines bypass the clip, and one layer can remain
+visible after another reaches either finite edge. The global capture follows
+the semantic primary layer selected by `ActionBgPlan`, not a hard-coded BG
+number.
+
+The motivating lower-edge repro is `runs/20260810-112529`. From snapshot gf1992
+to gf2120, BG1 camera `$24` and player `$08A4` both move upward exactly 48px
+(`232 -> 184`, `312 -> 264`) while BG1 remains a 512px world. The capture was
+still `top=32,bottom=0`, so the lower platform moved down in screen space and
+fell through the captured floor even though it remained in the finite level.
+At camera 184, 103 real rows exist below the authentic viewport; a 32- or
+64-row bottom budget can retain them without changing camera/gameplay state.
 
 The early capture/row traps, all found by measurement rather than by reading:
 
@@ -1842,23 +1856,31 @@ The early capture/row traps, all found by measurement rather than by reading:
    writes to two destinations with two different origins and must bias only the
    diorama-plane one. Measured, action stage, extend 0 vs 32: the HUD occupies
    rows `[11..26]` in **both**, while the BG2 plane grows `[0..223]` → `[0..255]`.
-4. **The layers do not share a vertical world edge.** Using BG1's available-top
-   count to size the band is correct, but treating that as permission for every
-   BG is not. Each bounded world layer needs its own camera-derived clip or its
-   negative synthetic rows wrap to the opposite edge of the resident tilemap.
+4. **The layers do not share a vertical world edge.** Using the primary layer
+   to size the capture is correct, but treating that as permission for every BG
+   is not. Each bounded world layer needs its own top AND bottom camera-derived
+   clip or synthetic rows wrap to the opposite edge of its resident tilemap.
+5. **Every capture consumer needs both counts.** The PPU already had a bottom
+   scanout loop, but the frame slot, texture upload, BG2 valid-span plan and OBJ
+   apron compositor previously sized themselves as `224 + top`. A real bottom
+   band would therefore either be omitted or indexed past a shorter logical
+   surface. `FrameSlot` now carries both immutable counts from the rendered
+   frame.
 
 `Diorama_Composite` normalizes world height against the AUTHENTIC 224, not the
 captured height — dividing by the capture would make the taller plane span the
 same 1.0 world unit, so the auto-fit would frame it to the same screen height
 and the only visible effect would be everything ~14% smaller. It then lifts the
 world (folded into the MVP so layers, skirts, depth shapes, shoebox and
-`Diorama_ProjectCapturedPoint` cannot disagree), because the meshes are
-symmetric about `wy = 0` and every new row arrives at the top.
+`Diorama_ProjectCapturedPoint` cannot disagree) according to margin asymmetry.
+Meshes are symmetric about `wy = 0`, so the pin is `(top-bottom)/(2*224)`:
+equal margins require no shift, top-heavy captures shift up and bottom-heavy
+captures use the mirrored signed solve to shift down.
 
 ### Sizing that lift (trap 6)
 
-Half the added height pins the authentic band perfectly — and is wrong on its
-own. It is a fixed WORLD-space offset whose SCREEN effect depends on pitch:
+For a top-only capture, half the added height pins the authentic band perfectly
+— and is wrong on its own. It is a fixed WORLD-space offset whose SCREEN effect depends on pitch:
 pitching down tilts the plane so its projected centre sits low, leaving slack
 above, and a full pin spends exactly that slack. That is why every pitched
 configuration measured as well-centred and hid the problem. A flat camera has no
@@ -1866,12 +1888,12 @@ such slack — the composition already sat centred — so a full pin drives the
 whole box against the top edge and opens a large gap along the bottom (reported
 from a flat free-cam run, measured at 144px of top bias).
 
-`DioramaVerticalShift` lifts by the pin but never past the point where the drawn
-content is vertically centred in the viewport, with a floor so centring never
-drops the content's bottom further past the viewport than a full pin would: when
-the content is already taller than the window there is no slack to spend, and a
-smaller lift only buys losing PLAYFIELD rows off the bottom instead of band rows
-off the top. Measured, 3420x2128:
+`DioramaVerticalShift` moves toward the signed pin but never past the point
+where the drawn content is vertically centred in the viewport, with a floor so
+centring does not trade authentic playfield rows for synthetic-band rows. The
+bottom-heavy case mirrors world and projected Y through the same solver instead
+of maintaining a second policy. Measured for the original top-only case,
+3420x2128:
 
 | camera | before | after |
 |---|---|---|
@@ -1880,10 +1902,11 @@ off the top. Measured, 3420x2128:
 | pitch 0.20 dist 3.25 | centre +11.8 | **unchanged** (still a full pin) |
 | pitch 0.175 dist 5.75 | centre +6.0 | **unchanged** |
 
-`pin == 0` (no band) short-circuits to the untouched matrix, so extend 0 is
-byte-identical by construction.
+`pin == 0` (no band, or equal top/bottom margins) short-circuits to the
+untouched matrix, so extend 0 is byte-identical and a symmetric capture remains
+geometrically centred by construction.
 
-### Sprite position above the screen: the exact-Y sideband
+### Sprite position outside the screen: the exact-position sideband
 
 Three separate symptoms in the band all had one cause, and all three are gone
 for the same reason.
@@ -1912,23 +1935,21 @@ the **un-truncated form of exactly what the byte encodes**, not a recomputed
 "true" position: that is what makes a slot with an override render identically
 wherever the byte was not already lossy.
 
-The rule on above-screen scanlines becomes: **draw only from slots that have an
+The rule on every margin scanline becomes: **draw only from slots that have an
 override.** A parked slot was never written by the emitter, so it has none. A
-bottom-edge sprite has one saying +215, which yields a negative row on a band
-line by ordinary signed arithmetic and is never considered. A part more than 32
-rows up — which used to alias to a POSITIVE byte and draw mid-screen — now
-carries its real negative value and stays in the band. Slots without an override
-(the HUD, emitted by recompiled ROM at positive Y) keep the authentic mod-256
-path untouched; for `y` and `line` both in `[0,224)` the two agree exactly,
-because a negative difference could only alias into `[0,height)` at
-`line - y <= -256 + height`, which those ranges cannot reach.
+bottom-edge sprite has its real positive Y; an above-screen sprite has its real
+negative Y; ordinary signed subtraction selects only the correct rows. A part
+more than 32 rows up — which used to alias to a positive byte and draw
+mid-screen — stays in the top band, while a part below 223 can now occupy the
+bottom band without aliasing above. Slots without an override (the HUD, emitted
+by recompiled ROM at positive Y) keep the authentic mod-256 path untouched; for
+`y` and `line` both in `[0,224)` the two agree exactly.
 
-With position no longer routed through the byte, the emitter's own vertical cull
-(`biased_y < kSpriteBiasedHeight`, i.e. screen rows `[-16, 224)` — the ROM's
-draw bias already grants 16 rows up) widens by the live band with no clamp. That
-was the missing tree head: an object 24 rows above the screen, eight past the
-ROM's allowance, whose BG neck stub the band decoded correctly while the OBJ
-head was dropped.
+With position no longer routed through the byte, both the action object scan
+and the per-part emitter widen their DRAW predicates by live top/bottom counts.
+Activation remains on the authentic vertical window: it is game logic, not
+presentation. That distinction fixed the missing tree head above the screen
+and now carries actors/items standing on lower-band platforms as well.
 
 Measured, Fillmore act 2 at extend 32: band OBJ pixels 104 → 570, 0 → 466,
 104 → 735 on the frames where it fires, with the AUTHENTIC rows of all 32
@@ -2003,8 +2024,11 @@ game-agnostic PPU masks/global diagnostic overrides. Three final release
 matrices are byte-exact against the post-ring-repair baseline (612/612
 artifacts).
 
-The vertical-extension default is still 0: the presentation is validated on Fillmore acts 1-2 and
-level 1, not across every stage.
+The vertical-extension default is still 0. The symmetric plumbing is covered by
+ROM-free finite-margin, bottom-layer-clip, exact-bottom-OBJ, tuner-capacity and
+settings-overlay regressions plus the 2026-08-10 Bloodpool repro analysis; a
+fresh manual visual sweep of every action stage remains prudent before changing
+the default.
 
 `AR_VEXT_LOG=1` prints the resolved margin with the camera/scroll state that
 produced it, plus a `[vext-rows]` line showing where the HUD and the diorama

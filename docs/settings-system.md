@@ -581,10 +581,11 @@ This developer-only custom tab is deliberately outside the setting registry.
 It exposes the immutable live `ActionBgPlan` through a session-local sparse
 draft: source and semantic role are read-only, while edge strategy, per-side
 horizontal/vertical caps, and canonical-band horizontal caps are editable.
-The per-BG **ignore side bounds** toggle is a non-destructive A/B over those
-horizontal caps: on makes the layer and all its bands use every available
-column in the shared canvas; off restores the stored cap values. It does not
-change the edge strategy or expand the canvas itself.
+The per-BG **ignore side bounds** and **ignore vertical bounds** toggles are
+non-destructive A/Bs over those caps. The first makes the layer and all its
+bands use every available horizontal column; the second makes its top/bottom
+extent available. Off restores the stored cap values. Neither changes the edge
+strategy, finite-world clip, or shared canvas size.
 Apply and guide toggles are session state, not `g_settings`; no edit is written
 to `settings.ini` or `diorama-layers.ini`. Room changes clear the draft and
 disable its application. The game is paused whenever the menu reads or edits

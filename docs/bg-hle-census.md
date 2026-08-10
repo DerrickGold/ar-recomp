@@ -405,8 +405,8 @@ requested `vd_gfN` snapshot must contain its own complete WRAM, VRAM, CGRAM,
 OAM, high-OAM, and PPU-register set; a matching total assembled from incomplete
 prefixes is rejected. The plan helper and load-only migration behavior have
 ROM-free unit coverage. `PpuSetVerticalMarginLayerClip` is retained: it remains
-the generic bound for non-provider/native or decorative layers in a shared
-vertical band, not a duplicate world decoder.
+the generic per-layer top/bottom bound for non-provider/native or decorative
+layers in a shared vertical capture, not a duplicate world decoder.
 
 ### Final policy/setter census
 
