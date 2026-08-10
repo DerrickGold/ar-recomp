@@ -288,6 +288,9 @@ static void TestFramePlanCapture(void) {
   CHECK(plan.valid);
   CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
   CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 76 &&
+        plan.layer[1].horizontal_extent.right == 100);
   CHECK(policy.mirror_layers == kActRaiserBgLayerMask_Bg2);
   CHECK(policy.repeat_band_layer == kActRaiserPpuLayer_Bg2);
   CHECK(policy.repeat_band_y0 == 136 && policy.repeat_band_y1 == 224);

@@ -468,8 +468,8 @@ classification:
 | Entries | BG1 role/source | BG2 role/source | Extent consequence |
 | --- | --- | --- | --- |
 | `0101`, `0102`, `0301`, `0303`, `0404`, `0501`, `0504` | playfield / finite world | backdrop / finite world or disabled | both retain available caps; each finite source supplies its own natural bound |
-| `0201` | playfield / 4096x512 world | backdrop / 256x256 viewport | moon/cloud rows use fixed `0/0`; water `136..224` remains independently available |
-| `0202` | playfield / 768x512 world | backdrop / 256x256 viewport | the same fixed moon/cloud and available water families apply |
+| `0201` | playfield / 4096x512 world | backdrop / 256x256 viewport | moon/cloud rows use live-tuned fixed `76/100`; water `136..224` remains independently available |
+| `0202` | playfield / 768x512 world | backdrop / 256x256 viewport | moon/cloud rows retain fixed `0/0`; water `136..224` remains independently available |
 | `0401`, `0601`, `0605` | playfield / finite world | backdrop / 256x256 viewport | current cyclic backdrop strategy is repeat-safe and may use the available canvas |
 | `0701` pre-ending | playfield / captured viewport | backdrop / captured viewport | bounded upper statue/face art and repeat-safe fog `144..224` remain separate policies |
 | `0701` ending sky | playfield / captured viewport | backdrop / captured viewport | the page/state handoff replaces the fog band and remains a separately tuned backdrop |
@@ -500,9 +500,11 @@ a narrow mirrored backdrop receives a fixed zero-pixel synthetic extension,
 while a narrow cyclic backdrop remains available to the complete canvas. The
 cap affects only pixels outside the authentic viewport; it neither clamps the
 global canvas nor the playfield role. Bloodpool `0201` and `0202` additionally
-resolve rows `136..224` as an available repeat-safe water band, leaving the
-moon/cloud family above it authentic-width. Death Heim `0701` applies the same
-explicit fixed/available split at its established fog boundary `144`.
+resolve rows `136..224` as an available repeat-safe water band. `0202` leaves
+the moon/cloud family above it authentic-width; the promoted tuner export in
+`runs/20260810-122509` gives `0201` that family a known-good reflected extent of
+76px left and 100px right. Death Heim `0701` applies the same banded principle
+at its established fog boundary `144`.
 
 An authentic band with `y0=0` or `y1=224` also governs the adjacent vertical
 extension rows. This keeps the band's edge strategy and horizontal extent as
@@ -519,15 +521,16 @@ on either side, retaining the established same-direction parallax behavior.
 The all-map planner assertions and a real-PPU top-margin direction probe now pin
 that distinction explicitly.
 
-Fresh Wide Full captures show the intended composition in both Bloodpool acts:
-the moon/cloud plane terminates at the authentic side boundaries, BG1 platforms
-continue into the margins, and lower water still fills them. For `0201`, the
-accepted authentic-center comparison reports 1,628 changed margin pixels, zero
-center pixels, zero provider-owned VRAM changes, and all 16 non-framebuffer
-artifacts exact. `0202` likewise has an exact cropped 256x224 center and 16/16
-exact state/snapshot artifacts. The pre-ending Death Heim hub remains 17/17
-exact in both Wide Full and Diorama-32 because its existing clamp/repeat edges
-already produced the now-explicit limits.
+The initial conservative Wide Full captures stop the moon/cloud plane at the
+authentic side boundaries while BG1 platforms and lower water continue. For
+`0201`, that accepted baseline reports 1,628 changed margin pixels, zero center
+pixels, zero provider-owned VRAM changes, and all 16 non-framebuffer artifacts
+exact. `0202` likewise has an exact cropped 256x224 center and 16/16 exact
+state/snapshot artifacts. The later live `0201` draft deliberately replaces
+only its upper `0/0` cap with `76/100`; `0202` remains on the captured baseline.
+The pre-ending Death Heim hub remains 17/17 exact in both Wide Full and
+Diorama-32 because its existing clamp/repeat edges already produced the
+now-explicit limits.
 
 This confirms the Bloodpool diagrammed behavior and the Death Heim policy seam.
 The final gate covers every ordinary entry in 4:3, Wide Raw and Diorama-32,
