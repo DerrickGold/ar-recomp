@@ -209,12 +209,13 @@ tool. Open BG1 or BG2 to inspect its playfield/scene/backdrop role and source,
 change its edge strategy or per-side horizontal/vertical cap, and tune the
 horizontal cap of any canonical row band. **Ignore side bounds** temporarily
 lets the selected BG use every available column past its Diorama side guides;
-the shared canvas and edge strategy still limit what can actually be drawn,
-and switching it off restores the stored caps. `Apply draft` performs the live
-A/B; `Extent guides` draws BG1 in cyan and BG2 in orange; `Print draft` writes
-the resolved plan to the run log. Drafts reset when the room changes, start
-disabled, are never written to `settings.ini`, and never modify
-`diorama-layers.ini`. Press `Y` on a row to restore its canonical value.
+**Ignore vertical bounds** does the same past the top/bottom guides. The shared
+canvas, finite world and edge strategy still limit what can actually be drawn,
+and switching either shortcut off restores the stored caps. `Apply draft`
+performs the live A/B; `Extent guides` draws BG1 in cyan and BG2 in orange;
+`Print draft` writes the resolved plan to the run log. Drafts reset when the
+room changes, start disabled, are never written to `settings.ini`, and never
+modify `diorama-layers.ini`. Press `Y` on a row to restore its canonical value.
 
 ### The overlay's artwork
 

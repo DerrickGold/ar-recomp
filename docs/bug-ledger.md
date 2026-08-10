@@ -1218,6 +1218,44 @@ the current debugging process; this file is the case law.
     source, edge and extent state; one of them alone can be truthful while the
     rendered result is wrong.
 
+42. **Action camera motion discarded resident playfield through the capture
+    floor — FIXED 2026-08-10.** In Bloodpool run
+    `runs/20260810-112529`, snapshot gf1992 showed the isolated lower platform,
+    while gf2120 after a jump did not. The platform had not left the finite
+    level and no backdrop cap removed it. BG1 camera `$24` and player `$08A4`
+    both moved upward exactly 48px (`232 -> 184`, `312 -> 264`), while the PPU
+    metadata remained `top=32,bottom=0` and BG1 height `$30` remained 512. The
+    lower world therefore moved down in screen space and crossed a capture
+    boundary that had no bottom allowance.
+
+    **Fix:** `diorama_vertical_extend` is now a per-side budget (0..64,
+    default 0). `ActRaiserActionBg_ResolveVerticalMargins` derives independent
+    top/bottom counts from the semantic primary layer using the game's 225px
+    camera clamp, and `PpuSetVerticalMarginLayerClip` applies the same finite
+    calculation independently to BG1/BG2. Bottom scanlines use hold-last PPU
+    state. The action object scan and part emitter widen DRAW coverage on both
+    vertical sides while activation stays authentic. Margin OBJ evaluation
+    trusts only exact signed slots, so below-screen objects cannot alias to the
+    top through OAM's 8-bit Y. `FrameSlot`, texture upload, BG valid spans,
+    action-effect projection, OBJ apron and Diorama composition all consume the
+    same `top + 224 + bottom` capture. Diorama's signed pin uses
+    `(top-bottom)/(2*224)`, so equal margins remain centred. The Layers tuner
+    adds a non-destructive per-BG **ignore vertical bounds** A/B alongside the
+    existing side-bound switch; finite world/source availability still wins.
+
+    ROM-free regressions cover the measured cameras, top/bottom finite clips,
+    exact bottom OBJ versus an untrusted OAM-only slot, row capacities 1..max,
+    tuner restoration, and settings-menu control. All 44 tests pass; the one
+    display-backed shader test requires normal macOS display access and passes
+    there. A complete action-stage visual sweep is still required before
+    changing the feature's default from 0.
+
+    **Reusable lesson:** a camera-valid world and a capture-valid world are
+    separate intervals. If presentation adds space on only one side, ordinary
+    camera tracking can cull still-resident content at the opposite side. Every
+    producer/consumer must carry the two bounds explicitly; inferring a single
+    added height loses the authentic origin and breaks asymmetric finite edges.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

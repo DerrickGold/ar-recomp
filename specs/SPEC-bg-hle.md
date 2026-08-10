@@ -916,8 +916,8 @@ also complete.
   end to end: setters, `Ppu` fields, reset/raster/inspector branches, the
   permanently-zero ActRaiser caller plumbing, and current documentation.
 - `PpuSetVerticalMarginLayerClip` remains live: native/decorative layers can
-  share vertical extension without a provider and still need independent
-  bounds.
+  share vertical extension without a provider and still need independent top
+  and bottom bounds.
 
 After this final deletion, rebuilt-release 4:3, Wide Full, and diorama-32
 matrices are byte-exact against the accepted post-ring-repair baseline:
