@@ -319,6 +319,9 @@ typedef struct FrameSlot {
    * edge decision. */
   ActionBgPlan action_bg_plan;
   bool bg_capture_pad_to_budget;
+  /* Developer-only authoring guide gate, captured beside the exact plan so
+   * present code never reads the live tuner singleton. */
+  bool action_bg_extent_guides;
   uint8_t inidisp;
   uint8_t bg_mode;  /* PPU_mode(g_ppu) == (g_ppu->bgmode & 7) */
 

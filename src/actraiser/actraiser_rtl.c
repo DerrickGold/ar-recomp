@@ -9,6 +9,7 @@
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
 #include "actraiser_action_bg.h"
+#include "action/action_bg_tuner.h"
 #include "action/action_load_pacing.h"
 #include "actraiser_ws_gap.h"
 #include "diorama/diorama_capture_blend.h"
@@ -984,6 +985,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   /* Virtual tilemaps are frame-scoped. Clear before the inactive early return
    * so leaving widescreen cannot retain the prior action room's provider. */
   PpuClearVirtualTilemaps(g_ppu);
+  ActionBgTuner_BeginFrame();
   s_pending_action_bg_plan = ActRaiser_NativeBgPresentationPlan();
   s_pending_bg_capture_pad_to_budget = false;
   if (!g_ws_active) {
@@ -1000,6 +1002,13 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       if (ActRaiserActionBg_BuildPlan(
               g_ram, kActRaiserWramSize, g_ppu,
               g_settings.ws_bg2_padding, &plan, &presentation)) {
+        ActionBgTuner_ObservePlan(
+            g_ram[kActRaiserWram_MapGroup],
+            g_ram[kActRaiserWram_CurrentMap], &plan,
+            (ActionBgTunerLimits) {
+              kPpuExtraLeftRight, kPpuExtraLeftRight,
+              kPpuExtraTopBottom, kPpuExtraTopBottom,
+            });
         s_pending_action_bg_plan = plan;
         /* No side columns are rendered in this mode. Preserve source ownership
          * for the authentic provider, but describe the executed presentation
@@ -1111,16 +1120,25 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (ActRaiserActionBg_BuildPlan(
             g_ram, kActRaiserWramSize, g_ppu,
             g_settings.ws_bg2_padding, &bg_plan, &bg_policy)) {
-      bg_plan_valid = 1;
-      bg_plan_source_bg1 = bg_plan.layer[0].source;
-      bg_plan_source_bg2 = bg_plan.layer[1].source;
-      bg_hle_allowed = wide;
-      clamp = bg_policy.clamp_layers;
-      mirror = bg_policy.mirror_layers;
-      repeat = bg_policy.repeat_layers;
-      repeat_band_layer = bg_policy.repeat_band_layer;
-      repeat_band_y0 = bg_policy.repeat_band_y0;
-      repeat_band_y1 = bg_policy.repeat_band_y1;
+      ActionBgTuner_ObservePlan(
+          map_group, map_number, &bg_plan,
+          (ActionBgTunerLimits) {
+            kPpuExtraLeftRight, kPpuExtraLeftRight,
+            kPpuExtraTopBottom, kPpuExtraTopBottom,
+          });
+      if (ActionBgTuner_ApplyDraft(&bg_plan) &&
+          ActionBgPlan_CompilePresentation(&bg_plan, &bg_policy)) {
+        bg_plan_valid = 1;
+        bg_plan_source_bg1 = bg_plan.layer[0].source;
+        bg_plan_source_bg2 = bg_plan.layer[1].source;
+        bg_hle_allowed = wide;
+        clamp = bg_policy.clamp_layers;
+        mirror = bg_policy.mirror_layers;
+        repeat = bg_policy.repeat_layers;
+        repeat_band_layer = bg_policy.repeat_band_layer;
+        repeat_band_y0 = bg_policy.repeat_band_y0;
+        repeat_band_y1 = bg_policy.repeat_band_y1;
+      }
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
