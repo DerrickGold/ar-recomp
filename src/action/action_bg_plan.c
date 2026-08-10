@@ -13,7 +13,8 @@ enum {
   kAitos = 4,
   kNorthwall = 6,
   kDeathHeim = 7,
-  kBloodpoolAct1Map = 1,
+  kBloodpoolFirstMap = 1,
+  kBloodpoolLastMoonWaterMap = 2,
   kBloodpoolWaterStartY = 136,
   kDeathHeimHub = 1,
   kDeathHeimFirstBoss = 2,
@@ -64,6 +65,15 @@ static ActionBgHorizontalExtent AvailableHorizontalExtent(void) {
   };
 }
 
+static ActionBgHorizontalExtent FixedHorizontalExtent(uint16_t left,
+                                                       uint16_t right) {
+  return (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = left,
+    .right = right,
+  };
+}
+
 static ActionBgVerticalExtent AvailableVerticalExtent(void) {
   return (ActionBgVerticalExtent) {
     .mode = kActionBgExtent_Available,
@@ -109,12 +119,20 @@ static void ClassifyNarrowBg2(const ActionBgFrameState *state,
   }
   bg2->default_edge = UsesCyclicBg2(state->map_group, state->map_number)
       ? kActionBgEdge_Repeat : kActionBgEdge_Mirror;
+  /* A cyclic backdrop is authored to continue. A mirrored backdrop is the
+   * finite/unique-art class: mirroring it farther eventually reintroduces a
+   * moon, landmark, or hard silhouette. Keep that family authentic-width and
+   * let the independently wider playfield remain visible around it. */
+  if (bg2->default_edge == kActionBgEdge_Mirror)
+    bg2->horizontal_extent = FixedHorizontalExtent(0, 0);
   if (state->map_group == kBloodpool &&
-      state->map_number == kBloodpoolAct1Map) {
+      state->map_number >= kBloodpoolFirstMap &&
+      state->map_number <= kBloodpoolLastMoonWaterMap) {
     bg2->bands[0] = (ActionBgBand) {
       .y0 = kBloodpoolWaterStartY,
       .y1 = kAuthenticHeight,
       .edge = kActionBgEdge_Repeat,
+      .horizontal_extent = AvailableHorizontalExtent(),
     };
     bg2->band_count = 1;
   }
@@ -150,6 +168,7 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
     plan->layer[layer].default_edge = kActionBgEdge_Clamp;
     plan->layer[layer].band_count = 0;
   }
+  plan->layer[1].horizontal_extent = FixedHorizontalExtent(0, 0);
   if (DeathHeimEndingSky(state)) {
     plan->layer[1].default_edge = kActionBgEdge_Mirror;
   } else {
@@ -157,6 +176,7 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
       .y0 = kDeathHeimFogStartY,
       .y1 = kAuthenticHeight,
       .edge = kActionBgEdge_Repeat,
+      .horizontal_extent = AvailableHorizontalExtent(),
     };
     plan->layer[1].band_count = 1;
   }

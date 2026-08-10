@@ -138,24 +138,32 @@ static void TestBandedValidSpans(void) {
                                &layer, 0, 224, kTexWidth, &spans);
   ExpectSpan("unpadded mirror", &spans.spans[0], 0, 224, 120, 496);
 
-  /* Bloodpool's Mirror default and Repeat water band have the same full-budget
-   * extent. Exact evaluation can therefore coalesce them without the old,
-   * incorrect conservative clamp. */
+  /* Bloodpool's unique upper moon/cloud family is authentic-width while the
+   * repeat-safe water remains available across the full capture. */
+  layer.horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+  };
   layer.bands[0] = (ActionBgBand) {
     .y0 = 136, .y1 = 224, .edge = kActionBgEdge_Repeat,
+    .horizontal_extent = { .mode = kActionBgExtent_Available },
   };
   layer.band_count = 1;
   DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
                                &layer, 16, 240, kTexWidth, &spans);
-  ExpectInt("Bloodpool span count", spans.count, 1);
-  ExpectSpan("Bloodpool", &spans.spans[0], 0, 240, 0, 496);
+  ExpectInt("Bloodpool span count", spans.count, 2);
+  ExpectSpan("Bloodpool sky", &spans.spans[0], 0, 152, 120, 376);
+  ExpectSpan("Bloodpool water", &spans.spans[1], 152, 240, 0, 496);
 
   /* Death Heim's upper clamp and lower repeating fog genuinely need distinct
    * UV spans. The authentic y=144 boundary moves down by the 16-row vertical
    * extension in the captured texture. */
   layer = Layer(kActionBgEdge_Clamp);
+  layer.horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+  };
   layer.bands[0] = (ActionBgBand) {
     .y0 = 144, .y1 = 224, .edge = kActionBgEdge_Repeat,
+    .horizontal_extent = { .mode = kActionBgExtent_Available },
   };
   layer.band_count = 1;
   DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,

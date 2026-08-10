@@ -338,11 +338,15 @@ static void TestNarrowDecorativeBg2(void) {
   ActionBgPlan plan = Build(&state);
   CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(!plan.layer[1].horizontal_extent.left &&
+        !plan.layer[1].horizontal_extent.right);
   CHECK(Compile(&plan).mirror_layers == 2);
 
   state.decorative_padding_enabled = false;
   plan = Build(&state);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
   CHECK(Compile(&plan).clamp_layers == 2);
 
   const uint8_t repeat_cases[][2] = {
@@ -354,6 +358,8 @@ static void TestNarrowDecorativeBg2(void) {
     state.layer[1].world_width = 256;
     plan = Build(&state);
     CHECK(plan.layer[1].default_edge == kActionBgEdge_Repeat);
+    CHECK(plan.layer[1].horizontal_extent.mode ==
+          kActionBgExtent_Available);
     CHECK(Compile(&plan).repeat_layers == 2);
   }
 
@@ -365,6 +371,7 @@ static void TestNarrowDecorativeBg2(void) {
     state.layer[1].world_width = 256;
     plan = Build(&state);
     CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+    CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
   }
 }
 
@@ -373,12 +380,15 @@ static void TestBloodpoolBand(void) {
   state.layer[1].world_width = 256;
   ActionBgPlan plan = Build(&state);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(!plan.layer[1].horizontal_extent.left &&
+        !plan.layer[1].horizontal_extent.right);
   CHECK(plan.layer[1].band_count == 1);
   CHECK(plan.layer[1].bands[0].y0 == 136 &&
         plan.layer[1].bands[0].y1 == 224 &&
         plan.layer[1].bands[0].edge == kActionBgEdge_Repeat);
   CHECK(plan.layer[1].bands[0].horizontal_extent.mode ==
-        kActionBgExtent_Inherit);
+        kActionBgExtent_Available);
   ActionBgPresentationPolicy policy = Compile(&plan);
   CHECK(policy.mirror_layers == 2 && policy.repeat_band_layer == 1);
   CHECK(policy.repeat_band_y0 == 136 && policy.repeat_band_y1 == 224);
@@ -387,6 +397,17 @@ static void TestBloodpoolBand(void) {
   plan = Build(&state);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
   CHECK(plan.layer[1].band_count == 0);
+
+  state = State(2, 2);
+  state.layer[1].world_width = 256;
+  plan = Build(&state);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].band_count == 1);
+  CHECK(plan.layer[1].bands[0].y0 == 136 &&
+        plan.layer[1].bands[0].y1 == 224 &&
+        plan.layer[1].bands[0].horizontal_extent.mode ==
+            kActionBgExtent_Available);
 }
 
 static void TestDeathHeimStates(void) {
@@ -395,7 +416,10 @@ static void TestDeathHeimStates(void) {
   CHECK(plan.layer[0].source == kActionBgSource_AuthenticViewport);
   CHECK(plan.layer[0].default_edge == kActionBgEdge_Clamp);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
   CHECK(plan.layer[1].band_count == 1);
+  CHECK(plan.layer[1].bands[0].horizontal_extent.mode ==
+        kActionBgExtent_Available);
   ActionBgPresentationPolicy policy = Compile(&plan);
   CHECK(policy.clamp_layers == 3 && !policy.bound_canvas_to_world);
   CHECK(!plan.bound_canvas_to_world);
@@ -409,6 +433,7 @@ static void TestDeathHeimStates(void) {
   policy = Compile(&plan);
   CHECK(policy.clamp_layers == 1 && policy.mirror_layers == 2);
   CHECK(policy.repeat_band_layer == -1);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
 
   state.layer[0].bgsc = 0x60;
   state.layer[1].bgsc = 0x70;
@@ -445,7 +470,8 @@ static void TestEveryKnownMapClassifies(void) {
       CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
       for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
         CHECK(plan.layer[layer].horizontal_extent.mode ==
-              kActionBgExtent_Available);
+              (layer == 1 && group == 7 && map == 1
+                   ? kActionBgExtent_Fixed : kActionBgExtent_Available));
         CHECK(plan.layer[layer].vertical_extent.mode ==
               kActionBgExtent_Available);
       }
