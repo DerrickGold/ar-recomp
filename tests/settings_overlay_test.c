@@ -494,6 +494,13 @@ static void CheckLayerEditorSection(void) {
     CHECK(ActionBgTuner_DraftEnabled());
     RowToKey("bg2");
     CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    RowToKey("bg2.ignore_side_bounds");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    ActionBgPlan unbounded = canonical;
+    CHECK(ActionBgTuner_ApplyDraft(&unbounded));
+    CHECK(unbounded.layer[1].horizontal_extent.mode ==
+          kActionBgExtent_Available);
+    CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
     RowToKey("bg2.horizontal");
     CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
     RowToKey("bg2.left");

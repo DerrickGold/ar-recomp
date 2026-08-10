@@ -1237,7 +1237,11 @@ accepted; 4,074 pixels change only in the two Bloodpool side margins, with
 every authentic center and state/PPU/VRAM artifact exact. The complete twelve
 ordinary entries also pass 4:3, Wide Raw and Diorama-32. Settings -> Layers ->
 BG Extents exposes a non-persistent sparse draft, A/B, colored guides and a
-normalized log dump without creating a second canonical policy store.
+normalized log dump without creating a second canonical policy store. Its
+per-BG `ignore side bounds` shortcut resolves the layer and all of its row
+bands to the available horizontal extent for the A/B, while retaining the
+stored caps for exact restoration; it cannot outgrow the shared canvas or
+source/edge availability.
 
 ## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
 
