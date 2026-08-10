@@ -187,10 +187,63 @@ static void TestGuideSegments(void) {
                                   kActionBgTunerGuideMax) == 0);
 }
 
+static void TestRowCapacity(void) {
+  ActionBgTuner_ResetSession();
+  ActionBgPlan canonical = Plan();
+  ActionBgLayerPlan *bg1 = &canonical.layer[0];
+  bg1->horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = 32,
+    .right = 40,
+  };
+  bg1->vertical_extent = (ActionBgVerticalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .top = 12,
+    .bottom = 8,
+  };
+  for (int i = 0; i < kActionBgMaxBands; i++) {
+    bg1->bands[i] = (ActionBgBand) {
+      .y0 = (uint16_t)(i * 32),
+      .y1 = (uint16_t)(i * 32 + 16),
+      .edge = kActionBgEdge_Repeat,
+      .horizontal_extent = {
+        .mode = kActionBgExtent_Fixed,
+        .left = (uint16_t)(i * 4),
+        .right = (uint16_t)(i * 4 + 4),
+      },
+    };
+  }
+  bg1->band_count = kActionBgMaxBands;
+  CHECK(ActionBgPlan_Validate(&canonical));
+  CHECK(ActionBgTuner_ObservePlan(
+      2, 1, &canonical, (ActionBgTunerLimits){120, 120, 32, 32}));
+
+  ActionBgTunerRow rows[kActionBgTunerRowMax + 1];
+  int count = ActionBgTuner_BuildRows(rows, kActionBgTunerRowMax);
+  ActionBgTunerRow *bg1_row = Find(rows, count, "bg1");
+  CHECK(bg1_row != NULL);
+  CHECK(ActionBgTuner_Activate(bg1_row) == kActionBgTunerResult_Changed);
+  const int full_count = ActionBgTuner_BuildRows(
+      rows, kActionBgTunerRowMax);
+  CHECK(full_count == 30);
+
+  ActionBgTunerRow untouched;
+  memset(&untouched, 0xa5, sizeof(untouched));
+  for (int capacity = 1; capacity <= kActionBgTunerRowMax; capacity++) {
+    memset(rows, 0xa5, sizeof(rows));
+    count = ActionBgTuner_BuildRows(rows, capacity);
+    CHECK(count == (capacity < full_count ? capacity : full_count));
+    CHECK(!memcmp(&rows[capacity], &untouched, sizeof(untouched)));
+  }
+  CHECK(ActionBgTuner_BuildRows(rows, 0) == 0);
+  CHECK(ActionBgTuner_BuildRows(NULL, kActionBgTunerRowMax) == 0);
+}
+
 int main(void) {
   TestDraftLifecycle();
   TestResetAndAtomicity();
   TestGuideSegments();
+  TestRowCapacity();
   if (failures) {
     fprintf(stderr, "action bg tuner: %d failure(s)\n", failures);
     return 1;
