@@ -155,6 +155,13 @@ visual policy is Bloodpool `0201`:
 4. The authentic 256x224 center remains exact.
 5. Native PPU effects and layer ordering remain exact.
 
+The canonical spelling is a fixed `0/0` horizontal extent on the unique
+moon/cloud family plus an explicitly available `136..224` water band. Bloodpool
+`0202` uses the same confirmed row family. A zero cap means "no synthetic
+extension beyond the authentic viewport," not "hide the layer"; authentic
+pixels remain inviolable and the independent playfield/global canvas remains
+wide.
+
 Death Heim acceptance keeps four state classes distinct: pre-ending `0701`
 clamp/repeat bands, the ending-sky page handoff, cyclic `0702-0707` rematch
 parallax, and the native raw-wrap `0708` raster arena.
