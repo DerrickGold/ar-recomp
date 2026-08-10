@@ -575,6 +575,19 @@ it naturally when the relevant engine becomes active.
 | Decorative BG2 padding | `AR_WS_BG2_MIRROR` | bool | on | stage policy chooses reflection or cyclic repeat; off clamps the 256-wide BG2. Keep env name for compatibility |
 | Clamp override | `AR_WS_CLAMP` | mask | none | manual per-layer mask; already uncached/live |
 
+### Live action background authoring (`Layers -> BG Extents`)
+
+This developer-only custom tab is deliberately outside the setting registry.
+It exposes the immutable live `ActionBgPlan` through a session-local sparse
+draft: source and semantic role are read-only, while edge strategy, per-side
+horizontal/vertical caps, and canonical-band horizontal caps are editable.
+Apply and guide toggles are session state, not `g_settings`; no edit is written
+to `settings.ini` or `diorama-layers.ini`. Room changes clear the draft and
+disable its application. The game is paused whenever the menu reads or edits
+the model, so it shares the main-thread overlay contract rather than adding a
+second cross-thread settings channel. The resolved plan—not the singleton—is
+copied through `FrameSlot` for guide rendering.
+
 ### Simulation 3D (`kSettingCat_Simulation`) (updated 2026-08-08)
 
 Read by the game thread and resolved into the immutable `FrameSlot` payload;

@@ -515,6 +515,21 @@ exact in both Wide Full and Diorama-32 because its existing clamp/repeat edges
 already produced the now-explicit limits.
 
 This confirms the Bloodpool diagrammed behavior and the Death Heim policy seam.
-Natural later-room/ending transitions and every display mode remain part of the
-final canonical validation gate before the broader mirrored-backdrop rule is
-considered complete.
+The final gate covers every ordinary entry in 4:3, Wide Raw and Diorama-32,
+plus all six Death Heim rematches in Wide Full and Diorama-32. The rematch Wide
+Full control is 102/102 artifacts byte-exact to its frozen baseline. Native
+`0708` is 17/17 exact in Wide Full and Diorama-32 after its special classifier
+resets both raw raster planes to available extents.
+
+That `0708` reset was found by the cross-mode gate. Generic narrow-BG2
+classification had assigned a fixed `0/0` cap before the final-room override
+changed the source and edge back to native `RawWrap`; retaining the orthogonal
+cap emptied the starfield side margins. The special override now initializes
+source, edge, horizontal/vertical extent, bands and role as one coherent state,
+with a direct regression assertion.
+
+A pinned `$0347=7` route reaches the real `0701` `$64/$74` page switch but
+remains black, so it is not accepted as a visual shortcut for the natural
+ending. The natural Death Heim ending tail and natural Northwall `0608`
+transition remain useful archival/manual fixture gaps, not untested branches
+of the implemented extent machinery.

@@ -1085,8 +1085,11 @@ would also duplicate BG1 and sprites visible through transparent BG2 pixels.
 The isolated z/color words instead preserve BG2 transparency, priority, palette
 animation, windowing, mosaic, main/sub-screen identity, and later color math.
 This is a presentation enhancement, not recovered/decompiled level data, and it
-performs no PPU VRAM writes. Narrow action BG2 opts in by default; the original
-clamp remains the same-binary fidelity/fallback path.
+performs no PPU VRAM writes. Narrow action BG2 still selects its audited edge
+strategy by default, but the later per-layer extent plan may independently cap
+unique reflected art to the authentic viewport. Cyclic backdrops retain the
+available full-canvas extent. The original clamp remains the same-binary
+fidelity/fallback path.
 
 Aitos Act 1 (`$18=04`, raw maps `$19=01-$03`) demonstrates why reflection
 cannot be the only padding policy. Its `$0100`-wide BG2 contains several cloud
@@ -1098,11 +1101,12 @@ the centered cloud field tear visibly from both margins. For this act,
 continues each authentic scanline: left `x<0` samples `256+x`, while right
 `x>=256` samples `x-256`. Because the copy happens after that scanline's tile
 decode/window/current scroll state, all bands keep the same direction and tile
-animation remains automatic. Bloodpool Act 2 retains whole-layer reflection.
-Bloodpool Act 1 is mixed: its upper mountain band remains reflected, while BG2
-tile row 17 downward (`y=136-223`) cyclically repeats the live scanline so its
-animated water does not flow backward in the margins. Neither padding mode
-reads the stale offscreen tilemap half or mutates emulated state.
+animation remains automatic. Bloodpool acts 1 and 2 are now both mixed: their
+upper moon/cloud family keeps the mirror edge classification but a fixed `0/0`
+extent prevents that unique art from re-entering either side margin; BG2 tile
+row 17 downward (`y=136-223`) explicitly removes the cap and cyclically repeats
+the live water scanline. Neither padding mode reads the stale offscreen tilemap
+half or mutates emulated state.
 
 Northwall (`$18=06`, raw maps `$19=01-$05`) uses the same narrow,
 parallax-cloud BG2 construction and therefore selects the same cyclic-repeat
@@ -1163,13 +1167,15 @@ too early, but `$0334>=3` is also visibly late in
   does `$F64C-$F650` select song id `$0334=3`.
 
 The policy now requires `$0347>=7` and observes the live BGSC page bases
-`$64/$74`; song id `$0334>=3` remains a settled-state fallback. It keeps BG1 clamped
-and replaces the lower repeat band with whole-BG2 reflection immediately when
-the sky pages become active. This samples the transitioned live BG2 after its
-scroll/window state, cannot resurrect face tiles still resident in VRAM, and
-joins the non-periodic cloud edges without the hard seam produced by cyclic
-repeat. Direct testing on 2026-07-14 confirmed that the handoff occurs invisibly
-during the black frame and that the wide sky is ready before fade-in.
+`$64/$74`; song id `$0334>=3` remains a settled-state fallback. It keeps BG1
+clamped and replaces the lower repeat band with whole-BG2 reflection
+immediately when the sky pages become active. The current extent catalogue
+then independently bounds that unique ending backdrop to the authentic
+viewport. Edge selection and extent are separate: the former still describes
+how the captured sky joins if a future canonical cap permits it. Direct testing
+on 2026-07-14 confirmed that the page handoff occurs invisibly during the black
+frame; a new natural-tail pixel fixture remains desirable for the later extent
+decision.
 
 Death Heim raw maps `$02-$07` (`0702-0707`) select the narrow-parallax repeat
 policy. Capture
@@ -1180,8 +1186,10 @@ authentic center at the 256px boundaries. The same effect was then directly
 reported on maps `$05-$07`. Maps `$02` and `$03` are provisionally
 classified with that background family so boss-rush transitions cannot restore
 reflection. The full `$02-$07` range therefore selects the same
-isolated-scanline cyclic repeat as Aitos and Northwall. Direct post-build
-validation remains pending for these maps, especially the provisional entries.
+isolated-scanline cyclic repeat as Aitos and Northwall. Direct 2026-08-10
+matrices now cover all six rooms in Wide Full and Diorama-32 with zero provider
+mismatch; the Wide Full artifacts are 102/102 byte-exact to their frozen
+baseline.
 
 Final-boss map `0708` is a distinct two-layer raster arena. Snapshots
 `runs/20260714-183142/snapshots/snap_00_gf12574` and `snap_01_gf12654` record
@@ -1197,7 +1205,39 @@ already wrap every 256px. `0708` now only opens the symmetric canvas and draws
 both raw (`repeat=$00`), preserving each layer's current raster phase while
 eliminating two temporary-buffer clears and two priority merges per scanline.
 Direct testing on 2026-07-14 confirmed the full-width effect and normal
-performance.
+performance. The role catalogue identifies BG1 as a primary `scene`, not a
+playfield, so it can anchor Diorama's vertical raster without owning finite
+world bounds. Its special classifier must also reset both planes to available
+extents: the 2026-08-10 cross-mode gate caught a generic narrow-BG2 `0/0` cap
+surviving the raw-wrap override and emptying the side starfield. Wide Full and
+Diorama-32 are again 17/17 artifacts exact to their accepted `0708` controls.
+
+### Per-layer role and extent seam (2026-08-10)
+
+`ActionBgPlan` now carries two orthogonal facts for each action plane: semantic
+role (`playfield`, `scene`, `backdrop`) and presentation extent. The unique
+finite-world playfield owns horizontal canvas clamping; the primary playfield
+or special scene anchors the vertical Diorama capture; a backdrop never gains
+either responsibility merely from being BG1 or BG2. Native/non-action plans
+remain unclassified and fail closed.
+
+Horizontal extents are available or fixed independently on the left and right;
+vertical extents do the same for top and bottom. Authentic pixels cannot be
+removed. Sorted half-open authentic-row bands may inherit, remove or replace a
+layer's horizontal cap. The producer resolves this once, applies it to PPU
+scanout, latches the same immutable value through `FrameSlot`, and lets Diorama
+build one UV span per distinct row policy. The presenter never reverses live
+PPU masks or reads `g_ppu` after scanout.
+
+The first canonical result is the requested Bloodpool composition: BG1 keeps
+the wide playable platform layer, BG2's unique moon/cloud family stops at the
+authentic side boundaries, and rows `136..224` keep repeating water across the
+canvas. Against the pre-policy Wide Full census, all 204 artifacts are
+accepted; 4,074 pixels change only in the two Bloodpool side margins, with
+every authentic center and state/PPU/VRAM artifact exact. The complete twelve
+ordinary entries also pass 4:3, Wide Raw and Diorama-32. Settings -> Layers ->
+BG Extents exposes a non-persistent sparse draft, A/B, colored guides and a
+normalized log dump without creating a second canonical policy store.
 
 ## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
 

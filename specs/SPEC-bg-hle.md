@@ -780,10 +780,12 @@ The old `DioramaBg2MarginSource` enum, scalar field, PPU-mask classifier and
 single-span API are removed. `DioramaBgValidSpanPlan_Build` evaluates the exact
 BG2 edge at every captured row, shifts authentic band coordinates by the live
 vertical-extension origin, and coalesces only adjacent rows with identical
-spans. The skybox emits one screen-space quad per distinct span. Bloodpool's
-Mirror→Repeat policy correctly coalesces to a full-width result; Death Heim's
-Clamp→Repeat fog remains two spans, so the lower repeated band is no longer
-over-cropped to the upper clamp.
+spans. The skybox emits one screen-space quad per distinct span. At the BH6
+checkpoint, Bloodpool's Mirror-to-Repeat policy correctly coalesced to a
+full-width result; the follow-on extent plan now keeps its upper family
+authentic-width while the water remains full. Death Heim's Clamp-to-Repeat fog
+remains two spans, so the lower repeated band is no longer over-cropped to the
+upper clamp.
 
 The ROM-free policy matrix still classifies all 49 action maps and now pins the
 native projection, explicit overrides, malformed-policy fail-closed behavior,
@@ -944,6 +946,17 @@ remain a second runtime source of truth.
 - `docs/rendering-engine.md`, `docs/SEAMS.md`, `docs/progress.md`, `DEBUG.md`,
   `docs/settings-system.md`, `docs/research-symbol-map.md` and this spec describe
   the final ownership accurately.
+
+### Follow-on per-layer extent plan (2026-08-10)
+
+`SPEC-bg-layer-extents.md` builds on the completed provider without changing
+its source or fallback contract. `ActionBgPlan` now also owns semantic
+playfield/scene/backdrop roles and independent presentation extents. Bloodpool
+keeps its playable BG1 and repeat-safe water wide while bounding the unique
+moon/cloud family; the PPU, immutable FrameSlot handoff and Diorama all consume
+the same row-resolved plan. The twelve-entry 4:3/Raw/Full/Diorama-32 gates and
+focused Death Heim Full/Diorama-32 gates pass. No ROM symbol changed; the new
+ownership is a host presentation seam.
 
 ---
 

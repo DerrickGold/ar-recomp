@@ -737,10 +737,12 @@ is broken at its first boss transition.
   wrong presentation there: cloud slope and motion reverse at both 256px
   boundaries. The renderer now cyclically repeats the isolated authentic BG2
   scanline for those three maps instead. This preserves same-direction scroll.
-  Bloodpool Act 2 retains its visually successful reflection policy, while
-  Bloodpool Act 1 (`0201`) is explicitly hybrid: mirror its static mountain
-  band above screen `y=136`, then cyclically repeat BG2 rows `136-223` so the
-  animated water keeps the same apparent direction across both seams.
+  Bloodpool acts 1 and 2 are explicitly hybrid. Their upper moon/cloud family
+  keeps the mirror edge classification but a fixed `0/0` extent prevents that
+  unique art from entering synthetic margins; BG2 rows `136-223` explicitly
+  remove the cap and cyclically repeat so the animated water keeps the same
+  apparent direction across both seams. The playable BG1 remains independently
+  wide.
 - Northwall Act 1 entry `0601` exhibits the same narrow-BG2 cloud technique.
   `runs/20260712-222626/` records BG1 width `$2E=$0A00`, BG2 width
   `$32=$0100`, and the live `$00:E7BC` -> `$02:945E` -> `$02:96B6` path
@@ -783,10 +785,10 @@ is broken at its first boss transition.
   `runs/20260714-173750/snapshots/snap_00_gf4875`, the active policy was
   `mirror=02` with BG2 `$32=$0100`; direct observation showed those reflected
   margins scrolling opposite the authentic center on maps `$19=04-$07`.
-  `$19=02/$03` are provisionally classified with the same background family.
-  The full `$02-$07` range now selects cyclic repeat; direct post-build
-  validation remains pending for these maps, especially the provisional
-  entries.
+  `$19=02/$03` are classified with the same background family. The full
+  `$02-$07` range selects cyclic repeat; 2026-08-10 direct Wide Full and
+  Diorama-32 matrices cover all six rooms with zero provider mismatch, and the
+  Wide Full set is 102/102 artifacts byte-exact to its frozen baseline.
 - Final-boss map `0708` is separate: both BG1 and BG2 declare `$0100` width and
   form stacked transparent star-road/star-field effects with scanline/sine
   motion (`runs/20260714-183142/snapshots/snap_00_gf12574` and
@@ -796,9 +798,14 @@ is broken at its first boss transition.
   32x32 maps already wrap natively every 256px. The optimized policy opens
   symmetric margins and draws both raw (`repeat=$00`), retaining their live
   raster phases without temporary clear/merge passes. Direct testing on
-  2026-07-14 confirmed correct visuals and normal performance.
-- Full Bloodpool act 2 run `runs/20260712-200334/`: mirror fill is visually
-  confirmed. The first handler batch restored early enemies/platforms. Later
+  2026-07-14 confirmed correct visuals and normal performance. Its explicit
+  `scene/backdrop` plan resets both native planes to available extents; a
+  2026-08-10 regression gate caught and fixed a generic narrow-BG2 cap that had
+  survived the special override and emptied the starfield margins.
+- Full Bloodpool act 2 run `runs/20260712-200334/`: the historical mirror fill
+  was visually confirmed before the later per-layer extent catalogue bounded
+  its unique upper art and retained only the repeat-safe water extension. The
+  first handler batch restored early enemies/platforms. Later
   F2 captures found four more live `$12` roots (`$BD82`, `$BD36`, `$BBB4`,
   `$BE0B`), expanding to 12 entries; `$BE0B` is also `found:0` on all 204 boss
   frames in the exit ring. These cfg registrations were pending at this capture;

@@ -1194,6 +1194,30 @@ the current debugging process; this file is the case law.
     a target. A harness limit that only works in headless mode cannot safely
     bound the renderer path whose behavior it is meant to validate.
 
+41. **Generic backdrop extent leaked into Death Heim's native final raster —
+    FIXED 2026-08-10.** The first canonical layer-extent policy correctly
+    bounded narrow mirrored landmark art before special-room classification.
+    `0708` then replaced BG1/BG2 source and edge with native `RawWrap`, but did
+    not replace the already-assigned BG2 horizontal cap. The edge log therefore
+    looked correct (`repeat=$00`, native/native) while the orthogonal fixed
+    `0/0` extent silently removed BG2's star field from both side margins.
+
+    **Fix:** the final-arena classifier now initializes role, source, edge,
+    horizontal extent, vertical extent and bands as one coherent override;
+    both raster planes explicitly use available extents. The plan test pins the
+    two 256px layers so the generic narrow classifier really runs before the
+    special override. Wide Full is 17/17 byte-exact to the accepted role
+    baseline and Diorama-32 is 17/17 exact to the role-driven owner baseline.
+    The same validation sweep covers every Death Heim rematch in Full and
+    Diorama-32; the Full set is 102/102 exact.
+
+    **Reusable lesson:** changing one axis of a classified policy does not
+    reset orthogonal axes. A special-case override must either construct a
+    complete value or explicitly normalize every field that earlier generic
+    classification could have touched. Logs and tests must assert independent
+    source, edge and extent state; one of them alone can be truthful while the
+    rendered result is wrong.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of
