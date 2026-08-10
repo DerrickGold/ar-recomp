@@ -20,7 +20,6 @@
 
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
-#include "crt_post.h"
 #include "diorama/diorama_scroll_math.h"
 #include "frame_slot.h"
 #include "host_display_pacing.h"
@@ -399,16 +398,6 @@ static void ReportPresentPerformance(uint32_t render_start_ms,
   window_frame_count = 0;
 }
 
-/* The letterboxed rect the game picture occupies, for the CRT resolve. Only
- * meaningful for the paths that disable logical presentation and compute their
- * own viewport — where SDL still owns the letterboxing, CrtPost_End prefers
- * SDL's own answer and ignores this. */
-static SDL_Rect PresentImageRect(const FrameSlot *slot) {
-  return ComputePresentationViewport(
-      g_renderer, slot->ignore_aspect_ratio,
-      slot->pixel_aspect, slot->visible_width, slot->snes_height);
-}
-
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
   if (!g_renderer || !g_texture) return false;
 
@@ -434,13 +423,10 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
     s_retained_frame.slot = slot;
     s_retained_frame.valid = true;
   }
-  CrtPost_Begin(g_renderer);
-  PresentComposite(
+  PresentFrame(
       &slot,
       game_tick ? &s_previous_scroll : NULL,
       game_tick ? alpha : kInterpPhaseNone);
-  CrtPost_End(g_renderer, slot.visible_width, slot.snes_height,
-              PresentImageRect(&slot));
   if (game_tick)
     FrameSlot_ExtractScrollSnapshot(&slot, &s_previous_scroll);
 
@@ -483,14 +469,10 @@ bool HostDisplay_TryRepresentFrame(float alpha,
     return false;
   }
 
-  CrtPost_Begin(g_renderer);
-  PresentComposite(
+  PresentFrame(
       &s_retained_frame.slot,
       &s_retained_frame.previous_scroll,
       alpha);
-  CrtPost_End(g_renderer, s_retained_frame.slot.visible_width,
-              s_retained_frame.slot.snes_height,
-              PresentImageRect(&s_retained_frame.slot));
   ThrottlePresent(PresentIntervalNs(kHostDisplayPresent_GameTick));
   SDL_RenderPresent(g_renderer);
   s_represent_count++;

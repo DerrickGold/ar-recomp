@@ -2,9 +2,9 @@
 
 /* CRT post-process: one fullscreen pass over the finished frame.
  *
- * Applied at the very end of presentation, after PresentComposite has drawn
- * whichever mode is live, so flat 2D, diorama, sim3D and world-navigation all
- * get it from a single integration point.
+ * Applied after PresentFrame's scene stage has drawn whichever mode is live,
+ * and before its terminal host-UI stage, so flat 2D, diorama, sim3D and
+ * world-navigation all get it from one integration point without masking UI.
  *
  * The pass runs over the WHOLE render target, but the game image occupies only
  * the letterboxed viewport inside it, so everything geometric works in "image

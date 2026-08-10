@@ -1,9 +1,8 @@
-/* T2a: the present.c <-> present_sim3d.c boundary.
+/* Internal boundary for the split presentation family.
  *
- * NOT a public API — that is present.h. This header exists only because the
- * SIM-mode 3D renderer was split out of present.c into its own translation
- * unit; it declares the present.c internals that renderer calls, and the sim
- * entry points present.c calls back into.
+ * NOT a public API — that is present.h. This header declares the scene and
+ * host-UI stages used by present_frame.c plus the helpers shared with the
+ * split SIM/world-navigation renderers.
  *
  * It deliberately exposes present.c internals ONLY. It must never carry live
  * game state (g_ppu, g_settings, g_snes_width, g_ws_extra,
@@ -41,8 +40,10 @@ typedef struct EffectBatch {
 SDL_FRect ToFRect(SDL_Rect r);
 void ApplyLogicalPresentation(const FrameSlot *slot);
 void PresentHudOverlayComposited(const FrameSlot *slot, SDL_Rect viewport);
-void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport);
-void PresentCheatBadge(const FrameSlot *slot, SDL_Rect viewport);
+void PresentCompositeScene(const FrameSlot *slot,
+                           const DioramaScrollSnapshot *prev_scroll,
+                           float alpha);
+void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport);
 bool EffectRendererAvailable(void);
 void DisableEffectAdd(const char *operation);
 bool BeginEffectAdd(EffectRenderState *state);

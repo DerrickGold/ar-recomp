@@ -164,7 +164,7 @@ bool CrtPost_Begin(SDL_Renderer *renderer) {
   SDL_SetRenderTarget(renderer, s_scene);
   /* The target carries its own logical presentation state (SDL_render.h: "Each
    * render target has its own logical presentation state"), which is what lets
-   * PresentComposite's existing per-mode logical-presentation handling work
+   * PresentCompositeScene's per-mode logical-presentation handling work
    * unchanged in here. Start from a known state each frame. */
   SDL_SetRenderLogicalPresentation(renderer, 0, 0,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);
@@ -199,9 +199,9 @@ static SDL_Rect ResolveImageRect(SDL_Renderer *renderer, SDL_Rect fallback) {
   return fallback;
 }
 
-void CrtPost_End(SDL_Renderer *renderer, int scan_columns, int scan_lines,
-                 SDL_Rect image) {
-  if (!s_engaged) return;
+SDL_Rect CrtPost_End(SDL_Renderer *renderer,
+                     int scan_columns, int scan_lines, SDL_Rect image) {
+  if (!s_engaged) return image;
   s_engaged = false;
 
   /* Before unbinding — this reads the scene target's own presentation state. */
@@ -268,6 +268,7 @@ void CrtPost_End(SDL_Renderer *renderer, int scan_columns, int scan_lines,
 
   SDL_SetRenderLogicalPresentation(renderer, logical_w, logical_h,
                                    logical_mode);
+  return image;
 }
 
 SDL_Texture *CrtPost_BaseTarget(void) {

@@ -12,21 +12,25 @@ rather than a performance trade-off.
 
 ## Why there is only one integration point
 
-`PresentComposite()` is the single function every render mode funnels through —
-flat 2D, diorama, sim3D enhanced and world-navigation 3D. Redirecting it into an
-offscreen target and resolving that target through a shader gives every mode the
-effect at once, with no per-mode work. It has exactly three callers: the two
-present paths in `host_display.c` and the screenshot path in `dev_tools.c`.
+`PresentFrame()` is the single function every render mode funnels through — flat
+2D, diorama, sim3D enhanced and world-navigation 3D. It owns the scene target,
+mode-specific composite, resolve, and terminal host-UI pass in that order. It
+has exactly three callers: the two present paths in `host_display.c` and the
+screenshot path in `dev_tools.c`.
 
 ```
-CrtPost_Begin(renderer);          /* redirect into the scene target */
-PresentComposite(...);            /* whichever mode is live         */
-CrtPost_End(renderer, ...);       /* resolve through the shader     */
+PresentFrame(...);                /* begin -> scene -> resolve -> UI */
 SDL_RenderPresent(renderer);
 ```
 
-Both calls are no-ops when the effect is off, leaving the original path
-byte-for-byte untouched.
+The internal CRT begin/end calls are no-ops when the effect is off, leaving the
+scene path byte-for-byte untouched.
+
+The inspector, cheat disclosure, manual and settings overlay deliberately render
+after the resolve. They are host UI, not part of the emulated video signal;
+keeping them outside the scene target also prevents a 4:3 fullscreen resolve
+from painting black pillar bars over them. The developer screenshot path calls
+the same function, so captures still match the live window.
 
 ## The trap: "back to the backbuffer"
 

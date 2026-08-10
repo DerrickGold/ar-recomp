@@ -556,11 +556,64 @@ int main(void) {
   CHECK(SettingsOverlay_IsOpen());
   CheckManualSectionAvailability();
   if (renderer) {
+    /* Fullscreen 4:3 leaves SDL's game presentation pillarboxed on a wide
+     * output. A direct overlay call must temporarily discard that coordinate
+     * space and game-local clip, draw into the bars, then restore both. */
+    CHECK(SDL_SetRenderLogicalPresentation(
+        renderer, 1024, 768, SDL_LOGICAL_PRESENTATION_LETTERBOX));
+    SDL_Rect game_clip = { 0, 0, 1024, 768 };
+    CHECK(SDL_SetRenderClipRect(renderer, &game_clip));
+    int expected_logical_width = -1, expected_logical_height = -1;
+    SDL_RendererLogicalPresentation expected_logical_mode =
+        SDL_LOGICAL_PRESENTATION_DISABLED;
+    CHECK(SDL_GetRenderLogicalPresentation(
+        renderer, &expected_logical_width, &expected_logical_height,
+        &expected_logical_mode));
+    const bool expected_viewport_set = SDL_RenderViewportSet(renderer);
+    SDL_Rect expected_viewport = {0};
+    CHECK(SDL_GetRenderViewport(renderer, &expected_viewport));
+    const bool expected_clip_enabled = SDL_RenderClipEnabled(renderer);
+    SDL_Rect expected_clip = {0};
+    CHECK(SDL_GetRenderClipRect(renderer, &expected_clip));
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
     SettingsOverlay_Render(
         (SDL_Rect){0, 0, surface_width, surface_height});
+    int logical_width = -1, logical_height = -1;
+    SDL_RendererLogicalPresentation logical_mode =
+        SDL_LOGICAL_PRESENTATION_LETTERBOX;
+    CHECK(SDL_GetRenderLogicalPresentation(
+        renderer, &logical_width, &logical_height, &logical_mode));
+    CHECK(logical_width == expected_logical_width &&
+          logical_height == expected_logical_height);
+    CHECK(logical_mode == expected_logical_mode);
+    CHECK(SDL_RenderViewportSet(renderer) == expected_viewport_set);
+    SDL_Rect overlay_viewport = { -1, -1, -1, -1 };
+    CHECK(SDL_GetRenderViewport(renderer, &overlay_viewport));
+    CHECK(SDL_RectsEqual(&overlay_viewport, &expected_viewport));
+    CHECK(SDL_RenderClipEnabled(renderer) == expected_clip_enabled);
+    SDL_Rect overlay_clip = {0};
+    CHECK(SDL_GetRenderClipRect(renderer, &overlay_clip));
+    CHECK(SDL_RectsEqual(&overlay_clip, &expected_clip));
     SDL_RenderPresent(renderer);
+    /* On a wide target, surviving pixels in the left pillar prove this was a
+     * real full-output draw rather than state bookkeeping alone. */
+    const int content_width = surface_height * 4 / 3;
+    const int pillar_width = (surface_width - content_width) / 2;
+    if (pillar_width > 0 && surface) {
+      int changed = 0;
+      for (int y = 0; y < surface_height && changed == 0; y++) {
+        for (int x = 0; x < pillar_width; x++) {
+          Uint8 r = 0, g = 0, b = 0, a = 0;
+          CHECK(SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a));
+          if (r != 32 || g != 24 || b != 16) {
+            changed++;
+            break;
+          }
+        }
+      }
+      CHECK(changed > 0);
+    }
     const char *preview = getenv("AR_OVERLAY_TEST_BMP");
     if (preview && preview[0]) CHECK(SDL_SaveBMP(surface, preview));
     /* Scroll to the Refresh rate row and capture it to eyeball the Hz label. */

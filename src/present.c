@@ -504,7 +504,7 @@ static bool FindSelectedHudChunk(const FrameSlot *slot, SDL_Rect viewport,
   return false;
 }
 
-void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
+static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
   if (!slot->scene_inspector_enabled || !SceneInspector_HasSelection())
     return;
   int x = 0, y = 0;
@@ -700,7 +700,7 @@ static DioramaScrollDelta ComputeDioramaScrollDelta(
  * FrameSlot every frame, so Free Cam behavior/output is unchanged). Dynamic
  * Cam: baseline pose today (direct snap; B4-vellean/B4-damp add sway +
  * easing on top in a later checkpoint). A plain file-scope static, not
- * thread-local: PresentComposite (like every other present.c function) is
+ * thread-local: PresentCompositeScene (like every other present.c function) is
  * only ever called from the present thread, the same reasoning that already
  * covers s_hud_composite_texture above. Diorama_Composite's camera parameter
  * comes from here in Dynamic mode, from the slot's authored pose in Free
@@ -937,7 +937,7 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
  * able to hide. Drawn last-but-one — above the game and the HUD, below the
  * settings overlay, in every presentation path — so it cannot be scrolled,
  * masked, or projected out of frame. */
-void PresentCheatBadge(const FrameSlot *slot, SDL_Rect viewport) {
+static void PresentCheatBadge(const FrameSlot *slot, SDL_Rect viewport) {
   if (!slot || !slot->magic_cycle_armed) return;
 
   static const char *const kSpells[] = {
@@ -957,6 +957,19 @@ void PresentCheatBadge(const FrameSlot *slot, SDL_Rect viewport) {
   int x = viewport.x + kSettingsOverlayGlyphSize;
   int y = viewport.y + kSettingsOverlayGlyphSize;
   SettingsOverlay_DrawGameText(x, y, scale, 255, text);
+}
+
+/* Terminal host UI is deliberately outside the CRT scene. One scoped physical
+ * output coordinate space covers the inspector marker/panel, cheat disclosure,
+ * manual and settings menu, then restores the backbuffer state for callers. */
+void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport) {
+  if (!slot || !g_renderer) return;
+  PresentationOutputState output_state;
+  if (!PresentationGeometry_PushFullOutput(g_renderer, &output_state)) return;
+  PresentSceneInspector(slot, viewport);
+  PresentCheatBadge(slot, viewport);
+  SettingsOverlay_Render(viewport);
+  PresentationGeometry_PopFullOutput(g_renderer, &output_state);
 }
 
 bool Present_SimRimMaskSupported(void) {
@@ -991,9 +1004,9 @@ void PresentRendererResources_Reset(void) {
   PresentSim3D_ResetResources();
 }
 
-void PresentComposite(const FrameSlot *slot,
-                      const DioramaScrollSnapshot *prev_scroll,
-                      float alpha) {
+void PresentCompositeScene(const FrameSlot *slot,
+                           const DioramaScrollSnapshot *prev_scroll,
+                           float alpha) {
   if (!g_renderer || !g_texture) return;
 
   /* The action map group becomes live while the world-to-action transition
@@ -1223,9 +1236,6 @@ void PresentComposite(const FrameSlot *slot,
      * two don't both draw a HUD. */
     if (slot->diorama_hud_flat)
       PresentHudOverlayComposited(slot, viewport);
-    PresentSceneInspector(slot, viewport);
-    PresentCheatBadge(slot, viewport);
-    SettingsOverlay_Render(viewport);
     return;
   }
 
@@ -1245,8 +1255,5 @@ void PresentComposite(const FrameSlot *slot,
   DrawActionEffects(slot, viewport, NULL);
   PresentHudOverlay(slot, viewport);
   PresentHdReplacements(slot, viewport);
-  PresentSceneInspector(slot, viewport);
-  PresentCheatBadge(slot, viewport);
-  SettingsOverlay_Render(viewport);
   ApplyLogicalPresentation(slot);
 }

@@ -69,6 +69,43 @@ int main(void) {
   CHECK(renderer != NULL);
   if (!renderer) { SDL_Quit(); return 1; }
 
+  /* Full-output host UI uses a scoped renderer view. Pin both halves of that
+   * contract here: the scope clears logical presentation/viewport/clip, and
+   * Pop restores whether the viewport was explicit as well as its rectangle. */
+  {
+    CHECK(SDL_SetRenderLogicalPresentation(
+        renderer, 1024, 768, SDL_LOGICAL_PRESENTATION_LETTERBOX));
+    SDL_Rect viewport = { 10, 20, 900, 680 };
+    SDL_Rect clip = { 3, 4, 100, 80 };
+    CHECK(SDL_SetRenderViewport(renderer, &viewport));
+    CHECK(SDL_SetRenderClipRect(renderer, &clip));
+    PresentationOutputState state;
+    CHECK(PresentationGeometry_PushFullOutput(renderer, &state));
+    int logical_w = -1, logical_h = -1;
+    SDL_RendererLogicalPresentation logical_mode =
+        SDL_LOGICAL_PRESENTATION_LETTERBOX;
+    CHECK(SDL_GetRenderLogicalPresentation(
+        renderer, &logical_w, &logical_h, &logical_mode));
+    CHECK(logical_w == 0 && logical_h == 0);
+    CHECK(logical_mode == SDL_LOGICAL_PRESENTATION_DISABLED);
+    CHECK(!SDL_RenderViewportSet(renderer));
+    CHECK(!SDL_RenderClipEnabled(renderer));
+    PresentationGeometry_PopFullOutput(renderer, &state);
+    CHECK(SDL_GetRenderLogicalPresentation(
+        renderer, &logical_w, &logical_h, &logical_mode));
+    CHECK(logical_w == 1024 && logical_h == 768);
+    CHECK(logical_mode == SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    CHECK(SDL_RenderViewportSet(renderer));
+    SDL_Rect restored = {0};
+    CHECK(SDL_GetRenderViewport(renderer, &restored));
+    CHECK(SDL_RectsEqual(&restored, &viewport));
+    CHECK(SDL_RenderClipEnabled(renderer));
+    CHECK(SDL_GetRenderClipRect(renderer, &restored));
+    CHECK(SDL_RectsEqual(&restored, &clip));
+    CHECK(SDL_SetRenderViewport(renderer, NULL));
+    CHECK(SDL_SetRenderClipRect(renderer, NULL));
+  }
+
   /* Streaming texture at the full widescreen budget, like g_texture — created
    * the SAME way main.c creates it, including the blend mode. This is the
    * regression guard for the black-screen bug: SDL3 defaults new textures to

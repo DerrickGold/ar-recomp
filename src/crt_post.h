@@ -1,19 +1,16 @@
 /* CRT post-processing: one fullscreen shader pass over the finished frame.
  *
- * The whole effect hangs off a single integration point. PresentComposite() is
- * the one function every render mode funnels through — flat 2D, diorama, sim3D
- * enhanced and world-navigation 3D — so redirecting it into an offscreen target
- * and resolving that target through a shader gives every mode the effect at
- * once, with no per-mode work.
+ * PresentFrame() owns the one integration point every render mode funnels
+ * through — flat 2D, diorama, sim3D enhanced and world-navigation 3D — so
+ * redirecting its scene stage into an offscreen target and resolving it here
+ * gives every mode the effect at once.
  *
  * Usage, around the existing composite call:
  *
- *     CrtPost_Begin(renderer);
- *     PresentComposite(...);
- *     CrtPost_End(renderer, scan_lines, image_rect);
+ *     PresentFrame(...);  // begin -> scene -> resolve -> host UI
  *     SDL_RenderPresent(renderer);
  *
- * Both calls are no-ops when the effect is off, leaving the original path
+ * Begin/End are no-ops when the effect is off, leaving the scene path
  * byte-for-byte untouched.
  *
  * IMPORTANT for any code that renders to its own target: while this is engaged,
@@ -32,7 +29,7 @@
 bool CrtPost_Begin(SDL_Renderer *renderer);
 
 /* Resolve the scene target to the backbuffer through the CRT shader. Safe to
- * call unconditionally; does nothing if Begin did not engage.
+ * call unconditionally; returns `image` unchanged if Begin did not engage.
  *
  * `scan_columns`/`scan_lines` are the SOURCE dimensions (visible_width and
  * g_snes_height), not pixel counts on screen — the beam profile and the
@@ -40,9 +37,14 @@ bool CrtPost_Begin(SDL_Renderer *renderer);
  * they must hold still as it scales.
  * `image` is the letterboxed viewport the game picture occupies inside the
  * target, so curvature and scanlines apply to the picture and not to the
- * black bars around it. */
-void CrtPost_End(SDL_Renderer *renderer, int scan_columns, int scan_lines,
-                 SDL_Rect image);
+ * black bars around it.
+ *
+ * Returns the exact image rectangle used for the resolve. Flat presentation
+ * may replace the caller's calculated fallback with SDL's per-target logical
+ * presentation rectangle; post-resolve host UI must consume this return value
+ * so both passes share one geometry truth. */
+SDL_Rect CrtPost_End(SDL_Renderer *renderer,
+                     int scan_columns, int scan_lines, SDL_Rect image);
 
 /* The target that "back to the base surface" means right now: NULL when the
  * effect is off, the scene target while it is engaged. */
