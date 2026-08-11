@@ -158,9 +158,11 @@ typedef struct FrameSlot {
    * stages land, so adding this contract cannot change the authentic composite. */
   SimFrameData sim;
 
-  /* Action-stage spell lifecycle, captured from WRAM beside the frame it
-   * decorates. The payload is inert outside a positively identified spell. */
+  /* Action-stage spell and scene lifecycles, captured from WRAM beside the
+   * frame they decorate. Payloads are inert outside positively identified
+   * source records/map objects. */
   ActionEffectFrame action_effects;
+  ActionSceneEffectFrame action_scene_effects;
   bool action_effect_lighting;
   bool action_effect_particles;
 

@@ -350,6 +350,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_action_effects_test
         tests/action_effects_test.c
         src/action/action_effects.c
+        src/action/action_bg_world.c
     )
     target_include_directories(actraiser_action_effects_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

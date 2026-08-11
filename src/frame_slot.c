@@ -329,6 +329,9 @@ void FrameSlot_Capture(FrameSlot *dst) {
   ActionEffects_CaptureFrame(&s_action_effect_observer, &dst->action_effects,
                              g_ram,
                              kActRaiserWramSize, g_capture_ticks);
+  ActionSceneEffects_CaptureFrame(&s_action_effect_observer,
+                                  &dst->action_scene_effects, g_ram,
+                                  kActRaiserWramSize, g_capture_ticks);
   dst->action_effect_lighting = g_settings.action_effect_lighting;
   dst->action_effect_particles = g_settings.action_effect_particles;
   /* Capture-side twin of present.c's "[action-fx] first spell geometry
@@ -346,6 +349,19 @@ void FrameSlot_Capture(FrameSlot *dst) {
               dst->action_effects.controller_kind,
               dst->action_effects.effect_count,
               dst->action_effects.visible_count,
+              g_settings.action_effect_lighting,
+              g_settings.action_effect_particles);
+    }
+  }
+  if (dst->action_scene_effects.effect_count) {
+    static bool announced_scene;
+    if (!announced_scene) {
+      announced_scene = true;
+      fprintf(stderr,
+              "[action-fx] first scene accents captured: effect(s)=%u "
+              "visible=%u (lighting=%d particles=%d)\n",
+              dst->action_scene_effects.effect_count,
+              dst->action_scene_effects.visible_count,
               g_settings.action_effect_lighting,
               g_settings.action_effect_particles);
     }

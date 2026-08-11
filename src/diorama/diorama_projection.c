@@ -5,13 +5,11 @@
 #include "diorama_depth_shapes.h"
 #include "scene3d_math.h"
 
-bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
-                                  float capture_x, float capture_y,
-                                  unsigned obj_priority, SDL_FPoint *point,
-                                  float *scale_x, float *scale_y) {
-  if (!projection || !projection->valid || !point ||
-      obj_priority >= kDioramaObjectPriorityCount ||
-      !projection->object_planes[obj_priority].valid ||
+static bool ProjectCapturedPlanePoint(
+    const DioramaProjection *projection, float capture_x, float capture_y,
+    const DioramaObjectPlaneProjection *plane, SDL_FPoint *point,
+    float *scale_x, float *scale_y) {
+  if (!projection || !projection->valid || !point || !plane || !plane->valid ||
       projection->texture_width <= 0 || projection->texture_height <= 0 ||
       projection->output_width <= 0 || projection->output_height <= 0)
     return false;
@@ -19,14 +17,13 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
   float dv = projection->object_v1 - projection->object_v0;
   if (du == 0.0f || dv == 0.0f) return false;
 
-  const DioramaObjectPlaneProjection *plane =
-      &projection->object_planes[obj_priority];
   SDL_FPoint projected[3];
   int sample_count = (scale_x || scale_y) ? 3 : 1;
   for (int sample = 0; sample < sample_count; sample++) {
     float x = capture_x + (sample == 1 ? 1.0f : 0.0f);
     float y = capture_y + (sample == 2 ? 1.0f : 0.0f);
-    float u = x / (float)projection->texture_width;
+    float u = (x + (float)projection->texture_x_origin) /
+        (float)projection->texture_width;
     float v = y / (float)projection->texture_height;
     float s = (u - projection->object_u0) / du;
     float t = (v - projection->object_v0) / dv;
@@ -53,4 +50,24 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
     *scale_y = hypotf(projected[2].x - projected[0].x,
                       projected[2].y - projected[0].y);
   return true;
+}
+
+bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
+                                  float capture_x, float capture_y,
+                                  unsigned obj_priority, SDL_FPoint *point,
+                                  float *scale_x, float *scale_y) {
+  if (!projection || obj_priority >= kDioramaObjectPriorityCount) return false;
+  return ProjectCapturedPlanePoint(
+      projection, capture_x, capture_y,
+      &projection->object_planes[obj_priority], point, scale_x, scale_y);
+}
+
+bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
+                                     float capture_x, float capture_y,
+                                     SDL_FPoint *point,
+                                     float *scale_x, float *scale_y) {
+  if (!projection) return false;
+  return ProjectCapturedPlanePoint(projection, capture_x, capture_y,
+                                   &projection->bg1_plane, point,
+                                   scale_x, scale_y);
 }

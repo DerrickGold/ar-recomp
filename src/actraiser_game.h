@@ -236,6 +236,7 @@ enum {
   kActRaiserObjectStatus_End = 0x8000,
   kActRaiserObjectStatus_NoDraw = 0x2000,
   kActRaiserObjectStatus_IneligibleMask = 0x4C00,
+  kActRaiserObjectFlag_Attacker = 0x0001,
   kActRaiserObjectFlag_OutsideActivation = 0x0400,
   kActRaiserObjectFlip_Horizontal = 0x4000,
   kActRaiserObjectFlip_Vertical = 0x8000,
@@ -267,12 +268,19 @@ typedef enum ActRaiserActionObjectField {
   kActRaiserActionObject_BaseAttributes = 0x19,   /* byte; mirrors +$29 */
   kActRaiserActionObject_AnimationState = 0x1A,
   kActRaiserActionObject_AnimationIndex = 0x1C,
+  /* Polymorphic control-flow/source fields. They are only stable identities
+   * within a measured actor family; presentation observers must combine them
+   * with animation state/visual/composition instead of treating them as a
+   * universal object type. */
+  kActRaiserActionObject_ResumeAddress = 0x1E,
   kActRaiserActionObject_Composition = 0x20,
   kActRaiserActionObject_Visual = 0x22,
   kActRaiserActionObject_Wait = 0x24,
   kActRaiserActionObject_FlipAttributes = 0x28,
   kActRaiserActionObject_Flags = 0x30,
+  kActRaiserActionObject_SourceDescriptor = 0x32,
   kActRaiserActionObject_LocalCounter = 0x38,
+  kActRaiserActionObject_SpawnerBacklink = 0x3A,
 } ActRaiserActionObjectField;
 
 /* Low-WRAM (bank $7E, addresses $0000-$FFFF) 16-bit access.

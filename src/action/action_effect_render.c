@@ -124,11 +124,39 @@ static float HashUnit(uint32_t value) {
   return (float)(EffectHash(value) & 0xFFFFu) / 65535.0f;
 }
 
-static bool Reserve(const ActionEffectRenderBatch *batch,
+/* Capacity-aware view over either public batch type. Geometry builders write
+ * directly into their final destination; no spell-sized scene scratch batch,
+ * index rebasing, or capacity coupling is required. Counts are committed to
+ * the public batch only after the complete build succeeds, so any overflow
+ * leaves a zero-count, fail-closed output. */
+typedef struct ActionEffectGeometryWriter {
+  SDL_Vertex *vertices;
+  int *indices;
+  int vertex_count;
+  int index_count;
+  int vertex_capacity;
+  int index_capacity;
+} ActionEffectGeometryWriter;
+
+static ActionEffectGeometryWriter GeometryWriter(
+    SDL_Vertex *vertices, int vertex_capacity,
+    int *indices, int index_capacity) {
+  return (ActionEffectGeometryWriter) {
+    .vertices = vertices,
+    .indices = indices,
+    .vertex_capacity = vertex_capacity,
+    .index_capacity = index_capacity,
+  };
+}
+
+static bool Reserve(const ActionEffectGeometryWriter *writer,
                     int vertices, int indices) {
-  return batch && vertices >= 0 && indices >= 0 &&
-      batch->vertex_count <= kActionEffectRenderMaxVertices - vertices &&
-      batch->index_count <= kActionEffectRenderMaxIndices - indices;
+  return writer && writer->vertices && writer->indices &&
+      vertices >= 0 && indices >= 0 &&
+      vertices <= writer->vertex_capacity &&
+      indices <= writer->index_capacity &&
+      writer->vertex_count <= writer->vertex_capacity - vertices &&
+      writer->index_count <= writer->index_capacity - indices;
 }
 
 /* Integer triangle wave over `period` ticks, 0..1. Identical phase and
@@ -142,14 +170,25 @@ static float TriangleWave(unsigned ticks, unsigned period) {
   return (float)triangle / (float)half;
 }
 
+/* The captured clock remains authentic 60 Hz lifecycle time. Bloodpool's BG
+ * torch art turns over much faster than the original generic light pulse, so
+ * only its presentation samples run at 2x. Unsigned wrap is intentional: all
+ * visual functions below are periodic and deterministic across the wrap. */
+static unsigned EffectVisualTicks(const ActionEffectInstance *effect,
+                                  unsigned ticks) {
+  return effect && effect->kind == kActionEffect_WallTorch ? ticks * 2u : ticks;
+}
+
 /* Two beat rates rather than one. A single slow swell reads as a light being
  * dimmed; a fast flicker riding a slow swell reads as combustion. The rates
  * are deliberately coprime (7 and 30) so the pair does not resynchronise into
  * a visible loop for hundreds of ticks. */
 static float DeterministicPulse(const ActionEffectInstance *effect) {
   unsigned seed = (unsigned)effect->visual * 2u;
-  float swell = TriangleWave((unsigned)effect->phase_ticks + seed, 30u);
-  float flicker = TriangleWave((unsigned)effect->phase_ticks + seed * 3u, 7u);
+  const unsigned ticks = EffectVisualTicks(
+      effect, (unsigned)effect->phase_ticks);
+  float swell = TriangleWave(ticks + seed, 30u);
+  float flicker = TriangleWave(ticks + seed * 3u, 7u);
   return 0.82f + 0.12f * swell + 0.06f * flicker;
 }
 
@@ -487,7 +526,7 @@ static bool ProjectWithScale(const ActionEffectInstance *effect,
 
 /* One ring-gradient glow centred on a local point. Shared by the burst body
  * and the per-part cores — they differ only in radius and palette. */
-static bool AppendGlow(ActionEffectRenderBatch *batch,
+static bool AppendGlow(ActionEffectGeometryWriter *writer,
                        const ActionEffectInstance *effect,
                        const ActionEffectGlowStyle *style, float strength,
                        float local_x, float local_y,
@@ -502,13 +541,13 @@ static bool AppendGlow(ActionEffectRenderBatch *batch,
   if (!ProjectWithScale(effect, project_point, userdata, local_x, local_y,
                         &anchor, &scale_x, &scale_y))
     return true;
-  if (!Reserve(batch, kActionEffectGlowVertices, kActionEffectGlowIndices))
+  if (!Reserve(writer, kActionEffectGlowVertices, kActionEffectGlowIndices))
     return false;
 
-  int centre = batch->vertex_count;
+  int centre = writer->vertex_count;
   SDL_FColor centre_color = style->centre;
   centre_color.a *= strength;
-  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
     anchor, centre_color, { 0.0f, 0.0f },
   };
 
@@ -517,7 +556,7 @@ static bool AppendGlow(ActionEffectRenderBatch *batch,
 
   int ring_base[kRings];
   for (int r = 0; r < kRings; r++) {
-    ring_base[r] = batch->vertex_count;
+    ring_base[r] = writer->vertex_count;
     SDL_FColor color = style->ring[r];
     color.a *= strength;
     float scale = style->ring_scale[r];
@@ -539,10 +578,11 @@ static bool AppendGlow(ActionEffectRenderBatch *batch,
     float ax = style->axis_x, ay = style->axis_y;
     for (int s = 0; s < kSegments; s++) {
       float shape = 1.0f + wobble * FlameSilhouette(
-          style->seed, (unsigned)effect->pulse_ticks, s);
+          style->seed,
+          EffectVisualTicks(effect, (unsigned)effect->pulse_ticks), s);
       float ux = kCircle32[s][0] * radius_x * scale * shape;
       float uy = kCircle32[s][1] * radius_y * scale * shape;
-      batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+      writer->vertices[writer->vertex_count++] = (SDL_Vertex){
         { anchor.x + ux * ax - uy * ay + style->lift_x * lift,
           anchor.y + ux * ay + uy * ax + style->lift_y * lift },
         color, { 0.0f, 0.0f },
@@ -552,9 +592,10 @@ static bool AppendGlow(ActionEffectRenderBatch *batch,
 
   /* Centre fan out to ring 0. */
   for (int s = 0; s < kSegments; s++) {
-    batch->indices[batch->index_count++] = centre;
-    batch->indices[batch->index_count++] = ring_base[0] + s;
-    batch->indices[batch->index_count++] = ring_base[0] + (s + 1) % kSegments;
+    writer->indices[writer->index_count++] = centre;
+    writer->indices[writer->index_count++] = ring_base[0] + s;
+    writer->indices[writer->index_count++] =
+        ring_base[0] + (s + 1) % kSegments;
   }
   /* Quad strips between consecutive rings, two triangles per segment. */
   for (int r = 0; r + 1 < kRings; r++) {
@@ -562,12 +603,12 @@ static bool AppendGlow(ActionEffectRenderBatch *batch,
       int next = (s + 1) % kSegments;
       int inner0 = ring_base[r] + s, inner1 = ring_base[r] + next;
       int outer0 = ring_base[r + 1] + s, outer1 = ring_base[r + 1] + next;
-      batch->indices[batch->index_count++] = inner0;
-      batch->indices[batch->index_count++] = outer0;
-      batch->indices[batch->index_count++] = outer1;
-      batch->indices[batch->index_count++] = inner0;
-      batch->indices[batch->index_count++] = outer1;
-      batch->indices[batch->index_count++] = inner1;
+      writer->indices[writer->index_count++] = inner0;
+      writer->indices[writer->index_count++] = outer0;
+      writer->indices[writer->index_count++] = outer1;
+      writer->indices[writer->index_count++] = inner0;
+      writer->indices[writer->index_count++] = outer1;
+      writer->indices[writer->index_count++] = inner1;
     }
   }
   return true;
@@ -610,7 +651,7 @@ static void EmberOffset(float drift, float t, float *x, float *y) {
  * palette from the burst's anchor gave bursting stars a flight trail (and
  * flying stars a detonation spray) depending only on which part happened to be
  * first in the frame. */
-static bool AppendEmbers(ActionEffectRenderBatch *batch,
+static bool AppendEmbers(ActionEffectGeometryWriter *writer,
                          const ActionEffectBurst *burst, unsigned count,
                          const SpellVisual *visual,
                          ActionEffectProjectPointFn project_point,
@@ -743,22 +784,22 @@ static bool AppendEmbers(ActionEffectRenderBatch *batch,
     color.a *= burst->strength * flicker * birth_fade;
 
     static const int kQuad[] = { 0, 1, 2, 0, 2, 3 };
-    if (!Reserve(batch, 4, 6)) return false;
-    int base = batch->vertex_count;
-    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    if (!Reserve(writer, 4, 6)) return false;
+    int base = writer->vertex_count;
+    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
       { position.x + dir_x * reach, position.y + dir_y * reach },
       color, { 0.0f, 0.0f } };
-    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
       { position.x - dir_y * width, position.y + dir_x * width },
       color, { 0.0f, 0.0f } };
-    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
       { position.x - dir_x * reach, position.y - dir_y * reach },
       color, { 0.0f, 0.0f } };
-    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
       { position.x + dir_y * width, position.y - dir_x * width },
       color, { 0.0f, 0.0f } };
     for (int n = 0; n < 6; n++)
-      batch->indices[batch->index_count++] = base + kQuad[n];
+      writer->indices[writer->index_count++] = base + kQuad[n];
   }
   return true;
 }
@@ -849,6 +890,9 @@ bool ActionEffectRender_Build(const ActionEffectFrame *frame,
     return false;
   if (!lighting_enabled && !particles_enabled) return true;
   if (!project_point) return false;
+  ActionEffectGeometryWriter writer = GeometryWriter(
+      batch->vertices, kActionEffectRenderMaxVertices,
+      batch->indices, kActionEffectRenderMaxIndices);
 
   ActionEffectBurst burst;
   if (!BuildBurst(frame, &burst)) return true;
@@ -894,7 +938,7 @@ bool ActionEffectRender_Build(const ActionEffectFrame *frame,
       .lift_x = 0.0f, .lift_y = -1.0f,
       .seed = (unsigned)burst.anchor->record_address >> 4,
     };
-    if (!AppendGlow(batch, burst.anchor, &spill, strength, mid_x, mid_y,
+    if (!AppendGlow(&writer, burst.anchor, &spill, strength, mid_x, mid_y,
                     project_point, project_userdata))
       return false;
 
@@ -957,7 +1001,7 @@ bool ActionEffectRender_Build(const ActionEffectFrame *frame,
         .lift_x = lift_x, .lift_y = lift_y,
         .seed = (unsigned)burst.flame[i].source->record_address >> 5,
       };
-      if (!AppendGlow(batch, burst.anchor, &body,
+      if (!AppendGlow(&writer, burst.anchor, &body,
                       burst.strength * part_phase->strength,
                       (rect->x0 + rect->x1) * 0.5f,
                       (rect->y0 + rect->y1) * 0.5f,
@@ -971,9 +1015,780 @@ bool ActionEffectRender_Build(const ActionEffectFrame *frame,
     unsigned embers = (unsigned)((float)visual->embers * phase->embers);
     if (embers > kActionEffectMaxEmbers) embers = kActionEffectMaxEmbers;
     if (embers &&
-        !AppendEmbers(batch, &burst, embers, visual, project_point,
+        !AppendEmbers(&writer, &burst, embers, visual, project_point,
                       project_userdata))
       return false;
   }
+  batch->vertex_count = writer.vertex_count;
+  batch->index_count = writer.index_count;
+  return true;
+}
+
+/* ── Independent scene lights ─────────────────────────────────────────────
+ *
+ * Scene effects intentionally reuse the same ring-gradient geometry and SDL
+ * additive submission as spells. No renderer shader or backend-specific
+ * uniform path is involved: GLSL/SPIR-V/MSL support therefore does not gate
+ * these accents, and SDL's software/D3D renderers receive the same batch.
+ * Unlike a spell cast, each scene record remains an independent light centre. */
+
+static bool SceneActorHeading(const ActionEffectInstance *effect,
+                              float *x, float *y) {
+  if (!effect || !x || !y) return false;
+  const float vx = (float)effect->velocity_x;
+  const float vy = (float)effect->velocity_y;
+  const float speed = hypotf(vx, vy);
+  if (speed < 0.001f) return false;
+  *x = vx / speed;
+  *y = vy / speed;
+  return true;
+}
+
+static bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
+                                const ActionEffectInstance *effect,
+                                float x, float y, float previous_x,
+                                float previous_y, float width, float reach,
+                                SDL_FColor color,
+                                ActionEffectProjectPointFn project_point,
+                                void *userdata) {
+  SDL_FPoint position, previous;
+  float scale_x, scale_y;
+  if (!ProjectWithScale(effect, project_point, userdata, x, y, &position,
+                        &scale_x, &scale_y) ||
+      !project_point(userdata, effect, previous_x, previous_y, &previous))
+    return true;
+  const float output_scale = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
+  float dx = position.x - previous.x;
+  float dy = position.y - previous.y;
+  const float length = hypotf(dx, dy);
+  if (length < 0.001f) {
+    dx = 0.0f;
+    dy = -1.0f;
+  } else {
+    dx /= length;
+    dy /= length;
+  }
+  width *= output_scale;
+  reach *= output_scale;
+  if (!Reserve(writer, 4, 6)) return false;
+  const int base = writer->vertex_count;
+  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    {position.x + dx * reach, position.y + dy * reach}, color, {0.0f, 0.0f}};
+  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    {position.x - dy * width, position.y + dx * width}, color, {0.0f, 0.0f}};
+  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    {position.x - dx * reach, position.y - dy * reach}, color, {0.0f, 0.0f}};
+  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    {position.x + dy * width, position.y - dx * width}, color, {0.0f, 0.0f}};
+  static const int kQuad[6] = {0, 1, 2, 0, 2, 3};
+  for (int i = 0; i < 6; i++)
+    writer->indices[writer->index_count++] = base + kQuad[i];
+  return true;
+}
+
+/* A sword-beam sparkle is two crossed additive diamonds. Four of these use
+ * the same bounded vertex/index allowance as eight ordinary scene motes, but
+ * read as deliberate star glints rather than as fire embers. The basis comes
+ * from projected local unit vectors so the cross follows the OBJ plane in
+ * Diorama mode instead of remaining screen-axis-aligned. */
+static bool AppendSceneStarParticle(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    float local_x, float local_y, float size, SDL_FColor color,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  SDL_FPoint centre, sample_x, sample_y;
+  if (!project_point(userdata, effect, local_x, local_y, &centre) ||
+      !project_point(userdata, effect, local_x + 1.0f, local_y, &sample_x) ||
+      !project_point(userdata, effect, local_x, local_y + 1.0f, &sample_y))
+    return true;
+  float xx = sample_x.x - centre.x, xy = sample_x.y - centre.y;
+  float yx = sample_y.x - centre.x, yy = sample_y.y - centre.y;
+  const float x_length = hypotf(xx, xy), y_length = hypotf(yx, yy);
+  if (x_length < 0.001f || y_length < 0.001f) return true;
+  xx /= x_length;
+  xy /= x_length;
+  yx /= y_length;
+  yy /= y_length;
+  const float long_x = size * x_length;
+  const float long_y = size * 1.35f * y_length;
+  const float thin_x = fmaxf(0.45f, size * 0.23f * x_length);
+  const float thin_y = fmaxf(0.45f, size * 0.23f * y_length);
+  if (!Reserve(writer, 8, 12)) return false;
+  const int base = writer->vertex_count;
+  const SDL_FPoint points[] = {
+    {centre.x + xx * long_x, centre.y + xy * long_x},
+    {centre.x + yx * thin_y, centre.y + yy * thin_y},
+    {centre.x - xx * long_x, centre.y - xy * long_x},
+    {centre.x - yx * thin_y, centre.y - yy * thin_y},
+    {centre.x + yx * long_y, centre.y + yy * long_y},
+    {centre.x + xx * thin_x, centre.y + xy * thin_x},
+    {centre.x - yx * long_y, centre.y - yy * long_y},
+    {centre.x - xx * thin_x, centre.y - xy * thin_x},
+  };
+  for (unsigned i = 0; i < 8; i++)
+    writer->vertices[writer->vertex_count++] =
+        (SDL_Vertex){points[i], color, {0.0f, 0.0f}};
+  static const int kDiamonds[12] = {
+    0, 1, 2, 0, 2, 3,
+    4, 5, 6, 4, 6, 7,
+  };
+  for (unsigned i = 0; i < 12; i++)
+    writer->indices[writer->index_count++] = base + kDiamonds[i];
+  return true;
+}
+
+/* Visuals $00-$05 are not frames of one generic bolt. The `$7E:5000`
+ * compositions author two different centre lines (vertical and diagonal),
+ * each clipped to long/medium/short lengths. These are the per-row centroids
+ * of the real 8x8 OAM parts at $5346/$5401/$5492 and $54F2/$55C2/$5661.
+ * Following them fixes both endpoint placement and every bend angle; a coarse
+ * interpolation across the culling rect cannot recover this information. */
+static const int8_t kBossLightningVerticalX[] = {
+  4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 6, 7, 6, 5, 7, 7, 2, 5, 4,
+  4, 4, 4, 6, 6, 4,
+};
+static const int8_t kBossLightningDiagonalX[] = {
+  0, -4, -5, -5, -6, -12, -10, -11, -16, -20, -20, -22, -26,
+  -30, -30, -32, -30, -29, -29, -33, -36, -36, -40, -44, -44,
+};
+
+static bool BossLightningPathFor(const ActionEffectInstance *effect,
+                                 const int8_t **path_x,
+                                 unsigned *joint_count) {
+  if (!effect || !joint_count || effect->visual > 5u)
+    return false;
+  const unsigned family_visual = effect->visual % 3u;
+  if (path_x) {
+    *path_x = effect->visual < 3u ? kBossLightningVerticalX
+                                 : kBossLightningDiagonalX;
+  }
+  *joint_count = family_visual == 0u ? 25u
+      : (family_visual == 1u ? 19u : 13u);
+  return true;
+}
+
+static bool BossLightningPathPoint(const ActionEffectInstance *effect,
+                                   unsigned joint, float *x, float *y) {
+  const int8_t *path_x = NULL;
+  unsigned joint_count = 0;
+  if (!BossLightningPathFor(effect, &path_x, &joint_count) ||
+      joint >= joint_count || !x || !y)
+    return false;
+  *x = (float)path_x[joint];
+  if (effect->flags & kActionEffectFlag_FlipHorizontal) *x = -*x;
+  /* `$8D68`'s action-OBJ emitter stores Y with one extra draw-bias pixel
+   * after the camera-origin bias cancels. Subtract it here so the filament
+   * runs through the emitted tile centres, not one row below them. */
+  *y = -80.0f + (float)joint * 8.0f;
+  return true;
+}
+
+static bool BossLightningPathSample(const ActionEffectInstance *effect,
+                                    float along, float *x, float *y) {
+  unsigned joint_count = 0;
+  if (!BossLightningPathFor(effect, NULL, &joint_count) || !x || !y ||
+      !isfinite(along))
+    return false;
+  along = fmaxf(0.0f, fminf(1.0f, along));
+  const float scaled = along * (float)(joint_count - 1u);
+  unsigned segment = (unsigned)scaled;
+  if (segment >= joint_count - 1u)
+    return BossLightningPathPoint(effect, joint_count - 1u, x, y);
+  float x0, y0, x1, y1;
+  if (!BossLightningPathPoint(effect, segment, &x0, &y0) ||
+      !BossLightningPathPoint(effect, segment + 1u, &x1, &y1))
+    return false;
+  const float t = scaled - (float)segment;
+  *x = x0 + (x1 - x0) * t;
+  *y = y0 + (y1 - y0) * t;
+  return true;
+}
+
+static bool AppendBossLightningRibbonLayer(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    float half_width, SDL_FColor color,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  enum { kJoints = kActionSceneEffectLightningSegments + 1 };
+  SDL_FPoint points[kJoints];
+  float scales[kJoints];
+  unsigned joint_count = 0;
+  if (!BossLightningPathFor(effect, NULL, &joint_count)) return true;
+  const unsigned segment_count = joint_count - 1u;
+  for (unsigned i = 0; i < joint_count; i++) {
+    float local_x, local_y, scale_x, scale_y;
+    if (!BossLightningPathPoint(effect, i, &local_x, &local_y) ||
+        !ProjectWithScale(effect, project_point, userdata, local_x, local_y,
+                          &points[i], &scale_x, &scale_y))
+      return true;
+    scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
+  }
+  if (!Reserve(writer, (int)segment_count * 4, (int)segment_count * 6))
+    return false;
+
+  for (unsigned i = 0; i < segment_count; i++) {
+    float dx = points[i + 1].x - points[i].x;
+    float dy = points[i + 1].y - points[i].y;
+    const float length = hypotf(dx, dy);
+    if (length < 0.001f) continue;
+    dx /= length;
+    dy /= length;
+    const float taper0 = i == 0 ? 0.55f : 1.0f;
+    const float taper1 = i + 1 == segment_count
+        ? 0.55f : 1.0f;
+    const float width0 = half_width * scales[i] * taper0;
+    const float width1 = half_width * scales[i + 1] * taper1;
+    const int base = writer->vertex_count;
+    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+      {points[i].x - dy * width0, points[i].y + dx * width0},
+      color, {0.0f, 0.0f},
+    };
+    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+      {points[i].x + dy * width0, points[i].y - dx * width0},
+      color, {0.0f, 0.0f},
+    };
+    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+      {points[i + 1].x + dy * width1, points[i + 1].y - dx * width1},
+      color, {0.0f, 0.0f},
+    };
+    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+      {points[i + 1].x - dy * width1, points[i + 1].y + dx * width1},
+      color, {0.0f, 0.0f},
+    };
+    static const int kQuad[6] = {0, 1, 2, 0, 2, 3};
+    for (int j = 0; j < 6; j++)
+      writer->indices[writer->index_count++] = base + kQuad[j];
+  }
+  return true;
+}
+
+static bool AppendBossLightningRibbon(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  if (effect->phase != kActionEffectPhase_BossLightningStrike) return true;
+  const float pulse = DeterministicPulse(effect);
+  SDL_FColor corona = {1.00f, 0.54f, 0.04f, 0.17f * pulse};
+  SDL_FColor filament = {1.00f, 0.98f, 0.68f, 0.88f * pulse};
+  return AppendBossLightningRibbonLayer(
+             writer, effect, 4.8f, corona, project_point, userdata) &&
+      AppendBossLightningRibbonLayer(
+             writer, effect, 1.15f, filament, project_point, userdata);
+}
+
+static bool AppendSwordBeamTrailLayer(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    float length, float head_half_width, float tail_half_width,
+    SDL_FColor head_color, SDL_FColor tail_color,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  float hx = 1.0f, hy = 0.0f;
+  if (!SceneActorHeading(effect, &hx, &hy)) return true;
+  const float px = -hy, py = hx;
+  const float centre_x = 8.0f, centre_y = 15.0f;
+  const float tail_x = centre_x - hx * length;
+  const float tail_y = centre_y - hy * length;
+  const float local_x[] = {
+    centre_x + px * head_half_width,
+    centre_x - px * head_half_width,
+    tail_x - px * tail_half_width,
+    tail_x + px * tail_half_width,
+  };
+  const float local_y[] = {
+    centre_y + py * head_half_width,
+    centre_y - py * head_half_width,
+    tail_y - py * tail_half_width,
+    tail_y + py * tail_half_width,
+  };
+  SDL_FPoint points[4];
+  for (unsigned i = 0; i < 4; i++)
+    if (!project_point(userdata, effect, local_x[i], local_y[i], &points[i]))
+      return true;
+  if (!Reserve(writer, 4, 6)) return false;
+  const int base = writer->vertex_count;
+  writer->vertices[writer->vertex_count++] =
+      (SDL_Vertex){points[0], head_color, {0.0f, 0.0f}};
+  writer->vertices[writer->vertex_count++] =
+      (SDL_Vertex){points[1], head_color, {0.0f, 0.0f}};
+  writer->vertices[writer->vertex_count++] =
+      (SDL_Vertex){points[2], tail_color, {0.0f, 0.0f}};
+  writer->vertices[writer->vertex_count++] =
+      (SDL_Vertex){points[3], tail_color, {0.0f, 0.0f}};
+  static const int kQuad[6] = {0, 1, 2, 0, 2, 3};
+  for (unsigned i = 0; i < 6; i++)
+    writer->indices[writer->index_count++] = base + kQuad[i];
+  return true;
+}
+
+static bool AppendSwordBeamTrail(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  if (effect->kind != kActionEffect_SwordBeam ||
+      effect->phase != kActionEffectPhase_SwordBeamFlight)
+    return true;
+  const float pulse = DeterministicPulse(effect);
+  SDL_FColor outer_head = {0.12f, 0.52f, 1.00f, 0.24f * pulse};
+  SDL_FColor outer_tail = {0.03f, 0.16f, 0.78f, 0.00f};
+  SDL_FColor inner_head = {0.70f, 0.98f, 1.00f, 0.54f * pulse};
+  SDL_FColor inner_tail = {0.10f, 0.48f, 1.00f, 0.00f};
+  return AppendSwordBeamTrailLayer(
+             writer, effect, 42.0f, 14.0f, 2.0f,
+             outer_head, outer_tail, project_point, userdata) &&
+      AppendSwordBeamTrailLayer(
+             writer, effect, 28.0f, 7.0f, 1.0f,
+             inner_head, inner_tail, project_point, userdata);
+}
+
+static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
+                                 const ActionEffectInstance *effect,
+                                 ActionEffectProjectPointFn project_point,
+                                 void *userdata) {
+  unsigned count = 0;
+  SDL_FColor hot = {0}, cool = {0};
+  switch (effect->kind) {
+    case kActionEffect_WallTorch:
+      count = 7;
+      hot = (SDL_FColor){1.00f, 0.92f, 0.55f, 0.88f};
+      cool = (SDL_FColor){0.95f, 0.18f, 0.01f, 0.00f};
+      break;
+    case kActionEffect_EnemyFireball:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){1.00f, 0.97f, 0.78f, 0.96f};
+      cool = (SDL_FColor){1.00f, 0.10f, 0.00f, 0.00f};
+      break;
+    case kActionEffect_SwordBeam:
+      count = 4;
+      hot = (SDL_FColor){0.92f, 1.00f, 1.00f, 0.88f};
+      cool = (SDL_FColor){0.08f, 0.42f, 1.00f, 0.00f};
+      break;
+    case kActionEffect_LightningTrap:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){0.98f, 1.00f, 1.00f, 0.92f};
+      cool = (SDL_FColor){0.18f, 0.48f, 1.00f, 0.00f};
+      break;
+    case kActionEffect_BloodpoolBossLightning:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){1.00f, 1.00f, 0.82f, 0.98f};
+      cool = (SDL_FColor){1.00f, 0.34f, 0.01f, 0.00f};
+      break;
+    default:
+      return true;
+  }
+
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const unsigned visual_ticks = EffectVisualTicks(
+      effect, (unsigned)effect->pulse_ticks);
+  float heading_x = 1.0f, heading_y = 0.0f;
+  SceneActorHeading(effect, &heading_x, &heading_y);
+  for (unsigned i = 0; i < count; i++) {
+    const uint32_t seed = EffectHash(
+        effect->pulse_generation * 0x9E3779B9u ^
+        (uint32_t)effect->record_address * 0x85EBCA6Bu ^
+        i * 0xC2B2AE35u);
+    const unsigned lifetime = effect->kind == kActionEffect_SwordBeam
+        ? 13u + ((seed >> 6) & 7u)
+        : (effect->kind == kActionEffect_LightningTrap ||
+           effect->kind == kActionEffect_BloodpoolBossLightning)
+        ? 11u + ((seed >> 6) & 7u)
+        : 21u + ((seed >> 5) & 15u);
+    const unsigned age = (visual_ticks + seed % lifetime) % lifetime;
+    const float t = (float)age / (float)(lifetime - 1u);
+    const float previous_t = fmaxf(0.0f, t - 0.14f);
+    float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
+    float width = 0.55f, reach = 1.8f + 2.2f * t;
+
+    if (effect->kind == kActionEffect_WallTorch) {
+      const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 7.0f;
+      const float birth = (HashUnit(seed ^ 0x71u) - 0.5f) * 5.0f;
+      x = birth + drift * t * t;
+      y = -2.0f - 9.0f * t - 25.0f * t * t;
+      previous_x = birth + drift * previous_t * previous_t;
+      previous_y = -2.0f - 9.0f * previous_t -
+          25.0f * previous_t * previous_t;
+      width = 0.45f + 0.35f * (1.0f - t);
+    } else if (effect->kind == kActionEffect_EnemyFireball) {
+      const float side = (HashUnit(seed ^ 0x53u) - 0.5f) *
+          (4.0f + 14.0f * t);
+      /* Start beyond the 16px source art instead of hiding the youngest
+       * sparks inside its painted red tail. The longer cone makes the host
+       * enhancement legible without bleaching the authentic projectile. */
+      const float distance = 10.0f + 44.0f * t;
+      const float previous_distance = 10.0f + 44.0f * previous_t;
+      x = -heading_x * distance - heading_y * side;
+      y = -heading_y * distance + heading_x * side;
+      previous_x = -heading_x * previous_distance - heading_y * side;
+      previous_y = -heading_y * previous_distance + heading_x * side;
+      width = 0.80f + 0.60f * (1.0f - t);
+      reach = 3.0f + 5.0f * t;
+    } else if (effect->kind == kActionEffect_SwordBeam) {
+      /* The six authored OAM parts form a 16x32 crescent centred at (8,15)
+       * after the action emitter's one-pixel Y bias. A short tapered wake
+       * gives the very clean white/cyan art motion without turning it into a
+       * fire projectile or obscuring its silhouette. */
+      const float side = (HashUnit(seed ^ 0x53u) - 0.5f) *
+          (6.0f + 11.0f * t);
+      const float distance = 5.0f + 32.0f * t;
+      x = 8.0f - heading_x * distance - heading_y * side;
+      y = 15.0f - heading_y * distance + heading_x * side;
+    } else if (effect->kind == kActionEffect_LightningTrap) {
+      /* Most sparks crawl across the full bolt; the last quarter burst away
+       * from its lower impact so the strike has both a shaft and a contact. */
+      if (i >= count * 3u / 4u) {
+        const float *direction = kCircle32[(i * 7u + (seed >> 12)) & 31u];
+        const float distance = 3.0f + 20.0f * t;
+        const float old_distance = 3.0f + 20.0f * previous_t;
+        x = (rect->x0 + rect->x1) * 0.5f + direction[0] * distance;
+        y = rect->y1 + direction[1] * distance * 0.55f;
+        previous_x = (rect->x0 + rect->x1) * 0.5f +
+            direction[0] * old_distance;
+        previous_y = rect->y1 + direction[1] * old_distance * 0.55f;
+      } else {
+        const float along = HashUnit(seed ^ 0x29u);
+        const float base_y = rect->y0 + (rect->y1 - rect->y0) * along;
+        const float jitter = (HashUnit(seed ^
+            (visual_ticks * 0x27D4EB2Du)) - 0.5f) * 12.0f;
+        const float old_jitter = -jitter * 0.55f;
+        x = (rect->x0 + rect->x1) * 0.5f + jitter;
+        y = base_y + (t - 0.5f) * 5.0f;
+        previous_x = (rect->x0 + rect->x1) * 0.5f + old_jitter;
+        previous_y = base_y + (previous_t - 0.5f) * 5.0f;
+      }
+      width = 0.42f + 0.28f * (1.0f - t);
+      reach = 2.0f + 2.5f * (1.0f - t);
+    } else if (effect->phase == kActionEffectPhase_BossLightningStrike) {
+      float endpoint_x = (rect->x0 + rect->x1) * 0.5f;
+      float endpoint_y = rect->y1;
+      BossLightningPathSample(effect, 1.0f, &endpoint_x, &endpoint_y);
+      if (i >= count * 3u / 4u) {
+        const float *direction = kCircle32[(i * 9u + (seed >> 11)) & 31u];
+        const float distance = 4.0f + 24.0f * t;
+        const float old_distance = 4.0f + 24.0f * previous_t;
+        x = endpoint_x + direction[0] * distance;
+        y = endpoint_y + direction[1] * distance * 0.48f;
+        previous_x = endpoint_x + direction[0] * old_distance;
+        previous_y = endpoint_y +
+            direction[1] * old_distance * 0.48f;
+      } else {
+        const float birth = HashUnit(seed ^ 0x29u);
+        float along = birth + 0.34f * t;
+        float previous_along = birth + 0.34f * previous_t;
+        if (along > 1.0f) along -= 1.0f;
+        if (previous_along > 1.0f) previous_along -= 1.0f;
+        if (!BossLightningPathSample(effect, along, &x, &y) ||
+            !BossLightningPathSample(
+                effect, previous_along, &previous_x, &previous_y))
+          continue;
+      }
+      width = 0.55f + 0.38f * (1.0f - t);
+      reach = 2.5f + 3.5f * (1.0f - t);
+    } else {
+      /* The linked state-$09 child expands around its own floor artwork. */
+      const float *direction = kCircle32[(i * 11u + (seed >> 13)) & 31u];
+      const float distance = 2.0f + 26.0f * t;
+      const float old_distance = 2.0f + 26.0f * previous_t;
+      x = (rect->x0 + rect->x1) * 0.5f + direction[0] * distance;
+      y = rect->y1 - 2.0f + direction[1] * distance * 0.38f;
+      previous_x = (rect->x0 + rect->x1) * 0.5f +
+          direction[0] * old_distance;
+      previous_y = rect->y1 - 2.0f +
+          direction[1] * old_distance * 0.38f;
+      width = 0.50f + 0.32f * (1.0f - t);
+      reach = 2.0f + 2.8f * (1.0f - t);
+    }
+
+    SDL_FColor color = MixColor(hot, cool, t);
+    const float birth_fade = fminf(1.0f, t * 7.0f);
+    color.a *= birth_fade * (1.0f - t) *
+        (0.72f + 0.28f * HashUnit(seed ^ 0xA7u));
+    if (effect->kind == kActionEffect_SwordBeam) {
+      const float star_size = 0.85f + 1.45f * (1.0f - t) *
+          (0.75f + 0.25f * HashUnit(seed ^ 0xD3u));
+      if (!AppendSceneStarParticle(writer, effect, x, y, star_size, color,
+                                   project_point, userdata))
+        return false;
+      continue;
+    }
+    if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
+                             width, reach, color, project_point, userdata))
+      return false;
+  }
+  return true;
+}
+
+static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
+                                const ActionEffectInstance *effect,
+                                ActionEffectProjectPointFn project_point,
+                                void *userdata) {
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const float mid_x = (rect->x0 + rect->x1) * 0.5f;
+  const float mid_y = (rect->y0 + rect->y1) * 0.5f;
+  const float pulse = DeterministicPulse(effect);
+  ActionEffectGlowStyle spill = {0}, body = {0};
+  float spill_x = mid_x, spill_y = mid_y;
+  float body_x = mid_x, body_y = mid_y;
+
+  switch (effect->kind) {
+    case kActionEffect_WallTorch:
+      spill = (ActionEffectGlowStyle){
+        .radius_x = 30.0f, .radius_y = 25.0f,
+        .ring_scale = {0.25f, 0.62f, 1.0f},
+        .centre = {1.00f, 0.48f, 0.10f, 0.14f},
+        .ring = {{1.00f, 0.34f, 0.05f, 0.10f},
+                 {0.84f, 0.12f, 0.01f, 0.045f},
+                 {0.55f, 0.03f, 0.00f, 0.00f}},
+        .flare = 0.12f, .rise = 0.16f,
+        .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->generation,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = 8.5f, .radius_y = 14.0f,
+        .ring_scale = {0.20f, 0.52f, 1.0f},
+        .centre = {1.00f, 0.98f, 0.82f, 0.72f},
+        .ring = {{1.00f, 0.72f, 0.22f, 0.40f},
+                 {1.00f, 0.27f, 0.02f, 0.16f},
+                 {0.78f, 0.07f, 0.00f, 0.00f}},
+        .flare = 0.34f, .rise = 0.42f,
+        .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      body_y = -3.0f;
+      break;
+    case kActionEffect_EnemyFireball: {
+      float hx = 1.0f, hy = 0.0f;
+      SceneActorHeading(effect, &hx, &hy);
+      spill = (ActionEffectGlowStyle){
+        .radius_x = 38.0f, .radius_y = 27.0f,
+        .ring_scale = {0.28f, 0.65f, 1.0f},
+        .centre = {1.00f, 0.52f, 0.09f, 0.24f},
+        .ring = {{1.00f, 0.35f, 0.03f, 0.17f},
+                 {0.92f, 0.11f, 0.00f, 0.075f},
+                 {0.55f, 0.02f, 0.00f, 0.00f}},
+        .flare = 0.13f, .rise = 0.18f,
+        .axis_x = hx, .axis_y = hy,
+        .lift_x = -hx, .lift_y = -hy,
+        .seed = (unsigned)effect->record_address,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = 25.0f, .radius_y = 11.0f,
+        .ring_scale = {0.20f, 0.50f, 1.0f},
+        .centre = {1.00f, 0.99f, 0.88f, 0.90f},
+        .ring = {{1.00f, 0.78f, 0.28f, 0.60f},
+                 {1.00f, 0.30f, 0.02f, 0.30f},
+                 {0.82f, 0.07f, 0.00f, 0.00f}},
+        .flare = 0.27f, .rise = 0.34f,
+        .axis_x = hx, .axis_y = hy,
+        .lift_x = -hx, .lift_y = -hy,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      /* Pull the enhanced body into the wake so its brightest region remains
+       * visible beside the painted core instead of disappearing underneath. */
+      body_x = mid_x - hx * 6.0f;
+      body_y = mid_y - hy * 6.0f;
+      break;
+    }
+    case kActionEffect_SwordBeam: {
+      float hx = 1.0f, hy = 0.0f;
+      SceneActorHeading(effect, &hx, &hy);
+      spill = (ActionEffectGlowStyle){
+        .radius_x = 38.0f, .radius_y = 42.0f,
+        .ring_scale = {0.25f, 0.64f, 1.0f},
+        .centre = {0.52f, 0.88f, 1.00f, 0.20f},
+        .ring = {{0.26f, 0.70f, 1.00f, 0.14f},
+                 {0.08f, 0.34f, 0.98f, 0.055f},
+                 {0.02f, 0.10f, 0.60f, 0.00f}},
+        .flare = 0.045f, .rise = 0.16f,
+        .axis_x = hx, .axis_y = hy,
+        .lift_x = -hx, .lift_y = -hy,
+        .seed = (unsigned)effect->record_address,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = 15.0f, .radius_y = 28.0f,
+        .ring_scale = {0.20f, 0.58f, 1.0f},
+        .centre = {0.94f, 1.00f, 1.00f, 0.78f},
+        .ring = {{0.48f, 0.92f, 1.00f, 0.48f},
+                 {0.12f, 0.56f, 1.00f, 0.18f},
+                 {0.03f, 0.18f, 0.72f, 0.00f}},
+        .flare = 0.025f, .rise = 0.10f,
+        .axis_x = hx, .axis_y = hy,
+        .lift_x = -hx, .lift_y = -hy,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      /* The white source art remains readable when the hottest points sit a
+       * few pixels into its wake instead of directly bleaching the crescent. */
+      spill_x = 8.0f - hx * 5.0f;
+      spill_y = 15.0f - hy * 5.0f;
+      body_x = 8.0f - hx * 3.0f;
+      body_y = 15.0f - hy * 3.0f;
+      break;
+    }
+    case kActionEffect_LightningTrap:
+      spill = (ActionEffectGlowStyle){
+        .radius_x = 31.0f,
+        .radius_y = fmaxf(46.0f, (rect->y1 - rect->y0) * 0.59f),
+        /* Ring 2 is transparent. Keep the last COLOURED ring at the captured
+         * electrode endpoints; the old 0.62 scale made the visible aura die
+         * near the middle even though its transparent geometry was full-size. */
+        .ring_scale = {0.24f, 0.86f, 1.0f},
+        .centre = {0.68f, 0.90f, 1.00f, 0.13f},
+        .ring = {{0.48f, 0.76f, 1.00f, 0.09f},
+                 {0.22f, 0.48f, 1.00f, 0.04f},
+                 {0.08f, 0.18f, 0.72f, 0.00f}},
+        .flare = 0.07f, .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->record_address,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = 9.0f,
+        .radius_y = fmaxf(38.0f, (rect->y1 - rect->y0) * 0.55f),
+        .ring_scale = {0.16f, 0.92f, 1.0f},
+        .centre = {1.00f, 1.00f, 1.00f, 0.62f},
+        .ring = {{0.82f, 0.96f, 1.00f, 0.34f},
+                 {0.34f, 0.68f, 1.00f, 0.13f},
+                 {0.10f, 0.28f, 0.84f, 0.00f}},
+        .flare = 0.13f, .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      break;
+    case kActionEffect_BloodpoolBossLightning:
+      if (effect->phase == kActionEffectPhase_BossLightningStrike) {
+        BossLightningPathSample(effect, 0.5f, &spill_x, &spill_y);
+        body_x = spill_x;
+        body_y = spill_y;
+        spill = (ActionEffectGlowStyle){
+          .radius_x = fmaxf(42.0f, (rect->x1 - rect->x0) * 1.15f),
+          .radius_y = fmaxf(58.0f, (rect->y1 - rect->y0) * 0.64f),
+          .ring_scale = {0.24f, 0.72f, 1.0f},
+          .centre = {1.00f, 0.72f, 0.17f, 0.19f},
+          .ring = {{1.00f, 0.48f, 0.06f, 0.13f},
+                   {0.86f, 0.18f, 0.01f, 0.055f},
+                   {0.52f, 0.04f, 0.00f, 0.00f}},
+          .flare = 0.10f, .axis_x = 1.0f, .lift_y = -1.0f,
+          .seed = (unsigned)effect->record_address,
+        };
+        body = (ActionEffectGlowStyle){
+          .radius_x = 15.0f,
+          .radius_y = fmaxf(45.0f, (rect->y1 - rect->y0) * 0.53f),
+          .ring_scale = {0.16f, 0.78f, 1.0f},
+          .centre = {1.00f, 1.00f, 0.86f, 0.70f},
+          .ring = {{1.00f, 0.88f, 0.34f, 0.42f},
+                   {1.00f, 0.47f, 0.05f, 0.16f},
+                   {0.80f, 0.10f, 0.00f, 0.00f}},
+          .flare = 0.16f, .axis_x = 1.0f, .lift_y = -1.0f,
+          .seed = (unsigned)effect->pulse_generation,
+        };
+        float start_x, start_y, end_x, end_y;
+        if (BossLightningPathSample(effect, 0.0f, &start_x, &start_y) &&
+            BossLightningPathSample(effect, 1.0f, &end_x, &end_y)) {
+          const float path_x = end_x - start_x;
+          const float path_y = end_y - start_y;
+          const float path_length = hypotf(path_x, path_y);
+          if (path_length > 0.001f) {
+            /* Local +Y is the ellipse's long axis; rotate it onto the
+             * authored start-to-end chord. The ribbon retains the individual
+             * OAM bends while its surrounding body agrees with their angle. */
+            spill.axis_x = body.axis_x = path_y / path_length;
+            spill.axis_y = body.axis_y = -path_x / path_length;
+          }
+        }
+      } else {
+        spill = (ActionEffectGlowStyle){
+          .radius_x = 37.0f,
+          .radius_y = 15.0f,
+          .ring_scale = {0.24f, 0.66f, 1.0f},
+          .centre = {1.00f, 0.82f, 0.35f, 0.18f},
+          .ring = {{1.00f, 0.60f, 0.12f, 0.13f},
+                   {0.92f, 0.28f, 0.02f, 0.055f},
+                   {0.58f, 0.05f, 0.00f, 0.00f}},
+          .flare = 0.08f, .axis_x = 1.0f, .lift_y = -1.0f,
+          .seed = (unsigned)effect->record_address,
+        };
+        body = (ActionEffectGlowStyle){
+          .radius_x = 18.0f,
+          .radius_y = 8.0f,
+          .ring_scale = {0.18f, 0.58f, 1.0f},
+          .centre = {1.00f, 1.00f, 0.84f, 0.68f},
+          .ring = {{1.00f, 0.86f, 0.32f, 0.38f},
+                   {1.00f, 0.42f, 0.04f, 0.14f},
+                   {0.76f, 0.08f, 0.00f, 0.00f}},
+          .flare = 0.12f, .axis_x = 1.0f, .lift_y = -1.0f,
+          .seed = (unsigned)effect->pulse_generation,
+        };
+        spill_y = body_y = rect->y1 - 2.0f;
+      }
+      break;
+    default:
+      return true;
+  }
+
+  if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
+                  project_point, userdata))
+    return false;
+  if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y,
+                  project_point, userdata))
+    return false;
+  return AppendBossLightningRibbon(writer, effect, project_point, userdata) &&
+      AppendSwordBeamTrail(writer, effect, project_point, userdata);
+}
+
+static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
+  if (!effect) return false;
+  switch (effect->kind) {
+    case kActionEffect_WallTorch:
+      return effect->phase == kActionEffectPhase_WallTorch;
+    case kActionEffect_EnemyFireball:
+      return effect->phase == kActionEffectPhase_EnemyFireballFlight;
+    case kActionEffect_LightningTrap:
+      return effect->phase == kActionEffectPhase_LightningActive;
+    case kActionEffect_BloodpoolBossLightning:
+      return (effect->phase == kActionEffectPhase_BossLightningStrike &&
+              effect->visual <= 5u) ||
+          (effect->phase == kActionEffectPhase_BossLightningImpact &&
+           effect->visual >= 8u && effect->visual <= 10u);
+    case kActionEffect_SwordBeam:
+      return effect->phase == kActionEffectPhase_SwordBeamFlight &&
+          (effect->visual == 0x30u || effect->visual == 0x31u);
+    default:
+      return false;
+  }
+}
+
+bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
+                                   bool lighting_enabled,
+                                   bool particles_enabled,
+                                   ActionEffectProjectPointFn project_point,
+                                   void *project_userdata,
+                                   ActionSceneEffectRenderBatch *batch) {
+  if (!batch) return false;
+  memset(batch, 0, sizeof(*batch));
+  if (!frame || frame->effect_count > kActionSceneEffectMaxInstances)
+    return false;
+  if (frame->overflow || (!lighting_enabled && !particles_enabled)) return true;
+  if (!project_point) return false;
+  ActionEffectGeometryWriter writer = GeometryWriter(
+      batch->vertices, kActionSceneEffectRenderMaxVertices,
+      batch->indices, kActionSceneEffectRenderMaxIndices);
+  unsigned lightning_filaments = 0;
+
+  for (uint8_t i = 0; i < frame->effect_count; i++) {
+    const ActionEffectInstance *effect = &frame->effects[i];
+    if (!(effect->flags & kActionEffectFlag_Visible) ||
+        effect->geometry.kind != kActionEffectGeometry_Rect ||
+        !RectIsSane(&effect->geometry.data.rect) ||
+        !SceneEffectStyleKnown(effect) ||
+        effect->obj_priority >= kActionEffectObjPriorityCount ||
+        effect->render_layer != kActionEffectRenderLayer_WorldOverlay ||
+        effect->projection_plane > kActionEffectProjectionPlane_Bg1)
+      continue;
+    if (effect->kind == kActionEffect_BloodpoolBossLightning &&
+        effect->phase == kActionEffectPhase_BossLightningStrike &&
+        ++lightning_filaments > kActionSceneEffectMaxLightningFilaments)
+      return false;
+
+    if (lighting_enabled &&
+        !AppendSceneLighting(&writer, effect, project_point,
+                             project_userdata))
+      return false;
+    if (particles_enabled &&
+        !AppendSceneParticles(&writer, effect, project_point,
+                              project_userdata))
+      return false;
+  }
+  batch->vertex_count = writer.vertex_count;
+  batch->index_count = writer.index_count;
   return true;
 }

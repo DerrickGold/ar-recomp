@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "action_bg_world.h"
 
 /* ── Spell rule table ──────────────────────────────────────────────────────
  *
@@ -187,17 +188,25 @@ static const SpellRule kSpellRules[] = {
 _Static_assert(kActionEffectObserverTrackCount ==
                    kActRaiserActionMagicCohortCount,
                "observer needs one tracker per action-magic cohort slot");
+_Static_assert(kActionSceneEffectObserverTrackCount ==
+                   kActRaiserActionObjectCount,
+               "scene observer needs one tracker per action-object slot");
 
 typedef struct ActionObjectSnapshot {
   uint16_t status;
   int16_t world_x, world_y;
   int16_t velocity_x, velocity_y;
   uint16_t left_extent, top_extent, right_extent, bottom_extent;
+  uint16_t handler;
   uint16_t animation_address;
   uint8_t animation_bank;
   uint16_t animation_state, animation_index;
+  uint16_t resume_address;
   uint16_t composition, visual, flip_attributes;
+  uint16_t flags;
+  uint16_t source_descriptor;
   uint16_t local_counter;
+  uint16_t spawner_backlink;
 } ActionObjectSnapshot;
 
 static uint16_t Read16(const uint8_t *wram, size_t wram_size,
@@ -236,6 +245,11 @@ static void RetireAll(ActionEffectObserver *observer) {
   memset(observer->tracks, 0, sizeof(observer->tracks));
 }
 
+static void RetireSceneAll(ActionEffectObserver *observer) {
+  if (!observer) return;
+  memset(observer->scene_tracks, 0, sizeof(observer->scene_tracks));
+}
+
 static bool IsActionMap(const uint8_t *wram, size_t wram_size) {
   if (!wram || wram_size <= kActRaiserWram_MapGroup) return false;
   uint8_t group = wram[kActRaiserWram_MapGroup];
@@ -268,6 +282,8 @@ static bool ReadActionObject(const uint8_t *wram, size_t wram_size,
                            address + kActRaiserActionObject_RightExtent),
     .bottom_extent = Read16(wram, wram_size,
                             address + kActRaiserActionObject_BottomExtent),
+    .handler = Read16(wram, wram_size,
+                      address + kActRaiserActionObject_Handler),
     .animation_address = Read16(
         wram, wram_size, address + kActRaiserActionObject_AnimationAddress),
     /* BYTE, not word. +$16..+$18 is the 24-bit animation pointer (addr16 then
@@ -282,14 +298,22 @@ static bool ReadActionObject(const uint8_t *wram, size_t wram_size,
         wram, wram_size, address + kActRaiserActionObject_AnimationState),
     .animation_index = Read16(
         wram, wram_size, address + kActRaiserActionObject_AnimationIndex),
+    .resume_address = Read16(
+        wram, wram_size, address + kActRaiserActionObject_ResumeAddress),
     .composition = Read16(wram, wram_size,
                           address + kActRaiserActionObject_Composition),
     .visual = Read16(wram, wram_size,
                      address + kActRaiserActionObject_Visual),
     .flip_attributes = Read16(
         wram, wram_size, address + kActRaiserActionObject_FlipAttributes),
+    .flags = Read16(wram, wram_size,
+                    address + kActRaiserActionObject_Flags),
+    .source_descriptor = Read16(
+        wram, wram_size, address + kActRaiserActionObject_SourceDescriptor),
     .local_counter = Read16(
         wram, wram_size, address + kActRaiserActionObject_LocalCounter),
+    .spawner_backlink = Read16(
+        wram, wram_size, address + kActRaiserActionObject_SpawnerBacklink),
   };
   return true;
 }
@@ -352,11 +376,11 @@ static void RecordUnmatched(ActionEffectFrame *dst, uint16_t address,
 }
 
 static void BeginOrAdvanceTrack(ActionEffectObserver *observer,
-                                unsigned cohort_index, uint8_t kind,
+                                ActionEffectObserverTrack *track, uint8_t kind,
                                 uint8_t phase, uint16_t pulse_key,
                                 unsigned elapsed_ticks,
                                 ActionEffectInstance *effect) {
-  ActionEffectObserverTrack *track = &observer->tracks[cohort_index];
+  if (!observer || !track || !effect) return;
   bool new_actor = !track->active || track->kind != kind;
   if (new_actor) {
     memset(track, 0, sizeof(*track));
@@ -391,6 +415,84 @@ static void BeginOrAdvanceTrack(ActionEffectObserver *observer,
   effect->age_ticks = track->age_ticks;
   effect->phase_ticks = track->phase_ticks;
   effect->pulse_ticks = track->pulse_ticks;
+}
+
+static unsigned AbsInt(int value) {
+  return (unsigned)(value < 0 ? -value : value);
+}
+
+static unsigned SceneMotionLimit(int16_t current_velocity,
+                                 int16_t previous_velocity,
+                                 unsigned ticks) {
+  unsigned speed = AbsInt(current_velocity);
+  if (AbsInt(previous_velocity) > speed)
+    speed = AbsInt(previous_velocity);
+  if (speed && ticks > (UINT_MAX - 8u) / speed) return UINT_MAX;
+  return speed * ticks + 8u;
+}
+
+/* Ordinary action slots have no outer controller lifetime. A projectile can
+ * be freed and another member of the same family allocated into that address
+ * between two captures, so (slot, kind) alone is not an actor identity.
+ *
+ * The control-flow/source tuple catches reuse by a different spawner. The
+ * bounded motion check catches reuse by the same spawner: the measured
+ * fireballs move three pixels/tick and lightning is stationary, while a new
+ * actor appears back at its source. Eight pixels of slack admits handler-side
+ * subpixel/collision adjustment without allowing a screen-space teleport to
+ * inherit the old particle generation. 16-bit subtraction preserves normal
+ * world-coordinate wrap. */
+static bool SceneTrackDiscontinuous(const ActionEffectObserverTrack *track,
+                                    const ActionObjectSnapshot *object,
+                                    uint8_t kind, uint32_t continuity_key,
+                                    unsigned elapsed_ticks) {
+  if (!track || !object || !track->active || track->kind != kind ||
+      !track->continuity_valid)
+    return false;
+  if (track->continuity_key != continuity_key) return true;
+
+  const int dx = (int16_t)((uint16_t)object->world_x -
+                           (uint16_t)track->last_world_x);
+  const int dy = (int16_t)((uint16_t)object->world_y -
+                           (uint16_t)track->last_world_y);
+  const unsigned ticks = elapsed_ticks ? elapsed_ticks : 1u;
+  const unsigned limit_x = SceneMotionLimit(
+      object->velocity_x, track->last_velocity_x, ticks);
+  const unsigned limit_y = SceneMotionLimit(
+      object->velocity_y, track->last_velocity_y, ticks);
+  return AbsInt(dx) > limit_x || AbsInt(dy) > limit_y;
+}
+
+static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
+                                     ActionEffectObserverTrack *track,
+                                     const ActionObjectSnapshot *object,
+                                     uint8_t kind, uint8_t phase,
+                                     unsigned elapsed_ticks,
+                                     ActionEffectInstance *effect) {
+  if (!observer || !track || !object || !effect) return;
+  /* Resume/source are stable for the projectile and trap families. Fireball's
+   * handler is stable too and strengthens its identity; trap lightning omits
+   * it because one live bolt transitions between $BD36 and the generic timed
+   * animation handler $8683 without becoming a new actor. The boss-lightning
+   * child changes resume across its repeated strike/blank cycles, so its
+   * stable source/backlink pair is the lifecycle key instead. */
+  uint32_t continuity_key = (uint32_t)object->source_descriptor |
+      ((uint32_t)object->resume_address << 16);
+  if (kind == kActionEffect_EnemyFireball)
+    continuity_key ^= (uint32_t)object->handler * 0x9E3779B9u;
+  else if (kind == kActionEffect_BloodpoolBossLightning)
+    continuity_key = (uint32_t)object->source_descriptor |
+        ((uint32_t)object->spawner_backlink << 16);
+  if (SceneTrackDiscontinuous(track, object, kind, continuity_key,
+                              elapsed_ticks))
+    memset(track, 0, sizeof(*track));
+  BeginOrAdvanceTrack(observer, track, kind, phase, 0, elapsed_ticks, effect);
+  track->continuity_key = continuity_key;
+  track->last_world_x = object->world_x;
+  track->last_world_y = object->world_y;
+  track->last_velocity_x = object->velocity_x;
+  track->last_velocity_y = object->velocity_y;
+  track->continuity_valid = 1;
 }
 
 void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
@@ -468,6 +570,7 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
     effect->role = slot->role;
     effect->obj_priority = rule->obj_priority;
     effect->render_layer = kActionEffectRenderLayer_WorldOverlay;
+    effect->projection_plane = kActionEffectProjectionPlane_Obj;
     effect->geometry = (ActionEffectGeometry){
       .kind = kActionEffectGeometry_Rect,
       .data.rect = {
@@ -477,7 +580,8 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
         (float)object.bottom_extent,
       },
     };
-    BeginOrAdvanceTrack(observer, cohort, effect->kind, effect->phase,
+    BeginOrAdvanceTrack(observer, &observer->tracks[cohort], effect->kind,
+                        effect->phase,
                         rule->pulse_from_local_counter ? object.local_counter
                                                        : 0,
                         elapsed_ticks, effect);
@@ -494,4 +598,378 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
 
   for (unsigned i = 0; i < kActionEffectObserverTrackCount; i++)
     if (!seen[i]) memset(&observer->tracks[i], 0, sizeof(observer->tracks[i]));
+}
+
+/* ── Measured action-scene identities ─────────────────────────────────────
+ *
+ * These rules come from run 20260810-124203. They deliberately combine
+ * control-flow identity with animation/composition identity: object fields are
+ * polymorphic in ActRaiser, so matching a visual number or palette colour by
+ * itself would eventually decorate an unrelated actor.
+ *
+ * Enemy fireballs (snap_03_gf7397):
+ *   handler $BDF0, resume $BDD9, state $23, animation $7E:4000,
+ *   visual/composition $17/$45EF or $18/$4610.
+ * Lightning traps (snap_04_gf9417):
+ *   source descriptor $BD2A, resume $BD69, state $14, animation $7E:4000,
+ *   handler $BD36 or the shared animation-repeat handler $8683, and
+ *   visual/composition $1F/$46FE or $20/$479D.
+ * Bloodpool boss lightning (runs 20260810-174202 and -180202):
+ *   map group/current map $02/$08, source descriptor $BDFF, animation
+ *   $7E:5000, shared delay handler $8661, and a validated +$3A backlink.
+ *   States $02-$07 are six different authored strikes: vertical/diagonal,
+ *   each in long/medium/short lengths, using visuals $00-$05. Their shared
+ *   visual $20 is the blank half-cycle, not a telegraph. State $09 is the
+ *   linked floor impact. Exact state/visual/composition tuples below cover
+ *   every strike shape rather than extrapolating from one captured pose.
+ * Player sword beam (run 20260810-175403 snap_01_gf1726):
+ *   handler $9D1C, animation $06:8000, player backlink $08A0, and exact
+ *   state/visual/composition pairs $13/$30/$99E8 or $14/$31/$9A17.
+ * Bloodpool wall torches (snap_01_gf2479, snap_06_gf7654):
+ *   BG1 metatile $47 immediately above $4F in maps $02/$03 and $02/$05.
+ *   The exact pair is the authored object identity and applies across the
+ *   Bloodpool group rather than being tied to either observed room number. */
+enum {
+  kEnemyFireballHandler = 0xBDF0,
+  kEnemyFireballResume = 0xBDD9,
+  kEnemyFireballState = 0x0023,
+  kLightningSourceDescriptor = 0xBD2A,
+  kLightningResume = 0xBD69,
+  kLightningState = 0x0014,
+  kLightningHandler = 0xBD36,
+  kAnimationRepeatHandler = 0x8683,
+  kSceneAnimationAddress = 0x4000,
+  kSceneAnimationBank = 0x7E,
+  kBloodpoolBossMap = 0x08,
+  kBossLightningSourceDescriptor = 0xBDFF,
+  kBossLightningHandler = 0x8661,
+  kBossAnimationAddress = 0x5000,
+  kBossLightningFirstStrikeState = 0x0002,
+  kBossLightningLastStrikeState = 0x0007,
+  kBossLightningImpactState = 0x0009,
+  kBossLightningImpactResume = 0xC06A,
+  kSwordBeamHandler = 0x9D1C,
+  kSwordBeamAnimationAddress = 0x8000,
+  kSwordBeamAnimationBank = 0x06,
+  kSwordBeamHorizontalState = 0x0013,
+  kSwordBeamAlternateState = 0x0014,
+  kBloodpoolTorchTopMetatile = 0x47,
+  kBloodpoolTorchBottomMetatile = 0x4F,
+};
+
+static bool ActionObjectVisible(const ActionObjectSnapshot *object) {
+  return object &&
+      !(object->status & (kActRaiserObjectStatus_InactiveMask |
+                          kActRaiserObjectStatus_IneligibleMask |
+                          kActRaiserObjectStatus_NoDraw)) &&
+      !(object->flags & kActRaiserObjectFlag_OutsideActivation);
+}
+
+static bool IsEnemyFireball(const ActionObjectSnapshot *object) {
+  if (!object || object->handler != kEnemyFireballHandler ||
+      object->resume_address != kEnemyFireballResume ||
+      object->animation_address != kSceneAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->animation_state != kEnemyFireballState)
+    return false;
+  return (object->visual == 0x0017 && object->composition == 0x45EF) ||
+      (object->visual == 0x0018 && object->composition == 0x4610);
+}
+
+static bool IsLightningTrap(const ActionObjectSnapshot *object) {
+  if (!object || object->source_descriptor != kLightningSourceDescriptor ||
+      object->resume_address != kLightningResume ||
+      object->animation_address != kSceneAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->animation_state != kLightningState ||
+      (object->handler != kLightningHandler &&
+       object->handler != kAnimationRepeatHandler))
+    return false;
+  return (object->visual == 0x001F && object->composition == 0x46FE) ||
+      (object->visual == 0x0020 && object->composition == 0x479D);
+}
+
+static bool ActionObjectAddressIsValid(uint16_t address) {
+  const unsigned table_start = kActRaiserWram_ActionObjectTable;
+  const unsigned table_end = table_start +
+      kActRaiserActionObjectCount * kActRaiserActionObjectStride;
+  return address >= table_start && address < table_end &&
+      (address - table_start) % kActRaiserActionObjectStride == 0;
+}
+
+static bool SwordBeamParentIsValid(const uint8_t *wram, size_t wram_size,
+                                   const ActionObjectSnapshot *object) {
+  if (!object || object->spawner_backlink != kActRaiserWram_PlayerObject)
+    return false;
+  ActionObjectSnapshot player;
+  return ReadActionObject(wram, wram_size, kActRaiserWram_PlayerObject,
+                          &player) &&
+      !(player.status & kActRaiserObjectStatus_InactiveMask) &&
+      player.composition &&
+      player.animation_address == kSwordBeamAnimationAddress &&
+      player.animation_bank == kSwordBeamAnimationBank &&
+      player.source_descriptor == object->source_descriptor;
+}
+
+static bool IsSwordBeam(const uint8_t *wram, size_t wram_size,
+                        const ActionObjectSnapshot *object) {
+  if (!object || object->handler != kSwordBeamHandler ||
+      object->animation_address != kSwordBeamAnimationAddress ||
+      object->animation_bank != kSwordBeamAnimationBank ||
+      !object->source_descriptor ||
+      !(object->flags & kActRaiserObjectFlag_Attacker) ||
+      !SwordBeamParentIsValid(wram, wram_size, object))
+    return false;
+  return (object->animation_state == kSwordBeamHorizontalState &&
+          object->visual == 0x0030 && object->composition == 0x99E8) ||
+      (object->animation_state == kSwordBeamAlternateState &&
+       object->visual == 0x0031 && object->composition == 0x9A17);
+}
+
+static bool BloodpoolBossLightningParentIsValid(
+    const uint8_t *wram, size_t wram_size,
+    const ActionObjectSnapshot *object) {
+  if (!object || !ActionObjectAddressIsValid(object->spawner_backlink))
+    return false;
+  ActionObjectSnapshot parent;
+  return ReadActionObject(wram, wram_size, object->spawner_backlink,
+                          &parent) &&
+      !(parent.status & kActRaiserObjectStatus_InactiveMask) &&
+      parent.composition &&
+      parent.source_descriptor == kBossLightningSourceDescriptor &&
+      parent.animation_address == kBossAnimationAddress &&
+      parent.animation_bank == kSceneAnimationBank;
+}
+
+static uint8_t MatchBloodpoolBossLightning(
+    const uint8_t *wram, size_t wram_size,
+    const ActionObjectSnapshot *object) {
+  if (!object || object->source_descriptor !=
+          kBossLightningSourceDescriptor ||
+      object->handler != kBossLightningHandler ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||
+      !BloodpoolBossLightningParentIsValid(wram, wram_size, object))
+    return kActionEffectPhase_None;
+
+  static const uint16_t kStrikeCompositions[] = {
+    0x5346, 0x5401, 0x5492, 0x54F2, 0x55C2, 0x5661,
+  };
+  if (object->animation_state >= kBossLightningFirstStrikeState &&
+      object->animation_state <= kBossLightningLastStrikeState) {
+    const unsigned strike =
+        object->animation_state - kBossLightningFirstStrikeState;
+    if (object->visual == strike &&
+        object->composition == kStrikeCompositions[strike])
+      return kActionEffectPhase_BossLightningStrike;
+  }
+
+  if (object->animation_state == kBossLightningImpactState &&
+      object->resume_address == kBossLightningImpactResume &&
+      ((object->visual == 0x0008 && object->composition == 0x570A) ||
+       (object->visual == 0x0009 && object->composition == 0x5716) ||
+       (object->visual == 0x000A && object->composition == 0x5729)))
+    return kActionEffectPhase_BossLightningImpact;
+
+  return kActionEffectPhase_None;
+}
+
+static bool SceneFrameAppend(ActionSceneEffectFrame *dst,
+                             const ActionEffectInstance *effect) {
+  if (!dst || !effect) return false;
+  if (dst->effect_count >= kActionSceneEffectMaxInstances) {
+    dst->overflow = 1;
+    return false;
+  }
+  dst->effects[dst->effect_count++] = *effect;
+  if (effect->flags & kActionEffectFlag_Visible) dst->visible_count++;
+  return true;
+}
+
+static void CaptureBloodpoolTorches(ActionSceneEffectFrame *dst,
+                                    const uint8_t *wram,
+                                    size_t wram_size) {
+  if (!dst || !wram ||
+      Read8(wram, wram_size, kActRaiserWram_MapGroup) !=
+          kActRaiserMapGroup_Bloodpool)
+    return;
+
+  ActionBgMapView map;
+  if (!ActionBgMapView_Init(
+          &map, wram, wram_size,
+          Read16(wram, wram_size, kActRaiserWram_Bg1Width),
+          Read16(wram, wram_size, kActRaiserWram_Bg1Height),
+          Read16(wram, wram_size, kActRaiserWram_BgMapPage)))
+    return;
+  for (unsigned y = 0; y + kActionBgMetatilePixels < map.world_height;
+       y += kActionBgMetatilePixels) {
+    for (unsigned x = 0; x < map.world_width;
+         x += kActionBgMetatilePixels) {
+      uint8_t top = 0, bottom = 0;
+      if (!ActionBgMapView_LookupMetatile(&map, (int)x, (int)y, &top) ||
+          top != kBloodpoolTorchTopMetatile ||
+          !ActionBgMapView_LookupMetatile(
+              &map, (int)x, (int)(y + kActionBgMetatilePixels), &bottom) ||
+          bottom != kBloodpoolTorchBottomMetatile)
+        continue;
+      const uint32_t identity =
+          ((uint32_t)(y / kActionBgMetatilePixels) << 16) |
+          (uint32_t)(x / kActionBgMetatilePixels);
+      /* Every instance uses the same animated BG tiles, so its source flame
+       * changes on one shared game clock. Keep lifecycle time authentic and
+       * synchronized here; the renderer owns the deliberately faster visual
+       * response used by the added light and embers. */
+      const uint16_t clock = dst->game_frame;
+      ActionEffectInstance effect = {
+        .generation = 0x54000000u ^ identity,
+        .pulse_generation = 0x74000000u ^ identity,
+        .world_x = (int16_t)(x + 8),
+        .world_y = (int16_t)(y + 15),
+        .left_extent = 5,
+        .top_extent = 9,
+        .right_extent = 5,
+        .bottom_extent = 2,
+        .age_ticks = clock,
+        .phase_ticks = clock,
+        .pulse_ticks = clock,
+        .kind = kActionEffect_WallTorch,
+        .phase = kActionEffectPhase_WallTorch,
+        .role = kActionEffectRole_Body,
+        .flags = kActionEffectFlag_Visible,
+        .render_layer = kActionEffectRenderLayer_WorldOverlay,
+        .projection_plane = kActionEffectProjectionPlane_Bg1,
+        .geometry = {
+          .kind = kActionEffectGeometry_Rect,
+          .data.rect = {-5.0f, -9.0f, 5.0f, 2.0f},
+        },
+      };
+      SceneFrameAppend(dst, &effect);
+    }
+  }
+}
+
+static void PopulateSceneObjectEffect(ActionEffectInstance *effect,
+                                      uint16_t address,
+                                      const ActionObjectSnapshot *object,
+                                      uint8_t kind, uint8_t phase) {
+  if (!effect || !object) return;
+  *effect = (ActionEffectInstance) {
+    .record_address = address,
+    .world_x = object->world_x,
+    .world_y = object->world_y,
+    .velocity_x = object->velocity_x,
+    .velocity_y = object->velocity_y,
+    .left_extent = object->left_extent,
+    .top_extent = object->top_extent,
+    .right_extent = object->right_extent,
+    .bottom_extent = object->bottom_extent,
+    .composition = object->composition,
+    .visual = object->visual,
+    .animation_state = object->animation_state,
+    .animation_index = object->animation_index,
+    .flip_attributes = object->flip_attributes,
+    .kind = kind,
+    .phase = phase,
+    .role = kActionEffectRole_Body,
+    .obj_priority = 0,
+    .render_layer = kActionEffectRenderLayer_WorldOverlay,
+    .projection_plane = kActionEffectProjectionPlane_Obj,
+    .geometry = {
+      .kind = kActionEffectGeometry_Rect,
+      .data.rect = {
+        -(float)object->left_extent,
+        -(float)object->top_extent,
+        (float)object->right_extent,
+        (float)object->bottom_extent,
+      },
+    },
+  };
+  if (ActionObjectVisible(object)) effect->flags |= kActionEffectFlag_Visible;
+  if (object->flip_attributes & kActRaiserObjectFlip_Horizontal)
+    effect->flags |= kActionEffectFlag_FlipHorizontal;
+  if (object->flip_attributes & kActRaiserObjectFlip_Vertical)
+    effect->flags |= kActionEffectFlag_FlipVertical;
+}
+
+void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
+                                     ActionSceneEffectFrame *dst,
+                                     const uint8_t *wram, size_t wram_size,
+                                     unsigned elapsed_ticks) {
+  if (!dst) return;
+  memset(dst, 0, sizeof(*dst));
+  if (!observer) return;
+  if (!observer->next_generation || !observer->next_pulse_generation)
+    ActionEffectObserver_Reset(observer);
+  if (wram && wram_size > kActRaiserWram_GameFrame + 1)
+    dst->game_frame = Read16(wram, wram_size, kActRaiserWram_GameFrame);
+  if (!IsActionMap(wram, wram_size)) {
+    RetireSceneAll(observer);
+    return;
+  }
+
+  CaptureBloodpoolTorches(dst, wram, wram_size);
+  const bool boss_lightning_map =
+      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
+          kActRaiserMapGroup_Bloodpool &&
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
+          kBloodpoolBossMap;
+  bool seen[kActionSceneEffectObserverTrackCount] = {false};
+  for (unsigned slot = 0; slot < kActionSceneEffectObserverTrackCount;
+       slot++) {
+    const uint16_t address = (uint16_t)(kActRaiserWram_ActionObjectTable +
+        slot * kActRaiserActionObjectStride);
+    ActionObjectSnapshot object;
+    if (!ReadActionObject(wram, wram_size, address, &object) ||
+        (object.status & kActRaiserObjectStatus_InactiveMask) ||
+        !object.composition)
+      continue;
+
+    uint8_t kind = kActionEffect_None;
+    uint8_t phase = kActionEffectPhase_None;
+    if (IsEnemyFireball(&object)) {
+      kind = kActionEffect_EnemyFireball;
+      phase = kActionEffectPhase_EnemyFireballFlight;
+    } else if (IsSwordBeam(wram, wram_size, &object)) {
+      kind = kActionEffect_SwordBeam;
+      phase = kActionEffectPhase_SwordBeamFlight;
+    } else if (IsLightningTrap(&object)) {
+      kind = kActionEffect_LightningTrap;
+      phase = kActionEffectPhase_LightningActive;
+    } else if (boss_lightning_map &&
+               (phase = MatchBloodpoolBossLightning(
+                    wram, wram_size, &object)) !=
+                   kActionEffectPhase_None) {
+      kind = kActionEffect_BloodpoolBossLightning;
+    } else {
+      continue;
+    }
+
+    seen[slot] = true;
+    ActionEffectInstance effect;
+    PopulateSceneObjectEffect(&effect, address, &object, kind, phase);
+    if (kind == kActionEffect_SwordBeam) {
+      /* Both `$06:8000` projectile compositions emit the same six 8x8
+       * crescent parts over local x=[0,16], y=[-1,31]. Their collision header
+       * deliberately contains signed offsets (for example left=$FFE0), so it
+       * is not a drawable bounding box and must not position the light. */
+      effect.geometry.data.rect =
+          (ActionEffectLocalRect){0.0f, -1.0f, 16.0f, 31.0f};
+    }
+    /* Animation index advances inside one projectile/strike lifecycle. It is
+     * artwork cadence, not a new emission pulse; using it as pulse_key would
+     * reseed every spark whenever the source sprite changed frame. */
+    BeginOrAdvanceSceneTrack(observer, &observer->scene_tracks[slot], &object,
+                             kind, phase, elapsed_ticks, &effect);
+    SceneFrameAppend(dst, &effect);
+  }
+  for (unsigned i = 0; i < kActionSceneEffectObserverTrackCount; i++)
+    if (!seen[i])
+      memset(&observer->scene_tracks[i], 0,
+             sizeof(observer->scene_tracks[i]));
+
+  if (dst->overflow) {
+    dst->effect_count = 0;
+    dst->visible_count = 0;
+  }
 }

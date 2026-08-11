@@ -39,6 +39,41 @@ enum {
   kActionEffectRenderMaxIndices =
       kActionEffectMaxGlows * kActionEffectGlowIndices +
       kActionEffectMaxEmbers * 6,
+
+  /* Scene actors remain independent light sources. Two gradient meshes give
+   * each a soft environmental spill plus a tighter luminous body; the small
+   * fixed spark budget keeps the worst-case batch bounded and deterministic. */
+  kActionSceneEffectGlowsPerInstance = 2,
+  kActionSceneEffectParticlesPerInstance = 12,
+  kActionSceneEffectMaxGlows =
+      kActionSceneEffectMaxInstances * kActionSceneEffectGlowsPerInstance,
+  kActionSceneEffectMaxParticles =
+      kActionSceneEffectMaxInstances * kActionSceneEffectParticlesPerInstance,
+  /* The boss strike adds two screen-space filament layers over at most 24
+   * authored OAM-row segments: a broad amber corona and a narrow white-gold
+   * core.
+   * The mapped room has one boss and its lifecycle can publish only one active
+   * strike (the separate floor child is Impact), so keep that cardinality in
+   * the bounded contract rather than inflating every scene slot by 80 verts. */
+  kActionSceneEffectMaxLightningFilaments = 1,
+  kActionSceneEffectLightningSegments = 24,
+  kActionSceneEffectLightningLayers = 2,
+  kActionSceneEffectLightningVerticesPerInstance =
+      kActionSceneEffectLightningSegments * 4 *
+      kActionSceneEffectLightningLayers,
+  kActionSceneEffectLightningIndicesPerInstance =
+      kActionSceneEffectLightningSegments * 6 *
+      kActionSceneEffectLightningLayers,
+  kActionSceneEffectRenderMaxVertices =
+      kActionSceneEffectMaxGlows * kActionEffectGlowVertices +
+      kActionSceneEffectMaxParticles * 4 +
+      kActionSceneEffectMaxLightningFilaments *
+          kActionSceneEffectLightningVerticesPerInstance,
+  kActionSceneEffectRenderMaxIndices =
+      kActionSceneEffectMaxGlows * kActionEffectGlowIndices +
+      kActionSceneEffectMaxParticles * 6 +
+      kActionSceneEffectMaxLightningFilaments *
+          kActionSceneEffectLightningIndicesPerInstance,
 };
 
 typedef bool (*ActionEffectProjectPointFn)(
@@ -54,6 +89,13 @@ typedef struct ActionEffectRenderBatch {
   int index_count;
 } ActionEffectRenderBatch;
 
+typedef struct ActionSceneEffectRenderBatch {
+  SDL_Vertex vertices[kActionSceneEffectRenderMaxVertices];
+  int indices[kActionSceneEffectRenderMaxIndices];
+  int vertex_count;
+  int index_count;
+} ActionSceneEffectRenderBatch;
+
 /* Unknown effect/phase/geometry/layer values are ignored (fail closed).
  * False reports malformed input or an internal capacity violation; the output
  * is always initialized and remains safe to submit when true. */
@@ -63,5 +105,12 @@ bool ActionEffectRender_Build(const ActionEffectFrame *frame,
                               ActionEffectProjectPointFn project_point,
                               void *project_userdata,
                               ActionEffectRenderBatch *batch);
+
+bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
+                                   bool lighting_enabled,
+                                   bool particles_enabled,
+                                   ActionEffectProjectPointFn project_point,
+                                   void *project_userdata,
+                                   ActionSceneEffectRenderBatch *batch);
 
 #endif  /* ACTION_EFFECT_RENDER_H */

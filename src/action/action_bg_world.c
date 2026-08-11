@@ -68,45 +68,85 @@ static void Invalidate(ActionBgWorld *world) {
   if (world) world->valid = false;
 }
 
+bool ActionBgMapView_Init(ActionBgMapView *view,
+                          const uint8_t *wram, size_t wram_size,
+                          uint16_t world_width, uint16_t world_height,
+                          uint16_t map_page) {
+  if (!view) return false;
+  memset(view, 0, sizeof(*view));
+  if (!wram || !wram_size || wram_size > kActionBgMaxWramBytes ||
+      !world_width || !world_height ||
+      world_width % kActionBgPagePixels != 0 ||
+      world_height % kActionBgPagePixels != 0)
+    return false;
+
+  const size_t pages_wide = world_width / kActionBgPagePixels;
+  const size_t pages_high = world_height / kActionBgPagePixels;
+  if (!pages_wide || pages_high > SIZE_MAX / pages_wide) return false;
+  const size_t page_count = pages_wide * pages_high;
+  if (page_count > SIZE_MAX / kActionBgPageBytes) return false;
+  const size_t map_size = page_count * kActionBgPageBytes;
+  const size_t map_start = map_page & 0xFF00u;
+  if (map_start > wram_size || map_size > wram_size - map_start) return false;
+
+  *view = (ActionBgMapView) {
+    .map = wram + map_start,
+    .map_size = map_size,
+    .world_width = world_width,
+    .world_height = world_height,
+    .pages_wide = (unsigned)pages_wide,
+  };
+  return true;
+}
+
+bool ActionBgMapView_LookupMetatile(const ActionBgMapView *view,
+                                    int world_x, int world_y,
+                                    uint8_t *metatile) {
+  if (!view || !view->map || !metatile || world_x < 0 || world_y < 0 ||
+      (unsigned)world_x >= view->world_width ||
+      (unsigned)world_y >= view->world_height || !view->pages_wide)
+    return false;
+  const unsigned x = (unsigned)world_x;
+  const unsigned y = (unsigned)world_y;
+  const size_t page = (size_t)(y / kActionBgPagePixels) * view->pages_wide +
+      x / kActionBgPagePixels;
+  const size_t metatile_in_page = (size_t)(y & 0xF0u) +
+      (size_t)((x & 0xF0u) / kActionBgMetatilePixels);
+  const size_t offset = page * kActionBgPageBytes + metatile_in_page;
+  if (offset >= view->map_size) return false;
+  *metatile = view->map[offset];
+  return true;
+}
+
 static bool ValidateInput(const ActionBgDecodeInput *input,
                           ActionBgLayout *layout) {
   if (!input || !layout || !input->wram || input->wram_size == 0 ||
       input->wram_size > kActionBgMaxWramBytes)
     return false;
-  if (!input->world_width || !input->world_height ||
-      input->world_width % kActionBgPagePixels != 0 ||
-      input->world_height % kActionBgPagePixels != 0)
-    return false;
-
-  const size_t pages_wide = input->world_width / kActionBgPagePixels;
-  const size_t pages_high = input->world_height / kActionBgPagePixels;
-  if (pages_high > SIZE_MAX / pages_wide) return false;
-  const size_t page_count = pages_wide * pages_high;
-  if (page_count > SIZE_MAX / kActionBgPageBytes) return false;
-
-  const size_t map_start = input->map_page & 0xFF00u;
-  const size_t map_size = page_count * kActionBgPageBytes;
-  if (map_start > input->wram_size ||
-      map_size > input->wram_size - map_start)
+  ActionBgMapView map_view;
+  if (!ActionBgMapView_Init(&map_view, input->wram, input->wram_size,
+                            input->world_width, input->world_height,
+                            input->map_page))
     return false;
 
   const size_t table_start = input->metatile_table;
   if (table_start > input->wram_size ||
       kActionBgDefinitionBytes > input->wram_size - table_start)
     return false;
+  const size_t page_count = map_view.map_size / kActionBgPageBytes;
   if (page_count > SIZE_MAX / kActionBgTilesPerPage) return false;
   const size_t tile_count = page_count * kActionBgTilesPerPage;
   if (tile_count > kActionBgMaxExpandedTiles ||
-      map_size > SIZE_MAX - kActionBgDefinitionBytes)
+      map_view.map_size > SIZE_MAX - kActionBgDefinitionBytes)
     return false;
 
   *layout = (ActionBgLayout) {
-    .map_start = map_start,
-    .map_size = map_size,
+    .map_start = (size_t)(map_view.map - input->wram),
+    .map_size = map_view.map_size,
     .table_start = table_start,
-    .source_size = map_size + kActionBgDefinitionBytes,
+    .source_size = map_view.map_size + kActionBgDefinitionBytes,
     .tile_count = tile_count,
-    .pages_wide = (unsigned)pages_wide,
+    .pages_wide = map_view.pages_wide,
     .tile_width = input->world_width / kActionBgTilePixels,
     .tile_height = input->world_height / kActionBgTilePixels,
   };
