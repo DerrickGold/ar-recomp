@@ -543,8 +543,10 @@ projection, applied to the normal flat present path. Per-effect feasibility tria
   currently gated to diorama mode + action stages. That shared plumbing is the real
   cost of ALL the flat-mode effects in this list (shadows, parallax too) — pay it
   once behind the "2D depth enhancement" toggle, and note it carries the capture
-  caveats into the flat view: per-frame capture cost, and per-layer capture loses
-  cross-layer color math (predecessor §5.8/§8.1). Once the plumbing exists, the
+  caveats into the flat view: per-frame capture cost, and the flat compositor
+  must consume the same explicit half-add, full-add, and fixed-colour policies
+  as Diorama (§5.8/§8.1). Unsupported register topologies still require a
+  measured policy or authentic-flat fallback. Once the plumbing exists, the
   tint is the cheapest, best-ratio effect to evaluate first.
 - **Drop shadows between planes (PORTABLE, medium):** the cheap offset-and-darken
   shadow (already in `diorama.c` for the tilted view) works flat too — a soft dark
@@ -581,10 +583,11 @@ you value first.
 - **B3-plumbing — flat separated-plane refactor** **(REGRESSION CHECKPOINT)**: with
   `flat_depth_enhance` ON (default OFF), the flat path stops compositing one
   framebuffer (present.c ~614-631) and runs the separated multi-plane composite in
-  flat mode. **Acceptance test:** *cannot be asserted pixel-identical* — per-layer
-  capture loses cross-layer SNES color math (§5.8/§8.1) — so verify by instrumentation
-  instead: with the flag ON there is no *visible* regression, the per-layer buffers
-  actually populate in flat mode, and any color-math divergences are catalogued. Gate
+  flat mode. **Acceptance test:** cannot be asserted pixel-identical until the
+  flat compositor consumes the frame-owned colour-math metadata
+  (§5.8/§8.1). Verify that the per-layer buffers populate, every observed
+  supported math form selects its exact blend/transform, and an unsupported
+  form fails to the authentic composite rather than being approximated. Gate
   this BEFORE porting any effect on top.
 - **B3-depth-shade** *(VISIBLE)*: **Acceptance test:** with the flag ON in normal 2D
   view, farther background layers render visibly darker/cooler; reuse the existing
@@ -1301,9 +1304,9 @@ gated (pixel-identical / unchanged) before any feature stacks on them.
     near side wall culls/fades. (Walls + culling ship together.)
 18. **B3-plumbing — flat separated-plane refactor** **(REGRESSION CHECKPOINT)** —
     `flat_depth_enhance` appears (default OFF); with it ON, flat output shows no visible
-    regression, instrumentation confirms per-layer buffers populate, color-math
-    divergences catalogued (NOT pixel-identical — per-layer capture loses cross-layer
-    color math).
+    regression, instrumentation confirms per-layer buffers populate, supported
+    colour-math metadata is consumed exactly, and unsupported states fall back to
+    the authentic composite.
 19. **B3-depth-shade** — with the flag ON in normal 2D view, farther layers render
     darker/cooler; the `diorama_depth_shade` slider (made reachable in flat mode) changes
     strength.

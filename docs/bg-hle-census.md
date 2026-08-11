@@ -297,8 +297,9 @@ decorative layer native.
 ROM-free tests pin native-plan initialization, policy override validation,
 all 49 map classifications, Bloodpool's 136..224 band, Death Heim's 144..224
 band and both ending-sky selectors, plus exact row-span behavior with a 16-row
-vertical extension. Debug and release builds succeed; 40 sandbox-safe tests and
-the macOS display-dependent shader test pass (41/41). BH6 is complete.
+vertical extension. At the BH6 checkpoint, debug and release builds succeeded;
+40 sandbox-safe tests and the macOS display-dependent shader test passed
+(41/41). The post-Marahna suite now contains 45 tests. BH6 is complete.
 
 ## BH7 default-on acceptance — 2026-08-09
 
@@ -436,8 +437,8 @@ The rebuilt-release post-census manifests are:
 
 Each is 204/204 byte-exact against its accepted post-ring-repair BH8 baseline,
 for 612/612 exact artifacts total. All 36 matrix targets report zero provider
-mismatch, debug and release builds pass, and the full suite passes 41/41. This
-closes BH8.
+mismatch, debug and release builds passed, and the then-current suite passed
+41/41. The post-Marahna suite now passes 45/45. This closes BH8.
 
 ### Rejected Northwall `0608` shortcut
 
@@ -472,7 +473,8 @@ classification:
 | Entries | BG1 role/source | BG2 role/source | Extent consequence |
 | --- | --- | --- | --- |
 | `0101` | playfield / finite world | backdrop / finite world | BG1 remains available; the live-tuned BG2 backdrop is fixed to `128/128` |
-| `0102`, `0303`, `0404`, `0501`, `0504` | playfield / finite world | backdrop / finite world or disabled | both retain available caps; each finite source supplies its own natural bound |
+| `0102`, `0303`, `0404`, `0504` | playfield / finite world | backdrop / finite world or disabled | both retain available caps; each finite source supplies its own natural bound |
+| `0501`, `0502` | playfield / finite world | backdrop / 512px cyclic decoded world | BG2 wraps its decoded X when it shares the full camera with a wider BG1; subsection `$19` is not part of the rule |
 | `0301`, natural-transition `0302` | playfield / finite world | backdrop / captured viewport | content-anchored sky rows Mirror within a tuned `128/128` cap while dune rows at BG2 world Y `256+` Repeat with an available extent; BG1 remains available |
 | `0201` | playfield / 4096x512 world | backdrop / 256x256 viewport | moon/cloud rows use live-tuned fixed `76/100`; water `136..224` remains independently available |
 | `0202` | playfield / 768x512 world | backdrop / 256x256 viewport | the whole BG2 span is live-tuned to `68/68`; water `136..224` repeats within that inherited limit |
@@ -501,6 +503,32 @@ Sky Palace, Mode 7, title and other non-action projections cannot accidentally
 opt into future action-canvas growth. The live BG Extents tuner displays and
 prints the role but cannot edit it; a draft is therefore unable to silently
 turn decorative art into a canvas owner.
+
+### Marahna cyclic decoded-world evidence — 2026-08-11
+
+Marahna corrects an assumption in the original role census: a declared world
+width is not necessarily a finite endpoint. The two independently captured
+subsections have different BG1 maps but the same topology:
+
+| Snapshot | Map | BG1/BG2 camera X | BG2 declaration | Native-ring result |
+| --- | --- | --- | --- | --- |
+| `runs/20260811-115422/snapshots/snap_00_gf2331` | `0501` | `543/543` | 512px | all 924 authentic words match decoded X modulo 64 tiles |
+| `runs/20260811-120243/snapshots/snap_00_gf9728` | `0502` | `503/503` | 512px | all 957 authentic words match decoded X modulo 64 tiles |
+
+The canonical classifier therefore requires all of: Marahna map group, BG2
+WorldMap source, BG2 width 512, independently wider BG1, and equal BG1/BG2
+camera X. It sets `ActionBgLayerPlan.wrap_world_x`; lookup and native-ring
+preflight both use the same modulo. No subsection allowlist is involved, so the
+rule continues to later `$19` values whenever their live structure agrees and
+fails closed when any structural input does not.
+
+The snapshots also establish why this provider finding cannot be separated
+from PPU screen ownership. Both record main `$06`, sub `$11`, CGWSEL `$02`, and
+CGADSUB `$03`: BG2/BG3 form the main input, BG1/OBJ form the subscreen input,
+and a full add combines their resolved winners. Provider eligibility and layer
+census therefore use main-or-sub enablement rather than main alone. The detailed
+capture/compositor contract is in rendering-engine.md §13.4 and SEAMS.md's
+main/subscreen seam.
 
 ### Canonical layer limits
 

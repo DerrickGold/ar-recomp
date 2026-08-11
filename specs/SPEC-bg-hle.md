@@ -434,6 +434,10 @@ skips any of these stages does not satisfy this spec.
 
 For authentic rows, a provider-enabled frame must produce byte-identical final
 pixels **and priority-plane captures**, not merely a visually similar composite.
+Layer eligibility is the union of live main and subscreen designation: a
+subscreen-only WorldMap layer is active and must remain provider-backed. Marahna
+proves this with BG1 on TS only; treating TM as the complete visible-layer mask
+would reject the playable layer even though native colour math makes it visible.
 
 Page-changing scenes are conservative. If a live BGSC page identifies authored
 tilemap state not represented by the world source, that layer uses
@@ -450,7 +454,7 @@ live BGSC and transition state remain authoritative where already measured.
 | Scene/layer | Source and edge policy |
 | --- | --- |
 | Ordinary wide BG1/BG2 | `WorldMap`; live inside independent bounds, transparent outside |
-| Marahna action BG2 | `WorldMap`; a 512px horizontal cycle when it shares camera X with an independently wider BG1, regardless of subsection `$19` |
+| Marahna action BG2 | `WorldMap`; a 512px horizontal cycle when it shares camera X with an independently wider BG1, regardless of subsection `$19`. `0501` gf2331 and `0502` gf9728 prove 924/924 and 957/957 native words at decoded X modulo 64 tiles |
 | Narrow decorative BG2 with padding disabled | `AuthenticViewport`; clamp |
 | Bloodpool decorative BG2 | authentic rendered line; mirror by default |
 | Bloodpool act 1 water rows `136..224` | repeat band overriding mirrored upper rows |
@@ -650,8 +654,9 @@ and the integrated build produced byte-identical framebuffers, PPU snapshots,
 WRAM, SRAM, dispatch logs and final state across all 12 ordinary entries, five
 wide policy classes (`0101`, `0201`, `0401`, `0701`, `0708`), and three
 vertical/diorama cases (`0102`, `0201`, `0701`). The emitted clamp/mirror/repeat
-policies were identical. All 41 ROM-free tests pass (the SDL shader platform
-test requires access to the macOS video service).
+policies were identical. All 41 ROM-free tests at that checkpoint passed (the
+SDL shader platform test required access to the macOS video service); the
+post-Marahna consolidated suite contains 45 tests.
 
 **Work**
 

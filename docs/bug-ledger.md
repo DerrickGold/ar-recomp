@@ -1165,7 +1165,8 @@ the current debugging process; this file is the case law.
     vertical per-layer clip, and the mechanical plan-to-PPU projection all have
     live consumers and remain. Rebuilt-release 4:3, Wide Full, and diorama-32
     matrices are byte-exact against the accepted post-repair baseline (612/612
-    artifacts), and the suite passes 41/41. BH8 is complete.
+    artifacts), and the then-current suite passed 41/41. The post-Marahna suite
+    now passes 45/45. BH8 is complete.
 
     **Reusable lesson:** a resident tilemap address is not automatically a spatial world
     coordinate outside hardware-visible scanlines. An A/B that confines a symptom to an
@@ -1459,6 +1460,61 @@ the current debugging process; this file is the case law.
     **Reusable lesson:** fixed-screen coordinates do not imply fixed OAM slots.
     Any HUD sprite sharing the allocator with menus or dialog must identify its
     complete shape first and treat the resulting slot range as per-frame data.
+
+48. **Marahna Diorama lost the playable layer/water and later dropped its BG2
+    provider — FIXED 2026-08-11.** The first action frame after Advent showed
+    corrupt/missing planes in Diorama while widescreen flat mode remained
+    correct. `runs/20260811-112534` then proved that restoring the missing
+    planes alone still omitted the animated water/detail, and
+    `runs/20260811-114834` showed the action-background HLE falling back after
+    camera advance. The decisive snapshots are `0501` gf2331 in
+    `runs/20260811-115422` and `0502` gf9728 in
+    `runs/20260811-120243`.
+
+    **Root cause:** two independent “ordinary action level” assumptions failed.
+    First, Diorama capture treated TM (`$212C`) as the visible-layer list.
+    Marahna instead records TM `$06` (BG2+BG3), TS `$11` (BG1+OBJ), CGWSEL
+    `$02`, and CGADSUB `$03`: the playable BG1 and actors exist exclusively as
+    the resolved subscreen operand to a full add over main-screen BG2. TM and TS
+    are not competing complete screens; they are independently priority-resolved
+    inputs to the final pixel. Capturing only TM removed BG1/OBJ, while drawing
+    all four sources as ordinary opaque planes still discarded the colour-math
+    water/detail. Second, the HLE interpreted BG2's declared 512px width as a
+    finite endpoint even though the game drives it with the same full X camera
+    as the wider BG1. Crossing the encoded period therefore produced finite-edge
+    fallback and collapsed the enhanced view.
+
+    **Fix:** capture eligibility is now `TM | TS`. During scanout the PPU exports
+    the main rendering when a source lives there and otherwise the subscreen
+    rendering, after per-line HDMA writes. The exact disjoint full-add topology
+    is admitted only for CGWSEL `$02`, no half/subtract, non-overlapping visual
+    masks, and a math-enabled main source. PPU winner filtering writes sparse
+    BG1/OBJ addend planes only where each source wins TS and the resolved main
+    winner enables math. `FrameSlot.diorama_plane_additive_mask` carries that
+    immutable result to a three-pass compositor: main world, saturated-additive
+    TS, then BG3. The relocated HUD icon remains in ordinary OBJ capture but is
+    omitted from the addend scratch, preventing a moved-icon hole.
+
+    The background planner separately recognizes one decoded horizontal cycle
+    when the group is Marahna, BG2 is a 512px WorldMap, BG1 is independently
+    wider, and both cameras share X. It sets `wrap_world_x`; lookup and native
+    preflight use identical modulo-64-tile coordinates. The classifier does not
+    name `$19`, so it covers every Marahna subsection with the same live
+    structure and rejects a merely narrow or differently scrolling backdrop.
+
+    Evidence is exact: all 924 authentic BG2 words in `0501` gf2331 and all 957
+    in `0502` gf9728 match the decoded map at X modulo 64. Focused capture,
+    winner-filter, relocated-OAM, plan-structure, provider/preflight, and
+    compositor-order regressions cover the result; the complete 45-test suite
+    passes. No new WRAM field, ROM address, or recompiled symbol was discovered:
+    this is a PPU/host presentation seam.
+
+    **Reusable lessons:** use TM∪TS to answer “can this source affect the
+    picture,” then model colour math separately from source presence. A map
+    dimension may describe one authored cycle rather than a finite boundary;
+    prove that with camera/topology and modulo ring evidence, not a subsection
+    allowlist. Finally, carry any reconstructed arithmetic as immutable
+    frame-owned metadata—present must never reverse-engineer live PPU state.
 
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 

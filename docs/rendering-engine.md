@@ -1088,7 +1088,8 @@ detects that structural relationship rather than naming `$19`: Marahna, BG2
 width 512, wider BG1, and equal camera X. `ActionBgLayerPlan.wrap_world_x` then
 makes provider lookup and native-ring preflight apply the same modulo. BG1
 remains the finite playable map, while the PPU still combines the two
-independent layers through the live main/subscreen color-math state.
+independent layers through the live main/subscreen color-math state. See
+§13.4 for the register-level finding and the separated-plane reproduction.
 
 Diagnostics separately count preflight, eligible, bound, phase, edge, mismatch,
 and runtime lookup results. The modern PPU can bind at authentic 4:3 with zero
@@ -1447,6 +1448,84 @@ native RawWrap exception for its two-plane raster scene. The planner test lists
 every member rather than only range endpoints, and the real-PPU fixture now
 proves same-direction cyclic sampling on a synthetic top row as well as the
 Bloodpool bottom band.
+
+### 13.4 Action Diorama main/subscreen colour math (2026-08-11)
+
+The SNES main screen and subscreen are not alternative complete views. They are
+two independently priority-resolved inputs to the final pixel operation. The
+game can place a useful visual source only on the subscreen and rely on colour
+math to make it visible. Any host feature that extracts layers must therefore
+treat `TM | TS` as source eligibility; using `TM` alone is a category error.
+
+Marahna action mode is the measured counterexample that established this rule.
+Both `runs/20260811-115422/snapshots/snap_00_gf2331` (`0501`) and
+`runs/20260811-120243/snapshots/snap_00_gf9728` (`0502`) record the same state:
+
+| Register | Value | Meaning in the measured frame |
+| --- | --- | --- |
+| `$212C` `TM` | `$06` | BG2 and BG3 participate in the main-screen priority resolve |
+| `$212D` `TS` | `$11` | BG1 and OBJ participate only in the subscreen priority resolve |
+| `$212E/$212F` `TMW/TSW` | `$06/$11` | matching main/sub window designation; the live PPU still evaluates it per scanline |
+| `$2130` `CGWSEL` | `$02` | use the resolved subscreen pixel as the second colour operand; no direct-colour or colour-window mode |
+| `$2131` `CGADSUB` | `$03` | full addition, enabled for main winners BG1 and BG2; no half or subtract bit |
+
+The native result is therefore not “show BG2 instead of BG1.” For each pixel,
+the PPU first resolves the highest-priority main winner and the highest-priority
+subscreen winner. If the main winner is selected by `CGADSUB` and the colour
+window permits math, it saturating-adds the subscreen colour in SNES 5-bit
+component space. In this scene BG2 is the ordinary math-bearing main world,
+BG1/OBJ supply the resolved subscreen addend, and non-math BG3 remains a main
+foreground/HUD winner. That is why main-only Diorama capture lost the playable
+level and sprites, while merely capturing BG1/OBJ as ordinary opaque planes
+still lost the water lighting/detail.
+
+The separated capture reproduces the measured full-add state with this exact
+contract:
+
+1. `ActRaiserDrawPpuFrame` gates BG/OBJ capture on
+   `screenEnabled[0] | screenEnabled[1]`. The PPU exports the main rendering of
+   a source when present there and otherwise its subscreen rendering. This
+   choice happens during scanout, after scanline HDMA can update TM/TS.
+2. `DioramaCaptureBlend_FullAddSubscreenSources` admits only
+   `CGWSEL == $02`, full non-subtract math, disjoint main/sub visual-source
+   masks, and at least one math-enabled main source. Overlapping ownership,
+   direct colour, half/subtract variants, or colour-window modes fail closed
+   rather than being approximated.
+3. For an admitted source, the PPU resolves the authentic main and subscreen
+   priority winners and exports a sparse addend only where that source wins TS
+   and the main winner actually enables colour math. BG3 is excluded from the
+   world resolve and reinserted later so a relocated/flat HUD cannot punch
+   glyph-shaped holes in the addend. The separately relocated HUD OAM range is
+   likewise omitted from the full-add OBJ scratch while remaining present in
+   the ordinary OBJ capture.
+4. `FrameSlot.diorama_plane_additive_mask` carries the immutable result beside
+   the captured frame. Present intersects it with uploaded content and the
+   Diorama compositor draws three passes: ordinary main-world planes, sparse TS
+   planes with saturated additive blending, then BG3. Present never reads live
+   PPU state.
+
+This is one member of a small, explicit colour-math support table rather than a
+claim that arbitrary SNES arithmetic maps to host alpha:
+
+| Authored form | Separated-plane representation |
+| --- | --- |
+| Subscreen half-add on an eligible BG | source alpha `$80`; a layer also on TS is identity and remains opaque |
+| OBJ colour math | existing per-palette-group `$80` alpha capture |
+| Disjoint subscreen full-add | sparse resolved-TS plane plus saturated additive pass |
+| Full fixed-colour BG subtraction | baked into the isolated plane in native 5-bit component space before brightness expansion |
+| Overlapping main/sub ownership, general subtract/half-subtract, direct colour, or unsupported colour-window math | fail closed; do not infer a blend from layer bits alone |
+
+The background provider has a related but independent Marahna rule. A 512px
+BG2 driven by the same full camera X as a wider BG1 is one authored horizontal
+cycle, not a finite backdrop. The classifier requires Marahna, BG2 width 512,
+a wider BG1, equal camera X, and a WorldMap source; it never names subsection
+`$19`. All 924 authentic BG2 ring words in `0501` gf2331 and all 957 in `0502`
+gf9728 match the decoder at X modulo 64 tiles. `wrap_world_x` applies that same
+modulo in lookup and native-ring preflight, so every qualifying subsection keeps
+the HLE provider when the camera crosses the encoded period.
+
+These are host/PPU presentation seams only. The work discovered no new WRAM
+field, ROM routine/table, or recompiled ROM symbol.
 
 ## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
 
