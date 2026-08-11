@@ -580,7 +580,18 @@ it naturally when the relevant engine becomes active.
 This developer-only custom tab is deliberately outside the setting registry.
 It exposes the immutable live `ActionBgPlan` through a session-local sparse
 draft: source and semantic role are read-only, while edge strategy, per-side
-horizontal/vertical caps, and canonical-band horizontal caps are editable.
+horizontal/vertical caps, and mirror-motion phase are editable. Each BG owns a
+bounded table of up to four non-overlapping bands. The editor can add/delete a
+band and tune its screen/world anchor, half-open row interval, fill, motion,
+and horizontal cap. Fill-relative is the legacy reflected-motion behavior;
+Normal Scroll keeps a mirrored band's apparent movement aligned with the
+authentic layer. A world anchor follows the live vertical camera instead of
+freezing the split to one captured screen row.
+Mixed-anchor tables are validated over the complete native camera range, so an
+edit that is disjoint only on the current frame is rejected before it can later
+cross another band. Draft application is atomic; stale room-state drafts fall
+back to the current canonical plan rather than disabling background HLE.
+
 The per-BG **ignore side bounds** and **ignore vertical bounds** toggles are
 non-destructive A/Bs over those caps. The first makes the layer and all its
 bands use every available horizontal column; the second makes its top/bottom

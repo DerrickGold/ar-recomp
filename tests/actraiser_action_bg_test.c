@@ -292,14 +292,112 @@ static void TestFramePlanCapture(void) {
   CHECK(plan.layer[1].horizontal_extent.left == 76 &&
         plan.layer[1].horizontal_extent.right == 100);
   CHECK(policy.mirror_layers == kActRaiserBgLayerMask_Bg2);
-  CHECK(policy.repeat_band_layer == kActRaiserPpuLayer_Bg2);
-  CHECK(policy.repeat_band_y0 == 136 && policy.repeat_band_y1 == 224);
+  CHECK(policy.band_count == 1);
+  CHECK(policy.bands[0].layer == kActRaiserPpuLayer_Bg2 &&
+        policy.bands[0].y0 == 136 && policy.bands[0].y1 == 224 &&
+        policy.bands[0].edge == kActionBgEdge_Repeat);
+
+  wram[kActRaiserWram_CurrentMap] = 2;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 68 &&
+        plan.layer[1].horizontal_extent.right == 68);
+  CHECK(plan.layer[1].bands[0].horizontal_extent.mode ==
+        kActionBgExtent_Inherit);
+
+  wram[kActRaiserWram_CurrentMap] = 6;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 68 &&
+        plan.layer[1].horizontal_extent.right == 68);
+  CHECK(plan.layer[1].band_count == 0);
+
+  wram[kActRaiserWram_CurrentMap] = 7;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 92 &&
+        plan.layer[1].horizontal_extent.right == 92);
+  CHECK(plan.layer[1].band_count == 0);
+
+  wram[kActRaiserWram_CurrentMap] = 8;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[0].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[0].horizontal_extent.left == 16 &&
+        plan.layer[0].horizontal_extent.right == 16);
+  CHECK(plan.layer[0].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[0].band_count == 0);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 0 &&
+        plan.layer[1].horizontal_extent.right == 0);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].band_count == 0);
+  CHECK(policy.mirror_layers ==
+        (kActRaiserBgLayerMask_Bg1 | kActRaiserBgLayerMask_Bg2));
+  CHECK(policy.normal_scroll_layers == 0 && policy.band_count == 0);
+
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  wram[kActRaiserWram_CurrentMap] = 1;
+  Write16(wram, kActRaiserWram_Bg2Width, 2304);
+  ppu->bgXsc[1] = 0x73;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 128 &&
+        plan.layer[1].horizontal_extent.right == 128);
+
+  static const struct {
+    uint8_t map;
+    uint16_t camera_y;
+    uint8_t dune_y;
+  } kasandora_cases[] = {
+    { 1, 173, 82 },
+    { 2, 162, 93 },
+  };
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Kasandora;
+  Write16(wram, kActRaiserWram_Bg2Width, 512);
+  for (size_t i = 0;
+       i < sizeof(kasandora_cases) / sizeof(kasandora_cases[0]); i++) {
+    wram[kActRaiserWram_CurrentMap] = kasandora_cases[i].map;
+    Write16(wram, kActRaiserWram_Bg2CameraY, kasandora_cases[i].camera_y);
+    CHECK(ActRaiserActionBg_BuildPlan(
+        wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+    CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+    CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+    CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+    CHECK(plan.layer[1].band_count == 1);
+    CHECK(plan.layer[1].bands[0].y0 == 256 &&
+          plan.layer[1].bands[0].y1 == 512 &&
+          plan.layer[1].bands[0].anchor == kActionBgBandAnchor_World &&
+          plan.layer[1].bands[0].edge == kActionBgEdge_Repeat);
+    CHECK(policy.mirror_layers == kActRaiserBgLayerMask_Bg2);
+    CHECK(policy.band_count == 1);
+    CHECK(policy.bands[0].layer == kActRaiserPpuLayer_Bg2 &&
+          policy.bands[0].y0 == kasandora_cases[i].dune_y &&
+          policy.bands[0].y1 == 224 &&
+          policy.bands[0].edge == kActionBgEdge_Repeat);
+  }
 
   wram[kActRaiserWram_CurrentMap] = 9;
   memset(&plan, 0xA5, sizeof(plan));
   CHECK(!ActRaiserActionBg_BuildPlan(
       wram, kActRaiserWramSize, ppu, true, &plan, &policy));
-  CHECK(!plan.valid && policy.repeat_band_layer == -1);
+  CHECK(!plan.valid && !policy.band_count);
   free(ppu);
   free(wram);
 }
@@ -424,6 +522,26 @@ static void TestFramePlanBinding(void) {
       ActRaiserActionBg_GetDiagnostics();
   CHECK(diagnostics->layer_activations == 1);
 
+  /* Source and edge are independent: a finite world may own the authentic
+   * tile words while its synthetic margin deliberately mirrors that centre. */
+  plan.layer[0].default_edge = kActionBgEdge_Mirror;
+  plan.layer[0].horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = 4,
+    .right = 4,
+  };
+  CHECK(ActionBgPlan_Validate(&plan));
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  CHECK(ppu->virtualTilemap[0].lookup != NULL);
+  CHECK(ppu->virtualTilemap[0].flags ==
+        kPpuVirtualTilemapFlag_IncludeAuthentic);
+  plan.layer[0].default_edge = kActionBgEdge_LiveWorld;
+  plan.layer[0].horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Available,
+  };
+
   /* A paused redraw owns the same logical game frame. Rebinding must remain
    * valid without rebuilding the immutable world; a geometry/resize callback
    * may clear the frame-scoped PPU seam first, so pin that sequence too. */
@@ -446,13 +564,15 @@ static void TestFramePlanBinding(void) {
   CHECK(ppu->virtualTilemap[0].lookup != NULL);
   CHECK(diagnostics->layer_activations == 2);
 
-  CHECK(diagnostics->provider_preflight_layers == 3);
-  CHECK(diagnostics->provider_preflight_tiles == 3u * 33u * 28u);
+  CHECK(diagnostics->provider_preflight_layers == 4);
+  CHECK(diagnostics->provider_preflight_tiles == 4u * 33u * 28u);
   CHECK(diagnostics->provider_preflight_mismatches == 0);
   CHECK(diagnostics->provider_preflight_outside_world == 0);
-  CHECK(diagnostics->provider_eligible_layers == 3);
+  CHECK(diagnostics->provider_eligible_layers == 4);
 
-  /* Any authentic contradiction rejects the whole layer for that frame. */
+  /* A stale native publication edge or a legitimate runtime patch may
+   * contradict the immutable room map. Keep that authentic word, but retain
+   * the finite provider for synthetic margins instead of dropping the layer. */
   const int changed_x = snapshot.camera_x >> 3;
   const int changed_y = (snapshot.camera_y + 1) >> 3;
   size_t changed_address = 0;
@@ -462,10 +582,15 @@ static void TestFramePlanBinding(void) {
   ppu->vram[changed_address] ^= 1;
   Write16(wram, kActRaiserWram_GameFrame, 101);
   CHECK(ActRaiserActionBg_BindPlan(
-      wram, kActRaiserWramSize, &plan, ppu) == 0);
-  CHECK(ppu->virtualTilemap[0].lookup == NULL);
+      wram, kActRaiserWramSize, &plan, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  CHECK(ppu->virtualTilemap[0].lookup != NULL);
+  CHECK(ppu->virtualTilemap[0].flags == 0);
   CHECK(diagnostics->provider_preflight_mismatches == 1);
-  CHECK(diagnostics->fallbacks[kActRaiserActionBgFallback_CompareFailure] == 1);
+  CHECK(diagnostics->provider_eligible_layers == 5);
+  CHECK(diagnostics->provider_layers == 5);
+  CHECK(diagnostics->fallbacks[
+      kActRaiserActionBgFallback_CompareFailure] == 0);
   ppu->vram[changed_address] ^= 1;
 
   /* The finite decoder may report a valid outside-world coordinate, but the

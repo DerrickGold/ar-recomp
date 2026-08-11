@@ -187,10 +187,7 @@ bool ActRaiserActionBg_BuildPlan(
     bool decorative_padding_enabled, ActionBgPlan *plan,
     ActionBgPresentationPolicy *presentation) {
   if (plan) memset(plan, 0, sizeof(*plan));
-  if (presentation) {
-    memset(presentation, 0, sizeof(*presentation));
-    presentation->repeat_band_layer = -1;
-  }
+  if (presentation) memset(presentation, 0, sizeof(*presentation));
   if (!wram || !ppu || !plan || !presentation ||
       wram_size <= kActRaiserWram_DeathHeimProgress)
     return false;
@@ -208,6 +205,7 @@ bool ActRaiserActionBg_BuildPlan(
             wram, wram_size, layer, ppu->bgXsc[layer], &snapshot))
       return false;
     state.layer[layer] = (ActionBgLayerState) {
+      .camera_y = snapshot.camera_y,
       .world_width = snapshot.decode.world_width,
       .world_height = snapshot.decode.world_height,
       .tilemap_base = snapshot.tilemap_base,
@@ -218,7 +216,6 @@ bool ActRaiserActionBg_BuildPlan(
       !ActionBgPlan_CompilePresentation(plan, presentation)) {
     memset(plan, 0, sizeof(*plan));
     memset(presentation, 0, sizeof(*presentation));
-    presentation->repeat_band_layer = -1;
     return false;
   }
   return true;
@@ -258,10 +255,16 @@ bool ActRaiserActionBg_ApplyPlanExtents(const ActionBgPlan *plan, Ppu *ppu) {
      * per-frame reset left them Available). */
     for (unsigned i = 0; i < layer_plan->band_count; i++) {
       const ActionBgBand *band = &layer_plan->bands[i];
+      int y0 = 0, y1 = 0;
+      if (!ActionBgLayerPlan_ResolveBand(layer_plan, i, &y0, &y1))
+        return false;
+      if (y0 < 0) y0 = 0;
+      if (y1 > kActRaiserAuthenticHeight) y1 = kActRaiserAuthenticHeight;
+      if (y0 >= y1) continue;
       if (band->horizontal_extent.mode != kActionBgExtent_Inherit &&
           !HorizontalExtentsEqual(horizontal, &band->horizontal_extent)) {
         PpuSetWidescreenLayerExtentBand(
-            ppu, (uint8_t)layer, band->y0, band->y1,
+            ppu, (uint8_t)layer, (uint8_t)y0, (uint8_t)y1,
             PpuExtentCap(band->horizontal_extent.mode,
                          band->horizontal_extent.left),
             PpuExtentCap(band->horizontal_extent.mode,
@@ -298,7 +301,7 @@ static bool CompareEnabled(void) {
   return s_observer.enabled != 0;
 }
 
-static bool HleEnabled(void) {
+bool ActRaiserActionBg_HleEnabled(void) {
   if (s_observer.hle_enabled < 0) {
     const char *value = getenv("AR_ACTION_BG_HLE");
     /* BH7: provider ownership is the production default. Keep one exact
@@ -455,7 +458,8 @@ uint8_t ActRaiserActionBg_BindPlan(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
     struct Ppu *ppu) {
   PpuClearVirtualTilemaps(ppu);
-  if (!HleEnabled() || !wram || !ppu || !plan || !plan->valid ||
+  if (!ActRaiserActionBg_HleEnabled() ||
+      !wram || !ppu || !plan || !plan->valid ||
       !SyncFrameIdentity(wram, wram_size))
     return 0;
   const uint8_t map_group = wram[kActRaiserWram_MapGroup];
@@ -490,7 +494,6 @@ uint8_t ActRaiserActionBg_BindPlan(
     ActRaiserActionBgLayerSnapshot snapshot;
     if (!ActRaiserActionBg_CaptureLayer(
             wram, wram_size, layer, ppu->bgXsc[layer], &snapshot) ||
-        layer_plan->default_edge != kActionBgEdge_LiveWorld ||
         layer_plan->world_width != snapshot.decode.world_width ||
         layer_plan->world_height != snapshot.decode.world_height) {
       RecordProviderFallback(kActRaiserActionBgFallback_InvalidSource, layer,
@@ -543,13 +546,19 @@ uint8_t ActRaiserActionBg_BindPlan(
         comparison.outside_world;
     ReportComparison(wram, layer, map_group, map_number, &snapshot, serial,
                      &comparison);
-    if (comparison.mismatches || comparison.outside_world) {
-      const ActRaiserActionBgFallbackReason reason = comparison.mismatches
-          ? kActRaiserActionBgFallback_CompareFailure
-          : kActRaiserActionBgFallback_AuthenticEdge;
-      RecordProviderFallback(reason, layer, map_group, map_number, &snapshot);
+    if (comparison.outside_world) {
+      RecordProviderFallback(kActRaiserActionBgFallback_AuthenticEdge, layer,
+                             map_group, map_number, &snapshot);
       continue;
     }
+
+    /* A resident ring can lag a newly visible 8px edge until the native 16px
+     * streamer publishes it; a legitimate runtime patch could also disagree
+     * with the immutable map. Keep either kind of live word authoritative in
+     * the authentic viewport while the finite decoder continues to own only
+     * synthetic margins. A coordinate outside the decoded world is different:
+     * there is no safe finite source, so that still fails closed above. */
+    const bool include_authentic = comparison.mismatches == 0;
     s_observer.diagnostics.provider_eligible_layers++;
     s_provider[layer].world = world;
     const PpuVirtualTilemapBinding binding = {
@@ -559,7 +568,8 @@ uint8_t ActRaiserActionBg_BindPlan(
       .camera_y = snapshot.camera_y,
       .hscroll_anchor = (uint16_t)(ppu->hScroll[layer] & 0x3ff),
       .vscroll_anchor = (uint16_t)(ppu->vScroll[layer] & 0x3ff),
-      .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
+      .flags = include_authentic
+          ? kPpuVirtualTilemapFlag_IncludeAuthentic : 0,
     };
     if (!PpuSetVirtualTilemap(ppu, (uint8_t)layer, &binding)) {
       RecordProviderFallback(kActRaiserActionBgFallback_InvalidSource, layer,

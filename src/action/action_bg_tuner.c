@@ -5,16 +5,11 @@
 
 enum { kExtentStep = 4, kAuthenticWidth = 256, kAuthenticHeight = 224 };
 
-typedef struct ActionBgBandDraft {
-  bool used;
-  uint16_t y0, y1;
-  bool horizontal_set;
-  ActionBgHorizontalExtent horizontal;
-} ActionBgBandDraft;
-
 typedef struct ActionBgLayerDraft {
   bool edge_set;
   ActionBgEdgeMode edge;
+  bool motion_set;
+  ActionBgMotionMode motion;
   /* Debug A/B over the normal extent policy. Kept separate from the authored
    * caps so switching it off restores the exact layer and band values the
    * tuner was holding instead of destroying that work. */
@@ -24,7 +19,12 @@ typedef struct ActionBgLayerDraft {
   ActionBgHorizontalExtent horizontal;
   bool vertical_set;
   ActionBgVerticalExtent vertical;
-  ActionBgBandDraft bands[kActionBgMaxBands];
+  /* Structural editing is atomic per layer. The first band edit snapshots the
+   * canonical band table; subsequent add/delete/property edits operate on this
+   * one table rather than accumulating overlapping sparse records. */
+  bool bands_set;
+  uint8_t band_count;
+  ActionBgBand bands[kActionBgMaxBands];
 } ActionBgLayerDraft;
 
 typedef struct ActionBgTunerState {
@@ -37,9 +37,18 @@ typedef struct ActionBgTunerState {
   ActionBgPlan canonical;
   ActionBgTunerLimits limits;
   ActionBgLayerDraft layer[kActionBgPlanLayerCount];
+  int8_t selected_band[kActionBgPlanLayerCount];
 } ActionBgTunerState;
 
-static ActionBgTunerState s_tuner = { .selected_layer = -1 };
+static ActionBgTunerState s_tuner = {
+  .selected_layer = -1,
+  .selected_band = { -1, -1 },
+};
+
+static void ClearBandSelection(void) {
+  for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++)
+    s_tuner.selected_band[layer] = -1;
+}
 
 static void ClearDraft(void) {
   memset(s_tuner.layer, 0, sizeof(s_tuner.layer));
@@ -48,18 +57,11 @@ static void ClearDraft(void) {
 
 void ActionBgTuner_ResetSession(void) {
   s_tuner = (ActionBgTunerState){ .selected_layer = -1 };
+  ClearBandSelection();
 }
 
 void ActionBgTuner_BeginFrame(void) {
   s_tuner.live = false;
-}
-
-static bool CanonicalHasBand(const ActionBgLayerPlan *layer,
-                             uint16_t y0, uint16_t y1) {
-  if (!layer) return false;
-  for (unsigned i = 0; i < layer->band_count; i++)
-    if (layer->bands[i].y0 == y0 && layer->bands[i].y1 == y1) return true;
-  return false;
 }
 
 bool ActionBgTuner_ObservePlan(uint8_t map_group, uint8_t map_number,
@@ -72,18 +74,7 @@ bool ActionBgTuner_ObservePlan(uint8_t map_group, uint8_t map_number,
   if (changed_room) {
     ClearDraft();
     s_tuner.selected_layer = -1;
-  } else {
-    /* Bands are keyed by their canonical row interval, not by array position.
-     * Drop overrides whose interval disappeared so a dynamic room cannot
-     * exhaust the fixed sparse table with stale keys. */
-    for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
-      for (unsigned i = 0; i < kActionBgMaxBands; i++) {
-        ActionBgBandDraft *draft = &s_tuner.layer[layer].bands[i];
-        if (draft->used && !CanonicalHasBand(
-                &canonical->layer[layer], draft->y0, draft->y1))
-          *draft = (ActionBgBandDraft){0};
-      }
-    }
+    ClearBandSelection();
   }
   s_tuner.map_group = map_group;
   s_tuner.map_number = map_number;
@@ -94,20 +85,34 @@ bool ActionBgTuner_ObservePlan(uint8_t map_group, uint8_t map_number,
   return true;
 }
 
-static ActionBgBandDraft *FindBandDraft(int layer, uint16_t y0, uint16_t y1,
-                                        bool create) {
-  if (layer < 0 || layer >= kActionBgPlanLayerCount) return NULL;
-  ActionBgBandDraft *free_slot = NULL;
-  for (unsigned i = 0; i < kActionBgMaxBands; i++) {
-    ActionBgBandDraft *draft = &s_tuner.layer[layer].bands[i];
-    if (draft->used && draft->y0 == y0 && draft->y1 == y1) return draft;
-    if (!draft->used && !free_slot) free_slot = draft;
-  }
-  if (!create || !free_slot) return NULL;
-  free_slot->used = true;
-  free_slot->y0 = y0;
-  free_slot->y1 = y1;
-  return free_slot;
+static void EnsureEditableBands(int layer) {
+  ActionBgLayerDraft *draft = &s_tuner.layer[layer];
+  if (draft->bands_set) return;
+  const ActionBgLayerPlan *canonical = &s_tuner.canonical.layer[layer];
+  draft->bands_set = true;
+  draft->band_count = canonical->band_count;
+  memcpy(draft->bands, canonical->bands, sizeof(draft->bands));
+}
+
+static uint8_t EffectiveBandCount(int layer) {
+  const ActionBgLayerDraft *draft = &s_tuner.layer[layer];
+  return draft->bands_set ? draft->band_count
+                          : s_tuner.canonical.layer[layer].band_count;
+}
+
+static const ActionBgBand *EffectiveBand(int layer, int band) {
+  if (layer < 0 || layer >= kActionBgPlanLayerCount || band < 0 ||
+      band >= EffectiveBandCount(layer))
+    return NULL;
+  const ActionBgLayerDraft *draft = &s_tuner.layer[layer];
+  return draft->bands_set ? &draft->bands[band]
+                          : &s_tuner.canonical.layer[layer].bands[band];
+}
+
+static ActionBgBand *EditableBand(int layer, int band) {
+  EnsureEditableBands(layer);
+  ActionBgLayerDraft *draft = &s_tuner.layer[layer];
+  return band >= 0 && band < draft->band_count ? &draft->bands[band] : NULL;
 }
 
 static bool BuildEffectivePlan(ActionBgPlan *out, bool apply_draft) {
@@ -119,20 +124,19 @@ static bool BuildEffectivePlan(ActionBgPlan *out, bool apply_draft) {
       ActionBgLayerPlan *dst = &built.layer[layer];
       const ActionBgLayerDraft *draft = &s_tuner.layer[layer];
       if (draft->edge_set) dst->default_edge = draft->edge;
+      if (draft->motion_set) dst->default_motion = draft->motion;
       if (draft->horizontal_set)
         dst->horizontal_extent = draft->horizontal;
       if (draft->vertical_set) dst->vertical_extent = draft->vertical;
-      for (unsigned band = 0; band < dst->band_count; band++) {
-        ActionBgBandDraft *band_draft = FindBandDraft(
-            (int)layer, dst->bands[band].y0, dst->bands[band].y1, false);
-        if (band_draft && band_draft->horizontal_set)
-          dst->bands[band].horizontal_extent = band_draft->horizontal;
+      if (draft->bands_set) {
+        dst->band_count = draft->band_count;
+        memcpy(dst->bands, draft->bands, sizeof(dst->bands));
       }
       /* Resolve the convenience toggle last. A layer can contain fixed row
        * bands even when its default extent is available (Bloodpool/Death Heim),
        * so ignoring the side boundary means removing every horizontal cap on
-      * that plane, not just changing the layer default. Source/edge rules still
-      * decide whether pixels actually exist outside the authentic viewport. */
+       * that plane, not just changing the layer default. Source/edge rules still
+       * decide whether pixels actually exist outside the authentic viewport. */
       if (draft->ignore_side_bounds) {
         const ActionBgHorizontalExtent available = {
           .mode = kActionBgExtent_Available,
@@ -163,6 +167,8 @@ bool ActionBgTuner_ApplyDraft(ActionBgPlan *plan) {
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     if (plan->layer[layer].role != s_tuner.canonical.layer[layer].role ||
         plan->layer[layer].source != s_tuner.canonical.layer[layer].source ||
+        plan->layer[layer].camera_y !=
+            s_tuner.canonical.layer[layer].camera_y ||
         plan->layer[layer].world_width !=
             s_tuner.canonical.layer[layer].world_width ||
         plan->layer[layer].world_height !=
@@ -188,8 +194,7 @@ static ActionBgTunerRow *PushRow(ActionBgTunerRow *out, int capacity,
   row->kind = kind;
   row->layer = (int8_t)layer;
   row->band = (int8_t)band;
-  row->selectable = kind != kActionBgTunerRow_Header &&
-      kind != kActionBgTunerRow_BandHeader;
+  row->selectable = kind != kActionBgTunerRow_Header;
   return row;
 }
 
@@ -199,6 +204,22 @@ static const char *UpperEdge(ActionBgEdgeMode edge) {
   };
   return edge >= kActionBgEdge_Transparent && edge <= kActionBgEdge_RawWrap
       ? names[edge] : "UNKNOWN";
+}
+
+static const char *UpperMotion(ActionBgMotionMode motion) {
+  switch (motion) {
+    case kActionBgMotion_FillRelative: return "FILL-RELATIVE";
+    case kActionBgMotion_NormalScroll: return "NORMAL SCROLL";
+    default: return "UNKNOWN";
+  }
+}
+
+static const char *UpperAnchor(ActionBgBandAnchor anchor) {
+  switch (anchor) {
+    case kActionBgBandAnchor_Screen: return "SCREEN";
+    case kActionBgBandAnchor_World: return "WORLD";
+    default: return "UNKNOWN";
+  }
 }
 
 static const char *UpperExtent(ActionBgExtentMode mode) {
@@ -250,11 +271,106 @@ static ActionBgVerticalExtent EffectiveVertical(int layer) {
 }
 
 static ActionBgHorizontalExtent EffectiveBandHorizontal(int layer, int band) {
-  const ActionBgBand *canonical = &s_tuner.canonical.layer[layer].bands[band];
-  ActionBgBandDraft *draft = FindBandDraft(
-      layer, canonical->y0, canonical->y1, false);
-  return draft && draft->horizontal_set
-      ? draft->horizontal : canonical->horizontal_extent;
+  const ActionBgBand *effective = EffectiveBand(layer, band);
+  return effective ? effective->horizontal_extent
+                   : (ActionBgHorizontalExtent){ 0 };
+}
+
+static bool PushBandRows(ActionBgTunerRow *out, int capacity, int *count,
+                         int layer, unsigned band) {
+  const ActionBgBand *effective = EffectiveBand(layer, (int)band);
+  if (!effective) return false;
+  char key[48], value[24], label[32];
+  ActionBgTunerRow *row = PushRow(
+      out, capacity, count, kActionBgTunerRow_BandHeader, layer, (int)band);
+  if (!row) return false;
+  snprintf(value, sizeof(value), "%s%s", UpperEdge(effective->edge),
+           s_tuner.selected_band[layer] == (int)band ? " OPEN" : "");
+  snprintf(key, sizeof(key), "bg%d.band%u", layer + 1, band);
+  snprintf(label, sizeof(label), "%s rows %u-%u",
+           effective->anchor == kActionBgBandAnchor_World
+               ? "world" : "screen",
+           effective->y0, effective->y1 - 1);
+  SetRowText(row, key, label, value);
+  row->nested = true;
+  if (s_tuner.selected_band[layer] != (int)band) return true;
+
+  row = PushRow(out, capacity, count,
+                kActionBgTunerRow_BandAnchor, layer, (int)band);
+  if (!row) return false;
+  snprintf(key, sizeof(key), "bg%d.band%u.anchor", layer + 1, band);
+  SetRowText(row, key, "band anchor", UpperAnchor(effective->anchor));
+  row->nested = true;
+
+  const struct {
+    ActionBgTunerRowKind kind;
+    const char *suffix;
+    const char *label;
+    uint16_t value;
+  } bounds[] = {
+    { kActionBgTunerRow_BandStart, "start", "band start", effective->y0 },
+    { kActionBgTunerRow_BandEnd, "end", "band end", effective->y1 },
+  };
+  for (unsigned i = 0; i < sizeof(bounds) / sizeof(bounds[0]); i++) {
+    row = PushRow(out, capacity, count, bounds[i].kind, layer, (int)band);
+    if (!row) return false;
+    snprintf(key, sizeof(key), "bg%d.band%u.%s",
+             layer + 1, band, bounds[i].suffix);
+    snprintf(value, sizeof(value), "%u", bounds[i].value);
+    SetRowText(row, key, bounds[i].label, value);
+    row->nested = true;
+  }
+
+  row = PushRow(out, capacity, count,
+                kActionBgTunerRow_BandEdge, layer, (int)band);
+  if (!row) return false;
+  snprintf(key, sizeof(key), "bg%d.band%u.edge", layer + 1, band);
+  SetRowText(row, key, "band fill", UpperEdge(effective->edge));
+  row->nested = true;
+
+  row = PushRow(out, capacity, count,
+                kActionBgTunerRow_BandMotion, layer, (int)band);
+  if (!row) return false;
+  snprintf(key, sizeof(key), "bg%d.band%u.motion", layer + 1, band);
+  SetRowText(row, key, "band motion", UpperMotion(effective->motion));
+  row->nested = true;
+
+  const ActionBgHorizontalExtent extent =
+      EffectiveBandHorizontal(layer, (int)band);
+  row = PushRow(out, capacity, count,
+                kActionBgTunerRow_BandMode, layer, (int)band);
+  if (!row) return false;
+  snprintf(key, sizeof(key), "bg%d.band%u.horizontal", layer + 1, band);
+  SetRowText(row, key, "band cap", UpperExtent(extent.mode));
+  row->nested = true;
+  if (extent.mode == kActionBgExtent_Fixed) {
+    const struct {
+      ActionBgTunerRowKind kind;
+      const char *suffix;
+      const char *label;
+      uint16_t value;
+    } sides[] = {
+      { kActionBgTunerRow_BandLeft, "left", "band left", extent.left },
+      { kActionBgTunerRow_BandRight, "right", "band right", extent.right },
+    };
+    for (unsigned i = 0; i < sizeof(sides) / sizeof(sides[0]); i++) {
+      row = PushRow(out, capacity, count, sides[i].kind, layer, (int)band);
+      if (!row) return false;
+      snprintf(key, sizeof(key), "bg%d.band%u.%s",
+               layer + 1, band, sides[i].suffix);
+      snprintf(value, sizeof(value), "%u px", sides[i].value);
+      SetRowText(row, key, sides[i].label, value);
+      row->nested = true;
+    }
+  }
+
+  row = PushRow(out, capacity, count,
+                kActionBgTunerRow_BandDelete, layer, (int)band);
+  if (!row) return false;
+  snprintf(key, sizeof(key), "bg%d.band%u.delete", layer + 1, band);
+  SetRowText(row, key, "delete band", "DELETE");
+  row->nested = true;
+  return true;
 }
 
 static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
@@ -279,6 +395,14 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
   if (!row) return;
   snprintf(key, sizeof(key), "bg%d.edge", layer + 1);
   SetRowText(row, key, "edge strategy", UpperEdge(edge));
+  row->nested = true;
+
+  ActionBgMotionMode motion = draft->motion_set
+      ? draft->motion : canonical->default_motion;
+  row = PushRow(out, capacity, count, kActionBgTunerRow_Motion, layer, -1);
+  if (!row) return;
+  snprintf(key, sizeof(key), "bg%d.motion", layer + 1);
+  SetRowText(row, key, "scroll motion", UpperMotion(motion));
   row->nested = true;
 
   row = PushRow(out, capacity, count,
@@ -341,44 +465,17 @@ static void PushLayerRows(ActionBgTunerRow *out, int capacity, int *count,
     row->nested = true;
   }
 
-  for (unsigned band = 0; band < canonical->band_count; band++) {
-    const ActionBgBand *canonical_band = &canonical->bands[band];
-    row = PushRow(out, capacity, count,
-                  kActionBgTunerRow_BandHeader, layer, (int)band);
-    if (!row) return;
-    snprintf(value, sizeof(value), "%s", UpperEdge(canonical_band->edge));
-    snprintf(key, sizeof(key), "bg%d.band%u", layer + 1, band);
-    char label[32];
-    snprintf(label, sizeof(label), "rows %u-%u",
-             canonical_band->y0, canonical_band->y1 - 1);
-    SetRowText(row, key, label, value);
-    row->nested = true;
-
-    ActionBgHorizontalExtent band_extent =
-        EffectiveBandHorizontal(layer, (int)band);
-    row = PushRow(out, capacity, count,
-                  kActionBgTunerRow_BandMode, layer, (int)band);
-    if (!row) return;
-    snprintf(key, sizeof(key), "bg%d.band%u.horizontal", layer + 1, band);
-    SetRowText(row, key, "band cap", UpperExtent(band_extent.mode));
-    row->nested = true;
-    if (band_extent.mode == kActionBgExtent_Fixed) {
-      row = PushRow(out, capacity, count,
-                    kActionBgTunerRow_BandLeft, layer, (int)band);
-      if (!row) return;
-      snprintf(key, sizeof(key), "bg%d.band%u.left", layer + 1, band);
-      snprintf(value, sizeof(value), "%u px", band_extent.left);
-      SetRowText(row, key, "band left", value);
-      row->nested = true;
-      row = PushRow(out, capacity, count,
-                    kActionBgTunerRow_BandRight, layer, (int)band);
-      if (!row) return;
-      snprintf(key, sizeof(key), "bg%d.band%u.right", layer + 1, band);
-      snprintf(value, sizeof(value), "%u px", band_extent.right);
-      SetRowText(row, key, "band right", value);
-      row->nested = true;
-    }
-  }
+  const uint8_t band_count = EffectiveBandCount(layer);
+  for (unsigned band = 0; band < band_count; band++)
+    if (!PushBandRows(out, capacity, count, layer, band)) return;
+  row = PushRow(out, capacity, count,
+                kActionBgTunerRow_BandAdd, layer, -1);
+  if (!row) return;
+  snprintf(key, sizeof(key), "bg%d.band_add", layer + 1);
+  SetRowText(row, key, "add row band",
+             band_count < kActionBgMaxBands ? "ADD" : "FULL");
+  row->nested = true;
+  row->selectable = band_count < kActionBgMaxBands;
 }
 
 int ActionBgTuner_BuildRows(ActionBgTunerRow *out, int capacity) {
@@ -445,15 +542,104 @@ static ActionBgVerticalExtent *EditableVertical(int layer) {
 }
 
 static ActionBgHorizontalExtent *EditableBandHorizontal(int layer, int band) {
-  const ActionBgBand *canonical = &s_tuner.canonical.layer[layer].bands[band];
-  ActionBgBandDraft *draft = FindBandDraft(
-      layer, canonical->y0, canonical->y1, true);
-  if (!draft) return NULL;
-  if (!draft->horizontal_set) {
-    draft->horizontal = canonical->horizontal_extent;
-    draft->horizontal_set = true;
+  ActionBgBand *editable = EditableBand(layer, band);
+  return editable ? &editable->horizontal_extent : NULL;
+}
+
+static bool EditableBandsValid(int layer) {
+  ActionBgLayerPlan candidate = s_tuner.canonical.layer[layer];
+  const ActionBgLayerDraft *draft = &s_tuner.layer[layer];
+  candidate.band_count = draft->band_count;
+  memcpy(candidate.bands, draft->bands, sizeof(candidate.bands));
+  return ActionBgLayerPlan_Validate(&candidate);
+}
+
+static bool TryReplaceBand(int layer, int band, ActionBgBand replacement) {
+  ActionBgBand *editable = EditableBand(layer, band);
+  if (!editable) return false;
+  const ActionBgBand previous = *editable;
+  *editable = replacement;
+  if (EditableBandsValid(layer)) return true;
+  *editable = previous;
+  return false;
+}
+
+static ActionBgTunerResult AddBand(int layer) {
+  EnsureEditableBands(layer);
+  ActionBgLayerDraft *draft = &s_tuner.layer[layer];
+  if (draft->band_count >= kActionBgMaxBands)
+    return kActionBgTunerResult_AtLimit;
+
+  ActionBgLayerPlan resolved = s_tuner.canonical.layer[layer];
+  resolved.band_count = draft->band_count;
+  memcpy(resolved.bands, draft->bands, sizeof(resolved.bands));
+  int best_y0 = 0, best_y1 = 0, cursor = 0;
+  for (unsigned i = 0; i < resolved.band_count; i++) {
+    int y0 = 0, y1 = 0;
+    if (!ActionBgLayerPlan_ResolveBand(&resolved, i, &y0, &y1))
+      return kActionBgTunerResult_Unchanged;
+    if (y0 < 0) y0 = 0;
+    if (y0 > kAuthenticHeight) y0 = kAuthenticHeight;
+    if (y1 < 0) y1 = 0;
+    if (y1 > kAuthenticHeight) y1 = kAuthenticHeight;
+    if (y0 > cursor && y0 - cursor > best_y1 - best_y0) {
+      best_y0 = cursor;
+      best_y1 = y0;
+    }
+    if (y1 > cursor) cursor = y1;
   }
-  return &draft->horizontal;
+  if (cursor < kAuthenticHeight &&
+      kAuthenticHeight - cursor > best_y1 - best_y0) {
+    best_y0 = cursor;
+    best_y1 = kAuthenticHeight;
+  }
+  if (best_y0 >= best_y1) return kActionBgTunerResult_AtLimit;
+
+  const ActionBgEdgeMode edge = draft->edge_set
+      ? draft->edge : resolved.default_edge;
+  const ActionBgMotionMode motion = draft->motion_set
+      ? draft->motion : resolved.default_motion;
+  unsigned insert = draft->band_count;
+  while (insert > 0) {
+    int prior_y0 = 0, prior_y1 = 0;
+    resolved.band_count = draft->band_count;
+    memcpy(resolved.bands, draft->bands, sizeof(resolved.bands));
+    if (!ActionBgLayerPlan_ResolveBand(
+            &resolved, insert - 1, &prior_y0, &prior_y1) ||
+        prior_y0 <= best_y0)
+      break;
+    draft->bands[insert] = draft->bands[insert - 1];
+    insert--;
+  }
+  draft->bands[insert] = (ActionBgBand) {
+    .y0 = (uint16_t)best_y0,
+    .y1 = (uint16_t)best_y1,
+    .edge = edge,
+    .motion = motion,
+    .anchor = kActionBgBandAnchor_Screen,
+    .horizontal_extent = { .mode = kActionBgExtent_Inherit },
+  };
+  draft->band_count++;
+  if (!EditableBandsValid(layer)) {
+    for (unsigned i = insert; i + 1 < draft->band_count; i++)
+      draft->bands[i] = draft->bands[i + 1];
+    draft->bands[--draft->band_count] = (ActionBgBand){ 0 };
+    return kActionBgTunerResult_AtLimit;
+  }
+  s_tuner.selected_band[layer] = (int8_t)insert;
+  return kActionBgTunerResult_Changed;
+}
+
+static ActionBgTunerResult DeleteBand(int layer, int band) {
+  EnsureEditableBands(layer);
+  ActionBgLayerDraft *draft = &s_tuner.layer[layer];
+  if (band < 0 || band >= draft->band_count)
+    return kActionBgTunerResult_Unchanged;
+  for (int i = band; i + 1 < draft->band_count; i++)
+    draft->bands[i] = draft->bands[i + 1];
+  draft->bands[--draft->band_count] = (ActionBgBand){ 0 };
+  s_tuner.selected_band[layer] = -1;
+  return kActionBgTunerResult_Changed;
 }
 
 static ActionBgTunerResult ChangeMode(ActionBgExtentMode *mode,
@@ -465,6 +651,127 @@ static ActionBgTunerResult ChangeMode(ActionBgExtentMode *mode,
   index = (index + (direction < 0 ? -1 : 1) + count) % count;
   *mode = (ActionBgExtentMode)(first + index);
   return kActionBgTunerResult_Changed;
+}
+
+static bool IsBandChangeRow(ActionBgTunerRowKind kind) {
+  switch (kind) {
+    case kActionBgTunerRow_BandAdd:
+    case kActionBgTunerRow_BandAnchor:
+    case kActionBgTunerRow_BandStart:
+    case kActionBgTunerRow_BandEnd:
+    case kActionBgTunerRow_BandEdge:
+    case kActionBgTunerRow_BandMotion:
+    case kActionBgTunerRow_BandMode:
+    case kActionBgTunerRow_BandLeft:
+    case kActionBgTunerRow_BandRight:
+    case kActionBgTunerRow_BandDelete:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ActionBgTunerResult ChangeBandRow(const ActionBgTunerRow *row,
+                                         int direction) {
+  switch (row->kind) {
+    case kActionBgTunerRow_BandMode: {
+      if (row->band < 0 || row->band >= EffectiveBandCount(row->layer))
+        return kActionBgTunerResult_Unchanged;
+      ActionBgHorizontalExtent *extent =
+          EditableBandHorizontal(row->layer, row->band);
+      if (!extent) return kActionBgTunerResult_Unchanged;
+      ActionBgTunerResult result = ChangeMode(&extent->mode, true, direction);
+      if (extent->mode == kActionBgExtent_Fixed &&
+          !extent->left && !extent->right) {
+        extent->left = s_tuner.limits.left;
+        extent->right = s_tuner.limits.right;
+      } else if (extent->mode != kActionBgExtent_Fixed) {
+        extent->left = extent->right = 0;
+      }
+      return result;
+    }
+    case kActionBgTunerRow_BandLeft:
+    case kActionBgTunerRow_BandRight: {
+      if (row->band < 0 || row->band >= EffectiveBandCount(row->layer))
+        return kActionBgTunerResult_Unchanged;
+      ActionBgHorizontalExtent *extent =
+          EditableBandHorizontal(row->layer, row->band);
+      if (!extent) return kActionBgTunerResult_Unchanged;
+      uint16_t *side = row->kind == kActionBgTunerRow_BandLeft
+          ? &extent->left : &extent->right;
+      int maximum = row->kind == kActionBgTunerRow_BandLeft
+          ? s_tuner.limits.left : s_tuner.limits.right;
+      int next = StepExtent(*side, direction, maximum);
+      if (next == *side) return kActionBgTunerResult_AtLimit;
+      *side = (uint16_t)next;
+      return kActionBgTunerResult_Changed;
+    }
+    case kActionBgTunerRow_BandAdd:
+      return AddBand(row->layer);
+    case kActionBgTunerRow_BandAnchor: {
+      const ActionBgBand *current = EffectiveBand(row->layer, row->band);
+      if (!current) return kActionBgTunerResult_Unchanged;
+      ActionBgBand next = *current;
+      const int offset =
+          (int)s_tuner.canonical.layer[row->layer].camera_y + 1;
+      if (next.anchor == kActionBgBandAnchor_Screen) {
+        if ((int)next.y1 + offset >
+            s_tuner.canonical.layer[row->layer].world_height)
+          return kActionBgTunerResult_AtLimit;
+        next.y0 = (uint16_t)(next.y0 + offset);
+        next.y1 = (uint16_t)(next.y1 + offset);
+        next.anchor = kActionBgBandAnchor_World;
+      } else {
+        if ((int)next.y0 < offset ||
+            (int)next.y1 - offset > kAuthenticHeight)
+          return kActionBgTunerResult_AtLimit;
+        next.y0 = (uint16_t)(next.y0 - offset);
+        next.y1 = (uint16_t)(next.y1 - offset);
+        next.anchor = kActionBgBandAnchor_Screen;
+      }
+      return TryReplaceBand(row->layer, row->band, next)
+          ? kActionBgTunerResult_Changed : kActionBgTunerResult_AtLimit;
+    }
+    case kActionBgTunerRow_BandStart:
+    case kActionBgTunerRow_BandEnd: {
+      const ActionBgBand *current = EffectiveBand(row->layer, row->band);
+      if (!current) return kActionBgTunerResult_Unchanged;
+      ActionBgBand next = *current;
+      uint16_t *value = row->kind == kActionBgTunerRow_BandStart
+          ? &next.y0 : &next.y1;
+      const int maximum = next.anchor == kActionBgBandAnchor_World
+          ? s_tuner.canonical.layer[row->layer].world_height
+          : kAuthenticHeight;
+      const int stepped = StepExtent(*value, direction, maximum);
+      if (stepped == *value) return kActionBgTunerResult_AtLimit;
+      *value = (uint16_t)stepped;
+      return TryReplaceBand(row->layer, row->band, next)
+          ? kActionBgTunerResult_Changed : kActionBgTunerResult_AtLimit;
+    }
+    case kActionBgTunerRow_BandEdge: {
+      const ActionBgBand *current = EffectiveBand(row->layer, row->band);
+      if (!current) return kActionBgTunerResult_Unchanged;
+      ActionBgBand next = *current;
+      const int count = kActionBgEdge_RawWrap - kActionBgEdge_Transparent + 1;
+      next.edge = (ActionBgEdgeMode)(((int)next.edge +
+          (direction < 0 ? -1 : 1) + count) % count);
+      return TryReplaceBand(row->layer, row->band, next)
+          ? kActionBgTunerResult_Changed : kActionBgTunerResult_AtLimit;
+    }
+    case kActionBgTunerRow_BandMotion: {
+      const ActionBgBand *current = EffectiveBand(row->layer, row->band);
+      if (!current) return kActionBgTunerResult_Unchanged;
+      ActionBgBand next = *current;
+      next.motion = next.motion == kActionBgMotion_FillRelative
+          ? kActionBgMotion_NormalScroll : kActionBgMotion_FillRelative;
+      return TryReplaceBand(row->layer, row->band, next)
+          ? kActionBgTunerResult_Changed : kActionBgTunerResult_AtLimit;
+    }
+    case kActionBgTunerRow_BandDelete:
+      return DeleteBand(row->layer, row->band);
+    default:
+      return kActionBgTunerResult_Unchanged;
+  }
 }
 
 ActionBgTunerResult ActionBgTuner_Change(const ActionBgTunerRow *row,
@@ -480,11 +787,15 @@ ActionBgTunerResult ActionBgTuner_Change(const ActionBgTunerRow *row,
     return kActionBgTunerResult_Changed;
   }
   if (row->kind == kActionBgTunerRow_Layer) {
+    if (row->layer < 0 || row->layer >= kActionBgPlanLayerCount)
+      return kActionBgTunerResult_Unchanged;
     s_tuner.selected_layer = row->layer;
     return kActionBgTunerResult_Changed;
   }
   if (row->layer < 0 || row->layer >= kActionBgPlanLayerCount)
     return kActionBgTunerResult_Unchanged;
+  if (IsBandChangeRow(row->kind))
+    return ChangeBandRow(row, direction);
   ActionBgLayerDraft *draft = &s_tuner.layer[row->layer];
   switch (row->kind) {
     case kActionBgTunerRow_Edge: {
@@ -496,6 +807,16 @@ ActionBgTunerResult ActionBgTuner_Change(const ActionBgTunerRow *row,
       index = (index + count) % count;
       draft->edge = (ActionBgEdgeMode)index;
       draft->edge_set = true;
+      return kActionBgTunerResult_Changed;
+    }
+    case kActionBgTunerRow_Motion: {
+      ActionBgMotionMode motion = draft->motion_set
+          ? draft->motion
+          : s_tuner.canonical.layer[row->layer].default_motion;
+      draft->motion = motion == kActionBgMotion_FillRelative
+          ? kActionBgMotion_NormalScroll
+          : kActionBgMotion_FillRelative;
+      draft->motion_set = true;
       return kActionBgTunerResult_Changed;
     }
     case kActionBgTunerRow_IgnoreSideBounds:
@@ -556,40 +877,6 @@ ActionBgTunerResult ActionBgTuner_Change(const ActionBgTunerRow *row,
       extent->bottom = (uint16_t)next;
       return kActionBgTunerResult_Changed;
     }
-    case kActionBgTunerRow_BandMode: {
-      if (row->band < 0 ||
-          row->band >= s_tuner.canonical.layer[row->layer].band_count)
-        return kActionBgTunerResult_Unchanged;
-      ActionBgHorizontalExtent *extent =
-          EditableBandHorizontal(row->layer, row->band);
-      if (!extent) return kActionBgTunerResult_Unchanged;
-      ActionBgTunerResult result = ChangeMode(&extent->mode, true, direction);
-      if (extent->mode == kActionBgExtent_Fixed &&
-          !extent->left && !extent->right) {
-        extent->left = s_tuner.limits.left;
-        extent->right = s_tuner.limits.right;
-      } else if (extent->mode != kActionBgExtent_Fixed) {
-        extent->left = extent->right = 0;
-      }
-      return result;
-    }
-    case kActionBgTunerRow_BandLeft:
-    case kActionBgTunerRow_BandRight: {
-      if (row->band < 0 ||
-          row->band >= s_tuner.canonical.layer[row->layer].band_count)
-        return kActionBgTunerResult_Unchanged;
-      ActionBgHorizontalExtent *extent =
-          EditableBandHorizontal(row->layer, row->band);
-      if (!extent) return kActionBgTunerResult_Unchanged;
-      uint16_t *side = row->kind == kActionBgTunerRow_BandLeft
-          ? &extent->left : &extent->right;
-      int maximum = row->kind == kActionBgTunerRow_BandLeft
-          ? s_tuner.limits.left : s_tuner.limits.right;
-      int next = StepExtent(*side, direction, maximum);
-      if (next == *side) return kActionBgTunerResult_AtLimit;
-      *side = (uint16_t)next;
-      return kActionBgTunerResult_Changed;
-    }
     default:
       return kActionBgTunerResult_Unchanged;
   }
@@ -605,10 +892,11 @@ static void PrintDraft(void) {
     const ActionBgLayerPlan *p = &plan.layer[layer];
     fprintf(stderr,
             "[action-bg-tuner] BG%u role=%s source=%s edge=%s "
-            "horizontal=%s:%u,%u vertical=%s:%u,%u\n",
+            "motion=%s horizontal=%s:%u,%u vertical=%s:%u,%u\n",
             layer + 1, ActionBgLayerRole_Name(p->role),
             ActionBgSourceKind_Name(p->source),
             ActionBgEdgeMode_Name(p->default_edge),
+            ActionBgMotionMode_Name(p->default_motion),
             ActionBgExtentMode_Name(p->horizontal_extent.mode),
             p->horizontal_extent.left, p->horizontal_extent.right,
             ActionBgExtentMode_Name(p->vertical_extent.mode),
@@ -616,10 +904,11 @@ static void PrintDraft(void) {
     for (unsigned band = 0; band < p->band_count; band++) {
       const ActionBgBand *b = &p->bands[band];
       fprintf(stderr,
-              "[action-bg-tuner] BG%u band=%u..%u edge=%s "
+              "[action-bg-tuner] BG%u band=%s:%u..%u edge=%s motion=%s "
               "horizontal=%s:%u,%u\n",
-              layer + 1, b->y0, b->y1,
+              layer + 1, ActionBgBandAnchor_Name(b->anchor), b->y0, b->y1,
               ActionBgEdgeMode_Name(b->edge),
+              ActionBgMotionMode_Name(b->motion),
               ActionBgExtentMode_Name(b->horizontal_extent.mode),
               b->horizontal_extent.left, b->horizontal_extent.right);
     }
@@ -636,11 +925,22 @@ ActionBgTunerResult ActionBgTuner_Activate(const ActionBgTunerRow *row) {
   if (row->kind == kActionBgTunerRow_Reset) {
     ClearDraft();
     s_tuner.selected_layer = -1;
+    ClearBandSelection();
     return kActionBgTunerResult_Reset;
   }
   if (row->kind == kActionBgTunerRow_Layer) {
+    if (row->layer < 0 || row->layer >= kActionBgPlanLayerCount)
+      return kActionBgTunerResult_Unchanged;
     s_tuner.selected_layer = s_tuner.selected_layer == row->layer
         ? -1 : row->layer;
+    return kActionBgTunerResult_Changed;
+  }
+  if (row->kind == kActionBgTunerRow_BandHeader) {
+    if (row->layer < 0 || row->layer >= kActionBgPlanLayerCount ||
+        row->band < 0 || row->band >= EffectiveBandCount(row->layer))
+      return kActionBgTunerResult_Unchanged;
+    s_tuner.selected_band[row->layer] =
+        s_tuner.selected_band[row->layer] == row->band ? -1 : row->band;
     return kActionBgTunerResult_Changed;
   }
   return ActionBgTuner_Change(row, +1);
@@ -665,9 +965,13 @@ ActionBgTunerResult ActionBgTuner_ResetRow(const ActionBgTunerRow *row) {
   switch (row->kind) {
     case kActionBgTunerRow_Layer:
       memset(draft, 0, sizeof(*draft));
+      s_tuner.selected_band[row->layer] = -1;
       return kActionBgTunerResult_Reset;
     case kActionBgTunerRow_Edge:
       draft->edge_set = false;
+      return kActionBgTunerResult_Reset;
+    case kActionBgTunerRow_Motion:
+      draft->motion_set = false;
       return kActionBgTunerResult_Reset;
     case kActionBgTunerRow_IgnoreSideBounds:
       draft->ignore_side_bounds = false;
@@ -685,19 +989,22 @@ ActionBgTunerResult ActionBgTuner_ResetRow(const ActionBgTunerRow *row) {
     case kActionBgTunerRow_Bottom:
       draft->vertical_set = false;
       return kActionBgTunerResult_Reset;
+    case kActionBgTunerRow_BandHeader:
+    case kActionBgTunerRow_BandAdd:
+    case kActionBgTunerRow_BandAnchor:
+    case kActionBgTunerRow_BandStart:
+    case kActionBgTunerRow_BandEnd:
+    case kActionBgTunerRow_BandEdge:
+    case kActionBgTunerRow_BandMotion:
     case kActionBgTunerRow_BandMode:
     case kActionBgTunerRow_BandLeft:
-    case kActionBgTunerRow_BandRight: {
-      if (row->band < 0 ||
-          row->band >= s_tuner.canonical.layer[row->layer].band_count)
-        return kActionBgTunerResult_Unchanged;
-      const ActionBgBand *band =
-          &s_tuner.canonical.layer[row->layer].bands[row->band];
-      ActionBgBandDraft *band_draft = FindBandDraft(
-          row->layer, band->y0, band->y1, false);
-      if (band_draft) band_draft->horizontal_set = false;
+    case kActionBgTunerRow_BandRight:
+    case kActionBgTunerRow_BandDelete:
+      draft->bands_set = false;
+      draft->band_count = 0;
+      memset(draft->bands, 0, sizeof(draft->bands));
+      s_tuner.selected_band[row->layer] = -1;
       return kActionBgTunerResult_Reset;
-    }
     default:
       return kActionBgTunerResult_Unchanged;
   }
@@ -717,6 +1024,9 @@ const char *ActionBgTuner_RowHelp(const ActionBgTunerRow *row) {
     case kActionBgTunerRow_Edge:
       return "Choose how this layer supplies pixels outside the authentic "
              "viewport. The extent remains an independent maximum.";
+    case kActionBgTunerRow_Motion:
+      return "Fill-relative preserves legacy reflected motion. Normal scroll "
+             "keeps mirrored padding moving in the authentic layer direction.";
     case kActionBgTunerRow_IgnoreSideBounds:
       return "Let this background use every horizontally available canvas "
              "pixel past its Diorama side guides. The shared canvas and edge "
@@ -741,6 +1051,24 @@ const char *ActionBgTuner_RowHelp(const ActionBgTunerRow *row) {
     case kActionBgTunerRow_BandLeft:
     case kActionBgTunerRow_BandRight:
       return "Maximum horizontal extension for this row band on the named side.";
+    case kActionBgTunerRow_BandAdd:
+      return "Add a behavior-neutral band in the largest uncovered authentic "
+             "row interval. Up to four non-overlapping bands are supported.";
+    case kActionBgTunerRow_BandAnchor:
+      return "Screen bands stay on fixed authentic rows. World bands follow "
+             "the layer camera and parallax through a stable content boundary. "
+             "Mixed anchors that could cross later are rejected.";
+    case kActionBgTunerRow_BandStart:
+    case kActionBgTunerRow_BandEnd:
+      return "Edit this half-open band's authored row boundary in four-pixel "
+             "steps. Overlap and empty intervals are rejected.";
+    case kActionBgTunerRow_BandEdge:
+      return "Choose this band's fill independently of the layer default.";
+    case kActionBgTunerRow_BandMotion:
+      return "Choose whether mirrored padding reflects apparent movement or "
+             "retains the authentic layer's normal scrolling direction.";
+    case kActionBgTunerRow_BandDelete:
+      return "Delete this session-local band from the effective draft.";
     case kActionBgTunerRow_Print:
       return "Print the fully resolved draft to stderr for transcription into "
              "the canonical action background policy.";
@@ -748,8 +1076,8 @@ const char *ActionBgTuner_RowHelp(const ActionBgTunerRow *row) {
       return "Discard every sparse override for this room and disable applying "
              "the draft. Guide visibility is left unchanged.";
     case kActionBgTunerRow_BandHeader:
-      return "Canonical scanline band and edge strategy; its extent can be "
-             "tuned independently below.";
+      return "Open this authored band. Its anchor, boundaries, fill, motion, "
+             "and extent can be tuned independently.";
     case kActionBgTunerRow_Header:
     default:
       return "Session-local action background extent authoring.";

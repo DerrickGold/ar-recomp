@@ -49,6 +49,16 @@ static ActionBgPresentationPolicy Compile(const ActionBgPlan *plan) {
   return policy;
 }
 
+static bool PresentationBandIs(const ActionBgPresentationPolicy *policy,
+                               unsigned index, uint8_t layer,
+                               uint8_t y0, uint8_t y1,
+                               ActionBgEdgeMode edge) {
+  if (!policy || index >= policy->band_count) return false;
+  const ActionBgPresentationBand *band = &policy->bands[index];
+  return band->layer == layer && band->y0 == y0 && band->y1 == y1 &&
+      band->edge == edge;
+}
+
 static void TestValidationAndFallback(void) {
   ActionBgPlan plan;
   ActionBgPresentationPolicy policy;
@@ -72,7 +82,7 @@ static void TestValidationAndFallback(void) {
   memset(&plan, 0, sizeof(plan));
   memset(&policy, 0xA5, sizeof(policy));
   CHECK(!ActionBgPlan_CompilePresentation(&plan, &policy));
-  CHECK(policy.repeat_band_layer == -1 && !policy.clamp_layers);
+  CHECK(!policy.band_count && !policy.clamp_layers);
   CHECK(!strcmp(ActionBgSourceKind_Name(kActionBgSource_NativeTilemap),
                 "native"));
   CHECK(!strcmp(ActionBgSourceKind_Name(kActionBgSource_WorldMap), "world"));
@@ -88,6 +98,12 @@ static void TestValidationAndFallback(void) {
   CHECK(!strcmp(ActionBgEdgeMode_Name(kActionBgEdge_LiveWorld), "world"));
   CHECK(!strcmp(ActionBgEdgeMode_Name(kActionBgEdge_Repeat), "repeat"));
   CHECK(!strcmp(ActionBgEdgeMode_Name((ActionBgEdgeMode)99), "unknown"));
+  CHECK(!strcmp(ActionBgMotionMode_Name(kActionBgMotion_FillRelative),
+                "fill"));
+  CHECK(!strcmp(ActionBgMotionMode_Name(kActionBgMotion_NormalScroll),
+                "normal"));
+  CHECK(!strcmp(ActionBgBandAnchor_Name(kActionBgBandAnchor_World),
+                "world"));
   CHECK(!strcmp(ActionBgExtentMode_Name(kActionBgExtent_Inherit), "inherit"));
   CHECK(!strcmp(ActionBgExtentMode_Name(kActionBgExtent_Available),
                 "available"));
@@ -106,9 +122,13 @@ static void TestResolvedPresentationProjection(void) {
 
   ActionBgPresentationPolicy policy = {
     .clamp_layers = 2,
-    .repeat_band_layer = 1,
-    .repeat_band_y0 = 144,
-    .repeat_band_y1 = 224,
+    .band_count = 1,
+    .bands = {{
+      .layer = 1,
+      .y0 = 144,
+      .y1 = 224,
+      .edge = kActionBgEdge_Repeat,
+    }},
     .bound_canvas_to_world = true,
   };
   CHECK(ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
@@ -123,7 +143,7 @@ static void TestResolvedPresentationProjection(void) {
   /* Global raw/4:3 projection retains the canonical source seam while removing
    * decorative edges and bands that were not executed for that frame. */
   plan.layer[1].source = kActionBgSource_AuthenticViewport;
-  policy = (ActionBgPresentationPolicy){ .repeat_band_layer = -1 };
+  policy = (ActionBgPresentationPolicy){ 0 };
   CHECK(ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
   CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_RawWrap);
@@ -137,17 +157,44 @@ static void TestResolvedPresentationProjection(void) {
   policy = (ActionBgPresentationPolicy) {
     .clamp_layers = 2,
     .mirror_layers = 2,
-    .repeat_band_layer = -1,
   };
   CHECK(!ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
   CHECK(!memcmp(&plan, &before, sizeof(plan)));
   policy = (ActionBgPresentationPolicy) {
-    .repeat_band_layer = 1,
-    .repeat_band_y0 = 224,
-    .repeat_band_y1 = 144,
+    .band_count = 1,
+    .bands = {{
+      .layer = 1,
+      .y0 = 224,
+      .y1 = 144,
+      .edge = kActionBgEdge_Repeat,
+    }},
   };
   CHECK(!ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
   CHECK(!memcmp(&plan, &before, sizeof(plan)));
+
+  policy = (ActionBgPresentationPolicy) {
+    .mirror_layers = 2,
+    .normal_scroll_layers = 2,
+    .band_count = 3,
+    .bands = {
+      { .layer = 0, .y0 = 0, .y1 = 32,
+        .edge = kActionBgEdge_Clamp },
+      { .layer = 1, .y0 = 32, .y1 = 96,
+        .edge = kActionBgEdge_Mirror,
+        .motion = kActionBgMotion_NormalScroll },
+      { .layer = 1, .y0 = 136, .y1 = 224,
+        .edge = kActionBgEdge_Repeat },
+    },
+  };
+  CHECK(ActionBgPlan_ApplyPresentationPolicy(&plan, &policy));
+  CHECK(plan.layer[1].default_motion == kActionBgMotion_NormalScroll);
+  CHECK(plan.layer[0].band_count == 1 && plan.layer[1].band_count == 2);
+  CHECK(plan.layer[1].bands[0].motion == kActionBgMotion_NormalScroll);
+  ActionBgPresentationPolicy round_trip = Compile(&plan);
+  CHECK(round_trip.band_count == 3);
+  CHECK(round_trip.normal_scroll_layers == 2);
+  CHECK(PresentationBandIs(
+      &round_trip, 2, 1, 136, 224, kActionBgEdge_Repeat));
 }
 
 static ActionBgLayerPlan ExtentLayer(void) {
@@ -244,6 +291,42 @@ static void TestExtentValidationAndRowResolution(void) {
   invalid.bands[0].horizontal_extent.mode = kActionBgExtent_Inherit;
   invalid.bands[0].horizontal_extent.right = 1;
   CHECK(!ActionBgLayerPlan_Validate(&invalid));
+  invalid = layer;
+  invalid.bands[0].anchor = kActionBgBandAnchor_World;
+  invalid.bands[0].y1 = invalid.world_height + 1;
+  CHECK(!ActionBgLayerPlan_Validate(&invalid));
+  invalid = layer;
+  invalid.bands[0].motion = (ActionBgMotionMode)99;
+  CHECK(!ActionBgLayerPlan_Validate(&invalid));
+
+  /* Mixed anchors must remain disjoint for the complete camera traversal, not
+   * merely at the frame where a tuner edit was accepted. This safe pair keeps
+   * a fixed top strip above a deep world family at camera 0 and at its native
+   * maximum. The second pair is disjoint at camera 100 but would cross later. */
+  ActionBgLayerPlan mixed = ExtentLayer();
+  mixed.world_height = 512;
+  mixed.camera_y = 100;
+  mixed.bands[0] = (ActionBgBand) {
+    .y0 = 0, .y1 = 32,
+    .edge = kActionBgEdge_Mirror,
+  };
+  mixed.bands[1] = (ActionBgBand) {
+    .y0 = 400, .y1 = 512,
+    .edge = kActionBgEdge_Repeat,
+    .anchor = kActionBgBandAnchor_World,
+  };
+  mixed.band_count = 2;
+  CHECK(ActionBgLayerPlan_Validate(&mixed));
+  mixed.camera_y = 287;
+  CHECK(ActionBgLayerPlan_Validate(&mixed));
+  mixed.camera_y = 100;
+  mixed.bands[1].y0 = 200;
+  mixed.bands[1].y1 = 256;
+  int projected_y0 = 0, projected_y1 = 0;
+  CHECK(ActionBgLayerPlan_ResolveBand(
+      &mixed, 1, &projected_y0, &projected_y1));
+  CHECK(projected_y0 == 99 && projected_y1 == 155);
+  CHECK(!ActionBgLayerPlan_Validate(&mixed));
 
   ActionBgPlan plan = { .valid = true };
   plan.layer[0] = layer;
@@ -347,6 +430,33 @@ static void TestOrdinaryWorldAndNativeSource(void) {
   plan = Build(&state);
   CHECK(plan.layer[1].source == kActionBgSource_NativeTilemap);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_RawWrap);
+
+  plan.layer[0].default_edge = kActionBgEdge_Transparent;
+  CHECK(Compile(&plan).clamp_layers == 1);
+}
+
+static void TestFillmoreAct1BackdropExtent(void) {
+  ActionBgFrameState state = State(1, 1);
+  ActionBgPlan plan = Build(&state);
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 128 &&
+        plan.layer[1].horizontal_extent.right == 128);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+
+  state.decorative_padding_enabled = false;
+  plan = Build(&state);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
+
+  state.decorative_padding_enabled = true;
+  state.layer[1].bgsc = 0x70;
+  plan = Build(&state);
+  CHECK(plan.layer[1].source == kActionBgSource_NativeTilemap);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
 }
 
 static void TestNarrowDecorativeBg2(void) {
@@ -419,8 +529,9 @@ static void TestBloodpoolBand(void) {
   CHECK(row.edge == kActionBgEdge_Repeat);
   CHECK(row.horizontal_extent.mode == kActionBgExtent_Available);
   ActionBgPresentationPolicy policy = Compile(&plan);
-  CHECK(policy.mirror_layers == 2 && policy.repeat_band_layer == 1);
-  CHECK(policy.repeat_band_y0 == 136 && policy.repeat_band_y1 == 224);
+  CHECK(policy.mirror_layers == 2 && policy.band_count == 1);
+  CHECK(PresentationBandIs(
+      &policy, 0, 1, 136, 224, kActionBgEdge_Repeat));
 
   state.decorative_padding_enabled = false;
   plan = Build(&state);
@@ -432,13 +543,130 @@ static void TestBloodpoolBand(void) {
   plan = Build(&state);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
   CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
-  CHECK(!plan.layer[1].horizontal_extent.left &&
-        !plan.layer[1].horizontal_extent.right);
+  CHECK(plan.layer[1].horizontal_extent.left == 68 &&
+        plan.layer[1].horizontal_extent.right == 68);
   CHECK(plan.layer[1].band_count == 1);
   CHECK(plan.layer[1].bands[0].y0 == 136 &&
         plan.layer[1].bands[0].y1 == 224 &&
         plan.layer[1].bands[0].horizontal_extent.mode ==
-            kActionBgExtent_Available);
+            kActionBgExtent_Inherit);
+  CHECK(ActionBgLayerPlan_ResolveRow(&plan.layer[1], 180, &row));
+  CHECK(row.edge == kActionBgEdge_Repeat);
+  CHECK(row.horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(row.horizontal_extent.left == 68 &&
+        row.horizontal_extent.right == 68);
+}
+
+static void TestBloodpoolUnbandedBackdropExtents(void) {
+  static const struct {
+    uint8_t map;
+    uint16_t extent;
+  } cases[] = {
+    { 6, 68 },
+    { 7, 92 },
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    ActionBgFrameState state = State(2, cases[i].map);
+    state.layer[1].world_width = 256;
+    ActionBgPlan plan = Build(&state);
+    CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+    CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+    CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+    CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+    CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+    CHECK(plan.layer[1].horizontal_extent.left == cases[i].extent &&
+          plan.layer[1].horizontal_extent.right == cases[i].extent);
+    CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+    CHECK(plan.layer[1].band_count == 0);
+    for (int band = 0; band < kActionBgMaxBands; band++)
+      CHECK(BandIsClear(&plan.layer[1].bands[band]));
+  }
+
+  ActionBgFrameState state = State(2, 8);
+  state.layer[1].world_width = 256;
+  ActionBgPlan plan = Build(&state);
+  CHECK(plan.layer[0].role == kActionBgLayerRole_Playfield);
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[0].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[0].horizontal_extent.left == 16 &&
+        plan.layer[0].horizontal_extent.right == 16);
+  CHECK(plan.layer[0].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[0].band_count == 0);
+  CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 0 &&
+        plan.layer[1].horizontal_extent.right == 0);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].band_count == 0);
+  ActionBgPresentationPolicy policy = Compile(&plan);
+  CHECK(policy.mirror_layers == 3);
+  CHECK(policy.normal_scroll_layers == 0 && policy.band_count == 0);
+}
+
+static void TestKasandoraHybridBackdrop(void) {
+  static const struct {
+    uint8_t map;
+    uint16_t camera_y;
+    uint16_t dune_y;
+  } cases[] = {
+    { 1, 173, 82 },
+    { 2, 162, 93 },
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    ActionBgFrameState state = State(3, cases[i].map);
+    state.layer[1].camera_y = cases[i].camera_y;
+    state.layer[1].world_height = 512;
+    ActionBgPlan plan = Build(&state);
+    CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+    CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
+    CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+    CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+    CHECK(plan.layer[1].band_count == 1);
+    CHECK(plan.layer[1].bands[0].y0 == 256 &&
+          plan.layer[1].bands[0].y1 == 512 &&
+          plan.layer[1].bands[0].anchor == kActionBgBandAnchor_World &&
+          plan.layer[1].bands[0].edge == kActionBgEdge_Repeat);
+    CHECK(plan.layer[1].bands[0].horizontal_extent.mode ==
+          kActionBgExtent_Available);
+    ActionBgRowPolicy row;
+    CHECK(ActionBgLayerPlan_ResolveRow(
+        &plan.layer[1], cases[i].dune_y - 1, &row));
+    CHECK(row.edge == kActionBgEdge_Mirror);
+    CHECK(ActionBgLayerPlan_ResolveRow(
+        &plan.layer[1], cases[i].dune_y, &row));
+    CHECK(row.edge == kActionBgEdge_Repeat);
+    ActionBgPresentationPolicy policy = Compile(&plan);
+    CHECK(policy.mirror_layers == 2 && policy.band_count == 1);
+    CHECK(PresentationBandIs(&policy, 0, 1, cases[i].dune_y, 224,
+                             kActionBgEdge_Repeat));
+  }
+
+  ActionBgFrameState state = State(3, 1);
+  state.layer[1].world_height = 512;
+  state.layer[1].camera_y = 0;
+  ActionBgPlan plan = Build(&state);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].band_count == 1);
+  CHECK(Compile(&plan).band_count == 0);
+
+  state.layer[1].camera_y = 255;
+  plan = Build(&state);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].band_count == 1);
+  ActionBgPresentationPolicy full_dunes = Compile(&plan);
+  CHECK(full_dunes.mirror_layers == 2 && full_dunes.band_count == 1);
+  CHECK(PresentationBandIs(
+      &full_dunes, 0, 1, 0, 224, kActionBgEdge_Repeat));
+
+  state.decorative_padding_enabled = false;
+  plan = Build(&state);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
 }
 
 static void TestDeathHeimStates(void) {
@@ -454,8 +682,8 @@ static void TestDeathHeimStates(void) {
   ActionBgPresentationPolicy policy = Compile(&plan);
   CHECK(policy.clamp_layers == 3 && !policy.bound_canvas_to_world);
   CHECK(!plan.bound_canvas_to_world);
-  CHECK(policy.repeat_band_layer == 1 && policy.repeat_band_y0 == 144 &&
-        policy.repeat_band_y1 == 224);
+  CHECK(policy.band_count == 1 && PresentationBandIs(
+      &policy, 0, 1, 144, 224, kActionBgEdge_Repeat));
 
   state.death_heim_progress = 7;
   state.layer[0].bgsc = 0x64;
@@ -463,7 +691,7 @@ static void TestDeathHeimStates(void) {
   plan = Build(&state);
   policy = Compile(&plan);
   CHECK(policy.clamp_layers == 1 && policy.mirror_layers == 2);
-  CHECK(policy.repeat_band_layer == -1);
+  CHECK(!policy.band_count);
   CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
 
   state.layer[0].bgsc = 0x60;
@@ -508,8 +736,15 @@ static void TestEveryKnownMapClassifies(void) {
                                     : kActionBgLayerRole_Playfield));
       CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
       for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
+        const bool fixed_fillmore_bg2 =
+            layer == 1 && group == 1 && map == 1;
+        const bool fixed_death_heim_bg2 =
+            layer == 1 && group == 7 && map == 1;
+        const bool fixed_bloodpool_boss_bg1 =
+            layer == 0 && group == 2 && map == 8;
         CHECK(plan.layer[layer].horizontal_extent.mode ==
-              (layer == 1 && group == 7 && map == 1
+              (fixed_fillmore_bg2 || fixed_death_heim_bg2 ||
+                   fixed_bloodpool_boss_bg1
                    ? kActionBgExtent_Fixed : kActionBgExtent_Available));
         CHECK(plan.layer[layer].vertical_extent.mode ==
               kActionBgExtent_Available);
@@ -525,8 +760,11 @@ int main(void) {
   TestUnboundWorldFallback();
   TestCanvasOwner();
   TestOrdinaryWorldAndNativeSource();
+  TestFillmoreAct1BackdropExtent();
   TestNarrowDecorativeBg2();
   TestBloodpoolBand();
+  TestBloodpoolUnbandedBackdropExtents();
+  TestKasandoraHybridBackdrop();
   TestDeathHeimStates();
   TestEveryKnownMapClassifies();
   if (failures) {

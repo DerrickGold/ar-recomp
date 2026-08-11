@@ -12,9 +12,13 @@
 enum {
   kActionBgPlanLayerCount = 2,
   kActionBgMaxBands = 4,
+  kActionBgPresentationBandMax =
+      kActionBgPlanLayerCount * kActionBgMaxBands,
 };
 
 typedef struct ActionBgLayerState {
+  /* Canonical world row sampled immediately above authentic row zero. */
+  uint16_t camera_y;
   uint16_t world_width;
   uint16_t world_height;
   uint16_t tilemap_base;
@@ -56,6 +60,27 @@ typedef enum ActionBgEdgeMode {
   kActionBgEdge_RawWrap,
 } ActionBgEdgeMode;
 
+/* Fill and apparent horizontal motion are independent. FillRelative preserves
+ * the historical renderer exactly: reflecting an already-scrolled scanline
+ * also reflects its apparent movement. NormalScroll compensates that reflected
+ * sampling phase so a mirrored cloud/water family travels in the same screen
+ * direction as the authentic layer. Repeat and non-padding fills are identical
+ * in both modes. */
+typedef enum ActionBgMotionMode {
+  kActionBgMotion_FillRelative = 0,
+  kActionBgMotion_NormalScroll,
+} ActionBgMotionMode;
+
+/* Screen bands are authored directly in authentic rows [0,224). World bands
+ * follow vertical camera/parallax movement and are projected through the
+ * layer's canonical camera row each frame. A mixed-anchor table is valid only
+ * when its authored order remains non-overlapping across native camera travel,
+ * preventing a policy accepted on one frame from crossing on a later frame. */
+typedef enum ActionBgBandAnchor {
+  kActionBgBandAnchor_Screen = 0,
+  kActionBgBandAnchor_World,
+} ActionBgBandAnchor;
+
 /* An extent limits presentation outside the authentic viewport; it never
  * creates pixels that the selected edge/source cannot provide. `Inherit` is
  * valid only on a row band. `Available` applies no additional cap. */
@@ -81,6 +106,8 @@ typedef struct ActionBgBand {
   uint16_t y0;
   uint16_t y1;
   ActionBgEdgeMode edge;
+  ActionBgMotionMode motion;
+  ActionBgBandAnchor anchor;
   /* Inherit by default, so existing edge-only bands retain the layer extent. */
   ActionBgHorizontalExtent horizontal_extent;
 } ActionBgBand;
@@ -90,6 +117,9 @@ typedef struct ActionBgLayerPlan {
   ActionBgLayerRole role;
   ActionBgSourceKind source;
   ActionBgEdgeMode default_edge;
+  ActionBgMotionMode default_motion;
+  /* Canonical world row sampled immediately above authentic row zero. */
+  uint16_t camera_y;
   uint16_t world_width;
   uint16_t world_height;
   ActionBgHorizontalExtent horizontal_extent;
@@ -106,13 +136,22 @@ typedef struct ActionBgPlan {
 
 /* Fully resolved policy for one authentic or synthetic presentation row.
  * Bands identify authentic content families rather than capture-space rows.
- * A band with y0=0 or y1=224 owns the adjacent synthetic margin so an
- * edge-anchored moving family continues with the same strategy and extent;
- * other outside rows use the layer default. */
+ * A band whose resolved interval owns authentic row 0 or 223 also owns that
+ * adjacent synthetic margin, so an edge-anchored moving family continues with
+ * the same fill, motion and extent; other outside rows use the layer default. */
 typedef struct ActionBgRowPolicy {
   ActionBgEdgeMode edge;
+  ActionBgMotionMode motion;
   ActionBgHorizontalExtent horizontal_extent;
 } ActionBgRowPolicy;
+
+typedef struct ActionBgPresentationBand {
+  uint8_t layer;
+  uint8_t y0;
+  uint8_t y1;
+  ActionBgEdgeMode edge;
+  ActionBgMotionMode motion;
+} ActionBgPresentationBand;
 
 /* Mechanical projection into the generic post-raster PPU policy. Map-specific
  * classification remains in ActionBgPlan; these masks exist only at the PPU
@@ -121,9 +160,9 @@ typedef struct ActionBgPresentationPolicy {
   uint8_t clamp_layers;
   uint8_t mirror_layers;
   uint8_t repeat_layers;
-  int8_t repeat_band_layer;
-  uint8_t repeat_band_y0;
-  uint8_t repeat_band_y1;
+  uint8_t normal_scroll_layers;
+  uint8_t band_count;
+  ActionBgPresentationBand bands[kActionBgPresentationBandMax];
   bool bound_canvas_to_world;
 } ActionBgPresentationPolicy;
 
@@ -133,6 +172,12 @@ bool ActionBgPlan_Validate(const ActionBgPlan *plan);
 bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
                                   int authentic_y,
                                   ActionBgRowPolicy *out);
+/* Resolve one authored band to un-clipped authentic-screen coordinates. World
+ * bands may return rows outside [0,224); callers clip only at their concrete
+ * presentation boundary. */
+bool ActionBgLayerPlan_ResolveBand(const ActionBgLayerPlan *layer,
+                                  unsigned band,
+                                  int *screen_y0, int *screen_y1);
 bool ActionBgPlan_CompilePresentation(
     const ActionBgPlan *plan, ActionBgPresentationPolicy *out);
 /* Exact native/raw plan used for non-action frames, plus the inverse adapter
@@ -162,6 +207,8 @@ int ActionBgPlan_CanvasOwner(const ActionBgPlan *plan);
 const char *ActionBgSourceKind_Name(ActionBgSourceKind source);
 const char *ActionBgLayerRole_Name(ActionBgLayerRole role);
 const char *ActionBgEdgeMode_Name(ActionBgEdgeMode edge);
+const char *ActionBgMotionMode_Name(ActionBgMotionMode motion);
+const char *ActionBgBandAnchor_Name(ActionBgBandAnchor anchor);
 const char *ActionBgExtentMode_Name(ActionBgExtentMode mode);
 
 #endif  /* ACTION_BG_PLAN_H */

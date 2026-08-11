@@ -46,8 +46,11 @@ visible clear color after all layers have participated.
 
 ## 2. Edge strategy and extent are independent
 
+`ActionBgSourceKind` answers which tile-word source is authoritative;
 `ActionBgEdgeMode` answers how a pixel outside the authentic viewport is
-sourced. The extent answers how far that answer may be used.
+presented. Those decisions are independent. A verified finite-world source may
+therefore bind the HLE provider for authentic tile words while Mirror or Repeat
+fills its synthetic span. The extent answers how far that fill may be used.
 
 | Edge | Available extension before an explicit cap |
 |---|---|
@@ -60,6 +63,10 @@ sourced. The extent answers how far that answer may be used.
 An explicit fixed extent takes the minimum of the edge-available extension and
 the configured cap. It cannot turn `Clamp` into padding. Changing a strategy
 and changing its extent are deliberately separate edits in the debug tuner.
+
+For the semantic playfield, the presentation-aware camera uses that same
+resolved per-side cap. It never shifts by a larger global canvas budget when
+the layer will expose only a smaller fixed span.
 
 The behavior-neutral default is **available**: add no cap beyond the existing
 edge/source/canvas rules. Every canonical map initially uses that default, so
@@ -164,12 +171,18 @@ visual policy is Bloodpool `0201`:
 4. The authentic 256x224 center remains exact.
 5. Native PPU effects and layer ordering remain exact.
 
-The canonical spelling is a fixed `0/0` horizontal extent on the unique
+The first acceptance spelling was a fixed `0/0` horizontal extent on the unique
 moon/cloud family plus an explicitly available `136..224` water band. Bloodpool
 `0202` uses the same confirmed row family. A zero cap means "no synthetic
 extension beyond the authentic viewport," not "hide the layer"; authentic
 pixels remain inviolable and the independent playfield/global canvas remains
 wide.
+
+Later promoted room policies extend the same catalogue: `0206` uses a 68/68
+BG2 cap, `0207` uses 92/92, and boss room `0208` uses Mirror/fill on both
+layers with world-backed BG1 capped to 16/16 and viewport BG2 capped to 0/0.
+`0208` is the confirming case that finite-world provider ownership does not
+imply a `LiveWorld` synthetic edge.
 
 Death Heim acceptance keeps four state classes distinct: pre-ending `0701`
 clamp/repeat bands, the ending-sky page handoff, cyclic `0702-0707` rematch

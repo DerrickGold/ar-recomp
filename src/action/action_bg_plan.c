@@ -5,19 +5,31 @@
 
 enum {
   kAuthenticHeight = 224,
+  /* The native vertical camera clamp reserves row 224 in addition to the
+   * 224 rendered rows, so its maximum is world_height - 225. */
+  kCameraViewportHeight = 225,
   kWorldPagePixels = 256,
   kWideWorldMinimum = 512,
   kMapGroupFirst = 1,
   kMapGroupLast = 7,
+  kBg1 = 0,
+  kBg2 = 1,
+  kFillmore = 1,
   kBloodpool = 2,
+  kKasandora = 3,
   kAitos = 4,
   kNorthwall = 6,
   kDeathHeim = 7,
+  kFillmoreAct1 = 1,
   kBloodpoolFirstMap = 1,
-  kBloodpoolLastMoonWaterMap = 2,
+  kBloodpoolAct2 = 2,
   kBloodpoolWaterStartY = 136,
-  kBloodpoolAct1BackdropLeft = 76,
-  kBloodpoolAct1BackdropRight = 100,
+  kBloodpoolMap6 = 6,
+  kBloodpoolMap7 = 7,
+  kBloodpoolBoss = 8,
+  kKasandoraFirstHybridRoom = 1,
+  kKasandoraLastHybridRoom = 2,
+  kKasandoraDunesWorldY = 256,
   kDeathHeimHub = 1,
   kDeathHeimFirstBoss = 2,
   kDeathHeimLastBoss = 7,
@@ -28,6 +40,104 @@ enum {
   kEndingSkyBg1Page = 0x64,
   kEndingSkyBg2Page = 0x74,
   kBgscPageMask = 0xFC,
+};
+
+typedef struct TunedLayerPolicy {
+  uint8_t map_group;
+  uint8_t map_number;
+  uint8_t layer;
+  ActionBgSourceKind required_source;
+  ActionBgEdgeMode required_edge;
+  ActionBgEdgeMode edge;
+  ActionBgMotionMode motion;
+  uint16_t left;
+  uint16_t right;
+  bool bands_inherit_extent;
+} TunedLayerPolicy;
+
+/* Canonical transcription target for live BG Extents exports. Classification
+ * still owns role/source/bands. Each entry is guarded by that canonical
+ * source/edge before applying the exported edge, motion and horizontal cap;
+ * this prevents a stale tuning from silently reclassifying another scene. */
+static const TunedLayerPolicy kTunedLayerPolicies[] = {
+  {
+    .map_group = kFillmore,
+    .map_number = kFillmoreAct1,
+    .layer = kBg2,
+    .required_source = kActionBgSource_WorldMap,
+    .required_edge = kActionBgEdge_LiveWorld,
+    .edge = kActionBgEdge_LiveWorld,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 128,
+    .right = 128,
+  },
+  {
+    .map_group = kBloodpool,
+    .map_number = kBloodpoolFirstMap,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Mirror,
+    .edge = kActionBgEdge_Mirror,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 76,
+    .right = 100,
+  },
+  {
+    .map_group = kBloodpool,
+    .map_number = kBloodpoolAct2,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Mirror,
+    .edge = kActionBgEdge_Mirror,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 68,
+    .right = 68,
+    .bands_inherit_extent = true,
+  },
+  {
+    .map_group = kBloodpool,
+    .map_number = kBloodpoolMap6,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Mirror,
+    .edge = kActionBgEdge_Mirror,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 68,
+    .right = 68,
+  },
+  {
+    .map_group = kBloodpool,
+    .map_number = kBloodpoolMap7,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Mirror,
+    .edge = kActionBgEdge_Mirror,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 92,
+    .right = 92,
+  },
+  {
+    .map_group = kBloodpool,
+    .map_number = kBloodpoolBoss,
+    .layer = kBg1,
+    .required_source = kActionBgSource_WorldMap,
+    .required_edge = kActionBgEdge_LiveWorld,
+    .edge = kActionBgEdge_Mirror,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 16,
+    .right = 16,
+  },
+  {
+    .map_group = kBloodpool,
+    .map_number = kBloodpoolBoss,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Mirror,
+    .edge = kActionBgEdge_Mirror,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 0,
+    .right = 0,
+  },
 };
 
 static const uint8_t kLastMapByGroup[kMapGroupLast + 1] = {
@@ -42,8 +152,8 @@ static const uint8_t kLastMapByGroup[kMapGroupLast + 1] = {
 
 _Static_assert(kActionBgPlanLayerCount == 2,
                "action background plan owns BG1/BG2 only");
-_Static_assert(kActionBgMaxBands >= 1,
-               "current mixed BG2 policy needs one override band");
+_Static_assert(kActionBgMaxBands >= 4,
+               "live authoring promises four independent row bands");
 
 static bool ValidMap(uint8_t group, uint8_t map) {
   return group >= kMapGroupFirst && group <= kMapGroupLast && map > 0 &&
@@ -97,6 +207,8 @@ static ActionBgLayerPlan BaseLayerPlan(const ActionBgLayerState *state,
                     : kActionBgSource_NativeTilemap,
     .default_edge = world ? kActionBgEdge_LiveWorld
                           : kActionBgEdge_RawWrap,
+    .default_motion = kActionBgMotion_FillRelative,
+    .camera_y = state->camera_y,
     .world_width = state->world_width,
     .world_height = state->world_height,
     .horizontal_extent = AvailableHorizontalExtent(),
@@ -129,14 +241,7 @@ static void ClassifyNarrowBg2(const ActionBgFrameState *state,
     bg2->horizontal_extent = FixedHorizontalExtent(0, 0);
   if (state->map_group == kBloodpool &&
       state->map_number >= kBloodpoolFirstMap &&
-      state->map_number <= kBloodpoolLastMoonWaterMap) {
-    /* Live authoring in runs/20260810-122509 established asymmetric room for
-     * 0201's unique upper composition before reflected landmarks repeat. 0202
-     * retains the conservative 0/0 default until independently tuned. */
-    if (state->map_number == kBloodpoolFirstMap) {
-      bg2->horizontal_extent = FixedHorizontalExtent(
-          kBloodpoolAct1BackdropLeft, kBloodpoolAct1BackdropRight);
-    }
+      state->map_number <= kBloodpoolAct2) {
     bg2->bands[0] = (ActionBgBand) {
       .y0 = kBloodpoolWaterStartY,
       .y1 = kAuthenticHeight,
@@ -144,6 +249,63 @@ static void ClassifyNarrowBg2(const ActionBgFrameState *state,
       .horizontal_extent = AvailableHorizontalExtent(),
     };
     bg2->band_count = 1;
+  }
+}
+
+static void ClassifyKasandora(const ActionBgFrameState *state,
+                              ActionBgPlan *plan) {
+  if (!state->decorative_padding_enabled ||
+      state->map_group != kKasandora ||
+      state->map_number < kKasandoraFirstHybridRoom ||
+      state->map_number > kKasandoraLastHybridRoom)
+    return;
+  ActionBgLayerPlan *bg2 = &plan->layer[1];
+  if (bg2->source != kActionBgSource_WorldMap ||
+      bg2->default_edge != kActionBgEdge_LiveWorld ||
+      bg2->world_height <= kKasandoraDunesWorldY)
+    return;
+
+  /* Rooms 0301/0302 author sparse clouds above BG2 world Y=256 and cyclic
+   * dunes at and below it. Keep that content seam in world coordinates; the
+   * row resolver projects it through the live parallax camera each frame. */
+  bg2->source = kActionBgSource_AuthenticViewport;
+  bg2->default_edge = kActionBgEdge_Mirror;
+  ClearBands(bg2);
+  bg2->bands[0] = (ActionBgBand) {
+    .y0 = kKasandoraDunesWorldY,
+    .y1 = bg2->world_height,
+    .edge = kActionBgEdge_Repeat,
+    .anchor = kActionBgBandAnchor_World,
+    .horizontal_extent = AvailableHorizontalExtent(),
+  };
+  bg2->band_count = 1;
+}
+
+static void ApplyTunedMapOverrides(const ActionBgFrameState *state,
+                                   ActionBgPlan *plan) {
+  if (!state->decorative_padding_enabled) return;
+  for (unsigned i = 0;
+       i < sizeof(kTunedLayerPolicies) / sizeof(kTunedLayerPolicies[0]);
+       i++) {
+    const TunedLayerPolicy *tuning = &kTunedLayerPolicies[i];
+    if (tuning->layer >= kActionBgPlanLayerCount) continue;
+    ActionBgLayerPlan *layer = &plan->layer[tuning->layer];
+    if (state->map_group != tuning->map_group ||
+        state->map_number != tuning->map_number ||
+        layer->source != tuning->required_source ||
+        layer->default_edge != tuning->required_edge)
+      continue;
+    layer->default_edge = tuning->edge;
+    layer->default_motion = tuning->motion;
+    layer->horizontal_extent = FixedHorizontalExtent(
+        tuning->left, tuning->right);
+    if (tuning->bands_inherit_extent) {
+      for (unsigned band = 0; band < layer->band_count; band++) {
+        layer->bands[band].horizontal_extent = (ActionBgHorizontalExtent) {
+          .mode = kActionBgExtent_Inherit,
+        };
+      }
+    }
   }
 }
 
@@ -212,8 +374,10 @@ bool ActionBgPlan_Build(const ActionBgFrameState *state, ActionBgPlan *out) {
   built.layer[1] = BaseLayerPlan(
       &state->layer[1], kActionBgLayerRole_Backdrop);
   ClassifyNarrowBg2(state, &built.layer[1]);
+  ClassifyKasandora(state, &built);
   if (state->map_group == kDeathHeim)
     ClassifyDeathHeim(state, &built);
+  ApplyTunedMapOverrides(state, &built);
   if (!ActionBgPlan_Validate(&built)) return false;
   *out = built;
   return true;
@@ -231,6 +395,16 @@ static bool ValidRole(ActionBgLayerRole role) {
 
 static bool ValidEdge(ActionBgEdgeMode edge) {
   return edge >= kActionBgEdge_Transparent && edge <= kActionBgEdge_RawWrap;
+}
+
+static bool ValidMotion(ActionBgMotionMode motion) {
+  return motion >= kActionBgMotion_FillRelative &&
+      motion <= kActionBgMotion_NormalScroll;
+}
+
+static bool ValidBandAnchor(ActionBgBandAnchor anchor) {
+  return anchor >= kActionBgBandAnchor_Screen &&
+      anchor <= kActionBgBandAnchor_World;
 }
 
 static bool ValidExtentMode(ActionBgExtentMode mode, bool allow_inherit) {
@@ -254,23 +428,52 @@ static bool ValidVerticalExtent(const ActionBgVerticalExtent *extent) {
       (!extent->top && !extent->bottom);
 }
 
+static int MaximumCameraY(const ActionBgLayerPlan *layer) {
+  int maximum = layer->world_height > kCameraViewportHeight
+      ? (int)layer->world_height - kCameraViewportHeight : 0;
+  if (maximum < layer->camera_y) maximum = layer->camera_y;
+  return maximum;
+}
+
+static bool BandsRemainOrderedAcrossCameraTravel(
+    const ActionBgLayerPlan *layer,
+    const ActionBgBand *preceding, const ActionBgBand *following) {
+  if (preceding->anchor == following->anchor)
+    return preceding->y1 <= following->y0;
+
+  /* World rows move upward as camera_y increases. A World->Screen pair is
+   * closest at camera zero; a Screen->World pair is closest at the maximum
+   * reachable camera. Checking that limiting state proves the two half-open
+   * intervals cannot cross later after a tuner draft has been accepted. */
+  if (preceding->anchor == kActionBgBandAnchor_World) {
+    const int preceding_y1_at_top = (int)preceding->y1 - 1;
+    return preceding_y1_at_top <= following->y0;
+  }
+  const int following_y0_at_bottom =
+      (int)following->y0 - MaximumCameraY(layer) - 1;
+  return preceding->y1 <= following_y0_at_bottom;
+}
+
 bool ActionBgLayerPlan_Validate(const ActionBgLayerPlan *layer) {
   if (!layer || !layer->valid || !ValidRole(layer->role) ||
       !ValidSource(layer->source) ||
       !ValidEdge(layer->default_edge) ||
+      !ValidMotion(layer->default_motion) ||
       !ValidHorizontalExtent(&layer->horizontal_extent, false) ||
       !ValidVerticalExtent(&layer->vertical_extent) ||
       layer->band_count > kActionBgMaxBands)
     return false;
 
-  uint16_t preceding_y1 = 0;
   for (unsigned i = 0; i < layer->band_count; i++) {
     const ActionBgBand *band = &layer->bands[i];
-    if (band->y0 >= band->y1 || band->y1 > kAuthenticHeight ||
-        (i && band->y0 < preceding_y1) || !ValidEdge(band->edge) ||
-        !ValidHorizontalExtent(&band->horizontal_extent, true))
+    int y0 = 0, y1 = 0;
+    if (!ValidEdge(band->edge) || !ValidMotion(band->motion) ||
+        !ValidHorizontalExtent(&band->horizontal_extent, true) ||
+        !ActionBgLayerPlan_ResolveBand(layer, i, &y0, &y1))
       return false;
-    preceding_y1 = band->y1;
+    if (i && !BandsRemainOrderedAcrossCameraTravel(
+                 layer, &layer->bands[i - 1], band))
+      return false;
   }
   return true;
 }
@@ -282,24 +485,42 @@ bool ActionBgPlan_Validate(const ActionBgPlan *plan) {
   return true;
 }
 
+bool ActionBgLayerPlan_ResolveBand(const ActionBgLayerPlan *layer,
+                                  unsigned band,
+                                  int *screen_y0, int *screen_y1) {
+  if (screen_y0) *screen_y0 = 0;
+  if (screen_y1) *screen_y1 = 0;
+  if (!layer || !screen_y0 || !screen_y1 ||
+      band >= layer->band_count || band >= kActionBgMaxBands)
+    return false;
+  const ActionBgBand *entry = &layer->bands[band];
+  if (!ValidBandAnchor(entry->anchor) || entry->y0 >= entry->y1)
+    return false;
+  const uint16_t limit = entry->anchor == kActionBgBandAnchor_World
+      ? layer->world_height : kAuthenticHeight;
+  if (entry->y1 > limit) return false;
+  const int offset = entry->anchor == kActionBgBandAnchor_World
+      ? (int)layer->camera_y + 1 : 0;
+  *screen_y0 = (int)entry->y0 - offset;
+  *screen_y1 = (int)entry->y1 - offset;
+  return true;
+}
+
 static const ActionBgBand *FindRowBand(const ActionBgLayerPlan *layer,
                                       int authentic_y) {
   /* A content family that reaches an authentic viewport edge continues into
    * that edge's synthetic presentation margin. This is deliberately derived
    * from the band's existing bounds: it adds no second flag or policy source,
    * and an internal band can never leak outside the authentic viewport. */
-  if (authentic_y < 0) {
-    if (!layer->band_count || layer->bands[0].y0 != 0) return NULL;
-    return &layer->bands[0];
-  }
-  if (authentic_y >= kAuthenticHeight) {
-    if (!layer->band_count) return NULL;
-    const ActionBgBand *last = &layer->bands[layer->band_count - 1];
-    return last->y1 == kAuthenticHeight ? last : NULL;
-  }
   for (unsigned i = 0; i < layer->band_count; i++) {
     const ActionBgBand *band = &layer->bands[i];
-    if (authentic_y >= (int)band->y0 && authentic_y < (int)band->y1)
+    int y0 = 0, y1 = 0;
+    if (!ActionBgLayerPlan_ResolveBand(layer, i, &y0, &y1)) return NULL;
+    const bool owns_top_margin = authentic_y < 0 && y0 <= 0 && y1 > 0;
+    const bool owns_bottom_margin = authentic_y >= kAuthenticHeight &&
+        y0 < kAuthenticHeight && y1 >= kAuthenticHeight;
+    if (owns_top_margin || owns_bottom_margin ||
+        (authentic_y >= y0 && authentic_y < y1))
       return band;
   }
   return NULL;
@@ -312,11 +533,13 @@ bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
   if (!out || !ActionBgLayerPlan_Validate(layer)) return false;
   ActionBgRowPolicy resolved = {
     .edge = layer->default_edge,
+    .motion = layer->default_motion,
     .horizontal_extent = layer->horizontal_extent,
   };
   const ActionBgBand *band = FindRowBand(layer, authentic_y);
   if (band) {
     resolved.edge = band->edge;
+    resolved.motion = band->motion;
     if (band->horizontal_extent.mode != kActionBgExtent_Inherit)
       resolved.horizontal_extent = band->horizontal_extent;
   }
@@ -326,38 +549,44 @@ bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
 
 bool ActionBgPlan_CompilePresentation(
     const ActionBgPlan *plan, ActionBgPresentationPolicy *out) {
-  if (out) {
-    memset(out, 0, sizeof(*out));
-    out->repeat_band_layer = -1;
-  }
+  if (out) memset(out, 0, sizeof(*out));
   if (!plan || !out || !ActionBgPlan_Validate(plan)) return false;
 
-  ActionBgPresentationPolicy built = { .repeat_band_layer = -1 };
+  ActionBgPresentationPolicy built = { 0 };
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     const ActionBgLayerPlan *layer_plan = &plan->layer[layer];
     if (!layer_plan->valid || layer_plan->band_count > kActionBgMaxBands)
       return false;
     const uint8_t mask = (uint8_t)(1u << layer);
     switch (layer_plan->default_edge) {
+      case kActionBgEdge_Transparent:
       case kActionBgEdge_Clamp:  built.clamp_layers |= mask; break;
       case kActionBgEdge_Mirror: built.mirror_layers |= mask; break;
       case kActionBgEdge_Repeat: built.repeat_layers |= mask; break;
-      case kActionBgEdge_Transparent:
       case kActionBgEdge_LiveWorld:
       case kActionBgEdge_RawWrap:
         break;
       default:
         return false;
     }
+    if (layer_plan->default_motion == kActionBgMotion_NormalScroll)
+      built.normal_scroll_layers |= mask;
     for (unsigned band = 0; band < layer_plan->band_count; band++) {
       const ActionBgBand *entry = &layer_plan->bands[band];
-      if (entry->edge != kActionBgEdge_Repeat ||
-          entry->y0 >= entry->y1 || entry->y1 > kAuthenticHeight ||
-          built.repeat_band_layer >= 0)
+      int y0 = 0, y1 = 0;
+      if (!ActionBgLayerPlan_ResolveBand(layer_plan, band, &y0, &y1))
         return false;
-      built.repeat_band_layer = (int8_t)layer;
-      built.repeat_band_y0 = (uint8_t)entry->y0;
-      built.repeat_band_y1 = (uint8_t)entry->y1;
+      if (y0 < 0) y0 = 0;
+      if (y1 > kAuthenticHeight) y1 = kAuthenticHeight;
+      if (y0 >= y1) continue;
+      if (built.band_count >= kActionBgPresentationBandMax) return false;
+      built.bands[built.band_count++] = (ActionBgPresentationBand) {
+        .layer = (uint8_t)layer,
+        .y0 = (uint8_t)y0,
+        .y1 = (uint8_t)y1,
+        .edge = entry->edge,
+        .motion = entry->motion,
+      };
     }
   }
   built.bound_canvas_to_world = plan->bound_canvas_to_world;
@@ -372,6 +601,7 @@ void ActionBgPlan_InitNative(ActionBgPlan *out) {
     out->layer[layer].valid = true;
     out->layer[layer].source = kActionBgSource_NativeTilemap;
     out->layer[layer].default_edge = kActionBgEdge_RawWrap;
+    out->layer[layer].default_motion = kActionBgMotion_FillRelative;
     out->layer[layer].horizontal_extent = AvailableHorizontalExtent();
     out->layer[layer].vertical_extent = AvailableVerticalExtent();
   }
@@ -384,13 +614,25 @@ bool ActionBgPlan_ApplyPresentationPolicy(
   const uint8_t clamp = policy->clamp_layers & owned_mask;
   const uint8_t mirror = policy->mirror_layers & owned_mask;
   const uint8_t repeat = policy->repeat_layers & owned_mask;
+  const uint8_t normal = policy->normal_scroll_layers & owned_mask;
   if ((clamp & mirror) || (clamp & repeat) || (mirror & repeat) ||
-      policy->repeat_band_layer < -1 ||
-      policy->repeat_band_layer >= kActionBgPlanLayerCount ||
-      (policy->repeat_band_layer >= 0 &&
-       (policy->repeat_band_y0 >= policy->repeat_band_y1 ||
-        policy->repeat_band_y1 > kAuthenticHeight)))
+      policy->band_count > kActionBgPresentationBandMax)
     return false;
+  uint8_t preceding_layer = 0;
+  uint8_t preceding_y1 = 0;
+  uint8_t layer_band_count[kActionBgPlanLayerCount] = { 0 };
+  for (unsigned i = 0; i < policy->band_count; i++) {
+    const ActionBgPresentationBand *band = &policy->bands[i];
+    if (band->layer >= kActionBgPlanLayerCount || band->y0 >= band->y1 ||
+        band->y1 > kAuthenticHeight || !ValidEdge(band->edge) ||
+        !ValidMotion(band->motion) ||
+        (i && band->layer < preceding_layer) ||
+        (i && band->layer == preceding_layer && band->y0 < preceding_y1))
+      return false;
+    if (++layer_band_count[band->layer] > kActionBgMaxBands) return false;
+    preceding_layer = band->layer;
+    preceding_y1 = band->y1;
+  }
 
   ActionBgPlan built = *plan;
   built.bound_canvas_to_world = policy->bound_canvas_to_world;
@@ -399,6 +641,9 @@ bool ActionBgPlan_ApplyPresentationPolicy(
     const uint8_t mask = (uint8_t)(1u << layer);
     layer_plan->valid = true;
     ClearBands(layer_plan);
+    layer_plan->default_motion = normal & mask
+        ? kActionBgMotion_NormalScroll
+        : kActionBgMotion_FillRelative;
     layer_plan->horizontal_extent = AvailableHorizontalExtent();
     layer_plan->vertical_extent = AvailableVerticalExtent();
     if (clamp & mask)
@@ -410,15 +655,17 @@ bool ActionBgPlan_ApplyPresentationPolicy(
     else
       layer_plan->default_edge = kActionBgEdge_RawWrap;
   }
-  if (policy->repeat_band_layer >= 0) {
-    ActionBgLayerPlan *layer_plan =
-        &built.layer[policy->repeat_band_layer];
-    layer_plan->bands[0] = (ActionBgBand) {
-      .y0 = policy->repeat_band_y0,
-      .y1 = policy->repeat_band_y1,
-      .edge = kActionBgEdge_Repeat,
+  for (unsigned i = 0; i < policy->band_count; i++) {
+    const ActionBgPresentationBand *src = &policy->bands[i];
+    ActionBgLayerPlan *layer_plan = &built.layer[src->layer];
+    ActionBgBand *dst = &layer_plan->bands[layer_plan->band_count++];
+    *dst = (ActionBgBand) {
+      .y0 = src->y0,
+      .y1 = src->y1,
+      .edge = src->edge,
+      .motion = src->motion,
+      .anchor = kActionBgBandAnchor_Screen,
     };
-    layer_plan->band_count = 1;
   }
   if (!ActionBgPlan_Validate(&built)) return false;
   *plan = built;
@@ -440,6 +687,7 @@ uint8_t ActionBgPlan_ClampUnboundWorldLayers(
     clamp_layers |= layer_mask;
     layer_plan->source = kActionBgSource_AuthenticViewport;
     layer_plan->default_edge = kActionBgEdge_Clamp;
+    layer_plan->default_motion = kActionBgMotion_FillRelative;
     layer_plan->horizontal_extent = AvailableHorizontalExtent();
     layer_plan->vertical_extent = AvailableVerticalExtent();
     ClearBands(layer_plan);
@@ -507,6 +755,18 @@ const char *ActionBgEdgeMode_Name(ActionBgEdgeMode edge) {
     case kActionBgEdge_RawWrap: return "raw";
     default: return "unknown";
   }
+}
+
+const char *ActionBgMotionMode_Name(ActionBgMotionMode motion) {
+  static const char *const names[] = { "fill", "normal" };
+  return motion >= kActionBgMotion_FillRelative &&
+      motion <= kActionBgMotion_NormalScroll ? names[motion] : "unknown";
+}
+
+const char *ActionBgBandAnchor_Name(ActionBgBandAnchor anchor) {
+  static const char *const names[] = { "screen", "world" };
+  return anchor >= kActionBgBandAnchor_Screen &&
+      anchor <= kActionBgBandAnchor_World ? names[anchor] : "unknown";
 }
 
 const char *ActionBgExtentMode_Name(ActionBgExtentMode mode) {

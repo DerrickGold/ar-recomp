@@ -3649,6 +3649,10 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
             HINT("B", "settings");
             HINT("Y", "clear layer");
             break;
+          case kActionBgTunerRow_BandHeader:
+            HINT("B", "settings");
+            HINT("Y", "canonical bands");
+            break;
           case kActionBgTunerRow_Print:
             HINT("B", "print");
             break;
@@ -3656,7 +3660,6 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
             HINT("B", "reset draft");
             break;
           case kActionBgTunerRow_Header:
-          case kActionBgTunerRow_BandHeader:
             break;
           default:
             HINT("LEFT/RIGHT", "adjust");

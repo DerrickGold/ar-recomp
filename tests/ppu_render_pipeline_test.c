@@ -829,7 +829,8 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   {
     const uint8_t kAllFlags = kPpuOverlayFlag_RemoveFromGame |
                               kPpuOverlayFlag_MarkObjColorMath |
-                              kPpuOverlayFlag_MarkBgHalfAdd;
+                              kPpuOverlayFlag_MarkBgHalfAdd |
+                              kPpuOverlayFlag_ApplyBgFixedColorSubtract;
     CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0,
                                kActRaiserAuthenticWidth,
                                kActRaiserAuthenticHeight, kAllFlags));
@@ -873,6 +874,40 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
       kPpuOverlayFlag_RemoveFromGame));
   CHECK(!Sim3D_PrepareCapture(ppu, &request));
   CHECK(!Sim3D_BeginFrame());
+  ppu_free(ppu);
+}
+
+static void TestDioramaFixedColorSubtractCapture(void) {
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  static uint8_t fb[kW * sizeof(uint32_t)];
+  static uint32_t capture[kW];
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  memset(capture, 0, sizeof(capture));
+  ppu->cgram[0x11] = bgr555(10, 1, 3);
+  ppu->fixedColor = bgr555(2, 1, 2); /* snap_02_gf4230: fixed=$0822 */
+  ppu->cgwsel = 0x00;
+  ppu->cgadsub = 0x81;               /* full subtract, math on BG1 */
+  render_first_line(ppu);
+  const uint32_t flat_pixel = ((const uint32_t *)(const void *)fb)[0];
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
+                              (uint8_t *)capture, sizeof(capture)));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+      kPpuOverlayFlag_RemoveFromGame |
+          kPpuOverlayFlag_ApplyBgFixedColorSubtract));
+  render_first_line(ppu);
+
+  /* Subtraction happens before 5->8-bit expansion and clamps each component. */
+  CHECK(capture[0] == (0xff000000u | rgb555(8, 0, 1)));
+  CHECK((capture[0] & 0x00ffffffu) == (flat_pixel & 0x00ffffffu));
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, NULL, 0);
+  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -1314,12 +1349,11 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
   set_solid_4bpp_tile(ppu, 2, 2);
   ppu->bgTileAdr = 0;
   ppu->bgXsc[bg2] = 0x20 | 3;
+  /* Alternate tile columns so both edge selection and motion-phase
+   * compensation remain observable after a non-zero horizontal scroll. */
   for (int i = 0; i < 0x1000; i++)
-    ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
-  /* Give the last tile column a different color, making reflection and cyclic
-   * continuation observably different at both side seams. */
-  for (int i = 31; i < 0x1000; i += 32)
-    ppu->vram[0x2000 + i] = (uint16_t)(2 | (2 << 10));
+    ppu->vram[0x2000 + i] = (uint16_t)(
+        ((i & 31) & 1 ? 2 : 1) | (2 << 10));
 
   PpuSetExtraSpace(ppu, kBudget);
   PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
@@ -1361,11 +1395,81 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
 
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
 
+  /* Preserve the legacy whole-mask precedence used by diagnostics and older
+   * callers: padding overrides Clamp, and Repeat overrides Mirror. */
+  memset(fb, 0, sizeof(fb));
+  memset(capture, 0, sizeof(capture));
+  PpuSetExtraSpace(ppu, kBudget);
+  PpuSetWidescreenLayerClamp(ppu, (uint8_t)(1u << bg2));
+  PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
+  PpuSetWidescreenLayerRepeat(ppu, (uint8_t)(1u << bg2));
+  PpuSetWidescreenPadCapturedToBudget(ppu, 1);
+  PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                              (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+                             -kBudget, 0, kWidth, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
+  ppu_runLine(ppu, 1);
+  CHECK(capture[kBudget - 1] == capture[kBudget + 255]);
+  CHECK(capture[kBudget - 1] != capture[kBudget + 1]);
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+
+  /* Two independent bands on the same layer: upper art mirrors while keeping
+   * the authentic scroll direction, lower art cyclically repeats. The normal
+   * mirror phase samples x=-1 from source 249 at hscroll=4; legacy reflection
+   * would sample source 1 and visibly reverse the moving pattern. */
+  memset(fb, 0, sizeof(fb));
+  memset(capture, 0, sizeof(capture));
+  ppu->hScroll[bg2] = 4;
+  PpuSetExtraSpace(ppu, kBudget);
+  PpuSetWidescreenLayerClamp(ppu, (uint8_t)(1u << bg2));
+  PpuSetWidescreenLayerBand(
+      ppu, (uint8_t)bg2, 0, 64, kPpuWidescreenBandFill_Mirror,
+      kPpuWidescreenMotion_NormalScroll);
+  PpuSetWidescreenLayerBand(
+      ppu, (uint8_t)bg2, 64, 128, kPpuWidescreenBandFill_Repeat,
+      kPpuWidescreenMotion_FillRelative);
+  PpuSetWidescreenPadCapturedToBudget(ppu, 1);
+  int mapped_x = 0;
+  PpuWidescreenLayerPolicy mapped_policy;
+  CHECK(PpuMapWidescreenLayerX(
+      ppu, (uint8_t)bg2, 0, -1, &mapped_x, &mapped_policy));
+  CHECK(mapped_x == 249 && mapped_policy.band_override &&
+        mapped_policy.fill == kPpuWidescreenBandFill_Mirror &&
+        mapped_policy.motion == kPpuWidescreenMotion_NormalScroll);
+  CHECK(PpuMapWidescreenLayerX(
+      ppu, (uint8_t)bg2, 80, -1, &mapped_x, &mapped_policy));
+  CHECK(mapped_x == 255 && mapped_policy.band_override &&
+        mapped_policy.fill == kPpuWidescreenBandFill_Repeat);
+  CHECK(!PpuMapWidescreenLayerX(
+      ppu, (uint8_t)bg2, 160, -1, &mapped_x, &mapped_policy));
+  CHECK(!mapped_policy.band_override &&
+        mapped_policy.fill == kPpuWidescreenBandFill_Clamp);
+  PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                              (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+                             -kBudget, 0, kWidth, 128,
+                             kPpuOverlayFlag_RemoveFromGame));
+  ppu_runLine(ppu, 1);   /* authentic row 0: normal-motion Mirror */
+  ppu_runLine(ppu, 81);  /* authentic row 80: legacy Repeat */
+
+  const uint32_t *mirror_row = capture;
+  CHECK(mirror_row[kBudget - 1] == mirror_row[kBudget + 249]);
+  CHECK(mirror_row[kBudget - 1] != mirror_row[kBudget + 1]);
+  const uint32_t *repeat_row = capture + 80 * kWidth;
+  CHECK(repeat_row[kBudget - 1] == repeat_row[kBudget + 255]);
+  CHECK(repeat_row[kBudget + kW] == repeat_row[kBudget]);
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+
   /* Aitos, Northwall, and the Death Heim rematches use whole-layer Repeat for
    * moving cloud/snow BG2. Pin the synthetic TOP margin separately: it does not
    * need a row band and must never fall back to reflection there. */
   memset(fb, 0, sizeof(fb));
   memset(capture, 0, sizeof(capture));
+  ppu->hScroll[bg2] = 0;
   PpuSetExtraSpace(ppu, kBudget);
   PpuSetWidescreenLayerRepeat(ppu, (uint8_t)(1u << bg2));
   PpuSetWidescreenPadCapturedToBudget(ppu, 1);
@@ -1622,6 +1726,7 @@ int main(void) {
   TestSim3DFlatComposition();
   TestSim3DWidescreenHudCaptureHandoff();
   TestOverlayContentMetadata();
+  TestDioramaFixedColorSubtractCapture();
   TestVerticalMarginLayerClip();
   TestVerticalMarginBottomLayerClip();
   TestVerticalMarginExactObj();

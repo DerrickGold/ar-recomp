@@ -6,9 +6,12 @@ decoder, offline oracle, pure `ActionBgWorld`, differential observer, and
 tilemap seam. The provider is enabled when `AR_ACTION_BG_HLE` is unset or
 nonzero; exact `AR_ACTION_BG_HLE=0` retains the native A/B. Eligible world layers
 own both the authentic 256x224 viewport and synthetic margins after an exact
-live-ring preflight. Decorative/native layers retain the existing isolated
-mirror/repeat/raw paths. The resolved per-layer/per-band plan now crosses the
-immutable `FrameSlot` handoff and drives diorama row spans without reverse-
+live-ring preflight. An in-world ring contradiction narrows ownership to finite
+synthetic margins while retaining the native authentic centre; phase, source,
+and finite-bound failures still reject the complete layer. Decorative/native
+layers retain the existing isolated mirror/repeat/raw paths. The resolved
+per-layer/per-band plan now crosses the immutable `FrameSlot` handoff and
+drives diorama row spans without reverse-
 classifying PPU masks. BH7's cross-presentation, transition and lifecycle gates
 are complete. BH8 removed the duplicated repair transaction and unused PPU
 policy prototypes after exact pre/post acceptance.
@@ -448,6 +451,7 @@ live BGSC and transition state remain authoritative where already measured.
 | Narrow decorative BG2 with padding disabled | `AuthenticViewport`; clamp |
 | Bloodpool decorative BG2 | authentic rendered line; mirror by default |
 | Bloodpool act 1 water rows `136..224` | repeat band overriding mirrored upper rows |
+| Bloodpool boss `0208` | provider-backed BG1 world with Mirror/fill capped to `16/16`; viewport BG2 Mirror/fill capped to `0/0` |
 | Aitos maps `$01-$03` BG2 | authentic rendered line; cyclic repeat |
 | Northwall maps `$01-$05/$08` BG2 | authentic rendered line; cyclic repeat |
 | Death Heim maps `$02-$07` narrow BG2 | authentic rendered line; cyclic repeat |
@@ -489,6 +493,9 @@ individual sources in `CMakeLists.txt`, following existing test isolation.
 - No data definitions in headers.
 - Static rule rows use designated initializers so source/edge/band intent is
   compiler-checked at the declaration.
+- World source ownership and synthetic edge fill are independent. A verified
+  world may bind the provider for authentic tile words while Mirror/Repeat/
+  Clamp controls only how its synthetic span is presented.
 - Keep programmer-only rendering semantics in C, not an INI/JSON registry.
 - Use `_Static_assert` for two-layer assumptions, band capacity, enum mappings
   copied into `FrameSlot`, and provider coordinate/storage limits.
@@ -718,14 +725,26 @@ main/subscreen, brightness, transparency, and color math. A real-PPU test
 constructs equivalent native/provider 64x64 rings and proves byte-identical
 full-row pixels and priority words in normal and mosaic rendering.
 
-The ActRaiser adapter sets that flag only after all structural BH4 checks plus
-three authentic-centre gates: the full camera must match the live 10-bit PPU
-scroll phase, every displayed tile word must match the resident native ring,
-and no displayed coordinate may be outside the finite world. Any failure clears
-the layer binding for that frame. Preflight/eligible/bound/mismatch/outside and
-fallback counters make that decision observable. Authentic 4:3 uses the same
-modern-PPU handoff even with zero margins; wide-raw and the legacy renderer
-remain native comparison paths.
+The original BH5 adapter set that flag only after all structural BH4 checks plus
+three authentic-centre gates: the full camera had to match the live 10-bit PPU
+scroll phase, every displayed tile word had to match the resident native ring,
+and no displayed coordinate could be outside the finite world. BH7 and ledger
+#45 refined only the content-mismatch branch: an in-world contradiction now
+keeps the layer bound without `IncludeAuthentic`, so the native ring owns the
+authentic centre and the provider owns finite margins. Phase, source, and
+finite-world failures still reject the layer atomically. Preflight/eligible/
+bound/mismatch/outside and fallback counters make that decision observable.
+Authentic 4:3 uses the same modern-PPU handoff even with zero margins; wide-raw
+and the legacy renderer remain native comparison paths.
+
+The `0207` evidence that motivated that refinement is a publication-cadence
+case, not a newly mapped actor writer. Between gf9652 and gf10040 in
+`runs/20260810-172649`, BG1 ring `$6000-$6FFF`, the WRAM map, and the metatile
+table are byte-identical. Moving camera Y from 767 to 760 exposes row 95 on an
+8px boundary before the native 16px streamer refreshes it; exactly eight words
+on that first row are stale relative to the immutable decoder. Margin-only
+recovery preserves the finite canvas without claiming ownership of those
+authentic resident words.
 
 The provider-enabled 12-entry matrix manifest
 `runs/bg-hle-matrix-20260809-145341.json` records 19,522 eligible-and-bound
@@ -995,6 +1014,9 @@ Fail closed at the largest coherent boundary.
 
 - Invalid dimensions, source pointers, table bounds, capacity, cache state or
   unknown scene policy disable HLE for the complete affected layer that frame.
+- A tile-word contradiction wholly inside a valid finite world is a coherent
+  margin-only recovery, not a per-tile fallback: the native ring owns the
+  complete authentic centre and the provider owns only synthetic margins.
 - Out-of-world coordinates on a valid bounded world are transparent; they are
   not failures.
 - Do not fall back per tile after scanout has begun. A mixed HLE/native layer can
@@ -1046,7 +1068,9 @@ This background-HLE track is complete only when all of the following are true:
   windows, transparency, priority and color math remain PPU-owned and verified;
 - game-visible CPU/WRAM/PPU state is unchanged by the HLE;
 - diorama receives exact immutable policy instead of reverse-classifying masks;
-- unexpected fallback and mismatch counts are zero in complete action sweeps;
+- unexplained fallback counts and mismatch-driven layer drops are zero in
+  complete action sweeps; diagnosed in-world contradictions take the explicit
+  native-centre/provider-margin recovery path;
 - obsolete action margin-repair and duplicate policy code is removed in BH8;
 - the authentic native renderer remains as fallback and diagnostic oracle;
 - reference docs and symbols describe the new ownership and the cleanup.

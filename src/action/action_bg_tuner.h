@@ -7,9 +7,10 @@
 #include "action_bg_plan.h"
 
 /* Developer-only, session-local authoring for action background presentation.
- * The tuner stores sparse overrides rather than a copied plan, so dynamic room
- * metadata (notably Death Heim) continues to come from the canonical planner.
- * Nothing is persisted or coupled to diorama-layers.ini. */
+ * Layer fields remain sparse overrides; the first structural band edit copies
+ * only that layer's bounded four-entry band table. Dynamic role/source/world
+ * metadata continues to come from the canonical planner. Nothing is persisted
+ * or coupled to diorama-layers.ini. */
 
 enum { kActionBgTunerRowMax = 32 };
 enum {
@@ -27,6 +28,7 @@ typedef enum ActionBgTunerRowKind {
   kActionBgTunerRow_Guides,
   kActionBgTunerRow_Layer,
   kActionBgTunerRow_Edge,
+  kActionBgTunerRow_Motion,
   kActionBgTunerRow_IgnoreSideBounds,
   kActionBgTunerRow_IgnoreVerticalBounds,
   kActionBgTunerRow_HorizontalMode,
@@ -36,9 +38,16 @@ typedef enum ActionBgTunerRowKind {
   kActionBgTunerRow_Top,
   kActionBgTunerRow_Bottom,
   kActionBgTunerRow_BandHeader,
+  kActionBgTunerRow_BandAdd,
+  kActionBgTunerRow_BandAnchor,
+  kActionBgTunerRow_BandStart,
+  kActionBgTunerRow_BandEnd,
+  kActionBgTunerRow_BandEdge,
+  kActionBgTunerRow_BandMotion,
   kActionBgTunerRow_BandMode,
   kActionBgTunerRow_BandLeft,
   kActionBgTunerRow_BandRight,
+  kActionBgTunerRow_BandDelete,
   kActionBgTunerRow_Print,
   kActionBgTunerRow_Reset,
 } ActionBgTunerRowKind;
@@ -78,7 +87,8 @@ bool ActionBgTuner_ObservePlan(uint8_t map_group, uint8_t map_number,
                               ActionBgTunerLimits limits);
 
 /* Project the enabled sparse draft over the just-observed canonical plan.
- * Atomic: false leaves `plan` untouched. */
+ * Atomic: false leaves `plan` untouched so the runtime can execute the current
+ * canonical room policy instead of dropping background HLE. */
 bool ActionBgTuner_ApplyDraft(ActionBgPlan *plan);
 
 bool ActionBgTuner_IsLive(void);

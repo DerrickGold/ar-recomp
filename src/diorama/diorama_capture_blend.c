@@ -18,3 +18,12 @@ bool DioramaCaptureBlend_LayerIsHalfAdded(uint8_t cgwsel, uint8_t cgadsub,
   if (screen_sub & layer_bit) return false;
   return true;
 }
+
+bool DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+    uint8_t cgwsel, uint8_t cgadsub, uint16_t fixed_color,
+    uint8_t layer_bit) {
+  if (!layer_bit || !fixed_color || cgwsel != 0) return false;
+  if (!(cgadsub & layer_bit)) return false;
+  return (cgadsub & (kCgadsubHalf | kCgadsubSubtract)) ==
+      kCgadsubSubtract;
+}
