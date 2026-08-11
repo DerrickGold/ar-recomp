@@ -407,6 +407,30 @@ static void TestFramePlanCapture(void) {
           kActionBgExtent_Available);
   }
 
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Marahna;
+  wram[kActRaiserWram_CurrentMap] = 5;
+  Write16(wram, kActRaiserWram_Bg1Width, 2048);
+  Write16(wram, kActRaiserWram_Bg1CameraX, 543);
+  Write16(wram, kActRaiserWram_Bg2Width, 512);
+  Write16(wram, kActRaiserWram_Bg2CameraX, 543);
+  ppu->bgXsc[0] = 0x63;
+  ppu->bgXsc[1] = 0x73;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].wrap_world_x);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Repeat);
+  CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 128 &&
+        plan.layer[1].horizontal_extent.right == 128);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].band_count == 0);
+  CHECK(policy.repeat_layers == kActRaiserBgLayerMask_Bg2);
+  CHECK(policy.normal_scroll_layers == 0);
+
   wram[kActRaiserWram_CurrentMap] = 9;
   memset(&plan, 0xA5, sizeof(plan));
   CHECK(!ActRaiserActionBg_BuildPlan(

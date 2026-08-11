@@ -124,7 +124,16 @@ static bool StandardTownHudCapture(const Ppu *ppu, int source,
     return false;
   if (source == kPpuOverlaySource_Bg3)
     return capture->oamCount == 0;
-  return capture->oamFirst == kActRaiserHudObjOamFirst &&
+  /* The town menu consumes the leading OAM entries, so the fixed-screen
+   * hourglass moves from its ordinary slots 0-3 (observed at 11-14 in
+   * runs/20260810-231616 and runs/20260811-145909). The widescreen HUD
+   * promoter already discovers that range from the complete sprite signature;
+   * validate against the same per-frame fact here instead of accidentally
+   * treating a fixed screen position as a fixed OAM allocation. */
+  enum { kPpuOamSlots = kPpuOamWords / 2 };
+  const int hourglass_first = ActRaiser_FindSimulationHourglass(
+      ppu->oam, ppu->highOam, kPpuOamSlots);
+  return hourglass_first >= 0 && capture->oamFirst == hourglass_first &&
       capture->oamCount == kActRaiserHudObjOamCount;
 }
 

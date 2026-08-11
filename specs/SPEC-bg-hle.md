@@ -454,7 +454,7 @@ live BGSC and transition state remain authoritative where already measured.
 | Scene/layer | Source and edge policy |
 | --- | --- |
 | Ordinary wide BG1/BG2 | `WorldMap`; live inside independent bounds, transparent outside |
-| Marahna action BG2 | `WorldMap`; a 512px horizontal cycle when it shares camera X with an independently wider BG1, regardless of subsection `$19`. `0501` gf2331 and `0502` gf9728 prove 924/924 and 957/957 native words at decoded X modulo 64 tiles |
+| Marahna action BG2 | `WorldMap`; a 512px horizontal cycle when it shares camera X with an independently wider BG1, regardless of subsection `$19`. `0501` gf2331 and `0502` gf9728 prove 924/924 and 957/957 native words at decoded X modulo 64 tiles. `0505` retains that source and presents it with Repeat/fill capped to `128/128` |
 | Narrow decorative BG2 with padding disabled | `AuthenticViewport`; clamp |
 | Bloodpool decorative BG2 | authentic rendered line; mirror by default |
 | Bloodpool act 1 water rows `136..224` | repeat band overriding mirrored upper rows |

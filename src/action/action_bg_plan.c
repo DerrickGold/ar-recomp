@@ -34,6 +34,7 @@ enum {
   kKasandoraFirstHybridRoom = 1,
   kKasandoraLastHybridRoom = 2,
   kKasandoraDunesWorldY = 256,
+  kMarahnaMap5 = 5,
   kDeathHeimHub = 1,
   kDeathHeimFirstBoss = 2,
   kDeathHeimLastBoss = 7,
@@ -167,6 +168,17 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .left = 128,
     .right = 128,
     .requires_existing_band = true,
+  },
+  {
+    .map_group = kMarahna,
+    .map_number = kMarahnaMap5,
+    .layer = kBg2,
+    .required_source = kActionBgSource_WorldMap,
+    .required_edge = kActionBgEdge_LiveWorld,
+    .edge = kActionBgEdge_Repeat,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 128,
+    .right = 128,
   },
 };
 

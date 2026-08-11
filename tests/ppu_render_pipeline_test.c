@@ -819,16 +819,17 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
       ppu, kActRaiserSimulationHudHeight,
       kActRaiserSimulationHudSplit, kActRaiserSimulationHudSplit,
       kActRaiserSimulationHudHeight, kActRaiserSimulationHudHeight);
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg3, 0, 0,
-      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
-      kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Obj, 0, 0,
-      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
-      kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayOamRange(
-      ppu, kActRaiserHudObjOamFirst, kActRaiserHudObjOamCount));
+  /* The exact gf18992 menu-open hourglass: earlier menu sprites own slots
+   * 0-10, while phase $ED's four pieces move to slots 11-14. The enhanced-view
+   * overlay gate must follow the validated capture range rather than assume
+   * the ordinary slots 0-3. */
+  enum { kMenuHourglassFirst = 11 };
+  static const uint16_t kMenuHourglass[] = {
+    0x0B94, 0x31ED, 0x0B9B, 0x71ED,
+    0x1394, 0x31FD, 0x139B, 0x71FD,
+  };
+  memcpy(&ppu->oam[kMenuHourglassFirst * 2], kMenuHourglass,
+         sizeof(kMenuHourglass));
 
   /* PpuSetOverlayCapture stores flags through a WHITELIST, so a flag that is
    * declared in ppu.h but missing from that mask is accepted by the setter and
@@ -856,6 +857,17 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
     PpuClearOverlayCaptures(ppu);
   }
 
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg3, 0, 0,
+      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Obj, 0, 0,
+      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(
+      ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
+
   const int extra = 43;
   Sim3DCaptureRequest request = {
     .town = true,
@@ -877,6 +889,22 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   CHECK(obj->x0 == -extra && obj->x1 == kActRaiserAuthenticWidth + extra);
   CHECK(obj->oamFirst == 0 && obj->oamCount == 128);
   CHECK(Sim3D_BeginFrame());
+
+  /* The same four-slot-sized capture at the old allocation is not the
+   * promoted icon and must remain an overlay conflict. */
+  PpuClearOverlayCaptures(ppu);
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg3, 0, 0,
+      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Obj, 0, 0,
+      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(
+      ppu, kActRaiserHudObjOamFirst, kActRaiserHudObjOamCount));
+  CHECK(!Sim3D_PrepareCapture(ppu, &request));
+  CHECK(!Sim3D_BeginFrame());
 
   /* An unrelated layer capture still owns its source and must fail closed. */
   PpuClearOverlayCaptures(ppu);
