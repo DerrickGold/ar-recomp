@@ -64,16 +64,40 @@ enum {
   kActionSceneEffectLightningIndicesPerInstance =
       kActionSceneEffectLightningSegments * 6 *
       kActionSceneEffectLightningLayers,
+  /* The player lifecycle admits one sword beam. Its magical path uses fixed
+   * crossed stars (8 vertices/12 indices) plus two wake quads. Reserve
+   * only the amount above an ordinary scene actor's 12-quad particle budget;
+   * the renderer rejects impossible duplicate beams rather than multiplying
+   * this allowance by every scene slot. */
+  kActionSceneEffectMaxSwordStreams = 1,
+  kActionSceneEffectSwordStarCount = 48,
+  kActionSceneEffectSwordWakeLayers = 2,
+  kActionSceneEffectSwordVerticesPerInstance =
+      kActionSceneEffectSwordStarCount * 8 +
+      kActionSceneEffectSwordWakeLayers * 4,
+  kActionSceneEffectSwordIndicesPerInstance =
+      kActionSceneEffectSwordStarCount * 12 +
+      kActionSceneEffectSwordWakeLayers * 6,
+  kActionSceneEffectSwordExtraVertices =
+      kActionSceneEffectSwordVerticesPerInstance -
+      kActionSceneEffectParticlesPerInstance * 4,
+  kActionSceneEffectSwordExtraIndices =
+      kActionSceneEffectSwordIndicesPerInstance -
+      kActionSceneEffectParticlesPerInstance * 6,
   kActionSceneEffectRenderMaxVertices =
       kActionSceneEffectMaxGlows * kActionEffectGlowVertices +
       kActionSceneEffectMaxParticles * 4 +
       kActionSceneEffectMaxLightningFilaments *
-          kActionSceneEffectLightningVerticesPerInstance,
+          kActionSceneEffectLightningVerticesPerInstance +
+      kActionSceneEffectMaxSwordStreams *
+          kActionSceneEffectSwordExtraVertices,
   kActionSceneEffectRenderMaxIndices =
       kActionSceneEffectMaxGlows * kActionEffectGlowIndices +
       kActionSceneEffectMaxParticles * 6 +
       kActionSceneEffectMaxLightningFilaments *
-          kActionSceneEffectLightningIndicesPerInstance,
+          kActionSceneEffectLightningIndicesPerInstance +
+      kActionSceneEffectMaxSwordStreams *
+          kActionSceneEffectSwordExtraIndices,
 };
 
 typedef bool (*ActionEffectProjectPointFn)(

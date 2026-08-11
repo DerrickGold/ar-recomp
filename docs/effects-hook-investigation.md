@@ -15,8 +15,11 @@ implements Bloodpool's wall torches, gargoyle fireballs, vertical lightning trap
 boss lightning attack as portable action-scene lights and particle emitters. Run
 `20260810-180202` corrects the latter to six strike shapes plus one floor-impact cycle; the
 complete state sequences and per-row paths are decoded from its `$7E:5000` boss animation bank.
-Run `20260810-175403` also maps the global player sword beam and implements a cool light, tapered
-light wake, and sparse crossed-star trail for both of its authored cycles and travel directions.
+Run `20260810-175403` also maps the global player sword beam. Follow-up run `20260810-184935`
+corrects its signed-origin OAM placement; `20260810-190012` proves the aligned five-glint revision
+too faint, and `20260810-190729` proves a denser centreline still too narrow. The settled pass uses
+full-height haze plus a forty-eight-glint materializing star path for both authored cycles and travel
+directions.
 Snapshot hooks and renderer output are covered by ROM-free regressions, with only live visual
 tuning remaining.
 
@@ -81,11 +84,15 @@ visual cadence, not its actor-owned lifetime. This is the companion to [SEAMS.md
 11. **The sword beam is a player-linked action projectile, not a Bloodpool object.** Creator
     `$00:9CF2` installs handler `$9D1C`, animation `$06:8000`, attacker flag `$0001`, and a
     backlink to player slot `$08A0`. State/visual/composition tuples `$13/$30/$99E8` and
-    `$14/$31/$9A17` are its two authored cycles. Both compositions emit the same six 8x8 parts,
-    producing local drawable bounds `(0,-1)..(16,31)` centred at `(8,15)` after the action
-    emitter's Y bias. Its collision-header words include signed offsets and therefore cannot be
-    reused as unsigned presentation extents. The measured velocity, normally `+8` or `-8`, is the
-    authoritative trail direction.
+    `$14/$31/$9A17` are its two authored cycles. Both compositions emit the same six 8x8 crescent
+    parts, but their signed byte origins place them differently relative to the object hot point.
+    State `$13` normal bounds are `(32,-33)..(48,-1)`, centred at `(40,-17)`; state `$14` normal
+    bounds are `(40,-9)..(56,23)`, centred at `(48,7)`. H-flip produces `(-48,-33)..(-32,-1)` and
+    `(-56,-9)..(-40,23)`. Run `20260810-184935` confirms state `$13` exactly: world `(232,456)`
+    minus camera `(120,255)` gives hot point `(112,201)`, while captured OAM spans
+    `(144,168)..(160,200)`. Vertical flip is not an authored beam state and fails closed; horizontal
+    flip selects the measured mirrored rectangles. The measured velocity, normally `+8` or `-8`,
+    is the authoritative path direction.
 
 These findings leave no ROM-decompilation blocker to choosing particle and light styles. They
 also mean the first implementation should expose per-instance metadata, rather than a single
@@ -184,9 +191,14 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   bias; the surrounding glow rotates onto the same authored chord. All particle placement is an
   integer-hash function of authentic lifecycle clocks, so paused redraws freeze and repeat builds
   are byte-identical.
-- Sword-beam presentation uses a cold two-tier glow, two tapered additive wake quads, and four
-  sparse cyan-white crossed-star glints behind the crescent. All three follow measured velocity,
-  mirror for leftward travel, and project through the same OBJ plane in flat or Diorama mode.
+- Sword-beam presentation uses a restrained cold halo/core, narrow 80px/56px connective haze
+  layers, and forty-eight cyan-white crossed-star glints arranged as sixteen fixed cross-sections
+  of three height lanes. Positions stay fixed from 4px to 88px behind the crescent while scrambled
+  18-tick phases independently fade and scale each star into and out of existence; no glint streams
+  backward along the path.
+  All elements follow measured velocity, mirror for leftward travel, and project through the same
+  OBJ plane in flat or Diorama mode. This supersedes both the detached triangular wake in run
+  `20260810-184935` and the barely visible five-glint correction in run `20260810-190012`.
 - Flat presentation uses the normal action camera projection. Diorama presentation publishes the
   exact resolved BG1-low shape alongside the existing four OBJ shapes: torches follow BG1
   depth/rake/bow, while fireballs and lightning follow OBJ priority 0. A missing plane fails closed
@@ -482,9 +494,12 @@ Before final visual tuning, finish these focused acceptance captures:
    Accept all six vertical/diagonal and long/medium/short white-gold/amber strike paths, horizontal
    mirroring, the separate floor impact, pause behavior, retirement, and both Graphics switches in
    flat and Diorama presentation.
-4. Revisit the second snapshot from `20260810-175403`. Accept the sword beam's cold body light,
-   continuous tapered wake, four-star trail, left/right mirroring, both `$13/$14` cycles, pause and
-   retirement behavior, and both Graphics switches in flat and Diorama presentation.
+4. Revisit the second snapshot from `20260810-175403`, using `20260810-184935` as the failed
+   alignment baseline, `20260810-190012` as the low-density baseline, and `20260810-190729` as
+   the narrow-centreline baseline. Accept exact crescent registration for both `$13/$14` cycles
+   and both travel directions, the restrained cold halo, full-height long haze, materializing
+   forty-eight-star path, pause and retirement behavior, and both Graphics switches in flat and
+   Diorama presentation.
 5. Log the controller kind and cohort slot `status, X/Y, +0A/+0C/+0E/+10, +20, +22, +28` each
    tick. Confirm the decoded timing, clone count, and slot reuse for IDs 2-4.
 6. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the

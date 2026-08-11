@@ -467,7 +467,7 @@ static void SeedSwordBeam(uint8_t *wram, unsigned state, bool hflip) {
   const size_t beam = kActRaiserWram_ActionObjectTable +
       9 * kActRaiserActionObjectStride;
   Write16(wram, beam + 0x00, 0x0000);
-  Write16(wram, beam + 0x02, 224);
+  Write16(wram, beam + 0x02, 232);
   Write16(wram, beam + 0x04, 456);
   Write16(wram, beam + 0x06, hflip ? 0xFFF8 : 0x0008);
   Write16(wram, beam + 0x08, 0x0000);
@@ -735,35 +735,51 @@ static void TestSwordBeamIdentityAndAuthoredGeometry(void) {
   CHECK(frame.effects[0].record_address == 0x08E0);
   CHECK(frame.effects[0].kind == kActionEffect_SwordBeam);
   CHECK(frame.effects[0].phase == kActionEffectPhase_SwordBeamFlight);
-  CHECK(frame.effects[0].world_x == 224);
+  CHECK(frame.effects[0].world_x == 232);
   CHECK(frame.effects[0].world_y == 456);
   CHECK(frame.effects[0].velocity_x == 8);
   CHECK(frame.effects[0].left_extent == 0xFFE0);
   CHECK(frame.effects[0].visual == 0x30);
   CHECK(frame.effects[0].composition == 0x99E8);
-  CHECK(frame.effects[0].geometry.data.rect.x0 == 0.0f);
-  CHECK(frame.effects[0].geometry.data.rect.y0 == -1.0f);
-  CHECK(frame.effects[0].geometry.data.rect.x1 == 16.0f);
-  CHECK(frame.effects[0].geometry.data.rect.y1 == 31.0f);
+  CHECK(frame.effects[0].geometry.data.rect.x0 == 32.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y0 == -33.0f);
+  CHECK(frame.effects[0].geometry.data.rect.x1 == 48.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y1 == -1.0f);
+  /* Exact snap_01_gf1815 registration from run 20260810-184935: camera
+   * (120,255) turns world hot point (232,456) into (112,201), and the decoded
+   * local rect must land on the captured crescent OAM bounds 144..160 by
+   * 168..200. */
+  CHECK(frame.effects[0].world_x - 120 +
+        frame.effects[0].geometry.data.rect.x0 == 144.0f);
+  CHECK(frame.effects[0].world_y - 255 +
+        frame.effects[0].geometry.data.rect.y0 == 168.0f);
+  CHECK(frame.effects[0].world_x - 120 +
+        frame.effects[0].geometry.data.rect.x1 == 160.0f);
+  CHECK(frame.effects[0].world_y - 255 +
+        frame.effects[0].geometry.data.rect.y1 == 200.0f);
 
-  /* The alternate state uses a second visual/composition tuple but emits
-   * the same six OAM parts and therefore the same light anchor. */
+  /* The alternate state uses the same six-part crescent with a different
+   * signed composition origin, so its decoded anchor moves with the OAM. */
   SeedSwordBeam(wram, 0x14, false);
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 1);
   CHECK(frame.effects[0].animation_state == 0x14);
   CHECK(frame.effects[0].visual == 0x31);
   CHECK(frame.effects[0].composition == 0x9A17);
-  CHECK(frame.effects[0].geometry.data.rect.y0 == -1.0f);
-  CHECK(frame.effects[0].geometry.data.rect.y1 == 31.0f);
+  CHECK(frame.effects[0].geometry.data.rect.x0 == 40.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y0 == -9.0f);
+  CHECK(frame.effects[0].geometry.data.rect.x1 == 56.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y1 == 23.0f);
 
   SeedSwordBeam(wram, 0x13, true);
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 1);
   CHECK(frame.effects[0].velocity_x == -8);
   CHECK(frame.effects[0].flags & kActionEffectFlag_FlipHorizontal);
-  CHECK(frame.effects[0].geometry.data.rect.x0 == 0.0f);
-  CHECK(frame.effects[0].geometry.data.rect.x1 == 16.0f);
+  CHECK(frame.effects[0].geometry.data.rect.x0 == -48.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y0 == -33.0f);
+  CHECK(frame.effects[0].geometry.data.rect.x1 == -32.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y1 == -1.0f);
 
   /* This is a player ability rather than a Bloodpool room signature. */
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
@@ -780,6 +796,10 @@ static void TestSwordBeamIdentityAndAuthoredGeometry(void) {
   CHECK(frame.effect_count == 0);
   SeedSwordBeam(wram, 0x13, false);
   Write16(wram, kActRaiserWram_PlayerObject + 0x32, 0x9810);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+  SeedSwordBeam(wram, 0x13, false);
+  Write16(wram, 0x08E0 + 0x28, kActRaiserObjectFlip_Vertical);
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 0);
 }

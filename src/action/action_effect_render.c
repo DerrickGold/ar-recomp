@@ -1086,11 +1086,12 @@ static bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
   return true;
 }
 
-/* A sword-beam sparkle is two crossed additive diamonds. Four of these use
- * the same bounded vertex/index allowance as eight ordinary scene motes, but
- * read as deliberate star glints rather than as fire embers. The basis comes
- * from projected local unit vectors so the cross follows the OBJ plane in
- * Diorama mode instead of remaining screen-axis-aligned. */
+/* A sword-beam sparkle is two crossed additive diamonds. Forty-eight fixed
+ * glints independently materialize along the magical path rather than moving
+ * backward like fire embers. The bounded extra capacity is explicit in
+ * action_effect_render.h.
+ * Projected local unit vectors keep the cross on the OBJ plane in Diorama
+ * mode instead of leaving it screen-axis-aligned. */
 static bool AppendSceneStarParticle(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     float local_x, float local_y, float size, SDL_FColor color,
@@ -1281,7 +1282,9 @@ static bool AppendSwordBeamTrailLayer(
   float hx = 1.0f, hy = 0.0f;
   if (!SceneActorHeading(effect, &hx, &hy)) return true;
   const float px = -hy, py = hx;
-  const float centre_x = 8.0f, centre_y = 15.0f;
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const float centre_x = (rect->x0 + rect->x1) * 0.5f;
+  const float centre_y = (rect->y0 + rect->y1) * 0.5f;
   const float tail_x = centre_x - hx * length;
   const float tail_y = centre_y - hy * length;
   const float local_x[] = {
@@ -1323,15 +1326,23 @@ static bool AppendSwordBeamTrail(
       effect->phase != kActionEffectPhase_SwordBeamFlight)
     return true;
   const float pulse = DeterministicPulse(effect);
-  SDL_FColor outer_head = {0.12f, 0.52f, 1.00f, 0.24f * pulse};
-  SDL_FColor outer_tail = {0.03f, 0.16f, 0.78f, 0.00f};
-  SDL_FColor inner_head = {0.70f, 0.98f, 1.00f, 0.54f * pulse};
-  SDL_FColor inner_tail = {0.10f, 0.48f, 1.00f, 0.00f};
+  SDL_FColor outer_head = {0.32f, 0.78f, 1.00f, 0.19f * pulse};
+  SDL_FColor outer_tail = {0.05f, 0.22f, 0.82f, 0.00f};
+  SDL_FColor inner_head = {0.78f, 0.98f, 1.00f, 0.27f * pulse};
+  SDL_FColor inner_tail = {0.10f, 0.42f, 1.00f, 0.00f};
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const float crescent_half_height = (rect->y1 - rect->y0) * 0.5f;
+  const float outer_head_width = fmaxf(6.0f, crescent_half_height * 0.95f);
+  const float inner_head_width = fmaxf(2.75f,
+                                       crescent_half_height * 0.58f);
+  /* Both layers now meet nearly the full decoded crescent height. They remain
+   * low-alpha and taper immediately, avoiding the detached headlight while
+   * fixing the centreline-only attachment captured in 20260810-190729. */
   return AppendSwordBeamTrailLayer(
-             writer, effect, 42.0f, 14.0f, 2.0f,
+             writer, effect, 80.0f, outer_head_width, 2.0f,
              outer_head, outer_tail, project_point, userdata) &&
       AppendSwordBeamTrailLayer(
-             writer, effect, 28.0f, 7.0f, 1.0f,
+             writer, effect, 56.0f, inner_head_width, 1.0f,
              inner_head, inner_tail, project_point, userdata);
 }
 
@@ -1353,9 +1364,9 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       cool = (SDL_FColor){1.00f, 0.10f, 0.00f, 0.00f};
       break;
     case kActionEffect_SwordBeam:
-      count = 4;
-      hot = (SDL_FColor){0.92f, 1.00f, 1.00f, 0.88f};
-      cool = (SDL_FColor){0.08f, 0.42f, 1.00f, 0.00f};
+      count = kActionSceneEffectSwordStarCount;
+      hot = (SDL_FColor){0.96f, 1.00f, 1.00f, 1.00f};
+      cool = (SDL_FColor){0.10f, 0.48f, 1.00f, 0.55f};
       break;
     case kActionEffect_LightningTrap:
       count = kActionSceneEffectParticlesPerInstance;
@@ -1381,17 +1392,18 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
         effect->pulse_generation * 0x9E3779B9u ^
         (uint32_t)effect->record_address * 0x85EBCA6Bu ^
         i * 0xC2B2AE35u);
-    const unsigned lifetime = effect->kind == kActionEffect_SwordBeam
-        ? 13u + ((seed >> 6) & 7u)
-        : (effect->kind == kActionEffect_LightningTrap ||
-           effect->kind == kActionEffect_BloodpoolBossLightning)
+    const unsigned lifetime =
+        (effect->kind == kActionEffect_LightningTrap ||
+         effect->kind == kActionEffect_BloodpoolBossLightning)
         ? 11u + ((seed >> 6) & 7u)
         : 21u + ((seed >> 5) & 15u);
-    const unsigned age = (visual_ticks + seed % lifetime) % lifetime;
+    const unsigned birth_phase = seed % lifetime;
+    const unsigned age = (visual_ticks + birth_phase) % lifetime;
     const float t = (float)age / (float)(lifetime - 1u);
     const float previous_t = fmaxf(0.0f, t - 0.14f);
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
     float width = 0.55f, reach = 1.8f + 2.2f * t;
+    float sword_path_t = 0.0f;
 
     if (effect->kind == kActionEffect_WallTorch) {
       const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 7.0f;
@@ -1417,15 +1429,26 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       width = 0.80f + 0.60f * (1.0f - t);
       reach = 3.0f + 5.0f * t;
     } else if (effect->kind == kActionEffect_SwordBeam) {
-      /* The six authored OAM parts form a 16x32 crescent centred at (8,15)
-       * after the action emitter's one-pixel Y bias. A short tapered wake
-       * gives the very clean white/cyan art motion without turning it into a
-       * fire projectile or obscuring its silhouette. */
-      const float side = (HashUnit(seed ^ 0x53u) - 0.5f) *
-          (6.0f + 11.0f * t);
-      const float distance = 5.0f + 32.0f * t;
-      x = 8.0f - heading_x * distance - heading_y * side;
-      y = 15.0f - heading_y * distance + heading_x * side;
+      /* Sixteen fixed cross-sections span the path, each with top/centre/
+       * bottom lanes. Position depends only on identity; the materialization
+       * clock below changes alpha and size without pushing stars backward. */
+      const unsigned lane_count = 3u;
+      const unsigned cross_section_count = count / lane_count;
+      const unsigned cross_section = i / lane_count;
+      sword_path_t = cross_section_count > 1u
+          ? (float)cross_section / (float)(cross_section_count - 1u)
+          : 0.0f;
+      const float centre_x = (rect->x0 + rect->x1) * 0.5f;
+      const float centre_y = (rect->y0 + rect->y1) * 0.5f;
+      const float half_height = (rect->y1 - rect->y0) * 0.5f;
+      const float lane = (float)(i % lane_count) - 1.0f;
+      const float lane_half_span = fmaxf(2.0f, half_height - 2.5f) *
+          (1.0f - 0.35f * sword_path_t);
+      const float jitter = (HashUnit(seed ^ 0x53u) - 0.5f) * 1.5f;
+      const float side = lane * lane_half_span + jitter;
+      const float distance = 4.0f + 84.0f * sword_path_t;
+      x = centre_x - heading_x * distance - heading_y * side;
+      y = centre_y - heading_y * distance + heading_x * side;
     } else if (effect->kind == kActionEffect_LightningTrap) {
       /* Most sparks crawl across the full bolt; the last quarter burst away
        * from its lower impact so the strike has both a shaft and a contact. */
@@ -1492,18 +1515,26 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       reach = 2.0f + 2.8f * (1.0f - t);
     }
 
-    SDL_FColor color = MixColor(hot, cool, t);
-    const float birth_fade = fminf(1.0f, t * 7.0f);
-    color.a *= birth_fade * (1.0f - t) *
-        (0.72f + 0.28f * HashUnit(seed ^ 0xA7u));
+    SDL_FColor color = MixColor(
+        hot, cool, effect->kind == kActionEffect_SwordBeam ? sword_path_t : t);
     if (effect->kind == kActionEffect_SwordBeam) {
-      const float star_size = 0.85f + 1.45f * (1.0f - t) *
-          (0.75f + 0.25f * HashUnit(seed ^ 0xD3u));
+      float materialize = TriangleWave(visual_ticks + i * 7u, 18u);
+      materialize = materialize * materialize *
+          (3.0f - 2.0f * materialize);
+      color.a *= materialize * (1.0f - 0.35f * sword_path_t) *
+          (0.82f + 0.18f * HashUnit(seed ^ 0xA7u));
+      const float base_size = 1.15f + 1.30f * (1.0f - sword_path_t) *
+          (0.78f + 0.22f * HashUnit(seed ^ 0xD3u));
+      const float star_size = base_size * (0.70f + 0.50f * materialize);
       if (!AppendSceneStarParticle(writer, effect, x, y, star_size, color,
                                    project_point, userdata))
         return false;
       continue;
     }
+    const float birth_fade = fminf(1.0f, t * 8.0f);
+    const float retirement_fade = 1.0f - t;
+    color.a *= birth_fade * retirement_fade *
+        (0.82f + 0.18f * HashUnit(seed ^ 0xA7u));
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
                              width, reach, color, project_point, userdata))
       return false;
@@ -1586,35 +1617,36 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       float hx = 1.0f, hy = 0.0f;
       SceneActorHeading(effect, &hx, &hy);
       spill = (ActionEffectGlowStyle){
-        .radius_x = 38.0f, .radius_y = 42.0f,
+        .radius_x = 24.0f, .radius_y = 22.0f,
         .ring_scale = {0.25f, 0.64f, 1.0f},
-        .centre = {0.52f, 0.88f, 1.00f, 0.20f},
-        .ring = {{0.26f, 0.70f, 1.00f, 0.14f},
-                 {0.08f, 0.34f, 0.98f, 0.055f},
+        .centre = {0.52f, 0.88f, 1.00f, 0.13f},
+        .ring = {{0.26f, 0.70f, 1.00f, 0.09f},
+                 {0.08f, 0.34f, 0.98f, 0.035f},
                  {0.02f, 0.10f, 0.60f, 0.00f}},
-        .flare = 0.045f, .rise = 0.16f,
+        .flare = 0.035f, .rise = 0.11f,
         .axis_x = hx, .axis_y = hy,
         .lift_x = -hx, .lift_y = -hy,
         .seed = (unsigned)effect->record_address,
       };
       body = (ActionEffectGlowStyle){
-        .radius_x = 15.0f, .radius_y = 28.0f,
+        .radius_x = 10.0f, .radius_y = 18.0f,
         .ring_scale = {0.20f, 0.58f, 1.0f},
-        .centre = {0.94f, 1.00f, 1.00f, 0.78f},
-        .ring = {{0.48f, 0.92f, 1.00f, 0.48f},
-                 {0.12f, 0.56f, 1.00f, 0.18f},
+        .centre = {0.94f, 1.00f, 1.00f, 0.52f},
+        .ring = {{0.48f, 0.92f, 1.00f, 0.30f},
+                 {0.12f, 0.56f, 1.00f, 0.10f},
                  {0.03f, 0.18f, 0.72f, 0.00f}},
         .flare = 0.025f, .rise = 0.10f,
         .axis_x = hx, .axis_y = hy,
         .lift_x = -hx, .lift_y = -hy,
         .seed = (unsigned)effect->pulse_generation,
       };
-      /* The white source art remains readable when the hottest points sit a
-       * few pixels into its wake instead of directly bleaching the crescent. */
-      spill_x = 8.0f - hx * 5.0f;
-      spill_y = 15.0f - hy * 5.0f;
-      body_x = 8.0f - hx * 3.0f;
-      body_y = 15.0f - hy * 3.0f;
+      /* Anchor the restrained halo to the decoded OAM rectangle. Only the
+       * outer spill leans slightly into the wake; the luminous core remains
+       * on the painted crescent. */
+      spill_x = mid_x - hx * 2.0f;
+      spill_y = mid_y - hy * 2.0f;
+      body_x = mid_x;
+      body_y = mid_y;
       break;
     }
     case kActionEffect_LightningTrap:
@@ -1763,6 +1795,7 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
       batch->vertices, kActionSceneEffectRenderMaxVertices,
       batch->indices, kActionSceneEffectRenderMaxIndices);
   unsigned lightning_filaments = 0;
+  unsigned sword_streams = 0;
 
   for (uint8_t i = 0; i < frame->effect_count; i++) {
     const ActionEffectInstance *effect = &frame->effects[i];
@@ -1777,6 +1810,9 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
     if (effect->kind == kActionEffect_BloodpoolBossLightning &&
         effect->phase == kActionEffectPhase_BossLightningStrike &&
         ++lightning_filaments > kActionSceneEffectMaxLightningFilaments)
+      return false;
+    if (effect->kind == kActionEffect_SwordBeam &&
+        ++sword_streams > kActionSceneEffectMaxSwordStreams)
       return false;
 
     if (lighting_enabled &&

@@ -259,7 +259,7 @@ static ActionEffectInstance SceneEffect(uint8_t kind, int world_x) {
         (ActionEffectLocalRect){-30.0f, -83.0f, 8.0f, 21.0f};
   else if (kind == kActionEffect_SwordBeam)
     effect.geometry.data.rect =
-        (ActionEffectLocalRect){0.0f, -1.0f, 16.0f, 31.0f};
+        (ActionEffectLocalRect){32.0f, -33.0f, 48.0f, -1.0f};
   return effect;
 }
 
@@ -430,33 +430,93 @@ static void TestSwordBeamLightingTrailAndStars(void) {
       &frame, true, false, IdentityProjection, NULL, &lighting));
   CHECK(lighting.vertex_count == 2 * kActionEffectGlowVertices + 8);
   CHECK(lighting.index_count == 2 * kActionEffectGlowIndices + 12);
-  /* Spill/body hot points sit just behind the authored (8,15) crescent
-   * centre. The two trail layers taper 42 and 28 pixels opposite velocity. */
-  CHECK(fabsf(lighting.vertices[0].position.x - 303.0f) < 0.01f);
-  CHECK(fabsf(lighting.vertices[0].position.y - 135.0f) < 0.01f);
+  /* Run 20260810-184935 proves the normal state-$13 crescent centre is local
+   * (40,-17), not (8,15). Keep the core there and lean only the spill 2px
+   * into the wake. Both haze layers meet the decoded 32px crescent height,
+   * then taper over their 80px and 56px lengths. */
+  CHECK(fabsf(lighting.vertices[0].position.x - 338.0f) < 0.01f);
+  CHECK(fabsf(lighting.vertices[0].position.y - 103.0f) < 0.01f);
   CHECK(fabsf(lighting.vertices[kActionEffectGlowVertices].position.x -
-              305.0f) < 0.01f);
+              340.0f) < 0.01f);
   const int trail = 2 * kActionEffectGlowVertices;
-  CHECK(fabsf(lighting.vertices[trail + 2].position.x - 266.0f) < 0.01f);
+  CHECK(fabsf(lighting.vertices[trail + 2].position.x - 260.0f) < 0.01f);
   CHECK(lighting.vertices[trail + 2].color.a == 0.0f);
-  CHECK(fabsf(lighting.vertices[trail + 6].position.x - 280.0f) < 0.01f);
+  CHECK(fabsf(lighting.vertices[trail + 6].position.x - 284.0f) < 0.01f);
+  CHECK(fabsf(lighting.vertices[trail].position.y -
+              lighting.vertices[trail + 1].position.y) > 30.0f);
 
   CHECK(ActionSceneEffectRender_Build(
       &frame, false, true, IdentityProjection, NULL, &particles));
-  CHECK(particles.vertex_count == 4 * 8);
-  CHECK(particles.index_count == 4 * 12);
+  CHECK(particles.vertex_count == kActionSceneEffectSwordStarCount * 8);
+  CHECK(particles.index_count == kActionSceneEffectSwordStarCount * 12);
+  float nearest_star_x = -10000.0f, farthest_star_x = 10000.0f;
+  float near_min_y = 10000.0f, near_max_y = -10000.0f;
+  int near_star_count = 0;
+  for (int i = 0; i < kActionSceneEffectSwordStarCount; i++) {
+    const int base = i * 8;
+    const float star_x =
+        (particles.vertices[base].position.x +
+         particles.vertices[base + 2].position.x) * 0.5f;
+    const float star_y =
+        (particles.vertices[base].position.y +
+         particles.vertices[base + 2].position.y) * 0.5f;
+    CHECK(star_x < 340.0f);  /* every glint is behind the rightward crescent */
+    if (star_x > nearest_star_x) nearest_star_x = star_x;
+    if (star_x < farthest_star_x) farthest_star_x = star_x;
+    if (star_x > 320.0f) {
+      near_star_count++;
+      if (star_y < near_min_y) near_min_y = star_y;
+      if (star_y > near_max_y) near_max_y = star_y;
+    }
+  }
+  CHECK(nearest_star_x - farthest_star_x > 70.0f);
+  CHECK(near_star_count >= 6);
+  CHECK(near_max_y - near_min_y > 24.0f);
   CHECK(ActionSceneEffectRender_Build(
       &frame, false, true, IdentityProjection, NULL, &repeat));
   CHECK(memcmp(&particles, &repeat, sizeof(particles)) == 0);
+  frame.effects[0].pulse_ticks++;
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, false, true, IdentityProjection, NULL, &repeat));
+  CHECK(memcmp(&particles, &repeat, sizeof(particles)) != 0);
+  bool materialization_changed = false;
+  for (int i = 0; i < kActionSceneEffectSwordStarCount; i++) {
+    const int base = i * 8;
+    const float before_x =
+        (particles.vertices[base].position.x +
+         particles.vertices[base + 2].position.x) * 0.5f;
+    const float before_y =
+        (particles.vertices[base].position.y +
+         particles.vertices[base + 2].position.y) * 0.5f;
+    const float after_x =
+        (repeat.vertices[base].position.x +
+         repeat.vertices[base + 2].position.x) * 0.5f;
+    const float after_y =
+        (repeat.vertices[base].position.y +
+         repeat.vertices[base + 2].position.y) * 0.5f;
+    CHECK(fabsf(before_x - after_x) < 0.01f);
+    CHECK(fabsf(before_y - after_y) < 0.01f);
+    if (fabsf(particles.vertices[base].color.a -
+              repeat.vertices[base].color.a) > 0.001f)
+      materialization_changed = true;
+  }
+  CHECK(materialization_changed);
+  frame.effects[0].pulse_ticks--;
 
   frame.effects[0].velocity_x = -8;
   frame.effects[0].flags |= kActionEffectFlag_FlipHorizontal;
+  frame.effects[0].geometry.data.rect =
+      (ActionEffectLocalRect){-48.0f, -33.0f, -32.0f, -1.0f};
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &repeat));
-  CHECK(fabsf(repeat.vertices[0].position.x - 313.0f) < 0.01f);
-  CHECK(fabsf(repeat.vertices[trail + 2].position.x - 350.0f) < 0.01f);
+  CHECK(fabsf(repeat.vertices[0].position.x - 262.0f) < 0.01f);
+  CHECK(fabsf(repeat.vertices[trail + 2].position.x - 340.0f) < 0.01f);
+  CHECK(fabsf(repeat.vertices[trail + 6].position.x - 316.0f) < 0.01f);
 
   frame.effects[0].visual = 0x31;
+  frame.effects[0].flags &= ~kActionEffectFlag_FlipHorizontal;
+  frame.effects[0].geometry.data.rect =
+      (ActionEffectLocalRect){40.0f, -9.0f, 56.0f, 23.0f};
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &repeat));
   CHECK(repeat.vertex_count > 0);
@@ -476,7 +536,8 @@ static void TestSceneCapacityAndMalformedInput(void) {
   frame.effects[0].visual = 0;
   frame.effects[0].geometry.data.rect =
       (ActionEffectLocalRect){-6.0f, -83.0f, 11.0f, 117.0f};
-  for (unsigned i = 1; i < kActionSceneEffectMaxInstances; i++)
+  frame.effects[1] = SceneEffect(kActionEffect_SwordBeam, 120);
+  for (unsigned i = 2; i < kActionSceneEffectMaxInstances; i++)
     frame.effects[i] = SceneEffect(kActionEffect_LightningTrap, 100 + i * 20);
   ActionSceneEffectRenderBatch batch;
   CHECK(ActionSceneEffectRender_Build(
@@ -487,13 +548,20 @@ static void TestSceneCapacityAndMalformedInput(void) {
   /* A second active boss filament cannot arise from the mapped one-boss
    * lifecycle. Reject it as a capacity-contract violation without publishing
    * a partial batch instead of reserving 16 impossible ribbons on the stack. */
-  frame.effects[1] = SceneEffect(
-      kActionEffect_BloodpoolBossLightning, 120);
+  frame.effects[2] = SceneEffect(
+      kActionEffect_BloodpoolBossLightning, 140);
   CHECK(!ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &batch));
   CHECK(batch.vertex_count == 0);
   CHECK(batch.index_count == 0);
-  frame.effects[1] = SceneEffect(kActionEffect_LightningTrap, 120);
+  /* The expanded comet budget likewise belongs to the one player projectile,
+   * not to an arbitrary number of forged scene records. */
+  frame.effects[2] = SceneEffect(kActionEffect_SwordBeam, 140);
+  CHECK(!ActionSceneEffectRender_Build(
+      &frame, true, true, IdentityProjection, NULL, &batch));
+  CHECK(batch.vertex_count == 0);
+  CHECK(batch.index_count == 0);
+  frame.effects[2] = SceneEffect(kActionEffect_LightningTrap, 140);
 
   frame.overflow = 1;
   CHECK(ActionSceneEffectRender_Build(
