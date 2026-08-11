@@ -292,7 +292,8 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
    * Any flag added to ppu.h MUST be added here too or it is silently inert. */
   capture->flags = flags &
       (kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkObjColorMath |
-       kPpuOverlayFlag_MarkBgHalfAdd);
+       kPpuOverlayFlag_MarkBgHalfAdd |
+       kPpuOverlayFlag_ApplyBgFixedColorSubtract);
   capture->oamFirst = 0;
   capture->oamCount = 0;
   return true;
@@ -316,9 +317,10 @@ static inline void PpuResetLayerClamps(Ppu *ppu) {
   ppu->wsLayerClamp = 0;
   ppu->wsLayerMirror = 0;
   ppu->wsLayerRepeat = 0;
+  ppu->wsLayerNormalScroll = 0;
   ppu->wsPadCapturedToBudget = 0;
-  memset(ppu->wsRepeatY0, 0, sizeof(ppu->wsRepeatY0));
-  memset(ppu->wsRepeatY1, 0, sizeof(ppu->wsRepeatY1));
+  memset(ppu->wsBandFill, 0, sizeof(ppu->wsBandFill));
+  memset(ppu->wsBandMotion, 0, sizeof(ppu->wsBandMotion));
   memset(ppu->wsLayerExtentLeftDefault, 0xff,
          sizeof(ppu->wsLayerExtentLeftDefault));
   memset(ppu->wsLayerExtentRightDefault, 0xff,
@@ -489,14 +491,30 @@ void PpuSetWidescreenLayerRepeat(Ppu *ppu, uint8_t mask) {
   ppu->wsLayerRepeat = mask;
 }
 
+void PpuSetWidescreenLayerNormalScroll(Ppu *ppu, uint8_t mask) {
+  if (ppu) ppu->wsLayerNormalScroll = mask;
+}
+
+void PpuSetWidescreenLayerBand(Ppu *ppu, uint8_t layer, uint8_t y0,
+                               uint8_t y1, PpuWidescreenBandFill fill,
+                               PpuWidescreenMotion motion) {
+  if (!ppu || layer >= 4 || y0 >= y1 || y1 > kPpuYPixels ||
+      fill < kPpuWidescreenBandFill_Transparent ||
+      fill > kPpuWidescreenBandFill_RawWrap ||
+      motion < kPpuWidescreenMotion_FillRelative ||
+      motion > kPpuWidescreenMotion_NormalScroll)
+    return;
+  for (int y = y0; y < y1; y++) {
+    ppu->wsBandFill[layer][y] = (uint8_t)fill;
+    ppu->wsBandMotion[layer][y] = (uint8_t)motion;
+  }
+}
+
 void PpuSetWidescreenLayerRepeatBand(Ppu *ppu, uint8_t layer, uint8_t y0,
                                      uint8_t y1) {
-  // Repeat BG(layer+1)'s authentic rendered scanline into both margins only on
-  // [y0,y1). The draw policy gives this band precedence over whole-layer clamp.
-  if (layer < 4) {
-    ppu->wsRepeatY0[layer] = y0;
-    ppu->wsRepeatY1[layer] = y1;
-  }
+  PpuSetWidescreenLayerBand(
+      ppu, layer, y0, y1, kPpuWidescreenBandFill_Repeat,
+      kPpuWidescreenMotion_FillRelative);
 }
 
 void PpuSetWidescreenLayerExtent(Ppu *ppu, uint8_t layer,
@@ -724,11 +742,20 @@ static inline uint16 PpuLayerHorizontalExtent(const Ppu *ppu, uint layer,
                : ppu->wsLayerExtentLeft[layer][row];
 }
 
-static inline bool PpuLayerInRepeatBand(const Ppu *ppu, uint layer, int y) {
-  if (layer >= 4 || ppu->wsRepeatY1[layer] <= ppu->wsRepeatY0[layer])
-    return false;
-  int row = PpuLayerPolicyRow(y);
-  return row >= ppu->wsRepeatY0[layer] && row < ppu->wsRepeatY1[layer];
+static inline PpuWidescreenLayerPolicy PpuLayerPolicy(
+    const Ppu *ppu, uint layer, int render_line) {
+  return PpuResolveWidescreenLayerPolicy(
+      ppu, (uint8_t)layer, render_line - 1);
+}
+
+static inline bool PpuFillIsPadding(PpuWidescreenBandFill fill) {
+  return fill == kPpuWidescreenBandFill_Mirror ||
+      fill == kPpuWidescreenBandFill_Repeat;
+}
+
+static inline bool PpuFillIsAuthenticOnly(PpuWidescreenBandFill fill) {
+  return fill == kPpuWidescreenBandFill_Transparent ||
+      fill == kPpuWidescreenBandFill_Clamp || PpuFillIsPadding(fill);
 }
 
 static inline int PpuLimitLayerExtra(const Ppu *ppu, uint layer, int y,
@@ -764,13 +791,7 @@ static inline int PpuLayerExtra(Ppu *ppu, uint layer, int y, int extra,
     // Game-forced per-layer clamp (UI/dialog/bounded layers): keep this layer
     // in the authentic 256 so it never tiles wrapped/garbage columns into the
     // margins while the wide world layers beside it still extend.
-    if ((ppu->wsLayerClamp | ppu->wsLayerMirror | ppu->wsLayerRepeat) &
-        (1u << layer))
-      return 0;
-    // A repeat band is first rendered only in the authentic center, then its
-    // isolated scanline is merged into the margins by the 4bpp policy path.
-    if (PpuLayerInRepeatBand(ppu, layer, y))
-      return 0;
+    if (PpuFillIsAuthenticOnly(PpuLayerPolicy(ppu, layer, y).fill)) return 0;
     extra = PpuLimitLayerExtra(ppu, layer, y, extra, right);
   }
   if (layer != 2)
@@ -1356,16 +1377,16 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu,
 // temporary layer buffer is important: directly copying the live center would
 // also duplicate sprites and lower-priority BGs visible through transparent
 // pixels. Comparing isolated z/color words reproduces the normal per-layer
-// priority merge. `repeat` chooses cyclic continuation instead of reflection.
-// margin_left/margin_right bound the two synthesized padding runs. They are
+// priority merge. The resolved policy chooses cyclic continuation or
+// reflection. margin_left/margin_right bound the two synthesized padding runs.
 // normally the live per-side margin; a captured layer may pass the full budget
 // instead (see PpuSetWidescreenPadCapturedToBudget). The centre run is
 // unconditional and unaffected.
 static void PpuMergePaddedBackground(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
                                      const PpuPixelPrioBufs *layerbuf,
-                                     bool repeat,
+                                     uint layer,
+                                     const PpuWidescreenLayerPolicy *policy,
                                      int margin_left, int margin_right) {
-  (void)ppu;
   PpuZbufType *dst = dstbuf->data;
   const PpuZbufType *src = layerbuf->data;
   for (int x = 0; x < kPpuXPixels; x++) {
@@ -1375,7 +1396,10 @@ static void PpuMergePaddedBackground(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
   }
   for (int x = -margin_left; x < 0; x++) {
     int di = x + kPpuExtraLeftRight;
-    int sx = repeat ? kPpuXPixels + x : -x;
+    int sx = 0;
+    if (!PpuMapWidescreenLayerXWithPolicy(
+            ppu, layer, x, &sx, policy))
+      continue;
     int si = sx + kPpuExtraLeftRight;
     if (src[si] > dst[di])
       dst[di] = src[si];
@@ -1383,7 +1407,10 @@ static void PpuMergePaddedBackground(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
   for (int x = kPpuXPixels;
        x < kPpuXPixels + margin_right; x++) {
     int di = x + kPpuExtraLeftRight;
-    int sx = repeat ? x - kPpuXPixels : kPpuXPixels * 2 - 2 - x;
+    int sx = 0;
+    if (!PpuMapWidescreenLayerXWithPolicy(
+            ppu, layer, x, &sx, policy))
+      continue;
     int si = sx + kPpuExtraLeftRight;
     if (src[si] > dst[di])
       dst[di] = src[si];
@@ -1395,9 +1422,8 @@ static void PpuDrawBackground_4bpp_policy(Ppu *ppu,
                                           int y, bool sub,
                                           uint layer, PpuZbufType zhi,
                                           PpuZbufType zlo, bool mosaic) {
-  uint8_t padding = ppu->wsLayerMirror | ppu->wsLayerRepeat;
-  bool repeat_band = PpuLayerInRepeatBand(ppu, layer, y);
-  if (!(padding & (1u << layer)) && !repeat_band) {
+  const PpuWidescreenLayerPolicy policy = PpuLayerPolicy(ppu, layer, y);
+  if (!PpuFillIsPadding(policy.fill)) {
     if (mosaic)
       PpuDrawBackground_4bpp_mosaic(ppu, dstbuf, y, sub,
                                     layer, zhi, zlo);
@@ -1432,8 +1458,7 @@ static void PpuDrawBackground_4bpp_policy(Ppu *ppu,
   margin_left = PpuLimitLayerExtra(ppu, layer, y, margin_left, false);
   margin_right = PpuLimitLayerExtra(ppu, layer, y, margin_right, true);
   PpuMergePaddedBackground(ppu, dstbuf, &layerbuf,
-                           repeat_band ||
-                           (ppu->wsLayerRepeat & (1u << layer)) != 0,
+                           layer, &policy,
                            margin_left, margin_right);
 }
 
@@ -1722,6 +1747,23 @@ static uint32 PpuCapturedOverlayColor(
     Ppu *ppu, PpuOverlaySource source,
     const PpuOverlayCapture *capture, PpuZbufType pixel) {
   uint32 color = PpuOverlayColor(ppu, pixel);
+  /* Fixed-colour subtraction is not a compositing operation: apply it to the
+   * isolated BG in the same 5-bit component space as the authentic scanout,
+   * then expand through the live master-brightness table. The diorama policy
+   * only sets this flag for cgwsel=$00, full subtract, no-half states. */
+  if (color && source != kPpuOverlaySource_Obj &&
+      (capture->flags & kPpuOverlayFlag_ApplyBgFixedColorSubtract)) {
+    uint32 raw = ppu->cgram[pixel & 0xff];
+    uint32 fixed = ppu->fixedColor;
+    uint32 r = raw & 0x1f, g = (raw >> 5) & 0x1f, b = (raw >> 10) & 0x1f;
+    uint32 fr = fixed & 0x1f, fg = (fixed >> 5) & 0x1f;
+    uint32 fb = (fixed >> 10) & 0x1f;
+    r = r >= fr ? r - fr : 0;
+    g = g >= fg ? g - fg : 0;
+    b = b >= fb ? b - fb : 0;
+    color = 0xff000000u | (uint32)ppu->brightnessMult[r] << 16 |
+        (uint32)ppu->brightnessMult[g] << 8 | ppu->brightnessMult[b];
+  }
   /* OBJ color math is selected by CGADSUB's OBJ bit only for palettes 4-7.
    * SPRITE_PRIO_TO_PRIO encodes those pixels with layer id 4; palettes 0-3
    * use id 6 so the compositor deliberately skips the OBJ math bit. */

@@ -104,6 +104,11 @@ bool ActRaiserActionBg_BuildPlan(
 bool ActRaiserActionBg_ApplyPlanExtents(
     const ActionBgPlan *plan, struct Ppu *ppu);
 
+/* Production provider gate shared with presentation-aware camera policy.
+ * Default-on; AR_ACTION_BG_HLE=0 is the exact native control. Keeping the
+ * environment decision here prevents related HLE seams from drifting. */
+bool ActRaiserActionBg_HleEnabled(void);
+
 /* Default-on BH7 renderer adapter. Unless `AR_ACTION_BG_HLE=0`, publish and
  * bind every plan layer whose source is a finite world map. A zero-mismatch,
  * zero-outside comparison against the exact live native viewport is required

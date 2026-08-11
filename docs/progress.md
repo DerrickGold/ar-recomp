@@ -29,8 +29,10 @@ confirmed fully playable with widescreen enabled. Across those passes:
 - decorative 256px BG2 layers use stage-appropriate presentation policy:
   cyclic repeat for Aitos and Northwall cloud/snow raster effects, explicit
   clamp/raw exceptions, and independent extents that keep Bloodpool's unique
-  upper art bounded (`0201` tuned to 76/100, `0202` authentic-width) while its
-  water continues;
+  upper art bounded (`0201` tuned to 76/100, `0202` and unbanded `0206` to
+  68/68, and unbanded `0207` to 92/92); boss room `0208` mirrors BG1 within a
+  16/16 playfield cap and holds BG2 to 0/0; `0201` water remains available while
+  `0202` water inherits its backdrop span;
 - the handler-coverage batch restored the inert objects discovered by the wider
   playthroughs. Those were pre-existing recompilation gaps, not widescreen
   regressions.
@@ -40,7 +42,9 @@ user-verified end-to-end on 2026-07-14, playing through every boss to the end
 (see the region table). Finite action-world side margins now clamp from the
 role-selected playfield camera/dimensions. The BH7-accepted background HLE is
 now default-on and supplies finite BG1/BG2 tile words across eligible authentic
-world layers and side/top synthetic margins after an exact live-ring preflight.
+world layers and side/top synthetic margins after phase, source, bounds, and
+live-ring preflight. Exact ring words permit full-layer ownership; an in-world
+contradiction retains the native authentic centre plus finite provider margins.
 Decorative layers remain native mirror/repeat/clamp sources. BH6 now carries
 that same per-layer/per-band
 plan through the post-scanout `FrameSlot` handoff: Bloodpool and Death Heim
@@ -66,7 +70,7 @@ follows the game's internal order (`$18`/`$19` in WRAM — see `docs/SEAMS.md`
 |---|---|---|
 | 1 — Fillmore | ✅ Full widescreen playthrough; sprites and activation clean (2026-07-12) | ✅ Full widescreen playthrough; fast vertical fall/row streaming confirmed repaired (2026-07-12) |
 | 2 — Bloodpool | ✅ Full widescreen playthrough; narrow BG2 policy clean (2026-07-12); 2026-08-10 moon/cloud bound + wide water/playfield matrix accepted | ✅ Full widescreen playthrough; enemies, moving platforms, and boss confirmed (2026-07-12); 2026-08-10 shares the accepted moon/cloud/water extent split |
-| 3 — Kasandora | ✅ Full widescreen playthrough; generated runtime handlers and rendering confirmed (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
+| 3 — Kasandora | 🟡 Full widescreen playthrough and generated handlers confirmed (2026-07-12); 2026-08-10 `0301/0302` world-anchored Mirror-cloud/Repeat-dune policy is implemented from live captures, the generic tuner/runtime supports four fill/motion bands per BG, and visual acceptance is pending | ✅ Full widescreen playthrough (2026-07-12) |
 | 4 — Aitos | ✅ Full widescreen playthrough; cyclic BG2 cloud padding removes the parallax seam (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
 | 5 — Marahna | ✅ Full widescreen playthrough (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
 | 6 — Northwall | ✅ Full widescreen playthrough; cyclic BG2 cloud/snow padding confirmed across the affected maps (2026-07-12) | ✅ Full widescreen playthrough and boss completion (2026-07-12) |
@@ -83,22 +87,26 @@ bosses at `$19 = $0347+2` (progress counter `$0347 = beaten map - 1`, written by
 final boss (sets `$0334=1`). The all-six-regions-complete path
 (`$00:A343` checking `$7F:6B18`) is the separate post-rush exit.
 
-### Remaining action-mode completion gate
+### Residual action-mode completion gate
 
-The broad region `$01-$06` matrix is complete. Remaining action work is:
+The broad region `$01-$06` matrix is complete. Residual action work is:
 
-1. Map the native camera clamps and add widescreen-aware left/right limits so
-   finite background edges never enter the visible margins. Exercise at least
-   one wide streamed BG, one 256px padded BG2, and one vertical stage.
+1. ~~Map the native camera clamps and add widescreen-aware left/right limits so
+   finite background edges never enter the visible margins.~~ Done 2026-08-10
+   at the canonical `$02:B091` seam, with per-axis native fallback. Wide
+   streamed `0202`, its 256px BG2, vertical Diorama-32, 4:3/Raw controls, and
+   undersized `0703` all pass with zero background-HLE mismatches. The shared
+   plan/provider gate also keeps authored hub `0701` and the explicit
+   provider-off control on native camera behavior.
 2. ~~Diagnose the `0701` crash after its first boss teleport~~ — done 2026-07-14
    (yield-helper continuations; docs/bug-ledger.md #20), and the full rush
    through the final boss (`$19=8`) is user-verified. There is no ordinary
    `0702`. Optional residue: the all-six-regions exit variant (`$00:A343` over
    `$7F:6B18`) fires only on a save with every kingdom's act 2 complete —
    exercise it during a full-game playthrough.
-3. Re-run representative `$01-$06` boundaries with the feature-disable gates
-   after the camera change. Add a lifted-limit A/B only after `NoSpriteLimits`
-   is actually forwarded to the PPU render flags.
+3. Representative corrected/4:3/Raw and undersized-room camera gates pass after
+   the camera change. A lifted-limit A/B remains optional only after
+   `NoSpriteLimits` is actually forwarded to the PPU render flags.
 
 For Death Heim or any future anomaly:
 
@@ -247,6 +255,7 @@ Current widescreen work/status is:
 | Save / load (in-game state) | ✅ | Checksum-gated continue path confirmed (`AR_SAVECHECK`) |
 | Action-stage combat | ✅ | Every ordinary action level plus the complete Death Heim boss rush, final boss, and return transition is fully playable. Open `$00:B8AB` spell-projectile garbage variant (`DEBUG.md` #19) remains a separate unconverted-code edge case. |
 | Magic casting | 🟡 | WORKS as of 2026-07-07 (was dead — blocked by our own knockback cheat, `DEBUG.md` #18). 2026-08-02: all four spells' controller/slot lifecycles, animation banks, timing, transforms, and composition geometry are statically mapped in `effects-hook-investigation.md`. 2026-08-03: host-polish lighting/particles land, initially Magical Fire only — and only after a 16-bit read of the 8-bit animation-bank field was found to have rejected every spell since the feature was written (bug-ledger.md §32). 2026-08-05: generalised to a DATA-DRIVEN rule table (controller kind -> slots/roles/phases) covering all four spells, with per-part stage styling, overlap clustering, heading-oriented bodies, and three ember modes (rise/trail/burst). Fire and Stardust are MEASURED against live WRAM and confirmed rendering; Aura and Light are still TRANSCRIBED from the static map and unproven — an unrecognised cohort slot is reported to `[action-fx census]` rather than rendered on a guess, so one cast of each corrects the table. Test harness is Cheats > Cycle magic spell (default `M`). Known and accepted: Stardust's right-edge launch is born one pixel outside the authentic window and as low as the player's line, which widescreen makes visible (bug-ledger.md §33). |
+| Action scene lighting / particles | 🟡 | 2026-08-10: Bloodpool BG1 torch pair `$47/$4F`, enemy fireballs, vertical lightning traps, the map-$08 boss lightning attack, and the global player sword beam publish a separate read-only scene-effect frame and render in both flat and Diorama action presentation. Actor matching uses measured map/handler/resume/source/state plus exact live visual/composition pairs; run `20260810-180202` and a complete `$7E:5000` decode identify six boss strikes (vertical/diagonal × long/medium/short), visual `$20` as their blank half-cycle, and a separate state-`$09` floor impact. Run `20260810-175403` identifies both sword-beam cycles through handler `$9D1C`, player backlink/source continuity, states `$13/$14`, and visuals/compositions `$30/$99E8` or `$31/$9A17`; decoded six-part geometry drives its cool two-tier light, tapered light wake, and four-star trail in either travel direction. The boss child also requires a validated live `$BDFF` parent backlink. Torch matching uses the shared bounded BG map view across all Bloodpool rooms, not a room allowlist. Portable SDL additive geometry follows BG1 or OBJ projection and needs no backend-specific shader. Follow-up fixes carry the Diorama OBJ-apron texture origin, correct the fireball pairs, accelerate synchronized torch accents, cover the full 176px trap shaft, and make both boss filaments follow the exact authored OAM row centroids (up to 24 segments), mirrored orientation, and one-pixel emitter Y bias. Deterministic capture/render/capacity/slot-reuse/projection regressions pass; fresh visual acceptance remains for Bloodpool maps `$03/$05/$08` and the sword-beam run. |
 | Sim-mode town simulation | 🟡 | Fillmore ✅ end-to-end; Bloodpool entry/lightning partial; full Bloodpool plus Kasandora/Aitos/Marahna/Northwall baselines pending. Reward web and multi-actor cutscenes fixed 2026-07-07 (`DEBUG.md` #18b/§7.17). |
 | Scroll/MP persistence | ✅ | `$0295` persistent / `$21` working-copy model mapped + grant verified across modes (2026-07-07) |
 | Audio (music/SPC) | 🟡 | SPC upload handshake and boss-music playback fixed; a narrower "voice/SFX key-on" gap was reported and its current status isn't confirmed — verify before marking ✅ |
@@ -261,7 +270,7 @@ Current widescreen work/status is:
 | Bridge structure-cap fix (sim) | 🟡 | 2026-07-17: structure-record system fully mapped + SRAM-validated (SEAMS town §7, save-format §3.4: 128 × 4-byte records per town, allocator `$03:9D9F`, census `$03:C07F`, miracle damage `$03:B274`, bridge immunity row `$A435`; record format confirmed against real saves incl. both bridge orientation variants). v1 slot-reuse/lightning designs were withdrawn after they erased bridges on reconstruction. v2 uses a validated/deduplicated completed-bridge sidecar: `$9D9F` migrates, `$C07E` restores support, `$9CFB` restores `$E1/$E2` marks, and `$89F0` decodes the native rebuild program to restore the visible metatile after `$9D4D`. Sidecar-only checksum changes are shadowed until a normal ROM save transaction, with a persistence regression test. Marks-only visual capture correctly failed (black bridge), establishing the second render seam; generated build + replacement screenshot are the remaining acceptance gate. |
 | Build / platform targets | 🟡 | macOS (arm64, primary development platform) and Steam Deck are built and played on regularly — both confirmed working end to end from the distribution bundle. All seven bundles (macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64/arm64, steam-deck) cross-build from one machine because the Go module is CGO-free, but **Windows and generic Linux have not been run end to end by this project** — no CI, no `.vcxproj`, no verified launch. Treat those bundles as untested. See `docs/BUILD_TOOLING.md` for the packaging design and the open signing/notarisation gaps. |
 | Debug tooling | ✅ | 2026-07-07 toolkit: `dis65`/`romxref`/`wram`/`resolve_miss`/`cycle.sh` — anomaly capture → auto-triage → proposed cfg patch loop (`DEBUG.md` §1) |
-| Action widescreen BG/sprites | 🟢 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, finite camera edges, sprites, activation, narrow-BG2 edge policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. 2026-08-09 `SPEC-bg-hle.md`: bounded `ActionBgWorld`, the 49-map `ActionBgPlan`, full-world provider, and exact diorama handoff are implemented. The provider is default-on with exact `AR_ACTION_BG_HLE=0` native fallback. After exact phase/tile/bounds preflight, eligible authentic and margin pixels use provider tile words while live VRAM/CGRAM, priority, windows, transparency, mosaic, color math, and scroll effects remain native PPU stages. Five paired 12-entry presentation matrices, long Fillmore Full/Raw/diorama-32 runs, a natural Death Heim transition soak, lifecycle/rebind/savestate/geometry gates, and a real compositor A/B pass; every authentic center and state artifact is exact. Wide Full `0301` intentionally corrects 30 synthetic-margin pixels at BG2's finite edge. Maximum-span cost remains 0.067 ms/frame, below the 0.10 ms budget. BH8 removed the duplicate ring repair and unused clamp-band/margin-source-gap PPU prototypes; three final release matrices are 612/612 byte-exact. 2026-08-10 adds semantic playfield/scene/backdrop roles plus independent per-layer and row-band extents. Bloodpool's unique moon/cloud art is independently bounded (`0201` live-tuned to 76/100, `0202` authentic-width) while BG1 and water remain wide; the initial all-0/0 policy accepted all 204 Wide Full artifacts with only 4,074 side-margin pixels changed, and complete 4:3/Raw/Diorama-32 plus Death Heim rematch/final-arena gates pass. Native streamers/ring and live decorative paths remain as fallback/oracle infrastructure. |
+| Action widescreen BG/sprites | 🟢 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, finite camera edges, sprites, activation, narrow-BG2 edge policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. 2026-08-09 `SPEC-bg-hle.md`: bounded `ActionBgWorld`, the 49-map `ActionBgPlan`, full-world provider, and exact diorama handoff are implemented. The provider is default-on with exact `AR_ACTION_BG_HLE=0` native fallback. After phase/source/bounds preflight, an exact authentic ring gives the provider the whole layer; an in-world ring contradiction retains a native authentic centre while the provider remains active for finite margins. Live VRAM/CGRAM, priority, windows, transparency, mosaic, color math, and scroll effects remain native PPU stages. Five paired 12-entry presentation matrices, long Fillmore Full/Raw/diorama-32 runs, a natural Death Heim transition soak, lifecycle/rebind/savestate/geometry gates, and a real compositor A/B pass; every authentic center and state artifact is exact. Wide Full `0301` intentionally corrects 30 synthetic-margin pixels at BG2's finite edge. Maximum-span cost remains 0.067 ms/frame, below the accepted 0.10 ms budget. BH8 removed the duplicate ring repair and unused clamp-band/margin-source-gap PPU prototypes; three final release matrices are 612/612 byte-exact. 2026-08-10 adds semantic playfield/scene/backdrop roles plus independent per-layer and row-band extents. Bloodpool's unique moon/cloud art is independently bounded (`0201` live-tuned to 76/100, `0202` and unbanded `0206` to 68/68, unbanded `0207` to 92/92); `0201` water remains wide while `0202` water inherits its backdrop extent. Boss room `0208` retains its world-backed BG1 but mirrors only 16/16 pixels beyond the authentic view, keeps viewport BG2 at 0/0, and caps the fitted camera to that actual playfield span. Source ownership and synthetic edge fill are now independent, so world+Mirror binds without a false Clamp fallback. The initial all-0/0 policy accepted all 204 Wide Full artifacts with only 4,074 side-margin pixels changed, and complete 4:3/Raw/Diorama-32 plus Death Heim rematch/final-arena gates pass. Run `20260810-172649` then exposed two boundary regressions: eight stale words on a newly exposed BG1 row triggered an atomic fallback, and a blocked `$7C=-120` request drove zero-input walking at the new left clamp. Snapshot comparison confirmed an 8px visibility versus 16px strip-publication cadence seam, not a transition-time ROM writer. Margin-only provider recovery and effective camera-delta reconciliation are implemented and regression-tested; a direct replay remains the visual acceptance gate. Native streamers/ring and live decorative paths remain as fallback/oracle infrastructure. |
 
 ## Codebase metrics (objective, automated — refreshed 2026-07-12)
 

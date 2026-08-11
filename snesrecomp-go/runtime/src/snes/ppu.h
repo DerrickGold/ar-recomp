@@ -177,7 +177,39 @@ enum {
    * frame BG1 is on the subscreen and BG2 is not, so only BG2 is marked.
    * Extraction-only, like the OBJ flag: authentic scanout is untouched. */
   kPpuOverlayFlag_MarkBgHalfAdd = 4,
+  /* Bake an eligible BG's fixed-colour subtraction into its captured pixels.
+   * Unlike half-add, subtraction cannot be represented by host alpha: it must
+   * happen in the PPU's 5-bit component space before brightness expansion.
+   * The caller admits only full, fixed-addend subtraction with no colour
+   * window; authentic scanout is still untouched. */
+  kPpuOverlayFlag_ApplyBgFixedColorSubtract = 8,
 };
+
+/* Per-row widescreen padding policy. Inherit selects the whole-layer mask;
+ * the remaining values intentionally mirror the host action-background edge
+ * vocabulary without making the generic PPU depend on that game module. */
+typedef enum PpuWidescreenBandFill {
+  kPpuWidescreenBandFill_Inherit = 0,
+  kPpuWidescreenBandFill_Transparent,
+  kPpuWidescreenBandFill_LiveWorld,
+  kPpuWidescreenBandFill_Clamp,
+  kPpuWidescreenBandFill_Mirror,
+  kPpuWidescreenBandFill_Repeat,
+  kPpuWidescreenBandFill_RawWrap,
+} PpuWidescreenBandFill;
+
+typedef enum PpuWidescreenMotion {
+  /* Historical behavior: a reflected scanline also reflects apparent motion. */
+  kPpuWidescreenMotion_FillRelative = 0,
+  /* Retain the authentic layer's apparent horizontal scroll direction. */
+  kPpuWidescreenMotion_NormalScroll,
+} PpuWidescreenMotion;
+
+typedef struct PpuWidescreenLayerPolicy {
+  PpuWidescreenBandFill fill;
+  PpuWidescreenMotion motion;
+  bool band_override;
+} PpuWidescreenLayerPolicy;
 
 /* Mode-7 canvas-space texture override (per-frame game policy, cleared with
  * the captures). While active, main-screen Mode-7 BG1 pixels whose canvas
@@ -387,12 +419,12 @@ struct Ppu {
   // rendered 256px scanline into the margins. Unlike reflection, this keeps
   // raster/HDMA parallax moving in the same direction across the seam.
   uint8_t wsLayerRepeat;
-  // Per-layer cyclic-repeat BAND (see PpuSetWidescreenLayerRepeatBand): on
-  // authentic rows [y0,y1), repeat the rendered scanline into both margins.
-  // A band with y0=0 or y1=224 also owns that adjacent synthetic vertical
-  // margin. This takes precedence over a whole-layer clamp on those rows,
-  // allowing animated/raster content to share a BG with bounded scenery.
-  uint8_t wsRepeatY0[4], wsRepeatY1[4];
+  // Whole-layer motion phase plus independently authored per-row fill/motion.
+  // A zero row fill inherits the masks above. Synthetic rows inherit the
+  // nearest authentic edge row through PpuLayerPolicyRow.
+  uint8_t wsLayerNormalScroll;
+  uint8_t wsBandFill[4][kPpuYPixels];
+  uint8_t wsBandMotion[4][kPpuYPixels];
   // Independent presentation caps for BG1-BG4. Horizontal caps are resolved
   // per authentic scanline so mixed-content row bands can differ. Synthetic
   // rows inherit the nearest authentic edge row, so edge-anchored bands retain
@@ -458,6 +490,88 @@ struct Ppu {
 
 
 };
+
+/* Resolve one row through the exact whole-layer/band padding policy used by
+ * the renderer. screen_y is authentic-screen based: 0..223 is the center and
+ * synthetic rows inherit the nearest edge. Kept inline because the scanline
+ * renderer queries it in its hot path and diagnostics must share the same
+ * implementation rather than copy its precedence rules. */
+static inline PpuWidescreenLayerPolicy PpuResolveWidescreenLayerPolicy(
+    const Ppu *ppu, uint8_t layer, int screen_y) {
+  PpuWidescreenLayerPolicy policy = {
+    .fill = kPpuWidescreenBandFill_RawWrap,
+    .motion = kPpuWidescreenMotion_FillRelative,
+  };
+  if (!ppu || layer >= 4) return policy;
+  const int row = screen_y < 0 ? 0
+      : screen_y >= kPpuYPixels ? kPpuYPixels - 1 : screen_y;
+  const uint8_t row_fill = ppu->wsBandFill[layer][row];
+  if (row_fill) {
+    policy.fill = (PpuWidescreenBandFill)row_fill;
+    policy.motion = (PpuWidescreenMotion)ppu->wsBandMotion[layer][row];
+    policy.band_override = true;
+    return policy;
+  }
+  const uint8_t bit = (uint8_t)(1u << layer);
+  /* Synthesized padding wins over Clamp; Repeat wins over Mirror. */
+  if (ppu->wsLayerRepeat & bit)
+    policy.fill = kPpuWidescreenBandFill_Repeat;
+  else if (ppu->wsLayerMirror & bit)
+    policy.fill = kPpuWidescreenBandFill_Mirror;
+  else if (ppu->wsLayerClamp & bit)
+    policy.fill = kPpuWidescreenBandFill_Clamp;
+  if (ppu->wsLayerNormalScroll & bit)
+    policy.motion = kPpuWidescreenMotion_NormalScroll;
+  return policy;
+}
+
+static inline bool PpuMapWidescreenLayerXWithPolicy(
+    const Ppu *ppu, uint8_t layer, int screen_x, int *source_x,
+    const PpuWidescreenLayerPolicy *policy) {
+  if (!ppu || layer >= 4 || !source_x || !policy) return false;
+  if (screen_x >= 0 && screen_x < kPpuXPixels) {
+    *source_x = screen_x;
+    return true;
+  }
+  switch (policy->fill) {
+    case kPpuWidescreenBandFill_Mirror:
+      *source_x = screen_x < 0
+          ? -screen_x : kPpuXPixels * 2 - 2 - screen_x;
+      if (policy->motion == kPpuWidescreenMotion_NormalScroll) {
+        *source_x = (*source_x -
+            2 * (int)(ppu->hScroll[layer] & 0xff)) & 0xff;
+      }
+      return *source_x >= 0 && *source_x < kPpuXPixels;
+    case kPpuWidescreenBandFill_Repeat:
+      *source_x = screen_x < 0
+          ? kPpuXPixels + screen_x : screen_x - kPpuXPixels;
+      return *source_x >= 0 && *source_x < kPpuXPixels;
+    case kPpuWidescreenBandFill_Transparent:
+    case kPpuWidescreenBandFill_Clamp:
+      return false;
+    case kPpuWidescreenBandFill_LiveWorld:
+    case kPpuWidescreenBandFill_RawWrap:
+    case kPpuWidescreenBandFill_Inherit:
+    default:
+      *source_x = screen_x;
+      return true;
+  }
+}
+
+/* Map a displayed X through that resolved policy. Authentic and raw/live
+ * coordinates map directly; Clamp/Transparent synthetic coordinates return
+ * false. This is the shared source-inspection seam for renderer and tooling. */
+static inline bool PpuMapWidescreenLayerX(
+    const Ppu *ppu, uint8_t layer, int screen_y, int screen_x,
+    int *source_x, PpuWidescreenLayerPolicy *out_policy) {
+  if (out_policy) *out_policy = (PpuWidescreenLayerPolicy){ 0 };
+  if (!ppu || layer >= 4 || !source_x) return false;
+  const PpuWidescreenLayerPolicy policy =
+      PpuResolveWidescreenLayerPolicy(ppu, layer, screen_y);
+  if (out_policy) *out_policy = policy;
+  return PpuMapWidescreenLayerXWithPolicy(
+      ppu, layer, screen_x, source_x, &policy);
+}
 
 #define SPRITE_PRIO_TO_PRIO(prio, level6) (((prio) * 4 + 2) * 16 + 4 + (level6 ? 2 : 0))
 #define SPRITE_PRIO_TO_PRIO_HI(prio) ((prio) * 4 + 2)
@@ -807,6 +921,14 @@ void PpuSetWidescreenLayerMirror(Ppu *ppu, uint8_t mask);
 // unsupported layers remain authentically clamped. Re-apply per frame. A
 // repeat bit takes precedence if the same layer is also marked for mirroring.
 void PpuSetWidescreenLayerRepeat(Ppu *ppu, uint8_t mask);
+void PpuSetWidescreenLayerNormalScroll(Ppu *ppu, uint8_t mask);
+
+// Override one layer's fill and motion on authentic rows [y0,y1). Multiple
+// non-overlapping calls may be made per layer each frame. The caller owns
+// overlap validation; later calls deterministically replace earlier rows.
+void PpuSetWidescreenLayerBand(Ppu *ppu, uint8_t layer, uint8_t y0,
+                               uint8_t y1, PpuWidescreenBandFill fill,
+                               PpuWidescreenMotion motion);
 
 // Widescreen: when enabled, a layer whose margins are SYNTHESIZED (mirror or
 // repeat padding, not fetched from tilemap) pads a CAPTURED layer buffer out to
@@ -826,13 +948,7 @@ void PpuSetWidescreenLayerRepeat(Ppu *ppu, uint8_t mask);
 // Re-apply per frame: the extra-space setters reset it.
 void PpuSetWidescreenPadCapturedToBudget(Ppu *ppu, uint8_t enabled);
 
-// Cyclically repeat BG(layer+1)'s authentic rendered scanline into the margins
-// on authentic rows [y0,y1) only. A band with y0=0 or y1=224 also
-// applies throughout that adjacent synthetic vertical margin. This is the
-// banded form of PpuSetWidescreenLayerRepeat: it preserves per-line scroll,
-// tile animation, transparency, priority, and color math, and takes precedence
-// over a whole-layer clamp for the selected rows. Currently supported by the
-// Mode-1 4bpp BG1/BG2 path. y1<=y0 disables. Re-apply per frame.
+// Compatibility spelling for callers that need one legacy repeat band.
 void PpuSetWidescreenLayerRepeatBand(Ppu *ppu, uint8_t layer, uint8_t y0,
                                      uint8_t y1);
 
@@ -846,9 +962,9 @@ void PpuSetWidescreenLayerExtent(Ppu *ppu, uint8_t layer,
                                  uint16_t top, uint16_t bottom);
 
 // Override the horizontal caps for one half-open authentic scanline band.
-// The coordinate convention deliberately matches
-// PpuSetWidescreenLayerRepeatBand so a repeat strategy and its extent change
-// on the same raster line. Invalid/empty bands are ignored.
+// The coordinate convention deliberately matches PpuSetWidescreenLayerBand so
+// fill, motion and extent change on the same raster line. Invalid/empty bands
+// are ignored.
 void PpuSetWidescreenLayerExtentBand(Ppu *ppu, uint8_t layer,
                                      uint8_t y0, uint8_t y1,
                                      uint16_t left, uint16_t right);

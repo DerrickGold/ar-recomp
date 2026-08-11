@@ -17,6 +17,7 @@ user's F2 snapshots in `runs/20260711-092516/`.
 ```
 game logic (per frame, between vblank yields)
   ├─ object updates ($00:8915 loop) ...................... gameplay
+  ├─ camera request $02:B030: tracks subject $8A / focus $82 into $7C/$7E
   ├─ camera update  $02:B091: applies deltas $7C/$7E to $22/$24 with the
   │    LEVEL-BOUNDS CLAMP ($2E/$30), derives BG2 parallax $26/$28
   │    ($02:B9D5/$02:BA0B), sets 16px-crossing flags in $93
@@ -175,7 +176,7 @@ interleaving the record's two rows/columns), `$02:B95A` header/geometry.
 | `$3A-$45` | parallax ratio nibbles (from section config, see §5) |
 | `$5E/$60/$62/$64` | record-buffer cursors (see §3) |
 | `$76/$79` (+banks `$78/$7B`) | NMI drain pointers (reset every NMI by `$ACC8`) |
-| `$7C/$7E` | camera H/V delta for this frame (16-bit signed) |
+| `$7C/$7E` | requested camera H/V delta (16-bit signed); corrected wide bounds replace it with effective motion before downstream consumers |
 | `$93` | strip-request flags: $80 BG1col $40 BG1row $20 BG2col $10 BG2row |
 
 ## 5. Per-section video config — `$02:B4E8` + table `$02:893E`
@@ -203,6 +204,12 @@ Fillmore act 1 arrives with `$DE/$DF=$FF, $E1=0` — tile anim disabled.
 
 ## 6. Camera, clamp, parallax
 
+- **`$02:B030`** (JSL'd immediately before `$02:B091` at
+  `$00:807E/$80BD/$82ED`): computes the requested camera movement. It reads the
+  selected action-object base from `$8A`, centres object `+02` X in the native
+  256px view, applies the vertical dead zone around focus Y `$82`, and writes
+  signed requests to `$7C/$7E`. It does not move the camera or publish strip
+  flags.
 - **`$02:B091`** (JSL'd from the main loop at `$00:8082/$80C1/$82F1`):
   - H: `$22 += $7C`, clamped to `[0, $2E - $100]`. **The $100 here is the
     hardcoded 256px viewport width.** Sets `$93 |= $80` when the result
@@ -214,6 +221,44 @@ Fillmore act 1 arrives with `$DE/$DF=$FF, $E1=0` — tile anim disabled.
     `$2E,X` ONLY if that width >= $300 — narrower layers wrap freely.
   - Tail: `JSL $00:A1B0` — copies camera-relative fields into the player
     object (`$06A0` block; `$24+$70` -> +$144/+$184).
+
+Corrected action-wide presentation HLEs this complete routine at the same
+`$02:B091` seam. For a world extent `W`, native viewport `V`, and requested
+before/after margins `B/A`, the camera interval becomes
+`[B, W - V - A]` only when `B + V + A <= W`. Otherwise it remains the ROM's
+`[0, W - V]`; zero/invalid load-state dimensions also retain the ROM's
+unsigned fallback. Horizontal margins start with the live widescreen render
+budget and vertical margins with the configured per-side Diorama extension;
+each side is then limited by the canonical playfield layer's fixed extent, when
+present. This makes a tuned 16/16 playfield such as Bloodpool `0208` fit only the
+16 pixels it actually presents rather than shifting for an invisible full
+margin. The correction also consumes the renderer's
+canonical `ActionBgPlan_CanvasOwner` and provider-enable decision: authored
+Death Heim hub/final scenes (`0701`/`0708`) and `AR_ACTION_BG_HLE=0` do not
+acquire playfield camera policy. 4:3, Wide Raw, non-action modes, disabled
+action widening, non-finite scene plans, and rooms too small for the complete
+requested view are therefore behavior-preserving. BG2 parallax helpers,
+player-relative tail, strip flags, and the single canonical `$22/$24` camera
+remain native. A fitted presentation clamp also reconciles `$7C/$7E` before
+those consumers run: while the old camera is already inside the corrected
+interval they receive the camera displacement that actually occurred, not the
+unfulfilled outward request; an initial correction from outside the interval
+publishes zero motion. This matters at section entrances, where a native
+`$7C=-120` request can coexist with the new minimum camera of 120. Leaving the
+request live made BG2 parallax and the player state machine treat a stationary
+boundary as movement (`runs/20260810-172649`, gf9652).
+
+Bloodpool `0202` (BG1 `768x512`) resolves to horizontal `26..486` in flat
+16:10 Full and to `120..392`, vertical `32..255` in Diorama-32. Death Heim
+`0703` (BG1 `256x256`) cannot contain either widened view and stays at native
+`0..0`, `0..31`. The `0701` hub stays native at `0,31` until its natural
+transition to finite room `0702`; the explicit provider-off `0202` control
+also remains `0,287`. Evidence: `runs/20260810-170205` (flat Full),
+`runs/20260810-170240` (4:3), `runs/20260810-170857-2` (Raw),
+`runs/20260810-171443` (Diorama-32), `runs/20260810-170857` (undersized),
+`runs/20260810-171516` (hub transition), and
+`runs/20260810-171443-2` (provider off). `AR_WS_ACTION_CAMDBG=1` reports the
+live interval and whether each requested axis fit.
 - `$02:ADC3` uploads `$22..$2D` to the six BGnHOFS/VOFS regs each NMI
   (10-bit `AND #$03` high mask).
 
@@ -292,33 +337,82 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
 - Budget reality (user snapshots, 16:9): max 60/128 entries live, margin
   sprites present and correct — **no OAM pressure in act 1 even wide**.
 
-### 9a. Host action-spell lighting and particles
+### 9a. Host action lighting and particles
 
 `ActionEffects_CaptureFrame` is the game-thread boundary for presentation-only
-spell metadata. The first implemented family, Magical Fire, requires the live
-kind-1 controller and all per-slot animation/composition/transform identity;
-it publishes the four mirrored actors separately rather than collapsing them
-to one player-centred fireball. The capture publishes generic point/rectangle/
-segment geometry, authentic OBJ priority, and separate actor, phase, and pulse
-clocks. Those clocks advance by captured emulation ticks and therefore freeze
-during paused or retained-slot redraws. Observer state is explicit, not hidden
-inside the capture module, and savestate loads reset it before the next frame.
+spell metadata. Its data-driven rules require the live controller and complete
+per-slot animation/composition/transform identity; mirrored or cloned actors
+remain separate rather than collapsing to a player-centred effect. The capture
+publishes generic point/rectangle/segment geometry, authentic OBJ priority, and
+separate actor, phase, and pulse clocks. Those clocks advance by captured
+emulation ticks and therefore freeze during paused or retained-slot redraws.
+Observer state is explicit, not hidden inside the capture module, and savestate
+loads reset it before the next frame.
+
+`ActionSceneEffects_CaptureFrame` is the parallel boundary for exact scene
+accents, including Bloodpool's map-$08 boss attack resolved from the 30-snapshot
+run `20260810-180202`, a complete decode of its `$7E:5000` animation bank, and
+the global player sword beam measured in run `20260810-175403`.
+BG wall torches are not actors: the observer uses the same validated
+`ActionBgMapView` contract as the full-world provider and matches the exact BG1
+metatile pair `$47` over `$4F` throughout map group `$02`. Fireballs and
+lightning are ordinary action objects and require the positive handler,
+resume/source, animation-state, visual, and composition tuples recorded in the
+RAM map. Boss lightning further requires map `$02/$08`, animation bank
+`$7E:5000`, and a validated backlink to its live `$BDFF` parent. States `$02`
+through `$07` select vertical or diagonal long/medium/short strikes; their
+resume PCs vary during normal control flow and are not shape identities.
+Visual `$20` is the blank half of each strike cycle, so it intentionally emits
+no host effect. Matching only a visual ID is invalid because action slots and
+values are polymorphic. A recycled same-kind slot begins a fresh renderer
+generation when its lifecycle key changes or its position is discontinuous
+with its measured velocity.
+
+The sword-beam rule is not map-specific. It requires handler `$9D1C`, animation
+`$06:8000`, attacker flag `$0001`, backlink `$08A0`, a source descriptor shared
+with the active player, and exact state/visual/composition `$13/$30/$99E8` or
+`$14/$31/$9A17`. Its raw collision header includes signed offsets, so capture
+publishes the decoded six-part drawable bounds `(0,-1)..(16,31)` instead of
+feeding those words into the generic unsigned-extent path.
 
 `DrawActionEffects` runs after the authentic action image and before flat HUD,
 HD-replacement, inspector, and settings overlays. Flat mode uses the resolved
 physical viewport. Diorama mode receives a `DioramaProjection` value from the
-same composite call that drew the OBJ planes: camera matrix, capture mesh
-dimensions, BG1/OBJ interpolated UV window, output dimensions, and the exact
-authored depth/rake/bow of all four OBJ priority planes are not re-derived from
-live state. The explicit render policy is a world overlay above the composed
-world and below HUD/HD UI.
+same composite call that drew the BG and OBJ planes: camera matrix, capture
+mesh dimensions, BG1/OBJ interpolated UV window, output dimensions, and exact
+authored depth/rake/bow are not re-derived from live state. Scene metadata also
+selects its authentic plane: torches use BG1-low, while fireballs and lightning
+use OBJ priority 0. The projection value owns `texture_x_origin`, the hidden
+64-column OBJ resolve apron that precedes caller-visible capture coordinates.
+Keeping that origin in inverse projection prevents overlays from sliding
+horizontally on raked planes without changing the flat path's contract. The
+explicit render policy is a world overlay above the composed world and below
+HUD/HD UI.
 
-`action_effect_render.c` converts the captured kind/phase/geometry into a
-bounded, renderer-independent batch; unknown values fail closed. Its Fire
-pulse is an authored-tick integer triangle wave, avoiding cross-libm sine
-variance. `present.c` only supplies flat/diorama projection and submits through
-the same verified SDL additive blend plus untextured batched geometry used by
-town effects; no optional Metal/Vulkan shader pipeline is required.
+`action_effect_render.c` converts captured kind/phase/geometry into bounded,
+renderer-independent spell and scene batches; unknown values fail closed. A
+small capacity-aware geometry writer appends directly to the caller's final
+arrays, avoiding a spell-sized scene scratch copy and its former stack peak.
+Torch light/particles sample the shared authentic game clock at 2× visual rate
+to follow the fast BG flame animation while all torch instances remain in
+phase. Fireball sparks trail opposite measured velocity. Lightning lighting
+uses the live `88+88` extents, and its last nontransparent ring reaches both
+ends of the full 176px shaft rather than letting only a transparent falloff
+cover them. The boss strike adds a warm spill plus two bounded filaments
+following the actual per-row OAM centroids for all six authored
+vertical/diagonal, long/medium/short shapes. The longest uses 24 segments,
+horizontal flip mirrors the complete path, and the action-OBJ emitter's extra
+one-pixel Y draw bias is applied before projection. Visual `$20` stays blank;
+only the linked state-$09 child receives the separate floor-impact bloom.
+The sword crescent receives a cool two-tier light, a two-layer tapered additive
+wake, and four sparse crossed-diamond star glints. The wake and stars are
+authored behind measured velocity and therefore mirror automatically; their
+local basis is projected through OBJ priority 0, preserving the same form on a
+Diorama-raked plane.
+Integer-hash particles and integer triangle pulses make repeat builds
+deterministic. `present.c` only supplies flat/Diorama projection and submits
+through the same verified SDL additive blend plus untextured batched geometry
+used by town effects; no optional Metal/Vulkan shader pipeline is required.
 
 `action_effect_lighting` and `action_effect_particles` are independent,
 default-on Graphics settings. Backend rejection latches the shared host-effect
@@ -962,12 +1056,23 @@ cannot expose stale ring margins. Wide Raw remains the explicit raw control.
 BH5 adds `kPpuVirtualTilemapFlag_IncludeAuthentic`. The ActRaiser adapter sets
 it only when the full camera agrees with the live 10-bit PPU scroll phase and
 an exact 1-based-scanline viewport comparison finds zero native-ring mismatch
-and zero finite-world exit. The whole layer falls back for that frame on any
-contradiction; diagnostics separately count preflight, eligible, bound, phase,
-edge, mismatch, and runtime lookup results. The modern PPU can bind at authentic
-4:3 with zero margins, while wide-raw and the legacy renderer remain native
-controls. Character/palette/raster/priority ownership after the tile word is
-unchanged.
+and zero finite-world exit. A finite-world exit still rejects the layer. A
+native-ring word mismatch with all coordinates inside the finite world instead
+binds the provider without `IncludeAuthentic`: live VRAM remains authoritative
+in the authentic centre while the immutable world supplies synthetic margins.
+This is also the safe contract when the native ring is temporarily behind the
+visible tile edge. Bloodpool `0207` proved that case in
+`runs/20260810-172649`: BG1 ring `$6000-$6FFF`, the WRAM map, and the metatile
+table were byte-identical between gf9652 (camera Y 767) and gf10040 (camera Y
+760), but the 8px upward move exposed tile row 95 before the native 16px row
+publication refreshed it. Exactly eight resident words on that newly visible
+row contradicted the immutable decoder; there was no transition/actor writer
+to symbolize. The old atomic fallback clamped BG1 to the authentic viewport,
+making most of the wide playfield disappear.
+Diagnostics separately count preflight, eligible, bound, phase, edge, mismatch,
+and runtime lookup results. The modern PPU can bind at authentic 4:3 with zero
+margins, while wide-raw and the legacy renderer remain native controls.
+Character/palette/raster/priority ownership after the tile word is unchanged.
 
 The provider-enabled 12-entry matrix
 `runs/bg-hle-matrix-20260809-145341.json` bound all 19,522 eligible layer-frames,
@@ -1103,11 +1208,12 @@ continues each authentic scanline: left `x<0` samples `256+x`, while right
 decode/window/current scroll state, all bands keep the same direction and tile
 animation remains automatic. Bloodpool acts 1 and 2 are now both mixed: their
 upper moon/cloud family keeps the mirror edge classification, while BG2 tile
-row 17 downward (`y=136-223`) removes the horizontal cap and cyclically repeats
-the live water scanline. `0202` retains the conservative fixed `0/0` upper cap;
-live authoring in `runs/20260810-122509` establishes asymmetric `76/100` limits
-for `0201`, allowing its reflection only through the known-good interval before
-unique landmarks repeat. Neither padding mode reads the stale offscreen
+row 17 downward (`y=136-223`) cyclically repeats the live water scanline. Live
+authoring establishes asymmetric `76/100` upper limits for `0201`, whose water
+remains available, and a `68/68` whole-backdrop limit for `0202`, whose Repeat
+band inherits that limit. This allows reflection only through each room's
+known-good interval before unique landmarks repeat. Neither padding mode reads
+the stale offscreen
 tilemap half or mutates emulated state.
 
 Northwall (`$18=06`, raw maps `$19=01-$05`) uses the same narrow,
@@ -1137,10 +1243,11 @@ animated border/fog/water. The black left margin in the composite is therefore
 the camera-at-world-edge side budget (`cam=0`), not absent fog art.
 
 A whole-layer policy cannot separate the bounded statues from the desired wide
-fog. The renderer now supports a per-layer cyclic-repeat band: it first renders
-the authentic scanline in isolation, then repeats that scanline into both
-margins while preserving transparency, priority, scroll/HDMA phase, character
-animation, and color math. For `0701`, the full symmetric canvas is enabled,
+fog. The renderer supports up to four non-overlapping fill/motion bands per
+layer. It first renders the authentic scanline in isolation, then applies the
+selected Clamp/Mirror/Repeat fill into both margins while preserving
+transparency, priority, live per-line scroll/HDMA, character animation, and
+color math. For `0701`, the full symmetric canvas is enabled,
 BG1 and BG2 are clamped (`mask=$03`), and BG2 tile rows 18-27 (screen
 `y=144-223`) override the clamp with cyclic repeat. Row 18 contains the
 decorative divider and the fog/water begins below it; all face art ends above
@@ -1231,23 +1338,60 @@ scanout, latches the same immutable value through `FrameSlot`, and lets Diorama
 build one UV span per distinct row policy. The presenter never reverses live
 PPU masks or reads `g_ppu` after scanout.
 
-The canonical Bloodpool composition keeps BG1 as the wide playable platform
-layer and rows `136..224` as repeating water across the canvas. BG2's unique
+The canonical Fillmore `0101` policy keeps BG1 fully available while limiting
+its finite-world BG2 backdrop to 128px of additional canvas on each side. The
+source remains WorldMap and its edge remains LiveWorld; only the presentation
+extent is capped. The canonical Bloodpool composition keeps BG1 as the wide
+playable platform layer and rows `136..224` as repeating water. BG2's unique
 upper moon/cloud family is independently capped: `0201` uses the live-tuned
-fixed `76/100` interval from `runs/20260810-122509`, while `0202` retains the
-conservative `0/0` boundary. The initial all-`0/0` baseline accepted all 204
+fixed `76/100` interval from `runs/20260810-122509` and leaves its water
+available, while `0202` uses `68/68` for both its upper family and inherited
+Repeat band. Bloodpool `0206` and `0207` independently limit their unbanded
+Mirror BG2 planes to `68/68` and `92/92`, respectively, while leaving BG1
+available. The initial all-`0/0` baseline accepted all 204
 Wide Full artifacts against the pre-policy census—4,074 changed pixels, all in
 the two Bloodpool side margins, with every authentic center and state/PPU/VRAM
 artifact exact—and the complete twelve ordinary entries passed 4:3, Wide Raw
 and Diorama-32. The later `0201` tuning supersedes only that room's synthetic
-upper margin. Settings -> Layers ->
-BG Extents exposes a non-persistent sparse draft, A/B, colored guides and a
-normalized log dump without creating a second canonical policy store. Its
-per-BG `ignore side bounds` shortcut resolves the layer and all of its row
-bands to the available horizontal extent for the A/B. The independent `ignore
+upper margin. Settings -> Layers -> BG Extents exposes a non-persistent sparse
+draft, A/B, colored guides and a
+normalized log dump without creating a second canonical policy store. Each BG
+can author up to four non-overlapping bands, add/delete them in the overlay,
+choose screen or world anchoring, edit the half-open row bounds, and select fill,
+motion and extent independently. `motion=fill` is the behavior-compatible
+legacy phase: reflecting the rendered scanline also reflects apparent movement.
+`motion=normal` compensates the mirrored sample by the live horizontal-scroll
+phase so clouds/water move in the authentic direction; Repeat is unchanged.
+The PPU stores the compiled policy per authentic row, so multiple Mirror,
+Repeat, Clamp, world/raw, or transparent families can share one BG without a
+single-band runtime special case. Its per-BG `ignore side bounds` shortcut
+resolves the layer and all of its row bands to the available horizontal extent
+for the A/B. The independent `ignore
 vertical bounds` shortcut resolves that layer's top/bottom extent to available.
 Both retain stored caps for exact restoration and cannot outgrow the shared
 canvas, finite world, or source/edge availability.
+
+Mixed screen/world tables carry one additional invariant: adjacent intervals
+must remain ordered across the layer's complete native camera travel, not only
+at the frame where an edit is made. The tuner rejects a future crossing before
+publishing it. Draft application remains atomic, and the runtime compiles the
+unchanged canonical room plan if a later room-state transition makes stored
+authoring data stale. This keeps developer tooling unable to take HLE offline.
+The scene inspector obtains fill, motion, band precedence and reflected source
+X from the PPU's shared inline resolver, so diagnostics cannot drift from the
+scanline renderer's sampling formula.
+
+Kasandora `0301` and natural-transition room `0302` use the same immutable
+handoff for a content-anchored hybrid. Their 512x512 BG2 maps place sparse
+cloud/sky art above world Y=256 and cyclic dunes at and below it. Because BG2
+vertical parallax moves that source boundary through the viewport, the planner
+stores the dune family once as the world band `256..512`; the common row
+resolver projects it as `256 - cameraY - 1` each frame. Cloud rows use Mirror
+and dune rows use Repeat. The captures in `runs/20260810-130310` pin row
+82 at camera 173 in `0301` and row 93 at camera 162 in `0302`. The synthesized
+BG2 source is the authentic viewport, avoiding the provider-invalid fallback
+that occurs when a live WorldMap plan is manually changed to Mirror/Repeat;
+BG1 remains fully provider-backed and owns the playable canvas.
 
 Vertical extension makes one additional row-policy rule load-bearing: a band
 with `y0=0` or `y1=224` owns the synthetic margin adjacent to that authentic
@@ -1255,7 +1399,9 @@ boundary. Internal bands remain bounded and outside rows at an unrelated edge
 still use the layer default. This is derived from the existing half-open band
 bounds rather than stored as another override. Both the immutable
 `ActionBgPlan` row resolver and the mechanical PPU projection apply the rule,
-including the band's horizontal extent.
+including the band's fill, motion and horizontal extent. Existing baked bands
+remain fill-relative by default, so this generalization does not retune or
+invalidate the accepted Fillmore/Bloodpool/Death Heim policies.
 
 Bloodpool run `runs/20260810-114943/snapshots/snap_00_gf8076` exposed the
 omission: BG2 was correctly classified as whole-layer Mirror with a

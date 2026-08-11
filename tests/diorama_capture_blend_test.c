@@ -91,10 +91,34 @@ static void TestSubscreenIdentityIsPerLayer(void) {
                                             kBg2));
 }
 
+static void TestMeasuredBloodpoolFixedColorSubtract(void) {
+  const uint16_t fixed_rgb_2_1_2 = (uint16_t)(2 | (1 << 5) | (2 << 10));
+  CHECK(DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      0x00, 0x81, fixed_rgb_2_1_2, kBg1));
+  CHECK(!DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      0x00, 0x81, fixed_rgb_2_1_2, kBg2));
+
+  /* Fail closed on a no-op fixed colour, half subtract, fixed add, subscreen
+   * addend, colour-window state, and an empty layer selector. */
+  CHECK(!DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      0x00, 0x81, 0, kBg1));
+  CHECK(!DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      0x00, 0xc1, fixed_rgb_2_1_2, kBg1));
+  CHECK(!DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      0x00, 0x01, fixed_rgb_2_1_2, kBg1));
+  CHECK(!DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      0x02, 0x81, fixed_rgb_2_1_2, kBg1));
+  CHECK(!DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      0x10, 0x81, fixed_rgb_2_1_2, kBg1));
+  CHECK(!DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      0x00, 0x81, fixed_rgb_2_1_2, 0));
+}
+
 int main(void) {
   TestMeasuredFillmoreAct2Frame();
   TestFailsClosedOnUnreproducibleMath();
   TestSubscreenIdentityIsPerLayer();
+  TestMeasuredBloodpoolFixedColorSubtract();
   printf("diorama capture blend tests: %s\n", s_failures ? "FAIL" : "pass");
   return s_failures ? 1 : 0;
 }

@@ -82,10 +82,27 @@ The per-region object-type tables at `$00:96AF/$A8F6/$B449/$C11E/$CD9B/$D928/$E7
 (already listed above) are the **enemy stat tables**: each 12-byte record carries ATK at `+7`,
 HP at `+8` and death score at `+9`. `tools/act_content.py --tables` decodes all eight.
 
+### Action camera and tile-streaming control
+
+| SNES address | File range | Meaning |
+|---|---:|---|
+| `$02:B030-$B090` | `0x13030-0x13090` | **Action camera tracking request** — selects the tracked object's X through direct-page object base `$8A`, centres it against the native 256px viewport, applies the vertical dead zone around focus Y `$82`, and stages signed requests in `$7C/$7E`. Called immediately before `$02:B091` from each action frame loop. |
+| `$02:B091-$B126` | `0x13091-0x13126` | **Action camera application/stream trigger** — applies `$7C/$7E` to BG1 camera `$22/$24`, clamps against dimensions `$2E/$30`, raises the 16px strip flags in `$93`, then derives BG2 parallax and player-relative coordinates. The HLE seam preserves that tail while optionally fitting the finite presentation canvas. |
+
 ### Sprite identity and action OBJ assets
 
 | SNES address | File range | Meaning |
 |---|---:|---|
+| `$00:8683-$868F` | `0x00683-0x0068F` | Shared action animation-repeat dispatcher: advances through `$00:8631`, decrements object `+$38` at the authored sequence boundary, repeats while nonzero, and dispatches the saved `+$1E` resume when the repeat count reaches zero. A Bloodpool lightning bolt legitimately transitions here from its scene-specific root. |
+| `$00:BD2A-$BD35` | `0x03D2A-0x03D35` | Bloodpool vertical-lightning spawn record. Its computed primary handler is record+`$0C` = `$00:BD36`; live objects retain `$BD2A` in slot `+$32`. |
+| `$00:BD36-$BD75` | `0x03D36-0x03D75` | Bloodpool vertical-lightning lifecycle: offscreen gate, packed animation/repeat commands `$0010/$1104/$1406`, SFX `$10`, and transition through the shared animation/retirement helpers. The saved nested resume value is `$BD69` (execution resumes at `$BD6A`). |
+| `$00:BD76-$BD81`, `$00:BD84-$BD8F` | `0x03D76-0x03D81`, `0x03D84-0x03D8F` | Two direction/attribute variants of the Bloodpool enemy-fireball spawn record. Live fireballs retain the selected record address in slot `+$32`; `$BD84` is intentionally embedded behind the branch at handler `$BD82`. |
+| `$00:BDF0-$BDFE` | `0x03DF0-0x03DFE` | Enemy-fireball flight tail: advance/loop animation through `$00:8631` until object flag `$0400` says it left the authentic activation window, then release through `$00:85B7`. |
+| `$00:BDFF-$BE0A` | `0x03DFF-0x03E0A` | Bloodpool boss spawn record retained as `$BDFF` in the boss and its linked lightning children (`+$32`); computed primary boss handler is `$BE0B`. |
+| `$00:BFDF-$BFF8` | `0x03FDF-0x03FF8` | Boss lightning-attack child allocation: allocates an action slot, assigns handler `$BFF9`, links/copies the boss through `$8709`, and offsets the child anchor vertically. |
+| `$00:BFF9-$C06E` | `0x03FF9-0x0406E` | Linked boss-lightning sequence. `$BFF9` selects one of six strike states through the table at `$C056` (`$07,$04,$06,$03,$05,$02` = diagonal/vertical × short/medium/long), runs each strike/blank cycle through delay handler `$8661`, then creates the state-9 floor child handled at `$C062`. Strike saved resumes observed live are `$C02B/$C04B/$C051`; floor resume is `$C06A`. |
+| `$00:9CF2-$9D1B` | `0x01CF2-0x01D1B` | Player ranged-sword creator. Allocates a linked action child, copies the player source/backlink, marks it as an attacker, selects animation state `$13` or `$14`, and advances animation through `$8E2F`. |
+| `$00:9D1C-$9D3D` | `0x01D1C-0x01D3D` | Player sword-beam flight handler. Retires on timer/offscreen/end conditions and otherwise moves the child through `$86BB`; live velocity is horizontally mirrored `8px/tick`. Animation `$06:8000` maps state `$13` to visual/composition `$30/$99E8` and state `$14` to `$31/$9A17`. |
 | `$00:95DD-$95EC` | `0x015DD-0x015EC` | Eight action handler-table pointers: `$96AF,$A8F6,$B449,$C11E,$CD9B,$D928,$E722,$F39A` for `$18=$00-$07` |
 | `$01:E099+` | `0x0E099+` | Town world-object type → behavior/animation-data pointer table |
 | `$01:E7D9+` | `0x0E7D9+` | Parallel town world-object type → sprite-frame pointer table; frame lists continue around `$01:E838` |

@@ -1293,6 +1293,102 @@ the current debugging process; this file is the case law.
     synthetic rows on that side must retain all of its coupled policy—not just
     its pixels or edge mode—otherwise animation direction and extent can split.
 
+44. **Bloodpool scene accents were displaced, absent, or covered only half of
+    their source art — FIXED 2026-08-10.** The first visual pass exposed four
+    independent failures in runs `20260810-162113` and `20260810-163044`:
+    torch lighting was displaced in Diorama, map `$02/$05` torches received no
+    accents, enemy fireballs received no visibly different treatment, and the
+    lightning aura appeared to stop halfway down the 176px bolt.
+
+    **Root causes:** Diorama inverse projection treated caller-visible capture X
+    as texture X and omitted the hidden 64-column OBJ resolve apron; torches
+    initially followed a room-specific path rather than their authored BG1
+    identity; the fireball matcher used non-live visual values even though the
+    captured compositions were right; and the lightning mesh's transparent
+    outer ring reached the captured endpoints while its last visibly coloured
+    ring reached only about half the `88+88` extent. Vertex-count and outer-bound
+    tests could therefore pass while the pixels a viewer could see were wrong.
+
+    **Fix:** `DioramaProjection.texture_x_origin` now owns the resolve-apron
+    offset, and projection supports the exact BG1-low shape separately from the
+    four OBJ priority shapes. Torch capture uses shared bounded
+    `ActionBgMapView` addressing and matches exact metatile `$47` over `$4F`
+    throughout Bloodpool, anchored at local `(8,15)`. Fireballs require the live
+    `$17/$45EF` or `$18/$4610` visual/composition pairs in addition to handler
+    `$BDF0`, resume `$BDD9`, state `$23`, and animation `$7E:4000`; their trail
+    is longer/brighter and runs opposite measured velocity. Torch accents use
+    one shared game clock sampled at 2× presentation rate. Lightning keeps the
+    captured `88px` top and bottom extents, but its nontransparent body/spill
+    rings now reach within 2px of both endpoints.
+
+    ROM-free regressions pin the hidden-apron projection offset, BG1-vs-OBJ
+    plane selection, Bloodpool maps `$03/$05`, both fireball directions,
+    immediate same-kind slot reuse, synchronized torch clocks, and visible
+    lightning alpha coverage rather than only geometry bounds. Spell and scene
+    builders append through one capacity-aware geometry writer, removing the
+    large scene scratch batch found during review. Release/test builds, the
+    complete headless suite, the live GPU shader test, and diff hygiene pass.
+    A fresh post-fix visual run remains the acceptance gate.
+
+    **Reusable lessons:** a texture may contain undisplayed resolve padding, so
+    inverse projection must publish its texture origin instead of teaching each
+    caller about the allocation. Match semantic effects with a validated tuple
+    of control flow, lifecycle source, and artwork—not a room number or one
+    polymorphic field. Finally, test the support of nontransparent vertices when
+    reviewing a gradient; a fully transparent falloff can satisfy geometric
+    coverage while drawing no perceptible effect.
+
+45. **Section entry walked without input and a stale leading ring row dropped the
+    wide playfield — FIXED 2026-08-10; replay pending.** Bloodpool `0207` run
+    `runs/20260810-172649` captured both regressions. At gf9652 the held input
+    word was zero, but BG1 camera X was already at the new presentation minimum
+    120 while the caller still requested `$7C=-120`. The player was at X=24
+    with velocity -2 and handler `$9884`. The fitted clamp rejected the camera
+    request but left `$7C` unchanged for the original BG2 parallax and player
+    consumers, so a stationary wide edge looked like continued movement.
+
+    At gf9906 the HLE preflight found eight BG1 word differences, first at
+    tile `(28,95)` (`$1866` decoded versus resident `$508B`). Snapshot
+    comparison found no live writer: BG1 VRAM ring `$6000-$6FFF`, the WRAM map,
+    and the metatile table are byte-identical between gf9652 and gf10040. The
+    difference is visibility cadence. Camera Y moved from 767 to 760, exposing
+    tile row 95 on an 8px boundary while the native row streamer publishes on
+    16px crossings. All eight contradictions are on that newly visible first
+    row; the resident words were already stale before they entered the view.
+    The old all-or-nothing ownership rule treated the contradiction as a
+    decoder failure, unbound BG1, and let
+    `ActionBgPlan_ClampUnboundWorldLayers` collapse the playfield to the
+    authentic viewport. Snapshot gf10040 therefore showed only the central
+    portion of the level while the independently mirrored backdrop remained
+    across the margins.
+
+    **Fix:** fitted action-camera bounds now reconcile `$7C/$7E` before the ROM
+    tail. A camera already inside the corrected interval publishes the signed
+    displacement that actually occurred; a one-time correction from outside
+    publishes zero. Native/fallback paths retain the requested delta exactly.
+    Provider preflight now distinguishes source bounds from content ownership:
+    an outside-world cell still fails closed, while an in-world native-word
+    mismatch binds without `IncludeAuthentic`. Live VRAM owns the authentic
+    centre and the immutable finite decoder continues to own synthetic margins,
+    so a native publication-lag contradiction cannot remove the widened
+    playfield. The same conservative path remains valid if a future legitimate
+    runtime tile-word patch is discovered.
+
+    Focused tests pin blocked/partial/ordinary/entry/native camera deltas and a
+    deliberately contradicted native ring that remains bound margin-only with
+    no compare-failure fallback. The release application builds; all 44
+    sandbox-safe tests and the separately run display-backed shader test pass.
+    A repeat of the exact room
+    transition is still required for visual acceptance.
+
+    **Reusable lesson:** a requested camera delta is safe to forward only while
+    the camera uses the requester's interval. Introducing a stricter host bound
+    creates rejected motion that must be reconciled before legacy consumers.
+    Separately, immutable map data and resident tilemap state are complementary:
+    a tile-word contradiction should narrow provider ownership, not invalidate
+    the finite source needed by unrelated margins. Snapshot equality is the
+    quickest way to distinguish an actual writer from stale streaming state.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

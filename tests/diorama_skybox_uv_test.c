@@ -158,6 +158,21 @@ static void TestBandedValidSpans(void) {
    * authentic y=224 boundary and therefore owns that adjacent margin too. */
   ExpectSpan("Bloodpool water", &spans.spans[1], 152, 256, 0, 496);
 
+  /* Bloodpool 0202 repeats its water within the same inherited 68/68 span as
+   * the upper backdrop, so the presenter may coalesce both row families. */
+  layer.horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .left = 68,
+    .right = 68,
+  };
+  layer.bands[0].horizontal_extent = (ActionBgHorizontalExtent) {
+    .mode = kActionBgExtent_Inherit,
+  };
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true,
+                               &layer, 16, 256, kTexWidth, &spans);
+  ExpectInt("Bloodpool act 2 span count", spans.count, 1);
+  ExpectSpan("Bloodpool act 2", &spans.spans[0], 0, 256, 52, 444);
+
   /* Death Heim's upper clamp and lower repeating fog genuinely need distinct
    * UV spans. The authentic y=144 boundary moves down by the 16-row vertical
    * extension in the captured texture. */

@@ -62,4 +62,16 @@ bool DioramaCaptureBlend_LayerIsHalfAdded(uint8_t cgwsel, uint8_t cgadsub,
                                           uint8_t screen_sub,
                                           uint8_t layer_bit);
 
+/* True when a BG layer's colour math is an exact fixed-colour subtraction
+ * that the capture pipeline can bake into the extracted pixels. This is the
+ * palette-dimming state measured in Bloodpool act 2 map 4:
+ * cgwsel=$00 cgadsub=$81 fixed=$0822 (RGB5 2,1,2), with math on BG1.
+ *
+ * Requiring cgwsel == 0 excludes subscreen math, direct colour, and colour-
+ * window clipping/prevention. Half subtract is excluded because its rounding
+ * is a separate operation. A zero fixed colour is a no-op and stays unmarked. */
+bool DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+    uint8_t cgwsel, uint8_t cgadsub, uint16_t fixed_color,
+    uint8_t layer_bit);
+
 #endif /* DIORAMA_CAPTURE_BLEND_H */

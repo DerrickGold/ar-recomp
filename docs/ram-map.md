@@ -31,8 +31,8 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 ### Camera / Scroll — full model in rendering-engine.md §4/§6/§11.1
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0022 | 2 | BG1/camera X. Action writer `$02:B091`, clamp `[0,$2E-$100]`; town writer `$01:B4C6`, native clamp `[0,$0100]`, corrected-wide clamp `[extra,$0100-extra]` (16:9: `[$002B,$00D5]`, directly validated 2026-07-14). All six scroll regs upload from `$22-$2D` via `$02:ADC3` (10-bit). |
-| $7E:0024 | 2 | BG1/camera Y. Action clamp `[0,$30-$E1]`; town writer `$01:B4C6`, clamp `[0,$011F]`. |
+| $7E:0022 | 2 | BG1/camera X. Action writer/HLE seam `$02:B091`: native clamp `[0,$2E-$100]`; corrected action-wide clamp `[left,$2E-$100-right]` when the complete requested view fits, otherwise native. Town writer `$01:B4C6`: native `[0,$0100]`, corrected-wide `[extra,$0100-extra]` (16:9: `[$002B,$00D5]`, directly validated 2026-07-14). All six scroll regs upload from `$22-$2D` via `$02:ADC3` (10-bit). |
+| $7E:0024 | 2 | BG1/camera Y. Action `$02:B091`: native `[0,$30-$E1]`; corrected Diorama interval `[top,$30-$E1-bottom]` when it fits. Town writer `$01:B4C6` clamps to `[0,$011F]`. |
 | $7E:0026/$0028 | 2+2 | BG2 H/V scroll (parallax, $02:B9D5/$02:BA0B from ratio nibbles $3A-$45) |
 | $7E:002A/$002C | 2+2 | BG3 H/V scroll ($2C pinned $FFFC: HUD up 4px) |
 | $7E:002E/$0030 | 2+2 | **BG1 layer = LEVEL pixel width/height** (Fillmore act1: 4096x768) — the camera clamp bounds |
@@ -44,7 +44,9 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:0054/$0058 | 2 ea | BG1/BG2 tile-word masks applied before the layer attribute merge. |
 | $7E:005E/$0060/$0062/$0064 | 2 ea | record-buffer cursors: BG1col $3900 / BG1row $3A02 / BG2col $3B04 / BG2row $3C06 |
 | $7E:006B/$006F | 1 ea | BG1/BG2 action tile-word attribute merges (palette/priority bits), indexed by layer stride 4. Together with `$46/$52/$54`, these are the complete `ActionBgWorld` decoder records. |
-| $7E:007C/$007E | 2+2 | camera H/V delta this frame (16-bit signed; strip triggers) |
+| $7E:007C/$007E | 2+2 | camera H/V delta this frame (16-bit signed; strip/parallax/player input). `$02:B030` stages the requested motion; the corrected `$02:B091` HLE reconciles it to motion that actually fit a presentation-aware bound before downstream consumers. Native/fallback paths preserve the request. |
+| $7E:0080/$0082 | 2+2 | Cached action-camera subject X/Y. The selected object's `+02/+04` coordinates initialize this pair; `$82` is the vertical focus consumed by `$02:B030`, while action-object code also uses the pair to derive subject motion. |
+| $7E:008A | 2 | WRAM offset of the action object selected as the camera subject. `$02:B030` reads subject X from `[$8A]+$02`; object spawn/control paths update the selector when camera-follow ownership changes. |
 | $7E:008E | 1 | parallax disable bits (bit0 BG2H, bit1 BG2V = script-driven) |
 | $7E:0093 | 1 | strip-request flags: $80 BG1col $40 BG1row $20 BG2col $10 BG2row (set by $02:B091 on 16px crossings, TRB-consumed by dispatcher $02:B127) |
 
@@ -84,26 +86,41 @@ entries `OBSEL` picks, so a host that builds a part WITHOUT an OAM slot (the OBJ
 apron channel, rendering-engine.md §13j) must read it here and resolve through
 `PpuObjSizeForSizeBit` — there is no size information in the tile/attr word.
 
-### Action magic objects (action mode only)
+### Action objects and magic cohorts (action mode only)
 
 | Address / field | Size | Description |
 |---|---:|---|
 | `$7E:06A0-$1A9F` | 80 × `$40` | Action object slots. Magic cohort slots are `$06A0-$0820`; cast controller is `$0860`; player is `$08A0` |
-<!-- inserted 2026-08-05: RNG state, found while deriving Stardust's launch site -->
-
 | `$7E:02D0-$02E0` | 17 | **PRNG state pool.** `$00:84C0` advances it (a carry-chain `ADC` down the pool, then a multi-byte counter increment) and returns the byte at `$02D1` in A. Every randomized spell decision goes through it — e.g. Magical Stardust's launch site picks top-vs-right edge and its Y offset from one call (`$00:A0E8`, see bug-ledger.md §33). |
-
 | slot `+00` | 2 | Status. `$4000/$8000` high states are inactive/free; spell actors normally use active values 0 or `$0800` |
 | slot `+02/+04` | 2+2 | World-space hot-point X/Y, updated by the spell handler and projected with camera `$22/$24` |
 | slot `+06/+08` | 2+2 | Current per-tick X/Y velocity decoded by `$00:8E2F`; flip bits mirror the authored deltas |
-| slot `+0A/+0C/+0E/+10` | 2 each | Current composition left/top/right/bottom extents after flip selection |
+| slot `+0A/+0C/+0E/+10` | 2 each | Current composition collision-header words after flip selection. Most actors use unsigned left/top/right/bottom distances, but the sword beam retains signed offsets (`$FFE0` occurs live); decode authored parts for presentation geometry instead of assuming this is always an unsigned rectangle. |
+| slot `+12` | 2 | Primary per-frame handler dispatched by `$00:8915`. This is lifecycle identity as well as control flow: Bloodpool fireball flight uses `$BDF0`; a live lightning bolt transitions from `$BD36` to shared repeat handler `$8683` without becoming a new actor. |
+| slot `+14` | 2 | Secondary handler or polymorphic spawn parameter. Do not treat it as a handler without validating the object type. |
 | slot `+16..+18` | 2+**1** | Animation-table pointer: 16-bit address at `+16` then a **single BANK BYTE at `+18`** (`$07:C000` Fire/Stardust, `$07:C800` Aura/Light). **`+19` is a SEPARATE field, not the pointer's high half** — live Magical Fire reads `$3907` as a word there, so a 16-bit read of `+18` silently yields `bank \| next<<8`. This entry previously read "2+2" and that misreading is exactly what left the action-spell effects drawing nothing (bug-ledger.md §32). Corroborated by `$00:95F0`, which copies spawn-record bytes `+2/+3` into `$18`/`$28` as BYTES. |
 | slot `+1A/+1C` | 2+2 | Animation state and entry index |
+| slot `+1E` | 2 | Nested-dispatch resume value. Yield helpers store the JSR return address, so the next executed instruction is `value+1`: live fireball `$BDD9` resumes at `$BDDA`; live lightning `$BD69` resumes at `$BD6A`. |
 | slot `+20/+22/+24` | 2 each | Current composition pointer, visual ID, and animation wait counter |
 | slot `+28`/`+29` | 1+1 (see note) | Attribute/transform. Masking the 16-bit read at `+28` with `$C000` selects the horizontal/vertical flip, which works because the bits live in the **byte at `+29`**; `+28`'s own byte measured `$00` on every spell actor observed, and `$00:95F0` writes `+28` byte-wise. Treat as two bytes rather than one word until a case is found that needs the low half. `+19` carries the same base attribute value as `+29`. |
+| slot `+2A/+2C/+2E` | 2 each | Attack, HP, and BCD death-score value copied from spawn-record bytes `+7/+8/+9` by `$00:95F0`. |
+| slot `+30` | 2 | Object flags. Bit `$0001` marks an attacker (including the player sword beam); bit `$0400` is outside the authentic activation window. The scene-effect observer keeps lifecycle identity but does not submit the object while the latter bit is set. |
+| slot `+32` | 2 | Source/spawn-record pointer retained by ordinary action actors. Bloodpool trap lightning uses `$BD2A`, boss-lightning children use `$BDFF`, and the two fireball directions use `$BD76` and `$BD84`. Player sword-beam captures observed `$979A` and `$9810`; validate equality with the linked player's current source instead of hardcoding either. This is a useful slot-reuse discriminator, not a globally unique actor ID. |
 | slot `+38` | 2 | Polymorphic spell-local counter. Controller `$0860+38` is selected spell ID; cohort spells reuse `+38` for repeat counts |
-| slot `+3A` | 2 | Spawner backlink; the cast controller points back to the player |
+| slot `+3A` | 2 | Spawner backlink. The cast controller and player sword-beam child point to player `$08A0`; Bloodpool boss-lightning strike child `$08E0` points to boss `$12E0`, while its floor child `$0920` points to `$08E0`. Combined with `+32`, this validates the linked family and remains stable while `+1E` changes across repeated strike/blank cycles. |
 | `$7E:00F4/$00F8/$00F9` | 2 each | Input-enable mask, cast-active gate, and cast-transition state used by `$9DE1-$9F10` |
+
+Action-scene identities measured in runs `20260810-124203`, `20260810-163044`,
+`20260810-174202`, the six-cycle correction run `20260810-180202`, and sword-beam run
+`20260810-175403` combine those fields rather than matching artwork alone:
+
+| Kind | Positive live identity |
+|---|---|
+| Enemy fireball | `+12=$BDF0`, `+1E=$BDD9`, `+16/+18=$4000/$7E`, `+1A=$23`, and `(+22,+20)=($17,$45EF)` or `($18,$4610)`; `+32` is `$BD76` or `$BD84` |
+| Lightning trap | `+32=$BD2A`, `+1E=$BD69`, `+16/+18=$4000/$7E`, `+1A=$14`, `+12=$BD36` or `$8683`, and `(+22,+20)=($1F,$46FE)` or `($20,$479D)`; the live vertical extents are `+0C=+10=$58` (88px each side) |
+| Boss lightning (`$18/$19=$02/$08`) | Base identity `+32=$BDFF`, `+12=$8661`, `+16/+18=$5000/$7E`, no V-flip, and `+3A` resolving to an active `$BDFF/$7E:5000` parent. Strikes: states/visuals/compositions `$02/$00/$5346`, `$03/$01/$5401`, `$04/$02/$5492` are vertical long/medium/short; `$05/$03/$54F2`, `$06/$04/$55C2`, `$07/$05/$5661` are diagonal long/medium/short. Normal left/top/right/bottom extents are `6/83/11/117`, `6/83/11/69`, `1/83/11/21`, `48/83/8/117`, `36/83/8/69`, `30/83/8/21`; H-flip swaps left/right. `$20/$5D2B` is the blank half-cycle and is not decorated. Observed strike resumes `$C02B/$C04B/$C051` are control flow, not shape identity. Floor impact is state/resume `$09/$C06A`, pairs `$08/$570A`, `$09/$5716`, or `$0A/$5729`. |
+| Wall torch | Not an action slot. It is the exact BG1 metatile pair `$47` over `$4F` in the bounded `$7E:8000` map view for Bloodpool (`$18=$02`), anchored at local `(8,15)` in the 16×32 pair. |
+| Player sword beam (all action maps) | `+12=$9D1C`, `+16/+18=$8000/$06`, `+30&$0001`, `+3A=$08A0`, nonzero `+32` equal to the active linked player's source, and state/visual/composition `$13/$30/$99E8` or `$14/$31/$9A17`. Measured velocity is `+8` or `-8`. Both six-part compositions draw local bounds `(0,-1)..(16,31)` with centre `(8,15)`; raw collision words include signed values and are retained only for diagnostics/gameplay fidelity. |
 
 ### Town simulation render records and camera auxiliaries
 
@@ -285,8 +302,8 @@ see [save-format.md](save-format.md) §3.
 ### Graphics & Map Data
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:4000+ | varies | Metadata for map variant [01 00] |
-| $7E:5000+ | varies | Metadata for map variant [01 01] |
+| $7E:4000+ | varies | Per-act decompressed ordinary-object animation/composition blob. Loaded by `$02:B69C` only at act-entry maps and inherited by later maps in the same act. Bloodpool scene composition pointers `$45EF/$4610/$46FE/$479D` are addresses inside this mutable WRAM blob, not ROM symbols. |
+| $7E:5000+ | varies | Per-map decompressed boss animation/composition blob selected by the same asset-script command with nonzero destination flag. |
 | $7E:6000-$7E:7FFF | 8KB | Graphics metadata |
 | $7F:2000+ | varies | Arrangement data |
 | $7F:6800+ | varies | Road construction data (one word per 4x4 block) |

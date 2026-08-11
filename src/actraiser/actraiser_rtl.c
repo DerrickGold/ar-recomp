@@ -849,7 +849,6 @@ static ActionBgPlan ActRaiser_NativeBgPresentationPlan(void) {
  * verbatim, so map-specific action classification has only one owner. */
 static void ActRaiser_ProjectBgPresentationPolicy(
     ActionBgPlan *plan, uint8 clamp, uint8 mirror, uint8 repeat,
-    int repeat_band_layer, uint8 repeat_band_y0, uint8 repeat_band_y1,
     bool bound_canvas_to_world) {
   static bool reported_invalid_policy;
   if (!plan) return;
@@ -857,9 +856,6 @@ static void ActRaiser_ProjectBgPresentationPolicy(
     .clamp_layers = clamp,
     .mirror_layers = mirror,
     .repeat_layers = repeat,
-    .repeat_band_layer = (int8_t)repeat_band_layer,
-    .repeat_band_y0 = repeat_band_y0,
-    .repeat_band_y1 = repeat_band_y1,
     .bound_canvas_to_world = bound_canvas_to_world,
   };
   if (ActionBgPlan_ApplyPresentationPolicy(plan, &policy)) return;
@@ -875,6 +871,59 @@ static void ActRaiser_ProjectBgPresentationPolicy(
   }
 }
 
+static PpuWidescreenBandFill ActRaiser_PpuBandFill(
+    ActionBgEdgeMode edge) {
+  switch (edge) {
+    case kActionBgEdge_Transparent:
+      return kPpuWidescreenBandFill_Transparent;
+    case kActionBgEdge_LiveWorld:
+      return kPpuWidescreenBandFill_LiveWorld;
+    case kActionBgEdge_Clamp:
+      return kPpuWidescreenBandFill_Clamp;
+    case kActionBgEdge_Mirror:
+      return kPpuWidescreenBandFill_Mirror;
+    case kActionBgEdge_Repeat:
+      return kPpuWidescreenBandFill_Repeat;
+    case kActionBgEdge_RawWrap:
+    default:
+      return kPpuWidescreenBandFill_RawWrap;
+  }
+}
+
+static void ActRaiser_ApplyBgPresentationBands(
+    const ActionBgPresentationPolicy *policy) {
+  if (!policy) return;
+  PpuSetWidescreenLayerNormalScroll(
+      g_ppu, policy->normal_scroll_layers);
+  for (unsigned i = 0; i < policy->band_count; i++) {
+    const ActionBgPresentationBand *band = &policy->bands[i];
+    PpuSetWidescreenLayerBand(
+        g_ppu, band->layer, band->y0, band->y1,
+        ActRaiser_PpuBandFill(band->edge),
+        band->motion == kActionBgMotion_NormalScroll
+            ? kPpuWidescreenMotion_NormalScroll
+            : kPpuWidescreenMotion_FillRelative);
+  }
+}
+
+static uint32 ActRaiser_BgBandSignature(
+    const ActionBgPresentationPolicy *policy) {
+  if (!policy) return 0;
+  uint32 signature = 2166136261u;
+  for (unsigned i = 0; i < policy->band_count; i++) {
+    const ActionBgPresentationBand *band = &policy->bands[i];
+    const uint8 bytes[] = {
+      band->layer, band->y0, band->y1,
+      (uint8)band->edge, (uint8)band->motion,
+    };
+    for (unsigned byte = 0; byte < sizeof(bytes); byte++) {
+      signature ^= bytes[byte];
+      signature *= 16777619u;
+    }
+  }
+  return signature;
+}
+
 /* Build and publish the one canonical action-background decision before any
  * generic/debug presentation override runs. Draft application is explicit:
  * native 4:3 still observes the room for authoring but cannot apply synthetic
@@ -882,6 +931,7 @@ static void ActRaiser_ProjectBgPresentationPolicy(
 static bool ActRaiser_ResolveActionBgPlan(
     uint8 map_group, uint8 map_number, bool apply_tuner_draft,
     ActionBgPlan *plan, ActionBgPresentationPolicy *presentation) {
+  static bool reported_rejected_draft;
   if (!plan || !presentation ||
       !ActRaiserActionBg_BuildPlan(
           g_ram, kActRaiserWramSize, g_ppu,
@@ -893,7 +943,13 @@ static bool ActRaiser_ResolveActionBgPlan(
             kPpuExtraTopBottom, kPpuExtraTopBottom,
           }))
     return false;
-  if (apply_tuner_draft && !ActionBgTuner_ApplyDraft(plan)) return false;
+  if (apply_tuner_draft && !ActionBgTuner_ApplyDraft(plan) &&
+      !reported_rejected_draft) {
+    reported_rejected_draft = true;
+    fprintf(stderr,
+            "[action-bg-tuner] rejected stale/invalid draft; using canonical "
+            "room policy\n");
+  }
   return ActionBgPlan_CompilePresentation(plan, presentation);
 }
 
@@ -1113,7 +1169,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
          * for the authentic provider, but describe the executed presentation
          * as raw/live so a mirror decision cannot imply nonexistent padding. */
         ActRaiser_ProjectBgPresentationPolicy(
-            &s_pending_action_bg_plan, 0, 0, 0, -1, 0, 0, false);
+            &s_pending_action_bg_plan, 0, 0, 0, false);
         ActRaiserActionBg_BindPlan(
             g_ram, kActRaiserWramSize, &plan, g_ppu);
       }
@@ -1139,8 +1195,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   uint8 clamp = 0;
   uint8 mirror = 0;
   uint8 repeat = 0;
-  int repeat_band_layer = -1;
-  uint8 repeat_band_y0 = 0, repeat_band_y1 = 0;
+  ActionBgPresentationPolicy bg_presentation = { 0 };
   uint8 hud_split_height = 0;
   uint8 hud_split_left_end = 0;
   uint8 hud_split_right_start = 0;
@@ -1227,9 +1282,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       clamp = bg_policy.clamp_layers;
       mirror = bg_policy.mirror_layers;
       repeat = bg_policy.repeat_layers;
-      repeat_band_layer = bg_policy.repeat_band_layer;
-      repeat_band_y0 = bg_policy.repeat_band_y0;
-      repeat_band_y1 = bg_policy.repeat_band_y1;
+      bg_presentation = bg_policy;
     }
   }
   /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
@@ -1240,7 +1293,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       int L = atoi(ob) - 1;
       if (L >= 0 && L < 4) g_ppu->screenEnabled[0] = (uint8)(1u << L);
       wide = 1; clamp = 0; mirror = 0; repeat = 0;  /* raw tilemap data */
-      repeat_band_layer = -1;
+      bg_presentation = (ActionBgPresentationPolicy){ 0 };
       bg_hle_allowed = 0;
       project_final_bg_policy = true;
     } }
@@ -1249,7 +1302,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (cm && cm[0]) {
       wide = 1; clamp = (uint8)strtoul(cm, NULL, 16);
       mirror = 0; repeat = 0;
-      repeat_band_layer = -1;
+      bg_presentation = (ActionBgPresentationPolicy){ 0 };
       bg_hle_allowed = 0;
       project_final_bg_policy = true;
     } }
@@ -1267,13 +1320,13 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   if (g_settings.display_mode == kDisplayMode_43) {
     wide = 0; clamp = 0; mirror = 0; repeat = 0;
     bounded_world_margins = 0;
-    repeat_band_layer = -1;
+    bg_presentation = (ActionBgPresentationPolicy){ 0 };
     bg_hle_allowed = 0;
     project_final_bg_policy = true;
   } else if (g_settings.display_mode == kDisplayMode_WideRaw) {
     wide = 1; clamp = 0; mirror = 0; repeat = 0;
     bounded_world_margins = 0;
-    repeat_band_layer = -1;
+    bg_presentation = (ActionBgPresentationPolicy){ 0 };
     bg_hle_allowed = 0;
     project_final_bg_policy = true;
   }
@@ -1329,9 +1382,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     PpuSetWidescreenPadCapturedToBudget(
         g_ppu, (uint8)(g_settings.diorama_mode &&
                        g_settings.diorama_margin_fix));
-    if (repeat_band_layer >= 0)
-      PpuSetWidescreenLayerRepeatBand(g_ppu, (uint8)repeat_band_layer,
-                                      repeat_band_y0, repeat_band_y1);
     if (hud_split_height)
       PpuSetWidescreenHudSplit(g_ppu, hud_split_height,
                                hud_split_left_end, hud_split_right_start,
@@ -1357,6 +1407,12 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       if (fallback_world_layers) {
         clamp |= fallback_world_layers;
         PpuSetWidescreenLayerClamp(g_ppu, clamp);
+        /* The failed world layer was atomically converted to a viewport Clamp
+         * plan above. Recompile before the one band-application site so none
+         * of its tuner-authored row overrides can bypass that safe fallback. */
+        if (!ActionBgPlan_CompilePresentation(
+                &bg_plan, &bg_presentation))
+          bg_presentation = (ActionBgPresentationPolicy){ 0 };
       }
       /* The role catalog, not a PPU layer-number convention, owns the finite
        * action canvas. A missing, ambiguous, or unbound owner fails closed to
@@ -1366,6 +1422,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
           (bg_hle_bindings & (uint8)(1u << canvas_layer)))
         bounded_world_margins = 1;
     }
+    ActRaiser_ApplyBgPresentationBands(&bg_presentation);
     if (bounded_world_margins) {
       /* Clamp each side to the catalogued playfield's real world space.
        * Simulation towns use BG1 and the fixed 512px world proven by
@@ -1390,8 +1447,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     ActRaiser_ProjectBgPresentationPolicy(
         &s_pending_action_bg_plan,
         wide ? clamp : 0, wide ? mirror : 0, wide ? repeat : 0,
-        wide ? repeat_band_layer : -1,
-        repeat_band_y0, repeat_band_y1,
         wide && bounded_world_margins);
   } else {
     s_pending_action_bg_plan.bound_canvas_to_world =
@@ -1400,21 +1455,24 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   ActRaiserActionBg_ApplyPlanExtents(&s_pending_action_bg_plan, g_ppu);
   s_pending_bg_capture_pad_to_budget =
       g_ppu->wsPadCapturedToBudget != 0;
+  const uint32 bg_band_signature =
+      ActRaiser_BgBandSignature(&bg_presentation);
   /* One line per policy flip — cheap, and makes "why isn't this screen
    * wide?" diagnosable from any console.log (mode bytes included). */
   static int last_wide = -1, last_clamp = -1, last_mirror = -1,
-             last_repeat = -1, last_repeat_band_layer = -2,
-             last_repeat_band_y0 = -1, last_repeat_band_y1 = -1,
+             last_repeat = -1, last_bg_band_count = -1,
+             last_bg_normal_scroll = -1,
              last_hud_split_height = -1, last_hud_split_left_end = -1,
              last_hud_split_right_start = -1,
              last_hud_left_only_y = -1, last_bg_plan_valid = -1,
              last_bg_plan_source_bg1 = -2, last_bg_plan_source_bg2 = -2,
              last_bg_hle_bindings = -1;
+  static uint32 last_bg_band_signature;
   if (wide != last_wide || clamp != last_clamp || mirror != last_mirror ||
       repeat != last_repeat ||
-      repeat_band_layer != last_repeat_band_layer ||
-      repeat_band_y0 != last_repeat_band_y0 ||
-      repeat_band_y1 != last_repeat_band_y1 ||
+      bg_presentation.band_count != last_bg_band_count ||
+      bg_presentation.normal_scroll_layers != last_bg_normal_scroll ||
+      bg_band_signature != last_bg_band_signature ||
       hud_split_height != last_hud_split_height ||
       hud_split_left_end != last_hud_split_left_end ||
       hud_split_right_start != last_hud_split_right_start ||
@@ -1427,9 +1485,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     last_clamp = clamp;
     last_mirror = mirror;
     last_repeat = repeat;
-    last_repeat_band_layer = repeat_band_layer;
-    last_repeat_band_y0 = repeat_band_y0;
-    last_repeat_band_y1 = repeat_band_y1;
+    last_bg_band_count = bg_presentation.band_count;
+    last_bg_normal_scroll = bg_presentation.normal_scroll_layers;
+    last_bg_band_signature = bg_band_signature;
     last_hud_split_height = hud_split_height;
     last_hud_split_left_end = hud_split_left_end;
     last_hud_split_right_start = hud_split_right_start;
@@ -1439,13 +1497,14 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     last_bg_plan_source_bg2 = bg_plan_source_bg2;
     last_bg_hle_bindings = bg_hle_bindings;
     fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s "
-            "clamp=%02x mirror=%02x repeat=%02x rband=%d/%u-%u "
+            "clamp=%02x mirror=%02x repeat=%02x bands=%u/%08x normal=%02x "
             "hud=%u/%u/%u left-only-y=%u bg-plan=%d source=%s/%s "
             "hle=%02x\n",
             (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
             map_group, map_number, wide ? "WIDE" : "pillarbox",
-            clamp, mirror, repeat, repeat_band_layer,
-            (unsigned)repeat_band_y0, (unsigned)repeat_band_y1,
+            clamp, mirror, repeat, (unsigned)bg_presentation.band_count,
+            (unsigned)bg_band_signature,
+            bg_presentation.normal_scroll_layers,
             (unsigned)hud_split_height, (unsigned)hud_split_left_end,
             (unsigned)hud_split_right_start, (unsigned)hud_left_only_y,
             bg_plan_valid,
@@ -2161,6 +2220,16 @@ void ActRaiserDrawPpuFrame(void) {
                       src + 1, g_ppu->cgwsel, g_ppu->cgadsub,
                       g_ppu->screenEnabled[0], g_ppu->screenEnabled[1]);
             }
+          }
+          /* Bloodpool 0204 dims BG1 with full fixed-colour subtraction
+           * (cgwsel=$00 cgadsub=$81). Alpha cannot express subtraction, so ask
+           * the PPU capture to bake it into this isolated plane in native
+           * 5-bit colour space. */
+          if (src != kPpuOverlaySource_Obj &&
+              DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+                  (uint8_t)g_ppu->cgwsel, (uint8_t)g_ppu->cgadsub,
+                  (uint16_t)g_ppu->fixedColor, (uint8_t)(1 << src))) {
+            flags |= kPpuOverlayFlag_ApplyBgFixedColorSubtract;
           }
           PpuSetOverlayCapture(g_ppu, src, -g_ws_extra, -g_ws_extra_top,
                                width, capture_height, flags);

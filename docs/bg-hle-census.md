@@ -305,7 +305,11 @@ the macOS display-dependent shader test pass (41/41). BH6 is complete.
 The provider is now the default for eligible action world layers. Unset, empty,
 or nonzero `AR_ACTION_BG_HLE` enables it; exact `AR_ACTION_BG_HLE=0` is the
 native A/B. Wide Raw deliberately remains unbound, and every validation failure
-still falls back atomically per layer and frame.
+in the accepted matrix fell back atomically per layer and frame. A later
+leading-edge cadence case refined that rule: an in-world native-ring mismatch
+now retains a
+native authentic centre plus finite provider margins; phase/source/bounds
+failures still fall back atomically (see ledger #45).
 
 Five paired 12-entry matrices cover authentic 4:3, Wide Full, Wide Raw, and
 diorama vertical extension 0 and 32:
@@ -467,9 +471,14 @@ classification:
 
 | Entries | BG1 role/source | BG2 role/source | Extent consequence |
 | --- | --- | --- | --- |
-| `0101`, `0102`, `0301`, `0303`, `0404`, `0501`, `0504` | playfield / finite world | backdrop / finite world or disabled | both retain available caps; each finite source supplies its own natural bound |
+| `0101` | playfield / finite world | backdrop / finite world | BG1 remains available; the live-tuned BG2 backdrop is fixed to `128/128` |
+| `0102`, `0303`, `0404`, `0501`, `0504` | playfield / finite world | backdrop / finite world or disabled | both retain available caps; each finite source supplies its own natural bound |
+| `0301`, natural-transition `0302` | playfield / finite world | backdrop / captured viewport | content-anchored sky rows Mirror while dune rows at BG2 world Y `256+` Repeat; BG1 remains available |
 | `0201` | playfield / 4096x512 world | backdrop / 256x256 viewport | moon/cloud rows use live-tuned fixed `76/100`; water `136..224` remains independently available |
-| `0202` | playfield / 768x512 world | backdrop / 256x256 viewport | moon/cloud rows retain fixed `0/0`; water `136..224` remains independently available |
+| `0202` | playfield / 768x512 world | backdrop / 256x256 viewport | the whole BG2 span is live-tuned to `68/68`; water `136..224` repeats within that inherited limit |
+| `0206` | playfield / finite world | backdrop / 256x256 viewport | BG1 remains available; the mirrored BG2 backdrop is live-tuned to `68/68` |
+| `0207` | playfield / finite world | backdrop / 256x256 viewport | BG1 remains available; the mirrored BG2 backdrop is live-tuned to `92/92` |
+| `0208` | playfield / finite world | backdrop / 256x256 viewport | both use Mirror/fill motion; BG1 exposes only `16/16` pixels beyond the authentic view and BG2 is fixed to `0/0` |
 | `0401`, `0601`, `0605` | playfield / finite world | backdrop / 256x256 viewport | current cyclic backdrop strategy is repeat-safe and may use the available canvas |
 | `0701` pre-ending | playfield / captured viewport | backdrop / captured viewport | bounded upper statue/face art and repeat-safe fog `144..224` remain separate policies |
 | `0701` ending sky | playfield / captured viewport | backdrop / captured viewport | the page/state handoff replaces the fog band and remains a separately tuned backdrop |
@@ -493,18 +502,64 @@ opt into future action-canvas growth. The live BG Extents tuner displays and
 prints the role but cannot edit it; a draft is therefore unable to silently
 turn decorative art into a canvas owner.
 
-### First canonical backdrop limits
+### Canonical layer limits
 
 The first intentional policy promotes the conservative result of that census:
 a narrow mirrored backdrop receives a fixed zero-pixel synthetic extension,
 while a narrow cyclic backdrop remains available to the complete canvas. The
 cap affects only pixels outside the authentic viewport; it neither clamps the
 global canvas nor the playfield role. Bloodpool `0201` and `0202` additionally
-resolve rows `136..224` as an available repeat-safe water band. `0202` leaves
-the moon/cloud family above it authentic-width; the promoted tuner export in
-`runs/20260810-122509` gives `0201` that family a known-good reflected extent of
-76px left and 100px right. Death Heim `0701` applies the same banded principle
-at its established fog boundary `144`.
+resolve rows `136..224` as repeat-safe water. The promoted tuner export in
+`runs/20260810-122509` gives `0201` a known-good reflected upper extent of 76px
+left and 100px right while leaving its water available. The later `0202` tuning
+uses 68px on each side for the whole backdrop; its Repeat band inherits that
+extent. Death Heim `0701` applies the same banded principle at its established
+fog boundary `144`.
+
+Fillmore `0101` is the first tuned finite-world backdrop: BG1 remains available
+to expose the playable level, while BG2's live-world plane stops after 128px of
+additional canvas on either side. Its world source and LiveWorld edge remain
+unchanged; the extent only bounds how much of that backdrop is presented.
+
+Bloodpool `0206` and `0207` apply the same independently bounded composition
+without row bands: their world-backed BG1 remains available, while their
+viewport-backed Mirror BG2 stops after 68px and 92px per side, respectively.
+
+Bloodpool boss room `0208` is the first tuned playfield whose finite world
+source deliberately uses a non-World edge. BG1 retains its provider-backed
+world source and playfield role, but Mirror/fill presentation is capped to 16px
+per side; BG2 uses the captured viewport with the same Mirror/fill policy and a
+0px cap. Source and edge are therefore independent: the provider still owns
+verified world tile words, while the PPU edge policy decides how the small
+synthetic span is filled. The fitted camera consumes the playfield's effective
+16/16 cap rather than the larger display budget.
+
+Kasandora `0301` and its natural-transition room `0302` use a dynamic hybrid
+instead of one whole-layer edge. Isolated BG2 renders from
+`runs/20260810-130310` confirm sparse sky/cloud art in the first 256px world
+page and repeat-safe dunes beginning at world Y=256 in both rooms. The planner
+stores one world-anchored `256..512` dune band and the common resolver projects
+that content boundary into authentic rows as `255 - BG2 cameraY`, so
+the upper rows Mirror and the lower rows Repeat while vertical parallax moves
+the boundary. At the two captured states this resolves to row 82 (`0301`,
+camera 173) and row 93 (`0302`, camera 162). BG2 uses its authentic viewport
+for this synthesized presentation; BG1 remains the finite-world canvas owner.
+
+The same canonical table now supports up to four non-overlapping bands per BG.
+Fill (Transparent/World/Clamp/Mirror/Repeat/Raw), apparent horizontal motion
+(legacy fill-relative or compensated normal scrolling), screen/world anchoring,
+and horizontal extent are independent fields. Compiled per-row PPU policy
+removes the former one-Repeat-band restriction while preserving every zeroed
+legacy initializer. The live BG Extents tab authors and exports this structure;
+it remains session-only until a printed room policy is transcribed into the
+map catalogue.
+
+The promoted backdrop extents now live in one data table keyed by room plus the
+required canonical source/fill classification. Adding another printed tuning
+entry therefore does not extend a map-specific `if/else` chain. Mixed
+screen/world bands are accepted only if their order remains disjoint across the
+complete camera range; stale drafts are atomic and fall back to that canonical
+catalogue.
 
 An authentic band with `y0=0` or `y1=224` also governs the adjacent vertical
 extension rows. This keeps the band's edge strategy and horizontal extent as
@@ -526,8 +581,9 @@ authentic side boundaries while BG1 platforms and lower water continue. For
 `0201`, that accepted baseline reports 1,628 changed margin pixels, zero center
 pixels, zero provider-owned VRAM changes, and all 16 non-framebuffer artifacts
 exact. `0202` likewise has an exact cropped 256x224 center and 16/16 exact
-state/snapshot artifacts. The later live `0201` draft deliberately replaces
-only its upper `0/0` cap with `76/100`; `0202` remains on the captured baseline.
+state/snapshot artifacts. The later live drafts replace `0201`'s upper cap with
+`76/100` and give all of `0202` a `68/68` span; the latter's water changes edge
+direction but inherits the same limit.
 The pre-ending Death Heim hub remains 17/17 exact in both Wide Full and
 Diorama-32 because its existing clamp/repeat edges already produced the
 now-explicit limits.

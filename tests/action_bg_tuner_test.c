@@ -60,6 +60,11 @@ static void TestDraftLifecycle(void) {
         kActionBgTunerResult_Changed);
   count = Rows(rows);
   CHECK(Find(rows, count, "bg2.horizontal") != NULL);
+  CHECK(Find(rows, count, "bg2.band0") != NULL);
+  CHECK(Find(rows, count, "bg2.band0.horizontal") == NULL);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2.band0")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
   CHECK(Find(rows, count, "bg2.band0.horizontal") != NULL);
 
   CHECK(ActionBgTuner_Change(Find(rows, count, "bg2.horizontal"), +1) ==
@@ -115,6 +120,110 @@ static void TestDraftLifecycle(void) {
   applied = next;
   CHECK(ActionBgTuner_ApplyDraft(&applied));
   CHECK(applied.layer[1].default_edge == kActionBgEdge_Clamp);
+}
+
+static void TestStructuralBandAuthoring(void) {
+  ActionBgTuner_ResetSession();
+  ActionBgPlan canonical = Plan();
+  CHECK(ActionBgTuner_ObservePlan(
+      2, 1, &canonical, (ActionBgTunerLimits){120, 120, 32, 32}));
+  ActionBgTunerRow rows[kActionBgTunerRowMax];
+  int count = Rows(rows);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+
+  /* The first added band occupies the largest uncovered interval, so the
+   * existing lower band and new upper band are adjacent and deterministic. */
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2.band_add")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  CHECK(Find(rows, count, "bg2.band0.anchor") != NULL);
+  CHECK(Find(rows, count, "bg2.band1") != NULL);
+  CHECK(ActionBgTuner_Change(Find(rows, count, "bg2.band0.end"), -1) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2.band_add")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  CHECK(Find(rows, count, "bg2.band1.anchor") != NULL);
+
+  CHECK(ActionBgTuner_Change(Find(rows, count, "bg2.band1.edge"), +1) ==
+        kActionBgTunerResult_Changed);
+  CHECK(ActionBgTuner_Change(Find(rows, count, "bg2.band1.motion"), +1) ==
+        kActionBgTunerResult_Changed);
+  /* This tiny world band is disjoint now but would cross band 0 as the camera
+   * moves, so the editor rejects it. Converting the upper band is stable: a
+   * World->Screen pair can only move farther apart after camera zero. */
+  CHECK(ActionBgTuner_Change(Find(rows, count, "bg2.band1.anchor"), +1) ==
+        kActionBgTunerResult_AtLimit);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2.band0")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  CHECK(ActionBgTuner_Change(Find(rows, count, "bg2.band0.anchor"), +1) ==
+        kActionBgTunerResult_Changed);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg_tuner.apply")) ==
+        kActionBgTunerResult_Changed);
+
+  ActionBgPlan applied = canonical;
+  CHECK(ActionBgTuner_ApplyDraft(&applied));
+  CHECK(applied.layer[1].band_count == 3);
+  CHECK(applied.layer[1].bands[0].anchor == kActionBgBandAnchor_World);
+  CHECK(applied.layer[1].bands[0].y0 == 1 &&
+        applied.layer[1].bands[0].y1 == 133);
+  int resolved_y0 = 0, resolved_y1 = 0;
+  CHECK(ActionBgLayerPlan_ResolveBand(
+      &applied.layer[1], 0, &resolved_y0, &resolved_y1));
+  CHECK(resolved_y0 == 0 && resolved_y1 == 132);
+  CHECK(applied.layer[1].bands[1].anchor == kActionBgBandAnchor_Screen);
+  CHECK(applied.layer[1].bands[1].motion == kActionBgMotion_NormalScroll);
+  CHECK(ActionBgPlan_Validate(&applied));
+  ActionBgPresentationPolicy presentation;
+  CHECK(ActionBgPlan_CompilePresentation(&applied, &presentation));
+  CHECK(presentation.band_count == 3);
+
+  count = Rows(rows);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2.band1")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2.band1.delete")) ==
+        kActionBgTunerResult_Changed);
+  applied = canonical;
+  CHECK(ActionBgTuner_ApplyDraft(&applied));
+  CHECK(applied.layer[1].band_count == 2);
+  CHECK(ActionBgPlan_Validate(&applied));
+}
+
+static void TestStaleDraftIsAtomic(void) {
+  ActionBgTuner_ResetSession();
+  ActionBgPlan canonical = Plan();
+  CHECK(ActionBgTuner_ObservePlan(
+      2, 1, &canonical, (ActionBgTunerLimits){120, 120, 32, 32}));
+  ActionBgTunerRow rows[kActionBgTunerRowMax];
+  int count = Rows(rows);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg2.band0")) ==
+        kActionBgTunerResult_Changed);
+  count = Rows(rows);
+  CHECK(ActionBgTuner_Change(Find(rows, count, "bg2.band0.anchor"), +1) ==
+        kActionBgTunerResult_Changed);
+  CHECK(ActionBgTuner_Change(Find(rows, count, "bg_tuner.apply"), +1) ==
+        kActionBgTunerResult_Changed);
+
+  /* A same-room canonical transition can narrow the source after the draft
+   * was authored. The rejected world band must leave that new canonical plan
+   * byte-exact so the caller can continue with its safe fallback. */
+  ActionBgPlan transitioned = canonical;
+  transitioned.layer[1].world_height = 128;
+  CHECK(ActionBgPlan_Validate(&transitioned));
+  CHECK(ActionBgTuner_ObservePlan(
+      2, 1, &transitioned, (ActionBgTunerLimits){120, 120, 32, 32}));
+  ActionBgPlan applied = transitioned;
+  ActionBgPlan before = applied;
+  CHECK(!ActionBgTuner_ApplyDraft(&applied));
+  CHECK(!memcmp(&applied, &before, sizeof(applied)));
 }
 
 static void TestResetAndAtomicity(void) {
@@ -334,9 +443,12 @@ static void TestRowCapacity(void) {
   ActionBgTunerRow *bg1_row = Find(rows, count, "bg1");
   CHECK(bg1_row != NULL);
   CHECK(ActionBgTuner_Activate(bg1_row) == kActionBgTunerResult_Changed);
+  count = ActionBgTuner_BuildRows(rows, kActionBgTunerRowMax);
+  CHECK(ActionBgTuner_Activate(Find(rows, count, "bg1.band0")) ==
+        kActionBgTunerResult_Changed);
   const int full_count = ActionBgTuner_BuildRows(
       rows, kActionBgTunerRowMax);
-  CHECK(full_count == 32);
+  CHECK(full_count > 0 && full_count <= kActionBgTunerRowMax);
 
   ActionBgTunerRow untouched;
   memset(&untouched, 0xa5, sizeof(untouched));
@@ -352,6 +464,8 @@ static void TestRowCapacity(void) {
 
 int main(void) {
   TestDraftLifecycle();
+  TestStructuralBandAuthoring();
+  TestStaleDraftIsAtomic();
   TestResetAndAtomicity();
   TestIgnoreSideBounds();
   TestIgnoreVerticalBounds();

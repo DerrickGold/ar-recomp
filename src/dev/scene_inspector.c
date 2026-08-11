@@ -112,8 +112,6 @@ static int LayerBpp(int mode, int layer) {
  * The strings mirror the runner's policy vocabulary for useful diagnostics. */
 static bool MapLayerX(int layer, int scan_y, int screen_x,
                       int *source_x, const char **policy) {
-  const int bit = 1 << layer;
-
   /* Promoted BG3 HUD chunks use the full allocated margin, even when a finite
    * world's live margin is smaller. Reproduce the exact source biases. */
   int hud_extra = g_ppu->extraLeftRight;
@@ -170,30 +168,21 @@ static bool MapLayerX(int layer, int scan_y, int screen_x,
     return true;
   }
 
-  bool repeat_band = g_ppu->wsRepeatY1[layer] >
-                         g_ppu->wsRepeatY0[layer] &&
-                     scan_y >= g_ppu->wsRepeatY0[layer] &&
-                     scan_y < g_ppu->wsRepeatY1[layer];
-  bool repeat = repeat_band || (g_ppu->wsLayerRepeat & bit);
-  bool mirror = (g_ppu->wsLayerMirror & bit) != 0;
-  if (repeat || mirror) {
-    if (screen_x < 0)
-      *source_x = repeat ? 256 + screen_x : -screen_x;
-    else
-      *source_x = repeat ? screen_x - 256 : 510 - screen_x;
-    *policy = repeat ? (repeat_band ? "REPEAT-BAND" : "REPEAT")
-                     : "MIRROR";
-    return *source_x >= 0 && *source_x < kActRaiserAuthenticWidth;
-  }
-
-  if (g_ppu->wsLayerClamp & bit)
+  PpuWidescreenLayerPolicy resolved;
+  if (!PpuMapWidescreenLayerX(
+          g_ppu, (uint8_t)layer, scan_y, screen_x,
+          source_x, &resolved))
     return false;
-  if (layer == 2 &&
+  if ((resolved.fill == kPpuWidescreenBandFill_LiveWorld ||
+       resolved.fill == kPpuWidescreenBandFill_RawWrap) && layer == 2 &&
       !(g_ppu->wsBg3WidenY && scan_y >= g_ppu->wsBg3WidenY))
     return false;
-
-  *source_x = screen_x;
-  *policy = "WIDE";
+  if (resolved.fill == kPpuWidescreenBandFill_Repeat)
+    *policy = resolved.band_override ? "REPEAT-BAND" : "REPEAT";
+  else if (resolved.fill == kPpuWidescreenBandFill_Mirror)
+    *policy = resolved.band_override ? "MIRROR-BAND" : "MIRROR";
+  else
+    *policy = "WIDE";
   return true;
 }
 

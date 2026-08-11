@@ -206,9 +206,17 @@ the menu keeps to the master toggles and the major on/off effects.
 
 The developer-only **Layers → BG Extents** tab is a live action-stage authoring
 tool. Open BG1 or BG2 to inspect its playfield/scene/backdrop role and source,
-change its edge strategy or per-side horizontal/vertical cap, and tune the
-horizontal cap of any canonical row band. **Ignore side bounds** temporarily
-lets the selected BG use every available column past its Diorama side guides;
+change its edge strategy, apparent mirror-motion phase, or per-side
+horizontal/vertical cap. Each layer can add, delete, and edit up to four
+non-overlapping row bands. A band independently selects screen- or world-space
+anchoring, its half-open start/end rows, fill strategy, legacy fill-relative or
+normal scrolling motion, and horizontal cap. Open a band before changing its
+fields. Mixed screen/world bands are accepted only when they remain disjoint
+through the layer's complete camera travel; an anchor edit that could cross a
+neighbor later reports the normal limit feedback. If a room-state transition
+invalidates an older draft, the canonical room policy remains active.
+**Ignore side bounds** temporarily lets the selected BG use every
+available column past its Diorama side guides;
 **Ignore vertical bounds** does the same past the top/bottom guides. The shared
 canvas, finite world and edge strategy still limit what can actually be drawn,
 and switching either shortcut off restores the stored caps. `Apply draft`
@@ -216,6 +224,18 @@ performs the live A/B; `Extent guides` draws BG1 in cyan and BG2 in orange;
 `Print draft` writes the resolved plan to the run log. Drafts reset when the
 room changes, start disabled, are never written to `settings.ini`, and never
 modify `diorama-layers.ini`. Press `Y` on a row to restore its canonical value.
+Existing baked policies use the behavior-preserving fill-relative motion unless
+they explicitly opt into normal scrolling.
+
+Corrected action-wide modes also keep the complete requested playfield view
+inside each room's finite BG1 dimensions whenever it fits. This camera-bound
+correction is automatic; it has no per-room setting and is disabled in 4:3,
+Wide Raw, the explicit `AR_ACTION_BG_HLE=0` native control, and authored scenes
+whose canonical background plan has no finite playfield canvas. For
+diagnostics, `AR_WS_ACTION_CAMDBG=1` logs the room, camera,
+resolved horizontal/vertical intervals, requested margins, and whether each
+axis could contain the full view. An axis that cannot fit safely retains the
+game's native camera bounds.
 
 ### The overlay's artwork
 
@@ -417,14 +437,15 @@ Overlay section **System → Game**. Background in [`SEAMS.md`](SEAMS.md) town �
 ### Verified `AR_WARP` targets
 
 The low byte is the game's raw map/sub-flow value, **not a uniform act number**.
-For example, `0302` is not Kasandora Act 2; it loads invalid/garbage state, while
-Kasandora Act 2 begins at `0303`.
+For example, `0302` is not Kasandora Act 2. It is a valid room only after the
+natural `0301` transition supplies its setup; using it as a standalone warp
+loads invalid/garbage state. Kasandora Act 2 begins at `0303`.
 
 | Region | Act 1 entry | Act 2 entry | Notes |
 |---|---:|---:|---|
 | Fillmore | `0101` | `0102` | |
 | Bloodpool | `0201` | `0202` | |
-| Kasandora | `0301` | `0303` | Do not use `0302` as an Act 2 shortcut |
+| Kasandora | `0301` | `0303` | `0302` is a natural-transition room, not a standalone warp or Act 2 shortcut |
 | Aitos | `0401` | `0404` | |
 | Marahna | `0501` | `0504` | |
 | Northwall | `0601` | `0605` | `0608` selects the boss map but is **not** a valid standalone visual baseline: from a non-action warp it leaves patterned/garbage CHR and self-exits. Reach the boss naturally from `0605` for acceptance. |
