@@ -6,26 +6,32 @@
 
 ---
 
-## Implementation status (updated 2026-07-21)
+## Implementation status (updated 2026-08-11)
 
 Both tracks are implemented. This doc remains the design record; treat the
 notes below as the authoritative "what actually shipped and why it differs,"
 rather than re-deriving from git history.
 
-**Visual track (M0-M3): DONE**, unchanged from earlier status — diorama
-rendering lives in `src/diorama.c`/`diorama.h`.
+**2026-08-11 capture-model correction:** layer capture follows the union of
+the SNES main and subscreen source masks. Marahna proves that an action stage
+can put BG1 and OBJ exclusively on TS and full-add them to main-screen BG2.
+The shipped path now preserves supported colour math through explicit alpha,
+5-bit pixel transforms, or resolved additive planes; the older main-only
+sketches below have been replaced accordingly.
+
+**Visual track (M0-M3): DONE**, unchanged from earlier status — Diorama
+rendering lives in `src/diorama/diorama.c` and its companion headers/modules.
 
 **Optimization track (M4-M8): DONE**, with real deviations from this doc's
 literal sketches, each called out in-code where it matters:
 - **M4** (`[present-perf]` baseline) — as specified.
-- **M5** (present thread) — implemented per Appendix D, with one deliberate
-  simplification: pixel buffers are NOT double-buffered as §2.1/D7 sketch.
-  Safety instead comes from a present-thread handshake (upload-phase
-  completion gates the game thread's next draw) — see the buffer-ownership
-  note in `src/present.h`. A real data race (present thread reading the
-  "other" `FrameSlot` as interpolation history) was caught and fixed during
-  M7 by giving the present thread its own thread-local scroll snapshot
-  instead — see `DioramaScrollSnapshot` in `present.h`.
+- **M5** (present isolation) — the present-thread experiment implemented the
+  Appendix-D contract, then Phase 0 removed the thread (#18/P13). Current
+  upload/composite runs on the producing thread before the next scanout, so
+  large pixel surfaces need neither copies nor double buffering. `FrameSlot`
+  remains as the immutable scalar/derived-state boundary that keeps present
+  code off live PPU/settings state; interpolation history is an explicit
+  `DioramaScrollSnapshot`. See the ownership note in `src/present.h`.
 - **M6** (fixed-timestep loop) — as specified; record/replay determinism
   reverified after the refactor (0 divergence).
 - **M7** (scroll interpolation) — implemented, but **shipped disabled by
@@ -68,16 +74,18 @@ the primary control surface.
 
 ## Scope: Diorama targets ACTION stages only
 
-**The diorama render mode (Phases 3–6) applies to ActRaiser's side-scrolling ACTION
-stages only — NOT the simulation/overworld (sim) mode.**
+**The action Diorama renderer (Phases 3–6) applies to ActRaiser's side-scrolling
+ACTION stages only. Non-action scenes now have separate presentation systems.**
 
 - **Action stages** are Mode 1 side-scrollers (BG1 playfield, BG2 parallax, BG3
   HUD, plus sprites) with a clear front-to-back layer stack. This maps naturally
   onto a flat-plane diorama/shadowbox.
-- **Sim mode** (town-building overworld, Sky Palace, world map) is a Mode-7
-  top-down view. A flat-plane diorama does not make sense for it — a true 3D
-  terrain projection would be needed instead. **Sim-mode 3D is explicitly OUT OF
-  SCOPE for this doc and deferred to a follow-up design session.**
+- **Town simulation views are Mode 1, not Mode 7.** They now use the independent
+  Sim3D semantic-ground/billboard pipeline rather than this action shadowbox.
+- **World navigation is Mode 7** and now has its own optional forced-top-down
+  full-plane 3D presentation. Sky Palace, menus, and other non-action screens
+  retain their own flat/overlay policies. Those later systems remain outside
+  this historical action-Diorama design.
 
 **Gating mechanism (grounded in existing code):** ActRaiser already distinguishes
 these via the map-group WRAM byte. Use the established helper:
@@ -94,9 +102,10 @@ static inline int ActRaiser_IsActionMapGroup(uint8 map_group) {
 This is the SAME predicate the widescreen policy uses to decide per-scene behavior
 (`ActRaiser_ApplyWidescreenPolicy`, actraiser_rtl.c:695), and it parallels the
 existing split of `ws_action` vs `ws_sim` settings (settings.h:223-224). The
-diorama capture policy and renderer must **early-out to the normal flat present
-path whenever `!ActRaiser_IsActionMapGroup(...)`**, so sim mode, the title screen,
-the world map, and menus always render normally regardless of the diorama toggle.
+action-Diorama capture policy and renderer must **early-out whenever
+`!ActRaiser_IsActionMapGroup(...)`**. The present dispatcher may then select the
+separate town/world-navigation enhancement or the normal flat path; action
+Diorama must never claim those scenes.
 
 Phases 1–2 (present thread, fixed-timestep) and the interpolation infrastructure
 (Phase 5) are mode-agnostic and apply to the whole game.
@@ -211,13 +220,10 @@ typedef struct FrameSlot {
     uint8_t pixels[kPpuBufWidth * 4 * 240];
     uint8_t hud_bg_pixels[kPpuBufWidth * 4 * 240];
     uint8_t hud_obj_pixels[kPpuBufWidth * 4 * 240];
-    // Overlay/m7 layer pixels are NOT memcpied into the slot (the m7 buffer is
-    // ~6.4 MB). These point at the just-finished set of the DOUBLE-BUFFERED
-    // dedicated arrays (g_diorama_pixels[2][...], §4.3; g_m7_overlay double-
-    // buffered per §2.9(e)); the game thread writes the other set. Never alias
-    // the single live global.
-    uint8_t *hd_overlay_pixels[kPpuOverlaySource_Count]; // -> read set, not a copy
-    uint8_t *m7_overlay_pixels;                          // -> read set, not a copy
+    // Implementation correction: large overlay pixels are not copied or
+    // pointer-owned by FrameSlot. Dedicated surfaces are protected by the
+    // upload/capture ordering contract (§4.3); the slot carries immutable
+    // request/content/additive metadata for those surfaces.
     // Metadata the present thread needs to composite correctly:
     int snes_width;
     int snes_height;
@@ -497,10 +503,11 @@ Do not reconstruct this range from `overlayCaptures[OBJ]`: the diorama's later
 full-scene OBJ claim legitimately replaces it with 0-127. Skip the OAM copy only
 when neither an OBJ overlay nor a promoted HUD icon is active.
 
-**Widescreen + diorama interaction:** in diorama mode the HUD split is NOT used
-(diorama captures the whole BG3 plane, §4.2). So `BuildHudPresentationChunks` runs
-only in the flat (non-diorama) present path. The two are mutually exclusive per
-frame — no combined-mode hazard. Both still read from the snapshot, not live state.
+**Widescreen + Diorama interaction:** default flat-HUD Diorama deliberately
+reuses `BuildHudPresentationChunks` after the projected world, while tilted-HUD
+mode binds BG3 as a Diorama plane. The producer explicitly rebinds BG3 for both
+branches every frame and the present choice comes from `FrameSlot`, not live
+settings. This is a combined-mode contract, not mutual exclusion.
 
 ### 2.9 Game-thread code that touches the renderer or PPU — the OTHER single-thread violations
 
@@ -787,12 +794,13 @@ capture buffer (ppu.c:1270-1287). So when §4.2 captures each layer with
 margin content is included in each layer's plane — the diorama renders the widened
 BG1/BG2/OBJ, margins and all, not just the authentic 256-wide center.
 
-**Implication:** no changes to the widescreen hacks are needed for diorama
-compatibility. They already produce per-layer, margin-inclusive content ahead of
-capture. The one thing NOT captured per-layer is the widescreen HUD *split*
-projection (that's a present-time re-slice, §2.8) — but the diorama doesn't use the
-HUD split anyway (it takes the whole BG3 plane, §4.2), so this is moot in diorama
-mode.
+**Implication:** no changes to the widescreen world generation are needed for
+diorama compatibility. It already produces per-layer, margin-inclusive content
+ahead of capture. BG3 is the deliberate exception: default flat-HUD mode keeps
+the widescreen HUD capture and presents its split/anchored bands after the
+Diorama world, while tilted-HUD mode explicitly rebinds BG3 to its Diorama
+plane. Both branches rebind every frame because omitting a source does not undo
+the preceding frame's surface binding.
 
 ### 4.1 Prerequisite: Switch ActRaiser to New PPU Path
 
@@ -806,120 +814,110 @@ The old PPU path (`ppu_old.c`) does NOT support overlay captures — it composit
 
 ### 4.2 Diorama Capture Policy
 
-In `ActRaiserDrawPpuFrame` (actraiser_rtl.c:1126), after `PpuClearOverlayCaptures`:
+The implemented policy captures **visual sources**, not just TM. Marahna action
+mode uses TM=`$06` (BG2+BG3), TS=`$11` (BG1+OBJ), CGWSEL=`$02`, and
+CGADSUB=`$03`: BG1 and OBJ exist exclusively as the subscreen input to a full
+colour add. A main-only gate therefore removes the playable plane and every
+actor even though authentic scanout is healthy.
+
+The current policy is equivalent to:
 
 ```c
-// Diorama is ACTION-STAGE ONLY (see the Scope banner). Sim/Mode-7 scenes,
-// title, world map, and menus fall through to the normal present path.
-bool diorama_active = g_settings.diorama_mode &&
-    ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]);
-
+bool diorama_active = Diorama_IsActiveThisFrame();
 if (diorama_active) {
-    int width = g_snes_width;  // 256 + 2*extra in widescreen
-    // Action stages are Mode 1: BG1 (playfield), BG2 (parallax), BG3 (HUD).
-    // BG4 never draws in Mode 1 (no capture branch exists — see §8.8), so it
-    // is intentionally excluded.
-    static const PpuOverlaySource kBgLayers[] = {
-        kPpuOverlaySource_Bg1, kPpuOverlaySource_Bg2, kPpuOverlaySource_Bg3,
+    uint8_t visual_sources =
+        g_ppu->screenEnabled[0] | g_ppu->screenEnabled[1];
+    uint8_t full_add_sub_sources =
+        DioramaCaptureBlend_FullAddSubscreenSources(
+            g_ppu->cgwsel, g_ppu->cgadsub,
+            g_ppu->screenEnabled[0], g_ppu->screenEnabled[1]);
+
+    static const PpuOverlaySource sources[] = {
+        kPpuOverlaySource_Bg1, kPpuOverlaySource_Bg2,
+        kPpuOverlaySource_Obj,
     };
-    for (size_t i = 0; i < sizeof(kBgLayers)/sizeof(kBgLayers[0]); i++) {
-        PpuOverlaySource source = kBgLayers[i];
-        // screenEnabled[0] is the MAIN screen bitmask; bit `layer` = enabled.
-        // (ppu.h:283 IS_SCREEN_ENABLED).
-        bool enabled = (g_ppu->screenEnabled[0] & (1 << source)) != 0;
-        if (enabled) {
-            PpuSetOverlayCapture(g_ppu, source,
-                                 -g_ws_extra, 0, width, 224,
-                                 kPpuOverlayFlag_RemoveFromGame);
-        }
+    for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); i++) {
+        PpuOverlaySource source = sources[i];
+        if (!(visual_sources & (1 << source)))
+            continue;
+        uint8_t flags = kPpuOverlayFlag_RemoveFromGame;
+        if (full_add_sub_sources & (1 << source))
+            flags |= kPpuOverlayFlag_MarkFullAddSubscreen;
+        // Eligible half-add/fixed-subtract flags are classified separately.
+        PpuSetOverlayCapture(..., source, ..., flags);
     }
+    if (visual_sources & (1 << kPpuOverlaySource_Obj))
+        PpuSetOverlayOamRange(g_ppu, 0, 128);
 
-    // OBJ capture is DIFFERENT from BG capture: a rectangle alone is not
-    // enough. PpuSetOverlayCapture resets oamCount to 0 (ppu.c:164-165), and
-    // the sprite capture path only captures a sprite pixel when
-    // `oamCount && slot in [oamFirst, oamFirst+oamCount)` (ppu.c:1565-1566).
-    // With oamCount==0 NO sprites are captured — they fall through to the
-    // world buffer and bake into the backdrop plane. To capture the whole
-    // sprite layer for the diorama, set the rect AND the full OAM range 0..128.
-    if (g_ppu->screenEnabled[0] & (1 << kPpuOverlaySource_Obj)) {
-        PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
-                             -g_ws_extra, 0, width, 224,
-                             kPpuOverlayFlag_RemoveFromGame);
-        PpuSetOverlayOamRange(g_ppu, 0, 128);  // ALL 128 OAM slots
-    }
-
-    // Skip the normal widescreen HUD split policy — diorama captures the whole
-    // BG3 plane, not just the HUD sub-rect. (Still run cheats/pins/etc. below.)
-} else {
-    // ... existing widescreen/HD policy (unchanged) ...
+    // BG3 is rebound explicitly every frame. Flat-HUD mode leaves the existing
+    // HUD capture authoritative; tilted-HUD mode binds the Diorama BG3 plane.
 }
 ```
 
-**Why OBJ needs the OAM range (do not omit `PpuSetOverlayOamRange`):** the existing
-widescreen HUD feature only ever captured a *handful* of specific sprites (a HUD
-icon), so the OBJ overlay was designed as an OAM-slot-range selector, not a
-rectangle. `PpuSetOverlayCapture` deliberately clears `oamCount` so a stale range
-can't leak across frames. For the diorama we want *every* sprite, so we pass the
-full `0..128` range. Verified against the capture gate at ppu.c:1563-1566.
+The frontend union is only the frame-level admission test. During scanout the
+PPU chooses the owning rendering per line, after HDMA may have changed TM/TS:
+prefer main when the source is present there, otherwise export its subscreen
+rendering. A source on both screens is not exported twice.
 
-**Note on the mode check:** `ActRaiser_IsActionMapGroup` reads WRAM `$0018`,
-which the game keeps current every frame. During the brief sim→action transition
-frames the map group flips before the PPU fully re-initializes the action layer
-set; the `screenEnabled[0]` per-layer gate above naturally suppresses capture of
-not-yet-enabled layers during that window, so no special transition handling is
-needed. If a transition frame ever flickers, extend the gate to also require the
-INIDISP force-blank bit clear (`!(g_ppu->inidisp & 0x80)`).
+Full-add is stricter than source capture. The helper admits it only when
+CGWSEL is exactly `$02`, neither half nor subtract is active, TM and TS visual
+sources are disjoint, and a main winner can enable math. The PPU then exports a
+sparse TS plane only where that source wins subscreen priority and the resolved
+main winner is selected by CGADSUB. `FrameSlot.diorama_plane_additive_mask`
+carries that immutable fact to present; the compositor orders main world,
+additive TS, then BG3. Unsupported overlapping/window/direct-colour states fail
+closed instead of being inferred from one frame-start register sample.
+
+OBJ still requires the full OAM range: `PpuSetOverlayCapture` clears
+`oamCount`, and zero means no sprite pixels are captured. A separately promoted
+HUD icon range remains in the ordinary OBJ capture but is excluded from the
+full-add OBJ scratch so relocating it cannot leave an icon-shaped hole in the
+world addend.
+
+Transition frames need no map-number allowlist. `Diorama_IsActiveThisFrame`
+owns the mode gate, source union suppresses genuinely disabled layers, and
+forced blank remains the black-frame authority. BG3's explicit per-frame rebind
+is also load-bearing: omitting a source from a capture list does not unbind the
+surface used on the preceding frame.
 
 ### 4.3 Layer Buffers
 
-Each layer needs a full-frame RGBA buffer. The overlay system supports this —
-`PpuBindOverlaySurface` binds an arbitrary buffer. **The diorama must use its own
-dedicated buffer set — do NOT reuse `g_hd_overlay_pixels[]`:**
-- `g_hd_overlay_pixels[Bg3]` and `[Obj]` are never used for those sources.
-  `RebindPpuOutputSurfaces` binds BG3 → `g_hud_bg_pixels` and OBJ →
-  `g_hud_obj_pixels` (main.c:1671-1674), and `BindHdReplacementSurfaces` explicitly
-  skips BG3/OBJ (main.c:1656). Binding diorama BG3/OBJ to `g_hd_overlay_pixels[2]/[4]`
-  would diverge from the live HUD surfaces and break the widescreen HUD path.
-- The single `overlayCaptures[source]` rect per source (ppu.h:247) is already
-  claimed by the widescreen HUD split (BG3) and by `HdReplacements_EvaluateFrame`'s
-  "source busy" guard (hd_replacements.c:305). A diorama full-frame capture and an
-  HD-replacement targeted capture for the same source cannot coexist — first setter
-  wins, the other is dropped.
+Diorama uses dedicated host surfaces rather than
+`g_hd_overlay_pixels[]`. The primary BG1/BG2/BG3/OBJ planes and the BG1/BG2
+high-priority plus OBJ1-OBJ3 bands remain distinct destinations. OBJ surfaces
+also carry the resolve-only apron documented in rendering-engine.md §13j, so
+their pitch is not interchangeable with the displayed width.
 
-So the diorama needs its OWN dedicated per-source buffer set, plus a documented
-mutual exclusion with HD replacements and the widescreen HUD split (both are
-suppressed while diorama is active — which also frees those capture slots):
+The pixel buffers are **not double-buffered**. Single-threaded ordering uploads
+them after scanout and before the next tick can overwrite them. `FrameSlot`
+retains immutable metadata for architectural isolation, not for a concurrent
+pixel handoff. This is the implementation deviation recorded in the status
+banner and present.h ownership contract.
 
-```c
-// Dedicated diorama layer buffers — double-buffered (two sets) for the present
-// thread (see §2.9(e)); NOT g_hd_overlay_pixels.
-static uint8_t *g_diorama_pixels[2][kPpuOverlaySource_Count];
-static int g_diorama_write_set;
+Surface binding is explicit per frame:
 
-// Per frame, in the diorama capture policy, bind the WRITE set:
-if (diorama_active) {
-    uint8_t **set = g_diorama_pixels[g_diorama_write_set];
-    for (int i = 0; i < kPpuOverlaySource_Count; i++) {
-        if (i == kPpuOverlaySource_Bg4) continue;   // never drawn (§8.8)
-        if (!set[i]) set[i] = calloc(1, kPpuBufWidth * 4 * 240);
-        PpuBindOverlaySurface(g_ppu, (PpuOverlaySource)i, set[i], g_snes_width * 4);
-    }
-    // ... capture policy from §4.2 ...
-    // present thread reads g_diorama_pixels[1 - g_diorama_write_set]; swap after submit
-}
-```
+- BG1, BG2, OBJ, and every priority band bind to their Diorama surfaces;
+- with `diorama_hud_flat=true`, BG3 binds to the narrow
+  `g_hud_bg_pixels` surface and the established HUD capture remains
+  authoritative (extended through the authentic height for title/pause body
+  rows);
+- with a tilted HUD, BG3 binds to its Diorama surface and receives the full
+  scene capture;
+- OBJ capture claims OAM 0..127; a validated promoted-HUD range is separately
+  tagged for exclusion from the full-add scratch only.
 
-Because diorama binds BG3/OBJ to its own buffers and suppresses the HUD split + HD
-replacements, it does not fight `RebindPpuOutputSurfaces` — but note that function
-runs on settings-change/resize (main.c:984, 2086), so the diorama rebind must be
-re-applied whenever geometry changes (fold it into the same rebind path).
+The explicit BG3 branch is self-healing across flat↔tilted toggles. There is no
+generic “unbind” operation: leaving BG3 out of an array would preserve the old
+destination and create a live tilted ghost plus a frozen flat HUD.
 
-The PPU writes each layer's pixels (straight alpha: `0xFF<<24|RGB` for opaque,
-`0x00000000` for transparent) into these buffers via `PpuWriteOverlayRenderLine`
-(ppu.c:1263-1288). The main `g_pixels` framebuffer receives only the backdrop color
-(all layer pixels are removed by `RemoveFromGame`). **See §5.8 for the full alpha
-model and the per-plane blend-mode requirement** — notably, the backdrop plane
-carries alpha=0 and must use `BLENDMODE_NONE`, not BLEND.
+`overlayCaptures[source]` still provides one capture rectangle per source.
+A post-scanout HD-replacement capture cannot independently claim that same
+source. Pipeline-level replacements remain compatible because they reach the
+ordinary PPU scanout and are naturally present in the separated surfaces.
+
+The buffers use the alpha/blend policy in §5.8. Request, content, and additive
+plane masks are latched after scanout so present uploads only frame-owned
+surfaces and never rescans CPU pixels or reads live PPU/settings state.
 
 ### 4.4 What "RemoveFromGame" Leaves in `g_pixels`
 
@@ -937,9 +935,9 @@ See §5.8.
 
 | Case | Handling |
 |------|----------|
-| Per-tile priority (some BG1 tiles above sprites, others below) | The overlay captures BG1 as a single RGBA plane. Tiles with high priority AND tiles with low priority both land in the BG1 surface. In the flat composite, priority determined Z-ordering per pixel; in diorama mode, the entire BG1 plane sits at one Z depth. This is a visual simplification — acceptable for the diorama novelty effect. Advanced: split high/low priority into separate sub-planes (requires extending the overlay system). |
+| Per-tile/per-OBJ priority | Implemented priority-band surfaces split BG1/BG2 low/high and OBJ priorities 0-3. Each resolved pixel lands in exactly one band; Diorama orders the bands with the Mode-1 interleave, and full-add metadata covers every band belonging to an admitted source. |
 | Color math (subscreen blending) | See §8.1 below. |
-| Mode 7 | OUT OF SCOPE — Mode 7 is sim mode, which the diorama never engages (Scope banner, §8.4). Do NOT plan a Mode-7 floor plane here, and do NOT source it from `g_m7_overlay_pixels` (that surface exists only with HD Mode-7 art — see §8.4). Deferred to a future sim-3D session. |
+| Non-action / Mode 7 | Action Diorama is gated off. Mode-1 town Sim3D and Mode-7 world-navigation 3D are independent present branches with their own immutable frame contracts; see §8.4. |
 | Forced blank (INIDISP bit 7) | PPU outputs black. Diorama renderer detects forced blank and shows nothing (or a static "powered off" screen). |
 | BG3 mode 1 high priority | In SNES mode 1 with `bg3priority` set, BG3 high-priority tiles render ABOVE everything (even sprites). The overlay capture puts these in the BG3 surface. In diorama, BG3 would be placed at a fixed Z. This is a fidelity difference — acceptable for the effect. |
 
@@ -1158,14 +1156,10 @@ static void RenderDiorama(const FrameSlot *slot, SDL_Renderer *renderer,
         if (!layer->visible || !layer->texture) continue;
 
         // Upload this frame's pixels to the layer's texture.
-        // THREADING (single source of truth — see §4.3 and §2.9(e)): diorama
-        // layer pixels live in the dedicated DOUBLE-BUFFERED set
-        // g_diorama_pixels[2][source], NOT g_hd_overlay_pixels and NOT a
-        // FrameSlot memcpy. layer->pixels points at the READ set
-        // (g_diorama_pixels[1 - g_diorama_write_set][source]) — the buffer the
-        // game thread just finished, while it captures the next frame into the
-        // other set. Synchronously (M2/M3) there is only one frame in flight so
-        // this is trivially safe; after M5 the pointer-swap is the handoff.
+        // THREADING (implemented contract — see §4.3): layer pixels live in
+        // dedicated Diorama surfaces, not g_hd_overlay_pixels and not a
+        // FrameSlot memcpy. Upload/capture ordering protects those surfaces;
+        // FrameSlot carries immutable request/content/additive masks.
         SDL_UpdateTexture(layer->texture, NULL, layer->pixels,
                           slot->snes_width * 4);
 
@@ -1283,96 +1277,54 @@ When diorama mode is toggled OFF, animate `tilt_x`/`tilt_y` → 0 and `fov_y` �
 
 In the settings overlay, add a "Diorama" section with per-layer visibility toggles. Allow the user to hide individual layers (e.g., hide BG3/HUD to see the playfield clearly, or hide BG1 to see the parallax background alone).
 
-### 5.8 Alpha model — the single source of truth for layer compositing
+### 5.8 Alpha and blend model — the single source of truth
 
-The whole diorama depends on getting alpha right per plane. This is the unified
-spec; every render decision above follows from it.
+The SNES has no alpha channel. It supplies source presence, per-pixel priority,
+and main/subscreen colour arithmetic. The host starts from **presence**:
+palette index zero becomes transparent and any drawn BG/OBJ pixel becomes
+straight-alpha RGBA with alpha `$FF`. Priority becomes the separated Diorama
+plane ordering. Colour math is handled only by an explicit proven transform; it
+must never be guessed from opacity or layer depth.
 
-**Foundational fact: the SNES has NO alpha channel. Every alpha value in this
-pipeline is host-synthesized — we invent all of it.** The PPU is a 15-bit BGR555
-machine: CGRAM entries are 5 bits each of B/G/R and nothing else (see the palette
-lookup at ppu.c:1220 and the old-path expansion at ppu_old.c:133-135). "Alpha" is
-not a concept the hardware or the game ROM has. What the SNES expresses instead is:
-- **Presence** — whether a layer produced a pixel at all (palette index 0 =
-  transparent for that layer). This is the ONLY thing that maps cleanly to alpha.
-- **Priority** — per-layer / per-tile / per-sprite ordering, resolved into ONE
-  opaque pixel per screen position at composite time.
-- **Color math** — additive/subtractive blend between main and sub screen, which
-  is *not* alpha; it's a per-pixel arithmetic op that also collapses to one opaque
-  output pixel.
+`PpuCapturedOverlayColor` applies the supported extraction policies:
 
-**The synthesis rule we use (and why it is what it is):** the capture path
-(`PpuOverlayColor`, ppu.c:1216-1224) maps **presence → binary alpha**:
-`palette index == 0` → `alpha 0x00` (this layer is absent here, let planes behind
-show through); any drawn pixel → `alpha 0xFF` (opaque). That is the correct and
-complete synthesis for *presence*. It deliberately does NOT try to synthesize alpha
-from priority (priority becomes plane Z-order in the diorama, §5.2) or from color
-math (which has no single-layer alpha representation — §8.1). So the alpha we fill
-in is exactly "did this layer draw here," which is what per-plane compositing needs.
+- ordinary drawn pixel: straight alpha `$FF`; empty pixel: all-zero RGBA;
+- eligible subscreen half-add: alpha `$80` (BG per layer, OBJ per eligible
+  palette group);
+- eligible fixed-colour BG subtraction: RGB is transformed in native 5-bit
+  component space before master-brightness expansion, alpha remains `$FF`;
+- disjoint full-add subscreen input: alpha remains `$FF`, but the PPU writes a
+  sparse plane containing only pixels where the source is the resolved TS
+  winner and the main winner enables math.
 
-The rest of this section is the concrete consequence of that rule.
+The resulting compositor contract is:
 
-**What the capture buffers actually contain (verified, ppu.c:1216-1224):**
-`PpuOverlayColor` writes **straight (non-premultiplied) alpha**, binary per pixel:
-- Opaque drawn pixel → `0xFF<<24 | RGB` (RGB already has INIDISP master brightness
-  baked via `brightnessMult`; alpha is a flat 0xFF, unaffected by brightness).
-- Empty/transparent position → `0x00000000` (RGB *and* alpha both zero).
-Each capture line is cleared to all-zero first (`PpuClearOverlayRenderLine`,
-ppu.c:1232-1261), so untouched texels are fully transparent. There is **no partial
-alpha** — a captured layer is either fully opaque or fully absent at each pixel.
+| Plane/content | Buffer representation | SDL blend |
+| --- | --- | --- |
+| Backdrop `g_pixels` | RGB with alpha zero in the new PPU path | `SDL_BLENDMODE_NONE` |
+| Ordinary BG/OBJ | straight alpha `$FF` drawn / zero empty | `SDL_BLENDMODE_BLEND` |
+| Half-added BG or OBJ pixel | straight alpha `$80` | `SDL_BLENDMODE_BLEND` |
+| Resolved full-add TS plane | sparse straight-alpha `$FF` addends | `SDL_BLENDMODE_ADD` |
+| Fixed-colour-subtracted BG | already-corrected RGB, binary alpha | `SDL_BLENDMODE_BLEND` |
 
-**Consequences for compositing:**
+`SDL_BLENDMODE_BLEND` implements straight source-over; the captured RGB is not
+premultiplied. Do not use a premultiplied blend without converting the buffers.
+`SDL_BLENDMODE_ADD` is used only for the resolved full-add subset published in
+`FrameSlot.diorama_plane_additive_mask`. The three-pass order is ordinary main
+world, additive TS, then BG3. Ordinary scenes retain their historical painter
+pass.
 
-| Plane | Source | Alpha in buffer | SDL blend mode | Why |
-|-------|--------|-----------------|----------------|-----|
-| Backdrop | `g_pixels` | **0x00** (new-path composite ppu.c:1436-1438/1473 writes RGB only; old path ppu_old.c:136) | **`SDL_BLENDMODE_NONE`** | It's the farthest, fully opaque plane. Under BLEND its alpha-0 would blit invisible — the SDL3 black-screen bug class. |
-| BG1/BG2/BG3 | overlay capture | 0xFF opaque / 0x00 empty | `SDL_BLENDMODE_BLEND` | Straight alpha; transparent where the layer didn't draw, so lower planes show through. |
-| OBJ (sprites) | overlay capture | 0xFF opaque / 0x00 empty | `SDL_BLENDMODE_BLEND` | Same. |
+INIDISP brightness is already baked into captured RGB. COLDATA/CGADSUB effects
+are not automatically baked merely because the native flat framebuffer is
+correct: only the explicitly classified half-add, disjoint full-add, and
+fixed-colour-subtract forms above are reproduced. Overlapping main/sub source
+ownership, unsupported windows/direct colour, and general subtraction fail
+closed as described in §8.1.
 
-**SDL blend equation match (SDL_blendmode.h:55):** `SDL_BLENDMODE_BLEND` is
-`dstRGB = srcRGB*srcA + dstRGB*(1-srcA)` — straight alpha, which matches the
-capture buffers (RGB is NOT premultiplied by A). Do **NOT** use
-`SDL_BLENDMODE_BLEND_PREMULTIPLIED` (SDL_blendmode.h:56) — the capture RGB is not
-premultiplied, so premultiplied blend would over-brighten edges.
-
-**Backdrop alternatives (pick one; the table uses option A):**
-- **A. NONE blend on the backdrop plane** (used in §5.5). Simplest; matches how
-  `g_texture` is already handled today (`SDL_BLENDMODE_NONE`, main.c:2035).
-- **B. Force backdrop alpha to 0xFF** before upload (a cheap pass over `g_pixels`,
-  or bind a dedicated backdrop buffer whose alpha byte is set). Lets it use BLEND
-  uniformly if a later effect needs it. More work, no benefit for v1.
-- **C. Skip the backdrop texture entirely** and `SDL_RenderClear` to the CGRAM[0]
-  color (read the backdrop palette entry, convert, clear to it). Avoids a texture
-  upload, but loses per-pixel backdrop effects (color-math backdrop, gradient
-  HDMA on the backdrop) — ActRaiser action stages rarely use those, so C is a
-  valid optimization if the backdrop is provably flat. Default to A.
-
-**Partial transparency (SNES color math) is NOT in the alpha model — see §8.1.**
-The capture applies only brightness, not color math, so a formerly-translucent
-layer (water, glass) is captured fully **opaque** (alpha 0xFF). In diorama mode it
-therefore renders opaque, not see-through. This is a known limitation, documented
-in §8.1. A v2 could bake color-math intensity into per-pixel alpha (e.g. a 50%
-half-add region → alpha 0x80) so `SDL_BLENDMODE_BLEND` reproduces the translucency
-in 3D — but that requires the PPU capture path to emit sub-0xFF alpha, which it
-does not today (`PpuOverlayColor` hardcodes `0xFF` for any drawn pixel). Flag for
-the v2 color-math work, not v1.
-
-**Per-layer opacity (optional feature):** `SDL_RenderGeometry` modulates the
-texture by per-vertex `SDL_FColor`. The §5.5 mesh uses `{1,1,1,1}`. To add a
-per-layer opacity slider (dim a plane), set the vertex color alpha to the desired
-factor on all of that layer's vertices — SDL multiplies it into the sampled
-texture alpha before the BLEND equation. This composes correctly with straight
-alpha. (Do not also call `SDL_SetTextureAlphaMod` — vertex-color alpha already
-covers it and `SDL_RenderGeometry` ignores `SDL_SetTextureColorMod`/`AlphaMod`
-per SDL_render.h:2465-2466.)
-
-**Sampling/fringing note:** with `SDL_SCALEMODE_NEAREST` (used everywhere for the
-game planes) there is no interpolation across the transparent/opaque boundary, so
-straight-alpha RGB=0 texels cannot dark-fringe opaque edges. **If the GPU path
-(§7) or any future effect switches a game-plane texture to `SDL_SCALEMODE_LINEAR`,
-straight alpha with RGB=0 in transparent texels WILL cause dark halos** at layer
-edges. Either keep NEAREST for game planes, or premultiply before a LINEAR sample.
-Noted so the §7 shader work doesn't reintroduce it.
+Nearest sampling preserves transparent edges. A future linear-sampling path
+must premultiply or otherwise pad edge colours to avoid dark fringes. Optional
+per-layer opacity may multiply vertex alpha, but it is a presentation effect and
+must remain separate from the hardware colour-math classification.
 
 ### 5.9 Aspect/crop fidelity — the diorama bypasses the flat present pipeline
 
@@ -1573,66 +1525,73 @@ Path B is an enhancement over the `SDL_RenderGeometry` approach — not a prereq
 
 ### 8.1 Color Math in Diorama Mode
 
-**The problem:** SNES color math (add/subtract) blends the mainscreen pixel with the subscreen pixel per-pixel. When layers are separated into independent planes, this inter-layer blend can't happen in the PPU pass.
+Main and subscreen are two independently priority-resolved operands, not two
+mutually exclusive scene definitions. TM (`$212C`) and TS (`$212D`) select
+BG1-BG4/OBJ membership; TMW/TSW apply their windows; CGWSEL (`$2130`) chooses
+the fixed colour or resolved subscreen as the second operand and controls colour
+windows/direct colour; CGADSUB (`$2131`) selects source layers plus add/subtract
+and half mode.
 
-**ActRaiser's usage:** Color math in ActRaiser is primarily:
-- Screen fades — via TWO different mechanisms with DIFFERENT outcomes under capture (detailed in the "Fades" qualification below): INIDISP master-brightness fades survive; COLDATA fixed-color add/subtract fades do NOT. Do not assume fades are uniformly safe.
-- Water/lava transparency (BG1 atop BG2 with half-add) — rare, only specific action-stage scenes.
-- Window-masked fog regions — very rare.
+Marahna is the decisive action-stage example. Both `0501` gf2331 and `0502`
+gf9728 record TM=`$06` (BG2+BG3), TS=`$11` (BG1+OBJ),
+CGWSEL=`$02`, CGADSUB=`$03`. BG1 and OBJ are therefore visible only as the
+resolved subscreen input to full addition. Capturing TM alone loses the playable
+layer and sprites; capturing TM and TS as ordinary opaque planes loses the
+water/detail created by the arithmetic.
 
-**Relationship to the alpha model (§5.8):** the capture path emits **binary** alpha
-(0xFF opaque / 0x00 empty) and never sub-0xFF — `PpuOverlayColor` hardcodes `0xFF`
-for any drawn pixel (ppu.c:1221). So there is no alpha channel available to express
-"this pixel was 50% translucent via color math." A translucent region is captured
-fully opaque. Fades are the exception that still works, but for a subtle reason:
-they are **brightness** (INIDISP), baked into the RGB via `brightnessMult`, *not*
-into alpha — so a mid-fade frame captures with darkened RGB and full 0xFF alpha,
-which composites correctly. Color-math *transparency* (add/sub between screens) has
-no such RGB-only representation and is lost.
+The shipped separated-plane path supports only forms with an exact
+representation:
 
-**Solution for v1:** Accept the visual difference. Color math is not reproduced in
-diorama mode. Cross-layer transparency (water/glass/lava half-add) renders as an
-opaque plane instead of a see-through one.
+| Native form | Admission | Representation |
+| --- | --- | --- |
+| Subscreen half-add | addend is TS, add not subtract, half set; selected BG is not itself on TS | alpha `$80` source-over; OBJ remains per palette group |
+| Disjoint subscreen full-add | CGWSEL exactly `$02`; no half/subtract; TM/TS visual masks disjoint; a main source enables math | PPU-resolved sparse TS winner planes, saturated additive host pass |
+| Full fixed-colour BG subtraction | CGWSEL zero; subtract set, half clear; nonzero fixed colour; selected BG | bake subtraction in SNES 5-bit space before brightness expansion |
+| INIDISP master brightness | any supported scene | already baked into captured RGB |
 
-**Fades — the important qualification (do NOT assume "fades just work"):** the SNES
-has TWO distinct fade mechanisms, and only one survives capture:
-- **INIDISP master-brightness fades** ($2100, `PPU_brightness`): baked into the
-  captured RGB via `brightnessMult` (ppu.c:362-364, applied in PpuOverlayColor at
-  ppu.c:1222-1224). These reproduce correctly in diorama mode.
-- **Color-math fixed-color fades** (COLDATA $2132 add/subtract toward black/white):
-  applied only in the *composite* loop (`fixed_color` at ppu.c:1458/1460, add/sub
-  at 1463-1471), which writes to the flat framebuffer and **never touches the
-  overlay capture**. In diorama mode a COLDATA fade would be LOST — the layer stays
-  full-brightness, then hard-cuts when the fade completes.
+The full-add PPU filter is per pixel, not a frame-level source-mask shortcut. It
+reconstructs main and subscreen winners after windows/priority, keeps a TS pixel
+only when that exact source wins, and checks that the main winner enables math.
+BG3 is reinserted after the additive world; relocated HUD OAM is excluded from
+the addend scratch. The immutable additive plane mask crosses the game/present
+thread boundary in `FrameSlot`.
 
-**Action required (on-target check):** verify how ActRaiser's action stages
-implement their fades (stage entry/exit, death, boss transitions). No ROM on this
-machine, so this must be checked on a target machine. If any action-stage fade uses
-COLDATA color-math, diorama mode needs to either (a) detect COLDATA-active frames
-and fall back to the flat present path for that transition, or (b) bake the
-fixed-color add/subtract into each captured layer's RGB (a v2 capture-path change).
-Until verified, do NOT claim fades are safe in diorama mode.
+Overlapping TM/TS ownership is deliberately rejected by the full-add classifier:
+the two screens may use different windows, while one isolated source buffer
+cannot encode both renderings. Direct colour, colour-window math/prevention,
+half-subtract, general subtraction, and fixed-colour addition likewise have no
+generic separated-plane representation today. “Fail closed” here means no
+guessed transform is applied; it does not prove visual equivalence. A newly
+observed unsupported action frame must be measured and either receive a proven
+capture policy or use the authentic flat composite for that frame.
 
-**Solution for v2 (if needed), two options:**
-- *Bake into alpha:* extend the PPU capture so a color-math pixel emits sub-0xFF
-  alpha proportional to the math (a half-add → alpha ~0x80). Then the existing
-  `SDL_BLENDMODE_BLEND` compositing reproduces the translucency in 3D with no
-  renderer change. Requires modifying `PpuOverlayColor`/the capture write to know
-  the per-pixel math factor (which the composite computes but the capture discards).
-- *Merge the pair:* when color math is active between two layers, pre-composite the
-  math result into a single "blended pair" surface and project it at the averaged Z
-  of the two layers. Simpler PPU-side, but collapses two planes into one (less 3D
-  separation exactly where the effect is).
+Fades retain the same qualification. INIDISP fades are safe because brightness
+is in RGB. A COLDATA/CGADSUB fade is safe only if it matches a supported form
+above; fixed-colour addition is still an explicit action-stage acceptance risk.
+Never infer fade safety solely from the fact that ordinary flat scanout looks
+correct.
 
-### 8.2 Per-Tile Priority Split
+The durable implementation/evidence reference is rendering-engine.md §13.4;
+the ownership boundary is recorded in SEAMS.md.
 
-SNES tiles have a per-tile priority bit. In Mode 1, a high-priority BG1 tile renders ABOVE low-priority sprites, while a low-priority BG1 tile renders BELOW them. This means a single BG layer is not truly "one plane" — parts of it interleave with the sprite layer.
+### 8.2 Per-Tile and OBJ Priority Split
 
-**Impact in diorama mode:** The BG1 plane sits at a single Z depth. High-priority tiles that should be "in front of" sprites will appear behind the sprite plane instead.
+The original single-plane simplification has been superseded. The PPU overlay
+API now binds priority-band surfaces. BG1 and BG2 each split priority-0 and
+priority-1 tiles; OBJ splits priorities 0-3. The source z-buffer decides the
+winner first, then routes that winning pixel to exactly one band, so overlapping
+sprite parts cannot appear in several planes.
 
-**Solution for v1:** Accept — the diorama is a novelty view, not a pixel-accurate composite. The flat 2D mode remains the reference.
+The Diorama plane order reproduces the Mode-1 interleave:
+OBJ0/OBJ1 behind the playfield, BG2-low, BG1-low, OBJ2, BG2-high, BG1-high,
+OBJ3, then BG3. Authored depth/rake overrides may change presentation geometry,
+but the capture identity remains explicit (`bg1`, `bg1hi`, `bg2`,
+`bg2hi`, and `obj0`-`obj3`).
 
-**Solution for v2:** Split BG1 into two sub-layers: "BG1-lo" (below sprites) and "BG1-hi" (above sprites). The overlay capture system already carries priority information in `PpuZbufType` — bits 8-15 encode the priority level (`(data[i] >> 8) & 0xf` gives the layer identity in the new PPU composite, ppu.c:1448). Similarly, OBJ priority is encoded in `objBuffer.data[x]` bits 12-15: values 2/6/10/14 for OAM priorities 0-3 (via `SPRITE_PRIO_TO_PRIO_HI`, ppu.h:281). Fork `PpuWriteOverlayRenderLine` to write high-priority pixels to one buffer and low-priority to another, keyed on the priority bits already present in the z-buffer entry.
+A full-add source marks all of its priority bands in
+`diorama_plane_additive_mask`; each band is already sparse at pixels that lost
+the native subscreen resolve. This keeps priority splitting and the Marahna
+colour-math handoff orthogonal rather than collapsing either one.
 
 ### 8.3 Window Effects — TWO kinds, only one is baked into captures
 
@@ -1660,24 +1619,27 @@ do, diorama mode must fall back to the flat path for those frames, or replicate 
 clip in the compositor. Per-layer visibility windows need no handling. Until
 verified, do not claim the color window is handled.
 
-### 8.4 Mode 7 / Sim Mode — OUT OF SCOPE
+### 8.4 Non-action presentation — separate pipelines
 
-ActRaiser's simulation mode (town-building, world map, Sky Palace) uses Mode 7
-(rotated/scaled BG1) as a top-down view. **A flat-plane diorama does not fit
-this** — a true 3D terrain projection would be required, and that is deferred to
-a follow-up design session (see the Scope banner).
+The original plan incorrectly grouped every simulation/overworld screen under
+Mode 7. The current map is:
 
-The diorama renderer therefore **never engages in sim mode.** The capture policy
-(§4.2) gates on `ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])`; sim
-scenes fall through to the normal flat present path unchanged.
+- town simulation views are ordinary PPU Mode 1 and may use the independent
+  Sim3D ground, semantic billboard, weather, lighting, and HUD pipeline;
+- world navigation is Mode 7 and may use its independent forced-top-down
+  full-plane 3D scene;
+- Sky Palace, menus, title, and other screens use their own flat/overlay paths.
 
-**Mechanism note for a future sim-3D session:** `g_m7_overlay_pixels` is NOT a
-usable sim-mode "floor plane." That surface is allocated only when an HD manifest
-supplies Mode-7 replacement art (`BindHdReplacementSurfaces`, main.c:1635-1651);
-a stock sim scene with no HD pack has no such surface. Mode-7 BG1 is captured as
-the ordinary BG1 overlay source when the new PPU runs (ppu.c:1369-1372), not via
-the m7 override. This is moot for the current scope (sim mode is excluded), but
-recorded so a future sim-3D session starts from the correct mechanism.
+`Diorama_IsActiveThisFrame` remains action-map-only. This action capture policy
+must never bind its BG/OBJ surfaces in those other branches, even when a
+presentation setting named “Diorama” or shared visual effects are enabled. The
+non-action systems publish their own immutable `FrameSlot.sim` data and do not
+reuse the action layer order or additive-plane mask.
+
+`g_m7_overlay_pixels` is an HD Mode-7 replacement surface, not a generic town
+floor. The shipped town renderer derives its scene from Mode-1 captures plus
+semantic state; world-navigation 3D owns its complete Mode-7 plane separately.
+See rendering-engine.md §13b/§13h and the simulation/world-navigation specs.
 
 ### 8.5 Settings Overlay / Scene Inspector
 
@@ -2180,8 +2142,8 @@ M5 = Phase 1; M6 = Phase 2; M7 = Phase 5; M8 = Phase 6.)
 | SDL3 `"gpu"` renderer not available on all platforms | Low | Low (Phase 6 only; Path A doesn't need it) | GPU path is optional; `SDL_RenderGeometry` works on all backends |
 | Present thread deadlock on window close | Medium | Medium | Careful shutdown sequence (§2.6); timeout on condition wait |
 | Audio dropout from lock contention with faster game loop | Low | Low | Already mitigated by existing 256-batch APU lock design; Phase 2 doesn't change lock behavior |
-| Color math visual artifacts in diorama mode | Certain | Low (novelty mode) | Document as known limitation; offer "composite" fallback layer for affected scenes |
-| **COLDATA color-math fades lost in diorama** (only INIDISP-brightness fades are baked into captures; fixed-color add/sub fades render as no-fade-then-cut) | Unknown (needs ROM check) | Medium | §8.1: verify ActRaiser action-stage fade mechanism on-target; if COLDATA, fall back to flat present for those frames or bake the add/sub into captured RGB |
+| Unsupported colour-math form appears in Diorama mode | Unknown | Medium | §8.1: supported half-add, disjoint full-add, and fixed-colour-subtract states have exact policies; measure any other register topology and add a proven policy or use the authentic flat composite for that frame |
+| **COLDATA fixed-colour-add fade appears in action Diorama** (INIDISP brightness and the measured fixed-colour subtraction are reproduced; general fixed-colour addition is not) | Unknown | Medium | Log the complete TM/TS/TMW/TSW/CGWSEL/CGADSUB/COLDATA state; fall back to flat present or implement the native 5-bit operation only after a live fixture pins it |
 | **Color-window clip-to-black lost in diorama** (per-layer visibility windows ARE baked; the color/math window index 5 is composite-time only) | Unknown (needs ROM check) | Medium | §8.3: verify action-stage color-window use (iris/spotlight); fall back to flat path or replicate clip in compositor |
 | Phase-5 UV interpolation wraps opposite-edge content | Low | Low | §6.4: set `SDL_TEXTURE_ADDRESS_CLAMP` for game planes or clamp shifted UVs |
 | HDMA-heavy scenes (Mode 7 title, wavy effects) look wrong at >60Hz | Medium | Low | Interpolation only shifts whole-frame scroll; HDMA baked into pixels; visual is "correct at 60fps, static between" |
