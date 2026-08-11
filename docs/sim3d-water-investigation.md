@@ -1,15 +1,21 @@
 # Sim-3D water surface: shader feasibility investigation
 
-Status: **preliminary — evidence gathered, nothing implemented.** Companion to
+Status: **preliminary — evidence gathered and a look chosen from a live
+preview; nothing implemented in the engine.** Companion to
 [rendering-engine.md](rendering-engine.md) §7 (tile animation),
 [effects-hook-investigation.md](effects-hook-investigation.md) (the same
 "identify the authentic state first, then choose a style" method), and
 [../specs/ar-recomp-sim-rendering-plan.md](../specs/ar-recomp-sim-rendering-plan.md).
 
-The question: can the sim-3D town view give its water light-based shimmer,
-depth and transparency, and what does that cost? The answer is yes, and the
-part that looked hardest — knowing which pixels are water — turns out to be
-exactly derivable from state the game already publishes.
+The question: can the sim-3D town view give its water depth and transparency,
+and what does that cost? The answer is yes, and the part that looked hardest —
+knowing which pixels are water — turns out to be exactly derivable from state
+the game already publishes.
+
+The style question was settled separately, by building each candidate and
+looking at it: see §4. The short version is a visible ocean bed at a fixed
+depth under a mostly-transparent glassy surface — deliberately stylised rather
+than simulated, with no motion of its own.
 
 ## 1. The blocker that isn't: identifying water
 
@@ -108,12 +114,13 @@ them are visible.
 | World-map underlay, 1024² + blurred mip | `DrawSimWorldUnderlay`, `src/present_sim3d.c:2376` | world map | §1d, built in `SimWorldMap_Bake` |
 
 All three are `SDL_RenderGeometry` calls over a projected mesh, so one
-fragment shader covers all three. The wave phase must be computed in **town /
-world space**, not UV space, or the animation will visibly shear across the
-canvas-to-underlay seam and slide when the camera scrolls. That means each
-draw supplies a UV→world affine transform as a uniform; the values already
-exist (`slot->sim.camera_x/y`, `underlay_screen_x0`, and the
-`texture_x_at_zero` / `span` arguments `DrawSimGroundExtension` already takes).
+fragment shader covers all three. Everything spatial — the bed, the sheen
+patches, the grain — must be computed in **town / world space**, not UV space,
+or it will visibly shear across the canvas-to-underlay seam and swim when the
+camera scrolls. That means each draw supplies a UV→world affine transform as a
+uniform; the values already exist (`slot->sim.camera_x/y`,
+`underlay_screen_x0`, and the `texture_x_at_zero` / `span` arguments
+`DrawSimGroundExtension` already takes).
 
 ## 3. Shader hook mechanics
 
@@ -149,7 +156,7 @@ accompanies, so it costs one extra streaming texture and no extra CPU passes:
 | Channel | Content | Feeds |
 |---|---|---|
 | R | water coverage 0/255 | everything |
-| G | distance to shore, clamped to **32px** (see §4) | bed falloff, absorption, foam |
+| G | distance to shore, clamped to 32px (8px suffices — see §4) | the pane edge |
 | B | reserved (flow direction / river-vs-sea class) | directional ripple |
 | A | 255 | — |
 
@@ -161,57 +168,112 @@ it or the edges alias back to 8-pixel stairsteps.
 
 The house style here is a lit diorama of 16-bit art, not a photoreal ocean.
 
-**The direction, decided after seeing a live preview of the alternative: the
-ROM's own tile animation carries the motion, and the shader supplies depth.**
-An earlier pass built the effect around animated specular shimmer and a
-scrolling wave normal. On the real art it fought the ROM's 4-frame CHR cycle
-rather than adding to it — two unrelated motions on one surface. Everything
-below therefore has **no time term at all** except one deliberately small
-ripple. The authentic 7.5 fps cadence is the movement the eye should read.
+**The direction, arrived at over three rounds of live preview: a visible ocean
+bed at one fixed depth, a thin blue body over it, and the ROM's water tile
+contributing nothing but its bright pixels as glints on the surface.**
+Deliberately *un*realistic — no wave simulation, no flow, no moving highlight.
+The only thing that moves anywhere in the effect is the authentic 7.5 fps CHR
+cycle.
 
-1. **A bed under the water.** Shore sand fading to a dark floor with the shore
-   distance, plus static grain. **This is invented content** — the ROM's water
-   tiles are opaque and there is no seabed art anywhere in the game. Building
-   it out of the map's own palette (bank 1's two sand entries, and a floor
-   derived by darkening the deep-water colour) is what keeps it from reading
-   as imported from a different game. It is a larger departure than lighting
-   existing pixels, and worth taking deliberately rather than by drift.
-2. **Transparency over that bed.** Absorption driven by shore distance:
-   shallow water is nearly clear, deep water hides the bed. Note the ground
-   plane itself must stay **opaque** — it is the backing that stops the
+Three earlier passes are worth recording because each was rejected for a
+concrete reason:
+
+- **Animated specular shimmer** fought the ROM's 4-frame cycle rather than
+  adding to it — two unrelated motions on one surface.
+- **Depth-graded water** (absorption ramping with shore distance) still read
+  as a simulated body of water. Flattening it to one depth is what makes it
+  read as a built diorama instead.
+- **The tile as an opaque pane** (`mix(art, bed, sheerness)`) was wrong in
+  kind: it made the ROM art *replace* the water colour rather than sit over a
+  floor, so raising sheerness dissolved the water instead of revealing a bed.
+
+The model:
+
+1. **A bed you are meant to see.** Mixed from bank 1's own sand, rock and weed
+   entries and — the part that makes it work — **quantised to whole town
+   pixels** in a few flat steps. Smooth procedural noise sitting under 8×8
+   pixel art reads as a photograph slid in behind the sprites; snapping it to
+   the same grid makes it belong to the map. **This is invented content**: the
+   ROM's water tiles are opaque and there is no floor art anywhere in the game.
+   It is the largest single thing the effect adds, and worth taking
+   deliberately rather than by drift.
+2. **One fixed depth.** Uniform darkening, no shore ramp.
+3. **The body as absorption, not a lerp.** Multiply the bed by a per-channel
+   absorption with red falling off first, *then* mix toward a scatter colour.
+   Lerping the bed toward a mid blue instead desaturates everything and the
+   pool comes out a pale grey haze — this was measured, not assumed. Note the
+   ground plane itself must stay **opaque**: it is the backing that stops the
    world-map underlay showing through (see the comment at
-   `src/present_sim3d.c:2444`). The transparency is between the synthesised
-   bed and the water body, entirely inside the shader.
-3. **The authored art returns on top as the surface.** Classify each water
-   pixel by luminance against the three authored shades: the light crests stay,
-   the flat body becomes glass. This is the term that makes the tile animation
-   the thing you actually watch, and it costs one dot product. A hard
-   three-way colour match would break under the canvas's `LINEAR` filtering; a
-   `smoothstep` over luminance does not.
-4. **Static sheen.** Fixed glare patches from low-frequency noise, pinned in
-   town space and weighted toward the crests the ROM already drew. Placement
-   comes from `SimShadowLight()` (`src/present_sim3d.c:766`) so the glare
-   agrees with the shadow direction instead of implying a second sun;
-   elevation sets brightness only, never position. Glare that ignores the art
-   reads as fog sitting on the water rather than light coming off it.
-5. **Shoreline foam.** A band inside ~4 px of shore from the distance channel.
-   Static; the ROM's crest animation supplies its liveliness.
-6. **One small live ripple.** A single specular term on an animated normal,
-   default low. Kept only as a dial, not as the effect.
+   `src/present_sim3d.c:2444`). All of the transparency is internal to the
+   shader.
+4. **Only the tile's bright pixels return, as glints.** Threshold the ROM art
+   on luminance and let the light dashes through as reflections on the glass.
+   That is the entire surface treatment, and it is what keeps the authentic
+   cadence as the thing that twinkles without simulating anything.
+5. **Flat sky in the glass.** The ground quad's normal is constant (+Z), so a
+   true fresnel term is constant too. Flat is the correct answer here, not a
+   shortcut.
+6. **One broad sheen band raking across the sheet**, running along the light
+   azimuth from `SimShadowLight()` (`src/present_sim3d.c:766`) so it agrees
+   with the shadow direction instead of implying a second sun; elevation sets
+   brightness only, never position. Repeating rather than a single lobe, so
+   the open ocean beyond the town catches it too. No time term.
+7. **The pane's edge.** A clean static lip ~3 px from the waterline. Not foam
+   — it is the edge of the sheet, and it does not move.
 
-Deferred: **billboard reflections** (a second mirrored, mask-clipped object
-pass — real cost and real risk to the sort order) and **refractive wobble**
-(offsetting the colour sample by the wave normal; it must be clamped inside
-the mask or it drags grass into the water, and it is motion we just decided
-not to add).
+Dropped along with the realism: shoreline foam as an animated band, the live
+ripple, and refractive wobble. Still deferred: **billboard reflections** (a
+second mirrored, mask-clipped object pass — real cost and real risk to the
+sort order).
 
-### Shore distance needs ~32 px, not 8
+### 4a. Why it still looked wrong, and what fixed it
 
-The first field bake clamped shore distance to 8 town pixels. That is fine for
-a foam band and useless for anything else: it leaves a ~4 px shallow fringe and
-everything beyond it is flat "deep". Clamping to **32 px** puts about 60% of
-Fillmore's water inside the ramp, which is what gives the bed and the
-absorption somewhere to happen. Foam then uses the first ~14% of the range.
+With all of the above in place the result was *correct* and still did not look
+good. The reason was one root cause with three faces: **a shader emits
+thousands of continuous colour values into a scene assembled from a handful of
+palette entries on an 8-pixel grid.** Everything below is about putting the
+output back on the source's own terms, and each is cheap.
+
+1. **Posterise with an ordered dither.** Snap the result to a coarse ramp
+   (~5 levels per channel at full strength, against BGR555's real 32) using a
+   4×4 Bayer matrix **indexed in town pixels, not screen pixels** — locked to
+   the art's grid, so it does not crawl when the camera moves. This is the
+   single largest improvement available and it is about six lines. The source
+   gets all its gradients this way; matching that is most of what "looks like
+   the same game" means.
+2. **Quantise the bed to 8-pixel cells, not single pixels.** Snapping the
+   noise to whole town pixels was not enough — every *other* feature on the map
+   is built from 8×8 tiles, so a floor whose shapes ignore that grid reads as
+   organic blobs sitting underneath a tiled world. An 8 px cell for the coarse
+   layer with a 2 px sub-cell for detail keeps it on the grid without going
+   uniformly chunky. Dither the boundary between two bed colours rather than
+   hard-stepping it, which is exactly how the source transitions between two
+   palette entries.
+3. **Parallax the bed against the surface.** Offset the floor sample along the
+   view direction, scaled by depth. This is the depth cue that darkening can
+   never supply: without it the bed is painted *on* the water rather than
+   lying under it, and no amount of tint tuning fixes that.
+4. **Give the shoreline a direction.** A uniform bright ring around the whole
+   coast reads as a selection outline, because it ignores where the light is.
+   Take the gradient of the shore-distance channel to get the direction of
+   land, dot it with the light azimuth, and use the sign: land toward the sun
+   casts *into* the water, land away from it catches a lip. One term, two
+   signs, and the coast acquires a direction.
+
+Not yet tried, in rough order of likely payoff: constraining output to the
+town's **actual CGRAM entries** rather than a generic ramp (nearest-colour
+against the live palette, which would make it exactly on-model); replacing the
+smooth sheen band with hard-edged authored *shapes* in the ROM's own dash
+idiom; and giving the bed a small set of authored 8×8 patterns instead of
+noise at all.
+
+### Shore distance: 8 px is enough again
+
+The field bake was widened from 8 to 32 town pixels when the bed was
+depth-graded, because an 8 px clamp leaves only a ~4 px shallow fringe. With
+the depth fixed, the distance channel is only consumed by the ~3 px pane edge,
+so **8 px would do**. The 32 px bake is kept because it costs nothing and
+preserves the option, but nothing in the current model needs it.
 
 ## 5. Constraints and traps
 
@@ -235,7 +297,13 @@ absorption somewhere to happen. Foam then uses the first ~14% of the range.
   all of which are one-line changes by design.
 - **The blurred underlay mip.** `s_sim_underlay_blur_texture` is a separate
   downsampled image. Its field texture must be downsampled the same way, or
-  the far ocean shimmers on a mask that does not match its own pixels.
+  the far ocean is shaded through a mask that does not match its own pixels.
+- **The ground quad's normal is +Z, not +Y.** Its geometry is a quad in the XY
+  plane tilted about X (`Scene3D_BuildViewProjection`), not a horizontal plane
+  under an elevated camera. A Y-up normal makes every view-dependent term fire
+  uniformly across the whole surface instead of tracking the art, which reads
+  as a flat milky wash. This was a real bug in the preview before it was one in
+  the engine.
 - **CRT post-process composes fine.** It is a resolve pass over the finished
   frame; this is a per-draw render state. No interaction.
 - **Not covered here:** the widescreen margin and vertical-extend streaming
@@ -251,5 +319,13 @@ absorption somewhere to happen. Foam then uses the first ~14% of the range.
    verification.
 3. Same field applied to the **live BG1 planes** via the camera offset, which
    is what closes the seam and makes the visible window match.
-4. Effects 1-4 from §4, behind one settings row with a strength slider.
-5. Refraction and reflections only if 1-4 leave something wanted.
+4. Terms 1-7 from §4 — the quantised bed, fixed depth, absorption, the tile's
+   glints, flat sky, the sheen band, the pane edge — behind one settings row
+   with a strength slider.
+5. Billboard reflections only if that leaves something wanted. On present
+   evidence it does not.
+
+A live preview of the §4 model, running the real shader over the captured
+Fillmore canvas and the derived mask, is the artifact published from this
+work. It is the right place to settle strengths before any of the above is
+written.
