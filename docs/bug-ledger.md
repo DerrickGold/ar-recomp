@@ -1434,6 +1434,32 @@ the current debugging process; this file is the case law.
     total vertices or outer bounds—and make exceptional capacity proportional
     to the lifecycle cardinality that can actually occur.
 
+47. **Opening the simulation menu left the hourglass at authentic centre
+    screen — FIXED 2026-08-10; post-fix visual confirmation pending.** The
+    gf61067 snapshot in `runs/20260810-231616` shows the menu consuming OAM
+    slots 0-10 and the unchanged hourglass signature in slots 11-14: phase
+    `$EF`, x `$94/$9B`, y `$0B/$13`, attrs `$31/$71`, lower tiles `$FF`.
+
+    **Root cause:** promotion treated the hourglass shape and its allocation as
+    one invariant. The validator read only slots 0-3, which is correct for the
+    ordinary town HUD and false as soon as menu sprites allocate first. The
+    failed validation left the ROM's authentic-centre draw in place while BG3's
+    other HUD groups moved to their widescreen anchors.
+
+    **Fix:** `ActRaiser_FindSimulationHourglass` scans every complete four-slot
+    range and fails closed unless position, phase-relative tiles, attributes,
+    X-high bits, and size bits all match. `ActRaiser_WidescreenHudObjPromote`
+    now carries the discovered range through the same common capture/latch path
+    used by the other HUD icons. The regression replays both the ordinary
+    slot-0 phase and the exact menu-shifted slot-11 OAM/high-OAM bytes, plus a
+    malformed-size rejection. The release application builds and all 45 tests
+    pass (the display-backed shader test was run separately with display
+    access).
+
+    **Reusable lesson:** fixed-screen coordinates do not imply fixed OAM slots.
+    Any HUD sprite sharing the allocator with menus or dialog must identify its
+    complete shape first and treat the resulting slot range as per-frame data.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

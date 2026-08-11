@@ -804,16 +804,19 @@ bundled runtime's widescreen/PPU interfaces:
   the generic OBJ overlay buffer; every other OBJ remains on the normal sprite
   path. Earlier render-scoped OAM coordinate mutation is gone, so emulated
   state, savestates, future DMA, and game logic remain authentic.
-- Simulation's hourglass (town maps 1-6) is also slots 0-3. The Fillmore
-  snapshot at `runs/20260716-172322/snapshots/snap_00_gf1378` identifies
+- Simulation's hourglass (town maps 1-6) has a fixed four-sprite shape but a
+  dynamic OAM allocation. The ordinary Fillmore snapshot at
+  `runs/20260716-172322/snapshots/snap_00_gf1378` places it in slots 0-3 and identifies
   fixed/overlay record 23 (`$083E`, live frame pointer `$01:DD4B`) and its OAM
   signature: left/right x `$94/$9B`, upper/lower y `$0B/$13`, and output
   attributes `$31/$71` (the right halves are horizontally flipped). ROM
   compositions at `$01:DD4B/$DD60/$DD75/$DD8A` prove four animation phases:
   paired upper tiles `$EC-$EF` and lower tiles `$FC-$FF`. Validation accepts
   only that range and requires both halves and the `+$10` lower-tile
-  relationship. The same host placement then pins the 16px capture four native
-  pixels before simulation's right/score group.
+  relationship. Opening the sim menu consumes slots 0-10 and moves the same
+  icon to slots 11-14 (`runs/20260810-231616`, gf61067), so promotion scans the
+  complete OAM table for this signature. The same host placement then pins the
+  16px capture four native pixels before simulation's right/score group.
 - Sky Palace's selected-magic icon is a separate OAM capture path: the game
   dynamically allocates its sprites. With no dialog sprites the icon can occupy
   slots 0-3; dialog/menu sprites can push the same icon to slots 6-9 (both
