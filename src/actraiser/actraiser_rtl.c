@@ -1546,11 +1546,11 @@ bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count) {
 /* Promote a validated fixed-screen HUD icon out of OAM.
  *
  * Action's $00:923A icon uses tiles $D4-$D7 in the first four slots.
- * Simulation's 2026-07-16 Fillmore capture proves the hourglass uses the same
- * slots at x=$94/$9B, y=$0B/$13; ROM frames $01:DD4B/$DD60/$DD75/$DD8A cycle
- * upper tiles $EC-$EF and paired lower tiles $FC-$FF, with horizontal flip on
- * each right half. Sky Palace's selected-magic icon is neither fixed-slot nor
- * fixed-shape and is scanned for -- see ActRaiser_SkyPalaceMagicIconSlots.
+ * Simulation's hourglass uses x=$94/$9B, y=$0B/$13; ROM frames
+ * $01:DD4B/$DD60/$DD75/$DD8A cycle upper tiles $EC-$EF and paired lower tiles
+ * $FC-$FF, with horizontal flip on each right half. Both non-action icons move
+ * to later slots when menu/dialog sprites appear and are scanned by their pure
+ * helpers in actraiser_game.h.
  *
  * All three land on the same 16x16 footprint, which is what lets the host draw
  * whatever this promotes as one 16x16 chunk beside the right HUD group. No
@@ -1563,6 +1563,8 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
     return;
 
   uint8 capture_height = 0;
+  uint8 capture_first = kActRaiserHudObjOamFirst;
+  uint8 capture_count = kActRaiserHudObjOamCount;
   uint8 map_group = g_ram[kActRaiserWram_MapGroup];
   uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
   if (g_ppu->wsHudSplitHeight == kActRaiserActionHudHeight &&
@@ -1619,43 +1621,21 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
       }
       if (found_slot < 0)
         return;
-      if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
-                               0, 0, kActRaiserAuthenticWidth,
-                               kActRaiserSimulationHudHeight,
-                               kPpuOverlayFlag_RemoveFromGame) &&
-          PpuSetOverlayOamRange(g_ppu, found_slot, found_count)) {
-        s_hud_obj_icon_first = (uint8_t)found_slot;
-        s_hud_obj_icon_count = (uint8_t)found_count;
-      }
-      return;
-    }
-    /* Town sim: hourglass is a 4-sprite animated icon in OAM slots 0-3. */
-    uint8 upper_tile = (uint8)g_ppu->oam[1];
-    if (upper_tile < kActRaiserSimulationHourglassFirstUpperTile ||
-        upper_tile >= kActRaiserSimulationHourglassFirstUpperTile +
-                          kActRaiserSimulationHourglassFrameCount)
-      return;
-    for (int slot = 0; slot < kActRaiserHudObjOamCount; slot++) {
-      int index = slot * 2;
-      uint16 xy = g_ppu->oam[index];
-      uint16 tile_attr = g_ppu->oam[index + 1];
-      uint8 expected_x = (slot & 1)
-          ? kActRaiserSimulationHourglassRightX
-          : kActRaiserSimulationHourglassLeftX;
-      uint8 expected_y = slot < 2
-          ? kActRaiserHudObjUpperY : kActRaiserHudObjLowerY;
-      uint8 expected_tile = slot < 2 ? upper_tile
-          : (uint8)(upper_tile +
-                    kActRaiserSimulationHourglassLowerTileOffset);
-      uint8 expected_attr = (slot & 1)
-          ? kActRaiserSimulationHourglassRightAttr
-          : kActRaiserSimulationHourglassLeftAttr;
-      if ((uint8)xy != expected_x || (uint8)(xy >> 8) != expected_y ||
-          (uint8)tile_attr != expected_tile ||
-          (uint8)(tile_attr >> 8) != expected_attr)
+      capture_height = kActRaiserSimulationHudHeight;
+      capture_first = (uint8_t)found_slot;
+      capture_count = (uint8_t)found_count;
+    } else {
+      /* Town sim: menus can push the four-sprite hourglass out of slots 0-3.
+       * Scan for the complete phase-relative signature instead of assuming an
+       * allocation; runs/20260810-231616 places it in slots 11-14. */
+      const int found_slot = ActRaiser_FindSimulationHourglass(
+          g_ppu->oam, g_ppu->highOam, kActRaiserPpuOamSlots);
+      if (found_slot < 0)
         return;
+      capture_height = kActRaiserSimulationHudHeight;
+      capture_first = (uint8_t)found_slot;
+      capture_count = kActRaiserHudObjOamCount;
     }
-    capture_height = kActRaiserSimulationHudHeight;
   } else {
     return;
   }
@@ -1664,10 +1644,9 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
                            0, 0, kActRaiserAuthenticWidth,
                            capture_height,
                            kPpuOverlayFlag_RemoveFromGame) &&
-      PpuSetOverlayOamRange(g_ppu, kActRaiserHudObjOamFirst,
-                            kActRaiserHudObjOamCount)) {
-    s_hud_obj_icon_first = kActRaiserHudObjOamFirst;
-    s_hud_obj_icon_count = kActRaiserHudObjOamCount;
+      PpuSetOverlayOamRange(g_ppu, capture_first, capture_count)) {
+    s_hud_obj_icon_first = capture_first;
+    s_hud_obj_icon_count = capture_count;
   }
 }
 

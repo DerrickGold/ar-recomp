@@ -392,6 +392,57 @@ static inline int ActRaiser_SimMapPickerActive(void) {
       ActRaiser_ReadWramMirror16(kActRaiserWram_SimMapPickerFlag));
 }
 
+/* Find the simulation-town hourglass in a raw OAM snapshot. The icon's shape
+ * is fixed but its allocation is not: the ordinary HUD uses slots 0-3, while
+ * the open-menu capture in runs/20260810-231616 uses slots 11-14 after menu
+ * sprites consume the earlier entries. Scan every possible four-slot range
+ * and claim only the complete measured signature.
+ *
+ * Each phase uses upper tile $EC-$EF and the paired lower tile $FC-$FF. All
+ * four entries must have zero high-OAM bits: their X positions are below 256
+ * and every piece is an 8x8 small sprite. Returns the first slot or -1. */
+static inline int ActRaiser_FindSimulationHourglass(
+    const uint16 *oam, const uint8 *high_oam, int oam_slots) {
+  if (!oam || !high_oam || oam_slots < kActRaiserHudObjOamCount)
+    return -1;
+
+  for (int s = 0; s + kActRaiserHudObjOamCount <= oam_slots; s++) {
+    const uint8 upper_tile = (uint8)oam[s * 2 + 1];
+    if (upper_tile < kActRaiserSimulationHourglassFirstUpperTile ||
+        upper_tile >= kActRaiserSimulationHourglassFirstUpperTile +
+                          kActRaiserSimulationHourglassFrameCount)
+      continue;
+
+    int matches = 1;
+    for (int i = 0; i < kActRaiserHudObjOamCount && matches; i++) {
+      const int slot = s + i;
+      const int index = slot * 2;
+      const uint16 xy = oam[index];
+      const uint16 tile_attr = oam[index + 1];
+      const uint8 expected_x = (i & 1)
+          ? kActRaiserSimulationHourglassRightX
+          : kActRaiserSimulationHourglassLeftX;
+      const uint8 expected_y = i < 2
+          ? kActRaiserHudObjUpperY : kActRaiserHudObjLowerY;
+      const uint8 expected_tile = i < 2 ? upper_tile
+          : (uint8)(upper_tile +
+                    kActRaiserSimulationHourglassLowerTileOffset);
+      const uint8 expected_attr = (i & 1)
+          ? kActRaiserSimulationHourglassRightAttr
+          : kActRaiserSimulationHourglassLeftAttr;
+      const uint8 high_bits =
+          (high_oam[slot >> 2] >> ((slot & 3) * 2)) & 3;
+      if ((uint8)xy != expected_x || (uint8)(xy >> 8) != expected_y ||
+          (uint8)tile_attr != expected_tile ||
+          (uint8)(tile_attr >> 8) != expected_attr || high_bits)
+        matches = 0;
+    }
+    if (matches)
+      return s;
+  }
+  return -1;
+}
+
 /* Does an OAM slot with these attributes START the Sky Palace selected-magic
  * HUD icon, and if so how many slots does the icon occupy? Pure so the promote,
  * and its test, agree on one answer; `large` is the slot's high-OAM size bit

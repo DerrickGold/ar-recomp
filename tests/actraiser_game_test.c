@@ -77,6 +77,44 @@ static void TestLivePickerPredicate(void) {
   CHECK(!ActRaiser_SimMapPickerActive());
 }
 
+static void TestSimulationHourglassScanRange(void) {
+  /* Ordinary town HUD: phase $EC in the first four slots. */
+  static const uint16 kFixedOam[] = {
+    0x0B94, 0x31EC, 0x0B9B, 0x71EC,
+    0x1394, 0x31FC, 0x139B, 0x71FC,
+  };
+  static const uint8 kFixedHighOam[] = { 0 };
+
+  /* Exact leading OAM words/high bits from gf61067 in
+   * runs/20260810-231616. Menu sprites occupy slots 0-10; phase $EF begins at
+   * slot 11 and retains the same four-small-sprite footprint. */
+  static const uint16 kMenuOam[] = {
+    0x2D20, 0x3D20, 0x3D20, 0x3B6C, 0x3D28, 0x7B6C,
+    0x4520, 0x3B7C, 0x4528, 0x7B7C, 0x3D32, 0x3D6E,
+    0x3D42, 0x3F80, 0x4D20, 0x3F60, 0x5D20, 0x3F4A,
+    0x6D20, 0x3D2E, 0x7D20, 0x3D44,
+    0x0B94, 0x31EF, 0x0B9B, 0x71EF,
+    0x1394, 0x31FF, 0x139B, 0x71FF,
+  };
+  static const uint8 kMenuHighOam[] = { 0x02, 0xA8, 0x2A, 0x80 };
+  uint8 malformed_high_oam[sizeof(kMenuHighOam)];
+
+  CHECK(ActRaiser_FindSimulationHourglass(
+      kFixedOam, kFixedHighOam,
+      (int)(sizeof(kFixedOam) / sizeof(kFixedOam[0]) / 2)) == 0);
+  CHECK(ActRaiser_FindSimulationHourglass(
+      kMenuOam, kMenuHighOam,
+      (int)(sizeof(kMenuOam) / sizeof(kMenuOam[0]) / 2)) == 11);
+
+  /* A size/X-high bit on any companion invalidates the fixed-screen shape. */
+  memcpy(malformed_high_oam, kMenuHighOam, sizeof(malformed_high_oam));
+  malformed_high_oam[3] |= 0x02;  /* slot 12 size bit */
+  CHECK(ActRaiser_FindSimulationHourglass(
+      kMenuOam, malformed_high_oam,
+      (int)(sizeof(kMenuOam) / sizeof(kMenuOam[0]) / 2)) == -1);
+  CHECK(ActRaiser_FindSimulationHourglass(NULL, NULL, 0) == -1);
+}
+
 /* Captured OAM, one snapshot per spell, from runs/20260806-232552 with all four
  * spells unlocked in the Sky Palace. These are the real bytes the ROM emitted,
  * not a reconstruction: slot 6 onward, x / y / attr / size-bit, read out of
@@ -219,6 +257,7 @@ int main(void) {
   TestSimulationTownScope();
   TestPurePickerPredicate();
   TestLivePickerPredicate();
+  TestSimulationHourglassScanRange();
   TestSkyPalaceMagicIconShapes();
   TestSkyPalaceMagicIconScanRange();
   if (failures) {
