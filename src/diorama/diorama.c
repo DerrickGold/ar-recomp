@@ -1556,6 +1556,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
+                       uint32_t additive_plane_mask,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
                        DioramaProjection *out_projection) {
   if (out_projection) memset(out_projection, 0, sizeof(*out_projection));
@@ -1846,9 +1847,35 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     }
   }
 
-  for (int i = 0; i < resolved_count; i++) {
+  /* Ordinary scenes retain the single historical painter pass byte-for-byte.
+   * A disjoint full-add scene needs three passes: main world, resolved TS
+   * addends, then BG3. The PPU capture has already made every additive plane
+   * sparse at non-winning pixels, so drawing all addends after the main world
+   * reproduces main+sub without letting a low-priority addend be overwritten by
+   * a later main plane. BG3 remains last because a non-math HUD winner must
+   * occlude (rather than receive) the subscreen contribution. */
+  int draw_order[kDioramaLayerCount];
+  int draw_count = 0;
+  const int blend_pass_count = additive_plane_mask ? 3 : 1;
+  for (int blend_pass = 0; blend_pass < blend_pass_count; blend_pass++) {
+    for (int i = 0; i < resolved_count; i++) {
+      const int plane = resolved[i].plane;
+      const bool additive =
+          (additive_plane_mask & (1u << (unsigned)plane)) != 0;
+      int plane_pass = 0;
+      if (additive_plane_mask)
+        plane_pass = additive ? 1
+            : plane == kPpuOverlaySource_Bg3 ? 2 : 0;
+      if (plane_pass == blend_pass)
+        draw_order[draw_count++] = i;
+    }
+  }
+  for (int draw_index = 0; draw_index < draw_count; draw_index++) {
+    const int i = draw_order[draw_index];
     const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
     if (!layer) continue;
+    const bool is_additive =
+        (additive_plane_mask & (1u << (unsigned)layer->plane)) != 0;
     const float layer_z = resolved[i].z;
     const float layer_rake = resolved[i].rake;
     const float layer_bow = resolved[i].bow;
@@ -2004,7 +2031,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        out_w, out_h, copy_color,
                        stack_verts, stack_indices, &stack_nv, &stack_ni);
         if (stack_nv > 0) {
-          SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+          SDL_SetTextureBlendMode(
+              texture, is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
           SDL_RenderGeometry(renderer, texture, stack_verts, stack_nv,
                              stack_indices, stack_ni);
         }
@@ -2039,7 +2067,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                           aspect_x, height_scale, out_w, out_h, shade,
                           skirt_verts, skirt_indices, &skirt_nv, &skirt_ni);
       if (skirt_nv > 0) {
-        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureBlendMode(
+            texture, is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
         SDL_RenderGeometry(renderer, texture, skirt_verts, skirt_nv,
                            skirt_indices, skirt_ni);
       }
@@ -2059,7 +2088,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     bool use_shader = rim_light || dof_or_edge;
 
     SDL_SetTextureBlendMode(texture,
-        is_backdrop ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND);
+        is_backdrop ? SDL_BLENDMODE_NONE
+                    : is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
 
     SDL_Texture *draw_texture = texture;
     bool used_ss = false;
@@ -2073,7 +2103,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     }
     if (used_ss) {
       SDL_SetTextureBlendMode(draw_texture,
-          is_backdrop ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND);
+          is_backdrop ? SDL_BLENDMODE_NONE
+                      : is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
     }
 
     /* Supersample targets contain only the active capture region, unlike the

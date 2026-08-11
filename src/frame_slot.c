@@ -170,6 +170,28 @@ static uint32_t CaptureDioramaPlaneContentMask(void) {
   return mask;
 }
 
+static uint32_t CaptureDioramaAdditivePlaneMask(void) {
+  uint32_t mask = 0;
+  if (g_ppu->overlayCaptures[kPpuOverlaySource_Bg1].flags &
+      kPpuOverlayFlag_MarkFullAddSubscreen)
+    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg1) |
+            DioramaPlaneBit(kDioramaPlane_Bg1Hi);
+  if (g_ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags &
+      kPpuOverlayFlag_MarkFullAddSubscreen)
+    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2) |
+            DioramaPlaneBit(kDioramaPlane_Bg2Hi);
+  if (g_ppu->overlayCaptures[kPpuOverlaySource_Bg3].flags &
+      kPpuOverlayFlag_MarkFullAddSubscreen)
+    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg3);
+  if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].flags &
+      kPpuOverlayFlag_MarkFullAddSubscreen)
+    mask |= DioramaPlaneBit(kPpuOverlaySource_Obj) |
+            DioramaPlaneBit(kDioramaPlane_Obj1) |
+            DioramaPlaneBit(kDioramaPlane_Obj2) |
+            DioramaPlaneBit(kDioramaPlane_Obj3);
+  return mask;
+}
+
 /* The pose the projection is built from this frame.
  *
  * Free Cam's is the player-owned one the right-drag edits and the reset action
@@ -475,9 +497,11 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->diorama_active = g_diorama_frame_active;
   dst->diorama_plane_request_mask = 0;
   dst->diorama_plane_content_mask = 0;
+  dst->diorama_plane_additive_mask = 0;
   if (dst->diorama_active) {
     dst->diorama_plane_request_mask = CaptureDioramaPlaneRequestMask();
     dst->diorama_plane_content_mask = CaptureDioramaPlaneContentMask();
+    dst->diorama_plane_additive_mask = CaptureDioramaAdditivePlaneMask();
   }
 
   /* M7/§6.1: scroll snapshot for present-time interpolation. */
@@ -585,6 +609,9 @@ void FrameSlot_Capture(FrameSlot *dst) {
     _Static_assert(kFrameSlotOverlayFlag_RemoveFromGame ==
                    kPpuOverlayFlag_RemoveFromGame,
                    "present.h's mirrored overlay flag must match ppu.h");
+    _Static_assert(kFrameSlotOverlayFlag_MarkFullAddSubscreen ==
+                   kPpuOverlayFlag_MarkFullAddSubscreen,
+                   "present.h's mirrored full-add flag must match ppu.h");
     /* IJ1: this one is load-bearing arithmetic, not just a layout mirror — it
      * is the denominator that normalizes every U-axis offset into the layer
      * textures. Dividing by snes_width instead cost 1.75x too much horizontal

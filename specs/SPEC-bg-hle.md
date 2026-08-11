@@ -87,6 +87,8 @@ repair machinery built around the ring.
 - Horizontal widescreen margins and the diorama top extension.
 - Existing narrow/decorative layer behavior: clamp, reflection, cyclic repeat,
   raw native wrap, and per-row policy bands.
+- Explicit decoded-world cycles whose camera travels beyond one authored map
+  period, independently of post-raster edge presentation.
 - Death Heim boss hub, ending transition, boss-rush rooms and final arena.
 - Immutable per-frame presentation metadata consumed by diorama mode.
 - Runtime/offline differential comparison with the original decoder/ring.
@@ -448,10 +450,12 @@ live BGSC and transition state remain authoritative where already measured.
 | Scene/layer | Source and edge policy |
 | --- | --- |
 | Ordinary wide BG1/BG2 | `WorldMap`; live inside independent bounds, transparent outside |
+| Marahna action BG2 | `WorldMap`; a 512px horizontal cycle when it shares camera X with an independently wider BG1, regardless of subsection `$19` |
 | Narrow decorative BG2 with padding disabled | `AuthenticViewport`; clamp |
 | Bloodpool decorative BG2 | authentic rendered line; mirror by default |
 | Bloodpool act 1 water rows `136..224` | repeat band overriding mirrored upper rows |
 | Bloodpool boss `0208` | provider-backed BG1 world with Mirror/fill capped to `16/16`; viewport BG2 Mirror/fill capped to `0/0` |
+| Kasandora `0301/0302` BG2 | viewport-backed Mirror/fill sky capped to `128/128`; world-anchored Repeat/fill dune band `256..512` remains available |
 | Aitos maps `$01-$03` BG2 | authentic rendered line; cyclic repeat |
 | Northwall maps `$01-$05/$08` BG2 | authentic rendered line; cyclic repeat |
 | Death Heim maps `$02-$07` narrow BG2 | authentic rendered line; cyclic repeat |

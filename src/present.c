@@ -1292,6 +1292,8 @@ void PresentCompositeScene(const FrameSlot *slot,
                            slot->visible_width, viewport,
                            g_diorama_textures, pixels,
                            &scroll_delta, &final_cam, distance_scale,
+                           slot->diorama_plane_additive_mask &
+                               s_diorama_uploaded_plane_mask,
                            &bg2_valid_spans, &action_projection))
       return;
     DrawActionEffects(slot, viewport, &action_projection);

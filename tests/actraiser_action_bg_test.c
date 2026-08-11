@@ -214,7 +214,7 @@ static void TestRingAndComparison(void) {
 
   ActRaiserActionBgCompareResult result;
   CHECK(ActRaiserActionBg_CompareLayer(
-      world, &snapshot, vram, kVramWords, &result));
+      world, &snapshot, vram, kVramWords, false, &result));
   /* Authentic x=0..255 and PPU scanlines 1..224 expose 33 by 28 cells at
    * camera phases 13/7. */
   CHECK(result.compared == 33u * 28u);
@@ -231,7 +231,7 @@ static void TestRingAndComparison(void) {
                                       kVramWords, &changed_address));
   vram[changed_address] ^= 1;
   CHECK(ActRaiserActionBg_CompareLayer(
-      world, &snapshot, vram, kVramWords, &result));
+      world, &snapshot, vram, kVramWords, false, &result));
   CHECK(result.mismatches == 1);
   CHECK(result.first_tile_x == changed_x && result.first_tile_y == changed_y);
   CHECK(result.first_hle != result.first_native);
@@ -241,12 +241,19 @@ static void TestRingAndComparison(void) {
    * native cells and never promoted to provider failure. */
   snapshot.camera_x = 500;
   CHECK(ActRaiserActionBg_CompareLayer(
-      world, &snapshot, vram, kVramWords, &result));
+      world, &snapshot, vram, kVramWords, false, &result));
   CHECK(result.compared == 2u * 28u);
   CHECK(result.outside_world == 31u * 28u);
   CHECK(result.mismatches == 0);
   CHECK(result.first_outside_tile_x == 64 &&
         result.first_outside_tile_y == 1);
+
+  /* The same public comparator is the production cyclic preflight. Original
+   * ring coordinates stay unwrapped while decoded-world lookup wraps X. */
+  CHECK(ActRaiserActionBg_CompareLayer(
+      world, &snapshot, vram, kVramWords, true, &result));
+  CHECK(result.compared == 33u * 28u);
+  CHECK(result.outside_world == 0 && result.mismatches == 0);
 
   snapshot.bgsc = 0x62;
   CHECK(!ActRaiserActionBg_WorldRingEligible(&snapshot, kVramWords));
@@ -380,6 +387,11 @@ static void TestFramePlanCapture(void) {
     CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
     CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
     CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+    CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
+    CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+    CHECK(plan.layer[1].horizontal_extent.left == 128 &&
+          plan.layer[1].horizontal_extent.right == 128);
+    CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
     CHECK(plan.layer[1].band_count == 1);
     CHECK(plan.layer[1].bands[0].y0 == 256 &&
           plan.layer[1].bands[0].y1 == 512 &&
@@ -391,6 +403,8 @@ static void TestFramePlanCapture(void) {
           policy.bands[0].y0 == kasandora_cases[i].dune_y &&
           policy.bands[0].y1 == 224 &&
           policy.bands[0].edge == kActionBgEdge_Repeat);
+    CHECK(plan.layer[1].bands[0].horizontal_extent.mode ==
+          kActionBgExtent_Available);
   }
 
   wram[kActRaiserWram_CurrentMap] = 9;
@@ -479,8 +493,10 @@ static void TestFramePlanBinding(void) {
   /* Narrow BG2 is presentation-owned, so only finite BG1 may bind. */
   Write16(wram, kActRaiserWram_Bg2Width, 256);
   ppu->bgmode = 1;
-  ppu->screenEnabled[0] = kActRaiserBgLayerMask_Bg1 |
-                          kActRaiserBgLayerMask_Bg2;
+  /* Marahna's ownership split must be a valid provider manifest: BG1 is a
+   * subscreen-only world layer while BG2 is main-screen presentation art. */
+  ppu->screenEnabled[0] = kActRaiserBgLayerMask_Bg2;
+  ppu->screenEnabled[1] = kActRaiserBgLayerMask_Bg1;
   ppu->bgXsc[0] = 0x63;
   ppu->bgXsc[1] = 0x73;
   ppu->hScroll[0] = 0x40D;
@@ -593,14 +609,16 @@ static void TestFramePlanBinding(void) {
       kActRaiserActionBgFallback_CompareFailure] == 0);
   ppu->vram[changed_address] ^= 1;
 
-  /* The finite decoder may report a valid outside-world coordinate, but the
-   * full authentic handoff requires every displayed cell to exist. */
+  /* A genuinely finite decoder may report a valid outside-world coordinate,
+   * but the full authentic handoff requires every displayed cell to exist. */
   Write16(wram, kActRaiserWram_Bg1CameraX, 500);
   ppu->hScroll[0] = 500;
   Write16(wram, kActRaiserWram_GameFrame, 102);
   CHECK(ActRaiserActionBg_BindPlan(
       wram, kActRaiserWramSize, &plan, ppu) == 0);
   CHECK(diagnostics->provider_preflight_outside_world == 31u * 28u);
+  CHECK(diagnostics->provider_eligible_layers == 5);
+  CHECK(diagnostics->provider_layers == 5);
   CHECK(diagnostics->fallbacks[kActRaiserActionBgFallback_AuthenticEdge] == 1);
 
   /* Camera/PPU phase disagreement means the comparison would address a
@@ -648,6 +666,92 @@ static void TestFramePlanBinding(void) {
   free(wram);
 }
 
+static void TestMarahnaCyclicBackdropBinding(void) {
+  uint8_t *wram = BuildWram();
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(wram != NULL && ppu != NULL);
+  if (!wram || !ppu) {
+    free(ppu);
+    free(wram);
+    return;
+  }
+
+  ActRaiserActionBg_Shutdown();
+  CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Marahna;
+  wram[kActRaiserWram_CurrentMap] = 2;
+  Write16(wram, kActRaiserWram_GameFrame, 9728);
+  /* Reproduce snap_00_gf9728's topology: a wider BG1 and 512px BG2 share
+   * camera X=503, while the native BG2 ring contains X modulo 64. */
+  Write16(wram, kActRaiserWram_Bg1CameraX, 503);
+  Write16(wram, kActRaiserWram_Bg1Width, 768);
+  Write16(wram, kActRaiserWram_Bg2CameraX, 503);
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = kActRaiserBgLayerMask_Bg2;
+  ppu->screenEnabled[1] = kActRaiserBgLayerMask_Bg1;
+  ppu->bgXsc[0] = 0x63;
+  ppu->bgXsc[1] = 0x73;
+  ppu->hScroll[0] = 503;
+  ppu->vScroll[0] = 7;
+  ppu->hScroll[1] = 503;
+  ppu->vScroll[1] = 23;
+
+  ActionBgPlan plan;
+  ActionBgPresentationPolicy policy;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(!plan.layer[0].wrap_world_x);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].wrap_world_x);
+
+  ActionBgWorld *reference[2] = {
+    ActionBgWorld_Create(), ActionBgWorld_Create(),
+  };
+  ActRaiserActionBgLayerSnapshot snapshot[2];
+  for (unsigned layer = 0; layer < 2; layer++) {
+    CHECK(reference[layer] != NULL);
+    CHECK(ActRaiserActionBg_CaptureLayer(
+        wram, kActRaiserWramSize, layer, ppu->bgXsc[layer],
+        &snapshot[layer]));
+    CHECK(ActionBgWorld_Update(reference[layer], &snapshot[layer].decode));
+    PopulateNativeRing(reference[layer], &snapshot[layer], ppu->vram);
+  }
+
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) ==
+      (kActRaiserBgLayerMask_Bg1 | kActRaiserBgLayerMask_Bg2));
+  const PpuVirtualTilemapBinding *bg2 = &ppu->virtualTilemap[1];
+  CHECK(bg2->lookup != NULL && bg2->context != NULL);
+  CHECK(bg2->camera_x == 503 && bg2->hscroll_anchor == 503);
+  CHECK(bg2->flags == kPpuVirtualTilemapFlag_IncludeAuthentic);
+
+  uint16_t expected = 0, actual = 0;
+  CHECK(ActionBgWorld_Lookup(reference[1], 3, 3, &expected) ==
+        kActionBgLookup_Tile);
+  CHECK(bg2->lookup(bg2->context, 67, 3, &actual));
+  CHECK(actual == expected);
+  CHECK(ActionBgWorld_Lookup(reference[1], 63, 3, &expected) ==
+        kActionBgLookup_Tile);
+  CHECK(bg2->lookup(bg2->context, -1, 3, &actual));
+  CHECK(actual == expected);
+
+  const ActRaiserActionBgDiagnostics *diagnostics =
+      ActRaiserActionBg_GetDiagnostics();
+  CHECK(diagnostics->provider_preflight_layers == 2);
+  CHECK(diagnostics->provider_preflight_tiles == 2u * 33u * 28u);
+  CHECK(diagnostics->provider_preflight_mismatches == 0);
+  CHECK(diagnostics->provider_preflight_outside_world == 0);
+  CHECK(diagnostics->provider_eligible_layers == 2);
+  CHECK(diagnostics->provider_layers == 2);
+
+  for (unsigned layer = 0; layer < 2; layer++)
+    ActionBgWorld_Destroy(reference[layer]);
+  ActRaiserActionBg_Shutdown();
+  free(ppu);
+  free(wram);
+}
+
 int main(void) {
   TestCapture();
   TestVerticalMargins();
@@ -655,6 +759,7 @@ int main(void) {
   TestFramePlanCapture();
   TestPlanExtentProjection();
   TestFramePlanBinding();
+  TestMarahnaCyclicBackdropBinding();
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);
     return 1;

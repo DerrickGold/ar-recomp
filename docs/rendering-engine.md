@@ -1078,6 +1078,18 @@ publication refreshed it. Exactly eight resident words on that newly visible
 row contradicted the immutable decoder; there was no transition/actor writer
 to symbolize. The old atomic fallback clamped BG1 to the authentic viewport,
 making most of the wide playfield disappear.
+
+Marahna's action BG2 is the mapped exception to finite horizontal topology, not
+an exception to that fail-closed rule. Its separate 512px backdrop follows the
+independently wider BG1 with the same full camera X. All 924 authentic BG2 ring
+words in `0501` gf2331 match decoded X modulo 64 tiles; all 957 in `0502` gf9728
+do too, despite different BG1 maps and subsection IDs. The planner therefore
+detects that structural relationship rather than naming `$19`: Marahna, BG2
+width 512, wider BG1, and equal camera X. `ActionBgLayerPlan.wrap_world_x` then
+makes provider lookup and native-ring preflight apply the same modulo. BG1
+remains the finite playable map, while the PPU still combines the two
+independent layers through the live main/subscreen color-math state.
+
 Diagnostics separately count preflight, eligible, bound, phase, edge, mismatch,
 and runtime lookup results. The modern PPU can bind at authentic 4:3 with zero
 margins, while wide-raw and the legacy renderer remain native controls.
@@ -1400,7 +1412,9 @@ and dune rows use Repeat. The captures in `runs/20260810-130310` pin row
 82 at camera 173 in `0301` and row 93 at camera 162 in `0302`. The synthesized
 BG2 source is the authentic viewport, avoiding the provider-invalid fallback
 that occurs when a live WorldMap plan is manually changed to Mirror/Repeat;
-BG1 remains fully provider-backed and owns the playable canvas.
+the mirrored sky is capped to 128px per side while the repeat-safe dune band
+retains an available extent. BG1 remains fully provider-backed and owns the
+playable canvas.
 
 Vertical extension makes one additional row-policy rule load-bearing: a band
 with `y0=0` or `y1=224` owns the synthetic margin adjacent to that authentic

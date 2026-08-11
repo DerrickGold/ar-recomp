@@ -75,6 +75,16 @@ static void set_solid_4bpp_tile(Ppu *ppu, int tile, int color) {
   }
 }
 
+static void set_solid_2bpp_tile(Ppu *ppu, int word_address,
+                                int tile, int color) {
+  for (int row = 0; row < 8; row++) {
+    uint16_t bits = 0;
+    if (color & 1) bits |= 0x00ff;
+    if (color & 2) bits |= 0xff00;
+    ppu->vram[word_address + tile * 8 + row] = bits;
+  }
+}
+
 typedef struct VirtualTilemapFixture {
   int min_x, max_x;
   int min_y, max_y;
@@ -830,7 +840,8 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
     const uint8_t kAllFlags = kPpuOverlayFlag_RemoveFromGame |
                               kPpuOverlayFlag_MarkObjColorMath |
                               kPpuOverlayFlag_MarkBgHalfAdd |
-                              kPpuOverlayFlag_ApplyBgFixedColorSubtract;
+                              kPpuOverlayFlag_ApplyBgFixedColorSubtract |
+                              kPpuOverlayFlag_MarkFullAddSubscreen;
     CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0,
                                kActRaiserAuthenticWidth,
                                kActRaiserAuthenticHeight, kAllFlags));
@@ -907,6 +918,216 @@ static void TestDioramaFixedColorSubtractCapture(void) {
   CHECK((capture[0] & 0x00ffffffu) == (flat_pixel & 0x00ffffffu));
 
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, NULL, 0);
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
+/* Diorama capture follows a visual source onto the subscreen instead of
+ * treating TM as the complete layer manifest. Marahna act 1 is the measured
+ * real-game case: main=$06 (BG2+BG3), sub=$11 (BG1+OBJ). This focused fixture
+ * keeps BG1 off main and proves the generic PPU exporter still produces the
+ * isolated plane. */
+static void TestSubscreenOnlyOverlayCapture(void) {
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  static uint8_t fb[kW * sizeof(uint32_t)];
+  static uint32_t capture[kW];
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  memset(capture, 0, sizeof(capture));
+
+  /* setup_virtual_bg authors a solid red BG1 on main. Move only that source
+   * to sub and enable subscreen colour math so the PPU actually renders TS. */
+  ppu->screenEnabled[0] = 0;
+  ppu->screenEnabled[1] = 1u << kActRaiserPpuLayer_Bg1;
+  ppu->cgwsel = 0x02;   /* colour-math addend is the subscreen */
+  ppu->cgadsub = 0x01;  /* nonzero math mask makes the sub pass live */
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
+                              (uint8_t *)capture, sizeof(capture)));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+      kPpuOverlayFlag_RemoveFromGame));
+  render_first_line(ppu);
+
+  CHECK(capture[0] == (0xff000000u | rgb555(31, 0, 0)));
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg1, 0));
+
+  /* Main remains the authority when a source is enabled on both screens. A
+   * main-only visibility window suppresses x=0; if TS overwrote the export,
+   * that pixel would incorrectly become red again. */
+  memset(capture, 0, sizeof(capture));
+  ppu->screenEnabled[0] = 1u << kActRaiserPpuLayer_Bg1;
+  ppu->screenWindowed[0] = 1u << kActRaiserPpuLayer_Bg1;
+  ppu->screenWindowed[1] = 0;
+  ppu->windowsel = 0x02; /* BG1 main: window 1 enabled, inside disabled */
+  ppu->window1left = 0;
+  ppu->window1right = 0;
+  render_first_line(ppu);
+  CHECK(capture[0] == 0);
+  CHECK(capture[1] == (0xff000000u | rgb555(31, 0, 0)));
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, NULL, 0);
+
+  /* OBJ extraction is screen-agnostic once the frontend claims its OAM range.
+   * Exercise the measured Marahna ownership (OBJ on TS only) so changing the
+   * frontend gate back to TM cannot be mistaken for a PPU limitation. */
+  static uint32_t obj_capture[kW];
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  memset(obj_capture, 0, sizeof(obj_capture));
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = 0;
+  ppu->screenEnabled[1] = 1u << kPpuOverlaySource_Obj;
+  ppu->cgwsel = 0x02;
+  ppu->cgadsub = 0x01;
+  ppu->cgram[0x81] = bgr555(31, 31, 0);
+  set_solid_4bpp_tile(ppu, 0, 1);
+  for (int slot = 0; slot < 128; slot++)
+    ppu->oam[slot * 2] = (uint16_t)(0 | (0xe0u << 8));
+  ppu->oam[0] = (uint16_t)(24 | (0u << 8));
+  ppu->oam[1] = 0;
+  PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj,
+                              (uint8_t *)obj_capture, sizeof(obj_capture)));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Obj, 0, 0, kW, 1,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(ppu, 0, 1));
+  render_first_line(ppu);
+  CHECK(obj_capture[24] == (0xff000000u | rgb555(31, 31, 0)));
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Obj, 0));
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, NULL, 0);
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
+/* Marahna act 1's screens are two simultaneous inputs, not alternate layer
+ * manifests: TM=$06 supplies BG2/BG3 and TS=$11 supplies BG1/OBJ, with a full
+ * add selected by CGWSEL=$02/CGADSUB=$03. The addend captures must contain only
+ * the winning TS source at each pixel so drawing all of them additively cannot
+ * double-add an overlapping BG and sprite. */
+static void TestFullAddSubscreenWinnerCapture(void) {
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  static uint8_t fb[kW * sizeof(uint32_t)];
+  static uint32_t bg1_capture[kW];
+  static uint32_t bg2_capture[kW];
+  static uint32_t bg3_capture[kW];
+  static uint32_t obj_capture[kW];
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  memset(bg1_capture, 0, sizeof(bg1_capture));
+  memset(bg2_capture, 0, sizeof(bg2_capture));
+  memset(bg3_capture, 0, sizeof(bg3_capture));
+  memset(obj_capture, 0, sizeof(obj_capture));
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = 1u << kActRaiserPpuLayer_Bg2;
+  ppu->screenEnabled[1] =
+      (1u << kActRaiserPpuLayer_Bg1) |
+      (1u << kPpuOverlaySource_Obj);
+  ppu->cgwsel = 0x02;
+  ppu->cgadsub = 0x03;
+  ppu->cgram[0x11] = bgr555(31, 0, 0);  /* TS BG1: red addend */
+  ppu->cgram[0x21] = bgr555(0, 0, 31);  /* TM BG2: blue base */
+  ppu->cgram[0x81] = bgr555(0, 31, 0);  /* TS OBJ: green addend */
+  set_solid_4bpp_tile(ppu, 0, 1);
+  set_solid_4bpp_tile(ppu, 1, 1);
+  ppu->bgTileAdr = 0;
+  ppu->bgXsc[kActRaiserPpuLayer_Bg1] = 0x20;
+  ppu->bgXsc[kActRaiserPpuLayer_Bg2] = 0x24;
+  for (int i = 0; i < 0x400; i++) {
+    ppu->vram[0x2000 + i] = (uint16_t)(1 | (1 << 10));
+    ppu->vram[0x2400 + i] = (uint16_t)(1 | (2 << 10));
+  }
+  for (int slot = 0; slot < 128; slot++)
+    ppu->oam[slot * 2] = (uint16_t)(0 | (0xe0u << 8));
+  ppu->oam[0] = (uint16_t)(24 | (0u << 8));
+  ppu->oam[1] = (uint16_t)(3u << 12); /* priority 3 wins TS over BG1 */
+
+  PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
+                              (uint8_t *)bg1_capture, sizeof(bg1_capture)));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                              (uint8_t *)bg2_capture, sizeof(bg2_capture)));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj,
+                              (uint8_t *)obj_capture, sizeof(obj_capture)));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+      kPpuOverlayFlag_RemoveFromGame |
+          kPpuOverlayFlag_MarkFullAddSubscreen));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 1,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Obj, 0, 0, kW, 1,
+      kPpuOverlayFlag_RemoveFromGame |
+          kPpuOverlayFlag_MarkFullAddSubscreen));
+  CHECK(PpuSetOverlayOamRange(ppu, 0, 1));
+  render_first_line(ppu);
+
+  CHECK(bg2_capture[0] == (0xff000000u | rgb555(0, 0, 31)));
+  CHECK(bg1_capture[0] == (0xff000000u | rgb555(31, 0, 0)));
+  CHECK(obj_capture[0] == 0);
+  CHECK(bg1_capture[24] == 0);
+  CHECK(obj_capture[24] == (0xff000000u | rgb555(0, 31, 0)));
+
+  /* A host-relocated OBJ (the Marahna status icon in flat-HUD mode) is not a
+   * world addend. Removing it must reveal the BG1 pixel it covered rather than
+   * leave an icon-shaped hole, while the ordinary OAM capture range remains
+   * valid for all other sprites. */
+  CHECK(!PpuSetOverlayRelocatedOamRange(ppu, 1, 1));
+  CHECK(PpuSetOverlayRelocatedOamRange(ppu, 0, 1));
+  memset(bg1_capture, 0, sizeof(bg1_capture));
+  memset(obj_capture, 0, sizeof(obj_capture));
+  render_first_line(ppu);
+  CHECK(bg1_capture[24] == (0xff000000u | rgb555(31, 0, 0)));
+  CHECK(obj_capture[24] == 0);
+
+  /* A captured BG3 is reinserted after the host's additive pass (or moved to
+   * the anchored flat HUD). It must not punch its opaque glyphs out of the
+   * underlying world addend. Model the Mode-1 priority quirk with a solid
+   * priority-1 BG3 in front of BG2: BG1 remains captured underneath it. */
+  ppu->screenEnabled[0] |= 1u << kActRaiserPpuLayer_Bg3;
+  ppu->bgmode = 9;
+  ppu->bgTileAdr = 0x0400; /* BG3 character base $4000; BG1/BG2 remain $0000 */
+  ppu->bgXsc[kActRaiserPpuLayer_Bg3] = 0x28;
+  ppu->cgram[5] = bgr555(31, 31, 31);
+  set_solid_2bpp_tile(ppu, 0x4000, 0, 1);
+  for (int i = 0; i < 0x400; i++)
+    ppu->vram[0x2800 + i] = (uint16_t)((1 << 10) | (1 << 13));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3,
+                              (uint8_t *)bg3_capture, sizeof(bg3_capture)));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg3, 0, 0, kW, 1,
+      kPpuOverlayFlag_RemoveFromGame));
+  memset(bg1_capture, 0, sizeof(bg1_capture));
+  render_first_line(ppu);
+  CHECK(bg3_capture[0] == (0xff000000u | rgb555(31, 31, 31)));
+  CHECK(bg1_capture[0] == (0xff000000u | rgb555(31, 0, 0)));
+
+  /* The filter also keys on the reconstructed main winner's CGADSUB bit. A
+   * manually stale tag must not brighten BG2 when only BG1 math is selected. */
+  memset(bg1_capture, 0, sizeof(bg1_capture));
+  memset(obj_capture, 0, sizeof(obj_capture));
+  ppu->cgadsub = 0x01;
+  render_first_line(ppu);
+  CHECK(bg1_capture[0] == 0);
+  CHECK(obj_capture[24] == 0);
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, NULL, 0);
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, NULL, 0);
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, NULL, 0);
   g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
@@ -1727,6 +1948,8 @@ int main(void) {
   TestSim3DWidescreenHudCaptureHandoff();
   TestOverlayContentMetadata();
   TestDioramaFixedColorSubtractCapture();
+  TestSubscreenOnlyOverlayCapture();
+  TestFullAddSubscreenWinnerCapture();
   TestVerticalMarginLayerClip();
   TestVerticalMarginBottomLayerClip();
   TestVerticalMarginExactObj();

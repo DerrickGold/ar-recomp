@@ -77,10 +77,14 @@ bool ActRaiserActionBg_WorldRingEligible(
 bool ActRaiserActionBg_RingAddress(uint16_t tilemap_base, int tile_x,
                                    int tile_y, size_t vram_words,
                                    size_t *address);
+/* Compare the authentic viewport against the live native ring. Cyclic worlds
+ * wrap only the decoded lookup X; the native address retains the original
+ * world coordinate so this remains an exact streamer oracle. */
 bool ActRaiserActionBg_CompareLayer(
     const ActionBgWorld *world,
     const ActRaiserActionBgLayerSnapshot *snapshot,
     const uint16_t *vram, size_t vram_words,
+    bool wrap_world_x,
     ActRaiserActionBgCompareResult *result);
 
 /* Resolve the real finite-world rows immediately above and below ActRaiser's

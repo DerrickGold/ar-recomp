@@ -435,6 +435,60 @@ static void TestOrdinaryWorldAndNativeSource(void) {
   CHECK(Compile(&plan).clamp_layers == 1);
 }
 
+static void TestMarahnaCyclicBackdrop(void) {
+  ActionBgFrameState state = State(5, 1);
+  state.layer[0].world_width = 2048;
+  state.layer[0].world_height = 512;
+  state.layer[0].camera_x = 543;
+  state.layer[1].world_width = 512;
+  state.layer[1].world_height = 512;
+  state.layer[1].camera_x = 543;
+
+  ActionBgPlan plan = Build(&state);
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(!plan.layer[0].wrap_world_x);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].wrap_world_x);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
+  ActionBgPresentationPolicy policy = Compile(&plan);
+  CHECK(!policy.clamp_layers && !policy.mirror_layers &&
+        !policy.repeat_layers);
+
+  /* The relationship persists across subsection changes; no individual $19
+   * value is part of the classifier. */
+  state.map_number = 2;
+  plan = Build(&state);
+  CHECK(plan.layer[1].wrap_world_x);
+
+  /* Each structural input is required, preventing a merely 512px background
+   * from being promoted to an authored cycle. */
+  state.layer[1].camera_x = 542;
+  plan = Build(&state);
+  CHECK(!plan.layer[1].wrap_world_x);
+  state.layer[1].camera_x = 543;
+  state.layer[0].world_width = 512;
+  plan = Build(&state);
+  CHECK(!plan.layer[1].wrap_world_x);
+  state.layer[0].world_width = 2048;
+  state.layer[1].world_width = 768;
+  plan = Build(&state);
+  CHECK(!plan.layer[1].wrap_world_x);
+  state.layer[1].world_width = 512;
+  state.map_group = 1;
+  state.map_number = 1;
+  plan = Build(&state);
+  CHECK(!plan.layer[1].wrap_world_x);
+
+  /* Cyclic lookup is a decoded-world property, never a viewport/native
+   * presentation spelling. */
+  state.map_group = 5;
+  state.map_number = 2;
+  plan = Build(&state);
+  plan.layer[1].wrap_world_x = true;
+  plan.layer[1].source = kActionBgSource_AuthenticViewport;
+  CHECK(!ActionBgPlan_Validate(&plan));
+}
+
 static void TestFillmoreAct1BackdropExtent(void) {
   ActionBgFrameState state = State(1, 1);
   ActionBgPlan plan = Build(&state);
@@ -626,6 +680,11 @@ static void TestKasandoraHybridBackdrop(void) {
     CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
     CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
     CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+    CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
+    CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+    CHECK(plan.layer[1].horizontal_extent.left == 128 &&
+          plan.layer[1].horizontal_extent.right == 128);
+    CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
     CHECK(plan.layer[1].band_count == 1);
     CHECK(plan.layer[1].bands[0].y0 == 256 &&
           plan.layer[1].bands[0].y1 == 512 &&
@@ -667,6 +726,7 @@ static void TestKasandoraHybridBackdrop(void) {
   plan = Build(&state);
   CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
 }
 
 static void TestDeathHeimStates(void) {
@@ -727,6 +787,8 @@ static void TestEveryKnownMapClassifies(void) {
   for (uint8_t group = 1; group <= 7; group++) {
     for (uint8_t map = 1; map <= last_map[group]; map++) {
       ActionBgFrameState state = State(group, map);
+      if (group == 3 && (map == 1 || map == 2))
+        state.layer[1].world_height = 512;
       ActionBgPlan plan;
       CHECK(ActionBgPlan_Build(&state, &plan));
       CHECK(plan.valid);
@@ -740,11 +802,13 @@ static void TestEveryKnownMapClassifies(void) {
             layer == 1 && group == 1 && map == 1;
         const bool fixed_death_heim_bg2 =
             layer == 1 && group == 7 && map == 1;
+        const bool fixed_kasandora_bg2 =
+            layer == 1 && group == 3 && (map == 1 || map == 2);
         const bool fixed_bloodpool_boss_bg1 =
             layer == 0 && group == 2 && map == 8;
         CHECK(plan.layer[layer].horizontal_extent.mode ==
               (fixed_fillmore_bg2 || fixed_death_heim_bg2 ||
-                   fixed_bloodpool_boss_bg1
+                   fixed_kasandora_bg2 || fixed_bloodpool_boss_bg1
                    ? kActionBgExtent_Fixed : kActionBgExtent_Available));
         CHECK(plan.layer[layer].vertical_extent.mode ==
               kActionBgExtent_Available);
@@ -760,6 +824,7 @@ int main(void) {
   TestUnboundWorldFallback();
   TestCanvasOwner();
   TestOrdinaryWorldAndNativeSource();
+  TestMarahnaCyclicBackdrop();
   TestFillmoreAct1BackdropExtent();
   TestNarrowDecorativeBg2();
   TestBloodpoolBand();

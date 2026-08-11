@@ -161,6 +161,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaScrollDelta *scroll_delta,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
+                       uint32_t additive_plane_mask,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
                        DioramaProjection *out_projection);
 
