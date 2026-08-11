@@ -260,12 +260,41 @@ output back on the source's own terms, and each is cheap.
    casts *into* the water, land away from it catches a lip. One term, two
    signs, and the coast acquires a direction.
 
-Not yet tried, in rough order of likely payoff: constraining output to the
+### 4b. Stop inventing a bed — the map already has one
+
+Even posterised and grid-aligned, the synthesised floor still looked wrong,
+and the reason was compositional rather than technical: **it put mid-frequency
+detail across 100% of the water at one scale.** Pixel-art water reads because
+it is mostly large flat areas with detail concentrated in a few places. Detail
+everywhere, however well dithered, is wallpaper.
+
+The fix removes the invention instead of improving it. Walk toward land along
+the gradient of the shore-distance channel and **sample the town canvas
+there**, so the beach, rock and grass the artist already drew simply continue
+under the water. That is real pixel art — exactly on palette, at exactly the
+right feature scale, for free, and with no seabed invented at all.
+
+It also restores the large-scale structure that noise destroyed, without
+reintroducing a depth gradient. The gradient only carries information within
+the 32 px the field encodes; past that it saturates and there is nothing to
+walk toward. So the shallows get authored texture and the deep middle goes
+flat — a textured margin around a calm field, which is how the era's water was
+actually composed.
+
+Two details matter:
+
+- **Quantise the sample position** to ~4 px blocks. Walking a smoothly varying
+  distance smears the source into radial streaks that read as motion blur;
+  quantising turns the same smear into blocks, which reads as art.
+- **Fade out where the gradient dies** (past ~26 px from any shore), or the
+  normalise of a near-zero gradient produces garbage in open water.
+
+Still not tried, in rough order of likely payoff: constraining output to the
 town's **actual CGRAM entries** rather than a generic ramp (nearest-colour
 against the live palette, which would make it exactly on-model); replacing the
 smooth sheen band with hard-edged authored *shapes* in the ROM's own dash
-idiom; and giving the bed a small set of authored 8×8 patterns instead of
-noise at all.
+idiom; and letting the surface dominate outright — a flat vivid field with the
+bed showing only in sparse, deliberate shallow patches rather than continuously.
 
 ### Shore distance: 8 px is enough again
 

@@ -33,6 +33,7 @@ typedef struct ActRaiserActionBgObserver {
 
 typedef struct ActRaiserActionBgProvider {
   const ActionBgWorld *world;
+  bool wrap_world_x;
 } ActRaiserActionBgProvider;
 
 static ActRaiserActionBgObserver s_observer = {
@@ -117,11 +118,27 @@ bool ActRaiserActionBg_RingAddress(uint16_t tilemap_base, int tile_x,
   return true;
 }
 
+static int32_t WrapWorldTile(int32_t coordinate, unsigned extent) {
+  if (!extent) return coordinate;
+  int64_t wrapped = coordinate % (int64_t)extent;
+  if (wrapped < 0) wrapped += extent;
+  return (int32_t)wrapped;
+}
+
+static ActionBgLookupResult LookupWorldTile(
+    const ActionBgWorld *world, bool wrap_world_x,
+    int32_t tile_x, int32_t tile_y, uint16_t *entry) {
+  if (!world) return kActionBgLookup_ProviderFailure;
+  if (wrap_world_x)
+    tile_x = WrapWorldTile(tile_x, ActionBgWorld_TileWidth(world));
+  return ActionBgWorld_Lookup(world, tile_x, tile_y, entry);
+}
+
 bool ActRaiserActionBg_CompareLayer(
     const ActionBgWorld *world,
     const ActRaiserActionBgLayerSnapshot *snapshot,
     const uint16_t *vram, size_t vram_words,
-    ActRaiserActionBgCompareResult *result) {
+    bool wrap_world_x, ActRaiserActionBgCompareResult *result) {
   if (result) {
     memset(result, 0, sizeof(*result));
     result->first_tile_x = -1;
@@ -150,8 +167,8 @@ bool ActRaiserActionBg_CompareLayer(
   for (int tile_y = first_y; tile_y <= last_y; tile_y++) {
     for (int tile_x = first_x; tile_x <= last_x; tile_x++) {
       uint16_t hle = 0;
-      const ActionBgLookupResult lookup =
-          ActionBgWorld_Lookup(world, tile_x, tile_y, &hle);
+      const ActionBgLookupResult lookup = LookupWorldTile(
+          world, wrap_world_x, tile_x, tile_y, &hle);
       if (lookup == kActionBgLookup_OutsideWorld) {
         if (!built.outside_world) {
           built.first_outside_tile_x = tile_x;
@@ -205,6 +222,7 @@ bool ActRaiserActionBg_BuildPlan(
             wram, wram_size, layer, ppu->bgXsc[layer], &snapshot))
       return false;
     state.layer[layer] = (ActionBgLayerState) {
+      .camera_x = snapshot.camera_x,
       .camera_y = snapshot.camera_y,
       .world_width = snapshot.decode.world_width,
       .world_height = snapshot.decode.world_height,
@@ -408,9 +426,9 @@ static bool ProviderLookup(const void *context, int32_t tile_x,
                            int32_t tile_y, uint16_t *entry) {
   const ActRaiserActionBgProvider *provider = context;
   s_observer.diagnostics.provider_lookups++;
-  const ActionBgLookupResult result = provider && provider->world
-      ? ActionBgWorld_Lookup(provider->world, tile_x, tile_y, entry)
-      : kActionBgLookup_ProviderFailure;
+  const ActionBgLookupResult result = LookupWorldTile(
+      provider ? provider->world : NULL,
+      provider && provider->wrap_world_x, tile_x, tile_y, entry);
   if (result == kActionBgLookup_Tile) {
     s_observer.diagnostics.provider_tiles++;
     return true;
@@ -533,7 +551,8 @@ uint8_t ActRaiserActionBg_BindPlan(
     ActRaiserActionBgCompareResult comparison;
     if (!ActRaiserActionBg_CompareLayer(
             world, &snapshot, ppu->vram,
-            sizeof(ppu->vram) / sizeof(ppu->vram[0]), &comparison)) {
+            sizeof(ppu->vram) / sizeof(ppu->vram[0]),
+            layer_plan->wrap_world_x, &comparison)) {
       RecordProviderFallback(kActRaiserActionBgFallback_CompareFailure, layer,
                              map_group, map_number, &snapshot);
       continue;
@@ -561,6 +580,7 @@ uint8_t ActRaiserActionBg_BindPlan(
     const bool include_authentic = comparison.mismatches == 0;
     s_observer.diagnostics.provider_eligible_layers++;
     s_provider[layer].world = world;
+    s_provider[layer].wrap_world_x = layer_plan->wrap_world_x;
     const PpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
       .context = &s_provider[layer],
@@ -584,7 +604,8 @@ uint8_t ActRaiserActionBg_BindPlan(
 
 static void ObserveLayer(const uint8_t *wram, size_t wram_size,
                          const Ppu *ppu, unsigned layer,
-                         uint8_t map_group, uint8_t map_number) {
+                         uint8_t map_group, uint8_t map_number,
+                         bool wrap_world_x) {
   ActRaiserActionBgLayerSnapshot snapshot;
   if (!ActRaiserActionBg_CaptureLayer(
           wram, wram_size, layer, ppu->bgXsc[layer], &snapshot)) {
@@ -620,7 +641,8 @@ static void ObserveLayer(const uint8_t *wram, size_t wram_size,
   ActRaiserActionBgCompareResult comparison;
   if (!ActRaiserActionBg_CompareLayer(
           world, &snapshot, ppu->vram,
-          sizeof(ppu->vram) / sizeof(ppu->vram[0]), &comparison)) {
+          sizeof(ppu->vram) / sizeof(ppu->vram[0]),
+          wrap_world_x, &comparison)) {
     RecordFallback(kActRaiserActionBgFallback_CompareFailure, layer,
                    map_group, map_number, &snapshot);
     return;
@@ -657,8 +679,17 @@ void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
                      map_group, map_number, NULL);
     return;
   }
+
+  /* Keep the compare-only observer on the same topology as the production
+   * provider. Otherwise Marahna 0501 would falsely report a finite edge after
+   * camera X=512 even though its native ring publishes BG2 modulo 512. */
+  ActionBgPlan plan;
+  ActionBgPresentationPolicy presentation;
+  const bool have_plan = ActRaiserActionBg_BuildPlan(
+      wram, wram_size, ppu, true, &plan, &presentation);
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
-    ObserveLayer(wram, wram_size, ppu, layer, map_group, map_number);
+    ObserveLayer(wram, wram_size, ppu, layer, map_group, map_number,
+                 have_plan && plan.layer[layer].wrap_world_x);
 }
 
 const ActRaiserActionBgDiagnostics *ActRaiserActionBg_GetDiagnostics(void) {

@@ -74,6 +74,32 @@ static void TestFailsClosedOnUnreproducibleMath(void) {
                                               0));
 }
 
+static void TestMeasuredMarahnaFullAddFrame(void) {
+  /* Marahna act 1: BG2/BG3 form the main image, while BG1/OBJ are a second
+   * image added into it. This is not a choice between two opaque screens. */
+  CHECK(DioramaCaptureBlend_FullAddSubscreenSources(
+            0x02, 0x03, kBg2 | kBg3, kBg1 | kObj) == (kBg1 | kObj));
+
+  /* No main winner has math enabled, so the configured subscreen is inert. */
+  CHECK(!DioramaCaptureBlend_FullAddSubscreenSources(
+      0x02, 0x01, kBg2 | kBg3, kBg1 | kObj));
+
+  /* Overlapping ownership cannot use the isolated-buffer winner resolve. */
+  CHECK(!DioramaCaptureBlend_FullAddSubscreenSources(
+      0x02, 0x03, kBg1 | kBg2, kBg1 | kObj));
+
+  /* Half-add, subtract, fixed-colour addend, and colour-window/direct-colour
+   * variants retain their existing paths or fail closed. */
+  CHECK(!DioramaCaptureBlend_FullAddSubscreenSources(
+      0x02, 0x43, kBg2 | kBg3, kBg1 | kObj));
+  CHECK(!DioramaCaptureBlend_FullAddSubscreenSources(
+      0x02, 0x83, kBg2 | kBg3, kBg1 | kObj));
+  CHECK(!DioramaCaptureBlend_FullAddSubscreenSources(
+      0x00, 0x03, kBg2 | kBg3, kBg1 | kObj));
+  CHECK(!DioramaCaptureBlend_FullAddSubscreenSources(
+      0x12, 0x03, kBg2 | kBg3, kBg1 | kObj));
+}
+
 static void TestSubscreenIdentityIsPerLayer(void) {
   /* With nothing on the subscreen, every math-enabled layer blends. */
   CHECK(DioramaCaptureBlend_LayerIsHalfAdded(kActCgwsel, kActCgadsub, 0x00,
@@ -117,6 +143,7 @@ static void TestMeasuredBloodpoolFixedColorSubtract(void) {
 int main(void) {
   TestMeasuredFillmoreAct2Frame();
   TestFailsClosedOnUnreproducibleMath();
+  TestMeasuredMarahnaFullAddFrame();
   TestSubscreenIdentityIsPerLayer();
   TestMeasuredBloodpoolFixedColorSubtract();
   printf("diorama capture blend tests: %s\n", s_failures ? "FAIL" : "pass");

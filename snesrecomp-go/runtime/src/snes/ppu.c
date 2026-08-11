@@ -226,6 +226,8 @@ bool PpuOverlaySurfaceHasContent(const Ppu *ppu, PpuOverlaySource source,
 
 void PpuClearOverlayCaptures(Ppu *ppu) {
   memset(ppu->overlayCaptures, 0, sizeof(ppu->overlayCaptures));
+  ppu->overlayObjRelocatedFirst = 0;
+  ppu->overlayObjRelocatedCount = 0;
   memset(&ppu->m7Override, 0, sizeof(ppu->m7Override));
 }
 
@@ -293,7 +295,8 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
   capture->flags = flags &
       (kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkObjColorMath |
        kPpuOverlayFlag_MarkBgHalfAdd |
-       kPpuOverlayFlag_ApplyBgFixedColorSubtract);
+       kPpuOverlayFlag_ApplyBgFixedColorSubtract |
+       kPpuOverlayFlag_MarkFullAddSubscreen);
   capture->oamFirst = 0;
   capture->oamCount = 0;
   return true;
@@ -307,6 +310,19 @@ bool PpuSetOverlayOamRange(Ppu *ppu, uint8_t first, uint8_t count) {
     return false;
   capture->oamFirst = first;
   capture->oamCount = count;
+  return true;
+}
+
+bool PpuSetOverlayRelocatedOamRange(Ppu *ppu, uint8_t first, uint8_t count) {
+  const PpuOverlayCapture *capture =
+      &ppu->overlayCaptures[kPpuOverlaySource_Obj];
+  if (!count || first >= 128 || count > 128 - first ||
+      !(capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen) ||
+      !capture->oamCount || first < capture->oamFirst ||
+      first + count > capture->oamFirst + capture->oamCount)
+    return false;
+  ppu->overlayObjRelocatedFirst = first;
+  ppu->overlayObjRelocatedCount = count;
   return true;
 }
 
@@ -666,9 +682,12 @@ static void PpuRenderLine(Ppu *ppu, int line) {
 
   // evaluate sprites
   ClearBackdrop(&ppu->objBuffer);
-  if (ppu->overlayRenderBuffer[kPpuOverlaySource_Obj])
+  if (ppu->overlayRenderBuffer[kPpuOverlaySource_Obj]) {
     memset(&ppu->overlayBuffers[kPpuOverlaySource_Obj], 0,
            sizeof(ppu->overlayBuffers[kPpuOverlaySource_Obj]));
+    memset(&ppu->overlayObjFullAddBuffer, 0,
+           sizeof(ppu->overlayObjFullAddBuffer));
+  }
   /* Margin lines use the frontend's exact signed OBJ sideband; authentic lines
    * retain the ordinary OAM path for slots without one. */
   ppu->lineHasSprites = !PPU_forcedBlank(ppu) && ppu_evaluateSprites(ppu, line - 1);
@@ -1836,8 +1855,32 @@ static void PpuClearOverlayRenderLine(Ppu *ppu, int y) {
   }
 }
 
-static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
-                                      int y) {
+typedef struct PpuOverlayWinnerFilter {
+  const PpuZbufType *main;
+  const PpuZbufType *sub;
+  uint8_t math_enabled;
+} PpuOverlayWinnerFilter;
+
+static const PpuZbufType *PpuOverlayIsolatedPixels(
+    const Ppu *ppu, PpuOverlaySource source) {
+  if (source == kPpuOverlaySource_Obj &&
+      (ppu->overlayCaptures[source].flags &
+       kPpuOverlayFlag_MarkFullAddSubscreen))
+    return ppu->overlayObjFullAddBuffer.data;
+  return ppu->overlayBuffers[source].data;
+}
+
+static bool PpuOverlayPixelPassesWinnerFilter(
+    const PpuOverlayWinnerFilter *filter, PpuZbufType pixel, int index) {
+  if (!filter) return true;
+  if (pixel != filter->sub[index]) return false;
+  uint8_t main_layer = (uint8_t)((filter->main[index] >> 8) & 0x0f);
+  return (filter->math_enabled & (1u << main_layer)) != 0;
+}
+
+static void PpuWriteOverlayRenderLineFiltered(
+    Ppu *ppu, PpuOverlaySource source, int y,
+    const PpuOverlayWinnerFilter *filter) {
   /* Two different coordinates from here on, identical only when no vertical
    * margin is active: `screen_y` is the AUTHENTIC screen row the capture
    * rectangle is expressed in (negative above the screen), `row` is where it
@@ -1864,7 +1907,7 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
 
   uint32 *dst = (uint32 *)(ppu->overlayRenderBuffer[source] +
                             (size_t)row * pitch);
-  const PpuZbufType *src = ppu->overlayBuffers[source].data;
+  const PpuZbufType *src = PpuOverlayIsolatedPixels(ppu, source);
 
   uint32 *band_dst[3] = { NULL, NULL, NULL };
   bool any_bands = false;
@@ -1878,8 +1921,11 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
   if (!any_bands) {
     bool has_content = false;
     for (int x = x0; x < x1; x++) {
+      int index = x + kPpuExtraLeftRight;
+      if (!PpuOverlayPixelPassesWinnerFilter(filter, src[index], index))
+        continue;
       uint32 color = PpuCapturedOverlayColor(
-          ppu, source, capture, src[x + kPpuExtraLeftRight]);
+          ppu, source, capture, src[index]);
       dst[x + texture_extra] = color;
       if (color)
         has_content = true;
@@ -1904,7 +1950,10 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
   };
   uint8_t content_mask = 0;
   for (int x = x0; x < x1; x++) {
-    PpuZbufType zp = src[x + kPpuExtraLeftRight];
+    int index = x + kPpuExtraLeftRight;
+    PpuZbufType zp = src[index];
+    if (!PpuOverlayPixelPassesWinnerFilter(filter, zp, index))
+      continue;
     uint32 color = PpuCapturedOverlayColor(ppu, source, capture, zp);
     if (!color)
       continue;
@@ -1926,11 +1975,101 @@ static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
   ppu->overlayRenderContentMask[source] |= content_mask;
 }
 
+static void PpuWriteOverlayRenderLine(Ppu *ppu, PpuOverlaySource source,
+                                      int y) {
+  PpuWriteOverlayRenderLineFiltered(ppu, source, y, NULL);
+}
+
+/* Reconstruct one complete screen's priority winner without putting captured
+ * pixels back into the native framebuffer. bgBuffers[] already contains every
+ * uncaptured source. Each captured source's isolated buffer supplies the part
+ * RemoveFromGame intentionally omitted. Full-add capture is admitted only for
+ * disjoint TM/TS ownership, so an isolated BG buffer belongs unambiguously to
+ * this screen.
+ *
+ * BG isolated buffers have already passed through their layer windows. OBJ is
+ * captured during OAM evaluation, before PpuDrawSprites applies its screen-
+ * specific window, so reproduce that one gate while merging it here. */
+static void PpuResolveScreenWithCapturedSources(
+    Ppu *ppu, int y, bool sub, int excluded_source,
+    PpuZbufType out[kPpuBufWidth]) {
+  memcpy(out, ppu->bgBuffers[sub].data, sizeof(ppu->bgBuffers[sub].data));
+  for (int source = 0; source < kPpuOverlaySource_Count; source++) {
+    if (source == excluded_source) continue;
+    if (!IS_SCREEN_ENABLED(ppu, sub, source) ||
+        !PpuOverlayActiveOnLine(ppu, (PpuOverlaySource)source, y - 1))
+      continue;
+    const PpuZbufType *isolated =
+        PpuOverlayIsolatedPixels(ppu, (PpuOverlaySource)source);
+    if (source != kPpuOverlaySource_Obj) {
+      for (int i = 0; i < kPpuBufWidth; i++)
+        if (isolated[i] > out[i]) out[i] = isolated[i];
+      continue;
+    }
+
+    PpuWindows win;
+    IS_SCREEN_WINDOWED(ppu, sub, source)
+        ? PpuWindows_Calc(&win, ppu, source, y)
+        : PpuWindows_Clear(&win, ppu, source, y);
+    for (int span = 0; span < win.nr; span++) {
+      if (win.bits & (1u << span)) continue;
+      int x0 = win.edges[span] + kPpuExtraLeftRight;
+      int x1 = win.edges[span + 1] + kPpuExtraLeftRight;
+      x0 = IntMax(x0, 0);
+      x1 = IntMin(x1, kPpuBufWidth);
+      for (int i = x0; i < x1; i++)
+        if (isolated[i] > out[i]) out[i] = isolated[i];
+    }
+  }
+}
+
+static void PpuWriteFullAddSubscreenOverlayLines(Ppu *ppu, int y) {
+  bool active = false;
+  for (int source = 0; source < kPpuOverlaySource_Count; source++) {
+    if (ppu->overlayCaptures[source].flags &
+        kPpuOverlayFlag_MarkFullAddSubscreen) {
+      active = true;
+      break;
+    }
+  }
+  if (!active) return;
+
+  PpuZbufType main[kPpuBufWidth], sub[kPpuBufWidth];
+  /* BG3 is a separately reinserted foreground plane. Keeping it in this
+   * resolve would punch HUD-glyph-shaped holes out of the addend; those holes
+   * become visible when flat-HUD mode relocates BG3. Resolve the math-bearing
+   * world underneath it instead. Tilted BG3 is still drawn after the additive
+   * pass by the host and therefore occludes the preserved addend exactly where
+   * it did on hardware. */
+  PpuResolveScreenWithCapturedSources(
+      ppu, y, false, kPpuOverlaySource_Bg3, main);
+  PpuResolveScreenWithCapturedSources(ppu, y, true, -1, sub);
+  const PpuOverlayWinnerFilter filter = {
+    .main = main,
+    .sub = sub,
+    .math_enabled = (uint8_t)PPU_mathEnabled(ppu),
+  };
+  for (int source = 0; source < kPpuOverlaySource_Count; source++) {
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+    if (!(capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen))
+      continue;
+    PpuWriteOverlayRenderLineFiltered(
+        ppu, (PpuOverlaySource)source, y, &filter);
+  }
+}
+
 static PpuPixelPrioBufs *PpuBeginBackgroundOverlay(Ppu *ppu, int y,
                                                    bool sub, uint layer) {
   int screen_y = (int)y - 1;
   PpuOverlaySource source = (PpuOverlaySource)layer;
   if (!PpuOverlayActiveOnLine(ppu, source, screen_y))
+    return &ppu->bgBuffers[sub];
+  /* Do not erase the isolated rendering saved by the source's owning screen
+   * merely because PpuDrawBackgrounds visits every Mode-1 layer on the other
+   * screen too. The draw routine immediately returns for a disabled source.
+   * Keeping the earlier buffer is what lets full-add resolve reconstruct TM
+   * after TS has rendered. */
+  if (!IS_SCREEN_ENABLED(ppu, sub, layer))
     return &ppu->bgBuffers[sub];
   memset(&ppu->overlayBuffers[source], 0,
          sizeof(ppu->overlayBuffers[source]));
@@ -1944,10 +2083,29 @@ static void PpuFinishBackgroundOverlay(Ppu *ppu, int y, bool sub,
   if (layerbuf != &ppu->overlayBuffers[source])
     return;
 
-  if (!sub)
+  /* A source can be authored exclusively on the subscreen. Action stages
+   * normally put every independently useful layer on the main screen too,
+   * which let the original overlay contract silently equate "capture" with
+   * "write the main pass." Marahna is the counterexample: BG1 is subscreen-
+   * only and is added to main-screen BG2 with SNES colour math.
+   *
+   * Export exactly one rendering of the source. Prefer main when the source
+   * is enabled on both screens (preserving the established window/visibility
+   * semantics), otherwise fall back to the subscreen pass. screenEnabled is
+   * read here, after the scanline's HDMA updates, so a per-line TM/TS change
+   * selects the pass that actually owns that line rather than a frame-start
+   * guess made by the frontend. */
+  const uint8_t source_bit = (uint8_t)(1u << source);
+  const bool enabled_main = (ppu->screenEnabled[0] & source_bit) != 0;
+  const bool export_this_pass = sub
+      ? !enabled_main && (ppu->screenEnabled[1] & source_bit) != 0
+      : enabled_main;
+  const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+  const bool deferred_full_add = sub &&
+      (capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen) != 0;
+  if (export_this_pass && !deferred_full_add)
     PpuWriteOverlayRenderLine(ppu, source, y);
 
-  const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
   PpuZbufType *dst = ppu->bgBuffers[sub].data;
   const PpuZbufType *src = layerbuf->data;
   bool remove = (capture->flags & kPpuOverlayFlag_RemoveFromGame) != 0;
@@ -2046,6 +2204,10 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
     if (ppu->screenEnabled[1] != 0) {
       PpuDrawBackgrounds(ppu, y, true);
       rendered_subscreen = true;
+      /* Full-add planes need both screen resolves before export: this masks
+       * BG1/OBJ to the one source that actually supplies each subscreen pixel
+       * and to positions backed by a math-bearing main-world source. */
+      PpuWriteFullAddSubscreenOverlayLines(ppu, y);
     }
   }
 
@@ -2152,7 +2314,9 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
     }
   } while (cw_clip_math >>= 1, ++windex < cwin.nr);
 
-  PpuWriteOverlayRenderLine(ppu, kPpuOverlaySource_Obj, y);
+  if (!(ppu->overlayCaptures[kPpuOverlaySource_Obj].flags &
+        kPpuOverlayFlag_MarkFullAddSubscreen))
+    PpuWriteOverlayRenderLine(ppu, kPpuOverlaySource_Obj, y);
 
 }
 
@@ -2416,6 +2580,25 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
                       &ppu->overlayBuffers[kPpuOverlaySource_Obj].data[di];
                   if ((*overlay & 0xff) == 0)
                     *overlay = z + pixel;
+                  /* A flat HUD may relocate a captured icon after scanout.
+                   * Keep the ordinary overlay's historical all-slots result,
+                   * but build the full-add winner from a second first-writer
+                   * buffer without those slots. This exposes BG1 (or the next
+                   * world sprite) behind the moved icon instead of leaving an
+                   * icon-shaped hole in the additive world plane. */
+                  bool full_add =
+                      (obj_capture->flags &
+                       kPpuOverlayFlag_MarkFullAddSubscreen) != 0;
+                  bool relocated = ppu->overlayObjRelocatedCount &&
+                      slot >= ppu->overlayObjRelocatedFirst &&
+                      slot < ppu->overlayObjRelocatedFirst +
+                                 ppu->overlayObjRelocatedCount;
+                  if (full_add && !relocated) {
+                    PpuZbufType *addend =
+                        &ppu->overlayObjFullAddBuffer.data[di];
+                    if ((*addend & 0xff) == 0)
+                      *addend = z + pixel;
+                  }
                 }
                 if (!capture_pixel ||
                     !(obj_capture->flags & kPpuOverlayFlag_RemoveFromGame)) {

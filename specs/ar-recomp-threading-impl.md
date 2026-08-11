@@ -246,9 +246,12 @@ typedef struct FrameSlot {
     // Per-source capture rects (RenderHudOverlay OBJ icon, RenderHdReplacements)
     PpuOverlayCapture overlay_captures[kPpuOverlaySource_Count];
 
-    // OBJ HUD-icon promotion reads specific OAM slots at present time. Snapshot
-    // the OAM words the icon logic indexes (or the resolved x/y) rather than
-    // reading g_ppu->oam / g_ppu->highOam live. See §2.8.
+    // OBJ HUD-icon promotion validates a pattern anywhere in OAM on the game
+    // thread, then latches the range independently of overlayCaptures[OBJ]
+    // (the diorama's later full-scene claim can replace that capture range).
+    // Present resolves the icon position from this per-frame range and the OAM
+    // snapshot rather than reading g_ppu->oam / g_ppu->highOam live. See §2.8.
+    uint8_t hud_icon_first, hud_icon_count;
     uint16_t oam_snapshot[128 * 2];   // if any OBJ overlay/icon is active
     uint8_t  high_oam_snapshot[32];
 
@@ -330,12 +333,15 @@ if (g_ppu) {
     slot->bg_mode              = PPU_mode(g_ppu);   // (g_ppu->bgmode & 7)
     memcpy(slot->overlay_captures, g_ppu->overlayCaptures,
            sizeof(slot->overlay_captures));
+    ActRaiser_HudObjIconRange(&slot->hud_icon_first,
+                              &slot->hud_icon_count);
     // OAM only needed when an OBJ overlay/HUD icon is active this frame.
     // static_assert guards against a future Ppu struct change silently
     // under-copying (see §D18).
     _Static_assert(sizeof(slot->oam_snapshot) == sizeof(g_ppu->oam), "oam size");
     _Static_assert(sizeof(slot->high_oam_snapshot) == sizeof(g_ppu->highOam), "highOam size");
-    if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount) {
+    if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount ||
+        slot->hud_icon_count) {
         memcpy(slot->oam_snapshot, g_ppu->oam, sizeof(slot->oam_snapshot));
         memcpy(slot->high_oam_snapshot, g_ppu->highOam,
                sizeof(slot->high_oam_snapshot));
@@ -483,10 +489,13 @@ NEVER from `g_ppu` directly. The FrameSlot (§2.1) now carries all of them. Conc
    `g_settings.scene_inspector` are also read at present time — snapshot them too
    (they change rarely, but a mid-present change would still tear).
 
-**OAM snapshot cost note:** the OBJ HUD-icon path indexes a few `oam[]`/`highOam[]`
-entries. Snapshotting the full 544-byte OAM per frame is cheap; do that rather than
-trying to resolve only the icon slots (the capture's `oamFirst`/`oamCount` can vary).
-If diorama mode is off and no OBJ overlay is active, skip the OAM copy.
+**OAM snapshot cost note:** the OBJ HUD-icon path indexes a validated, per-frame
+`hud_icon_first`/`hud_icon_count` range in `oam[]`/`highOam[]`. Snapshotting the
+full 544-byte OAM per frame is cheap; do that rather than assuming a stable slot
+(the simulation hourglass moves from slots 0-3 to 11-14 while its menu is open).
+Do not reconstruct this range from `overlayCaptures[OBJ]`: the diorama's later
+full-scene OBJ claim legitimately replaces it with 0-127. Skip the OAM copy only
+when neither an OBJ overlay nor a promoted HUD icon is active.
 
 **Widescreen + diorama interaction:** in diorama mode the HUD split is NOT used
 (diorama captures the whole BG3 plane, §4.2). So `BuildHudPresentationChunks` runs

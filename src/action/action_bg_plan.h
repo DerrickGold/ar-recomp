@@ -17,7 +17,9 @@ enum {
 };
 
 typedef struct ActionBgLayerState {
-  /* Canonical world row sampled immediately above authentic row zero. */
+  /* Full world camera. X participates in shared-camera topology detection;
+   * Y also anchors world-coordinate presentation bands. */
+  uint16_t camera_x;
   uint16_t camera_y;
   uint16_t world_width;
   uint16_t world_height;
@@ -114,6 +116,10 @@ typedef struct ActionBgBand {
 
 typedef struct ActionBgLayerPlan {
   bool valid;
+  /* The decoded map is one authored horizontal cycle rather than a finite
+   * endpoint. Provider tile coordinates wrap by world_width; presentation
+   * edges remain independently classified by default_edge/bands. */
+  bool wrap_world_x;
   ActionBgLayerRole role;
   ActionBgSourceKind source;
   ActionBgEdgeMode default_edge;

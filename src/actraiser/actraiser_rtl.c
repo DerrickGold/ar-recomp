@@ -1683,6 +1683,7 @@ static uint32_t s_hud_icon_raster[kActRaiserHudIconRasterLimit *
 static PpuObjRangeBounds s_hud_icon_bounds;
 static int s_hud_icon_priority;
 static bool s_hud_icon_ready;
+static bool s_hud_icon_ppu_relocated;
 
 /* The icon-footprint restore layer (see the block comment in
  * ActRaiser_DioramaHudObjPrepare): per footprint pixel, the colour and the
@@ -1708,6 +1709,7 @@ static void ActRaiser_DioramaHudObjPrepare(void) {
   extern bool g_diorama_frame_active;
 
   s_hud_icon_ready = false;
+  s_hud_icon_ppu_relocated = false;
   /* Only the flat-HUD variant anchors a host overlay. With diorama_hud_flat
    * off the whole status bar is deliberately a tilted plane (see the A5/A7
    * note in the capture block), and the icon belongs on it. */
@@ -1738,6 +1740,10 @@ static void ActRaiser_DioramaHudObjPrepare(void) {
   s_hud_icon_bounds = bounds;
   s_hud_icon_priority = priority;
   s_hud_icon_ready = true;
+  if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].flags &
+      kPpuOverlayFlag_MarkFullAddSubscreen)
+    s_hud_icon_ppu_relocated = PpuSetOverlayRelocatedOamRange(
+        g_ppu, first, count);
 
   /* --- Restore layer: what the promoted sprites were HIDING ---------------
    *
@@ -1878,7 +1884,7 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
       const size_t plane_index =
           (size_t)(screen_y + plane_row_bias) * plane_width +
           ActionApron_SurfaceColumn(&plane_geom, s_hud_icon_bounds.x0 + x);
-      if (plane) plane[plane_index] = 0;
+      if (plane && !s_hud_icon_ppu_relocated) plane[plane_index] = 0;
       /* Hand the pixel back to whatever the icon was covering, in ITS band --
        * the capture never recorded it, because the icon won the shared OBJ
        * z-test here. Only inside the icon's OPAQUE footprint: where the icon
@@ -1887,7 +1893,8 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
        * own band survives it. */
       const size_t footprint_index = (size_t)y * raster_width + x;
       const uint8_t restore_priority = s_hud_restore_prio[footprint_index];
-      if (restore_priority != kActRaiserHudRestoreNone) {
+      if (!s_hud_icon_ppu_relocated &&
+          restore_priority != kActRaiserHudRestoreNone) {
         uint32_t *restore_plane = (uint32_t *)g_diorama_layer_pixels[
             ActRaiser_DioramaObjPlaneForPriority(restore_priority)];
         if (restore_plane)
@@ -2151,16 +2158,31 @@ void ActRaiserDrawPpuFrame(void) {
       static const PpuOverlaySource kCaptureLayersCommon[] = {
         kPpuOverlaySource_Bg1, kPpuOverlaySource_Bg2, kPpuOverlaySource_Obj,
       };
+      /* Diorama owns visual sources, not just the SNES main screen. Marahna
+       * keeps BG1 and OBJ exclusively on TS ($11) and full-adds them to
+       * main-screen BG2 ($06); gating on TM alone produced an empty BG1 plane
+       * and no sprites even though the native composite was healthy. The PPU
+       * overlay exporter prefers TM and falls back to TS for a subscreen-only
+       * BG, so the union is the frontend's correct eligibility test. */
+      const uint8_t capture_screens =
+          (uint8_t)(g_ppu->screenEnabled[0] | g_ppu->screenEnabled[1]);
+      const uint8_t full_add_sub_sources =
+          DioramaCaptureBlend_FullAddSubscreenSources(
+              (uint8_t)g_ppu->cgwsel, (uint8_t)g_ppu->cgadsub,
+              (uint8_t)g_ppu->screenEnabled[0],
+              (uint8_t)g_ppu->screenEnabled[1]);
       /* F4 (2026-07-26 handback: "missing transparency on background layers in
        * diorama mode"). SNES colour math is not reproduced by the capture, so a
        * half-added BG used to arrive fully opaque and HIDE the planes behind it
        * instead of tinting them. Annotate those planes so the compositor draws
        * them at 50% instead — see kPpuOverlayFlag_MarkBgHalfAdd.
        *
-       * Only the exact half-add-with-subscreen state qualifies, and it fails
-       * closed: a full add is not an alpha blend, and a subtract is not either,
-       * so both keep today's opaque capture rather than guessing.
-       * Measured in Fillmore act 2 as cgwsel=$02 cgadsub=$43.
+       * Half-add is represented by alpha. A disjoint full-add scene is instead
+       * tagged as a subscreen addend: the PPU capture masks each source to the
+       * resolved TS winner, and the compositor uses additive blending. Measured
+       * respectively in Fillmore act 2 ($02/$43) and Marahna act 1 ($02/$03,
+       * TM=$06, TS=$11). Subtract and overlapping full-add ownership still fail
+       * closed rather than guessing.
        *
        * The policy itself lives in diorama_capture_blend.c so it can be tested
        * without a ROM or a renderer. */
@@ -2170,8 +2192,10 @@ void ActRaiserDrawPpuFrame(void) {
         if (!g_diorama_layer_pixels[src])
           g_diorama_layer_pixels[src] = calloc(1, kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
         PpuBindOverlaySurface(g_ppu, src, g_diorama_layer_pixels[src], pitch);
-        if (g_ppu->screenEnabled[0] & (1 << src)) {
+        if (capture_screens & (1 << src)) {
           uint8_t flags = kPpuOverlayFlag_RemoveFromGame;
+          if (full_add_sub_sources & (1 << src))
+            flags |= kPpuOverlayFlag_MarkFullAddSubscreen;
           /* OBJ keeps its own per-palette-group flag; this one is BG-only. */
           if (src != kPpuOverlaySource_Obj &&
               DioramaCaptureBlend_LayerIsHalfAdded(
@@ -2212,6 +2236,23 @@ void ActRaiserDrawPpuFrame(void) {
           }
           PpuSetOverlayCapture(g_ppu, src, -g_ws_extra, -g_ws_extra_top,
                                width, capture_height, flags);
+          if (flags & kPpuOverlayFlag_MarkFullAddSubscreen) {
+            static bool reported_full_add;
+            static int verbose_full_add = -1;
+            if (verbose_full_add < 0)
+              verbose_full_add = getenv("AR_DIORAMA_BLEND_LOG") ? 1 : 0;
+            if (!reported_full_add || verbose_full_add) {
+              reported_full_add = true;
+              fprintf(stderr,
+                      "[diorama-blend] gf=%u full subscreen add "
+                      "(cgwsel=$%02x cgadsub=$%02x main=$%02x sub=$%02x) "
+                      "-> resolved TS sources=$%02x use additive planes\n",
+                      ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+                      g_ppu->cgwsel, g_ppu->cgadsub,
+                      g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
+                      full_add_sub_sources);
+            }
+          }
         }
       }
       /* BG3 needs its OWN branch, not just an on/off entry in the loop above:
@@ -2277,12 +2318,16 @@ void ActRaiserDrawPpuFrame(void) {
         PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3,
                               g_diorama_layer_pixels[kPpuOverlaySource_Bg3],
                               pitch);
-        if (g_ppu->screenEnabled[0] & (1 << kPpuOverlaySource_Bg3))
+        if (capture_screens & (1 << kPpuOverlaySource_Bg3))
           PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3, -g_ws_extra,
                                -g_ws_extra_top, width, capture_height,
-                               kPpuOverlayFlag_RemoveFromGame);
+                               kPpuOverlayFlag_RemoveFromGame |
+                                   ((full_add_sub_sources &
+                                     (1 << kPpuOverlaySource_Bg3))
+                                        ? kPpuOverlayFlag_MarkFullAddSubscreen
+                                        : 0));
       }
-      if (g_ppu->screenEnabled[0] & (1 << kPpuOverlaySource_Obj))
+      if (capture_screens & (1 << kPpuOverlaySource_Obj))
         PpuSetOverlayOamRange(g_ppu, 0, 128);
       /* Priority-band splits: scanout routes each captured pixel to the
        * surface matching its hardware priority (Mode-1 tile priority bit for

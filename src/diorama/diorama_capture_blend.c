@@ -19,6 +19,19 @@ bool DioramaCaptureBlend_LayerIsHalfAdded(uint8_t cgwsel, uint8_t cgadsub,
   return true;
 }
 
+uint8_t DioramaCaptureBlend_FullAddSubscreenSources(
+    uint8_t cgwsel, uint8_t cgadsub,
+    uint8_t screen_main, uint8_t screen_sub) {
+  enum { kVisualSourceMask = 0x1f };
+  if (cgwsel != kCgwselAddendIsSubscreen) return 0;
+  if (cgadsub & (kCgadsubHalf | kCgadsubSubtract)) return 0;
+  if (screen_main & screen_sub & kVisualSourceMask) return 0;
+  /* At least one visible main-screen source must actually select colour math;
+   * otherwise the subscreen is configured but never contributes. */
+  if (!(screen_main & cgadsub & kCgadsubLayerMask)) return 0;
+  return screen_sub & kVisualSourceMask;
+}
+
 bool DioramaCaptureBlend_LayerUsesFixedColorSubtract(
     uint8_t cgwsel, uint8_t cgadsub, uint16_t fixed_color,
     uint8_t layer_bit) {

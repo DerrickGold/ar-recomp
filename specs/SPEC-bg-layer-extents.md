@@ -184,6 +184,12 @@ layers with world-backed BG1 capped to 16/16 and viewport BG2 capped to 0/0.
 `0208` is the confirming case that finite-world provider ownership does not
 imply a `LiveWorld` synthetic edge.
 
+Kasandora `0301/0302` promote the complementary banded case: the default
+viewport-backed Mirror/fill backdrop is fixed to 128/128, while the
+world-anchored Repeat/fill dune band at `256..512` retains an Available extent.
+The cap therefore bounds unique sky/cloud composition without constraining the
+cyclic lower landscape or the independently wide BG1 playfield.
+
 Death Heim acceptance keeps four state classes distinct: pre-ending `0701`
 clamp/repeat bands, the ending-sky page handoff, cyclic `0702-0707` rematch
 parallax, and the native raw-wrap `0708` raster arena.

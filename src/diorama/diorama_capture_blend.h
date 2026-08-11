@@ -5,11 +5,12 @@
 #include <stdint.h>
 
 /* F4 (2026-07-26 handback: "missing transparency on background layers in diorama
- * mode"). The diorama capture pulls each enabled main-screen layer into its own
- * plane and the host composites those planes in depth order. What it does NOT
- * reproduce is SNES colour math, so a layer the PPU was half-adding with the
- * subscreen used to arrive fully opaque and HIDE the planes behind it instead of
- * tinting them.
+ * mode"). The diorama capture pulls each enabled visual source into its own
+ * plane (main-screen rendering preferred, subscreen rendering used when that is
+ * the source's only home) and the host composites those planes in depth order.
+ * What it does NOT reproduce is arbitrary SNES colour math, so a layer the PPU
+ * was half-adding with the subscreen used to arrive fully opaque and HIDE the
+ * planes behind it instead of tinting them.
  *
  * (main + sub) / 2 is exactly a 50% source-over of the layer onto whatever is
  * behind it, and the subscreen is what "behind" means here — so the whole effect
@@ -61,6 +62,24 @@ bool DioramaCaptureBlend_IsHalfAddWithSubscreen(uint8_t cgwsel, uint8_t cgadsub)
 bool DioramaCaptureBlend_LayerIsHalfAdded(uint8_t cgwsel, uint8_t cgadsub,
                                           uint8_t screen_sub,
                                           uint8_t layer_bit);
+
+/* Return the subscreen sources that are exact full-add inputs to a disjoint
+ * main/sub scene. This is the second colour-math form the separated diorama
+ * compositor can reproduce: it draws the resolved subscreen winner with
+ * saturated additive blending over the main-screen winner.
+ *
+ * The ownership partition is load-bearing. A source enabled on both screens
+ * is rendered through two potentially different window sets, while the PPU's
+ * capture scratch stores only one isolated rendering at a time. Failing closed
+ * on any overlap keeps the later per-pixel winner resolve exact. Likewise,
+ * cgwsel must be exactly $02: direct colour and colour-window clipping/math
+ * prevention need more state than an additive plane can encode.
+ *
+ * `screen_main`/`screen_sub` use the TM/TS bit order. The result uses that same
+ * order and contains BG/OBJ source bits only; backdrop is never returned. */
+uint8_t DioramaCaptureBlend_FullAddSubscreenSources(
+    uint8_t cgwsel, uint8_t cgadsub,
+    uint8_t screen_main, uint8_t screen_sub);
 
 /* True when a BG layer's colour math is an exact fixed-colour subtraction
  * that the capture pipeline can bake into the extracted pixels. This is the

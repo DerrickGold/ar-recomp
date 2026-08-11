@@ -473,7 +473,7 @@ classification:
 | --- | --- | --- | --- |
 | `0101` | playfield / finite world | backdrop / finite world | BG1 remains available; the live-tuned BG2 backdrop is fixed to `128/128` |
 | `0102`, `0303`, `0404`, `0501`, `0504` | playfield / finite world | backdrop / finite world or disabled | both retain available caps; each finite source supplies its own natural bound |
-| `0301`, natural-transition `0302` | playfield / finite world | backdrop / captured viewport | content-anchored sky rows Mirror while dune rows at BG2 world Y `256+` Repeat; BG1 remains available |
+| `0301`, natural-transition `0302` | playfield / finite world | backdrop / captured viewport | content-anchored sky rows Mirror within a tuned `128/128` cap while dune rows at BG2 world Y `256+` Repeat with an available extent; BG1 remains available |
 | `0201` | playfield / 4096x512 world | backdrop / 256x256 viewport | moon/cloud rows use live-tuned fixed `76/100`; water `136..224` remains independently available |
 | `0202` | playfield / 768x512 world | backdrop / 256x256 viewport | the whole BG2 span is live-tuned to `68/68`; water `136..224` repeats within that inherited limit |
 | `0206` | playfield / finite world | backdrop / 256x256 viewport | BG1 remains available; the mirrored BG2 backdrop is live-tuned to `68/68` |
@@ -543,7 +543,9 @@ that content boundary into authentic rows as `255 - BG2 cameraY`, so
 the upper rows Mirror and the lower rows Repeat while vertical parallax moves
 the boundary. At the two captured states this resolves to row 82 (`0301`,
 camera 173) and row 93 (`0302`, camera 162). BG2 uses its authentic viewport
-for this synthesized presentation; BG1 remains the finite-world canvas owner.
+for this synthesized presentation. The mirrored sky/backdrop is capped to
+128px per side in both rooms, while the repeat-safe dune band remains available
+to the complete canvas. BG1 remains the finite-world canvas owner.
 
 The same canonical table now supports up to four non-overlapping bands per BG.
 Fill (Transparent/World/Clamp/Mirror/Repeat/Raw), apparent horizontal motion

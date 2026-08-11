@@ -147,6 +147,31 @@ class BgHleCensusTest(unittest.TestCase):
             self.assertEqual(summary["groups"]["01/02/BG1"]["map_variants"], 1)
             self.assertEqual(summary["groups"]["01/02/BG1"]["mismatches"], 0)
 
+    def test_marahna_bg2_uses_decoded_world_cycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = CensusFixture(directory)
+            fixture.wram[0x18] = 5
+            fixture.wram[0x19] = 2
+            write_u16(fixture.wram, 0x22, 503)
+            write_u16(fixture.wram, 0x2E, 768)
+            write_u16(fixture.wram, 0x26, 503)
+            write_u16(fixture.wram, 0x32, 512)
+            layout = census.decode_layout(fixture.wram, 1)
+            for tile_y in range(32):
+                for tile_x in range(64):
+                    address = census.ring_address(
+                        layout["tilemap_base"], tile_x, tile_y)
+                    fixture.vram[address] = census.decoded_word(
+                        fixture.wram, layout, tile_x, tile_y)
+            fixture.write()
+
+            record = census.analyze_snapshot(fixture.prefix)
+            bg2 = record["layers"][1]
+            self.assertTrue(bg2["wrap_world_x"])
+            self.assertEqual(bg2["comparison"]["compared"], 33 * 28)
+            self.assertEqual(bg2["comparison"]["mismatches"], 0)
+            self.assertEqual(bg2["comparison"]["outside_world"], 0)
+
     def test_authentic_tile_bounds_pin_all_vertical_scroll_phases(self):
         expected_first_rows = [10, 10, 10, 10, 10, 10, 10, 11]
         expected_row_counts = [29, 29, 29, 29, 29, 29, 29, 28]

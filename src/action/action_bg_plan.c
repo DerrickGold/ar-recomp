@@ -9,7 +9,10 @@ enum {
    * 224 rendered rows, so its maximum is world_height - 225. */
   kCameraViewportHeight = 225,
   kWorldPagePixels = 256,
-  kWideWorldMinimum = 512,
+  /* One complete native 64x64 tilemap period. Maps below this width are
+   * presentation-owned; an exactly matching map can also be an authored
+   * decoded-world cycle when the scene topology proves it. */
+  kWorldTilemapPeriodPixels = 512,
   kMapGroupFirst = 1,
   kMapGroupLast = 7,
   kBg1 = 0,
@@ -18,6 +21,7 @@ enum {
   kBloodpool = 2,
   kKasandora = 3,
   kAitos = 4,
+  kMarahna = 5,
   kNorthwall = 6,
   kDeathHeim = 7,
   kFillmoreAct1 = 1,
@@ -52,13 +56,15 @@ typedef struct TunedLayerPolicy {
   ActionBgMotionMode motion;
   uint16_t left;
   uint16_t right;
+  bool requires_existing_band;
   bool bands_inherit_extent;
 } TunedLayerPolicy;
 
 /* Canonical transcription target for live BG Extents exports. Classification
  * still owns role/source/bands. Each entry is guarded by that canonical
- * source/edge before applying the exported edge, motion and horizontal cap;
- * this prevents a stale tuning from silently reclassifying another scene. */
+ * source/edge and, where required, the classified band before applying the
+ * exported edge, motion and horizontal cap; this prevents a stale tuning from
+ * silently reclassifying another scene. */
 static const TunedLayerPolicy kTunedLayerPolicies[] = {
   {
     .map_group = kFillmore,
@@ -138,6 +144,30 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .left = 0,
     .right = 0,
   },
+  {
+    .map_group = kKasandora,
+    .map_number = kKasandoraFirstHybridRoom,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Mirror,
+    .edge = kActionBgEdge_Mirror,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 128,
+    .right = 128,
+    .requires_existing_band = true,
+  },
+  {
+    .map_group = kKasandora,
+    .map_number = kKasandoraLastHybridRoom,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Mirror,
+    .edge = kActionBgEdge_Mirror,
+    .motion = kActionBgMotion_FillRelative,
+    .left = 128,
+    .right = 128,
+    .requires_existing_band = true,
+  },
 };
 
 static const uint8_t kLastMapByGroup[kMapGroupLast + 1] = {
@@ -197,6 +227,14 @@ static void ClearBands(ActionBgLayerPlan *layer) {
   memset(layer->bands, 0, sizeof(layer->bands));
 }
 
+static void SetLayerSource(ActionBgLayerPlan *layer,
+                           ActionBgSourceKind source) {
+  if (!layer) return;
+  layer->source = source;
+  if (source != kActionBgSource_WorldMap)
+    layer->wrap_world_x = false;
+}
+
 static ActionBgLayerPlan BaseLayerPlan(const ActionBgLayerState *state,
                                        ActionBgLayerRole role) {
   const bool world = WorldRingEligible(state);
@@ -225,8 +263,8 @@ static bool UsesCyclicBg2(uint8_t group, uint8_t map) {
 
 static void ClassifyNarrowBg2(const ActionBgFrameState *state,
                               ActionBgLayerPlan *bg2) {
-  if (state->layer[1].world_width >= kWideWorldMinimum) return;
-  bg2->source = kActionBgSource_AuthenticViewport;
+  if (state->layer[1].world_width >= kWorldTilemapPeriodPixels) return;
+  SetLayerSource(bg2, kActionBgSource_AuthenticViewport);
   if (!state->decorative_padding_enabled) {
     bg2->default_edge = kActionBgEdge_Clamp;
     return;
@@ -252,6 +290,23 @@ static void ClassifyNarrowBg2(const ActionBgFrameState *state,
   }
 }
 
+static void ClassifyMarahnaSharedCameraBg2(
+    const ActionBgFrameState *state, ActionBgLayerPlan *bg2) {
+  if (state->map_group != kMarahna ||
+      state->layer[1].world_width != kWorldTilemapPeriodPixels ||
+      state->layer[0].world_width <= state->layer[1].world_width ||
+      state->layer[0].camera_x != state->layer[1].camera_x ||
+      bg2->source != kActionBgSource_WorldMap)
+    return;
+
+  /* Marahna's action subsections declare a 512px BG2 map but drive it with the
+   * same full X camera as the independently wider BG1 playfield. Captures from
+   * 0501 (X=543) and 0502 (X=503) prove every authentic ring word equals the
+   * decoded BG2 word at X mod 64 tiles. The structural relationship, not the
+   * subsection number, therefore identifies one authored horizontal cycle. */
+  bg2->wrap_world_x = true;
+}
+
 static void ClassifyKasandora(const ActionBgFrameState *state,
                               ActionBgPlan *plan) {
   if (!state->decorative_padding_enabled ||
@@ -268,7 +323,7 @@ static void ClassifyKasandora(const ActionBgFrameState *state,
   /* Rooms 0301/0302 author sparse clouds above BG2 world Y=256 and cyclic
    * dunes at and below it. Keep that content seam in world coordinates; the
    * row resolver projects it through the live parallax camera each frame. */
-  bg2->source = kActionBgSource_AuthenticViewport;
+  SetLayerSource(bg2, kActionBgSource_AuthenticViewport);
   bg2->default_edge = kActionBgEdge_Mirror;
   ClearBands(bg2);
   bg2->bands[0] = (ActionBgBand) {
@@ -293,7 +348,8 @@ static void ApplyTunedMapOverrides(const ActionBgFrameState *state,
     if (state->map_group != tuning->map_group ||
         state->map_number != tuning->map_number ||
         layer->source != tuning->required_source ||
-        layer->default_edge != tuning->required_edge)
+        layer->default_edge != tuning->required_edge ||
+        (tuning->requires_existing_band && layer->band_count == 0))
       continue;
     layer->default_edge = tuning->edge;
     layer->default_motion = tuning->motion;
@@ -324,7 +380,7 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
     plan->bound_canvas_to_world = false;
     for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
       plan->layer[layer].role = kActionBgLayerRole_Backdrop;
-      plan->layer[layer].source = kActionBgSource_NativeTilemap;
+      SetLayerSource(&plan->layer[layer], kActionBgSource_NativeTilemap);
       plan->layer[layer].default_edge = kActionBgEdge_RawWrap;
       /* 0708 is an authored two-plane raster scene. Its 256px native maps
        * intentionally wrap across the complete wide canvas, so discard any
@@ -340,7 +396,8 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
   plan->bound_canvas_to_world = false;
 
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
-    plan->layer[layer].source = kActionBgSource_AuthenticViewport;
+    SetLayerSource(&plan->layer[layer],
+                   kActionBgSource_AuthenticViewport);
     plan->layer[layer].default_edge = kActionBgEdge_Clamp;
     ClearBands(&plan->layer[layer]);
   }
@@ -374,6 +431,7 @@ bool ActionBgPlan_Build(const ActionBgFrameState *state, ActionBgPlan *out) {
   built.layer[1] = BaseLayerPlan(
       &state->layer[1], kActionBgLayerRole_Backdrop);
   ClassifyNarrowBg2(state, &built.layer[1]);
+  ClassifyMarahnaSharedCameraBg2(state, &built.layer[1]);
   ClassifyKasandora(state, &built);
   if (state->map_group == kDeathHeim)
     ClassifyDeathHeim(state, &built);
@@ -457,6 +515,8 @@ static bool BandsRemainOrderedAcrossCameraTravel(
 bool ActionBgLayerPlan_Validate(const ActionBgLayerPlan *layer) {
   if (!layer || !layer->valid || !ValidRole(layer->role) ||
       !ValidSource(layer->source) ||
+      (layer->wrap_world_x &&
+       layer->source != kActionBgSource_WorldMap) ||
       !ValidEdge(layer->default_edge) ||
       !ValidMotion(layer->default_motion) ||
       !ValidHorizontalExtent(&layer->horizontal_extent, false) ||
@@ -599,7 +659,7 @@ void ActionBgPlan_InitNative(ActionBgPlan *out) {
   *out = (ActionBgPlan){ .valid = true };
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     out->layer[layer].valid = true;
-    out->layer[layer].source = kActionBgSource_NativeTilemap;
+    SetLayerSource(&out->layer[layer], kActionBgSource_NativeTilemap);
     out->layer[layer].default_edge = kActionBgEdge_RawWrap;
     out->layer[layer].default_motion = kActionBgMotion_FillRelative;
     out->layer[layer].horizontal_extent = AvailableHorizontalExtent();
@@ -685,7 +745,7 @@ uint8_t ActionBgPlan_ClampUnboundWorldLayers(
         (bound_layers & layer_mask))
       continue;
     clamp_layers |= layer_mask;
-    layer_plan->source = kActionBgSource_AuthenticViewport;
+    SetLayerSource(layer_plan, kActionBgSource_AuthenticViewport);
     layer_plan->default_edge = kActionBgEdge_Clamp;
     layer_plan->default_motion = kActionBgMotion_FillRelative;
     layer_plan->horizontal_extent = AvailableHorizontalExtent();

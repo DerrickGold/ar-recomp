@@ -67,7 +67,10 @@ enum {
   kFrameSlotAuthenticWidth = 256,  /* kActRaiserAuthenticWidth */
   kFrameSlotAuthenticHeight = 224, /* kActRaiserAuthenticHeight */
 };
-enum { kFrameSlotOverlayFlag_RemoveFromGame = 1 };
+enum {
+  kFrameSlotOverlayFlag_RemoveFromGame = 1,
+  kFrameSlotOverlayFlag_MarkFullAddSubscreen = 16,
+};
 
 typedef struct FrameSlotOverlayCapture {
   int16_t x0, x1;
@@ -151,6 +154,10 @@ typedef struct FrameSlot {
    * the CPU surfaces. */
   uint32_t diorama_plane_request_mask;
   uint32_t diorama_plane_content_mask;
+  /* Planes containing the resolved TS input to a full SNES colour add. The
+   * compositor draws this subset with saturated additive blending after the
+   * ordinary main-screen world planes. */
+  uint32_t diorama_plane_additive_mask;
 
   /* D1 simulation-town semantic payload.  This value-copy is the only form
    * present-time code may consume; the live HLE producer state stays private

@@ -183,6 +183,13 @@ enum {
    * The caller admits only full, fixed-addend subtraction with no colour
    * window; authentic scanout is still untouched. */
   kPpuOverlayFlag_ApplyBgFixedColorSubtract = 8,
+  /* This source is a subscreen input to a full, non-half colour add. Capture
+   * only pixels where it wins the subscreen priority resolve and a resolved
+   * main-world source enables math; separately captured BG3 is reinserted over
+   * that result. The host can draw the sparse plane with saturated additive
+   * blending. Unlike the alpha flags, this applies to BG and OBJ alike.
+   * Extraction-only. */
+  kPpuOverlayFlag_MarkFullAddSubscreen = 16,
 };
 
 /* Per-row widescreen padding policy. Inherit selects the whole-layer mask;
@@ -446,7 +453,12 @@ struct Ppu {
   PpuPixelPrioBufs objBuffer;
   /* Per-source isolated priority pixels for generic host-overlay captures. */
   PpuPixelPrioBufs overlayBuffers[kPpuOverlaySource_Count];
+  /* Full-add OBJ resolve with host-relocated slots omitted. The ordinary OBJ
+   * overlay still includes those slots so non-additive capture semantics do
+   * not change. */
+  PpuPixelPrioBufs overlayObjFullAddBuffer;
   PpuOverlayCapture overlayCaptures[kPpuOverlaySource_Count];
+  uint8_t overlayObjRelocatedFirst, overlayObjRelocatedCount;
   uint32_t renderPitch;
   uint8_t *renderBuffer;
   uint32_t overlayRenderPitch[kPpuOverlaySource_Count];
@@ -695,7 +707,10 @@ bool PpuOverlaySurfaceHasContent(const Ppu *ppu, PpuOverlaySource source,
 // Clear per-frame capture policy, then configure an arbitrary screen-space
 // rectangle from BG1-BG4 or OBJ. With RemoveFromGame, pixels inside the rect
 // are omitted from both main and subscreen while still exported with palette,
-// transparency, windows, mosaic, and master brightness resolved.
+// transparency, windows, mosaic, and master brightness resolved. BG sources
+// are exported from the main-screen rendering when enabled there, otherwise
+// from their subscreen rendering; a source enabled on both is exported once
+// from main so screen-specific window policy remains deterministic.
 void PpuClearOverlayCaptures(Ppu *ppu);
 bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
                           int x, int y, int width, int height, uint8_t flags);
@@ -703,6 +718,13 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
 // Select a contiguous OAM slot range for an already configured OBJ capture.
 // The game remains responsible for validating what those slots represent.
 bool PpuSetOverlayOamRange(Ppu *ppu, uint8_t first, uint8_t count);
+
+/* Exclude a contiguous subset of the captured OBJ range from a full-add
+ * subscreen resolve. The host is promising to reinsert these objects elsewhere
+ * (for example, moving a status-bar icon to an anchored HUD), so the extracted
+ * world must expose the BG/OBJ pixels they covered. Cleared with the per-frame
+ * overlay policy. */
+bool PpuSetOverlayRelocatedOamRange(Ppu *ppu, uint8_t first, uint8_t count);
 
 // Bind the persistent Mode-7 override surface: a transparent ARGB buffer
 // covering the full render frame at `scale` (1-4) subsamples per axis, i.e.

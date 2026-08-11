@@ -25,6 +25,8 @@ AUTHENTIC_WIDTH = 256
 AUTHENTIC_HEIGHT = 224
 LAYER_STRIDE = 4
 DEFINITION_BYTES = 0x800
+MARAHNA_MAP_GROUP = 5
+WORLD_TILEMAP_PERIOD_PIXELS = 512
 
 
 class CensusError(Exception):
@@ -225,7 +227,7 @@ def authentic_tile_bounds(camera_x, camera_y):
     )
 
 
-def compare_view(wram, vram, layout):
+def compare_view(wram, vram, layout, wrap_world_x=False):
     result = {
         "available": bool(vram) and layout["valid"],
         "compared": 0,
@@ -241,10 +243,12 @@ def compare_view(wram, vram, layout):
     world_width, world_height = layout["world_tiles"]
     for tile_y in range(first_y, last_y + 1):
         for tile_x in range(first_x, last_x + 1):
-            if (tile_x >= world_width or tile_y >= world_height):
+            lookup_x = tile_x % world_width if wrap_world_x else tile_x
+            if (lookup_x < 0 or lookup_x >= world_width or
+                    tile_y < 0 or tile_y >= world_height):
                 result["outside_world"] += 1
                 continue
-            expected = decoded_word(wram, layout, tile_x, tile_y)
+            expected = decoded_word(wram, layout, lookup_x, tile_y)
             address = ring_address(layout["tilemap_base"], tile_x, tile_y)
             native = vram[address]
             result["compared"] += 1
@@ -261,6 +265,17 @@ def compare_view(wram, vram, layout):
     return result
 
 
+def uses_cyclic_world_x(wram, layouts, layer_index):
+    """Mirror the pure planner's structural Marahna topology predicate."""
+    if layer_index != 1 or len(layouts) < 2:
+        return False
+    bg1, bg2 = layouts[0], layouts[1]
+    return (wram[0x18] == MARAHNA_MAP_GROUP and
+            bg2["world_pixels"][0] == WORLD_TILEMAP_PERIOD_PIXELS and
+            bg1["world_pixels"][0] > bg2["world_pixels"][0] and
+            bg1["camera"][0] == bg2["camera"][0])
+
+
 def analyze_snapshot(prefix, rom_sha256=None):
     wram = load_binary(prefix + ".wram.bin", WRAM_BYTES)
     vram_path = prefix + ".vram.bin"
@@ -270,12 +285,13 @@ def analyze_snapshot(prefix, rom_sha256=None):
         vram = [raw_vram[i] | (raw_vram[i + 1] << 8)
                 for i in range(0, len(raw_vram), 2)]
     ppu = load_ppu(prefix)
-    layers = []
-    for layer_index in range(2):
-        layout = decode_layout(wram, layer_index)
+    layers = [decode_layout(wram, layer_index) for layer_index in range(2)]
+    for layer_index, layout in enumerate(layers):
+        layout["wrap_world_x"] = uses_cyclic_world_x(
+            wram, layers, layer_index)
         layout["ppu"] = ppu_layer_state(ppu, layout)
-        layout["comparison"] = compare_view(wram, vram, layout)
-        layers.append(layout)
+        layout["comparison"] = compare_view(
+            wram, vram, layout, layout["wrap_world_x"])
     return {
         "format": 1,
         "record_type": "snapshot",
@@ -389,11 +405,12 @@ def format_human(record):
                        "no" if ppu["eligible"] is False else "unknown")
         lines.append(
             "  BG%d %dx%d map=$%05X+%d table=$%04X ring=$%04X "
-            "eligible=%s compare=%d mismatch=%d outside=%d" % (
+            "eligible=%s wrap-x=%s compare=%d mismatch=%d outside=%d" % (
                 layer["layer"], layer["world_pixels"][0],
                 layer["world_pixels"][1], layer["map_start"],
                 layer["map_size"], layer["metatile_table"],
                 layer["tilemap_base"], eligibility,
+                "yes" if layer["wrap_world_x"] else "no",
                 comparison["compared"], comparison["mismatches"],
                 comparison["outside_world"]))
         reasons = layer["errors"] + ppu["reasons"]
