@@ -422,6 +422,437 @@ static void TestUnmatchedSlotsAreCensused(void) {
   CHECK(frame.unmatched_count == 3);
 }
 
+static void SeedMeasuredSceneObject(uint8_t *wram, unsigned slot,
+                                    bool lightning) {
+  size_t address = kActRaiserWram_ActionObjectTable +
+      slot * kActRaiserActionObjectStride;
+  Write16(wram, address + 0x00, 0x0000);
+  Write16(wram, address + 0x02, lightning ? 1376 : 703);
+  Write16(wram, address + 0x04, lightning ? 888 : 576);
+  Write16(wram, address + 0x06, lightning ? 0 : 3);
+  Write16(wram, address + 0x08, 0);
+  Write16(wram, address + 0x0A, lightning ? 0 : 8);
+  Write16(wram, address + 0x0C, lightning ? 88 : 8);
+  Write16(wram, address + 0x0E, 8);
+  Write16(wram, address + 0x10, lightning ? 88 : 8);
+  Write16(wram, address + 0x12, lightning ? 0x8683 : 0xBDF0);
+  Write16(wram, address + 0x16, 0x4000);
+  wram[address + 0x18] = 0x7E;
+  Write16(wram, address + 0x1A, lightning ? 0x0014 : 0x0023);
+  Write16(wram, address + 0x1C, lightning ? 1 : 2);
+  Write16(wram, address + 0x1E, lightning ? 0xBD69 : 0xBDD9);
+  Write16(wram, address + 0x20, lightning ? 0x46FE : 0x4610);
+  Write16(wram, address + 0x22, lightning ? 0x001F : 0x0018);
+  Write16(wram, address + 0x30, 0x0020);
+  Write16(wram, address + 0x32, lightning ? 0xBD2A : 0xBD84);
+}
+
+static void SeedBloodpoolBoss(uint8_t *wram) {
+  const size_t address = 0x12E0;
+  Write16(wram, address + 0x00, 0x0000);
+  Write16(wram, address + 0x16, 0x5000);
+  wram[address + 0x18] = 0x7E;
+  Write16(wram, address + 0x20, 0x5847);
+  Write16(wram, address + 0x32, 0xBDFF);
+}
+
+static void SeedSwordBeam(uint8_t *wram, unsigned state, bool hflip) {
+  const size_t player = kActRaiserWram_PlayerObject;
+  Write16(wram, player + 0x00, 0x0000);
+  Write16(wram, player + 0x16, 0x8000);
+  wram[player + 0x18] = 0x06;
+  Write16(wram, player + 0x20, 0x899F);
+  Write16(wram, player + 0x32, 0x979A);
+
+  const size_t beam = kActRaiserWram_ActionObjectTable +
+      9 * kActRaiserActionObjectStride;
+  Write16(wram, beam + 0x00, 0x0000);
+  Write16(wram, beam + 0x02, 224);
+  Write16(wram, beam + 0x04, 456);
+  Write16(wram, beam + 0x06, hflip ? 0xFFF8 : 0x0008);
+  Write16(wram, beam + 0x08, 0x0000);
+  Write16(wram, beam + 0x0A, hflip ? 0x0030 : 0xFFE0);
+  Write16(wram, beam + 0x0C, state == 0x13 ? 0x0020 : 0x0008);
+  Write16(wram, beam + 0x0E, hflip ? 0xFFE0 : 0x0030);
+  Write16(wram, beam + 0x10, state == 0x13 ? 0x0000 : 0x0018);
+  Write16(wram, beam + 0x12, 0x9D1C);
+  Write16(wram, beam + 0x16, 0x8000);
+  wram[beam + 0x18] = 0x06;
+  Write16(wram, beam + 0x1A, (uint16_t)state);
+  Write16(wram, beam + 0x1C, 0x0000);
+  Write16(wram, beam + 0x1E, 0x0000);
+  Write16(wram, beam + 0x20, state == 0x13 ? 0x99E8 : 0x9A17);
+  Write16(wram, beam + 0x22, state == 0x13 ? 0x0030 : 0x0031);
+  Write16(wram, beam + 0x28,
+          hflip ? kActRaiserObjectFlip_Horizontal : 0x0000);
+  Write16(wram, beam + 0x30, kActRaiserObjectFlag_Attacker);
+  Write16(wram, beam + 0x32, 0x979A);
+  Write16(wram, beam + 0x3A, kActRaiserWram_PlayerObject);
+}
+
+static void SeedBloodpoolBossLightningStrike(uint8_t *wram, unsigned slot,
+                                             unsigned visual, bool hflip) {
+  static const uint16_t kComposition[] = {
+    0x5346, 0x5401, 0x5492, 0x54F2, 0x55C2, 0x5661,
+  };
+  static const uint8_t kLeft[] = {6, 6, 1, 48, 36, 30};
+  static const uint8_t kRight[] = {11, 11, 11, 8, 8, 8};
+  static const uint8_t kBottom[] = {117, 69, 21, 117, 69, 21};
+  static const uint16_t kResume[] = {0xC02B, 0xC04B, 0xC051};
+  const size_t address = kActRaiserWram_ActionObjectTable +
+      slot * kActRaiserActionObjectStride;
+  CHECK(visual < 6);
+  Write16(wram, address + 0x00, 0x0000);
+  Write16(wram, address + 0x02, 120);
+  Write16(wram, address + 0x04, 160);
+  Write16(wram, address + 0x0A,
+          hflip ? kRight[visual] : kLeft[visual]);
+  Write16(wram, address + 0x0C, 83);
+  Write16(wram, address + 0x0E,
+          hflip ? kLeft[visual] : kRight[visual]);
+  Write16(wram, address + 0x10, kBottom[visual]);
+  Write16(wram, address + 0x12, 0x8661);
+  Write16(wram, address + 0x16, 0x5000);
+  wram[address + 0x18] = 0x7E;
+  Write16(wram, address + 0x1A, (uint16_t)(visual + 2));
+  Write16(wram, address + 0x1C, 1);
+  Write16(wram, address + 0x1E, kResume[visual % 3]);
+  Write16(wram, address + 0x20, kComposition[visual]);
+  Write16(wram, address + 0x22, (uint16_t)visual);
+  Write16(wram, address + 0x28,
+          hflip ? kActRaiserObjectFlip_Horizontal : 0);
+  Write16(wram, address + 0x30, 0x0020);
+  Write16(wram, address + 0x32, 0xBDFF);
+  Write16(wram, address + 0x3A, 0x12E0);
+}
+
+static void SeedBloodpoolBossLightningImpact(uint8_t *wram, unsigned slot,
+                                             unsigned visual) {
+  static const uint16_t kComposition[] = {0x570A, 0x5716, 0x5729};
+  static const uint8_t kExtent[] = {4, 8, 16};
+  static const uint8_t kTop[] = {8, 8, 16};
+  const size_t address = kActRaiserWram_ActionObjectTable +
+      slot * kActRaiserActionObjectStride;
+  CHECK(visual >= 8 && visual <= 10);
+  const unsigned frame = visual - 8;
+  Write16(wram, address + 0x00, 0x0000);
+  Write16(wram, address + 0x02, 120);
+  Write16(wram, address + 0x04, 224);
+  Write16(wram, address + 0x0A, kExtent[frame]);
+  Write16(wram, address + 0x0C, kTop[frame]);
+  Write16(wram, address + 0x0E, kExtent[frame]);
+  Write16(wram, address + 0x10, 0);
+  Write16(wram, address + 0x12, 0x8661);
+  Write16(wram, address + 0x16, 0x5000);
+  wram[address + 0x18] = 0x7E;
+  Write16(wram, address + 0x1A, 9);
+  Write16(wram, address + 0x1C, (uint16_t)(frame + 1));
+  Write16(wram, address + 0x1E, 0xC06A);
+  Write16(wram, address + 0x20, kComposition[frame]);
+  Write16(wram, address + 0x22, (uint16_t)visual);
+  Write16(wram, address + 0x30, 0x0020);
+  Write16(wram, address + 0x32, 0xBDFF);
+  Write16(wram, address + 0x3A, 0x08E0);
+}
+
+static void TestMeasuredSceneObjectIdentities(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionSceneEffectFrame first, paused, advanced, reused, source_reused,
+      alternate, rejected;
+  ActionEffectObserver observer = {0};
+  memset(wram, 0, sizeof(wram));
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  wram[kActRaiserWram_CurrentMap] = 5;
+  Write16(wram, kActRaiserWram_GameFrame, 7397);
+  SeedMeasuredSceneObject(wram, 22, false);  /* live address $0C20 */
+  SeedMeasuredSceneObject(wram, 32, true);   /* live address $0EA0 */
+
+  ActionSceneEffects_CaptureFrame(&observer, &first, wram, sizeof(wram), 1);
+  CHECK(first.game_frame == 7397);
+  CHECK(first.effect_count == 2);
+  CHECK(first.visible_count == 2);
+  CHECK(first.effects[0].record_address == 0x0C20);
+  CHECK(first.effects[0].kind == kActionEffect_EnemyFireball);
+  CHECK(first.effects[0].phase ==
+        kActionEffectPhase_EnemyFireballFlight);
+  CHECK(first.effects[0].velocity_x == 3);
+  CHECK(first.effects[0].projection_plane ==
+        kActionEffectProjectionPlane_Obj);
+  CHECK(first.effects[0].generation != 0);
+  CHECK(first.effects[1].record_address == 0x0EA0);
+  CHECK(first.effects[1].kind == kActionEffect_LightningTrap);
+  CHECK(first.effects[1].phase == kActionEffectPhase_LightningActive);
+  CHECK(first.effects[1].top_extent == 88);
+  CHECK(first.effects[1].geometry.data.rect.y0 == -88.0f);
+  CHECK(first.effects[1].geometry.data.rect.y1 == 88.0f);
+
+  /* $BD36 hands the same lightning actor to shared repeat handler $8683.
+   * That control-flow transition is part of one bolt, not slot reuse. */
+  Write16(wram, 0x0EA0 + 0x12, 0xBD36);
+  ActionSceneEffects_CaptureFrame(&observer, &paused, wram, sizeof(wram), 0);
+  CHECK(paused.effects[0].age_ticks == 0);
+  CHECK(paused.effects[0].generation == first.effects[0].generation);
+  CHECK(paused.effects[1].generation == first.effects[1].generation);
+  Write16(wram, 0x0C20 + 0x02, 712);  /* +3 px/tick for three ticks */
+  ActionSceneEffects_CaptureFrame(&observer, &advanced, wram, sizeof(wram), 3);
+  CHECK(advanced.effects[0].age_ticks == 3);
+  CHECK(advanced.effects[0].pulse_ticks == 3);
+  CHECK(advanced.effects[0].generation == first.effects[0].generation);
+
+  /* A same-kind actor can replace its predecessor in the same slot between
+   * captures. The control-flow identity is unchanged, but teleporting back to
+   * a source is discontinuous with the measured three-pixel flight and must
+   * start a fresh renderer generation rather than inherit the old trail. */
+  Write16(wram, 0x0C20 + 0x02, 1200);
+  ActionSceneEffects_CaptureFrame(&observer, &reused, wram, sizeof(wram), 1);
+  CHECK(reused.effect_count == 2);
+  CHECK(reused.effects[0].generation != advanced.effects[0].generation);
+  CHECK(reused.effects[0].pulse_generation !=
+        advanced.effects[0].pulse_generation);
+  CHECK(reused.effects[0].age_ticks == 0);
+  CHECK(reused.effects[0].pulse_ticks == 0);
+
+  Write16(wram, 0x0C20 + 0x02, 1203);
+  Write16(wram, 0x0C20 + 0x32, 0xBD76);
+  ActionSceneEffects_CaptureFrame(&observer, &source_reused, wram,
+                                  sizeof(wram), 1);
+  CHECK(source_reused.effects[0].generation != reused.effects[0].generation);
+  CHECK(source_reused.effects[0].age_ticks == 0);
+
+  /* The opposite-facing source artwork uses the other measured pair. Both
+   * belong to the same projectile family and must remain positively matched. */
+  Write16(wram, 0x0C20 + 0x20, 0x45EF);
+  Write16(wram, 0x0C20 + 0x22, 0x0017);
+  ActionSceneEffects_CaptureFrame(&observer, &alternate, wram, sizeof(wram), 1);
+  CHECK(alternate.effect_count == 2);
+  CHECK(alternate.effects[0].kind == kActionEffect_EnemyFireball);
+
+  /* Outside-activation is separate from status/no-draw and is the exact bit
+   * carried by snap_04's second, offscreen lightning column. Keep tracking it
+   * but never submit it. */
+  Write16(wram, 0x0EA0 + 0x30, kActRaiserObjectFlag_OutsideActivation);
+  ActionSceneEffects_CaptureFrame(&observer, &advanced, wram, sizeof(wram), 1);
+  CHECK(advanced.effect_count == 2);
+  CHECK(advanced.visible_count == 1);
+  CHECK((advanced.effects[1].flags & kActionEffectFlag_Visible) == 0);
+
+  /* A near miss must not be decorated merely because its visual and palette
+   * resemble fire. */
+  Write16(wram, 0x0C20 + 0x12, 0xBDEF);
+  ActionSceneEffects_CaptureFrame(&observer, &rejected, wram, sizeof(wram), 1);
+  CHECK(rejected.effect_count == 1);
+  CHECK(rejected.effects[0].kind == kActionEffect_LightningTrap);
+}
+
+static void TestBloodpoolBossLightningIdentity(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionSceneEffectFrame frame;
+  ActionEffectObserver observer = {0};
+  memset(wram, 0, sizeof(wram));
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  wram[kActRaiserWram_CurrentMap] = 8;
+  Write16(wram, kActRaiserWram_GameFrame, 11775);
+  SeedBloodpoolBoss(wram);
+
+  static const uint8_t kLeft[] = {6, 6, 1, 48, 36, 30};
+  static const uint8_t kRight[] = {11, 11, 11, 8, 8, 8};
+  static const uint8_t kBottom[] = {117, 69, 21, 117, 69, 21};
+  for (unsigned visual = 0; visual < 6; visual++) {
+    for (unsigned flipped = 0; flipped < 2; flipped++) {
+      SeedBloodpoolBossLightningStrike(wram, 9, visual, flipped != 0);
+      ActionSceneEffects_CaptureFrame(
+          &observer, &frame, wram, sizeof(wram), 1);
+      CHECK(frame.effect_count == 1);
+      CHECK(frame.effects[0].record_address == 0x08E0);
+      CHECK(frame.effects[0].kind == kActionEffect_BloodpoolBossLightning);
+      CHECK(frame.effects[0].phase == kActionEffectPhase_BossLightningStrike);
+      CHECK(frame.effects[0].visual == visual);
+      CHECK(frame.effects[0].animation_state == visual + 2);
+      CHECK(frame.effects[0].left_extent ==
+            (flipped ? kRight[visual] : kLeft[visual]));
+      CHECK(frame.effects[0].right_extent ==
+            (flipped ? kLeft[visual] : kRight[visual]));
+      CHECK(frame.effects[0].bottom_extent == kBottom[visual]);
+      CHECK(((frame.effects[0].flags &
+              kActionEffectFlag_FlipHorizontal) != 0) == (flipped != 0));
+    }
+  }
+
+  /* $20/$5D2B is the blank half of every strike cycle, not a warning. */
+  Write16(wram, 0x08E0 + 0x20, 0x5D2B);
+  Write16(wram, 0x08E0 + 0x22, 0x0020);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+
+  SeedBloodpoolBossLightningStrike(wram, 9, 5, false);
+  for (unsigned visual = 8; visual <= 10; visual++) {
+    SeedBloodpoolBossLightningImpact(wram, 10, visual);
+    ActionSceneEffects_CaptureFrame(&observer, &frame, wram,
+                                    sizeof(wram), 1);
+    CHECK(frame.effect_count == 2);
+    CHECK(frame.effects[1].phase == kActionEffectPhase_BossLightningImpact);
+    CHECK(frame.effects[1].visual == visual);
+  }
+
+  /* The boss animation bank is shared by the room. Map, control flow, linked
+   * parent, transform, and exact composition tuple are all required. */
+  wram[kActRaiserWram_CurrentMap] = 7;
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram,
+                                  sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+  wram[kActRaiserWram_CurrentMap] = 8;
+  Write16(wram, 0x08E0 + 0x12, 0x8660);
+  Write16(wram, 0x0920 + 0x12, 0x8660);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram,
+                                  sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+
+  SeedBloodpoolBossLightningStrike(wram, 9, 4, false);
+  Write16(wram, 0x08E0 + 0x3A, 0x08A0);  /* player, not boss family */
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram,
+                                  sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+  SeedBloodpoolBossLightningStrike(wram, 9, 4, false);
+  Write16(wram, 0x08E0 + 0x28, kActRaiserObjectFlip_Vertical);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram,
+                                  sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+}
+
+static void TestSwordBeamIdentityAndAuthoredGeometry(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionSceneEffectFrame frame;
+  ActionEffectObserver observer = {0};
+  memset(wram, 0, sizeof(wram));
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  wram[kActRaiserWram_CurrentMap] = 2;
+  Write16(wram, kActRaiserWram_GameFrame, 1726);
+
+  SeedSwordBeam(wram, 0x13, false);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.visible_count == 1);
+  CHECK(frame.effects[0].record_address == 0x08E0);
+  CHECK(frame.effects[0].kind == kActionEffect_SwordBeam);
+  CHECK(frame.effects[0].phase == kActionEffectPhase_SwordBeamFlight);
+  CHECK(frame.effects[0].world_x == 224);
+  CHECK(frame.effects[0].world_y == 456);
+  CHECK(frame.effects[0].velocity_x == 8);
+  CHECK(frame.effects[0].left_extent == 0xFFE0);
+  CHECK(frame.effects[0].visual == 0x30);
+  CHECK(frame.effects[0].composition == 0x99E8);
+  CHECK(frame.effects[0].geometry.data.rect.x0 == 0.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y0 == -1.0f);
+  CHECK(frame.effects[0].geometry.data.rect.x1 == 16.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y1 == 31.0f);
+
+  /* The alternate state uses a second visual/composition tuple but emits
+   * the same six OAM parts and therefore the same light anchor. */
+  SeedSwordBeam(wram, 0x14, false);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].animation_state == 0x14);
+  CHECK(frame.effects[0].visual == 0x31);
+  CHECK(frame.effects[0].composition == 0x9A17);
+  CHECK(frame.effects[0].geometry.data.rect.y0 == -1.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y1 == 31.0f);
+
+  SeedSwordBeam(wram, 0x13, true);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].velocity_x == -8);
+  CHECK(frame.effects[0].flags & kActionEffectFlag_FlipHorizontal);
+  CHECK(frame.effects[0].geometry.data.rect.x0 == 0.0f);
+  CHECK(frame.effects[0].geometry.data.rect.x1 == 16.0f);
+
+  /* This is a player ability rather than a Bloodpool room signature. */
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  Write16(wram, 0x08E0 + 0x20, 0x99E9);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+  SeedSwordBeam(wram, 0x13, false);
+  Write16(wram, 0x08E0 + 0x3A, 0x0860);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+  SeedSwordBeam(wram, 0x13, false);
+  Write16(wram, kActRaiserWram_PlayerObject + 0x32, 0x9810);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+}
+
+static void TestBloodpoolTorchMetatileIdentity(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionSceneEffectFrame frame;
+  ActionEffectObserver observer = {0};
+  memset(wram, 0, sizeof(wram));
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  wram[kActRaiserWram_CurrentMap] = 3;
+  Write16(wram, kActRaiserWram_GameFrame, 2479);
+  Write16(wram, kActRaiserWram_Bg1Width, 256);
+  Write16(wram, kActRaiserWram_Bg1Height, 256);
+  Write16(wram, kActRaiserWram_BgMapPage, 0x8000);
+  /* Two sconces share one animated BG tile clock even though their particle
+   * seeds remain identity-specific. */
+  /* World cell (32,48): one $47 torch top directly over its $4F base. */
+  wram[0x8000 + 0x30 + 2] = 0x47;
+  wram[0x8000 + 0x40 + 2] = 0x4F;
+  wram[0x8000 + 0x30 + 4] = 0x47;
+  wram[0x8000 + 0x40 + 4] = 0x4F;
+
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 2);
+  CHECK(frame.visible_count == 2);
+  CHECK(frame.effects[0].kind == kActionEffect_WallTorch);
+  CHECK(frame.effects[0].phase == kActionEffectPhase_WallTorch);
+  CHECK(frame.effects[0].world_x == 40);
+  CHECK(frame.effects[0].world_y == 63);
+  CHECK(frame.effects[0].projection_plane ==
+        kActionEffectProjectionPlane_Bg1);
+  CHECK(frame.effects[0].phase_ticks == 2479);
+  CHECK(frame.effects[1].world_x == 72);
+  CHECK(frame.effects[1].world_y == 63);
+  CHECK(frame.effects[1].phase_ticks == frame.effects[0].phase_ticks);
+
+  /* The same authored pair is present in Bloodpool map 5 and must not be
+   * suppressed by a room-number allowlist. */
+  wram[kActRaiserWram_CurrentMap] = 5;
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 2);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  wram[kActRaiserWram_CurrentMap] = 3;
+  wram[0x8000 + 0x30 + 4] = 0;
+  wram[0x8000 + 0x40 + 4] = 0;
+  wram[0x8000 + 0x40 + 2] = 0x4E;
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+}
+
+static void TestSceneCaptureCapacityFailsClosed(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionSceneEffectFrame frame;
+  ActionEffectObserver observer = {0};
+  memset(wram, 0, sizeof(wram));
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  for (unsigned slot = 0; slot < kActionSceneEffectMaxInstances + 1; slot++)
+    SeedMeasuredSceneObject(wram, slot, false);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.overflow != 0);
+  CHECK(frame.effect_count == 0);
+  CHECK(frame.visible_count == 0);
+
+  memset(&frame, 0xFF, sizeof(frame));
+  ActionSceneEffects_CaptureFrame(NULL, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+  CHECK(frame.visible_count == 0);
+}
+
 int main(void) {
   TestControllerAndSlotIdentity();
   TestEverySpellIsIdentified();
@@ -430,6 +861,11 @@ int main(void) {
   TestLiveWramRecordIsRecognized();
   TestLifecycleUsesEmulationTicks();
   TestMalformedInputsFailClosed();
+  TestMeasuredSceneObjectIdentities();
+  TestBloodpoolBossLightningIdentity();
+  TestSwordBeamIdentityAndAuthoredGeometry();
+  TestBloodpoolTorchMetatileIdentity();
+  TestSceneCaptureCapacityFailsClosed();
   if (g_failures) {
     fprintf(stderr, "%d action-effects test(s) failed\\n", g_failures);
     return 1;

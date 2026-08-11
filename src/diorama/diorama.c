@@ -1760,6 +1760,11 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     memcpy(out_projection->matrix, mvp, sizeof(mvp));
     out_projection->aspect_x = aspect_x;
     out_projection->height_scale = height_scale;
+    /* The public point-projection contract takes coordinates relative to the
+     * displayed capture. Layer textures carry a hidden resolve apron before
+     * that capture, so publish its origin once instead of making every
+     * presentation overlay know the surface layout. */
+    out_projection->texture_x_origin = obj_apron;
     out_projection->texture_width = kPpuSurfaceWidth;
     /* The ALLOCATED height, matching texture_width's allocated width, because
      * Diorama_ProjectCapturedPoint divides a texture row by this to get V and
@@ -1809,11 +1814,19 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         resolved, kDioramaLayerCount);
   }
 
-  /* Publish the exact authored shape of each OBJ priority plane. Enhanced
-   * action effects remain a world overlay, but their registration now follows
-   * the same parallax/rake/bow as the source sprite band. */
+  /* Publish the exact authored shape of BG1-low and each OBJ priority plane.
+   * Enhanced action effects remain a world overlay, but their registration
+   * follows the same parallax/rake/bow as the source art. */
   if (out_projection) {
     for (int i = 0; i < resolved_count; i++) {
+      if (resolved[i].plane == kPpuOverlaySource_Bg1) {
+        out_projection->bg1_plane = (DioramaObjectPlaneProjection){
+          .valid = true,
+          .z_world = resolved[i].z - 0.5f,
+          .rake = resolved[i].rake,
+          .bow = resolved[i].bow,
+        };
+      }
       int priority = -1;
       switch (resolved[i].plane) {
         case kPpuOverlaySource_Obj: priority = 0; break;

@@ -10,7 +10,15 @@ Palette-1 Red Demon fire is implemented with ROM-semantic unit coverage; a live
 Red Demon capture remains its visual acceptance gate. Magical Fire now has a host-side captured
 lifecycle plus portable lighting/particle implementation for flat and diorama presentation; its
 new visual pass and the other three action spells still need the short live acceptance sweep in
-[Validation remaining](#validation-remaining).
+[Validation remaining](#validation-remaining). Run `20260810-124203` additionally maps and
+implements Bloodpool's wall torches, gargoyle fireballs, vertical lightning traps, and the map-$08
+boss lightning attack as portable action-scene lights and particle emitters. Run
+`20260810-180202` corrects the latter to six strike shapes plus one floor-impact cycle; the
+complete state sequences and per-row paths are decoded from its `$7E:5000` boss animation bank.
+Run `20260810-175403` also maps the global player sword beam and implements a cool light, tapered
+light wake, and sparse crossed-star trail for both of its authored cycles and travel directions.
+Snapshot hooks and renderer output are covered by ROM-free regressions, with only live visual
+tuning remaining.
 
 The lifecycle mapping in this document is deliberately implementation-neutral. It identifies the
 authentic 60 Hz game state that an enhanced renderer can observe without changing damage,
@@ -52,6 +60,32 @@ visual cadence, not its actor-owned lifetime. This is the companion to [SEAMS.md
    unrelated to `$E6CA/$E6D0/$E6D6`.
    The ROM authors every source frame at one 60 Hz tick, producing a 20-cycle-per-second flicker;
    the enhanced baseline deliberately holds each frame for four logic ticks (15 source fps).
+8. **The Bloodpool wall torches are BG1 map objects, not action records.** Maps `$02/$03` and
+   `$02/$05` both use the exact metatile pair `$47` over `$4F`; the light anchor is the flame at
+   local `(8,15)` within that 16x32 pair. Capture therefore matches that bounded pair throughout
+   the Bloodpool group rather than maintaining a room allowlist. A colour-key or screen-space
+   pixel search is unnecessary.
+9. **The observed enemy fireballs and lightning are independent action objects.** Fireball flight
+   is handler `$BDF0`, resume `$BDD9`, state `$23`, animation `$7E:4000`, with exact
+   visual/composition pairs `$17/$45EF` and `$18/$4610`. The lightning-trap bolt is source `$BD2A`,
+   resume `$BD69`, state `$14`, animation `$7E:4000`, handler `$BD36`/`$8683`, with pairs
+   `$1F/$46FE` and `$20/$479D`. Their live slot positions and culling extents are the anchors.
+10. **The Bloodpool boss attack is a third lightning family.** In map `$02/$08`, source `$BDFF`
+    creates linked `$7E:5000` children through `$BFDF/$BFF9`. States `$02-$04` are long/medium/
+    short VERTICAL strikes using visuals/compositions `$00/$5346`, `$01/$5401`, `$02/$5492`;
+    states `$05-$07` are the corresponding DIAGONAL strikes using `$03/$54F2`, `$04/$55C2`,
+    `$05/$5661`. Horizontal flip mirrors every path. Shared `$20/$5D2B` is the blank half-cycle,
+    not a telegraph; saved resumes `$C02B/$C04B/$C051` vary across repetitions and are not phase
+    identity. State `$09` is the linked floor impact. Slot `+$3A` validates the parent and supplies
+    stable continuity across those control-flow changes.
+11. **The sword beam is a player-linked action projectile, not a Bloodpool object.** Creator
+    `$00:9CF2` installs handler `$9D1C`, animation `$06:8000`, attacker flag `$0001`, and a
+    backlink to player slot `$08A0`. State/visual/composition tuples `$13/$30/$99E8` and
+    `$14/$31/$9A17` are its two authored cycles. Both compositions emit the same six 8x8 parts,
+    producing local drawable bounds `(0,-1)..(16,31)` centred at `(8,15)` after the action
+    emitter's Y bias. Its collision-header words include signed offsets and therefore cannot be
+    reused as unsigned presentation extents. The measured velocity, normally `+8` or `-8`, is the
+    authoritative trail direction.
 
 These findings leave no ROM-decompilation blocker to choosing particle and light styles. They
 also mean the first implementation should expose per-instance metadata, rather than a single
@@ -84,6 +118,9 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   current player point through `$00:A061` from DP `$80/$82`.
 - The current composition supplies four culling extents. `$8E2F` mirrors them according to slot
   `+28` and writes left/top/right/bottom to `+0A/+0C/+0E/+10`.
+- Those four words are raw collision-header data, not a universal presentation rectangle. Most
+  observed actors encode unsigned distances, but the sword beam uses signed offsets; its host
+  geometry is decoded from the six authored OAM parts instead.
 - Each seven-byte OAM part contains size, normal/flipped X bytes, normal/flipped Y bytes, tile,
   and attributes. The authentic local position is the selected unsigned part coordinate minus
   the selected left/top extent. Do not sign-extend the stored part coordinate first.
@@ -120,6 +157,49 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   effects. No platform shader is required. Settings expose independent `action_effect_lighting`
   and `action_effect_particles` switches (`AR_ACTION_EFFECT_LIGHTING` /
   `AR_ACTION_EFFECT_PARTICLES`), both on by default.
+
+### Action-scene accent slice (2026-08-10)
+
+- `ActionSceneEffects_CaptureFrame` is a separate immutable frame contract from the spell cast.
+  It scans BG1's bounded page map for Bloodpool torch pairs through the same pure
+  `ActionBgMapView` validation/addressing contract used by `ActionBgWorld`, then walks the ordinary
+  action-object table for the three measured actor signatures above. The boss-lightning rule is
+  additionally limited to Bloodpool map `$08`, validates its linked parent through `+$3A`, and
+  matches every pair decoded from animation states 2 through 7 and 9. Unknown lookalikes fail closed;
+  inactive, no-draw, ineligible, and outside-activation records never submit geometry. Scene actor
+  generations also combine stable resume/source identity with bounded motion continuity, so an
+  immediately recycled same-kind slot cannot inherit its predecessor's particle clock. The boss
+  child uses source/backlink continuity because its saved resume intentionally changes across
+  repeated strike/blank cycles.
+- The player sword beam is deliberately outside the Bloodpool map gate. Capture requires handler
+  `$9D1C`, animation `$06:8000`, attacker flag `$0001`, one of the two exact state/visual/
+  composition tuples, and a backlink to the live player whose source descriptor matches the
+  child. This prevents a polymorphic or immediately recycled slot from inheriting the effect.
+- Each source remains an independent light centre. Torches receive a warm two-tier wall spill and
+  a small rising ember plume; fireballs receive a heading-aligned hot body, warm spill, and trailing
+  sparks; trap lightning receives a tall cyan shaft aura, crawling sparks, and a small impact fan.
+  Boss lightning receives a floor-impact bloom plus a strike-only warm spill, impact fan, and two
+  projected filaments (amber corona and white-gold core). The filaments follow the real 8×8 OAM
+  row centroids for all six paths, including horizontal mirroring and `$8D68`'s one-pixel Y draw
+  bias; the surrounding glow rotates onto the same authored chord. All particle placement is an
+  integer-hash function of authentic lifecycle clocks, so paused redraws freeze and repeat builds
+  are byte-identical.
+- Sword-beam presentation uses a cold two-tier glow, two tapered additive wake quads, and four
+  sparse cyan-white crossed-star glints behind the crescent. All three follow measured velocity,
+  mirror for leftward travel, and project through the same OBJ plane in flat or Diorama mode.
+- Flat presentation uses the normal action camera projection. Diorama presentation publishes the
+  exact resolved BG1-low shape alongside the existing four OBJ shapes: torches follow BG1
+  depth/rake/bow, while fireballs and lightning follow OBJ priority 0. A missing plane fails closed
+  instead of placing the effect at a guessed depth. The published projection also owns the hidden
+  OBJ-resolve apron origin of the 640-column layer textures; callers remain in displayed-capture
+  coordinates, preventing overlays from drifting across a raked plane while the flat path stays
+  unchanged.
+- This slice deliberately adds no GLSL, SPIR-V, or MSL artifact. It uses the established bounded,
+  capability-checked SDL additive/untextured-geometry pass, so Metal, Vulkan, Direct3D, OpenGL,
+  software, and headless builds share one implementation. The existing Action `Effect lighting`
+  and `Particles` settings control both spell and scene accents. Spell and scene batches share one
+  capacity-aware geometry writer and append directly into their final arrays; scene rendering does
+  not allocate or copy through a spell-sized scratch batch.
 
 ### Simulation coordinate contract
 
@@ -390,11 +470,26 @@ Before final visual tuning, finish these focused acceptance captures:
 1. Enable `AR_ALL_MAGIC=1` and `AR_INF_MP=1`; cast Magical Fire with both flat and diorama action
    presentation and visually accept attachment, coverage, intensity, lifecycle end, and pause
    behavior. Then cast the other three spells in a scrollable action stage.
-2. Log the controller kind and cohort slot `status, X/Y, +0A/+0C/+0E/+10, +20, +22, +28` each
+2. Revisit Bloodpool `$02/$03` and `$02/$05` in flat and diorama modes. Visually accept torch wall
+   registration and synchronized faster cadence, the strengthened fireball trail, complete
+   176px lightning-column coverage, source retirement, and the lighting/particle setting switches.
+   The discovery anchors remain `snap_01_gf2479`, `snap_03_gf7397`, and `snap_04_gf9417` from run
+   `20260810-124203`; the failure anchors are `snap_05_gf5415`, `snap_06_gf7654`, and
+   `snap_07_gf10026` from `20260810-163044`. The latter run corrected the fireball matcher from
+   non-live visual values to `$17/$45EF` and `$18/$4610`, proved `$47/$4F` torches in map `$05`,
+   and measured lightning extents at 88px above plus 88px below the actor hot point.
+3. Revisit the Bloodpool boss in `$02/$08` using run `20260810-180202` as the correction baseline.
+   Accept all six vertical/diagonal and long/medium/short white-gold/amber strike paths, horizontal
+   mirroring, the separate floor impact, pause behavior, retirement, and both Graphics switches in
+   flat and Diorama presentation.
+4. Revisit the second snapshot from `20260810-175403`. Accept the sword beam's cold body light,
+   continuous tapered wake, four-star trail, left/right mirroring, both `$13/$14` cycles, pause and
+   retirement behavior, and both Graphics switches in flat and Diorama presentation.
+5. Log the controller kind and cohort slot `status, X/Y, +0A/+0C/+0E/+10, +20, +22, +28` each
    tick. Confirm the decoded timing, clone count, and slot reuse for IDs 2-4.
-3. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the
+6. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the
    `$923E=0..140` sunlight ramp before implementing their distinct weather/scene-light styles.
-4. Capture one Red Demon attack to visually accept its elevated red flame attachment, and one Skull
+7. Capture one Red Demon attack to visually accept its elevated red flame attachment, and one Skull
    Head attack to confirm the statically decoded Earthquake-posting window against live
    presentation.
 

@@ -88,18 +88,23 @@ typedef struct DioramaObjectPlaneProjection {
   float bow;
 } DioramaObjectPlaneProjection;
 
-/* Resolved action-OBJ projection for presentation-only overlays. The
+/* Resolved action-world projection for presentation-only overlays. The
  * compositor publishes the same camera, mesh dimensions, interpolated BG1 UV
- * window, and per-room OBJ plane shapes used by the captured sprite planes;
+ * window, and per-room BG1/OBJ plane shapes used by the captured planes;
  * consumers therefore cannot duplicate auto-fit or guess a parallel depth. */
 typedef struct DioramaProjection {
   bool valid;
   float matrix[16];
   float object_u0, object_v0, object_u1, object_v1;
   float aspect_x, height_scale;
+  /* Texture column containing captured display x=0. Action-effect callers
+   * speak in display-capture coordinates; the projection owns the hidden OBJ
+   * resolve apron carried by every diorama layer surface. */
+  int texture_x_origin;
   int texture_width, texture_height;
   int output_x, output_y;
   int output_width, output_height;
+  DioramaObjectPlaneProjection bg1_plane;
   DioramaObjectPlaneProjection object_planes[kDioramaObjectPriorityCount];
 } DioramaProjection;
 
@@ -109,6 +114,14 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
                                   float capture_x, float capture_y,
                                   unsigned obj_priority, SDL_FPoint *point,
                                   float *scale_x, float *scale_y);
+
+/* Same mapping, using the resolved BG1-low plane. Environmental lights such
+ * as wall torches stay registered to raked/bowed room geometry instead of
+ * floating at an arbitrary OBJ depth. */
+bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
+                                     float capture_x, float capture_y,
+                                     SDL_FPoint *point,
+                                     float *scale_x, float *scale_y);
 
 /* B4-kick (followup doc): boost's "zoom-punch" multiplies the RESOLVED
  * distance (1.0 = no change) rather than offsetting DioramaCameraPose's

@@ -834,7 +834,7 @@ bool SubmitEffectBatch(EffectBatch *batch) {
   return false;
 }
 
-/* ── Action-stage spell effects ────────────────────────────────────────── */
+/* ── Action-stage presentation effects ────────────────────────────────── */
 
 typedef struct ActionEffectProjectionContext {
   const FrameSlot *slot;
@@ -868,9 +868,13 @@ static bool ProjectActionEffectPoint(
      * diorama samples TEXTURE space, whose row 0 is screen y = -ws_extra_top.
      * The flat path below keeps the authentic screen y, and never sees a
      * non-zero vertical margin anyway. */
+    const float texture_y = capture_y + (float)slot->ws_extra_top;
+    if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
+      return Diorama_ProjectCapturedBg1Point(
+          context->diorama_projection, capture_x, texture_y,
+          point, NULL, NULL);
     return Diorama_ProjectCapturedPoint(
-        context->diorama_projection, capture_x,
-        capture_y + (float)slot->ws_extra_top,
+        context->diorama_projection, capture_x, texture_y,
         effect->obj_priority, point, NULL, NULL);
   }
 
@@ -884,7 +888,8 @@ static bool ProjectActionEffectPoint(
 
 static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
                               const DioramaProjection *diorama_projection) {
-  if (!slot || !slot->action_effects.visible_count ||
+  if (!slot || (!slot->action_effects.visible_count &&
+                !slot->action_scene_effects.visible_count) ||
       (!slot->action_effect_lighting && !slot->action_effect_particles) ||
       !EffectRendererAvailable())
     return;
@@ -895,14 +900,19 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
     .viewport = viewport,
   };
   ActionEffectRenderBatch geometry;
+  ActionSceneEffectRenderBatch scene_geometry;
   if (!ActionEffectRender_Build(
           &slot->action_effects, slot->action_effect_lighting,
           slot->action_effect_particles, ProjectActionEffectPoint,
           &projection, &geometry) ||
-      !geometry.index_count)
+      !ActionSceneEffectRender_Build(
+          &slot->action_scene_effects, slot->action_effect_lighting,
+          slot->action_effect_particles, ProjectActionEffectPoint,
+          &projection, &scene_geometry) ||
+      (!geometry.index_count && !scene_geometry.index_count))
     return;
 
-  EffectBatch batch = {
+  EffectBatch spell_batch = {
     .vertices = geometry.vertices,
     .indices = geometry.indices,
     .vertex_count = geometry.vertex_count,
@@ -910,9 +920,18 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
     .vertex_capacity = kActionEffectRenderMaxVertices,
     .index_capacity = kActionEffectRenderMaxIndices,
   };
+  EffectBatch scene_batch = {
+    .vertices = scene_geometry.vertices,
+    .indices = scene_geometry.indices,
+    .vertex_count = scene_geometry.vertex_count,
+    .index_count = scene_geometry.index_count,
+    .vertex_capacity = kActionSceneEffectRenderMaxVertices,
+    .index_capacity = kActionSceneEffectRenderMaxIndices,
+  };
   EffectRenderState state;
   if (!BeginEffectAdd(&state)) return;
-  SubmitEffectBatch(&batch);
+  bool spell_submitted = SubmitEffectBatch(&spell_batch);
+  bool scene_submitted = SubmitEffectBatch(&scene_batch);
   EndEffectAdd(&state);
 
   /* One line, once per process: the whole path (WRAM identity -> capture ->
@@ -921,13 +940,23 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
    * silent version of this is what let a 16-bit read of the animation-bank
    * BYTE reject every spell with no visible symptom but "nothing happens". */
   static bool announced;
-  if (!announced) {
+  if (!announced && geometry.index_count && spell_submitted) {
     announced = true;
     fprintf(stderr, "[action-fx] first spell geometry submitted: %u effect(s), "
             "%d vertices / %d indices (lighting=%d particles=%d)\n",
             slot->action_effects.visible_count, geometry.vertex_count,
             geometry.index_count, slot->action_effect_lighting,
             slot->action_effect_particles);
+  }
+  static bool announced_scene;
+  if (!announced_scene && scene_geometry.index_count && scene_submitted) {
+    announced_scene = true;
+    fprintf(stderr,
+            "[action-fx] first scene accent geometry submitted: %u effect(s), "
+            "%d vertices / %d indices (lighting=%d particles=%d)\n",
+            slot->action_scene_effects.visible_count,
+            scene_geometry.vertex_count, scene_geometry.index_count,
+            slot->action_effect_lighting, slot->action_effect_particles);
   }
 }
 

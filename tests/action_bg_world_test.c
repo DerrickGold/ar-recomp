@@ -128,6 +128,46 @@ static void CheckTile(const Fixture *fixture, const ActionBgWorld *world,
   CHECK(entry == ExpectedAtTile(fixture, (unsigned)tile_x, (unsigned)tile_y));
 }
 
+static void TestSharedMapViewAddressing(void) {
+  Fixture fixture = MakeFixture();
+  ActionBgMapView view;
+  CHECK(ActionBgMapView_Init(
+      &view, fixture.wram, fixture.input.wram_size,
+      fixture.input.world_width, fixture.input.world_height,
+      (uint16_t)(fixture.input.map_page | 0x007Fu)));
+  CHECK(view.world_width == 512);
+  CHECK(view.world_height == 512);
+  CHECK(view.pages_wide == 2);
+  CHECK(view.map_size == 4u * 256u);
+
+  uint8_t id = 0xFF;
+  CHECK(ActionBgMapView_LookupMetatile(&view, 0, 0, &id));
+  CHECK(id == fixture.wram[MapAddress(&fixture, 0, 0, 0, 0)]);
+  CHECK(ActionBgMapView_LookupMetatile(&view, 31, 47, &id));
+  CHECK(id == fixture.wram[MapAddress(&fixture, 0, 0, 1, 2)]);
+  CHECK(ActionBgMapView_LookupMetatile(&view, 256, 272, &id));
+  CHECK(id == fixture.wram[MapAddress(&fixture, 1, 1, 0, 1)]);
+  CHECK(ActionBgMapView_LookupMetatile(&view, 511, 511, &id));
+  CHECK(id == fixture.wram[MapAddress(&fixture, 1, 1, 15, 15)]);
+
+  id = 0xA5;
+  CHECK(!ActionBgMapView_LookupMetatile(&view, -1, 0, &id));
+  CHECK(!ActionBgMapView_LookupMetatile(&view, 512, 0, &id));
+  CHECK(!ActionBgMapView_LookupMetatile(&view, 0, 512, &id));
+  CHECK(!ActionBgMapView_LookupMetatile(&view, 0, 0, NULL));
+  CHECK(id == 0xA5);
+
+  CHECK(!ActionBgMapView_Init(
+      &view, fixture.wram, fixture.input.wram_size, 384, 512,
+      fixture.input.map_page));
+  CHECK(view.map == NULL);
+  CHECK(!ActionBgMapView_LookupMetatile(&view, 0, 0, &id));
+  CHECK(!ActionBgMapView_Init(
+      NULL, fixture.wram, fixture.input.wram_size, 512, 512,
+      fixture.input.map_page));
+  DestroyFixture(&fixture);
+}
+
 static void TestDecodePagesQuadrantsAndBounds(void) {
   Fixture fixture = MakeFixture();
   ActionBgWorld *world = ActionBgWorld_Create();
@@ -317,6 +357,7 @@ static void TestMaximumWramBound(void) {
 }
 
 int main(void) {
+  TestSharedMapViewAddressing();
   TestDecodePagesQuadrantsAndBounds();
   TestExactSourceCacheAndInvalidation();
   TestMalformedInputFailsClosedAtomically();

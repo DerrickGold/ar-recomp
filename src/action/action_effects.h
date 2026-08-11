@@ -16,6 +16,13 @@ typedef enum ActionEffectKind {
   kActionEffect_MagicalStardust = 2,
   kActionEffect_MagicalAura = 3,
   kActionEffect_MagicalLight = 4,
+  /* Presentation-only scene accents. These values deliberately follow the
+   * ROM spell IDs so the established spell identities remain stable. */
+  kActionEffect_WallTorch,
+  kActionEffect_EnemyFireball,
+  kActionEffect_LightningTrap,
+  kActionEffect_BloodpoolBossLightning,
+  kActionEffect_SwordBeam,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -47,6 +54,12 @@ typedef enum ActionEffectPhase {
    * calls out that the 24-tick pre-beam visual must not get full intensity. */
   kActionEffectPhase_LightBeamCharge,
   kActionEffectPhase_LightBeam,
+  kActionEffectPhase_WallTorch,
+  kActionEffectPhase_EnemyFireballFlight,
+  kActionEffectPhase_LightningActive,
+  kActionEffectPhase_BossLightningStrike,
+  kActionEffectPhase_BossLightningImpact,
+  kActionEffectPhase_SwordBeamFlight,
   kActionEffectPhase_Count,
 } ActionEffectPhase;
 
@@ -69,6 +82,15 @@ typedef enum ActionEffectRole {
 typedef enum ActionEffectRenderLayer {
   kActionEffectRenderLayer_WorldOverlay = 0,
 } ActionEffectRenderLayer;
+
+/* Diorama rooms can shape BG1 and each OBJ priority band independently. Keep
+ * the source plane with the captured effect so presentation projects a torch
+ * with its wall and an action object with its authentic OBJ band. Flat-mode
+ * projection intentionally treats both identically. */
+typedef enum ActionEffectProjectionPlane {
+  kActionEffectProjectionPlane_Obj = 0,
+  kActionEffectProjectionPlane_Bg1,
+} ActionEffectProjectionPlane;
 
 typedef enum ActionEffectGeometryKind {
   kActionEffectGeometry_None = 0,
@@ -103,6 +125,8 @@ enum {
    * Fire/Aura/Stardust use four slots; Light uses the final three. */
   kActionEffectMaxInstances = 7,
   kActionEffectObserverTrackCount = 7,
+  kActionSceneEffectMaxInstances = 16,
+  kActionSceneEffectObserverTrackCount = 80,
   kActionEffectObjPriorityCount = 4,
   kActionEffectFlag_Visible = 1 << 0,
   kActionEffectFlag_FlipHorizontal = 1 << 1,
@@ -115,8 +139,9 @@ typedef struct ActionEffectInstance {
   uint16_t record_address;
   int16_t world_x, world_y;
   int16_t velocity_x, velocity_y;
-  /* Unsigned distances from the hot point, already selected for the current
-   * flip by the animation handler (the ROM draws world-left/world+right). */
+  /* Raw composition collision bounds after flip selection. Most actors store
+   * unsigned distances from the hot point, but the player sword beam carries
+   * signed header offsets here; presentation must use geometry instead. */
   uint16_t left_extent, top_extent, right_extent, bottom_extent;
   uint16_t composition;
   uint16_t visual;
@@ -132,6 +157,7 @@ typedef struct ActionEffectInstance {
   uint8_t flags;
   uint8_t obj_priority;
   uint8_t render_layer;
+  uint8_t projection_plane;
   ActionEffectGeometry geometry;
 } ActionEffectInstance;
 
@@ -161,6 +187,19 @@ typedef struct ActionEffectFrame {
   ActionEffectUnmatched unmatched[kActionEffectMaxInstances];
 } ActionEffectFrame;
 
+/* Non-spell scene effects use the same renderer-independent instance contract,
+ * but remain a separate frame. Spell geometry intentionally coalesces a cast
+ * into one composition; torches, enemy/player projectiles, and traps must each
+ * retain an independent light centre. If capture would be partial, the scene
+ * layer fails closed for that frame instead. */
+typedef struct ActionSceneEffectFrame {
+  uint16_t game_frame;
+  uint8_t effect_count;
+  uint8_t visible_count;
+  uint8_t overflow;
+  ActionEffectInstance effects[kActionSceneEffectMaxInstances];
+} ActionSceneEffectFrame;
+
 /* Observer state is explicit so savestate/restart boundaries can reset it and
  * tests do not depend on process-global history. pulse_key is capture-private:
  * future repeated-launch spells can advance pulse_generation without ending
@@ -172,15 +211,25 @@ typedef struct ActionEffectObserverTrack {
   uint16_t phase_ticks;
   uint16_t pulse_ticks;
   uint16_t pulse_key;
+  /* Scene-only continuity sample. Spell tracks leave continuity_valid clear;
+   * their controller/cohort contract supplies the outer lifetime. */
+  uint32_t continuity_key;
+  int16_t last_world_x;
+  int16_t last_world_y;
+  int16_t last_velocity_x;
+  int16_t last_velocity_y;
   uint8_t kind;
   uint8_t phase;
   uint8_t active;
+  uint8_t continuity_valid;
 } ActionEffectObserverTrack;
 
 typedef struct ActionEffectObserver {
   uint32_t next_generation;
   uint32_t next_pulse_generation;
   ActionEffectObserverTrack tracks[kActionEffectObserverTrackCount];
+  ActionEffectObserverTrack
+      scene_tracks[kActionSceneEffectObserverTrackCount];
 } ActionEffectObserver;
 
 void ActionEffectObserver_Reset(ActionEffectObserver *observer);
@@ -192,5 +241,15 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
                                 ActionEffectFrame *dst,
                                 const uint8_t *wram, size_t wram_size,
                                 unsigned elapsed_ticks);
+
+/* Captures exact, measured scene identities used by the enhanced action pass:
+ * Bloodpool's BG1 torch metatile pair, the gargoyle fireball actor family,
+ * the vertical lightning-trap actor family, the map-$08 boss lightning
+ * sequence, and the global player sword beam. Unknown objects are ignored;
+ * presentation never guesses from pixels or palette colours. */
+void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
+                                     ActionSceneEffectFrame *dst,
+                                     const uint8_t *wram, size_t wram_size,
+                                     unsigned elapsed_ticks);
 
 #endif  /* ACTION_EFFECTS_H */

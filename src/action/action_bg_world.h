@@ -17,6 +17,7 @@ enum {
    * public input contract prevents a corrupt dimension from turning a caller-
    * supplied size into an unbounded host allocation. */
   kActionBgMaxWramBytes = 0x20000,
+  kActionBgMetatilePixels = 16,
 };
 
 typedef struct ActionBgDecodeInput {
@@ -34,6 +35,29 @@ typedef struct ActionBgDecodeInput {
   uint16_t word_mask;
   uint8_t attributes;
 } ActionBgDecodeInput;
+
+/* Validated, read-only view of the native 256-byte BG map pages. This is the
+ * one page-addressing contract shared by the full-world decoder and semantic
+ * consumers such as presentation-side map-object detection. */
+typedef struct ActionBgMapView {
+  const uint8_t *map;
+  size_t map_size;
+  unsigned world_width;
+  unsigned world_height;
+  unsigned pages_wide;
+} ActionBgMapView;
+
+bool ActionBgMapView_Init(ActionBgMapView *view,
+                          const uint8_t *wram, size_t wram_size,
+                          uint16_t world_width, uint16_t world_height,
+                          uint16_t map_page);
+
+/* Looks up the 16x16 metatile containing one world-pixel coordinate. False
+ * covers malformed/uninitialized views and coordinates outside the finite
+ * world; `metatile` is not modified on failure. */
+bool ActionBgMapView_LookupMetatile(const ActionBgMapView *view,
+                                    int world_x, int world_y,
+                                    uint8_t *metatile);
 
 typedef enum ActionBgLookupResult {
   /* No complete publication is available. The caller must disable the
