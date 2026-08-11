@@ -575,6 +575,11 @@ for this synthesized presentation. The mirrored sky/backdrop is capped to
 128px per side in both rooms, while the repeat-safe dune band remains available
 to the complete canvas. BG1 remains the finite-world canvas owner.
 
+Marahna `0505` keeps both layers world-backed. Its BG2 remains the structurally
+identified 512px decoded-world cycle, but the promoted room policy presents
+that cycle with Repeat/fill and a fixed 128px extension on each side. BG1 stays
+available, so the cap bounds only the independently authored backdrop.
+
 The same canonical table now supports up to four non-overlapping bands per BG.
 Fill (Transparent/World/Clamp/Mirror/Repeat/Raw), apparent horizontal motion
 (legacy fill-relative or compensated normal scrolling), screen/world anchoring,

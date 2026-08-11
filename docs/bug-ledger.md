@@ -1435,8 +1435,8 @@ the current debugging process; this file is the case law.
     total vertices or outer bounds—and make exceptional capacity proportional
     to the lifecycle cardinality that can actually occur.
 
-47. **Opening the simulation menu left the hourglass at authentic centre
-    screen — FIXED 2026-08-10; post-fix visual confirmation pending.** The
+47. **Opening the simulation menu assumed the hourglass occupied OAM slots
+    0-3 twice — FIXED 2026-08-11.** The
     gf61067 snapshot in `runs/20260810-231616` shows the menu consuming OAM
     slots 0-10 and the unchanged hourglass signature in slots 11-14: phase
     `$EF`, x `$94/$9B`, y `$0B/$13`, attrs `$31/$71`, lower tiles `$FF`.
@@ -1456,6 +1456,23 @@ the current debugging process; this file is the case law.
     malformed-size rejection. The release application builds and all 45 tests
     pass (the display-backed shader test was run separately with display
     access).
+
+    **Follow-up, 2026-08-11:** promotion was fixed, but enhanced SIM's overlay
+    admission gate independently retained the old slots-0-3 assumption.
+    `runs/20260811-145909` records repeated
+    `enhanced -> authentic (overlay_conflict)` transitions with integrity `$0`
+    and zero pixel mismatch; gf18992 has the standard town PPU topology and a
+    valid phase-`$ED` hourglass in OAM slots 11-14. The gate rejected the OBJ
+    capture solely because `StandardTownHudCapture` compared its dynamic
+    `oamFirst` against `kActRaiserHudObjOamFirst`.
+
+    `StandardTownHudCapture` now calls the same complete-signature scanner as
+    promotion and admits the OBJ capture only when its range begins at the
+    discovered slot and contains exactly four sprites. The end-to-end PPU
+    regression places the hourglass at 11-14 and proves enhanced capture
+    succeeds, then points the same four-slot capture at stale slots 0-3 and
+    proves it still fails closed. All 45 tests pass; the display-backed shader
+    test was run separately with display access.
 
     **Reusable lesson:** fixed-screen coordinates do not imply fixed OAM slots.
     Any HUD sprite sharing the allocator with menus or dialog must identify its

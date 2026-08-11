@@ -489,6 +489,37 @@ static void TestMarahnaCyclicBackdrop(void) {
   CHECK(!ActionBgPlan_Validate(&plan));
 }
 
+static void TestMarahnaMap5BackdropExtent(void) {
+  ActionBgFrameState state = State(5, 5);
+  state.layer[0].world_width = 2048;
+  state.layer[0].world_height = 512;
+  state.layer[0].camera_x = 543;
+  state.layer[1].world_width = 512;
+  state.layer[1].world_height = 512;
+  state.layer[1].camera_x = 543;
+
+  ActionBgPlan plan = Build(&state);
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].wrap_world_x);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Repeat);
+  CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 128 &&
+        plan.layer[1].horizontal_extent.right == 128);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].band_count == 0);
+  ActionBgPresentationPolicy policy = Compile(&plan);
+  CHECK(policy.repeat_layers == 2 && policy.normal_scroll_layers == 0);
+
+  state.decorative_padding_enabled = false;
+  plan = Build(&state);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
+}
+
 static void TestFillmoreAct1BackdropExtent(void) {
   ActionBgFrameState state = State(1, 1);
   ActionBgPlan plan = Build(&state);
@@ -804,11 +835,14 @@ static void TestEveryKnownMapClassifies(void) {
             layer == 1 && group == 7 && map == 1;
         const bool fixed_kasandora_bg2 =
             layer == 1 && group == 3 && (map == 1 || map == 2);
+        const bool fixed_marahna_bg2 =
+            layer == 1 && group == 5 && map == 5;
         const bool fixed_bloodpool_boss_bg1 =
             layer == 0 && group == 2 && map == 8;
         CHECK(plan.layer[layer].horizontal_extent.mode ==
               (fixed_fillmore_bg2 || fixed_death_heim_bg2 ||
-                   fixed_kasandora_bg2 || fixed_bloodpool_boss_bg1
+                   fixed_kasandora_bg2 || fixed_marahna_bg2 ||
+                   fixed_bloodpool_boss_bg1
                    ? kActionBgExtent_Fixed : kActionBgExtent_Available));
         CHECK(plan.layer[layer].vertical_extent.mode ==
               kActionBgExtent_Available);
@@ -825,6 +859,7 @@ int main(void) {
   TestCanvasOwner();
   TestOrdinaryWorldAndNativeSource();
   TestMarahnaCyclicBackdrop();
+  TestMarahnaMap5BackdropExtent();
   TestFillmoreAct1BackdropExtent();
   TestNarrowDecorativeBg2();
   TestBloodpoolBand();

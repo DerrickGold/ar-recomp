@@ -190,6 +190,11 @@ world-anchored Repeat/fill dune band at `256..512` retains an Available extent.
 The cap therefore bounds unique sky/cloud composition without constraining the
 cyclic lower landscape or the independently wide BG1 playfield.
 
+Marahna `0505` promotes a whole-layer cyclic case. BG2 retains its WorldMap
+source and decoded-world horizontal cycle, uses Repeat/fill at the presentation
+edge, and is fixed to 128/128. BG1 remains Available; the limit therefore
+bounds the backdrop without reducing the playable canvas.
+
 Death Heim acceptance keeps four state classes distinct: pre-ending `0701`
 clamp/repeat bands, the ending-sky page handoff, cyclic `0702-0707` rematch
 parallax, and the native raw-wrap `0708` raster arena.

@@ -817,6 +817,11 @@ bundled runtime's widescreen/PPU interfaces:
   icon to slots 11-14 (`runs/20260810-231616`, gf61067), so promotion scans the
   complete OAM table for this signature. The same host placement then pins the
   16px capture four native pixels before simulation's right/score group.
+  Enhanced-sim HUD handoff validates the promoted OBJ capture against that same
+  per-frame scan result; it must not reimpose slots 0-3 after promotion has
+  already discovered another range. `runs/20260811-145909`, gf18992 confirms a
+  menu-open phase `$ED` hourglass in slots 11-14. A capture that names any other
+  range remains an overlay conflict and fails closed.
 - Sky Palace's selected-magic icon is a separate OAM capture path: the game
   dynamically allocates its sprites. With no dialog sprites the icon can occupy
   slots 0-3; dialog/menu sprites can push the same icon to slots 6-9 (both
@@ -1090,6 +1095,10 @@ makes provider lookup and native-ring preflight apply the same modulo. BG1
 remains the finite playable map, while the PPU still combines the two
 independent layers through the live main/subscreen color-math state. See
 §13.4 for the register-level finding and the separated-plane reproduction.
+
+Room `0505` adds a presentation limit without changing that provider topology:
+BG2 uses Repeat/fill with a fixed 128px extent on each side, while its source
+remains the decoded world cycle and the BG1 playfield remains available.
 
 Diagnostics separately count preflight, eligible, bound, phase, edge, mismatch,
 and runtime lookup results. The modern PPU can bind at authentic 4:3 with zero
