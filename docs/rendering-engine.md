@@ -371,9 +371,11 @@ with its measured velocity.
 The sword-beam rule is not map-specific. It requires handler `$9D1C`, animation
 `$06:8000`, attacker flag `$0001`, backlink `$08A0`, a source descriptor shared
 with the active player, and exact state/visual/composition `$13/$30/$99E8` or
-`$14/$31/$9A17`. Its raw collision header includes signed offsets, so capture
-publishes the decoded six-part drawable bounds `(0,-1)..(16,31)` instead of
-feeding those words into the generic unsigned-extent path.
+`$14/$31/$9A17`. Its raw collision header includes signed byte origins, so
+capture publishes four explicit state/direction rectangles instead of feeding
+those words into the generic unsigned-extent path. Run `20260810-184935`
+provides the decisive state-`$13` proof: hot point `(112,201)` versus OAM bounds
+`(144,168)..(160,200)`, yielding local `(32,-33)..(48,-1)`.
 
 `DrawActionEffects` runs after the authentic action image and before flat HUD,
 HD-replacement, inspector, and settings overlays. Flat mode uses the resolved
@@ -404,11 +406,15 @@ vertical/diagonal, long/medium/short shapes. The longest uses 24 segments,
 horizontal flip mirrors the complete path, and the action-OBJ emitter's extra
 one-pixel Y draw bias is applied before projection. Visual `$20` stays blank;
 only the linked state-$09 child receives the separate floor-impact bloom.
-The sword crescent receives a cool two-tier light, a two-layer tapered additive
-wake, and four sparse crossed-diamond star glints. The wake and stars are
-authored behind measured velocity and therefore mirror automatically; their
-local basis is projected through OBJ priority 0, preserving the same form on a
-Diorama-raked plane.
+The sword crescent receives a restrained cool halo/core, narrow 80px/56px
+connective haze layers, and forty-eight crossed-diamond star glints arranged as
+sixteen fixed cross-sections with top/centre/bottom lanes from 4px to 88px
+behind the crescent. Scrambled 18-tick phases independently fade and scale each
+glint into and out of existence without changing its local centre. The path
+mirrors from measured velocity, and its local basis is projected through OBJ
+priority 0, preserving the same form on a Diorama-raked plane. The mapped
+player lifecycle permits one beam, so the batch reserves one explicit expanded
+stream and rejects impossible duplicates instead of inflating all scene slots.
 Integer-hash particles and integer triangle pulses make repeat builds
 deterministic. `present.c` only supplies flat/Diorama projection and submits
 through the same verified SDL additive blend plus untextured batched geometry

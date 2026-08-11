@@ -112,7 +112,8 @@ apron channel, rendering-engine.md §13j) must read it here and resolve through
 
 Action-scene identities measured in runs `20260810-124203`, `20260810-163044`,
 `20260810-174202`, the six-cycle correction run `20260810-180202`, and sword-beam run
-`20260810-175403` combine those fields rather than matching artwork alone:
+`20260810-175403`, `20260810-184935`, `20260810-190012`, and
+`20260810-190729` combine those fields rather than matching artwork alone:
 
 | Kind | Positive live identity |
 |---|---|
@@ -120,7 +121,7 @@ Action-scene identities measured in runs `20260810-124203`, `20260810-163044`,
 | Lightning trap | `+32=$BD2A`, `+1E=$BD69`, `+16/+18=$4000/$7E`, `+1A=$14`, `+12=$BD36` or `$8683`, and `(+22,+20)=($1F,$46FE)` or `($20,$479D)`; the live vertical extents are `+0C=+10=$58` (88px each side) |
 | Boss lightning (`$18/$19=$02/$08`) | Base identity `+32=$BDFF`, `+12=$8661`, `+16/+18=$5000/$7E`, no V-flip, and `+3A` resolving to an active `$BDFF/$7E:5000` parent. Strikes: states/visuals/compositions `$02/$00/$5346`, `$03/$01/$5401`, `$04/$02/$5492` are vertical long/medium/short; `$05/$03/$54F2`, `$06/$04/$55C2`, `$07/$05/$5661` are diagonal long/medium/short. Normal left/top/right/bottom extents are `6/83/11/117`, `6/83/11/69`, `1/83/11/21`, `48/83/8/117`, `36/83/8/69`, `30/83/8/21`; H-flip swaps left/right. `$20/$5D2B` is the blank half-cycle and is not decorated. Observed strike resumes `$C02B/$C04B/$C051` are control flow, not shape identity. Floor impact is state/resume `$09/$C06A`, pairs `$08/$570A`, `$09/$5716`, or `$0A/$5729`. |
 | Wall torch | Not an action slot. It is the exact BG1 metatile pair `$47` over `$4F` in the bounded `$7E:8000` map view for Bloodpool (`$18=$02`), anchored at local `(8,15)` in the 16×32 pair. |
-| Player sword beam (all action maps) | `+12=$9D1C`, `+16/+18=$8000/$06`, `+30&$0001`, `+3A=$08A0`, nonzero `+32` equal to the active linked player's source, and state/visual/composition `$13/$30/$99E8` or `$14/$31/$9A17`. Measured velocity is `+8` or `-8`. Both six-part compositions draw local bounds `(0,-1)..(16,31)` with centre `(8,15)`; raw collision words include signed values and are retained only for diagnostics/gameplay fidelity. |
+| Player sword beam (all action maps) | `+12=$9D1C`, `+16/+18=$8000/$06`, `+30&$0001`, `+3A=$08A0`, nonzero `+32` equal to the active linked player's source, no V-flip, and state/visual/composition `$13/$30/$99E8` or `$14/$31/$9A17`. Measured velocity is `+8` or `-8`. State `$13` normal/H-flip drawable bounds are `(32,-33)..(48,-1)` / `(-48,-33)..(-32,-1)`; state `$14` bounds are `(40,-9)..(56,23)` / `(-56,-9)..(-40,23)`. Run `20260810-184935` proves the state-`$13` normal rectangle byte-for-byte against captured OAM. Raw collision words include signed byte origins and are retained only for diagnostics/gameplay fidelity. |
 
 ### Town simulation render records and camera auxiliaries
 

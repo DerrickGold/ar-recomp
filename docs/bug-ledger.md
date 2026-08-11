@@ -1389,6 +1389,51 @@ the current debugging process; this file is the case law.
     the finite source needed by unrelated margins. Snapshot equality is the
     quickest way to distinguish an actual writer from stale streaming state.
 
+46. **The sword-beam accent followed the object hot point instead of the
+    emitted crescent — FIXED 2026-08-10; final visual acceptance pending.**
+    Run `20260810-184935` placed the authentic state-`$13` crescent at captured
+    `(144,168)..(160,200)`, while the first host accent assumed the shared local
+    rectangle `(0,-1)..(16,31)` and therefore attached 32px left and 32px below
+    the artwork. Later runs `20260810-190012` and `20260810-190729` confirmed
+    that the aligned five-glint revision was too faint and a denser centreline
+    still failed to cover the full 32px crescent height.
+
+    **Root cause:** the collision-header origins are signed bytes published
+    through word fields. `$00:8D68` subtracts them with wrapping byte arithmetic
+    before applying the signed screen transform and its one-pixel Y draw bias.
+    Treating those words as ordinary unsigned extents—or assuming the same
+    local origin for both animation states—discarded exactly the information
+    that positions the six OAM parts. Sparse hash-phased particles also offered
+    no coverage invariant, so vertex-count tests could pass while the head,
+    middle, or top/bottom of the trail remained visually empty.
+
+    **Fix:** capture publishes four explicit state/direction rectangles:
+    state `$13` uses `(32,-33)..(48,-1)` or
+    `(-48,-33)..(-32,-1)`, and state `$14` uses
+    `(40,-9)..(56,23)` or `(-56,-9)..(-40,23)`. Vertical flip fails closed.
+    Lighting and haze derive their anchor and height from that decoded
+    rectangle. The settled presentation uses low-alpha full-height 80px/56px
+    haze plus 48 fixed-position crossed stars in sixteen top/centre/bottom
+    cross-sections from 4px to 88px behind the crescent. Independent scrambled
+    18-tick alpha/scale phases materialize each star without moving its centre.
+    The mapped player lifecycle admits one beam, so only one expanded stream is
+    budgeted and forged duplicates fail closed without publishing a partial
+    batch.
+
+    Regression coverage pins the live snapshot arithmetic, both animation
+    states, both horizontal directions, V-flip rejection, full-height head
+    attachment, 70px-plus path coverage, deterministic materialization, exact
+    worst-case capacity, and duplicate-stream rejection. The implementation is
+    renderer-portable SDL geometry and adds no backend-specific shader or new
+    emulated state. The release application builds and all 45 tests, including
+    the display-backed shader test, pass.
+
+    **Reusable lesson:** presentation geometry must follow the emitter's actual
+    arithmetic, not a convenient interpretation of nearby collision fields.
+    For stylized particle paths, test spatial coverage and attachment—not just
+    total vertices or outer bounds—and make exceptional capacity proportional
+    to the lifecycle cardinality that can actually occur.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

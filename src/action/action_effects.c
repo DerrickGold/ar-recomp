@@ -717,6 +717,7 @@ static bool IsSwordBeam(const uint8_t *wram, size_t wram_size,
       object->animation_address != kSwordBeamAnimationAddress ||
       object->animation_bank != kSwordBeamAnimationBank ||
       !object->source_descriptor ||
+      (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||
       !(object->flags & kActRaiserObjectFlag_Attacker) ||
       !SwordBeamParentIsValid(wram, wram_size, object))
     return false;
@@ -949,12 +950,23 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     ActionEffectInstance effect;
     PopulateSceneObjectEffect(&effect, address, &object, kind, phase);
     if (kind == kActionEffect_SwordBeam) {
-      /* Both `$06:8000` projectile compositions emit the same six 8x8
-       * crescent parts over local x=[0,16], y=[-1,31]. Their collision header
-       * deliberately contains signed offsets (for example left=$FFE0), so it
-       * is not a drawable bounding box and must not position the light. */
-      effect.geometry.data.rect =
-          (ActionEffectLocalRect){0.0f, -1.0f, 16.0f, 31.0f};
+      /* These headers use signed 8-bit origins even though the action ABI
+       * publishes them as words. `$8D68` performs wrapping byte arithmetic:
+       * state $13's normal X=0/8 parts minus left=$E0 draw at +32..+48, not
+       * 0..16. The one-pixel OBJ Y bias is included here. Keep the two states
+       * and H-flipped choices explicit so presentation follows the exact OAM
+       * rectangles observed in run 20260810-184935. */
+      const bool flipped =
+          (object.flip_attributes & kActRaiserObjectFlip_Horizontal) != 0;
+      if (object.animation_state == kSwordBeamHorizontalState) {
+        effect.geometry.data.rect = flipped
+            ? (ActionEffectLocalRect){-48.0f, -33.0f, -32.0f, -1.0f}
+            : (ActionEffectLocalRect){32.0f, -33.0f, 48.0f, -1.0f};
+      } else {
+        effect.geometry.data.rect = flipped
+            ? (ActionEffectLocalRect){-56.0f, -9.0f, -40.0f, 23.0f}
+            : (ActionEffectLocalRect){40.0f, -9.0f, 56.0f, 23.0f};
+      }
     }
     /* Animation index advances inside one projectile/strike lifecycle. It is
      * artwork cadence, not a new emission pulse; using it as pulse_key would
