@@ -27,8 +27,8 @@ with the game's own dialog font.
 | | |
 |---|---|
 | ✅ | **Action stages** — every act across all regions, plus Death Heim, played through end to end |
-| 🟡 | **Simulation mode** — only Fillmore verified end to end; the other five towns await play-testing |
-| 🟡 | **Diorama mode** — playable, but per-room layer depths still need tuning to look their best |
+| 🟡 | **Simulation mode** — Fillmore, Bloodpool, and Kasandora verified end to end; the other three towns await play-testing |
+| 🟡 | **Diorama mode** — Fillmore, Bloodpool, and Kasandora acts/towns plus Marahna Act 1 are play-tested; remaining rooms still need tuning and acceptance |
 | 🟡 | **Platforms** — builds confirmed on macOS and Steam Deck. **Windows is untested and unverified.** |
 
 Per-stage detail: [`docs/progress.md`](docs/progress.md).
@@ -312,17 +312,18 @@ Expanding on the [summary above](#progress-at-a-glance):
   HDMA/parallax effects all render and behave correctly.
 - **Death Heim (region 7)** — the complete boss rush, final boss, and post-boss
   sky transition are playable and widescreen-validated.
-- **Simulation mode** — Fillmore has one confirmed clean end-to-end town round;
-  Bloodpool has partial entry/lightning coverage. The remaining towns and full
-  simulation-mode widescreen behavior are TBD.
+- **Simulation mode** — Fillmore, Bloodpool, and Kasandora have confirmed clean
+  end-to-end town rounds with Diorama effects. Aitos, Marahna, and Northwall
+  remain to be play-tested end to end.
 - **Remaining widescreen polish** — presentation-aware camera/world-edge
   clamping so the ends of finite backgrounds cannot scroll into the wider
   viewport.
 - **3D town rendering** — phases 0–4 plus the ground extension are done; other
   towns still need art and layer work.
-- **Diorama polish** — the mode is playable everywhere, but per-room layer
-  depths in `diorama-layers.ini` are still being tuned room by room; some areas
-  read flatter than they should until their entry is authored.
+- **Diorama polish** — Fillmore, Bloodpool, and Kasandora Acts 1/2 and towns,
+  plus Marahna Act 1, are play-tested with effects enabled. Remaining room
+  depths in `diorama-layers.ini` are still being tuned and accepted room by
+  room.
 - **Platforms** — macOS and Steam Deck are built and played on regularly. The
   Windows and generic Linux bundles cross-build but have not been run by this
   project; reports either way are welcome.

@@ -58,6 +58,21 @@ bounds and is validated across 4:3, Wide Raw, Wide Full and Diorama-32.
 No generated ROM-derived source is committed; reproducible builds materialize
 the registered handlers from `recomp/*.cfg`.
 
+## Diorama play-testing milestone — 2026-08-11
+
+The following routes have now been user-played to completion with Diorama
+effects enabled, including their action-stage transitions and town presentation
+where listed:
+
+- Fillmore Acts 1 and 2 plus the complete simulation round;
+- Bloodpool Acts 1 and 2 plus the complete simulation round;
+- Kasandora Acts 1 and 2 plus the complete simulation round;
+- Marahna Act 1.
+
+This is a play-test statement, not an inference from shared code. Aitos,
+Marahna Act 2/simulation, Northwall, and Death Heim Diorama-specific completion
+remain unverified unless their rows below say otherwise.
+
 ## Action stages — observed status
 
 ActRaiser's 6 kingdoms each have two action (side-scrolling) stages, played
@@ -68,11 +83,11 @@ follows the game's internal order (`$18`/`$19` in WRAM — see `docs/SEAMS.md`
 
 | Region | Act 1 | Act 2 |
 |---|---|---|
-| 1 — Fillmore | ✅ Full widescreen playthrough; sprites and activation clean (2026-07-12) | ✅ Full widescreen playthrough; fast vertical fall/row streaming confirmed repaired (2026-07-12) |
-| 2 — Bloodpool | ✅ Full widescreen playthrough; narrow BG2 policy clean (2026-07-12); 2026-08-10 moon/cloud bound + wide water/playfield matrix accepted | ✅ Full widescreen playthrough; enemies, moving platforms, and boss confirmed (2026-07-12); 2026-08-10 shares the accepted moon/cloud/water extent split |
-| 3 — Kasandora | 🟡 Full widescreen playthrough and generated handlers confirmed (2026-07-12); 2026-08-10 `0301/0302` world-anchored Mirror-cloud/Repeat-dune policy is implemented from live captures, with the mirrored BG2 backdrop promoted at `128/128` and its repeat-safe dune band left available; the generic tuner/runtime supports four fill/motion bands per BG, and a complete visual acceptance sweep remains pending | ✅ Full widescreen playthrough (2026-07-12) |
+| 1 — Fillmore | ✅ Full widescreen playthrough; sprites and activation clean (2026-07-12); complete playthrough with Diorama effects (2026-08-11) | ✅ Full widescreen playthrough; fast vertical fall/row streaming confirmed repaired (2026-07-12); complete playthrough with Diorama effects (2026-08-11) |
+| 2 — Bloodpool | ✅ Full widescreen playthrough; narrow BG2 policy clean (2026-07-12); 2026-08-10 moon/cloud bound + wide water/playfield matrix accepted; complete playthrough with Diorama effects (2026-08-11) | ✅ Full widescreen playthrough; enemies, moving platforms, and boss confirmed (2026-07-12); 2026-08-10 shares the accepted moon/cloud/water extent split; complete playthrough with Diorama effects (2026-08-11) |
+| 3 — Kasandora | ✅ Full widescreen playthrough and generated handlers confirmed (2026-07-12); `0301/0302` world-anchored Mirror-cloud/Repeat-dune policy accepted at `128/128`; complete playthrough with Diorama effects (2026-08-11) | ✅ Full widescreen playthrough (2026-07-12); complete playthrough with Diorama effects (2026-08-11) |
 | 4 — Aitos | ✅ Full widescreen playthrough; cyclic BG2 cloud padding removes the parallax seam (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
-| 5 — Marahna | ✅ Full widescreen playthrough (2026-07-12) | ✅ Full widescreen playthrough (2026-07-12) |
+| 5 — Marahna | ✅ Full widescreen playthrough (2026-07-12); complete playthrough with Diorama effects, including main/subscreen colour mixing and cyclic BG2 across `0501/0502` (2026-08-11) | ✅ Full widescreen playthrough (2026-07-12); Diorama-specific completion pending |
 | 6 — Northwall | ✅ Full widescreen playthrough; cyclic BG2 cloud/snow padding confirmed across the affected maps (2026-07-12) | ✅ Full widescreen playthrough and boss completion (2026-07-12) |
 | 7 — Death Heim | ✅ Full boss-rush playthrough to the end — entry, every boss fight, victory teleport-outs, hub warps, and the final boss all user-verified (2026-07-14) | — No Act 2 |
 
@@ -133,18 +148,18 @@ captured, and `AR_NO_KNOCKBACK=1` suppresses authentic water drag.
 
 | Town | Status |
 |---|---|
-| Fillmore | ✅ clean full round (act1 → sim → act2, 2026-07-07): development cycles, story events (rock zap/fire), lair sealing with all cutscene actors, reward grants (scroll persists), offerings |
-| Bloodpool | 🟡 Entry and two-person lightning cutscene confirmed; full development/events/rewards/lair sealing and sim→act-2 transition remain |
-| Kasandora | ⬜ Full authentic baseline needed before any widescreen town work |
+| Fillmore | ✅ Clean full round (act1 → sim → act2, 2026-07-07): development cycles, story events (rock zap/fire), lair sealing with all cutscene actors, reward grants (scroll persists), offerings; complete simulation replay with Diorama effects (2026-08-11) |
+| Bloodpool | ✅ Complete simulation round with Diorama effects, including development, events, lairs, and transition coverage (2026-08-11) |
+| Kasandora | ✅ Complete simulation round with Diorama effects, including development, events, lairs, and transition coverage (2026-08-11) |
 | Aitos | ⬜ Full authentic baseline needed before any widescreen town work |
 | Marahna | ⬜ Full authentic baseline needed before any widescreen town work |
 | Northwall | ⬜ Full authentic baseline needed before any widescreen town work |
 
 The sim-mode *engine* itself (town dispatch, spawn/behavior systems — see
 `docs/SEAMS.md`'s "Sim-mode town architecture" section) is shared code across
-all 6 towns, so a fix verified in Fillmore likely applies everywhere — but
-"likely applies" isn't "confirmed," hence still ⬜ for the other five until
-someone actually plays them.
+all 6 towns, so a fix verified in one town likely applies everywhere — but
+"likely applies" isn't "confirmed," hence Aitos, Marahna, and Northwall remain
+⬜ until someone actually plays them.
 
 For **each** incomplete town, the baseline pass must cover:
 
@@ -256,7 +271,7 @@ Current widescreen work/status is:
 | Action-stage combat | ✅ | Every ordinary action level plus the complete Death Heim boss rush, final boss, and return transition is fully playable. Open `$00:B8AB` spell-projectile garbage variant (`DEBUG.md` #19) remains a separate unconverted-code edge case. |
 | Magic casting | 🟡 | WORKS as of 2026-07-07 (was dead — blocked by our own knockback cheat, `DEBUG.md` #18). 2026-08-02: all four spells' controller/slot lifecycles, animation banks, timing, transforms, and composition geometry are statically mapped in `effects-hook-investigation.md`. 2026-08-03: host-polish lighting/particles land, initially Magical Fire only — and only after a 16-bit read of the 8-bit animation-bank field was found to have rejected every spell since the feature was written (bug-ledger.md §32). 2026-08-05: generalised to a DATA-DRIVEN rule table (controller kind -> slots/roles/phases) covering all four spells, with per-part stage styling, overlap clustering, heading-oriented bodies, and three ember modes (rise/trail/burst). Fire and Stardust are MEASURED against live WRAM and confirmed rendering; Aura and Light are still TRANSCRIBED from the static map and unproven — an unrecognised cohort slot is reported to `[action-fx census]` rather than rendered on a guess, so one cast of each corrects the table. Test harness is Cheats > Cycle magic spell (default `M`). Known and accepted: Stardust's right-edge launch is born one pixel outside the authentic window and as low as the player's line, which widescreen makes visible (bug-ledger.md §33). |
 | Action scene lighting / particles | 🟡 | 2026-08-10: Bloodpool BG1 torch pair `$47/$4F`, enemy fireballs, vertical lightning traps, the map-$08 boss lightning attack, and the global player sword beam publish a separate read-only scene-effect frame and render in both flat and Diorama action presentation. Actor matching uses measured map/handler/resume/source/state plus exact live visual/composition pairs; run `20260810-180202` and a complete `$7E:5000` decode identify six boss strikes (vertical/diagonal × long/medium/short), visual `$20` as their blank half-cycle, and a separate state-`$09` floor impact. Runs `20260810-175403` and `20260810-184935` identify both sword-beam cycles and correct signed-origin geometry to four explicit state/direction OAM rectangles. Run `20260810-190012` shows the aligned five-glint revision was too faint, while `20260810-190729` shows the denser centreline remained too narrow. The current pass derives full-height haze from the 32px crescent and fixes forty-eight stars at sixteen top/centre/bottom cross-sections from 4px to 88px behind it; independent 18-tick alpha/scale phases make them materialize instead of streaming. One explicitly budgeted sword stream preserves bounded geometry without multiplying capacity across all scene slots. The boss child also requires a validated live `$BDFF` parent backlink. Torch matching uses the shared bounded BG map view across all Bloodpool rooms, not a room allowlist. Portable SDL additive geometry follows BG1 or OBJ projection and needs no backend-specific shader. Follow-up fixes carry the Diorama OBJ-apron texture origin, correct the fireball pairs, accelerate synchronized torch accents, cover the full 176px trap shaft, and make both boss filaments follow the exact authored OAM row centroids (up to 24 segments), mirrored orientation, and one-pixel emitter Y bias. Deterministic capture/render/capacity/slot-reuse/projection regressions pass; fresh visual acceptance remains for Bloodpool maps `$03/$05/$08` and the materializing sword-beam pass. |
-| Sim-mode town simulation | 🟡 | Fillmore ✅ end-to-end; Bloodpool entry/lightning partial; full Bloodpool plus Kasandora/Aitos/Marahna/Northwall baselines pending. Reward web and multi-actor cutscenes fixed 2026-07-07 (`DEBUG.md` #18b/§7.17). |
+| Sim-mode town simulation | 🟡 | Fillmore, Bloodpool, and Kasandora ✅ end-to-end with Diorama effects (2026-08-11); Aitos, Marahna, and Northwall baselines pending. Reward web and multi-actor cutscenes fixed 2026-07-07 (`DEBUG.md` #18b/§7.17). |
 | Scroll/MP persistence | ✅ | `$0295` persistent / `$21` working-copy model mapped + grant verified across modes (2026-07-07) |
 | Audio (music/SPC) | 🟡 | SPC upload handshake and boss-music playback fixed; a narrower "voice/SFX key-on" gap was reported and its current status isn't confirmed — verify before marking ✅ |
 | Music replacement (OGG streaming) | 🟡 | 2026-07-16: manifest-driven OGG streaming live (`[music:]` in `game-assets/manifest.ini`, all 17 song-table entries enumerated): port-0 play/halt protocol decoded, srcn>=0x0C DSP voice gate keeps SFX authentic, sample-accurate loops (LOOPSTART tags), `when =` variant gates. 2026-07-25: fixed the intermittent boot race that cleared the song-instrument base after the common upload and shifted music into unmuted srcn 00-0B; 20/20 fast-boot stress runs reached the common upload only after SPC bootstrap idle, and 10/10 paced runs keyed title srcn 0C. Pending: in-game listening pass, per-src identification of the 16 unnamed songs, driver fade capture. |
