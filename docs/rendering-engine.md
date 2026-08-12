@@ -344,21 +344,47 @@ spell metadata. Its data-driven rules require the live controller and complete
 per-slot animation/composition/transform identity; mirrored or cloned actors
 remain separate rather than collapsing to a player-centred effect. The capture
 publishes generic point/rectangle/segment geometry, authentic OBJ priority, and
-separate actor, phase, and pulse clocks. Those clocks advance by captured
-emulation ticks and therefore freeze during paused or retained-slot redraws.
-Observer state is explicit, not hidden inside the capture module, and savestate
-loads reset it before the next frame.
+separate actor, phase, and pulse clocks. `action_effect_clock.c` owns the small
+publisher/read adapter: the successful common epilogue of the authentic
+`$00:8C98` action object/OAM pass publishes its monotonic execution serial only
+after both nested sprite builders have completed, and `FrameSlot_Capture` turns
+that serial into a bounded delta. It is not a host/emulator-frame clock: the ROM
+skips `$00:8C98` during native pause and freeze paths, while catch-up still
+contributes one serial step per completed gameplay pass. Map-backed torch and
+lava emitters share an observer-owned clock seeded from `$0088` on entry and
+advanced by that same serial delta. Native pause, host pause, aborted OAM
+passes, and retained-slot redraws therefore freeze every action light and
+particle together. Observer state is explicit, not hidden inside the capture
+module, and savestate loads reset it before the next frame. Both this clock and
+the ordinary emulated-tick capture clock use `frame_timing.h`'s shared bounded-
+delta limit; only the gameplay-pass clock filters ActRaiser's native pause.
 
 `ActionSceneEffects_CaptureFrame` is the parallel boundary for exact scene
 accents, including Bloodpool's map-$08 boss attack resolved from the 30-snapshot
-run `20260810-180202`, a complete decode of its `$7E:5000` animation bank, and
-the global player sword beam measured in run `20260810-175403`.
+run `20260810-180202`, a complete decode of its `$7E:5000` animation bank, the
+global player sword beam measured in run `20260810-175403`, and Marahna's torch,
+orb/split fireball, linked-lightning, and boss-lightning families plus Aitos lava
+pits/fireballs measured in runs `20260811-151353` and `20260811-221433`.
 BG wall torches are not actors: the observer uses the same validated
 `ActionBgMapView` contract as the full-world provider and matches the exact BG1
-metatile pair `$47` over `$4F` throughout map group `$02`. Fireballs and
+metatile pair `$47` over `$4F` throughout map group `$02`. Marahna maps
+`$05/$04-$08` instead match one complete `$43` metatile at `(8,11)` and publish
+only a camera-local subset; `$04-$07` share a 31-instance world while boss map
+`$08` contains ten cells in its 512×512 world. Fireballs and
 lightning are ordinary action objects and require the positive handler,
 resume/source, animation-state, visual, and composition tuples recorded in the
-RAM map. Boss lightning further requires map `$02/$08`, animation bank
+RAM map. Marahna connector children additionally validate their `$E18E` source
+endpoint, adjacent `$E254` partner, backlink, orientation, and exact midpoint.
+The Marahna fireball matcher validates source `$E047`, every exact frame of the
+large `$05-$08/$4504-$4528` left/idle/right orb cycle, and four
+`$32/$4BCD` or `$33/$4BD9` cardinal children against their retained orb backlink.
+Up and right require their authored V/H flips. A second fireball rule validates
+the `$DE96` snake parent and its `$1D/$4869` or `$1E/$487C` child lifecycle
+through exact state/resume/velocity, local counter, backlink, and matching
+horizontal flip. The reaper's source-`$E0BA` aimed/falling orb and the
+superficially fiery `$34/$4BE5` actors are measured moving platforms and are
+deliberately rejected.
+Boss lightning further requires map `$02/$08`, animation bank
 `$7E:5000`, and a validated backlink to its live `$BDFF` parent. States `$02`
 through `$07` select vertical or diagonal long/medium/short strikes; their
 resume PCs vary during normal control flow and are not shape identities.
@@ -367,6 +393,28 @@ no host effect. Matching only a visual ID is invalid because action slots and
 values are polymorphic. A recycled same-kind slot begins a fresh renderer
 generation when its lifecycle key changes or its position is discontinuous
 with its measured velocity.
+
+Marahna boss map `$05/$08` has its own source `$E483` electrical rule. Parent
+artwork `$07/$57C2` and `$08/$5868` receives hand-charge illumination;
+`$0A/$59DE` receives a central orb bloom. Backlink-validated `$11/$5CE0`
+children publish their exact 32px down-left or down-right local quadrant and
+measured `±4,+4` velocity. The renderer adds two projected cyan ribbon layers,
+so the same captured segment passes through the production flat/Diorama camera
+adapter rather than a mode-specific shader path. At impact the same child
+changes to resume/state `$E57E/$07` and travels horizontally at `±4,0` through
+the complete `$12/$5D01`, `$13/$5D0D`, `$14/$5D2E`, `$13/$5D0D` loaded cycle.
+That phase receives a compact ground-aligned bloom plus contact sparks and a
+direction-aware electrical wake. Its exact OBJ-local geometry uses the same
+production projection path in flat and Diorama modes.
+
+Aitos map `$04/$01` uses a separate camera-local BG1 semantic: `$DC`, one to
+six `$DD`, then `$DE`, over an equally wide `$DF` row. This yields the exact
+64px/128px lava-surface rectangle without looking at raster colours. Its six
+cyclic projectile slots retain source/resume `$CF9E/$CFCD`, exact artwork
+`$2A/$4D21` or `$2B/$4D2D`, and 8px extents. Handler/state pairs
+`$CFE3/$22`, `$8661/$23`, and `$CFFE/$24` cover rise, reset/wait, and return;
+bounded position continuity resets the particle generation when a persistent
+slot jumps back to its launch point.
 
 The sword-beam rule is not map-specific. It requires handler `$9D1C`, animation
 `$06:8000`, attacker flag `$0001`, backlink `$08A0`, a source descriptor shared
@@ -383,8 +431,9 @@ physical viewport. Diorama mode receives a `DioramaProjection` value from the
 same composite call that drew the BG and OBJ planes: camera matrix, capture
 mesh dimensions, BG1/OBJ interpolated UV window, output dimensions, and exact
 authored depth/rake/bow are not re-derived from live state. Scene metadata also
-selects its authentic plane: torches use BG1-low, while fireballs and lightning
-use OBJ priority 0. The projection value owns `texture_x_origin`, the hidden
+selects its authentic plane: torches and lava surfaces use BG1-low, while
+fireballs and lightning use OBJ priority 0. The projection value owns
+`texture_x_origin`, the hidden
 64-column OBJ resolve apron that precedes caller-visible capture coordinates.
 Keeping that origin in inverse projection prevents overlays from sliding
 horizontally on raked planes without changing the flat path's contract. The
@@ -392,13 +441,25 @@ explicit render policy is a world overlay above the composed world and below
 HUD/HD UI.
 
 `action_effect_render.c` converts captured kind/phase/geometry into bounded,
-renderer-independent spell and scene batches; unknown values fail closed. A
+renderer-independent spell and scene batches; unknown values fail closed.
+`action_effect_projection.c` is the shared production/test adapter for camera
+subtraction, widescreen/vertical margins, flat viewport placement, and
+compositor-published BG1/OBJ Diorama projection. A
 small capacity-aware geometry writer appends directly to the caller's final
 arrays, avoiding a spell-sized scene scratch copy and its former stack peak.
 Torch light/particles sample the shared authentic game clock at 2× visual rate
 to follow the fast BG flame animation while all torch instances remain in
-phase. Fireball sparks trail opposite measured velocity. Lightning lighting
-uses the live `88+88` extents, and its last nontransparent ring reaches both
+phase; Aitos BG lava uses the same accelerated presentation clock. Its light
+is an elongated two-tier orange surface spill, with twelve deterministic
+ember births distributed across the complete decoded rim. Bloodpool, Marahna,
+and Aitos fireball sparks trail opposite measured velocity.
+Marahna's horizontal/vertical connector rectangles rotate the same cyan/violet
+glow and drive two projected ten-segment ribbons through their exact 80px
+chords; crawling sparks and endpoint fans share the authentic lifecycle clock.
+Five authored links are explicitly budgeted and a sixth fails closed. Marahna
+boss charge/orb stages add cold blooms and sparks; its launched bolt
+adds two eight-segment cyan layers, with a one-bolt capacity contract. Bloodpool
+trap lightning lighting uses the live `88+88` extents, and its last nontransparent ring reaches both
 ends of the full 176px shaft rather than letting only a transparent falloff
 cover them. The boss strike adds a warm spill plus two bounded filaments
 following the actual per-row OAM centroids for all six authored
@@ -416,7 +477,7 @@ priority 0, preserving the same form on a Diorama-raked plane. The mapped
 player lifecycle permits one beam, so the batch reserves one explicit expanded
 stream and rejects impossible duplicates instead of inflating all scene slots.
 Integer-hash particles and integer triangle pulses make repeat builds
-deterministic. `present.c` only supplies flat/Diorama projection and submits
+deterministic. `present.c` supplies immutable projection inputs and submits
 through the same verified SDL additive blend plus untextured batched geometry
 used by town effects; no optional Metal/Vulkan shader pipeline is required.
 
@@ -1523,6 +1584,31 @@ claim that arbitrary SNES arithmetic maps to host alpha:
 | Disjoint subscreen full-add | sparse resolved-TS plane plus saturated additive pass |
 | Full fixed-colour BG subtraction | baked into the isolated plane in native 5-bit component space before brightness expansion |
 | Overlapping main/sub ownership, general subtract/half-subtract, direct colour, or unsupported colour-window math | fail closed; do not infer a blend from layer bits alone |
+
+#### Additive planes and authored depth copies
+
+`diorama_plane_additive_mask` is a compositing contract for one resolved TS
+source pixel. It is not a material flag that can be copied across arbitrary
+host geometry. `stack`, `voxel`, and `thick` submit additional meshes using the
+same texture, and the current compositor assigns `SDL_BLENDMODE_ADD` to every
+one of those submissions when the source plane is additive.
+
+The failure is measured in `runs/20260811-145909`, gf2097. A live Marahna
+`bg1 = voxel:0.18 slices:12 dir:backward` edit turns the intended
+`main + BG1` operation into eleven solid voxel-copy additions plus the original
+face. Voxel copies use uniform shade 0.88 and full alpha, so a fully overlapping
+pixel receives roughly `main + (1 + 11*0.88)*BG1` before channel saturation.
+Red and green clip first in that palette, producing the white/yellow image and
+overlap-dependent bands seen in the snapshot. This is compositing amplification,
+not corrupt CGRAM or texture data.
+
+Per-copy intensity scaling is not a correct repair: projected overlap varies at
+silhouette edges and across depth. The faithful design is to build the complete
+extrusion into an intermediate target with non-additive internal occlusion, then
+submit that flattened result to the additive pass exactly once. Until that path
+exists, multi-draw depth strategies (`thick`, `stack`, `voxel`) are unsupported
+on additive planes. Single-submit placement/shape controls (`z`, `rake`, `bow`)
+do not multiply the colour-math contribution.
 
 The background provider has a related but independent Marahna rule. A 512px
 BG2 driven by the same full camera X as a wider BG1 is one authored horizontal

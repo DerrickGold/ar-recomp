@@ -170,13 +170,16 @@ static float TriangleWave(unsigned ticks, unsigned period) {
   return (float)triangle / (float)half;
 }
 
-/* The captured clock remains authentic 60 Hz lifecycle time. Bloodpool's BG
- * torch art turns over much faster than the original generic light pulse, so
- * only its presentation samples run at 2x. Unsigned wrap is intentional: all
- * visual functions below are periodic and deterministic across the wrap. */
+/* The captured clock remains authentic 60 Hz lifecycle time. Animated BG
+ * fire turns over much faster than the original generic light pulse, so its
+ * presentation samples run at 2x. Unsigned wrap is intentional: all visual
+ * functions below are periodic and deterministic across the wrap. */
 static unsigned EffectVisualTicks(const ActionEffectInstance *effect,
                                   unsigned ticks) {
-  return effect && effect->kind == kActionEffect_WallTorch ? ticks * 2u : ticks;
+  return effect &&
+      (effect->kind == kActionEffect_WallTorch ||
+       effect->kind == kActionEffect_AitosLavaPit)
+      ? ticks * 2u : ticks;
 }
 
 /* Two beat rates rather than one. A single slow swell reads as a light being
@@ -1044,6 +1047,27 @@ static bool SceneActorHeading(const ActionEffectInstance *effect,
   return true;
 }
 
+static void SceneFireballHeading(const ActionEffectInstance *effect,
+                                 float *x, float *y) {
+  if (!x || !y) return;
+  *x = 1.0f;
+  *y = 0.0f;
+  if (SceneActorHeading(effect, x, y)) return;
+  if (effect && effect->kind == kActionEffect_AitosLavaFireball) {
+    /* Its reset frame sits above the pit before relaunch; retain the rising
+     * shot's downward wake rather than snapping horizontally while stopped. */
+    *x = 0.0f;
+    *y = -1.0f;
+  } else if (effect && effect->kind == kActionEffect_MarahnaFireball &&
+             effect->phase == kActionEffectPhase_MarahnaFireballOrb) {
+    /* `$E047` deliberately pauses twice in its left/right animation. A still
+     * ball remains a flame: let heat climb instead of inventing a rightward
+     * trail for the two zero-velocity entries. */
+    *x = 0.0f;
+    *y = 1.0f;
+  }
+}
+
 static bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
                                 const ActionEffectInstance *effect,
                                 float x, float y, float previous_x,
@@ -1204,24 +1228,12 @@ static bool BossLightningPathSample(const ActionEffectInstance *effect,
   return true;
 }
 
-static bool AppendBossLightningRibbonLayer(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    float half_width, SDL_FColor color,
-    ActionEffectProjectPointFn project_point, void *userdata) {
-  enum { kJoints = kActionSceneEffectLightningSegments + 1 };
-  SDL_FPoint points[kJoints];
-  float scales[kJoints];
-  unsigned joint_count = 0;
-  if (!BossLightningPathFor(effect, NULL, &joint_count)) return true;
+static bool AppendProjectedRibbonSegments(
+    ActionEffectGeometryWriter *writer, const SDL_FPoint *points,
+    const float *scales, unsigned joint_count, float half_width,
+    SDL_FColor color) {
+  if (!writer || !points || !scales || joint_count < 2u) return true;
   const unsigned segment_count = joint_count - 1u;
-  for (unsigned i = 0; i < joint_count; i++) {
-    float local_x, local_y, scale_x, scale_y;
-    if (!BossLightningPathPoint(effect, i, &local_x, &local_y) ||
-        !ProjectWithScale(effect, project_point, userdata, local_x, local_y,
-                          &points[i], &scale_x, &scale_y))
-      return true;
-    scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
-  }
   if (!Reserve(writer, (int)segment_count * 4, (int)segment_count * 6))
     return false;
 
@@ -1261,6 +1273,27 @@ static bool AppendBossLightningRibbonLayer(
   return true;
 }
 
+static bool AppendBossLightningRibbonLayer(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    float half_width, SDL_FColor color,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  enum { kJoints = kActionSceneEffectLightningSegments + 1 };
+  SDL_FPoint points[kJoints];
+  float scales[kJoints];
+  unsigned joint_count = 0;
+  if (!BossLightningPathFor(effect, NULL, &joint_count)) return true;
+  for (unsigned i = 0; i < joint_count; i++) {
+    float local_x, local_y, scale_x, scale_y;
+    if (!BossLightningPathPoint(effect, i, &local_x, &local_y) ||
+        !ProjectWithScale(effect, project_point, userdata, local_x, local_y,
+                          &points[i], &scale_x, &scale_y))
+      return true;
+    scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
+  }
+  return AppendProjectedRibbonSegments(writer, points, scales, joint_count,
+                                       half_width, color);
+}
+
 static bool AppendBossLightningRibbon(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     ActionEffectProjectPointFn project_point, void *userdata) {
@@ -1272,6 +1305,125 @@ static bool AppendBossLightningRibbon(
              writer, effect, 4.8f, corona, project_point, userdata) &&
       AppendBossLightningRibbonLayer(
              writer, effect, 1.15f, filament, project_point, userdata);
+}
+
+static bool AppendMarahnaLightningRibbonLayer(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    float half_width, SDL_FColor color,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  enum { kJoints = kActionSceneEffectMarahnaLightningSegments + 1 };
+  SDL_FPoint points[kJoints];
+  float scales[kJoints];
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const bool horizontal = rect->x1 - rect->x0 >= rect->y1 - rect->y0;
+  const float mid_x = (rect->x0 + rect->x1) * 0.5f;
+  const float mid_y = (rect->y0 + rect->y1) * 0.5f;
+  const unsigned ticks = EffectVisualTicks(
+      effect, (unsigned)effect->phase_ticks);
+  for (unsigned i = 0; i < kJoints; i++) {
+    const float along = (float)i / (float)(kJoints - 1u);
+    float x = horizontal ? rect->x0 + (rect->x1 - rect->x0) * along
+                         : mid_x;
+    float y = horizontal ? mid_y
+                         : rect->y0 + (rect->y1 - rect->y0) * along;
+    if (i && i + 1u < kJoints) {
+      const uint32_t seed = EffectHash(
+          effect->generation * 0x9E3779B9u ^ i * 0x85EBCA6Bu);
+      const float static_bend = HashUnit(seed) - 0.5f;
+      const float animated_bend =
+          TriangleWave(ticks + i * 5u, 13u) - 0.5f;
+      const float bend = static_bend * 3.0f + animated_bend * 5.0f;
+      if (horizontal) y += bend;
+      else x += bend;
+    }
+    float scale_x, scale_y;
+    if (!ProjectWithScale(effect, project_point, userdata, x, y, &points[i],
+                          &scale_x, &scale_y))
+      return true;
+    scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
+  }
+  return AppendProjectedRibbonSegments(writer, points, scales, kJoints,
+                                       half_width, color);
+}
+
+static bool AppendMarahnaLightningRibbon(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  if (effect->kind != kActionEffect_MarahnaLightningLink ||
+      effect->phase != kActionEffectPhase_MarahnaLightningActive)
+    return true;
+  const float pulse = DeterministicPulse(effect);
+  const SDL_FColor corona = {0.24f, 0.34f, 1.00f, 0.24f * pulse};
+  const SDL_FColor filament = {0.90f, 0.98f, 1.00f, 0.94f * pulse};
+  return AppendMarahnaLightningRibbonLayer(
+             writer, effect, 4.0f, corona, project_point, userdata) &&
+      AppendMarahnaLightningRibbonLayer(
+             writer, effect, 1.05f, filament, project_point, userdata);
+}
+
+static void MarahnaBossBoltEndpoints(const ActionEffectInstance *effect,
+                                     float *x0, float *y0,
+                                     float *x1, float *y1) {
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const bool left = effect->velocity_x < 0;
+  *x0 = left ? rect->x1 : rect->x0;
+  *y0 = rect->y0;
+  *x1 = left ? rect->x0 : rect->x1;
+  *y1 = rect->y1;
+}
+
+static bool AppendMarahnaBossLightningRibbonLayer(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    float half_width, SDL_FColor color,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  enum { kJoints = kActionSceneEffectMarahnaBossLightningSegments + 1 };
+  SDL_FPoint points[kJoints];
+  float scales[kJoints];
+  float x0, y0, x1, y1;
+  MarahnaBossBoltEndpoints(effect, &x0, &y0, &x1, &y1);
+  const float dx = x1 - x0;
+  const float dy = y1 - y0;
+  const float length = hypotf(dx, dy);
+  if (length < 0.001f) return true;
+  const float normal_x = -dy / length;
+  const float normal_y = dx / length;
+  const unsigned ticks = EffectVisualTicks(
+      effect, (unsigned)effect->phase_ticks);
+  for (unsigned i = 0; i < kJoints; i++) {
+    const float along = (float)i / (float)(kJoints - 1u);
+    float x = x0 + dx * along;
+    float y = y0 + dy * along;
+    if (i && i + 1u < kJoints) {
+      const uint32_t seed = EffectHash(
+          effect->generation * 0x9E3779B9u ^ i * 0x85EBCA6Bu);
+      const float bend = (HashUnit(seed) - 0.5f) * 3.0f +
+          (TriangleWave(ticks + i * 5u, 11u) - 0.5f) * 5.0f;
+      x += normal_x * bend;
+      y += normal_y * bend;
+    }
+    float scale_x, scale_y;
+    if (!ProjectWithScale(effect, project_point, userdata, x, y, &points[i],
+                          &scale_x, &scale_y))
+      return true;
+    scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
+  }
+  return AppendProjectedRibbonSegments(writer, points, scales, kJoints,
+                                       half_width, color);
+}
+
+static bool AppendMarahnaBossLightningRibbon(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  if (effect->kind != kActionEffect_MarahnaBossLightning ||
+      effect->phase != kActionEffectPhase_MarahnaBossLightningBolt)
+    return true;
+  const float pulse = DeterministicPulse(effect);
+  const SDL_FColor corona = {0.22f, 0.48f, 1.00f, 0.27f * pulse};
+  const SDL_FColor filament = {0.92f, 0.99f, 1.00f, 0.96f * pulse};
+  return AppendMarahnaBossLightningRibbonLayer(
+             writer, effect, 4.4f, corona, project_point, userdata) &&
+      AppendMarahnaBossLightningRibbonLayer(
+             writer, effect, 1.10f, filament, project_point, userdata);
 }
 
 static bool AppendSwordBeamTrailLayer(
@@ -1359,9 +1511,16 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       cool = (SDL_FColor){0.95f, 0.18f, 0.01f, 0.00f};
       break;
     case kActionEffect_EnemyFireball:
+    case kActionEffect_MarahnaFireball:
+    case kActionEffect_AitosLavaFireball:
       count = kActionSceneEffectParticlesPerInstance;
       hot = (SDL_FColor){1.00f, 0.97f, 0.78f, 0.96f};
       cool = (SDL_FColor){1.00f, 0.10f, 0.00f, 0.00f};
+      break;
+    case kActionEffect_AitosLavaPit:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){1.00f, 0.91f, 0.38f, 0.92f};
+      cool = (SDL_FColor){0.90f, 0.06f, 0.00f, 0.00f};
       break;
     case kActionEffect_SwordBeam:
       count = kActionSceneEffectSwordStarCount;
@@ -1372,6 +1531,16 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       count = kActionSceneEffectParticlesPerInstance;
       hot = (SDL_FColor){0.98f, 1.00f, 1.00f, 0.92f};
       cool = (SDL_FColor){0.18f, 0.48f, 1.00f, 0.00f};
+      break;
+    case kActionEffect_MarahnaLightningLink:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){0.98f, 1.00f, 1.00f, 0.96f};
+      cool = (SDL_FColor){0.20f, 0.18f, 1.00f, 0.00f};
+      break;
+    case kActionEffect_MarahnaBossLightning:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){0.98f, 1.00f, 1.00f, 0.98f};
+      cool = (SDL_FColor){0.10f, 0.32f, 1.00f, 0.00f};
       break;
     case kActionEffect_BloodpoolBossLightning:
       count = kActionSceneEffectParticlesPerInstance;
@@ -1386,7 +1555,12 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
   const unsigned visual_ticks = EffectVisualTicks(
       effect, (unsigned)effect->pulse_ticks);
   float heading_x = 1.0f, heading_y = 0.0f;
-  SceneActorHeading(effect, &heading_x, &heading_y);
+  if (effect->kind == kActionEffect_EnemyFireball ||
+      effect->kind == kActionEffect_MarahnaFireball ||
+      effect->kind == kActionEffect_AitosLavaFireball)
+    SceneFireballHeading(effect, &heading_x, &heading_y);
+  else
+    SceneActorHeading(effect, &heading_x, &heading_y);
   for (unsigned i = 0; i < count; i++) {
     const uint32_t seed = EffectHash(
         effect->pulse_generation * 0x9E3779B9u ^
@@ -1394,6 +1568,8 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
         i * 0xC2B2AE35u);
     const unsigned lifetime =
         (effect->kind == kActionEffect_LightningTrap ||
+         effect->kind == kActionEffect_MarahnaLightningLink ||
+         effect->kind == kActionEffect_MarahnaBossLightning ||
          effect->kind == kActionEffect_BloodpoolBossLightning)
         ? 11u + ((seed >> 6) & 7u)
         : 21u + ((seed >> 5) & 15u);
@@ -1405,7 +1581,18 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
     float width = 0.55f, reach = 1.8f + 2.2f * t;
     float sword_path_t = 0.0f;
 
-    if (effect->kind == kActionEffect_WallTorch) {
+    if (effect->kind == kActionEffect_AitosLavaPit) {
+      const float half_width = (rect->x1 - rect->x0) * 0.5f;
+      const float birth = (HashUnit(seed ^ 0x71u) * 2.0f - 1.0f) *
+          fmaxf(1.0f, half_width - 3.0f);
+      const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 10.0f;
+      x = birth + drift * t * t;
+      y = -3.0f - 7.0f * t - 17.0f * t * t;
+      previous_x = birth + drift * previous_t * previous_t;
+      previous_y = -3.0f - 7.0f * previous_t -
+          17.0f * previous_t * previous_t;
+      width = 0.50f + 0.42f * (1.0f - t);
+    } else if (effect->kind == kActionEffect_WallTorch) {
       const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 7.0f;
       const float birth = (HashUnit(seed ^ 0x71u) - 0.5f) * 5.0f;
       x = birth + drift * t * t;
@@ -1414,7 +1601,9 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       previous_y = -2.0f - 9.0f * previous_t -
           25.0f * previous_t * previous_t;
       width = 0.45f + 0.35f * (1.0f - t);
-    } else if (effect->kind == kActionEffect_EnemyFireball) {
+    } else if (effect->kind == kActionEffect_EnemyFireball ||
+               effect->kind == kActionEffect_MarahnaFireball ||
+               effect->kind == kActionEffect_AitosLavaFireball) {
       const float side = (HashUnit(seed ^ 0x53u) - 0.5f) *
           (4.0f + 14.0f * t);
       /* Start beyond the 16px source art instead of hiding the youngest
@@ -1449,6 +1638,98 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       const float distance = 4.0f + 84.0f * sword_path_t;
       x = centre_x - heading_x * distance - heading_y * side;
       y = centre_y - heading_y * distance + heading_x * side;
+    } else if (effect->kind == kActionEffect_MarahnaLightningLink) {
+      const bool horizontal =
+          rect->x1 - rect->x0 >= rect->y1 - rect->y0;
+      const float mid_x = (rect->x0 + rect->x1) * 0.5f;
+      const float mid_y = (rect->y0 + rect->y1) * 0.5f;
+      if (i >= count * 3u / 4u) {
+        const bool at_end = (i & 1u) != 0;
+        const float endpoint_x = horizontal
+            ? (at_end ? rect->x1 : rect->x0) : mid_x;
+        const float endpoint_y = horizontal
+            ? mid_y : (at_end ? rect->y1 : rect->y0);
+        const float *direction = kCircle32[(i * 7u + (seed >> 12)) & 31u];
+        const float distance = 2.0f + 15.0f * t;
+        const float old_distance = 2.0f + 15.0f * previous_t;
+        x = endpoint_x + direction[0] * distance;
+        y = endpoint_y + direction[1] * distance;
+        previous_x = endpoint_x + direction[0] * old_distance;
+        previous_y = endpoint_y + direction[1] * old_distance;
+      } else {
+        const float along = HashUnit(seed ^ 0x29u);
+        const float jitter = (HashUnit(
+            seed ^ (visual_ticks * 0x27D4EB2Du)) - 0.5f) * 9.0f;
+        const float old_jitter = -jitter * 0.45f;
+        if (horizontal) {
+          x = rect->x0 + (rect->x1 - rect->x0) * along;
+          y = mid_y + jitter;
+          previous_x = x;
+          previous_y = mid_y + old_jitter;
+        } else {
+          x = mid_x + jitter;
+          y = rect->y0 + (rect->y1 - rect->y0) * along;
+          previous_x = mid_x + old_jitter;
+          previous_y = y;
+        }
+      }
+      width = 0.42f + 0.28f * (1.0f - t);
+      reach = 2.0f + 2.5f * (1.0f - t);
+    } else if (effect->kind == kActionEffect_MarahnaBossLightning) {
+      if (effect->phase == kActionEffectPhase_MarahnaBossLightningBolt) {
+        float x0, y0, x1, y1;
+        MarahnaBossBoltEndpoints(effect, &x0, &y0, &x1, &y1);
+        const float along = HashUnit(seed ^ 0x29u);
+        const float old_along = fmaxf(0.0f, along - 0.18f);
+        const float jitter = (HashUnit(seed ^
+            (visual_ticks * 0x27D4EB2Du)) - 0.5f) * 8.0f;
+        const float dx = x1 - x0, dy = y1 - y0;
+        const float length = fmaxf(0.001f, hypotf(dx, dy));
+        x = x0 + dx * along - dy / length * jitter;
+        y = y0 + dy * along + dx / length * jitter;
+        previous_x = x0 + dx * old_along + dy / length * jitter * 0.4f;
+        previous_y = y0 + dy * old_along - dx / length * jitter * 0.4f;
+      } else if (effect->phase ==
+                 kActionEffectPhase_MarahnaBossLightningGroundCharge) {
+        /* The post-impact charge slides horizontally along the floor. Eight
+         * sparks form a low wake behind it; four short-lived contacts jump
+         * around the leading orb so the effect still reads on its compact
+         * first animation frame. All coordinates remain in OBJ-local space
+         * and therefore share the production flat/Diorama projection. */
+        if (i < count * 2u / 3u) {
+          const float side = (HashUnit(seed ^ 0x53u) - 0.5f) *
+              (7.0f + 9.0f * t);
+          const float distance = 5.0f + 35.0f * t;
+          const float old_distance = 5.0f + 35.0f * previous_t;
+          x = -heading_x * distance - heading_y * side;
+          y = -heading_y * distance + heading_x * side;
+          previous_x = -heading_x * old_distance - heading_y * side;
+          previous_y = -heading_y * old_distance + heading_x * side;
+        } else {
+          const float *direction =
+              kCircle32[(i * 7u + (seed >> 12)) & 31u];
+          const float distance = 3.0f + 18.0f * t;
+          const float old_distance = 3.0f + 18.0f * previous_t;
+          x = heading_x * 3.0f + direction[0] * distance;
+          y = direction[1] * distance * 0.44f;
+          previous_x = heading_x * 3.0f + direction[0] * old_distance;
+          previous_y = direction[1] * old_distance * 0.44f;
+        }
+        width = 0.48f + 0.36f * (1.0f - t);
+        reach = 2.4f + 3.4f * (1.0f - t);
+      } else {
+        const float centre_y = -24.0f;
+        const float angle_x = HashUnit(seed ^ 0x29u) * 2.0f - 1.0f;
+        const float angle_y = HashUnit(seed ^ 0x71u) * 2.0f - 1.0f;
+        const float radius = effect->phase ==
+            kActionEffectPhase_MarahnaBossLightningOrb ? 24.0f : 46.0f;
+        x = angle_x * radius;
+        y = centre_y + angle_y * radius * 0.46f;
+        previous_x = x * 0.82f;
+        previous_y = centre_y + (y - centre_y) * 0.82f;
+      }
+      width = 0.45f + 0.34f * (1.0f - t);
+      reach = 2.2f + 3.2f * (1.0f - t);
     } else if (effect->kind == kActionEffect_LightningTrap) {
       /* Most sparks crawl across the full bolt; the last quarter burst away
        * from its lower impact so the strike has both a shaft and a contact. */
@@ -1580,9 +1861,41 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       };
       body_y = -3.0f;
       break;
-    case kActionEffect_EnemyFireball: {
+    case kActionEffect_AitosLavaPit: {
+      const float half_width = (rect->x1 - rect->x0) * 0.5f;
+      spill = (ActionEffectGlowStyle){
+        .radius_x = fmaxf(34.0f, half_width + 14.0f),
+        .radius_y = 23.0f,
+        .ring_scale = {0.22f, 0.70f, 1.0f},
+        .centre = {1.00f, 0.42f, 0.04f, 0.17f},
+        .ring = {{1.00f, 0.28f, 0.02f, 0.13f},
+                 {0.80f, 0.08f, 0.00f, 0.055f},
+                 {0.45f, 0.01f, 0.00f, 0.00f}},
+        .flare = 0.10f, .rise = 0.12f,
+        .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->generation,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = fmaxf(28.0f, half_width + 3.0f),
+        .radius_y = 8.0f,
+        .ring_scale = {0.16f, 0.78f, 1.0f},
+        .centre = {1.00f, 0.98f, 0.66f, 0.78f},
+        .ring = {{1.00f, 0.66f, 0.10f, 0.46f},
+                 {1.00f, 0.20f, 0.01f, 0.18f},
+                 {0.72f, 0.04f, 0.00f, 0.00f}},
+        .flare = 0.19f, .rise = 0.24f,
+        .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      spill_y = -2.0f;
+      body_y = 0.0f;
+      break;
+    }
+    case kActionEffect_EnemyFireball:
+    case kActionEffect_MarahnaFireball:
+    case kActionEffect_AitosLavaFireball: {
       float hx = 1.0f, hy = 0.0f;
-      SceneActorHeading(effect, &hx, &hy);
+      SceneFireballHeading(effect, &hx, &hy);
       spill = (ActionEffectGlowStyle){
         .radius_x = 38.0f, .radius_y = 27.0f,
         .ring_scale = {0.28f, 0.65f, 1.0f},
@@ -1611,6 +1924,124 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
        * visible beside the painted core instead of disappearing underneath. */
       body_x = mid_x - hx * 6.0f;
       body_y = mid_y - hy * 6.0f;
+      break;
+    }
+    case kActionEffect_MarahnaLightningLink: {
+      const bool horizontal =
+          rect->x1 - rect->x0 >= rect->y1 - rect->y0;
+      const float axis_x = horizontal ? 1.0f : 0.0f;
+      const float axis_y = horizontal ? 0.0f : 1.0f;
+      spill = (ActionEffectGlowStyle){
+        .radius_x = 48.0f, .radius_y = 16.0f,
+        .ring_scale = {0.22f, 0.72f, 1.0f},
+        .centre = {0.62f, 0.82f, 1.00f, 0.18f},
+        .ring = {{0.40f, 0.62f, 1.00f, 0.12f},
+                 {0.18f, 0.28f, 0.96f, 0.05f},
+                 {0.07f, 0.08f, 0.58f, 0.00f}},
+        .flare = 0.08f, .axis_x = axis_x, .axis_y = axis_y,
+        .lift_y = -1.0f,
+        .seed = (unsigned)effect->record_address,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = 42.0f, .radius_y = 6.0f,
+        .ring_scale = {0.14f, 0.84f, 1.0f},
+        .centre = {0.98f, 1.00f, 1.00f, 0.74f},
+        .ring = {{0.76f, 0.92f, 1.00f, 0.42f},
+                 {0.30f, 0.46f, 1.00f, 0.15f},
+                 {0.10f, 0.12f, 0.72f, 0.00f}},
+        .flare = 0.15f, .axis_x = axis_x, .axis_y = axis_y,
+        .lift_y = -1.0f,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      break;
+    }
+    case kActionEffect_MarahnaBossLightning: {
+      if (effect->phase == kActionEffectPhase_MarahnaBossLightningBolt) {
+        float x0, y0, x1, y1;
+        MarahnaBossBoltEndpoints(effect, &x0, &y0, &x1, &y1);
+        spill_x = body_x = (x0 + x1) * 0.5f;
+        spill_y = body_y = (y0 + y1) * 0.5f;
+        const float dx = x1 - x0, dy = y1 - y0;
+        const float length = fmaxf(0.001f, hypotf(dx, dy));
+        spill = (ActionEffectGlowStyle){
+          .radius_x = 38.0f, .radius_y = 16.0f,
+          .ring_scale = {0.22f, 0.72f, 1.0f},
+          .centre = {0.66f, 0.88f, 1.00f, 0.21f},
+          .ring = {{0.38f, 0.68f, 1.00f, 0.14f},
+                   {0.12f, 0.30f, 1.00f, 0.055f},
+                   {0.03f, 0.09f, 0.64f, 0.00f}},
+          .flare = 0.09f, .axis_x = dx / length, .axis_y = dy / length,
+          .lift_y = -1.0f, .seed = (unsigned)effect->record_address,
+        };
+        body = (ActionEffectGlowStyle){
+          .radius_x = 29.0f, .radius_y = 6.0f,
+          .ring_scale = {0.14f, 0.82f, 1.0f},
+          .centre = {0.98f, 1.00f, 1.00f, 0.82f},
+          .ring = {{0.74f, 0.94f, 1.00f, 0.46f},
+                   {0.24f, 0.54f, 1.00f, 0.17f},
+                   {0.06f, 0.14f, 0.76f, 0.00f}},
+          .flare = 0.16f, .axis_x = dx / length, .axis_y = dy / length,
+          .lift_y = -1.0f, .seed = (unsigned)effect->pulse_generation,
+        };
+      } else if (effect->phase ==
+                 kActionEffectPhase_MarahnaBossLightningGroundCharge) {
+        float hx = 1.0f, hy = 0.0f;
+        SceneActorHeading(effect, &hx, &hy);
+        spill_x = mid_x - hx * 4.0f;
+        spill_y = mid_y - hy * 4.0f;
+        body_x = mid_x;
+        body_y = mid_y;
+        spill = (ActionEffectGlowStyle){
+          .radius_x = 43.0f, .radius_y = 19.0f,
+          .ring_scale = {0.22f, 0.70f, 1.0f},
+          .centre = {0.62f, 0.86f, 1.00f, 0.24f},
+          .ring = {{0.34f, 0.64f, 1.00f, 0.16f},
+                   {0.10f, 0.26f, 0.98f, 0.06f},
+                   {0.02f, 0.07f, 0.58f, 0.00f}},
+          .flare = 0.10f, .rise = 0.06f,
+          .axis_x = hx, .axis_y = hy,
+          .lift_x = -hx, .lift_y = -hy,
+          .seed = (unsigned)effect->record_address,
+        };
+        body = (ActionEffectGlowStyle){
+          .radius_x = 22.0f, .radius_y = 13.0f,
+          .ring_scale = {0.15f, 0.76f, 1.0f},
+          .centre = {0.98f, 1.00f, 1.00f, 0.88f},
+          .ring = {{0.72f, 0.94f, 1.00f, 0.52f},
+                   {0.22f, 0.50f, 1.00f, 0.18f},
+                   {0.04f, 0.12f, 0.72f, 0.00f}},
+          .flare = 0.16f, .rise = 0.08f,
+          .axis_x = hx, .axis_y = hy,
+          .lift_x = -hx, .lift_y = -hy,
+          .seed = (unsigned)effect->pulse_generation,
+        };
+      } else {
+        const bool orb = effect->phase ==
+            kActionEffectPhase_MarahnaBossLightningOrb;
+        spill = (ActionEffectGlowStyle){
+          .radius_x = orb ? 46.0f : 64.0f,
+          .radius_y = orb ? 38.0f : 31.0f,
+          .ring_scale = {0.22f, 0.68f, 1.0f},
+          .centre = {0.62f, 0.84f, 1.00f, orb ? 0.26f : 0.18f},
+          .ring = {{0.34f, 0.66f, 1.00f, orb ? 0.17f : 0.12f},
+                   {0.11f, 0.27f, 0.96f, 0.055f},
+                   {0.03f, 0.07f, 0.55f, 0.00f}},
+          .flare = 0.10f, .axis_x = 1.0f, .lift_y = -1.0f,
+          .seed = (unsigned)effect->record_address,
+        };
+        body = (ActionEffectGlowStyle){
+          .radius_x = orb ? 26.0f : 50.0f,
+          .radius_y = orb ? 26.0f : 15.0f,
+          .ring_scale = {0.16f, 0.78f, 1.0f},
+          .centre = {0.98f, 1.00f, 1.00f, orb ? 0.86f : 0.64f},
+          .ring = {{0.70f, 0.92f, 1.00f, orb ? 0.50f : 0.34f},
+                   {0.22f, 0.48f, 1.00f, 0.15f},
+                   {0.05f, 0.12f, 0.70f, 0.00f}},
+          .flare = 0.15f, .axis_x = 1.0f, .lift_y = -1.0f,
+          .seed = (unsigned)effect->pulse_generation,
+        };
+        spill_y = body_y = -24.0f;
+      }
       break;
     }
     case kActionEffect_SwordBeam: {
@@ -1754,6 +2185,10 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
                   project_point, userdata))
     return false;
   return AppendBossLightningRibbon(writer, effect, project_point, userdata) &&
+      AppendMarahnaLightningRibbon(
+             writer, effect, project_point, userdata) &&
+      AppendMarahnaBossLightningRibbon(
+             writer, effect, project_point, userdata) &&
       AppendSwordBeamTrail(writer, effect, project_point, userdata);
 }
 
@@ -1764,6 +2199,34 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
       return effect->phase == kActionEffectPhase_WallTorch;
     case kActionEffect_EnemyFireball:
       return effect->phase == kActionEffectPhase_EnemyFireballFlight;
+    case kActionEffect_MarahnaFireball:
+      return (effect->phase == kActionEffectPhase_MarahnaFireballOrb &&
+              effect->visual >= 0x05u && effect->visual <= 0x08u) ||
+          (effect->phase == kActionEffectPhase_MarahnaFireballSplit &&
+           (effect->visual == 0x32u || effect->visual == 0x33u)) ||
+          (effect->phase == kActionEffectPhase_MarahnaSnakeFireballShot &&
+           (effect->visual == 0x1Du || effect->visual == 0x1Eu));
+    case kActionEffect_AitosLavaPit:
+      return effect->phase == kActionEffectPhase_AitosLavaPit;
+    case kActionEffect_AitosLavaFireball:
+      return effect->phase == kActionEffectPhase_AitosLavaFireballFlight;
+    case kActionEffect_MarahnaLightningLink:
+      return effect->phase == kActionEffectPhase_MarahnaLightningActive &&
+          ((effect->visual == 0x2Eu &&
+            effect->animation_state == 0x27u) ||
+           (effect->visual == 0x31u &&
+            effect->animation_state == 0x28u));
+    case kActionEffect_MarahnaBossLightning:
+      return (effect->phase ==
+                  kActionEffectPhase_MarahnaBossLightningCharge &&
+              (effect->visual == 0x07u || effect->visual == 0x08u)) ||
+          (effect->phase == kActionEffectPhase_MarahnaBossLightningOrb &&
+           effect->visual == 0x0Au) ||
+          (effect->phase == kActionEffectPhase_MarahnaBossLightningBolt &&
+           effect->visual == 0x11u) ||
+          (effect->phase ==
+               kActionEffectPhase_MarahnaBossLightningGroundCharge &&
+           effect->visual >= 0x12u && effect->visual <= 0x14u);
     case kActionEffect_LightningTrap:
       return effect->phase == kActionEffectPhase_LightningActive;
     case kActionEffect_BloodpoolBossLightning:
@@ -1795,6 +2258,8 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
       batch->vertices, kActionSceneEffectRenderMaxVertices,
       batch->indices, kActionSceneEffectRenderMaxIndices);
   unsigned lightning_filaments = 0;
+  unsigned marahna_lightning_links = 0;
+  unsigned marahna_boss_lightning_bolts = 0;
   unsigned sword_streams = 0;
 
   for (uint8_t i = 0; i < frame->effect_count; i++) {
@@ -1810,6 +2275,15 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
     if (effect->kind == kActionEffect_BloodpoolBossLightning &&
         effect->phase == kActionEffectPhase_BossLightningStrike &&
         ++lightning_filaments > kActionSceneEffectMaxLightningFilaments)
+      return false;
+    if (effect->kind == kActionEffect_MarahnaLightningLink &&
+        ++marahna_lightning_links >
+            kActionSceneEffectMaxMarahnaLightningLinks)
+      return false;
+    if (effect->kind == kActionEffect_MarahnaBossLightning &&
+        effect->phase == kActionEffectPhase_MarahnaBossLightningBolt &&
+        ++marahna_boss_lightning_bolts >
+            kActionSceneEffectMaxMarahnaBossLightningBolts)
       return false;
     if (effect->kind == kActionEffect_SwordBeam &&
         ++sword_streams > kActionSceneEffectMaxSwordStreams)

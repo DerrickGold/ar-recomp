@@ -19,7 +19,14 @@ Run `20260810-175403` also maps the global player sword beam. Follow-up run `202
 corrects its signed-origin OAM placement; `20260810-190012` proves the aligned five-glint revision
 too faint, and `20260810-190729` proves a denser centreline still too narrow. The settled pass uses
 full-height haze plus a forty-eight-glint materializing star path for both authored cycles and travel
-directions.
+directions. Runs `20260811-151353` and `20260811-221433` add Marahna's single-metatile wall
+torches (including all ten in the boss room), the exact orb-to-four-cardinal-fireballs lifecycle,
+horizontal/vertical linked lightning, and the boss hand-charge/central-orb/diagonal-bolt/
+ground-charge cycle as implemented scene accents. Run `20260811-225534` corrects `$E57E` from a
+supposed retired tail to the live three-frame floor discharge. The later captures also prove the
+formerly matched six `$34/$4BE5` actors are moving platforms, not fireballs.
+The later Aitos snapshots in that run add map `$04/$01` lava-pit surface lights and the complete
+three-state lifecycle of their emitted lava fireballs as a separate implemented family.
 Snapshot hooks and renderer output are covered by ROM-free regressions, with only live visual
 tuning remaining.
 
@@ -93,6 +100,57 @@ visual cadence, not its actor-owned lifetime. This is the companion to [SEAMS.md
     `(144,168)..(160,200)`. Vertical flip is not an authored beam state and fails closed; horizontal
     flip selects the measured mirrored rectangles. The measured velocity, normally `+8` or `-8`,
     is the authoritative path direction.
+12. **Marahna's requested accents are a separate map/object family.** In maps `$05/$04-$08`,
+    one BG1 metatile `$43` is the complete torch, anchored at local `(8,11)`. The shared 2304×1792
+    world contains 31 instances, so capture uses the same bounded `ActionBgMapView` contract as
+    Bloodpool but publishes only cells within a 256px margin around the camera. Map `$08` is a
+    separate 512×512 world containing ten occurrences of that same authored signature. The actual
+    fireball family retains source `$E047`, handler `$8661`, and animation `$7E:4000`. Its
+    state-`$0C` large orb is an eight-entry left/idle/right/idle cycle: exact
+    visual/composition/velocity tuples are `$07/$451C/(0,0)`, `$08/$4528/(-1,0)` or `(-2,0)`,
+    `$05/$4504/(0,0)`, and `$06/$4510/(+1,0)` or `(+2,0)`, all with resume `$E061` and 8px
+    extents. On split, the inactive orb remains the parent at child `+$3A`; four 4px-extent
+    children resume at `$A65D` and travel exactly `(0,+3)`, `(-3,0)`, `(0,-3)`, and `(+3,0)`.
+    Vertical children use state/visual/composition `$0F/$32/$4BCD`, with V-flip on the upward
+    child; horizontal children use `$10/$33/$4BD9`, with H-flip on the rightward child. Run
+    `20260811-225534` exposes both omissions in the former left-only matcher.
+    Run `20260811-232640` corrects the next projectile family: `$E0BA` is a reaper whose
+    `$19-$1C` horizontal/aimed/vertical orb must not receive fire. The actual snake fireballs
+    retain source `$DE96`, shared handler/resume/state `$8661/$A65D/$06`, 8/4/8/4 extents,
+    local counter 6, and exact `$1D/$4869` or `$1E/$487C` artwork at velocity `(-4,0)` or
+    H-flipped `(+4,0)`. Their backlink resolves to the source-`$DE96` snake lifecycle, preventing
+    shared animation machinery from becoming identity.
+    Run `20260811-221433` proves the six `$34/$4BE5` source roots previously classified as
+    fireballs are moving-platform machinery and must fail closed.
+13. **Marahna's two lightning orientations are linked endpoint connectors.** Connector children
+    use handler `$8683`, source `$E18E`, resume `$E24F`, and backlink `+$3A` to the first endpoint.
+    The `$E254` partner is the immediately following slot, and the connector hot point is their
+    exact midpoint. Horizontal state/visual/composition `$27/$2E/$4AA1` has 40/4/40/4 extents;
+    vertical `$28/$31/$4B82` has 5/40/5/40. Endpoint pairs `$0D/$45B8` + `$0F/$45D0` and
+    `$0E/$45C4` + `$10/$45DC` validate orientation. The ten-part connector compositions support
+    ten aligned host-ribbon segments without inferring an angle from screen pixels.
+14. **Aitos lava pits are bounded BG1 structures, and their fireballs are cyclic actors.** On
+    map `$04/$01`, every observed pit rim is `$DC`, one or more `$DD`, then `$DE`, with an equally
+    wide `$DF` row directly below. The four decoded pits are 64px wide at world `(1648,976)`,
+    `(1888,992)`, and `(2144,976)`, plus the 128px pit at `(3616,928)`. Capture requires the whole
+    two-row signature and publishes only a camera-local subset on BG1. Six persistent emitter slots
+    retain source `$CF9E`, resume `$CFCD`, animation `$7E:4000`, 8/8/8/8 extents, no flip, and
+    artwork `$2A/$4D21` or `$2B/$4D2D`. Rising state `$22` uses handler `$CFE3` and velocity
+    `(0,-4)`; wait/reset state `$23` uses `$8661` and `(0,0)`; return state `$24` uses `$CFFE` and
+    `(-1,+6)`. Source+resume continuity plus bounded motion starts a fresh particle generation when
+    the cyclic slot jumps back to its launch point.
+15. **Marahna's boss attack is a third electrical family with four presentation stages.** Only
+    map `$05/$08` admits it. The live boss parent retains source `$E483`, animation `$7E:5000`,
+    48/40/48/8 extents, and no spawner backlink. Handler `$8661` owns its pre-impact stages: exact
+    visual/composition `$07/$57C2` and `$08/$5868` are its hand-charge cycles; `$0A/$59DE` is the
+    central orb. A launched child uses the same source,
+    backlink `$12E0`, resume/state/visual/composition `$E578/$04/$11/$5CE0`, velocity
+    `(-4,+4)` or `(+4,+4)`, and the corresponding left/down or right/down 32px quadrant. After
+    impact, that child resumes at `$E57E` in state `$07` and rides the floor at `(-4,0)` unflipped
+    or `(+4,0)` H-flipped. The complete loaded cycle is `$12/$5D01`, `$13/$5D0D`,
+    `$14/$5D2E`, `$13/$5D0D`; its backlink parent is then the exact shared-repeat tuple
+    `$8683/$0A/$E4D7/$00/$5307`. These identities supply measured local geometry for both flat
+    and Diorama projection without estimating an angle from pixels.
 
 These findings leave no ROM-decompilation blocker to choosing particle and light styles. They
 also mean the first implementation should expose per-instance metadata, rather than a single
@@ -149,8 +207,10 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   tick clocks. State 2 versus 3 resolves Fire visual 12's phase ambiguity. A paused host redraw
   passes zero elapsed ticks, so emitter clocks freeze with the game rather than advancing at display
   refresh rate. The observer is explicit state and is reset on every savestate load.
-- `action_effect_render.c` owns spell style and geometry extraction; `present.c` only projects and
-  submits its bounded batch. The renderer centres each glow on the published rectangle, then emits
+- `action_effect_render.c` owns spell style and geometry extraction;
+  `action_effect_projection.c` owns the pure camera/widescreen/flat-or-Diorama mapping, and
+  `present.c` copies immutable frame inputs into that context and submits the bounded batch. The
+  renderer centres each glow on the published rectangle, then emits
   quadrant-aware embers from all four mirrored actors. Its pulse is an integer triangle wave rather
   than `libm` sine, so authored-tick output is repeatable across platforms. Unknown effect, phase,
   geometry, layer, or priority values fail closed.
@@ -165,7 +225,7 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   and `action_effect_particles` switches (`AR_ACTION_EFFECT_LIGHTING` /
   `AR_ACTION_EFFECT_PARTICLES`), both on by default.
 
-### Action-scene accent slice (2026-08-10)
+### Action-scene accent slice (2026-08-10/12)
 
 - `ActionSceneEffects_CaptureFrame` is a separate immutable frame contract from the spell cast.
   It scans BG1's bounded page map for Bloodpool torch pairs through the same pure
@@ -178,6 +238,34 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   immediately recycled same-kind slot cannot inherit its predecessor's particle clock. The boss
   child uses source/backlink continuity because its saved resume intentionally changes across
   repeated strike/blank cycles.
+- Marahna adds a second bounded torch rule for maps `$05/$04-$08`, exact fireball/link actor rules
+  for `$04-$07`, and an exact boss-lightning rule only for `$08`.
+  The torch rule matches single metatile `$43` and applies a camera-local publication window; it
+  uses shared metatile-aligned scan bounds rather than traversing the complete world, does not scan
+  pixels, and does not consume one record for all 31 shared-world torches. The boss room's ten
+  `$43` cells use that same rule. Fireballs reuse the established heading-aware fire style but
+  retain distinct lifecycle keys: the complete `$E047` left/idle/right orb cycle and four
+  correctly flipped cardinal children, plus the separately parent-validated `$DE96` snake-shot
+  family. Lightning links
+  validate the source endpoint, adjacent partner, orientation-specific compositions, backlink,
+  and exact midpoint before publishing. Up to five authored links receive two ten-segment projected
+  ribbons, a chord-aligned cyan/violet glow, crawling sparks, and endpoint fans; a sixth forged
+  link fails the explicit geometry-capacity contract.
+  The boss attack separately validates its live `$E483` parent and exact charge/orb/diagonal-bolt/
+  ground-charge artwork.
+  Charge and orb stages receive cold two-tier illumination and sparks; the launched 32px diagonal
+  receives a two-layer eight-segment projected ribbon. The complete three-frame floor charge gets
+  a grounded oval bloom, contact sparks, and a direction-aware wake. A forged second diagonal bolt
+  exceeds the explicit one-bolt capacity and fails closed.
+- Aitos map `$04/$01` adds a camera-windowed lava-surface scan through the same bounded BG map
+  view and shared aligned scan bounds. It requires the complete `$DC/$DD+/$DE` rim over `$DF`,
+  derives the exact 64px or 128px
+  surface rectangle, and projects it on BG1. A separate `$CF9E/$CFCD` actor rule covers all three
+  exact fireball handler/state/velocity phases and both artwork pairs on OBJ priority 0. Lava surfaces use
+  an elongated two-tier orange spill plus twelve births distributed across the full rim; fireballs
+  use the velocity-aligned flame body and wake, with an upward fallback during the stationary wait.
+  Both animated BG fire styles sample presentation at 2× while retaining authentic 60Hz capture
+  clocks.
 - The player sword beam is deliberately outside the Bloodpool map gate. Capture requires handler
   `$9D1C`, animation `$06:8000`, attacker flag `$0001`, one of the two exact state/visual/
   composition tuples, and a backlink to the live player whose source descriptor matches the
@@ -189,8 +277,10 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   projected filaments (amber corona and white-gold core). The filaments follow the real 8×8 OAM
   row centroids for all six paths, including horizontal mirroring and `$8D68`'s one-pixel Y draw
   bias; the surrounding glow rotates onto the same authored chord. All particle placement is an
-  integer-hash function of authentic lifecycle clocks, so paused redraws freeze and repeat builds
-  are byte-identical.
+  integer-hash function of authentic lifecycle clocks driven by the completed `$00:8C98`
+  gameplay-pass serial. Publication occurs only at the routine's successful common epilogue,
+  so native/host pauses and abnormal nested-HLE returns freeze effects, and repeat builds are
+  byte-identical even though native pause continues running emulated frames.
 - Sword-beam presentation uses a restrained cold halo/core, narrow 80px/56px connective haze
   layers, and forty-eight cyan-white crossed-star glints arranged as sixteen fixed cross-sections
   of three height lanes. Positions stay fixed from 4px to 88px behind the crescent while scrambled
@@ -500,11 +590,23 @@ Before final visual tuning, finish these focused acceptance captures:
    and both travel directions, the restrained cold halo, full-height long haze, materializing
    forty-eight-star path, pause and retirement behavior, and both Graphics switches in flat and
    Diorama presentation.
-5. Log the controller kind and cohort slot `status, X/Y, +0A/+0C/+0E/+10, +20, +22, +28` each
+5. Revisit Marahna maps `$05/$04-$08` using the first three snapshots of run
+   `20260811-151353` plus snapshots 0-11 of `20260811-221433`. Accept torch registration/cadence
+   across subsection transitions and all ten boss-room torches, flame lighting on the `$E047`
+   large orb and four cardinal children, both `$4AA1` horizontal and `$4B82` vertical connector
+   cycles, and all four boss stages: hand charge, central orb, left/right diagonal descent, and
+   the three-frame left/right ground-riding charge. Confirm `$34/$4BE5` moving platforms and the
+   `$E0BA` reaper orb remain undecorated, then accept pause/retirement, flat/Diorama registration,
+   and both Graphics switches.
+6. Revisit Aitos map `$04/$01` using snapshots 3-7 of `20260811-151353`. Accept full-width lava
+   surface spill/embers for both observed 64px and 128px pits, the rising/reset/return fireball
+   cycles, slot relaunch, pause/retirement, flat/Diorama registration, and both Graphics switches.
+   The pit must follow BG1 rake/bow while each projectile follows OBJ priority 0.
+7. Log the controller kind and cohort slot `status, X/Y, +0A/+0C/+0E/+10, +20, +22, +28` each
    tick. Confirm the decoded timing, clone count, and slot reuse for IDs 2-4.
-6. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the
+8. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the
    `$923E=0..140` sunlight ramp before implementing their distinct weather/scene-light styles.
-7. Capture one Red Demon attack to visually accept its elevated red flame attachment, and one Skull
+9. Capture one Red Demon attack to visually accept its elevated red flame attachment, and one Skull
    Head attack to confirm the statically decoded Earthquake-posting window against live
    presentation.
 

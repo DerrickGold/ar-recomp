@@ -1533,6 +1533,111 @@ the current debugging process; this file is the case law.
     allowlist. Finally, carry any reconstructed arithmetic as immutable
     frame-owned metadata—present must never reverse-engineer live PPU state.
 
+49. **Voxelizing a resolved additive plane multiplies its colour contribution —
+    OPEN 2026-08-11.** In `runs/20260811-145909`, gf2097, enabling
+    `voxel:0.18 slices:12` on Marahna `0501` BG1 turns most of the scene
+    white/yellow. The captured PPU state remains the valid topology from §48:
+    BG1 is the sparse full-add subscreen operand, not corrupt palette data.
+
+    **Root cause:** the compositor correctly marks BG1 additive, but applies
+    that blend mode to every geometry submission. A twelve-slice voxel is eleven
+    unfaded copies plus the original face, so overlapping pixels receive the
+    BG1 source roughly ten times before saturation instead of once. Stack and
+    thickness are the same semantic risk because they also add submissions;
+    voxel makes it catastrophic because its copies deliberately stay opaque.
+
+    **Required fix:** render the authored multi-draw shape into an intermediate
+    target with ordinary internal occlusion, then add that flattened result once.
+    Dividing colour by slice count is invalid because projected overlap varies
+    across the silhouette. Until an intermediate path exists, the shipped
+    authoring contract forbids `thick`, `stack`, and `voxel` on additive planes;
+    `z`, `rake`, and `bow` remain safe because they submit the source once. The
+    shipped `0501` definition does not persist the diagnostic BG1 voxel edit.
+
+50. **Marahna scene accents decorated platforms and missed the actual fireball,
+    split shots, boss-room torches, and boss lightning — FIXED 2026-08-11.** Run
+    `20260811-221433` contains the complete correction set: snap 0 is the large
+    enemy orb, snap 1 its four cardinal children, snap 2 the false-positive
+    moving platforms, snap 3 the ten boss-room torches, and snaps 4-11 the boss
+    electrical cycle.
+
+    **Root cause:** the first Marahna pass classified `$34/$4BE5` by its fiery
+    appearance, but the six source/state/resume roots are moving-platform
+    machinery. The actual fireball is source `$E047`: one `$08/$4528` orb and
+    four backlink-linked `$32/$4BCD` or `$33/$4BD9` children. Torch capture used
+    the correct `$43` metatile but gated maps at `$04-$07`, excluding boss map
+    `$08`. The boss electrical family had not yet been mapped.
+
+    **Fix:** platform roots are excluded and regression-reproduced as a negative
+    identity. The `$E047` matcher pins orb and split bounds, resume/state/artwork,
+    exact cardinal velocities, and validates the retained parent backlink.
+    Torch semantic capture admits map `$08`; its 512×512 BG1 contains ten exact
+    `$43` cells, so no new visual heuristic is needed. A map-`$08`-only `$E483`
+    matcher covers boss charge `$57C2/$5868`, orb `$59DE`, and backlink-validated
+    left/right `$5CE0` bolts. The renderer adds cold blooms, sparks, and a bounded
+    two-layer eight-segment diagonal ribbon through the production flat/Diorama
+    projection adapter. Capture, orientation, capacity, malformed-input, and
+    platform-rejection regressions pass.
+
+    **Reusable lesson:** appearance is never action-object identity. Preserve a
+    tempting false positive as a negative regression, and prefer an existing BG
+    semantic signature over introducing a room-specific coordinate table.
+
+51. **Marahna fire effects followed only left-moving `$E047` frames and two
+    split directions — FIXED 2026-08-11.** Run `20260811-225534` shows the
+    state-`$0C` orb stationary and travelling right without host flame, while
+    the split publishes down/left but misses authored V-flipped up and H-flipped
+    right children.
+
+    **Root cause:** capture reduced the eight-entry large-orb animation to its
+    `$08/$4528/(-1,0)` entry, and required zero flip on every cardinal child.
+    The renderer likewise accepted only the left-moving visual. This made exact
+    validation accidentally directional rather than lifecycle-complete.
+
+    **Fix:** the matcher now pins every unique loaded orb tuple across visuals
+    `$05-$08`, including stationary and ±1/±2 X velocities. Split identity pins
+    its direction-specific V/H flips.
+
+    A first static pass then misclassified source `$E0BA` as the requested
+    second fireball family. Run `20260811-232640` resolves it: `$E0BA` is the
+    reaper's horizontal/aimed/falling orb and must fail closed. The real snake
+    shots retain source `$DE96`, exact `$1D/$4869` or `$1E/$487C` artwork,
+    state/resume/counter/velocity, and a backlink to the matching snake
+    lifecycle. Capture and render regressions exercise all orb/split directions,
+    still frames, both snake-shot animation frames/facings, malformed backlink,
+    velocity/composition/flip rejection, and the live `$E0BA` false positive.
+
+    **Reusable lesson:** an exact frame signature is not necessarily an exact
+    actor signature. When presentation should survive an authored animation,
+    enumerate the complete decoded state table and validate each full tuple.
+
+52. **Marahna boss lightning stopped after the diagonal bolt and omitted the
+    floor charge — FIXED 2026-08-12.** Runs `20260811-221433` and
+    `20260811-225534` show four attack stages: hand charge, central orb,
+    diagonal descent, then a circular charge riding along the ground in either
+    direction.
+
+    **Root cause:** `$E57E` had been documented as a retired, non-rendering
+    bolt tail, so capture ended at the `$E578/$04/$11/$5CE0` diagonal child.
+    The backlink matcher also admitted only the boss's pre-impact `$8661`
+    tuples, but the live parent changes to shared repeat handler `$8683`, state
+    `$0A`, resume `$E4D7`, and `$00/$5307` artwork while the ground child lives.
+
+    **Fix:** source `$E483` now admits the exact post-impact child
+    resume/state `$E57E/$07`, velocity `(-4,0)` unflipped or `(+4,0)`
+    H-flipped, and the complete `$12/$5D01`, `$13/$5D0D`, `$14/$5D2E`,
+    `$13/$5D0D` cycle with measured 8px/16px extents. Its `$12E0` backlink must
+    resolve to the exact post-impact parent tuple. The renderer adds a grounded
+    cyan bloom, contact sparks, and a direction-aware electrical wake through
+    the same portable SDL geometry and production flat/Diorama projection
+    seam. Live snapshot replay now publishes visuals `$13` and `$14`; tests pin
+    every loaded frame, both directions, malformed artwork, velocity, flip,
+    and parent rejection.
+
+    **Reusable lesson:** a child changing resume/state does not imply retirement;
+    follow the linked parent and loaded animation table through the entire
+    visible attack before declaring its tail non-rendering.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

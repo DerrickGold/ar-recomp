@@ -349,6 +349,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_action_effects_test
         tests/action_effects_test.c
+        src/action/action_effect_clock.c
         src/action/action_effects.c
         src/action/action_bg_world.c
     )
@@ -433,10 +434,15 @@ if(BUILD_TESTING)
     add_executable(actraiser_action_effect_render_test
         tests/action_effect_render_test.c
         src/action/action_effect_render.c
+        src/action/action_effect_projection.c
+        src/diorama/diorama_projection.c
+        src/diorama/diorama_depth_shapes.c
+        src/scene3d_math.c
     )
     target_include_directories(actraiser_action_effect_render_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
+        ${CMAKE_SOURCE_DIR}/src/diorama
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_action_effect_render_test PRIVATE
