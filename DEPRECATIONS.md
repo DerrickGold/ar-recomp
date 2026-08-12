@@ -1,28 +1,25 @@
-# Deprecated compatibility shims
+# Deprecated compatibility launchers
 
-These wrappers exist only so existing muscle memory and older automation keep
-working. They are thin launchers that shell out to the Go drivers
-(`cmd/snesbuild` and `cmd/v2regen`) and add no logic of their own. Prefer
-calling the Go driver directly in any new script or CI step. They will be
-removed once nothing invokes them by name.
+Compatibility launchers add no build logic; they delegate to the Go drivers in
+`cmd/snesbuild` and `cmd/v2regen`. New scripts and CI should call those drivers
+directly.
 
-**Keep for now** — some are still referenced from the docs (e.g. `tools/regen.sh`
-is cited as a fallback in `docs/contributing.md`, `docs/BUILD_TOOLING.md`, and
-`DEBUG.md`), so do not delete them until those references are updated.
+## Removed Python shims (2026-08-12)
 
-## Python shims → `v2regen` (D9)
+The repository no longer referenced these wrappers, so they were removed after
+a repo-wide caller audit. Use the direct replacements below.
 
 | Shim | Direct replacement |
 |---|---|
-| `tools/gen_metadata.py` | `v2regen metadata` |
-| `tools/link_audit.py`   | `v2regen link-audit` |
-| `tools/opcode_diff.py`  | `v2regen opcode-diff` |
-| `tools/stub_census.py`  | `v2regen stub-census` |
+| removed `tools/gen_metadata.py` | `v2regen metadata` |
+| removed `tools/link_audit.py`   | `v2regen link-audit` |
+| removed `tools/opcode_diff.py`  | `v2regen opcode-diff` |
+| removed `tools/stub_census.py`  | `v2regen stub-census` |
 
-Each is a ~15–24 line `os.execvp("go", ["go", "run", "./cmd/v2regen", <subcmd>, …])`
-passthrough.
+## Retained shell launchers → `snesbuild` (D10)
 
-## Shell launchers → `snesbuild` (D10)
+Keep these while repository automation or user-facing documentation invokes
+them by name.
 
 | Launcher | Direct replacement |
 |---|---|

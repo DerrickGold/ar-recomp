@@ -4,8 +4,9 @@
 #include <stdbool.h>
 
 /* Read-only renderer capability boundary used by Settings availability gates.
- * The present thread owns detection and reset; callers must not mutate the
- * underlying latches or depend on which backend operation rejected them. */
+ * The main-thread presentation path owns detection and reset; callers must not
+ * mutate the underlying latches or depend on which backend operation rejected
+ * them. */
 bool Present_SimRimMaskSupported(void);
 bool Present_EffectRendererSupported(void);
 

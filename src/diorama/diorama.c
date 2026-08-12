@@ -1104,11 +1104,11 @@ static void BuildQuadMesh(const float mvp[16],
 
 /* ── Render ───────────────────────────────────────────────────────────── */
 
-/* M5 (D6/buffer-ownership split): upload is separated from composite so the
- * present thread can release the game thread (safe to redraw pixels[]) right
- * after this returns, instead of after the full composite+vsync-present). The
- * caller supplies the frame-snapshotted request/content intersection; this
- * function neither reads live settings nor rescans producer-owned pixels. */
+/* M5 (D6/buffer-ownership split): upload remains separate from composite even
+ * though presentation is now synchronous. The boundary keeps texture ownership
+ * and the producer snapshot explicit. The caller supplies the frame-snapshotted
+ * request/content intersection; this function neither reads live settings nor
+ * rescans producer-owned pixels. */
 uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
                         int snes_width, int snes_height, int obj_apron,
                         uint32_t plane_mask) {

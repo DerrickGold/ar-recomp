@@ -111,7 +111,7 @@ static void AddHudPresentationChunk(HudPresentationChunk *chunks, int *count,
 }
 
 /* One geometry description drives both compositing and hit-testing (D4):
- * pure, no globals — the present thread feeds it from a FrameSlot, and
+ * pure, no globals — the presentation path feeds it from a FrameSlot, and
  * DevTools_InspectWindowPoint feeds it from live state. Ported verbatim from
  * the pre-M5 main.c version, just reading `inputs` instead of g_ppu/g_settings/
  * g_snes_width/g_snes_height directly. */
@@ -729,16 +729,15 @@ static DioramaScrollDelta ComputeDioramaScrollDelta(
   return ComputeDioramaScrollDeltaAt(curr, prev, alpha);
 }
 
-/* B4-split (followup doc): the present-thread-owned "effective render
- * camera" — Free Cam: the authored/persisted pose (snapshotted through
+/* B4-split (followup doc): the presentation-owned "effective render camera" —
+ * Free Cam: the authored/persisted pose (snapshotted through
  * FrameSlot every frame, so Free Cam behavior/output is unchanged). Dynamic
  * Cam: baseline pose today (direct snap; B4-vellean/B4-damp add sway +
  * easing on top in a later checkpoint). A plain file-scope static, not
- * thread-local: PresentCompositeScene (like every other present.c function) is
- * only ever called from the present thread, the same reasoning that already
- * covers s_hud_composite_texture above. Diorama_Composite's camera parameter
- * comes from here in Dynamic mode, from the slot's authored pose in Free
- * mode — g_diorama_cam (diorama.c, game-thread-owned) is never read here. */
+ * thread-local: PresentCompositeScene and the rest of present.c run
+ * synchronously on the main thread. Diorama_Composite's camera parameter comes
+ * from here in Dynamic mode and from the slot's authored pose in Free mode;
+ * g_diorama_cam (diorama.c, producer-owned) is never read here. */
 static DioramaCameraPose g_diorama_render_cam;
 static int g_diorama_render_cam_mode = -1;    /* -1: no frame composited yet */
 static uint64_t g_diorama_render_cam_last_ns;
@@ -1428,7 +1427,7 @@ void PresentCompositeScene(const FrameSlot *slot,
     g_diorama_render_cam_last_ns = now_ns;
 
     /* B4-kick: trigger a fresh impulse only on a genuinely NEW FrameSlot
-     * capture (not a present-thread redraw of one already processed — see
+     * capture (not a re-presentation of one already processed—see
      * the FrameSlot field comment, present.h), and only in Dynamic Cam
      * (event kicks are part of the reactive system, same scoping as
      * vellean/pan). Impulses stack additively (a hit while already mid-jolt

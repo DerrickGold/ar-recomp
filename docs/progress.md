@@ -185,90 +185,29 @@ Run these authentic-geometry baselines before changing town rendering. The
 existing partial-town-actor symptom must be captured as a baseline rather than
 silently attributed to future widescreen code.
 
-## Remaining proper-widescreen roadmap
+## Remaining validation roadmap
 
-The runtime settings/overlay plan in
-[settings-system.md](settings-system.md) is complete through Phase 6, with one
-manual save-acceptance matrix pending. Its 101-row registry
-owns every wired application/game setting, resolves
-`config.ini < settings.ini < environment`, persists atomically, and exposes
-live/restart apply metadata. The SDL host overlay renders descriptor-driven
-categories and rows, freezes game advancement while open, consumes SNES input,
-saves accepted changes, and scales independently. Escape/F1 opens it globally
-from every game state before emulated input dispatch. The authentic 2bpp font,
-selector, and three-panel dialog frame are decoded from the user-supplied ROM
-into full-window host atlases with independently scaled contents. Custom rows
-support validated text entry, and Extras/Inspector actions reuse the pause,
-turbo, save/load-state, warp, snapshot, complete scene-asset dump, restart, and
-exit paths. Screen ratio is an explicit
-4:3/16:9/16:10 cycle; ratio, pixel aspect, and renderer selection now rebind
-preallocated video surfaces live. Enhanced music now adopts or releases the
-currently playing song immediately, and audio frequency cycles through
-32.04/44.1/48 kHz presets. Only audio format rows retain restart markers. A
-native menu entry remains optional; gamepad support is tracked separately with
-the general input system. The guarded Save editor can load/persist native or
-lossless INI SRAM and stage Progress, Status, Magic, Items, and Scores pages,
-including the six combined town states and the enabled fields represented by
-the reference editor. Import/export does not change the active backend, and
-session-only changes remain distinct from explicit writes. Automated codec/
-backend tests pass; the outstanding manual gate is representative Apply and
-save → Restart Game → Continue checks across those pages.
-Current widescreen work/status is:
+The settings overlay and save editor are implemented through Phase 6. Automated
+codec and backend tests pass; the remaining settings gate is a representative
+Apply and save → Restart Game → Continue matrix across the save-editor pages.
+See [settings-system.md](settings-system.md) for the implementation record.
 
-1. **Action-background HLE and cleanup — complete.** BH7 is accepted and default-on.
-   Five paired 12-entry presentation matrices cover 4:3, Wide Full, Wide Raw,
-   and diorama vertical extension 0/32; long Fillmore and natural Death Heim
-   runs, same-frame/rebind/reset/savestate/geometry gates, a real compositor
-   A/B, debug/release builds, and the then-current 41/41 tests passed; the
-   post-Marahna suite now passes 45/45. BH8 has now removed the
-   duplicated host ring-repair transaction, builder trampolines, and 128 KiB
-   snapshot; 4:3, Wide Full, and diorama-32 accept all 612 artifacts. Every
-   framebuffer/state/PPU register/authentic ring is exact; seven full-VRAM
-   snapshots differ only where the deleted transaction formerly wrote
-   provider-owned offscreen tilemap cells. The retired
-   setting is a hidden load-only alias and unbound world layers clamp safely to
-   the authentic viewport. The final census removed the unused scanline
-   clamp-band and margin-source-gap PPU prototypes while retaining live
-   clamp/mirror/repeat/repeat-band, vertical clip, native streamers, the VRAM
-   ring, and fallback/oracle paths. Three rebuilt-release matrices are
-   612/612 byte-exact against the accepted post-repair baseline. The natural
-   Northwall boss and automated Death Heim ending-tail captures remain useful
-   archival BH1 evidence gaps, not blockers to the classified default path.
-   The follow-on role/extent plan is also complete: Bloodpool changes only
-   4,074 pixels in its two Wide Full side margins across an accepted 204-artifact
-   matrix; full ordinary 4:3/Raw/Diorama-32 and Death Heim Full/Diorama-32 gates
-   pass, including exact `0708` native-raster controls.
-2. **Freeze simulation baselines.** Complete Bloodpool and all four untested
-   towns using the town matrix. The old `simdev.rec`/`lairseal.rec` files no
-   longer reach a town viewport from the current SRAM, so new direct captures
-   are required; use `AR_WS_SIM=0` for authentic geometry.
-3. **Widen simulation backgrounds safely — implemented and directly validated.**
-   Modes `$00:$01-$06` derive margins from `$01:B4C6` camera bounds, clamp at
-   the 512px map edges, keep BG2/dialogs centered, clear framebuffer gaps, and
-   provide the same-binary `AR_WS_SIM=0` switch. Fillmore direct BG testing on
-   2026-07-14 confirmed clean clamped edges with no odd tile exposure.
-   Bloodpool was captured as `$00:$02`, exposing and then repairing the original
-   Fillmore-only gate. A faithful `$01:B4C6` HLE constrains the
-   corrected-wide camera to `[extra,$0100-extra]`, eliminating cleared edge
-   gaps instead of merely rendering them black. Direct testing on 2026-07-14
-   confirmed the camera clamp works as expected in simulation mode. Bloodpool
-   plus modes `$03-$06` remain full content-pass targets.
-4. **Widen simulation world sprites — enemy composition and angel projectile
-   validated.** The regenerated faithful `$01:ADAD/$01:AE6F` ports extend
-   horizontal emission only for `$0A00-$1087` world records; the 2026-07-14
-   direct run confirmed complete enemy sprites in both margins. The angel arrow
-   is already world record `$0B0A`, but its state-2 update `$01:B44B` destroys
-   it through `$01:B473` when `x+4` leaves the old `[cameraX,cameraX+$100)`
-   window. The faithful `$B473` port widens only those horizontal camera
-   comparisons, retaining the 512x512 hard bounds and authentic vertical rule.
-   Direct testing on 2026-07-14 confirmed arrows remain and render correctly in
-   both margins. `AR_WS_SIM_SPRITES=0` restores both native predicates and
-   `AR_WS_SIM_SPRDBG=1` diagnoses both paths.
-5. **Polish shared presentation.** Audit action HUD side panels, dialog staging,
-   boss effects, intro/name-entry/ending screens, and framebuffer-gap clearing.
-6. **Re-run the complete matrix.** Recheck every action stage, every town, and
-   the major non-action screens with widescreen enabled and disabled before a
-   release-quality milestone.
+The remaining project-wide validation work is:
+
+1. **Complete simulation-town baselines.** Finish Aitos from simulation entry
+   through Act 2, then capture Northwall's authentic baseline. Use
+   `AR_WS_SIM=0` for the authentic-geometry comparison.
+2. **Accept recent action effects visually.** Recheck Bloodpool, the
+   materializing sword beam, Marahna, and Aitos against their captured evidence.
+3. **Polish shared presentation.** Audit HUD side panels, dialog staging, boss
+   effects, intro/name-entry/ending screens, and framebuffer-gap clearing.
+4. **Run the release matrix.** Recheck every action stage, every town, and the
+   major non-action screens with enhanced presentation enabled and disabled.
+
+Action-background HLE, simulation background widening, and simulation world
+sprites are implemented. Their detailed acceptance evidence lives in
+[bg-hle-census.md](bg-hle-census.md), [widescreen-survey.md](widescreen-survey.md),
+and the status tables below rather than being repeated here.
 
 ## Major functionality
 
@@ -286,7 +225,7 @@ Current widescreen work/status is:
 | Mode 7 (world navigation) | 🟡 | 2026-07-27: native camera/focus contract, act-entry spin/zoom, Palace/UI OAM composition, location selection, developed-map builder, and four-frame water upload are mapped. Optional `AR_SIM3D_WORLD_NAV=1` owns the full world as a forced-top-down 3D scene and remains enhanced across the complete INIDISP fade. Pending: complete manual movement/destination and action-entry acceptance sweep. Other Mode-7 screens remain separate work. |
 | Input | ✅ | Every joypad button is re-bindable for keyboard and gamepad independently (Settings → Controls; `bind_key_*`/`bind_pad_*` in `settings.ini`, keyboard stored by SDL scancode so layout changes follow the keys). Gamepad support includes multi-pad selection with hotplug, `gamecontrollerdb.txt`, left-stick-as-D-pad with deadzone, right-stick/trigger camera control, and six pad-bindable host actions so the menu (including rebinding) is reachable with no keyboard. Steam Deck works via Steam Input and via SDL's HIDAPI Steam driver from desktop mode. Reference: `docs/manual.md` "Controls". Consumer side fully mapped (SEAMS "Input" + "Magic system") |
 | Runtime settings overlay | ✅ | Phase 5 complete: global Escape/F1 access, hierarchical category/direct-action navigation, independently scaled three-panel native dialog theme, ROM-decoded font/frame atlases, frozen-game input capture, validated editing/actions, and atomic `settings.ini` saves. Phase 6 includes the guarded Save editor category and codec actions. A native game-menu entry is optional; gamepad support has since landed (the pad drives the menu using the player's own bindings — see the Input row). 2026-07-21: new Graphics category added for the diorama GPU-shader effects below. |
-| Diorama 3D presentation mode | 🟡 | `ar-recomp-threading-impl.md`'s full plan shipped 2026-07-20/21: action-stage layers render as a tilted 3D shadowbox (interactive camera, per-layer toggles), a fixed 60.0988Hz game-tick loop, and optional GPU shader effects (rim lighting + depth-of-field/edge-AA, live-verified) reachable via Settings → Graphics. Two features are implemented but shipped OFF by default with a known bug each: scroll interpolation (vibrates the HDMA-driven BG2 parallax layer) and soft shadow blur (bleeds onto transparent gaps in the layer behind it, e.g. over the sky). Per-room presentation is still being authored: `diorama-layers.ini` carries the depth/alpha/rake overrides for each area, and rooms without a tuned entry fall back to defaults that can read flatter than intended — an ongoing visual-tuning pass, not a defect. 2026-07-23: the act-title card and pause text (BG3 rows below the HUD split) now ride the composed flat HUD overlay instead of being buried behind the tilted scene planes — see rendering-engine.md §13.1. Simulation presentation uses independent profiles below rather than the action-stage camera. 2026-08-05 (branch `vertical-extend`): a **vertical band** (`diorama_vertical_extend`, initially 0-32 scanlines, **default 0**) renders real world above the authentic viewport. 2026-08-10 makes it symmetric and raises the per-side ceiling to 64: top/bottom resolve independently against the primary finite world, every BG receives its own top/bottom clip, exact signed OBJ positions allow actors on either side, and FrameSlot/Diorama carry the complete `top+224+bottom` capture. Repro `runs/20260810-112529` proved camera/player Y both moved 48px while the old bottom remained zero, culling a still-resident lower platform. The Layers tuner now has independent side-bound and vertical-bound bypasses per BG. The default remains 0 pending a complete manual action-stage sweep. 2026-08-09 corrected the Fillmore act-2 red-band diagnosis: it was not spatially off-screen art but bottom-of-tilemap BG2 data wrapping into negative synthetic rows while BG1 legitimately extended. `PpuSetVerticalMarginLayerClip` bounds BG1/BG2 independently; the gf-2200 replay removes BG2-high with byte-identical WRAM. Design and diagnostics are rendering-engine.md §13i. 2026-08-06: the horizontal transpose landed as the **OBJ apron** — captured OBJ planes carry 64 columns of RESOLVE headroom per side, so a sprite straddling the display edge is rasterized whole instead of being abandoned mid-write. Those columns are deliberately NOT displayed: the scanline buffer is now 512px with a 120px/side live cap, while the 64px apron remains a separate resolve-only surface band. Clipping at the shown edge therefore remains correct; the benefit is that the DOF/edge-AA/rim shaders stop sampling past the content, and it is the machinery the sim synthetic part channel needs. Real OAM is never widened — out-of-window parts stay parked and ride a host part channel carrying exact positions. `kPpuObjApron = 0` is the A/B lever. See rendering-engine.md §13j and ledger §35/§36. 2026-08-11 Marahna established the missing main/subscreen contract: visual capture uses `TM | TS`; measured disjoint full-add state `TM=$06`, `TS=$11`, `CGWSEL=$02`, `CGADSUB=$03` is reproduced with PPU-resolved sparse TS planes and an immutable additive-plane handoff. Its 512px BG2 is independently classified as a decoded horizontal cycle whenever a wider BG1 shares camera X, covering `0501/0502` without a subsection allowlist. |
+| Diorama 3D presentation mode | 🟡 | `ar-recomp-threading-impl.md`'s full plan shipped 2026-07-20/21: action-stage layers render as a tilted 3D shadowbox (interactive camera, per-layer toggles), a fixed 60.0988Hz game-tick loop, and optional GPU shader effects (rim lighting + depth-of-field/edge-AA, live-verified) reachable via Settings → Graphics. Scroll interpolation remains off by default pending in-game acceptance of its IJ1 unit fix; it no longer reads HDMA-polluted scroll state. Soft shadow blur also remains off because it can bleed onto transparent gaps in the layer behind it. Per-room presentation is still being authored: `diorama-layers.ini` carries the depth/alpha/rake overrides for each area, and rooms without a tuned entry fall back to defaults that can read flatter than intended — an ongoing visual-tuning pass, not a defect. 2026-07-23: the act-title card and pause text (BG3 rows below the HUD split) now ride the composed flat HUD overlay instead of being buried behind the tilted scene planes — see rendering-engine.md §13.1. Simulation presentation uses independent profiles below rather than the action-stage camera. 2026-08-05 (branch `vertical-extend`): a **vertical band** (`diorama_vertical_extend`, initially 0-32 scanlines, **default 0**) renders real world above the authentic viewport. 2026-08-10 makes it symmetric and raises the per-side ceiling to 64: top/bottom resolve independently against the primary finite world, every BG receives its own top/bottom clip, exact signed OBJ positions allow actors on either side, and FrameSlot/Diorama carry the complete `top+224+bottom` capture. Repro `runs/20260810-112529` proved camera/player Y both moved 48px while the old bottom remained zero, culling a still-resident lower platform. The Layers tuner now has independent side-bound and vertical-bound bypasses per BG. The default remains 0 pending a complete manual action-stage sweep. 2026-08-09 corrected the Fillmore act-2 red-band diagnosis: it was not spatially off-screen art but bottom-of-tilemap BG2 data wrapping into negative synthetic rows while BG1 legitimately extended. `PpuSetVerticalMarginLayerClip` bounds BG1/BG2 independently; the gf-2200 replay removes BG2-high with byte-identical WRAM. Design and diagnostics are rendering-engine.md §13i. 2026-08-06: the horizontal transpose landed as the **OBJ apron** — captured OBJ planes carry 64 columns of RESOLVE headroom per side, so a sprite straddling the display edge is rasterized whole instead of being abandoned mid-write. Those columns are deliberately NOT displayed: the scanline buffer is now 512px with a 120px/side live cap, while the 64px apron remains a separate resolve-only surface band. Clipping at the shown edge therefore remains correct; the benefit is that the DOF/edge-AA/rim shaders stop sampling past the content, and it is the machinery the sim synthetic part channel needs. Real OAM is never widened — out-of-window parts stay parked and ride a host part channel carrying exact positions. `kPpuObjApron = 0` is the A/B lever. See rendering-engine.md §13j and ledger §35/§36. 2026-08-11 Marahna established the missing main/subscreen contract: visual capture uses `TM | TS`; measured disjoint full-add state `TM=$06`, `TS=$11`, `CGWSEL=$02`, `CGADSUB=$03` is reproduced with PPU-resolved sparse TS planes and an immutable additive-plane handoff. Its 512px BG2 is independently classified as a decoded horizontal cycle whenever a wider BG1 shares camera X, covering `0501/0502` without a subsection allowlist. |
 | Simulation / world-navigation 3D | 🟡 | Town 3D provides the projected ground, full-town canvas, developed-world underlay, semantic billboards, height/shadow/rim-light stages, cloud shroud, haze, and atmospheric backdrop. 2026-08-03: frame-owned effect emitters now cover the Lightning miracle, Blue Dragon lightning, the world-tier pair of new-town creation strikes, palette-1 Red Demon fire, both palette-1 red / palette-2 blue variants of the shared ground-fire animation, and the separate scripted burning-house `$0A01/$01:A838/$DD2D-$DD39` family with portable batched additive lighting and deterministic burst/rising particles. Run `20260803-130945` frame 19,950 proves three concurrent house fires and their `(8,16)` ground contact; a signature-checked visual-data patch slows their one-tick source frames to four ticks without putting mutations in renderer or metadata callbacks. Run `20260803-133014` corrects the new-town hook: the `$01:A8BB` actors are world process `$000E` records retaining `$A8BB` in raw `+$06`, with `$E9CC/$EA27/$EA82/$EAEC` visible phases and `$E527` preserving lifecycle through blank gaps; exact slots `$0E02/$0E28` and positions are independently unit-covered, with post-fix visual acceptance still pending. The reusable contract separates lifecycle/phase/geometry/colour metadata from renderer style, captures raw source identity and emitted OBJ palette rather than inferring either from shared runtime composition addresses, validates applied blend support, and fails closed on ambiguous palettes or metadata overflow. `D6a`-`D6c` strictly cover the 240-tick miracle, 33-tick dragon strike, and 1,123 blue-fire samples; house fire and new-town lightning now need post-change live visual acceptance, while Red Demon still needs its live visual capture. 2026-07-27 adds independent off-by-default world navigation: a forced-top-down 1024x1024 developed plane using the game's live focus/matrix/zoom, location-aware haze (full-map dim outside all borders), seamless whole-world clouds and directional shadows, zoom-relative cloud-deck visibility, animated water, Palace/UI overlays, and continuous fade ownership. A 2048x2048 high-fidelity reconstruction from all six town tilesets remains research. |
 | Battery save codec/editor | 🟡 | 2026-07-16: exact 8 KiB native codec, checksum validation/repair, version-1 lossless INI, deterministic active backend, atomic writes, timestamped editor backup, auto-persist/shutdown shadow re-sync, five paged edit groups (town/Death Heim/Professional progress, player/Angel status, magic, items, and BCD scores), import/export/session/persistent actions, `tools/srm.py`, and transactional tests are implemented. All 9 repository saves validate and `.srm → .ini → .srm` is byte-identical. Pending final gate: manual Apply and save → Restart Game → Continue acceptance matrix in the game. |
 | Cheats | 🟡 | Named cheat kit 2026-07-07: `AR_ALL_MAGIC`/`AR_RANGED_SWORD`/`AR_INF_MP`/`AR_INF_SP`/`AR_ANGEL_HP` + magic-safe `AR_NO_KNOCKBACK` + generic `AR_PIN`; real 8x turbo on `t`. `AR_FREEZE_TIMER` auto-backoff added, still unverified. `AR_NO_KNOCKBACK` is not physics-neutral: its pinned invulnerability suppresses water drag (confirmed 2026-07-12). |
@@ -295,18 +234,18 @@ Current widescreen work/status is:
 | Debug tooling | ✅ | 2026-07-07 toolkit: `dis65`/`romxref`/`wram`/`resolve_miss`/`cycle.sh` — anomaly capture → auto-triage → proposed cfg patch loop (`DEBUG.md` §1) |
 | Action widescreen BG/sprites | 🟢 | All ordinary stages and Death Heim are fully playable and visually validated: wide streaming, finite camera edges, sprites, activation, narrow-BG2 edge policies, HDMA/parallax scenes, bosses, and post-final-boss transitions behave correctly. 2026-08-09 `SPEC-bg-hle.md`: bounded `ActionBgWorld`, the 49-map `ActionBgPlan`, full-world provider, and exact diorama handoff are implemented. The provider is default-on with exact `AR_ACTION_BG_HLE=0` native fallback. After phase/source/bounds preflight, an exact authentic ring gives the provider the whole layer; an in-world ring contradiction retains a native authentic centre while the provider remains active for finite margins. Live VRAM/CGRAM, priority, windows, transparency, mosaic, color math, and scroll effects remain native PPU stages. Five paired 12-entry presentation matrices, long Fillmore Full/Raw/diorama-32 runs, a natural Death Heim transition soak, lifecycle/rebind/savestate/geometry gates, and a real compositor A/B pass; every authentic center and state artifact is exact. Wide Full `0301` intentionally corrects 30 synthetic-margin pixels at BG2's finite edge. Maximum-span cost remains 0.067 ms/frame, below the accepted 0.10 ms budget. BH8 removed the duplicate ring repair and unused clamp-band/margin-source-gap PPU prototypes; three final release matrices are 612/612 byte-exact. 2026-08-10 adds semantic playfield/scene/backdrop roles plus independent per-layer and row-band extents. Bloodpool's unique moon/cloud art is independently bounded (`0201` live-tuned to 76/100, `0202` and unbanded `0206` to 68/68, unbanded `0207` to 92/92); `0201` water remains wide while `0202` water inherits its backdrop extent. Boss room `0208` retains its world-backed BG1 but mirrors only 16/16 pixels beyond the authentic view, keeps viewport BG2 at 0/0, and caps the fitted camera to that actual playfield span. Source ownership and synthetic edge fill are now independent, so world+Mirror binds without a false Clamp fallback. The initial all-0/0 policy accepted all 204 Wide Full artifacts with only 4,074 side-margin pixels changed, and complete 4:3/Raw/Diorama-32 plus Death Heim rematch/final-arena gates pass. Run `20260810-172649` then exposed two boundary regressions: eight stale words on a newly exposed BG1 row triggered an atomic fallback, and a blocked `$7C=-120` request drove zero-input walking at the new left clamp. Snapshot comparison confirmed an 8px visibility versus 16px strip-publication cadence seam, not a transition-time ROM writer. Margin-only provider recovery and effective camera-delta reconciliation are implemented and regression-tested; a direct replay remains the visual acceptance gate. Native streamers/ring and live decorative paths remain as fallback/oracle infrastructure. |
 
-## Codebase metrics (objective, automated — refreshed 2026-07-12)
+## Codebase metrics (objective, automated — refreshed 2026-08-12)
 
 These metrics measure structural and reference-vector coverage, not
 playability. Re-run the listed commands when refreshing this section.
 
 | Metric | Value | How to reproduce |
 |---|---|---|
-| Hand-authored recompiler directives (`recomp/*.cfg`) | 2,646 lines | `wc -l recomp/*.cfg` |
-| → generated C output (`src/gen/*.c`) | 2,130,680 lines | `wc -l src/gen/*.c` (after `snesbuild regen`) |
-| Hand-written game runtime (`src/*.c`/`*.h`, excl. shared engine) | 3,253 lines | `wc -l src/*.c src/*.h` |
+| Hand-authored recompiler directives (`recomp/*.cfg`) | 2,912 lines | `wc -l recomp/*.cfg` |
+| → generated C output (`src/gen/*.c`) | 2,227,186 lines | `wc -l src/gen/*.c` (after `snesbuild regen`) |
+| Hand-written game runtime (`src/`, excluding `src/gen` and shader blobs) | 59,265 lines | `find src \( -path src/gen -o -path src/shaders \) -prune -o -type f \( -name '*.c' -o -name '*.h' \) -print0 \| xargs -0 wc -l` |
 | Bank coverage | 29 of 32 possible SNES banks | `ls recomp/bank*.cfg \| wc -l` |
-| Recompiled functions (unique ROM addresses) | 2,480 | `grep -c "^    { 0x" src/gen/dispatch_v2.c` |
+| Recompiled functions (unique ROM addresses) | 2,483 | `grep -c "^    { 0x" src/gen/dispatch_v2.c` |
 | Recompiled functions (× m/x width variants) | 4,657 | `go -C snesrecomp-go run ./cmd/v2regen link-audit --gen-dir ../src/gen --src-dir ../src --runtime-dir runtime/src` |
 | Static reachability | 4,657/4,657 (100%) — 0 orphans, 0 unreferenced variants | same Go link-audit command |
 | Unresolved trap sites | 74 logical sites / 165 variant emissions: 20 goto sites (53 variants) + 54 indirect-oob sites (112 variants) | `go -C snesrecomp-go run ./cmd/v2regen stub-census --gen-dir ../src/gen` |

@@ -239,7 +239,7 @@ records to disk. The ROM's normal `$03:A656` save transaction later changes
 the native town block; auto-persistence then commits the complete, already
 checksummed 8 KiB image, including the sidecar. A save-system regression test
 covers both halves of this boundary. The census, marks, and scene-finish
-render hooks read the area directly (`src/actraiser_bugfixes.c`); the ROM
+render hooks read the area directly (`src/actraiser/actraiser_bugfixes.c`); the ROM
 itself never does.
 
 ---

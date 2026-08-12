@@ -20,8 +20,8 @@ document it. The examples come from this repository.
 ## Size budgets
 
 Measure **logic lines**: total lines minus comments, blanks, and data tables. Raw
-length can mislead. `settings.c` is 3,069 lines but includes a 1,286-line
-descriptor table; `settings_overlay.c` has 2,479 lines of coupled logic.
+length can mislead: `settings.c` contains a large cohesive descriptor table,
+while `settings_overlay.c` contains coupled navigation and rendering logic.
 
 | Unit | Budget | Hard limit |
 |---|---|---|
@@ -230,24 +230,20 @@ See `DEBUG.md` §4c for the full harness and its flag traps.
 
 ## Current debt register
 
-Measured on `cleanup-crusade`. Update these numbers when they move; the point is
-that the list is short, named, and honest.
+Keep this list focused on reasoning cost rather than snapshot line counts. Use
+the budgets above when touching one of these units.
 
-| File / symbol | Logic lines | Note |
-|---|---|---|
-| `settings_overlay.c` | **2,479** | largest logic file; resisted two extraction passes. Seams are text/glyph measurement and the tab/section/row navigation model — real, but a long tail of small helpers rather than two subsystems |
-| `present_sim3d.c` | 1,953 | product of the T2a split, minus the world-map renderer. Remaining stage seams: effects/particles, clouds, shadows, ground, billboards, cull |
-| `actraiser_rtl.c` | 1,815 | contains `ActRaiserDrawPpuFrame` (455) and `ActRaiser_ApplyWidescreenPolicy` (now 388 physical/~283 logic lines). The 2026-08-10 background-extent cleanup extracted canonical plan/tuner resolution, finite-canvas arithmetic, diagnostics and margin-gap clearing while retaining one ordered PPU application/handoff path. Further decomposition remains **deprioritized deliberately**: this is the HLE seam against ROM behaviour, where mistakes are subtlest and the oracles weakest. High risk, moderate reward |
-| `main.c` | 1,246 | the file, not a function — `main()` itself is now 14 lines over eight named phases. Largest remaining is `AppLoop_PumpEvents` (390), kept whole on purpose: one flat switch, every arm independent |
-| `diorama.c` | 1,175 | at budget, watch it |
+| File / symbol | Why it remains debt |
+|---|---|
+| `src/settings_overlay.c` | Largest coupled logic unit. Useful seams include text/glyph measurement and the tab/section/row navigation model, but the remaining work is a long tail of helpers rather than one clean subsystem split. |
+| `src/present_sim3d.c` | The world-map renderer has been extracted; effects, clouds, shadows, ground, billboards, and culling remain potential stage boundaries. |
+| `src/actraiser/actraiser_rtl.c` | `ActRaiserDrawPpuFrame` and `ActRaiser_ApplyWidescreenPolicy` sit on the HLE seam against ROM behaviour, where mistakes are subtle and the oracles are weakest. Further decomposition is high risk and moderate reward. |
+| `src/main.c` / `AppLoop_PumpEvents` | Boot and loop phases are named, but event dispatch remains one large flat switch. Its independent arms make it easier to review than its raw size suggests. |
+| `src/diorama/diorama.c` | Near the file budget; watch for a new independent presentation stage before adding more responsibility. |
 
-Retired from this list: `main()` at 1,311 lines (decomposed into boot phases) and
-`present_world_nav.c` (split out at 530 logic lines, for isolation rather than
-size — see its file header).
-
-`settings.c` is deliberately **not** on this list: 3,069 total but 1,250 logic,
-and see [Where data lives](#where-data-lives) for why splitting its table is the
-wrong move.
+`src/settings.c` is deliberately absent: most of its size is the cohesive
+descriptor registry. See [Where data lives](#where-data-lives) for why splitting
+that table would make navigation worse.
 
 Known coverage gap: the world-map navigation renderer has no automated render
 coverage — no checkpoint sets `AR_SIM3D_WORLD_NAV` and no staged replay reaches

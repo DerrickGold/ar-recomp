@@ -118,8 +118,8 @@ bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
 bool SettingsOverlay_GetTabState(int *active_tab, int *tab_count);
 
 /* Advances hold-to-accelerate value stepping. main.c calls this once per frame
- * on the main thread while the overlay is open (never the present thread — a
- * settings write there would deadlock against the present-thread quiesce). */
+ * before rendering while the overlay is open, so the render pass sees a stable
+ * navigation state. */
 void SettingsOverlay_Tick(void);
 
 /* Test seam: the pure hold-acceleration curve — base steps to move for a row

@@ -712,7 +712,7 @@ show the frozen `$0088` against the advancing host frame:
   headless forces authentic 256-wide so the oracle/differential harness never sees a
   wide framebuffer). THE flag for headless widescreen visual-regression: replay +
   `AR_SHOT_*` writes 342-wide PPMs with no window. The oracle harness leaves it unset.
-  Stage B uses the isolated `src/actraiser_widescreen_bg.c` refresh; see
+  Stage B uses the isolated `src/actraiser/actraiser_widescreen_bg.c` refresh; see
   docs/widescreen-survey.md for its transaction/state-identity gates.
 
 ### 4c. Visual-regression harness (widescreen work, generalizes to any rendering change)
@@ -1538,7 +1538,7 @@ there.** New entries: OPEN bugs are tracked below; when resolved, write the ledg
   `src/gen/*.c`. A configure also removes stale generated-bank objects whose
   source basename no longer exists after a split/merge.
 - Constraints: **no stubs, ever** (a stub is a hard build error — close the recompiler gap).
-  Edit only the emitter, runner, `src/main.c`, `src/actraiser_rtl.c`, `recomp/*.cfg`, and
+  Edit only the emitter, runner, `src/main.c`, `src/actraiser/actraiser_rtl.c`, `recomp/*.cfg`, and
   `tools/`. Commit/push only when asked.
 - **⚠️ Standing stub-lint reality (2026-07-18):** despite the policy above, Go
   `snesbuild regen` currently completes generation and all sidecars, then exits 1 at the hard
@@ -1705,7 +1705,7 @@ act_collision.py       action-stage terrain collision map, ROM-only via `--map M
 quintet_lzss.py        faithful port of the game's LZSS `$02:C5C9`/`$C639`/`$C66C` (bit-packed; ring pre-filled with $20, cursor at $EF; match len = nibble+2). `--verify` checks two known blobs byte-for-byte against saves/dump_wram.bin, `--selfcheck` cross-checks the bit reader against a literal $C66C transcription. CAUTION: a naive byte-aligned LZSS decoder appears to work on this data (it consumes the stream and emits plausible bytes) but is wrong — always validate a decoder against a known blob before trusting its output
 act_content.py         static dump of the CONTENT tables a rebalance/randomizer touches: `--tables` per-region object-type records (ATK `+7` / HP `+8` / score `+9` / flags / handler), `--levels` the bank-$0A level layout streams (player start, terrain damage boxes, 4-byte object placements + `$FC/$FD/$FE/$FF` opcodes), `--census` per-stage type + statue-drop summary, `--lairs` the 24-entry sim monster-lair seed table. Read SEAMS "Content / randomizer seams" first — several handlers overwrite HP at runtime, so a table edit is not the whole story
 town_structs.py        decode a town's 128-slot structure-record array from any WRAM dump (F2 snapshot / exit dump): per-slot type/cell/state, bridge count, TABLE FULL marker (--all = all six towns; SEAMS town §7). Same 4-byte layout sits in SRAM at 0x600+town*0x200 (save-format §3.4)
-AR_BRIDGEFIX_DEBUG=1   [bridgefix] structure-system observability via the hle'd allocator+miracle hooks: bridge allocations, table-full events, slot steals, miracle hits on bridges; =2 = every allocation + every miracle record hit (src/actraiser_bugfixes.c)
+AR_BRIDGEFIX_DEBUG=1   [bridgefix] structure-system observability via the hle'd allocator+miracle hooks: bridge allocations, table-full events, slot steals, miracle hits on bridges; =2 = every allocation + every miracle record hit (src/actraiser/actraiser_bugfixes.c)
 find_yield_helpers.py  yield-helper census BY SHAPE (pull/peek of caller frame -> object-field store) + every JSR site's continuation vs cfg; exit!=0 = unregistered = future silent soft-lock (§7.20). Run after ANY bank00.cfg handler work; --lines = paste-ready fixes
 AR_RTSDISP_MISS=1      names any continuation a `rts_dispatch` list doesn't cover (site + popped target); benign JSR-return fall-throughs also print — check the popped value before adding a mapping
 AR_GARBAGE_HIST=<n>    garbage-trap block-ring depth (default 24, max 1000) incl. per-block S — 1000 spans a whole sim frame; how the dev-cycle m-leak origin was found (§7.13)

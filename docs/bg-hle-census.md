@@ -1,7 +1,9 @@
 # Action-background HLE evidence census
 
-Living evidence ledger for `SPEC-bg-hle.md` BH1/BH2. This separates what the
-provider has actually matched from what remains an architectural expectation.
+Evidence ledger for `SPEC-bg-hle.md` BH1–BH8 and the later role/extent work.
+Sections preserve the dated evidence available at each checkpoint; later
+acceptance sections supersede earlier open questions without rewriting the
+historical measurements.
 
 ## Ordinary act-entry matrix — 2026-08-09
 

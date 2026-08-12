@@ -211,7 +211,7 @@ need a depth curve or attachment rule:
 ## Implemented classifier
 
 D3c transcribes the policy above into `Sim3D_ClassifyObject`
-(`src/sim_render_metadata.c`), a pure function over
+(`src/sim/sim_render_metadata.c`), a pure function over
 `(tier, record class, semantic state, record address, composition)`. It
 publishes a `SimHeightClass`, a virtual height in authentic SNES pixels
 (`24` for every flight plane, `8` for the Napper ground-pluck phase, `0`

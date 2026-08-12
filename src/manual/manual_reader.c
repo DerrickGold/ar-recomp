@@ -56,7 +56,7 @@ static struct {
   bool open;
   ManualView view;
 
-  /* Present-thread only, all of it. */
+  /* Main renderer thread only, all of it. */
   PageTexture cache[kCacheSlots];
   uint64_t clock;
   uint64_t last_tick_ns;
@@ -425,7 +425,7 @@ bool ManualReader_HandleMouse(const SDL_Event *event) {
 
 /* ── Textures ──────────────────────────────────────────────────────────────
  *
- * PRESENT THREAD ONLY, all of this.
+ * Main renderer thread only.
  */
 
 static bool AlreadyFailed(int page) {
@@ -693,9 +693,8 @@ void ManualReader_Render(SDL_Rect viewport) {
   const int view_w = viewport.w > 0 ? viewport.w : 1;
   const int view_h = viewport.h > 0 ? viewport.h : 1;
 
-  /* Advance the turn from the PRESENT thread's clock. This is the thread that
-   * actually puts frames on the display, so pacing the animation from anywhere
-   * else times it against something the player is not watching. */
+  /* Advance from the presentation clock so page turns follow displayed frames
+   * rather than game-tick cadence. */
   const uint64_t now = SDL_GetTicksNS();
   if (s_reader.last_tick_ns != 0) {
     const float elapsed = (float)((double)(now - s_reader.last_tick_ns) / 1e9);

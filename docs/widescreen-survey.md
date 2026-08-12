@@ -176,9 +176,9 @@ everywhere for continued surveying.
 Full chain: `$00:8C98` per-frame cull → `$00:8D68` per-object sprite builder →
 `$00:923A` leading entries (from the `$06:A800` bank-6 table) → `$02:ACA6`
 OAM DMA (544 bytes: `$0380-$057F` entries + `$0580-$059F` high table).
-Ported to C in `src/actraiser_widescreen.c` via `hle_func 8C98
-ActRaiser_ObjectVisibilityScan` (bank00.cfg); `8D68` is a static helper inside
-the port. Wide branches key off the LIVE PPU margins (`extraLeftCur/RightCur`)
+Ported to C in the then-monolithic `actraiser_widescreen.c`. The surviving
+implementation is `ActRaiser_ObjectVisibilityScanWide` in
+`src/actraiser/actraiser_widescreen_sprites.c`. Wide branches key off the live PPU margins (`extraLeftCur/RightCur`)
 so they are inert (bit-exact) whenever margins are 0 — no separate mode wiring.
 
 **$0380 shadow bit-8 answer** (the plan's "fiddliest detail"): the high table
@@ -249,8 +249,8 @@ timer instead of the flag.
 Correction to the earlier note ("the cam+0..46 bursts are tile animation,
 not a problem" — WRONG). The action BG streaming has two tiers:
 
-1. **Strip prefetch** — `$02:B158` (now hle'd: `ActRaiser_StreamStripH`,
-   src/actraiser_widescreen.c): 2-column strip at camera+256 (right) /
+1. **Strip prefetch** — `$02:B158` (then hle'd as
+   `ActRaiser_StreamStripH` in the now-retired monolithic port): 2-column strip at camera+256 (right) /
    camera+0 (left), 16px-aligned, fired on each 16px camera crossing;
    marshals into `JSR $BED3` (multiply) + `JSR $B825` (build/upload via the
    `[$76]` record chain). Strip TOP ROWS are filler (BG1 `$04E`, BG2 `$18A`

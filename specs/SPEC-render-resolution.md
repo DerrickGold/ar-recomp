@@ -2,19 +2,24 @@
 
 **Status:** authored, not implemented. Awaiting the audit in §9.
 
+Source locations were refreshed on 2026-08-12. References use symbols instead
+of line numbers so the proposal survives routine file reorganization.
+
 ## 1. Problem
 
-The engine has no concept of a *render* resolution — only a window resolution.
+The engine has no concept of a *render* resolution—only a window resolution.
 `SDL_GetRenderOutputSize` returns the window's physical pixel size, and
-`SDL_WINDOW_HIGH_PIXEL_DENSITY` (`src/main.c:746`) makes that as large as the
-panel allows. Nine sites derive geometry from it.
+`AppBoot_CreateVideo` (`src/main.c`) requests
+`SDL_WINDOW_HIGH_PIXEL_DENSITY`, making that as large as the panel allows.
+Several presentation paths derive geometry from it.
 
 Two consequences:
 
-1. **Cost.** The 3D paths build projection matrices at native resolution
-   (`src/diorama.c:1111`, `src/present.c:3005`, `src/present.c:252`). On a 4K
-   panel the diorama and town-3D genuinely rasterize 4K geometry. There is no
-   way to trade resolution for framerate.
+1. **Cost.** The 3D paths build projection matrices at native resolution in
+   `Diorama_Composite` (`src/diorama/diorama.c`) and `PresentSim3D`
+   (`src/present_sim3d.c`), using the viewport from
+   `ComputePresentationViewport` (`src/present.c`). On a 4K panel they genuinely
+   rasterize 4K geometry. There is no way to trade resolution for framerate.
 
 2. **We deny external upscalers.** Even in fullscreen we hand the compositor a
    native-resolution surface. gamescope's FSR (and any comparable
@@ -46,12 +51,11 @@ Reduce the size of the surface we render to and present, so
 consumer then becomes correct with no change, because they all already size
 themselves from that call.
 
-Rejected alternative — **logical presentation as a scaler**: set
-`SDL_SetRenderLogicalPresentation(w, h, LETTERBOX)` around the 3D path instead of
-`DISABLED` (`src/diorama.c:1108`, `src/present.c:2823`). This is ~2 hours and
-fixes the GPU-cost half, but the *presented surface stays native*, so it does not
-achieve goal (2) at all. It remains a reasonable fallback if §3's mechanism
-proves unavailable on a platform — see §7 R3.
+Rejected alternative—**logical presentation as a scaler**: use
+`SDL_SetRenderLogicalPresentation` around `Diorama_Composite` and `PresentSim3D`
+instead of disabling it. This fixes the GPU-cost half, but the *presented surface
+stays native*, so it does not achieve goal (2). It remains a reasonable fallback
+if §3's mechanism proves unavailable on a platform—see §7 R3.
 
 ### 3a. Mechanism per window mode
 
@@ -73,16 +77,15 @@ render_resolution : enum, kApply_Restart, kSettingCat_Display
 `Native` must be the default and must reproduce today's behavior exactly —
 byte-identical output, no new code path taken.
 
-Restart-scoped, matching the `gpu_shaders_enabled` precedent
-(`src/settings.c:1351`): this touches window/renderer creation, which is fixed
-for the process lifetime. A live-apply version is a later enhancement, not this
-change.
+Restart-scoped, matching the `gpu_shaders_enabled` descriptor in
+`src/settings.c`: this touches window/renderer creation, which is fixed for the
+process lifetime. A live-apply version is a later enhancement, not this change.
 
 Label honesty (the R13/R8 lesson): a row must not offer a resolution the display
 cannot produce, and if the request is refused the menu must not claim it was
 honored. Either enumerate real modes via `SDL_GetFullscreenDisplayModes()` or
 read back the achieved drawable size and publish it (mirroring
-`Settings_SetHostVsyncActive`, `src/host_display.c`).
+`Settings_SetHostVsyncActive` from `src/host/host_display.c`).
 
 ## 5. What does NOT need to change (verified)
 
@@ -91,16 +94,16 @@ This is why the estimate is ~1 day rather than a subsystem rewrite:
 - **No render target.** No `SDL_TEXTUREACCESS_TARGET` texture, no
   `SDL_SetRenderTarget` plumbing, no device-reset reload path for it. The
   drawable *is* the smaller surface.
-- **All nine `SDL_GetRenderOutputSize` consumers are already correct.** They ask
-  the renderer how big it is; the answer simply becomes smaller.
-  (`dev_tools.c:367`, `diorama.c:1111`, `host_display.c:99`, `present.c:252`,
-  `present.c:518`, `present.c:3005`, `settings_overlay.c:2835/2863/3035`.)
+- **All current `SDL_GetRenderOutputSize` consumers appear structurally
+  compatible.** They ask the renderer how big it is; the answer simply becomes
+  smaller. The calls live in `src/dev/dev_tools.c`, `src/diorama/diorama.c`,
+  `src/host/host_display.c`, `src/present.c`, and `src/settings_overlay.c`.
 - **Input mapping has exactly ONE conversion point**, not four as first feared:
-  `HostDisplay_WindowPointToOutput` (`src/host_display.c:90-114`) already scales
+  `HostDisplay_WindowPointToOutput` (`src/host/host_display.c`) already scales
   window-client coordinates to renderer-output pixels by the
-  window-size/output-size ratio, explicitly to cover high-DPI backing scale. Its
-  three callers (`dev_tools.c:357`, `main.c:1387`, `main.c:1409`) pass output
-  coordinates onward, and `settings_overlay.c` works purely in output space.
+  window-size/output-size ratio, explicitly to cover high-DPI backing scale.
+  Callers in `src/dev/dev_tools.c` and `src/main.c` pass output coordinates
+  onward, and `src/settings_overlay.c` works purely in output space.
   **A larger window with a smaller drawable is the same arithmetic as high-DPI,
   in the other direction.** This must be re-verified, not assumed — §9 R1.
 - **The 2D flat path** already renders at SNES dimensions.
@@ -108,18 +111,16 @@ This is why the estimate is ~1 day rather than a subsystem rewrite:
 ## 6. What DOES need to change
 
 1. `settings.h` / `settings.c` — the enum, labels, description, `kApply_Restart`.
-2. `src/main.c:745-757` — window flags: conditionally drop
-   `SDL_WINDOW_HIGH_PIXEL_DENSITY`.
-3. `src/main.c` (post-creation, near the existing exclusive-fullscreen mode set
-   at ~`:803`) — request the display mode.
-4. `src/host_display.c` — publish the achieved drawable size for the menu;
+2. `AppBoot_CreateVideo` in `src/main.c`—conditionally drop
+   `SDL_WINDOW_HIGH_PIXEL_DENSITY` and request the display mode after creation.
+3. `src/host/host_display.c`—publish the achieved drawable size for the menu;
    possibly adjust `HostDisplay_CalculateWindowSize`.
-5. Interaction with **R6 pixel density**: `src/settings.c:2698` documents that
-   `SDL_GetRenderOutputSize` reports PHYSICAL pixels while `hud_scale_percent`
-   and window scale are in POINTS, and `WindowScaleInPoints()` divides by
-   density. Changing the drawable changes that ratio. **Read that comment first;
-   this is the most likely place to introduce a subtle regression.**
-6. `docs/settings-system.md` + a settings unit test.
+4. Interaction with **R6 pixel density**: `Settings_HostPixelDensity` and
+   `WindowScaleInPoints` document and implement the split between physical
+   renderer pixels and window points. Changing the drawable changes that ratio.
+   **Review that contract first; this is the most likely place to introduce a
+   subtle regression.**
+5. `docs/settings-system.md` plus a settings unit test.
 
 ## 7. Risks
 
@@ -139,7 +140,7 @@ This is why the estimate is ~1 day rather than a subsystem rewrite:
   compositor may refuse a mode change outright.
 - **R5 — non-integer scaling artifacts.** 720p→800p on a Deck OLED is a
   non-integer ratio; the letterbox math (`ComputePresentationViewport`,
-  `present.c:247`) must not produce off-by-one bars or a half-pixel offset.
+  `src/present.c`) must not produce off-by-one bars or a half-pixel offset.
 - **R6 — screenshots.** `WriteFramebufferPpm` / `AR_SHOT` capture at output size,
   so shot dimensions change with the setting. Acceptable, but the PPM byte-
   identity gates used elsewhere must not be run across a resolution change.
@@ -169,6 +170,6 @@ looks right at both `Native` and 720p; **on Deck, gamescope FSR actually engages
    be fullscreen-only.
 3. **gamescope/Wayland reality (R3/R4).** From documentation only.
 4. **R2** — enumerate every place the points/pixels ratio is assumed.
-5. **Is the "nine consumers are already correct" claim true?** Check each for a
+5. **Are the current output-size consumers correct?** Check each for a
    hidden assumption that output size == window size or == display size.
 6. **R5** — the letterbox arithmetic at a non-integer target ratio.

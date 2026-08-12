@@ -65,12 +65,11 @@ typedef struct DioramaScrollDelta {
 } DioramaScrollDelta;
 
 /* B4-split (followup doc): the camera pose Diorama_Composite renders with,
- * passed in by the caller instead of Composite reading the game-thread-owned
- * g_diorama_cam directly (the pre-existing D6 exception this checkpoint
- * closes). Free Cam mode: the caller passes the authored/persisted pose
+ * passed in by the caller instead of Composite reading producer-owned
+ * g_diorama_cam directly. Free Cam mode: the caller passes the authored pose
  * (snapshotted through FrameSlot). Dynamic Cam mode: the caller passes the
- * present-thread's own render camera (baseline pose, later checkpoints add
- * damped sway on top) — see present.c's g_diorama_render_cam. fov_y isn't
+ * presentation-owned render camera with damped sway—see present.c's
+ * g_diorama_render_cam. fov_y isn't
  * part of this: it's a fixed camera constant (kDioramaFovY, diorama.c),
  * never authored per-mode. */
 typedef struct DioramaCameraPose {
