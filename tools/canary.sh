@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# canary.sh — the ROM-free per-commit gate for the cleanup crusade (spec §0.7 rule 6).
+# canary.sh — the ROM-free per-commit gate (spec §0.7 rule 6).
 #
 # Run after EVERY `git am <patch>` on the ROM machine, and locally after each commit
 # while authoring. It rebuilds and runs the ROM-FREE test tier (the tests/ suite compiles
@@ -49,24 +49,21 @@ cmake -S "${ROOT}" -B "${BUILD}" -G Ninja \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON >/tmp/canary_cfg.log 2>&1 \
   || { echo "[canary] CONFIGURE FAILED — see /tmp/canary_cfg.log"; tail -15 /tmp/canary_cfg.log; exit 1; }
 
-# Build ONLY the tests/ targets — NOT the `all`/ActRaiserRecomp game binary, which needs
-# the generated funcs.h/banks from the ROM. The test targets compile only individual
-# src/*.c + SDL + PPU (ROM-free). (AR0 will add a -DAR_TESTS_ONLY that excludes the game
-# target from configure entirely; until then, name the test targets explicitly.)
-TEST_TARGETS=(
-  actraiser_host_display_pacing_test actraiser_camera_orbit_test
-  actraiser_scene3d_math_test actraiser_sim_town_canvas_test actraiser_sim_world_map_test
-  actraiser_game_test actraiser_sim_phase0_trace_test actraiser_sim_render_metadata_test
-  actraiser_settings_test actraiser_settings_overlay_test actraiser_render_pipeline_test
-  actraiser_ppu_render_pipeline_test actraiser_save_system_test actraiser_scene_inspector_test
-  actraiser_scene_asset_dump_test actraiser_hd_manifest_test actraiser_music_manifest_test
-  actraiser_main_thread_boot_test actraiser_diorama_scroll_math_test
-  actraiser_ws_gap_test actraiser_diorama_skybox_uv_test
-  actraiser_diorama_capture_blend_test actraiser_diorama_layer_editor_test
-  actraiser_ini_upgrade_test
-  actraiser_diorama_layer_order_test
-  actraiser_manual_pages_test actraiser_manual_input_test
+# Build ONLY test executables—not `all`/ActRaiserRecomp, which needs generated
+# ROM banks. Discover the targets from the configured Ninja graph so adding a
+# CTest cannot silently leave its executable out of this gate.
+TEST_TARGETS=()
+while IFS= read -r target; do
+  TEST_TARGETS+=("${target}")
+done < <(
+  ninja -C "${BUILD}" -t targets all |
+    sed -n 's/^\(actraiser_[A-Za-z0-9_]*_test\):.*/\1/p' |
+    sort -u
 )
+if [ "${#TEST_TARGETS[@]}" -eq 0 ]; then
+  echo "[canary] no ROM-free test targets found in ${BUILD}"
+  exit 1
+fi
 echo "[canary] build the ${#TEST_TARGETS[@]} ROM-free test targets (not the game binary)"
 cmake --build "${BUILD}" --target "${TEST_TARGETS[@]}" >/tmp/canary_build.log 2>&1 \
   || { echo "[canary] BUILD FAILED — see /tmp/canary_build.log"; tail -25 /tmp/canary_build.log; exit 1; }
