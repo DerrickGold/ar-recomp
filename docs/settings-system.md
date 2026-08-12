@@ -1,43 +1,23 @@
-# ActRaiser Recomp — Settings & Live-Config System
+# Settings and live configuration
 
-Architecture and implementation record for the single source of truth that
-captures every custom setting (cheats,
-widescreen knobs, display/audio, extras, and inspection tools) and defines each one's **path to live
-runtime updates**, so the host overlay menu can flip them mid-run. This
-is the "option B" refactor from the 2026-07-12 settings scan.
+Architecture and implementation record for the typed settings registry,
+layered configuration, in-game overlay, and save editor.
 
-Status: **PHASES 1–6 IMPLEMENTED; FINAL IN-GAME SAVE-ACCEPTANCE CHECK PENDING.**
-`src/settings.{c,h}` now own
-the existing cheat fields, nine widescreen behavior gates, render profile,
-host-output HUD/menu scales, application display/aspect/audio fields, and a
-101-row descriptor registry with lookup, formatting, availability, mutation,
-callbacks, sticky/restart results, observer notification, layered INI loading,
-and atomic persistence. The promoted game HUD proves the post-upscale
-host-compositor seam; master audio gain, audio enable, fullscreen, window
-sizing, and the Sky Palace dialogue blip prove the live callback paths. The
-host settings menu renders registry categories/rows with the
-ROM-decoded font and selector, consumes input, freezes game advancement while
-remaining redrawable, applies live values, and atomically saves accepted
-changes. The native dialog-frame theme is also ROM-decoded. Direct text editing
-handles custom values such as PAR pins and warp targets, while screen ratio is
-an explicit 4:3/16:9/16:10 enum; ACTION
-rows reuse the pause, turbo, save/load-state, warp, snapshot, scene-asset dump,
-restart, graceful-exit, and save-codec paths.
-The optional native ActRaiser menu entry, broader gamepad input, and decoding
-the still-opaque town-map payload remain outside the completed overlay/save
-editor phases.
-Companion docs:
-[SEAMS.md](SEAMS.md) (gameplay/tunable seams the cheats hook),
-[rendering-engine.md](rendering-engine.md) (widescreen policy internals),
-[ram-map.md](ram-map.md) (the WRAM addresses the cheats pin),
-[save-format.md](save-format.md) (the SRAM map + checksum behind `CAT_SAVE`).
+**Status:** Phases 1–6 are implemented. The remaining acceptance item is loading
+a host-edited save through the title-screen Continue flow.
 
-Source sites this design replaces: `ActRaiser_ApplyCheats`
-(`src/actraiser_rtl.c:607`), `ActRaiser_ApplyWidescreenPolicy`
-(`src/actraiser_rtl.c:327`), the widescreen sprite/BG builders
-(`src/actraiser_widescreen_sprites.c`, `src/actraiser_widescreen_bg.c`), the
-`Config` struct + ini parser (`src/config.c`), and the boot flag init block in
-`src/main.c` (~`:355`–`:470`).
+`src/settings.{c,h}` owns the live `g_settings` state and descriptor registry.
+The registry drives lookup, parsing, formatting, availability, mutation,
+callbacks, persistence, and menu rows. The overlay uses ROM-decoded font and
+frame art, freezes game advancement while open, applies supported changes live,
+and writes accepted values atomically.
+
+Related references:
+
+- [manual.md](manual.md) for player-facing behavior
+- [save-format.md](save-format.md) for SRAM and save backends
+- [rendering-engine.md](rendering-engine.md) for presentation settings
+- [SEAMS.md](SEAMS.md) and [ram-map.md](ram-map.md) for gameplay hooks
 
 ---
 
@@ -881,75 +861,19 @@ read mutable format fields directly from `g_settings`.
 
 ## 8. Phased rollout
 
-1. **Phase 1 — struct + seed, no menu (implemented; gameplay golden runs
-   remain).** The 20 legacy cheat/widescreen controls read live fields; special
-   env encodings and default polarities are covered by `actraiser_settings`.
-   The 4:3/RAW/FULL preset actions and paused render-only redraw are implemented.
-   Remaining validation: §9 frame-level cheat comparisons in representative
-   action/sim states.
-2. **Phase 2 — prove live mutation headless (implemented).**
-   `AR_SETTING_SET=key=value` plus optional `AR_SETTING_AT_GF=N` applies one
-   descriptor mutation through the real main loop. The unit test covers the API;
-   the headless probe has confirmed a live FULL→RAW profile mutation.
-3. **Phase 3 — descriptor metadata + apply kinds (implemented for current
-   rows).** Labels, tooltips, ranges, enum labels, availability, change
-   callbacks, formatting, sticky warnings, restart results, and a host observer
-   are present. New Config/audio/save rows must supply the same metadata as they
-   migrate in Phases 4/6.
-4. **Phase 4 — persistence + Config merge (implemented).** The registry
-   owns every wired display/aspect/audio field. `config.ini` is a lower-priority
-   compatibility layer, `settings.ini` load/save is descriptor-driven and
-   atomic, real env values remain distinguishable and highest-priority, and
-   audio-format resources use boot snapshots. Screen ratio, pixel aspect,
-   renderer selection, window scale, fullscreen, ignore-aspect, audio enable,
-   master volume, and dialogue blip have live apply paths. Independent
-   music/SFX gain remains research-gated by the audio-seam
-   criteria above; dead template config keys remain excluded rather than being
-   promoted as fake settings.
-5. **Phase 5 — overlay UI (implemented).** The SDL host
-   overlay now renders rows from `SettingDesc[]`, writes `g_settings`, persists
-   accepted mutations, intercepts menu input, freezes game-frame advancement,
-   and scales independently. Escape/F1 opens it globally from every game
-   state. The verified ROM font/selector asset is now decoded
-   into host atlases; the same path builds the native three-panel dialog-frame
-   theme, and the menu scales over the full window. Phase 5B adds validated
-   direct text editing and eight descriptor-driven ACTION rows backed by the
-   existing host commands. A native game-menu entry remains optional; gamepad
-   navigation belongs to the broader runner input project rather than blocking
-   the keyboard-complete overlay.
-6. **Phase 6 — save codec, backends, and editor (`CAT_SAVE`; implemented).** It
-   owns `g_sram` persistence, not the cheat gates. The delivered pieces are:
+| Phase | Result | Status |
+|---|---|---|
+| 1 | Typed runtime state and environment seeding | Implemented |
+| 2 | Scheduled headless mutation through the live API | Implemented |
+| 3 | Descriptor metadata and apply-kind callbacks | Implemented |
+| 4 | Layered config, atomic persistence, and live video/audio callbacks | Implemented |
+| 5 | ROM-themed in-game overlay, text editing, and host actions | Implemented |
+| 6 | SRAM codec, native/INI backends, import/export, and save editor | Implemented; one manual acceptance check remains |
 
-   - **6A — codec core (complete).** `tools/srm.py` and `src/save_system.c`
-     implement exact-size native SRAM decode/encode,
-     `SramChecksum()`, `SaveFieldDesc[]`, validation/errors, and fixture tests.
-   - **6B — lossless INI (complete).** The version-1 chunked-hex schema from
-     save-format.md §4.1. Require all raw chunks, apply verified readable-field
-     overrides, and reject invalid input transactionally. Prove every fixture
-     survives `.srm → .ini → .srm` byte-identically with no edits.
-   - **6C — active backend integration (complete).** Boot load and per-frame
-     auto-persist route through `SaveSystem_LoadActive()` /
-     `SaveSystem_AutoPersistIfChanged()`; keep
-     native `.srm` as default, make INI explicit, write atomically, log the
-     selected target, take backups, and expose a real shadow-buffer re-sync API.
-   - **6D — editing and conversion actions (code complete; manual game check
-     pending).** The §4.1 safety sequence and all enabled fields represented by
-     the reference editor are exposed on five pages: town/Death Heim/
-     Professional progress, player and Angel status, magic, items, and scores.
-     Import, Export `.srm`, Export `.ini`, Apply for session, and Apply and save
-     remain explicit commands rather than implicit writes.
-   - **6E — future field promotion.** Decode the raw town-map/city payload one
-     field at a time only after WRAM correspondence, known-state diffing, and a
-     game round trip. Reference-editor rows explicitly disabled or hidden
-     (city internals, current city, derived next-level XP) remain unexposed.
-
-   Automated Phase-6 acceptance now proves malformed/truncated INI never changes `g_sram`;
-   an unedited cross-format round trip preserves all 8192 bytes including fill
-   and unknown town state; a named-field edit changes only its verified bytes
-   plus `0x1fec`–`0x1fef`; backend choice is deterministic when both files
-   exist; and auto-persist writes only the active target. Acceptance of a
-   host-edited save through the game's title-screen Continue flow remains the
-   one manual check.
+Phase 6 preserves all 8192 bytes in unedited cross-format round trips, rejects
+malformed INI transactionally, limits named-field edits to verified bytes plus
+checksum, and writes only the active backend. Future town-map field promotion
+requires WRAM correspondence, known-state diffs, and a real game round trip.
 
 ---
 
@@ -1004,6 +928,7 @@ and frame assets with host-authored fallbacks. RmlUi remains a possible future
 frontend only if the runtime adopts its C++/OpenGL integration.
 
 ### 10.5 Default save-edit action
+
 Implemented with **Apply for session** first: it swaps validated SRAM and
 re-syncs the shadow without altering disk. **Apply and save** follows it and
 backs up before atomically committing through the active backend. Merely

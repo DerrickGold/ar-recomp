@@ -1,8 +1,8 @@
 # Contributing — building from source and working in this repo
 
-This is the developer-facing companion to the [README](../README.md). It covers
-what a recomp actually is, how to build from a source checkout, where everything
-lives, and the one rule that matters most here: what can and cannot be committed.
+Developer guide to the recompilation model, source builds, repository layout,
+and contribution boundaries. For player setup, use the
+[README](../README.md).
 
 **Contents**
 
@@ -15,38 +15,26 @@ lives, and the one rule that matters most here: what can and cannot be committed
 
 ## Recomp, not decomp
 
-This is a **static recompilation ("recomp")**, not a decompilation ("decomp") —
-the distinction matters:
+This is a **static recompilation ("recomp")**, not a decompilation ("decomp"):
 
-- A **decompilation** is a hand-written, from-scratch reimplementation: someone
-  reads the original binary (or its disassembly), understands *what* it does, and
-  writes new, original source code that reproduces that behavior. The result is
-  new expression of the same functionality.
-- A **static recompilation** mechanically translates the ROM's actual 65816
-  machine code into equivalent C, one function at a time, via an automated tool
-  ([`snesrecomp-go`](../snesrecomp-go/README.md), the bundled Go reimplementation
-  of the historical SNES static recompiler). The output is a direct, literal
-  translation of the original binary's logic — not new authorship. That generated
-  code is copyrighted-ROM-derived and is **never committed to this repo** (see
-  below); it's regenerated locally by everyone who builds this project, from
-  their own ROM.
+- A **decompilation** is a new, hand-written implementation based on an
+  understanding of the original binary.
+- A **static recompilation** mechanically translates the ROM's 65816 machine
+  code into equivalent C. This project uses
+  [`snesrecomp-go`](../snesrecomp-go/README.md), the bundled Go reimplementation
+  of the historical SNES static recompiler. Its generated output is ROM-derived,
+  never committed, and rebuilt locally from each user's ROM.
 
-Layered on top of the recompiled game logic is a hand-written runtime — SDL3
-windowing/input, a PPU/APU (video/audio) reimplementation, save-state handling,
-and a growing set of "HLE" (high-level emulation) shims that replace timing- or
-hardware-dependent ROM routines with equivalent native code. That runtime layer
-*is* original engineering and *is* what's tracked in this repo.
+The tracked, original code is the hand-written runtime: SDL3 windowing and
+input, PPU/APU video and audio, save states, and HLE shims for timing- or
+hardware-dependent routines.
 
 ### Why recomp instead of just running it in an emulator?
 
-An emulator interprets or JIT-compiles the original ROM on the fly, forever
-depending on an emulation core. A static recomp instead produces a real, native,
-standalone executable — no core, no interpretation loop, no per-instruction
-overhead — that can be profiled, debugged, and modernized (widescreen, higher
-resolutions, better performance, native ports) like any other codebase, while
-still requiring the end user to legally own the original game. That's the
-long-term preservation case: as SNES hardware and even software emulators age
-out, a native recompilation is far more portable and maintainable than either.
+A static recomp produces a native executable instead of depending on an
+emulation core. It can be profiled, debugged, ported, and extended like other
+native code while still requiring the user to own the original game. That
+portability is the project's preservation case.
 
 ## Building from source
 
@@ -58,21 +46,17 @@ code.
 ### Dependencies
 
 - **Go 1.24+** — builds the recompiler/driver; required for both build paths
-- **CMake** ≥ 3.16 — for the developer CMake presets (not needed for `--hermetic`)
-- **A C11 compiler** (clang or gcc) — likewise (the hermetic path uses its own
-  bundled Zig instead)
-- **SDL3** (development package/headers) — the only external library this links
-  against; auto-discovered by both build paths, and bundled outright in the
-  distribution package (so end users need nothing)
+- **CMake** ≥ 3.16 — developer preset builds only
+- **A C11 compiler** (clang or gcc) — developer preset builds only
+- **SDL3** development files — auto-discovered by both source-build paths
 - **git**
 
 Python is optional for unrelated forensic/triage scripts; it is not a build,
 regeneration, runtime, or opcode-validation dependency.
 
-The `brew`/`apt` lines below install the CMake-preset build's dependencies. The
-hermetic path drops the CMake and C-compiler requirements (it uses its own
-bundled Zig), so it needs only Go and SDL3 development files — and the
-distribution bundle removes even the SDL3 requirement by carrying it inside.
+The commands below install dependencies for the CMake-preset build. The
+hermetic path needs only Go and SDL3 development files because it uses a pinned
+Zig compiler. Released bundles include SDL3 where redistribution permits it.
 
 **macOS** (verified — the primary development platform):
 
@@ -80,19 +64,15 @@ distribution bundle removes even the SDL3 requirement by carrying it inside.
 brew install cmake sdl3 go
 ```
 
-**Linux** (Debian/Ubuntu — the Steam Deck bundle is built and played on
-regularly, so Linux x86_64 is a confirmed target; this from-source CMake path on
-a general distro is untested but the build has no OS-specific code beyond
-standard SDL3/POSIX):
+**Linux** (Debian/Ubuntu; the general-distro source path is not yet verified):
 
 ```sh
 sudo apt install build-essential cmake libsdl3-dev golang-go
 ```
 
-**Windows**: the bundled runtime has MSVC-oriented support (see
-`snesrecomp-go/runtime/runner.cmake`), but this specific project
-hasn't been built on Windows yet — no `.vcxproj`/CI verifying it works here.
-If you get it building, a PR documenting the steps would help.
+**Windows**: the runtime has MSVC-oriented support in
+`snesrecomp-go/runtime/runner.cmake`, but this project has not been run from a
+Windows source build. Documented build steps are welcome.
 
 ### Steps
 
@@ -102,33 +82,29 @@ If you get it building, a PR documenting the steps would help.
 2. **Supply your own ROM.** Place a verified `ar.sfc` (see the checksums in the
    [README](../README.md#what-you-need)) at the repo root.
 
-3. **Regenerate the recompiled banks.** The cross-platform `snesbuild` driver
-   runs the recompiler over your ROM, refreshes `src/gen/*.c`, `recomp/funcs.h`,
-   metadata, RTS-web census, and the hard-stub report. From a source checkout:
+3. **Regenerate the recompiled banks.** `snesbuild` refreshes `src/gen/*.c`,
+   `recomp/funcs.h`, metadata, the RTS-web census, and the hard-stub report:
 
    ```sh
    go -C snesrecomp-go run ./cmd/snesbuild regen \
      --root .. --rom ar.sfc --allow-stubs
    ```
 
-   A downloaded `snesbuild`/`snesbuild.exe` can run the same operation directly
-   without Go or Bash. `bash tools/regen.sh` remains a compatibility command.
-   The inherited hard-stub backlog currently makes strict regeneration exit
-   nonzero after writing complete output; see `DEBUG.md` §8.
+   A downloaded `snesbuild`/`snesbuild.exe` can run the same command without Go.
+   `tools/regen.sh` remains a compatibility wrapper. Because of the inherited
+   hard-stub backlog, strict regeneration exits nonzero after producing its
+   output; local work may use `--allow-stubs`.
 
 4. **Compile the game.** Two options:
 
-   - **Hermetic (no CMake/compiler/SDL install)** — compiles with a pinned Zig
-     toolchain that `snesbuild` downloads on first use, discovering SDL3
-     automatically:
+   - **Hermetic** — uses a pinned Zig toolchain and discovers SDL3:
 
      ```sh
      go -C snesrecomp-go run ./cmd/snesbuild toolchain fetch   # one time
      go -C snesrecomp-go run ./cmd/snesbuild build --hermetic --root ..
      ```
 
-   - **CMake presets (the classic developer build)** — needs CMake, a C11
-     compiler, and SDL3 development files:
+   - **CMake presets** — uses the installed CMake, C11 compiler, and SDL3:
 
      ```sh
      cmake --preset play && cmake --build --preset play
@@ -143,14 +119,9 @@ From a clean or fresh tree, `make dev` does steps 3 and 4 in one command
 editing C, run `cmake --build --preset play` directly — no regen or reconfigure
 needed.
 
-Steps 2–4 are exactly what the player-facing `run-build` bundle script
-automates through its local graphical builder.
-
-To reuse the bundled toolchain from another game project, start with
-[`snesrecomp-go/README.md`](../snesrecomp-go/README.md) and its
-[project integration guide](../snesrecomp-go/docs/PROJECT_INTEGRATION.md).
-The native project-driver design, the hermetic build, and the self-contained
-distribution bundles are documented in
+The released `run-build` bundle automates steps 2–4. For toolchain integration,
+see [`snesrecomp-go/README.md`](../snesrecomp-go/README.md), the
+[project integration guide](../snesrecomp-go/docs/PROJECT_INTEGRATION.md), and
 [`BUILD_TOOLING.md`](BUILD_TOOLING.md).
 
 ## Producing the distribution bundles
@@ -162,10 +133,10 @@ To produce all seven bundles from a source checkout (into `release/`, named
 make release
 ```
 
-Go and CMake are the only host requirements — the C toolchain and SDL3 are
-downloaded and bundled automatically. Because the Go module is CGO-free, every
-platform cross-builds from one machine. Full details, layout, and the current
-signing/CI gaps are in [`BUILD_TOOLING.md`](BUILD_TOOLING.md).
+Go and CMake are the host requirements. The packaging process downloads the C
+toolchain and SDL3, and the CGO-free Go module cross-builds every target from one
+machine. See [`BUILD_TOOLING.md`](BUILD_TOOLING.md) for packaging details and
+current signing, CI, and runtime-validation gaps.
 
 The platforms are `macos-arm64`, `macos-x86_64`, `linux-x86_64`, `linux-arm64`,
 `windows-x86_64`, `windows-arm64`, and `steam-deck`. Each can be built alone,
@@ -266,35 +237,28 @@ ActRaiserRecomp/
 
 ## Where to read first
 
-`DEBUG.md`, `docs/SEAMS.md`, `docs/research-symbol-map.md`, and
-`docs/progress.md` are the documents worth reading before diving into the code:
-`DEBUG.md` tells you *how to diagnose* a problem (which tool, which env var,
-which known gotcha), `SEAMS.md` tells you *what the game's internal architecture
-actually is* (object systems, dispatch tables, subsystem boundaries) as
-reverse-engineered so far, and `progress.md` tells you *what actually works
-today* (playability per stage/town + codebase metrics).
-`docs/settings-system.md` records the architecture and implementation of the
-live settings registry, persistent user settings, and host-side overlay UI.
+| If you need to… | Read |
+|---|---|
+| Diagnose a problem | [`DEBUG.md`](../DEBUG.md) |
+| Understand game architecture and hardware seams | [`SEAMS.md`](SEAMS.md) |
+| Look up candidate symbols | [`research-symbol-map.md`](research-symbol-map.md) |
+| Check current playability and subsystem status | [`progress.md`](progress.md) |
+| Change the settings system or overlay | [`settings-system.md`](settings-system.md) |
+| Write or restructure code | [`code-style.md`](code-style.md) |
+| Find an existing design or implementation plan | [`specs/README.md`](../specs/README.md) |
 
-`docs/code-style.md` is the one to read before *writing*: size budgets, how to
-derive a file split and declare its seam, where data belongs, and the
-verification tiers a render-affecting change has to clear. It also carries the
-current debt register, so you can tell deliberate structure from accumulated
-sprawl.
-
-`specs/README.md` is the fourth: `docs/` is what is *continuously true*, while
-`specs/` is work at a point in time — proposed, in progress, or done and kept
-for the reasoning behind the code. Read its index before starting a change in an
-area a spec already covers.
+Documents under `docs/` describe the living system. Files under `specs/` record
+work at a point in time and may be historical; use their index for current
+status.
 
 ## What can (and can't) be committed here
 
-This repo mixes original engineering (safe to commit) with content mechanically
-derived from the copyrighted ActRaiser ROM (must never be committed). The
-`.gitignore` enforces this, but the reasoning is worth understanding if you're
-contributing:
+This repository mixes original engineering with material that can be derived
+from the copyrighted ROM. `.gitignore` enforces much of the boundary, but
+contributors must still understand it.
 
 **Never commit:**
+
 - The ROM itself (`*.sfc`/`*.smc`), any save file derived from it (`*.srm`),
   or any raw memory/WRAM/SRAM dump captured while running it (`saves/`,
   `*.bin`) — these can contain decompressed copyrighted assets (graphics,
@@ -319,6 +283,7 @@ contributing:
   `tools/oracle/README.md`.
 
 **Safe to commit:**
+
 - `recomp/*.cfg` — these are our own hand-written addresses, directives, and
   commentary that *tell* the recompiler what to do. They don't contain any
   translated ROM logic themselves, similar to how a symbol map or linker

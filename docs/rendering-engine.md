@@ -1,12 +1,9 @@
 # ActRaiser Rendering Engine Reference
 
-Consolidated map of the game's drawing/streaming machinery, reverse-engineered
-during the widescreen work (2026-07; deep-dive completed 2026-07-11 via full
-static disasm of the bank-02 video core + whole-level DMA/VRAM traces).
-Written decomp-style: every routine with its address, data structures with
-layouts, unknowns marked `?`. Companion docs: [SEAMS.md](SEAMS.md) (seam
-inventory / conversion status), [widescreen-survey.md](widescreen-survey.md)
-(widescreen policy + evidence trail), [ram-map.md](ram-map.md) (variables).
+Reference map of the game's drawing and streaming machinery. It records routine
+addresses, data layouts, and unknowns marked `?`. See [SEAMS.md](SEAMS.md) for
+conversion status, [widescreen-survey.md](widescreen-survey.md) for the evidence
+trail, and [ram-map.md](ram-map.md) for variables.
 
 Evidence basis: `saves/level1-action.rec` replay traces (faithful config,
 channels dma/vram/vmadd/wram), disassembly of `$02:ABF0-$C72B`, and the

@@ -7,15 +7,10 @@ preview; nothing implemented in the engine.** Companion to
 "identify the authentic state first, then choose a style" method), and
 [../specs/ar-recomp-sim-rendering-plan.md](../specs/ar-recomp-sim-rendering-plan.md).
 
-The question: can the sim-3D town view give its water depth and transparency,
-and what does that cost? The answer is yes, and the part that looked hardest —
-knowing which pixels are water — turns out to be exactly derivable from state
-the game already publishes.
-
-The style question was settled separately, by building each candidate and
-looking at it: see §4. The short version is a visible ocean bed at a fixed
-depth under a mostly-transparent glassy surface — deliberately stylised rather
-than simulated, with no motion of its own.
+The sim-3D town view can add water depth and transparency. Water pixels can be
+derived from existing game state rather than a hardcoded tile list. The chosen
+look (§4) is a visible bed at fixed depth beneath a mostly transparent, stylized
+surface with no independent motion.
 
 ## 1. The blocker that isn't: identifying water
 
@@ -377,10 +372,9 @@ preserves the option, but nothing in the current model needs it.
   dim and the extent alpha in `SDL_Vertex.color`. The fragment shader must
   multiply through by `v_color` exactly as `rim.frag.glsl` does, or the cull
   fade and the town/underlay handoff both break.
-- **Present thread.** Every SDL render call runs on the present thread (see
-  the present-thread renderer affinity notes). Shader and sampler creation
-  must happen lazily from the draw path, the way `EnsureBlurShader` does — not
-  at init on the main thread.
+- **Render ownership.** Rendering is synchronous on the main thread. Create
+  shaders and samplers through the draw-path ownership used by the existing GPU
+  effects rather than from unrelated initialization code.
 - **Default off, and gated twice.** Like every GPU effect here: the
   `gpu_shaders_enabled` backend switch plus its own row, with a silent fall
   back to the current path when the shader is unavailable. A new effect on by

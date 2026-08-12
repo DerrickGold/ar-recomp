@@ -9,12 +9,11 @@ your own cartridge dump, into a real executable.**
 side-scrolling action-platformer stages and a top-down "god game" town
 simulation. This project targets the USA cartridge dump.
 
-Not an emulator. The ROM's 65816 machine code is statically recompiled into C
-and linked against a hand-written SDL3 runtime, which is what makes the rest
-possible: true widescreen, a tilted 3D diorama presentation for the action
-stages, a projected 3D simulation town, GPU shader effects, drop-in HD art and
-music, re-bindable controls, save states, and a full in-game settings menu drawn
-with the game's own dialog font.
+The project statically recompiles the ROM's 65816 machine code into C and links
+it against a hand-written SDL3 runtime. It is not an emulator. The native
+runtime enables true widescreen, 3D presentations for action stages and towns,
+GPU effects, replacement art and music, re-bindable controls, save states, and
+an in-game settings menu.
 
 **[Quick start](#quick-start)** · **[Features](#features)** ·
 **[Manual](docs/manual.md)** · **[Contributing](docs/contributing.md)** ·
@@ -27,8 +26,8 @@ with the game's own dialog font.
 | | |
 |---|---|
 | ✅ | **Action stages** — every act across all regions, plus Death Heim, played through end to end |
-| 🟡 | **Simulation mode** — Fillmore, Bloodpool, and Kasandora verified end to end; the other three towns await play-testing |
-| 🟡 | **Diorama mode** — Fillmore, Bloodpool, and Kasandora acts/towns plus Marahna Act 1 are play-tested; remaining rooms still need tuning and acceptance |
+| 🟡 | **Simulation mode** — Fillmore, Bloodpool, Kasandora, and Marahna verified end to end; Aitos and Northwall remain |
+| 🟡 | **Diorama mode** — Fillmore, Bloodpool, Kasandora, and Marahna acts/towns are play-tested; remaining rooms still need tuning and acceptance |
 | 🟡 | **Platforms** — builds confirmed on macOS and Steam Deck. **Windows is untested and unverified.** |
 
 Per-stage detail: [`docs/progress.md`](docs/progress.md).
@@ -37,30 +36,29 @@ Per-stage detail: [`docs/progress.md`](docs/progress.md).
 
 ## AI disclosure
 
-**This project is built with substantial help from AI coding assistants** (Claude
-/ Claude Code). Large portions of the recompiler tooling, runtime code,
-debugging infrastructure, and documentation were written by AI under my
-direction and review. Assume AI involvement throughout.
+**This project is built with substantial help from AI coding assistants**
+(Claude / Claude Code). AI contributed to the tooling, runtime, debugging
+infrastructure, and documentation under my direction and review. Assume AI
+involvement throughout.
 
 The two halves have different provenance: the recompiled game logic is a
 mechanical translation of the original binary — never committed here, no
 authorship claimed. The runtime around it (widescreen streaming, the diorama and
 3D town renderers, the settings system) is original work.
 
-It started as wanting to play the game sooner. It's now aimed at preservation —
-a native build that outlives the hardware — and at improving the game without
-changing how it feels, which is why every enhancement is a toggle and the
-authentic 4:3 path stays intact.
+The goal is preservation: a portable native build that can improve the game
+without changing how it feels. Every enhancement is optional, and the authentic
+4:3 path remains available.
 
 ### Notes for a non-AI decompilation
 
-The reverse-engineering notes are maintained to be useful on their own: ~6,800
-lines, none ROM-derived, all MIT-licensed. They describe the 1990 game rather
-than this implementation, so they carry over to whatever you build.
+The MIT-licensed reverse-engineering notes describe the original game rather
+than this implementation. They contain no ROM-derived code and can support a
+separate decompilation effort.
 
 | | |
 |---|---|
-| [`docs/SEAMS.md`](docs/SEAMS.md) | ~1,600 lines of logic↔hardware boundaries: object systems, dispatch tables, subsystem roles, and each seam's intent |
+| [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundaries, object systems, dispatch tables, and subsystem roles |
 | [`docs/research-symbol-map.md`](docs/research-symbol-map.md) | address → candidate name, with confidence and evidence |
 | [`docs/ram-map.md`](docs/ram-map.md) · [`docs/rom-map.md`](docs/rom-map.md) | WRAM and ROM data-region references |
 | [`docs/rendering-engine.md`](docs/rendering-engine.md) | rendering, streaming, and OAM behaviour |
@@ -132,8 +130,8 @@ there while you wait.
 When the build finishes, press **Play** — and a `run-game` file appears in the
 folder. Open that any time afterwards to play instantly, with no rebuild.
 
-You can also just run `run-build` again. It detects the finished game and opens
-as a launcher: no ROM picker, no build step, just **Play** and the manual.
+You can also run `run-build` again. It detects the finished game and opens as a
+launcher with **Play** and the manual.
 
 ### 4. Upgrading later
 
@@ -151,9 +149,6 @@ game, telling you how much that frees.
 Your settings, saves and any added music or graphics are untouched — only
 build-only files go. `run-build` afterwards is launcher-only; to rebuild, download
 the bundle again.
-
-The bundle also carries the original 40-page instruction booklet, readable in
-the builder's **Manual** tab.
 
 <details>
 <summary>Building from a source checkout instead</summary>
@@ -300,49 +295,25 @@ Full reference for every one of these: **[docs/manual.md](docs/manual.md)**.
 
 ## Current status
 
-**Actively in development — expect bugs.**
-[`docs/progress.md`](docs/progress.md) is the authoritative, kept-current status
-tracker: per-action-stage / per-sim-town playability tables plus automated
-codebase metrics — read it rather than this summary if the two ever disagree.
-Expanding on the [summary above](#progress-at-a-glance):
+**Actively in development — expect bugs.** The [summary above](#progress-at-a-glance)
+is only an overview. [`docs/progress.md`](docs/progress.md) is the authoritative
+tracker for stage, town, subsystem, and platform status.
 
-- **Action stages, regions 1–6** — every ordinary action level has been played
-  through and is fully playable. Widescreen BG streaming, sprites, activation,
-  enemies/platforms, bosses, fast vertical traversal, and the observed
-  HDMA/parallax effects all render and behave correctly.
-- **Death Heim (region 7)** — the complete boss rush, final boss, and post-boss
-  sky transition are playable and widescreen-validated.
-- **Simulation mode** — Fillmore, Bloodpool, and Kasandora have confirmed clean
-  end-to-end town rounds with Diorama effects. Aitos, Marahna, and Northwall
-  remain to be play-tested end to end.
-- **Remaining widescreen polish** — presentation-aware camera/world-edge
-  clamping so the ends of finite backgrounds cannot scroll into the wider
-  viewport.
-- **3D town rendering** — phases 0–4 plus the ground extension are done; other
-  towns still need art and layer work.
-- **Diorama polish** — Fillmore, Bloodpool, and Kasandora Acts 1/2 and towns,
-  plus Marahna Act 1, are play-tested with effects enabled. Remaining room
-  depths in `diorama-layers.ini` are still being tuned and accepted room by
-  room.
-- **Platforms** — macOS and Steam Deck are built and played on regularly. The
-  Windows and generic Linux bundles cross-build but have not been run by this
-  project; reports either way are welcome.
-
-Open bugs and investigation state live in [`DEBUG.md`](DEBUG.md); design specs
-and their real (code-derived) status live in [`specs/README.md`](specs/README.md).
+Open investigations live in [`DEBUG.md`](DEBUG.md). The code-derived status of
+each design spec lives in [`specs/README.md`](specs/README.md).
 
 ## Documentation
 
 | Document | What it is |
 |---|---|
-| [`docs/manual.md`](docs/manual.md) | Player/power-user reference: every config key, control, hotkey, cheat, overlay behavior, and the asset-replacement systems |
-| [`docs/contributing.md`](docs/contributing.md) | Building from source, project layout, and what can/can't be committed here |
-| [`DEBUG.md`](DEBUG.md) | The debugging guide — every tool, every known bug class, the full bug-hunt journal |
-| [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundary map and the reverse-engineered game architecture |
-| [`docs/progress.md`](docs/progress.md) | Per-stage / per-town / per-subsystem status tracker |
+| [`docs/manual.md`](docs/manual.md) | Player and power-user reference |
+| [`docs/contributing.md`](docs/contributing.md) | Source builds, repository layout, and contribution rules |
+| [`DEBUG.md`](DEBUG.md) | Debugging workflow, tools, and known bug classes |
+| [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundary and architecture map |
+| [`docs/progress.md`](docs/progress.md) | Stage, town, and subsystem status |
 | [`docs/rendering-engine.md`](docs/rendering-engine.md) | Rendering, streaming, and OAM architecture |
-| [`docs/BUILD_TOOLING.md`](docs/BUILD_TOOLING.md) | The `snesbuild` driver, hermetic builds, and the distribution bundles |
-| [`specs/README.md`](specs/README.md) | Index of every design spec with its real status |
+| [`docs/BUILD_TOOLING.md`](docs/BUILD_TOOLING.md) | Build driver, hermetic builds, and distribution bundles |
+| [`specs/README.md`](specs/README.md) | Design-spec index and current status |
 
 ## License
 
