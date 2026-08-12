@@ -620,6 +620,36 @@ static const DioramaLayerDesc *DioramaDescForPlane(int plane) {
   return NULL;
 }
 
+/* Projection publication and drawing must describe the same frame. Keeping
+ * every visibility/resource gate here prevents a hidden or unuploaded plane
+ * from remaining projectable to presentation effects. */
+static bool DioramaLayerIsDrawable(
+    const DioramaLayerDesc *layer, SDL_Texture *textures[], uint8_t *pixels[]) {
+  return layer && Diorama_PlaneEligible(
+      layer->plane, !layer->visible || *layer->visible,
+      textures[layer->plane] != NULL, pixels[layer->plane] != NULL,
+      g_settings.diorama_hud_flat,
+      g_settings.diorama_skybox == kDioramaSky_Only);
+}
+
+/* BG projections retain the exact drawing predicate above. An OBJ plane may
+ * additionally be requested by a current captured actor effect: its metadata
+ * is current content even if the isolated hardware band contributed no final
+ * pixels. Visibility and texture readiness still gate that projection. */
+static bool DioramaLayerIsProjectable(
+    const DioramaLayerDesc *layer, SDL_Texture *textures[], uint8_t *pixels[],
+    uint8_t effect_obj_priority_mask) {
+  if (!layer) return false;
+  const int priority = DioramaPlaneObjectPriority(layer->plane);
+  const bool has_obj_effect = priority >= 0 &&
+      (effect_obj_priority_mask & (1u << (unsigned)priority)) != 0;
+  return Diorama_PlaneProjectable(
+      layer->plane, !layer->visible || *layer->visible,
+      textures[layer->plane] != NULL, pixels[layer->plane] != NULL,
+      has_obj_effect, g_settings.diorama_hud_flat,
+      g_settings.diorama_skybox == kDioramaSky_Only);
+}
+
 /* ── layer manifest I/O ──────────────────────────────────────────────────
  *
  * `diorama-layers.ini` beside settings.ini. Sections are rooms, bodies are
@@ -1557,7 +1587,10 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        uint32_t additive_plane_mask,
+                       uint8_t effect_obj_priority_mask,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
+                       DioramaPlaneEffectFn plane_effect,
+                       void *plane_effect_userdata,
                        DioramaProjection *out_projection) {
   if (out_projection) memset(out_projection, 0, sizeof(*out_projection));
   if (!renderer || !cam_pose || authentic_y0 < 0 ||
@@ -1747,17 +1780,24 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   }
 
   /* Action objects follow BG1's stable camera/interpolation delta in this
-   * compositor (DioramaLayerBgIndex maps every OBJ band to index 0). Publish
-   * that exact resolved window rather than asking present.c to recreate it. */
+   * compositor (DioramaLayerBgIndex maps every OBJ band to index 0). Resolve
+   * both source windows once; publication below pairs each eligible plane's
+   * window with its shape. */
+  float bg1_u0, bg1_v0, bg1_u1, bg1_v1;
+  float bg2_u0, bg2_v0, bg2_u1, bg2_v1;
+  float bg1_du = interpolating ? scroll_delta->bg_du[0] : 0.0f;
+  float bg1_dv = interpolating ? scroll_delta->bg_dv[0] : 0.0f;
+  DioramaInterpUvWindow(uv_u0, uv_u1, bg1_du, uv_slack,
+                        &bg1_u0, &bg1_u1);
+  DioramaInterpUvWindow(uv_v0, uv_v1, bg1_dv, v_slack,
+                        &bg1_v0, &bg1_v1);
+  float bg2_du = interpolating ? scroll_delta->bg_du[1] : 0.0f;
+  float bg2_dv = interpolating ? scroll_delta->bg_dv[1] : 0.0f;
+  DioramaInterpUvWindow(uv_u0, uv_u1, bg2_du, uv_slack,
+                        &bg2_u0, &bg2_u1);
+  DioramaInterpUvWindow(uv_v0, uv_v1, bg2_dv, v_slack,
+                        &bg2_v0, &bg2_v1);
   if (out_projection) {
-    float object_du = interpolating ? scroll_delta->bg_du[0] : 0.0f;
-    float object_dv = interpolating ? scroll_delta->bg_dv[0] : 0.0f;
-    DioramaInterpUvWindow(uv_u0, uv_u1, object_du, uv_slack,
-                          &out_projection->object_u0,
-                          &out_projection->object_u1);
-    DioramaInterpUvWindow(uv_v0, uv_v1, object_dv, v_slack,
-                          &out_projection->object_v0,
-                          &out_projection->object_v1);
     memcpy(out_projection->matrix, mvp, sizeof(mvp));
     out_projection->aspect_x = aspect_x;
     out_projection->height_scale = height_scale;
@@ -1815,36 +1855,39 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         resolved, kDioramaLayerCount);
   }
 
-  /* Publish the exact authored shape of BG1-low and each OBJ priority plane.
-   * Enhanced action effects remain a world overlay, but their registration
-   * follows the same parallax/rake/bow as the source art. */
+  /* Publish the exact authored shape/window of both low-priority BG planes
+   * and each OBJ priority plane. BG planes use the identical drawable gate
+   * below; a current actor effect can additionally retain its visible OBJ
+   * transform when the isolated source band has no winning pixels. */
   if (out_projection) {
     for (int i = 0; i < resolved_count; i++) {
+      const DioramaLayerDesc *layer =
+          DioramaDescForPlane(resolved[i].plane);
+      if (!DioramaLayerIsProjectable(
+              layer, textures, pixels, effect_obj_priority_mask))
+        continue;
+      const bool bg2 = resolved[i].plane == kPpuOverlaySource_Bg2;
+      DioramaPlaneProjection plane = {
+        .valid = true,
+        .u0 = bg2 ? bg2_u0 : bg1_u0,
+        .v0 = bg2 ? bg2_v0 : bg1_v0,
+        .u1 = bg2 ? bg2_u1 : bg1_u1,
+        .v1 = bg2 ? bg2_v1 : bg1_v1,
+        .z_world = resolved[i].z - 0.5f,
+        .rake = resolved[i].rake,
+        .bow = resolved[i].bow,
+      };
       if (resolved[i].plane == kPpuOverlaySource_Bg1) {
-        out_projection->bg1_plane = (DioramaObjectPlaneProjection){
-          .valid = true,
-          .z_world = resolved[i].z - 0.5f,
-          .rake = resolved[i].rake,
-          .bow = resolved[i].bow,
-        };
+        out_projection->bg1_plane = plane;
       }
-      int priority = -1;
-      switch (resolved[i].plane) {
-        case kPpuOverlaySource_Obj: priority = 0; break;
-        case kDioramaPlane_Obj1: priority = 1; break;
-        case kDioramaPlane_Obj2: priority = 2; break;
-        case kDioramaPlane_Obj3: priority = 3; break;
-        default: break;
+      if (bg2) {
+        out_projection->bg2_plane = plane;
       }
+      const int priority = DioramaPlaneObjectPriority(resolved[i].plane);
       if (priority < 0) continue;
-      out_projection->object_planes[priority] =
-          (DioramaObjectPlaneProjection){
-            .valid = true,
-            .z_world = resolved[i].z - 0.5f,
-            .rake = resolved[i].rake,
-            .bow = resolved[i].bow,
-          };
+      out_projection->object_planes[priority] = plane;
     }
+    out_projection->valid = true;
   }
 
   /* Ordinary scenes retain the single historical painter pass byte-for-byte.
@@ -1884,7 +1927,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     const int layer_stack_copies = resolved[i].stack_copies;
     const int layer_stack_dir = resolved[i].stack_direction;
     const bool layer_stack_solid = resolved[i].stack_solid;
-    if (layer->visible && !*layer->visible) continue;
+    if (!DioramaLayerIsDrawable(layer, textures, pixels)) continue;
     /* A5 (followup doc): with diorama_hud_flat on, BG3 is deliberately not
      * captured as a diorama layer (actraiser_rtl.c) and the anchored flat
      * HUD draws separately (present.c). Skip this entry outright rather
@@ -1892,17 +1935,11 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * buffer has been written at least once (tilted mode was used this
      * session), the pointer stays non-NULL and its last frame's content
      * would otherwise keep drawing as a stale ghost plane. */
-    if (layer->plane == kPpuOverlaySource_Bg3 && g_settings.diorama_hud_flat)
-      continue;
     /* B5 (followup doc): "Skybox only" promotes BG2 OUT of the box entirely
      * (drawn above as the enveloping skybox instead) — both priority bands
      * share the same underlying capture/visibility toggle, so both are
      * excluded together. "Plane + skybox" and "Off" leave this loop
      * untouched: BG2 still draws in-box exactly as before. */
-    if ((layer->plane == kPpuOverlaySource_Bg2 ||
-         layer->plane == kDioramaPlane_Bg2Hi) &&
-        g_settings.diorama_skybox == kDioramaSky_Only)
-      continue;
     /* B5 follow-up (live report, 2026-07-21): the pre-existing backdrop
      * plane (kDioramaPlane_Backdrop, the full flat-scene residual) sits
      * opaque at z=-0.50, in front of the skybox — at low tilt its projected
@@ -1912,12 +1949,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * margin-filler), so skip backdrop too. Plane+skybox keeps it — there
      * BG2's in-box copy is the main visual and backdrop still backstops any
      * gaps the way it always has. */
-    if (layer->plane == kDioramaPlane_Backdrop &&
-        g_settings.diorama_skybox == kDioramaSky_Only)
-      continue;
     bool is_backdrop = (layer->plane == kDioramaPlane_Backdrop);
     SDL_Texture *texture = textures[layer->plane];
-    if (!texture || !pixels[layer->plane]) continue;
 
     SDL_FColor shade = {
       1.0f + (layer->shade.r - 1.0f) * shade_mix,
@@ -2192,6 +2225,16 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     SDL_RenderGeometry(renderer, draw_texture, draw_verts, nv, indices, ni);
     if (rim_light || dof_or_edge)
       SDL_SetGPURenderState(renderer, NULL);
+    if (plane_effect && out_projection && out_projection->valid) {
+      if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
+      plane_effect(plane_effect_userdata, layer->plane, out_projection);
+      if (!viewport_is_output) SDL_SetRenderViewport(renderer, &viewport);
+      /* The callback owns its blend/draw state but not the per-layer texture
+       * sampling policy. Reassert interpolation clamping before later planes. */
+      if (interpolating)
+        SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_CLAMP,
+                                        SDL_TEXTURE_ADDRESS_CLAMP);
+    }
   }
 
   if (interpolating)
@@ -2200,8 +2243,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
 
   if (!viewport_is_output)
     SDL_SetRenderViewport(renderer, NULL);
-
-  if (out_projection) out_projection->valid = true;
 
   return true;
 }

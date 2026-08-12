@@ -19,6 +19,33 @@ enum {
   kDioramaPlane_Count
 };
 
+/* Returns the authentic OBJ priority represented by a split plane, or -1 for
+ * every BG/backdrop plane. Keep this mapping shared by capture-apron policy
+ * and effect projection so neither grows an incidental definition of OBJ. */
+static inline int DioramaPlaneObjectPriority(int plane) {
+  switch (plane) {
+    case kPpuOverlaySource_Obj: return 0;
+    case kDioramaPlane_Obj1: return 1;
+    case kDioramaPlane_Obj2: return 2;
+    case kDioramaPlane_Obj3: return 3;
+    default: return -1;
+  }
+}
+
+static inline int DioramaPlaneForObjectPriority(unsigned priority) {
+  switch (priority) {
+    case 0: return kPpuOverlaySource_Obj;
+    case 1: return kDioramaPlane_Obj1;
+    case 2: return kDioramaPlane_Obj2;
+    case 3: return kDioramaPlane_Obj3;
+    default: return -1;
+  }
+}
+
+static inline bool DioramaPlaneIsObjectPriority(int plane) {
+  return DioramaPlaneObjectPriority(plane) >= 0;
+}
+
 /* Can this plane ever hold pixels in the resolve apron?
  *
  * ONLY the OBJ planes. Everything else is filled exclusively by the scanline
@@ -33,8 +60,7 @@ enum {
  * them is uploading known zeros. Measured at 0.79 MB per frame, ~47 MB/s at
  * 60fps, which was most of what the apron cost in steady state. */
 static inline bool DioramaPlaneCanCarryApron(int plane) {
-  return plane == kPpuOverlaySource_Obj || plane == kDioramaPlane_Obj1 ||
-         plane == kDioramaPlane_Obj2 || plane == kDioramaPlane_Obj3;
+  return DioramaPlaneIsObjectPriority(plane);
 }
 
 #endif  /* DIORAMA_PLANES_H */

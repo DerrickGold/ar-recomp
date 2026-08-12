@@ -13,6 +13,7 @@
  * frame-slot-to-context copy. */
 typedef struct ActionEffectProjectionContext {
   int16_t bg1_camera_x, bg1_camera_y;
+  int16_t bg2_camera_x, bg2_camera_y;
   int ws_extra;
   int ws_extra_top;
   int visible_x0;
@@ -22,10 +23,18 @@ typedef struct ActionEffectProjectionContext {
   const DioramaProjection *diorama_projection;
 } ActionEffectProjectionContext;
 
+/* Returns the authentic OBJ priority bands needed by current world-overlay
+ * effects. Diorama uses this current-frame publication to retain an actor
+ * projection when the isolated source band has no winning pixels; BG-local
+ * effects never enter this mask. */
+uint8_t ActionEffectProjection_RequiredObjPriorityMask(
+    const ActionEffectFrame *spell_frame,
+    const ActionSceneEffectFrame *scene_frame);
+
 /* ActionEffectProjectPointFn-compatible projection callback. Flat mode maps
  * through the resolved viewport. Diorama mode uses the compositor-published
- * BG1/OBJ source plane, including display margins and the hidden apron owned
- * by DioramaProjection. */
+ * BG1/BG2/OBJ source plane, including display margins and the hidden apron
+ * owned by DioramaProjection. */
 bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
     float local_x, float local_y, SDL_FPoint *point);

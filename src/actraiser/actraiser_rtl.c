@@ -1665,13 +1665,17 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
  * icon, and there is no second OBJ capture to put the icon in, so the split has
  * to happen on captured pixels rather than on capture policy.
  *
- * Two phases, for the same reason sim3d has two:
+ * Three phases, because the icon's tile/palette state can change during the
+ * raster:
  *
- *   Prepare, BEFORE scanout -- rasterize the icon's own OAM range. It must run
- *     here because the frame's mid-scanline IRQ handlers and HDMA rewrite VRAM
- *     and CGRAM as the picture is drawn: rasterizing afterwards reads whatever
- *     tile data the game streamed in next and yields a fully transparent icon,
- *     which is exactly the silent failure this comment exists to prevent.
+ *   Prepare, BEFORE scanout -- resolve the icon's OAM range and footprint.
+ *   CaptureLine, DURING scanout -- immediately after each authentic scanline
+ *     is rendered, rasterize with that line's live VRAM/CGRAM state and retain
+ *     only the icon row that was just displayed. This ordering matters in both
+ *     directions: after scanout the game may already have streamed the next
+ *     tile set, while on the game-over return to Sky Palace the frame-start
+ *     state is still the previous all-black tile and the IRQ restores the HUD
+ *     art before rows 11..26. A whole-icon sample at either endpoint is wrong.
  *   Finish, AFTER scanout -- publish that raster to g_hud_obj_pixels for the
  *     anchored overlay and clear the same pixels from the diorama plane that
  *     holds the icon's priority band, which only has content once scanout has
@@ -1732,13 +1736,11 @@ static void ActRaiser_DioramaHudObjPrepare(void) {
       raster_width > kActRaiserHudIconRasterLimit ||
       raster_height > kActRaiserHudIconRasterLimit)
     return;
-  if (!PpuRasterizeObjRange(g_ppu, first, count, (uint8_t)priority, &bounds,
-                            s_hud_icon_raster, raster_width, raster_height,
-                            (size_t)raster_width * sizeof(uint32_t)))
-    return;
 
   s_hud_icon_bounds = bounds;
   s_hud_icon_priority = priority;
+  memset(s_hud_icon_raster, 0,
+         (size_t)raster_width * raster_height * sizeof(uint32_t));
   s_hud_icon_ready = true;
   if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].flags &
       kPpuOverlayFlag_MarkFullAddSubscreen)
@@ -1763,8 +1765,10 @@ static void ActRaiser_DioramaHudObjPrepare(void) {
    *
    * Fix: replay the same first-writer-wins rule over the icon's footprint with
    * the promoted slots REMOVED, keeping each restored pixel's colour AND the
-   * priority band it belongs to. Rasterised here, pre-scanout, for exactly the
-   * reason the icon is -- mid-frame IRQ/HDMA rewrite VRAM and CGRAM.
+   * priority band it belongs to. Rasterised here, pre-scanout, so the
+   * best-effort underlay cannot accidentally use the NEXT frame's streamed
+   * art. Unlike the visible icon this is only a rare overlap repair; capturing
+   * its complete per-line OAM competition would require a second OBJ resolve.
    *
    * Not a full re-render: the hardware sprite-per-line limits are not replayed,
    * so a footprint contested by more than 34 slivers on a line could restore a
@@ -1811,6 +1815,33 @@ static void ActRaiser_DioramaHudObjPrepare(void) {
       }
     }
   }
+}
+
+/* Preserve exactly the OBJ pixels the hardware saw on this scanline. The
+ * scratch raster is intentionally rebuilt from the current PPU state: callers
+ * invoke this after ppu_runLine and before HDMA/IRQ advances to the next line.
+ * s_hud_restore_slot is no longer needed by the restore-layer build once
+ * Prepare returns, so sharing it avoids another 16 KiB static buffer. */
+static void ActRaiser_DioramaHudObjCaptureLine(int screen_y) {
+  if (!s_hud_icon_ready || screen_y < s_hud_icon_bounds.y0 ||
+      screen_y >= s_hud_icon_bounds.y1)
+    return;
+
+  const int raster_width = s_hud_icon_bounds.x1 - s_hud_icon_bounds.x0;
+  const int raster_height = s_hud_icon_bounds.y1 - s_hud_icon_bounds.y0;
+  if (!PpuRasterizeObjRange(
+          g_ppu, s_hud_obj_icon_first, s_hud_obj_icon_count,
+          (uint8_t)s_hud_icon_priority, &s_hud_icon_bounds,
+          s_hud_restore_slot, raster_width, raster_height,
+          (size_t)raster_width * sizeof(uint32_t))) {
+    s_hud_icon_ready = false;
+    return;
+  }
+
+  const int row = screen_y - s_hud_icon_bounds.y0;
+  memcpy(s_hud_icon_raster + (size_t)row * raster_width,
+         s_hud_restore_slot + (size_t)row * raster_width,
+         (size_t)raster_width * sizeof(uint32_t));
 }
 
 static void ActRaiser_DioramaHudObjFinish(int width) {
@@ -2354,6 +2385,33 @@ void ActRaiserDrawPpuFrame(void) {
     }
   }
 
+  /* Flat presentation has one already-composited framebuffer, so a BG2-stage
+   * enhancement needs the PPU's real priority winner as an occlusion mask.
+   * Diorama owns isolated planes and inserts the effect directly after BG2;
+   * a one-shot dump likewise owns this capture slot. HD replacements get
+   * first refusal above—never overwrite another source policy. */
+  extern bool g_diorama_frame_active;
+  extern bool g_diorama_dump_pending;
+  if (!g_diorama_frame_active && !g_diorama_dump_pending &&
+      map_group == kActRaiserMapGroup_Aitos &&
+      map_number >= 2 && map_number <= 3) {
+    PpuOverlayCapture *bg2 =
+        &g_ppu->overlayCaptures[kPpuOverlaySource_Bg2];
+    if (bg2->x1 <= bg2->x0 || bg2->y1 <= bg2->y0) {
+      extern int g_ws_extra;
+      extern uint8_t g_action_bg2_mask_pixels[];
+      const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+      if (PpuBindOverlaySurface(
+              g_ppu, kPpuOverlaySource_Bg2,
+              g_action_bg2_mask_pixels, (size_t)width * 4)) {
+        PpuSetOverlayCapture(
+            g_ppu, kPpuOverlaySource_Bg2, -g_ws_extra, 0,
+            width, kActRaiserAuthenticHeight,
+            kPpuOverlayFlag_MarkMainScreenWinner);
+      }
+    }
+  }
+
   /* D2: claim observational full-frame Mode-1 captures only after every
    * pre-existing HUD/HD/diorama policy has had a chance to declare a
    * conflict. The original PPU framebuffer remains intact as same-frame A0. */
@@ -2438,13 +2496,16 @@ void ActRaiserDrawPpuFrame(void) {
         ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
   }
 
-  /* Must precede the scanline loop: the IRQ handlers and HDMA below rewrite
-   * VRAM/CGRAM mid-picture, so this is the last point at which the icon's tile
-   * data is still the data the frame is being drawn with. */
+  /* Resolve the stable OAM footprint before scanout; the live tile/palette
+   * pixels are captured one displayed row at a time inside the loop. */
   ActRaiser_DioramaHudObjPrepare();
 
   for (int i = 0; i <= 224; i++) {
     ppu_runLine(g_ppu, i);
+    /* ppu_runLine(i) renders authentic row i-1. Sample the promoted HUD OBJ
+     * now, against the same VRAM/CGRAM state, before HDMA or the IRQ below
+     * advances the raster state. */
+    ActRaiser_DioramaHudObjCaptureLine(i - 1);
     /* Vertical top margin (diorama). Placed HERE, not before the loop, for two
      * reasons that both have to hold:
      *

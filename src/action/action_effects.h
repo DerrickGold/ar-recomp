@@ -28,6 +28,10 @@ typedef enum ActionEffectKind {
   kActionEffect_MarahnaBossLightning,
   kActionEffect_AitosLavaPit,
   kActionEffect_AitosLavaFireball,
+  kActionEffect_AitosMoltenRock,
+  kActionEffect_AitosWaterSplash,
+  kActionEffect_AitosWaterfall,
+  kActionEffect_AitosWaterfallMist,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -75,6 +79,10 @@ typedef enum ActionEffectPhase {
   kActionEffectPhase_MarahnaBossLightningGroundCharge,
   kActionEffectPhase_AitosLavaPit,
   kActionEffectPhase_AitosLavaFireballFlight,
+  kActionEffectPhase_AitosMoltenRockFlight,
+  kActionEffectPhase_AitosWaterSplash,
+  kActionEffectPhase_AitosWaterfallFlow,
+  kActionEffectPhase_AitosWaterfallMist,
   kActionEffectPhase_Count,
 } ActionEffectPhase;
 
@@ -96,6 +104,15 @@ typedef enum ActionEffectRole {
  * leaves a clean path to priority-aware masking later. */
 typedef enum ActionEffectRenderLayer {
   kActionEffectRenderLayer_WorldOverlay = 0,
+  /* Environmental accents that belong inside the captured BG2 plane. Flat
+   * presentation clips these through the PPU's BG2-winner mask; Diorama
+   * inserts them immediately after the resolved BG2 draw. */
+  kActionEffectRenderLayer_Bg2Plane,
+  /* Camera-local atmospheric cover for an intentionally unavailable Diorama
+   * BG2 extension. Unlike the source veil, this is unmasked inside the
+   * after-BG2 callback so later BG1/OBJ planes remain in front. */
+  kActionEffectRenderLayer_Atmosphere,
+  kActionEffectRenderLayer_Count,
 } ActionEffectRenderLayer;
 
 /* Diorama rooms can shape BG1 and each OBJ priority band independently. Keep
@@ -105,6 +122,7 @@ typedef enum ActionEffectRenderLayer {
 typedef enum ActionEffectProjectionPlane {
   kActionEffectProjectionPlane_Obj = 0,
   kActionEffectProjectionPlane_Bg1,
+  kActionEffectProjectionPlane_Bg2,
 } ActionEffectProjectionPlane;
 
 typedef enum ActionEffectGeometryKind {
@@ -141,6 +159,10 @@ enum {
   kActionEffectMaxInstances = 7,
   kActionEffectObserverTrackCount = 7,
   kActionSceneEffectMaxInstances = 16,
+  /* Map-derived accents have their own capture/render budget. The measured
+   * Aitos waterfall window holds 14 platform splashes plus one BG2 veil and
+   * one bottom-mist record; none may consume the 16-record actor budget. */
+  kActionSceneDecorationMaxInstances = 16,
   kActionSceneEffectObserverTrackCount = 80,
   kActionEffectObjPriorityCount = 4,
   kActionEffectFlag_Visible = 1 << 0,
@@ -203,16 +225,20 @@ typedef struct ActionEffectFrame {
 } ActionEffectFrame;
 
 /* Non-spell scene effects use the same renderer-independent instance contract,
- * but remain a separate frame. Spell geometry intentionally coalesces a cast
- * into one composition; torches, enemy/player projectiles, and traps must each
- * retain an independent light centre. If capture would be partial, the scene
- * layer fails closed for that frame instead. */
+ * but remain a separate frame. Dynamic actors and map-derived decorations have
+ * independent bounded lists: a dense camera window must never evict actor
+ * effects. Each list fails closed independently if its own capture would be
+ * partial. */
 typedef struct ActionSceneEffectFrame {
   uint16_t game_frame;
   uint8_t effect_count;
   uint8_t visible_count;
   uint8_t overflow;
   ActionEffectInstance effects[kActionSceneEffectMaxInstances];
+  uint8_t decoration_count;
+  uint8_t decoration_visible_count;
+  uint8_t decoration_overflow;
+  ActionEffectInstance decorations[kActionSceneDecorationMaxInstances];
 } ActionSceneEffectFrame;
 
 /* Observer state is explicit so savestate/restart boundaries can reset it and
@@ -267,7 +293,8 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
  * Bloodpool/Marahna BG1 torch and Aitos lava-pit signatures, the measured
  * enemy projectile families, the vertical trap, linked Marahna lightning and
  * Marahna boss-lightning families, the Bloodpool map-$08 boss lightning
- * sequence, and the global player sword beam. Unknown objects are ignored;
+ * sequence, the global player sword beam, and the exact two-child Aitos boss
+ * sword volley. Unknown objects are ignored;
  * presentation never guesses from pixels or palette colours. */
 void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
                                      ActionSceneEffectFrame *dst,

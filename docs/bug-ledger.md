@@ -1417,14 +1417,16 @@ the current debugging process; this file is the case law.
     haze plus 48 fixed-position crossed stars in sixteen top/centre/bottom
     cross-sections from 4px to 88px behind the crescent. Independent scrambled
     18-tick alpha/scale phases materialize each star without moving its centre.
-    The mapped player lifecycle admits one beam, so only one expanded stream is
-    budgeted and forged duplicates fail closed without publishing a partial
+    The original mapped player lifecycle admits one beam. Run
+    `20260812-000613` later proved the Aitos dragon can add two distinct
+    diagonal crescents, so the expanded-stream contract is now the measured
+    peak of three; a forged fourth fails closed without publishing a partial
     batch.
 
     Regression coverage pins the live snapshot arithmetic, both animation
     states, both horizontal directions, V-flip rejection, full-height head
     attachment, 70px-plus path coverage, deterministic materialization, exact
-    worst-case capacity, and duplicate-stream rejection. The implementation is
+    worst-case capacity, and over-budget stream rejection. The implementation is
     renderer-portable SDL geometry and adds no backend-specific shader or new
     emulated state. The release application builds and all 45 tests, including
     the display-backed shader test, pass.
@@ -1637,6 +1639,214 @@ the current debugging process; this file is the case law.
     **Reusable lesson:** a child changing resume/state does not imply retirement;
     follow the linked parent and loaded animation table through the entire
     visible attack before declaring its tail non-rendering.
+
+53. **Sword-beam and other OBJ-attached host effects disappeared in Diorama
+    mode — FIXED 2026-08-12.** Run `20260812-105739` captured one valid scene
+    actor but never logged scene geometry submission; the final WRAM dump pins
+    the active sword beam at `$08E0` to handler `$9D1C`, source `$979A`, state
+    `$13`, visual `$30`, and composition `$99E8`.
+
+    **Root cause:** the BG2 waterfall depth fix tightened projection publication
+    to planes with current winning pixels. That is correct for BG-local effects,
+    but an isolated OBJ priority band can legitimately be empty even while a
+    captured actor's portable world overlay needs that authored transform. The
+    projection callback then failed every sword glow/star point, producing a
+    successful but empty geometry batch. Flat mode did not use the Diorama
+    plane record and was unaffected.
+
+    **Fix:** immutable spell/scene frames now publish a four-bit mask of the
+    exact OBJ priorities required by current visible world-overlay effects.
+    The compositor treats that current actor metadata as projection content
+    for only its visible, texture-backed OBJ band. BG1/BG2 still require the
+    same current-pixel eligibility used by drawing, so an absent waterfall
+    backdrop cannot resurface. Immutable request/content/upload masks also
+    distinguish an intentionally empty OBJ band from a failed upload. Tests
+    pin the sword's authored priority 0, mask filtering/fail-closed behavior,
+    empty-band OBJ projection, upload-failure rejection, and rejection of the
+    same exception for BG2.
+
+    **Reusable lesson:** pixel contribution and presentation attachment are
+    different kinds of current content. A strict source-pixel gate is right for
+    BG-local decoration, but actor overlays must carry an explicit bounded
+    projection request rather than depending on whether their isolated sprite
+    band happened to win a pixel that frame.
+
+54. **The Aitos Act-2 boss's sword crescents had no enhanced trail — FIXED
+    2026-08-12; live visual acceptance pending.** Snapshot
+    `runs/20260812-000613/snapshots/snap_05_gf21056` shows the dragon emitting
+    two cyan crescents, but the scene observer recognized only the player's
+    `$9D1C/$06:8000` sword projectile.
+
+    **Root cause:** the boss does not reuse the player projectile lifecycle.
+    Source `$D646` creates an inactive `$D793` volley controller, then two
+    generic `$A655` children driven from the mutable `$7E:5000` boss animation
+    bank. The visible children wait in handler `$8661` with resume `$A65D` and
+    are linked to that inactive controller rather than to player slot `$08A0`.
+
+    **Fix:** Aitos map `$04/$03` now recognizes the complete lower/upper child
+    tuples `$01/$21/$56D8/$01/(-3,+1)` and
+    `$02/$20/$56BE/$02/(-3,-1)`, including exact extents, flags, animation
+    index, inactive controller fields, and controller backlink to the active
+    boss root. Captured OAM entries 71-76 prove their one-pixel-biased 24×24
+    rectangles and authored OBJ priority 2. Both reuse the existing portable
+    cool halo, tapered wake, and forty-eight materializing stars using their
+    real diagonal velocities. The bounded renderer now reserves the measured
+    maximum of three simultaneous sword streams (player plus both boss
+    children) and fails closed on a fourth.
+
+    Regressions cover both exact branches, OAM registration, priority-2
+    projection metadata, wrong map, velocity, artwork, controller, and boss
+    root rejection, diagonal rendering, and the three/four stream boundary.
+
+    **Reusable lesson:** visually similar projectiles can be authored by
+    unrelated animation banks and link graphs. Share the presentation style
+    only after each producer has its own exact lifecycle discriminator, and
+    derive expanded geometry capacity from their real coexistence peak.
+
+55. **Aitos lava sparks appeared to originate at the bottom of the pit —
+    FIXED 2026-08-12; live visual acceptance pending.** Snapshot
+    `runs/20260812-105106/snapshots/snap_00_gf3728` shows the desired source
+    plane in the upper-middle of the two-row bubbly lava volume.
+
+    **Root cause:** capture correctly published the complete `$DF/$E7` volume
+    so lighting could cover all animated lava tiles, but presentation reused
+    that full vertical extent as the random spark-birth range. This conflated
+    light coverage with particle origin and allowed births near the lower edge.
+
+    **Fix:** the elongated glow still covers the complete captured rectangle.
+    Spark births remain distributed across its full width but now use a narrow
+    `+/-1.5px` band one quarter of the captured height above its geometric
+    midpoint. The first centre-point correction remained visibly low; this
+    proportional bias follows the reference's isometric surface and scales for
+    both one- and two-row pits. The existing BG1 projection path carries that
+    local source plane through both flat and Diorama modes. A 72-tick renderer
+    regression checks each particle-quad centroid against the bounded birth
+    plane across every possible 21-36 tick lifetime.
+
+    **Reusable lesson:** a semantic region can define a light's coverage
+    without also defining every particle's emitter volume. Store or derive the
+    visual source plane explicitly when perspective makes those contracts
+    different.
+
+56. **Aitos's finite waterfall backdrop exposed a black lower gap, and its
+    existing veil had no positive submission diagnostic — FIXED 2026-08-12;
+    live visual acceptance pending.** The tuned `$04/$02` policy gives native
+    raw-wrap BG2 only 24 lower-extension pixels. Extending it farther repeats
+    water artwork into authored non-water areas, while retaining the safe
+    extent can expose black beneath the waterfall in a tall Diorama view.
+
+    **Fix:** the exact camera-local waterfall-platform signature now publishes
+    a paired after-BG2 Diorama atmosphere record beside the existing BG2 veil. Three
+    overlapping translucent mist banks and sixteen rising foam motes cover the
+    final 32 authentic rows and first 24 lower-extension rows. The atmosphere
+    retains BG2 camera/rake/bow projection and submits unmasked from the same after-BG2 Diorama callback, because absent BG2 pixels are precisely the area it must cover. Later BG1/OBJ planes and the HUD remain in front; flat mode has no vertical-extension gap and keeps only its masked veil.
+
+    The original 48-streak veil remains BG2-local: Diorama inserts it after a
+    drawable BG2-low mesh, and flat mode composites it only after multiplying
+    by the live BG2-winner mask. Both routes now log their first successful
+    geometry submission, separately from world decorations. The measured
+    worst case is exactly 14 platform splashes + one veil + one mist in the
+    16-record decoration list; a forged fifteenth splash fails that list closed
+    without consuming the independent actor budget. Tests pin capture gating,
+    capacity, substantial veil geometry, bottom-extension coverage, and the
+    production BG2 projection used by the atmosphere.
+
+    **Reusable lesson:** an effect bound to source pixels cannot conceal holes
+    caused by the absence of those pixels. Keep source enhancement and seam
+    concealment as separate passes with explicit painter order and diagnostics.
+
+57. **Sky Palace's selected-magic icon became a black square after the
+    game-over return — FIXED 2026-08-12; exact live-transition acceptance
+    pending.** Snapshot `runs/20260812-122258/snapshots/snap_02_gf5705` shows
+    the black promoted icon after all lives are lost and the game returns to
+    Sky Palace. Its OAM is not corrupt: slots 6-9 contain the complete Magical
+    Fire signature (`$67/$67/$77/$77`) at the expected position and priority.
+
+    **Root cause:** the Diorama HUD split resolved and rasterized the complete
+    icon before the scanline loop. That ordering had protected other captures
+    from post-frame VRAM/CGRAM streaming, but it was still only an endpoint
+    sample. On this transition the frame begins with the previous all-black
+    icon tile/palette state and the mid-picture IRQ restores the visible art
+    before rows 11-26. OAM identity and host placement were therefore correct
+    while the extracted texture was temporally wrong.
+
+    **Fix:** `ActRaiser_DioramaHudObjPrepare` now resolves only the stable OAM
+    range and footprint. After each `ppu_runLine`,
+    `ActRaiser_DioramaHudObjCaptureLine` retains the row just displayed before
+    HDMA or IRQ advances the raster state; `ActRaiser_DioramaHudObjFinish`
+    publishes the completed icon after scanout and performs the existing plane
+    removal/underlay restore. This is host-only extraction and does not alter
+    emulated OAM, VRAM, CGRAM, or game state.
+
+    The reported `hf=1507` `dispmiss` is unrelated. It occurs during the much
+    earlier action-entry interval, while the game-over return begins at gf4923,
+    and belongs to the already documented benign `$896F` object-loop unwind
+    class (`$82ED/$8078/$80B4`; see SEAMS.md, Dispatch, and ledger §33).
+
+    Debug and release builds pass, and the SDL-dummy suite passes 45/45. A
+    deterministic Sky Palace Diorama replay of `saves/artifacts2.rec` at gf1636
+    exercises the corrected path and renders the Magical Fire icon correctly.
+    The supplied diagnostic snapshot cannot resume the coroutine state, so the
+    exact game-over transition remains a live acceptance check rather than a
+    replay claim.
+
+    **Reusable lesson:** correct OAM identity and screen placement do not prove
+    that an extracted OBJ texture was sampled at the right time. When IRQ/HDMA
+    mutates tile or palette state mid-frame, capture each promoted row at the
+    same scanline-local state that produced the authentic picture; neither
+    whole-frame endpoint is automatically authoritative.
+
+58. **Gating pre-control enemy activation produced a second fade-in/fade-out
+    during the orb/statue arrival — CORRECTED 2026-08-12; live visual
+    acceptance pending.** The balance goal was sound: with extended horizontal
+    activation, margin enemies can begin advancing before the player receives
+    control. The first implementation disabled the extra activation margins
+    while player handler `$08B2` was `$97A6/$97C9/$97E4`, but used the fitted
+    presentation camera `$22` as the origin of the resulting 256px interval.
+
+    **What did *not* happen:** widescreen rendering was never disabled. The
+    `$00:8C98` HLE already has independent DRAW and ACTIVATION predicates.
+    DRAW continued to use fitted `$22/$24`, live L/R/T/B margins and the OBJ
+    apron, so sprites and backgrounds remained fully wide. Only object `+$30`
+    bit `$0400`—gameplay/script activation state—changed. The misleading local
+    name `activation_wide` refers to that predicate alone, not the presentation
+    mode.
+
+    **Root cause:** zero margins around a fitted camera are not the original
+    viewport. At Fillmore's left edge, presentation-aware fitting places
+    `$22=120`; the native `$02:B030` rule centres the arrival subject at 128 and
+    clamps to the world, giving camera X 0 for player world X `$0050`. The
+    failed gate therefore selected world interval `[120,376)` instead of native
+    `[0,256)`. It both excluded original-left objects and admitted farther-right
+    scripted/enemy objects. Because `$0400` belongs to every action object—not
+    only enemies—this changed the entry object set while the paired `$9755`
+    arrival actor and final `$97E4` player handler were driving entry motion and
+    fade/raster controls `$CB/$CD/$CE/$CF`. The visible result was the reported
+    extra fade cycle even though the draw path stayed wide.
+
+    **Fix:** the gate suppresses only D2's additional horizontal activation
+    range. During `$97A6/$97C9/$97E4`, activation uses the native camera formula
+    `clamp(subject_x-128, 0, world_width-256)` with zero extra L/R margins and
+    authentic vertical camera `$24`. Before `$97A6` transfers camera-subject
+    ownership through `$8A`, initialized player X `$08A2` supplies the arrival
+    anchor; ordinary native-width fallback validates `$8A` and reads its object
+    X. DRAW remains unchanged. Completed `$97E4` installs `$9832`, the first
+    handler that reads held input, so wide activation returns on that same
+    visibility scan.
+
+    **Verification:** release builds, `git diff --check`, and all 45 tests pass.
+    Deterministic Fillmore replay `runs/20260812-122927` transitions at gf962
+    `$97A6`, gf1068 `$97C9`, gf1140 `$97E4`, and gf1185 `$9832`. After the one
+    intentional action-entry start, the Fillmore track has no second
+    stop/restart signature. The headless replay verifies lifecycle and audio
+    continuity; a live visual run remains the acceptance gate for the fade.
+
+    **Reusable lesson:** decoupling draw from activation is necessary but not
+    sufficient when presentation-aware camera fitting changes coordinate
+    origin. A “native-width” gameplay window must reconstruct the native camera
+    basis, not reuse the presentation camera with smaller margins. Also, a
+    global object flag cannot safely be reasoned about as an enemy-only gate;
+    scripted camera, fade, platform and projectile actors share the same table.
 
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 

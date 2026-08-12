@@ -49,6 +49,40 @@ static void TestSimulationTownScope(void) {
                                     kActRaiserNonActionMap_Fillmore));
 }
 
+static void TestActionEntryActivationPolicy(void) {
+  static const uint16 arrival_handlers[] = {
+    kActRaiserPlayerHandler_ArrivalApproach,
+    kActRaiserPlayerHandler_ArrivalTransformFirst,
+    kActRaiserPlayerHandler_ArrivalTransformFinal,
+  };
+
+  for (unsigned i = 0;
+       i < sizeof(arrival_handlers) / sizeof(arrival_handlers[0]); i++) {
+    CHECK(ActRaiser_PlayerArrivalAnimationActive(arrival_handlers[i]));
+    CHECK(!ActRaiser_ShouldUseWideActionActivation(
+        1, arrival_handlers[i]));
+  }
+
+  CHECK(!ActRaiser_PlayerArrivalAnimationActive(
+      kActRaiserPlayerHandler_GroundControl));
+  CHECK(ActRaiser_ShouldUseWideActionActivation(
+      1, kActRaiserPlayerHandler_GroundControl));
+  /* Normal movement handlers remain widened after the handoff. */
+  CHECK(ActRaiser_ShouldUseWideActionActivation(1, 0x9884));
+  /* The fidelity switch still wins regardless of player lifecycle. */
+  CHECK(!ActRaiser_ShouldUseWideActionActivation(
+      0, kActRaiserPlayerHandler_GroundControl));
+
+  /* The fitted wide camera is 120 at Fillmore's left edge, but $02:B030's
+   * authentic camera for the arrival subject at world x=80 is still zero. */
+  CHECK(ActRaiser_AuthenticActionCameraX(80, 768) == 0);
+  CHECK(ActRaiser_AuthenticActionCameraX(128, 768) == 0);
+  CHECK(ActRaiser_AuthenticActionCameraX(248, 768) == 120);
+  CHECK(ActRaiser_AuthenticActionCameraX(500, 768) == 372);
+  CHECK(ActRaiser_AuthenticActionCameraX(1000, 768) == 512);
+  CHECK(ActRaiser_AuthenticActionCameraX(80, 224) == 0);
+}
+
 static void TestPurePickerPredicate(void) {
   CHECK(!ActRaiser_SimMapPickerActiveForState(
       kActRaiserMapGroup_NonAction, kActRaiserNonActionMap_Fillmore, 0));
@@ -255,6 +289,7 @@ static void TestSkyPalaceMagicIconScanRange(void) {
 int main(void) {
   TestSimSpriteRangePolicy();
   TestSimulationTownScope();
+  TestActionEntryActivationPolicy();
   TestPurePickerPredicate();
   TestLivePickerPredicate();
   TestSimulationHourglassScanRange();

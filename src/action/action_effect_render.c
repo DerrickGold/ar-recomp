@@ -178,7 +178,8 @@ static unsigned EffectVisualTicks(const ActionEffectInstance *effect,
                                   unsigned ticks) {
   return effect &&
       (effect->kind == kActionEffect_WallTorch ||
-       effect->kind == kActionEffect_AitosLavaPit)
+       effect->kind == kActionEffect_AitosLavaPit ||
+       effect->kind == kActionEffect_AitosWaterSplash)
       ? ticks * 2u : ticks;
 }
 
@@ -1522,6 +1523,26 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       hot = (SDL_FColor){1.00f, 0.91f, 0.38f, 0.92f};
       cool = (SDL_FColor){0.90f, 0.06f, 0.00f, 0.00f};
       break;
+    case kActionEffect_AitosMoltenRock:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){1.00f, 0.92f, 0.48f, 0.86f};
+      cool = (SDL_FColor){0.94f, 0.12f, 0.00f, 0.00f};
+      break;
+    case kActionEffect_AitosWaterSplash:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){0.92f, 1.00f, 1.00f, 0.86f};
+      cool = (SDL_FColor){0.12f, 0.48f, 1.00f, 0.00f};
+      break;
+    case kActionEffect_AitosWaterfall:
+      count = kActionSceneEffectWaterfallParticleCount;
+      hot = (SDL_FColor){0.76f, 0.96f, 1.00f, 0.30f};
+      cool = (SDL_FColor){0.08f, 0.42f, 0.82f, 0.00f};
+      break;
+    case kActionEffect_AitosWaterfallMist:
+      count = kActionSceneEffectWaterfallMistParticleCount;
+      hot = (SDL_FColor){0.94f, 1.00f, 1.00f, 0.34f};
+      cool = (SDL_FColor){0.34f, 0.70f, 0.92f, 0.00f};
+      break;
     case kActionEffect_SwordBeam:
       count = kActionSceneEffectSwordStarCount;
       hot = (SDL_FColor){0.96f, 1.00f, 1.00f, 1.00f};
@@ -1587,11 +1608,92 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
           fmaxf(1.0f, half_width - 3.0f);
       const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 10.0f;
       x = birth + drift * t * t;
-      y = -3.0f - 7.0f * t - 17.0f * t * t;
+      /* The captured rectangle covers the full bubbly volume. Its geometric
+       * centre still reads too low in the isometric mouth: the apparent
+       * surface sits one quarter-height above it. Keep births in a narrow
+       * band around that authored plane; the fraction scales correctly for
+       * both one- and two-row pits. */
+      const float source_surface_y = (rect->y0 + rect->y1) * 0.5f -
+          (rect->y1 - rect->y0) * 0.25f;
+      const float source_y = source_surface_y +
+          (HashUnit(seed ^ 0xB5u) - 0.5f) * 3.0f;
+      y = source_y - 5.0f * t - 13.0f * t * t;
       previous_x = birth + drift * previous_t * previous_t;
-      previous_y = -3.0f - 7.0f * previous_t -
-          17.0f * previous_t * previous_t;
+      previous_y = source_y - 5.0f * previous_t -
+          13.0f * previous_t * previous_t;
       width = 0.50f + 0.42f * (1.0f - t);
+    } else if (effect->kind == kActionEffect_AitosMoltenRock) {
+      /* Close sparks tumble off a hot solid surface. They do not align into a
+       * directional flame wake, which is what distinguishes molten rock from
+       * the actual `$CF9E` lava fireballs. */
+      const float *direction = kCircle32[(i * 11u + (seed >> 10)) & 31u];
+      const float distance = 6.0f + 10.0f * t;
+      const float old_distance = 6.0f + 10.0f * previous_t;
+      x = direction[0] * distance + heading_x * 2.0f * t;
+      y = direction[1] * distance + 10.0f * t * t;
+      previous_x = direction[0] * old_distance +
+          heading_x * 2.0f * previous_t;
+      previous_y = direction[1] * old_distance +
+          10.0f * previous_t * previous_t;
+      width = 0.44f + 0.34f * (1.0f - t);
+      reach = 1.5f + 2.2f * (1.0f - t);
+    } else if (effect->kind == kActionEffect_AitosWaterSplash) {
+      const float half_width = (rect->x1 - rect->x0) * 0.5f;
+      const float birth_x = (HashUnit(seed ^ 0x71u) * 2.0f - 1.0f) *
+          fmaxf(1.0f, half_width - 2.0f);
+      const bool drip = (i & 1u) != 0;
+      const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 5.0f;
+      x = birth_x + drift * t;
+      previous_x = birth_x + drift * previous_t;
+      if (drip) {
+        y = 2.0f + 6.0f * t + 25.0f * t * t;
+        previous_y = 2.0f + 6.0f * previous_t +
+            25.0f * previous_t * previous_t;
+      } else {
+        y = -8.0f - 12.0f * t + 18.0f * t * t;
+        previous_y = -8.0f - 12.0f * previous_t +
+            18.0f * previous_t * previous_t;
+      }
+      width = 0.38f + 0.30f * (1.0f - t);
+      reach = 1.8f + 3.0f * t;
+    } else if (effect->kind == kActionEffect_AitosWaterfall) {
+      /* Stable lanes, staggered by identity, provide a slow translucent flow
+       * over the fast two-frame source cycle. The varying alpha and length
+       * break horizontal bands without blurring away the pixel art. */
+      const unsigned columns = 12u;
+      const unsigned column = i % columns;
+      const unsigned row = i / columns;
+      const float lane = ((float)column + 0.5f) / (float)columns;
+      const float left = rect->x0 + 10.0f;
+      const float width_span = rect->x1 - rect->x0 - 20.0f;
+      const float y_span = rect->y1 - rect->y0 + 48.0f;
+      const float phase = (HashUnit(seed ^ 0x29u) +
+          (float)visual_ticks / (84.0f + (float)(row * 11u)));
+      const float wrapped = phase - floorf(phase);
+      x = left + width_span * lane +
+          (HashUnit(seed ^ 0x53u) - 0.5f) * 10.0f;
+      y = rect->y0 - 24.0f + y_span * wrapped;
+      previous_x = x + (HashUnit(seed ^ 0x37u) - 0.5f) * 1.5f;
+      previous_y = y - (8.0f + 7.0f * HashUnit(seed ^ 0xB5u));
+      width = 0.28f + 0.28f * HashUnit(seed ^ 0x71u);
+      reach = 3.5f + 6.0f * HashUnit(seed ^ 0xA7u);
+    } else if (effect->kind == kActionEffect_AitosWaterfallMist) {
+      /* Foam boils along the lower waterfall edge while lighter droplets
+       * drift upward into the fog banks. Horizontal phase offsets avoid a
+       * static bright seam over the gap. */
+      const float span = rect->x1 - rect->x0;
+      const float lane = ((float)i + HashUnit(seed ^ 0x53u)) /
+          (float)count;
+      const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 18.0f;
+      const float base_y = 5.0f +
+          (HashUnit(seed ^ 0xB5u) - 0.5f) * 9.0f;
+      x = rect->x0 + span * lane + drift * t;
+      y = base_y - 5.0f * t - 17.0f * t * t;
+      previous_x = rect->x0 + span * lane + drift * previous_t;
+      previous_y = base_y - 5.0f * previous_t -
+          17.0f * previous_t * previous_t;
+      width = 0.48f + 0.52f * (1.0f - t);
+      reach = 1.8f + 3.2f * t;
     } else if (effect->kind == kActionEffect_WallTorch) {
       const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 7.0f;
       const float birth = (HashUnit(seed ^ 0x71u) - 0.5f) * 5.0f;
@@ -1863,9 +1965,10 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       break;
     case kActionEffect_AitosLavaPit: {
       const float half_width = (rect->x1 - rect->x0) * 0.5f;
+      const float half_height = (rect->y1 - rect->y0) * 0.5f;
       spill = (ActionEffectGlowStyle){
         .radius_x = fmaxf(34.0f, half_width + 14.0f),
-        .radius_y = 23.0f,
+        .radius_y = fmaxf(23.0f, half_height + 13.0f),
         .ring_scale = {0.22f, 0.70f, 1.0f},
         .centre = {1.00f, 0.42f, 0.04f, 0.17f},
         .ring = {{1.00f, 0.28f, 0.02f, 0.13f},
@@ -1877,7 +1980,7 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       };
       body = (ActionEffectGlowStyle){
         .radius_x = fmaxf(28.0f, half_width + 3.0f),
-        .radius_y = 8.0f,
+        .radius_y = fmaxf(8.0f, half_height + 2.0f),
         .ring_scale = {0.16f, 0.78f, 1.0f},
         .centre = {1.00f, 0.98f, 0.66f, 0.78f},
         .ring = {{1.00f, 0.66f, 0.10f, 0.46f},
@@ -1887,9 +1990,116 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
         .axis_x = 1.0f, .lift_y = -1.0f,
         .seed = (unsigned)effect->pulse_generation,
       };
-      spill_y = -2.0f;
+      spill_y = -half_height * 0.30f;
       body_y = 0.0f;
       break;
+    }
+    case kActionEffect_AitosMoltenRock:
+      spill = (ActionEffectGlowStyle){
+        .radius_x = 25.0f, .radius_y = 23.0f,
+        .ring_scale = {0.24f, 0.66f, 1.0f},
+        .centre = {1.00f, 0.44f, 0.05f, 0.18f},
+        .ring = {{1.00f, 0.28f, 0.02f, 0.13f},
+                 {0.78f, 0.08f, 0.00f, 0.05f},
+                 {0.42f, 0.01f, 0.00f, 0.00f}},
+        .flare = 0.035f, .rise = 0.03f,
+        .axis_x = 1.0f, .lift_y = 1.0f,
+        .seed = (unsigned)effect->record_address,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = 10.5f, .radius_y = 10.5f,
+        .ring_scale = {0.18f, 0.62f, 1.0f},
+        .centre = {1.00f, 1.00f, 0.70f, 0.86f},
+        .ring = {{1.00f, 0.67f, 0.12f, 0.52f},
+                 {1.00f, 0.20f, 0.01f, 0.18f},
+                 {0.72f, 0.03f, 0.00f, 0.00f}},
+        .flare = 0.025f, .rise = 0.02f,
+        .axis_x = 1.0f, .lift_y = 1.0f,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      break;
+    case kActionEffect_AitosWaterSplash: {
+      const float half_width = (rect->x1 - rect->x0) * 0.5f;
+      spill = (ActionEffectGlowStyle){
+        .radius_x = fmaxf(22.0f, half_width + 10.0f),
+        .radius_y = 19.0f,
+        .ring_scale = {0.22f, 0.70f, 1.0f},
+        .centre = {0.52f, 0.90f, 1.00f, 0.12f},
+        .ring = {{0.28f, 0.70f, 1.00f, 0.08f},
+                 {0.08f, 0.32f, 0.78f, 0.03f},
+                 {0.02f, 0.10f, 0.38f, 0.00f}},
+        .flare = 0.025f, .rise = 0.04f,
+        .axis_x = 1.0f, .lift_y = 1.0f,
+        .seed = (unsigned)effect->generation,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = fmaxf(14.0f, half_width + 2.0f),
+        .radius_y = 6.0f,
+        .ring_scale = {0.18f, 0.72f, 1.0f},
+        .centre = {0.94f, 1.00f, 1.00f, 0.50f},
+        .ring = {{0.54f, 0.92f, 1.00f, 0.28f},
+                 {0.16f, 0.58f, 1.00f, 0.08f},
+                 {0.03f, 0.18f, 0.54f, 0.00f}},
+        .flare = 0.02f, .axis_x = 1.0f, .lift_y = 1.0f,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      spill_y = 4.0f;
+      body_y = -4.0f;
+      break;
+    }
+    case kActionEffect_AitosWaterfall:
+      /* Two extremely broad, low-alpha meshes act as a soft water veil. The
+       * underlying tiles remain the image; this only lowers the perceived
+       * contrast of their short animation cycle and supplies cool depth. */
+      spill = (ActionEffectGlowStyle){
+        .radius_x = 330.0f, .radius_y = 218.0f,
+        .ring_scale = {0.12f, 0.88f, 1.0f},
+        .centre = {0.30f, 0.70f, 1.00f, 0.012f},
+        .ring = {{0.22f, 0.62f, 1.00f, 0.010f},
+                 {0.10f, 0.42f, 0.78f, 0.005f},
+                 {0.03f, 0.14f, 0.30f, 0.00f}},
+        .flare = 0.008f, .axis_x = 1.0f, .lift_y = 1.0f,
+        .seed = (unsigned)effect->generation,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = 282.0f, .radius_y = 170.0f,
+        .ring_scale = {0.12f, 0.92f, 1.0f},
+        .centre = {0.56f, 0.88f, 1.00f, 0.016f},
+        .ring = {{0.38f, 0.78f, 1.00f, 0.013f},
+                 {0.16f, 0.52f, 0.92f, 0.006f},
+                 {0.04f, 0.18f, 0.42f, 0.00f}},
+        .flare = 0.006f, .axis_x = 1.0f, .lift_y = 1.0f,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      break;
+    case kActionEffect_AitosWaterfallMist: {
+      /* Three overlapping, low-alpha banks feather the finite waterfall into
+       * the uncovered bottom band. Their transparent outer rings keep this a
+       * soft atmosphere rather than an opaque replacement backdrop. */
+      static const float kBankX[3] = {-150.0f, 0.0f, 150.0f};
+      static const float kBankY[3] = {4.0f, -2.0f, 5.0f};
+      static const float kBankRadiusX[3] = {205.0f, 232.0f, 205.0f};
+      static const float kBankRadiusY[3] = {30.0f, 37.0f, 30.0f};
+      for (unsigned bank = 0;
+           bank < kActionSceneEffectWaterfallMistGlowCount; bank++) {
+        ActionEffectGlowStyle mist = {
+          .radius_x = kBankRadiusX[bank],
+          .radius_y = kBankRadiusY[bank],
+          .ring_scale = {0.18f, 0.70f, 1.0f},
+          .centre = {0.86f, 0.97f, 1.00f, bank == 1 ? 0.14f : 0.11f},
+          .ring = {{0.72f, 0.92f, 1.00f, bank == 1 ? 0.10f : 0.08f},
+                   {0.30f, 0.68f, 0.94f, 0.035f},
+                   {0.08f, 0.28f, 0.54f, 0.00f}},
+          .flare = 0.035f, .rise = 0.025f,
+          .axis_x = 1.0f, .lift_y = -1.0f,
+          .seed = (unsigned)effect->pulse_generation + bank * 0x45D9u,
+        };
+        if (!AppendGlow(writer, effect, &mist, pulse,
+                        kBankX[bank], kBankY[bank],
+                        project_point, userdata))
+          return false;
+      }
+      return true;
     }
     case kActionEffect_EnemyFireball:
     case kActionEffect_MarahnaFireball:
@@ -2210,6 +2420,15 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
       return effect->phase == kActionEffectPhase_AitosLavaPit;
     case kActionEffect_AitosLavaFireball:
       return effect->phase == kActionEffectPhase_AitosLavaFireballFlight;
+    case kActionEffect_AitosMoltenRock:
+      return effect->phase == kActionEffectPhase_AitosMoltenRockFlight &&
+          effect->visual == 0x2Bu;
+    case kActionEffect_AitosWaterSplash:
+      return effect->phase == kActionEffectPhase_AitosWaterSplash;
+    case kActionEffect_AitosWaterfall:
+      return effect->phase == kActionEffectPhase_AitosWaterfallFlow;
+    case kActionEffect_AitosWaterfallMist:
+      return effect->phase == kActionEffectPhase_AitosWaterfallMist;
     case kActionEffect_MarahnaLightningLink:
       return effect->phase == kActionEffectPhase_MarahnaLightningActive &&
           ((effect->visual == 0x2Eu &&
@@ -2236,23 +2455,25 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
            effect->visual >= 8u && effect->visual <= 10u);
     case kActionEffect_SwordBeam:
       return effect->phase == kActionEffectPhase_SwordBeamFlight &&
-          (effect->visual == 0x30u || effect->visual == 0x31u);
+          (effect->visual == 0x20u || effect->visual == 0x21u ||
+           effect->visual == 0x30u || effect->visual == 0x31u);
     default:
       return false;
   }
 }
 
-bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
-                                   bool lighting_enabled,
-                                   bool particles_enabled,
-                                   ActionEffectProjectPointFn project_point,
-                                   void *project_userdata,
-                                   ActionSceneEffectRenderBatch *batch) {
+static bool BuildSceneEffectList(
+    const ActionEffectInstance *effects, uint8_t effect_count,
+    uint8_t capacity, bool overflow, uint8_t render_layer,
+    bool lighting_enabled, bool particles_enabled,
+    ActionEffectProjectPointFn project_point, void *project_userdata,
+    ActionSceneEffectRenderBatch *batch) {
   if (!batch) return false;
   memset(batch, 0, sizeof(*batch));
-  if (!frame || frame->effect_count > kActionSceneEffectMaxInstances)
+  if (!effects || effect_count > capacity ||
+      render_layer >= kActionEffectRenderLayer_Count)
     return false;
-  if (frame->overflow || (!lighting_enabled && !particles_enabled)) return true;
+  if (overflow || (!lighting_enabled && !particles_enabled)) return true;
   if (!project_point) return false;
   ActionEffectGeometryWriter writer = GeometryWriter(
       batch->vertices, kActionSceneEffectRenderMaxVertices,
@@ -2261,16 +2482,18 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
   unsigned marahna_lightning_links = 0;
   unsigned marahna_boss_lightning_bolts = 0;
   unsigned sword_streams = 0;
+  unsigned waterfall_veils = 0;
+  unsigned waterfall_mists = 0;
 
-  for (uint8_t i = 0; i < frame->effect_count; i++) {
-    const ActionEffectInstance *effect = &frame->effects[i];
+  for (uint8_t i = 0; i < effect_count; i++) {
+    const ActionEffectInstance *effect = &effects[i];
     if (!(effect->flags & kActionEffectFlag_Visible) ||
         effect->geometry.kind != kActionEffectGeometry_Rect ||
         !RectIsSane(&effect->geometry.data.rect) ||
         !SceneEffectStyleKnown(effect) ||
         effect->obj_priority >= kActionEffectObjPriorityCount ||
-        effect->render_layer != kActionEffectRenderLayer_WorldOverlay ||
-        effect->projection_plane > kActionEffectProjectionPlane_Bg1)
+        effect->render_layer != render_layer ||
+        effect->projection_plane > kActionEffectProjectionPlane_Bg2)
       continue;
     if (effect->kind == kActionEffect_BloodpoolBossLightning &&
         effect->phase == kActionEffectPhase_BossLightningStrike &&
@@ -2288,6 +2511,12 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
     if (effect->kind == kActionEffect_SwordBeam &&
         ++sword_streams > kActionSceneEffectMaxSwordStreams)
       return false;
+    if (effect->kind == kActionEffect_AitosWaterfall &&
+        ++waterfall_veils > kActionSceneEffectMaxWaterfallVeils)
+      return false;
+    if (effect->kind == kActionEffect_AitosWaterfallMist &&
+        ++waterfall_mists > kActionSceneEffectMaxWaterfallVeils)
+      return false;
 
     if (lighting_enabled &&
         !AppendSceneLighting(&writer, effect, project_point,
@@ -2301,4 +2530,37 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
   batch->vertex_count = writer.vertex_count;
   batch->index_count = writer.index_count;
   return true;
+}
+
+bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
+                                   bool lighting_enabled,
+                                   bool particles_enabled,
+                                   ActionEffectProjectPointFn project_point,
+                                   void *project_userdata,
+                                   ActionSceneEffectRenderBatch *batch) {
+  if (!frame) {
+    if (batch) memset(batch, 0, sizeof(*batch));
+    return false;
+  }
+  return BuildSceneEffectList(
+      frame->effects, frame->effect_count, kActionSceneEffectMaxInstances,
+      frame->overflow, kActionEffectRenderLayer_WorldOverlay,
+      lighting_enabled, particles_enabled, project_point, project_userdata,
+      batch);
+}
+
+bool ActionSceneDecorationRender_Build(
+    const ActionSceneEffectFrame *frame, uint8_t render_layer,
+    bool lighting_enabled, bool particles_enabled,
+    ActionEffectProjectPointFn project_point, void *project_userdata,
+    ActionSceneEffectRenderBatch *batch) {
+  if (!frame) {
+    if (batch) memset(batch, 0, sizeof(*batch));
+    return false;
+  }
+  return BuildSceneEffectList(
+      frame->decorations, frame->decoration_count,
+      kActionSceneDecorationMaxInstances, frame->decoration_overflow,
+      render_layer, lighting_enabled, particles_enabled, project_point,
+      project_userdata, batch);
 }

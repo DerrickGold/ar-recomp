@@ -25,6 +25,8 @@ horizontal/vertical linked lightning, and the boss hand-charge/central-orb/diago
 ground-charge cycle as implemented scene accents. Run `20260811-225534` corrects `$E57E` from a
 supposed retired tail to the live three-frame floor discharge. The later captures also prove the
 formerly matched six `$34/$4BE5` actors are moving platforms, not fireballs.
+Run `20260812-000613` snapshot 5 also maps and implements the Aitos dragon boss's two exact
+priority-2 diagonal sword crescents through the existing portable comet style.
 The later Aitos snapshots in that run add map `$04/$01` lava-pit surface lights and the complete
 three-state lifecycle of their emitted lava fireballs as a separate implemented family.
 Snapshot hooks and renderer output are covered by ROM-free regressions, with only live visual
@@ -100,6 +102,15 @@ visual cadence, not its actor-owned lifetime. This is the companion to [SEAMS.md
     `(144,168)..(160,200)`. Vertical flip is not an authored beam state and fails closed; horizontal
     flip selects the measured mirrored rectangles. The measured velocity, normally `+8` or `-8`,
     is the authoritative path direction.
+    Aitos's Act-2 dragon has a second, separately validated producer in map `$04/$03`.
+    `$00:D785` leaves an inactive state-0 `$D793` controller linked to the active `$D646`
+    boss root and allocates two `$A655` children. Once visible they are handler/resume
+    `$8661/$A65D`, animation `$7E:5000`, index 1, flags `$0020`, no flip, and exact
+    state/visual/composition/local-counter/velocity tuples
+    `$01/$21/$56D8/$01/(-3,+1)` and `$02/$20/$56BE/$02/(-3,-1)`.
+    Snapshot `snap_05_gf21056` proves both 24×24 crescents at OBJ priority 2. They reuse
+    the sword comet presentation through their measured diagonal headings; they do not
+    relax the player identity rule or match arbitrary boss-bank artwork.
 12. **Marahna's requested accents are a separate map/object family.** In maps `$05/$04-$08`,
     one BG1 metatile `$43` is the complete torch, anchored at local `(8,11)`. The shared 2304×1792
     world contains 31 instances, so capture uses the same bounded `ActionBgMapView` contract as
@@ -130,16 +141,26 @@ visual cadence, not its actor-owned lifetime. This is the companion to [SEAMS.md
     `$0E/$45C4` + `$10/$45DC` validate orientation. The ten-part connector compositions support
     ten aligned host-ribbon segments without inferring an angle from screen pixels.
 14. **Aitos lava pits are bounded BG1 structures, and their fireballs are cyclic actors.** On
-    map `$04/$01`, every observed pit rim is `$DC`, one or more `$DD`, then `$DE`, with an equally
-    wide `$DF` row directly below. The four decoded pits are 64px wide at world `(1648,976)`,
+    map `$04/$01`, every observed pit rim is `$DC`, one or more `$DD`, then `$DE`, with equally
+    wide `$DF` then `$E7` bubbly rows below when map height permits (the rim at world Y=992
+    legitimately ends after `$DF`). The four decoded pits are 64px wide at world `(1648,976)`,
     `(1888,992)`, and `(2144,976)`, plus the 128px pit at `(3616,928)`. Capture requires the whole
-    two-row signature and publishes only a camera-local subset on BG1. Six persistent emitter slots
+    full signature and publishes only a camera-local subset on BG1. Six persistent emitter slots
     retain source `$CF9E`, resume `$CFCD`, animation `$7E:4000`, 8/8/8/8 extents, no flip, and
     artwork `$2A/$4D21` or `$2B/$4D2D`. Rising state `$22` uses handler `$CFE3` and velocity
     `(0,-4)`; wait/reset state `$23` uses `$8661` and `(0,0)`; return state `$24` uses `$CFFE` and
     `(-1,+6)`. Source+resume continuity plus bounded motion starts a fresh particle generation when
     the cyclic slot jumps back to its launch point.
-15. **Marahna's boss attack is a third electrical family with four presentation stages.** Only
+15. **Aitos volcano rocks and waterfall platforms have separate positive identities.** Run
+    `20260812-000613` separates launched molten rocks from `$CF9E` fireballs: they retain source
+    `$CEEC`, resume `$CF16`, handler/state `$8661/$27`, animation `$7E:4000`, artwork
+    `$2B/$4D2D`, extents `8/8/8/8`, X velocity `-2` unflipped or `+2` H-flipped, and measured Y
+    velocity `-1..+1`. Stationary `$CEEC/$CF1C` lava-mouth actors are excluded. Waterfall platforms
+    in maps `$04/$02-$03` use an exact three-row BG1 structure:
+    `$36/$5E*/$81`, `$4E/$F4*/$4F`, `$F6/$FC*/$FE`. Camera-local presence of that structure is
+    also the live discriminator between map `$04/$02`'s waterfall section and its preceding cave,
+    whose decoded BG2 map is otherwise the same.
+16. **Marahna's boss attack is a third electrical family with four presentation stages.** Only
     map `$05/$08` admits it. The live boss parent retains source `$E483`, animation `$7E:5000`,
     48/40/48/8 extents, and no spawner backlink. Handler `$8661` owns its pre-impact stages: exact
     visual/composition `$07/$57C2` and `$08/$5868` are its hand-charge cycles; `$0A/$59DE` is the
@@ -215,11 +236,12 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   than `libm` sine, so authored-tick output is repeatable across platforms. Unknown effect, phase,
   geometry, layer, or priority values fail closed.
 - Flat mode maps through the resolved presentation viewport. Diorama mode consumes the compositor's
-  exact resolved matrix, mesh dimensions, BG1 interpolation window, and the source OBJ priority
-  plane's authored depth/rake/bow, keeping the overlay registered without reading live WRAM,
-  duplicating camera auto-fit, or guessing a parallel depth. Enhanced light/embers intentionally
-  remain a world overlay above the composed world and below HUD/HD UI; source priority is retained
-  for projection now and priority-aware masking later.
+  exact resolved matrix, mesh dimensions, and paired UV-window/shape record for the source BG or
+  OBJ plane, keeping the overlay registered without reading live WRAM, duplicating camera auto-fit,
+  or guessing a parallel depth. Dynamic actors and BG1-local accents remain a world overlay above
+  the composed world and below HUD/HD UI. The waterfall is instead inserted at BG2-low painter
+  depth in Diorama and multiplied by a current PPU BG2-winner mask in flat presentation, preserving
+  later BG1/OBJ occlusion without a custom shader.
 - Both modes share the same capability-checked SDL additive/untextured-geometry path as simulation
   effects. No platform shader is required. Settings expose independent `action_effect_lighting`
   and `action_effect_particles` switches (`AR_ACTION_EFFECT_LIGHTING` /
@@ -258,18 +280,35 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   a grounded oval bloom, contact sparks, and a direction-aware wake. A forged second diagonal bolt
   exceeds the explicit one-bolt capacity and fails closed.
 - Aitos map `$04/$01` adds a camera-windowed lava-surface scan through the same bounded BG map
-  view and shared aligned scan bounds. It requires the complete `$DC/$DD+/$DE` rim over `$DF`,
+  view and shared aligned scan bounds. It requires the complete `$DC/$DD+/$DE` rim over `$DF`
+  and includes the following `$E7` bubbly row when it exists,
   derives the exact 64px or 128px
   surface rectangle, and projects it on BG1. A separate `$CF9E/$CFCD` actor rule covers all three
   exact fireball handler/state/velocity phases and both artwork pairs on OBJ priority 0. Lava surfaces use
-  an elongated two-tier orange spill plus twelve births distributed across the full rim; fireballs
+  an elongated two-tier orange spill over the full bubbly volume plus twelve births spread across
+  the rim width from a narrow band one quarter-height above its geometric midpoint; fireballs
   use the velocity-aligned flame body and wake, with an upward fallback during the stationary wait.
   Both animated BG fire styles sample presentation at 2× while retaining authentic 60Hz capture
   clocks.
+- The separately identified `$CEEC/$CF16` rocks receive a compact molten halo and close tumbling
+  sparks rather than a directional flame wake. Exact waterfall-platform structures receive cool
+  lip spray plus downward drips. When at least one is camera-local, one bounded BG2 record adds a
+  low-alpha water veil and 48 slow vertical flow streaks over the source waterfall. A paired
+  after-BG2 Diorama record adds three mist banks and sixteen foam motes at the bottom seam, where the
+  intentionally finite BG2 extension would otherwise expose black. Map-derived accents have an
+  independent 16-record frame from the 16 actor records: the measured maximum camera window
+  publishes 14 splash structures plus one veil and one mist while still admitting the complete
+  actor budget. Either list fails closed independently. These use the same portable untextured SDL
+  geometry and standard blend modes as every other action accent; no renderer-specific shader blob
+  is required.
 - The player sword beam is deliberately outside the Bloodpool map gate. Capture requires handler
   `$9D1C`, animation `$06:8000`, attacker flag `$0001`, one of the two exact state/visual/
   composition tuples, and a backlink to the live player whose source descriptor matches the
   child. This prevents a polymorphic or immediately recycled slot from inheriting the effect.
+- Aitos map `$04/$03` additionally admits exactly the dragon's two-child `$D646` sword volley.
+  Capture validates each full child tuple, the inactive `$D793/$23/$56FE` controller, and its
+  backlink to the live boss root. Both retain their authored priority-2 projection and exact
+  OAM-local rectangles while sharing the player beam's portable halo/wake/star style.
 - Each source remains an independent light centre. Torches receive a warm two-tier wall spill and
   a small rising ember plume; fireballs receive a heading-aligned hot body, warm spill, and trailing
   sparks; trap lightning receives a tall cyan shaft aura, crawling sparks, and a small impact fan.
@@ -286,13 +325,23 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   of three height lanes. Positions stay fixed from 4px to 88px behind the crescent while scrambled
   18-tick phases independently fade and scale each star into and out of existence; no glint streams
   backward along the path.
-  All elements follow measured velocity, mirror for leftward travel, and project through the same
+  All elements follow measured velocity—including the Aitos boss's two diagonal branches—mirror
+  for leftward travel, and project through the same
   OBJ plane in flat or Diorama mode. This supersedes both the detached triangular wake in run
   `20260810-184935` and the barely visible five-glint correction in run `20260810-190012`.
 - Flat presentation uses the normal action camera projection. Diorama presentation publishes the
-  exact resolved BG1-low shape alongside the existing four OBJ shapes: torches follow BG1
-  depth/rake/bow, while fireballs and lightning follow OBJ priority 0. A missing plane fails closed
-  instead of placing the effect at a guessed depth. The published projection also owns the hidden
+  exact resolved BG1-low and BG2-low UV/shape records alongside the existing four OBJ records:
+  BG planes pass the same visibility, texture, current-pixel, flat-HUD, and skybox gates as
+  drawing. A visible current world-overlay actor also counts as current projection content for its
+  exact OBJ priority band; this is required when the isolated band has no final winning pixels,
+  and is requested through a four-bit mask derived from the immutable spell/scene frames. The OBJ
+  layer request and texture-resource gates still fail closed; immutable request/content/success
+  masks distinguish an intentionally empty band from a failed upload. Torches, lava,
+  and platform splash/drips follow BG1 depth/rake/bow; the waterfall veil follows BG2 camera and
+  geometry and is drawn immediately after BG2-low rather than after the complete world; fireballs
+  and lightning follow OBJ priority 0. Flat mode clips that veil with the PPU's completed
+  main-screen BG2-winner mask before additive composition. A missing plane or mask fails closed instead of
+  placing the effect at a guessed depth. The published projection also owns the hidden
   OBJ-resolve apron origin of the 640-column layer textures; callers remain in displayed-capture
   coordinates, preventing overlays from drifting across a raked plane while the flat path stays
   unchanged.
@@ -301,7 +350,8 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   software, and headless builds share one implementation. The existing Action `Effect lighting`
   and `Particles` settings control both spell and scene accents. Spell and scene batches share one
   capacity-aware geometry writer and append directly into their final arrays; scene rendering does
-  not allocate or copy through a spell-sized scratch batch.
+  not allocate or copy through a spell-sized scratch batch. Dynamic actors and map decorations
+  share the writer but keep independent capture capacities and reuse one scene render batch.
 
 ### Simulation coordinate contract
 
@@ -598,10 +648,18 @@ Before final visual tuning, finish these focused acceptance captures:
    the three-frame left/right ground-riding charge. Confirm `$34/$4BE5` moving platforms and the
    `$E0BA` reaper orb remain undecorated, then accept pause/retirement, flat/Diorama registration,
    and both Graphics switches.
-6. Revisit Aitos map `$04/$01` using snapshots 3-7 of `20260811-151353`. Accept full-width lava
-   surface spill/embers for both observed 64px and 128px pits, the rising/reset/return fireball
-   cycles, slot relaunch, pause/retirement, flat/Diorama registration, and both Graphics switches.
-   The pit must follow BG1 rake/bow while each projectile follows OBJ priority 0.
+6. Revisit Aitos maps `$04/$01-$03` using snapshots 3-7 of `20260811-151353` and all six snapshots
+   of `20260812-000613`, plus the perspective-source correction in
+   `20260812-105106/snap_00_gf3728`. Accept full-volume lava spill for both observed 64px and 128px
+   pits, with embers born across the width at the isometric plane one quarter-height above the
+   bubbly volume's geometric midpoint,
+   the rising/reset/return fireball cycles, the separate molten-rock accent without a flame wake,
+   platform lip spray/drips, the restrained BG2 waterfall veil/flow streaks, and the Diorama-only unmasked
+   bottom foam/mist covering the finite-backdrop gap. Confirm the shared
+   `$04/$02` cave receives no water overlay, then accept slot relaunch, pause/retirement,
+   flat/Diorama registration, and both Graphics switches. Lava and platform accents must follow
+   BG1 rake/bow, the waterfall must follow BG2 camera/rake/bow, and projectiles must follow OBJ
+   priority 0.
 7. Log the controller kind and cohort slot `status, X/Y, +0A/+0C/+0E/+10, +20, +22, +28` each
    tick. Confirm the decoded timing, clone count, and slot reuse for IDs 2-4.
 8. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the

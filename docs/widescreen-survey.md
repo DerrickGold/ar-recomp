@@ -545,9 +545,38 @@ Stage D2 widens only the `$0400` horizontal decision and remains independent of
 `AR_WS_MARGIN_OBJECTS`. Vertical coverage, status gates, D1 drawing, OAM
 emission, and exit machine state are unchanged. Direct Fillmore testing
 confirmed correct sprites and activation, so wide activation is now default-on;
-`AR_WS_MARGIN_ACTIVATION=0` restores the authentic boundary.
+`AR_WS_MARGIN_ACTIVATION=0` restores the native-width boundary.
 `AR_WS_ACTDBG=1` logs every `$0400` transition with authentic/draw/activation
 results, handler, type, definition, span, and margins.
+
+#### Action-entry activation gate (corrected 2026-08-12)
+
+The D1/D2 split remains intact during the orb/statue arrival. DRAW continues
+using fitted camera `$22/$24`, `AR_WS_MARGIN_OBJECTS`, live presentation
+margins, and the OBJ apron. Only D2's extra horizontal ACTIVATION range is held
+back while player handler `$08B2` is `$97A6`, `$97C9`, or `$97E4`; authentic
+vertical coverage and every visual path remain unchanged. Completed `$97E4`
+installs `$9832`, the first handler that reads input, and wide activation is
+restored on that same object scan.
+
+“Zero activation margins” is not sufficient once the camera is fitted to a
+wide finite canvas. At Fillmore entry the presented camera is `$22=120`, but
+the original `$02:B030` subject-centre/clamp rule gives native camera 0 for
+arrival world X `$0050`. The first implementation applied a 256px interval at
+the fitted origin, selecting world `[120,376)` instead of `[0,256)`. It did not
+disable or narrow drawing; it shifted the `$0400` gameplay/script object set
+120px right and produced the observed fade-in/fade-out regression.
+
+The corrected gate reconstructs native camera X as
+`clamp(subject_x-128, 0, world_width-256)`. Arrival X comes from initialized
+player field `$08A2` until `$97A6` transfers subject ownership through `$8A`;
+ordinary native-width fallback uses validated subject `$8A`. The paired entry
+actor at `$9755` and final player handler `$97E4` both write entry fade/raster
+controls, demonstrating why an activation scan cannot assume every non-player
+slot is merely an enemy. Replay `runs/20260812-122927` follows handler changes
+at gf962 `$97A6`, gf1068 `$97C9`, gf1140 `$97E4`, and gf1185 `$9832`, with no
+second Fillmore music stop/restart. The full test suite passes 45/45; live
+visual acceptance of the corrected fade remains pending.
 
 Cheat-matched deterministic runs through game-frame 3000 completed cleanly:
 off `runs/20260712-135146/`, on `runs/20260712-135219/`. At gf=2500 the PPM
@@ -650,7 +679,11 @@ off whenever a cfg/emitter change makes it necessary.
 
 1. **Action Stage D2 — COMPLETE.** D1 drawing is unchanged; wide activation is
    default-on and `AR_WS_MARGIN_ACTIVATION=0` retains the same-binary fidelity
-   gate. Direct Fillmore movement/combat and boundary behavior are clean.
+   gate. During `$97A6/$97C9/$97E4` arrival, only the extra horizontal
+   activation range is automatically held to the reconstructed native camera;
+   wide drawing/presentation never switches off. Direct Fillmore
+   movement/combat and boundary behavior are clean, and the corrected entry
+   replay preserves the native handler/fade lifecycle.
 2. **All-action policy — IMPLEMENTED and VALIDATED.** The runtime
    enables the shared BG/sprite paths for `$18=$01-$07`. Every ordinary action
    level plus the complete Death Heim boss rush/final boss/return transition is

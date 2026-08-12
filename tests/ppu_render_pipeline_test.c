@@ -842,7 +842,8 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
                               kPpuOverlayFlag_MarkObjColorMath |
                               kPpuOverlayFlag_MarkBgHalfAdd |
                               kPpuOverlayFlag_ApplyBgFixedColorSubtract |
-                              kPpuOverlayFlag_MarkFullAddSubscreen;
+                              kPpuOverlayFlag_MarkFullAddSubscreen |
+                              kPpuOverlayFlag_MarkMainScreenWinner;
     CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0,
                                kActRaiserAuthenticWidth,
                                kActRaiserAuthenticHeight, kAllFlags));
@@ -1156,6 +1157,56 @@ static void TestFullAddSubscreenWinnerCapture(void) {
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, NULL, 0);
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, NULL, 0);
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
+/* A BG2-stage host effect needs the final main-screen winner, not merely the
+ * isolated BG2 pixels. Put BG1 high-priority art over the right half and prove
+ * the exported mask is white only where BG2 remains drawable; its untouched
+ * region is opaque black so SDL_BLENDMODE_MUL actually erases effect RGB. */
+static void TestMainScreenWinnerMask(void) {
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint8_t fb[kW * sizeof(uint32_t)];
+  static uint32_t mask[kW];
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  memset(mask, 0, sizeof(mask));
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] =
+      (1u << kActRaiserPpuLayer_Bg1) |
+      (1u << kActRaiserPpuLayer_Bg2);
+  ppu->cgram[0x11] = bgr555(31, 0, 0);
+  ppu->cgram[0x21] = bgr555(0, 0, 31);
+  set_solid_4bpp_tile(ppu, 1, 1);
+  set_solid_4bpp_tile(ppu, 2, 1);
+  ppu->bgTileAdr = 0;
+  ppu->bgXsc[kActRaiserPpuLayer_Bg1] = 0x20;
+  ppu->bgXsc[kActRaiserPpuLayer_Bg2] = 0x24;
+  for (int x = 0; x < 32; x++) {
+    /* Transparent BG1 on the left; high-priority BG1 on the right. */
+    ppu->vram[0x2000 + x] = x < 16 ? 0 : (uint16_t)(1 | (1 << 10) |
+                                                     (1 << 13));
+    ppu->vram[0x2400 + x] = (uint16_t)(2 | (2 << 10));
+  }
+  PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                              (uint8_t *)mask, sizeof(mask)));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 1,
+      kPpuOverlayFlag_MarkMainScreenWinner));
+  render_first_line(ppu);
+  CHECK(mask[0] == 0xffffffffu);
+  CHECK(mask[127] == 0xffffffffu);
+  CHECK(mask[128] == 0xff000000u);
+  CHECK(mask[255] == 0xff000000u);
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 0));
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
@@ -1978,6 +2029,7 @@ int main(void) {
   TestDioramaFixedColorSubtractCapture();
   TestSubscreenOnlyOverlayCapture();
   TestFullAddSubscreenWinnerCapture();
+  TestMainScreenWinnerMask();
   TestVerticalMarginLayerClip();
   TestVerticalMarginBottomLayerClip();
   TestVerticalMarginExactObj();
