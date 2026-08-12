@@ -1,9 +1,8 @@
 # Cross-platform build tooling
 
-ActRaiserRecomp uses `snesbuild`, a native Go project driver, for regeneration
-and CMake orchestration. The command is deliberately separate from `v2regen`:
-`v2regen` exposes individual recompiler operations, while `snesbuild` owns the
-ordered per-project workflow and host-tool invocation.
+ActRaiserRecomp uses the Go-based `snesbuild` driver for regeneration and build
+orchestration. `v2regen` exposes individual recompiler operations;
+`snesbuild` owns the ordered project workflow.
 
 ## Current commands
 
@@ -15,9 +14,8 @@ go -C snesrecomp-go run ./cmd/snesbuild regen --root .. --rom ar.sfc
 go -C snesrecomp-go run ./cmd/snesbuild build --root ..
 ```
 
-The current inherited stub backlog makes strict `regen` exit nonzero after all
-outputs and sidecars are complete. `--allow-stubs` is available for local work
-on the existing backlog; new release automation should remain strict.
+The inherited stub backlog makes strict `regen` exit nonzero after producing all
+outputs. Use `--allow-stubs` for local work; keep release automation strict.
 
 Build a reusable host binary with:
 
@@ -25,8 +23,8 @@ Build a reusable host binary with:
 go -C snesrecomp-go build -o build/snesbuild ./cmd/snesbuild
 ```
 
-Because `-C snesrecomp-go` changes the output base, that command creates
-`snesrecomp-go/build/snesbuild`. It can then be invoked without Go or Bash:
+Because `-C snesrecomp-go` changes the output base, this creates
+`snesrecomp-go/build/snesbuild`, which can run without Go or Bash:
 
 ```sh
 snesrecomp-go/build/snesbuild all \
@@ -46,13 +44,10 @@ should call `snesbuild` directly.
 
 ## Hermetic builds (no CMake, no system compiler)
 
-`snesbuild build --hermetic` compiles the entire game — engine runtime, game
-sources, and generated banks — with a pinned [Zig](https://ziglang.org)
-toolchain (`zig cc`, a self-contained clang+lld) and links the executable
-directly. CMake, Xcode CLT/gcc, and SDL3 *development packages* are not
-required; only the SDL3 runtime library remains an external input, and the
-platform bundles carry it beside the executable where a redistributable is
-available.
+`snesbuild build --hermetic` compiles the runtime, game sources, and generated
+banks with a pinned [Zig](https://ziglang.org) toolchain. It does not require
+CMake, a system C compiler, or SDL3 development packages. The SDL3 runtime
+remains an input and is bundled where redistribution permits it.
 
 ```sh
 snesbuild toolchain fetch          # one-time: download + sha256-verify + extract
@@ -61,11 +56,9 @@ snesbuild all --hermetic --root . --rom ar.sfc --allow-stubs   # regen + build
 snesbuild gui --root .         # local graphical ROM picker + hermetic build
 ```
 
-The pinned Zig release (0.16.0) is resolved in order: `$SNESBUILD_ZIG`, the
-project cache `build/toolchain/`, then `PATH`. `snesbuild toolchain status`
-reports the pin, its checksum, and what is locally available. Fetch verifies
-the archive against a checksum embedded in the snesbuild binary — the network
-is trusted for bytes, never for content.
+Zig 0.16.0 is resolved from `$SNESBUILD_ZIG`, `build/toolchain/`, then `PATH`.
+`snesbuild toolchain status` reports the pin and local availability. Fetches are
+verified against a checksum embedded in `snesbuild`.
 
 The macOS/Linux Zig pins are `.tar.xz` archives, unpacked via the host `tar`,
 which must support `.xz` (standard on modern macOS and Linux). The Windows Zig
@@ -84,17 +77,13 @@ Inputs are split along the same boundary as the redistribution rules:
 - generated banks are globbed from `src/gen` as always.
 
 Output lands in `build/hermetic/` with flat per-source objects. Rebuilds are
-incremental (source/header mtimes + a flags hash); a no-op rebuild takes well
-under a second, a clean build roughly two minutes on an 8-core machine. The
-CMake path (`snesbuild build`, presets, tests, sanitizers) remains the
-developer workflow; hermetic is the distribution path.
+incremental using source/header mtimes and a flags hash. Use CMake for normal
+development, tests, and sanitizers; use the hermetic path for distribution.
 
 ### Cross-target link checks
 
-`zig cc` ships libc headers and a linker for every target it supports, so the
-same command can build the game *for* a platform this machine is not. That
-turns "will the Windows build work?" from a question needing a Windows box into
-one command:
+Because `zig cc` includes target headers and linkers, it can compile and link for
+another platform:
 
 ```sh
 make check-cross                   # currently: Windows x86_64
@@ -117,15 +106,9 @@ Each target keeps its own object tree under `build/hermetic/<target>/`, so a
 cross check does not evict the native build's objects (and vice versa); both
 stay incremental.
 
-This proves the compile and the link, not the run. Its value is the class of
-breakage that is otherwise invisible from a Mac: `#ifdef _WIN32` branches
-nothing has ever compiled, macro collisions with `<windows.h>`, and system
-libraries the link needs but nothing declares. Introducing it caught exactly
-those three — a BSD-only `funopen` in `ar_trace.c`, a project `FORCEINLINE`
-that silently downgraded mingw's `__forceinline` and produced duplicate
-`NtCurrentTeb`/`GetCurrentFiber`/`GetFiberData` definitions in every
-translation unit including `<windows.h>`, and a missing `-lcomdlg32` for
-`launcher.c`'s ROM picker.
+This proves compilation and linking, not runtime behavior. It catches uncompiled
+`#ifdef _WIN32` branches, `<windows.h>` macro collisions, and missing system
+libraries. The check has already found examples of all three.
 
 Only Windows x86_64 is wired in, because it is the only platform with both an
 official SDL3 redistributable to link against and no other way to test it here:
@@ -149,13 +132,9 @@ census deltas, and cross-platform exit status handling; it does not call
 
 ## GPU shaders
 
-The optional GPU effects (rim lighting, depth of field, edge AA, soft shadow
-blur — `kSettingCat_Graphics`) need one shader per backend, and each backend
-speaks a different format: Vulkan wants SPIR-V, Metal wants MSL, D3D12 wants
-DXIL. **No shader compiler runs at build time.** The hermetic build has a
-pinned `zig cc` and nothing else, so requiring `glslc` there would break the
-one-download bundle premise; instead the compiled blobs are committed and both
-build paths simply compile C.
+GPU effects need backend-specific shader formats: SPIR-V for Vulkan, MSL for
+Metal, and DXIL for D3D12. **No shader compiler runs during a game build.**
+Compiled blobs are committed, so both build paths compile only C.
 
 | Path | What it is |
 |---|---|
@@ -194,14 +173,12 @@ additive.
 
 ## Self-contained distribution bundles
 
-`snesrecomp-go/packaging/` is a standalone CMake project (it compiles no C
-itself) that produces a **fully self-contained, one-click bundle per
-platform**. A non-technical user downloads one archive and runs one script,
-which opens a local graphical ROM picker and build log — no repository
-checkout, compiler, SDL, or system-wide install. Because the Go module is
-CGO-free, every platform cross-builds from one machine.
+`snesrecomp-go/packaging/` is a standalone CMake project that produces a
+self-contained bundle for each platform. The user runs one script to open a
+local ROM picker and build log; no checkout, compiler, or system-wide install is
+needed. The CGO-free Go module cross-builds every target from one machine.
 
-**Build all seven from the repo root, one command:**
+Build all seven from the repository root:
 
 ```sh
 make release
@@ -211,21 +188,16 @@ make release
 # Steam Deck only:  make release-steam-deck
 ```
 
-Each platform's CMake build tree holds a freshly extracted ~180 MB Zig
-toolchain, so it is removed automatically as soon as that bundle is staged
-(pass `KEEP_BUILD=1` to retain them for debugging). The download cache
-(`snesrecomp-go/packaging/cache/`, ~420 MB of archives) is kept, so re-runs
-re-extract in seconds without re-downloading. To reclaim more afterwards:
-`make clean` removes every regenerable artifact (build trees, generated C, tool
-binaries, release bundles) while keeping the ROM, save files, source, and that
-download cache; `make clean-all` also drops the cache.
+Each platform tree extracts a Zig toolchain, then removes it after staging the
+bundle. Set `KEEP_BUILD=1` to retain it. The packaging download cache is kept for
+faster reruns. `make clean` removes regenerable artifacts but keeps the cache;
+`make clean-all` removes the cache too.
 
 Bundles (plus `.sha256` sidecars) land in `release/`, named
 `actraiser-recomp-<os>-<arch>.{tar.xz,zip}` (~55–65 MB tar.xz, ~100 MB Windows
 zip).
 
-**The bundle is built for a non-technical user, so its root is deliberately
-almost empty** — everything that would intimidate is hidden under `utils/`:
+The bundle root contains only the instructions, run script, and `utils/`:
 
 ```
 actraiser-recomp-<platform>/
@@ -241,38 +213,21 @@ actraiser-recomp-<platform>/
     └── LICENSE, ATTRIBUTION.md
 ```
 
-The only things deliberately absent are the ROM (the user supplies it), the
-ROM-derived generated C (regenerated locally), and optional HD/music replacement
-assets. The stock manual is embedded in `snesbuild` and materialized as
-`utils/game-assets/manual.pdf` when the builder/launcher first starts; a manual
-already present there wins. `game-assets/manifest.ini` ships as a template
-mapping every song/graphic slot so users drop in their own files. macOS and
-Windows x86_64 use SDL's official
-redistributables (universal macOS `.dmg`; Windows mingw archive). The dedicated
-Steam Deck archive is always Linux x86_64 and combines matching-version pinned
-official SDL headers with Valve's pinned Steam Runtime SDL shared library.
-Generic Linux archives still use the system SDL because there is no single
-portable upstream redistributable.
+The bundle excludes the ROM, ROM-derived generated C, and optional replacement
+assets. The embedded manual is written to `utils/game-assets/manual.pdf` on the
+first launch unless one already exists. The asset manifest maps the available
+replacement slots. macOS and Windows x86_64 use official SDL
+redistributables; Steam Deck uses Valve's Steam Runtime SDL. Generic Linux uses
+the system SDL.
 
-**How a user runs it:** unpack the archive and run `run-build`. The script starts
-`snesbuild gui`, a dependency-free local web interface bound to `127.0.0.1`
-behind a random per-session URL. The user selects a ROM, sees the live build log,
-and can launch the finished game. The ROM is copied locally as
-`utils/user-rom.sfc`; it is never sent over the network. The GUI runs the same
-hermetic regeneration/build APIs as the CLI, then does the two things that make
-play trivial:
+The user unpacks the archive and runs `run-build`. It starts a local interface on
+`127.0.0.1` behind a per-session URL. The selected ROM is copied locally to
+`utils/user-rom.sfc` and never uploaded. After the hermetic build, the GUI:
 
-1. **Copies the finished game to the root** — the executable and, on
-   macOS/Windows, its bundled SDL library — so the playable result sits in the
-   top folder, not buried in a build directory.
-2. **Generates a `run-game` script** (`.command`/`.bat`/`.sh`) next to it. The
-   user opens `run-game` to play — every time, with no rebuild. (That generated
-   script is created locally, so it is not Gatekeeper-quarantined — only the
-   downloaded `run-build` triggers the one-time right-click-Open on macOS.)
+1. Copies the executable and bundled SDL library, where applicable, to the root.
+2. Generates a `run-game` script beside it for later launches without a rebuild.
 
-**Reopening it: the GUI is also a launcher.** It probes the filesystem at session
-start (`cmd/snesbuild/install_state.go`) and reports two INDEPENDENT capabilities,
-because they depend on different files:
+On later launches, the GUI independently detects two capabilities:
 
 - **can launch** — the `run-game` launcher and the game binary are both present in
   the output folder. Nothing about the toolchain matters.
@@ -281,40 +236,24 @@ because they depend on different files:
   the Zig toolchain or `src/gen`, which the build fetches and regenerates —
   gating on those would refuse a rebuild that would have succeeded.
 
-Their combination picks the page shape: `buildable` (the original ROM picker),
-`ready` (Play plus a rebuild option), `launcher` (Play only — the build UI is
-hidden entirely, not merely disabled), or `unusable`. The rebuild gate is enforced
-server-side as well as in the page, because a stale tab or a cleanup performed in
-another window would otherwise start a build that dies partway with a confusing
-toolchain error.
+Together they select the `buildable`, `ready`, `launcher`, or `unusable` page.
+The server also enforces the rebuild gate so stale browser state cannot start an
+invalid build.
 
-**The "keep just the game" cleanup.** After a successful build the GUI offers to
-delete the build-only files, sized from an actual walk. It is an **allowlist** —
-`utils/{tools,build,src,recomp,snesrecomp-go,third_party}` — and never "delete
-`utils/`", because `utils/` is the game's runtime working directory: the launcher
-`cd`s into it, so `config.ini`, `diorama-layers.ini`, `game-assets/` and `saves/`
-resolve relative to it and sit beside the build inputs. Removing it wholesale
-would leave a game that starts without its settings, authored layer overrides,
-manual, or saves. `slimInstall` also refuses unless a built game is present, so a
-mis-click cannot leave the user with neither a game nor the means to build one.
+After a successful build, **Keep just the game** deletes an allowlist of build
+inputs: `utils/{tools,build,src,recomp,snesrecomp-go,third_party}`. It never
+deletes all of `utils/`, which is also the runtime working directory for config,
+layer overrides, assets, and saves. Cleanup is refused unless a built game is
+present.
 
-`snesbuild` locates the bundled Zig and SDL beside its own executable
-(`utils/tools/`), and the built game links SDL via an rpath
-(`@executable_path` / `$ORIGIN`) with the bundled library copied next to it, so
-it runs with no system SDL. The `run-game` script runs the root binary with its
-working directory set to `utils/` so the game finds `config.ini` and
-`game-assets/`. This whole flow is verified end-to-end: a bundle extracted to
-an empty directory outside the repo, with the dev machine's Zig/SDL/homebrew
-removed from the environment, builds from the ROM, deposits the game and
-`run-game` in the root, and the generated `run-game` script launches the game.
+`snesbuild` finds bundled Zig and SDL beside itself in `utils/tools/`. The game
+uses an executable-relative SDL rpath, and `run-game` sets its working directory
+to `utils/` for config and assets. This flow is verified from an extracted
+bundle outside the repository without the development machine's toolchain.
 
-A post-package **leak gate** re-extracts every archive and fails packaging if
-an unreviewed top-level entry appears (only `README.txt`, the run script, and
-`utils/` are allowed) or any first-party file contains a build-machine path;
-third-party payloads under `utils/tools/toolchain/`, `utils/tools/sdl3/`, and
-`utils/third_party/` are exempt from the string scan. `-trimpath` keeps such
-paths out of the Go binary to begin with; the gate proves it stays that way
-across the whole bundle (≈145 first-party files scanned per archive).
+A post-package **leak gate** re-extracts every archive. It rejects unexpected
+top-level entries and build-machine paths in first-party files. Toolchains,
+SDL, and third-party payloads are exempt from the path scan.
 
 ## Remaining distribution work
 

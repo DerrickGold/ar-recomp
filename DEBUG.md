@@ -1,19 +1,14 @@
 # ActRaiser Recomp — Debugging Guide
 
-This document is the single reference for **how to debug this static-recompilation port**.
-It lists every diagnostic tool, what it's for, and — most importantly — **which tool to reach
-for given a symptom**. Read the Decision Guide first; the rest is reference detail.
+Use the [decision guide](#1-decision-guide--symptom--tool) for an active bug.
+The remaining sections document individual tools, known bug classes, and case
+studies.
 
-All `AR_*` env vars are read by the recomp binary (`build/ActRaiserRecomp`). All `SNESREF_*`
-env vars are read by the oracle (`tools/oracle/snesref`). Almost every tool is **env-gated and
-inert by default**, so it's safe to leave the instrumentation in the build.
-
-**Config-file shortcut:** every `AR_*`/`SNESREF_*` var can also be set in the `.ini` config
-(`config.c` exports any such key via `setenv`), so you don't have to type them each run. Use
-**`./build/ActRaiserRecomp ar.sfc --config dev-config.ini`** — `dev-config.ini` ships with the
-cheat kit on and the common debug flags listed (commented). Precedence is **env > config**, so a
-command-line `env AR_X=…` still overrides a value in the file. (Section headers and `#` comments
-in the `.ini` are ignored; inline `# comments` after a value are stripped.)
+`AR_*` variables affect the recomp binary (`build/ActRaiserRecomp`);
+`SNESREF_*` variables affect the oracle (`tools/oracle/snesref`). Most probes are
+inert unless enabled. Variables may be set in the environment or the selected
+`.ini`; environment values take precedence. `dev-config.ini` lists the common
+debug flags and enables the cheat kit.
 
 ---
 
@@ -32,247 +27,90 @@ in the `.ini` are ignored; inline `# comments` after a value are stripped.)
   tracking, stack ABI) and **(b) the hand-written runtime** (PPU/DMA, NMI/IRQ, BRK/COP syscalls,
   vblank-wait HLE, SPC). Different tools target each — see below.
 
-### What actually causes m/x drift (read this before chasing a misdecode)
+### M/X drift
 
-The single most important mental model, learned the hard way (the act→sim cascade):
+Opcode correctness and decode-width correctness are separate. `v2regen
+opcode-diff` tests an opcode with known flags; it cannot prove that the decoder
+inferred the correct M/X state at a particular PC.
 
-> **Opcode correctness and decode-time WIDTH correctness are orthogonal.** A clean `v2regen opcode-diff`
-> (Tom Harte, §5) does NOT mean "no misdecodes." Tom Harte tests each opcode with *known input
-> flags* ("given m=1, does `SEP #$20` work?"). It can NEVER test "did the **decoder** correctly
-> *assume* m=1 at this PC" — which byte-width it gave the instruction and which variant it emitted.
-> That's a whole-program control/data-flow inference, and ALL our drift lives there.
+Runtime M/X can drift when:
 
-So a misdecode is almost never "wrong opcode" or "unregistered handler." It's **right handler,
-WRONG VARIANT**: the recomp emits one variant per `(routine × m/x)` and **dispatches by *runtime*
-m/x**. One leaked flag bit → dispatch faithfully picks a wrong-width variant whose body is garbage
-(the `CMP #$0004`→`CMP #$04`+`BRK` splits). The opcodes are fine; the m/x **input** to the dispatch
-is wrong. **Four ways runtime m/x goes wrong even with perfect opcodes:**
+1. `PLP` or `RTI` restores a runtime-dependent `P` that static analysis cannot
+   infer across a call or relocated stack.
+2. A wrong-width push misaligns the stack, so a later `PLP` or `RTS` reads the
+   wrong byte.
+3. A callee exits at a different width than the decoder propagated.
+4. Computed dispatch reaches a target at an unmodeled width.
 
-1. **`PLP`/`RTI` restoring a runtime-determined `P`.** The decoder tracks m/x via SEP/REP/PHP/PLP
-   (a per-function P-stack). Balanced *local* PHP/PLP works; but a PHP/PLP straddling a **call
-   boundary**, or a **relocated stack** (`TCS`), breaks the model → the decoder *guesses* the
-   restored m/x → every following byte decodes at the wrong width.
-2. **Stack misalignment.** A `PHX`/`PHY`/`PHP` run at the wrong width pushes the wrong byte count →
-   the SNES stack desyncs → a later `PLP`/`RTS` reads adjacent bytes → loads a garbage `P` →
-   runtime m/x flips. (This is the x=1 cascade: wrong-width index pushes → misaligned stack.)
-3. **Wrong exit-m/x propagation.** A callee returns at a different width than the decoder assumed,
-   so the caller's *post-call* code is decoded at the wrong m/x — the `$9156` class. Override with
-   cfg `exit_mx_at` / handle the RTS-trick with `rts_dispatch`.
-4. **Computed dispatch** reaching a PC at a runtime m/x the decoder never decoded that target for.
+A `--leaks` or `ar_call_mx_check` report is not automatically a defect. Decode
+the raw block at both widths with `dis65.py`. If the instruction lengths match,
+the report is cosmetic. If they differ, inspect the emitted block for a
+swallowed instruction. Unexpected `g_cpu_brk_hook` or `g_cpu_cop_hook` calls in
+`src/gen` are a common signal.
 
-**Which reported leaks actually matter (triage rule, 2026-07-22 — bug-ledger §22).** `--leaks` and
-the `ar_call_mx_check` tripwire report the **decoder's static expectation** at a JSR/JSL site. That
-is *not* by itself a defect: the emitted call is always a runtime `switch (((m_flag&1)<<1)|(x_flag&1))`
-over all four variants, so the correct-width callee runs regardless. A leak becomes real only when
-the mis-labelled **block** contains an **m-dependent-length immediate**, because then every byte
-after it was decoded at the wrong width and a real instruction gets swallowed. So:
+Before diagnosing flag inference, rule out stack-pointer drift with `AR_STRACE`.
+A one-byte `S` error can make a later `PLP` look like an M/X leak. This was the
+root cause of the act-to-sim cascade: an unconverted RTS-trick lost one stack
+byte per call. See [bug-ledger §7](docs/bug-ledger.md) and §7.7 below for the
+full case history.
 
-> Dump the block's RAW BYTES and decode at both widths — `dis65.py <blk> --mx 1,0` vs `--mx 0,0`.
-> **Same instruction stream → cosmetic, move on. Different lengths → an instruction was eaten;
-> read the emitted block in `src/gen` and find out which one.**
+### Common traps
 
-Two long-standing benign examples that will keep showing up and are NOT worth re-chasing:
-`NmiHandler $008520` / `IrqHandler $008525` (x=0 vs expected x=1, every frame — native-mode
-interrupts don't change m/x, and both handlers are `JSL`+`RTI`), and `bank_03_9DE4/9E5A/9E6B`
-`$03:A048`/`$03:A116`. The real one a hundred bytes away (`$03:A46A`) ate a `STA $0002,X`.
+Check these before adding instrumentation:
 
-**The swallowed-instruction symptom shape: a SILENT MISSING STORE.** No crash, no garbage variant,
-no stack drift, nothing in `--diagnose` — a state machine simply reaches its terminal state and the
-side effect never happens. The tell in `src/gen` is a block emitting `g_cpu_brk_hook`/
-`g_cpu_cop_hook` in a region the ROM has no software interrupt in (the swallowed opcode's tail
-bytes decode as `00`/`02`). Worth a scan whenever "X gets into state N and never leaves":
-
-```sh
-# blocks in a bank that emit brk/cop hooks — candidates for a width misdecode
-grep -n 'cpu_trace_block\|brk_hook\|cop_hook' src/gen/bank03_part*_v2.c
-```
-
-A routine that hits *all four at once* (stack relocation + RTS-tricks + nested cross-function
-PHP/PLP) is a "perfect storm" the static decoder can't track — e.g. `$03:8053` (the act→sim
-enter-sim setup). The decoder guesses at every hop; on a *rare* code path (most of the game never
-runs it) some guess is wrong and cascades.
-
-**Why this is hard to pin, and the fix:** from inside the recomp, "m=0 here" looks identical whether
-it's a correct rare path or a leaked guess (we burned a whole trace on `$02C206`, which actually
-self-normalizes). `AR_MXCHECK` proved the *direct-call* layer clean; the leaks live in the
-*dispatch + PLP-restore + stack-relocation* layer, invisible to per-opcode tests and any purely
-static check. **Only a real-hardware CPU-flag reference can say which** — that's the (still-unbuilt)
-ground-truth diff: serialize snes9x (`retro_serialize` savestates carry the CPU `P`), diff its m/x
-against the recomp's per-block m/x, and the first divergence is the exact leaking PLP/push/dispatch.
-Then fix with the override directives the recomp already has: `exit_mx_at`, `force_variant_at`,
-`rts_dispatch`.
-
-> **RESOLVED (2026-06-26) — and the lesson is a CORRECTION to the above: the act→sim "perfect
-> storm" was mechanism #2 (stack misalignment), NOT a flag-tracking bug, and was found WITHOUT the
-> oracle.** The apparent "x-leak" was a *symptom*: a **−1 SNES stack-pointer drift** made a `PLP`
-> read the slot *next to* its own saved `P`, loading a byte with x=1. So x looked misdecoded, but
-> m/x tracking was fine — `cpu->S` was off by one. Root: an **unconverted jump-table RTS-trick**
-> (`bank_01_B898` `$B8C0: LDA $01B8D0,X; PHA; RTS` with a `PHY`-pushed return to `$B8C2`) — the
-> recomp's generic RTS couldn't resolve the computed target and host-unwound `S` by −1 *per call*,
-> which ratcheted up over a loop until the over-pop. **Diagnostic lesson: before assuming an m/x
-> leak, RULE OUT a stack-pointer leak first.** A 1-byte `S` drift is indistinguishable from a flag
-> misdecode at block granularity (the dispatch *and* a downstream `PLP` both go wrong). The tool
-> that settles it is **`AR_STRACE`** (per-instruction `S`, scoped to a PC window) + the per-block
-> `S` now in the diag dump: watch `S` across each call in the suspect routine — the one call that
-> returns with `S` off is the bug, no oracle needed. Fixed with the new `indirect_dispatch …
-> ret:<pc>` directive (jump-table CALL; §7.7). The CPU-flag oracle (§6) WAS built and is real, but
-> it has a frame-granularity ceiling (can't see the crash frame, shows sampling noise) — the
-> instruction-level `S` trace is what actually cracked this.
-
-### Gotchas that have each burned a full investigation (read before building new instrumentation)
-
-These aren't bugs — they're properties of the runtime/ROM that look like bugs until you know them.
-Each one below cost real time (some cost days) before being understood; check this list before
-adding a new probe.
-
-1. **Direct-page addressing is `D`-relative, not literal.** `LDA $19` in decoded/generated code
-   reads `cpu_read8(cpu, 0x7E, cpu->D + 0x0019)`, NOT literal WRAM offset `$0019`. `D` happens to be
-   `0` in most of the code paths debugged so far (confirmed via the sim branch probe's printed `D=` field
-   for the ResetHandler main-loop context), but **never assume it** — a watch pointed at a literal
-   address can miss the real target entirely if `D != 0` at that call site. Always check `D` before
-   trusting a watch's silence as "nothing writes here."
-2. **Direct-page scratch bytes are reused across unrelated subsystems.** `$0014-$0017` is used as a
-   16-bit ADD/XOR accumulator by the save-checksum routine (`$02:84F3`) AND as a message-type
-   parameter by the dialog-draw dispatcher (`$02:BF60`) — two completely unrelated systems sharing
-   the same 4 bytes. An oracle diff or watch hit on a low DP address does NOT mean "the SAME logical
-   value differs" — check what's CURRENTLY using that address at the specific PC/frame in question
-   before concluding anything about its "meaning." Assume DP scratch is polymorphic until proven
-   otherwise (mirrors the object-table field-`$14` polymorphism in §11).
-3. **There are (at least) three distinct WRAM write paths, and a watch only covers what it hooks.**
-   `cpu_write8`/`cpu_write16` (`cpu_state.c`) is the direct-store path; `IndirWriteByte`/
-   `IndirWriteWord` (`common_rtl.h`) is the indexed/indirect-store path (`STA (dp),Y` etc.); `snes_write`
-   (`snes.c`, used by `dma_transferByte`) is the DMA path — DMA writes go straight into `g_ram`
-   completely bypassing both CPU-instruction paths. `AR_WATCHOBJ`/`AR_WATCH16` originally only
-   hooked the first path; both gaps were closed 2026-07-01 (see §3's coverage note and the
-   `[wobj-dma]`/`[watch16-dma]` tags), but if you ever add a FOURTH write mechanism to the runtime,
-   it needs its own hook too — a watch's silence is only as good as its coverage.
-4. **A CPU register's value at a sampling point doesn't mean what you think it means without an
-   explicit verification step.** A whole investigation (2026-07-01, the "`A=0x00A1`" chase) was
-   built on the unverified assumption that `cpu->A`, sampled via `AR_FRAMELOG` at a vblank-wait
-   yield point, reflected a specific memory read (`$0019`) executed earlier that frame. It didn't —
-   `A` was legitimate, transient CPU state left over from an entirely unrelated `LDA #$A1` a few
-   instructions earlier (`$00:8465`, a hardware-register-setup routine, same pattern as the
-   NMITIMEN write at `$008051`). Ten rounds of write/read/DMA instrumentation correctly found no
-   corruption, because there wasn't any — the bug was the initial assumed *link* between the
-   register and the memory address, never checked before building on top of it. **Before chasing a
-   suspicious register/memory value across multiple probes, spend one probe confirming the causal
-   chain that made you suspicious of it in the first place.**
-5. **A previously-documented, deliberately-accepted workaround can silently become the live bug
-   the moment its original blocker is fixed — and nobody notices unless they go looking.**
-   `$01:B898`'s `indirect_dispatch B8C0 … count=16` was capped below its real size (26) in an
-   EARLIER arc (2026-06-26), with an explicit, correctly-reasoned comment: *"object types 16-26
-   silently no-op instead of crashing — an acceptable gap, not a regression."* That comment was
-   accurate **at the time**. Months later (2026-07-02), chasing the sim-mode actor-spawn bug, the
-   label-emission bug that forced the cap got fixed as an unrelated side effect of a different
-   fix — which silently turned "acceptable gap for types we don't use yet" into "the exact types
-   the new feature needs." Nothing about the cap itself changed, and nothing flagged that its
-   justification had quietly expired. It took **three full rounds** of registering dispatch
-   targets, watching the census, and still seeing zero battery calls before anyone thought to grep
-   the existing cfg comments and find the answer already written down. **Rule: before treating a
-   silent no-op / dead dispatch / "nothing happens here" bug as newly discovered, grep
-   `recomp/*.cfg` (and this file) for existing directives and comments touching the same address
-   range FIRST** — a prior arc may have already characterized the exact gap you're staring at, and
-   any accepted workaround is a candidate for having silently rotted since. This is also why
-   `cpu_trace_dispatch_oob` was made loud-by-default in the same fix (§7, "dispatch-OOB
-   tripwire") — process discipline (check first) is necessary but not sufficient; the tooling
-   should also make this class of gap impossible to stay silent for long, so a future rotted
-   workaround surfaces on its own instead of needing someone to remember to look.
-
-6. **A "verified" result is only as good as the field you actually read, and green output is not
-   the same as a run that happened.** Four separate false-greens in one 2026-07-22 session, each
-   costing a re-run or a wrong conclusion:
-   - The A/B that signed off the widened sprite emitter checked `separated_mismatch_pixels`,
-     found a clean zero, and never read `integrity_flags` **in the same JSON object** — where
-     the real failure was sitting. Decide which field would *disprove* the change before running
-     it, not which one confirms it.
-   - `tools/sim3d_demo.py` defaults to `--binary build/ActRaiserRecomp`, so a session spent
-     building `build-release/` tests a stale binary and reports plausible-looking results. The
-     tell was a checkpoint whose visual SHA-256 was byte-identical to the previous run.
-     **Rebuild `build/` before any checkpoint run, or pass `--binary`.**
-   - A background shell inherits the working directory of whatever `cd` ran before it. A suite
-     launched after an earlier `cd build-release` died instantly on "no such file", and the
-     trailing `echo` in the command chain made the task report **exit code 0**. Never end a
-     background command with something that can succeed independently of the work.
-   - `--all` had been broken since the stage-pin guard was added, because `run_suite` referenced
-     an undefined `checkpoint`. It had never been exercised — every prior "suite passed" was
-     individual `--checkpoint` runs. A guard added to one entry point is not added to the other.
-
-7. **Look for the same contract in every place that could restate it.** Making atlas overflow
-   non-fatal took three edits — the builder loop, the foot-union pass, and the commit-side
-   descriptor validator — and the first attempt was abandoned because the third one raised a
-   flag (`AtlasRasterFailure`) that looked like an unrelated latent bug. It was the same
-   all-or-nothing rule, written again. This is the same shape as ledger §23, where two
-   composition paths each applied the live-area rule to their base fill and forgot it for their
-   plane loop. **When you relax an invariant, grep for every consumer of the flag it sets.**
-
-8. **Reverse-engineering: read the writer before inverting the data.** Two attempts to rebuild
-   the town from its 32x32 cell map failed (cell → 2x2 tile block is only 62-77% single-valued
-   however you align it), and the range holding the answer — `$7F:0000` — was dismissed twice
-   from eyeballing word patterns, once as "only the VRAM window" and once as "probably BG2".
-   Disassembling the *writer*, `$03:9C43`, gave the layout in four instructions: it is the whole
-   64x64-tile town, quadrant-paged, which is exactly why a row-major read looks like a different
-   layer. Expansion tables like `$7E:3100` are write paths the game runs on change; invert them
-   only after checking whether the expanded result is already resident.
+1. **Direct-page addresses are `D`-relative.** Confirm `D` before watching a
+   literal WRAM offset.
+2. **Direct-page scratch is polymorphic.** Identify the active caller before
+   assigning meaning to a low address.
+3. **A watch is only as complete as its hooks.** WRAM writes can use direct CPU,
+   indirect CPU, or DMA paths. Add coverage when adding another write path.
+4. **A sampled register does not prove causality.** Confirm that the suspected
+   read produced the value before tracing it across frames.
+5. **Accepted workarounds can expire.** Search `recomp/*.cfg`, this guide, and
+   the bug ledger before treating a silent dispatch gap as new.
+6. **Green output does not prove the intended test ran.** Confirm the binary,
+   working directory, exit status, checkpoint, and the field that would disprove
+   the change. `tools/sim3d_demo.py` defaults to `build/ActRaiserRecomp`; rebuild
+   it or pass `--binary`.
+7. **Contracts are often restated.** When changing an invariant or flag, search
+   every producer and consumer.
+8. **Read the writer before inverting data.** The expanded representation may
+   already exist in memory in a non-obvious layout.
 
 ---
 
-## 1. DECISION GUIDE — symptom → tool
+## 1. Decision guide — symptom → tool
 
-### THE DEBUG LOOP (the whole process, end to end)
+### Debug loop
 
-Every issue goes through the same eight steps. The rest of this document is reference detail for
-individual steps — this box is the process:
+`tools/cycle.sh` automates regeneration when needed, build, run, anomaly
+diagnosis, and dispatch-miss suggestions. Use the manual loop for ambiguous
+results:
 
-0. **`tools/cycle.sh` is steps 1-2-5-6 in one command** (2026-07-07): regen-iff-cfg-changed →
-   build → run via `tools/run.sh` → on exit auto-diagnoses every anom capture AND runs
-   `tools/resolve_miss.py` (the mechanized version of steps 2-3) → `runs/latest/cycle_report.txt`
-   ends with a PROPOSED CFG PATCH. Apply with `resolve_miss.py <files> --apply`, review via
-   git diff, `tools/cycle.sh` again. The manual steps below remain the reference for what
-   the automation is doing (and for the classes it marks AMBIGUOUS).
-   **All per-run artifacts live in `runs/<timestamp>/`** (2026-07-08, NATIVE via `src/run_dir.c` —
-   plain `./build/ActRaiserRecomp ar.sfc --config dev-config.ini` gets it too, no wrapper needed):
-   console.log (full stdout+stderr, tee'd through a child process so it survives crashes),
-   run_info.txt (cmd + AR_* env), anom captures, F2 snapshots, Shift+F9/exit dumps, screenshots.
-   `runs/latest` symlinks the newest; older runs stay intact for parallel analysis.
-   Battery SRAM/save-states stay in `saves/`. `AR_NO_RUN_DIR=1` restores the flat legacy layout.
-   Bare filenames in AR_TRACE/AR_INPUT_RECORD/AR_WRAM_TRACE/etc. are placed inside the run dir.
-1. **Play with watch mode on** (`--config dev-config.ini` keeps `AR_TRACE_WATCH` always-on). When
-   anything breaks, the lead-up window is ALREADY on disk (`runs/<ts>/anom_hf<frame>_<kind>.jsonl`;
-   the watchdog auto-flushes on hangs). No replay, no flag guessing.
-2. **`tools/trace_slice.py <dump> --diagnose`** — needs a fresh `saves/gen_meta.json` (regen.sh
-   auto-refreshes it). Read the ranked verdicts: most give a paste-ready cfg line or an explicit
-   DO-NOT-REGISTER.
-3. **Classify via the m/x-leak decision tree below** — the judgment calls the tools now flag
-   AUTOMATICALLY: construct-ret (B8C2 nested-reentry), paired JSR/JSL-return (§7.17
-   double-execution), and continuation SHAPE (single-shot/loop-continue → `func`; suspect →
-   manual). For anything AMBIGUOUS, decode it yourself with `tools/dis65.py` (m/x-tracked
-   disassembly with registration marks) + `tools/romxref.py` (who calls/branches there).
-   Wrong registrations no longer crash (the runner's dispatch recursion guard unwinds +
-   prints `[dispatch-recursion]` naming the bad line) — but still do the check; the guard
-   is a net, not a license.
-4. **No trace signal at all?** → not the misdecode/dispatch class. Go by symptom: the channel
-   table below (vram/wram/ppumem/hwread/stack/frame), then §5 static tools, then §6 oracle.
-5. **Apply the fix** — cfg directive (regen required) or runner/`src` change (rebuild only, §8).
-6. **Regen prints its own follow-ups**: the RTS-web census DELTA (newly-reachable uncovered
-   continuations — triage them NOW, before they cost a playtest) and the hard-stub census.
-   `go -C snesrecomp-go run ./cmd/v2regen rts-webs --rom ../ar.sfc --cfg-dir ../recomp
-   --suggest` emits shape-classified candidates for the delta. Search `src/gen` directly for
-   suppressed-call markers as described in the symptom table below.
-7. **Verify by re-trace, not by eyeball**: the specific signal must flip (`--leaks` empty,
-   `--vmadd` shows the right address, the anom dump stops appearing). Never declare a fix from
-   "it built" — the `exit_mx_at 039D4D` false fix cost a full round.
-8. **Document + commit**: track the bug as an OPEN entry in §7 while working it; on resolution,
-   write the ledger entry (root cause + fix + the reusable lesson) into
-   [docs/bug-ledger.md](docs/bug-ledger.md), memory update if the lesson generalizes, then
-   commit cfg/tool/doc changes together.
+1. Reproduce with `dev-config.ini`; its watch mode preserves the lead-up trace.
+2. Run `tools/trace_slice.py <dump> --diagnose` and read the ranked verdicts.
+3. Classify ambiguous continuations with `tools/dis65.py` and
+   `tools/romxref.py`. Do not register a target until its control-flow shape is
+   understood.
+4. If the trace has no misdecode or dispatch signal, select the relevant channel
+   from the table below, then use static tools (§5) or the oracle (§6).
+5. Apply the fix. Cfg changes require regeneration; runtime changes require a
+   rebuild.
+6. Review regeneration's RTS-web delta and hard-stub census. Search `src/gen`
+   for suppressed-call markers when relevant.
+7. Re-run the trace and verify that the specific failure signal changed.
+8. Record the root cause, fix, and reusable lesson in
+   [docs/bug-ledger.md](docs/bug-ledger.md), then commit the related changes.
 
-### STEP 0 (ALWAYS FIRST): capture a unified `AR_TRACE` and read it before toggling anything
+Run artifacts live in `runs/<timestamp>/`, with `runs/latest` pointing to the
+newest. Battery SRAM and save states remain in `saves/`. Bare trace and replay
+filenames are placed in the run directory; `AR_NO_RUN_DIR=1` restores the legacy
+flat layout.
 
-Do **not** start by reaching for a per-symptom flag. Almost every flag below is now folded into the
-one-run **`AR_TRACE`** stream (§2), so the first move on *any* bug is: get a deterministic repro,
-find the **host frame** of the symptom, and capture a windowed trace. This replaces the old
-"guess a probe, run, discover it saw the wrong layer, re-run" loop that cost this project dozens of
-runs.
+### First step: capture a unified trace
+
+Start with `AR_TRACE`, which combines most symptom-specific probes. Record a
+deterministic reproduction, locate the host frame, and capture a narrow window:
 
 ```
 # 1. deterministic repro (record once, then replay frame-exact):
@@ -380,44 +218,30 @@ those cases.
 | **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Search the generated output for silent-drop markers: `rg -n -e 'Call indirect SUPPRESSED' -e 'Call: target unknown' -e 'not a valid LoROM code address' src/gen`. If none name the suspect bank/address range, it is probably a genuine logic/state bug (for example, a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `AR_INDIRLOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (a targeted branch probe — the 4-PC "which branch fired" pattern, bug-ledger "Methodology learnings") |
 | **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | The Go port does not emit the Python tool's historical detailed routing report. Use `AR_MXCHECK`/`AR_CALLMX` to confirm the live mismatch, then inspect the generated `(m,x)` switch and, if the static route is suspect, `findEquivalentVariants` in `snesrecomp-go/internal/emitter/function.go` plus `routeVariant` in `snesrecomp-go/internal/codegen/emitter.go`. `snesbuild regen` logs how many equivalences each fixpoint pass learned | If no survivor is provably equivalent, investigate the caller-side width leak or pin the intended width with cfg `entry_mx:`; do not infer safety from variant distance |
 
-**Golden rule:** capture an **`AR_TRACE`** window first and read `--summary` → `--leaks` (STEP 0
-above) before toggling any per-symptom flag. One windowed run classifies the bug (misdecode /
-dispatch-miss / garbage / logic) *and* carries every layer (VRAM/WRAM/PPU/DMA/stack/hwread) with
-`m/x/S/DB` on every line. Reach for `AR_MXHIST=1` only when you can't yet pin the host frame to
-window on (it scans the whole run for the leak boundary); reach for single-address `AR_WATCH*`
-only after the trace has named the site.
+Two cautions:
 
-**Golden rule 2 (learned the hard way):** when a variant looks like a misdecode, **trust the
-emitted gen, not a hand ROM disassembly.** The instant, unambiguous "this variant is garbage"
-check is `grep -c brk_hook` on the two variants — e.g. `bank_03_AC8E_M0X0` had **0** BRK calls
-(real m=0 code) vs `bank_03_AC8E_M1X0`'s **7** (the m=1 misdecode splits `CMP #$0004` into
-`CMP #$04` + `BRK`). Hand-decoding the bytes wastes time and mis-aligns; the recompiler already
-did the decode correctly. Use the ROM only to *confirm*, never to *discover*.
-
-**Golden rule 3:** ActRaiser **legitimately relocates its stack to high pages** (page `$05` via
-`$057F`; **page `$1F` via `LDA #$1FFF; TCS` at `$03:9176`** for the act→sim transition). So a high
-`S` is NOT corruption. The real corruption signatures are (a) `S` *draining down* and wrapping
-`$0000→$FFxx` (underflow), and (b) a `[dispatch-miss]`. Don't waste a cycle flagging high pages.
+- Inspect emitted code before hand-disassembling a suspected variant. Comparing
+  `brk_hook` counts often identifies a wrong-width decode immediately; use ROM
+  disassembly to confirm it.
+- A high `S` is not automatically corrupt. ActRaiser legitimately relocates the
+  stack to pages `$05` and `$1F`. Look for continued drain, underflow, or a
+  `[dispatch-miss]`.
 
 ---
 
 ## 2. The core detection toolkit (permanent, always-available)
 
-**Read this section in two tiers.** The FIRST tier is `AR_TRACE`/`AR_TRACE_WATCH` + the default-on
-tripwires — that's the modern workflow (§1 THE DEBUG LOOP) and it subsumes most of what follows.
-The SECOND tier (everything from `AR_MXCHECK` down) predates the unified trace: each flag captures
-ONE layer the trace now carries as a channel. They remain for two legitimate uses — (a) whole-run
-coverage when you can't name a host-frame window (`AR_MXHIST`), (b) single-address history across
-a whole run (`AR_WATCHOBJ`/`AR_WATCH16`, §3) — and as cheap always-on regression guards
-(`AR_MXCHECK`/`AR_CALLMX` in dev-config). Do not START an investigation with a tier-two flag.
+Start with `AR_TRACE` or `AR_TRACE_WATCH`. The older flags below remain useful
+for whole-run coverage (`AR_MXHIST`), single-address history (`AR_WATCHOBJ`,
+`AR_WATCH16`), and always-on regression guards (`AR_MXCHECK`, `AR_CALLMX`).
 
-*(The `AR_TRACE` reference lives just below at its original position — see "unified single-run
-trace". Also default-ON with no flag: `[dispatch-miss]` (S≥$0200 only — the trace `dispmiss`
-channel is the ungated truth), `[garbage-variant]`, `[dispatch-recursion]` (>24 live dispatches
-of one target → self-healing unwind naming the bad cfg line), and `[4210-wedge]` (a whitelisted
-vblank spin stuck 4096 reads → prints which gate refused).)*
+Default-on tripwires include `[dispatch-miss]`, `[garbage-variant]`,
+`[dispatch-recursion]`, and `[4210-wedge]`. The trace's `dispmiss` channel is the
+complete dispatch-miss source; stderr reports only the dangerous high-stack
+subset.
 
 ### `AR_MXCHECK=1` — entry M/X invariant check *(tier two: permanent regression guard)*
+
 Emitted in every function prologue (`ar_entry_mx_check`; see
 `snesrecomp-go/internal/emitter/function.go`). Logs when a
 function is entered with `(m,x)` ≠ the variant it was compiled for. Catches **direct-call
@@ -426,6 +250,7 @@ variant mismatches** = the emitter's static M/X analysis being wrong.
 variant) — that's what `AR_MXHIST` is for. Leave it as a permanent regression guard.
 
 ### `AR_MXHIST=1` — runtime M/X histogram + live misdecode trap  *(tier two — the fallback misdecode finder when you can't window an AR_TRACE)*
+
 Records per-PC `(m,x)` execution counts (`ar_mxhist_record`, `common_cpu_infra.c`). Once a PC is
 established with a dominant `(m,x)` (≥64 hits), the **first** time it runs a different `(m,x)`
 prints `[mxhist] MISDECODE? <pc> ran m=.. x=.. (1st time) after <dom> xN f=<frame> caller=<fn>`.
@@ -433,6 +258,7 @@ At exit dumps all multi-combo PCs (flags **LOPSIDED** ones). A misdecode = a fun
 variant it normally never runs → instant pinpoint of the leak boundary.
 
 ### `AR_DISPMISSALL=1` — computed-dispatch-miss log  *(tier two — superseded by the trace `dispmiss` channel, which is ungated and windowed)*
+
 Logs every dispatch miss in the action stage as `[missall] ->TARGET from SOURCE m=.. f=..`. The
 object loop's **normal** exits are `from 00896f` — filter them out:
 ```
@@ -445,6 +271,7 @@ log: `AR_DISPMISS=1` ($8965/$8966-gated, also shows BRA/BRL-follow resolution); 
 (RTS-return-to-ancestor resolution).
 
 ### `[dispatch-miss]` — RTS-trick / computed-dispatch tripwire  *(default ON, the root-event finder)*
+
 Printed by `cpu_dispatch_pc_from` (`cpu_state.c`) whenever an RTS/RTL/computed dispatch pops a
 `(PB:PC)` that is **not a registered function entry**, so the runtime host-unwinds to the lexical
 caller:
@@ -466,6 +293,7 @@ Unlike `AR_DISPMISSALL` (action-stage `$18==01` only), this fires in **all** gam
 transition is `$18==$27`).
 
 ### `[garbage-variant]` — split-immediate misdecode trap  *(default ON, closest-to-root, no oracle)*
+
 Printed by `ar_garbage_variant_trap` (`common_cpu_infra.c`), emitted into the prologue of any
 function variant the recompiler detected as a **split-immediate misdecode** at regen time (see
 the garbage-evidence and equivalence analysis in `snesrecomp-go/internal/emitter/function.go`):
@@ -484,6 +312,7 @@ RTS-trick/computed misses; this catches wrong-*variant* dispatches.) *Known limi
 during *normal* play, not a cascade).
 
 ### `AR_SCHECK=1` — SNES stack-pointer corruption tracer *(tier two — `S` is on every trace line now; use this for whole-run drift hunts)*
+
 In `cpu_trace_block` (`cpu_trace.h`). Two outputs: `[scheck]` logs each new high-water page of
 `S`; **`[scheck-d]`** logs every block where `S` *jumps* > `$100` (a `TCS`/`TXS` relocation or the
 corruption); and a one-shot **32-block path dump at the impending underflow** (`S < $0040`) so the
@@ -492,6 +321,7 @@ rule 3: high `S` is often a legit relocation — the underflow + `[dispatch-miss
 signals.)
 
 ### `AR_STACKPROV=1` — stack pusher-provenance  *(tier two — the trace `stack` channel covers windowed pushes; this one maps pusher-PC per byte whole-run)*
+
 In `cpu_write8` (records) + the `[dispatch-miss]` site (reads), `cpu_state.c`. A shadow array
 (`g_stack_pusher[0x10000]`, `common_cpu_infra.c`) stamps, for each bank-0 stack byte, the recomp
 block-PC that last **pushed** there (detected by `bank==0 && addr==cpu->S` — the byte is written
@@ -511,18 +341,21 @@ the block where **x last flipped 0→1** (`aux` bit17, recorded in `cpu_trace_bl
 (wrong-width) variant upstream of the drain. That line is the actual fix target for an x-leak crash.
 
 ### `AR_RTSLOG=0x<hex pc>` — RTS-dispatch chain tracer
+
 In `cpu_dispatch_pc_from`. For a given RTS site, logs each dispatch hop's target PC + m/x + S +
 the final result. `AR_RTSLOG=0x039b59` is what proved `$9156`'s RTS-trick dispatches to the
 unregistered `$9B22` and host-unwinds (`final r=0`). Reach for it after `[dispatch-miss]` names a
 suspicious RTS site, to see the whole chain and where it bails.
 
 ### `AR_TRAPFN=<substring>` — entry call-stack + block-path dump
+
 In `ar_entry_mx_check`/`ar_entry_trapfn` (`common_cpu_infra.c`). The first time a function whose
 name contains the substring is entered, dumps the **recomp call stack** + a **40-block pc/m ring**.
 `AR_TRAPFN=bank_03_AC8E_M1X0` named the caller (`bank_03_8053`) and the m-flip path into a garbage
 misdecode variant. Use to find *who* dispatched into a known-bad variant.
 
 ### `AR_CALLMX=1` — per-call-site m/x invariant check  *(tier two — folded into the trace `call` channel / `--leaks`; keep on in dev-config as a live tripwire)*
+
 Set once at startup from env (`src/main.c`), read by `ar_call_mx_check` (inlined in every emitted
 JSR/JSL, `cpu_state.h`). Unlike `AR_MXCHECK` (checks a function's *entry*), this fires at every
 **call site**, comparing the decoder's static assumed `(m,x)` for that JSR/JSL against the runtime
@@ -532,6 +365,7 @@ to a specific mid-function call site rather than just "somewhere in this functio
 call site.
 
 ### `AR_MXCHECK_BT=<fn-substring>` — real host C call-stack backtrace  *(2026-06-30)*
+
 In `ar_entry_mx_fail` (`common_cpu_infra.c`), fires once (first hit) when a function whose name
 contains the substring fails its entry `AR_MXCHECK` invariant. Captures the actual host
 `backtrace()`/`backtrace_symbols_fd()` — the REAL C call stack, not the `g_recomp_stack`-based
@@ -540,6 +374,7 @@ in doubt; this is what finally proved `$01:933C_M1X0 -> $01:B898_M1X1`'s exact c
 2026-06-30/07-01 investigation.
 
 ### `AR_INDIRLOG=1` — suppressed `JSR (abs,X)` inspection  *(2026-07-01)*
+
 In `ar_indirect_suppressed_log` (`cpu_state.c`), called from every codegen-emitted
 `Call indirect SUPPRESSED` site (an unauthorised `JSR (abs,X)` the decoder severed — see
 `_STUB_MARKERS`/`indirect_call_table`). Logs the site, table base, and effective address
@@ -552,6 +387,7 @@ unique sites. Reach for this whenever a generated-source search such as
 `rg -n 'Call indirect SUPPRESSED' src/gen` lists a site you're trying to resolve.
 
 ### `AR_TRACE=<file.jsonl>` / `AR_TRACE_WATCH=<prefix>` — unified single-run trace  *(TIER ONE — start here; see §1 THE DEBUG LOOP)*
+
 The answer to "why did that take a dozen small runs that each missed a layer." ONE windowed run
 emits a correlated JSONL stream across **every** layer, so you never again enable one probe, miss
 the path that mattered, and re-run. Channels:
@@ -625,6 +461,7 @@ stack drift (`S`), and a wrong data/program bank (`DB`/`PB`) are all visible on 
   `vmadd`/`vram` channels catch the *consequence* (VMADD=`$0000`, junk write) directly.
 
 ### Legacy misdecode/m-leak pipeline *(superseded — kept for context)*
+
 The pre-trace-era loop was: `AR_MXHIST` (locate the leak boundary) → `AR_DISPMISSALL` (name the
 missed handler) → register in cfg → regen. **The modern equivalent is §1 THE DEBUG LOOP**:
 watch-mode dump → `--diagnose` does the locate+name+suggest in one shot, and knows the
@@ -1036,17 +873,16 @@ show the frozen `$0088` against the advancing host frame:
 
 ### 4d. Cross-region and town capture matrix
 
-- **Action milestone (2026-07-12):** every action level in regions `$01-$06`
-  is fully playable and renders correctly in widescreen. The verified raw-map
-  warp targets are in `docs/manual.md` and `docs/SEAMS.md`; do not assume the low byte
-  is an act number (`0303`, not `0302`, enters Kasandora Act 2). Remaining
-  action work is a presentation-aware camera/world-edge clamp. Death Heim
-  `0701` currently reaches the first boss arena and crashes; after repair,
-  record its `$19` changes through the six act-2 boss arenas and final boss.
-  For the camera change or crash, capture stage start, map edges, dense
-  encounter, boss/effect, and transition. On an anomaly, pair
+- **Action milestone (2026-07-12; historical):** every action level in regions
+  `$01-$06` was playable in widescreen. Death Heim still crashed at its first
+  boss at this point; it was repaired and validated end to end on 2026-07-14.
+  The later finite camera-bound work is recorded in `docs/progress.md`. Verified
+  raw-map warp targets are in `docs/manual.md`; do not assume the low byte is an
+  act number (`0303`, not `0302`, enters Kasandora Act 2). For a new action
+  anomaly, capture stage start, map edges, a dense encounter, boss/effect, and
+  transition. Pair
   `AR_WS_SPRDBG=1` with `AR_WS_ACTDBG=1`, full
-  F2 snapshots or `AR_VRAMDUMP_GF`, OAM counts, and `$D0-$D5`. The normal pass
+  F2 snapshots or `AR_VRAMDUMP_GF`, OAM counts, and `$D0-$D5`. A normal pass
   needs neither verbose flag.
 - **Warp fidelity caveat (2026-07-12):** F6 currently stages only the game's
   destination bytes `$1B/$1A` and request `$FB|=$80`. Invoking it after
@@ -1459,12 +1295,14 @@ Finds where the recomp's behavior diverges from a known-good reference. Lives in
   the same JSONL.
 
 ### ⚠️ CRITICAL: load the SAME save into the oracle
+
 The recomp auto-loads battery SRAM from `saves/save.srm` at startup. **snesref does NOT** unless
 you pass `SNESREF_SRAM_IN=../../saves/save.srm`. Without it the oracle boots a *fresh game*
 (new-game name-entry screen) while the recomp continues from your save — **completely different
 playthroughs, so the diff is garbage.** Always pass `SNESREF_SRAM_IN` for save-based recordings.
 
 ### Run recipe
+
 ```sh
 # Oracle (from tools/oracle/), WITH the save:
 SNESREF_HEADLESS=1 SNESREF_QUIT_FRAMES=4300 SNESREF_SRAM_IN=../../saves/save.srm \
@@ -1491,6 +1329,7 @@ python3 tools/oracle/diff_seq.py /tmp/o.jsonl /tmp/r.jsonl --lo 0x200 --hi 0x1ff
 > `.srm` file / a raw SRAM dump instead.
 
 ### Three diff tools (pick by question)
+
 - **`diff_seq.py`** — *value-SEQUENCE* diff (**use this**). Compares each address's ordered
   change-sequence, which is **timing-independent** (lag frames write nothing; an A→B→A toggle
   matches regardless of rate). Reports addresses whose sequences genuinely diverge, earliest
@@ -1502,6 +1341,7 @@ python3 tools/oracle/diff_seq.py /tmp/o.jsonl /tmp/r.jsonl --lo 0x200 --hi 0x1ff
   skew); prefer `diff_seq`.
 
 ### Oracle-only analysis (missing objects/events)
+
 A *missing* thing is an **oracle-only** write (oracle writes it nonzero, recomp never does) —
 which `diff_seq`'s prefix compare won't surface. Find them with a short Python pass over the two
 JSONLs: collect addresses the oracle writes **nonzero** that aren't in the recomp's nonzero set,
@@ -1510,12 +1350,14 @@ isn't traced, so early writes look oracle-only). This is how the missing platfor
 (a `$7E:6800+` OAM/sprite buffer the recomp never builds).
 
 ### Screenshots (for VRAM/PPU bugs the WRAM oracle can't see)
+
 - Recomp: `AR_SHOT_AT_GF=N` → `saves/shot.ppm` (also `AR_SHOT_EVERY=N`, `AR_SHOT_FROM/TO`).
 - Oracle: `SNESREF_SHOT_AT_GF=N [SNESREF_SHOT_FILE=p]` → PPM (works headless).
 - View: `sips -s format png x.ppm --out x.png` (or PIL). Compare the two screens at the same
   game-frame to confirm a rendering divergence and see the target.
 
 ### Other useful snesref / recomp knobs
+
 `SNESREF_WRAM0` / `SNESREF_DUMP_AT_GF`+`SNESREF_DUMP_AT_FILE` (oracle WRAM dumps),
 `SNESREF_FORCE_B_AFTER` / `AR_FORCE_INPUT_AFTER`+`AR_FORCE_INPUT_MASK`+`AR_FORCE_PULSES`
 (scripted input without a recording), `SNESREF_ENTRY_GF`/`AR_...` (align stage-entry frames).
@@ -1788,6 +1630,7 @@ bug-ledger "Methodology learnings"), `AR_INDIRLOG` (general-purpose — worth ke
 future suppressed-dispatch site), `AR_ADADTRACE`, `AR_WATCH14`.
 
 ### Case study archive
+
 The full sim-mode bring-up arc narrative (2026-07-01→04) lives in
 [docs/bug-ledger.md](docs/bug-ledger.md)'s appendix.
 

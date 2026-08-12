@@ -1,43 +1,21 @@
 # Particle and lighting effect hook investigation
 
-Status: **static lifecycle, animation, geometry, and anchor mapping complete** for the four
-action magics, the five simulation miracles, and the four simulation enemy classes. Simulation
-Lightning, Blue Dragon lightning, and palette-selected ground fire are implemented; the blue
-post-Lightning variant is replay-validated and the scripted red variant is live-capture-validated.
-The distinct scripted burning-house family is mapped from run `20260803-130945` and implemented
-with exact lifecycle, lighting, particle, ground-contact, and source-cadence handling.
-Palette-1 Red Demon fire is implemented with ROM-semantic unit coverage; a live
-Red Demon capture remains its visual acceptance gate. Magical Fire now has a host-side captured
-lifecycle plus portable lighting/particle implementation for flat and diorama presentation; its
-new visual pass and the other three action spells still need the short live acceptance sweep in
-[Validation remaining](#validation-remaining). Run `20260810-124203` additionally maps and
-implements Bloodpool's wall torches, gargoyle fireballs, vertical lightning traps, and the map-$08
-boss lightning attack as portable action-scene lights and particle emitters. Run
-`20260810-180202` corrects the latter to six strike shapes plus one floor-impact cycle; the
-complete state sequences and per-row paths are decoded from its `$7E:5000` boss animation bank.
-Run `20260810-175403` also maps the global player sword beam. Follow-up run `20260810-184935`
-corrects its signed-origin OAM placement; `20260810-190012` proves the aligned five-glint revision
-too faint, and `20260810-190729` proves a denser centreline still too narrow. The settled pass uses
-full-height haze plus a forty-eight-glint materializing star path for both authored cycles and travel
-directions. Runs `20260811-151353` and `20260811-221433` add Marahna's single-metatile wall
-torches (including all ten in the boss room), the exact orb-to-four-cardinal-fireballs lifecycle,
-horizontal/vertical linked lightning, and the boss hand-charge/central-orb/diagonal-bolt/
-ground-charge cycle as implemented scene accents. Run `20260811-225534` corrects `$E57E` from a
-supposed retired tail to the live three-frame floor discharge. The later captures also prove the
-formerly matched six `$34/$4BE5` actors are moving platforms, not fireballs.
-Run `20260812-000613` snapshot 5 also maps and implements the Aitos dragon boss's two exact
-priority-2 diagonal sword crescents through the existing portable comet style.
-The later Aitos snapshots in that run add map `$04/$01` lava-pit surface lights and the complete
-three-state lifecycle of their emitted lava fireballs as a separate implemented family.
-Snapshot hooks and renderer output are covered by ROM-free regressions, with only live visual
-tuning remaining.
+**Status:** Lifecycle, animation, geometry, and anchor mapping is complete for
+the four action magics, five simulation miracles, and four simulation enemy
+classes. Implemented effects cover simulation lightning and fire families,
+burning houses, Magical Fire, and the mapped Bloodpool, Marahna, and Aitos scene
+accents. Snapshot hooks and rendering have ROM-free regression coverage.
 
-The lifecycle mapping in this document is deliberately implementation-neutral. It identifies the
-authentic 60 Hz game state that an enhanced renderer can observe without changing damage,
-gameplay timing, or object allocation. The one explicit source-art exception is the
-signature-checked burning-house frame hold documented below; it changes only that looping sprite's
-visual cadence, not its actor-owned lifetime. This is the companion to [SEAMS.md](SEAMS.md),
-[rendering-engine.md](rendering-engine.md), and [sim-object-catalog.md](sim-object-catalog.md).
+Remaining acceptance work is the short live sweep for all four action spells, a
+Red Demon capture, and final visual tuning. See
+[Validation remaining](#validation-remaining).
+
+The mapping is implementation-neutral: it identifies authentic 60 Hz state an
+enhanced renderer can observe without changing damage, timing, or object
+allocation. The signature-checked burning-house frame hold is the one documented
+source-art exception; it changes visual cadence, not actor lifetime. Related
+references: [SEAMS.md](SEAMS.md), [rendering-engine.md](rendering-engine.md), and
+[sim-object-catalog.md](sim-object-catalog.md).
 
 ## Conclusions that affect the visual design
 

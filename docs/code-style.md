@@ -1,11 +1,10 @@
 # Code style and structure
 
-House rules for the hand-written runtime under `src/`. The generated code in
-`src/gen/` and `recomp/` is machine output and is exempt from everything here.
+House rules for the hand-written runtime under `src/`. Generated code in
+`src/gen/` and `recomp/` is exempt.
 
-These are budgets and defaults, not laws. Every one of them can be broken with a
-stated reason — but "it grew that way" is not a reason. Each rule below is
-followed by the concrete file in this repo that earned it.
+These are defaults, not laws. Break one when there is a specific reason and
+document it. The examples come from this repository.
 
 **Contents**
 - [Size budgets](#size-budgets)
@@ -20,22 +19,18 @@ followed by the concrete file in this repo that earned it.
 
 ## Size budgets
 
-Measure **logic lines** — total minus comments, blanks, and data tables. Raw line
-count is misleading: `settings.c` is 3,069 lines and perfectly workable because
-1,286 of them are a descriptor table you skim in seconds, while `settings_overlay.c`
-is 3,651 lines of which 2,479 are logic, and that one genuinely hurts.
+Measure **logic lines**: total lines minus comments, blanks, and data tables. Raw
+length can mislead. `settings.c` is 3,069 lines but includes a 1,286-line
+descriptor table; `settings_overlay.c` has 2,479 lines of coupled logic.
 
 | Unit | Budget | Hard limit |
 |---|---|---|
 | File | ~1,500 logic lines | past ~2,500, splitting is the default answer |
 | Function | ~150 lines | past 400, treat as a defect |
 
-**Why this matters here specifically.** Both humans and coding agents pay for
-size the same way: the cost is not the file's length, it is *whether you must
-read the whole thing to change part of it*. A 1,200-line data table costs
-nothing — you jump to a row. A 1,200-line function costs everything, because
-there is no smaller unit that can be reasoned about on its own. Prefer many small
-functions in one longer file over few enormous functions in a short one.
+The cost is not raw length but how much context a change requires. A large data
+table is searchable; a large function has no smaller reasoning unit. Prefer
+small functions in a longer file to a few enormous functions in a shorter one.
 
 Exempt from the file budget, but say so in the file's header comment:
 - generated blobs (`src/shaders/*.h`)
@@ -48,22 +43,18 @@ When a file carries two subsystems that only meet at a few call sites, that seam
 is a file boundary. `present.c` was 4,551 lines because the flat/diorama present
 path and the SIM 3D renderer shared a file while barely sharing code.
 
-**Deriving the split.** Do not partition by name — names lie. Partition by usage:
-*a definition moves iff it has no remaining user on the original side once the
-obvious movers leave*, applied to closure. When this was run on `present.c` it
-independently found the sim-only helpers whose names gave no hint (`kEffectCircle32`,
-`kPi`, `CloudHash`/`CloudSmooth`/`CloudNoise`) and independently kept every shared
-helper behind.
+**Derive the split from usage.** Move a definition only when it has no remaining
+consumer on the original side after the obvious movers leave, then repeat to
+closure. This found sim-only helpers in `present.c` whose names did not reveal
+their ownership while retaining shared helpers.
 
-**Name the seam.** A split TU pair gets an explicit `<name>_internal.h` holding
-exactly what crosses: shared type definitions, the helpers that lost `static`, and
-the callbacks going the other way. See `src/present_internal.h`. Two properties
-make it work:
+**Name the seam.** A split translation-unit pair gets an explicit
+`<name>_internal.h` containing only what crosses: shared types, helpers that lost
+`static`, and callbacks in the other direction. See `src/present_internal.h`.
 
-- It is *not* the public API. That stays in `present.h`. An internal header is a
-  reviewable list of deliberate coupling — if it grows, the split is eroding.
-- It carries no live game state, which is what lets the D6 invariant survive the
-  split (see below).
+- The public API remains in `present.h`; growth in the internal header reveals
+  erosion of the split.
+- It carries no live game state, preserving the D6 invariant below.
 
 **Watch for declarations vs definitions.** When splitting, a block of `extern`
 declarations for globals owned by a *third* file is duplicated into both halves,
@@ -86,19 +77,14 @@ if a second TU ever includes one, it must convert first.
 **The correct split, when data deserves its own file, is a `.c` plus an `extern`
 declaration in the existing header.** Never a definition in a header.
 
-**But measure coupling before splitting at all.** The test: *how many file-private
-symbols does the data reference?* Data that references none is genuinely data;
-data that references many is coupled logic wearing a data costume, and hoisting it
-inverts the dependency.
+**Measure coupling before splitting.** Count the file-private symbols the data
+references. Data with none is self-contained; data with many is coupled logic,
+and moving it inverts the dependency.
 
-Worked example — `g_setting_descs[]` in `settings.c` looks like a prime candidate
-at 1,190 lines, and `settings.h` already declares it `extern`, so the move looks
-free. It is not: the table references **75** file-private symbols (parsers,
-formatters, `on_change` callbacks, availability predicates, label arrays).
-Splitting it would export 75 symbols to relocate the most skimmable part of the
-file. **Correct answer: leave it.** The 81 lines of pure label arrays are likewise
-too small to be worth a file. `settings.c` is a false positive for the size rule
-and should be left alone.
+For example, the 1,190-line `g_setting_descs[]` table references 75 private
+parsers, formatters, callbacks, predicates, and label arrays. Splitting it would
+export those symbols only to move the easiest part of the file to skim. Leave it
+in `settings.c`.
 
 Split data out when it is bulky *and* self-contained. Otherwise let it sit next to
 the code that owns it.
@@ -122,15 +108,11 @@ file-private symbols measured above. Moving the table to TOML/JSON would not
 remove a table; it would add two (a name→function-pointer registry and a
 name→struct-offset registry), hand-maintained, to resolve what the file names.
 
-The decisive cost is losing the compiler. Today a typo'd callback or a bad enum
-is a build error. Externalized, it is a runtime error on a user's machine at
-boot — and settings is the worst subsystem for that, since a failure there can
-lock someone out of the very graphics options they need in order to launch.
+The decisive cost is losing compile-time checking. A bad callback or enum is a
+build error today; in external data it becomes a boot-time user error.
 
-The version that *would* be worth it, if localization ever becomes a goal, is
-externalizing `label` and `tooltip` alone: genuinely pure strings, genuinely
-worth non-programmer editing, and able to fail soft (missing key falls back to
-the built-in English) rather than failing the boot.
+If localization becomes a goal, externalize only `label` and `tooltip`. They are
+pure strings and can fail safely by falling back to built-in English.
 
 ## Put the decision on the thing it describes
 
@@ -144,10 +126,9 @@ never knew this function existed, at which point their setting silently inherite
 the legacy `AR_*` parse. It is now `return !desc->modern_env;`, with the answer
 stated on each row.
 
-Generalize: **if adding a case in one place requires remembering to edit another
-place, the design is the bug.** Prefer a field on the record, a flag in the table,
-or a variant constructor (`BOOL_SETTING_MODERN`) whose *name* states the intent at
-the call site.
+If adding a case requires an unrelated edit elsewhere, encode the decision on
+the record instead: a field, table flag, or named constructor such as
+`BOOL_SETTING_MODERN`.
 
 Two mechanics worth reusing:
 - Put a new struct field **last** when rows use positional initializers — the
@@ -195,10 +176,8 @@ test's dependencies now call must be added to that target too.
 
 ## Comments
 
-This codebase has an unusually high comment density — `actraiser_rtl.c` is 31%
-comment — and that is an **asset to preserve, not cleanup debt**. The reason is
-the domain: much of this code exists to match the observable behaviour of a 1990
-ROM, and the *why* is frequently unrecoverable from the *what*.
+Preserve this codebase's high comment density. Much of the code must match a
+1990 ROM, and the reason for a choice is often unrecoverable from the code alone.
 
 - Explain **why**, and especially why the obvious alternative is wrong.
 - Cite evidence: ledger entries (`ledger §24`), spec sections, ROM addresses,

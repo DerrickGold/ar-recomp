@@ -1,32 +1,18 @@
 # Widescreen Mode Survey and Implementation Record
 
-> **Current status (2026-07-12):** the early Phase-2/Phase-3 text below is
-> retained as an evidence trail, not the current design. Every action level in
-> regions `$18=$01-$06` is directly confirmed fully playable with correct wide
-> BG streaming, sprites, activation, and observed raster effects. The shared
-> path is enabled for `$18=$01-$07`; Death Heim/`70X` currently reaches its
-> first boss arena and crashes. The one
-> known presentation gap for `$01-$06` is widescreen-aware camera/world-edge
-> clamping so finite map edges cannot enter the margins.
-> The current implementation is split between
-> `src/actraiser_widescreen_bg.c` and the audited `$8C98/$8D68` HLE seams; it
-> does not use the historical monolithic `src/actraiser_widescreen.c` strategy.
-> See “Investigation restart” and “Remaining task queue” for authoritative
-> status.
+> **Current status (2026-08-12):** every action stage in regions `$01-$06` and
+> the complete Death Heim boss rush are playable and widescreen-validated.
+> Finite camera bounds, background streaming/HLE, sprites, activation, narrow
+> BG2 policies, and observed raster effects are implemented. See
+> [progress.md](progress.md) for current acceptance status and
+> [rendering-engine.md](rendering-engine.md) for the current design.
 
-> **2026-07-09 correction (user-reported):** the first pass of this survey
-> mis-verified several modes as "clean wide" — those screenshots were in fact
-> pillarboxed (dark content next to pure-black margins misread visually; only
-> the action stage truly rendered margins). Root cause: ActRaiser's sim/menu
-> engine keeps a full-width hardware window enabled, and the SNES 8-bit window
-> coordinates can't express the margins → everything outside [0,255] hit the
-> composite's clip-to-black path. Fixed in the engine (ppu.c
-> PpuWindows_Calc): window edges pinned at 0/255 are read as "to the screen
-> border" and extend into the active margins. After the fix the verdicts below
-> hold for real (re-verified pixel-numerically via simdev.rec replay, and
-> always verify margins NUMERICALLY, not by eyeballing dark PNGs).
+The dated phases and verdicts below are an evidence trail. They include defects
+and hypotheses that were later corrected. In particular, the 2026-07-09 pass
+mistook dark pillarboxing for wide output; numerical margin checks exposed the
+error and led to the full-width hardware-window fix in `PpuWindows_Calc`.
 
-Catalogue of per-mode behavior with raw symmetric margins (`AR_WS_SURVEY=1`,
+Historical catalogue of per-mode behavior with raw symmetric margins (`AR_WS_SURVEY=1`,
 16:9 / 43 extra columns per side). Source: user play session
 `runs/20260709-045204/snapshots/` (F2 snapshots incl. WRAM/VRAM/OAM sidecars).
 Read each snapshot's `$18`/`$19` from its `.wram.bin` (offsets 0x18/0x19).

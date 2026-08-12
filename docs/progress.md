@@ -1,17 +1,10 @@
 # ActRaiser Recomp — Progress Tracker
 
-Tracks playability by **action level** and **simulation-mode town**, plus
-cross-cutting **major functionality**. Replaces the old phase-checklist
-version of this doc, which tracked recompiler-tooling setup milestones and
-was accurate early on but stopped reflecting reality once the game itself
-became the main focus (see `DEBUG.md` for that history if it's ever useful).
+Tracks playability by action stage and simulation town, plus cross-cutting
+subsystems. This is the authoritative project-status document.
 
-**How to keep this honest:** only mark something ✅/🟡 once it's actually
-been played, not once the code "should" work. Everything below that hasn't
-been personally exercised is marked ⬜ Untested — that's the accurate
-starting state as of this doc's creation (2026-07-03), not a guess. Update
-rows as you actually play through them, and note the date + what was
-verified, same as the other status markers.
+Mark a row ✅ or 🟡 only after a play-test, not because the code should work.
+Use ⬜ for untested paths and record the date and scope of each verification.
 
 **Legend:** ✅ Confirmed working · 🟡 Playable with known issues (see note)
 · 🔴 Broken/blocking · ⬜ Untested
@@ -304,12 +297,8 @@ Current widescreen work/status is:
 
 ## Codebase metrics (objective, automated — refreshed 2026-07-12)
 
-These come from static analysis and reference-vector testing, not manual
-play, so they're a different kind of signal than the tables above: they say
-"how much of the recompiler's output is structurally sound / verified
-correct," not "does the game actually work." Both matter. Re-run the
-commands noted below periodically and update this section rather than let
-it go stale — same discipline as the playability tables.
+These metrics measure structural and reference-vector coverage, not
+playability. Re-run the listed commands when refreshing this section.
 
 | Metric | Value | How to reproduce |
 |---|---|---|
@@ -327,9 +316,6 @@ it go stale — same discipline as the playability tables.
 
 ## What "done" looks like
 
-Not attempting to define a precise finish line here since it'll shift as
-things are found — but at minimum, "done" means every action stage and every
-sim-mode town has actually been played through and marked ✅ or 🟡-with-a-
-specific-known-issue, not left as an assumption. Update this doc as that
-happens rather than batching it up for later — a stale progress doc is worse
-than no progress doc, which is exactly why this one got rewritten.
+At minimum, every action stage and simulation town must be played through and
+marked ✅ or 🟡 with a specific known issue. Update this document with each
+verification instead of batching status changes later.

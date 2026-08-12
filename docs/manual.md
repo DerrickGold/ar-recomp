@@ -1,13 +1,9 @@
 # Manual — running, configuring, and tuning the game
 
-Everything the player-facing side of ActRaiser Recomp exposes: how to launch it,
-every real config key, the full settings overlay, controls and hotkeys, the save
-editor, the scene inspector, cheats, and asset replacement.
-
-If you just want to play, you don't need this file — the
-[quick start](../README.md#quick-start) is three steps and the in-game settings
-overlay (`Esc`/`F1`) explains every row as you select it. This is the reference
-for when you want to know exactly what a control does.
+This is the player and power-user reference for launching, configuration,
+controls, settings, developer tools, cheats, and asset replacement. For a first
+run, use the [quick start](../README.md#quick-start); the in-game settings
+overlay (`Esc`/`F1`) also explains each selected row.
 
 **Contents**
 
@@ -46,14 +42,13 @@ not overlays.
 
 ## Configuration files
 
-### What's actually wired up in `config.ini`
+### `config.ini`
 
-Only what's listed below is read by `config.c`. **`config.ini`'s `[KeyMap]` and
-`[GamepadMap]` sections, and the `Autosave`/`DisableFrameDelay`/`SkipLauncher`/
-`EnableSnes9xOracle`/`WindowSize` keys, are currently placeholders — none of
-them are parsed or have any effect.** `LinearFiltering`, `NoSpriteLimits`, and
-`AudioChannels` are parsed compatibility leftovers without runtime consumers.
-Input binding is done from the settings overlay, not from this file.
+`config.c` reads only the keys below. The `[KeyMap]` and `[GamepadMap]` sections
+are placeholders; configure input from the settings overlay. These keys also
+have no effect: `Autosave`, `DisableFrameDelay`, `SkipLauncher`,
+`EnableSnes9xOracle`, and `WindowSize`. `LinearFiltering`, `NoSpriteLimits`, and
+`AudioChannels` are parsed only for compatibility.
 
 **Real config keys** (`[Graphics]`/`[Sound]`):
 
@@ -67,17 +62,15 @@ Input binding is done from the settings overlay, not from this file.
 | `IgnoreAspectRatio` | disable logical-size aspect correction and stretch to the window |
 | `EnableAudio`, `AudioFreq`, `AudioSamples` | audio output settings; enable/disable is live, frequency cycles through `32040`/`44100`/`48000` Hz, and format changes apply on restart |
 
-These legacy names are staged directly into the same descriptor registry used
-by the menu and `settings.ini`; the config parser keeps no state of its own, and
-runtime video and audio code reads only `g_settings`.
+These legacy names feed the same settings registry as the menu and
+`settings.ini`; runtime code reads the resolved `g_settings` values.
 
 ### Persistent user settings (`settings.ini`)
 
-`settings.ini` is loaded automatically after the selected `config.ini`. It is
-menu/user-owned and uses stable descriptor keys such as `window_scale`,
-`extended_aspect`, `pixel_aspect`, `audio_enabled`, `audio_master_volume`,
-`menu_scale_percent`, and `ws_sprites`. The atomic writer emits every registry
-row without rewriting the developer-authored `config.ini`.
+`settings.ini` loads after the selected `config.ini`. It contains user-owned
+keys such as `window_scale`, `extended_aspect`, `pixel_aspect`, `audio_enabled`,
+`audio_master_volume`, `menu_scale_percent`, and `ws_sprites`. Saving settings
+rewrites this file atomically and leaves `config.ini` untouched.
 
 Resolution order is:
 
@@ -85,21 +78,18 @@ Resolution order is:
 built-in defaults < config.ini < settings.ini < real environment < live changes
 ```
 
-Known `AR_*` settings inside `config.ini` are staged at the config tier rather
-than disguised as real environment variables. Diagnostic-only `AR_*` and
-`SNESREF_*` keys retain the old environment bridge. This means a command-line
-environment value still reliably overrides both files.
+Known `AR_*` settings in `config.ini` use the config tier. Diagnostic-only
+`AR_*` and `SNESREF_*` keys retain the environment bridge, so command-line
+environment values override both files.
 
 ## Controls
 
-Every joypad button is re-bindable from **Settings → Controls**, for the
-keyboard and for a gamepad independently. Both binding sets are always stored;
-the *Input device* row decides which one feeds the game (*Auto* keeps both
-live), and *Configure bindings for* switches which set the rows below show.
-To rebind, select a row, press Return (or SNES B), then press the key or
-button you want; `A` (SNES Y) restores that row's default and Escape cancels.
-Bindings live in `settings.ini` as `bind_key_*` / `bind_pad_*` and are saved
-the moment they change.
+**Settings → Controls** stores separate keyboard and gamepad bindings. *Input
+device* selects which set feeds the game; *Auto* keeps both active. *Configure
+bindings for* selects the set being edited. To rebind a row, press Return (or
+SNES B), then press the new key or button. `A` (SNES Y) restores the default;
+Escape cancels. Changes are saved immediately to `settings.ini` as
+`bind_key_*` or `bind_pad_*`.
 
 Keyboard bindings are stored by **physical key position** (SDL scancode), so a
 layout change moves with the keys rather than the letters. The defaults are:
@@ -114,11 +104,10 @@ layout change moves with the keys rather than the letters. The defaults are:
 
 ### Gamepad
 
-The gamepad defaults follow the standard SNES-on-Xbox-layout mapping: South =
-B, East = A, West = Y, North = X, shoulders = L/R, Menu/View = Start/Select,
-D-pad = D-pad. The left analog stick doubles as the D-pad (*Left stick as
-D-Pad*, on by default, with an adjustable deadzone); the right stick and
-triggers are reserved for the camera.
+The defaults follow the standard SNES-on-Xbox layout: South/East/West/North map
+to B/A/Y/X, shoulders to L/R, Menu/View to Start/Select, and D-pad to D-pad.
+The left stick also acts as the D-pad by default, with an adjustable deadzone.
+The right stick and triggers control the camera.
 
 Set the *Gamepad* row to pick between several connected controllers; it names
 each one, and *First connected* follows hotplug. If SDL does not recognise a
@@ -127,23 +116,17 @@ and it is loaded at startup.
 
 ### Camera control
 
-Camera control (diorama and 3D sim town, Free Cam only) is on the pad as well
-as the mouse. The right stick orbits (yaw/pitch), the triggers zoom in/out, and
-clicking the right stick recentres the camera; all seven are re-bindable, and
-*Camera sensitivity*, *Camera stick deadzone*, and *Invert camera Y* tune the
-feel. Stick input is integrated over real elapsed time, so orbit speed does not
-change with frame rate. Outside those two modes the camera bindings do nothing.
-The mouse path is right-drag orbit, wheel zoom, middle-click reset.
+In diorama mode and 3D town Free Cam, the right stick orbits, the triggers zoom,
+and R3 recentres. The mouse equivalents are right-drag, wheel, and middle-click.
+All seven pad inputs are re-bindable; sensitivity, deadzone, and invert-Y are
+configurable. Camera bindings do nothing outside these modes.
 
 ### Host actions on the pad
 
-Six host actions are gamepad-bindable too, because a Steam Deck has no
-keyboard: open settings menu (default L3), reset camera (default R3), pause,
-fast forward, save state, and load state. The pad also drives the settings menu
-itself — using your own bindings, so menu confirm is whatever you bound to SNES
-B — and that includes rebinding, so the whole feature is reachable with no
-keyboard attached. The keyboard hotkeys below stay hard-wired on purpose: a bad
-rebind can never lock a desktop player out of the menu.
+Six host actions are gamepad-bindable: open settings (default L3), reset camera
+(default R3), pause, fast forward, save state, and load state. The pad also
+drives the settings menu using your SNES bindings. Keyboard hotkeys remain fixed
+so a bad rebind cannot lock a desktop player out of the menu.
 
 ### Steam Deck
 
@@ -171,29 +154,26 @@ Keyboard only, not re-bindable:
 
 ## The settings overlay
 
-The host settings overlay is available from every game state. Its left-hand
-navigation column lists eight sections — Video, Diorama, Town 3D, Audio,
-Controls, Cheats, Save, System — each of which holds one or more tabs. (A ninth
-developer section, Layers, appears only with *Show debug settings* on.)
+The overlay is available from every game state. Its navigation column contains
+Video, Diorama, Town 3D, Audio, Controls, Cheats, Save, and System. Enabling
+*Show debug settings* adds the developer-only Layers section.
 
-It opens with focus on the primary left-hand navigation: Up/Down selects a
-category or direct action and `Z` (SNES B) or Return enters/runs it. Inside a
-category, Up/Down selects a row, Left/Right changes ordinary values, and `Z` or
-Return advances/toggles ordinary values, opens direct text editing for custom
-values, or runs the selected command. `X` (SNES A) returns from a category to
-primary navigation; from primary navigation it closes the overlay. During text
-entry, Backspace edits, Return validates/applies, and Escape cancels. `A`
-restores a setting's default.
+| Context | Controls |
+|---|---|
+| Navigation | Up/Down selects; `Z` (SNES B) or Return enters or runs |
+| Settings | Up/Down selects; Left/Right changes; `Z` or Return toggles, edits, or runs |
+| Text entry | Backspace edits; Return applies; Escape cancels |
+| Defaults | `A` (SNES Y) restores the selected setting |
+| Back/close | `X` (SNES A) returns to navigation, then closes; Escape or F1 closes anywhere |
 
 Every tab also ends with `Reset <section> defaults`; pressing it twice restores
 every tab in that top-level section, including hidden developer controls,
 without changing other sections. For example, resetting Town 3D restores Scene,
 Camera, Light, and Weather together.
 
-Escape or F1 closes the menu from either focus. F2 remains available for a full
-snapshot while the overlay is open. Game-frame advancement and SNES input are
-frozen until it closes; accepted setting changes are atomically written to
-`settings.ini`. ACTION rows themselves are not persisted.
+F2 remains available for a full snapshot while the overlay is open. The game and
+SNES input stay frozen until the overlay closes. Accepted setting changes are
+written atomically to `settings.ini`; action rows are not persisted.
 
 Restart Game and Exit Desktop live at the end of System → Tools. Both flush
 `settings.ini` and battery SRAM through the normal shutdown path; restart then
@@ -204,56 +184,42 @@ diorama and Town 3D numeric tuning dials, their per-layer and per-stage A/B
 toggles, the granular widescreen flags, and the scene inspector. With it off,
 the menu keeps to the master toggles and the major on/off effects.
 
-The developer-only **Layers → BG Extents** tab is a live action-stage authoring
-tool. Open BG1 or BG2 to inspect its playfield/scene/backdrop role and source,
-change its edge strategy, apparent mirror-motion phase, or per-side
-horizontal/vertical cap. Each layer can add, delete, and edit up to four
-non-overlapping row bands. A band independently selects screen- or world-space
-anchoring, its half-open start/end rows, fill strategy, legacy fill-relative or
-normal scrolling motion, and horizontal cap. Open a band before changing its
-fields. Mixed screen/world bands are accepted only when they remain disjoint
-through the layer's complete camera travel; an anchor edit that could cross a
-neighbor later reports the normal limit feedback. If a room-state transition
-invalidates an older draft, the canonical room policy remains active.
-**Ignore side bounds** temporarily lets the selected BG use every
-available column past its Diorama side guides;
-**Ignore vertical bounds** does the same past the top/bottom guides. The shared
-canvas, finite world and edge strategy still limit what can actually be drawn,
-and switching either shortcut off restores the stored caps. `Apply draft`
-performs the live A/B; `Extent guides` draws BG1 in cyan and BG2 in orange;
-`Print draft` writes the resolved plan to the run log. Drafts reset when the
-room changes, start disabled, are never written to `settings.ini`, and never
-modify `diorama-layers.ini`. Press `Y` on a row to restore its canonical value.
-Existing baked policies use the behavior-preserving fill-relative motion unless
-they explicitly opt into normal scrolling.
+The developer-only **Layers → BG Extents** tab authors action-stage background
+policies. Select BG1 or BG2, then edit its role, source, edge strategy, motion,
+or per-side caps. Each layer supports up to four non-overlapping row bands with
+independent anchoring, row range, fill strategy, motion, and horizontal cap.
+Open a band before editing it.
 
-Corrected action-wide modes also keep the complete requested playfield view
-inside each room's finite BG1 dimensions whenever it fits. This camera-bound
-correction is automatic; it has no per-room setting and is disabled in 4:3,
-Wide Raw, the explicit `AR_ACTION_BG_HLE=0` native control, and authored scenes
-whose canonical background plan has no finite playfield canvas. For
-diagnostics, `AR_WS_ACTION_CAMDBG=1` logs the room, camera,
-resolved horizontal/vertical intervals, requested margins, and whether each
-axis could contain the full view. An axis that cannot fit safely retains the
-game's native camera bounds.
+- **Ignore side bounds** and **Ignore vertical bounds** temporarily bypass the
+  selected layer's Diorama guides. Canvas, finite-world, and edge-strategy limits
+  still apply.
+- **Apply draft** enables the live A/B. **Extent guides** draws BG1 in cyan and
+  BG2 in orange. **Print draft** writes the resolved plan to the run log.
+- `Y` restores the selected row's canonical value.
+- Drafts start disabled, reset on room changes, and never modify
+  `settings.ini` or `diorama-layers.ini`.
+
+Mixed screen/world bands must remain disjoint throughout the room's camera
+travel. Invalid edits report normal limit feedback and leave the canonical room
+policy active.
+
+Corrected action-wide modes automatically keep the requested view within finite
+BG1 dimensions when it fits. The correction is disabled in 4:3, Wide Raw,
+`AR_ACTION_BG_HLE=0`, and scenes without a finite playfield canvas. If an axis
+cannot fit safely, it keeps the game's native bounds. `AR_WS_ACTION_CAMDBG=1`
+logs the decision.
 
 ### The overlay's artwork
 
-The overlay decodes ActRaiser's 256-tile 2bpp dialog font and its native
-Sky Palace dialog frame directly from the user-supplied ROM at startup.
-Alphabetic and numeric tiles therefore retain the game's real artwork and
-baked outline/shadow treatment. The frame is assembled as three independent
-category/settings/help boxes with transparent gutters over the paused game.
-Host-authored fallback glyphs and frames remain available if the expected ROM
-assets cannot be decoded. No ROM-derived graphics data is committed or sampled
-from scene-dependent VRAM.
+At startup, the overlay decodes ActRaiser's dialog font and Sky Palace frame
+from the user-supplied ROM. Host-authored fallbacks are used if those assets
+cannot be decoded. No ROM-derived graphics are committed.
 
 ## Display and scaling
 
-Screen ratio is a normal three-choice row — 4:3, 16:9, and 16:10 — not a text
-field. Screen ratio, pixel aspect, render profile, renderer path, render scale,
-window mode, stretching, HUD/menu scale, and widescreen policy changes apply
-live.
+Screen ratio offers 4:3, 16:9, and 16:10. Ratio, pixel aspect, render profile,
+renderer path, render scale, window mode, stretching, HUD/menu scale, and
+widescreen policy changes apply live.
 
 *Render scale* is the internal render/upscale multiple of the SNES output
 (1–8, default 3). Higher values render more actual detail in the 3D town and
@@ -307,14 +273,10 @@ Custom music (OGG streaming in place of SPC songs) is covered in
 
 ## Save editor
 
-The **Save editor** category stages battery-save changes without treating the
-unknown town-map payload as disposable structured data. Use **Edit section** to
-switch between Progress, Status, Magic, Items, and Scores. The active section is
-repeated in the panel title and separated from global save controls and
-commands. The editable set includes all six town states, Death Heim and
-Professional-mode unlock state, player name, Master/Angel level/health/SP/MP/
-lives, message speed, magic and item slots, equipped magic, and both act scores
-for every town.
+The **Save editor** stages changes without discarding unknown town-map data.
+**Edit section** switches among Progress, Status, Magic, Items, and Scores. You
+can edit town states, unlocks, player name, Master and Angel stats, message
+speed, magic, items, and act scores.
 
 **Allow save edits** is an explicit safety switch, not an edit by itself. Leave
 it Off while browsing; turn it On only when you are ready to apply changes.
@@ -359,32 +321,19 @@ A developer tool: enable it with `F3`, its Inspector-submenu toggle, or
 `AR_SCENE_INSPECTOR=1` (the Inspector tab itself is hidden unless *Show debug
 settings* is on).
 
-Left-click anywhere in the game viewport to freeze the current frame. A clean,
-color-coded monospace panel reports game mode/submode, camera and PPU state, the
-BG tile(s) and OAM sprite(s) under the pointer, tile/frame numbers,
-palette/priority/flips, and VRAM tilemap/character addresses. The console gets
-the full report, including a manifest gate/draft and tile hashes compatible with
-`AR_TILE_CENSUS`.
+Left-click the game viewport to freeze and inspect a frame. The panel reports
+game mode, camera and PPU state, BG tiles and OAM sprites under the pointer,
+palette and priority data, and VRAM addresses. The console receives the full
+report, including manifest gates and `AR_TILE_CENSUS`-compatible hashes.
 
-The compact panel fits its natural width to the longest visible report line and
-initially opens opposite the selected point and can be moved by left-dragging
-its title strip. Dragging the cyan lower-right grip uniformly scales the frame,
-font, and spacing so the report can reveal more of the scene without truncating
-columns. Clicks elsewhere in the report body pass through to scene selection.
-Right-click, F3, or P clears the marker and releases the pause created by the
-inspector; an existing manual pause is preserved.
+Drag the title strip to move the panel or the cyan lower-right grip to resize it.
+Clicks in the report body pass through to scene selection. Right-click, F3, or P
+clears the marker and releases an inspector-created pause; a manual pause is
+preserved.
 
 `screen` and `mode7` manifest planes are live today; the inspector identifies
 hash-keyed `tiles` assets but labels that replacement plane as reserved until
 the N-x renderer path is implemented.
-
-When SDL logical rendering is active, its mouse events already arrive in logical
-coordinates and are mapped directly through the physical presentation viewport.
-The no-logical-size path converts window coordinates to renderer output first.
-PAR/letterboxing, widescreen cropping, and the independently scaled/anchored
-promoted HUD are then resolved. HUD clicks are mapped back through the same
-presentation chunks used to render them, so the marker, highlighted source
-tile/sprite, and pointer stay aligned.
 
 **Dump scene assets** writes a frame-unique `scene_assets_*` directory beneath
 the current run folder (`runs/latest/` points at it). It exports each complete
@@ -463,13 +412,9 @@ ignore unless you're debugging.
 
 ## Asset replacement (HD art & music)
 
-Both systems share one design: `game-assets/manifest.ini` is **tracked** and
-ships every known replacement hook active, but an entry only engages when its
-asset file exists at the path it names — the asset files themselves are
-gitignored (bring your own). Drop a file with the matching name and it appears
-on the next launch; no configuration editing needed. A missing asset is
-silently inert (fully authentic rendering/audio), so a fresh clone behaves
-exactly like the unmodified game.
+Both systems use the tracked `game-assets/manifest.ini`. A replacement activates
+only when its named file exists; asset files are gitignored. Missing files are
+inert, so a fresh clone keeps the authentic graphics and audio.
 
 In a downloaded bundle, the same folder is `utils/game-assets/`.
 
