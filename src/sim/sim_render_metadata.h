@@ -751,9 +751,9 @@ typedef struct SimFrameData {
   /* Synthetic horizon height, percent of viewport from the top. */
   uint8_t backdrop_horizon_pct;
   /* Resolved world-underlay placement. `underlay_serial` changes whenever the
-   * baked image would differ, so the present thread rebuilds its texture from
-   * the frame it is drawing rather than from live module state. Zero means the
-   * module has nothing usable and the layer must not draw. */
+   * baked image would differ, so the presentation path rebuilds its texture
+   * from the frame it is drawing rather than from live module state. Zero
+   * means the module has nothing usable and the layer must not draw. */
   uint32_t underlay_serial;
   uint8_t underlay_origin_tile_x, underlay_origin_tile_y;
   /* Persistent full-resolution town ground accumulated from verified frames.

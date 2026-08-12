@@ -480,9 +480,9 @@ is no separate opposite-edge clip heuristic in the completed HLE path.
 
 | File | One concern |
 | --- | --- |
-| `src/action/action_bg_plan.c/.h` | pure frame state -> scene plan classification |
-| `src/action/action_bg_world.c/.h` | validated world decode, cache and tile lookup |
-| `src/actraiser/actraiser_action_bg.c/.h` | capture live state, own lifecycle, bind plan/provider |
+| `src/action/action_bg_plan.{c,h}` | pure frame state -> scene plan classification |
+| `src/action/action_bg_world.{c,h}` | validated world decode, cache and tile lookup |
+| `src/actraiser/actraiser_action_bg.{c,h}` | capture live state, own lifecycle, bind plan/provider |
 | `tests/action_bg_plan_test.c` | exhaustive rule/transition matrix |
 | `tests/action_bg_world_test.c` | synthetic decoder, bounds, invalidation and capacity tests |
 

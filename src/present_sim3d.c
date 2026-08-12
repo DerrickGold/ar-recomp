@@ -144,8 +144,9 @@ static void DrawSimGroundPlane(SDL_Texture *texture, SDL_Rect source,
     return;
 
   float aspect = (float)viewport.w / (float)viewport.h;
-  /* Reused on the present thread; together these are too large for a routine
-   * stack allocation at the density the rounded boundary requires. */
+  /* Reused by the synchronous presentation path; together these are too large
+   * for a routine stack allocation at the density the rounded boundary
+   * requires. */
   static SDL_Vertex vertices[kSimGroundVertexCount];
   static int indices[kSimGroundIndexCount];
   int vertex_count = 0, index_count = 0;
@@ -2058,9 +2059,8 @@ static void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
  * under a camera that is already looking down, and it takes very little
  * before the map appears to swim.
  *
- * Present-thread state, matching the diorama camera's ownership: the game
- * thread hands over a clamped signal and one-shot event flags, and the
- * formula lives here. */
+ * Presentation-owned state, matching the diorama camera: FrameSlot hands over
+ * a clamped signal and one-shot event flags, and the formula lives here. */
 static const float kSimLeanYaw = 0.045f;    /* rad at full lean */
 static const float kSimLeanPitch = 0.055f;  /* rad at full lean */
 static const float kSimDampTau = 0.22f;     /* s; slower than action mode */
@@ -2131,8 +2131,8 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
     g_sim_dyncam.lean_y += (target_y - g_sim_dyncam.lean_y) * alpha;
   }
 
-  /* Impulses fire only on a genuinely new capture. A present-thread redraw of
-   * a slot already processed must not re-trigger, or a paused frame would
+  /* Impulses fire only on a genuinely new capture. Re-presenting a slot already
+   * processed must not re-trigger, or a paused frame would
    * shake forever. Stacking is additive so a hit taken mid-jolt reads as
    * stronger rather than restarting. */
   if (reactive && slot->timestamp_ns != g_sim_dyncam.last_slot_ns) {

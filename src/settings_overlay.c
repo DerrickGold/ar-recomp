@@ -1305,12 +1305,12 @@ static const MenuTab *ActiveTab(void) {
  * can never disagree.
  *
  * Deliberately a direct store rather than Settings_SetLong: row enumeration
- * happens during SettingsOverlay_Render, which runs on the present thread
- * (present.c), and the host's change observer quiesces that very thread —
- * routing this through the mutation API would deadlock the presenter against
- * itself. Both fields are plain in-range enum selectors with no callback and
- * no restart semantics, so there is nothing for the normalizing path to do
- * here anyway. */
+ * happens inside SettingsOverlay_Render, and the normal mutation API invokes
+ * the full host change observer. These fields are plain in-range enum selectors
+ * with no callback or restart semantics, so changing them directly keeps the
+ * tab and its row traversal in one operation. A later normal settings save
+ * includes the selector; tab movement itself does not invoke callbacks or
+ * write the settings file. */
 static void SyncActiveTabPage(void) {
   const MenuTab *tab = ActiveTab();
   if (!tab->page_key) return;

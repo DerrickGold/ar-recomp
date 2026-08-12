@@ -50,7 +50,7 @@ literal sketches, each called out in-code where it matters:
   auto-bound at `[[texture(0)]]`/`[[sampler(0)]]`) was reverse-engineered
   from SDL's own compiled test shaders
   (`test/testgpurender_effects_{grayscale,CRT}.frag.msl.h` in the SDL repo),
-  not from documentation. Shipped effects (`src/diorama.c`): rim lighting
+  not from documentation. Shipped effects (`src/diorama/diorama.c`): rim lighting
   and a combined depth-of-field + parallax-aware edge-AA shader (the two
   target the same BG1/BG2 layers, so they had to be merged into one shader —
   SDL allows only one custom fragment shader per draw call, and DOF silently
@@ -2106,14 +2106,14 @@ that nuance; the phase graph does not.
 
 | File | Milestones | Nature of changes |
 |------|-----------|-------------------|
-| `src/actraiser_rtl.c` | M0, M2 | Diorama capture policy in `ActRaiserDrawPpuFrame` (§4.2) |
-| `src/diorama.c` (NEW) | M1-M3, M7, M8 | Layer buffers, camera model, projection, mesh, interpolation |
-| `src/diorama.h` (NEW) | M1-M3, M7 | Public types (DioramaCamera, DioramaLayer, FrameScrollState) |
+| `src/actraiser/actraiser_rtl.c` | M0, M2 | Diorama capture policy in `ActRaiserDrawPpuFrame` (§4.2) |
+| `src/diorama/diorama.c` (NEW) | M1-M3, M7, M8 | Layer buffers, camera model, projection, mesh, interpolation |
+| `src/diorama/diorama.h` (NEW) | M1-M3, M7 | Public types (DioramaCamera, DioramaLayer, FrameScrollState) |
 | `src/main.c` | M0-M7 | Debug dump (M0); recomposite + diorama render pass (M1-M3); present thread + FrameSlot + §2.9 command queue (M5); loop restructure (M6) |
 | `src/settings.h` | M3, M6 | New fields (scaled-int camera, toggles) |
 | `src/settings.c` | M3, M6 | New descriptors + `kSettingCat_Presentation` (§10.3) |
 | `src/settings_overlay.c` | M3 | New Presentation/Diorama menu section |
-| `CMakeLists.txt` | M1 | Add `src/diorama.c` to build |
+| `CMakeLists.txt` | M1 | Add `src/diorama/diorama.c` to build |
 | `snesrecomp-go/runtime/src/snes/ppu.c` | (fallback only) | Overlay capture for OLD PPU path — only if new-PPU parity fails (§4.1) |
 
 (Milestone→Phase map: M0-M3 = Phases 3+4; M4 = instrumentation only, no phase;

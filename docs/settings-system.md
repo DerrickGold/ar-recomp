@@ -723,7 +723,7 @@ The v1 toggles (bridge slot reuse, lightning destruction) were withdrawn the
 same day after play-testing — construction events regenerate town tiles from
 the record table, so record-freeing erased bridges and stranded the build
 cursor. v2 replaces them with the extension-area design (SEAMS town §7,
-save-format §3.4): four hle bodies in `src/actraiser_bugfixes.c` cooperate
+save-format §3.4): four hle bodies in `src/actraiser/actraiser_bugfixes.c` cooperate
 (`$9D9F` allocator migration, `$C07E` census, `$9CFB` construction-scene
 marks pass, `$89F0` post-reconstruction metatile render), while miracle damage
 remains completely native. The bridge is never destroyed — it keeps its map
@@ -846,7 +846,7 @@ checksummed once, and committed transactionally by `SaveSystem_ApplyEdits()`.
 ## 7. Threading / safety model
 
 The game runs as a cooperative coroutine via `swapcontext`
-(`RunOneFrameOfGame`, `src/actraiser_rtl.c`) on the **same thread** as the SDL
+(`RunOneFrameOfGame`, `src/actraiser/actraiser_rtl.c`) on the **same thread** as the SDL
 event loop. The menu mutates `g_settings` *between* frames; ordinary game and
 host code reads it on the next frame without locks.
 
@@ -883,9 +883,11 @@ requires WRAM correspondence, known-state diffs, and a real game round trip.
   struct and assert `g_ram` effects are identical via the WRAM oracle / `F2`
   snapshot. Since seeding uses the same env vars, an `AR_ALL_MAGIC=1` run must
   match byte-for-byte.
-- **Drift guard:** `tests/settings_test.c` asserts all 99 descriptor keys are
-  unique, all 86 persistent rows have unique storage, ACTION rows have none,
-  and lookup/formatting/persistence behave correctly.
+- **Drift guard:** `tests/settings_test.c` checks the complete descriptor
+  registry: keys are unique, persistent rows have unique storage, ACTION rows
+  have none, and lookup/formatting/persistence behave correctly. The test also
+  pins the total descriptor count so additions must update the fixture
+  deliberately.
 - **Live-path test:** `AR_SETTING_SET=key=value AR_SETTING_AT_GF=N` applies via
   the same mutation API the overlay calls; observe enforcement at N+1.
 - **Save-codec tests (Phase 6):** exact 8192-byte native round trip; fixture

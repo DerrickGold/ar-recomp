@@ -132,7 +132,7 @@ build. Batch with A4 (the same menu-cleanup commit).
 
 ### A3. Redundant C-literal camera defaults (§D13 residue — the seeding is already shipped)
 **Severity:** low (maintenance hazard, not a live bug).
-**Where:** `src/diorama.c` (~443-445) `static DioramaCamera g_diorama_cam = { .tilt_x
+**Where:** `src/diorama/diorama.c` (~443-445) `static DioramaCamera g_diorama_cam = { .tilt_x
 = 0.0f, .tilt_y = -0.18f, ... }`.
 **Status check (corrects the original audit framing of this finding):** the §D13
 seeding IS implemented in `cc0b042` — `Diorama_SeedCameraFromSettings` exists

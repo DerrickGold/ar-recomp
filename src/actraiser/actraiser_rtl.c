@@ -2553,7 +2553,7 @@ void ActRaiserDrawPpuFrame(void) {
         ActionApron_SurfacePitch(width, kPpuObjApron),
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
     /* After scanout (the diorama planes only hold this frame's sprites now) and
-     * before FrameSlot_Capture publishes them to the present thread. */
+     * before FrameSlot_Capture publishes them to the presentation path. */
     ActRaiser_DioramaHudObjFinish(width);
     /* After the HUD-icon promote, not before: that pass PUNCHES the promoted
      * icon out of the OBJ planes, and the apron's claimed-set test reads those

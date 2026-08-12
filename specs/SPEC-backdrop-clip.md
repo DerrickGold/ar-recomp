@@ -41,7 +41,7 @@ authority on why the fallback ordering is A → C → B.
 
 ## 1. Root cause (corrected)
 
-At a level bound the PPU's **live** per-side margin collapses (`ActRaiser_ApplyWidescreenPolicy`, `src/actraiser_rtl.c:952-969`: `margin_left = min(camera_x, g_ws_extra)`), so scanout only ever writes screen x in `[-extraLeftCur, 256+extraRightCur)` — while every diorama consumer maps the **fixed** 446-column capture span. Two distinct consumers then render the never-written columns as *opaque* black: `DrawDioramaSkybox` maps U over the whole span (`src/diorama.c:950,970-971`) and forces `SDL_BLENDMODE_NONE` (`src/diorama.c:987`), and the flat framebuffer's gap strips are explicitly zeroed every frame (`src/actraiser_rtl.c:1039-1052`) and drawn as `kDioramaPlane_Backdrop`, also `SDL_BLENDMODE_NONE` (`src/diorama.c:1351-1352`). Critically, the KNOWN LIMITATION comment at `src/diorama.c:904-922` is **wrong** that "there is no cheap fix": for the majority of action maps BG2's margins are not fetched from tilemap at all, they are *synthesized by memcpy* in `PpuMergePaddedBackground` (`snesrecomp-go/runtime/src/snes/ppu.c:987-1012`) from the always-present authentic 256 columns — and those two loops are gratuitously bounded by the **live** margin instead of the **budget**.
+At a level bound the PPU's **live** per-side margin collapses (`ActRaiser_ApplyWidescreenPolicy`, `src/actraiser/actraiser_rtl.c:952-969`: `margin_left = min(camera_x, g_ws_extra)`), so scanout only ever writes screen x in `[-extraLeftCur, 256+extraRightCur)` — while every diorama consumer maps the **fixed** 446-column capture span. Two distinct consumers then render the never-written columns as *opaque* black: `DrawDioramaSkybox` maps U over the whole span (`src/diorama/diorama.c:950,970-971`) and forces `SDL_BLENDMODE_NONE` (`src/diorama/diorama.c:987`), and the flat framebuffer's gap strips are explicitly zeroed every frame (`src/actraiser/actraiser_rtl.c:1039-1052`) and drawn as `kDioramaPlane_Backdrop`, also `SDL_BLENDMODE_NONE` (`src/diorama/diorama.c:1351-1352`). Critically, the KNOWN LIMITATION comment at `src/diorama/diorama.c:904-922` is **wrong** that "there is no cheap fix": for the majority of action maps BG2's margins are not fetched from tilemap at all, they are *synthesized by memcpy* in `PpuMergePaddedBackground` (`snesrecomp-go/runtime/src/snes/ppu.c:987-1012`) from the always-present authentic 256 columns — and those two loops are gratuitously bounded by the **live** margin instead of the **budget**.
 
 **Verifier corrections to the lead's model — read these before writing code:**
 
@@ -58,10 +58,10 @@ At a level bound the PPU's **live** per-side margin collapses (`ActRaiser_ApplyW
 | # | Contributor | Where | Verdict |
 |---|---|---|---|
 | **1** | **BG2's captured margins are empty past the live bound** — the upstream cause. `PpuMergePaddedBackground` (`ppu.c:997`, `ppu.c:1004-1005`) stops at `extraLeftCur/extraRightCur`; for non-padded BG2 (`bg2_width >= 512`, e.g. **Fillmore act 1**, or `clamp`) there is no margin content at all. | `ppu.c:997/1004`, `actraiser_rtl.c:757-786` | **Root.** Fixing it removes the artifact at the source for the *narrow-BG2 majority* (Bloodpool, Aitos 01-03, Northwall 01-05/08, Death Heim 02-08). |
-| **2** | **Skybox quad maps U over the dead columns**, `BLENDMODE_NONE` → opaque black band ≈21% of screen width. | `src/diorama.c:950,970-971,987` | **Dominant in `Skybox only`** (there the backdrop and in-box BG2 planes are skipped, `diorama.c:1263-1266,1276-1278`, so the skybox IS the whole background). |
-| **3** | **Backdrop plane's zeroed gap strips**, drawn *after* the skybox, `BLENDMODE_NONE` → opaque black over the corrected sky. Begins at `y = hud_split_height` (40) because HUD rows are re-composited edge-to-edge (`ppu.c:1562-1565`) — this is why it reads as a "wedge"/notch, not a full-height bar. | `src/actraiser_rtl.c:1039-1052` → `src/present.c:575,2936` → `src/diorama.c:696,1351-1352` | **Dominant in `Plane + skybox`; sole cause in `Off`.** A skybox-only fix leaves the symptom visibly present in 2 of 3 modes. |
-| 4 | In-box BG2 / Bg2Hi tilted planes have the same content gap | `src/diorama.c:1182-1183` | **Cosmetic, not black** — `SDL_BLENDMODE_BLEND` (`diorama.c:1351-1352`) so alpha-0 columns are *transparent*; they merely fail to cover. Fixed for free by contributor 1. Do **not** narrow their UV (would desync from world-registered BG1). |
-| 5 | DOF/edge-AA feather uses the fixed-span window, so the real content edge gets no feather; unclamped DOF blur bleeds ≤0.9 texel | `src/diorama.c:1413-1418` | **Cosmetic, macOS+Metal + `gpu_shaders_enabled=1` only** (default 0, `settings.c:1365-1371`). Out of scope; note only. |
+| **2** | **Skybox quad maps U over the dead columns**, `BLENDMODE_NONE` → opaque black band ≈21% of screen width. | `src/diorama/diorama.c:950,970-971,987` | **Dominant in `Skybox only`** (there the backdrop and in-box BG2 planes are skipped, `diorama.c:1263-1266,1276-1278`, so the skybox IS the whole background). |
+| **3** | **Backdrop plane's zeroed gap strips**, drawn *after* the skybox, `BLENDMODE_NONE` → opaque black over the corrected sky. Begins at `y = hud_split_height` (40) because HUD rows are re-composited edge-to-edge (`ppu.c:1562-1565`) — this is why it reads as a "wedge"/notch, not a full-height bar. | `src/actraiser/actraiser_rtl.c:1039-1052` → `src/present.c:575,2936` → `src/diorama/diorama.c:696,1351-1352` | **Dominant in `Plane + skybox`; sole cause in `Off`.** A skybox-only fix leaves the symptom visibly present in 2 of 3 modes. |
+| 4 | In-box BG2 / Bg2Hi tilted planes have the same content gap | `src/diorama/diorama.c:1182-1183` | **Cosmetic, not black** — `SDL_BLENDMODE_BLEND` (`diorama.c:1351-1352`) so alpha-0 columns are *transparent*; they merely fail to cover. Fixed for free by contributor 1. Do **not** narrow their UV (would desync from world-registered BG1). |
+| 5 | DOF/edge-AA feather uses the fixed-span window, so the real content edge gets no feather; unclamped DOF blur bleeds ≤0.9 texel | `src/diorama/diorama.c:1413-1418` | **Cosmetic, macOS+Metal + `gpu_shaders_enabled=1` only** (default 0, `settings.c:1365-1371`). Out of scope; note only. |
 | — | Shoebox, HUD/`PresentHudOverlayComposited`, former margin refresher, tile streamer, `PpuWriteOverlayRenderLine` writeback | — | **Verified non-contributors to this bug.** BH8 later retired the refresher for independent HLE cleanup; the other paths remain untouched. |
 
 **Direct answer to "backdrop plane vs skybox — which does the user see?"** Both, mode-dependently, and they must both be fixed. `Skybox only` → skybox quad. `Plane + skybox` → the backdrop's black bars painted over the skybox. `Off` → backdrop only.
@@ -109,7 +109,7 @@ Verified safe: `dstbuf == &overlayBuffers[layer]` is exactly the diorama-capture
 
 Three pieces: a producer-side classification, two new FrameSlot fields, and a pure UV helper. D6 is respected: `present.c` reads only the slot; `diorama.c` receives plain ints.
 
-**B1. New pure module `src/diorama_skybox_uv.c` / `.h`** (precedent: `src/diorama_scroll_math.c`):
+**B1. New pure module `src/diorama/diorama_skybox_uv.c` / `.h`** (precedent: `src/diorama/diorama_scroll_math.c`):
 
 ```c
 typedef enum {
@@ -138,7 +138,7 @@ void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,
 `DioramaBg2ValidSpan`: clamp `live_*` into `[0, budget]`; `m = (margin_source == Padded) ? budget : (margin_source == Clamped ? 0 : live)` per side; `*out_x0 = ws_extra - m_left`, `*out_x1 = ws_extra + 256 + m_right`; clamp into `[0, tex_width]`.
 `DioramaSkyboxUvRange`: `mu = (blur_radius + 1.0f)/tex_width; *u0 = x0/tw + mu; *u1 = x1/tw - mu; if (*u1 < *u0) *u1 = *u0;` — **keep** the blur inset (the taps reach exactly `blur_radius`, so `+1` leaves one texel of slack) and keep the degenerate guard as defensive code (it is provably unreachable: the span is always ≥256 texels).
 
-**B2. `src/diorama.c`** — `DrawDioramaSkybox` (:945) gains `int bg2_valid_x0, int bg2_valid_x1` and replaces lines 950-972 with one `DioramaSkyboxUvRange(kPpuBufWidth, bg2_valid_x0, bg2_valid_x1, blur_radius, &u0, &u1)` call. `Diorama_Composite` (`src/diorama.h:69`, `src/diorama.c:1117`) gains the same two ints and forwards them at :1160-1162. Do **not** apply them to the per-layer loop.
+**B2. `src/diorama/diorama.c`** — `DrawDioramaSkybox` (:945) gains `int bg2_valid_x0, int bg2_valid_x1` and replaces lines 950-972 with one `DioramaSkyboxUvRange(kPpuBufWidth, bg2_valid_x0, bg2_valid_x1, blur_radius, &u0, &u1)` call. `Diorama_Composite` (`src/diorama/diorama.h:69`, `src/diorama/diorama.c:1117`) gains the same two ints and forwards them at :1160-1162. Do **not** apply them to the per-layer loop.
 
 **B3. FrameSlot** (`src/present.h`, beside `extra_left_right` at :248):
 
@@ -148,7 +148,7 @@ void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,
   uint8_t bg2_margin_source; /* DioramaBg2MarginSource; only meaningful when diorama_active */
 ```
 
-Snapshot in `FrameSlot_Capture`, `src/frame_slot.c`, immediately after :370. **Do not read `g_ppu->extraLeftCur` there** — `src/main.c:329-334` runs `ActRaiser_RebindPpuOutputSurfaces()` between `RtlDrawPpuFrame` (main.c:306) and `HostDisplay_SubmitFrame` (main.c:402), and that reaches `PpuSetExtraSpaceCentered` (`src/hd_replacement_host.c:212`) which zeroes both live values. Instead latch them at the end of `ActRaiserDrawPpuFrame` (after the scanline loop, `src/actraiser_rtl.c:1406-1408`) into file-scope ints exposed as `void ActRaiser_LiveMargins(int *l, int *r, int *bg2_source);` and read that. `bg2_margin_source` is classified from `g_ppu->wsLayerClamp/wsLayerMirror/wsLayerRepeat` and `wsRepeatY1[1] > wsRepeatY0[1]` at the same latch point.
+Snapshot in `FrameSlot_Capture`, `src/frame_slot.c`, immediately after :370. **Do not read `g_ppu->extraLeftCur` there** — `src/main.c:329-334` runs `ActRaiser_RebindPpuOutputSurfaces()` between `RtlDrawPpuFrame` (main.c:306) and `HostDisplay_SubmitFrame` (main.c:402), and that reaches `PpuSetExtraSpaceCentered` (`src/hd_replacement_host.c:212`) which zeroes both live values. Instead latch them at the end of `ActRaiserDrawPpuFrame` (after the scanline loop, `src/actraiser/actraiser_rtl.c:1406-1408`) into file-scope ints exposed as `void ActRaiser_LiveMargins(int *l, int *r, int *bg2_source);` and read that. `bg2_margin_source` is classified from `g_ppu->wsLayerClamp/wsLayerMirror/wsLayerRepeat` and `wsRepeatY1[1] > wsRepeatY0[1]` at the same latch point.
 
 **B4. `src/present.c`** — in the diorama branch (~:3075), compute `DioramaBg2ValidSpan(slot->ws_extra, slot->extra_left_right, slot->extra_left_cur, slot->extra_right_cur, slot->bg2_margin_source, &x0, &x1)` and pass `x0,x1` to `Diorama_Composite`. Use **`slot->ws_extra`** (`frame_slot.c:277`) as the offset, not `extra_left_right` — `ws_extra` is what the capture pitch and `Diorama_Upload` rect are derived from (`actraiser_rtl.c:1212`, `diorama.c:862`). They are equal today; keep them conceptually distinct.
 
@@ -156,9 +156,9 @@ Snapshot in `FrameSlot_Capture`, `src/frame_slot.c`, immediately after :370. **D
 
 ### Fix C — stop the backdrop plane's gap strips from being black (contributor 3)
 
-**File:** `src/actraiser_rtl.c:1034-1054`, inside `ActRaiser_ApplyWidescreenPolicy`. Replace the two `memset(...,0,...)` loops with a fill of the frame's backdrop colour when diorama mode is on — the colour the authentic renderer already shows for every unrendered pixel *inside* the live span (`ClearBackdrop` → `cgram[0]`).
+**File:** `src/actraiser/actraiser_rtl.c:1034-1054`, inside `ActRaiser_ApplyWidescreenPolicy`. Replace the two `memset(...,0,...)` loops with a fill of the frame's backdrop colour when diorama mode is on — the colour the authentic renderer already shows for every unrendered pixel *inside* the live span (`ClearBackdrop` → `cgram[0]`).
 
-Extract the loop as a pure helper (new `src/actraiser_ws_gap.c`/`.h`) so it is testable:
+Extract the loop as a pure helper (new `src/actraiser/actraiser_ws_gap.c`/`.h`) so it is testable:
 
 ```c
 /* Pure. Fills the framebuffer gap strips the compositor never writes.
@@ -179,7 +179,7 @@ Caller:
                           g_ppu->extraLeftRight, l, r, gap_fill);
 ```
 
-`ActRaiserBackdropArgb` is the same expansion as `BackdropArgb` in `src/sim3d.c:72-79` (`ExpandColor5` × `PPU_brightness`); make that one non-static/shared rather than duplicating it. **Gate on `diorama_mode` is mandatory**: in flat widescreen the black gap is intentional pillarbox at a world edge, and changing it unconditionally alters flat output and breaks byte-identical replay. Known imperfections, both acceptable and to be commented: the fill uses start-of-frame `cgram[0]` (per-line HDMA palette changes are not tracked), and forced-blank rows are re-blackened by scanout's memset (`ppu.c:1523-1527`) — correct, since the screen is blank.
+`ActRaiserBackdropArgb` is the same expansion as `BackdropArgb` in `src/sim/sim3d.c:72-79` (`ExpandColor5` × `PPU_brightness`); make that one non-static/shared rather than duplicating it. **Gate on `diorama_mode` is mandatory**: in flat widescreen the black gap is intentional pillarbox at a world edge, and changing it unconditionally alters flat output and breaks byte-identical replay. Known imperfections, both acceptable and to be commented: the fill uses start-of-frame `cgram[0]` (per-line HDMA palette changes are not tracked), and forced-blank rows are re-blackened by scanout's memset (`ppu.c:1523-1527`) — correct, since the screen is blank.
 
 Explicitly **rejected** for contributor 3: narrowing the backdrop plane's UV (its mesh shares `aspect_x`/`height_scale` with BG1/OBJ, `diorama.c:1196-1197`, so it would de-register from the other planes) and switching it to `SDL_BLENDMODE_BLEND` (the compositor writes alpha 0 for *every* pixel, `ppu.c:1578-1581` — the whole plane would vanish).
 
@@ -187,7 +187,7 @@ Explicitly **rejected** for contributor 3: narrowing the backdrop plane's UV (it
 
 All three modules are new pure files; wire them following the `actraiser_diorama_scroll_math_test` pattern at `CMakeLists.txt:508-520`.
 
-### T1 `tests/diorama_skybox_uv_test.c` → `src/diorama_skybox_uv.c`
+### T1 `tests/diorama_skybox_uv_test.c` → `src/diorama/diorama_skybox_uv.c`
 
 `DioramaBg2ValidSpan(ws_extra, budget, live_l, live_r, source, &x0, &x1)`:
 
@@ -218,7 +218,7 @@ New `TestCapturedBg2PaddingUsesBudget()`: `ppu_reset`; `inidisp=0x0f`; enable BG
 - **Gate proof (the regression the fix could introduce):** repeat the identical setup with **no** bound overlay surface, and assert the *framebuffer* columns `0..94` of row 0 remain the backdrop/zero. *This must pass both before and after* — it is the byte-identical-flat-mode guard; break the fix by removing the `captured` condition and it fails.
 - Clamp variant (`PpuSetWidescreenLayerClamp(ppu, 1u<<1)`): capture columns `0..94` stay zero — documents Fix A's scope limit and justifies Fix B.
 
-### T3 `tests/actraiser_ws_gap_test.c` → `src/actraiser_ws_gap.c`
+### T3 `tests/actraiser_ws_gap_test.c` → `src/actraiser/actraiser_ws_gap.c`
 
 Seed a 446×8 buffer with a sentinel `0xDEADBEEF`, then `ActRaiserFillMarginGaps(buf, 446*4, 8, 95, live_l, live_r, 0xff1030a0)`:
 
@@ -263,6 +263,6 @@ Settings for every check: **Screen ratio = 16:9**, **Diorama mode = On**. Walk t
 - **Narrowing the in-box BG2/Bg2Hi UV window** — their `BLENDMODE_BLEND` already handles the dead columns correctly (transparent), and narrowing would desync them from world-registered BG1.
 - **A symmetric UV inset** (`min(left,right)` both sides) — the collapse is one-sided, so this also crops the still-valid side, pushing the stretch from 1.27x to 1.75x.
 - **Deleting the gap memset at `actraiser_rtl.c:1039-1052`** — the compositor never writes those columns, so they would hold last frame's pixels (stale ghost strips), strictly worse than black.
-- **Mirroring `diorama_skybox` into FrameSlot** — `diorama.c` reads its own settings live *by documented design* (`src/diorama.c:130-132`); D6 fences `present.c` as a translation unit only. Not a gap, not part of this fix.
+- **Mirroring `diorama_skybox` into FrameSlot** — `diorama.c` reads its own settings live *by documented design* (`src/diorama/diorama.c:130-132`); D6 fences `present.c` as a translation unit only. Not a gap, not part of this fix.
 
-**Files touched:** `snesrecomp-go/runtime/src/snes/ppu.c` (2 functions), `src/actraiser_rtl.c` (gap fill + margin latch), new `src/diorama_skybox_uv.{c,h}`, new `src/actraiser_ws_gap.{c,h}`, `src/present.h` (3 fields), `src/frame_slot.c` (3 assignments), `src/present.c` (span computation + 2 args), `src/diorama.{c,h}` (2 params, UV math replaced), `src/sim3d.c` (un-static `BackdropArgb`), `CMakeLists.txt` (2 new test targets + 2 new sources in the app target), `tests/diorama_skybox_uv_test.c`, `tests/actraiser_ws_gap_test.c`, `tests/ppu_render_pipeline_test.c`. Delete the now-obsolete "no cheap fix" paragraph at `src/diorama.c:904-922` and replace it with the corrected scope note (Fix A covers padded BG2; Fix B covers wide/clamped BG2 with a stretch; contributor 5 remains open).
+**Files touched:** `snesrecomp-go/runtime/src/snes/ppu.c` (2 functions), `src/actraiser/actraiser_rtl.c` (gap fill + margin latch), new `src/diorama_skybox_uv.{c,h}`, new `src/actraiser_ws_gap.{c,h}`, `src/present.h` (3 fields), `src/frame_slot.c` (3 assignments), `src/present.c` (span computation + 2 args), `src/diorama.{c,h}` (2 params, UV math replaced), `src/sim/sim3d.c` (un-static `BackdropArgb`), `CMakeLists.txt` (2 new test targets + 2 new sources in the app target), `tests/diorama_skybox_uv_test.c`, `tests/actraiser_ws_gap_test.c`, `tests/ppu_render_pipeline_test.c`. Delete the now-obsolete "no cheap fix" paragraph at `src/diorama/diorama.c:904-922` and replace it with the corrected scope note (Fix A covers padded BG2; Fix B covers wide/clamped BG2 with a stretch; contributor 5 remains open).

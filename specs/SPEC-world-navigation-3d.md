@@ -486,7 +486,7 @@ town underlay shroud's hole or cull geometry.
 
 - `kActRaiserNonActionMap_WorldMap = 0x09` already identifies the scene.
 - `$09` is already fully wide with no ordinary UI layers in
-  `src/actraiser_rtl.c`.
+  `src/actraiser/actraiser_rtl.c`.
 - `SimWorldMap` already stores and bakes the complete 128x128 map, not a town
   chunk.
 - `SimWorldMap_Downsample` provides a safe CPU-side blur mip.

@@ -6,6 +6,11 @@ This document is the implementation plan for enhanced rendering in the six town
 simulation maps. Phase 0 evidence tooling is implemented; the enhanced renderer
 itself begins in Phase 1.
 
+**Current-status note (2026-08-12):** use the status table in `specs/README.md`
+and the town matrix in `docs/progress.md` for what remains. The checkpoint
+narrative below records the 2026-07-22 implementation state and is retained as
+design evidence; later work has superseded several “what remains” paragraphs.
+
 Implementation checkpoint (2026-07-22): Phase 3 / D3b is landed. D1's
 frame-owned source/OAM metadata and 512x512 semantic atlas remain the required
 integrity gate. D2 adds ten observational Mode-1 capture planes in exact SNES
@@ -1205,19 +1210,19 @@ general visual drift.
 Prefer the following separation:
 
 ```text
-src/sim3d.c / src/sim3d.h
+src/sim/sim3d.c / src/sim/sim3d.h
     render gate, projection, composition, shadows, transitions
 
-src/sim_render_data.c / src/sim_render_data.h
+src/sim/sim_render_metadata.c / src/sim/sim_render_metadata.h
     producer metadata, atlas descriptors, pure classification
 
 src/scene3d_math.c / src/scene3d_math.h
     shared projection/quad math if follow-up GEO has not already supplied it
 
-src/actraiser_widescreen_sprites.c
+src/actraiser/actraiser_widescreen_sprites.c
     existing semantic OAM leaf instrumentation only
 
-src/actraiser_rtl.c
+src/actraiser/actraiser_rtl.c
     game-thread capture policy and atlas preparation
 
 src/present.h, src/main.c, src/present.c

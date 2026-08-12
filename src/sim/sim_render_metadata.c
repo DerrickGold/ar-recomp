@@ -1151,7 +1151,7 @@ bool SimRenderMetadata_CommitAtlas(
 
 /* Per-world-record presentation-height animation. This is host-only easing
  * state on the game thread: it is folded into the immutable per-frame value
- * copy, so the present thread still reads one self-contained snapshot. */
+ * copy, so the presentation path still reads one self-contained snapshot. */
 typedef struct SimHeightSlew {
   int16_t height;
   uint32_t last_serial;

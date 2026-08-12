@@ -1065,7 +1065,7 @@ comment for the full key/gate grammar. Planes are capability tiers:
 - `tiles` (reserved): parsed but inert — the planned hash-keyed HD
   tile-pack path (needs the N-x RGBA-sideband renderer extension).
 
-`AR_TILE_CENSUS=1` (src/hd_tile_census.c) is the tile-pack sizing survey for
+`AR_TILE_CENSUS=1` (src/dev/hd_tile_census.c) is the tile-pack sizing survey for
 the `tiles` plane: a read-only per-frame walk of visible BG/OAM/Mode-7 tiles
 that writes unique-tile contact sheets (`tile_sheet_<class>.ppm`), a JSONL
 census, and a palette-variance summary to the run dir. First results
@@ -1075,7 +1075,7 @@ are small.
 
 #### Click-driven scene inspector (2026-07-16)
 
-The host scene inspector (`src/scene_inspector.c`) is the interactive front end
+The host scene inspector (`src/dev/scene_inspector.c`) is the interactive front end
 to these replacement seams. Enable the persistent `scene_inspector` setting,
 press F3, or seed `AR_SCENE_INSPECTOR=1`; a left click inside the presented
 game viewport maps through the real renderer viewport/PAR and widescreen crop
@@ -1117,7 +1117,7 @@ works. `tests/scene_inspector_test.c` guards center/mirror BG mapping and OAM
 frame/subtile identity.
 
 The overlay's Inspector category also provides a one-click resident asset dump
-(`src/scene_asset_dump.c`). Unlike F2's framebuffer-oriented diagnostic
+(`src/dev/scene_asset_dump.c`). Unlike F2's framebuffer-oriented diagnostic
 snapshot, it decodes complete data sets: every tilemap cell for each BG layer
 (or the full 1024×1024 Mode-7 canvas), all 128 OAM compositions in a fixed
 16×8 sheet, and both OBJ name bases repeated through all eight OBJ palettes as
@@ -1160,7 +1160,7 @@ did not isolate it: that branch also hle-replaced `$8C98/$8D68`, hle-wrapped
 both streamers, and restored only selected DP scratch after calling `$B825`.
 
 At that checkpoint, main kept all four original routines and placed the validated
-margin decoder in `src/actraiser_widescreen_bg.c`. Static audit of
+margin decoder in `src/actraiser/actraiser_widescreen_bg.c`. Static audit of
 `$B825->$B90D` shows only upload-record WRAM writes, DP `$0E`, and `$BED3`
 multiply-register use; there are no PPU/OAM/CGRAM writes. The host wrapper
 therefore snapshots/restores the full `CpuState`, all 128 KiB WRAM, and SNES
@@ -1832,7 +1832,7 @@ once per vertex and shared by every term that reads it — two terms describing
 the same boundary must not be able to disagree about where it is. It is stated
 in the emitter's own biased coordinates so the cull predicate and the things that
 explain it are the same arithmetic rather than two derivations that agree by
-inspection. `src/actraiser_widescreen_sprites.c` carries `_Static_assert`s
+inspection. `src/actraiser/actraiser_widescreen_sprites.c` carries `_Static_assert`s
 tying the mirrored window constants to the emitter's.
 
 It returns 0 well inside the window and 1 at the edge, and every cue reads

@@ -204,17 +204,16 @@ ActRaiserRecomp/
 │   ├── hd/                    # your HD art (*.png) — gitignored
 │   └── audio/                 # your music (*.ogg) — gitignored
 ├── src/
-│   ├── main.c                 # SDL3 entry point, input, frame loop, config
-│   ├── actraiser_rtl.c        # game-specific HLE/runtime glue + cheats
-│   ├── actraiser_spc_player.c # SPC/audio upload handling
-│   ├── diorama*.c             # tilted-3D action-stage presentation
-│   ├── sim3d*.c, sim_world_*.c # 3D simulation town + world navigation
-│   ├── hd_replacements.c      # HD-art manifest parsing + per-frame gates
-│   ├── music_replacements.c   # music manifest + OGG loop streamer + triggers
-│   ├── settings.c / settings_overlay.c  # live settings registry + host menu
-│   ├── input_map.c            # keyboard/gamepad binding registry
-│   ├── save_system.c          # SRAM backends, save editor, import/export
-│   ├── config.c               # .ini parsing
+│   ├── main.c                 # SDL3 entry point and application loop
+│   ├── settings*.c            # live settings registry + host menu
+│   ├── present*.c             # frame upload and presentation paths
+│   ├── actraiser/             # game-specific HLE, CPU glue, audio, widescreen
+│   ├── action/                # action-scene plans, effects, and host rendering
+│   ├── diorama/               # tilted-3D action-stage presentation
+│   ├── sim/                   # simulation-town metadata and capture
+│   ├── host/                  # display, audio, and input platform boundaries
+│   ├── manual/                # in-app manual parsing, input, and rendering
+│   ├── dev/                   # inspectors, diagnostics, and evidence tools
 │   └── gen/                   # ★ regenerated C output — NOT committed (you
 │                                 produce this locally via snesbuild regen)
 ├── third_party/

@@ -501,7 +501,7 @@ the current debugging process; this file is the case law.
     be black. The result was 4-8 differing pixels at x=93-94 (live area starts at 95), which
     correctly failed D2's byte-equality gate — dropping that single frame to the authentic
     composite, i.e. one flat frame among projected ones. **Fix:** clip plane compositing to the
-    live area below the promoted-HUD rows (`full_width_rows`), in `src/sim3d.c`.
+    live area below the promoted-HUD rows (`full_width_rows`), in `src/sim/sim3d.c`.
     **Reusable lessons:**
     - **A flat one-frame flicker in an enhanced renderer is a capture fallback, and the status
       names the cause.** `[sim3d-view]` console lines report every enhanced<->authentic
@@ -574,7 +574,7 @@ the current debugging process; this file is the case law.
     authentic 224-row viewport, so it makes sprite pixels appear that the original game hides.
     The horizontal margins are different in kind — they extend into widescreen area the hardware
     never showed. Reverted; the reasoning lives beside the vertical predicate in
-    `src/actraiser_widescreen_sprites.c`. Reaching actors above or below the camera needs a path
+    `src/actraiser/actraiser_widescreen_sprites.c`. Reaching actors above or below the camera needs a path
     that does not travel through OAM at all: the emitter recording parts host-side and the atlas
     rasterizing from a synthetic OAM view. `PpuRasterizeObjRange` is already fully
     screen-independent (no clipping, no scanline limits), so art is not the obstacle.

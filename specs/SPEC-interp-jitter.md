@@ -1,7 +1,23 @@
-# Spec — IJ1: diorama scroll interpolation is jittery when enabled
+# Spec — IJ1: diorama scroll-interpolation jitter (resolved)
 
-**Status:** authored, not implemented. Not yet audited. **The primary hypothesis
-must be confirmed against data before any code changes** — see §7.
+**Status:** resolved after audit; the proposed extrapolation-to-lerp change was
+not implemented. A separate IJ2 decision remains deferred pending on-device
+evidence.
+
+## Resolution
+
+The Wave 4 audit found a unit mismatch, not an extrapolation failure, as the
+measured dominant cause. Horizontal motion was normalized by the visible width
+while the renderer sampled the wider allocated layer texture. The resulting
+oversized shift snapped backward at every tick and saturated the UV slack during
+ordinary movement. Commit `bfafe3e` normalized both against
+`kFrameSlotLayerTextureWidth` and added regression coverage.
+
+The current code still extrapolates deliberately. Revisit the original lerp
+proposal as IJ2 only if fresh device testing shows jitter specifically on
+velocity changes after the unit fix. The remaining sections preserve the
+pre-fix investigation and the criteria for that decision; they are not an
+implementation instruction.
 
 ## 1. Symptom (author-reported, on-device)
 
@@ -26,7 +42,8 @@ number.
 
 ## 3. Primary hypothesis — we EXTRAPOLATE, and every velocity change snaps
 
-`src/diorama_scroll_math.c:83-86`:
+`ComputeDioramaScrollDeltaAt` in
+`src/diorama/diorama_scroll_math.c`:
 
 ```c
 int dh1 = curr->bg1_camera_x - prev->bg1_camera_x;
@@ -34,10 +51,9 @@ d.bg_du[0] = (t * (float)dh1) / (float)curr->snes_width;
 ```
 
 Displayed position is `curr + t × (previous tick's motion)`. The choice is
-deliberate and documented at `src/present.c:658-668`: it extrapolates forward
-using the prev→curr delta as a one-tick velocity estimate, explicitly rejecting
-the design doc's §6.2 `prev + t*(curr-prev)` lerp because that costs one tick of
-display latency.
+deliberate: it uses the prev→curr delta as a one-tick velocity estimate rather
+than paying the one tick of display latency introduced by
+`prev + t*(curr-prev)`.
 
 **Why that produces jitter.** Extrapolation is only smooth while velocity is
 constant. Every time the real velocity differs from the prediction, the error is
@@ -71,15 +87,15 @@ position = prev + t × (curr − prev)
 
 Never predicts, so never needs correcting; motion is monotone by construction.
 
-Cost: one tick (~16.6ms) of additional display latency for the *interpolated
-layers only*. Note this does NOT delay input response — the game logic, the
-player sprite (OAM, not an interpolated layer), and the HUD are unaffected. It
-delays only the background scroll, against which 16.6ms is not perceptible.
+Cost: one tick (~16.6ms) of additional display latency for the interpolated
+world. This does not delay game logic or the HUD, but it does move OBJ with BG1:
+`DioramaLayerBgIndex` deliberately gives them the same delta so actors remain
+attached to the scene. On-device acceptance must therefore include perceived
+input response as well as layer alignment.
 
 Implementation is small: the delta already exists; `t` is already correct; the
-change is which base the offset is applied to, plus updating the comment at
-`present.c:658-668` (which currently documents the rejected-then-chosen
-reasoning and would become actively misleading).
+change is which base the offset is applied to, plus updating the rationale in
+`ComputeDioramaScrollDelta` (`src/present.c`).
 
 **This changes the sign/base of a rendered offset, so it must be gated on the
 existing off-by-default setting and verified by the mesh-UV test, not by
@@ -89,22 +105,23 @@ existing off-by-default setting and verified by the mesh-UV test, not by
 
 These are independent of §3 and could each produce jitter alone or additively.
 
-**IJ-H2 — `capture_ticks` quantization.** `diorama_scroll_math.c:70`:
-`t = alpha / curr->capture_ticks`. When the drain runs 2 ticks in one iteration,
+**IJ-H2 — `capture_ticks` quantization.** In
+`ComputeDioramaScrollDeltaAt`, `t = alpha / curr->capture_ticks`. When the drain
+runs 2 ticks in one iteration,
 `t` halves while the delta doubles — correct *on average*, but the on-screen
 motion *rate* changes step-wise for that frame. If `capture_ticks` alternates
 1,2,1,2 under load (which the Limit-aware catch-up cap permits), that alternation
 alone is jitter, and it would persist after fixing §3.
 
-**IJ-H3 — per-layer divergence.** BG1 and BG2 use independent deltas
-(`:83-91`) — intentional parallax. If BG2's WRAM camera is noisier or updates on
+**IJ-H3 — per-layer divergence.** BG1 and BG2 use independent deltas in
+`ComputeDioramaScrollDeltaAt`—intentional parallax. If BG2's WRAM camera is noisier or updates on
 a different cadence than BG1's, the layers jitter *against each other*: the scene
 appears to shear rather than shake. Note finding B1b already established that
 BG2 is HDMA-driven and its PPU registers carry residue; the fix moved to the WRAM
 camera, but whether BG2's WRAM camera is as stable as BG1's is unverified.
 
 **IJ-H4 — the `t` clamp hides a real out-of-range condition.**
-`:71-72` clamps `t` to [0,1] silently. If `alpha` or `capture_ticks` is ever out
+`ComputeDioramaScrollDeltaAt` clamps `t` to [0,1] silently. If `alpha` or `capture_ticks` is ever out
 of the expected range, the clamp converts that into a *frozen* offset for that
 frame (a stutter) instead of a loud failure. The R17 assertions cover `alpha`,
 but only in debug builds.
@@ -162,9 +179,11 @@ remains byte-identical (PPM compare).
 3. IJ-H2: can `capture_ticks` realistically alternate 1↔2 during steady play at
    default settings?
 4. IJ-H3: is BG2's WRAM camera as stable per-tick as BG1's?
-5. Does the one-tick latency of §3a interact with anything that *does* need to be
-   latency-free — confirm the player sprite and HUD are not interpolated layers.
+5. The player sprite is interpolated: `DioramaLayerBgIndex` in `src/present.c`
+   maps all OBJ planes to BG1's delta so actors remain attached to the world.
+   Any IJ2 implementation must preserve that alignment. The HUD remains flat.
 6. Is there any place other than `bg_du/bg_dv` that the diorama camera pose is
-   perturbed per-present (the B4 dyncam lean/kick decay at `present.c:2742`
-   runs per present on a wall-clock exponential) — could *that* be the jitter
-   source rather than scroll interpolation, given both are only visible together?
+   perturbed per-present (`PresentCompositeScene` in `src/present.c` applies the
+   Dynamic Cam lean/kick decay on a wall-clock exponential)—could that be the
+   jitter source rather than scroll interpolation, given both are visible
+   together?
