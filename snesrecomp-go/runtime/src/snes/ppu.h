@@ -190,6 +190,11 @@ enum {
    * blending. Unlike the alpha flags, this applies to BG and OBJ alike.
    * Extraction-only. */
   kPpuOverlayFlag_MarkFullAddSubscreen = 16,
+  /* Export an opaque black/white mask of pixels for which this isolated
+   * source is the final main-screen priority winner. The host can multiply a
+   * presentation effect by the mask without a custom shader. Extraction-only;
+   * authentic scanout remains unchanged. */
+  kPpuOverlayFlag_MarkMainScreenWinner = 32,
 };
 
 /* Per-row widescreen padding policy. Inherit selects the whole-layer mask;

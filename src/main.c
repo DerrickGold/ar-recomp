@@ -120,6 +120,11 @@ uint8_t g_hud_bg_pixels[
     kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 uint8_t g_hud_obj_pixels[
     kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+/* Flat-mode mask of pixels for which BG2 wins the complete PPU main-screen
+ * priority resolve. A BG2-stage presentation effect is multiplied by this
+ * before compositing, so later BG1/OBJ art retains authentic occlusion. */
+uint8_t g_action_bg2_mask_pixels[
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 
 /* Diorama per-plane capture buffers, indexed by kDioramaPlane_* (engine
  * sources = the priority-0 remainder of each layer, appended entries = the

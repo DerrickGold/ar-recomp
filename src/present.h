@@ -158,6 +158,9 @@ typedef struct FrameSlot {
    * compositor draws this subset with saturated additive blending after the
    * ordinary main-screen world planes. */
   uint32_t diorama_plane_additive_mask;
+  /* True only when the flat-mode PPU capture produced a current BG2-winner
+   * mask. Presentation must not reuse stale mask texture content. */
+  bool action_bg2_mask_valid;
 
   /* D1 simulation-town semantic payload.  This value-copy is the only form
    * present-time code may consume; the live HLE producer state stays private

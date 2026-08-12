@@ -27,10 +27,6 @@ static DioramaProjection Projection(void) {
       0, 0, 1, 0,
       0, 0, 0, 1,
     },
-    .object_u0 = 0.0f,
-    .object_v0 = 0.0f,
-    .object_u1 = 1.0f,
-    .object_v1 = 1.0f,
     .aspect_x = 2.0f,
     .height_scale = 1.0f,
     .texture_width = 100,
@@ -38,8 +34,11 @@ static DioramaProjection Projection(void) {
     .output_width = 100,
     .output_height = 100,
   };
-  projection.bg1_plane.valid = true;
-  projection.object_planes[0].valid = true;
+  projection.bg1_plane = (DioramaPlaneProjection){
+    .valid = true, .u1 = 1.0f, .v1 = 1.0f,
+  };
+  projection.bg2_plane = projection.bg1_plane;
+  projection.object_planes[0] = projection.bg1_plane;
   return projection;
 }
 
@@ -59,7 +58,7 @@ static void TestPriorityPlaneShapeIsApplied(void) {
   DioramaProjection projection = Projection();
   projection.matrix[8] = 1.0f;  /* make depth visible in screen X */
   projection.object_planes[0].rake = 0.5f;
-  projection.object_planes[1].valid = true;
+  projection.object_planes[1] = projection.object_planes[0];
   projection.object_planes[1].rake = 0.0f;
   SDL_FPoint raked, flat;
   CHECK(Diorama_ProjectCapturedPoint(
@@ -97,8 +96,8 @@ static void TestCapturedTextureOriginIsApplied(void) {
    * This is the contract action effects need when the diorama layer surfaces
    * are wider than the region they display. */
   projection.texture_x_origin = 20;
-  projection.object_u0 = 0.20f;
-  projection.object_u1 = 0.80f;
+  projection.object_planes[0].u0 = 0.20f;
+  projection.object_planes[0].u1 = 0.80f;
   SDL_FPoint point;
   float scale_x = 0.0f, scale_y = 0.0f;
   CHECK(Diorama_ProjectCapturedPoint(
@@ -130,6 +129,25 @@ static void TestBg1PlaneShapeIsIndependent(void) {
       &projection, 50.0f, 25.0f, &wall, NULL, NULL));
 }
 
+static void TestBg2PlaneShapeAndWindowAreIndependent(void) {
+  DioramaProjection projection = Projection();
+  projection.matrix[8] = 1.0f;
+  projection.bg2_plane.z_world = -0.30f;
+  projection.bg2_plane.rake = 0.10f;
+  projection.bg2_plane.u0 = 0.20f;
+  projection.bg2_plane.u1 = 0.80f;
+  SDL_FPoint backdrop, playfield;
+  CHECK(Diorama_ProjectCapturedBg2Point(
+      &projection, 50.0f, 25.0f, &backdrop, NULL, NULL));
+  CHECK(Diorama_ProjectCapturedBg1Point(
+      &projection, 50.0f, 25.0f, &playfield, NULL, NULL));
+  CHECK(Near(backdrop.x - playfield.x, -12.5f));
+  CHECK(Near(backdrop.y, playfield.y));
+  projection.bg2_plane.valid = false;
+  CHECK(!Diorama_ProjectCapturedBg2Point(
+      &projection, 50.0f, 25.0f, &backdrop, NULL, NULL));
+}
+
 static void TestInvalidInputsFailClosed(void) {
   DioramaProjection projection = Projection();
   SDL_FPoint point = { 17.0f, 29.0f };
@@ -150,13 +168,66 @@ static void TestInvalidInputsFailClosed(void) {
       &projection, 0.0f, 0.0f, 0, NULL, NULL, NULL));
 }
 
+static void TestPlaneEligibilityMatchesDrawableInputs(void) {
+  CHECK(Diorama_PlaneEligible(
+      kPpuOverlaySource_Bg2, true, true, true, false, false));
+  CHECK(!Diorama_PlaneEligible(
+      kPpuOverlaySource_Bg2, false, true, true, false, false));
+  CHECK(!Diorama_PlaneEligible(
+      kPpuOverlaySource_Bg2, true, false, true, false, false));
+  CHECK(!Diorama_PlaneEligible(
+      kPpuOverlaySource_Bg2, true, true, false, false, false));
+  CHECK(!Diorama_PlaneEligible(
+      kPpuOverlaySource_Bg2, true, true, true, false, true));
+  CHECK(!Diorama_PlaneEligible(
+      kPpuOverlaySource_Bg3, true, true, true, true, false));
+
+  /* A current actor effect supplies current projection content for its exact
+   * visible OBJ band. It must not weaken the BG2 drawable-pixel contract that
+   * keeps the waterfall hidden when its source backdrop is skipped. */
+  CHECK(Diorama_PlaneProjectable(
+      kPpuOverlaySource_Obj, true, true, false, true, false, false));
+  CHECK(!Diorama_PlaneProjectable(
+      kPpuOverlaySource_Obj, false, true, false, true, false, false));
+  CHECK(!Diorama_PlaneProjectable(
+      kPpuOverlaySource_Obj, true, false, false, true, false, false));
+  CHECK(!Diorama_PlaneProjectable(
+      kPpuOverlaySource_Bg2, true, true, false, true, false, false));
+  CHECK(Diorama_PlaneProjectable(
+      kPpuOverlaySource_Bg2, true, true, true, true, false, false));
+  CHECK(!Diorama_PlaneProjectable(
+      kPpuOverlaySource_Obj, true, true, false, false, false, false));
+}
+
+static void TestObjEffectMaskDistinguishesEmptyFromFailedUpload(void) {
+  const uint32_t obj0 = 1u << kPpuOverlaySource_Obj;
+  const uint32_t obj2 = 1u << kDioramaPlane_Obj2;
+  const uint8_t required = (1u << 0) | (1u << 2);
+
+  /* Empty OBJ0 needs its actor transform without a texture upload; OBJ2 had
+   * pixels and uploaded, so both exact priorities remain available. */
+  CHECK(Diorama_FilterObjEffectProjectionMask(
+      required, obj0 | obj2, obj2, obj2) == required);
+  /* Content without a successful upload is a real resource failure, not an
+   * empty-band actor case, and therefore fails closed. */
+  CHECK(Diorama_FilterObjEffectProjectionMask(
+      required, obj0 | obj2, obj0 | obj2, obj2) == (1u << 2));
+  CHECK(Diorama_FilterObjEffectProjectionMask(
+      required, obj2, 0, 0) == (1u << 2));
+  CHECK(Diorama_FilterObjEffectProjectionMask(
+      0xFFu, 0, 0, 0) == 0);
+}
+
 int main(void) {
   TestRegisteredProjectionAndScale();
   TestPriorityPlaneShapeIsApplied();
   TestOutputViewportOriginIsApplied();
   TestCapturedTextureOriginIsApplied();
   TestBg1PlaneShapeIsIndependent();
+  TestBg2PlaneShapeAndWindowAreIndependent();
   TestInvalidInputsFailClosed();
+  TestPlaneEligibilityMatchesDrawableInputs();
+  TestObjEffectMaskDistinguishesEmptyFromFailedUpload();
   if (g_failures) {
     fprintf(stderr, "%d diorama projection test(s) failed\n", g_failures);
     return 1;

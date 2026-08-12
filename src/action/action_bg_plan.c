@@ -57,6 +57,10 @@ typedef struct TunedLayerPolicy {
   ActionBgMotionMode motion;
   uint16_t left;
   uint16_t right;
+  uint16_t top;
+  uint16_t bottom;
+  bool apply_horizontal_extent;
+  bool apply_vertical_extent;
   bool requires_existing_band;
   bool bands_inherit_extent;
 } TunedLayerPolicy;
@@ -64,8 +68,8 @@ typedef struct TunedLayerPolicy {
 /* Canonical transcription target for live BG Extents exports. Classification
  * still owns role/source/bands. Each entry is guarded by that canonical
  * source/edge and, where required, the classified band before applying the
- * exported edge, motion and horizontal cap; this prevents a stale tuning from
- * silently reclassifying another scene. */
+ * exported edge, motion and explicitly selected extents; this prevents a
+ * stale tuning from silently reclassifying another scene. */
 static const TunedLayerPolicy kTunedLayerPolicies[] = {
   {
     .map_group = kFillmore,
@@ -75,6 +79,7 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_LiveWorld,
     .edge = kActionBgEdge_LiveWorld,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 128,
     .right = 128,
   },
@@ -86,6 +91,7 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_Mirror,
     .edge = kActionBgEdge_Mirror,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 76,
     .right = 100,
   },
@@ -97,6 +103,7 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_Mirror,
     .edge = kActionBgEdge_Mirror,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 68,
     .right = 68,
     .bands_inherit_extent = true,
@@ -109,6 +116,7 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_Mirror,
     .edge = kActionBgEdge_Mirror,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 68,
     .right = 68,
   },
@@ -120,6 +128,7 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_Mirror,
     .edge = kActionBgEdge_Mirror,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 92,
     .right = 92,
   },
@@ -131,6 +140,7 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_LiveWorld,
     .edge = kActionBgEdge_Mirror,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 16,
     .right = 16,
   },
@@ -142,6 +152,7 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_Mirror,
     .edge = kActionBgEdge_Mirror,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 0,
     .right = 0,
   },
@@ -153,6 +164,7 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_Mirror,
     .edge = kActionBgEdge_Mirror,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 128,
     .right = 128,
     .requires_existing_band = true,
@@ -165,6 +177,7 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_Mirror,
     .edge = kActionBgEdge_Mirror,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 128,
     .right = 128,
     .requires_existing_band = true,
@@ -177,8 +190,24 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .required_edge = kActionBgEdge_LiveWorld,
     .edge = kActionBgEdge_Repeat,
     .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
     .left = 128,
     .right = 128,
+  },
+  {
+    /* Promoted verbatim from the 20260812-000613 BG Extents draft. This
+     * 512px decoder state uses a native 32x32 PPU map, so source/edge remain
+     * native/raw; only its independently verified vertical budget is tuned. */
+    .map_group = kAitos,
+    .map_number = 2,
+    .layer = kBg2,
+    .required_source = kActionBgSource_NativeTilemap,
+    .required_edge = kActionBgEdge_RawWrap,
+    .edge = kActionBgEdge_RawWrap,
+    .motion = kActionBgMotion_FillRelative,
+    .top = 24,
+    .bottom = 24,
+    .apply_vertical_extent = true,
   },
 };
 
@@ -231,6 +260,15 @@ static ActionBgHorizontalExtent FixedHorizontalExtent(uint16_t left,
 static ActionBgVerticalExtent AvailableVerticalExtent(void) {
   return (ActionBgVerticalExtent) {
     .mode = kActionBgExtent_Available,
+  };
+}
+
+static ActionBgVerticalExtent FixedVerticalExtent(uint16_t top,
+                                                   uint16_t bottom) {
+  return (ActionBgVerticalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .top = top,
+    .bottom = bottom,
   };
 }
 
@@ -365,9 +403,15 @@ static void ApplyTunedMapOverrides(const ActionBgFrameState *state,
       continue;
     layer->default_edge = tuning->edge;
     layer->default_motion = tuning->motion;
-    layer->horizontal_extent = FixedHorizontalExtent(
-        tuning->left, tuning->right);
-    if (tuning->bands_inherit_extent) {
+    if (tuning->apply_horizontal_extent) {
+      layer->horizontal_extent = FixedHorizontalExtent(
+          tuning->left, tuning->right);
+    }
+    if (tuning->apply_vertical_extent) {
+      layer->vertical_extent = FixedVerticalExtent(
+          tuning->top, tuning->bottom);
+    }
+    if (tuning->apply_horizontal_extent && tuning->bands_inherit_extent) {
       for (unsigned band = 0; band < layer->band_count; band++) {
         layer->bands[band].horizontal_extent = (ActionBgHorizontalExtent) {
           .mode = kActionBgExtent_Inherit,

@@ -590,6 +590,34 @@ static void TestNarrowDecorativeBg2(void) {
   }
 }
 
+static void TestAitosWaterfallVerticalExtent(void) {
+  ActionBgFrameState state = State(4, 2);
+  /* The captured PPU uses a native 32x32 map (`bgsc=$70`) even though the
+   * decoded record declares a 512px world. Preserve that source/edge and
+   * promote only the live-tuned vertical budget. */
+  state.layer[1].bgsc = 0x70;
+  state.layer[1].world_width = 512;
+  state.layer[1].world_height = 512;
+  ActionBgPlan plan = Build(&state);
+  CHECK(plan.layer[1].source == kActionBgSource_NativeTilemap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_RawWrap);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].vertical_extent.top == 24);
+  CHECK(plan.layer[1].vertical_extent.bottom == 24);
+
+  /* Source/edge guards prevent the tuning from silently reclassifying a
+   * future world-backed layout or a neighbouring Aitos room. */
+  state.layer[1].bgsc = 0x73;
+  plan = Build(&state);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+  state = State(4, 3);
+  state.layer[1].bgsc = 0x70;
+  plan = Build(&state);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+}
+
 static void TestBloodpoolBand(void) {
   ActionBgFrameState state = State(2, 1);
   state.layer[1].world_width = 256;
@@ -862,6 +890,7 @@ int main(void) {
   TestMarahnaMap5BackdropExtent();
   TestFillmoreAct1BackdropExtent();
   TestNarrowDecorativeBg2();
+  TestAitosWaterfallVerticalExtent();
   TestBloodpoolBand();
   TestBloodpoolUnbandedBackdropExtents();
   TestKasandoraHybridBackdrop();

@@ -5,16 +5,57 @@
 #include "diorama_depth_shapes.h"
 #include "scene3d_math.h"
 
+bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
+                           bool has_pixels, bool hud_flat, bool skybox_only) {
+  if (!visible || !has_texture || !has_pixels) return false;
+  if (plane == kPpuOverlaySource_Bg3 && hud_flat) return false;
+  if (skybox_only &&
+      (plane == kPpuOverlaySource_Bg2 ||
+       plane == kDioramaPlane_Bg2Hi ||
+       plane == kDioramaPlane_Backdrop))
+    return false;
+  return true;
+}
+
+bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
+                              bool has_pixels, bool has_obj_effect,
+                              bool hud_flat, bool skybox_only) {
+  const bool has_effect_content =
+      has_obj_effect && DioramaPlaneIsObjectPriority(plane);
+  return Diorama_PlaneEligible(
+      plane, visible, has_texture, has_pixels || has_effect_content,
+      hud_flat, skybox_only);
+}
+
+uint8_t Diorama_FilterObjEffectProjectionMask(
+    uint8_t required_priorities, uint32_t requested_planes,
+    uint32_t content_planes, uint32_t uploaded_planes) {
+  uint8_t filtered = 0;
+  for (unsigned priority = 0;
+       priority < kDioramaObjectPriorityCount; priority++) {
+    const uint8_t priority_bit = (uint8_t)(1u << priority);
+    if (!(required_priorities & priority_bit)) continue;
+    const int plane = DioramaPlaneForObjectPriority(priority);
+    if (plane < 0) continue;
+    const uint32_t plane_bit = 1u << (unsigned)plane;
+    if (!(requested_planes & plane_bit)) continue;
+    if ((content_planes & plane_bit) && !(uploaded_planes & plane_bit))
+      continue;
+    filtered |= priority_bit;
+  }
+  return filtered;
+}
+
 static bool ProjectCapturedPlanePoint(
     const DioramaProjection *projection, float capture_x, float capture_y,
-    const DioramaObjectPlaneProjection *plane, SDL_FPoint *point,
+    const DioramaPlaneProjection *plane, SDL_FPoint *point,
     float *scale_x, float *scale_y) {
   if (!projection || !projection->valid || !point || !plane || !plane->valid ||
       projection->texture_width <= 0 || projection->texture_height <= 0 ||
       projection->output_width <= 0 || projection->output_height <= 0)
     return false;
-  float du = projection->object_u1 - projection->object_u0;
-  float dv = projection->object_v1 - projection->object_v0;
+  float du = plane->u1 - plane->u0;
+  float dv = plane->v1 - plane->v0;
   if (du == 0.0f || dv == 0.0f) return false;
 
   SDL_FPoint projected[3];
@@ -25,8 +66,8 @@ static bool ProjectCapturedPlanePoint(
     float u = (x + (float)projection->texture_x_origin) /
         (float)projection->texture_width;
     float v = y / (float)projection->texture_height;
-    float s = (u - projection->object_u0) / du;
-    float t = (v - projection->object_v0) / dv;
+    float s = (u - plane->u0) / du;
+    float t = (v - plane->v0) / dv;
     float wx = (s - 0.5f) * projection->aspect_x;
     float wy = (0.5f - t) * projection->height_scale;
     float wz = DioramaTiltedRowDepth(
@@ -67,7 +108,17 @@ bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
                                      SDL_FPoint *point,
                                      float *scale_x, float *scale_y) {
   if (!projection) return false;
-  return ProjectCapturedPlanePoint(projection, capture_x, capture_y,
-                                   &projection->bg1_plane, point,
-                                   scale_x, scale_y);
+  return ProjectCapturedPlanePoint(
+      projection, capture_x, capture_y,
+      &projection->bg1_plane, point, scale_x, scale_y);
+}
+
+bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
+                                     float capture_x, float capture_y,
+                                     SDL_FPoint *point,
+                                     float *scale_x, float *scale_y) {
+  if (!projection) return false;
+  return ProjectCapturedPlanePoint(
+      projection, capture_x, capture_y,
+      &projection->bg2_plane, point, scale_x, scale_y);
 }

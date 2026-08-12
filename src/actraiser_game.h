@@ -80,6 +80,7 @@ enum {
   kActRaiserWram_BgWordMask = 0x0054,
   kActRaiserWram_BgAttributes = 0x006B,
   kActRaiserWram_GameFrame = 0x0088,
+  kActRaiserWram_ActionCameraSubject = 0x008A,
   kActRaiserWram_InputHeldHigh = 0x00A0,
   kActRaiserWram_ActionTimerLow = 0x00E6,
   kActRaiserWram_ActionTimerHigh = 0x00E7,
@@ -245,6 +246,48 @@ enum {
   kActRaiserPlayerFlag_InvulnerableHighByte = 0x20,
   kActRaiserUnknownMapGroup = 0xFF,
 };
+
+/* The action-stage arrival sequence owns the player slot while the orb falls
+ * into the statue and the avatar materializes. $97E4 installs $9832 directly
+ * when the final animation completes; $9832 is the first normal handler that
+ * reads player input. Keep these lifecycle identities explicit so host-side
+ * gameplay extensions do not need a guessed frame timer. */
+enum {
+  kActRaiserPlayerHandler_ArrivalApproach = 0x97A6,
+  kActRaiserPlayerHandler_ArrivalTransformFirst = 0x97C9,
+  kActRaiserPlayerHandler_ArrivalTransformFinal = 0x97E4,
+  kActRaiserPlayerHandler_GroundControl = 0x9832,
+};
+
+static inline int ActRaiser_PlayerArrivalAnimationActive(uint16 handler) {
+  return handler == kActRaiserPlayerHandler_ArrivalApproach ||
+         handler == kActRaiserPlayerHandler_ArrivalTransformFirst ||
+         handler == kActRaiserPlayerHandler_ArrivalTransformFinal;
+}
+
+/* Only the widescreen extension is gated. The authentic 256px activation
+ * window remains live throughout the arrival sequence, preserving original
+ * enemy and scripted-object timing. */
+static inline int ActRaiser_ShouldUseWideActionActivation(
+    int wide_activation_enabled, uint16 player_handler) {
+  return wide_activation_enabled &&
+         !ActRaiser_PlayerArrivalAnimationActive(player_handler);
+}
+
+/* $02:B030 derives the authentic horizontal camera directly from the selected
+ * subject: centre it at x=128, then clamp to the native world interval. The
+ * presentation-aware camera can sit `before`/`after` pixels inside that
+ * interval, so camera-relative 0..256 is not necessarily the authentic view. */
+static inline uint16 ActRaiser_AuthenticActionCameraX(
+    uint16 subject_world_x, uint16 world_width) {
+  if (subject_world_x < kActRaiserAuthenticWidth / 2)
+    return 0;
+  const uint16 candidate =
+      (uint16)(subject_world_x - kActRaiserAuthenticWidth / 2);
+  const uint16 maximum = world_width >= kActRaiserAuthenticWidth
+      ? (uint16)(world_width - kActRaiserAuthenticWidth) : 0;
+  return candidate < maximum ? candidate : maximum;
+}
 
 /* Stable layout of one $40-byte action object. Some fields are polymorphic
  * outside the animation/sprite pipeline; these names describe the established

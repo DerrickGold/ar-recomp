@@ -296,7 +296,8 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
       (kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkObjColorMath |
        kPpuOverlayFlag_MarkBgHalfAdd |
        kPpuOverlayFlag_ApplyBgFixedColorSubtract |
-       kPpuOverlayFlag_MarkFullAddSubscreen);
+       kPpuOverlayFlag_MarkFullAddSubscreen |
+       kPpuOverlayFlag_MarkMainScreenWinner);
   capture->oamFirst = 0;
   capture->oamCount = 0;
   return true;
@@ -1765,6 +1766,8 @@ static uint32 PpuOverlayColor(Ppu *ppu, PpuZbufType pixel) {
 static uint32 PpuCapturedOverlayColor(
     Ppu *ppu, PpuOverlaySource source,
     const PpuOverlayCapture *capture, PpuZbufType pixel) {
+  if (capture->flags & kPpuOverlayFlag_MarkMainScreenWinner)
+    return (pixel & 0xff) ? 0xffffffffu : 0;
   uint32 color = PpuOverlayColor(ppu, pixel);
   /* Fixed-colour subtraction is not a compositing operation: apply it to the
    * isolated BG in the same 5-bit component space as the authentic scanout,
@@ -1828,7 +1831,14 @@ static void PpuClearOverlayRenderLine(Ppu *ppu, int y) {
     int row = PpuOverlayRow(capture, screen_y);
     if (row < 0)
       continue;
-    memset(pixels + (size_t)row * pitch, 0, pitch);
+    if (active &&
+        (capture->flags & kPpuOverlayFlag_MarkMainScreenWinner)) {
+      uint32 *dst = (uint32 *)(pixels + (size_t)row * pitch);
+      for (uint32_t x = 0; x < pitch / sizeof(uint32); x++)
+        dst[x] = 0xff000000u;
+    } else {
+      memset(pixels + (size_t)row * pitch, 0, pitch);
+    }
     for (int band = 0; band < 3; band++) {
       uint8_t *band_pixels = ppu->overlayRenderBands[source][band];
       if (band_pixels)
@@ -1856,8 +1866,8 @@ static void PpuClearOverlayRenderLine(Ppu *ppu, int y) {
 }
 
 typedef struct PpuOverlayWinnerFilter {
-  const PpuZbufType *main;
-  const PpuZbufType *sub;
+  const PpuZbufType *winner;
+  const PpuZbufType *math_main;
   uint8_t math_enabled;
 } PpuOverlayWinnerFilter;
 
@@ -1873,8 +1883,9 @@ static const PpuZbufType *PpuOverlayIsolatedPixels(
 static bool PpuOverlayPixelPassesWinnerFilter(
     const PpuOverlayWinnerFilter *filter, PpuZbufType pixel, int index) {
   if (!filter) return true;
-  if (pixel != filter->sub[index]) return false;
-  uint8_t main_layer = (uint8_t)((filter->main[index] >> 8) & 0x0f);
+  if (pixel != filter->winner[index]) return false;
+  if (!filter->math_main) return true;
+  uint8_t main_layer = (uint8_t)((filter->math_main[index] >> 8) & 0x0f);
   return (filter->math_enabled & (1u << main_layer)) != 0;
 }
 
@@ -2045,13 +2056,27 @@ static void PpuWriteFullAddSubscreenOverlayLines(Ppu *ppu, int y) {
       ppu, y, false, kPpuOverlaySource_Bg3, main);
   PpuResolveScreenWithCapturedSources(ppu, y, true, -1, sub);
   const PpuOverlayWinnerFilter filter = {
-    .main = main,
-    .sub = sub,
+    .winner = sub,
+    .math_main = main,
     .math_enabled = (uint8_t)PPU_mathEnabled(ppu),
   };
   for (int source = 0; source < kPpuOverlaySource_Count; source++) {
     const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
     if (!(capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen))
+      continue;
+    PpuWriteOverlayRenderLineFiltered(
+        ppu, (PpuOverlaySource)source, y, &filter);
+  }
+}
+
+static void PpuWriteMainScreenWinnerOverlayLines(Ppu *ppu, int y) {
+  const PpuOverlayWinnerFilter filter = {
+    .winner = ppu->bgBuffers[0].data,
+  };
+  for (int source = 0; source < kPpuOverlaySource_Count; source++) {
+    if (!(ppu->overlayCaptures[source].flags &
+          kPpuOverlayFlag_MarkMainScreenWinner) ||
+        !(ppu->screenEnabled[0] & (1u << source)))
       continue;
     PpuWriteOverlayRenderLineFiltered(
         ppu, (PpuOverlaySource)source, y, &filter);
@@ -2101,9 +2126,10 @@ static void PpuFinishBackgroundOverlay(Ppu *ppu, int y, bool sub,
       ? !enabled_main && (ppu->screenEnabled[1] & source_bit) != 0
       : enabled_main;
   const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
-  const bool deferred_full_add = sub &&
-      (capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen) != 0;
-  if (export_this_pass && !deferred_full_add)
+  const bool deferred =
+      (sub && (capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen)) ||
+      (capture->flags & kPpuOverlayFlag_MarkMainScreenWinner);
+  if (export_this_pass && !deferred)
     PpuWriteOverlayRenderLine(ppu, source, y);
 
   PpuZbufType *dst = ppu->bgBuffers[sub].data;
@@ -2196,6 +2222,9 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
 
   // Render main screen
   PpuDrawBackgrounds(ppu, y, false);
+  /* This filter needs the COMPLETE main priority resolve, so it cannot be
+   * written from PpuFinishBackgroundOverlay while later layers are pending. */
+  PpuWriteMainScreenWinnerOverlayLines(ppu, y);
 
   // Render also the subscreen?
   bool rendered_subscreen = false;

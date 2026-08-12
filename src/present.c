@@ -55,6 +55,7 @@ extern SDL_Texture *g_hud_obj_texture;
 extern uint8_t g_pixels[];
 extern uint8_t g_hud_bg_pixels[];
 extern uint8_t g_hud_obj_pixels[];
+extern uint8_t g_action_bg2_mask_pixels[];
 extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
 extern uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
 extern SDL_Texture *g_sim_obj_atlas_texture;
@@ -62,6 +63,18 @@ extern SDL_Texture *g_sim_obj_atlas_texture;
 extern SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
 extern SDL_Texture *g_sim3d_flat_texture;
 static uint32_t s_diorama_uploaded_plane_mask;
+static SDL_Texture *s_action_bg2_mask_texture;
+static SDL_Texture *s_action_bg2_effect_target;
+static int s_action_bg2_effect_w, s_action_bg2_effect_h;
+static bool s_action_bg2_blend_supported = true;
+
+static void DisableActionBg2Effect(const char *operation) {
+  if (!s_action_bg2_blend_supported) return;
+  s_action_bg2_blend_supported = false;
+  fprintf(stderr,
+          "[action-fx] flat BG2 effect unavailable at %s (%s); disabled\n",
+          operation ? operation : "unknown operation", SDL_GetError());
+}
 
 SDL_FRect ToFRect(SDL_Rect r) {
   return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };
@@ -598,6 +611,25 @@ void PresentUpload(const FrameSlot *slot) {
         ActionApron_SurfacePitch(slot->snes_width, slot->obj_apron));
   }
 
+  if (!slot->diorama_active && slot->action_bg2_mask_valid) {
+    if (!s_action_bg2_mask_texture) {
+      s_action_bg2_mask_texture = SDL_CreateTexture(
+          g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+          kFrameSlotLayerTextureWidth, kFrameSlotAuthenticHeight);
+      if (s_action_bg2_mask_texture) {
+        SDL_SetTextureScaleMode(
+            s_action_bg2_mask_texture, SDL_SCALEMODE_NEAREST);
+        SDL_SetTextureBlendMode(
+            s_action_bg2_mask_texture, SDL_BLENDMODE_MUL);
+      }
+    }
+    if (s_action_bg2_mask_texture) {
+      const SDL_Rect mask = {0, 0, slot->snes_width, slot->snes_height};
+      SDL_UpdateTexture(s_action_bg2_mask_texture, &mask,
+                        g_action_bg2_mask_pixels, slot->snes_width * 4);
+    }
+  }
+
   /* A7 (followup doc): this used to sit behind the diorama branch's early
    * `return` above, so g_hud_bg_texture/g_hud_obj_texture were NEVER
    * refreshed in diorama mode — PresentHudOverlayComposited was sampling
@@ -844,7 +876,8 @@ _Static_assert(kActionEffectObjPriorityCount ==
 static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
                               const DioramaProjection *diorama_projection) {
   if (!slot || (!slot->action_effects.visible_count &&
-                !slot->action_scene_effects.visible_count) ||
+                !slot->action_scene_effects.visible_count &&
+                !slot->action_scene_effects.decoration_visible_count) ||
       (!slot->action_effect_lighting && !slot->action_effect_particles) ||
       !EffectRendererAvailable())
     return;
@@ -852,6 +885,8 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
   ActionEffectProjectionContext projection = {
     .bg1_camera_x = slot->bg1_camera_x,
     .bg1_camera_y = slot->bg1_camera_y,
+    .bg2_camera_x = slot->bg2_camera_x,
+    .bg2_camera_y = slot->bg2_camera_y,
     .ws_extra = slot->ws_extra,
     .ws_extra_top = slot->ws_extra_top,
     .visible_x0 = slot->visible_x0,
@@ -869,9 +904,10 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
       !ActionSceneEffectRender_Build(
           &slot->action_scene_effects, slot->action_effect_lighting,
           slot->action_effect_particles, ActionEffectProjection_ProjectPoint,
-          &projection, &scene_geometry) ||
-      (!geometry.index_count && !scene_geometry.index_count))
+          &projection, &scene_geometry))
     return;
+  const int actor_vertex_count = scene_geometry.vertex_count;
+  const int actor_index_count = scene_geometry.index_count;
 
   EffectBatch spell_batch = {
     .vertices = geometry.vertices,
@@ -895,6 +931,24 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
   bool scene_submitted = SubmitEffectBatch(&scene_batch);
   EndEffectAdd(&state);
 
+  /* Map-derived world decorations own a separate captured list and reuse the
+   * same scratch batch after actor submission. This preserves the actor
+   * budget without increasing the stack peak. BG2 decorations and bottom
+   * atmosphere are submitted by their dedicated depth-ordered passes. */
+  bool decoration_submitted = false;
+  if (ActionSceneDecorationRender_Build(
+          &slot->action_scene_effects,
+          kActionEffectRenderLayer_WorldOverlay,
+          slot->action_effect_lighting, slot->action_effect_particles,
+          ActionEffectProjection_ProjectPoint, &projection,
+          &scene_geometry) && scene_geometry.index_count) {
+    scene_batch.vertex_count = scene_geometry.vertex_count;
+    scene_batch.index_count = scene_geometry.index_count;
+    if (BeginEffectAdd(&state)) {
+      decoration_submitted = SubmitEffectBatch(&scene_batch);
+      EndEffectAdd(&state);
+    }
+  }
   /* One line, once per process: the whole path (WRAM identity -> capture ->
    * projection -> geometry submit) either produced pixels or it did not, and
    * a run's console.log should say which without anyone re-deriving it. The
@@ -910,14 +964,229 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
             slot->action_effect_particles);
   }
   static bool announced_scene;
-  if (!announced_scene && scene_geometry.index_count && scene_submitted) {
+  if (!announced_scene && actor_index_count && scene_submitted) {
     announced_scene = true;
     fprintf(stderr,
             "[action-fx] first scene accent geometry submitted: %u effect(s), "
             "%d vertices / %d indices (lighting=%d particles=%d)\n",
             slot->action_scene_effects.visible_count,
-            scene_geometry.vertex_count, scene_geometry.index_count,
+            actor_vertex_count, actor_index_count,
             slot->action_effect_lighting, slot->action_effect_particles);
+  }
+  static bool announced_decorations;
+  if (!announced_decorations && decoration_submitted) {
+    announced_decorations = true;
+    fprintf(stderr,
+            "[action-fx] first map decoration geometry submitted\n");
+  }
+}
+
+typedef struct ActionDioramaPlaneEffectContext {
+  const FrameSlot *slot;
+  SDL_Rect viewport;
+} ActionDioramaPlaneEffectContext;
+
+static void DrawActionDioramaPlaneEffect(
+    void *userdata, int plane, const DioramaProjection *diorama_projection) {
+  ActionDioramaPlaneEffectContext *context =
+      (ActionDioramaPlaneEffectContext *)userdata;
+  if (!context || !context->slot ||
+      plane != kPpuOverlaySource_Bg2 || !diorama_projection ||
+      !diorama_projection->bg2_plane.valid || !EffectRendererAvailable())
+    return;
+  const FrameSlot *slot = context->slot;
+  ActionEffectProjectionContext projection = {
+    .bg1_camera_x = slot->bg1_camera_x,
+    .bg1_camera_y = slot->bg1_camera_y,
+    .bg2_camera_x = slot->bg2_camera_x,
+    .bg2_camera_y = slot->bg2_camera_y,
+    .ws_extra = slot->ws_extra,
+    .ws_extra_top = slot->ws_extra_top,
+    .visible_x0 = slot->visible_x0,
+    .visible_width = slot->visible_width,
+    .snes_height = slot->snes_height,
+    .diorama_projection = diorama_projection,
+    .viewport = context->viewport,
+  };
+  ActionSceneEffectRenderBatch geometry;
+  if (!ActionSceneDecorationRender_Build(
+          &slot->action_scene_effects, kActionEffectRenderLayer_Bg2Plane,
+          slot->action_effect_lighting, slot->action_effect_particles,
+          ActionEffectProjection_ProjectPoint, &projection, &geometry) ||
+      !geometry.index_count)
+    return;
+  EffectBatch batch = {
+    .vertices = geometry.vertices,
+    .indices = geometry.indices,
+    .vertex_count = geometry.vertex_count,
+    .index_count = geometry.index_count,
+    .vertex_capacity = kActionSceneEffectRenderMaxVertices,
+    .index_capacity = kActionSceneEffectRenderMaxIndices,
+  };
+  EffectRenderState state;
+  if (!BeginEffectAdd(&state)) return;
+  const bool submitted = SubmitEffectBatch(&batch);
+  EndEffectAdd(&state);
+  static bool announced;
+  if (!announced && submitted) {
+    announced = true;
+    fprintf(stderr,
+            "[action-fx] first BG2-local waterfall geometry submitted "
+            "(Diorama)\n");
+  }
+
+  /* The finite-backdrop gap exists only in Diorama's vertical extension.
+   * Submit its unmasked atmosphere from the same after-BG2 callback, before
+   * later BG1 and OBJ planes, so source sprites remain in front. */
+  if (!ActionSceneDecorationRender_Build(
+          &slot->action_scene_effects,
+          kActionEffectRenderLayer_Atmosphere,
+          slot->action_effect_lighting, slot->action_effect_particles,
+          ActionEffectProjection_ProjectPoint, &projection, &geometry) ||
+      !geometry.index_count)
+    return;
+  batch.vertex_count = geometry.vertex_count;
+  batch.index_count = geometry.index_count;
+  if (!BeginEffectAdd(&state)) return;
+  const bool atmosphere_submitted = SubmitEffectBatch(&batch);
+  EndEffectAdd(&state);
+  static bool announced_atmosphere;
+  if (!announced_atmosphere && atmosphere_submitted) {
+    announced_atmosphere = true;
+    fprintf(stderr,
+            "[action-fx] first waterfall bottom atmosphere submitted "
+            "(Diorama)\n");
+  }
+}
+
+static SDL_Texture *EnsureActionBg2EffectTarget(int w, int h) {
+  if (!g_renderer || w <= 0 || h <= 0) return NULL;
+  if (s_action_bg2_effect_target && s_action_bg2_effect_w == w &&
+      s_action_bg2_effect_h == h)
+    return s_action_bg2_effect_target;
+  SDL_DestroyTexture(s_action_bg2_effect_target);
+  s_action_bg2_effect_target = SDL_CreateTexture(
+      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
+  s_action_bg2_effect_w = w;
+  s_action_bg2_effect_h = h;
+  if (s_action_bg2_effect_target) {
+    SDL_SetTextureScaleMode(
+        s_action_bg2_effect_target, SDL_SCALEMODE_NEAREST);
+    SDL_BlendMode applied = SDL_BLENDMODE_INVALID;
+    if (!SDL_SetTextureBlendMode(
+            s_action_bg2_effect_target, SDL_BLENDMODE_ADD_PREMULTIPLIED) ||
+        !SDL_GetTextureBlendMode(s_action_bg2_effect_target, &applied) ||
+        applied != SDL_BLENDMODE_ADD_PREMULTIPLIED) {
+      SDL_DestroyTexture(s_action_bg2_effect_target);
+      s_action_bg2_effect_target = NULL;
+      DisableActionBg2Effect("premultiplied blend verification");
+    }
+  }
+  return s_action_bg2_effect_target;
+}
+
+static void DrawActionBg2EffectFlat(const FrameSlot *slot,
+                                    SDL_Rect viewport) {
+  if (!slot || !slot->action_bg2_mask_valid ||
+      !slot->action_scene_effects.decoration_visible_count ||
+      !s_action_bg2_mask_texture || !s_action_bg2_blend_supported ||
+      !EffectRendererAvailable())
+    return;
+  ActionEffectProjectionContext projection = {
+    .bg1_camera_x = slot->bg1_camera_x,
+    .bg1_camera_y = slot->bg1_camera_y,
+    .bg2_camera_x = slot->bg2_camera_x,
+    .bg2_camera_y = slot->bg2_camera_y,
+    .ws_extra = slot->ws_extra,
+    .visible_x0 = slot->visible_x0,
+    .visible_width = slot->visible_width,
+    .snes_height = slot->snes_height,
+    .viewport = viewport,
+  };
+  ActionSceneEffectRenderBatch geometry;
+  if (!ActionSceneDecorationRender_Build(
+          &slot->action_scene_effects, kActionEffectRenderLayer_Bg2Plane,
+          slot->action_effect_lighting, slot->action_effect_particles,
+          ActionEffectProjection_ProjectPoint, &projection, &geometry) ||
+      !geometry.index_count)
+    return;
+  int output_w = 0, output_h = 0;
+  if (!SDL_GetRenderOutputSize(g_renderer, &output_w, &output_h)) return;
+  SDL_Texture *target = EnsureActionBg2EffectTarget(output_w, output_h);
+  if (!target) return;
+
+  SDL_Texture *saved_target = SDL_GetRenderTarget(g_renderer);
+  SDL_BlendMode saved_blend = SDL_BLENDMODE_INVALID;
+  Uint8 saved_r = 0, saved_g = 0, saved_b = 0, saved_a = 0;
+  if (!SDL_GetRenderDrawBlendMode(g_renderer, &saved_blend) ||
+      !SDL_GetRenderDrawColor(
+          g_renderer, &saved_r, &saved_g, &saved_b, &saved_a)) {
+    DisableActionBg2Effect("render-state capture");
+    return;
+  }
+  if (!SDL_SetRenderTarget(g_renderer, target)) {
+    DisableActionBg2Effect("effect-target bind");
+    return;
+  }
+  bool target_ready =
+      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
+      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
+      SDL_RenderClear(g_renderer);
+  if (!target_ready)
+    DisableActionBg2Effect("effect-target clear");
+  EffectBatch batch = {
+    .vertices = geometry.vertices,
+    .indices = geometry.indices,
+    .vertex_count = geometry.vertex_count,
+    .index_count = geometry.index_count,
+    .vertex_capacity = kActionSceneEffectRenderMaxVertices,
+    .index_capacity = kActionSceneEffectRenderMaxIndices,
+  };
+  EffectRenderState state;
+  bool submitted = false;
+  bool masked = false;
+  if (target_ready && BeginEffectAdd(&state)) {
+    submitted = SubmitEffectBatch(&batch);
+    EndEffectAdd(&state);
+  }
+  if (submitted && s_action_bg2_blend_supported) {
+    SDL_BlendMode applied = SDL_BLENDMODE_INVALID;
+    if (!SDL_SetTextureBlendMode(
+            s_action_bg2_mask_texture, SDL_BLENDMODE_MUL) ||
+        !SDL_GetTextureBlendMode(s_action_bg2_mask_texture, &applied) ||
+        applied != SDL_BLENDMODE_MUL) {
+      DisableActionBg2Effect("multiply blend verification");
+    } else {
+      const SDL_FRect src = {
+        (float)slot->visible_x0, 0.0f,
+        (float)slot->visible_width, (float)slot->snes_height,
+      };
+      const SDL_FRect dst = ToFRect(viewport);
+      masked = SDL_RenderTexture(
+          g_renderer, s_action_bg2_mask_texture, &src, &dst);
+      if (!masked) DisableActionBg2Effect("winner-mask draw");
+    }
+  }
+  const bool target_restored = SDL_SetRenderTarget(g_renderer, saved_target);
+  const bool blend_restored =
+      SDL_SetRenderDrawBlendMode(g_renderer, saved_blend);
+  const bool color_restored = SDL_SetRenderDrawColor(
+      g_renderer, saved_r, saved_g, saved_b, saved_a);
+  if (!target_restored || !blend_restored || !color_restored) {
+    DisableActionBg2Effect("render-state restore");
+    return;
+  }
+  bool composited = false;
+  if (masked && s_action_bg2_blend_supported) {
+    composited = SDL_RenderTexture(g_renderer, target, NULL, NULL);
+    if (!composited) DisableActionBg2Effect("masked-target composite");
+  }
+  static bool announced;
+  if (!announced && composited) {
+    announced = true;
+    fprintf(stderr,
+            "[action-fx] first BG2-local waterfall geometry submitted "
+            "(flat, winner-masked)\n");
   }
 }
 
@@ -1036,6 +1305,12 @@ void PresentRendererResources_Reset(void) {
     SDL_DestroyTexture(s_hud_composite_texture);
   s_hud_composite_texture = NULL;
   s_hud_composite_w = s_hud_composite_h = 0;
+  SDL_DestroyTexture(s_action_bg2_mask_texture);
+  SDL_DestroyTexture(s_action_bg2_effect_target);
+  s_action_bg2_mask_texture = NULL;
+  s_action_bg2_effect_target = NULL;
+  s_action_bg2_effect_w = s_action_bg2_effect_h = 0;
+  s_action_bg2_blend_supported = true;
   SDL_SetAtomicInt(&s_effect_add_supported, 1);
   SDL_SetAtomicInt(&s_effect_geometry_supported, 1);
   PresentSim3D_ResetResources();
@@ -1244,6 +1519,18 @@ void PresentCompositeScene(const FrameSlot *slot,
         g_renderer, slot->ignore_aspect_ratio, slot->pixel_aspect,
         slot->visible_width, slot->snes_height);
     DioramaProjection action_projection;
+    ActionDioramaPlaneEffectContext plane_effect = {slot, viewport};
+    const uint8_t required_effect_obj_priorities =
+        (slot->action_effect_lighting || slot->action_effect_particles)
+            ? ActionEffectProjection_RequiredObjPriorityMask(
+                  &slot->action_effects, &slot->action_scene_effects)
+            : 0;
+    const uint8_t effect_obj_priority_mask =
+        Diorama_FilterObjEffectProjectionMask(
+            required_effect_obj_priorities,
+            slot->diorama_plane_request_mask,
+            slot->diorama_plane_content_mask,
+            s_diorama_uploaded_plane_mask);
     if (!Diorama_Composite(g_renderer, slot->snes_width,
                            slot->snes_height + slot->ws_extra_top +
                                slot->ws_extra_bottom,
@@ -1255,7 +1542,10 @@ void PresentCompositeScene(const FrameSlot *slot,
                            &scroll_delta, &final_cam, distance_scale,
                            slot->diorama_plane_additive_mask &
                                s_diorama_uploaded_plane_mask,
-                           &bg2_valid_spans, &action_projection))
+                           effect_obj_priority_mask,
+                           &bg2_valid_spans,
+                           DrawActionDioramaPlaneEffect, &plane_effect,
+                           &action_projection))
       return;
     DrawActionEffects(slot, viewport, &action_projection);
     /* A7/A5 (followup doc): the diorama branch used to skip the widescreen
@@ -1294,6 +1584,7 @@ void PresentCompositeScene(const FrameSlot *slot,
   SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);
   PresentMode7Composite(slot, viewport);
+  DrawActionBg2EffectFlat(slot, viewport);
   DrawActionEffects(slot, viewport, NULL);
   PresentHudOverlay(slot, viewport);
   PresentHdReplacements(slot, viewport);

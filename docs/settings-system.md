@@ -181,6 +181,15 @@ but OAM membership and activation reflect the new preset on the next game
 frame. For a sprite-focused comparison, change modes while running (or briefly
 unpause for one frame) before taking the F2 capture.
 
+`ws_margin_objects` and `ws_margin_activation` are independent even during
+action entry. Full widescreen keeps object drawing, fitted camera geometry and
+BG presentation enabled throughout the orb/statue animation. The activation
+setting remains enabled, but its **additional horizontal margin range** is
+automatically held to the reconstructed native 256px camera while player
+handler `$08B2` is `$97A6/$97C9/$97E4`; `$97E4` installs input-reading `$9832`
+and the live margin range resumes. This lifecycle policy does not rewrite the
+setting or change the selected preset.
+
 Phase 1 originally reserved only `save_region_progress[]`. Phase 6 has since
 reconciled the reference editor's USA offset adjustment and expanded staging to
 the paged status, magic, item, score, Death Heim, and Professional fields in
@@ -571,7 +580,7 @@ it naturally when the relevant engine becomes active.
 | Sky Palace BG2 source repair | `AR_WS_SKYPALACE_BG` | bool | on | render-only ROM source-map margin decode; off restores raw-wide dialogue staging. Validated 2026-07-13 (byte-identical to the boot colonnade) |
 | Widen sprites | `AR_WS_SPRITES` | bool | on | emit sprites into margins |
 | Draw margin objects | `AR_WS_MARGIN_OBJECTS` | bool | on | object draw coverage in margins |
-| Extend activation | `AR_WS_MARGIN_ACTIVATION` | bool | on | `$0400` activation boundary |
+| Extend activation | `AR_WS_MARGIN_ACTIVATION` | bool | on | widens the horizontal `$0400` activation boundary independently of drawing; the extra range is automatically gated to the reconstructed native camera during player arrival `$97A6/$97C9/$97E4` and resumes at `$9832` |
 | Decorative BG2 padding | `AR_WS_BG2_MIRROR` | bool | on | stage policy chooses reflection or cyclic repeat; off clamps the 256-wide BG2. Keep env name for compatibility |
 | Clamp override | `AR_WS_CLAMP` | mask | none | manual per-layer mask; already uncached/live |
 

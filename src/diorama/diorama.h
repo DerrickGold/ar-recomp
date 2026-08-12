@@ -81,21 +81,22 @@ typedef struct DioramaCameraPose {
 
 enum { kDioramaObjectPriorityCount = 4 };
 
-typedef struct DioramaObjectPlaneProjection {
+typedef struct DioramaPlaneProjection {
   bool valid;
+  float u0, v0, u1, v1;
   float z_world;
   float rake;
   float bow;
-} DioramaObjectPlaneProjection;
+} DioramaPlaneProjection;
 
 /* Resolved action-world projection for presentation-only overlays. The
- * compositor publishes the same camera, mesh dimensions, interpolated BG1 UV
- * window, and per-room BG1/OBJ plane shapes used by the captured planes;
- * consumers therefore cannot duplicate auto-fit or guess a parallel depth. */
+ * compositor publishes the same camera, mesh dimensions, independent
+ * interpolated BG1/BG2 UV windows, and per-room BG1/BG2/OBJ plane shapes used
+ * by the captured planes; consumers therefore cannot duplicate auto-fit or
+ * guess a parallel depth. */
 typedef struct DioramaProjection {
   bool valid;
   float matrix[16];
-  float object_u0, object_v0, object_u1, object_v1;
   float aspect_x, height_scale;
   /* Texture column containing captured display x=0. Action-effect callers
    * speak in display-capture coordinates; the projection owns the hidden OBJ
@@ -104,9 +105,37 @@ typedef struct DioramaProjection {
   int texture_width, texture_height;
   int output_x, output_y;
   int output_width, output_height;
-  DioramaObjectPlaneProjection bg1_plane;
-  DioramaObjectPlaneProjection object_planes[kDioramaObjectPriorityCount];
+  DioramaPlaneProjection bg1_plane;
+  DioramaPlaneProjection bg2_plane;
+  DioramaPlaneProjection object_planes[kDioramaObjectPriorityCount];
 } DioramaProjection;
+
+/* Optional presentation hook inserted immediately after a drawable plane's
+ * main mesh. It receives the same resolved projection the plane uses, making
+ * BG-local enhancements part of painter order instead of a late world overlay. */
+typedef void (*DioramaPlaneEffectFn)(void *userdata, int plane,
+                                    const DioramaProjection *projection);
+
+/* Pure eligibility contract shared by projection publication and drawing.
+ * Resource booleans describe this frame's upload/content intersection. */
+bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
+                           bool has_pixels, bool hud_flat, bool skybox_only);
+
+/* Projection normally has the same current-pixel contract as drawing. A
+ * current OBJ-attached host effect is also current content for its authentic
+ * priority plane, even when that isolated sprite band has no winning pixels.
+ * The exception is deliberately rejected for every non-OBJ plane. */
+bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
+                              bool has_pixels, bool has_obj_effect,
+                              bool hud_flat, bool skybox_only);
+
+/* Keeps required OBJ priorities whose plane was requested and either had no
+ * source pixels or uploaded those pixels successfully. This distinguishes an
+ * intentionally empty band from an upload failure before pixels[] collapses
+ * both to NULL at composite time. */
+uint8_t Diorama_FilterObjEffectProjectionMask(
+    uint8_t required_priorities, uint32_t requested_planes,
+    uint32_t content_planes, uint32_t uploaded_planes);
 
 /* Maps a captured framebuffer point onto its authentic action OBJ priority
  * plane. scale_x/scale_y are the projected lengths of one captured pixel. */
@@ -119,6 +148,14 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
  * as wall torches stay registered to raked/bowed room geometry instead of
  * floating at an arbitrary OBJ depth. */
 bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
+                                     float capture_x, float capture_y,
+                                     SDL_FPoint *point,
+                                     float *scale_x, float *scale_y);
+
+/* Same mapping, using the resolved BG2-low backdrop plane. Waterfall accents
+ * follow the independently-authored backdrop rake/depth instead of borrowing
+ * BG1's playfield shape. */
+bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
                                      float capture_x, float capture_y,
                                      SDL_FPoint *point,
                                      float *scale_x, float *scale_y);
@@ -150,7 +187,12 @@ bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
  * displayed span is [obj_apron, obj_apron+snes_width) -- snes_width stays the
  * DISPLAY width, so the mesh, aspect_x and the camera fit are unaffected by
  * the apron and apron 0 reproduces the pre-apron geometry exactly. Only the UV
- * window and the supersample source rect move. */
+ * window and the supersample source rect move.
+ *
+ * effect_obj_priority_mask: authentic OBJ bands required by current captured
+ * world-overlay effects. Those actors are current projection content even if
+ * their isolated hardware band has no final winning pixels; this cannot make
+ * a BG plane projectable or bypass a hidden OBJ layer/missing texture. */
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int authentic_y0,
                        int obj_apron,
@@ -162,7 +204,10 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        uint32_t additive_plane_mask,
+                       uint8_t effect_obj_priority_mask,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
+                       DioramaPlaneEffectFn plane_effect,
+                       void *plane_effect_userdata,
                        DioramaProjection *out_projection);
 
 /* Drops renderer-owned targets/effects after SDL_EVENT_RENDER_DEVICE_RESET so

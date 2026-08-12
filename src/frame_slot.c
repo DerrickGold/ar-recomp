@@ -382,15 +382,18 @@ void FrameSlot_Capture(FrameSlot *dst) {
               g_settings.action_effect_particles);
     }
   }
-  if (dst->action_scene_effects.effect_count) {
+  if (dst->action_scene_effects.effect_count ||
+      dst->action_scene_effects.decoration_count) {
     static bool announced_scene;
     if (!announced_scene) {
       announced_scene = true;
       fprintf(stderr,
-              "[action-fx] first scene accents captured: effect(s)=%u "
-              "visible=%u (lighting=%d particles=%d)\n",
+              "[action-fx] first scene accents captured: actors=%u/%u "
+              "decorations=%u/%u (lighting=%d particles=%d)\n",
               dst->action_scene_effects.effect_count,
               dst->action_scene_effects.visible_count,
+              dst->action_scene_effects.decoration_count,
+              dst->action_scene_effects.decoration_visible_count,
               g_settings.action_effect_lighting,
               g_settings.action_effect_particles);
     }
@@ -619,6 +622,11 @@ void FrameSlot_Capture(FrameSlot *dst) {
     _Static_assert(kFrameSlotOverlayFlag_MarkFullAddSubscreen ==
                    kPpuOverlayFlag_MarkFullAddSubscreen,
                    "present.h's mirrored full-add flag must match ppu.h");
+    dst->action_bg2_mask_valid =
+        !dst->diorama_active &&
+        (g_ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags &
+         kPpuOverlayFlag_MarkMainScreenWinner) != 0 &&
+        PpuOverlaySurfaceHasContent(g_ppu, kPpuOverlaySource_Bg2, 0);
     /* IJ1: this one is load-bearing arithmetic, not just a layout mirror — it
      * is the denominator that normalizes every U-axis offset into the layer
      * textures. Dividing by snes_width instead cost 1.75x too much horizontal

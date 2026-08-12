@@ -49,6 +49,10 @@ enum {
       kActionSceneEffectMaxInstances * kActionSceneEffectGlowsPerInstance,
   kActionSceneEffectMaxParticles =
       kActionSceneEffectMaxInstances * kActionSceneEffectParticlesPerInstance,
+  /* Bottom waterfall atmosphere uses three low-alpha fog banks plus sixteen
+   * deterministic foam/mist motes. It is the only style with a third glow. */
+  kActionSceneEffectWaterfallMistGlowCount = 3,
+  kActionSceneEffectWaterfallMistParticleCount = 16,
   /* The boss strike adds two screen-space filament layers over at most 24
    * authored OAM-row segments: a broad amber corona and a narrow white-gold
    * core.
@@ -89,12 +93,11 @@ enum {
   kActionSceneEffectMarahnaBossLightningIndicesPerInstance =
       kActionSceneEffectMarahnaBossLightningSegments * 6 *
       kActionSceneEffectMarahnaBossLightningLayers,
-  /* The player lifecycle admits one sword beam. Its magical path uses fixed
-   * crossed stars (8 vertices/12 indices) plus two wake quads. Reserve
-   * only the amount above an ordinary scene actor's 12-quad particle budget;
-   * the renderer rejects impossible duplicate beams rather than multiplying
-   * this allowance by every scene slot. */
-  kActionSceneEffectMaxSwordStreams = 1,
+  /* One player crescent can coexist with the Aitos boss's two-child diagonal
+   * volley. Their shared magical path uses fixed crossed stars (8 vertices/
+   * 12 indices) plus two wake quads. Reserve only the measured three-stream
+   * peak above an ordinary scene actor's 12-quad particle budget. */
+  kActionSceneEffectMaxSwordStreams = 3,
   kActionSceneEffectSwordStarCount = 48,
   kActionSceneEffectSwordWakeLayers = 2,
   kActionSceneEffectSwordVerticesPerInstance =
@@ -109,6 +112,25 @@ enum {
   kActionSceneEffectSwordExtraIndices =
       kActionSceneEffectSwordIndicesPerInstance -
       kActionSceneEffectParticlesPerInstance * 6,
+  /* One camera-wide waterfall veil is admitted only after exact platform
+   * splash signatures identify the section. Its denser field is the only
+   * scene style that exceeds the ordinary 12-particle actor budget. */
+  kActionSceneEffectMaxWaterfallVeils = 1,
+  kActionSceneEffectWaterfallParticleCount = 48,
+  kActionSceneEffectWaterfallExtraVertices =
+      (kActionSceneEffectWaterfallParticleCount -
+       kActionSceneEffectParticlesPerInstance) * 4,
+  kActionSceneEffectWaterfallExtraIndices =
+      (kActionSceneEffectWaterfallParticleCount -
+       kActionSceneEffectParticlesPerInstance) * 6,
+  kActionSceneEffectWaterfallMistExtraVertices =
+      kActionEffectGlowVertices +
+      (kActionSceneEffectWaterfallMistParticleCount -
+       kActionSceneEffectParticlesPerInstance) * 4,
+  kActionSceneEffectWaterfallMistExtraIndices =
+      kActionEffectGlowIndices +
+      (kActionSceneEffectWaterfallMistParticleCount -
+       kActionSceneEffectParticlesPerInstance) * 6,
   kActionSceneEffectRenderMaxVertices =
       kActionSceneEffectMaxGlows * kActionEffectGlowVertices +
       kActionSceneEffectMaxParticles * 4 +
@@ -119,7 +141,10 @@ enum {
       kActionSceneEffectMaxMarahnaBossLightningBolts *
           kActionSceneEffectMarahnaBossLightningVerticesPerInstance +
       kActionSceneEffectMaxSwordStreams *
-          kActionSceneEffectSwordExtraVertices,
+          kActionSceneEffectSwordExtraVertices +
+      kActionSceneEffectMaxWaterfallVeils *
+          (kActionSceneEffectWaterfallExtraVertices +
+           kActionSceneEffectWaterfallMistExtraVertices),
   kActionSceneEffectRenderMaxIndices =
       kActionSceneEffectMaxGlows * kActionEffectGlowIndices +
       kActionSceneEffectMaxParticles * 6 +
@@ -130,7 +155,10 @@ enum {
       kActionSceneEffectMaxMarahnaBossLightningBolts *
           kActionSceneEffectMarahnaBossLightningIndicesPerInstance +
       kActionSceneEffectMaxSwordStreams *
-          kActionSceneEffectSwordExtraIndices,
+          kActionSceneEffectSwordExtraIndices +
+      kActionSceneEffectMaxWaterfallVeils *
+          (kActionSceneEffectWaterfallExtraIndices +
+           kActionSceneEffectWaterfallMistExtraIndices),
 };
 
 typedef bool (*ActionEffectProjectPointFn)(
@@ -169,5 +197,14 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
                                    ActionEffectProjectPointFn project_point,
                                    void *project_userdata,
                                    ActionSceneEffectRenderBatch *batch);
+
+/* Builds only map-derived decorations assigned to `render_layer`. Keeping
+ * this separate from the actor builder preserves both capture and scratch
+ * capacity when a camera window contains many authored structures. */
+bool ActionSceneDecorationRender_Build(
+    const ActionSceneEffectFrame *frame, uint8_t render_layer,
+    bool lighting_enabled, bool particles_enabled,
+    ActionEffectProjectPointFn project_point, void *project_userdata,
+    ActionSceneEffectRenderBatch *batch);
 
 #endif  /* ACTION_EFFECT_RENDER_H */

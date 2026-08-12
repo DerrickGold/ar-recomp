@@ -289,12 +289,79 @@ Two details matter:
 - **Fade out where the gradient dies** (past ~26 px from any shore), or the
   normalise of a near-zero gradient produces garbage in open water.
 
-Still not tried, in rough order of likely payoff: constraining output to the
-town's **actual CGRAM entries** rather than a generic ramp (nearest-colour
-against the live palette, which would make it exactly on-model); replacing the
-smooth sheen band with hard-edged authored *shapes* in the ROM's own dash
-idiom; and letting the surface dominate outright — a flat vivid field with the
-bed showing only in sparse, deliberate shallow patches rather than continuously.
+### 4c. Draw the seabed instead of approximating it
+
+Projecting the shoreline's own pixels inward was better than noise and still
+did not carry depth: it is the *edge* of the map's art smeared inward, so it
+has no vocabulary of its own — no ripples, no weed, nothing that says "this is
+a floor under water" rather than "this is the beach, stretched".
+
+What finally worked was the obvious thing: **draw the tiles.** Twelve 8×8
+tiles, every pixel an entry from Fillmore's own CGRAM bank 1, placed the way
+the map itself places tiles — a low-frequency field picks a terrain *class* so
+the floor has regions rather than confetti, and a per-cell hash picks a variant
+and a mirror inside that class so the grid does not show.
+
+Everything before this was a procedural approximation of what a pixel artist
+would simply draw. Drawing it was cheaper than approximating it, and it is the
+first version that reads as depth.
+
+**The tile source.** Kept here as text because it is authored content, and a
+generated PNG in a scratchpad is not a source of truth. Index into
+`docs/sim3d-water-investigation.md` when regenerating the sheet.
+
+Palette key, all Fillmore bank 1:
+`.`=12 `#dec59c` sand light · `,`=11 `#bdac83` sand mid ·
+`:`=4 `#839483` rock light · `=`=3 `#6a736a` rock mid ·
+`#`=2 `#414a41` rock dark · `o`=0 `#525252` silt · `O`=1 `#202020` silt dark ·
+`w`=13 `#4a5a00` weed dark · `W`=14 `#6a8300` weed light
+
+```
+ 0 sand        1 ripples A   2 ripples B   3 pebbles
+ .......,      ........      ..,,,,,.      ........
+ ....,...      .,,,,,..      ........      ...=....
+ ........      ........      ,,,,....      ........
+ ..,.....      ....,,,,      ........      .=......
+ .......,      ........      ....,,,,      ......=.
+ .....,..      ,,,,....      ........      ........
+ ........      ........      .,,,,,..      ....=...
+ ,.......      ..,,,,,.      ........      ........
+
+ 4 sand>rock   5 patchy      6 rock        7 cracked
+ ........      :...:...      =:==:=:=      =:=#=:=:
+ ....,...      =.:..:..      :==:==:=      :=#=:==#
+ .,......      .:..=...      ==:==:==      =#=:=#=:
+ :.:...:.      ..:...:.      :=:==:=:      #=:==:#=
+ =:==:=:=      :..=..:=      ==:=:==:      =:=#=:=:
+ ==#==#==      ...:..:.      =:==:==:      :#=:=#=:
+ #==#==#=      .=...:..      :==:=:==      =:#=:=:#
+ ==#===#=      ..:...:=      ==:==:=:      #=:=#=:=
+
+ 8 silt        9 weed clump  10 weed sparse 11 weed field
+ ##o##o##      ...w....      ........       .w..w..w
+ #o##o###      ..wWw...      .....w..       wWw.wWw.
+ ##o###o#      .wWWWw..      ....wWw.       .w..w..w
+ o###o##o      ..wWw.w.      .....w..       ..w..w..
+ ##o##oO#      ...w.wWw      ........       .wWw.wWw
+ #o###o##      ,..,..w.      ..w.....       ..w..w..
+ ##o#o###      ........      .wWw....       w..w..w.
+ o##o###o      .,......      ..w.....       Ww.Ww.Ww
+```
+
+Placement: `cls = vnoise(cell * 0.085)` selects the group — <0.40 sand (0-3),
+<0.58 breaking up (4-5), <0.80 rock (6-8), else weed (9-11) — and
+`hash21(cell)` picks the variant plus an X and Y mirror.
+
+Two implementation notes: the sheet texture **must** be `NEAREST` (filtering a
+strip of 8×8 tiles bleeds neighbours across every tile edge), and the per-cell
+mirroring is load-bearing — without it a twelve-tile set reads as a repeating
+sheet.
+
+Still not tried: constraining output to the town's **actual CGRAM entries**
+rather than a generic ramp (nearest-colour against the live palette); and
+replacing the smooth sheen band with hard-edged authored *shapes* in the ROM's
+own dash idiom, since a smooth exponential band is still a modern gradient
+however well dithered.
 
 ### Shore distance: 8 px is enough again
 

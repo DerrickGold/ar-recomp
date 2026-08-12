@@ -38,10 +38,6 @@ static DioramaProjection RakedApronProjection(void) {
       1, 0, 1, 0,
       0, 0, 0, 1,
     },
-    .object_u0 = 0.20f,
-    .object_v0 = 0.0f,
-    .object_u1 = 0.80f,
-    .object_v1 = 1.0f,
     .aspect_x = 2.0f,
     .height_scale = 1.0f,
     .texture_x_origin = 20,
@@ -50,14 +46,22 @@ static DioramaProjection RakedApronProjection(void) {
     .output_width = 100,
     .output_height = 100,
   };
-  projection.bg1_plane = (DioramaObjectPlaneProjection){
+  projection.bg1_plane = (DioramaPlaneProjection){
     .valid = true,
+    .u0 = 0.20f, .v0 = 0.0f, .u1 = 0.80f, .v1 = 1.0f,
     .z_world = 0.35f,
     .rake = 0.25f,
     .bow = 0.10f,
   };
-  projection.object_planes[0] = (DioramaObjectPlaneProjection){
+  projection.bg2_plane = (DioramaPlaneProjection){
     .valid = true,
+    .u0 = 0.20f, .v0 = 0.0f, .u1 = 0.80f, .v1 = 1.0f,
+    .z_world = -0.30f,
+    .rake = 0.04f,
+  };
+  projection.object_planes[0] = (DioramaPlaneProjection){
+    .valid = true,
+    .u0 = 0.20f, .v0 = 0.0f, .u1 = 0.80f, .v1 = 1.0f,
     .z_world = -0.05f,
     .rake = -0.08f,
   };
@@ -292,11 +296,36 @@ static ActionEffectInstance SceneEffect(uint8_t kind, int world_x) {
     case kActionEffect_AitosLavaPit:
       effect.phase = kActionEffectPhase_AitosLavaPit;
       effect.geometry.data.rect =
-          (ActionEffectLocalRect){-64.0f, -8.0f, 64.0f, 8.0f};
+          (ActionEffectLocalRect){-64.0f, -24.0f, 64.0f, 24.0f};
       break;
     case kActionEffect_AitosLavaFireball:
       effect.velocity_y = -4;
       effect.phase = kActionEffectPhase_AitosLavaFireballFlight;
+      break;
+    case kActionEffect_AitosMoltenRock:
+      effect.velocity_x = -2;
+      effect.velocity_y = 1;
+      effect.visual = 0x2B;
+      effect.phase = kActionEffectPhase_AitosMoltenRockFlight;
+      break;
+    case kActionEffect_AitosWaterSplash:
+      effect.phase = kActionEffectPhase_AitosWaterSplash;
+      effect.projection_plane = kActionEffectProjectionPlane_Bg1;
+      effect.geometry.data.rect =
+          (ActionEffectLocalRect){-24.0f, -16.0f, 24.0f, 16.0f};
+      break;
+    case kActionEffect_AitosWaterfall:
+      effect.phase = kActionEffectPhase_AitosWaterfallFlow;
+      effect.projection_plane = kActionEffectProjectionPlane_Bg2;
+      effect.geometry.data.rect =
+          (ActionEffectLocalRect){-256.0f, -176.0f, 256.0f, 176.0f};
+      break;
+    case kActionEffect_AitosWaterfallMist:
+      effect.phase = kActionEffectPhase_AitosWaterfallMist;
+      effect.render_layer = kActionEffectRenderLayer_Atmosphere;
+      effect.projection_plane = kActionEffectProjectionPlane_Bg2;
+      effect.geometry.data.rect =
+          (ActionEffectLocalRect){-256.0f, -32.0f, 256.0f, 24.0f};
       break;
     case kActionEffect_LightningTrap:
       effect.visual = 0x1F;
@@ -415,6 +444,39 @@ static void TestAitosLavaLightingAndParticles(void) {
   }
   CHECK(pit_max_x - pit_min_x > 70.0f);
 
+  /* The glow still covers the complete two-row bubbly volume, but the
+   * isometric source plane sits one quarter-height above its geometric
+   * midpoint. A quad's centroid is the projected particle position,
+   * independent of its width and reach. Sweep enough ticks to cover every
+   * 21-36 tick lifetime and pin the narrow +/-1.5px source band. */
+  const float pit_source_y = frame.effects[0].world_y +
+      (frame.effects[0].geometry.data.rect.y0 +
+       frame.effects[0].geometry.data.rect.y1) * 0.5f -
+      (frame.effects[0].geometry.data.rect.y1 -
+       frame.effects[0].geometry.data.rect.y0) * 0.25f;
+  float max_centroid_y[12];
+  for (int particle = 0; particle < 12; particle++)
+    max_centroid_y[particle] = -10000.0f;
+  for (unsigned ticks = 0; ticks < 72; ticks++) {
+    frame.effects[0].pulse_ticks = ticks;
+    CHECK(ActionSceneEffectRender_Build(
+        &frame, false, true, IdentityProjection, NULL, &particles));
+    for (int particle = 0; particle < 12; particle++) {
+      float centre_y = 0.0f;
+      for (int vertex = 0; vertex < 4; vertex++)
+        centre_y += particles.vertices[particle * 4 + vertex].position.y;
+      centre_y *= 0.25f;
+      CHECK(centre_y <= pit_source_y + 1.51f);
+      if (centre_y > max_centroid_y[particle])
+        max_centroid_y[particle] = centre_y;
+    }
+  }
+  /* Lava presentation advances at 2x, so an even lifetime with an odd birth
+   * phase can approach within one tick rather than land exactly on age zero. */
+  for (int particle = 0; particle < 12; particle++)
+    CHECK(max_centroid_y[particle] >= pit_source_y - 2.0f);
+  frame.effects[0].pulse_ticks = 9;
+
   /* Rising fireballs trail down from the source art. This catches the old
    * zero/default-horizontal heading and sign mistakes. */
   float fireball_min_y = 10000.0f;
@@ -485,6 +547,8 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
   ActionEffectProjectionContext context = {
     .bg1_camera_x = 1000,
     .bg1_camera_y = 500,
+    .bg2_camera_x = 1000,
+    .bg2_camera_y = 500,
     .ws_extra = 60,
     .ws_extra_top = 32,
     .visible_x0 = 0,
@@ -505,10 +569,10 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, ActionEffectProjection_ProjectPoint,
       &context, &pit));
-  /* Vertex zero is the outer glow's centre. The pit spill is authored at
-   * local Y=-2 and must use BG1's rake/bow plus the 20-column apron. */
+  /* Vertex zero is the outer glow's centre. The pit spill follows the full
+   * two-row bubbly geometry and must use BG1's rake/bow plus the apron. */
   CHECK(Diorama_ProjectCapturedBg1Point(
-      &projection, 30.0f, 23.0f, &expected, NULL, NULL));
+      &projection, 30.0f, 17.8f, &expected, NULL, NULL));
   CHECK(fabsf(pit.vertices[0].position.x - expected.x) < 0.001f);
   CHECK(fabsf(pit.vertices[0].position.y - expected.y) < 0.001f);
 
@@ -527,8 +591,42 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
   CHECK(fabsf(pit.vertices[0].position.x -
               fireball.vertices[0].position.x) > 5.0f);
 
+  /* A BG2 waterfall uses its own camera and independently resolved backdrop
+   * shape/window, rather than borrowing either BG1 or OBJ registration. */
+  frame.effects[0] = SceneEffect(kActionEffect_AitosWaterfall, 970);
+  frame.effects[0].world_y = 493;
+  context.bg2_camera_x = 1010;
+  context.bg2_camera_y = 510;
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, false, ActionEffectProjection_ProjectPoint,
+      &context, &pit));
+  CHECK(Diorama_ProjectCapturedBg2Point(
+      &projection, 20.0f, 15.0f, &expected, NULL, NULL));
+  CHECK(fabsf(pit.vertices[0].position.x - expected.x) < 0.001f);
+  CHECK(fabsf(pit.vertices[0].position.y - expected.y) < 0.001f);
+
+  /* The bottom atmosphere deliberately draws after the world, but it still
+   * uses the production BG2 camera/rake/bow projection so its foam seam meets
+   * the finite waterfall plane in Diorama mode. */
+  ActionSceneEffectFrame decorations = {
+    .decoration_count = 1,
+    .decoration_visible_count = 1,
+  };
+  decorations.decorations[0] =
+      SceneEffect(kActionEffect_AitosWaterfallMist, 970);
+  decorations.decorations[0].world_y = 493;
+  CHECK(ActionSceneDecorationRender_Build(
+      &decorations, kActionEffectRenderLayer_Atmosphere, true, false,
+      ActionEffectProjection_ProjectPoint, &context, &pit));
+  CHECK(Diorama_ProjectCapturedBg2Point(
+      &projection, -130.0f, 19.0f, &expected, NULL, NULL));
+  CHECK(fabsf(pit.vertices[0].position.x - expected.x) < 0.001f);
+  CHECK(fabsf(pit.vertices[0].position.y - expected.y) < 0.001f);
+
   /* The same production helper owns flat viewport placement. Vertical
    * extension is a Diorama texture concern and intentionally drops out here. */
+  frame.effects[0] = SceneEffect(kActionEffect_AitosLavaPit, 970);
+  frame.effects[0].world_y = 493;
   context.diorama_projection = NULL;
   context.visible_x0 = 10;
   context.visible_width = 400;
@@ -536,6 +634,93 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
       &context, &frame.effects[0], 0.0f, 0.0f, &expected));
   CHECK(fabsf(expected.x - 48.6f) < 0.001f);
   CHECK(fabsf(expected.y - (-1.0f)) < 0.001f);
+}
+
+static void TestCurrentActorEffectsRequestExactObjPlanes(void) {
+  ActionEffectFrame spells = {.effect_count = 2, .visible_count = 2};
+  spells.effects[0] = Fire();
+  spells.effects[0].obj_priority = 2;
+  spells.effects[0].projection_plane = kActionEffectProjectionPlane_Obj;
+  spells.effects[1] = Fire();
+  spells.effects[1].flags = 0;
+
+  ActionSceneEffectFrame scene = {.effect_count = 4, .visible_count = 4};
+  scene.effects[0] = SceneEffect(kActionEffect_SwordBeam, 200);
+  scene.effects[0].obj_priority = 0;
+  scene.effects[1] = SceneEffect(kActionEffect_EnemyFireball, 220);
+  scene.effects[1].obj_priority = 3;
+  scene.effects[2] = SceneEffect(kActionEffect_WallTorch, 240);
+  scene.effects[2].obj_priority = 1;
+  scene.effects[3] = SceneEffect(kActionEffect_SwordBeam, 260);
+  scene.effects[3].visual = 0x21;
+  scene.effects[3].obj_priority = 2;
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(&spells, &scene) ==
+        ((1u << 0) | (1u << 2) | (1u << 3)));
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &scene) ==
+        ((1u << 0) | (1u << 2) | (1u << 3)));
+
+  /* A malformed actor list fails closed as a unit, without suppressing the
+   * independently valid spell request. BG-local decorations never acquire an
+   * OBJ projection merely because their priority byte happens to be set. */
+  scene.overflow = 1;
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(&spells, &scene) ==
+        (1u << 2));
+  scene.overflow = 0;
+  scene.effect_count = kActionSceneEffectMaxInstances + 1;
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &scene) == 0);
+}
+
+static void TestDecorationLayerBuildsAreIndependent(void) {
+  ActionSceneEffectFrame frame = {
+    .decoration_count = 3,
+    .decoration_visible_count = 3,
+  };
+  frame.decorations[0] = SceneEffect(kActionEffect_AitosWaterSplash, 100);
+  frame.decorations[1] = SceneEffect(kActionEffect_AitosWaterfall, 120);
+  frame.decorations[1].render_layer = kActionEffectRenderLayer_Bg2Plane;
+  frame.decorations[2] = SceneEffect(kActionEffect_AitosWaterfallMist, 120);
+  frame.decorations[2].world_y = 216;
+  ActionSceneEffectRenderBatch world, bg2, atmosphere;
+  CHECK(ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_WorldOverlay, true, true,
+      IdentityProjection, NULL, &world));
+  CHECK(ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_Bg2Plane, true, true,
+      IdentityProjection, NULL, &bg2));
+  CHECK(ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_Atmosphere, true, true,
+      IdentityProjection, NULL, &atmosphere));
+  CHECK(world.index_count > 0);
+  CHECK(bg2.index_count > 0);
+  CHECK(atmosphere.index_count > 0);
+  CHECK(world.index_count != bg2.index_count);
+  CHECK(atmosphere.index_count != bg2.index_count);
+
+  /* The source veil remains substantial renderer geometry rather than a
+   * record that gets silently filtered, while the separate atmosphere spans
+   * the bottom seam and extends below the authentic 224px frame. */
+  CHECK(bg2.vertex_count ==
+        2 * kActionEffectGlowVertices +
+        kActionSceneEffectWaterfallParticleCount * 4);
+  float atmosphere_min_y = 10000.0f;
+  float atmosphere_max_y = -10000.0f;
+  for (int i = 0; i < atmosphere.vertex_count; i++) {
+    if (atmosphere.vertices[i].position.y < atmosphere_min_y)
+      atmosphere_min_y = atmosphere.vertices[i].position.y;
+    if (atmosphere.vertices[i].position.y > atmosphere_max_y)
+      atmosphere_max_y = atmosphere.vertices[i].position.y;
+  }
+  CHECK(atmosphere_min_y < frame.decorations[2].world_y - 20.0f);
+  CHECK(atmosphere_max_y > frame.decorations[2].world_y + 20.0f);
+  CHECK(atmosphere_max_y > 224.0f);
+  frame.decoration_overflow = 1;
+  CHECK(ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_WorldOverlay, true, true,
+      IdentityProjection, NULL, &world));
+  CHECK(world.index_count == 0);
+  CHECK(!ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_Count, true, true,
+      IdentityProjection, NULL, &world));
 }
 
 static void TestLightningVisibleLightCoversCapturedArc(void) {
@@ -935,6 +1120,26 @@ static void TestSwordBeamLightingTrailAndStars(void) {
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &repeat));
   CHECK(repeat.vertex_count > 0);
+  /* Aitos's boss-authored upper/lower crescents use the same portable comet
+   * style while retaining their diagonal headings and priority-2 source. */
+  frame.effects[0].visual = 0x21;
+  frame.effects[0].velocity_x = -3;
+  frame.effects[0].velocity_y = 1;
+  frame.effects[0].obj_priority = 2;
+  frame.effects[0].geometry.data.rect =
+      (ActionEffectLocalRect){-8.0f, -17.0f, 16.0f, 7.0f};
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, true, IdentityProjection, NULL, &repeat));
+  CHECK(repeat.vertex_count ==
+        2 * kActionEffectGlowVertices + 8 +
+        kActionSceneEffectSwordStarCount * 8);
+  frame.effects[0].visual = 0x20;
+  frame.effects[0].velocity_y = -1;
+  frame.effects[0].geometry.data.rect =
+      (ActionEffectLocalRect){-8.0f, -9.0f, 16.0f, 15.0f};
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, true, IdentityProjection, NULL, &repeat));
+  CHECK(repeat.vertex_count > 0);
   frame.effects[0].visual = 0x32;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &repeat));
@@ -961,11 +1166,27 @@ static void TestSceneCapacityAndMalformedInput(void) {
     frame.effects[i] = SceneEffect(kActionEffect_LightningTrap, 100 + i * 20);
   frame.effects[7] = SceneEffect(
       kActionEffect_MarahnaBossLightning, 140);
+  frame.effects[8] = SceneEffect(kActionEffect_AitosWaterfall, 180);
+  frame.effects[9] = SceneEffect(kActionEffect_SwordBeam, 200);
+  frame.effects[9].visual = 0x21;
+  frame.effects[9].velocity_x = -3;
+  frame.effects[9].velocity_y = 1;
+  frame.effects[10] = SceneEffect(kActionEffect_SwordBeam, 220);
+  frame.effects[10].visual = 0x20;
+  frame.effects[10].velocity_x = -3;
+  frame.effects[10].velocity_y = -1;
   ActionSceneEffectRenderBatch batch;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &batch));
-  CHECK(batch.vertex_count == kActionSceneEffectRenderMaxVertices);
-  CHECK(batch.index_count == kActionSceneEffectRenderMaxIndices);
+  /* The shared public capacity additionally reserves one bottom-atmosphere
+   * record for the decoration builder; this actor-only worst case must remain
+   * within it without manufacturing that separate map-derived record. */
+  CHECK(batch.vertex_count ==
+        kActionSceneEffectRenderMaxVertices -
+        kActionSceneEffectWaterfallMistExtraVertices);
+  CHECK(batch.index_count ==
+        kActionSceneEffectRenderMaxIndices -
+        kActionSceneEffectWaterfallMistExtraIndices);
 
   /* A second active boss filament cannot arise from the mapped one-boss
    * lifecycle. Reject it as a capacity-contract violation without publishing
@@ -976,8 +1197,8 @@ static void TestSceneCapacityAndMalformedInput(void) {
       &frame, true, true, IdentityProjection, NULL, &batch));
   CHECK(batch.vertex_count == 0);
   CHECK(batch.index_count == 0);
-  /* The expanded comet budget likewise belongs to the one player projectile,
-   * not to an arbitrary number of forged scene records. */
+  /* The expanded comet budget admits exactly the player plus the boss's two
+   * diagonal children, not an arbitrary fourth forged stream. */
   frame.effects[7] = SceneEffect(kActionEffect_SwordBeam, 140);
   CHECK(!ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &batch));
@@ -1025,6 +1246,8 @@ int main(void) {
   TestAitosLavaLightingAndParticles();
   TestMarahnaFireballFramesAndDirections();
   TestAitosUsesRakedDioramaSourcePlanes();
+  TestCurrentActorEffectsRequestExactObjPlanes();
+  TestDecorationLayerBuildsAreIndependent();
   TestLightningVisibleLightCoversCapturedArc();
   TestBossLightningFilamentAndStages();
   TestMarahnaLightningLinksAndOrientations();

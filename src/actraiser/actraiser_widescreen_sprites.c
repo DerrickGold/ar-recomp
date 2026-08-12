@@ -304,6 +304,36 @@ static int ws_scan_axis_visible(uint16 pos, uint16 leading, uint16 trailing,
   return 0;
 }
 
+static uint16 ws_authentic_action_camera_x(CpuState *cpu,
+                                            uint16 fallback_camera_x,
+                                            int player_arrival_active) {
+  /* $8A is assigned by the arrival actors and can still contain its
+   * pre-stage value on the first visibility scan. The player object already
+   * has its authoritative spawn X then, and shares the arrival camera's X, so
+   * use it while that sequence owns the player. This also ensures the gate can
+   * never classify the player/statue pair against the fitted wide camera. */
+  if (player_arrival_active) {
+    return ActRaiser_AuthenticActionCameraX(
+        ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionX),
+        ws_dp16(cpu, kActRaiserWram_Bg1Width));
+  }
+
+  const uint16 subject =
+      ws_dp16(cpu, kActRaiserWram_ActionCameraSubject);
+  const uint16 table_end = (uint16)(
+      kActRaiserWram_ActionObjectTable +
+      kActRaiserActionObjectCount * kActRaiserActionObjectStride);
+  if (subject < kActRaiserWram_ActionObjectTable || subject >= table_end ||
+      (subject - kActRaiserWram_ActionObjectTable) %
+          kActRaiserActionObjectStride != 0)
+    return fallback_camera_x;
+
+  const uint16 subject_world_x = ActRaiser_ReadWram16(
+      (uint16)(subject + kActRaiserActionObject_WorldX));
+  return ActRaiser_AuthenticActionCameraX(
+      subject_world_x, ws_dp16(cpu, kActRaiserWram_Bg1Width));
+}
+
 /* Stage D1/D2 replacement for $00:8C98. Object drawing and $0400 activation
  * use separate horizontal windows and retain independent fidelity switches.
  * This reproduces the ROM's PHP/PLP stack byte and its normal two-bit-per-slot
@@ -427,13 +457,27 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   }
   int draw_t = (vext_obj_draw && ws_margin_objects_enabled()) ? live_t : 0;
   int draw_b = (vext_obj_draw && ws_margin_objects_enabled()) ? live_b : 0;
-  int activation_wide = ws_margin_activation_enabled();
-  int activation_l = activation_wide ? live_l : 0;
-  int activation_r = activation_wide ? live_r : 0;
-  const char *actdbg = getenv("AR_WS_ACTDBG");
-  int activation_debug = actdbg && actdbg[0] && actdbg[0] != '0';
   uint16 camera_x = ws_dp16(cpu, kActRaiserWram_Bg1CameraX);
   uint16 camera_y = ws_dp16(cpu, kActRaiserWram_Bg1CameraY);
+  const int activation_wide_requested = ws_margin_activation_enabled();
+  const uint16 player_handler =
+      ActRaiser_ReadWram16(kActRaiserWram_PlayerHandler);
+  const int player_arrival_active =
+      ActRaiser_PlayerArrivalAnimationActive(player_handler);
+  const uint16 authentic_camera_x = ws_authentic_action_camera_x(
+      cpu, camera_x, player_arrival_active);
+  /* Do not let the extra widescreen margins wake actors while the arrival
+   * animation still owns the player. Authentic-width activation remains live,
+   * and the final $97E4 tick installs $9832 before this scan runs, so margin
+   * actors first advance on the same following tick that accepts input. */
+  int activation_wide = ActRaiser_ShouldUseWideActionActivation(
+      activation_wide_requested, player_handler);
+  int activation_l = activation_wide ? live_l : 0;
+  int activation_r = activation_wide ? live_r : 0;
+  uint16 activation_camera_x =
+      activation_wide ? camera_x : authentic_camera_x;
+  const char *actdbg = getenv("AR_WS_ACTDBG");
+  int activation_debug = actdbg && actdbg[0] && actdbg[0] != '0';
 
   for (;;) {
     uint16 status = cpu_read16(
@@ -474,14 +518,14 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
           : vertical;
       int authentic = vertical &&
           ws_scan_axis_visible(world_x, left_extent, right_extent,
-                               camera_x, 0, 0,
+                               authentic_camera_x, 0, 0,
                                kActRaiserAuthenticWidth);
       int draw = vertical_draw &&
           ws_scan_axis_visible(world_x, left_extent, right_extent,
                                camera_x, draw_l, draw_r,
                                kActRaiserAuthenticWidth);
       int activation = vertical && ws_scan_axis_visible(
-          world_x, left_extent, right_extent, camera_x,
+          world_x, left_extent, right_extent, activation_camera_x,
           activation_l, activation_r, kActRaiserAuthenticWidth);
 
       if (vertical_draw && !vertical)
@@ -544,7 +588,9 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
                     kActRaiserActionObjectStride), object_address,
                 !!(flags & kActRaiserObjectFlag_OutsideActivation),
                 !!(next_flags & kActRaiserObjectFlag_OutsideActivation),
-                activation_wide ? "wide" : "authentic",
+                activation_wide ? "wide" :
+                    (activation_wide_requested && player_arrival_active
+                         ? "arrival-gated" : "authentic"),
                 authentic, draw, activation, screen_left, screen_right,
                 live_l, live_r, handler, object_type, definition_bank,
                 definition_address);

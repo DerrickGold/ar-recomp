@@ -485,6 +485,13 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
   else if (kind == kActionEffect_MarahnaFireball)
     continuity_key = (uint32_t)object->source_descriptor |
         ((uint32_t)object->resume_address << 16);
+  else if (kind == kActionEffect_SwordBeam) {
+    continuity_key = (uint32_t)object->source_descriptor |
+        ((uint32_t)object->spawner_backlink << 16);
+    if (object->animation_bank == 0x7E &&
+        object->animation_address == 0x5000)
+      continuity_key ^= (uint32_t)object->local_counter * 0x9E3779B9u;
+  }
   else if (kind == kActionEffect_BloodpoolBossLightning ||
            kind == kActionEffect_MarahnaLightningLink ||
            kind == kActionEffect_MarahnaBossLightning)
@@ -633,6 +640,11 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
  * Player sword beam (run 20260810-175403 snap_01_gf1726):
  *   handler $9D1C, animation $06:8000, player backlink $08A0, and exact
  *   state/visual/composition pairs $13/$30/$99E8 or $14/$31/$9A17.
+ * Aitos boss sword volley (run 20260812-000613 snap_05_gf21056):
+ *   source $D646 emits two diagonal $7E:5000 crescents through an inactive
+ *   state-$00 volley controller. Children retain resume $A65D and exact
+ *   state/visual/composition/velocity tuples $01/$21/$56D8/(-3,+1) and
+ *   $02/$20/$56BE/(-3,-1). Their captured OAM uses OBJ priority 2.
  * Bloodpool wall torches (snap_01_gf2479, snap_06_gf7654):
  *   BG1 metatile $47 immediately above $4F in maps $02/$03 and $02/$05.
  *   The exact pair is the authored object identity and applies across the
@@ -651,9 +663,13 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
  *   complete $5D01/$5D0D/$5D2E ground-charge cycle.
  * Aitos (same run, map $04/$01):
  *   lava pits are BG1 rows $DC, one-or-more $DD, $DE over an equally wide
- *   $DF row. Their emitted fireballs share source $CF9E and resume $CFCD;
+ *   sequence $DF/$E7; these are the two bubbly rows above the solid-red $F7
+ *   fill. Their emitted fireballs share source $CF9E and resume $CFCD;
  *   exact handler/state and visual/composition pairs cover the wait, rising,
- *   and return phases without matching unrelated $7E:4000 actors. */
+ *   and return phases without matching unrelated $7E:4000 actors. Run
+ *   20260812-000613 separates launched volcano rocks as the $CEEC/$CF16
+ *   family, and maps waterfall-platform splash frames as exact three-row BG1
+ *   structures in maps $04/$02-$03. */
 enum {
   kEnemyFireballHandler = 0xBDF0,
   kEnemyFireballResume = 0xBDD9,
@@ -715,9 +731,31 @@ enum {
   kAitosLavaMiddleMetatile = 0xDD,
   kAitosLavaRightMetatile = 0xDE,
   kAitosLavaFillMetatile = 0xDF,
+  kAitosLavaBubbleMetatile = 0xE7,
   kAitosLavaMaxMiddleCells = 6,
   kAitosLavaFireballSourceDescriptor = 0xCF9E,
   kAitosLavaFireballResume = 0xCFCD,
+  kAitosMoltenRockSourceDescriptor = 0xCEEC,
+  kAitosMoltenRockResume = 0xCF16,
+  kAitosMoltenRockHandler = 0x8661,
+  kAitosMoltenRockState = 0x0027,
+  kAitosBossMap = 0x03,
+  kAitosBossSourceDescriptor = 0xD646,
+  kAitosBossSwordBeamHandler = 0x8661,
+  kAitosBossSwordBeamResume = 0xA65D,
+  kAitosBossSwordBeamParentResume = 0xD793,
+  kAitosWaterfallFirstMap = 0x02,
+  kAitosWaterfallLastMap = 0x03,
+  kAitosSplashTopLeft = 0x36,
+  kAitosSplashTopMiddle = 0x5E,
+  kAitosSplashTopRight = 0x81,
+  kAitosSplashBodyLeft = 0x4E,
+  kAitosSplashBodyMiddle = 0xF4,
+  kAitosSplashBodyRight = 0x4F,
+  kAitosSplashDripLeft = 0xF6,
+  kAitosSplashDripMiddle = 0xFC,
+  kAitosSplashDripRight = 0xFE,
+  kAitosSplashMaxCells = 8,
 };
 
 static bool IsMarahnaEffectMap(const uint8_t *wram, size_t wram_size) {
@@ -734,6 +772,15 @@ static bool IsAitosLavaMap(const uint8_t *wram, size_t wram_size) {
       Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
           kActRaiserMapGroup_Aitos &&
       Read8(wram, wram_size, kActRaiserWram_CurrentMap) == kAitosLavaMap;
+}
+
+static bool IsAitosWaterfallMap(const uint8_t *wram, size_t wram_size) {
+  if (!wram ||
+      Read8(wram, wram_size, kActRaiserWram_MapGroup) !=
+          kActRaiserMapGroup_Aitos)
+    return false;
+  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
+  return map >= kAitosWaterfallFirstMap && map <= kAitosWaterfallLastMap;
 }
 
 static bool ActionObjectVisible(const ActionObjectSnapshot *object) {
@@ -957,6 +1004,26 @@ static bool IsAitosLavaFireball(const ActionObjectSnapshot *object) {
   return false;
 }
 
+static bool IsAitosMoltenRock(const ActionObjectSnapshot *object) {
+  if (!object ||
+      object->source_descriptor != kAitosMoltenRockSourceDescriptor ||
+      object->resume_address != kAitosMoltenRockResume ||
+      object->handler != kAitosMoltenRockHandler ||
+      object->animation_address != kSceneAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->animation_state != kAitosMoltenRockState ||
+      object->visual != 0x002B || object->composition != 0x4D2D ||
+      object->left_extent != 8 || object->top_extent != 8 ||
+      object->right_extent != 8 || object->bottom_extent != 8 ||
+      (object->velocity_x != -2 && object->velocity_x != 2) ||
+      object->velocity_y < -1 || object->velocity_y > 1)
+    return false;
+  const uint16_t flips =
+      object->flip_attributes & kActRaiserObjectFlip_Mask;
+  return object->velocity_x < 0 ? flips == 0
+                                : flips == kActRaiserObjectFlip_Horizontal;
+}
+
 static bool ActionObjectAddressIsValid(uint16_t address) {
   const unsigned table_start = kActRaiserWram_ActionObjectTable;
   const unsigned table_end = table_start +
@@ -1130,8 +1197,9 @@ static uint8_t MatchMarahnaBossLightning(
   return phase;
 }
 
-static bool SwordBeamParentIsValid(const uint8_t *wram, size_t wram_size,
-                                   const ActionObjectSnapshot *object) {
+static bool PlayerSwordBeamParentIsValid(
+    const uint8_t *wram, size_t wram_size,
+    const ActionObjectSnapshot *object) {
   if (!object || object->spawner_backlink != kActRaiserWram_PlayerObject)
     return false;
   ActionObjectSnapshot player;
@@ -1144,20 +1212,86 @@ static bool SwordBeamParentIsValid(const uint8_t *wram, size_t wram_size,
       player.source_descriptor == object->source_descriptor;
 }
 
-static bool IsSwordBeam(const uint8_t *wram, size_t wram_size,
-                        const ActionObjectSnapshot *object) {
+static bool IsPlayerSwordBeam(const uint8_t *wram, size_t wram_size,
+                              const ActionObjectSnapshot *object) {
   if (!object || object->handler != kSwordBeamHandler ||
       object->animation_address != kSwordBeamAnimationAddress ||
       object->animation_bank != kSwordBeamAnimationBank ||
       !object->source_descriptor ||
       (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||
       !(object->flags & kActRaiserObjectFlag_Attacker) ||
-      !SwordBeamParentIsValid(wram, wram_size, object))
+      !PlayerSwordBeamParentIsValid(wram, wram_size, object))
     return false;
   return (object->animation_state == kSwordBeamHorizontalState &&
           object->visual == 0x0030 && object->composition == 0x99E8) ||
       (object->animation_state == kSwordBeamAlternateState &&
        object->visual == 0x0031 && object->composition == 0x9A17);
+}
+
+static bool AitosBossSwordBeamParentIsValid(
+    const uint8_t *wram, size_t wram_size,
+    const ActionObjectSnapshot *object) {
+  if (!object || !ActionObjectAddressIsValid(object->spawner_backlink))
+    return false;
+  ActionObjectSnapshot parent;
+  if (!ReadActionObject(wram, wram_size, object->spawner_backlink, &parent) ||
+      parent.status != 0x4000 ||
+      parent.source_descriptor != kAitosBossSourceDescriptor ||
+      parent.handler != kAitosBossSwordBeamHandler ||
+      parent.animation_address != kBossAnimationAddress ||
+      parent.animation_bank != kSceneAnimationBank ||
+      parent.resume_address != kAitosBossSwordBeamParentResume ||
+      parent.animation_state != 0x0000 || parent.visual != 0x0023 ||
+      parent.composition != 0x56FE || parent.flip_attributes != 0 ||
+      parent.left_extent != 8 || parent.top_extent != 8 ||
+      parent.right_extent != 8 || parent.bottom_extent != 8 ||
+      parent.flags != 0x0020 || parent.local_counter != 0x000D ||
+      !ActionObjectAddressIsValid(parent.spawner_backlink))
+    return false;
+
+  ActionObjectSnapshot boss;
+  return ReadActionObject(wram, wram_size, parent.spawner_backlink, &boss) &&
+      !(boss.status & kActRaiserObjectStatus_InactiveMask) &&
+      boss.composition &&
+      boss.source_descriptor == kAitosBossSourceDescriptor &&
+      boss.animation_address == kBossAnimationAddress &&
+      boss.animation_bank == kSceneAnimationBank &&
+      boss.spawner_backlink == 0 && (boss.flags & 0x4000);
+}
+
+static bool IsAitosBossSwordBeam(const uint8_t *wram, size_t wram_size,
+                                 const ActionObjectSnapshot *object) {
+  if (!object ||
+      object->source_descriptor != kAitosBossSourceDescriptor ||
+      object->handler != kAitosBossSwordBeamHandler ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->resume_address != kAitosBossSwordBeamResume ||
+      object->animation_index != 0x0001 || object->flip_attributes != 0 ||
+      object->flags != 0x0020 ||
+      !AitosBossSwordBeamParentIsValid(wram, wram_size, object))
+    return false;
+
+  static const struct {
+    uint16_t state, visual, composition, local_counter;
+    int16_t velocity_y;
+    uint16_t top_extent, bottom_extent;
+  } kCrescents[] = {
+    {0x0001, 0x0021, 0x56D8, 0x0001, 1, 16, 8},
+    {0x0002, 0x0020, 0x56BE, 0x0002, -1, 8, 16},
+  };
+  for (unsigned i = 0; i < sizeof(kCrescents) / sizeof(kCrescents[0]); i++)
+    if (object->animation_state == kCrescents[i].state &&
+        object->visual == kCrescents[i].visual &&
+        object->composition == kCrescents[i].composition &&
+        object->local_counter == kCrescents[i].local_counter &&
+        object->velocity_x == -3 &&
+        object->velocity_y == kCrescents[i].velocity_y &&
+        object->left_extent == 8 && object->right_extent == 16 &&
+        object->top_extent == kCrescents[i].top_extent &&
+        object->bottom_extent == kCrescents[i].bottom_extent)
+      return true;
+  return false;
 }
 
 static bool BloodpoolBossLightningParentIsValid(
@@ -1221,6 +1355,19 @@ static bool SceneFrameAppend(ActionSceneEffectFrame *dst,
   return true;
 }
 
+static bool SceneDecorationAppend(ActionSceneEffectFrame *dst,
+                                  const ActionEffectInstance *effect) {
+  if (!dst || !effect) return false;
+  if (dst->decoration_count >= kActionSceneDecorationMaxInstances) {
+    dst->decoration_overflow = 1;
+    return false;
+  }
+  dst->decorations[dst->decoration_count++] = *effect;
+  if (effect->flags & kActionEffectFlag_Visible)
+    dst->decoration_visible_count++;
+  return true;
+}
+
 typedef struct WallTorchMapRule {
   uint8_t top_metatile;
   uint8_t bottom_metatile;
@@ -1266,6 +1413,35 @@ typedef struct SceneBgScanBounds {
   unsigned x1, y1;  /* exclusive */
 } SceneBgScanBounds;
 
+static bool SceneBgScanBounds_InitWindow(
+    SceneBgScanBounds *bounds, const ActionBgMapView *map,
+    int camera_x, int camera_y, int margin_x, int margin_y,
+    bool include_partial_cells) {
+  if (!bounds || !map || !map->world_width || !map->world_height ||
+      margin_x < 0 || margin_y < 0)
+    return false;
+  int min_x = camera_x - margin_x;
+  int min_y = camera_y - margin_y;
+  int max_x = camera_x + kActRaiserAuthenticWidth + margin_x;
+  int max_y = camera_y + kActRaiserAuthenticHeight + margin_y;
+  if (max_x < 0 || max_y < 0 || min_x >= (int)map->world_width ||
+      min_y >= (int)map->world_height)
+    return false;
+  if (min_x < 0) min_x = 0;
+  if (min_y < 0) min_y = 0;
+  if (max_x >= (int)map->world_width) max_x = (int)map->world_width - 1;
+  if (max_y >= (int)map->world_height) max_y = (int)map->world_height - 1;
+  const unsigned cell = kActionBgMetatilePixels;
+  const unsigned align_bias = include_partial_cells ? 0u : cell - 1u;
+  bounds->x0 = ((unsigned)min_x + align_bias) / cell * cell;
+  bounds->y0 = ((unsigned)min_y + align_bias) / cell * cell;
+  bounds->x1 = ((unsigned)max_x / cell + 1u) * cell;
+  bounds->y1 = ((unsigned)max_y / cell + 1u) * cell;
+  if (bounds->x1 > map->world_width) bounds->x1 = map->world_width;
+  if (bounds->y1 > map->world_height) bounds->y1 = map->world_height;
+  return bounds->x0 < bounds->x1 && bounds->y0 < bounds->y1;
+}
+
 static bool SceneBgScanBounds_Init(SceneBgScanBounds *bounds,
                                    const ActionBgMapView *map,
                                    bool camera_bounded,
@@ -1279,28 +1455,9 @@ static bool SceneBgScanBounds_Init(SceneBgScanBounds *bounds,
     };
     return true;
   }
-
-  const int margin = kActRaiserAuthenticWidth;
-  int min_x = camera_x - margin;
-  int min_y = camera_y - margin;
-  int max_x = camera_x + kActRaiserAuthenticWidth + margin;
-  int max_y = camera_y + kActRaiserAuthenticHeight + margin;
-  if (max_x < 0 || max_y < 0 || min_x >= (int)map->world_width ||
-      min_y >= (int)map->world_height)
-    return false;
-  if (min_x < 0) min_x = 0;
-  if (min_y < 0) min_y = 0;
-  if (max_x >= (int)map->world_width) max_x = (int)map->world_width - 1;
-  if (max_y >= (int)map->world_height) max_y = (int)map->world_height - 1;
-
-  const unsigned cell = kActionBgMetatilePixels;
-  bounds->x0 = ((unsigned)min_x + cell - 1u) / cell * cell;
-  bounds->y0 = ((unsigned)min_y + cell - 1u) / cell * cell;
-  bounds->x1 = ((unsigned)max_x / cell + 1u) * cell;
-  bounds->y1 = ((unsigned)max_y / cell + 1u) * cell;
-  if (bounds->x1 > map->world_width) bounds->x1 = map->world_width;
-  if (bounds->y1 > map->world_height) bounds->y1 = map->world_height;
-  return bounds->x0 < bounds->x1 && bounds->y0 < bounds->y1;
+  return SceneBgScanBounds_InitWindow(
+      bounds, map, camera_x, camera_y,
+      kActRaiserAuthenticWidth, kActRaiserAuthenticWidth, false);
 }
 
 static void CaptureWallTorches(ActionSceneEffectFrame *dst,
@@ -1367,7 +1524,7 @@ static void CaptureWallTorches(ActionSceneEffectFrame *dst,
                         (float)rule.bottom_extent},
         },
       };
-      SceneFrameAppend(dst, &effect);
+      SceneDecorationAppend(dst, &effect);
     }
   }
 }
@@ -1418,34 +1575,47 @@ static void CaptureAitosLavaPits(ActionSceneEffectFrame *dst,
       }
       if (!total_cells) continue;
 
-      bool fill_valid = true;
-      for (unsigned cell = 0; cell < total_cells; cell++) {
-        const unsigned cell_x = x + cell * kActionBgMetatilePixels;
-        if (cell_x < x ||
-            !ActionBgMapView_LookupMetatile(
-                &map, (int)cell_x,
-                (int)(y + kActionBgMetatilePixels), &metatile) ||
-            metatile != kAitosLavaFillMetatile) {
-          fill_valid = false;
-          break;
+      bool bubbles_valid = true;
+      unsigned bubble_rows = 1;
+      static const uint8_t kBubbleRows[] = {
+        kAitosLavaFillMetatile, kAitosLavaBubbleMetatile,
+      };
+      const bool has_second_bubble_row =
+          y <= map.world_height - 3u * kActionBgMetatilePixels;
+      if (has_second_bubble_row) bubble_rows++;
+      for (unsigned row = 0; row < bubble_rows; row++) {
+        for (unsigned cell = 0; cell < total_cells; cell++) {
+          const unsigned cell_x = x + cell * kActionBgMetatilePixels;
+          const unsigned cell_y = y + (row + 1u) * kActionBgMetatilePixels;
+          if (cell_x < x || cell_y < y ||
+              !ActionBgMapView_LookupMetatile(
+                  &map, (int)cell_x, (int)cell_y, &metatile) ||
+              metatile != kBubbleRows[row]) {
+            bubbles_valid = false;
+            break;
+          }
         }
+        if (!bubbles_valid) break;
       }
-      if (!fill_valid) continue;
+      if (!bubbles_valid) continue;
 
       const unsigned width = total_cells * kActionBgMetatilePixels;
+      const unsigned height = bubble_rows * kActionBgMetatilePixels;
       const uint32_t identity =
           ((uint32_t)(y / kActionBgMetatilePixels) << 16) |
           (uint32_t)(x / kActionBgMetatilePixels);
       const float half_width = (float)width * 0.5f;
+      const float half_height = (float)height * 0.5f;
       ActionEffectInstance effect = {
         .generation = 0x4C000000u ^ identity,
         .pulse_generation = 0x6C000000u ^ identity,
         .world_x = (int16_t)(x + width / 2u),
-        .world_y = (int16_t)(y + 8u),
+        .world_y = (int16_t)(
+            y + kActionBgMetatilePixels + height / 2u),
         .left_extent = (uint16_t)(width / 2u),
-        .top_extent = 8,
+        .top_extent = (uint16_t)(height / 2u),
         .right_extent = (uint16_t)(width / 2u),
-        .bottom_extent = 8,
+        .bottom_extent = (uint16_t)(height / 2u),
         .age_ticks = clock,
         .phase_ticks = clock,
         .pulse_ticks = clock,
@@ -1457,12 +1627,171 @@ static void CaptureAitosLavaPits(ActionSceneEffectFrame *dst,
         .projection_plane = kActionEffectProjectionPlane_Bg1,
         .geometry = {
           .kind = kActionEffectGeometry_Rect,
-          .data.rect = {-half_width, -8.0f, half_width, 8.0f},
+          .data.rect = {-half_width, -half_height,
+                        half_width, half_height},
         },
       };
-      SceneFrameAppend(dst, &effect);
+      SceneDecorationAppend(dst, &effect);
     }
   }
+}
+
+static bool AitosSplashStructureWidth(
+    const ActionBgMapView *map, unsigned x, unsigned y,
+    unsigned *total_cells) {
+  if (total_cells) *total_cells = 0;
+  if (!map || !total_cells) return false;
+  uint8_t tile = 0;
+  if (!ActionBgMapView_LookupMetatile(map, (int)x, (int)y, &tile) ||
+      tile != kAitosSplashTopLeft)
+    return false;
+  for (unsigned cells = 2; cells <= kAitosSplashMaxCells; cells++) {
+    const unsigned right_x = x + (cells - 1u) * kActionBgMetatilePixels;
+    if (right_x < x ||
+        !ActionBgMapView_LookupMetatile(
+            map, (int)right_x, (int)y, &tile))
+      return false;
+    if (tile == kAitosSplashTopMiddle) continue;
+    if (tile != kAitosSplashTopRight) return false;
+    static const uint8_t kLeft[] = {
+      kAitosSplashBodyLeft, kAitosSplashDripLeft,
+    };
+    static const uint8_t kMiddle[] = {
+      kAitosSplashBodyMiddle, kAitosSplashDripMiddle,
+    };
+    static const uint8_t kRight[] = {
+      kAitosSplashBodyRight, kAitosSplashDripRight,
+    };
+    for (unsigned row = 0; row < 2; row++) {
+      const unsigned row_y = y + (row + 1u) * kActionBgMetatilePixels;
+      for (unsigned cell = 0; cell < cells; cell++) {
+        const uint8_t expected = cell == 0 ? kLeft[row]
+            : cell + 1u == cells ? kRight[row] : kMiddle[row];
+        if (!ActionBgMapView_LookupMetatile(
+                map, (int)(x + cell * kActionBgMetatilePixels),
+                (int)row_y, &tile) || tile != expected)
+          return false;
+      }
+    }
+    *total_cells = cells;
+    return true;
+  }
+  return false;
+}
+
+static void CaptureAitosWater(ActionSceneEffectFrame *dst,
+                              const uint8_t *wram,
+                              size_t wram_size, uint16_t clock) {
+  if (!dst || !IsAitosWaterfallMap(wram, wram_size)) return;
+  ActionBgMapView map;
+  if (!ActionBgMapView_Init(
+          &map, wram, wram_size,
+          Read16(wram, wram_size, kActRaiserWram_Bg1Width),
+          Read16(wram, wram_size, kActRaiserWram_Bg1Height),
+          Read16(wram, wram_size, kActRaiserWram_BgMapPage)))
+    return;
+  const int camera_x = Read16(wram, wram_size, kActRaiserWram_Bg1CameraX);
+  const int camera_y = Read16(wram, wram_size, kActRaiserWram_Bg1CameraY);
+  SceneBgScanBounds bounds;
+  /* Cover the maximum wide side margin and Diorama vertical extension while
+   * keeping the immutable scene payload bounded to structures that can
+   * actually enter this presentation. */
+  if (!SceneBgScanBounds_InitWindow(
+          &bounds, &map, camera_x, camera_y, 128, 64, true))
+    return;
+
+  unsigned splash_count = 0;
+  for (unsigned y = bounds.y0; y < bounds.y1;
+       y += kActionBgMetatilePixels) {
+    for (unsigned x = bounds.x0; x < bounds.x1;
+         x += kActionBgMetatilePixels) {
+      unsigned cells = 0;
+      if (!AitosSplashStructureWidth(&map, x, y, &cells)) continue;
+      const unsigned width = cells * kActionBgMetatilePixels;
+      const float half_width = (float)width * 0.5f;
+      const uint32_t identity =
+          ((uint32_t)(y / kActionBgMetatilePixels) << 16) |
+          (uint32_t)(x / kActionBgMetatilePixels);
+      ActionEffectInstance effect = {
+        .generation = 0x57000000u ^ identity,
+        .pulse_generation = 0x77000000u ^ identity,
+        .world_x = (int16_t)(x + width / 2u),
+        .world_y = (int16_t)(y + 16u),
+        .left_extent = (uint16_t)(width / 2u),
+        .top_extent = 16,
+        .right_extent = (uint16_t)(width / 2u),
+        .bottom_extent = 16,
+        .age_ticks = clock,
+        .phase_ticks = clock,
+        .pulse_ticks = clock,
+        .kind = kActionEffect_AitosWaterSplash,
+        .phase = kActionEffectPhase_AitosWaterSplash,
+        .role = kActionEffectRole_Body,
+        .flags = kActionEffectFlag_Visible,
+        .render_layer = kActionEffectRenderLayer_WorldOverlay,
+        .projection_plane = kActionEffectProjectionPlane_Bg1,
+        .geometry = {
+          .kind = kActionEffectGeometry_Rect,
+          .data.rect = {-half_width, -16.0f, half_width, 16.0f},
+        },
+      };
+      if (SceneDecorationAppend(dst, &effect)) splash_count++;
+    }
+  }
+  if (!splash_count || dst->decoration_overflow) return;
+
+  /* BG2 uses the same decoded 512x512 map in the preceding dark cave, so the
+   * camera-local presence of an exact splash structure is the live art
+   * discriminator for the waterfall section. One broad BG2 record supplies
+   * a restrained flow veil without replacing the source pixels. */
+  const int bg2_camera_x =
+      Read16(wram, wram_size, kActRaiserWram_Bg2CameraX);
+  const int bg2_camera_y =
+      Read16(wram, wram_size, kActRaiserWram_Bg2CameraY);
+  const uint32_t map_identity =
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap);
+  ActionEffectInstance waterfall = {
+    .generation = 0x57540000u ^ map_identity,
+    .pulse_generation = 0x77540000u ^ map_identity,
+    .world_x = (int16_t)(bg2_camera_x + 128),
+    .world_y = (int16_t)(bg2_camera_y + 112),
+    .left_extent = 256,
+    .top_extent = 176,
+    .right_extent = 256,
+    .bottom_extent = 176,
+    .age_ticks = clock,
+    .phase_ticks = clock,
+    .pulse_ticks = clock,
+    .kind = kActionEffect_AitosWaterfall,
+    .phase = kActionEffectPhase_AitosWaterfallFlow,
+    .role = kActionEffectRole_Body,
+    .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg2,
+    .geometry = {
+      .kind = kActionEffectGeometry_Rect,
+      .data.rect = {-256.0f, -176.0f, 256.0f, 176.0f},
+    },
+  };
+  if (!SceneDecorationAppend(dst, &waterfall)) return;
+
+  /* `$04/$02` intentionally keeps BG2's vertical extension short: allowing
+   * more raw-wrap rows repeats water into non-water areas. A separate
+   * after-BG2 Diorama record puts foam and mist over the uncovered bottom
+   * band. It uses BG2's camera/shape but not its winner pixels; later BG1 and
+   * OBJ planes remain in front. */
+  ActionEffectInstance mist = waterfall;
+  mist.generation = 0x575D0000u ^ map_identity;
+  mist.pulse_generation = 0x775D0000u ^ map_identity;
+  mist.world_y = (int16_t)(bg2_camera_y + kActRaiserAuthenticHeight - 8);
+  mist.top_extent = 32;
+  mist.bottom_extent = 24;
+  mist.kind = kActionEffect_AitosWaterfallMist;
+  mist.phase = kActionEffectPhase_AitosWaterfallMist;
+  mist.render_layer = kActionEffectRenderLayer_Atmosphere;
+  mist.geometry.data.rect =
+      (ActionEffectLocalRect){-256.0f, -32.0f, 256.0f, 24.0f};
+  SceneDecorationAppend(dst, &mist);
 }
 
 static void PopulateSceneObjectEffect(ActionEffectInstance *effect,
@@ -1534,8 +1863,17 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
   }
   CaptureWallTorches(dst, wram, wram_size, observer->scene_clock);
   CaptureAitosLavaPits(dst, wram, wram_size, observer->scene_clock);
+  CaptureAitosWater(dst, wram, wram_size, observer->scene_clock);
+  if (dst->decoration_overflow) {
+    dst->decoration_count = 0;
+    dst->decoration_visible_count = 0;
+  }
   const bool marahna_effect_map = IsMarahnaEffectMap(wram, wram_size);
   const bool aitos_lava_map = IsAitosLavaMap(wram, wram_size);
+  const bool aitos_boss_map =
+      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
+          kActRaiserMapGroup_Aitos &&
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap) == kAitosBossMap;
   const bool boss_lightning_map =
       Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
           kActRaiserMapGroup_Bloodpool &&
@@ -1559,6 +1897,7 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
 
     uint8_t kind = kActionEffect_None;
     uint8_t phase = kActionEffectPhase_None;
+    bool aitos_boss_sword_beam = false;
     if (IsEnemyFireball(&object)) {
       kind = kActionEffect_EnemyFireball;
       phase = kActionEffectPhase_EnemyFireballFlight;
@@ -1579,7 +1918,15 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     } else if (aitos_lava_map && IsAitosLavaFireball(&object)) {
       kind = kActionEffect_AitosLavaFireball;
       phase = kActionEffectPhase_AitosLavaFireballFlight;
-    } else if (IsSwordBeam(wram, wram_size, &object)) {
+    } else if (aitos_lava_map && IsAitosMoltenRock(&object)) {
+      kind = kActionEffect_AitosMoltenRock;
+      phase = kActionEffectPhase_AitosMoltenRockFlight;
+    } else if (aitos_boss_map &&
+               IsAitosBossSwordBeam(wram, wram_size, &object)) {
+      kind = kActionEffect_SwordBeam;
+      phase = kActionEffectPhase_SwordBeamFlight;
+      aitos_boss_sword_beam = true;
+    } else if (IsPlayerSwordBeam(wram, wram_size, &object)) {
       kind = kActionEffect_SwordBeam;
       phase = kActionEffectPhase_SwordBeamFlight;
     } else if (IsLightningTrap(&object)) {
@@ -1608,22 +1955,32 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
           : (ActionEffectLocalRect){0.0f, 0.0f, 32.0f, 32.0f};
     }
     if (kind == kActionEffect_SwordBeam) {
-      /* These headers use signed 8-bit origins even though the action ABI
-       * publishes them as words. `$8D68` performs wrapping byte arithmetic:
-       * state $13's normal X=0/8 parts minus left=$E0 draw at +32..+48, not
-       * 0..16. The one-pixel OBJ Y bias is included here. Keep the two states
-       * and H-flipped choices explicit so presentation follows the exact OAM
-       * rectangles observed in run 20260810-184935. */
-      const bool flipped =
-          (object.flip_attributes & kActRaiserObjectFlip_Horizontal) != 0;
-      if (object.animation_state == kSwordBeamHorizontalState) {
-        effect.geometry.data.rect = flipped
-            ? (ActionEffectLocalRect){-48.0f, -33.0f, -32.0f, -1.0f}
-            : (ActionEffectLocalRect){32.0f, -33.0f, 48.0f, -1.0f};
+      if (aitos_boss_sword_beam) {
+        /* Both three-part boss crescents are authored in OBJ priority 2.
+         * `$8D68`'s one-pixel Y bias shifts their ordinary 24x24 headers up
+         * one pixel: captured OAM confirms both rectangles exactly. */
+        effect.obj_priority = 2;
+        effect.geometry.data.rect = object.animation_state == 0x0001
+            ? (ActionEffectLocalRect){-8.0f, -17.0f, 16.0f, 7.0f}
+            : (ActionEffectLocalRect){-8.0f, -9.0f, 16.0f, 15.0f};
       } else {
-        effect.geometry.data.rect = flipped
-            ? (ActionEffectLocalRect){-56.0f, -9.0f, -40.0f, 23.0f}
-            : (ActionEffectLocalRect){40.0f, -9.0f, 56.0f, 23.0f};
+        /* These headers use signed 8-bit origins even though the action ABI
+         * publishes them as words. `$8D68` performs wrapping byte arithmetic:
+         * state $13's normal X=0/8 parts minus left=$E0 draw at +32..+48, not
+         * 0..16. The one-pixel OBJ Y bias is included here. Keep the two states
+         * and H-flipped choices explicit so presentation follows the exact OAM
+         * rectangles observed in run 20260810-184935. */
+        const bool flipped =
+            (object.flip_attributes & kActRaiserObjectFlip_Horizontal) != 0;
+        if (object.animation_state == kSwordBeamHorizontalState) {
+          effect.geometry.data.rect = flipped
+              ? (ActionEffectLocalRect){-48.0f, -33.0f, -32.0f, -1.0f}
+              : (ActionEffectLocalRect){32.0f, -33.0f, 48.0f, -1.0f};
+        } else {
+          effect.geometry.data.rect = flipped
+              ? (ActionEffectLocalRect){-56.0f, -9.0f, -40.0f, 23.0f}
+              : (ActionEffectLocalRect){40.0f, -9.0f, 56.0f, 23.0f};
+        }
       }
     }
     /* Animation index advances inside one projectile/strike lifecycle. It is

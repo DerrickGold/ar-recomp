@@ -321,11 +321,17 @@ magic/effect replacements; there is no per-enemy sheet allocator to exhaust.
 ## 9. OAM / sprite pipeline (action)
 
 See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
-- `$00:8C98` (hle `ActRaiser_ObjectVisibilityScan`): shadow clear
+- `$00:8C98` (HLE `ActRaiser_ObjectVisibilityScanWide`): shadow clear
   (x=$80/y=$E0 parked), high-table cursor reset (`$9A=$0580`), `$00:923A`
   HUD sprites (fixed positions from `$06:A800`), object walk (`$06A0`
-  stride $40): skip $8000/$4C00, cull vs camera window (extents at
-  +`$0A/$0C/$0E/$10`), offscreen bit $0400 in +`$30`, draw gate $2000.
+  stride $40): skip $8000/$4C00, evaluate independent DRAW and ACTIVATION
+  windows (extents at +`$0A/$0C/$0E/$10`), write selected-activation bit
+  `$0400` in +`$30`, and respect draw-suppression bit `$2000`. DRAW uses fitted
+  `$22/$24`, live presentation margins, and the resolve-only OBJ apron.
+  ACTIVATION retains authentic vertical `$24`; horizontally it uses fitted
+  `$22` plus live margins normally, or a reconstructed native 256px camera
+  while player `$08B2` is `$97A6/$97C9/$97E4`. `$97E4` installs input-reading
+  `$9832`, restoring wide activation without changing drawing or presentation.
 - `$00:8D68`: sprite-def walk (7B defs, ptr obj+`$20`+5, bank obj+`$18`),
   y/x window tests biased by `$94/$96` (camera-16), writes `$0380` entries
   + packed high-table bits (bit0 = x bit 8 — true 16-bit screen x).
@@ -336,6 +342,17 @@ See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
   `NoSpriteLimits` is not yet forwarded.
 - Budget reality (user snapshots, 16:9): max 60/128 entries live, margin
   sprites present and correct — **no OAM pressure in act 1 even wide**.
+
+The arrival gate must reconstruct the native horizontal camera, not merely set
+margin widths to zero around the fitted one. `$02:B030` centres camera subject
+X at 128 and clamps it to `[0, world_width-256]`; before `$97A6` assigns player
+slot `$08A0` to subject pointer `$8A`, initialized player X `$08A2` supplies the
+entry anchor. At Fillmore's left edge fitted `$22=120` but arrival X `$0050`
+produces native camera 0. The failed first gate therefore chose `[120,376)`
+instead of `[0,256)`: visuals remained wide, but `$0400` selected the wrong
+gameplay/script objects and the intro fade regressed. Corrected replay
+`runs/20260812-122927` reaches `$9832` at gf1185 with no second music
+stop/restart. See bug-ledger.md §58.
 
 ### 9a. Host action lighting and particles
 
@@ -364,7 +381,8 @@ accents, including Bloodpool's map-$08 boss attack resolved from the 30-snapshot
 run `20260810-180202`, a complete decode of its `$7E:5000` animation bank, the
 global player sword beam measured in run `20260810-175403`, and Marahna's torch,
 orb/split fireball, linked-lightning, and boss-lightning families plus Aitos lava
-pits/fireballs measured in runs `20260811-151353` and `20260811-221433`.
+pits/fireballs measured in runs `20260811-151353` and `20260811-221433`. Run
+`20260812-000613` additionally maps the Aitos boss's two-child sword volley.
 BG wall torches are not actors: the observer uses the same validated
 `ActionBgMapView` contract as the full-world provider and matches the exact BG1
 metatile pair `$47` over `$4F` throughout map group `$02`. Marahna maps
@@ -408,15 +426,28 @@ direction-aware electrical wake. Its exact OBJ-local geometry uses the same
 production projection path in flat and Diorama modes.
 
 Aitos map `$04/$01` uses a separate camera-local BG1 semantic: `$DC`, one to
-six `$DD`, then `$DE`, over an equally wide `$DF` row. This yields the exact
-64px/128px lava-surface rectangle without looking at raster colours. Its six
+six `$DD`, then `$DE`, over an equally wide `$DF` row and the following `$E7`
+bubbly row when it exists. This yields the exact 64px/128px lava-surface
+rectangle without looking at raster colours. Its six
 cyclic projectile slots retain source/resume `$CF9E/$CFCD`, exact artwork
 `$2A/$4D21` or `$2B/$4D2D`, and 8px extents. Handler/state pairs
 `$CFE3/$22`, `$8661/$23`, and `$CFFE/$24` cover rise, reset/wait, and return;
 bounded position continuity resets the particle generation when a persistent
 slot jumps back to its launch point.
 
-The sword-beam rule is not map-specific. It requires handler `$9D1C`, animation
+Run `20260812-000613` adds two deliberately separate Aitos styles. Volcano
+rocks are `$CEEC/$CF16` actors with exact `$8661/$27`, `$2B/$4D2D`, 8px extents,
+signed X/flip and `Y=-1..+1`; they receive a compact molten crust/glow and
+non-directional surface sparks, not the `$CF9E` flame wake. Waterfall platforms
+in maps `$04/$02-$03` match exact BG1 rows `$36/$5E*/$81`,
+`$4E/$F4*/$4F`, `$F6/$FC*/$FE`. Their presence inside the bounded camera window
+admits both BG1 drip/spray accents and one BG2 flow veil, preventing the shared
+map `$04/$02` cave section from receiving water. `DioramaProjection` publishes
+an independent BG2-low plane and interpolated UV window, while the production
+adapter selects BG2 camera `$26/$28`; flat and Diorama modes therefore share
+one portable geometry style without a platform shader dependency.
+
+The player sword-beam rule is not map-specific. It requires handler `$9D1C`, animation
 `$06:8000`, attacker flag `$0001`, backlink `$08A0`, a source descriptor shared
 with the active player, and exact state/visual/composition `$13/$30/$99E8` or
 `$14/$31/$9A17`. Its raw collision header includes signed byte origins, so
@@ -425,34 +456,80 @@ those words into the generic unsigned-extent path. Run `20260810-184935`
 provides the decisive state-`$13` proof: hot point `(112,201)` versus OAM bounds
 `(144,168)..(160,200)`, yielding local `(32,-33)..(48,-1)`.
 
-`DrawActionEffects` runs after the authentic action image and before flat HUD,
-HD-replacement, inspector, and settings overlays. Flat mode uses the resolved
-physical viewport. Diorama mode receives a `DioramaProjection` value from the
-same composite call that drew the BG and OBJ planes: camera matrix, capture
-mesh dimensions, BG1/OBJ interpolated UV window, output dimensions, and exact
-authored depth/rake/bow are not re-derived from live state. Scene metadata also
-selects its authentic plane: torches and lava surfaces use BG1-low, while
-fireballs and lightning use OBJ priority 0. The projection value owns
+The Aitos Act-2 boss uses a separate authored route into that same presentation
+style. In map `$04/$03`, source `$D646` creates an inactive `$D793` volley
+controller linked to the live dragon root, then two `$8661/$A65D` children.
+Their complete tuples are `$01/$21/$56D8/(-3,+1)` and
+`$02/$20/$56BE/(-3,-1)`, with distinct local counters and asymmetric extents.
+Snapshot `snap_05_gf21056` proves both 24×24 rectangles and priority-2 OAM.
+Capture consequently publishes their real diagonal headings and OBJ band, but
+reuses the portable cool halo, tapered wake, and materializing-star renderer.
+
+Dynamic scene actors and BG1-local decorations run after the authentic action
+image and before flat HUD, HD-replacement, inspector, and settings overlays.
+Flat mode uses the resolved physical viewport. Diorama mode receives a
+`DioramaProjection` value from the same composite call that drew the BG and OBJ
+planes: camera matrix, capture mesh dimensions, output dimensions, and one
+paired UV-window/shape record per eligible BG1/BG2/OBJ plane are not re-derived
+from live state. BG projections use the exact drawing predicate: a plane hidden
+by its layer toggle, missing a current texture upload or pixel publication,
+flattened as BG3 HUD, or displaced by skybox-only mode is neither drawn nor
+published as projectable. An OBJ-attached world overlay is itself current
+presentation content, so its exact priority bit may retain a visible,
+texture-backed OBJ transform when the isolated hardware band has no final
+winning pixels. The mask comes only from immutable captured effect frames and
+is filtered through immutable requested/content/success plane masks, so an
+upload failure still fails closed and the exception cannot make BG1/BG2
+projectable. Scene metadata selects its
+authentic plane: torches, lava surfaces, and platform water use BG1-low;
+ordinary fireballs/lightning and the player beam use OBJ priority 0, while the
+Aitos boss crescents retain authored OBJ priority 2. The projection value owns
 `texture_x_origin`, the hidden
 64-column OBJ resolve apron that precedes caller-visible capture coordinates.
 Keeping that origin in inverse projection prevents overlays from sliding
-horizontally on raked planes without changing the flat path's contract. The
-explicit render policy is a world overlay above the composed world and below
-HUD/HD UI.
+horizontally on raked planes without changing the flat path's contract.
+
+The camera-wide waterfall is a BG2-stage decoration, not a late world overlay.
+Diorama invokes a bounded plane-effect callback immediately after the drawable
+BG2-low mesh, before later BG1/OBJ planes. Flat presentation captures a current
+black/white mask from the PPU's complete main-screen priority resolve, multiplies
+the waterfall target by pixels where BG2 is the final winner, then composites
+the premultiplied result. Both paths therefore keep platforms, enemies, and the
+player in front. They use standard SDL additive/multiply blend modes and fail
+closed if the backend substitutes an unsupported mode; no backend shader is
+required. One-time success logs now report the first Diorama BG2-local submit
+and the first flat winner-masked composite independently.
+
+The paired bottom atmosphere solves a different problem and therefore has a
+different painter contract. `$04/$02` deliberately caps raw-wrap BG2 at 24px
+of vertical extension so waterfall tiles cannot bleed into authored non-water
+rows. Three soft mist banks and sixteen rising foam motes cover the final 32
+authentic rows and first 24 lower-extension rows. They retain BG2 camera and rake/bow projection and submit unmasked from the same after-BG2 Diorama callback: absent source pixels are precisely the black gap this pass is intended to conceal. Later BG1/OBJ planes and the HUD remain in front. Flat mode has no vertical extension gap and therefore keeps only its winner-masked veil.
 
 `action_effect_render.c` converts captured kind/phase/geometry into bounded,
 renderer-independent spell and scene batches; unknown values fail closed.
 `action_effect_projection.c` is the shared production/test adapter for camera
 subtraction, widescreen/vertical margins, flat viewport placement, and
-compositor-published BG1/OBJ Diorama projection. A
+compositor-published BG1/BG2/OBJ Diorama projection. A
 small capacity-aware geometry writer appends directly to the caller's final
 arrays, avoiding a spell-sized scene scratch copy and its former stack peak.
+The immutable scene frame also separates its 16 dynamic-actor records from 16
+camera-local decoration records. The measured Aitos window can consequently
+publish all 14 platform splashes plus one BG2 veil and one paired bottom-mist
+record without consuming the complete actor budget; either list fails closed
+independently, and presentation
+reuses one scene scratch batch while submitting actor and decoration passes.
 Torch light/particles sample the shared authentic game clock at 2× visual rate
 to follow the fast BG flame animation while all torch instances remain in
-phase; Aitos BG lava uses the same accelerated presentation clock. Its light
-is an elongated two-tier orange surface spill, with twelve deterministic
-ember births distributed across the complete decoded rim. Bloodpool, Marahna,
-and Aitos fireball sparks trail opposite measured velocity.
+phase; Aitos BG lava and platform spray use the same accelerated presentation
+clock. Lava light spans the complete decoded bubbly volume, while its twelve
+deterministic embers originate in a narrow band one quarter of the captured
+height above its geometric midpoint, matching the isometric surface instead
+of appearing from the lower volume. The waterfall veil instead uses 48 slow
+deterministic streaks to soften the short source cycle; its bottom atmosphere
+uses the three mist banks and sixteen foam motes described above. Molten rocks
+keep compact tumbling sparks rather than a flame tail.
+Bloodpool, Marahna, and Aitos fireball sparks trail opposite measured velocity.
 Marahna's horizontal/vertical connector rectangles rotate the same cyan/violet
 glow and drive two projected ten-segment ribbons through their exact 80px
 chords; crawling sparks and endpoint fans share the authentic lifecycle clock.
@@ -472,10 +549,11 @@ connective haze layers, and forty-eight crossed-diamond star glints arranged as
 sixteen fixed cross-sections with top/centre/bottom lanes from 4px to 88px
 behind the crescent. Scrambled 18-tick phases independently fade and scale each
 glint into and out of existence without changing its local centre. The path
-mirrors from measured velocity, and its local basis is projected through OBJ
-priority 0, preserving the same form on a Diorama-raked plane. The mapped
-player lifecycle permits one beam, so the batch reserves one explicit expanded
-stream and rejects impossible duplicates instead of inflating all scene slots.
+follows measured velocity, and its local basis is projected through the
+authored OBJ band—priority 0 for the player or priority 2 for the Aitos boss—
+preserving the same form on a Diorama-raked plane. One player beam can coexist
+with the boss's two crescent children, so the batch reserves the measured
+three-stream peak and rejects a fourth instead of inflating all scene slots.
 Integer-hash particles and integer triangle pulses make repeat builds
 deterministic. `present.c` supplies immutable projection inputs and submits
 through the same verified SDL additive blend plus untextured batched geometry
@@ -656,7 +734,7 @@ testing confirms the arrow now traverses both margins correctly.
 | Routine | Status |
 |---|---|
 | `$00:8418` / `$02:A85E` vblank wait | hle (host yield) |
-| `$00:8C98` cull + `$00:8D68` builder | `widescreen-sprites-v2`: regenerated and direct-play validated Stage C/D1; wide drawing with authentic activation |
+| `$00:8C98` cull + `$00:8D68` builder | `widescreen-sprites-v2`: regenerated and direct-play validated Stage C/D1/D2; independent wide drawing and `$0400` activation, with only extended horizontal activation held to the reconstructed native window during `$97A6/$97C9/$97E4` arrival |
 | `$02:B158` col-strip builder | original recompiled path on main; validated BG refresh separately reuses `$B825` transactionally for margin-only VRAM writes |
 | `$02:B1AF` row-strip builder | original recompiled path on main; experimental hle port is not used |
 | `$02:BED3/$B825/$B8A0/$B90D/$B95A`, drain chain, OAM DMA, camera `$B091` | recompiled |
@@ -790,8 +868,11 @@ Facts the next design must satisfy (all trace/disasm-proven above):
    coupled replacement of `$8C98/$8D68`, including an inaccurate normal-exit
    machine-state model, not from the background decoder. Stage D2 widens
    `$0400`-gated activation separately and is directly validated in Fillmore;
-   `AR_WS_MARGIN_ACTIVATION=0` restores authentic activation. Regions/effects
-   still need testing with hardware scanline limits enabled and lifted.
+   `AR_WS_MARGIN_ACTIVATION=0` restores native-width activation. The automatic
+   action-entry gate uses that same native horizontal window until `$97E4`
+   installs input-reading handler `$9832`; drawing, camera presentation and BG
+   extension remain wide throughout. Regions/effects still need testing with
+   hardware scanline limits enabled and lifted.
 8. **HUD (BG3 + selected-magic OBJ)**: the 32-tile-wide compose in `$7F:B000`
    is streamed per frame. Widescreen-full now promotes its status band into a
    transparent host surface, with action/simulation-specific anchors and a
@@ -889,7 +970,7 @@ bundled runtime's widescreen/PPU interfaces:
   layouts measured in `runs/20260808-214848`). The host therefore scans the
   complete OAM table from slot 0 for the signature rather than imposing a
   minimum slot or hardcoding an index.
-- **That icon has two OAM shapes, one per spell (corrected 2026-08-06).** The
+- **That icon has two OAM shapes, selected by spell (corrected 2026-08-06).** The
   ROM draws the same 16x16 framed icon at the same fixed position (x `$94`,
   y `$0B`, attr `$39`) two different ways, measured one snapshot per spell in
   `runs/20260806-232552`: **Magical Fire** spends FOUR 8x8 sprites (tiles
@@ -904,6 +985,19 @@ bundled runtime's widescreen/PPU interfaces:
   recognised, so the other three spells were never promoted and drew at their
   authentic centre-screen X while the rest of the HUD moved — ledger §38.
   `AR_HUDICON=1` reports the scan outcome (slot and count, misses included).
+- **The game-over return adds a raster-timing constraint (fixed 2026-08-12).**
+  `runs/20260812-122258/snapshots/snap_02_gf5705` contains the valid Magical
+  Fire signature in OAM slots 6-9 (`$67/$67/$77/$77`) and the correct anchored
+  footprint, but the promoted result is a black square. The Diorama split had
+  rasterized the complete icon before scanout; during this transition that
+  endpoint still contains the previous all-black tile/palette state, while the
+  mid-picture IRQ restores the visible state before icon rows 11-26. The split
+  now has three phases: `ActRaiser_DioramaHudObjPrepare` resolves the stable OAM
+  footprint before scanout, `…CaptureLine` retains each displayed icon row
+  immediately after `ppu_runLine` and before HDMA/IRQ advances, and `…Finish`
+  publishes the completed flat-HUD raster after scanout. This changes only the
+  host extraction timing; OAM, VRAM, CGRAM, and emulated game state are not
+  rewritten.
 - `src/main.c` binds generic BG3/OBJ surfaces, then uploads the game and those
   two captured surfaces separately. It
   renders the game with the normal logical-size/PAR transform, then composites
