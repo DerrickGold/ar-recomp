@@ -23,6 +23,11 @@ typedef enum ActionEffectKind {
   kActionEffect_LightningTrap,
   kActionEffect_BloodpoolBossLightning,
   kActionEffect_SwordBeam,
+  kActionEffect_MarahnaFireball,
+  kActionEffect_MarahnaLightningLink,
+  kActionEffect_MarahnaBossLightning,
+  kActionEffect_AitosLavaPit,
+  kActionEffect_AitosLavaFireball,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -60,6 +65,16 @@ typedef enum ActionEffectPhase {
   kActionEffectPhase_BossLightningStrike,
   kActionEffectPhase_BossLightningImpact,
   kActionEffectPhase_SwordBeamFlight,
+  kActionEffectPhase_MarahnaFireballOrb,
+  kActionEffectPhase_MarahnaFireballSplit,
+  kActionEffectPhase_MarahnaSnakeFireballShot,
+  kActionEffectPhase_MarahnaLightningActive,
+  kActionEffectPhase_MarahnaBossLightningCharge,
+  kActionEffectPhase_MarahnaBossLightningOrb,
+  kActionEffectPhase_MarahnaBossLightningBolt,
+  kActionEffectPhase_MarahnaBossLightningGroundCharge,
+  kActionEffectPhase_AitosLavaPit,
+  kActionEffectPhase_AitosLavaFireballFlight,
   kActionEffectPhase_Count,
 } ActionEffectPhase;
 
@@ -227,6 +242,12 @@ typedef struct ActionEffectObserverTrack {
 typedef struct ActionEffectObserver {
   uint32_t next_generation;
   uint32_t next_pulse_generation;
+  /* Map-backed emitters have no actor slot from which to derive a lifecycle
+   * clock. Seed this from the authentic game frame on action entry, then
+   * advance it only by gameplay ticks so native pause cannot animate torches
+   * or lava while their source BG is frozen. */
+  uint16_t scene_clock;
+  uint8_t scene_clock_valid;
   ActionEffectObserverTrack tracks[kActionEffectObserverTrackCount];
   ActionEffectObserverTrack
       scene_tracks[kActionSceneEffectObserverTrackCount];
@@ -234,17 +255,18 @@ typedef struct ActionEffectObserver {
 
 void ActionEffectObserver_Reset(ActionEffectObserver *observer);
 
-/* elapsed_ticks is the producer's clamped emulation-tick delta. Passing zero
- * makes a paused/re-present capture idempotent; particle clocks cannot advance
- * merely because the host redraws a frozen game frame. */
+/* elapsed_ticks is the producer's clamped action-gameplay-tick delta. Passing
+ * zero makes both native pause and host re-present captures idempotent;
+ * particle clocks cannot advance merely because an emulated frame ran. */
 void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
                                 ActionEffectFrame *dst,
                                 const uint8_t *wram, size_t wram_size,
                                 unsigned elapsed_ticks);
 
 /* Captures exact, measured scene identities used by the enhanced action pass:
- * Bloodpool's BG1 torch metatile pair, the gargoyle fireball actor family,
- * the vertical lightning-trap actor family, the map-$08 boss lightning
+ * Bloodpool/Marahna BG1 torch and Aitos lava-pit signatures, the measured
+ * enemy projectile families, the vertical trap, linked Marahna lightning and
+ * Marahna boss-lightning families, the Bloodpool map-$08 boss lightning
  * sequence, and the global player sword beam. Unknown objects are ignored;
  * presentation never guesses from pixels or palette colours. */
 void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,

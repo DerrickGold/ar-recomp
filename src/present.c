@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "action/action_bg_tuner.h"
+#include "action/action_effect_projection.h"
 #include "action/action_obj_apron.h"
 #include "present.h"
 #include "action/action_effect_render.h"
@@ -836,55 +837,9 @@ bool SubmitEffectBatch(EffectBatch *batch) {
 
 /* ── Action-stage presentation effects ────────────────────────────────── */
 
-typedef struct ActionEffectProjectionContext {
-  const FrameSlot *slot;
-  const DioramaProjection *diorama_projection;
-  SDL_Rect viewport;
-} ActionEffectProjectionContext;
-
 _Static_assert(kActionEffectObjPriorityCount ==
                    kDioramaObjectPriorityCount,
                "action effects and diorama must agree on OBJ bands");
-
-static bool ProjectActionEffectPoint(
-    void *userdata, const ActionEffectInstance *effect,
-    float local_x, float local_y, SDL_FPoint *point) {
-  const ActionEffectProjectionContext *context = userdata;
-  const FrameSlot *slot = context ? context->slot : NULL;
-  if (!slot || !effect || !point || slot->visible_width <= 0 ||
-      slot->snes_height <= 0 || context->viewport.w <= 0 ||
-      context->viewport.h <= 0)
-    return false;
-
-  int screen_x = (int16_t)(uint16_t)(
-      (uint16_t)effect->world_x - (uint16_t)slot->bg1_camera_x);
-  int screen_y = (int16_t)(uint16_t)(
-      (uint16_t)effect->world_y - (uint16_t)slot->bg1_camera_y);
-  float capture_x = (float)slot->ws_extra + screen_x + local_x;
-  float capture_y = (float)screen_y + local_y;
-
-  if (context->diorama_projection) {
-    /* +ws_extra_top for the same reason capture_x carries +ws_extra: the
-     * diorama samples TEXTURE space, whose row 0 is screen y = -ws_extra_top.
-     * The flat path below keeps the authentic screen y, and never sees a
-     * non-zero vertical margin anyway. */
-    const float texture_y = capture_y + (float)slot->ws_extra_top;
-    if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
-      return Diorama_ProjectCapturedBg1Point(
-          context->diorama_projection, capture_x, texture_y,
-          point, NULL, NULL);
-    return Diorama_ProjectCapturedPoint(
-        context->diorama_projection, capture_x, texture_y,
-        effect->obj_priority, point, NULL, NULL);
-  }
-
-  point->x = context->viewport.x +
-      (capture_x - (float)slot->visible_x0) * context->viewport.w /
-          (float)slot->visible_width;
-  point->y = context->viewport.y + capture_y * context->viewport.h /
-      (float)slot->snes_height;
-  return true;
-}
 
 static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
                               const DioramaProjection *diorama_projection) {
@@ -895,7 +850,13 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
     return;
 
   ActionEffectProjectionContext projection = {
-    .slot = slot,
+    .bg1_camera_x = slot->bg1_camera_x,
+    .bg1_camera_y = slot->bg1_camera_y,
+    .ws_extra = slot->ws_extra,
+    .ws_extra_top = slot->ws_extra_top,
+    .visible_x0 = slot->visible_x0,
+    .visible_width = slot->visible_width,
+    .snes_height = slot->snes_height,
     .diorama_projection = diorama_projection,
     .viewport = viewport,
   };
@@ -903,11 +864,11 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
   ActionSceneEffectRenderBatch scene_geometry;
   if (!ActionEffectRender_Build(
           &slot->action_effects, slot->action_effect_lighting,
-          slot->action_effect_particles, ProjectActionEffectPoint,
+          slot->action_effect_particles, ActionEffectProjection_ProjectPoint,
           &projection, &geometry) ||
       !ActionSceneEffectRender_Build(
           &slot->action_scene_effects, slot->action_effect_lighting,
-          slot->action_effect_particles, ProjectActionEffectPoint,
+          slot->action_effect_particles, ActionEffectProjection_ProjectPoint,
           &projection, &scene_geometry) ||
       (!geometry.index_count && !scene_geometry.index_count))
     return;

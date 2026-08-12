@@ -1,0 +1,38 @@
+#include "action_effect_projection.h"
+
+bool ActionEffectProjection_ProjectPoint(
+    void *userdata, const ActionEffectInstance *effect,
+    float local_x, float local_y, SDL_FPoint *point) {
+  const ActionEffectProjectionContext *context = userdata;
+  if (!context || !effect || !point || context->visible_width <= 0 ||
+      context->snes_height <= 0 || context->viewport.w <= 0 ||
+      context->viewport.h <= 0)
+    return false;
+
+  const int screen_x = (int16_t)(uint16_t)(
+      (uint16_t)effect->world_x - (uint16_t)context->bg1_camera_x);
+  const int screen_y = (int16_t)(uint16_t)(
+      (uint16_t)effect->world_y - (uint16_t)context->bg1_camera_y);
+  const float capture_x = (float)context->ws_extra + screen_x + local_x;
+  const float capture_y = (float)screen_y + local_y;
+
+  if (context->diorama_projection) {
+    /* Texture row zero represents screen y=-ws_extra_top. Flat mode keeps
+     * authentic screen Y and therefore intentionally ignores this margin. */
+    const float texture_y = capture_y + (float)context->ws_extra_top;
+    if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
+      return Diorama_ProjectCapturedBg1Point(
+          context->diorama_projection, capture_x, texture_y,
+          point, NULL, NULL);
+    return Diorama_ProjectCapturedPoint(
+        context->diorama_projection, capture_x, texture_y,
+        effect->obj_priority, point, NULL, NULL);
+  }
+
+  point->x = context->viewport.x +
+      (capture_x - (float)context->visible_x0) * context->viewport.w /
+          (float)context->visible_width;
+  point->y = context->viewport.y +
+      capture_y * context->viewport.h / (float)context->snes_height;
+  return true;
+}

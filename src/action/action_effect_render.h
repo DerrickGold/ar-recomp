@@ -64,6 +64,31 @@ enum {
   kActionSceneEffectLightningIndicesPerInstance =
       kActionSceneEffectLightningSegments * 6 *
       kActionSceneEffectLightningLayers,
+  /* Marahna's connector emitter authors at most five simultaneous links.
+   * Each $4AA1/$4B82 composition contains ten tiles along the horizontal or
+   * vertical chord, so the enhancement reserves two ten-segment ribbons per
+   * link and rejects impossible sixth-link input. */
+  kActionSceneEffectMaxMarahnaLightningLinks = 5,
+  kActionSceneEffectMarahnaLightningSegments = 10,
+  kActionSceneEffectMarahnaLightningLayers = 2,
+  kActionSceneEffectMarahnaLightningVerticesPerInstance =
+      kActionSceneEffectMarahnaLightningSegments * 4 *
+      kActionSceneEffectMarahnaLightningLayers,
+  kActionSceneEffectMarahnaLightningIndicesPerInstance =
+      kActionSceneEffectMarahnaLightningSegments * 6 *
+      kActionSceneEffectMarahnaLightningLayers,
+  /* A charge pose can overlap its one launched diagonal bolt. Only the
+   * diagonal stage adds filament geometry beyond the ordinary two-glow/
+   * particle budget; its post-impact ground charge uses that ordinary budget. */
+  kActionSceneEffectMaxMarahnaBossLightningBolts = 1,
+  kActionSceneEffectMarahnaBossLightningSegments = 8,
+  kActionSceneEffectMarahnaBossLightningLayers = 2,
+  kActionSceneEffectMarahnaBossLightningVerticesPerInstance =
+      kActionSceneEffectMarahnaBossLightningSegments * 4 *
+      kActionSceneEffectMarahnaBossLightningLayers,
+  kActionSceneEffectMarahnaBossLightningIndicesPerInstance =
+      kActionSceneEffectMarahnaBossLightningSegments * 6 *
+      kActionSceneEffectMarahnaBossLightningLayers,
   /* The player lifecycle admits one sword beam. Its magical path uses fixed
    * crossed stars (8 vertices/12 indices) plus two wake quads. Reserve
    * only the amount above an ordinary scene actor's 12-quad particle budget;
@@ -89,6 +114,10 @@ enum {
       kActionSceneEffectMaxParticles * 4 +
       kActionSceneEffectMaxLightningFilaments *
           kActionSceneEffectLightningVerticesPerInstance +
+      kActionSceneEffectMaxMarahnaLightningLinks *
+          kActionSceneEffectMarahnaLightningVerticesPerInstance +
+      kActionSceneEffectMaxMarahnaBossLightningBolts *
+          kActionSceneEffectMarahnaBossLightningVerticesPerInstance +
       kActionSceneEffectMaxSwordStreams *
           kActionSceneEffectSwordExtraVertices,
   kActionSceneEffectRenderMaxIndices =
@@ -96,6 +125,10 @@ enum {
       kActionSceneEffectMaxParticles * 6 +
       kActionSceneEffectMaxLightningFilaments *
           kActionSceneEffectLightningIndicesPerInstance +
+      kActionSceneEffectMaxMarahnaLightningLinks *
+          kActionSceneEffectMarahnaLightningIndicesPerInstance +
+      kActionSceneEffectMaxMarahnaBossLightningBolts *
+          kActionSceneEffectMarahnaBossLightningIndicesPerInstance +
       kActionSceneEffectMaxSwordStreams *
           kActionSceneEffectSwordExtraIndices,
 };

@@ -19,6 +19,7 @@
  * sprite/projectile predicates authentic. */
 
 #include "cpu_state.h"
+#include "action/action_effect_clock.h"
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
@@ -583,6 +584,10 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
     cpu->Y &= 0x00FF;
   }
   cpu->S = (uint16)(cpu->S + 2);          /* RTS */
+  /* Publish only after the HUD and every admitted object builder completed.
+   * Either nested HLE can return abnormally above; such an aborted scan did
+   * not produce the gameplay/OAM frame whose effect clocks this serial owns. */
+  ActionEffectGameplayClock_CompletePass();
   return RECOMP_RETURN_NORMAL;
 }
 

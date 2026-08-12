@@ -17,11 +17,13 @@
 #include "sim/sim_render_metadata.h"
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_navigation_capture.h"
+#include "action/action_effect_clock.h"
 #include "action/action_effects.h"
 #include "action/action_bg_tuner.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "common_rtl.h"      /* g_ram, g_ppu */
+#include "frame_timing.h"
 #include "snes/ppu.h"        /* PPU_mode, PpuOverlay* */
 
 /* main.c-owned globals with no header declaration, read here. */
@@ -60,21 +62,20 @@ extern bool g_diorama_frame_active;
 static float g_diorama_velx_avg = 4.0f;
 static float g_diorama_vely_avg = 4.0f;
 
-/* Captures are per PRESENTED frame, not per emulated tick: gameplay batches
- * catch-up ticks into one capture below 60Hz present rates (Frame limit,
- * <60Hz panels), and the paused/menu loop re-captures frozen WRAM at panel
- * rate with zero ticks elapsing. All reactive-camera statistics therefore
- * advance by TICKS, not by call: FrameSlot_Capture measures how many
- * emulated ticks elapsed since the last capture (snes_frame_counter) and
- * the EMA applies once per tick — so kEmaAlpha's time constant is anchored
- * to the fixed 60.0988Hz tick rate, identical on every display and limit
- * setting, and a session parked in the settings menu cannot recalibrate the
- * averages against a frozen pause velocity. */
-static int g_capture_ticks;   /* ticks since previous capture; 0 while paused */
+/* Captures are per PRESENTED frame, not per emulated tick: gameplay can batch
+ * catch-up ticks into one capture below 60Hz present rates. Host pause/menu
+ * redraws do not run an emulated tick and therefore produce a zero delta;
+ * ActRaiser's native pause is different—it continues running emulated vblanks
+ * and is intentionally filtered only by the action-effect gameplay clock.
+ * Reactive-camera statistics follow this emulator-frame delta, not capture
+ * call count, so their EMA remains anchored to the fixed 60.0988Hz rate. */
+static int g_emulated_capture_ticks;
 static ActionEffectObserver s_action_effect_observer;
+static ActionEffectTickClock s_action_effect_tick_clock;
 
 void FrameSlot_ResetActionEffects(void) {
   ActionEffectObserver_Reset(&s_action_effect_observer);
+  ActionEffectTickClock_Reset(&s_action_effect_tick_clock);
 }
 
 static float NormalizeReactiveVelocity(int16_t v, float *avg) {
@@ -82,7 +83,7 @@ static float NormalizeReactiveVelocity(int16_t v, float *avg) {
   static const float kEmaAlpha = 0.02f;      /* ~0.8s time constant, per-tick */
   static const float kNormMultiple = 3.0f;   /* "full lean" = 3x recent avg */
   float av = fabsf((float)v);
-  for (int t = 0; t < g_capture_ticks; t++)
+  for (int t = 0; t < g_emulated_capture_ticks; t++)
     *avg += (av - *avg) * kEmaAlpha;
   float ref = *avg * kNormMultiple;
   if (ref < kFloor) ref = kFloor;
@@ -323,21 +324,22 @@ void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim) {
 void FrameSlot_Capture(FrameSlot *dst) {
   memset(dst, 0, sizeof(*dst));
 
-  /* Ticks elapsed since the previous capture — the advancement unit for the
-   * reactive-camera statistics below (see g_capture_ticks). Clamped: a
-   * savestate load or long stall must not fire a giant catch-up burst. 0
-   * while paused (frozen WRAM re-captures must not move averages or edge
-   * state). First capture seeds without advancing. */
+  /* Emulated ticks since the previous capture—the advancement unit for the
+   * reactive-camera statistics below. Clamp stalls and discontinuities to the
+   * shared presentation-observer limit. Host-paused redraws produce zero;
+   * native in-game pause still produces emulated ticks. The first produced
+   * frame carries one tick because it has no prior presentation pair. */
   { extern int snes_frame_counter;
-    static int last_tick = -1;
-    if (last_tick < 0) g_capture_ticks = 1;
+    static int last_emulated_tick = -1;
+    if (last_emulated_tick < 0) g_emulated_capture_ticks = 1;
     else {
-      int elapsed = snes_frame_counter - last_tick;
+      int elapsed = snes_frame_counter - last_emulated_tick;
       if (elapsed < 0) elapsed = 1;           /* counter reset (reload) */
-      if (elapsed > 8) elapsed = 8;           /* stall/settings-menu clamp */
-      g_capture_ticks = elapsed;
+      if (elapsed > kFrameTimingMaximumElapsedTicks)
+        elapsed = kFrameTimingMaximumElapsedTicks;
+      g_emulated_capture_ticks = elapsed;
     }
-    last_tick = snes_frame_counter;
+    last_emulated_tick = snes_frame_counter;
   }
   /* R17/C3: publish it. Present-time interpolation needs the TRUE period of
    * the prev->curr pair, not an assumed single tick: the main loop's drain
@@ -346,14 +348,19 @@ void FrameSlot_Capture(FrameSlot *dst) {
    * camera motion. Dividing the sub-tick phase by this is what keeps
    * extrapolation from overshooting by that factor. Same clamped value the
    * reactive-camera statistics above use. */
-  dst->capture_ticks = (uint8_t)g_capture_ticks;
+  dst->capture_ticks = (uint8_t)g_emulated_capture_ticks;
 
+  /* $00:8C98 publishes only completed gameplay/OAM passes and is skipped by
+   * native pause/freeze. Capture through the shared adapter so production and
+   * its regression consume the identical publisher/read/delta chain. */
+  const unsigned action_effect_ticks =
+      ActionEffectTickClock_Capture(&s_action_effect_tick_clock);
   ActionEffects_CaptureFrame(&s_action_effect_observer, &dst->action_effects,
                              g_ram,
-                             kActRaiserWramSize, g_capture_ticks);
+                             kActRaiserWramSize, action_effect_ticks);
   ActionSceneEffects_CaptureFrame(&s_action_effect_observer,
                                   &dst->action_scene_effects, g_ram,
-                                  kActRaiserWramSize, g_capture_ticks);
+                                  kActRaiserWramSize, action_effect_ticks);
   dst->action_effect_lighting = g_settings.action_effect_lighting;
   dst->action_effect_particles = g_settings.action_effect_particles;
   /* Capture-side twin of present.c's "[action-fx] first spell geometry

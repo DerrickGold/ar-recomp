@@ -248,6 +248,7 @@ static void RetireAll(ActionEffectObserver *observer) {
 static void RetireSceneAll(ActionEffectObserver *observer) {
   if (!observer) return;
   memset(observer->scene_tracks, 0, sizeof(observer->scene_tracks));
+  observer->scene_clock_valid = 0;
 }
 
 static bool IsActionMap(const uint8_t *wram, size_t wram_size) {
@@ -470,17 +471,23 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
                                      unsigned elapsed_ticks,
                                      ActionEffectInstance *effect) {
   if (!observer || !track || !object || !effect) return;
-  /* Resume/source are stable for the projectile and trap families. Fireball's
-   * handler is stable too and strengthens its identity; trap lightning omits
-   * it because one live bolt transitions between $BD36 and the generic timed
-   * animation handler $8683 without becoming a new actor. The boss-lightning
-   * child changes resume across its repeated strike/blank cycles, so its
-   * stable source/backlink pair is the lifecycle key instead. */
+  /* Resume/source are stable for the original projectile and trap families.
+   * Fireball's handler is stable too and strengthens its identity; trap
+   * lightning omits it because one live bolt transitions between $BD36 and
+   * the generic timed animation handler $8683 without becoming a new actor.
+   * Marahna's orb and split children share a source but retain distinct
+   * resume values, so source+resume is their lifecycle key. Linked lightning
+   * and the Bloodpool boss child use their validated source/backlink pair. */
   uint32_t continuity_key = (uint32_t)object->source_descriptor |
       ((uint32_t)object->resume_address << 16);
   if (kind == kActionEffect_EnemyFireball)
     continuity_key ^= (uint32_t)object->handler * 0x9E3779B9u;
-  else if (kind == kActionEffect_BloodpoolBossLightning)
+  else if (kind == kActionEffect_MarahnaFireball)
+    continuity_key = (uint32_t)object->source_descriptor |
+        ((uint32_t)object->resume_address << 16);
+  else if (kind == kActionEffect_BloodpoolBossLightning ||
+           kind == kActionEffect_MarahnaLightningLink ||
+           kind == kActionEffect_MarahnaBossLightning)
     continuity_key = (uint32_t)object->source_descriptor |
         ((uint32_t)object->spawner_backlink << 16);
   if (SceneTrackDiscontinuous(track, object, kind, continuity_key,
@@ -602,10 +609,11 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
 
 /* ── Measured action-scene identities ─────────────────────────────────────
  *
- * These rules come from run 20260810-124203. They deliberately combine
- * control-flow identity with animation/composition identity: object fields are
- * polymorphic in ActRaiser, so matching a visual number or palette colour by
- * itself would eventually decorate an unrelated actor.
+ * These rules come from runs 20260810-124203 through -190729 and Marahna run
+ * 20260811-151353. They deliberately combine control-flow identity with
+ * animation/composition identity: object fields are polymorphic in ActRaiser,
+ * so matching a visual number or palette colour by itself would eventually
+ * decorate an unrelated actor.
  *
  * Enemy fireballs (snap_03_gf7397):
  *   handler $BDF0, resume $BDD9, state $23, animation $7E:4000,
@@ -628,7 +636,24 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
  * Bloodpool wall torches (snap_01_gf2479, snap_06_gf7654):
  *   BG1 metatile $47 immediately above $4F in maps $02/$03 and $02/$05.
  *   The exact pair is the authored object identity and applies across the
- *   Bloodpool group rather than being tied to either observed room number. */
+ *   Bloodpool group rather than being tied to either observed room number.
+ * Marahna (runs 20260811-151353 and -221433, maps $05/$04-$08):
+ *   one BG1 metatile $43 is the complete wall torch. Source $E047 emits a
+ *   large four-frame $05-$08 orb, then four backlink-linked $32/$4BCD or
+ *   $33/$4BD9 children with exact cardinal velocities and direction flips.
+ *   Source $DE96 emits the snake enemy's separate $1D/$1E fire shot. $4AA1/$4B82 are
+ *   ten-part
+ *   horizontal/vertical lightning links whose parent, partner, and midpoint
+ *   are validated before capture. The visually fiery $34/$4BE5 family is
+ *   moving-platform machinery and must not receive a projectile effect. In
+ *   the boss room, source $E483 authors exact $57C2/$5868 charge arcs, the
+ *   $59DE orb, backlink-validated $5CE0 diagonal launched bolts, and the
+ *   complete $5D01/$5D0D/$5D2E ground-charge cycle.
+ * Aitos (same run, map $04/$01):
+ *   lava pits are BG1 rows $DC, one-or-more $DD, $DE over an equally wide
+ *   $DF row. Their emitted fireballs share source $CF9E and resume $CFCD;
+ *   exact handler/state and visual/composition pairs cover the wait, rising,
+ *   and return phases without matching unrelated $7E:4000 actors. */
 enum {
   kEnemyFireballHandler = 0xBDF0,
   kEnemyFireballResume = 0xBDD9,
@@ -655,7 +680,61 @@ enum {
   kSwordBeamAlternateState = 0x0014,
   kBloodpoolTorchTopMetatile = 0x47,
   kBloodpoolTorchBottomMetatile = 0x4F,
+  kMarahnaFirstEffectMap = 0x04,
+  kMarahnaLastEffectMap = 0x07,
+  kMarahnaBossMap = 0x08,
+  kMarahnaTorchMetatile = 0x43,
+  kMarahnaFireballSourceDescriptor = 0xE047,
+  kMarahnaFireballHandler = 0x8661,
+  kMarahnaFireballOrbResume = 0xE061,
+  kMarahnaFireballOrbState = 0x000C,
+  kMarahnaFireballSplitResume = 0xA65D,
+  kMarahnaFireballSplitParentResume = 0xE0A6,
+  kMarahnaSnakeSourceDescriptor = 0xDE96,
+  kMarahnaSnakeWaitHandler = 0x8661,
+  kMarahnaSnakeRiseHandler = 0xDF3E,
+  kMarahnaSnakeFallHandler = 0xDF63,
+  kMarahnaSnakeResume = 0xDF34,
+  kMarahnaSnakeFireballResume = 0xA65D,
+  kMarahnaSnakeFireballState = 0x0006,
+  kMarahnaLightningHandler = 0x8683,
+  kMarahnaLightningSourceDescriptor = 0xE18E,
+  kMarahnaLightningPartnerSourceDescriptor = 0xE254,
+  kMarahnaLightningResume = 0xE24F,
+  kMarahnaLightningHorizontalState = 0x0027,
+  kMarahnaLightningVerticalState = 0x0028,
+  kMarahnaBossLightningSourceDescriptor = 0xE483,
+  kMarahnaBossLightningHandler = 0x8661,
+  kMarahnaBossLightningParentResume = 0xE4E5,
+  kMarahnaBossLightningActiveParentResume = 0xE4F4,
+  kMarahnaBossLightningGroundParentResume = 0xE4D7,
+  kMarahnaBossLightningBoltResume = 0xE578,
+  kMarahnaBossLightningGroundChargeResume = 0xE57E,
+  kAitosLavaMap = 0x01,
+  kAitosLavaLeftMetatile = 0xDC,
+  kAitosLavaMiddleMetatile = 0xDD,
+  kAitosLavaRightMetatile = 0xDE,
+  kAitosLavaFillMetatile = 0xDF,
+  kAitosLavaMaxMiddleCells = 6,
+  kAitosLavaFireballSourceDescriptor = 0xCF9E,
+  kAitosLavaFireballResume = 0xCFCD,
 };
+
+static bool IsMarahnaEffectMap(const uint8_t *wram, size_t wram_size) {
+  if (!wram ||
+      Read8(wram, wram_size, kActRaiserWram_MapGroup) !=
+          kActRaiserMapGroup_Marahna)
+    return false;
+  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
+  return map >= kMarahnaFirstEffectMap && map <= kMarahnaLastEffectMap;
+}
+
+static bool IsAitosLavaMap(const uint8_t *wram, size_t wram_size) {
+  return wram &&
+      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
+          kActRaiserMapGroup_Aitos &&
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap) == kAitosLavaMap;
+}
 
 static bool ActionObjectVisible(const ActionObjectSnapshot *object) {
   return object &&
@@ -689,12 +768,366 @@ static bool IsLightningTrap(const ActionObjectSnapshot *object) {
       (object->visual == 0x0020 && object->composition == 0x479D);
 }
 
+typedef struct MarahnaFireballSplitLifecycle {
+  int16_t velocity_x, velocity_y;
+  uint16_t state, visual, composition, flips;
+} MarahnaFireballSplitLifecycle;
+
+typedef struct MarahnaFireballOrbLifecycle {
+  int16_t velocity_x, velocity_y;
+  uint16_t visual, composition;
+} MarahnaFireballOrbLifecycle;
+
+static bool ActionObjectAddressIsValid(uint16_t address);
+
+static bool MarahnaFireballSplitParentIsValid(
+    const uint8_t *wram, size_t wram_size,
+    const ActionObjectSnapshot *object) {
+  if (!object || !ActionObjectAddressIsValid(object->spawner_backlink))
+    return false;
+  ActionObjectSnapshot parent;
+  return ReadActionObject(wram, wram_size, object->spawner_backlink,
+                          &parent) &&
+      (parent.status & kActRaiserObjectStatus_InactiveMask) &&
+      parent.source_descriptor == kMarahnaFireballSourceDescriptor &&
+      parent.handler == kMarahnaFireballHandler &&
+      parent.animation_address == kSceneAnimationAddress &&
+      parent.animation_bank == kSceneAnimationBank &&
+      parent.resume_address == kMarahnaFireballSplitParentResume &&
+      parent.animation_state == 0x000E && parent.visual == 0x000C &&
+      parent.composition == 0x4597 &&
+      parent.left_extent == 8 && parent.top_extent == 8 &&
+      parent.right_extent == 8 && parent.bottom_extent == 8 &&
+      !parent.spawner_backlink;
+}
+
+static bool MarahnaSnakeFireballParentIsValid(
+    const uint8_t *wram, size_t wram_size,
+    const ActionObjectSnapshot *object) {
+  if (!object || !ActionObjectAddressIsValid(object->spawner_backlink))
+    return false;
+  ActionObjectSnapshot parent;
+  if (!ReadActionObject(wram, wram_size, object->spawner_backlink, &parent) ||
+      (parent.status & kActRaiserObjectStatus_InactiveMask) ||
+      parent.source_descriptor != kMarahnaSnakeSourceDescriptor ||
+      parent.animation_address != kSceneAnimationAddress ||
+      parent.animation_bank != kSceneAnimationBank ||
+      parent.left_extent != 16 || parent.top_extent != 24 ||
+      parent.right_extent != 16 || parent.bottom_extent != 24 ||
+      (parent.flip_attributes & kActRaiserObjectFlip_Vertical) ||
+      (parent.flip_attributes & kActRaiserObjectFlip_Mask) !=
+          (object->flip_attributes & kActRaiserObjectFlip_Mask) ||
+      parent.spawner_backlink)
+    return false;
+  static const struct {
+    uint16_t handler, resume, state, visual, composition;
+  } kLifecycle[] = {
+    {kMarahnaSnakeWaitHandler, kMarahnaSnakeResume,
+     0x0005, 0x0000, 0x4435},
+    {kMarahnaSnakeRiseHandler, kMarahnaSnakeResume,
+     0x0003, 0x0001, 0x4464},
+    {kMarahnaSnakeFallHandler, kMarahnaSnakeResume,
+     0x0004, 0x0001, 0x4464},
+  };
+  for (size_t i = 0; i < sizeof(kLifecycle) / sizeof(kLifecycle[0]); i++)
+    if (parent.handler == kLifecycle[i].handler &&
+        parent.resume_address == kLifecycle[i].resume &&
+        parent.animation_state == kLifecycle[i].state &&
+        parent.visual == kLifecycle[i].visual &&
+        parent.composition == kLifecycle[i].composition)
+      return true;
+  return false;
+}
+
+static uint8_t MatchMarahnaSnakeFireballShot(
+    const uint8_t *wram, size_t wram_size,
+    const ActionObjectSnapshot *object) {
+  if (!object ||
+      object->source_descriptor != kMarahnaSnakeSourceDescriptor ||
+      object->handler != kMarahnaSnakeWaitHandler ||
+      object->animation_address != kSceneAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->animation_state != kMarahnaSnakeFireballState ||
+      object->resume_address != kMarahnaSnakeFireballResume ||
+      object->left_extent != 8 || object->top_extent != 4 ||
+      object->right_extent != 8 || object->bottom_extent != 4 ||
+      object->velocity_y != 0 || object->local_counter != 6 ||
+      (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||
+      !MarahnaSnakeFireballParentIsValid(wram, wram_size, object))
+    return kActionEffectPhase_None;
+  const bool horizontal_flip =
+      (object->flip_attributes & kActRaiserObjectFlip_Horizontal) != 0;
+  if (object->velocity_x != (horizontal_flip ? 4 : -4))
+    return kActionEffectPhase_None;
+  if ((object->visual == 0x001D && object->composition == 0x4869) ||
+      (object->visual == 0x001E && object->composition == 0x487C))
+    return kActionEffectPhase_MarahnaSnakeFireballShot;
+  return kActionEffectPhase_None;
+}
+
+static uint8_t MatchMarahnaFireball(const uint8_t *wram, size_t wram_size,
+                                    const ActionObjectSnapshot *object) {
+  if (!object) return kActionEffectPhase_None;
+  if (object->source_descriptor == kMarahnaSnakeSourceDescriptor)
+    return MatchMarahnaSnakeFireballShot(wram, wram_size, object);
+  if (object->source_descriptor != kMarahnaFireballSourceDescriptor ||
+      object->handler != kMarahnaFireballHandler ||
+      object->animation_address != kSceneAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank)
+    return kActionEffectPhase_None;
+
+  static const MarahnaFireballOrbLifecycle kOrb[] = {
+    { 0, 0, 0x0007, 0x451C},
+    {-1, 0, 0x0008, 0x4528},
+    {-2, 0, 0x0008, 0x4528},
+    { 0, 0, 0x0005, 0x4504},
+    { 1, 0, 0x0006, 0x4510},
+    { 2, 0, 0x0006, 0x4510},
+  };
+  if (object->resume_address == kMarahnaFireballOrbResume &&
+      object->animation_state == kMarahnaFireballOrbState &&
+      object->left_extent == 8 && object->top_extent == 8 &&
+      object->right_extent == 8 && object->bottom_extent == 8 &&
+      !(object->flip_attributes & kActRaiserObjectFlip_Mask)) {
+    for (size_t i = 0; i < sizeof(kOrb) / sizeof(kOrb[0]); i++)
+      if (object->velocity_x == kOrb[i].velocity_x &&
+          object->velocity_y == kOrb[i].velocity_y &&
+          object->visual == kOrb[i].visual &&
+          object->composition == kOrb[i].composition)
+        return kActionEffectPhase_MarahnaFireballOrb;
+  }
+
+  static const MarahnaFireballSplitLifecycle kSplit[] = {
+    { 0,  3, 0x000F, 0x0032, 0x4BCD, 0x0000},
+    {-3,  0, 0x0010, 0x0033, 0x4BD9, 0x0000},
+    { 0, -3, 0x000F, 0x0032, 0x4BCD,
+      kActRaiserObjectFlip_Vertical},
+    { 3,  0, 0x0010, 0x0033, 0x4BD9,
+      kActRaiserObjectFlip_Horizontal},
+  };
+  if (object->resume_address != kMarahnaFireballSplitResume ||
+      object->left_extent != 4 || object->top_extent != 4 ||
+      object->right_extent != 4 || object->bottom_extent != 4 ||
+      !MarahnaFireballSplitParentIsValid(wram, wram_size, object))
+    return kActionEffectPhase_None;
+  for (size_t i = 0; i < sizeof(kSplit) / sizeof(kSplit[0]); i++)
+    if (object->velocity_x == kSplit[i].velocity_x &&
+        object->velocity_y == kSplit[i].velocity_y &&
+        object->animation_state == kSplit[i].state &&
+        object->visual == kSplit[i].visual &&
+        object->composition == kSplit[i].composition &&
+        (object->flip_attributes & kActRaiserObjectFlip_Mask) ==
+            kSplit[i].flips)
+      return kActionEffectPhase_MarahnaFireballSplit;
+  return kActionEffectPhase_None;
+}
+
+typedef struct AitosLavaFireballLifecycle {
+  uint16_t state;
+  uint16_t handler;
+  int16_t velocity_x;
+  int16_t velocity_y;
+} AitosLavaFireballLifecycle;
+
+static bool IsAitosLavaFireball(const ActionObjectSnapshot *object) {
+  static const AitosLavaFireballLifecycle kLifecycle[] = {
+    {0x0022, 0xCFE3,  0, -4},
+    {0x0023, 0x8661,  0,  0},
+    {0x0024, 0xCFFE, -1,  6},
+  };
+  if (!object ||
+      object->source_descriptor != kAitosLavaFireballSourceDescriptor ||
+      object->resume_address != kAitosLavaFireballResume ||
+      object->animation_address != kSceneAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->left_extent != 0x08 || object->top_extent != 0x08 ||
+      object->right_extent != 0x08 || object->bottom_extent != 0x08 ||
+      (object->flip_attributes & kActRaiserObjectFlip_Mask))
+    return false;
+  const bool artwork =
+      (object->visual == 0x002A && object->composition == 0x4D21) ||
+      (object->visual == 0x002B && object->composition == 0x4D2D);
+  if (!artwork) return false;
+  for (size_t i = 0; i < sizeof(kLifecycle) / sizeof(kLifecycle[0]); i++)
+    if (object->animation_state == kLifecycle[i].state &&
+        object->handler == kLifecycle[i].handler &&
+        object->velocity_x == kLifecycle[i].velocity_x &&
+        object->velocity_y == kLifecycle[i].velocity_y)
+      return true;
+  return false;
+}
+
 static bool ActionObjectAddressIsValid(uint16_t address) {
   const unsigned table_start = kActRaiserWram_ActionObjectTable;
   const unsigned table_end = table_start +
       kActRaiserActionObjectCount * kActRaiserActionObjectStride;
   return address >= table_start && address < table_end &&
       (address - table_start) % kActRaiserActionObjectStride == 0;
+}
+
+static bool MarahnaLightningEndpointMatches(
+    const ActionObjectSnapshot *object, bool partner, bool vertical) {
+  if (!object || (object->status & kActRaiserObjectStatus_InactiveMask) ||
+      !object->composition || object->handler != kMarahnaLightningHandler ||
+      object->animation_address != kSceneAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      (object->flip_attributes & kActRaiserObjectFlip_Mask))
+    return false;
+  if (partner) {
+    return object->source_descriptor ==
+               kMarahnaLightningPartnerSourceDescriptor &&
+        object->animation_state == 0x001D &&
+        object->visual == (vertical ? 0x0010 : 0x000F) &&
+        object->composition == (vertical ? 0x45DC : 0x45D0);
+  }
+  return object->source_descriptor == kMarahnaLightningSourceDescriptor &&
+      object->animation_state == 0x001A &&
+      object->visual == (vertical ? 0x000E : 0x000D) &&
+      object->composition == (vertical ? 0x45C4 : 0x45B8);
+}
+
+static bool IsMarahnaLightningLink(const uint8_t *wram, size_t wram_size,
+                                   const ActionObjectSnapshot *object) {
+  if (!object || object->handler != kMarahnaLightningHandler ||
+      object->source_descriptor != kMarahnaLightningSourceDescriptor ||
+      object->resume_address != kMarahnaLightningResume ||
+      object->animation_address != kSceneAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      (object->flip_attributes & kActRaiserObjectFlip_Mask) ||
+      !ActionObjectAddressIsValid(object->spawner_backlink))
+    return false;
+
+  const bool horizontal =
+      object->animation_state == kMarahnaLightningHorizontalState &&
+      object->visual == 0x002E && object->composition == 0x4AA1 &&
+      object->left_extent == 40 && object->right_extent == 40 &&
+      object->top_extent == 4 && object->bottom_extent == 4;
+  const bool vertical =
+      object->animation_state == kMarahnaLightningVerticalState &&
+      object->visual == 0x0031 && object->composition == 0x4B82 &&
+      object->left_extent == 5 && object->right_extent == 5 &&
+      object->top_extent == 40 && object->bottom_extent == 40;
+  if (!horizontal && !vertical) return false;
+
+  const unsigned partner_address =
+      (unsigned)object->spawner_backlink + kActRaiserActionObjectStride;
+  if (partner_address > UINT16_MAX ||
+      !ActionObjectAddressIsValid((uint16_t)partner_address))
+    return false;
+  ActionObjectSnapshot parent, partner;
+  if (!ReadActionObject(wram, wram_size, object->spawner_backlink, &parent) ||
+      !ReadActionObject(wram, wram_size, (uint16_t)partner_address,
+                        &partner) ||
+      !MarahnaLightningEndpointMatches(&parent, false, vertical) ||
+      !MarahnaLightningEndpointMatches(&partner, true, vertical))
+    return false;
+  return (int32_t)object->world_x * 2 ==
+             (int32_t)parent.world_x + partner.world_x &&
+      (int32_t)object->world_y * 2 ==
+             (int32_t)parent.world_y + partner.world_y;
+}
+
+static bool MarahnaBossParentMatches(const ActionObjectSnapshot *object) {
+  if (!object || (object->status & kActRaiserObjectStatus_InactiveMask) ||
+      !object->composition ||
+      object->source_descriptor != kMarahnaBossLightningSourceDescriptor ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->left_extent != 48 || object->top_extent != 40 ||
+      object->right_extent != 48 || object->bottom_extent != 8 ||
+      object->spawner_backlink ||
+      (object->flip_attributes & kActRaiserObjectFlip_Mask))
+    return false;
+  return (object->handler == kMarahnaBossLightningHandler &&
+          object->animation_state == 0x0000 &&
+          object->resume_address == kMarahnaBossLightningParentResume) ||
+      (object->handler == kMarahnaBossLightningHandler &&
+       object->animation_state == 0x0001 &&
+       object->resume_address == kMarahnaBossLightningActiveParentResume) ||
+      (object->handler == kAnimationRepeatHandler &&
+       object->animation_state == 0x000A && object->visual == 0x0000 &&
+       object->composition == 0x5307 &&
+       object->resume_address == kMarahnaBossLightningGroundParentResume);
+}
+
+static uint8_t MatchMarahnaBossLightning(
+    const uint8_t *wram, size_t wram_size,
+    const ActionObjectSnapshot *object) {
+  if (!object ||
+      object->source_descriptor != kMarahnaBossLightningSourceDescriptor ||
+      object->handler != kMarahnaBossLightningHandler ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank)
+    return kActionEffectPhase_None;
+
+  if (MarahnaBossParentMatches(object)) {
+    if ((object->visual == 0x0007 && object->composition == 0x57C2) ||
+        (object->visual == 0x0008 && object->composition == 0x5868))
+      return kActionEffectPhase_MarahnaBossLightningCharge;
+    if (object->visual == 0x000A && object->composition == 0x59DE)
+      return kActionEffectPhase_MarahnaBossLightningOrb;
+    return kActionEffectPhase_None;
+  }
+
+  uint8_t phase = kActionEffectPhase_None;
+  const uint16_t flips =
+      object->flip_attributes & kActRaiserObjectFlip_Mask;
+  if (object->resume_address == kMarahnaBossLightningBoltResume &&
+      object->animation_state == 0x0004 && object->visual == 0x0011 &&
+      object->composition == 0x5CE0 && object->velocity_y == 4 &&
+      !object->top_extent && object->bottom_extent == 32) {
+    const bool left = object->velocity_x == -4 &&
+        object->left_extent == 32 && !object->right_extent && !flips;
+    const bool right = object->velocity_x == 4 &&
+        !object->left_extent && object->right_extent == 32 &&
+        flips == kActRaiserObjectFlip_Horizontal;
+    if (left || right)
+      phase = kActionEffectPhase_MarahnaBossLightningBolt;
+  } else if (
+      object->resume_address == kMarahnaBossLightningGroundChargeResume &&
+      object->animation_state == 0x0007 && !object->velocity_y) {
+    static const struct {
+      uint16_t visual, composition, extent;
+    } kGroundChargeFrames[] = {
+      {0x0012, 0x5D01, 8},
+      {0x0013, 0x5D0D, 16},
+      {0x0014, 0x5D2E, 16},
+    };
+    bool artwork_matches = false;
+    for (size_t i = 0;
+         i < sizeof(kGroundChargeFrames) / sizeof(kGroundChargeFrames[0]);
+         i++) {
+      const uint16_t extent = kGroundChargeFrames[i].extent;
+      if (object->visual == kGroundChargeFrames[i].visual &&
+          object->composition == kGroundChargeFrames[i].composition &&
+          object->left_extent == extent && object->top_extent == extent &&
+          object->right_extent == extent && object->bottom_extent == extent) {
+        artwork_matches = true;
+        break;
+      }
+    }
+    const bool left = object->velocity_x == -4 && !flips;
+    const bool right = object->velocity_x == 4 &&
+        flips == kActRaiserObjectFlip_Horizontal;
+    if (artwork_matches && (left || right))
+      phase = kActionEffectPhase_MarahnaBossLightningGroundCharge;
+  }
+  if (phase == kActionEffectPhase_None ||
+      !ActionObjectAddressIsValid(object->spawner_backlink))
+    return kActionEffectPhase_None;
+
+  ActionObjectSnapshot parent;
+  if (!ReadActionObject(wram, wram_size, object->spawner_backlink, &parent) ||
+      !MarahnaBossParentMatches(&parent))
+    return kActionEffectPhase_None;
+  const bool post_impact_parent =
+      parent.handler == kAnimationRepeatHandler &&
+      parent.animation_state == 0x000A &&
+      parent.resume_address == kMarahnaBossLightningGroundParentResume;
+  if ((phase == kActionEffectPhase_MarahnaBossLightningGroundCharge) !=
+      post_impact_parent)
+    return kActionEffectPhase_None;
+  return phase;
 }
 
 static bool SwordBeamParentIsValid(const uint8_t *wram, size_t wram_size,
@@ -788,13 +1221,93 @@ static bool SceneFrameAppend(ActionSceneEffectFrame *dst,
   return true;
 }
 
-static void CaptureBloodpoolTorches(ActionSceneEffectFrame *dst,
-                                    const uint8_t *wram,
-                                    size_t wram_size) {
-  if (!dst || !wram ||
-      Read8(wram, wram_size, kActRaiserWram_MapGroup) !=
-          kActRaiserMapGroup_Bloodpool)
-    return;
+typedef struct WallTorchMapRule {
+  uint8_t top_metatile;
+  uint8_t bottom_metatile;
+  int8_t anchor_y;
+  int8_t bottom_extent;
+  bool requires_bottom;
+  bool camera_bounded;
+} WallTorchMapRule;
+
+static bool WallTorchRuleFor(const uint8_t *wram, size_t wram_size,
+                             WallTorchMapRule *rule) {
+  if (!wram || !rule) return false;
+  const uint8_t group =
+      Read8(wram, wram_size, kActRaiserWram_MapGroup);
+  if (group == kActRaiserMapGroup_Bloodpool) {
+    *rule = (WallTorchMapRule) {
+      .top_metatile = kBloodpoolTorchTopMetatile,
+      .bottom_metatile = kBloodpoolTorchBottomMetatile,
+      .anchor_y = 15,
+      .bottom_extent = 2,
+      .requires_bottom = true,
+    };
+    return true;
+  }
+  if (IsMarahnaEffectMap(wram, wram_size) ||
+      (Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
+           kActRaiserMapGroup_Marahna &&
+       Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
+           kMarahnaBossMap)) {
+    *rule = (WallTorchMapRule) {
+      .top_metatile = kMarahnaTorchMetatile,
+      .anchor_y = 11,
+      .bottom_extent = 5,
+      .camera_bounded = true,
+    };
+    return true;
+  }
+  return false;
+}
+
+typedef struct SceneBgScanBounds {
+  unsigned x0, y0;
+  unsigned x1, y1;  /* exclusive */
+} SceneBgScanBounds;
+
+static bool SceneBgScanBounds_Init(SceneBgScanBounds *bounds,
+                                   const ActionBgMapView *map,
+                                   bool camera_bounded,
+                                   int camera_x, int camera_y) {
+  if (!bounds || !map || !map->world_width || !map->world_height)
+    return false;
+  if (!camera_bounded) {
+    *bounds = (SceneBgScanBounds){
+      .x1 = map->world_width,
+      .y1 = map->world_height,
+    };
+    return true;
+  }
+
+  const int margin = kActRaiserAuthenticWidth;
+  int min_x = camera_x - margin;
+  int min_y = camera_y - margin;
+  int max_x = camera_x + kActRaiserAuthenticWidth + margin;
+  int max_y = camera_y + kActRaiserAuthenticHeight + margin;
+  if (max_x < 0 || max_y < 0 || min_x >= (int)map->world_width ||
+      min_y >= (int)map->world_height)
+    return false;
+  if (min_x < 0) min_x = 0;
+  if (min_y < 0) min_y = 0;
+  if (max_x >= (int)map->world_width) max_x = (int)map->world_width - 1;
+  if (max_y >= (int)map->world_height) max_y = (int)map->world_height - 1;
+
+  const unsigned cell = kActionBgMetatilePixels;
+  bounds->x0 = ((unsigned)min_x + cell - 1u) / cell * cell;
+  bounds->y0 = ((unsigned)min_y + cell - 1u) / cell * cell;
+  bounds->x1 = ((unsigned)max_x / cell + 1u) * cell;
+  bounds->y1 = ((unsigned)max_y / cell + 1u) * cell;
+  if (bounds->x1 > map->world_width) bounds->x1 = map->world_width;
+  if (bounds->y1 > map->world_height) bounds->y1 = map->world_height;
+  return bounds->x0 < bounds->x1 && bounds->y0 < bounds->y1;
+}
+
+static void CaptureWallTorches(ActionSceneEffectFrame *dst,
+                               const uint8_t *wram,
+                               size_t wram_size, uint16_t clock) {
+  WallTorchMapRule rule;
+  if (!dst || !WallTorchRuleFor(wram, wram_size, &rule)) return;
 
   ActionBgMapView map;
   if (!ActionBgMapView_Init(
@@ -803,34 +1316,42 @@ static void CaptureBloodpoolTorches(ActionSceneEffectFrame *dst,
           Read16(wram, wram_size, kActRaiserWram_Bg1Height),
           Read16(wram, wram_size, kActRaiserWram_BgMapPage)))
     return;
-  for (unsigned y = 0; y + kActionBgMetatilePixels < map.world_height;
+  const int camera_x = Read16(wram, wram_size, kActRaiserWram_Bg1CameraX);
+  const int camera_y = Read16(wram, wram_size, kActRaiserWram_Bg1CameraY);
+  SceneBgScanBounds bounds;
+  if (!SceneBgScanBounds_Init(&bounds, &map, rule.camera_bounded,
+                              camera_x, camera_y))
+    return;
+  for (unsigned y = bounds.y0; y < bounds.y1;
        y += kActionBgMetatilePixels) {
-    for (unsigned x = 0; x < map.world_width;
+    for (unsigned x = bounds.x0; x < bounds.x1;
          x += kActionBgMetatilePixels) {
       uint8_t top = 0, bottom = 0;
       if (!ActionBgMapView_LookupMetatile(&map, (int)x, (int)y, &top) ||
-          top != kBloodpoolTorchTopMetatile ||
-          !ActionBgMapView_LookupMetatile(
-              &map, (int)x, (int)(y + kActionBgMetatilePixels), &bottom) ||
-          bottom != kBloodpoolTorchBottomMetatile)
+          top != rule.top_metatile)
+        continue;
+      if (rule.requires_bottom &&
+          (!ActionBgMapView_LookupMetatile(
+               &map, (int)x, (int)(y + kActionBgMetatilePixels), &bottom) ||
+           bottom != rule.bottom_metatile))
         continue;
       const uint32_t identity =
           ((uint32_t)(y / kActionBgMetatilePixels) << 16) |
           (uint32_t)(x / kActionBgMetatilePixels);
       /* Every instance uses the same animated BG tiles, so its source flame
-       * changes on one shared game clock. Keep lifecycle time authentic and
-       * synchronized here; the renderer owns the deliberately faster visual
-       * response used by the added light and embers. */
-      const uint16_t clock = dst->game_frame;
+       * changes on one shared gameplay clock. The renderer owns the
+       * deliberately faster visual response used by the added light and
+       * embers; the observer clock keeps that response frozen with the source
+       * BG throughout ActRaiser's native pause. */
       ActionEffectInstance effect = {
         .generation = 0x54000000u ^ identity,
         .pulse_generation = 0x74000000u ^ identity,
         .world_x = (int16_t)(x + 8),
-        .world_y = (int16_t)(y + 15),
+        .world_y = (int16_t)(y + rule.anchor_y),
         .left_extent = 5,
         .top_extent = 9,
         .right_extent = 5,
-        .bottom_extent = 2,
+        .bottom_extent = (uint16_t)rule.bottom_extent,
         .age_ticks = clock,
         .phase_ticks = clock,
         .pulse_ticks = clock,
@@ -842,7 +1363,101 @@ static void CaptureBloodpoolTorches(ActionSceneEffectFrame *dst,
         .projection_plane = kActionEffectProjectionPlane_Bg1,
         .geometry = {
           .kind = kActionEffectGeometry_Rect,
-          .data.rect = {-5.0f, -9.0f, 5.0f, 2.0f},
+          .data.rect = {-5.0f, -9.0f, 5.0f,
+                        (float)rule.bottom_extent},
+        },
+      };
+      SceneFrameAppend(dst, &effect);
+    }
+  }
+}
+
+static void CaptureAitosLavaPits(ActionSceneEffectFrame *dst,
+                                 const uint8_t *wram,
+                                 size_t wram_size, uint16_t clock) {
+  if (!dst || !IsAitosLavaMap(wram, wram_size)) return;
+  ActionBgMapView map;
+  if (!ActionBgMapView_Init(
+          &map, wram, wram_size,
+          Read16(wram, wram_size, kActRaiserWram_Bg1Width),
+          Read16(wram, wram_size, kActRaiserWram_Bg1Height),
+          Read16(wram, wram_size, kActRaiserWram_BgMapPage)))
+    return;
+  const int camera_x = Read16(wram, wram_size, kActRaiserWram_Bg1CameraX);
+  const int camera_y = Read16(wram, wram_size, kActRaiserWram_Bg1CameraY);
+  SceneBgScanBounds bounds;
+  if (!SceneBgScanBounds_Init(&bounds, &map, true, camera_x, camera_y))
+    return;
+  for (unsigned y = bounds.y0; y < bounds.y1;
+       y += kActionBgMetatilePixels) {
+    for (unsigned x = bounds.x0; x < bounds.x1;
+         x += kActionBgMetatilePixels) {
+      uint8_t metatile = 0;
+      if (!ActionBgMapView_LookupMetatile(
+               &map, (int)x, (int)y, &metatile) ||
+          metatile != kAitosLavaLeftMetatile)
+        continue;
+
+      unsigned middle_cells = 0;
+      unsigned total_cells = 0;
+      for (unsigned step = 1; step <= kAitosLavaMaxMiddleCells + 1;
+           step++) {
+        const unsigned cell_x = x + step * kActionBgMetatilePixels;
+        if (cell_x < x ||
+            !ActionBgMapView_LookupMetatile(
+                &map, (int)cell_x, (int)y, &metatile))
+          break;
+        if (step <= kAitosLavaMaxMiddleCells &&
+            metatile == kAitosLavaMiddleMetatile) {
+          middle_cells++;
+          continue;
+        }
+        if (middle_cells && metatile == kAitosLavaRightMetatile)
+          total_cells = step + 1;
+        break;
+      }
+      if (!total_cells) continue;
+
+      bool fill_valid = true;
+      for (unsigned cell = 0; cell < total_cells; cell++) {
+        const unsigned cell_x = x + cell * kActionBgMetatilePixels;
+        if (cell_x < x ||
+            !ActionBgMapView_LookupMetatile(
+                &map, (int)cell_x,
+                (int)(y + kActionBgMetatilePixels), &metatile) ||
+            metatile != kAitosLavaFillMetatile) {
+          fill_valid = false;
+          break;
+        }
+      }
+      if (!fill_valid) continue;
+
+      const unsigned width = total_cells * kActionBgMetatilePixels;
+      const uint32_t identity =
+          ((uint32_t)(y / kActionBgMetatilePixels) << 16) |
+          (uint32_t)(x / kActionBgMetatilePixels);
+      const float half_width = (float)width * 0.5f;
+      ActionEffectInstance effect = {
+        .generation = 0x4C000000u ^ identity,
+        .pulse_generation = 0x6C000000u ^ identity,
+        .world_x = (int16_t)(x + width / 2u),
+        .world_y = (int16_t)(y + 8u),
+        .left_extent = (uint16_t)(width / 2u),
+        .top_extent = 8,
+        .right_extent = (uint16_t)(width / 2u),
+        .bottom_extent = 8,
+        .age_ticks = clock,
+        .phase_ticks = clock,
+        .pulse_ticks = clock,
+        .kind = kActionEffect_AitosLavaPit,
+        .phase = kActionEffectPhase_AitosLavaPit,
+        .role = kActionEffectRole_Body,
+        .flags = kActionEffectFlag_Visible,
+        .render_layer = kActionEffectRenderLayer_WorldOverlay,
+        .projection_plane = kActionEffectProjectionPlane_Bg1,
+        .geometry = {
+          .kind = kActionEffectGeometry_Rect,
+          .data.rect = {-half_width, -8.0f, half_width, 8.0f},
         },
       };
       SceneFrameAppend(dst, &effect);
@@ -909,12 +1524,28 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     return;
   }
 
-  CaptureBloodpoolTorches(dst, wram, wram_size);
+  if (!observer->scene_clock_valid) {
+    /* Preserve the established visual phase on entry/load, then decouple it
+     * from $0088: that ROM clock keeps moving on the native pause screen. */
+    observer->scene_clock = dst->game_frame;
+    observer->scene_clock_valid = 1;
+  } else {
+    observer->scene_clock = (uint16_t)(observer->scene_clock + elapsed_ticks);
+  }
+  CaptureWallTorches(dst, wram, wram_size, observer->scene_clock);
+  CaptureAitosLavaPits(dst, wram, wram_size, observer->scene_clock);
+  const bool marahna_effect_map = IsMarahnaEffectMap(wram, wram_size);
+  const bool aitos_lava_map = IsAitosLavaMap(wram, wram_size);
   const bool boss_lightning_map =
       Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
           kActRaiserMapGroup_Bloodpool &&
       Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
           kBloodpoolBossMap;
+  const bool marahna_boss_map =
+      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
+          kActRaiserMapGroup_Marahna &&
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
+          kMarahnaBossMap;
   bool seen[kActionSceneEffectObserverTrackCount] = {false};
   for (unsigned slot = 0; slot < kActionSceneEffectObserverTrackCount;
        slot++) {
@@ -931,6 +1562,23 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     if (IsEnemyFireball(&object)) {
       kind = kActionEffect_EnemyFireball;
       phase = kActionEffectPhase_EnemyFireballFlight;
+    } else if (marahna_effect_map &&
+               (phase = MatchMarahnaFireball(
+                    wram, wram_size, &object)) !=
+                   kActionEffectPhase_None) {
+      kind = kActionEffect_MarahnaFireball;
+    } else if (marahna_effect_map &&
+               IsMarahnaLightningLink(wram, wram_size, &object)) {
+      kind = kActionEffect_MarahnaLightningLink;
+      phase = kActionEffectPhase_MarahnaLightningActive;
+    } else if (marahna_boss_map &&
+               (phase = MatchMarahnaBossLightning(
+                    wram, wram_size, &object)) !=
+                   kActionEffectPhase_None) {
+      kind = kActionEffect_MarahnaBossLightning;
+    } else if (aitos_lava_map && IsAitosLavaFireball(&object)) {
+      kind = kActionEffect_AitosLavaFireball;
+      phase = kActionEffectPhase_AitosLavaFireballFlight;
     } else if (IsSwordBeam(wram, wram_size, &object)) {
       kind = kActionEffect_SwordBeam;
       phase = kActionEffectPhase_SwordBeamFlight;
@@ -949,6 +1597,16 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     seen[slot] = true;
     ActionEffectInstance effect;
     PopulateSceneObjectEffect(&effect, address, &object, kind, phase);
+    if (kind == kActionEffect_MarahnaBossLightning &&
+        phase == kActionEffectPhase_MarahnaBossLightningBolt) {
+      /* The authored bolt owns one asymmetric 32x32 quadrant extending down
+       * and toward its velocity. Preserve that measured segment explicitly;
+       * the renderer jitters it in local space before production projection,
+       * so flat and diorama modes follow the same camera transform. */
+      effect.geometry.data.rect = object.velocity_x < 0
+          ? (ActionEffectLocalRect){-32.0f, 0.0f, 0.0f, 32.0f}
+          : (ActionEffectLocalRect){0.0f, 0.0f, 32.0f, 32.0f};
+    }
     if (kind == kActionEffect_SwordBeam) {
       /* These headers use signed 8-bit origins even though the action ABI
        * publishes them as words. `$8D68` performs wrapping byte arithmetic:
