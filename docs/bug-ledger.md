@@ -1729,31 +1729,52 @@ the current debugging process; this file is the case law.
     different.
 
 56. **Aitos's finite waterfall backdrop exposed a black lower gap, and its
-    existing veil had no positive submission diagnostic — FIXED 2026-08-12;
-    live visual acceptance pending.** The tuned `$04/$02` policy gives native
+    initial veil/mist tuning was effectively invisible — RETUNED 2026-08-12;
+    fresh live visual acceptance pending.** The tuned `$04/$02` policy gives native
     raw-wrap BG2 only 24 lower-extension pixels. Extending it farther repeats
     water artwork into authored non-water areas, while retaining the safe
     extent can expose black beneath the waterfall in a tall Diorama view.
 
     **Fix:** the exact camera-local waterfall-platform signature now publishes
     a paired after-BG2 Diorama atmosphere record beside the existing BG2 veil. Three
-    overlapping translucent mist banks and sixteen rising foam motes cover the
-    final 32 authentic rows and first 24 lower-extension rows. The atmosphere
+    two tiers of three overlapping translucent mist banks and thirty-two rising foam motes meet
+    the waterfall at the end of its safe 24px lower extension. The atmosphere
     retains BG2 camera/rake/bow projection and submits unmasked from the same after-BG2 Diorama callback, because absent BG2 pixels are precisely the area it must cover. Later BG1/OBJ planes and the HUD remain in front; flat mode has no vertical-extension gap and keeps only its masked veil.
 
-    The original 48-streak veil remains BG2-local: Diorama inserts it after a
+    Run `20260812-151323` proved this was initially a visual rather than a
+    capture/painter-order failure: its console contains both successful submit
+    diagnostics, while `snap_00_gf10129` shows no readable veil and only a few
+    isolated streaks in the black band. The mist had been anchored eight rows
+    above authentic row 224, so only its fully transparent outer ring reached
+    the actual 24px extension boundary; veil alpha around 0.01 also disappeared
+    under CRT scaling. The corrected emitter shares the named 24px policy
+    constant, centres on row 248, pins visible colour beyond that seam, and
+    increases its bank opacity without becoming an opaque replacement.
+
+    Follow-up snapshot `runs/20260812-153127/snapshots/snap_00_gf11099`
+    shows that correction reached the seam but still read as a thin blue band
+    with sparse flakes. The atmosphere is therefore split into a dense
+    three-bank foam shelf and a taller, softer three-bank lower tier. Its
+    bounded geometry now spans 64px above and 80px below the shared seam; a
+    renderer regression requires more than 100px of visibly coloured vertical
+    coverage so another apparently thick transparent hull cannot pass.
+
+    The now-96-streak veil remains BG2-local: Diorama inserts it after a
     drawable BG2-low mesh, and flat mode composites it only after multiplying
     by the live BG2-winner mask. Both routes now log their first successful
     geometry submission, separately from world decorations. The measured
     worst case is exactly 14 platform splashes + one veil + one mist in the
     16-record decoration list; a forged fifteenth splash fails that list closed
     without consuming the independent actor budget. Tests pin capture gating,
-    capacity, substantial veil geometry, bottom-extension coverage, and the
+    capacity, substantial veil geometry, visible (non-zero-alpha)
+    bottom-extension coverage, and the
     production BG2 projection used by the atmosphere.
 
-    **Reusable lesson:** an effect bound to source pixels cannot conceal holes
-    caused by the absence of those pixels. Keep source enhancement and seam
-    concealment as separate passes with explicit painter order and diagnostics.
+    **Reusable lesson:** successful submission proves neither perceptual
+    visibility nor correct seam placement. Pin visible-colour coverage—not
+    merely transparent geometry—against the same named extent that owns the
+    source plane, and keep source enhancement and seam concealment as separate
+    passes with explicit painter order and diagnostics.
 
 57. **Sky Palace's selected-magic icon became a black square after the
     game-over return — FIXED 2026-08-12; exact live-transition acceptance
@@ -1847,6 +1868,42 @@ the current debugging process; this file is the case law.
     basis, not reuse the presentation camera with smaller margins. Also, a
     global object flag cannot safely be reasoned about as an enemy-only gate;
     scripted camera, fade, platform and projectile actors share the same table.
+
+59. **Aitos waterfall Diorama screens exposed an unsuitable finite captured
+    backdrop — CORRECTED 2026-08-12; live visual acceptance pending.** Applying a
+    map-wide backdrop disable/replacement was unsafe because `$04/$02` contains
+    both the cave and the waterfall section. Caching the first room's framebuffer
+    would additionally make presentation depend on visit order and could retain
+    unrelated sprites/UI.
+
+    **Fix:** the already exact, camera-local three-row waterfall platform
+    signature now publishes a bounded `waterfall` layer section through the
+    immutable `FrameSlot`. Scoped manifest records inherit base-room tuning and
+    may refine the backdrop to `source:rom-04-01-bg2`. The ROM source catalogue
+    can reconstruct BG1 or BG2 from any of the 49 valid action maps by replaying
+    that act's stock `$05:8000` asset entries, including inherited map state,
+    without modifying emulated state. The old `aitos-sky` spelling remains a
+    parser alias only. Missing/invalid ROM data or texture allocation falls back
+    to the captured source. Alpha zero is rejected before submission, which
+    makes backdrop disable reliable despite the backdrop's opaque SDL blend
+    mode.
+
+    **Verification:** the decoded asset sources match live map/metatile/CHR/palette
+    publications from `runs/20260812-000613/snapshots/snap_00_gf4152` byte for
+    byte. Synthetic literal/back-reference/truncation tests cover the decompressor;
+    layer tests cover scoped parsing, base inheritance, source round-trip and cave
+    isolation; editor/overlay tests cover effective inherited-source display,
+    active-scope mutation, and scoped reset. A stock-ROM census decodes all 98
+    valid action-map BG1/BG2 identities. The cache is keyed by that complete
+    identity, so an editor change cannot reuse a stale prior texture. Build and
+    focused tests pass. A live waterfall screenshot remains the visual acceptance
+    gate.
+
+    **Reusable lesson:** when a presentation section needs art from a nonresident
+    room, decode the immutable authored asset, not a temporal framebuffer. And
+    when one map contains semantically different screens, derive scope from the
+    exact same captured art identity that justifies the effect—never from a broad
+    map number or hand-tuned camera interval.
 
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 

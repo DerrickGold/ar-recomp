@@ -4,6 +4,8 @@
 
 #include "action_effect_render.h"
 #include "action_effect_projection.h"
+#include "action_bg_plan.h"
+#include "actraiser_game.h"
 #include "diorama.h"
 
 static int g_failures;
@@ -619,7 +621,7 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
       &decorations, kActionEffectRenderLayer_Atmosphere, true, false,
       ActionEffectProjection_ProjectPoint, &context, &pit));
   CHECK(Diorama_ProjectCapturedBg2Point(
-      &projection, -130.0f, 19.0f, &expected, NULL, NULL));
+      &projection, -148.0f, 5.0f, &expected, NULL, NULL));
   CHECK(fabsf(pit.vertices[0].position.x - expected.x) < 0.001f);
   CHECK(fabsf(pit.vertices[0].position.y - expected.y) < 0.001f);
 
@@ -679,7 +681,9 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
   frame.decorations[1] = SceneEffect(kActionEffect_AitosWaterfall, 120);
   frame.decorations[1].render_layer = kActionEffectRenderLayer_Bg2Plane;
   frame.decorations[2] = SceneEffect(kActionEffect_AitosWaterfallMist, 120);
-  frame.decorations[2].world_y = 216;
+  frame.decorations[2].world_y =
+      kActRaiserAuthenticHeight +
+      kActionBgAitosWaterfallBottomExtensionPixels;
   ActionSceneEffectRenderBatch world, bg2, atmosphere;
   CHECK(ActionSceneDecorationRender_Build(
       &frame, kActionEffectRenderLayer_WorldOverlay, true, true,
@@ -695,6 +699,10 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
   CHECK(atmosphere.index_count > 0);
   CHECK(world.index_count != bg2.index_count);
   CHECK(atmosphere.index_count != bg2.index_count);
+  CHECK(atmosphere.vertex_count ==
+        kActionSceneEffectWaterfallMistGlowCount *
+            kActionEffectGlowVertices +
+        kActionSceneEffectWaterfallMistParticleCount * 4);
 
   /* The source veil remains substantial renderer geometry rather than a
    * record that gets silently filtered, while the separate atmosphere spans
@@ -704,15 +712,30 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
         kActionSceneEffectWaterfallParticleCount * 4);
   float atmosphere_min_y = 10000.0f;
   float atmosphere_max_y = -10000.0f;
+  float visible_atmosphere_min_y = 10000.0f;
+  float visible_atmosphere_max_y = -10000.0f;
   for (int i = 0; i < atmosphere.vertex_count; i++) {
     if (atmosphere.vertices[i].position.y < atmosphere_min_y)
       atmosphere_min_y = atmosphere.vertices[i].position.y;
     if (atmosphere.vertices[i].position.y > atmosphere_max_y)
       atmosphere_max_y = atmosphere.vertices[i].position.y;
+    if (atmosphere.vertices[i].color.a > 0.02f &&
+        atmosphere.vertices[i].position.y < visible_atmosphere_min_y)
+      visible_atmosphere_min_y = atmosphere.vertices[i].position.y;
+    if (atmosphere.vertices[i].color.a > 0.02f) {
+      if (atmosphere.vertices[i].position.y > visible_atmosphere_max_y)
+        visible_atmosphere_max_y = atmosphere.vertices[i].position.y;
+    }
   }
   CHECK(atmosphere_min_y < frame.decorations[2].world_y - 20.0f);
   CHECK(atmosphere_max_y > frame.decorations[2].world_y + 20.0f);
   CHECK(atmosphere_max_y > 224.0f);
+  /* A transparent outer ring used to be the only geometry reaching the
+   * unsupported rows. Pin visible colour beyond the 24px-safe BG2 seam. */
+  CHECK(visible_atmosphere_max_y >
+        kActRaiserAuthenticHeight +
+            kActionBgAitosWaterfallBottomExtensionPixels + 20.0f);
+  CHECK(visible_atmosphere_max_y - visible_atmosphere_min_y > 100.0f);
   frame.decoration_overflow = 1;
   CHECK(ActionSceneDecorationRender_Build(
       &frame, kActionEffectRenderLayer_WorldOverlay, true, true,

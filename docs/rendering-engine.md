@@ -500,8 +500,9 @@ and the first flat winner-masked composite independently.
 The paired bottom atmosphere solves a different problem and therefore has a
 different painter contract. `$04/$02` deliberately caps raw-wrap BG2 at 24px
 of vertical extension so waterfall tiles cannot bleed into authored non-water
-rows. Three soft mist banks and sixteen rising foam motes cover the final 32
-authentic rows and first 24 lower-extension rows. They retain BG2 camera and rake/bow projection and submit unmasked from the same after-BG2 Diorama callback: absent source pixels are precisely the black gap this pass is intended to conceal. Later BG1/OBJ planes and the HUD remain in front. Flat mode has no vertical extension gap and therefore keeps only its winner-masked veil.
+rows. Two tiers of three soft mist banks and thirty-two rising foam motes are anchored at
+the end of that safe extension, with visible coloured rings spanning both the
+last water rows and the unsupported lower band. They retain BG2 camera and rake/bow projection and submit unmasked from the same after-BG2 Diorama callback: absent source pixels are precisely the black gap this pass is intended to conceal. Later BG1/OBJ planes and the HUD remain in front. Flat mode has no vertical extension gap and therefore keeps only its winner-masked veil.
 
 `action_effect_render.c` converts captured kind/phase/geometry into bounded,
 renderer-independent spell and scene batches; unknown values fail closed.
@@ -522,9 +523,9 @@ phase; Aitos BG lava and platform spray use the same accelerated presentation
 clock. Lava light spans the complete decoded bubbly volume, while its twelve
 deterministic embers originate in a narrow band one quarter of the captured
 height above its geometric midpoint, matching the isometric surface instead
-of appearing from the lower volume. The waterfall veil instead uses 48 slow
+of appearing from the lower volume. The waterfall veil instead uses 96 slow
 deterministic streaks to soften the short source cycle; its bottom atmosphere
-uses the three mist banks and sixteen foam motes described above. Molten rocks
+uses the six mist banks and thirty-two foam motes described above. Molten rocks
 keep compact tumbling sparks rather than a flame tail.
 Bloodpool, Marahna, and Aitos fireball sparks trail opposite measured velocity.
 Marahna's horizontal/vertical connector rectangles rotate the same cyan/violet
@@ -1712,6 +1713,54 @@ the HLE provider when the camera crosses the encoded period.
 
 These are host/PPU presentation seams only. The work discovered no new WRAM
 field, ROM routine/table, or recompiled ROM symbol.
+
+### 13.5 Scoped Diorama backdrops from stock ROM assets (2026-08-12)
+
+A room byte is sometimes too coarse for presentation policy. Aitos map `$04/$02`
+contains both a cave and the waterfall screens; replacing or hiding the backdrop
+for the entire map would fix one area by damaging the other. The exact camera-
+local three-row waterfall-platform signature already captured for spray effects
+is therefore also the section discriminator. `FrameSlot` carries that immutable
+result as `kDioramaLayerSection_AitosWaterfall`; present-time code never rereads
+live WRAM or guesses from camera coordinates.
+
+`diorama-layers.ini` sections may refine a room with a named suffix:
+
+```ini
+[layers:04:02]
+bg1 = voxel:0.08 slices:16 dir:backward
+
+[layers:04:02:waterfall]
+backdrop = source:rom-04-01-bg2
+```
+
+Resolution applies the base room first and the active section second. Thus the
+waterfall keeps the room's BG1 shape while changing only its backdrop; the cave
+sees the base record alone. The Layers menu shows the currently published scope,
+offers a backdrop-only Source enum, and resets only that scope. `alpha:0` is an
+explicit non-drawable plane, so disabling the waterfall backdrop remains an A/B
+choice even though the shipped tuning selects the alternate source.
+
+The Source enum is a ROM-wide action-background catalogue. `captured` uses the
+current residual plane; `rom-GG-MM-bgN` selects BG1 or BG2 from any valid action
+map (98 combinations across the 49 maps). `DioramaRomBackdrop_LoadActionBg`
+walks the stock `$05:8000` asset script, replaying earlier entries from the same
+act so inherited maps are deterministic even when selected from another level.
+It decompresses the selected map, word-swapped metatiles, character banks and
+palettes into an opaque 256×256 first-page host image. The old `aitos-sky` token
+is accepted as a compatibility alias for `rom-04-01-bg2`, but saves use the
+generic token.
+
+The HLE never writes emulated WRAM, VRAM, or CGRAM and does not depend on visit
+order. Decode is lazy and the cache key is the complete source identity, so a
+Source edit replaces the texture immediately rather than retaining the previous
+room's art. The ordinary SDL Diorama mesh draws the texture with horizontal
+wrap, giving it the same renderer/back-end support as captured layers and no new
+shader format. Decode or texture failure falls back to the captured backdrop;
+renderer reset destroys the texture and recreates it lazily from retained ROM
+bytes. The editor records the exact live subsection in each row and seeds a
+first scoped edit from its resolved inherited source, preventing a changing
+camera scope from saving to the wrong record or displaying stale base state.
 
 ## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
 

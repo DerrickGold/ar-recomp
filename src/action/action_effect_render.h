@@ -49,10 +49,11 @@ enum {
       kActionSceneEffectMaxInstances * kActionSceneEffectGlowsPerInstance,
   kActionSceneEffectMaxParticles =
       kActionSceneEffectMaxInstances * kActionSceneEffectParticlesPerInstance,
-  /* Bottom waterfall atmosphere uses three low-alpha fog banks plus sixteen
-   * deterministic foam/mist motes. It is the only style with a third glow. */
-  kActionSceneEffectWaterfallMistGlowCount = 3,
-  kActionSceneEffectWaterfallMistParticleCount = 16,
+  /* Bottom waterfall atmosphere uses two tiers of three fog banks plus
+   * thirty-two deterministic foam/mist motes. It is the only style with more
+   * than the ordinary spill/body pair. */
+  kActionSceneEffectWaterfallMistGlowCount = 6,
+  kActionSceneEffectWaterfallMistParticleCount = 32,
   /* The boss strike adds two screen-space filament layers over at most 24
    * authored OAM-row segments: a broad amber corona and a narrow white-gold
    * core.
@@ -116,7 +117,7 @@ enum {
    * splash signatures identify the section. Its denser field is the only
    * scene style that exceeds the ordinary 12-particle actor budget. */
   kActionSceneEffectMaxWaterfallVeils = 1,
-  kActionSceneEffectWaterfallParticleCount = 48,
+  kActionSceneEffectWaterfallParticleCount = 96,
   kActionSceneEffectWaterfallExtraVertices =
       (kActionSceneEffectWaterfallParticleCount -
        kActionSceneEffectParticlesPerInstance) * 4,
@@ -124,11 +125,13 @@ enum {
       (kActionSceneEffectWaterfallParticleCount -
        kActionSceneEffectParticlesPerInstance) * 6,
   kActionSceneEffectWaterfallMistExtraVertices =
-      kActionEffectGlowVertices +
+      (kActionSceneEffectWaterfallMistGlowCount -
+       kActionSceneEffectGlowsPerInstance) * kActionEffectGlowVertices +
       (kActionSceneEffectWaterfallMistParticleCount -
        kActionSceneEffectParticlesPerInstance) * 4,
   kActionSceneEffectWaterfallMistExtraIndices =
-      kActionEffectGlowIndices +
+      (kActionSceneEffectWaterfallMistGlowCount -
+       kActionSceneEffectGlowsPerInstance) * kActionEffectGlowIndices +
       (kActionSceneEffectWaterfallMistParticleCount -
        kActionSceneEffectParticlesPerInstance) * 6,
   kActionSceneEffectRenderMaxVertices =

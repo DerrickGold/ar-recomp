@@ -50,7 +50,7 @@
  */
 
 enum {
-  /* A room is identified by one (group, map) byte pair. */
+  /* A room override is identified by (group, map, section). */
   kDioramaRoomOverrideMax = 64,
   kDioramaLayerAlphaOpaque = 255,
   /* Hard cap on stack copies per plane. Each copy is one more RenderGeometry
@@ -67,6 +67,50 @@ enum {
   kDioramaVoxelMax = 24,
   kDioramaVoxelCopiesDefault = 12,
 };
+
+/* Optional authored subsection of a room. The base room always resolves first;
+ * a non-default section then refines only the knobs it explicitly authors.
+ * This lets one decoded map carry distinct presentation areas without making
+ * the game invent another room byte. Tokens are part of diorama-layers.ini's
+ * stable grammar. */
+typedef enum DioramaLayerSection {
+  kDioramaLayerSection_Room = 0,
+  kDioramaLayerSection_AitosWaterfall,
+  kDioramaLayerSection_Count,
+} DioramaLayerSection;
+
+const char *DioramaLayerOrder_SectionToken(int section);
+int DioramaLayerOrder_SectionFromToken(const char *token);
+
+/* Pixel source for a resolved layer. Captured is the ordinary current-frame
+ * plane. Every other valid value encodes one action room and one of its two BG
+ * planes. Uniform eight-room slots make the identity stable in manifests; the
+ * helpers reject the unused slots in shorter acts. */
+typedef enum DioramaLayerSource {
+  kDioramaLayerSource_Captured = 0,
+  kDioramaLayerSource_ActionBgFirst,
+  kDioramaLayerSource_Count =
+      kDioramaLayerSource_ActionBgFirst + 7 * 8 * 2,
+} DioramaLayerSource;
+
+/* Compatibility name for the first named source shipped before the catalogue
+ * was generalized. New manifests format it as `rom-04-01-bg2`; the parser also
+ * accepts the historical `aitos-sky` token. */
+enum {
+  kDioramaLayerSource_AitosSky =
+      kDioramaLayerSource_ActionBgFirst + ((4 - 1) * 8 + (1 - 1)) * 2 + 1,
+};
+
+const char *DioramaLayerOrder_SourceToken(int source);
+int DioramaLayerOrder_SourceFromToken(const char *token);
+bool DioramaLayerOrder_SourceIsValid(int source);
+int DioramaLayerOrder_ActionBgSource(uint8_t map_group, uint8_t map_number,
+                                     uint8_t bg_layer);
+bool DioramaLayerOrder_DecodeActionBgSource(int source,
+                                            uint8_t *out_map_group,
+                                            uint8_t *out_map_number,
+                                            uint8_t *out_bg_layer);
+int DioramaLayerOrder_NextSource(int source, int direction);
 
 /* The depth strategies a plane can use, as ONE enumeration.
  *
@@ -122,6 +166,8 @@ typedef struct DioramaPlaneOverride {
   float z;
   bool set_alpha;
   uint8_t alpha;
+  bool set_source;
+  uint8_t source;     /* DioramaLayerSource; backdrop-only */
   /* RAKE — the layer stops being parallel to the screen and tilts in depth: its
    * TOP edge keeps `z`, its BOTTOM edge sits at `z + rake`. Positive rakes the
    * bottom toward the camera.
@@ -260,6 +306,7 @@ typedef struct DioramaRoomOverride {
   bool used;
   uint8_t map_group;   /* $18 */
   uint8_t map_number;  /* $19 */
+  uint8_t section;     /* DioramaLayerSection; Room is the base override */
   DioramaPlaneOverride planes[kDioramaPlane_Count];
 } DioramaRoomOverride;
 
@@ -273,6 +320,7 @@ typedef struct DioramaResolvedLayer {
   int plane;
   float z;
   uint8_t alpha;
+  uint8_t source;     /* DioramaLayerSource */
   float rake;       /* bottom edge sits at z + rake; 0 = parallel, as today */
   float bow;        /* same, but eased quadratically; 0 = no curve */
   float thickness;  /* extrude the bottom edge forward to z + thickness; 0 = flat */
@@ -315,6 +363,15 @@ const DioramaRoomOverride *DioramaLayerOrder_Find(
 DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
     DioramaLayerOrderTable *table, uint8_t map_group, uint8_t map_number);
 
+/* Scoped variants used by section-aware presentation and the live editor.
+ * The legacy two-byte helpers above deliberately address only the base room. */
+const DioramaRoomOverride *DioramaLayerOrder_FindSection(
+    const DioramaLayerOrderTable *table, uint8_t map_group,
+    uint8_t map_number, uint8_t section);
+DioramaRoomOverride *DioramaLayerOrder_FindOrAddSection(
+    DioramaLayerOrderTable *table, uint8_t map_group, uint8_t map_number,
+    uint8_t section);
+
 /* True when the room has at least one authored plane. A room whose every
  * override was reset is NOT active, so it behaves exactly as if it had never
  * been authored — that is what makes "Reset room" a true undo. */
@@ -323,6 +380,9 @@ bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room);
 /* Drop every override for a room (the editor's "Reset room"). */
 void DioramaLayerOrder_ResetRoom(DioramaLayerOrderTable *table,
                                  uint8_t map_group, uint8_t map_number);
+void DioramaLayerOrder_ResetSection(DioramaLayerOrderTable *table,
+                                    uint8_t map_group, uint8_t map_number,
+                                    uint8_t section);
 
 /* Resolve the draw list for a room.
  *
@@ -344,6 +404,14 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
                               const DioramaResolvedLayer *defaults,
                               int default_count,
                               DioramaResolvedLayer *out, int capacity);
+
+/* Resolve the base room and then an optional section refinement. */
+int DioramaLayerOrder_ResolveSection(const DioramaLayerOrderTable *table,
+                                     uint8_t map_group, uint8_t map_number,
+                                     uint8_t section,
+                                     const DioramaResolvedLayer *defaults,
+                                     int default_count,
+                                     DioramaResolvedLayer *out, int capacity);
 
 /* The plane's manifest token ("bg1", "bg2hi", "obj2", ...), or NULL if the
  * plane index is not one the diorama draws. Stable across versions: these
@@ -371,6 +439,13 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
  * read). Returns false if it is not one of ours or is malformed. */
 bool DioramaLayerOrder_ParseSection(const char *section, uint8_t *out_group,
                                     uint8_t *out_map);
+
+/* Extended grammar: "layers:GG:MM[:token]". The two-byte parser above remains
+ * strict and accepts only the base-room spelling. */
+bool DioramaLayerOrder_ParseScopedSection(const char *section,
+                                          uint8_t *out_group,
+                                          uint8_t *out_map,
+                                          uint8_t *out_layer_section);
 
 /* Render a room as manifest text into `buffer`. Returns the number of bytes
  * that WOULD be written (like snprintf), so a caller can detect truncation.

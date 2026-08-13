@@ -3,6 +3,7 @@
 
 #include "action_effect_clock.h"
 #include "action_effects.h"
+#include "action_bg_plan.h"
 #include "action_bg_world.h"
 #include "actraiser_game.h"
 #include "frame_timing.h"
@@ -2026,7 +2027,10 @@ static void TestAitosWaterfallSplashIdentity(void) {
   CHECK(frame.decorations[2].render_layer ==
         kActionEffectRenderLayer_Atmosphere);
   CHECK(frame.decorations[2].world_x == 856 &&
-        frame.decorations[2].world_y == 704);
+        frame.decorations[2].world_y == 736);
+  CHECK(frame.decorations[2].world_y - 488 ==
+        kActRaiserAuthenticHeight +
+            kActionBgAitosWaterfallBottomExtensionPixels);
 
   /* Both observed waterfall subsections use the same exact positive
    * structure; the map range itself must not accidentally stop at `$02`. */

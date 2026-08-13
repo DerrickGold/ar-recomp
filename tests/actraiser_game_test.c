@@ -14,6 +14,22 @@ static int failures;
   }                                                                         \
 } while (0)
 
+static void TestActionMapDomain(void) {
+  static const uint8_t kExpectedLastMap[] = { 0, 4, 8, 6, 7, 8, 8, 8 };
+  CHECK(!ActRaiser_IsActionMapGroup(0));
+  CHECK(!ActRaiser_IsActionMapGroup(8));
+  for (uint8_t group = 1; group <= 7; group++) {
+    CHECK(ActRaiser_ActionMapLast(group) == kExpectedLastMap[group]);
+    CHECK(!ActRaiser_IsActionMap(group, 0));
+    CHECK(ActRaiser_IsActionMap(group, 1));
+    CHECK(ActRaiser_IsActionMap(group, kExpectedLastMap[group]));
+    CHECK(!ActRaiser_IsActionMap(
+        group, (uint8_t)(kExpectedLastMap[group] + 1)));
+  }
+  CHECK(ActRaiser_ActionMapLast(0) == 0);
+  CHECK(ActRaiser_ActionMapLast(8) == 0);
+}
+
 static void TestSimSpriteRangePolicy(void) {
   ActRaiserSimSpriteRangePolicy policy =
       ActRaiser_ResolveSimSpriteRangePolicy(true, 256, false, 0);
@@ -287,6 +303,7 @@ static void TestSkyPalaceMagicIconScanRange(void) {
 }
 
 int main(void) {
+  TestActionMapDomain();
   TestSimSpriteRangePolicy();
   TestSimulationTownScope();
   TestActionEntryActivationPolicy();

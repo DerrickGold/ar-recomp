@@ -12,6 +12,11 @@
 enum {
   kActionBgPlanLayerCount = 2,
   kActionBgMaxBands = 4,
+  /* Aitos `$04/$02` may safely expose this many BG2 rows below the authentic
+   * 224-line view. The waterfall atmosphere uses the same seam; keeping the
+   * policy value public prevents its emitter from drifting back to the
+   * authentic edge while the drawable waterfall continues below it. */
+  kActionBgAitosWaterfallBottomExtensionPixels = 24,
   kActionBgPresentationBandMax =
       kActionBgPlanLayerCount * kActionBgMaxBands,
 };

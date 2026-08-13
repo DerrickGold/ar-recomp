@@ -393,6 +393,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_bg_plan_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_bg_plan
         COMMAND actraiser_action_bg_plan_test)
@@ -405,6 +406,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_bg_tuner_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_bg_tuner
         COMMAND actraiser_action_bg_tuner_test)
@@ -801,6 +803,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_diorama_skybox_uv_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_diorama_skybox_uv_test PRIVATE m)
     add_test(NAME actraiser_diorama_skybox_uv
@@ -848,6 +851,22 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_diorama_layer_order
         COMMAND actraiser_diorama_layer_order_test)
+
+    # ROM backdrop HLE uses the stock asset script and compressed-asset format.
+    # This exercises command inheritance plus literal/back-reference decoding
+    # with synthetic data, so no copyrighted ROM is required by the suite. The
+    # binary also accepts an optional local ROM path for a 98-source census.
+    add_executable(actraiser_diorama_rom_backdrop_test
+        tests/diorama_rom_backdrop_test.c
+        src/diorama/diorama_rom_backdrop.c
+    )
+    target_include_directories(actraiser_diorama_rom_backdrop_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/diorama
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_diorama_rom_backdrop
+        COMMAND actraiser_diorama_rom_backdrop_test)
 
     # The in-game layer editor's row model and strategy authoring. Pure for the
     # same reason the depth shapes are: the overlay that consumes it is SDL, and

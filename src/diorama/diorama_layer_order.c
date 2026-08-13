@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "actraiser_game.h"
+
 /* Manifest tokens. These ARE the file grammar — renaming one invalidates every
  * authored manifest, so they are deliberately terse and stable. */
 static const struct { int plane; const char *token; } kPlaneTokens[] = {
@@ -20,6 +22,92 @@ static const struct { int plane; const char *token; } kPlaneTokens[] = {
 };
 static const int kPlaneTokenCount =
     (int)(sizeof(kPlaneTokens) / sizeof(kPlaneTokens[0]));
+
+static const char *const kSectionTokens[kDioramaLayerSection_Count] = {
+  [kDioramaLayerSection_Room] = NULL,
+  [kDioramaLayerSection_AitosWaterfall] = "waterfall",
+};
+
+const char *DioramaLayerOrder_SectionToken(int section) {
+  if (section <= kDioramaLayerSection_Room ||
+      section >= kDioramaLayerSection_Count)
+    return NULL;
+  return kSectionTokens[section];
+}
+
+int DioramaLayerOrder_SectionFromToken(const char *token) {
+  if (!token || !token[0]) return kDioramaLayerSection_Room;
+  for (int i = kDioramaLayerSection_Room + 1;
+       i < kDioramaLayerSection_Count; i++)
+    if (kSectionTokens[i] && !strcmp(kSectionTokens[i], token)) return i;
+  return -1;
+}
+
+const char *DioramaLayerOrder_SourceToken(int source) {
+  static char token[20];
+  uint8_t group = 0, map = 0, bg = 0;
+  if (source == kDioramaLayerSource_Captured) return "captured";
+  if (!DioramaLayerOrder_DecodeActionBgSource(source, &group, &map, &bg))
+    return "captured";
+  snprintf(token, sizeof(token), "rom-%02x-%02x-bg%u", group, map, bg);
+  return token;
+}
+
+int DioramaLayerOrder_SourceFromToken(const char *token) {
+  if (!token) return -1;
+  if (!strcmp(token, "captured")) return kDioramaLayerSource_Captured;
+  if (!strcmp(token, "aitos-sky")) return kDioramaLayerSource_AitosSky;
+  unsigned group = 0, map = 0, bg = 0;
+  char tail = 0;
+  if (sscanf(token, "rom-%2x-%2x-bg%u%c", &group, &map, &bg, &tail) != 3 ||
+      group > 0xFF || map > 0xFF || bg > 0xFF)
+    return -1;
+  return DioramaLayerOrder_ActionBgSource(
+      (uint8_t)group, (uint8_t)map, (uint8_t)bg);
+}
+
+int DioramaLayerOrder_ActionBgSource(uint8_t map_group, uint8_t map_number,
+                                     uint8_t bg_layer) {
+  if (!ActRaiser_IsActionMap(map_group, map_number) ||
+      (bg_layer != 1 && bg_layer != 2))
+    return -1;
+  return kDioramaLayerSource_ActionBgFirst +
+      (((int)map_group - 1) * 8 + ((int)map_number - 1)) * 2 +
+      ((int)bg_layer - 1);
+}
+
+bool DioramaLayerOrder_DecodeActionBgSource(int source,
+                                            uint8_t *out_map_group,
+                                            uint8_t *out_map_number,
+                                            uint8_t *out_bg_layer) {
+  const int slot = source - kDioramaLayerSource_ActionBgFirst;
+  if (slot < 0 || slot >= 7 * 8 * 2) return false;
+  const uint8_t group = (uint8_t)(slot / (8 * 2) + 1);
+  const uint8_t map = (uint8_t)((slot / 2) % 8 + 1);
+  const uint8_t bg = (uint8_t)(slot % 2 + 1);
+  if (!ActRaiser_IsActionMap(group, map)) return false;
+  if (out_map_group) *out_map_group = group;
+  if (out_map_number) *out_map_number = map;
+  if (out_bg_layer) *out_bg_layer = bg;
+  return true;
+}
+
+bool DioramaLayerOrder_SourceIsValid(int source) {
+  return source == kDioramaLayerSource_Captured ||
+      DioramaLayerOrder_DecodeActionBgSource(source, NULL, NULL, NULL);
+}
+
+int DioramaLayerOrder_NextSource(int source, int direction) {
+  if (!DioramaLayerOrder_SourceIsValid(source))
+    source = kDioramaLayerSource_Captured;
+  for (int attempts = 0; attempts < kDioramaLayerSource_Count; attempts++) {
+    source += direction < 0 ? -1 : 1;
+    if (source < 0) source = kDioramaLayerSource_Count - 1;
+    if (source >= kDioramaLayerSource_Count) source = 0;
+    if (DioramaLayerOrder_SourceIsValid(source)) return source;
+  }
+  return kDioramaLayerSource_Captured;
+}
 
 const char *DioramaLayerOrder_PlaneToken(int plane) {
   for (int i = 0; i < kPlaneTokenCount; i++)
@@ -97,11 +185,18 @@ int DioramaLayerOrder_StackCopiesForDensity(float depth, float density) {
 const DioramaRoomOverride *DioramaLayerOrder_Find(
     const DioramaLayerOrderTable *table, uint8_t map_group,
     uint8_t map_number) {
+  return DioramaLayerOrder_FindSection(
+      table, map_group, map_number, kDioramaLayerSection_Room);
+}
+
+const DioramaRoomOverride *DioramaLayerOrder_FindSection(
+    const DioramaLayerOrderTable *table, uint8_t map_group,
+    uint8_t map_number, uint8_t section) {
   if (!table) return NULL;
   for (int i = 0; i < table->count; i++) {
     const DioramaRoomOverride *room = &table->rooms[i];
     if (room->used && room->map_group == map_group &&
-        room->map_number == map_number)
+        room->map_number == map_number && room->section == section)
       return room;
   }
   return NULL;
@@ -109,11 +204,19 @@ const DioramaRoomOverride *DioramaLayerOrder_Find(
 
 DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
     DioramaLayerOrderTable *table, uint8_t map_group, uint8_t map_number) {
+  return DioramaLayerOrder_FindOrAddSection(
+      table, map_group, map_number, kDioramaLayerSection_Room);
+}
+
+DioramaRoomOverride *DioramaLayerOrder_FindOrAddSection(
+    DioramaLayerOrderTable *table, uint8_t map_group, uint8_t map_number,
+    uint8_t section) {
+  if (section >= kDioramaLayerSection_Count) return NULL;
   if (!table) return NULL;
   for (int i = 0; i < table->count; i++) {
     DioramaRoomOverride *room = &table->rooms[i];
     if (room->used && room->map_group == map_group &&
-        room->map_number == map_number)
+        room->map_number == map_number && room->section == section)
       return room;
   }
   /* Reuse a slot vacated by a reset before growing. */
@@ -124,6 +227,7 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
       room->used = true;
       room->map_group = map_group;
       room->map_number = map_number;
+      room->section = section;
       return room;
     }
   }
@@ -133,6 +237,7 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
   room->used = true;
   room->map_group = map_group;
   room->map_number = map_number;
+  room->section = section;
   table->count++;
   return room;
 }
@@ -141,7 +246,8 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
  * and the per-plane emit skip in FormatRoomBody must agree on this exact set, so
  * it lives in one place. NOT the same as the editor's shape-only clear subset. */
 static bool PlaneOverrideIsAuthored(const DioramaPlaneOverride *o) {
-  return o->set_order || o->set_z || o->set_alpha || o->set_rake || o->set_bow ||
+  return o->set_order || o->set_z || o->set_alpha || o->set_source ||
+         o->set_rake || o->set_bow ||
          o->set_thickness || o->set_stack || o->set_stack_copies ||
          o->set_stack_density || o->set_stack_direction || o->set_voxel ||
          o->set_voxel_copies;
@@ -158,11 +264,18 @@ bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
 
 void DioramaLayerOrder_ResetRoom(DioramaLayerOrderTable *table,
                                  uint8_t map_group, uint8_t map_number) {
+  DioramaLayerOrder_ResetSection(
+      table, map_group, map_number, kDioramaLayerSection_Room);
+}
+
+void DioramaLayerOrder_ResetSection(DioramaLayerOrderTable *table,
+                                    uint8_t map_group, uint8_t map_number,
+                                    uint8_t section) {
   if (!table) return;
   for (int i = 0; i < table->count; i++) {
     DioramaRoomOverride *room = &table->rooms[i];
     if (room->used && room->map_group == map_group &&
-        room->map_number == map_number) {
+        room->map_number == map_number && room->section == section) {
       memset(room, 0, sizeof(*room));
       /* Left !used so the slot is recycled; count is not decremented because
        * later entries must keep their indices. */
@@ -176,12 +289,27 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
                               const DioramaResolvedLayer *defaults,
                               int default_count,
                               DioramaResolvedLayer *out, int capacity) {
+  return DioramaLayerOrder_ResolveSection(
+      table, map_group, map_number, kDioramaLayerSection_Room,
+      defaults, default_count, out, capacity);
+}
+
+int DioramaLayerOrder_ResolveSection(const DioramaLayerOrderTable *table,
+                                     uint8_t map_group, uint8_t map_number,
+                                     uint8_t section,
+                                     const DioramaResolvedLayer *defaults,
+                                     int default_count,
+                                     DioramaResolvedLayer *out, int capacity) {
   if (!defaults || !out || default_count <= 0 || capacity <= 0) return 0;
   int n = default_count < capacity ? default_count : capacity;
 
-  const DioramaRoomOverride *room =
-      DioramaLayerOrder_Find(table, map_group, map_number);
-  const bool active = DioramaLayerOrder_RoomIsActive(room);
+  const DioramaRoomOverride *rooms[2] = {
+    DioramaLayerOrder_Find(table, map_group, map_number),
+    section == kDioramaLayerSection_Room ? NULL :
+        DioramaLayerOrder_FindSection(table, map_group, map_number, section),
+  };
+  const bool active = DioramaLayerOrder_RoomIsActive(rooms[0]) ||
+                      DioramaLayerOrder_RoomIsActive(rooms[1]);
 
   /* Sort keys, parallel to `out`. A plane with no authored order keeps its
    * built-in slot, so it cannot drift: only authored planes move. */
@@ -192,46 +320,42 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
     if (out[i].alpha == 0) out[i].alpha = kDioramaLayerAlphaOpaque;
     keys[i] = i;  /* built-in slot */
     if (!active) continue;
-    const DioramaPlaneOverride *o = NULL;
-    if (out[i].plane >= 0 && out[i].plane < kDioramaPlane_Count)
-      o = &room->planes[out[i].plane];
-    if (!o) continue;
-    if (o->set_z) out[i].z = o->z;
-    if (o->set_alpha) out[i].alpha = o->alpha;
-    if (o->set_rake) out[i].rake = o->rake;
-    if (o->set_bow) out[i].bow = o->bow;
-    if (o->set_thickness) out[i].thickness = o->thickness;
-    if (o->set_stack) out[i].stack = o->stack;
-    if (o->set_stack_direction) out[i].stack_direction = o->stack_direction;
-    /* Count precedence: an explicit `copies` is the most specific instruction and
-     * wins; then a `density`, resolved against this room's own fill depth; then a
-     * plain `stack:` gets a usable default rather than silently resolving to zero
-     * copies, which would make the key look broken when authored alone. */
-    if (o->set_stack_copies) {
-      out[i].stack_copies = o->stack_copies;
-    } else if (o->set_stack_density) {
-      out[i].stack_copies = DioramaLayerOrder_StackCopiesForDensity(
-          out[i].stack, o->stack_density);
-    } else if (o->set_stack) {
-      out[i].stack_copies = kDioramaStackCopiesDefault;
+    for (int scope = 0; scope < 2; scope++) {
+      const DioramaRoomOverride *room = rooms[scope];
+      if (!DioramaLayerOrder_RoomIsActive(room)) continue;
+      const DioramaPlaneOverride *o = NULL;
+      if (out[i].plane >= 0 && out[i].plane < kDioramaPlane_Count)
+        o = &room->planes[out[i].plane];
+      if (!o) continue;
+      if (o->set_z) out[i].z = o->z;
+      if (o->set_alpha) out[i].alpha = o->alpha;
+      if (o->set_source) out[i].source = o->source;
+      if (o->set_rake) out[i].rake = o->rake;
+      if (o->set_bow) out[i].bow = o->bow;
+      if (o->set_thickness) out[i].thickness = o->thickness;
+      if (o->set_stack) out[i].stack = o->stack;
+      if (o->set_stack_direction) out[i].stack_direction = o->stack_direction;
+      /* Later section values refine inherited room values. A scoped `density`
+       * therefore resolves against the base room's fill depth, while a scoped
+       * plain `stack` intentionally replaces an inherited copy policy. */
+      if (o->set_stack_copies) {
+        out[i].stack_copies = o->stack_copies;
+      } else if (o->set_stack_density) {
+        out[i].stack_copies = DioramaLayerOrder_StackCopiesForDensity(
+            out[i].stack, o->stack_density);
+      } else if (o->set_stack) {
+        out[i].stack_copies = kDioramaStackCopiesDefault;
+      }
+      if (o->set_voxel) {
+        out[i].stack = o->voxel;
+        out[i].stack_solid = true;
+        out[i].stack_copies = o->set_voxel_copies ? o->voxel_copies
+                                                  : kDioramaVoxelCopiesDefault;
+        if (out[i].stack_copies > kDioramaVoxelMax)
+          out[i].stack_copies = kDioramaVoxelMax;
+      }
+      if (o->set_order) keys[i] = o->order;
     }
-    /* A voxel resolves onto the SAME stack fields -- the geometry is identical,
-     * only the falloff and the cap differ -- plus the solid flag the renderer
-     * keys the fade off. Authored after the stack keys so a room that sets both
-     * gets the voxel, which is the more specific intent. */
-    if (o->set_voxel) {
-      out[i].stack = o->voxel;
-      out[i].stack_solid = true;
-      out[i].stack_copies = o->set_voxel_copies ? o->voxel_copies
-                                                : kDioramaVoxelCopiesDefault;
-      if (out[i].stack_copies > kDioramaVoxelMax)
-        out[i].stack_copies = kDioramaVoxelMax;
-    }
-    /* `slices:` with no `voxel:` is deliberately inert: a count without a depth
-     * is not a shape, and inventing a depth the author never asked for would be
-     * worse than doing nothing. It still marks the room active, so the value
-     * survives an export/re-import round trip. */
-    if (o->set_order) keys[i] = o->order;
   }
   if (!active) return n;
 
@@ -310,6 +434,16 @@ static const char *NextWord(const char *p, char *out, size_t size) {
 
 bool DioramaLayerOrder_ParseSection(const char *section, uint8_t *out_group,
                                     uint8_t *out_map) {
+  uint8_t scope = kDioramaLayerSection_Room;
+  return DioramaLayerOrder_ParseScopedSection(
+             section, out_group, out_map, &scope) &&
+         scope == kDioramaLayerSection_Room;
+}
+
+bool DioramaLayerOrder_ParseScopedSection(const char *section,
+                                          uint8_t *out_group,
+                                          uint8_t *out_map,
+                                          uint8_t *out_layer_section) {
   if (!section) return false;
   static const char kPrefix[] = "layers:";
   const size_t prefix_len = sizeof(kPrefix) - 1;
@@ -321,11 +455,20 @@ bool DioramaLayerOrder_ParseSection(const char *section, uint8_t *out_group,
   if (end == rest || !end || *end != ':') return false;
   const char *map_text = end + 1;
   long map = strtol(map_text, &end, 16);
-  if (end == map_text || !end || *end != '\0') return false;
+  if (end == map_text || !end) return false;
   if (group < 0 || group > 0xFF || map < 0 || map > 0xFF) return false;
+
+  int layer_section = kDioramaLayerSection_Room;
+  if (*end == ':') {
+    layer_section = DioramaLayerOrder_SectionFromToken(end + 1);
+    if (layer_section <= kDioramaLayerSection_Room) return false;
+  } else if (*end != '\0') {
+    return false;
+  }
 
   if (out_group) *out_group = (uint8_t)group;
   if (out_map) *out_map = (uint8_t)map;
+  if (out_layer_section) *out_layer_section = (uint8_t)layer_section;
   return true;
 }
 
@@ -413,6 +556,17 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       }
       edit.alpha = (uint8_t)a;
       edit.set_alpha = true;
+      touched = true;
+    } else if (!strcmp(word, "source")) {
+      int source = DioramaLayerOrder_SourceFromToken(value);
+      if (plane != kDioramaPlane_Backdrop ||
+          !DioramaLayerOrder_SourceIsValid(source)) {
+        if (out_error) *out_error =
+            "bad source (backdrop captured/rom-GG-MM-bgN)";
+        return false;
+      }
+      edit.source = (uint8_t)source;
+      edit.set_source = true;
       touched = true;
     } else if (!strcmp(word, "rake")) {
       /* Signed: a negative rake tilts the bottom edge AWAY, which is the right
@@ -553,7 +707,12 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
     if (wrote > 0) total += (size_t)wrote;                                  \
   } while (0)
 
-  APPEND("[layers:%02X:%02X]\n", room->map_group, room->map_number);
+  const char *section = DioramaLayerOrder_SectionToken(room->section);
+  if (section)
+    APPEND("[layers:%02X:%02X:%s]\n", room->map_group, room->map_number,
+           section);
+  else
+    APPEND("[layers:%02X:%02X]\n", room->map_group, room->map_number);
   /* Emit in table-token order, not plane-index order, so a diff between two
    * exports is stable and readable. */
   for (int i = 0; i < kPlaneTokenCount; i++) {
@@ -567,6 +726,8 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
     if (o->set_order) APPEND(" order:%d", o->order);
     if (o->set_z) APPEND(" z:%.4g", (double)o->z);
     if (o->set_alpha) APPEND(" alpha:%u", (unsigned)o->alpha);
+    if (o->set_source)
+      APPEND(" source:%s", DioramaLayerOrder_SourceToken(o->source));
     if (o->set_rake) APPEND(" rake:%.4g", (double)o->rake);
     if (o->set_bow) APPEND(" bow:%.4g", (double)o->bow);
     if (o->set_thickness) APPEND(" thick:%.4g", (double)o->thickness);
@@ -604,7 +765,8 @@ static bool MergeLineIsPlaneBody(const char *line) {
  * room. Mirrors the loader's own header handling in diorama.c so the merge
  * splits the file on exactly the sections the loader would recognise. */
 static bool MergeLineIsSection(const char *line, bool *is_ours,
-                               uint8_t *group, uint8_t *map) {
+                               uint8_t *group, uint8_t *map,
+                               uint8_t *section) {
   *is_ours = false;
   const char *at = line;
   while (*at == ' ' || *at == '\t') at++;
@@ -616,11 +778,12 @@ static bool MergeLineIsSection(const char *line, bool *is_ours,
   for (const char *p = at + 1; p < close && n + 1 < sizeof(inner); p++)
     inner[n++] = *p;
   inner[n] = '\0';
-  uint8_t g = 0, m = 0;
-  if (DioramaLayerOrder_ParseSection(inner, &g, &m)) {
+  uint8_t g = 0, m = 0, s = kDioramaLayerSection_Room;
+  if (DioramaLayerOrder_ParseScopedSection(inner, &g, &m, &s)) {
     *is_ours = true;
     if (group) *group = g;
     if (map) *map = m;
+    if (section) *section = s;
   }
   return true;
 }
@@ -675,15 +838,16 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
     probe[probe_len] = '\0';
 
     bool is_ours = false;
-    uint8_t group = 0, map = 0;
-    if (MergeLineIsSection(probe, &is_ours, &group, &map)) {
-      if (is_ours && DioramaLayerOrder_Find(table, group, map) &&
+    uint8_t group = 0, map = 0, section = kDioramaLayerSection_Room;
+    if (MergeLineIsSection(probe, &is_ours, &group, &map, &section)) {
+      const DioramaRoomOverride *managed = DioramaLayerOrder_FindSection(
+          table, group, map, section);
+      if (is_ours && managed &&
           DioramaLayerOrder_RoomIsActive(
-              DioramaLayerOrder_Find(table, group, map))) {
+              managed)) {
         /* A section we manage and the table still marks active: regenerate its
          * body here, then skip the file's old body until the next section. */
-        const DioramaRoomOverride *room =
-            DioramaLayerOrder_Find(table, group, map);
+        const DioramaRoomOverride *room = managed;
         /* Preserve any inline comment the user put ON the header line
          * ("[layers:01:02]  ; Fillmore act 2"). FormatRoomBody re-emits the header
          * bare, so without this the label is silently dropped -- a small loss, but

@@ -1542,6 +1542,9 @@ void PresentCompositeScene(const FrameSlot *slot,
                            slot->diorama_plane_additive_mask &
                                s_diorama_uploaded_plane_mask,
                            effect_obj_priority_mask,
+                           slot->diorama_map_group,
+                           slot->diorama_map_number,
+                           slot->diorama_layer_section,
                            &bg2_valid_spans,
                            DrawActionDioramaPlaneEffect, &plane_effect,
                            &action_projection))

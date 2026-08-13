@@ -82,6 +82,7 @@ typedef enum DioramaEditorParam {
   kDioramaEditorParam_Direction,  /* stack fill side */
   kDioramaEditorParam_Z,
   kDioramaEditorParam_Alpha,
+  kDioramaEditorParam_Source,
   kDioramaEditorParam_Order,
 } DioramaEditorParam;
 
@@ -98,6 +99,16 @@ typedef struct DioramaEditorRow {
    * rows and the parameter rows beneath them share it. */
   int plane;
   DioramaEditorParam param;
+  /* Exact live scope represented by this row. The settings overlay uses this
+   * identity for writes instead of re-querying a camera-local provider after
+   * the row was selected. */
+  uint8_t map_group;
+  uint8_t map_number;
+  uint8_t section;
+  /* Renderer-resolved value of an inherited source. Scoped records keep only
+   * their own authored fields, but the Source row must display and step from
+   * what is actually being drawn. */
+  uint8_t effective_source;
   /* True when the row is a parameter of the selected plane, so the overlay can
    * indent it and dim it distinctly from a plane row. */
   bool nested;
@@ -111,6 +122,7 @@ typedef struct DioramaEditorContext {
   bool room_live;         /* false when the diorama is not running a room */
   uint8_t map_group;      /* $18 */
   uint8_t map_number;     /* $19 */
+  uint8_t section;        /* DioramaLayerSection */
   /* The plane the cursor is on, or -1. Only this plane's parameters are listed
    * -- see the header comment on why the list expands rather than showing every
    * plane's parameters at once. */
