@@ -48,14 +48,29 @@ enum {
   kSaveEquippedMagic = 0x145d,
   kSaveScores = 0x1464,
   kSaveProfessionalMode = 0x1ff0,
+
+  kSaveRuntimePathBytes = 512,
+  kSaveIniLineBytes = 1024,
+  kSaveIniRawChunkBytes = 64,
+  kSaveIniRawChunkHexCharacters = kSaveIniRawChunkBytes * 2,
+  kSaveIniRawOffsetHexCharacters = 4,
+  kProfessionalModeSignatureBytes = 3,
+  kDeathHeimStateLocked = 0,
+  kDeathHeimStateUnlocked = 1,
+  kDeathHeimStateCleared = 4,
+  kDeathHeimStoredCleared = 3,
+  kSaveBackupSuffixCapacity = 128,
+  kSaveBackupPathBytes =
+      kSaveRuntimePathBytes + kSaveBackupSuffixCapacity,
+  kSaveCopyBufferBytes = 4096,
 };
 
 typedef struct SaveRuntime {
   uint8_t *live;
   size_t size;
   SaveBackend backend;
-  char native_path[512];
-  char ini_path[512];
+  char native_path[kSaveRuntimePathBytes];
+  char ini_path[kSaveRuntimePathBytes];
   uint8_t shadow[kActRaiserSramSize];
   bool shadow_valid;
   bool backup_taken;
@@ -214,9 +229,10 @@ static int HexDigit(char ch) {
   return -1;
 }
 
-static bool DecodeHexChunk(const char *text, uint8_t out[64]) {
-  if (!text || strlen(text) != 128) return false;
-  for (int i = 0; i < 64; i++) {
+static bool DecodeHexChunk(
+    const char *text, uint8_t out[kSaveIniRawChunkBytes]) {
+  if (!text || strlen(text) != kSaveIniRawChunkHexCharacters) return false;
+  for (int i = 0; i < kSaveIniRawChunkBytes; i++) {
     int high = HexDigit(text[i * 2]);
     int low = HexDigit(text[i * 2 + 1]);
     if (high < 0 || low < 0) return false;
@@ -257,12 +273,12 @@ static bool LoadIni(const char *path,
 
   enum { kSection_None, kSection_Meta, kSection_Regions, kSection_Raw } section;
   section = kSection_None;
-  bool raw_seen[kActRaiserSramSize / 64] = {0};
+  bool raw_seen[kActRaiserSramSize / kSaveIniRawChunkBytes] = {0};
   bool region_seen[kActRaiserSaveRegionCount] = {0};
   int region_values[kActRaiserSaveRegionCount] = {0};
   bool format_seen = false, version_seen = false, size_seen = false;
   bool success = true;
-  char line[1024];
+  char line[kSaveIniLineBytes];
   int line_number = 0;
   memset(scratch, 0, kActRaiserSramSize);
 
@@ -327,12 +343,13 @@ static bool LoadIni(const char *path,
     } else if (section == kSection_Raw) {
       char *end = NULL;
       long offset = strtol(key, &end, 16);
-      if (!end || *end || strlen(key) != 4 || offset < 0 ||
-          offset >= kActRaiserSramSize || (offset & 63)) {
+      if (!end || *end || strlen(key) != kSaveIniRawOffsetHexCharacters ||
+          offset < 0 || offset >= kActRaiserSramSize ||
+          (offset % kSaveIniRawChunkBytes)) {
         success = Fail(error, "%s:%d: invalid raw chunk '%s'", path,
                        line_number, key);
       } else {
-        int chunk = (int)offset / 64;
+        int chunk = (int)offset / kSaveIniRawChunkBytes;
         if (raw_seen[chunk] || !DecodeHexChunk(value, scratch + offset))
           success = Fail(error, "%s:%d: invalid/duplicate raw chunk '%s'",
                          path, line_number, key);
@@ -347,9 +364,10 @@ static bool LoadIni(const char *path,
   if (!success) return false;
   if (!format_seen || !version_seen || !size_seen)
     return Fail(error, "%s is missing required [Meta] keys", path);
-  for (int i = 0; i < kActRaiserSramSize / 64; i++)
+  for (int i = 0; i < kActRaiserSramSize / kSaveIniRawChunkBytes; i++)
     if (!raw_seen[i])
-      return Fail(error, "%s is missing raw chunk %04X", path, i * 64);
+      return Fail(error, "%s is missing raw chunk %04X", path,
+                  i * kSaveIniRawChunkBytes);
   if (!Save_ChecksumValid(scratch))
     return Fail(error, "%s raw image has an invalid checksum", path);
 
@@ -392,7 +410,7 @@ static bool FlushFileData(FILE *file) {
  * files and MoveFileEx's metadata write-through covers the entry. */
 static void SyncContainingDirectory(const char *path) {
 #ifndef _WIN32
-  char dir[1024];
+  char dir[kHostPathCapacity];
   snprintf(dir, sizeof dir, "%s", path);
   char *slash = strrchr(dir, '/');
   if (slash) *slash = '\0';
@@ -481,10 +499,11 @@ static bool WriteIniBody(FILE *file, const void *context,
   if (fprintf(file, "\n[Raw]\n") < 0)
     return Fail(error, "error writing INI raw header");
   static const char hex[] = "0123456789abcdef";
-  char encoded[129];
-  encoded[128] = 0;
-  for (int offset = 0; offset < kActRaiserSramSize; offset += 64) {
-    for (int i = 0; i < 64; i++) {
+  char encoded[kSaveIniRawChunkHexCharacters + 1];
+  encoded[kSaveIniRawChunkHexCharacters] = 0;
+  for (int offset = 0; offset < kActRaiserSramSize;
+       offset += kSaveIniRawChunkBytes) {
+    for (int i = 0; i < kSaveIniRawChunkBytes; i++) {
       encoded[i * 2] = hex[image[offset + i] >> 4];
       encoded[i * 2 + 1] = hex[image[offset + i] & 15];
     }
@@ -618,7 +637,7 @@ static bool BackupCopyFile(const char *source, const char *destination,
     return Fail(error, "cannot write %s: %s", destination, strerror(errno));
   }
   bool success = true;
-  uint8_t buffer[4096];
+  uint8_t buffer[kSaveCopyBufferBytes];
   size_t count;
   while ((count = fread(buffer, 1, sizeof(buffer), in)) != 0) {
     if (fwrite(buffer, 1, count, out) != count) {
@@ -658,7 +677,7 @@ static bool BackupActiveOnce(bool enabled, SaveError *error) {
 #endif
   char timestamp[32];
   strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", &local_time);
-  char backup[640];
+  char backup[kSaveBackupPathBytes];
   snprintf(backup, sizeof(backup), "%s.bak-%s", path, timestamp);
   if (!BackupCopyFile(path, backup, error)) return false;
   s_runtime.backup_taken = true;
@@ -728,8 +747,9 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
   }
   if (edits->player_name_set) {
     size_t length = strlen(edits->player_name);
-    if (length == 0 || length > 8)
-      return Fail(error, "Player name must contain 1..8 characters");
+    if (length == 0 || length > kActRaiserPlayerNameCharacterLimit)
+      return Fail(error, "Player name must contain 1..%d characters",
+                  kActRaiserPlayerNameCharacterLimit);
     for (size_t i = 0; i < length; i++) {
       unsigned char ch = (unsigned char)edits->player_name[i];
       if (ch < 0x20 || ch > 0x7e)
@@ -737,7 +757,8 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
     }
     /* The game reserves nine bytes at $1439-$1441 for an eight-character
      * name plus terminator/padding; $1442 begins the level word. */
-    memset(scratch + kSavePlayerName, 0, 9);
+    memset(scratch + kSavePlayerName, 0,
+           kActRaiserPlayerNameStorageBytes);
     memcpy(scratch + kSavePlayerName, edits->player_name, length);
   }
   if (edits->professional_mode >= 0) {
@@ -748,18 +769,21 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
       scratch[kSaveProfessionalMode + 1] = 'C';
       scratch[kSaveProfessionalMode + 2] = 'T';
     } else {
-      memset(scratch + kSaveProfessionalMode, 0xff, 3);
+      memset(scratch + kSaveProfessionalMode, 0xff,
+             kProfessionalModeSignatureBytes);
     }
   }
   if (edits->death_heim_state >= 0) {
-    if (edits->death_heim_state != 0 && edits->death_heim_state != 1 &&
-        edits->death_heim_state != 4)
+    if (edits->death_heim_state != kDeathHeimStateLocked &&
+        edits->death_heim_state != kDeathHeimStateUnlocked &&
+        edits->death_heim_state != kDeathHeimStateCleared)
       return Fail(error, "Death Heim state must be locked, unlocked, or cleared");
     scratch[kSaveDeathHeimState] =
-        (uint8_t)(edits->death_heim_state == 4 ? 3 : 0);
+        (uint8_t)(edits->death_heim_state == kDeathHeimStateCleared
+                      ? kDeathHeimStoredCleared : 0);
     scratch[kSaveDeathHeimUnlocked] =
         (uint8_t)((scratch[kSaveDeathHeimUnlocked] & ~1u) |
-                  (edits->death_heim_state != 0));
+                  (edits->death_heim_state != kDeathHeimStateLocked));
   }
   if (!SetStagedU16(scratch, kSaveMasterLevel, edits->master_level,
                     1, 17, "Master level", error) ||
@@ -783,21 +807,24 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
       return Fail(error, "Lives must be 1..9");
     scratch[kSaveLives] = (uint8_t)(edits->lives - 1);
   }
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < kActRaiserSaveMagicSlotCount; i++) {
     if (edits->magic_slots[i] < 0) continue;
-    if (edits->magic_slots[i] > 4)
-      return Fail(error, "Magic slot %d must be empty or magic 1..4", i + 1);
+    if (edits->magic_slots[i] > kActRaiserMagicSpellCount)
+      return Fail(error, "Magic slot %d must be empty or magic 1..%d", i + 1,
+                  kActRaiserMagicSpellCount);
     scratch[kSaveMagicSlots + i] =
         (uint8_t)((scratch[kSaveMagicSlots + i] & 0x80) |
                   edits->magic_slots[i]);
   }
   if (edits->equipped_magic >= 0) {
-    if (edits->equipped_magic > 4)
-      return Fail(error, "Equipped magic must be none or spell 1..4");
-    for (int i = 0; i < 4; i++) scratch[kSaveMagicSlots + i] &= 0x7f;
+    if (edits->equipped_magic > kActRaiserMagicSpellCount)
+      return Fail(error, "Equipped magic must be none or spell 1..%d",
+                  kActRaiserMagicSpellCount);
+    for (int i = 0; i < kActRaiserSaveMagicSlotCount; i++)
+      scratch[kSaveMagicSlots + i] &= 0x7f;
     if (edits->equipped_magic) {
       int selected_slot = -1;
-      for (int i = 0; i < 4; i++) {
+      for (int i = 0; i < kActRaiserSaveMagicSlotCount; i++) {
         if ((scratch[kSaveMagicSlots + i] & 0x7f) ==
             edits->equipped_magic) {
           selected_slot = i;
@@ -811,7 +838,7 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
     }
     scratch[kSaveEquippedMagic] = (uint8_t)edits->equipped_magic;
   }
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < kActRaiserSaveItemSlotCount; i++) {
     if (edits->item_slots[i] < 0) continue;
     if (!SaveItemValueValid(edits->item_slots[i]))
       return Fail(error, "Item slot %d has invalid item $%02X", i + 1,
@@ -819,14 +846,17 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
     scratch[kSaveItemSlots + i] = (uint8_t)edits->item_slots[i];
   }
   for (int region = 0; region < kActRaiserSaveRegionCount; region++) {
-    for (int act = 0; act < 2; act++) {
+    for (int act = 0; act < kActRaiserSaveActCount; act++) {
       int score = edits->scores[region][act];
       if (score < 0) continue;
       uint16_t bcd = 0;
       if (!ScoreToBcd(score, &bcd))
         return Fail(error, "%s Act %d score must be 0..99990 by 10",
                     g_save_region_fields[region].label, act + 1);
-      WriteLe16(scratch + kSaveScores + region * 4 + act * 2, bcd);
+      WriteLe16(scratch + kSaveScores +
+                    region * kActRaiserSaveActCount * (int)sizeof(uint16_t) +
+                    act * (int)sizeof(uint16_t),
+                bcd);
     }
   }
   if (!memcmp(scratch, s_runtime.live, sizeof(scratch)))

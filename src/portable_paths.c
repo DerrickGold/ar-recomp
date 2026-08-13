@@ -3,9 +3,8 @@
 #include <stddef.h>
 #include <sys/stat.h>
 
+#include "constants.h"
 #include "launcher.h"
-
-enum { kPortablePathCapacity = 1024 };
 
 static bool PathExists(const char *path) {
   struct stat path_info;
@@ -17,7 +16,7 @@ bool PortablePaths_IsBundle(void) {
       "game-assets",
       "portable.txt",
   };
-  char candidate_path[kPortablePathCapacity];
+  char candidate_path[kHostPathCapacity];
 
   const size_t marker_count =
       sizeof(kBundleMarkers) / sizeof(kBundleMarkers[0]);

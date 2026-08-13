@@ -8,6 +8,9 @@
 
 enum {
   kActionEffectGlowSegments = 32,
+  /* Segment count is a power of two, so animated table indices wrap with this
+   * mask without repeating the literal 31 throughout the renderer. */
+  kActionEffectGlowSegmentMask = kActionEffectGlowSegments - 1,
   /* Each glow is one multi-ring gradient mesh, not a stack of overlapping
    * discs: a hot core ring, a body ring, and a transparent aura ring, joined
    * by triangle strips. Overlapping discs would double-blend along every

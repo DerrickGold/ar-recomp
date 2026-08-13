@@ -210,13 +210,19 @@ uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 addr) {
                     extern uint32_t g_ar_blk_ring[]; extern unsigned g_ar_blk_idx;
                     extern int snes_frame_counter;
                     static uint32_t seen[64]; static int nseen;
-                    uint32_t blk = g_ar_blk_ring[(g_ar_blk_idx - 1u) & 1023u];
+                    uint32_t blk = g_ar_blk_ring[
+                        (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
                     int dup = 0;
                     for (int i = 0; i < nseen; i++) if (seen[i] == blk) { dup = 1; break; }
                     if (!dup && nseen < 64) {
                         seen[nseen++] = blk;
-                        extern uint8 g_ram[0x20000];
-                        unsigned _gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+                        extern uint8 g_ram[kSnesWramSize];
+                        unsigned _gf =
+                            (unsigned)g_ram[
+                                kActRaiserRuntimeWram_GameFrame] |
+                            ((unsigned)g_ram[
+                                 kActRaiserRuntimeWram_GameFrame + 1]
+                             << 8);
                         fprintf(stderr, "[overpop] pop at block $%06X read NEVER-PUSHED "
                                 "stack slot $%04X (S=$%04X, f=%d gf=%u) — unbalanced "
                                 "pop/RTS draining stale stack. (AR_XFLIP_GF=%u to find "
@@ -233,11 +239,17 @@ uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 addr) {
                          * the leak. (aux: bit17=x_flag, bit16=m_flag.) */
                         extern uint32_t g_ar_blk_aux[];
                         {
-                            unsigned cur = (g_ar_blk_idx - 1u) & 1023u;
+                            unsigned cur =
+                                (g_ar_blk_idx - 1u) &
+                                kRuntimeBlockTraceRingMask;
                             int found = 0;
                             for (int k = 1; k < 600; k++) {
-                                unsigned i0 = (cur - (unsigned)k) & 1023u;
-                                unsigned i1 = (cur - (unsigned)k + 1u) & 1023u;
+                                unsigned i0 =
+                                    (cur - (unsigned)k) &
+                                    kRuntimeBlockTraceRingMask;
+                                unsigned i1 =
+                                    (cur - (unsigned)k + 1u) &
+                                    kRuntimeBlockTraceRingMask;
                                 int x0 = (g_ar_blk_aux[i0] >> 17) & 1;
                                 int x1 = (g_ar_blk_aux[i1] >> 17) & 1;
                                 if (x0 == 0 && x1 == 1) {
@@ -258,7 +270,9 @@ uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 addr) {
                              * visible in context. */
                             fprintf(stderr, "[overpop]   recent trail (newest last):\n");
                             for (int k = 16; k >= 0; k--) {
-                                unsigned i = (cur - (unsigned)k) & 1023u;
+                                unsigned i =
+                                    (cur - (unsigned)k) &
+                                    kRuntimeBlockTraceRingMask;
                                 fprintf(stderr, "[overpop]     $%06X x=%u m=%u\n",
                                         g_ar_blk_ring[i], (g_ar_blk_aux[i] >> 17) & 1,
                                         (g_ar_blk_aux[i] >> 16) & 1);
@@ -314,7 +328,7 @@ uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 addr) {
 
 uint16 cpu_read16(CpuState *cpu, uint8 bank, uint16 addr) {
     int off = cpu_ram_offset(bank, addr);
-    if (off >= 0 && off + 1 < 0x20000)
+    if (off >= 0 && off + 1 < kSnesWramSize)
         return (uint16)cpu->ram[off] | ((uint16)cpu->ram[off + 1] << 8);
     if (is_hw_reg(bank, addr)) { cpu_pace_cycles(addr); cpu_hw_log(addr, 1, 0); return ReadRegWord(addr); }
     int sram_lo = cpu_sram_offset(bank, addr);
@@ -348,7 +362,7 @@ void ar_indirect_suppressed_log(CpuState *cpu, uint32 site_pc24,
             (unsigned)cpu->m_flag, (unsigned)cpu->x_flag, snes_frame_counter);
 
     int off = cpu_ram_offset(bank, (uint16)eff);
-    if (off >= 0 && off + 1 < 0x20000) {
+    if (off >= 0 && off + 1 < kSnesWramSize) {
         uint16 target = (uint16)cpu->ram[off] | ((uint16)cpu->ram[off + 1] << 8);
         fprintf(stderr, "[indirlog]   -> WRAM, live table entry = $%04X "
                 "(would-be target $%02X:%04X)\n", target, bank, target);
@@ -407,21 +421,25 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 addr, uint8 v) {
                 extern uint32_t g_ar_blk_ring[]; extern unsigned g_ar_blk_idx;
                 extern uint32_t *g_stack_pusher; extern unsigned *g_stack_pusher_frame;
                 extern int snes_frame_counter;
-                g_stack_pusher[addr] = g_ar_blk_ring[(g_ar_blk_idx - 1u) & 1023u];
+                g_stack_pusher[addr] = g_ar_blk_ring[
+                    (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
                 g_stack_pusher_frame[addr] = (unsigned)snes_frame_counter;
             }
         }
         /* AR_WATCH18: trace game-mode byte $7E:0018 changes (overworld $18=0
          * vs action stage $18=1) — find who drives the mode transition and
          * what the display state is at that moment. */
-        if (off == 0x18 && old != v && ar_env_probe(&ar_probe_watch18, NULL)) {
-            extern int snes_frame_counter; extern uint8 g_ram[0x20000];
+        if (off == kActRaiserRuntimeWram_MapGroup && old != v &&
+            ar_env_probe(&ar_probe_watch18, NULL)) {
+            extern int snes_frame_counter;
+            extern uint8 g_ram[kSnesWramSize];
             extern const char *g_last_recomp_func;
             extern const char *g_recomp_stack[]; extern int g_recomp_stack_top;
             (void)g_recomp_stack; (void)g_recomp_stack_top;
             uint16 s = cpu->S;
             fprintf(stderr, "[$18] f=%d %02x->%02x $19=%02x by=%s PB=%02x S=%04x snstk:",
-                    snes_frame_counter, old, v, g_ram[0x19],
+                    snes_frame_counter, old, v,
+                    g_ram[kActRaiserRuntimeWram_CurrentMap],
                     g_last_recomp_func ? g_last_recomp_func : "?", cpu->PB, s);
             for (int i = 1; i <= 18; i++)
                 fprintf(stderr, " %02x", g_ram[(uint16)(s + i)]);
@@ -438,7 +456,8 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 addr, uint8 v) {
                 extern uint32_t g_ar_blk_ring[]; extern unsigned g_ar_blk_idx;
                 static int n;
                 if (n++ < 8000) {
-                    uint32_t last_blk = g_ar_blk_ring[(g_ar_blk_idx - 1u) & 1023u];
+                    uint32_t last_blk = g_ar_blk_ring[
+                        (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
                     int d14off = cpu_ram_offset(0x7E, (uint16)(cpu->D + 0x0014));
                     int d16off = cpu_ram_offset(0x7E, (uint16)(cpu->D + 0x0016));
                     uint16 d14 = (d14off >= 0) ? ((uint16)cpu->ram[d14off] | ((uint16)cpu->ram[d14off+1] << 8)) : 0xffff;
@@ -478,7 +497,7 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 addr, uint8 v) {
 
 void cpu_write16(CpuState *cpu, uint8 bank, uint16 addr, uint16 v) {
     int off = cpu_ram_offset(bank, addr);
-    if (off >= 0 && off + 1 < 0x20000) {
+    if (off >= 0 && off + 1 < kSnesWramSize) {
         uint16 old = (uint16)cpu->ram[off]
                    | ((uint16)cpu->ram[off + 1] << 8);
         /* AR_WATCH14=1: traces the actual STA
@@ -778,13 +797,16 @@ static RecompReturn _cpu_dispatch_once(CpuState *cpu, uint32 pc24,
      * sentinel is visible, plus the source (who re-entered the loop) + depth. */
     if (pc24 == 0x008966u && getenv("AR_8966X")) {
         extern int snes_frame_counter; extern int g_recomp_stack_top;
-        extern uint8 g_ram[0x20000];
+        extern uint8 g_ram[kSnesWramSize];
         static unsigned long n;
-        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+        unsigned gf =
+            (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+            ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
         const char *gfe = getenv("AR_8966X_GF");
         long wantgf = gfe ? atol(gfe) : -1;
         uint16 x = cpu->X;
-        uint16 sw = (uint16)(g_ram[x & 0x1FFFF] | (g_ram[(x + 1) & 0x1FFFF] << 8));
+        uint16 sw = (uint16)(g_ram[x & kSnesWramMask] |
+                             (g_ram[(x + 1) & kSnesWramMask] << 8));
         if (n++ < 4000 && (wantgf < 0 || (long)gf == wantgf))
             fprintf(stderr, "[8966] X=%04x [$00,X]=%04x S=%04x m=%u src=%06x top=%d f=%d\n",
                     x, sw, cpu->S, (unsigned)cpu->m_flag, source_pc24, g_recomp_stack_top, snes_frame_counter);
@@ -795,9 +817,11 @@ static RecompReturn _cpu_dispatch_once(CpuState *cpu, uint32 pc24,
      * names the handler that corrupts the loop index. */
     if (source_pc24 == 0x008965u && getenv("AR_8966X")) {
         extern int snes_frame_counter;
-        extern uint8 g_ram[0x20000];
+        extern uint8 g_ram[kSnesWramSize];
         static unsigned long n;
-        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+        unsigned gf =
+            (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+            ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
         const char *gfe = getenv("AR_8966X_GF");
         long wantgf = gfe ? atol(gfe) : -1;
         if (n++ < 4000 && (wantgf < 0 || (long)gf == wantgf))
@@ -944,8 +968,9 @@ static RecompReturn _cpu_dispatch_once(CpuState *cpu, uint32 pc24,
          * $8965-gated AR_DISPMISS never saw. A miss to the action-stage fade-in
          * routine would silently skip it -> black playfield. */
         if (getenv("AR_DISPMISSALL")) {
-            extern int snes_frame_counter; extern uint8 g_ram[0x20000];
-            if (g_ram[0x18] == 0x01) {
+            extern int snes_frame_counter;
+            extern uint8 g_ram[kSnesWramSize];
+            if (g_ram[kActRaiserRuntimeWram_MapGroup] == 0x01) {
                 static unsigned long n;
                 if (n++ < 50000)
                     fprintf(stderr, "[missall] ->%06x from %06x m=%u x=%u f=%d\n",

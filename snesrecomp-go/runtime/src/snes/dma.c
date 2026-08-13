@@ -10,8 +10,9 @@
 #include "dma.h"
 #include "snes.h"
 #include "../ar_trace.h"
+#include "../actraiser_runtime_constants.h"
 
-static const int bAdrOffsets[8][4] = {
+static const int bAdrOffsets[kDmaChannelCount][4] = {
   {0, 0, 0, 0},
   {0, 1, 0, 1},
   {0, 0, 0, 0},
@@ -22,7 +23,7 @@ static const int bAdrOffsets[8][4] = {
   {0, 0, 1, 1}
 };
 
-static const int transferLength[8] = {
+static const int transferLength[kDmaChannelCount] = {
   1, 2, 2, 4, 4, 4, 2, 4
 };
 
@@ -39,7 +40,7 @@ void dma_free(Dma* dma) {
 }
 
 void dma_reset(Dma* dma) {
-  for(int i = 0; i < 8; i++) {
+  for(int i = 0; i < kDmaChannelCount; i++) {
     dma->channel[i].bAdr = 0xff;
     dma->channel[i].aAdr = 0xffff;
     dma->channel[i].aBank = 0xff;
@@ -194,12 +195,12 @@ void dma_doDma(Dma* dma) {
   }
   // figure out first channel that is active
   int i = 0;
-  for(i = 0; i < 8; i++) {
+  for(i = 0; i < kDmaChannelCount; i++) {
     if(dma->channel[i].dmaActive) {
       break;
     }
   }
-  if(i == 8) {
+  if(i == kDmaChannelCount) {
     // no active channels
     dma->dmaBusy = false;
     return;
@@ -241,8 +242,10 @@ void dma_doDma(Dma* dma) {
         && (dma->channel[i].bAdr == 0x18 || dma->channel[i].bAdr == 0x19)
         && (ld >= 2 || g_ppu->vramPointer < 0x1000) /* ld>=2: all VRAM dests */
         && dma->channel[i].size >= dma->channel[i].size /* burst-start proxy */) {
-      extern uint8 g_ram[0x20000];
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      extern uint8 g_ram[kSnesWramSize];
+      unsigned gf =
+          (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+          ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
       /* one line per burst: only when vramPointer is at the burst start (a
        * fresh $2116 set) — approximate by logging the first offIndex==0 whose
        * dest we haven't seen this frame */
@@ -258,8 +261,11 @@ void dma_doDma(Dma* dma) {
           char sb[40] = "(non-WRAM)";
           if (ab == 0x7E || ab == 0x7F) { unsigned b = ((ab & 1) << 16) | aa;
             snprintf(sb, sizeof sb, "%02x %02x %02x %02x %02x %02x",
-              g_ram[b], g_ram[(b+1)&0x1ffff], g_ram[(b+2)&0x1ffff],
-              g_ram[(b+3)&0x1ffff], g_ram[(b+4)&0x1ffff], g_ram[(b+5)&0x1ffff]); }
+              g_ram[b], g_ram[(b+1)&kSnesWramMask],
+              g_ram[(b+2)&kSnesWramMask],
+              g_ram[(b+3)&kSnesWramMask],
+              g_ram[(b+4)&kSnesWramMask],
+              g_ram[(b+5)&kSnesWramMask]); }
           fprintf(stderr, "[lairdma] gf=%u src=$%02x:%04x vram=$%04x size=%u "
             "src[0..5]=%s func=%s\n", gf, ab, aa, g_ppu->vramPointer,
             (unsigned)dma->channel[i].size, sb,
@@ -307,7 +313,7 @@ bool dma_cycle(Dma* dma) {
 }
 
 void dma_startDma(Dma* dma, uint8_t val, bool hdma) {
-  for(int i = 0; i < 8; i++) {
+  for(int i = 0; i < kDmaChannelCount; i++) {
     if(hdma) {
       dma->channel[i].hdmaActive = val & (1 << i);
     } else {

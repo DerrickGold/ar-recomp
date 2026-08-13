@@ -17,6 +17,7 @@
 #include "settings.h"
 #include "settings_overlay.h"
 #include "sim/sim3d.h"
+#include "constants.h"
 
 /* FrameSlot_Capture records turbo in the immutable presentation snapshot. */
 uint8 g_turbo;
@@ -143,9 +144,10 @@ void HostInput_ResetSim3DCamera(void) {
 }
 
 void HostInput_ApplyAnalogCamera(void) {
-  static const uint64_t kMaximumElapsedNs = 100000000ull;
-  static const float kNanosecondsPerSecond = 1000000000.0f;
-  static const float kPercentScale = 100.0f;
+  enum { kMaximumAnalogCameraElapsedMs = 100 };
+  static const uint64_t kMaximumElapsedNs =
+      (uint64_t)kMaximumAnalogCameraElapsedMs *
+      kNanosecondsPerMillisecond;
   static const float kYawRadiansPerSecond = 1.2f;
   static const float kPitchRadiansPerSecond = 1.2f;
   static const float kZoomUnitsPerSecond = 6.0f;
@@ -164,9 +166,9 @@ void HostInput_ApplyAnalogCamera(void) {
       Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready);
 
   const float elapsed_seconds =
-      (float)elapsed_ns / kNanosecondsPerSecond;
+      (float)elapsed_ns / (float)kNanosecondsPerSecond;
   const float gain =
-      (float)g_settings.input_cam_sensitivity / kPercentScale;
+      (float)g_settings.input_cam_sensitivity / (float)kPercentScale;
 
   float yaw = InputMap_AnalogAction(kInputAction_CamYawRight) -
               InputMap_AnalogAction(kInputAction_CamYawLeft);

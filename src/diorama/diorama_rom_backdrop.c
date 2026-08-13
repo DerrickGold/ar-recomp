@@ -10,6 +10,7 @@ enum {
   kAssetScriptEnd = 0x06 * 0x8000,
   kChrBytes = 0x2000,
   kChrVramBytes = kChrBytes * 2,
+  kExtraChrUploadDestination = 0x6000,
   /* Eight 16-colour BG palettes. Script destinations $00/$40 address the
    * lower/upper halves; $80 and above are OBJ colours and stay out of this
    * standalone BG reconstruction. */
@@ -141,7 +142,7 @@ static bool ApplyCommand(ActionBgAssets *assets,
                       assets->chars + destination, bytes))
         return false;
       assets->have_chars[destination / kChrBytes] = true;
-    } else if (destination == 0x6000) {
+    } else if (destination == kExtraChrUploadDestination) {
       /* The stock script uploads this bank at VRAM word $3000. BG1 metatile
        * words can select it through bit 9; keep it adjacent in the HLE tile
        * index domain rather than inventing a 64-KiB VRAM mirror. */

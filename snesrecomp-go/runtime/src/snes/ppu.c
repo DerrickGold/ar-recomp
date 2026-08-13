@@ -17,6 +17,7 @@
 
 extern void ar_vramraw(uint16_t vaddr, uint8_t val, int port);
 #include "../ar_trace.h"
+#include "../actraiser_runtime_constants.h"
 
 
 extern bool g_new_ppu;
@@ -2878,10 +2879,13 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
   switch(adr) {
     case INIDISP & 0xff:
       if (getenv("AR_INIDISP2") && val != ppu->inidisp) {
-        extern int snes_frame_counter; extern uint8 g_ram[0x20000];
+        extern int snes_frame_counter;
+        extern uint8 g_ram[kSnesWramSize];
         extern const char *g_last_recomp_func;
         fprintf(stderr, "[inidisp2] f=%d $2100 %02x->%02x (bright=%d fblank=%d) $18=%02x by=%s\n",
-          snes_frame_counter, ppu->inidisp, val, val & 0xf, (val & 0x80) ? 1 : 0, g_ram[0x18],
+          snes_frame_counter, ppu->inidisp, val, val & 0xf,
+          (val & 0x80) ? 1 : 0,
+          g_ram[kActRaiserRuntimeWram_MapGroup],
           g_last_recomp_func ? g_last_recomp_func : "?");
       }
       ppu->inidisp = val;
@@ -3001,10 +3005,14 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
        * ($7F:B800 fill via $2139). Reveals whether the readback source is the
        * graphics region ($0000) or a wrong tilemap region ($6800) at the seal. */
       { static int en = -1; if (en < 0) en = getenv("AR_BAFSRC") ? 1 : 0;
-        if (en) { extern const char *g_last_recomp_func; extern uint8 g_ram[0x20000];
+        if (en) {
+          extern const char *g_last_recomp_func;
+          extern uint8 g_ram[kSnesWramSize];
           const char *f = g_last_recomp_func;
           if (f && (f[8]=='B'&&f[9]=='A'&&f[10]=='F')) {
-            unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+            unsigned gf =
+                (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+                ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
             static unsigned lastgf = 0xffffffff;
             if (gf != lastgf) { lastgf = gf;
               fprintf(stderr, "[bafsrc] gf=%u vramPointer=$%04x func=%s\n",
@@ -3018,7 +3026,8 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
           extern uint32_t g_ar_blk_ring[]; extern unsigned g_ar_blk_idx;
           if(lo<0||(snes_frame_counter>=lo&&(hi<0||snes_frame_counter<=hi))){
             static int nl; if(nl++<400){
-              uint32_t blk=g_ar_blk_ring[(g_ar_blk_idx-1u)&1023u];
+              uint32_t blk = g_ar_blk_ring[
+                  (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
               fprintf(stderr,"[vmadd] hf=%d VMADD=$%04x blk=$%06X func=%s\n",
                 snes_frame_counter, ppu->vramPointer, blk,
                 g_last_recomp_func?g_last_recomp_func:"?"); } } } }

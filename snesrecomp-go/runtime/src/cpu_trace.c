@@ -1191,7 +1191,8 @@ void cpu_trace_block_watch_check(CpuState *cpu, uint32_t pc24) {
         h->m_flag = cpu->m_flag; h->x_flag = cpu->x_flag; h->e_flag = cpu->emulation;
         for (int j = 0; j < w->n_addrs; j++) {
             int32_t off = w->ram_offsets[j];
-            h->vals[j] = (off >= 0 && off < 0x20000) ? g_ram[off] : 0;
+            h->vals[j] =
+                (off >= 0 && off < kSnesWramSize) ? g_ram[off] : 0;
         }
         int depth = g_recomp_stack_top;
         if (depth > BLOCK_WATCH_STACK_DEPTH) depth = BLOCK_WATCH_STACK_DEPTH;
@@ -1226,7 +1227,7 @@ void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
     {
         extern uint32_t g_ar_blk_ring[]; extern uint32_t g_ar_blk_aux[];
         extern uint16_t g_ar_blk_s[];    extern unsigned g_ar_blk_idx;
-        unsigned _i = g_ar_blk_idx++ & 1023u;
+        unsigned _i = g_ar_blk_idx++ & kRuntimeBlockTraceRingMask;
         g_ar_blk_ring[_i] = pc24;
         g_ar_blk_aux[_i] = ((uint32_t)(cpu->x_flag & 1) << 17)
                          | ((uint32_t)(cpu->m_flag & 1) << 16) | (cpu->X & 0xFFFFu);

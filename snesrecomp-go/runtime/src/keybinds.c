@@ -219,21 +219,36 @@ const KeyBinds *keybinds_get(void) {
 
 /* SNES joypad bitmask layout — matches $4218/$4219 (low/high byte) packing.
  * Returns 0 if either `keys` is NULL or player is out of range. */
+enum {
+    kJoypadR      = 1u << 0,
+    kJoypadL      = 1u << 1,
+    kJoypadX      = 1u << 2,
+    kJoypadA      = 1u << 3,
+    kJoypadRight  = 1u << 4,
+    kJoypadLeft   = 1u << 5,
+    kJoypadDown   = 1u << 6,
+    kJoypadUp     = 1u << 7,
+    kJoypadStart  = 1u << 8,
+    kJoypadSelect = 1u << 9,
+    kJoypadY      = 1u << 10,
+    kJoypadB      = 1u << 11,
+};
+
 uint16_t keybinds_read_player(const uint8_t *keys, int player) {
     if (!keys) return 0;
     const PlayerBinds *pb = (player == 2) ? &s_binds.p2 : &s_binds.p1;
     uint16_t b = 0;
-    if (pb->r      != SDL_SCANCODE_UNKNOWN && keys[pb->r])      b |= 0x0001;
-    if (pb->l      != SDL_SCANCODE_UNKNOWN && keys[pb->l])      b |= 0x0002;
-    if (pb->x      != SDL_SCANCODE_UNKNOWN && keys[pb->x])      b |= 0x0004;
-    if (pb->a      != SDL_SCANCODE_UNKNOWN && keys[pb->a])      b |= 0x0008;
-    if (pb->right  != SDL_SCANCODE_UNKNOWN && keys[pb->right])  b |= 0x0010;
-    if (pb->left   != SDL_SCANCODE_UNKNOWN && keys[pb->left])   b |= 0x0020;
-    if (pb->down   != SDL_SCANCODE_UNKNOWN && keys[pb->down])   b |= 0x0040;
-    if (pb->up     != SDL_SCANCODE_UNKNOWN && keys[pb->up])     b |= 0x0080;
-    if (pb->start  != SDL_SCANCODE_UNKNOWN && keys[pb->start])  b |= 0x0100;
-    if (pb->select != SDL_SCANCODE_UNKNOWN && keys[pb->select]) b |= 0x0200;
-    if (pb->y      != SDL_SCANCODE_UNKNOWN && keys[pb->y])      b |= 0x0400;
-    if (pb->b      != SDL_SCANCODE_UNKNOWN && keys[pb->b])      b |= 0x0800;
+    if (pb->r      != SDL_SCANCODE_UNKNOWN && keys[pb->r])      b |= kJoypadR;
+    if (pb->l      != SDL_SCANCODE_UNKNOWN && keys[pb->l])      b |= kJoypadL;
+    if (pb->x      != SDL_SCANCODE_UNKNOWN && keys[pb->x])      b |= kJoypadX;
+    if (pb->a      != SDL_SCANCODE_UNKNOWN && keys[pb->a])      b |= kJoypadA;
+    if (pb->right  != SDL_SCANCODE_UNKNOWN && keys[pb->right])  b |= kJoypadRight;
+    if (pb->left   != SDL_SCANCODE_UNKNOWN && keys[pb->left])   b |= kJoypadLeft;
+    if (pb->down   != SDL_SCANCODE_UNKNOWN && keys[pb->down])   b |= kJoypadDown;
+    if (pb->up     != SDL_SCANCODE_UNKNOWN && keys[pb->up])     b |= kJoypadUp;
+    if (pb->start  != SDL_SCANCODE_UNKNOWN && keys[pb->start])  b |= kJoypadStart;
+    if (pb->select != SDL_SCANCODE_UNKNOWN && keys[pb->select]) b |= kJoypadSelect;
+    if (pb->y      != SDL_SCANCODE_UNKNOWN && keys[pb->y])      b |= kJoypadY;
+    if (pb->b      != SDL_SCANCODE_UNKNOWN && keys[pb->b])      b |= kJoypadB;
     return b;
 }

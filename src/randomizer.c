@@ -15,12 +15,34 @@
  */
 #define ROM_SIZE_EXPECTED 0x100000u
 
+enum {
+  kObjectRegionTableCount = 8,
+  kObjectRegionTableMask = kObjectRegionTableCount - 1,
+  kCommonObjectTypeMask = 0x80,
+  kRegionObjectTypeIndexMask = 0x7F,
+  kObjectTypePointerBytes = 2,
+  kLoRomBankAddressLimit = 0x10000,
+  kObjectTypeTableMaximumBytes = 0x100,
+  kMalformedStreamGuardLimit = 256,
+  kVisitedPlacementCursorLimit = 64,
+  kPercentRoundingBias = kPercentScale / 2,
+  kGeneratedSeedModulo = 1000000000u,
+  kLevelIndexEntryBytes = 4,
+  kLevelIndexStreamOffsetByte = 2,
+  kMapPlayerStartBytes = 3,
+  kTerrainDamageBoxBytes = 5,
+  kFirstTownRegion = 1,
+  kLastTownRegion = 6,
+  kFirstAct = 1,
+  kSecondAct = 2,
+};
+
 static uint32 LoRom(uint8 bank, uint16 addr) {
   return ((uint32)bank << 15) | (addr & 0x7fffu);
 }
 
 /* $00:95DD — eight per-region object-type table pointers, $18 = 0..7. */
-static const uint16 kTypeTables[8] = {
+static const uint16 kTypeTables[kObjectRegionTableCount] = {
   0x96AF, 0xA8F6, 0xB449, 0xC11E, 0xCD9B, 0xD928, 0xE722, 0xF39A,
 };
 
@@ -29,6 +51,8 @@ enum {
   kRecFlags = 4,      /* word: $0001 attacker, $0200 pickup, $4000 boss */
   kRecAtk   = 7,      /* -> obj +$2A */
   kRecHp    = 8,      /* -> obj +$2C */
+  kRecFlagPickup = 0x0200,
+  kRecFlagBoss = 0x4000,
 };
 
 /* Bank $0A level index and placement-stream opcodes. */
@@ -40,6 +64,11 @@ enum {
   kOpGoto     = 0xFC,
   kTypeStatue = 0x80,   /* the item statue; $38 carries the item id */
   kItemCount  = 8,      /* $00:879D handles ids 0..7 */
+  kPlacementRecordBytes = 4,
+  kPlacementParamByte = 2,
+  kPlacementTypeByte = 3,
+  kWaveGateRecordBytes = 5,
+  kReserveRecordBytes = 2,
 };
 
 /* $03:B825 — 24 lair records x 9 bytes, 4 per town. */
@@ -49,7 +78,9 @@ enum { kLairCellX = 0, kLairCellY = 1, kLairType = 3 };
 
 /* Act-2 entry sub-map per region $01..$06 (ram-map $7E:0019; the same split the
  * professional-mode order table $02:9013 enumerates). Index by $18. */
-static const uint8 kAct2Entry[8] = { 0, 2, 2, 3, 4, 4, 5, 0 };
+static const uint8 kAct2Entry[kObjectRegionTableCount] = {
+  0, 2, 2, 3, 4, 4, 5, 0,
+};
 
 /* --------------------------------------------------------------------- state */
 
@@ -123,12 +154,12 @@ static void RomWrite8(uint32 off, uint8 v) {
  * summary counts records rewritten, not enemies actually affected.
  */
 static void ScaleStat(uint32 off, int percent) {
-  if (percent == 100) return;
+  if (percent == kPercentScale) return;
   int v = RomU8(off);
   if (v == 0) return;                       /* 0 means "deals/has nothing" */
-  int scaled = (v * percent + 50) / 100;
+  int scaled = (v * percent + kPercentRoundingBias) / kPercentScale;
   if (scaled < 1) scaled = 1;               /* never silently delete a stat */
-  if (scaled > 255) scaled = 255;
+  if (scaled > UINT8_MAX) scaled = UINT8_MAX;
   RomWrite8(off, (uint8)scaled);
 }
 
@@ -139,8 +170,8 @@ static void ForEachRecord(int region, void (*fn)(uint32 rec_off, void *ctx),
                           void *ctx) {
   uint16 base = kTypeTables[region];
   uint16 a = base;
-  uint32 end = 0x10000u;
-  uint32 hard = (uint32)base + 0x100u;
+  uint32 end = kLoRomBankAddressLimit;
+  uint32 hard = (uint32)base + kObjectTypeTableMaximumBytes;
   while (a < end && a < hard) {
     uint16 ptr = RomU16(LoRom(0x00, a));
     a = (uint16)(a + 2);
@@ -156,16 +187,17 @@ typedef struct { int hp_percent, atk_percent, count; } StatCtx;
 static void ApplyStatsToRecord(uint32 rec, void *vctx) {
   StatCtx *c = (StatCtx *)vctx;
   uint16 flags = RomU16(rec + kRecFlags);
-  if (flags & 0x0200) return;               /* pickup/statue, not an enemy */
+  if (flags & kRecFlagPickup) return;       /* pickup/statue, not an enemy */
   ScaleStat(rec + kRecAtk, c->atk_percent);
   ScaleStat(rec + kRecHp, c->hp_percent);
   c->count++;
 }
 
 static void PassEnemyStats(int hp_percent, int atk_percent) {
-  if (hp_percent == 100 && atk_percent == 100) return;
+  if (hp_percent == kPercentScale && atk_percent == kPercentScale) return;
   StatCtx ctx = { hp_percent, atk_percent, 0 };
-  for (int r = 0; r < 8; r++) ForEachRecord(r, ApplyStatsToRecord, &ctx);
+  for (int r = 0; r < kObjectRegionTableCount; r++)
+    ForEachRecord(r, ApplyStatsToRecord, &ctx);
   g_summary.enemy_records = ctx.count;
 }
 
@@ -180,7 +212,12 @@ typedef struct {
   uint8 wave;      /* which $FE-gated batch this entry belongs to */
 } Placement;
 
-enum { kMaxPlacements = 256 };
+enum {
+  kMaxPlacements = 256,
+  kActTypePlacementCapacityMultiplier = 4,
+  kActTypePlacementCapacity =
+      kMaxPlacements * kActTypePlacementCapacityMultiplier,
+};
 
 typedef struct {
   Placement items[kMaxPlacements];
@@ -192,28 +229,36 @@ typedef struct {
  * from the stashed cursor, so the entries after it are still this map's. */
 static void CollectPlacements(uint16 stream_addr, PlacementList *out) {
   uint16 y = stream_addr;
-  uint16 seen[64];
+  uint16 seen[kVisitedPlacementCursorLimit];
   int seen_n = 0;
   uint8 wave = 0;
-  for (int guard = 0; guard < 256; guard++) {
+  for (int guard = 0; guard < kMalformedStreamGuardLimit; guard++) {
     for (int i = 0; i < seen_n; i++) if (seen[i] == y) return;   /* cycle guard */
-    if (seen_n < 64) seen[seen_n++] = y;
-    for (int inner = 0; inner < kMaxPlacements * 4; inner++) {
+    if (seen_n < kVisitedPlacementCursorLimit) seen[seen_n++] = y;
+    for (int inner = 0;
+         inner < kMaxPlacements * kPlacementRecordBytes; inner++) {
       uint8 op = RomU8(LoRom(0x0A, y));
       if (op == kOpEnd) return;
-      if (op == kOpWaveGate) { y = (uint16)(y + 5); wave++; break; }
-      if (op == kOpReserve)  { y = (uint16)(y + 2); continue; }
+      if (op == kOpWaveGate) {
+        y = (uint16)(y + kWaveGateRecordBytes);
+        wave++;
+        break;
+      }
+      if (op == kOpReserve) {
+        y = (uint16)(y + kReserveRecordBytes);
+        continue;
+      }
       if (op == kOpGoto)     { y = RomU16(LoRom(0x0A, (uint16)(y + 1))); break; }
       if (out->count < kMaxPlacements) {
         Placement *p = &out->items[out->count++];
         p->off   = LoRom(0x0A, y);
         p->tx    = RomU8(p->off);
         p->ty    = RomU8(p->off + 1);
-        p->param = RomU8(p->off + 2);
-        p->type  = RomU8(p->off + 3);
+        p->param = RomU8(p->off + kPlacementParamByte);
+        p->type  = RomU8(p->off + kPlacementTypeByte);
         p->wave  = wave;
       }
-      y = (uint16)(y + 4);
+      y = (uint16)(y + kPlacementRecordBytes);
     }
   }
 }
@@ -227,22 +272,25 @@ static int ForEachMap(MapFn fn, void *ctx) {
    * stock image: it stops a degenerate one (all zeroes, a truncated dump) from
    * spinning here forever, since `a` is 16-bit and would wrap rather than run
    * off the end. Every walk in this file is bounded for the same reason. */
-  for (uint16 a = LEVEL_INDEX_ADDR, guard = 0; guard < 256;
-       a = (uint16)(a + 4), guard++) {
+  for (uint16 a = LEVEL_INDEX_ADDR, guard = 0;
+       guard < kMalformedStreamGuardLimit;
+       a = (uint16)(a + kLevelIndexEntryBytes), guard++) {
     uint16 key = RomU16(LoRom(0x0A, a));
     if (key == 0xFFFF) break;
-    uint16 base = (uint16)(LEVEL_INDEX_ADDR + RomU16(LoRom(0x0A, (uint16)(a + 2))));
+    uint16 base = (uint16)(LEVEL_INDEX_ADDR + RomU16(
+        LoRom(0x0A, (uint16)(a + kLevelIndexStreamOffsetByte))));
     uint8 mode = (uint8)(key & 0xFF), sub = (uint8)(key >> 8);
     if (mode == 0) continue;                       /* not an action map */
     /* Skip the header: player start (3B) then $FF-terminated 5-byte terrain
      * damage boxes. What follows is the placement list. */
-    uint16 y = (uint16)(base + 3);
+    uint16 y = (uint16)(base + kMapPlayerStartBytes);
     int boxes = 0;
     while (RomU8(LoRom(0x0A, y)) != kOpEnd) {
-      if (++boxes > 256) break;            /* degenerate image; see above */
-      y = (uint16)(y + 5);
+      if (++boxes > kMalformedStreamGuardLimit)
+        break;                             /* degenerate image; see above */
+      y = (uint16)(y + kTerrainDamageBoxBytes);
     }
-    if (boxes > 256) continue;
+    if (boxes > kMalformedStreamGuardLimit) continue;
     y = (uint16)(y + 1);
     fn(mode, sub, y, ctx);
     maps++;
@@ -289,13 +337,13 @@ static void StatuePass(uint8 mode, uint8 sub, uint16 stream, void *vctx) {
       for (int i = 0; i < n; i++) {
         uint8 v = vals[order[i]];
         if (v != list.items[idx[i]].param) g_summary.statue_drops++;
-        RomWrite8(list.items[idx[i]].off + 2, v);
+        RomWrite8(list.items[idx[i]].off + kPlacementParamByte, v);
       }
     } else {
       for (int i = 0; i < n; i++) {
         uint8 v = (uint8)RngBelow(&rng, kItemCount);
         if (v != list.items[idx[i]].param) g_summary.statue_drops++;
-        RomWrite8(list.items[idx[i]].off + 2, v);
+        RomWrite8(list.items[idx[i]].off + kPlacementParamByte, v);
       }
     }
   }
@@ -307,7 +355,7 @@ static void StatuePass(uint8 mode, uint8 sub, uint16 stream, void *vctx) {
    * passed. Same-wave swaps are always still reachable. */
   if (c->spots != kRandomMode_Off && n > 1) {
     RngSeed(&rng, c->seed, 0x5D070000u ^ tag);
-    for (int w = 0; w <= 255; w++) {
+    for (int w = 0; w <= UINT8_MAX; w++) {
       int wid[kMaxPlacements], wn = 0;
       for (int i = 0; i < n; i++)
         if (list.items[idx[i]].wave == (uint8)w) wid[wn++] = idx[i];
@@ -349,8 +397,8 @@ typedef struct {
   RandomizerScope scope;
   uint32 seed;
   /* Act-scope accumulation: entries collected across the act's maps. */
-  uint32 offs[kMaxPlacements * 4];
-  uint8 types[kMaxPlacements * 4];
+  uint32 offs[kActTypePlacementCapacity];
+  uint8 types[kActTypePlacementCapacity];
   int n;
   uint8 cur_mode, cur_act;
 } TypeCtx;
@@ -358,18 +406,20 @@ typedef struct {
 /* A type is movable when it is region-scoped (bit 7 clear) and its record does
  * not carry the boss flag. Unused/zero table slots are not movable either. */
 static bool TypeIsMovable(uint8 region, uint8 type) {
-  if (type & 0x80) return false;
-  uint16 base = kTypeTables[region & 7];
-  uint16 slot = (uint16)(base + (uint16)(type & 0x7F) * 2);
-  if (slot >= (uint16)(base + 0x100)) return false;
+  if (type & kCommonObjectTypeMask) return false;
+  uint16 base = kTypeTables[region & kObjectRegionTableMask];
+  uint16 slot = (uint16)(base +
+      (uint16)(type & kRegionObjectTypeIndexMask) * kObjectTypePointerBytes);
+  if (slot >= (uint16)(base + kObjectTypeTableMaximumBytes)) return false;
   uint16 ptr = RomU16(LoRom(0x00, slot));
   if (ptr == 0 || ptr <= base) return false;
-  return (RomU16(LoRom(0x00, ptr) + kRecFlags) & 0x4000) == 0;
+  return (RomU16(LoRom(0x00, ptr) + kRecFlags) & kRecFlagBoss) == 0;
 }
 
 static uint8 ActOf(uint8 mode, uint8 sub) {
-  if (mode >= 1 && mode <= 6) return (uint8)(sub >= kAct2Entry[mode] ? 2 : 1);
-  return 1;                                   /* Death Heim: one group */
+  if (mode >= kFirstTownRegion && mode <= kLastTownRegion)
+    return (uint8)(sub >= kAct2Entry[mode] ? kSecondAct : kFirstAct);
+  return kFirstAct;                           /* Death Heim: one group */
 }
 
 static void TypeFlush(TypeCtx *c) {
@@ -377,13 +427,13 @@ static void TypeFlush(TypeCtx *c) {
     Rng rng;
     RngSeed(&rng, c->seed,
             0x7E900000u ^ ((uint32)c->cur_mode << 8) ^ c->cur_act);
-    int order[kMaxPlacements * 4];
+    int order[kActTypePlacementCapacity];
     for (int i = 0; i < c->n; i++) order[i] = i;
     RngShuffle(&rng, order, c->n);
     for (int i = 0; i < c->n; i++) {
       uint8 v = c->types[order[i]];
       if (v != c->types[i]) g_summary.enemy_type_moves++;
-      RomWrite8(c->offs[i] + 3, v);
+      RomWrite8(c->offs[i] + kPlacementTypeByte, v);
     }
   }
   c->n = 0;
@@ -548,7 +598,7 @@ void Randomizer_Reroll(void) {
   counter += 0x9E3779B9u;
   const uint32 counter_seed = (uint32)counter;
   RngSeed(&r, (uint32)(uintptr_t)&counter ^ counter_seed, counter_seed);
-  long seed = (long)(RngNext(&r) % 1000000000u);
+  long seed = (long)(RngNext(&r) % kGeneratedSeedModulo);
   const SettingDesc *d = Settings_Find("rando_seed");
   if (d) Settings_SetLong(d, seed);
   else g_settings.rando_seed = seed;

@@ -3,13 +3,38 @@
 #include <math.h>
 #include <string.h>
 
+#include "constants.h"
 #include "sim_world_map.h"
 
 enum {
-  kAuthenticScreenCentreX = 128,
-  kAuthenticScreenCentreY = 112,
   kWorldLocationCount = 7,
+  kWorldLocationFirst = 1,
+  kWorldLocationRegionPixels = kActRaiserAuthenticWidth,
+  kMode7MatrixFixedPointUnit = 256,
+  kHardwareMaximumBrightness = 15,
+  kAlphaPerBrightnessStep = UINT8_MAX / kHardwareMaximumBrightness,
+  kOamWordsPerSlot = 2,
+  kOamSlotCount =
+      kSimWorldNavigationOamWords / kOamWordsPerSlot,
+  kOamHiddenY = 0xE0,
+  /* Slot zero begins the packed location UI, so a valid Palace must leave at
+   * least that one-slot prefix in front of its fixed grid. */
+  kPalaceFirstSlotMinimum = 1,
+  kPalaceGridColumns = 3,
+  kPalaceGridRows = 3,
+  kPalaceOamCount = kPalaceGridColumns * kPalaceGridRows,
+  kPalaceOriginX = 104,
+  kPalaceOriginY = 81,
+  kPalaceCellPixels = 16,
+  kPalaceAttributesHigh = 0x32,
+  kPalaceOccupiedMask = (1u << kPalaceOamCount) - 1,
+  kUiPriorityShift = 12,
+  kUiPriorityMask = 3,
+  kUiRequiredPriority = 3,
 };
+
+static const float kCameraAltitudePerZoomUnit = 0.25f;
+static const float kCloudCrossingBandPixels = 32.0f;
 
 typedef struct WorldLocationRegion {
   uint16_t x, y;
@@ -50,17 +75,20 @@ bool SimWorldNavigationScene_Build(
   const int64_t determinant = a * d - b * c;
   if (!determinant) return false;
 
-  const double inverse_scale = 256.0 / (double)determinant;
+  const double inverse_scale =
+      (double)kMode7MatrixFixedPointUnit / (double)determinant;
   const double m00 = (double)d * inverse_scale;
   const double m01 = (double)-b * inverse_scale;
   const double m10 = (double)-c * inverse_scale;
   const double m11 = (double)a * inverse_scale;
-  const double tx = (double)kAuthenticScreenCentreX -
+  const double tx = (double)(kActRaiserAuthenticWidth / 2) -
       m00 * navigation->focus_x - m01 * navigation->focus_y;
-  const double ty = (double)kAuthenticScreenCentreY -
+  const double ty = (double)(kActRaiserAuthenticHeight / 2) -
       m10 * navigation->focus_x - m11 * navigation->focus_y;
-  const double affine[6] = {m00, m01, tx, m10, m11, ty};
-  for (int i = 0; i < 6; i++) {
+  const double affine[kSimWorldNavigationAffineComponentCount] = {
+    m00, m01, tx, m10, m11, ty,
+  };
+  for (int i = 0; i < kSimWorldNavigationAffineComponentCount; i++) {
     if (!isfinite(affine[i])) return false;
     out->source_to_screen[i] = (float)affine[i];
   }
@@ -78,15 +106,17 @@ bool SimWorldNavigationScene_Build(
   out->ground[3] = (SimWorldNavigationGroundVertex){
       0, kSimWorldMapTiles, 0.0f, 1.0f};
   out->active_location = navigation->active_location;
-  if (navigation->active_location >= 1 &&
-      navigation->active_location <= kWorldLocationCount) {
+  if (navigation->active_location >= kWorldLocationFirst &&
+      navigation->active_location <
+          kWorldLocationFirst + kWorldLocationCount) {
     const WorldLocationRegion *region =
-        &kWorldLocationRegions[navigation->active_location - 1];
+        &kWorldLocationRegions[
+            navigation->active_location - kWorldLocationFirst];
     out->active_region_valid = true;
     out->active_region_x = region->x;
     out->active_region_y = region->y;
-    out->active_region_width = 256;
-    out->active_region_height = 256;
+    out->active_region_width = kWorldLocationRegionPixels;
+    out->active_region_height = kWorldLocationRegionPixels;
   }
   out->valid = true;
   return true;
@@ -117,12 +147,13 @@ float SimWorldNavigationScene_CloudVisibility(
    * far=$0562. Treat one quarter of their zoom delta as camera altitude in
    * the same original-pixel vocabulary as the existing cloud setting. */
   float camera_altitude =
-      ((float)zoom_current - (float)kSimWorldNavigationZoomNear) * 0.25f;
+      ((float)zoom_current - (float)kSimWorldNavigationZoomNear) *
+      kCameraAltitudePerZoomUnit;
   if (camera_altitude < 0.0f) camera_altitude = 0.0f;
 
   /* A 32px crossing band keeps the scripted zoom/rotation event continuous:
    * the cloud bodies do not pop on the single frame that crosses the deck. */
-  const float half_band = 16.0f;
+  const float half_band = kCloudCrossingBandPixels * 0.5f;
   float t = (camera_altitude - ((float)cloud_altitude_px - half_band)) /
       (half_band * 2.0f);
   if (t <= 0.0f) return 0.0f;
@@ -131,10 +162,12 @@ float SimWorldNavigationScene_CloudVisibility(
 }
 
 uint8_t SimWorldNavigationScene_MasterFadeAlpha(uint8_t brightness) {
-  if (brightness > 15) brightness = 15;
+  if (brightness > kHardwareMaximumBrightness)
+    brightness = kHardwareMaximumBrightness;
   /* 255 / 15 is exactly 17, so every hardware brightness step maps to an
    * exact 8-bit blend step with no rounding drift at either endpoint. */
-  return (uint8_t)((15 - brightness) * 17);
+  return (uint8_t)((kHardwareMaximumBrightness - brightness) *
+                   kAlphaPerBrightnessStep);
 }
 
 float SimWorldNavigationScene_LocationHaze(
@@ -160,30 +193,41 @@ float SimWorldNavigationScene_LocationHaze(
 }
 
 static bool OamSlotHidden(const uint16_t oam[kSimWorldNavigationOamWords], int slot) {
-  return (oam[slot * 2] >> 8) == 0xE0;
+  return (oam[slot * kOamWordsPerSlot] >> 8) == kOamHiddenY;
 }
 
 static bool PalaceSignatureAt(const uint16_t oam[kSimWorldNavigationOamWords], int first) {
-  if (first < 1 || first > 128 - 9) return false;
+  if (first < kPalaceFirstSlotMinimum ||
+      first > kOamSlotCount - kPalaceOamCount)
+    return false;
   unsigned occupied = 0;
-  for (int i = 0; i < 9; i++) {
-    const uint16_t position = oam[(first + i) * 2];
-    const uint16_t attributes = oam[(first + i) * 2 + 1];
-    const int x = position & 0xFF;
+  for (int i = 0; i < kPalaceOamCount; i++) {
+    const int word = (first + i) * kOamWordsPerSlot;
+    const uint16_t position = oam[word];
+    const uint16_t attributes = oam[word + 1];
+    const int x = position & UINT8_MAX;
     const int y = position >> 8;
-    if (x < 104 || x > 136 || (x - 104) % 16 ||
-        y < 81 || y > 113 || (y - 81) % 16 ||
-        (attributes >> 8) != 0x32)
+    if (x < kPalaceOriginX ||
+        x > kPalaceOriginX +
+                (kPalaceGridColumns - 1) * kPalaceCellPixels ||
+        (x - kPalaceOriginX) % kPalaceCellPixels ||
+        y < kPalaceOriginY ||
+        y > kPalaceOriginY +
+                (kPalaceGridRows - 1) * kPalaceCellPixels ||
+        (y - kPalaceOriginY) % kPalaceCellPixels ||
+        (attributes >> 8) != kPalaceAttributesHigh)
       return false;
     const unsigned cell =
-        (unsigned)((y - 81) / 16 * 3 + (x - 104) / 16);
+        (unsigned)((y - kPalaceOriginY) / kPalaceCellPixels *
+                       kPalaceGridColumns +
+                   (x - kPalaceOriginX) / kPalaceCellPixels);
     if (occupied & (1u << cell)) return false;
     occupied |= 1u << cell;
   }
   /* The ROM changes tile numbers and traversal order between Palace animation
    * frames. The invariant is the complete fixed-centre 3x3 grid, one slot per
    * cell, all with the same palette/priority attributes. */
-  return occupied == 0x1FFu;
+  return occupied == kPalaceOccupiedMask;
 }
 
 bool SimWorldNavigationScene_ClassifyOam(
@@ -194,7 +238,7 @@ bool SimWorldNavigationScene_ClassifyOam(
   if (!oam) return false;
 
   bool all_hidden = true;
-  for (int slot = 0; slot < 128; slot++) {
+  for (int slot = 0; slot < kOamSlotCount; slot++) {
     if (!OamSlotHidden(oam, slot)) {
       all_hidden = false;
       break;
@@ -207,23 +251,28 @@ bool SimWorldNavigationScene_ClassifyOam(
   }
 
   int palace_first = -1;
-  for (int slot = 1; slot <= 128 - 9; slot++) {
+  for (int slot = kPalaceFirstSlotMinimum;
+       slot <= kOamSlotCount - kPalaceOamCount; slot++) {
     if (PalaceSignatureAt(oam, slot)) {
       palace_first = slot;
       break;
     }
   }
-  if (palace_first < 1) return false;
+  if (palace_first < kPalaceFirstSlotMinimum) return false;
 
   /* The location label/frame is packed immediately before the Palace. Hidden
    * holes would make one range raster include stale off-screen entries, so an
    * unexpected layout is a fallback rather than an inferred composition. */
   for (int slot = 0; slot < palace_first; slot++) {
-    const uint16_t attributes = oam[slot * 2 + 1];
-    if (OamSlotHidden(oam, slot) || ((attributes >> 12) & 3) != 3)
+    const uint16_t attributes =
+        oam[slot * kOamWordsPerSlot + 1];
+    if (OamSlotHidden(oam, slot) ||
+        ((attributes >> kUiPriorityShift) & kUiPriorityMask) !=
+            kUiRequiredPriority)
       return false;
   }
-  for (int slot = palace_first + 9; slot < 128; slot++)
+  for (int slot = palace_first + kPalaceOamCount;
+       slot < kOamSlotCount; slot++)
     if (!OamSlotHidden(oam, slot)) return false;
 
   out->valid = true;
@@ -232,6 +281,6 @@ bool SimWorldNavigationScene_ClassifyOam(
   out->ui.oam_count = (uint8_t)palace_first;
   out->palace.visible = true;
   out->palace.oam_first = (uint8_t)palace_first;
-  out->palace.oam_count = 9;
+  out->palace.oam_count = kPalaceOamCount;
   return true;
 }

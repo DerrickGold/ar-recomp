@@ -34,9 +34,11 @@ typedef struct DmaChannel {
   uint8_t offIndex;
 } DmaChannel;
 
+enum { kDmaChannelCount = 8 };
+
 struct Dma {
   Snes* snes;
-  DmaChannel channel[8];
+  DmaChannel channel[kDmaChannelCount];
   uint32_t dmaTimer;
   bool dmaBusy;
 };

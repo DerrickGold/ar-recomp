@@ -6,10 +6,6 @@
 #include "actraiser_game.h"
 
 enum {
-  kAuthenticHeight = 224,
-  /* The native vertical camera clamp reserves row 224 in addition to the
-   * 224 rendered rows, so its maximum is world_height - 225. */
-  kCameraViewportHeight = 225,
   kWorldPagePixels = 256,
   /* One complete native 64x64 tilemap period. Maps below this width are
    * presentation-owned; an exactly matching map can also be an authored
@@ -323,7 +319,7 @@ static void ClassifyNarrowBg2(const ActionBgFrameState *state,
       state->map_number <= kBloodpoolAct2) {
     bg2->bands[0] = (ActionBgBand) {
       .y0 = kBloodpoolWaterStartY,
-      .y1 = kAuthenticHeight,
+      .y1 = kActRaiserAuthenticHeight,
       .edge = kActionBgEdge_Repeat,
       .horizontal_extent = AvailableHorizontalExtent(),
     };
@@ -454,7 +450,7 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
   } else {
     plan->layer[1].bands[0] = (ActionBgBand) {
       .y0 = kDeathHeimFogStartY,
-      .y1 = kAuthenticHeight,
+      .y1 = kActRaiserAuthenticHeight,
       .edge = kActionBgEdge_Repeat,
       .horizontal_extent = AvailableHorizontalExtent(),
     };
@@ -534,8 +530,8 @@ static bool ValidVerticalExtent(const ActionBgVerticalExtent *extent) {
 }
 
 static int MaximumCameraY(const ActionBgLayerPlan *layer) {
-  int maximum = layer->world_height > kCameraViewportHeight
-      ? (int)layer->world_height - kCameraViewportHeight : 0;
+  int maximum = layer->world_height > kActRaiserActionCameraViewportHeight
+      ? (int)layer->world_height - kActRaiserActionCameraViewportHeight : 0;
   if (maximum < layer->camera_y) maximum = layer->camera_y;
   return maximum;
 }
@@ -604,7 +600,7 @@ bool ActionBgLayerPlan_ResolveBand(const ActionBgLayerPlan *layer,
   if (!ValidBandAnchor(entry->anchor) || entry->y0 >= entry->y1)
     return false;
   const uint16_t limit = entry->anchor == kActionBgBandAnchor_World
-      ? layer->world_height : kAuthenticHeight;
+      ? layer->world_height : kActRaiserAuthenticHeight;
   if (entry->y1 > limit) return false;
   const int offset = entry->anchor == kActionBgBandAnchor_World
       ? (int)layer->camera_y + 1 : 0;
@@ -634,8 +630,10 @@ static const ActionBgBand *FindValidatedRowBand(
     int y0 = 0, y1 = 0;
     ResolveValidatedBand(layer, i, &y0, &y1);
     const bool owns_top_margin = authentic_y < 0 && y0 <= 0 && y1 > 0;
-    const bool owns_bottom_margin = authentic_y >= kAuthenticHeight &&
-        y0 < kAuthenticHeight && y1 >= kAuthenticHeight;
+    const bool owns_bottom_margin =
+        authentic_y >= kActRaiserAuthenticHeight &&
+        y0 < kActRaiserAuthenticHeight &&
+        y1 >= kActRaiserAuthenticHeight;
     if (owns_top_margin || owns_bottom_margin ||
         (authentic_y >= y0 && authentic_y < y1))
       return band;
@@ -700,7 +698,8 @@ bool ActionBgPlan_CompilePresentation(
       if (!ActionBgLayerPlan_ResolveBand(layer_plan, band, &y0, &y1))
         return false;
       if (y0 < 0) y0 = 0;
-      if (y1 > kAuthenticHeight) y1 = kAuthenticHeight;
+      if (y1 > kActRaiserAuthenticHeight)
+        y1 = kActRaiserAuthenticHeight;
       if (y0 >= y1) continue;
       if (built.band_count >= kActionBgPresentationBandMax) return false;
       built.bands[built.band_count++] = (ActionBgPresentationBand) {
@@ -747,7 +746,7 @@ bool ActionBgPlan_ApplyPresentationPolicy(
   for (unsigned i = 0; i < policy->band_count; i++) {
     const ActionBgPresentationBand *band = &policy->bands[i];
     if (band->layer >= kActionBgPlanLayerCount || band->y0 >= band->y1 ||
-        band->y1 > kAuthenticHeight || !ValidEdge(band->edge) ||
+        band->y1 > kActRaiserAuthenticHeight || !ValidEdge(band->edge) ||
         !ValidMotion(band->motion) ||
         (i && band->layer < preceding_layer) ||
         (i && band->layer == preceding_layer && band->y0 < preceding_y1))

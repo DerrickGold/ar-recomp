@@ -54,7 +54,7 @@ void snes_saveload(Snes *snes, SaveLoadInfo *sli) {
   cart_saveload(snes->cart, sli);
 
   sli->func(sli, &snes->hPos, sizeof(*snes) - offsetof(Snes, hPos));
-  sli->func(sli, snes->ram, 0x20000);
+  sli->func(sli, snes->ram, kSnesWramSize);
   sli->func(sli, &snes->ramAdr, 4);
 
   snes->cpu->e = 0;
@@ -67,7 +67,7 @@ void snes_reset(Snes* snes, bool hard) {
   dma_reset(snes->dma);
   ppu_reset(snes->ppu);
   if (hard)
-    memset(snes->ram, 0, 0x20000);
+    memset(snes->ram, 0, kSnesWramSize);
   snes->ramAdr = 0;
   snes->hPos = 0;
   snes->vPos = 0;
@@ -267,7 +267,7 @@ uint8_t snes_readBBus(Snes* snes, uint8_t adr) {
   }
   if(adr == 0x80) {
     uint8_t ret = snes->ram[snes->ramAdr++];
-    snes->ramAdr &= 0x1ffff;
+    snes->ramAdr &= kSnesWramMask;
     return ret;
   }
 
@@ -283,12 +283,14 @@ uint8_t snes_readBBus(Snes* snes, uint8_t adr) {
 void snes_writeBBus(Snes* snes, uint8_t adr, uint8_t val) {
   if(adr < 0x40) {
     if (adr == 0x00 && getenv("AR_INIDISP")) {  /* $2100 INIDISP */
-      extern int snes_frame_counter; extern uint8 g_ram[0x20000];
+      extern int snes_frame_counter;
+      extern uint8 g_ram[kSnesWramSize];
       extern const char *g_last_recomp_func;
       static uint8_t lastv = 0xfe;
       if (val != lastv) { lastv = val;
         fprintf(stderr, "[inidisp] f=%d $2100<-%02x (bright=%d fblank=%d) $18=%02x by=%s\n",
-          snes_frame_counter, val, val & 0xf, (val & 0x80) ? 1 : 0, g_ram[0x18],
+          snes_frame_counter, val, val & 0xf, (val & 0x80) ? 1 : 0,
+          g_ram[kActRaiserRuntimeWram_MapGroup],
           g_last_recomp_func ? g_last_recomp_func : "?");
       }
     }
@@ -314,7 +316,7 @@ void snes_writeBBus(Snes* snes, uint8_t adr, uint8_t val) {
         snes->ramAdr = (wa + 1u) & 0x1ffffu; }
 #else
       snes->ram[snes->ramAdr++] = val;
-      snes->ramAdr &= 0x1ffff;
+      snes->ramAdr &= kSnesWramMask;
 #endif
       break;
     }

@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { kExtentStep = 4, kAuthenticWidth = 256, kAuthenticHeight = 224 };
+#include "constants.h"
+
+enum { kExtentStep = 4 };
 
 typedef struct ActionBgLayerDraft {
   bool edge_set;
@@ -579,19 +581,19 @@ static ActionBgTunerResult AddBand(int layer) {
     if (!ActionBgLayerPlan_ResolveBand(&resolved, i, &y0, &y1))
       return kActionBgTunerResult_Unchanged;
     if (y0 < 0) y0 = 0;
-    if (y0 > kAuthenticHeight) y0 = kAuthenticHeight;
+    if (y0 > kActRaiserAuthenticHeight) y0 = kActRaiserAuthenticHeight;
     if (y1 < 0) y1 = 0;
-    if (y1 > kAuthenticHeight) y1 = kAuthenticHeight;
+    if (y1 > kActRaiserAuthenticHeight) y1 = kActRaiserAuthenticHeight;
     if (y0 > cursor && y0 - cursor > best_y1 - best_y0) {
       best_y0 = cursor;
       best_y1 = y0;
     }
     if (y1 > cursor) cursor = y1;
   }
-  if (cursor < kAuthenticHeight &&
-      kAuthenticHeight - cursor > best_y1 - best_y0) {
+  if (cursor < kActRaiserAuthenticHeight &&
+      kActRaiserAuthenticHeight - cursor > best_y1 - best_y0) {
     best_y0 = cursor;
-    best_y1 = kAuthenticHeight;
+    best_y1 = kActRaiserAuthenticHeight;
   }
   if (best_y0 >= best_y1) return kActionBgTunerResult_AtLimit;
 
@@ -723,7 +725,7 @@ static ActionBgTunerResult ChangeBandRow(const ActionBgTunerRow *row,
         next.anchor = kActionBgBandAnchor_World;
       } else {
         if ((int)next.y0 < offset ||
-            (int)next.y1 - offset > kAuthenticHeight)
+            (int)next.y1 - offset > kActRaiserAuthenticHeight)
           return kActionBgTunerResult_AtLimit;
         next.y0 = (uint16_t)(next.y0 - offset);
         next.y1 = (uint16_t)(next.y1 - offset);
@@ -741,7 +743,7 @@ static ActionBgTunerResult ChangeBandRow(const ActionBgTunerRow *row,
           ? &next.y0 : &next.y1;
       const int maximum = next.anchor == kActionBgBandAnchor_World
           ? s_tuner.canonical.layer[row->layer].world_height
-          : kAuthenticHeight;
+          : kActRaiserAuthenticHeight;
       const int stepped = StepExtent(*value, direction, maximum);
       if (stepped == *value) return kActionBgTunerResult_AtLimit;
       *value = (uint16_t)stepped;
@@ -1102,11 +1104,11 @@ int ActionBgTuner_BuildGuides(const ActionBgPlan *plan,
   int count = 0;
   for (int layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     const ActionBgLayerPlan *layer_plan = &plan->layer[layer];
-    for (int y = 0; y < kAuthenticHeight;) {
+    for (int y = 0; y < kActRaiserAuthenticHeight;) {
       ActionBgRowPolicy row;
       ActionBgLayerPlan_ResolveValidatedRow(layer_plan, y, &row);
       int y1 = y + 1;
-      for (; y1 < kAuthenticHeight; y1++) {
+      for (; y1 < kActRaiserAuthenticHeight; y1++) {
         ActionBgRowPolicy next;
         ActionBgLayerPlan_ResolveValidatedRow(layer_plan, y1, &next);
         if (next.horizontal_extent.mode != row.horizontal_extent.mode ||
@@ -1119,8 +1121,10 @@ int ActionBgTuner_BuildGuides(const ActionBgPlan *plan,
                   -(int)row.horizontal_extent.left, y,
                   -(int)row.horizontal_extent.left, y1);
         PushGuide(out, capacity, &count, layer,
-                  kAuthenticWidth + row.horizontal_extent.right, y,
-                  kAuthenticWidth + row.horizontal_extent.right, y1);
+                  kActRaiserAuthenticWidth +
+                      row.horizontal_extent.right, y,
+                  kActRaiserAuthenticWidth +
+                      row.horizontal_extent.right, y1);
       }
       y = y1;
     }
@@ -1130,13 +1134,16 @@ int ActionBgTuner_BuildGuides(const ActionBgPlan *plan,
       int x0 = horizontal->mode == kActionBgExtent_Fixed
           ? -(int)horizontal->left : 0;
       int x1 = horizontal->mode == kActionBgExtent_Fixed
-          ? kAuthenticWidth + horizontal->right : kAuthenticWidth;
+          ? kActRaiserAuthenticWidth + horizontal->right
+          : kActRaiserAuthenticWidth;
       PushGuide(out, capacity, &count, layer,
                 x0, -(int)layer_plan->vertical_extent.top,
                 x1, -(int)layer_plan->vertical_extent.top);
       PushGuide(out, capacity, &count, layer,
-                x0, kAuthenticHeight + layer_plan->vertical_extent.bottom,
-                x1, kAuthenticHeight + layer_plan->vertical_extent.bottom);
+                x0, kActRaiserAuthenticHeight +
+                        layer_plan->vertical_extent.bottom,
+                x1, kActRaiserAuthenticHeight +
+                        layer_plan->vertical_extent.bottom);
     }
   }
   return count;

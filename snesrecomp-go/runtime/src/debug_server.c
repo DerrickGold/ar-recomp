@@ -56,7 +56,7 @@ extern Dma *g_dma;
 extern Snes *g_snes;
 // APU pacing counter; defined in common_rtl.c.
 extern uint64_t g_main_cpu_cycles_estimate;
-extern uint8 g_ram[0x20000];
+extern uint8 g_ram[kSnesWramSize];
 extern uint8 *g_sram;
 extern int g_sram_size;
 void snes_saveload(Snes *snes, SaveLoadInfo *sli);
@@ -671,7 +671,7 @@ static int              s_anchor_count = 0;
 static struct {
     uint64_t block_idx;
     int      frame;
-    uint8_t  wram[0x20000];
+    uint8_t  wram[kSnesWramSize];
 } s_wram_anchors[ANCHOR_RING_SIZE];
 
 extern uint8_t g_ram[];
@@ -682,7 +682,7 @@ static void anchor_capture(int frame) {
     int idx = s_anchor_write_idx % ANCHOR_RING_SIZE;
     s_wram_anchors[idx].block_idx = g_block_counter;
     s_wram_anchors[idx].frame = frame;
-    memcpy(s_wram_anchors[idx].wram, g_ram, 0x20000);
+    memcpy(s_wram_anchors[idx].wram, g_ram, kSnesWramSize);
     s_anchor_write_idx++;
     if (s_anchor_count < ANCHOR_RING_SIZE) s_anchor_count++;
 }
@@ -1343,7 +1343,7 @@ typedef struct {
     // observability principle). Any address range that was previously only
     // queryable on-demand (dump_ram, dump_vram) is now also in the ring
     // for historical queries. zeropage/wram_1000 are now subsets of wram.
-    uint8_t wram[0x20000];    // 128 KB — full SNES WRAM ($7E0000-$7FFFFF)
+    uint8_t wram[kSnesWramSize];  // full SNES WRAM ($7E0000-$7FFFFF)
     uint8_t vram[0x10000];    // 64 KB  — full SNES VRAM ($0000-$FFFF word-addressable × 2)
 } FrameRecord;
 
@@ -1486,12 +1486,13 @@ void debug_server_record_frame(int frame) {
 
     // Full WRAM snapshot ($0-$1FFFF, 128KB). Source of truth; the two
     // back-compat subsets above are redundant with this.
-    if (s_ram && s_ram_size >= 0x20000)
-        memcpy(r->wram, s_ram, 0x20000);
+    if (s_ram && s_ram_size >= kSnesWramSize)
+        memcpy(r->wram, s_ram, kSnesWramSize);
     else {
-        memset(r->wram, 0, 0x20000);
+        memset(r->wram, 0, kSnesWramSize);
         if (s_ram && s_ram_size > 0)
-            memcpy(r->wram, s_ram, s_ram_size < 0x20000 ? s_ram_size : 0x20000);
+            memcpy(r->wram, s_ram,
+                   s_ram_size < kSnesWramSize ? s_ram_size : kSnesWramSize);
     }
 
     // Full VRAM snapshot (64KB word-addressable → stored as raw bytes).
@@ -1664,7 +1665,7 @@ static void cmd_frame(const char *args) {
 static void cmd_read_ram(const char *args) {
     unsigned int addr = 0, len = 16;
     sscanf(args, "%x %u", &addr, &len);
-    if (len > 0x20000) len = 0x20000;  // 128 KB max — full WRAM
+    if (len > kSnesWramSize) len = kSnesWramSize;
     if (!s_ram || addr + len > s_ram_size) {
         send_fmt("{\"error\":\"out of range\",\"addr\":\"0x%x\",\"max\":\"0x%x\"}", addr, s_ram_size);
         return;
@@ -1689,7 +1690,7 @@ static void cmd_read_ram(const char *args) {
 static void cmd_dump_ram(const char *args) {
     unsigned int addr = 0, len = 256;
     sscanf(args, "%x %u", &addr, &len);
-    if (len > 0x20000) len = 0x20000;  // 128 KB max — full WRAM
+    if (len > kSnesWramSize) len = kSnesWramSize;
     if (!s_ram || addr + len > s_ram_size) {
         send_fmt("{\"error\":\"out of range\",\"addr\":\"0x%x\",\"len\":%u}", addr, len);
         return;
@@ -1711,7 +1712,7 @@ static void cmd_dump_ram(const char *args) {
 static void cmd_read_sram(const char *args) {
     unsigned int addr = 0, len = 16;
     sscanf(args, "%x %u", &addr, &len);
-    if (len > 0x20000) len = 0x20000;
+    if (len > kSnesWramSize) len = kSnesWramSize;
     if (!g_sram || addr + len > (unsigned int)g_sram_size) {
         send_fmt("{\"error\":\"out of range\",\"addr\":\"0x%x\",\"max\":\"0x%x\"}",
                  addr, g_sram_size);
@@ -2562,7 +2563,7 @@ static void cmd_get_oracle_vram_trace(const char *args) {
 static void cmd_trace_wram(const char *args) {
     unsigned int lo = 0, hi = 0;
     sscanf(args, "%x %x", &lo, &hi);
-    if (hi < lo || hi > 0x1ffff) {
+    if (hi < lo || hi > kSnesWramMask) {
         send_fmt("{\"error\":\"bad range (max \\$1ffff for 128KB WRAM)\"}"); return;
     }
     if (s_wram_trace.nranges >= MAX_WRAM_TRACE_RANGES) {
@@ -2867,20 +2868,21 @@ static void cmd_wram_at_block(const char *args) {
     }
     if (len < 1) len = 1;
     if (len > 4096) len = 4096;
-    if (start_addr >= 0x20000) start_addr = 0;
-    if (start_addr + len > 0x20000) len = 0x20000 - start_addr;
+    if (start_addr >= kSnesWramSize) start_addr = 0;
+    if (start_addr + len > kSnesWramSize)
+        len = kSnesWramSize - start_addr;
     uint64_t target = (uint64_t)target_ull;
 
     // Build full reconstructed WRAM into a static scratch buffer, then
     // slice for response. (128KB scratch isn't huge.)
-    static uint8_t scratch[0x20000];
+    static uint8_t scratch[kSnesWramSize];
     int anchor_idx = anchor_find_le(target);
     uint64_t replay_start_bi = 0;
     if (anchor_idx >= 0) {
-        memcpy(scratch, s_wram_anchors[anchor_idx].wram, 0x20000);
+        memcpy(scratch, s_wram_anchors[anchor_idx].wram, kSnesWramSize);
         replay_start_bi = s_wram_anchors[anchor_idx].block_idx;
     } else {
-        memset(scratch, 0, 0x20000);
+        memset(scratch, 0, kSnesWramSize);
     }
 
     // Replay all wram_trace writes with block_idx in (replay_start_bi, target].
@@ -2900,9 +2902,10 @@ static void cmd_wram_at_block(const char *args) {
         uint32_t a = s_wram_trace.log[idx].adr;
         uint16_t v = s_wram_trace.log[idx].val;
         uint8_t  w = s_wram_trace.log[idx].width;
-        if (a < 0x20000) {
+        if (a < kSnesWramSize) {
             scratch[a] = (uint8_t)(v & 0xff);
-            if (w == 2 && a + 1 < 0x20000) scratch[a + 1] = (uint8_t)((v >> 8) & 0xff);
+            if (w == 2 && a + 1 < kSnesWramSize)
+                scratch[a + 1] = (uint8_t)((v >> 8) & 0xff);
         }
         applied++;
     }
@@ -3382,7 +3385,7 @@ static void cmd_write_ram(const char *args) {
     while (*p && !((*p == ' ') || (*p == '\t'))) p++;
     while (*p == ' ' || *p == '\t') p++;
     int count = 0;
-    while (p[0] && p[1] && addr + count < 0x20000) {
+    while (p[0] && p[1] && addr + count < kSnesWramSize) {
         int hi = _hex_nibble(p[0]);
         int lo = _hex_nibble(p[1]);
         if (hi < 0 || lo < 0) break;
@@ -3396,8 +3399,8 @@ static void cmd_write_ram(const char *args) {
 
 static void cmd_zero_ram(const char *args) {
     (void)args;
-    memset(g_ram, 0, 0x20000);
-    send_fmt("{\"ok\":true,\"size\":%u}", 0x20000);
+    memset(g_ram, 0, kSnesWramSize);
+    send_fmt("{\"ok\":true,\"size\":%u}", kSnesWramSize);
 }
 
 // set_cpu key=val key=val ...   where key in {a,x,y,sp,dp,db,pb,pc,p,e}
@@ -3547,7 +3550,7 @@ static void cmd_wram_timeseries(const char *args) {
     }
     if (len < 1) len = 1;
     if (len > 32) len = 32;
-    if (addr + len > 0x20000) {
+    if (addr + len > kSnesWramSize) {
         send_fmt("{\"ok\":false,\"error\":\"range out of WRAM\"}");
         return;
     }
@@ -3852,13 +3855,13 @@ static void cmd_dump_frame_vram(const char *args) {
 // frame. Args: `<frame> [addr_hex] [len]`.
 static void cmd_dump_frame_wram(const char *args) {
     int frame_num = -1;
-    unsigned int addr = 0, len = 0x20000;
+    unsigned int addr = 0, len = kSnesWramSize;
     if (sscanf(args, "%d %x %u", &frame_num, &addr, &len) < 1) {
         send_fmt("{\"error\":\"usage: dump_frame_wram <frame> [addr_hex] [len]\"}");
         return;
     }
-    if (len > 0x20000) len = 0x20000;
-    if (addr + len > 0x20000) {
+    if (len > kSnesWramSize) len = kSnesWramSize;
+    if (addr + len > kSnesWramSize) {
         send_fmt("{\"error\":\"out of range\"}");
         return;
     }
@@ -3874,7 +3877,7 @@ static void cmd_dump_frame_wram(const char *args) {
              "{\"frame\":%d,\"addr\":\"0x%x\",\"len\":%u,\"hex\":\"",
              frame_num, addr, len);
     send(s_client_sock, hdr, (int)strlen(hdr), 0);
-    static uint8_t tmp[0x20000];
+    static uint8_t tmp[kSnesWramSize];
     memcpy(tmp, r->wram + addr, len);
     unlock_mutex();
     send_hex_blob(tmp, len);
@@ -6385,7 +6388,7 @@ int debug_server_init(int port) {
     // exe.
     s_wram_trace.nranges = 1;
     s_wram_trace.ranges[0].lo = 0x00000;
-    s_wram_trace.ranges[0].hi = 0x1FFFF;
+    s_wram_trace.ranges[0].hi = kSnesWramMask;
     s_wram_trace.active = 1;
 
     // Always-on Tier-2 block-entry trace. Same rationale as the WRAM

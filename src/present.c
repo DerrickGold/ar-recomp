@@ -17,6 +17,7 @@
 #include "action/action_obj_apron.h"
 #include "present.h"
 #include "action/action_effect_render.h"
+#include "constants.h"
 #include "crt_post.h"
 #include "types.h"
 #include "diorama/diorama.h"
@@ -121,7 +122,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
     /* Pinned: the percentage is SNES-pixels-per-OUTPUT-pixel, and the output is
      * physical under SDL_WINDOW_HIGH_PIXEL_DENSITY. The FrameSlot already
      * carries the density-corrected value (D6 — no live settings read here). */
-    scale_y = in->hud_scale_percent / 100.0;
+    scale_y = in->hud_scale_percent / (double)kPercentScale;
     scale_x = scale_y * (in->pixel_aspect == kPixelAspect_Crt43 ? 7.0 / 6.0 : 1.0);
   }
 
@@ -541,8 +542,14 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
   /* Crosshair arms scale with the output (7 SNES pixels' worth at the
    * current viewport scale, min the historical 7px) — a fixed 7 output
    * pixels is near-invisible at 4K/high-density output. */
-  int arm = viewport.h > 0 ? (viewport.h * 7 + 112) / 224 : 7;
-  if (arm < 7) arm = 7;
+  enum { kInspectorCrosshairMinimumArmPixels = 7 };
+  int arm = viewport.h > 0
+      ? (viewport.h * kInspectorCrosshairMinimumArmPixels +
+         kFrameSlotAuthenticHeight / 2) /
+          kFrameSlotAuthenticHeight
+      : kInspectorCrosshairMinimumArmPixels;
+  if (arm < kInspectorCrosshairMinimumArmPixels)
+    arm = kInspectorCrosshairMinimumArmPixels;
   SDL_RenderLine(g_renderer, (float)(px - arm), (float)py, (float)(px + arm), (float)py);
   SDL_RenderLine(g_renderer, (float)px, (float)(py - arm), (float)px, (float)(py + arm));
 
@@ -1377,12 +1384,13 @@ void PresentCompositeScene(const FrameSlot *slot,
      * frame. Free Cam: the live authored pose, unchanged from B4-split.
      * Dynamic Cam (B4-vellean): baseline + a small velocity-driven lean —
      * yaw toward horizontal run direction, pitch with vertical velocity —
-     * scaled by reactive_strength/100 (0 disables sway, exactly reproducing
+     * scaled by reactive_strength/kPercentScale (0 disables sway, reproducing
      * B4-baseline's "snaps to the fixed pose" test). */
     bool dynamic = slot->diorama_camera_mode == kDioramaCam_Dynamic;
     DioramaCameraPose target;
     if (dynamic) {
-      float gain = (float)slot->diorama_reactive_strength / 100.0f;
+      float gain =
+          (float)slot->diorama_reactive_strength / (float)kPercentScale;
       target = slot->diorama_dyncam_baseline;
       target.tilt_y += kDioramaLeanYaw * gain * slot->diorama_dyncam_lean_yaw;
       target.tilt_x += kDioramaLeanPitch * gain * slot->diorama_dyncam_lean_pitch;
@@ -1433,7 +1441,8 @@ void PresentCompositeScene(const FrameSlot *slot,
     bool new_slot = dynamic && slot->timestamp_ns != g_diorama_last_slot_ns;
     g_diorama_last_slot_ns = slot->timestamp_ns;
     if (new_slot) {
-      float gain = (float)slot->diorama_reactive_strength / 100.0f;
+      float gain =
+          (float)slot->diorama_reactive_strength / (float)kPercentScale;
       if (slot->diorama_dyncam_event_hit || slot->diorama_dyncam_event_land)
         g_diorama_kick_pitch += kDioramaKickPitch * gain;
       /* Hit gets the zoom-punch too (see the section comment above) — a
@@ -1481,7 +1490,7 @@ void PresentCompositeScene(const FrameSlot *slot,
         "target(x=%.4f y=%.4f d=%.3f) render(x=%.4f y=%.4f d=%.3f) "
         "kick(pitch=%.4f zoom=%.4f) evt(hit=%d land=%d boost=%d)\n",
         slot->diorama_camera_mode,
-        (float)slot->diorama_reactive_strength / 100.0f,
+        (float)slot->diorama_reactive_strength / (float)kPercentScale,
         slot->diorama_dyncam_lean_yaw, slot->diorama_dyncam_lean_pitch,
         target.tilt_x, target.tilt_y, target.distance,
         g_diorama_render_cam.tilt_x, g_diorama_render_cam.tilt_y,

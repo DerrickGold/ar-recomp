@@ -15,7 +15,6 @@ enum {
   kAudioBytesPerFrame = kAudioChannelCount * kAudioBytesPerSample,
   kAudioCallbackChunkFrameCapacity = 2048,
   kDefaultConfiguredBufferFrames = 2048,
-  kMinimumDeviceFrequencyHz = 44100,
   kMinimumReportedFrequencyHz = 8000,
   kMaximumReportedFrequencyHz = 384000,
   kFullVolumePercent = 100,
@@ -142,14 +141,14 @@ static bool OpenAudioStream(void) {
           ? s_requested_frequency_hz
           : device_native_frequency_hz > 0
                 ? device_native_frequency_hz
-                : kMinimumDeviceFrequencyHz;
-  if (requested_spec.freq < kMinimumDeviceFrequencyHz) {
+                : kHostAudioMinimumOutputFrequencyHz;
+  if (requested_spec.freq < kHostAudioMinimumOutputFrequencyHz) {
     fprintf(stderr,
             "[audio] requested %d Hz is below SDL's %d device minimum; "
             "using %d (the setting cannot lower it)\n",
-            requested_spec.freq, kMinimumDeviceFrequencyHz,
-            kMinimumDeviceFrequencyHz);
-    requested_spec.freq = kMinimumDeviceFrequencyHz;
+            requested_spec.freq, kHostAudioMinimumOutputFrequencyHz,
+            kHostAudioMinimumOutputFrequencyHz);
+    requested_spec.freq = kHostAudioMinimumOutputFrequencyHz;
   }
   requested_spec.format = SDL_AUDIO_S16;
   requested_spec.channels = kAudioChannelCount;
@@ -163,7 +162,8 @@ static bool OpenAudioStream(void) {
         device_native_frequency_hz > 0) {
       device_buffer_frames =
           (int)((int64_t)kDefaultConfiguredBufferFrames *
-                device_native_frequency_hz / kMinimumDeviceFrequencyHz);
+                device_native_frequency_hz /
+                    kHostAudioMinimumOutputFrequencyHz);
     }
     char buffer_frames_hint[kBufferFramesHintCapacity];
     snprintf(buffer_frames_hint, sizeof(buffer_frames_hint), "%d",

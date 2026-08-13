@@ -1,7 +1,7 @@
 #ifndef DEBUG_SERVER_H
 #define DEBUG_SERVER_H
 
-#include <stdint.h>
+#include "types.h"
 
 // SNESRECOMP_TRACE gates the debug-server runtime. When 0 (Production
 // builds), every public debug_server_* function declaration below is

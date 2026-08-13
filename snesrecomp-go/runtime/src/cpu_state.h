@@ -23,6 +23,7 @@
  */
 
 #include "types.h"
+#include "actraiser_runtime_constants.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -226,11 +227,13 @@ static inline void ar_trace_a_write(uint16 old_a, uint8 v_low, int is16, uint16 
      * sim mode. NOT gated by g_last_recomp_func: the read immediately
      * preceding the corruption showed cur=(none), so a function-name
      * filter would risk skipping exactly the write we need to see. */
-    extern uint8 g_ram[0x20000];
+    extern uint8 g_ram[kSnesWramSize];
     static long min_gf = -2;
     if (min_gf == -2) { const char *e = getenv("AR_TRACEA_GF");
         min_gf = e ? atol(e) : 600; }
-    unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+    unsigned gf =
+        (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+        ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
     if ((long)gf < min_gf) return;
     static int n;
     if (n++ < 3000) {
@@ -355,7 +358,7 @@ static inline void cpu_mirrors_to_p(CpuState *cpu) {
 
 /*
  * Memory helpers map a 24-bit logical address (bank << 16 | abs) onto
- * the runtime's flat `g_ram[0x20000]` according to the existing
+ * the runtime's flat `g_ram[kSnesWramSize]` according to the existing
  * snesrecomp memory map (see common_rtl.h). They do NOT perform any
  * banking arithmetic of their own beyond what the existing runtime
  * already does — they're a thin shim so the v2 codegen can speak in

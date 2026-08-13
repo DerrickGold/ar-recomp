@@ -21,22 +21,7 @@
 #include "snes/ppu.h"
 
 enum {
-  kWramByteCount = 0x20000,
-  kWramLastAddress = kWramByteCount - 1,
-  kGameModeAddress = kActRaiserWram_MapGroup,   /* $18 */
-  /* DELIBERATELY NOT kActRaiserWram_CurrentMap ($19). This trace has always read
-   * $1a, and runtime_diagnostics.c's equally-named constant reads $19 -- the two
-   * files defined the same name with different values, which is how this surfaced.
-   * $1a is documented nowhere in docs/ram-map.md, so I cannot tell from here
-   * whether it is a real second field this trace wants or a typo for $19. Left as
-   * it was because the trace's output has presumably been read and interpreted at
-   * that offset; changing it silently would invalidate past captures. Both files
-   * are env-gated diagnostics (AR_DUMP_ACT here), so nothing in normal play reads
-   * either. Resolve with a ROM: dump both bytes across a map change. */
-  kGameSubmodeAddress = 0x1a,
-  kGameFrameLowAddress = 0x88,
-  kGameFrameHighAddress = 0x89,
-  kActionStageMode = 0x01,
+  kWramLastAddress = kActRaiserWramSize - 1,
   kTraceFlushFrameInterval = 30,
   kOraclePathCapacity = 320,
   kUninitializedOption = -1,
@@ -49,7 +34,7 @@ static const mode_t kSnapshotDirectoryMode = 0755;
 
 static FILE *s_wram_trace_file;
 static FILE *s_mx_trace_file;
-static uint8_t s_previous_wram[kWramByteCount];
+static uint8_t s_previous_wram[kActRaiserWramSize];
 static uint32_t s_trace_low_address;
 static uint32_t s_trace_high_address = kWramLastAddress;
 static bool s_previous_wram_initialized;
@@ -63,8 +48,8 @@ static unsigned s_last_vram_dumped_game_frame = UINT_MAX;
 static bool s_mx_trace_initialized;
 
 static unsigned ReadGameFrame(const uint8_t *wram) {
-  return (unsigned)wram[kGameFrameLowAddress] |
-         ((unsigned)wram[kGameFrameHighAddress] << 8);
+  return (unsigned)wram[kActRaiserWram_GameFrame] |
+         ((unsigned)wram[kActRaiserWram_GameFrame + 1] << 8);
 }
 
 static bool WriteWramSnapshot(const char *relative_path,
@@ -74,15 +59,16 @@ static bool WriteWramSnapshot(const char *relative_path,
   FILE *output_file = fopen(output_path, "wb");
   if (!output_file) return false;
   const size_t written_bytes =
-      fwrite(wram, 1, kWramByteCount, output_file);
+      fwrite(wram, 1, kActRaiserWramSize, output_file);
   const int close_result = fclose(output_file);
-  return written_bytes == kWramByteCount && close_result == 0;
+  return written_bytes == kActRaiserWramSize && close_result == 0;
 }
 
 static void DumpActionFrame(uint32_t host_frame, const uint8_t *wram) {
   if (s_dump_action_frames == kUninitializedOption)
     s_dump_action_frames = getenv("AR_DUMP_ACT") ? 1 : 0;
-  if (!s_dump_action_frames || wram[kGameModeAddress] != kActionStageMode)
+  if (!s_dump_action_frames ||
+      wram[kActRaiserWram_MapGroup] != kActRaiserMapGroup_Fillmore)
     return;
 
   if (!s_first_action_frame_written) {
@@ -167,8 +153,9 @@ static void WriteMxTrace(uint32_t host_frame, const uint8_t *wram) {
   if (!s_mx_trace_file) return;
 
   fprintf(s_mx_trace_file, "%u %d %d %u %u\n", ReadGameFrame(wram),
-          g_cpu.m_flag & 1, g_cpu.x_flag & 1, wram[kGameModeAddress],
-          wram[kGameSubmodeAddress]);
+          g_cpu.m_flag & 1, g_cpu.x_flag & 1,
+          wram[kActRaiserWram_MapGroup],
+          wram[kActRaiserWram_DestinationMap]);
   if ((host_frame % kTraceFlushFrameInterval) == 0)
     fflush(s_mx_trace_file);
 }

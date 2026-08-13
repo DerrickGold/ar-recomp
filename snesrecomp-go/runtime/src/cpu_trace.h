@@ -1280,7 +1280,7 @@ extern uint8_t    g_block_watch_any;
 
 /* Arm a block-watch slot. If a slot already exists for `pc24`, that slot
  * is reset and reused. `ram_offsets` is an array of `n_addrs` g_ram
- * offsets in [0, 0x20000); -1 means "unused" but normally callers pass
+ * offsets in [0, kSnesWramSize); -1 means "unused" but normally callers pass
  * exactly n_addrs valid offsets. `max_hits` clamped to BLOCK_WATCH_HITS_MAX. */
 void cpu_trace_block_watch_arm(uint32_t pc24,
                                 const int32_t *ram_offsets,
@@ -1320,7 +1320,7 @@ void cpu_trace_dump_wram(const char *tag, int scan_n);
  * watchdog to reveal an infinite-loop's block cycle. */
 extern uint32_t g_ar_blk_ring[]; extern uint32_t g_ar_blk_aux[]; extern unsigned g_ar_blk_idx;
 static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
-  unsigned _i = g_ar_blk_idx++ & 1023u;
+  unsigned _i = g_ar_blk_idx++ & kRuntimeBlockTraceRingMask;
   g_ar_blk_ring[_i] = pc24;
   /* bit16 = m_flag, bit17 = x_flag (free bit, used by the AR_STACKPROV [overpop]
    * dump to walk back to the block where x last flipped 0->1 = the x-leak site). */
@@ -1340,13 +1340,15 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
     static long xf_gf = -2;
     if (xf_gf == -2) { const char *e = getenv("AR_XFLIP_GF"); xf_gf = e ? atol(e) : -1; }
     if (xf_gf >= 0) {
-      extern uint8 g_ram[0x20000];
-      long gf = (long)((unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8));
+      extern uint8 g_ram[kSnesWramSize];
+      long gf = (long)((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+          ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8));
       /* Log a small WINDOW ending at the target (the crash frame): x persists
        * across frame edges, so an unclosed SEP that leaks into the crash may be a
        * few frames earlier. The per-line gf shows which frame each transition is on. */
       if (gf >= xf_gf - 8 && gf <= xf_gf && g_ar_blk_idx >= 2) {
-        unsigned _p = (g_ar_blk_idx - 2u) & 1023u;   /* previous block */
+        unsigned _p =
+            (g_ar_blk_idx - 2u) & kRuntimeBlockTraceRingMask;
         int prev_x = (g_ar_blk_aux[_p] >> 17) & 1;
         int cur_x = cpu->x_flag & 1;
         if (prev_x != cur_x) {           /* x transition (either direction) */
@@ -1378,15 +1380,18 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
     static int xt_en = -1;
     if (xt_en < 0) { extern int ar_xtrace_enabled(void); xt_en = ar_xtrace_enabled(); }
     if (xt_en && g_ar_blk_idx >= 2) {
-      unsigned _p = (g_ar_blk_idx - 2u) & 1023u;
+      unsigned _p = (g_ar_blk_idx - 2u) & kRuntimeBlockTraceRingMask;
       int prev_x = (g_ar_blk_aux[_p] >> 17) & 1;
       int cur_x = cpu->x_flag & 1;
       if (prev_x != cur_x) {
-        extern uint8 g_ram[0x20000];
+        extern uint8 g_ram[kSnesWramSize];
         extern void ar_xtrace_record(uint32_t blk, uint32_t nxt, int new_x, int m, uint32_t gf);
         ar_xtrace_record(g_ar_blk_ring[_p], pc24, cur_x,
                          (g_ar_blk_aux[_p] >> 16) & 1,
-                         (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8));
+                         (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+                             ((unsigned)g_ram[
+                                  kActRaiserRuntimeWram_GameFrame + 1]
+                              << 8));
       }
     }
   }
@@ -1417,12 +1422,15 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
     static int ld = -1;
     if (ld < 0) ld = getenv("AR_LAIRDMA") ? 1 : 0;
     if (ld && pc24 == 0x02AF3Du) {
-      extern int snes_frame_counter; extern uint8 g_ram[0x20000];
+      extern int snes_frame_counter;
+      extern uint8 g_ram[kSnesWramSize];
       if (g_ram[0xD5] != 0) {  /* $D5!=0 => DMA will run (BNE $AF42) */
         static int nl;
         if (nl < 80) {
           nl++;
-          unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+          unsigned gf =
+              (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+              ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
           unsigned src = g_ram[0xD0] | (g_ram[0xD1] << 8);
           unsigned bank = g_ram[0xD2];
           unsigned dst = g_ram[0xD3] | (g_ram[0xD4] << 8);
@@ -1431,9 +1439,13 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
           if (bank == 0x7E || bank == 0x7F) {
             unsigned base = ((bank & 1) << 16) | src;
             snprintf(sb, sizeof sb, "%02x %02x %02x %02x %02x %02x %02x %02x",
-                     g_ram[base], g_ram[(base+1)&0x1ffff], g_ram[(base+2)&0x1ffff],
-                     g_ram[(base+3)&0x1ffff], g_ram[(base+4)&0x1ffff],
-                     g_ram[(base+5)&0x1ffff], g_ram[(base+6)&0x1ffff], g_ram[(base+7)&0x1ffff]);
+                     g_ram[base], g_ram[(base+1)&kSnesWramMask],
+                     g_ram[(base+2)&kSnesWramMask],
+                     g_ram[(base+3)&kSnesWramMask],
+                     g_ram[(base+4)&kSnesWramMask],
+                     g_ram[(base+5)&kSnesWramMask],
+                     g_ram[(base+6)&kSnesWramMask],
+                     g_ram[(base+7)&kSnesWramMask]);
           }
           fprintf(stderr, "[lairdma] gf=%u f=%d src=$%02x:%04x -> vram=$%04x "
                   "size$D5=%02x src[0..7]=%s\n", gf, snes_frame_counter, bank, src,
@@ -1451,7 +1463,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
       if (sd_lines < 400) {
         sd_lines++;
         extern int snes_frame_counter;
-        extern uint8 g_ram[0x20000];
+        extern uint8 g_ram[kSnesWramSize];
         const char *tag = (pc24 == 0x0393C0u) ? "candidate"
                         : (pc24 == 0x0393D2u) ? "gate1-PASS(9D9F)"
                         : (pc24 == 0x0393DBu) ? "gate2-PASS(8D18)"
@@ -1487,7 +1499,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
       if (nw < 400) {
         nw++;
         extern int snes_frame_counter;
-        extern uint8 g_ram[0x20000];
+        extern uint8 g_ram[kSnesWramSize];
         uint16 rec = cpu->X;  /* $7E low-RAM record base */
         uint16 e12 = (uint16)(rec + 0x12), e16 = (uint16)(rec + 0x16);
         uint16 st = (uint16)g_ram[e12] | ((uint16)g_ram[(uint16)(e12+1)] << 8);
@@ -1506,7 +1518,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
       if (n2 < 500) {
         n2++;
         extern int snes_frame_counter;
-        extern uint8 g_ram[0x20000];
+        extern uint8 g_ram[kSnesWramSize];
         const char *tag = (pc24==0x038349u)?"census-call($839C)"
                         : (pc24==0x038356u)?"GATE($8356 BEQ->skip if A=0)"
                         : (pc24==0x038362u)?"*** COP $9C POSTED ***"
@@ -1530,8 +1542,10 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
       if (lines < 600) {
         lines++;
         extern int snes_frame_counter;
-        extern uint8 g_ram[0x20000];
-        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+        extern uint8 g_ram[kSnesWramSize];
+        unsigned gf =
+            (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+            ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
         const char *tag = (pc24 == 0x008125u) ? "SKIP-rest-of-update"
                          : (pc24 == 0x0080F6u) ? "CONTINUE-full-update"
                          : (pc24 == 0x008106u) ? "second-$19-check"
@@ -1569,8 +1583,11 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
     static int sc_en = -1;
     if (sc_en < 0) sc_en = getenv("AR_SAVECHECK") ? 1 : 0;
     if (sc_en && (pc24 == 0x02A72Fu || pc24 == 0x02A70Fu)) {
-      extern int snes_frame_counter; extern uint8 g_ram[0x20000];
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      extern int snes_frame_counter;
+      extern uint8 g_ram[kSnesWramSize];
+      unsigned gf =
+          (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+          ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
       fprintf(stderr, "[savecheck] gf=%u f=%d pc=$%06X %s\n",
               gf, snes_frame_counter, pc24,
               pc24 == 0x02A72Fu ? "PASS (continue saved game)"
@@ -1616,7 +1633,8 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
         fprintf(stderr, "[scheck] === S draining to $%04X (impending underflow) at pc=$%06X func=%s frame=%d; path: ===\n",
                 cpu->S, pc24, g_last_recomp_func ? g_last_recomp_func : "?", snes_frame_counter);
         for (int k = 32; k >= 1; k--) {
-          unsigned idx = (g_ar_blk_idx - (unsigned)k) & 1023u;
+          unsigned idx =
+              (g_ar_blk_idx - (unsigned)k) & kRuntimeBlockTraceRingMask;
           fprintf(stderr, "    [-%2d] pc=$%06X m=%u X=$%04X\n", k,
                   g_ar_blk_ring[idx], (g_ar_blk_aux[idx] >> 16) & 1, g_ar_blk_aux[idx] & 0xFFFF);
         }
@@ -1686,7 +1704,9 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
       static uint32_t last_pc = 0xffffffffu;
       if (pc24 != last_pc) {
         last_pc = pc24;
-        unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+        unsigned gf =
+            (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+            ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
         fprintf(stderr, "[boss] f=%d gf=%u pc=%06X m=%d  ($12obj=%02x%02x)\n",
                 snes_frame_counter, gf, pc24, cpu->m_flag & 1,
                 g_ram[0x13], g_ram[0x12]);
@@ -1734,7 +1754,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
    * or wrongly to $8077/$8078 (early-exit). DP=0 so $1E,X = $001E+X. */
   if (pc24 == 0x008664u) {
     extern int snes_frame_counter;
-    extern uint8 g_ram[0x20000];
+    extern uint8 g_ram[kSnesWramSize];
     if (snes_frame_counter >= 3560 && snes_frame_counter <= 3567 && getenv("AR_8664_CATCH")) {
       unsigned a = (cpu->D + 0x001E + cpu->X) & 0xFFFF;
       unsigned tgt = g_ram[a] | (g_ram[(a + 1) & 0xFFFF] << 8);
@@ -1753,7 +1773,8 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
     if (f >= 3564 && f <= 3567 && getenv("AR_8A3C_CATCH")) {
       fprintf(stderr, "[8a3c] entry f=%d m=%u — last 26 blocks:\n", f, cpu->m_flag & 1);
       for (int n = 27; n >= 1; n--) {
-        unsigned idx = (g_ar_blk_idx - n) & 1023u;
+        unsigned idx =
+            (g_ar_blk_idx - n) & kRuntimeBlockTraceRingMask;
         uint32_t pc = g_ar_blk_ring[idx], aux = g_ar_blk_aux[idx];
         fprintf(stderr, "    %06X m=%u X=%04X\n", pc, (aux >> 16) & 1, aux & 0xFFFF);
       }
@@ -1772,13 +1793,15 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
               snes_frame_counter);
       unsigned prev_m = 2;
       for (int n = 1023; n >= 1; n--) {
-        unsigned idx = (g_ar_blk_idx - n) & 1023u;
+        unsigned idx =
+            (g_ar_blk_idx - n) & kRuntimeBlockTraceRingMask;
         uint32_t pc = g_ar_blk_ring[idx], aux = g_ar_blk_aux[idx];
         unsigned mm = (aux >> 16) & 1;
         if (prev_m == 1 && mm == 0) {
           /* print a few blocks of context around the flip */
           for (int j = n + 2; j >= n - 2 && j >= 1; j--) {
-            unsigned jx = (g_ar_blk_idx - j) & 1023u;
+            unsigned jx =
+                (g_ar_blk_idx - j) & kRuntimeBlockTraceRingMask;
             uint32_t jp = g_ar_blk_ring[jx], ja = g_ar_blk_aux[jx];
             fprintf(stderr, "    [%4d] %06X m=%u X=%04X%s\n", j, jp,
                     (ja >> 16) & 1, ja & 0xFFFF, (j == n) ? "  <-- 1->0 here" : "");
@@ -1794,7 +1817,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
     static int done = 0;
     if (!done && getenv("AR_B90D_CATCH")) {
       done = 1;
-      extern uint8 g_ram[0x20000];
+      extern uint8 g_ram[kSnesWramSize];
       extern int snes_frame_counter;
       fprintf(stderr, "[b90d] ENTER small X=%04X  A=%04X Y=%04X D=%04X DB=%02X f=%d\n",
               cpu->X & 0xFFFF, cpu->A & 0xFFFF, cpu->Y & 0xFFFF, cpu->D & 0xFFFF,

@@ -1,5 +1,5 @@
 #pragma once
-#include <stdint.h>
+#include "types.h"
 
 // Per-frame WRAM dumper (game-agnostic).
 // Output layout:

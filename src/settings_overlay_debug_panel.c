@@ -1,5 +1,6 @@
 #include "settings_overlay.h"
 #include "settings_overlay_internal.h"
+#include "constants.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -10,6 +11,30 @@
  * the overlay renderer, debug font, layout math and low-level draw primitives
  * declared in settings_overlay_internal.h. Split out of settings_overlay.c so
  * the menu core is not 3900 lines. State below is private to the panel. */
+
+enum {
+  kDebugPanelMinimumScalePercent = 50,
+  kDebugPanelMaximumScalePercent = 250,
+  kDebugPanelScaleStepPercent = 5,
+  kDebugPanelMaximumTextLines = 12,
+  kDebugPanelOuterMargin = 8,
+  kDebugPanelHorizontalPadding = 12,
+  kDebugPanelTitleBaselineY = 9,
+  kDebugPanelContentY = 21,
+  kDebugPanelVerticalChrome = 30,
+  kDebugPanelMinimumWidth = 200,
+  kDebugPanelMaximumWidth = 560,
+  kDebugPanelDragStripHeight = 20,
+  kDebugPanelResizeHandleSize = 18,
+};
+
+static int ClampDebugPanelScale(int scale_percent) {
+  if (scale_percent < kDebugPanelMinimumScalePercent)
+    return kDebugPanelMinimumScalePercent;
+  if (scale_percent > kDebugPanelMaximumScalePercent)
+    return kDebugPanelMaximumScalePercent;
+  return scale_percent;
+}
 
 static SDL_Rect s_debug_panel_rect;
 static SDL_Rect s_debug_panel_drag_rect;
@@ -60,20 +85,20 @@ void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
    * can then override this automatic scale without changing the report's
    * logical width or truncating additional columns. */
   int automatic_scale = layout.scale_percent;
-  if (automatic_scale > 250) automatic_scale = 250;
+  automatic_scale = ClampDebugPanelScale(automatic_scale);
   int maximum_scale = SnappedFitScale(output_width, output_height);
-  if (maximum_scale > 250) maximum_scale = 250;
+  maximum_scale = ClampDebugPanelScale(maximum_scale);
   int debug_scale = s_debug_panel_scale_percent > 0
       ? s_debug_panel_scale_percent : automatic_scale;
   if (debug_scale > maximum_scale) debug_scale = maximum_scale;
-  if (debug_scale < 50) debug_scale = 50;
+  debug_scale = ClampDebugPanelScale(debug_scale);
   layout = BuildLayoutAtScale(output_width, output_height, debug_scale);
   s_debug_panel_render_scale_percent = debug_scale;
   const char *debug_title = title ? title : "DEBUG";
   int lines = 0;
   int longest_line = 0;
   const char *measure = text;
-  while (*measure && lines < 12) {
+  while (*measure && lines < kDebugPanelMaximumTextLines) {
     const char *newline = strchr(measure, '\n');
     int length = newline ? (int)(newline - measure) : (int)strlen(measure);
     if (length > longest_line) longest_line = length;
@@ -82,26 +107,34 @@ void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
     measure = newline + 1;
   }
   if (lines < 1) lines = 1;
-  int panel_height = 30 + lines * 10;
-  if (panel_height > layout.logical_height - 16)
-    panel_height = layout.logical_height - 16;
+  int panel_height =
+      kDebugPanelVerticalChrome + lines * kDebugLineHeight;
+  if (panel_height > layout.logical_height - 2 * kDebugPanelOuterMargin)
+    panel_height = layout.logical_height - 2 * kDebugPanelOuterMargin;
   int title_length = (int)strlen(debug_title);
   int content_chars = longest_line > title_length
       ? longest_line : title_length;
-  int panel_width = content_chars * kDebugGlyphWidth + 24;
-  if (panel_width < 200) panel_width = 200;
+  int panel_width = content_chars * kDebugGlyphWidth +
+      2 * kDebugPanelHorizontalPadding;
+  if (panel_width < kDebugPanelMinimumWidth)
+    panel_width = kDebugPanelMinimumWidth;
   panel_width = (panel_width + kGlyphSize - 1) & ~(kGlyphSize - 1);
-  int maximum_panel_width = layout.logical_width - 16;
-  if (maximum_panel_width > 560) maximum_panel_width = 560;
+  int maximum_panel_width =
+      layout.logical_width - 2 * kDebugPanelOuterMargin;
+  if (maximum_panel_width > kDebugPanelMaximumWidth)
+    maximum_panel_width = kDebugPanelMaximumWidth;
   maximum_panel_width &= ~(kGlyphSize - 1);
   if (panel_width > maximum_panel_width) panel_width = maximum_panel_width;
   int panel_x = (layout.logical_width - panel_width) / 2;
   int panel_y = avoid_point.y < output_height / 2
-      ? layout.logical_height - panel_height - 8 : 8;
+      ? layout.logical_height - panel_height - kDebugPanelOuterMargin
+      : kDebugPanelOuterMargin;
   if (s_debug_panel_user_position) {
-    panel_x = (s_debug_panel_output_x - layout.origin_x) * 100 /
+    panel_x = (s_debug_panel_output_x - layout.origin_x) *
+        kPercentScale /
         layout.scale_percent;
-    panel_y = (s_debug_panel_output_y - layout.origin_y) * 100 /
+    panel_y = (s_debug_panel_output_y - layout.origin_y) *
+        kPercentScale /
         layout.scale_percent;
   }
   int max_x = layout.logical_width - panel_width;
@@ -111,18 +144,23 @@ void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
   if (panel_x > max_x) panel_x = max_x;
   if (panel_y > max_y) panel_y = max_y;
   DrawDialogPanel(&layout, panel_x, panel_y, panel_width, panel_height);
-  DrawDebugTextN(&layout, panel_x + 12, panel_y + 9,
+  DrawDebugTextN(&layout,
+                 panel_x + kDebugPanelHorizontalPadding,
+                 panel_y + kDebugPanelTitleBaselineY,
                  debug_title, (int)strlen(debug_title), kDebugText_Label);
 
-  int max_chars = (panel_width - 24) / kDebugGlyphWidth;
+  int max_chars =
+      (panel_width - 2 * kDebugPanelHorizontalPadding) /
+      kDebugGlyphWidth;
   const char *cursor = text;
   for (int line = 0; line < lines && *cursor; line++) {
     const char *newline = strchr(cursor, '\n');
     int length = newline ? (int)(newline - cursor) : (int)strlen(cursor);
     if (length > max_chars) length = max_chars;
     DrawDebugHighlightedLine(
-        &layout, panel_x + 12,
-        panel_y + 21 + line * kDebugLineHeight, cursor, length);
+        &layout, panel_x + kDebugPanelHorizontalPadding,
+        panel_y + kDebugPanelContentY + line * kDebugLineHeight,
+        cursor, length);
     if (!newline) break;
     cursor = newline + 1;
   }
@@ -145,10 +183,12 @@ void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
    * Remaining report-body clicks pass through to the scene inspector so a
    * panel covering a requested sample cannot retain an old crosshair. */
   s_debug_panel_drag_rect = LogicalRect(
-      &layout, panel_x, panel_y, panel_width, 20);
+      &layout, panel_x, panel_y, panel_width,
+      kDebugPanelDragStripHeight);
   s_debug_panel_resize_rect = LogicalRect(
-      &layout, panel_x + panel_width - 18,
-      panel_y + panel_height - 18, 18, 18);
+      &layout, panel_x + panel_width - kDebugPanelResizeHandleSize,
+      panel_y + panel_height - kDebugPanelResizeHandleSize,
+      kDebugPanelResizeHandleSize, kDebugPanelResizeHandleSize);
   s_debug_panel_visible = true;
   if (s_debug_panel_user_position) {
     s_debug_panel_output_x = s_debug_panel_rect.x;
@@ -204,14 +244,19 @@ void SettingsOverlay_DragDebugPanel(int output_x, int output_y) {
     int dx = output_x - s_debug_panel_resize_start_x;
     int dy = output_y - s_debug_panel_resize_start_y;
     int change_x = s_debug_panel_resize_start_width > 0
-        ? dx * 100 / s_debug_panel_resize_start_width : 0;
+        ? dx * kPercentScale /
+            s_debug_panel_resize_start_width : 0;
     int change_y = s_debug_panel_resize_start_height > 0
-        ? dy * 100 / s_debug_panel_resize_start_height : 0;
+        ? dy * kPercentScale /
+            s_debug_panel_resize_start_height : 0;
     int change = abs(change_x) >= abs(change_y) ? change_x : change_y;
-    int scale = s_debug_panel_resize_start_scale * (100 + change) / 100;
-    scale = ((scale + 2) / 5) * 5;
-    if (scale < 50) scale = 50;
-    if (scale > 250) scale = 250;
+    int scale = s_debug_panel_resize_start_scale *
+        (kPercentScale + change) /
+        kPercentScale;
+    scale = ((scale + kDebugPanelScaleStepPercent / 2) /
+             kDebugPanelScaleStepPercent) *
+        kDebugPanelScaleStepPercent;
+    scale = ClampDebugPanelScale(scale);
     s_debug_panel_scale_percent = scale;
     return;
   }

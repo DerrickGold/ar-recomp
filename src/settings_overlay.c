@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "constants.h"
 #include "diorama/diorama_layer_editor.h"
 #include "action/action_bg_tuner.h"
 #include "input_map.h"
@@ -31,6 +32,8 @@ enum {
   kMinimumLayoutHeight = 208,
   kMinimumScalePercent = 25,
   kMaximumScalePercent = 800,
+  kScaleStepPercent = 25,
+  kMatchGameMaximumScalePercent = 400,
   /* Nav rows are as tall as a section icon; the eight sections then fill the
    * column without scrolling at any ordinary window size. */
   kNavRowHeight = 17,
@@ -40,6 +43,7 @@ enum {
    * (single fine step) from a hold; after it, a step fires every interval. */
   kHoldInitialDelayMs = 350,
   kHoldRepeatMs = 55,
+  kCursorBlinkHalfPeriodMs = 250,
 };
 
 /* ARGB() is defined in settings_overlay_internal.h (shared with the panel). */
@@ -454,8 +458,8 @@ static int s_nav_visible_rows = 9;
 static int s_row;
 static int s_top_row;
 static int s_visible_rows = 9;
-static int s_auto_menu_scale_percent = 100;
-static int s_match_game_scale_percent = 100;
+static int s_auto_menu_scale_percent = kPercentScale;
+static int s_match_game_scale_percent = kPercentScale;
 static char s_status[48];
 static Uint64 s_status_until;
 static bool s_editing;
@@ -932,9 +936,12 @@ _Static_assert((int)(sizeof(kSectionIconMaps) / sizeof(kSectionIconMaps[0]))
 static SDL_Texture *s_icon_texture;
 
 static uint32_t ScaleColor(uint32_t color, int percent) {
-  unsigned r = ((color >> 16) & 0xff) * (unsigned)percent / 100;
-  unsigned g = ((color >> 8) & 0xff) * (unsigned)percent / 100;
-  unsigned b = (color & 0xff) * (unsigned)percent / 100;
+  unsigned r = ((color >> 16) & 0xff) * (unsigned)percent /
+      kPercentScale;
+  unsigned g = ((color >> 8) & 0xff) * (unsigned)percent /
+      kPercentScale;
+  unsigned b = (color & 0xff) * (unsigned)percent /
+      kPercentScale;
   return ARGB(255, r, g, b);
 }
 
@@ -1552,7 +1559,7 @@ static void SetStatus(const char *text) {
  * apply step so a held value can be applied live every frame but written once
  * on release. */
 static void PersistChange(SettingChangeResult result) {
-  char settings_file[1024];
+  char settings_file[kHostPathCapacity];
   const char *settings_path = getenv("AR_OVERLAY_TEST_SETTINGS_PATH");
   if (!settings_path || !settings_path[0])
     settings_path = UserDataFile(settings_file, sizeof settings_file,
@@ -2627,7 +2634,8 @@ bool SettingsOverlay_HandleText(const char *text) {
 }
 
 static int ScalePosition(int position, int scale_percent) {
-  return (position * scale_percent + 50) / 100;
+  return (position * scale_percent + kPercentScale / 2) /
+      kPercentScale;
 }
 
 SDL_Rect LogicalRect(const MenuLayout *layout,
@@ -3021,10 +3029,10 @@ static void DrawInspectorInfo(const MenuLayout *layout, int x, int y,
 }
 
 int SnappedFitScale(int output_width, int output_height) {
-  int fit_x = output_width * 100 / kMinimumLayoutWidth;
-  int fit_y = output_height * 100 / kMinimumLayoutHeight;
+  int fit_x = output_width * kPercentScale / kMinimumLayoutWidth;
+  int fit_y = output_height * kPercentScale / kMinimumLayoutHeight;
   int fit = fit_x < fit_y ? fit_x : fit_y;
-  fit = (fit / 25) * 25;
+  fit = (fit / kScaleStepPercent) * kScaleStepPercent;
   if (fit < kMinimumScalePercent) fit = kMinimumScalePercent;
   if (fit > kMaximumScalePercent) fit = kMaximumScalePercent;
   return fit;
@@ -3032,8 +3040,8 @@ int SnappedFitScale(int output_width, int output_height) {
 
 MenuLayout BuildLayoutAtScale(int output_width, int output_height,
                                      int scale) {
-  int logical_width = output_width * 100 / scale;
-  int logical_height = output_height * 100 / scale;
+  int logical_width = output_width * kPercentScale / scale;
+  int logical_height = output_height * kPercentScale / scale;
   int used_width = ScalePosition(logical_width, scale);
   int used_height = ScalePosition(logical_height, scale);
   return (MenuLayout){
@@ -3346,7 +3354,8 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
         FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
                         kHighlight);
         FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
-        DrawGlyph(layout, selector_x + ((SDL_GetTicks() / 250) & 1), y, '>',
+        DrawGlyph(layout, selector_x +
+                  ((SDL_GetTicks() / kCursorBlinkHalfPeriodMs) & 1), y, '>',
                   kText_Warning);
       }
 
@@ -3402,7 +3411,8 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
       FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
                       kHighlight);
       FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
-      DrawGlyph(layout, selector_x + ((SDL_GetTicks() / 250) & 1), y, '>',
+      DrawGlyph(layout, selector_x +
+                ((SDL_GetTicks() / kCursorBlinkHalfPeriodMs) & 1), y, '>',
                 kText_Warning);
     }
     TextStyle style = available && s_submenu_open
@@ -3484,7 +3494,8 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
         FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
                         kHighlight);
         FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
-        DrawGlyph(layout, selector_x + ((SDL_GetTicks() / 250) & 1), y, '>',
+        DrawGlyph(layout, selector_x +
+                  ((SDL_GetTicks() / kCursorBlinkHalfPeriodMs) & 1), y, '>',
                   kText_Warning);
       }
       char label[64];
@@ -3780,9 +3791,14 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
   }
 
   s_match_game_scale_percent =
-      ((game_viewport.h * 100 + 112) / 224 + 12) / 25 * 25;
-  if (s_match_game_scale_percent < 25) s_match_game_scale_percent = 25;
-  if (s_match_game_scale_percent > 400) s_match_game_scale_percent = 400;
+      ((game_viewport.h * kPercentScale +
+        kActRaiserAuthenticHeight / 2) /
+           kActRaiserAuthenticHeight + kScaleStepPercent / 2) /
+      kScaleStepPercent * kScaleStepPercent;
+  if (s_match_game_scale_percent < kMinimumScalePercent)
+    s_match_game_scale_percent = kMinimumScalePercent;
+  if (s_match_game_scale_percent > kMatchGameMaximumScalePercent)
+    s_match_game_scale_percent = kMatchGameMaximumScalePercent;
 
   SDL_BlendMode old_blend_mode = SDL_BLENDMODE_NONE;
   Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;

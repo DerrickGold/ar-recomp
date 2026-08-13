@@ -15,7 +15,7 @@
 #include <windows.h>   /* MoveFileExA: rotating the SRAM backup, see RtlWriteSram */
 #endif
 
-uint8 g_ram[0x20000];
+uint8 g_ram[kSnesWramSize];
 uint8 *g_sram;
 int g_sram_size;
 const uint8 *g_rom;
@@ -248,7 +248,7 @@ void MemCpy(void *dst, const void *src, int size) {
 bool Unreachable(void) {
   printf("Unreachable!\n");
   assert(0);
-  g_ram[0x1ffff] = 1;
+  g_ram[kSnesWramMask] = 1;
   return false;
 }
 
@@ -391,7 +391,8 @@ static void WriteVramWord(Ppu *ppu, uint16 value) {
       extern uint32_t g_ar_blk_ring[]; extern unsigned g_ar_blk_idx;
       if(lo<0||(snes_frame_counter>=lo&&(hi<0||snes_frame_counter<=hi))){
         static int nl; if(nl++<20000){
-          uint32_t blk=g_ar_blk_ring[(g_ar_blk_idx-1u)&1023u];
+          uint32_t blk = g_ar_blk_ring[
+              (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
           fprintf(stderr,"[vword] hf=%d vram=$%04x val=$%04x blk=$%06X func=%s\n",
             snes_frame_counter, adr&0x7fff, value, blk,
             g_last_recomp_func?g_last_recomp_func:"?"); } } } }

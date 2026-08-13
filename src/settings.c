@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "constants.h"
 #include "randomizer.h"
 #include "render_capabilities.h"
 #include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
@@ -28,7 +29,11 @@ static SettingsActionObserver s_action_observer;
  * s_config_layer, and Settings_InitWithFile aborts the moment the table
  * outgrows it, so a cap that tracks the count exactly turns every new setting
  * into a crash on boot. */
-enum { kSettingsMaxDescriptors = 320, kSettingsLayerValueSize = 512 };
+enum {
+  kSettingsMaxDescriptors = 320,
+  kSettingsLayerValueSize = 512,
+  kSettingsIniLineCapacity = 1024,
+};
 typedef struct SettingsLayerValue {
   bool present;
   bool legacy_env_syntax;
@@ -157,7 +162,7 @@ static int FormatHudScale(char *buffer, int buffer_size, const void *field) {
   int value = *(const int *)field;
   if (!value) return snprintf(buffer, (size_t)buffer_size, "Match game");
   return snprintf(buffer, (size_t)buffer_size, "%d.%02dx",
-                  value / 100, value % 100);
+                  value / kPercentScale, value % kPercentScale);
 }
 
 static bool ParseHudScale(const char *text, void *field) {
@@ -170,7 +175,7 @@ static bool ParseHudScale(const char *text, void *field) {
   double value = strtod(text, &end);
   if (!end || end == text) return false;
   if (*end == 'x' && end[1] == 0) {
-    *out = (int)(value * 100.0 + 0.5);
+    *out = (int)(value * (double)kPercentScale + 0.5);
     return true;
   }
   if (*end) return false;
@@ -182,7 +187,7 @@ static int FormatMenuScale(char *buffer, int buffer_size, const void *field) {
   int value = *(const int *)field;
   if (!value) return snprintf(buffer, (size_t)buffer_size, "Auto");
   return snprintf(buffer, (size_t)buffer_size, "%d.%02dx",
-                  value / 100, value % 100);
+                  value / kPercentScale, value % kPercentScale);
 }
 
 static bool ParseMenuScale(const char *text, void *field) {
@@ -199,7 +204,7 @@ static bool ParseAudioVolume(const char *text, void *field) {
   long value = strtol(text, &end, 0);
   if (!end || (*end && !(*end == '%' && end[1] == 0))) return false;
   if (value < 0) value = 0;
-  if (value > 100) value = 100;
+  if (value > kPercentScale) value = kPercentScale;
   *(int *)field = (int)(value / 5 * 5);
   return true;
 }
@@ -1773,7 +1778,10 @@ const SettingDesc g_setting_descs[] = {
   INT_SETTING(input_stick_deadzone, NULL, "Stick deadzone",
               "How far the left stick must travel before it counts as a "
               "direction, as a percent of full travel.",
-              kSettingCat_Input, 35, 5, 90, NULL, NULL),
+              kSettingCat_Input,
+              kInputStickDeadzoneDefaultPercent,
+              kInputStickDeadzoneMinimumPercent,
+              kInputStickDeadzoneMaximumPercent, NULL, NULL),
   INT_SETTING(input_cam_sensitivity, NULL, "Camera sensitivity",
               "Speed of stick-driven camera orbit and zoom in the diorama and "
               "3D town, as a percent of the base rate.",
@@ -1781,7 +1789,10 @@ const SettingDesc g_setting_descs[] = {
   INT_SETTING(input_cam_deadzone, NULL, "Camera stick deadzone",
               "How far the camera stick must travel before it orbits. Lower "
               "than the D-Pad deadzone so small nudges still aim.",
-              kSettingCat_Input, 12, 0, 60, NULL, NULL),
+              kSettingCat_Input,
+              kInputCameraDeadzoneDefaultPercent,
+              kInputCameraDeadzoneMinimumPercent,
+              kInputCameraDeadzoneMaximumPercent, NULL, NULL),
   BOOL_SETTING(input_cam_invert_y, NULL, "Invert camera Y",
                "Push the camera stick up to pitch the view down.",
                kSettingCat_Input, 0, false, NULL, NULL),
@@ -2790,7 +2801,7 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
   bool moonjump_toggle_seen = false;
   bool legacy_moonjump_speed_seen = false;
   bool legacy_moonjump_enabled = false;
-  char line[1024];
+  char line[kSettingsIniLineCapacity];
   int line_number = 0;
   while (fgets(line, sizeof(line), file)) {
     line_number++;
@@ -2940,7 +2951,7 @@ static bool Settings_FlushFileData(FILE *file) {
 
 static void Settings_SyncContainingDirectory(const char *path) {
 #ifndef _WIN32
-  char dir[1024];
+  char dir[kHostPathCapacity];
   snprintf(dir, sizeof dir, "%s", path);
   char *slash = strrchr(dir, '/');
   if (slash) *slash = '\0';

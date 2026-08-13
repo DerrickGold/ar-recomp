@@ -7,6 +7,7 @@
 
 #include "actraiser_game.h"
 #include "camera_orbit.h"
+#include "constants.h"
 #include "scene3d_math.h"
 #include "settings.h"
 #include "user_data_dir.h"
@@ -14,10 +15,9 @@
 enum {
   kSim3DCameraTiltMinimumMrad = -700,
   kSim3DCameraTiltMaximumMrad = 700,
-  kMilliradiansPerRadian = 1000,
-  kSim3DCameraDistanceScale = 100,
+  kMilliradiansPerRadian = kPermilleScale,
+  kSim3DCameraDistanceScale = kPercentScale,
   kSim3DCameraSettingsSaveDelayMs = 500,
-  kSettingsPathCapacity = 1024,
 };
 
 static const float kSim3DCameraDefaultSceneRadius = 0.4f;
@@ -180,7 +180,7 @@ void Sim3DCamera_FlushSettingsIfDirty(void) {
     return;
 
   s_settings_dirty = false;
-  char settings_path[kSettingsPathCapacity];
+  char settings_path[kHostPathCapacity];
   UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
   if (!Settings_Save(settings_path))
     fprintf(stderr, "[sim3d] failed to persist camera settings\n");

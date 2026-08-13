@@ -47,7 +47,12 @@
 
 extern int snes_frame_counter;
 
-#define GAME_STACK_SIZE (2 * 1024 * 1024)
+enum {
+  kGameCoroutineStackReserveBytes = 2 * 1024 * 1024,
+  kGameCoroutineStackCommitBytes = 64 * 1024,
+  kFallbackHostPageBytes = 4096,
+  kRdnmiRepeatedReadWarningThreshold = 4096,
+};
 
 #ifdef _WIN32
 static void *g_host_fiber;   /* ConvertThreadToFiber result (driver thread) */
@@ -203,13 +208,16 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
     static uint32_t wedge_blk, wedge_n;
     static unsigned wedge_idx;
     unsigned idx = g_ar_blk_idx;
-    uint32_t block = g_ar_blk_ring[(g_ar_blk_idx - 1) & 1023u];
+    uint32_t block = g_ar_blk_ring[
+        (g_ar_blk_idx - 1) & kRuntimeBlockTraceRingMask];
     if (block == wedge_blk && (idx == wedge_idx || idx == wedge_idx + 1)) {
-      if (++wedge_n == 4096) {
+      if (++wedge_n == kRdnmiRepeatedReadWarningThreshold) {
         fprintf(stderr,
-                "[4210-wedge] blk=$%06X f=%d x4096 consecutive reads; "
+                "[4210-wedge] blk=$%06X f=%d x%u consecutive reads; "
                 "forceNmi=%d yielding=%d inNmi=%d nmiAvail=%d\n",
-                block, snes_frame_counter, snes->forceNmi ? 1 : 0,
+                block, snes_frame_counter,
+                (unsigned)kRdnmiRepeatedReadWarningThreshold,
+                snes->forceNmi ? 1 : 0,
                 yielding ? 1 : 0, snes->inNmi ? 1 : 0,
                 snes->nmiAvail ? 1 : 0);
         fflush(stderr);
@@ -229,7 +237,8 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
       0x019293, 0x0192AA, 0x0287F3, 0x029AC4,
       0x02BEBF, 0x03B013, 0x03E535,
     };
-    uint32_t block = g_ar_blk_ring[(g_ar_blk_idx - 1) & 1023u];
+    uint32_t block = g_ar_blk_ring[
+        (g_ar_blk_idx - 1) & kRuntimeBlockTraceRingMask];
     for (unsigned i = 0;
          i < sizeof(kSpinBlocksNoYield) / sizeof(kSpinBlocksNoYield[0]); i++) {
       if (block == kSpinBlocksNoYield[i]) {
@@ -265,12 +274,12 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
       0x03B013, /* long-form wait */
       0x03E535, /* sound-upload bracket wait */
     };
-    uint32_t block = g_ar_blk_ring[(g_ar_blk_idx - 1) & 1023u];
+    uint32_t block = g_ar_blk_ring[
+        (g_ar_blk_idx - 1) & kRuntimeBlockTraceRingMask];
     for (unsigned i = 0; i < sizeof(kSpinBlocks) / sizeof(kSpinBlocks[0]); i++) {
       if (block != kSpinBlocks[i])
         continue;
       if (getenv("AR_VBLOG")) {
-        extern uint8 g_ram[0x20000];
         extern Ppu *g_ppu;
         static int last_frame = -1;
         if (snes_frame_counter != last_frame) {
@@ -283,8 +292,12 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
                   "S=%04x blk=%06X\n",
                   snes_frame_counter, g_ppu->inidisp & 0xf,
                   (g_ppu->inidisp & 0x80) ? 1 : 0, g_ppu->bgmode,
-                  g_ppu->screenEnabled[0], g_ram[0x18], g_ram[0x19],
-                  g_ram[0xE7], g_ram[0xE6], g_ram[0x1D], ar_cpu_PB(),
+                  g_ppu->screenEnabled[0],
+                  g_ram[kActRaiserWram_MapGroup],
+                  g_ram[kActRaiserWram_CurrentMap],
+                  g_ram[kActRaiserWram_ActionTimerHigh],
+                  g_ram[kActRaiserWram_ActionTimerLow],
+                  g_ram[kActRaiserWram_PlayerHp], ar_cpu_PB(),
                   ar_cpu_S(), block);
         }
       }
@@ -2432,12 +2445,12 @@ void ActRaiserDrawPpuFrame(void) {
    * never applied, leaving the title raster effect dead. SimpleHdma_Init
    * early-returns on inactive channels, so iterating 0..7 is a safe no-op for
    * channels the game isn't using this frame. */
-  SimpleHdma hdma_chans[8];
+  SimpleHdma hdma_chans[kDmaChannelCount];
   Dma *dma = g_dma;
 
   dma_startDma(dma, g_snesrecomp_last_hdmaen, true);
 
-  for (int ch = 0; ch < 8; ch++)
+  for (int ch = 0; ch < kDmaChannelCount; ch++)
     SimpleHdma_Init(&hdma_chans[ch], &dma->channel[ch]);
 
   int trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
@@ -2457,7 +2470,7 @@ void ActRaiserDrawPpuFrame(void) {
    * writes the selected range to the HUD surface while each line is fetched. */
   ActRaiser_DioramaHudObjPrepare();
 
-  for (int i = 0; i <= 224; i++) {
+  for (int i = 0; i <= kActRaiserAuthenticHeight; i++) {
     ppu_runLine(g_ppu, i);
     /* Vertical top margin (diorama). Placed HERE, not before the loop, for two
      * reasons that both have to hold:
@@ -2475,7 +2488,7 @@ void ActRaiserDrawPpuFrame(void) {
       for (int m = g_ppu->extraTopCur; m >= 1; m--)
         ppu_runMarginLine(g_ppu, 1 - m);
     }
-    for (int ch = 0; ch < 8; ch++)
+    for (int ch = 0; ch < kDmaChannelCount; ch++)
       SimpleHdma_DoLine(&hdma_chans[ch]);
     if (i == trigger) {
       g_snes->inIrq = true;
@@ -2494,7 +2507,7 @@ void ActRaiserDrawPpuFrame(void) {
    * hold-first policy above). Exact signed OBJ positions make these rows
    * unambiguous even though the stored OAM Y byte itself wraps at 256. */
   for (int m = 1; m <= g_ppu->extraBottomCur; m++)
-    ppu_runMarginLine(g_ppu, 224 + m);
+    ppu_runMarginLine(g_ppu, kActRaiserAuthenticHeight + m);
   {
     extern uint8_t g_pixels[];
     extern int g_ws_extra;
@@ -2710,10 +2723,17 @@ static void ActRaiser_ApplyMagicCycle(void) {
  * direct-page addrs map 1:1 ($1D player HP, $E6/$E7 timer, player object $08A0).
  * This is the framework the planned debug menu plugs into — see
  * docs/SEAMS.md "Gameplay / Tunable seams" + memory debug-menu-warp-roadmap. */
+enum {
+  kPackedBcdDigitRadix = 10,
+  kPackedBcdPairPlaceValue = kPackedBcdDigitRadix * kPackedBcdDigitRadix,
+};
+
 static int ActRaiser_BcdTimerToSeconds(uint8 low, uint8 high) {
-  int low_pair = (low & 0x0F) + ((low >> 4) & 0x0F) * 10;
-  int high_pair = (high & 0x0F) + ((high >> 4) & 0x0F) * 10;
-  return low_pair + high_pair * 100;
+  int low_pair =
+      (low & 0x0F) + ((low >> 4) & 0x0F) * kPackedBcdDigitRadix;
+  int high_pair =
+      (high & 0x0F) + ((high >> 4) & 0x0F) * kPackedBcdDigitRadix;
+  return low_pair + high_pair * kPackedBcdPairPlaceValue;
 }
 
 void ActRaiser_ApplyCheats(void) {
@@ -3010,7 +3030,8 @@ static bool CreateGameCoroutine(void) {
     DeleteFiber(g_game_fiber);
     g_game_fiber = NULL;
   }
-  g_game_fiber = CreateFiberEx(64 * 1024, GAME_STACK_SIZE,
+  g_game_fiber = CreateFiberEx(kGameCoroutineStackCommitBytes,
+                               kGameCoroutineStackReserveBytes,
                                FIBER_FLAG_FLOAT_SWITCH,
                                game_coroutine_fiber, NULL);
   if (!g_game_fiber) {
@@ -3028,8 +3049,8 @@ static bool CreateGameCoroutine(void) {
      * crash). With a guard page the overflow faults immediately, at the site
      * that caused it. */
     long page = sysconf(_SC_PAGESIZE);
-    size_t guard = page > 0 ? (size_t)page : 4096u;
-    size_t total = GAME_STACK_SIZE + guard;
+    size_t guard = page > 0 ? (size_t)page : kFallbackHostPageBytes;
+    size_t total = kGameCoroutineStackReserveBytes + guard;
     void *map = mmap(NULL, total, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (map == MAP_FAILED) {
@@ -3053,7 +3074,7 @@ static bool CreateGameCoroutine(void) {
     return false;
   }
   g_game_ctx.uc_stack.ss_sp = g_game_stack;
-  g_game_ctx.uc_stack.ss_size = GAME_STACK_SIZE;
+  g_game_ctx.uc_stack.ss_size = kGameCoroutineStackReserveBytes;
   g_game_ctx.uc_link = &g_host_ctx;
   makecontext(&g_game_ctx, game_coroutine, 0);
 #endif

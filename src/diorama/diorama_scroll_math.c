@@ -12,6 +12,10 @@
 #include <stdio.h>   /* fprintf (AR_INTERP_LOG) */
 #include <stdlib.h>  /* getenv (AR_INTERP_LOG) */
 
+#include "constants.h"
+
+enum { kMaximumInterpolablePairSpanMs = 50 };
+
 void DioramaInterpUvWindow(float region_u0, float region_u1, float du,
                            float slack, float *out_u0, float *out_u1) {
   /* Clamp the SHIFT, not the window position — see the header comment for why
@@ -37,7 +41,10 @@ bool DioramaScrollPairIsInterpolable(const FrameSlot *curr,
    * estimate (savestate load, long stall). Still checked on the timestamps,
    * which remain the honest record of when the two frames were captured — the
    * span is simply no longer used as the interpolation DIVISOR. */
-  if (curr->timestamp_ns - prev->timestamp_ns >= 50000000ULL) return false;
+  if (curr->timestamp_ns - prev->timestamp_ns >=
+      (uint64_t)kMaximumInterpolablePairSpanMs *
+          kNanosecondsPerMillisecond)
+    return false;
   /* R17/C3: 0 means "paused re-capture", which is not a pair; and it is the
    * divisor below, so this also guards the division. */
   if (curr->capture_ticks == 0) return false;

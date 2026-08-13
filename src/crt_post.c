@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "constants.h"
 #include "gpu_shader_blob.h"
 #include "settings.h"
 
@@ -245,15 +246,24 @@ SDL_Rect CrtPost_End(SDL_Renderer *renderer,
     uniforms.image_y = (float)image.y;
     uniforms.image_w = (float)image.w;
     uniforms.image_h = (float)image.h;
-    uniforms.scan_lines = (float)(scan_lines > 0 ? scan_lines : 224);
-    uniforms.scan_columns = (float)(scan_columns > 0 ? scan_columns : 256);
-    uniforms.curvature = (float)g_settings.crt_curvature_x100 / 100.0f;
-    uniforms.scanline_depth = (float)g_settings.crt_scanline_x100 / 100.0f;
-    uniforms.mask_strength = (float)g_settings.crt_mask_x100 / 100.0f;
-    uniforms.aberration = (float)g_settings.crt_aberration_x100 / 100.0f;
-    uniforms.bandwidth = (float)g_settings.crt_bandwidth_x100 / 100.0f;
-    uniforms.vignette = (float)g_settings.crt_vignette_x100 / 100.0f;
-    uniforms.brightness = (float)g_settings.crt_brightness_x100 / 100.0f;
+    uniforms.scan_lines = (float)(
+        scan_lines > 0 ? scan_lines : kActRaiserAuthenticHeight);
+    uniforms.scan_columns = (float)(
+        scan_columns > 0 ? scan_columns : kActRaiserAuthenticWidth);
+    uniforms.curvature =
+        (float)g_settings.crt_curvature_x100 / (float)kPercentScale;
+    uniforms.scanline_depth =
+        (float)g_settings.crt_scanline_x100 / (float)kPercentScale;
+    uniforms.mask_strength =
+        (float)g_settings.crt_mask_x100 / (float)kPercentScale;
+    uniforms.aberration =
+        (float)g_settings.crt_aberration_x100 / (float)kPercentScale;
+    uniforms.bandwidth =
+        (float)g_settings.crt_bandwidth_x100 / (float)kPercentScale;
+    uniforms.vignette =
+        (float)g_settings.crt_vignette_x100 / (float)kPercentScale;
+    uniforms.brightness =
+        (float)g_settings.crt_brightness_x100 / (float)kPercentScale;
 
     SDL_SetGPURenderStateFragmentUniforms(s_state, 0, &uniforms,
                                           (Uint32)sizeof uniforms);

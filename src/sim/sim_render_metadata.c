@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "constants.h"
 #include "sim_world_map.h"
 
 _Static_assert(kSimMaxSourceRecords ==
@@ -102,6 +103,9 @@ enum {
   kSimRecordState_BlueDragonStrike = 6,
   kSimRecordState_RedDemonAttackFirst = 7,
   kSimRecordState_RedDemonAttackLast = 9,
+  kSimComposition_BlueDragonBoltA = 0xE1BD,
+  kSimComposition_BlueDragonBoltB = 0xE209,
+  kSimComposition_BlueDragonBoltC = 0xE255,
   /* The miracle cloud family's own ground shadow ellipse. Inside the
    * $D9E5-$DCD2 range but not part of what hangs in the sky. */
   kSimComposition_MiracleCloudShadow = 0xDA22,
@@ -129,8 +133,9 @@ static bool IsAngelArrowComposition(uint16_t composition) {
 }
 
 static bool IsBuildingZapComposition(uint16_t composition) {
-  return composition == 0xE1BD || composition == 0xE209 ||
-      composition == 0xE255;
+  return composition == kSimComposition_BlueDragonBoltA ||
+      composition == kSimComposition_BlueDragonBoltB ||
+      composition == kSimComposition_BlueDragonBoltC;
 }
 
 typedef struct TownCreationLightningPhaseDesc {
@@ -384,13 +389,13 @@ static SimEffectGeometry EffectPointGeometry(int16_t x, int16_t y,
 static SimEffectPhase BlueDragonPhase(uint16_t composition, int16_t *strike_y) {
   *strike_y = 56;
   switch (composition) {
-    case 0xE1BD:
+    case kSimComposition_BlueDragonBoltA:
       *strike_y = 52;
       return kSimEffectPhase_BlueDragonBoltA;
-    case 0xE209:
+    case kSimComposition_BlueDragonBoltB:
       *strike_y = 52;
       return kSimEffectPhase_BlueDragonBoltB;
-    case 0xE255:
+    case kSimComposition_BlueDragonBoltC:
       return kSimEffectPhase_BlueDragonBoltC;
   }
   return kSimEffectPhase_BlueDragonAttack;
@@ -1318,7 +1323,8 @@ float Sim3D_SourceCullCover(const SimSourceRecord *source,
 }
 
 int16_t Sim3D_MaxDrawLift(unsigned height_scale_x100) {
-  long lift = (long)kSimVirtualHeight_Flying * (long)height_scale_x100 / 100;
+  long lift = (long)kSimVirtualHeight_Flying * (long)height_scale_x100 /
+      kPercentScale;
   if (lift < 0) lift = 0;
   if (lift > 0x7FFF) lift = 0x7FFF;
   return (int16_t)lift;
@@ -1336,7 +1342,7 @@ int16_t Sim3D_SourceDrawLift(const SimSourceRecord *source,
       source->tier, source->type, source->semantic_state,
       source->record_address, source->composition);
   long lift = (long)classification.virtual_height *
-      (long)height_scale_x100 / 100;
+      (long)height_scale_x100 / kPercentScale;
   if (lift < 0) lift = 0;
   if (lift > 0x7FFF) lift = 0x7FFF;
   return (int16_t)lift;
@@ -1434,7 +1440,7 @@ void SimRenderMetadata_CaptureFrame(
   memset(dst, 0, sizeof(*dst));
   /* Zero is a deliberate "ground everything" tuning value, so a frame that is
    * never annotated must still default to the catalogue heights. */
-  dst->height_scale_x100 = 100;
+  dst->height_scale_x100 = kPercentScale;
   dst->requested_features = requested_features & kSimFeature_All;
   dst->diagnostic_layer_mask = diagnostic_layer_mask;
   if (!wram) return;

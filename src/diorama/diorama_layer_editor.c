@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "constants.h"
 
 /* ── level tabs ──────────────────────────────────────────────────────────
  *
@@ -52,7 +53,10 @@ int DioramaLayerEditor_LevelIndexOfGroup(uint8_t map_group) {
  * for Fillmore act 2's water (diorama-layers.ini), i.e. the one magnitude known
  * to close a real gap in a real room. A thickness starts smaller because a
  * skirt that deep reads as a wall rather than an edge. */
-enum { kEditorParamStepPermille = 10 };  /* 0.01 per press on a depth key */
+enum {
+  kEditorParamStepPermille = 10,  /* 0.01 per press on a depth key. */
+  kEditorStackDensityMaximum = 100,
+};
 static const float kEditorDefaultTilt = 0.29f;
 static const float kEditorDefaultThickness = 0.20f;
 static const float kEditorDefaultStack = 0.29f;
@@ -189,7 +193,8 @@ static int ClampInt(int v, int lo, int hi) {
  * blindly so a value loaded from a hand-edited file (rake:0.293) snaps onto the
  * grid on the first press instead of carrying its remainder forever. */
 static float StepFloat(float value, int direction, float lo, float hi) {
-  const float step = (float)kEditorParamStepPermille / 1000.0f;
+  const float step =
+      (float)kEditorParamStepPermille / (float)kPermilleScale;
   int units = (int)(value / step + (value >= 0.0f ? 0.5f : -0.5f));
   units += direction < 0 ? -1 : 1;
   return ClampFloat((float)units * step, lo, hi);
@@ -261,7 +266,8 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
           ClearShapeKeys(p);
           return true;
         }
-        const float step = (float)kEditorParamStepPermille / 1000.0f;
+        const float step =
+            (float)kEditorParamStepPermille / (float)kPermilleScale;
         next = direction < 0 ? -step : step;
       }
       switch (strategy) {
@@ -322,8 +328,9 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
       if (strategy != kDioramaDepth_Stack) return false;
       float base = p->set_stack_density ? p->stack_density
                                         : kEditorDefaultDensity;
-      float next = ClampFloat(base + (direction < 0 ? -1.0f : 1.0f), 1.0f,
-                              100.0f);
+      float next = ClampFloat(
+          base + (direction < 0 ? -1.0f : 1.0f), 1.0f,
+          (float)kEditorStackDensityMaximum);
       if (p->set_stack_density && next == p->stack_density) return false;
       p->stack_density = next; p->set_stack_density = true;
       /* Mirror of the rule above: a density only takes effect when no explicit

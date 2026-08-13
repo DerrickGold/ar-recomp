@@ -19,6 +19,7 @@
 #include "action/action_obj_apron.h"
 #include "present.h"
 #include "action/action_effect_render.h"
+#include "constants.h"
 #include "crt_post.h"
 #include "types.h"
 #include "diorama/diorama.h"
@@ -304,7 +305,7 @@ static bool DrawWorldNavigationActiveRegionHaze(
         WorldNavigationAuthenticToOutput(
             slot, viewport, authentic_x, authentic_y),
         {1.0f, 1.0f, 1.0f,
-         haze * (float)slot->sim.underlay_defocus_pct / 100.0f},
+         haze * (float)slot->sim.underlay_defocus_pct / (float)kPercentScale},
         {xs[column] / (float)kSimWorldMapPixels,
          ys[row] / (float)kSimWorldMapPixels},
       };
@@ -341,7 +342,8 @@ static bool DrawWorldNavigationActiveRegionHaze(
           scene, vertices[i].tex_coord.x * kSimWorldMapPixels,
           vertices[i].tex_coord.y * kSimWorldMapPixels, lead);
       vertices[i].color = (SDL_FColor){
-        r, g, b, haze * (float)slot->sim.underlay_haze_pct / 100.0f,
+        r, g, b,
+        haze * (float)slot->sim.underlay_haze_pct / (float)kPercentScale,
       };
     }
     SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
@@ -416,11 +418,13 @@ static bool DrawWorldNavigationWeather(
   SDL_Texture *texture = EnsureWorldNavigationCloudTexture();
   if (!texture) return false;
 
-  const float opacity = (float)slot->sim.cloud_opacity_pct / 100.0f;
+  const float opacity =
+      (float)slot->sim.cloud_opacity_pct / (float)kPercentScale;
   const float body_visibility = SimWorldNavigationScene_CloudVisibility(
       slot->sim.world_navigation.zoom_current,
       slot->sim.cloud_altitude_px);
-  const float drift = (float)slot->sim.cloud_drift_pct / 100.0f;
+  const float drift =
+      (float)slot->sim.cloud_drift_pct / (float)kPercentScale;
   const Uint64 elapsed_ms = SDL_GetTicks();
   SDL_SetTextureColorMod(texture, 255, 255, 255);
   SDL_SetTextureAlphaMod(texture, 255);
@@ -456,7 +460,7 @@ static bool DrawWorldNavigationWeather(
         const float sample_weight =
             sample_count == 1 ? 1.0f : sample == 1 ? 0.5f : 0.25f;
         const float alpha = opacity * layer->weight *
-            ((float)slot->sim.shadow_opacity_pct / 100.0f) *
+            ((float)slot->sim.shadow_opacity_pct / (float)kPercentScale) *
             0.35f * sample_weight;
         if (!DrawWorldNavigationCloudLayer(
                 slot, viewport, texture, layer, elapsed_ms, drift,

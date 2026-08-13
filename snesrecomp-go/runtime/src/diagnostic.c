@@ -20,9 +20,8 @@
 
 /* The always-on block-PC ring stays in common_cpu_infra.c (it is written by
  * the inline cpu_trace_block on every block entry — core infra, not gated
- * diagnostics). The dumps here only read it. This size mirror must match the
- * AR_BLK_RING definition next to the ring. */
-#define AR_BLK_RING 1024
+ * diagnostics). The dumps here only read it; types.h owns the shared capacity
+ * and derived wrap mask. */
 extern uint32_t g_ar_blk_ring[];
 extern uint32_t g_ar_blk_aux[];
 extern uint16_t g_ar_blk_s[];
@@ -181,7 +180,8 @@ void ar_entry_trapfn(CpuState *cpu, const char *fn, uint32_t pc24) {
   extern uint16_t g_ar_blk_s[]; extern unsigned g_ar_blk_idx;
   fprintf(stderr, "  block path (pc, m, x, S):\n");
   for (int k = 200; k >= 1; k--) {
-    unsigned idx = (g_ar_blk_idx - (unsigned)k) & 1023u;
+    unsigned idx =
+        (g_ar_blk_idx - (unsigned)k) & kRuntimeBlockTraceRingMask;
     fprintf(stderr, "    [-%3d] pc=$%06X m=%u x=%u S=$%04X\n", k,
             g_ar_blk_ring[idx], (g_ar_blk_aux[idx] >> 16) & 1,
             (g_ar_blk_aux[idx] >> 17) & 1, g_ar_blk_s[idx]);
@@ -245,7 +245,8 @@ void ar_garbage_variant_trap(CpuState *cpu, const char *fn, uint32_t pc24) {
       histn = h ? (int)strtoul(h, NULL, 0) : 24;
       if (histn > 1000) histn = 1000; if (histn < 1) histn = 24; }
     for (int k = histn; k >= 1; k--) {
-      unsigned idx = (g_ar_blk_idx - (unsigned)k) & 1023u;
+      unsigned idx =
+          (g_ar_blk_idx - (unsigned)k) & kRuntimeBlockTraceRingMask;
       fprintf(stderr, "[garbage-variant]   [-%3d] pc=$%06X m=%u x=%u S=%04X\n", k,
               g_ar_blk_ring[idx], (g_ar_blk_aux[idx] >> 16) & 1,
               (g_ar_blk_aux[idx] >> 17) & 1, g_ar_blk_s[idx]);
@@ -273,7 +274,8 @@ void ar_garbage_variant_trap(CpuState *cpu, const char *fn, uint32_t pc24) {
               "S jump across a call; the B21F blocks $03B2xx mark each call's "
               "return) ===\n", fn);
       for (int k = 200; k >= 1; k--) {
-        unsigned idx = (g_ar_blk_idx - (unsigned)k) & 1023u;
+        unsigned idx =
+            (g_ar_blk_idx - (unsigned)k) & kRuntimeBlockTraceRingMask;
         fprintf(stderr, "[xtrace]   %06X m=%u x=%u S=%04X\n",
                 g_ar_blk_ring[idx], (g_ar_blk_aux[idx] >> 16) & 1,
                 (g_ar_blk_aux[idx] >> 17) & 1, g_ar_blk_s[idx]);
@@ -404,7 +406,8 @@ void ar_call_mx_fail(CpuState *cpu, int em, int ex, const char *fn, uint32_t pc2
     extern unsigned g_ar_blk_idx;
     fprintf(stderr, "[call-mx] last 48 blocks (pc m x S X), oldest-first:\n");
     for (int i = 48; i >= 1; i--) {
-      unsigned j = (g_ar_blk_idx - (unsigned)i) & 1023u;
+      unsigned j =
+          (g_ar_blk_idx - (unsigned)i) & kRuntimeBlockTraceRingMask;
       uint32_t aux = g_ar_blk_aux[j];
       fprintf(stderr, "    %06X m=%u x=%u S=%04X X=%04X\n",
               g_ar_blk_ring[j], (aux >> 16) & 1, (aux >> 17) & 1,
@@ -487,11 +490,13 @@ static int ar_strace_setup(void) {
 /* True when the currently-executing block (newest ring entry) is in the window. */
 int ar_strace_active(void) {
   if (!ar_strace_setup() || g_strace_n >= 400 || g_ar_blk_idx == 0) return 0;
-  uint32_t pc = g_ar_blk_ring[(g_ar_blk_idx - 1u) & (AR_BLK_RING - 1)];
+  uint32_t pc = g_ar_blk_ring[
+      (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
   return pc >= g_strace_lo && pc <= g_strace_hi;
 }
 void ar_strace_op(const char *kind, uint16_t addr, uint8_t val, uint16_t s) {
-  uint32_t pc = g_ar_blk_ring[(g_ar_blk_idx - 1u) & (AR_BLK_RING - 1)];
+  uint32_t pc = g_ar_blk_ring[
+      (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
   fprintf(stderr, "[strace]   %-4s $%04X = $%02X   S=%04X  (in $%06X)\n",
           kind, addr, val, s, pc);
   if (++g_strace_n == 400) fprintf(stderr, "[strace] (cap 400)\n");
@@ -520,11 +525,13 @@ int ar_stackprov_enabled(void) {
 }
 
 int ar_block_history2(uint32_t *pc, uint32_t *aux, int max) {
-  if (max > AR_BLK_RING) max = AR_BLK_RING;
+  if (max > kRuntimeBlockTraceRingCapacity)
+    max = kRuntimeBlockTraceRingCapacity;
   unsigned total = g_ar_blk_idx;
   int n = (total < (unsigned)max) ? (int)total : max;
   for (int i = 0; i < n; i++) {
-    unsigned k = (g_ar_blk_idx - n + i) & (AR_BLK_RING - 1);
+    unsigned k =
+        (g_ar_blk_idx - n + i) & kRuntimeBlockTraceRingMask;
     pc[i] = g_ar_blk_ring[k];
     aux[i] = g_ar_blk_aux[k];
   }
@@ -535,11 +542,13 @@ int ar_block_history2(uint32_t *pc, uint32_t *aux, int max) {
  * dump show stack drift across a call chain (find the subroutine that returns
  * with S off, corrupting a later PLP). */
 int ar_block_history3(uint32_t *pc, uint32_t *aux, uint16_t *s, int max) {
-  if (max > AR_BLK_RING) max = AR_BLK_RING;
+  if (max > kRuntimeBlockTraceRingCapacity)
+    max = kRuntimeBlockTraceRingCapacity;
   unsigned total = g_ar_blk_idx;
   int n = (total < (unsigned)max) ? (int)total : max;
   for (int i = 0; i < n; i++) {
-    unsigned k = (g_ar_blk_idx - n + i) & (AR_BLK_RING - 1);
+    unsigned k =
+        (g_ar_blk_idx - n + i) & kRuntimeBlockTraceRingMask;
     pc[i] = g_ar_blk_ring[k];
     aux[i] = g_ar_blk_aux[k];
     s[i] = g_ar_blk_s[k];
@@ -563,7 +572,7 @@ void ar_vramraw(uint16_t vaddr, uint8_t val, int port) {
     vhi = v ? (unsigned)strtoul(v, NULL, 0) : 4; }
   if (!en) return;
   if (vaddr > vhi) return;
-  extern uint8_t g_ram[0x20000];
+  extern uint8_t g_ram[kSnesWramSize];
   extern int snes_frame_counter;
   /* AR_HF_LO/HI: gate on HOST frame (monotonic) instead of game-frame $0088,
    * which is unreliable near the cutscene. */
@@ -573,13 +582,18 @@ void ar_vramraw(uint16_t vaddr, uint8_t val, int port) {
   if (hflo >= 0) {
     if (snes_frame_counter < hflo || (hfhi >= 0 && snes_frame_counter > hfhi)) return;
   } else {
-    unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+    unsigned gf =
+        (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+        ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
     if (gf < lo || gf > hi) return;
   }
-  unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+  unsigned gf =
+      (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+      ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
   extern const char *g_last_recomp_func;
   extern uint32_t g_ar_blk_ring[]; extern unsigned g_ar_blk_idx;
-  uint32_t blk = g_ar_blk_ring[(g_ar_blk_idx - 1u) & 1023u];
+  uint32_t blk = g_ar_blk_ring[
+      (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
   static int nl; if (nl++ < 4000)
     fprintf(stderr, "[vramraw] hf=%d gf=%u port=%02x vram=$%04x val=%02x blk=$%06X func=%s\n",
             snes_frame_counter, gf, port, vaddr, val, blk, g_last_recomp_func ? g_last_recomp_func : "?");
@@ -598,8 +612,10 @@ int ar_vramwatch(uint16_t vaddr, uint8_t val) {
   }
   if (!en) return 0;
   if (vaddr < vlo || vaddr > vhi) return 0;
-  extern uint8_t g_ram[0x20000];
-  unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+  extern uint8_t g_ram[kSnesWramSize];
+  unsigned gf =
+      (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+      ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
   if (gf < lo || gf > hi) return 0;
   extern const char *g_last_recomp_func;
   extern uint32_t g_ar_blk_ring[]; extern unsigned g_ar_blk_idx;
@@ -613,7 +629,8 @@ int ar_vramwatch(uint16_t vaddr, uint8_t val) {
   unsigned key = vaddr >> 5;
   for (int i = 0; i < n; i++) if (sf[i] == fn && sv[i] == key) return 0;
   if (n < 512) { sf[n] = fn; sv[n] = key; n++; }
-  uint32_t blk = g_ar_blk_ring[(g_ar_blk_idx - 1u) & 1023u];
+  uint32_t blk = g_ar_blk_ring[
+      (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
   fprintf(stderr, "[vramwatch] gf=%u vram=$%04x val=%02x blk=$%06X func=%s\n",
           gf, vaddr, val, blk, fn);
   return 0;

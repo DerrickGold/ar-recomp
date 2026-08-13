@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "music_replacements.h"
+#include "constants.h"
 #include "host/host_audio.h"
 #include "settings.h"
 
@@ -13,6 +14,8 @@
 #ifdef _WIN32
 #define strncasecmp _strnicmp
 #endif
+
+enum { kMusicManifestLineCapacity = 1024 };
 
 /* Engine seams (snesrecomp-go/runtime). The APU mutex is recursive (SDL), so the
  * handlers below may take it even when the caller already holds it. */
@@ -25,11 +28,13 @@ extern int g_dsp_voice_mute_srcn_min;
 /* ActRaiser's SPC driver: per-song instruments occupy srcn 0x0C and up; the
  * common sample bank (srcn 0x00-0x0B, uploaded once from 06:AC00) carries the
  * SFX, which must survive any song-bank swap and therefore never live in the
- * per-song range. Muting from 0x0C silences music voices only. */
-#define MUSIC_MUTE_SRCN_MIN 0x0C
+ * per-song range. Muting from the shared boundary silences music voices only. */
 
 /* Driver command vocabulary on APU port 0 ($2140). Anything other than these
  * controls and idle zero is a "start/resume song N" request. */
+#define SPC_PORT_CONTROL 0
+#define SPC_PORT_SOUND_EFFECT 2
+#define SPC_CMD_IDLE 0x00
 #define SPC_CMD_HALT 0xF0
 #define SPC_CMD_ATTENTION 0xF1
 #define SPC_CMD_PAUSE 0xF2
@@ -186,7 +191,7 @@ int MusicReplacements_Load(const char *manifest_path) {
   MusicReplacement pending;
   bool in_entry = false;
   int entry_line = 0;
-  char line[1024];
+  char line[kMusicManifestLineCapacity];
   int line_number = 0;
 
   #define COMMIT_PENDING() do { \
@@ -210,7 +215,7 @@ int MusicReplacements_Load(const char *manifest_path) {
         snprintf(pending.name, sizeof(pending.name), "%s", cursor + 7);
         pending.song = kMusicSongAny;
         pending.loop = true;
-        pending.gain_percent = 100;
+        pending.gain_percent = kPercentScale;
         in_entry = true;
         entry_line = line_number;
       }
@@ -356,7 +361,7 @@ static void StartSession(const MusicReplacement *entry, int song) {
   s.src_carry = 0.0;
   s.hist[0] = 0;
   s.hist[1] = 0;
-  g_dsp_voice_mute_srcn_min = MUSIC_MUTE_SRCN_MIN;
+  g_dsp_voice_mute_srcn_min = kActRaiserSpcMusicSourceMinimum;
   fprintf(stderr, "[music] src=%02X:%04X song=%02x -> [music:%s] %s\n",
           (unsigned)(entry->src >> 16), (unsigned)(entry->src & 0xffff),
           (unsigned)song, entry->name, entry->file);
@@ -373,12 +378,13 @@ static void OnSpcUpload(uint32_t src) {
 }
 
 static void OnApuPortWrite(uint8_t port, uint8_t val) {
-  if (port == 2) {
+  if (port == SPC_PORT_SOUND_EFFECT) {
     if (val && s_musiclog)
-      fprintf(stderr, "[music] event id=%02x on port 2\n", val);
+      fprintf(stderr, "[music] event id=%02x on port %d\n", val,
+              SPC_PORT_SOUND_EFFECT);
     return;
   }
-  if (port != 0) return;
+  if (port != SPC_PORT_CONTROL) return;
   if (s_musiclog)
     fprintf(stderr, "[music] port0=%02x (session=%s song=%02x)\n", val,
             s.session ? s.session->name : "-",
@@ -401,7 +407,8 @@ static void OnApuPortWrite(uint8_t port, uint8_t val) {
               s.session->name);
     return;
   }
-  if (val == SPC_CMD_ATTENTION || val == SPC_CMD_UPLOAD || val == 0x00)
+  if (val == SPC_CMD_ATTENTION || val == SPC_CMD_UPLOAD ||
+      val == SPC_CMD_IDLE)
     return;
 
   /* Anything else on port 0 starts song `val` of the loaded image. */
@@ -466,7 +473,8 @@ static void MixMusic(int16_t *out, int out_frames) {
   const MusicReplacement *entry = s.session;
   const int gain = s.gain_percent;
   int output_rate = RtlGetAudioOutputRate();
-  if (output_rate <= 0) output_rate = 44100;
+  if (output_rate <= 0)
+    output_rate = kHostAudioMinimumOutputFrequencyHz;
   const double phase0 = s.src_carry;      /* carried sub-sample resample phase */
   double per_block = ((double)out_frames * entry->file_rate / output_rate) +
                      phase0;
@@ -553,7 +561,7 @@ static void MixMusic(int16_t *out, int out_frames) {
                   frac * ((2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) +
                           frac * (3.0 * (p1 - p2) + p3 - p0)));
       int sample = (int)v;
-      sample = (sample * gain) / 100;
+      sample = (sample * gain) / kPercentScale;
       int mixed = out[i * 2 + ch] + sample;
       out[i * 2 + ch] = (int16_t)(mixed < -32768 ? -32768
                                   : (mixed > 32767 ? 32767 : mixed));

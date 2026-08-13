@@ -17,8 +17,9 @@ enum {
   /* At most 512 map pages can fit in the two-bank WRAM input. Each expands to
    * 32x32 tile words, so this is a derived safety bound rather than a guessed
    * level-size cap. */
+  kActionBgMaximumPageCount = kActionBgMaxWramBytes / kActionBgPageBytes,
   kActionBgMaxExpandedTiles =
-      (kActionBgMaxWramBytes / kActionBgPageBytes) * kActionBgTilesPerPage,
+      kActionBgMaximumPageCount * kActionBgTilesPerPage,
 };
 
 typedef struct ActionBgLayout {
@@ -61,8 +62,6 @@ struct ActionBgWorld {
 _Static_assert(sizeof(uint16_t) == 2, "tilemap words must be 16-bit");
 _Static_assert(kActionBgDefinitionBytes == 0x800,
                "256 metatiles must occupy 2 KiB");
-_Static_assert(kActionBgMaxExpandedTiles == 512 * 1024,
-               "expanded capacity must follow the WRAM page bound");
 
 static void Invalidate(ActionBgWorld *world) {
   if (world) world->valid = false;

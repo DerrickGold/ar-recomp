@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "sfx_census.h"
+#include "constants.h"
 #include "host/host_audio.h"
 #include "run_dir.h"
 
@@ -14,11 +15,8 @@ extern void (*g_dsp_voice_kon_hook)(int ch, uint8_t srcn, uint16_t decodeOffset,
                                     int volL, int volR, uint16_t pitch);
 extern uint64_t snes_apu_cycle_count(void);
 
-/* Per-song instruments start here; anything below is the shared bank that
- * carries the SFX. Key-ons at or above this are music and are not candidates
- * for correlation. Kept in sync with music_replacements.c by intent, not by
- * #include — the census must keep working if that gate is ever retuned. */
-#define SFX_SRCN_MAX 0x0C
+/* Per-song instruments begin at kActRaiserSpcMusicSourceMinimum; anything
+ * below is the shared bank and therefore an SFX census candidate. */
 
 /* A request and the key-on it caused are separated by: the NMI's even-frame
  * mailbox drain, the scheduled port-write delay, and the driver's own poll
@@ -31,6 +29,8 @@ extern uint64_t snes_apu_cycle_count(void);
 
 #define SFX_MAX_FNS 6      /* distinct calling functions tracked per id */
 #define SFX_MAX_SRCN 8     /* distinct srcn observed per id */
+
+enum { kSfxCensusPathCapacity = 512 };
 
 typedef struct {
   const char *name;
@@ -79,7 +79,7 @@ static struct {
  * music/ambience in the shared bank, i.e. exactly the voices that a naive
  * srcn-based music/SFX split would misclassify. Counted per srcn so the report
  * can call them out. */
-static unsigned s_orphan_kon[SFX_SRCN_MAX];
+static unsigned s_orphan_kon[kActRaiserSpcMusicSourceMinimum];
 static unsigned s_orphan_total;
 
 static void (*s_prev_port_hook)(uint8_t port, uint8_t val);
@@ -171,7 +171,8 @@ static void OnApuPortWrite(uint8_t port, uint8_t val) {
 static void OnVoiceKeyOn(int ch, uint8_t srcn, uint16_t decodeOffset,
                          int volL, int volR, uint16_t pitch) {
   (void)decodeOffset;
-  if (srcn >= SFX_SRCN_MAX) return;   /* music voice, not a census candidate */
+  if (srcn >= kActRaiserSpcMusicSourceMinimum)
+    return;                            /* music voice, not a census candidate */
 
   uint64_t now = snes_apu_cycle_count();
   if (s_pending.id < 0 || now > s_pending.deadline) {
@@ -223,7 +224,8 @@ void SfxCensus_Init(void) {
   g_rtl_apu_port_hook = OnApuPortWrite;
   g_dsp_voice_kon_hook = OnVoiceKeyOn;
   fprintf(stderr, "[sfx-census] enabled — correlating BRK sound requests with "
-                  "shared-bank (srcn < %02x) key-ons\n", SFX_SRCN_MAX);
+                  "shared-bank (srcn < %02x) key-ons\n",
+                  kActRaiserSpcMusicSourceMinimum);
 }
 
 static void WriteReport(FILE *f) {
@@ -297,7 +299,7 @@ static void WriteReport(FILE *f) {
              "# These are music or driver ambience living in the SFX bank — the\n"
              "# voices a plain srcn-threshold music/SFX split gets wrong.\n",
           s_orphan_total);
-  for (int i = 0; i < SFX_SRCN_MAX; i++)
+  for (int i = 0; i < kActRaiserSpcMusicSourceMinimum; i++)
     if (s_orphan_kon[i])
       fprintf(f, "#   srcn %02x: %u key-ons\n", i, s_orphan_kon[i]);
 }
@@ -312,7 +314,7 @@ void SfxCensus_Report(void) {
     return;
   }
 
-  char path[512];
+  char path[kSfxCensusPathCapacity];
   RunDirFile(path, sizeof path, "sfx_census.txt");
   FILE *f = fopen(path, "w");
   if (f) {
