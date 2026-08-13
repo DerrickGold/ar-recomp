@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "constants.h"
 #include "sim_world_navigation_scene.h"
 #include "snes/ppu.h"
 #include "types.h"
@@ -278,7 +279,7 @@ enum {
   /* Atmospheric backdrop strength: how far the horizon and zenith depart from
    * the scene's own backdrop colour. Zero reproduces the flat fill exactly,
    * which is what the D5a-2 checkpoint compares against. */
-  kSimBackdropStrengthDefaultPct = 100,
+  kSimBackdropStrengthDefaultPct = kPercentScale,
   /* Where the synthetic horizon sits, percent of viewport height from the top.
    * The real one is never in frame (see DrawSimBackdrop), and the backdrop is
    * only ever seen fully zoomed out past the end of the extended map, so this
@@ -293,7 +294,7 @@ enum {
    * design: banks that visibly race read as a screen effect rather than as
    * weather, and this field also has to hide a cull boundary, which it cannot
    * do if it is somewhere else a second later. */
-  kSimCloudDriftDefaultPct = 100,
+  kSimCloudDriftDefaultPct = kPercentScale,
 };
 
 /* The sprite-drawable window in the emitter's own biased coordinates.

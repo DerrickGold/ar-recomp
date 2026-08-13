@@ -5,10 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
+#include "actraiser_game.h"
 #include "snes/ppu.h"
 
-extern uint8 g_ram[0x20000];
 extern Ppu *g_ppu;
 
 enum {
@@ -59,11 +58,6 @@ static void Append(TextBuilder *builder, const char *format, ...) {
   if (written <= 0) return;
   size_t room = builder->capacity - builder->length;
   builder->length += (size_t)written < room ? (size_t)written : room - 1;
-}
-
-static uint16 ReadWram16(unsigned address) {
-  address &= 0x1ffff;
-  return (uint16)(g_ram[address] | (g_ram[(address + 1) & 0x1ffff] << 8));
 }
 
 static uint64_t Fnv1a(uint64_t hash, const void *data, size_t size) {
@@ -448,7 +442,8 @@ static bool InspectMode7(int scan_y, TextBuilder *panel,
          "when = wram[0018]==0x%02X, wram[0019]==0x%02X, mode==7\n",
          canvas_x & ~7, canvas_y & ~7,
          (canvas_x & ~7) + 8, (canvas_y & ~7) + 8,
-         g_ram[0x18], g_ram[0x19]);
+         g_ram[kActRaiserWram_MapGroup],
+         g_ram[kActRaiserWram_CurrentMap]);
   return true;
 }
 
@@ -460,7 +455,8 @@ bool SceneInspector_Select(int screen_x, int screen_y) {
 bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
                                    unsigned bg_mask,
                                    bool inspect_objects) {
-  if (!g_ppu || screen_y < 0 || screen_y >= 224 ||
+  if (!g_ppu || screen_y < 0 ||
+      screen_y >= kActRaiserAuthenticHeight ||
       screen_x < -kPpuExtraLeftRight ||
       screen_x >= kActRaiserAuthenticWidth + kPpuExtraLeftRight)
     return false;
@@ -474,9 +470,9 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
   TextBuilder report = { s.report, sizeof(s.report), 0 };
   int mode = g_ppu->bgmode & 7;
   int scan_y = screen_y + 1; /* PPU scanline 1 is visible output row 0. */
-  uint16 gf = ReadWram16(0x88);
-  uint16 camera_x = ReadWram16(0x22);
-  uint16 camera_y = ReadWram16(0x24);
+  uint16 gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+  uint16 camera_x = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
+  uint16 camera_y = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
 
   Append(&panel, "CLICK %d,%d  WORLD $%04X,$%04X\n",
          screen_x, screen_y,
@@ -484,8 +480,10 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
          (uint16)(camera_y + screen_y));
   Append(&panel,
          "GF $%04X STATE $%02X/$%02X CAM $%04X,$%04X MAP $%04X,$%04X\n",
-         gf, g_ram[0x18], g_ram[0x19], camera_x, camera_y,
-         ReadWram16(0x2e), ReadWram16(0x30));
+         gf, g_ram[kActRaiserWram_MapGroup],
+         g_ram[kActRaiserWram_CurrentMap], camera_x, camera_y,
+         ActRaiser_ReadWram16(kActRaiserWram_Bg1Width),
+         ActRaiser_ReadWram16(kActRaiserWram_Bg1Height));
   Append(&panel,
          "PPU MODE %d BRIGHT %d MAIN $%02X SUB $%02X MARGIN %d/%d\n",
          mode, g_ppu->inidisp & 0xf, g_ppu->screenEnabled[0],
@@ -551,13 +549,17 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
          "manifest gate: when = wram[0018]==0x%02X, "
          "wram[0019]==0x%02X, mode==%d\n",
          screen_x, screen_y, (uint16)(camera_x + screen_x),
-         (uint16)(camera_y + screen_y), gf, g_ram[0x18], g_ram[0x19],
-         camera_x, camera_y, ReadWram16(0x2e), ReadWram16(0x30),
+         (uint16)(camera_y + screen_y), gf,
+         g_ram[kActRaiserWram_MapGroup],
+         g_ram[kActRaiserWram_CurrentMap], camera_x, camera_y,
+         ActRaiser_ReadWram16(kActRaiserWram_Bg1Width),
+         ActRaiser_ReadWram16(kActRaiserWram_Bg1Height),
          mode, g_ppu->inidisp & 0xf, (g_ppu->inidisp >> 7) & 1,
          g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
          g_ppu->screenWindowed[0], g_ppu->screenWindowed[1],
          g_ppu->extraLeftCur, g_ppu->extraRightCur,
-         g_ppu->extraLeftRight, g_ram[0x18], g_ram[0x19], mode);
+         g_ppu->extraLeftRight, g_ram[kActRaiserWram_MapGroup],
+         g_ram[kActRaiserWram_CurrentMap], mode);
   if (s_sim_valid && s_sim.view != kSimView_None) {
     Append(&report,
            "sim3d: view=%s metadata_valid=%d integrity=$%X serial=%u "
@@ -671,7 +673,8 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
            "this 8x8 tile. Scrolling scenery belongs to the future tiles "
            "plane.\n"
            "when = wram[0018]==0x%02X, wram[0019]==0x%02X, mode==%d\n",
-           g_ram[0x18], g_ram[0x19], mode);
+           g_ram[kActRaiserWram_MapGroup],
+           g_ram[kActRaiserWram_CurrentMap], mode);
   }
   Append(&report,
          "Candidates are geometry/pixel matches. Live PPU windows, color "

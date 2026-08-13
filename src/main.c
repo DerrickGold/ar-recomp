@@ -72,10 +72,14 @@
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim3d.h"
+#include "constants.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 enum {
   kDefaultPowerOnWramFill = 0x55,
+  kDefaultPowerOnSramFill = 0x60,
+  kUninitializedEnvironmentOption = -2,
+  kPerformanceReportIntervalMs = kMillisecondsPerSecond,
   kPowerOnGameFrameSentinel =
       kDefaultPowerOnWramFill | (kDefaultPowerOnWramFill << 8),
 };
@@ -236,8 +240,8 @@ static void RunOneEmulatedTick(bool *stop_running) {
    * wall time reaches the threshold (default 8 ms; the flag value overrides
    * when >= 2) prints one [apuprof] line splitting the frame into lock-wait
    * vs SPC catch-up vs handshake-spin vs upload vs music-hook time. */
-  static int apuprof_ms = -2;
-  if (apuprof_ms == -2) {
+  static int apuprof_ms = kUninitializedEnvironmentOption;
+  if (apuprof_ms == kUninitializedEnvironmentOption) {
     extern int ApuProfEnabled(void);
     apuprof_ms = ApuProfEnabled() ? atoi(getenv("AR_APUPROF")) : -1;
     if (apuprof_ms >= 0 && apuprof_ms < 2) apuprof_ms = 8;
@@ -293,22 +297,30 @@ static void RunOneEmulatedTick(bool *stop_running) {
     extern uint64_t g_watchdog_loop_headers;
     extern uint64_t g_apuprof_audiowait_max_ns;
     uint64_t dt_ns = audio_trace_wall_ns() - apuprof_t0;
-    if (dt_ns >= (uint64_t)apuprof_ms * 1000000u) {
+    if (dt_ns >=
+        (uint64_t)apuprof_ms * kNanosecondsPerMillisecond) {
       const unsigned gf =
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      double audiowait_ms = g_apuprof_audiowait_max_ns / 1e6;
+      double audiowait_ms =
+          g_apuprof_audiowait_max_ns /
+          (double)kNanosecondsPerMillisecond;
       g_apuprof_audiowait_max_ns = 0;
       fprintf(stderr,
               "[apuprof] gf=%u dt=%.1fms lockwait=%.2fms "
               "catchup=%.2fms/%llucyc/%uc reads=%u writes=%u "
               "hook=%.2fms upload=%.2fms schedlat=%llusmp pushes=%lu "
               "loops=%llu audiowait-max=%.2fms last=%s\n",
-              gf, dt_ns / 1e6, g_apuprof_lockwait_ns / 1e6,
-              g_apuprof_catchup_ns / 1e6,
+              gf, dt_ns / (double)kNanosecondsPerMillisecond,
+              g_apuprof_lockwait_ns /
+                  (double)kNanosecondsPerMillisecond,
+              g_apuprof_catchup_ns /
+                  (double)kNanosecondsPerMillisecond,
               (unsigned long long)g_apuprof_catchup_cyc,
               g_apuprof_catchup_calls, g_apuprof_port_reads,
-              g_apuprof_port_writes, g_apuprof_hook_ns / 1e6,
-              g_apuprof_upload_ns / 1e6,
+              g_apuprof_port_writes,
+              g_apuprof_hook_ns / (double)kNanosecondsPerMillisecond,
+              g_apuprof_upload_ns /
+                  (double)kNanosecondsPerMillisecond,
               (unsigned long long)g_apuprof_sched_lat_max,
               g_recomp_push_count - apuprof_push0,
               (unsigned long long)(g_watchdog_loop_headers - apuprof_loop0),
@@ -325,7 +337,7 @@ static void RunOneEmulatedTick(bool *stop_running) {
     run_ms_sum += dt; if (dt > run_ms_max) run_ms_max = dt;
     win_frames++;
     if (!win_start) win_start = t1;
-    if (t1 - win_start >= 1000) {
+    if (t1 - win_start >= kPerformanceReportIntervalMs) {
       uint64_t cc, cy; snes_catchup_stats(&cc, &cy);
       const unsigned gf =
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
@@ -435,7 +447,7 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
     if (dt > draw_ms_max) draw_ms_max = dt;
     draw_win_frames++;
     if (!draw_win_start) draw_win_start = now;
-    if (now - draw_win_start >= 1000) {
+    if (now - draw_win_start >= kPerformanceReportIntervalMs) {
       fprintf(stderr,
               "[draw-perf] frames=%d draw-ms avg=%.1f max=%u $18=%02x $19=%02x\n",
               draw_win_frames, (double)draw_ms_sum / draw_win_frames,
@@ -534,9 +546,9 @@ static void RunOuterIterationHousekeeping(void) {
    * F6; used e.g. to sweep the warp table capturing each level's music src
    * (AR_MUSICLOG). Same transition-capable-state caveats as F6. */
   {
-    static long warp_at = -2;
+    static long warp_at = kUninitializedEnvironmentOption;
     static bool warp_fired;
-    if (warp_at == -2) {
+    if (warp_at == kUninitializedEnvironmentOption) {
       const char *at = getenv("AR_WARP_AT");
       warp_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
     }
@@ -560,9 +572,9 @@ static void RunOuterIterationHousekeeping(void) {
    * desyncs game-frame-keyed input replays, so a visual-regression run has to
    * replay flat into the stage and only then switch. */
   {
-    static long diorama_at = -2;
+    static long diorama_at = kUninitializedEnvironmentOption;
     static bool diorama_fired;
-    if (diorama_at == -2) {
+    if (diorama_at == kUninitializedEnvironmentOption) {
       const char *at = getenv("AR_DIORAMA_AT");
       diorama_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
     }
@@ -668,7 +680,7 @@ static int AppBoot_ParseArgs(AppBoot *app, int argc, char **argv) {
    * beside build/ActRaiserRecomp, so the CWD stays authoritative and the dev
    * workflow is unchanged. Must precede RunDirInit (console tee into runs/)
    * and any relative file access. */
-  static char rom_abs[1024], config_abs[1024];
+  static char rom_abs[kHostPathCapacity], config_abs[kHostPathCapacity];
   if (PortablePaths_IsBundle()) {
     if (app->rom_path && snesrecomp_abspath(app->rom_path, rom_abs, sizeof rom_abs))
       app->rom_path = rom_abs;
@@ -761,7 +773,7 @@ static void AppBoot_ResolveDisplayAndSettings(AppBoot *app) {
    * The default load path is the SAME portable-relative location every
    * Settings_Save site writes. AR_SETTINGS_PATH still wins so replay fixtures
    * (tools/sim3d_demo.py) can keep their pinned settings. */
-  char settings_file[1024];
+  char settings_file[kHostPathCapacity];
   const char *settings_path = getenv("AR_SETTINGS_PATH");
   if (!settings_path || !settings_path[0])
     settings_path = UserDataFile(settings_file, sizeof settings_file,
@@ -1248,7 +1260,7 @@ static void AppBoot_StartGame(AppBoot *app) {
     const char *wp0 = getenv("AR_WRAM_INIT");
     if (wp0 && wp0[0]) {
       FILE *f = fopen(wp0, "rb");
-      if (f) { size_t n = fread(g_ram, 1, 0x20000, f); fclose(f);
+      if (f) { size_t n = fread(g_ram, 1, kActRaiserWramSize, f); fclose(f);
         fprintf(stderr, "[wram-init] seeded %zu bytes from %s\n", n, wp0); }
       else fprintf(stderr, "AR_WRAM_INIT: cannot open %s\n", wp0);
     }
@@ -1263,14 +1275,16 @@ static void AppBoot_StartGame(AppBoot *app) {
   {
     extern uint8 *g_sram; extern int g_sram_size;
     const char *senv = getenv("AR_SRAM_FILL");
-    int sfill = senv ? (int)strtoul(senv, NULL, 0) : 0x60;
+    int sfill = senv ? (int)strtoul(senv, NULL, 0)
+                     : kDefaultPowerOnSramFill;
     if (g_sram && g_sram_size > 0) memset(g_sram, sfill, g_sram_size);
   }
 
   /* Load persisted battery save (overrides the fresh-cart fill if present).
    * Portable builds use saves/ beside the executable after the bundle anchor;
    * developer runs use saves/ under their launch directory. */
-  char saves_dir[1024], save_srm[1024], save_ini[1024];
+  char saves_dir[kHostPathCapacity], save_srm[kHostPathCapacity],
+      save_ini[kHostPathCapacity];
   UserDataFile(saves_dir, sizeof saves_dir, "saves");
   mkdir(saves_dir, 0755);
   RtlMigrateLegacySram(kActRaiserGameInfo.title);
@@ -1483,7 +1497,7 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
               const SettingDesc *inspector = Settings_Find("scene_inspector");
               SettingChangeResult result = Settings_SetLong(
                   inspector, !g_settings.scene_inspector);
-              char settings_path[1024];
+              char settings_path[kHostPathCapacity];
               UserDataFile(settings_path, sizeof settings_path, "settings.ini");
               if (result > kSettingChange_Unchanged &&
                   !Settings_Save(settings_path))
@@ -1562,7 +1576,6 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
             HostDevTools_TakeFullSnapshot();
           } else if (event.key.key == SDLK_D && !event.key.repeat) {
             if (event.key.mod & SDL_KMOD_SHIFT) {
-              extern uint8 g_ram[0x20000];
               if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
                 fprintf(stderr, "[diorama] layer dump requires an action stage "
                         "($18=%02x)\n", g_ram[kActRaiserWram_MapGroup]);
@@ -1740,8 +1753,8 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
  * checked only inside the headless branch, which meant an otherwise identical
  * real-compositor capture could not exit cleanly after writing its artifact. */
 static bool DevTools_ShouldAutoQuit(void) {
-  static int quit_frames = -2;
-  if (quit_frames == -2) {
+  static int quit_frames = kUninitializedEnvironmentOption;
+  if (quit_frames == kUninitializedEnvironmentOption) {
     const char *value = getenv("AR_QUIT_FRAMES");
     quit_frames = value ? atoi(value) : -1;
   }
@@ -1758,6 +1771,9 @@ static void AppRunMainLoop(AppBoot *app) {
 
   bool running = true;
   uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
+  const uint32 emulation_frame_interval_ms =
+      (uint32)(kHostDisplayEmulationFrameIntervalNs /
+               kNanosecondsPerMillisecond);
 
   /* M6/§3.1,§3.3: fixed-timestep accumulator, non-headless only. */
   static const int kMaxCatchupFrames = 3;     /* spiral-of-death cap, §3.1 */
@@ -1819,7 +1835,7 @@ static void AppRunMainLoop(AppBoot *app) {
        * panel's native rate, whatever it is. The fixed sleep remains only
        * as the anti-spin fallback when nothing presents (hidden window,
        * headless). */
-      if (!presented) SDL_Delay(16);
+      if (!presented) SDL_Delay(emulation_frame_interval_ms);
       last_time_ns = SDL_GetTicksNS();
       continue;
     }
@@ -1839,19 +1855,21 @@ static void AppRunMainLoop(AppBoot *app) {
        * in real time by the audio thread) stays in sync with the game thread —
        * a faithful reproduction of normal play, vs. the default headless turbo
        * which runs the game thread uncapped and confounds APU-handshake timing. */
-      static int pace = -2;
-      if (pace == -2) pace = getenv("AR_PACE") ? 1 : 0;
+      static int pace = kUninitializedEnvironmentOption;
+      if (pace == kUninitializedEnvironmentOption)
+        pace = getenv("AR_PACE") ? 1 : 0;
       if (pace) {
         uint32 now = SDL_GetTicks();
         uint32 elapsed = now - last_tick;
-        if (elapsed < 16) SDL_Delay(16 - elapsed);
+        if (elapsed < emulation_frame_interval_ms)
+          SDL_Delay(emulation_frame_interval_ms - elapsed);
         last_tick = SDL_GetTicks();
       }
       continue;
     }
 
     /* M6/§3.1: fixed-timestep accumulator (non-headless only). The game
-     * thread is no longer paced by SDL_Delay(16) here —
+     * thread is no longer paced by a fixed millisecond delay here —
      * HostDisplay_SubmitFrame owns the present wait, and this wall-clock
      * accumulator owns the emulated tick rate independently. */
     {

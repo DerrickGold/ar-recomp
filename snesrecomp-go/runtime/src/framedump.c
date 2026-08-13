@@ -40,7 +40,7 @@ static uint32_t crc32(const uint8_t *buf, size_t len) {
 // Game-agnostic per-frame metadata. Per-game offline tools decode the
 // accompanying .bin dump for game-specific fields.
 static void write_json(const char *path, uint32_t frame, const uint8_t *wram) {
-  uint32_t crc = crc32(wram, 0x20000);
+  uint32_t crc = crc32(wram, kSnesWramSize);
   FILE *f = fopen(path, "w");
   if (!f) return;
   fprintf(f,
@@ -49,14 +49,14 @@ static void write_json(const char *path, uint32_t frame, const uint8_t *wram) {
     "  \"wram_size\": %u,\n"
     "  \"crc32_wram\": \"0x%08X\"\n"
     "}\n",
-    frame, 0x20000u, crc);
+    frame, kSnesWramSize, crc);
   fclose(f);
 }
 
 static void write_bin(const char *path, const uint8_t *wram) {
   FILE *f = fopen(path, "wb");
   if (!f) return;
-  fwrite(wram, 1, 0x20000, f);
+  fwrite(wram, 1, kSnesWramSize, f);
   fclose(f);
 }
 

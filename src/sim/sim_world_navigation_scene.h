@@ -4,20 +4,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Raw $09 camera state captured from WRAM on the game thread. The current
- * matrix is the transform uploaded for this frame; the staged matrix is kept
- * separately so presentation never guesses which side of the ROM's update it
- * observed. */
-typedef struct SimWorldNavigationFrame {
-  uint16_t focus_x, focus_y;
-  int16_t matrix[4];       /* current A/B/C/D uploaded for this frame */
-  int16_t next_matrix[4];  /* staged A/B/C/D for the next update */
-  uint16_t rotation;
-  uint16_t zoom_current;
-  uint16_t zoom_target;
-  uint16_t active_location;
-} SimWorldNavigationFrame;
-
 enum {
   /* OAM low table in 16-bit words (128 sprites x 2). Mirrors ppu.h's
    * kPpuOamWords, declared here rather than included because this module is pure
@@ -27,7 +13,24 @@ enum {
   kSimWorldNavigationZoomNear = 0x0206,
   kSimWorldNavigationZoomMiddle = 0x040A,
   kSimWorldNavigationZoomFar = 0x0562,
+  kSimWorldNavigationMatrixComponentCount = 4,
+  kSimWorldNavigationAffineComponentCount = 6,
+  kSimWorldNavigationGroundVertexCount = 4,
 };
+
+/* Raw $09 camera state captured from WRAM on the game thread. The current
+ * matrix is the transform uploaded for this frame; the staged matrix is kept
+ * separately so presentation never guesses which side of the ROM's update it
+ * observed. */
+typedef struct SimWorldNavigationFrame {
+  uint16_t focus_x, focus_y;
+  int16_t matrix[kSimWorldNavigationMatrixComponentCount];
+  int16_t next_matrix[kSimWorldNavigationMatrixComponentCount];
+  uint16_t rotation;
+  uint16_t zoom_current;
+  uint16_t zoom_target;
+  uint16_t active_location;
+} SimWorldNavigationFrame;
 
 typedef struct SimWorldNavigationGroundVertex {
   /* Full-world tile coordinates. The four vertices cover [0,128] on each
@@ -73,8 +76,9 @@ typedef struct SimWorldNavigationScene {
   uint32_t texture_serial;
   uint16_t texture_width, texture_height;
   uint16_t tile_width, tile_height;
-  float source_to_screen[6];
-  SimWorldNavigationGroundVertex ground[4];
+  float source_to_screen[kSimWorldNavigationAffineComponentCount];
+  SimWorldNavigationGroundVertex
+      ground[kSimWorldNavigationGroundVertexCount];
   /* 1-based ROM location and its $01:B73C region in source-texture pixels.
    * Zero/unknown locations mean the Palace is outside every town border, so
    * no clear region is cut out of the full-world haze. */
@@ -123,7 +127,7 @@ float SimWorldNavigationScene_LocationHaze(
  * Anything else fails closed. Raster bounds are filled later by the PPU-backed
  * capture step. */
 bool SimWorldNavigationScene_ClassifyOam(
-    const uint16_t oam[256],
+    const uint16_t oam[kSimWorldNavigationOamWords],
     SimWorldNavigationComposition *out);
 
 #endif  /* SIM_WORLD_NAVIGATION_SCENE_H */

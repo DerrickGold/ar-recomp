@@ -8,10 +8,11 @@
  * handwritten game-specific code. */
 
 #include "types.h"
+#include "actraiser_runtime_constants.h"
+#include "constants.h"
 
-enum {
-  kActRaiserWramSize = 0x20000,
-};
+_Static_assert(kActRaiserWramSize == kSnesWramSize,
+               "game and bundled runtime must agree on WRAM size");
 
 extern uint8 g_ram[kActRaiserWramSize];
 
@@ -57,8 +58,8 @@ enum {
 /* Stable low-WRAM state addresses. These are offsets within g_ram's $7E bank
  * mirror, not general SNES bus addresses. */
 enum {
-  kActRaiserWram_MapGroup = 0x0018,
-  kActRaiserWram_CurrentMap = 0x0019,
+  kActRaiserWram_MapGroup = kActRaiserRuntimeWram_MapGroup,
+  kActRaiserWram_CurrentMap = kActRaiserRuntimeWram_CurrentMap,
   kActRaiserWram_DestinationMap = 0x001A,
   kActRaiserWram_DestinationMapGroup = 0x001B,
   kActRaiserWram_Lives = 0x001C,
@@ -79,7 +80,7 @@ enum {
   kActRaiserWram_BgMetatileTable = 0x0052,
   kActRaiserWram_BgWordMask = 0x0054,
   kActRaiserWram_BgAttributes = 0x006B,
-  kActRaiserWram_GameFrame = 0x0088,
+  kActRaiserWram_GameFrame = kActRaiserRuntimeWram_GameFrame,
   kActRaiserWram_ActionCameraSubject = 0x008A,
   kActRaiserWram_InputHeldHigh = 0x00A0,
   kActRaiserWram_ActionTimerLow = 0x00E6,
@@ -94,6 +95,7 @@ enum {
   kActRaiserWram_AngelMaximumSp = 0x0284,
   kActRaiserWram_AngelCurrentHp = 0x0286,
   kActRaiserWram_AngelMaximumHp = 0x0287,
+  kActRaiserWram_TownLevel = 0x0291,
   kActRaiserWram_PersistentMagicPoints = 0x0295,
   kActRaiserWram_MagicInventory = 0x0299,
 
@@ -170,8 +172,6 @@ enum {
 };
 
 enum {
-  kActRaiserAuthenticWidth = 256,
-  kActRaiserAuthenticHeight = 224,
   kActRaiserTownWorldWidth = 512,
   kActRaiserTownCameraMaximumX = 256,
   kActRaiserTownCameraMaximumY = 0x011F,
@@ -233,6 +233,7 @@ enum {
   kActRaiserSkyPalaceMagicIconSize = 16,
 
   kActRaiserTransitionRequestBit = 0x80,
+  kActRaiserObjectStatus_Inactive = 0x4000,
   kActRaiserObjectStatus_InactiveMask = 0xC000,
   kActRaiserObjectStatus_End = 0x8000,
   kActRaiserObjectStatus_NoDraw = 0x2000,

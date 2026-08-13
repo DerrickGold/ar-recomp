@@ -602,9 +602,11 @@ static bool AxisBindingHeld(uint32 binding, int value, bool was_held) {
 
 static int StickDeadzone(void) {
   int percent = g_settings.input_stick_deadzone;
-  if (percent < 5) percent = 5;
-  if (percent > 90) percent = 90;
-  return 32767 * percent / 100;
+  if (percent < kInputStickDeadzoneMinimumPercent)
+    percent = kInputStickDeadzoneMinimumPercent;
+  if (percent > kInputStickDeadzoneMaximumPercent)
+    percent = kInputStickDeadzoneMaximumPercent;
+  return kInputAxisMaximumMagnitude * percent / kPercentScale;
 }
 
 bool InputMap_GamepadIsActive(void) {
@@ -717,7 +719,7 @@ static void HandlePadAxis(SDL_GamepadAxis axis, int value) {
 
 /* 0..1 deflection of one binding right now. Sticks scale past the camera
  * deadzone so a light touch nudges rather than slews; triggers use their full
- * 0..32767 travel from a small dead spot. */
+ * 0..kInputAxisMaximumMagnitude travel from a small dead spot. */
 static float BindingMagnitude(uint32 binding) {
   int kind = INPUT_BIND_KIND(binding);
   int code = INPUT_BIND_CODE(binding);
@@ -739,11 +741,15 @@ static float BindingMagnitude(uint32 binding) {
                               : (INPUT_BIND_NEG(binding) ? -value : value);
       if (magnitude <= 0) return 0.0f;
       int percent = g_settings.input_cam_deadzone;
-      if (percent < 0) percent = 0;
-      if (percent > 90) percent = 90;
-      int deadzone = 32767 * percent / 100;
+      if (percent < kInputCameraDeadzoneMinimumPercent)
+        percent = kInputCameraDeadzoneMinimumPercent;
+      if (percent > kInputCameraDeadzoneMaximumPercent)
+        percent = kInputCameraDeadzoneMaximumPercent;
+      int deadzone =
+          kInputAxisMaximumMagnitude * percent / kPercentScale;
       if (magnitude <= deadzone) return 0.0f;
-      float scaled = (float)(magnitude - deadzone) / (float)(32767 - deadzone);
+      float scaled = (float)(magnitude - deadzone) /
+          (float)(kInputAxisMaximumMagnitude - deadzone);
       return scaled > 1.0f ? 1.0f : scaled;
     }
     default:

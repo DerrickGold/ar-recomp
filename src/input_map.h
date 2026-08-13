@@ -87,6 +87,20 @@ typedef enum {
   kInputDevice_Count,
 } InputDeviceMode;
 
+/* User-facing analog ranges shared by the settings descriptor and the input
+ * evaluator. Keeping validation and runtime defense on these same symbols
+ * prevents an accepted setting from acquiring a different meaning in the
+ * event path. */
+enum {
+  kInputStickDeadzoneDefaultPercent = 35,
+  kInputStickDeadzoneMinimumPercent = 5,
+  kInputStickDeadzoneMaximumPercent = 90,
+  kInputCameraDeadzoneDefaultPercent = 12,
+  kInputCameraDeadzoneMinimumPercent = 0,
+  kInputCameraDeadzoneMaximumPercent = 60,
+  kInputAxisMaximumMagnitude = 32767,
+};
+
 /* Packed binding word, stored in g_settings and serialized through the
  * descriptor's parse/format pair:
  *   bits 24-27  kind (InputBindKind)

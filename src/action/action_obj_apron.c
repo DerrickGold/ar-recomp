@@ -2,14 +2,11 @@
 
 #include <string.h>
 
-/* Authentic screen width. Not pulled from actraiser_game.h on purpose: that
- * header declares g_ram and the CPU state, and this unit is meant to be
- * testable without either. */
-enum { kApronAuthenticWidth = 256 };
+#include "constants.h"
 
 int ActionApron_SurfaceWidth(const ActionApronGeometry *g) {
   if (!g) return 0;
-  return kApronAuthenticWidth + 2 * g->ws_extra + 2 * g->apron;
+  return kActRaiserAuthenticWidth + 2 * g->ws_extra + 2 * g->apron;
 }
 
 int ActionApron_SurfaceColumn(const ActionApronGeometry *g, int screen_x) {
@@ -27,8 +24,8 @@ void ActionApron_LeftSpan(const ActionApronGeometry *g, int *x0, int *x1) {
 
 void ActionApron_RightSpan(const ActionApronGeometry *g, int *x0, int *x1) {
   if (!g || !x0 || !x1) return;
-  *x0 = kApronAuthenticWidth + g->ws_extra;
-  *x1 = kApronAuthenticWidth + g->ws_extra + g->apron;
+  *x0 = kActRaiserAuthenticWidth + g->ws_extra;
+  *x1 = kActRaiserAuthenticWidth + g->ws_extra + g->apron;
 }
 
 bool ActionApron_PartTouchesApron(const ActionApronGeometry *g, int x,

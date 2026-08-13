@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include "actraiser_runtime_constants.h"
 #include "snes/snes_regs.h"
 #include "debug_server.h"
 #include <string.h>
@@ -24,7 +25,7 @@ typedef struct CpuState CpuState;
 void SimpleHdma_Init(SimpleHdma *c, DmaChannel *dc);
 void SimpleHdma_DoLine(SimpleHdma *c);
 
-extern uint8 g_ram[0x20000];
+extern uint8 g_ram[kSnesWramSize];
 extern uint8 *g_sram;
 extern int g_sram_size;
 extern const uint8 *g_rom;
@@ -157,9 +158,9 @@ static inline uint8_t *IndirPtr(LongPtr ptr, uint16 offs) {
   uint32 a = (*(uint32 *)&ptr & 0xffffff) + offs;
   uint8 bank = (uint8)(a >> 16);
   if (bank >= 0x7e && bank <= 0x7f)
-    return &g_ram[a & 0x1ffff];
+    return &g_ram[a & kSnesWramMask];
   if ((a & 0xffff) < 0x2000)
-    return &g_ram[a & 0x1ffff];
+    return &g_ram[a & kSnesWramMask];
   return RomPtr(a);
 }
 /* AR_WATCHOBJ/AR_WATCH16 gap fix (2026-07-01): cpu_write8/cpu_write16
@@ -177,7 +178,7 @@ static inline uint8_t *IndirPtr(LongPtr ptr, uint16 offs) {
  * two watches behave identically regardless of which store form hits
  * the target address. */
 static inline void IndirWatchByte(uint8_t *dst, uint8_t old_val, uint8_t value) {
-  if (dst < g_ram || dst >= g_ram + 0x20000) return;
+  if (dst < g_ram || dst >= g_ram + kSnesWramSize) return;
   uint32_t off = (uint32_t)(dst - g_ram);
   { extern int ar_trace_active(void);
     extern void ar_trace_wram(uint32_t, uint16_t, uint16_t, int);
@@ -207,13 +208,14 @@ static inline void IndirWriteByte(LongPtr ptr, uint16 offs, uint8 value) {
   static int need_old = -1;
   if (need_old < 0)
     need_old = (getenv("AR_WATCHOBJ") != NULL) || (getenv("AR_TRACE") != NULL);
-  if (need_old && dst >= g_ram && dst < g_ram + 0x20000) old_val = dst[0];
+  if (need_old && dst >= g_ram && dst < g_ram + kSnesWramSize)
+    old_val = dst[0];
 #if SNESRECOMP_REVERSE_DEBUG
   // Only fire the WRAM hook if the write actually landed in WRAM.
   // dst may point into ROM for in-ROM data-table writes (a NOP in practice
   // since ROM is read-only, but the ptr math still lands there).
   // Read old BEFORE the store so the Tier-1 log can emit old/new.
-  if (dst >= g_ram && dst < g_ram + 0x20000) {
+  if (dst >= g_ram && dst < g_ram + kSnesWramSize) {
     uint8_t old_val_dbg = dst[0];
     dst[0] = value;
     debug_on_wram_write_byte((uint32_t)(dst - g_ram), old_val_dbg, value);
@@ -227,7 +229,7 @@ static inline void IndirWriteByte(LongPtr ptr, uint16 offs, uint8 value) {
 }
 
 static inline void IndirWatchWord(uint8_t *dst, uint16_t old_val, uint16_t value) {
-  if (dst < g_ram || dst >= g_ram + 0x20000) return;
+  if (dst < g_ram || dst >= g_ram + kSnesWramSize) return;
   uint32_t off = (uint32_t)(dst - g_ram);
   { extern int ar_trace_active(void);
     extern void ar_trace_wram(uint32_t, uint16_t, uint16_t, int);
@@ -276,10 +278,10 @@ static inline void IndirWriteWord(LongPtr ptr, uint16 offs, uint16 value) {
   if (need_old < 0)
     need_old = (getenv("AR_WATCHOBJ") != NULL) || (getenv("AR_WATCH16") != NULL)
              || (getenv("AR_TRACE") != NULL);
-  if (need_old && dst >= g_ram && dst < g_ram + 0x20000)
+  if (need_old && dst >= g_ram && dst < g_ram + kSnesWramSize)
     old_val = (uint16_t)dst[0] | ((uint16_t)dst[1] << 8);
 #if SNESRECOMP_REVERSE_DEBUG
-  if (dst >= g_ram && dst < g_ram + 0x20000) {
+  if (dst >= g_ram && dst < g_ram + kSnesWramSize) {
     uint16_t old_val_dbg = (uint16_t)dst[0] | ((uint16_t)dst[1] << 8);
     dst[0] = (uint8_t)value;
     dst[1] = (uint8_t)(value >> 8);
@@ -301,7 +303,7 @@ static inline void IndirWriteWord(LongPtr ptr, uint16 offs, uint16 value) {
 #if SNESRECOMP_REVERSE_DEBUG
 static inline void rdb_indir_dbx_store8(uint8 dp_addr, uint16 offs, uint8 value) {
   uint8_t *dst = IndirPtrDB(dp_addr, offs);
-  if (dst >= g_ram && dst < g_ram + 0x20000) {
+  if (dst >= g_ram && dst < g_ram + kSnesWramSize) {
     uint8_t old_val = dst[0];
     dst[0] = value;
     debug_on_wram_write_byte((uint32_t)(dst - g_ram), old_val, value);
@@ -311,7 +313,7 @@ static inline void rdb_indir_dbx_store8(uint8 dp_addr, uint16 offs, uint8 value)
 }
 static inline void rdb_indir_dbx_store16(uint8 dp_addr, uint16 offs, uint16 value) {
   uint8_t *dst = IndirPtrDB(dp_addr, offs);
-  if (dst >= g_ram && dst < g_ram + 0x20000) {
+  if (dst >= g_ram && dst < g_ram + kSnesWramSize) {
     uint16_t old_val = *(uint16_t *)dst;
     *(uint16_t *)dst = value;
     debug_on_wram_write_word((uint32_t)(dst - g_ram), old_val, value);

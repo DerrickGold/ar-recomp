@@ -30,8 +30,7 @@ enum {
   kHudScaleStepPercent = 25,
   kHudScaleMinimumPercent = 25,
   kHudScaleMaximumPercent = 400,
-  kHudScaleDefaultPercent = 100,
-  kPercentScale = 100,
+  kHudScaleDefaultPercent = kPercentScale,
 };
 
 static void EnsureDirectoryExists(const char *path) {

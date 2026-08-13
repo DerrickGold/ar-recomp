@@ -4,6 +4,17 @@
 
 #include "audio_trace.h"
 
+#define TRACE_NANOSECONDS_PER_MILLISECOND 1000000ull
+#define TRACE_NANOSECONDS_PER_SECOND 1000000000ull
+#define TRACE_MILLISECONDS_PER_SECOND 1000u
+
+enum {
+  kTraceSnapshotIntervalMs = TRACE_MILLISECONDS_PER_SECOND,
+  kApuPortCount = 4,
+  kApuPortMask = kApuPortCount - 1,
+  kDspKeyOnRegister = 0x4c,
+};
+
 #ifdef _WIN32
 #include <windows.h>
 static uint64_t wall_ms(void) { return (uint64_t)GetTickCount64(); }
@@ -28,19 +39,22 @@ static uint64_t wall_ns(void) {
   uint64_t f = (uint64_t)freq.QuadPart;
   if (!f) return 0;
   uint64_t c = (uint64_t)now.QuadPart;
-  return (c / f) * 1000000000ull + ((c % f) * 1000000000ull) / f;
+  return (c / f) * TRACE_NANOSECONDS_PER_SECOND +
+      ((c % f) * TRACE_NANOSECONDS_PER_SECOND) / f;
 }
 #else
 #include <time.h>
 static uint64_t wall_ms(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000);
+  return (uint64_t)ts.tv_sec * TRACE_MILLISECONDS_PER_SECOND +
+      (uint64_t)(ts.tv_nsec / TRACE_NANOSECONDS_PER_MILLISECOND);
 }
 static uint64_t wall_ns(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+  return (uint64_t)ts.tv_sec * TRACE_NANOSECONDS_PER_SECOND +
+      (uint64_t)ts.tv_nsec;
 }
 #endif
 
@@ -72,7 +86,7 @@ static AudioTraceEvent *push_event(uint8_t type) {
 
 static void maybe_snap(uint32_t ring_fill) {
   uint64_t now = wall_ms();
-  if (now - s_last_snap_ms < 1000) return;
+  if (now - s_last_snap_ms < kTraceSnapshotIntervalMs) return;
   s_last_snap_ms = now;
   AudioTraceSnap *s = &s_snaps[s_stats.snap_count & (AUDIO_TRACE_SNAP_RING - 1)];
   s_stats.snap_count++;
@@ -116,7 +130,7 @@ void audio_trace_on_reg_write(uint8_t addr, uint8_t val) {
   e->addr = addr;
   e->val = val;
   s_stats.reg_writes++;
-  if (addr == 0x4c && val != 0) s_stats.kon_writes++;
+  if (addr == kDspKeyOnRegister && val != 0) s_stats.kon_writes++;
   s_open_drop_event = UINT64_MAX;
 }
 
@@ -139,9 +153,9 @@ void audio_trace_on_pace(int consumer_active, uint32_t baseline_cycles) {
  *     read; a second CPU write while pending increments the per-port
  *     overwrite counter — the "engine never saw it" drop signature. */
 extern int snes_frame_counter; /* common_rtl.c — game frame number */
-static uint8_t s_spc_rd_last[4], s_cpu_rd_last[4];
-static uint8_t s_spc_rd_fresh[4], s_cpu_rd_fresh[4];
-static uint8_t s_cpu_wr_pending[4];
+static uint8_t s_spc_rd_last[kApuPortCount], s_cpu_rd_last[kApuPortCount];
+static uint8_t s_spc_rd_fresh[kApuPortCount], s_cpu_rd_fresh[kApuPortCount];
+static uint8_t s_cpu_wr_pending[kApuPortCount];
 
 static AudioTraceEvent *push_port_event(uint8_t type, uint8_t port, uint8_t val) {
   AudioTraceEvent *e = push_event(type);
@@ -156,13 +170,13 @@ void audio_trace_on_cpu_port_write(uint8_t port, uint8_t val) {
    * scheduled APU-sample target. Loss accounting and SPC-read gating
    * key off the APPLY hook below, where the engine can actually see
    * the value. */
-  port &= 3;
+  port &= kApuPortMask;
   s_stats.cpu_port_writes++;
   push_port_event(AUDIO_TRACE_EV_CPU_PORT_WRITE, port, val);
 }
 
 void audio_trace_on_cpu_port_apply(uint8_t port, uint8_t val) {
-  port &= 3;
+  port &= kApuPortMask;
   if (s_cpu_wr_pending[port])
     s_stats.cpu_port_overwrites[port]++;
   /* Only a NONZERO value is a command that can be lost; the per-frame
@@ -173,7 +187,7 @@ void audio_trace_on_cpu_port_apply(uint8_t port, uint8_t val) {
 }
 
 void audio_trace_on_spc_port_read(uint8_t port, uint8_t val) {
-  port &= 3;
+  port &= kApuPortMask;
   s_stats.spc_port_reads_seen++;
   s_cpu_wr_pending[port] = 0;
   if (!s_spc_rd_fresh[port] && val == s_spc_rd_last[port]) return;
@@ -184,19 +198,19 @@ void audio_trace_on_spc_port_read(uint8_t port, uint8_t val) {
 }
 
 void audio_trace_on_spc_port_write(uint8_t port, uint8_t val) {
-  port &= 3;
+  port &= kApuPortMask;
   s_stats.spc_port_writes++;
   s_cpu_rd_fresh[port] = 1;
   /* Engine outPort writes are frequent (per-tick echoes); record only
    * value changes. The raw total is still counted above. */
-  static uint8_t last[4];
+  static uint8_t last[kApuPortCount];
   if (val == last[port]) return;
   last[port] = val;
   push_port_event(AUDIO_TRACE_EV_SPC_PORT_WRITE, port, val);
 }
 
 void audio_trace_on_cpu_port_read(uint8_t port, uint8_t val) {
-  port &= 3;
+  port &= kApuPortMask;
   if (!s_cpu_rd_fresh[port] && val == s_cpu_rd_last[port]) return;
   s_cpu_rd_fresh[port] = 0;
   s_cpu_rd_last[port] = val;

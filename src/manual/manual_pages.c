@@ -2,10 +2,13 @@
 
 #include <math.h>
 
+#include "constants.h"
 #include "scene3d_math.h"
 #include <string.h>
 
 /* ── Album carving ─────────────────────────────────────────────────────────── */
+
+enum { kManualAlbumContentMinimumPercent = 80 };
 
 /* JPEG SOF0 (baseline) carries the geometry we need. Progressive (SOF2) and the
  * arithmetic-coded variants are deliberately NOT accepted: stb_image decodes
@@ -122,7 +125,9 @@ bool ManualPages_LooksLikeAlbum(const ManualPageIndex *index, size_t size) {
    * images are a rounding error of the file. */
   uint64_t image_bytes = 0;
   for (int i = 0; i < index->count; i++) image_bytes += index->pages[i].length;
-  if (image_bytes * 100u < (uint64_t)size * 80u) return false;
+  if (image_bytes * kPercentScale <
+      (uint64_t)size * kManualAlbumContentMinimumPercent)
+    return false;
 
   /* One geometry throughout. A scan album is a stack of identical sheets; mixed
    * sizes mean logos, figures, or a document that merely embeds photographs. */
@@ -273,8 +278,9 @@ void ManualView_Pan(ManualView *view, float dx, float dy,
 
 void ManualView_ZoomLimit(int page_w, int page_h, int view_w, int view_h,
                           float *out_min, float *out_max) {
-  const float lo = (float)kManualZoomMinPermille / 1000.0f;
-  const float ceiling = (float)kManualZoomMaxPermille / 1000.0f;
+  const float lo = (float)kManualZoomMinPermille / (float)kPermilleScale;
+  const float ceiling =
+      (float)kManualZoomMaxPermille / (float)kPermilleScale;
   if (out_min) *out_min = lo;
   if (out_max) *out_max = ceiling;
   if (page_w <= 0 || page_h <= 0 || view_w <= 0 || view_h <= 0) return;
@@ -289,7 +295,8 @@ void ManualView_ZoomLimit(int page_w, int page_h, int view_w, int view_h,
   /* Zoom is a multiple of fit, so the multiple of NATIVE resolution is fit*zoom.
    * Solving that for the native ceiling is the whole rule: a scan being shrunk to
    * fit has room to magnify, one already near 1:1 has almost none. */
-  float hi = ((float)kManualZoomNativePermille / 1000.0f) / fit;
+  float hi =
+      ((float)kManualZoomNativePermille / (float)kPermilleScale) / fit;
   if (hi > ceiling) hi = ceiling;
   /* A scan displayed past the native ceiling at fit would compute a maximum
    * below the minimum. Fit still has to be reachable, so the floor wins and the
@@ -367,7 +374,8 @@ float ManualTurn_HingeAngle(float turn) {
 float ManualTurn_BowOffset(float turn, float u) {
   const float cu = ClampF(u, 0.0f, 1.0f);
   const float angle = ManualTurn_HingeAngle(turn);
-  const float amplitude = (float)kManualCurlPermille / 1000.0f;
+  const float amplitude =
+      (float)kManualCurlPermille / (float)kPermilleScale;
   /* sin(pi*u) pins the bow to zero at the hinge and the free edge; sin(angle)
    * pins it to zero at rest and at the landing, so a settled sheet is exactly
    * flat and coincides with the page beneath it. */
@@ -516,7 +524,8 @@ float ManualSheet_CameraFov(float sheet_pixels, int view_h, float preferred_fov)
 
   /* Invert lift/distance = 2*sheet_pixels*tan(fov/2)/view_h for the fov at which
    * the lift exactly meets the clearance. */
-  const float clearance = (float)kManualLiftClearancePermille / 1000.0f;
+  const float clearance =
+      (float)kManualLiftClearancePermille / (float)kPermilleScale;
   const float half_tangent = clearance * (float)view_h / (2.0f * sheet_pixels);
   if (!isfinite(half_tangent) || !(half_tangent > 0.0f)) return preferred_fov;
   const float fov = 2.0f * atanf(half_tangent);
@@ -666,7 +675,8 @@ float ManualTurn_LeafShade(float turn, float u) {
    * nearly invisible, since a bow of this amplitude moves few pixels.
    * d/du of sin(pi*u) is pi*cos(pi*u): positive on the hinge half, negative on
    * the outer half, zero at the crest. */
-  const float amplitude = (float)kManualCurlPermille / 1000.0f;
+  const float amplitude =
+      (float)kManualCurlPermille / (float)kPermilleScale;
   const float slope = amplitude * (float)M_PI * cosf((float)M_PI * cu) *
                       sinf(angle);
   const float bend = 1.0f - 0.55f * slope;

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <SDL3/SDL.h>
 #include "types.h"
+#include "constants.h"
 #include "hd_replacements.h"
 #include "diorama/diorama.h"
 #include "sim/sim_render_metadata.h"
@@ -56,8 +57,8 @@ enum {
    *
    * Both are cross-checked against their actraiser_game.h counterparts by
    * _Static_asserts in frame_slot.c. */
-  kFrameSlotAuthenticWidth = 256,  /* kActRaiserAuthenticWidth */
-  kFrameSlotAuthenticHeight = 224, /* kActRaiserAuthenticHeight */
+  kFrameSlotAuthenticWidth = kActRaiserAuthenticWidth,
+  kFrameSlotAuthenticHeight = kActRaiserAuthenticHeight,
 };
 enum {
   kFrameSlotOverlayFlag_RemoveFromGame = 1,

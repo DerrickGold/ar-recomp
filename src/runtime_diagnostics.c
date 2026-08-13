@@ -19,14 +19,6 @@
 #include "run_dir.h"
 
 enum {
-  kWramByteCount = 0x20000,
-  /* Use the canonical names rather than re-deriving the addresses: these are
-   * $18/$19, the map group and map number (actraiser_game.h). Two files
-   * previously defined their own kGameModeAddress/kGameSubmodeAddress pair and
-   * DISAGREED on the second one -- see the note in oracle_trace.c. */
-  kGameModeAddress = kActRaiserWram_MapGroup,
-  kGameSubmodeAddress = kActRaiserWram_CurrentMap,
-  kTownLevelAddress = 0x0291,
   kDiagnosticPathCapacity = 320,
   kBlockHistoryCapacity = 256,
   kBlockHistoryMFlagBit = 16,
@@ -74,7 +66,7 @@ void DumpDiagState(const char *tag) {
   {
     FILE *wram_file = fopen(s_wram_path, "wb");
     if (wram_file) {
-      fwrite(g_ram, 1, kWramByteCount, wram_file);
+      fwrite(g_ram, 1, kActRaiserWramSize, wram_file);
       fclose(wram_file);
     }
   }
@@ -110,9 +102,9 @@ void DumpDiagState(const char *tag) {
     }
     fprintf(state_file,
             "game-state: $18=%02x $19=%02x  town-level $0291=%04x\n",
-            g_ram[kGameModeAddress], g_ram[kGameSubmodeAddress],
-            g_ram[kTownLevelAddress] |
-                (g_ram[kTownLevelAddress + 1] << 8));
+            g_ram[kActRaiserWram_MapGroup],
+            g_ram[kActRaiserWram_CurrentMap],
+            ActRaiser_ReadWram16(kActRaiserWram_TownLevel));
 
     const int block_count = ar_block_history3(
         s_block_history_pc, s_block_history_aux, s_block_history_stack,

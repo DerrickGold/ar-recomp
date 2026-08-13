@@ -1,6 +1,6 @@
 #include "diorama_skybox_uv.h"
 
-enum { kAuthenticWidth = 256, kAuthenticHeight = 224 };
+#include "constants.h"
 
 static int ClampInt(int value, int low, int high) {
   if (value < low) return low;
@@ -49,7 +49,8 @@ static void ValidSpanForPolicy(int ws_extra, int budget,
   }
 
   *out_x0 = ClampInt(ws_extra - margin_left, 0, tex_width);
-  *out_x1 = ClampInt(ws_extra + kAuthenticWidth + margin_right, 0, tex_width);
+  *out_x1 = ClampInt(
+      ws_extra + kActRaiserAuthenticWidth + margin_right, 0, tex_width);
   if (*out_x1 < *out_x0) *out_x1 = *out_x0;
 }
 
@@ -59,8 +60,8 @@ static bool RowWithinVerticalExtent(const ActionBgLayerPlan *layer,
     return true;
   if (authentic_y < 0)
     return -authentic_y <= layer->vertical_extent.top;
-  if (authentic_y >= kAuthenticHeight)
-    return authentic_y - (kAuthenticHeight - 1) <=
+  if (authentic_y >= kActRaiserAuthenticHeight)
+    return authentic_y - (kActRaiserAuthenticHeight - 1) <=
         layer->vertical_extent.bottom;
   return true;
 }

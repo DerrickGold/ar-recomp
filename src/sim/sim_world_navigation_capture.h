@@ -4,13 +4,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "constants.h"
 #include "sim_render_metadata.h"
 
 typedef struct Ppu Ppu;
 
 enum {
-  kSimWorldNavigationCompositionWidth = 256,
-  kSimWorldNavigationCompositionHeight = 224,
+  kSimWorldNavigationCompositionWidth = kActRaiserAuthenticWidth,
+  kSimWorldNavigationCompositionHeight = kActRaiserAuthenticHeight,
   kSimWorldNavigationCompositionPitch =
       kSimWorldNavigationCompositionWidth * (int)sizeof(uint32_t),
 };

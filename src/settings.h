@@ -1,5 +1,6 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
+#include "constants.h"
 #include "types.h"
 #include "sim/sim_render_metadata.h"
 
@@ -320,7 +321,7 @@ typedef struct Settings {
   bool save_edit_armed;
   bool save_autobackup;
   int save_editor_page;
-  int save_region_progress[6];
+  int save_region_progress[kActRaiserSaveRegionCount];
   /* Zero leaves the field untouched. Fields whose real range includes zero
    * store real+1 and use a formatter to keep that staging sentinel distinct. */
   int save_master_level;
@@ -332,13 +333,13 @@ typedef struct Settings {
   int save_angel_hp_current;
   int save_angel_hp_max;
   int save_message_speed;
-  char save_player_name[9];
+  char save_player_name[kActRaiserPlayerNameStorageBytes];
   int save_professional_mode;
   int save_death_heim_state;
   int save_equipped_magic;
-  int save_magic_slots[4];
-  int save_item_slots[8];
-  int save_scores[6][2];
+  int save_magic_slots[kActRaiserSaveMagicSlotCount];
+  int save_item_slots[kActRaiserSaveItemSlotCount];
+  int save_scores[kActRaiserSaveRegionCount][kActRaiserSaveActCount];
 
   /* Cheat values. Zero/false means disabled. Stateful enforcement latches are
    * deliberately kept private to ActRaiser_ApplyCheats, not stored here. */

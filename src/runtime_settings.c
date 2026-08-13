@@ -97,12 +97,12 @@ bool RuntimeSettings_BuildSaveEditRequest(SaveEditRequest *edits) {
     edits->equipped_magic = g_settings.save_equipped_magic - 1;
     staged = true;
   }
-  for (int slot = 0; slot < 4; slot++) {
+  for (int slot = 0; slot < kActRaiserSaveMagicSlotCount; slot++) {
     if (g_settings.save_magic_slots[slot] <= 0) continue;
     edits->magic_slots[slot] = g_settings.save_magic_slots[slot] - 1;
     staged = true;
   }
-  for (int slot = 0; slot < 8; slot++) {
+  for (int slot = 0; slot < kActRaiserSaveItemSlotCount; slot++) {
     const int selector = g_settings.save_item_slots[slot];
     if (selector <= 0 ||
         selector >= (int)(sizeof(kItemValues) / sizeof(kItemValues[0]))) {
@@ -112,7 +112,7 @@ bool RuntimeSettings_BuildSaveEditRequest(SaveEditRequest *edits) {
     staged = true;
   }
   for (int region = 0; region < kActRaiserSaveRegionCount; region++) {
-    for (int act = 0; act < 2; act++) {
+    for (int act = 0; act < kActRaiserSaveActCount; act++) {
       const int selector = g_settings.save_scores[region][act];
       if (selector <= 0) continue;
       edits->scores[region][act] = (selector - 1) * 10;
@@ -206,7 +206,7 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
     fprintf(stderr, "[save-editor] export -> %s\n", path);
   } else if (!strcmp(desc->key, "restart_game") ||
              !strcmp(desc->key, "exit_desktop")) {
-    char settings_path[1024];
+    char settings_path[kHostPathCapacity];
     UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
     if (!Settings_Save(settings_path)) {
       fprintf(stderr, "[lifecycle] could not save settings.ini\n");

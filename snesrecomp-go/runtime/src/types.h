@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#include "runtime_constants.h"
+
 #if defined(_WIN32)
 #include <crtdbg.h>
 #ifndef assert

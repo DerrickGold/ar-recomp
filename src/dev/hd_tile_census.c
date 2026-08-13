@@ -18,10 +18,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "actraiser_game.h"
 #include "snes/ppu.h"
 #include "run_dir.h"
 
-extern uint8 g_ram[0x20000];
 extern Ppu *g_ppu;
 
 enum {
@@ -29,6 +29,10 @@ enum {
   kCensusMaxRecords = 32768,
   kCensusMaxPaletteVariants = 8,
   kCensusSheetColumns = 32,
+  kMode7CanvasTilesPerAxis = 128,
+  kMode7TilePixelsPerAxis = 8,
+  kMode7CanvasPixelsPerAxis =
+      kMode7CanvasTilesPerAxis * kMode7TilePixelsPerAxis,
 };
 
 typedef enum CensusClass {
@@ -115,7 +119,8 @@ static TileRecord *FindOrAddRecord(uint64 hash, CensusClass class_) {
       memset(record, 0, sizeof(*record));
       record->hash = hash;
       record->class_ = (uint8)class_;
-      record->first_gf = (uint16)(g_ram[0x88] | (g_ram[0x89] << 8));
+      record->first_gf =
+          ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       g_hash_slots[slot] = g_record_count++;
       return record;
     }
@@ -130,7 +135,7 @@ static TileRecord *FindOrAddRecord(uint64 hash, CensusClass class_) {
 static void RecordSighting(TileRecord *record, uint8 layer_bit,
                            uint8 palette_group, int palette_base, int colors) {
   if (!record) return;
-  uint16 gf = (uint16)(g_ram[0x88] | (g_ram[0x89] << 8));
+  uint16 gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
   if (record->last_gf != gf || !record->sightings) {
     record->sightings++;
     record->last_gf = gf;
@@ -276,7 +281,7 @@ static int GroupIsPermutation(const uint16 *prev, const uint16 *cur) {
  * surveyed frames (forced blank, census disabled scene) resnapshots without
  * classifying so scene transitions don't pollute the statistics. */
 static void ClassifyPaletteWrites(void) {
-  uint16 gf = (uint16)(g_ram[0x88] | (g_ram[0x89] << 8));
+  uint16 gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
   if (g_prev_cgram_valid && gf == g_prev_cgram_gf) return;
   int classify = g_prev_cgram_valid && (uint16)(gf - g_prev_cgram_gf) == 1;
   if (classify) {
@@ -554,17 +559,22 @@ static void HdMode7Dump_Frame(void) {
   last_hash = hash;
 
   char path[320];
-  unsigned gf = (unsigned)(g_ram[0x88] | (g_ram[0x89] << 8));
+  unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
   RunDirFile(path, sizeof(path), "m7_canvas_gf%u_%08x.ppm", gf,
              (unsigned)(hash & 0xffffffffu));
   FILE *f = fopen(path, "wb");
   if (!f) return;
-  fprintf(f, "P6\n1024 1024\n255\n");
-  for (int py = 0; py < 1024; py++) {
-    for (int px = 0; px < 1024; px++) {
-      int tile = g_ppu->vram[(py >> 3) * 128 + (px >> 3)] & 0xff;
-      uint8 pixel = (uint8)(g_ppu->vram[tile * 64 + (py & 7) * 8 + (px & 7)]
-                            >> 8);
+  fprintf(f, "P6\n%d %d\n255\n", kMode7CanvasPixelsPerAxis,
+          kMode7CanvasPixelsPerAxis);
+  for (int py = 0; py < kMode7CanvasPixelsPerAxis; py++) {
+    for (int px = 0; px < kMode7CanvasPixelsPerAxis; px++) {
+      int tile = g_ppu->vram[
+          (py / kMode7TilePixelsPerAxis) * kMode7CanvasTilesPerAxis +
+          px / kMode7TilePixelsPerAxis] & 0xff;
+      uint8 pixel = (uint8)(g_ppu->vram[
+          tile * kMode7TilePixelsPerAxis * kMode7TilePixelsPerAxis +
+          (py % kMode7TilePixelsPerAxis) * kMode7TilePixelsPerAxis +
+          px % kMode7TilePixelsPerAxis] >> 8);
       uint16 xbgr = g_ppu->cgram[pixel];
       uint8 rgb[3] = {
         (uint8)(((xbgr >> 0) & 0x1f) << 3),

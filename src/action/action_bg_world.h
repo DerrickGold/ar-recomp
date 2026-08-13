@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "constants.h"
+
 /* Pure action-stage background decoder (SPEC-bg-hle BH2).
  *
  * The native loader has already expanded the level into WRAM as 256-byte
@@ -16,7 +18,7 @@ enum {
   /* ActRaiser's WRAM mirror is exactly banks $7E-$7F. Keeping the limit in the
    * public input contract prevents a corrupt dimension from turning a caller-
    * supplied size into an unbounded host allocation. */
-  kActionBgMaxWramBytes = 0x20000,
+  kActionBgMaxWramBytes = kActRaiserWramSize,
   kActionBgMetatilePixels = 16,
 };
 

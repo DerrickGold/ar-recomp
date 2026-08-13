@@ -59,18 +59,19 @@ const char *g_last_recomp_func = "(none)";
 /* Always-on lightweight block-PC ring (works in non-trace builds, where
  * cpu_trace.c's ring is absent). Written by the inline cpu_trace_block;
  * read by the watchdog dump to reveal an infinite-loop's block cycle. */
-#define AR_BLK_RING 1024
-uint32_t g_ar_blk_ring[AR_BLK_RING];
-uint32_t g_ar_blk_aux[AR_BLK_RING];   /* (x_flag<<17) | (m_flag<<16) | (X & 0xFFFF) */
-uint16_t g_ar_blk_s[AR_BLK_RING];     /* cpu->S at each block entry (stack-drift trace) */
+uint32_t g_ar_blk_ring[kRuntimeBlockTraceRingCapacity];
+uint32_t g_ar_blk_aux[kRuntimeBlockTraceRingCapacity];
+uint16_t g_ar_blk_s[kRuntimeBlockTraceRingCapacity];
 unsigned g_ar_blk_idx = 0;
 
 int ar_block_history(uint32_t *out, int max) {
-  if (max > AR_BLK_RING) max = AR_BLK_RING;
+  if (max > kRuntimeBlockTraceRingCapacity)
+    max = kRuntimeBlockTraceRingCapacity;
   unsigned total = g_ar_blk_idx;
   int n = (total < (unsigned)max) ? (int)total : max;
   for (int i = 0; i < n; i++)
-    out[i] = g_ar_blk_ring[(g_ar_blk_idx - n + i) & (AR_BLK_RING - 1)];
+    out[i] = g_ar_blk_ring[
+        (g_ar_blk_idx - n + i) & kRuntimeBlockTraceRingMask];
   return n;
 }
 
@@ -153,7 +154,7 @@ int cpu_resolve_ancestor_skip(uint16_t ret_s) {
   if (top < 2 || top > RECOMP_STACK_DEPTH) return -1;
   /* Reconstruct the RTS return PC from the SNES stack (same math as the
    * generated callsite) so the log shows WHERE the loop is trying to return. */
-  extern uint8 g_ram[0x20000];
+  extern uint8 g_ram[kSnesWramSize];
   uint16 _rpcl = g_ram[(uint16)(ret_s + 1)];
   uint16 _rpch = g_ram[(uint16)(ret_s + 2)];
   uint16 _rpc  = (uint16)((((_rpch << 8) | _rpcl) + 1) & 0xFFFFu);
@@ -238,7 +239,9 @@ void RecompStackPush(const char *name) {
       extern int snes_frame_counter; extern CpuState g_cpu; extern uint8 g_ram[];
       static long ctpgf = -2;
       if (ctpgf == -2) { const char *e = getenv("AR_CALLTRACE_GF"); ctpgf = e ? atol(e) : -1; }
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      unsigned gf =
+          (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+          ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
       if (snes_frame_counter >= ctp && snes_frame_counter <= ctp + 4 &&
           (ctpgf < 0 || (long)gf == ctpgf))
         fprintf(stderr, "[ctPUSH S=%04x m=%u] %*s>%s\n", g_cpu.S, (unsigned)g_cpu.m_flag,
@@ -258,7 +261,9 @@ void RecompStackPush(const char *name) {
        * pointer at entry, to spot a handler that leaks (next sibling S lower). */
       static long ctgf = -2;
       if (ctgf == -2) { const char *e = getenv("AR_CALLTRACE_GF"); ctgf = e ? atol(e) : -1; }
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      unsigned gf =
+          (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+          ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
       if (snes_frame_counter >= ct && snes_frame_counter <= ct + 4 &&
           (ctgf < 0 || (long)gf == ctgf))
         fprintf(stderr, "[ct S=%04x m=%u] %*s%s\n", g_cpu.S, (unsigned)g_cpu.m_flag,
@@ -319,7 +324,9 @@ void RecompStackPop(void) {
       extern int snes_frame_counter; extern CpuState g_cpu; extern uint8 g_ram[];
       static long ctgf = -2;
       if (ctgf == -2) { const char *e = getenv("AR_CALLTRACE_GF"); ctgf = e ? atol(e) : -1; }
-      unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+      unsigned gf =
+          (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+          ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
       if (snes_frame_counter >= ct && snes_frame_counter <= ct + 4 &&
           (ctgf < 0 || (long)gf == ctgf))
         fprintf(stderr, "[ct S=%04x m=%u] %*s/%s\n", g_cpu.S, (unsigned)g_cpu.m_flag,

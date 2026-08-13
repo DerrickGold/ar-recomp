@@ -768,7 +768,9 @@ void ManualReader_Render(SDL_Rect viewport) {
 
   ManualMesh density;
   ManualTurn_SolveMesh(matrix, &sheet,
-                       (float)kManualMeshBudgetCentipixels / 100.0f, &density);
+                       (float)kManualMeshBudgetCentipixels /
+                           (float)kManualCentipixelsPerPixel,
+                       &density);
 
   const float pan_world_x = page_w > 0.0f
       ? s_reader.view.pan_x * (2.0f * sheet.half_x / page_w) : 0.0f;

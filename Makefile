@@ -27,6 +27,7 @@
 #   For the normal inner loop (after editing src/ or runtime C) just run
 #   `cmake --build --preset play` directly — no regen or reconfigure needed.
 #
+#   make check-constants  reject high-risk duplicate literals in authored code.
 #   make check-cross  compile AND link the game for the platforms that cannot be
 #                     tested on this machine (currently Windows x86_64), using
 #                     the pinned Zig toolchain and the same SDL3 redistributable
@@ -52,7 +53,10 @@ CLEAN_BUILD_DIRS := build build-release build-asan build-trace $(PACKAGING)/buil
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-cross clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-constants check-cross clean clean-all clean-release clean-packaging-mounts
+
+check-constants:
+	@sh tools/check_constants.sh
 
 dev:
 	@if [ -z "$$(ls src/gen/*.c 2>/dev/null)" ]; then \

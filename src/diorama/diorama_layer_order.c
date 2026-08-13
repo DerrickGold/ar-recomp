@@ -6,6 +6,10 @@
 
 #include "actraiser_game.h"
 
+/* Files may preserve deliberately extreme experiments beyond the interactive
+ * editor's ergonomic range, but still need a finite parse ceiling. */
+static const double kManifestStackDensityMaximum = 1000.0;
+
 /* Manifest tokens. These ARE the file grammar — renaming one invalidates every
  * authored manifest, so they are deliberately terse and stable. */
 static const struct { int plane; const char *token; } kPlaneTokens[] = {
@@ -633,7 +637,7 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
        * true for NaN exactly as `!(v >= lo)` is. */
       double density = strtod(value, &end);
       if (end == value || (end && *end) || !(density > 0.0) ||
-          !(density <= 1000.0)) {
+          !(density <= kManifestStackDensityMaximum)) {
         if (out_error) *out_error = "bad density (>0)";
         return false;
       }

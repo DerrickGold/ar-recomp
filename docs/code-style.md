@@ -10,6 +10,7 @@ document it. The examples come from this repository.
 - [Size budgets](#size-budgets)
 - [One concern per translation unit](#one-concern-per-translation-unit)
 - [Where data lives](#where-data-lives)
+- [Constants and numeric data](#constants-and-numeric-data)
 - [Put the decision on the thing it describes](#put-the-decision-on-the-thing-it-describes)
 - [Enforce invariants with the compiler](#enforce-invariants-with-the-compiler)
 - [Includes and folders](#includes-and-folders)
@@ -88,6 +89,41 @@ in `settings.c`.
 
 Split data out when it is bulky *and* self-contained. Otherwise let it sit next to
 the code that owns it.
+
+## Constants and numeric data
+
+Name a number when the name explains a decision or prevents two consumers from
+drifting. Search for an existing owner before adding one: game geometry, save
+cardinalities, timing units, host path capacity, and cross-subsystem boundaries
+live in [`src/constants.h`](../src/constants.h). That header contains only
+preprocessor constants—no functions, types, storage, or runtime policy—so it is
+safe for low-level and pure modules to include. Hardware constants shared by the
+standalone SNES runtime stay at that runtime's lowest shared layer; for example,
+`kSnesWramSize` and its derived mask live in the pure-defines
+`snesrecomp-go/runtime/src/runtime_constants.h`.
+
+Prefer the narrowest owner that has every real consumer:
+
+- Put a file-local layout or algorithm limit beside the code that enforces it.
+- Put a subsystem contract in that subsystem's public header.
+- Promote a value to `src/constants.h` only when independent subsystems share
+  the same semantic fact. Equal numeric values with different meanings are not
+  the same constant.
+- Derive related values (`mask = count - 1`, bytes from element counts, time
+  units from smaller units) instead of maintaining both literals.
+
+Do not manufacture names for loop origins, ordinary `+1` indexing, mathematical
+coefficients, or one-off bit shifts when the expression already explains itself.
+ROM signatures, palettes, coordinates, font bitmaps, and similar exact data
+belong in named descriptor tables or narrowly named classifier functions; their
+individual cells do not each need constants. Test fixtures may retain explicit
+expected values because hiding them behind production constants weakens the
+test.
+
+Run `make check-constants` after moving a canonical value. The check is
+deliberately narrow and guards high-risk regressions—raw WRAM indexing, duplicate
+WRAM extents, authentic-dimension redeclarations, and the shared SPC bank
+boundary—without pretending a text search can judge every numeric literal.
 
 ### In code, or in a file on disk?
 

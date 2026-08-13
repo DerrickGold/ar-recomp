@@ -18,6 +18,7 @@
 #include "action/action_obj_apron.h"
 #include "present.h"
 #include "action/action_effect_render.h"
+#include "constants.h"
 #include "crt_post.h"
 #include "types.h"
 #include "diorama/diorama.h"
@@ -202,7 +203,7 @@ static float SimHeightWorldUnits(SDL_Rect source, int virtual_height,
                                  unsigned height_scale_x100) {
   if (source.h <= 0 || !virtual_height) return 0.0f;
   return (float)virtual_height * (float)height_scale_x100 /
-      (100.0f * (float)source.h);
+      ((float)kPercentScale * (float)source.h);
 }
 
 static bool ProjectSimTexturePoint(
@@ -813,7 +814,8 @@ static float SimBillboardHeightPop(SDL_Rect source, float height_world,
   if (height_world <= 0.0f || !height_pop_pct || source.h <= 0) return 1.0f;
   float reference = (float)kSimVirtualHeight_Flying / (float)source.h;
   if (reference <= 0.0f) return 1.0f;
-  return 1.0f + (height_world / reference) * (float)height_pop_pct / 100.0f;
+  return 1.0f + (height_world / reference) * (float)height_pop_pct /
+      (float)kPercentScale;
 }
 /* How much of a caster's art height becomes ground depth. A billboard has no
  * depth, so shearing its silhouette along the light the way a solid body would
@@ -916,7 +918,8 @@ static void BlurSimShadowAxis(SDL_Texture *source, SDL_Texture *destination,
 static void BlurSimShadowMask(SDL_Texture *mask, int w, int h,
                               unsigned softness_pct) {
   if (!softness_pct) return;
-  float radius = (float)softness_pct / 100.0f * (float)h * 0.02f;
+  float radius =
+      (float)softness_pct / (float)kPercentScale * (float)h * 0.02f;
   if (radius < 0.5f) return;
   /* D4b's separable blur alone needs the second full-viewport target. Keep a
    * hard-shadow run from reserving it, which is 31.6 MiB at 4K. Allocation
@@ -1054,7 +1057,7 @@ static void DrawSimShadowMask(
   if (clipped) SDL_SetRenderClipRect(g_renderer, &saved_clip);
 
   SDL_SetTextureAlphaMod(
-      mask, (Uint8)(slot->sim.shadow_opacity_pct * 255 / 100));
+      mask, (Uint8)(slot->sim.shadow_opacity_pct * 255 / kPercentScale));
   SDL_FRect dst = ToFRect(viewport);
   SDL_RenderTexture(g_renderer, mask, NULL, &dst);
   SDL_SetTextureAlphaMod(mask, 255);
@@ -1423,7 +1426,8 @@ static void DrawSimRimLight(
   if (clipped) SDL_SetRenderClipRect(g_renderer, &saved_clip);
 
   SDL_SetTextureBlendMode(rim, SDL_BLENDMODE_ADD);
-  SDL_SetTextureAlphaMod(rim, (Uint8)(slot->sim.rim_strength_pct * 255 / 100));
+  SDL_SetTextureAlphaMod(
+      rim, (Uint8)(slot->sim.rim_strength_pct * 255 / kPercentScale));
   SDL_FRect destination = ToFRect(viewport);
   SDL_RenderTexture(g_renderer, rim, NULL, &destination);
   SDL_SetTextureAlphaMod(rim, 255);
@@ -1952,7 +1956,8 @@ static void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
   float clear_y1 = (float)(source.y + slot->sim.cloud_clear_y1);
   float falloff = (float)slot->sim.cloud_falloff_px;
   float inset = (float)slot->sim.cloud_inset_px;
-  float opacity = (float)slot->sim.cloud_opacity_pct / 100.0f;
+  float opacity =
+      (float)slot->sim.cloud_opacity_pct / (float)kPercentScale;
   /* Overlapping banks at different scales and offsets, so each layer's gaps
    * sit over another layer's body and alpha compounds as `1 - prod(1 - a)`.
    *
@@ -1977,7 +1982,7 @@ static void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
    * counter that would jump the whole sky every eighteen minutes when it
    * wrapped. */
   Uint64 elapsed_ms = SDL_GetTicks();
-  float drift = (float)slot->sim.cloud_drift_pct / 100.0f;
+  float drift = (float)slot->sim.cloud_drift_pct / (float)kPercentScale;
 
   static SDL_Vertex vertices[kSimCloudVertexCount];
   static int indices[kSimCloudIndexCount];
@@ -2110,7 +2115,7 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
     return;
   }
 
-  float gain = (float)slot->sim_dyncam_strength / 100.0f;
+  float gain = (float)slot->sim_dyncam_strength / (float)kPercentScale;
   float target_x = kSimLeanPitch * gain * slot->sim_dyncam_lean_pitch;
   float target_y = kSimLeanYaw * gain * slot->sim_dyncam_lean_yaw;
 
@@ -2232,9 +2237,12 @@ void DrawSimBackdrop(const FrameSlot *slot, SDL_Rect viewport,
   float base_g = (float)((backdrop >> 8) & 0xFF) / 255.0f;
   float base_b = (float)(backdrop & 0xFF) / 255.0f;
 
-  float strength = (float)slot->sim.backdrop_strength_pct / 100.0f;
-  float horizon_mix = (float)kSimBackdropHorizonMixPct / 100.0f * strength;
-  float zenith_mix = (float)kSimBackdropZenithMixPct / 100.0f * strength;
+  float strength =
+      (float)slot->sim.backdrop_strength_pct / (float)kPercentScale;
+  float horizon_mix =
+      (float)kSimBackdropHorizonMixPct / (float)kPercentScale * strength;
+  float zenith_mix =
+      (float)kSimBackdropZenithMixPct / (float)kPercentScale * strength;
 
   SDL_FColor horizon = {
     base_r + (kSimSkyHorizon.r - base_r) * horizon_mix,
@@ -2262,7 +2270,7 @@ void DrawSimBackdrop(const FrameSlot *slot, SDL_Rect viewport,
   float anchor = horizon_visible
       ? horizon_y
       : top + (float)viewport.h *
-            (float)slot->sim.backdrop_horizon_pct / 100.0f;
+            (float)slot->sim.backdrop_horizon_pct / (float)kPercentScale;
 
   /* A vertex at the anchor when it falls inside, because SDL_RenderGeometry
    * interpolates linearly and the gradient bends there. */
@@ -2357,7 +2365,7 @@ static void DrawSimCullMarkers(const FrameSlot *slot, SDL_Rect source,
      * a flying actor's feet. */
     float lift = SimHeightWorldUnits(
         source, Sim3D_SourceDrawLift(record, slot->sim.height_scale_x100),
-        100);
+        kPercentScale);
     Scene3DPoint centre;
     if (!ProjectSimTexturePoint(matrix, source, viewport, texture_x,
                                 texture_y, lift, &centre))
@@ -2377,7 +2385,9 @@ static void DrawSimCullMarkers(const FrameSlot *slot, SDL_Rect source,
 static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
                                  SDL_Rect viewport, const float matrix[16],
                                  int lift_inset) {
-  if (!slot->sim.underlay_serial || slot->sim.underlay_haze_pct >= 100) return;
+  if (!slot->sim.underlay_serial ||
+      slot->sim.underlay_haze_pct >= kPercentScale)
+    return;
   SDL_Texture *texture = EnsureSimUnderlayTexture(slot);
   if (!texture) return;
   /* Two captured pixels per world-map pixel: the world map is the town at
@@ -2391,7 +2401,8 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
       origin_x;
   float texture_y_at_zero = -(float)slot->sim.camera_y - origin_y;
   float span = (float)(kSimWorldMapPixels * kSimWorldMapTownScale);
-  uint8_t hazed = (uint8_t)(255 - slot->sim.underlay_haze_pct * 255 / 100);
+  uint8_t hazed = (uint8_t)(
+      255 - slot->sim.underlay_haze_pct * 255 / kPercentScale);
 
   /* Focus falloff, in two passes over the same mesh.
    *
@@ -2412,8 +2423,8 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
                                         : kSimCullHazeLeadDefaultPx,
     .corner = slot->sim.cull_corner_px,
     .lift_inset = lift_inset,
-    .fade = (float)slot->sim.underlay_defocus_pct / 100.0f,
-    .dim = (float)slot->sim.cull_dim_pct / 100.0f,
+    .fade = (float)slot->sim.underlay_defocus_pct / (float)kPercentScale,
+    .dim = (float)slot->sim.cull_dim_pct / (float)kPercentScale,
     .margin_left = slot->sim.sprite_margin_left,
     .margin_right = slot->sim.sprite_margin_right,
     .margin_top = slot->sim.sprite_margin_top,
@@ -2457,8 +2468,12 @@ static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
                                         : kSimCullHazeLeadDefaultPx,
     .corner = slot->sim.cull_corner_px,
     .lift_inset = lift_inset,
-    .fade = cull_fade ? (float)slot->sim.cull_haze_pct / 100.0f : 0.0f,
-    .dim = cull_fade ? (float)slot->sim.cull_dim_pct / 100.0f : 0.0f,
+    .fade = cull_fade
+        ? (float)slot->sim.cull_haze_pct / (float)kPercentScale
+        : 0.0f,
+    .dim = cull_fade
+        ? (float)slot->sim.cull_dim_pct / (float)kPercentScale
+        : 0.0f,
     .extent_x0 = extent_x0,
     .extent_y0 = extent_y0,
     .extent_x1 = extent_x0 + (float)kSimTownCanvasPixels,
@@ -2551,9 +2566,10 @@ static void RenderSimProfile(const FrameSlot *slot,
       (float)viewport.w, (float)viewport.h });
 
   Scene3DCamera camera = {
-    .tilt_x = (float)slot->sim.projection_pitch_mrad / 1000.0f,
-    .tilt_y = (float)slot->sim.projection_yaw_mrad / 1000.0f,
-    .distance = (float)slot->sim.projection_distance_x100 / 100.0f,
+    .tilt_x = (float)slot->sim.projection_pitch_mrad / (float)kPermilleScale,
+    .tilt_y = (float)slot->sim.projection_yaw_mrad / (float)kPermilleScale,
+    .distance =
+        (float)slot->sim.projection_distance_x100 / (float)kPercentScale,
     .fov_y = 0.4f,
   };
   if (camera.distance <= 0.0f)
@@ -2613,8 +2629,12 @@ static void RenderSimProfile(const FrameSlot *slot,
                                         : kSimCullHazeLeadDefaultPx,
     .corner = slot->sim.cull_corner_px,
     .lift_inset = lift_inset,
-    .fade = cull_haze ? (float)slot->sim.cull_haze_pct / 100.0f : 0.0f,
-    .dim = cull_haze ? (float)slot->sim.cull_dim_pct / 100.0f : 0.0f,
+    .fade = cull_haze
+        ? (float)slot->sim.cull_haze_pct / (float)kPercentScale
+        : 0.0f,
+    .dim = cull_haze
+        ? (float)slot->sim.cull_dim_pct / (float)kPercentScale
+        : 0.0f,
     .extent_x0 = town_extent_x0,
     .extent_y0 = town_extent_y0,
     .extent_x1 = town_extent_x0 + (float)kSimTownCanvasPixels,

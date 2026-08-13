@@ -1,5 +1,7 @@
 #include "actraiser_ws_gap.h"
 
+#include "constants.h"
+
 /* Fill one strip of `count` pixels starting at `x0` on every row. */
 static void FillStrip(uint8_t *rows, size_t pitch, int height,
                       int x0, int count, uint32_t fill_argb) {
@@ -28,7 +30,7 @@ void ActRaiserFillMarginGaps(uint8_t *rows, size_t pitch, int height,
 
   /* Right gap starts immediately after the live window's last column. The
    * authentic 256 columns sit at [budget, budget + 256). */
-  const int authentic_width = 256;
-  FillStrip(rows, pitch, height, budget + authentic_width + live_right,
+  FillStrip(rows, pitch, height,
+            budget + kActRaiserAuthenticWidth + live_right,
             budget - live_right, fill_argb);
 }

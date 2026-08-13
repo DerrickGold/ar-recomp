@@ -16,7 +16,7 @@
 
 /* Externs from the runner (no new headers needed). */
 extern int          snes_frame_counter;      /* host/game frame tick */
-extern unsigned char g_ram[0x20000];          /* WRAM; $0088 = game frame */
+extern unsigned char g_ram[kSnesWramSize];    /* WRAM; $0088 = game frame */
 extern const char  *g_last_recomp_func;       /* current recomp function */
 extern uint32_t     g_ar_blk_ring[];          /* block-PC ring */
 extern unsigned     g_ar_blk_idx;
@@ -32,7 +32,7 @@ static long     s_hf_lo = -1, s_hf_hi = -1;   /* host-frame window */
 #define AR_TR_DEFAULT (0x3FFF & ~(AR_TR_WRAM | AR_TR_STACK))
 static int      s_ch = AR_TR_DEFAULT;         /* channel mask */
 static unsigned s_vlo = 0, s_vhi = 0x7fff;    /* vram word-addr filter */
-static unsigned s_wlo = 0, s_whi = 0x1ffff;   /* wram g_ram-offset filter */
+static unsigned s_wlo = 0, s_whi = kSnesWramMask;
 static char     s_func_sub[48] = "";          /* func-name substring filter */
 static uint64_t s_seq = 0;
 
@@ -82,7 +82,9 @@ static void ring_push_and_maybe_dump(const char *line) {
 
   /* a fresh anomaly on this line → open a dump, flush the ring, start aftermath */
   if (s_pending_anom && s_post_countdown < 0) {
-    unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
+    unsigned gf =
+        (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+        ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
     (void)gf;
     char path[320];
     snprintf(path, sizeof path, "%s_hf%d_%s%d.jsonl",
@@ -231,8 +233,11 @@ int ar_trace_ch(int chbit) { return (s_ch & chbit) != 0; }
 extern CpuState g_cpu;
 
 static void emit_prefix(const char *ch) {
-  unsigned gf = (unsigned)g_ram[0x88] | ((unsigned)g_ram[0x89] << 8);
-  uint32_t blk = g_ar_blk_ring[(g_ar_blk_idx - 1u) & 1023u];
+  unsigned gf =
+      (unsigned)g_ram[kActRaiserRuntimeWram_GameFrame] |
+      ((unsigned)g_ram[kActRaiserRuntimeWram_GameFrame + 1] << 8);
+  uint32_t blk = g_ar_blk_ring[
+      (g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask];
   const char *fn = g_last_recomp_func ? g_last_recomp_func : "?";
   /* mnow/xnow/S/DB = the LIVE cpu state at this event — a single trace shows
    * where m/x flips (exit-mx leak), where S drifts (stack corruption), and where

@@ -3,6 +3,13 @@
 
 #include <stdbool.h>
 
+enum {
+  /* SDL may report unusual native rates, but the replacement mixer and device
+   * buffer policy require at least CD-quality output. This is also the safe
+   * fallback before SDL has published its actual stream rate. */
+  kHostAudioMinimumOutputFrequencyHz = 44100,
+};
+
 /* Initialize host-audio synchronization and open the SDL stream. `enabled`
  * controls whether the completed mix is audible; rendering continues silently
  * while disabled so authentic and host-streamed audio timelines stay aligned.

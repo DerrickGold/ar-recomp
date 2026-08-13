@@ -65,16 +65,26 @@ type repository struct {
 
 var bankConfigRE = regexp.MustCompile(`(?i)^bank([0-9a-f]+)\.cfg$`)
 
+const (
+	defaultChunkThresholdBytes    = 4 * 1024 * 1024
+	defaultChunkPCSpan            = 0x800
+	variantFixpointPassLimit      = 24
+	variantPrunePassLimit         = 8
+	variantDiscoveryRoundLimit    = 32
+	exitMXInferenceIterationLimit = 12
+	pruneProofIterationLimit      = 16
+)
+
 func Run(options Options) (Report, error) {
 	started := time.Now()
 	if options.Jobs <= 0 {
 		options.Jobs = runtime.NumCPU()
 	}
 	if options.ChunkThresholdBytes == 0 {
-		options.ChunkThresholdBytes = 4 * 1024 * 1024
+		options.ChunkThresholdBytes = defaultChunkThresholdBytes
 	}
 	if options.ChunkPCSpan == 0 {
-		options.ChunkPCSpan = 0x800
+		options.ChunkPCSpan = defaultChunkPCSpan
 	}
 	logf := options.Progress
 	if logf == nil {
@@ -96,7 +106,7 @@ func Run(options Options) (Report, error) {
 	repo.rebuildNames()
 	repo.discoverDispatchHelpers(options.Jobs, logf)
 
-	for pass := 0; pass < 24; pass++ {
+	for pass := 0; pass < variantFixpointPassLimit; pass++ {
 		report.Passes = pass + 1
 		added, decodeErr := repo.discoverVariants(options.Jobs)
 		if decodeErr != nil {
@@ -108,8 +118,10 @@ func Run(options Options) (Report, error) {
 		if added == 0 && !exitChanged {
 			break
 		}
-		if pass == 23 {
-			return report, fmt.Errorf("variant/exit-MX fixpoint did not converge in 24 passes")
+		if pass == variantFixpointPassLimit-1 {
+			return report, fmt.Errorf(
+				"variant/exit-MX fixpoint did not converge in %d passes",
+				variantFixpointPassLimit)
 		}
 	}
 
@@ -119,7 +131,7 @@ func Run(options Options) (Report, error) {
 	logf("emitting %d function variants with %d workers", report.FinalEntries, options.Jobs)
 	var results map[byte][]*emitter.FunctionResult
 	var contexts []*codegen.Context
-	for prunePass := 0; prunePass < 8; prunePass++ {
+	for prunePass := 0; prunePass < variantPrunePassLimit; prunePass++ {
 		results, contexts, err = repo.emitFunctions(options.Jobs, options.OnlyBanks)
 		if err != nil {
 			return report, err
@@ -130,8 +142,10 @@ func Run(options Options) (Report, error) {
 			break
 		}
 		logf("emit-truth prune %d: removed %d wrong-width variants; learned %d equivalences; re-emitting", prunePass+1, pruned, equivalencesAdded)
-		if prunePass == 7 {
-			return report, fmt.Errorf("variant prune did not converge in 8 passes")
+		if prunePass == variantPrunePassLimit-1 {
+			return report, fmt.Errorf(
+				"variant prune did not converge in %d passes",
+				variantPrunePassLimit)
 		}
 	}
 	report.FinalEntries, report.Functions = 0, 0
@@ -364,7 +378,7 @@ func (repo *repository) discoverDispatchHelpers(jobs int, logf func(string, ...a
 
 func (repo *repository) discoverVariants(jobs int) (int, error) {
 	totalAdded := 0
-	for round := 0; round < 32; round++ {
+	for round := 0; round < variantDiscoveryRoundLimit; round++ {
 		demands := make(map[codegen.Variant]struct{})
 		var lock sync.Mutex
 		var firstErr error
@@ -397,7 +411,8 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 			return totalAdded, nil
 		}
 	}
-	return totalAdded, fmt.Errorf("variant discovery exceeded 32 rounds")
+	return totalAdded, fmt.Errorf(
+		"variant discovery exceeded %d rounds", variantDiscoveryRoundLimit)
 }
 
 func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{}) map[codegen.Variant]struct{} {
@@ -548,7 +563,7 @@ func (repo *repository) inferExitMX(jobs int) (bool, int) {
 	for key, value := range manual {
 		current[key] = value
 	}
-	for iteration := 0; iteration < 12; iteration++ {
+	for iteration := 0; iteration < exitMXInferenceIterationLimit; iteration++ {
 		next := cloneExitMap(manual)
 		var lock sync.Mutex
 		repo.parallelEntries(jobs, nil, func(bank *bankState, entry config.Entry) {
@@ -792,7 +807,7 @@ func (repo *repository) pruneDirtyVariants(results map[byte][]*emitter.FunctionR
 	// spans the BRK survives this same prune decision. Solve that dependency
 	// before mutating the entry set; otherwise mutually speculative garbage
 	// variants can incorrectly validate and prune one another.
-	for iteration := 0; iteration < 16; iteration++ {
+	for iteration := 0; iteration < pruneProofIterationLimit; iteration++ {
 		effective := make(map[codegen.Variant]struct{}, len(hardDirty)+len(garbageEvidence))
 		for key := range hardDirty {
 			effective[key] = struct{}{}

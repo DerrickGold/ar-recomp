@@ -21,6 +21,7 @@
 #include "action/action_effects.h"
 #include "action/action_bg_tuner.h"
 #include "actraiser_game.h"
+#include "constants.h"
 #include "actraiser_rtl.h"
 #include "common_rtl.h"      /* g_ram, g_ppu */
 #include "frame_timing.h"
@@ -522,14 +523,17 @@ void FrameSlot_Capture(FrameSlot *dst) {
    * from g_settings here is equivalent to reading the live g_diorama_cam). */
   dst->diorama_camera_mode = g_settings.diorama_camera_mode;
   dst->diorama_free_pose = (DioramaCameraPose){
-    (float)g_settings.diorama_tilt_x_mrad / 1000.0f,
-    (float)g_settings.diorama_tilt_y_mrad / 1000.0f,
-    (float)g_settings.diorama_distance_x100 / 100.0f,
+    (float)g_settings.diorama_tilt_x_mrad / (float)kPermilleScale,
+    (float)g_settings.diorama_tilt_y_mrad / (float)kPermilleScale,
+    (float)g_settings.diorama_distance_x100 / (float)kPercentScale,
   };
   dst->diorama_dyncam_baseline = (DioramaCameraPose){
-    (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad / 1000.0f,
-    (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad / 1000.0f,
-    (float)g_settings.diorama_dyncam_baseline_distance_x100 / 100.0f,
+    (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad /
+        (float)kPermilleScale,
+    (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad /
+        (float)kPermilleScale,
+    (float)g_settings.diorama_dyncam_baseline_distance_x100 /
+        (float)kPercentScale,
   };
   Diorama_GetDynamicCameraOrbit(&dst->diorama_manual_orbit_yaw,
                                 &dst->diorama_manual_orbit_pitch);

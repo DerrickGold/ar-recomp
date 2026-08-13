@@ -12,7 +12,6 @@ enum {
   kActionBgLayerCount = 2,
   kActionBgRingTiles = 64,
   kActionBgRingWords = kActionBgRingTiles * kActionBgRingTiles,
-  kActionBgCameraViewportHeight = 225,
 };
 
 typedef struct ActRaiserActionBgObserver {
@@ -57,7 +56,7 @@ void ActRaiserActionBg_ResolveVerticalMargins(
   if (budget < 0) budget = 0;
   int available_top = camera_y > 0 ? camera_y : 0;
   int available_bottom =
-      world_height - kActionBgCameraViewportHeight - camera_y;
+      world_height - kActRaiserActionCameraViewportHeight - camera_y;
   if (available_bottom < 0) available_bottom = 0;
   if (available_top > budget) available_top = budget;
   if (available_bottom > budget) available_bottom = budget;

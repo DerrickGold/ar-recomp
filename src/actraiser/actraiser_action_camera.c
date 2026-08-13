@@ -41,7 +41,6 @@ enum {
   kActionCameraVerticalStrip = 0x0040,
   kActionBg2HorizontalStrip = 0x0020,
   kActionBg2VerticalStrip = 0x0010,
-  kActionVerticalViewportHeight = 0x00E1,
 };
 
 typedef RecompReturn (*ActionCameraRomHelper)(CpuState *cpu);
@@ -184,7 +183,7 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
   const uint16_t camera_y = ActionCameraAxisBounds_UpdateNativeCamera(
       old_y, requested_delta_y,
       ActionCamera_Read16(cpu, kActRaiserWram_Bg1Height),
-      kActionVerticalViewportHeight, &vertical_bounds);
+      kActRaiserActionCameraViewportHeight, &vertical_bounds);
   const int16_t effective_delta_x =
       ActionCameraAxisBounds_EffectiveDelta(
           &horizontal_bounds, old_x, camera_x, requested_delta_x);

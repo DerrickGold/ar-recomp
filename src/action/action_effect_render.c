@@ -217,9 +217,15 @@ static float DeterministicPulse(const ActionEffectInstance *effect) {
  * of breathing uniformly, and the amplitudes sum to exactly 1 so the result
  * cannot exceed the caller's `flare` budget. No transcendental involved. */
 static float FlameSilhouette(unsigned seed, unsigned ticks, int segment) {
-  int i1 = (segment + (int)((ticks / 3u + seed) & 31u)) & 31;
-  int i2 = (segment * 3 + (int)((ticks / 2u + seed * 5u) & 31u)) & 31;
-  int i3 = (segment * 5 + (int)((ticks + seed * 11u) & 31u)) & 31;
+  int i1 = (segment + (int)((ticks / 3u + seed) &
+                            kActionEffectGlowSegmentMask)) &
+      kActionEffectGlowSegmentMask;
+  int i2 = (segment * 3 + (int)((ticks / 2u + seed * 5u) &
+                                kActionEffectGlowSegmentMask)) &
+      kActionEffectGlowSegmentMask;
+  int i3 = (segment * 5 + (int)((ticks + seed * 11u) &
+                                kActionEffectGlowSegmentMask)) &
+      kActionEffectGlowSegmentMask;
   return 0.52f * kCircle32[i1][0] + 0.31f * kCircle32[i2][0] +
       0.17f * kCircle32[i3][0];
 }
@@ -896,7 +902,8 @@ static bool AppendEmbers(ActionEffectGeometryWriter *writer,
       /* Fan by INDEX rather than by hash so the spray covers the circle
        * instead of clumping: 7 is coprime with 32, so stepping the table by
        * it walks every direction before repeating. */
-      const float *dir = kCircle32[(i * 7u + (seed >> 11)) & 31u];
+      const float *dir = kCircle32[
+          (i * 7u + (seed >> 11)) & kActionEffectGlowSegmentMask];
       EmberOffsetBurst(dir[0], dir[1], t, &ox, &oy);
       EmberOffsetBurst(dir[0], dir[1], fmaxf(0.0f, t - 0.12f),
                        &prev_x, &prev_y);
@@ -1800,7 +1807,8 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       /* Close sparks tumble off a hot solid surface. They do not align into a
        * directional flame wake, which is what distinguishes molten rock from
        * the actual `$CF9E` lava fireballs. */
-      const float *direction = kCircle32[(i * 11u + (seed >> 10)) & 31u];
+      const float *direction = kCircle32[
+          (i * 11u + (seed >> 10)) & kActionEffectGlowSegmentMask];
       const float distance = 6.0f + 10.0f * t;
       const float old_distance = 6.0f + 10.0f * previous_t;
       x = direction[0] * distance + heading_x * 2.0f * t;
@@ -1927,7 +1935,8 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
             ? (at_end ? rect->x1 : rect->x0) : mid_x;
         const float endpoint_y = horizontal
             ? mid_y : (at_end ? rect->y1 : rect->y0);
-        const float *direction = kCircle32[(i * 7u + (seed >> 12)) & 31u];
+        const float *direction = kCircle32[
+            (i * 7u + (seed >> 12)) & kActionEffectGlowSegmentMask];
         const float distance = 2.0f + 15.0f * t;
         const float old_distance = 2.0f + 15.0f * previous_t;
         x = endpoint_x + direction[0] * distance;
@@ -1984,8 +1993,8 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
           previous_x = -heading_x * old_distance - heading_y * side;
           previous_y = -heading_y * old_distance + heading_x * side;
         } else {
-          const float *direction =
-              kCircle32[(i * 7u + (seed >> 12)) & 31u];
+          const float *direction = kCircle32[
+              (i * 7u + (seed >> 12)) & kActionEffectGlowSegmentMask];
           const float distance = 3.0f + 18.0f * t;
           const float old_distance = 3.0f + 18.0f * previous_t;
           x = heading_x * 3.0f + direction[0] * distance;
@@ -2012,7 +2021,8 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       /* Most sparks crawl across the full bolt; the last quarter burst away
        * from its lower impact so the strike has both a shaft and a contact. */
       if (i >= count * 3u / 4u) {
-        const float *direction = kCircle32[(i * 7u + (seed >> 12)) & 31u];
+        const float *direction = kCircle32[
+            (i * 7u + (seed >> 12)) & kActionEffectGlowSegmentMask];
         const float distance = 3.0f + 20.0f * t;
         const float old_distance = 3.0f + 20.0f * previous_t;
         x = (rect->x0 + rect->x1) * 0.5f + direction[0] * distance;
@@ -2038,7 +2048,8 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       float endpoint_y = rect->y1;
       BossLightningPathSample(effect, 1.0f, &endpoint_x, &endpoint_y);
       if (i >= count * 3u / 4u) {
-        const float *direction = kCircle32[(i * 9u + (seed >> 11)) & 31u];
+        const float *direction = kCircle32[
+            (i * 9u + (seed >> 11)) & kActionEffectGlowSegmentMask];
         const float distance = 4.0f + 24.0f * t;
         const float old_distance = 4.0f + 24.0f * previous_t;
         x = endpoint_x + direction[0] * distance;
@@ -2061,7 +2072,8 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       reach = 2.5f + 3.5f * (1.0f - t);
     } else {
       /* The linked state-$09 child expands around its own floor artwork. */
-      const float *direction = kCircle32[(i * 11u + (seed >> 13)) & 31u];
+      const float *direction = kCircle32[
+          (i * 11u + (seed >> 13)) & kActionEffectGlowSegmentMask];
       const float distance = 2.0f + 26.0f * t;
       const float old_distance = 2.0f + 26.0f * previous_t;
       x = (rect->x0 + rect->x1) * 0.5f + direction[0] * distance;

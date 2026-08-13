@@ -2,15 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "actraiser_game.h"
 #include "hd_replacements.h"
 #include "snes/ppu.h"
 #include "settings.h"
 
-extern uint8 g_ram[0x20000];
 extern Ppu *g_ppu;
 
 HdReplacement g_hd_replacements[kHdMaxReplacements];
 int g_hd_replacement_count;
+
+enum { kHdManifestLineCapacity = 1024 };
 
 /* ---- parsing ---------------------------------------------------------- */
 
@@ -148,7 +150,7 @@ int HdReplacements_Load(const char *path) {
   HdReplacement pending;
   bool in_entry = false;
   int entry_line = 0;
-  char line[1024];
+  char line[kHdManifestLineCapacity];
   int line_number = 0;
 
   #define COMMIT_PENDING() do { \

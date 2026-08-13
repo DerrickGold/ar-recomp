@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "constants.h"
+
 /* Page-image indexing and reader kinematics for the in-game manual.
  *
  * PURE: no SDL, no stdio, no allocation. The host shim owns the renderer, the
@@ -178,7 +180,7 @@ typedef struct ManualView {
 enum {
   /* Below 1.0 the page would float inside the view with nothing around it, and
    * every pan would be a no-op. */
-  kManualZoomMinPermille = 1000,
+  kManualZoomMinPermille = kPermilleScale,
   /* How far past the scan's OWN resolution the reader will magnify, in
    * thousandths. Past this a page is showing JPEG blocks and paper grain rather
    * than text, and the exact multiple where that happens is a property of the
@@ -512,7 +514,8 @@ enum {
   kManualMeshMaxRows = 20,
   /* Target for the worst cell, in hundredths of a pixel. Under the scan's own
    * 1-2 px stroke width, so the slip stays inside a stroke. */
-  kManualMeshBudgetCentipixels = 100,
+  kManualCentipixelsPerPixel = 100,
+  kManualMeshBudgetCentipixels = kManualCentipixelsPerPixel,
 };
 
 typedef struct ManualMesh {

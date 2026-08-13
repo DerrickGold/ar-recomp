@@ -679,12 +679,13 @@ enum {
   kLightningResume = 0xBD69,
   kLightningState = 0x0014,
   kLightningHandler = 0xBD36,
+  kAnimationDelayHandler = 0x8661,
   kAnimationRepeatHandler = 0x8683,
+  kSharedActionChildResume = 0xA65D,
   kSceneAnimationAddress = 0x4000,
   kSceneAnimationBank = 0x7E,
   kBloodpoolBossMap = 0x08,
   kBossLightningSourceDescriptor = 0xBDFF,
-  kBossLightningHandler = 0x8661,
   kBossAnimationAddress = 0x5000,
   kBossLightningFirstStrikeState = 0x0002,
   kBossLightningLastStrikeState = 0x0007,
@@ -702,17 +703,13 @@ enum {
   kMarahnaBossMap = 0x08,
   kMarahnaTorchMetatile = 0x43,
   kMarahnaFireballSourceDescriptor = 0xE047,
-  kMarahnaFireballHandler = 0x8661,
   kMarahnaFireballOrbResume = 0xE061,
   kMarahnaFireballOrbState = 0x000C,
-  kMarahnaFireballSplitResume = 0xA65D,
   kMarahnaFireballSplitParentResume = 0xE0A6,
   kMarahnaSnakeSourceDescriptor = 0xDE96,
-  kMarahnaSnakeWaitHandler = 0x8661,
   kMarahnaSnakeRiseHandler = 0xDF3E,
   kMarahnaSnakeFallHandler = 0xDF63,
   kMarahnaSnakeResume = 0xDF34,
-  kMarahnaSnakeFireballResume = 0xA65D,
   kMarahnaSnakeFireballState = 0x0006,
   kMarahnaLightningHandler = 0x8683,
   kMarahnaLightningSourceDescriptor = 0xE18E,
@@ -721,7 +718,6 @@ enum {
   kMarahnaLightningHorizontalState = 0x0027,
   kMarahnaLightningVerticalState = 0x0028,
   kMarahnaBossLightningSourceDescriptor = 0xE483,
-  kMarahnaBossLightningHandler = 0x8661,
   kMarahnaBossLightningParentResume = 0xE4E5,
   kMarahnaBossLightningActiveParentResume = 0xE4F4,
   kMarahnaBossLightningGroundParentResume = 0xE4D7,
@@ -738,12 +734,11 @@ enum {
   kAitosLavaFireballResume = 0xCFCD,
   kAitosMoltenRockSourceDescriptor = 0xCEEC,
   kAitosMoltenRockResume = 0xCF16,
-  kAitosMoltenRockHandler = 0x8661,
   kAitosMoltenRockState = 0x0027,
+  kAitosMoltenRockVisual = 0x002B,
+  kAitosMoltenRockComposition = 0x4D2D,
   kAitosBossMap = 0x03,
   kAitosBossSourceDescriptor = 0xD646,
-  kAitosBossSwordBeamHandler = 0x8661,
-  kAitosBossSwordBeamResume = 0xA65D,
   kAitosBossSwordBeamParentResume = 0xD793,
   kAitosWaterfallFirstMap = 0x02,
   kAitosWaterfallLastMap = 0x03,
@@ -838,7 +833,7 @@ static bool MarahnaFireballSplitParentIsValid(
                           &parent) &&
       (parent.status & kActRaiserObjectStatus_InactiveMask) &&
       parent.source_descriptor == kMarahnaFireballSourceDescriptor &&
-      parent.handler == kMarahnaFireballHandler &&
+      parent.handler == kAnimationDelayHandler &&
       parent.animation_address == kSceneAnimationAddress &&
       parent.animation_bank == kSceneAnimationBank &&
       parent.resume_address == kMarahnaFireballSplitParentResume &&
@@ -870,7 +865,7 @@ static bool MarahnaSnakeFireballParentIsValid(
   static const struct {
     uint16_t handler, resume, state, visual, composition;
   } kLifecycle[] = {
-    {kMarahnaSnakeWaitHandler, kMarahnaSnakeResume,
+    {kAnimationDelayHandler, kMarahnaSnakeResume,
      0x0005, 0x0000, 0x4435},
     {kMarahnaSnakeRiseHandler, kMarahnaSnakeResume,
      0x0003, 0x0001, 0x4464},
@@ -892,11 +887,11 @@ static uint8_t MatchMarahnaSnakeFireballShot(
     const ActionObjectSnapshot *object) {
   if (!object ||
       object->source_descriptor != kMarahnaSnakeSourceDescriptor ||
-      object->handler != kMarahnaSnakeWaitHandler ||
+      object->handler != kAnimationDelayHandler ||
       object->animation_address != kSceneAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
       object->animation_state != kMarahnaSnakeFireballState ||
-      object->resume_address != kMarahnaSnakeFireballResume ||
+      object->resume_address != kSharedActionChildResume ||
       object->left_extent != 8 || object->top_extent != 4 ||
       object->right_extent != 8 || object->bottom_extent != 4 ||
       object->velocity_y != 0 || object->local_counter != 6 ||
@@ -919,7 +914,7 @@ static uint8_t MatchMarahnaFireball(const uint8_t *wram, size_t wram_size,
   if (object->source_descriptor == kMarahnaSnakeSourceDescriptor)
     return MatchMarahnaSnakeFireballShot(wram, wram_size, object);
   if (object->source_descriptor != kMarahnaFireballSourceDescriptor ||
-      object->handler != kMarahnaFireballHandler ||
+      object->handler != kAnimationDelayHandler ||
       object->animation_address != kSceneAnimationAddress ||
       object->animation_bank != kSceneAnimationBank)
     return kActionEffectPhase_None;
@@ -953,7 +948,7 @@ static uint8_t MatchMarahnaFireball(const uint8_t *wram, size_t wram_size,
     { 3,  0, 0x0010, 0x0033, 0x4BD9,
       kActRaiserObjectFlip_Horizontal},
   };
-  if (object->resume_address != kMarahnaFireballSplitResume ||
+  if (object->resume_address != kSharedActionChildResume ||
       object->left_extent != 4 || object->top_extent != 4 ||
       object->right_extent != 4 || object->bottom_extent != 4 ||
       !MarahnaFireballSplitParentIsValid(wram, wram_size, object))
@@ -980,7 +975,7 @@ typedef struct AitosLavaFireballLifecycle {
 static bool IsAitosLavaFireball(const ActionObjectSnapshot *object) {
   static const AitosLavaFireballLifecycle kLifecycle[] = {
     {0x0022, 0xCFE3,  0, -4},
-    {0x0023, 0x8661,  0,  0},
+    {0x0023, kAnimationDelayHandler,  0,  0},
     {0x0024, 0xCFFE, -1,  6},
   };
   if (!object ||
@@ -994,7 +989,8 @@ static bool IsAitosLavaFireball(const ActionObjectSnapshot *object) {
     return false;
   const bool artwork =
       (object->visual == 0x002A && object->composition == 0x4D21) ||
-      (object->visual == 0x002B && object->composition == 0x4D2D);
+      (object->visual == kAitosMoltenRockVisual &&
+       object->composition == kAitosMoltenRockComposition);
   if (!artwork) return false;
   for (size_t i = 0; i < sizeof(kLifecycle) / sizeof(kLifecycle[0]); i++)
     if (object->animation_state == kLifecycle[i].state &&
@@ -1009,11 +1005,12 @@ static bool IsAitosMoltenRock(const ActionObjectSnapshot *object) {
   if (!object ||
       object->source_descriptor != kAitosMoltenRockSourceDescriptor ||
       object->resume_address != kAitosMoltenRockResume ||
-      object->handler != kAitosMoltenRockHandler ||
+      object->handler != kAnimationDelayHandler ||
       object->animation_address != kSceneAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
       object->animation_state != kAitosMoltenRockState ||
-      object->visual != 0x002B || object->composition != 0x4D2D ||
+      object->visual != kAitosMoltenRockVisual ||
+      object->composition != kAitosMoltenRockComposition ||
       object->left_extent != 8 || object->top_extent != 8 ||
       object->right_extent != 8 || object->bottom_extent != 8 ||
       (object->velocity_x != -2 && object->velocity_x != 2) ||
@@ -1106,10 +1103,10 @@ static bool MarahnaBossParentMatches(const ActionObjectSnapshot *object) {
       object->spawner_backlink ||
       (object->flip_attributes & kActRaiserObjectFlip_Mask))
     return false;
-  return (object->handler == kMarahnaBossLightningHandler &&
+  return (object->handler == kAnimationDelayHandler &&
           object->animation_state == 0x0000 &&
           object->resume_address == kMarahnaBossLightningParentResume) ||
-      (object->handler == kMarahnaBossLightningHandler &&
+      (object->handler == kAnimationDelayHandler &&
        object->animation_state == 0x0001 &&
        object->resume_address == kMarahnaBossLightningActiveParentResume) ||
       (object->handler == kAnimationRepeatHandler &&
@@ -1123,7 +1120,7 @@ static uint8_t MatchMarahnaBossLightning(
     const ActionObjectSnapshot *object) {
   if (!object ||
       object->source_descriptor != kMarahnaBossLightningSourceDescriptor ||
-      object->handler != kMarahnaBossLightningHandler ||
+      object->handler != kAnimationDelayHandler ||
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank)
     return kActionEffectPhase_None;
@@ -1236,9 +1233,9 @@ static bool AitosBossSwordBeamParentIsValid(
     return false;
   ActionObjectSnapshot parent;
   if (!ReadActionObject(wram, wram_size, object->spawner_backlink, &parent) ||
-      parent.status != 0x4000 ||
+      parent.status != kActRaiserObjectStatus_Inactive ||
       parent.source_descriptor != kAitosBossSourceDescriptor ||
-      parent.handler != kAitosBossSwordBeamHandler ||
+      parent.handler != kAnimationDelayHandler ||
       parent.animation_address != kBossAnimationAddress ||
       parent.animation_bank != kSceneAnimationBank ||
       parent.resume_address != kAitosBossSwordBeamParentResume ||
@@ -1267,10 +1264,10 @@ static bool IsAitosBossSwordBeam(const uint8_t *wram, size_t wram_size,
       kActRaiserObjectFlip_Horizontal | kActRaiserObjectFlip_Vertical;
   if (!object ||
       object->source_descriptor != kAitosBossSourceDescriptor ||
-      object->handler != kAitosBossSwordBeamHandler ||
+      object->handler != kAnimationDelayHandler ||
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
-      object->resume_address != kAitosBossSwordBeamResume ||
+      object->resume_address != kSharedActionChildResume ||
       object->animation_index != 0x0001 ||
       (object->flip_attributes != 0 &&
        object->flip_attributes != reflected_flips) ||
@@ -1335,7 +1332,7 @@ static uint8_t MatchBloodpoolBossLightning(
     const ActionObjectSnapshot *object) {
   if (!object || object->source_descriptor !=
           kBossLightningSourceDescriptor ||
-      object->handler != kBossLightningHandler ||
+      object->handler != kAnimationDelayHandler ||
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
       (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||

@@ -28,6 +28,7 @@
 #include "present_cadence_metrics.h"
 #include "settings.h"
 #include "snes/ppu.h"
+#include "constants.h"
 #include "widescreen.h"
 
 extern SDL_Window *g_window;
@@ -53,7 +54,8 @@ enum {
   kDeadlineResyncIntervalCount = 2,
   kPerformanceReportIntervalMs = 1000,
 };
-static const uint64_t kDisplayPropertyPollIntervalNs = 1000000000ull;
+static const uint64_t kDisplayPropertyPollIntervalNs =
+    kNanosecondsPerSecond;
 
 typedef struct RetainedPresentFrame {
   FrameSlot slot;

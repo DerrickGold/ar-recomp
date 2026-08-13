@@ -2,6 +2,7 @@
 #include "crt_post.h"
 #include "gpu_shader_blob.h"
 #include "actraiser_game.h"
+#include "constants.h"
 #include "atomic_replace.h"
 #include "diorama_layer_order.h"
 #include "diorama_rom_backdrop.h"
@@ -499,30 +500,36 @@ static float Clampf(float v, float lo, float hi) {
 /* ── Camera operations ───────────────────────────────────────────────── */
 
 void Diorama_SeedCameraFromSettings(void) {
-  g_diorama_cam.tilt_x = (float)g_settings.diorama_tilt_x_mrad / 1000.0f;
-  g_diorama_cam.tilt_y = (float)g_settings.diorama_tilt_y_mrad / 1000.0f;
-  g_diorama_cam.distance = (float)g_settings.diorama_distance_x100 / 100.0f;
+  g_diorama_cam.tilt_x =
+      (float)g_settings.diorama_tilt_x_mrad / (float)kPermilleScale;
+  g_diorama_cam.tilt_y =
+      (float)g_settings.diorama_tilt_y_mrad / (float)kPermilleScale;
+  g_diorama_cam.distance =
+      (float)g_settings.diorama_distance_x100 / (float)kPercentScale;
   g_diorama_cam.fov_y = kDioramaFovY;
 }
 
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
   if (g_settings.diorama_camera_mode == kDioramaCam_Dynamic) {
     const float baseline_yaw =
-        (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad / 1000.0f;
+        (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad /
+        (float)kPermilleScale;
     const float baseline_pitch =
-        (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad / 1000.0f;
+        (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad /
+        (float)kPermilleScale;
     CameraOrbit_Adjust(&s_diorama_dynamic_orbit, d_yaw, d_pitch,
                        baseline_yaw, baseline_pitch,
                        kDioramaTiltMin, kDioramaTiltMax);
 
     if (d_zoom == 0.0f) return;
     float distance = g_settings.diorama_dyncam_baseline_distance_x100 > 0
-        ? (float)g_settings.diorama_dyncam_baseline_distance_x100 / 100.0f
+        ? (float)g_settings.diorama_dyncam_baseline_distance_x100 /
+              (float)kPercentScale
         : g_diorama_auto_distance;
     distance = Clampf(distance + d_zoom,
                       kDioramaDistMin, kDioramaDistMax);
     g_settings.diorama_dyncam_baseline_distance_x100 =
-        (int)(distance * 100.0f);
+        (int)(distance * (float)kPercentScale);
     g_diorama_settings_dirty = true;
     g_diorama_settings_dirty_at = SDL_GetTicks();
     return;
@@ -538,9 +545,12 @@ void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
     g_diorama_cam.distance = Clampf(base + d_zoom,
                                     kDioramaDistMin, kDioramaDistMax);
   }
-  g_settings.diorama_tilt_x_mrad = (int)(g_diorama_cam.tilt_x * 1000.0f);
-  g_settings.diorama_tilt_y_mrad = (int)(g_diorama_cam.tilt_y * 1000.0f);
-  g_settings.diorama_distance_x100 = (int)(g_diorama_cam.distance * 100.0f);
+  g_settings.diorama_tilt_x_mrad =
+      (int)(g_diorama_cam.tilt_x * (float)kPermilleScale);
+  g_settings.diorama_tilt_y_mrad =
+      (int)(g_diorama_cam.tilt_y * (float)kPermilleScale);
+  g_settings.diorama_distance_x100 =
+      (int)(g_diorama_cam.distance * (float)kPercentScale);
   g_diorama_settings_dirty = true;
   g_diorama_settings_dirty_at = SDL_GetTicks();
 }
@@ -598,7 +608,7 @@ void Diorama_FlushSettingsIfDirty(void) {
   if (g_diorama_settings_dirty && !s_diorama_dragging &&
       SDL_GetTicks() - g_diorama_settings_dirty_at > 500) {
     g_diorama_settings_dirty = false;
-    char settings_path[1024];
+    char settings_path[kHostPathCapacity];
     UserDataFile(settings_path, sizeof settings_path, "settings.ini");
     if (!Settings_Save(settings_path))
       fprintf(stderr, "[diorama] failed to persist camera settings\n");
@@ -731,7 +741,7 @@ static bool DioramaLayerIsProjectable(
 static const char kLayerManifestLeaf[] = "diorama-layers.ini";
 
 void Diorama_LoadLayerManifest(void) {
-  char path[1024];
+  char path[kHostPathCapacity];
   UserDataFile(path, sizeof path, kLayerManifestLeaf);
   FILE *file = fopen(path, "r");
   if (!file) {
@@ -866,7 +876,7 @@ static const char kLayerManifestPreamble[] =
     "# silhouette. All compose.\n\n";
 
 bool Diorama_SaveLayerManifest(void) {
-  char path[1024];
+  char path[kHostPathCapacity];
   UserDataFile(path, sizeof path, kLayerManifestLeaf);
 
   /* Read the current file first, so the merge can preserve everything it does
@@ -2039,7 +2049,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     DrawDioramaShoebox(renderer, mvp, aspect_x, height_scale, cam.tilt_y,
                        out_w, out_h);
 
-  float shade_mix = (float)g_settings.diorama_depth_shade / 100.0f;
+  float shade_mix =
+      (float)g_settings.diorama_depth_shade / (float)kPercentScale;
 
   SDL_Vertex verts[DIORAMA_VERTS_PER_LAYER];
   int indices[DIORAMA_INDICES_PER_LAYER];

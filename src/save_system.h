@@ -5,10 +5,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "constants.h"
+
 enum {
   kActRaiserSramSize = 0x2000,
   kActRaiserSramChecksumOffset = 0x1fec,
-  kActRaiserSaveRegionCount = 6,
 };
 
 typedef enum SaveRegionState {
@@ -46,7 +47,7 @@ extern const SaveFieldDesc g_save_region_fields[kActRaiserSaveRegionCount];
 typedef struct SaveEditRequest {
   int region_state[kActRaiserSaveRegionCount];
   bool player_name_set;
-  char player_name[9];
+  char player_name[kActRaiserPlayerNameStorageBytes];
   int professional_mode;
   int death_heim_state;
   int master_level;
@@ -59,9 +60,9 @@ typedef struct SaveEditRequest {
   int angel_hp_max;
   int message_speed;
   int equipped_magic;
-  int magic_slots[4];
-  int item_slots[8];
-  int scores[kActRaiserSaveRegionCount][2];
+  int magic_slots[kActRaiserSaveMagicSlotCount];
+  int item_slots[kActRaiserSaveItemSlotCount];
+  int scores[kActRaiserSaveRegionCount][kActRaiserSaveActCount];
 } SaveEditRequest;
 
 void SaveEditRequest_Clear(SaveEditRequest *edits);

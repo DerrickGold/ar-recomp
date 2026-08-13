@@ -12,9 +12,11 @@
 #include <sys/stat.h>
 #endif
 
+#include "actraiser_game.h"
 #include "snes/ppu.h"
 
 enum {
+  kSceneAssetPathCapacity = 512,
   kRgbaChannels = 4,
   kObjAtlasWidth = 16 * 8,
   kObjAtlasHeight = 2 * 8 * 16 * 8,
@@ -257,7 +259,7 @@ static bool WritePlanarBackground(const char *directory, const Ppu *ppu,
     }
   }
   snprintf(dump->file, sizeof(dump->file), "bg%d.png", layer + 1);
-  char path[512];
+  char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, dump->file);
   bool ok = WritePng(path, pixels, width, height);
   free(pixels);
@@ -291,7 +293,7 @@ static bool WriteMode7Background(const char *directory, const Ppu *ppu,
       }
     }
   }
-  char path[512];
+  char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "bg1_mode7.png");
   bool ok = WritePng(path, pixels, kCanvas, kCanvas);
   free(pixels);
@@ -316,7 +318,7 @@ static bool WritePalette(const char *directory, const Ppu *ppu) {
                       index, false);
     }
   }
-  char path[512];
+  char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "palette.png");
   bool ok = WritePng(path, pixels, kSize, kSize);
   free(pixels);
@@ -347,7 +349,7 @@ static bool WriteObjAtlas(const char *directory, const Ppu *ppu) {
       }
     }
   }
-  char path[512];
+  char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "obj_tiles.png");
   bool ok = WritePng(path, pixels, kObjAtlasWidth, kObjAtlasHeight);
   free(pixels);
@@ -388,7 +390,7 @@ static bool WriteOamSheet(const char *directory, const Ppu *ppu) {
       }
     }
   }
-  char path[512];
+  char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "oam_sprites.png");
   bool ok = WritePng(path, pixels, kOamSheetWidth, kOamSheetHeight);
   free(pixels);
@@ -397,7 +399,7 @@ static bool WriteOamSheet(const char *directory, const Ppu *ppu) {
 
 static bool WriteBinary(const char *directory, const char *name,
                         const void *data, size_t size) {
-  char path[512];
+  char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, name);
   FILE *file = fopen(path, "wb");
   bool ok = file && fwrite(data, 1, size, file) == size;
@@ -407,7 +409,7 @@ static bool WriteBinary(const char *directory, const char *name,
 }
 
 static bool WriteOamBinary(const char *directory, const Ppu *ppu) {
-  char path[512];
+  char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "oam.bin");
   FILE *file = fopen(path, "wb");
   bool ok = file &&
@@ -422,13 +424,16 @@ static bool WriteOamBinary(const char *directory, const Ppu *ppu) {
 static bool WriteMetadata(const char *directory, const Ppu *ppu,
                           const uint8_t *wram, int host_frame,
                           const BgDump *backgrounds, int background_count) {
-  char path[512];
+  char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "metadata.json");
   FILE *file = fopen(path, "w");
   if (!file) return false;
-  unsigned game_frame = wram ? wram[0x88] | (wram[0x89] << 8) : 0;
-  unsigned state18 = wram ? wram[0x18] : 0;
-  unsigned state19 = wram ? wram[0x19] : 0;
+  unsigned game_frame = wram
+      ? wram[kActRaiserWram_GameFrame] |
+            (wram[kActRaiserWram_GameFrame + 1] << 8)
+      : 0;
+  unsigned map_group = wram ? wram[kActRaiserWram_MapGroup] : 0;
+  unsigned current_map = wram ? wram[kActRaiserWram_CurrentMap] : 0;
   fprintf(file,
       "{\n  \"format\": 1,\n  \"host_frame\": %d,\n"
       "  \"game_frame\": %u,\n  \"state_18\": %u,\n"
@@ -437,7 +442,8 @@ static bool WriteMetadata(const char *directory, const Ppu *ppu,
       "    \"main_screen\": %u, \"sub_screen\": %u,\n"
       "    \"obsel\": %u, \"obj_base_1_word\": %u, "
       "\"obj_base_2_word\": %u\n  },\n  \"backgrounds\": [\n",
-      host_frame, game_frame, state18, state19, PPU_mode(ppu), ppu->bgmode,
+      host_frame, game_frame, map_group, current_map,
+      PPU_mode(ppu), ppu->bgmode,
       PPU_brightness(ppu), ppu->screenEnabled[0], ppu->screenEnabled[1],
       ppu->obsel, PPU_objTileAdr1(ppu), PPU_objTileAdr2(ppu));
   for (int i = 0; i < background_count; i++) {
@@ -518,7 +524,9 @@ bool SceneAssetDump_Write(const char *directory, const Ppu *ppu,
   ok &= WriteBinary(directory, "vram.bin", ppu->vram, sizeof(ppu->vram));
   ok &= WriteBinary(directory, "cgram.bin", ppu->cgram, sizeof(ppu->cgram));
   ok &= WriteOamBinary(directory, ppu);
-  if (wram) ok &= WriteBinary(directory, "wram.bin", wram, 0x20000);
+  if (wram)
+    ok &= WriteBinary(
+        directory, "wram.bin", wram, kActRaiserWramSize);
   ok &= WriteMetadata(directory, ppu, wram, host_frame,
                       backgrounds, background_count);
   if (ok)

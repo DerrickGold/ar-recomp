@@ -10,7 +10,6 @@
 #include "settings.h"
 #include "snes/ppu.h"
 
-extern uint8 g_ram[0x20000];
 extern Ppu *g_ppu;
 extern bool g_diorama_frame_active;
 extern uint8_t g_pixels[];

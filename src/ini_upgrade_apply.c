@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "atomic_replace.h"
+#include "constants.h"
 #include "ini_upgrade.h"
 #include "user_data_dir.h"
 
@@ -141,7 +142,7 @@ void IniUpgrade_ApplyShippedDefaults(void) {
     const char *leaf = kUpgradeLeaves[i].leaf;
     const IniUpgradeSectionKind kind = kUpgradeLeaves[i].kind;
 
-    char live_path[1024];
+    char live_path[kHostPathCapacity];
     UserDataFile(live_path, sizeof live_path, leaf);
 
     char default_path[kIniUpgradePathMax];

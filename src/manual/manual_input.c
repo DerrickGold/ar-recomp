@@ -1,5 +1,7 @@
 #include "manual_input.h"
 
+#include "constants.h"
+
 ManualIntent ManualInput_KeyIntent(SDL_Keycode key, bool zoomed) {
   switch (key) {
     /* These page at any zoom, so there is always a way to turn without zooming
@@ -65,7 +67,8 @@ float ManualInput_StickAxis(int raw, int deadzone_percent) {
    * same thing in the manual as it does in the game. */
   if (deadzone_percent < 5) deadzone_percent = 5;
   if (deadzone_percent > 90) deadzone_percent = 90;
-  const float deadzone = 32767.0f * (float)deadzone_percent / 100.0f;
+  const float deadzone =
+      32767.0f * (float)deadzone_percent / (float)kPercentScale;
 
   float value = (float)raw;
   if (value > 32767.0f) value = 32767.0f;      /* -32768 is one past the top */

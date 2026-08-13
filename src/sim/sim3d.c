@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "constants.h"
 #include "snes_bgr555.h"
 #include "snes/ppu.h"
 
@@ -582,7 +583,8 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
     return;
   g_demo_dump.attempted = true;
 
-  char path_a[1024], path_b[1024], path_difference[1024], path_json[1024];
+  char path_a[kHostPathCapacity], path_b[kHostPathCapacity],
+      path_difference[kHostPathCapacity], path_json[kHostPathCapacity];
   snprintf(path_a, sizeof(path_a), "%s-A.ppm", prefix);
   snprintf(path_b, sizeof(path_b), "%s-B.ppm", prefix);
   snprintf(path_difference, sizeof(path_difference), "%s-difference.ppm",
@@ -600,7 +602,7 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
     "obj2", "bg2-high", "bg1-high", "obj3", "bg3-high",
   };
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-    char plane_path[1024];
+    char plane_path[kHostPathCapacity];
     snprintf(plane_path, sizeof(plane_path), "%s-plane-%02d-%s.ppm",
              prefix, plane, plane_names[plane]);
     ok &= WritePpm(plane_path, g_sim3d_layer_pixels[plane],
@@ -1076,7 +1078,7 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   frame->height_scale_x100 =
       (uint16_t)ClampTuning(tuning->height_scale_x100, 0, 0xFFFF);
   frame->shadow_opacity_pct =
-      (uint8_t)ClampTuning(tuning->shadow_opacity_pct, 0, 100);
+      (uint8_t)ClampTuning(tuning->shadow_opacity_pct, 0, kPercentScale);
   frame->height_pop_pct =
       (uint8_t)ClampTuning(tuning->height_pop_pct, 0, 255);
   /* Azimuth wraps; elevation and softness clamp. */
@@ -1085,13 +1087,13 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   frame->light_elevation_deg =
       (uint8_t)ClampTuning(tuning->light_elevation_deg, 5, 90);
   frame->shadow_softness_pct =
-      (uint8_t)ClampTuning(tuning->shadow_softness_pct, 0, 100);
+      (uint8_t)ClampTuning(tuning->shadow_softness_pct, 0, kPercentScale);
   frame->rim_strength_pct =
-      (uint8_t)ClampTuning(tuning->rim_strength_pct, 0, 100);
+      (uint8_t)ClampTuning(tuning->rim_strength_pct, 0, kPercentScale);
   frame->underlay_haze_pct =
-      (uint8_t)ClampTuning(tuning->underlay_haze_pct, 0, 100);
+      (uint8_t)ClampTuning(tuning->underlay_haze_pct, 0, kPercentScale);
   frame->cloud_opacity_pct =
-      (uint8_t)ClampTuning(tuning->cloud_opacity_pct, 0, 100);
+      (uint8_t)ClampTuning(tuning->cloud_opacity_pct, 0, kPercentScale);
   frame->cloud_falloff_px =
       (uint16_t)ClampTuning(tuning->cloud_falloff_px, 1, 2048);
   frame->cloud_inset_px =
@@ -1120,14 +1122,16 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   frame->sprite_margin_top = (int16_t)tuning->sprite_margin_top;
   frame->sprite_margin_bottom = (int16_t)tuning->sprite_margin_bottom;
   frame->cull_lead_px = (uint16_t)ClampTuning(tuning->cull_lead_px, 1, 512);
-  frame->cull_haze_pct = (uint8_t)ClampTuning(tuning->cull_haze_pct, 0, 100);
-  frame->cull_dim_pct = (uint8_t)ClampTuning(tuning->cull_dim_pct, 0, 100);
+  frame->cull_haze_pct =
+      (uint8_t)ClampTuning(tuning->cull_haze_pct, 0, kPercentScale);
+  frame->cull_dim_pct =
+      (uint8_t)ClampTuning(tuning->cull_dim_pct, 0, kPercentScale);
   frame->cull_haze_lead_px =
       (uint16_t)ClampTuning(tuning->cull_haze_lead_px, 1, 1024);
   frame->cull_corner_px =
       (uint16_t)ClampTuning(tuning->cull_corner_px, 0, 512);
   frame->underlay_defocus_pct =
-      (uint8_t)ClampTuning(tuning->underlay_defocus_pct, 0, 100);
+      (uint8_t)ClampTuning(tuning->underlay_defocus_pct, 0, kPercentScale);
   frame->cloud_altitude_px =
       (uint16_t)ClampTuning(tuning->cloud_altitude_px, 0, 512);
   frame->cloud_drift_pct =
@@ -1142,9 +1146,9 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
       tuning->world_navigation_haze ? 1 : 0;
   frame->cull_lift_inset = tuning->cull_lift_inset ? 1 : 0;
   frame->backdrop_strength_pct =
-      (uint8_t)ClampTuning(tuning->backdrop_strength_pct, 0, 100);
+      (uint8_t)ClampTuning(tuning->backdrop_strength_pct, 0, kPercentScale);
   frame->backdrop_horizon_pct =
-      (uint8_t)ClampTuning(tuning->backdrop_horizon_pct, 0, 100);
+      (uint8_t)ClampTuning(tuning->backdrop_horizon_pct, 0, kPercentScale);
   /* The capture is centred on the authentic 256-column window, so this is the
    * captured-texture column that holds SNES x = 0 — the offset the underlay
    * needs to turn a texture column into a town pixel. */
