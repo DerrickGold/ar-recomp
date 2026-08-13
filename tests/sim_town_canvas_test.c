@@ -128,14 +128,22 @@ static void TestChangeDetection(void) {
   Render(1);
   CHECK(SimTownCanvas_Serial() != serial);
   CHECK(CanvasAt(40 * 8, 50 * 8) == 0xFF0000FF);
+  CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+  CHECK(x == 40 * 8 && y == 50 * 8 && w == 8 && h == 8);
 
   /* Animated tile graphics land in VRAM, not the tilemap. */
   serial = SimTownCanvas_Serial();
-  SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h);
   g_vram[1 * 16 + 0] = 0x0040;   /* move the lit pixel one column right */
   Render(1);
   CHECK(SimTownCanvas_Serial() != serial);
   CHECK(CanvasAt(1 * 8 + 1, 1 * 8) == 0xFFFF0000);
+  CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+  /* Both cells using character 1 are refreshed as separate row spans, not a
+   * large bounding rectangle containing the other 4094 cells. */
+  CHECK(x == 1 * 8 && y == 1 * 8 && w == 8 && h == 8);
+  CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+  CHECK(x == 40 * 8 && y == 50 * 8 && w == 8 && h == 8);
+  CHECK(!SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
 
   /* So does a palette fade. */
   serial = SimTownCanvas_Serial();
@@ -143,6 +151,54 @@ static void TestChangeDetection(void) {
   Render(1);
   CHECK(SimTownCanvas_Serial() != serial);
   CHECK(CanvasAt(1 * 8 + 1, 1 * 8) == 0xFF00FF00);
+  CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+  CHECK(x == 1 * 8 && y == 1 * 8 && w == 8 && h == 8);
+
+  /* Changes which cannot affect sampled canvas pixels stay upload-free. */
+  serial = SimTownCanvas_Serial();
+  SetTile(1, 1, (uint16_t)(1 | (1 << 10) | 0x2000)); /* priority only */
+  Render(1);
+  CHECK(SimTownCanvas_Serial() == serial);
+  g_vram[2 * 16] = 0x0080;                            /* unused character */
+  Render(1);
+  CHECK(SimTownCanvas_Serial() == serial);
+
+  /* Ignored-at-the-time source changes are still snapshotted. Referencing
+   * them later through a tilemap edit must use the current data, and clearing
+   * that cell must restore its backdrop rather than leave a stale tile. */
+  SetTile(2, 2, (uint16_t)(2 | (1 << 10)));
+  Render(1);
+  CHECK(SimTownCanvas_Serial() != serial);
+  CHECK(CanvasAt(2 * 8, 2 * 8) == 0xFF00FF00);
+  CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+  CHECK(x == 2 * 8 && y == 2 * 8 && w == 8 && h == 8);
+  serial = SimTownCanvas_Serial();
+  SetTile(2, 2, 0);
+  Render(1);
+  CHECK(SimTownCanvas_Serial() != serial);
+  CHECK(CanvasAt(2 * 8, 2 * 8) == kBackdrop);
+  CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+  CHECK(x == 2 * 8 && y == 2 * 8 && w == 8 && h == 8);
+
+  serial = SimTownCanvas_Serial();
+  g_cgram[3 * 16 + 1] = 0x7C00;                  /* unused BG palette bank */
+  Render(1);
+  CHECK(SimTownCanvas_Serial() == serial);
+  SetTile(3, 3, (uint16_t)(1 | (3 << 10)));
+  Render(1);
+  CHECK(SimTownCanvas_Serial() != serial);
+  CHECK(CanvasAt(3 * 8 + 1, 3 * 8) == 0xFF0000FF);
+  CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+  CHECK(x == 3 * 8 && y == 3 * 8 && w == 8 && h == 8);
+
+  serial = SimTownCanvas_Serial();
+  g_cgram[16] = 0x7FFF;                 /* transparent palette colour zero */
+  Render(1);
+  CHECK(SimTownCanvas_Serial() == serial);
+  g_cgram[200] = 0x7FFF;                           /* OBJ palette storage */
+  Render(1);
+  CHECK(SimTownCanvas_Serial() == serial);
+  CHECK(!SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
 }
 
 static void TestBrightnessAndTownChange(void) {

@@ -1070,7 +1070,10 @@ bool ActionEffectRender_Build(const ActionEffectFrame *frame,
                               void *project_userdata,
                               ActionEffectRenderBatch *batch) {
   if (!batch) return false;
-  memset(batch, 0, sizeof(*batch));
+  /* Only the populated prefixes are part of the batch contract. Clearing the
+   * complete fixed-capacity arrays wrote about 50 KB even for an empty list. */
+  batch->vertex_count = 0;
+  batch->index_count = 0;
   if (!frame || frame->effect_count > kActionEffectMaxInstances)
     return false;
   if (!lighting_enabled && !particles_enabled) return true;
@@ -2634,7 +2637,10 @@ static bool BuildSceneEffectList(
     ActionEffectProjectPointFn project_point, void *project_userdata,
     ActionSceneEffectRenderBatch *batch) {
   if (!batch) return false;
-  memset(batch, 0, sizeof(*batch));
+  /* Submitters consume only [0, count). The scene capacity is deliberately
+   * large, so zeroing its unused tail cost roughly 290 KB per build. */
+  batch->vertex_count = 0;
+  batch->index_count = 0;
   if (!effects || effect_count > capacity ||
       render_layer >= kActionEffectRenderLayer_Count)
     return false;
@@ -2704,7 +2710,10 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
                                    void *project_userdata,
                                    ActionSceneEffectRenderBatch *batch) {
   if (!frame) {
-    if (batch) memset(batch, 0, sizeof(*batch));
+    if (batch) {
+      batch->vertex_count = 0;
+      batch->index_count = 0;
+    }
     return false;
   }
   return BuildSceneEffectList(
@@ -2720,7 +2729,10 @@ bool ActionSceneDecorationRender_Build(
     ActionEffectProjectPointFn project_point, void *project_userdata,
     ActionSceneEffectRenderBatch *batch) {
   if (!frame) {
-    if (batch) memset(batch, 0, sizeof(*batch));
+    if (batch) {
+      batch->vertex_count = 0;
+      batch->index_count = 0;
+    }
     return false;
   }
   return BuildSceneEffectList(

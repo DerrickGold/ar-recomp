@@ -23,6 +23,7 @@ typedef struct Sim3DCaptureState {
   bool bindings_owned;
   bool inspector_active;
   bool separated_valid;
+  bool flat_stage_requested;
   bool hud_handoff;
   bool hud_bg3;
   bool hud_obj;
@@ -67,6 +68,17 @@ int Sim3D_ObjPlaneForPriority(int priority) {
     kSim3DPlane_Obj2, kSim3DPlane_Obj3,
   };
   return priority >= 0 && priority < 4 ? planes[priority] : -1;
+}
+
+uint32_t Sim3D_PlaneTextureUploadMask(
+    SimRenderFeatureMask effective_features) {
+  if (!(effective_features & kSimFeature_GroundProjection)) return 0;
+  uint32_t mask = (1u << kSim3DPlane_Count) - 1u;
+  if (effective_features & kSimFeature_ObjectBillboards) {
+    for (int priority = 0; priority < 4; priority++)
+      mask &= ~(1u << Sim3D_ObjPlaneForPriority(priority));
+  }
+  return mask;
 }
 
 /* Shared with actraiser_rtl.c's margin-gap fill (Fix C, SPEC-backdrop-clip.md)
@@ -243,6 +255,7 @@ bool Sim3D_BeginFrame(void) {
   g_sim3d.bindings_owned = false;
   g_sim3d.inspector_active = false;
   g_sim3d.separated_valid = false;
+  g_sim3d.flat_stage_requested = false;
   g_sim3d.hud_handoff = false;
   g_sim3d.hud_bg3 = false;
   g_sim3d.hud_obj = false;
@@ -267,6 +280,11 @@ bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
     g_sim3d.status = kSim3DCapture_NotRequested;
     return false;
   }
+  /* The flat texture is a real presentation dependency only when the
+   * perspective ground stage is disabled. Retain that request here because
+   * FinishCapture runs after scanout and no longer has the settings payload. */
+  g_sim3d.flat_stage_requested =
+      !(request->requested_features & kSimFeature_GroundProjection);
 #if AR_SIM3D_PICKER_TOPDOWN
   if (request->picker_active) {
     g_sim3d.status = kSim3DCapture_Picker;
@@ -914,20 +932,24 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
    * RestoreTownHudPolicy and any armed diagnostic comparison. */
   ApplyFixedColorAdd();
 
-  /* The promoted HUD owns the full width of its own rows, so those rows keep
-   * every captured pixel; the same span the authentic-side restore uses. */
-  int hud_span_rows = g_sim3d.hud_bg3
-      ? g_sim3d.prior_captures[kPpuOverlaySource_Bg3].y1 : 0;
-  ComposeFlatPixelsPolicy(
-      g_sim3d_flat_pixels, g_sim3d.width, g_sim3d.height,
-      g_sim3d.width * (int)sizeof(uint32_t), g_sim3d.backdrop_argb,
-      g_sim3d.live_x0, g_sim3d.live_x1, g_sim3d_layer_pixels, 0,
-      g_sim3d.object_half_add, hud_span_rows);
-
   bool dump_armable = DemoArtifactsArmable();
   bool trace_armed = SimRenderMetadata_TraceArmed();
   bool diagnostics_armed =
       g_sim3d.inspector_active || dump_armable || trace_armed;
+
+  /* The promoted HUD owns the full width of its own rows, so those rows keep
+   * every captured pixel; the same span the authentic-side restore uses. */
+  int hud_span_rows = g_sim3d.hud_bg3
+      ? g_sim3d.prior_captures[kPpuOverlaySource_Bg3].y1 : 0;
+  /* Ground projection consumes the individual planes directly. Building a
+   * second full-frame CPU composite in that profile was pure dead work unless
+   * a diagnostic reader needed its hash/difference. */
+  if (g_sim3d.flat_stage_requested || diagnostics_armed)
+    ComposeFlatPixelsPolicy(
+        g_sim3d_flat_pixels, g_sim3d.width, g_sim3d.height,
+        g_sim3d.width * (int)sizeof(uint32_t), g_sim3d.backdrop_argb,
+        g_sim3d.live_x0, g_sim3d.live_x1, g_sim3d_layer_pixels, 0,
+        g_sim3d.object_half_add, hud_span_rows);
   uint32_t mismatch = 0;
   uint64_t flat_hash = 0;
   if (diagnostics_armed)
@@ -967,19 +989,15 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
 
   /* A nonzero diagnostic mask intentionally produces an incomplete A1 while
    * retaining the full-composite equality result above as the safety gate. */
-  if (g_sim3d.diagnostic_layer_mask) {
+  if (g_sim3d.flat_stage_requested && g_sim3d.diagnostic_layer_mask) {
     ComposeFlatPixelsPolicy(
         g_sim3d_flat_pixels, g_sim3d.width, g_sim3d.height,
         g_sim3d.width * (int)sizeof(uint32_t), g_sim3d.backdrop_argb,
         g_sim3d.live_x0, g_sim3d.live_x1, g_sim3d_layer_pixels,
         g_sim3d.diagnostic_layer_mask, g_sim3d.object_half_add,
         hud_span_rows);
-    /* Keep A/B Difference useful for isolated-layer inspection without
-     * changing the full-composite fidelity result published above. The count
-     * is discarded here, so this whole pass exists only to refresh the image
-     * for a dump -- skip it outright when no dump can consume it. */
-    if (dump_armable)
-      BuildDifference(authentic_pixels, authentic_pitch, true, NULL);
+    /* The diagnostic dump above deliberately records the complete A/B image;
+     * this masked rebuild is only the flat presentation selected on screen. */
   }
 }
 

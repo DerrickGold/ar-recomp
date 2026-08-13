@@ -1526,17 +1526,23 @@ void UploadSimTownCanvas(void) {
     /* A new streaming texture holds uninitialized memory, and from here on
      * only dirty sub-rectangles are uploaded — so anything the camera never
      * covers would keep whatever garbage the driver allocated (it showed as
-     * magenta). Publish the whole zeroed canvas once so unseen town pixels
-     * really are transparent and the world map shows through them. */
-    SDL_UpdateTexture(s_sim_canvas_texture, NULL, SimTownCanvas_Pixels(),
-                      kSimTownCanvasPixels * (int)sizeof(uint32_t));
+     * magenta). Publish the complete current canvas once, then consume the
+     * already-covered dirty regions so the first frame is not uploaded twice. */
+    if (SDL_UpdateTexture(s_sim_canvas_texture, NULL,
+                          SimTownCanvas_Pixels(),
+                          kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
+      int x, y, w, h;
+      while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {}
+    }
+    return;
   }
   int x = 0, y = 0, w = 0, h = 0;
-  if (!SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) return;
   const uint32_t *pixels = SimTownCanvas_Pixels();
-  SDL_UpdateTexture(s_sim_canvas_texture, &(SDL_Rect){ x, y, w, h },
-                    pixels + (size_t)y * kSimTownCanvasPixels + x,
-                    kSimTownCanvasPixels * (int)sizeof(uint32_t));
+  while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {
+    SDL_UpdateTexture(s_sim_canvas_texture, &(SDL_Rect){ x, y, w, h },
+                      pixels + (size_t)y * kSimTownCanvasPixels + x,
+                      kSimTownCanvasPixels * (int)sizeof(uint32_t));
+  }
 }
 
 /* Rebuilt only when the baked image would differ, which the serial reports.

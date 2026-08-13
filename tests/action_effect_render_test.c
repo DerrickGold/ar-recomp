@@ -18,6 +18,30 @@ static int g_failures;
   }                                                                          \
 } while (0)
 
+static bool EffectBatchesEqual(const ActionEffectRenderBatch *a,
+                               const ActionEffectRenderBatch *b) {
+  return a->vertex_count == b->vertex_count &&
+      a->index_count == b->index_count &&
+      (!a->vertex_count ||
+       memcmp(a->vertices, b->vertices,
+              (size_t)a->vertex_count * sizeof(a->vertices[0])) == 0) &&
+      (!a->index_count ||
+       memcmp(a->indices, b->indices,
+              (size_t)a->index_count * sizeof(a->indices[0])) == 0);
+}
+
+static bool SceneBatchesEqual(const ActionSceneEffectRenderBatch *a,
+                              const ActionSceneEffectRenderBatch *b) {
+  return a->vertex_count == b->vertex_count &&
+      a->index_count == b->index_count &&
+      (!a->vertex_count ||
+       memcmp(a->vertices, b->vertices,
+              (size_t)a->vertex_count * sizeof(a->vertices[0])) == 0) &&
+      (!a->index_count ||
+       memcmp(a->indices, b->indices,
+              (size_t)a->index_count * sizeof(a->indices[0])) == 0);
+}
+
 static bool IdentityProjection(void *userdata,
                                const ActionEffectInstance *effect,
                                float local_x, float local_y,
@@ -115,7 +139,7 @@ static void TestFeatureSwitchesAndDeterminism(void) {
   CHECK(both.index_count == lighting.index_count + particles.index_count);
   CHECK(ActionEffectRender_Build(&frame, true, true, IdentityProjection,
                                  NULL, &repeat));
-  CHECK(memcmp(&both, &repeat, sizeof(both)) == 0);
+  CHECK(EffectBatchesEqual(&both, &repeat));
 
   memset(&repeat, 0xFF, sizeof(repeat));
   CHECK(ActionEffectRender_Build(&frame, false, false, NULL, NULL, &repeat));
@@ -132,7 +156,7 @@ static void TestClocksAndValidation(void) {
   frame.effects[0].pulse_ticks++;
   CHECK(ActionEffectRender_Build(&frame, false, true, IdentityProjection,
                                  NULL, &changed));
-  CHECK(memcmp(&first, &changed, sizeof(first)) != 0);
+  CHECK(!EffectBatchesEqual(&first, &changed));
 
   frame.effects[0] = Fire();
   frame.effects[0].kind = 99;
@@ -386,12 +410,12 @@ static void TestSceneFeatureSwitchesAndDeterminism(void) {
   CHECK(both.index_count == lighting.index_count + particles.index_count);
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &repeat));
-  CHECK(memcmp(&both, &repeat, sizeof(both)) == 0);
+  CHECK(SceneBatchesEqual(&both, &repeat));
 
   frame.effects[0].pulse_ticks++;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &repeat));
-  CHECK(memcmp(&both, &repeat, sizeof(both)) != 0);
+  CHECK(!SceneBatchesEqual(&both, &repeat));
 }
 
 static void TestSceneKindsRemainIndependent(void) {
@@ -492,7 +516,7 @@ static void TestAitosLavaLightingAndParticles(void) {
   frame.effects[0].pulse_ticks++;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &lighting));
-  CHECK(memcmp(&repeat, &lighting, sizeof(repeat)) != 0);
+  CHECK(!SceneBatchesEqual(&repeat, &lighting));
 }
 
 static void TestMarahnaFireballFramesAndDirections(void) {
@@ -905,7 +929,7 @@ static void TestBossLightningFilamentAndStages(void) {
         kActionSceneEffectParticlesPerInstance * 6);
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &repeat));
-  CHECK(memcmp(&lighting, &repeat, sizeof(lighting)) == 0);
+  CHECK(SceneBatchesEqual(&lighting, &repeat));
 
   /* Only the linked state-$09 child receives the floor bloom. The shared
    * visual-$20 blank cycle is rejected by capture and has no renderer phase. */
@@ -955,12 +979,12 @@ static void TestMarahnaLightningLinksAndOrientations(void) {
         kActionSceneEffectParticlesPerInstance * 6);
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &repeat));
-  CHECK(memcmp(&horizontal, &repeat, sizeof(horizontal)) == 0);
+  CHECK(SceneBatchesEqual(&horizontal, &repeat));
   frame.effects[0].phase_ticks++;
   frame.effects[0].pulse_ticks++;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &repeat));
-  CHECK(memcmp(&horizontal, &repeat, sizeof(horizontal)) != 0);
+  CHECK(!SceneBatchesEqual(&horizontal, &repeat));
 
   frame.effects[0].visual = 0x31;
   frame.effects[0].animation_state = 0x28;
@@ -1052,7 +1076,7 @@ static void TestMarahnaBossLightningStagesAndOrientations(void) {
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &orb));
   CHECK(orb.vertex_count == charge.vertex_count);
-  CHECK(memcmp(&charge, &orb, sizeof(charge)) != 0);
+  CHECK(!SceneBatchesEqual(&charge, &orb));
   CHECK(ActionSceneEffectRender_Build(
       &frame, false, true, IdentityProjection, NULL, &particles));
   CHECK(particles.vertex_count ==
@@ -1165,11 +1189,11 @@ static void TestSwordBeamLightingTrailAndStars(void) {
   CHECK(near_max_y - near_min_y > 24.0f);
   CHECK(ActionSceneEffectRender_Build(
       &frame, false, true, IdentityProjection, NULL, &repeat));
-  CHECK(memcmp(&particles, &repeat, sizeof(particles)) == 0);
+  CHECK(SceneBatchesEqual(&particles, &repeat));
   frame.effects[0].pulse_ticks++;
   CHECK(ActionSceneEffectRender_Build(
       &frame, false, true, IdentityProjection, NULL, &repeat));
-  CHECK(memcmp(&particles, &repeat, sizeof(particles)) != 0);
+  CHECK(!SceneBatchesEqual(&particles, &repeat));
   bool materialization_changed = false;
   for (int i = 0; i < kActionSceneEffectSwordStarCount; i++) {
     const int base = i * 8;
