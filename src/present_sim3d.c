@@ -1680,10 +1680,9 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
   y1 = source.y + (0.5f - world_y1) * source.h;
 
   float base_alpha = (float)alpha / 255.0f;
-  /* File-scope rather than automatic: at this density the vertex/index pair
-   * is well past a sane frame-stack allocation. Since Phase 0 every caller
-   * runs on the render/main thread — the only thread that issues SDL render
-   * calls — so these shared statics stay single-threaded-safe. */
+  /* File-scope rather than automatic: at this density the vertex/index pair is
+   * too large for a frame-stack allocation. SDL rendering runs synchronously on
+   * the main thread, so these shared statics are not accessed concurrently. */
   static SDL_Vertex vertices[kSimUnderlayVertexCount];
   static int indices[kSimUnderlayIndexCount];
   int vertex_count = 0, index_count = 0;
@@ -2254,8 +2253,8 @@ void DrawSimBackdrop(const FrameSlot *slot, SDL_Rect viewport,
   float bottom = (float)(viewport.y + viewport.h);
 
   /* Anchor the gradient's zero -- its brightest, most distant-looking end --
-   * at the real horizon when it is on screen, and at the synthetic one
-   * otherwise, which is every pitch the settings allow today. */
+   * at the real horizon when it is on screen, and at the synthetic one for
+   * configured pitches where the real horizon falls outside the viewport. */
   float horizon_y = 0.0f;
   bool horizon_visible = matrix &&
       Scene3D_GroundHorizonScreenY(matrix, viewport.h, &horizon_y) &&

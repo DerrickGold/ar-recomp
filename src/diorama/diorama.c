@@ -480,8 +480,7 @@ typedef Scene3DCamera DioramaCamera;
  * is unconditionally overwritten by Diorama_SeedCameraFromSettings (below)
  * before first render (boot, camera-row menu edits, and Reset Camera all
  * call it), so the settings descriptors are the single source of truth for
- * the actual defaults. A literal here would be dead weight a future editor
- * could mistake for load-bearing. */
+ * defaults. A literal here would look load-bearing despite never being used. */
 static DioramaCamera g_diorama_cam;
 static float g_diorama_auto_distance = 5.0f;
 static bool g_diorama_settings_dirty;
@@ -945,9 +944,9 @@ bool Diorama_SaveLayerManifest(void) {
   /* One atomic replace on both platforms. A bare rename() FAILS on Windows when
    * the destination exists (packaging builds windows-x86_64/arm64), so every save
    * after the first would silently stop persisting the user's edits -- the same
-   * trap the GUI's own ROM staging documents at buildgui/gui.go:482. See
-   * atomic_replace.h; this file may hold hand-authored rooms that are not
-   * reproducible from the table, so "original kept" below must be TRUE. */
+   * trap handled by buildgui's storeROM. See atomic_replace.h; this file may
+   * contain hand-authored rooms that cannot be reproduced from the table, so
+   * "original kept" below must be TRUE. */
   if (!AtomicReplaceFile(tmp, path)) {
     remove(tmp);
     fprintf(stderr, "[diorama-layers] could not replace %s -- original kept\n",
@@ -2052,7 +2051,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       1.0f + (layer->shade.g - 1.0f) * shade_mix,
       1.0f + (layer->shade.b - 1.0f) * shade_mix,
       /* Authored alpha multiplies the layer's built-in shade alpha, so an
-       * un-authored plane (255) is exactly today's value. */
+       * un-authored plane (255) preserves the built-in value exactly. */
       layer->shade.a * ((float)resolved[i].alpha / 255.0f),
     };
 

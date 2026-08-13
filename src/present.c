@@ -1,19 +1,12 @@
-/* M5 (ar-recomp-threading-impl.md Appendix D6): present-time rendering,
- * physically isolated from main.c's live game state. This file must NOT
+/* Present-time rendering is isolated from live game state. This file must NOT
  * declare or extern g_ppu, g_settings, g_snes_width, g_ws_extra,
  * g_active_pixel_aspect, or call Settings_Visible*() — every present-time
- * decision comes from the `const FrameSlot *` handed in. A stray live read
- * of any of those becomes an undeclared-symbol compile error, which is the
- * point (D6) — it's cheaper than relying on discipline/grep.
+ * decision comes from the `const FrameSlot *` handed in. Leaving those symbols
+ * undeclared makes a stray live read a compile error.
  *
- * It's fine to extern the presentation *resources* below (renderer, window,
- * textures, the raw pixel buffers): those are boot-created once and, since
- * Phase 0 removed the present thread (#18/P13), are read only here on the
- * single render/main thread — the same thread that runs RtlDrawPpuFrame and
- * the Upload/Composite phases, so nothing reads them concurrently. The D6
- * isolation above is a separate and still-enforced rule: it is about not
- * reading LIVE g_ppu/g_settings state (which the frame slot must carry
- * instead), not about cross-thread access, which no longer exists. */
+ * Presentation resources are different: the renderer, window, textures, and
+ * raw pixel buffers are boot-owned and used synchronously on the render/main
+ * thread. The isolation rule applies to mutable game state, not these resources. */
 
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -110,11 +103,9 @@ static void AddHudPresentationChunk(HudPresentationChunk *chunks, int *count,
   };
 }
 
-/* One geometry description drives both compositing and hit-testing (D4):
- * pure, no globals — the presentation path feeds it from a FrameSlot, and
- * DevTools_InspectWindowPoint feeds it from live state. Ported verbatim from
- * the pre-M5 main.c version, just reading `inputs` instead of g_ppu/g_settings/
- * g_snes_width/g_snes_height directly. */
+/* One pure geometry description drives both compositing and hit-testing.
+ * Presentation supplies FrameSlot-derived inputs; DevTools_InspectWindowPoint
+ * supplies a live snapshot. */
 int BuildHudPresentationChunks(SDL_Rect viewport,
                                const HudProjectionInputs *in,
                                HudPresentationChunk *chunks) {
@@ -630,15 +621,9 @@ void PresentUpload(const FrameSlot *slot) {
     }
   }
 
-  /* A7 (followup doc): this used to sit behind the diorama branch's early
-   * `return` above, so g_hud_bg_texture/g_hud_obj_texture were NEVER
-   * refreshed in diorama mode — PresentHudOverlayComposited was sampling
-   * whatever stale texture content happened to be left over from the last
-   * flat-mode frame (or uninitialized memory if the game booted straight
-   * into diorama), read with THIS frame's hud_split geometry. That mismatch
-   * between stale pixels and fresh geometry is what produced the garbled/
-   * misaligned HUD text. Needed in both branches now that diorama mode
-   * anchors its HUD through the same g_hud_bg_texture flat mode uses. */
+  /* Refresh HUD textures for both presentation paths. Diorama anchors the HUD
+   * through the same textures as flat mode; skipping this upload would combine
+   * stale pixels with the current frame's split geometry. */
   if (slot->hud_split_height) {
     int split_rows = slot->hud_split_height;
     if (g_hud_bg_texture) {
@@ -729,21 +714,15 @@ static DioramaScrollDelta ComputeDioramaScrollDelta(
   return ComputeDioramaScrollDeltaAt(curr, prev, alpha);
 }
 
-/* B4-split (followup doc): the presentation-owned "effective render camera" —
- * Free Cam: the authored/persisted pose (snapshotted through
- * FrameSlot every frame, so Free Cam behavior/output is unchanged). Dynamic
- * Cam: baseline pose today (direct snap; B4-vellean/B4-damp add sway +
- * easing on top in a later checkpoint). A plain file-scope static, not
- * thread-local: PresentCompositeScene and the rest of present.c run
- * synchronously on the main thread. Diorama_Composite's camera parameter comes
- * from here in Dynamic mode and from the slot's authored pose in Free mode;
- * g_diorama_cam (diorama.c, producer-owned) is never read here. */
+/* Presentation-owned effective camera. Free Cam uses the persisted pose from
+ * the FrameSlot. Dynamic Cam eases reactive lean and event kicks around its
+ * dedicated baseline. Diorama_Composite receives that resolved pose and never
+ * reads producer-owned g_diorama_cam. */
 static DioramaCameraPose g_diorama_render_cam;
 static int g_diorama_render_cam_mode = -1;    /* -1: no frame composited yet */
 static uint64_t g_diorama_render_cam_last_ns;
 
-/* B4-vellean/B4-damp (followup doc) provisional constants — literals from
- * the doc, not yet author-tuned (tuning is an explicit follow-up pass). */
+/* Dynamic-camera response constants. */
 static const float kDioramaDampTau = 0.15f;    /* seconds, 1-exp(-dt/tau) */
 static const float kDioramaLeanYaw = 0.10f;    /* rad, max yaw lean @ full run speed */
 /* Doc's provisional 0.06 rad (half of yaw's 0.10) turned out imperceptible
@@ -1499,8 +1478,8 @@ void PresentCompositeScene(const FrameSlot *slot,
      * alone (D6 — this file never reads live g_ppu). ws_extra, not
      * extra_left_right, is the offset: the capture pitch and Diorama_Upload's
      * rect are both derived from ws_extra, so it is what texture column 0
-     * corresponds to. They are equal today; keeping them distinct is what makes
-     * that stay true if either ever moves. */
+     * corresponds to. Keep the two concepts distinct even when their values are
+     * equal, so either can change without altering the other's meaning. */
     DioramaBgValidSpanPlan bg2_valid_spans;
     /* + obj_apron: each span is in SURFACE columns, and screen x = 0 sits at
      * column obj_apron + ws_extra now that the surfaces carry resolve headroom
@@ -1550,22 +1529,14 @@ void PresentCompositeScene(const FrameSlot *slot,
                            &action_projection))
       return;
     DrawActionEffects(slot, viewport, &action_projection);
-    /* A7/A5 (followup doc): the diorama branch used to skip the widescreen
-     * HUD anchoring entirely — BG3 (ACT/TIME/SCORE, HP, boss health)
-     * rendered only as an unanchored, centered 256-wide tilted plane. With
-     * diorama_hud_flat on (default), the capture side (actraiser_rtl.c) no
-     * longer rebinds BG3 into the diorama layer buffer, leaving the same
-     * RemoveFromGame HUD-split capture flat mode uses standing (->
-     * g_hud_bg_pixels/g_hud_bg_texture). A straight PresentHudOverlay port
-     * produced visible seams (see PresentHudOverlayComposited's comment) —
-     * reconstruct into one texture first, then draw it as a plain screen
-     * overlay. Diorama_Composite (above) already disabled logical
-     * presentation, matching the precondition ApplyLogicalPresentation
-     * establishes for the flat branch's PresentHudOverlay call.
+    /* Flat HUD mode leaves BG3 in the same RemoveFromGame capture used by flat
+     * presentation. Reconstruct its split pieces into one texture before
+     * drawing the screen-space overlay; drawing them directly creates seams
+     * (see PresentHudOverlayComposited).
      *
-     * With diorama_hud_flat off (A5's A/B option), the capture side instead
-     * rebinds BG3 into the diorama layer buffer (the pre-A7 behavior) so it
-     * renders as the ordinary tilted BG3 plane in Diorama_Composite's own
+     * With diorama_hud_flat off, capture rebinds BG3 into the diorama layer
+     * buffer so it renders as the ordinary tilted BG3 plane in
+     * Diorama_Composite's own
      * per-layer loop above — skip the anchored overlay entirely here so the
      * two don't both draw a HUD. */
     if (slot->diorama_hud_flat)

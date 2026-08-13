@@ -1503,9 +1503,9 @@ const SettingDesc g_setting_descs[] = {
               "motion; 0 holds it fixed at the baseline pose.",
               kSettingCat_DioramaCamera, 35, 0, 100, NULL,
               DioramaDynamicCameraAvailable),
-  /* B5 (followup doc): promotes BG2 to an enveloping dimmed+DoF'd skybox so
+  /* Promotes BG2 to an enveloping dimmed+DoF'd skybox so
    * camera tilt/yaw/zoom never reveals the void past the finite backdrop
-   * quad's edges. Off keeps today's look; see the DioramaSkyMode comment
+   * quad's edges. Off keeps the default presentation; see DioramaSkyMode
    * (settings.h) for what the other two modes do. */
   { "diorama_skybox", NULL, "Skybox",
     "Off: BG2 is an in-box parallax plane (void may show at the margins "

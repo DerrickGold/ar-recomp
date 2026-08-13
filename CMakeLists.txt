@@ -12,12 +12,8 @@ endif()
 set(CMAKE_C_STANDARD 11)
 include(CTest)
 
-# AR_TESTS_ONLY: configure ONLY the ROM-free test tier (the tests/ suite links
-# individual src/*.c + SDL + PPU, never the generated ROM banks). When ON, the
-# generated-bank glob check and the ActRaiserRecomp game target — both of which
-# require a ROM to have been recompiled (src/gen/*.c + funcs.h) — are skipped,
-# so `cmake -DAR_TESTS_ONLY=ON` configures cleanly on a checkout with no ROM.
-# Off by default: a normal build is byte-identical to before this option existed.
+# Configure the ROM-free test tier without requiring generated ROM banks. This
+# skips the game target; tests link only the hand-written sources they exercise.
 option(AR_TESTS_ONLY "Configure only the ROM-free test tier (no ROM required)" OFF)
 
 set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
@@ -82,29 +78,10 @@ endif()
 # test tier below is independent of this target and always available.
 if(NOT AR_TESTS_ONLY)
 
-# THE GAME SOURCE LIST LIVES IN snesbuild.ini, AND THIS READS IT.
-#
-# There is exactly one list, and it is the one that SHIPS. snesbuild.ini is
-# installed into a bundle's utils/ (packaging/CMakeLists.txt) and is what a user's
-# `snesbuild build --hermetic` rebuild compiles from; this file is not shipped at
-# all. Keeping a second literal copy here meant the two could disagree, and when
-# they did the failure surfaced as a link error in a USER's bundle rebuild rather
-# than anywhere near the commit that caused it:
-#
-#     error: undefined symbol: _AtomicReplaceFile
-#
-# src/atomic_replace.c had been added here and not to the manifest. The drift was
-# detectable -- project.ManifestDriftWarnings names it exactly -- but its only
-# hard-failing caller reads CMakeLists.txt from the hermetic build's own --root,
-# which in a bundle is utils/ and carries no CMakeLists.txt: the read fails, the
-# check returns nothing, and it is a silent no-op precisely where the rebuild runs.
-#
-# So the duplication is removed rather than policed. TO ADD A SOURCE FILE, add a
-# `source = <path>` line to snesbuild.ini; both builds pick it up. Paths stay
-# relative to this directory, exactly as the literal list was.
-#
-# CMAKE_CONFIGURE_DEPENDS re-runs configure when the manifest changes, so editing
-# it does not require a manual cmake invocation to take effect.
+# snesbuild.ini is the sole game-source list for both local builds and shipped
+# hermetic rebuilds. A second CMake list once let a local build pass while the
+# bundle failed to link. Add sources to the manifest; its paths are relative to
+# this directory, and CMAKE_CONFIGURE_DEPENDS picks up edits automatically.
 set(ACTRAISER_MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/snesbuild.ini)
 if(NOT EXISTS ${ACTRAISER_MANIFEST})
     message(FATAL_ERROR "snesbuild.ini is missing; it holds the game source list")
@@ -206,17 +183,8 @@ else()
     target_compile_definitions(ActRaiserRecomp PRIVATE AR_SIM3D_PICKER_TOPDOWN=0)
 endif()
 
-# AR_SANITIZE: AddressSanitizer + UndefinedBehaviorSanitizer opt-in build.
-# 2026-06-30: added chasing a CpuState->x_flag corruption where runtime
-# instrumentation proved the flag reads differently one C statement apart
-# with ZERO emitted code in between (a switch-case selecting a variant by
-# x_flag==1, then that variant's own first statement reading x_flag==0) --
-# a signature of a stray/out-of-bounds write elsewhere landing on memory
-# that happens to alias the CpuState struct, not a decode-time bug. ASan
-# catches the actual corrupting write with a full stack trace; printf-based
-# instrumentation can only observe the symptom. Off by default (real perf
-# cost — ASan is typically 2-3x slower, tractable for one repro run but not
-# for normal play). Enable with -DAR_SANITIZE=ON.
+# AddressSanitizer + UndefinedBehaviorSanitizer for memory-corruption hunts.
+# Off by default because the instrumentation has a substantial runtime cost.
 option(AR_SANITIZE "Build with ASan + UBSan (debug corruption bugs)" OFF)
 if(AR_SANITIZE AND NOT MSVC)
     target_compile_options(ActRaiserRecomp PRIVATE
@@ -226,13 +194,9 @@ if(AR_SANITIZE AND NOT MSVC)
     message(STATUS "ActRaiserRecomp: AR_SANITIZE on — ASan+UBSan enabled")
 endif()
 
-# AR_TSAN: ThreadSanitizer opt-in build (D16, ar-recomp-threading-impl.md).
-# Mutually exclusive with AR_SANITIZE (ASan+TSan can't be combined in one
-# binary). Use this to bring up the M5 present thread: run a session
-# exercising widescreen/diorama/HD-replacements, F5/F7 save-load, F9 display
-# cycle, F2 snapshot, pause/settings-overlay, and window resize, and watch
-# for TSan reports. Off by default (real perf cost, like AR_SANITIZE).
-option(AR_TSAN "Build with ThreadSanitizer (debug the present-thread handshake)" OFF)
+# ThreadSanitizer for concurrency diagnostics. It is mutually exclusive with
+# AR_SANITIZE and off by default because of its runtime cost.
+option(AR_TSAN "Build with ThreadSanitizer" OFF)
 if(AR_TSAN AND NOT MSVC)
     if(AR_SANITIZE)
         message(FATAL_ERROR "AR_TSAN and AR_SANITIZE cannot both be ON")
@@ -634,10 +598,8 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_shader_blob PROPERTIES
         ENVIRONMENT "SDL_AUDIODRIVER=dummy")
 
-    # Phase 0 insurance: the whole SDL present pattern (window -> renderer ->
-    # clear -> present -> readpixels) executed on the SDL_Init thread, proving
-    # nothing in that sequence structurally needs a second thread once the
-    # present thread is removed. Software renderer under the dummy driver.
+    # Verify that the SDL render sequence stays on the SDL_Init thread. The
+    # dummy driver and software renderer keep the test headless and ROM-free.
     add_executable(actraiser_main_thread_boot_test
         tests/main_thread_boot_test.c
     )

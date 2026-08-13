@@ -57,7 +57,7 @@ bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
 void ActRaiser_RequestMagicCycle(void);
 /* 0 when no spell is selected, else 1..4 ($02AC). Published into the frame
  * slot so the presentation layer can name the armed cheat's current spell
- * without reading live WRAM off the game thread. */
+ * without presentation reading live WRAM. */
 uint8 ActRaiser_SelectedMagic(void);
 
 /* BG-only widescreen presentation helpers. The Sky Palace pair temporarily

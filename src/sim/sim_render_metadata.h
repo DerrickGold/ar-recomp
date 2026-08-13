@@ -9,9 +9,9 @@
 #include "snes/ppu.h"
 #include "types.h"
 
-/* Phase D1's immutable simulation-town render contract.  The producer is
- * written only by the game thread's $01:ADAD/$01:AE6F HLE leaves; consumers
- * receive a value copy in FrameSlot and never retain a producer pointer. */
+/* Immutable simulation-town render contract. The $01:ADAD/$01:AE6F HLE leaves
+ * produce it; presentation receives a value copy through FrameSlot and never
+ * retains a producer pointer. */
 enum {
   kSimMaxSourceRecords = 92,  /* 48 fixed + 44 world records. */
   kSimMaxRenderObjects = 128, /* At most one priority run per OAM slot. */
@@ -649,9 +649,9 @@ typedef struct SimFrameData {
    * host world before drawing Palace/UI pixels that the PPU rasterizer has
    * already brightness-adjusted. */
   uint8_t world_navigation_brightness;
-  /* Step-3 full-world scene derived wholly on the game thread from the state
-   * above and the owned developed-map serial. The render thread consumes this
-   * value copy; invalid means authentic Mode 7 must own the frame. */
+  /* Full-world scene derived during capture from the state above and the owned
+   * developed-map serial. Presentation consumes this value copy; invalid means
+   * authentic Mode 7 must own the frame. */
   SimWorldNavigationScene world_navigation_scene;
   uint32_t build_serial;
   uint32_t integrity_flags;

@@ -2811,8 +2811,6 @@ uint8_t ppu_read(Ppu* ppu, uint8_t adr) {
 }
 
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
-//  if (adr != 24 && adr != 25)
-//    printf("ppu_write(%d, %d)\n", adr, val);
   switch(adr) {
     case INIDISP & 0xff:
       if (getenv("AR_INIDISP2") && val != ppu->inidisp) {

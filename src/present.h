@@ -11,22 +11,15 @@
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
 
-/* M5 (ar-recomp-threading-impl.md Appendix D). FrameSlot is the ONE contract
- * for everything present-time rendering reads: it is populated by the single
- * writer FrameSlot_Capture (D5), called on the game thread immediately after
- * RtlDrawPpuFrame() returns, and consumed only by present.c (D6) — present.c
- * must not read g_ppu/g_settings/g_snes_width/etc. live, only slot fields.
+/* FrameSlot is the sole game-state contract for presentation. FrameSlot_Capture
+ * populates it immediately after RtlDrawPpuFrame; presentation consumes the
+ * captured values instead of reading g_ppu, g_settings, or geometry globals.
  *
  * Pixel buffers (g_pixels, g_hud_bg_pixels, g_hud_obj_pixels,
  * g_m7_overlay_pixels, g_diorama_layer_pixels[], g_sim_obj_atlas_pixels) are
- * deliberately NOT copied
- * here. Safety for those comes from single-threaded ordering: since Phase 0
- * removed the present thread (#18/P13), Upload reads them on the same thread
- * that produced them (RtlDrawPpuFrame), before the next tick overwrites them,
- * so there is no reader/writer race to close. FrameSlot still carries the
- * small scalar/derived state Composite needs, because that keeps present.c
- * off live g_ppu/g_settings (the D6 isolation rule), not for any thread
- * reason (§2.8/D3). */
+ * not copied. Synchronous ordering guarantees Upload consumes them before the
+ * next tick overwrites them. The slot carries scalar and derived state to
+ * enforce presentation isolation, not as a cross-thread handoff. */
 
 /* Mirrors ppu.h's kPpuOverlaySource_* / kPpuOverlayFlag_RemoveFromGame.
  * present.c does not include ppu.h (D6), so the order/value is pinned here
@@ -83,23 +76,15 @@ typedef struct FrameSlotHdEntry {
   bool active;
   int source;
   bool brightness_mod;
-  /* SDL_Texture*, copied for convenience. NOT stable after boot, despite what
-   * this comment used to claim: HdReplacementHost_ReloadTextures destroys and
-   * recreates every one on SDL_EVENT_RENDER_TARGETS_RESET /
-   * _DEVICE_RESET. Within a single present that is harmless (the slot is
-   * captured and consumed in one synchronous call), but a RETAINED slot — see
-   * R17/C2's g_repr, which a between-ticks re-present re-composites — would
-   * hold dangling handles across a reset. That is why the reset arm calls
-   * HostDisplay_InvalidatePresentHistory(). Do not retain a FrameSlot anywhere else
-   * without the same invalidation. */
+  /* SDL_Texture*, valid for a synchronous present. Texture reloads and render
+   * target resets invalidate retained slots, so their handlers must call
+   * HostDisplay_InvalidatePresentHistory(). Any new FrameSlot retention site
+   * needs the same invalidation. */
   void *texture;
 } FrameSlotHdEntry;
 
-/* Scene-inspector click anchor (D4-adjacent: shared between the present-time
- * renderer, which reads it from the FrameSlot, and main.c's game-thread click
- * handler in dev_tools.c, which writes it from a live hit-test). Shared here
- * (rather than kept private to the host) so present.c can use the same
- * type without redeclaring it. */
+/* Scene-inspector click anchor shared by the renderer and the input hit-test.
+ * It lives here so both sides use one type without exposing live game state. */
 typedef enum InspectorPresentationKind {
   kInspectorPresentation_Base,
   kInspectorPresentation_HudBg,
@@ -168,10 +153,8 @@ typedef struct FrameSlot {
    * mask. Presentation must not reuse stale mask texture content. */
   bool action_bg2_mask_valid;
 
-  /* D1 simulation-town semantic payload.  This value-copy is the only form
-   * present-time code may consume; the live HLE producer state stays private
-   * (the D6 rule).  All effective visual bits are zero until their render
-   * stages land, so adding this contract cannot change the authentic composite. */
+  /* Simulation-town semantic payload. Presentation consumes this value copy;
+   * the live HLE producer state stays private. Disabled stages remain inert. */
   SimFrameData sim;
 
   /* Action-stage spell and scene lifecycles, captured from WRAM beside the
@@ -211,14 +194,9 @@ typedef struct FrameSlot {
    * (unlike the 10-bit modular PPU scroll registers this replaces), so no
    * wrap-correction is needed when differencing them.
    *
-   * NOTE ON "prev": interpolation needs this slot's data PLUS the previous
-   * frame's, so the caller keeps its own DioramaScrollSnapshot (below) and
-   * passes it to PresentFrame; the slot itself only ever carries the
-   * CURRENT frame. Historically this note warned against reading the
-   * alternate entry of a double-buffered slot array (the M5.3 present thread
-   * could be writing it); that array and thread are gone (#18/P13), but the
-   * separate prev snapshot remains the interface — PresentFrame is given
-   * prev explicitly rather than inferring it. */
+   * Interpolation also needs the previous frame, so the caller keeps a separate
+   * DioramaScrollSnapshot and passes it to PresentFrame. FrameSlot itself always
+   * describes only the current capture. */
   uint64_t timestamp_ns;
   /* R17/C3: emulated ticks between the previous capture and this one — the
    * TRUE period of the prev->curr camera pair, clamped to 1..8 by
@@ -253,11 +231,10 @@ typedef struct FrameSlot {
    * candidate authored poses, resolved at present-composite time into
    * whichever is active this frame — see present.c's g_diorama_render_cam
    * and the DioramaCameraPose comment (diorama.h) for the full rationale.
-   * Snapshotting BOTH poses (rather than resolving on the game thread) keeps
+   * Snapshotting both poses rather than resolving during capture keeps
    * FrameSlot_Capture a plain field-by-field mirror of g_settings, matching
-   * every other row here. diorama_reactive_strength rides along now so
-   * later B4 checkpoints (velocity-lean, pan, kicks) don't need another
-   * FrameSlot edit. */
+   * every other row here. Presentation selects the pose and applies the
+   * captured reactive strength. */
   int diorama_camera_mode;
   DioramaCameraPose diorama_free_pose;
   DioramaCameraPose diorama_dyncam_baseline;
@@ -271,10 +248,8 @@ typedef struct FrameSlot {
    * (main.c) for why normalization happens there (it owns the WRAM read and
    * the running-max state) rather than here. yaw follows horizontal
    * velocity (running), pitch follows vertical velocity (jump/fall), naming
-   * matches which DioramaCameraPose field each drives in present.c's sway
-   * formula. Not yet multiplied by k_run/k_pitch/reactive_strength — that
-   * formula is present-side (D6: present.c owns the actual sway math, this
-   * is just the clamped raw signal). */
+   * matches which DioramaCameraPose field each drives. These fields are the
+   * normalized signals; present.c applies response constants and strength. */
   float diorama_dyncam_lean_yaw;
   float diorama_dyncam_lean_pitch;
   /* B4-kick (followup doc): rising-edge event flags, computed on the game
@@ -455,12 +430,9 @@ typedef struct DioramaScrollSnapshot {
 void FrameSlot_ExtractScrollSnapshot(const FrameSlot *slot,
                                     DioramaScrollSnapshot *out);
 
-/* --- Present-time entry points. Called synchronously on the render/main
- * thread (Phase 0 removed the present thread, #18/P13). Still split into an
- * Upload phase (SDL_UpdateTexture only) and a resolved frame phase
- * (SDL_RenderTexture + post-process + host UI): the split keeps the texture
- * uploads grouped ahead of the vsync-blocking present, not for any cross-thread
- * handoff. */
+/* Present-time entry points, called synchronously on the render/main thread.
+ * Upload remains separate from composite so texture updates stay grouped ahead
+ * of the potentially vsync-blocking present. */
 void PresentUpload(const FrameSlot *slot);
 /* prev_scroll: the scroll snapshot from the frame shown immediately before
  * this one (M7 interpolation, diorama mode only). NULL disables

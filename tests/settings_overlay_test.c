@@ -450,8 +450,8 @@ static void CheckLayerEditorSection(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(water->rake > rake_before);
 
-  /* The menu's reset verb is SNES Y, which defaults to the keyboard's A key
-   * (input_map.c:165) -- not SDLK_Y. Clearing the depth removes the SHAPE, since
+  /* The menu's reset verb is SNES Y, whose kDefaults keyboard binding is A --
+   * not SDLK_Y. Clearing the depth removes the SHAPE, since
    * a rake of zero is not a shape, so the plane reads FLAT again. */
   CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
   CHECK(DioramaLayerEditor_StrategyOfPlane(water) == kDioramaDepth_Flat);

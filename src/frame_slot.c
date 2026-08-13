@@ -1,8 +1,6 @@
-/* frame_slot.c — the sole game-thread FrameSlot producer, extracted from
- * main.c (Q3). FrameSlot_Capture runs on the game thread immediately after
- * RtlDrawPpuFrame() returns, reading live g_ppu/g_settings/g_ram/etc.;
- * present.c only ever consumes the FrameSlot this produces. No behavior
- * change — the body is verbatim from main.c. */
+/* The sole FrameSlot producer. FrameSlot_Capture runs immediately after
+ * RtlDrawPpuFrame, snapshots live game state, and hands presentation an
+ * isolated value copy. */
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,34 +31,13 @@ extern bool g_ws_active;
 extern int g_ws_extra;
 extern bool g_diorama_frame_active;
 
-/* B4-vellean (followup doc): self-calibrating velocity normalizer — REVISED
- * TWICE after live measurement (AR_DYNCAM_LOG captures, 2026-07-21):
- *   1st capture: the doc's literal "permanent running max, seeded 256" was
- *   dominated by a too-high floor (ordinary run/walk PlayerVelocityX never
- *   exceeded ~1-2 raw units — the 256 floor never got superseded, yaw lean
- *   read 0.004-0.008 all session) and by a single early outlier on Y (one
- *   big fall — likely the stage-entry drop-in, not a real jump — spiked the
- *   running max once; a monotonic max can only grow, so every ordinary jump
- *   afterward normalized against that outlier and read near-zero).
- *   2nd capture (after switching to a decaying PEAK follower, ~10s
- *   half-life): fixed X (yaw now reaches ±0.5 during normal running), but Y
- *   was STILL dead — one -1.000 spike at the very start (4 frames, matching
- *   the same drop-in event), then near-zero for the rest of a ~56s session
- *   with plenty of real jumps in it. A peak-follower is fundamentally the
- *   wrong shape for this: ONE frame can set the entire session's scale, no
- *   matter how fast it decays, if that one frame is a scripted event (a
- *   drop-in) rather than representative gameplay physics.
- * Fix: normalize against a recent-activity AVERAGE (exponential moving
- * average of |v|, ~0.8s time constant) instead of a peak, scaled by
- * kNormMultiple so "typical recent motion" reads as a fraction of full
- * lean and a burst clearly above that reads as more. A single-frame outlier
- * — however large — only nudges the average by kEmaAlpha of its excess, so
- * it can't singlehandedly desensitize anything; sustained real motion (a
- * multi-frame jump arc, continuous running) dominates the average the way
- * it should. This is the auto-gain-control shape (RMS/average-following),
- * not peak-following, and it's what "self-calibrates near real top speed"
- * actually needs when scripted one-off events share the same WRAM signal as
- * real gameplay motion. */
+/* Self-calibrating velocity normalization uses a recent-activity EMA, not a
+ * running or decaying peak. Live traces showed ordinary horizontal velocity at
+ * only ~1-2 raw units, while a four-frame stage-entry fall dominated the
+ * vertical peak and made later jumps nearly invisible. A ~0.8 s average lets
+ * sustained movement set the scale while a scripted one-frame outlier changes
+ * it by only kEmaAlpha. kNormMultiple leaves headroom for bursts above typical
+ * recent motion. */
 static float g_diorama_velx_avg = 4.0f;
 static float g_diorama_vely_avg = 4.0f;
 
@@ -304,8 +281,8 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
   g_sim_prev_in_town = true;
 }
 
-/* #16: DrawAndPresentFrame annotates the canonical SimFrameData once per
- * frame and points this at it around its SubmitFrameToPresent call;
+/* DrawAndPresentFrame annotates the canonical SimFrameData once per frame and
+ * publishes it around HostDisplay_SubmitFrame;
  * FrameSlot_Capture copies it instead of recomputing the identical
  * CaptureFrame+AnnotateFrame (same wram/settings/tuning inputs, same
  * thread, nothing mutates them in between). NULL for every other caller —

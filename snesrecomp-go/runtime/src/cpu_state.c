@@ -269,8 +269,8 @@ uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 addr) {
                 }
             }
         }
-        /* AR_READ0019=1 (2026-07-01, temporary probe): unconditional read
-         * watch on $0019. Every WRAM-write mechanism (cpu_write8/16,
+        /* AR_READ0019=1: unconditional read watch on $0019. Every WRAM-write
+         * mechanism (cpu_write8/16,
          * IndirWriteByte/Word, DMA via snes_write) has been instrumented
          * and shows ZERO writes setting $0019 to 0xA1, yet AR_SIMTRACE
          * shows it being read as 0xA1 mid-frame. Logging the read side
@@ -374,9 +374,9 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 addr, uint8 v) {
     int off = cpu_ram_offset(bank, addr);
     if (off >= 0) {
         uint8 old = cpu->ram[off];
-        /* AR_WATCH0019=1 (2026-07-01, temporary probe): unconditional --
-         * fires on EVERY write to $0019, changed or not. AR_WATCHOBJ only
-         * logs on value CHANGE (old != v); if something writes 0xA1 to $19
+        /* AR_WATCH0019=1: fires on EVERY write to $0019, changed or not.
+         * AR_WATCHOBJ logs only value changes (old != v); if something writes
+         * 0xA1 to $19
          * every frame and it's already 0xA1 (e.g. restored once from the
          * SRAM save via a raw memcpy at boot, bypassing all per-byte write
          * instrumentation, then rewritten identically every frame after),
@@ -481,7 +481,7 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 addr, uint16 v) {
     if (off >= 0 && off + 1 < 0x20000) {
         uint16 old = (uint16)cpu->ram[off]
                    | ((uint16)cpu->ram[off + 1] << 8);
-        /* AR_WATCH14=1 (2026-07-01, temporary probe): traces the actual STA
+        /* AR_WATCH14=1: traces the actual STA
          * $0014/$0016 write inside bank_01_ADAD (the position scratch pair
          * that AR_WATCHOBJ found frozen at read-time despite varying per-
          * object source data) -- is the WRITE itself already frozen (bug is
@@ -499,7 +499,7 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 addr, uint16 v) {
         }
         cpu->ram[off]     = (uint8)(v & 0xFF);
         cpu->ram[off + 1] = (uint8)(v >> 8);
-        /* AR_WATCH0019=1 (2026-07-01, temporary probe): see cpu_write8's
+        /* AR_WATCH0019=1: see cpu_write8's
          * copy of this block for why -- unconditional, catches a same-
          * value rewrite AR_WATCHOBJ's on-change filter would hide. A
          * 16-bit write at off==0x18 also touches 0x19 (the high byte). */
@@ -693,7 +693,7 @@ static RecompReturn _cpu_dispatch_once(CpuState *cpu, uint32 pc24,
     source_pc24 &= 0xFFFFFFu;
     unsigned mx_idx = (unsigned)(((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1));
     int via_mirror = 0;
-    /* AR_F5BE_HANDLERS=1 (2026-07-02, temporary probe): the ActRaiser town
+    /* AR_F5BE_HANDLERS=1: the ActRaiser town
      * per-frame handler dispatcher $03:F5BE calls out via a PHX/PHY/PHA/SEP/
      * RTS trick whose real target/return-continuation set can't be reliably
      * reconstructed by static ROM analysis (the per-town table layout at

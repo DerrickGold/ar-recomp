@@ -1,8 +1,8 @@
 /* The in-game diorama layer editor's row model and strategy authoring.
  *
  * THE LOAD-BEARING ASSERTION is exclusivity. The six depth shapes are NOT
- * exclusive in the data model: rake and bow SUM (diorama.c:1727 hands the skirt
- * rake+bow), a voxel and a stack resolve onto the SAME field, and
+ * exclusive in the data model: the renderer sums rake and bow, a voxel and a
+ * stack resolve onto the SAME field, and
  * DioramaLayerOrder_StrategyOf reports whichever key DOMINATES rather than the
  * only one set. So "select stack" must clear the keys that would otherwise
  * dominate or add to it. If that clearing is wrong, the row says one shape and
@@ -40,7 +40,7 @@ static int g_failures;
     }                                                                      \
   } while (0)
 
-/* diorama.c's real table (diorama.c:700-720), so a failure maps onto what the
+/* diorama.c's real kDioramaLayers table, so a failure maps onto what the
  * game would actually draw. */
 static const DioramaResolvedLayer kDefaults[] = {
   { kDioramaPlane_Backdrop, 0.00f, 255 },
@@ -204,8 +204,8 @@ static void TestAuthoredStrategyIsNonZero(void) {
     CHECK(layer != NULL);
     if (!layer) continue;
     /* Whichever shape it is, SOMETHING must be non-zero, and a repeat-based
-     * shape needs more than one copy or the loop in diorama.c:1668 skips it
-     * entirely (`layer_stack_copies > 1`). */
+     * shape needs more than one copy or the renderer's layer_stack_copies gate
+     * skips it entirely. */
     const bool visible =
         layer->rake != 0.0f || layer->bow != 0.0f || layer->thickness > 0.0f ||
         (layer->stack > 0.0f && layer->stack_copies > 1);
@@ -307,7 +307,7 @@ static void TestStrategyRoundTripsThroughManifest(void) {
 /* The unedited-game guarantee, from the editor's side: authoring then undoing
  * must leave the room INACTIVE, so Resolve returns the built-in table verbatim.
  * A room that stayed "active" with all-zero overrides would still take the sort
- * path, and while that happens to be a no-op today, relying on it would make the
+ * path, and even if that sort is a no-op, relying on it would make the
  * guarantee accidental rather than structural. */
 static void TestUndoLeavesRoomInactive(void) {
   DioramaLayerOrderTable table;
@@ -753,8 +753,8 @@ static void TestRowsFitTheDocumentedMaximum(void) {
   }
 }
 
-/* Level tabs cover exactly the action groups: the diorama cannot run outside
- * them (diorama_host.c:23), so a tab for group $00 or $08 could never show a
+/* Level tabs cover exactly the action groups: Diorama_IsActiveThisFrame rejects
+ * groups $00 and $08, so those tabs could never show a
  * live room. */
 static void TestLevelTabsAreTheActionGroups(void) {
   CHECK(kDioramaEditorLevelCount ==
@@ -877,7 +877,7 @@ static void TestWorstCaseRoomFitsTheSaveBuffer(void) {
  * reachable by holding one key:
  *
  *   1. Copies stepped down to 1. The renderer gates the stack pass on
- *      `copies > 1` (diorama.c:1717) because one copy coincides with the plane's
+ *      `copies > 1` because one copy coincides with the plane's
  *      own draw, so `copies:1` rendered NOTHING while the row still said STACK.
  *   2. Depth stepped to exactly 0. The flag stayed set, so RoomIsActive (which
  *      tests the flag, not the value) kept the room authored and wrote `rake:0`
@@ -920,8 +920,8 @@ static void TestSteppingNeverDisagreesWithTheRenderer(void) {
           CHECK(DioramaLayerEditor_StrategyOfPlane(plane) ==
                 DioramaLayerOrder_StrategyOf(layer));
 
-          /* (2) Whatever shape is reported must actually DRAW. These are the
-           * renderer's own gates, copied from diorama.c:1683/1717/1770. */
+          /* (2) Whatever shape is reported must actually DRAW. These mirror
+           * Diorama_Composite's shape gates. */
           switch (DioramaLayerEditor_StrategyOfPlane(plane)) {
             case kDioramaDepth_Rake:  CHECK(layer->rake != 0.0f); break;
             case kDioramaDepth_Bow:   CHECK(layer->bow != 0.0f); break;

@@ -5,10 +5,10 @@
  *      If that ever breaks, every unedited room in the game changes.
  *   2. AN ORDER-ONLY EDIT MOVES ONLY WHAT IT NAMES. Paint order is an explicit
  *      key that defaults to the plane's built-in slot -- NOT a sort by z. The
- *      two disagree today (Bg2Hi z=0.21 paints after Bg1 z=0.50), so sorting by
+ *      two disagree (Bg2Hi z=0.21 paints after Bg1 z=0.50), so sorting by
  *      z would reshuffle planes for an edit that changed nothing.
  *   3. ORDER AND Z ARE INDEPENDENT: z feeds depth-of-field
- *      (DofRadiusForLayer, diorama.c:1371), so reordering must not silently
+ *      (DofRadiusForLayer), so reordering must not silently
  *      refocus a layer.
  *   4. STABILITY: planes with equal keys keep built-in order, or the four OBJ
  *      priority planes would reshuffle against each other.
@@ -29,7 +29,7 @@ static int g_failures;
   } while (0)
 
 /* A stand-in for diorama.c's kDioramaLayers, in its real order and with its
- * real z values (diorama.c:696-717). Keeping the real numbers means a test
+ * real z values. Keeping the real numbers means a test
  * failure maps directly onto what the game would do. */
 static const DioramaResolvedLayer kDefaults[] = {
   { kDioramaPlane_Backdrop, 0.00f, 255 },

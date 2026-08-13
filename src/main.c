@@ -258,8 +258,8 @@ static void RunOneEmulatedTick(bool *stop_running) {
 
   uint32 inputs = HostInput_ComputeGameInputs(stop_running);
 
-  /* No frame-wide APU lock here (removed 2026-07-16). Every APU-touching
-   * path inside the frame takes RtlApuLock itself (RtlApuWrite,
+  /* Do not hold the APU lock for a whole frame. Every APU-touching path takes
+   * RtlApuLock itself (RtlApuWrite,
    * snes_readBBus, ReadRegWord, the SPC upload HLE), and the engine's
    * audio thread renders in short locked batches precisely so the two
    * threads interleave. Holding the lock across the whole frame starved
@@ -377,9 +377,8 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&sim, &tuning);
     SimWorldNavigationCapture_Capture(&sim, g_ppu);
-    /* This site runs on every frame including headless, unlike
-     * FrameSlot_Capture, whose only caller is the dev-tools snapshot path
-     * (dev_tools.c) and is gated on a live renderer. */
+    /* This site runs for every drawn frame, including headless runs that never
+     * call HostDisplay_SubmitFrame or FrameSlot_Capture. */
     Sim3D_RenderTownCanvas(&sim, g_ram, g_ppu);
     sim.town_canvas_serial = SimTownCanvas_Serial();
     Sim3D_LogViewTransition(&sim);
@@ -487,7 +486,7 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
   }
 
   if (!headless) {
-    /* #16: FrameSlot_Capture inside this call copies the sim annotated above
+  /* FrameSlot_Capture inside this call copies the sim annotated above
      * instead of recomputing it (identical inputs, same thread, nothing
      * mutates them in between). Cleared immediately after: the screenshot
      * and paused/menu-redraw captures run outside this window and must
@@ -1380,8 +1379,8 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
          * resolution and aspect settings are still fully respected: they
          * letterbox inside whatever size the user chose.
          *
-         * Phase 0 made rendering main-thread-only, so re-deriving the logical
-         * presentation here no longer races the (removed) present thread. */
+         * Rendering is synchronous, so re-deriving logical presentation here
+         * cannot race a composite. */
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
           HostDisplay_RecomputeLogicalPresentation();
@@ -1753,13 +1752,9 @@ static bool DevTools_ShouldAutoQuit(void) {
 /* The frame loop: pump events, then either service a host pause, step uncapped
  * (headless), or advance the M6 fixed-timestep accumulator. */
 static void AppRunMainLoop(AppBoot *app) {
-  /* Phase 0 (MY-AUDIT-render-off-thread) + #18/P13: there is no present
-   * thread. SDL3's 2D render API is main-thread-only (SDL_render.h:46-47) and
-   * PresentThreadFn was the sole contract violator, which is why the default
-   * GL/EGL backend would not boot on Wayland. All rendering runs synchronously
-   * on this (the main) thread via HostDisplay_SubmitFrame. Fixed-timestep
-   * decoupling is preserved by the M6 accumulator (owns the emulated tick
-   * rate) plus vsync (SDL_RenderPresent blocks briefly when vsync is on). */
+  /* SDL requires its 2D render API on the main thread, so all rendering runs
+   * synchronously here through HostDisplay_SubmitFrame. The fixed-timestep
+   * accumulator still owns emulated tick rate; vsync controls presentation. */
 
   bool running = true;
   uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
@@ -1804,9 +1799,8 @@ static void AppRunMainLoop(AppBoot *app) {
       /* Re-render the emulated frame only when something changed (a settings
        * edit, a resize); it is not re-rendered per iteration. */
       HostInput_RedrawPausedFrameIfNeeded();
-      /* §2.5: re-present unconditionally to keep the window alive while
-       * paused — the removed present thread used to do this from its own idle
-       * timeout. The present is paced by HostDisplay_SubmitFrame's host-UI
+      /* Re-present unconditionally to keep the window alive while paused. The
+       * present is paced by HostDisplay_SubmitFrame's host-UI
        * interval (menu: panel rate; plain pause: idle keep-alive rate).
        * game_tick=false (R16): no tick ran, so this must not feed M7's scroll
        * history or its tick-span average. */
@@ -1833,10 +1827,9 @@ static void AppRunMainLoop(AppBoot *app) {
     ScheduledSettings_ApplyIfDue();
 
     if (app->headless) {
-      /* §3.6: headless keeps the OLD model verbatim — uncapped by default,
-       * exactly one tick per outer iteration, no present thread. The
-       * oracle/replay tooling depends on this running as fast as the CPU
-       * allows. */
+      /* Headless mode is uncapped by default and advances exactly one tick per
+       * outer iteration. Oracle/replay tooling depends on it running as fast as
+       * the CPU allows. */
       RunOneEmulatedTick(&running);
       RunOuterIterationHousekeeping();
       DrawAndPresentFrame(true, kInterpPhaseNone);
@@ -1866,8 +1859,8 @@ static void AppRunMainLoop(AppBoot *app) {
       uint64_t dt = now_ns - last_time_ns;
       last_time_ns = now_ns;
       accumulator += dt;
-      /* Spiral-of-death cap (§3.1) — with Limit-aware headroom. Phase 0 put
-       * the Refresh=Limit throttle sleep on THIS thread, so at Limit <~30fps
+      /* Spiral-of-death cap (§3.1) with Limit-aware headroom. Refresh=Limit
+       * sleeps on this thread, so at Limit <~30fps
        * one deliberate present interval exceeds three emulation ticks and the
        * fixed cap would discard wall time EVERY iteration, permanently
        * slowing the game (~58.3Hz at Limit=25; exactly 60.000Hz at 20 — the
@@ -1951,12 +1944,9 @@ static void AppRunMainLoop(AppBoot *app) {
 /* Teardown, in strict reverse-dependency order: everything owning a texture, a
  * shader, or render state goes before the renderer that created it. */
 static int AppShutdown(AppBoot *app, char **argv) {
-  /* D10's present-thread join is gone with the thread itself (#18/P13):
-   * nothing can be mid-render here, so teardown below (SettingsOverlay_Destroy
-   * + the DestroyTexture block + SDL_DestroyRenderer) is safe in source order.
-   *
-   * Flush only game-originated battery changes on exit. Deliberate
-   * session-only editor changes re-sync the save-system shadow, so using
+  /* Rendering is synchronous, so nothing can be mid-render during the reverse-
+   * dependency teardown below. Flush only game-originated battery changes on
+   * exit. Deliberate session-only editor changes re-sync the save-system shadow;
    * Restart/Exit after one must not turn it into a persistent edit. Skip the
    * flush during replay so a replayed run never mutates the active save (see
    * the auto-persist note above — it would break the next replay's alignment). */

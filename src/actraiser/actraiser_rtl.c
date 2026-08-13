@@ -1285,9 +1285,8 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       bg_presentation = bg_policy;
     }
   }
-  /* AR_WS_ONLYBG=N (1..4): isolate a single BG layer for capture — masks the
-   * main-screen enable to just that layer so a snapshot shows exactly which
-   * layer carries the sky / dialog / pillars. Temporary Phase-4 probe. */
+  /* AR_WS_ONLYBG=N (1..4): isolate one BG layer so a capture identifies which
+   * layer carries scene elements such as sky, dialog, or pillars. */
   { const char *ob = getenv("AR_WS_ONLYBG");
     if (ob && ob[0]) {
       int L = atoi(ob) - 1;
@@ -2568,8 +2567,8 @@ void ActRaiserDrawPpuFrame(void) {
    * ActRaiser_RebindPpuOutputSurfaces(), which reaches PpuSetExtraSpaceCentered
    * (hd_replacement_host.c) and ZEROES both live margins — reading g_ppu later
    * would silently describe a different frame than the pixels came from. That
-   * path is !diorama_mode-gated today, so the bug would be latent rather than
-   * live; latching makes it impossible either way. */
+   * The non-diorama rebind gate normally prevents this mismatch; latching at
+   * the producer boundary makes that safety independent of the gate. */
   s_live_margin_top = g_ppu->extraTopCur;
   s_live_margin_bottom = g_ppu->extraBottomCur;
 

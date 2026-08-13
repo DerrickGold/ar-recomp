@@ -1,14 +1,9 @@
-/* main_thread_boot_test.c — Phase 0 insurance: prove the SDL present PATTERN
- * works entirely on the SDL_Init thread.
+/* ROM-free guard for the main-thread SDL render contract. It runs the
+ * create-window -> create-renderer -> clear -> present -> readpixels sequence
+ * entirely on the SDL_Init thread.
  *
- * Phase 0 of the cleanup moves ALL SDL rendering back onto the main thread by
- * never spawning the present thread. This harness is the cheap, ROM-free proof
- * that the create-window -> create-renderer -> clear -> present -> readpixels
- * sequence is valid when performed on ONE thread (the SDL_Init thread) — i.e.
- * that nothing in that sequence structurally requires a second thread.
- *
- * It CANNOT link main.c's real SubmitFrameToPresent (static + ROM-welded via
- * funcs.h), so it validates the pattern, not that specific function.
+ * The game loop depends on generated ROM functions, so this test validates the
+ * SDL sequence rather than HostDisplay_SubmitFrame's full integration.
  *
  * Runs headless under the dummy video driver with the software renderer, like
  * the sibling render-pipeline tests.
@@ -34,8 +29,7 @@ int main(void) {
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));
 
-  /* Pin the thread SDL was initialized on. Everything below must run on it —
-   * that is the whole Phase 0 invariant (no present thread). */
+  /* Pin the initialization thread; every render operation below must stay on it. */
   const SDL_ThreadID init_tid = SDL_GetCurrentThreadID();
 
   SDL_Window *window = SDL_CreateWindow(
@@ -48,7 +42,7 @@ int main(void) {
 
   /* Drive several frames synchronously on the init thread — clear to a known
    * color, present, read the pixels back, assert they survive. This is the
-   * exact ordering the synchronous SubmitFrameToPresent path uses:
+   * exact ordering the synchronous HostDisplay_SubmitFrame path uses:
    * (composite ->) RenderPresent, all on the calling thread. */
   const struct { Uint8 r, g, b; } frames[] = {
       { 0x3A, 0x7B, 0xEF }, { 0x10, 0xC0, 0x20 }, { 0xFF, 0x00, 0x88 },

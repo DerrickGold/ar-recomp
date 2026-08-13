@@ -355,7 +355,7 @@ void WatchdogFrameEnd(void) { }
 // Frame watchdog: detect infinite loops in generated code.
 // Set before calling run_frame, checked by generated code periodically.
 // Wall-clock (monotonic) time source. clock() measures process-wide CPU
-// time across all threads on glibc/Linux, so a busy audio/present thread
+// time across all threads on glibc/Linux, so another busy host thread
 // makes it outrun wall time and can trip the watchdog on a game that is
 // not actually hung. Use a monotonic wall clock instead. SDL is game-layer
 // only; this SDL-agnostic runtime TU uses the platform primitive directly.

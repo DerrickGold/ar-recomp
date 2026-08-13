@@ -1520,15 +1520,9 @@ static void EnsureSelectedNavVisible(void) {
 }
 
 static const SettingDesc *SelectedDesc(void) {
-  /* A custom section has no descriptors, so matching one by row index would be
-   * meaningless -- row 3 of the layer editor is not "the third Presentation
-   * setting".
-   *
-   * Defence in depth, and knowingly untestable: every caller is already behind a
-   * Layer* early-return, so removing this guard changes no observable behaviour
-   * today. It is here because those guards are the thing a future edit is most
-   * likely to miss, and the failure would be silent -- a keypress on a layer row
-   * editing whatever descriptor happened to share its index. */
+  /* Custom sections have no descriptors: layer-editor row 3 is not presentation
+   * descriptor 3. Keep this guard even though callers also branch earlier; a
+   * missed branch must not let a custom row edit an unrelated setting. */
   if (ActiveSectionIsCustom()) return NULL;
   SyncActiveTabPage();
   int row = 0;
@@ -1770,13 +1764,9 @@ static void BeginValueHold(const SettingDesc *desc, int direction,
 
 /* ── Layer editor dispatch ───────────────────────────────────────────────
  *
- * Mutating the override table from a key handler while diorama.c reads it in the
- * draw loop is safe because there is exactly one thread: Phase 0 (#18/P13)
- * removed the present thread, since SDL3's 2D render API is main-thread-only,
- * and main.c:1151-1157 documents that all rendering now runs synchronously on
- * the main thread. Key handling and drawing are therefore strictly ordered, and
- * an edit lands before the next frame reads it -- which is what makes the
- * editor's live A/B possible at all.
+ * Key handling and drawing run synchronously on the main thread, so an override
+ * edit is ordered before the next frame reads it. This is what makes live A/B
+ * editing safe without locking.
  *
  * Returns true when the row belonged to the editor, so the ordinary descriptor
  * paths are skipped. */
