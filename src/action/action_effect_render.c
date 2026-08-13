@@ -110,6 +110,19 @@ static const float kCircle32[kActionEffectGlowSegments][2] = {
   { 0.923880f, -0.382683f }, { 0.980785f, -0.195090f },
 };
 
+/* Mist is a mass of overlapping puffs rather than a precision light halo.
+ * Twelve segments keep each silhouette round at SNES presentation scale while
+ * making a dense 24-puff volume cheaper than six generic 32-segment glows. */
+static const float
+kMistCircle12[kActionSceneEffectWaterfallMistCloudSegments][2] = {
+  { 1.000000f, 0.000000f }, { 0.866025f, 0.500000f },
+  { 0.500000f, 0.866025f }, { 0.000000f, 1.000000f },
+  {-0.500000f, 0.866025f }, {-0.866025f, 0.500000f },
+  {-1.000000f, 0.000000f }, {-0.866025f,-0.500000f },
+  {-0.500000f,-0.866025f }, { 0.000000f,-1.000000f },
+  { 0.500000f,-0.866025f }, { 0.866025f,-0.500000f },
+};
+
 static uint32_t EffectHash(uint32_t value) {
   value ^= value >> 16;
   value *= 0x7FEB352Du;
@@ -614,6 +627,167 @@ static bool AppendGlow(ActionEffectGeometryWriter *writer,
       writer->indices[writer->index_count++] = outer1;
       writer->indices[writer->index_count++] = inner1;
     }
+  }
+  return true;
+}
+
+/* One source-alpha cloud puff. Unlike AppendGlow this is not a light and is
+ * never submitted additively: its opaque-ish core actually conceals the hard
+ * BG2/skybox seam, while two soft rings feather it into neighbouring puffs.
+ * Per-puff radius, tint and opacity let four overlapping tiers imply volume
+ * without a backend-specific 3D-noise shader. */
+static bool AppendWaterfallMistCloud(
+    ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect,
+    float local_x, float local_y, float local_radius_x, float local_radius_y,
+    SDL_FColor tint, float opacity, unsigned seed,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  enum {
+    kSegments = kActionSceneEffectWaterfallMistCloudSegments,
+    kRings = kActionEffectGlowRings,
+  };
+  SDL_FPoint anchor;
+  float scale_x, scale_y;
+  if (!ProjectWithScale(effect, project_point, userdata, local_x, local_y,
+                        &anchor, &scale_x, &scale_y))
+    return true;
+  if (!Reserve(writer,
+               kActionSceneEffectWaterfallMistCloudVertices,
+               kActionSceneEffectWaterfallMistCloudIndices))
+    return false;
+
+  const SDL_FColor white = {1.0f, 1.0f, 1.0f, opacity};
+  SDL_FColor centre_color = MixColor(tint, white, 0.42f);
+  centre_color.a = opacity;
+  const int centre = writer->vertex_count;
+  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    anchor, centre_color, {0.0f, 0.0f},
+  };
+
+  const float radius_x = fmaxf(4.0f, local_radius_x * scale_x);
+  const float radius_y = fmaxf(3.0f, local_radius_y * scale_y);
+  static const float kRingScale[kRings] = {0.24f, 0.70f, 1.0f};
+  SDL_FColor ring_color[kRings] = {
+    MixColor(tint, white, 0.24f), tint, tint,
+  };
+  ring_color[0].a = opacity * 0.84f;
+  ring_color[1].a = opacity * 0.34f;
+  ring_color[2].a = 0.0f;
+  const unsigned ticks = EffectVisualTicks(
+      effect, (unsigned)effect->pulse_ticks) / 4u;
+
+  int ring_base[kRings];
+  for (int ring = 0; ring < kRings; ring++) {
+    ring_base[ring] = writer->vertex_count;
+    const float wobble = 0.035f + 0.055f * (float)ring;
+    for (int segment = 0; segment < kSegments; segment++) {
+      const int silhouette_segment =
+          segment * kActionEffectGlowSegments / kSegments;
+      const float shape = 1.0f + wobble * FlameSilhouette(
+          seed, ticks, silhouette_segment);
+      writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+        {
+          anchor.x + kMistCircle12[segment][0] * radius_x *
+              kRingScale[ring] * shape,
+          anchor.y + kMistCircle12[segment][1] * radius_y *
+              kRingScale[ring] * shape,
+        },
+        ring_color[ring], {0.0f, 0.0f},
+      };
+    }
+  }
+
+  for (int segment = 0; segment < kSegments; segment++) {
+    const int next = (segment + 1) % kSegments;
+    writer->indices[writer->index_count++] = centre;
+    writer->indices[writer->index_count++] = ring_base[0] + segment;
+    writer->indices[writer->index_count++] = ring_base[0] + next;
+  }
+  for (int ring = 0; ring + 1 < kRings; ring++) {
+    for (int segment = 0; segment < kSegments; segment++) {
+      const int next = (segment + 1) % kSegments;
+      const int inner0 = ring_base[ring] + segment;
+      const int inner1 = ring_base[ring] + next;
+      const int outer0 = ring_base[ring + 1] + segment;
+      const int outer1 = ring_base[ring + 1] + next;
+      writer->indices[writer->index_count++] = inner0;
+      writer->indices[writer->index_count++] = outer0;
+      writer->indices[writer->index_count++] = outer1;
+      writer->indices[writer->index_count++] = inner0;
+      writer->indices[writer->index_count++] = outer1;
+      writer->indices[writer->index_count++] = inner1;
+    }
+  }
+  return true;
+}
+
+static bool AppendWaterfallMistCloudVolume(
+    ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, float pulse,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  enum { kColumns = 6, kTiers = 4 };
+  _Static_assert(kColumns * kTiers ==
+                     kActionSceneEffectWaterfallMistCloudCount,
+                 "waterfall cloud layout must fill its bounded budget");
+  static const float kTierY[kTiers] = {48.0f, 20.0f, -24.0f, -5.0f};
+  static const float kTierRadiusX[kTiers] = {108.0f, 92.0f, 76.0f, 62.0f};
+  static const float kTierRadiusY[kTiers] = {88.0f, 70.0f, 54.0f, 32.0f};
+  static const float kTierOpacity[kTiers] = {0.090f, 0.115f, 0.135f, 0.205f};
+  static const float kTierOffsetX[kTiers] = {0.0f, 28.0f, -20.0f, 12.0f};
+  static const SDL_FColor kTierTint[kTiers] = {
+    {0.58f, 0.76f, 0.88f, 1.0f},
+    {0.68f, 0.85f, 0.94f, 1.0f},
+    {0.78f, 0.91f, 0.98f, 1.0f},
+    {0.90f, 0.97f, 1.00f, 1.0f},
+  };
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const float span = rect->x1 - rect->x0;
+  const unsigned ticks = EffectVisualTicks(
+      effect, (unsigned)effect->pulse_ticks);
+
+  /* Back to front: broad cool banks establish depth, rising mid-tier puffs
+   * break their upper silhouette, and the compact bright tier reads as fresh
+   * foam boiling where the waterfall meets the cloud. */
+  for (unsigned cloud = 0;
+       cloud < kActionSceneEffectWaterfallMistCloudCount; cloud++) {
+    const unsigned tier = cloud / kColumns;
+    const unsigned column = cloud % kColumns;
+    const unsigned seed = EffectHash(
+        (uint32_t)effect->pulse_generation ^
+        ((uint32_t)cloud + 1u) * 0x9E3779B9u);
+    const unsigned x_period = 132u + tier * 17u + (seed & 15u);
+    const unsigned y_period = 96u + tier * 13u + ((seed >> 4) & 15u);
+    float x_wave = TriangleWave(ticks + seed % x_period, x_period) * 2.0f - 1.0f;
+    float y_wave = TriangleWave(
+        ticks + (seed >> 8) % y_period, y_period);
+    if (cloud & 1u) x_wave = -x_wave;
+    const float lane = ((float)column + 0.5f) / (float)kColumns;
+    const float jitter_x = (HashUnit(seed ^ 0x53u) - 0.5f) * 28.0f;
+    const float jitter_y = (HashUnit(seed ^ 0xB5u) - 0.5f) *
+        (tier == 3u ? 14.0f : 28.0f);
+    float x = rect->x0 + span * lane + kTierOffsetX[tier] +
+        jitter_x + x_wave * (6.0f + 2.5f * (float)tier);
+    float y = kTierY[tier] + jitter_y -
+        y_wave * (5.0f + 1.5f * (float)tier);
+    /* A fixed first anchor gives the production projection regression one
+     * stable point while the other 23 puffs drift independently around it. */
+    if (cloud == 0u) {
+      x = rect->x0 + span * lane;
+      y = kTierY[tier];
+    }
+    const float size_jitter = 0.88f + 0.24f * HashUnit(seed ^ 0x71u);
+    const float breathe = 0.94f + 0.08f * TriangleWave(
+        ticks + (seed >> 16) % 113u, 113u);
+    const float opacity = kTierOpacity[tier] *
+        (0.90f + 0.10f * pulse) *
+        (0.92f + 0.08f * HashUnit(seed ^ 0xA7u));
+    if (!AppendWaterfallMistCloud(
+            writer, effect, x, y,
+            kTierRadiusX[tier] * size_jitter * breathe,
+            kTierRadiusY[tier] * size_jitter / breathe,
+            kTierTint[tier], opacity, seed,
+            project_point, userdata))
+      return false;
   }
   return true;
 }
@@ -1661,6 +1835,8 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
        * over the fast two-frame source cycle. The varying alpha and length
        * break horizontal bands without blurring away the pixel art. */
       const unsigned columns = 16u;
+      _Static_assert(kActionSceneEffectWaterfallParticleCount % 16u == 0u,
+                     "waterfall veil must fill complete lane rows");
       const unsigned column = i % columns;
       const unsigned row = i / columns;
       const float lane = ((float)column + 0.5f) / (float)columns;
@@ -2055,7 +2231,7 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
        * disappeared under CRT scaling, so these remain restrained but no
        * longer sub-perceptual. */
       spill = (ActionEffectGlowStyle){
-        .radius_x = 330.0f, .radius_y = 218.0f,
+        .radius_x = 330.0f, .radius_y = 282.0f,
         .ring_scale = {0.12f, 0.88f, 1.0f},
         .centre = {0.30f, 0.70f, 1.00f, 0.042f},
         .ring = {{0.22f, 0.62f, 1.00f, 0.034f},
@@ -2065,7 +2241,7 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
         .seed = (unsigned)effect->generation,
       };
       body = (ActionEffectGlowStyle){
-        .radius_x = 282.0f, .radius_y = 170.0f,
+        .radius_x = 282.0f, .radius_y = 230.0f,
         .ring_scale = {0.12f, 0.92f, 1.0f},
         .centre = {0.56f, 0.88f, 1.00f, 0.052f},
         .ring = {{0.38f, 0.78f, 1.00f, 0.040f},
@@ -2075,68 +2251,9 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
         .seed = (unsigned)effect->pulse_generation,
       };
       break;
-    case kActionEffect_AitosWaterfallMist: {
-      /* Two overlapping tiers feather the finite waterfall into the uncovered
-       * bottom band. The first tuning used three near-identical lower ellipses
-       * whose visible rings all ended at local Y ~= 80; their overlap read as
-       * one translucent rectangle with a horizontal cutoff. Keep the upper
-       * foam shelf broad, but make the lower banks narrower, vertically
-       * staggered, and more irregular. Their zero-alpha rims now terminate at
-       * substantially different depths, so the mist breaks up before it
-       * disappears instead of exposing one synthetic edge. */
-      static const float kBankX[6] = {
-        -170.0f, 0.0f, 170.0f,
-        -178.0f, -24.0f, 176.0f,
-      };
-      static const float kBankY[6] = {
-        -11.0f, -15.0f, -8.0f,
-        18.0f, 36.0f, 12.0f,
-      };
-      static const float kBankRadiusX[6] = {
-        194.0f, 224.0f, 194.0f,
-        160.0f, 182.0f, 158.0f,
-      };
-      static const float kBankRadiusY[6] = {
-        46.0f, 54.0f, 43.0f,
-        78.0f, 112.0f, 92.0f,
-      };
-      static const float kBankCentreAlpha[6] = {
-        0.28f, 0.34f, 0.27f,
-        0.15f, 0.18f, 0.14f,
-      };
-      static const float kBankInnerAlpha[6] = {
-        0.20f, 0.25f, 0.19f,
-        0.11f, 0.13f, 0.10f,
-      };
-      static const float kBankBodyAlpha[6] = {
-        0.085f, 0.11f, 0.080f,
-        0.050f, 0.060f, 0.045f,
-      };
-      static const float kBankFlare[6] = {
-        0.055f, 0.045f, 0.065f,
-        0.105f, 0.120f, 0.095f,
-      };
-      for (unsigned bank = 0;
-           bank < kActionSceneEffectWaterfallMistGlowCount; bank++) {
-        ActionEffectGlowStyle mist = {
-          .radius_x = kBankRadiusX[bank],
-          .radius_y = kBankRadiusY[bank],
-          .ring_scale = {0.18f, bank < 3 ? 0.82f : 0.86f, 1.0f},
-          .centre = {0.86f, 0.97f, 1.00f, kBankCentreAlpha[bank]},
-          .ring = {{0.72f, 0.92f, 1.00f, kBankInnerAlpha[bank]},
-                   {0.30f, 0.68f, 0.94f, kBankBodyAlpha[bank]},
-                   {0.08f, 0.28f, 0.54f, 0.00f}},
-          .flare = kBankFlare[bank], .rise = 0.025f,
-          .axis_x = 1.0f, .lift_y = -1.0f,
-          .seed = (unsigned)effect->pulse_generation + bank * 0x45D9u,
-        };
-        if (!AppendGlow(writer, effect, &mist, pulse,
-                        kBankX[bank], kBankY[bank],
-                        project_point, userdata))
-          return false;
-      }
-      return true;
-    }
+    case kActionEffect_AitosWaterfallMist:
+      return AppendWaterfallMistCloudVolume(
+          writer, effect, pulse, project_point, userdata);
     case kActionEffect_EnemyFireball:
     case kActionEffect_MarahnaFireball:
     case kActionEffect_AitosLavaFireball: {

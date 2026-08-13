@@ -51,8 +51,9 @@ bool Sim3D_BeginFrame(void);
  * observational: the authentic PPU framebuffer is never removed or modified. */
 bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request);
 
-/* Rebuilds the pitch-zero image after scanout and compares it against the
- * same-frame authentic framebuffer. A mismatch fails closed for this frame. */
+/* Rebuilds the pitch-zero image after scanout. Diagnostic modes also compare
+ * it against the same-frame authentic framebuffer; ordinary play skips that
+ * non-vetoing full-frame pass. */
 void Sim3D_FinishCapture(uint8_t *authentic_pixels,
                          int authentic_pitch, uint16_t game_frame);
 
@@ -118,7 +119,7 @@ typedef struct Sim3DTuning {
 void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning);
 /* Re-renders the whole town's ground from the resident WRAM tilemap plus
  * live VRAM/CGRAM. Call once per game frame, after Sim3D_AnnotateFrame; a
- * frame that failed the fidelity gate is skipped. */
+ * frame without a usable separated capture is skipped. */
 void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
                             const Ppu *ppu);
 /* Pure painter-order reference used by focused tests. `plane_mask==0` means

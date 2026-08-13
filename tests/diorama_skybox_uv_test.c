@@ -246,6 +246,37 @@ static void TestExtentValidSpans(void) {
   ExpectSpan("vertical top clipped", &spans.spans[0], 0, 4, 0, 0);
   ExpectSpan("vertical visible", &spans.spans[1], 4, 242, 0, 496);
   ExpectSpan("vertical bottom clipped", &spans.spans[2], 242, 244, 0, 0);
+  /* Aitos `$04/$02` captures 32 rows per side but deliberately admits only 24
+   * BG2 rows. Keep the transparent top/bottom intervals explicit even though
+   * presentation-only overflow no longer derives its existence from them. */
+  layer.vertical_extent = (ActionBgVerticalExtent) {
+    .mode = kActionBgExtent_Fixed,
+    .top = 24,
+    .bottom = 24,
+  };
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false,
+                               &layer, 32, 288, kTexWidth, &spans);
+  ExpectInt("Aitos vertical span count", spans.count, 3);
+  ExpectSpan("Aitos top clipped", &spans.spans[0], 0, 8, 0, 0);
+  ExpectSpan("Aitos waterfall rows", &spans.spans[1], 8, 280, 0, 496);
+  ExpectSpan("Aitos bottom clipped", &spans.spans[2], 280, 288, 0, 0);
+  int drawable_y0 = -1, drawable_y1 = -1;
+  ExpectInt("Aitos has drawable rows",
+            DioramaBgValidSpanPlan_DrawableRowBounds(
+                &spans, &drawable_y0, &drawable_y1), true);
+  ExpectInt("Aitos drawable row start", drawable_y0, 8);
+  ExpectInt("Aitos drawable row end", drawable_y1, 280);
+
+  DioramaBgValidSpanPlan clipped = {
+    .count = 1,
+    .spans = {{ .y0 = 0, .y1 = 8, .x0 = 0, .x1 = 0 }},
+  };
+  drawable_y0 = drawable_y1 = -1;
+  ExpectInt("fully clipped has no drawable rows",
+            DioramaBgValidSpanPlan_DrawableRowBounds(
+                &clipped, &drawable_y0, &drawable_y1), false);
+  ExpectInt("fully clipped drawable start", drawable_y0, 0);
+  ExpectInt("fully clipped drawable end", drawable_y1, 0);
 
   /* Exercise the fixed-capacity proof: four isolated overrides create nine
    * horizontal runs, plus one clipped run above and below. */

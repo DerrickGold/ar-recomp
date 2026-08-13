@@ -35,10 +35,7 @@ bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
     float local_x, float local_y, SDL_FPoint *point) {
   const ActionEffectProjectionContext *context = userdata;
-  if (!context || !effect || !point || context->visible_width <= 0 ||
-      context->snes_height <= 0 || context->viewport.w <= 0 ||
-      context->viewport.h <= 0)
-    return false;
+  if (!context || !effect || !point) return false;
 
   const int16_t camera_x = effect->projection_plane ==
           kActionEffectProjectionPlane_Bg2
@@ -70,6 +67,9 @@ bool ActionEffectProjection_ProjectPoint(
         effect->obj_priority, point, NULL, NULL);
   }
 
+  if (context->visible_width <= 0 || context->snes_height <= 0 ||
+      context->viewport.w <= 0 || context->viewport.h <= 0)
+    return false;
   point->x = context->viewport.x +
       (capture_x - (float)context->visible_x0) * context->viewport.w /
           (float)context->visible_width;

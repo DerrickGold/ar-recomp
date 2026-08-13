@@ -32,16 +32,15 @@ enum {
   kFrameSlotOverlay_Bg4 = 3,
   kFrameSlotOverlay_Obj = 4,
   kFrameSlotOverlaySourceCount = 5,  /* kPpuOverlaySource_Count */
-  /* Mirrors ppu.h's kPpuSurfaceWidth (the SURFACE allocation width, which is
-   * kPpuBufWidth plus the apron per side), for the same D6 reason as the
-   * overlay enum above: present-time code must not include ppu.h. It is the
-   * ALLOCATED width of every layer texture, and therefore the denominator that
-   * normalizes the U axis — the capture occupies only the leading snes_width
-   * columns of it. Anything computing a normalized U offset must divide by this,
-   * not by snes_width; see IJ1 in diorama_scroll_math.c for the artifact that
-   * mistake produced. Cross-checked by FrameSlot_Capture's _Static_assert
-   * against the real constant. */
+  /* Mirrors ppu.h's allocated layer-texture axes for the same D6 reason as the
+   * overlay enum above: present-time code must not include ppu.h. Width is the
+   * full surface (PPU buffer plus resolve aprons); height is the authentic 224
+   * rows plus both 64-row vertical-margin budgets. Captures occupy subregions,
+   * but normalized UV movement must always divide by these allocation sizes.
+   * Cross-checked by FrameSlot_Capture's _Static_asserts against the real
+   * constants. */
   kFrameSlotLayerTextureWidth = 640,  /* kPpuSurfaceWidth (512 + 64*2) */
+  kFrameSlotLayerTextureHeight = 352, /* kPpuBufHeight (224 + 64*2) */
   /* The authentic SNES screen dimensions, mirroring actraiser_game.h's
    * kActRaiserAuthenticWidth/Height for the same D6 reason as the constants above:
    * present-time code must not include actraiser_game.h, which declares g_ram and
@@ -52,8 +51,8 @@ enum {
    * the left margin and HUD source rects are expressed against this rather than
    * against snes_width -- the HUD is authored for the authentic window and is
    * anchored, not stretched. Do not confuse it with snes_width (the whole
-   * framebuffer, which varies) or with kFrameSlotLayerTextureWidth (the allocated
-   * texture, which is fixed at 640 and is the U-axis denominator).
+   * framebuffer, which varies) or with the fixed layer-texture allocation
+   * dimensions above, which normalize the U/V axes.
    *
    * Both are cross-checked against their actraiser_game.h counterparts by
    * _Static_asserts in frame_slot.c. */

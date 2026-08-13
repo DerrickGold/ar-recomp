@@ -1056,7 +1056,7 @@ static void TestObjColorMathPartition(void) {
   CHECK(!frame.objects[2].color_math_eligible);
 }
 
-static void TestAtlasDescriptorFallback(void) {
+static void TestAtlasFailureFallback(void) {
   uint8 wram[kActRaiserWramSize] = {0};
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Aitos;
@@ -1070,17 +1070,10 @@ static void TestAtlasDescriptorFallback(void) {
   SimAtlasBuildInput atlas;
   CHECK(SimRenderMetadata_CopyAtlasInput(&atlas));
   CHECK(atlas.object_count == 2);
-  for (uint16_t i = 0; i < atlas.object_count; i++) {
-    atlas.objects[i].local_x0 = atlas.objects[i].local_y0 = 0;
-    atlas.objects[i].local_x1 = atlas.objects[i].local_y1 = 8;
-    atlas.objects[i].atlas_x = atlas.objects[i].atlas_y = 1;
-    atlas.objects[i].atlas_w = atlas.objects[i].atlas_h = 8;
-    atlas.objects[i].atlas_valid = 1;
-  }
-  /* Two descriptors claiming the same atlas pixels fail closed. */
+  /* A failure reported by the sole atlas builder fails the atlas closed. */
   CHECK(SimRenderMetadata_CommitAtlas(
-      atlas.build_serial, atlas.objects, atlas.object_count, true,
-      64, 64, 9, 9, 0));
+      atlas.build_serial, atlas.objects, atlas.object_count, false,
+      64, 64, 0, 0, kSimMetadataIntegrity_AtlasRasterFailure));
 
   SimFrameData frame;
   SimRenderMetadata_CaptureFrame(
@@ -1902,7 +1895,7 @@ int main(int argc, char **argv) {
   TestGroundStrikeOverride();
   TestHeightSlew();
   TestObjColorMathPartition();
-  TestAtlasDescriptorFallback();
+  TestAtlasFailureFallback();
   TestShadowCasterSelection();
   TestWorldNavigationFrameContract();
   TestWorldNavigationCloudCeiling();

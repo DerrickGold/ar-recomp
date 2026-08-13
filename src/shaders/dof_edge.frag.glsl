@@ -35,31 +35,73 @@ layout(set = 3, binding = 0) uniform Context {
     float v_min;
     float v_max;
     float edge_feather;
-    float pad0;
+    float lower_content_v_max;
 };
+
+/* Layer captures use straight alpha for SDL_BLENDMODE_BLEND, but filtering
+ * straight RGB through transparent texels creates dark fringes: transparent
+ * capture padding has RGB=0, so averaging it directly contaminates the color
+ * before the fragment alpha reveals the already-rendered layer underneath.
+ * Accumulate premultiplied taps, then convert the filtered result back to
+ * straight alpha for SDL's blend mode. Opaque interiors and radius=0 remain
+ * algebraically unchanged. */
+void accumulate_tap(inout vec4 sum, vec4 tap, float weight) {
+    sum.rgb += tap.rgb * tap.a * weight;
+    sum.a += tap.a * weight;
+}
+
+/* The raw plane texture is taller than the current captured content. At an
+ * ordinary free edge, sampling that transparent padding is useful to soften
+ * the silhouette. An attached waterfall continuation owns the lower edge,
+ * however, so revealing padding there produces a colored horizontal band from
+ * the repeated pixels underneath. Pin lower taps on the drawable side to its
+ * final texel centre, while fragments in intentionally clipped rows remain
+ * transparent for the extension to own. Extension UVs remain inside the
+ * drawable limit and are unchanged. */
+vec4 sample_layer(vec2 uv, vec2 center_uv) {
+    if (lower_content_v_max > 0.0 && center_uv.y < lower_content_v_max) {
+        uv.y = min(uv.y, lower_content_v_max - 0.5 * texel_h);
+    }
+    return texture(u_texture, uv);
+}
 
 void main() {
     vec2 uv = v_uv;
+    /* Rows after the policy edge are not a soft silhouette: they are an
+     * intentional ownership handoff to the attached geometry. Letting the
+     * blur kernel reach backward from those transparent host fragments would
+     * recreate the very band that the drawable-side clamp removes. */
+    if (lower_content_v_max > 0.0 && uv.y >= lower_content_v_max) {
+        o_color = vec4(0.0);
+        return;
+    }
     vec2 offset = vec2(texel_w, texel_h) * blur_radius;
 
     vec4 sum = vec4(0.0);
-    sum += texture(u_texture, uv + vec2(-offset.x, -offset.y));
-    sum += texture(u_texture, uv + vec2( 0.0,      -offset.y));
-    sum += texture(u_texture, uv + vec2( offset.x, -offset.y));
-    sum += texture(u_texture, uv + vec2(-offset.x,  0.0));
-    sum += texture(u_texture, uv) * 2.0;
-    sum += texture(u_texture, uv + vec2( offset.x,  0.0));
-    sum += texture(u_texture, uv + vec2(-offset.x,  offset.y));
-    sum += texture(u_texture, uv + vec2( 0.0,       offset.y));
-    sum += texture(u_texture, uv + vec2( offset.x,  offset.y));
-    vec4 c = sum / 10.0;
+    accumulate_tap(sum, sample_layer(uv + vec2(-offset.x, -offset.y), uv), 1.0);
+    accumulate_tap(sum, sample_layer(uv + vec2( 0.0,      -offset.y), uv), 1.0);
+    accumulate_tap(sum, sample_layer(uv + vec2( offset.x, -offset.y), uv), 1.0);
+    accumulate_tap(sum, sample_layer(uv + vec2(-offset.x,  0.0),      uv), 1.0);
+    accumulate_tap(sum, sample_layer(uv,                              uv), 2.0);
+    accumulate_tap(sum, sample_layer(uv + vec2( offset.x,  0.0),      uv), 1.0);
+    accumulate_tap(sum, sample_layer(uv + vec2(-offset.x,  offset.y), uv), 1.0);
+    accumulate_tap(sum, sample_layer(uv + vec2( 0.0,       offset.y), uv), 1.0);
+    accumulate_tap(sum, sample_layer(uv + vec2( offset.x,  offset.y), uv), 1.0);
+    float filtered_alpha = sum.a / 10.0;
+    vec3 filtered_rgb = sum.a > 0.00001 ? sum.rgb / sum.a : vec3(0.0);
+    vec4 c = vec4(filtered_rgb, filtered_alpha);
 
     /* Feather the layer's TRUE UV edge, not the screen edge — these planes are
      * tilted, so the geometric border lands at an arbitrary screen angle. */
     float fade = 1.0;
     if (edge_feather > 0.0) {
         float du = min(uv.x - u_min, u_max - uv.x);
-        float dv = min(uv.y - v_min, v_max - uv.y);
+        float dv_top = uv.y - v_min;
+        /* An attached continuation can own the lower boundary. Do not fade the
+         * host into the backdrop there: its UV-sized feather changes apparent
+         * width under perspective even though both meshes use the same MVP. */
+        float dv_bottom = lower_content_v_max > 0.0 ? 1.0 : v_max - uv.y;
+        float dv = min(dv_top, dv_bottom);
         float d = min(du, dv);
         float texel_avg = (texel_w + texel_h) * 0.5;
         fade = clamp(d / (texel_avg * edge_feather), 0.0, 1.0);

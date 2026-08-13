@@ -294,7 +294,7 @@ static bool RimLightEnabled(SDL_Renderer *renderer) {
 typedef struct {
   float texel_w, texel_h, blur_radius;
   float u_min, u_max, v_min, v_max;
-  float edge_feather, _pad;
+  float edge_feather, lower_content_v_max;
 } DofEdgeUniforms;
 
 static SDL_GPUShader *g_dofedge_shader;
@@ -957,6 +957,17 @@ bool Diorama_SaveLayerManifest(void) {
 #define DIORAMA_SUBDIV_Y 6
 #define DIORAMA_VERTS_PER_LAYER ((DIORAMA_SUBDIV_X + 1) * (DIORAMA_SUBDIV_Y + 1))
 #define DIORAMA_INDICES_PER_LAYER (DIORAMA_SUBDIV_X * DIORAMA_SUBDIV_Y * 6)
+/* One extra interval gives the curved continuation a dedicated row at its
+ * non-uniform handoff, while retaining six intervals for the visible bend. */
+#define DIORAMA_OVERFLOW_SUBDIV_Y (DIORAMA_SUBDIV_Y + 1)
+#define DIORAMA_OVERFLOW_VERTS \
+  ((DIORAMA_SUBDIV_X + 1) * (DIORAMA_OVERFLOW_SUBDIV_Y + 1))
+#define DIORAMA_OVERFLOW_INDICES \
+  (DIORAMA_SUBDIV_X * DIORAMA_OVERFLOW_SUBDIV_Y * 6)
+#define DIORAMA_ATTACHED_VERTS \
+  (DIORAMA_OVERFLOW_VERTS + DIORAMA_VERTS_PER_LAYER)
+#define DIORAMA_ATTACHED_INDICES \
+  (DIORAMA_OVERFLOW_INDICES + DIORAMA_INDICES_PER_LAYER)
 
 static void BuildViewProjection(const DioramaCamera *cam, int out_w, int out_h,
                                 float out_mat[16]) {
@@ -1169,6 +1180,67 @@ static void BuildQuadMesh(const float mvp[16],
   }
   *num_verts = vi;
   TriangulateGrid(subdiv_u, subdiv_v, out_indices, num_indices);
+}
+
+/* Curved continuation for a finite captured plane. Unlike BuildQuadMesh, each
+ * row follows DioramaOverflowFoldPoint, so the surface can stay coplanar under
+ * the host's lower margin and then turn toward the camera. The same pure path
+ * is consumed by diorama_projection.c for BG-local particles and lighting. */
+static void BuildFoldedOverflowMesh(
+    const float mvp[16],
+    float y_top, float z_top, float z_handoff,
+    float overflow_height, float overlap_t,
+    float front_z, float front_drop,
+    float u0, float v0, float u1, float v1,
+    float aspect_x, int screen_w, int screen_h, SDL_FColor color,
+    SDL_Vertex *out_verts, int *out_indices,
+    int *num_verts, int *num_indices) {
+  *num_verts = 0;
+  *num_indices = 0;
+  int vi = 0;
+  for (int row = 0; row <= DIORAMA_OVERFLOW_SUBDIV_Y; row++) {
+    const float t = DioramaOverflowFoldRowT(
+        row, DIORAMA_OVERFLOW_SUBDIV_Y, overlap_t);
+    float wy = 0.0f, wz = 0.0f;
+    DioramaOverflowFoldPoint(
+        t, y_top, z_top, z_handoff,
+        overflow_height, overlap_t, front_z, front_drop,
+        &wy, &wz);
+    for (int col = 0; col <= DIORAMA_SUBDIV_X; col++) {
+      const float s = (float)col / DIORAMA_SUBDIV_X;
+      const float wx = (s - 0.5f) * aspect_x;
+      if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
+                             &out_verts[vi].position))
+        return;
+      out_verts[vi].tex_coord = (SDL_FPoint){
+        u0 + s * (u1 - u0), v0 + t * (v1 - v0),
+      };
+      out_verts[vi].color = color;
+      vi++;
+    }
+  }
+  *num_verts = vi;
+  TriangulateGrid(
+      DIORAMA_SUBDIV_X, DIORAMA_OVERFLOW_SUBDIV_Y,
+      out_indices, num_indices);
+}
+
+/* The supersample target contains only the active captured rectangle, while
+ * ordinary layer geometry addresses the larger persistent layer texture.
+ * Remap any mesh that will sample the compact target. Keeping this shared is
+ * what lets auxiliary geometry such as the waterfall continuation use the
+ * exact same resolved source as its host plane rather than silently falling
+ * back to the raw texture. */
+static void RemapMeshToSupersampleTexture(SDL_Vertex *vertices, int count,
+                                          int obj_apron,
+                                          int snes_width, int snes_height) {
+  const float u_scale = (float)kPpuSurfaceWidth / (float)snes_width;
+  const float u_bias = (float)obj_apron / (float)snes_width;
+  const float v_scale = (float)kPpuBufHeight / (float)snes_height;
+  for (int v = 0; v < count; v++) {
+    vertices[v].tex_coord.x = vertices[v].tex_coord.x * u_scale - u_bias;
+    vertices[v].tex_coord.y *= v_scale;
+  }
 }
 
 /* ── Render ───────────────────────────────────────────────────────────── */
@@ -1419,6 +1491,16 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer,
  * painter's algorithm, the box surrounds the stack. */
 static const float kShoeboxZBack = -0.50f;
 static const float kShoeboxZFront = 0.45f;
+/* Once the waterfall reaches the host plane's real lower edge, retain only a
+ * shallow vertical drop while it travels to the box's front depth. Enough Y
+ * change preserves a cascading silhouette; most of the repeated tile budget
+ * becomes forward travel, which is what makes the overflow leave the screen
+ * plane and read as water folding over the diorama lip. */
+static const float kAitosWaterfallFrontDrop = 0.18f;
+/* Keep two native 8 px tile rows hidden beneath the authentic BG2.  The
+ * overlap is opaque and coplanar, so it costs no visible source area while
+ * leaving enough coverage for camera pitch, landing shake, and filtering. */
+static const int kAitosWaterfallSeamTolerancePixels = 2 * 8;
 /* Crossfade band (rad) around tilt_y=0 — see the near-wall comment below. */
 static const float kShoeboxWallFadeRange = 0.15f;
 
@@ -2119,6 +2201,113 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                    aspect_x, height_scale, out_w, out_h, shade,
                    verts, indices, &nv, &ni);
 
+    /* Sized for the extension plus the host: when the extension is present,
+     * both are appended into this one ordered geometry submission below.
+     * Extension primitives remain first so the authentic BG2 owns the hidden
+     * coplanar overlap without relying on a second draw call. */
+    SDL_Vertex extension_verts[DIORAMA_ATTACHED_VERTS];
+    int extension_indices[DIORAMA_ATTACHED_INDICES];
+    int extension_nv = 0, extension_ni = 0;
+
+    /* The validated `$04/$02-$03:waterfall` token is published only when the
+     * exact three-row splash-platform signature is camera-local. Extend both
+     * BG2 priority bands, and no other layer/section, by repeating the
+     * authentic 224-row waterfall interval.
+     *
+     * The authentic interval is the only source guaranteed to stay populated
+     * under every BG Extents edit. The previous PoC derived both its source and
+     * fold from `bg2_valid_spans`; changing a top/bottom extent could therefore
+     * move the fold outside the captured 256-row cycle and make the overflow
+     * disappear. Folding at the authentic bottom is invariant; the opaque
+     * continuation is tucked beneath the host before curling over its edge. */
+    const bool aitos_waterfall_extension =
+        map_group == kActRaiserMapGroup_Aitos &&
+        map_number >= 2 && map_number <= 3 &&
+        layer_section == kDioramaLayerSection_AitosWaterfall &&
+        (layer->plane == kPpuOverlaySource_Bg2 ||
+         layer->plane == kDioramaPlane_Bg2Hi);
+    float attached_lower_content_v_max = 0.0f;
+    if (aitos_waterfall_extension) {
+      DioramaVerticalRepeatPlan repeat;
+      const float layer_v_span = layer_v1 - layer_v0;
+      if (DioramaVerticalRepeatPlan_Build(
+              authentic_y0, kActRaiserAuthenticHeight,
+              snes_height, kPpuBufHeight, &repeat) &&
+          layer_v_span > 0.0f) {
+        /* Apply the same bounded sub-tick V shift as the host layer. The shift
+         * cancels out of fold_t (geometry stays fixed) but keeps the repeated
+         * pixels flowing with the captured waterfall rather than drifting by
+         * one emulated tick. */
+        const float layer_v_shift = layer_v0 - uv_v0;
+        int drawable_y1 = 0;
+        if (!DioramaBgValidSpanPlan_DrawableRowBounds(
+                bg2_valid_spans, NULL, &drawable_y1) ||
+            drawable_y1 <= 0 || drawable_y1 > snes_height) {
+          drawable_y1 = snes_height;
+        }
+        /* The capture can deliberately end in transparent policy rows. The
+         * attachment belongs at the final drawable texel, not at the texture
+         * rectangle's geometric end; otherwise vertical interpolation samples
+         * across that hidden ownership boundary and exposes a colored line. */
+        attached_lower_content_v_max =
+            (float)drawable_y1 / (float)kPpuBufHeight + layer_v_shift;
+        const float fold_v =
+            (float)repeat.fold_y / (float)kPpuBufHeight + layer_v_shift;
+        const float source_v0 =
+            (float)repeat.source_y0 / (float)kPpuBufHeight + layer_v_shift;
+        const float source_v1 =
+            (float)repeat.source_y1 / (float)kPpuBufHeight + layer_v_shift;
+        const float fold_t = (fold_v - layer_v0) / layer_v_span;
+        const float extension_height =
+            (float)repeat.repeat_height / (float)kActRaiserAuthenticHeight;
+        if (fold_t >= 0.0f && fold_t <= 1.0f && source_v0 >= 0.0f &&
+            source_v1 <= 1.0f) {
+          const float extension_y = (0.5f - fold_t) * height_scale;
+          const float extension_z = DioramaTiltedRowDepth(
+              z_world, layer_rake, layer_bow, fold_t);
+          /* Remain coplanar through the host mesh's exact sampled bottom. The
+           * dedicated row in BuildFoldedOverflowMesh prevents the first curved
+           * triangle from intruding into this interval under camera pitch. */
+          float overlap_t =
+              (1.0f - fold_t) * height_scale / extension_height;
+          overlap_t +=
+              (float)kAitosWaterfallSeamTolerancePixels /
+              (float)repeat.repeat_height;
+          if (overlap_t < 0.0f) overlap_t = 0.0f;
+          if (overlap_t > 1.0f) overlap_t = 1.0f;
+          float handoff_t = fold_t +
+              overlap_t * extension_height / height_scale;
+          if (handoff_t > 1.0f) handoff_t = 1.0f;
+          const float handoff_z = DioramaTiltedRowDepth(
+              z_world, layer_rake, layer_bow, handoff_t);
+          BuildFoldedOverflowMesh(
+              mvp, extension_y, extension_z, handoff_z,
+              extension_height, overlap_t,
+              kShoeboxZFront, kAitosWaterfallFrontDrop,
+              layer_u0, source_v0, layer_u1, source_v1,
+              aspect_x, out_w, out_h, shade,
+              extension_verts, extension_indices,
+              &extension_nv, &extension_ni);
+
+          /* Only the low BG2 plane owns the public waterfall projection. The
+           * high-priority band uses identical geometry but must not overwrite
+           * the atmosphere's established low-plane host. */
+          if (extension_nv > 0 && out_projection &&
+              layer->plane == kPpuOverlaySource_Bg2 &&
+              out_projection->bg2_plane.valid) {
+            DioramaPlaneProjection *plane = &out_projection->bg2_plane;
+            plane->overflow_valid = true;
+            plane->overflow_fold_t = fold_t;
+            plane->overflow_height = extension_height;
+            plane->overflow_overlap_t = overlap_t;
+            plane->overflow_handoff_z = handoff_z;
+            plane->overflow_front_z = kShoeboxZFront;
+            plane->overflow_front_drop = kAitosWaterfallFrontDrop;
+          }
+        }
+      }
+    }
+
     /* STACK: fill the depth gap with PARALLEL copies of the layer, drawn behind
      * the plane itself (back to front, so the painter's algorithm layers them
      * correctly without a depth test).
@@ -2153,7 +2342,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       SDL_Vertex stack_verts[DIORAMA_VERTS_PER_LAYER];
       int stack_indices[DIORAMA_INDICES_PER_LAYER];
       for (int c = layer_stack_copies - 1; c >= 0; c--) {
-        if (!DioramaStackCopyIsVisible(c, layer_stack_copies)) continue;
         /* Skip whichever copy coincides with the plane's own depth -- index 0 for
          * a one-sided fill, the middle one for an odd-count centred fill. The
          * rule lives in the pure module so it cannot drift from the geometry. */
@@ -2269,12 +2457,12 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
        * than at 0. A pure scale would map the apron into the target and shift
        * every crisp-path layer right by apron*kDioramaSupersample texels. V
        * needs no offset -- the vertical band's row 0 IS the surface's row 0. */
-      float u_scale = (float)kPpuSurfaceWidth / (float)snes_width;
-      float u_bias = (float)obj_apron / (float)snes_width;
-      float v_scale = (float)kPpuBufHeight / (float)snes_height;
-      for (int v = 0; v < nv; v++) {
-        ss_verts[v].tex_coord.x = ss_verts[v].tex_coord.x * u_scale - u_bias;
-        ss_verts[v].tex_coord.y *= v_scale;
+      RemapMeshToSupersampleTexture(
+          ss_verts, nv, obj_apron, snes_width, snes_height);
+      if (extension_nv > 0) {
+        RemapMeshToSupersampleTexture(
+            extension_verts, extension_nv,
+            obj_apron, snes_width, snes_height);
       }
       draw_verts = ss_verts;
     }
@@ -2330,12 +2518,34 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight, dof_radius,
         layer_u0, layer_u1,
         layer_v0, layer_v1,
-        want_edge ? 2.0f : 0.0f, 0.0f,
+        want_edge ? 2.0f : 0.0f,
+        /* The opaque waterfall continuation owns this lower edge. Keep its
+         * host samples inside captured BG2 and suppress only the already-
+         * covered bottom feather; top/left/right AA remains active. */
+        attached_lower_content_v_max,
       };
       SDL_SetGPURenderStateFragmentUniforms(g_dofedge_state, 0, &u, sizeof(u));
       SDL_SetGPURenderState(renderer, g_dofedge_state);
     }
-    SDL_RenderGeometry(renderer, draw_texture, draw_verts, nv, indices, ni);
+    /* Submit the attached waterfall and BG2 as one ordered geometry batch.
+     * Auxiliary water remains first and coplanar for two hidden native tile
+     * rows; the following host primitives cover it in the same draw. This
+     * removes an otherwise unnecessary submission boundary from the seam
+     * without pretending the folded 3D mesh can be baked into a 2D texture. */
+    if (extension_nv > 0) {
+      const int host_vertex_base = extension_nv;
+      memcpy(&extension_verts[extension_nv], draw_verts,
+             (size_t)nv * sizeof(extension_verts[0]));
+      for (int index = 0; index < ni; index++)
+        extension_indices[extension_ni + index] =
+            host_vertex_base + indices[index];
+      extension_nv += nv;
+      extension_ni += ni;
+      SDL_RenderGeometry(renderer, draw_texture, extension_verts, extension_nv,
+                         extension_indices, extension_ni);
+    } else {
+      SDL_RenderGeometry(renderer, draw_texture, draw_verts, nv, indices, ni);
+    }
     if (rim_light || dof_or_edge)
       SDL_SetGPURenderState(renderer, NULL);
     if (plane_effect && out_projection && out_projection->valid) {

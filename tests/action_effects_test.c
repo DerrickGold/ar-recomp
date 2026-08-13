@@ -2075,6 +2075,8 @@ static void TestAitosWaterfallSplashIdentity(void) {
         kActionEffectRenderLayer_Bg2Plane);
   CHECK(frame.decorations[1].world_x == 856 &&
         frame.decorations[1].world_y == 600);
+  CHECK(frame.decorations[1].geometry.data.rect.y0 == -176.0f);
+  CHECK(frame.decorations[1].geometry.data.rect.y1 == 312.0f);
   CHECK(frame.decorations[2].kind == kActionEffect_AitosWaterfallMist);
   CHECK(frame.decorations[2].projection_plane ==
         kActionEffectProjectionPlane_Bg2);

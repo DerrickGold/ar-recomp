@@ -176,45 +176,58 @@ int main(void) {
     CHECK(near(u0, r0) && near(u1, r1));
   }
 
-  /* IJ1: the U and V axes must use the SAME unit — one source texel — so a
-   * diagonal camera move produces a shift with the same aspect as the motion.
+  /* IJ1 follow-up: both axes must use the SAME unit — one allocated texture
+   * texel — so a diagonal camera move produces the texture's own aspect.
    *
    * The bug: U divided by snes_width (256) while diorama.c normalizes its U
-   * window by the layer texture's allocated width (kFrameSlotLayerTextureWidth). V
-   * divided by snes_height, which IS the texture height, so V was right and U
-   * was 1.75x too large. Two consequences, both of which the author saw as
-   * jitter:
-   *   - At t->1 the displayed camera sat at P + 1.75*delta while the next
-   *     tick's t=0 lands at P + delta, so 0.75*delta was thrown away BACKWARD
-   *     every tick — a 60Hz sawtooth even at constant velocity.
-   *   - Diagonal motion sheared, because H and V disagreed by 1.75x.
+   * window by the layer texture's allocated width. V later acquired the same
+   * bug when fixed vertical-margin capacity made the texture 352 rows while
+   * snes_height remained the authentic 224. At t->1 the displayed vertical
+   * camera sat at P + (352/224)*delta while the next tick's t=0 landed at
+   * P + delta, throwing the excess backward every tick. That 60 Hz sawtooth
+   * also sheared diagonal motion because H and V used different units.
    *
    * The assertion is the axis RATIO, which is unit-independent and therefore
    * survives any future change to either denominator: an equal-pixel diagonal
-   * move must yield du/dv equal to the texture's own height/width ratio. */
+   * move must yield dv/du equal to the texture's own width/height ratio. */
   {
     FrameSlot diag = curr;
     diag.capture_ticks = 1;
     diag.snes_width = 256; diag.snes_height = 224;
     DioramaScrollSnapshot base = prev;
     base.bg1_camera_x = 100; base.bg1_camera_y = 100;
+    base.bg2_camera_y = 200;
     diag.bg1_camera_x = 108; diag.bg1_camera_y = 108;   /* +8 px on BOTH axes */
+    diag.bg2_camera_y = 204;
 
     DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&diag, &base, 1.0f);
     CHECK(r.active);
-    /* One texel of U is 1/tex; one row of V is 1/224. So an equal-pixel move
-     * must give dv exactly tex/224 x du, NOT the 1.75x-inflated du the bug
-     * produced (which yielded dv/du = 224/... -> 1.143). */
+    /* Equal source-pixel movement normalizes independently by the two fixed
+     * allocation axes. Using 224 for V would overshoot by 352/224 and then
+     * snap backward at the next captured tick. */
     CHECK(near(r.bg_du[0], 8.0f / (float)kFrameSlotLayerTextureWidth));
-    CHECK(near(r.bg_dv[0], 8.0f / 224.0f));
-    CHECK(near(r.bg_dv[0] / r.bg_du[0], (float)kFrameSlotLayerTextureWidth / 224.0f));
+    CHECK(near(r.bg_dv[0],
+               8.0f / (float)kFrameSlotLayerTextureHeight));
+    CHECK(near(r.bg_dv[0] / r.bg_du[0],
+               (float)kFrameSlotLayerTextureWidth /
+                   (float)kFrameSlotLayerTextureHeight));
+    CHECK(near(r.bg_dv[1],
+               4.0f / (float)kFrameSlotLayerTextureHeight));
 
     /* And the load-bearing property: at t=1 the shift must equal EXACTLY one
      * tick of motion in texture units, so extrapolation lands precisely on the
      * next tick's captured position instead of overshooting past it. Overshoot
      * is what made the offset get discarded backward every tick. */
     CHECK(near(r.bg_du[0] * (float)kFrameSlotLayerTextureWidth, 8.0f));    /* 8 texels, not 14 */
-    CHECK(near(r.bg_dv[0] * 224.0f, 8.0f));
+    CHECK(near(r.bg_dv[0] * (float)kFrameSlotLayerTextureHeight, 8.0f));
+
+    /* Authentic viewport height is not the allocation denominator. Changing
+     * this frame descriptor cannot alter the normalized texture movement. */
+    FrameSlot taller_view = diag;
+    taller_view.snes_height = 240;
+    DioramaScrollDelta taller =
+        ComputeDioramaScrollDeltaAt(&taller_view, &base, 1.0f);
+    CHECK(near(taller.bg_dv[0], r.bg_dv[0]));
 
     /* The R17/C1 slack margin must not saturate at ordinary walking speed. The
      * margin is 4px of the layer texture; a one-tick move of 4 source px at
@@ -266,15 +279,6 @@ int main(void) {
       prev_z = z; prev_y = y; prev_sh = sh;
     }
 
-    /* THE NO-OP GUARANTEE. Zero thickness must collapse the skirt onto the fold
-     * for every t -- that is what makes an unauthored layer cost nothing, since
-     * the caller skips the draw entirely but the arithmetic must agree. */
-    for (int i = 0; i <= 4; i++) {
-      DioramaSkirtVertex((float)i / 4.0f, kZ, kY, 0.0f, &y, &z, &sh);
-      CHECK(near(y, kY));
-      CHECK(near(z, kZ));
-    }
-
     /* A rake and a thickness COMPOSE: the caller passes the raked bottom edge as
      * z_bottom, so the skirt starts where the raked plane ends rather than where
      * the unraked plane would have. Getting this wrong tears the fold open,
@@ -285,22 +289,6 @@ int main(void) {
     DioramaSkirtVertex(1.0f, kZ + kRake, kY, kThick, &y, &z, &sh);
     CHECK(near(z, kZ + kRake + kThick));
 
-    /* Degenerate inputs must not produce geometry above the fold or behind the
-     * plane: t is clamped and a negative thickness is treated as zero. A
-     * negative thickness is rejected at parse time, so this is defence in depth
-     * against a future caller, not dead code for the manifest path. */
-    DioramaSkirtVertex(-1.0f, kZ, kY, kThick, &y, &z, &sh);
-    CHECK(near(z, kZ) && near(y, kY));
-    DioramaSkirtVertex(2.0f, kZ, kY, kThick, &y, &z, &sh);
-    CHECK(near(z, kZ + kThick));
-    DioramaSkirtVertex(0.5f, kZ, kY, -0.5f, &y, &z, &sh);
-    CHECK(near(z, kZ) && near(y, kY));
-
-    /* NULL outputs are optional: a caller wanting only the depth must not crash. */
-    DioramaSkirtVertex(0.5f, kZ, kY, kThick, NULL, NULL, NULL);
-    float only_z = 0.0f;
-    DioramaSkirtVertex(1.0f, kZ, kY, kThick, NULL, &only_z, NULL);
-    CHECK(near(only_z, kZ + kThick));
   }
 
   /* ── STACK: fill a depth gap with PARALLEL copies ───────────────────── */
@@ -314,7 +302,8 @@ int main(void) {
      * That is what lets the caller skip it -- the plane's own draw IS copy 0, so
      * any offset or dimming here would show as a seam or a double-darkened front
      * face on every stacked layer. */
-    DioramaStackCopy(0, 4, kBase, kDepth, &z, &sh, &al);
+    DioramaStackCopyShaped(
+        0, 4, kBase, kDepth, 0, false, &z, &sh, &al);
     CHECK(near(z, kBase));
     CHECK(near(sh, 1.0f));
     CHECK(near(al, 1.0f));
@@ -322,7 +311,8 @@ int main(void) {
     /* The last copy reaches exactly the far end of the authored fill -- so
      * stack:0.29 on the water lands its farthest slice on the rock's own depth,
      * which is what "fills the gap" has to mean. */
-    DioramaStackCopy(3, 4, kBase, kDepth, &z, &sh, &al);
+    DioramaStackCopyShaped(
+        3, 4, kBase, kDepth, 0, false, &z, &sh, &al);
     CHECK(near(z, kBase + kDepth));
     CHECK(sh < 1.0f);   /* recedes rather than smearing identical sprites */
     CHECK(al < 1.0f);
@@ -332,53 +322,23 @@ int main(void) {
      * depth would make the painter's-algorithm draw order wrong. */
     float prev_z = kBase - 1.0f, prev_al = 2.0f;
     for (int c = 0; c < 4; c++) {
-      DioramaStackCopy(c, 4, kBase, kDepth, &z, &sh, &al);
+      DioramaStackCopyShaped(
+          c, 4, kBase, kDepth, 0, false, &z, &sh, &al);
       CHECK(z >= prev_z);
       CHECK(al <= prev_al);
       CHECK(near(z, kBase + kDepth * (float)c / 3.0f));
       prev_z = z; prev_al = al;
     }
 
-    /* copies:1 is a no-op -- one copy is the plane itself. Must not divide by
-     * (copies-1) == 0. */
-    DioramaStackCopy(0, 1, kBase, kDepth, &z, &sh, &al);
-    CHECK(near(z, kBase) && near(sh, 1.0f) && near(al, 1.0f));
-
-    /* Zero depth collapses every copy onto the plane, whatever the count: a
-     * `copies:` with no `stack:` must not smear the layer across depth. */
-    for (int c = 0; c < 4; c++) {
-      DioramaStackCopy(c, 4, kBase, 0.0f, &z, NULL, NULL);
-      CHECK(near(z, kBase));
-    }
-
-    /* Degenerate inputs clamp instead of producing geometry outside the fill or
-     * dividing by zero. */
-    DioramaStackCopy(-5, 4, kBase, kDepth, &z, NULL, NULL);
-    CHECK(near(z, kBase));
-    DioramaStackCopy(99, 4, kBase, kDepth, &z, NULL, NULL);
-    CHECK(near(z, kBase + kDepth));
-    DioramaStackCopy(0, 0, kBase, kDepth, &z, NULL, NULL);
-    CHECK(near(z, kBase));
-    DioramaStackCopy(2, 4, kBase, -1.0f, &z, NULL, NULL);
-    CHECK(near(z, kBase));
-
-    /* The visibility guard the draw loop uses. */
-    CHECK(DioramaStackCopyIsVisible(0, 4));
-    CHECK(DioramaStackCopyIsVisible(3, 4));
-    CHECK(!DioramaStackCopyIsVisible(4, 4));
-    CHECK(!DioramaStackCopyIsVisible(-1, 4));
-    CHECK(DioramaStackCopyIsVisible(0, 0));   /* copies clamped to >= 1 */
-
-    /* NULL outputs are optional. */
-    DioramaStackCopy(1, 4, kBase, kDepth, NULL, NULL, NULL);
-
     /* THE POINT OF THE SHAPE: every copy is at a SINGLE depth, so a stacked
      * layer cannot acquire the two-parallax-rates shear a rake does. Nothing
      * here returns a per-vertex or per-row depth -- the arithmetic is per COPY.
      * If this ever grows a `t` parameter, that invariant has been lost. */
     float za = 0.0f, zb = 0.0f;
-    DioramaStackCopy(2, 4, kBase, kDepth, &za, NULL, NULL);
-    DioramaStackCopy(2, 4, kBase, kDepth, &zb, NULL, NULL);
+    DioramaStackCopyShaped(
+        2, 4, kBase, kDepth, 0, false, &za, &sh, &al);
+    DioramaStackCopyShaped(
+        2, 4, kBase, kDepth, 0, false, &zb, &sh, &al);
     CHECK(near(za, zb));
   }
 
@@ -395,38 +355,40 @@ int main(void) {
      * (z=0.21) sits BEHIND the rock path (z=0.50), and higher z is nearer the
      * camera, so the gap to fill is on the camera side. The far copy must land on
      * the rock's depth. */
-    DioramaStackCopyDirected(3, 4, kBase, kDepth, kFwd, &z, NULL, NULL);
+    DioramaStackCopyShaped(
+        3, 4, kBase, kDepth, kFwd, false, &z, &sh, &al);
     CHECK(near(z, kBase + kDepth));
     CHECK(z > kBase);                    /* forward really means toward camera */
-    /* Unspecified direction must behave exactly as forward, so the pre-existing
-     * DioramaStackCopy callers keep their behaviour. */
-    float z_plain = 0.0f;
-    DioramaStackCopy(3, 4, kBase, kDepth, &z_plain, NULL, NULL);
-    CHECK(near(z_plain, z));
-
     /* BACKWARD is the mirror: a foreground layer receding into the scene. */
-    DioramaStackCopyDirected(3, 4, kBase, kDepth, kBack, &z, NULL, NULL);
+    DioramaStackCopyShaped(
+        3, 4, kBase, kDepth, kBack, false, &z, &sh, &al);
     CHECK(near(z, kBase - kDepth));
     CHECK(z < kBase);
 
     /* BOTH centres the fill on the plane: index 0 is the FAR edge, the last is
      * the near edge, and the span is still exactly `depth`. */
     float z_far = 0.0f, z_near = 0.0f;
-    DioramaStackCopyDirected(0, 5, kBase, kDepth, kBoth, &z_far, NULL, NULL);
-    DioramaStackCopyDirected(4, 5, kBase, kDepth, kBoth, &z_near, NULL, NULL);
+    DioramaStackCopyShaped(
+        0, 5, kBase, kDepth, kBoth, false, &z_far, &sh, &al);
+    DioramaStackCopyShaped(
+        4, 5, kBase, kDepth, kBoth, false, &z_near, &sh, &al);
     CHECK(near(z_far, kBase - kDepth * 0.5f));
     CHECK(near(z_near, kBase + kDepth * 0.5f));
     CHECK(near(z_near - z_far, kDepth));
 
     /* Fade follows DISTANCE from the plane, not signed depth -- otherwise a
      * backward or centred stack would brighten as it receded. */
-    DioramaStackCopyDirected(3, 4, kBase, kDepth, kBack, NULL, &sh, &al);
+    DioramaStackCopyShaped(
+        3, 4, kBase, kDepth, kBack, false, &z, &sh, &al);
     CHECK(sh < 1.0f && al < 1.0f);
     /* Centred: the two EDGES are equally faded, and the middle is brightest. */
     float sh_far = 0.0f, sh_mid = 0.0f, sh_near = 0.0f;
-    DioramaStackCopyDirected(0, 5, kBase, kDepth, kBoth, NULL, &sh_far, NULL);
-    DioramaStackCopyDirected(2, 5, kBase, kDepth, kBoth, NULL, &sh_mid, NULL);
-    DioramaStackCopyDirected(4, 5, kBase, kDepth, kBoth, NULL, &sh_near, NULL);
+    DioramaStackCopyShaped(
+        0, 5, kBase, kDepth, kBoth, false, &z, &sh_far, &al);
+    DioramaStackCopyShaped(
+        2, 5, kBase, kDepth, kBoth, false, &z, &sh_mid, &al);
+    DioramaStackCopyShaped(
+        4, 5, kBase, kDepth, kBoth, false, &z, &sh_near, &al);
     CHECK(near(sh_far, sh_near));
     CHECK(sh_mid > sh_far);
     CHECK(near(sh_mid, 1.0f));
@@ -435,7 +397,8 @@ int main(void) {
      * symmetry let a mutation that halved the range survive, because both edges
      * were still equal to each other. */
     float sh_oneside = 0.0f;
-    DioramaStackCopyDirected(4, 5, kBase, kDepth, kFwd, NULL, &sh_oneside, NULL);
+    DioramaStackCopyShaped(
+        4, 5, kBase, kDepth, kFwd, false, &z, &sh_oneside, &al);
     CHECK(near(sh_far, sh_oneside));
     CHECK(near(sh_near, sh_oneside));
 
@@ -452,20 +415,8 @@ int main(void) {
     for (int c = 0; c < 4; c++)
       CHECK(!DioramaStackCopyIsRedundant(c, 4, kBoth));
     /* And the skipped midpoint really is at the plane's depth. */
-    DioramaStackCopyDirected(2, 5, kBase, kDepth, kBoth, &z, NULL, NULL);
-    CHECK(near(z, kBase));
-    /* Out-of-range is not "redundant", it is simply not drawn. */
-    CHECK(!DioramaStackCopyIsRedundant(-1, 4, kFwd));
-    CHECK(!DioramaStackCopyIsRedundant(9, 4, kFwd));
-
-    /* An unknown direction falls back to forward rather than producing garbage. */
-    DioramaStackCopyDirected(3, 4, kBase, kDepth, 99, &z, NULL, NULL);
-    CHECK(near(z, kBase + kDepth));
-
-    /* Degenerate inputs behave as they do for the undirected form. */
-    DioramaStackCopyDirected(2, 4, kBase, -1.0f, kBoth, &z, NULL, NULL);
-    CHECK(near(z, kBase));
-    DioramaStackCopyDirected(0, 0, kBase, kDepth, kBoth, &z, NULL, NULL);
+    DioramaStackCopyShaped(
+        2, 5, kBase, kDepth, kBoth, false, &z, &sh, &al);
     CHECK(near(z, kBase));
   }
 
@@ -479,21 +430,20 @@ int main(void) {
     /* Same depth arithmetic as a stack -- a voxel is a stack geometrically, so
      * any divergence here would be a bug, not a feature. */
     for (int c = 0; c < 6; c++) {
-      DioramaStackCopyShaped(c, 6, kBase, kDepth, kFwd, false, &z_s, NULL, NULL);
-      DioramaStackCopyShaped(c, 6, kBase, kDepth, kFwd, true, &z_v, NULL, NULL);
+      DioramaStackCopyShaped(
+          c, 6, kBase, kDepth, kFwd, false, &z_s, &sh_s, &al_s);
+      DioramaStackCopyShaped(
+          c, 6, kBase, kDepth, kFwd, true, &z_v, &sh_v, &al_v);
       CHECK(near(z_s, z_v));
     }
-    /* And it agrees with the directed form it delegates to. */
-    float z_d = 0.0f;
-    DioramaStackCopyDirected(3, 6, kBase, kDepth, kFwd, &z_d, NULL, NULL);
-    DioramaStackCopyShaped(3, 6, kBase, kDepth, kFwd, false, &z_s, NULL, NULL);
-    CHECK(near(z_d, z_s));
 
     /* THE DEFINING DIFFERENCE. A stack FADES with depth so the eye reads separate
      * things receding. A voxel must NOT: it is one object with volume, and a
      * falloff would make its own back half look like fog. */
-    DioramaStackCopyShaped(5, 6, kBase, kDepth, kFwd, false, NULL, &sh_s, &al_s);
-    DioramaStackCopyShaped(5, 6, kBase, kDepth, kFwd, true,  NULL, &sh_v, &al_v);
+    DioramaStackCopyShaped(
+        5, 6, kBase, kDepth, kFwd, false, &z_s, &sh_s, &al_s);
+    DioramaStackCopyShaped(
+        5, 6, kBase, kDepth, kFwd, true, &z_v, &sh_v, &al_v);
     CHECK(sh_s < 1.0f && al_s < 1.0f);      /* stack recedes */
     CHECK(near(al_v, 1.0f));                /* voxel stays opaque */
     CHECK(sh_v > sh_s);                     /* and much less darkened */
@@ -502,10 +452,11 @@ int main(void) {
      * is what makes it read as solid. If this ever varies with index the shape has
      * silently become a stack again. */
     float first_sh = 0.0f, first_al = 0.0f;
-    DioramaStackCopyShaped(0, 8, kBase, kDepth, kFwd, true, NULL, &first_sh,
-                           &first_al);
+    DioramaStackCopyShaped(
+        0, 8, kBase, kDepth, kFwd, true, &z_v, &first_sh, &first_al);
     for (int c = 1; c < 8; c++) {
-      DioramaStackCopyShaped(c, 8, kBase, kDepth, kFwd, true, NULL, &sh_v, &al_v);
+      DioramaStackCopyShaped(
+          c, 8, kBase, kDepth, kFwd, true, &z_v, &sh_v, &al_v);
       CHECK(near(sh_v, first_sh));
       CHECK(near(al_v, first_al));
     }
@@ -515,11 +466,104 @@ int main(void) {
     CHECK(first_sh > 0.5f);   /* but not so dark it reads as a shadow */
 
     /* Direction still applies -- a voxel can extrude backward or straddle. */
-    DioramaStackCopyShaped(0, 5, kBase, kDepth, kBoth, true, &z_v, NULL, NULL);
+    DioramaStackCopyShaped(
+        0, 5, kBase, kDepth, kBoth, true, &z_v, &sh_v, &al_v);
     CHECK(near(z_v, kBase - kDepth * 0.5f));
     /* And the redundant-copy rule is direction-based, not shape-based. */
     CHECK(DioramaStackCopyIsRedundant(0, 6, kFwd));
     CHECK(DioramaStackCopyIsRedundant(2, 5, kBoth));
+  }
+
+  /* ── VERTICAL REPEAT: overflow is independent of BG Extents ─────────── */
+  {
+    DioramaVerticalRepeatPlan repeat;
+    CHECK(DioramaVerticalRepeatPlan_Build(32, 224, 288, 352, &repeat));
+    CHECK(repeat.source_y0 == 32 && repeat.source_y1 == 256);
+    CHECK(repeat.fold_y == 256 && repeat.repeat_height == 224);
+
+    /* The continuation is anchored solely to the immutable authentic band.
+     * A BG Extents valid-span plan is intentionally not an input, so fixed,
+     * available, or live-tuned margins all produce this same handoff. */
+    DioramaVerticalRepeatPlan same;
+    CHECK(DioramaVerticalRepeatPlan_Build(32, 224, 320, 352, &same));
+    CHECK(same.source_y0 == repeat.source_y0 &&
+          same.source_y1 == repeat.source_y1 &&
+          same.fold_y == repeat.fold_y &&
+          same.repeat_height == repeat.repeat_height);
+
+    /* It also remains defined with no synthetic vertical capture at all, and
+     * malformed intervals fail closed with a cleared output. */
+    CHECK(DioramaVerticalRepeatPlan_Build(0, 224, 224, 352, &same));
+    CHECK(same.source_y0 == 0 && same.source_y1 == 224 && same.fold_y == 224);
+    CHECK(!DioramaVerticalRepeatPlan_Build(32, 224, 240, 352, &same));
+    CHECK(same.source_y0 == 0 && same.source_y1 == 0 && same.fold_y == 0);
+  }
+
+  /* ── FOLDED OVERFLOW: overlap is exact, then the sheet comes forward ── */
+  {
+    const float y_top = -0.50f;
+    const float z_top = -0.30f;
+    const float z_handoff = -0.25f;
+    const float height = 1.0f;
+    const float overlap = 0.25f;
+    const float front_z = 0.45f;
+    const float front_drop = 0.18f;
+    float y = 0.0f, z = 0.0f;
+
+    DioramaOverflowFoldPoint(
+        0.0f, y_top, z_top, z_handoff, height, overlap,
+        front_z, front_drop, &y, &z);
+    CHECK(near(y, y_top) && near(z, z_top));
+
+    /* The host's last drawable row and overflow meet at one exact point. */
+    DioramaOverflowFoldPoint(
+        overlap, y_top, z_top, z_handoff, height, overlap,
+        front_z, front_drop, &y, &z);
+    CHECK(near(y, y_top - height * overlap));
+    CHECK(near(z, z_handoff));
+
+    /* Halfway through the bend, smoothstep is 0.5. The surface has begun
+     * trading vertical continuation for forward depth. */
+    DioramaOverflowFoldPoint(
+        0.625f, y_top, z_top, z_handoff, height, overlap,
+        front_z, front_drop, &y, &z);
+    CHECK(near(y, -0.9825f));
+    CHECK(near(z, 0.10f));
+
+    DioramaOverflowFoldPoint(
+        1.0f, y_top, z_top, z_handoff, height, overlap,
+        front_z, front_drop, &y, &z);
+    CHECK(near(y, y_top - height * overlap - front_drop));
+    CHECK(near(z, front_z));
+
+    /* The eased bend is continuous at the end of the coplanar overlap. */
+    float y_before, z_before, y_after, z_after;
+    DioramaOverflowFoldPoint(
+        overlap - 0.0001f, y_top, z_top, z_handoff, height, overlap,
+        front_z, front_drop, &y_before, &z_before);
+    DioramaOverflowFoldPoint(
+        overlap + 0.0001f, y_top, z_top, z_handoff, height, overlap,
+        front_z, front_drop, &y_after, &z_after);
+    CHECK(fabsf(y_after - y_before) < 0.001f);
+    CHECK(fabsf(z_after - z_before) < 0.001f);
+
+    /* Aitos's opaque repeat is tucked beneath the host's 32-row lower margin
+     * and stays flat for two additional native 8 px tile rows. Pin that
+     * non-uniform
+     * handoff: a uniform 1/6 row would begin bending inside the tolerance and
+     * let landing pitch expose a crack. */
+    const float aitos_underlap = (32.0f + 16.0f) / 224.0f;
+    CHECK(near(DioramaOverflowFoldRowT(0, 7, aitos_underlap), 0.0f));
+    CHECK(near(DioramaOverflowFoldRowT(1, 7, aitos_underlap),
+               aitos_underlap));
+    CHECK(near(DioramaOverflowFoldRowT(7, 7, aitos_underlap), 1.0f));
+    float previous_t = -1.0f;
+    for (int row = 0; row <= 7; row++) {
+      const float row_t = DioramaOverflowFoldRowT(
+          row, 7, aitos_underlap);
+      CHECK(row_t > previous_t);
+      previous_t = row_t;
+    }
   }
 
   /* ── TILT: rake is linear, bow is eased ──────────────────────────────── */

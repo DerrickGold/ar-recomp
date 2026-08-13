@@ -183,6 +183,12 @@ bool ActionBgPlan_Validate(const ActionBgPlan *plan);
 bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
                                   int authentic_y,
                                   ActionBgRowPolicy *out);
+/* Fast path for callers that already validated the layer once at a batch
+ * boundary. The layer and output must be non-null and the layer must continue
+ * to satisfy ActionBgLayerPlan_Validate. */
+void ActionBgLayerPlan_ResolveValidatedRow(const ActionBgLayerPlan *layer,
+                                           int authentic_y,
+                                           ActionBgRowPolicy *out);
 /* Resolve one authored band to un-clipped authentic-screen coordinates. World
  * bands may return rows outside [0,224); callers clip only at their concrete
  * presentation boundary. */

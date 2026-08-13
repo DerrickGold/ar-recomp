@@ -1088,34 +1088,16 @@ bool SimRenderMetadata_CommitAtlas(
       kSimMetadataIntegrity_AtlasOverflow |
       kSimMetadataIntegrity_AtlasRasterFailure;
   g_sim_metadata.integrity_flags |= integrity_flags & atlas_failures;
-  bool descriptors_valid = atlas_valid && atlas_width && atlas_height &&
+  /* SimRenderAtlas_Build owns packing, descriptor bounds and overlap. Commit
+   * only closes the matching build transaction and publishes its result; a
+   * second O(n^2) verification here used to re-prove the builder's output. */
+  bool dimensions_valid = atlas_valid && atlas_width && atlas_height &&
       atlas_used_width <= atlas_width && atlas_used_height <= atlas_height;
-  for (uint16_t i = 0; descriptors_valid && i < object_count; i++) {
-    const SimRenderObject *object = &objects[i];
-    /* A purged object carries no descriptor to validate. The builder drops
-     * one it cannot pack rather than discarding the atlas, so an absent
-     * descriptor is an expected outcome here, not a contract violation --
-     * the D1 census counts it through the object's own atlas_valid. */
-    if (!object->atlas_valid) continue;
-    descriptors_valid = object->atlas_w &&
-        object->atlas_h && object->atlas_x + object->atlas_w <= atlas_width &&
-        object->atlas_y + object->atlas_h <= atlas_height &&
-        object->local_x1 - object->local_x0 == object->atlas_w &&
-        object->local_y1 - object->local_y0 == object->atlas_h;
-    for (uint16_t j = 0; descriptors_valid && j < i; j++) {
-      const SimRenderObject *prior = &objects[j];
-      if (!prior->atlas_valid) continue;
-      bool overlap = object->atlas_x < prior->atlas_x + prior->atlas_w &&
-          object->atlas_x + object->atlas_w > prior->atlas_x &&
-          object->atlas_y < prior->atlas_y + prior->atlas_h &&
-          object->atlas_y + object->atlas_h > prior->atlas_y;
-      if (overlap) descriptors_valid = false;
-    }
-  }
-  if (!descriptors_valid && !(g_sim_metadata.integrity_flags & atlas_failures))
+  if (!dimensions_valid &&
+      !(g_sim_metadata.integrity_flags & atlas_failures))
     g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_AtlasRasterFailure;
 
-  g_sim_metadata.atlas_valid = descriptors_valid &&
+  g_sim_metadata.atlas_valid = dimensions_valid &&
       !(g_sim_metadata.integrity_flags & atlas_failures);
   g_sim_metadata.atlas_width = g_sim_metadata.atlas_valid ? atlas_width : 0;
   g_sim_metadata.atlas_height = g_sim_metadata.atlas_valid ? atlas_height : 0;

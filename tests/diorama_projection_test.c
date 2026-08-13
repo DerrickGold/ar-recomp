@@ -148,6 +148,38 @@ static void TestBg2PlaneShapeAndWindowAreIndependent(void) {
       &projection, 50.0f, 25.0f, &backdrop, NULL, NULL));
 }
 
+static void TestBg2FoldedOverflowProjection(void) {
+  DioramaProjection projection = Projection();
+  projection.matrix[8] = 1.0f;  /* make folded Z visible in screen X */
+  projection.bg2_plane.z_world = -0.30f;
+  projection.bg2_plane.overflow_valid = true;
+  projection.bg2_plane.overflow_fold_t = 0.50f;
+  projection.bg2_plane.overflow_height = 1.0f;
+  projection.bg2_plane.overflow_overlap_t = 0.25f;
+  projection.bg2_plane.overflow_handoff_z = -0.30f;
+  projection.bg2_plane.overflow_front_z = 0.45f;
+  projection.bg2_plane.overflow_front_drop = 0.18f;
+
+  /* capture y=56.25 maps to plane t=1.125, hence overflow t=0.625.
+   * This is the same halfway-bend point pinned by the pure geometry test:
+   * world y=-0.4825 and z=0.075 for this y_top=0 variant. */
+  SDL_FPoint folded;
+  CHECK(Diorama_ProjectCapturedBg2Point(
+      &projection, 50.0f, 56.25f, &folded, NULL, NULL));
+  CHECK(Near(folded.x, 53.75f));
+  CHECK(Near(folded.y, 74.125f));
+
+  /* Disabling the continuation returns to ordinary flat extrapolation. This
+   * guards the production seam used by the waterfall veil and mist, not only
+   * the mesh arithmetic. */
+  projection.bg2_plane.overflow_valid = false;
+  SDL_FPoint flat;
+  CHECK(Diorama_ProjectCapturedBg2Point(
+      &projection, 50.0f, 56.25f, &flat, NULL, NULL));
+  CHECK(!Near(folded.x, flat.x));
+  CHECK(!Near(folded.y, flat.y));
+}
+
 static void TestInvalidInputsFailClosed(void) {
   DioramaProjection projection = Projection();
   SDL_FPoint point = { 17.0f, 29.0f };
@@ -225,6 +257,7 @@ int main(void) {
   TestCapturedTextureOriginIsApplied();
   TestBg1PlaneShapeIsIndependent();
   TestBg2PlaneShapeAndWindowAreIndependent();
+  TestBg2FoldedOverflowProjection();
   TestInvalidInputsFailClosed();
   TestPlaneEligibilityMatchesDrawableInputs();
   TestObjEffectMaskDistinguishesEmptyFromFailedUpload();

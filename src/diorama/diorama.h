@@ -94,6 +94,16 @@ typedef struct DioramaPlaneProjection {
   float z_world;
   float rake;
   float bow;
+  /* Optional continuation attached below this plane. Projecting BG-local
+   * atmosphere through these exact fold parameters keeps it registered with
+   * curved auxiliary geometry instead of extrapolating a flat billboard. */
+  bool overflow_valid;
+  float overflow_fold_t;
+  float overflow_height;
+  float overflow_overlap_t;
+  float overflow_handoff_z;
+  float overflow_front_z;
+  float overflow_front_drop;
 } DioramaPlaneProjection;
 
 /* Resolved action-world projection for presentation-only overlays. The
@@ -183,10 +193,11 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
  * renderer viewport before returning.
  *
  * bg2_valid_spans (Fix B/BH6): exact capture-row and texture-column regions of
- * BG2's rendered content. Only the skybox uses them — it is screen-space, so
- * each row band can crop/stretch independently. They are deliberately NOT
- * applied to the per-layer loop: those quads are world-registered against BG1,
- * and narrowing their UV would desync them. */
+ * BG2's rendered content. The skybox uses every row span for screen-space
+ * crop/stretch; an attached BG2 continuation additionally uses their drawable
+ * row bound as its sampling handoff. They are deliberately NOT used to narrow
+ * ordinary layer UVs: those quads are world-registered against BG1, and doing
+ * so would desync them. */
 /* authentic_y0: texture row where authentic screen y=0 begins inside the
  * vertically expanded capture.
  *
