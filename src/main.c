@@ -1146,6 +1146,8 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
    * data. Failure is not fatal: consumers retain the authentic presentation. */
   if (SimWorldMap_Init(app->rom_data, app->rom_size))
     SimWorldMapBuild_Init(app->rom_data, app->rom_size);
+  if (!Diorama_InitRomBackdrops(app->rom_data, app->rom_size))
+    fprintf(stderr, "[diorama] named ROM backdrops unavailable\n");
   /* Per-room diorama layer overrides. Absent file is the normal case and leaves
    * every room drawing as built. */
   Diorama_LoadLayerManifest();

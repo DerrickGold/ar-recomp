@@ -361,6 +361,13 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
       if (p->set_alpha && next == p->alpha) return false;
       p->alpha = (uint8_t)next; p->set_alpha = true; return true;
     }
+    case kDioramaEditorParam_Source: {
+      int base = p->set_source ? p->source : kDioramaLayerSource_Captured;
+      int next = DioramaLayerOrder_NextSource(base, direction);
+      p->source = (uint8_t)next;
+      p->set_source = true;
+      return true;
+    }
     case kDioramaEditorParam_Order: {
       /* Same bound as the parser: slots run 0 .. planes*4-1, which leaves room
        * to interleave planes between the built-in slots. */
@@ -404,6 +411,10 @@ void DioramaLayerEditor_ClearParam(DioramaPlaneOverride *p,
     case kDioramaEditorParam_Alpha:
       p->set_alpha = false; p->alpha = 0;
       break;
+    case kDioramaEditorParam_Source:
+      p->set_source = false;
+      p->source = kDioramaLayerSource_Captured;
+      break;
     case kDioramaEditorParam_Order:
       p->set_order = false; p->order = 0;
       break;
@@ -440,8 +451,9 @@ const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
                                        DioramaEditorParam param,
                                        DioramaDepthStrategy strategy) {
   if (kind == kDioramaEditorRow_ResetRoom)
-    return "Clear every override in this room, restoring the built-in look. "
-           "The room stops being written to diorama-layers.ini entirely.";
+    return "Clear every override in this room or camera-local section, "
+           "restoring its inherited built-in look. The scope stops being "
+           "written to diorama-layers.ini entirely.";
   if (kind == kDioramaEditorRow_Header)
     return "The editor authors the room you are standing in. Walk into a stage "
            "on this level to edit it.";
@@ -506,6 +518,10 @@ const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
     case kDioramaEditorParam_Alpha:
       return "This plane's opacity. Lets a room compensate for a translucency "
              "the capture did not reproduce.";
+    case kDioramaEditorParam_Source:
+      return "Backdrop image source. Captured uses the current frame; ROM "
+             "GG/MM BG1 or BG2 reconstructs that action room directly from "
+             "the cartridge, without depending on room visit order.";
     case kDioramaEditorParam_Order:
       return "Where the plane sits in the paint sequence, back to front. "
              "Separate from depth on purpose, so reordering a plane does not "
@@ -559,10 +575,11 @@ static void FormatPlaneValue(char *dst, size_t size,
  * one, because the player will step it and conclude the editor is broken when
  * nothing changes. */
 static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
-                          int plane, const DioramaPlaneOverride *p) {
+                          int plane, const DioramaPlaneOverride *p,
+                          uint8_t effective_source) {
   const DioramaDepthStrategy strategy = DioramaLayerEditor_StrategyOfPlane(p);
 
-  struct { DioramaEditorParam param; const char *label; } rows[8];
+  struct { DioramaEditorParam param; const char *label; } rows[9];
   int n = 0;
   if (strategy != kDioramaDepth_Flat)
     rows[n].param = kDioramaEditorParam_Depth, rows[n++].label = "depth";
@@ -578,12 +595,15 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
     rows[n].param = kDioramaEditorParam_Density, rows[n++].label = "density";
   rows[n].param = kDioramaEditorParam_Z, rows[n++].label = "z depth";
   rows[n].param = kDioramaEditorParam_Alpha, rows[n++].label = "alpha";
+  if (plane == kDioramaPlane_Backdrop)
+    rows[n].param = kDioramaEditorParam_Source, rows[n++].label = "source";
   rows[n].param = kDioramaEditorParam_Order, rows[n++].label = "paint order";
 
   for (int i = 0; i < n; i++) {
     DioramaEditorRow *row = PushRow(out, capacity, count);
     if (!row) return;
-    row->kind = rows[i].param == kDioramaEditorParam_Direction
+    row->kind = (rows[i].param == kDioramaEditorParam_Direction ||
+                 rows[i].param == kDioramaEditorParam_Source)
         ? kDioramaEditorRow_ParamEnum : kDioramaEditorRow_Param;
     row->plane = plane;
     row->param = rows[i].param;
@@ -637,6 +657,12 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
                                    (unsigned)p->alpha);
         else SetText(row->value, sizeof(row->value), "--");
         break;
+      case kDioramaEditorParam_Source:
+        row->effective_source = effective_source;
+        DioramaLayerEditor_Upper(
+            row->value, sizeof(row->value),
+            DioramaLayerOrder_SourceToken(effective_source));
+        break;
       case kDioramaEditorParam_Order:
         if (p->set_order) snprintf(row->value, sizeof(row->value), "%d",
                                    p->order);
@@ -671,14 +697,27 @@ int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
     return count;
   }
 
-  const DioramaRoomOverride *room =
-      DioramaLayerOrder_Find(table, group, context->map_number);
+  const DioramaRoomOverride *room = DioramaLayerOrder_FindSection(
+      table, group, context->map_number, context->section);
+  uint8_t effective_source = kDioramaLayerSource_Captured;
+  const DioramaRoomOverride *base = DioramaLayerOrder_Find(
+      table, group, context->map_number);
+  if (base && base->planes[kDioramaPlane_Backdrop].set_source)
+    effective_source = base->planes[kDioramaPlane_Backdrop].source;
+  if (room && room->planes[kDioramaPlane_Backdrop].set_source)
+    effective_source = room->planes[kDioramaPlane_Backdrop].source;
 
   {
     DioramaEditorRow *row = PushRow(out, capacity, &count);
     if (!row) return count;
     row->kind = kDioramaEditorRow_Header;
-    snprintf(row->label, sizeof(row->label), "Room %02X", context->map_number);
+    const char *section = DioramaLayerOrder_SectionToken(context->section);
+    if (section)
+      snprintf(row->label, sizeof(row->label), "Room %02X %s",
+               context->map_number, section);
+    else
+      snprintf(row->label, sizeof(row->label), "Room %02X",
+               context->map_number);
     SetText(row->value, sizeof(row->value), "HERE");
   }
 
@@ -708,15 +747,19 @@ int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
     FormatPlaneValue(row->value, sizeof(row->value), p);
 
     if (plane == context->selected_plane)
-      PushParamRows(out, capacity, &count, plane, p);
+      PushParamRows(out, capacity, &count, plane, p, effective_source);
   }
 
   DioramaEditorRow *reset = PushRow(out, capacity, &count);
   if (reset) {
     reset->kind = kDioramaEditorRow_ResetRoom;
     reset->selectable = true;
-    snprintf(reset->label, sizeof(reset->label), "Reset room %02X",
-             context->map_number);
+    const char *section = DioramaLayerOrder_SectionToken(context->section);
+    if (section)
+      snprintf(reset->label, sizeof(reset->label), "Reset %s", section);
+    else
+      snprintf(reset->label, sizeof(reset->label), "Reset room %02X",
+               context->map_number);
     SetText(reset->value, sizeof(reset->value), "RESET");
   }
   return count;

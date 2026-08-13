@@ -4,6 +4,7 @@
 
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "diorama_layer_order.h"
 #include "host/host_display.h"
 #include "host/host_input.h"
 #include "settings.h"
@@ -31,10 +32,29 @@ bool Diorama_IsActiveThisFrame(void) {
  * editor reports a room exactly when the renderer would apply its overrides --
  * with the diorama off there is nothing on screen to compare, and offering to
  * author a room whose settings would not be used is worse than saying so. */
-bool Diorama_LiveRoom(uint8_t *out_group, uint8_t *out_map) {
+static uint8_t s_layer_section_group;
+static uint8_t s_layer_section_map;
+static uint8_t s_layer_section;
+
+void Diorama_PublishLiveLayerSection(uint8_t map_group, uint8_t map_number,
+                                     uint8_t section) {
+  s_layer_section_group = map_group;
+  s_layer_section_map = map_number;
+  s_layer_section = section;
+}
+
+bool Diorama_LiveRoom(uint8_t *out_group, uint8_t *out_map,
+                      uint8_t *out_section) {
   if (!Diorama_IsActiveThisFrame()) return false;
-  if (out_group) *out_group = g_ram[kActRaiserWram_MapGroup];
-  if (out_map) *out_map = g_ram[kActRaiserWram_CurrentMap];
+  const uint8_t group = g_ram[kActRaiserWram_MapGroup];
+  const uint8_t map = g_ram[kActRaiserWram_CurrentMap];
+  if (out_group) *out_group = group;
+  if (out_map) *out_map = map;
+  if (out_section) {
+    *out_section = s_layer_section_group == group &&
+                       s_layer_section_map == map
+        ? s_layer_section : kDioramaLayerSection_Room;
+  }
   return true;
 }
 

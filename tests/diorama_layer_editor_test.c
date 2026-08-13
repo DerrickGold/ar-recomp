@@ -660,6 +660,64 @@ static void TestUnauthoredKnobsShowDash(void) {
   CHECK(z && !strcmp(z->value, "--"));
 }
 
+static void TestBackdropSourceIsScopedAndEditable(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *waterfall = DioramaLayerOrder_FindOrAddSection(
+      &table, kActRaiserMapGroup_Aitos, 0x02,
+      kDioramaLayerSection_AitosWaterfall);
+  CHECK(waterfall != NULL);
+  if (!waterfall) return;
+  waterfall->planes[kDioramaPlane_Backdrop].set_source = true;
+  waterfall->planes[kDioramaPlane_Backdrop].source =
+      kDioramaLayerSource_AitosSky;
+
+  DioramaEditorContext ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  ctx.room_live = true;
+  ctx.map_group = kActRaiserMapGroup_Aitos;
+  ctx.map_number = 0x02;
+  ctx.section = kDioramaLayerSection_AitosWaterfall;
+  ctx.selected_plane = kDioramaPlane_Backdrop;
+  DioramaEditorRow rows[kDioramaEditorRowMax];
+  const int level =
+      DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Aitos);
+  int n = DioramaLayerEditor_BuildRows(
+      &table, &ctx, level, rows, kDioramaEditorRowMax);
+  CHECK(strstr(rows[0].label, "waterfall") != NULL);
+  const DioramaEditorRow *source = FindRow(
+      rows, n, kDioramaPlane_Backdrop, kDioramaEditorParam_Source);
+  CHECK(source != NULL);
+  CHECK(source && source->kind == kDioramaEditorRow_ParamEnum);
+  CHECK(source && !strcmp(source->value, "ROM-04-01-BG2"));
+  /* Other planes cannot offer a source row the manifest would reject. */
+  ctx.selected_plane = kPpuOverlaySource_Bg1;
+  n = DioramaLayerEditor_BuildRows(
+      &table, &ctx, level, rows, kDioramaEditorRowMax);
+  CHECK(!FindRow(rows, n, kPpuOverlaySource_Bg1,
+                 kDioramaEditorParam_Source));
+
+  /* A scoped record with no local source displays the renderer's inherited
+   * base-room source, not a misleading raw zero/Captured value. */
+  DioramaRoomOverride *base = DioramaLayerOrder_FindOrAdd(
+      &table, kActRaiserMapGroup_Aitos, 0x02);
+  CHECK(base != NULL);
+  if (base) {
+    waterfall->planes[kDioramaPlane_Backdrop].set_source = false;
+    base->planes[kDioramaPlane_Backdrop].set_source = true;
+    base->planes[kDioramaPlane_Backdrop].source =
+        DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1);
+    ctx.selected_plane = kDioramaPlane_Backdrop;
+    n = DioramaLayerEditor_BuildRows(
+        &table, &ctx, level, rows, kDioramaEditorRowMax);
+    source = FindRow(rows, n, kDioramaPlane_Backdrop,
+                     kDioramaEditorParam_Source);
+    CHECK(source && !strcmp(source->value, "ROM-06-08-BG1"));
+    CHECK(source && source->effective_source ==
+                        DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1));
+  }
+}
+
 /* The row array must never overflow, whatever the shape. The header promises a
  * caller can stack-allocate kDioramaEditorRowMax and be safe. */
 static void TestRowsFitTheDocumentedMaximum(void) {
@@ -967,6 +1025,7 @@ int main(void) {
   TestLiveTabListsEveryPlane();
   TestParamRowsFollowTheActiveShape();
   TestUnauthoredKnobsShowDash();
+  TestBackdropSourceIsScopedAndEditable();
   TestRowsFitTheDocumentedMaximum();
   TestLevelTabsAreTheActionGroups();
 

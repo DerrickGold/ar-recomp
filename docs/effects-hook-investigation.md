@@ -137,7 +137,11 @@ references: [SEAMS.md](SEAMS.md), [rendering-engine.md](rendering-engine.md), an
     in maps `$04/$02-$03` use an exact three-row BG1 structure:
     `$36/$5E*/$81`, `$4E/$F4*/$4F`, `$F6/$FC*/$FE`. Camera-local presence of that structure is
     also the live discriminator between map `$04/$02`'s waterfall section and its preceding cave,
-    whose decoded BG2 map is otherwise the same.
+    whose decoded BG2 map is otherwise the same. That discriminator is now published immutably to
+    the Diorama layer resolver as section `waterfall`: it inherits the base room tuning, then selects
+    `rom-04-01-bg2`, the generic ROM-backed source for room `$04/$01` BG2. The same catalogue can
+    select BG1 or BG2 from any valid action map; it is not a previous-frame/previous-room cache, and
+    a failed decode falls back to the captured backdrop.
 16. **Marahna's boss attack is a third electrical family with four presentation stages.** Only
     map `$05/$08` admits it. The live boss parent retains source `$E483`, animation `$7E:5000`,
     48/40/48/8 extents, and no spawner backlink. Handler `$8661` owns its pre-impact stages: exact
@@ -271,9 +275,10 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
 - The separately identified `$CEEC/$CF16` rocks receive a compact molten halo and close tumbling
   sparks rather than a directional flame wake. Exact waterfall-platform structures receive cool
   lip spray plus downward drips. When at least one is camera-local, one bounded BG2 record adds a
-  low-alpha water veil and 48 slow vertical flow streaks over the source waterfall. A paired
-  after-BG2 Diorama record adds three mist banks and sixteen foam motes at the bottom seam, where the
-  intentionally finite BG2 extension would otherwise expose black. Map-derived accents have an
+  cool water veil and 96 slow vertical flow streaks over the source waterfall. A paired
+  after-BG2 Diorama record adds two tiers of three mist banks and thirty-two foam motes at the end of the safe
+  24px BG2 extension, where the intentionally finite backdrop would otherwise expose black.
+  Map-derived accents have an
   independent 16-record frame from the 16 actor records: the measured maximum camera window
   publishes 14 splash structures plus one veil and one mist while still admitting the complete
   actor budget. Either list fails closed independently. These use the same portable untextured SDL

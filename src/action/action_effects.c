@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "action_bg_plan.h"
 #include "action_bg_world.h"
 
 /* ── Spell rule table ──────────────────────────────────────────────────────
@@ -1776,21 +1777,24 @@ static void CaptureAitosWater(ActionSceneEffectFrame *dst,
   if (!SceneDecorationAppend(dst, &waterfall)) return;
 
   /* `$04/$02` intentionally keeps BG2's vertical extension short: allowing
-   * more raw-wrap rows repeats water into non-water areas. A separate
-   * after-BG2 Diorama record puts foam and mist over the uncovered bottom
-   * band. It uses BG2's camera/shape but not its winner pixels; later BG1 and
-   * OBJ planes remain in front. */
+   * more raw-wrap rows repeats water into non-water areas. Anchor the
+   * after-BG2 foam/mist at the END of those safe rows, not at authentic row
+   * 224. The latter was technically submitted but faded out before reaching
+   * the black gap. It uses BG2's camera/shape but not its winner pixels; later
+   * BG1 and OBJ planes remain in front. */
   ActionEffectInstance mist = waterfall;
   mist.generation = 0x575D0000u ^ map_identity;
   mist.pulse_generation = 0x775D0000u ^ map_identity;
-  mist.world_y = (int16_t)(bg2_camera_y + kActRaiserAuthenticHeight - 8);
-  mist.top_extent = 32;
-  mist.bottom_extent = 24;
+  mist.world_y = (int16_t)(
+      bg2_camera_y + kActRaiserAuthenticHeight +
+      kActionBgAitosWaterfallBottomExtensionPixels);
+  mist.top_extent = 64;
+  mist.bottom_extent = 80;
   mist.kind = kActionEffect_AitosWaterfallMist;
   mist.phase = kActionEffectPhase_AitosWaterfallMist;
   mist.render_layer = kActionEffectRenderLayer_Atmosphere;
   mist.geometry.data.rect =
-      (ActionEffectLocalRect){-256.0f, -32.0f, 256.0f, 24.0f};
+      (ActionEffectLocalRect){-256.0f, -64.0f, 256.0f, 80.0f};
   SceneDecorationAppend(dst, &mist);
 }
 

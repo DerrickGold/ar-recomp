@@ -158,6 +158,12 @@ typedef struct FrameSlot {
    * compositor draws this subset with saturated additive blending after the
    * ordinary main-screen world planes. */
   uint32_t diorama_plane_additive_mask;
+  /* Immutable key for scoped diorama layer overrides. The section is derived
+   * from positively identified captured scene art, never from present-time
+   * live WRAM. */
+  uint8_t diorama_map_group;
+  uint8_t diorama_map_number;
+  uint8_t diorama_layer_section;
   /* True only when the flat-mode PPU capture produced a current BG2-winner
    * mask. Presentation must not reuse stale mask texture content. */
   bool action_bg2_mask_valid;

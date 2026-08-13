@@ -235,7 +235,7 @@ static void TestResetSlotIsRecycled(void) {
 }
 
 static void TestSectionParsing(void) {
-  uint8_t group = 0, map = 0;
+  uint8_t group = 0, map = 0, section = 0xFF;
   CHECK(DioramaLayerOrder_ParseSection("layers:01:02", &group, &map));
   CHECK(group == 0x01 && map == 0x02);
   /* Hex, because these are the WRAM bytes as everything else prints them. */
@@ -249,6 +249,97 @@ static void TestSectionParsing(void) {
   CHECK(!DioramaLayerOrder_ParseSection("layers:01:02:03", &group, &map));
   CHECK(!DioramaLayerOrder_ParseSection("layers::", &group, &map));
   CHECK(!DioramaLayerOrder_ParseSection("", &group, &map));
+
+  CHECK(DioramaLayerOrder_ParseScopedSection(
+      "layers:04:02:waterfall", &group, &map, &section));
+  CHECK(group == 0x04 && map == 0x02);
+  CHECK(section == kDioramaLayerSection_AitosWaterfall);
+  CHECK(!DioramaLayerOrder_ParseScopedSection(
+      "layers:04:02:unknown", &group, &map, &section));
+  /* The legacy parser intentionally addresses only the base room. */
+  CHECK(!DioramaLayerOrder_ParseSection(
+      "layers:04:02:waterfall", &group, &map));
+}
+
+static void TestScopedSourceInheritsBaseRoom(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *base =
+      DioramaLayerOrder_FindOrAdd(&table, 0x04, 0x02);
+  DioramaRoomOverride *waterfall = DioramaLayerOrder_FindOrAddSection(
+      &table, 0x04, 0x02, kDioramaLayerSection_AitosWaterfall);
+  CHECK(base != NULL && waterfall != NULL);
+  if (!base || !waterfall) return;
+
+  base->planes[kPpuOverlaySource_Bg1].set_z = true;
+  base->planes[kPpuOverlaySource_Bg1].z = 0.63f;
+  waterfall->planes[kDioramaPlane_Backdrop].set_source = true;
+  waterfall->planes[kDioramaPlane_Backdrop].source =
+      kDioramaLayerSource_AitosSky;
+
+  DioramaResolvedLayer out[16];
+  int n = DioramaLayerOrder_ResolveSection(
+      &table, 0x04, 0x02, kDioramaLayerSection_AitosWaterfall,
+      kDefaults, kDefaultCount, out, 16);
+  bool saw_bg1 = false, saw_backdrop = false;
+  for (int i = 0; i < n; i++) {
+    if (out[i].plane == kPpuOverlaySource_Bg1) {
+      saw_bg1 = true;
+      CHECK(out[i].z == 0.63f);       /* inherited from base room */
+    }
+    if (out[i].plane == kDioramaPlane_Backdrop) {
+      saw_backdrop = true;
+      CHECK(out[i].source == kDioramaLayerSource_AitosSky);
+    }
+  }
+  CHECK(saw_bg1 && saw_backdrop);
+
+  /* Outside the positively identified section, only the base applies. */
+  n = DioramaLayerOrder_Resolve(&table, 0x04, 0x02, kDefaults,
+                                kDefaultCount, out, 16);
+  for (int i = 0; i < n; i++)
+    if (out[i].plane == kDioramaPlane_Backdrop)
+      CHECK(out[i].source == kDioramaLayerSource_Captured);
+
+  char text[256];
+  CHECK(DioramaLayerOrder_FormatRoom(waterfall, text, sizeof(text)) > 0);
+  CHECK(strstr(text, "[layers:04:02:waterfall]") != NULL);
+  CHECK(strstr(text, "backdrop = source:rom-04-01-bg2") != NULL);
+}
+
+static void TestRomSourceCatalogue(void) {
+  CHECK(DioramaLayerOrder_ActionBgSource(0x04, 0x01, 2) ==
+        kDioramaLayerSource_AitosSky);
+  CHECK(DioramaLayerOrder_SourceFromToken("aitos-sky") ==
+        kDioramaLayerSource_AitosSky);  /* compatibility alias */
+  CHECK(DioramaLayerOrder_SourceFromToken("rom-04-01-bg2") ==
+        kDioramaLayerSource_AitosSky);
+  CHECK(!strcmp(DioramaLayerOrder_SourceToken(
+                    kDioramaLayerSource_AitosSky),
+                "rom-04-01-bg2"));
+
+  uint8_t group = 0, map = 0, bg = 0;
+  const int northwall = DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1);
+  CHECK(DioramaLayerOrder_DecodeActionBgSource(
+      northwall, &group, &map, &bg));
+  CHECK(group == 0x06 && map == 0x08 && bg == 1);
+  CHECK(DioramaLayerOrder_ActionBgSource(0x01, 0x05, 1) < 0);
+  CHECK(DioramaLayerOrder_ActionBgSource(0x04, 0x01, 3) < 0);
+  CHECK(DioramaLayerOrder_SourceFromToken("rom-01-05-bg1") < 0);
+
+  int source = kDioramaLayerSource_Captured;
+  int valid = 1;
+  for (;;) {
+    source = DioramaLayerOrder_NextSource(source, +1);
+    if (source == kDioramaLayerSource_Captured) break;
+    CHECK(DioramaLayerOrder_SourceIsValid(source));
+    valid++;
+    CHECK(valid < kDioramaLayerSource_Count);
+  }
+  CHECK(valid == (4 + 8 + 6 + 7 + 8 + 8 + 8) * 2 + 1);
+  CHECK(DioramaLayerOrder_NextSource(
+            kDioramaLayerSource_Captured, -1) ==
+        DioramaLayerOrder_ActionBgSource(0x07, 0x08, 2));
 }
 
 static void TestLineParsing(void) {
@@ -277,6 +368,18 @@ static void TestLineParsing(void) {
   CHECK(room.planes[kDioramaPlane_Bg2Hi].z == 0.21f);
   CHECK(room.planes[kDioramaPlane_Bg2Hi].alpha == 64);
 
+  memset(&room, 0, sizeof(room));
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "backdrop = source:aitos-sky", &error));
+  CHECK(room.planes[kDioramaPlane_Backdrop].set_source);
+  CHECK(room.planes[kDioramaPlane_Backdrop].source ==
+        kDioramaLayerSource_AitosSky);
+  memset(&room, 0, sizeof(room));
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "backdrop = source:rom-06-08-bg1", &error));
+  CHECK(room.planes[kDioramaPlane_Backdrop].source ==
+        DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1));
+
   /* Rejections, each with a reason for the log. */
   const char *cases[] = {
     "nosuchplane = z:0.5",
@@ -287,6 +390,10 @@ static void TestLineParsing(void) {
     "bg1 = z:abc",
     "bg1 = alpha:999",
     "bg1 = alpha:-1",
+    "bg1 = source:aitos-sky",
+    "backdrop = source:unknown",
+    "backdrop = source:rom-01-05-bg1", /* Fillmore has no map 5 */
+    "backdrop = source:rom-04-01-bg3",
     "bg1 = colour:red",
     "= z:0.5",              /* no plane */
   };
@@ -1388,6 +1495,8 @@ int main(void) {
   TestResetRoomRestoresDefaults();
   TestResetSlotIsRecycled();
   TestSectionParsing();
+  TestScopedSourceInheritsBaseRoom();
+  TestRomSourceCatalogue();
   TestLineParsing();
   TestFormatRoundTrips();
   TestRakeAndThicknessResolve();

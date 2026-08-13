@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "actraiser_game.h"
+
 enum {
   kAuthenticHeight = 224,
   /* The native vertical camera clamp reserves row 224 in addition to the
@@ -206,19 +208,9 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .edge = kActionBgEdge_RawWrap,
     .motion = kActionBgMotion_FillRelative,
     .top = 24,
-    .bottom = 24,
+    .bottom = kActionBgAitosWaterfallBottomExtensionPixels,
     .apply_vertical_extent = true,
   },
-};
-
-static const uint8_t kLastMapByGroup[kMapGroupLast + 1] = {
-  [1] = 4,
-  [2] = 8,
-  [3] = 6,
-  [4] = 7,
-  [5] = 8,
-  [6] = 8,
-  [7] = 8,
 };
 
 _Static_assert(kActionBgPlanLayerCount == 2,
@@ -227,8 +219,7 @@ _Static_assert(kActionBgMaxBands >= 4,
                "live authoring promises four independent row bands");
 
 static bool ValidMap(uint8_t group, uint8_t map) {
-  return group >= kMapGroupFirst && group <= kMapGroupLast && map > 0 &&
-      map <= kLastMapByGroup[group];
+  return ActRaiser_IsActionMap(group, map);
 }
 
 static bool ValidLayer(const ActionBgLayerState *layer) {

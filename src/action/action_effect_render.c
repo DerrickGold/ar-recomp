@@ -1535,12 +1535,12 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       break;
     case kActionEffect_AitosWaterfall:
       count = kActionSceneEffectWaterfallParticleCount;
-      hot = (SDL_FColor){0.76f, 0.96f, 1.00f, 0.30f};
+      hot = (SDL_FColor){0.82f, 0.98f, 1.00f, 0.46f};
       cool = (SDL_FColor){0.08f, 0.42f, 0.82f, 0.00f};
       break;
     case kActionEffect_AitosWaterfallMist:
       count = kActionSceneEffectWaterfallMistParticleCount;
-      hot = (SDL_FColor){0.94f, 1.00f, 1.00f, 0.34f};
+      hot = (SDL_FColor){0.96f, 1.00f, 1.00f, 0.54f};
       cool = (SDL_FColor){0.34f, 0.70f, 0.92f, 0.00f};
       break;
     case kActionEffect_SwordBeam:
@@ -1660,7 +1660,7 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       /* Stable lanes, staggered by identity, provide a slow translucent flow
        * over the fast two-frame source cycle. The varying alpha and length
        * break horizontal bands without blurring away the pixel art. */
-      const unsigned columns = 12u;
+      const unsigned columns = 16u;
       const unsigned column = i % columns;
       const unsigned row = i / columns;
       const float lane = ((float)column + 0.5f) / (float)columns;
@@ -1675,8 +1675,8 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       y = rect->y0 - 24.0f + y_span * wrapped;
       previous_x = x + (HashUnit(seed ^ 0x37u) - 0.5f) * 1.5f;
       previous_y = y - (8.0f + 7.0f * HashUnit(seed ^ 0xB5u));
-      width = 0.28f + 0.28f * HashUnit(seed ^ 0x71u);
-      reach = 3.5f + 6.0f * HashUnit(seed ^ 0xA7u);
+      width = 0.45f + 0.42f * HashUnit(seed ^ 0x71u);
+      reach = 6.0f + 10.0f * HashUnit(seed ^ 0xA7u);
     } else if (effect->kind == kActionEffect_AitosWaterfallMist) {
       /* Foam boils along the lower waterfall edge while lighter droplets
        * drift upward into the fog banks. Horizontal phase offsets avoid a
@@ -1685,15 +1685,15 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       const float lane = ((float)i + HashUnit(seed ^ 0x53u)) /
           (float)count;
       const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 18.0f;
-      const float base_y = 5.0f +
-          (HashUnit(seed ^ 0xB5u) - 0.5f) * 9.0f;
+      const float base_y = 1.0f +
+          (HashUnit(seed ^ 0xB5u) - 0.5f) * 12.0f;
       x = rect->x0 + span * lane + drift * t;
       y = base_y - 5.0f * t - 17.0f * t * t;
       previous_x = rect->x0 + span * lane + drift * previous_t;
       previous_y = base_y - 5.0f * previous_t -
           17.0f * previous_t * previous_t;
-      width = 0.48f + 0.52f * (1.0f - t);
-      reach = 1.8f + 3.2f * t;
+      width = 0.62f + 0.68f * (1.0f - t);
+      reach = 2.4f + 4.4f * t;
     } else if (effect->kind == kActionEffect_WallTorch) {
       const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 7.0f;
       const float birth = (HashUnit(seed ^ 0x71u) - 0.5f) * 5.0f;
@@ -2048,15 +2048,18 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       break;
     }
     case kActionEffect_AitosWaterfall:
-      /* Two extremely broad, low-alpha meshes act as a soft water veil. The
+      /* Two broad, low-alpha meshes act as a soft water veil. The
        * underlying tiles remain the image; this only lowers the perceived
-       * contrast of their short animation cycle and supplies cool depth. */
+       * contrast of their short animation cycle and supplies cool depth. The
+       * first live waterfall acceptance showed the original 0.01-alpha veil
+       * disappeared under CRT scaling, so these remain restrained but no
+       * longer sub-perceptual. */
       spill = (ActionEffectGlowStyle){
         .radius_x = 330.0f, .radius_y = 218.0f,
         .ring_scale = {0.12f, 0.88f, 1.0f},
-        .centre = {0.30f, 0.70f, 1.00f, 0.012f},
-        .ring = {{0.22f, 0.62f, 1.00f, 0.010f},
-                 {0.10f, 0.42f, 0.78f, 0.005f},
+        .centre = {0.30f, 0.70f, 1.00f, 0.042f},
+        .ring = {{0.22f, 0.62f, 1.00f, 0.034f},
+                 {0.10f, 0.42f, 0.78f, 0.014f},
                  {0.03f, 0.14f, 0.30f, 0.00f}},
         .flare = 0.008f, .axis_x = 1.0f, .lift_y = 1.0f,
         .seed = (unsigned)effect->generation,
@@ -2064,31 +2067,57 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       body = (ActionEffectGlowStyle){
         .radius_x = 282.0f, .radius_y = 170.0f,
         .ring_scale = {0.12f, 0.92f, 1.0f},
-        .centre = {0.56f, 0.88f, 1.00f, 0.016f},
-        .ring = {{0.38f, 0.78f, 1.00f, 0.013f},
-                 {0.16f, 0.52f, 0.92f, 0.006f},
+        .centre = {0.56f, 0.88f, 1.00f, 0.052f},
+        .ring = {{0.38f, 0.78f, 1.00f, 0.040f},
+                 {0.16f, 0.52f, 0.92f, 0.017f},
                  {0.04f, 0.18f, 0.42f, 0.00f}},
         .flare = 0.006f, .axis_x = 1.0f, .lift_y = 1.0f,
         .seed = (unsigned)effect->pulse_generation,
       };
       break;
     case kActionEffect_AitosWaterfallMist: {
-      /* Three overlapping, low-alpha banks feather the finite waterfall into
-       * the uncovered bottom band. Their transparent outer rings keep this a
-       * soft atmosphere rather than an opaque replacement backdrop. */
-      static const float kBankX[3] = {-150.0f, 0.0f, 150.0f};
-      static const float kBankY[3] = {4.0f, -2.0f, 5.0f};
-      static const float kBankRadiusX[3] = {205.0f, 232.0f, 205.0f};
-      static const float kBankRadiusY[3] = {30.0f, 37.0f, 30.0f};
+      /* Two overlapping tiers feather the finite waterfall into the uncovered
+       * bottom band. The upper row is a denser foam shelf at the exact safe
+       * BG2 edge; the taller lower row gives that shelf enough body to read as
+       * mist instead of a thin blue line. Transparent outer rings keep both
+       * rows atmospheric rather than turning the gap into an opaque fill. */
+      static const float kBankX[6] = {
+        -168.0f, 0.0f, 168.0f,
+        -160.0f, 0.0f, 160.0f,
+      };
+      static const float kBankY[6] = {
+        -10.0f, -13.0f, -9.0f,
+        14.0f, 10.0f, 15.0f,
+      };
+      static const float kBankRadiusX[6] = {
+        214.0f, 248.0f, 214.0f,
+        226.0f, 260.0f, 226.0f,
+      };
+      static const float kBankRadiusY[6] = {
+        44.0f, 52.0f, 44.0f,
+        62.0f, 72.0f, 62.0f,
+      };
+      static const float kBankCentreAlpha[6] = {
+        0.34f, 0.42f, 0.34f,
+        0.20f, 0.25f, 0.20f,
+      };
+      static const float kBankInnerAlpha[6] = {
+        0.25f, 0.31f, 0.25f,
+        0.15f, 0.19f, 0.15f,
+      };
+      static const float kBankBodyAlpha[6] = {
+        0.11f, 0.14f, 0.11f,
+        0.070f, 0.085f, 0.070f,
+      };
       for (unsigned bank = 0;
            bank < kActionSceneEffectWaterfallMistGlowCount; bank++) {
         ActionEffectGlowStyle mist = {
           .radius_x = kBankRadiusX[bank],
           .radius_y = kBankRadiusY[bank],
-          .ring_scale = {0.18f, 0.70f, 1.0f},
-          .centre = {0.86f, 0.97f, 1.00f, bank == 1 ? 0.14f : 0.11f},
-          .ring = {{0.72f, 0.92f, 1.00f, bank == 1 ? 0.10f : 0.08f},
-                   {0.30f, 0.68f, 0.94f, 0.035f},
+          .ring_scale = {0.18f, bank < 3 ? 0.82f : 0.86f, 1.0f},
+          .centre = {0.86f, 0.97f, 1.00f, kBankCentreAlpha[bank]},
+          .ring = {{0.72f, 0.92f, 1.00f, kBankInnerAlpha[bank]},
+                   {0.30f, 0.68f, 0.94f, kBankBodyAlpha[bank]},
                    {0.08f, 0.28f, 0.54f, 0.00f}},
           .flare = 0.035f, .rise = 0.025f,
           .axis_x = 1.0f, .lift_y = -1.0f,

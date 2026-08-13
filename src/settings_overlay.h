@@ -42,7 +42,8 @@ void SettingsOverlay_SetInspectorInfoProvider(
 struct DioramaLayerOrderTable;
 typedef struct DioramaLayerOrderTable *(*SettingsOverlayLayerTableFn)(void);
 typedef bool (*SettingsOverlayLayerRoomFn)(uint8_t *out_group,
-                                           uint8_t *out_map);
+                                           uint8_t *out_map,
+                                           uint8_t *out_section);
 typedef bool (*SettingsOverlayLayerSaveFn)(void);
 void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
                                          SettingsOverlayLayerRoomFn room,

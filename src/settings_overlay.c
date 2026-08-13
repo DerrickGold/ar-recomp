@@ -1349,6 +1349,7 @@ static const char *LayerParamKey(DioramaEditorParam param) {
     case kDioramaEditorParam_Direction: return "dir";
     case kDioramaEditorParam_Z:         return "z";
     case kDioramaEditorParam_Alpha:     return "alpha";
+    case kDioramaEditorParam_Source:    return "source";
     case kDioramaEditorParam_Order:     return "order";
     case kDioramaEditorParam_None:
     default:                            return "";
@@ -1390,11 +1391,20 @@ static int LayerEditorRows(DioramaEditorRow *rows, int capacity) {
   context.selected_plane = s_layer_plane;
   if (s_layer_room_provider)
     context.room_live = s_layer_room_provider(&context.map_group,
-                                              &context.map_number);
+                                              &context.map_number,
+                                              &context.section);
   const DioramaLayerOrderTable *table =
       s_layer_table_provider ? s_layer_table_provider() : NULL;
-  return DioramaLayerEditor_BuildRows(table, &context, ActiveTabIndex(), rows,
-                                      capacity);
+  const int count = DioramaLayerEditor_BuildRows(
+      table, &context, ActiveTabIndex(), rows, capacity);
+  if (context.room_live) {
+    for (int i = 0; i < count; i++) {
+      rows[i].map_group = context.map_group;
+      rows[i].map_number = context.map_number;
+      rows[i].section = context.section;
+    }
+  }
+  return count;
 }
 
 static int LayerMenuRows(LayerMenuRow *out, int capacity) {
@@ -1774,13 +1784,11 @@ static DioramaPlaneOverride *LayerPlaneForRow(const DioramaEditorRow *row) {
   if (!row || row->plane < 0 || !s_layer_table_provider) return NULL;
   DioramaLayerOrderTable *table = s_layer_table_provider();
   if (!table) return NULL;
-  uint8_t group = 0, map = 0;
-  if (!s_layer_room_provider || !s_layer_room_provider(&group, &map))
-    return NULL;
   /* FindOrAdd, not Find: the first edit to a room is what creates its entry. A
    * full table returns NULL and is reported rather than dropping the edit
    * silently. */
-  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(table, group, map);
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAddSection(
+      table, row->map_group, row->map_number, row->section);
   if (!room) return NULL;
   return &room->planes[row->plane];
 }
@@ -1845,6 +1853,14 @@ static bool LayerChangeSelected(int direction) {
     SetStatus(status);
     LayerSaveEdit();
     return true;
+  }
+
+  /* A scoped row displays the renderer-resolved source, which may be inherited
+   * from its base room. Seed a first local edit from that displayed value so
+   * Right means "next source" rather than jumping from hidden Captured state. */
+  if (diorama->param == kDioramaEditorParam_Source && !plane->set_source) {
+    plane->source = diorama->effective_source;
+    plane->set_source = true;
   }
 
   if (!DioramaLayerEditor_StepParam(plane, diorama->param, direction)) {
@@ -1921,13 +1937,12 @@ static bool LayerActivateSelected(void) {
   if (diorama->kind == kDioramaEditorRow_ResetRoom) {
     DioramaLayerOrderTable *table =
         s_layer_table_provider ? s_layer_table_provider() : NULL;
-    uint8_t group = 0, map = 0;
-    if (!table || !s_layer_room_provider ||
-        !s_layer_room_provider(&group, &map)) {
+    if (!table) {
       SetStatus("NO ROOM TO RESET");
       return true;
     }
-    DioramaLayerOrder_ResetRoom(table, group, map);
+    DioramaLayerOrder_ResetSection(
+        table, diorama->map_group, diorama->map_number, diorama->section);
     s_layer_plane = -1;
     SetStatus("ROOM RESET");
     LayerSaveEdit();
@@ -3544,11 +3559,10 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
     if (diorama && diorama->plane >= 0) {
       const DioramaLayerOrderTable *table =
           s_layer_table_provider ? s_layer_table_provider() : NULL;
-      uint8_t group = 0, map = 0;
-      if (table && s_layer_room_provider &&
-          s_layer_room_provider(&group, &map)) {
-        const DioramaRoomOverride *room =
-            DioramaLayerOrder_Find(table, group, map);
+      if (table) {
+        const DioramaRoomOverride *room = DioramaLayerOrder_FindSection(
+            table, diorama->map_group, diorama->map_number,
+            diorama->section);
         if (room)
           strategy = DioramaLayerEditor_StrategyOfPlane(
               &room->planes[diorama->plane]);

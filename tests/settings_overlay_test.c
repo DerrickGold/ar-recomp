@@ -263,16 +263,18 @@ static DioramaLayerOrderTable s_fake_layer_table;
 static bool s_fake_room_live;
 static uint8_t s_fake_group = 0x01;   /* Fillmore */
 static uint8_t s_fake_map = 0x02;     /* act 2, the reported room */
+static uint8_t s_fake_section = kDioramaLayerSection_Room;
 static int s_fake_saves;
 
 static DioramaLayerOrderTable *FakeLayerTable(void) {
   return &s_fake_layer_table;
 }
 
-static bool FakeLayerRoom(uint8_t *group, uint8_t *map) {
+static bool FakeLayerRoom(uint8_t *group, uint8_t *map, uint8_t *section) {
   if (!s_fake_room_live) return false;
   if (group) *group = s_fake_group;
   if (map) *map = s_fake_map;
+  if (section) *section = s_fake_section;
   return true;
 }
 
@@ -291,6 +293,7 @@ static void CheckLayerEditorSection(void) {
                                       FakeLayerSave);
   memset(&s_fake_layer_table, 0, sizeof(s_fake_layer_table));
   s_fake_room_live = true;
+  s_fake_section = kDioramaLayerSection_Room;
   s_fake_saves = 0;
 
   /* THE GATE the feature was asked for: developer-only means the section is not
@@ -467,6 +470,27 @@ static void CheckLayerEditorSection(void) {
    * built-in table and the unedited-game guarantee holds. */
   room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
   CHECK(!room || !DioramaLayerOrder_RoomIsActive(room));
+
+  /* The production room hook also carries a camera-local section. Edits while
+   * that section is live must land in its refining record, never the base room. */
+  s_fake_section = kDioramaLayerSection_AitosWaterfall;
+  RowToKey("backdrop");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));  /* expand */
+  RowToKey("backdrop.source");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  const DioramaRoomOverride *scoped = DioramaLayerOrder_FindSection(
+      &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section);
+  CHECK(scoped != NULL);
+  CHECK(scoped && scoped->planes[kDioramaPlane_Backdrop].set_source);
+  CHECK(scoped && scoped->planes[kDioramaPlane_Backdrop].source ==
+                      DioramaLayerOrder_ActionBgSource(0x01, 0x01, 1));
+  room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
+  CHECK(!room || !DioramaLayerOrder_RoomIsActive(room));
+  RowToKey("layer_reset_room");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!DioramaLayerOrder_FindSection(
+      &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section));
+  s_fake_section = kDioramaLayerSection_Room;
 
   /* The final Layers tab is a separate, session-only action-BG tuner. It uses
    * the live canonical plan even when Diorama itself is not the provider, and

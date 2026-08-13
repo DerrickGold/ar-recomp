@@ -4,6 +4,7 @@
 #include "actraiser_game.h"
 #include "atomic_replace.h"
 #include "diorama_layer_order.h"
+#include "diorama_rom_backdrop.h"
 #include "diorama_skybox_uv.h"
 #include "camera_orbit.h"
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
@@ -16,6 +17,69 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+
+typedef struct DioramaRomBackdropCache {
+  uint32_t pixels[kDioramaRomBackdropPixels * kDioramaRomBackdropPixels];
+  SDL_Texture *texture;
+  int source;
+  bool available;
+} DioramaRomBackdropCache;
+
+static const uint8_t *g_diorama_rom_data;
+static size_t g_diorama_rom_size;
+static DioramaRomBackdropCache g_rom_backdrop = {
+  .source = -1,
+};
+
+bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size) {
+  g_diorama_rom_data = rom_data;
+  g_diorama_rom_size = rom_size;
+  g_rom_backdrop.available = false;
+  g_rom_backdrop.source = -1;
+  return rom_data && rom_size > 0;
+}
+
+static SDL_Texture *RomBackdropTexture(SDL_Renderer *renderer, int source) {
+  if (!renderer || !g_diorama_rom_data ||
+      !DioramaLayerOrder_SourceIsValid(source) ||
+      source == kDioramaLayerSource_Captured)
+    return NULL;
+  if (g_rom_backdrop.source != source) {
+    uint8_t group = 0, map = 0, bg = 0;
+    g_rom_backdrop.available =
+        DioramaLayerOrder_DecodeActionBgSource(
+            source, &group, &map, &bg) &&
+        DioramaRomBackdrop_LoadActionBg(
+            g_diorama_rom_data, g_diorama_rom_size, group, map, bg,
+            g_rom_backdrop.pixels,
+            sizeof(g_rom_backdrop.pixels) /
+                sizeof(g_rom_backdrop.pixels[0]));
+    g_rom_backdrop.source = source;
+    SDL_DestroyTexture(g_rom_backdrop.texture);
+    g_rom_backdrop.texture = NULL;
+    fprintf(stderr, "[diorama] ROM backdrop source=%s decoded=%d\n",
+            DioramaLayerOrder_SourceToken(source),
+            g_rom_backdrop.available ? 1 : 0);
+  }
+  if (!g_rom_backdrop.available) return NULL;
+  if (!g_rom_backdrop.texture) {
+    g_rom_backdrop.texture = SDL_CreateTexture(
+        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
+        kDioramaRomBackdropPixels, kDioramaRomBackdropPixels);
+    if (!g_rom_backdrop.texture ||
+        !SDL_UpdateTexture(g_rom_backdrop.texture, NULL,
+                           g_rom_backdrop.pixels,
+                           kDioramaRomBackdropPixels *
+                               (int)sizeof(g_rom_backdrop.pixels[0]))) {
+      SDL_DestroyTexture(g_rom_backdrop.texture);
+      g_rom_backdrop.texture = NULL;
+      return NULL;
+    }
+    SDL_SetTextureScaleMode(g_rom_backdrop.texture, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureBlendMode(g_rom_backdrop.texture, SDL_BLENDMODE_NONE);
+  }
+  return g_rom_backdrop.texture;
+}
 
 /* ── M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish) ────
  *
@@ -632,6 +696,19 @@ static bool DioramaLayerIsDrawable(
       g_settings.diorama_skybox == kDioramaSky_Only);
 }
 
+/* A named ROM source supplies both texture storage and current pixels itself.
+ * It still obeys the same visibility/HUD/skybox policy as a captured layer;
+ * only the two resource booleans are substituted. */
+static bool DioramaLayerIsDrawableWithNamedSource(
+    const DioramaLayerDesc *layer, SDL_Texture *textures[], uint8_t *pixels[],
+    bool named_source_ready) {
+  if (!named_source_ready) return DioramaLayerIsDrawable(layer, textures, pixels);
+  return layer && Diorama_PlaneEligible(
+      layer->plane, !layer->visible || *layer->visible,
+      true, true, g_settings.diorama_hud_flat,
+      g_settings.diorama_skybox == kDioramaSky_Only);
+}
+
 /* BG projections retain the exact drawing predicate above. An OBJ plane may
  * additionally be requested by a current captured actor effect: its metadata
  * is current content even if the isolated hardware band contributed no final
@@ -728,24 +805,26 @@ void Diorama_LoadLayerManifest(void) {
         continue;
       }
       *close = '\0';
-      uint8_t group = 0, map = 0;
-      if (!DioramaLayerOrder_ParseSection(at + 1, &group, &map)) {
+      uint8_t group = 0, map = 0, section = kDioramaLayerSection_Room;
+      if (!DioramaLayerOrder_ParseScopedSection(
+              at + 1, &group, &map, &section)) {
         /* Not one of ours -- a foreign section just ends the current room. That
          * is legitimate (the file may grow other sections), so it is not
          * counted as bad. But it IS worth a line: the grammar is strict
-         * ("layers:GG:MM", hex, nothing else), so `[layers:04:01 ]` with one
+         * ("layers:GG:MM[:token]", hex), so `[layers:04:01 ]` with one
          * stray space lands here and would otherwise drop a whole authored room
          * with no output at all. Reported at a lower volume than an error. */
         if (!strncmp(at + 1, "layers", 6))
           fprintf(stderr,
                   "[diorama-layers] %s:%d: '[%s]' is not a valid room header "
-                  "(expected [layers:GG:MM] in hex) -- its plane lines are "
+                  "(expected [layers:GG:MM[:token]] in hex) -- its plane lines are "
                   "skipped\n",
                   kLayerManifestLeaf, line_number, at + 1);
         room = NULL;
         continue;
       }
-      room = DioramaLayerOrder_FindOrAdd(&g_layer_overrides, group, map);
+      room = DioramaLayerOrder_FindOrAddSection(
+          &g_layer_overrides, group, map, section);
       if (!room) {
         fprintf(stderr, "[diorama-layers] %s:%d: table full, room dropped\n",
                 kLayerManifestLeaf, line_number);
@@ -783,12 +862,14 @@ static const char kLayerManifestPreamble[] =
     "# on screen immediately. Every edit is written back here, so the two are\n"
     "# interchangeable -- and your comments and layout are PRESERVED across a save.\n"
     "#\n"
-    "# Section is [layers:GG:MM] with $18/$19 in hex; keys are\n"
+    "# Section is [layers:GG:MM] with $18/$19 in hex. A camera-local refinement\n"
+    "# may use [layers:GG:MM:waterfall] and inherits the base room first. Keys are\n"
     "#   order:<slot>  z:<-1..2>  alpha:<0-255>  rake:<-1..1>  bow:<-1..1>"
     "  thick:<0..1>\n"
     "#   stack:<0..1>  copies:<1..8>  density:<per unit>  dir:<forward|"
     "backward|both>\n"
     "#   voxel:<0..1>  slices:<2..24>\n"
+    "# Backdrop source is captured or rom-GG-MM-bgN (N=1/2); alpha:0 disables it.\n"
     "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake); bow is\n"
     "# the same tilt EASED. thick extrudes the bottom edge forward. stack fills\n"
     "# the gap with PARALLEL repeats (no tilt, one parallax rate); dir picks which\n"
@@ -1588,6 +1669,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        float distance_scale,
                        uint32_t additive_plane_mask,
                        uint8_t effect_obj_priority_mask,
+                       uint8_t map_group, uint8_t map_number,
+                       uint8_t layer_section,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
                        DioramaPlaneEffectFn plane_effect,
                        void *plane_effect_userdata,
@@ -1840,6 +1923,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       defaults[i].plane = kDioramaLayers[i].plane;
       defaults[i].z = kDioramaLayers[i].z;
       defaults[i].alpha = kDioramaLayerAlphaOpaque;
+      defaults[i].source = kDioramaLayerSource_Captured;
       defaults[i].rake = 0.0f;
       defaults[i].bow = 0.0f;
       defaults[i].thickness = 0.0f;
@@ -1848,11 +1932,9 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       defaults[i].stack_direction = kDioramaStack_Forward;
       defaults[i].stack_solid = false;
     }
-    extern uint8 g_ram[0x20000];
-    resolved_count = DioramaLayerOrder_Resolve(
-        &g_layer_overrides, g_ram[kActRaiserWram_MapGroup],
-        g_ram[kActRaiserWram_CurrentMap], defaults, kDioramaLayerCount,
-        resolved, kDioramaLayerCount);
+    resolved_count = DioramaLayerOrder_ResolveSection(
+        &g_layer_overrides, map_group, map_number, layer_section,
+        defaults, kDioramaLayerCount, resolved, kDioramaLayerCount);
   }
 
   /* Publish the exact authored shape/window of both low-priority BG planes
@@ -1861,6 +1943,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
    * transform when the isolated source band has no winning pixels. */
   if (out_projection) {
     for (int i = 0; i < resolved_count; i++) {
+      if (resolved[i].alpha == 0) continue;
       const DioramaLayerDesc *layer =
           DioramaDescForPlane(resolved[i].plane);
       if (!DioramaLayerIsProjectable(
@@ -1915,6 +1998,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   }
   for (int draw_index = 0; draw_index < draw_count; draw_index++) {
     const int i = draw_order[draw_index];
+    if (resolved[i].alpha == 0) continue;
     const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
     if (!layer) continue;
     const bool is_additive =
@@ -1927,7 +2011,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     const int layer_stack_copies = resolved[i].stack_copies;
     const int layer_stack_dir = resolved[i].stack_direction;
     const bool layer_stack_solid = resolved[i].stack_solid;
-    if (!DioramaLayerIsDrawable(layer, textures, pixels)) continue;
     /* A5 (followup doc): with diorama_hud_flat on, BG3 is deliberately not
      * captured as a diorama layer (actraiser_rtl.c) and the anchored flat
      * HUD draws separately (present.c). Skip this entry outright rather
@@ -1951,6 +2034,18 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * gaps the way it always has. */
     bool is_backdrop = (layer->plane == kDioramaPlane_Backdrop);
     SDL_Texture *texture = textures[layer->plane];
+    bool named_rom_backdrop = false;
+    if (is_backdrop &&
+        resolved[i].source != kDioramaLayerSource_Captured) {
+      SDL_Texture *named = RomBackdropTexture(renderer, resolved[i].source);
+      if (named) {
+        texture = named;
+        named_rom_backdrop = true;
+      }
+    }
+    if (!DioramaLayerIsDrawableWithNamedSource(
+            layer, textures, pixels, named_rom_backdrop))
+      continue;
 
     SDL_FColor shade = {
       1.0f + (layer->shade.r - 1.0f) * shade_mix,
@@ -2002,6 +2097,17 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     float layer_v0, layer_v1;
     DioramaInterpUvWindow(uv_v0, uv_v1, layer_dv, v_slack,
                           &layer_v0, &layer_v1);
+    if (named_rom_backdrop) {
+      /* ROM sources are tight 256x256 textures. Repeat their first map page
+       * across the current backdrop quad and avoid PPU allocation padding. */
+      const float source_width = (float)kDioramaRomBackdropPixels;
+      layer_u0 = 0.0f;
+      layer_u1 = (float)snes_width / source_width;
+      layer_v0 = 0.0f;
+      layer_v1 = 1.0f;
+      SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_WRAP,
+                                      SDL_TEXTURE_ADDRESS_CLAMP);
+    }
     BuildLayerMesh(mvp,
                    z_world, layer_rake, layer_bow, layer_u0, layer_v0,
                    layer_u1, layer_v1,
@@ -2110,12 +2216,15 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     /* Determined up front (before the shadow/main draws) so B1b-crisp knows
      * whether this layer is eligible for the premultiplied supersample path
      * — see the section comment above kDioramaSupersample. */
-    bool rim_light = layer->is_figure && RimLightEnabled(renderer);
-    bool want_dof = !rim_light && layer->plane != kPpuOverlaySource_Bg3 &&
+    bool rim_light = !named_rom_backdrop && layer->is_figure &&
+        RimLightEnabled(renderer);
+    bool want_dof = !named_rom_backdrop && !rim_light &&
+        layer->plane != kPpuOverlaySource_Bg3 &&
         DofBlurEnabled(renderer);
     float dof_radius = want_dof ? DofRadiusForLayer(layer_z) : 0.0f;
     if (dof_radius < 0.05f) dof_radius = 0.0f;
-    bool want_edge = !rim_light && LayerGetsEdgeAA(layer->plane) &&
+    bool want_edge = !named_rom_backdrop && !rim_light &&
+        LayerGetsEdgeAA(layer->plane) &&
         EdgeAAEnabled(renderer);
     bool dof_or_edge = !rim_light && (dof_radius > 0.0f || want_edge);
     bool use_shader = rim_light || dof_or_edge;
@@ -2126,7 +2235,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
 
     SDL_Texture *draw_texture = texture;
     bool used_ss = false;
-    if (!use_shader) {
+    if (!use_shader && !named_rom_backdrop) {
       SDL_Texture *ss = BuildDioramaSupersample(
           renderer, texture, obj_apron, snes_width, snes_height);
       if (ss) {
@@ -2225,6 +2334,11 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     SDL_RenderGeometry(renderer, draw_texture, draw_verts, nv, indices, ni);
     if (rim_light || dof_or_edge)
       SDL_SetGPURenderState(renderer, NULL);
+    if (named_rom_backdrop)
+      SDL_SetRenderTextureAddressMode(
+          renderer,
+          interpolating ? SDL_TEXTURE_ADDRESS_CLAMP : SDL_TEXTURE_ADDRESS_AUTO,
+          interpolating ? SDL_TEXTURE_ADDRESS_CLAMP : SDL_TEXTURE_ADDRESS_AUTO);
     if (plane_effect && out_projection && out_projection->valid) {
       if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
       plane_effect(plane_effect_userdata, layer->plane, out_projection);
@@ -2263,6 +2377,9 @@ static void DioramaReleaseRendererResources(SDL_Renderer *renderer) {
   g_diorama_ss_texture = NULL;
   g_diorama_ss_w = 0;
   g_diorama_ss_h = 0;
+
+  SDL_DestroyTexture(g_rom_backdrop.texture);
+  g_rom_backdrop.texture = NULL;
 
   SDL_GPUDevice *current_device = DioramaRendererGpuDevice(renderer);
   bool same_device = !g_diorama_shader_device ||

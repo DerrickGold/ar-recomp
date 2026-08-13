@@ -1,6 +1,7 @@
 #ifndef DIORAMA_H
 #define DIORAMA_H
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <SDL3/SDL.h>
 #include "diorama_planes.h"
@@ -9,6 +10,10 @@
 /* The per-room ($18,$19) layer override table the editor edits and the draw
  * loop reads. Never NULL. Empty means "every room draws as built". */
 struct DioramaLayerOrderTable *Diorama_LayerOverrides(void);
+
+/* Decode deterministic named backdrop sources from immutable cart data. A
+ * failed source remains unavailable and authored uses fall back to captured. */
+bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size);
 
 /* Load / write `diorama-layers.ini` (beside settings.ini). Load is called once
  * at boot; save is the editor's "Export manifest". Absent file = no overrides. */
@@ -19,7 +24,10 @@ bool Diorama_SaveLayerManifest(void);
  * editor. False when no diorama room is running, in which case the outputs are
  * untouched -- so the editor reports a room exactly when authoring one would
  * have a visible effect. */
-bool Diorama_LiveRoom(uint8_t *out_group, uint8_t *out_map);
+bool Diorama_LiveRoom(uint8_t *out_group, uint8_t *out_map,
+                      uint8_t *out_section);
+void Diorama_PublishLiveLayerSection(uint8_t map_group, uint8_t map_number,
+                                     uint8_t section);
 
 void Diorama_SeedCameraFromSettings(void);
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom);
@@ -204,6 +212,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        float distance_scale,
                        uint32_t additive_plane_mask,
                        uint8_t effect_obj_priority_mask,
+                       uint8_t map_group, uint8_t map_number,
+                       uint8_t layer_section,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
                        DioramaPlaneEffectFn plane_effect,
                        void *plane_effect_userdata,

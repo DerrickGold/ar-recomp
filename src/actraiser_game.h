@@ -364,6 +364,23 @@ static inline int ActRaiser_IsActionMapGroup(uint8 map_group) {
          map_group <= kActRaiserActionMapGroup_Last;
 }
 
+/* Last valid $19 for each action group. Keep the room-domain contract beside
+ * the group-domain contract: host catalogues (Diorama ROM backdrops), action
+ * BG policy, and developer tools must not grow independent copies that accept
+ * different rooms. */
+static inline uint8 ActRaiser_ActionMapLast(uint8 map_group) {
+  static const uint8 kLastMap[] = {
+    0, 4, 8, 6, 7, 8, 8, 8,
+  };
+  return ActRaiser_IsActionMapGroup(map_group)
+      ? kLastMap[map_group] : 0;
+}
+
+static inline int ActRaiser_IsActionMap(uint8 map_group, uint8 map_number) {
+  const uint8 last = ActRaiser_ActionMapLast(map_group);
+  return map_number > 0 && map_number <= last;
+}
+
 /* Live sprite-drawable margins either side of the authentic 256-pixel window,
  * in authentic pixels. This is the OAM emitter's own horizontal predicate, so
  * a presentation layer asking "where can a sprite actually appear?" gets the
