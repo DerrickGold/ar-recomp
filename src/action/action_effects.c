@@ -2,6 +2,8 @@
 
 #include <limits.h>
 #include <stdbool.h>
+#include <stdio.h>   /* fprintf (AR_AITOS_WATERFALL_LOG) */
+#include <stdlib.h>  /* getenv (AR_AITOS_WATERFALL_LOG) */
 #include <string.h>
 
 #include "actraiser_game.h"
@@ -1697,6 +1699,35 @@ static bool AitosSplashStructureWidth(
   return false;
 }
 
+/* AR_AITOS_WATERFALL_LOG=1: the veil appended below is what publishes the
+ * `waterfall` section token (frame_slot.c), which is in turn what admits the
+ * folded BG2 continuation (diorama.c). Those three live in different files, so
+ * a capture-side dropout presents as a rendering bug at the far end and costs a
+ * session to trace. Log the capture decision on CHANGE only, so a jump reads as
+ * a handful of lines instead of 60 per second. */
+static void AitosWaterfallLog(const ActionSceneEffectFrame *dst,
+                              const SceneBgScanBounds *bounds,
+                              int camera_x, int camera_y,
+                              unsigned splash_count, bool published) {
+  static int log_on = -1;
+  if (log_on < 0) {
+    const char *value = getenv("AR_AITOS_WATERFALL_LOG");
+    log_on = (value && value[0] && value[0] != '0') ? 1 : 0;
+  }
+  if (!log_on) return;
+  static unsigned last_splash = UINT_MAX;
+  static int last_published = -1;
+  if (splash_count == last_splash && (int)published == last_published) return;
+  last_splash = splash_count;
+  last_published = (int)published;
+  fprintf(stderr,
+          "[aitos-wf] capture gf=%u cam=(%d,%d) scan=[%u,%u)x[%u,%u) "
+          "splash=%u veil=%s\n",
+          (unsigned)dst->game_frame, camera_x, camera_y,
+          bounds->x0, bounds->x1, bounds->y0, bounds->y1,
+          splash_count, published ? "yes" : "no");
+}
+
 static void CaptureAitosWater(ActionSceneEffectFrame *dst,
                               const uint8_t *wram,
                               size_t wram_size, uint16_t clock) {
@@ -1756,7 +1787,11 @@ static void CaptureAitosWater(ActionSceneEffectFrame *dst,
       if (SceneDecorationAppend(dst, &effect)) splash_count++;
     }
   }
-  if (!splash_count || dst->decoration_overflow) return;
+  if (!splash_count || dst->decoration_overflow) {
+    AitosWaterfallLog(dst, &bounds, camera_x, camera_y, splash_count, false);
+    return;
+  }
+  AitosWaterfallLog(dst, &bounds, camera_x, camera_y, splash_count, true);
 
   /* BG2 uses the same decoded 512x512 map in the preceding dark cave, so the
    * camera-local presence of an exact splash structure is the live art
