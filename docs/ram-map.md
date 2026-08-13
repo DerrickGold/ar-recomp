@@ -99,7 +99,7 @@ apron channel, rendering-engine.md §13j) must read it here and resolve through
 |---|---:|---|
 | `$7E:06A0-$1A9F` | 80 × `$40` | Action object slots. Magic cohort slots are `$06A0-$0820`; cast controller is `$0860`; player is `$08A0` |
 | `$7E:02D0-$02E0` | 17 | **PRNG state pool.** `$00:84C0` advances it (a carry-chain `ADC` down the pool, then a multi-byte counter increment) and returns the byte at `$02D1` in A. Every randomized spell decision goes through it — e.g. Magical Stardust's launch site picks top-vs-right edge and its Y offset from one call (`$00:A0E8`, see bug-ledger.md §33). |
-| `$7E:08A2/$08A4` | 2+2 | Player object world X/Y (`$08A0 + $02/+04`). The arrival gate uses initialized X `$08A2` to reconstruct the native horizontal activation camera before `$97A6` transfers camera-subject ownership through `$8A`; drawing still uses fitted camera `$22/$24`. |
+| `$7E:08A2/$08A4` | 2+2 | Player object world X/Y (`$08A0 + $02/+04`). The arrival gate uses initialized X `$08A2` to reconstruct the native horizontal activation camera before `$97A6` transfers camera-subject ownership through `$8A`; drawing uses horizontally fitted `$22` and native vertical `$24`. |
 | `$7E:08B2` | 2 | Player primary handler (`$08A0 + $12`). Action entry advances `$97A6 → $97C9 → $97E4`; `$97E4` installs `$9832`, the first handler that reads held input. This lifecycle gates only extra horizontal activation, never widescreen drawing or camera presentation. |
 | slot `+00` | 2 | Status. `$4000/$8000` high states are inactive/free; spell actors normally use active values 0 or `$0800` |
 | slot `+02/+04` | 2+2 | World-space hot-point X/Y, updated by the spell handler and projected with camera `$22/$24` |

@@ -224,19 +224,22 @@ Corrected action-wide presentation HLEs this complete routine at the same
 before/after margins `B/A`, the camera interval becomes
 `[B, W - V - A]` only when `B + V + A <= W`. Otherwise it remains the ROM's
 `[0, W - V]`; zero/invalid load-state dimensions also retain the ROM's
-unsigned fallback. Horizontal margins start with the live widescreen render
-budget and vertical margins with the configured per-side Diorama extension;
-each side is then limited by the canonical playfield layer's fixed extent, when
-present. This makes a tuned 16/16 playfield such as Bloodpool `0208` fit only the
-16 pixels it actually presents rather than shifting for an invisible full
-margin. The correction also consumes the renderer's
+unsigned fallback. This fitted interval is horizontal only: margins start with
+the live widescreen render budget and each side is then limited by the
+canonical playfield layer's fixed horizontal extent, when present. This makes
+a tuned 16/16 playfield such as Bloodpool `0208` fit only the 16 pixels it
+actually presents rather than shifting for an invisible full margin. Diorama's
+vertical extension never constrains canonical camera `$24`; the per-frame
+capture policy instead resolves the real rows independently available above and
+below the native camera. The correction also consumes the renderer's
 canonical `ActionBgPlan_CanvasOwner` and provider-enable decision: authored
 Death Heim hub/final scenes (`0701`/`0708`) and `AR_ACTION_BG_HLE=0` do not
 acquire playfield camera policy. 4:3, Wide Raw, non-action modes, disabled
 action widening, non-finite scene plans, and rooms too small for the complete
-requested view are therefore behavior-preserving. BG2 parallax helpers,
+requested horizontal view are therefore behavior-preserving. BG2 parallax helpers,
 player-relative tail, strip flags, and the single canonical `$22/$24` camera
-remain native. A fitted presentation clamp also reconciles `$7C/$7E` before
+remain intact; only `$22` receives presentation fitting. A fitted horizontal
+clamp also reconciles `$7C/$7E` before
 those consumers run: while the old camera is already inside the corrected
 interval they receive the camera displacement that actually occurred, not the
 unfulfilled outward request; an initial correction from outside the interval
@@ -246,9 +249,11 @@ request live made BG2 parallax and the player state machine treat a stationary
 boundary as movement (`runs/20260810-172649`, gf9652).
 
 Bloodpool `0202` (BG1 `768x512`) resolves to horizontal `26..486` in flat
-16:10 Full and to `120..392`, vertical `32..255` in Diorama-32. Death Heim
-`0703` (BG1 `256x256`) cannot contain either widened view and stays at native
-`0..0`, `0..31`. The `0701` hub stays native at `0,31` until its natural
+16:10 Full and to `120..392` in Diorama-32. Its vertical camera remains native
+`0..287` in both modes; at the floor, the capture naturally resolves to
+`top=32,bottom=0` rather than moving `$24` to manufacture a symmetric band.
+Death Heim `0703` (BG1 `256x256`) stays at native vertical `0..31`. The `0701`
+hub stays native at `0,31` until its natural
 transition to finite room `0702`; the explicit provider-off `0202` control
 also remains `0,287`. Evidence: `runs/20260810-170205` (flat Full),
 `runs/20260810-170240` (4:3), `runs/20260810-170857-2` (Raw),

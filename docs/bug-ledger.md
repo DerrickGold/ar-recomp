@@ -1954,6 +1954,53 @@ the current debugging process; this file is the case law.
     exact same captured art identity that justifies the effect—never from a broad
     map number or hand-tuned camera interval.
 
+60. **Diorama vertical camera fitting exposed inactive “fake” log platforms and
+    leaked its framing into flat mode — FIXED 2026-08-13; live replay pending.**
+    Bloodpool `runs/20260813-110941/snapshots/snap_00_gf4677` showed two log
+    platforms ahead of the player, but the player fell through them. They were
+    not stale graphics: action records at world Y 488 retained the authentic
+    platform handler `$B4AF`. With Diorama-32 active, however, canonical BG1
+    camera `$24` had been fitted from native bottom 287 to 255 so a complete
+    32/32 presentation band would fit inside the 512px room. Their screen top
+    became 225. Vertical DRAW included the bottom extension, but ACTIVATION kept
+    the authentic 225-line window, so object flag `$0400` was set and the
+    platform handler was dormant.
+
+    `AR_VEXT_OBJDRAW=0` in `runs/20260813-112628` correctly hid those inactive
+    objects but exposed an impossible jump, proving the logs were required
+    gameplay rather than decoration. In `runs/20260813-112738`, flat snapshot
+    gf3016 had native `$24=287`, logs at screen top 193, and flags `$8030` with
+    `$0400` clear. Diorama gf4057 had `$24=255`, top 225, and `$8430`. Disabling
+    Diorama at gf4164 removed the vertical capture but left `$24=255`: the ROM's
+    zero-delta camera path deliberately preserves a stationary origin, so the
+    presentation-created offset could not unwind itself.
+
+    **Fix:** presentation no longer fits the vertical gameplay camera.
+    `ActRaiser_UpdateActionCamera` routes Y through the native-only
+    `ActionCameraAxisBounds_UpdateNativeCamera` API, which has no presentation
+    margin parameters, and retains the ROM's native `0..height-225` range for
+    `$24`; horizontal
+    widescreen fitting and its effective-delta reconciliation remain unchanged.
+    `ActRaiser_ApplyVerticalMarginPolicy` already resolves the real rows
+    independently available around that camera, and `FrameSlot`, uploads,
+    clipping and `Diorama_Composite` already support asymmetric captures. At the
+    Bloodpool floor the result is therefore `top=32,bottom=0`, not a camera move
+    manufactured to obtain `32/32`. Required logs remain inside authentic
+    activation/collision, and toggling Diorama cannot mutate or leak vertical
+    gameplay state. Margin-only OBJ drawing remains a separate presentation
+    policy and does not widen vertical activation.
+
+    **Verification:** `actraiser_action_camera_bounds_test` pins the native
+    512×225 range at `0..287` and explicitly contrasts the retired fitted result
+    `32..255`. The focused test and full `ActRaiserRecomp` target build pass.
+    A fresh live Bloodpool replay must still confirm the logs are solid and the
+    Diorama-on/off comparison retains `$24=287` while stationary at this floor.
+
+    **Reusable lesson:** a presentation capture budget is not a gameplay-camera
+    viewport. When the capture pipeline already carries asymmetric availability,
+    moving canonical camera state to force symmetric imagery can deactivate
+    required actors and persist after the presentation mode is gone.
+
 ## Appendix: Case study archive: the sim-mode bring-up arc (2026-07-01 → 07-04, RESOLVED)
 
 This section previously held the full ~550-line chronological narrative (wrong turns included) of

@@ -538,7 +538,7 @@ results, handler, type, definition, span, and margins.
 #### Action-entry activation gate (corrected 2026-08-12)
 
 The D1/D2 split remains intact during the orb/statue arrival. DRAW continues
-using fitted camera `$22/$24`, `AR_WS_MARGIN_OBJECTS`, live presentation
+using horizontally fitted `$22`, native vertical `$24`, `AR_WS_MARGIN_OBJECTS`, live presentation
 margins, and the OBJ apron. Only D2's extra horizontal ACTIVATION range is held
 back while player handler `$08B2` is `$97A6`, `$97C9`, or `$97E4`; authentic
 vertical coverage and every visual path remain unchanged. Completed `$97E4`
