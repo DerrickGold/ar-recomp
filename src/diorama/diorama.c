@@ -1192,6 +1192,41 @@ static void BuildQuadMesh(const float mvp[16],
   TriangulateGrid(subdiv_u, subdiv_v, out_indices, num_indices);
 }
 
+/* AR_AITOS_WATERFALL_LOG=1 draw-side twin of action_effects.c's capture line.
+ * Together the two localise any dropout: a capture line reading veil=no with no
+ * matching draw line means the section never reached the renderer, while
+ * section=waterfall with ext=0 means it did and the geometry gate rejected it.
+ * Logs on CHANGE so a full jump stays readable. */
+static void DioramaAitosWaterfallLog(uint8_t map_group, uint8_t map_number,
+                                     int layer_section, bool eligible,
+                                     int extension_nv, int authentic_y0,
+                                     int capture_height, int drawable_y1,
+                                     float fold_t, float overlap_t) {
+  static int log_on = -1;
+  if (log_on < 0) {
+    const char *value = getenv("AR_AITOS_WATERFALL_LOG");
+    log_on = (value && value[0] && value[0] != '0') ? 1 : 0;
+  }
+  if (!log_on) return;
+  /* Quantise the floats: they carry a sub-tick interpolation shift that would
+   * otherwise make every frame a "change" and defeat the whole point. */
+  const int fold_key = (int)(fold_t * 1000.0f);
+  const int overlap_key = (int)(overlap_t * 1000.0f);
+  static int last_key[6] = {-2, -2, -2, -2, -2, -2};
+  const int key[6] = {
+    layer_section, extension_nv > 0, authentic_y0, drawable_y1,
+    fold_key, overlap_key,
+  };
+  if (!memcmp(key, last_key, sizeof key)) return;
+  memcpy(last_key, key, sizeof key);
+  fprintf(stderr,
+          "[aitos-wf] draw map=$%02X/$%02X section=%d eligible=%d ext_nv=%d "
+          "top=%d cap_h=%d drawable_y1=%d fold_t=%.4f overlap_t=%.4f\n",
+          map_group, map_number, layer_section, eligible ? 1 : 0, extension_nv,
+          authentic_y0, capture_height, drawable_y1,
+          (double)fold_t, (double)overlap_t);
+}
+
 /* Curved continuation for a finite captured plane. Unlike BuildQuadMesh, each
  * row follows DioramaOverflowFoldPoint, so the surface can stay coplanar under
  * the host's lower margin and then turn toward the camera. The same pure path
@@ -2238,6 +2273,11 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         (layer->plane == kPpuOverlaySource_Bg2 ||
          layer->plane == kDioramaPlane_Bg2Hi);
     float attached_lower_content_v_max = 0.0f;
+    /* AR_AITOS_WATERFALL_LOG=1 draw-side counterpart. Seeded to sentinels so a
+     * frame that took an early-out inside the block is distinguishable from one
+     * that never entered it at all. */
+    float log_fold_t = -1.0f, log_overlap_t = -1.0f;
+    int log_drawable_y1 = -1;
     if (aitos_waterfall_extension) {
       DioramaVerticalRepeatPlan repeat;
       const float layer_v_span = layer_v1 - layer_v0;
@@ -2262,6 +2302,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
          * across that hidden ownership boundary and exposes a colored line. */
         attached_lower_content_v_max =
             (float)drawable_y1 / (float)kPpuBufHeight + layer_v_shift;
+        log_drawable_y1 = drawable_y1;
         const float fold_v =
             (float)repeat.fold_y / (float)kPpuBufHeight + layer_v_shift;
         const float source_v0 =
@@ -2276,13 +2317,26 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
           const float extension_y = (0.5f - fold_t) * height_scale;
           const float extension_z = DioramaTiltedRowDepth(
               z_world, layer_rake, layer_bow, fold_t);
-          /* Remain coplanar through the host mesh's exact sampled bottom. The
-           * dedicated row in BuildFoldedOverflowMesh prevents the first curved
-           * triangle from intruding into this interval under camera pitch. */
+          /* Remain coplanar through the host's last DRAWABLE row, then add the
+           * tolerance underlap before bending. The dedicated row in
+           * BuildFoldedOverflowMesh prevents the first curved triangle from
+           * intruding into this interval under camera pitch.
+           *
+           * Measured in texture rows against `drawable_y1` — the same row the
+           * shader hands ownership over at (attached_lower_content_v_max) —
+           * rather than as `(1 - fold_t)` of the host mesh. Those are not the
+           * same edge: `fold_t` and `height_scale` both carry the interpolation
+           * crop, so the host's GEOMETRIC bottom moves by kInterpUvSlackPx
+           * whenever frame-pair interpolability flips, while its CONTENT bottom
+           * does not. Anchoring here made the coplanar band breathe between 20
+           * and 24 rows mid-jump (AR_AITOS_WATERFALL_LOG showed fold_t flipping
+           * 0.9000/0.8889 with drawable_y1 pinned at 280) — visible as a
+           * horizontal seam that changed size with camera motion. Row units are
+           * exact for both meshes: each spans 1/224 world units per texture row,
+           * so no height_scale factor belongs in this expression at all. */
           float overlap_t =
-              (1.0f - fold_t) * height_scale / extension_height;
-          overlap_t +=
-              (float)kAitosWaterfallSeamTolerancePixels /
+              (float)(drawable_y1 - repeat.fold_y +
+                      kAitosWaterfallSeamTolerancePixels) /
               (float)repeat.repeat_height;
           if (overlap_t < 0.0f) overlap_t = 0.0f;
           if (overlap_t > 1.0f) overlap_t = 1.0f;
@@ -2291,6 +2345,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
           if (handoff_t > 1.0f) handoff_t = 1.0f;
           const float handoff_z = DioramaTiltedRowDepth(
               z_world, layer_rake, layer_bow, handoff_t);
+          log_fold_t = fold_t;
+          log_overlap_t = overlap_t;
           BuildFoldedOverflowMesh(
               mvp, extension_y, extension_z, handoff_z,
               extension_height, overlap_t,
@@ -2318,6 +2374,11 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         }
       }
     }
+    if (layer->plane == kPpuOverlaySource_Bg2)
+      DioramaAitosWaterfallLog(map_group, map_number, layer_section,
+                               aitos_waterfall_extension, extension_nv,
+                               authentic_y0, snes_height, log_drawable_y1,
+                               log_fold_t, log_overlap_t);
 
     /* STACK: fill the depth gap with PARALLEL copies of the layer, drawn behind
      * the plane itself (back to front, so the painter's algorithm layers them
