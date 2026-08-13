@@ -46,9 +46,9 @@ set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/spc.c
 )
 
-# Trace rings and tripwire instrumentation are developer-only. The historical
-# TCP debug_server.c currently drifts from cpu_trace.c and is intentionally not
-# linked; debug_server_stub.c satisfies its integration hooks in trace builds.
+# Trace rings and tripwire instrumentation are developer-only. debug_server.c
+# does not match the current cpu_trace API, so trace builds use no-op integration
+# hooks from debug_server_stub.c instead of linking the TCP server.
 # Off by default; opt in with -DSNESRECOMP_ENABLE_TRACE=ON.
 option(SNESRECOMP_ENABLE_TRACE "Build local observability rings and tripwires" OFF)
 if(SNESRECOMP_ENABLE_TRACE)

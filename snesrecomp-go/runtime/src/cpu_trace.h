@@ -67,8 +67,8 @@ enum {
      * extra0 = stack-op mnemonic id (see CPU_STACK_OP_*).
      * extra1 = (high byte = bytes pushed/popped, signed: +N = pushed, -N = popped;
      *          low byte = unused). Use addr16 for old S, new_value for new S
-     *          (reusing the WRAM_WRITE field slots; non-WRAM events leave them
-     *          zero today, so the field is free). */
+     *          (reusing the WRAM_WRITE field slots, which other event types
+     *          leave unused). */
     CPU_TR_STACK_OP    = 18,
 };
 

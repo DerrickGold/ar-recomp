@@ -13,8 +13,8 @@
 #define SNESRECOMP_TRACE 0
 #endif
 
-// Reverse debugger build flag. The historical TCP server is currently not
-// linked by runtime/runner.cmake; trace builds use debug_server_stub.c.
+// Reverse-debug generator flag. Project trace builds link debug_server_stub.c,
+// not the TCP server, so its readout path is unavailable in that configuration.
 // When 0: the generator emits raw `g_ram[x] = val` stores exactly as it
 // always has; no hooks are compiled; zero runtime cost. When 1: the
 // generator must be rerun with `recomp.py --reverse-debug` so every WRAM

@@ -142,11 +142,9 @@ static size_t IniMergeInto(const char *live, const char *shipped,
     }                                                                       \
     total += emit_n;                                                        \
   } while (0)
-/* Macro locals are prefixed so they cannot shadow a caller's variable. The
- * unprefixed spelling DID shadow the `at` line cursor in both walk loops below:
- * harmless today because no EMIT_FMT argument references `at`, but the next edit
- * that passed one would silently format the output pointer instead of the line.
- * -Wshadow caught it; the prefix removes the trap rather than the warning. */
+/* Prefix macro locals so they cannot shadow the walk loops' `at` cursor. Without
+ * the prefix, an EMIT_FMT argument named `at` would silently bind to the output
+ * pointer instead of the input line. */
 #define EMIT_FMT(...)                                                       \
   do {                                                                      \
     size_t emit_room = (total < size) ? size - total : 0;                     \

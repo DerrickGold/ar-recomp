@@ -29,7 +29,7 @@
  * builds rows when asked.
  *
  * SCOPE: the LIVE room only. A level's room set cannot be enumerated -- $19 is
- * not a uniform act selector (docs/ram-map.md:12: act 2 starts at
+ * not a uniform act selector (docs/ram-map.md records that act 2 starts at
  * $02/$02/$03/$04/$04/$05 depending on the region, Death Heim uses $01 for its
  * hub and $02-$08 for arenas) and no table of valid rooms exists in the ROM
  * notes. Listing a fixed $01..$08 would therefore offer rooms that do not
@@ -40,8 +40,7 @@
 
 enum {
   /* Level tabs are the ACTION map groups only ($01 Fillmore .. $07 Death Heim).
-   * The diorama does not run outside them -- Diorama_IsActiveThisFrame() gates
-   * on ActRaiser_IsActionMapGroup (diorama_host.c:23) -- so a tab for group $00
+   * Diorama_IsActiveThisFrame gates on ActRaiser_IsActionMapGroup, so group $00
    * (towns, world map, title) or $08 (ending) could never show a live room and
    * would be a tab that is always empty. */
   kDioramaEditorLevelCount = 7,

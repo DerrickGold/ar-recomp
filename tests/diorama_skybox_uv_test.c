@@ -94,8 +94,8 @@ static void TestValidSpan(void) {
   ExpectInt("bounded x0", x0, 120);
   ExpectInt("bounded x1", x1, 376);
 
-  /* Degenerate: g_ws_extra == 0 (4:3). The span is exactly the authentic 256
-   * starting at column 0, i.e. identical to today's behaviour. */
+  /* Degenerate: g_ws_extra == 0 (4:3). The span remains the authentic 256
+   * columns starting at column 0. */
   Span(0, 0, 0, 0, kActionBgEdge_RawWrap, false, &x0, &x1);
   ExpectInt("no-widescreen x0", x0, 0);
   ExpectInt("no-widescreen x1", x1, 256);

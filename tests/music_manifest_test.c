@@ -384,8 +384,8 @@ static void TestMusicResamplerMath(void) {
 /* F5 (2026-07-26 handback): "hd music loops and plays first few seconds of the
  * previous song before transitioning" when a boss fight starts.
  *
- * The boss go-signal chain ($00:A3FE -> $00:A410, gen bank00_part04_v2.c:9688
- * then :9796) issues a play command with NO preceding $F0 and no new upload, so
+ * The boss go-signal chain ($00:A3FE -> $00:A410) issues a play command with NO
+ * preceding $F0 and no new upload, so
  * the upload-derived identity still names the OUTGOING song: selection resolves
  * to the session already playing and the old restart rewound it to frame 0.
  *

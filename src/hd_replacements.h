@@ -10,12 +10,11 @@
  * to swap the graphic. Planes deliberately have different capability tiers:
  *
  *   screen  host-overlay substitution of a screen-locked, untransformed
- *           graphic via the generic PPU capture API (works today)
- *   mode7   canvas-space texture override sampled through the Mode-7 matrix
- *           (WORKS -- landed 2026-07-15; routes through PpuSetMode7Override, one
- *           override per frame, and says so once when another entry owns it)
- *   tiles   hash-keyed HD tile pack. STILL RESERVED: parsed, then reported inert
- *           at load time, because it needs the N-x RGBA-sideband renderer path.
+ *           graphic via the generic PPU capture API
+ *   mode7   canvas-space texture override sampled through the Mode-7 matrix;
+ *           one override owns a frame and conflicts are reported once
+ *   tiles   hash-keyed HD tile pack. Reserved and inert because it needs the
+ *           N-x RGBA-sideband renderer path.
  *           An authored `tiles` entry logs "[hd-manifest] ... reserved and not
  *           implemented yet; entry inert" rather than failing silently.
  *

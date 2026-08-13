@@ -585,16 +585,8 @@ func TestGameBinaryFoundAlongsideBundleScripts(t *testing.T) {
 	}
 }
 
-// THE DOCUMENTED DEVELOPER INVOCATION must never be able to delete source.
-// `snesbuild gui --root .` from a checkout (docs/BUILD_TOOLING.md:61) makes root
-// the repository root, so the cleanup allowlist -- src, recomp, tools,
-// third_party, snesrecomp-go, build -- names the developer's own tracked
-// directories. An audit probe ran it against a checkout-shaped fixture and it
-// deleted src/main.c, recomp/bank00.cfg and tools/canary.sh.
-//
-// isSlimmableBundle now requires positive proof of a bundle (tools/snesbuild
-// present) AND the absence of any source-tree marker, so a false negative merely
-// hides the offer while a false positive would destroy work.
+// A checkout-shaped root must never qualify for destructive bundle cleanup.
+// False negatives only hide the offer; false positives can delete source.
 func TestCleanupRefusesInASourceCheckout(t *testing.T) {
 	repo := t.TempDir()
 	for _, dir := range []string{"src", "recomp", "tools", "third_party",

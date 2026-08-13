@@ -7,8 +7,7 @@
 
 #include "diorama_planes.h"
 
-/* Per-room diorama layer overrides (F3/F4 from the 2026-07-26 on-device
- * handback).
+/* Per-room diorama layer overrides.
  *
  * The problem: a stage's layers do not always want the diorama's default paint
  * order. Fillmore Act 2 renders its water band BEHIND the rock path, when it
@@ -31,7 +30,7 @@
  * this module got wrong. diorama.c's paint order is the literal order of the
  * kDioramaLayers table and nothing sorts by z (no qsort in diorama.c; the file
  * notes at each SDL_RenderGeometry call that it has no depth test). Crucially the two
- * do NOT agree today: Bg2Hi (z=0.21) is painted at slot 7, AFTER Bg1 (z=0.50)
+ * do not agree: Bg2Hi (z=0.21) is painted at slot 7, AFTER Bg1 (z=0.50)
  * at slot 5. So "sort by ascending z when an override is active" is not a
  * refinement of the default order — it is a DIFFERENT order, and it reshuffled
  * five planes even for an edit that changed nothing.
@@ -321,7 +320,7 @@ typedef struct DioramaResolvedLayer {
   float z;
   uint8_t alpha;
   uint8_t source;     /* DioramaLayerSource */
-  float rake;       /* bottom edge sits at z + rake; 0 = parallel, as today */
+  float rake;       /* bottom edge sits at z + rake; 0 = parallel */
   float bow;        /* same, but eased quadratically; 0 = no curve */
   float thickness;  /* extrude the bottom edge forward to z + thickness; 0 = flat */
   float stack;      /* fill depth by repeating the layer to z + stack; 0 = off */
@@ -388,8 +387,8 @@ void DioramaLayerOrder_ResetSection(DioramaLayerOrderTable *table,
  *
  * `defaults` / `default_count` are the built-in planes in their built-in table
  * order, with their built-in z. On no override the output is the defaults
- * verbatim, in the same order, with alpha 255 — so an inactive table is
- * bit-identical to today's behaviour.
+ * verbatim, in the same order, with alpha 255 — so an inactive table preserves
+ * the built-in behavior exactly.
  *
  * With an override active, planes carrying an authored `order` are placed at
  * that slot and everything else keeps its built-in relative position. Planes

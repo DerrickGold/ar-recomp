@@ -209,7 +209,7 @@ static inline uint16 cpu_read_a_m(const CpuState *cpu) {
     return cpu->m_flag ? (uint16)cpu_read_a8(cpu) : cpu_read_a16(cpu);
 }
 
-/* AR_TRACEA=1 (2026-07-01, temporary probe): every cpu_write_a8/a16 call,
+/* AR_TRACEA=1: trace every cpu_write_a8/a16 call,
  * unconditional. Settles whether the $0019-read-then-write sequence at
  * bank00 $008106 really produces A's low byte == the value read (the C
  * source says it must; observed behavior says A ends up 0x00A1 instead
@@ -556,7 +556,7 @@ static inline void ar_call_mx_check(CpuState *cpu, int em, int ex,
     ar_trace_call(pc24, fn, cpu->m_flag & 1, cpu->x_flag & 1, em, ex);
 }
 
-/* AR_INDIRLOG (2026-07-01): every `JSR (abs,X)` the decoder severed for
+/* AR_INDIRLOG: every `JSR (abs,X)` the decoder severed for
  * lack of cfg `indirect_call_table` authorisation calls this right where
  * the real dispatch would have happened. Names the site, table base, and
  * runtime (m,x,X-reg) so we can tell a genuine unauthorised static-ROM

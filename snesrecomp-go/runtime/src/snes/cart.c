@@ -28,7 +28,8 @@ void cart_free(Cart* cart) {
 }
 
 void cart_reset(Cart* cart) {
-  //if(cart->ramSize > 0 && cart->ram != NULL) memset(cart->ram, 0, cart->ramSize); // for now
+  /* Battery-backed RAM survives a console reset. */
+  (void)cart;
 }
 
 void cart_saveload(Cart *cart, SaveLoadInfo *sli) {

@@ -60,8 +60,8 @@ import (
 // own marker. The toolchain is the size anyway: 415 MB of the real bundle's
 // 431 MB under tools/, against 7.2 MB for snesbuild.
 //
-// tools/sdl3 IS removable: copySDLRuntime (internal/project/hermetic.go:255)
-// copies libSDL3 next to the game binary at link time, and the rpath is
+// tools/sdl3 IS removable: copySDLRuntime copies libSDL3 next to the game binary
+// at link time, and the rpath is
 // @executable_path/$ORIGIN, so the game never reads it from here.
 var buildOnlySubtrees = []string{
 	"tools/toolchain", // the pinned Zig toolchain -- 415 of tools/'s 431 MB
@@ -158,16 +158,13 @@ func measureSlimBytes(root string) int64 {
 // isSlimmableBundle reports whether `root` is a shipped bundle's utils/ directory
 // rather than a developer's source checkout.
 //
-// THIS GUARD IS NOT OPTIONAL. The documented developer invocation is
-// `snesbuild gui --root .` from a repo checkout (docs/BUILD_TOOLING.md:61), which
-// makes root == the repository root -- so the cleanup allowlist
-// (src, recomp, tools, third_party, snesrecomp-go, build) names the developer's
-// own TRACKED SOURCE. Accepting the cleanup there would delete src/, recomp/ and
-// tools/ from a working copy. Found by an audit probe; it destroyed src/main.c,
-// recomp/bank00.cfg and tools/canary.sh in a fixture before this existed.
+// This guard is mandatory. docs/BUILD_TOOLING.md documents
+// `snesbuild gui --root .` for a checkout, where the cleanup allowlist names
+// tracked source. A permissive check would delete that source; an audit fixture
+// reproduced exactly that failure.
 //
-// Two positive signals are required, so the test is "is this definitely a bundle"
-// rather than "is this probably not a checkout":
+// Require positive proof of a bundle rather than trying to recognize every
+// possible checkout shape:
 //
 //   - the bundled snesbuild lives at tools/snesbuild[.exe]; a checkout builds it
 //     into build/ or a GOPATH instead, and never has it there.

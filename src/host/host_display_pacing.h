@@ -42,8 +42,8 @@ uint64_t HostDisplayPacing_CatchupCapNs(
  * round-to-nearest alone returns `extent` — one past the end — for the final
  * window pixel whenever output <= window/2, which is exactly the ratio a 2x
  * downscale produces. Every current caller happens to bounds-check, so the
- * symptom today is only a one-pixel dead edge, but SDL_mouse.h warns that mouse
- * coordinates may fall outside the window at all, so no caller may assume the
+ * visible symptom can be only a one-pixel dead edge, but SDL permits mouse
+ * coordinates outside the window, so no caller may assume the
  * result is in range unless this guarantees it.
  *
  * Returns 0 for a non-positive extent rather than dividing by zero. */

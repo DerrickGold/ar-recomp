@@ -434,9 +434,8 @@ bool ManualTurn_SheetExtents(const float matrix[16],
   if (!matrix || view_w <= 0 || view_h <= 0) return false;
   if (!(page_w > 0.0f) || !(page_h > 0.0f)) return false;
   /* Finite, not merely positive. +Inf is > 0 and sails through the test above,
-   * then divides to +Inf extents and puts every vertex of the sheet at NaN --
-   * a silently blank reader rather than a refusal. No caller reaches this today;
-   * a host shim reading page dimensions from a file could. */
+   * then divides to +Inf extents and puts every vertex at NaN, producing a
+   * silently blank reader. Reject it at this boundary. */
   if (!isfinite(page_w) || !isfinite(page_h)) return false;
 
   /* At z=0 the projection is linear in world x and y, so the scale is exactly

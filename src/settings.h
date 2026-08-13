@@ -73,10 +73,8 @@ typedef enum {
   kAudioFrequency_Count,
 } AudioFrequency;
 
-/* B4 (followup doc): Free Cam is today's manual orbit/zoom, persisted and
- * player-owned. Dynamic Cam is the opt-in reactive camera that sways off
- * gameplay signals around its own dedicated baseline pose — mutually
- * exclusive with Free Cam, not a blend. */
+/* Free Cam is the persisted, player-owned orbit/zoom pose. Dynamic Cam reacts
+ * to gameplay around its own baseline. The modes are exclusive, not blended. */
 typedef enum {
   kDioramaCam_Free = 0,
   kDioramaCam_Dynamic = 1,
@@ -103,8 +101,8 @@ typedef enum {
  * mutually exclusive views of the same layer (matches display_mode's/
  * extended_aspect's mutually-exclusive-preset modeling). Default Off: BG2 is
  * a heuristic pick for "sky" (no programmatic flag says so — see
- * AR_WS_ONLYBG, actraiser_rtl.c), so this stays opt-in rather than changing
- * today's known-good look unprompted. */
+ * AR_WS_ONLYBG, actraiser_rtl.c), so this stays opt-in and preserves the
+ * default presentation. */
 typedef enum {
   kDioramaSky_Off = 0,
   kDioramaSky_Only = 1,
@@ -483,7 +481,7 @@ typedef struct Settings {
   /* A5 (followup doc): true (default) = BG3 excluded from the diorama
    * capture, drawn via the anchored PresentHudOverlayComposited path (A7) —
    * flat, widescreen-spread, readable. false = BG3 captured as a diorama
-   * layer and drawn as an unanchored tilted plane (today's pre-A7 look) —
+   * layer and drawn as an unanchored tilted plane —
    * kept as an A/B curiosity, not a real anchored alternative (see A5's
    * load-bearing constraint: screen-space anchored rects can't be projected
    * onto a tilted mesh). */
@@ -499,9 +497,8 @@ typedef struct Settings {
   int diorama_dyncam_baseline_tilt_x_mrad;
   int diorama_dyncam_baseline_tilt_y_mrad;
   int diorama_dyncam_baseline_distance_x100;
-  /* B4 (followup doc): 0-100, scales every reactive offset (velocity-lean,
-   * positional pan, event kicks — later checkpoints); 0 disables sway
-   * entirely, snapping to the baseline pose above. */
+  /* 0-100, scales every reactive offset; 0 disables sway and holds the
+   * baseline pose. */
   int diorama_reactive_strength;
   /* B5 (followup doc): DioramaSkyMode selector — see the enum comment. */
   int diorama_skybox;

@@ -638,7 +638,7 @@ void RtlApuWrite(uint16 adr, uint8 val) {
      * produced-samples — one guaranteed engine poll. The drain runs once
      * per produced sample (apu_cycle), so this target spacing becomes
      * apply spacing directly. Bounded by produced + 8*quantum so a
-     * pathological sustained burst degrades to today's bounded latency
+     * pathological sustained burst degrades to the existing bounded latency
      * rather than unbounding it. Identical repeats (e.g. repeated
      * 0-clears) need no spacing. No effect at 1x: frame-spaced writes are
      * already ~534 samples apart, far above the floor. */

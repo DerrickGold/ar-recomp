@@ -923,17 +923,8 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
     cursor += line_len;
   }
 
-  /* EMPTY INPUT ONLY: seed a new file with the shipped preamble and every active
-   * room. `!wrote_any_line` is exactly "the walk above emitted nothing", which for
-   * a non-empty `existing` is impossible (every line is either passed through or
-   * regenerated). So this is the first-write path and nothing else.
-   *
-   * An earlier version also tested `!saw_managed_section` and its comment claimed
-   * the branch covered "a file with no managed section". It never did: such a file
-   * still has lines, so `wrote_any_line` is true and the branch is skipped -- which
-   * is CORRECT (an existing file must keep its own preamble, never gain ours), but
-   * the extra condition was dead and the comment described behaviour that does not
-   * exist. Both removed rather than left to mislead. */
+  /* Seed the shipped preamble only when the input is empty. An existing file,
+   * even one with no managed section, must keep its own preamble unchanged. */
   if (!wrote_any_line && default_preamble && default_preamble[0]) {
     total = 0;
     OUT_TEXT(default_preamble);

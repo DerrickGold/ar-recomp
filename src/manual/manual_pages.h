@@ -422,9 +422,8 @@ bool ManualSheet_Solve(const float matrix[16], int view_w, int view_h,
 enum {
   /* How close to the camera the sheet's highest point may come, in thousandths
    * of the camera distance. 700 is not a taste value: it is just above the 661
-   * the ActRaiser manual already reaches, chosen so that the page shape this
-   * reader was built around keeps EXACTLY the camera it has today and only
-   * shapes that would otherwise break get a different one. */
+   * the ActRaiser manual already reaches. It preserves the reference layout's
+   * camera and adjusts only shapes that would otherwise cross the camera. */
   kManualLiftClearancePermille = 700,
 };
 

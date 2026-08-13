@@ -1,11 +1,7 @@
-/* Temporary diagnostic stub: the upstream debug_server.c (TCP debug server)
- * has bitrotted against the current cpu_trace.c (references removed symbols
- * g_oamblk_*, s_oamblk, g_rtst_*, OAMBLK_TRACE_SIZE, ...). For local
- * stack-drift hunts we only need SNESRECOMP_TRACE=1 to compile in the
- * cpu_trace.c tripwires; the TCP server itself is unused. This file provides
- * no-op definitions for the handful of debug_server entry points that
- * non-debug_server translation units reference, so the trace build links
- * without compiling debug_server.c. NOT part of the normal (perf) build. */
+/* Trace-build linkage stub. The TCP debug_server.c no longer matches the
+ * current cpu_trace API, while local trace builds need only the in-process
+ * rings and tripwires. These no-op integration hooks let that configuration
+ * link without the TCP server and are excluded from normal builds. */
 #include <stdint.h>
 #include "cpu_state.h"
 

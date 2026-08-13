@@ -244,7 +244,7 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
       if (next == 0.0f) {
         /* Zero is not a shape, so it must not be stored as one. But a rake and a
          * bow are SIGNED -- a negative one tilts the bottom edge away, which is
-         * the right shape for a ceiling (diorama_layer_order.c:412) -- so simply
+         * the right shape for a ceiling -- so simply
          * clearing at zero would make the whole negative half of their range
          * unreachable by stepping. Step THROUGH it instead: one more increment in
          * the same direction, so holding Left on a rake goes 0.02, 0.01, -0.01

@@ -37,8 +37,8 @@ bool SimWorldNavigationScene_Build(
   if (!navigation || !developed_texture_serial) return false;
 
   /* Mode 7 maps a screen delta to a source-texture delta through the signed
-   * 8.8 A/B/C/D matrix. Invert that 2x2 transform once on the game thread;
-   * the render thread then receives a direct source-to-screen affine map.
+   * 8.8 A/B/C/D matrix. Invert that 2x2 transform during capture so
+   * presentation receives a direct source-to-screen affine map.
    *
    * Keep the determinant in 64 bits. The inputs are signed 16-bit and the
    * cross products can span nearly the entire signed 32-bit range before

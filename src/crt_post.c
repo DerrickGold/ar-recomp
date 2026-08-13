@@ -41,9 +41,8 @@ static const GpuShaderBlobs kCrtBlobs = {
  * knobs move the picture while the menu is open.
  *
  * One mode has no settings row: AR_CRT_PASSTHROUGH=1 redirects through the
- * render target but blits straight back with no shader. That is the Phase 0
- * proof — output must stay byte-identical to the effect being off — and it is
- * a test hook, not something to expose to players. */
+ * render target but blits straight back with no shader. It is a byte-identity
+ * test hook, not a player-facing mode. */
 typedef enum { kCrtMode_Off, kCrtMode_Passthrough, kCrtMode_Full } CrtMode;
 
 static bool s_passthrough_checked;
