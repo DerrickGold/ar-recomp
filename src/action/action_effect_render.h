@@ -49,10 +49,19 @@ enum {
       kActionSceneEffectMaxInstances * kActionSceneEffectGlowsPerInstance,
   kActionSceneEffectMaxParticles =
       kActionSceneEffectMaxInstances * kActionSceneEffectParticlesPerInstance,
-  /* Bottom waterfall atmosphere uses two tiers of three fog banks plus
-   * thirty-two deterministic foam/mist motes. It is the only style with more
-   * than the ordinary spill/body pair. */
-  kActionSceneEffectWaterfallMistGlowCount = 6,
+  /* Bottom waterfall atmosphere uses four tiers of six low-poly cloud puffs
+   * plus thirty-two deterministic foam/mist motes. A dedicated 12-segment
+   * primitive keeps the volume dense without paying the generic 32-segment
+   * light-glow cost for every puff. */
+  kActionSceneEffectWaterfallMistCloudCount = 24,
+  kActionSceneEffectWaterfallMistCloudSegments = 12,
+  kActionSceneEffectWaterfallMistCloudVertices =
+      1 + kActionSceneEffectWaterfallMistCloudSegments *
+          kActionEffectGlowRings,
+  kActionSceneEffectWaterfallMistCloudIndices =
+      kActionSceneEffectWaterfallMistCloudSegments * 3 +
+      kActionSceneEffectWaterfallMistCloudSegments * 6 *
+          (kActionEffectGlowRings - 1),
   kActionSceneEffectWaterfallMistParticleCount = 32,
   /* The boss strike adds two screen-space filament layers over at most 24
    * authored OAM-row segments: a broad amber corona and a narrow white-gold
@@ -117,7 +126,9 @@ enum {
    * splash signatures identify the section. Its denser field is the only
    * scene style that exceeds the ordinary 12-particle actor budget. */
   kActionSceneEffectMaxWaterfallVeils = 1,
-  kActionSceneEffectWaterfallParticleCount = 96,
+  /* Eight rows across sixteen stable lanes preserve the original veil density
+   * now that its projection continues through the 224-row overflow repeat. */
+  kActionSceneEffectWaterfallParticleCount = 128,
   kActionSceneEffectWaterfallExtraVertices =
       (kActionSceneEffectWaterfallParticleCount -
        kActionSceneEffectParticlesPerInstance) * 4,
@@ -125,13 +136,15 @@ enum {
       (kActionSceneEffectWaterfallParticleCount -
        kActionSceneEffectParticlesPerInstance) * 6,
   kActionSceneEffectWaterfallMistExtraVertices =
-      (kActionSceneEffectWaterfallMistGlowCount -
-       kActionSceneEffectGlowsPerInstance) * kActionEffectGlowVertices +
+      kActionSceneEffectWaterfallMistCloudCount *
+          kActionSceneEffectWaterfallMistCloudVertices -
+      kActionSceneEffectGlowsPerInstance * kActionEffectGlowVertices +
       (kActionSceneEffectWaterfallMistParticleCount -
        kActionSceneEffectParticlesPerInstance) * 4,
   kActionSceneEffectWaterfallMistExtraIndices =
-      (kActionSceneEffectWaterfallMistGlowCount -
-       kActionSceneEffectGlowsPerInstance) * kActionEffectGlowIndices +
+      kActionSceneEffectWaterfallMistCloudCount *
+          kActionSceneEffectWaterfallMistCloudIndices -
+      kActionSceneEffectGlowsPerInstance * kActionEffectGlowIndices +
       (kActionSceneEffectWaterfallMistParticleCount -
        kActionSceneEffectParticlesPerInstance) * 6,
   kActionSceneEffectRenderMaxVertices =

@@ -613,8 +613,18 @@ bool ActionBgLayerPlan_ResolveBand(const ActionBgLayerPlan *layer,
   return true;
 }
 
-static const ActionBgBand *FindRowBand(const ActionBgLayerPlan *layer,
-                                      int authentic_y) {
+static void ResolveValidatedBand(const ActionBgLayerPlan *layer,
+                                 unsigned band,
+                                 int *screen_y0, int *screen_y1) {
+  const ActionBgBand *entry = &layer->bands[band];
+  const int offset = entry->anchor == kActionBgBandAnchor_World
+      ? (int)layer->camera_y + 1 : 0;
+  *screen_y0 = (int)entry->y0 - offset;
+  *screen_y1 = (int)entry->y1 - offset;
+}
+
+static const ActionBgBand *FindValidatedRowBand(
+    const ActionBgLayerPlan *layer, int authentic_y) {
   /* A content family that reaches an authentic viewport edge continues into
    * that edge's synthetic presentation margin. This is deliberately derived
    * from the band's existing bounds: it adds no second flag or policy source,
@@ -622,7 +632,7 @@ static const ActionBgBand *FindRowBand(const ActionBgLayerPlan *layer,
   for (unsigned i = 0; i < layer->band_count; i++) {
     const ActionBgBand *band = &layer->bands[i];
     int y0 = 0, y1 = 0;
-    if (!ActionBgLayerPlan_ResolveBand(layer, i, &y0, &y1)) return NULL;
+    ResolveValidatedBand(layer, i, &y0, &y1);
     const bool owns_top_margin = authentic_y < 0 && y0 <= 0 && y1 > 0;
     const bool owns_bottom_margin = authentic_y >= kAuthenticHeight &&
         y0 < kAuthenticHeight && y1 >= kAuthenticHeight;
@@ -633,17 +643,15 @@ static const ActionBgBand *FindRowBand(const ActionBgLayerPlan *layer,
   return NULL;
 }
 
-bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
-                                  int authentic_y,
-                                  ActionBgRowPolicy *out) {
-  if (out) memset(out, 0, sizeof(*out));
-  if (!out || !ActionBgLayerPlan_Validate(layer)) return false;
+void ActionBgLayerPlan_ResolveValidatedRow(const ActionBgLayerPlan *layer,
+                                           int authentic_y,
+                                           ActionBgRowPolicy *out) {
   ActionBgRowPolicy resolved = {
     .edge = layer->default_edge,
     .motion = layer->default_motion,
     .horizontal_extent = layer->horizontal_extent,
   };
-  const ActionBgBand *band = FindRowBand(layer, authentic_y);
+  const ActionBgBand *band = FindValidatedRowBand(layer, authentic_y);
   if (band) {
     resolved.edge = band->edge;
     resolved.motion = band->motion;
@@ -651,6 +659,14 @@ bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
       resolved.horizontal_extent = band->horizontal_extent;
   }
   *out = resolved;
+}
+
+bool ActionBgLayerPlan_ResolveRow(const ActionBgLayerPlan *layer,
+                                  int authentic_y,
+                                  ActionBgRowPolicy *out) {
+  if (out) memset(out, 0, sizeof(*out));
+  if (!out || !ActionBgLayerPlan_Validate(layer)) return false;
+  ActionBgLayerPlan_ResolveValidatedRow(layer, authentic_y, out);
   return true;
 }
 

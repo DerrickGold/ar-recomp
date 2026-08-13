@@ -102,9 +102,12 @@ DioramaScrollDelta ComputeDioramaScrollDeltaAt(
    * constant for most of a tick and then jumped — a second, harsher artifact
    * on top of the first.
    *
-   * V was already correct: snes_height IS the texture height, and diorama.c
-   * normalizes V by the same tex_h. Only U was inconsistent, which is also why
-   * diagonal motion sheared horizontally against vertically.
+   * The same allocation rule applies to V. Layer textures gained fixed top and
+   * bottom margin capacity after this comment was written, so snes_height=224
+   * is now only the authentic viewport while the texture is kPpuBufHeight=352.
+   * Dividing by 224 applies 1.57 texture rows for each camera pixel and throws
+   * the excess away at the next captured tick: a vertical-only sawtooth that is
+   * most visible at an attached repeat boundary.
    *
    * (Wide diorama makes snes_width 496; the denominator still has the apron,
    * so using the captured width remains wrong even at maximum margin, though
@@ -114,12 +117,14 @@ DioramaScrollDelta ComputeDioramaScrollDeltaAt(
   int dh1 = curr->bg1_camera_x - prev->bg1_camera_x;
   int dv1 = curr->bg1_camera_y - prev->bg1_camera_y;
   d.bg_du[0] = (t * (float)dh1) / (float)kFrameSlotLayerTextureWidth;
-  d.bg_dv[0] = (t * (float)dv1) / (float)curr->snes_height;
+  d.bg_dv[0] =
+      (t * (float)dv1) / (float)kFrameSlotLayerTextureHeight;
 
   int dh2 = curr->bg2_camera_x - prev->bg2_camera_x;
   int dv2 = curr->bg2_camera_y - prev->bg2_camera_y;
   d.bg_du[1] = (t * (float)dh2) / (float)kFrameSlotLayerTextureWidth;
-  d.bg_dv[1] = (t * (float)dv2) / (float)curr->snes_height;
+  d.bg_dv[1] =
+      (t * (float)dv2) / (float)kFrameSlotLayerTextureHeight;
 
   /* AR_INTERP_LOG=1: log BG1's interpolated offset every present, so the M7
    * acceptance test (ar-recomp-threading-impl.md milestone M7) can assert

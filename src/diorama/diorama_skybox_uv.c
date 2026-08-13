@@ -83,7 +83,7 @@ void DioramaBgValidSpanPlan_Build(
       .horizontal_extent = { .mode = kActionBgExtent_Available },
     };
     if (layer_valid)
-      ActionBgLayerPlan_ResolveRow(layer, authentic_y, &policy);
+      ActionBgLayerPlan_ResolveValidatedRow(layer, authentic_y, &policy);
     if (!layer_valid || RowWithinVerticalExtent(layer, authentic_y)) {
       ValidSpanForPolicy(ws_extra, budget, live_left, live_right,
                          pad_captured_to_budget, &policy,
@@ -106,6 +106,29 @@ void DioramaBgValidSpanPlan_Build(
       .x1 = x1,
     };
   }
+}
+
+bool DioramaBgValidSpanPlan_DrawableRowBounds(
+    const DioramaBgValidSpanPlan *plan, int *out_y0, int *out_y1) {
+  if (out_y0) *out_y0 = 0;
+  if (out_y1) *out_y1 = 0;
+  if (!plan || !plan->count || plan->count > kDioramaBgMaxValidSpans)
+    return false;
+
+  bool found = false;
+  int y0 = 0, y1 = 0;
+  for (uint8_t i = 0; i < plan->count; i++) {
+    const DioramaBgValidSpan *span = &plan->spans[i];
+    if (span->x1 <= span->x0 || span->y1 <= span->y0)
+      continue;
+    if (!found || span->y0 < y0) y0 = span->y0;
+    if (!found || span->y1 > y1) y1 = span->y1;
+    found = true;
+  }
+  if (!found) return false;
+  if (out_y0) *out_y0 = y0;
+  if (out_y1) *out_y1 = y1;
+  return true;
 }
 
 void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,

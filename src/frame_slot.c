@@ -629,6 +629,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
      * interpolation shift. */
     _Static_assert(kFrameSlotLayerTextureWidth == kPpuSurfaceWidth,
                    "present.h's mirrored layer texture width must match ppu.h");
+    _Static_assert(kFrameSlotLayerTextureHeight == kPpuBufHeight,
+                   "present.h's mirrored layer texture height must match ppu.h");
     _Static_assert(kFrameSlotAuthenticWidth == kActRaiserAuthenticWidth,
                    "present.h's mirrored authentic width must match "
                    "actraiser_game.h");

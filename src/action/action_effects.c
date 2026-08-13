@@ -1779,7 +1779,7 @@ static void CaptureAitosWater(ActionSceneEffectFrame *dst,
     .left_extent = 256,
     .top_extent = 176,
     .right_extent = 256,
-    .bottom_extent = 176,
+    .bottom_extent = 312,
     .age_ticks = clock,
     .phase_ticks = clock,
     .pulse_ticks = clock,
@@ -1791,7 +1791,10 @@ static void CaptureAitosWater(ActionSceneEffectFrame *dst,
     .projection_plane = kActionEffectProjectionPlane_Bg2,
     .geometry = {
       .kind = kActionEffectGeometry_Rect,
-      .data.rect = {-256.0f, -176.0f, 256.0f, 176.0f},
+      /* Continue the veil through one 224-row overflow repeat. The lower
+       * bound is chosen so the particle field ends at screen row 448 after
+       * its 24px travel margin: authentic bottom 224 + one repeat 224. */
+      .data.rect = {-256.0f, -176.0f, 256.0f, 312.0f},
     },
   };
   if (!SceneDecorationAppend(dst, &waterfall)) return;

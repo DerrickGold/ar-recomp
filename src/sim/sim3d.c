@@ -509,24 +509,6 @@ void Sim3D_ComposeFlatPixels(
                           full_width_rows);
 }
 
-static uint64_t HashRgb(const uint32_t *pixels, int width, int height,
-                        int pitch) {
-  uint64_t hash = UINT64_C(1469598103934665603);
-  for (int y = 0; y < height; y++) {
-    const uint32_t *row = (const uint32_t *)(
-        (const uint8_t *)pixels + (size_t)y * pitch);
-    for (int x = 0; x < width; x++) {
-      uint32_t color = row[x] & 0xffffff;
-      for (int byte = 0; byte < 3; byte++) {
-        hash ^= color & 0xff;
-        hash *= UINT64_C(1099511628211);
-        color >>= 8;
-      }
-    }
-  }
-  return hash;
-}
-
 static bool WritePpm(const char *path, const uint8_t *pixels,
                      int width, int height, int pitch) {
   FILE *file = fopen(path, "wb");
@@ -642,13 +624,13 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
           ok ? "written" : "failed", (unsigned)game_frame, prefix);
 }
 
-/* The mismatch COUNT is the fidelity gate and is always needed. The difference
- * IMAGE is only ever read by MaybeDumpDemoArtifacts, so `write_image` is false
- * in ordinary play -- which drops a full-frame (300 KB at 342x224) store pass
- * from every enhanced town frame. */
+/* The mismatch count and image are diagnostic-only now that pixel differences
+ * do not veto a frame. `write_image` is reserved for artifact dumps. */
 static uint32_t BuildDifference(const uint8_t *authentic_pixels,
-                                int authentic_pitch, bool write_image) {
+                                int authentic_pitch, bool write_image,
+                                uint64_t *out_flat_hash) {
   uint32_t mismatch = 0;
+  uint64_t hash = UINT64_C(1469598103934665603);
   for (int y = 0; y < g_sim3d.height; y++) {
     const uint32_t *authentic = (const uint32_t *)(
         authentic_pixels + (size_t)y * authentic_pitch);
@@ -658,6 +640,14 @@ static uint32_t BuildDifference(const uint8_t *authentic_pixels,
         ? &g_sim3d_difference_pixels[(size_t)y * g_sim3d.width] : NULL;
     for (int x = 0; x < g_sim3d.width; x++) {
       uint32_t a = authentic[x], b = flat[x];
+      if (out_flat_hash) {
+        uint32_t color = b & 0xffffff;
+        for (int byte = 0; byte < 3; byte++) {
+          hash ^= color & 0xff;
+          hash *= UINT64_C(1099511628211);
+          color >>= 8;
+        }
+      }
       int ar = a >> 16 & 0xff, ag = a >> 8 & 0xff, ab = a & 0xff;
       int br = b >> 16 & 0xff, bg = b >> 8 & 0xff, bb = b & 0xff;
       int dr = ar > br ? ar - br : br - ar;
@@ -669,6 +659,7 @@ static uint32_t BuildDifference(const uint8_t *authentic_pixels,
       if (dr || dg || db) mismatch++;
     }
   }
+  if (out_flat_hash) *out_flat_hash = hash;
   return mismatch;
 }
 
@@ -766,8 +757,7 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
 
   /* The full-plane capture does not use RemoveFromGame, so the PPU framebuffer
    * entering this function is already correct everywhere except the promoted
-   * HUD pixels. The D2 gate immediately above proved the separated composite
-   * agrees with that framebuffer byte-for-byte. Patch only the BG3 capture
+   * HUD pixels. Patch only the BG3 capture
    * rectangle and the sparse OBJ raster instead of recompositing all ten planes
    * over the entire frame, then scanning all ten planes over it a second time.
    *
@@ -835,8 +825,8 @@ static uint8_t ColorMathLayerBit(int plane) {
  *
  * Done here, on the captured plane pixels, rather than in either compositor:
  * the authentic rebuild, the flat recomposition and the projected textures all
- * read these same buffers, so one application serves all three and the D2
- * equality gate verifies it against the real hardware output. Unlike the
+ * read these same buffers, so one application serves all three and diagnostic
+ * D2 runs verify it against the real hardware output. Unlike the
  * targeted-miracle half-add -- which combines two planes and therefore has to
  * stay a compositing policy -- a fixed-colour add is a property of one layer
  * and belongs baked into it.
@@ -844,8 +834,8 @@ static uint8_t ColorMathLayerBit(int plane) {
  * The arithmetic is the part that matters. The PPU adds in 5-bit component
  * space and only then maps through `brightnessMult` to 8 bits, so adding the
  * expanded colour to the expanded pixel is NOT the same operation: it differs
- * on 168 of the 1024 (component, add) pairs, which the byte-exact D2 gate
- * would reject outright. The 5-bit value is recovered by inverting that table (injective at
+ * on 168 of the 1024 (component, add) pairs, which byte-exact D2 diagnostics
+ * expose. The 5-bit value is recovered by inverting that table (injective at
  * full brightness, which the capture gate requires), added with the hardware's
  * clamp at 31, and mapped forward again. */
 static void ApplyFixedColorAdd(void) {
@@ -880,7 +870,7 @@ static void ApplyFixedColorAdd(void) {
         uint8_t byte = (uint8_t)(pixel >> shift[c]);
         uint8_t five = inverse[byte];
         /* A byte the table never produces cannot be a palette colour this
-         * frame; leaving it be is safer than guessing, and the D2 gate will
+         * frame; leaving it be is safer than guessing, and D2 diagnostics will
          * notice if that assumption is ever wrong. */
         if (five == 0xFF) {
           out |= (uint32_t)byte << shift[c];
@@ -918,9 +908,8 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
       authentic_pitch < g_sim3d.width * 4)
     return;
 
-  /* Before anything reads the planes -- the authentic rebuild inside
-   * RestoreTownHudPolicy included, since that rebuild feeds the very image
-   * the fidelity gate compares against. */
+  /* Before anything reads the planes, including the authentic rebuild inside
+   * RestoreTownHudPolicy and any armed diagnostic comparison. */
   ApplyFixedColorAdd();
 
   /* The promoted HUD owns the full width of its own rows, so those rows keep
@@ -934,20 +923,21 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
       g_sim3d.object_half_add, hud_span_rows);
 
   bool dump_armable = DemoArtifactsArmable();
-  uint32_t mismatch =
-      BuildDifference(authentic_pixels, authentic_pitch, dump_armable);
+  bool trace_armed = SimRenderMetadata_TraceArmed();
+  bool diagnostics_armed =
+      g_sim3d.inspector_active || dump_armable || trace_armed;
+  uint32_t mismatch = 0;
+  uint64_t flat_hash = 0;
+  if (diagnostics_armed)
+    mismatch = BuildDifference(authentic_pixels, authentic_pitch,
+                               dump_armable, &flat_hash);
   g_sim3d.mismatch_pixels = mismatch;
-  /* The composed-frame hash has exactly three readers -- the scene inspector
-   * panel, the D1 metadata trace and the D2 dump's JSON -- and all three are
-   * off in ordinary play, where it was a full-frame FNV pass (three rounds per
-   * pixel) whose result was then discarded. Zero when nobody is looking, which
-   * is what BeginFrame already reports for a frame that never composed. */
-  g_sim3d.separated_hash =
-      (g_sim3d.inspector_active || dump_armable ||
-       SimRenderMetadata_TraceArmed())
-          ? HashRgb(g_sim3d_flat_pixels, g_sim3d.width, g_sim3d.height,
-                    g_sim3d.width * (int)sizeof(uint32_t))
-          : 0;
+  /* Difference count and composed-frame hash are diagnostics now that a pixel
+   * mismatch no longer vetoes the enhanced frame. Checkpoints arm the D1 trace,
+   * while the inspector and dump paths identify themselves explicitly. Fold the
+   * hash into the diagnostic comparison so those modes scan the frame once; in
+   * ordinary play neither value has a reader and both stay zero. */
+  g_sim3d.separated_hash = flat_hash;
   /* A requested diagnostic dump is useful for failed fidelity gates too: it
    * preserves the authentic/composed/difference triplet that names which
    * pixels the recomposition got wrong. Since the gate stopped vetoing this is
@@ -968,9 +958,9 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
    * separated_mismatch_pixels_total == 0, and the count and status below still
    * carry the failure into the D1 trace and the console. */
   g_sim3d.separated_valid = true;
-  g_sim3d.status = mismatch ? kSim3DCapture_PixelMismatch
-                            : kSim3DCapture_Ready;
-  ReportFidelityChange(mismatch, game_frame);
+  g_sim3d.status = diagnostics_armed && mismatch
+      ? kSim3DCapture_PixelMismatch : kSim3DCapture_Ready;
+  if (diagnostics_armed) ReportFidelityChange(mismatch, game_frame);
   RestoreTownHudPolicy(authentic_pixels, authentic_pitch);
 
   /* A nonzero diagnostic mask intentionally produces an incomplete A1 while
@@ -987,7 +977,7 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
      * is discarded here, so this whole pass exists only to refresh the image
      * for a dump -- skip it outright when no dump can consume it. */
     if (dump_armable)
-      BuildDifference(authentic_pixels, authentic_pitch, true);
+      BuildDifference(authentic_pixels, authentic_pitch, true, NULL);
   }
 }
 

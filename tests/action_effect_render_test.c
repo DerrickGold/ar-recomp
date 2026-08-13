@@ -320,7 +320,7 @@ static ActionEffectInstance SceneEffect(uint8_t kind, int world_x) {
       effect.phase = kActionEffectPhase_AitosWaterfallFlow;
       effect.projection_plane = kActionEffectProjectionPlane_Bg2;
       effect.geometry.data.rect =
-          (ActionEffectLocalRect){-256.0f, -176.0f, 256.0f, 176.0f};
+          (ActionEffectLocalRect){-256.0f, -176.0f, 256.0f, 312.0f};
       break;
     case kActionEffect_AitosWaterfallMist:
       effect.phase = kActionEffectPhase_AitosWaterfallMist;
@@ -603,7 +603,7 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
       &frame, true, false, ActionEffectProjection_ProjectPoint,
       &context, &pit));
   CHECK(Diorama_ProjectCapturedBg2Point(
-      &projection, 20.0f, 15.0f, &expected, NULL, NULL));
+      &projection, 20.0f, 83.0f, &expected, NULL, NULL));
   CHECK(fabsf(pit.vertices[0].position.x - expected.x) < 0.001f);
   CHECK(fabsf(pit.vertices[0].position.y - expected.y) < 0.001f);
 
@@ -620,8 +620,14 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
   CHECK(ActionSceneDecorationRender_Build(
       &decorations, kActionEffectRenderLayer_Atmosphere, true, false,
       ActionEffectProjection_ProjectPoint, &context, &pit));
+  /* The first cloud anchor is deliberately stable; the remaining puffs drift
+   * independently. screen X is -40, plus 60 capture margin, plus the first
+   * of six lanes across local [-256,256]. screen Y is -17, plus local 48 and
+   * the 32-row texture margin. */
+  const float first_cloud_x = -256.0f + 512.0f * (0.5f / 6.0f);
   CHECK(Diorama_ProjectCapturedBg2Point(
-      &projection, -150.0f, 4.0f, &expected, NULL, NULL));
+      &projection, 20.0f + first_cloud_x, 63.0f,
+      &expected, NULL, NULL));
   CHECK(fabsf(pit.vertices[0].position.x - expected.x) < 0.001f);
   CHECK(fabsf(pit.vertices[0].position.y - expected.y) < 0.001f);
 
@@ -700,9 +706,13 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
   CHECK(world.index_count != bg2.index_count);
   CHECK(atmosphere.index_count != bg2.index_count);
   CHECK(atmosphere.vertex_count ==
-        kActionSceneEffectWaterfallMistGlowCount *
-            kActionEffectGlowVertices +
+        kActionSceneEffectWaterfallMistCloudCount *
+            kActionSceneEffectWaterfallMistCloudVertices +
         kActionSceneEffectWaterfallMistParticleCount * 4);
+  CHECK(atmosphere.index_count ==
+        kActionSceneEffectWaterfallMistCloudCount *
+            kActionSceneEffectWaterfallMistCloudIndices +
+        kActionSceneEffectWaterfallMistParticleCount * 6);
 
   /* The source veil remains substantial renderer geometry rather than a
    * record that gets silently filtered, while the separate atmosphere spans
@@ -710,6 +720,16 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
   CHECK(bg2.vertex_count ==
         2 * kActionEffectGlowVertices +
         kActionSceneEffectWaterfallParticleCount * 4);
+  float visible_veil_max_y = -10000.0f;
+  for (int i = 0; i < bg2.vertex_count; i++) {
+    if (bg2.vertices[i].color.a > 0.01f &&
+        bg2.vertices[i].position.y > visible_veil_max_y)
+      visible_veil_max_y = bg2.vertices[i].position.y;
+  }
+  /* The source waterfall record now covers the repeated geometry too. This
+   * rejects a raw overflow quad that stops receiving the main flow veil at the
+   * authentic plane edge. */
+  CHECK(visible_veil_max_y > frame.decorations[1].world_y + 300.0f);
   float atmosphere_min_y = 10000.0f;
   float atmosphere_max_y = -10000.0f;
   float visible_atmosphere_min_y = 10000.0f;
@@ -736,32 +756,52 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
         kActRaiserAuthenticHeight +
             kActionBgAitosWaterfallBottomExtensionPixels + 20.0f);
   CHECK(visible_atmosphere_max_y - visible_atmosphere_min_y > 100.0f);
-  /* The six banks must not converge on one shared lower alpha edge. Inspect
-   * each glow's second (last visibly coloured) ring: the staggered bank
-   * depths need to differ by more than 80px, and one must retain visible mist
-   * 100px below the safe BG2 seam. This rejects the rectangular cutoff seen
-   * in run 20260812-224123 even though its total geometry was tall enough. */
-  float shallowest_bank_bottom = 10000.0f;
-  float deepest_bank_bottom = -10000.0f;
-  for (int bank = 0; bank < kActionSceneEffectWaterfallMistGlowCount;
-       bank++) {
+  /* Four tiers of six independently placed puffs replace the six huge banks.
+   * Pin the volume cues: cloud centres span the camera width and several
+   * heights, every second ring remains visible, every outer ring feathers to
+   * zero, and the irregular visible bottoms differ enough that they cannot
+   * converge into the old horizontal shelf. */
+  float cloud_centre_min_x = 10000.0f, cloud_centre_max_x = -10000.0f;
+  float cloud_centre_min_y = 10000.0f, cloud_centre_max_y = -10000.0f;
+  float shallowest_cloud_bottom = 10000.0f;
+  float deepest_cloud_bottom = -10000.0f;
+  for (int cloud = 0;
+       cloud < kActionSceneEffectWaterfallMistCloudCount; cloud++) {
+    const int cloud_base =
+        cloud * kActionSceneEffectWaterfallMistCloudVertices;
+    const SDL_Vertex *centre = &atmosphere.vertices[cloud_base];
+    if (centre->position.x < cloud_centre_min_x)
+      cloud_centre_min_x = centre->position.x;
+    if (centre->position.x > cloud_centre_max_x)
+      cloud_centre_max_x = centre->position.x;
+    if (centre->position.y < cloud_centre_min_y)
+      cloud_centre_min_y = centre->position.y;
+    if (centre->position.y > cloud_centre_max_y)
+      cloud_centre_max_y = centre->position.y;
+    CHECK(centre->color.a > 0.05f);
     const int visible_ring =
-        bank * kActionEffectGlowVertices + 1 + kActionEffectGlowSegments;
-    float bank_bottom = -10000.0f;
-    for (int segment = 0; segment < kActionEffectGlowSegments; segment++) {
+        cloud_base + 1 + kActionSceneEffectWaterfallMistCloudSegments;
+    const int transparent_ring = visible_ring +
+        kActionSceneEffectWaterfallMistCloudSegments;
+    float cloud_bottom = -10000.0f;
+    for (int segment = 0;
+         segment < kActionSceneEffectWaterfallMistCloudSegments; segment++) {
       const SDL_Vertex *vertex =
           &atmosphere.vertices[visible_ring + segment];
       CHECK(vertex->color.a > 0.02f);
-      if (vertex->position.y > bank_bottom)
-        bank_bottom = vertex->position.y;
+      CHECK(atmosphere.vertices[transparent_ring + segment].color.a == 0.0f);
+      if (vertex->position.y > cloud_bottom)
+        cloud_bottom = vertex->position.y;
     }
-    if (bank_bottom < shallowest_bank_bottom)
-      shallowest_bank_bottom = bank_bottom;
-    if (bank_bottom > deepest_bank_bottom)
-      deepest_bank_bottom = bank_bottom;
+    if (cloud_bottom < shallowest_cloud_bottom)
+      shallowest_cloud_bottom = cloud_bottom;
+    if (cloud_bottom > deepest_cloud_bottom)
+      deepest_cloud_bottom = cloud_bottom;
   }
-  CHECK(deepest_bank_bottom - shallowest_bank_bottom > 80.0f);
-  CHECK(deepest_bank_bottom >
+  CHECK(cloud_centre_max_x - cloud_centre_min_x > 400.0f);
+  CHECK(cloud_centre_max_y - cloud_centre_min_y > 55.0f);
+  CHECK(deepest_cloud_bottom - shallowest_cloud_bottom > 75.0f);
+  CHECK(deepest_cloud_bottom >
         kActRaiserAuthenticHeight +
             kActionBgAitosWaterfallBottomExtensionPixels + 100.0f);
   frame.decoration_overflow = 1;

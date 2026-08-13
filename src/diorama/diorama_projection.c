@@ -50,9 +50,9 @@ static bool ProjectCapturedPlanePoint(
     const DioramaProjection *projection, float capture_x, float capture_y,
     const DioramaPlaneProjection *plane, SDL_FPoint *point,
     float *scale_x, float *scale_y) {
-  if (!projection || !projection->valid || !point || !plane || !plane->valid ||
-      projection->texture_width <= 0 || projection->texture_height <= 0 ||
-      projection->output_width <= 0 || projection->output_height <= 0)
+  /* A published valid projection already guarantees non-zero texture/output
+   * dimensions; public entry points own pointer validation once per call. */
+  if (!projection->valid || !plane->valid)
     return false;
   float du = plane->u1 - plane->u0;
   float dv = plane->v1 - plane->v0;
@@ -72,6 +72,22 @@ static bool ProjectCapturedPlanePoint(
     float wy = (0.5f - t) * projection->height_scale;
     float wz = DioramaTiltedRowDepth(
         plane->z_world, plane->rake, plane->bow, t);
+    if (plane->overflow_valid && t > plane->overflow_fold_t &&
+        plane->overflow_height > 0.0f) {
+      const float overflow_t =
+          (t - plane->overflow_fold_t) * projection->height_scale /
+          plane->overflow_height;
+      const float y_top =
+          (0.5f - plane->overflow_fold_t) * projection->height_scale;
+      const float z_top = DioramaTiltedRowDepth(
+          plane->z_world, plane->rake, plane->bow,
+          plane->overflow_fold_t);
+      DioramaOverflowFoldPoint(
+          overflow_t, y_top, z_top, plane->overflow_handoff_z,
+          plane->overflow_height, plane->overflow_overlap_t,
+          plane->overflow_front_z, plane->overflow_front_drop,
+          &wy, &wz);
+    }
     Scene3DPoint projected_point;
     if (!Scene3D_ProjectWorldPoint(
             projection->matrix, wx, wy, wz,
@@ -97,7 +113,8 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
                                   float capture_x, float capture_y,
                                   unsigned obj_priority, SDL_FPoint *point,
                                   float *scale_x, float *scale_y) {
-  if (!projection || obj_priority >= kDioramaObjectPriorityCount) return false;
+  if (!projection || !point ||
+      obj_priority >= kDioramaObjectPriorityCount) return false;
   return ProjectCapturedPlanePoint(
       projection, capture_x, capture_y,
       &projection->object_planes[obj_priority], point, scale_x, scale_y);
@@ -107,7 +124,7 @@ bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
                                      float capture_x, float capture_y,
                                      SDL_FPoint *point,
                                      float *scale_x, float *scale_y) {
-  if (!projection) return false;
+  if (!projection || !point) return false;
   return ProjectCapturedPlanePoint(
       projection, capture_x, capture_y,
       &projection->bg1_plane, point, scale_x, scale_y);
@@ -117,7 +134,7 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
                                      float capture_x, float capture_y,
                                      SDL_FPoint *point,
                                      float *scale_x, float *scale_y) {
-  if (!projection) return false;
+  if (!projection || !point) return false;
   return ProjectCapturedPlanePoint(
       projection, capture_x, capture_y,
       &projection->bg2_plane, point, scale_x, scale_y);

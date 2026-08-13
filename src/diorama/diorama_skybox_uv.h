@@ -49,6 +49,13 @@ void DioramaBgValidSpanPlan_Build(
     int authentic_y0, int capture_height, int tex_width,
     DioramaBgValidSpanPlan *out);
 
+/* Bounding capture rows containing at least one drawable BG2 column. This is
+ * also the authoritative content edge for an attached plane continuation: the
+ * texture allocation/capture rectangle can extend past it with intentionally
+ * transparent rows. */
+bool DioramaBgValidSpanPlan_DrawableRowBounds(
+    const DioramaBgValidSpanPlan *plan, int *out_y0, int *out_y1);
+
 /* Map a texture-column span to the skybox quad's U range.
  *
  * The blur shader samples up to `blur_radius` texels either side of each

@@ -15,7 +15,7 @@
  *   rake   tilt the plane linearly.  DioramaTiltedRowDepth
  *   bow    tilt it on an eased curve. DioramaTiltedRowDepth
  *   thick  extrude a near face from its bottom edge. DioramaSkirtVertex
- *   stack  repeat it at parallel depths, faded. DioramaStackCopy*
+ *   stack  repeat it at parallel depths, faded. DioramaStackCopyShaped
  *   voxel  repeat it densely and unfaded, so it reads solid. DioramaStackCopyShaped
  *
  * WHY THESE LIVE IN A PURE MODULE. diorama.c's mesh builders are `static` and
@@ -51,8 +51,8 @@
  * brightness as the top surface, and without the gradient the skirt reads as a
  * smear of the plane's bottom row rather than a separate surface.
  *
- * Clamps t to [0,1] and treats a non-positive thickness as zero, so a caller
- * cannot produce geometry above the fold or behind the plane. */
+ * The renderer calls this only for an authored positive thickness, normalized
+ * t in [0,1], and non-null outputs. */
 void DioramaSkirtVertex(float t, float z_bottom, float y_bottom,
                         float thickness, float *out_y, float *out_z,
                         float *out_shade);
@@ -65,48 +65,64 @@ float DioramaSkirtNearShade(void);
  * rake is linear and bow is eased quadratically. */
 float DioramaTiltedRowDepth(float z_world, float rake, float bow, float t);
 
-/* STACK: depth, shade and opacity of one copy in a stacked layer.
+/* A finite captured plane can grow a presentation-only continuation by
+ * repeating the authentic frame, which is the one vertical source interval
+ * guaranteed to remain populated under every BG Extents policy. `fold_y` is
+ * the first row after that authentic interval; drawing the repeat there lets
+ * any authored bottom margin overlap and hide the handoff. The returned rows
+ * are capture/texture pixel coordinates, not normalized UVs.
  *
- * A stack fills a depth gap by repeating the layer at intermediate depths instead
- * of tilting it. Tilting (rake) puts a single plane's own rows at different
- * depths, which gives that layer two different parallax rates within itself and
- * shears it as the camera moves. Every copy here stays exactly parallel, so each
- * has ONE depth and one parallax rate, and the layer keeps the flat poster-like
- * motion the diorama is built on.
- *
- * `index` is 0 for the copy nearest the plane's own depth and `copies - 1` for the
- * farthest into the gap; `copies` is clamped to >= 1. `depth` is the total fill,
- * laid from `z_base` toward `z_base + depth`.
- *
- * Copy 0 sits AT z_base -- deliberately, so it coincides with the plane the caller
- * already draws and the stack has no seam at its own front face. The caller
- * therefore skips index 0 and draws 1..copies-1 as extra passes.
- *
- * `out_alpha` and `out_shade` both fall off with distance into the gap so the
- * stack reads as receding volume rather than a smear of identical sprites. Alpha
- * never reaches 0 for a valid index, since an invisible copy is a wasted draw. */
-void DioramaStackCopy(int index, int copies, float z_base, float depth,
-                      float *out_z, float *out_shade, float *out_alpha);
+ * Keeping this plan independent of a layer's mutable valid-span table is
+ * deliberate: changing how much synthetic margin BG Extents exposes must not
+ * move or disable separately-authored overflow geometry. */
+typedef struct DioramaVerticalRepeatPlan {
+  int source_y0, source_y1;
+  int fold_y;
+  int repeat_height;
+} DioramaVerticalRepeatPlan;
 
-/* Same, with a direction (a DioramaStackDirection, passed as int so this header
- * keeps no dependency on the override module).
- *
- * Forward lays copies from z_base toward z_base + depth, i.e. TOWARD the camera,
- * since higher z is nearer in this projection. That is the default and what the
- * reported Fillmore act 2 case needs -- its water sits behind the rock path, so
- * the gap to fill is on the camera side. Backward is the mirror, for a foreground
- * layer receding into the scene. Both centres the fill on the plane, for something
- * the plane sits in the middle of.
- *
- * Shade and alpha fall off with DISTANCE from the plane, not with signed depth, so
- * a Backward or Both stack recedes visually the same way a Forward one does rather
- * than brightening as it goes. */
-void DioramaStackCopyDirected(int index, int copies, float z_base, float depth,
-                              int direction, float *out_z, float *out_shade,
-                              float *out_alpha);
+bool DioramaVerticalRepeatPlan_Build(
+    int authentic_y0, int authentic_height,
+    int capture_height, int texture_height,
+    DioramaVerticalRepeatPlan *out);
 
-/* Same again, with `solid` selecting a VOXEL fill: identical depth arithmetic, but
- * no shade or alpha falloff.
+/* FOLDED OVERFLOW: continue a captured plane through an overlap, then turn it
+ * toward the front of the diorama. This is used by the Aitos waterfall, but
+ * the arithmetic is presentation-generic so geometry and effect projection
+ * can share one contract.
+ *
+ * `t` runs from 0 at the authentic-band fold to 1 at the continuation's near
+ * lip. Through `overlap_t`, Y continues down the host plane and Z interpolates
+ * to the host's drawable-bottom depth. That coplanar interval lets the host
+ * cover the repeated texture handoff without a crack. After the overlap, a
+ * smooth bend trades the would-be vertical continuation for forward Z travel;
+ * only `front_drop` additional Y is retained, making the surface read as water
+ * curling over the box edge instead of a second parallel billboard.
+ *
+ * The renderer supplies normalized/clamped authoring inputs and non-null
+ * outputs. The function still clamps t so a projected particle one sample past
+ * the mesh cannot escape the physical continuation. */
+void DioramaOverflowFoldPoint(
+    float t, float y_top, float z_top, float z_handoff,
+    float overflow_height, float overlap_t,
+    float front_z, float front_drop,
+    float *out_y, float *out_z);
+
+/* Mesh-row parameterization for a folded overflow. Row 0 is the authentic
+ * fold and row 1 is the exact end of the coplanar overlap; the remaining rows
+ * subdivide only the curved section. A uniform grid cannot generally contain
+ * that boundary and will start pulling the shared edge forward before the host
+ * plane ends, producing a camera-dependent crack. */
+float DioramaOverflowFoldRowT(int row, int subdivisions, float overlap_t);
+
+/* STACK: depth, shade and opacity of one parallel copy. Forward lays copies
+ * from z_base toward z_base + depth, Backward mirrors that, and Both centres
+ * the fill on the plane. Shade and alpha fall off with distance from the plane,
+ * not signed depth. `solid` selects a VOXEL fill with the same depth arithmetic
+ * but uniform shade and alpha.
+ *
+ * The draw loop supplies copies > 1, an in-range index, positive depth, a valid
+ * DioramaStackDirection and non-null outputs.
  *
  * A stack fades so the eye reads separate things receding into the distance. A
  * voxel must NOT fade, because it is one object with volume -- a falloff would
@@ -120,11 +136,6 @@ void DioramaStackCopyDirected(int index, int copies, float z_base, float depth,
 void DioramaStackCopyShaped(int index, int copies, float z_base, float depth,
                             int direction, bool solid, float *out_z,
                             float *out_shade, float *out_alpha);
-
-/* True when a copy at `index` of `copies` is worth drawing at all: in range and
- * not fully transparent. The caller's loop guard, so the "is this a wasted draw"
- * rule lives with the arithmetic instead of being restated at the call site. */
-bool DioramaStackCopyIsVisible(int index, int copies);
 
 /* True when this copy coincides with the plane's OWN depth, so the caller must
  * skip it -- the plane's existing draw already covers it, and drawing both would

@@ -1104,12 +1104,12 @@ int ActionBgTuner_BuildGuides(const ActionBgPlan *plan,
     const ActionBgLayerPlan *layer_plan = &plan->layer[layer];
     for (int y = 0; y < kAuthenticHeight;) {
       ActionBgRowPolicy row;
-      if (!ActionBgLayerPlan_ResolveRow(layer_plan, y, &row)) return 0;
+      ActionBgLayerPlan_ResolveValidatedRow(layer_plan, y, &row);
       int y1 = y + 1;
       for (; y1 < kAuthenticHeight; y1++) {
         ActionBgRowPolicy next;
-        if (!ActionBgLayerPlan_ResolveRow(layer_plan, y1, &next) ||
-            next.horizontal_extent.mode != row.horizontal_extent.mode ||
+        ActionBgLayerPlan_ResolveValidatedRow(layer_plan, y1, &next);
+        if (next.horizontal_extent.mode != row.horizontal_extent.mode ||
             next.horizontal_extent.left != row.horizontal_extent.left ||
             next.horizontal_extent.right != row.horizontal_extent.right)
           break;
