@@ -125,3 +125,15 @@ void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,
   *out_u0 = u0;
   *out_u1 = u1;
 }
+
+void DioramaRomSkyboxUvRange(int display_width, int source_width,
+                             float *out_u0, float *out_u1) {
+  if (!out_u0 || !out_u1) return;
+  if (display_width <= 0 || source_width <= 0) {
+    *out_u0 = 0.0f;
+    *out_u1 = 0.0f;
+    return;
+  }
+  *out_u0 = 0.0f;
+  *out_u1 = (float)display_width / (float)source_width;
+}

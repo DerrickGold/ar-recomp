@@ -760,7 +760,7 @@ static void SeedSwordBeam(uint8_t *wram, unsigned state, bool hflip) {
   Write16(wram, beam + 0x3A, kActRaiserWram_PlayerObject);
 }
 
-static void SeedAitosBossSwordVolley(uint8_t *wram) {
+static void SeedAitosBossSwordVolley(uint8_t *wram, bool reflected) {
   const size_t boss = kActRaiserWram_ActionObjectTable +
       49 * kActRaiserActionObjectStride;
   const size_t parent = kActRaiserWram_ActionObjectTable +
@@ -792,6 +792,10 @@ static void SeedAitosBossSwordVolley(uint8_t *wram) {
   Write16(wram, parent + 0x1E, 0xD793);
   Write16(wram, parent + 0x20, 0x56FE);
   Write16(wram, parent + 0x22, 0x0023);
+  Write16(wram, parent + 0x28,
+          reflected ? kActRaiserObjectFlip_Horizontal |
+                          kActRaiserObjectFlip_Vertical
+                    : 0);
   Write16(wram, parent + 0x30, 0x0020);
   Write16(wram, parent + 0x32, 0xD646);
   Write16(wram, parent + 0x38, 0x000D);
@@ -811,12 +815,20 @@ static void SeedAitosBossSwordVolley(uint8_t *wram) {
     Write16(wram, child + 0x00, 0x0000);
     Write16(wram, child + 0x02, 444);
     Write16(wram, child + 0x04, (uint16_t)kCrescents[i].world_y);
-    Write16(wram, child + 0x06, (uint16_t)(int16_t)-3);
-    Write16(wram, child + 0x08, (uint16_t)kCrescents[i].velocity_y);
-    Write16(wram, child + 0x0A, 8);
-    Write16(wram, child + 0x0C, kCrescents[i].top_extent);
-    Write16(wram, child + 0x0E, 16);
-    Write16(wram, child + 0x10, kCrescents[i].bottom_extent);
+    Write16(wram, child + 0x06,
+            (uint16_t)(int16_t)(reflected ? 3 : -3));
+    Write16(wram, child + 0x08,
+            (uint16_t)(int16_t)(reflected
+                ? -kCrescents[i].velocity_y
+                : kCrescents[i].velocity_y));
+    Write16(wram, child + 0x0A, reflected ? 16 : 8);
+    Write16(wram, child + 0x0C,
+            reflected ? kCrescents[i].bottom_extent
+                      : kCrescents[i].top_extent);
+    Write16(wram, child + 0x0E, reflected ? 8 : 16);
+    Write16(wram, child + 0x10,
+            reflected ? kCrescents[i].top_extent
+                      : kCrescents[i].bottom_extent);
     Write16(wram, child + 0x12, 0x8661);
     Write16(wram, child + 0x16, 0x5000);
     wram[child + 0x18] = 0x7E;
@@ -825,6 +837,10 @@ static void SeedAitosBossSwordVolley(uint8_t *wram) {
     Write16(wram, child + 0x1E, 0xA65D);
     Write16(wram, child + 0x20, kCrescents[i].composition);
     Write16(wram, child + 0x22, kCrescents[i].visual);
+    Write16(wram, child + 0x28,
+            reflected ? kActRaiserObjectFlip_Horizontal |
+                            kActRaiserObjectFlip_Vertical
+                      : 0);
     Write16(wram, child + 0x30, 0x0020);
     Write16(wram, child + 0x32, 0xD646);
     Write16(wram, child + 0x38, kCrescents[i].local_counter);
@@ -1159,7 +1175,7 @@ static void TestAitosBossSwordVolleyIdentityAndGeometry(void) {
   Write16(wram, kActRaiserWram_GameFrame, 21056);
   Write16(wram, kActRaiserWram_Bg1CameraX, 136);
   Write16(wram, kActRaiserWram_Bg1CameraY, 8);
-  SeedAitosBossSwordVolley(wram);
+  SeedAitosBossSwordVolley(wram, false);
 
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 2);
@@ -1213,9 +1229,47 @@ static void TestAitosBossSwordVolleyIdentityAndGeometry(void) {
   CHECK(frame.effects[0].record_address == 0x1660);
   CHECK(frame.effects[0].generation != lower_generation);
 
+  /* Run 20260812-224123 captures the controller's H+V-reflected facing. Its
+   * state-$01 child at world (338,50), camera (120,8), emits OAM over
+   * (202,33)..(226,57). The sibling tuple pins the second reflected diagonal
+   * even though it had already become inactive in that particular frame. */
+  SeedAitosBossSwordVolley(wram, true);
+  Write16(wram, kActRaiserWram_Bg1CameraX, 120);
+  Write16(wram, kActRaiserWram_Bg1CameraY, 8);
+  Write16(wram, 0x1660 + 0x02, 338);
+  Write16(wram, 0x1660 + 0x04, 50);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 2);
+  CHECK(frame.effects[0].record_address == 0x1660);
+  CHECK(frame.effects[0].velocity_x == 3);
+  CHECK(frame.effects[0].velocity_y == -1);
+  CHECK(frame.effects[0].flags & kActionEffectFlag_FlipHorizontal);
+  CHECK(frame.effects[0].flags & kActionEffectFlag_FlipVertical);
+  CHECK(frame.effects[0].geometry.data.rect.x0 == -16.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y0 == -9.0f);
+  CHECK(frame.effects[0].geometry.data.rect.x1 == 8.0f);
+  CHECK(frame.effects[0].geometry.data.rect.y1 == 15.0f);
+  CHECK(frame.effects[0].world_x - 120 +
+        frame.effects[0].geometry.data.rect.x0 == 202.0f);
+  CHECK(frame.effects[0].world_y - 8 +
+        frame.effects[0].geometry.data.rect.y0 == 33.0f);
+  CHECK(frame.effects[1].record_address == 0x16A0);
+  CHECK(frame.effects[1].velocity_x == 3);
+  CHECK(frame.effects[1].velocity_y == 1);
+  CHECK(frame.effects[1].geometry.data.rect.x0 == -16.0f);
+  CHECK(frame.effects[1].geometry.data.rect.y0 == -17.0f);
+  CHECK(frame.effects[1].geometry.data.rect.x1 == 8.0f);
+  CHECK(frame.effects[1].geometry.data.rect.y1 == 7.0f);
+
+  /* Reflection belongs to the complete controller/child lifecycle. A lone
+   * reflected projectile cannot acquire the boss effect by visual tuple. */
+  Write16(wram, 0x1620 + 0x28, 0);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+
   /* This loaded boss bank is shared across Aitos sections. Map, complete
    * child tuple, inactive controller, and live boss root all fail closed. */
-  SeedAitosBossSwordVolley(wram);
+  SeedAitosBossSwordVolley(wram, false);
   wram[kActRaiserWram_CurrentMap] = 2;
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 0);
@@ -1224,16 +1278,16 @@ static void TestAitosBossSwordVolleyIdentityAndGeometry(void) {
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 1);
   CHECK(frame.effects[0].record_address == 0x16A0);
-  SeedAitosBossSwordVolley(wram);
+  SeedAitosBossSwordVolley(wram, false);
   Write16(wram, 0x16A0 + 0x20, 0x56D8);
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 1);
   CHECK(frame.effects[0].record_address == 0x1660);
-  SeedAitosBossSwordVolley(wram);
+  SeedAitosBossSwordVolley(wram, false);
   Write16(wram, 0x1620 + 0x1E, 0xD794);
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 0);
-  SeedAitosBossSwordVolley(wram);
+  SeedAitosBossSwordVolley(wram, false);
   Write16(wram, 0x12E0 + 0x32, 0xD645);
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 0);
@@ -2031,6 +2085,8 @@ static void TestAitosWaterfallSplashIdentity(void) {
   CHECK(frame.decorations[2].world_y - 488 ==
         kActRaiserAuthenticHeight +
             kActionBgAitosWaterfallBottomExtensionPixels);
+  CHECK(frame.decorations[2].geometry.data.rect.y0 == -64.0f);
+  CHECK(frame.decorations[2].geometry.data.rect.y1 == 152.0f);
 
   /* Both observed waterfall subsections use the same exact positive
    * structure; the map range itself must not accidentally stop at `$02`. */

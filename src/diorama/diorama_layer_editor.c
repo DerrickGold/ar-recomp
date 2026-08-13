@@ -519,9 +519,9 @@ const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
       return "This plane's opacity. Lets a room compensate for a translucency "
              "the capture did not reproduce.";
     case kDioramaEditorParam_Source:
-      return "Backdrop image source. Captured uses the current frame; ROM "
+      return "Skybox image source. Captured uses the current room's BG2; ROM "
              "GG/MM BG1 or BG2 reconstructs that action room directly from "
-             "the cartridge, without depending on room visit order.";
+             "the cartridge. It is visible when Diorama skybox is enabled.";
     case kDioramaEditorParam_Order:
       return "Where the plane sits in the paint sequence, back to front. "
              "Separate from depth on purpose, so reordering a plane does not "
@@ -595,8 +595,10 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
     rows[n].param = kDioramaEditorParam_Density, rows[n++].label = "density";
   rows[n].param = kDioramaEditorParam_Z, rows[n++].label = "z depth";
   rows[n].param = kDioramaEditorParam_Alpha, rows[n++].label = "alpha";
-  if (plane == kDioramaPlane_Backdrop)
-    rows[n].param = kDioramaEditorParam_Source, rows[n++].label = "source";
+  if (plane == kDioramaPlane_Backdrop) {
+    rows[n].param = kDioramaEditorParam_Source;
+    rows[n++].label = "skybox source";
+  }
   rows[n].param = kDioramaEditorParam_Order, rows[n++].label = "paint order";
 
   for (int i = 0; i < n; i++) {

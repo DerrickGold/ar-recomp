@@ -166,7 +166,7 @@ typedef struct DioramaPlaneOverride {
   bool set_alpha;
   uint8_t alpha;
   bool set_source;
-  uint8_t source;     /* DioramaLayerSource; backdrop-only */
+  uint8_t source;     /* DioramaLayerSource; Backdrop record → skybox */
   /* RAKE — the layer stops being parallel to the screen and tilts in depth: its
    * TOP edge keeps `z`, its BOTTOM edge sits at `z + rake`. Positive rakes the
    * bottom toward the camera.
@@ -330,6 +330,14 @@ typedef struct DioramaResolvedLayer {
    * because the geometry is identical -- only the fade and the cap differ. */
   bool stack_solid;
 } DioramaResolvedLayer;
+
+/* The skybox source is authored on the Backdrop record so the manifest and
+ * editor do not need a second room-scoped object. It is deliberately resolved
+ * independently of that plane's alpha/visibility: those fields control the
+ * residual in-box Backdrop geometry, while `source` controls the surrounding
+ * skybox whenever the global skybox mode is enabled. */
+int DioramaLayerOrder_SkyboxSource(const DioramaResolvedLayer *layers,
+                                   int count);
 
 /* Which strategy a resolved plane is using, for the editor's label and for
  * diagnostics. Derived, not stored: whichever authored key is most specific wins,

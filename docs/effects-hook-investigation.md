@@ -83,12 +83,16 @@ references: [SEAMS.md](SEAMS.md), [rendering-engine.md](rendering-engine.md), an
     Aitos's Act-2 dragon has a second, separately validated producer in map `$04/$03`.
     `$00:D785` leaves an inactive state-0 `$D793` controller linked to the active `$D646`
     boss root and allocates two `$A655` children. Once visible they are handler/resume
-    `$8661/$A65D`, animation `$7E:5000`, index 1, flags `$0020`, no flip, and exact
+    `$8661/$A65D`, animation `$7E:5000`, index 1, flags `$0020`, and exact
     state/visual/composition/local-counter/velocity tuples
     `$01/$21/$56D8/$01/(-3,+1)` and `$02/$20/$56BE/$02/(-3,-1)`.
     Snapshot `snap_05_gf21056` proves both 24×24 crescents at OBJ priority 2. They reuse
     the sword comet presentation through their measured diagonal headings; they do not
-    relax the player identity rule or match arbitrary boss-bank artwork.
+    relax the player identity rule or match arbitrary boss-bank artwork. Run
+    `20260812-224123/snap_01_gf15666` measures the other facing: controller and child both
+    carry H+V flip `$C000`, velocity becomes `(+3,-1)` for state 1, and all four extents
+    swap sides. Applying that exact 180-degree lifecycle relation to both states covers
+    the two rightward diagonals without admitting independent flip/velocity mixtures.
 12. **Marahna's requested accents are a separate map/object family.** In maps `$05/$04-$08`,
     one BG1 metatile `$43` is the complete torch, anchored at local `(8,11)`. The shared 2304×1792
     world contains 31 instances, so capture uses the same bounded `ActionBgMapView` contract as
@@ -139,9 +143,9 @@ references: [SEAMS.md](SEAMS.md), [rendering-engine.md](rendering-engine.md), an
     also the live discriminator between map `$04/$02`'s waterfall section and its preceding cave,
     whose decoded BG2 map is otherwise the same. That discriminator is now published immutably to
     the Diorama layer resolver as section `waterfall`: it inherits the base room tuning, then selects
-    `rom-04-01-bg2`, the generic ROM-backed source for room `$04/$01` BG2. The same catalogue can
-    select BG1 or BG2 from any valid action map; it is not a previous-frame/previous-room cache, and
-    a failed decode falls back to the captured backdrop.
+    `rom-04-01-bg2`, the generic ROM-backed **skybox** source for room `$04/$01` BG2. The same
+    catalogue can select BG1 or BG2 from any valid action map; it is not a previous-frame/previous-
+    room cache, and a failed decode falls back to the current room's captured BG2 skybox.
 16. **Marahna's boss attack is a third electrical family with four presentation stages.** Only
     map `$05/$08` admits it. The live boss parent retains source `$E483`, animation `$7E:5000`,
     48/40/48/8 extents, and no spawner backlink. Handler `$8661` owns its pre-impact stages: exact
@@ -278,6 +282,11 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   cool water veil and 96 slow vertical flow streaks over the source waterfall. A paired
   after-BG2 Diorama record adds two tiers of three mist banks and thirty-two foam motes at the end of the safe
   24px BG2 extension, where the intentionally finite backdrop would otherwise expose black.
+  Run `20260812-224123/snap_00_gf11758` showed that six similarly sized additive banks
+  still converged on one horizontal lower edge. The lower tier is now narrower, vertically
+  staggered, and irregular, with visible bank depths differing by more than 80px and the
+  deepest fade extending over 100px below the safe seam. This one concealment pass uses
+  verified source-alpha blending; the waterfall veil and luminous actor effects remain additive.
   Map-derived accents have an
   independent 16-record frame from the 16 actor records: the measured maximum camera window
   publishes 14 splash structures plus one veil and one mist while still admitting the complete
@@ -288,9 +297,11 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   `$9D1C`, animation `$06:8000`, attacker flag `$0001`, one of the two exact state/visual/
   composition tuples, and a backlink to the live player whose source descriptor matches the
   child. This prevents a polymorphic or immediately recycled slot from inheriting the effect.
-- Aitos map `$04/$03` additionally admits exactly the dragon's two-child `$D646` sword volley.
+- Aitos map `$04/$03` additionally admits exactly the dragon's two-child `$D646` sword volley
+  in both measured facings.
   Capture validates each full child tuple, the inactive `$D793/$23/$56FE` controller, and its
-  backlink to the live boss root. Both retain their authored priority-2 projection and exact
+  backlink to the live boss root. Normal children use no flip; the reflected family requires
+  matching controller/child H+V flip, reversed velocity, and side-swapped extents. Both retain their authored priority-2 projection and exact
   OAM-local rectangles while sharing the player beam's portable halo/wake/star style.
 - Each source remains an independent light centre. Torches receive a warm two-tier wall spill and
   a small rising ember plume; fireballs receive a heading-aligned hot body, warm spill, and trailing
@@ -308,7 +319,7 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   of three height lanes. Positions stay fixed from 4px to 88px behind the crescent while scrambled
   18-tick phases independently fade and scale each star into and out of existence; no glint streams
   backward along the path.
-  All elements follow measured velocity—including the Aitos boss's two diagonal branches—mirror
+  All elements follow measured velocity—including the Aitos boss's four diagonal branches—mirror
   for leftward travel, and project through the same
   OBJ plane in flat or Diorama mode. This supersedes both the detached triangular wake in run
   `20260810-184935` and the barely visible five-glint correction in run `20260810-190012`.

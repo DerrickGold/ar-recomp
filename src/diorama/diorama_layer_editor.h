@@ -104,9 +104,9 @@ typedef struct DioramaEditorRow {
   uint8_t map_group;
   uint8_t map_number;
   uint8_t section;
-  /* Renderer-resolved value of an inherited source. Scoped records keep only
-   * their own authored fields, but the Source row must display and step from
-   * what is actually being drawn. */
+  /* Renderer-resolved value of an inherited skybox source. Scoped records keep
+   * only their own authored fields, but the Source row must display and step
+   * from what is actually being drawn. */
   uint8_t effective_source;
   /* True when the row is a parameter of the selected plane, so the overlay can
    * indent it and dim it distinctly from a plane row. */

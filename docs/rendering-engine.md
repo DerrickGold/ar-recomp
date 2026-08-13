@@ -459,6 +459,11 @@ controller linked to the live dragon root, then two `$8661/$A65D` children.
 Their complete tuples are `$01/$21/$56D8/(-3,+1)` and
 `$02/$20/$56BE/(-3,-1)`, with distinct local counters and asymmetric extents.
 Snapshot `snap_05_gf21056` proves both 24×24 rectangles and priority-2 OAM.
+Run `20260812-224123/snap_01_gf15666` measures the opposite facing as a complete
+180-degree transform: controller and child both use H+V flip `$C000`, both
+velocity components reverse, and the four extents swap sides. The state-1 OAM
+rectangle is exactly `(-16,-9)..(8,15)` relative to its hot point. The same
+validated relation covers state 2, yielding all four authored diagonals.
 Capture consequently publishes their real diagonal headings and OBJ band, but
 reuses the portable cool halo, tapered wake, and materializing-star renderer.
 
@@ -502,7 +507,15 @@ different painter contract. `$04/$02` deliberately caps raw-wrap BG2 at 24px
 of vertical extension so waterfall tiles cannot bleed into authored non-water
 rows. Two tiers of three soft mist banks and thirty-two rising foam motes are anchored at
 the end of that safe extension, with visible coloured rings spanning both the
-last water rows and the unsupported lower band. They retain BG2 camera and rake/bow projection and submit unmasked from the same after-BG2 Diorama callback: absent source pixels are precisely the black gap this pass is intended to conceal. Later BG1/OBJ planes and the HUD remain in front. Flat mode has no vertical extension gap and therefore keeps only its winner-masked veil.
+last water rows and the unsupported lower band. The lower banks use unequal
+widths, vertical anchors, depths, and silhouette flare so their visible alpha
+does not terminate on one horizontal line. The deepest bank fades more than
+100px below the seam while the six visible bottoms span over 80px. They retain
+BG2 camera and rake/bow projection and submit unmasked from the same after-BG2
+Diorama callback using verified source-alpha blending: unlike an additive
+light, the mist can obscure and feather the BG2/skybox discontinuity. Later
+BG1/OBJ planes and the HUD remain in front. Flat mode has no vertical extension
+gap and therefore keeps only its winner-masked veil.
 
 `action_effect_render.c` converts captured kind/phase/geometry into bounded,
 renderer-independent spell and scene batches; unknown values fail closed.
@@ -554,7 +567,7 @@ with the boss's two crescent children, so the batch reserves the measured
 three-stream peak and rejects a fourth instead of inflating all scene slots.
 Integer-hash particles and integer triangle pulses make repeat builds
 deterministic. `present.c` supplies immutable projection inputs and submits
-through the same verified SDL additive blend plus untextured batched geometry
+through verified standard SDL additive/source-alpha blends plus untextured batched geometry
 used by town effects; no optional Metal/Vulkan shader pipeline is required.
 
 `action_effect_lighting` and `action_effect_particles` are independent,
@@ -983,19 +996,21 @@ bundled runtime's widescreen/PPU interfaces:
   recognised, so the other three spells were never promoted and drew at their
   authentic centre-screen X while the rest of the HUD moved — ledger §38.
   `AR_HUDICON=1` reports the scan outcome (slot and count, misses included).
-- **The game-over return adds a raster-timing constraint (fixed 2026-08-12).**
-  `runs/20260812-122258/snapshots/snap_02_gf5705` contains the valid Magical
-  Fire signature in OAM slots 6-9 (`$67/$67/$77/$77`) and the correct anchored
-  footprint, but the promoted result is a black square. The Diorama split had
-  rasterized the complete icon before scanout; during this transition that
-  endpoint still contains the previous all-black tile/palette state, while the
-  mid-picture IRQ restores the visible state before icon rows 11-26. The split
-  now has three phases: `ActRaiser_DioramaHudObjPrepare` resolves the stable OAM
-  footprint before scanout, `…CaptureLine` retains each displayed icon row
-  immediately after `ppu_runLine` and before HDMA/IRQ advances, and `…Finish`
-  publishes the completed flat-HUD raster after scanout. This changes only the
-  host extraction timing; OAM, VRAM, CGRAM, and emulated game state are not
-  rewritten.
+- **The game-over return requires capture inside the OBJ evaluator (revised
+  2026-08-12).** `runs/20260812-122258/snapshots/snap_02_gf5705` proves the
+  failure with Magical Fire's valid slots 6-9; after the first attempted fix,
+  `runs/20260812-220252/snapshots/snap_00_gf6889` reproduces it with selected
+  spell 2 (`$02AC=2`) and the valid single-large slot 6 (`$84`, attr `$39`).
+  The generic Diorama OBJ plane still receives the icon at its authentic
+  position, while the separately reconstructed flat-HUD copy is empty. Moving
+  `PpuRasterizeObjRange` beside each scanline did not make it scanout: the helper
+  still re-resolved and rebuilt the complete sprite from a second register
+  snapshot. `ActRaiser_DioramaHudObjPrepare` now registers the validated range
+  with `PpuSetObjRangeCapture`; the normal sprite evaluator writes only those
+  slots directly to `g_hud_obj_pixels` as it fetches them. `…Finish` uses that
+  exact opacity mask to remove the original from its Diorama priority plane and
+  restore any covered sprite. OAM, VRAM, CGRAM, and emulated game state remain
+  untouched.
 - `src/main.c` binds generic BG3/OBJ surfaces, then uploads the game and those
   two captured surfaces separately. It
   renders the game with the normal logical-size/PAR transform, then composites
@@ -1714,10 +1729,10 @@ the HLE provider when the camera crosses the encoded period.
 These are host/PPU presentation seams only. The work discovered no new WRAM
 field, ROM routine/table, or recompiled ROM symbol.
 
-### 13.5 Scoped Diorama backdrops from stock ROM assets (2026-08-12)
+### 13.5 Scoped Diorama skyboxes from stock ROM assets (2026-08-12)
 
 A room byte is sometimes too coarse for presentation policy. Aitos map `$04/$02`
-contains both a cave and the waterfall screens; replacing or hiding the backdrop
+contains both a cave and the waterfall screens; replacing the skybox
 for the entire map would fix one area by damaging the other. The exact camera-
 local three-row waterfall-platform signature already captured for spray effects
 is therefore also the section discriminator. `FrameSlot` carries that immutable
@@ -1735,32 +1750,57 @@ backdrop = source:rom-04-01-bg2
 ```
 
 Resolution applies the base room first and the active section second. Thus the
-waterfall keeps the room's BG1 shape while changing only its backdrop; the cave
-sees the base record alone. The Layers menu shows the currently published scope,
-offers a backdrop-only Source enum, and resets only that scope. `alpha:0` is an
-explicit non-drawable plane, so disabling the waterfall backdrop remains an A/B
-choice even though the shipped tuning selects the alternate source.
+waterfall keeps the room's BG1 shape while changing only its skybox; the cave
+sees the base record alone. For manifest compatibility, the source field lives
+on the `backdrop` record, but it is not the Backdrop plane's texture. The Layers
+menu therefore labels it **Skybox source**, shows the currently published scope,
+and resets only that scope. Backdrop `alpha`, depth, order, and the layer toggle
+still control only the residual in-box plane. In particular, `alpha:0` hides
+that plane without disabling a selected skybox source; the global Diorama
+skybox mode controls whether any skybox is drawn.
 
 The Source enum is a ROM-wide action-background catalogue. `captured` uses the
-current residual plane; `rom-GG-MM-bgN` selects BG1 or BG2 from any valid action
-map (98 combinations across the 49 maps). `DioramaRomBackdrop_LoadActionBg`
+current room's captured BG2; `rom-GG-MM-bgN` selects BG1 or BG2 from any valid
+action map (98 combinations across the 49 maps). `DioramaRomBackdrop_LoadActionBg`
 walks the stock `$05:8000` asset script, replaying earlier entries from the same
 act so inherited maps are deterministic even when selected from another level.
 It decompresses the selected map, word-swapped metatiles, character banks and
-palettes into an opaque 256×256 first-page host image. The old `aitos-sky` token
+palettes into an opaque 256×256 first-page host image. Before character lookup,
+the rasterizer reproduces action setup's tile-word transform: `$02:B6D3-$B6F6`
+installs mask `$ECFF`, then `$02:B4E8-$B54C` merges attribute byte `$10` for BG1
+or `$01` for BG2. This is required even when every decoded asset byte is exact:
+without it, `rom-04-01-bg2` selects tile bank `$000` instead of `$100` and draws
+unrelated cave/lava art. The old `aitos-sky` token
 is accepted as a compatibility alias for `rom-04-01-bg2`, but saves use the
 generic token.
 
 The HLE never writes emulated WRAM, VRAM, or CGRAM and does not depend on visit
 order. Decode is lazy and the cache key is the complete source identity, so a
 Source edit replaces the texture immediately rather than retaining the previous
-room's art. The ordinary SDL Diorama mesh draws the texture with horizontal
-wrap, giving it the same renderer/back-end support as captured layers and no new
-shader format. Decode or texture failure falls back to the captured backdrop;
-renderer reset destroys the texture and recreates it lazily from retained ROM
+room's art. Source resolution happens before the far-background pass, and the
+ordinary SDL skybox quad draws the 256×256 texture with horizontal wrap and
+vertical clamp. This uses the same renderer/back-end and optional blur pipeline
+as captured BG2 and introduces no new shader format. Decode or texture failure
+falls back to the captured BG2 skybox. Renderer reset destroys the texture and
+recreates it lazily from retained ROM
 bytes. The editor records the exact live subsection in each row and seeds a
 first scoped edit from its resolved inherited source, preventing a changing
 camera scope from saving to the wrong record or displaying stale base state.
+
+Run `20260812-220252/snapshots/snap_01_gf18194` exposed the original routing
+mistake: logs proved that changing `rom-04-01-bg2` to `rom-03-04-bg2` decoded a
+new texture, yet the surround remained the live waterfall because the named
+texture had been submitted only as residual Backdrop geometry. The production
+path now queries the resolved Backdrop record before drawing the skybox. Pure
+regressions pin source resolution even when Backdrop alpha is zero, plus the
+ROM-page widescreen repeat range.
+
+Run `20260812-222309/snapshots/snap_00_gf7605` exposed the missing native
+tile-word transform after routing was corrected. The fixed first-page tilemap
+matches the live `$04/$01` BG2 VRAM publication in all 2,048 bytes, and its
+65,536 output pixels match when rendered through the same decoded character and
+palette assets. The synthetic room-script regression independently pins the
+mask and both layer attributes.
 
 ## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
 

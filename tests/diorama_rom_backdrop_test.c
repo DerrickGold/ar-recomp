@@ -101,31 +101,45 @@ static void TestGenericRoomScriptAndInheritance(void) {
   };
   uint8_t *rom = calloc(1, kRomSize);
   uint8_t *zeros = calloc(1, 0x2000);
-  uint8_t *chars = calloc(1, 0x2000);
+  uint8_t *chars0 = calloc(1, 0x2000);
+  uint8_t *chars1 = calloc(1, 0x2000);
   uint8_t *meta1 = calloc(1, 0x0800);
+  uint8_t *meta2 = calloc(1, 0x0800);
   uint32_t *pixels = calloc(
       kDioramaRomBackdropPixels * kDioramaRomBackdropPixels,
       sizeof(*pixels));
-  CHECK(rom && zeros && chars && meta1 && pixels);
-  if (!rom || !zeros || !chars || !meta1 || !pixels) goto done;
+  CHECK(rom && zeros && chars0 && chars1 && meta1 && meta2 && pixels);
+  if (!rom || !zeros || !chars0 || !chars1 || !meta1 || !meta2 || !pixels)
+    goto done;
 
-  /* Tile zero emits colour 1. BG1's metatile selects palette group 4, proving
-   * that the generic path follows the upper four BG palettes as well as the
-   * originally measured Aitos BG2 palettes 0..3. */
-  for (unsigned row = 0; row < 8; row++) chars[row * 2] = 0xFF;
-  for (unsigned quadrant = 0; quadrant < 4; quadrant++)
-    meta1[quadrant * 2] = 0x10;      /* byte-swapped SNES word $1000 */
-  WriteLiteralAsset(rom + kChr0, chars, 0x2000);
-  WriteLiteralAsset(rom + kChr1, zeros, 0x2000);
+  /* `$02:B6D3-$B6F6` masks definition words with $ECFF, then `$02:B4E8`
+   * merges attribute byte $10 into BG1 and $01 into BG2. Pin both operations
+   * with deliberately misleading definition bits: BG1 raw tile $100 must
+   * become tile $000/palette 4, while BG2 raw tile $200 must become tile $100.
+   * The two resulting tiles emit different colour indices so using the raw
+   * definition, omitting the attribute, or selecting the wrong character bank
+   * cannot accidentally produce the expected pixel. */
+  for (unsigned row = 0; row < 8; row++) {
+    chars0[row * 2] = 0xFF;          /* tile $000: colour 1 */
+    chars1[row * 2 + 1] = 0xFF;      /* tile $100: colour 2 */
+  }
+  for (unsigned quadrant = 0; quadrant < 4; quadrant++) {
+    meta1[quadrant * 2] = 0x01;      /* byte-swapped SNES word $0100 */
+    meta2[quadrant * 2] = 0x02;      /* byte-swapped SNES word $0200 */
+  }
+  WriteLiteralAsset(rom + kChr0, chars0, 0x2000);
+  WriteLiteralAsset(rom + kChr1, chars1, 0x2000);
   WriteLiteralAsset(rom + kMeta1, meta1, 0x0800);
-  WriteLiteralAsset(rom + kMeta2, zeros, 0x0800);
+  WriteLiteralAsset(rom + kMeta2, meta2, 0x0800);
   rom[kMap1] = rom[kMap1 + 1] = 1;
   rom[kMap2] = rom[kMap2 + 1] = 1;
   WriteLiteralAsset(rom + kMap1 + 2, zeros, 0x0100);
   WriteLiteralAsset(rom + kMap2 + 2, zeros, 0x0100);
-  rom[kPalette + 2] = 0x1F;         /* BGR15 red at palette 0 colour 1 */
-  rom[kPalette2 + 2] = 0xE0;        /* BGR15 green at palette 0 colour 1 */
-  rom[kPalette2 + 3] = 0x03;
+  rom[kPalette + 2] = 0xFF;         /* wrong-path palette 0 colour 1: white */
+  rom[kPalette + 3] = 0x7F;
+  rom[kPalette + 4] = 0x1F;         /* BGR15 red at palette 0 colour 2 */
+  rom[kPalette2 + 4] = 0xE0;        /* BGR15 green at palette 0 colour 2 */
+  rom[kPalette2 + 5] = 0x03;
   rom[kPaletteUpper + 2] = 0x00;    /* BGR15 blue at palette 4 colour 1 */
   rom[kPaletteUpper + 3] = 0x7C;
 
@@ -179,8 +193,10 @@ static void TestGenericRoomScriptAndInheritance(void) {
 
 done:
   free(pixels);
+  free(meta2);
   free(meta1);
-  free(chars);
+  free(chars1);
+  free(chars0);
   free(zeros);
   free(rom);
 }

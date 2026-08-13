@@ -756,21 +756,22 @@ static const float kDioramaKickPitch = 0.05f;  /* rad */
 static const float kDioramaKickZoom = -0.15f;  /* fraction; "slight" zoom-in */
 static const float kDioramaKickTau = 0.20f;    /* seconds, wall-clock exp decay */
 
-/* Host effects use the renderer abstraction's standard additive blend and
- * untextured geometry, not a backend shader. That is a portable API path,
+/* Host effects use the renderer abstraction's standard additive/alpha blend
+ * modes and untextured geometry, not a backend shader. Those are portable
+ * API paths,
  * but not a promise of pixel-identical rasterization across Metal, Vulkan,
  * Direct3D and software. Capability is verified at the point of use: SDL may
  * legally substitute the closest blend mode, so a successful set is followed
  * by a get-and-compare. Any rejection or substitution fails the stages closed. */
-static SDL_AtomicInt s_effect_add_supported = { .value = 1 };
+static SDL_AtomicInt s_effect_blend_supported = { .value = 1 };
 static SDL_AtomicInt s_effect_geometry_supported = { .value = 1 };
 
-void DisableEffectAdd(const char *operation) {
+void DisableEffectBlend(const char *operation) {
   if (!SDL_CompareAndSwapAtomicInt(
-          &s_effect_add_supported, 1, 0))
+          &s_effect_blend_supported, 1, 0))
     return;
   fprintf(stderr,
-          "[host-effects] additive pass unavailable at %s (%s) — "
+          "[host-effects] effect blend pass unavailable at %s (%s) — "
           "effect lighting and particles disabled\n",
           operation, SDL_GetError());
 }
@@ -786,7 +787,7 @@ static void DisableEffectGeometry(const char *operation) {
 }
 
 bool EffectRendererAvailable(void) {
-  return SDL_GetAtomicInt(&s_effect_add_supported) != 0 &&
+  return SDL_GetAtomicInt(&s_effect_blend_supported) != 0 &&
       SDL_GetAtomicInt(&s_effect_geometry_supported) != 0;
 }
 
@@ -794,35 +795,47 @@ bool Present_EffectRendererSupported(void) {
   return EffectRendererAvailable();
 }
 
-bool BeginEffectAdd(EffectRenderState *state) {
+static bool BeginEffectBlendMode(EffectRenderState *state,
+                                 SDL_BlendMode requested,
+                                 const char *operation) {
   if (!state || !EffectRendererAvailable()) return false;
   if (!SDL_GetRenderDrawBlendMode(g_renderer, &state->blend) ||
       !SDL_GetRenderDrawColor(g_renderer, &state->r, &state->g,
                               &state->b, &state->a)) {
-    DisableEffectAdd("state capture");
+    DisableEffectBlend("state capture");
     return false;
   }
-  if (!SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_ADD)) {
+  if (!SDL_SetRenderDrawBlendMode(g_renderer, requested)) {
     SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
-    DisableEffectAdd("blend set");
+    DisableEffectBlend(operation);
     return false;
   }
   SDL_BlendMode applied = SDL_BLENDMODE_INVALID;
   if (!SDL_GetRenderDrawBlendMode(g_renderer, &applied) ||
-      applied != SDL_BLENDMODE_ADD) {
+      applied != requested) {
     SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
-    DisableEffectAdd("blend verification");
+    DisableEffectBlend(operation);
     return false;
   }
   return true;
 }
 
-void EndEffectAdd(const EffectRenderState *state) {
+bool BeginEffectAdd(EffectRenderState *state) {
+  return BeginEffectBlendMode(
+      state, SDL_BLENDMODE_ADD, "additive blend verification");
+}
+
+static bool BeginEffectAlpha(EffectRenderState *state) {
+  return BeginEffectBlendMode(
+      state, SDL_BLENDMODE_BLEND, "alpha blend verification");
+}
+
+void EndEffectBlend(const EffectRenderState *state) {
   if (!state) return;
   bool color_ok = SDL_SetRenderDrawColor(
       g_renderer, state->r, state->g, state->b, state->a);
   bool blend_ok = SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
-  if (!color_ok || !blend_ok) DisableEffectAdd("state restore");
+  if (!color_ok || !blend_ok) DisableEffectBlend("state restore");
 }
 
 bool SubmitEffectBatch(EffectBatch *batch) {
@@ -907,7 +920,7 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
   if (!BeginEffectAdd(&state)) return;
   bool spell_submitted = SubmitEffectBatch(&spell_batch);
   bool scene_submitted = SubmitEffectBatch(&scene_batch);
-  EndEffectAdd(&state);
+  EndEffectBlend(&state);
 
   /* Map-derived world decorations own a separate captured list and reuse the
    * same scratch batch after actor submission. This preserves the actor
@@ -924,7 +937,7 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
     scene_batch.index_count = scene_geometry.index_count;
     if (BeginEffectAdd(&state)) {
       decoration_submitted = SubmitEffectBatch(&scene_batch);
-      EndEffectAdd(&state);
+      EndEffectBlend(&state);
     }
   }
   /* One line, once per process: the whole path (WRAM identity -> capture ->
@@ -1004,7 +1017,7 @@ static void DrawActionDioramaPlaneEffect(
   EffectRenderState state;
   if (!BeginEffectAdd(&state)) return;
   const bool submitted = SubmitEffectBatch(&batch);
-  EndEffectAdd(&state);
+  EndEffectBlend(&state);
   static bool announced;
   if (!announced && submitted) {
     announced = true;
@@ -1025,9 +1038,13 @@ static void DrawActionDioramaPlaneEffect(
     return;
   batch.vertex_count = geometry.vertex_count;
   batch.index_count = geometry.index_count;
-  if (!BeginEffectAdd(&state)) return;
+  /* Mist needs to obscure the finite BG2/skybox discontinuity, not merely
+   * brighten both sides of it. Standard source-alpha blending lets the
+   * staggered zero-alpha rims feather that boundary; the ordinary waterfall
+   * veil and all luminous effects remain additive. */
+  if (!BeginEffectAlpha(&state)) return;
   const bool atmosphere_submitted = SubmitEffectBatch(&batch);
-  EndEffectAdd(&state);
+  EndEffectBlend(&state);
   static bool announced_atmosphere;
   if (!announced_atmosphere && atmosphere_submitted) {
     announced_atmosphere = true;
@@ -1125,7 +1142,7 @@ static void DrawActionBg2EffectFlat(const FrameSlot *slot,
   bool masked = false;
   if (target_ready && BeginEffectAdd(&state)) {
     submitted = SubmitEffectBatch(&batch);
-    EndEffectAdd(&state);
+    EndEffectBlend(&state);
   }
   if (submitted && s_action_bg2_blend_supported) {
     SDL_BlendMode applied = SDL_BLENDMODE_INVALID;
@@ -1289,7 +1306,7 @@ void PresentRendererResources_Reset(void) {
   s_action_bg2_effect_target = NULL;
   s_action_bg2_effect_w = s_action_bg2_effect_h = 0;
   s_action_bg2_blend_supported = true;
-  SDL_SetAtomicInt(&s_effect_add_supported, 1);
+  SDL_SetAtomicInt(&s_effect_blend_supported, 1);
   SDL_SetAtomicInt(&s_effect_geometry_supported, 1);
   PresentSim3D_ResetResources();
 }

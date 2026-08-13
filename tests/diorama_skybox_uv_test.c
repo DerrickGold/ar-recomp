@@ -335,6 +335,21 @@ static void TestUvRangeNeverInverts(void) {
   ExpectFloat("negative radius u0", u0, 1.0f / (float)kTexWidth);
 }
 
+static void TestRomUvRepeatsAcrossDisplayedWidth(void) {
+  float u0 = -1.0f, u1 = -1.0f;
+  DioramaRomSkyboxUvRange(256, 256, &u0, &u1);
+  ExpectFloat("ROM 4:3 u0", u0, 0.0f);
+  ExpectFloat("ROM 4:3 u1", u1, 1.0f);
+
+  DioramaRomSkyboxUvRange(kCapture, 256, &u0, &u1);
+  ExpectFloat("ROM widescreen u0", u0, 0.0f);
+  ExpectFloat("ROM widescreen u1", u1, (float)kCapture / 256.0f);
+
+  DioramaRomSkyboxUvRange(kCapture, 0, &u0, &u1);
+  ExpectFloat("ROM invalid u0", u0, 0.0f);
+  ExpectFloat("ROM invalid u1", u1, 0.0f);
+}
+
 int main(void) {
   TestValidSpan();
   TestBandedValidSpans();
@@ -342,6 +357,7 @@ int main(void) {
   TestUvRangeMatchesLegacyOnFullSpan();
   TestUvRangeCropsNarrowedSpan();
   TestUvRangeNeverInverts();
+  TestRomUvRepeatsAcrossDisplayedWidth();
   if (g_failures) {
     printf("diorama_skybox_uv_test: %d failure(s)\n", g_failures);
     return 1;

@@ -18,6 +18,14 @@ enum {
   kMapPageBytes = 0x100,
   kMapMaxBytes = 16 * 4 * kMapPageBytes,
   kTileBytes4Bpp = 32,
+  /* `$02:B6D3-$B6F6` installs $ECFF for all three action BG word masks.
+   * `$02:B4E8-$B54C` then merges $10 into BG1 and $01 into BG2 whenever
+   * `$18 != 0`. The native metatile builder applies both to every definition
+   * word; omitting this transformed BG2 tile $000 into tile $100 and made a
+   * byte-exact map/metatile decode render completely unrelated character art. */
+  kActionBgTileWordMask = 0xECFF,
+  kActionBg1Attributes = 0x10,
+  kActionBg2Attributes = 0x01,
 };
 
 typedef struct ActionBgAssets {
@@ -272,6 +280,8 @@ bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
     palette[i] = 0xFF000000u | (uint32_t)Expand5(colour) << 16 |
         (uint32_t)Expand5(colour >> 5) << 8 | Expand5(colour >> 10);
   }
+  const uint16_t attributes = (uint16_t)(
+      (bg_layer == 1 ? kActionBg1Attributes : kActionBg2Attributes) << 8);
 
   for (unsigned tile_y = 0; tile_y < 32; tile_y++) {
     for (unsigned tile_x = 0; tile_x < 32; tile_x++) {
@@ -281,7 +291,10 @@ bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
       /* `$02:B3CE` swaps every metatile word while copying it to WRAM. */
       const uint8_t *source = assets.metatiles[bg] +
           (size_t)id * 8 + quadrant * 2;
-      const uint16_t entry = (uint16_t)(source[1] | ((uint16_t)source[0] << 8));
+      const uint16_t definition =
+          (uint16_t)(source[1] | ((uint16_t)source[0] << 8));
+      const uint16_t entry =
+          (definition & kActionBgTileWordMask) | attributes;
       const unsigned tile = entry & 0x3FFu;
       const unsigned palette_base = ((entry >> 10) & 7u) * 16u;
       const bool flip_x = (entry & 0x4000u) != 0;

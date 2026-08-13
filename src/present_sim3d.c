@@ -644,7 +644,7 @@ static void DrawSimEffectLocalLighting(
   EffectRenderState state;
   if (!BeginEffectAdd(&state)) return;
   SubmitEffectBatch(&batch);
-  EndEffectAdd(&state);
+  EndEffectBlend(&state);
 }
 
 static void DrawSimEffectSceneFlash(const FrameSlot *slot, bool lighting,
@@ -671,8 +671,8 @@ static void DrawSimEffectSceneFlash(const FrameSlot *slot, bool lighting,
       (Uint8)(strongest_style.strength * 12.0f));
   SDL_FRect flash = ToFRect(viewport);
   bool fill_ok = color_ok && SDL_RenderFillRect(g_renderer, &flash);
-  if (!fill_ok) DisableEffectAdd("scene flash");
-  EndEffectAdd(&state);
+  if (!fill_ok) DisableEffectBlend("scene flash");
+  EndEffectBlend(&state);
 }
 
 static void DrawSimEffectParticles(
@@ -703,7 +703,7 @@ static void DrawSimEffectParticles(
   EffectRenderState state;
   if (!BeginEffectAdd(&state)) return;
   SubmitEffectBatch(&batch);
-  EndEffectAdd(&state);
+  EndEffectBlend(&state);
 }
 
 static bool SimObjectIsPromotedHud(const FrameSlot *slot,

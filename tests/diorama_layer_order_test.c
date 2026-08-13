@@ -276,6 +276,10 @@ static void TestScopedSourceInheritsBaseRoom(void) {
   waterfall->planes[kDioramaPlane_Backdrop].set_source = true;
   waterfall->planes[kDioramaPlane_Backdrop].source =
       kDioramaLayerSource_AitosSky;
+  /* The Backdrop plane may be hidden while its source still drives the
+   * independently drawn skybox. */
+  waterfall->planes[kDioramaPlane_Backdrop].set_alpha = true;
+  waterfall->planes[kDioramaPlane_Backdrop].alpha = 0;
 
   DioramaResolvedLayer out[16];
   int n = DioramaLayerOrder_ResolveSection(
@@ -290,9 +294,12 @@ static void TestScopedSourceInheritsBaseRoom(void) {
     if (out[i].plane == kDioramaPlane_Backdrop) {
       saw_backdrop = true;
       CHECK(out[i].source == kDioramaLayerSource_AitosSky);
+      CHECK(out[i].alpha == 0);
     }
   }
   CHECK(saw_bg1 && saw_backdrop);
+  CHECK(DioramaLayerOrder_SkyboxSource(out, n) ==
+        kDioramaLayerSource_AitosSky);
 
   /* Outside the positively identified section, only the base applies. */
   n = DioramaLayerOrder_Resolve(&table, 0x04, 0x02, kDefaults,
@@ -300,11 +307,15 @@ static void TestScopedSourceInheritsBaseRoom(void) {
   for (int i = 0; i < n; i++)
     if (out[i].plane == kDioramaPlane_Backdrop)
       CHECK(out[i].source == kDioramaLayerSource_Captured);
+  CHECK(DioramaLayerOrder_SkyboxSource(out, n) ==
+        kDioramaLayerSource_Captured);
+  CHECK(DioramaLayerOrder_SkyboxSource(NULL, n) ==
+        kDioramaLayerSource_Captured);
 
   char text[256];
   CHECK(DioramaLayerOrder_FormatRoom(waterfall, text, sizeof(text)) > 0);
   CHECK(strstr(text, "[layers:04:02:waterfall]") != NULL);
-  CHECK(strstr(text, "backdrop = source:rom-04-01-bg2") != NULL);
+  CHECK(strstr(text, "source:rom-04-01-bg2") != NULL);
 }
 
 static void TestRomSourceCatalogue(void) {

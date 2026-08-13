@@ -57,4 +57,10 @@ void DioramaBgValidSpanPlan_Build(
 void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,
                           float blur_radius, float *out_u0, float *out_u1);
 
+/* A ROM skybox is a tight map page rather than a widescreen PPU capture.
+ * Repeat enough of that page to cover the current displayed width; vertical
+ * mapping remains the complete page [0,1]. */
+void DioramaRomSkyboxUvRange(int display_width, int source_width,
+                             float *out_u0, float *out_u1);
+
 #endif /* DIORAMA_SKYBOX_UV_H */
