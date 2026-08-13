@@ -850,6 +850,80 @@ static void TestSim3DFlatComposition(void) {
   CHECK(output[1] == 0xff112233u); /* alpha-zero capture cannot cover */
 }
 
+static void TestSim3DFlatCompositionDemand(void) {
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  ppu_reset(ppu);
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 9;
+  ppu->screenEnabled[0] = 0x17;
+  ppu->screenEnabled[1] = 0;
+  ppu->cgram[0] = bgr555(3, 5, 7);
+
+  enum { width = kActRaiserAuthenticWidth, height = 1 };
+  uint32_t authentic[width] = {0};
+  Sim3DCaptureRequest request = {
+    .town = true,
+    .master_enabled = true,
+    .renderer_ready = true,
+    .requested_features = kSimFeature_SeparatedComposite |
+                          kSimFeature_GroundProjection,
+    .width = width,
+    .height = height,
+  };
+
+  /* The projected profile has no flat-buffer reader. A sentinel proves the
+   * finish path did not merely produce an equivalent-looking composite. */
+  Sim3D_BeginFrame();
+  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  for (int plane = 0; plane < kSim3DPlane_Count; plane++)
+    memset(g_sim3d_layer_pixels[plane], 0, width * sizeof(uint32_t));
+  for (int x = 0; x < width; x++) g_sim3d_flat_pixels[x] = 0x5a5a5a5au;
+  Sim3D_FinishCapture((uint8_t *)authentic, width * (int)sizeof(uint32_t), 1);
+  for (int x = 0; x < width; x++)
+    CHECK(g_sim3d_flat_pixels[x] == 0x5a5a5a5au);
+
+  CHECK(Sim3D_BeginFrame());
+  PpuClearOverlayBindings(ppu);
+  PpuClearOverlayCaptures(ppu);
+
+  /* Disabling ground projection selects the flat fallback, which must keep
+   * rebuilding the exact same buffer for presentation. */
+  request.requested_features = kSimFeature_SeparatedComposite;
+  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  for (int plane = 0; plane < kSim3DPlane_Count; plane++)
+    memset(g_sim3d_layer_pixels[plane], 0, width * sizeof(uint32_t));
+  Sim3D_FinishCapture((uint8_t *)authentic, width * (int)sizeof(uint32_t), 2);
+  CHECK(g_sim3d_flat_pixels[0] != 0x5a5a5a5au);
+  CHECK(g_sim3d_flat_pixels[0] == ActRaiser_BackdropArgb(ppu));
+
+  Sim3D_BeginFrame();
+  ppu_free(ppu);
+}
+
+static void TestSim3DPlaneTextureUploadMask(void) {
+  const uint32_t all_planes = (1u << kSim3DPlane_Count) - 1u;
+  CHECK(Sim3D_PlaneTextureUploadMask(0) == 0);
+  CHECK(Sim3D_PlaneTextureUploadMask(kSimFeature_SeparatedComposite) == 0);
+  CHECK(Sim3D_PlaneTextureUploadMask(
+            kSimFeature_SeparatedComposite |
+            kSimFeature_GroundProjection) == all_planes);
+
+  uint32_t billboard_mask = Sim3D_PlaneTextureUploadMask(
+      kSimFeature_SeparatedComposite |
+      kSimFeature_GroundProjection |
+      kSimFeature_ObjectBillboards);
+  int uploaded_planes = 0;
+  for (int plane = 0; plane < kSim3DPlane_Count; plane++)
+    if (billboard_mask & (1u << plane)) uploaded_planes++;
+  for (int priority = 0; priority < 4; priority++)
+    CHECK(!(billboard_mask &
+            (1u << Sim3D_ObjPlaneForPriority(priority))));
+  CHECK(uploaded_planes == 6);
+}
+
 static void TestSim3DWidescreenHudCaptureHandoff(void) {
   CHECK(Sim3D_ObjPlaneForPriority(0) == kSim3DPlane_Obj0);
   CHECK(Sim3D_ObjPlaneForPriority(1) == kSim3DPlane_Obj1);
@@ -2076,6 +2150,8 @@ int main(void) {
   TestObjRangeScanoutCapture();
   TestSemanticAtlasPacking();
   TestSim3DFlatComposition();
+  TestSim3DFlatCompositionDemand();
+  TestSim3DPlaneTextureUploadMask();
   TestSim3DWidescreenHudCaptureHandoff();
   TestOverlayContentMetadata();
   TestDioramaFixedColorSubtractCapture();

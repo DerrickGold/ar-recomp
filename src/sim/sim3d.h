@@ -41,6 +41,12 @@ extern uint32_t g_sim3d_difference_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
  * callers must never derive these plane indices arithmetically. */
 int Sim3D_ObjPlaneForPriority(int priority);
 
+/* Plane textures sampled by the resolved presentation profile. Flat mode
+ * samples only g_sim3d_flat_pixels; projected billboard mode replaces the
+ * four raw OBJ planes with the packed object atlas. */
+uint32_t Sim3D_PlaneTextureUploadMask(
+    SimRenderFeatureMask effective_features);
+
 /* Called before per-frame overlay policies. True means the preceding SIM
  * capture owned the PPU bindings and the frontend must restore its defaults. */
 bool Sim3D_BeginFrame(void);
@@ -51,9 +57,10 @@ bool Sim3D_BeginFrame(void);
  * observational: the authentic PPU framebuffer is never removed or modified. */
 bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request);
 
-/* Rebuilds the pitch-zero image after scanout. Diagnostic modes also compare
- * it against the same-frame authentic framebuffer; ordinary play skips that
- * non-vetoing full-frame pass. */
+/* Rebuilds the pitch-zero image after scanout only when the flat stage or a
+ * diagnostic consumer needs it. Diagnostic modes also compare it against the
+ * same-frame authentic framebuffer; projected ordinary play skips both
+ * full-frame passes. */
 void Sim3D_FinishCapture(uint8_t *authentic_pixels,
                          int authentic_pitch, uint16_t game_frame);
 

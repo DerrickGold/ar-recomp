@@ -201,8 +201,9 @@ typedef struct ActionSceneEffectRenderBatch {
 } ActionSceneEffectRenderBatch;
 
 /* Unknown effect/phase/geometry/layer values are ignored (fail closed).
- * False reports malformed input or an internal capacity violation; the output
- * is always initialized and remains safe to submit when true. */
+ * False reports malformed input or an internal capacity violation. Output
+ * counts are always initialized; only the vertex/index prefixes they name are
+ * defined and safe to submit. Storage beyond those counts is unspecified. */
 bool ActionEffectRender_Build(const ActionEffectFrame *frame,
                               bool lighting_enabled,
                               bool particles_enabled,

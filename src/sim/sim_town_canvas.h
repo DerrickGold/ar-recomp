@@ -53,8 +53,8 @@ uint8_t SimTownCanvas_Town(void);
 /* Changes whenever the rendered image does; zero means nothing to draw. */
 uint32_t SimTownCanvas_Serial(void);
 
-/* Region rewritten since the last take, in town pixels. False when nothing
- * changed, so a quiet town uploads nothing. */
+/* Takes one coalesced tile-row region rewritten since the previous drain, in
+ * town pixels. Call until false; a quiet town returns false immediately. */
 bool SimTownCanvas_TakeDirtyRect(int *x, int *y, int *width, int *height);
 /* Row-major ARGB8888, kSimTownCanvasPixels square, fully opaque. */
 const uint32_t *SimTownCanvas_Pixels(void);

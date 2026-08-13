@@ -671,12 +671,18 @@ void PresentUpload(const FrameSlot *slot) {
 
   if (slot->sim.separated_valid) {
     SDL_Rect frame = { 0, 0, slot->snes_width, slot->snes_height };
+    uint32_t plane_upload_mask =
+        Sim3D_PlaneTextureUploadMask(slot->sim.effective_features);
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-      if (g_sim3d_layer_textures[plane] && g_sim3d_layer_pixels[plane])
+      if ((plane_upload_mask & (1u << plane)) &&
+          g_sim3d_layer_textures[plane] && g_sim3d_layer_pixels[plane])
         SDL_UpdateTexture(g_sim3d_layer_textures[plane], &frame,
                           g_sim3d_layer_pixels[plane], slot->snes_width * 4);
     }
-    if (g_sim3d_flat_texture)
+    /* Ground projection samples the separated planes directly. Upload the
+     * CPU flat composite only for the fallback stage that actually draws it. */
+    if (g_sim3d_flat_texture &&
+        !(slot->sim.effective_features & kSimFeature_GroundProjection))
       SDL_UpdateTexture(g_sim3d_flat_texture, &frame, g_sim3d_flat_pixels,
                         slot->snes_width * 4);
   }
@@ -895,14 +901,19 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
   };
   ActionEffectRenderBatch geometry;
   ActionSceneEffectRenderBatch scene_geometry;
-  if (!ActionEffectRender_Build(
-          &slot->action_effects, slot->action_effect_lighting,
-          slot->action_effect_particles, ActionEffectProjection_ProjectPoint,
-          &projection, &geometry) ||
-      !ActionSceneEffectRender_Build(
-          &slot->action_scene_effects, slot->action_effect_lighting,
-          slot->action_effect_particles, ActionEffectProjection_ProjectPoint,
-          &projection, &scene_geometry))
+  geometry.vertex_count = geometry.index_count = 0;
+  scene_geometry.vertex_count = scene_geometry.index_count = 0;
+  if ((slot->action_effects.visible_count &&
+       !ActionEffectRender_Build(
+           &slot->action_effects, slot->action_effect_lighting,
+           slot->action_effect_particles,
+           ActionEffectProjection_ProjectPoint, &projection, &geometry)) ||
+      (slot->action_scene_effects.visible_count &&
+       !ActionSceneEffectRender_Build(
+           &slot->action_scene_effects, slot->action_effect_lighting,
+           slot->action_effect_particles,
+           ActionEffectProjection_ProjectPoint, &projection,
+           &scene_geometry)))
     return;
   const int actor_vertex_count = scene_geometry.vertex_count;
   const int actor_index_count = scene_geometry.index_count;
@@ -924,17 +935,22 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
     .index_capacity = kActionSceneEffectRenderMaxIndices,
   };
   EffectRenderState state;
-  if (!BeginEffectAdd(&state)) return;
-  bool spell_submitted = SubmitEffectBatch(&spell_batch);
-  bool scene_submitted = SubmitEffectBatch(&scene_batch);
-  EndEffectBlend(&state);
+  bool spell_submitted = true;
+  bool scene_submitted = true;
+  if (spell_batch.index_count || scene_batch.index_count) {
+    if (!BeginEffectAdd(&state)) return;
+    spell_submitted = SubmitEffectBatch(&spell_batch);
+    scene_submitted = SubmitEffectBatch(&scene_batch);
+    EndEffectBlend(&state);
+  }
 
   /* Map-derived world decorations own a separate captured list and reuse the
    * same scratch batch after actor submission. This preserves the actor
    * budget without increasing the stack peak. BG2 decorations and bottom
    * atmosphere are submitted by their dedicated depth-ordered passes. */
   bool decoration_submitted = false;
-  if (ActionSceneDecorationRender_Build(
+  if (slot->action_scene_effects.decoration_visible_count &&
+      ActionSceneDecorationRender_Build(
           &slot->action_scene_effects,
           kActionEffectRenderLayer_WorldOverlay,
           slot->action_effect_lighting, slot->action_effect_particles,
@@ -989,6 +1005,7 @@ static void DrawActionDioramaPlaneEffect(
   ActionDioramaPlaneEffectContext *context =
       (ActionDioramaPlaneEffectContext *)userdata;
   if (!context || !context->slot ||
+      !context->slot->action_scene_effects.decoration_visible_count ||
       plane != kPpuOverlaySource_Bg2 || !diorama_projection ||
       !diorama_projection->bg2_plane.valid || !EffectRendererAvailable())
     return;
