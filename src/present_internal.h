@@ -45,9 +45,9 @@ void PresentCompositeScene(const FrameSlot *slot,
                            float alpha);
 void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport);
 bool EffectRendererAvailable(void);
-void DisableEffectAdd(const char *operation);
+void DisableEffectBlend(const char *operation);
 bool BeginEffectAdd(EffectRenderState *state);
-void EndEffectAdd(const EffectRenderState *state);
+void EndEffectBlend(const EffectRenderState *state);
 bool SubmitEffectBatch(EffectBatch *batch);
 
 /* ---- sim entry points present.c calls back into --------------------------

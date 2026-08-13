@@ -152,6 +152,17 @@ DioramaDepthStrategy DioramaLayerOrder_StrategyOf(
   return kDioramaDepth_Flat;
 }
 
+int DioramaLayerOrder_SkyboxSource(const DioramaResolvedLayer *layers,
+                                   int count) {
+  if (!layers || count <= 0) return kDioramaLayerSource_Captured;
+  for (int i = 0; i < count; i++) {
+    if (layers[i].plane == kDioramaPlane_Backdrop &&
+        DioramaLayerOrder_SourceIsValid(layers[i].source))
+      return layers[i].source;
+  }
+  return kDioramaLayerSource_Captured;
+}
+
 static const struct { int direction; const char *token; } kStackDirTokens[] = {
   { kDioramaStack_Forward,  "forward" },
   { kDioramaStack_Backward, "backward" },
@@ -562,7 +573,7 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       if (plane != kDioramaPlane_Backdrop ||
           !DioramaLayerOrder_SourceIsValid(source)) {
         if (out_error) *out_error =
-            "bad source (backdrop captured/rom-GG-MM-bgN)";
+            "bad skybox source (backdrop captured/rom-GG-MM-bgN)";
         return false;
       }
       edit.source = (uint8_t)source;

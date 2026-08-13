@@ -18,67 +18,67 @@
 #include <string.h>
 #include <stdlib.h>
 
-typedef struct DioramaRomBackdropCache {
+typedef struct DioramaRomSkyboxCache {
   uint32_t pixels[kDioramaRomBackdropPixels * kDioramaRomBackdropPixels];
   SDL_Texture *texture;
   int source;
   bool available;
-} DioramaRomBackdropCache;
+} DioramaRomSkyboxCache;
 
 static const uint8_t *g_diorama_rom_data;
 static size_t g_diorama_rom_size;
-static DioramaRomBackdropCache g_rom_backdrop = {
+static DioramaRomSkyboxCache g_rom_skybox = {
   .source = -1,
 };
 
 bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size) {
   g_diorama_rom_data = rom_data;
   g_diorama_rom_size = rom_size;
-  g_rom_backdrop.available = false;
-  g_rom_backdrop.source = -1;
+  g_rom_skybox.available = false;
+  g_rom_skybox.source = -1;
   return rom_data && rom_size > 0;
 }
 
-static SDL_Texture *RomBackdropTexture(SDL_Renderer *renderer, int source) {
+static SDL_Texture *RomSkyboxTexture(SDL_Renderer *renderer, int source) {
   if (!renderer || !g_diorama_rom_data ||
       !DioramaLayerOrder_SourceIsValid(source) ||
       source == kDioramaLayerSource_Captured)
     return NULL;
-  if (g_rom_backdrop.source != source) {
+  if (g_rom_skybox.source != source) {
     uint8_t group = 0, map = 0, bg = 0;
-    g_rom_backdrop.available =
+    g_rom_skybox.available =
         DioramaLayerOrder_DecodeActionBgSource(
             source, &group, &map, &bg) &&
         DioramaRomBackdrop_LoadActionBg(
             g_diorama_rom_data, g_diorama_rom_size, group, map, bg,
-            g_rom_backdrop.pixels,
-            sizeof(g_rom_backdrop.pixels) /
-                sizeof(g_rom_backdrop.pixels[0]));
-    g_rom_backdrop.source = source;
-    SDL_DestroyTexture(g_rom_backdrop.texture);
-    g_rom_backdrop.texture = NULL;
-    fprintf(stderr, "[diorama] ROM backdrop source=%s decoded=%d\n",
+            g_rom_skybox.pixels,
+            sizeof(g_rom_skybox.pixels) /
+                sizeof(g_rom_skybox.pixels[0]));
+    g_rom_skybox.source = source;
+    SDL_DestroyTexture(g_rom_skybox.texture);
+    g_rom_skybox.texture = NULL;
+    fprintf(stderr, "[diorama] ROM skybox source=%s decoded=%d\n",
             DioramaLayerOrder_SourceToken(source),
-            g_rom_backdrop.available ? 1 : 0);
+            g_rom_skybox.available ? 1 : 0);
   }
-  if (!g_rom_backdrop.available) return NULL;
-  if (!g_rom_backdrop.texture) {
-    g_rom_backdrop.texture = SDL_CreateTexture(
+  if (!g_rom_skybox.available) return NULL;
+  if (!g_rom_skybox.texture) {
+    g_rom_skybox.texture = SDL_CreateTexture(
         renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
         kDioramaRomBackdropPixels, kDioramaRomBackdropPixels);
-    if (!g_rom_backdrop.texture ||
-        !SDL_UpdateTexture(g_rom_backdrop.texture, NULL,
-                           g_rom_backdrop.pixels,
+    if (!g_rom_skybox.texture ||
+        !SDL_UpdateTexture(g_rom_skybox.texture, NULL,
+                           g_rom_skybox.pixels,
                            kDioramaRomBackdropPixels *
-                               (int)sizeof(g_rom_backdrop.pixels[0]))) {
-      SDL_DestroyTexture(g_rom_backdrop.texture);
-      g_rom_backdrop.texture = NULL;
+                               (int)sizeof(g_rom_skybox.pixels[0]))) {
+      SDL_DestroyTexture(g_rom_skybox.texture);
+      g_rom_skybox.texture = NULL;
       return NULL;
     }
-    SDL_SetTextureScaleMode(g_rom_backdrop.texture, SDL_SCALEMODE_NEAREST);
-    SDL_SetTextureBlendMode(g_rom_backdrop.texture, SDL_BLENDMODE_NONE);
+    SDL_SetTextureScaleMode(g_rom_skybox.texture, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureBlendMode(g_rom_skybox.texture, SDL_BLENDMODE_NONE);
   }
-  return g_rom_backdrop.texture;
+  return g_rom_skybox.texture;
 }
 
 /* ── M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish) ────
@@ -695,19 +695,6 @@ static bool DioramaLayerIsDrawable(
       g_settings.diorama_skybox == kDioramaSky_Only);
 }
 
-/* A named ROM source supplies both texture storage and current pixels itself.
- * It still obeys the same visibility/HUD/skybox policy as a captured layer;
- * only the two resource booleans are substituted. */
-static bool DioramaLayerIsDrawableWithNamedSource(
-    const DioramaLayerDesc *layer, SDL_Texture *textures[], uint8_t *pixels[],
-    bool named_source_ready) {
-  if (!named_source_ready) return DioramaLayerIsDrawable(layer, textures, pixels);
-  return layer && Diorama_PlaneEligible(
-      layer->plane, !layer->visible || *layer->visible,
-      true, true, g_settings.diorama_hud_flat,
-      g_settings.diorama_skybox == kDioramaSky_Only);
-}
-
 /* BG projections retain the exact drawing predicate above. An OBJ plane may
  * additionally be requested by a current captured actor effect: its metadata
  * is current content even if the isolated hardware band contributed no final
@@ -868,7 +855,9 @@ static const char kLayerManifestPreamble[] =
     "#   stack:<0..1>  copies:<1..8>  density:<per unit>  dir:<forward|"
     "backward|both>\n"
     "#   voxel:<0..1>  slices:<2..24>\n"
-    "# Backdrop source is captured or rom-GG-MM-bgN (N=1/2); alpha:0 disables it.\n"
+    "# Backdrop's source key selects the SKYBOX: captured uses current BG2;\n"
+    "# rom-GG-MM-bgN (N=1/2) decodes a stock action BG. Backdrop alpha/z/order\n"
+    "# control only the residual plane and do not disable that skybox source.\n"
     "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake); bow is\n"
     "# the same tilt EASED. thick extrudes the bottom edge forward. stack fills\n"
     "# the gap with PARALLEL repeats (no tilt, one parallax rate); dir picks which\n"
@@ -1303,12 +1292,13 @@ static int DioramaLayerBgIndex(int plane) {
  * there, so heavy blur reads as "the picture is broken," not atmosphere);
  * Plane+skybox wants the fuller blur since the in-box copy stays sharp and
  * the skybox is deliberately meant to read as unfocused backdrop. */
-static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
+static void DrawDioramaSkybox(SDL_Renderer *renderer,
+                              SDL_Texture *skybox_texture,
                               int obj_apron, int snes_width, int snes_height,
                               int out_w, int out_h, bool dim,
-                              float blur_radius,
+                              float blur_radius, bool rom_source,
                               const DioramaBgValidSpanPlan *valid_spans) {
-  if (!bg2_texture || snes_height <= 0) return;
+  if (!skybox_texture || snes_height <= 0) return;
   /* [obj_apron, obj_apron+snes_width) -- the DISPLAYED span, which sits in the
    * middle of an apron-wide surface. The valid spans arrive already in the same
    * surface-column space, so the margin-fix branch needs no apron term. */
@@ -1341,11 +1331,15 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
   static const SDL_FColor kSkyboxFull = { 1.0f, 1.0f, 1.0f, 1.0f };
   SDL_FColor tint = dim ? kSkyboxDim : kSkyboxFull;
   int indices[6] = { 0, 1, 2, 0, 2, 3 };
-  SDL_SetTextureBlendMode(bg2_texture, SDL_BLENDMODE_NONE);
+  SDL_SetTextureBlendMode(skybox_texture, SDL_BLENDMODE_NONE);
   bool blur = SkyboxBlurEnabled(renderer);
   if (blur) {
+    const float source_width = rom_source
+        ? (float)kDioramaRomBackdropPixels : (float)kPpuSurfaceWidth;
+    const float source_height = rom_source
+        ? (float)kDioramaRomBackdropPixels : (float)kPpuBufHeight;
     BlurUniforms u = {
-      1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight,
+      1.0f / source_width, 1.0f / source_height,
       blur_radius, 0.0f,
     };
     SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
@@ -1365,7 +1359,8 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
   };
   const DioramaBgValidSpan *spans = &legacy;
   unsigned span_count = 1;
-  if (g_settings.diorama_margin_fix && valid_spans && valid_spans->count) {
+  if (!rom_source && g_settings.diorama_margin_fix &&
+      valid_spans && valid_spans->count) {
     spans = valid_spans->spans;
     span_count = valid_spans->count;
     if (span_count > kDioramaBgMaxValidSpans)
@@ -1379,7 +1374,10 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
     int y1 = spans[i].y1 > snes_height ? snes_height : spans[i].y1;
     if (y1 <= y0) continue;
     float u0, u1;
-    if (g_settings.diorama_margin_fix) {
+    if (rom_source) {
+      DioramaRomSkyboxUvRange(
+          snes_width, kDioramaRomBackdropPixels, &u0, &u1);
+    } else if (g_settings.diorama_margin_fix) {
       DioramaSkyboxUvRange(kPpuSurfaceWidth, spans[i].x0, spans[i].x1,
                            blur_radius, &u0, &u1);
     } else {
@@ -1392,15 +1390,19 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer, SDL_Texture *bg2_texture,
         (float)out_h * ((float)y0 / (float)snes_height);
     const float draw_y1 =
         (float)out_h * ((float)y1 / (float)snes_height);
-    const float v0 = (float)y0 / (float)kPpuBufHeight;
-    const float v1 = (float)y1 / (float)kPpuBufHeight;
+    const float v0 = rom_source
+        ? (float)y0 / (float)snes_height
+        : (float)y0 / (float)kPpuBufHeight;
+    const float v1 = rom_source
+        ? (float)y1 / (float)snes_height
+        : (float)y1 / (float)kPpuBufHeight;
     SDL_Vertex verts[4] = {
       { { 0.0f, draw_y0 },         tint, { u0, v0 } },
       { { (float)out_w, draw_y0 }, tint, { u1, v0 } },
       { { (float)out_w, draw_y1 }, tint, { u1, v1 } },
       { { 0.0f, draw_y1 },         tint, { u0, v1 } },
     };
-    SDL_RenderGeometry(renderer, bg2_texture, verts, 4, indices, 6);
+    SDL_RenderGeometry(renderer, skybox_texture, verts, 4, indices, 6);
   }
   if (blur) SDL_SetGPURenderState(renderer, NULL);
 }
@@ -1709,6 +1711,32 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   out_w = viewport.w;
   out_h = viewport.h;
 
+  /* Resolve this room's authored overrides before the far-background pass.
+   * The Backdrop record carries the skybox source as room-scoped metadata, so
+   * waiting until the in-box layer loop would leave the skybox stuck on live
+   * BG2 even though the editor and decoder had selected a ROM source. */
+  DioramaResolvedLayer resolved[kDioramaLayerCount];
+  int resolved_count;
+  {
+    DioramaResolvedLayer defaults[kDioramaLayerCount];
+    for (int i = 0; i < kDioramaLayerCount; i++) {
+      defaults[i].plane = kDioramaLayers[i].plane;
+      defaults[i].z = kDioramaLayers[i].z;
+      defaults[i].alpha = kDioramaLayerAlphaOpaque;
+      defaults[i].source = kDioramaLayerSource_Captured;
+      defaults[i].rake = 0.0f;
+      defaults[i].bow = 0.0f;
+      defaults[i].thickness = 0.0f;
+      defaults[i].stack = 0.0f;
+      defaults[i].stack_copies = 0;
+      defaults[i].stack_direction = kDioramaStack_Forward;
+      defaults[i].stack_solid = false;
+    }
+    resolved_count = DioramaLayerOrder_ResolveSection(
+        &g_layer_overrides, map_group, map_number, layer_section,
+        defaults, kDioramaLayerCount, resolved, kDioramaLayerCount);
+  }
+
   bool interpolating = scroll_delta && scroll_delta->active;
   /* §6.4: SDL_RenderGeometry's default SDL_TEXTURE_ADDRESS_AUTO wraps UVs
    * outside [0,1] for power-of-two textures — shifting UVs to fake sub-frame
@@ -1725,10 +1753,9 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   }
 
   /* B5 (followup doc): drawn before the per-layer loop below — painter's
-   * algorithm, skybox is the farthest thing in the scene. Same
-   * pixels[]-populated guard the per-layer loop uses below, so a stale
-   * texture from a prior session doesn't draw when BG2 isn't actually
-   * captured this frame.
+   * algorithm, skybox is the farthest thing in the scene. Captured mode uses
+   * the same pixels[]-populated guard as the layer loop so stale BG2 cannot
+   * draw; an authored ROM source is immutable and does not need that guard.
    *
    * Live report (2026-07-21): Skybox-only wants noticeably LESS blur than
    * Plane+skybox — it's the entire visible background there (no sharper
@@ -1736,13 +1763,38 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
    * "broken," not atmospheric. */
   static const float kSkyboxBlurRadiusOnly = 1.0f;
   static const float kSkyboxBlurRadiusBoth = 3.0f;
-  if (g_settings.diorama_skybox != kDioramaSky_Off &&
-      pixels[kPpuOverlaySource_Bg2]) {
+  if (g_settings.diorama_skybox != kDioramaSky_Off) {
     bool both = g_settings.diorama_skybox == kDioramaSky_Both;
-    DrawDioramaSkybox(renderer, textures[kPpuOverlaySource_Bg2],
-                      obj_apron, snes_width, snes_height, out_w, out_h, both,
-                      both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly,
-                      bg2_valid_spans);
+    SDL_Texture *skybox_texture = textures[kPpuOverlaySource_Bg2];
+    bool rom_skybox = false;
+    const int skybox_source =
+        DioramaLayerOrder_SkyboxSource(resolved, resolved_count);
+    if (skybox_source != kDioramaLayerSource_Captured) {
+      SDL_Texture *named = RomSkyboxTexture(renderer, skybox_source);
+      if (named) {
+        skybox_texture = named;
+        rom_skybox = true;
+      }
+    }
+    /* Named ROM art is immutable and supplies its own current pixels. A decode
+     * or upload failure falls back to captured BG2, retaining the established
+     * current-frame guard so a stale live texture cannot leak into a scene. */
+    if (rom_skybox || pixels[kPpuOverlaySource_Bg2]) {
+      if (rom_skybox)
+        SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_WRAP,
+                                        SDL_TEXTURE_ADDRESS_CLAMP);
+      DrawDioramaSkybox(renderer, skybox_texture,
+                        obj_apron, snes_width, snes_height, out_w, out_h, both,
+                        both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly,
+                        rom_skybox, bg2_valid_spans);
+      if (rom_skybox)
+        SDL_SetRenderTextureAddressMode(
+            renderer,
+            interpolating ? SDL_TEXTURE_ADDRESS_CLAMP
+                          : SDL_TEXTURE_ADDRESS_AUTO,
+            interpolating ? SDL_TEXTURE_ADDRESS_CLAMP
+                          : SDL_TEXTURE_ADDRESS_AUTO);
+    }
   }
 
   float tex_h = (float)snes_height;
@@ -1911,31 +1963,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   int indices[DIORAMA_INDICES_PER_LAYER];
   int nv, ni;
 
-  /* Resolve this room's authored overrides once per frame. On an empty table
-   * this returns the built-in table verbatim, in built-in order, so an unedited
-   * room draws exactly as it did before overrides existed. */
-  DioramaResolvedLayer resolved[kDioramaLayerCount];
-  int resolved_count;
-  {
-    DioramaResolvedLayer defaults[kDioramaLayerCount];
-    for (int i = 0; i < kDioramaLayerCount; i++) {
-      defaults[i].plane = kDioramaLayers[i].plane;
-      defaults[i].z = kDioramaLayers[i].z;
-      defaults[i].alpha = kDioramaLayerAlphaOpaque;
-      defaults[i].source = kDioramaLayerSource_Captured;
-      defaults[i].rake = 0.0f;
-      defaults[i].bow = 0.0f;
-      defaults[i].thickness = 0.0f;
-      defaults[i].stack = 0.0f;
-      defaults[i].stack_copies = 0;
-      defaults[i].stack_direction = kDioramaStack_Forward;
-      defaults[i].stack_solid = false;
-    }
-    resolved_count = DioramaLayerOrder_ResolveSection(
-        &g_layer_overrides, map_group, map_number, layer_section,
-        defaults, kDioramaLayerCount, resolved, kDioramaLayerCount);
-  }
-
   /* Publish the exact authored shape/window of both low-priority BG planes
    * and each OBJ priority plane. BG planes use the identical drawable gate
    * below; a current actor effect can additionally retain its visible OBJ
@@ -2033,17 +2060,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * gaps the way it always has. */
     bool is_backdrop = (layer->plane == kDioramaPlane_Backdrop);
     SDL_Texture *texture = textures[layer->plane];
-    bool named_rom_backdrop = false;
-    if (is_backdrop &&
-        resolved[i].source != kDioramaLayerSource_Captured) {
-      SDL_Texture *named = RomBackdropTexture(renderer, resolved[i].source);
-      if (named) {
-        texture = named;
-        named_rom_backdrop = true;
-      }
-    }
-    if (!DioramaLayerIsDrawableWithNamedSource(
-            layer, textures, pixels, named_rom_backdrop))
+    if (!DioramaLayerIsDrawable(layer, textures, pixels))
       continue;
 
     SDL_FColor shade = {
@@ -2096,17 +2113,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     float layer_v0, layer_v1;
     DioramaInterpUvWindow(uv_v0, uv_v1, layer_dv, v_slack,
                           &layer_v0, &layer_v1);
-    if (named_rom_backdrop) {
-      /* ROM sources are tight 256x256 textures. Repeat their first map page
-       * across the current backdrop quad and avoid PPU allocation padding. */
-      const float source_width = (float)kDioramaRomBackdropPixels;
-      layer_u0 = 0.0f;
-      layer_u1 = (float)snes_width / source_width;
-      layer_v0 = 0.0f;
-      layer_v1 = 1.0f;
-      SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_WRAP,
-                                      SDL_TEXTURE_ADDRESS_CLAMP);
-    }
     BuildLayerMesh(mvp,
                    z_world, layer_rake, layer_bow, layer_u0, layer_v0,
                    layer_u1, layer_v1,
@@ -2215,14 +2221,13 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     /* Determined up front (before the shadow/main draws) so B1b-crisp knows
      * whether this layer is eligible for the premultiplied supersample path
      * — see the section comment above kDioramaSupersample. */
-    bool rim_light = !named_rom_backdrop && layer->is_figure &&
-        RimLightEnabled(renderer);
-    bool want_dof = !named_rom_backdrop && !rim_light &&
+    bool rim_light = layer->is_figure && RimLightEnabled(renderer);
+    bool want_dof = !rim_light &&
         layer->plane != kPpuOverlaySource_Bg3 &&
         DofBlurEnabled(renderer);
     float dof_radius = want_dof ? DofRadiusForLayer(layer_z) : 0.0f;
     if (dof_radius < 0.05f) dof_radius = 0.0f;
-    bool want_edge = !named_rom_backdrop && !rim_light &&
+    bool want_edge = !rim_light &&
         LayerGetsEdgeAA(layer->plane) &&
         EdgeAAEnabled(renderer);
     bool dof_or_edge = !rim_light && (dof_radius > 0.0f || want_edge);
@@ -2234,7 +2239,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
 
     SDL_Texture *draw_texture = texture;
     bool used_ss = false;
-    if (!use_shader && !named_rom_backdrop) {
+    if (!use_shader) {
       SDL_Texture *ss = BuildDioramaSupersample(
           renderer, texture, obj_apron, snes_width, snes_height);
       if (ss) {
@@ -2333,11 +2338,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     SDL_RenderGeometry(renderer, draw_texture, draw_verts, nv, indices, ni);
     if (rim_light || dof_or_edge)
       SDL_SetGPURenderState(renderer, NULL);
-    if (named_rom_backdrop)
-      SDL_SetRenderTextureAddressMode(
-          renderer,
-          interpolating ? SDL_TEXTURE_ADDRESS_CLAMP : SDL_TEXTURE_ADDRESS_AUTO,
-          interpolating ? SDL_TEXTURE_ADDRESS_CLAMP : SDL_TEXTURE_ADDRESS_AUTO);
     if (plane_effect && out_projection && out_projection->valid) {
       if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
       plane_effect(plane_effect_userdata, layer->plane, out_projection);
@@ -2377,8 +2377,8 @@ static void DioramaReleaseRendererResources(SDL_Renderer *renderer) {
   g_diorama_ss_w = 0;
   g_diorama_ss_h = 0;
 
-  SDL_DestroyTexture(g_rom_backdrop.texture);
-  g_rom_backdrop.texture = NULL;
+  SDL_DestroyTexture(g_rom_skybox.texture);
+  g_rom_skybox.texture = NULL;
 
   SDL_GPUDevice *current_device = DioramaRendererGpuDevice(renderer);
   bool same_device = !g_diorama_shader_device ||

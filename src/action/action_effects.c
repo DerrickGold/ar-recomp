@@ -1243,7 +1243,8 @@ static bool AitosBossSwordBeamParentIsValid(
       parent.animation_bank != kSceneAnimationBank ||
       parent.resume_address != kAitosBossSwordBeamParentResume ||
       parent.animation_state != 0x0000 || parent.visual != 0x0023 ||
-      parent.composition != 0x56FE || parent.flip_attributes != 0 ||
+      parent.composition != 0x56FE ||
+      parent.flip_attributes != object->flip_attributes ||
       parent.left_extent != 8 || parent.top_extent != 8 ||
       parent.right_extent != 8 || parent.bottom_extent != 8 ||
       parent.flags != 0x0020 || parent.local_counter != 0x000D ||
@@ -1262,16 +1263,28 @@ static bool AitosBossSwordBeamParentIsValid(
 
 static bool IsAitosBossSwordBeam(const uint8_t *wram, size_t wram_size,
                                  const ActionObjectSnapshot *object) {
+  const uint16_t reflected_flips =
+      kActRaiserObjectFlip_Horizontal | kActRaiserObjectFlip_Vertical;
   if (!object ||
       object->source_descriptor != kAitosBossSourceDescriptor ||
       object->handler != kAitosBossSwordBeamHandler ||
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
       object->resume_address != kAitosBossSwordBeamResume ||
-      object->animation_index != 0x0001 || object->flip_attributes != 0 ||
+      object->animation_index != 0x0001 ||
+      (object->flip_attributes != 0 &&
+       object->flip_attributes != reflected_flips) ||
       object->flags != 0x0020 ||
       !AitosBossSwordBeamParentIsValid(wram, wram_size, object))
     return false;
+
+  /* Run 20260812-224123 measured the controller's other facing. The engine
+   * rotates the complete two-child volley by 180 degrees: controller and
+   * child both carry H+V ($C000), both velocity components reverse, and the
+   * four culling extents swap sides. Keeping that relationship explicit
+   * admits all four authored diagonals without accepting independent flip,
+   * velocity, or extent mixtures. */
+  const bool reflected = object->flip_attributes == reflected_flips;
 
   static const struct {
     uint16_t state, visual, composition, local_counter;
@@ -1286,11 +1299,18 @@ static bool IsAitosBossSwordBeam(const uint8_t *wram, size_t wram_size,
         object->visual == kCrescents[i].visual &&
         object->composition == kCrescents[i].composition &&
         object->local_counter == kCrescents[i].local_counter &&
-        object->velocity_x == -3 &&
-        object->velocity_y == kCrescents[i].velocity_y &&
-        object->left_extent == 8 && object->right_extent == 16 &&
-        object->top_extent == kCrescents[i].top_extent &&
-        object->bottom_extent == kCrescents[i].bottom_extent)
+        object->velocity_x == (reflected ? 3 : -3) &&
+        object->velocity_y ==
+            (reflected ? -kCrescents[i].velocity_y
+                       : kCrescents[i].velocity_y) &&
+        object->left_extent == (reflected ? 16 : 8) &&
+        object->right_extent == (reflected ? 8 : 16) &&
+        object->top_extent ==
+            (reflected ? kCrescents[i].bottom_extent
+                       : kCrescents[i].top_extent) &&
+        object->bottom_extent ==
+            (reflected ? kCrescents[i].top_extent
+                       : kCrescents[i].bottom_extent))
       return true;
   return false;
 }
@@ -1789,12 +1809,12 @@ static void CaptureAitosWater(ActionSceneEffectFrame *dst,
       bg2_camera_y + kActRaiserAuthenticHeight +
       kActionBgAitosWaterfallBottomExtensionPixels);
   mist.top_extent = 64;
-  mist.bottom_extent = 80;
+  mist.bottom_extent = 152;
   mist.kind = kActionEffect_AitosWaterfallMist;
   mist.phase = kActionEffectPhase_AitosWaterfallMist;
   mist.render_layer = kActionEffectRenderLayer_Atmosphere;
   mist.geometry.data.rect =
-      (ActionEffectLocalRect){-256.0f, -64.0f, 256.0f, 80.0f};
+      (ActionEffectLocalRect){-256.0f, -64.0f, 256.0f, 152.0f};
   SceneDecorationAppend(dst, &mist);
 }
 
@@ -1964,9 +1984,18 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
          * `$8D68`'s one-pixel Y bias shifts their ordinary 24x24 headers up
          * one pixel: captured OAM confirms both rectangles exactly. */
         effect.obj_priority = 2;
-        effect.geometry.data.rect = object.animation_state == 0x0001
-            ? (ActionEffectLocalRect){-8.0f, -17.0f, 16.0f, 7.0f}
-            : (ActionEffectLocalRect){-8.0f, -9.0f, 16.0f, 15.0f};
+        const bool reflected = object.flip_attributes ==
+            (kActRaiserObjectFlip_Horizontal |
+             kActRaiserObjectFlip_Vertical);
+        if (object.animation_state == 0x0001) {
+          effect.geometry.data.rect = reflected
+              ? (ActionEffectLocalRect){-16.0f, -9.0f, 8.0f, 15.0f}
+              : (ActionEffectLocalRect){-8.0f, -17.0f, 16.0f, 7.0f};
+        } else {
+          effect.geometry.data.rect = reflected
+              ? (ActionEffectLocalRect){-16.0f, -17.0f, 8.0f, 7.0f}
+              : (ActionEffectLocalRect){-8.0f, -9.0f, 16.0f, 15.0f};
+        }
       } else {
         /* These headers use signed 8-bit origins even though the action ABI
          * publishes them as words. `$8D68` performs wrapping byte arithmetic:

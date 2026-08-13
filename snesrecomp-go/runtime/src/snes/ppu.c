@@ -228,7 +228,33 @@ void PpuClearOverlayCaptures(Ppu *ppu) {
   memset(ppu->overlayCaptures, 0, sizeof(ppu->overlayCaptures));
   ppu->overlayObjRelocatedFirst = 0;
   ppu->overlayObjRelocatedCount = 0;
+  memset(&ppu->objRangeCapture, 0, sizeof(ppu->objRangeCapture));
   memset(&ppu->m7Override, 0, sizeof(ppu->m7Override));
+}
+
+bool PpuSetObjRangeCapture(Ppu *ppu, uint8_t first, uint8_t count,
+                           int x, int y, int width, int height,
+                           uint8_t *pixels, size_t pitch) {
+  const int64_t x1 = (int64_t)x + width;
+  const int64_t y1 = (int64_t)y + height;
+  if (!ppu || !pixels || first >= 128 || !count || count > 128 - first ||
+      width <= 0 || height <= 0 || !pitch ||
+      pitch % sizeof(uint32_t) != 0 ||
+      pitch / sizeof(uint32_t) < kPpuXPixels ||
+      pitch / sizeof(uint32_t) > kPpuSurfaceWidth ||
+      x < INT16_MIN || x1 > INT16_MAX || y < 0 || y1 > kPpuYPixels)
+    return false;
+  ppu->objRangeCapture = (PpuObjRangeCapture){
+    .x0 = (int16_t)x,
+    .y0 = (int16_t)y,
+    .x1 = (int16_t)x1,
+    .y1 = (int16_t)y1,
+    .first = first,
+    .count = count,
+    .pixels = pixels,
+    .pitch = (uint32_t)pitch,
+  };
+  return true;
 }
 
 bool PpuBindMode7OverlaySurface(Ppu *ppu, uint8_t *pixels, size_t pitch,
@@ -673,6 +699,22 @@ static inline bool PpuBgVisibleOnMarginLine(const Ppu *ppu, int y,
   return true;
 }
 
+static void PpuClearObjRangeCaptureLine(Ppu *ppu, int screen_y) {
+  PpuObjRangeCapture *capture = &ppu->objRangeCapture;
+  if (!capture->pixels || !capture->count ||
+      screen_y < capture->y0 || screen_y >= capture->y1)
+    return;
+  const int surface_width = (int)(capture->pitch / sizeof(uint32_t));
+  const int texture_extra = IntMax((surface_width - kPpuXPixels) / 2, 0);
+  const int x0 = IntMax(capture->x0, -texture_extra);
+  const int x1 = IntMin(capture->x1, surface_width - texture_extra);
+  if (x1 <= x0)
+    return;
+  uint8_t *row = capture->pixels + (size_t)screen_y * capture->pitch;
+  memset(row + (size_t)(x0 + texture_extra) * sizeof(uint32_t), 0,
+         (size_t)(x1 - x0) * sizeof(uint32_t));
+}
+
 // The body of one rendered scanline, shared by the authentic loop and by the
 // vertical-margin bands. `line` is 1-based and may fall outside [1,kPpuYPixels]
 // when a margin is active; every consumer below either handles that range or is
@@ -682,6 +724,7 @@ static void PpuRenderLine(Ppu *ppu, int line) {
   PpuUpdateBrightnessCache(ppu);
 
   // evaluate sprites
+  PpuClearObjRangeCaptureLine(ppu, line - 1);
   ClearBackdrop(&ppu->objBuffer);
   if (ppu->overlayRenderBuffer[kPpuOverlaySource_Obj]) {
     memset(&ppu->overlayBuffers[kPpuOverlaySource_Obj], 0,
@@ -2572,6 +2615,11 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
         int paletteBase = 0x80 + 16 * ((oam1 & 0xe00) >> 9);
         int prio = SPRITE_PRIO_TO_PRIO((oam1 & 0x3000) >> 12, (oam1 & 0x800) == 0);
         PpuZbufType z = paletteBase + (prio << 8);
+        PpuObjRangeCapture *range_capture = &ppu->objRangeCapture;
+        const bool capture_range_slot = range_capture->pixels &&
+            range_capture->count && slot >= range_capture->first &&
+            slot < range_capture->first + range_capture->count &&
+            line >= range_capture->y0 && line < range_capture->y1;
 
         for(int col = 0; col < spriteSize; col += 8) {
           if(col + x > -8 - ppu->extraLeftCur && col + x < 256 + ppu->extraRightCur) {
@@ -2601,6 +2649,22 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
               if (pixel != 0) {
                 int screen_x = col + x + px;
                 int di = screen_x + kPpuExtraLeftRight;
+                if (capture_range_slot &&
+                    screen_x >= range_capture->x0 &&
+                    screen_x < range_capture->x1) {
+                  const int surface_width =
+                      (int)(range_capture->pitch / sizeof(uint32_t));
+                  const int texture_extra =
+                      IntMax((surface_width - kPpuXPixels) / 2, 0);
+                  const int dx = screen_x + texture_extra;
+                  if (dx >= 0 && dx < surface_width) {
+                    uint32_t *range_row = (uint32_t *)(
+                        range_capture->pixels +
+                        (size_t)line * range_capture->pitch);
+                    if (!range_row[dx])
+                      range_row[dx] = PpuObjColor(ppu, paletteBase + pixel);
+                  }
+                }
                 bool capture_pixel = capture_slot &&
                     screen_x >= obj_capture->x0 &&
                     screen_x < obj_capture->x1;

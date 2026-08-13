@@ -581,6 +581,57 @@ static void TestObjRangeRaster(void) {
   ppu_free(ppu);
 }
 
+static void TestObjRangeScanoutCapture(void) {
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  ppu_reset(ppu);
+  ppu->inidisp = 0x0f;
+  ppu->obsel = 0;
+  ppu->screenEnabled[0] = 1u << kPpuOverlaySource_Obj;
+  ppu->cgram[0x81] = bgr555(31, 0, 0);
+  ppu->cgram[0x82] = bgr555(0, 0, 31);
+  set_solid_4bpp_tile(ppu, 0, 1);
+  set_solid_4bpp_tile(ppu, 1, 2);
+
+  /* Slot 0 wins the authentic overlap, but the semantic range selects slot 1
+   * and must preserve its blue pixels at the instant scanout fetches them. */
+  ppu->oam[0] = 10 | (20 << 8);
+  ppu->oam[1] = 0 | (2 << 12);
+  ppu->oam[2] = 10 | (20 << 8);
+  ppu->oam[3] = 1 | (2 << 12);
+  static uint8_t framebuffer[kW * kH * sizeof(uint32_t)];
+  static uint32_t capture[kW * kH];
+  memset(framebuffer, 0, sizeof(framebuffer));
+  memset(capture, 0x5a, sizeof(capture));
+  PpuSetExtraSpace(ppu, 0);
+  PpuBeginDrawing(ppu, framebuffer, kW * sizeof(uint32_t), 0);
+  CHECK(PpuSetObjRangeCapture(
+      ppu, 1, 1, 10, 20, 8, 8, (uint8_t *)capture,
+      kW * sizeof(uint32_t)));
+  ppu_runLine(ppu, 0);
+  ppu_runLine(ppu, 21);
+  const uint32_t *frame = (const uint32_t *)(const void *)framebuffer;
+  CHECK(frame[20 * kW + 10] == 0x00ff0000u);
+  CHECK(capture[20 * kW + 10] == 0xff0000ffu);
+  CHECK(capture[20 * kW + 17] == 0xff0000ffu);
+
+  /* Later endpoint state cannot rewrite the already displayed row. This is
+   * the transition seam the HUD handoff depends on. */
+  set_solid_4bpp_tile(ppu, 1, 0);
+  ppu->cgram[0x82] = 0;
+  ppu_runLine(ppu, 22);
+  CHECK(capture[20 * kW + 10] == 0xff0000ffu);
+  CHECK(capture[21 * kW + 10] == 0);
+
+  PpuClearOverlayCaptures(ppu);
+  CHECK(ppu->objRangeCapture.count == 0);
+  ppu_free(ppu);
+  g_new_ppu = saved_new_ppu;
+}
+
 static void TestWorldNavigationPartialBrightnessCapture(void) {
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
@@ -2022,6 +2073,7 @@ static void TestCapturedPaddingReachesBudget(void) {
 int main(void) {
   TestWorldNavigationPartialBrightnessCapture();
   TestObjRangeRaster();
+  TestObjRangeScanoutCapture();
   TestSemanticAtlasPacking();
   TestSim3DFlatComposition();
   TestSim3DWidescreenHudCaptureHandoff();

@@ -621,7 +621,7 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
       &decorations, kActionEffectRenderLayer_Atmosphere, true, false,
       ActionEffectProjection_ProjectPoint, &context, &pit));
   CHECK(Diorama_ProjectCapturedBg2Point(
-      &projection, -148.0f, 5.0f, &expected, NULL, NULL));
+      &projection, -150.0f, 4.0f, &expected, NULL, NULL));
   CHECK(fabsf(pit.vertices[0].position.x - expected.x) < 0.001f);
   CHECK(fabsf(pit.vertices[0].position.y - expected.y) < 0.001f);
 
@@ -736,6 +736,34 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
         kActRaiserAuthenticHeight +
             kActionBgAitosWaterfallBottomExtensionPixels + 20.0f);
   CHECK(visible_atmosphere_max_y - visible_atmosphere_min_y > 100.0f);
+  /* The six banks must not converge on one shared lower alpha edge. Inspect
+   * each glow's second (last visibly coloured) ring: the staggered bank
+   * depths need to differ by more than 80px, and one must retain visible mist
+   * 100px below the safe BG2 seam. This rejects the rectangular cutoff seen
+   * in run 20260812-224123 even though its total geometry was tall enough. */
+  float shallowest_bank_bottom = 10000.0f;
+  float deepest_bank_bottom = -10000.0f;
+  for (int bank = 0; bank < kActionSceneEffectWaterfallMistGlowCount;
+       bank++) {
+    const int visible_ring =
+        bank * kActionEffectGlowVertices + 1 + kActionEffectGlowSegments;
+    float bank_bottom = -10000.0f;
+    for (int segment = 0; segment < kActionEffectGlowSegments; segment++) {
+      const SDL_Vertex *vertex =
+          &atmosphere.vertices[visible_ring + segment];
+      CHECK(vertex->color.a > 0.02f);
+      if (vertex->position.y > bank_bottom)
+        bank_bottom = vertex->position.y;
+    }
+    if (bank_bottom < shallowest_bank_bottom)
+      shallowest_bank_bottom = bank_bottom;
+    if (bank_bottom > deepest_bank_bottom)
+      deepest_bank_bottom = bank_bottom;
+  }
+  CHECK(deepest_bank_bottom - shallowest_bank_bottom > 80.0f);
+  CHECK(deepest_bank_bottom >
+        kActRaiserAuthenticHeight +
+            kActionBgAitosWaterfallBottomExtensionPixels + 100.0f);
   frame.decoration_overflow = 1;
   CHECK(ActionSceneDecorationRender_Build(
       &frame, kActionEffectRenderLayer_WorldOverlay, true, true,
@@ -1163,6 +1191,22 @@ static void TestSwordBeamLightingTrailAndStars(void) {
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &repeat));
   CHECK(repeat.vertex_count > 0);
+  /* Reflected state 1 from run 20260812-224123 travels right/up. Its wake
+   * must therefore taper left/down, proving the newly admitted facing reaches
+   * the heading-driven renderer rather than merely passing capture. */
+  frame.effects[0].visual = 0x21;
+  frame.effects[0].velocity_x = 3;
+  frame.effects[0].velocity_y = -1;
+  frame.effects[0].flags = kActionEffectFlag_Visible |
+      kActionEffectFlag_FlipHorizontal | kActionEffectFlag_FlipVertical;
+  frame.effects[0].geometry.data.rect =
+      (ActionEffectLocalRect){-16.0f, -9.0f, 8.0f, 15.0f};
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, true, IdentityProjection, NULL, &repeat));
+  CHECK(repeat.vertices[trail].position.x >
+        repeat.vertices[trail + 2].position.x);
+  CHECK(repeat.vertices[trail].position.y <
+        repeat.vertices[trail + 2].position.y);
   frame.effects[0].visual = 0x32;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &repeat));

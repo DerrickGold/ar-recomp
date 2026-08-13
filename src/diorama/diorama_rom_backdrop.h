@@ -21,8 +21,9 @@ bool DioramaRomBackdrop_DecompressAsset(const uint8_t *packed,
  * interprets the stock per-map asset script, including inherited assets within
  * an act, and never mutates emulated WRAM/VRAM/CGRAM. The first 256x256 map
  * page is rendered as opaque ARGB8888 for the residual backdrop plane. BG1's
- * script-uploaded VRAM-$3000 character bank is also followed when its
- * metatiles select tile ids $200-$2FF. */
+ * native action tile-word mask and per-layer attribute merge are applied
+ * before character lookup; this is what maps BG1 definitions to tiles
+ * $000-$0FF and BG2 definitions to tiles $100-$1FF. */
 bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
                                      uint8_t map_group, uint8_t map_number,
                                      uint8_t bg_layer,

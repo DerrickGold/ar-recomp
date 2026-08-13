@@ -689,6 +689,7 @@ static void TestBackdropSourceIsScopedAndEditable(void) {
       rows, n, kDioramaPlane_Backdrop, kDioramaEditorParam_Source);
   CHECK(source != NULL);
   CHECK(source && source->kind == kDioramaEditorRow_ParamEnum);
+  CHECK(source && !strcmp(source->label, "skybox source"));
   CHECK(source && !strcmp(source->value, "ROM-04-01-BG2"));
   /* Other planes cannot offer a source row the manifest would reject. */
   ctx.selected_plane = kPpuOverlaySource_Bg1;

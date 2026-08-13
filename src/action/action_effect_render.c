@@ -2077,37 +2077,44 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       break;
     case kActionEffect_AitosWaterfallMist: {
       /* Two overlapping tiers feather the finite waterfall into the uncovered
-       * bottom band. The upper row is a denser foam shelf at the exact safe
-       * BG2 edge; the taller lower row gives that shelf enough body to read as
-       * mist instead of a thin blue line. Transparent outer rings keep both
-       * rows atmospheric rather than turning the gap into an opaque fill. */
+       * bottom band. The first tuning used three near-identical lower ellipses
+       * whose visible rings all ended at local Y ~= 80; their overlap read as
+       * one translucent rectangle with a horizontal cutoff. Keep the upper
+       * foam shelf broad, but make the lower banks narrower, vertically
+       * staggered, and more irregular. Their zero-alpha rims now terminate at
+       * substantially different depths, so the mist breaks up before it
+       * disappears instead of exposing one synthetic edge. */
       static const float kBankX[6] = {
-        -168.0f, 0.0f, 168.0f,
-        -160.0f, 0.0f, 160.0f,
+        -170.0f, 0.0f, 170.0f,
+        -178.0f, -24.0f, 176.0f,
       };
       static const float kBankY[6] = {
-        -10.0f, -13.0f, -9.0f,
-        14.0f, 10.0f, 15.0f,
+        -11.0f, -15.0f, -8.0f,
+        18.0f, 36.0f, 12.0f,
       };
       static const float kBankRadiusX[6] = {
-        214.0f, 248.0f, 214.0f,
-        226.0f, 260.0f, 226.0f,
+        194.0f, 224.0f, 194.0f,
+        160.0f, 182.0f, 158.0f,
       };
       static const float kBankRadiusY[6] = {
-        44.0f, 52.0f, 44.0f,
-        62.0f, 72.0f, 62.0f,
+        46.0f, 54.0f, 43.0f,
+        78.0f, 112.0f, 92.0f,
       };
       static const float kBankCentreAlpha[6] = {
-        0.34f, 0.42f, 0.34f,
-        0.20f, 0.25f, 0.20f,
+        0.28f, 0.34f, 0.27f,
+        0.15f, 0.18f, 0.14f,
       };
       static const float kBankInnerAlpha[6] = {
-        0.25f, 0.31f, 0.25f,
-        0.15f, 0.19f, 0.15f,
+        0.20f, 0.25f, 0.19f,
+        0.11f, 0.13f, 0.10f,
       };
       static const float kBankBodyAlpha[6] = {
-        0.11f, 0.14f, 0.11f,
-        0.070f, 0.085f, 0.070f,
+        0.085f, 0.11f, 0.080f,
+        0.050f, 0.060f, 0.045f,
+      };
+      static const float kBankFlare[6] = {
+        0.055f, 0.045f, 0.065f,
+        0.105f, 0.120f, 0.095f,
       };
       for (unsigned bank = 0;
            bank < kActionSceneEffectWaterfallMistGlowCount; bank++) {
@@ -2119,7 +2126,7 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
           .ring = {{0.72f, 0.92f, 1.00f, kBankInnerAlpha[bank]},
                    {0.30f, 0.68f, 0.94f, kBankBodyAlpha[bank]},
                    {0.08f, 0.28f, 0.54f, 0.00f}},
-          .flare = 0.035f, .rise = 0.025f,
+          .flare = kBankFlare[bank], .rise = 0.025f,
           .axis_x = 1.0f, .lift_y = -1.0f,
           .seed = (unsigned)effect->pulse_generation + bank * 0x45D9u,
         };

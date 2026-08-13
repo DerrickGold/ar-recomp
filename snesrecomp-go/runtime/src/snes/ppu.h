@@ -268,6 +268,16 @@ typedef struct PpuObjRangeBounds {
   int16_t x0, y0, x1, y1;
 } PpuObjRangeBounds;
 
+/* A second, semantic OBJ capture that is written directly by the live sprite
+ * evaluator. Unlike PpuRasterizeObjRange, this does not sample an endpoint
+ * PPU state: each selected pixel is preserved when scanout fetches it. */
+typedef struct PpuObjRangeCapture {
+  int16_t x0, y0, x1, y1;
+  uint8_t first, count;
+  uint8_t *pixels;
+  uint32_t pitch;
+} PpuObjRangeCapture;
+
 /* One resolved sprite part: exact position, attribute word, size. The atom
  * every OBJ position consumer operates on -- OAM is one way to obtain parts,
  * not the only one. Priority is deliberately NOT a separate field: it lives in
@@ -464,6 +474,7 @@ struct Ppu {
   PpuPixelPrioBufs overlayObjFullAddBuffer;
   PpuOverlayCapture overlayCaptures[kPpuOverlaySource_Count];
   uint8_t overlayObjRelocatedFirst, overlayObjRelocatedCount;
+  PpuObjRangeCapture objRangeCapture;
   uint32_t renderPitch;
   uint8_t *renderBuffer;
   uint32_t overlayRenderPitch[kPpuOverlaySource_Count];
@@ -682,6 +693,16 @@ bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
                           uint8_t priority, const PpuObjRangeBounds *bounds,
                           uint32_t *pixels, int width, int height,
                           size_t pitch);
+
+/* Capture one validated contiguous OAM range into an independent ARGB surface
+ * as the normal sprite evaluator fetches it. The rectangle is in authentic
+ * screen coordinates and is cleared lazily, one selected scanline at a time.
+ * Selected slots retain their own first-writer order but are isolated from
+ * unrelated OAM, which is required when the host relocates a HUD sprite after
+ * scanout. Policy is frame-scoped and cleared by PpuClearOverlayCaptures. */
+bool PpuSetObjRangeCapture(Ppu *ppu, uint8_t first, uint8_t count,
+                           int x, int y, int width, int height,
+                           uint8_t *pixels, size_t pitch);
 
 // Clear/bind persistent transparent ARGB host-overlay surfaces. Bindings survive
 // ppu_reset; capture rectangles do not and are configured by game policy each

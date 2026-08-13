@@ -1664,25 +1664,22 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
  * icon, and there is no second OBJ capture to put the icon in, so the split has
  * to happen on captured pixels rather than on capture policy.
  *
- * Three phases, because the icon's tile/palette state can change during the
- * raster:
+ * Two host phases around one PPU-owned capture, because the icon's
+ * tile/palette state can change during the raster:
  *
- *   Prepare, BEFORE scanout -- resolve the icon's OAM range and footprint.
- *   CaptureLine, DURING scanout -- immediately after each authentic scanline
- *     is rendered, rasterize with that line's live VRAM/CGRAM state and retain
- *     only the icon row that was just displayed. This ordering matters in both
- *     directions: after scanout the game may already have streamed the next
- *     tile set, while on the game-over return to Sky Palace the frame-start
- *     state is still the previous all-black tile and the IRQ restores the HUD
- *     art before rows 11..26. A whole-icon sample at either endpoint is wrong.
- *   Finish, AFTER scanout -- publish that raster to g_hud_obj_pixels for the
- *     anchored overlay and clear the same pixels from the diorama plane that
- *     holds the icon's priority band, which only has content once scanout has
- *     run. The diorama's OBJ capture is RemoveFromGame, so the icon is already
- *     out of the backdrop frame; only the plane needs erasing. */
+ *   Prepare, BEFORE scanout -- resolve the icon's OAM range and footprint and
+ *     register an independent semantic range capture. The real sprite
+ *     evaluator then writes those selected slots to g_hud_obj_pixels at the
+ *     exact instant it fetches each displayed pixel. This is intentionally not
+ *     a PpuRasterizeObjRange call on either side of scanout: the game-over
+ *     return to Sky Palace changes the live OBJ state within the frame, and a
+ *     second decode can disagree with the pixels the evaluator just emitted.
+ *   Finish, AFTER scanout -- use that completed HUD surface as the opacity
+ *     mask while clearing the same pixels from the diorama plane that holds
+ *     the icon's priority band, which only has content once scanout has run.
+ *     The diorama's OBJ capture is RemoveFromGame, so the icon is already out
+ *     of the backdrop frame; only the plane needs erasing. */
 enum { kActRaiserHudIconRasterLimit = 64 };
-static uint32_t s_hud_icon_raster[kActRaiserHudIconRasterLimit *
-                                  kActRaiserHudIconRasterLimit];
 static PpuObjRangeBounds s_hud_icon_bounds;
 static int s_hud_icon_priority;
 static bool s_hud_icon_ready;
@@ -1710,6 +1707,8 @@ static int ActRaiser_DioramaObjPlaneForPriority(int priority) {
 
 static void ActRaiser_DioramaHudObjPrepare(void) {
   extern bool g_diorama_frame_active;
+  extern int g_ws_extra;
+  extern uint8_t g_hud_obj_pixels[];
 
   s_hud_icon_ready = false;
   s_hud_icon_ppu_relocated = false;
@@ -1738,8 +1737,12 @@ static void ActRaiser_DioramaHudObjPrepare(void) {
 
   s_hud_icon_bounds = bounds;
   s_hud_icon_priority = priority;
-  memset(s_hud_icon_raster, 0,
-         (size_t)raster_width * raster_height * sizeof(uint32_t));
+  const int surface_width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+  if (!PpuSetObjRangeCapture(
+          g_ppu, first, count, bounds.x0, bounds.y0,
+          raster_width, raster_height, g_hud_obj_pixels,
+          (size_t)surface_width * sizeof(uint32_t)))
+    return;
   s_hud_icon_ready = true;
   if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].flags &
       kPpuOverlayFlag_MarkFullAddSubscreen)
@@ -1816,43 +1819,9 @@ static void ActRaiser_DioramaHudObjPrepare(void) {
   }
 }
 
-/* Preserve exactly the OBJ pixels the hardware saw on this scanline. The
- * scratch raster is intentionally rebuilt from the current PPU state: callers
- * invoke this after ppu_runLine and before HDMA/IRQ advances to the next line.
- * s_hud_restore_slot is no longer needed by the restore-layer build once
- * Prepare returns, so sharing it avoids another 16 KiB static buffer. */
-static void ActRaiser_DioramaHudObjCaptureLine(int screen_y) {
-  if (!s_hud_icon_ready || screen_y < s_hud_icon_bounds.y0 ||
-      screen_y >= s_hud_icon_bounds.y1)
-    return;
-
-  const int raster_width = s_hud_icon_bounds.x1 - s_hud_icon_bounds.x0;
-  const int raster_height = s_hud_icon_bounds.y1 - s_hud_icon_bounds.y0;
-  if (!PpuRasterizeObjRange(
-          g_ppu, s_hud_obj_icon_first, s_hud_obj_icon_count,
-          (uint8_t)s_hud_icon_priority, &s_hud_icon_bounds,
-          s_hud_restore_slot, raster_width, raster_height,
-          (size_t)raster_width * sizeof(uint32_t))) {
-    s_hud_icon_ready = false;
-    return;
-  }
-
-  const int row = screen_y - s_hud_icon_bounds.y0;
-  memcpy(s_hud_icon_raster + (size_t)row * raster_width,
-         s_hud_restore_slot + (size_t)row * raster_width,
-         (size_t)raster_width * sizeof(uint32_t));
-}
-
 static void ActRaiser_DioramaHudObjFinish(int width) {
   extern uint8_t *g_diorama_layer_pixels[];
   extern uint8_t g_hud_obj_pixels[];
-
-  /* Rows of g_hud_obj_pixels this pass last wrote. present.c uploads that
-   * surface over the FULL capture height (224 rows in diorama mode), so rows
-   * left behind by an earlier icon position would persist in the texture;
-   * clearing just them beats a 224-row blanket memset for a 16x16 icon. */
-  static int last_y0, last_y1;
-  static size_t last_pitch;
 
   /* Bound against the PLANE width -- the wider of the two destinations, and the
    * one the apron grew. Both surfaces are allocated kPpuSurfaceWidth wide. */
@@ -1892,25 +1861,16 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
   extern int g_ws_extra_top;
   const int plane_row_bias = g_ws_extra_top;
 
-  /* Clear at the pitch the rows were WRITTEN at: a display-mode change between
-   * frames alters `width`, and clearing at the new one would walk off the old
-   * rows and leave the icon's last position smeared in the texture. */
-  if (last_pitch)
-    for (int y = last_y0; y < last_y1; y++)
-      memset(g_hud_obj_pixels + (size_t)y * last_pitch, 0, last_pitch);
-  last_y0 = last_y1 = 0;
-  last_pitch = pitch;
-
   for (int y = 0; y < raster_height; y++) {
     const int screen_y = s_hud_icon_bounds.y0 + y;
     if (screen_y < 0 || screen_y >= kActRaiserAuthenticHeight) continue;
-    uint32_t *dst = (uint32_t *)(g_hud_obj_pixels + (size_t)screen_y * pitch);
+    const uint32_t *hud_src = (const uint32_t *)(
+        g_hud_obj_pixels + (size_t)screen_y * pitch);
     for (int x = 0; x < raster_width; x++) {
       const int texture_x = s_hud_icon_bounds.x0 + x + extra;
       if (texture_x < 0 || texture_x >= width) continue;
-      const uint32_t pixel = s_hud_icon_raster[(size_t)y * raster_width + x];
+      const uint32_t pixel = hud_src[texture_x];
       if (!pixel) continue;
-      dst[texture_x] = pixel;
       const size_t plane_index =
           (size_t)(screen_y + plane_row_bias) * plane_width +
           ActionApron_SurfaceColumn(&plane_geom, s_hud_icon_bounds.x0 + x);
@@ -1930,8 +1890,6 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
         if (restore_plane)
           restore_plane[plane_index] = s_hud_restore_argb[footprint_index];
       }
-      if (!last_y1) last_y0 = screen_y;
-      if (screen_y + 1 > last_y1) last_y1 = screen_y + 1;
     }
   }
 }
@@ -2495,16 +2453,12 @@ void ActRaiserDrawPpuFrame(void) {
         ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
   }
 
-  /* Resolve the stable OAM footprint before scanout; the live tile/palette
-   * pixels are captured one displayed row at a time inside the loop. */
+  /* Resolve the stable OAM footprint before scanout; the live sprite evaluator
+   * writes the selected range to the HUD surface while each line is fetched. */
   ActRaiser_DioramaHudObjPrepare();
 
   for (int i = 0; i <= 224; i++) {
     ppu_runLine(g_ppu, i);
-    /* ppu_runLine(i) renders authentic row i-1. Sample the promoted HUD OBJ
-     * now, against the same VRAM/CGRAM state, before HDMA or the IRQ below
-     * advances the raster state. */
-    ActRaiser_DioramaHudObjCaptureLine(i - 1);
     /* Vertical top margin (diorama). Placed HERE, not before the loop, for two
      * reasons that both have to hold:
      *
