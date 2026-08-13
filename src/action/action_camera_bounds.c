@@ -1,6 +1,7 @@
 #include "action_camera_bounds.h"
 
 #include <limits.h>
+#include <stddef.h>
 
 bool ActionCameraAxisBounds_Resolve(
     uint16_t world_extent, uint16_t viewport_extent,
@@ -53,13 +54,28 @@ static uint16_t MoveNative(
       ? native_maximum : (uint16_t)candidate;
 }
 
+uint16_t ActionCameraAxisBounds_UpdateNativeCamera(
+    uint16_t camera_origin, int16_t delta,
+    uint16_t world_extent, uint16_t viewport_extent,
+    ActionCameraAxisBounds *resolved_bounds) {
+  if (resolved_bounds) {
+    /* Resolve with no presentation budget solely to publish the native range.
+     * Resolve owns invalid/load-state normalization and always initializes the
+     * output, so callers and debug logging cannot retain stale bounds. */
+    ActionCameraAxisBounds_Resolve(
+        world_extent, viewport_extent, 0, 0, resolved_bounds);
+  }
+  return MoveNative(
+      camera_origin, delta, world_extent, viewport_extent);
+}
+
 uint16_t ActionCameraAxisBounds_UpdateCamera(
     uint16_t camera_origin, int16_t delta,
     uint16_t world_extent, uint16_t viewport_extent,
     int requested_before, int requested_after,
     ActionCameraAxisBounds *resolved_bounds) {
-  const uint16_t native = MoveNative(
-      camera_origin, delta, world_extent, viewport_extent);
+  const uint16_t native = ActionCameraAxisBounds_UpdateNativeCamera(
+      camera_origin, delta, world_extent, viewport_extent, NULL);
   ActionCameraAxisBounds bounds;
   if (!ActionCameraAxisBounds_Resolve(
           world_extent, viewport_extent,

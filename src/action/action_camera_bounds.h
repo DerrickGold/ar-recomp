@@ -23,6 +23,15 @@ bool ActionCameraAxisBounds_Resolve(
 uint16_t ActionCameraAxisBounds_Clamp(
     const ActionCameraAxisBounds *bounds, int32_t camera_origin);
 
+/* Apply only the ROM's native camera motion/clamp and publish its unmodified
+ * [0, world-viewport] interval for diagnostics. This API deliberately has no
+ * presentation-margin parameters, making native gameplay axes structural
+ * rather than a convention at each call site. */
+uint16_t ActionCameraAxisBounds_UpdateNativeCamera(
+    uint16_t camera_origin, int16_t delta,
+    uint16_t world_extent, uint16_t viewport_extent,
+    ActionCameraAxisBounds *resolved_bounds);
+
 /* Apply one ROM-style camera delta, then add the presentation interval only
  * when the complete requested margins fit. Native/fallback zero-delta frames
  * deliberately retain the input origin, matching $02:B091 transition logic. */

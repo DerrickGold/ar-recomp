@@ -1,21 +1,24 @@
 /* Presentation-aware replacement for the action camera at $02:B091.
  *
- * The ROM clamps BG1's camera for a 256x225 viewport. Wide presentation used
- * to leave that camera untouched and shorten whichever synthetic margin met a
- * finite world edge. That exposed the playfield cutoff inside the wider canvas.
- * This replacement keeps the complete requested playfield view inside the live
- * $2E/$30 room dimensions whenever it fits. The original clamp remains the
- * fallback for a room smaller than that view, every authentic/raw mode, and
- * authored scenes whose canonical background plan has no finite BG1 canvas.
- * BG2 parallax and the player-relative tail still run through the recompiled
- * ROM helpers, after the corrected BG1 camera has become canonical and the
- * requested delta has been reconciled with the motion that actually fit. */
+ * The ROM clamps BG1's camera for a 256x225 viewport. Wide horizontal
+ * presentation used to leave that camera untouched and shorten whichever
+ * synthetic margin met a finite world edge. That exposed the playfield cutoff
+ * inside the wider canvas, so this replacement fits the horizontal view inside
+ * the live $2E room width whenever it can.
+ *
+ * Diorama's vertical extension is deliberately different: it captures however
+ * many real rows exist around the native $24 camera instead of moving gameplay
+ * state to manufacture equal top/bottom margins. Keeping the ROM's vertical
+ * camera range preserves object activation/collision and makes toggling
+ * Diorama presentation-neutral. BG2 parallax and the player-relative tail
+ * still run through the recompiled ROM helpers, after the corrected BG1 camera
+ * has become canonical and the requested delta has been reconciled with the
+ * motion that actually fit. */
 
 #include "action/action_camera_bounds.h"
 #include "actraiser_action_bg.h"
 #include "actraiser_game.h"
 #include "cpu_state.h"
-#include "diorama/diorama.h"
 #include "settings.h"
 
 #include <stdio.h>
@@ -157,16 +160,6 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
             g_ws_extra, playfield.horizontal_extent.mode,
             playfield.horizontal_extent.right)
       : 0;
-  const int vertical_available =
-      wide && Diorama_IsActiveThisFrame()
-          ? g_settings.diorama_vertical_extend
-          : 0;
-  const int vertical_before = ActionCamera_LimitMargin(
-      vertical_available, playfield.vertical_extent.mode,
-      playfield.vertical_extent.top);
-  const int vertical_after = ActionCamera_LimitMargin(
-      vertical_available, playfield.vertical_extent.mode,
-      playfield.vertical_extent.bottom);
   const uint16_t old_x = ActionCamera_Read16(
       cpu, kActRaiserWram_Bg1CameraX);
   const uint16_t old_y = ActionCamera_Read16(
@@ -182,17 +175,23 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
       ActionCamera_Read16(cpu, kActRaiserWram_Bg1Width),
       kActRaiserAuthenticWidth, horizontal_before, horizontal_after,
       &horizontal_bounds);
-  const uint16_t camera_y = ActionCameraAxisBounds_UpdateCamera(
+  /* Do not fit the gameplay camera to Diorama's vertical capture budget.
+   * ActRaiser_ApplyVerticalMarginPolicy independently resolves the real rows
+   * available above and below this native camera, and the compositor already
+   * accepts asymmetric captures. The native-only API has no margin arguments,
+   * so presentation cannot accidentally push required action objects outside
+   * the authentic activation/collision window while still drawing them. */
+  const uint16_t camera_y = ActionCameraAxisBounds_UpdateNativeCamera(
       old_y, requested_delta_y,
       ActionCamera_Read16(cpu, kActRaiserWram_Bg1Height),
-      kActionVerticalViewportHeight, vertical_before, vertical_after,
-      &vertical_bounds);
+      kActionVerticalViewportHeight, &vertical_bounds);
   const int16_t effective_delta_x =
       ActionCameraAxisBounds_EffectiveDelta(
           &horizontal_bounds, old_x, camera_x, requested_delta_x);
-  const int16_t effective_delta_y =
-      ActionCameraAxisBounds_EffectiveDelta(
-          &vertical_bounds, old_y, camera_y, requested_delta_y);
+  /* Native ROM behavior publishes the request even when its camera clamp
+   * blocks some or all motion. Effective-delta reconciliation is exclusively
+   * a fitted-presentation correction and therefore remains X-only. */
+  const int16_t effective_delta_y = requested_delta_y;
   ActionCamera_Write16(
       cpu, kActionCameraDeltaX, (uint16_t)effective_delta_x);
   ActionCamera_Write16(
@@ -240,7 +239,7 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
               horizontal_bounds.minimum, horizontal_bounds.maximum,
               vertical_bounds.minimum, vertical_bounds.maximum,
               horizontal_before, horizontal_after,
-              vertical_before, vertical_after,
+              0, 0,
               horizontal_bounds.includes_requested_margins,
               vertical_bounds.includes_requested_margins,
               requested_delta_x, effective_delta_x,

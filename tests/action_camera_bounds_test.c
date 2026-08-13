@@ -85,6 +85,17 @@ static void CheckInvalidInput(void) {
   CHECK(!ActionCameraAxisBounds_Resolve(256, 256, 0, -1, &bounds));
   CHECK(!ActionCameraAxisBounds_Resolve(256, 256, 0, 0, NULL));
   CHECK(ActionCameraAxisBounds_Clamp(NULL, 100) == 0);
+
+  /* The native API preserves zero-delta transition state even before valid
+   * dimensions arrive, while still clearing diagnostic bounds. */
+  bounds = (ActionCameraAxisBounds){ 1, 2, true };
+  CHECK(ActionCameraAxisBounds_UpdateNativeCamera(
+      120, 0, 0, 225, &bounds) == 120);
+  CHECK(bounds.minimum == 0);
+  CHECK(bounds.maximum == 0);
+  CHECK(!bounds.includes_requested_margins);
+  CHECK(ActionCameraAxisBounds_UpdateNativeCamera(
+      120, 0, 0, 225, NULL) == 120);
 }
 
 static void CheckNativeStationaryCameraIsUntouched(void) {
@@ -111,6 +122,33 @@ static void CheckCorrectedCameraClampsWithoutMotion(void) {
   CHECK(bounds.includes_requested_margins);
   CHECK(ActionCameraAxisBounds_UpdateCamera(
       512, 0, 768, 256, 120, 120, &bounds) == 392);
+}
+
+static void CheckVerticalCaptureDoesNotFitGameplayCamera(void) {
+  ActionCameraAxisBounds bounds = { 0 };
+
+  /* A 512px-tall action room has native vertical range 0..287. Diorama may
+   * capture up to 32 real rows around that camera, but presentation must not
+   * shrink the gameplay-camera range to 32..255. At Bloodpool's floor this is
+   * the difference between the moving logs being at native screen y=193 and
+   * being drawn but inactive just beyond line 224. */
+  CHECK(ActionCameraAxisBounds_UpdateNativeCamera(
+      287, 0, 512, 225, &bounds) == 287);
+  CHECK(!bounds.includes_requested_margins);
+  CHECK(bounds.minimum == 0);
+  CHECK(bounds.maximum == 287);
+
+  /* If an older savestate contains the retired floor clamp, the next native
+   * tracking request can reach the real floor instead of being blocked at
+   * 255 again. */
+  CHECK(ActionCameraAxisBounds_UpdateNativeCamera(
+      255, 32, 512, 225, &bounds) == 287);
+
+  /* Keep the old generic fitted result explicit: production Y uses the
+   * native-only API above and therefore cannot accept this retired budget. */
+  CHECK(ActionCameraAxisBounds_UpdateCamera(
+      287, 0, 512, 225, 32, 32, &bounds) == 255);
+  CHECK(bounds.includes_requested_margins);
 }
 
 static void CheckPresentationDeltaReconciliation(void) {
@@ -143,6 +181,7 @@ int main(void) {
   CheckInvalidInput();
   CheckNativeStationaryCameraIsUntouched();
   CheckCorrectedCameraClampsWithoutMotion();
+  CheckVerticalCaptureDoesNotFitGameplayCamera();
   CheckPresentationDeltaReconciliation();
   puts("action_camera_bounds_test: PASS");
   return 0;
