@@ -506,6 +506,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_settings_overlay_test
         tests/settings_overlay_test.c
         src/config.c
+        src/quintet_lzss.c
         src/settings.c
         src/atomic_replace.c
         src/randomizer.c
@@ -820,6 +821,7 @@ if(BUILD_TESTING)
     # binary also accepts an optional local ROM path for a 98-source census.
     add_executable(actraiser_diorama_rom_backdrop_test
         tests/diorama_rom_backdrop_test.c
+        src/quintet_lzss.c
         src/diorama/diorama_rom_backdrop.c
     )
     target_include_directories(actraiser_diorama_rom_backdrop_test PRIVATE
@@ -829,6 +831,33 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_diorama_rom_backdrop
         COMMAND actraiser_diorama_rom_backdrop_test)
+
+    # Shared byte-exact Quintet LZSS core used by both immutable host assets
+    # and the formal $02:C5C9 CPU HLE. Pins bit phases, dictionary overlap,
+    # truncation, and the native scratch metadata without requiring the ROM.
+    add_executable(actraiser_quintet_lzss_test
+        tests/quintet_lzss_test.c
+        src/quintet_lzss.c
+    )
+    target_include_directories(actraiser_quintet_lzss_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_quintet_lzss
+        COMMAND actraiser_quintet_lzss_test)
+
+    # CPU-facing contract for the $02:C5C9 whole-body HLE: output and ring
+    # bytes plus all caller-visible DP scratch, registers, and RTL stack pop.
+    add_executable(actraiser_lzss_hle_test
+        tests/actraiser_lzss_hle_test.c
+        src/quintet_lzss.c
+        src/actraiser/actraiser_lzss.c
+    )
+    target_include_directories(actraiser_lzss_hle_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_lzss_hle
+        COMMAND actraiser_lzss_hle_test)
 
     # The in-game layer editor's row model and strategy authoring. Pure for the
     # same reason the depth shapes are: the overlay that consumes it is SDL, and

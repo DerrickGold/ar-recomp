@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "quintet_lzss.h"
 
 enum {
   kAssetScriptBase = 0x05 * 0x8000,
@@ -43,65 +44,11 @@ typedef struct ActionBgAssets {
   bool have_map[2];
 } ActionBgAssets;
 
-typedef struct BitReader {
-  const uint8_t *data;
-  size_t size;
-  size_t bit;
-} BitReader;
-
-static bool ReadBits(BitReader *reader, unsigned count, unsigned *value) {
-  if (!reader || !value || reader->bit > reader->size * 8 ||
-      count > reader->size * 8 - reader->bit)
-    return false;
-  unsigned result = 0;
-  for (unsigned i = 0; i < count; i++) {
-    const uint8_t byte = reader->data[reader->bit >> 3];
-    result = (result << 1) |
-        ((byte >> (7 - (reader->bit & 7))) & 1u);
-    reader->bit++;
-  }
-  *value = result;
-  return true;
-}
-
-/* Byte-exact host form of `$02:C5C9`: packed MSB-first tokens and a 256-byte
- * dictionary filled with spaces, write cursor `$EF`. */
 static bool Decompress(const uint8_t *rom, size_t rom_size, size_t offset,
                        uint8_t *out, size_t expected_size) {
   if (!rom || !out || offset > rom_size || rom_size - offset < 2) return false;
-  const size_t output_size =
-      (size_t)rom[offset] | ((size_t)rom[offset + 1] << 8);
-  if (output_size != expected_size) return false;
-  BitReader reader = {rom + offset + 2, rom_size - offset - 2, 0};
-  uint8_t dictionary[256];
-  memset(dictionary, 0x20, sizeof(dictionary));
-  unsigned write = 0xEF;
-  size_t produced = 0;
-  while (produced < output_size) {
-    unsigned literal = 0;
-    if (!ReadBits(&reader, 1, &literal)) return false;
-    if (literal) {
-      unsigned value = 0;
-      if (!ReadBits(&reader, 8, &value)) return false;
-      out[produced++] = (uint8_t)value;
-      dictionary[write] = (uint8_t)value;
-      write = (write + 1) & 0xFF;
-      continue;
-    }
-    unsigned read = 0, length_code = 0;
-    if (!ReadBits(&reader, 8, &read) ||
-        !ReadBits(&reader, 4, &length_code))
-      return false;
-    for (unsigned n = length_code + 2;
-         n && produced < output_size; n--) {
-      const uint8_t value = dictionary[read];
-      read = (read + 1) & 0xFF;
-      out[produced++] = value;
-      dictionary[write] = value;
-      write = (write + 1) & 0xFF;
-    }
-  }
-  return true;
+  return QuintetLzss_DecompressAsset(
+      rom + offset, rom_size - offset, out, expected_size, NULL);
 }
 
 static uint32_t Read24(const uint8_t *bytes) {
