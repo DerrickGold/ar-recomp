@@ -1040,7 +1040,8 @@ even if a record is freed afterwards.
 **Auxiliary per-town state mapped along the way:** `$7F:9250 + town*0x80` = 64-entry
 built-square dedup list (2-byte **square** coords x,y ≤ 7, `$FFFF` empty; appender `$8EC1`,
 staged pair `$9550/$9552`, scan cursors `$9554,X`); `$7F:3800 + town*0x400` = per-cell flag
-map (bit0 set near road/build commit `$9623`, bit1 near `$8E48`; init cleared, not saved);
+map (bit0 set near road/build commit `$9623`, bit1 near `$8E48`, transient pathfinder
+visited bit2 set at `$9A50`; init cleared, not saved);
 `$7F:6800 + town*0x80` road-map words, one per selector square, initialised from ROM
 `$03:DCFA` (bit `$40` = obstructs the build-direction selector, `$0080/$0100` =
 river-crossing/bridge state); `$7F:7BF9` = current town id, `$7F:7BFB` = town id ×2 (the
@@ -1071,7 +1072,15 @@ HLE backed by the same `ActRaiser_CellMarkIndex` function used by the bridge sid
 whole-ROM scan found 21 direct JSR sites and no external branch into its body; the wrapper
 preserves its pre-quadrant `$7C05` scratch value, A/X result, final flags, decimal-mode edge,
 and RTS stack effect. An exhaustive 6-town × 32 × 32 test pins the canonical map and separate
-raw-word cases pin the instruction-level ABI. Later, `$9D4D` dispatches active records
+raw-word cases pin the instruction-level ABI. The build-direction pathfinder's five call sites
+then use `$96EF` to apply two rejection rules to that index: bit `$0200` in the metatile's
+top-left word at `$7E:2100 + terrain_id*8` means impassable terrain, while bit `$04` in the
+cell's `$7F:3800` flag means this traversal already visited it. `$96EF` is also a whole-body
+HLE; it folds the nested `$9710` call into the shared calculation and preserves the original
+Z-result convention (`Z=1` means available), accumulator high byte, X/Y, flags, `$7C05`,
+nested-JSR stack bytes, and outer RTS. Predicate coverage plus an instruction-level ABI suite
+and a deterministic simulation replay pin the conversion; the replay's final CPU state, WRAM,
+and SRAM are byte-identical to the native-body baseline. Later, `$9D4D` dispatches active records
 through `$9F6B/$9F8D` and `$A4A8/$A4F7`: it selects the bridge rebuild program from the
 `$03:D4E2` family, arms the record's `$77E7+slot*8` step entry, and executes its initial draw
 through `$A591` → `$9C43`. `$A591` interprets a count plus `{dx,dy,metatile}` triples;
