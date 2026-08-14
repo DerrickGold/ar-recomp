@@ -905,16 +905,17 @@ static void TestSim3DFlatCompositionDemand(void) {
 
 static void TestSim3DPlaneTextureUploadMask(void) {
   const uint32_t all_planes = (1u << kSim3DPlane_Count) - 1u;
-  CHECK(Sim3D_PlaneTextureUploadMask(0) == 0);
-  CHECK(Sim3D_PlaneTextureUploadMask(kSimFeature_SeparatedComposite) == 0);
+  CHECK(Sim3D_PlaneTextureUploadMask(0, all_planes) == 0);
+  CHECK(Sim3D_PlaneTextureUploadMask(
+            kSimFeature_SeparatedComposite, all_planes) == 0);
   CHECK(Sim3D_PlaneTextureUploadMask(
             kSimFeature_SeparatedComposite |
-            kSimFeature_GroundProjection) == all_planes);
+            kSimFeature_GroundProjection, all_planes) == all_planes);
 
   uint32_t billboard_mask = Sim3D_PlaneTextureUploadMask(
       kSimFeature_SeparatedComposite |
       kSimFeature_GroundProjection |
-      kSimFeature_ObjectBillboards);
+      kSimFeature_ObjectBillboards, all_planes);
   int uploaded_planes = 0;
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     if (billboard_mask & (1u << plane)) uploaded_planes++;
@@ -922,6 +923,105 @@ static void TestSim3DPlaneTextureUploadMask(void) {
     CHECK(!(billboard_mask &
             (1u << Sim3D_ObjPlaneForPriority(priority))));
   CHECK(uploaded_planes == 6);
+  /* A missing producer bit always wins over feature selection. Presentation
+   * must not sample a stale texture even if a future caller violates the
+   * capture/fallback contract. */
+  CHECK(Sim3D_PlaneTextureUploadMask(
+            kSimFeature_SeparatedComposite |
+            kSimFeature_GroundProjection,
+            1u << kSim3DPlane_Bg1Low) ==
+        (1u << kSim3DPlane_Bg1Low));
+}
+
+static void TestSim3DRawObjCaptureFallbackContract(void) {
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  ppu_reset(ppu);
+  ppu->inidisp = 0x0f;
+  ppu->bgmode = 9;
+  ppu->screenEnabled[0] = 0x17;
+  ppu->screenEnabled[1] = 0;
+
+  Sim3DCaptureRequest request = {
+    .town = true,
+    .master_enabled = true,
+    .renderer_ready = true,
+    .billboard_atlas_ready = true,
+    .billboard_renderer_ready = true,
+    .requested_features = kSimFeature_SeparatedComposite |
+                          kSimFeature_GroundProjection |
+                          kSimFeature_ObjectBillboards,
+    .width = kActRaiserAuthenticWidth,
+    .height = 1,
+  };
+  uint32_t authentic[kActRaiserAuthenticWidth] = {0};
+
+  /* Ordinary billboard presentation has a current atlas and no raw-plane
+   * reader. OBJ is fully unbound before scanout, including every band and its
+   * capture, while the six BG planes remain active. */
+  Sim3D_BeginFrame();
+  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Bg1] != NULL);
+  CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] == NULL);
+  for (int band = 0; band < 3; band++)
+    CHECK(ppu->overlayRenderBands[kPpuOverlaySource_Obj][band] == NULL);
+  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].x1 <=
+        ppu->overlayCaptures[kPpuOverlaySource_Obj].x0);
+  CHECK(Sim3D_BeginFrame());
+  PpuClearOverlayBindings(ppu);
+
+  /* The inspector consumes the exact ten-plane composition even though the
+   * selected presentation profile uses billboards. */
+  request.inspector_active = true;
+  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
+  for (int band = 0; band < 3; band++)
+    CHECK(ppu->overlayRenderBands[kPpuOverlaySource_Obj][band] != NULL);
+  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount == 128);
+  CHECK(Sim3D_BeginFrame());
+  PpuClearOverlayBindings(ppu);
+  request.inspector_active = false;
+
+  /* A current-frame metadata/atlas failure retains the raw fallback. */
+  request.billboard_atlas_ready = false;
+  SimRenderMetadata_Reset();
+  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
+  Sim3D_FinishCapture((uint8_t *)authentic,
+                      kActRaiserAuthenticWidth * (int)sizeof(uint32_t), 1);
+  SimFrameData fallback_frame = {0};
+  Sim3DTuning fallback_tuning = {0};
+  Sim3D_AnnotateFrame(&fallback_frame, &fallback_tuning);
+  CHECK(fallback_frame.separated_valid);
+  CHECK(fallback_frame.separated_status == kSim3DCapture_AtlasInvalid);
+  CHECK(fallback_frame.separated_plane_mask ==
+        (1u << kSim3DPlane_Count) - 1u);
+  CHECK(Sim3D_BeginFrame());
+  PpuClearOverlayBindings(ppu);
+  request.billboard_atlas_ready = true;
+
+  /* The GPU atlas is also part of the contract. Its absence retains raw OBJ
+   * and removes billboards from the implemented feature set after finish. */
+  request.billboard_renderer_ready = false;
+  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
+  Sim3D_FinishCapture((uint8_t *)authentic,
+                      kActRaiserAuthenticWidth * (int)sizeof(uint32_t), 1);
+  CHECK(Sim3D_ImplementedFeatures() & kSimFeature_GroundProjection);
+  CHECK(!(Sim3D_ImplementedFeatures() & kSimFeature_ObjectBillboards));
+  CHECK(Sim3D_BeginFrame());
+  PpuClearOverlayBindings(ppu);
+  request.billboard_renderer_ready = true;
+
+  /* Turning billboards off is the intentional raw-plane profile. */
+  request.requested_features &= ~kSimFeature_ObjectBillboards;
+  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
+  CHECK(Sim3D_BeginFrame());
+
+  ppu_free(ppu);
 }
 
 static void TestSim3DWidescreenHudCaptureHandoff(void) {
@@ -995,12 +1095,30 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
       ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
 
   const int extra = 43;
+  const int width = kActRaiserAuthenticWidth + 2 * extra;
+  static uint32_t hud_obj[kSim3DMaxWidth * kActRaiserAuthenticHeight];
+  static uint32_t authentic[kSim3DMaxWidth * kActRaiserAuthenticHeight];
+  /* Give every referenced OBJ tile an opaque test colour. The handoff
+   * rasterizes the promoted range before capture ownership changes, so this
+   * makes its output observable without running a complete PPU frame. */
+  memset(ppu->vram, 0xff, sizeof(ppu->vram));
+  ppu->cgram[0xff] = bgr555(31, 0, 31);
+  CHECK(PpuBindOverlaySurface(
+      ppu, kPpuOverlaySource_Obj, (uint8_t *)hud_obj,
+      (size_t)width * sizeof(uint32_t)));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Obj, 0, 0,
+      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(
+      ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
+
   Sim3DCaptureRequest request = {
     .town = true,
     .master_enabled = true,
     .renderer_ready = true,
     .requested_features = kSimFeature_SeparatedComposite,
-    .width = kActRaiserAuthenticWidth + 2 * extra,
+    .width = width,
     .height = kActRaiserAuthenticHeight,
   };
   Sim3D_BeginFrame();
@@ -1015,6 +1133,44 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   CHECK(obj->x0 == -extra && obj->x1 == kActRaiserAuthenticWidth + extra);
   CHECK(obj->oamFirst == 0 && obj->oamCount == 128);
   CHECK(Sim3D_BeginFrame());
+
+  /* The promoted HUD surface must be rebuilt identically whether raw OBJ is
+   * the selected fallback or billboards suppress all four raw bands. This is
+   * the stale/cleared-buffer boundary: PrepareHudHandoff retains the original
+   * HUD destination before OBJ is rebound or unbound, and FinishCapture
+   * repopulates it from the independent range raster. */
+  for (int suppress_raw = 0; suppress_raw <= 1; suppress_raw++) {
+    PpuClearOverlayBindings(ppu);
+    memset(hud_obj, 0, sizeof(hud_obj));
+    memset(authentic, 0, sizeof(authentic));
+    CHECK(PpuBindOverlaySurface(
+        ppu, kPpuOverlaySource_Obj, (uint8_t *)hud_obj,
+        (size_t)width * sizeof(uint32_t)));
+    CHECK(PpuSetOverlayCapture(
+        ppu, kPpuOverlaySource_Bg3, 0, 0,
+        kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+        kPpuOverlayFlag_RemoveFromGame));
+    CHECK(PpuSetOverlayCapture(
+        ppu, kPpuOverlaySource_Obj, 0, 0,
+        kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+        kPpuOverlayFlag_RemoveFromGame));
+    CHECK(PpuSetOverlayOamRange(
+        ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
+    request.requested_features = kSimFeature_SeparatedComposite |
+        (suppress_raw ? kSimFeature_GroundProjection |
+                            kSimFeature_ObjectBillboards
+                      : 0);
+    request.billboard_atlas_ready = suppress_raw;
+    request.billboard_renderer_ready = suppress_raw;
+    CHECK(Sim3D_PrepareCapture(ppu, &request));
+    CHECK((ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] == NULL) ==
+          (suppress_raw != 0));
+    Sim3D_FinishCapture(
+        (uint8_t *)authentic, width * (int)sizeof(uint32_t), 1);
+    CHECK(hud_obj[(size_t)kActRaiserHudObjUpperY * width +
+                  extra + kActRaiserSimulationHourglassLeftX] != 0);
+    CHECK(Sim3D_BeginFrame());
+  }
 
   /* The same four-slot-sized capture at the old allocation is not the
    * promoted icon and must remain an overlay conflict. */
@@ -2152,6 +2308,7 @@ int main(void) {
   TestSim3DFlatComposition();
   TestSim3DFlatCompositionDemand();
   TestSim3DPlaneTextureUploadMask();
+  TestSim3DRawObjCaptureFallbackContract();
   TestSim3DWidescreenHudCaptureHandoff();
   TestOverlayContentMetadata();
   TestDioramaFixedColorSubtractCapture();

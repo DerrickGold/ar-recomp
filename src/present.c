@@ -672,7 +672,9 @@ void PresentUpload(const FrameSlot *slot) {
   if (slot->sim.separated_valid) {
     SDL_Rect frame = { 0, 0, slot->snes_width, slot->snes_height };
     uint32_t plane_upload_mask =
-        Sim3D_PlaneTextureUploadMask(slot->sim.effective_features);
+        Sim3D_PlaneTextureUploadMask(
+            slot->sim.effective_features,
+            slot->sim.separated_plane_mask);
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
       if ((plane_upload_mask & (1u << plane)) &&
           g_sim3d_layer_textures[plane] && g_sim3d_layer_pixels[plane])

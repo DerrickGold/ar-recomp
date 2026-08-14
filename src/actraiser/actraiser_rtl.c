@@ -2387,11 +2387,20 @@ void ActRaiserDrawPpuFrame(void) {
    * conflict. The original PPU framebuffer remains intact as same-frame A0. */
   {
     extern bool g_sim3d_textures_ready;
+    extern bool g_sim3d_billboard_renderer_ready;
     extern bool g_diorama_frame_active;
     extern int g_ws_extra;
     uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
     uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
     bool town = ActRaiser_IsSimulationTown(map_group, map_number);
+    /* Build D1b before choosing D2's physical planes. This is the same live
+     * OAM/VRAM/CGRAM state the scanline renderer is about to consume, but now
+     * an atlas or metadata failure can retain raw OBJ before scanout instead
+     * of being discovered after those fallback pixels were omitted. */
+    bool billboard_atlas_ready = town && SimRenderAtlas_Build(
+        g_ppu,
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
     Sim3DCaptureRequest request = {
       .town = town,
       .master_enabled = g_settings.sim3d_mode,
@@ -2406,6 +2415,8 @@ void ActRaiserDrawPpuFrame(void) {
           map_group, map_number,
           ActRaiser_ReadWramMirror16(kActRaiserWram_SimMapPickerFlag)),
       .renderer_ready = g_sim3d_textures_ready,
+      .billboard_atlas_ready = billboard_atlas_ready,
+      .billboard_renderer_ready = g_sim3d_billboard_renderer_ready,
       .diorama_active = g_diorama_frame_active,
       /* The inspector panel is the only on-screen reader of the capture's
        * diagnostic hash; with it off, that pass is skipped. */
@@ -2454,17 +2465,6 @@ void ActRaiserDrawPpuFrame(void) {
     SimpleHdma_Init(&hdma_chans[ch], &dma->channel[ch]);
 
   int trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
-
-  /* D1b: isolate each semantic (record, priority) OAM fragment before the
-   * scanline renderer consumes this exact OAM/VRAM/CGRAM state. The atlas is
-   * presentation-only and the authentic framebuffer remains untouched. */
-  if (ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
-                                 g_ram[kActRaiserWram_CurrentMap])) {
-    SimRenderAtlas_Build(
-        g_ppu,
-        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
-        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
-  }
 
   /* Resolve the stable OAM footprint before scanout; the live sprite evaluator
    * writes the selected range to the HUD surface while each line is fetched. */

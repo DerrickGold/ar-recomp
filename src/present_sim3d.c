@@ -2597,6 +2597,7 @@ static void RenderSimProfile(const FrameSlot *slot,
   uint32_t enabled_planes = slot->sim.diagnostic_layer_mask
       ? slot->sim.diagnostic_layer_mask
       : (1u << kSim3DPlane_Count) - 1;
+  uint32_t captured_planes = slot->sim.separated_plane_mask;
   bool fade_ground_planes = cull_haze &&
       (slot->sim.cull_haze_pct != 0 || slot->sim.cull_dim_pct != 0);
 
@@ -2679,6 +2680,7 @@ static void RenderSimProfile(const FrameSlot *slot,
         continue;
       }
     }
+    if (!(captured_planes & (1u << plane))) continue;
     SDL_Texture *texture = g_sim3d_layer_textures[plane];
     if (!texture) continue;
     if (plane == kSim3DPlane_Bg1Low || plane == kSim3DPlane_Bg1High) {
@@ -2740,6 +2742,7 @@ static void RenderSimProfile(const FrameSlot *slot,
       continue;
     }
     if (!SimPlaneIsMenu(plane)) continue;
+    if (!(captured_planes & (1u << plane))) continue;
     SDL_Texture *texture = g_sim3d_layer_textures[plane];
     if (texture) SDL_RenderTexture(g_renderer, texture, &src, &dst);
   }
