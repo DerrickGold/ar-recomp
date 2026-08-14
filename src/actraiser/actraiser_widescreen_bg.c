@@ -7,6 +7,7 @@
 
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "action/action_bg_metatile.h"
 #include "common_rtl.h"
 #include "settings.h"
 #include "snes/ppu.h"
@@ -203,8 +204,8 @@ void ActRaiser_WidescreenSkyPalacePrepare(void) {
       int quadrant = ((source_tile_y & 1) << 1) | (source_tile_x & 1);
       uint16 definition_word = ActRaiser_ReadWram16((uint16)(
           metatile_definition_base + metatile * 8 + quadrant * 2));
-      uint16 tilemap_word = (uint16)(
-          (definition_word & metatile_word_mask) | metatile_attributes);
+      uint16 tilemap_word = ActionBg_ComposeTilemapWord(
+          definition_word, metatile_word_mask, metatile_attributes);
       g_ppu->vram[ws_tilemap_addr_64(
           tilemap_base, tile_x, tile_y)] = tilemap_word;
     }

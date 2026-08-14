@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "action_bg_metatile.h"
 #include "action_bg_world.h"
 
 static int failures;
@@ -94,6 +95,15 @@ static Fixture MakeFixture(void) {
     FillMap(&fixture);
   }
   return fixture;
+}
+
+static void TestSharedTileWordComposition(void) {
+  CHECK(ActionBg_ComposeTilemapWord(0xFFFF, 0xECFF, 0x0100) ==
+        0xEDFF);
+  CHECK(ActionBg_ComposeTilemapWord(0x1234, 0xFDFF, 0x2000) ==
+        0x3034);
+  CHECK(ActionBg_ComposeTilemapWord(0x8200, 0x01FF, 0x0400) ==
+        0x0400);
 }
 
 static void DestroyFixture(Fixture *fixture) {
@@ -357,6 +367,7 @@ static void TestMaximumWramBound(void) {
 }
 
 int main(void) {
+  TestSharedTileWordComposition();
   TestSharedMapViewAddressing();
   TestDecodePagesQuadrantsAndBounds();
   TestExactSourceCacheAndInvalidation();
