@@ -5,13 +5,25 @@
 #include <string.h>
 
 enum {
+  kStackBank = 0x00,
+  kLowWramBank = 0x7E,
+  kHighWramBank = 0x7F,
+  kDataBankOverflowBank = 0x80,
+  kBankAddressBits = 16,
   kTownIndex = 0x7BFB,
   kScratch = 0x7C05,
   kCellX = 0x7C4B,
   kCellY = 0x7C4D,
+  kTerrainMapBase = 0x2000,
+  kCellFlagsBase = 0x3800,
+  kMetatileDefinitionsBase = 0x2100,
+  kMetatileDefinitionBytes = 8,
+  kMetatileCollisionBit = 0x0200,
+  kTraversalVisitedBit = 0x04,
+  kNestedCellIndexReturnAddress = 0x96F1,
 };
 
-static uint8_t memory[0x20000];
+static uint8_t memory[0x30000];
 static int failures;
 
 #define CHECK(condition)                                                   \
@@ -23,8 +35,10 @@ static int failures;
   } while (0)
 
 static size_t BankOffset(uint8 bank, uint16 address) {
-  if (bank == 0x7E) return address;
-  if (bank == 0x7F) return 0x10000u + address;
+  if (bank == kStackBank && address < 0x2000) return address;
+  if (bank == kLowWramBank) return address;
+  if (bank == kHighWramBank) return 0x10000u + address;
+  if (bank == kDataBankOverflowBank) return 0x20000u + address;
   return 0;
 }
 
@@ -49,6 +63,14 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 address, uint16 value) {
   cpu_write8(cpu, bank, (uint16)(address + 1), (uint8)(value >> 8));
 }
 
+static void WriteDataBankIndexedByte(uint8 data_bank, uint16 base_address,
+                                     uint16 index, uint8 value) {
+  const uint32 effective_address =
+      ((uint32)data_bank << kBankAddressBits) + base_address + index;
+  cpu_write8(NULL, (uint8)(effective_address >> kBankAddressBits),
+             (uint16)effective_address, value);
+}
+
 typedef struct ReferenceAdd {
   uint16 value;
   bool carry;
@@ -59,6 +81,14 @@ typedef struct ReferenceResult {
   uint16 scratch;
   ReferenceAdd final;
 } ReferenceResult;
+
+typedef struct ReferenceTraversalResult {
+  ReferenceResult cell_index;
+  uint16 metatile_definition_offset;
+  uint16 final_accumulator;
+  bool blocked;
+  bool negative;
+} ReferenceTraversalResult;
 
 static uint16 Swap16(uint16 value) {
   return (uint16)((value << 8) | (value >> 8));
@@ -109,6 +139,29 @@ static ReferenceResult ReferenceRoutine(uint16 town_index, uint16 cell_x_word,
   result.scratch = scratch.value;
   result.final =
       ReferenceAdd16((uint16)(quadrant << 8), scratch.value, decimal);
+  return result;
+}
+
+static ReferenceTraversalResult ReferenceTraversalRoutine(
+    uint16 town_index, uint16 cell_x_word, uint16 cell_y_word, bool decimal,
+    uint8 terrain_id, uint16 metatile_top_left_word, uint8 cell_flags) {
+  ReferenceTraversalResult result;
+  result.cell_index =
+      ReferenceRoutine(town_index, cell_x_word, cell_y_word, decimal);
+  result.metatile_definition_offset =
+      (uint16)(terrain_id * kMetatileDefinitionBytes);
+  const bool terrain_blocks_traversal =
+      (metatile_top_left_word & kMetatileCollisionBit) != 0;
+  result.blocked = terrain_blocks_traversal ||
+                   (cell_flags & kTraversalVisitedBit) != 0;
+  if (terrain_blocks_traversal) {
+    result.final_accumulator = metatile_top_left_word;
+    result.negative = (metatile_top_left_word & 0x8000u) != 0;
+  } else {
+    result.final_accumulator =
+        (uint16)((metatile_top_left_word & 0xFF00u) | cell_flags);
+    result.negative = (cell_flags & 0x80u) != 0;
+  }
   return result;
 }
 
@@ -172,6 +225,96 @@ static void CheckCpuCase(uint16 town_index, uint16 cell_x, uint16 cell_y,
   CHECK(cpu._flag_N == ((expected.final.value & 0x8000u) != 0));
 }
 
+static void CheckTraversalPredicate(void) {
+  static const uint8 representative_flags[] = { 0x00, 0x04, 0x80, 0x84 };
+  for (uint32 word = 0; word <= UINT16_MAX; word++) {
+    for (unsigned i = 0;
+         i < sizeof(representative_flags) / sizeof(representative_flags[0]);
+         i++) {
+      const uint8 flags = representative_flags[i];
+      const bool expected = (word & kMetatileCollisionBit) != 0 ||
+                            (flags & kTraversalVisitedBit) != 0;
+      CHECK(ActRaiser_IsTownCellTraversalBlocked((uint16)word, flags) ==
+            expected);
+    }
+  }
+
+  static const uint16 representative_words[] = {
+    0x0000, 0x0200, 0x8000, 0xA100,
+  };
+  for (unsigned flags = 0; flags <= UINT8_MAX; flags++) {
+    for (unsigned i = 0;
+         i < sizeof(representative_words) / sizeof(representative_words[0]);
+         i++) {
+      const uint16 word = representative_words[i];
+      const bool expected = (word & kMetatileCollisionBit) != 0 ||
+                            (flags & kTraversalVisitedBit) != 0;
+      CHECK(ActRaiser_IsTownCellTraversalBlocked(word, (uint8)flags) ==
+            expected);
+    }
+  }
+}
+
+static void CheckTraversalCase(uint16 town_index, uint16 cell_x,
+                               uint16 cell_y, bool decimal, bool initial_m,
+                               uint8 terrain_id,
+                               uint16 metatile_top_left_word,
+                               uint8 cell_flags) {
+  memset(memory, 0, sizeof(memory));
+  const ReferenceTraversalResult expected = ReferenceTraversalRoutine(
+      town_index, cell_x, cell_y, decimal, terrain_id,
+      metatile_top_left_word, cell_flags);
+  const uint16 cell_index = expected.cell_index.final.value;
+  cpu_write16(NULL, kHighWramBank, kTownIndex, town_index);
+  cpu_write16(NULL, kHighWramBank, kCellX, cell_x);
+  cpu_write16(NULL, kHighWramBank, kCellY, cell_y);
+  cpu_write16(NULL, kHighWramBank, kScratch, 0xDEAD);
+  WriteDataBankIndexedByte(kHighWramBank, kTerrainMapBase, cell_index,
+                           terrain_id);
+  cpu_write16(NULL, kLowWramBank,
+              (uint16)(kMetatileDefinitionsBase +
+                       expected.metatile_definition_offset),
+              metatile_top_left_word);
+  WriteDataBankIndexedByte(kHighWramBank, kCellFlagsBase, cell_index,
+                           cell_flags);
+
+  CpuState cpu = MakeCpu(kHighWramBank, decimal, initial_m);
+  const uint16 entry_stack_pointer = cpu.S;
+  CHECK(ActRaiser_TownCellTestTraversalBlocked(&cpu) ==
+        RECOMP_RETURN_NORMAL);
+
+  CHECK(cpu_read16(NULL, kHighWramBank, kScratch) ==
+        expected.cell_index.scratch);
+  CHECK(cpu.A == expected.final_accumulator);
+  CHECK(cpu.X == expected.metatile_definition_offset);
+  CHECK(cpu.Y == cell_index);
+  CHECK(cpu.S == (uint16)(entry_stack_pointer + 2));
+  CHECK(cpu.D == 0x2468);
+  CHECK(cpu.DB == kHighWramBank);
+  CHECK(cpu.PB == 0x03);
+  CHECK(cpu_read8(NULL, kStackBank, entry_stack_pointer) ==
+        (uint8)(kNestedCellIndexReturnAddress >> 8));
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 1)) ==
+        (uint8)kNestedCellIndexReturnAddress);
+  CHECK(cpu.host_return_valid == 1);
+
+  const uint8 expected_p =
+      (uint8)(CPU_P_M | CPU_P_I | (decimal ? CPU_P_D : 0) |
+              (!expected.blocked ? CPU_P_Z : 0) |
+              (expected.cell_index.final.overflow ? CPU_P_V : 0) |
+              (expected.negative ? CPU_P_N : 0));
+  CHECK(cpu.P == expected_p);
+  CHECK(cpu.m_flag == 1);
+  CHECK(cpu.x_flag == 0);
+  CHECK(cpu._flag_C == 0);
+  CHECK(cpu._flag_Z == !expected.blocked);
+  CHECK(cpu._flag_I == 1);
+  CHECK(cpu._flag_D == decimal);
+  CHECK(cpu._flag_V == expected.cell_index.final.overflow);
+  CHECK(cpu._flag_N == expected.negative);
+}
+
 static void CheckCanonicalGrid(void) {
   for (unsigned town = 0; town < 6; town++) {
     for (unsigned y = 0; y < 32; y++) {
@@ -212,10 +355,30 @@ static void CheckWidthAndDecimalEdges(void) {
   }
 }
 
+static void CheckTraversalCpuContract(void) {
+  /* Available terrain preserves the metatile word's high accumulator byte. */
+  CheckTraversalCase(0x0004, 0x0003, 0x0005, false, false,
+                     0x21, 0xA100, 0x00);
+  /* Terrain collision exits before reading the visited map. */
+  CheckTraversalCase(0x0002, 0x0014, 0x001A, false, true,
+                     0x37, 0x8201, 0x80);
+  /* A visited cell uses the 8-bit flags load for the final A/N state. */
+  CheckTraversalCase(0x000A, 0x001F, 0x001F, false, false,
+                     0xFF, 0x4100, 0x84);
+  /* Non-blocking high-bit flags leave Z set while setting N. */
+  CheckTraversalCase(0x0000, 0x0000, 0x0000, false, true,
+                     0x00, 0x0100, 0x80);
+  /* Preserve the nested helper's instruction-level decimal-mode behavior. */
+  CheckTraversalCase(0x00FE, 0xAB1A, 0xCD15, true, false,
+                     0x5A, 0x2100, 0x00);
+}
+
 int main(void) {
   memset(memory, 0, sizeof(memory));
+  CheckTraversalPredicate();
   CheckCanonicalGrid();
   CheckWidthAndDecimalEdges();
+  CheckTraversalCpuContract();
   if (failures) {
     printf("actraiser cell-map HLE: %d failure(s)\n", failures);
     return 1;

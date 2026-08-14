@@ -11,6 +11,7 @@
 #define kSnesWramMask (kSnesWramSize - 1)
 
 /* Stack bytes consumed when an HLE replaces the matching return opcode. */
+#define k65816StackBank 0x00
 #define k65816RtsStackBytes 2
 #define k65816RtlStackBytes 3
 
