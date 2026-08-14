@@ -42,6 +42,7 @@ void ApplyLogicalPresentation(const FrameSlot *slot);
 void PresentHudOverlayComposited(const FrameSlot *slot, SDL_Rect viewport);
 void PresentCompositeScene(const FrameSlot *slot,
                            const DioramaScrollSnapshot *prev_scroll,
+                           const ActionObjInterpolationFrame *prev_action_obj,
                            float alpha);
 void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport);
 bool EffectRendererAvailable(void);

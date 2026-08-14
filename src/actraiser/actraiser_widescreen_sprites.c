@@ -21,6 +21,7 @@
 #include "cpu_state.h"
 #include "action/action_effect_clock.h"
 #include "action/action_obj_apron.h"
+#include "action/action_obj_interpolation.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "settings.h"
@@ -429,6 +430,9 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * an object lives is game logic, not presentation. */
   const ActionApronGeometry scan_apron = ActRaiser_ObjApronGeometry();
   ActionApron_BeginFrame();
+  ActionObjInterpolation_BeginFrame(
+      g_settings.gpu_interp_enabled && g_settings.diorama_mode &&
+      ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]));
   int draw_l = ws_margin_objects_enabled() ? live_l + scan_apron.apron : 0;
   int draw_r = ws_margin_objects_enabled() ? live_r + scan_apron.apron : 0;
   /* Vertical draw window (diorama vertical extend). The horizontal axis has
@@ -644,6 +648,14 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   uint16 object_address = cpu->X;
   uint16 oam_offset = cpu->Y;
   int oam_full = 0;
+  /* The source descriptor avoids binding identity to the handler itself
+   * (several actors deliberately move through generic animation handlers) and
+   * distinguishes most adjacent record reuse. Address + bounded anchor motion
+   * remains the continuity fallback for families whose descriptor is zero. */
+  const uint16 object_signature = cpu_read16(
+      cpu, cpu->DB,
+      (uint16)(object_address +
+               kActRaiserActionObject_SourceDescriptor));
 
   uint16 screen_origin_x = (uint16)(
       cpu_read16(cpu, cpu->DB,
@@ -659,6 +671,17 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
       ws_dp16(cpu, kSpriteDp_CameraOriginY));
   ws_dp16w(cpu, kSpriteDp_ScreenOriginX, screen_origin_x);
   ws_dp16w(cpu, kSpriteDp_ScreenOriginY, screen_origin_y);
+  /* Identity motion follows the record's world origin, not its top/left
+   * sprite extent. Extents can change with collision state; treating that as
+   * movement would pull every component in the opposite direction for a tick. */
+  const int screen_anchor_x = (int)(int16)(uint16)(
+      cpu_read16(cpu, cpu->DB,
+                 (uint16)(object_address + kActRaiserActionObject_WorldX)) -
+      ws_dp16(cpu, kSpriteDp_CameraOriginX));
+  const int screen_anchor_y = (int)(int16)(uint16)(
+      cpu_read16(cpu, cpu->DB,
+                 (uint16)(object_address + kActRaiserActionObject_WorldY)) -
+      ws_dp16(cpu, kSpriteDp_CameraOriginY));
 
   uint16 flip_attributes = (uint16)(
       cpu_read16(cpu, cpu->DB,
@@ -813,13 +836,18 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
          * component offsets are small unsigned part offsets), which is what
          * keeps a slot with an exact position byte-identical wherever the
          * encoding was not lossy. */
+        const int exact_x =
+            (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginX) +
+            (int)component_offset_x - kSpriteDrawBias;
+        const int exact_y =
+            (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
+            (int)component_offset_y - (kSpriteDrawBias + 1);
         if (g_ppu)
           PpuSetObjExactPosition(
-              g_ppu, (uint8)(oam_offset >> 2),
-              (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginX) +
-                  (int)component_offset_x - kSpriteDrawBias,
-              (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
-                  (int)component_offset_y - (kSpriteDrawBias + 1));
+              g_ppu, (uint8)(oam_offset >> 2), exact_x, exact_y);
+        ActionObjInterpolation_RecordOamPart(
+            (uint8)(oam_offset >> 2), object_address, object_signature,
+            screen_anchor_x, screen_anchor_y);
 
         uint16 slots = (uint16)(
             ws_dp16(cpu, kSpriteDp_OamHighSlotsRemaining) - 1);
@@ -872,14 +900,22 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
           const int part_large = cpu_read8(
               cpu, definition_bank,
               (uint16)(definition_address + kActionPartFlags)) & 1;
-          ActionApron_AddPart(
-              &apron_geom,
+          const int exact_x =
               (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginX) +
-                  (int)component_offset_x - kSpriteDrawBias,
+              (int)component_offset_x - kSpriteDrawBias;
+          const int exact_y =
               (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
-                  (int)component_offset_y - (kSpriteDrawBias + 1),
-              rendered_attributes,
-              (uint8_t)PpuObjSizeForSizeBit(g_ppu, part_large));
+              (int)component_offset_y - (kSpriteDrawBias + 1);
+          const uint8_t part_size =
+              (uint8_t)PpuObjSizeForSizeBit(g_ppu, part_large);
+          if (ActionApron_AddPart(
+                  &apron_geom, exact_x, exact_y, rendered_attributes,
+                  part_size)) {
+            ActionObjInterpolation_RecordSyntheticPart(
+                exact_x, exact_y, rendered_attributes, part_size,
+                object_address, object_signature,
+                screen_anchor_x, screen_anchor_y);
+          }
         }
       }
     }

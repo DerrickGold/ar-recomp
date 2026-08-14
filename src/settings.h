@@ -528,10 +528,9 @@ typedef struct Settings {
    * case backend creation silently fell back). gpu_fx_shadow defaults OFF:
    * a known visual bug (shadow blur can bleed onto transparent gaps in a
    * receiving layer) keeps it opt-in until fixed — see diorama.c.
-   * gpu_interp_enabled also defaults OFF, but as of B1b (followup doc) its
-   * source bug is fixed (present.c ComputeDioramaScrollDelta now reads the
-   * stable WRAM camera, not the HDMA-polluted PPU scroll registers) — OFF
-   * pending in-game confirmation the fix is stable, not a known issue. */
+   * gpu_interp_enabled also defaults OFF. It owns the delayed camera pair and
+   * the action-mode vector OBJ proof of concept; invalid OBJ decompositions
+   * fail closed to the established whole-plane renderer. */
   bool gpu_shaders_enabled;
   bool gpu_fx_rim;
   bool gpu_fx_dof;

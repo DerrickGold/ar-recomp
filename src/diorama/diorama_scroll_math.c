@@ -37,8 +37,8 @@ bool DioramaScrollPairIsInterpolable(const FrameSlot *curr,
   if (curr->timestamp_ns == 0 || prev->timestamp_ns == 0) return false;
   if (curr->bg_mode != prev->bg_mode) return false;            /* §6.4 mode change */
   if (curr->timestamp_ns <= prev->timestamp_ns) return false;  /* not a real pair */
-  /* §6.2 sanity: a pair spanning >=50ms is not a plausible one-tick velocity
-   * estimate (savestate load, long stall). Still checked on the timestamps,
+  /* §6.2 sanity: a pair spanning >=50ms is not a plausible continuous visual
+   * interval (savestate load, long stall). Still checked on the timestamps,
    * which remain the honest record of when the two frames were captured — the
    * span is simply no longer used as the interpolation DIVISOR. */
   if (curr->timestamp_ns - prev->timestamp_ns >=
@@ -49,6 +49,14 @@ bool DioramaScrollPairIsInterpolable(const FrameSlot *curr,
    * divisor below, so this also guards the division. */
   if (curr->capture_ticks == 0) return false;
   return true;
+}
+
+float DioramaInterpolationPairPhase(float alpha, uint8_t capture_ticks) {
+  if (!capture_ticks) return 1.0f;
+  if (alpha < 0.0f) alpha = 0.0f;
+  if (alpha > 1.0f) alpha = 1.0f;
+  return ((float)capture_ticks - 1.0f + alpha) /
+      (float)capture_ticks;
 }
 
 DioramaScrollDelta ComputeDioramaScrollDeltaAt(
@@ -72,11 +80,12 @@ DioramaScrollDelta ComputeDioramaScrollDeltaAt(
    * that: it is exact by construction and cannot be corrupted by presents,
    * because presents do not write it.
    *
-   * Divided by capture_ticks (C3) because alpha is a fraction of ONE tick
-   * while the pair may span several — see the field comment in present.h. */
-  float t = alpha / (float)curr->capture_ticks;
-  if (t < 0.0f) t = 0.0f;
-  if (t > 1.0f) t = 1.0f;
+   * The presenter now uses a stable one-tick delay instead of predicting the
+   * future. For a k-tick pair, render time at curr's capture is k-1 ticks into
+   * prev->curr; alpha advances the final tick. This reaches curr exactly as
+   * the next capture arrives and stays continuous across tick boundaries. */
+  const float t =
+      DioramaInterpolationPairPhase(alpha, curr->capture_ticks);
 
   d.active = true;
   /* B1b (followup doc) source fix: the WRAM camera is a real world-pixel
@@ -102,7 +111,8 @@ DioramaScrollDelta ComputeDioramaScrollDeltaAt(
    * camera sat at P + 1.75*delta, while the next tick's t=0 lands at
    * P + delta, so 0.75*delta was discarded BACKWARD at every tick boundary —
    * a 60Hz sawtooth even at perfectly constant velocity, which is precisely
-   * the case forward extrapolation is supposed to render smoothly.
+   * the steady-motion case the former predictive interpolation was meant to
+   * render smoothly.
    *
    * It also made the R17/C1 slack margin saturate at 2.29 camera px/tick
    * instead of the intended 4, so ordinary walking clipped the offset to a
@@ -123,15 +133,19 @@ DioramaScrollDelta ComputeDioramaScrollDeltaAt(
    * again.) */
   int dh1 = curr->bg1_camera_x - prev->bg1_camera_x;
   int dv1 = curr->bg1_camera_y - prev->bg1_camera_y;
-  d.bg_du[0] = (t * (float)dh1) / (float)kFrameSlotLayerTextureWidth;
+  d.bg_du[0] = ((t - 1.0f) * (float)dh1) /
+      (float)kFrameSlotLayerTextureWidth;
   d.bg_dv[0] =
-      (t * (float)dv1) / (float)kFrameSlotLayerTextureHeight;
+      ((t - 1.0f) * (float)dv1) /
+      (float)kFrameSlotLayerTextureHeight;
 
   int dh2 = curr->bg2_camera_x - prev->bg2_camera_x;
   int dv2 = curr->bg2_camera_y - prev->bg2_camera_y;
-  d.bg_du[1] = (t * (float)dh2) / (float)kFrameSlotLayerTextureWidth;
+  d.bg_du[1] = ((t - 1.0f) * (float)dh2) /
+      (float)kFrameSlotLayerTextureWidth;
   d.bg_dv[1] =
-      (t * (float)dv2) / (float)kFrameSlotLayerTextureHeight;
+      ((t - 1.0f) * (float)dv2) /
+      (float)kFrameSlotLayerTextureHeight;
 
   /* AR_INTERP_LOG=1: log BG1's interpolated offset every present, so the M7
    * acceptance test (ar-recomp-threading-impl.md milestone M7) can assert

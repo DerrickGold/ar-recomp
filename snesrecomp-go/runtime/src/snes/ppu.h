@@ -865,6 +865,9 @@ void PpuSetObjExactPosition(Ppu *ppu, uint8_t slot, int x, int y);
 // contract. Exact positions are consulted, which is the point: bounds and
 // rasterization then agree with the scanline evaluator about where sprites
 // are.
+/* Resolve one slot without requiring callers to duplicate exact-position,
+ * high-OAM size, and widescreen wrap policy. */
+bool PpuResolveObjSlot(Ppu *ppu, uint8_t slot, PpuObjPart *out_part);
 bool PpuResolveObjSlots(Ppu *ppu, uint8_t first, uint8_t count,
                         uint8_t priority, PpuObjPart *out_parts,
                         int max_parts, int *out_count);

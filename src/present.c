@@ -61,6 +61,23 @@ static SDL_Texture *s_action_bg2_mask_texture;
 static SDL_Texture *s_action_bg2_effect_target;
 static int s_action_bg2_effect_w, s_action_bg2_effect_h;
 static bool s_action_bg2_blend_supported = true;
+static SDL_Texture *s_action_obj_interpolation_atlas_texture;
+static uint64_t s_action_obj_interpolation_atlas_timestamp;
+
+static SDL_Texture *EnsureActionObjInterpolationAtlas(void) {
+  if (s_action_obj_interpolation_atlas_texture)
+    return s_action_obj_interpolation_atlas_texture;
+  if (!g_renderer) return NULL;
+  SDL_Texture *texture = SDL_CreateTexture(
+      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+      kActionObjInterpolationAtlasWidth,
+      kActionObjInterpolationAtlasHeight);
+  if (!texture) return NULL;
+  SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+  s_action_obj_interpolation_atlas_texture = texture;
+  return texture;
+}
 
 static void DisableActionBg2Effect(const char *operation) {
   if (!s_action_bg2_blend_supported) return;
@@ -585,6 +602,8 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
 void PresentUpload(const FrameSlot *slot) {
   if (!g_renderer || !g_texture) return;
 
+  s_action_obj_interpolation_atlas_timestamp = 0;
+
   if (slot->diorama_active) {
     uint8_t *pixels[kDioramaPlane_Count];
     memcpy(pixels, g_diorama_layer_pixels, sizeof(pixels));
@@ -669,6 +688,27 @@ void PresentUpload(const FrameSlot *slot) {
                       g_sim_obj_atlas_pixels, kSimObjAtlasPitch);
   }
 
+  if (slot->action_obj_interpolation.valid) {
+    SDL_Texture *atlas = EnsureActionObjInterpolationAtlas();
+    if (atlas && (!slot->action_obj_interpolation.part_count ||
+                  (slot->action_obj_interpolation.atlas_used_width &&
+                   slot->action_obj_interpolation.atlas_used_height))) {
+      bool uploaded = true;
+      if (slot->action_obj_interpolation.part_count) {
+        SDL_Rect rect = {
+          0, 0,
+          slot->action_obj_interpolation.atlas_used_width,
+          slot->action_obj_interpolation.atlas_used_height,
+        };
+        uploaded = SDL_UpdateTexture(
+            atlas, &rect, g_action_obj_interpolation_atlas_pixels,
+            kActionObjInterpolationAtlasWidth * (int)sizeof(uint32_t));
+      }
+      if (uploaded)
+        s_action_obj_interpolation_atlas_timestamp = slot->timestamp_ns;
+    }
+  }
+
   if (slot->sim.separated_valid) {
     SDL_Rect frame = { 0, 0, slot->snes_width, slot->snes_height };
     uint32_t plane_upload_mask =
@@ -704,19 +744,11 @@ void FrameSlot_ExtractScrollSnapshot(const FrameSlot *slot,
   out->diorama_active = slot->diorama_active;
 }
 
-/* M7 (§6.1-6.4): present-time scroll interpolation, diorama only (the flat
- * path's single baked framebuffer has no separate per-layer scroll to shift
- * — see the M7 plan note). Extrapolates FORWARD from `curr` using the
- * prev->curr delta as a one-tick velocity estimate: at the instant curr was
- * captured (t=0) we show curr as-is; by one whole tick-period later (t=1)
- * we show curr shifted by a full predicted tick's motion. This deliberately
- * differs from the doc's §6.2 literal `prev + t*(curr-prev)` sketch, which
- * lerps FROM prev TO curr — since a present always happens at or after
- * curr's timestamp (curr is by definition the latest captured data), that
- * formula would show prev's stale position at t=0 and only reach curr's
- * actual position a full tick later, i.e. a constant one-tick display lag.
- * Extrapolation is the standard fixed-timestep-render technique for exactly
- * this "render happens after the last tick, before the next one" case. */
+/* Present-time scroll interpolation, diorama only. The presenter deliberately
+ * runs one emulation tick behind and lerps prev->curr. Unlike the former
+ * forward velocity estimate, this never guesses through a stop, reversal,
+ * collision, teleport, or animation discontinuity; the fixed one-tick latency
+ * buys endpoint continuity at every refresh rate. */
 static DioramaScrollDelta ComputeDioramaScrollDelta(
     const FrameSlot *curr, const DioramaScrollSnapshot *prev, float alpha) {
   /* R17/C4: the phase comes from the caller (the main loop's accumulator
@@ -1332,13 +1364,171 @@ void PresentRendererResources_Reset(void) {
   s_action_bg2_effect_target = NULL;
   s_action_bg2_effect_w = s_action_bg2_effect_h = 0;
   s_action_bg2_blend_supported = true;
+  SDL_DestroyTexture(s_action_obj_interpolation_atlas_texture);
+  s_action_obj_interpolation_atlas_texture = NULL;
+  s_action_obj_interpolation_atlas_timestamp = 0;
   SDL_SetAtomicInt(&s_effect_blend_supported, 1);
   SDL_SetAtomicInt(&s_effect_geometry_supported, 1);
   PresentSim3D_ResetResources();
 }
 
+enum {
+  kActionObjMeshMaxSubdiv = 4,
+  kActionObjMeshMaxVerticesPerPart =
+      (kActionObjMeshMaxSubdiv + 1) * (kActionObjMeshMaxSubdiv + 1),
+  kActionObjMeshMaxIndicesPerPart =
+      kActionObjMeshMaxSubdiv * kActionObjMeshMaxSubdiv * 6,
+  kActionObjMeshMaxVertices =
+      kActionObjInterpolationMaxParts * kActionObjMeshMaxVerticesPerPart,
+  kActionObjMeshMaxIndices =
+      kActionObjInterpolationMaxParts * kActionObjMeshMaxIndicesPerPart,
+};
+
+static SDL_Vertex s_action_obj_vertices[kActionObjMeshMaxVertices];
+static int s_action_obj_indices[kActionObjMeshMaxIndices];
+
+typedef struct ActionObjPlaneInterpolationContext {
+  const FrameSlot *slot;
+  const ActionObjInterpolationFrame *previous;
+  float pair_phase;
+  bool enabled;
+} ActionObjPlaneInterpolationContext;
+
+static void InterpolatedActionObjPosition(
+    const ActionObjPlaneInterpolationContext *context,
+    const ActionObjInterpolationPart *part, float *x, float *y) {
+  const int maximum_delta = 64 * context->slot->capture_ticks;
+  /* Current artwork/local offsets ride a delayed interpolation of the common
+   * object anchor. This keeps multipart actors rigid across animation-frame
+   * changes instead of lerping unrelated component rectangles. */
+  ActionObjInterpolation_PartPosition(
+      context->previous, part, context->pair_phase, maximum_delta, x, y);
+}
+
+static bool BuildInterpolatedActionObjGeometry(
+    const ActionObjPlaneInterpolationContext *context,
+    const DioramaProjection *projection, unsigned priority,
+    SDL_FColor color, float position_offset,
+    int *out_vertex_count, int *out_index_count) {
+  int nv = 0, ni = 0;
+  const ActionObjInterpolationFrame *frame =
+      &context->slot->action_obj_interpolation;
+  /* Reverse evaluator order: the earliest OAM component is the hardware
+   * winner and must be submitted last when interpolated masks overlap. */
+  for (int part_index = (int)frame->part_count - 1;
+       part_index >= 0; part_index--) {
+    const ActionObjInterpolationPart *part = &frame->parts[part_index];
+    if (part->priority != priority || !part->size) continue;
+    int subdiv = ((int)part->size + 15) / 16;
+    if (subdiv < 1) subdiv = 1;
+    if (subdiv > kActionObjMeshMaxSubdiv)
+      subdiv = kActionObjMeshMaxSubdiv;
+    const int part_vertices = (subdiv + 1) * (subdiv + 1);
+    const int part_indices = subdiv * subdiv * 6;
+    if (nv + part_vertices > kActionObjMeshMaxVertices ||
+        ni + part_indices > kActionObjMeshMaxIndices)
+      return false;
+
+    float draw_x, draw_y;
+    InterpolatedActionObjPosition(context, part, &draw_x, &draw_y);
+    const int vertex_base = nv;
+    for (int row = 0; row <= subdiv; row++) {
+      const float t = (float)row / (float)subdiv;
+      for (int col = 0; col <= subdiv; col++) {
+        const float s = (float)col / (float)subdiv;
+        SDL_FPoint point;
+        const float capture_x = (float)context->slot->ws_extra + draw_x +
+            s * (float)part->size;
+        const float capture_y = (float)context->slot->ws_extra_top + draw_y +
+            t * (float)part->size;
+        if (!Diorama_ProjectCapturedPoint(
+                projection, capture_x, capture_y, priority,
+                &point, NULL, NULL))
+          return false;
+        /* Diorama_Composite keeps its viewport bound while invoking this
+         * replacement. Public projection points are output-absolute, so make
+         * them viewport-local just as the compositor's own meshes are. */
+        point.x -= (float)projection->output_x;
+        point.y -= (float)projection->output_y;
+        point.x += position_offset;
+        point.y += position_offset;
+        s_action_obj_vertices[nv++] = (SDL_Vertex){
+          .position = point,
+          .color = color,
+          .tex_coord = {
+            ((float)part->atlas_x + s * (float)part->size) /
+                (float)kActionObjInterpolationAtlasWidth,
+            ((float)part->atlas_y + t * (float)part->size) /
+                (float)kActionObjInterpolationAtlasHeight,
+          },
+        };
+      }
+    }
+    const int cols = subdiv + 1;
+    for (int row = 0; row < subdiv; row++) {
+      for (int col = 0; col < subdiv; col++) {
+        const int tl = vertex_base + row * cols + col;
+        s_action_obj_indices[ni++] = tl;
+        s_action_obj_indices[ni++] = tl + 1;
+        s_action_obj_indices[ni++] = tl + cols;
+        s_action_obj_indices[ni++] = tl + 1;
+        s_action_obj_indices[ni++] = tl + cols + 1;
+        s_action_obj_indices[ni++] = tl + cols;
+      }
+    }
+  }
+  *out_vertex_count = nv;
+  *out_index_count = ni;
+  return true;
+}
+
+static bool DrawInterpolatedActionObjPlane(
+    void *userdata, int plane, const DioramaProjection *projection,
+    SDL_FColor shade, bool additive, bool casts_shadow) {
+  ActionObjPlaneInterpolationContext *context = userdata;
+  const int priority = DioramaPlaneObjectPriority(plane);
+  if (!context || !context->enabled || !projection || priority < 0 ||
+      !projection->object_planes[priority].valid ||
+      !s_action_obj_interpolation_atlas_texture)
+    return false;
+
+  int nv = 0, ni = 0;
+  if (casts_shadow && !additive) {
+    if (!BuildInterpolatedActionObjGeometry(
+            context, projection, (unsigned)priority,
+            (SDL_FColor){0.0f, 0.0f, 0.0f, 0.35f},
+            (float)projection->output_height * 0.004f, &nv, &ni))
+      return false;
+    if (ni &&
+        (!SDL_SetTextureBlendMode(
+             s_action_obj_interpolation_atlas_texture, SDL_BLENDMODE_BLEND) ||
+         !SDL_RenderGeometry(
+             g_renderer, s_action_obj_interpolation_atlas_texture,
+             s_action_obj_vertices, nv, s_action_obj_indices, ni)))
+      return false;
+  }
+
+  nv = ni = 0;
+  if (!BuildInterpolatedActionObjGeometry(
+          context, projection, (unsigned)priority, shade, 0.0f, &nv, &ni))
+    return false;
+  if (ni &&
+      (!SDL_SetTextureBlendMode(
+           s_action_obj_interpolation_atlas_texture,
+           additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND) ||
+       !SDL_RenderGeometry(
+           g_renderer, s_action_obj_interpolation_atlas_texture,
+           s_action_obj_vertices, nv, s_action_obj_indices, ni)))
+    return false;
+  /* A complete atlas is allowed to contain no pixels for this priority. It
+   * still replaces the raw plane: drawing the latter would duplicate the
+   * priorities that did contain parts. */
+  return true;
+}
+
 void PresentCompositeScene(const FrameSlot *slot,
                            const DioramaScrollSnapshot *prev_scroll,
+                           const ActionObjInterpolationFrame *prev_action_obj,
                            float alpha) {
   if (!g_renderer || !g_texture) return;
 
@@ -1379,7 +1569,7 @@ void PresentCompositeScene(const FrameSlot *slot,
     for (int plane = 0; plane < kDioramaPlane_Count; plane++)
       if (!(s_diorama_uploaded_plane_mask & (1u << plane)))
         pixels[plane] = NULL;
-    /* M7 interpolation (kSettingCat_Graphics "Scroll interpolation" row) is
+    /* M7 interpolation (kSettingCat_Graphics "Frame interpolation" row) is
      * OFF by default. Observed cause of a real bug: ActRaiser's BG2
      * parallax layer in action stages appears to be HDMA-driven
      * (per-scanline register rewrites), so the single end-of-frame
@@ -1395,10 +1585,27 @@ void PresentCompositeScene(const FrameSlot *slot,
      * snapshot, before re-enabling by default.
      *
      * Read from the FrameSlot (D6 — present.c must not read g_settings
-     * live), snapshotted by FrameSlot_Capture on the game thread. */
+     * live), snapshotted by FrameSlot_Capture on the game thread. The action
+     * proof of concept also reconstructs complete OBJ bands into vector-moved
+     * parts under this same gate; an incomplete frame retains this layer path. */
     DioramaScrollDelta scroll_delta = slot->interp_setting_enabled
         ? ComputeDioramaScrollDelta(slot, prev_scroll, alpha)
         : (DioramaScrollDelta){0};
+    const bool vector_obj_interpolation =
+        scroll_delta.active && prev_scroll && prev_action_obj &&
+        slot->action_obj_interpolation.valid && prev_action_obj->valid &&
+        slot->action_obj_interpolation.timestamp_ns == slot->timestamp_ns &&
+        prev_action_obj->timestamp_ns == prev_scroll->timestamp_ns &&
+        s_action_obj_interpolation_atlas_timestamp == slot->timestamp_ns &&
+        s_action_obj_interpolation_atlas_texture != NULL;
+    ActionObjPlaneInterpolationContext obj_interpolation = {
+      .slot = slot,
+      .previous = prev_action_obj,
+      .pair_phase = vector_obj_interpolation
+          ? DioramaInterpolationPairPhase(alpha, slot->capture_ticks)
+          : 1.0f,
+      .enabled = vector_obj_interpolation,
+    };
     /* B4-split (followup doc): resolve which authored pose is active this
      * frame. Free Cam: the live authored pose, unchanged from B4-split.
      * Dynamic Cam (B4-vellean): baseline + a small velocity-driven lean —
@@ -1562,7 +1769,8 @@ void PresentCompositeScene(const FrameSlot *slot,
                            slot->pixel_aspect, slot->ignore_aspect_ratio,
                            slot->visible_width, viewport,
                            g_diorama_textures, pixels,
-                           &scroll_delta, &final_cam, distance_scale,
+                           &scroll_delta, vector_obj_interpolation,
+                           &final_cam, distance_scale,
                            slot->diorama_plane_additive_mask &
                                s_diorama_uploaded_plane_mask,
                            effect_obj_priority_mask,
@@ -1570,6 +1778,9 @@ void PresentCompositeScene(const FrameSlot *slot,
                            slot->diorama_map_number,
                            slot->diorama_layer_section,
                            &bg2_valid_spans,
+                           vector_obj_interpolation
+                               ? DrawInterpolatedActionObjPlane : NULL,
+                           &obj_interpolation,
                            DrawActionDioramaPlaneEffect, &plane_effect,
                            &action_projection))
       return;
