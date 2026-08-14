@@ -1072,7 +1072,10 @@ HLE backed by the same `ActRaiser_CellMarkIndex` function used by the bridge sid
 whole-ROM scan found 21 direct JSR sites and no external branch into its body; the wrapper
 preserves its pre-quadrant `$7C05` scratch value, A/X result, final flags, decimal-mode edge,
 and RTS stack effect. An exhaustive 6-town × 32 × 32 test pins the canonical map and separate
-raw-word cases pin the instruction-level ABI. The build-direction pathfinder's five call sites
+raw-word cases pin the instruction-level ABI. `$9FCD/$9FE4` are whole-body HLEs for the
+one-cell/2×2 structure writers; their wrappers and the sidecar-extended `$9CFB` pass use the
+same `ActRaiser_WriteTownStructureMark` primitive instead of maintaining three copies of the
+map geometry. The build-direction pathfinder's five call sites
 then use `$96EF` to apply two rejection rules to that index: bit `$0200` in the metatile's
 top-left word at `$7E:2100 + terrain_id*8` means impassable terrain, while bit `$04` in the
 cell's `$7F:3800` flag means this traversal already visited it. `$96EF` is also a whole-body
