@@ -2,6 +2,7 @@
 #define SETTINGS_H
 #include "constants.h"
 #include "types.h"
+#include "sim/sim_background_voxel_quality.h"
 #include "sim/sim_render_metadata.h"
 
 /* Live runtime settings — the first slice of the g_settings refactor described
@@ -413,6 +414,7 @@ typedef struct Settings {
    * what the checkpoints do. */
   bool sim3d_separated_composite;
   bool sim3d_ground_projection;
+  int sim3d_voxel_detail;       /* SimBackgroundVoxelDetail performance target */
   bool sim3d_object_billboards;
   bool sim3d_virtual_height;
   bool sim3d_shadows;

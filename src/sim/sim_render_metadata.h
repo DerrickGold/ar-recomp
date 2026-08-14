@@ -688,6 +688,8 @@ typedef struct SimFrameData {
   /* Resolved presentation tuning: percent of each classified virtual height.
    * Copied here so one frame cannot mix old and new tuning values. */
   uint16_t height_scale_x100;
+  /* Player-selected procedural background-model performance target. */
+  uint8_t background_voxel_detail;
   /* Resolved D4a shadow darkness, percent. Zero renders no shadow pass at all
    * even when the feature bit is set, so the tuning value alone is enough to
    * A/B the mask without touching the feature mask. */
@@ -765,6 +767,10 @@ typedef struct SimFrameData {
   /* Persistent full-resolution town ground accumulated from verified frames.
    * Changes whenever the canvas image does; zero means nothing to draw. */
   uint32_t town_canvas_serial;
+  /* Presentation-only building/tree extraction derived from that canvas.
+   * The scene and pixel buffers remain module-owned; this serial prevents a
+   * queued frame from sampling a different build. */
+  uint32_t background_voxel_serial;
   /* Authentic-pixel column of the captured texture that holds SNES x = 0.
    * Resolved on the game thread so present-time code never re-derives the
    * widescreen margin width. */

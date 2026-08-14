@@ -1,6 +1,8 @@
 #ifndef SIM3D_H
 #define SIM3D_H
 
+#include "sim_background_voxel_quality.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -95,6 +97,7 @@ typedef struct Sim3DTuning {
   int yaw_mrad;
   int distance_x100;
   int height_scale_x100;
+  int voxel_detail;
   int shadow_opacity_pct;
   int height_pop_pct;
   int light_azimuth_deg;
