@@ -13,6 +13,8 @@
 
 _Static_assert(kSim3DMaxWidth == kPpuBufWidth,
                "SIM capture width must match the PPU buffer ceiling");
+_Static_assert(kSim3DPlane_Count <= 16,
+               "SIM produced-plane mask must fit its frame payload");
 
 uint8_t *g_sim3d_layer_pixels[kSim3DPlane_Count];
 uint32_t g_sim3d_flat_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
@@ -24,6 +26,8 @@ typedef struct Sim3DCaptureState {
   bool inspector_active;
   bool separated_valid;
   bool flat_stage_requested;
+  bool billboard_renderer_ready;
+  bool raw_obj_planes;
   bool hud_handoff;
   bool hud_bg3;
   bool hud_obj;
@@ -55,12 +59,19 @@ typedef struct Sim3DCaptureState {
    * option; 32 bytes settles the lifetime question outright. */
   uint8_t brightness_mult[32];
   uint32_t diagnostic_layer_mask;
+  uint32_t captured_plane_mask;
   uint32_t mismatch_pixels;
   uint64_t separated_hash;
 } Sim3DCaptureState;
 
 static Sim3DCaptureState g_sim3d;
 static uint32_t g_sim3d_hud_obj_mask[kSim3DMaxWidth * kSim3DMaxHeight];
+
+static bool DemoArtifactsArmable(void);
+
+enum {
+  kSim3DAllPlaneMask = (1u << kSim3DPlane_Count) - 1u,
+};
 
 int Sim3D_ObjPlaneForPriority(int priority) {
   static const int planes[] = {
@@ -70,14 +81,19 @@ int Sim3D_ObjPlaneForPriority(int priority) {
   return priority >= 0 && priority < 4 ? planes[priority] : -1;
 }
 
+static uint32_t Sim3D_ObjPlaneMask(void) {
+  uint32_t mask = 0;
+  for (int priority = 0; priority < 4; priority++)
+    mask |= 1u << Sim3D_ObjPlaneForPriority(priority);
+  return mask;
+}
+
 uint32_t Sim3D_PlaneTextureUploadMask(
-    SimRenderFeatureMask effective_features) {
+    SimRenderFeatureMask effective_features, uint32_t captured_plane_mask) {
   if (!(effective_features & kSimFeature_GroundProjection)) return 0;
-  uint32_t mask = (1u << kSim3DPlane_Count) - 1u;
-  if (effective_features & kSimFeature_ObjectBillboards) {
-    for (int priority = 0; priority < 4; priority++)
-      mask &= ~(1u << Sim3D_ObjPlaneForPriority(priority));
-  }
+  uint32_t mask = captured_plane_mask & kSim3DAllPlaneMask;
+  if (effective_features & kSimFeature_ObjectBillboards)
+    mask &= ~Sim3D_ObjPlaneMask();
   return mask;
 }
 
@@ -102,10 +118,11 @@ uint32_t ActRaiser_BackdropArgbFullBrightness(const Ppu *ppu) {
       ExpandColor5((color >> 10) & 0x1f, 15);
 }
 
-static bool AllocatePlanes(void) {
+static bool AllocatePlanes(uint32_t plane_mask) {
   const size_t bytes =
       (size_t)kSim3DMaxWidth * kSim3DMaxHeight * sizeof(uint32_t);
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+    if (!(plane_mask & (1u << plane))) continue;
     if (!g_sim3d_layer_pixels[plane])
       g_sim3d_layer_pixels[plane] = calloc(1, bytes);
     if (!g_sim3d_layer_pixels[plane]) return false;
@@ -256,6 +273,8 @@ bool Sim3D_BeginFrame(void) {
   g_sim3d.inspector_active = false;
   g_sim3d.separated_valid = false;
   g_sim3d.flat_stage_requested = false;
+  g_sim3d.billboard_renderer_ready = false;
+  g_sim3d.raw_obj_planes = false;
   g_sim3d.hud_handoff = false;
   g_sim3d.hud_bg3 = false;
   g_sim3d.hud_obj = false;
@@ -264,6 +283,7 @@ bool Sim3D_BeginFrame(void) {
   g_sim3d.status = kSim3DCapture_Inactive;
   g_sim3d.mismatch_pixels = 0;
   g_sim3d.separated_hash = 0;
+  g_sim3d.captured_plane_mask = 0;
   return restore_bindings;
 }
 
@@ -366,7 +386,23 @@ bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
   g_sim3d.fixed_add_b = (uint8_t)PPU_fixedColorB(ppu);
   memcpy(g_sim3d.brightness_mult, ppu->brightnessMult,
          sizeof(g_sim3d.brightness_mult));
-  if (!AllocatePlanes()) {
+  /* Raw OBJ is redundant only when this exact frame has both a complete atlas
+   * and a renderer that can consume it. Diagnostics retain the raw planes so
+   * the inspector, D1 hash and one-shot D2 dump remain exact ten-plane views.
+   * Any failed prerequisite falls back before scanout, never after stale
+   * surfaces could already have been selected. */
+  bool diagnostics_armed = request->inspector_active ||
+      DemoArtifactsArmable() || SimRenderMetadata_TraceArmed();
+  bool billboards_requested =
+      (request->requested_features & kSimFeature_GroundProjection) &&
+      (request->requested_features & kSimFeature_ObjectBillboards);
+  g_sim3d.billboard_renderer_ready = request->billboard_renderer_ready;
+  g_sim3d.raw_obj_planes = diagnostics_armed || !billboards_requested ||
+      !request->billboard_atlas_ready || !request->billboard_renderer_ready;
+  uint32_t captured_plane_mask = kSim3DAllPlaneMask;
+  if (!g_sim3d.raw_obj_planes)
+    captured_plane_mask &= ~Sim3D_ObjPlaneMask();
+  if (!AllocatePlanes(captured_plane_mask)) {
     g_sim3d.status = kSim3DCapture_AllocationFailure;
     return false;
   }
@@ -399,18 +435,25 @@ bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
   ok &= PpuBindOverlayPrioSurface(
       ppu, kPpuOverlaySource_Bg3, 1,
       g_sim3d_layer_pixels[kSim3DPlane_Bg3High]);
-  ok &= PpuBindOverlaySurface(
-      ppu, kPpuOverlaySource_Obj,
-      g_sim3d_layer_pixels[kSim3DPlane_Obj0], pitch);
-  ok &= PpuBindOverlayPrioSurface(
-      ppu, kPpuOverlaySource_Obj, 1,
-      g_sim3d_layer_pixels[kSim3DPlane_Obj1]);
-  ok &= PpuBindOverlayPrioSurface(
-      ppu, kPpuOverlaySource_Obj, 2,
-      g_sim3d_layer_pixels[kSim3DPlane_Obj2]);
-  ok &= PpuBindOverlayPrioSurface(
-      ppu, kPpuOverlaySource_Obj, 3,
-      g_sim3d_layer_pixels[kSim3DPlane_Obj3]);
+  if (g_sim3d.raw_obj_planes) {
+    ok &= PpuBindOverlaySurface(
+        ppu, kPpuOverlaySource_Obj,
+        g_sim3d_layer_pixels[kSim3DPlane_Obj0], pitch);
+    ok &= PpuBindOverlayPrioSurface(
+        ppu, kPpuOverlaySource_Obj, 1,
+        g_sim3d_layer_pixels[kSim3DPlane_Obj1]);
+    ok &= PpuBindOverlayPrioSurface(
+        ppu, kPpuOverlaySource_Obj, 2,
+        g_sim3d_layer_pixels[kSim3DPlane_Obj2]);
+    ok &= PpuBindOverlayPrioSurface(
+        ppu, kPpuOverlaySource_Obj, 3,
+        g_sim3d_layer_pixels[kSim3DPlane_Obj3]);
+  } else {
+    /* This also clears the source's capture and priority bindings, so the PPU
+     * skips its isolated OBJ scratch setup, four row clears and resolve pass. */
+    ok &= PpuBindOverlaySurface(
+        ppu, kPpuOverlaySource_Obj, NULL, 0);
+  }
 
   int extra = (request->width - kPpuXPixels) / 2;
   for (int source = kPpuOverlaySource_Bg1;
@@ -418,7 +461,7 @@ bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
     ok &= PpuSetOverlayCapture(ppu, (PpuOverlaySource)source,
                                -extra, 0, request->width, request->height, 0);
   }
-  if (ok) {
+  if (ok && g_sim3d.raw_obj_planes) {
     ok &= PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj,
                                -extra, 0, request->width, request->height,
                                targeted_miracle_half_add
@@ -438,6 +481,7 @@ bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
   g_sim3d.live_x1 = extra + kPpuXPixels + ppu->extraRightCur;
   g_sim3d.backdrop_argb = ActRaiser_BackdropArgb(ppu);
   g_sim3d.diagnostic_layer_mask = request->diagnostic_layer_mask;
+  g_sim3d.captured_plane_mask = captured_plane_mask;
   return true;
 }
 
@@ -692,6 +736,7 @@ static uint32_t ComposeTownPixelWithoutHud(int x, int y,
       ? g_sim3d.backdrop_argb : 0xff000000u;
 
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+    if (!(g_sim3d.captured_plane_mask & (1u << plane))) continue;
     if (skip_bg3 &&
         (plane == kSim3DPlane_Bg3Low || plane == kSim3DPlane_Bg3High))
       continue;
@@ -734,7 +779,8 @@ static void RestoreTownHudPixel(uint8_t *authentic_pixels,
   }
   if (skip_obj) {
     int plane = Sim3D_ObjPlaneForPriority(g_sim3d.hud_obj_priority);
-    ((uint32_t *)g_sim3d_layer_pixels[plane])[index] = 0;
+    if (g_sim3d.captured_plane_mask & (1u << plane))
+      ((uint32_t *)g_sim3d_layer_pixels[plane])[index] = 0;
   }
 }
 
@@ -873,6 +919,7 @@ static void ApplyFixedColorAdd(void) {
   size_t count = (size_t)g_sim3d.width * g_sim3d.height;
 
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+    if (!(g_sim3d.captured_plane_mask & (1u << plane))) continue;
     uint8_t bit = ColorMathLayerBit(plane);
     if (!bit || !(g_sim3d.fixed_add_mask & bit) || !g_sim3d_layer_pixels[plane])
       continue;
@@ -948,7 +995,8 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
     ComposeFlatPixelsPolicy(
         g_sim3d_flat_pixels, g_sim3d.width, g_sim3d.height,
         g_sim3d.width * (int)sizeof(uint32_t), g_sim3d.backdrop_argb,
-        g_sim3d.live_x0, g_sim3d.live_x1, g_sim3d_layer_pixels, 0,
+        g_sim3d.live_x0, g_sim3d.live_x1, g_sim3d_layer_pixels,
+        g_sim3d.captured_plane_mask,
         g_sim3d.object_half_add, hud_span_rows);
   uint32_t mismatch = 0;
   uint64_t flat_hash = 0;
@@ -968,7 +1016,11 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
    * the only way to see them, the frame itself having been kept. */
   MaybeDumpDemoArtifacts(authentic_pixels, authentic_pitch, game_frame);
 
-  if (!SimRenderMetadata_AtlasReady()) {
+  bool atlas_ready = SimRenderMetadata_AtlasReady();
+  if (!atlas_ready && !g_sim3d.raw_obj_planes) {
+    /* The atlas state is immutable between the pre-scanout decision and here,
+     * so this is a broken producer contract rather than an ordinary fallback.
+     * Fail closed instead of publishing a frame with neither sprite source. */
     g_sim3d.status = kSim3DCapture_AtlasInvalid;
     RestoreTownHudPolicy(authentic_pixels, authentic_pitch);
     return;
@@ -982,8 +1034,10 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
    * separated_mismatch_pixels_total == 0, and the count and status below still
    * carry the failure into the D1 trace and the console. */
   g_sim3d.separated_valid = true;
-  g_sim3d.status = diagnostics_armed && mismatch
-      ? kSim3DCapture_PixelMismatch : kSim3DCapture_Ready;
+  g_sim3d.status = !atlas_ready
+      ? kSim3DCapture_AtlasInvalid
+      : diagnostics_armed && mismatch
+          ? kSim3DCapture_PixelMismatch : kSim3DCapture_Ready;
   if (diagnostics_armed) ReportFidelityChange(mismatch, game_frame);
   RestoreTownHudPolicy(authentic_pixels, authentic_pitch);
 
@@ -1074,14 +1128,19 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
    * plane capture exists at all. */
   if (!g_sim3d.separated_valid ||
       (g_sim3d.status != kSim3DCapture_Ready &&
-       g_sim3d.status != kSim3DCapture_PixelMismatch))
+       g_sim3d.status != kSim3DCapture_PixelMismatch &&
+       g_sim3d.status != kSim3DCapture_AtlasInvalid))
     return;
   SimTownCanvas_Render(frame->town, wram, ppu->vram, ppu->cgram,
                        PPU_brightness(ppu), g_sim3d.backdrop_argb);
 }
 
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void) {
-  return g_sim3d.separated_valid ? kSim3DShippedFeatures : 0;
+  if (!g_sim3d.separated_valid) return 0;
+  SimRenderFeatureMask features = kSim3DShippedFeatures;
+  if (!g_sim3d.billboard_renderer_ready)
+    features &= ~kSimFeature_ObjectBillboards;
+  return features;
 }
 
 static int ClampTuning(int value, int low, int high) {
@@ -1174,6 +1233,8 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
       ? (uint16_t)((g_sim3d.width - kActRaiserAuthenticWidth) / 2) : 0;
   frame->separated_valid = g_sim3d.separated_valid;
   frame->separated_status = (uint8_t)g_sim3d.status;
+  frame->separated_plane_mask =
+      (uint16_t)g_sim3d.captured_plane_mask;
   frame->separated_mismatch_pixels = g_sim3d.mismatch_pixels;
   frame->separated_hash = g_sim3d.separated_hash;
   frame->separated_backdrop_argb = g_sim3d.backdrop_argb;

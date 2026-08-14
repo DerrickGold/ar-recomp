@@ -15,6 +15,11 @@ typedef struct Sim3DCaptureRequest {
   bool master_enabled;
   bool picker_active;
   bool renderer_ready;
+  /* Current-frame semantic OBJ data and its GPU consumer are both required
+   * before raw OBJ capture may be suppressed. Either false keeps the four
+   * priority planes as an exact fallback. */
+  bool billboard_atlas_ready;
+  bool billboard_renderer_ready;
   bool diorama_active;
   /* A capture-diagnostics UI is on screen this frame (the scene inspector
    * panel reports the composed-frame hash). Supplied by the host rather than
@@ -32,7 +37,7 @@ enum {
 };
 
 /* Raw capture buffers are game-thread-written until PresentUpload completes.
- * They are allocated once on first supported capture and never reallocated. */
+ * Each plane is allocated lazily on first demand and never reallocated. */
 extern uint8_t *g_sim3d_layer_pixels[kSim3DPlane_Count];
 extern uint32_t g_sim3d_flat_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
 extern uint32_t g_sim3d_difference_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
@@ -45,7 +50,7 @@ int Sim3D_ObjPlaneForPriority(int priority);
  * samples only g_sim3d_flat_pixels; projected billboard mode replaces the
  * four raw OBJ planes with the packed object atlas. */
 uint32_t Sim3D_PlaneTextureUploadMask(
-    SimRenderFeatureMask effective_features);
+    SimRenderFeatureMask effective_features, uint32_t captured_plane_mask);
 
 /* Called before per-frame overlay policies. True means the preceding SIM
  * capture owned the PPU bindings and the frontend must restore its defaults. */

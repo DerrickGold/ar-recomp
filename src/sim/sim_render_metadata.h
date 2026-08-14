@@ -661,6 +661,11 @@ typedef struct SimFrameData {
   uint16_t atlas_used_width, atlas_used_height;
   bool separated_valid;
   uint8_t separated_status;
+  /* Physical CPU planes authored for this frame. Logical OBJ ranks remain in
+   * diagnostic_layer_mask when semantic billboards replace their raw pixels;
+   * this mask exists to prevent uploads or fallback draws from sampling an
+   * unproduced (and therefore potentially stale) surface. */
+  uint16_t separated_plane_mask;
   uint32_t separated_mismatch_pixels;
   /* The PPU colour-math state the D2 gate last looked at.
    *

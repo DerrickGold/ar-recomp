@@ -146,6 +146,7 @@ SDL_Texture *g_sim_obj_atlas_texture;
 SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
 SDL_Texture *g_sim3d_flat_texture;
 bool g_sim3d_textures_ready;
+bool g_sim3d_billboard_renderer_ready;
 
 static void DestroyDioramaTextures(void) {
   for (int i = 0; i < kDioramaPlane_Count; i++) {
@@ -877,6 +878,7 @@ static void AppBoot_CreatePresentationTextures(AppBoot *app) {
     fprintf(stderr, "[sim3d-d1] semantic atlas texture unavailable: %s\n",
             SDL_GetError());
   }
+  g_sim3d_billboard_renderer_ready = g_sim_obj_atlas_texture != NULL;
 
   /* D2's observational Mode-1 capture family. Layer textures are retained
    * for inspector/future geometry use; the pitch-zero reference and its
@@ -2006,6 +2008,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   Diorama_Shutdown(g_renderer);
   DestroyDioramaTextures();
   SDL_DestroyTexture(g_sim_obj_atlas_texture);
+  g_sim3d_billboard_renderer_ready = false;
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
   SDL_DestroyTexture(g_sim3d_flat_texture);
