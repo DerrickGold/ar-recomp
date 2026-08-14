@@ -2060,8 +2060,10 @@ action map can be built from the ROM alone (`tools/act_collision.py --map MODE,S
    `$7E:2100`;
 4. rebuild the `$05A0` attribute table exactly as `$02:BAC1` does.
 
-This needed a faithful decompressor, which is now `tools/quintet_lzss.py` — a direct port of
-`$02:C5C9` / `$C639` / `$C66C`. Note for anyone tempted to reach for a stock Quintet LZSS routine:
+This needed a faithful decompressor. The production implementation is now the shared
+`src/quintet_lzss.c`, used by the ROM backdrop loader, settings font, and whole-body `$02:C5C9`
+CPU HLE; `tools/quintet_lzss.py` remains an independent direct-port oracle for `$C5C9` / `$C639`
+/ `$C66C`. Note for anyone tempted to reach for a stock Quintet LZSS routine:
 this stream is **bit-packed rather than byte-aligned**, the ring is pre-filled with `$20` (not zero)
 and its write cursor starts at `$EF`. A byte-aligned decoder consumes the stream and emits
 plausible-looking output while being wrong, so validate any decoder against a known blob first —
@@ -2198,7 +2200,7 @@ establishes or changes a semantic identity.
 | `$02:B1F7` / `$02:B250` / `$02:B264` | **per-map asset-script VM** — first call of action level entry; seeks the `($18,$19)` entry in the table at `$05:8000` and dispatches command bytes by highest set bit (skip chain `$B264` gives operand sizes) |
 | `$02:B4C0` | asset-script pointer read + **linear→LoROM fixup** (`bank = L>>15`, `addr = $8000\|(L&$7FFF)`) into the decompressor source `$A5-$A7` |
 | `$02:B69C` | per-act OBJ animation/composition blob decompress — flag + source pointer from the asset script, size from the blob's own first word, dest `$7E:4000` (objects) or `$7E:5000` (boss) |
-| `$02:C5C9` / `$C639` / `$C66C` | **Quintet LZSS decompressor** — 256-byte ring at `$7E:2000` pre-filled with `$20`, write cursor starting at `$EF`, control bits in `$AE`. **Bit-packed, not byte-aligned**: `$C639` reads 8 bits and `$C66C` the 4-bit match length (len = n+2) by shifting `$B7/$B8` by the current bit phase. Ported byte-exact in `tools/quintet_lzss.py` |
+| `$02:C5C9` / `$C639` / `$C66C` | **Quintet LZSS decompressor + whole-body HLE** — 256-byte ring at `$7E:2000` pre-filled with `$20`, write cursor starting at `$EF`, control bits in `$AE`. **Bit-packed, not byte-aligned**: `$C639` reads 8 bits and `$C66C` the 4-bit match length (len = n+2) by shifting `$B7/$B8` by the current bit phase. `src/quintet_lzss.c` is the shared production core; `tools/quintet_lzss.py` is the independent oracle. The HLE reconstructs caller-visible DP scratch, ring contents, registers, accumulator, and RTL stack behavior. |
 | `$02:B3EB` | generic WRAM data load — selector, pointer, then `[widthChunks][heightChunks][size16]` from the blob; sets level dims `$2E`/`$30` and hands off to `$02:B446` (raw copy or decompress, dest from the `$0046,X` table) |
 | `$02:B363` | metatile definition table load — 2048 bytes to `$7E:2100` (BG1) or `$7E:2900` (BG2), stored byte-swapped in ROM |
 | `$02:B330` | CGRAM/palette load |

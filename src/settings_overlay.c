@@ -11,6 +11,7 @@
 #include "action/action_bg_tuner.h"
 #include "input_map.h"
 #include "presentation_geometry.h"
+#include "quintet_lzss.h"
 #include "settings.h"
 #include "user_data_dir.h"
 
@@ -416,12 +417,6 @@ enum {
 };
 static const char kSectionResetKey[] = "reset_section_defaults";
 
-typedef struct BitReader {
-  const uint8_t *data;
-  size_t size;
-  size_t bit;
-} BitReader;
-
 /* MenuLayout is defined in settings_overlay_internal.h (shared with the panel). */
 
 /* Glyph-cache dimensions. Both are 256 for BYTE-INDEXING reasons and are not
@@ -564,25 +559,6 @@ static SDL_Window *OverlayWindow(void) {
   return s_renderer ? SDL_GetRenderWindow(s_renderer) : NULL;
 }
 
-static bool ReadBits(BitReader *reader, int count, unsigned *value) {
-  if (!reader || !value || count < 0 ||
-      reader->bit + (size_t)count > reader->size * 8)
-    return false;
-  unsigned result = 0;
-  for (int i = 0; i < count; i++) {
-    uint8_t byte = reader->data[reader->bit >> 3];
-    result = (result << 1) |
-             ((byte >> (7 - (reader->bit & 7))) & 1);
-    reader->bit++;
-  }
-  *value = result;
-  return true;
-}
-
-/* Host equivalent of the game's $02:C5C9 decompressor. Its tokens are packed
- * continuously across byte boundaries: one flag bit followed by either an
- * eight-bit literal, or an eight-bit dictionary offset and four-bit length.
- * The latter copies length+2 bytes from a 256-byte ring initialized to spaces. */
 static bool DecodeFontAsset(const uint8_t *rom_data, size_t rom_size) {
   if (!rom_data || rom_size < (size_t)kFontAssetOffset + 2)
     return false;
@@ -591,49 +567,17 @@ static bool DecodeFontAsset(const uint8_t *rom_data, size_t rom_size) {
   if (output_size != kFontTileBytes)
     return false;
 
-  BitReader reader = {
-    asset + 2,
-    rom_size - (size_t)kFontAssetOffset - 2,
-    0,
-  };
-  uint8_t dictionary[kOverlayCharCodes];
-  memset(dictionary, 0x20, sizeof(dictionary));
-  unsigned write_position = 0xef;
-  size_t output_position = 0;
-
-  while (output_position < output_size) {
-    unsigned literal = 0;
-    if (!ReadBits(&reader, 1, &literal))
-      return false;
-    if (literal) {
-      unsigned value = 0;
-      if (!ReadBits(&reader, 8, &value))
-        return false;
-      s_font_tiles[output_position++] = (uint8_t)value;
-      dictionary[write_position] = (uint8_t)value;
-      write_position = (write_position + 1) & 0xff;
-      continue;
-    }
-
-    unsigned read_position = 0;
-    unsigned length_code = 0;
-    if (!ReadBits(&reader, 8, &read_position) ||
-        !ReadBits(&reader, 4, &length_code))
-      return false;
-    unsigned length = length_code + 2;
-    for (unsigned i = 0; i < length && output_position < output_size; i++) {
-      uint8_t value = dictionary[read_position];
-      read_position = (read_position + 1) & 0xff;
-      s_font_tiles[output_position++] = value;
-      dictionary[write_position] = value;
-      write_position = (write_position + 1) & 0xff;
-    }
-  }
+  QuintetLzssState state;
+  if (!QuintetLzss_DecompressAsset(
+          asset, rom_size - (size_t)kFontAssetOffset,
+          s_font_tiles, output_size, &state))
+    return false;
 
   fprintf(stderr,
           "[settings-menu] decoded ActRaiser font: $%04X bytes from ROM "
           "offset $%06X (%zu compressed bytes consumed)\n",
-          kFontTileBytes, kFontAssetOffset, (reader.bit + 7) / 8);
+          kFontTileBytes, kFontAssetOffset,
+          (state.bits_consumed + 7) / 8);
   return true;
 }
 
