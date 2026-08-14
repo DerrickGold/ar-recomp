@@ -6,12 +6,19 @@
 
 enum {
   kStackBank = 0x00,
+  kDrawListRomBank = 0x03,
   kLowWramBank = 0x7E,
   kHighWramBank = 0x7F,
   kBankBytes = 0x10000,
+  kDrawCommandCount = 0x7C23,
+  kDrawOriginCellX = 0x7CAB,
+  kDrawOriginCellY = 0x7CAD,
   kCellX = 0x7CAF,
   kCellY = 0x7CB1,
   kMetatileId = 0x7CB5,
+  kDrawStepListPointerOffset = 6,
+  kDrawMetatileCopyReturnAddress = 0xA5CF,
+  kDrawCommandBytes = 3,
   kTerrainDefinitionsBase = 0x2100,
   kStructureDefinitionsBase = 0x3100,
   kDefinitionBytes = 8,
@@ -42,7 +49,7 @@ typedef struct ReferenceAddress {
   ReferenceAdd destination;
 } ReferenceAddress;
 
-static uint8_t memory[2 * kBankBytes];
+static uint8_t memory[3 * kBankBytes];
 static int failures;
 
 #define CHECK(condition)                                                   \
@@ -57,6 +64,7 @@ static size_t BankOffset(uint8 bank, uint16 address) {
   if (bank == kStackBank && address < 0x2000) return address;
   if (bank == kLowWramBank) return address;
   if (bank == kHighWramBank) return kBankBytes + address;
+  if (bank == kDrawListRomBank) return 2 * kBankBytes + address;
   return 0;
 }
 
@@ -165,6 +173,53 @@ static void CheckSemanticGrid(void) {
       kActRaiserTownMetatileAtlas_Terrain);
   CheckCopiedWords(kHighWramBank,
                    ExpectedDestination(0x0020, 0xFFFF), terrain_words);
+  CHECK(memcmp(&cpu, &initial_cpu, sizeof(cpu)) == 0);
+}
+
+static void WriteDrawCommand(uint16 address, uint8 cell_x_offset,
+                             uint8 cell_y_offset, uint8 metatile_id) {
+  cpu_write8(NULL, kDrawListRomBank, address, cell_x_offset);
+  cpu_write8(NULL, kDrawListRomBank, (uint16)(address + 1), cell_y_offset);
+  cpu_write8(NULL, kDrawListRomBank, (uint16)(address + 2), metatile_id);
+}
+
+static void CheckSemanticDrawList(void) {
+  const uint16 draw_list_address = 0xD200;
+  const uint8 first_metatile = 0x40;
+  const uint8 second_metatile = 0x41;
+  static const uint16 first_words[] = {
+    0x0200, 0x1111, 0x2222, 0x3333,
+  };
+  static const uint16 second_words[] = {
+    0x8444, 0x0555, 0xA666, 0x0777,
+  };
+
+  memset(memory, 0, sizeof(memory));
+  WriteDefinition(kActRaiserTownMetatileAtlas_Structure, first_metatile,
+                  first_words);
+  WriteDefinition(kActRaiserTownMetatileAtlas_Structure, second_metatile,
+                  second_words);
+  cpu_write8(NULL, kDrawListRomBank, draw_list_address, 2);
+  WriteDrawCommand((uint16)(draw_list_address + 1), 0, 0,
+                   first_metatile);
+  WriteDrawCommand((uint16)(draw_list_address + 1 + kDrawCommandBytes),
+                   2, 1, second_metatile);
+
+  CpuState cpu;
+  memset(&cpu, 0, sizeof(cpu));
+  cpu.ram = memory;
+  const CpuState initial_cpu = cpu;
+  CHECK(ActRaiser_ExecuteTownDrawList(
+      &cpu, kHighWramBank, 3, 5, draw_list_address, 2));
+  CheckCopiedWords(kHighWramBank, ExpectedDestination(3, 5), first_words);
+  CheckCopiedWords(kHighWramBank, ExpectedDestination(5, 6), second_words);
+  CHECK(memcmp(&cpu, &initial_cpu, sizeof(cpu)) == 0);
+
+  CHECK(!ActRaiser_ExecuteTownDrawList(
+      &cpu, kHighWramBank, 3, 5, draw_list_address, 1));
+  cpu_write8(NULL, kDrawListRomBank, draw_list_address, 0);
+  CHECK(!ActRaiser_ExecuteTownDrawList(
+      &cpu, kHighWramBank, 3, 5, draw_list_address, 2));
   CHECK(memcmp(&cpu, &initial_cpu, sizeof(cpu)) == 0);
 }
 
@@ -322,10 +377,125 @@ static void CheckCpuContracts(void) {
                0xAB1A, 0xCD15, 0x7E, 0x0000, kHighWramBank, true);
 }
 
+static void CheckDrawListCpuCase(bool decimal, uint16 saved_x,
+                                 uint16 origin_cell_x,
+                                 uint16 origin_cell_y) {
+  const uint16 draw_step_address = 0xD100;
+  const uint16 draw_list_address = 0xD200;
+  const uint8 first_metatile = 0x44;
+  const uint8 final_metatile = 0x45;
+  const uint8 final_cell_x_offset = 2;
+  const uint8 final_cell_y_offset = 1;
+  static const uint16 first_words[] = {
+    0x1001, 0x1002, 0x1003, 0x1004,
+  };
+  static const uint16 final_words[] = {
+    0x2001, 0x2202, 0x2003, 0x8001,
+  };
+
+  memset(memory, 0xCC, sizeof(memory));
+  WriteDefinition(kActRaiserTownMetatileAtlas_Structure, first_metatile,
+                  first_words);
+  WriteDefinition(kActRaiserTownMetatileAtlas_Structure, final_metatile,
+                  final_words);
+  cpu_write16(NULL, kHighWramBank,
+              (uint16)(saved_x + kDrawStepListPointerOffset),
+              draw_step_address);
+  cpu_write16(NULL, kDrawListRomBank, draw_step_address,
+              draw_list_address);
+  cpu_write8(NULL, kDrawListRomBank, draw_list_address, 2);
+  WriteDrawCommand((uint16)(draw_list_address + 1), 0, 0,
+                   first_metatile);
+  const uint16 final_command_address = (uint16)(
+      draw_list_address + 1 + kDrawCommandBytes);
+  WriteDrawCommand(final_command_address, final_cell_x_offset,
+                   final_cell_y_offset, final_metatile);
+  cpu_write16(NULL, kHighWramBank, kDrawOriginCellX, origin_cell_x);
+  cpu_write16(NULL, kHighWramBank, kDrawOriginCellY, origin_cell_y);
+
+  CpuState cpu = MakeCpu(kHighWramBank, decimal);
+  cpu.X = saved_x;
+  const uint16 entry_stack_pointer = cpu.S;
+  const ReferenceAdd final_cell_x = ReferenceAdd16(
+      final_cell_x_offset, origin_cell_x, decimal);
+  const ReferenceAdd final_cell_y = ReferenceAdd16(
+      final_cell_y_offset, origin_cell_y, decimal);
+  const ReferenceAddress final_destination = ReferenceCpuAddress(
+      final_cell_x.value, final_cell_y.value, decimal);
+
+  CHECK(ActRaiser_TownExecuteDrawList(&cpu) == RECOMP_RETURN_NORMAL);
+  CheckCopiedWords(kHighWramBank, final_destination.destination.value,
+                   final_words);
+  CHECK(cpu_read16(NULL, kHighWramBank, kDrawCommandCount) == 0);
+  CHECK(cpu_read16(NULL, kHighWramBank, kCellX) == final_cell_x.value);
+  CHECK(cpu_read16(NULL, kHighWramBank, kCellY) == final_cell_y.value);
+  CHECK(cpu_read16(NULL, kHighWramBank, kMetatileId) == final_metatile);
+  CHECK(cpu.A == (uint16)(final_words[3] & kAttributeMask));
+  CHECK(cpu.X == saved_x);
+  CHECK(cpu.Y == final_destination.destination.value);
+  CHECK(cpu.S == (uint16)(entry_stack_pointer + 2));
+  CHECK(cpu.D == 0x2468);
+  CHECK(cpu.DB == kHighWramBank);
+  CHECK(cpu.PB == kDrawListRomBank);
+  CHECK(cpu.host_return_valid == 1);
+
+  CHECK(cpu_read8(NULL, kStackBank, entry_stack_pointer) ==
+        (uint8)(saved_x >> 8));
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 1)) ==
+        (uint8)saved_x);
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 2)) ==
+        (uint8)(final_command_address >> 8));
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 3)) ==
+        (uint8)final_command_address);
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 4)) ==
+        (uint8)(kDrawMetatileCopyReturnAddress >> 8));
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 5)) ==
+        (uint8)kDrawMetatileCopyReturnAddress);
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 6)) ==
+        (uint8)(final_destination.horizontal >> 8));
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 7)) ==
+        (uint8)final_destination.horizontal);
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 8)) ==
+        (uint8)(final_destination.within_quadrant.value >> 8));
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack_pointer - 9)) ==
+        (uint8)final_destination.within_quadrant.value);
+
+  const uint8 expected_p = (uint8)(
+      CPU_P_I | (decimal ? CPU_P_D : 0) |
+      (final_destination.destination.overflow ? CPU_P_V : 0) |
+      (saved_x == 0 ? CPU_P_Z : 0) |
+      (saved_x & 0x8000u ? CPU_P_N : 0));
+  CHECK(cpu.P == expected_p);
+  CHECK(cpu.m_flag == 0);
+  CHECK(cpu.x_flag == 0);
+  CHECK(cpu._flag_C == 0);
+  CHECK(cpu._flag_Z == (saved_x == 0));
+  CHECK(cpu._flag_I == 1);
+  CHECK(cpu._flag_D == decimal);
+  CHECK(cpu._flag_V == final_destination.destination.overflow);
+  CHECK(cpu._flag_N == ((saved_x & 0x8000u) != 0));
+}
+
+static void CheckDrawListCpuContract(void) {
+  CheckDrawListCpuCase(false, 0x7000, 0x0014, 0x001A);
+  CheckDrawListCpuCase(true, 0x0000, 0x0019, 0x0018);
+}
+
 int main(void) {
   memset(memory, 0, sizeof(memory));
   CheckSemanticGrid();
+  CheckSemanticDrawList();
   CheckCpuContracts();
+  CheckDrawListCpuContract();
   if (failures) {
     printf("actraiser town-metatile HLE: %d failure(s)\n", failures);
     return 1;

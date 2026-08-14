@@ -102,6 +102,7 @@ enum {
   kStructFlag_Building = 0x40,
   kStructType_ClassMask = 0x0F,
   kStructType_Bridge    = 0x01,
+  kMaximumBridgeDrawCommands = 16,
 };
 
 /* AR_BRIDGEFIX_DEBUG play-test log levels ([bridgefix] on stderr, captured in
@@ -416,20 +417,11 @@ static int draw_extension_bridge(CpuState *cpu, uint8 db,
   if (first_command >= 0x00FD) return 0;
 
   const uint16 draw_list = cpu_read16(cpu, 0x03, (uint16)(program + 2));
-  const uint8 count = cpu_read8(cpu, 0x03, draw_list);
   /* Native bridge lists contain one command. A small ceiling makes a damaged
    * sidecar fail closed instead of interpreting arbitrary ROM as a list. */
-  if (count == 0 || count > 16) return 0;
-  for (unsigned i = 0; i < count; i++) {
-    const uint16 command = (uint16)(draw_list + 1 + i * 3);
-    const uint8 dx = cpu_read8(cpu, 0x03, command);
-    const uint8 dy = cpu_read8(cpu, 0x03, (uint16)(command + 1));
-    const uint8 metatile = cpu_read8(cpu, 0x03, (uint16)(command + 2));
-    ActRaiser_CopyTownMetatile(
-        cpu, db, (uint16)(rec[0] + dx), (uint16)(rec[1] + dy), metatile,
-        kActRaiserTownMetatileAtlas_Structure);
-  }
-  return 1;
+  return ActRaiser_ExecuteTownDrawList(
+      cpu, db, rec[0], rec[1], draw_list,
+      kMaximumBridgeDrawCommands);
 }
 
 /* Set N/Z/C exactly; every exit of both replaced routines ends on an
