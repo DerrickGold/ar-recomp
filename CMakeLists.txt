@@ -771,8 +771,8 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_cell_map_hle
         COMMAND actraiser_cell_map_hle_test)
 
-    # Shared semantic town-metatile copy plus the complete CPU contracts for
-    # the matching $03:9B5A terrain and $03:9C43 structure-copy HLE leaves.
+    # Shared semantic town-metatile copy/draw-list execution plus the complete
+    # CPU contracts for $03:9B5A, $03:9C43, and $03:A591.
     add_executable(actraiser_town_metatile_hle_test
         tests/actraiser_town_metatile_hle_test.c
         src/actraiser/actraiser_town_metatile.c

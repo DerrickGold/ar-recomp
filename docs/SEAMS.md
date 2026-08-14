@@ -1095,6 +1095,13 @@ coordinate and instruction-level ABI cases pins the conversion. For the observed
 bridge states, record actions `$11/$31` select
 programs `$D5C5/$D5D1`, lists `$DC1C/$DC24`, and metatiles `$44/$45`.
 
+`$A591` is now a whole-body HLE as well. Its two native callers and the bridge-side restamp
+share `ActRaiser_ExecuteTownDrawList`, the single count + `{dx,dy,metatile}` decoder. The CPU
+wrapper retains the reconstruction-step/list pointer chain, `$7C23` countdown, decimal-mode
+coordinate additions, nested `$9C43` return frame and temporary stack writes, final
+register/flag state, and outer RTS. Host bridge restoration supplies a named command ceiling
+and therefore fails closed on a malformed list without maintaining a second parser.
+
 A direct visual capture disproved the earlier marks-only assumption: the sidecar-only bridge
 had the correct `$E2` mark but remained a solid black map cell because `$9D4D` could not see
 it. The `$89F0` post-pass now decodes the same rebuild program and performs the same metatile
