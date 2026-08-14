@@ -814,6 +814,20 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_town_metatile_hle
         COMMAND actraiser_town_metatile_hle_test)
 
+    # Shared semantic town-structure step-program resolution/arming plus the
+    # complete CPU contracts for rebuild $03:A4A8 and construction $03:A4B8.
+    add_executable(actraiser_town_structure_steps_hle_test
+        tests/actraiser_town_structure_steps_hle_test.c
+        src/actraiser/actraiser_town_structure_steps.c
+        src/cpu_65816_math.c
+    )
+    target_include_directories(actraiser_town_structure_steps_hle_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_town_structure_steps_hle
+        COMMAND actraiser_town_structure_steps_hle_test)
+
     # Golden test for the diorama M7 scroll-interpolation math, extracted from
     # present.c with the wall-clock injected so t is controllable (Test gap 2).
     add_executable(actraiser_diorama_scroll_math_test

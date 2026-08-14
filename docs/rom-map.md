@@ -184,7 +184,7 @@ ram-map "Road Construction Encoding" for the bit layout):
 | `$03:DC74-$03:DC7F` | `0x1DC74` | Per-town structure-record array base pointers (`$7F:6BE7 + town*0x200`, 128 × 4-byte records each) |
 | `$03:AB6C+` | `0x12B6C` | Per-town pointers to initial structure-record images (`$FF`-terminated 4-byte records, copied at new-game init `$03:AA51`) |
 | `$03:A017/$A364/$A0D1/$A1A1/$A23D/$A29C/$A2F5` | `0x12017+` | Per-type-class 8-entry action tables (pushed-address−1): house/bridge/field/factory-tier/4/5/6 × actions 0-7. Bridge rows 2-6 all point at the `$A435` no-op — the bridge-indestructibility row |
-| `$03:D4D2+` | `0x1D4D2` | Structure-visual class table bases (class `$7D1F` + variant `$7D21` → step-program pointer, armed into `$7F:77E7+rec*8` by `$03:A4B8`) |
+| `$03:D4D2+/$03:D4E2+` | `0x1D4D2/0x1D4E2` | Construction/rebuild structure-visual class table bases (class `$7D1F` + variant `$7D21` → step-program pointer, armed into `$7F:77E7+rec*8` by the `$03:A4B8/$03:A4A8` HLE pair) |
 | `$03:D2FA/$03:D306` | `0x1D2FA` | Development target-site coordinate tables (per SEAMS §5) |
 
 ### Town OBJ composition landmarks (bank $01, classified 2026-07-22)

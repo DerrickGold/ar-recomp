@@ -346,9 +346,9 @@ stager) requires all six words == 2 for the all-bosses-done path.
 | $7F:3800-$7F:53FF | Per-cell flag maps, `$400` per town (32×32 cells; bit0 set at road/build commit `$03:9623`, bit1 at `$03:8E48`, transient pathfinder visited bit2 set at `$03:9A50` and tested by the `$03:96EF` HLE) |
 | $7F:6B26+2N | Per-town population **support capacity** (census `$03:C07F` sum: 32/48/72 per completed support structure, bridges 32) |
 | $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, bit6 under construction, bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
-| $7F:77E7-$7F:7BE6 | Per-record visual step-machine slots, 128 × 8 bytes (armed by `$03:A4B8`/rebuild `$A4A8`, walked by the `$89F7`/`$8A7E` 8-frame stepper). Completed sidecar bridges bypass this pool: the `$89F0` HLE replays their single native rebuild draw directly |
+| $7F:77E7-$7F:7BE6 | Per-record visual step-machine slots, 128 × 8 bytes (armed by the construction `$03:A4B8` / rebuild `$03:A4A8` HLE pair through one shared resolver/armer, then walked by the `$89F7`/`$8A7E` 8-frame stepper). Completed sidecar bridges bypass this pool: the `$89F0` HLE resolves and replays their single native rebuild draw through the same model |
 | $7F:7BE7 | Step/tick scratch variable (record index during scanner passes) |
-| $7F:7BE9 | Scanner gate: nonzero makes `$03:A4B8` (arm visual step) and `$03:A4F7` early-out |
+| $7F:7BE9 | Scanner gate: nonzero makes `$03:A4A8/$03:A4B8` (arm rebuild/construction visual step) and `$03:A4F7` early-out |
 
 #### Record `+3` = action/progress byte, and the per-type state machines (mapped 2026-07-22)
 

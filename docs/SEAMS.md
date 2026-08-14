@@ -1030,12 +1030,16 @@ and `JSL $03:B4A6`; **bridge actions 2-6 all point to `$A435`, a reset-to-idle n
 single table row is the entirety of bridge indestructibility.** (Wheat/factory earthquake
 immunity lives in the same tables' higher action rows.)
 
-**Visual step programs.** `$A4B8` (gate `$7BE9`) resolves class table base ROM `$03:D4D2` +
-variant to a step-program pointer and arms the record's slot in the 128 × 8-byte step-machine
-pool at `$7F:77E7 + record_index*8` (`$77E7-$7BE6`, ending exactly at the `$7BE7` tick
-variable). The §5 8-frame step walker (`$89F7` + step table `$03:8A7E`) then draws the
-tile changes. This is why records and visuals can diverge: tiles persist in the town map
-even if a record is freed afterwards.
+**Visual step programs.** `$A4B8` (construction table family `$03:D4D2`) and `$A4A8`
+(rebuild family `$03:D4E2`) share the body at `$A4C6`. When gate `$7BE9` is clear, it adds
+class `$7D1F` and variant `$7D21` indirections to resolve a step-program pointer and arms the
+record's slot in the 128 × 8-byte step-machine pool at `$7F:77E7 + record_index*8`
+(`$77E7-$7BE6`, ending exactly at the `$7BE7` tick variable). Both entry points are now
+whole-body HLEs backed by a shared resolver/armer that the bridge sidecar also uses; focused
+tests pin both ROM families, stack bytes, decimal-mode ADC edges, DB-relative writes, and
+the complete CPU return contract. The §5 8-frame step walker (`$89F7` + step table
+`$03:8A7E`) then draws the tile changes. This is why records and visuals can diverge: tiles
+persist in the town map even if a record is freed afterwards.
 
 **Auxiliary per-town state mapped along the way:** `$7F:9250 + town*0x80` = 64-entry
 built-square dedup list (2-byte **square** coords x,y ≤ 7, `$FFFF` empty; appender `$8EC1`,
@@ -1084,8 +1088,9 @@ Z-result convention (`Z=1` means available), accumulator high byte, X/Y, flags, 
 nested-JSR stack bytes, and outer RTS. Predicate coverage plus an instruction-level ABI suite
 and a deterministic simulation replay pin the conversion; the replay's final CPU state, WRAM,
 and SRAM are byte-identical to the native-body baseline. Later, `$9D4D` dispatches active records
-through `$9F6B/$9F8D` and `$A4A8/$A4F7`: it selects the bridge rebuild program from the
-`$03:D4E2` family, arms the record's `$77E7+slot*8` step entry, and executes its initial draw
+through `$9F6B/$9F8D` and `$A4A8/$A4F7`: the shared structure-step resolver selects the
+bridge rebuild program from the `$03:D4E2` family, arms the record's `$77E7+slot*8` step
+entry, and executes its initial draw
 through `$A591` → `$9C43`. `$A591` interprets a count plus `{dx,dy,metatile}` triples;
 `$9C43` copies four tilemap words from `$7E:3100 + metatile*8` into the quadrant-paged live
 town tilemap. Its sibling `$9B5A` performs the same copy from the terrain definitions at

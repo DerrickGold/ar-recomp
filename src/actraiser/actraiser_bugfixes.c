@@ -74,6 +74,7 @@
 #include "actraiser_cell_map.h"
 #include "actraiser_rtl.h"
 #include "actraiser_town_metatile.h"
+#include "actraiser_town_structure_steps.h"
 #include "cpu_state.h"
 #include "save_system.h"
 #include "settings.h"
@@ -92,9 +93,10 @@ enum {
   kVar_PendingType    = 0x7CA1,  /* allocation request: type byte */
   kVar_MarkCellX      = 0x7C4B,
   kVar_MarkCellY      = 0x7C4D,
+  kVar_StructureStepRecordIndex = 0x7BE7,
 
+  kTownRomBank = 0x03,
   kRom_StructListPtrs = 0xDC74,  /* bank $03 data: per-town array bases */
-  kRom_RebuildTypePtrs = 0xD4E2, /* bank $03: rebuild program tables */
 
   kStructRecordCount = 128,
   kStructRecordSize  = 4,
@@ -103,6 +105,14 @@ enum {
   kStructFlag_Subtype  = 0x10,
   kStructType_ClassMask = 0x0F,
   kStructType_Bridge    = 0x01,
+  kStructRecordCellXOffset = 0,
+  kStructRecordCellYOffset = 1,
+  kStructRecordActionOffset = 3,
+  kBridgeStructureStepClassOffset = 2,
+  kStructureStepVariantSourceShift = 3,
+  kStructureStepVariantOffsetMask = 0x0E,
+  kStructureStepDrawListPointerOffset = sizeof(uint16),
+  kStructureStepTerminatorMinimum = 0x00FD,
   kWordHighByteMask = 0xFF00,
   kMaximumBridgeDrawCommands = 16,
 };
@@ -161,7 +171,7 @@ static const char *struct_class_name(uint8 flags) {
 }
 
 static uint16 struct_list_base(CpuState *cpu, uint16 town_index_word) {
-  return cpu_read16(cpu, 0x03,
+  return cpu_read16(cpu, kTownRomBank,
                     (uint16)(kRom_StructListPtrs + town_index_word));
 }
 
@@ -421,19 +431,25 @@ static int ext_bridge_count(CpuState *cpu, uint8 db, unsigned town,
  * allocating one of $9D4D's 128 animation-step entries. */
 static int draw_extension_bridge(CpuState *cpu, uint8 db,
                                  const uint8 rec[4]) {
-  const uint16 bridge_table =
-      cpu_read16(cpu, 0x03, (uint16)(kRom_RebuildTypePtrs + 2));
-  const uint16 variant = (uint16)((rec[3] >> 3) & 0x0E);
-  const uint16 program =
-      cpu_read16(cpu, 0x03, (uint16)(bridge_table + variant));
-  const uint16 first_command = cpu_read16(cpu, 0x03, program);
-  if (first_command >= 0x00FD) return 0;
+  const uint16 variant_offset = (uint16)(
+      (rec[kStructRecordActionOffset] >>
+       kStructureStepVariantSourceShift) &
+      kStructureStepVariantOffsetMask);
+  const uint16 program = ActRaiser_ResolveTownStructureStepProgram(
+      cpu, kBridgeStructureStepClassOffset, variant_offset,
+      kActRaiserTownStructureStepProgramFamily_Rebuild);
+  const uint16 first_command = cpu_read16(
+      cpu, kTownRomBank, program);
+  if (first_command >= kStructureStepTerminatorMinimum) return 0;
 
-  const uint16 draw_list = cpu_read16(cpu, 0x03, (uint16)(program + 2));
+  const uint16 draw_list = cpu_read16(
+      cpu, kTownRomBank,
+      (uint16)(program + kStructureStepDrawListPointerOffset));
   /* Native bridge lists contain one command. A small ceiling makes a damaged
    * sidecar fail closed instead of interpreting arbitrary ROM as a list. */
   return ActRaiser_ExecuteTownDrawList(
-      cpu, db, rec[0], rec[1], draw_list,
+      cpu, db, rec[kStructRecordCellXOffset],
+      rec[kStructRecordCellYOffset], draw_list,
       kMaximumBridgeDrawCommands);
 }
 
@@ -699,7 +715,7 @@ RecompReturn ActRaiser_SceneMarkStructures(CpuState *cpu) {
 
   /* Exit state of the original loop. Extension marking above deliberately
    * has no architectural side effects: it behaves as a post-pass. */
-  cpu_write8(cpu, db, 0x7BE7, kStructRecordCount);
+  cpu_write8(cpu, db, kVar_StructureStepRecordIndex, kStructRecordCount);
   cpu->X = (uint16)(base + kStructRecordCount * kStructRecordSize);
   cpu->Y = native_y;
   cpu->A = (uint16)(a_high | kStructRecordCount);
