@@ -603,7 +603,8 @@ capability off and both stages fail closed.
 
 - Town-map tile *content* (which house/road/bridge tiles exist where) is not
   decided in this engine layer: structure records drive per-record visual step
-  programs (`$03:A4B8` → `$7F:77E7` slots → the `$89F7`/`$8A7E` stepper) that
+  programs (`$03:A4B8` construction / `$03:A4A8` rebuild HLEs → `$7F:77E7`
+  slots → the `$89F7`/`$8A7E` stepper) that
   edit the town map, which the SEAMS "Sim-mode town-map GRAPHICS pipeline"
   then uploads. See SEAMS town §7 for the record/step system.
 - `$02:BF60`: dialog/message-box draw dispatcher (type in `$14`); its tile
