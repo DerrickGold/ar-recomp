@@ -365,6 +365,20 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_metatile_hle
         COMMAND actraiser_action_metatile_hle_test)
 
+    # CPU contracts for the shared per-town/global lair-bit resolver family,
+    # its six operations, stack writes, registers, and final flags.
+    add_executable(actraiser_town_lair_bits_hle_test
+        tests/actraiser_town_lair_bits_hle_test.c
+        src/actraiser/actraiser_town_lair_bits.c
+        src/cpu_65816_math.c
+    )
+    target_include_directories(actraiser_town_lair_bits_hle_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_town_lair_bits_hle
+        COMMAND actraiser_town_lair_bits_hle_test)
+
     add_executable(actraiser_action_bg_plan_test
         tests/action_bg_plan_test.c
         src/action/action_bg_plan.c

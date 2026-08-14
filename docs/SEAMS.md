@@ -805,9 +805,9 @@ exit: PLB; PLP; RTS                           ; flag-transparent to the caller
   14 unique handlers; code starts at `$F621, $F671, $F68A, $F6BF, $F6FF, $F791, $F7AE, $F7D1,
   $F7F8, $F822, $F857, $F870, $F8A5, $F8CC`.
 - The handlers are the town's **lair/event logic**: they test and maintain the per-town lair
-  bitmask state at `$7E:9107+` (4 bytes/town, "open lairs") and `$7E:911F+` ("spawned lairs")
-  via the helpers `$03:F46E` (test) / `$F479` (set) / `$F484` (clear), which use `$03:F497`
-  (bit compute, scratch `$7E:914F`) and the WRAM-pointer tables `$03:DCA2`/`$DCAE`. They also
+  bitmask state at `DB:$9107+` (4 bytes/town, "open lairs") and `DB:$911F+` ("spawned lairs")
+  via the helpers `$03:F46E` (test) / `$F479` (set) / `$F487` (clear), which use `$03:F497`
+  (bit compute, scratch `DB:$914F`) and the WRAM-pointer tables `$03:DCA2`/`$DCAE`. They also
   drive the spawn-list engine (see #3) and post events.
 - **Recomp seam note:** the `PHY #ret; PHA handler; SEP; RTS` idiom is invisible to static
   decoding. Fixed 2026-07-02 with `indirect_dispatch F5DF 20 idx:A tables:F5F9 ret:F5E3 sep:20`
@@ -2257,7 +2257,7 @@ establishes or changes a semantic identity.
 | `$01:E7D9` (ROM data, not code) | **actor sprite-frame pointer table** (base corrected from `$E7E1`), parallel to `$E099`: per-type sprite/animation-frame pointers (frames list continues at `$01:E838`, e.g. `$E6CA/$E6D0/$E6D6...`). Read by the `$01:D0F5-D127` sprite-assign code. **The asset-identity seam for sim-mode actor sprites.** |
 | `$03:8193` | **sim-mode per-frame master loop** — see "Sim-mode town architecture" above. Sets DB=`$7F`, runs `$8238`, the `$F5BE` handler dispatch, the 720-frame periodic counter (`$7F:91FE` vs `#$02D0` → `$8271`), then the bank-01 object loops. |
 | `$03:F5BE` | **per-town handler dispatcher** (PHY/PHA/SEP/RTS trick; 6-town outer table `$03:F5ED`, packed inner lists `$F5F9-$F620`, 14 handlers `$F621+`). Was silently dead in the recomp until the `idx:A`/`sep:` `indirect_dispatch` fix (2026-07-02) — the town-corruption/freeze root cause. |
-| `$03:F46E`/`$F479`/`$F484`/`$F497` | **lair-bitmask helpers**: test / set / clear a per-town lair bit; `$F497` computes the bit + cell (scratch `$7E:914F`) from the WRAM-pointer tables `$03:DCA2` (open-lair masks `$7E:9107+`) / `$DCAE` (spawned masks `$7E:911F+`). |
+| `$03:F46E`/`$F479`/`$F487`/`$F497` | **lair-bitmask helpers**: test / set / clear a per-town lair bit; `$F497` computes the bit + cell (scratch `DB:$914F`) from the WRAM-pointer tables `$03:DCA2` (open-lair masks `DB:$9107+`) / `$DCAE` (spawned masks `DB:$911F+`). |
 | `$01:AC36` | **process-script assigner**: `entry.+02/+06 = ROM[$01:A227[$033C*2] + $033D*2]`, `+04=0`, `+00=1`. The stride-12 tier's spawn primitive. |
 | `$01:CFF2` | thin wrapper: packed `A=(list<<8)|variant` → high byte `$033C`, low byte `$033D`, then `JSR $AC36`. The sweep's per-entry call. |
 | `$01:AA56` | **town-entry sweep driver**: staging restore (via `$03:813F`) + walk the stride-12 table calling `CFF2(entry.+0E)` per entry. |
