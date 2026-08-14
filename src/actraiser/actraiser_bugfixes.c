@@ -71,6 +71,7 @@
  *   at 0x1D6A and it never reads this region.
  */
 
+#include "actraiser_cell_map.h"
 #include "actraiser_rtl.h"
 #include "cpu_state.h"
 #include "save_system.h"
@@ -398,16 +399,6 @@ static int ext_bridge_count(CpuState *cpu, uint8 db, unsigned town,
   return n;
 }
 
-/* $03:9710 replica — cell (x, y) to $2000-map index for the given town:
- * quadrant-paged layout, $100 bytes per 16x16-cell quadrant, row stride
- * $10, $400 bytes per town. */
-static uint16 cell_mark_index(unsigned town, uint8 x, uint8 y) {
-  const unsigned qx = (x & 0x1F) >= 0x10;
-  const unsigned qy = (y & 0x1F) >= 0x10;
-  return (uint16)(town * 0x400 + qy * 0x200 + qx * 0x100 +
-                  (y & 0x0F) * 0x10 + (x & 0x0F));
-}
-
 /* $03:9C43 replica for a single simulation metatile. The native rebuild
  * renderer treats the town as four 16x16-cell quadrants, then copies the
  * selected 2x2 tilemap words from $7E:3100 while clearing attribute bit 9.
@@ -658,7 +649,7 @@ RecompReturn ActRaiser_SceneMarkStructures(CpuState *cpu) {
     native_y = 0x9D3B;
     const uint8 x = cpu_read8(cpu, db, rec);
     const uint8 y = cpu_read8(cpu, db, (uint16)(rec + 1));
-    const uint16 idx = cell_mark_index(town, x, y);
+    const uint16 idx = ActRaiser_CellMarkIndex(town, x, y);
     uint8 code = 0;
     int block = 0;
     switch (f2 & kStructType_ClassMask) {
@@ -697,7 +688,7 @@ RecompReturn ActRaiser_SceneMarkStructures(CpuState *cpu) {
       if (!ext_bridge_get(cpu, town, i, rec) ||
           main_has_bridge(cpu, db, base, rec))
         continue;
-      const uint16 idx = cell_mark_index(town, rec[0], rec[1]);
+      const uint16 idx = ActRaiser_CellMarkIndex(town, rec[0], rec[1]);
       cpu_write8(cpu, db, (uint16)(kVar_CellMarkMap + idx),
                  (uint8)((rec[2] & 0x10) ? 0xE1 : 0xE2));
       ext_marked++;
