@@ -350,6 +350,21 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_bg_world
         COMMAND actraiser_action_bg_world_test)
 
+    # CPU contracts for the shared $02:B90D/$02:B95A action metatile strip
+    # HLE, including their distinct geometry and stack/register/flag effects.
+    add_executable(actraiser_action_metatile_hle_test
+        tests/actraiser_action_metatile_hle_test.c
+        src/actraiser/actraiser_action_metatile.c
+        src/cpu_65816_math.c
+    )
+    target_include_directories(actraiser_action_metatile_hle_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/action
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_action_metatile_hle
+        COMMAND actraiser_action_metatile_hle_test)
+
     add_executable(actraiser_action_bg_plan_test
         tests/action_bg_plan_test.c
         src/action/action_bg_plan.c

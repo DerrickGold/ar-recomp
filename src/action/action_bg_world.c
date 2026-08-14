@@ -1,5 +1,7 @@
 #include "action_bg_world.h"
 
+#include "action_bg_metatile.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -242,7 +244,8 @@ static void DecodeSnapshot(ActionBgWorld *world,
       const uint8_t *definition =
           definitions + (size_t)id * kActionBgMetatileBytes + quadrant * 2;
       world->scratch_tiles[(size_t)tile_y * layout->tile_width + tile_x] =
-          (ReadWord(definition) & input->word_mask) | attributes;
+          ActionBg_ComposeTilemapWord(
+              ReadWord(definition), input->word_mask, attributes);
     }
   }
 }

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "action/action_bg_metatile.h"
 #include "quintet_lzss.h"
 
 enum {
@@ -241,8 +242,8 @@ bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
           (size_t)id * 8 + quadrant * 2;
       const uint16_t definition =
           (uint16_t)(source[1] | ((uint16_t)source[0] << 8));
-      const uint16_t entry =
-          (definition & kActionBgTileWordMask) | attributes;
+      const uint16_t entry = ActionBg_ComposeTilemapWord(
+          definition, kActionBgTileWordMask, attributes);
       const unsigned tile = entry & 0x3FFu;
       const unsigned palette_base = ((entry >> 10) & 7u) * 16u;
       const bool flip_x = (entry & 0x4000u) != 0;

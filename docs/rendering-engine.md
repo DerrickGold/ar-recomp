@@ -146,6 +146,13 @@ Builders: marshal a DP block, `JSR $BED3` (8x8->16 multiply; col path),
 expansion (writes `STA 0,X / $40,X / 2,X / $42,X` per 16x16 metatile,
 interleaving the record's two rows/columns), `$02:B95A` header/geometry.
 
+`$B90D/$B95A` are whole-body HLEs backed by one orientation-aware strip
+expander. It preserves their different column/row source strides and output
+orders, while the tile-word rule `(definition & preserved_mask) |
+common_attributes` lives in `ActionBg_ComposeTilemapWord`. The complete-world
+provider, Sky Palace margin repair, and ROM-backdrop decoder use that same
+named primitive instead of carrying independent copies of the transform.
+
 **Consequences of the geometry** (the widescreen crux — see §13):
 - A ring column's content = whatever the LAST writer decoded for it. Row
   strips re-decode all 64 columns for map span `[cam_x&~$FF, +512)`; ring
