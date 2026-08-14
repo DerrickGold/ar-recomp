@@ -116,7 +116,7 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
     PresentUpload(&frame_slot);
     /* The same scene -> CRT resolve -> host-UI function used by the live
      * window keeps F2 captures visually identical, including an open menu. */
-    PresentFrame(&frame_slot, NULL, kInterpPhaseNone);
+    PresentFrame(&frame_slot, NULL, NULL, kInterpPhaseNone);
     have_composite = true;
   }
   if (have_composite) {

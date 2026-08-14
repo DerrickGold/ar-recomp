@@ -17,6 +17,11 @@ static const float kInterpPhaseNone = -1.0f;
 DioramaScrollDelta ComputeDioramaScrollDeltaAt(
     const FrameSlot *curr, const DioramaScrollSnapshot *prev, float alpha);
 
+/* One-tick-delayed interpolation phase across a prev->curr pair. A pair may
+ * span several drained emulation ticks; at the instant curr is captured the
+ * render target is one tick behind curr, not necessarily at prev. */
+float DioramaInterpolationPairPhase(float alpha, uint8_t capture_ticks);
+
 /* The pair-validity half of the above, exposed so a caller deciding whether a
  * re-present is worth doing uses the SAME predicate the math does. Keeping
  * these in one place is what stops the gate from drifting away from the

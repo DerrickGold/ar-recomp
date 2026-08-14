@@ -1333,8 +1333,8 @@ uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
  * — it's UI, not world content), so it isn't listed here at all; it simply
  * never interpolates.
  *
- * B1b rule: OBJ planes ride the BG1 base-camera delta. §6.4 originally
- * deferred sprite interpolation entirely (returned -1) — left that way,
+ * Fallback rule: a captured whole OBJ plane rides the BG1 base-camera delta.
+ * §6.4 originally deferred sprite interpolation entirely (returned -1) — left that way,
  * sprites (including the player standing on BG1's platforms) would step at
  * 60fps while the world glides at >60fps, the exact relative-judder artifact
  * B1's rejected "exclude HDMA layers" non-fix was ruled out for, but now on
@@ -1343,7 +1343,9 @@ uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
  * the interpolated BG1 camera delta keeps sprites rigidly attached to the
  * gliding world; their own world-space animation still refreshes at 60fps —
  * the same acceptable residual as HDMA raster detail (see B1's ceiling
- * note). */
+ * note). Action-mode vector interpolation bypasses this whole-plane UV shift:
+ * it projects each reconstructed OAM component at a fractional position while
+ * preserving this function only for invalid/incomplete atlas frames. */
 static int DioramaLayerBgIndex(int plane) {
   switch (plane) {
     case kPpuOverlaySource_Bg1:
@@ -1793,6 +1795,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        SDL_Texture *textures[],
                        uint8_t *pixels[],
                        const DioramaScrollDelta *scroll_delta,
+                       bool obj_vector_interpolation,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        uint32_t additive_plane_mask,
@@ -1800,6 +1803,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        uint8_t map_group, uint8_t map_number,
                        uint8_t layer_section,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
+                       DioramaPlaneReplacementFn plane_replacement,
+                       void *plane_replacement_userdata,
                        DioramaPlaneEffectFn plane_effect,
                        void *plane_effect_userdata,
                        DioramaProjection *out_projection) {
@@ -2104,12 +2109,14 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
               layer, textures, pixels, effect_obj_priority_mask))
         continue;
       const bool bg2 = resolved[i].plane == kPpuOverlaySource_Bg2;
+      const bool vector_obj = obj_vector_interpolation &&
+          DioramaPlaneIsObjectPriority(resolved[i].plane);
       DioramaPlaneProjection plane = {
         .valid = true,
-        .u0 = bg2 ? bg2_u0 : bg1_u0,
-        .v0 = bg2 ? bg2_v0 : bg1_v0,
-        .u1 = bg2 ? bg2_u1 : bg1_u1,
-        .v1 = bg2 ? bg2_v1 : bg1_v1,
+        .u0 = vector_obj ? uv_u0 : bg2 ? bg2_u0 : bg1_u0,
+        .v0 = vector_obj ? uv_v0 : bg2 ? bg2_v0 : bg1_v0,
+        .u1 = vector_obj ? uv_u1 : bg2 ? bg2_u1 : bg1_u1,
+        .v1 = vector_obj ? uv_v1 : bg2 ? bg2_v1 : bg1_v1,
         .z_world = resolved[i].z - 0.5f,
         .rake = resolved[i].rake,
         .bow = resolved[i].bow,
@@ -2241,6 +2248,24 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     float layer_v0, layer_v1;
     DioramaInterpUvWindow(uv_v0, uv_v1, layer_dv, v_slack,
                           &layer_v0, &layer_v1);
+
+    /* A vector OBJ replacement owns the whole plane draw in exactly this
+     * painter slot. It consumes the already-published authored projection,
+     * so room z/rake/bow and the current camera remain single-sourced while
+     * each sprite component retains a fractional presentation position. */
+    if (plane_replacement && out_projection && out_projection->valid &&
+        DioramaPlaneIsObjectPriority(layer->plane) &&
+        plane_replacement(
+            plane_replacement_userdata, layer->plane, out_projection,
+            shade, is_additive, layer->casts_shadow)) {
+      if (plane_effect) {
+        if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
+        plane_effect(plane_effect_userdata, layer->plane, out_projection);
+        if (!viewport_is_output) SDL_SetRenderViewport(renderer, &viewport);
+      }
+      continue;
+    }
+
     BuildLayerMesh(mvp,
                    z_world, layer_rake, layer_bow, layer_u0, layer_v0,
                    layer_u1, layer_v1,

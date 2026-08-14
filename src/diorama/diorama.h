@@ -133,6 +133,16 @@ typedef struct DioramaProjection {
 typedef void (*DioramaPlaneEffectFn)(void *userdata, int plane,
                                     const DioramaProjection *projection);
 
+/* Optional replacement for one captured plane's complete geometry pass. It is
+ * invoked in the plane's authentic painter position with the renderer still
+ * in viewport-local coordinates. Returning true skips the captured plane,
+ * including its whole-plane shadow/depth treatments; false draws it normally.
+ * The action OBJ interpolator uses this to submit independently moving atlas
+ * quads without flattening them into an intermediate pixel grid. */
+typedef bool (*DioramaPlaneReplacementFn)(
+    void *userdata, int plane, const DioramaProjection *projection,
+    SDL_FColor shade, bool additive, bool casts_shadow);
+
 /* Pure eligibility contract shared by projection publication and drawing.
  * Resource booleans describe this frame's upload/content intersection. */
 bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
@@ -219,6 +229,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        SDL_Texture *textures[],
                        uint8_t *pixels[],
                        const DioramaScrollDelta *scroll_delta,
+                       bool obj_vector_interpolation,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        uint32_t additive_plane_mask,
@@ -226,6 +237,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        uint8_t map_group, uint8_t map_number,
                        uint8_t layer_section,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
+                       DioramaPlaneReplacementFn plane_replacement,
+                       void *plane_replacement_userdata,
                        DioramaPlaneEffectFn plane_effect,
                        void *plane_effect_userdata,
                        DioramaProjection *out_projection);

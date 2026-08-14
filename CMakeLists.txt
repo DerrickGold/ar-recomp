@@ -656,6 +656,7 @@ if(BUILD_TESTING)
         src/sim/sim_world_navigation_capture.c
         src/sim/sim_town_canvas.c
         src/sim/sim_render_atlas.c
+        src/action/action_obj_interpolation.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu_old.c
     )

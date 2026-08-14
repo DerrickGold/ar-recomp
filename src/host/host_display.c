@@ -60,10 +60,12 @@ static const uint64_t kDisplayPropertyPollIntervalNs =
 typedef struct RetainedPresentFrame {
   FrameSlot slot;
   DioramaScrollSnapshot previous_scroll;
+  ActionObjInterpolationFrame previous_action_obj;
   bool valid;
 } RetainedPresentFrame;
 
 static DioramaScrollSnapshot s_previous_scroll;
+static ActionObjInterpolationFrame s_previous_action_obj;
 static RetainedPresentFrame s_retained_frame;
 static uint64_t s_present_deadline_ns;
 static unsigned long s_tick_present_count;
@@ -361,6 +363,7 @@ uint64_t HostDisplay_CatchupCapNs(int maximum_catchup_frames) {
 
 void HostDisplay_InvalidatePresentHistory(void) {
   memset(&s_previous_scroll, 0, sizeof(s_previous_scroll));
+  memset(&s_previous_action_obj, 0, sizeof(s_previous_action_obj));
   s_retained_frame.valid = false;
 }
 
@@ -422,15 +425,19 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
    * FrameSlot_Capture, whose fresh timestamp would collapse interpolation. */
   if (game_tick) {
     s_retained_frame.previous_scroll = s_previous_scroll;
+    s_retained_frame.previous_action_obj = s_previous_action_obj;
     s_retained_frame.slot = slot;
     s_retained_frame.valid = true;
   }
   PresentFrame(
       &slot,
       game_tick ? &s_previous_scroll : NULL,
+      game_tick ? &s_previous_action_obj : NULL,
       game_tick ? alpha : kInterpPhaseNone);
-  if (game_tick)
+  if (game_tick) {
     FrameSlot_ExtractScrollSnapshot(&slot, &s_previous_scroll);
+    s_previous_action_obj = slot.action_obj_interpolation;
+  }
 
   const uint32_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
@@ -474,6 +481,7 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   PresentFrame(
       &s_retained_frame.slot,
       &s_retained_frame.previous_scroll,
+      &s_retained_frame.previous_action_obj,
       alpha);
   ThrottlePresent(PresentIntervalNs(kHostDisplayPresent_GameTick));
   SDL_RenderPresent(g_renderer);

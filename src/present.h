@@ -11,16 +11,18 @@
 #include "sim/sim_render_metadata.h"
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
+#include "action/action_obj_interpolation.h"
 
 /* FrameSlot is the sole game-state contract for presentation. FrameSlot_Capture
  * populates it immediately after RtlDrawPpuFrame; presentation consumes the
  * captured values instead of reading g_ppu, g_settings, or geometry globals.
  *
  * Pixel buffers (g_pixels, g_hud_bg_pixels, g_hud_obj_pixels,
- * g_m7_overlay_pixels, g_diorama_layer_pixels[], g_sim_obj_atlas_pixels) are
- * not copied. Synchronous ordering guarantees Upload consumes them before the
- * next tick overwrites them. The slot carries scalar and derived state to
- * enforce presentation isolation, not as a cross-thread handoff. */
+ * g_m7_overlay_pixels, g_diorama_layer_pixels[], g_sim_obj_atlas_pixels,
+ * g_action_obj_interpolation_atlas_pixels) are not copied. Synchronous
+ * ordering guarantees Upload consumes them before the next tick overwrites
+ * them. The slot carries scalar and derived state to enforce presentation
+ * isolation, not as a cross-thread handoff. */
 
 /* Mirrors ppu.h's kPpuOverlaySource_* / kPpuOverlayFlag_RemoveFromGame.
  * present.c does not include ppu.h (D6), so the order/value is pinned here
@@ -201,12 +203,10 @@ typedef struct FrameSlot {
   /* R17/C3: emulated ticks between the previous capture and this one — the
    * TRUE period of the prev->curr camera pair, clamped to 1..8 by
    * FrameSlot_Capture, and 0 while paused (a frozen re-capture is not a pair).
-   * Interpolation divides the sub-tick phase by this: the main loop can drain
-   * several ticks in one iteration while the scroll snapshot advances once per
-   * present, and a multi-tick pair therefore carries proportionally more
-   * camera motion than one tick's worth. Without it, extrapolation overshoots
-   * by exactly that factor. (The wall-clock span EMA this replaces normalized
-   * the same effect implicitly, by measuring the real elapsed interval.) */
+   * The delayed pair phase accounts for this: the main loop can drain several
+   * ticks in one iteration while the snapshot advances once per present, so
+   * the presentation target starts one tick behind curr rather than all the
+   * way back at prev. */
   uint8_t capture_ticks;
   int16_t bg1_camera_x, bg1_camera_y;
   int16_t bg2_camera_x, bg2_camera_y;
@@ -214,10 +214,10 @@ typedef struct FrameSlot {
    * scroll into one FrameSlot submission (still at the normal ~16ms
    * submission cadence — see the M7 plan note on why this differs from the
    * doc's literal "multiple rapid submissions" turbo model), so the
-   * prev->curr delta is not a valid one-tick velocity estimate. Skip
-   * interpolation outright when either slot was captured under turbo. */
+   * prev->curr delta no longer describes a normally paced visual interval.
+   * Skip interpolation outright when either slot was captured under turbo. */
   bool turbo_active;
-  /* kSettingCat_Graphics "Scroll interpolation" row, snapshotted here (not
+  /* kSettingCat_Graphics "Frame interpolation" row, snapshotted here (not
    * read live from present.c per D6) so PresentFrame knows whether to
    * even attempt interpolation for this frame. */
   bool interp_setting_enabled;
@@ -340,6 +340,11 @@ typedef struct FrameSlot {
   uint16_t oam[0x100];
   uint8_t high_oam[0x20];
 
+  /* Action-mode vector OBJ reconstruction. Populated only while the existing
+   * interpolation setting is enabled and the captured priority planes can be
+   * decomposed completely. Invalid keeps the established whole-plane path. */
+  ActionObjInterpolationFrame action_obj_interpolation;
+
   /* Mode-7 override presentation. The src-rect is derived at present time
    * from visible_x0/visible_width/snes_height (already resolved above), so
    * only the active flag needs capturing here. */
@@ -453,6 +458,7 @@ void PresentUpload(const FrameSlot *slot);
  * otherwise the calculated fallback). SDL_RenderPresent remains caller-owned. */
 SDL_Rect PresentFrame(const FrameSlot *slot,
                       const DioramaScrollSnapshot *prev_scroll,
+                      const ActionObjInterpolationFrame *prev_action_obj,
                       float alpha);
 
 /* Drops renderer-owned present caches (HUD composite, sim shadow/rim targets,

@@ -20,6 +20,7 @@
 #include "action/action_effect_clock.h"
 #include "action/action_effects.h"
 #include "action/action_bg_tuner.h"
+#include "action/action_obj_interpolation.h"
 #include "actraiser_game.h"
 #include "constants.h"
 #include "actraiser_rtl.h"
@@ -31,6 +32,7 @@
 extern bool g_ws_active;
 extern int g_ws_extra;
 extern bool g_diorama_frame_active;
+extern uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
 
 /* Self-calibrating velocity normalization uses a recent-activity EMA, not a
  * running or decaying peak. Live traces showed ordinary horizontal velocity at
@@ -323,11 +325,10 @@ void FrameSlot_Capture(FrameSlot *dst) {
   }
   /* R17/C3: publish it. Present-time interpolation needs the TRUE period of
    * the prev->curr pair, not an assumed single tick: the main loop's drain
-   * runs up to kMaxCatchupFrames ticks in one iteration while the scroll
-   * snapshot advances once per present, so a 2-tick pair carries two ticks of
-   * camera motion. Dividing the sub-tick phase by this is what keeps
-   * extrapolation from overshooting by that factor. Same clamped value the
-   * reactive-camera statistics above use. */
+   * runs up to kMaxCatchupFrames ticks in one iteration while the snapshot
+   * advances once per present. The delayed phase uses this to start exactly
+   * one tick behind curr. Same clamped value the reactive-camera statistics
+   * above use. */
   dst->capture_ticks = (uint8_t)g_emulated_capture_ticks;
 
   /* $00:8C98 publishes only completed gameplay/OAM passes and is skipped by
@@ -662,6 +663,27 @@ void FrameSlot_Capture(FrameSlot *dst) {
       memcpy(dst->oam, g_ppu->oam, sizeof(dst->oam));
       memcpy(dst->high_oam, g_ppu->highOam, sizeof(dst->high_oam));
       dst->oam_valid = true;
+    }
+
+    if (dst->diorama_active && dst->interp_setting_enabled &&
+        g_ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount == 128) {
+      const uint8_t *obj_planes[4] = {0};
+      uint8_t obj_content = 0;
+      for (unsigned priority = 0; priority < 4; priority++) {
+        const int plane = DioramaPlaneForObjectPriority(priority);
+        obj_planes[priority] = g_diorama_layer_pixels[plane];
+        if (dst->diorama_plane_content_mask & (1u << (unsigned)plane))
+          obj_content |= (uint8_t)(1u << priority);
+      }
+      const uint8_t excluded_count =
+          dst->diorama_hud_flat ? dst->hud_icon_count : 0;
+      ActionObjInterpolation_BuildFrame(
+          g_ppu, &dst->action_obj_interpolation,
+          obj_planes, obj_content,
+          dst->snes_width + dst->obj_apron * 2,
+          dst->snes_height + dst->ws_extra_top + dst->ws_extra_bottom,
+          dst->ws_extra + dst->obj_apron, dst->ws_extra_top,
+          dst->hud_icon_first, excluded_count, dst->timestamp_ns);
     }
 
     dst->m7_active = (g_ppu->m7Override.rgba != NULL);

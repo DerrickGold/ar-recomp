@@ -18,11 +18,12 @@ int main(void) {
   curr.timestamp_ns = 1000000000ULL + 16600000ULL;   /* +16.6ms */
   prev.bg1_camera_x = 0;  curr.bg1_camera_x = 10;     /* +10 px */
 
-  /* alpha 0.5 = halfway to the next tick. */
+  /* A one-tick-delayed presenter is halfway from prev to curr. The current
+   * texture therefore samples five pixels back toward prev. */
   DioramaScrollDelta d = ComputeDioramaScrollDeltaAt(&curr, &prev, 0.5f);
   CHECK(d.active);
-  CHECK(near(d.bg_du[0], (0.5f * 10.0f) / (float)kFrameSlotLayerTextureWidth));  /* IJ1: /tex, not /256 */
-  CHECK(d.bg_du[0] > 0.0f);
+  CHECK(near(d.bg_du[0], (-0.5f * 10.0f) / (float)kFrameSlotLayerTextureWidth));  /* IJ1: /tex, not /256 */
+  CHECK(d.bg_du[0] < 0.0f);
   /* Refuted-claim guard: do NOT assert bg_du[1]==0 (BG2 has a WRAM camera).
    * BG3 (index 2) and BG4 (index 3) DO stay zero. */
   CHECK(d.bg_du[2] == 0.0f && d.bg_dv[2] == 0.0f);
@@ -50,39 +51,43 @@ int main(void) {
    * failure actually got wrong while the arithmetic stayed correct.
    *
    * Monotone ramp: the same pair at increasing phase must give strictly
-   * increasing offsets, reaching exactly one tick of motion at alpha -> 1. */
+   * increasing offsets, reaching the current endpoint at alpha -> 1. */
   {
-    float prev_du = -1.0f;
+    float prev_du = -1000.0f;
     const float phases[] = { 0.0f, 0.25f, 0.5f, 0.75f };
     for (unsigned i = 0; i < sizeof phases / sizeof *phases; i++) {
       DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&curr, &prev, phases[i]);
       CHECK(r.active);                       /* alpha 0.0 is a LEGAL phase */
-      CHECK(near(r.bg_du[0], (phases[i] * 10.0f) / (float)kFrameSlotLayerTextureWidth));
+      CHECK(near(r.bg_du[0], ((phases[i] - 1.0f) * 10.0f) /
+                                  (float)kFrameSlotLayerTextureWidth));
       CHECK(r.bg_du[0] > prev_du);           /* strictly increasing */
       prev_du = r.bg_du[0];
     }
-    /* alpha 0 means zero shift, but ACTIVE — distinct from "no phase". */
-    CHECK(near(ComputeDioramaScrollDeltaAt(&curr, &prev, 0.0f).bg_du[0], 0.0f));
+    /* alpha 0 shows prev; alpha 1 reaches curr. Both remain active and are
+     * distinct from "no phase". */
+    CHECK(near(ComputeDioramaScrollDeltaAt(&curr, &prev, 0.0f).bg_du[0],
+               -10.0f / (float)kFrameSlotLayerTextureWidth));
+    CHECK(near(ComputeDioramaScrollDeltaAt(&curr, &prev, 1.0f).bg_du[0],
+               0.0f));
     /* kInterpPhaseNone means "this present has no phase" -> inactive. */
     CHECK(!ComputeDioramaScrollDeltaAt(&curr, &prev, kInterpPhaseNone).active);
   }
 
   /* R17/C3: a multi-tick pair carries proportionally more motion, so the phase
-   * must be divided by capture_ticks. Without this the extrapolation overshoots
-   * by exactly that factor — the correction the deleted wall-clock span EMA had
-   * been making implicitly. 2 ticks, 20px total, alpha 0.5 -> half of ONE
-   * tick's 10px. */
+   * needs a phase of `(ticks-1+alpha)/ticks`: the presentation target is one
+   * tick behind curr, not all the way back at prev. 2 ticks, 20px total,
+   * alpha 0.5 -> five pixels behind curr. */
   {
     FrameSlot multi = curr;
     multi.capture_ticks = 2;
     multi.bg1_camera_x = 20;                 /* 20px over two ticks */
     DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&multi, &prev, 0.5f);
     CHECK(r.active);
-    CHECK(near(r.bg_du[0], (0.5f * 10.0f) / (float)kFrameSlotLayerTextureWidth));
-    /* Same pair mislabelled as one tick would double it — the bug this guards. */
+    CHECK(near(r.bg_du[0], (-0.5f * 10.0f) / (float)kFrameSlotLayerTextureWidth));
+    /* Same pair mislabelled as one tick would double the residual. */
     FrameSlot mislabelled = multi; mislabelled.capture_ticks = 1;
     CHECK(near(ComputeDioramaScrollDeltaAt(&mislabelled, &prev, 0.5f).bg_du[0],
-               (0.5f * 20.0f) / (float)kFrameSlotLayerTextureWidth));
+               (-0.5f * 20.0f) / (float)kFrameSlotLayerTextureWidth));
   }
 
   /* capture_ticks == 0 is a paused re-capture, not a pair — and it is the
@@ -200,33 +205,31 @@ int main(void) {
     diag.bg1_camera_x = 108; diag.bg1_camera_y = 108;   /* +8 px on BOTH axes */
     diag.bg2_camera_y = 204;
 
-    DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&diag, &base, 1.0f);
+    DioramaScrollDelta r = ComputeDioramaScrollDeltaAt(&diag, &base, 0.0f);
     CHECK(r.active);
     /* Equal source-pixel movement normalizes independently by the two fixed
      * allocation axes. Using 224 for V would overshoot by 352/224 and then
      * snap backward at the next captured tick. */
-    CHECK(near(r.bg_du[0], 8.0f / (float)kFrameSlotLayerTextureWidth));
+    CHECK(near(r.bg_du[0], -8.0f / (float)kFrameSlotLayerTextureWidth));
     CHECK(near(r.bg_dv[0],
-               8.0f / (float)kFrameSlotLayerTextureHeight));
+               -8.0f / (float)kFrameSlotLayerTextureHeight));
     CHECK(near(r.bg_dv[0] / r.bg_du[0],
                (float)kFrameSlotLayerTextureWidth /
                    (float)kFrameSlotLayerTextureHeight));
     CHECK(near(r.bg_dv[1],
-               4.0f / (float)kFrameSlotLayerTextureHeight));
+               -4.0f / (float)kFrameSlotLayerTextureHeight));
 
     /* And the load-bearing property: at t=1 the shift must equal EXACTLY one
-     * tick of motion in texture units, so extrapolation lands precisely on the
-     * next tick's captured position instead of overshooting past it. Overshoot
-     * is what made the offset get discarded backward every tick. */
-    CHECK(near(r.bg_du[0] * (float)kFrameSlotLayerTextureWidth, 8.0f));    /* 8 texels, not 14 */
-    CHECK(near(r.bg_dv[0] * (float)kFrameSlotLayerTextureHeight, 8.0f));
+     * tick of motion in texture units at alpha=0. */
+    CHECK(near(r.bg_du[0] * (float)kFrameSlotLayerTextureWidth, -8.0f));   /* 8 texels, not 14 */
+    CHECK(near(r.bg_dv[0] * (float)kFrameSlotLayerTextureHeight, -8.0f));
 
     /* Authentic viewport height is not the allocation denominator. Changing
      * this frame descriptor cannot alter the normalized texture movement. */
     FrameSlot taller_view = diag;
     taller_view.snes_height = 240;
     DioramaScrollDelta taller =
-        ComputeDioramaScrollDeltaAt(&taller_view, &base, 1.0f);
+        ComputeDioramaScrollDeltaAt(&taller_view, &base, 0.0f);
     CHECK(near(taller.bg_dv[0], r.bg_dv[0]));
 
     /* The R17/C1 slack margin must not saturate at ordinary walking speed. The
@@ -238,9 +241,9 @@ int main(void) {
       FrameSlot walk = diag;
       walk.bg1_camera_x = 100 + px;
       walk.bg1_camera_y = 100;
-      DioramaScrollDelta w = ComputeDioramaScrollDeltaAt(&walk, &base, 1.0f);
+      DioramaScrollDelta w = ComputeDioramaScrollDeltaAt(&walk, &base, 0.0f);
       CHECK(w.active);
-      CHECK(w.bg_du[0] <= uv_slack + 1e-6f);   /* does not need clamping */
+      CHECK(fabsf(w.bg_du[0]) <= uv_slack + 1e-6f); /* no clamping */
     }
   }
 

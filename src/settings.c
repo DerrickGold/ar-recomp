@@ -1663,15 +1663,13 @@ const SettingDesc g_setting_descs[] = {
                "bleed onto transparent gaps in the layer behind it (e.g. a "
                "hazy patch over the sky) — off by default until fixed.",
                kSettingCat_Graphics, 0, false, GpuShadersActive, NULL),
-  /* B1b (followup doc): the source fix (WRAM camera instead of the
-   * HDMA-polluted PPU scroll registers, present.c ComputeDioramaScrollDelta)
-   * has landed, so the old "known issue: jitters HDMA-driven parallax
-   * layers" no longer applies — kept off by default until the fix proves
-   * stable in-game (the doc's explicit call), not because of a known bug. */
+  /* The existing experimental gate now owns both the stable WRAM-camera pair
+   * and action-mode vector OBJ reconstruction. It remains opt-in while the
+   * proof of concept is validated across the complete action-stage census. */
   BOOL_SETTING(gpu_interp_enabled, "AR_INTERP_ENABLE",
-               "Scroll interpolation",
-               "Diorama: smooth background scroll motion between emulated "
-               "frames on high-refresh (>60Hz) displays.",
+               "Frame interpolation",
+               "Diorama: smooth camera and action-entity motion between "
+               "emulated frames on high-refresh (>60Hz) displays.",
                kSettingCat_Graphics, 0, false, Diorama_ModeIsOn, NULL),
   /* CRT post-process (kSettingCat_Crt). One fullscreen pass at the end of
    * presentation, so unlike the diorama-only gpu_fx_* rows above it covers

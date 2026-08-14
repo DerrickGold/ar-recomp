@@ -2442,6 +2442,16 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
 
 }
 
+bool PpuResolveObjSlot(Ppu *ppu, uint8_t slot, PpuObjPart *out_part) {
+  if (!ppu || !out_part || slot >= 128) return false;
+  const uint8_t index = (uint8_t)(slot * 2);
+  out_part->x = (int16_t)PpuObjScreenX(ppu, index);
+  out_part->y = (int16_t)PpuObjScreenY(ppu, index);
+  out_part->tile_attr = ppu->oam[index + 1];
+  out_part->size = (uint8_t)PpuObjSizeForIndex(ppu, index);
+  return true;
+}
+
 bool PpuResolveObjSlots(Ppu *ppu, uint8_t first, uint8_t count,
                         uint8_t priority, PpuObjPart *out_parts,
                         int max_parts, int *out_count) {
@@ -2462,10 +2472,8 @@ bool PpuResolveObjSlots(Ppu *ppu, uint8_t first, uint8_t count,
       return false;
     if (n >= max_parts)
       return false;
-    out_parts[n].x = (int16_t)PpuObjScreenX(ppu, index);
-    out_parts[n].y = (int16_t)PpuObjScreenY(ppu, index);
-    out_parts[n].tile_attr = (uint16_t)attributes;
-    out_parts[n].size = (uint8_t)PpuObjSizeForIndex(ppu, index);
+    if (!PpuResolveObjSlot(ppu, (uint8_t)slot, &out_parts[n]))
+      return false;
     n++;
   }
   *out_count = n;
