@@ -73,6 +73,7 @@
 
 #include "actraiser_cell_map.h"
 #include "actraiser_rtl.h"
+#include "actraiser_town_metatile.h"
 #include "cpu_state.h"
 #include "save_system.h"
 #include "settings.h"
@@ -123,7 +124,6 @@ enum {
   kVar_CellMarkMap     = 0x2000,   /* $7F: 6 towns x $400 structure marks */
   kVar_RoadMap         = 0x6800,   /* $7F: 6 towns x $80 road-map bytes */
   kVar_TownMapActive   = 0x919E,   /* per-town byte gating bridge marks */
-  kWram_MetatileAtlas  = 0x3100,   /* $7E: 256 x four tilemap words */
 };
 
 static const uint8 kExtMagic[4] = { 'A', 'X', 'B', '1' };
@@ -399,29 +399,6 @@ static int ext_bridge_count(CpuState *cpu, uint8 db, unsigned town,
   return n;
 }
 
-/* $03:9C43 replica for a single simulation metatile. The native rebuild
- * renderer treats the town as four 16x16-cell quadrants, then copies the
- * selected 2x2 tilemap words from $7E:3100 while clearing attribute bit 9.
- * This writes only the tilemap, with none of $9C43's CPU/scratch side
- * effects. */
-static void draw_sim_metatile(CpuState *cpu, uint8 db, uint16 cell_x,
-                              uint16 cell_y, uint8 metatile) {
-  const uint16 quadrant = (uint16)((cell_x >= 0x10 ? 1 : 0) +
-                                    (cell_y >= 0x10 ? 2 : 0));
-  const uint16 dst = (uint16)(quadrant * 0x800 +
-                               (cell_y & 0x0F) * 0x80 +
-                               (cell_x & 0x0F) * 4);
-  const uint16 src = (uint16)(kWram_MetatileAtlas + metatile * 8);
-  static const uint16 kSrcOffsets[4] = { 0, 2, 4, 6 };
-  static const uint16 kDstOffsets[4] = { 0, 2, 0x40, 0x42 };
-  for (int i = 0; i < 4; i++) {
-    const uint16 tile =
-        (uint16)(cpu_read16(cpu, 0x7E, (uint16)(src + kSrcOffsets[i])) &
-                 0xFDFF);
-    cpu_write16(cpu, db, (uint16)(dst + kDstOffsets[i]), tile);
-  }
-}
-
 /* Render the initial draw command of the native bridge rebuild program.
  * $9F8D derives the variant from record byte 3; $A4A8 selects the bridge
  * program table (type index 2); and $A591 executes the count + {dx,dy,tile}
@@ -448,8 +425,9 @@ static int draw_extension_bridge(CpuState *cpu, uint8 db,
     const uint8 dx = cpu_read8(cpu, 0x03, command);
     const uint8 dy = cpu_read8(cpu, 0x03, (uint16)(command + 1));
     const uint8 metatile = cpu_read8(cpu, 0x03, (uint16)(command + 2));
-    draw_sim_metatile(cpu, db, (uint16)(rec[0] + dx),
-                      (uint16)(rec[1] + dy), metatile);
+    ActRaiser_CopyTownMetatile(
+        cpu, db, (uint16)(rec[0] + dx), (uint16)(rec[1] + dy), metatile,
+        kActRaiserTownMetatileAtlas_Structure);
   }
   return 1;
 }

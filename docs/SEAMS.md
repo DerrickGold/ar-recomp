@@ -1085,7 +1085,14 @@ through `$9F6B/$9F8D` and `$A4A8/$A4F7`: it selects the bridge rebuild program f
 `$03:D4E2` family, arms the record's `$77E7+slot*8` step entry, and executes its initial draw
 through `$A591` → `$9C43`. `$A591` interprets a count plus `{dx,dy,metatile}` triples;
 `$9C43` copies four tilemap words from `$7E:3100 + metatile*8` into the quadrant-paged live
-town tilemap. For the observed settled bridge states, record actions `$11/$31` select
+town tilemap. Its sibling `$9B5A` performs the same copy from the terrain definitions at
+`$7E:2100`. Both bounded leaves are whole-body HLEs backed by the same named
+`ActRaiser_CopyTownMetatile` primitive that the bridge sidecar now calls directly, removing
+all three production copies of the quadrant/address/write logic. The CPU wrappers retain the
+ROM routines' decimal-mode address edge, A/X/Y/P results, two temporary word pushes in stack
+RAM, DB-relative writes, and RTS behavior. An exhaustive 32×32 grid for both atlases plus raw
+coordinate and instruction-level ABI cases pins the conversion. For the observed settled
+bridge states, record actions `$11/$31` select
 programs `$D5C5/$D5D1`, lists `$DC1C/$DC24`, and metatiles `$44/$45`.
 
 A direct visual capture disproved the earlier marks-only assumption: the sidecar-only bridge
