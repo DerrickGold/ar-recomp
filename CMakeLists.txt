@@ -727,6 +727,22 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_save_system COMMAND actraiser_save_system_test)
 
+    # CPU-facing contract for the shared $00:84F3 save-checksum HLE. The
+    # existing save-system suite pins the binary algorithm; this additionally
+    # pins DP/register/P/RTL effects and the native decimal-mode edge.
+    add_executable(actraiser_save_checksum_hle_test
+        tests/actraiser_save_checksum_hle_test.c
+        src/actraiser/actraiser_save_checksum.c
+        src/save_system.c
+        src/atomic_replace.c
+    )
+    target_include_directories(actraiser_save_checksum_hle_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_save_checksum_hle
+        COMMAND actraiser_save_checksum_hle_test)
+
     # Golden test for the diorama M7 scroll-interpolation math, extracted from
     # present.c with the wall-clock injected so t is controllable (Test gap 2).
     add_executable(actraiser_diorama_scroll_math_test
