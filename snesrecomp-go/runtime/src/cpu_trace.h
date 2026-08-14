@@ -1319,7 +1319,10 @@ void cpu_trace_dump_wram(const char *tag, int scan_n);
  * Records the last 1024 executed block PCs plus m-flag/X, dumped by the
  * watchdog to reveal an infinite-loop's block cycle. */
 extern uint32_t g_ar_blk_ring[]; extern uint32_t g_ar_blk_aux[]; extern unsigned g_ar_blk_idx;
-static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
+#if !defined(SNESRECOMP_CPU_TRACE_IMPLEMENTATION)
+void cpu_trace_block(CpuState *cpu, uint32_t pc24);
+#else
+void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
   unsigned _i = g_ar_blk_idx++ & kRuntimeBlockTraceRingMask;
   g_ar_blk_ring[_i] = pc24;
   /* bit16 = m_flag, bit17 = x_flag (free bit, used by the AR_STACKPROV [overpop]
@@ -1327,8 +1330,57 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
   g_ar_blk_aux[_i] = ((uint32_t)(cpu->x_flag & 1) << 17)
                    | ((uint32_t)(cpu->m_flag & 1) << 16) | (cpu->X & 0xFFFFu);
   { extern uint16_t g_ar_blk_s[]; g_ar_blk_s[_i] = cpu->S; }
-  { extern void ar_strace_block(uint32_t, uint16_t, int, int);
-    ar_strace_block(pc24, cpu->S, cpu->m_flag & 1, cpu->x_flag & 1); }
+  /* These probes were accumulated during one-off investigations. Keeping the
+   * whole suite inline made every generated block carry its branches, while
+   * two uncached getenv() guards took the process environment lock on every
+   * block. Resolve the immutable process settings once and make
+   * ordinary execution one cold branch into this single out-of-line copy. */
+  enum {
+    kArBlockDiag_XFlip    = 1u << 0,
+    kArBlockDiag_XTrace   = 1u << 1,
+    kArBlockDiag_LairDma  = 1u << 2,
+    kArBlockDiag_SimDev   = 1u << 3,
+    kArBlockDiag_SimWalk  = 1u << 4,
+    kArBlockDiag_SimDev2  = 1u << 5,
+    kArBlockDiag_SimTrace = 1u << 6,
+    kArBlockDiag_Save     = 1u << 7,
+    kArBlockDiag_SCheck   = 1u << 8,
+    kArBlockDiag_896E     = 1u << 9,
+    kArBlockDiag_Boss     = 1u << 10,
+    kArBlockDiag_Event    = 1u << 11,
+    kArBlockDiag_STrace   = 1u << 12,
+    kArBlockDiag_8664     = 1u << 13,
+    kArBlockDiag_8A3C     = 1u << 14,
+    kArBlockDiag_B127     = 1u << 15,
+    kArBlockDiag_B90D     = 1u << 16,
+  };
+  static uint32_t diag_flags = UINT32_MAX;
+  if (diag_flags == UINT32_MAX) {
+    diag_flags = 0;
+    if (getenv("AR_XFLIP_GF"))  diag_flags |= kArBlockDiag_XFlip;
+    if (getenv("AR_XTRACE"))    diag_flags |= kArBlockDiag_XTrace;
+    if (getenv("AR_LAIRDMA"))   diag_flags |= kArBlockDiag_LairDma;
+    if (getenv("AR_SIMDEV"))    diag_flags |= kArBlockDiag_SimDev;
+    if (getenv("AR_SIMWALK"))   diag_flags |= kArBlockDiag_SimWalk;
+    if (getenv("AR_SIMDEV2"))   diag_flags |= kArBlockDiag_SimDev2;
+    if (getenv("AR_SIMTRACE"))  diag_flags |= kArBlockDiag_SimTrace;
+    if (getenv("AR_SAVECHECK")) diag_flags |= kArBlockDiag_Save;
+    if (getenv("AR_SCHECK"))    diag_flags |= kArBlockDiag_SCheck;
+    if (getenv("AR_896E_CATCH")) diag_flags |= kArBlockDiag_896E;
+    if (getenv("AR_BOSSLOG"))    diag_flags |= kArBlockDiag_Boss;
+    if (getenv("AR_EVTRACE"))    diag_flags |= kArBlockDiag_Event;
+    if (getenv("AR_STRACE"))     diag_flags |= kArBlockDiag_STrace;
+    if (getenv("AR_8664_CATCH")) diag_flags |= kArBlockDiag_8664;
+    if (getenv("AR_8A3C_CATCH")) diag_flags |= kArBlockDiag_8A3C;
+    if (getenv("AR_B127_CATCH")) diag_flags |= kArBlockDiag_B127;
+    if (getenv("AR_B90D_CATCH")) diag_flags |= kArBlockDiag_B90D;
+  }
+  if (!diag_flags)
+    return;
+  if (diag_flags & kArBlockDiag_STrace) {
+    extern void ar_strace_block(uint32_t, uint16_t, int, int);
+    ar_strace_block(pc24, cpu->S, cpu->m_flag & 1, cpu->x_flag & 1);
+  }
   /* AR_XFLIP_GF=<game-frame>: the snes9x CPU-flag oracle (tools/oracle/diff_mx.py)
    * names the exact game-frame where the recomp's x is wrong vs ground truth; this
    * logs, DURING that $0088 frame, every block where x flips 0->1 (a SEP #$10/#$30
@@ -1378,7 +1430,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
    * compare + a store only on the rare frames where x actually toggles). */
   {
     static int xt_en = -1;
-    if (xt_en < 0) { extern int ar_xtrace_enabled(void); xt_en = ar_xtrace_enabled(); }
+    if (xt_en < 0) xt_en = (diag_flags & kArBlockDiag_XTrace) != 0;
     if (xt_en && g_ar_blk_idx >= 2) {
       unsigned _p = (g_ar_blk_idx - 2u) & kRuntimeBlockTraceRingMask;
       int prev_x = (g_ar_blk_aux[_p] >> 17) & 1;
@@ -1420,7 +1472,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
    * garbage-source buffer can be found (the lair-seal top-strip corruption). */
   {
     static int ld = -1;
-    if (ld < 0) ld = getenv("AR_LAIRDMA") ? 1 : 0;
+    if (ld < 0) ld = (diag_flags & kArBlockDiag_LairDma) != 0;
     if (ld && pc24 == 0x02AF3Du) {
       extern int snes_frame_counter;
       extern uint8 g_ram[kSnesWramSize];
@@ -1456,7 +1508,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
   }
   {
     static int sd_en = -1;
-    if (sd_en < 0) sd_en = getenv("AR_SIMDEV") ? 1 : 0;
+    if (sd_en < 0) sd_en = (diag_flags & kArBlockDiag_SimDev) != 0;
     if (sd_en && (pc24 == 0x0393C0u || pc24 == 0x0393D2u || pc24 == 0x0393DBu
                   || pc24 == 0x039400u || pc24 == 0x03943Cu || pc24 == 0x03943Du)) {
       static int sd_lines;
@@ -1493,7 +1545,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
      * which set state=3). Log the script byte + state + record ptr to see what
      * the actor reads and why it never advances. X = record base during CD35. */
     static int sw = -1;
-    if (sw < 0) sw = getenv("AR_SIMWALK") ? 1 : 0;
+    if (sw < 0) sw = (diag_flags & kArBlockDiag_SimWalk) != 0;
     if (sw && (pc24 == 0x01CD41u || pc24 == 0x01CD5Eu)) {
       static int nw;
       if (nw < 400) {
@@ -1510,7 +1562,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
       }
     }
     static int sd2 = -1;
-    if (sd2 < 0) sd2 = getenv("AR_SIMDEV2") ? 1 : 0;
+    if (sd2 < 0) sd2 = (diag_flags & kArBlockDiag_SimDev2) != 0;
     if (sd2 && (pc24 == 0x038349u || pc24 == 0x038356u || pc24 == 0x038362u
                 || pc24 == 0x0389F7u || pc24 == 0x038440u || pc24 == 0x03846Cu
                 || pc24 == 0x038D09u)) {
@@ -1535,7 +1587,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
   }
   {
     static int st_en = -1;
-    if (st_en < 0) st_en = getenv("AR_SIMTRACE") ? 1 : 0;
+    if (st_en < 0) st_en = (diag_flags & kArBlockDiag_SimTrace) != 0;
     if (st_en && (pc24 == 0x008125u || pc24 == 0x0080F6u || pc24 == 0x008106u
                   || pc24 == 0x008066u || pc24 == 0x0080E5u)) {
       static int lines;
@@ -1581,7 +1633,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
    * corruption that only surfaces much later, far from this code. */
   {
     static int sc_en = -1;
-    if (sc_en < 0) sc_en = getenv("AR_SAVECHECK") ? 1 : 0;
+    if (sc_en < 0) sc_en = (diag_flags & kArBlockDiag_Save) != 0;
     if (sc_en && (pc24 == 0x02A72Fu || pc24 == 0x02A70Fu)) {
       extern int snes_frame_counter;
       extern uint8 g_ram[kSnesWramSize];
@@ -1602,7 +1654,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
    * function + block-history ring so we see which routine corrupted it. One-shot. */
   {
     static int s_en = -1;
-    if (s_en < 0) s_en = getenv("AR_SCHECK") ? 1 : 0;
+    if (s_en < 0) s_en = (diag_flags & kArBlockDiag_SCheck) != 0;
     if (s_en) {
       extern int snes_frame_counter;
       extern const char *g_last_recomp_func;
@@ -1679,7 +1731,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
     if (pc24 == 0x008966u) { /* loop continuation reached */ }
     if (pc24 == 0x02B127u && (cpu->m_flag & 1) == 0) {
       static int rep = 0;
-      if (!rep && getenv("AR_896E_CATCH")) {
+      if (!rep && (diag_flags & kArBlockDiag_896E)) {
         rep = 1;
         fprintf(stderr, "[896e] B127 m=0 at f=%d; last $896E(PLP) ran at f=%d  (%s this frame); last $895C handler target=$%04X\n",
                 snes_frame_counter, last_896e_frame,
@@ -1695,7 +1747,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
    * identical block PCs (spin loops) to one line, so we see the call ORDER:
    * which command writes happen, whether $9A56 (the resident-uploader streamer)
    * is actually entered after the $01, and where $A410 is reached from. */
-  if (getenv("AR_BOSSLOG")) {
+  if (diag_flags & kArBlockDiag_Boss) {
     int in_boss = (pc24 >= 0x00A3F0u && pc24 <= 0x00A470u);
     int in_upld = (pc24 >= 0x029960u && pc24 <= 0x029B00u);
     if (in_boss || in_upld) {
@@ -1716,7 +1768,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
   }
   /* AR_EVTRACE: trace the post-miniboss event call chain to find where it breaks:
    * bank_01_8000 -> $85BE (JSR $93A8) -> $85C1 (JSR $8A62 -> C3DA -> sets $034B). */
-  if (getenv("AR_EVTRACE")) {
+  if (diag_flags & kArBlockDiag_Event) {
     switch (pc24) {
       case 0x018000u: case 0x0185BEu: case 0x0185C1u: case 0x018A62u:
       case 0x0193A8u: case 0x02C3DAu: {
@@ -1734,7 +1786,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
    * final RTS lands at $8078 instead of the $8966 loop continuation). */
   {
     extern int snes_frame_counter;
-    if (snes_frame_counter == 3566 && getenv("AR_STRACE")) {
+    if (snes_frame_counter == 3566 && (diag_flags & kArBlockDiag_STrace)) {
       switch (pc24) {
         case 0x008915u: case 0x00895Cu: case 0x008661u: case 0x008631u:
         case 0x008E2Fu: case 0x008F0Cu: case 0x008634u: case 0x008636u:
@@ -1755,7 +1807,8 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
   if (pc24 == 0x008664u) {
     extern int snes_frame_counter;
     extern uint8 g_ram[kSnesWramSize];
-    if (snes_frame_counter >= 3560 && snes_frame_counter <= 3567 && getenv("AR_8664_CATCH")) {
+    if (snes_frame_counter >= 3560 && snes_frame_counter <= 3567 &&
+        (diag_flags & kArBlockDiag_8664)) {
       unsigned a = (cpu->D + 0x001E + cpu->X) & 0xFFFF;
       unsigned tgt = g_ram[a] | (g_ram[(a + 1) & 0xFFFF] << 8);
       fprintf(stderr, "[8664] f=%d X=%04X $1E,X@%04X target=$%04X (RTS->$%04X) m=%u\n",
@@ -1770,7 +1823,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
   if (pc24 == 0x008A3Cu) {
     extern int snes_frame_counter;
     int f = snes_frame_counter;
-    if (f >= 3564 && f <= 3567 && getenv("AR_8A3C_CATCH")) {
+    if (f >= 3564 && f <= 3567 && (diag_flags & kArBlockDiag_8A3C)) {
       fprintf(stderr, "[8a3c] entry f=%d m=%u — last 26 blocks:\n", f, cpu->m_flag & 1);
       for (int n = 27; n >= 1; n--) {
         unsigned idx =
@@ -1786,7 +1839,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
    * status). The ring's per-block m-flag reveals where m flipped 1->0. */
   if (pc24 == 0x02B127u && (cpu->m_flag & 1) == 0) {
     static int b127done = 0;
-    if (!b127done && getenv("AR_B127_CATCH")) {
+    if (!b127done && (diag_flags & kArBlockDiag_B127)) {
       b127done = 1;
       extern int snes_frame_counter;
       fprintf(stderr, "[b127] m=0 entry at f=%d — scanning ring for m 1->0 flips:\n",
@@ -1815,7 +1868,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
   }
   if (pc24 == 0x02B90Du && (cpu->X & 0xFFFFu) < 0x0100u) {
     static int done = 0;
-    if (!done && getenv("AR_B90D_CATCH")) {
+    if (!done && (diag_flags & kArBlockDiag_B90D)) {
       done = 1;
       extern uint8 g_ram[kSnesWramSize];
       extern int snes_frame_counter;
@@ -1836,6 +1889,7 @@ static inline void cpu_trace_block(CpuState *cpu, uint32_t pc24) {
     }
   }
 }
+#endif  /* SNESRECOMP_CPU_TRACE_IMPLEMENTATION */
 static inline void cpu_trace_func_entry(CpuState *cpu, uint32_t pc24, const char *name) { (void)cpu; (void)pc24; (void)name; }
 static inline void cpu_trace_event(CpuState *cpu, uint32_t pc24, uint8_t et,
                                    uint8_t e0, uint16_t e1)                 { (void)cpu; (void)pc24; (void)et; (void)e0; (void)e1; }

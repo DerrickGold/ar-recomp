@@ -1973,8 +1973,24 @@ static void PpuWriteOverlayRenderLineFiltered(
       any_bands = true;
     }
   }
+  const bool ordinary = filter == NULL && capture->flags == 0;
   if (!any_bands) {
     bool has_content = false;
+    if (ordinary) {
+      /* This span is authored completely, including transparent pixels. The
+       * preceding row clear remains intentional: it also covers pixels outside
+       * a narrowed capture and therefore preserves the no-stale-surface
+       * contract when capture geometry changes between frames. */
+      for (int x = x0; x < x1; x++) {
+        uint32 color = PpuObjColor(
+            ppu, src[x + kPpuExtraLeftRight] & 0xff);
+        dst[x + texture_extra] = color;
+        has_content |= color != 0;
+      }
+      if (has_content)
+        ppu->overlayRenderContentMask[source] |= 1u;
+      return;
+    }
     for (int x = x0; x < x1; x++) {
       int index = x + kPpuExtraLeftRight;
       if (!PpuOverlayPixelPassesWinnerFilter(filter, src[index], index))
@@ -2003,6 +2019,39 @@ static void PpuWriteOverlayRenderLineFiltered(
     0xff,  /* BG4: never rendered by this PPU (modes 1/7 only) */
     0x00,  /* OBJ routes by the top two bits instead */
   };
+  if (ordinary) {
+    uint8_t content_mask = 0;
+    if (source == kPpuOverlaySource_Obj) {
+      for (int x = x0; x < x1; x++) {
+        PpuZbufType zp = src[x + kPpuExtraLeftRight];
+        uint32 color = PpuObjColor(ppu, zp & 0xff);
+        if (!color)
+          continue;
+        int band = zp >> 14;
+        int content_band = 0;
+        uint32 *out = dst;
+        if (band > 0 && band_dst[band - 1]) {
+          out = band_dst[band - 1];
+          content_band = band;
+        }
+        out[x + texture_extra] = color;
+        content_mask |= (uint8_t)(1u << content_band);
+      }
+    } else {
+      const uint8_t hi_prio_min = kBgHiPrioMin[source];
+      for (int x = x0; x < x1; x++) {
+        PpuZbufType zp = src[x + kPpuExtraLeftRight];
+        uint32 color = PpuObjColor(ppu, zp & 0xff);
+        if (!color)
+          continue;
+        const bool high = band_dst[0] && (zp >> 8) >= hi_prio_min;
+        (high ? band_dst[0] : dst)[x + texture_extra] = color;
+        content_mask |= high ? 2u : 1u;
+      }
+    }
+    ppu->overlayRenderContentMask[source] |= content_mask;
+    return;
+  }
   uint8_t content_mask = 0;
   for (int x = x0; x < x1; x++) {
     int index = x + kPpuExtraLeftRight;

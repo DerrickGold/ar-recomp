@@ -7,6 +7,7 @@
 #include "snes/snes.h"
 #include "snes/msu1.h"
 #include "util.h"
+#define SNESRECOMP_CPU_TRACE_IMPLEMENTATION 1
 #include "cpu_trace.h"
 #include "debug_server.h"
 #include <string.h>
