@@ -6,7 +6,7 @@
 typedef struct QuintetLzssBitReader {
   QuintetLzssReadByte read_byte;
   void *context;
-  size_t bit;
+  size_t bit_position;
   size_t cached_offset;
   uint8_t cached_value;
   bool have_cached_value;
@@ -16,6 +16,17 @@ typedef struct QuintetLzssBufferReader {
   const uint8_t *bytes;
   size_t size;
 } QuintetLzssBufferReader;
+
+enum {
+  kLzssTokenTypeBits = 1,
+  kLzssByteBits = CHAR_BIT,
+  kLzssLengthCodeBits = 4,
+  kLzssMinimumMatchLength = 2,
+  kLzssAssetSizeHeaderBytes = sizeof(uint16_t),
+  kLzssAssetSizeLowByteOffset = 0,
+  kLzssAssetSizeHighByteOffset = 1,
+  kLzssInitialControlMask = 1u << (CHAR_BIT - 1),
+};
 
 static bool ReadBufferByte(void *context, size_t offset, uint8_t *value) {
   const QuintetLzssBufferReader *reader = context;
@@ -41,15 +52,17 @@ static bool ReadSourceByte(QuintetLzssBitReader *reader, size_t offset,
 static bool ReadBits(QuintetLzssBitReader *reader, unsigned count,
                      unsigned *value) {
   if (!reader || !value || count > sizeof(*value) * CHAR_BIT ||
-      reader->bit > SIZE_MAX - count)
+      reader->bit_position > SIZE_MAX - count)
     return false;
   unsigned result = 0;
   for (unsigned i = 0; i < count; i++) {
     uint8_t byte = 0;
-    if (!ReadSourceByte(reader, reader->bit >> 3, &byte)) return false;
+    const size_t byte_offset = reader->bit_position / CHAR_BIT;
+    const unsigned bit_in_byte = (unsigned)(reader->bit_position % CHAR_BIT);
+    if (!ReadSourceByte(reader, byte_offset, &byte)) return false;
     result = (result << 1) |
-        ((byte >> (7 - (reader->bit & 7))) & 1u);
-    reader->bit++;
+        ((byte >> (CHAR_BIT - 1 - bit_in_byte)) & 1u);
+    reader->bit_position++;
   }
   *value = result;
   return true;
@@ -64,28 +77,29 @@ static void CaptureNativeShiftRegister(QuintetLzssBitReader *reader,
                                        unsigned shift,
                                        QuintetLzssState *state) {
   uint8_t first = 0, second = 0;
-  const size_t byte_offset = reader->bit >> 3;
+  const size_t byte_offset = reader->bit_position / CHAR_BIT;
   (void)ReadSourceByte(reader, byte_offset, &first);
   (void)ReadSourceByte(reader, byte_offset + 1, &second);
   state->native_shift_register =
-      (uint16_t)(((uint16_t)((uint16_t)first << 8 | second) << shift) &
-                 0xFFFFu);
+      (uint16_t)(((uint16_t)first << CHAR_BIT | second) << shift);
 }
 
 static bool ReadNativeByte(QuintetLzssBitReader *reader, unsigned *value,
                            QuintetLzssState *state) {
-  const unsigned phase = (unsigned)(reader->bit & 7);
+  const unsigned phase =
+      (unsigned)(reader->bit_position % kLzssByteBits);
   CaptureNativeShiftRegister(reader, phase, state);
-  state->last_read8_phase = (uint8_t)phase;
-  return ReadBits(reader, 8, value);
+  state->last_byte_read_phase = (uint8_t)phase;
+  return ReadBits(reader, kLzssByteBits, value);
 }
 
 static bool ReadNativeLength(QuintetLzssBitReader *reader, unsigned *value,
                              QuintetLzssState *state) {
-  const unsigned phase = (unsigned)(reader->bit & 7);
-  if (phase >= 4)
-    CaptureNativeShiftRegister(reader, phase - 4, state);
-  return ReadBits(reader, 4, value);
+  const unsigned phase =
+      (unsigned)(reader->bit_position % kLzssByteBits);
+  if (phase >= kLzssLengthCodeBits)
+    CaptureNativeShiftRegister(reader, phase - kLzssLengthCodeBits, state);
+  return ReadBits(reader, kLzssLengthCodeBits, value);
 }
 
 bool QuintetLzss_DecompressReader(QuintetLzssReadByte read_byte,
@@ -99,7 +113,7 @@ bool QuintetLzss_DecompressReader(QuintetLzssReadByte read_byte,
   memset(state.dictionary, kQuintetLzssDictionaryFill,
          sizeof(state.dictionary));
   state.write_position = kQuintetLzssDictionaryStart;
-  state.control_mask = 0x80;
+  state.control_mask = kLzssInitialControlMask;
 
   QuintetLzssBitReader reader = {
     .read_byte = read_byte,
@@ -107,9 +121,9 @@ bool QuintetLzss_DecompressReader(QuintetLzssReadByte read_byte,
   };
   size_t produced = 0;
   while (produced < output_size) {
-    unsigned literal = 0;
-    if (!ReadBits(&reader, 1, &literal)) return false;
-    if (literal) {
+    unsigned is_literal = 0;
+    if (!ReadBits(&reader, kLzssTokenTypeBits, &is_literal)) return false;
+    if (is_literal) {
       unsigned value = 0;
       if (!ReadNativeByte(&reader, &value, &state)) return false;
       const uint8_t byte = (uint8_t)value;
@@ -121,25 +135,28 @@ bool QuintetLzss_DecompressReader(QuintetLzssReadByte read_byte,
       continue;
     }
 
-    unsigned match = 0, length_code = 0;
-    if (!ReadNativeByte(&reader, &match, &state) ||
+    unsigned match_position = 0, length_code = 0;
+    if (!ReadNativeByte(&reader, &match_position, &state) ||
         !ReadNativeLength(&reader, &length_code, &state))
       return false;
-    unsigned remaining = length_code + 2;
-    state.match_position = (uint8_t)match;
-    while (remaining && produced < output_size) {
+    unsigned match_bytes_remaining =
+        length_code + kLzssMinimumMatchLength;
+    state.match_position = (uint8_t)match_position;
+    while (match_bytes_remaining && produced < output_size) {
       const uint8_t byte = state.dictionary[state.match_position++];
       state.dictionary[state.write_position++] = byte;
       output[produced++] = byte;
       state.last_output = byte;
       state.final_token_was_match = true;
-      state.final_match_remaining = (uint8_t)remaining;
-      remaining--;
+      state.final_match_remaining = (uint8_t)match_bytes_remaining;
+      match_bytes_remaining--;
     }
   }
 
-  state.bits_consumed = reader.bit;
-  state.control_mask = (uint8_t)(0x80u >> (reader.bit & 7));
+  state.bits_consumed = reader.bit_position;
+  state.control_mask = (uint8_t)(
+      kLzssInitialControlMask >>
+      (reader.bit_position % kLzssByteBits));
   if (state_out) *state_out = state;
   return true;
 }
@@ -155,10 +172,12 @@ bool QuintetLzss_Decompress(const uint8_t *input, size_t input_size,
 bool QuintetLzss_DecompressAsset(const uint8_t *packed, size_t packed_size,
                                  uint8_t *output, size_t expected_size,
                                  QuintetLzssState *state) {
-  if (!packed || packed_size < 2) return false;
+  if (!packed || packed_size < kLzssAssetSizeHeaderBytes) return false;
   const size_t output_size =
-      (size_t)packed[0] | ((size_t)packed[1] << 8);
+      (size_t)packed[kLzssAssetSizeLowByteOffset] |
+      ((size_t)packed[kLzssAssetSizeHighByteOffset] << CHAR_BIT);
   if (output_size != expected_size) return false;
   return QuintetLzss_Decompress(
-      packed + 2, packed_size - 2, output, output_size, state);
+      packed + kLzssAssetSizeHeaderBytes,
+      packed_size - kLzssAssetSizeHeaderBytes, output, output_size, state);
 }

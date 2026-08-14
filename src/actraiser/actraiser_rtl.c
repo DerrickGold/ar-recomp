@@ -12,6 +12,7 @@
 #include "action/action_bg_tuner.h"
 #include "action/action_load_pacing.h"
 #include "actraiser_ws_gap.h"
+#include "cpu_65816_math.h"
 #include "diorama/diorama_capture_blend.h"
 #include "diorama/diorama_planes.h"
 #include "host/host_display.h"   /* kHostDisplayFramebufferHeight */
@@ -722,31 +723,11 @@ static void ActRaiser_TileAnimSetNz(CpuState *cpu, uint16 value,
 
 static uint16 ActRaiser_TileAnimAdc16(CpuState *cpu, uint16 left,
                                      uint16 right) {
-  uint16 result;
-  if (!cpu->_flag_D) {
-    const uint32 sum = (uint32)left + (uint32)right + cpu->_flag_C;
-    result = (uint16)sum;
-    cpu->_flag_C = (sum & 0x10000) != 0;
-    cpu->_flag_V = ((left ^ result) & (right ^ result) & 0x8000) != 0;
-  } else {
-    uint32 carry = cpu->_flag_C;
-    uint32 decimal_result = 0;
-    uint32 carry_into_sign = 0;
-    for (unsigned shift = 0; shift < 16; shift += 4) {
-      uint32 digit = ((left >> shift) & 0xF) +
-                     ((right >> shift) & 0xF) + carry;
-      carry = digit > 9;
-      if (carry) digit += 6;
-      decimal_result |= (digit & 0xF) << shift;
-      if (shift == 8) carry_into_sign = carry;
-    }
-    result = (uint16)decimal_result;
-    cpu->_flag_C = carry != 0;
-    const uint32 visible_sign_sum =
-        (left & 0xF000) + (right & 0xF000) + (carry_into_sign << 12);
-    cpu->_flag_V =
-        ((left ^ visible_sign_sum) & (right ^ visible_sign_sum) & 0x8000) != 0;
-  }
+  const Cpu65816Add16Result addition = Cpu65816_Add16(
+      left, right, cpu->_flag_C != 0, cpu->_flag_D != 0);
+  const uint16 result = addition.value;
+  cpu->_flag_C = addition.carry;
+  cpu->_flag_V = addition.overflow;
   ActRaiser_TileAnimSetNz(cpu, result, 16);
   cpu_write_a16(cpu, result);
   return result;

@@ -28,7 +28,7 @@ typedef struct QuintetLzssState {
   uint8_t match_position;         /* native $B1 low byte */
   uint8_t control_mask;           /* native $AE */
   uint8_t last_output;
-  uint8_t last_read8_phase;
+  uint8_t last_byte_read_phase;  /* bit offset of the last 8-bit native read */
   uint8_t final_match_remaining;
   bool final_token_was_match;
 } QuintetLzssState;

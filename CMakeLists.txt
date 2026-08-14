@@ -727,12 +727,25 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_save_system COMMAND actraiser_save_system_test)
 
+    # Shared instruction-exact arithmetic used by CPU-facing HLE wrappers.
+    # Pin carry-in, carry-out, overflow, and packed-BCD adjustment directly.
+    add_executable(actraiser_cpu_65816_math_test
+        tests/cpu_65816_math_test.c
+        src/cpu_65816_math.c
+    )
+    target_include_directories(actraiser_cpu_65816_math_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_cpu_65816_math
+        COMMAND actraiser_cpu_65816_math_test)
+
     # CPU-facing contract for the shared $00:84F3 save-checksum HLE. The
     # existing save-system suite pins the binary algorithm; this additionally
     # pins DP/register/P/RTL effects and the native decimal-mode edge.
     add_executable(actraiser_save_checksum_hle_test
         tests/actraiser_save_checksum_hle_test.c
         src/actraiser/actraiser_save_checksum.c
+        src/cpu_65816_math.c
         src/save_system.c
         src/atomic_replace.c
     )
@@ -749,6 +762,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_cell_map_hle_test
         tests/actraiser_cell_map_hle_test.c
         src/actraiser/actraiser_cell_map.c
+        src/cpu_65816_math.c
     )
     target_include_directories(actraiser_cell_map_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
