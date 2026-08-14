@@ -290,6 +290,44 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_sim_town_canvas
         COMMAND actraiser_sim_town_canvas_test)
 
+    add_executable(actraiser_sim_background_voxels_test
+        tests/sim_background_voxels_test.c
+        src/sim/sim_background_voxels.c
+    )
+    target_include_directories(actraiser_sim_background_voxels_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_sim_background_voxels
+        COMMAND actraiser_sim_background_voxels_test)
+
+    add_executable(actraiser_sim_background_voxel_models_test
+        tests/sim_background_voxel_models_test.c
+        src/sim/sim_background_voxel_models.c
+    )
+    target_include_directories(actraiser_sim_background_voxel_models_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_sim_background_voxel_models
+        COMMAND actraiser_sim_background_voxel_models_test)
+
+    add_executable(actraiser_sim_background_voxel_proportions_test
+        tests/sim_background_voxel_proportions_test.c
+        src/sim/sim_background_voxel_models.c
+        src/sim/sim_background_voxel_proportions.c
+    )
+    target_include_directories(actraiser_sim_background_voxel_proportions_test
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_sim_background_voxel_proportions
+        COMMAND actraiser_sim_background_voxel_proportions_test)
+
     add_executable(actraiser_sim_world_map_test
         tests/sim_world_map_test.c
         src/sim/sim_world_map.c
@@ -655,6 +693,7 @@ if(BUILD_TESTING)
         src/sim/sim_world_navigation_scene.c
         src/sim/sim_world_navigation_capture.c
         src/sim/sim_town_canvas.c
+        src/sim/sim_background_voxels.c
         src/sim/sim_render_atlas.c
         src/action/action_obj_interpolation.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c

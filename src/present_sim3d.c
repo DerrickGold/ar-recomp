@@ -30,6 +30,7 @@
 #include "scene3d_math.h"
 #include "render_capabilities.h"
 #include "sim/sim_render_atlas.h"
+#include "sim/sim_background_voxel_renderer.h"
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim_world_navigation_capture.h"
@@ -948,9 +949,11 @@ static void DrawSimShadowMask(
       break;
     }
   }
+  bool voxel_caster = SimBackgroundVoxelRenderer_Ready(
+      slot->sim.background_voxel_serial);
   /* An empty mask contributes nothing. Avoid a full-viewport target clear,
    * optional fourteen-draw blur and full-viewport composite on such frames. */
-  if (!any_caster) return;
+  if (!any_caster && !voxel_caster) return;
   SDL_Texture *mask = EnsureSimShadowTexture(viewport.w, viewport.h);
   if (!mask) return;
 
@@ -1048,6 +1051,21 @@ static void DrawSimShadowMask(
     SDL_RenderGeometry(g_renderer, g_sim_obj_atlas_texture,
                        vertices, 4, indices, 6);
   }
+
+  if (voxel_caster)
+    SimBackgroundVoxelRenderer_DrawShadowMask(
+        g_renderer, &(SimBackgroundVoxelRenderParams){
+          .serial = slot->sim.background_voxel_serial,
+          .detail = slot->sim.background_voxel_detail,
+          .camera_x = slot->sim.camera_x,
+          .camera_y = slot->sim.camera_y,
+          .town_screen_x0 = slot->sim.underlay_screen_x0,
+          .light_azimuth_deg = slot->sim.light_azimuth_deg,
+          .light_elevation_deg = slot->sim.light_elevation_deg,
+          .source = source,
+          .viewport = local_viewport,
+          .matrix = matrix,
+        }, light_x, light_y);
 
   if (soft_shadows)
     BlurSimShadowMask(mask, viewport.w, viewport.h,
@@ -2464,8 +2482,14 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
 static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
                               SDL_Rect viewport, const float matrix[16],
                               bool cull_fade, int lift_inset,
-                              const SDL_FRect *exclude) {
+                              const SDL_FRect *exclude,
+                              bool background_voxels) {
   if (!slot->sim.town_canvas_serial || !s_sim_canvas_texture) return;
+  SDL_Texture *canvas = background_voxels
+      ? SimBackgroundVoxelRenderer_GroundTexture(
+            slot->sim.background_voxel_serial)
+      : s_sim_canvas_texture;
+  if (!canvas) return;
   float extent_x0 =
       (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x;
   float extent_y0 = -(float)slot->sim.camera_y;
@@ -2492,7 +2516,7 @@ static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
     .screen_x0 = slot->sim.underlay_screen_x0,
   };
   DrawSimGroundExtension(
-      s_sim_canvas_texture,
+      canvas,
       extent_x0, extent_y0, (float)kSimTownCanvasPixels, 255,
       source, viewport, matrix, &fade, exclude);
 }
@@ -2547,6 +2571,8 @@ static void RenderSimProfile(const FrameSlot *slot,
   bool clouds = underlay && (features & kSimFeature_CloudShroud) != 0;
   bool cull_haze = underlay && (features & kSimFeature_CullHaze) != 0;
   bool atmospheric_backdrop = (features & kSimFeature_Backdrop) != 0;
+  bool background_voxels = ground &&
+      SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial);
   /* The lit region is ground-painted and can only express the height-zero
    * boundary, so its bottom edge is pulled in by the largest lift the
    * classifier hands out. Zero when nothing is being lifted at all -- with
@@ -2613,18 +2639,21 @@ static void RenderSimProfile(const FrameSlot *slot,
    * the town itself draws belongs on top of it. */
   if (underlay) {
     DrawSimWorldUnderlay(slot, source, viewport, matrix, lift_inset);
+  }
+  if (underlay || background_voxels) {
     /* Keep the canvas as the opaque backing for transparent BG1 priority
-     * pixels, but omit it under BG1 wherever either alpha handoff is active.
-     * That applies each feather once instead of twice on one side of the
-     * captured-quad seam and once on the other. */
-    bool live_ground_enabled =
+     * pixels. Background voxels instead select the cleaned canvas and replace
+     * both captured BG1 ranks, regardless of whether the separate world-map
+     * extension is enabled. */
+    bool live_ground_enabled = !background_voxels && (
         ((enabled_planes & (1u << kSim3DPlane_Bg1Low)) &&
          g_sim3d_layer_textures[kSim3DPlane_Bg1Low]) ||
         ((enabled_planes & (1u << kSim3DPlane_Bg1High)) &&
-         g_sim3d_layer_textures[kSim3DPlane_Bg1High]);
+         g_sim3d_layer_textures[kSim3DPlane_Bg1High]));
     SDL_FRect live_ground = ToFRect(source);
     DrawSimTownCanvas(slot, source, viewport, matrix, cull_haze, lift_inset,
-                      live_ground_enabled ? &live_ground : NULL);
+                      live_ground_enabled ? &live_ground : NULL,
+                      background_voxels);
   }
 
   SDL_FRect src = ToFRect(source), dst = ToFRect(viewport);
@@ -2661,6 +2690,21 @@ static void RenderSimProfile(const FrameSlot *slot,
     if (plane == kSim3DPlane_Obj3)
       DrawSimEffectLocalLighting(slot, effect_lighting, source, viewport,
                                  &camera, matrix);
+    if (plane == kSim3DPlane_Obj2 && background_voxels &&
+        (enabled_planes & (1u << plane)))
+      SimBackgroundVoxelRenderer_Draw(
+          g_renderer, &(SimBackgroundVoxelRenderParams){
+            .serial = slot->sim.background_voxel_serial,
+            .detail = slot->sim.background_voxel_detail,
+            .camera_x = slot->sim.camera_x,
+            .camera_y = slot->sim.camera_y,
+            .town_screen_x0 = slot->sim.underlay_screen_x0,
+            .light_azimuth_deg = slot->sim.light_azimuth_deg,
+            .light_elevation_deg = slot->sim.light_elevation_deg,
+            .source = source,
+            .viewport = viewport,
+            .matrix = matrix,
+          });
     if (!(enabled_planes & (1u << plane))) continue;
     if (SimPlaneIsMenu(plane)) continue;
     if (billboards) {
@@ -2684,9 +2728,10 @@ static void RenderSimProfile(const FrameSlot *slot,
     SDL_Texture *texture = g_sim3d_layer_textures[plane];
     if (!texture) continue;
     if (plane == kSim3DPlane_Bg1Low || plane == kSim3DPlane_Bg1High) {
-      DrawSimGroundPlane(texture, source, viewport, matrix,
-                         (fade_ground_planes || underlay)
-                             ? &ground_fade : NULL);
+      if (!background_voxels)
+        DrawSimGroundPlane(texture, source, viewport, matrix,
+                           (fade_ground_planes || underlay)
+                               ? &ground_fade : NULL);
       /* Ground first, mask immediately after, everything else on top: the
        * shadow can only ever darken ground pixels. */
       if (plane == kSim3DPlane_Bg1Low && shadows)
@@ -2813,6 +2858,7 @@ void PresentSim3D_ResetResources(void) {
   if (s_sim_canvas_texture) SDL_DestroyTexture(s_sim_canvas_texture);
   s_sim_canvas_texture = NULL;
   s_sim_canvas_alloc_failed = false;
+  SimBackgroundVoxelRenderer_Reset();
   if (s_sim_cloud_texture) SDL_DestroyTexture(s_sim_cloud_texture);
   s_sim_cloud_texture = NULL;
   s_sim_cloud_alloc_failed = false;

@@ -15,6 +15,7 @@
 #include "diorama/diorama_layer_order.h"
 #include "sim/sim3d.h"
 #include "sim/sim_render_metadata.h"
+#include "sim/sim_background_voxels.h"
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_navigation_capture.h"
 #include "action/action_effect_clock.h"
@@ -212,6 +213,7 @@ Sim3DTuning BuildSim3DTuning(void) {
       .yaw_mrad = sim_pose.yaw_mrad,
       .distance_x100 = sim_pose.distance_x100,
       .height_scale_x100 = g_settings.sim3d_height_scale_x100,
+      .voxel_detail = g_settings.sim3d_voxel_detail,
       .shadow_opacity_pct = g_settings.sim3d_shadow_opacity_pct,
       .height_pop_pct = g_settings.sim3d_height_pop_pct,
       .light_azimuth_deg = g_settings.sim3d_light_azimuth_deg,
@@ -482,6 +484,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
     /* Accumulation itself happens once a frame at the always-run site below;
      * this only publishes the current canvas state into the slot. */
     dst->sim.town_canvas_serial = SimTownCanvas_Serial();
+    dst->sim.background_voxel_serial = SimBackgroundVoxels_Serial();
   }
 
   dst->snes_width = g_snes_width;

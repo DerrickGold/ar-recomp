@@ -1,4 +1,5 @@
 #include "sim3d.h"
+#include "sim_background_voxels.h"
 
 #include "sim_town_canvas.h"
 
@@ -1117,6 +1118,7 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
     /* Leaving a town drops the canvas: it is town-space, and the next town
      * would otherwise inherit this one's ground. */
     if (SimTownCanvas_Town()) SimTownCanvas_Reset();
+    if (SimBackgroundVoxels_Serial()) SimBackgroundVoxels_Reset();
     return;
   }
   if (!ppu) return;
@@ -1133,6 +1135,8 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
     return;
   SimTownCanvas_Render(frame->town, wram, ppu->vram, ppu->cgram,
                        PPU_brightness(ppu), g_sim3d.backdrop_argb);
+  SimBackgroundVoxels_Build(frame->town, wram, SimTownCanvas_Pixels(),
+                            SimTownCanvas_Serial());
 }
 
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void) {
@@ -1154,6 +1158,9 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   int distance_x100 = tuning->distance_x100;
   frame->height_scale_x100 =
       (uint16_t)ClampTuning(tuning->height_scale_x100, 0, 0xFFFF);
+  frame->background_voxel_detail = (uint8_t)ClampTuning(
+      tuning->voxel_detail, kSimBackgroundVoxelDetail_Low,
+      kSimBackgroundVoxelDetail_Ultra);
   frame->shadow_opacity_pct =
       (uint8_t)ClampTuning(tuning->shadow_opacity_pct, 0, kPercentScale);
   frame->height_pop_pct =

@@ -69,6 +69,7 @@
 #include "sim/sim_visual_patches.h"
 #include "sim/sim_world_navigation_capture.h"
 #include "sim/sim_render_atlas.h"
+#include "sim/sim_background_voxels.h"
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim3d.h"
@@ -394,6 +395,7 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
      * call HostDisplay_SubmitFrame or FrameSlot_Capture. */
     Sim3D_RenderTownCanvas(&sim, g_ram, g_ppu);
     sim.town_canvas_serial = SimTownCanvas_Serial();
+    sim.background_voxel_serial = SimBackgroundVoxels_Serial();
     Sim3D_LogViewTransition(&sim);
     SceneInspector_SetSimFrameData(&sim);
     /* g_pixels is bound apron-wide; offset past the apron so the trace sees

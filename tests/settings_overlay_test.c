@@ -794,6 +794,12 @@ int main(void) {
   CHECK(!g_settings.sim3d_world_navigation_clouds);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(g_settings.sim3d_mode);
+  RowToKey("sim3d_voxel_detail");
+  CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_Ultra);
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+  CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
   /* Walk to a stage toggle by key rather than counting rows: the stage list
    * grows every time a render stage lands. Toggling one from the menu must
    * also change what the renderer is asked for, since the fold is the only

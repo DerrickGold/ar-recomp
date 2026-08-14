@@ -90,7 +90,7 @@ static void TestDefaultsAndMetadata(void) {
    * cycle then added three: the Cheats-tab toggle that arms it, plus its
    * keyboard and gamepad binding rows. The sim synthetic-part work added one
    * measured, gameplay-affecting actor-range row. */
-  CHECK(g_setting_desc_count == 259);
+  CHECK(g_setting_desc_count == 260);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -146,6 +146,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_Sim3DRequestedFeatures() == kSim3DShippedFeatures);
   CHECK(g_settings.sim3d_separated_composite);
   CHECK(g_settings.sim3d_ground_projection);
+  CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
   CHECK(g_settings.sim3d_object_billboards);
   CHECK(g_settings.sim3d_virtual_height);
   CHECK(g_settings.sim3d_shadows);

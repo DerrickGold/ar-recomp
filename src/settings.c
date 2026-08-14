@@ -472,6 +472,13 @@ static const char *const kSimCamModeLabels[] = {
   "Dynamic Cam",
 };
 
+static const char *const kSimVoxelDetailLabels[] = {
+  "Low",
+  "Balanced",
+  "High",
+  "Ultra",
+};
+
 static const char *const kDioramaSkyModeLabels[] = {
   "Off",
   "Skybox only",
@@ -1119,6 +1126,17 @@ const SettingDesc g_setting_descs[] = {
                "it flat.",
                kSettingCat_Simulation, 1, false, Sim3DGroundAvailable,
                NULL),
+  { "sim3d_voxel_detail", "AR_SIM3D_VOXEL_DETAIL", "Voxel model detail",
+    "Performance target for simulation-town buildings and trees. Low uses "
+    "compact silhouettes for dense maps; Balanced is the conservative model; "
+    "High adds finer roofs and facade relief; Ultra enables the complete "
+    "voxel detail set.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_voxel_detail, kSimBackgroundVoxelDetail_High,
+    kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelDetail_Ultra, 1, false,
+    kSimVoxelDetailLabels, kSimBackgroundVoxelDetail_Count,
+    Sim3DGroundEnabled, NULL, NULL, NULL,
+    .modern_env = true, .player_visible = true },
   BOOL_SETTING_MODERN(sim3d_object_billboards, "AR_SIM3D_BILLBOARDS",
                "Object billboards",
                "Draw world records as individually placed sprites standing on "
