@@ -100,8 +100,10 @@ enum {
   kStructRecordSize  = 4,
   kStructFlag_Active   = 0x80,
   kStructFlag_Building = 0x40,
+  kStructFlag_Subtype  = 0x10,
   kStructType_ClassMask = 0x0F,
   kStructType_Bridge    = 0x01,
+  kWordHighByteMask = 0xFF00,
   kMaximumBridgeDrawCommands = 16,
 };
 
@@ -122,9 +124,20 @@ enum {
   kVar_SupportCapacity = 0x6B26,   /* census output: support, word per town */
   kVar_HousePopBias    = 0x9F57,   /* census output subtraction, per town */
   kWram_PopulationBase = 0x021C,   /* long $00:021C,X population output */
-  kVar_CellMarkMap     = 0x2000,   /* $7F: 6 towns x $400 structure marks */
   kVar_RoadMap         = 0x6800,   /* $7F: 6 towns x $80 road-map bytes */
   kVar_TownMapActive   = 0x919E,   /* per-town byte gating bridge marks */
+};
+
+enum {
+  kStructureMark_House = 0xE0,
+  kStructureMark_BridgeHorizontal = 0xE1,
+  kStructureMark_BridgeVertical = 0xE2,
+  kStructureMark_FactoryTier4 = 0xE3,
+  kStructureMark_CornField = 0xE4,
+  kStructureMark_WheatField = 0xE5,
+  kStructureMark_FactoryTier3 = 0xE6,
+  kStructureMark_Class5 = 0xE7,
+  kStructureMark_Class6 = 0xE8,
 };
 
 static const uint8 kExtMagic[4] = { 'A', 'X', 'B', '1' };
@@ -226,7 +239,7 @@ static int bridge_has_road_bit(CpuState *cpu, unsigned town,
                                     (rec[1] >> 2) * 0x10 +
                                     (rec[0] >> 2) * 2);
   const uint16 road = cpu_read16(cpu, 0x7F, road_addr);
-  return (road & ((rec[2] & 0x10) ? 0x0100 : 0x0080)) != 0;
+  return (road & ((rec[2] & kStructFlag_Subtype) ? 0x0100 : 0x0080)) != 0;
 }
 
 static int bridge_record_valid(CpuState *cpu, unsigned town,
@@ -554,7 +567,7 @@ RecompReturn ActRaiser_TownCensus(CpuState *cpu) {
         uint16 add = 0x20;
         if (cls == 2)
           add = (f2 & kStructFlag_Building) ? 0
-                : (f2 & 0x10) ? 0x30 : 0x20;
+                : (f2 & kStructFlag_Subtype) ? 0x30 : 0x20;
         else if (cls == 3)
           add = (f2 & kStructFlag_Building) ? 0 : 0x48;
         else if (cls == 4)
@@ -619,21 +632,37 @@ RecompReturn ActRaiser_SceneMarkStructures(CpuState *cpu) {
     native_y = 0x9D3B;
     const uint8 x = cpu_read8(cpu, db, rec);
     const uint8 y = cpu_read8(cpu, db, (uint16)(rec + 1));
-    const uint16 idx = ActRaiser_CellMarkIndex(town, x, y);
     uint8 code = 0;
-    int block = 0;
+    ActRaiserTownStructureMarkShape mark_shape =
+        kActRaiserTownStructureMarkShape_Cell;
     switch (f2 & kStructType_ClassMask) {
-      case 0: code = 0xE0; break;                          /* $9F1A */
+      case 0: code = kStructureMark_House; break;          /* $9F1A */
       case 1:                                              /* $9F73 */
         native_y = (uint16)town;
         if (!map_active) continue;
-        code = (f2 & 0x10) ? 0xE1 : 0xE2;
+        code = (f2 & kStructFlag_Subtype)
+            ? kStructureMark_BridgeHorizontal
+            : kStructureMark_BridgeVertical;
         break;
-      case 2: code = (f2 & 0x10) ? 0xE5 : 0xE4; block = 1; break;
-      case 3: code = 0xE6; block = 1; break;               /* $9F3F */
-      case 4: code = 0xE3; block = 1; break;               /* $9F4C */
-      case 5: code = 0xE7; block = 1; break;               /* $9F59 */
-      case 6: code = 0xE8; break;                          /* $9F66 */
+      case 2:
+        code = (f2 & kStructFlag_Subtype)
+            ? kStructureMark_WheatField
+            : kStructureMark_CornField;
+        mark_shape = kActRaiserTownStructureMarkShape_Block2x2;
+        break;
+      case 3:
+        code = kStructureMark_FactoryTier3;
+        mark_shape = kActRaiserTownStructureMarkShape_Block2x2;
+        break;                                             /* $9F3F */
+      case 4:
+        code = kStructureMark_FactoryTier4;
+        mark_shape = kActRaiserTownStructureMarkShape_Block2x2;
+        break;                                             /* $9F4C */
+      case 5:
+        code = kStructureMark_Class5;
+        mark_shape = kActRaiserTownStructureMarkShape_Block2x2;
+        break;                                             /* $9F59 */
+      case 6: code = kStructureMark_Class6; break;         /* $9F66 */
       default: continue;
     }
     /* Exact $9FCD/$9FE4 -> $9710 scratch and A-high side effects. The
@@ -641,14 +670,10 @@ RecompReturn ActRaiser_SceneMarkStructures(CpuState *cpu) {
     cpu_write8(cpu, db, kVar_MarkCellX, x);
     cpu_write8(cpu, db, kVar_MarkCellY, y);
     cpu_write16(cpu, db, kVar_AllocSlot,
-                (uint16)(town * 0x400 + (y & 0x0F) * 0x10 + (x & 0x0F)));
-    a_high = (uint16)(idx & 0xFF00);
-    cpu_write8(cpu, db, (uint16)(kVar_CellMarkMap + idx), code);
-    if (block) {
-      cpu_write8(cpu, db, (uint16)(kVar_CellMarkMap + idx + 1), code);
-      cpu_write8(cpu, db, (uint16)(kVar_CellMarkMap + idx + 0x10), code);
-      cpu_write8(cpu, db, (uint16)(kVar_CellMarkMap + idx + 0x11), code);
-    }
+                ActRaiser_CellMarkPreQuadrantIndex(town, x, y));
+    const uint16 idx = ActRaiser_WriteTownStructureMark(
+        cpu, db, town, x, y, code, mark_shape);
+    a_high = (uint16)(idx & kWordHighByteMask);
   }
 
   int ext_marked = 0;
@@ -658,9 +683,12 @@ RecompReturn ActRaiser_SceneMarkStructures(CpuState *cpu) {
       if (!ext_bridge_get(cpu, town, i, rec) ||
           main_has_bridge(cpu, db, base, rec))
         continue;
-      const uint16 idx = ActRaiser_CellMarkIndex(town, rec[0], rec[1]);
-      cpu_write8(cpu, db, (uint16)(kVar_CellMarkMap + idx),
-                 (uint8)((rec[2] & 0x10) ? 0xE1 : 0xE2));
+      const uint8 code = (rec[2] & kStructFlag_Subtype)
+          ? kStructureMark_BridgeHorizontal
+          : kStructureMark_BridgeVertical;
+      ActRaiser_WriteTownStructureMark(
+          cpu, db, town, rec[0], rec[1], code,
+          kActRaiserTownStructureMarkShape_Cell);
       ext_marked++;
     }
   }

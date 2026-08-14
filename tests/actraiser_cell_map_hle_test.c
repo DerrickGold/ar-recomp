@@ -21,6 +21,10 @@ enum {
   kMetatileCollisionBit = 0x0200,
   kTraversalVisitedBit = 0x04,
   kNestedCellIndexReturnAddress = 0x96F1,
+  kStructureMarkCellReturnAddress = 0x9FDD,
+  kStructureMarkBlockReturnAddress = 0x9FF4,
+  kStructureMarkMapBase = 0x2000,
+  kStructureMarkBlockRowStride = 0x10,
 };
 
 static uint8_t memory[0x30000];
@@ -373,12 +377,128 @@ static void CheckTraversalCpuContract(void) {
                      0x5A, 0x2100, 0x00);
 }
 
+static void CheckStructureMarkSemantic(void) {
+  memset(memory, 0, sizeof(memory));
+  CpuState cpu = MakeCpu(kLowWramBank, false, true);
+  const uint8 mark = 0xE3;
+  const uint16 cell_index = ActRaiser_WriteTownStructureMark(
+      &cpu, kHighWramBank, 2, 20, 22, mark,
+      kActRaiserTownStructureMarkShape_Block2x2);
+  CHECK(cell_index == ActRaiser_CellMarkIndex(2, 20, 22));
+  CHECK(cpu.DB == kLowWramBank);
+  CHECK(cpu_read8(NULL, kHighWramBank,
+                  (uint16)(kStructureMarkMapBase + cell_index)) == mark);
+  CHECK(cpu_read8(NULL, kHighWramBank,
+                  (uint16)(kStructureMarkMapBase + cell_index + 1)) == mark);
+  CHECK(cpu_read8(
+            NULL, kHighWramBank,
+            (uint16)(kStructureMarkMapBase + cell_index +
+                     kStructureMarkBlockRowStride)) == mark);
+  CHECK(cpu_read8(
+            NULL, kHighWramBank,
+            (uint16)(kStructureMarkMapBase + cell_index +
+                     kStructureMarkBlockRowStride + 1)) == mark);
+
+  const uint16 single_index = ActRaiser_WriteTownStructureMark(
+      &cpu, kHighWramBank, 1, 3, 5, 0xE0,
+      kActRaiserTownStructureMarkShape_Cell);
+  CHECK(cpu_read8(NULL, kHighWramBank,
+                  (uint16)(kStructureMarkMapBase + single_index)) == 0xE0);
+  CHECK(cpu_read8(NULL, kHighWramBank,
+                  (uint16)(kStructureMarkMapBase + single_index + 1)) == 0);
+}
+
+static void CheckStructureMarkCpuCase(
+    RecompReturn (*hle)(CpuState *),
+    ActRaiserTownStructureMarkShape shape, uint16 nested_return_address,
+    uint16 record_address) {
+  memset(memory, 0xCC, sizeof(memory));
+  const uint16 town_index = 4;
+  const uint8 cell_x = 20;
+  const uint8 cell_y = 22;
+  const uint8 mark = 0xE6;
+  const uint16 staged_cell_x = (uint16)(0xAA00u | cell_x);
+  const uint16 staged_cell_y = (uint16)(0xBB00u | cell_y);
+  const ReferenceResult expected = ReferenceRoutine(
+      town_index, staged_cell_x, staged_cell_y, false);
+  cpu_write16(NULL, kHighWramBank, kTownIndex, town_index);
+  cpu_write16(NULL, kHighWramBank, kCellX, staged_cell_x);
+  cpu_write16(NULL, kHighWramBank, kCellY, staged_cell_y);
+  cpu_write8(NULL, kHighWramBank, record_address, cell_x);
+  cpu_write8(NULL, kHighWramBank, (uint16)(record_address + 1), cell_y);
+
+  CpuState cpu = MakeCpu(kHighWramBank, false, true);
+  cpu.A = (uint16)(0xA500u | mark);
+  cpu.X = record_address;
+  cpu.Y = 0xBEEF;
+  cpu_mirrors_to_p(&cpu);
+  const uint16 entry_stack = cpu.S;
+
+  CHECK(hle(&cpu) == RECOMP_RETURN_NORMAL);
+  CHECK(cpu_read16(NULL, kHighWramBank, kCellX) == staged_cell_x);
+  CHECK(cpu_read16(NULL, kHighWramBank, kCellY) == staged_cell_y);
+  CHECK(cpu_read16(NULL, kHighWramBank, kScratch) == expected.scratch);
+  CHECK(cpu.A == (uint16)((expected.final.value & 0xFF00u) | mark));
+  CHECK(cpu.X == record_address);
+  CHECK(cpu.Y == 0xBEEF);
+  CHECK(cpu.S == (uint16)(entry_stack + 2));
+  CHECK(cpu.host_return_valid == 1);
+
+  CHECK(cpu_read16(NULL, kStackBank,
+                   (uint16)(entry_stack - 1)) == record_address);
+  CHECK(cpu_read8(NULL, kStackBank,
+                  (uint16)(entry_stack - 2)) == mark);
+  CHECK(cpu_read16(NULL, kStackBank,
+                   (uint16)(entry_stack - 4)) == nested_return_address);
+
+  const uint16 map_address =
+      (uint16)(kStructureMarkMapBase + expected.final.value);
+  CHECK(cpu_read8(NULL, kHighWramBank, map_address) == mark);
+  if (shape == kActRaiserTownStructureMarkShape_Block2x2) {
+    CHECK(cpu_read8(NULL, kHighWramBank,
+                    (uint16)(map_address + 1)) == mark);
+    CHECK(cpu_read8(NULL, kHighWramBank,
+                    (uint16)(map_address + kStructureMarkBlockRowStride)) ==
+          mark);
+    CHECK(cpu_read8(
+              NULL, kHighWramBank,
+              (uint16)(map_address + kStructureMarkBlockRowStride + 1)) ==
+          mark);
+  } else {
+    CHECK(cpu_read8(NULL, kHighWramBank,
+                    (uint16)(map_address + 1)) == 0xCC);
+  }
+
+  const uint8 expected_p = (uint8)(
+      CPU_P_M | CPU_P_I |
+      (expected.final.carry ? CPU_P_C : 0) |
+      (expected.final.overflow ? CPU_P_V : 0) |
+      (record_address == 0 ? CPU_P_Z : 0) |
+      (record_address & 0x8000u ? CPU_P_N : 0));
+  CHECK(cpu.P == expected_p);
+  CHECK(cpu.m_flag == 1);
+  CHECK(cpu.x_flag == 0);
+}
+
+static void CheckStructureMarkCpuContracts(void) {
+  CheckStructureMarkCpuCase(
+      ActRaiser_WriteTownStructureMarkCell,
+      kActRaiserTownStructureMarkShape_Cell,
+      kStructureMarkCellReturnAddress, 0x6A20);
+  CheckStructureMarkCpuCase(
+      ActRaiser_WriteTownStructureMarkBlock,
+      kActRaiserTownStructureMarkShape_Block2x2,
+      kStructureMarkBlockReturnAddress, 0);
+}
+
 int main(void) {
   memset(memory, 0, sizeof(memory));
   CheckTraversalPredicate();
   CheckCanonicalGrid();
   CheckWidthAndDecimalEdges();
   CheckTraversalCpuContract();
+  CheckStructureMarkSemantic();
+  CheckStructureMarkCpuContracts();
   if (failures) {
     printf("actraiser cell-map HLE: %d failure(s)\n", failures);
     return 1;

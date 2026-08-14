@@ -465,8 +465,10 @@ the current debugging process; this file is the case law.
     The decoder could not infer `$9FCD`/`$9FE4`'s exit width and resumed both continuations at
     m=0, where the immediate swallows the `9d` (`STA abs,X`) opcode. **Fix:** `exit_mx_at 039FCD
     1 0` + `exit_mx_at 039FE4 1 0` in `recomp/bank03.cfg`. Safe to pin: both callees are
-    width-neutral (`PHX/PHA … PLA/PLX/RTS`, no SEP/REP) and each has exactly ONE caller in the
-    whole ROM, both reached via `JSR $A4F7 ; LDA #$08` (`a9 08`) at m=1.
+    width-neutral (`PHX/PHA … PLA/PLX/RTS`, no SEP/REP) and each has exactly one direct JSR
+    caller, both reached via `JSR $A4F7 ; LDA #$08` (`a9 08`) at m=1. The `$9CFB` mark scanner
+    also reaches their exact entry addresses through BRL tail transfers after pushing a
+    continuation; those handlers run at the same m=1/x=0 width.
     **Reusable lessons (three, all new):**
     (a) **An m/x leak is only harmful when the mis-labelled block holds an m-dependent-length
     immediate.** `--leaks` and `ar_call_mx_check` report the *decoder's static expectation* at a

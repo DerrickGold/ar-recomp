@@ -13,13 +13,17 @@ enum {
   kCellMapScratch = 0x7C05,
   kCellMapCellX = 0x7C4B,
   kCellMapCellY = 0x7C4D,
-  kTownTerrainMapBase = 0x2000,
+  kTownCellMapBase = 0x2000,
   kTownCellFlagsBase = 0x3800,
   kTownMetatileDefinitionsBase = 0x2100,
   kTownMetatileDefinitionBytes = 8,
   kTownMetatileCollisionBit = 0x0200,
   kTownCellTraversalVisitedBit = 0x04,
   kTownCellIndexJsrReturnAddress = 0x96F1,
+  kStructureMarkCellIndexReturnAddress = 0x9FDD,
+  kStructureMarkBlockIndexReturnAddress = 0x9FF4,
+  kStructureRecordCellXOffset = 0,
+  kStructureRecordCellYOffset = 1,
   kCellMapQuadrantSide = 16,
   kCellMapQuadrantsPerAxis = 2,
   kCellMapQuadrantCells = kCellMapQuadrantSide * kCellMapQuadrantSide,
@@ -63,13 +67,63 @@ static unsigned CellMapQuadrantIndex(uint8_t cell_x, uint8_t cell_y) {
 uint16_t ActRaiser_CellMarkIndex(unsigned town, uint8_t cell_x,
                                 uint8_t cell_y) {
   const unsigned quadrant_index = CellMapQuadrantIndex(cell_x, cell_y);
+  return (uint16_t)(
+      ActRaiser_CellMarkPreQuadrantIndex(town, cell_x, cell_y) +
+      quadrant_index * kCellMapQuadrantCells);
+}
+
+uint16_t ActRaiser_CellMarkPreQuadrantIndex(unsigned town, uint8_t cell_x,
+                                           uint8_t cell_y) {
   const unsigned local_x = cell_x & kCellMapLocalCoordinateMask;
   const unsigned local_y = cell_y & kCellMapLocalCoordinateMask;
   const unsigned within_quadrant_index =
       local_y * kCellMapQuadrantSide + local_x;
-  return (uint16_t)(town * kCellMapTownCells +
-                    quadrant_index * kCellMapQuadrantCells +
-                    within_quadrant_index);
+  return (uint16_t)(town * kCellMapTownCells + within_quadrant_index);
+}
+
+static void WriteDataBankIndexedByte(CpuState *cpu, uint8_t data_bank,
+                                     uint16_t base_address, uint16_t index,
+                                     uint8_t value) {
+  const uint32_t effective_address =
+      ((uint32_t)data_bank << kWordBits) + base_address + index;
+  cpu_write8(cpu, (uint8_t)(effective_address >> kWordBits),
+             (uint16_t)effective_address, value);
+}
+
+static void WriteTownStructureMarkAtIndex(
+    CpuState *cpu, uint8_t data_bank, uint16_t mark_index, uint8_t mark,
+    ActRaiserTownStructureMarkShape shape) {
+  WriteDataBankIndexedByte(
+      cpu, data_bank, kTownCellMapBase, mark_index, mark);
+  if (shape == kActRaiserTownStructureMarkShape_Cell) return;
+  if (shape != kActRaiserTownStructureMarkShape_Block2x2) {
+    fprintf(stderr, "FATAL: invalid town structure-mark shape %d\n",
+            (int)shape);
+    abort();
+  }
+
+  const uint16_t right_index = (uint16_t)(mark_index + 1);
+  const uint16_t lower_index = (uint16_t)(
+      mark_index + kCellMapQuadrantSide);
+  WriteDataBankIndexedByte(
+      cpu, data_bank, kTownCellMapBase, right_index, mark);
+  WriteDataBankIndexedByte(
+      cpu, data_bank, kTownCellMapBase, lower_index, mark);
+  WriteDataBankIndexedByte(cpu, data_bank, kTownCellMapBase,
+                           (uint16_t)(lower_index + 1), mark);
+}
+
+uint16_t ActRaiser_WriteTownStructureMark(
+    CpuState *cpu, uint8_t data_bank, unsigned town, uint8_t cell_x,
+    uint8_t cell_y, uint8_t mark,
+    ActRaiserTownStructureMarkShape shape) {
+  const uint16_t mark_index =
+      ActRaiser_CellMarkIndex(town, cell_x, cell_y);
+  if (!cpu) return mark_index;
+
+  WriteTownStructureMarkAtIndex(
+      cpu, data_bank, mark_index, mark, shape);
+  return mark_index;
 }
 
 bool ActRaiser_IsTownCellTraversalBlocked(uint16_t metatile_top_left_word,
@@ -93,9 +147,8 @@ static TownCellMarkIndexResult CalculateTownCellMarkIndex(
       encoded_town_index % kEncodedTownIndexScale == 0;
   if (can_use_binary_cell_index_formula) {
     const unsigned town = encoded_town_index / kEncodedTownIndexScale;
-    const uint16_t cell_index =
-        ActRaiser_CellMarkIndex(town, cell_x, cell_y);
-    result.scratch_value = (uint16_t)(cell_index - quadrant_offset);
+    result.scratch_value =
+        ActRaiser_CellMarkPreQuadrantIndex(town, cell_x, cell_y);
     result.final_addition =
         AddCellMapWords(quadrant_offset, result.scratch_value, false);
     return result;
@@ -128,13 +181,51 @@ static void RequireTownCellIndexEntryMode(CpuState *cpu,
   abort();
 }
 
+static void RequireTownStructureMarkEntryMode(CpuState *cpu,
+                                               const char *routine_name) {
+  if (cpu->m_flag && !cpu->x_flag && !cpu->emulation) return;
+  fprintf(stderr,
+          "FATAL: %s HLE requires native mode with 8-bit A and "
+          "16-bit X/Y\n",
+          routine_name);
+  abort();
+}
+
+static void PushCpuWord(CpuState *cpu, uint16_t value) {
+  cpu_write8(cpu, k65816StackBank, cpu->S,
+             (uint8_t)(value >> CHAR_BIT));
+  cpu->S = (uint16_t)(cpu->S - 1);
+  cpu_write8(cpu, k65816StackBank, cpu->S, (uint8_t)value);
+  cpu->S = (uint16_t)(cpu->S - 1);
+}
+
+static uint16_t PopCpuWord(CpuState *cpu) {
+  cpu->S = (uint16_t)(cpu->S + 1);
+  const uint16_t value = cpu_read16(cpu, k65816StackBank, cpu->S);
+  cpu->S = (uint16_t)(cpu->S + 1);
+  return value;
+}
+
+static void PushCpuByte(CpuState *cpu, uint8_t value) {
+  cpu_write8(cpu, k65816StackBank, cpu->S, value);
+  cpu->S = (uint16_t)(cpu->S - 1);
+}
+
+static uint8_t PopCpuByte(CpuState *cpu) {
+  cpu->S = (uint16_t)(cpu->S + 1);
+  return cpu_read8(cpu, k65816StackBank, cpu->S);
+}
+
+static void SetCpuWordNegativeZero(CpuState *cpu, uint16_t value) {
+  cpu->_flag_Z = value == 0;
+  cpu->_flag_N = (value & kWordSignBit) != 0;
+  cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N | CPU_P_Z)) |
+                     (cpu->_flag_N ? CPU_P_N : 0) |
+                     (cpu->_flag_Z ? CPU_P_Z : 0));
+}
+
 static void EmulateNestedCellIndexJsr(CpuState *cpu) {
-  cpu_write8(cpu, k65816StackBank, cpu->S,
-             (uint8_t)(kTownCellIndexJsrReturnAddress >> CHAR_BIT));
-  cpu->S = (uint16_t)(cpu->S - 1);
-  cpu_write8(cpu, k65816StackBank, cpu->S,
-             (uint8_t)kTownCellIndexJsrReturnAddress);
-  cpu->S = (uint16_t)(cpu->S - 1);
+  PushCpuWord(cpu, kTownCellIndexJsrReturnAddress);
 
   /* $03:9710's RTS restores the caller-visible stack pointer. The bytes remain
    * in stack RAM, just as they do after the native nested call. */
@@ -189,6 +280,55 @@ RecompReturn ActRaiser_TownCellMarkIndex(CpuState *cpu) {
   return RECOMP_RETURN_NORMAL;
 }
 
+static RecompReturn WriteTownStructureMarkHle(
+    CpuState *cpu, ActRaiserTownStructureMarkShape shape,
+    uint16_t nested_return_address, const char *routine_name) {
+  if (!cpu) return RECOMP_RETURN_NORMAL;
+
+  cpu_mirrors_to_p(cpu);
+  RequireTownStructureMarkEntryMode(cpu, routine_name);
+
+  const uint16_t saved_x = cpu->X;
+  const uint8_t mark = (uint8_t)cpu->A;
+  PushCpuWord(cpu, saved_x);
+  PushCpuByte(cpu, mark);
+
+  const uint8_t cell_x = ReadDataBankIndexedByte(
+      cpu, kStructureRecordCellXOffset, saved_x);
+  const uint8_t cell_y = ReadDataBankIndexedByte(
+      cpu, kStructureRecordCellYOffset, saved_x);
+  cpu_write8(cpu, cpu->DB, kCellMapCellX, cell_x);
+  cpu_write8(cpu, cpu->DB, kCellMapCellY, cell_y);
+
+  PushCpuWord(cpu, nested_return_address);
+  cpu->host_return_valid = 1;
+  const RecompReturn nested_result = ActRaiser_TownCellMarkIndex(cpu);
+  if (nested_result != RECOMP_RETURN_NORMAL) return nested_result;
+
+  const uint16_t mark_index = cpu->X;
+  const uint8_t restored_mark = PopCpuByte(cpu);
+  cpu->A = (uint16_t)((cpu->A & kWordHighByteMask) | restored_mark);
+  WriteTownStructureMarkAtIndex(
+      cpu, cpu->DB, mark_index, restored_mark, shape);
+  cpu->X = PopCpuWord(cpu);
+  SetCpuWordNegativeZero(cpu, cpu->X);
+  cpu_p_to_mirrors(cpu);
+  cpu->S = (uint16_t)(cpu->S + k65816RtsStackBytes);
+  return RECOMP_RETURN_NORMAL;
+}
+
+RecompReturn ActRaiser_WriteTownStructureMarkCell(CpuState *cpu) {
+  return WriteTownStructureMarkHle(
+      cpu, kActRaiserTownStructureMarkShape_Cell,
+      kStructureMarkCellIndexReturnAddress, "$03:9FCD");
+}
+
+RecompReturn ActRaiser_WriteTownStructureMarkBlock(CpuState *cpu) {
+  return WriteTownStructureMarkHle(
+      cpu, kActRaiserTownStructureMarkShape_Block2x2,
+      kStructureMarkBlockIndexReturnAddress, "$03:9FE4");
+}
+
 /* $03:96EF is the build-direction pathfinder's bounded cell predicate. It
  * calls $03:9710, reads the terrain id from the active town map, tests the
  * collision marker carried by the metatile's top-left tile word, then falls
@@ -215,7 +355,7 @@ RecompReturn ActRaiser_TownCellTestTraversalBlocked(CpuState *cpu) {
   cpu_write16(cpu, cpu->DB, kCellMapScratch, index_result.scratch_value);
 
   const uint8_t terrain_id =
-      ReadDataBankIndexedByte(cpu, kTownTerrainMapBase, cell_index);
+      ReadDataBankIndexedByte(cpu, kTownCellMapBase, cell_index);
   const uint16_t metatile_definition_offset =
       (uint16_t)(terrain_id * kTownMetatileDefinitionBytes);
   const uint16_t metatile_top_left_word = cpu_read16(
