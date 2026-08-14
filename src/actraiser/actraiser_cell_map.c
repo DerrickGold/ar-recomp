@@ -1,66 +1,58 @@
 #include "actraiser/actraiser_cell_map.h"
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "constants.h"
+#include "cpu_65816_math.h"
 
 enum {
   kCellMapTownIndex = 0x7BFB,
   kCellMapScratch = 0x7C05,
   kCellMapCellX = 0x7C4B,
   kCellMapCellY = 0x7C4D,
+  kCellMapQuadrantSide = 16,
+  kCellMapQuadrantsPerAxis = 2,
+  kCellMapQuadrantCells = kCellMapQuadrantSide * kCellMapQuadrantSide,
+  kCellMapTownCells = kCellMapQuadrantCells *
+                      kCellMapQuadrantsPerAxis * kCellMapQuadrantsPerAxis,
+  kCellMapLocalCoordinateMask = kCellMapQuadrantSide - 1,
+  kCellMapCoordinateMask =
+      kCellMapQuadrantSide * kCellMapQuadrantsPerAxis - 1,
+  kCellMapQuadrantCoordinateBit = kCellMapQuadrantSide,
+  kEncodedTownIndexScale = 2,
+  kWordBits = sizeof(uint16_t) * CHAR_BIT,
+  kWordSignBit = 1u << (kWordBits - 1),
 };
 
-typedef struct Add16Result {
-  uint16_t value;
-  bool carry;
-  bool overflow;
-} Add16Result;
-
-static uint16_t Swap16(uint16_t value) {
-  return (uint16_t)((value << 8) | (value >> 8));
+static uint16_t SwapWordBytes(uint16_t value) {
+  return (uint16_t)((value << CHAR_BIT) | (value >> CHAR_BIT));
 }
 
-/* Match the recompiler's 65816 ADC model, including the decimal-mode edge.
- * Every ADC in $9710 is preceded by CLC, so this helper intentionally has no
- * carry input. */
-static Add16Result Add16(uint16_t a, uint16_t b, bool decimal) {
-  Add16Result result = { 0 };
-  if (!decimal) {
-    const uint32_t sum = (uint32_t)a + b;
-    result.value = (uint16_t)sum;
-    result.carry = (sum & 0x10000u) != 0;
-    result.overflow = ((a ^ result.value) & (b ^ result.value) & 0x8000u) != 0;
-    return result;
-  }
-
-  uint32_t adjusted = 0;
-  unsigned carry = 0;
-  unsigned high_nibble_carry = 0;
-  for (unsigned shift = 0; shift < 16; shift += 4) {
-    unsigned digit = ((a >> shift) & 0x0Fu) +
-                     ((b >> shift) & 0x0Fu) + carry;
-    carry = digit > 9;
-    if (shift == 8) high_nibble_carry = carry;
-    if (carry) digit += 6;
-    adjusted |= (uint32_t)(digit & 0x0Fu) << shift;
-  }
-  result.value = (uint16_t)adjusted;
-  result.carry = carry != 0;
-  const uint32_t visible_high_sum =
-      (a & 0xF000u) + (b & 0xF000u) + (high_nibble_carry << 12);
-  result.overflow =
-      ((a ^ visible_high_sum) & (b ^ visible_high_sum) & 0x8000u) != 0;
-  return result;
+/* Every ADC in $03:9710 follows CLC. Keep that call-site invariant named while
+ * sharing the exact CPU arithmetic with the other HLEs. */
+static Cpu65816Add16Result AddCellMapWords(uint16_t left, uint16_t right,
+                                          bool decimal) {
+  return Cpu65816_Add16(left, right, false, decimal);
 }
 
 uint16_t ActRaiser_CellMarkIndex(unsigned town, uint8_t cell_x,
                                 uint8_t cell_y) {
-  return (uint16_t)(town * 0x400u +
-                    ((cell_y & 0x10u) ? 0x200u : 0) +
-                    ((cell_x & 0x10u) ? 0x100u : 0) +
-                    (cell_y & 0x0Fu) * 0x10u +
-                    (cell_x & 0x0Fu));
+  const unsigned quadrant_column =
+      (cell_x & kCellMapQuadrantCoordinateBit) != 0;
+  const unsigned quadrant_row =
+      (cell_y & kCellMapQuadrantCoordinateBit) != 0;
+  const unsigned quadrant_index =
+      quadrant_row * kCellMapQuadrantsPerAxis + quadrant_column;
+  const unsigned local_x = cell_x & kCellMapLocalCoordinateMask;
+  const unsigned local_y = cell_y & kCellMapLocalCoordinateMask;
+  const unsigned within_quadrant_index =
+      local_y * kCellMapQuadrantSide + local_x;
+  return (uint16_t)(town * kCellMapTownCells +
+                    quadrant_index * kCellMapQuadrantCells +
+                    within_quadrant_index);
 }
 
 /* $03:9710 converts the staged word coordinates at $7C4B/$7C4D into the
@@ -82,49 +74,66 @@ RecompReturn ActRaiser_TownCellMarkIndex(CpuState *cpu) {
     abort();
   }
 
-  const uint16_t cell_x_word =
+  const uint16_t staged_cell_x =
       cpu_read16(cpu, cpu->DB, kCellMapCellX);
-  const uint16_t cell_y_word =
+  const uint16_t staged_cell_y =
       cpu_read16(cpu, cpu->DB, kCellMapCellY);
-  const uint16_t town_index =
+  const uint16_t encoded_town_index =
       cpu_read16(cpu, cpu->DB, kCellMapTownIndex);
-  const uint8_t cell_x = (uint8_t)(cell_x_word & 0x1Fu);
-  const uint8_t cell_y = (uint8_t)(cell_y_word & 0x1Fu);
+  const uint8_t cell_x =
+      (uint8_t)(staged_cell_x & kCellMapCoordinateMask);
+  const uint8_t cell_y =
+      (uint8_t)(staged_cell_y & kCellMapCoordinateMask);
   const bool decimal = cpu->_flag_D != 0;
 
-  const uint16_t quadrant =
-      (uint16_t)(((cell_y & 0x10u) ? 2u : 0u) +
-                 ((cell_x & 0x10u) ? 1u : 0u));
+  const uint16_t quadrant_column =
+      (cell_x & kCellMapQuadrantCoordinateBit) != 0;
+  const uint16_t quadrant_row =
+      (cell_y & kCellMapQuadrantCoordinateBit) != 0;
+  const uint16_t quadrant_index =
+      (uint16_t)(quadrant_row * kCellMapQuadrantsPerAxis + quadrant_column);
+  const uint16_t quadrant_offset =
+      (uint16_t)(quadrant_index * kCellMapQuadrantCells);
   uint16_t scratch_value;
-  Add16Result final;
-  if (!decimal && (town_index & 0xFF01u) == 0) {
+  Cpu65816Add16Result final_addition;
+  const bool can_use_binary_cell_index_formula =
+      !decimal && encoded_town_index <= UINT8_MAX &&
+      encoded_town_index % kEncodedTownIndexScale == 0;
+  if (can_use_binary_cell_index_formula) {
     /* The game stores town*2 in $7BFB. This is every legitimate caller and
      * is the consolidation path shared with the bridge-sidecar consumers. */
-    final.value = ActRaiser_CellMarkIndex(
-        (unsigned)(town_index >> 1), cell_x, cell_y);
-    scratch_value = (uint16_t)(final.value - (quadrant << 8));
-    final = Add16((uint16_t)(quadrant << 8), scratch_value, false);
+    const unsigned town = encoded_town_index / kEncodedTownIndexScale;
+    const uint16_t cell_index =
+        ActRaiser_CellMarkIndex(town, cell_x, cell_y);
+    scratch_value = (uint16_t)(cell_index - quadrant_offset);
+    final_addition = AddCellMapWords(quadrant_offset, scratch_value, false);
   } else {
     /* Preserve instruction-exact behavior for malformed raw town indexes and
      * for D=1, neither of which occurs in ordinary gameplay. */
-    const uint16_t row = (uint16_t)((cell_y & 0x0Fu) << 4);
-    const Add16Result within =
-        Add16((uint16_t)(cell_x & 0x0Fu), row, decimal);
-    const uint16_t town_base = (uint16_t)(Swap16(town_index) << 1);
-    const Add16Result scratch = Add16(town_base, within.value, decimal);
-    scratch_value = scratch.value;
-    final = Add16((uint16_t)(quadrant << 8), scratch_value, decimal);
+    const uint16_t local_x = cell_x & kCellMapLocalCoordinateMask;
+    const uint16_t local_y = cell_y & kCellMapLocalCoordinateMask;
+    const uint16_t row_offset =
+        (uint16_t)(local_y * kCellMapQuadrantSide);
+    const Cpu65816Add16Result within_quadrant_addition =
+        AddCellMapWords(local_x, row_offset, decimal);
+    const uint16_t town_base = (uint16_t)(
+        SwapWordBytes(encoded_town_index) * kEncodedTownIndexScale);
+    const Cpu65816Add16Result scratch_addition =
+        AddCellMapWords(town_base, within_quadrant_addition.value, decimal);
+    scratch_value = scratch_addition.value;
+    final_addition = AddCellMapWords(
+        quadrant_offset, scratch_value, decimal);
   }
   cpu_write16(cpu, cpu->DB, kCellMapScratch, scratch_value);
-  cpu->A = final.value;
-  cpu->X = final.value;
+  cpu->A = final_addition.value;
+  cpu->X = final_addition.value;
 
   cpu->P = (uint8_t)((cpu->P & (CPU_P_I | CPU_P_D | CPU_P_X)) | CPU_P_M |
-                     (final.carry ? CPU_P_C : 0) |
-                     (final.value == 0 ? CPU_P_Z : 0) |
-                     (final.overflow ? CPU_P_V : 0) |
-                     (final.value & 0x8000u ? CPU_P_N : 0));
+                     (final_addition.carry ? CPU_P_C : 0) |
+                     (final_addition.value == 0 ? CPU_P_Z : 0) |
+                     (final_addition.overflow ? CPU_P_V : 0) |
+                     (final_addition.value & kWordSignBit ? CPU_P_N : 0));
   cpu_p_to_mirrors(cpu);
-  cpu->S = (uint16_t)(cpu->S + 2);
+  cpu->S = (uint16_t)(cpu->S + k65816RtsStackBytes);
   return RECOMP_RETURN_NORMAL;
 }

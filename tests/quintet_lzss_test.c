@@ -54,7 +54,7 @@ static void TestLiteralState(void) {
   CHECK(state.write_position == 0xF2);
   CHECK(state.match_position == 0x00);
   CHECK(state.last_output == 'C');
-  CHECK(state.last_read8_phase == 3);
+  CHECK(state.last_byte_read_phase == 3);
   CHECK(!state.final_token_was_match);
   CHECK(state.dictionary[0xEF] == 'A');
   CHECK(state.dictionary[0xF0] == 'B');
