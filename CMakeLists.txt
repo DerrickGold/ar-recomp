@@ -743,6 +743,20 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_save_checksum_hle
         COMMAND actraiser_save_checksum_hle_test)
 
+    # Exhaustive 6-town x 32 x 32 semantic grid plus the complete CPU-facing
+    # contract for the shared $03:9710 cell-to-mark-map index HLE. Raw-width
+    # and decimal-mode cases pin the instruction-level edge behavior too.
+    add_executable(actraiser_cell_map_hle_test
+        tests/actraiser_cell_map_hle_test.c
+        src/actraiser/actraiser_cell_map.c
+    )
+    target_include_directories(actraiser_cell_map_hle_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_cell_map_hle
+        COMMAND actraiser_cell_map_hle_test)
+
     # Golden test for the diorama M7 scroll-interpolation math, extracted from
     # present.c with the wall-clock injected so t is controllable (Test gap 2).
     add_executable(actraiser_diorama_scroll_math_test

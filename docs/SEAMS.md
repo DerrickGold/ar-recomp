@@ -1066,7 +1066,12 @@ finish hle (`$89F0`) appends their visible metatiles after native reconstruction
 The renderer has two distinct record-presence consumers, not one. `$9CFB` writes per-cell
 **structure marks** through `$9FCD/$9FE4` into `$7F:2000` (bridge `$E1/$E2` by orientation,
 gated on `$919E+town`); `$9710` maps `(x,y)` to
-`town*$400 + quadrant*$100 + (y&15)*$10 + (x&15)`. Later, `$9D4D` dispatches active records
+`town*$400 + quadrant*$100 + (y&15)*$10 + (x&15)`. `$9710` is now a whole-body
+HLE backed by the same `ActRaiser_CellMarkIndex` function used by the bridge sidecar. A
+whole-ROM scan found 21 direct JSR sites and no external branch into its body; the wrapper
+preserves its pre-quadrant `$7C05` scratch value, A/X result, final flags, decimal-mode edge,
+and RTS stack effect. An exhaustive 6-town × 32 × 32 test pins the canonical map and separate
+raw-word cases pin the instruction-level ABI. Later, `$9D4D` dispatches active records
 through `$9F6B/$9F8D` and `$A4A8/$A4F7`: it selects the bridge rebuild program from the
 `$03:D4E2` family, arms the record's `$77E7+slot*8` step entry, and executes its initial draw
 through `$A591` → `$9C43`. `$A591` interprets a count plus `{dx,dy,metatile}` triples;
