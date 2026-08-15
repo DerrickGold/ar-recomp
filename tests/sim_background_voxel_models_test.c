@@ -39,6 +39,20 @@ static bool HorizontalFaceCovers(const SimBackgroundVoxelModel *model,
   return false;
 }
 
+static float RegionMaxZ(const SimBackgroundVoxelModel *model,
+                        float x0, float y0, float x1, float y1) {
+  float max_z = 0.0f;
+  for (uint16_t face = 0; face < model->face_count; face++)
+    for (int point = 0; point < 4; point++) {
+      const SimBackgroundVoxelModelPoint *p =
+          &model->faces[face].points[point];
+      if (p->x >= x0 && p->x <= x1 && p->y >= y0 && p->y <= y1 &&
+          p->z > max_z)
+        max_z = p->z;
+    }
+  return max_z;
+}
+
 static SimBackgroundVoxelModel Build(SimBackgroundVoxelKind kind,
                                      SimBackgroundVoxelDetail detail) {
   SimBackgroundVoxelObject object = {
@@ -84,7 +98,23 @@ int main(void) {
   CHECK(cathedral.min_y >= 0.0f && cathedral.max_y <= 32.0f);
   CHECK(cathedral.max_z == 24.0f);
   CHECK(cathedral.min_y >= 8.0f);  /* protected rear land stays visually open */
-  CHECK(MaterialFaces(&cathedral, kSimVoxelMaterial_WallLight) >= 25);
+  /* Surface compilation removes column caps buried in the facade/base. */
+  CHECK(MaterialFaces(&cathedral, kSimVoxelMaterial_WallLight) >= 15);
+
+  SimBackgroundVoxelObject cathedral_object = {
+    .kind = kSimBackgroundVoxel_Cathedral,
+    .record_slot = 2,
+  };
+  SimBackgroundVoxelModel decorated_cathedral;
+  SimBackgroundVoxelModel_BuildStyled(
+      &cathedral_object, kSimBackgroundVoxelDetail_Balanced,
+      kSimBackgroundVoxelStyle_Trim, &decorated_cathedral);
+  CHECK(!decorated_cathedral.overflow);
+  CHECK(MaterialFaces(&decorated_cathedral, kSimVoxelMaterial_Gold) > 0);
+  CHECK(RegionMaxZ(&decorated_cathedral, 2.0f, 24.0f, 9.0f, 31.5f)
+        <= 16.4f);
+  CHECK(RegionMaxZ(&decorated_cathedral, 23.0f, 24.0f, 30.0f, 31.5f)
+        <= 16.4f);
 
   SimBackgroundVoxelModel windmill = Build(
       kSimBackgroundVoxel_Windmill, kSimBackgroundVoxelDetail_Balanced);
@@ -130,6 +160,9 @@ int main(void) {
       &styled_factory_object, kSimBackgroundVoxelDetail_High,
       kSimBackgroundVoxelStyle_Varied, &repeated_varied_factory);
   CHECK(!architectural_factory.overflow && !varied_factory.overflow);
+  CHECK(architectural_factory.authored_face_count >
+        architectural_factory.face_count);
+  CHECK(architectural_factory.box_count > 0);
   CHECK(MaterialFaces(&trimmed_factory, kSimVoxelMaterial_Paving) == 0);
   CHECK(MaterialFaces(&architectural_factory, kSimVoxelMaterial_Paving) > 0);
   CHECK(architectural_factory.face_count > trimmed_factory.face_count);
@@ -138,6 +171,12 @@ int main(void) {
   CHECK(memcmp(varied_factory.faces, repeated_varied_factory.faces,
                varied_factory.face_count * sizeof(varied_factory.faces[0]))
         == 0);
+  int occluded_vertices = 0;
+  for (uint16_t face = 0; face < varied_factory.face_count; face++)
+    for (int point = 0; point < 4; point++)
+      if (varied_factory.faces[face].occlusion[point] < 255)
+        occluded_vertices++;
+  CHECK(occluded_vertices > 0);
 
   SimBackgroundVoxelModel low_basic, low_varied;
   SimBackgroundVoxelModel_BuildStyled(
@@ -186,7 +225,9 @@ int main(void) {
       &construction_object, kSimBackgroundVoxelDetail_Balanced,
       &construction);
   CHECK(!construction.overflow);
-  CHECK(construction.face_count < house.face_count);
+  /* Clean roof surfaces use fewer faces than the deliberately skeletal frame;
+   * construction identity is material-based, not a face-count heuristic. */
+  CHECK(construction.face_count != house.face_count);
   CHECK(MaterialFaces(&construction, kSimVoxelMaterial_Wood) > 0);
 
   /* Every family respects each performance target, and richer targets are

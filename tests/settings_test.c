@@ -90,8 +90,8 @@ static void TestDefaultsAndMetadata(void) {
    * cycle then added three: the Cheats-tab toggle that arms it, plus its
    * keyboard and gamepad binding rows. The sim synthetic-part work added one
    * measured, gameplay-affecting actor-range row. Background voxel polish then
-   * added four independent performance boundaries. */
-  CHECK(g_setting_desc_count == 264);
+   * added five independent performance boundaries. */
+  CHECK(g_setting_desc_count == 265);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -148,13 +148,14 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim3d_separated_composite);
   CHECK(g_settings.sim3d_ground_projection);
   CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
+  CHECK(g_settings.sim3d_voxel_lod == kSimBackgroundVoxelLod_Adaptive);
   CHECK(g_settings.sim3d_voxel_shading ==
         kSimBackgroundVoxelShading_MaterialAware);
   CHECK(g_settings.sim3d_voxel_style == kSimBackgroundVoxelStyle_Varied);
   CHECK(g_settings.sim3d_voxel_facing ==
         kSimBackgroundVoxelFacing_PerModel);
   CHECK(g_settings.sim3d_voxel_render_scale ==
-        kSimBackgroundVoxelRenderScale_Native);
+        kSimBackgroundVoxelRenderScale_PixelClean);
   CHECK(g_settings.sim3d_object_billboards);
   CHECK(g_settings.sim3d_virtual_height);
   CHECK(g_settings.sim3d_shadows);

@@ -46,6 +46,7 @@ static void AddFace(SimBackgroundVoxelModel *model,
   face->points[3] = d;
   face->material = (uint8_t)material;
   face->brightness = brightness;
+  for (int point = 0; point < 4; point++) face->occlusion[point] = 255;
   IncludePoint(model, a);
   IncludePoint(model, b);
   IncludePoint(model, c);
@@ -70,6 +71,13 @@ static void AddBox(SimBackgroundVoxelModel *model,
                    SimBackgroundVoxelMaterial material,
                    uint8_t faces) {
   if (x1 <= x0 || y1 <= y0 || z1 <= z0) return;
+  if (model->box_count >= kSimBackgroundVoxelModelMaxBoxes) {
+    model->overflow = true;
+    return;
+  }
+  model->boxes[model->box_count++] = (SimBackgroundVoxelModelBox){
+    x0, y0, z0, x1, y1, z1,
+  };
   if (faces & kBoxFace_Top)
     AddFace(model, material, 255,
             Point(x0, y0, z1), Point(x1, y0, z1),
@@ -137,6 +145,62 @@ static int DetailChoice(SimBackgroundVoxelDetail detail,
   return high;
 }
 
+static void AddGableRoofX(SimBackgroundVoxelModel *model,
+                          float x0, float x1, float y0, float y1,
+                          float eave_z, float ridge_z,
+                          SimBackgroundVoxelMaterial roof,
+                          SimBackgroundVoxelMaterial gable) {
+  float ridge_x = (x0 + x1) * 0.5f;
+  AddFace(model, roof, 218,
+          Point(x0, y0, eave_z), Point(ridge_x, y0, ridge_z),
+          Point(ridge_x, y1, ridge_z), Point(x0, y1, eave_z));
+  AddFace(model, roof, 248,
+          Point(ridge_x, y0, ridge_z), Point(x1, y0, eave_z),
+          Point(x1, y1, eave_z), Point(ridge_x, y1, ridge_z));
+  AddFace(model, gable, 232,
+          Point(x0, y1, eave_z), Point(x1, y1, eave_z),
+          Point(ridge_x, y1, ridge_z), Point(ridge_x, y1, ridge_z));
+  AddFace(model, gable, 178,
+          Point(x1, y0, eave_z), Point(x0, y0, eave_z),
+          Point(ridge_x, y0, ridge_z), Point(ridge_x, y0, ridge_z));
+}
+
+static void AddGableRoofY(SimBackgroundVoxelModel *model,
+                          float x0, float x1, float y0, float y1,
+                          float eave_z, float ridge_z,
+                          SimBackgroundVoxelMaterial roof,
+                          SimBackgroundVoxelMaterial gable) {
+  float ridge_y = (y0 + y1) * 0.5f;
+  AddFace(model, roof, 190,
+          Point(x0, y0, eave_z), Point(x1, y0, eave_z),
+          Point(x1, ridge_y, ridge_z), Point(x0, ridge_y, ridge_z));
+  AddFace(model, roof, 242,
+          Point(x0, ridge_y, ridge_z), Point(x1, ridge_y, ridge_z),
+          Point(x1, y1, eave_z), Point(x0, y1, eave_z));
+  AddFace(model, gable, 204,
+          Point(x1, y0, eave_z), Point(x1, y1, eave_z),
+          Point(x1, ridge_y, ridge_z), Point(x1, ridge_y, ridge_z));
+  AddFace(model, gable, 190,
+          Point(x0, y1, eave_z), Point(x0, y0, eave_z),
+          Point(x0, ridge_y, ridge_z), Point(x0, ridge_y, ridge_z));
+}
+
+static void AddShedRoofX(SimBackgroundVoxelModel *model,
+                         float x0, float x1, float y0, float y1,
+                         float low_z, float high_z,
+                         SimBackgroundVoxelMaterial roof,
+                         SimBackgroundVoxelMaterial gable) {
+  AddFace(model, roof, 232,
+          Point(x0, y0, low_z), Point(x1, y0, high_z),
+          Point(x1, y1, high_z), Point(x0, y1, low_z));
+  AddFace(model, gable, 232,
+          Point(x0, y1, low_z), Point(x1, y1, low_z),
+          Point(x1, y1, high_z), Point(x1, y1, high_z));
+  AddFace(model, gable, 178,
+          Point(x1, y0, high_z), Point(x0, y0, low_z),
+          Point(x1, y0, low_z), Point(x1, y0, high_z));
+}
+
 static void BuildHouse(const SimBackgroundVoxelObject *object,
                        SimBackgroundVoxelDetail detail,
                        SimBackgroundVoxelModel *model) {
@@ -151,22 +215,11 @@ static void BuildHouse(const SimBackgroundVoxelObject *object,
                  kSimVoxelMaterial_Trim);
   AddStandardBox(model, 2.5f, 3.0f, 2.0f, 13.5f, 14.5f, 10.0f,
                  kSimVoxelMaterial_Wall);
-  int roof_steps = DetailChoice(detail, 2, 4, 6, 8);
   /* A four-pixel rise keeps the gable recognizable without letting the roof
    * dominate the finished house. The older six-pixel rise was the remaining
    * source of the too-tall silhouette even after presentation scaling. */
-  float roof_step_height = 4.0f / roof_steps;
-  for (int step = 0; step < roof_steps; step++) {
-    float progress = roof_steps == 1 ? 0.0f : (float)step / (roof_steps - 1);
-    float inset = 1.0f + progress * 6.0f;
-    AddStandardBox(model, inset, 2.0f + progress * 1.5f,
-                   10.0f + step * roof_step_height,
-                   16.0f - inset, 15.0f - progress * 1.5f,
-                   10.0f + (step + 1) * roof_step_height,
-                   step >= roof_steps / 2
-                       ? kSimVoxelMaterial_RoofLight
-                       : kSimVoxelMaterial_Roof);
-  }
+  AddGableRoofX(model, 1.0f, 15.0f, 2.0f, 15.0f, 10.0f, 14.0f,
+                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
   AddStandardBox(model, 7.0f, 14.1f, 2.0f, 10.0f, 15.3f, 7.5f,
                  kSimVoxelMaterial_Dark);
   if (detail == kSimBackgroundVoxelDetail_Low) return;
@@ -201,8 +254,6 @@ static void BuildHouse(const SimBackgroundVoxelObject *object,
                    kSimVoxelMaterial_Trim);
     AddStandardBox(model, 7.0f, 3.0f, 14.0f, 9.0f, 14.0f, 15.0f,
                    kSimVoxelMaterial_RoofLight);
-    AddStandardBox(model, 11.0f, 5.0f, 11.5f, 13.0f, 7.0f, 15.5f,
-                   kSimVoxelMaterial_Dark);
   }
 
   if (detail == kSimBackgroundVoxelDetail_Ultra) {
@@ -234,22 +285,8 @@ static void BuildCathedral(SimBackgroundVoxelDetail detail,
 
   /* The first 16 pixels are the full-height lower mass. The second source
    * layer is compressed to eight pixels for perspective correction. */
-  int roof_steps = DetailChoice(detail, 3, 5, 8, 10);
-  float roof_step_height = 8.0f / roof_steps;
-  for (int step = 0; step < roof_steps; step++) {
-    float progress = roof_steps == 1 ? 0.0f : (float)step / (roof_steps - 1);
-    float inset = 1.5f + progress * 13.0f;
-    /* A gable narrows only across X. Keeping its depth gives the temple the
-     * long stepped ridge visible in the approved reference instead of a
-     * vertically dominant pyramid. */
-    AddStandardBox(model, inset, 9.5f + progress * 0.5f,
-                   16.0f + step * roof_step_height,
-                   32.0f - inset, 30.5f - progress * 0.5f,
-                   16.0f + (step + 1) * roof_step_height,
-                   step >= roof_steps / 2
-                       ? kSimVoxelMaterial_RoofLight
-                       : kSimVoxelMaterial_Roof);
-  }
+  AddGableRoofX(model, 2.0f, 30.0f, 9.5f, 30.5f, 16.0f, 24.0f,
+                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
 
   int columns = DetailChoice(detail, 3, 5, 6, 7);
   for (int i = 0; i < columns; i++) {
@@ -364,19 +401,8 @@ static void BuildWindmill(const SimBackgroundVoxelObject *object,
                  kSimVoxelMaterial_Wall);
   AddStandardBox(model, 9.5f, 3.5f, 18.0f, 22.5f, 14.0f, 22.0f,
                  kSimVoxelMaterial_WallLight);
-  int roof_steps = DetailChoice(detail, 2, 4, 6, 8);
-  float roof_step_height = 8.0f / roof_steps;
-  for (int step = 0; step < roof_steps; step++) {
-    float progress = roof_steps == 1 ? 0.0f : (float)step / (roof_steps - 1);
-    float inset = 6.5f + progress * 8.0f;
-    AddStandardBox(model, inset, 2.0f + progress * 1.5f,
-                   22.0f + step * roof_step_height,
-                   32.0f - inset, 15.0f - progress * 1.5f,
-                   22.0f + (step + 1) * roof_step_height,
-                   step >= roof_steps / 2
-                       ? kSimVoxelMaterial_RoofLight
-                       : kSimVoxelMaterial_Roof);
-  }
+  AddGableRoofX(model, 6.5f, 25.5f, 2.0f, 15.0f, 22.0f, 30.0f,
+                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
   AddStandardBox(model, 13.5f, 14.0f, 2.0f, 18.5f, 15.5f, 9.0f,
                  kSimVoxelMaterial_Dark);
   AddStandardBox(model, 14.0f, 14.1f, 18.0f, 18.0f, 15.2f, 22.0f,
@@ -416,43 +442,6 @@ static void BuildWindmill(const SimBackgroundVoxelObject *object,
   }
 }
 
-static void AddFactoryULayer(SimBackgroundVoxelModel *model,
-                             float x0, float spine_x, float x1,
-                             float y0, float gap_y0, float gap_y1, float y1,
-                             float z0, float z1,
-                             SimBackgroundVoxelMaterial material) {
-  /* Open to the left: two horizontal arms join one right-hand spine. Omit the
-   * touching east/west faces and restore only the spine wall exposed inside
-   * the courtyard, avoiding coplanar internal faces and their seam noise. */
-  AddBox(model, x0, y0, z0, spine_x, gap_y0, z1, material,
-         kBoxFace_AllVisible & (uint8_t)~kBoxFace_East);
-  AddBox(model, x0, gap_y1, z0, spine_x, y1, z1, material,
-         kBoxFace_AllVisible & (uint8_t)~kBoxFace_East);
-  AddBox(model, spine_x, y0, z0, x1, y1, z1, material,
-         kBoxFace_AllVisible & (uint8_t)~kBoxFace_West);
-  AddFace(model, material, 190,
-          Point(spine_x, gap_y0, z0), Point(spine_x, gap_y1, z0),
-          Point(spine_x, gap_y1, z1), Point(spine_x, gap_y0, z1));
-}
-
-static void AddFactoryArmRoof(SimBackgroundVoxelModel *model,
-                              SimBackgroundVoxelDetail detail,
-                              float y0, float y1) {
-  int steps = DetailChoice(detail, 1, 2, 3, 4);
-  float step_height = 3.0f / steps;
-  for (int step = 0; step < steps; step++) {
-    float progress = steps == 1 ? 0.0f : (float)step / (steps - 1);
-    float inset = progress * 4.0f;
-    AddStandardBox(model, 0.8f, y0 + inset,
-                   9.0f + step * step_height,
-                   22.2f, y1 - inset,
-                   9.0f + (step + 1) * step_height,
-                   step >= steps / 2
-                       ? kSimVoxelMaterial_RoofLight
-                       : kSimVoxelMaterial_Roof);
-  }
-}
-
 static void BuildFactory(const SimBackgroundVoxelObject *object,
                          SimBackgroundVoxelDetail detail,
                          SimBackgroundVoxelModel *model) {
@@ -463,19 +452,27 @@ static void BuildFactory(const SimBackgroundVoxelObject *object,
     return;
   }
 
-  /* The authentic 2x2 factory is a sideways U, open toward the left. Its
-   * centre is real courtyard/ground, not a dark recess painted onto a block. */
-  AddFactoryULayer(model, 0.5f, 21.5f, 31.5f,
-                   0.5f, 11.5f, 20.5f, 31.5f,
-                   0.0f, 1.5f, kSimVoxelMaterial_Trim);
-  AddFactoryULayer(model, 1.5f, 21.5f, 30.5f,
-                   1.5f, 11.5f, 20.5f, 30.5f,
-                   1.5f, 8.0f, kSimVoxelMaterial_Wall);
-  AddFactoryULayer(model, 0.8f, 21.5f, 31.2f,
-                   1.0f, 11.0f, 21.0f, 31.0f,
-                   7.5f, 9.0f, kSimVoxelMaterial_Roof);
-  AddFactoryArmRoof(model, detail, 1.0f, 11.0f);
-  AddFactoryArmRoof(model, detail, 21.0f, 31.0f);
+  /* The front arm is lower and the courtyard gap wider than the rear arm.
+   * From the normal SIM camera this makes the sideways-U readable instead of
+   * letting its near roof visually close the centre into a purple block. */
+  AddStandardBox(model, 0.5f, 0.5f, 0.0f, 22.0f, 11.0f, 1.5f,
+                 kSimVoxelMaterial_Trim);
+  AddStandardBox(model, 0.5f, 22.0f, 0.0f, 22.0f, 31.5f, 1.5f,
+                 kSimVoxelMaterial_Trim);
+  AddStandardBox(model, 21.0f, 0.5f, 0.0f, 31.5f, 31.5f, 1.5f,
+                 kSimVoxelMaterial_Trim);
+  AddStandardBox(model, 1.5f, 1.5f, 1.5f, 22.0f, 10.5f, 9.0f,
+                 kSimVoxelMaterial_Wall);
+  AddStandardBox(model, 1.5f, 23.0f, 1.5f, 22.0f, 30.5f, 6.8f,
+                 kSimVoxelMaterial_WallLight);
+  AddStandardBox(model, 21.0f, 1.5f, 1.5f, 30.5f, 30.5f, 9.0f,
+                 kSimVoxelMaterial_Wall);
+  AddStandardBox(model, 20.8f, 1.0f, 8.7f, 31.0f, 31.0f, 9.5f,
+                 kSimVoxelMaterial_Roof);
+  AddGableRoofY(model, 0.8f, 22.2f, 0.8f, 11.2f, 9.0f, 12.0f,
+                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
+  AddGableRoofY(model, 0.8f, 22.2f, 21.8f, 31.2f, 6.8f, 8.8f,
+                kSimVoxelMaterial_RoofLight, kSimVoxelMaterial_WallLight);
 
   static const float chimney_xy[][2] = {
     {4.0f, 5.0f}, {4.0f, 24.0f},
@@ -484,22 +481,24 @@ static void BuildFactory(const SimBackgroundVoxelObject *object,
   int chimneys = DetailChoice(detail, 1, 2, 4, 4);
   for (int i = 0; i < chimneys; i++) {
     float x = chimney_xy[i][0], y = chimney_xy[i][1];
-    AddStandardBox(model, x, y, 10.0f, x + 3.0f, y + 3.0f, 16.0f,
+    float base_z = y > 20.0f ? 8.0f : 10.0f;
+    AddStandardBox(model, x, y, base_z, x + 3.0f, y + 3.0f,
+                   base_z + 6.0f,
                    kSimVoxelMaterial_Metal);
-    AddStandardBox(model, x - 0.5f, y - 0.5f, 15.0f,
-                   x + 3.5f, y + 3.5f, 17.0f,
+    AddStandardBox(model, x - 0.5f, y - 0.5f, base_z + 5.0f,
+                   x + 3.5f, y + 3.5f, base_z + 7.0f,
                    kSimVoxelMaterial_Dark);
   }
   /* Public loading bays on the front arm and another bay opening into the
    * courtyard make the missing centre legible at the gameplay camera. */
-  AddStandardBox(model, 13.0f, 30.0f, 1.5f, 19.0f, 32.0f, 7.0f,
+  AddStandardBox(model, 13.0f, 30.0f, 1.5f, 19.0f, 32.0f, 6.2f,
                  kSimVoxelMaterial_Dark);
   if (detail == kSimBackgroundVoxelDetail_Low) return;
-  AddStandardBox(model, 4.0f, 30.0f, 3.5f, 8.0f, 31.5f, 6.5f,
+  AddStandardBox(model, 4.0f, 30.0f, 3.0f, 8.0f, 31.5f, 5.8f,
                  kSimVoxelMaterial_Dark);
   AddStandardBox(model, 24.0f, 30.0f, 3.5f, 28.0f, 31.5f, 6.5f,
                  kSimVoxelMaterial_Dark);
-  AddStandardBox(model, 8.0f, 10.7f, 2.5f, 15.0f, 12.0f, 7.0f,
+  AddStandardBox(model, 8.0f, 10.2f, 2.5f, 15.0f, 11.5f, 7.2f,
                  kSimVoxelMaterial_Dark);
 
   if (detail >= kSimBackgroundVoxelDetail_High) {
@@ -646,6 +645,193 @@ static void RecomputeModelBounds(SimBackgroundVoxelModel *model) {
       IncludePoint(model, model->faces[face].points[point]);
 }
 
+static bool NearlyEqual(float a, float b) {
+  float difference = a - b;
+  return difference > -0.0001f && difference < 0.0001f;
+}
+
+typedef struct AxisFace {
+  int axis;
+  float normal;
+  float plane;
+  float u0, u1, v0, v1;
+} AxisFace;
+
+static bool GetAxisFace(const SimBackgroundVoxelModelFace *face,
+                        AxisFace *out) {
+  const SimBackgroundVoxelModelPoint *a = &face->points[0];
+  const SimBackgroundVoxelModelPoint *b = &face->points[1];
+  const SimBackgroundVoxelModelPoint *d = &face->points[3];
+  float ux = b->x - a->x, uy = b->y - a->y, uz = b->z - a->z;
+  float vx = d->x - a->x, vy = d->y - a->y, vz = d->z - a->z;
+  float normal[3] = {
+    uy * vz - uz * vy,
+    uz * vx - ux * vz,
+    ux * vy - uy * vx,
+  };
+  int axis = 0;
+  if (normal[1] * normal[1] > normal[axis] * normal[axis]) axis = 1;
+  if (normal[2] * normal[2] > normal[axis] * normal[axis]) axis = 2;
+  float length = normal[axis] < 0.0f ? -normal[axis] : normal[axis];
+  if (length < 0.0001f) return false;
+  for (int other = 0; other < 3; other++) {
+    if (other == axis) continue;
+    float component = normal[other] < 0.0f ? -normal[other] : normal[other];
+    if (component > length * 0.001f) return false;
+  }
+  /* Match the authored AddBox winding correction used by lighting. */
+  float outward = normal[axis] > 0.0f ? 1.0f : -1.0f;
+  if (axis != 2 || outward < 0.0f) outward = -outward;
+  float coordinate[4][3];
+  for (int point = 0; point < 4; point++) {
+    coordinate[point][0] = face->points[point].x;
+    coordinate[point][1] = face->points[point].y;
+    coordinate[point][2] = face->points[point].z;
+  }
+  int u_axis = axis == 0 ? 1 : 0;
+  int v_axis = axis == 2 ? 1 : 2;
+  if (axis == 1) v_axis = 2;
+  *out = (AxisFace){
+    .axis = axis,
+    .normal = outward,
+    .plane = coordinate[0][axis],
+    .u0 = coordinate[0][u_axis], .u1 = coordinate[0][u_axis],
+    .v0 = coordinate[0][v_axis], .v1 = coordinate[0][v_axis],
+  };
+  for (int point = 1; point < 4; point++) {
+    float u = coordinate[point][u_axis];
+    float v = coordinate[point][v_axis];
+    if (u < out->u0) out->u0 = u;
+    if (u > out->u1) out->u1 = u;
+    if (v < out->v0) out->v0 = v;
+    if (v > out->v1) out->v1 = v;
+  }
+  return true;
+}
+
+static bool PointInsideBox(const SimBackgroundVoxelModelBox *box,
+                           float x, float y, float z) {
+  const float epsilon = 0.0001f;
+  return x > box->x0 + epsilon && x < box->x1 - epsilon &&
+      y > box->y0 + epsilon && y < box->y1 - epsilon &&
+      z > box->z0 + epsilon && z < box->z1 - epsilon;
+}
+
+static bool PointInsideAnyBox(const SimBackgroundVoxelModel *model,
+                              float x, float y, float z) {
+  for (uint16_t box = 0; box < model->box_count; box++)
+    if (PointInsideBox(&model->boxes[box], x, y, z)) return true;
+  return false;
+}
+
+static bool FaceIsBuried(const SimBackgroundVoxelModel *model,
+                         const SimBackgroundVoxelModelFace *face) {
+  AxisFace axis_face;
+  if (!GetAxisFace(face, &axis_face)) return false;
+  SimBackgroundVoxelModelPoint center = {0.0f, 0.0f, 0.0f};
+  for (int point = 0; point < 4; point++) {
+    center.x += face->points[point].x * 0.25f;
+    center.y += face->points[point].y * 0.25f;
+    center.z += face->points[point].z * 0.25f;
+  }
+  const float normal_step = 0.015f;
+  for (int sample = 0; sample < 5; sample++) {
+    SimBackgroundVoxelModelPoint point = sample == 4
+        ? center : face->points[sample];
+    if (sample < 4) {
+      /* Keep corner samples away from exact solid boundaries. */
+      point.x += (center.x - point.x) * 0.002f;
+      point.y += (center.y - point.y) * 0.002f;
+      point.z += (center.z - point.z) * 0.002f;
+    }
+    float *coordinate[3] = {&point.x, &point.y, &point.z};
+    *coordinate[axis_face.axis] += axis_face.normal * normal_step;
+    if (!PointInsideAnyBox(model, point.x, point.y, point.z)) return false;
+  }
+  return true;
+}
+
+static bool FacesAreDuplicate(const SimBackgroundVoxelModelFace *a,
+                              const SimBackgroundVoxelModelFace *b) {
+  if (a->material != b->material) return false;
+  AxisFace left, right;
+  if (!GetAxisFace(a, &left) || !GetAxisFace(b, &right)) return false;
+  return left.axis == right.axis && NearlyEqual(left.normal, right.normal) &&
+      NearlyEqual(left.plane, right.plane) &&
+      NearlyEqual(left.u0, right.u0) && NearlyEqual(left.u1, right.u1) &&
+      NearlyEqual(left.v0, right.v0) && NearlyEqual(left.v1, right.v1);
+}
+
+static void RemoveBuriedAndDuplicateFaces(SimBackgroundVoxelModel *model) {
+  uint16_t write = 0;
+  for (uint16_t face = 0; face < model->face_count; face++) {
+    if (FaceIsBuried(model, &model->faces[face])) continue;
+    bool duplicate = false;
+    for (uint16_t prior = 0; prior < write; prior++)
+      if (FacesAreDuplicate(&model->faces[prior], &model->faces[face])) {
+        duplicate = true;
+        break;
+      }
+    if (!duplicate) model->faces[write++] = model->faces[face];
+  }
+  model->face_count = write;
+}
+
+static void ComputeCornerOcclusion(SimBackgroundVoxelModel *model) {
+  const float normal_step = 0.02f;
+  const float tangent_step = 0.04f;
+  static const uint8_t visibility[] = {255, 226, 204, 178};
+  for (uint16_t face_index = 0; face_index < model->face_count; face_index++) {
+    SimBackgroundVoxelModelFace *face = &model->faces[face_index];
+    AxisFace axis_face;
+    if (!GetAxisFace(face, &axis_face)) continue;
+    int tangent[2], at = 0;
+    for (int axis = 0; axis < 3; axis++)
+      if (axis != axis_face.axis) tangent[at++] = axis;
+    float center[3] = {0.0f, 0.0f, 0.0f};
+    for (int point = 0; point < 4; point++) {
+      center[0] += face->points[point].x * 0.25f;
+      center[1] += face->points[point].y * 0.25f;
+      center[2] += face->points[point].z * 0.25f;
+    }
+    for (int point = 0; point < 4; point++) {
+      float origin[3] = {
+        face->points[point].x,
+        face->points[point].y,
+        face->points[point].z,
+      };
+      origin[axis_face.axis] += axis_face.normal * normal_step;
+      float direction[2] = {
+        origin[tangent[0]] < center[tangent[0]] ? -1.0f : 1.0f,
+        origin[tangent[1]] < center[tangent[1]] ? -1.0f : 1.0f,
+      };
+      float side_a[3] = {origin[0], origin[1], origin[2]};
+      float side_b[3] = {origin[0], origin[1], origin[2]};
+      float corner[3] = {origin[0], origin[1], origin[2]};
+      side_a[tangent[0]] += direction[0] * tangent_step;
+      side_b[tangent[1]] += direction[1] * tangent_step;
+      corner[tangent[0]] += direction[0] * tangent_step;
+      corner[tangent[1]] += direction[1] * tangent_step;
+      bool occupied_a = PointInsideAnyBox(
+          model, side_a[0], side_a[1], side_a[2]);
+      bool occupied_b = PointInsideAnyBox(
+          model, side_b[0], side_b[1], side_b[2]);
+      bool occupied_corner = PointInsideAnyBox(
+          model, corner[0], corner[1], corner[2]);
+      int occlusion = occupied_a && occupied_b
+          ? 3 : (int)occupied_a + (int)occupied_b + (int)occupied_corner;
+      face->occlusion[point] = visibility[occlusion];
+    }
+  }
+}
+
+static void FinalizeModelSurface(SimBackgroundVoxelModel *model) {
+  model->authored_face_count = model->face_count;
+  RemoveBuriedAndDuplicateFaces(model);
+  ComputeCornerOcclusion(model);
+  RecomputeModelBounds(model);
+}
+
 static void BuildAlternateFacingHouse(SimBackgroundVoxelDetail detail,
                                       SimBackgroundVoxelModel *model) {
   /* The authentic alternate is not a construction frame or a bare 90-degree
@@ -656,28 +842,67 @@ static void BuildAlternateFacingHouse(SimBackgroundVoxelDetail detail,
     for (int point = 0; point < 4; point++)
       model->faces[face].points[point].x =
           3.8f + model->faces[face].points[point].x * 0.76f;
+  for (uint16_t box = 0; box < model->box_count; box++) {
+    model->boxes[box].x0 = 3.8f + model->boxes[box].x0 * 0.76f;
+    model->boxes[box].x1 = 3.8f + model->boxes[box].x1 * 0.76f;
+  }
   RecomputeModelBounds(model);
 
   AddStandardBox(model, 0.7f, 4.0f, 0.0f, 6.4f, 15.0f, 1.5f,
                  kSimVoxelMaterial_Trim);
   AddStandardBox(model, 1.1f, 5.0f, 1.5f, 6.0f, 14.3f, 6.5f,
                  kSimVoxelMaterial_WallLight);
-  int roof_steps = DetailChoice(detail, 2, 3, 4, 5);
-  float step_width = 4.8f / roof_steps;
-  float step_height = 2.0f / roof_steps;
-  for (int step = 0; step < roof_steps; step++)
-    AddStandardBox(model,
-                   0.6f + step * step_width, 4.2f, 6.5f + step * step_height,
-                   6.6f, 14.8f, 6.5f + (step + 1) * step_height,
-                   step >= roof_steps / 2
-                       ? kSimVoxelMaterial_RoofLight
-                       : kSimVoxelMaterial_Roof);
+  AddShedRoofX(model, 0.6f, 6.6f, 4.2f, 14.8f, 6.5f, 8.5f,
+               kSimVoxelMaterial_RoofLight,
+               kSimVoxelMaterial_WallLight);
   if (detail != kSimBackgroundVoxelDetail_Low) {
     AddStandardBox(model, 2.2f, 14.0f, 2.8f, 4.6f, 15.1f, 5.5f,
                    kSimVoxelMaterial_Dark);
     AddStandardBox(model, 1.8f, 13.9f, 5.3f, 5.0f, 15.2f, 5.8f,
                    kSimVoxelMaterial_Trim);
   }
+}
+
+static void AddCathedralGoldDecorations(
+    SimBackgroundVoxelModel *model,
+    SimBackgroundVoxelDetail detail) {
+  /* A shallow winged relief recalls the gold eagle in the original Fillmore
+   * cathedral art. It sits just in front of the centre gable, parallel to the
+   * facade, so it actually presents toward the gameplay camera. Broad pieces
+   * survive native resolution better than literal one-voxel feather detail. */
+  const float crest_y0 = 31.2f, crest_y1 = 31.8f;
+  AddStandardBox(model, 15.3f, crest_y0, 17.2f,
+                 16.7f, crest_y1, 20.2f,
+                 kSimVoxelMaterial_Gold);
+  AddStandardBox(model, 12.0f, crest_y0, 18.0f,
+                 15.3f, crest_y1, 18.9f,
+                 kSimVoxelMaterial_Gold);
+  AddStandardBox(model, 16.7f, crest_y0, 18.0f,
+                 20.0f, crest_y1, 18.9f,
+                 kSimVoxelMaterial_Gold);
+  if (detail < kSimBackgroundVoxelDetail_High) return;
+  AddStandardBox(model, 11.5f, crest_y0, 18.7f,
+                 13.2f, crest_y1, 19.5f,
+                 kSimVoxelMaterial_Gold);
+  AddStandardBox(model, 18.8f, crest_y0, 18.7f,
+                 20.5f, crest_y1, 19.5f,
+                 kSimVoxelMaterial_Gold);
+
+  AddStandardBox(model, 10.0f, 31.0f, 15.6f,
+                 22.0f, 31.8f, 16.4f,
+                 kSimVoxelMaterial_Gold);
+
+  /* Gold doorway jambs and lintel add a second, lower accent without coating
+   * the pale masonry or turning every facade edge into bright noise. */
+  AddStandardBox(model, 13.4f, 31.0f, 2.8f,
+                 14.2f, 31.8f, 12.8f,
+                 kSimVoxelMaterial_Gold);
+  AddStandardBox(model, 17.8f, 31.0f, 2.8f,
+                 18.6f, 31.8f, 12.8f,
+                 kSimVoxelMaterial_Gold);
+  AddStandardBox(model, 13.4f, 31.0f, 12.0f,
+                 18.6f, 31.8f, 12.8f,
+                 kSimVoxelMaterial_Gold);
 }
 
 static void BuildSilhouetteTrim(
@@ -712,6 +937,14 @@ static void BuildSilhouetteTrim(
                      kSimVoxelMaterial_Trim);
       AddStandardBox(model, 29.0f, 10.0f, 15.1f, 30.2f, 29.5f, 16.1f,
                      kSimVoxelMaterial_Trim);
+      /* Keep the side roof planes uninterrupted. Earlier tower experiments
+       * left either pointed caps or square blocks sitting on the slope; both
+       * fought the simple cathedral silhouette approved from the source art. */
+      AddGableRoofX(model, 10.0f, 22.0f, 27.5f, 31.2f,
+                    16.2f, 20.5f,
+                    kSimVoxelMaterial_RoofLight,
+                    kSimVoxelMaterial_WallLight);
+      AddCathedralGoldDecorations(model, detail);
       break;
     case kSimBackgroundVoxel_Windmill:
       AddStandardBox(model, 7.0f, 13.8f, 17.4f, 25.0f, 15.4f, 18.3f,
@@ -720,11 +953,19 @@ static void BuildSilhouetteTrim(
                      kSimVoxelMaterial_Wood);
       AddStandardBox(model, 23.5f, 13.8f, 2.0f, 24.6f, 15.2f, 18.0f,
                      kSimVoxelMaterial_Wood);
+      AddStandardBox(model, 6.4f, 13.0f, 16.8f, 25.6f, 15.8f, 17.5f,
+                     kSimVoxelMaterial_Wood);
+      AddStandardBox(model, 9.0f, 14.0f, 14.0f, 10.0f, 15.5f, 17.2f,
+                     kSimVoxelMaterial_Wood);
+      AddStandardBox(model, 22.0f, 14.0f, 14.0f, 23.0f, 15.5f, 17.2f,
+                     kSimVoxelMaterial_Wood);
       break;
     case kSimBackgroundVoxel_Factory:
-      AddStandardBox(model, 1.0f, 29.7f, 8.6f, 21.2f, 31.7f, 9.4f,
+      AddStandardBox(model, 1.0f, 9.8f, 8.5f, 21.2f, 11.3f, 9.4f,
                      kSimVoxelMaterial_Trim);
-      AddStandardBox(model, 20.8f, 1.0f, 8.6f, 22.4f, 31.0f, 9.4f,
+      AddStandardBox(model, 1.0f, 29.7f, 6.3f, 21.2f, 31.7f, 7.1f,
+                     kSimVoxelMaterial_Trim);
+      AddStandardBox(model, 20.8f, 10.0f, 8.6f, 22.4f, 22.5f, 9.4f,
                      kSimVoxelMaterial_Trim);
       break;
     case kSimBackgroundVoxel_Tree:
@@ -773,19 +1014,35 @@ static void BuildDeterministicVariation(
     return;
   uint32_t seed = ObjectStyleSeed(object);
   switch ((SimBackgroundVoxelKind)object->kind) {
-    case kSimBackgroundVoxel_House:
-      if (seed & 1u) {
+    case kSimBackgroundVoxel_House: {
+      uint32_t variant = seed % 3u;
+      if (variant == 0u) {
         float x = seed & 2u ? 3.0f : 11.0f;
         AddStandardBox(model, x, 5.0f, 11.5f, x + 1.8f, 7.0f, 15.2f,
                        kSimVoxelMaterial_Dark);
         AddStandardBox(model, x - 0.3f, 4.7f, 14.6f,
                        x + 2.1f, 7.3f, 15.6f,
                        kSimVoxelMaterial_Trim);
-      } else {
+      } else if (variant == 1u) {
+        /* Broad porch canopy: visible at native resolution, but much calmer
+         * than a scatter of decorative facade cubes. */
         AddStandardBox(model, 6.3f, 15.0f, 7.3f, 10.7f, 16.0f, 8.1f,
                        kSimVoxelMaterial_Roof);
+        AddStandardBox(model, 6.6f, 15.1f, 1.2f, 7.2f, 15.8f, 7.4f,
+                       kSimVoxelMaterial_Wood);
+        AddStandardBox(model, 9.8f, 15.1f, 1.2f, 10.4f, 15.8f, 7.4f,
+                       kSimVoxelMaterial_Wood);
+      } else {
+        /* One compact dormer changes the roof silhouette without restoring
+         * the noisy high-frequency roof stepping removed by the compiler. */
+        AddStandardBox(model, 6.2f, 10.8f, 10.2f, 9.8f, 14.5f, 12.2f,
+                       kSimVoxelMaterial_WallLight);
+        AddGableRoofX(model, 5.7f, 10.3f, 10.3f, 14.8f, 12.2f, 13.8f,
+                      kSimVoxelMaterial_RoofLight,
+                      kSimVoxelMaterial_WallLight);
       }
       break;
+    }
     case kSimBackgroundVoxel_Factory:
       if (seed & 1u) {
         AddStandardBox(model, 24.5f, 13.0f, 9.0f, 28.5f, 17.0f, 12.0f,
@@ -798,9 +1055,15 @@ static void BuildDeterministicVariation(
       }
       break;
     case kSimBackgroundVoxel_Tree:
-      if (seed & 1u)
+      if (seed & 1u) {
         AddStandardBox(model, 4.8f, 7.2f, 5.0f, 7.2f, 8.8f, 7.0f,
                        kSimVoxelMaterial_LeavesDark);
+        AddStandardBox(model, 8.5f, 5.3f, 7.2f, 11.4f, 7.1f, 9.0f,
+                       kSimVoxelMaterial_Leaves);
+      } else {
+        AddStandardBox(model, 8.8f, 8.0f, 4.5f, 12.0f, 9.8f, 6.8f,
+                       kSimVoxelMaterial_LeavesDark);
+      }
       break;
     case kSimBackgroundVoxel_Cathedral:
     case kSimBackgroundVoxel_Windmill:
@@ -860,4 +1123,5 @@ void SimBackgroundVoxelModel_BuildStyled(
     BuildFactoryCourtyard(object, detail, out);
   if (style >= kSimBackgroundVoxelStyle_Varied)
     BuildDeterministicVariation(object, detail, out);
+  FinalizeModelSurface(out);
 }

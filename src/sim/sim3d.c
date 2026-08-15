@@ -1161,6 +1161,9 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   frame->background_voxel_detail = (uint8_t)ClampTuning(
       tuning->voxel_detail, kSimBackgroundVoxelDetail_Low,
       kSimBackgroundVoxelDetail_Ultra);
+  frame->background_voxel_lod = (uint8_t)ClampTuning(
+      tuning->voxel_lod, kSimBackgroundVoxelLod_Fixed,
+      kSimBackgroundVoxelLod_Adaptive);
   frame->background_voxel_shading = (uint8_t)ClampTuning(
       tuning->voxel_shading, kSimBackgroundVoxelShading_Basic,
       kSimBackgroundVoxelShading_MaterialAware);
@@ -1172,7 +1175,7 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
       kSimBackgroundVoxelFacing_PerModel);
   frame->background_voxel_render_scale = (uint8_t)ClampTuning(
       tuning->voxel_render_scale, kSimBackgroundVoxelRenderScale_Native,
-      kSimBackgroundVoxelRenderScale_2x);
+      kSimBackgroundVoxelRenderScale_PixelClean);
   frame->shadow_opacity_pct =
       (uint8_t)ClampTuning(tuning->shadow_opacity_pct, 0, kPercentScale);
   frame->height_pop_pct =

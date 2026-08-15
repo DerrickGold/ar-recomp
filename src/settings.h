@@ -415,6 +415,7 @@ typedef struct Settings {
   bool sim3d_separated_composite;
   bool sim3d_ground_projection;
   int sim3d_voxel_detail;       /* SimBackgroundVoxelDetail performance target */
+  int sim3d_voxel_lod;          /* SimBackgroundVoxelLod */
   int sim3d_voxel_shading;      /* SimBackgroundVoxelShading */
   int sim3d_voxel_style;        /* SimBackgroundVoxelStyle */
   int sim3d_voxel_facing;       /* SimBackgroundVoxelFacing */

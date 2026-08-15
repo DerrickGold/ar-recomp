@@ -214,6 +214,7 @@ Sim3DTuning BuildSim3DTuning(void) {
       .distance_x100 = sim_pose.distance_x100,
       .height_scale_x100 = g_settings.sim3d_height_scale_x100,
       .voxel_detail = g_settings.sim3d_voxel_detail,
+      .voxel_lod = g_settings.sim3d_voxel_lod,
       .voxel_shading = g_settings.sim3d_voxel_shading,
       .voxel_style = g_settings.sim3d_voxel_style,
       .voxel_facing = g_settings.sim3d_voxel_facing,

@@ -1057,6 +1057,7 @@ static void DrawSimShadowMask(
         g_renderer, &(SimBackgroundVoxelRenderParams){
           .serial = slot->sim.background_voxel_serial,
           .detail = slot->sim.background_voxel_detail,
+          .lod = slot->sim.background_voxel_lod,
           .shading = slot->sim.background_voxel_shading,
           .style = slot->sim.background_voxel_style,
           .facing = slot->sim.background_voxel_facing,
@@ -2700,6 +2701,7 @@ static void RenderSimProfile(const FrameSlot *slot,
           g_renderer, &(SimBackgroundVoxelRenderParams){
             .serial = slot->sim.background_voxel_serial,
             .detail = slot->sim.background_voxel_detail,
+            .lod = slot->sim.background_voxel_lod,
             .shading = slot->sim.background_voxel_shading,
             .style = slot->sim.background_voxel_style,
             .facing = slot->sim.background_voxel_facing,
