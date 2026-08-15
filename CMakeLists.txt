@@ -314,6 +314,20 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_sim_background_voxel_models
         COMMAND actraiser_sim_background_voxel_models_test)
 
+    add_executable(actraiser_sim_background_voxel_lighting_test
+        tests/sim_background_voxel_lighting_test.c
+        src/sim/sim_background_voxel_lighting.c
+    )
+    target_include_directories(actraiser_sim_background_voxel_lighting_test
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_sim_background_voxel_lighting_test PRIVATE m)
+    add_test(NAME actraiser_sim_background_voxel_lighting
+        COMMAND actraiser_sim_background_voxel_lighting_test)
+
     add_executable(actraiser_sim_background_voxel_proportions_test
         tests/sim_background_voxel_proportions_test.c
         src/sim/sim_background_voxel_models.c

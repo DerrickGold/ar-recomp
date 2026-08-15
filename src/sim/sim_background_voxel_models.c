@@ -680,15 +680,156 @@ static void BuildAlternateFacingHouse(SimBackgroundVoxelDetail detail,
   }
 }
 
+static void BuildSilhouetteTrim(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelModel *model) {
+  if (detail == kSimBackgroundVoxelDetail_Low ||
+      (object->flags & kSimBackgroundVoxel_UnderConstruction))
+    return;
+  switch ((SimBackgroundVoxelKind)object->kind) {
+    case kSimBackgroundVoxel_House:
+      if (object->flags & kSimBackgroundVoxel_AlternateFacing) {
+        AddStandardBox(model, 0.4f, 14.3f, 6.1f, 6.8f, 15.6f, 6.8f,
+                       kSimVoxelMaterial_Trim);
+        AddStandardBox(model, 7.1f, 14.2f, 9.5f, 14.2f, 15.6f, 10.2f,
+                       kSimVoxelMaterial_Trim);
+      } else {
+        /* Broad fascia pieces produce a stable eave line at authentic output
+         * resolution; tiny roof-edge cubes only reintroduce pixel noise. */
+        AddStandardBox(model, 0.9f, 14.2f, 9.5f, 15.1f, 15.7f, 10.2f,
+                       kSimVoxelMaterial_Trim);
+        AddStandardBox(model, 0.8f, 2.0f, 9.5f, 1.6f, 15.2f, 10.2f,
+                       kSimVoxelMaterial_Trim);
+        AddStandardBox(model, 14.4f, 2.0f, 9.5f, 15.2f, 15.2f, 10.2f,
+                       kSimVoxelMaterial_Trim);
+      }
+      break;
+    case kSimBackgroundVoxel_Cathedral:
+      AddStandardBox(model, 2.2f, 28.6f, 15.2f, 29.8f, 31.2f, 16.2f,
+                     kSimVoxelMaterial_Trim);
+      AddStandardBox(model, 1.8f, 10.0f, 15.1f, 3.0f, 29.5f, 16.1f,
+                     kSimVoxelMaterial_Trim);
+      AddStandardBox(model, 29.0f, 10.0f, 15.1f, 30.2f, 29.5f, 16.1f,
+                     kSimVoxelMaterial_Trim);
+      break;
+    case kSimBackgroundVoxel_Windmill:
+      AddStandardBox(model, 7.0f, 13.8f, 17.4f, 25.0f, 15.4f, 18.3f,
+                     kSimVoxelMaterial_Trim);
+      AddStandardBox(model, 7.4f, 13.8f, 2.0f, 8.5f, 15.2f, 18.0f,
+                     kSimVoxelMaterial_Wood);
+      AddStandardBox(model, 23.5f, 13.8f, 2.0f, 24.6f, 15.2f, 18.0f,
+                     kSimVoxelMaterial_Wood);
+      break;
+    case kSimBackgroundVoxel_Factory:
+      AddStandardBox(model, 1.0f, 29.7f, 8.6f, 21.2f, 31.7f, 9.4f,
+                     kSimVoxelMaterial_Trim);
+      AddStandardBox(model, 20.8f, 1.0f, 8.6f, 22.4f, 31.0f, 9.4f,
+                     kSimVoxelMaterial_Trim);
+      break;
+    case kSimBackgroundVoxel_Tree:
+      AddStandardBox(model, 5.7f, 6.8f, 0.0f, 10.3f, 9.2f, 1.0f,
+                     kSimVoxelMaterial_Trunk);
+      AddStandardBox(model, 6.8f, 5.7f, 0.0f, 9.2f, 10.3f, 1.0f,
+                     kSimVoxelMaterial_Trunk);
+      break;
+  }
+}
+
+static void BuildFactoryCourtyard(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelModel *model) {
+  if (detail == kSimBackgroundVoxelDetail_Low ||
+      object->kind != kSimBackgroundVoxel_Factory ||
+      (object->flags & kSimBackgroundVoxel_UnderConstruction))
+    return;
+  /* The courtyard is deliberately a thin inset surface so grass remains
+   * visible around the sideways-U footprint but the interior reads as a
+   * usable industrial yard rather than an accidental hole. */
+  AddStandardBox(model, 1.8f, 11.8f, 0.0f, 21.0f, 20.2f, 0.28f,
+                 kSimVoxelMaterial_Paving);
+  AddStandardBox(model, 20.4f, 13.5f, 1.3f, 21.8f, 18.5f, 7.2f,
+                 kSimVoxelMaterial_Dark);
+  AddStandardBox(model, 3.2f, 13.0f, 0.3f, 6.5f, 16.2f, 2.8f,
+                 kSimVoxelMaterial_Wood);
+  AddStandardBox(model, 7.0f, 16.8f, 0.3f, 10.0f, 19.7f, 2.1f,
+                 kSimVoxelMaterial_Metal);
+}
+
+static uint32_t ObjectStyleSeed(const SimBackgroundVoxelObject *object) {
+  return (uint32_t)object->cell_x * 0x9E3779B1u ^
+      (uint32_t)object->cell_y * 0x85EBCA77u ^
+      (uint32_t)object->record_slot * 0xC2B2AE3Du ^
+      (uint32_t)object->group * 0x27D4EB2Fu;
+}
+
+static void BuildDeterministicVariation(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelModel *model) {
+  if (detail < kSimBackgroundVoxelDetail_High ||
+      (object->flags & kSimBackgroundVoxel_UnderConstruction))
+    return;
+  uint32_t seed = ObjectStyleSeed(object);
+  switch ((SimBackgroundVoxelKind)object->kind) {
+    case kSimBackgroundVoxel_House:
+      if (seed & 1u) {
+        float x = seed & 2u ? 3.0f : 11.0f;
+        AddStandardBox(model, x, 5.0f, 11.5f, x + 1.8f, 7.0f, 15.2f,
+                       kSimVoxelMaterial_Dark);
+        AddStandardBox(model, x - 0.3f, 4.7f, 14.6f,
+                       x + 2.1f, 7.3f, 15.6f,
+                       kSimVoxelMaterial_Trim);
+      } else {
+        AddStandardBox(model, 6.3f, 15.0f, 7.3f, 10.7f, 16.0f, 8.1f,
+                       kSimVoxelMaterial_Roof);
+      }
+      break;
+    case kSimBackgroundVoxel_Factory:
+      if (seed & 1u) {
+        AddStandardBox(model, 24.5f, 13.0f, 9.0f, 28.5f, 17.0f, 12.0f,
+                       kSimVoxelMaterial_Metal);
+        AddStandardBox(model, 25.2f, 13.7f, 12.0f, 27.8f, 16.3f, 13.0f,
+                       kSimVoxelMaterial_Trim);
+      } else {
+        AddStandardBox(model, 11.0f, 4.0f, 9.0f, 15.0f, 8.0f, 11.2f,
+                       kSimVoxelMaterial_Metal);
+      }
+      break;
+    case kSimBackgroundVoxel_Tree:
+      if (seed & 1u)
+        AddStandardBox(model, 4.8f, 7.2f, 5.0f, 7.2f, 8.8f, 7.0f,
+                       kSimVoxelMaterial_LeavesDark);
+      break;
+    case kSimBackgroundVoxel_Cathedral:
+    case kSimBackgroundVoxel_Windmill:
+      /* Unique town landmarks do not need random silhouettes. */
+      break;
+  }
+}
+
 void SimBackgroundVoxelModel_Build(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelModel *out) {
+  SimBackgroundVoxelModel_BuildStyled(
+      object, detail, kSimBackgroundVoxelStyle_Basic, out);
+}
+
+void SimBackgroundVoxelModel_BuildStyled(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelStyle style,
     SimBackgroundVoxelModel *out) {
   if (!out) return;
   memset(out, 0, sizeof(*out));
   if (detail < kSimBackgroundVoxelDetail_Low ||
       detail >= kSimBackgroundVoxelDetail_Count)
     detail = kSimBackgroundVoxelDetail_High;
+  if (style < kSimBackgroundVoxelStyle_Basic ||
+      style >= kSimBackgroundVoxelStyle_Count)
+    style = kSimBackgroundVoxelStyle_Varied;
   out->face_budget = SimBackgroundVoxelModel_FaceBudget(detail);
   out->min_x = out->min_y = out->min_z = FLT_MAX;
   out->max_x = out->max_y = out->max_z = -FLT_MAX;
@@ -713,4 +854,10 @@ void SimBackgroundVoxelModel_Build(
       BuildTree(object, detail, out);
       break;
   }
+  if (style >= kSimBackgroundVoxelStyle_Trim)
+    BuildSilhouetteTrim(object, detail, out);
+  if (style >= kSimBackgroundVoxelStyle_Architectural)
+    BuildFactoryCourtyard(object, detail, out);
+  if (style >= kSimBackgroundVoxelStyle_Varied)
+    BuildDeterministicVariation(object, detail, out);
 }

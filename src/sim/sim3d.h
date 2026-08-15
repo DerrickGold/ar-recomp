@@ -98,6 +98,10 @@ typedef struct Sim3DTuning {
   int distance_x100;
   int height_scale_x100;
   int voxel_detail;
+  int voxel_shading;
+  int voxel_style;
+  int voxel_facing;
+  int voxel_render_scale;
   int shadow_opacity_pct;
   int height_pop_pct;
   int light_azimuth_deg;
