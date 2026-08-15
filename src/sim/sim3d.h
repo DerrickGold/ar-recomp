@@ -97,6 +97,7 @@ typedef struct Sim3DTuning {
   int yaw_mrad;
   int distance_x100;
   int height_scale_x100;
+  int voxel_preset;
   int voxel_detail;
   int voxel_lod;
   int voxel_shading;

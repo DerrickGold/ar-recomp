@@ -53,6 +53,45 @@ static float RegionMaxZ(const SimBackgroundVoxelModel *model,
   return max_z;
 }
 
+static uint64_t ModelHash(const SimBackgroundVoxelModel *model) {
+  const uint8_t *bytes = (const uint8_t *)model->faces;
+  size_t byte_count =
+      model->face_count * sizeof(model->faces[0]);
+  uint64_t hash = 1469598103934665603ull;
+  for (size_t i = 0; i < byte_count; i++) {
+    hash ^= bytes[i];
+    hash *= 1099511628211ull;
+  }
+  hash ^= model->face_count;
+  return hash;
+}
+
+static int UniqueVariedModels(SimBackgroundVoxelKind kind,
+                              SimBackgroundVoxelDetail detail) {
+  uint64_t hashes[8] = {0};
+  int unique = 0;
+  for (int seed = 0; seed < 64; seed++) {
+    SimBackgroundVoxelObject object = {
+      .kind = kind,
+      .cell_x = seed & 7,
+      .cell_y = seed >> 3,
+      .record_slot = (uint8_t)(seed % 7),
+      .group = (uint8_t)(seed % 3),
+    };
+    SimBackgroundVoxelModel model;
+    SimBackgroundVoxelModel_BuildStyled(
+        &object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    CHECK(!model.overflow);
+    CHECK(model.face_count <= SimBackgroundVoxelModel_FaceBudget(detail));
+    uint64_t hash = ModelHash(&model);
+    bool known = false;
+    for (int i = 0; i < unique; i++) known |= hashes[i] == hash;
+    if (!known && unique < (int)(sizeof(hashes) / sizeof(hashes[0])))
+      hashes[unique++] = hash;
+  }
+  return unique;
+}
+
 static SimBackgroundVoxelModel Build(SimBackgroundVoxelKind kind,
                                      SimBackgroundVoxelDetail detail) {
   SimBackgroundVoxelObject object = {
@@ -107,10 +146,11 @@ int main(void) {
   };
   SimBackgroundVoxelModel decorated_cathedral;
   SimBackgroundVoxelModel_BuildStyled(
-      &cathedral_object, kSimBackgroundVoxelDetail_Balanced,
+      &cathedral_object, kSimBackgroundVoxelDetail_High,
       kSimBackgroundVoxelStyle_Trim, &decorated_cathedral);
   CHECK(!decorated_cathedral.overflow);
   CHECK(MaterialFaces(&decorated_cathedral, kSimVoxelMaterial_Gold) > 0);
+  CHECK(MaterialFaces(&decorated_cathedral, kSimVoxelMaterial_Glass) > 0);
   CHECK(RegionMaxZ(&decorated_cathedral, 2.0f, 24.0f, 9.0f, 31.5f)
         <= 16.4f);
   CHECK(RegionMaxZ(&decorated_cathedral, 23.0f, 24.0f, 30.0f, 31.5f)
@@ -210,9 +250,13 @@ int main(void) {
   SimBackgroundVoxelModel_Build(
       &interior_object, kSimBackgroundVoxelDetail_Balanced, &interior);
   CHECK(!interior.overflow && interior.max_z == 15.0f);
-  CHECK(interior.face_count > isolated.face_count);
-  /* Even with all four neighbour bridges, a balanced dense-forest cell keeps
-   * at least one quarter of its per-object face budget in reserve. */
+  /* Adjacency affects extraction/grouping, never the authored crown. Forest
+   * interiors must not acquire rectangular connector bars on their sides. */
+  CHECK(interior.face_count == isolated.face_count);
+  CHECK(memcmp(interior.faces, isolated.faces,
+               interior.face_count * sizeof(interior.faces[0])) == 0);
+  /* A balanced dense-forest cell keeps at least one quarter of its per-object
+   * face budget in reserve. */
   CHECK(interior.face_count <= SimBackgroundVoxelModel_FaceBudget(
       kSimBackgroundVoxelDetail_Balanced) * 3 / 4);
 
@@ -247,6 +291,45 @@ int main(void) {
     CHECK(high.face_count <= ultra.face_count);
     CHECK(low.face_count < ultra.face_count);
   }
+
+  /* Every density/style boundary is a real hard budget. This exercises more
+   * than the representative fixtures above so a newly authored variant cannot
+   * overflow only for one deterministic town coordinate. */
+  for (int kind = kSimBackgroundVoxel_House;
+       kind <= kSimBackgroundVoxel_Tree; kind++) {
+    for (int detail = kSimBackgroundVoxelDetail_Low;
+         detail < kSimBackgroundVoxelDetail_Count; detail++) {
+      for (int style = kSimBackgroundVoxelStyle_Basic;
+           style < kSimBackgroundVoxelStyle_Count; style++) {
+        for (int seed = 0; seed < 4; seed++) {
+          SimBackgroundVoxelObject object = {
+            .kind = (uint8_t)kind,
+            .cell_x = (uint8_t)seed,
+            .cell_y = (uint8_t)(seed * 3),
+            .record_slot = (uint8_t)(seed + 1),
+            .group = (uint8_t)(seed & 1),
+          };
+          SimBackgroundVoxelModel model;
+          SimBackgroundVoxelModel_BuildStyled(
+              &object, (SimBackgroundVoxelDetail)detail,
+              (SimBackgroundVoxelStyle)style, &model);
+          CHECK(!model.overflow);
+          CHECK(model.face_count <=
+                SimBackgroundVoxelModel_FaceBudget(
+                    (SimBackgroundVoxelDetail)detail));
+        }
+      }
+    }
+  }
+
+  CHECK(UniqueVariedModels(kSimBackgroundVoxel_House,
+                           kSimBackgroundVoxelDetail_High) >= 4);
+  CHECK(UniqueVariedModels(kSimBackgroundVoxel_House,
+                           kSimBackgroundVoxelDetail_Ultra) >= 6);
+  CHECK(UniqueVariedModels(kSimBackgroundVoxel_Factory,
+                           kSimBackgroundVoxelDetail_High) >= 3);
+  CHECK(UniqueVariedModels(kSimBackgroundVoxel_Tree,
+                           kSimBackgroundVoxelDetail_High) >= 4);
 
   if (failures) {
     fprintf(stderr, "%d sim background voxel model checks failed\n", failures);

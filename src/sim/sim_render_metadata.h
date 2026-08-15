@@ -688,6 +688,9 @@ typedef struct SimFrameData {
   /* Resolved presentation tuning: percent of each classified virtual height.
    * Copied here so one frame cannot mix old and new tuning values. */
   uint16_t height_scale_x100;
+  /* Resolved false for the Off preset. The game thread then skips extraction
+   * and publishes serial zero, preserving the authentic background tiles. */
+  uint8_t background_voxel_enabled;
   /* Player-selected procedural background-model performance target. */
   uint8_t background_voxel_detail;
   /* Fixed keeps that detail for every model. Adaptive treats it as a ceiling

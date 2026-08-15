@@ -19,8 +19,10 @@ int main(void) {
     .record_slot = 2,
   };
   SimBackgroundVoxelPalette palette, repeated;
-  SimBackgroundVoxelPalette_Build(&house, &palette);
-  SimBackgroundVoxelPalette_Build(&house, &repeated);
+  SimBackgroundVoxelPalette_Build(
+      &house, kSimBackgroundVoxelBiome_Temperate, &palette);
+  SimBackgroundVoxelPalette_Build(
+      &house, kSimBackgroundVoxelBiome_Temperate, &repeated);
   CHECK(memcmp(&palette, &repeated, sizeof(palette)) == 0);
   uint32_t shadow = SimBackgroundVoxelPalette_Ramp(
       &palette, kSimVoxelMaterial_Roof, 80);
@@ -47,12 +49,26 @@ int main(void) {
   SimBackgroundVoxelObject tree_b = tree_a;
   tree_b.cell_y = 2;
   SimBackgroundVoxelPalette palette_a, palette_b;
-  SimBackgroundVoxelPalette_Build(&tree_a, &palette_a);
-  SimBackgroundVoxelPalette_Build(&tree_b, &palette_b);
+  SimBackgroundVoxelPalette_Build(
+      &tree_a, kSimBackgroundVoxelBiome_Temperate, &palette_a);
+  SimBackgroundVoxelPalette_Build(
+      &tree_b, kSimBackgroundVoxelBiome_Temperate, &palette_b);
   CHECK(SimBackgroundVoxelPalette_Base(
             &palette_a, kSimVoxelMaterial_Leaves) !=
         SimBackgroundVoxelPalette_Base(
             &palette_b, kSimVoxelMaterial_Leaves));
+
+  SimBackgroundVoxelPalette desert, northwall;
+  SimBackgroundVoxelPalette_Build(
+      &house, kSimBackgroundVoxelBiome_Desert, &desert);
+  SimBackgroundVoxelPalette_Build(
+      &house, kSimBackgroundVoxelBiome_Snow, &northwall);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &desert, kSimVoxelMaterial_Wall) !=
+        SimBackgroundVoxelPalette_Base(
+            &palette, kSimVoxelMaterial_Wall));
+  CHECK((SimBackgroundVoxelPalette_Base(
+      &northwall, kSimVoxelMaterial_Snow) >> 24) == 0xFFu);
 
   if (failures) return 1;
   puts("sim background voxel palette checks passed");

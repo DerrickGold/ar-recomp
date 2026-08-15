@@ -479,6 +479,14 @@ static const char *const kSimVoxelDetailLabels[] = {
   "Ultra",
 };
 
+static const char *const kSimVoxelPresetLabels[] = {
+  "Off",
+  "Performance",
+  "Balanced",
+  "Quality",
+  "Custom",
+};
+
 static const char *const kSimVoxelLodLabels[] = {
   "Fixed",
   "Adaptive",
@@ -718,6 +726,10 @@ static bool Sim3DGroundAvailable(void) {
 }
 static bool Sim3DGroundEnabled(void) {
   return Sim3DGroundAvailable() && g_settings.sim3d_ground_projection;
+}
+static bool Sim3DVoxelCustomEnabled(void) {
+  return Sim3DGroundEnabled() &&
+      g_settings.sim3d_voxel_preset == kSimBackgroundVoxelPreset_Custom;
 }
 static bool Sim3DBillboardsAvailable(void) {
   return Sim3DSeparatedEnabled() &&
@@ -1155,6 +1167,18 @@ const SettingDesc g_setting_descs[] = {
                "it flat.",
                kSettingCat_Simulation, 1, false, Sim3DGroundAvailable,
                NULL),
+  { "sim3d_voxel_preset", "AR_SIM3D_VOXEL_PRESET", "Voxel town quality",
+    "Off preserves the original background tiles. Performance uses compact "
+    "models and basic lighting. Balanced adds authored architecture, AO and "
+    "pixel-clean edges. Quality enables the complete geometry, palette and "
+    "Smooth 2x treatment. Custom exposes every control below without presets "
+    "overwriting those stored values.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_voxel_preset, kSimBackgroundVoxelPreset_Balanced,
+    kSimBackgroundVoxelPreset_Off, kSimBackgroundVoxelPreset_Custom, 1,
+    false, kSimVoxelPresetLabels, kSimBackgroundVoxelPreset_Count,
+    Sim3DGroundEnabled, NULL, NULL, NULL,
+    .modern_env = true, .player_visible = true },
   { "sim3d_voxel_detail", "AR_SIM3D_VOXEL_DETAIL", "Voxel model detail",
     "Performance target for simulation-town buildings and trees. Low uses "
     "compact silhouettes for dense maps; Balanced is the conservative model; "
@@ -1164,7 +1188,7 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.sim3d_voxel_detail, kSimBackgroundVoxelDetail_High,
     kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelDetail_Ultra, 1, false,
     kSimVoxelDetailLabels, kSimBackgroundVoxelDetail_Count,
-    Sim3DGroundEnabled, NULL, NULL, NULL,
+    Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_lod", "AR_SIM3D_VOXEL_LOD", "Voxel detail scaling",
     "Fixed uses the selected model detail everywhere. Adaptive treats model "
@@ -1175,7 +1199,7 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.sim3d_voxel_lod, kSimBackgroundVoxelLod_Adaptive,
     kSimBackgroundVoxelLod_Fixed, kSimBackgroundVoxelLod_Adaptive, 1, false,
     kSimVoxelLodLabels, kSimBackgroundVoxelLod_Count,
-    Sim3DGroundEnabled, NULL, NULL, NULL,
+    Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_shading", "AR_SIM3D_VOXEL_SHADING", "Voxel shading",
     "Lighting cost for simulation-town buildings and trees. Basic uses one "
@@ -1188,7 +1212,7 @@ const SettingDesc g_setting_descs[] = {
     kSimBackgroundVoxelShading_Basic,
     kSimBackgroundVoxelShading_MaterialAware, 1, false,
     kSimVoxelShadingLabels, kSimBackgroundVoxelShading_Count,
-    Sim3DGroundEnabled, NULL, NULL, NULL,
+    Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_style", "AR_SIM3D_VOXEL_STYLE", "Voxel styling",
     "Geometry family for authored background models. Basic preserves clean "
@@ -1199,7 +1223,7 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.sim3d_voxel_style, kSimBackgroundVoxelStyle_Varied,
     kSimBackgroundVoxelStyle_Basic, kSimBackgroundVoxelStyle_Varied, 1,
     false, kSimVoxelStyleLabels, kSimBackgroundVoxelStyle_Count,
-    Sim3DGroundEnabled, NULL, NULL, NULL,
+    Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_facing", "AR_SIM3D_VOXEL_FACING", "Voxel camera facing",
     "Shared lean tilts every model equally toward the camera. Per-model lean "
@@ -1209,7 +1233,7 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.sim3d_voxel_facing, kSimBackgroundVoxelFacing_PerModel,
     kSimBackgroundVoxelFacing_Shared, kSimBackgroundVoxelFacing_PerModel, 1,
     false, kSimVoxelFacingLabels, kSimBackgroundVoxelFacing_Count,
-    Sim3DGroundEnabled, NULL, NULL, NULL,
+    Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_render_scale", "AR_SIM3D_VOXEL_RENDER_SCALE",
     "Voxel render scale",
@@ -1224,7 +1248,7 @@ const SettingDesc g_setting_descs[] = {
     kSimBackgroundVoxelRenderScale_Native,
     kSimBackgroundVoxelRenderScale_PixelClean, 1, false,
     kSimVoxelRenderScaleLabels, kSimBackgroundVoxelRenderScale_Count,
-    Sim3DGroundEnabled, NULL, NULL, NULL,
+    Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   BOOL_SETTING_MODERN(sim3d_object_billboards, "AR_SIM3D_BILLBOARDS",
                "Object billboards",

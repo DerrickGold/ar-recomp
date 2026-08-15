@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "sim_background_voxel_biome.h"
 #include "sim_background_voxel_models.h"
 
 enum { kSimBackgroundVoxelPaletteRampLevels = 4 };
@@ -14,6 +15,7 @@ typedef struct SimBackgroundVoxelPalette {
 
 void SimBackgroundVoxelPalette_Build(
     const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelBiome biome,
     SimBackgroundVoxelPalette *palette);
 uint32_t SimBackgroundVoxelPalette_Base(
     const SimBackgroundVoxelPalette *palette,

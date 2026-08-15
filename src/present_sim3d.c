@@ -31,6 +31,7 @@
 #include "render_capabilities.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim_background_voxel_renderer.h"
+#include "sim/sim_background_voxel_depth.h"
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim_world_navigation_capture.h"
@@ -205,6 +206,28 @@ static float SimHeightWorldUnits(SDL_Rect source, int virtual_height,
   if (source.h <= 0 || !virtual_height) return 0.0f;
   return (float)virtual_height * (float)height_scale_x100 /
       ((float)kPercentScale * (float)source.h);
+}
+
+static SimBackgroundVoxelRenderParams SimVoxelRenderParams(
+    const FrameSlot *slot, SDL_Rect source, SDL_Rect viewport,
+    const float matrix[16]) {
+  return (SimBackgroundVoxelRenderParams){
+    .serial = slot->sim.background_voxel_serial,
+    .detail = slot->sim.background_voxel_detail,
+    .lod = slot->sim.background_voxel_lod,
+    .shading = slot->sim.background_voxel_shading,
+    .style = slot->sim.background_voxel_style,
+    .facing = slot->sim.background_voxel_facing,
+    .render_scale = slot->sim.background_voxel_render_scale,
+    .camera_x = slot->sim.camera_x,
+    .camera_y = slot->sim.camera_y,
+    .town_screen_x0 = slot->sim.underlay_screen_x0,
+    .light_azimuth_deg = slot->sim.light_azimuth_deg,
+    .light_elevation_deg = slot->sim.light_elevation_deg,
+    .source = source,
+    .viewport = viewport,
+    .matrix = matrix,
+  };
 }
 
 static bool ProjectSimTexturePoint(
@@ -949,8 +972,8 @@ static void DrawSimShadowMask(
       break;
     }
   }
-  bool voxel_caster = SimBackgroundVoxelRenderer_Ready(
-      slot->sim.background_voxel_serial);
+  bool voxel_caster = slot->sim.background_voxel_enabled &&
+      SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial);
   /* An empty mask contributes nothing. Avoid a full-viewport target clear,
    * optional fourteen-draw blur and full-viewport composite on such frames. */
   if (!any_caster && !voxel_caster) return;
@@ -1052,25 +1075,12 @@ static void DrawSimShadowMask(
                        vertices, 4, indices, 6);
   }
 
-  if (voxel_caster)
+  if (voxel_caster) {
+    SimBackgroundVoxelRenderParams voxel_params =
+        SimVoxelRenderParams(slot, source, local_viewport, matrix);
     SimBackgroundVoxelRenderer_DrawShadowMask(
-        g_renderer, &(SimBackgroundVoxelRenderParams){
-          .serial = slot->sim.background_voxel_serial,
-          .detail = slot->sim.background_voxel_detail,
-          .lod = slot->sim.background_voxel_lod,
-          .shading = slot->sim.background_voxel_shading,
-          .style = slot->sim.background_voxel_style,
-          .facing = slot->sim.background_voxel_facing,
-          .render_scale = slot->sim.background_voxel_render_scale,
-          .camera_x = slot->sim.camera_x,
-          .camera_y = slot->sim.camera_y,
-          .town_screen_x0 = slot->sim.underlay_screen_x0,
-          .light_azimuth_deg = slot->sim.light_azimuth_deg,
-          .light_elevation_deg = slot->sim.light_elevation_deg,
-          .source = source,
-          .viewport = local_viewport,
-          .matrix = matrix,
-        }, light_x, light_y);
+        g_renderer, &voxel_params, light_x, light_y);
+  }
 
   if (soft_shadows)
     BlurSimShadowMask(mask, viewport.w, viewport.h,
@@ -1135,21 +1145,45 @@ static SDL_BlendMode SimBillboardPassBlend(const SimBillboardPass *pass) {
  * actor's authored overlap. */
 static bool SimObjectSortsAfter(const SimRenderObject *a,
                                 const SimRenderObject *b,
-                                uint16_t camera_y) {
+                                float a_depth, float b_depth) {
   bool a_overhead = (a->traits & kSimObjectTrait_Overhead) != 0;
   bool b_overhead = (b->traits & kSimObjectTrait_Overhead) != 0;
   if (a_overhead != b_overhead) return a_overhead;
-  int a_row = (int16_t)(uint16_t)(a->world_y - camera_y);
-  int b_row = (int16_t)(uint16_t)(b->world_y - camera_y);
-  return a_row > b_row;
+  return a_depth < b_depth;
 }
 
-static void DrawSimObjectPriority(
+typedef enum SimObjectOverheadFilter {
+  kSimObjectOverhead_All,
+  kSimObjectOverhead_GroundOnly,
+  kSimObjectOverhead_Only,
+} SimObjectOverheadFilter;
+
+static float SimObjectGroundDepth(
+    const FrameSlot *slot, const SimRenderObject *object,
+    SDL_Rect source, SDL_Rect viewport, const float matrix[16]) {
+  bool foot_anchor = object->tier == kSimRecordTier_World &&
+      !(object->traits & kSimObjectTrait_RecordOriginAnchor);
+  int world_x = foot_anchor ? object->foot_x : object->world_x;
+  int world_y = foot_anchor ? object->foot_y : object->world_y;
+  int screen_x = (int16_t)(uint16_t)(world_x - slot->sim.camera_x);
+  int screen_y = (int16_t)(uint16_t)(world_y - slot->sim.camera_y);
+  float texture_x = slot->ws_extra + screen_x;
+  float texture_y = screen_y;
+  float fx = (texture_x - source.x) / source.w;
+  float fy = (texture_y - source.y) / source.h;
+  float aspect = (float)viewport.w / viewport.h;
+  return Scene3D_ClipDepth(
+      matrix, (fx - 0.5f) * aspect, 0.5f - fy, 0.0f);
+}
+
+static void DrawSimObjectPriorityFiltered(
     const FrameSlot *slot, int priority, SimObjectTierFilter tier_filter,
     bool project_world,
     bool virtual_height, SDL_Rect source, SDL_Rect viewport,
     const Scene3DCamera *camera, const float matrix[16],
-    const SimBillboardPass *pass) {
+    const SimBillboardPass *pass,
+    SimObjectOverheadFilter overhead_filter,
+    bool depth_filter, float minimum_depth, float maximum_depth) {
   if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
   /* W4-2: a rejected blend mode means this pass cannot draw correctly, so bail
    * rather than draw with whatever mode happened to be set. */
@@ -1170,6 +1204,7 @@ static void DrawSimObjectPriority(
    * tiebreak so co-located sprites (multi-part actors) keep their authored
    * overlap and the order stays stable frame to frame. */
   int order[kSimMaxRenderObjects];
+  float depth[kSimMaxRenderObjects];
   int order_count = 0;
   for (int i = (int)slot->sim.object_count - 1; i >= 0; i--) {
     const SimRenderObject *object = &slot->sim.objects[i];
@@ -1178,16 +1213,28 @@ static void DrawSimObjectPriority(
         fixed != (tier_filter == kSimTierFilter_Fixed) ||
         SimObjectIsPromotedHud(slot, object))
       continue;
+    bool overhead = (object->traits & kSimObjectTrait_Overhead) != 0;
+    if (overhead_filter == kSimObjectOverhead_GroundOnly && overhead)
+      continue;
+    if (overhead_filter == kSimObjectOverhead_Only && !overhead)
+      continue;
+    depth[i] = project_world
+        ? SimObjectGroundDepth(slot, object, source, viewport, matrix)
+        : 0.0f;
+    if (depth_filter &&
+        !SimBackgroundVoxelDepth_Contains(
+            depth[i], minimum_depth, maximum_depth))
+      continue;
     order[order_count++] = i;
   }
   if (project_world) {
-    /* Sort key: overhead art last, then ascending screen row.
+    /* Sort key: overhead art last, then projected ground depth far-to-near.
      *
-     * The row is the record's row on the captured screen, not a world Y: the
-     * ground quad maps row 0 to the far edge, so a smaller row is farther away
-     * and must be drawn first. Overhead art is exempt from that entirely --
-     * its composition hangs above the row the record sits on, so ordering it
-     * by that row lets a nearer ground object draw over a cloud.
+     * Clip depth uses both ground coordinates, so yawing the camera cannot
+     * leave overlap tied to the old top-down Y axis. Foot anchors make this a
+     * ground-contact comparison rather than a record-origin approximation.
+     * Overhead art is exempt -- its composition hangs above the row the record
+     * sits on, so depth-sorting it lets a ground object draw over a cloud.
      *
      * Insertion sort: a band holds a few dozen objects at most, and a stable
      * sort is what preserves the OAM tiebreak above -- including among the
@@ -1195,9 +1242,10 @@ static void DrawSimObjectPriority(
     for (int i = 1; i < order_count; i++) {
       int index = order[i];
       int j = i - 1;
-      while (j >= 0 && SimObjectSortsAfter(&slot->sim.objects[order[j]],
-                                           &slot->sim.objects[index],
-                                           slot->sim.camera_y)) {
+      while (j >= 0 && SimObjectSortsAfter(
+                           &slot->sim.objects[order[j]],
+                           &slot->sim.objects[index],
+                           depth[order[j]], depth[index])) {
         order[j + 1] = order[j];
         j--;
       }
@@ -1281,6 +1329,41 @@ static void DrawSimObjectPriority(
                         &atlas, &destination);
   }
   SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, 255);
+}
+
+static void DrawSimObjectPriority(
+    const FrameSlot *slot, int priority, SimObjectTierFilter tier_filter,
+    bool project_world,
+    bool virtual_height, SDL_Rect source, SDL_Rect viewport,
+    const Scene3DCamera *camera, const float matrix[16],
+    const SimBillboardPass *pass) {
+  DrawSimObjectPriorityFiltered(
+      slot, priority, tier_filter, project_world, virtual_height,
+      source, viewport, camera, matrix, pass,
+      kSimObjectOverhead_All, false, 0.0f, 0.0f);
+}
+
+typedef struct SimVoxelBillboardLayerContext {
+  const FrameSlot *slot;
+  int priority;
+  bool virtual_height;
+  const Scene3DCamera *camera;
+} SimVoxelBillboardLayerContext;
+
+static void DrawSimVoxelBillboardLayer(
+    void *userdata,
+    const SimBackgroundVoxelRenderParams *params,
+    float minimum_depth, float maximum_depth,
+    bool overhead_only) {
+  SimVoxelBillboardLayerContext *context = userdata;
+  DrawSimObjectPriorityFiltered(
+      context->slot, context->priority, kSimTierFilter_World,
+      true, context->virtual_height,
+      params->source, params->viewport, context->camera, params->matrix,
+      NULL,
+      overhead_only ? kSimObjectOverhead_Only
+                    : kSimObjectOverhead_GroundOnly,
+      !overhead_only, minimum_depth, maximum_depth);
 }
 
 /* D4c rim light. Sprites have no normals, so the only physically meaningful
@@ -2576,7 +2659,7 @@ static void RenderSimProfile(const FrameSlot *slot,
   bool clouds = underlay && (features & kSimFeature_CloudShroud) != 0;
   bool cull_haze = underlay && (features & kSimFeature_CullHaze) != 0;
   bool atmospheric_backdrop = (features & kSimFeature_Backdrop) != 0;
-  bool background_voxels = ground &&
+  bool background_voxels = ground && slot->sim.background_voxel_enabled &&
       SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial);
   /* The lit region is ground-painted and can only express the height-zero
    * boundary, so its bottom edge is pulled in by the largest lift the
@@ -2688,6 +2771,9 @@ static void RenderSimProfile(const FrameSlot *slot,
     .screen_x0 = slot->sim.underlay_screen_x0,
   };
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+    bool voxel_interleave =
+        plane == kSim3DPlane_Obj2 && background_voxels && billboards &&
+        (enabled_planes & (1u << plane));
     /* Ground illumination belongs above the complete visible BG1 ground but
      * below the highest world-object rank. Keeping this seam explicit avoids
      * the prototype's unconditional over-paint of every actor while retaining
@@ -2696,25 +2782,12 @@ static void RenderSimProfile(const FrameSlot *slot,
       DrawSimEffectLocalLighting(slot, effect_lighting, source, viewport,
                                  &camera, matrix);
     if (plane == kSim3DPlane_Obj2 && background_voxels &&
-        (enabled_planes & (1u << plane)))
+        (enabled_planes & (1u << plane)) && !voxel_interleave) {
+      SimBackgroundVoxelRenderParams voxel_params =
+          SimVoxelRenderParams(slot, source, viewport, matrix);
       SimBackgroundVoxelRenderer_Draw(
-          g_renderer, &(SimBackgroundVoxelRenderParams){
-            .serial = slot->sim.background_voxel_serial,
-            .detail = slot->sim.background_voxel_detail,
-            .lod = slot->sim.background_voxel_lod,
-            .shading = slot->sim.background_voxel_shading,
-            .style = slot->sim.background_voxel_style,
-            .facing = slot->sim.background_voxel_facing,
-            .render_scale = slot->sim.background_voxel_render_scale,
-            .camera_x = slot->sim.camera_x,
-            .camera_y = slot->sim.camera_y,
-            .town_screen_x0 = slot->sim.underlay_screen_x0,
-            .light_azimuth_deg = slot->sim.light_azimuth_deg,
-            .light_elevation_deg = slot->sim.light_elevation_deg,
-            .source = source,
-            .viewport = viewport,
-            .matrix = matrix,
-          });
+          g_renderer, &voxel_params);
+    }
     if (!(enabled_planes & (1u << plane))) continue;
     if (SimPlaneIsMenu(plane)) continue;
     if (billboards) {
@@ -2725,9 +2798,24 @@ static void RenderSimProfile(const FrameSlot *slot,
           break;
         }
       if (object_priority >= 0) {
-        DrawSimObjectPriority(slot, object_priority, kSimTierFilter_World,
-                              true, virtual_height,
-                              source, viewport, &camera, matrix, NULL);
+        if (voxel_interleave) {
+          SimVoxelBillboardLayerContext context = {
+            .slot = slot,
+            .priority = object_priority,
+            .virtual_height = virtual_height,
+            .camera = &camera,
+          };
+          SimBackgroundVoxelRenderParams voxel_params =
+              SimVoxelRenderParams(slot, source, viewport, matrix);
+          SimBackgroundVoxelRenderer_DrawInterleaved(
+              g_renderer, &voxel_params,
+              DrawSimVoxelBillboardLayer, &context);
+        } else {
+          DrawSimObjectPriority(slot, object_priority,
+                                kSimTierFilter_World,
+                                true, virtual_height,
+                                source, viewport, &camera, matrix, NULL);
+        }
         if (rim_light)
           DrawSimRimLight(slot, object_priority, virtual_height, source,
                           viewport, &camera, matrix);

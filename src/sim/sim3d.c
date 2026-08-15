@@ -1,5 +1,6 @@
 #include "sim3d.h"
 #include "sim_background_voxels.h"
+#include "sim_background_voxel_preset.h"
 
 #include "sim_town_canvas.h"
 
@@ -1135,8 +1136,12 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
     return;
   SimTownCanvas_Render(frame->town, wram, ppu->vram, ppu->cgram,
                        PPU_brightness(ppu), g_sim3d.backdrop_argb);
-  SimBackgroundVoxels_Build(frame->town, wram, SimTownCanvas_Pixels(),
-                            SimTownCanvas_Serial());
+  if (frame->background_voxel_enabled) {
+    SimBackgroundVoxels_Build(frame->town, wram, SimTownCanvas_Pixels(),
+                              SimTownCanvas_Serial());
+  } else if (SimBackgroundVoxels_Serial()) {
+    SimBackgroundVoxels_Reset();
+  }
 }
 
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void) {
@@ -1158,24 +1163,41 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   int distance_x100 = tuning->distance_x100;
   frame->height_scale_x100 =
       (uint16_t)ClampTuning(tuning->height_scale_x100, 0, 0xFFFF);
-  frame->background_voxel_detail = (uint8_t)ClampTuning(
-      tuning->voxel_detail, kSimBackgroundVoxelDetail_Low,
-      kSimBackgroundVoxelDetail_Ultra);
-  frame->background_voxel_lod = (uint8_t)ClampTuning(
-      tuning->voxel_lod, kSimBackgroundVoxelLod_Fixed,
-      kSimBackgroundVoxelLod_Adaptive);
-  frame->background_voxel_shading = (uint8_t)ClampTuning(
-      tuning->voxel_shading, kSimBackgroundVoxelShading_Basic,
-      kSimBackgroundVoxelShading_MaterialAware);
-  frame->background_voxel_style = (uint8_t)ClampTuning(
-      tuning->voxel_style, kSimBackgroundVoxelStyle_Basic,
-      kSimBackgroundVoxelStyle_Varied);
-  frame->background_voxel_facing = (uint8_t)ClampTuning(
-      tuning->voxel_facing, kSimBackgroundVoxelFacing_Shared,
-      kSimBackgroundVoxelFacing_PerModel);
-  frame->background_voxel_render_scale = (uint8_t)ClampTuning(
-      tuning->voxel_render_scale, kSimBackgroundVoxelRenderScale_Native,
-      kSimBackgroundVoxelRenderScale_PixelClean);
+  SimBackgroundVoxelPresetConfig voxel_config =
+      SimBackgroundVoxelPreset_Resolve(
+          (SimBackgroundVoxelPreset)ClampTuning(
+              tuning->voxel_preset, kSimBackgroundVoxelPreset_Off,
+              kSimBackgroundVoxelPreset_Custom),
+          (SimBackgroundVoxelPresetConfig){
+            .enabled = true,
+            .detail = (SimBackgroundVoxelDetail)ClampTuning(
+                tuning->voxel_detail, kSimBackgroundVoxelDetail_Low,
+                kSimBackgroundVoxelDetail_Ultra),
+            .lod = (SimBackgroundVoxelLod)ClampTuning(
+                tuning->voxel_lod, kSimBackgroundVoxelLod_Fixed,
+                kSimBackgroundVoxelLod_Adaptive),
+            .shading = (SimBackgroundVoxelShading)ClampTuning(
+                tuning->voxel_shading, kSimBackgroundVoxelShading_Basic,
+                kSimBackgroundVoxelShading_MaterialAware),
+            .style = (SimBackgroundVoxelStyle)ClampTuning(
+                tuning->voxel_style, kSimBackgroundVoxelStyle_Basic,
+                kSimBackgroundVoxelStyle_Varied),
+            .facing = (SimBackgroundVoxelFacing)ClampTuning(
+                tuning->voxel_facing, kSimBackgroundVoxelFacing_Shared,
+                kSimBackgroundVoxelFacing_PerModel),
+            .render_scale = (SimBackgroundVoxelRenderScale)ClampTuning(
+                tuning->voxel_render_scale,
+                kSimBackgroundVoxelRenderScale_Native,
+                kSimBackgroundVoxelRenderScale_PixelClean),
+          });
+  frame->background_voxel_enabled = voxel_config.enabled;
+  frame->background_voxel_detail = (uint8_t)voxel_config.detail;
+  frame->background_voxel_lod = (uint8_t)voxel_config.lod;
+  frame->background_voxel_shading = (uint8_t)voxel_config.shading;
+  frame->background_voxel_style = (uint8_t)voxel_config.style;
+  frame->background_voxel_facing = (uint8_t)voxel_config.facing;
+  frame->background_voxel_render_scale =
+      (uint8_t)voxel_config.render_scale;
   frame->shadow_opacity_pct =
       (uint8_t)ClampTuning(tuning->shadow_opacity_pct, 0, kPercentScale);
   frame->height_pop_pct =

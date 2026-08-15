@@ -213,6 +213,7 @@ Sim3DTuning BuildSim3DTuning(void) {
       .yaw_mrad = sim_pose.yaw_mrad,
       .distance_x100 = sim_pose.distance_x100,
       .height_scale_x100 = g_settings.sim3d_height_scale_x100,
+      .voxel_preset = g_settings.sim3d_voxel_preset,
       .voxel_detail = g_settings.sim3d_voxel_detail,
       .voxel_lod = g_settings.sim3d_voxel_lod,
       .voxel_shading = g_settings.sim3d_voxel_shading,

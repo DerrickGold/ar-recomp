@@ -91,7 +91,7 @@ static void TestDefaultsAndMetadata(void) {
    * keyboard and gamepad binding rows. The sim synthetic-part work added one
    * measured, gameplay-affecting actor-range row. Background voxel polish then
    * added five independent performance boundaries. */
-  CHECK(g_setting_desc_count == 265);
+  CHECK(g_setting_desc_count == 266);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -147,6 +147,8 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_Sim3DRequestedFeatures() == kSim3DShippedFeatures);
   CHECK(g_settings.sim3d_separated_composite);
   CHECK(g_settings.sim3d_ground_projection);
+  CHECK(g_settings.sim3d_voxel_preset ==
+        kSimBackgroundVoxelPreset_Balanced);
   CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
   CHECK(g_settings.sim3d_voxel_lod == kSimBackgroundVoxelLod_Adaptive);
   CHECK(g_settings.sim3d_voxel_shading ==

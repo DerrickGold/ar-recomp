@@ -22,6 +22,12 @@ typedef struct SimBackgroundVoxelRenderParams {
   const float *matrix;
 } SimBackgroundVoxelRenderParams;
 
+typedef void (*SimBackgroundVoxelDepthLayerCallback)(
+    void *userdata,
+    const SimBackgroundVoxelRenderParams *params,
+    float minimum_depth, float maximum_depth,
+    bool overhead_only);
+
 /* Render-thread half of sim_background_voxels. Texture ownership and geometry
  * live here so the general SIM compositor only chooses a painter-order seam. */
 void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer);
@@ -29,6 +35,12 @@ bool SimBackgroundVoxelRenderer_Ready(uint32_t serial);
 SDL_Texture *SimBackgroundVoxelRenderer_GroundTexture(uint32_t serial);
 void SimBackgroundVoxelRenderer_Draw(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params);
+/* Draws voxel and caller-owned billboard layers through the same far-to-near
+ * slices. The callback runs after the voxel geometry in each slice; its final
+ * overhead_only call is inside the same optional 2x target. */
+void SimBackgroundVoxelRenderer_DrawInterleaved(
+    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
+    SimBackgroundVoxelDepthLayerCallback callback, void *userdata);
 /* Adds solid-model contact/directional silhouettes to the caller's active
  * SIM shadow-mask target. The caller owns mask allocation, blur and opacity. */
 void SimBackgroundVoxelRenderer_DrawShadowMask(

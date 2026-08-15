@@ -414,6 +414,7 @@ typedef struct Settings {
    * what the checkpoints do. */
   bool sim3d_separated_composite;
   bool sim3d_ground_projection;
+  int sim3d_voxel_preset;       /* SimBackgroundVoxelPreset */
   int sim3d_voxel_detail;       /* SimBackgroundVoxelDetail performance target */
   int sim3d_voxel_lod;          /* SimBackgroundVoxelLod */
   int sim3d_voxel_shading;      /* SimBackgroundVoxelShading */
