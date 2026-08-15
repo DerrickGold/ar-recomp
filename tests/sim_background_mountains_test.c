@@ -42,6 +42,29 @@ int main(void) {
   CHECK(field.component[0] == field.component[1]);
   CHECK(field.component[20 * 32 + 20] != field.component[0]);
 
+  /* A complete four-cell north-edge base gains two sparse cap rows made from
+   * original source tiles, including the mirrored missing right slope. */
+  memset(wram, 0, sizeof(wram));
+  SetCell(wram, 1, 0, 0, 0x86);
+  SetCell(wram, 1, 1, 0, 0x89);
+  SetCell(wram, 1, 2, 0, 0x8A);
+  SetCell(wram, 1, 3, 0, 0x85);
+  SetCell(wram, 1, 8, 8, 0x7D);
+  SetCell(wram, 1, 9, 8, 0x82);
+  SetCell(wram, 1, 10, 8, 0x81);
+  SimBackgroundMountains_Classify(1, wram, &field);
+  SimBackgroundMountainCaps caps;
+  SimBackgroundMountains_BuildNorthCaps(&field, &caps);
+  CHECK(caps.tile_count == 6);
+  CHECK(caps.tiles[0].cell_x == 0 && caps.tiles[0].cell_y == -1 &&
+        caps.tiles[0].source_tile == 0x8A);
+  CHECK(caps.tiles[2].cell_x == 2 &&
+        (caps.tiles[2].flags & kSimBackgroundMountainCapTile_MirrorX));
+  CHECK(caps.tiles[4].cell_x == 0 && caps.tiles[4].cell_y == -2 &&
+        caps.tiles[4].source_tile == 0x82);
+  CHECK(caps.tiles[5].cell_x == 3 && caps.tiles[5].cell_y == -2 &&
+        caps.tiles[5].source_tile == 0x81);
+
   /* Marahna's $8D is isolated swamp decoration, not common-range rock. */
   SetCell(wram, 5, 4, 4, 0x8D);
   SimBackgroundMountains_Classify(5, wram, &field);
