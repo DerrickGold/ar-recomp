@@ -479,6 +479,29 @@ static const char *const kSimVoxelDetailLabels[] = {
   "Ultra",
 };
 
+static const char *const kSimVoxelShadingLabels[] = {
+  "Basic",
+  "Ambient occlusion",
+  "Materials + AO",
+};
+
+static const char *const kSimVoxelStyleLabels[] = {
+  "Basic",
+  "Silhouette trim",
+  "Architectural",
+  "Varied",
+};
+
+static const char *const kSimVoxelFacingLabels[] = {
+  "Shared lean",
+  "Per-model lean",
+};
+
+static const char *const kSimVoxelRenderScaleLabels[] = {
+  "Native",
+  "2x supersampled",
+};
+
 static const char *const kDioramaSkyModeLabels[] = {
   "Off",
   "Skybox only",
@@ -1135,6 +1158,54 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.sim3d_voxel_detail, kSimBackgroundVoxelDetail_High,
     kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelDetail_Ultra, 1, false,
     kSimVoxelDetailLabels, kSimBackgroundVoxelDetail_Count,
+    Sim3DGroundEnabled, NULL, NULL, NULL,
+    .modern_env = true, .player_visible = true },
+  { "sim3d_voxel_shading", "AR_SIM3D_VOXEL_SHADING", "Voxel shading",
+    "Lighting cost for simulation-town buildings and trees. Basic uses one "
+    "directional value per face; Ambient occlusion adds contact gradients; "
+    "Materials + AO also gives foliage, masonry, roofs and metal distinct "
+    "light responses.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_voxel_shading,
+    kSimBackgroundVoxelShading_MaterialAware,
+    kSimBackgroundVoxelShading_Basic,
+    kSimBackgroundVoxelShading_MaterialAware, 1, false,
+    kSimVoxelShadingLabels, kSimBackgroundVoxelShading_Count,
+    Sim3DGroundEnabled, NULL, NULL, NULL,
+    .modern_env = true, .player_visible = true },
+  { "sim3d_voxel_style", "AR_SIM3D_VOXEL_STYLE", "Voxel styling",
+    "Geometry family for authored background models. Basic preserves clean "
+    "silhouettes; Silhouette trim adds eaves and broad facade accents; "
+    "Architectural adds factory courtyard treatment; Varied adds "
+    "deterministic model variations without animation.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_voxel_style, kSimBackgroundVoxelStyle_Varied,
+    kSimBackgroundVoxelStyle_Basic, kSimBackgroundVoxelStyle_Varied, 1,
+    false, kSimVoxelStyleLabels, kSimBackgroundVoxelStyle_Count,
+    Sim3DGroundEnabled, NULL, NULL, NULL,
+    .modern_env = true, .player_visible = true },
+  { "sim3d_voxel_facing", "AR_SIM3D_VOXEL_FACING", "Voxel camera facing",
+    "Shared lean tilts every model equally toward the camera. Per-model lean "
+    "keeps houses and windmills upright while preserving more roof and crown "
+    "depth on factories and trees. Both paths retain real 3D volume.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_voxel_facing, kSimBackgroundVoxelFacing_PerModel,
+    kSimBackgroundVoxelFacing_Shared, kSimBackgroundVoxelFacing_PerModel, 1,
+    false, kSimVoxelFacingLabels, kSimBackgroundVoxelFacing_Count,
+    Sim3DGroundEnabled, NULL, NULL, NULL,
+    .modern_env = true, .player_visible = true },
+  { "sim3d_voxel_render_scale", "AR_SIM3D_VOXEL_RENDER_SCALE",
+    "Voxel render scale",
+    "Native draws directly into the scene. 2x renders only the background "
+    "voxel pass at double resolution and downsamples it on High or Ultra "
+    "detail; Low and Balanced remain native to preserve their performance "
+    "targets.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_voxel_render_scale,
+    kSimBackgroundVoxelRenderScale_Native,
+    kSimBackgroundVoxelRenderScale_Native,
+    kSimBackgroundVoxelRenderScale_2x, 1, false,
+    kSimVoxelRenderScaleLabels, kSimBackgroundVoxelRenderScale_Count,
     Sim3DGroundEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   BOOL_SETTING_MODERN(sim3d_object_billboards, "AR_SIM3D_BILLBOARDS",

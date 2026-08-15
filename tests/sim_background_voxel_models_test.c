@@ -105,6 +105,49 @@ int main(void) {
   CHECK(HorizontalFaceCovers(&factory, 10.0f, 26.0f));  /* lower U arm */
   CHECK(!HorizontalFaceCovers(&factory, 10.0f, 16.0f)); /* open courtyard */
 
+  /* Styling is a separate cost boundary from the density target. The factory
+   * yard appears only in Architectural+, and Varied is deterministic for the
+   * same object identity. */
+  SimBackgroundVoxelObject styled_factory_object = {
+    .kind = kSimBackgroundVoxel_Factory,
+    .cell_x = 7,
+    .cell_y = 11,
+    .record_slot = 2,
+  };
+  SimBackgroundVoxelModel trimmed_factory, architectural_factory;
+  SimBackgroundVoxelModel varied_factory;
+  SimBackgroundVoxelModel repeated_varied_factory;
+  SimBackgroundVoxelModel_BuildStyled(
+      &styled_factory_object, kSimBackgroundVoxelDetail_High,
+      kSimBackgroundVoxelStyle_Trim, &trimmed_factory);
+  SimBackgroundVoxelModel_BuildStyled(
+      &styled_factory_object, kSimBackgroundVoxelDetail_High,
+      kSimBackgroundVoxelStyle_Architectural, &architectural_factory);
+  SimBackgroundVoxelModel_BuildStyled(
+      &styled_factory_object, kSimBackgroundVoxelDetail_High,
+      kSimBackgroundVoxelStyle_Varied, &varied_factory);
+  SimBackgroundVoxelModel_BuildStyled(
+      &styled_factory_object, kSimBackgroundVoxelDetail_High,
+      kSimBackgroundVoxelStyle_Varied, &repeated_varied_factory);
+  CHECK(!architectural_factory.overflow && !varied_factory.overflow);
+  CHECK(MaterialFaces(&trimmed_factory, kSimVoxelMaterial_Paving) == 0);
+  CHECK(MaterialFaces(&architectural_factory, kSimVoxelMaterial_Paving) > 0);
+  CHECK(architectural_factory.face_count > trimmed_factory.face_count);
+  CHECK(varied_factory.face_count > architectural_factory.face_count);
+  CHECK(varied_factory.face_count == repeated_varied_factory.face_count);
+  CHECK(memcmp(varied_factory.faces, repeated_varied_factory.faces,
+               varied_factory.face_count * sizeof(varied_factory.faces[0]))
+        == 0);
+
+  SimBackgroundVoxelModel low_basic, low_varied;
+  SimBackgroundVoxelModel_BuildStyled(
+      &styled_factory_object, kSimBackgroundVoxelDetail_Low,
+      kSimBackgroundVoxelStyle_Basic, &low_basic);
+  SimBackgroundVoxelModel_BuildStyled(
+      &styled_factory_object, kSimBackgroundVoxelDetail_Low,
+      kSimBackgroundVoxelStyle_Varied, &low_varied);
+  CHECK(low_basic.face_count == low_varied.face_count);
+
   SimBackgroundVoxelObject isolated_object = {
     .kind = kSimBackgroundVoxel_Tree,
     .flags = kSimBackgroundVoxel_IsolatedTree,

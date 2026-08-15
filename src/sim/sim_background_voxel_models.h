@@ -27,6 +27,7 @@ typedef enum SimBackgroundVoxelMaterial {
   kSimVoxelMaterial_Leaves,
   kSimVoxelMaterial_LeavesLight,
   kSimVoxelMaterial_LeavesDark,
+  kSimVoxelMaterial_Paving,
   kSimVoxelMaterial_Count,
 } SimBackgroundVoxelMaterial;
 
@@ -60,6 +61,14 @@ uint16_t SimBackgroundVoxelModel_FaceBudget(
 void SimBackgroundVoxelModel_Build(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelModel *out);
+
+/* Styling is independent from density: detail owns face budgets and stepped
+ * resolution, while style selects optional authored architecture. */
+void SimBackgroundVoxelModel_BuildStyled(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelStyle style,
     SimBackgroundVoxelModel *out);
 
 #endif  /* SIM_BACKGROUND_VOXEL_MODELS_H */

@@ -800,6 +800,20 @@ int main(void) {
   CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_Ultra);
   CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
   CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
+  RowToKey("sim3d_voxel_shading");
+  CHECK(g_settings.sim3d_voxel_shading ==
+        kSimBackgroundVoxelShading_MaterialAware);
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+  CHECK(g_settings.sim3d_voxel_shading ==
+        kSimBackgroundVoxelShading_AmbientOcclusion);
+  RowToKey("sim3d_voxel_style");
+  CHECK(g_settings.sim3d_voxel_style == kSimBackgroundVoxelStyle_Varied);
+  RowToKey("sim3d_voxel_facing");
+  CHECK(g_settings.sim3d_voxel_facing ==
+        kSimBackgroundVoxelFacing_PerModel);
+  RowToKey("sim3d_voxel_render_scale");
+  CHECK(g_settings.sim3d_voxel_render_scale ==
+        kSimBackgroundVoxelRenderScale_Native);
   /* Walk to a stage toggle by key rather than counting rows: the stage list
    * grows every time a render stage lands. Toggling one from the menu must
    * also change what the renderer is asked for, since the fold is the only

@@ -23,6 +23,8 @@ typedef enum SimBackgroundVoxelKind {
   kSimBackgroundVoxel_Tree,
 } SimBackgroundVoxelKind;
 
+enum { kSimBackgroundVoxelKindCount = 5 };
+
 typedef enum SimBackgroundVoxelFlags {
   kSimBackgroundVoxel_UnderConstruction = 1u << 0,
   kSimBackgroundVoxel_IsolatedTree = 1u << 1,

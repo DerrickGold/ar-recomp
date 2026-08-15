@@ -690,6 +690,12 @@ typedef struct SimFrameData {
   uint16_t height_scale_x100;
   /* Player-selected procedural background-model performance target. */
   uint8_t background_voxel_detail;
+  /* Independent background-model cost classes. Keeping them in the immutable
+   * frame payload avoids reading live settings from the render thread. */
+  uint8_t background_voxel_shading;
+  uint8_t background_voxel_style;
+  uint8_t background_voxel_facing;
+  uint8_t background_voxel_render_scale;
   /* Resolved D4a shadow darkness, percent. Zero renders no shadow pass at all
    * even when the feature bit is set, so the tuning value alone is enough to
    * A/B the mask without touching the feature mask. */
