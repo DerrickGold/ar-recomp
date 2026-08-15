@@ -24,7 +24,12 @@ enum {
   kMaxGeometryQuads = 8192,
   kMaxVertices = kMaxGeometryQuads * 4,
   kMaxIndices = kMaxGeometryQuads * 6,
-  kMaxMountainReliefFaces = kSimBackgroundMountainCellCount *
+  /* A north-clipped range can gain two authentic cap rows. They add at most
+   * 48 sparse front faces and no side bands, but reserve two complete rows so
+   * the bound remains obvious if the cap pattern is expanded later. */
+  kMaxMountainReliefCells = kSimBackgroundMountainCellCount +
+      2 * kSimBackgroundMountainTownCells,
+  kMaxMountainReliefFaces = kMaxMountainReliefCells *
       (1 + 4 * kSimBackgroundMountainReliefMaxSideBands),
 };
 
@@ -380,6 +385,84 @@ static void MountainPlanePoint(
   *local_z = rise * relief->face_height_scale;
 }
 
+static bool FindMountainTileSource(
+    const SimBackgroundMountainField *field, uint8_t tile,
+    int *source_cell_x, int *source_cell_y) {
+  for (int cell_y = 0; cell_y < kSimBackgroundMountainTownCells; cell_y++)
+    for (int cell_x = 0; cell_x < kSimBackgroundMountainTownCells; cell_x++) {
+      int cell = cell_y * kSimBackgroundMountainTownCells + cell_x;
+      if (field->tile[cell] != tile ||
+          !(field->flags[cell] & kSimBackgroundMountainCell_Occupied))
+        continue;
+      *source_cell_x = cell_x;
+      *source_cell_y = cell_y;
+      return true;
+    }
+  return false;
+}
+
+static void AddMountainFrontTile(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundModelLean *lean,
+    const SimBackgroundMountainRelief *relief,
+    float origin_x, float origin_y, float baseline,
+    int destination_cell_x, int destination_cell_y,
+    int source_cell_x, int source_cell_y, bool mirror_x,
+    int *count) {
+  float x0 = destination_cell_x * kSimBackgroundCellPixels;
+  float y0 = destination_cell_y * kSimBackgroundCellPixels;
+  float x1 = x0 + kSimBackgroundCellPixels;
+  float y1 = y0 + kSimBackgroundCellPixels;
+  float u0 = source_cell_x * kSimBackgroundCellPixels /
+      (float)kSimTownCanvasPixels;
+  float v0 = source_cell_y * kSimBackgroundCellPixels /
+      (float)kSimTownCanvasPixels;
+  float u1 = (source_cell_x + 1) * kSimBackgroundCellPixels /
+      (float)kSimTownCanvasPixels;
+  float v1 = (source_cell_y + 1) * kSimBackgroundCellPixels /
+      (float)kSimTownCanvasPixels;
+  const SDL_FPoint uv[4] = {
+    {mirror_x ? u1 : u0, v0}, {mirror_x ? u0 : u1, v0},
+    {mirror_x ? u0 : u1, v1}, {mirror_x ? u1 : u0, v1},
+  };
+  const float source_x[4] = {x0, x1, x1, x0};
+  const float source_y[4] = {y0, y0, y1, y1};
+  float local_x[4], local_y[4], local_z[4];
+  for (int point = 0; point < 4; point++)
+    MountainPlanePoint(
+        source_x[point], source_y[point], baseline, relief,
+        0.0f, 0.0f,
+        &local_x[point], &local_y[point], &local_z[point]);
+  const uint8_t opaque[4] = {255, 255, 255, 255};
+  AddProjectedMountainReliefFace(
+      params, lean, origin_x, origin_y,
+      local_x, local_y, local_z, uv, 255, opaque, count);
+}
+
+static void AddNorthMountainCaps(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundModelLean *lean,
+    const SimBackgroundMountainRelief *relief,
+    const SimBackgroundMountainField *field,
+    const float component_bottom[kSimBackgroundMountainCellCount + 1],
+    float origin_x, float origin_y, int *count) {
+  SimBackgroundMountainCaps caps;
+  SimBackgroundMountains_BuildNorthCaps(field, &caps);
+  for (uint8_t at = 0; at < caps.tile_count; at++) {
+    const SimBackgroundMountainCapTile *tile = &caps.tiles[at];
+    int source_cell_x, source_cell_y;
+    if (!FindMountainTileSource(
+            field, tile->source_tile, &source_cell_x, &source_cell_y))
+      continue;
+    AddMountainFrontTile(
+        params, lean, relief, origin_x, origin_y,
+        component_bottom[tile->component], tile->cell_x, tile->cell_y,
+        source_cell_x, source_cell_y,
+        (tile->flags & kSimBackgroundMountainCapTile_MirrorX) != 0,
+        count);
+  }
+}
+
 static int BuildProjectedMountainReliefFaces(
     const SimBackgroundVoxelRenderParams *params) {
   if (!g_renderer_state.mountain_art) return 0;
@@ -403,10 +486,6 @@ static int BuildProjectedMountainReliefFaces(
    * art into one continuous shallow facade instead of tilting every 16x16
    * tile independently. */
   float component_bottom[kSimBackgroundMountainCellCount + 1] = {0};
-  float component_top[kSimBackgroundMountainCellCount + 1];
-  for (int component = 0;
-       component <= kSimBackgroundMountainCellCount; component++)
-    component_top[component] = kSimTownCanvasPixels;
   for (int cell_y = 0; cell_y < kSimBackgroundMountainTownCells;
        cell_y++)
     for (int cell_x = 0; cell_x < kSimBackgroundMountainTownCells;
@@ -417,11 +496,8 @@ static int BuildProjectedMountainReliefFaces(
       uint16_t component = field->component[cell];
       if (!component) component = 1;
       float bottom = (cell_y + 1) * kSimBackgroundCellPixels;
-      float top = cell_y * kSimBackgroundCellPixels;
       if (bottom > component_bottom[component])
         component_bottom[component] = bottom;
-      if (top < component_top[component])
-        component_top[component] = top;
     }
 
   /* Side bands are displaced behind the front facade along the same
@@ -467,18 +543,7 @@ static int BuildProjectedMountainReliefFaces(
             source_x[point], source_y[point], baseline, &relief,
             0.0f, 0.0f,
             &local_x[point], &local_y[point], &local_z[point]);
-      uint8_t front_alpha[4] = {255, 255, 255, 255};
-      if (component_top[component] == 0.0f) {
-        if (cell_y == 0) {
-          front_alpha[0] = 0;
-          front_alpha[1] = 0;
-          front_alpha[2] = 128;
-          front_alpha[3] = 128;
-        } else if (cell_y == 1) {
-          front_alpha[0] = 128;
-          front_alpha[1] = 128;
-        }
-      }
+      const uint8_t front_alpha[4] = {255, 255, 255, 255};
       AddProjectedMountainReliefFace(
           params, &mountain_lean, origin_x, origin_y,
           local_x, local_y, local_z, uv,
@@ -553,6 +618,9 @@ static int BuildProjectedMountainReliefFaces(
       }
     }
   }
+  AddNorthMountainCaps(
+      params, &mountain_lean, &relief, field, component_bottom,
+      origin_x, origin_y, &count);
   qsort(g_renderer_state.mountain_projected, (size_t)count,
         sizeof(g_renderer_state.mountain_projected[0]),
         CompareProjectedMountainDepth);

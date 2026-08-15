@@ -90,3 +90,72 @@ void SimBackgroundMountains_Classify(
       }
     }
 }
+
+static bool FieldContainsTile(
+    const SimBackgroundMountainField *field, uint8_t tile) {
+  for (int cell = 0; cell < kSimBackgroundMountainCellCount; cell++)
+    if (field->tile[cell] == tile &&
+        (field->flags[cell] & kSimBackgroundMountainCell_Occupied))
+      return true;
+  return false;
+}
+
+static void AppendCapTile(
+    SimBackgroundMountainCaps *caps, int cell_x, int cell_y,
+    uint8_t source_tile, uint8_t flags, uint16_t component) {
+  if (caps->tile_count >= kSimBackgroundMountainMaxCapTiles) return;
+  caps->tiles[caps->tile_count++] = (SimBackgroundMountainCapTile){
+    .cell_x = (int8_t)cell_x,
+    .cell_y = (int8_t)cell_y,
+    .source_tile = source_tile,
+    .flags = flags,
+    .component = component,
+  };
+}
+
+void SimBackgroundMountains_BuildNorthCaps(
+    const SimBackgroundMountainField *field, SimBackgroundMountainCaps *out) {
+  if (!out) return;
+  memset(out, 0, sizeof(*out));
+  if (!field || !field->cell_count ||
+      !FieldContainsTile(field, 0x8A) ||
+      !FieldContainsTile(field, 0x7D) ||
+      !FieldContainsTile(field, 0x89) ||
+      !FieldContainsTile(field, 0x82) ||
+      !FieldContainsTile(field, 0x81))
+    return;
+
+  /* Northern ranges use the base row of this authentic four-cell stamp. Its
+   * two cap rows occur elsewhere in the common mountain set:
+   *
+   *       $82  --  --  $81
+   *       $8A $7D $7E $89
+   *       (existing clipped base)
+   *
+   * Some towns omit $7E. It is the horizontal counterpart of $7D, so the
+   * layout mirrors that original tile rather than inventing new pixels. */
+  static const uint8_t middle_tiles[4] = {0x8A, 0x7D, 0x7D, 0x89};
+  for (int group_x = 0; group_x < kSimBackgroundMountainTownCells;
+       group_x += 4) {
+    int occupied = 0;
+    uint16_t component = 0;
+    for (int offset = 0; offset < 4; offset++) {
+      int cell_x = group_x + offset;
+      if (cell_x >= kSimBackgroundMountainTownCells ||
+          !SimBackgroundMountains_CellOccupied(field, cell_x, 0))
+        continue;
+      occupied++;
+      uint16_t candidate = field->component[cell_x];
+      if (!component) component = candidate;
+      else if (component != candidate) component = 0;
+    }
+    if (occupied < 3 || !component) continue;
+    for (int offset = 0; offset < 4; offset++)
+      AppendCapTile(
+          out, group_x + offset, -1, middle_tiles[offset],
+          offset == 2 ? kSimBackgroundMountainCapTile_MirrorX : 0,
+          component);
+    AppendCapTile(out, group_x, -2, 0x82, 0, component);
+    AppendCapTile(out, group_x + 3, -2, 0x81, 0, component);
+  }
+}

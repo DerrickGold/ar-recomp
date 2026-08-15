@@ -8,6 +8,8 @@ enum {
   kSimBackgroundMountainTownCells = 32,
   kSimBackgroundMountainCellCount =
       kSimBackgroundMountainTownCells * kSimBackgroundMountainTownCells,
+  kSimBackgroundMountainMaxCapTiles =
+      kSimBackgroundMountainTownCells * 3 / 2,
 };
 
 typedef enum SimBackgroundMountainCellFlags {
@@ -27,10 +29,31 @@ typedef struct SimBackgroundMountainField {
   uint16_t component[kSimBackgroundMountainCellCount];
 } SimBackgroundMountainField;
 
+typedef enum SimBackgroundMountainCapTileFlags {
+  kSimBackgroundMountainCapTile_MirrorX = 1u << 0,
+} SimBackgroundMountainCapTileFlags;
+
+typedef struct SimBackgroundMountainCapTile {
+  int8_t cell_x, cell_y;
+  uint8_t source_tile;
+  uint8_t flags;
+  uint16_t component;
+} SimBackgroundMountainCapTile;
+
+typedef struct SimBackgroundMountainCaps {
+  uint8_t tile_count;
+  SimBackgroundMountainCapTile tiles[kSimBackgroundMountainMaxCapTiles];
+} SimBackgroundMountainCaps;
+
 uint8_t SimBackgroundMountains_TileFlags(uint8_t town, uint8_t tile);
 void SimBackgroundMountains_Classify(
     uint8_t town, const uint8_t *wram, SimBackgroundMountainField *out);
 bool SimBackgroundMountains_CellOccupied(
     const SimBackgroundMountainField *field, int x, int y);
+/* Completes common-range peaks that deliberately begin at the north edge of
+ * the authentic 32x32 map. The returned sparse layout references original
+ * mountain tile ids; renderers choose how to project those source tiles. */
+void SimBackgroundMountains_BuildNorthCaps(
+    const SimBackgroundMountainField *field, SimBackgroundMountainCaps *out);
 
 #endif  /* SIM_BACKGROUND_MOUNTAINS_H */
