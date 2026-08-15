@@ -16,7 +16,7 @@ int main(void) {
     .kind = kSimBackgroundVoxel_House,
     .cell_x = 3,
     .cell_y = 4,
-    .record_slot = 2,
+    .record_slot = 1,
   };
   SimBackgroundVoxelPalette palette, repeated;
   SimBackgroundVoxelPalette_Build(
@@ -32,7 +32,11 @@ int main(void) {
       &palette, kSimVoxelMaterial_Roof);
   uint32_t highlight = SimBackgroundVoxelPalette_Ramp(
       &palette, kSimVoxelMaterial_Roof, 250);
-  CHECK(shadow != mid && mid != base && base != highlight);
+  CHECK(shadow != base && mid != base && base != highlight);
+  /* Fillmore houses use the authentic group-6 SIM background colours. */
+  CHECK(base == 0xFF834100u);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &palette, kSimVoxelMaterial_Wall) == 0xFFB48B4Au);
   CHECK((SimBackgroundVoxelPalette_Base(
       &palette, kSimVoxelMaterial_Contact) >> 24) < 0x80u);
   CHECK(SimBackgroundVoxelPalette_Ramp(
@@ -63,10 +67,20 @@ int main(void) {
       &house, kSimBackgroundVoxelBiome_Desert, &desert);
   SimBackgroundVoxelPalette_Build(
       &house, kSimBackgroundVoxelBiome_Snow, &northwall);
+  /* The captured non-snow towns share one structure palette; terrain supplies
+   * their regional colour rather than an invented voxel-only tint. */
   CHECK(SimBackgroundVoxelPalette_Base(
-            &desert, kSimVoxelMaterial_Wall) !=
+            &desert, kSimVoxelMaterial_Wall) ==
         SimBackgroundVoxelPalette_Base(
             &palette, kSimVoxelMaterial_Wall));
+  SimBackgroundVoxelObject northwall_tree = tree_a;
+  SimBackgroundVoxelPalette northwall_foliage;
+  SimBackgroundVoxelPalette_Build(
+      &northwall_tree, kSimBackgroundVoxelBiome_Snow,
+      &northwall_foliage);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &northwall_foliage, kSimVoxelMaterial_Leaves) ==
+        0xFF414A41u);
   CHECK((SimBackgroundVoxelPalette_Base(
       &northwall, kSimVoxelMaterial_Snow) >> 24) == 0xFFu);
 
