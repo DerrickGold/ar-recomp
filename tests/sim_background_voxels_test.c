@@ -6,6 +6,7 @@
 enum {
   kWramBytes = 0x20000,
   kCellMaps = 0x12000,
+  kCellMapBytes = 0x400,
   kRecords = 0x16BE7,
   kRecordsPerTown = 0x200,
 };
@@ -21,6 +22,10 @@ static int failures;
 static size_t CellIndex(int x, int y) {
   int quadrant = (y >= 16 ? 2 : 0) + (x >= 16 ? 1 : 0);
   return kCellMaps + quadrant * 0x100 + (y & 15) * 16 + (x & 15);
+}
+
+static size_t TownCellIndex(int town, int x, int y) {
+  return CellIndex(x, y) + (size_t)town * kCellMapBytes;
 }
 
 static void FillCell(uint32_t *pixels, int x, int y, uint32_t colour) {
@@ -89,7 +94,7 @@ int main(void) {
   SimBackgroundVoxels_Classify(1, wram, pixels, &scene);
   CHECK(scene.town == 1);
   CHECK(!scene.overflow);
-  CHECK(scene.object_count == 8);  /* four buildings + four tree cells */
+  CHECK(scene.object_count == 8);  /* four structures + four tree cells */
   CHECK(scene.tree_cell_count == 4);
   CHECK(scene.tree_group_count == 2);
   CHECK(scene.mountains.cell_count == 1);
@@ -103,6 +108,7 @@ int main(void) {
         (object->flags & kSimBackgroundVoxel_AlternateFacing));
   CHECK(object &&
         !(object->flags & kSimBackgroundVoxel_UnderConstruction));
+  CHECK(object && object->town == 1 && object->development_level == 0);
 
   object = FindKind(&scene, kSimBackgroundVoxel_Cathedral);
   CHECK(object && object->cell_x == 15 && object->cell_y == 15);
@@ -173,10 +179,23 @@ int main(void) {
   snow_house[1] = 5;
   snow_house[2] = 0x80;
   FillCell(pixels, 1, 1, 0xFF087020);
+  /* Northwall's green cathedral plot surrounds the masked source closely
+   * enough to win the generic neighbour vote. It must not become the town's
+   * eraser tile when ordinary snow is available elsewhere. */
+  for (int y = 13; y <= 18; y++)
+    for (int x = 13; x <= 18; x++)
+      FillCell(pixels, x, y, 0xFF708030);
+  wram[TownCellIndex(5, 14, 14)] = 0xC2;
+  wram[TownCellIndex(5, 15, 14)] = 0xC3;
+  wram[TownCellIndex(5, 14, 15)] = 0xCA;
+  wram[TownCellIndex(5, 15, 15)] = 0xCB;
   SimBackgroundVoxels_Build(6, wram, pixels, 2);
   ground = SimBackgroundVoxels_GroundPixels();
   CHECK(ground[tree_center] == 0xFFFFFFFF);
   CHECK(ground[house_center] == 0xFFFFFFFF);
+  size_t cathedral_center =
+      (size_t)(14 * 16 + 8) * kSimTownCanvasPixels + 14 * 16 + 8;
+  CHECK(ground[cathedral_center] == 0xFFFFFFFF);
 
   if (failures) {
     fprintf(stderr, "%d sim background voxel checks failed\n", failures);

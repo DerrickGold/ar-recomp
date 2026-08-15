@@ -16,6 +16,7 @@
 #include "sim_background_voxel_models.h"
 #include "sim_background_voxel_palette.h"
 #include "sim_background_voxel_proportions.h"
+#include "sim_background_voxel_region.h"
 #include "sim_background_voxels.h"
 
 enum {
@@ -25,11 +26,9 @@ enum {
   kMaxGeometryQuads = 8192,
   kMaxVertices = kMaxGeometryQuads * 4,
   kMaxIndices = kMaxGeometryQuads * 6,
-  /* A north-clipped range can gain two authentic cap rows. They add at most
-   * 48 sparse front faces and no side bands, but reserve two complete rows so
-   * the bound remains obvious if the cap pattern is expanded later. */
+  /* Original cells plus the complete bounded set of reconstructed cap tiles. */
   kMaxMountainReliefCells = kSimBackgroundMountainCellCount +
-      2 * kSimBackgroundMountainTownCells,
+      kSimBackgroundMountainMaxCapTiles,
   kMaxMountainReliefFaces = kMaxMountainReliefCells *
       (1 + 4 * kSimBackgroundMountainReliefMaxSideBands),
 };
@@ -447,8 +446,9 @@ static void AddMountainFrontTile(
     const SimBackgroundMountainRelief *relief,
     float origin_x, float origin_y, float baseline,
     int destination_cell_x, int destination_cell_y,
-    int source_cell_x, int source_cell_y, bool mirror_x,
-    int *count) {
+    int source_cell_x, int source_cell_y, uint8_t flags, int *count) {
+  bool mirror_x =
+      (flags & kSimBackgroundMountainCapTile_MirrorX) != 0;
   float x0 = destination_cell_x * kSimBackgroundCellPixels;
   float y0 = destination_cell_y * kSimBackgroundCellPixels;
   float x1 = x0 + kSimBackgroundCellPixels;
@@ -461,12 +461,21 @@ static void AddMountainFrontTile(
       (float)kSimTownCanvasPixels;
   float v1 = (source_cell_y + 1) * kSimBackgroundCellPixels /
       (float)kSimTownCanvasPixels;
-  const SDL_FPoint uv[4] = {
+  SDL_FPoint uv[4] = {
     {mirror_x ? u1 : u0, v0}, {mirror_x ? u0 : u1, v0},
     {mirror_x ? u0 : u1, v1}, {mirror_x ? u1 : u0, v1},
   };
-  const float source_x[4] = {x0, x1, x1, x0};
-  const float source_y[4] = {y0, y0, y1, y1};
+  float source_x[4] = {x0, x1, x1, x0};
+  float source_y[4] = {y0, y0, y1, y1};
+  if (flags & kSimBackgroundMountainCapTile_TriangleLowerRight) {
+    /* Keep the transparent cap silhouette while sampling an opaque body tile
+     * for its demonstrated lighting. The duplicate final vertex leaves the
+     * ordinary quad index pattern with one real and one degenerate triangle. */
+    source_x[0] = x1; source_y[0] = y0; uv[0] = (SDL_FPoint){u1, v0};
+    source_x[1] = x1; source_y[1] = y1; uv[1] = (SDL_FPoint){u1, v1};
+    source_x[2] = x0; source_y[2] = y1; uv[2] = (SDL_FPoint){u0, v1};
+    source_x[3] = x0; source_y[3] = y1; uv[3] = (SDL_FPoint){u0, v1};
+  }
   float local_x[4], local_y[4], local_z[4];
   for (int point = 0; point < 4; point++)
     MountainPlanePoint(
@@ -497,8 +506,7 @@ static void AddNorthMountainCaps(
         params, axis, relief, origin_x, origin_y,
         component_bottom[tile->component], tile->cell_x, tile->cell_y,
         source_cell_x, source_cell_y,
-        (tile->flags & kSimBackgroundMountainCapTile_MirrorX) != 0,
-        count);
+        tile->flags, count);
   }
 }
 
@@ -661,8 +669,7 @@ static int BuildProjectedMountainReliefFaces(
   }
   AddNorthMountainCaps(
       params, &mountain_axis, &relief, field, &scene->mountain_caps,
-      component_bottom,
-      origin_x, origin_y, &count);
+      component_bottom, origin_x, origin_y, &count);
   qsort(g_renderer_state.mountain_projected, (size_t)count,
         sizeof(g_renderer_state.mountain_projected[0]),
         CompareProjectedMountainDepth);
@@ -776,16 +783,7 @@ static void AppendGroundContact(
 }
 
 static float ModelAuthoredHeight(const SimBackgroundVoxelObject *object) {
-  bool construction =
-      (object->flags & kSimBackgroundVoxel_UnderConstruction) != 0;
-  switch ((SimBackgroundVoxelKind)object->kind) {
-    case kSimBackgroundVoxel_House: return construction ? 12.0f : 15.6f;
-    case kSimBackgroundVoxel_Cathedral: return 24.0f;
-    case kSimBackgroundVoxel_Windmill: return construction ? 24.0f : 31.0f;
-    case kSimBackgroundVoxel_Factory: return construction ? 10.0f : 17.0f;
-    case kSimBackgroundVoxel_Tree: return 15.0f;
-  }
-  return 16.0f;
+  return SimBackgroundVoxelRegion_AuthoredHeight(object);
 }
 
 static float ObjectGroundDepth(
@@ -1271,7 +1269,8 @@ static int ShadowBounds(const SimBackgroundVoxelObject *object,
   switch ((SimBackgroundVoxelKind)object->kind) {
     case kSimBackgroundVoxel_House:
       out[0] = (SimBackgroundShadowBounds){
-        1.0f, 2.0f, 15.0f, 15.5f, construction ? 12.0f : 15.5f};
+        1.0f, 2.0f, 15.0f, 15.5f,
+        SimBackgroundVoxelRegion_AuthoredHeight(object)};
       return 1;
     case kSimBackgroundVoxel_Cathedral:
       out[0] = (SimBackgroundShadowBounds){
@@ -1298,7 +1297,8 @@ static int ShadowBounds(const SimBackgroundVoxelObject *object,
       return 3;
     case kSimBackgroundVoxel_Tree:
       out[0] = (SimBackgroundShadowBounds){
-        0.0f, 0.0f, 16.0f, 16.0f, 15.0f};
+        0.0f, 0.0f, 16.0f, 16.0f,
+        SimBackgroundVoxelRegion_AuthoredHeight(object)};
       return 1;
   }
   return 0;

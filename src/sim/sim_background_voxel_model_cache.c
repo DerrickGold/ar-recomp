@@ -6,6 +6,7 @@
 typedef struct SimBackgroundVoxelModelCacheKey {
   uint16_t group;
   uint8_t kind, flags;
+  uint8_t town, development_level;
   uint8_t cell_x, cell_y;
   uint8_t tree_edges, record_slot;
   uint8_t detail, style;
@@ -38,6 +39,8 @@ static SimBackgroundVoxelModelCacheKey MakeKey(
     .group = object->group,
     .kind = object->kind,
     .flags = object->flags,
+    .town = object->town,
+    .development_level = object->development_level,
     .cell_x = object->cell_x,
     .cell_y = object->cell_y,
     .tree_edges = object->tree_edges,
@@ -51,6 +54,8 @@ static bool KeyEquals(const SimBackgroundVoxelModelCacheKey *left,
                       const SimBackgroundVoxelModelCacheKey *right) {
   return left->group == right->group && left->kind == right->kind &&
       left->flags == right->flags && left->cell_x == right->cell_x &&
+      left->town == right->town &&
+      left->development_level == right->development_level &&
       left->cell_y == right->cell_y && left->tree_edges == right->tree_edges &&
       left->record_slot == right->record_slot && left->detail == right->detail &&
       left->style == right->style;
@@ -68,12 +73,22 @@ static uint32_t HashKey(const SimBackgroundVoxelModelCacheKey *key) {
   hash = HashByte(hash, (uint8_t)(key->group >> 8));
   hash = HashByte(hash, key->kind);
   hash = HashByte(hash, key->flags);
+  hash = HashByte(hash, key->town);
+  hash = HashByte(hash, key->development_level);
   hash = HashByte(hash, key->cell_x);
   hash = HashByte(hash, key->cell_y);
   hash = HashByte(hash, key->tree_edges);
   hash = HashByte(hash, key->record_slot);
   hash = HashByte(hash, key->detail);
   hash = HashByte(hash, key->style);
+  /* The set count is a power of two, so avalanche the structured coordinates
+   * before selecting its low bits. This keeps adjacent town cells and the new
+   * regional identity bytes from clustering into a handful of four-way sets. */
+  hash ^= hash >> 16;
+  hash *= 0x7FEB352Du;
+  hash ^= hash >> 15;
+  hash *= 0x846CA68Bu;
+  hash ^= hash >> 16;
   return hash;
 }
 

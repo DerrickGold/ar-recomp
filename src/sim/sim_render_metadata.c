@@ -735,12 +735,17 @@ SimObjectClassification Sim3D_ClassifyObject(
    * record and class only: the $A627-$A792 pose frames are also borrowed by
    * miracle effect records (observed on a type-$04 record during the kind-5
    * miracle), and those must not inherit the angel's flight plane. */
-  if (record_address == kActRaiserWram_SimAngelRecord ||
+  bool flying_actor = record_address == kActRaiserWram_SimAngelRecord ||
       type == kSimRecordClass_Angel ||
       (type >= kSimRecordClass_EnemyFirst &&
-       type <= kSimRecordClass_EnemyLast)) {
+       type <= kSimRecordClass_EnemyLast);
+  if (flying_actor) {
     result.height_class = kSimHeightClass_Flying;
     result.virtual_height = kSimVirtualHeight_Flying;
+    /* This class is physically above the town, so terrain may never occlude
+     * it. Classified contact states returned earlier remain in the terrain
+     * depth sort while they are on or striking the ground. */
+    result.traits |= kSimObjectTrait_Overhead;
     return result;
   }
   result.height_class = kSimHeightClass_Grounded;

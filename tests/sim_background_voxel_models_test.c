@@ -121,6 +121,22 @@ static SimBackgroundVoxelModel Build(SimBackgroundVoxelKind kind,
   return model;
 }
 
+static SimBackgroundVoxelModel BuildRegionalHouse(uint8_t town,
+                                                   uint8_t level) {
+  SimBackgroundVoxelObject object = {
+    .kind = kSimBackgroundVoxel_House,
+    .town = town,
+    .development_level = level,
+    .record_slot = 1,
+  };
+  SimBackgroundVoxelModel model;
+  SimBackgroundVoxelModel_BuildStyled(
+      &object, kSimBackgroundVoxelDetail_Balanced,
+      kSimBackgroundVoxelStyle_Basic, &model);
+  CHECK(!model.overflow && model.face_count > 0);
+  return model;
+}
+
 int main(void) {
   SimBackgroundVoxelModel house = Build(
       kSimBackgroundVoxel_House, kSimBackgroundVoxelDetail_Balanced);
@@ -129,6 +145,34 @@ int main(void) {
   CHECK(house.max_z == 14.0f);
   CHECK(MaterialFaces(&house, kSimVoxelMaterial_Roof) > 0);
   CHECK(MaterialFaces(&house, kSimVoxelMaterial_Dark) > 0);
+
+  /* The ROM selects eight architectural families through its exact 6x3
+   * town/civilization table. Each town's three-stage progression must remain
+   * visually distinct even where another town deliberately shares a family. */
+  uint64_t progression_hash[6][3];
+  for (int town = 1; town <= 6; town++)
+    for (int level = 0; level < 3; level++) {
+      SimBackgroundVoxelModel regional = BuildRegionalHouse(town, level);
+      progression_hash[town - 1][level] = ModelHash(&regional);
+    }
+  for (int town = 0; town < 6; town++) {
+    CHECK(progression_hash[town][0] != progression_hash[town][1]);
+    CHECK(progression_hash[town][1] != progression_hash[town][2]);
+    CHECK(progression_hash[town][0] != progression_hash[town][2]);
+  }
+  /* Tent and timber reuse in the source game is intentional, not a missing
+   * regional override. */
+  CHECK(progression_hash[0][0] == progression_hash[5][0]);
+  CHECK(progression_hash[0][1] == progression_hash[1][1]);
+  CHECK(progression_hash[0][1] == progression_hash[3][1]);
+  CHECK(progression_hash[0][1] == progression_hash[5][1]);
+  /* Kasandora's explicitly requested progression grows from canvas to a low
+   * stone dwelling and then a taller developed stone house. */
+  SimBackgroundVoxelModel kasandora_tent = BuildRegionalHouse(3, 0);
+  SimBackgroundVoxelModel kasandora_early = BuildRegionalHouse(3, 1);
+  SimBackgroundVoxelModel kasandora_developed = BuildRegionalHouse(3, 2);
+  CHECK(kasandora_tent.max_z < kasandora_early.max_z);
+  CHECK(kasandora_early.max_z < kasandora_developed.max_z);
 
   SimBackgroundVoxelObject alternate_house_object = {
     .kind = kSimBackgroundVoxel_House,
@@ -296,6 +340,14 @@ int main(void) {
   CHECK(interior.face_count <= SimBackgroundVoxelModel_FaceBudget(
       kSimBackgroundVoxelDetail_Balanced) * 3 / 4);
 
+  SimBackgroundVoxelObject snow_tree_object = isolated_object;
+  snow_tree_object.town = 6;
+  SimBackgroundVoxelModel snow_tree;
+  SimBackgroundVoxelModel_Build(
+      &snow_tree_object, kSimBackgroundVoxelDetail_Balanced, &snow_tree);
+  CHECK(!snow_tree.overflow && snow_tree.max_z == 16.0f);
+  CHECK(ModelHash(&snow_tree) != ModelHash(&isolated));
+
   SimBackgroundVoxelObject construction_object = {
     .kind = kSimBackgroundVoxel_House,
     .flags = kSimBackgroundVoxel_UnderConstruction,
@@ -313,7 +365,7 @@ int main(void) {
   /* Every family respects each performance target, and richer targets are
    * genuinely richer rather than four labels selecting the same geometry. */
   for (int kind = kSimBackgroundVoxel_House;
-       kind <= kSimBackgroundVoxel_Tree; kind++) {
+       kind < kSimBackgroundVoxelKindCount; kind++) {
     SimBackgroundVoxelModel low = Build(
         (SimBackgroundVoxelKind)kind, kSimBackgroundVoxelDetail_Low);
     SimBackgroundVoxelModel balanced = Build(
@@ -332,7 +384,7 @@ int main(void) {
    * than the representative fixtures above so a newly authored variant cannot
    * overflow only for one deterministic town coordinate. */
   for (int kind = kSimBackgroundVoxel_House;
-       kind <= kSimBackgroundVoxel_Tree; kind++) {
+       kind < kSimBackgroundVoxelKindCount; kind++) {
     for (int detail = kSimBackgroundVoxelDetail_Low;
          detail < kSimBackgroundVoxelDetail_Count; detail++) {
       for (int style = kSimBackgroundVoxelStyle_Basic;
@@ -357,6 +409,33 @@ int main(void) {
       }
     }
   }
+
+  /* Regional families must honor the same configurable quality boundaries as
+   * the original Fillmore model. Exercise all 18 ROM-selected identities at
+   * every density/style combination rather than validating only one town. */
+  for (int town = 1; town <= 6; town++)
+    for (int level = 0; level < 3; level++)
+      for (int detail = kSimBackgroundVoxelDetail_Low;
+           detail < kSimBackgroundVoxelDetail_Count; detail++)
+        for (int style = kSimBackgroundVoxelStyle_Basic;
+             style < kSimBackgroundVoxelStyle_Count; style++) {
+          SimBackgroundVoxelObject object = {
+            .kind = kSimBackgroundVoxel_House,
+            .town = (uint8_t)town,
+            .development_level = (uint8_t)level,
+            .cell_x = (uint8_t)(town * 3),
+            .cell_y = (uint8_t)(level * 5),
+            .record_slot = (uint8_t)(town * 3 + level),
+          };
+          SimBackgroundVoxelModel regional;
+          SimBackgroundVoxelModel_BuildStyled(
+              &object, (SimBackgroundVoxelDetail)detail,
+              (SimBackgroundVoxelStyle)style, &regional);
+          CHECK(!regional.overflow && regional.face_count > 0);
+          CHECK(regional.face_count <=
+                SimBackgroundVoxelModel_FaceBudget(
+                    (SimBackgroundVoxelDetail)detail));
+        }
 
   CHECK(UniqueVariedModels(kSimBackgroundVoxel_House,
                            kSimBackgroundVoxelDetail_High) >= 4);

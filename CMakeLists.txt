@@ -338,6 +338,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_background_voxel_models_test
         tests/sim_background_voxel_models_test.c
         src/sim/sim_background_voxel_models.c
+        src/sim/sim_background_voxel_region.c
     )
     target_include_directories(actraiser_sim_background_voxel_models_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -378,6 +379,7 @@ if(BUILD_TESTING)
         tests/sim_background_voxel_model_cache_test.c
         src/sim/sim_background_voxel_model_cache.c
         src/sim/sim_background_voxel_models.c
+        src/sim/sim_background_voxel_region.c
     )
     target_include_directories(actraiser_sim_background_voxel_model_cache_test
         PRIVATE
@@ -413,6 +415,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_background_voxel_palette_test
         tests/sim_background_voxel_palette_test.c
         src/sim/sim_background_voxel_palette.c
+        src/sim/sim_background_voxel_region.c
     )
     target_include_directories(actraiser_sim_background_voxel_palette_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -441,6 +444,7 @@ if(BUILD_TESTING)
         tests/sim_background_voxel_proportions_test.c
         src/sim/sim_background_voxel_models.c
         src/sim/sim_background_voxel_proportions.c
+        src/sim/sim_background_voxel_region.c
     )
     target_include_directories(actraiser_sim_background_voxel_proportions_test
         PRIVATE
@@ -450,6 +454,18 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_sim_background_voxel_proportions
         COMMAND actraiser_sim_background_voxel_proportions_test)
+
+    add_executable(actraiser_sim_background_voxel_region_test
+        tests/sim_background_voxel_region_test.c
+        src/sim/sim_background_voxel_region.c
+    )
+    target_include_directories(actraiser_sim_background_voxel_region_test
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+    )
+    add_test(NAME actraiser_sim_background_voxel_region
+        COMMAND actraiser_sim_background_voxel_region_test)
 
     add_executable(actraiser_sim_world_map_test
         tests/sim_world_map_test.c

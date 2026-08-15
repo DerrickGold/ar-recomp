@@ -812,16 +812,21 @@ static void TestVirtualHeightClassification(void) {
       kSimHeightClass_WaterPlane, 0,
       kSimObjectTrait_WaterPlane | kSimObjectTrait_NoShadow },
     { "blue dragon", kSimRecordTier_World, 0x12, 3, world, 0xE0A0,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying, 0 },
+      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
+      kSimObjectTrait_Overhead },
     { "napper bat", kSimRecordTier_World, 0x13, 5, world, 0xE500,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying, 0 },
+      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
+      kSimObjectTrait_Overhead },
     { "red demon", kSimRecordTier_World, 0x14, 1, world, 0xE300,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying, 0 },
+      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
+      kSimObjectTrait_Overhead },
     { "skull head", kSimRecordTier_World, 0x15, 1, world, 0xE400,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying, 0 },
+      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
+      kSimObjectTrait_Overhead },
     { "angel record", kSimRecordTier_World, 0x0C, 0,
       kActRaiserWram_SimAngelRecord, 0xA627,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying, 0 },
+      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
+      kSimObjectTrait_Overhead },
     /* Miracle cloud family: the art spans cloud to ground, so it stays on the
      * map plane with the ROM's own anchor and shadow -- and is Overhead, so
      * D3b's row sort cannot let a nearer tree draw over a cloud. */
@@ -1384,9 +1389,9 @@ static void TestSourceDrawLift(void) {
 }
 
 /* Overhead is a sort trait, and the properties that matter are what it does
- * NOT change. It must not become a height (the family's ground contact is the
- * ROM's), must not resurrect a shadow, and must not spread to the shadow
- * ellipse that shares its composition range. */
+ * NOT change. It must not become a height (the cloud family's ground contact
+ * is the ROM's), must not resurrect a shadow, and must not spread to either
+ * the cloud shadow ellipse or ordinary grounded actors. */
 static void TestOverheadTrait(void) {
   const uint16_t sky[] = { 0xD9E5, 0xDA4B, 0xDAA1, 0xDAF7, 0xDB5C,
                            0xDC77, 0xDBC1, 0xDC1C, 0xDCD2 };
@@ -1406,14 +1411,28 @@ static void TestOverheadTrait(void) {
       kSimRecordTier_World, 0x08, 1, kActRaiserWram_SimWorldRecords, 0xDA22);
   CHECK(!(shadow.traits & kSimObjectTrait_Overhead));
 
-  /* Nothing else in the catalogue claims it -- an ordinary grounded record and
-   * a flying one both stay in the row sort. */
+  /* The player angel and airborne enemies are above voxel terrain, while an
+   * ordinary grounded record stays in the terrain depth sort. */
+  SimObjectClassification angel = Sim3D_ClassifyObject(
+      kSimRecordTier_World, 0x0C, 0,
+      kActRaiserWram_SimAngelRecord, 0xA627);
+  CHECK(angel.traits & kSimObjectTrait_Overhead);
+  CHECK(angel.height_class == kSimHeightClass_Flying);
+  CHECK(angel.virtual_height == kSimVirtualHeight_Flying);
+
   SimObjectClassification grounded = Sim3D_ClassifyObject(
       kSimRecordTier_World, 0x02, 0, kActRaiserWram_SimWorldRecords, 0xE000);
   CHECK(!(grounded.traits & kSimObjectTrait_Overhead));
-  SimObjectClassification flying = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x0C, 0, kActRaiserWram_SimAngelRecord, 0xA627);
-  CHECK(!(flying.traits & kSimObjectTrait_Overhead));
+  SimObjectClassification enemy = Sim3D_ClassifyObject(
+      kSimRecordTier_World, 0x12, 0,
+      kActRaiserWram_SimWorldRecords, 0xE0A0);
+  CHECK(enemy.traits & kSimObjectTrait_Overhead);
+  /* A classified contact state must not inherit the airborne ordering. */
+  SimObjectClassification striking = Sim3D_ClassifyObject(
+      kSimRecordTier_World, 0x12, 6,
+      kActRaiserWram_SimWorldRecords, 0xE0A0);
+  CHECK(!(striking.traits & kSimObjectTrait_Overhead));
+  CHECK(striking.height_class == kSimHeightClass_GroundStrike);
 }
 
 /* D4a caster selection is pure data: the shadow pass must never re-derive it

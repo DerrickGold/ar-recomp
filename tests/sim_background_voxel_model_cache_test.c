@@ -37,6 +37,30 @@ int main(void) {
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 2 && stats.hits == 1);
 
+  /* Town and civilization tier select different authored architecture and
+   * must never alias an otherwise identical house model. */
+  house.town = 3;
+  house.development_level = 1;
+  const SimBackgroundVoxelModel *early_kasandora =
+      SimBackgroundVoxelModelCache_Get(
+          &house, kSimBackgroundVoxelDetail_High,
+          kSimBackgroundVoxelStyle_Varied, 4);
+  house.development_level = 2;
+  const SimBackgroundVoxelModel *developed_kasandora =
+      SimBackgroundVoxelModelCache_Get(
+          &house, kSimBackgroundVoxelDetail_High,
+          kSimBackgroundVoxelStyle_Varied, 5);
+  house.town = 2;
+  const SimBackgroundVoxelModel *developed_bloodpool =
+      SimBackgroundVoxelModelCache_Get(
+          &house, kSimBackgroundVoxelDetail_High,
+          kSimBackgroundVoxelStyle_Varied, 6);
+  CHECK(early_kasandora && developed_kasandora && developed_bloodpool);
+  CHECK(early_kasandora != developed_kasandora);
+  CHECK(developed_kasandora != developed_bloodpool);
+  stats = SimBackgroundVoxelModelCache_Stats();
+  CHECK(stats.misses == 5 && stats.hits == 1);
+
   /* A developed-town pass should retain hundreds of independently seeded
    * objects and hit them on the following frame instead of linearly scanning
    * and evicting the next entry before it can be reused. */
@@ -64,6 +88,9 @@ int main(void) {
         kSimBackgroundVoxelStyle_Basic, 11) != NULL);
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(first_pass_misses == kDevelopedTownObjects);
+  if (stats.hits < kDevelopedTownObjects * 9 / 10)
+    fprintf(stderr, "cache retention: hits=%u misses=%u evictions=%u\n",
+            stats.hits, stats.misses, stats.evictions);
   CHECK(stats.hits >= kDevelopedTownObjects * 9 / 10);
 
   SimBackgroundVoxelModelCache_Reset();

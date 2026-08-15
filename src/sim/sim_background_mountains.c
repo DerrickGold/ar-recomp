@@ -126,41 +126,80 @@ void SimBackgroundMountains_BuildNorthCaps(
       !field->first_cell_by_tile[0x8A] ||
       !field->first_cell_by_tile[0x7D] ||
       !field->first_cell_by_tile[0x89] ||
-      !field->first_cell_by_tile[0x82] ||
-      !field->first_cell_by_tile[0x81])
+      !field->first_cell_by_tile[0x81] ||
+      !field->first_cell_by_tile[0x82])
     return;
 
-  /* Northern ranges use the base row of this authentic four-cell stamp. Its
-   * two cap rows occur elsewhere in the common mountain set:
+  /* Restore both clipped rows above a northern range. The mirrored $7D is
+   * deliberately the second row's right face: it keeps the authentic dark
+   * slope instead of substituting a flat, unshaded mountain tile.
    *
    *       $82  --  --  $81
-   *       $8A $7D $7E $89
-   *       (existing clipped base)
+   *       $8A $7D mirrored-$7D $89
    *
-   * Some towns omit $7E. It is the horizontal counterpart of $7D, so the
-   * layout mirrors that original tile rather than inventing new pixels. */
-  static const uint8_t middle_tiles[4] = {0x8A, 0x7D, 0x7D, 0x89};
+   * Adjacent groups pair $81/$82 into complete top-row peaks. The first and
+   * last map-edge groups retain one authentic half each because the missing
+   * half lies outside the level. Only complete a peak beside a genuine gap
+   * within the map; never add a third row or replace an original map cell. */
+  static const uint8_t row_tiles[4] = {0x8A, 0x7D, 0x7D, 0x89};
+  bool restored_groups[kSimBackgroundMountainTownCells / 4] = {false};
   for (int group_x = 0; group_x < kSimBackgroundMountainTownCells;
        group_x += 4) {
-    int occupied = 0;
     uint16_t component = 0;
+    bool complete = true;
     for (int offset = 0; offset < 4; offset++) {
       int cell_x = group_x + offset;
       if (cell_x >= kSimBackgroundMountainTownCells ||
-          !SimBackgroundMountains_CellOccupied(field, cell_x, 0))
-        continue;
-      occupied++;
+          !SimBackgroundMountains_CellOccupied(field, cell_x, 0)) {
+        complete = false;
+        break;
+      }
       uint16_t candidate = field->component[cell_x];
       if (!component) component = candidate;
-      else if (component != candidate) component = 0;
+      else if (component != candidate) complete = false;
     }
-    if (occupied < 3 || !component) continue;
-    for (int offset = 0; offset < 4; offset++)
+    if (!complete || !component) continue;
+    restored_groups[group_x / 4] = true;
+    for (int offset = 0; offset < 4; offset++) {
+      int cell_x = group_x + offset;
+      uint8_t flags =
+          offset == 2 ? kSimBackgroundMountainCapTile_MirrorX : 0;
       AppendCapTile(
-          out, group_x + offset, -1, middle_tiles[offset],
-          offset == 2 ? kSimBackgroundMountainCapTile_MirrorX : 0,
-          component);
+          out, cell_x, -1, row_tiles[offset], flags, component);
+    }
     AppendCapTile(out, group_x, -2, 0x82, 0, component);
     AppendCapTile(out, group_x + 3, -2, 0x81, 0, component);
   }
+
+  for (int group = 0;
+       group < kSimBackgroundMountainTownCells / 4; group++) {
+    if (!restored_groups[group]) continue;
+    int group_x = group * 4;
+    uint16_t component = field->component[group_x];
+    if (group > 0 && !restored_groups[group - 1])
+      AppendCapTile(out, group_x - 1, -2, 0x81, 0, component);
+    if (group + 1 < kSimBackgroundMountainTownCells / 4 &&
+        !restored_groups[group + 1])
+      AppendCapTile(out, group_x + 4, -2, 0x82, 0, component);
+  }
+
+  /* Filmora repeats the same nested overlap inside every reconstructed
+   * four-cell cap. Preserve the ordinary cap silhouettes, then layer the two
+   * demonstrated source fragments on each restored stamp: shaded $82 on the
+   * foreground-right and normally lit $89 inside the background-left
+   * triangle. This deliberately leaves the original map row and the valid
+   * source examples untouched. */
+  if (field->town == 1) {
+    for (int group = 0;
+         group < kSimBackgroundMountainTownCells / 4; group++) {
+      if (!restored_groups[group]) continue;
+      int group_x = group * 4;
+      uint16_t component = field->component[group_x];
+      AppendCapTile(out, group_x + 2, -1, 0x82, 0, component);
+      AppendCapTile(
+          out, group_x + 3, -2, 0x89,
+          kSimBackgroundMountainCapTile_TriangleLowerRight, component);
+    }
+  }
+
 }

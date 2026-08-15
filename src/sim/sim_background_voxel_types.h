@@ -42,6 +42,10 @@ typedef struct SimBackgroundVoxelObject {
   uint16_t group;
   uint8_t kind;
   uint8_t flags;
+  /* Region and authentic structure subtype are model identity. House subtype
+   * is the civilization level used by the ROM's regional art lookup. */
+  uint8_t town;
+  uint8_t development_level;
   uint8_t cell_x, cell_y;
   uint8_t source_cells_w, source_cells_h;
   uint8_t footprint_cells_w, footprint_cells_d;

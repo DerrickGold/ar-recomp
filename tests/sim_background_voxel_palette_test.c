@@ -14,6 +14,8 @@ static int failures;
 int main(void) {
   SimBackgroundVoxelObject house = {
     .kind = kSimBackgroundVoxel_House,
+    .town = 1,
+    .development_level = 2,
     .cell_x = 3,
     .cell_y = 4,
     .record_slot = 1,
@@ -67,12 +69,44 @@ int main(void) {
       &house, kSimBackgroundVoxelBiome_Desert, &desert);
   SimBackgroundVoxelPalette_Build(
       &house, kSimBackgroundVoxelBiome_Snow, &northwall);
-  /* The captured non-snow towns share one structure palette; terrain supplies
-   * their regional colour rather than an invented voxel-only tint. */
+  /* A biome change does not overwrite the house's authentic regional ramp. */
   CHECK(SimBackgroundVoxelPalette_Base(
             &desert, kSimVoxelMaterial_Wall) ==
         SimBackgroundVoxelPalette_Base(
             &palette, kSimVoxelMaterial_Wall));
+
+  SimBackgroundVoxelObject bloodpool_house = house;
+  bloodpool_house.town = 2;
+  SimBackgroundVoxelObject kasandora_house = house;
+  kasandora_house.town = 3;
+  SimBackgroundVoxelObject aitos_house = house;
+  aitos_house.town = 4;
+  SimBackgroundVoxelObject marahna_house = house;
+  marahna_house.town = 5;
+  marahna_house.development_level = 1;
+  SimBackgroundVoxelObject tent = kasandora_house;
+  tent.development_level = 0;
+  SimBackgroundVoxelPalette bloodpool, kasandora, aitos, marahna, canvas;
+  SimBackgroundVoxelPalette_Build(
+      &bloodpool_house, kSimBackgroundVoxelBiome_Wetland, &bloodpool);
+  SimBackgroundVoxelPalette_Build(
+      &kasandora_house, kSimBackgroundVoxelBiome_Desert, &kasandora);
+  SimBackgroundVoxelPalette_Build(
+      &aitos_house, kSimBackgroundVoxelBiome_Volcanic, &aitos);
+  SimBackgroundVoxelPalette_Build(
+      &marahna_house, kSimBackgroundVoxelBiome_Tropical, &marahna);
+  SimBackgroundVoxelPalette_Build(
+      &tent, kSimBackgroundVoxelBiome_Desert, &canvas);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &bloodpool, kSimVoxelMaterial_Roof) == 0xFF4A205Au);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &kasandora, kSimVoxelMaterial_Wall) == 0xFFA4A494u);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &aitos, kSimVoxelMaterial_Roof) == 0xFFB45A10u);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &marahna, kSimVoxelMaterial_Roof) == 0xFF836A31u);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &canvas, kSimVoxelMaterial_Roof) == 0xFFA47B39u);
   SimBackgroundVoxelObject northwall_tree = tree_a;
   SimBackgroundVoxelPalette northwall_foliage;
   SimBackgroundVoxelPalette_Build(

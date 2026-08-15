@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "sim_background_voxel_region.h"
+
 static uint8_t ClampChannel(int value) {
   return value < 0 ? 0 : value > 255 ? 255 : (uint8_t)value;
 }
@@ -64,6 +66,114 @@ static void SetBrownRoofs(SimBackgroundVoxelPalette *palette) {
   SetRamp(palette, kSimVoxelMaterial_RoofLight,
           Argb(90, 41, 0), Argb(131, 65, 0),
           Argb(164, 82, 0), Argb(164, 82, 0));
+}
+
+static void SetCanvasHouse(SimBackgroundVoxelPalette *palette) {
+  SetRamp(palette, kSimVoxelMaterial_Wall,
+          Argb(90, 74, 32), Argb(148, 115, 57),
+          Argb(205, 164, 90), Argb(230, 205, 139));
+  SetRamp(palette, kSimVoxelMaterial_WallLight,
+          Argb(148, 115, 57), Argb(180, 139, 74),
+          Argb(222, 180, 90), Argb(246, 213, 148));
+  SetRamp(palette, kSimVoxelMaterial_Roof,
+          Argb(74, 57, 24), Argb(115, 82, 32),
+          Argb(164, 123, 57), Argb(205, 164, 90));
+  SetRamp(palette, kSimVoxelMaterial_RoofLight,
+          Argb(115, 82, 32), Argb(164, 123, 57),
+          Argb(205, 164, 90), Argb(230, 205, 139));
+}
+
+static void SetTimberHouse(SimBackgroundVoxelPalette *palette) {
+  SetEarthenWalls(palette);
+  SetBrownRoofs(palette);
+  SetRamp(palette, kSimVoxelMaterial_Trim,
+          Argb(74, 41, 8), Argb(115, 65, 8),
+          Argb(148, 90, 16), Argb(180, 123, 49));
+}
+
+static void SetStoneHouse(SimBackgroundVoxelPalette *palette) {
+  SetRamp(palette, kSimVoxelMaterial_Wall,
+          Argb(65, 74, 65), Argb(106, 106, 98),
+          Argb(164, 164, 148), Argb(213, 213, 197));
+  SetRamp(palette, kSimVoxelMaterial_WallLight,
+          Argb(106, 106, 98), Argb(164, 164, 148),
+          Argb(205, 205, 189), Argb(238, 238, 222));
+  SetRamp(palette, kSimVoxelMaterial_Roof,
+          Argb(32, 57, 82), Argb(65, 82, 98),
+          Argb(106, 115, 115), Argb(164, 172, 164));
+  SetRamp(palette, kSimVoxelMaterial_RoofLight,
+          Argb(65, 82, 98), Argb(106, 115, 115),
+          Argb(164, 172, 164), Argb(205, 213, 205));
+  SetRamp(palette, kSimVoxelMaterial_Trim,
+          Argb(32, 32, 24), Argb(65, 74, 65),
+          Argb(106, 106, 98), Argb(180, 180, 164));
+}
+
+static void SetBloodpoolHouse(SimBackgroundVoxelPalette *palette) {
+  SetEarthenWalls(palette);
+  SetPurpleRoofs(palette);
+  SetRamp(palette, kSimVoxelMaterial_Trim,
+          Argb(32, 32, 24), Argb(74, 32, 90),
+          Argb(115, 57, 148), Argb(180, 139, 197));
+}
+
+static void SetAitosHouse(SimBackgroundVoxelPalette *palette) {
+  SetStoneHouse(palette);
+  SetRamp(palette, kSimVoxelMaterial_Roof,
+          Argb(90, 41, 0), Argb(131, 65, 0),
+          Argb(180, 90, 16), Argb(222, 139, 49));
+  SetRamp(palette, kSimVoxelMaterial_RoofLight,
+          Argb(131, 65, 0), Argb(180, 90, 16),
+          Argb(222, 139, 49), Argb(246, 180, 82));
+}
+
+static void SetMarahnaHouse(SimBackgroundVoxelPalette *palette) {
+  SetRamp(palette, kSimVoxelMaterial_Wall,
+          Argb(74, 57, 24), Argb(106, 82, 32),
+          Argb(148, 115, 49), Argb(197, 156, 82));
+  SetRamp(palette, kSimVoxelMaterial_WallLight,
+          Argb(106, 82, 32), Argb(148, 115, 49),
+          Argb(197, 156, 82), Argb(222, 197, 131));
+  SetRamp(palette, kSimVoxelMaterial_Roof,
+          Argb(57, 49, 16), Argb(90, 74, 24),
+          Argb(131, 106, 49), Argb(180, 148, 74));
+  SetRamp(palette, kSimVoxelMaterial_RoofLight,
+          Argb(90, 74, 24), Argb(131, 106, 49),
+          Argb(180, 148, 74), Argb(213, 180, 106));
+  SetRamp(palette, kSimVoxelMaterial_Trim,
+          Argb(49, 32, 8), Argb(74, 49, 8),
+          Argb(106, 65, 16), Argb(148, 98, 32));
+}
+
+static void ApplyRegionalHousePalette(
+    SimBackgroundVoxelPalette *palette,
+    SimBackgroundVoxelPaletteStyle style) {
+  switch (style) {
+    case kSimBackgroundPaletteStyle_Canvas:
+      SetCanvasHouse(palette);
+      break;
+    case kSimBackgroundPaletteStyle_Timber:
+      SetTimberHouse(palette);
+      break;
+    case kSimBackgroundPaletteStyle_Fillmore:
+      SetEarthenWalls(palette);
+      SetBrownRoofs(palette);
+      break;
+    case kSimBackgroundPaletteStyle_Bloodpool:
+      SetBloodpoolHouse(palette);
+      break;
+    case kSimBackgroundPaletteStyle_KasandoraStone:
+      SetStoneHouse(palette);
+      break;
+    case kSimBackgroundPaletteStyle_Aitos:
+      SetAitosHouse(palette);
+      break;
+    case kSimBackgroundPaletteStyle_Marahna:
+      SetMarahnaHouse(palette);
+      break;
+    case kSimBackgroundPaletteStyle_Common:
+      break;
+  }
 }
 
 static void SetCommonPalette(SimBackgroundVoxelPalette *palette) {
@@ -141,7 +251,8 @@ void SimBackgroundVoxelPalette_Build(
   if (!object) return;
   switch ((SimBackgroundVoxelKind)object->kind) {
     case kSimBackgroundVoxel_House:
-      SetBrownRoofs(palette);
+      ApplyRegionalHousePalette(
+          palette, SimBackgroundVoxelRegion_PaletteStyle(object));
       break;
     case kSimBackgroundVoxel_Cathedral:
       SetRamp(palette, kSimVoxelMaterial_Wall,
