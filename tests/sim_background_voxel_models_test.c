@@ -19,6 +19,21 @@ static int MaterialFaces(const SimBackgroundVoxelModel *model,
   return count;
 }
 
+static void MaterialXBounds(const SimBackgroundVoxelModel *model,
+                            SimBackgroundVoxelMaterial material,
+                            float *min_x, float *max_x) {
+  *min_x = 1000000.0f;
+  *max_x = -1000000.0f;
+  for (uint16_t face = 0; face < model->face_count; face++) {
+    if (model->faces[face].material != material) continue;
+    for (int point = 0; point < 4; point++) {
+      float x = model->faces[face].points[point].x;
+      if (x < *min_x) *min_x = x;
+      if (x > *max_x) *max_x = x;
+    }
+  }
+}
+
 static bool HorizontalFaceCovers(const SimBackgroundVoxelModel *model,
                                  float x, float y) {
   for (uint16_t i = 0; i < model->face_count; i++) {
@@ -131,6 +146,23 @@ int main(void) {
   CHECK(memcmp(alternate_house.faces, house.faces,
                house.face_count * sizeof(house.faces[0])) != 0);
 
+  /* Seed 1 selects the porch. On alternate-facing houses its posts must be
+   * transformed with the main facade instead of staying at the standard-house
+   * coordinates and landing to the left of the door. */
+  SimBackgroundVoxelObject alternate_porch_object = {
+    .kind = kSimBackgroundVoxel_House,
+    .flags = kSimBackgroundVoxel_AlternateFacing,
+    .record_slot = 1,
+  };
+  SimBackgroundVoxelModel alternate_porch;
+  SimBackgroundVoxelModel_BuildStyled(
+      &alternate_porch_object, kSimBackgroundVoxelDetail_High,
+      kSimBackgroundVoxelStyle_Varied, &alternate_porch);
+  float porch_min_x, porch_max_x;
+  MaterialXBounds(&alternate_porch, kSimVoxelMaterial_Wood,
+                  &porch_min_x, &porch_max_x);
+  CHECK(porch_min_x > 8.7f && porch_max_x < 12.0f);
+
   SimBackgroundVoxelModel cathedral = Build(
       kSimBackgroundVoxel_Cathedral, kSimBackgroundVoxelDetail_Balanced);
   CHECK(cathedral.min_x >= 0.0f && cathedral.max_x <= 32.0f);
@@ -174,6 +206,8 @@ int main(void) {
   CHECK(HorizontalFaceCovers(&factory, 26.0f, 16.0f));  /* right spine */
   CHECK(HorizontalFaceCovers(&factory, 10.0f, 26.0f));  /* lower U arm */
   CHECK(!HorizontalFaceCovers(&factory, 10.0f, 16.0f)); /* open courtyard */
+  CHECK(RegionMaxZ(&factory, 1.0f, 1.0f, 20.0f, 8.5f) ==
+        RegionMaxZ(&factory, 1.0f, 23.5f, 20.0f, 31.0f));
 
   /* Styling is a separate cost boundary from the density target. The factory
    * yard appears only in Architectural+, and Varied is deterministic for the
@@ -203,8 +237,10 @@ int main(void) {
   CHECK(architectural_factory.authored_face_count >
         architectural_factory.face_count);
   CHECK(architectural_factory.box_count > 0);
+  /* The courtyard must expose the underlying biome tile at every style level;
+   * architectural detail may add fixtures, but never a replacement floor. */
   CHECK(MaterialFaces(&trimmed_factory, kSimVoxelMaterial_Paving) == 0);
-  CHECK(MaterialFaces(&architectural_factory, kSimVoxelMaterial_Paving) > 0);
+  CHECK(MaterialFaces(&architectural_factory, kSimVoxelMaterial_Paving) == 0);
   CHECK(architectural_factory.face_count > trimmed_factory.face_count);
   CHECK(varied_factory.face_count > architectural_factory.face_count);
   CHECK(varied_factory.face_count == repeated_varied_factory.face_count);

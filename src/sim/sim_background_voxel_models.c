@@ -452,27 +452,27 @@ static void BuildFactory(const SimBackgroundVoxelObject *object,
     return;
   }
 
-  /* The front arm is lower and the courtyard gap wider than the rear arm.
-   * From the normal SIM camera this makes the sideways-U readable instead of
-   * letting its near roof visually close the centre into a purple block. */
-  AddStandardBox(model, 0.5f, 0.5f, 0.0f, 22.0f, 11.0f, 1.5f,
+  /* Keep both horizontal arms architecturally consistent. The open centre and
+   * connecting right spine establish the sideways-U without making the near
+   * arm look like an unrelated, shorter building. */
+  AddStandardBox(model, 0.5f, 0.5f, 0.0f, 22.0f, 9.0f, 1.5f,
                  kSimVoxelMaterial_Trim);
-  AddStandardBox(model, 0.5f, 22.0f, 0.0f, 22.0f, 31.5f, 1.5f,
+  AddStandardBox(model, 0.5f, 23.0f, 0.0f, 22.0f, 31.5f, 1.5f,
                  kSimVoxelMaterial_Trim);
   AddStandardBox(model, 21.0f, 0.5f, 0.0f, 31.5f, 31.5f, 1.5f,
                  kSimVoxelMaterial_Trim);
-  AddStandardBox(model, 1.5f, 1.5f, 1.5f, 22.0f, 10.5f, 9.0f,
-                 kSimVoxelMaterial_Wall);
-  AddStandardBox(model, 1.5f, 23.0f, 1.5f, 22.0f, 30.5f, 6.8f,
+  AddStandardBox(model, 1.5f, 1.5f, 1.5f, 22.0f, 8.5f, 9.0f,
+                 kSimVoxelMaterial_WallLight);
+  AddStandardBox(model, 1.5f, 23.5f, 1.5f, 22.0f, 30.5f, 9.0f,
                  kSimVoxelMaterial_WallLight);
   AddStandardBox(model, 21.0f, 1.5f, 1.5f, 30.5f, 30.5f, 9.0f,
                  kSimVoxelMaterial_Wall);
   AddStandardBox(model, 20.8f, 1.0f, 8.7f, 31.0f, 31.0f, 9.5f,
                  kSimVoxelMaterial_Roof);
-  AddGableRoofY(model, 0.8f, 22.2f, 0.8f, 11.2f, 9.0f, 12.0f,
+  AddGableRoofY(model, 0.8f, 22.2f, 0.8f, 9.2f, 9.0f, 12.0f,
                 kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
-  AddGableRoofY(model, 0.8f, 22.2f, 21.8f, 31.2f, 6.8f, 8.8f,
-                kSimVoxelMaterial_RoofLight, kSimVoxelMaterial_WallLight);
+  AddGableRoofY(model, 0.8f, 22.2f, 22.8f, 31.2f, 9.0f, 12.0f,
+                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
 
   static const float chimney_xy[][2] = {
     {4.0f, 5.0f}, {4.0f, 24.0f},
@@ -481,7 +481,7 @@ static void BuildFactory(const SimBackgroundVoxelObject *object,
   int chimneys = DetailChoice(detail, 1, 2, 4, 4);
   for (int i = 0; i < chimneys; i++) {
     float x = chimney_xy[i][0], y = chimney_xy[i][1];
-    float base_z = y > 20.0f ? 8.0f : 10.0f;
+    float base_z = 10.0f;
     AddStandardBox(model, x, y, base_z, x + 3.0f, y + 3.0f,
                    base_z + 6.0f,
                    kSimVoxelMaterial_Metal);
@@ -498,7 +498,7 @@ static void BuildFactory(const SimBackgroundVoxelObject *object,
                  kSimVoxelMaterial_Dark);
   AddStandardBox(model, 24.0f, 30.0f, 3.5f, 28.0f, 31.5f, 6.5f,
                  kSimVoxelMaterial_Dark);
-  AddStandardBox(model, 8.0f, 10.2f, 2.5f, 15.0f, 11.5f, 7.2f,
+  AddStandardBox(model, 8.0f, 8.2f, 2.5f, 15.0f, 9.5f, 7.2f,
                  kSimVoxelMaterial_Dark);
 
   if (detail >= kSimBackgroundVoxelDetail_High) {
@@ -981,9 +981,9 @@ static void BuildSilhouetteTrim(
                        kSimVoxelMaterial_Glass);
       break;
     case kSimBackgroundVoxel_Factory:
-      AddStandardBox(model, 1.0f, 9.8f, 8.5f, 21.2f, 11.3f, 9.4f,
+      AddStandardBox(model, 1.0f, 7.8f, 8.5f, 21.2f, 9.3f, 9.4f,
                      kSimVoxelMaterial_Trim);
-      AddStandardBox(model, 1.0f, 29.7f, 6.3f, 21.2f, 31.7f, 7.1f,
+      AddStandardBox(model, 1.0f, 29.7f, 8.5f, 21.2f, 31.7f, 9.4f,
                      kSimVoxelMaterial_Trim);
       AddStandardBox(model, 20.8f, 10.0f, 8.6f, 22.4f, 22.5f, 9.4f,
                      kSimVoxelMaterial_Trim);
@@ -1005,7 +1005,7 @@ static void BuildSilhouetteTrim(
   }
 }
 
-static void BuildFactoryCourtyard(
+static void BuildFactoryCourtyardDetails(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
     SimBackgroundVoxelModel *model) {
@@ -1013,11 +1013,9 @@ static void BuildFactoryCourtyard(
       object->kind != kSimBackgroundVoxel_Factory ||
       (object->flags & kSimBackgroundVoxel_UnderConstruction))
     return;
-  /* The courtyard is deliberately a thin inset surface so grass remains
-   * visible around the sideways-U footprint but the interior reads as a
-   * usable industrial yard rather than an accidental hole. */
-  AddStandardBox(model, 1.8f, 11.8f, 0.0f, 21.0f, 20.2f, 0.28f,
-                 kSimVoxelMaterial_Paving);
+  /* Leave the courtyard floor open so the same biome ground used to erase the
+   * source sprite remains visible through the sideways-U. Sparse fixtures can
+   * add detail at higher style settings without replacing the terrain. */
   AddStandardBox(model, 20.4f, 13.5f, 1.3f, 21.8f, 18.5f, 7.2f,
                  kSimVoxelMaterial_Dark);
   AddStandardBox(model, 3.2f, 13.0f, 0.3f, 6.5f, 16.2f, 2.8f,
@@ -1162,6 +1160,12 @@ void SimBackgroundVoxelModel_BuildStyled(
   switch ((SimBackgroundVoxelKind)object->kind) {
     case kSimBackgroundVoxel_House:
       BuildHouse(object, detail, out);
+      /* Alternate-facing houses compress and shift the complete main mass.
+       * Build seeded dormers, bays and porches first so their trim follows the
+       * same transform as the door and windows. Appending a porch afterwards
+       * left its canopy and posts visibly offset to the left of the opening. */
+      if (style >= kSimBackgroundVoxelStyle_Varied)
+        BuildDeterministicVariation(object, detail, out);
       if (object->flags & kSimBackgroundVoxel_AlternateFacing)
         BuildAlternateFacingHouse(detail, out);
       break;
@@ -1181,8 +1185,9 @@ void SimBackgroundVoxelModel_BuildStyled(
   if (style >= kSimBackgroundVoxelStyle_Trim)
     BuildSilhouetteTrim(object, detail, out);
   if (style >= kSimBackgroundVoxelStyle_Architectural)
-    BuildFactoryCourtyard(object, detail, out);
-  if (style >= kSimBackgroundVoxelStyle_Varied)
+    BuildFactoryCourtyardDetails(object, detail, out);
+  if (style >= kSimBackgroundVoxelStyle_Varied &&
+      object->kind != kSimBackgroundVoxel_House)
     BuildDeterministicVariation(object, detail, out);
   FinalizeModelSurface(out);
 }
