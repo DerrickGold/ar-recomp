@@ -48,12 +48,29 @@ static void MaterialResponse(SimBackgroundVoxelMaterial material,
   }
 }
 
-uint8_t SimBackgroundVoxelLighting_FaceBrightness(
+void SimBackgroundVoxelLighting_ResolveDirection(
+    uint16_t light_azimuth_deg,
+    uint8_t light_elevation_deg,
+    SimBackgroundVoxelLightDirection *out) {
+  if (!out) return;
+  const float kPi = 3.14159265f;
+  float azimuth = light_azimuth_deg * kPi / 180.0f;
+  float elevation = light_elevation_deg * kPi / 180.0f;
+  float horizontal = cosf(elevation);
+  /* The setting names the direction a shadow is thrown, so the light itself
+   * comes from the opposite horizontal direction. */
+  *out = (SimBackgroundVoxelLightDirection){
+    -cosf(azimuth) * horizontal,
+    -sinf(azimuth) * horizontal,
+    sinf(elevation),
+  };
+}
+
+uint8_t SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
     const SimBackgroundVoxelModelFace *face,
     SimBackgroundVoxelShading shading,
-    uint16_t light_azimuth_deg,
-    uint8_t light_elevation_deg) {
-  if (!face) return 0;
+    const SimBackgroundVoxelLightDirection *light) {
+  if (!face || !light) return 0;
   const SimBackgroundVoxelModelPoint *a = &face->points[0];
   const SimBackgroundVoxelModelPoint *b = &face->points[1];
   const SimBackgroundVoxelModelPoint *d = &face->points[3];
@@ -79,16 +96,7 @@ uint8_t SimBackgroundVoxelLighting_FaceBrightness(
     nz = -nz;
   }
 
-  const float kPi = 3.14159265f;
-  float azimuth = light_azimuth_deg * kPi / 180.0f;
-  float elevation = light_elevation_deg * kPi / 180.0f;
-  float horizontal = cosf(elevation);
-  /* The setting names the direction a shadow is thrown, so the light itself
-   * comes from the opposite horizontal direction. */
-  float light_x = -cosf(azimuth) * horizontal;
-  float light_y = -sinf(azimuth) * horizontal;
-  float light_z = sinf(elevation);
-  float diffuse = nx * light_x + ny * light_y + nz * light_z;
+  float diffuse = nx * light->x + ny * light->y + nz * light->z;
   if (diffuse < 0.0f) diffuse = 0.0f;
   if (diffuse > 1.0f) diffuse = 1.0f;
   float authored = 0.86f + 0.14f * face->brightness / 255.0f;
@@ -101,40 +109,69 @@ uint8_t SimBackgroundVoxelLighting_FaceBrightness(
   return (uint8_t)(lit * 255.0f + 0.5f);
 }
 
-uint8_t SimBackgroundVoxelLighting_VertexBrightness(
+uint8_t SimBackgroundVoxelLighting_FaceBrightness(
+    const SimBackgroundVoxelModelFace *face,
+    SimBackgroundVoxelShading shading,
+    uint16_t light_azimuth_deg,
+    uint8_t light_elevation_deg) {
+  SimBackgroundVoxelLightDirection light;
+  SimBackgroundVoxelLighting_ResolveDirection(
+      light_azimuth_deg, light_elevation_deg, &light);
+  return SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
+      face, shading, &light);
+}
+
+void SimBackgroundVoxelLighting_VertexBrightnesses(
     const SimBackgroundVoxelModelFace *face,
     const SimBackgroundVoxelModel *model,
-    int point,
     uint8_t directional_brightness,
-    SimBackgroundVoxelShading shading) {
-  if (!face || !model || point < 0 || point >= 4)
-    return directional_brightness;
-  if (shading < kSimBackgroundVoxelShading_AmbientOcclusion)
-    return directional_brightness;
+    SimBackgroundVoxelShading shading,
+    uint8_t out[4]) {
+  if (!out) return;
+  for (int point = 0; point < 4; point++)
+    out[point] = directional_brightness;
+  if (!face || !model ||
+      shading < kSimBackgroundVoxelShading_AmbientOcclusion)
+    return;
   float face_min_z = face->points[0].z;
   float face_max_z = face->points[0].z;
   for (int i = 1; i < 4; i++) {
     if (face->points[i].z < face_min_z) face_min_z = face->points[i].z;
     if (face->points[i].z > face_max_z) face_max_z = face->points[i].z;
   }
-  float factor = 1.0f;
-  if (face_max_z - face_min_z > 0.05f) {
-    float height = face->points[point].z - model->min_z;
-    float range = model->max_z - model->min_z;
-    float normalized = range > 0.05f ? height / range : 1.0f;
-    if (normalized < 0.0f) normalized = 0.0f;
-    if (normalized > 1.0f) normalized = 1.0f;
-    /* Contact darkening is strongest at the ground and smoothly releases up
-     * walls, trunks and courtyard faces. Four vertex values preserve batching
-     * and let the renderer interpolate the gradient without extra geometry. */
-    factor = 0.76f + 0.24f * sqrtf(normalized);
-  } else if (face_max_z < model->max_z * 0.68f) {
-    /* Low horizontal ledges sit underneath other mass and receive less sky. */
-    factor = 0.91f;
+  for (int point = 0; point < 4; point++) {
+    float factor = 1.0f;
+    if (face_max_z - face_min_z > 0.05f) {
+      float height = face->points[point].z - model->min_z;
+      float range = model->max_z - model->min_z;
+      float normalized = range > 0.05f ? height / range : 1.0f;
+      if (normalized < 0.0f) normalized = 0.0f;
+      if (normalized > 1.0f) normalized = 1.0f;
+      /* Contact darkening is strongest at the ground and smoothly releases up
+       * walls, trunks and courtyard faces. Four vertex values preserve batching
+       * and let the renderer interpolate the gradient without extra geometry. */
+      factor = 0.76f + 0.24f * sqrtf(normalized);
+    } else if (face_max_z < model->max_z * 0.68f) {
+      /* Low horizontal ledges sit underneath other mass and receive less sky. */
+      factor = 0.91f;
+    }
+    factor *= face->occlusion[point] / 255.0f;
+    float shaded = directional_brightness * factor;
+    if (shaded < 0.0f) shaded = 0.0f;
+    if (shaded > 255.0f) shaded = 255.0f;
+    out[point] = (uint8_t)(shaded + 0.5f);
   }
-  factor *= face->occlusion[point] / 255.0f;
-  float shaded = directional_brightness * factor;
-  if (shaded < 0.0f) shaded = 0.0f;
-  if (shaded > 255.0f) shaded = 255.0f;
-  return (uint8_t)(shaded + 0.5f);
+}
+
+uint8_t SimBackgroundVoxelLighting_VertexBrightness(
+    const SimBackgroundVoxelModelFace *face,
+    const SimBackgroundVoxelModel *model,
+    int point,
+    uint8_t directional_brightness,
+    SimBackgroundVoxelShading shading) {
+  if (point < 0 || point >= 4) return directional_brightness;
+  uint8_t brightness[4];
+  SimBackgroundVoxelLighting_VertexBrightnesses(
+      face, model, directional_brightness, shading, brightness);
+  return brightness[point];
 }

@@ -1,7 +1,7 @@
 #ifndef SIM_BACKGROUND_VOXEL_PROPORTIONS_H
 #define SIM_BACKGROUND_VOXEL_PROPORTIONS_H
 
-#include "sim_background_voxels.h"
+#include "sim_background_voxel_types.h"
 
 typedef struct SimBackgroundVoxelProportions {
   float footprint_scale;

@@ -20,9 +20,15 @@ typedef struct SimBackgroundVoxelModelCacheEntry {
 
 static struct {
   SimBackgroundVoxelModelCacheEntry entries[
-      kSimBackgroundVoxelModelCacheCapacity];
+      kSimBackgroundVoxelModelCacheSetCount]
+      [kSimBackgroundVoxelModelCacheWays];
   SimBackgroundVoxelModelCacheStats stats;
 } g_model_cache;
+
+_Static_assert(
+    kSimBackgroundVoxelModelCacheCapacity %
+        kSimBackgroundVoxelModelCacheWays == 0,
+    "voxel model cache capacity must contain complete sets");
 
 static SimBackgroundVoxelModelCacheKey MakeKey(
     const SimBackgroundVoxelObject *object,
@@ -50,6 +56,27 @@ static bool KeyEquals(const SimBackgroundVoxelModelCacheKey *left,
       left->style == right->style;
 }
 
+static uint32_t HashByte(uint32_t hash, uint8_t value) {
+  return (hash ^ value) * 16777619u;
+}
+
+static uint32_t HashKey(const SimBackgroundVoxelModelCacheKey *key) {
+  /* FNV-1a over explicit fields avoids hashing struct padding, whose bytes are
+  * unspecified and can differ between compilers and architectures. */
+  uint32_t hash = 2166136261u;
+  hash = HashByte(hash, (uint8_t)key->group);
+  hash = HashByte(hash, (uint8_t)(key->group >> 8));
+  hash = HashByte(hash, key->kind);
+  hash = HashByte(hash, key->flags);
+  hash = HashByte(hash, key->cell_x);
+  hash = HashByte(hash, key->cell_y);
+  hash = HashByte(hash, key->tree_edges);
+  hash = HashByte(hash, key->record_slot);
+  hash = HashByte(hash, key->detail);
+  hash = HashByte(hash, key->style);
+  return hash;
+}
+
 const SimBackgroundVoxelModel *SimBackgroundVoxelModelCache_Get(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
@@ -57,12 +84,13 @@ const SimBackgroundVoxelModel *SimBackgroundVoxelModelCache_Get(
     uint32_t stamp) {
   if (!object) return NULL;
   SimBackgroundVoxelModelCacheKey key = MakeKey(object, detail, style);
+  uint32_t set = HashKey(&key) % kSimBackgroundVoxelModelCacheSetCount;
   int free_entry = -1;
   int oldest_entry = -1;
   uint32_t oldest_age = 0;
-  for (int entry = 0; entry < kSimBackgroundVoxelModelCacheCapacity; entry++) {
+  for (int entry = 0; entry < kSimBackgroundVoxelModelCacheWays; entry++) {
     SimBackgroundVoxelModelCacheEntry *candidate =
-        &g_model_cache.entries[entry];
+        &g_model_cache.entries[set][entry];
     if (candidate->valid && KeyEquals(&candidate->key, &key)) {
       candidate->last_use = stamp;
       g_model_cache.stats.hits++;
@@ -81,7 +109,7 @@ const SimBackgroundVoxelModel *SimBackgroundVoxelModelCache_Get(
   int replacement = free_entry >= 0 ? free_entry : oldest_entry;
   if (replacement < 0) replacement = 0;
   SimBackgroundVoxelModelCacheEntry *entry =
-      &g_model_cache.entries[replacement];
+      &g_model_cache.entries[set][replacement];
   if (entry->valid) g_model_cache.stats.evictions++;
   entry->valid = true;
   entry->last_use = stamp;

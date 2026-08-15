@@ -10,6 +10,15 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# MSVC's C runtime provides the standard math functions without a separate
+# libm. Unix-like toolchains still require -lm. An interface target keeps that
+# distinction in one place and remains a valid link item on every platform.
+add_library(actraiser_math INTERFACE)
+if(NOT MSVC)
+    target_link_libraries(actraiser_math INTERFACE m)
+endif()
 include(CTest)
 
 # Configure the ROM-free test tier without requiring generated ROM banks. This
@@ -210,7 +219,7 @@ endif()
 
 target_link_libraries(ActRaiserRecomp PRIVATE
     SDL3::SDL3
-    m
+    actraiser_math
 )
 
 endif() # NOT AR_TESTS_ONLY
@@ -239,7 +248,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_host_audio_pause_test PRIVATE
         SDL3::SDL3
-        m
+        actraiser_math
     )
     add_test(NAME actraiser_host_audio_pause
         COMMAND actraiser_host_audio_pause_test)
@@ -265,7 +274,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_scene3d_math_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
-    target_link_libraries(actraiser_scene3d_math_test PRIVATE m)
+    target_link_libraries(actraiser_scene3d_math_test PRIVATE actraiser_math)
     add_test(NAME actraiser_scene3d_math COMMAND actraiser_scene3d_math_test)
 
     add_executable(actraiser_camera_orbit_test
@@ -275,7 +284,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_camera_orbit_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
-    target_link_libraries(actraiser_camera_orbit_test PRIVATE m)
+    target_link_libraries(actraiser_camera_orbit_test PRIVATE actraiser_math)
     add_test(NAME actraiser_camera_orbit COMMAND actraiser_camera_orbit_test)
 
     add_executable(actraiser_sim_town_canvas_test
@@ -347,7 +356,8 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
-    target_link_libraries(actraiser_sim_background_voxel_biome_test PRIVATE m)
+    target_link_libraries(actraiser_sim_background_voxel_biome_test PRIVATE
+        actraiser_math)
     add_test(NAME actraiser_sim_background_voxel_biome
         COMMAND actraiser_sim_background_voxel_biome_test)
 
@@ -359,7 +369,8 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/include)
-    target_link_libraries(actraiser_sim_background_voxel_depth_test PRIVATE m)
+    target_link_libraries(actraiser_sim_background_voxel_depth_test PRIVATE
+        actraiser_math)
     add_test(NAME actraiser_sim_background_voxel_depth
         COMMAND actraiser_sim_background_voxel_depth_test)
 
@@ -421,7 +432,8 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
-    target_link_libraries(actraiser_sim_background_voxel_lighting_test PRIVATE m)
+    target_link_libraries(actraiser_sim_background_voxel_lighting_test PRIVATE
+        actraiser_math)
     add_test(NAME actraiser_sim_background_voxel_lighting
         COMMAND actraiser_sim_background_voxel_lighting_test)
 
@@ -591,7 +603,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_action_effect_render_test PRIVATE
         SDL3::SDL3
-        m
+        actraiser_math
     )
     add_test(NAME actraiser_action_effect_render
         COMMAND actraiser_action_effect_render_test)
@@ -609,7 +621,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_diorama_projection_test PRIVATE
         SDL3::SDL3
-        m
+        actraiser_math
     )
     add_test(NAME actraiser_diorama_projection
         COMMAND actraiser_diorama_projection_test)
@@ -637,7 +649,8 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
-    target_link_libraries(actraiser_sim_render_metadata_test PRIVATE m)
+    target_link_libraries(actraiser_sim_render_metadata_test PRIVATE
+        actraiser_math)
     # The picker-view test asserts whichever policy the app is built with.
     if(AR_SIM3D_PICKER_TOPDOWN)
         target_compile_definitions(actraiser_sim_render_metadata_test
@@ -674,7 +687,8 @@ if(BUILD_TESTING)
     )
     # settings.c owns the input-binding descriptors, so the registry test now
     # links the SDL-backed key/button naming they serialize through.
-    target_link_libraries(actraiser_settings_test PRIVATE SDL3::SDL3 m)
+    target_link_libraries(actraiser_settings_test PRIVATE
+        SDL3::SDL3 actraiser_math)
     target_include_directories(actraiser_settings_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
@@ -710,7 +724,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_settings_overlay_test PRIVATE
         SDL3::SDL3
-        m
+        actraiser_math
     )
     add_test(NAME actraiser_settings_overlay COMMAND actraiser_settings_overlay_test)
     set_tests_properties(actraiser_settings_overlay PROPERTIES
@@ -734,7 +748,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_render_pipeline_test PRIVATE src)
     target_link_libraries(actraiser_render_pipeline_test PRIVATE
         SDL3::SDL3
-        m
+        actraiser_math
     )
     add_test(NAME actraiser_render_pipeline
         COMMAND actraiser_render_pipeline_test)
@@ -754,7 +768,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_present_frame_order_test PRIVATE
         SDL3::SDL3
-        m
+        actraiser_math
     )
     add_test(NAME actraiser_present_frame_order
         COMMAND actraiser_present_frame_order_test)
@@ -770,7 +784,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_shader_blob_test PRIVATE src)
     target_link_libraries(actraiser_shader_blob_test PRIVATE
         SDL3::SDL3
-        m
+        actraiser_math
     )
     add_test(NAME actraiser_shader_blob
         COMMAND actraiser_shader_blob_test)
@@ -784,7 +798,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_main_thread_boot_test PRIVATE
         SDL3::SDL3
-        m
+        actraiser_math
     )
     add_test(NAME actraiser_main_thread_boot
         COMMAND actraiser_main_thread_boot_test)
@@ -820,7 +834,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_ppu_render_pipeline_test PRIVATE
         SDL3::SDL3
-        m
+        actraiser_math
     )
     add_test(NAME actraiser_ppu_render_pipeline
         COMMAND actraiser_ppu_render_pipeline_test)
@@ -840,7 +854,7 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
-    target_link_libraries(actraiser_ppu_exact_pos_test PRIVATE m)
+    target_link_libraries(actraiser_ppu_exact_pos_test PRIVATE actraiser_math)
     add_test(NAME actraiser_ppu_exact_pos
         COMMAND actraiser_ppu_exact_pos_test)
 
@@ -892,7 +906,7 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/third_party/stb
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
-    target_link_libraries(actraiser_music_manifest_test PRIVATE m)
+    target_link_libraries(actraiser_music_manifest_test PRIVATE actraiser_math)
     add_test(NAME actraiser_music_manifest COMMAND actraiser_music_manifest_test)
 
     add_executable(actraiser_save_system_test
@@ -993,7 +1007,8 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src/diorama
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
-    target_link_libraries(actraiser_diorama_scroll_math_test PRIVATE SDL3::SDL3 m)
+    target_link_libraries(actraiser_diorama_scroll_math_test PRIVATE
+        SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_diorama_scroll_math
         COMMAND actraiser_diorama_scroll_math_test)
 
@@ -1022,7 +1037,8 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src/diorama
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
-    target_link_libraries(actraiser_diorama_skybox_uv_test PRIVATE m)
+    target_link_libraries(actraiser_diorama_skybox_uv_test PRIVATE
+        actraiser_math)
     add_test(NAME actraiser_diorama_skybox_uv
         COMMAND actraiser_diorama_skybox_uv_test)
 
@@ -1161,7 +1177,7 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/manual
     )
-    target_link_libraries(actraiser_manual_pages_test PRIVATE m)
+    target_link_libraries(actraiser_manual_pages_test PRIVATE actraiser_math)
     add_test(NAME actraiser_manual_pages COMMAND actraiser_manual_pages_test)
 
     # The reader's control scheme and its per-frame decode budget. Its own

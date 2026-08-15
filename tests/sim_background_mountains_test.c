@@ -41,6 +41,12 @@ int main(void) {
   CHECK(field.component_count == 2);
   CHECK(field.component[0] == field.component[1]);
   CHECK(field.component[20 * 32 + 20] != field.component[0]);
+  int source_x = -1, source_y = -1;
+  CHECK(SimBackgroundMountains_TileSource(
+      &field, 0x79, &source_x, &source_y));
+  CHECK(source_x == 1 && source_y == 0);
+  CHECK(!SimBackgroundMountains_TileSource(
+      &field, 0x77, &source_x, &source_y));
 
   /* A complete four-cell north-edge base gains two sparse cap rows made from
    * original source tiles, including the mirrored missing right slope. */

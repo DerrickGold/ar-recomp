@@ -37,6 +37,35 @@ int main(void) {
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 2 && stats.hits == 1);
 
+  /* A developed-town pass should retain hundreds of independently seeded
+   * objects and hit them on the following frame instead of linearly scanning
+   * and evicting the next entry before it can be reused. */
+  SimBackgroundVoxelModelCache_Reset();
+  enum { kDevelopedTownObjects = 320 };
+  SimBackgroundVoxelObject objects[kDevelopedTownObjects];
+  for (int i = 0; i < kDevelopedTownObjects; i++) {
+    objects[i] = (SimBackgroundVoxelObject){
+      .kind = i & 1 ? kSimBackgroundVoxel_House
+                    : kSimBackgroundVoxel_Tree,
+      .cell_x = (uint8_t)(i & 31),
+      .cell_y = (uint8_t)((i >> 5) & 31),
+      .group = (uint16_t)(i + 1),
+      .record_slot = (uint8_t)i,
+    };
+    CHECK(SimBackgroundVoxelModelCache_Get(
+        &objects[i], kSimBackgroundVoxelDetail_Low,
+        kSimBackgroundVoxelStyle_Basic, 10) != NULL);
+  }
+  stats = SimBackgroundVoxelModelCache_Stats();
+  uint32_t first_pass_misses = stats.misses;
+  for (int i = 0; i < kDevelopedTownObjects; i++)
+    CHECK(SimBackgroundVoxelModelCache_Get(
+        &objects[i], kSimBackgroundVoxelDetail_Low,
+        kSimBackgroundVoxelStyle_Basic, 11) != NULL);
+  stats = SimBackgroundVoxelModelCache_Stats();
+  CHECK(first_pass_misses == kDevelopedTownObjects);
+  CHECK(stats.hits >= kDevelopedTownObjects * 9 / 10);
+
   SimBackgroundVoxelModelCache_Reset();
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 0 && stats.hits == 0 && stats.evictions == 0);
