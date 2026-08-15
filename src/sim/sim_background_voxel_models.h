@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include "sim_background_voxel_quality.h"
-#include "sim_background_voxels.h"
+#include "sim_background_voxel_types.h"
 
 enum {
   /* Ultra's absolute ceiling. Each lower quality level has a smaller enforced

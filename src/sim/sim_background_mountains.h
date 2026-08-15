@@ -27,6 +27,9 @@ typedef struct SimBackgroundMountainField {
   uint8_t flags[kSimBackgroundMountainCellCount];
   uint8_t tile[kSimBackgroundMountainCellCount];
   uint16_t component[kSimBackgroundMountainCellCount];
+  /* One-based cell indices provide constant-time source-art lookup. Zero is
+   * reserved for tile ids that are not part of the classified range. */
+  uint16_t first_cell_by_tile[256];
 } SimBackgroundMountainField;
 
 typedef enum SimBackgroundMountainCapTileFlags {
@@ -50,6 +53,9 @@ void SimBackgroundMountains_Classify(
     uint8_t town, const uint8_t *wram, SimBackgroundMountainField *out);
 bool SimBackgroundMountains_CellOccupied(
     const SimBackgroundMountainField *field, int x, int y);
+bool SimBackgroundMountains_TileSource(
+    const SimBackgroundMountainField *field, uint8_t tile,
+    int *cell_x, int *cell_y);
 /* Completes common-range peaks that deliberately begin at the north edge of
  * the authentic 32x32 map. The returned sparse layout references original
  * mountain tile ids; renderers choose how to project those source tiles. */

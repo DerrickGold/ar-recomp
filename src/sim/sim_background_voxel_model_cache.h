@@ -5,7 +5,17 @@
 
 #include "sim_background_voxel_models.h"
 
-enum { kSimBackgroundVoxelModelCacheCapacity = 256 };
+enum {
+  /* A fully developed, zoomed-out town can expose more than 256 independently
+   * seeded houses and trees. Four-way sets keep lookup bounded while the
+   * larger capacity avoids the sequential LRU thrash of the former linear
+   * 256-entry table. */
+  kSimBackgroundVoxelModelCacheCapacity = 512,
+  kSimBackgroundVoxelModelCacheWays = 4,
+  kSimBackgroundVoxelModelCacheSetCount =
+      kSimBackgroundVoxelModelCacheCapacity /
+      kSimBackgroundVoxelModelCacheWays,
+};
 
 typedef struct SimBackgroundVoxelModelCacheStats {
   uint32_t hits;

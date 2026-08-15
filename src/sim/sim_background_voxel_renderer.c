@@ -1,6 +1,7 @@
 #include "sim_background_voxel_renderer.h"
 
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +43,7 @@ typedef struct SimBackgroundGeometryBatch {
 typedef struct ProjectedModelFace {
   Scene3DPoint points[4];
   float depth;
+  uint16_t order;
   uint8_t material;
   uint8_t brightness[4];
 } ProjectedModelFace;
@@ -50,6 +52,7 @@ typedef struct ProjectedMountainReliefFace {
   Scene3DPoint points[4];
   SDL_FPoint uv[4];
   float depth;
+  uint32_t order;
   uint8_t brightness;
   uint8_t alpha[4];
 } ProjectedMountainReliefFace;
@@ -58,6 +61,16 @@ typedef struct SimBackgroundModelLean {
   float x_per_height;
   float y_per_height;
 } SimBackgroundModelLean;
+
+typedef struct SimBackgroundProjectionAxis {
+  float x_per_height;
+  float y_per_height;
+  float height_scale;
+} SimBackgroundProjectionAxis;
+
+static const SimBackgroundProjectionAxis kUprightProjectionAxis = {
+  0.0f, 0.0f, 1.0f,
+};
 
 static struct {
   SDL_Texture *ground;
@@ -82,8 +95,11 @@ static SDL_Texture *CreateCanvasTexture(
       renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
       kSimTownCanvasPixels, kSimTownCanvasPixels);
   if (!texture) return NULL;
-  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-  SDL_SetTextureScaleMode(texture, scale_mode);
+  if (!SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) ||
+      !SDL_SetTextureScaleMode(texture, scale_mode)) {
+    SDL_DestroyTexture(texture);
+    return NULL;
+  }
   return texture;
 }
 
@@ -109,11 +125,13 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
     return;
   }
 
-  if (!g_renderer_state.mountain_art &&
+  const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
+  bool mountains_required = scene->mountains.cell_count != 0;
+  if (mountains_required && !g_renderer_state.mountain_art &&
       !g_renderer_state.mountain_art_allocation_failed)
     g_renderer_state.mountain_art = CreateCanvasTexture(
         renderer, SDL_SCALEMODE_NEAREST);
-  if (g_renderer_state.mountain_art &&
+  if (mountains_required && g_renderer_state.mountain_art &&
       !SDL_UpdateTexture(g_renderer_state.mountain_art, NULL,
                          SimBackgroundVoxels_AtlasPixels(), pitch)) {
     fprintf(stderr, "[sim-bg-voxels] mountain atlas upload failed: %s\n",
@@ -121,14 +139,20 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
     SDL_DestroyTexture(g_renderer_state.mountain_art);
     g_renderer_state.mountain_art = NULL;
     g_renderer_state.mountain_art_allocation_failed = true;
-  } else if (!g_renderer_state.mountain_art &&
+  } else if (mountains_required && !g_renderer_state.mountain_art &&
              !g_renderer_state.mountain_art_allocation_failed) {
     fprintf(stderr, "[sim-bg-voxels] mountain atlas allocation failed: %s\n",
             SDL_GetError());
     g_renderer_state.mountain_art_allocation_failed = true;
   }
+  /* The cleaned ground has already erased mountain source cells. If their
+   * companion texture cannot be represented by this SDL backend, reject the
+   * enhanced scene so the compositor retains the complete authentic canvas. */
+  if (mountains_required && !g_renderer_state.mountain_art) {
+    g_renderer_state.allocation_failed = true;
+    return;
+  }
 
-  const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   g_renderer_state.biome = SimBackgroundVoxelBiome_ForTown(scene->town);
   for (uint16_t i = 0; i < scene->object_count; i++)
     SimBackgroundVoxelPalette_Build(
@@ -216,22 +240,41 @@ static SimBackgroundModelLean CameraFacingModelLean(
   return CameraFacingLean(params, billboard_blend);
 }
 
-static bool ProjectPoint(const SimBackgroundVoxelRenderParams *params,
-                         const SimBackgroundModelLean *lean,
-                         float texture_x, float texture_y, float height_pixels,
-                         Scene3DPoint *out, float *clip_depth) {
-  /* Lean is a rotation-like presentation axis, not an additive shear. Scale
-   * its vertical and ground components together so facing the camera does not
-   * make the model physically longer as the pitch changes. */
+static SimBackgroundProjectionAxis ProjectionAxis(
+    const SimBackgroundVoxelRenderParams *params,
+    SimBackgroundModelLean lean) {
+  /* Normalize a camera-facing axis once per object kind, not once for every
+   * projected vertex. This preserves the rotation-like height correction
+   * while removing thousands of square roots from a developed-town frame. */
   float aspect = (float)params->viewport.w / params->viewport.h;
   float x_metric = aspect * params->source.h / params->source.w;
-  float lean_x = lean->x_per_height * x_metric;
-  float lean_length = sqrtf(lean_x * lean_x +
-                            lean->y_per_height * lean->y_per_height);
-  float vertical_height = height_pixels /
-      sqrtf(1.0f + lean_length * lean_length);
-  texture_x += vertical_height * lean->x_per_height;
-  texture_y += vertical_height * lean->y_per_height;
+  float lean_x = lean.x_per_height * x_metric;
+  float lean_length = sqrtf(
+      lean_x * lean_x + lean.y_per_height * lean.y_per_height);
+  float height_scale = 1.0f / sqrtf(1.0f + lean_length * lean_length);
+  return (SimBackgroundProjectionAxis){
+    lean.x_per_height * height_scale,
+    lean.y_per_height * height_scale,
+    height_scale,
+  };
+}
+
+static void ResolveProjectionAxes(
+    const SimBackgroundVoxelRenderParams *params,
+    SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount]) {
+  for (int kind = 0; kind < kSimBackgroundVoxelKindCount; kind++)
+    axes[kind] = ProjectionAxis(
+        params, CameraFacingModelLean(
+            params, (SimBackgroundVoxelKind)kind));
+}
+
+static bool ProjectPoint(const SimBackgroundVoxelRenderParams *params,
+                         const SimBackgroundProjectionAxis *axis,
+                         float texture_x, float texture_y, float height_pixels,
+                         Scene3DPoint *out, float *clip_depth) {
+  float vertical_height = height_pixels * axis->height_scale;
+  texture_x += height_pixels * axis->x_per_height;
+  texture_y += height_pixels * axis->y_per_height;
   float world_x, world_y, world_z;
   TexturePointToWorld(params, texture_x, texture_y, vertical_height,
                       &world_x, &world_y, &world_z);
@@ -321,14 +364,15 @@ static SimBackgroundVoxelDetail EffectiveMountainDetail(
   SimBackgroundVoxelDetail requested =
       (SimBackgroundVoxelDetail)params->detail;
   if (params->lod != kSimBackgroundVoxelLod_Adaptive) return requested;
-  const SimBackgroundModelLean no_lean = {0.0f, 0.0f};
   float origin_x = (float)params->town_screen_x0 - params->camera_x;
   float origin_y = -(float)params->camera_y;
   float center = kSimTownCanvasPixels * 0.5f;
   Scene3DPoint bottom, top;
-  if (!ProjectPoint(params, &no_lean, origin_x + center, origin_y + center,
+  if (!ProjectPoint(params, &kUprightProjectionAxis,
+                    origin_x + center, origin_y + center,
                     0.0f, &bottom, NULL) ||
-      !ProjectPoint(params, &no_lean, origin_x + center, origin_y + center,
+      !ProjectPoint(params, &kUprightProjectionAxis,
+                    origin_x + center, origin_y + center,
                     24.0f, &top, NULL))
     return requested;
   float dx = top.x - bottom.x, dy = top.y - bottom.y;
@@ -341,26 +385,38 @@ static SimBackgroundVoxelDetail EffectiveMountainDetail(
 
 static int CompareProjectedMountainDepth(
     const void *left, const void *right) {
-  float a = ((const ProjectedMountainReliefFace *)left)->depth;
-  float b = ((const ProjectedMountainReliefFace *)right)->depth;
-  return a < b ? 1 : a > b ? -1 : 0;
+  const ProjectedMountainReliefFace *a = left;
+  const ProjectedMountainReliefFace *b = right;
+  if (a->depth < b->depth) return 1;
+  if (a->depth > b->depth) return -1;
+  return a->order < b->order ? -1 : a->order > b->order ? 1 : 0;
+}
+
+static int CompareProjectedModelDepth(
+    const void *left, const void *right) {
+  const ProjectedModelFace *a = left;
+  const ProjectedModelFace *b = right;
+  if (a->depth < b->depth) return 1;
+  if (a->depth > b->depth) return -1;
+  return a->order < b->order ? -1 : a->order > b->order ? 1 : 0;
 }
 
 static void AddProjectedMountainReliefFace(
     const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundModelLean *lean,
+    const SimBackgroundProjectionAxis *axis,
     float origin_x, float origin_y,
     const float local_x[4], const float local_y[4],
     const float local_z[4], const SDL_FPoint uv[4],
     uint8_t brightness, const uint8_t alpha[4], int *count) {
   if (*count >= kMaxMountainReliefFaces) return;
   ProjectedMountainReliefFace face = {
+    .order = (uint32_t)*count,
     .brightness = brightness,
   };
   float depth_sum = 0.0f;
   for (int point = 0; point < 4; point++) {
     float depth;
-    if (!ProjectPoint(params, lean,
+    if (!ProjectPoint(params, axis,
                       origin_x + local_x[point],
                       origin_y + local_y[point], local_z[point],
                       &face.points[point], &depth))
@@ -385,25 +441,9 @@ static void MountainPlanePoint(
   *local_z = rise * relief->face_height_scale;
 }
 
-static bool FindMountainTileSource(
-    const SimBackgroundMountainField *field, uint8_t tile,
-    int *source_cell_x, int *source_cell_y) {
-  for (int cell_y = 0; cell_y < kSimBackgroundMountainTownCells; cell_y++)
-    for (int cell_x = 0; cell_x < kSimBackgroundMountainTownCells; cell_x++) {
-      int cell = cell_y * kSimBackgroundMountainTownCells + cell_x;
-      if (field->tile[cell] != tile ||
-          !(field->flags[cell] & kSimBackgroundMountainCell_Occupied))
-        continue;
-      *source_cell_x = cell_x;
-      *source_cell_y = cell_y;
-      return true;
-    }
-  return false;
-}
-
 static void AddMountainFrontTile(
     const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundModelLean *lean,
+    const SimBackgroundProjectionAxis *axis,
     const SimBackgroundMountainRelief *relief,
     float origin_x, float origin_y, float baseline,
     int destination_cell_x, int destination_cell_y,
@@ -435,27 +475,26 @@ static void AddMountainFrontTile(
         &local_x[point], &local_y[point], &local_z[point]);
   const uint8_t opaque[4] = {255, 255, 255, 255};
   AddProjectedMountainReliefFace(
-      params, lean, origin_x, origin_y,
+      params, axis, origin_x, origin_y,
       local_x, local_y, local_z, uv, 255, opaque, count);
 }
 
 static void AddNorthMountainCaps(
     const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundModelLean *lean,
+    const SimBackgroundProjectionAxis *axis,
     const SimBackgroundMountainRelief *relief,
     const SimBackgroundMountainField *field,
+    const SimBackgroundMountainCaps *caps,
     const float component_bottom[kSimBackgroundMountainCellCount + 1],
     float origin_x, float origin_y, int *count) {
-  SimBackgroundMountainCaps caps;
-  SimBackgroundMountains_BuildNorthCaps(field, &caps);
-  for (uint8_t at = 0; at < caps.tile_count; at++) {
-    const SimBackgroundMountainCapTile *tile = &caps.tiles[at];
+  for (uint8_t at = 0; at < caps->tile_count; at++) {
+    const SimBackgroundMountainCapTile *tile = &caps->tiles[at];
     int source_cell_x, source_cell_y;
-    if (!FindMountainTileSource(
+    if (!SimBackgroundMountains_TileSource(
             field, tile->source_tile, &source_cell_x, &source_cell_y))
       continue;
     AddMountainFrontTile(
-        params, lean, relief, origin_x, origin_y,
+        params, axis, relief, origin_x, origin_y,
         component_bottom[tile->component], tile->cell_x, tile->cell_y,
         source_cell_x, source_cell_y,
         (tile->flags & kSimBackgroundMountainCapTile_MirrorX) != 0,
@@ -480,6 +519,8 @@ static int BuildProjectedMountainReliefFaces(
   SimBackgroundModelLean mountain_lean = CameraFacingLean(
       params, params->facing == kSimBackgroundVoxelFacing_PerModel
           ? 0.44f : 0.35f);
+  SimBackgroundProjectionAxis mountain_axis =
+      ProjectionAxis(params, mountain_lean);
 
   /* Each connected range shares one baseline. Mapping source Y partly into
    * height and partly into ground depth turns the original pseudo-perspective
@@ -545,7 +586,7 @@ static int BuildProjectedMountainReliefFaces(
             &local_x[point], &local_y[point], &local_z[point]);
       const uint8_t front_alpha[4] = {255, 255, 255, 255};
       AddProjectedMountainReliefFace(
-          params, &mountain_lean, origin_x, origin_y,
+          params, &mountain_axis, origin_x, origin_y,
           local_x, local_y, local_z, uv,
           255, front_alpha, &count);
 
@@ -611,7 +652,7 @@ static int BuildProjectedMountainReliefFaces(
                 &relief, away_x * offset[point], away_y * offset[point],
                 &side_x[point], &side_y[point], &side_z[point]);
           AddProjectedMountainReliefFace(
-              params, &mountain_lean, origin_x, origin_y,
+              params, &mountain_axis, origin_x, origin_y,
               side_x, side_y, side_z, side_uv,
               relief.side_brightness[band], side_alpha, &count);
         }
@@ -619,7 +660,8 @@ static int BuildProjectedMountainReliefFaces(
     }
   }
   AddNorthMountainCaps(
-      params, &mountain_lean, &relief, field, component_bottom,
+      params, &mountain_axis, &relief, field, &scene->mountain_caps,
+      component_bottom,
       origin_x, origin_y, &count);
   qsort(g_renderer_state.mountain_projected, (size_t)count,
         sizeof(g_renderer_state.mountain_projected[0]),
@@ -701,7 +743,6 @@ static void AppendGroundContact(
       kSimBackgroundCellPixels * 0.5f;
   float center_y = object->footprint_cells_d *
       kSimBackgroundCellPixels * 0.5f;
-  const SimBackgroundModelLean no_lean = {0.0f, 0.0f};
   for (int at = 0; at < count; at++) {
     float x0 = center_x + (bounds[at].x0 - center_x) *
         proportions->footprint_scale;
@@ -719,7 +760,7 @@ static void AppendGroundContact(
     };
     bool valid = true;
     for (int point = 0; point < 4; point++) {
-      if (!ProjectPoint(params, &no_lean,
+      if (!ProjectPoint(params, &kUprightProjectionAxis,
                         origin_x + local_x[point],
                         origin_y + local_y[point], 0.06f,
                         &face.points[point], NULL)) {
@@ -766,7 +807,7 @@ static float ObjectGroundDepth(
 static bool ObjectMayBeVisible(
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundModelLean *lean) {
+    const SimBackgroundProjectionAxis *axis) {
   const SimBackgroundVoxelProportions *proportions =
       SimBackgroundVoxelProportions_Get(
           (SimBackgroundVoxelKind)object->kind);
@@ -791,7 +832,7 @@ static bool ObjectMayBeVisible(
     for (int yi = 0; yi < 2; yi++)
       for (int xi = 0; xi < 2; xi++) {
         Scene3DPoint point;
-        if (!ProjectPoint(params, lean, x[xi], y[yi], z[zi],
+        if (!ProjectPoint(params, axis, x[xi], y[yi], z[zi],
                           &point, NULL))
           continue;
         if (!any) {
@@ -820,7 +861,7 @@ static bool ObjectMayBeVisible(
 static SimBackgroundVoxelDetail EffectiveDetail(
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundModelLean *lean,
+    const SimBackgroundProjectionAxis *axis,
     float origin_x, float origin_y,
     const SimBackgroundVoxelProportions *proportions,
     float center_x, float center_y) {
@@ -829,9 +870,9 @@ static SimBackgroundVoxelDetail EffectiveDetail(
   if (params->lod != kSimBackgroundVoxelLod_Adaptive) return requested;
   Scene3DPoint bottom, top;
   float height = ModelAuthoredHeight(object) * proportions->height_scale;
-  if (!ProjectPoint(params, lean, origin_x + center_x, origin_y + center_y,
+  if (!ProjectPoint(params, axis, origin_x + center_x, origin_y + center_y,
                     0.0f, &bottom, NULL) ||
-      !ProjectPoint(params, lean, origin_x + center_x, origin_y + center_y,
+      !ProjectPoint(params, axis, origin_x + center_x, origin_y + center_y,
                     height, &top, NULL))
     return requested;
   float dx = top.x - bottom.x;
@@ -849,7 +890,8 @@ static void DrawModel(
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelPalette *palette,
     const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundModelLean *lean) {
+    const SimBackgroundProjectionAxis *axis,
+    const SimBackgroundVoxelLightDirection *light) {
   float origin_x = (float)params->town_screen_x0 - params->camera_x +
       object->cell_x * kSimBackgroundCellPixels;
   float origin_y = -(float)params->camera_y + ObjectOriginY(object);
@@ -861,7 +903,7 @@ static void DrawModel(
   float center_y = object->footprint_cells_d *
       kSimBackgroundCellPixels * 0.5f;
   SimBackgroundVoxelDetail detail = EffectiveDetail(
-      object, params, lean, origin_x, origin_y, proportions,
+      object, params, axis, origin_x, origin_y, proportions,
       center_x, center_y);
   const SimBackgroundVoxelModel *model = SimBackgroundVoxelModelCache_Get(
       object, detail, (SimBackgroundVoxelStyle)params->style,
@@ -874,18 +916,17 @@ static void DrawModel(
   for (uint16_t face_index = 0; face_index < model->face_count; face_index++) {
     const SimBackgroundVoxelModelFace *source = &model->faces[face_index];
     ProjectedModelFace face = {
-      .material = SimBackgroundVoxelBiome_SurfaceMaterial(
+      .order = face_index,
+      .material = (uint8_t)SimBackgroundVoxelBiome_SurfaceMaterial(
           g_renderer_state.biome, detail,
           (SimBackgroundVoxelMaterial)source->material, source),
     };
-    uint8_t directional = SimBackgroundVoxelLighting_FaceBrightness(
-        source, (SimBackgroundVoxelShading)params->shading,
-        params->light_azimuth_deg, params->light_elevation_deg);
-    for (int point = 0; point < 4; point++)
-      face.brightness[point] =
-          SimBackgroundVoxelLighting_VertexBrightness(
-              source, model, point, directional,
-              (SimBackgroundVoxelShading)params->shading);
+    uint8_t directional =
+        SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
+            source, (SimBackgroundVoxelShading)params->shading, light);
+    SimBackgroundVoxelLighting_VertexBrightnesses(
+        source, model, directional,
+        (SimBackgroundVoxelShading)params->shading, face.brightness);
     float depth_sum = 0.0f;
     bool valid = true;
     for (int point = 0; point < 4; point++) {
@@ -898,7 +939,7 @@ static void DrawModel(
               proportions->footprint_scale;
       float local_z = source->points[point].z *
           proportions->height_scale;
-      if (!ProjectPoint(params, lean,
+      if (!ProjectPoint(params, axis,
                         origin_x + local_x,
                         origin_y + local_y,
                         local_z,
@@ -910,14 +951,10 @@ static void DrawModel(
     }
     if (!valid || IsDegenerate(face.points)) continue;
     face.depth = depth_sum * 0.25f;
-    int insert = projected_count;
-    while (insert > 0 && projected[insert - 1].depth < face.depth) {
-      projected[insert] = projected[insert - 1];
-      insert--;
-    }
-    projected[insert] = face;
-    projected_count++;
+    projected[projected_count++] = face;
   }
+  qsort(projected, (size_t)projected_count, sizeof(projected[0]),
+        CompareProjectedModelDepth);
   for (int i = 0; i < projected_count; i++)
     AppendProjectedFace(
         renderer, batch, &projected[i], palette,
@@ -926,14 +963,25 @@ static void DrawModel(
 
 typedef struct SimBackgroundVisibleModel {
   uint16_t index;
+  uint8_t sort_x;
   float depth;
-  SimBackgroundModelLean lean;
+  SimBackgroundProjectionAxis axis;
 } SimBackgroundVisibleModel;
 
 typedef struct SimBackgroundVisibleModelList {
   uint16_t count;
   SimBackgroundVisibleModel entries[kSimBackgroundMaxObjects];
 } SimBackgroundVisibleModelList;
+
+static int CompareVisibleModelDepth(const void *left, const void *right) {
+  const SimBackgroundVisibleModel *a = left;
+  const SimBackgroundVisibleModel *b = right;
+  if (a->depth < b->depth) return 1;
+  if (a->depth > b->depth) return -1;
+  if (a->sort_x < b->sort_x) return -1;
+  if (a->sort_x > b->sort_x) return 1;
+  return a->index < b->index ? -1 : a->index > b->index ? 1 : 0;
+}
 
 static bool RenderParamsValid(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params) {
@@ -950,33 +998,29 @@ static void BuildVisibleModelList(
     SimBackgroundVisibleModelList *list) {
   list->count = 0;
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
+  SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
+  ResolveProjectionAxes(params, axes);
   for (uint16_t i = 0; i < scene->object_count; i++) {
     const SimBackgroundVoxelObject *object = &scene->objects[i];
+    if (object->kind >= kSimBackgroundVoxelKindCount) continue;
     SimBackgroundVisibleModel entry = {
       .index = i,
+      .sort_x = object->cell_x,
       .depth = ObjectGroundDepth(object, params),
-      .lean = CameraFacingModelLean(
-          params, (SimBackgroundVoxelKind)object->kind),
+      .axis = axes[object->kind],
     };
-    if (!ObjectMayBeVisible(object, params, &entry.lean)) continue;
-    int insert = list->count;
-    while (insert > 0 &&
-           (list->entries[insert - 1].depth < entry.depth ||
-            (list->entries[insert - 1].depth == entry.depth &&
-             scene->objects[list->entries[insert - 1].index].cell_x >
-                 object->cell_x))) {
-      list->entries[insert] = list->entries[insert - 1];
-      insert--;
-    }
-    list->entries[insert] = entry;
-    list->count++;
+    if (!ObjectMayBeVisible(object, params, &entry.axis)) continue;
+    list->entries[list->count++] = entry;
   }
+  qsort(list->entries, list->count, sizeof(list->entries[0]),
+        CompareVisibleModelDepth);
 }
 
 static void DrawModelDepthRange(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundVisibleModelList *list,
     int mountain_relief_count,
+    const SimBackgroundVoxelLightDirection *light,
     float minimum_depth, float maximum_depth) {
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
@@ -1001,7 +1045,7 @@ static void DrawModelDepthRange(
     uint16_t index = entry->index;
     const SimBackgroundVoxelObject *object = &scene->objects[index];
     DrawModel(renderer, batch, object, &g_renderer_state.palettes[index],
-              params, &entry->lean);
+              params, &entry->axis, light);
   }
   FlushBatch(renderer, batch);
 }
@@ -1028,8 +1072,17 @@ static SDL_Texture *EnsureSupersampleTarget(SDL_Renderer *renderer,
             SDL_GetError());
     return NULL;
   }
-  SDL_SetTextureBlendMode(g_renderer_state.supersample, SDL_BLENDMODE_BLEND);
-  SDL_SetTextureScaleMode(g_renderer_state.supersample, SDL_SCALEMODE_LINEAR);
+  if (!SDL_SetTextureBlendMode(
+          g_renderer_state.supersample, SDL_BLENDMODE_BLEND) ||
+      !SDL_SetTextureScaleMode(
+          g_renderer_state.supersample, SDL_SCALEMODE_LINEAR)) {
+    fprintf(stderr, "[sim-bg-voxels] 2x target setup failed: %s\n",
+            SDL_GetError());
+    SDL_DestroyTexture(g_renderer_state.supersample);
+    g_renderer_state.supersample = NULL;
+    g_renderer_state.supersample_allocation_failed = true;
+    return NULL;
+  }
   return g_renderer_state.supersample;
 }
 
@@ -1039,6 +1092,8 @@ typedef struct SimBackgroundDrawTargetState {
   bool clipped;
   SDL_Rect saved_clip;
   uint8_t red, green, blue, alpha;
+  bool blend_saved;
+  SDL_BlendMode saved_blend;
 } SimBackgroundDrawTargetState;
 
 static void BeginDrawTarget(
@@ -1047,11 +1102,20 @@ static void BeginDrawTarget(
     SimBackgroundVoxelRenderParams *draw_params) {
   *draw_params = *params;
   *state = (SimBackgroundDrawTargetState){0};
+  state->blend_saved = SDL_GetRenderDrawBlendMode(
+      renderer, &state->saved_blend);
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
   bool supersample = renderer && params &&
       params->render_scale == kSimBackgroundVoxelRenderScale_2x &&
       params->detail >= kSimBackgroundVoxelDetail_High &&
       params->viewport.w > 0 && params->viewport.h > 0;
   if (!supersample) return;
+
+  if (params->viewport.w > INT_MAX / 2 ||
+      params->viewport.h > INT_MAX / 2) {
+    fprintf(stderr, "[sim-bg-voxels] 2x target dimensions overflow\n");
+    return;
+  }
 
   int width = params->viewport.w * 2;
   int height = params->viewport.h * 2;
@@ -1084,18 +1148,25 @@ static void BeginDrawTarget(
 static void EndDrawTarget(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundDrawTargetState *state) {
-  if (!state->supersampled) return;
-  SDL_SetRenderTarget(renderer, state->saved_target);
-  SDL_SetRenderClipRect(renderer,
-                        state->clipped ? &state->saved_clip : NULL);
-  SDL_SetRenderDrawColor(renderer, state->red, state->green,
-                         state->blue, state->alpha);
-  SDL_FRect destination = {
-    (float)params->viewport.x, (float)params->viewport.y,
-    (float)params->viewport.w, (float)params->viewport.h,
-  };
-  SDL_RenderTexture(renderer, g_renderer_state.supersample,
-                    NULL, &destination);
+  if (state->supersampled) {
+    if (!SDL_SetRenderTarget(renderer, state->saved_target)) {
+      fprintf(stderr, "[sim-bg-voxels] 2x target restore failed: %s\n",
+              SDL_GetError());
+    } else {
+      SDL_SetRenderClipRect(renderer,
+                            state->clipped ? &state->saved_clip : NULL);
+      SDL_SetRenderDrawColor(renderer, state->red, state->green,
+                             state->blue, state->alpha);
+      SDL_FRect destination = {
+        (float)params->viewport.x, (float)params->viewport.y,
+        (float)params->viewport.w, (float)params->viewport.h,
+      };
+      SDL_RenderTexture(renderer, g_renderer_state.supersample,
+                        NULL, &destination);
+    }
+  }
+  if (state->blend_saved)
+    SDL_SetRenderDrawBlendMode(renderer, state->saved_blend);
 }
 
 static void GroundDepthRange(
@@ -1136,6 +1207,9 @@ static void DrawDepthLayers(
       BuildProjectedMountainReliefFaces(&draw_params);
   float visible_minimum, visible_maximum;
   GroundDepthRange(&draw_params, &visible_minimum, &visible_maximum);
+  SimBackgroundVoxelLightDirection light;
+  SimBackgroundVoxelLighting_ResolveDirection(
+      params->light_azimuth_deg, params->light_elevation_deg, &light);
   uint8_t slice_count = interleaved
       ? SimBackgroundVoxelDepth_SliceCount(
             (SimBackgroundVoxelDetail)params->detail)
@@ -1148,6 +1222,7 @@ static void DrawDepthLayers(
         &minimum, &maximum);
     DrawModelDepthRange(
         renderer, &draw_params, &list, mountain_relief_count,
+        &light,
         minimum, maximum);
     if (callback)
       callback(userdata, &draw_params, minimum, maximum, false);
@@ -1296,30 +1371,23 @@ static void AppendShadowVolume(
 void SimBackgroundVoxelRenderer_DrawShadowMask(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
     float light_x, float light_y) {
-  if (!renderer || !params || !params->matrix || params->source.w <= 0 ||
-      params->source.h <= 0 || params->viewport.w <= 0 ||
-      params->viewport.h <= 0 ||
-      !SimBackgroundVoxelRenderer_Ready(params->serial))
-    return;
+  if (!RenderParamsValid(renderer, params)) return;
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
   batch->vertex_count = 0;
   batch->index_count = 0;
+  SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
+  ResolveProjectionAxes(params, axes);
   for (uint16_t i = 0; i < scene->object_count; i++) {
     const SimBackgroundVoxelObject *object = &scene->objects[i];
-    SimBackgroundModelLean lean = CameraFacingModelLean(
-        params, (SimBackgroundVoxelKind)object->kind);
-    if (!ObjectMayBeVisible(object, params, &lean)) continue;
-    float aspect = (float)params->viewport.w / params->viewport.h;
-    float x_metric = aspect * params->source.h / params->source.w;
-    float lean_x = lean.x_per_height * x_metric;
-    float lean_length = sqrtf(lean_x * lean_x +
-                              lean.y_per_height * lean.y_per_height);
-    float axis_z_scale = 1.0f / sqrtf(1.0f + lean_length * lean_length);
+    if (object->kind >= kSimBackgroundVoxelKindCount) continue;
+    const SimBackgroundProjectionAxis *axis = &axes[object->kind];
+    if (!ObjectMayBeVisible(object, params, axis)) continue;
     SimBackgroundShadowBounds bounds[kSimBackgroundMaxShadowVolumes];
     int volume_count = ShadowBounds(object, bounds);
     for (int volume = 0; volume < volume_count; volume++)
-      AppendShadowVolume(batch, params, object, bounds[volume], axis_z_scale,
+      AppendShadowVolume(batch, params, object, bounds[volume],
+                         axis->height_scale,
                          light_x, light_y);
   }
   FlushBatch(renderer, batch);

@@ -9,7 +9,7 @@ enum {
 };
 
 static size_t CellIndex(int x, int y) {
-  return (size_t)y * kSimBackgroundMountainTownCells + x;
+  return (size_t)y * kSimBackgroundMountainTownCells + (size_t)x;
 }
 
 /* The cell maps use four 16x16 pages rather than row-major 32x32 storage. */
@@ -57,8 +57,11 @@ void SimBackgroundMountains_Classify(
       uint8_t tile = wram[TownCellMapIndex(town, x, y)];
       out->tile[cell] = tile;
       out->flags[cell] = SimBackgroundMountains_TileFlags(town, tile);
-      if (out->flags[cell] & kSimBackgroundMountainCell_Occupied)
+      if (out->flags[cell] & kSimBackgroundMountainCell_Occupied) {
         out->cell_count++;
+        if (!out->first_cell_by_tile[tile])
+          out->first_cell_by_tile[tile] = (uint16_t)(cell + 1);
+      }
     }
 
   uint16_t queue[kSimBackgroundMountainCellCount];
@@ -91,13 +94,15 @@ void SimBackgroundMountains_Classify(
     }
 }
 
-static bool FieldContainsTile(
-    const SimBackgroundMountainField *field, uint8_t tile) {
-  for (int cell = 0; cell < kSimBackgroundMountainCellCount; cell++)
-    if (field->tile[cell] == tile &&
-        (field->flags[cell] & kSimBackgroundMountainCell_Occupied))
-      return true;
-  return false;
+bool SimBackgroundMountains_TileSource(
+    const SimBackgroundMountainField *field, uint8_t tile,
+    int *cell_x, int *cell_y) {
+  if (!field || !cell_x || !cell_y || !field->first_cell_by_tile[tile])
+    return false;
+  int cell = field->first_cell_by_tile[tile] - 1;
+  *cell_x = cell % kSimBackgroundMountainTownCells;
+  *cell_y = cell / kSimBackgroundMountainTownCells;
+  return true;
 }
 
 static void AppendCapTile(
@@ -118,11 +123,11 @@ void SimBackgroundMountains_BuildNorthCaps(
   if (!out) return;
   memset(out, 0, sizeof(*out));
   if (!field || !field->cell_count ||
-      !FieldContainsTile(field, 0x8A) ||
-      !FieldContainsTile(field, 0x7D) ||
-      !FieldContainsTile(field, 0x89) ||
-      !FieldContainsTile(field, 0x82) ||
-      !FieldContainsTile(field, 0x81))
+      !field->first_cell_by_tile[0x8A] ||
+      !field->first_cell_by_tile[0x7D] ||
+      !field->first_cell_by_tile[0x89] ||
+      !field->first_cell_by_tile[0x82] ||
+      !field->first_cell_by_tile[0x81])
     return;
 
   /* Northern ranges use the base row of this authentic four-cell stamp. Its

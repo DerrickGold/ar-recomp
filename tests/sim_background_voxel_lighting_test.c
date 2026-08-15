@@ -27,6 +27,10 @@ int main(void) {
   SimBackgroundVoxelModelFace wall = VerticalFace(kSimVoxelMaterial_Wall);
   uint8_t basic = SimBackgroundVoxelLighting_FaceBrightness(
       &wall, kSimBackgroundVoxelShading_Basic, 0, 45);
+  SimBackgroundVoxelLightDirection direction;
+  SimBackgroundVoxelLighting_ResolveDirection(0, 45, &direction);
+  CHECK(basic == SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
+      &wall, kSimBackgroundVoxelShading_Basic, &direction));
   uint8_t ao_face = SimBackgroundVoxelLighting_FaceBrightness(
       &wall, kSimBackgroundVoxelShading_AmbientOcclusion, 0, 45);
   CHECK(basic == ao_face);  /* AO is vertex-local, never a second light. */
@@ -52,6 +56,11 @@ int main(void) {
   uint8_t ao_top = SimBackgroundVoxelLighting_VertexBrightness(
       &wall, &model, 2, basic,
       kSimBackgroundVoxelShading_AmbientOcclusion);
+  uint8_t brightness[4];
+  SimBackgroundVoxelLighting_VertexBrightnesses(
+      &wall, &model, basic,
+      kSimBackgroundVoxelShading_AmbientOcclusion, brightness);
+  CHECK(brightness[0] == ao_bottom && brightness[2] == ao_top);
   CHECK(basic_bottom == basic);
   CHECK(ao_bottom < ao_top);
   CHECK(ao_top == basic);

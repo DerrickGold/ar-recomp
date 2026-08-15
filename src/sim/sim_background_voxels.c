@@ -50,7 +50,7 @@ static uint32_t NextSerial(void) {
 }
 
 static size_t CellIndex(int x, int y) {
-  return (size_t)y * kSimBackgroundTownCells + x;
+  return (size_t)y * kSimBackgroundTownCells + (size_t)x;
 }
 
 /* The cell maps use four 16x16 pages rather than row-major 32x32 storage. */
@@ -102,7 +102,8 @@ static int CellTreePixelCount(const uint32_t *pixels, int cell_x, int cell_y) {
   for (int y = 0; y < kSimBackgroundCellPixels; y++)
     for (int x = 0; x < kSimBackgroundCellPixels; x++)
       if (StrongTreePixel(
-              pixels[(size_t)(y0 + y) * kSimTownCanvasPixels + x0 + x]))
+              pixels[(size_t)(y0 + y) * kSimTownCanvasPixels +
+                     (size_t)(x0 + x)]))
         count++;
   return count;
 }
@@ -117,6 +118,8 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
 
   bool occupied[kCellCount] = {false};
   SimBackgroundMountains_Classify(town, wram, &out->mountains);
+  SimBackgroundMountains_BuildNorthCaps(
+      &out->mountains, &out->mountain_caps);
   for (int y = 0; y < kSimBackgroundTownCells; y++)
     for (int x = 0; x < kSimBackgroundTownCells; x++)
       if (SimBackgroundMountains_CellOccupied(&out->mountains, x, y))
@@ -313,19 +316,25 @@ static bool CellIsMasked(int cell_x, int cell_y) {
   int y0 = cell_y * kSimBackgroundCellPixels;
   for (int y = 0; y < kSimBackgroundCellPixels; y++)
     for (int x = 0; x < kSimBackgroundCellPixels; x++)
-      if (g_object_mask[(size_t)(y0 + y) * kSimTownCanvasPixels + x0 + x])
+      if (g_object_mask[(size_t)(y0 + y) * kSimTownCanvasPixels +
+                        (size_t)(x0 + x)])
         return true;
   return false;
 }
 
 static uint32_t GeneralGroundColour(const uint32_t *pixels) {
-  enum { kMaxColours = 1024 };
-  uint32_t colours[kMaxColours];
-  uint32_t counts[kMaxColours];
+  enum { kMaxColours = 1024, kColourTableSize = 2048 };
+  uint32_t colours[kColourTableSize] = {0};
+  uint32_t counts[kColourTableSize] = {0};
+  uint16_t order[kColourTableSize] = {0};
+  bool used[kColourTableSize] = {false};
+  _Static_assert(
+      (kColourTableSize & (kColourTableSize - 1)) == 0,
+      "ground-colour hash table size must be a power of two");
   int colour_count = 0;
   for (int y = 0; y < kSimTownCanvasPixels; y++)
     for (int x = 0; x < kSimTownCanvasPixels; x++) {
-      size_t at = (size_t)y * kSimTownCanvasPixels + x;
+      size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x;
       if (!g_object_mask[at]) continue;
       static const int dx[] = {0, 1, 0, -1};
       static const int dy[] = {-1, 0, 1, 0};
@@ -334,23 +343,30 @@ static uint32_t GeneralGroundColour(const uint32_t *pixels) {
         if (nx < 0 || nx >= kSimTownCanvasPixels ||
             ny < 0 || ny >= kSimTownCanvasPixels)
           continue;
-        size_t next = (size_t)ny * kSimTownCanvasPixels + nx;
+        size_t next = (size_t)ny * kSimTownCanvasPixels + (size_t)nx;
         uint32_t colour = pixels[next];
         if (g_object_mask[next] || StrongTreePixel(colour)) continue;
-        int index = 0;
-        while (index < colour_count && colours[index] != colour) index++;
-        if (index == colour_count) {
+        uint32_t mixed = colour * 0x9E3779B1u;
+        int index = (int)(mixed & (kColourTableSize - 1));
+        while (used[index] && colours[index] != colour)
+          index = (index + 1) & (kColourTableSize - 1);
+        if (!used[index]) {
           if (colour_count >= kMaxColours) continue;
+          used[index] = true;
           colours[index] = colour;
           counts[index] = 0;
+          order[index] = (uint16_t)colour_count;
           colour_count++;
         }
         counts[index]++;
       }
-    }
+  }
   int best = -1;
-  for (int i = 0; i < colour_count; i++)
-    if (best < 0 || counts[i] > counts[best]) best = i;
+  for (int i = 0; i < kColourTableSize; i++)
+    if (used[i] &&
+        (best < 0 || counts[i] > counts[best] ||
+         (counts[i] == counts[best] && order[i] < order[best])))
+      best = i;
   return best >= 0 ? colours[best] : pixels[0];
 }
 
@@ -370,7 +386,8 @@ static bool FindGeneralGroundCell(const uint32_t *pixels,
       int y0 = cell_y * kSimBackgroundCellPixels;
       for (int y = 0; y < kSimBackgroundCellPixels; y++)
         for (int x = 0; x < kSimBackgroundCellPixels; x++)
-          if (pixels[(size_t)(y0 + y) * kSimTownCanvasPixels + x0 + x] ==
+          if (pixels[(size_t)(y0 + y) * kSimTownCanvasPixels +
+                     (size_t)(x0 + x)] ==
               ground_colour)
             score++;
       if (score > best_score) {
@@ -425,7 +442,8 @@ static void ExtractEnhancedReplacements(
       int y0 = cell_y * kSimBackgroundCellPixels;
       for (int y = 0; y < kSimBackgroundCellPixels; y++)
         for (int x = 0; x < kSimBackgroundCellPixels; x++) {
-          size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels + x0 + x;
+          size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels +
+              (size_t)(x0 + x);
           g_object_mask[at] = 1;
           g_mountain_mask[at] = 1;
           g_background.atlas[at] = pixels[at] | 0xFF000000u;
@@ -439,7 +457,8 @@ static void ExtractEnhancedReplacements(
     int height = object->source_cells_h * kSimBackgroundCellPixels;
     for (int y = 0; y < height; y++)
       for (int x = 0; x < width; x++) {
-        size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels + x0 + x;
+        size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels +
+            (size_t)(x0 + x);
         g_object_mask[at] = 1;
         /* Retained for diagnostic/catalog consumers. The enhanced renderer
          * uses its authored model and never samples this authentic cutout. */
@@ -456,12 +475,13 @@ static void ExtractEnhancedReplacements(
    * create streaks around a large forest, cathedral, or lifted mountain. */
   for (int y = 0; y < kSimTownCanvasPixels; y++)
     for (int x = 0; x < kSimTownCanvasPixels; x++) {
-      size_t at = (size_t)y * kSimTownCanvasPixels + x;
+      size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x;
       if (!g_object_mask[at]) continue;
       int source_x = ground_x0 + x % kSimBackgroundCellPixels;
       int source_y = ground_y0 + y % kSimBackgroundCellPixels;
       uint32_t replacement =
-          pixels[(size_t)source_y * kSimTownCanvasPixels + source_x];
+          pixels[(size_t)source_y * kSimTownCanvasPixels +
+                 (size_t)source_x];
       g_background.ground[at] = replacement;
       if (g_mountain_mask[at] && TerrainLike(pixels[at], replacement))
         g_background.atlas[at] = 0;
