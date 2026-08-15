@@ -7,11 +7,12 @@
 
 enum {
   /* A fully developed, zoomed-out town can expose more than 256 independently
-   * seeded houses and trees. Four-way sets keep lookup bounded while the
-   * larger capacity avoids the sequential LRU thrash of the former linear
-   * 256-entry table. */
+   * seeded houses and trees. Eight-way sets keep lookup tightly bounded while
+   * retaining regional/tier variants that would otherwise collide in a
+   * four-way set; the larger capacity avoids the sequential LRU thrash of the
+   * former linear 256-entry table. */
   kSimBackgroundVoxelModelCacheCapacity = 512,
-  kSimBackgroundVoxelModelCacheWays = 4,
+  kSimBackgroundVoxelModelCacheWays = 8,
   kSimBackgroundVoxelModelCacheSetCount =
       kSimBackgroundVoxelModelCacheCapacity /
       kSimBackgroundVoxelModelCacheWays,

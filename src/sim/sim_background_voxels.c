@@ -13,6 +13,8 @@ enum {
   kStructureActive = 0x80,
   kStructureConstructionVariant = 0x40,
   kStructureClassMask = 0x0F,
+  kStructureDevelopmentMask = 0x30,
+  kStructureDevelopmentShift = 4,
   kStructureClassHouse = 0,
   kStructureClassWindmill = 3,
   kStructureClassFactory = 4,
@@ -142,6 +144,10 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
       continue;
 
     SimBackgroundVoxelObject object = {
+      .town = town,
+      .development_level = (uint8_t)(
+          (flags & kStructureDevelopmentMask) >>
+          kStructureDevelopmentShift),
       .cell_x = (uint8_t)x,
       .cell_y = (uint8_t)y,
       .record_slot = (uint8_t)slot,
@@ -189,6 +195,7 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
           CellMapValue(town, wram, x + 1, y + 1) ==
               kCathedralBottomRight) {
         AppendObject(out, (SimBackgroundVoxelObject){
+          .town = town,
           .kind = kSimBackgroundVoxel_Cathedral,
           .cell_x = (uint8_t)x,
           .cell_y = (uint8_t)y,
@@ -293,6 +300,7 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
           edges |= kSimBackgroundTreeEdge_West;
         if (!AppendObject(out, (SimBackgroundVoxelObject){
               .group = group,
+              .town = town,
               .kind = kSimBackgroundVoxel_Tree,
               .flags = write == 1 ? kSimBackgroundVoxel_IsolatedTree : 0,
               .cell_x = (uint8_t)x,
@@ -370,8 +378,54 @@ static uint32_t GeneralGroundColour(const uint32_t *pixels) {
   return best >= 0 ? colours[best] : pixels[0];
 }
 
-static bool FindGeneralGroundCell(const uint32_t *pixels,
+static bool SnowLikePixel(uint32_t colour) {
+  unsigned red = (colour >> 16) & 0xFF;
+  unsigned green = (colour >> 8) & 0xFF;
+  unsigned blue = colour & 0xFF;
+  unsigned minimum = red < green ? red : green;
+  if (blue < minimum) minimum = blue;
+  unsigned maximum = red > green ? red : green;
+  if (blue > maximum) maximum = blue;
+  return minimum >= 144 && maximum - minimum <= 80;
+}
+
+static bool FindSnowGroundCell(const uint32_t *pixels,
+                               int *ground_cell_x, int *ground_cell_y) {
+  int best_score = 0, best_x = 0, best_y = 0;
+  for (int cell_y = 0; cell_y < kSimBackgroundTownCells; cell_y++)
+    for (int cell_x = 0; cell_x < kSimBackgroundTownCells; cell_x++) {
+      if (CellIsMasked(cell_x, cell_y)) continue;
+      int score = 0;
+      int x0 = cell_x * kSimBackgroundCellPixels;
+      int y0 = cell_y * kSimBackgroundCellPixels;
+      for (int y = 0; y < kSimBackgroundCellPixels; y++)
+        for (int x = 0; x < kSimBackgroundCellPixels; x++)
+          if (SnowLikePixel(
+                  pixels[(size_t)(y0 + y) * kSimTownCanvasPixels +
+                         (size_t)(x0 + x)]))
+            score++;
+      if (score > best_score) {
+        best_score = score;
+        best_x = cell_x;
+        best_y = cell_y;
+      }
+    }
+  if (!best_score) return false;
+  *ground_cell_x = best_x;
+  *ground_cell_y = best_y;
+  return true;
+}
+
+static bool FindGeneralGroundCell(const uint32_t *pixels, uint8_t town,
                                   int *ground_cell_x, int *ground_cell_y) {
+  /* Northwall contains deliberately green landmark plots. Their long border
+   * can dominate the object-neighbour vote even though the general terrain is
+   * snow, producing a conspicuous green rectangle under a replaced landmark.
+   * Prefer a complete unmasked snow cell and retain the ordinary colour vote
+   * as a fallback for fades or unusual captures with no detectable snow. */
+  if (town == 6 && FindSnowGroundCell(
+          pixels, ground_cell_x, ground_cell_y))
+    return true;
   uint32_t ground_colour = GeneralGroundColour(pixels);
   int best_score = -1, best_x = 0, best_y = 0;
   for (int cell_y = 0; cell_y < kSimBackgroundTownCells; cell_y++)
@@ -467,7 +521,9 @@ static void ExtractEnhancedReplacements(
   }
 
   int ground_cell_x, ground_cell_y;
-  if (!FindGeneralGroundCell(pixels, &ground_cell_x, &ground_cell_y)) return;
+  if (!FindGeneralGroundCell(
+          pixels, scene->town, &ground_cell_x, &ground_cell_y))
+    return;
   int ground_x0 = ground_cell_x * kSimBackgroundCellPixels;
   int ground_y0 = ground_cell_y * kSimBackgroundCellPixels;
   /* The same complete biome tile erases every source cell. Grass towns keep

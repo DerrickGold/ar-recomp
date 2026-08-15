@@ -126,14 +126,13 @@ typedef enum SimRenderObjectTrait {
   kSimObjectTrait_NoShadow = 1u << 2,
   /* Boats keep the map-height anchor but never take a flight shadow. */
   kSimObjectTrait_WaterPlane = 1u << 3,
-  /* Art that is overhead in the fiction while anchored to the ground in the
-   * data: the miracle clouds. D3b's depth sort orders a band by the record's
-   * screen row, which is right for actors standing on the map and wrong for
-   * something whose composition hangs in the sky above that row -- a tree one
-   * row nearer would draw over the cloud. This puts the object last in its
-   * band regardless of row, restoring the overlap the ROM's own OAM order
-   * expressed before the sort existed. Deliberately NOT a height: the family
-   * must keep its record-origin ground anchor (see D3c). */
+  /* Art that is overhead in the fiction: flying actors and miracle clouds. D3b's
+   * depth sort orders a band by the record's screen row, which is right for
+   * actors standing on the map and wrong for something flying above it. This
+   * puts the object last in its band and, during voxel interleave, after every
+   * terrain depth slice. Deliberately NOT a height: height and draw order are
+   * separate policies, and the cloud family must keep its record-origin ground
+   * anchor (see D3c). */
   kSimObjectTrait_Overhead = 1u << 4,
 } SimRenderObjectTrait;
 

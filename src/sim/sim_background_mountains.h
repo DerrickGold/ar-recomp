@@ -9,7 +9,7 @@ enum {
   kSimBackgroundMountainCellCount =
       kSimBackgroundMountainTownCells * kSimBackgroundMountainTownCells,
   kSimBackgroundMountainMaxCapTiles =
-      kSimBackgroundMountainTownCells * 3 / 2,
+      3 * kSimBackgroundMountainTownCells,
 };
 
 typedef enum SimBackgroundMountainCellFlags {
@@ -34,6 +34,7 @@ typedef struct SimBackgroundMountainField {
 
 typedef enum SimBackgroundMountainCapTileFlags {
   kSimBackgroundMountainCapTile_MirrorX = 1u << 0,
+  kSimBackgroundMountainCapTile_TriangleLowerRight = 1u << 1,
 } SimBackgroundMountainCapTileFlags;
 
 typedef struct SimBackgroundMountainCapTile {
@@ -57,8 +58,8 @@ bool SimBackgroundMountains_TileSource(
     const SimBackgroundMountainField *field, uint8_t tile,
     int *cell_x, int *cell_y);
 /* Completes common-range peaks that deliberately begin at the north edge of
- * the authentic 32x32 map. The returned sparse layout references original
- * mountain tile ids; renderers choose how to project those source tiles. */
+ * the authentic 32x32 map. Repairs reference original mountain tile ids;
+ * renderers choose how to project those source tiles. */
 void SimBackgroundMountains_BuildNorthCaps(
     const SimBackgroundMountainField *field, SimBackgroundMountainCaps *out);
 
