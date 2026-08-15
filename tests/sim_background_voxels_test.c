@@ -50,6 +50,7 @@ int main(void) {
   wram[CellIndex(16, 15)] = 0xC3;
   wram[CellIndex(15, 16)] = 0xCA;
   wram[CellIndex(16, 16)] = 0xCB;
+  wram[CellIndex(6, 6)] = 0x78;
 
   uint8_t *house = wram + kRecords;
   house[0] = 4; house[1] = 5; house[2] = 0xC0;
@@ -69,6 +70,10 @@ int main(void) {
       pixels[(size_t)(1 * 16 + row) * kSimTownCanvasPixels +
              3 * 16 + column] = 0xFF087020;
   FillCell(pixels, 8, 8, 0xFF087020);
+  FillCell(pixels, 6, 6, 0xFF8B5218);
+  /* A terrain-coloured pixel is still part of the complete authentic tile;
+   * the shallow voxel sides sample its edge rather than guessing a cutout. */
+  pixels[(size_t)(6 * 16) * kSimTownCanvasPixels + 6 * 16] = 0xFF647814;
   /* Authentic dark trunk/outline pixels must disappear with the whole tree
    * cell, not survive because only canopy green was treated as foreground. */
   pixels[(size_t)(1 * 16 + 14) * kSimTownCanvasPixels + 1 * 16 + 8] =
@@ -87,6 +92,7 @@ int main(void) {
   CHECK(scene.object_count == 8);  /* four buildings + four tree cells */
   CHECK(scene.tree_cell_count == 4);
   CHECK(scene.tree_group_count == 2);
+  CHECK(scene.mountains.cell_count == 1);
 
   const SimBackgroundVoxelObject *object =
       FindKind(&scene, kSimBackgroundVoxel_House);
@@ -140,6 +146,14 @@ int main(void) {
   CHECK((atlas[tree_center] >> 24) == 0xFF);
   CHECK(ground[tree_center] == 0xFF6A8018);
   CHECK(ground[tree_trunk] == 0xFF647814);
+  size_t mountain_corner =
+      (size_t)(6 * 16) * kSimTownCanvasPixels + 6 * 16;
+  size_t mountain_center =
+      (size_t)(6 * 16 + 8) * kSimTownCanvasPixels + 6 * 16 + 8;
+  CHECK(ground[mountain_corner] == 0xFF647814);
+  CHECK(ground[mountain_center] == 0xFF6A8018);
+  CHECK((atlas[mountain_corner] >> 24) == 0);
+  CHECK((atlas[mountain_center] >> 24) == 0xFF);
   uint32_t first_serial = SimBackgroundVoxels_Serial();
   SimBackgroundVoxels_Reset();
   CHECK(SimBackgroundVoxels_Serial() == 0);

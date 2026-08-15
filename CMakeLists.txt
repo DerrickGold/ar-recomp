@@ -293,6 +293,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_background_voxels_test
         tests/sim_background_voxels_test.c
         src/sim/sim_background_voxels.c
+        src/sim/sim_background_mountains.c
     )
     target_include_directories(actraiser_sim_background_voxels_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -301,6 +302,29 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_sim_background_voxels
         COMMAND actraiser_sim_background_voxels_test)
+
+    add_executable(actraiser_sim_background_mountains_test
+        tests/sim_background_mountains_test.c
+        src/sim/sim_background_mountains.c
+    )
+    target_include_directories(actraiser_sim_background_mountains_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+    )
+    add_test(NAME actraiser_sim_background_mountains
+        COMMAND actraiser_sim_background_mountains_test)
+
+    add_executable(actraiser_sim_background_mountain_relief_test
+        tests/sim_background_mountain_relief_test.c
+        src/sim/sim_background_mountain_relief.c
+    )
+    target_include_directories(
+        actraiser_sim_background_mountain_relief_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+    )
+    add_test(NAME actraiser_sim_background_mountain_relief
+        COMMAND actraiser_sim_background_mountain_relief_test)
 
     add_executable(actraiser_sim_background_voxel_models_test
         tests/sim_background_voxel_models_test.c
@@ -782,6 +806,7 @@ if(BUILD_TESTING)
         src/sim/sim_world_navigation_capture.c
         src/sim/sim_town_canvas.c
         src/sim/sim_background_voxels.c
+        src/sim/sim_background_mountains.c
         src/sim/sim_render_atlas.c
         src/action/action_obj_interpolation.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c

@@ -3,8 +3,10 @@
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "scene3d_math.h"
+#include "sim_background_mountain_relief.h"
 #include "sim_background_voxel_biome.h"
 #include "sim_background_voxel_depth.h"
 #include "sim_background_voxel_lighting.h"
@@ -22,6 +24,8 @@ enum {
   kMaxGeometryQuads = 8192,
   kMaxVertices = kMaxGeometryQuads * 4,
   kMaxIndices = kMaxGeometryQuads * 6,
+  kMaxMountainReliefFaces = kSimBackgroundMountainCellCount *
+      (1 + 4 * kSimBackgroundMountainReliefMaxSideBands),
 };
 
 typedef struct SimBackgroundGeometryBatch {
@@ -37,6 +41,14 @@ typedef struct ProjectedModelFace {
   uint8_t brightness[4];
 } ProjectedModelFace;
 
+typedef struct ProjectedMountainReliefFace {
+  Scene3DPoint points[4];
+  SDL_FPoint uv[4];
+  float depth;
+  uint8_t brightness;
+  uint8_t alpha[4];
+} ProjectedMountainReliefFace;
+
 typedef struct SimBackgroundModelLean {
   float x_per_height;
   float y_per_height;
@@ -44,24 +56,29 @@ typedef struct SimBackgroundModelLean {
 
 static struct {
   SDL_Texture *ground;
+  SDL_Texture *mountain_art;
   SDL_Texture *supersample;
   int supersample_w, supersample_h;
   uint32_t uploaded_serial;
   bool allocation_failed;
+  bool mountain_art_allocation_failed;
   bool supersample_allocation_failed;
   uint32_t cache_stamp;
   SimBackgroundVoxelBiome biome;
+  ProjectedMountainReliefFace
+      mountain_projected[kMaxMountainReliefFaces];
   SimBackgroundVoxelPalette palettes[kSimBackgroundMaxObjects];
   SimBackgroundGeometryBatch batch;
 } g_renderer_state;
 
-static SDL_Texture *CreateGroundTexture(SDL_Renderer *renderer) {
+static SDL_Texture *CreateCanvasTexture(
+    SDL_Renderer *renderer, SDL_ScaleMode scale_mode) {
   SDL_Texture *texture = SDL_CreateTexture(
       renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
       kSimTownCanvasPixels, kSimTownCanvasPixels);
   if (!texture) return NULL;
   SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-  SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+  SDL_SetTextureScaleMode(texture, scale_mode);
   return texture;
 }
 
@@ -71,7 +88,8 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
       g_renderer_state.allocation_failed)
     return;
   if (!g_renderer_state.ground)
-    g_renderer_state.ground = CreateGroundTexture(renderer);
+    g_renderer_state.ground = CreateCanvasTexture(
+        renderer, SDL_SCALEMODE_LINEAR);
   if (!g_renderer_state.ground) {
     g_renderer_state.allocation_failed = true;
     fprintf(stderr, "[sim-bg-voxels] texture allocation failed: %s\n",
@@ -84,6 +102,25 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
     fprintf(stderr, "[sim-bg-voxels] texture upload failed: %s\n",
             SDL_GetError());
     return;
+  }
+
+  if (!g_renderer_state.mountain_art &&
+      !g_renderer_state.mountain_art_allocation_failed)
+    g_renderer_state.mountain_art = CreateCanvasTexture(
+        renderer, SDL_SCALEMODE_NEAREST);
+  if (g_renderer_state.mountain_art &&
+      !SDL_UpdateTexture(g_renderer_state.mountain_art, NULL,
+                         SimBackgroundVoxels_AtlasPixels(), pitch)) {
+    fprintf(stderr, "[sim-bg-voxels] mountain atlas upload failed: %s\n",
+            SDL_GetError());
+    SDL_DestroyTexture(g_renderer_state.mountain_art);
+    g_renderer_state.mountain_art = NULL;
+    g_renderer_state.mountain_art_allocation_failed = true;
+  } else if (!g_renderer_state.mountain_art &&
+             !g_renderer_state.mountain_art_allocation_failed) {
+    fprintf(stderr, "[sim-bg-voxels] mountain atlas allocation failed: %s\n",
+            SDL_GetError());
+    g_renderer_state.mountain_art_allocation_failed = true;
   }
 
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
@@ -117,9 +154,9 @@ static void TexturePointToWorld(
   *world_z = height_pixels / params->source.h;
 }
 
-static SimBackgroundModelLean CameraFacingModelLean(
+static SimBackgroundModelLean CameraFacingLean(
     const SimBackgroundVoxelRenderParams *params,
-    SimBackgroundVoxelKind kind) {
+    float billboard_blend) {
   /* Clip depth's ground gradient points away from the camera. In town-texture
    * coordinates Y has the opposite sign from world Y, so (m3,-m7) is that
    * direction in pixels. Moving a model top along it cancels some of the
@@ -130,22 +167,6 @@ static SimBackgroundModelLean CameraFacingModelLean(
    * like the original upright SIM art. The cap keeps a nearly pitchless
    * camera from asking for an infinitely tilted billboard. */
   const float kMaximumLeanPerHeight = 1.15f;
-  float billboard_blend = 0.35f;
-  if (params->facing == kSimBackgroundVoxelFacing_PerModel) {
-    /* Tall narrow facades need more correction than broad roofs and foliage.
-     * These are presentation axes, not height scales, so proportions remain
-     * stable as the camera moves. */
-    static const float blend[kSimBackgroundVoxelKindCount] = {
-      [kSimBackgroundVoxel_House] = 0.48f,
-      [kSimBackgroundVoxel_Cathedral] = 0.44f,
-      [kSimBackgroundVoxel_Windmill] = 0.50f,
-      [kSimBackgroundVoxel_Factory] = 0.38f,
-      [kSimBackgroundVoxel_Tree] = 0.30f,
-    };
-    if (kind >= kSimBackgroundVoxel_House &&
-        kind < kSimBackgroundVoxelKindCount)
-      billboard_blend = blend[kind];
-  }
   /* Express the clip-depth gradient in authored texture pixels. Matrix X is
    * in aspect-scaled world units while Y/Z each span one source height; using
    * raw matrix coefficients made the lean change with window aspect ratio. */
@@ -166,6 +187,28 @@ static SimBackgroundModelLean CameraFacingModelLean(
     direction_x / ground_depth * lean,
     direction_y / ground_depth * lean,
   };
+}
+
+static SimBackgroundModelLean CameraFacingModelLean(
+    const SimBackgroundVoxelRenderParams *params,
+    SimBackgroundVoxelKind kind) {
+  float billboard_blend = 0.35f;
+  if (params->facing == kSimBackgroundVoxelFacing_PerModel) {
+    /* Tall narrow facades need more correction than broad roofs and foliage.
+     * These are presentation axes, not height scales, so proportions remain
+     * stable as the camera moves. */
+    static const float blend[kSimBackgroundVoxelKindCount] = {
+      [kSimBackgroundVoxel_House] = 0.48f,
+      [kSimBackgroundVoxel_Cathedral] = 0.44f,
+      [kSimBackgroundVoxel_Windmill] = 0.50f,
+      [kSimBackgroundVoxel_Factory] = 0.38f,
+      [kSimBackgroundVoxel_Tree] = 0.30f,
+    };
+    if (kind >= kSimBackgroundVoxel_House &&
+        kind < kSimBackgroundVoxelKindCount)
+      billboard_blend = blend[kind];
+  }
+  return CameraFacingLean(params, billboard_blend);
 }
 
 static bool ProjectPoint(const SimBackgroundVoxelRenderParams *params,
@@ -215,13 +258,19 @@ static SDL_FColor VertexColour(uint32_t argb, uint8_t brightness) {
   };
 }
 
-static void FlushBatch(SDL_Renderer *renderer,
-                       SimBackgroundGeometryBatch *batch) {
+static void FlushBatchTexture(SDL_Renderer *renderer,
+                              SimBackgroundGeometryBatch *batch,
+                              SDL_Texture *texture) {
   if (!batch->index_count) return;
-  SDL_RenderGeometry(renderer, NULL, batch->vertices, batch->vertex_count,
+  SDL_RenderGeometry(renderer, texture, batch->vertices, batch->vertex_count,
                      batch->indices, batch->index_count);
   batch->vertex_count = 0;
   batch->index_count = 0;
+}
+
+static void FlushBatch(SDL_Renderer *renderer,
+                       SimBackgroundGeometryBatch *batch) {
+  FlushBatchTexture(renderer, batch, NULL);
 }
 
 static void AppendProjectedFace(
@@ -260,6 +309,276 @@ static bool IsDegenerate(const Scene3DPoint points[4]) {
     twice_area += a->x * b->y - b->x * a->y;
   }
   return twice_area > -0.05f && twice_area < 0.05f;
+}
+
+static SimBackgroundVoxelDetail EffectiveMountainDetail(
+    const SimBackgroundVoxelRenderParams *params) {
+  SimBackgroundVoxelDetail requested =
+      (SimBackgroundVoxelDetail)params->detail;
+  if (params->lod != kSimBackgroundVoxelLod_Adaptive) return requested;
+  const SimBackgroundModelLean no_lean = {0.0f, 0.0f};
+  float origin_x = (float)params->town_screen_x0 - params->camera_x;
+  float origin_y = -(float)params->camera_y;
+  float center = kSimTownCanvasPixels * 0.5f;
+  Scene3DPoint bottom, top;
+  if (!ProjectPoint(params, &no_lean, origin_x + center, origin_y + center,
+                    0.0f, &bottom, NULL) ||
+      !ProjectPoint(params, &no_lean, origin_x + center, origin_y + center,
+                    24.0f, &top, NULL))
+    return requested;
+  float dx = top.x - bottom.x, dy = top.y - bottom.y;
+  float projected_height = sqrtf(dx * dx + dy * dy);
+  if (params->render_scale == kSimBackgroundVoxelRenderScale_2x)
+    projected_height *= 0.5f;
+  return SimBackgroundVoxelLod_Resolve(
+      requested, kSimBackgroundVoxelLod_Adaptive, projected_height);
+}
+
+static int CompareProjectedMountainDepth(
+    const void *left, const void *right) {
+  float a = ((const ProjectedMountainReliefFace *)left)->depth;
+  float b = ((const ProjectedMountainReliefFace *)right)->depth;
+  return a < b ? 1 : a > b ? -1 : 0;
+}
+
+static void AddProjectedMountainReliefFace(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundModelLean *lean,
+    float origin_x, float origin_y,
+    const float local_x[4], const float local_y[4],
+    const float local_z[4], const SDL_FPoint uv[4],
+    uint8_t brightness, const uint8_t alpha[4], int *count) {
+  if (*count >= kMaxMountainReliefFaces) return;
+  ProjectedMountainReliefFace face = {
+    .brightness = brightness,
+  };
+  float depth_sum = 0.0f;
+  for (int point = 0; point < 4; point++) {
+    float depth;
+    if (!ProjectPoint(params, lean,
+                      origin_x + local_x[point],
+                      origin_y + local_y[point], local_z[point],
+                      &face.points[point], &depth))
+      return;
+    face.uv[point] = uv[point];
+    face.alpha[point] = alpha[point];
+    depth_sum += depth;
+  }
+  if (IsDegenerate(face.points)) return;
+  face.depth = depth_sum * 0.25f;
+  g_renderer_state.mountain_projected[(*count)++] = face;
+}
+
+static void MountainPlanePoint(
+    float source_x, float source_y, float baseline,
+    const SimBackgroundMountainRelief *relief,
+    float offset_x, float offset_y,
+    float *local_x, float *local_y, float *local_z) {
+  float rise = baseline - source_y;
+  *local_x = source_x + offset_x;
+  *local_y = baseline - rise * relief->face_depth_scale + offset_y;
+  *local_z = rise * relief->face_height_scale;
+}
+
+static int BuildProjectedMountainReliefFaces(
+    const SimBackgroundVoxelRenderParams *params) {
+  if (!g_renderer_state.mountain_art) return 0;
+  const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
+  const SimBackgroundMountainField *field = &scene->mountains;
+  if (!field->cell_count) return 0;
+  SimBackgroundMountainRelief relief;
+  SimBackgroundMountainRelief_Resolve(
+      EffectiveMountainDetail(params),
+      (SimBackgroundVoxelShading)params->shading, &relief);
+  if (!relief.side_band_count || relief.depth_pixels <= 0.0f) return 0;
+
+  float origin_x = (float)params->town_screen_x0 - params->camera_x;
+  float origin_y = -(float)params->camera_y;
+  SimBackgroundModelLean mountain_lean = CameraFacingLean(
+      params, params->facing == kSimBackgroundVoxelFacing_PerModel
+          ? 0.44f : 0.35f);
+
+  /* Each connected range shares one baseline. Mapping source Y partly into
+   * height and partly into ground depth turns the original pseudo-perspective
+   * art into one continuous shallow facade instead of tilting every 16x16
+   * tile independently. */
+  float component_bottom[kSimBackgroundMountainCellCount + 1] = {0};
+  float component_top[kSimBackgroundMountainCellCount + 1];
+  for (int component = 0;
+       component <= kSimBackgroundMountainCellCount; component++)
+    component_top[component] = kSimTownCanvasPixels;
+  for (int cell_y = 0; cell_y < kSimBackgroundMountainTownCells;
+       cell_y++)
+    for (int cell_x = 0; cell_x < kSimBackgroundMountainTownCells;
+         cell_x++) {
+      int cell = cell_y * kSimBackgroundMountainTownCells + cell_x;
+      if (!(field->flags[cell] & kSimBackgroundMountainCell_Occupied))
+        continue;
+      uint16_t component = field->component[cell];
+      if (!component) component = 1;
+      float bottom = (cell_y + 1) * kSimBackgroundCellPixels;
+      float top = cell_y * kSimBackgroundCellPixels;
+      if (bottom > component_bottom[component])
+        component_bottom[component] = bottom;
+      if (top < component_top[component])
+        component_top[component] = top;
+    }
+
+  /* Side bands are displaced behind the front facade along the same
+   * clip-depth gradient used by the building billboards. The original art is
+   * emitted once; only component perimeter edges receive thickness. */
+  float aspect = (float)params->viewport.w / params->viewport.h;
+  float away_x = params->matrix[3] * aspect / params->source.w;
+  float away_y = -params->matrix[7] / params->source.h;
+  float away_length = sqrtf(away_x * away_x + away_y * away_y);
+  if (away_length > 0.000001f) {
+    away_x /= away_length;
+    away_y /= away_length;
+  } else {
+    away_x = 0.0f;
+    away_y = -1.0f;
+  }
+  int count = 0;
+  for (int cell_y = 0; cell_y < kSimBackgroundMountainTownCells;
+       cell_y++) {
+    for (int cell_x = 0; cell_x < kSimBackgroundMountainTownCells;
+         cell_x++) {
+      if (!SimBackgroundMountains_CellOccupied(field, cell_x, cell_y))
+        continue;
+      int cell = cell_y * kSimBackgroundMountainTownCells + cell_x;
+      uint16_t component = field->component[cell];
+      if (!component) component = 1;
+      float baseline = component_bottom[component];
+      float x0 = cell_x * kSimBackgroundCellPixels;
+      float y0 = cell_y * kSimBackgroundCellPixels;
+      float x1 = x0 + kSimBackgroundCellPixels;
+      float y1 = y0 + kSimBackgroundCellPixels;
+      const SDL_FPoint uv[4] = {
+        {x0 / kSimTownCanvasPixels, y0 / kSimTownCanvasPixels},
+        {x1 / kSimTownCanvasPixels, y0 / kSimTownCanvasPixels},
+        {x1 / kSimTownCanvasPixels, y1 / kSimTownCanvasPixels},
+        {x0 / kSimTownCanvasPixels, y1 / kSimTownCanvasPixels},
+      };
+      const float source_x[4] = {x0, x1, x1, x0};
+      const float source_y[4] = {y0, y0, y1, y1};
+      float local_x[4], local_y[4], local_z[4];
+      for (int point = 0; point < 4; point++)
+        MountainPlanePoint(
+            source_x[point], source_y[point], baseline, &relief,
+            0.0f, 0.0f,
+            &local_x[point], &local_y[point], &local_z[point]);
+      uint8_t front_alpha[4] = {255, 255, 255, 255};
+      if (component_top[component] == 0.0f) {
+        if (cell_y == 0) {
+          front_alpha[0] = 0;
+          front_alpha[1] = 0;
+          front_alpha[2] = 128;
+          front_alpha[3] = 128;
+        } else if (cell_y == 1) {
+          front_alpha[0] = 128;
+          front_alpha[1] = 128;
+        }
+      }
+      AddProjectedMountainReliefFace(
+          params, &mountain_lean, origin_x, origin_y,
+          local_x, local_y, local_z, uv,
+          255, front_alpha, &count);
+
+      static const int edge_dx[4] = {0, 1, 0, -1};
+      static const int edge_dy[4] = {-1, 0, 1, 0};
+      static const float edge_normal_x[4] = {0.0f, 1.0f, 0.0f, -1.0f};
+      static const float edge_normal_y[4] = {-1.0f, 0.0f, 1.0f, 0.0f};
+      for (int edge = 0; edge < 4; edge++) {
+        /* A range touching the north map boundary continues beneath the
+         * atmospheric shroud. It has no physical back edge to extrude. */
+        if (edge == 0 && cell_y == 0) continue;
+        if (SimBackgroundMountains_CellOccupied(
+                field, cell_x + edge_dx[edge],
+                cell_y + edge_dy[edge]))
+          continue;
+        float facing = -(edge_normal_x[edge] * away_x +
+                         edge_normal_y[edge] * away_y);
+        if (facing <= 0.0001f) continue;
+        if (facing > 1.0f) facing = 1.0f;
+        float ax, ay, bx, by, au, av, bu, bv;
+        switch (edge) {
+          case 0:
+            ax = x0; ay = y0; bx = x1; by = y0;
+            au = uv[0].x; av = uv[0].y;
+            bu = uv[1].x; bv = uv[1].y;
+            break;
+          case 1:
+            ax = x1; ay = y0; bx = x1; by = y1;
+            au = uv[1].x; av = uv[1].y;
+            bu = uv[2].x; bv = uv[2].y;
+            break;
+          case 2:
+            ax = x1; ay = y1; bx = x0; by = y1;
+            au = uv[2].x; av = uv[2].y;
+            bu = uv[3].x; bv = uv[3].y;
+            break;
+          default:
+            ax = x0; ay = y1; bx = x0; by = y0;
+            au = uv[3].x; av = uv[3].y;
+            bu = uv[0].x; bv = uv[0].y;
+            break;
+        }
+        const SDL_FPoint side_uv[4] = {
+          {au, av}, {bu, bv}, {bu, bv}, {au, av},
+        };
+        uint8_t side_alpha_value = (uint8_t)(relief.side_alpha * facing);
+        const uint8_t side_alpha[4] = {
+          side_alpha_value, side_alpha_value,
+          side_alpha_value, side_alpha_value,
+        };
+        for (uint8_t band = 0; band < relief.side_band_count; band++) {
+          float t0 = relief.depth_pixels * band /
+              relief.side_band_count;
+          float t1 = relief.depth_pixels * (band + 1) /
+              relief.side_band_count;
+          const float edge_source_x[4] = {ax, bx, bx, ax};
+          const float edge_source_y[4] = {ay, by, by, ay};
+          const float offset[4] = {t0, t0, t1, t1};
+          float side_x[4], side_y[4], side_z[4];
+          for (int point = 0; point < 4; point++)
+            MountainPlanePoint(
+                edge_source_x[point], edge_source_y[point], baseline,
+                &relief, away_x * offset[point], away_y * offset[point],
+                &side_x[point], &side_y[point], &side_z[point]);
+          AddProjectedMountainReliefFace(
+              params, &mountain_lean, origin_x, origin_y,
+              side_x, side_y, side_z, side_uv,
+              relief.side_brightness[band], side_alpha, &count);
+        }
+      }
+    }
+  }
+  qsort(g_renderer_state.mountain_projected, (size_t)count,
+        sizeof(g_renderer_state.mountain_projected[0]),
+        CompareProjectedMountainDepth);
+  return count;
+}
+
+static void AppendProjectedMountainReliefFace(
+    SDL_Renderer *renderer, SimBackgroundGeometryBatch *batch,
+    const ProjectedMountainReliefFace *face) {
+  if (batch->vertex_count + 4 > kMaxVertices ||
+      batch->index_count + 6 > kMaxIndices)
+    FlushBatchTexture(renderer, batch, g_renderer_state.mountain_art);
+  int base = batch->vertex_count;
+  float shade = face->brightness / 255.0f;
+  for (int point = 0; point < 4; point++) {
+    SDL_FColor tint = {
+      shade, shade, shade, face->alpha[point] / 255.0f,
+    };
+    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+      {face->points[point].x, face->points[point].y},
+      tint, face->uv[point],
+    };
+  }
+  static const int indices[] = {0, 1, 2, 0, 2, 3};
+  for (int i = 0; i < 6; i++)
+    batch->indices[batch->index_count++] = base + indices[i];
 }
 
 static float ObjectOriginY(const SimBackgroundVoxelObject *object) {
@@ -589,11 +908,23 @@ static void BuildVisibleModelList(
 static void DrawModelDepthRange(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundVisibleModelList *list,
+    int mountain_relief_count,
     float minimum_depth, float maximum_depth) {
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
   batch->vertex_count = 0;
   batch->index_count = 0;
+  for (int at = 0; at < mountain_relief_count; at++) {
+    const ProjectedMountainReliefFace *face =
+        &g_renderer_state.mountain_projected[at];
+    if (!SimBackgroundVoxelDepth_Contains(
+            face->depth, minimum_depth, maximum_depth))
+      continue;
+    AppendProjectedMountainReliefFace(renderer, batch, face);
+  }
+  /* Textured relief and palette geometry cannot share one SDL batch. Flush
+   * the authentic mountain copies before switching to solid model faces. */
+  FlushBatchTexture(renderer, batch, g_renderer_state.mountain_art);
   for (uint16_t at = 0; at < list->count; at++) {
     const SimBackgroundVisibleModel *entry = &list->entries[at];
     if (!SimBackgroundVoxelDepth_Contains(
@@ -733,6 +1064,8 @@ static void DrawDepthLayers(
   if (!g_renderer_state.cache_stamp) g_renderer_state.cache_stamp = 1;
   SimBackgroundVisibleModelList list;
   BuildVisibleModelList(&draw_params, &list);
+  int mountain_relief_count =
+      BuildProjectedMountainReliefFaces(&draw_params);
   float visible_minimum, visible_maximum;
   GroundDepthRange(&draw_params, &visible_minimum, &visible_maximum);
   uint8_t slice_count = interleaved
@@ -746,7 +1079,8 @@ static void DrawDepthLayers(
         visible_minimum, visible_maximum, slice_count, slice,
         &minimum, &maximum);
     DrawModelDepthRange(
-        renderer, &draw_params, &list, minimum, maximum);
+        renderer, &draw_params, &list, mountain_relief_count,
+        minimum, maximum);
     if (callback)
       callback(userdata, &draw_params, minimum, maximum, false);
   }
@@ -925,14 +1259,18 @@ void SimBackgroundVoxelRenderer_DrawShadowMask(
 
 void SimBackgroundVoxelRenderer_Reset(void) {
   if (g_renderer_state.ground) SDL_DestroyTexture(g_renderer_state.ground);
+  if (g_renderer_state.mountain_art)
+    SDL_DestroyTexture(g_renderer_state.mountain_art);
   if (g_renderer_state.supersample)
     SDL_DestroyTexture(g_renderer_state.supersample);
   g_renderer_state.ground = NULL;
+  g_renderer_state.mountain_art = NULL;
   g_renderer_state.supersample = NULL;
   g_renderer_state.supersample_w = 0;
   g_renderer_state.supersample_h = 0;
   g_renderer_state.uploaded_serial = 0;
   g_renderer_state.allocation_failed = false;
+  g_renderer_state.mountain_art_allocation_failed = false;
   g_renderer_state.supersample_allocation_failed = false;
   g_renderer_state.cache_stamp = 0;
   g_renderer_state.biome = kSimBackgroundVoxelBiome_Temperate;
