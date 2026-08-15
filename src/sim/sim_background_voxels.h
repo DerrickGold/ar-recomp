@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "sim_background_mountains.h"
 #include "sim_town_canvas.h"
 
 enum {
@@ -61,6 +62,7 @@ typedef struct SimBackgroundVoxelScene {
   uint16_t object_count;
   uint16_t tree_cell_count;
   uint16_t tree_group_count;
+  SimBackgroundMountainField mountains;
   SimBackgroundVoxelObject objects[kSimBackgroundMaxObjects];
 } SimBackgroundVoxelScene;
 

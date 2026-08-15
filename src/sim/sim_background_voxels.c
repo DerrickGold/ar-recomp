@@ -31,10 +31,14 @@ static struct {
   uint32_t atlas[kCanvasPixelCount];
   uint32_t ground[kCanvasPixelCount];
 } g_background;
-/* Scene rebuild scratch. Every classified source rectangle is marked before a
- * replacement tile is selected, so authentic object art is never considered
- * as the town's general ground. */
+/* Scene rebuild scratch. Every classified source rectangle, including static
+ * terrain, is marked before a replacement tile is selected, so authentic art
+ * is never considered as the town's general ground. */
 static uint8_t g_object_mask[kCanvasPixelCount];
+/* Mountain source cells can contain ordinary biome pixels between peaks. The
+ * complete cells are still excluded from eraser selection, but only pixels
+ * sufficiently different from the selected biome tile are lifted. */
+static uint8_t g_mountain_mask[kCanvasPixelCount];
 /* Reset clears publish state when leaving a town, but a later town must never
  * reuse a serial whose GPU texture may still exist. */
 static uint32_t g_next_serial;
@@ -112,6 +116,11 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
   out->town = town;
 
   bool occupied[kCellCount] = {false};
+  SimBackgroundMountains_Classify(town, wram, &out->mountains);
+  for (int y = 0; y < kSimBackgroundTownCells; y++)
+    for (int x = 0; x < kSimBackgroundTownCells; x++)
+      if (SimBackgroundMountains_CellOccupied(&out->mountains, x, y))
+        occupied[CellIndex(x, y)] = true;
   const uint8_t *records = wram + kStructureRecordsWram +
       (size_t)(town - 1) * kStructureRecordsPerTownBytes;
   for (int slot = 0; slot < kStructureRecordCount; slot++) {
@@ -376,9 +385,52 @@ static bool FindGeneralGroundCell(const uint32_t *pixels,
   return true;
 }
 
-static void ExtractVoxelObjects(const uint32_t *pixels,
-                                const SimBackgroundVoxelScene *scene) {
+static bool ColoursNear(uint32_t left, uint32_t right) {
+  int dr = (int)((left >> 16) & 0xFF) - (int)((right >> 16) & 0xFF);
+  int dg = (int)((left >> 8) & 0xFF) - (int)((right >> 8) & 0xFF);
+  int db = (int)(left & 0xFF) - (int)(right & 0xFF);
+  /* A 48-level RGB radius removes palette-adjacent grass/snow variations but
+   * leaves the measured rock ramps distinct in every town palette. */
+  return dr * dr + dg * dg + db * db <= 48 * 48;
+}
+
+static bool TerrainLike(uint32_t colour, uint32_t replacement) {
+  if (ColoursNear(colour, replacement)) return true;
+  unsigned red = (colour >> 16) & 0xFF;
+  unsigned green = (colour >> 8) & 0xFF;
+  unsigned blue = colour & 0xFF;
+  unsigned ground_red = (replacement >> 16) & 0xFF;
+  unsigned ground_green = (replacement >> 8) & 0xFF;
+  unsigned ground_blue = replacement & 0xFF;
+  bool green_ground = ground_green * 10 > ground_red * 11 &&
+      ground_green * 10 > ground_blue * 12;
+  bool green_pixel = green * 10 > red * 11 &&
+      green * 10 > blue * 12;
+  return green_ground && green_pixel;
+}
+
+static void ExtractEnhancedReplacements(
+    const uint32_t *pixels, const SimBackgroundVoxelScene *scene) {
   memset(g_object_mask, 0, sizeof(g_object_mask));
+  memset(g_mountain_mask, 0, sizeof(g_mountain_mask));
+  /* Mountain cells retain their complete authentic tiles in the atlas. The
+   * renderer uses them once as a lifted top and repeats only exposed edge
+   * texels down the shallow voxel sides. */
+  for (int cell_y = 0; cell_y < kSimBackgroundTownCells; cell_y++)
+    for (int cell_x = 0; cell_x < kSimBackgroundTownCells; cell_x++) {
+      if (!SimBackgroundMountains_CellOccupied(
+              &scene->mountains, cell_x, cell_y))
+        continue;
+      int x0 = cell_x * kSimBackgroundCellPixels;
+      int y0 = cell_y * kSimBackgroundCellPixels;
+      for (int y = 0; y < kSimBackgroundCellPixels; y++)
+        for (int x = 0; x < kSimBackgroundCellPixels; x++) {
+          size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels + x0 + x;
+          g_object_mask[at] = 1;
+          g_mountain_mask[at] = 1;
+          g_background.atlas[at] = pixels[at] | 0xFF000000u;
+        }
+    }
   for (uint16_t i = 0; i < scene->object_count; i++) {
     const SimBackgroundVoxelObject *object = &scene->objects[i];
     int x0 = object->cell_x * kSimBackgroundCellPixels;
@@ -401,15 +453,18 @@ static void ExtractVoxelObjects(const uint32_t *pixels,
   int ground_y0 = ground_cell_y * kSimBackgroundCellPixels;
   /* The same complete biome tile erases every source cell. Grass towns keep
    * their grass texture, Northwall keeps snow, and no nearest-pixel flood can
-   * create streaks around a large forest or cathedral footprint. */
+   * create streaks around a large forest, cathedral, or lifted mountain. */
   for (int y = 0; y < kSimTownCanvasPixels; y++)
     for (int x = 0; x < kSimTownCanvasPixels; x++) {
       size_t at = (size_t)y * kSimTownCanvasPixels + x;
       if (!g_object_mask[at]) continue;
       int source_x = ground_x0 + x % kSimBackgroundCellPixels;
       int source_y = ground_y0 + y % kSimBackgroundCellPixels;
-      g_background.ground[at] =
+      uint32_t replacement =
           pixels[(size_t)source_y * kSimTownCanvasPixels + source_x];
+      g_background.ground[at] = replacement;
+      if (g_mountain_mask[at] && TerrainLike(pixels[at], replacement))
+        g_background.atlas[at] = 0;
     }
 }
 
@@ -427,7 +482,7 @@ void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
   memcpy(g_background.ground, canvas_pixels, sizeof(g_background.ground));
   SimBackgroundVoxels_Classify(town, wram, canvas_pixels,
                                &g_background.scene);
-  ExtractVoxelObjects(canvas_pixels, &g_background.scene);
+  ExtractEnhancedReplacements(canvas_pixels, &g_background.scene);
   g_background.canvas_serial = canvas_serial;
   g_background.serial = next_serial;
 }
