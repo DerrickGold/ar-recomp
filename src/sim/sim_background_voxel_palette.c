@@ -32,6 +32,17 @@ static uint32_t VaryColour(uint32_t colour, int variation) {
       (uint32_t)ClampChannel(green) << 8 | ClampChannel(blue);
 }
 
+static uint32_t TintColour(uint32_t colour,
+                           int red, int green, int blue) {
+  uint8_t alpha = (uint8_t)(colour >> 24);
+  red += (int)((colour >> 16) & 0xFF);
+  green += (int)((colour >> 8) & 0xFF);
+  blue += (int)(colour & 0xFF);
+  return (uint32_t)alpha << 24 |
+      (uint32_t)ClampChannel(red) << 16 |
+      (uint32_t)ClampChannel(green) << 8 | ClampChannel(blue);
+}
+
 static void SetMaterial(SimBackgroundVoxelPalette *palette,
                         SimBackgroundVoxelMaterial material,
                         uint32_t base) {
@@ -57,12 +68,70 @@ static void SetCommonPalette(SimBackgroundVoxelPalette *palette) {
   SetMaterial(palette, kSimVoxelMaterial_LeavesDark, Argb(7, 79, 24));
   SetMaterial(palette, kSimVoxelMaterial_Paving, Argb(150, 133, 101));
   SetMaterial(palette, kSimVoxelMaterial_Gold, Argb(222, 164, 38));
+  SetMaterial(palette, kSimVoxelMaterial_Glass, Argb(45, 72, 91));
+  SetMaterial(palette, kSimVoxelMaterial_Snow, Argb(226, 236, 240));
   for (int level = 0; level < kSimBackgroundVoxelPaletteRampLevels; level++)
     palette->material[kSimVoxelMaterial_Contact][level] = 0x380B1014u;
 }
 
+static bool IsFoliage(SimBackgroundVoxelMaterial material) {
+  return material == kSimVoxelMaterial_Leaves ||
+      material == kSimVoxelMaterial_LeavesLight ||
+      material == kSimVoxelMaterial_LeavesDark;
+}
+
+static void ApplyBiomePalette(SimBackgroundVoxelPalette *palette,
+                              SimBackgroundVoxelBiome biome) {
+  int red = 0, green = 0, blue = 0;
+  switch (biome) {
+    case kSimBackgroundVoxelBiome_Temperate: return;
+    case kSimBackgroundVoxelBiome_Wetland:
+      red = -7; green = -2; blue = 4;
+      break;
+    case kSimBackgroundVoxelBiome_Desert:
+      red = 11; green = 5; blue = -11;
+      break;
+    case kSimBackgroundVoxelBiome_Volcanic:
+      red = -17; green = -15; blue = -10;
+      break;
+    case kSimBackgroundVoxelBiome_Tropical:
+      red = 2; green = 8; blue = -3;
+      break;
+    case kSimBackgroundVoxelBiome_Snow:
+      red = -5; green = 3; blue = 10;
+      break;
+    case kSimBackgroundVoxelBiome_Count: return;
+  }
+  for (int material = 0; material < kSimVoxelMaterial_Count; material++) {
+    if (material == kSimVoxelMaterial_Contact ||
+        material == kSimVoxelMaterial_Snow)
+      continue;
+    int material_red = red;
+    int material_green = green;
+    int material_blue = blue;
+    if (IsFoliage((SimBackgroundVoxelMaterial)material)) {
+      if (biome == kSimBackgroundVoxelBiome_Desert) {
+        material_red -= 4;
+        material_green -= 6;
+        material_blue -= 5;
+      } else if (biome == kSimBackgroundVoxelBiome_Tropical) {
+        material_green += 8;
+        material_blue += 4;
+      } else if (biome == kSimBackgroundVoxelBiome_Snow) {
+        material_red -= 2;
+        material_green -= 8;
+      }
+    }
+    uint32_t base = palette->material[material][2];
+    SetMaterial(palette, (SimBackgroundVoxelMaterial)material,
+                TintColour(base, material_red, material_green,
+                           material_blue));
+  }
+}
+
 void SimBackgroundVoxelPalette_Build(
     const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelBiome biome,
     SimBackgroundVoxelPalette *palette) {
   if (!palette) return;
   memset(palette, 0, sizeof(*palette));
@@ -87,6 +156,7 @@ void SimBackgroundVoxelPalette_Build(
       SetMaterial(palette, kSimVoxelMaterial_Trim, Argb(150, 160, 157));
       SetMaterial(palette, kSimVoxelMaterial_Dark, Argb(41, 43, 40));
       SetMaterial(palette, kSimVoxelMaterial_Gold, Argb(235, 181, 43));
+      SetMaterial(palette, kSimVoxelMaterial_Glass, Argb(53, 82, 101));
       break;
     case kSimBackgroundVoxel_Windmill:
       SetMaterial(palette, kSimVoxelMaterial_Wall, Argb(196, 154, 82));
@@ -134,6 +204,7 @@ void SimBackgroundVoxelPalette_Build(
                   VaryColour(base, variation));
     }
   }
+  ApplyBiomePalette(palette, biome);
 }
 
 uint32_t SimBackgroundVoxelPalette_Base(

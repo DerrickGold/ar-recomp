@@ -21,8 +21,13 @@ static void MaterialResponse(SimBackgroundVoxelMaterial material,
     case kSimVoxelMaterial_Metal:
     case kSimVoxelMaterial_Blade:
     case kSimVoxelMaterial_Gold:
+    case kSimVoxelMaterial_Glass:
       *ambient = 0.49f;
       *direct = 0.51f;
+      break;
+    case kSimVoxelMaterial_Snow:
+      *ambient = 0.76f;
+      *direct = 0.24f;
       break;
     case kSimVoxelMaterial_Dark:
     case kSimVoxelMaterial_Wood:

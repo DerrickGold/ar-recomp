@@ -794,6 +794,13 @@ int main(void) {
   CHECK(!g_settings.sim3d_world_navigation_clouds);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(g_settings.sim3d_mode);
+  RowToKey("sim3d_voxel_preset");
+  CHECK(g_settings.sim3d_voxel_preset ==
+        kSimBackgroundVoxelPreset_Balanced);
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.sim3d_voxel_preset ==
+        kSimBackgroundVoxelPreset_Custom);
   RowToKey("sim3d_voxel_detail");
   CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));

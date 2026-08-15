@@ -1,6 +1,15 @@
 #ifndef SIM_BACKGROUND_VOXEL_QUALITY_H
 #define SIM_BACKGROUND_VOXEL_QUALITY_H
 
+typedef enum SimBackgroundVoxelPreset {
+  kSimBackgroundVoxelPreset_Off = 0,
+  kSimBackgroundVoxelPreset_Performance,
+  kSimBackgroundVoxelPreset_Balanced,
+  kSimBackgroundVoxelPreset_Quality,
+  kSimBackgroundVoxelPreset_Custom,
+  kSimBackgroundVoxelPreset_Count,
+} SimBackgroundVoxelPreset;
+
 /* Stable stored values for the player-facing SIM voxel performance target.
  * Append new levels rather than reordering these: settings.ini may store the
  * numeric enum value as well as its label. */

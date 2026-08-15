@@ -314,6 +314,31 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_sim_background_voxel_models
         COMMAND actraiser_sim_background_voxel_models_test)
 
+    add_executable(actraiser_sim_background_voxel_biome_test
+        tests/sim_background_voxel_biome_test.c
+        src/sim/sim_background_voxel_biome.c
+    )
+    target_include_directories(actraiser_sim_background_voxel_biome_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_sim_background_voxel_biome_test PRIVATE m)
+    add_test(NAME actraiser_sim_background_voxel_biome
+        COMMAND actraiser_sim_background_voxel_biome_test)
+
+    add_executable(actraiser_sim_background_voxel_depth_test
+        tests/sim_background_voxel_depth_test.c
+        src/sim/sim_background_voxel_depth.c
+        ${TEST_RUNNER_SOURCE})
+    target_include_directories(actraiser_sim_background_voxel_depth_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/include)
+    target_link_libraries(actraiser_sim_background_voxel_depth_test PRIVATE m)
+    add_test(NAME actraiser_sim_background_voxel_depth
+        COMMAND actraiser_sim_background_voxel_depth_test)
+
     add_executable(actraiser_sim_background_voxel_model_cache_test
         tests/sim_background_voxel_model_cache_test.c
         src/sim/sim_background_voxel_model_cache.c
@@ -338,6 +363,17 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_sim_background_voxel_lod
         COMMAND actraiser_sim_background_voxel_lod_test)
+
+    add_executable(actraiser_sim_background_voxel_preset_test
+        tests/sim_background_voxel_preset_test.c
+        src/sim/sim_background_voxel_preset.c
+    )
+    target_include_directories(actraiser_sim_background_voxel_preset_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+    )
+    add_test(NAME actraiser_sim_background_voxel_preset
+        COMMAND actraiser_sim_background_voxel_preset_test)
 
     add_executable(actraiser_sim_background_voxel_palette_test
         tests/sim_background_voxel_palette_test.c
@@ -738,6 +774,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_ppu_render_pipeline_test
         tests/ppu_render_pipeline_test.c
         src/sim/sim3d.c
+        src/sim/sim_background_voxel_preset.c
         src/sim/sim_render_metadata.c
         src/sim/sim_render_metadata_trace.c
         src/sim/sim_world_map.c
