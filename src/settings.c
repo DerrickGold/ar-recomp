@@ -479,6 +479,11 @@ static const char *const kSimVoxelDetailLabels[] = {
   "Ultra",
 };
 
+static const char *const kSimVoxelLodLabels[] = {
+  "Fixed",
+  "Adaptive",
+};
+
 static const char *const kSimVoxelShadingLabels[] = {
   "Basic",
   "Ambient occlusion",
@@ -499,7 +504,8 @@ static const char *const kSimVoxelFacingLabels[] = {
 
 static const char *const kSimVoxelRenderScaleLabels[] = {
   "Native",
-  "2x supersampled",
+  "Smooth 2x",
+  "Pixel-clean",
 };
 
 static const char *const kDioramaSkyModeLabels[] = {
@@ -1160,6 +1166,17 @@ const SettingDesc g_setting_descs[] = {
     kSimVoxelDetailLabels, kSimBackgroundVoxelDetail_Count,
     Sim3DGroundEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
+  { "sim3d_voxel_lod", "AR_SIM3D_VOXEL_LOD", "Voxel detail scaling",
+    "Fixed uses the selected model detail everywhere. Adaptive treats model "
+    "detail as an upper limit and reuses cheaper cached meshes for buildings "
+    "and trees whose projected silhouettes are too small to show the extra "
+    "geometry.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_voxel_lod, kSimBackgroundVoxelLod_Adaptive,
+    kSimBackgroundVoxelLod_Fixed, kSimBackgroundVoxelLod_Adaptive, 1, false,
+    kSimVoxelLodLabels, kSimBackgroundVoxelLod_Count,
+    Sim3DGroundEnabled, NULL, NULL, NULL,
+    .modern_env = true, .player_visible = true },
   { "sim3d_voxel_shading", "AR_SIM3D_VOXEL_SHADING", "Voxel shading",
     "Lighting cost for simulation-town buildings and trees. Basic uses one "
     "directional value per face; Ambient occlusion adds contact gradients; "
@@ -1196,15 +1213,16 @@ const SettingDesc g_setting_descs[] = {
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_render_scale", "AR_SIM3D_VOXEL_RENDER_SCALE",
     "Voxel render scale",
-    "Native draws directly into the scene. 2x renders only the background "
-    "voxel pass at double resolution and downsamples it on High or Ultra "
-    "detail; Low and Balanced remain native to preserve their performance "
-    "targets.",
+    "Native draws directly into the scene. Pixel-clean locks projected "
+    "corners to the output pixel grid for crisp voxel edges. Smooth 2x "
+    "renders the background voxel pass at double resolution and downsamples "
+    "it on High or Ultra detail; Low and Balanced remain native to preserve "
+    "their performance targets.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_render_scale,
+    kSimBackgroundVoxelRenderScale_PixelClean,
     kSimBackgroundVoxelRenderScale_Native,
-    kSimBackgroundVoxelRenderScale_Native,
-    kSimBackgroundVoxelRenderScale_2x, 1, false,
+    kSimBackgroundVoxelRenderScale_PixelClean, 1, false,
     kSimVoxelRenderScaleLabels, kSimBackgroundVoxelRenderScale_Count,
     Sim3DGroundEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },

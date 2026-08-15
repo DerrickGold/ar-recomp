@@ -690,6 +690,9 @@ typedef struct SimFrameData {
   uint16_t height_scale_x100;
   /* Player-selected procedural background-model performance target. */
   uint8_t background_voxel_detail;
+  /* Fixed keeps that detail for every model. Adaptive treats it as a ceiling
+   * and selects a cheaper cached mesh for small projected silhouettes. */
+  uint8_t background_voxel_lod;
   /* Independent background-model cost classes. Keeping them in the immutable
    * frame payload avoids reading live settings from the render thread. */
   uint8_t background_voxel_shading;

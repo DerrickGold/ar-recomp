@@ -8,6 +8,7 @@
 typedef struct SimBackgroundVoxelRenderParams {
   uint32_t serial;
   uint8_t detail;
+  uint8_t lod;
   uint8_t shading;
   uint8_t style;
   uint8_t facing;

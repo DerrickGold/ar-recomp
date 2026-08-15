@@ -5,7 +5,10 @@
 
 #include "scene3d_math.h"
 #include "sim_background_voxel_lighting.h"
+#include "sim_background_voxel_lod.h"
+#include "sim_background_voxel_model_cache.h"
 #include "sim_background_voxel_models.h"
+#include "sim_background_voxel_palette.h"
 #include "sim_background_voxel_proportions.h"
 #include "sim_background_voxels.h"
 
@@ -23,10 +26,6 @@ typedef struct SimBackgroundGeometryBatch {
   int indices[kMaxIndices];
   int vertex_count, index_count;
 } SimBackgroundGeometryBatch;
-
-typedef struct SimBackgroundVoxelPalette {
-  uint32_t material[kSimVoxelMaterial_Count];
-} SimBackgroundVoxelPalette;
 
 typedef struct ProjectedModelFace {
   Scene3DPoint points[4];
@@ -47,98 +46,10 @@ static struct {
   uint32_t uploaded_serial;
   bool allocation_failed;
   bool supersample_allocation_failed;
+  uint32_t cache_stamp;
   SimBackgroundVoxelPalette palettes[kSimBackgroundMaxObjects];
   SimBackgroundGeometryBatch batch;
 } g_renderer_state;
-
-static uint32_t Argb(uint8_t red, uint8_t green, uint8_t blue) {
-  return 0xFF000000u | (uint32_t)red << 16 |
-      (uint32_t)green << 8 | blue;
-}
-
-static uint32_t VaryColour(uint32_t colour, int variation) {
-  int red = (int)((colour >> 16) & 0xFF) + variation;
-  int green = (int)((colour >> 8) & 0xFF) + variation;
-  int blue = (int)(colour & 0xFF) + variation;
-  if (red < 0) red = 0;
-  if (green < 0) green = 0;
-  if (blue < 0) blue = 0;
-  if (red > 255) red = 255;
-  if (green > 255) green = 255;
-  if (blue > 255) blue = 255;
-  return Argb((uint8_t)red, (uint8_t)green, (uint8_t)blue);
-}
-
-static void SetCommonPalette(SimBackgroundVoxelPalette *palette) {
-  palette->material[kSimVoxelMaterial_Wall] = Argb(194, 155, 85);
-  palette->material[kSimVoxelMaterial_WallLight] = Argb(230, 204, 139);
-  palette->material[kSimVoxelMaterial_Roof] = Argb(100, 55, 125);
-  palette->material[kSimVoxelMaterial_RoofLight] = Argb(132, 78, 153);
-  palette->material[kSimVoxelMaterial_Trim] = Argb(218, 198, 145);
-  palette->material[kSimVoxelMaterial_Dark] = Argb(39, 28, 34);
-  palette->material[kSimVoxelMaterial_Wood] = Argb(121, 70, 31);
-  palette->material[kSimVoxelMaterial_Metal] = Argb(110, 116, 113);
-  palette->material[kSimVoxelMaterial_Blade] = Argb(239, 237, 220);
-  palette->material[kSimVoxelMaterial_Trunk] = Argb(91, 55, 27);
-  palette->material[kSimVoxelMaterial_Leaves] = Argb(22, 132, 35);
-  palette->material[kSimVoxelMaterial_LeavesLight] = Argb(62, 177, 51);
-  palette->material[kSimVoxelMaterial_LeavesDark] = Argb(7, 79, 24);
-  palette->material[kSimVoxelMaterial_Paving] = Argb(112, 108, 101);
-}
-
-static void BuildPalette(const SimBackgroundVoxelObject *object,
-                         SimBackgroundVoxelPalette *palette) {
-  SetCommonPalette(palette);
-  switch ((SimBackgroundVoxelKind)object->kind) {
-    case kSimBackgroundVoxel_House:
-      palette->material[kSimVoxelMaterial_Wall] = Argb(202, 158, 81);
-      palette->material[kSimVoxelMaterial_WallLight] = Argb(238, 204, 125);
-      palette->material[kSimVoxelMaterial_Roof] = Argb(123, 64, 34);
-      palette->material[kSimVoxelMaterial_RoofLight] = Argb(163, 87, 42);
-      break;
-    case kSimBackgroundVoxel_Cathedral:
-      palette->material[kSimVoxelMaterial_Wall] = Argb(194, 200, 190);
-      palette->material[kSimVoxelMaterial_WallLight] = Argb(235, 236, 220);
-      palette->material[kSimVoxelMaterial_Roof] = Argb(172, 181, 178);
-      palette->material[kSimVoxelMaterial_RoofLight] = Argb(239, 239, 224);
-      palette->material[kSimVoxelMaterial_Trim] = Argb(150, 160, 157);
-      palette->material[kSimVoxelMaterial_Dark] = Argb(41, 43, 40);
-      break;
-    case kSimBackgroundVoxel_Windmill:
-      palette->material[kSimVoxelMaterial_Wall] = Argb(196, 154, 82);
-      palette->material[kSimVoxelMaterial_WallLight] = Argb(225, 190, 116);
-      palette->material[kSimVoxelMaterial_Roof] = Argb(88, 47, 118);
-      palette->material[kSimVoxelMaterial_RoofLight] = Argb(127, 74, 151);
-      break;
-    case kSimBackgroundVoxel_Factory:
-      palette->material[kSimVoxelMaterial_Wall] = Argb(177, 144, 73);
-      palette->material[kSimVoxelMaterial_WallLight] = Argb(220, 190, 112);
-      palette->material[kSimVoxelMaterial_Roof] = Argb(80, 42, 105);
-      palette->material[kSimVoxelMaterial_RoofLight] = Argb(116, 65, 139);
-      palette->material[kSimVoxelMaterial_Trim] = Argb(111, 81, 115);
-      break;
-    case kSimBackgroundVoxel_Tree: {
-      int seed = object->cell_x * 3 + object->cell_y * 5 + object->group;
-      int variation = (seed % 3 - 1) * 7;
-      palette->material[kSimVoxelMaterial_Leaves] =
-          VaryColour(palette->material[kSimVoxelMaterial_Leaves], variation);
-      palette->material[kSimVoxelMaterial_LeavesLight] =
-          VaryColour(palette->material[kSimVoxelMaterial_LeavesLight],
-                     variation);
-      palette->material[kSimVoxelMaterial_LeavesDark] =
-          VaryColour(palette->material[kSimVoxelMaterial_LeavesDark],
-                     variation);
-      break;
-    }
-  }
-  if (object->kind != kSimBackgroundVoxel_Tree && object->record_slot != 0xFF) {
-    int variation = ((int)object->record_slot % 3 - 1) * 4;
-    palette->material[kSimVoxelMaterial_Wall] =
-        VaryColour(palette->material[kSimVoxelMaterial_Wall], variation);
-    palette->material[kSimVoxelMaterial_Roof] =
-        VaryColour(palette->material[kSimVoxelMaterial_Roof], variation);
-  }
-}
 
 static SDL_Texture *CreateGroundTexture(SDL_Renderer *renderer) {
   SDL_Texture *texture = SDL_CreateTexture(
@@ -173,7 +84,8 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
 
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   for (uint16_t i = 0; i < scene->object_count; i++)
-    BuildPalette(&scene->objects[i], &g_renderer_state.palettes[i]);
+    SimBackgroundVoxelPalette_Build(
+        &scene->objects[i], &g_renderer_state.palettes[i]);
   g_renderer_state.uploaded_serial = serial;
 }
 
@@ -268,6 +180,10 @@ static bool ProjectPoint(const SimBackgroundVoxelRenderParams *params,
     return false;
   projected.x += params->viewport.x;
   projected.y += params->viewport.y;
+  if (params->render_scale == kSimBackgroundVoxelRenderScale_PixelClean) {
+    projected.x = floorf(projected.x) + 0.5f;
+    projected.y = floorf(projected.y) + 0.5f;
+  }
   *out = projected;
   if (clip_depth)
     *clip_depth = Scene3D_ClipDepth(
@@ -281,7 +197,7 @@ static SDL_FColor VertexColour(uint32_t argb, uint8_t brightness) {
     ((argb >> 16) & 0xFF) / 255.0f * shade,
     ((argb >> 8) & 0xFF) / 255.0f * shade,
     (argb & 0xFF) / 255.0f * shade,
-    1.0f,
+    ((argb >> 24) & 0xFF) / 255.0f,
   };
 }
 
@@ -297,15 +213,23 @@ static void FlushBatch(SDL_Renderer *renderer,
 static void AppendProjectedFace(
     SDL_Renderer *renderer, SimBackgroundGeometryBatch *batch,
     const ProjectedModelFace *face,
-    const SimBackgroundVoxelPalette *palette) {
+    const SimBackgroundVoxelPalette *palette,
+    SimBackgroundVoxelShading shading) {
   if (batch->vertex_count + 4 > kMaxVertices ||
       batch->index_count + 6 > kMaxIndices)
     FlushBatch(renderer, batch);
   int base = batch->vertex_count;
-  uint32_t argb = face->material < kSimVoxelMaterial_Count
-      ? palette->material[face->material] : Argb(255, 0, 255);
   for (int i = 0; i < 4; i++) {
-    SDL_FColor colour = VertexColour(argb, face->brightness[i]);
+    SimBackgroundVoxelMaterial material =
+        (SimBackgroundVoxelMaterial)face->material;
+    uint32_t argb = shading == kSimBackgroundVoxelShading_MaterialAware
+        ? SimBackgroundVoxelPalette_Ramp(
+              palette, material, face->brightness[i])
+        : SimBackgroundVoxelPalette_Base(palette, material);
+    uint8_t brightness =
+        shading == kSimBackgroundVoxelShading_MaterialAware
+            ? 255 : face->brightness[i];
+    SDL_FColor colour = VertexColour(argb, brightness);
     batch->vertices[batch->vertex_count++] =
         (SDL_Vertex){{face->points[i].x, face->points[i].y}, colour, {0, 0}};
   }
@@ -333,6 +257,86 @@ static float ObjectOriginY(const SimBackgroundVoxelObject *object) {
           object->footprint_cells_d) * kSimBackgroundCellPixels;
 }
 
+typedef struct SimBackgroundContactBounds {
+  float x0, y0, x1, y1;
+} SimBackgroundContactBounds;
+
+enum { kSimBackgroundMaxContactQuads = 3 };
+
+static int ContactBounds(const SimBackgroundVoxelObject *object,
+                         SimBackgroundContactBounds *out) {
+  switch ((SimBackgroundVoxelKind)object->kind) {
+    case kSimBackgroundVoxel_House:
+      out[0] = (SimBackgroundContactBounds){1.8f, 2.5f, 14.2f, 15.2f};
+      return 1;
+    case kSimBackgroundVoxel_Cathedral:
+      out[0] = (SimBackgroundContactBounds){0.8f, 8.8f, 31.2f, 31.4f};
+      return 1;
+    case kSimBackgroundVoxel_Windmill:
+      out[0] = (SimBackgroundContactBounds){6.2f, 2.3f, 25.8f, 15.2f};
+      return 1;
+    case kSimBackgroundVoxel_Factory:
+      out[0] = (SimBackgroundContactBounds){0.8f, 0.8f, 21.8f, 10.8f};
+      out[1] = (SimBackgroundContactBounds){0.8f, 22.2f, 21.8f, 31.2f};
+      out[2] = (SimBackgroundContactBounds){21.2f, 0.8f, 31.2f, 31.2f};
+      return 3;
+    case kSimBackgroundVoxel_Tree:
+      /* Contact belongs to the trunk, not the foliage footprint. This avoids
+       * turning dense forests into one continuous dark carpet. */
+      out[0] = (SimBackgroundContactBounds){5.4f, 5.4f, 10.6f, 10.6f};
+      return 1;
+  }
+  return 0;
+}
+
+static void AppendGroundContact(
+    SDL_Renderer *renderer, SimBackgroundGeometryBatch *batch,
+    const SimBackgroundVoxelObject *object,
+    const SimBackgroundVoxelPalette *palette,
+    const SimBackgroundVoxelRenderParams *params,
+    float origin_x, float origin_y,
+    const SimBackgroundVoxelProportions *proportions) {
+  if (params->shading < kSimBackgroundVoxelShading_AmbientOcclusion)
+    return;
+  SimBackgroundContactBounds bounds[kSimBackgroundMaxContactQuads];
+  int count = ContactBounds(object, bounds);
+  float center_x = object->footprint_cells_w *
+      kSimBackgroundCellPixels * 0.5f;
+  float center_y = object->footprint_cells_d *
+      kSimBackgroundCellPixels * 0.5f;
+  const SimBackgroundModelLean no_lean = {0.0f, 0.0f};
+  for (int at = 0; at < count; at++) {
+    float x0 = center_x + (bounds[at].x0 - center_x) *
+        proportions->footprint_scale;
+    float x1 = center_x + (bounds[at].x1 - center_x) *
+        proportions->footprint_scale;
+    float y0 = center_y + (bounds[at].y0 - center_y) *
+        proportions->footprint_scale;
+    float y1 = center_y + (bounds[at].y1 - center_y) *
+        proportions->footprint_scale;
+    const float local_x[4] = {x0, x1, x1, x0};
+    const float local_y[4] = {y0, y0, y1, y1};
+    ProjectedModelFace face = {
+      .material = kSimVoxelMaterial_Contact,
+      .brightness = {255, 255, 255, 255},
+    };
+    bool valid = true;
+    for (int point = 0; point < 4; point++) {
+      if (!ProjectPoint(params, &no_lean,
+                        origin_x + local_x[point],
+                        origin_y + local_y[point], 0.06f,
+                        &face.points[point], NULL)) {
+        valid = false;
+        break;
+      }
+    }
+    if (valid && !IsDegenerate(face.points))
+      AppendProjectedFace(
+          renderer, batch, &face, palette,
+          (SimBackgroundVoxelShading)params->shading);
+  }
+}
+
 static bool ObjectMayBeVisible(
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelRenderParams *params) {
@@ -349,18 +353,52 @@ static bool ObjectMayBeVisible(
       y0 <= params->source.y + params->source.h + margin;
 }
 
+static float ModelAuthoredHeight(const SimBackgroundVoxelObject *object) {
+  bool construction =
+      (object->flags & kSimBackgroundVoxel_UnderConstruction) != 0;
+  switch ((SimBackgroundVoxelKind)object->kind) {
+    case kSimBackgroundVoxel_House: return construction ? 12.0f : 15.6f;
+    case kSimBackgroundVoxel_Cathedral: return 24.0f;
+    case kSimBackgroundVoxel_Windmill: return construction ? 24.0f : 31.0f;
+    case kSimBackgroundVoxel_Factory: return construction ? 10.0f : 17.0f;
+    case kSimBackgroundVoxel_Tree: return 15.0f;
+  }
+  return 16.0f;
+}
+
+static SimBackgroundVoxelDetail EffectiveDetail(
+    const SimBackgroundVoxelObject *object,
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundModelLean *lean,
+    float origin_x, float origin_y,
+    const SimBackgroundVoxelProportions *proportions,
+    float center_x, float center_y) {
+  SimBackgroundVoxelDetail requested =
+      (SimBackgroundVoxelDetail)params->detail;
+  if (params->lod != kSimBackgroundVoxelLod_Adaptive) return requested;
+  Scene3DPoint bottom, top;
+  float height = ModelAuthoredHeight(object) * proportions->height_scale;
+  if (!ProjectPoint(params, lean, origin_x + center_x, origin_y + center_y,
+                    0.0f, &bottom, NULL) ||
+      !ProjectPoint(params, lean, origin_x + center_x, origin_y + center_y,
+                    height, &top, NULL))
+    return requested;
+  float dx = top.x - bottom.x;
+  float dy = top.y - bottom.y;
+  float projected_height = sqrtf(dx * dx + dy * dy);
+  if (params->render_scale == kSimBackgroundVoxelRenderScale_2x)
+    projected_height *= 0.5f;
+  return SimBackgroundVoxelLod_Resolve(
+      requested, kSimBackgroundVoxelLod_Adaptive,
+      projected_height);
+}
+
 static void DrawModel(
     SDL_Renderer *renderer, SimBackgroundGeometryBatch *batch,
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelPalette *palette,
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundModelLean *lean) {
-  SimBackgroundVoxelModel model;
-  SimBackgroundVoxelModel_BuildStyled(
-      object, (SimBackgroundVoxelDetail)params->detail,
-      (SimBackgroundVoxelStyle)params->style, &model);
-  if (!model.face_count || model.overflow) return;
-
   float origin_x = (float)params->town_screen_x0 - params->camera_x +
       object->cell_x * kSimBackgroundCellPixels;
   float origin_y = -(float)params->camera_y + ObjectOriginY(object);
@@ -371,10 +409,19 @@ static void DrawModel(
       kSimBackgroundCellPixels * 0.5f;
   float center_y = object->footprint_cells_d *
       kSimBackgroundCellPixels * 0.5f;
+  SimBackgroundVoxelDetail detail = EffectiveDetail(
+      object, params, lean, origin_x, origin_y, proportions,
+      center_x, center_y);
+  const SimBackgroundVoxelModel *model = SimBackgroundVoxelModelCache_Get(
+      object, detail, (SimBackgroundVoxelStyle)params->style,
+      g_renderer_state.cache_stamp);
+  if (!model || !model->face_count || model->overflow) return;
+  AppendGroundContact(renderer, batch, object, palette, params,
+                      origin_x, origin_y, proportions);
   ProjectedModelFace projected[kSimBackgroundVoxelModelMaxFaces];
   int projected_count = 0;
-  for (uint16_t face_index = 0; face_index < model.face_count; face_index++) {
-    const SimBackgroundVoxelModelFace *source = &model.faces[face_index];
+  for (uint16_t face_index = 0; face_index < model->face_count; face_index++) {
+    const SimBackgroundVoxelModelFace *source = &model->faces[face_index];
     ProjectedModelFace face = {
       .material = source->material,
     };
@@ -384,7 +431,7 @@ static void DrawModel(
     for (int point = 0; point < 4; point++)
       face.brightness[point] =
           SimBackgroundVoxelLighting_VertexBrightness(
-              source, &model, point, directional,
+              source, model, point, directional,
               (SimBackgroundVoxelShading)params->shading);
     float depth_sum = 0.0f;
     bool valid = true;
@@ -419,7 +466,9 @@ static void DrawModel(
     projected_count++;
   }
   for (int i = 0; i < projected_count; i++)
-    AppendProjectedFace(renderer, batch, &projected[i], palette);
+    AppendProjectedFace(
+        renderer, batch, &projected[i], palette,
+        (SimBackgroundVoxelShading)params->shading);
 }
 
 static void DrawModels(
@@ -445,6 +494,8 @@ static void DrawModels(
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
   batch->vertex_count = 0;
   batch->index_count = 0;
+  g_renderer_state.cache_stamp++;
+  if (!g_renderer_state.cache_stamp) g_renderer_state.cache_stamp = 1;
   for (uint16_t at = 0; at < scene->object_count; at++) {
     uint16_t index = order[at];
     const SimBackgroundVoxelObject *object = &scene->objects[index];
@@ -524,7 +575,10 @@ void SimBackgroundVoxelRenderer_Draw(
   SDL_RenderClear(renderer);
   SimBackgroundVoxelRenderParams scaled = *params;
   scaled.viewport = (SDL_Rect){0, 0, width, height};
-  scaled.render_scale = kSimBackgroundVoxelRenderScale_Native;
+  /* DrawModels does not recurse through this supersampling dispatch. Retain
+   * the scale mode so adaptive LOD can normalize the doubled viewport back
+   * to output pixels and choose the same mesh as Native/Pixel-clean. */
+  scaled.render_scale = kSimBackgroundVoxelRenderScale_2x;
   DrawModels(renderer, &scaled);
 
   SDL_SetRenderTarget(renderer, saved_target);
@@ -702,6 +756,8 @@ void SimBackgroundVoxelRenderer_Reset(void) {
   g_renderer_state.uploaded_serial = 0;
   g_renderer_state.allocation_failed = false;
   g_renderer_state.supersample_allocation_failed = false;
+  g_renderer_state.cache_stamp = 0;
+  SimBackgroundVoxelModelCache_Reset();
   g_renderer_state.batch.vertex_count = 0;
   g_renderer_state.batch.index_count = 0;
 }

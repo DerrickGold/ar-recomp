@@ -12,6 +12,12 @@ typedef enum SimBackgroundVoxelDetail {
   kSimBackgroundVoxelDetail_Count,
 } SimBackgroundVoxelDetail;
 
+typedef enum SimBackgroundVoxelLod {
+  kSimBackgroundVoxelLod_Fixed = 0,
+  kSimBackgroundVoxelLod_Adaptive,
+  kSimBackgroundVoxelLod_Count,
+} SimBackgroundVoxelLod;
+
 /* Independent presentation boundaries let players spend performance where it
  * is visible to them. These values are persisted by settings.ini; append new
  * modes instead of reordering existing ones. */
@@ -39,6 +45,7 @@ typedef enum SimBackgroundVoxelFacing {
 typedef enum SimBackgroundVoxelRenderScale {
   kSimBackgroundVoxelRenderScale_Native = 0,
   kSimBackgroundVoxelRenderScale_2x,
+  kSimBackgroundVoxelRenderScale_PixelClean,
   kSimBackgroundVoxelRenderScale_Count,
 } SimBackgroundVoxelRenderScale;
 

@@ -314,6 +314,43 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_sim_background_voxel_models
         COMMAND actraiser_sim_background_voxel_models_test)
 
+    add_executable(actraiser_sim_background_voxel_model_cache_test
+        tests/sim_background_voxel_model_cache_test.c
+        src/sim/sim_background_voxel_model_cache.c
+        src/sim/sim_background_voxel_models.c
+    )
+    target_include_directories(actraiser_sim_background_voxel_model_cache_test
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_sim_background_voxel_model_cache
+        COMMAND actraiser_sim_background_voxel_model_cache_test)
+
+    add_executable(actraiser_sim_background_voxel_lod_test
+        tests/sim_background_voxel_lod_test.c
+        src/sim/sim_background_voxel_lod.c
+    )
+    target_include_directories(actraiser_sim_background_voxel_lod_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+    )
+    add_test(NAME actraiser_sim_background_voxel_lod
+        COMMAND actraiser_sim_background_voxel_lod_test)
+
+    add_executable(actraiser_sim_background_voxel_palette_test
+        tests/sim_background_voxel_palette_test.c
+        src/sim/sim_background_voxel_palette.c
+    )
+    target_include_directories(actraiser_sim_background_voxel_palette_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_sim_background_voxel_palette
+        COMMAND actraiser_sim_background_voxel_palette_test)
+
     add_executable(actraiser_sim_background_voxel_lighting_test
         tests/sim_background_voxel_lighting_test.c
         src/sim/sim_background_voxel_lighting.c

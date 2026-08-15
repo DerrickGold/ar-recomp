@@ -19,6 +19,7 @@ static SimBackgroundVoxelModelFace VerticalFace(
     },
     .material = material,
     .brightness = 255,
+    .occlusion = {255, 255, 255, 255},
   };
 }
 

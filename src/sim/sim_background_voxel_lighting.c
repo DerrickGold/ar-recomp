@@ -20,11 +20,13 @@ static void MaterialResponse(SimBackgroundVoxelMaterial material,
       break;
     case kSimVoxelMaterial_Metal:
     case kSimVoxelMaterial_Blade:
+    case kSimVoxelMaterial_Gold:
       *ambient = 0.49f;
       *direct = 0.51f;
       break;
     case kSimVoxelMaterial_Dark:
     case kSimVoxelMaterial_Wood:
+    case kSimVoxelMaterial_Contact:
       *ambient = 0.69f;
       *direct = 0.31f;
       break;
@@ -125,6 +127,7 @@ uint8_t SimBackgroundVoxelLighting_VertexBrightness(
     /* Low horizontal ledges sit underneath other mass and receive less sky. */
     factor = 0.91f;
   }
+  factor *= face->occlusion[point] / 255.0f;
   float shaded = directional_brightness * factor;
   if (shaded < 0.0f) shaded = 0.0f;
   if (shaded > 255.0f) shaded = 255.0f;
