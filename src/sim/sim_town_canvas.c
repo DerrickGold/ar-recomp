@@ -15,6 +15,13 @@ enum {
   kBgPaletteBankCount = 8,
   kPaletteColorsPerBank = 16,
   kBgPaletteColorCount = kBgPaletteBankCount * kPaletteColorsPerBank,
+  /* Four little-endian 8x8 tilemap entries per 16x16 terrain metatile. */
+  kTerrainDefinitionsWram = 0x2100,
+  kTerrainDefinitionBytes = 8,
+  /* The definition's bit 9 is terrain traversal metadata. $03:9B5A clears it
+   * before the word becomes a live BG tilemap entry, so raw-source rendering
+   * must do the same or it samples character $200 too high. */
+  kTerrainDefinitionVisualMask = 0xFDFF,
   /* Tile priority changes painter order in the live PPU but not the opaque
    * town-space canvas; every other entry bit changes sampled pixels. */
   kTilemapVisualMask = 0xDFFF,
@@ -80,6 +87,34 @@ static uint16_t TilemapEntry(const uint8_t *tilemap, int tile_x, int tile_y) {
   return (uint16_t)(tilemap[word * 2] | (tilemap[word * 2 + 1] << 8));
 }
 
+static unsigned TilePixelIndex(const uint16_t *chars, uint16_t entry,
+                               int pixel_x, int pixel_y) {
+  const uint16_t *art = chars + (size_t)(entry & 0x3FF) * kTileWords;
+  bool flip_x = (entry & 0x4000) != 0, flip_y = (entry & 0x8000) != 0;
+  int source_x = flip_x ? 7 - pixel_x : pixel_x;
+  int source_y = flip_y ? 7 - pixel_y : pixel_y;
+  uint16_t low = art[source_y];
+  uint16_t high = art[source_y + 8];
+  int shift = 7 - source_x;
+  return ((low >> shift) & 1) |
+      (((low >> (shift + 8)) & 1) << 1) |
+      (((high >> shift) & 1) << 2) |
+      (((high >> (shift + 8)) & 1) << 3);
+}
+
+bool SimTownCanvas_SourcePixelOpaque(const uint8 *wram,
+                                     const uint16_t *vram,
+                                     int pixel_x, int pixel_y) {
+  if (!wram || !vram || pixel_x < 0 || pixel_y < 0 ||
+      pixel_x >= kSimTownCanvasPixels || pixel_y >= kSimTownCanvasPixels)
+    return false;
+  int tile_x = pixel_x >> 3, tile_y = pixel_y >> 3;
+  uint16_t entry = TilemapEntry(
+      wram + kSimTownTilemapWram, tile_x, tile_y);
+  return TilePixelIndex(vram + kBg1CharBaseWord, entry,
+                        pixel_x & 7, pixel_y & 7) != 0;
+}
+
 static void MarkDirtyTile(int tile_x, int tile_y) {
   int x0 = tile_x * 8, x1 = x0 + 8;
   if (g_canvas.dirty_x1[tile_y] <= g_canvas.dirty_x0[tile_y]) {
@@ -94,27 +129,47 @@ static void MarkDirtyTile(int tile_x, int tile_y) {
 static void RenderTile(int tile_x, int tile_y, uint16_t entry,
                        const uint16_t *chars, const uint32_t *palette,
                        uint32_t opaque_backdrop) {
-  const uint16_t *art = chars + (size_t)(entry & 0x3FF) * kTileWords;
   const uint32_t *bank =
       palette + ((entry >> 10) & 7) * kPaletteColorsPerBank;
-  bool flip_x = (entry & 0x4000) != 0, flip_y = (entry & 0x8000) != 0;
   for (int row = 0; row < 8; row++) {
-    int source_row = flip_y ? 7 - row : row;
-    uint16_t low = art[source_row];
-    uint16_t high = art[source_row + 8];
     uint32_t *out = g_canvas.pixels +
         (size_t)(tile_y * 8 + row) * kSimTownCanvasPixels + tile_x * 8;
     for (int column = 0; column < 8; column++) {
-      int shift = 7 - (flip_x ? 7 - column : column);
-      unsigned index =
-          ((low >> shift) & 1) | (((low >> (shift + 8)) & 1) << 1) |
-          (((high >> shift) & 1) << 2) | (((high >> (shift + 8)) & 1) << 3);
+      unsigned index = TilePixelIndex(chars, entry, column, row);
       /* Colour zero is transparent on hardware and the backdrop shows
        * through it; matching that keeps the canvas opaque everywhere so it
        * never punches a hole in the world map beneath. */
       out[column] = index ? bank[index] : opaque_backdrop;
     }
   }
+}
+
+bool SimTownCanvas_RenderTerrainMetatile(
+    const uint8 *wram, uint8_t metatile, uint32_t out_pixels[16 * 16]) {
+  if (!wram || !out_pixels || !g_canvas.have_source) return false;
+  uint32_t palette[kBgPaletteColorCount];
+  for (int i = 0; i < kBgPaletteColorCount; i++)
+    palette[i] = PaletteArgb(g_canvas.cgram[i], g_canvas.brightness);
+  uint32_t opaque_backdrop = g_canvas.backdrop | 0xFF000000u;
+  const uint8_t *definition = wram + kTerrainDefinitionsWram +
+      (size_t)metatile * kTerrainDefinitionBytes;
+  for (int quadrant = 0; quadrant < 4; quadrant++) {
+    uint16_t entry = (uint16_t)(definition[quadrant * 2] |
+        (definition[quadrant * 2 + 1] << 8));
+    entry &= kTerrainDefinitionVisualMask;
+    const uint32_t *bank = palette +
+        ((entry >> 10) & 7) * kPaletteColorsPerBank;
+    int x0 = (quadrant & 1) * 8;
+    int y0 = (quadrant >> 1) * 8;
+    for (int row = 0; row < 8; row++)
+      for (int column = 0; column < 8; column++) {
+        unsigned index = TilePixelIndex(
+            g_canvas.chars, entry, column, row);
+        out_pixels[(y0 + row) * 16 + x0 + column] =
+            index ? bank[index] : opaque_backdrop;
+      }
+  }
+  return true;
 }
 
 void SimTownCanvas_Render(uint8_t town, const uint8 *wram,

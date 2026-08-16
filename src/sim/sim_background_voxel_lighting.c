@@ -2,6 +2,8 @@
 
 #include <math.h>
 
+#include "sim_background_voxel_surface.h"
+
 static void MaterialResponse(SimBackgroundVoxelMaterial material,
                              float *ambient, float *direct) {
   *ambient = 0.63f;
@@ -71,32 +73,12 @@ uint8_t SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
     SimBackgroundVoxelShading shading,
     const SimBackgroundVoxelLightDirection *light) {
   if (!face || !light) return 0;
-  const SimBackgroundVoxelModelPoint *a = &face->points[0];
-  const SimBackgroundVoxelModelPoint *b = &face->points[1];
-  const SimBackgroundVoxelModelPoint *d = &face->points[3];
-  float ux = b->x - a->x, uy = b->y - a->y, uz = b->z - a->z;
-  float vx = d->x - a->x, vy = d->y - a->y, vz = d->z - a->z;
-  float nx = uy * vz - uz * vy;
-  float ny = uz * vx - ux * vz;
-  float nz = ux * vy - uy * vx;
-  float length = sqrtf(nx * nx + ny * ny + nz * nz);
-  if (length < 0.0001f) return face->brightness;
-  nx /= length;
-  ny /= length;
-  nz /= length;
-  /* AddBox authors side faces from the inside winding and top faces from the
-   * outside winding. Correct that convention before applying world light. */
-  if (fabsf(nz) < 0.5f) {
-    nx = -nx;
-    ny = -ny;
-    nz = -nz;
-  } else if (nz < 0.0f) {
-    nx = -nx;
-    ny = -ny;
-    nz = -nz;
-  }
+  SimBackgroundVoxelSurfaceNormal normal;
+  if (!SimBackgroundVoxelSurface_OutwardNormal(face, &normal))
+    return face->brightness;
 
-  float diffuse = nx * light->x + ny * light->y + nz * light->z;
+  float diffuse = normal.x * light->x + normal.y * light->y +
+      normal.z * light->z;
   if (diffuse < 0.0f) diffuse = 0.0f;
   if (diffuse > 1.0f) diffuse = 1.0f;
   float authored = 0.86f + 0.14f * face->brightness / 255.0f;

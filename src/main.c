@@ -27,6 +27,7 @@
 #include "crt_post.h"
 #include "settings.h"
 #include "settings_overlay.h"
+#include "sim/sim3d_depth_pass.h"
 #include "input_map.h"
 #include "dev/scene_inspector.h"
 #include "diorama/diorama.h"
@@ -94,10 +95,9 @@ enum {
  * g_ppu/g_settings state boundary D6 fences off. */
 SDL_Window *g_window;
 SDL_Renderer *g_renderer;
-/* M8: true once the "gpu" backend was successfully requested (AR_GPU_SHADERS=1)
- * AND created. Individual shader effects (present.c) must still check their
- * OWN AR_GPU_FX_* toggle on top of this — this only gates whether the
- * SDL_GPURenderState machinery is usable at all. */
+/* The SDL GPU renderer is the presentation backend. Individual optional
+ * shader effects still check their own AR_GPU_FX_* toggles; this flag reports
+ * that the mandatory GPU device and renderer were created successfully. */
 bool g_gpu_shaders_requested;
 bool g_gpu_shaders_active;
 SDL_Texture *g_texture;
@@ -987,9 +987,7 @@ static int AppBoot_CreateVideo(AppBoot *app) {
     fprintf(stderr, ")\n");
     if (driver && (SDL_strcmp(driver, "dummy") == 0 ||
                    SDL_strcmp(driver, "offscreen") == 0))
-      fprintf(stderr, "[video] WARNING: '%s' renders nowhere — the window will "
-                      "never appear. Set SDL_VIDEODRIVER to a real backend from "
-                      "the list above, or use an SDL build that has one.\n", driver);
+      Die("SIM3D requires a real GPU video driver; dummy/offscreen is unsupported");
 
     int scale = g_settings.window_scale ? g_settings.window_scale : 3;
     /* Window sized to the DISPLAY aspect: with the 4:3-corrected PAR the
@@ -1057,64 +1055,31 @@ static int AppBoot_CreateVideo(AppBoot *app) {
     );
     if (!g_window) Die("SDL_CreateWindow failed");
 
-    /* SDL3 renderer creation takes a driver NAME (NULL = first available
-     * accelerated backend) instead of an index + flag bitmask. Vsync is set
-     * separately, and the software backend is selected by name.
-     *
-     * M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish): the
-     * gpu_shaders_enabled setting (kSettingCat_Graphics, kApply_Restart —
-     * this backend choice is fixed for the process lifetime) requests the
-     * "gpu" backend instead, a prerequisite for SDL_CreateGPURenderState/
-     * SDL_SetGPURenderState (used by the diorama shader effects, each still
-     * independently toggleable in the same menu). Off by default: this
-     * swaps the render backend for the WHOLE app (HUD, flat mode,
-     * screenshots, settings overlay), not just diorama, so it needs to earn
-     * trust on its own before any shader effect is layered on top. Falls
-     * back to the normal auto-selected backend if "gpu" isn't available,
-     * rather than dying — this is opt-in polish, not a requirement to run
-     * at all. Settings_InitWithFile() has already run by this point, so
-     * g_settings reflects settings.ini/config.ini/the legacy AR_GPU_SHADERS
-     * env var per the usual priority chain.
-     *
-     * The "gpu" backend is requested WITH PROPERTIES, not by name alone,
-     * because SDL picks the underlying GPU backend (Vulkan / Metal / D3D12)
-     * partly from the shader formats the app declares it can supply. We ship
-     * SPIR-V and MSL (src/shaders/, see diorama.c) and deliberately do NOT
-     * claim DXIL, so SDL will choose Vulkan or Metal — backends this build
-     * can actually feed — instead of landing on D3D12 and leaving every
-     * effect silently disabled. Declaring nothing here, as this code did
-     * before, is exactly how the effects came to be macOS-only in practice. */
-    g_gpu_shaders_requested = g_settings.gpu_shaders_enabled;
-    if (app->headless_video) {
-      g_renderer = SDL_CreateRenderer(g_window, SDL_SOFTWARE_RENDERER);
-    } else if (g_gpu_shaders_requested) {
-      SDL_PropertiesID renderer_props = SDL_CreateProperties();
-      if (renderer_props) {
-        SDL_SetStringProperty(renderer_props,
-            SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER);
-        SDL_SetPointerProperty(renderer_props,
-            SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, g_window);
-        SDL_SetBooleanProperty(renderer_props,
-            SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
-        SDL_SetBooleanProperty(renderer_props,
-            SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
-        g_renderer = SDL_CreateRendererWithProperties(renderer_props);
-        SDL_DestroyProperties(renderer_props);
-      } else {
-        g_renderer = NULL;
-      }
-      if (g_renderer) {
-        g_gpu_shaders_active = true;
-      } else {
-        fprintf(stderr, "[gpu-shaders] \"gpu\" renderer unavailable (%s) — "
-                "falling back to the default backend, shaders disabled\n",
-                SDL_GetError());
-        g_renderer = SDL_CreateRenderer(g_window, NULL);
-      }
-    } else {
-      g_renderer = SDL_CreateRenderer(g_window, NULL);
+    /* SIM3D now relies on per-pixel depth testing, so SDL's cross-platform
+     * GPU renderer is a baseline requirement rather than an optional shader
+     * effects switch. Hidden capture windows use the same backend: a software
+     * renderer would produce screenshots from a different visibility model.
+     * SPIR-V feeds Vulkan and MSL feeds Metal; unsupported machines fail at
+     * launch instead of silently returning to painter sorting. */
+    g_gpu_shaders_requested = true;
+    g_settings.gpu_shaders_enabled = true;  /* legacy config/UI mirror */
+    SDL_PropertiesID renderer_props = SDL_CreateProperties();
+    if (renderer_props) {
+      SDL_SetStringProperty(renderer_props,
+          SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER);
+      SDL_SetPointerProperty(renderer_props,
+          SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, g_window);
+      SDL_SetBooleanProperty(renderer_props,
+          SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
+      SDL_SetBooleanProperty(renderer_props,
+          SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
+      g_renderer = SDL_CreateRendererWithProperties(renderer_props);
+      SDL_DestroyProperties(renderer_props);
     }
-    if (!g_renderer) Die("SDL_CreateRenderer failed");
+    if (!g_renderer) Die("SDL GPU renderer creation failed");
+    if (!Sim3DDepthPass_Require(g_renderer))
+      Die(Sim3DDepthPass_LastError());
+    g_gpu_shaders_active = true;
     /* Apply the selected refresh policy after renderer creation. Disabling
      * vsync stops SDL_RenderPresent from blocking until the next refresh; the
      * pacing path supplies the selected unlimited/limited cadence. */

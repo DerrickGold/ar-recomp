@@ -28,16 +28,17 @@ typedef void (*SimBackgroundVoxelDepthLayerCallback)(
     float minimum_depth, float maximum_depth,
     bool overhead_only);
 
-/* Render-thread half of sim_background_voxels. Texture ownership and geometry
- * live here so the general SIM compositor only chooses a painter-order seam. */
+/* Render-thread half of sim_background_voxels. Texture ownership, projected
+ * geometry and D32 visibility live here; the general SIM compositor owns only
+ * the ground base and intentionally promoted actor/selection overlays. */
 void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer);
 bool SimBackgroundVoxelRenderer_Ready(uint32_t serial);
 SDL_Texture *SimBackgroundVoxelRenderer_GroundTexture(uint32_t serial);
 void SimBackgroundVoxelRenderer_Draw(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params);
-/* Draws voxel and caller-owned billboard layers through the same far-to-near
- * slices. The callback runs after the voxel geometry in each slice; its final
- * overhead_only call is inside the same optional 2x target. */
+/* Draws the depth-tested background composite, then invokes the caller once
+ * for grounded actors and once for authored overhead actors. These callbacks
+ * are explicit priority bands, not a substitute for model depth testing. */
 void SimBackgroundVoxelRenderer_DrawInterleaved(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
     SimBackgroundVoxelDepthLayerCallback callback, void *userdata);

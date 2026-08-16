@@ -10,14 +10,15 @@ static float ClampFloat(float value, float minimum, float maximum) {
 
 void CameraOrbit_Adjust(CameraOrbit *orbit, float yaw_delta, float pitch_delta,
                         float baseline_yaw, float baseline_pitch,
-                        float minimum_tilt, float maximum_tilt) {
+                        float minimum_yaw, float maximum_yaw,
+                        float minimum_pitch, float maximum_pitch) {
   if (!orbit) return;
   orbit->yaw = ClampFloat(
-      baseline_yaw + orbit->yaw + yaw_delta, minimum_tilt, maximum_tilt) -
+      baseline_yaw + orbit->yaw + yaw_delta, minimum_yaw, maximum_yaw) -
       baseline_yaw;
   orbit->pitch = ClampFloat(
       baseline_pitch + orbit->pitch + pitch_delta,
-      minimum_tilt, maximum_tilt) - baseline_pitch;
+      minimum_pitch, maximum_pitch) - baseline_pitch;
 }
 
 bool CameraOrbit_Update(CameraOrbit *orbit, float elapsed_seconds,

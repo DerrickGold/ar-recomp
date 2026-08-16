@@ -5,6 +5,7 @@
 #include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
 #include "input_map.h"
 #include "atomic_replace.h"
+#include "sim/sim3d_camera_limits.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -868,10 +869,7 @@ static bool Sim3DPickerEaseAvailable(void) {
 }
 
 /* Graphics availability gate (kSettingCat_Graphics): the per-effect rows
- * only matter once the "gpu" renderer backend is actually running — gated
- * on the REAL runtime state (main.c's g_gpu_shaders_active), not just the
- * gpu_shaders_enabled setting, since backend creation can silently fall
- * back if the "gpu" driver isn't available on this machine (main.c). */
+ * only matter once the mandatory GPU renderer is running. */
 extern bool g_gpu_shaders_active;
 static bool GpuShadersActive(void) { return g_gpu_shaders_active; }
 static bool ActionEffectRendererAvailable(void) {
@@ -1332,14 +1330,17 @@ const SettingDesc g_setting_descs[] = {
    * sim3d defaults note above), so the shipped Dynamic view is the one that
    * was actually tuned rather than whatever Free Cam was last left at. */
   { "sim3d_dyncam_baseline_tilt_x_mrad", NULL, "Dynamic baseline pitch",
-    "Dynamic Cam's resting pitch in milliradians; the lean works around this.",
+    "Dynamic Cam's resting pitch in milliradians. The supported range runs "
+    "from the authored three-quarter view toward a low near-horizontal view.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
-    &g_settings.sim3d_dyncam_baseline_tilt_x_mrad, -575, -700, 700, 25, false,
+    &g_settings.sim3d_dyncam_baseline_tilt_x_mrad, -575,
+    kSim3DCameraPitchMinimumMrad, kSim3DCameraPitchMaximumMrad, 25, false,
     NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_dyncam_baseline_tilt_y_mrad", NULL, "Dynamic baseline yaw",
     "Dynamic Cam's resting yaw in milliradians; the lean works around this.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
-    &g_settings.sim3d_dyncam_baseline_tilt_y_mrad, 0, -700, 700, 20, false,
+    &g_settings.sim3d_dyncam_baseline_tilt_y_mrad, 0,
+    kSim3DCameraYawMinimumMrad, kSim3DCameraYawMaximumMrad, 20, false,
     NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_dyncam_baseline_distance_x100", NULL, "Dynamic baseline distance",
     "Dynamic Cam's resting camera distance (hundredths); 0 auto-fits.",
@@ -1379,12 +1380,17 @@ const SettingDesc g_setting_descs[] = {
   { "sim3d_tilt_y_mrad", "AR_SIM3D_YAW", "Camera yaw",
     "SIM free-camera yaw in milliradians; right-drag horizontally to adjust.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
-    &g_settings.sim3d_tilt_y_mrad, 0, -700, 700, 20, false, NULL, 0,
+    &g_settings.sim3d_tilt_y_mrad, 0,
+    kSim3DCameraYawMinimumMrad, kSim3DCameraYawMaximumMrad,
+    20, false, NULL, 0,
     Sim3DFreeCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_tilt_x_mrad", "AR_SIM3D_PITCH", "Camera pitch",
-    "SIM free-camera pitch in milliradians; right-drag vertically to adjust.",
+    "SIM free-camera pitch in milliradians; right-drag vertically between "
+    "the authored three-quarter view and a low near-horizontal view.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
-    &g_settings.sim3d_tilt_x_mrad, -575, -700, 700, 25, false, NULL, 0,
+    &g_settings.sim3d_tilt_x_mrad, -575,
+    kSim3DCameraPitchMinimumMrad, kSim3DCameraPitchMaximumMrad,
+    25, false, NULL, 0,
     Sim3DFreeCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_distance_x100", "AR_SIM3D_DISTANCE", "Camera distance",
     "SIM camera distance in hundredths; 0 auto-fits, and the mouse wheel zooms.",
@@ -1767,14 +1773,12 @@ const SettingDesc g_setting_descs[] = {
                "action-stage spell actors.",
                kSettingCat_Graphics, 1, false,
                ActionEffectRendererAvailable, NULL),
-  /* M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish). The
-   * backend switch needs a restart (SDL's renderer backend is fixed at
-   * SDL_CreateRenderer); the effect rows below apply live and are only
-   * offered once that backend is actually running (GpuShadersActive). */
+  /* Load/save compatibility for configurations that exposed the old optional
+   * backend switch. main.c now forces this value on because SIM3D depth is a
+   * baseline renderer capability; the effect rows remain independently live. */
   { "gpu_shaders_enabled", "AR_GPU_SHADERS", "GPU shader effects",
-    "Use SDL's GPU-accelerated renderer backend, required for the diorama "
-    "shader effects below. Falls back to the normal backend if unavailable "
-    "on this machine.",
+    "The GPU renderer is required. This retained setting only preserves "
+    "older configuration files; individual effects remain configurable.",
     kSettingType_Bool, kApply_Restart, kSettingCat_Graphics,
     &g_settings.gpu_shaders_enabled, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },

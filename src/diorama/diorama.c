@@ -519,6 +519,7 @@ void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
         (float)kPermilleScale;
     CameraOrbit_Adjust(&s_diorama_dynamic_orbit, d_yaw, d_pitch,
                        baseline_yaw, baseline_pitch,
+                       kDioramaTiltMin, kDioramaTiltMax,
                        kDioramaTiltMin, kDioramaTiltMax);
 
     if (d_zoom == 0.0f) return;

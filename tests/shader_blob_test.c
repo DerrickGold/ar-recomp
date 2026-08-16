@@ -40,6 +40,8 @@ typedef struct {
 #include "shaders/crt_frag.h"
 #include "shaders/dof_edge_frag.h"
 #include "shaders/rim_frag.h"
+#include "shaders/sim3d_depth_frag.h"
+#include "shaders/sim3d_depth_vert.h"
 
 static int s_failures;
 #define CHECK(expr) do { \
@@ -54,15 +56,30 @@ static int s_failures;
 static const struct {
   const char *name;
   GpuShaderBlobs blobs;
+  SDL_GPUShaderStage stage;
+  Uint32 samplers;
+  Uint32 uniforms;
 } kShaders[] = {
   { "blur",        { kBlurFragMSL, kBlurFragMSLSize,
-                     kBlurFragSPV, kBlurFragSPVSize } },
+                     kBlurFragSPV, kBlurFragSPVSize },
+                     SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
   { "crt",         { kCrtFragMSL, kCrtFragMSLSize,
-                     kCrtFragSPV, kCrtFragSPVSize } },
+                     kCrtFragSPV, kCrtFragSPVSize },
+                     SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
   { "dof_edge",    { kDofEdgeFragMSL, kDofEdgeFragMSLSize,
-                     kDofEdgeFragSPV, kDofEdgeFragSPVSize } },
+                     kDofEdgeFragSPV, kDofEdgeFragSPVSize },
+                     SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
   { "rim",         { kRimFragMSL, kRimFragMSLSize,
-                     kRimFragSPV, kRimFragSPVSize } },
+                     kRimFragSPV, kRimFragSPVSize },
+                     SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
+  { "sim3d_depth_fragment",
+                    { kSim3dDepthFragMSL, kSim3dDepthFragMSLSize,
+                      kSim3dDepthFragSPV, kSim3dDepthFragSPVSize },
+                      SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0 },
+  { "sim3d_depth_vertex",
+                    { kSim3dDepthVertMSL, kSim3dDepthVertMSLSize,
+                      kSim3dDepthVertSPV, kSim3dDepthVertSPVSize },
+                      SDL_GPU_SHADERSTAGE_VERTEX, 0, 0 },
 };
 static const int kShaderCount = (int)(sizeof(kShaders) / sizeof(kShaders[0]));
 
@@ -70,7 +87,9 @@ static const int kShaderCount = (int)(sizeof(kShaders) / sizeof(kShaders[0]));
  * parameter here only so the test can feed it a deliberately wrong name. */
 static SDL_GPUShader *CreateFrom(SDL_GPUDevice *device,
                                  const GpuShaderBlobs *blobs,
-                                 const char *entrypoint) {
+                                 const char *entrypoint,
+                                 SDL_GPUShaderStage stage,
+                                 Uint32 samplers, Uint32 uniforms) {
   const SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   SDL_GPUShaderCreateInfo info;
   SDL_zero(info);
@@ -86,9 +105,9 @@ static SDL_GPUShader *CreateFrom(SDL_GPUDevice *device,
     return NULL;
   }
   info.entrypoint = entrypoint;
-  info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-  info.num_samplers = 1;
-  info.num_uniform_buffers = 1;
+  info.stage = stage;
+  info.num_samplers = samplers;
+  info.num_uniform_buffers = uniforms;
   return SDL_CreateGPUShader(device, &info);
 }
 
@@ -121,7 +140,9 @@ int main(void) {
 
   /* 1. Every committed blob compiles on this backend. */
   for (int i = 0; i < kShaderCount; i++) {
-    SDL_GPUShader *shader = CreateFrom(device, &kShaders[i].blobs, good);
+    SDL_GPUShader *shader = CreateFrom(
+        device, &kShaders[i].blobs, good, kShaders[i].stage,
+        kShaders[i].samplers, kShaders[i].uniforms);
     CHECK(shader != NULL);
     if (!shader)
       fprintf(stderr, "  %s blob rejected: %s\n",
@@ -137,7 +158,9 @@ int main(void) {
   printf("shader_blob_test: negative case follows; one backend shader-compile "
          "error below is expected\n");
   fflush(stdout);
-  SDL_GPUShader *wrong = CreateFrom(device, &kShaders[0].blobs, bad);
+  SDL_GPUShader *wrong = CreateFrom(
+      device, &kShaders[0].blobs, bad, kShaders[0].stage,
+      kShaders[0].samplers, kShaders[0].uniforms);
   CHECK(wrong == NULL);
   if (wrong) {
     fprintf(stderr,

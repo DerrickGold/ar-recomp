@@ -644,7 +644,8 @@ SimObjectClassification Sim3D_ClassifyObject(
    * class-$09 record, so the composition remains the sole discriminator. */
   if (IsMapPlaneCursorComposition(composition)) {
     result.height_class = kSimHeightClass_MapPlane;
-    result.traits = kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow;
+    result.traits = kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow |
+        kSimObjectTrait_SelectionOverlay;
     return result;
   }
   /* The $0504 initializer creates world process-$000E town-creation bolts.

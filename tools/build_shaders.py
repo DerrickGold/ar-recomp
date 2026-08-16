@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile src/shaders/*.frag.glsl into committed C headers.
+"""Compile src/shaders/*.{vert,frag}.glsl into committed C headers.
 
 DEVELOPER TOOL ONLY. This never runs during a build — not the CMake developer
 build, and emphatically not `snesbuild build --hermetic`, whose entire premise
@@ -27,7 +27,6 @@ Binding convention (SDL_gpu.h, "Shader Resources") — the authored GLSL must
 match it or the shader will compile and then silently misbehave:
 
     fragment stage: set 2 = sampled textures, set 3 = uniform buffers
-    vertex interface: location 0 = COLOR0, location 1 = TEXCOORD0
 
 Usage:
     tools/build_shaders.py            # regenerate all shaders
@@ -86,9 +85,19 @@ def base_name(source_path):
     return source_path.name.split(".")[0]
 
 
-def c_identifier(base):
-    """rim -> RimFrag, dof_edge -> DofEdgeFrag."""
-    return "".join(part.capitalize() for part in re.split(r"[^0-9a-zA-Z]+", base) if part) + "Frag"
+def shader_stage(source_path):
+    """sim3d.vert.glsl -> vert."""
+    return source_path.name.split(".")[-2]
+
+
+def c_identifier(base, stage):
+    """rim/frag -> RimFrag, sim3d/vert -> Sim3dVert."""
+    stem = "".join(
+        part.capitalize()
+        for part in re.split(r"[^0-9a-zA-Z]+", base)
+        if part
+    )
+    return stem + stage.capitalize()
 
 
 def byte_array(data, indent="    "):
@@ -100,17 +109,18 @@ def byte_array(data, indent="    "):
 
 
 def compile_shader(source_path, temp_dir):
-    """Return (spirv_bytes, msl_text) for one .frag.glsl source."""
+    """Return (spirv_bytes, msl_text) for one shader source."""
+    stage = shader_stage(source_path)
     optimized_spv = temp_dir / (source_path.stem + ".opt.spv")
     readable_spv = temp_dir / (source_path.stem + ".spv")
 
     # Shipped SPIR-V is optimized: Vulkan consumes these bytes directly.
-    run(["glslc", "-fshader-stage=frag", "-O", str(source_path), "-o", str(optimized_spv)])
+    run(["glslc", f"-fshader-stage={stage}", "-O", str(source_path), "-o", str(optimized_spv)])
     # MSL is generated from UNoptimized SPIR-V purely so the emitted Metal
     # keeps the authored identifiers. Metal's own compiler optimizes the source
     # at load time, so this costs nothing at runtime and makes the generated
     # shader debuggable when something goes wrong on a real device.
-    run(["glslc", "-fshader-stage=frag", str(source_path), "-o", str(readable_spv)])
+    run(["glslc", f"-fshader-stage={stage}", str(source_path), "-o", str(readable_spv)])
 
     msl = run(["spirv-cross", "--msl", str(readable_spv)])
     verify_msl_bindings(source_path, msl)
@@ -127,7 +137,12 @@ def verify_msl_bindings(source_path, msl):
     that, the shader would still compile and then quietly sample nothing;
     fail loudly here instead.
     """
-    expected = ["[[texture(0)]]", "[[sampler(0)]]", "[[buffer(0)]]", "[[stage_in]]"]
+    source = source_path.read_text()
+    expected = ["[[stage_in]]"]
+    if "sampler" in source:
+        expected.extend(["[[texture(0)]]", "[[sampler(0)]]"])
+    if re.search(r"\buniform\s+(?!sampler)", source):
+        expected.append("[[buffer(0)]]")
     missing = [token for token in expected if token not in msl]
     if missing:
         die(
@@ -136,7 +151,9 @@ def verify_msl_bindings(source_path, msl):
             "the wrong slots. Inspect the output before shipping it."
             % (source_path.name, ", ".join(missing))
         )
-    if "fragment main0_out main0(" not in msl:
+    stage = shader_stage(source_path)
+    msl_stage = {"frag": "fragment", "vert": "vertex"}[stage]
+    if f"{msl_stage} main0_out main0(" not in msl:
         die(
             "%s: generated MSL entrypoint is not `main0`; SDL_GPUShaderCreateInfo"
             ".entrypoint would need updating to match." % source_path.name
@@ -145,8 +162,10 @@ def verify_msl_bindings(source_path, msl):
 
 def render_header(source_path, spirv, msl):
     base = base_name(source_path)
-    name = c_identifier(base)
-    guard = "AR_SHADER_%s_FRAG_H" % re.sub(r"[^0-9A-Z]", "_", base.upper())
+    stage = shader_stage(source_path)
+    name = c_identifier(base, stage)
+    guard = "AR_SHADER_%s_%s_H" % (
+        re.sub(r"[^0-9A-Z]", "_", base.upper()), stage.upper())
     msl_bytes = msl.encode("utf-8")
 
     return """/* GENERATED FILE — DO NOT EDIT.
@@ -206,7 +225,8 @@ def main():
 
     check_tools()
 
-    sources = sorted(SHADER_DIR.glob("*.frag.glsl"))
+    sources = sorted(SHADER_DIR.glob("*.frag.glsl")) + \
+        sorted(SHADER_DIR.glob("*.vert.glsl"))
     if args.shaders:
         wanted = set(args.shaders)
         sources = [s for s in sources if base_name(s) in wanted]
@@ -221,7 +241,8 @@ def main():
         temp_dir = pathlib.Path(temp)
         for source in sources:
             spirv, msl = compile_shader(source, temp_dir)
-            header_path = SHADER_DIR / (base_name(source) + "_frag.h")
+            header_path = SHADER_DIR / (
+                base_name(source) + "_" + shader_stage(source) + ".h")
             contents = render_header(source, spirv, msl)
 
             if args.check:

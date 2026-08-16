@@ -116,6 +116,7 @@ float SimBackgroundVoxelRegion_AuthoredHeight(
     case kSimBackgroundVoxel_Tree:
       return SimBackgroundVoxelRegion_TreeStyle(object->town) ==
           kSimBackgroundTreeStyle_SnowFir ? 16.0f : 15.0f;
+    case kSimBackgroundVoxel_Palm: return 15.5f;
   }
   return 16.0f;
 }

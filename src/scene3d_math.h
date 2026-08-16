@@ -63,6 +63,13 @@ float Scene3D_WrappedTextureOffset(uint64_t elapsed_ms,
  * this rather than assume every vertex is projectable. */
 float Scene3D_ClipDepth(const float matrix[16], float x, float y, float z);
 
+/* GPU depth for the same projection, normalized to SDL_GPU's portable [0, 1]
+ * NDC convention (zero near, one far). This retains the Z component that the
+ * legacy SDL_RenderGeometry projection discarded. */
+bool Scene3D_NormalizedDepth(const float matrix[16],
+                             float x, float y, float z,
+                             float *out_depth);
+
 /* World y at which clip depth equals `minimum_depth`, at world x/z. Clip
  * depth is affine in y on a constant-z plane, so this is solved, not searched.
  * `*increasing` reports whether depth grows with y — with the ground tilted

@@ -59,4 +59,21 @@ bool SimTownCanvas_TakeDirtyRect(int *x, int *y, int *width, int *height);
 /* Row-major ARGB8888, kSimTownCanvasPixels square, fully opaque. */
 const uint32_t *SimTownCanvas_Pixels(void);
 
+/* Reports whether the authentic BG1 source at a town-space pixel uses a
+ * non-zero palette index. The rendered canvas itself is intentionally opaque,
+ * so enhanced objects use this source alpha when they need the exact SNES
+ * silhouette rather than a colour-distance approximation. */
+bool SimTownCanvas_SourcePixelOpaque(const uint8 *wram,
+                                     const uint16_t *vram,
+                                     int pixel_x, int pixel_y);
+
+/* Renders one raw 16x16 SIM terrain metatile with the currently cached town
+ * character data and palette. This deliberately bypasses the already
+ * composed 32x32 cell map: enhanced terrain objects can therefore assemble a
+ * clean source stamp even when every visible instance of one metatile is
+ * fused with a neighbouring mountain. */
+bool SimTownCanvas_RenderTerrainMetatile(const uint8 *wram,
+                                         uint8_t metatile,
+                                         uint32_t out_pixels[16 * 16]);
+
 #endif  /* SIM_TOWN_CANVAS_H */

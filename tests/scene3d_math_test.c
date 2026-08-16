@@ -1,4 +1,5 @@
 #include "scene3d_math.h"
+#include "sim/sim3d_camera_limits.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -182,6 +183,10 @@ int main(void) {
   camera.distance = Scene3D_AutoFitDistance(camera.fov_y);
   Scene3D_BuildViewProjection(&camera, width, height, matrix);
   CHECK(Scene3D_ClipDepth(matrix, 0.0f, 0.0f, 0.0f) > 0.0f);
+  float normalized_depth = -1.0f;
+  CHECK(Scene3D_NormalizedDepth(
+      matrix, 0.0f, 0.0f, 0.0f, &normalized_depth));
+  CHECK(normalized_depth >= 0.0f && normalized_depth <= 1.0f);
   float boundary = 0.0f;
   bool increasing = false;
   CHECK(Scene3D_GroundDepthBoundaryY(matrix, 0.0f, 0.35f, &boundary,
@@ -243,7 +248,8 @@ int main(void) {
    * pitch range the vanishing line is outside a 224-row viewport, so there is
    * no horizon in frame to put a sky on. Asserted rather than commented, so
    * widening the range trips this and forces the backdrop to be revisited. */
-  for (int mrad = -700; mrad <= 700; mrad += 25) {
+  for (int mrad = kSim3DCameraPitchMinimumMrad;
+       mrad <= kSim3DCameraPitchMaximumMrad; mrad += 25) {
     camera.tilt_x = (float)mrad / 1000.0f;
     Scene3D_BuildViewProjection(&camera, width, height, matrix);
     float off = 0.0f;

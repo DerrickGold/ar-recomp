@@ -1039,10 +1039,12 @@ bundled runtime's widescreen/PPU interfaces:
 - Renderer-backed F2/`AR_SHOT_AT_GF` captures read the final composited output,
   so scaled-HUD regressions include the host overlay. Pure headless/oracle runs
   bind no overlay surfaces and preserve the historical internal framebuffer
-  and deterministic emulated state. Visual automation can opt into the real
-  compositor with `AR_HEADLESS_VIDEO=1` (normally paired with the SDL dummy
-  video driver); this creates a hidden software renderer without enabling
-  interactive input or frame pacing.
+  and deterministic emulated state. Visual automation opts into the real
+  compositor with `AR_HEADLESS_VIDEO=1`; it creates a hidden window backed by
+  the same mandatory GPU renderer and D32 pipeline as an interactive run,
+  without enabling input or frame pacing. Dummy/offscreen software video
+  drivers are intentionally rejected because they cannot exercise SIM3D's
+  visibility model.
 
 ### 13.1.1 Manifest-driven HD replacements (2026-07-15)
 
@@ -1897,11 +1899,14 @@ already passed over, and only as it looked at the time, so construction
 happening off-screen stayed invisible until the camera returned.
 
 **Draw order** is `atmospheric backdrop -> world underlay -> town canvas ->
-town ground quad -> shadows/objects/rim`. The renderer is painter-ordered with
-no depth buffer, so there is no z-fighting; the town's own opaque ground quad
-covers its visible window and the extension supplies everything beyond. The
-canvas is opaque throughout, so it never punches a hole in the underlay
-beneath it.
+town ground quad -> D32 background models -> authored actor/selection bands`.
+Mountains, buildings and trees share one transparent SDL_GPU color target and
+one `D32_FLOAT` depth attachment. Their visibility is therefore resolved per
+fragment from projected clip depth, independent of CPU submission order. The
+ground stays an earlier opaque base with no competing coplanar draw, while
+flying actors and interaction feedback remain explicit overlays by design. The
+canvas is opaque throughout, so it never punches a hole in the underlay beneath
+it.
 
 Sprites are extended separately and only horizontally — see
 `docs/SEAMS.md` "Sim-mode OAM emit margin" for why the vertical direction
@@ -2163,10 +2168,9 @@ and black lifted toward white is grey, so the sky rendered greyscale. Mixing
 toward an authored blue is well-defined for any backdrop, and a town that does
 choose a coloured one still tints the result rather than being overruled.
 
-**The ground-plane horizon is never on screen.** Across the whole settable
-pitch range (-700..700 mrad) the vanishing line lands 544 to 5619 destination
-pixels outside a 224-row viewport, and a pitch of exactly zero has no horizon
-at all. What reads as sky in frame is where the ground *data* runs out, not
+**The ground-plane horizon is never on screen.** Across the supported SIM
+pitch range (-1350..-575 mrad) the vanishing line remains outside a 224-row
+viewport. What reads as sky in frame is where the ground *data* runs out, not
 where the ground plane vanishes — in practice only the corners past the end of
 the extended map, and only when fully zoomed out.
 

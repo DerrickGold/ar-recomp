@@ -288,7 +288,8 @@ void SimBackgroundVoxelPalette_Build(
               Argb(0, 0, 0), Argb(74, 32, 90),
               Argb(115, 57, 148), Argb(115, 57, 148));
       break;
-    case kSimBackgroundVoxel_Tree: {
+    case kSimBackgroundVoxel_Tree:
+    case kSimBackgroundVoxel_Palm: {
       int seed = object->cell_x * 7 + object->cell_y * 5 + object->group;
       int variation = (seed % 3 - 1) * 3;
       static const SimBackgroundVoxelMaterial leaves[] = {
@@ -302,6 +303,7 @@ void SimBackgroundVoxelPalette_Build(
     }
   }
   if (object->kind != kSimBackgroundVoxel_Tree &&
+      object->kind != kSimBackgroundVoxel_Palm &&
       object->record_slot != 0xFF) {
     int variation = ((int)object->record_slot % 3 - 1) * 2;
     static const SimBackgroundVoxelMaterial varied[] = {
