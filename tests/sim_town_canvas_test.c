@@ -219,6 +219,26 @@ static void TestBrightnessAndTownChange(void) {
   CHECK(CanvasAt(0, 0) == kBackdrop);
 }
 
+static void TestRawTerrainMetatile(void) {
+  SimTownCanvas_Reset();
+  SetupSources();
+  Render(3);  /* Publish the current town's characters, palette and fade. */
+  const int definition = 0x2100 + 0x8B * 8;
+  for (int quadrant = 0; quadrant < 4; quadrant++) {
+    /* Bit 9 is terrain traversal metadata, not character-index bit 9. */
+    uint16_t entry = (uint16_t)(1 | (1 << 10) | 0x0200);
+    g_wram[definition + quadrant * 2] = (uint8_t)entry;
+    g_wram[definition + quadrant * 2 + 1] = (uint8_t)(entry >> 8);
+  }
+  uint32_t pixels[16 * 16];
+  CHECK(SimTownCanvas_RenderTerrainMetatile(g_wram, 0x8B, pixels));
+  CHECK(pixels[0] == 0xFFFF0000);
+  CHECK(pixels[7] == kBackdrop);
+  CHECK(pixels[8] == 0xFFFF0000);
+  CHECK(pixels[8 * 16] == 0xFFFF0000);
+  CHECK(pixels[8 * 16 + 8] == 0xFFFF0000);
+}
+
 static void TestRejectsMissingSources(void) {
   SimTownCanvas_Reset();
   SetupSources();
@@ -237,6 +257,7 @@ int main(void) {
   TestFlips();
   TestChangeDetection();
   TestBrightnessAndTownChange();
+  TestRawTerrainMetatile();
   TestRejectsMissingSources();
   SimTownCanvas_Reset();
   free(g_wram);

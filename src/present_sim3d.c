@@ -31,11 +31,11 @@
 #include "render_capabilities.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim_background_voxel_renderer.h"
-#include "sim/sim_background_voxel_depth.h"
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim_world_navigation_capture.h"
 #include "sim/sim3d.h"
+#include "sim/sim3d_camera_limits.h"
 
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
@@ -1158,6 +1158,11 @@ typedef enum SimObjectOverheadFilter {
   kSimObjectOverhead_Only,
 } SimObjectOverheadFilter;
 
+typedef enum SimObjectSelectionFilter {
+  kSimObjectSelection_Exclude,
+  kSimObjectSelection_Only,
+} SimObjectSelectionFilter;
+
 static float SimObjectGroundDepth(
     const FrameSlot *slot, const SimRenderObject *object,
     SDL_Rect source, SDL_Rect viewport, const float matrix[16]) {
@@ -1183,6 +1188,7 @@ static void DrawSimObjectPriorityFiltered(
     const Scene3DCamera *camera, const float matrix[16],
     const SimBillboardPass *pass,
     SimObjectOverheadFilter overhead_filter,
+    SimObjectSelectionFilter selection_filter,
     bool depth_filter, float minimum_depth, float maximum_depth) {
   if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
   /* W4-2: a rejected blend mode means this pass cannot draw correctly, so bail
@@ -1218,12 +1224,17 @@ static void DrawSimObjectPriorityFiltered(
       continue;
     if (overhead_filter == kSimObjectOverhead_Only && !overhead)
       continue;
+    bool selection =
+        (object->traits & kSimObjectTrait_SelectionOverlay) != 0;
+    if (selection_filter == kSimObjectSelection_Exclude && selection)
+      continue;
+    if (selection_filter == kSimObjectSelection_Only && !selection)
+      continue;
     depth[i] = project_world
         ? SimObjectGroundDepth(slot, object, source, viewport, matrix)
         : 0.0f;
     if (depth_filter &&
-        !SimBackgroundVoxelDepth_Contains(
-            depth[i], minimum_depth, maximum_depth))
+        (depth[i] < minimum_depth || depth[i] >= maximum_depth))
       continue;
     order[order_count++] = i;
   }
@@ -1340,7 +1351,8 @@ static void DrawSimObjectPriority(
   DrawSimObjectPriorityFiltered(
       slot, priority, tier_filter, project_world, virtual_height,
       source, viewport, camera, matrix, pass,
-      kSimObjectOverhead_All, false, 0.0f, 0.0f);
+      kSimObjectOverhead_All, kSimObjectSelection_Exclude,
+      false, 0.0f, 0.0f);
 }
 
 typedef struct SimVoxelBillboardLayerContext {
@@ -1363,7 +1375,42 @@ static void DrawSimVoxelBillboardLayer(
       NULL,
       overhead_only ? kSimObjectOverhead_Only
                     : kSimObjectOverhead_GroundOnly,
+      kSimObjectSelection_Exclude,
       !overhead_only, minimum_depth, maximum_depth);
+}
+
+/* Selection art is projected onto the map like any other MapPlane object, but
+ * it is interaction feedback rather than world scenery. Draw it after every
+ * world layer (and atmospheric cover) while retaining authentic priority and
+ * reverse-OAM order among selectors themselves. Fixed menu planes remain last
+ * and can still cover a selector with an actual UI panel. */
+static void DrawSimSelectionOverlays(
+    const FrameSlot *slot, bool virtual_height,
+    SDL_Rect source, SDL_Rect viewport,
+    const Scene3DCamera *camera, const float matrix[16]) {
+  static const SimObjectTierFilter tiers[] = {
+    kSimTierFilter_World,
+    kSimTierFilter_Fixed,
+  };
+  uint8_t priority_masks[2] = {0};
+  for (size_t at = 0; at < slot->sim.object_count; at++) {
+    const SimRenderObject *object = &slot->sim.objects[at];
+    if (!object->atlas_valid || object->priority >= 4 ||
+        !(object->traits & kSimObjectTrait_SelectionOverlay) ||
+        SimObjectIsPromotedHud(slot, object))
+      continue;
+    int tier = object->tier == kSimRecordTier_World ? 0 : 1;
+    priority_masks[tier] |= (uint8_t)(1u << object->priority);
+  }
+  for (int priority = 0; priority < 4; priority++)
+    for (size_t tier = 0; tier < sizeof(tiers) / sizeof(tiers[0]); tier++) {
+      if (!(priority_masks[tier] & (1u << priority))) continue;
+      DrawSimObjectPriorityFiltered(
+          slot, priority, tiers[tier],
+          true, virtual_height, source, viewport, camera, matrix, NULL,
+          kSimObjectOverhead_All, kSimObjectSelection_Only,
+          false, 0.0f, 0.0f);
+    }
 }
 
 /* D4c rim light. Sprites have no normals, so the only physically meaningful
@@ -2271,6 +2318,13 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
   if (camera->distance < 2.0f) camera->distance = 2.0f;
 }
 
+static void ClampSimCameraPitch(Scene3DCamera *camera) {
+  float minimum = (float)kSim3DCameraPitchMinimumMrad / kPermilleScale;
+  float maximum = (float)kSim3DCameraPitchMaximumMrad / kPermilleScale;
+  if (camera->tilt_x < minimum) camera->tilt_x = minimum;
+  if (camera->tilt_x > maximum) camera->tilt_x = maximum;
+}
+
 /* Atmospheric backdrop.
  *
  * Replaces the flat clear behind the finite ground with a vertical gradient.
@@ -2279,9 +2333,8 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
  * are the ones nothing else covered.
  *
  * **The ground-plane horizon is never on screen.** Measured across the whole
- * settable pitch range (-700..700 mrad): the vanishing line lands between 544
- * and 5619 destination pixels outside a 224-row viewport, closest at -700, and
- * a pitch of exactly zero has no horizon at all. The plan's D5a-2 wording
+ * supported pitch range (-1350..-575 mrad): the vanishing line remains outside
+ * a 224-row viewport. The plan's D5a-2 wording
  * ("at the tilted map horizon") describes something this camera cannot show.
  * What actually reads as sky in frame is where the ground *data* runs out --
  * past the world map extent or the near-clip bound -- which is a different
@@ -2701,6 +2754,7 @@ static void RenderSimProfile(const FrameSlot *slot,
    * shadows, the cull boundary, the shroud -- sees one camera. Adjusting the
    * matrix afterwards would leave the object anchors on the old one. */
   ApplySimDynamicCamera(slot, &camera);
+  ClampSimCameraPitch(&camera);
 
   /* Object anchors must use the exact same view/projection transform as the
    * ground mesh. Keeping the matrix at profile scope also prevents camera
@@ -2850,6 +2904,10 @@ static void RenderSimProfile(const FrameSlot *slot,
    * including a sprite that strays under its edge. */
   if (clouds)
     DrawSimCloudShroud(slot, source, viewport, matrix);
+
+  if (billboards)
+    DrawSimSelectionOverlays(
+        slot, virtual_height, source, viewport, &camera, matrix);
 
   /* The menu planes last of all, held back from the painter-order loop above.
    * They are the only thing in the profile that is not part of the world:

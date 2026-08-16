@@ -5,23 +5,22 @@
 
 #include "sim_background_voxel_quality.h"
 
-enum { kSimBackgroundMountainReliefMaxSideBands = 4 };
+enum { kSimBackgroundMountainReliefMaxStackLayers = 5 };
 
 typedef struct SimBackgroundMountainRelief {
-  uint8_t side_band_count;
-  uint8_t side_alpha;
-  float depth_pixels;
+  uint8_t stack_layer_count;
+  float stack_depth_pixels;
   float face_height_scale;
   float face_depth_scale;
-  uint8_t side_brightness[kSimBackgroundMountainReliefMaxSideBands];
 } SimBackgroundMountainRelief;
 
-/* The authentic mountain art remains the single visible front surface.
- * Quality controls only the number of shaded bands on exposed range sides,
- * so LOD changes can never replace or reclassify a peak. */
+/* Quality controls a bounded set of complete authentic-art copies. They move
+ * in fixed map space and taper to a shared ridge; no camera-relative or
+ * texture-stretched connector geometry is generated. */
 void SimBackgroundMountainRelief_Resolve(
-    SimBackgroundVoxelDetail detail,
-    SimBackgroundVoxelShading shading,
-    SimBackgroundMountainRelief *out);
+    SimBackgroundVoxelDetail detail, SimBackgroundMountainRelief *out);
+float SimBackgroundMountainRelief_StackOffsetY(
+    const SimBackgroundMountainRelief *relief, uint8_t layer,
+    float rise, float maximum_rise);
 
 #endif  /* SIM_BACKGROUND_MOUNTAIN_RELIEF_H */

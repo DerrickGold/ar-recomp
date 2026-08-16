@@ -629,7 +629,7 @@ labels it gameplay-affecting.
 | Atmospheric backdrop | `AR_SIM3D_BACKDROP` | bool | on | shared graded sky behind finite town or world-navigation ground; does not require the town master when navigation is enabled |
 | Ease picker exit | `AR_SIM3D_PICKER_EASE` | bool | off | Phase 5; greyed out until implemented |
 | SIM diagnostic layers | `AR_SIM3D_DIAGNOSTIC_LAYERS` | mask | `0` | developer-only per-plane visibility; deliberately produces incomplete images |
-| Camera pitch / yaw / distance | `AR_SIM3D_PITCH` / `_YAW` / `_DISTANCE` | int | −575 / 0 / 300 | milliradians, milliradians, hundredths; right-drag orbits and the wheel zooms |
+| Camera pitch / yaw / distance | `AR_SIM3D_PITCH` / `_YAW` / `_DISTANCE` | int | −575 / 0 / 300 | pitch −1350..−575 mrad (low near-horizontal through the authored three-quarter overhead limit), yaw milliradians, distance hundredths; right-drag orbits and the wheel zooms |
 | Object height scale | `AR_SIM3D_HEIGHT_SCALE` | int | 100 | percent of each classified flight plane. `0` grounds every billboard **without** disabling the height stage, so it is a real value and never doubles as "unset" — the frame capture defaults the field to 100 |
 | Flying sprite pop | `AR_SIM3D_HEIGHT_POP` | int | 5 | extra size for a flying sprite at its catalogue height, percent, normalized against that plane so the number means what it says. `0` leaves only the ~1% the lift genuinely produces. Scales lifted objects only, which is what makes it independent of camera distance |
 | Light direction | `AR_SIM3D_LIGHT_AZIMUTH` | int | 90 | compass direction the shadow is thrown, degrees: 0 right, 90 away from camera, 180 left, 270 toward camera. Also controls navigation cloud-shadow displacement. Inert at elevation 90 |

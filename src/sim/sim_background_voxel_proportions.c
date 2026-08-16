@@ -25,6 +25,11 @@ static const SimBackgroundVoxelProportions kTree = {
   .height_scale = 0.88f,
 };
 
+static const SimBackgroundVoxelProportions kPalm = {
+  .footprint_scale = 0.92f,
+  .height_scale = 0.92f,
+};
+
 const SimBackgroundVoxelProportions *SimBackgroundVoxelProportions_Get(
     SimBackgroundVoxelKind kind) {
   switch (kind) {
@@ -33,6 +38,7 @@ const SimBackgroundVoxelProportions *SimBackgroundVoxelProportions_Get(
     case kSimBackgroundVoxel_Windmill: return &kWindmill;
     case kSimBackgroundVoxel_Factory: return &kFactory;
     case kSimBackgroundVoxel_Tree: return &kTree;
+    case kSimBackgroundVoxel_Palm: return &kPalm;
   }
   return &kHouse;
 }

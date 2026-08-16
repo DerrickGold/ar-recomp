@@ -34,11 +34,14 @@ typedef struct SimBackgroundMountainField {
 
 typedef enum SimBackgroundMountainCapTileFlags {
   kSimBackgroundMountainCapTile_MirrorX = 1u << 0,
-  kSimBackgroundMountainCapTile_TriangleLowerRight = 1u << 1,
 } SimBackgroundMountainCapTileFlags;
 
 typedef struct SimBackgroundMountainCapTile {
   int8_t cell_x, cell_y;
+  /* Negative values request the legacy tile-id lookup. Stamp-generated caps
+   * retain their exact intact source cell so the source composition itself is
+   * the rendering oracle. */
+  int8_t source_cell_x, source_cell_y;
   uint8_t source_tile;
   uint8_t flags;
   uint16_t component;

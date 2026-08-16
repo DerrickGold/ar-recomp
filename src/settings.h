@@ -527,13 +527,9 @@ typedef struct Settings {
   bool diorama_shoebox;
 
   /* Graphics (kSettingCat_Graphics, M8/M7 GPU shader + interpolation work).
-   * gpu_shaders_enabled picks SDL's "gpu" renderer backend at boot — fixed
-   * for the process lifetime (kApply_Restart). The per-effect toggles below
-   * apply live (diorama.c rereads g_settings every frame, same pattern as
-   * the diorama_layer_* toggles above) and are only meaningful/available
-   * once gpu_shaders_enabled actually took effect (Settings_IsAvailable
-   * gates on the real runtime g_gpu_shaders_active, not just this flag, in
-   * case backend creation silently fell back). gpu_fx_shadow defaults OFF:
+   * gpu_shaders_enabled is retained as a config migration mirror; main.c
+   * requires SDL's GPU renderer and forces it true. The per-effect toggles
+   * below remain live and independent. gpu_fx_shadow defaults OFF:
    * a known visual bug (shadow blur can bleed onto transparent gaps in a
    * receiving layer) keeps it opt-in until fixed — see diorama.c.
    * gpu_interp_enabled also defaults OFF. It owns the delayed camera pair and

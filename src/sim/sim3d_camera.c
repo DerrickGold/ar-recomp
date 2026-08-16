@@ -10,11 +10,10 @@
 #include "constants.h"
 #include "scene3d_math.h"
 #include "settings.h"
+#include "sim3d_camera_limits.h"
 #include "user_data_dir.h"
 
 enum {
-  kSim3DCameraTiltMinimumMrad = -700,
-  kSim3DCameraTiltMaximumMrad = 700,
   kMilliradiansPerRadian = kPermilleScale,
   kSim3DCameraDistanceScale = kPercentScale,
   kSim3DCameraSettingsSaveDelayMs = 500,
@@ -76,8 +75,10 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
     CameraOrbit_Adjust(
         &s_dynamic_orbit, yaw_delta, pitch_delta,
         baseline_yaw, baseline_pitch,
-        (float)kSim3DCameraTiltMinimumMrad / kMilliradiansPerRadian,
-        (float)kSim3DCameraTiltMaximumMrad / kMilliradiansPerRadian);
+        (float)kSim3DCameraYawMinimumMrad / kMilliradiansPerRadian,
+        (float)kSim3DCameraYawMaximumMrad / kMilliradiansPerRadian,
+        (float)kSim3DCameraPitchMinimumMrad / kMilliradiansPerRadian,
+        (float)kSim3DCameraPitchMaximumMrad / kMilliradiansPerRadian);
 
     if (zoom_delta == 0.0f) return;
     float distance = g_settings.sim3d_dyncam_baseline_distance_x100 > 0
@@ -99,9 +100,10 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
   const int pitch_mrad = g_settings.sim3d_tilt_x_mrad +
       (int)(pitch_delta * (float)kMilliradiansPerRadian);
   g_settings.sim3d_tilt_y_mrad = ClampInt(
-      yaw_mrad, kSim3DCameraTiltMinimumMrad, kSim3DCameraTiltMaximumMrad);
+      yaw_mrad, kSim3DCameraYawMinimumMrad, kSim3DCameraYawMaximumMrad);
   g_settings.sim3d_tilt_x_mrad = ClampInt(
-      pitch_mrad, kSim3DCameraTiltMinimumMrad, kSim3DCameraTiltMaximumMrad);
+      pitch_mrad, kSim3DCameraPitchMinimumMrad,
+      kSim3DCameraPitchMaximumMrad);
 
   if (zoom_delta != 0.0f) {
     float distance = g_settings.sim3d_distance_x100 > 0

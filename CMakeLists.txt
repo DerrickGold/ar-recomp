@@ -303,6 +303,8 @@ if(BUILD_TESTING)
         tests/sim_background_voxels_test.c
         src/sim/sim_background_voxels.c
         src/sim/sim_background_mountains.c
+        src/sim/sim_background_mountain_silhouette.c
+        src/sim/sim_town_canvas.c
     )
     target_include_directories(actraiser_sim_background_voxels_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -315,6 +317,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_background_mountains_test
         tests/sim_background_mountains_test.c
         src/sim/sim_background_mountains.c
+        src/sim/sim_background_mountain_objects.c
     )
     target_include_directories(actraiser_sim_background_mountains_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -361,19 +364,6 @@ if(BUILD_TESTING)
         actraiser_math)
     add_test(NAME actraiser_sim_background_voxel_biome
         COMMAND actraiser_sim_background_voxel_biome_test)
-
-    add_executable(actraiser_sim_background_voxel_depth_test
-        tests/sim_background_voxel_depth_test.c
-        src/sim/sim_background_voxel_depth.c
-        ${TEST_RUNNER_SOURCE})
-    target_include_directories(actraiser_sim_background_voxel_depth_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/include)
-    target_link_libraries(actraiser_sim_background_voxel_depth_test PRIVATE
-        actraiser_math)
-    add_test(NAME actraiser_sim_background_voxel_depth
-        COMMAND actraiser_sim_background_voxel_depth_test)
 
     add_executable(actraiser_sim_background_voxel_model_cache_test
         tests/sim_background_voxel_model_cache_test.c
@@ -428,6 +418,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_background_voxel_lighting_test
         tests/sim_background_voxel_lighting_test.c
         src/sim/sim_background_voxel_lighting.c
+        src/sim/sim_background_voxel_surface.c
     )
     target_include_directories(actraiser_sim_background_voxel_lighting_test
         PRIVATE
@@ -837,6 +828,7 @@ if(BUILD_TESTING)
         src/sim/sim_town_canvas.c
         src/sim/sim_background_voxels.c
         src/sim/sim_background_mountains.c
+        src/sim/sim_background_mountain_silhouette.c
         src/sim/sim_render_atlas.c
         src/action/action_obj_interpolation.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c

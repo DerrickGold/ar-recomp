@@ -107,6 +107,20 @@ float Scene3D_ClipDepth(const float matrix[16], float x, float y, float z) {
   return matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
 }
 
+bool Scene3D_NormalizedDepth(const float matrix[16],
+                             float x, float y, float z,
+                             float *out_depth) {
+  if (!out_depth) return false;
+  float clip_w = Scene3D_ClipDepth(matrix, x, y, z);
+  if (clip_w <= kMinimumProjectionDepth) return false;
+  float clip_z = matrix[2] * x + matrix[6] * y +
+      matrix[10] * z + matrix[14];
+  float depth = clip_z / clip_w * 0.5f + 0.5f;
+  if (!isfinite(depth)) return false;
+  *out_depth = depth;
+  return true;
+}
+
 bool Scene3D_DepthBoundaryY(const float matrix[16], float x, float z,
                             float minimum_depth, float *boundary_y,
                             bool *increasing) {

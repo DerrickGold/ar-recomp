@@ -1571,11 +1571,12 @@ def main() -> int:
         state_env["AR_SIM3D_D1_TRACE"] = str(d1_trace.resolve())
     if checkpoint.get("d2_flat") or d3_visual or \
             checkpoint.get("headless_video"):
-        state_env.update({
-            "AR_HEADLESS_VIDEO": "1",
-            "SDL_VIDEODRIVER": "dummy",
-            "SDL_RENDER_DRIVER": "software",
-        })
+        # Visual checkpoints exercise the same mandatory GPU/D32 path as a
+        # normal run. Do not substitute SDL's dummy/software renderer: that
+        # would validate a visibility model the game can no longer use.
+        state_env["AR_HEADLESS_VIDEO"] = "1"
+        state_env.pop("SDL_VIDEODRIVER", None)
+        state_env.pop("SDL_RENDER_DRIVER", None)
     if checkpoint.get("d2_flat"):
         state_env.update({
             "AR_SIM3D_D2_DUMP_PREFIX": str(d2_artifact_prefix),

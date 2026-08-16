@@ -134,6 +134,13 @@ typedef enum SimRenderObjectTrait {
    * separate policies, and the cloud family must keep its record-origin ground
    * anchor (see D3c). */
   kSimObjectTrait_Overhead = 1u << 4,
+  /* Map selectors are interaction feedback, not terrain. Their authentic OBJ
+   * priority is retained inside this class, but projected presentation defers
+   * the complete class until the world is finished so raised models can never
+   * hide the yellow selection outline. This is deliberately separate from
+   * Overhead: a cursor has no physical height and remains projected flat onto
+   * its selected cells. */
+  kSimObjectTrait_SelectionOverlay = 1u << 5,
 } SimRenderObjectTrait;
 
 /* D3c presentation planes.  These are art/presentation classes derived from

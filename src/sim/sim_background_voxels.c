@@ -1,5 +1,7 @@
 #include "sim_background_voxels.h"
 
+#include "sim_background_mountain_silhouette.h"
+
 #include <stddef.h>
 #include <string.h>
 
@@ -32,15 +34,13 @@ static struct {
   SimBackgroundVoxelScene scene;
   uint32_t atlas[kCanvasPixelCount];
   uint32_t ground[kCanvasPixelCount];
+  /* One-based atlas cells for clean raw terrain-metatile sources. */
+  uint16_t mountain_source_cell[256];
 } g_background;
 /* Scene rebuild scratch. Every classified source rectangle, including static
  * terrain, is marked before a replacement tile is selected, so authentic art
  * is never considered as the town's general ground. */
 static uint8_t g_object_mask[kCanvasPixelCount];
-/* Mountain source cells can contain ordinary biome pixels between peaks. The
- * complete cells are still excluded from eraser selection, but only pixels
- * sufficiently different from the selected biome tile are lifted. */
-static uint8_t g_mountain_mask[kCanvasPixelCount];
 /* Reset clears publish state when leaving a town, but a later town must never
  * reuse a serial whose GPU texture may still exist. */
 static uint32_t g_next_serial;
@@ -301,7 +301,11 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
         if (!AppendObject(out, (SimBackgroundVoxelObject){
               .group = group,
               .town = town,
-              .kind = kSimBackgroundVoxel_Tree,
+              /* Marahna's permanent forest art is a broad tropical palm
+               * family. It shares extraction/adjacency with other trees but
+               * must not inherit the pointed evergreen model. */
+              .kind = town == 5 ? kSimBackgroundVoxel_Palm
+                                : kSimBackgroundVoxel_Tree,
               .flags = write == 1 ? kSimBackgroundVoxel_IsolatedTree : 0,
               .cell_x = (uint8_t)x,
               .cell_y = (uint8_t)y,
@@ -456,51 +460,95 @@ static bool FindGeneralGroundCell(const uint32_t *pixels, uint8_t town,
   return true;
 }
 
-static bool ColoursNear(uint32_t left, uint32_t right) {
-  int dr = (int)((left >> 16) & 0xFF) - (int)((right >> 16) & 0xFF);
-  int dg = (int)((left >> 8) & 0xFF) - (int)((right >> 8) & 0xFF);
-  int db = (int)(left & 0xFF) - (int)(right & 0xFF);
-  /* A 48-level RGB radius removes palette-adjacent grass/snow variations but
-   * leaves the measured rock ramps distinct in every town palette. */
-  return dr * dr + dg * dg + db * db <= 48 * 48;
+static bool FindMountainScratchCell(
+    const bool used[kCellCount], int *cell_x, int *cell_y) {
+  for (int y = kSimBackgroundTownCells - 1; y >= 0; y--)
+    for (int x = kSimBackgroundTownCells - 1; x >= 0; x--) {
+      size_t cell = CellIndex(x, y);
+      if (used[cell] || CellIsMasked(x, y)) continue;
+      *cell_x = x;
+      *cell_y = y;
+      return true;
+    }
+  return false;
 }
 
-static bool TerrainLike(uint32_t colour, uint32_t replacement) {
-  if (ColoursNear(colour, replacement)) return true;
-  unsigned red = (colour >> 16) & 0xFF;
-  unsigned green = (colour >> 8) & 0xFF;
-  unsigned blue = colour & 0xFF;
-  unsigned ground_red = (replacement >> 16) & 0xFF;
-  unsigned ground_green = (replacement >> 8) & 0xFF;
-  unsigned ground_blue = replacement & 0xFF;
-  bool green_ground = ground_green * 10 > ground_red * 11 &&
-      ground_green * 10 > ground_blue * 12;
-  bool green_pixel = green * 10 > red * 11 &&
-      green * 10 > blue * 12;
-  return green_ground && green_pixel;
+static void BuildCleanMountainSources(const uint8_t *wram) {
+  /* These are the clean semantic parts used by every complete mountain stamp.
+   * Rendering them from the town's raw metatile definitions preserves native
+   * region palettes (including Northwall snow) without sampling fused range
+   * cells such as Kasandora's $7D overlap. */
+  static const uint8_t kSourceTiles[] = {
+    0x70, 0x71, 0x81, 0x82, 0x88, 0x89, 0x8A, 0x8B,
+    0x8C, 0x8F, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95,
+    0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D,
+    0x9E, 0x9F,
+  };
+  bool used[kCellCount] = {false};
+  uint32_t metatile_pixels[kSimBackgroundCellPixels *
+                           kSimBackgroundCellPixels];
+  for (size_t tile_at = 0;
+       tile_at < sizeof(kSourceTiles) / sizeof(kSourceTiles[0]); tile_at++) {
+    uint8_t tile = kSourceTiles[tile_at];
+    bool test_opaque;
+    if (!SimBackgroundMountainSilhouette_Lookup(
+            tile, 0, 0, &test_opaque) ||
+        !SimTownCanvas_RenderTerrainMetatile(
+            wram, tile, metatile_pixels))
+      continue;
+    int cell_x, cell_y;
+    if (!FindMountainScratchCell(used, &cell_x, &cell_y)) return;
+    used[CellIndex(cell_x, cell_y)] = true;
+    int x0 = cell_x * kSimBackgroundCellPixels;
+    int y0 = cell_y * kSimBackgroundCellPixels;
+    for (int y = 0; y < kSimBackgroundCellPixels; y++)
+      for (int x = 0; x < kSimBackgroundCellPixels; x++) {
+        bool opaque = false;
+        SimBackgroundMountainSilhouette_Lookup(tile, x, y, &opaque);
+        size_t destination =
+            (size_t)(y0 + y) * kSimTownCanvasPixels + (size_t)(x0 + x);
+        uint32_t source = metatile_pixels[
+            y * kSimBackgroundCellPixels + x];
+        g_background.atlas[destination] =
+            opaque ? source | 0xFF000000u : 0;
+      }
+    g_background.mountain_source_cell[tile] =
+        (uint16_t)(CellIndex(cell_x, cell_y) + 1);
+  }
 }
 
 static void ExtractEnhancedReplacements(
+    const uint8_t *wram, const uint16_t *vram,
     const uint32_t *pixels, const SimBackgroundVoxelScene *scene) {
   memset(g_object_mask, 0, sizeof(g_object_mask));
-  memset(g_mountain_mask, 0, sizeof(g_mountain_mask));
-  /* Mountain cells retain their complete authentic tiles in the atlas. The
-   * renderer uses them once as a lifted top and repeats only exposed edge
-   * texels down the shallow voxel sides. */
+  /* Mountain cells keep the current town's authored colours but take their
+   * alpha from a palette-independent semantic silhouette. This preserves
+   * Northwall's white snow faces without lifting the opaque snow/grass pixels
+   * baked into some metatiles. Unknown semantic tiles fall back to the SNES
+   * source palette index, which is still safer than rendered RGB matching. */
   for (int cell_y = 0; cell_y < kSimBackgroundTownCells; cell_y++)
     for (int cell_x = 0; cell_x < kSimBackgroundTownCells; cell_x++) {
       if (!SimBackgroundMountains_CellOccupied(
               &scene->mountains, cell_x, cell_y))
         continue;
+      uint8_t tile = scene->mountains.tile[
+          CellIndex(cell_x, cell_y)];
       int x0 = cell_x * kSimBackgroundCellPixels;
       int y0 = cell_y * kSimBackgroundCellPixels;
       for (int y = 0; y < kSimBackgroundCellPixels; y++)
         for (int x = 0; x < kSimBackgroundCellPixels; x++) {
           size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels +
               (size_t)(x0 + x);
+          bool opaque;
+          if (!SimBackgroundMountainSilhouette_Lookup(
+                  tile, x, y, &opaque)) {
+            opaque = SimTownCanvas_SourcePixelOpaque(
+                wram, vram, x0 + x, y0 + y);
+          }
           g_object_mask[at] = 1;
-          g_mountain_mask[at] = 1;
-          g_background.atlas[at] = pixels[at] | 0xFF000000u;
+          g_background.atlas[at] = opaque
+              ? pixels[at] | 0xFF000000u
+              : 0;
         }
     }
   for (uint16_t i = 0; i < scene->object_count; i++) {
@@ -519,6 +567,8 @@ static void ExtractEnhancedReplacements(
         g_background.atlas[at] = pixels[at] | 0xFF000000u;
       }
   }
+
+  BuildCleanMountainSources(wram);
 
   int ground_cell_x, ground_cell_y;
   if (!FindGeneralGroundCell(
@@ -539,8 +589,6 @@ static void ExtractEnhancedReplacements(
           pixels[(size_t)source_y * kSimTownCanvasPixels +
                  (size_t)source_x];
       g_background.ground[at] = replacement;
-      if (g_mountain_mask[at] && TerrainLike(pixels[at], replacement))
-        g_background.atlas[at] = 0;
     }
 }
 
@@ -548,17 +596,20 @@ void SimBackgroundVoxels_Reset(void) { memset(&g_background, 0, sizeof(g_backgro
 
 void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                const uint32_t *canvas_pixels,
+                               const uint16_t *vram,
                                uint32_t canvas_serial) {
-  if (!town || !wram || !canvas_pixels || !canvas_serial) return;
+  if (!town || !wram || !canvas_pixels || !vram || !canvas_serial) return;
   if (g_background.scene.town == town &&
       g_background.canvas_serial == canvas_serial)
     return;
   uint32_t next_serial = NextSerial();
   memset(g_background.atlas, 0, sizeof(g_background.atlas));
+  memset(g_background.mountain_source_cell, 0,
+         sizeof(g_background.mountain_source_cell));
   memcpy(g_background.ground, canvas_pixels, sizeof(g_background.ground));
   SimBackgroundVoxels_Classify(town, wram, canvas_pixels,
                                &g_background.scene);
-  ExtractEnhancedReplacements(canvas_pixels, &g_background.scene);
+  ExtractEnhancedReplacements(wram, vram, canvas_pixels, &g_background.scene);
   g_background.canvas_serial = canvas_serial;
   g_background.serial = next_serial;
 }
@@ -572,4 +623,14 @@ const uint32_t *SimBackgroundVoxels_AtlasPixels(void) {
 }
 const uint32_t *SimBackgroundVoxels_GroundPixels(void) {
   return g_background.ground;
+}
+
+bool SimBackgroundVoxels_MountainTileSource(
+    uint8_t tile, int *cell_x, int *cell_y) {
+  if (!cell_x || !cell_y || !g_background.mountain_source_cell[tile])
+    return false;
+  int cell = g_background.mountain_source_cell[tile] - 1;
+  *cell_x = cell % kSimBackgroundTownCells;
+  *cell_y = cell / kSimBackgroundTownCells;
+  return true;
 }

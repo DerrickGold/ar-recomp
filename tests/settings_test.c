@@ -3,6 +3,7 @@
 #include "input_map.h"
 #include "render_capabilities.h"
 #include "settings.h"
+#include "sim/sim3d_camera_limits.h"
 #include "user_data_dir.h"
 
 #include <stdio.h>
@@ -176,6 +177,15 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim3d_tilt_x_mrad == -575);
   CHECK(g_settings.sim3d_tilt_y_mrad == 0);
   CHECK(g_settings.sim3d_distance_x100 == 300);
+  const SettingDesc *sim_pitch = Settings_Find("sim3d_tilt_x_mrad");
+  const SettingDesc *dynamic_pitch =
+      Settings_Find("sim3d_dyncam_baseline_tilt_x_mrad");
+  CHECK(sim_pitch &&
+        sim_pitch->minval == kSim3DCameraPitchMinimumMrad &&
+        sim_pitch->maxval == kSim3DCameraPitchMaximumMrad);
+  CHECK(dynamic_pitch &&
+        dynamic_pitch->minval == kSim3DCameraPitchMinimumMrad &&
+        dynamic_pitch->maxval == kSim3DCameraPitchMaximumMrad);
   /* D3c ships the catalogue heights unscaled; 0 is a valid "ground every
    * billboard" tuning value, so it must not double as the default. */
   CHECK(g_settings.sim3d_height_scale_x100 == 100);
@@ -417,7 +427,8 @@ static void TestSim3DEnvironmentLabels(void) {
          kSimFeature_CloudShroud | kSimFeature_CullHaze |
          kSimFeature_Backdrop | kSimFeature_EffectLighting |
          kSimFeature_Particles));
-  CHECK(g_settings.sim3d_tilt_x_mrad == 350);
+  CHECK(g_settings.sim3d_tilt_x_mrad ==
+        kSim3DCameraPitchMaximumMrad);
   ClearSettingsEnv();
 }
 
@@ -787,7 +798,7 @@ static void TestCategoryReset(void) {
   const SettingDesc *frequency = Settings_Find("audio_frequency");
   CHECK(sim_mode && sim_tilt && volume && frequency);
   CHECK(Settings_SetLong(sim_mode, 1) == kSettingChange_Applied);
-  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval + sim_tilt->step) ==
+  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval - sim_tilt->step) ==
         kSettingChange_Applied);
   CHECK(Settings_SetLong(volume, 55) == kSettingChange_Applied);
   CHECK(Settings_SetLong(frequency, kAudioFrequency_48000) ==

@@ -18,9 +18,10 @@ typedef enum SimBackgroundVoxelKind {
   kSimBackgroundVoxel_Windmill,
   kSimBackgroundVoxel_Factory,
   kSimBackgroundVoxel_Tree,
+  kSimBackgroundVoxel_Palm,
 } SimBackgroundVoxelKind;
 
-enum { kSimBackgroundVoxelKindCount = 5 };
+enum { kSimBackgroundVoxelKindCount = 6 };
 
 typedef enum SimBackgroundVoxelFlags {
   kSimBackgroundVoxel_UnderConstruction = 1u << 0,

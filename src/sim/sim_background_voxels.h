@@ -31,11 +31,18 @@ void SimBackgroundVoxels_Reset(void);
  * used only by enhanced SIM presentation. */
 void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                const uint32_t *canvas_pixels,
+                               const uint16_t *vram,
                                uint32_t canvas_serial);
 
 uint32_t SimBackgroundVoxels_Serial(void);
 const SimBackgroundVoxelScene *SimBackgroundVoxels_Scene(void);
 const uint32_t *SimBackgroundVoxels_AtlasPixels(void);
 const uint32_t *SimBackgroundVoxels_GroundPixels(void);
+
+/* Resolves a clean terrain-metatile source synthesized in the mountain atlas.
+ * Unlike SimBackgroundMountains_TileSource, this is independent of whether a
+ * pristine instance happens to be visible in the town's composed cell map. */
+bool SimBackgroundVoxels_MountainTileSource(uint8_t tile,
+                                            int *cell_x, int *cell_y);
 
 #endif  /* SIM_BACKGROUND_VOXELS_H */

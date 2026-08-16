@@ -33,9 +33,10 @@ typedef struct {
  * Returns NULL on any failure, having already reported it. Callers are
  * expected to fall back to their pre-shader path; a missing shader must never
  * be fatal. */
-static inline SDL_GPUShader *GpuShaderBlob_CreateFragment(
+static inline SDL_GPUShader *GpuShaderBlob_Create(
     SDL_GPUDevice *device, const GpuShaderBlobs *blobs, const char *label,
-    Uint32 num_samplers, Uint32 num_uniform_buffers) {
+    SDL_GPUShaderStage stage, Uint32 num_samplers,
+    Uint32 num_uniform_buffers) {
   const SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
 
   SDL_GPUShaderCreateInfo info;
@@ -58,7 +59,7 @@ static inline SDL_GPUShader *GpuShaderBlob_CreateFragment(
             (unsigned)formats, label);
     return NULL;
   }
-  info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+  info.stage = stage;
   info.num_samplers = num_samplers;
   info.num_uniform_buffers = num_uniform_buffers;
 
@@ -68,6 +69,14 @@ static inline SDL_GPUShader *GpuShaderBlob_CreateFragment(
             info.format == SDL_GPU_SHADERFORMAT_SPIRV ? "SPIR-V" : "MSL",
             SDL_GetError());
   return shader;
+}
+
+static inline SDL_GPUShader *GpuShaderBlob_CreateFragment(
+    SDL_GPUDevice *device, const GpuShaderBlobs *blobs, const char *label,
+    Uint32 num_samplers, Uint32 num_uniform_buffers) {
+  return GpuShaderBlob_Create(
+      device, blobs, label, SDL_GPU_SHADERSTAGE_FRAGMENT,
+      num_samplers, num_uniform_buffers);
 }
 
 #endif /* AR_GPU_SHADER_BLOB_H */

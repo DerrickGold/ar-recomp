@@ -19,15 +19,30 @@ static bool Near(float actual, float expected) {
 
 int main(void) {
   CameraOrbit orbit = {0};
-  CameraOrbit_Adjust(&orbit, 0.2f, -0.3f, 0.1f, -0.1f, -0.7f, 0.7f);
+  CameraOrbit_Adjust(&orbit, 0.2f, -0.3f, 0.1f, -0.1f,
+                     -0.7f, 0.7f, -0.7f, 0.7f);
   CHECK(Near(orbit.yaw, 0.2f));
   CHECK(Near(orbit.pitch, -0.3f));
 
   /* The baseline participates in the clamp: the transient offset can never
    * push the authored camera past the supported projection range. */
-  CameraOrbit_Adjust(&orbit, 2.0f, -2.0f, 0.1f, -0.1f, -0.7f, 0.7f);
+  CameraOrbit_Adjust(&orbit, 2.0f, -2.0f, 0.1f, -0.1f,
+                     -0.7f, 0.7f, -0.7f, 0.7f);
   CHECK(Near(orbit.yaw, 0.6f));
   CHECK(Near(orbit.pitch, -0.6f));
+
+  /* Yaw and pitch are independent axes. SIM uses symmetric yaw limits and
+   * an all-negative pitch interval, so reusing pitch bounds for yaw would
+   * make rightward orbit impossible. */
+  CameraOrbit asymmetric = {0};
+  CameraOrbit_Adjust(&asymmetric, 2.0f, 2.0f, 0.0f, -0.575f,
+                     -0.7f, 0.7f, -1.35f, -0.575f);
+  CHECK(Near(asymmetric.yaw, 0.7f));
+  CHECK(Near(asymmetric.pitch, 0.0f));
+  CameraOrbit_Adjust(&asymmetric, -4.0f, -2.0f, 0.0f, -0.575f,
+                     -0.7f, 0.7f, -1.35f, -0.575f);
+  CHECK(Near(asymmetric.yaw, -0.7f));
+  CHECK(Near(asymmetric.pitch, -0.775f));
 
   CameraOrbit held = orbit;
   CHECK(!CameraOrbit_Update(&held, 1.0f, true, 0.35f));

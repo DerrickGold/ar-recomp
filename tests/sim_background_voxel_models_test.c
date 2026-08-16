@@ -348,6 +348,24 @@ int main(void) {
   CHECK(!snow_tree.overflow && snow_tree.max_z == 16.0f);
   CHECK(ModelHash(&snow_tree) != ModelHash(&isolated));
 
+  SimBackgroundVoxelObject palm_object = {
+    .kind = kSimBackgroundVoxel_Palm,
+    .town = 5,
+    .cell_x = 4,
+    .cell_y = 7,
+    .group = 2,
+    .record_slot = 0xFF,
+  };
+  SimBackgroundVoxelModel palm;
+  SimBackgroundVoxelModel_Build(
+      &palm_object, kSimBackgroundVoxelDetail_Balanced, &palm);
+  CHECK(!palm.overflow && palm.face_count > 0);
+  CHECK(palm.min_x >= 0.0f && palm.max_x <= 16.0f);
+  CHECK(palm.min_y >= 0.0f && palm.max_y <= 16.0f);
+  CHECK(MaterialFaces(&palm, kSimVoxelMaterial_Trunk) > 0);
+  CHECK(MaterialFaces(&palm, kSimVoxelMaterial_Leaves) > 0);
+  CHECK(ModelHash(&palm) != ModelHash(&isolated));
+
   SimBackgroundVoxelObject construction_object = {
     .kind = kSimBackgroundVoxel_House,
     .flags = kSimBackgroundVoxel_UnderConstruction,

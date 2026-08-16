@@ -780,6 +780,8 @@ static void TestMapPlaneSelectorTrait(void) {
       &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.object_count == 1);
   CHECK(frame.objects[0].traits & kSimObjectTrait_MapPlane);
+  CHECK(frame.objects[0].traits & kSimObjectTrait_SelectionOverlay);
+  CHECK(!(frame.objects[0].traits & kSimObjectTrait_Overhead));
 
   SimRenderMetadata_Reset();
   Begin(kActRaiserWram_SimWorldRecords, true, 0xD32B, 0);
@@ -788,6 +790,7 @@ static void TestMapPlaneSelectorTrait(void) {
   SimRenderMetadata_CaptureFrame(
       &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!(frame.objects[0].traits & kSimObjectTrait_MapPlane));
+  CHECK(!(frame.objects[0].traits & kSimObjectTrait_SelectionOverlay));
 }
 
 /* D3c: the locked height policy is a data table, so each documented identity
@@ -877,13 +880,15 @@ static void TestVirtualHeightClassification(void) {
       kSimHeightClass_SemiGrounded, kSimVirtualHeight_SemiGrounded, 0 },
     { "map cursor", kSimRecordTier_World, 0x11, 0, world, 0xD2C4,
       kSimHeightClass_MapPlane, 0,
-      kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow },
+      kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow |
+      kSimObjectTrait_SelectionOverlay },
     /* The 64x64 hollow path-selection square arrives on a class-$09 record
      * and sits between the cursor family and the miracle cloud effects; it
      * must lie on the ground, not billboard. */
     { "path select square", kSimRecordTier_World, 0x09, 1, world, 0xD993,
       kSimHeightClass_MapPlane, 0,
-      kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow },
+      kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow |
+      kSimObjectTrait_SelectionOverlay },
     { "fixed UI", kSimRecordTier_Fixed, 0x02, 0,
       kActRaiserWram_SimFixedRecords, 0xD32B,
       kSimHeightClass_None, 0, 0 },

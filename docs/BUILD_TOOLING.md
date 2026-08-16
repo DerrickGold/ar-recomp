@@ -132,19 +132,21 @@ census deltas, and cross-platform exit status handling; it does not call
 
 ## GPU shaders
 
-GPU effects need backend-specific shader formats: SPIR-V for Vulkan, MSL for
-Metal, and DXIL for D3D12. **No shader compiler runs during a game build.**
-Compiled blobs are committed, so both build paths compile only C.
+The SDL GPU renderer and SIM3D's D32 pipeline are baseline requirements;
+optional post-effects share that backend. Shader formats remain
+backend-specific: SPIR-V for Vulkan, MSL for Metal, and DXIL for D3D12.
+**No shader compiler runs during a game build.** Compiled blobs are committed,
+so both build paths compile only C.
 
 | Path | What it is |
 |---|---|
-| `src/shaders/*.frag.glsl` | The authored source — the one place a shader is written |
-| `src/shaders/*_frag.h` | Generated **and committed**: byte arrays holding SPIR-V + MSL |
+| `src/shaders/*.{vert,frag}.glsl` | The authored source — the one place a shader is written |
+| `src/shaders/*_{vert,frag}.h` | Generated **and committed**: byte arrays holding SPIR-V + MSL |
 | `tools/build_shaders.py` | Developer-only generator |
 | `tests/shader_blob_test.c` | Asserts every blob compiles on the live backend |
 
 ```bash
-tools/build_shaders.py            # regenerate after editing any .frag.glsl
+tools/build_shaders.py            # regenerate after editing shader GLSL
 ```
 
 `--check` verifies the committed headers match their sources without writing,
@@ -166,10 +168,10 @@ Two constraints worth knowing before touching a shader:
 
 `main.c` requests the `gpu` renderer **with properties**, declaring SPIR-V and
 MSL and deliberately not DXIL, so SDL picks a backend this build can actually
-feed. Declaring nothing is how the effects were once macOS-only in practice.
-DXIL is a deliberate deferral for Windows machines with no Vulkan driver; the
-committed SPIR-V is valid `SDL_shadercross` input, so adding it later is
-additive.
+feed. Renderer creation, D32 support, and depth-pipeline creation are validated
+at startup; there is no software renderer or painter-order fallback. DXIL is a
+deliberate deferral for Windows machines with no Vulkan driver; the committed
+SPIR-V is valid `SDL_shadercross` input, so adding it later is additive.
 
 ## Self-contained distribution bundles
 

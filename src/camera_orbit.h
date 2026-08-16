@@ -13,7 +13,8 @@ typedef struct CameraOrbit {
 
 void CameraOrbit_Adjust(CameraOrbit *orbit, float yaw_delta, float pitch_delta,
                         float baseline_yaw, float baseline_pitch,
-                        float minimum_tilt, float maximum_tilt);
+                        float minimum_yaw, float maximum_yaw,
+                        float minimum_pitch, float maximum_pitch);
 
 /* Advances the return-to-baseline motion. Returns true when the offset
  * changed. Holding the orbit control freezes the current offset even when the

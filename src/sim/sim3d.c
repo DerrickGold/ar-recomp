@@ -1138,7 +1138,7 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
                        PPU_brightness(ppu), g_sim3d.backdrop_argb);
   if (frame->background_voxel_enabled) {
     SimBackgroundVoxels_Build(frame->town, wram, SimTownCanvas_Pixels(),
-                              SimTownCanvas_Serial());
+                              ppu->vram, SimTownCanvas_Serial());
   } else if (SimBackgroundVoxels_Serial()) {
     SimBackgroundVoxels_Reset();
   }

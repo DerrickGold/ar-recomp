@@ -853,7 +853,7 @@ int main(void) {
   const SettingDesc *sim_shadow = Settings_Find("sim3d_shadow_opacity_pct");
   const SettingDesc *sim_corner = Settings_Find("sim3d_cull_corner_px");
   const SettingDesc *volume = Settings_Find("audio_master_volume");
-  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval + sim_tilt->step) ==
+  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval - sim_tilt->step) ==
         kSettingChange_Applied);
   CHECK(Settings_SetLong(sim_shadow, sim_shadow->defval - sim_shadow->step) ==
         kSettingChange_Applied);

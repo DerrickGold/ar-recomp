@@ -1,4 +1,5 @@
 #include "sim/sim_background_voxel_lighting.h"
+#include "sim/sim_background_voxel_surface.h"
 
 #include <stdio.h>
 
@@ -25,6 +26,22 @@ static SimBackgroundVoxelModelFace VerticalFace(
 
 int main(void) {
   SimBackgroundVoxelModelFace wall = VerticalFace(kSimVoxelMaterial_Wall);
+  SimBackgroundVoxelSurfaceNormal normal;
+  CHECK(SimBackgroundVoxelSurface_OutwardNormal(&wall, &normal));
+  CHECK(normal.x == 0.0f && normal.y == -1.0f && normal.z == 0.0f);
+
+  SimBackgroundVoxelModelFace top = {
+    .points = {
+      {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 1.0f},
+      {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f, 1.0f},
+    },
+  };
+  CHECK(SimBackgroundVoxelSurface_OutwardNormal(&top, &normal));
+  CHECK(normal.x == 0.0f && normal.y == 0.0f && normal.z == 1.0f);
+
+  SimBackgroundVoxelModelFace degenerate = {0};
+  CHECK(!SimBackgroundVoxelSurface_OutwardNormal(&degenerate, &normal));
+
   uint8_t basic = SimBackgroundVoxelLighting_FaceBrightness(
       &wall, kSimBackgroundVoxelShading_Basic, 0, 45);
   SimBackgroundVoxelLightDirection direction;
