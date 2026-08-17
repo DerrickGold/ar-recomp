@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "sim_background_voxel_lighting.h"
+
 typedef struct SimBackgroundVoxelModelCacheKey {
   uint16_t group;
   uint8_t kind, flags;
@@ -14,9 +16,12 @@ typedef struct SimBackgroundVoxelModelCacheKey {
 
 typedef struct SimBackgroundVoxelModelCacheEntry {
   bool valid;
+  bool shading_valid;
   uint32_t last_use;
   SimBackgroundVoxelModelCacheKey key;
+  SimBackgroundVoxelModelShadingKey shading_key;
   SimBackgroundVoxelModel model;
+  SimBackgroundVoxelModelShading shading;
 } SimBackgroundVoxelModelCacheEntry;
 
 static struct {
@@ -61,6 +66,40 @@ static bool KeyEquals(const SimBackgroundVoxelModelCacheKey *left,
       left->style == right->style;
 }
 
+static bool ShadingKeyEquals(const SimBackgroundVoxelModelShadingKey *left,
+                             const SimBackgroundVoxelModelShadingKey *right) {
+  return left->light_azimuth_deg == right->light_azimuth_deg &&
+      left->light_elevation_deg == right->light_elevation_deg &&
+      left->shading == right->shading && left->biome == right->biome;
+}
+
+static void ResolveShading(SimBackgroundVoxelModelCacheEntry *entry) {
+  SimBackgroundVoxelLightDirection light;
+  SimBackgroundVoxelLighting_ResolveDirection(
+      entry->shading_key.light_azimuth_deg,
+      entry->shading_key.light_elevation_deg, &light);
+  SimBackgroundVoxelShading shading =
+      (SimBackgroundVoxelShading)entry->shading_key.shading;
+  SimBackgroundVoxelBiome biome =
+      (SimBackgroundVoxelBiome)entry->shading_key.biome;
+  SimBackgroundVoxelDetail detail =
+      (SimBackgroundVoxelDetail)entry->key.detail;
+  for (uint16_t face = 0; face < entry->model.face_count; face++) {
+    const SimBackgroundVoxelModelFace *source = &entry->model.faces[face];
+    entry->shading.material[face] =
+        (uint8_t)SimBackgroundVoxelBiome_SurfaceMaterial(
+            biome, detail, (SimBackgroundVoxelMaterial)source->material,
+            source);
+    uint8_t directional =
+        SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
+            source, shading, &light);
+    SimBackgroundVoxelLighting_VertexBrightnesses(
+        source, &entry->model, directional, shading,
+        entry->shading.brightness[face]);
+  }
+  entry->shading_valid = true;
+}
+
 static uint32_t HashByte(uint32_t hash, uint8_t value) {
   return (hash ^ value) * 16777619u;
 }
@@ -92,11 +131,28 @@ static uint32_t HashKey(const SimBackgroundVoxelModelCacheKey *key) {
   return hash;
 }
 
+/* Bring `entry`'s stored shading up to date with the requested lighting,
+ * without touching its geometry. */
+static const SimBackgroundVoxelModelShading *EntryShading(
+    SimBackgroundVoxelModelCacheEntry *entry,
+    const SimBackgroundVoxelModelShadingKey *key) {
+  if (!key) return NULL;
+  if (!entry->shading_valid || !ShadingKeyEquals(&entry->shading_key, key)) {
+    if (entry->shading_valid) g_model_cache.stats.relights++;
+    entry->shading_key = *key;
+    ResolveShading(entry);
+  }
+  return &entry->shading;
+}
+
 const SimBackgroundVoxelModel *SimBackgroundVoxelModelCache_Get(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
     SimBackgroundVoxelStyle style,
-    uint32_t stamp) {
+    uint32_t stamp,
+    const SimBackgroundVoxelModelShadingKey *shading_key,
+    const SimBackgroundVoxelModelShading **out_shading) {
+  if (out_shading) *out_shading = NULL;
   if (!object) return NULL;
   SimBackgroundVoxelModelCacheKey key = MakeKey(object, detail, style);
   uint32_t set = HashKey(&key) % kSimBackgroundVoxelModelCacheSetCount;
@@ -109,6 +165,7 @@ const SimBackgroundVoxelModel *SimBackgroundVoxelModelCache_Get(
     if (candidate->valid && KeyEquals(&candidate->key, &key)) {
       candidate->last_use = stamp;
       g_model_cache.stats.hits++;
+      if (out_shading) *out_shading = EntryShading(candidate, shading_key);
       return &candidate->model;
     }
     if (!candidate->valid) {
@@ -127,10 +184,12 @@ const SimBackgroundVoxelModel *SimBackgroundVoxelModelCache_Get(
       &g_model_cache.entries[set][replacement];
   if (entry->valid) g_model_cache.stats.evictions++;
   entry->valid = true;
+  entry->shading_valid = false;
   entry->last_use = stamp;
   entry->key = key;
   SimBackgroundVoxelModel_BuildStyled(object, detail, style, &entry->model);
   g_model_cache.stats.misses++;
+  if (out_shading) *out_shading = EntryShading(entry, shading_key);
   return &entry->model;
 }
 
