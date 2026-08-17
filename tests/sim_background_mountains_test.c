@@ -307,7 +307,17 @@ int main(void) {
               kAuditedMountainTowns[at].town);
     CHECK(built);
     CHECK(objects.count == kAuditedMountainTowns[at].object_count);
-    for (int object = 0; object < objects.count; object++)
+    int volcanoes = 0;
+    for (int object = 0; object < objects.count; object++) {
+      if (objects.objects[object].flags &
+          kSimBackgroundMountainObject_Volcano) {
+        volcanoes++;
+        CHECK(kAuditedMountainTowns[at].town == 4);
+        CHECK(objects.objects[object].cell_x == 6);
+        CHECK(objects.objects[object].cell_y == 8);
+        CHECK(objects.objects[object].source_tile[0][2] == 0x70);
+        CHECK(objects.objects[object].source_tile[0][3] == 0x71);
+      }
       for (int row = 0;
            row < objects.objects[object].height_cells; row++)
         for (int column = 0;
@@ -315,6 +325,8 @@ int main(void) {
           uint8_t tile = objects.objects[object].source_tile[row][column];
           CHECK(tile != 0x8D && tile != 0x8E);
         }
+    }
+    CHECK(volcanoes == (kAuditedMountainTowns[at].town == 4 ? 1 : 0));
   }
 
   /* Kasandora does not place a clean $8B right shoulder in its composed map.

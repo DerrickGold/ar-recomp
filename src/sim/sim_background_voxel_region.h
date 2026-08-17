@@ -13,10 +13,13 @@ typedef enum SimBackgroundVoxelHouseStyle {
   kSimBackgroundHouseStyle_Timber,
   kSimBackgroundHouseStyle_Fillmore,
   kSimBackgroundHouseStyle_Bloodpool,
-  kSimBackgroundHouseStyle_KasandoraEarlyStone,
-  kSimBackgroundHouseStyle_KasandoraStone,
+  kSimBackgroundHouseStyle_Yurt,
+  kSimBackgroundHouseStyle_WhiteTent,
+  kSimBackgroundHouseStyle_Adobe,
+  kSimBackgroundHouseStyle_Stone,
   kSimBackgroundHouseStyle_Aitos,
-  kSimBackgroundHouseStyle_Marahna,
+  kSimBackgroundHouseStyle_MarahnaStilt,
+  kSimBackgroundHouseStyle_MarahnaLogCabin,
   kSimBackgroundHouseStyle_Count,
 } SimBackgroundVoxelHouseStyle;
 
@@ -35,9 +38,13 @@ typedef enum SimBackgroundVoxelPaletteStyle {
   kSimBackgroundPaletteStyle_Timber,
   kSimBackgroundPaletteStyle_Fillmore,
   kSimBackgroundPaletteStyle_Bloodpool,
-  kSimBackgroundPaletteStyle_KasandoraStone,
+  kSimBackgroundPaletteStyle_Yurt,
+  kSimBackgroundPaletteStyle_WhiteCanvas,
+  kSimBackgroundPaletteStyle_Adobe,
+  kSimBackgroundPaletteStyle_Stone,
   kSimBackgroundPaletteStyle_Aitos,
-  kSimBackgroundPaletteStyle_Marahna,
+  kSimBackgroundPaletteStyle_MarahnaStilt,
+  kSimBackgroundPaletteStyle_MarahnaLogCabin,
 } SimBackgroundVoxelPaletteStyle;
 
 SimBackgroundVoxelHouseStyle SimBackgroundVoxelRegion_HouseStyle(

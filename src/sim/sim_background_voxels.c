@@ -1,6 +1,7 @@
 #include "sim_background_voxels.h"
 
 #include "sim_background_mountain_silhouette.h"
+#include "sim_background_voxel_landmarks.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -8,6 +9,15 @@
 enum {
   kTownCellMapsWram = 0x12000,       /* flat $7F:2000 */
   kTownCellMapBytes = 0x400,
+  kTownTilemapWram = 0x10000,        /* flat $7F:0000 */
+  kTerrainDefinitionsWram = 0x2100,  /* flat $7E:2100 */
+  kTerrainDefinitionBytes = 8,
+  kTerrainMetatileCount = 256,
+  /* Bit 9 is terrain traversal metadata cleared by $03:9B5A before a
+   * definition becomes a live entry, and bit 13 is tile priority, which
+   * changes painter order but not which pixels a cell shows. Neither may
+   * take part in matching a live cell against its definition. */
+  kMetatileCompareMask = 0xDDFF,
   kStructureRecordsWram = 0x16BE7,  /* flat $7F:6BE7 */
   kStructureRecordsPerTownBytes = 0x200,
   kStructureRecordBytes = 4,
@@ -20,12 +30,22 @@ enum {
   kStructureClassHouse = 0,
   kStructureClassWindmill = 3,
   kStructureClassFactory = 4,
-  kCathedralTopLeft = 0xC2,
-  kCathedralTopRight = 0xC3,
-  kCathedralBottomLeft = 0xCA,
-  kCathedralBottomRight = 0xCB,
   kCellCount = kSimBackgroundTownCells * kSimBackgroundTownCells,
   kCanvasPixelCount = kSimTownCanvasPixels * kSimTownCanvasPixels,
+};
+
+/* The 2x2 sanctuary block is a contiguous metatile run in every town. Five
+ * towns share the $C2 family; Marahna's $C0 family is the same plot drawn as
+ * a tropical temple, so it is a distinct model rather than a missing one. */
+typedef struct SanctuarySignature {
+  uint8_t top_left;
+  uint8_t kind;
+  uint8_t height_pixels;
+} SanctuarySignature;
+
+static const SanctuarySignature kSanctuaries[] = {
+  {0xC2, kSimBackgroundVoxel_Cathedral, 24},
+  {0xC0, kSimBackgroundVoxel_MarahnaTemple, 24},
 };
 
 static struct {
@@ -66,6 +86,61 @@ static uint8_t CellMapValue(uint8_t town, const uint8_t *wram, int x, int y) {
   return wram[TownCellMapIndex(town, x, y)];
 }
 
+static uint16_t Read16(const uint8_t *wram, size_t address) {
+  return (uint16_t)(wram[address] | (uint16_t)wram[address + 1] << 8);
+}
+
+/* The town tilemap is quadrant-paged, 64x64 8x8 entries. */
+static uint16_t TownTilemapWord(const uint8_t *wram, int tile_x, int tile_y) {
+  int quadrant = (tile_y >= 32 ? 2 : 0) + (tile_x >= 32 ? 1 : 0);
+  size_t word = (size_t)quadrant * 1024 +
+      (size_t)(tile_y & 31) * 32 + (size_t)(tile_x & 31);
+  return Read16(wram, kTownTilemapWram + word * 2) & kMetatileCompareMask;
+}
+
+static void LiveCellEntries(const uint8_t *wram, int x, int y,
+                            uint16_t out[4]) {
+  int tile_x = x * 2, tile_y = y * 2;
+  out[0] = TownTilemapWord(wram, tile_x, tile_y);
+  out[1] = TownTilemapWord(wram, tile_x + 1, tile_y);
+  out[2] = TownTilemapWord(wram, tile_x, tile_y + 1);
+  out[3] = TownTilemapWord(wram, tile_x + 1, tile_y + 1);
+}
+
+static bool TerrainMetatileMatches(const uint8_t *wram, uint8_t metatile,
+                                   const uint16_t live[4]) {
+  size_t at = kTerrainDefinitionsWram +
+      (size_t)metatile * kTerrainDefinitionBytes;
+  for (int entry = 0; entry < 4; entry++)
+    if ((Read16(wram, at + (size_t)entry * 2) & kMetatileCompareMask) !=
+        live[entry])
+      return false;
+  return true;
+}
+
+/* The metatile a cell is currently DISPLAYING, which is not always the one its
+ * cell map records. Clearing a bush or a wood commits the cleared cell-map
+ * value ($08 grass) as soon as the miracle resolves, and only repaints the BG1
+ * tilemap when the animation ends; for those frames the semantic map says
+ * "grass" while the original art is still on screen. Classifying from the
+ * cell map alone dropped the object and let the flat authentic sprite show
+ * through mid-strike, which is exactly the pop the enhanced view exists to
+ * avoid. Resolving what is drawn keeps the model alive until the art itself
+ * changes. */
+static uint8_t DisplayedCellMetatile(uint8_t town, const uint8_t *wram,
+                                     int x, int y) {
+  uint8_t recorded = CellMapValue(town, wram, x, y);
+  uint16_t live[4];
+  LiveCellEntries(wram, x, y, live);
+  if (TerrainMetatileMatches(wram, recorded, live)) return recorded;
+  for (int metatile = 0; metatile < kTerrainMetatileCount; metatile++)
+    if (TerrainMetatileMatches(wram, (uint8_t)metatile, live))
+      return (uint8_t)metatile;
+  /* Structure art and expansion marks are not in the terrain atlas at all, so
+   * an unmatched cell keeps its recorded identity. */
+  return recorded;
+}
+
 static bool AppendObject(SimBackgroundVoxelScene *scene,
                          SimBackgroundVoxelObject object) {
   if (scene->object_count >= kSimBackgroundMaxObjects) {
@@ -87,14 +162,62 @@ static void MarkOccupied(bool occupied[kCellCount], int x, int y,
     }
 }
 
+/* Used only to choose the ground eraser tile. Object classification is driven
+ * by terrain metatile identity, because rendered chroma cannot tell Bloodpool's
+ * mottled marsh from a canopy, nor Northwall's grey-white firs from snow. */
 static bool StrongTreePixel(uint32_t argb) {
   unsigned red = (argb >> 16) & 0xFF;
   unsigned green = (argb >> 8) & 0xFF;
   unsigned blue = argb & 0xFF;
-  /* Across all six captured town palettes, canopy greens are separated from
-   * olive grass by chroma rather than by a town-specific colour index. The
-   * low floor keeps classification stable during ordinary brightness fades. */
   return green >= 8 && green * 10 > red * 13 && green * 10 > blue * 12;
+}
+
+typedef enum FoliageClass {
+  kFoliage_None,
+  /* Clearable brush: one cell of decoration the player can remove, never part
+   * of a forest component. The round bush and the palm are the same role in
+   * different regions, so they are classified together and differ only in
+   * which model they carry. */
+  kFoliage_Bush,
+  kFoliage_Palm,
+  /* Permanent forest. Two families, both grouped by adjacency. */
+  kFoliage_Evergreen,
+  kFoliage_Broadleaf,
+  /* Mostly ground with a canopy fringe. These are the outer cells of a forest
+   * block and only become foliage when they touch one, and they take the
+   * family of whichever block recruited them. */
+  kFoliage_CanopyEdge,
+} FoliageClass;
+
+/* The terrain metatile atlas is an eight-wide grid whose entries mean the same
+ * thing in all six towns; only the palette changes. Columns 2-4 of rows 0-3
+ * (plus the $23/$24 caps) are the pointed evergreen family and columns 5-7 of
+ * the same rows (plus $26/$27) are the broad round canopies - Marahna's
+ * mangroves and Kasandora's oasis stands. Everything else here, including
+ * Bloodpool's $3D-$4F marsh, is terrain. */
+static FoliageClass FoliageClassForTile(uint8_t tile) {
+  switch (tile) {
+    case 0x01:
+      return kFoliage_Bush;
+    case 0x09:
+      return kFoliage_Palm;
+    case 0x02: case 0x03: case 0x04:
+    case 0x0A: case 0x0B: case 0x0C:
+    case 0x12: case 0x13: case 0x14:
+    case 0x1A: case 0x1B: case 0x1C:
+    case 0x23: case 0x24:
+      return kFoliage_Evergreen;
+    case 0x05: case 0x06: case 0x07:
+    case 0x0D: case 0x0E: case 0x0F:
+    case 0x15: case 0x16: case 0x17:
+    case 0x1D: case 0x1E: case 0x1F:
+    case 0x26: case 0x27:
+      return kFoliage_Broadleaf;
+    case 0x22:
+      return kFoliage_CanopyEdge;
+    default:
+      return kFoliage_None;
+  }
 }
 
 static int CellTreePixelCount(const uint32_t *pixels, int cell_x, int cell_y) {
@@ -111,11 +234,10 @@ static int CellTreePixelCount(const uint32_t *pixels, int cell_x, int cell_y) {
 }
 
 void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
-                                  const uint32_t *canvas_pixels,
                                   SimBackgroundVoxelScene *out) {
   if (!out) return;
   memset(out, 0, sizeof(*out));
-  if (!town || town > 6 || !wram || !canvas_pixels) return;
+  if (!town || town > 6 || !wram) return;
   out->town = town;
 
   bool occupied[kCellCount] = {false};
@@ -184,54 +306,100 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
     if (!AppendObject(out, object)) return;
   }
 
-  /* One stable four-cell signature identifies the cathedral in every town.
-   * Its top row is elevation art, not a second ground-depth row. */
-  bool cathedral_found = false;
-  for (int y = 0; y < kSimBackgroundTownCells - 1 && !cathedral_found; y++)
-    for (int x = 0; x < kSimBackgroundTownCells - 1; x++)
-      if (CellMapValue(town, wram, x, y) == kCathedralTopLeft &&
-          CellMapValue(town, wram, x + 1, y) == kCathedralTopRight &&
-          CellMapValue(town, wram, x, y + 1) == kCathedralBottomLeft &&
-          CellMapValue(town, wram, x + 1, y + 1) ==
-              kCathedralBottomRight) {
+  /* One stable four-cell signature identifies the town sanctuary. Its top row
+   * is elevation art, not a second ground-depth row. */
+  bool sanctuary_found = false;
+  for (int y = 0; y < kSimBackgroundTownCells - 1 && !sanctuary_found; y++)
+    for (int x = 0; x < kSimBackgroundTownCells - 1 && !sanctuary_found; x++)
+      for (size_t at = 0;
+           at < sizeof(kSanctuaries) / sizeof(kSanctuaries[0]); at++) {
+        uint8_t base = kSanctuaries[at].top_left;
+        if (CellMapValue(town, wram, x, y) != base ||
+            CellMapValue(town, wram, x + 1, y) != (uint8_t)(base + 1) ||
+            CellMapValue(town, wram, x, y + 1) != (uint8_t)(base + 8) ||
+            CellMapValue(town, wram, x + 1, y + 1) != (uint8_t)(base + 9))
+          continue;
         AppendObject(out, (SimBackgroundVoxelObject){
           .town = town,
-          .kind = kSimBackgroundVoxel_Cathedral,
+          .kind = kSanctuaries[at].kind,
           .cell_x = (uint8_t)x,
           .cell_y = (uint8_t)y,
           .source_cells_w = 2,
           .source_cells_h = 2,
           .footprint_cells_w = 2,
           /* All four cells are protected land: the game never places another
-           * structure behind the cathedral. The upper source row is therefore
+           * structure behind the sanctuary. The upper source row is therefore
            * both real depth and the perspective-compressed second tier. */
           .footprint_cells_d = 2,
-          .height_pixels = 24,
+          .height_pixels = kSanctuaries[at].height_pixels,
           .record_slot = 0xFF,
         });
         MarkOccupied(occupied, x, y, 2, 2);
-        cathedral_found = true;
+        sanctuary_found = true;
         break;
       }
 
+  /* Story landmarks own reserved cell-map plots rather than structure records.
+   * Install and reserve their complete source art before forest extraction so
+   * a large tree cannot be fragmented into ordinary one-cell evergreens. */
+  SimBackgroundVoxelObject landmarks[3];
+  size_t landmark_count = SimBackgroundVoxelLandmarks_Classify(
+      town, wram, landmarks,
+      sizeof(landmarks) / sizeof(landmarks[0]));
+  for (size_t at = 0; at < landmark_count; at++) {
+    SimBackgroundVoxelObject *landmark = &landmarks[at];
+    MarkOccupied(occupied, landmark->cell_x, landmark->cell_y,
+                 landmark->source_cells_w, landmark->source_cells_h);
+    if (!AppendObject(out, *landmark)) return;
+  }
+
   bool tree[kCellCount] = {false};
   bool weak_tree[kCellCount] = {false};
+  /* Which permanent family owns each canopy cell. A fringe cell has none until
+   * a block recruits it. */
+  uint8_t canopy_kind[kCellCount] = {0};
   for (int y = 0; y < kSimBackgroundTownCells; y++)
     for (int x = 0; x < kSimBackgroundTownCells; x++) {
       size_t cell = CellIndex(x, y);
       if (occupied[cell]) continue;
-      int green = CellTreePixelCount(canvas_pixels, x, y);
-      /* Main canopies occupy at least 30% of a cell. Edge/shadow variants can
-       * fall to 10%, just above the measured 7% ordinary-terrain maximum. */
-      tree[cell] = green * 10 >= kSimBackgroundCellPixels *
-          kSimBackgroundCellPixels * 3;
-      weak_tree[cell] = green * 10 >= kSimBackgroundCellPixels *
-          kSimBackgroundCellPixels;
+      FoliageClass foliage =
+          FoliageClassForTile(DisplayedCellMetatile(town, wram, x, y));
+      if (foliage == kFoliage_Bush || foliage == kFoliage_Palm) {
+        /* Clearable brush entries are their own single-cell objects. Keeping
+         * them out of the forest flood fill stops one bush beside a wood from
+         * being absorbed into it and losing its own model. */
+        if (!AppendObject(out, (SimBackgroundVoxelObject){
+              .town = town,
+              .kind = foliage == kFoliage_Bush
+                  ? kSimBackgroundVoxel_Shrub : kSimBackgroundVoxel_Palm,
+              .flags = kSimBackgroundVoxel_IsolatedTree,
+              .cell_x = (uint8_t)x,
+              .cell_y = (uint8_t)y,
+              .source_cells_w = 1,
+              .source_cells_h = 1,
+              .footprint_cells_w = 1,
+              .footprint_cells_d = 1,
+              .height_pixels = foliage == kFoliage_Bush ? 12 : 16,
+              .record_slot = 0xFF,
+            }))
+          return;
+        out->brush_cell_count++;
+        continue;
+      }
+      if (foliage == kFoliage_Evergreen || foliage == kFoliage_Broadleaf) {
+        tree[cell] = weak_tree[cell] = true;
+        canopy_kind[cell] = foliage == kFoliage_Evergreen
+            ? kSimBackgroundVoxel_Tree : kSimBackgroundVoxel_BroadTree;
+      } else if (foliage == kFoliage_CanopyEdge) {
+        weak_tree[cell] = true;
+      }
     }
 
-  /* Grow only from high-confidence canopies. This captures dark perimeter and
-   * trunk-heavy continuation cells without allowing an isolated patch of
-   * ordinary green decoration to become a tree object. */
+  /* Grow only from complete canopy cells. This captures the fringe cells that
+   * are mostly ground without letting an isolated fringe tile - or a marsh or
+   * snow patch that merely reads green - become a tree object. A recruited
+   * fringe cell inherits the family that reached it, so a wood never changes
+   * species at its own edge. */
   uint16_t weak_queue[kCellCount];
   int weak_read = 0, weak_write = 0;
   for (int cell = 0; cell < kCellCount; cell++)
@@ -250,6 +418,7 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
       size_t next = CellIndex(nx, ny);
       if (!tree[next] && weak_tree[next]) {
         tree[next] = true;
+        canopy_kind[next] = canopy_kind[cell];
         weak_queue[weak_write++] = (uint16_t)next;
       }
     }
@@ -301,11 +470,10 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
         if (!AppendObject(out, (SimBackgroundVoxelObject){
               .group = group,
               .town = town,
-              /* Marahna's permanent forest art is a broad tropical palm
-               * family. It shares extraction/adjacency with other trees but
-               * must not inherit the pointed evergreen model. */
-              .kind = town == 5 ? kSimBackgroundVoxel_Palm
-                                : kSimBackgroundVoxel_Tree,
+              /* The permanent family is the cell's own, not the town's.
+               * Marahna is mostly broad mangrove but its palms are clearable
+               * brush, and Kasandora carries both families at once. */
+              .kind = canopy_kind[cell],
               .flags = write == 1 ? kSimBackgroundVoxel_IsolatedTree : 0,
               .cell_x = (uint8_t)x,
               .cell_y = (uint8_t)y,
@@ -607,8 +775,7 @@ void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
   memset(g_background.mountain_source_cell, 0,
          sizeof(g_background.mountain_source_cell));
   memcpy(g_background.ground, canvas_pixels, sizeof(g_background.ground));
-  SimBackgroundVoxels_Classify(town, wram, canvas_pixels,
-                               &g_background.scene);
+  SimBackgroundVoxels_Classify(town, wram, &g_background.scene);
   ExtractEnhancedReplacements(wram, vram, canvas_pixels, &g_background.scene);
   g_background.canvas_serial = canvas_serial;
   g_background.serial = next_serial;

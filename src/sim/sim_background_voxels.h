@@ -14,15 +14,18 @@ typedef struct SimBackgroundVoxelScene {
   uint16_t object_count;
   uint16_t tree_cell_count;
   uint16_t tree_group_count;
+  /* Clearable single-cell brush: round bushes and Marahna's palms. */
+  uint16_t brush_cell_count;
   SimBackgroundMountainField mountains;
   SimBackgroundMountainCaps mountain_caps;
   SimBackgroundVoxelObject objects[kSimBackgroundMaxObjects];
 } SimBackgroundVoxelScene;
 
 /* Pure classification seam, used by the game-thread builder and ROM-free
- * tests. `canvas_pixels` is the complete 512x512 town canvas. */
+ * tests. Every object comes from town state - structure records, the cell map's
+ * terrain metatile identities and its reserved landmark plots - so the result
+ * does not depend on the current palette, brightness or fade. */
 void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
-                                  const uint32_t *canvas_pixels,
                                   SimBackgroundVoxelScene *out);
 
 void SimBackgroundVoxels_Reset(void);

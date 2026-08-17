@@ -13,6 +13,7 @@ typedef struct SimBackgroundVoxelRenderParams {
   uint8_t style;
   uint8_t facing;
   uint8_t render_scale;
+  uint16_t game_frame;
   uint16_t camera_x, camera_y;
   uint16_t town_screen_x0;
   uint16_t light_azimuth_deg;

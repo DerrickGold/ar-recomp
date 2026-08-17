@@ -219,6 +219,7 @@ static SimBackgroundVoxelRenderParams SimVoxelRenderParams(
     .style = slot->sim.background_voxel_style,
     .facing = slot->sim.background_voxel_facing,
     .render_scale = slot->sim.background_voxel_render_scale,
+    .game_frame = slot->sim.game_frame,
     .camera_x = slot->sim.camera_x,
     .camera_y = slot->sim.camera_y,
     .town_screen_x0 = slot->sim.underlay_screen_x0,

@@ -18,10 +18,23 @@ typedef enum SimBackgroundVoxelKind {
   kSimBackgroundVoxel_Windmill,
   kSimBackgroundVoxel_Factory,
   kSimBackgroundVoxel_Tree,
+  /* Permanent broad round canopies: Marahna's mangroves, Kasandora's oasis
+   * stands. A separate metatile family from the pointed evergreen, and in
+   * Marahna the permanent forest while the palms are the clearable brush. */
+  kSimBackgroundVoxel_BroadTree,
+  /* The two clearable brush entries. They share the evergreen's cube crown so
+   * the town's vegetation is one style, and differ by shape and palette. */
   kSimBackgroundVoxel_Palm,
+  kSimBackgroundVoxel_Shrub,
+  kSimBackgroundVoxel_StoryTree,
+  kSimBackgroundVoxel_BloodpoolCastle,
+  kSimBackgroundVoxel_MarahnaTemple,
+  kSimBackgroundVoxel_Pyramid,
 } SimBackgroundVoxelKind;
 
-enum { kSimBackgroundVoxelKindCount = 6 };
+enum {
+  kSimBackgroundVoxelKindCount = kSimBackgroundVoxel_Pyramid + 1,
+};
 
 typedef enum SimBackgroundVoxelFlags {
   kSimBackgroundVoxel_UnderConstruction = 1u << 0,

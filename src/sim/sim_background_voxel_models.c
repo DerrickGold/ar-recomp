@@ -1,6 +1,7 @@
 #include "sim_background_voxel_models.h"
 
 #include <float.h>
+#include <math.h>
 #include <string.h>
 
 #include "sim_background_voxel_region.h"
@@ -108,6 +109,34 @@ static void AddStandardBox(SimBackgroundVoxelModel *model,
                            SimBackgroundVoxelMaterial material) {
   AddBox(model, x0, y0, z0, x1, y1, z1, material,
          kBoxFace_AllVisible);
+}
+
+static void AddOctagonalFrustum(
+    SimBackgroundVoxelModel *model, float center_x, float center_y,
+    float lower_radius, float upper_radius, float z0, float z1,
+    SimBackgroundVoxelMaterial material) {
+  /* A fixed octagon is enough to give yurts a round identity while retaining
+   * the broad planar faces and deliberately stepped shading of the town art. */
+  static const float unit[8][2] = {
+    {0.0f, -1.0f}, {0.7071f, -0.7071f}, {1.0f, 0.0f},
+    {0.7071f, 0.7071f}, {0.0f, 1.0f}, {-0.7071f, 0.7071f},
+    {-1.0f, 0.0f}, {-0.7071f, -0.7071f},
+  };
+  static const uint8_t brightness[8] = {
+    178, 190, 204, 218, 232, 218, 190, 178,
+  };
+  for (int side = 0; side < 8; side++) {
+    int next = (side + 1) & 7;
+    AddFace(model, material, brightness[side],
+            Point(center_x + unit[side][0] * lower_radius,
+                  center_y + unit[side][1] * lower_radius, z0),
+            Point(center_x + unit[next][0] * lower_radius,
+                  center_y + unit[next][1] * lower_radius, z0),
+            Point(center_x + unit[next][0] * upper_radius,
+                  center_y + unit[next][1] * upper_radius, z1),
+            Point(center_x + unit[side][0] * upper_radius,
+                  center_y + unit[side][1] * upper_radius, z1));
+  }
 }
 
 static void AddRoofedBox(SimBackgroundVoxelModel *model,
@@ -307,6 +336,29 @@ static void BuildTentHouse(SimBackgroundVoxelDetail detail,
   }
 }
 
+static void BuildYurtHouse(SimBackgroundVoxelDetail detail,
+                           SimBackgroundVoxelModel *model) {
+  AddStandardBox(model, 2.0f, 2.0f, 0.0f, 14.0f, 14.0f, 0.8f,
+                 kSimVoxelMaterial_Trim);
+  AddOctagonalFrustum(model, 8.0f, 8.0f, 6.0f, 5.6f, 0.8f, 4.6f,
+                      kSimVoxelMaterial_Wall);
+  AddOctagonalFrustum(model, 8.0f, 8.0f, 6.1f, 0.9f, 4.6f, 8.6f,
+                      kSimVoxelMaterial_Roof);
+  AddStandardBox(model, 7.25f, 7.25f, 8.35f, 8.75f, 8.75f, 8.8f,
+                 kSimVoxelMaterial_RoofLight);
+  AddStandardBox(model, 6.5f, 13.15f, 0.8f, 9.5f, 14.25f, 4.2f,
+                 kSimVoxelMaterial_Dark);
+  if (detail == kSimBackgroundVoxelDetail_Low) return;
+  AddStandardBox(model, 6.1f, 13.0f, 4.0f, 9.9f, 14.4f, 4.6f,
+                 kSimVoxelMaterial_Trim);
+  if (detail >= kSimBackgroundVoxelDetail_High) {
+    AddStandardBox(model, 3.0f, 10.8f, 2.0f, 4.8f, 12.5f, 3.6f,
+                   kSimVoxelMaterial_WallLight);
+    AddStandardBox(model, 11.2f, 10.8f, 2.0f, 13.0f, 12.5f, 3.6f,
+                   kSimVoxelMaterial_WallLight);
+  }
+}
+
 static void BuildTimberHouse(SimBackgroundVoxelDetail detail,
                              SimBackgroundVoxelModel *model) {
   AddStandardBox(model, 1.7f, 2.5f, 0.0f, 14.3f, 15.0f, 1.4f,
@@ -355,31 +407,36 @@ static void BuildBloodpoolHouse(SimBackgroundVoxelDetail detail,
                    kSimVoxelMaterial_Dark);
 }
 
-static void BuildKasandoraEarlyStoneHouse(
-    SimBackgroundVoxelDetail detail,
-    SimBackgroundVoxelModel *model) {
-  AddStandardBox(model, 1.5f, 2.5f, 0.0f, 14.5f, 15.0f, 1.5f,
+static void BuildAdobeHouse(SimBackgroundVoxelDetail detail,
+                            SimBackgroundVoxelModel *model) {
+  AddStandardBox(model, 1.0f, 2.0f, 0.0f, 15.0f, 15.0f, 1.3f,
                  kSimVoxelMaterial_Trim);
-  AddStandardBox(model, 2.5f, 3.5f, 1.5f, 13.5f, 14.5f, 7.5f,
+  AddStandardBox(model, 2.0f, 3.0f, 1.3f, 14.0f, 14.5f, 9.3f,
                  kSimVoxelMaterial_Wall);
-  AddRoofedBox(model, 3.3f, 4.0f, 7.5f, 12.7f, 14.0f, 9.0f,
-               kSimVoxelMaterial_WallLight);
-  AddGableRoofX(model, 2.3f, 13.7f, 3.0f, 14.8f, 9.0f, 10.5f,
-                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
-  AddStandardBox(model, 6.2f, 14.0f, 1.5f, 9.8f, 15.3f, 6.5f,
+  AddStandardBox(model, 1.5f, 2.5f, 9.3f, 14.5f, 15.0f, 10.2f,
+                 kSimVoxelMaterial_Roof);
+  AddStandardBox(model, 2.0f, 3.0f, 10.2f, 14.0f, 4.0f, 11.0f,
+                 kSimVoxelMaterial_Trim);
+  AddStandardBox(model, 2.0f, 13.5f, 10.2f, 14.0f, 14.5f, 11.0f,
+                 kSimVoxelMaterial_Trim);
+  AddStandardBox(model, 2.0f, 4.0f, 10.2f, 3.0f, 13.5f, 11.0f,
+                 kSimVoxelMaterial_Trim);
+  AddStandardBox(model, 13.0f, 4.0f, 10.2f, 14.0f, 13.5f, 11.0f,
+                 kSimVoxelMaterial_Trim);
+  AddStandardBox(model, 6.2f, 14.0f, 1.3f, 9.8f, 15.3f, 7.2f,
                  kSimVoxelMaterial_Dark);
   if (detail == kSimBackgroundVoxelDetail_Low) return;
-  AddStandardBox(model, 3.5f, 14.0f, 3.5f, 5.5f, 15.2f, 5.8f,
+  AddStandardBox(model, 3.2f, 14.0f, 4.0f, 5.2f, 15.2f, 6.4f,
                  kSimVoxelMaterial_Dark);
-  AddStandardBox(model, 10.5f, 14.0f, 3.5f, 12.5f, 15.2f, 5.8f,
+  AddStandardBox(model, 10.8f, 14.0f, 4.0f, 12.8f, 15.2f, 6.4f,
                  kSimVoxelMaterial_Dark);
   if (detail >= kSimBackgroundVoxelDetail_High)
-    AddStandardBox(model, 2.2f, 13.9f, 7.0f, 13.8f, 15.3f, 7.8f,
-                   kSimVoxelMaterial_Trim);
+    AddStandardBox(model, 5.6f, 4.0f, 10.1f, 10.4f, 8.0f, 10.8f,
+                   kSimVoxelMaterial_WallLight);
 }
 
-static void BuildKasandoraStoneHouse(SimBackgroundVoxelDetail detail,
-                                     SimBackgroundVoxelModel *model) {
+static void BuildStoneHouse(SimBackgroundVoxelDetail detail,
+                            SimBackgroundVoxelModel *model) {
   AddStandardBox(model, 1.0f, 2.0f, 0.0f, 15.0f, 15.0f, 1.5f,
                  kSimVoxelMaterial_Trim);
   AddRoofedBox(model, 2.0f, 3.0f, 1.5f, 14.0f, 14.5f, 10.0f,
@@ -430,8 +487,8 @@ static void BuildAitosHouse(SimBackgroundVoxelDetail detail,
                    kSimVoxelMaterial_Glass);
 }
 
-static void BuildMarahnaHouse(SimBackgroundVoxelDetail detail,
-                              SimBackgroundVoxelModel *model) {
+static void BuildMarahnaStiltHouse(SimBackgroundVoxelDetail detail,
+                                   SimBackgroundVoxelModel *model) {
   for (int post = 0; post < 4; post++) {
     float x = post & 1 ? 12.5f : 2.5f;
     float y = post & 2 ? 13.5f : 4.0f;
@@ -456,6 +513,38 @@ static void BuildMarahnaHouse(SimBackgroundVoxelDetail detail,
                    kSimVoxelMaterial_Wood);
 }
 
+static void BuildMarahnaLogCabin(SimBackgroundVoxelDetail detail,
+                                 SimBackgroundVoxelModel *model) {
+  AddStandardBox(model, 1.4f, 2.5f, 0.0f, 14.6f, 15.0f, 1.2f,
+                 kSimVoxelMaterial_Trim);
+  AddRoofedBox(model, 2.2f, 3.5f, 1.2f, 13.8f, 14.5f, 8.0f,
+               kSimVoxelMaterial_Wall);
+  AddGableRoofX(model, 0.8f, 15.2f, 2.2f, 15.0f, 8.0f, 12.0f,
+                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
+  AddStandardBox(model, 6.3f, 14.0f, 1.2f, 9.7f, 15.3f, 6.8f,
+                 kSimVoxelMaterial_Dark);
+  if (detail == kSimBackgroundVoxelDetail_Low) return;
+  for (int course = 0; course < 3; course++) {
+    float z = 2.1f + course * 1.9f;
+    AddStandardBox(model, 2.0f, 14.0f, z, 6.0f, 15.25f, z + 0.55f,
+                   kSimVoxelMaterial_Wood);
+    AddStandardBox(model, 10.0f, 14.0f, z, 14.0f, 15.25f, z + 0.55f,
+                   kSimVoxelMaterial_Wood);
+  }
+  AddStandardBox(model, 3.2f, 14.0f, 3.7f, 5.2f, 15.3f, 6.1f,
+                 kSimVoxelMaterial_Dark);
+  AddStandardBox(model, 10.8f, 14.0f, 3.7f, 12.8f, 15.3f, 6.1f,
+                 kSimVoxelMaterial_Dark);
+  if (detail >= kSimBackgroundVoxelDetail_High) {
+    AddStandardBox(model, 1.5f, 14.5f, 7.4f, 14.5f, 15.7f, 8.2f,
+                   kSimVoxelMaterial_Trim);
+    AddStandardBox(model, 2.0f, 3.0f, 7.2f, 3.0f, 14.5f, 8.3f,
+                   kSimVoxelMaterial_Wood);
+    AddStandardBox(model, 13.0f, 3.0f, 7.2f, 14.0f, 14.5f, 8.3f,
+                   kSimVoxelMaterial_Wood);
+  }
+}
+
 static void BuildHouse(const SimBackgroundVoxelObject *object,
                        SimBackgroundVoxelDetail detail,
                        SimBackgroundVoxelModel *model) {
@@ -473,17 +562,26 @@ static void BuildHouse(const SimBackgroundVoxelObject *object,
     case kSimBackgroundHouseStyle_Bloodpool:
       BuildBloodpoolHouse(detail, model);
       break;
-    case kSimBackgroundHouseStyle_KasandoraEarlyStone:
-      BuildKasandoraEarlyStoneHouse(detail, model);
+    case kSimBackgroundHouseStyle_Yurt:
+      BuildYurtHouse(detail, model);
       break;
-    case kSimBackgroundHouseStyle_KasandoraStone:
-      BuildKasandoraStoneHouse(detail, model);
+    case kSimBackgroundHouseStyle_WhiteTent:
+      BuildTentHouse(detail, model);
+      break;
+    case kSimBackgroundHouseStyle_Adobe:
+      BuildAdobeHouse(detail, model);
+      break;
+    case kSimBackgroundHouseStyle_Stone:
+      BuildStoneHouse(detail, model);
       break;
     case kSimBackgroundHouseStyle_Aitos:
       BuildAitosHouse(detail, model);
       break;
-    case kSimBackgroundHouseStyle_Marahna:
-      BuildMarahnaHouse(detail, model);
+    case kSimBackgroundHouseStyle_MarahnaStilt:
+      BuildMarahnaStiltHouse(detail, model);
+      break;
+    case kSimBackgroundHouseStyle_MarahnaLogCabin:
+      BuildMarahnaLogCabin(detail, model);
       break;
     case kSimBackgroundHouseStyle_Count:
       BuildFillmoreHouse(object, detail, model);
@@ -550,10 +648,6 @@ static void BuildCathedral(SimBackgroundVoxelDetail detail,
       AddStandardBox(model, x, 29.1f, 6.0f, x + 1.8f, 30.2f, 10.0f,
                      kSimVoxelMaterial_Dark);
     }
-    AddStandardBox(model, 15.2f, 18.0f, 21.0f, 16.8f, 20.0f, 24.0f,
-                   kSimVoxelMaterial_Trim);
-    AddStandardBox(model, 14.0f, 18.0f, 22.0f, 18.0f, 20.0f, 23.2f,
-                   kSimVoxelMaterial_Trim);
   }
 }
 
@@ -743,13 +837,34 @@ static void BuildFactory(const SimBackgroundVoxelObject *object,
 
 enum { kTreeCrownMaxResolution = 9 };
 
-static bool TreeCrownVoxel(int x, int y, int z, int resolution,
-                           uint32_t seed,
-                           SimBackgroundVoxelTreeStyle style) {
-  float nx = ((x + 0.5f) * 2.0f / resolution) - 1.0f;
-  float ny = ((y + 0.5f) * 2.0f / resolution) - 1.0f;
-  float height = (z + 0.5f) / resolution;
-  uint32_t profile = seed % 4u;
+/* Every canopy in the town is the same stepped cube crown; only its profile,
+ * scale and colour ramp change. Keeping one builder is what makes a bush, a
+ * mangrove and the ancient tree read as the same authored vegetation style
+ * while staying individually recognizable. */
+typedef enum SimBackgroundCrownShape {
+  /* Pointed and tiered. */
+  kCrownShape_Evergreen,
+  /* Squat sphere, widest below the middle: the $01 bush. */
+  kCrownShape_Bush,
+  /* Broad rounded canopy with a flatter underside: the mangrove family and,
+   * at landmark scale, Northwall's ancient tree. */
+  kCrownShape_Broad,
+} SimBackgroundCrownShape;
+
+typedef struct SimBackgroundCrownGeometry {
+  /* Half-open span the crown occupies in model X/Y, and its Z extent. */
+  float center_x, center_y, span, base_z, height;
+} SimBackgroundCrownGeometry;
+
+/* Shadow, mid and highlight, bottom-up. The story tree passes snow as its
+ * highlight so its sunlit faces are white without recolouring the underside. */
+typedef struct SimBackgroundCrownRamp {
+  SimBackgroundVoxelMaterial dark, mid, light;
+} SimBackgroundCrownRamp;
+
+static bool EvergreenCrownVoxel(float nx, float ny, float height,
+                                int z, int resolution, uint32_t profile,
+                                SimBackgroundVoxelTreeStyle style) {
   if (profile == 1u) nx -= height > 0.35f ? 0.10f : -0.04f;
   if (profile == 2u) ny += height > 0.55f ? 0.12f : -0.05f;
   float radius = 1.02f - height * (profile == 3u ? 0.96f : 0.90f);
@@ -767,49 +882,90 @@ static bool TreeCrownVoxel(int x, int y, int z, int resolution,
   int tier_offset = (int)(profile & 1u);
   if (z + 1 < resolution && (z + tier_offset) % tier == 0)
     radius += profile == 3u ? 0.13f : 0.08f;
-  if (z + 1 == resolution)
-    return x == resolution / 2 && y == resolution / 2;
   return nx * nx + ny * ny <= radius * radius;
 }
 
-static SimBackgroundVoxelMaterial TreeCrownMaterial(
+/* Half-width of a unit sphere sliced at `height`, with the widest ring at
+ * `waist` and a vertical squash so the shape stays a ball rather than a cone.
+ * `scale` below 1 is what keeps the widest ring inside the grid corners; at 1
+ * the crown fills its whole cell and reads as a cube however round the maths
+ * is. */
+static float RoundCrownRadius(float height, float waist, float scale) {
+  float t = (height - waist) / (height >= waist ? 1.0f - waist : waist);
+  float squared = 1.0f - t * t;
+  return squared <= 0.0f ? 0.0f : sqrtf(squared) * scale;
+}
+
+static bool CrownVoxel(SimBackgroundCrownShape shape,
+                       int x, int y, int z, int resolution,
+                       uint32_t seed,
+                       SimBackgroundVoxelTreeStyle style) {
+  float nx = ((x + 0.5f) * 2.0f / resolution) - 1.0f;
+  float ny = ((y + 0.5f) * 2.0f / resolution) - 1.0f;
+  float height = (z + 0.5f) / resolution;
+  uint32_t profile = seed % 4u;
+  if (shape == kCrownShape_Evergreen) {
+    /* One unmistakable apex voxel. Rounded crowns must not take it, or a bush
+     * grows a spike. */
+    if (z + 1 == resolution)
+      return x == resolution / 2 && y == resolution / 2;
+    return EvergreenCrownVoxel(
+        nx, ny, height, z, resolution, profile, style);
+  }
+  float radius = shape == kCrownShape_Bush
+      ? RoundCrownRadius(height, 0.46f, 0.90f)
+      : RoundCrownRadius(height, 0.36f, 0.97f);
+  /* Seeded lean and a lumpy shoulder: the source art is a cluster of rounded
+   * clumps, not a billiard ball. */
+  if (profile == 1u) nx -= 0.08f;
+  if (profile == 2u) ny += 0.08f;
+  if (profile == 3u) radius -= 0.05f;
+  int tier = resolution >= 7 ? 3 : 2;
+  if (z + 1 < resolution && (z + (int)(profile & 1u)) % tier == 0)
+    radius += 0.07f;
+  return nx * nx + ny * ny <= radius * radius;
+}
+
+static SimBackgroundVoxelMaterial CrownMaterial(
+    const SimBackgroundCrownRamp *ramp,
     uint32_t seed, int x, int y, int z, int resolution,
     SimBackgroundVoxelDetail detail) {
-  if (z * 4 < resolution)
-    return kSimVoxelMaterial_LeavesDark;
-  if (z * 3 >= resolution * 2)
-    return kSimVoxelMaterial_LeavesLight;
+  if (z * 4 < resolution) return ramp->dark;
+  if (z * 3 >= resolution * 2) return ramp->light;
   if (detail >= kSimBackgroundVoxelDetail_High) {
     uint32_t patch = seed ^ (uint32_t)x * 0x9E37u ^
         (uint32_t)y * 0x7F4Au ^ (uint32_t)z * 0x45D9u;
-    if (patch % 13u == 0)
-      return kSimVoxelMaterial_LeavesLight;
-    if (patch % 17u == 0)
-      return kSimVoxelMaterial_LeavesDark;
+    if (patch % 13u == 0) return ramp->light;
+    if (patch % 17u == 0) return ramp->dark;
   }
-  return kSimVoxelMaterial_Leaves;
+  return ramp->mid;
 }
 
-static void BuildTreeCrown(SimBackgroundVoxelDetail detail,
-                           SimBackgroundVoxelModel *model,
-                           uint32_t seed, float offset_x, float offset_y,
-                           SimBackgroundVoxelTreeStyle style) {
+static void BuildVoxelCrown(SimBackgroundVoxelDetail detail,
+                            SimBackgroundVoxelModel *model, uint32_t seed,
+                            SimBackgroundCrownShape shape,
+                            const SimBackgroundCrownGeometry *geometry,
+                            const SimBackgroundCrownRamp *ramp,
+                            SimBackgroundVoxelTreeStyle style) {
   bool occupied[kTreeCrownMaxResolution][kTreeCrownMaxResolution]
                [kTreeCrownMaxResolution] = {{{false}}};
-  int resolution = DetailChoice(detail, 3, 5, 7, 9);
+  /* A cone fills about a third of its grid and a ball more than half, so the
+   * round shapes reach the same authored budget at a coarser step. Pushing
+   * them to the evergreen's ladder only overflows the box table, which
+   * truncates the crown rather than refining it. */
+  int resolution = shape == kCrownShape_Evergreen
+      ? DetailChoice(detail, 3, 5, 7, 9)
+      : DetailChoice(detail, 3, 5, 6, 7);
   for (int z = 0; z < resolution; z++)
     for (int y = 0; y < resolution; y++)
       for (int x = 0; x < resolution; x++)
-        occupied[x][y][z] = TreeCrownVoxel(
-            x, y, z, resolution, seed, style);
+        occupied[x][y][z] = CrownVoxel(
+            shape, x, y, z, resolution, seed, style);
 
-  const float crown_x0 = 1.0f + offset_x;
-  const float crown_y0 = 1.0f + offset_y;
-  const float crown_z0 = 3.5f;
-  const float voxel_xy = 14.0f / resolution;
-  const float crown_height =
-      style == kSimBackgroundTreeStyle_SnowFir ? 12.5f : 11.5f;
-  const float voxel_z = crown_height / resolution;
+  const float crown_x0 = geometry->center_x - geometry->span * 0.5f;
+  const float crown_y0 = geometry->center_y - geometry->span * 0.5f;
+  const float voxel_xy = geometry->span / resolution;
+  const float voxel_z = geometry->height / resolution;
   for (int z = 0; z < resolution; z++)
     for (int y = 0; y < resolution; y++)
       for (int x = 0; x < resolution; x++) {
@@ -826,29 +982,38 @@ static void BuildTreeCrown(SimBackgroundVoxelDetail detail,
         AddBox(model,
                crown_x0 + x * voxel_xy,
                crown_y0 + y * voxel_xy,
-               crown_z0 + z * voxel_z,
+               geometry->base_z + z * voxel_z,
                crown_x0 + (x + 1) * voxel_xy,
                crown_y0 + (y + 1) * voxel_xy,
-               crown_z0 + (z + 1) * voxel_z,
-               TreeCrownMaterial(seed, x, y, z, resolution, detail), faces);
+               geometry->base_z + (z + 1) * voxel_z,
+               CrownMaterial(ramp, seed, x, y, z, resolution, detail),
+               faces);
       }
 
   /* Neighbour metadata is deliberately not turned into geometry. Earlier
    * connector cuboids made only some sides of a tree sprout square foliage
-   * bars, especially at the edge of a forest. Adjacent pointed crowns may
-   * overlap naturally after projection without changing either silhouette. */
+   * bars, especially at the edge of a forest. Adjacent crowns may overlap
+   * naturally after projection without changing either silhouette. */
+}
+
+static const SimBackgroundCrownRamp kLeafRamp = {
+  kSimVoxelMaterial_LeavesDark,
+  kSimVoxelMaterial_Leaves,
+  kSimVoxelMaterial_LeavesLight,
+};
+
+static uint32_t FoliageSeed(const SimBackgroundVoxelObject *object) {
+  return (uint32_t)object->cell_x * 0x45D9F3Bu ^
+      (uint32_t)object->cell_y * 0x119DE1F3u ^
+      (uint32_t)object->group * 0x3449u;
 }
 
 static void BuildTree(const SimBackgroundVoxelObject *object,
                       SimBackgroundVoxelDetail detail,
                       SimBackgroundVoxelModel *model) {
-  uint32_t seed = (uint32_t)object->cell_x * 0x45D9F3Bu ^
-      (uint32_t)object->cell_y * 0x119DE1F3u ^
-      (uint32_t)object->group * 0x3449u;
+  uint32_t seed = FoliageSeed(object);
   float offset_x = ((int)(seed & 3u) - 1.5f) * 0.18f;
   float offset_y = ((int)((seed >> 2) & 3u) - 1.5f) * 0.18f;
-  SimBackgroundVoxelTreeStyle tree_style =
-      SimBackgroundVoxelRegion_TreeStyle(object->town);
 
   /* Every tree is an authored object, including forest interiors. A compact
    * tapered trunk supports a pointed, tiered evergreen crown with internal
@@ -859,7 +1024,86 @@ static void BuildTree(const SimBackgroundVoxelObject *object,
                  kSimVoxelMaterial_Trunk);
   AddStandardBox(model, 7.0f, 7.0f, 3.4f, 9.0f, 9.0f, 5.5f,
                  kSimVoxelMaterial_Trunk);
-  BuildTreeCrown(detail, model, seed, offset_x, offset_y, tree_style);
+  SimBackgroundVoxelTreeStyle tree_style =
+      SimBackgroundVoxelRegion_TreeStyle(object->town);
+  SimBackgroundCrownGeometry crown = {
+    .center_x = 8.0f + offset_x,
+    .center_y = 8.0f + offset_y,
+    .span = 14.0f,
+    .base_z = 3.5f,
+    .height = tree_style == kSimBackgroundTreeStyle_SnowFir ? 12.5f : 11.5f,
+  };
+  BuildVoxelCrown(detail, model, seed, kCrownShape_Evergreen,
+                  &crown, &kLeafRamp, tree_style);
+}
+
+static void BuildBroadTree(const SimBackgroundVoxelObject *object,
+                           SimBackgroundVoxelDetail detail,
+                           SimBackgroundVoxelModel *model) {
+  /* The broad canopy family ($05-$07/$0D-$0F/$15-$17/$1D-$1F/$26/$27) is a
+   * mass of rounded clumps over a short, visibly forked trunk - Marahna's
+   * mangroves. Same cube crown as the evergreen so the two sit together as one
+   * style, but round rather than pointed, and lower and wider. */
+  uint32_t seed = FoliageSeed(object);
+  float offset_x = ((int)(seed & 3u) - 1.5f) * 0.16f;
+  float offset_y = ((int)((seed >> 2) & 3u) - 1.5f) * 0.16f;
+
+  AddStandardBox(model, 6.5f, 6.5f, 0.0f, 9.5f, 9.5f, 4.6f,
+                 kSimVoxelMaterial_Trunk);
+  if (detail >= kSimBackgroundVoxelDetail_Balanced) {
+    /* The exposed roots the source art shows below the canopy. */
+    AddStandardBox(model, 4.4f, 7.0f, 0.0f, 6.7f, 9.0f, 2.4f,
+                   kSimVoxelMaterial_Trunk);
+    AddStandardBox(model, 9.3f, 7.0f, 0.0f, 11.6f, 9.0f, 2.6f,
+                   kSimVoxelMaterial_Trunk);
+  }
+  /* Broader and flatter than the bush, and taller, so the two round crowns
+   * are never mistaken for each other at map scale. */
+  SimBackgroundCrownGeometry crown = {
+    .center_x = 8.0f + offset_x,
+    .center_y = 8.0f + offset_y,
+    .span = 14.5f,
+    .base_z = 3.4f,
+    .height = 10.6f,
+  };
+  BuildVoxelCrown(detail, model, seed, kCrownShape_Broad,
+                  &crown, &kLeafRamp,
+                  SimBackgroundVoxelRegion_TreeStyle(object->town));
+}
+
+static void BuildShrub(const SimBackgroundVoxelObject *object,
+                       SimBackgroundVoxelDetail detail,
+                       SimBackgroundVoxelModel *model) {
+  /* Metatile $01: one bright round crown 13 source pixels across, standing on
+   * a short trunk the art draws as a 5x2 shadowed stub with a single brown
+   * pixel. It uses the evergreen's cube crown so the town reads as one
+   * vegetation style, and stays distinct by being round, low and bright. */
+  uint32_t seed = FoliageSeed(object);
+  float offset_x = ((int)(seed & 3u) - 1.5f) * 0.22f;
+  float offset_y = ((int)((seed >> 2) & 3u) - 1.5f) * 0.22f;
+  float center_x = 8.0f + offset_x;
+  float center_y = 8.0f + offset_y;
+
+  AddStandardBox(model, center_x - 1.3f, center_y - 1.3f, 0.0f,
+                 center_x + 1.3f, center_y + 1.3f, 4.0f,
+                 kSimVoxelMaterial_Trunk);
+  if (detail >= kSimBackgroundVoxelDetail_High)
+    AddStandardBox(model, center_x - 1.9f, center_y - 1.9f, 0.0f,
+                   center_x + 1.9f, center_y + 1.9f, 0.9f,
+                   kSimVoxelMaterial_Trunk);
+
+  /* Taller than wide, like the 13x15 source sprite, and lifted clear of the
+   * ground so the trunk is actually visible under it. */
+  SimBackgroundCrownGeometry crown = {
+    .center_x = center_x,
+    .center_y = center_y,
+    .span = 12.0f,
+    .base_z = 3.0f,
+    .height = 9.0f,
+  };
+  BuildVoxelCrown(detail, model, seed, kCrownShape_Bush,
+                  &crown, &kLeafRamp,
+                  SimBackgroundVoxelRegion_TreeStyle(object->town));
 }
 
 static void BuildPalm(const SimBackgroundVoxelObject *object,
@@ -943,6 +1187,264 @@ static void BuildPalm(const SimBackgroundVoxelObject *object,
     AddStandardBox(model, 6.55f + lean_x, 6.55f + lean_y, 8.0f,
                    9.45f + lean_x, 9.45f + lean_y, 8.5f,
                    kSimVoxelMaterial_Wood);
+  }
+}
+
+static void BuildStoryTree(SimBackgroundVoxelDetail detail,
+                           SimBackgroundVoxelModel *model) {
+  /* Northwall's ancient tree is the 2x2 $EB plot at (26,14): a single broad
+   * snow-laden canopy about 22 source pixels across, resting on a short knot
+   * of exposed roots. It is the same cube crown the forest uses, at landmark
+   * scale - a smooth frustum dome read as a different material entirely and
+   * sat oddly beside every other piece of vegetation in the town. */
+  AddStandardBox(model, 11.5f, 12.5f, 0.0f, 20.5f, 21.5f, 5.2f,
+                 kSimVoxelMaterial_Trunk);
+  AddStandardBox(model, 13.0f, 14.0f, 4.5f, 19.0f, 20.0f, 8.0f,
+                 kSimVoxelMaterial_Wood);
+  if (detail >= kSimBackgroundVoxelDetail_Balanced) {
+    /* Roots flaring out from under the canopy, kept inside its outline. */
+    AddStandardBox(model, 8.0f, 14.0f, 0.0f, 11.8f, 20.0f, 3.0f,
+                   kSimVoxelMaterial_Trunk);
+    AddStandardBox(model, 20.2f, 14.0f, 0.0f, 24.0f, 20.0f, 3.2f,
+                   kSimVoxelMaterial_Trunk);
+  }
+
+  /* Snow is the crown's highlight rather than a separate slab, so the sunlit
+   * faces are white and the underside keeps the town's subdued forest greens
+   * without any box breaking the silhouette. */
+  static const SimBackgroundCrownRamp kSnowCrown = {
+    kSimVoxelMaterial_LeavesDark,
+    kSimVoxelMaterial_LeavesLight,
+    kSimVoxelMaterial_Snow,
+  };
+  SimBackgroundCrownGeometry crown = {
+    .center_x = 16.0f,
+    .center_y = 16.0f,
+    .span = 23.0f,
+    .base_z = 5.0f,
+    .height = 22.5f,
+  };
+  /* A fixed seed: this is one authored landmark, not a member of a forest
+   * whose neighbours should each lean differently. */
+  BuildVoxelCrown(detail, model, 2u, kCrownShape_Broad,
+                  &crown, &kSnowCrown, kSimBackgroundTreeStyle_SnowFir);
+}
+
+static void BuildBloodpoolCastle(SimBackgroundVoxelDetail detail,
+                                 SimBackgroundVoxelModel *model) {
+  /* The 2x2 $EC plot at (6,16). The source art is a pale stone keep with a
+   * broad tan dome, four gold-capped spires and a colonnaded front terrace -
+   * not the purple factory-sized fort this used to build. Everything below is
+   * in that plot's own 32x32 pixels. */
+  /* Low detail spends its whole 64-face budget on the silhouette, so the
+   * rounded dome and spire cones become boxes rather than disappearing. */
+  bool rounded = detail >= kSimBackgroundVoxelDetail_Balanced;
+  AddStandardBox(model, 1.0f, 6.0f, 0.0f, 31.0f, 31.0f, 3.0f,
+                 kSimVoxelMaterial_Trim);
+  /* The dome covers only the middle of the hall, so the hall keeps its own
+   * roof plane; the compiler drops whatever the dome actually buries. */
+  AddStandardBox(model, 4.0f, 8.0f, 3.0f, 28.0f, 24.0f, 17.0f,
+                 kSimVoxelMaterial_Wall);
+  if (rounded)
+    /* Front terrace. */
+    AddStandardBox(model, 1.5f, 21.0f, 3.0f, 30.5f, 30.5f, 10.5f,
+                   kSimVoxelMaterial_WallLight);
+
+  /* Central domed keep. */
+  if (rounded) {
+    AddOctagonalFrustum(model, 16.0f, 15.0f, 8.4f, 7.0f, 15.0f, 22.0f,
+                        kSimVoxelMaterial_Roof);
+    AddOctagonalFrustum(model, 16.0f, 15.0f, 7.0f, 2.6f, 22.0f, 27.0f,
+                        kSimVoxelMaterial_RoofLight);
+  } else {
+    AddRoofedBox(model, 8.0f, 8.0f, 15.0f, 24.0f, 22.0f, 24.0f,
+                 kSimVoxelMaterial_Roof);
+  }
+  AddStandardBox(model, 14.2f, 13.2f, 26.6f, 17.8f, 16.8f, 29.0f,
+                 kSimVoxelMaterial_Gold);
+
+  /* Four corner spires: stone shafts with tan conical caps. */
+  for (int corner = 0; corner < 4; corner++) {
+    float x = corner & 1 ? 24.0f : 3.0f;
+    float y = corner & 2 ? 22.5f : 9.0f;
+    float shaft_z = corner & 2 ? 20.0f : 23.0f;
+    AddRoofedBox(model, x, y, 3.0f, x + 5.0f, y + 5.0f, shaft_z,
+                 kSimVoxelMaterial_WallLight);
+    if (rounded)
+      AddOctagonalFrustum(model, x + 2.5f, y + 2.5f, 3.1f, 0.4f,
+                          shaft_z, shaft_z + 6.0f,
+                          kSimVoxelMaterial_RoofLight);
+    else
+      AddStandardBox(model, x + 0.6f, y + 0.6f, shaft_z,
+                     x + 4.4f, y + 4.4f, shaft_z + 6.0f,
+                     kSimVoxelMaterial_RoofLight);
+  }
+
+  if (detail >= kSimBackgroundVoxelDetail_Balanced) {
+    /* Terrace parapet and the arcade under the dome. */
+    AddStandardBox(model, 1.2f, 29.6f, 10.5f, 30.8f, 31.2f, 12.6f,
+                   kSimVoxelMaterial_Trim);
+    AddStandardBox(model, 4.0f, 22.6f, 12.0f, 28.0f, 24.4f, 14.0f,
+                   kSimVoxelMaterial_Trim);
+    AddStandardBox(model, 12.5f, 29.0f, 3.0f, 19.5f, 31.4f, 8.5f,
+                   kSimVoxelMaterial_Dark);
+  }
+  if (detail >= kSimBackgroundVoxelDetail_High) {
+    /* Window slits in the spires and the hall's dark arcade openings. */
+    for (int corner = 0; corner < 2; corner++) {
+      float x = corner ? 25.4f : 4.4f;
+      AddStandardBox(model, x, 8.6f, 12.0f, x + 2.2f, 10.0f, 17.0f,
+                     kSimVoxelMaterial_Dark);
+    }
+    for (int bay = 0; bay < 4; bay++) {
+      float x = 6.5f + bay * 5.0f;
+      AddStandardBox(model, x, 23.4f, 15.0f, x + 3.0f, 24.6f, 16.6f,
+                     kSimVoxelMaterial_Dark);
+      AddStandardBox(model, x + 0.4f, 30.2f, 3.4f,
+                     x + 2.6f, 31.4f, 7.4f,
+                     kSimVoxelMaterial_Glass);
+    }
+  }
+  if (detail == kSimBackgroundVoxelDetail_Ultra) {
+    for (int step = 0; step < 3; step++)
+      AddStandardBox(model, 13.0f + step, 30.0f + step * 0.6f,
+                     step * 0.9f, 19.0f - step, 32.0f,
+                     0.9f + step * 0.9f, kSimVoxelMaterial_Paving);
+    AddStandardBox(model, 15.2f, 14.2f, 28.8f, 16.8f, 15.8f, 31.0f,
+                   kSimVoxelMaterial_Gold);
+  }
+}
+
+static void BuildPyramid(SimBackgroundVoxelDetail detail,
+                         SimBackgroundVoxelModel *model) {
+  /* Kasandora's 2x2 $EE plot at (20,4). The source art is a sandstone pyramid
+   * whose lower half shows brick courses and whose upper half is smooth
+   * casing, so the model steps four wide tiers and then tapers cleanly. */
+  /* One constant taper: each step loses the same width per unit of height the
+   * smooth casing above it does, so the whole thing reads as one pyramid
+   * rather than a small cap sitting on a squat plinth. */
+  static const float kTier[][3] = {
+    /* inset from each edge, z0, z1 */
+    {0.5f, 0.0f, 4.4f},
+    {2.7f, 4.4f, 8.4f},
+    {4.7f, 8.4f, 12.2f},
+    {6.6f, 12.2f, 15.6f},
+  };
+  enum { kTiers = (int)(sizeof(kTier) / sizeof(kTier[0])) };
+  for (int tier = 0; tier < kTiers; tier++) {
+    float inset = kTier[tier][0];
+    /* Keep each tier's top face: it is both the brick-course ledge the art
+     * draws and the only thing closing the step above it. Roofing the tiers
+     * instead left an open ring you could see straight through. */
+    AddStandardBox(model, inset, inset + 1.0f, kTier[tier][1],
+                   32.0f - inset, 32.0f - inset, kTier[tier][2],
+                   tier & 1 ? kSimVoxelMaterial_Wall
+                            : kSimVoxelMaterial_WallLight);
+  }
+
+  /* Smooth casing above the stepped base, tapering to the capstone. */
+  int steps = DetailChoice(detail, 2, 3, 5, 6);
+  const float cap_z0 = 15.6f, cap_z1 = 28.0f;
+  const float cap_inset0 = 8.4f, cap_inset1 = 14.4f;
+  for (int step = 0; step < steps; step++) {
+    float low = (float)step / steps, high = (float)(step + 1) / steps;
+    float inset_low = cap_inset0 + (cap_inset1 - cap_inset0) * low;
+    float inset_high = cap_inset0 + (cap_inset1 - cap_inset0) * high;
+    float z0 = cap_z0 + (cap_z1 - cap_z0) * low;
+    float z1 = cap_z0 + (cap_z1 - cap_z0) * high;
+    AddFace(model, kSimVoxelMaterial_WallLight, 232,
+            Point(inset_low, 32.0f - inset_low, z0),
+            Point(32.0f - inset_low, 32.0f - inset_low, z0),
+            Point(32.0f - inset_high, 32.0f - inset_high, z1),
+            Point(inset_high, 32.0f - inset_high, z1));
+    AddFace(model, kSimVoxelMaterial_Wall, 204,
+            Point(32.0f - inset_low, 32.0f - inset_low, z0),
+            Point(32.0f - inset_low, inset_low, z0),
+            Point(32.0f - inset_high, inset_high, z1),
+            Point(32.0f - inset_high, 32.0f - inset_high, z1));
+    AddFace(model, kSimVoxelMaterial_Wall, 190,
+            Point(inset_low, inset_low, z0),
+            Point(inset_low, 32.0f - inset_low, z0),
+            Point(inset_high, 32.0f - inset_high, z1),
+            Point(inset_high, inset_high, z1));
+    AddFace(model, kSimVoxelMaterial_Wall, 178,
+            Point(32.0f - inset_low, inset_low, z0),
+            Point(inset_low, inset_low, z0),
+            Point(inset_high, inset_high, z1),
+            Point(32.0f - inset_high, inset_high, z1));
+  }
+  AddStandardBox(model, cap_inset1, cap_inset1, cap_z1 - 0.6f,
+                 32.0f - cap_inset1, 32.0f - cap_inset1, cap_z1,
+                 kSimVoxelMaterial_WallLight);
+
+  if (detail >= kSimBackgroundVoxelDetail_High) {
+    /* The dark lintel band the art draws where casing meets base. */
+    AddStandardBox(model, 7.0f, 8.0f, 15.2f, 25.0f, 25.0f, 16.0f,
+                   kSimVoxelMaterial_Dark);
+  }
+  if (detail == kSimBackgroundVoxelDetail_Ultra) {
+    AddStandardBox(model, 13.0f, 29.0f, 0.0f, 19.0f, 31.6f, 3.2f,
+                   kSimVoxelMaterial_Dark);
+    AddStandardBox(model, 12.4f, 29.4f, 3.2f, 19.6f, 31.6f, 4.0f,
+                   kSimVoxelMaterial_Trim);
+  }
+}
+
+static void BuildMarahnaTemple(SimBackgroundVoxelDetail detail,
+                               SimBackgroundVoxelModel *model) {
+  /* Marahna's sanctuary is the $C0 cathedral variant, so it occupies the same
+   * 2x2 plot as every other town's cathedral. It stays a tropical stepped
+   * shrine with a central stair rather than a recoloured cathedral. */
+  AddStandardBox(model, 1.0f, 3.0f, 0.0f, 31.0f, 31.5f, 2.0f,
+                 kSimVoxelMaterial_Paving);
+  AddStandardBox(model, 3.5f, 4.5f, 2.0f, 28.5f, 29.5f, 4.0f,
+                 kSimVoxelMaterial_Wall);
+  AddStandardBox(model, 6.0f, 6.0f, 4.0f, 26.0f, 28.0f, 6.5f,
+                 kSimVoxelMaterial_WallLight);
+  AddRoofedBox(model, 8.5f, 8.0f, 6.5f, 23.5f, 28.0f, 14.0f,
+               kSimVoxelMaterial_Wall);
+  AddGableRoofX(model, 7.0f, 25.0f, 6.5f, 29.0f, 14.0f, 21.0f,
+                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
+  AddStandardBox(model, 13.5f, 26.5f, 6.0f, 18.5f, 31.5f, 13.0f,
+                 kSimVoxelMaterial_Dark);
+
+  if (detail >= kSimBackgroundVoxelDetail_Balanced) {
+    for (int step = 0; step < 5; step++)
+      AddStandardBox(model, 11.5f + step * 0.7f, 28.0f + step * 0.75f,
+                     2.0f + step * 0.9f,
+                     20.5f - step * 0.7f, 32.0f,
+                     2.5f + step * 0.9f, kSimVoxelMaterial_WallLight);
+    for (int side = 0; side < 2; side++) {
+      float x = side ? 21.0f : 9.5f;
+      AddStandardBox(model, x, 26.0f, 6.5f, x + 1.5f, 29.8f, 14.0f,
+                     kSimVoxelMaterial_Trim);
+    }
+    AddStandardBox(model, 8.0f, 26.8f, 13.5f, 24.0f, 29.8f, 14.8f,
+                   kSimVoxelMaterial_Gold);
+  }
+  if (detail >= kSimBackgroundVoxelDetail_High) {
+    for (int panel = 0; panel < 2; panel++) {
+      float x = panel ? 19.0f : 10.0f;
+      AddStandardBox(model, x, 27.8f, 8.5f, x + 2.5f, 30.0f, 11.5f,
+                     kSimVoxelMaterial_Dark);
+      AddStandardBox(model, x + 0.5f, 28.0f, 9.0f,
+                     x + 2.0f, 30.3f, 11.0f,
+                     kSimVoxelMaterial_Gold);
+    }
+    AddStandardBox(model, 4.0f, 27.0f, 3.5f, 7.0f, 30.0f, 6.0f,
+                   kSimVoxelMaterial_LeavesDark);
+    AddStandardBox(model, 25.0f, 27.0f, 3.5f, 28.0f, 30.0f, 6.0f,
+                   kSimVoxelMaterial_LeavesDark);
+  }
+  if (detail == kSimBackgroundVoxelDetail_Ultra) {
+    AddStandardBox(model, 14.5f, 28.5f, 14.5f, 17.5f, 30.8f, 17.0f,
+                   kSimVoxelMaterial_Gold);
+    AddStandardBox(model, 15.5f, 28.2f, 17.0f, 16.5f, 30.5f, 19.0f,
+                   kSimVoxelMaterial_Gold);
+    AddStandardBox(model, 3.0f, 28.5f, 1.8f, 8.0f, 31.0f, 2.6f,
+                   kSimVoxelMaterial_Leaves);
+    AddStandardBox(model, 24.0f, 28.5f, 1.8f, 29.0f, 31.0f, 2.6f,
+                   kSimVoxelMaterial_Leaves);
   }
 }
 
@@ -1145,6 +1647,14 @@ static void BuildAlternateFacingHouse(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
     SimBackgroundVoxelModel *model) {
+  SimBackgroundVoxelHouseStyle house_style =
+      SimBackgroundVoxelRegion_HouseStyle(
+          object->town, object->development_level);
+  /* A yurt has no privileged side silhouette. Keeping its circular footprint
+   * intact is both more faithful and avoids inventing a lean-to on alternate
+   * records that merely selected another source perspective. */
+  if (house_style == kSimBackgroundHouseStyle_Yurt) return;
+
   /* The authentic alternate is not a construction frame or a bare 90-degree
    * rotation. Its finished main gable remains readable while a lower side
    * mass reveals the other perspective. Compress and shift the authored main
@@ -1159,10 +1669,8 @@ static void BuildAlternateFacingHouse(
   }
   RecomputeModelBounds(model);
 
-  SimBackgroundVoxelHouseStyle house_style =
-      SimBackgroundVoxelRegion_HouseStyle(
-          object->town, object->development_level);
-  if (house_style == kSimBackgroundHouseStyle_Tent) {
+  if (house_style == kSimBackgroundHouseStyle_Tent ||
+      house_style == kSimBackgroundHouseStyle_WhiteTent) {
     AddStandardBox(model, 0.9f, 5.0f, 0.0f, 6.2f, 14.8f, 1.0f,
                    kSimVoxelMaterial_Trim);
     AddShedRoofX(model, 0.6f, 6.5f, 4.5f, 15.0f, 1.0f, 5.8f,
@@ -1268,11 +1776,17 @@ static void BuildSilhouetteTrim(
           SimBackgroundVoxelRegion_HouseStyle(
               object->town, object->development_level);
       float eave_z = 9.5f;
-      if (house_style == kSimBackgroundHouseStyle_Tent) eave_z = 4.8f;
+      if (house_style == kSimBackgroundHouseStyle_Yurt ||
+          house_style == kSimBackgroundHouseStyle_Adobe)
+        break;
+      if (house_style == kSimBackgroundHouseStyle_Tent ||
+          house_style == kSimBackgroundHouseStyle_WhiteTent)
+        eave_z = 4.8f;
       if (house_style == kSimBackgroundHouseStyle_Timber) eave_z = 7.0f;
-      if (house_style == kSimBackgroundHouseStyle_KasandoraEarlyStone)
-        eave_z = 7.0f;
-      if (house_style == kSimBackgroundHouseStyle_Marahna) eave_z = 7.6f;
+      if (house_style == kSimBackgroundHouseStyle_MarahnaStilt)
+        eave_z = 7.6f;
+      if (house_style == kSimBackgroundHouseStyle_MarahnaLogCabin)
+        eave_z = 7.8f;
       if (object->flags & kSimBackgroundVoxel_AlternateFacing) {
         float wing_z = eave_z < 6.1f ? eave_z : 6.1f;
         AddStandardBox(model, 0.4f, 14.3f, wing_z, 6.8f, 15.6f,
@@ -1348,10 +1862,25 @@ static void BuildSilhouetteTrim(
       break;
     case kSimBackgroundVoxel_Tree:
     case kSimBackgroundVoxel_Palm:
+    case kSimBackgroundVoxel_BroadTree:
       AddStandardBox(model, 5.7f, 6.8f, 0.0f, 10.3f, 9.2f, 1.0f,
                      kSimVoxelMaterial_Trunk);
       AddStandardBox(model, 6.8f, 5.7f, 0.0f, 9.2f, 10.3f, 1.0f,
                      kSimVoxelMaterial_Trunk);
+      break;
+    case kSimBackgroundVoxel_Shrub:
+      /* A root flare at the foot of the trunk. Narrower than the other
+       * families' because the bush's own trunk is a 5px stub. */
+      AddStandardBox(model, 5.9f, 6.6f, 0.0f, 10.1f, 9.4f, 0.8f,
+                     kSimVoxelMaterial_Trunk);
+      AddStandardBox(model, 6.6f, 5.9f, 0.0f, 9.4f, 10.1f, 0.8f,
+                     kSimVoxelMaterial_Trunk);
+      break;
+    case kSimBackgroundVoxel_StoryTree:
+    case kSimBackgroundVoxel_BloodpoolCastle:
+    case kSimBackgroundVoxel_MarahnaTemple:
+    case kSimBackgroundVoxel_Pyramid:
+      /* Landmark silhouettes carry their own authored trim. */
       break;
   }
 }
@@ -1395,6 +1924,10 @@ static void BuildDeterministicVariation(
       SimBackgroundVoxelHouseStyle house_style =
           SimBackgroundVoxelRegion_HouseStyle(
               object->town, object->development_level);
+      if (house_style == kSimBackgroundHouseStyle_Yurt ||
+          house_style == kSimBackgroundHouseStyle_WhiteTent ||
+          house_style == kSimBackgroundHouseStyle_Adobe)
+        break;
       if (house_style != kSimBackgroundHouseStyle_Fillmore) {
         float eave = SimBackgroundVoxelRegion_AuthoredHeight(object) - 3.0f;
         if (eave > 8.0f) eave = 8.0f;
@@ -1413,7 +1946,8 @@ static void BuildDeterministicVariation(
           AddStandardBox(model, 1.3f, 12.5f, 0.4f,
                          4.2f, 15.5f, 2.2f,
                          kSimVoxelMaterial_Wood);
-        } else if (house_style != kSimBackgroundHouseStyle_Tent) {
+        } else if (house_style != kSimBackgroundHouseStyle_Tent &&
+                   house_style != kSimBackgroundHouseStyle_WhiteTent) {
           AddStandardBox(model, 11.0f, 13.7f, 2.0f,
                          14.3f, 15.5f, eave - 0.5f,
                          kSimVoxelMaterial_WallLight);
@@ -1505,11 +2039,17 @@ static void BuildDeterministicVariation(
     }
     case kSimBackgroundVoxel_Tree:
     case kSimBackgroundVoxel_Palm:
+    case kSimBackgroundVoxel_Shrub:
+    case kSimBackgroundVoxel_BroadTree:
       /* Seeded crown profiles already vary the outline. Appending cuboids at
        * this stage produced detached branch blocks on only a few sides. */
       break;
     case kSimBackgroundVoxel_Cathedral:
     case kSimBackgroundVoxel_Windmill:
+    case kSimBackgroundVoxel_StoryTree:
+    case kSimBackgroundVoxel_BloodpoolCastle:
+    case kSimBackgroundVoxel_MarahnaTemple:
+    case kSimBackgroundVoxel_Pyramid:
       /* Unique town landmarks do not need random silhouettes. */
       break;
   }
@@ -1565,8 +2105,26 @@ void SimBackgroundVoxelModel_BuildStyled(
     case kSimBackgroundVoxel_Tree:
       BuildTree(object, detail, out);
       break;
+    case kSimBackgroundVoxel_BroadTree:
+      BuildBroadTree(object, detail, out);
+      break;
     case kSimBackgroundVoxel_Palm:
       BuildPalm(object, detail, out);
+      break;
+    case kSimBackgroundVoxel_Shrub:
+      BuildShrub(object, detail, out);
+      break;
+    case kSimBackgroundVoxel_StoryTree:
+      BuildStoryTree(detail, out);
+      break;
+    case kSimBackgroundVoxel_BloodpoolCastle:
+      BuildBloodpoolCastle(detail, out);
+      break;
+    case kSimBackgroundVoxel_MarahnaTemple:
+      BuildMarahnaTemple(detail, out);
+      break;
+    case kSimBackgroundVoxel_Pyramid:
+      BuildPyramid(detail, out);
       break;
   }
   if (style >= kSimBackgroundVoxelStyle_Trim)
