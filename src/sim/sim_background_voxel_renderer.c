@@ -63,7 +63,7 @@ typedef struct ProjectedMountainReliefFace {
   Scene3DPoint points[4];
   float gpu_depth[4];
   SDL_FPoint uv[4];
-  uint8_t brightness;
+  uint8_t brightness[4];
   uint8_t alpha[4];
 } ProjectedMountainReliefFace;
 
@@ -427,10 +427,10 @@ static void AddProjectedMountainReliefFace(
     float origin_x, float origin_y,
     const float local_x[4], const float local_y[4],
     const float local_z[4], const SDL_FPoint uv[4],
-    uint8_t brightness, const uint8_t alpha[4],
+    const uint8_t brightness[4], const uint8_t alpha[4],
     int *count) {
   if (*count >= kMaxMountainReliefFaces) return;
-  ProjectedMountainReliefFace face = {.brightness = brightness};
+  ProjectedMountainReliefFace face;
   for (int point = 0; point < 4; point++) {
     if (!ProjectVertex(params, axis,
                        origin_x + local_x[point],
@@ -438,6 +438,7 @@ static void AddProjectedMountainReliefFace(
                        &face.points[point], &face.gpu_depth[point]))
       return;
     face.uv[point] = uv[point];
+    face.brightness[point] = brightness[point];
     face.alpha[point] = alpha[point];
   }
   if (IsDegenerate(face.points)) return;
@@ -812,6 +813,7 @@ static void AddMountainStackTile(
   float source_x[4] = {x0, x1, x1, x0};
   float source_y[4] = {y0, y0, y1, y1};
   const uint8_t opaque[4] = {255, 255, 255, 255};
+  const uint8_t lit[4] = {255, 255, 255, 255};
   /* Emit rear copies first for coherent material batching. Visibility is
    * resolved per fragment by the shared D32 target, so this loop order is not
    * a correctness dependency. */
@@ -847,7 +849,7 @@ static void AddMountainStackTile(
     }
     AddProjectedMountainReliefFace(
         params, axis, origin_x, origin_y,
-        local_x, local_y, local_z, uv, 255, opaque,
+        local_x, local_y, local_z, uv, lit, opaque,
         count);
   }
 }
@@ -877,11 +879,22 @@ enum {
   /* A wall needs more than a couple of rows of outline to be worth standing. */
   kMountainSkirtMinimumRows = 2,
 };
+/* Shading down the wall. The mountain face is drawn fully lit, so a wall at a
+ * single darker value meets it in a hard tonal step, and any pixel of
+ * misalignment at that junction then reads as a shelf rather than as an edge.
+ * Ramping from almost the face's own value at the top to a shaded base makes
+ * the join continuous and lets the wall still read as a side. */
+static const uint8_t kMountainSkirtTopBrightness = 240;
+static const uint8_t kMountainSkirtBaseBrightness = 150;
+/* The wall stands a fraction of a pixel proud of the art and starts a hair
+ * above the face it meets. Both are below one source pixel, and they close
+ * the sub-pixel seam the fitted line cannot follow exactly - the outline is
+ * jagged row to row and a single quad can only be straight. */
+static const float kMountainSkirtOutwardMargin = 0.5f;
+static const float kMountainSkirtOverlapPixels = 0.35f;
 /* How far a row's outline may sit inside the fitted line before that row is
  * treated as dither fringe rather than part of the wall. */
 static const float kMountainSkirtStraightTolerance = 1.5f;
-static const uint8_t kMountainSkirtBrightness = 176;
-
 /* Where a tile's art meets the open side of its cell. Derived from the
  * immutable silhouette table, so it is resolved once per tile/side and reused
  * for every frame, object and town. */
@@ -1066,7 +1079,10 @@ static void AddMountainSkirtTile(
       MountainSkirtProfileFor(source_tile, right_edge);
   if (!profile->present) return;
 
-  float cell_x = destination_cell_x * (float)kSimBackgroundCellPixels;
+  float outward = right_edge ? kMountainSkirtOutwardMargin
+                             : -kMountainSkirtOutwardMargin;
+  float cell_x = destination_cell_x * (float)kSimBackgroundCellPixels +
+      outward;
   float cell_top = destination_cell_y * (float)kSimBackgroundCellPixels;
   /* The wall's top edge is the outline itself, so it slants with a shoulder
    * tile's diagonal instead of standing at the cell boundary beside it. */
@@ -1088,10 +1104,10 @@ static void AddMountainSkirtTile(
   MountainPlanePoint(south_x, y1, baseline, relief,
                      south_offset_x, south_offset_y,
                      &south_wall_x, &south_y, &south_z);
-  north_z *= height_scale;
-  south_z *= height_scale;
+  north_z = north_z * height_scale + kMountainSkirtOverlapPixels;
+  south_z = south_z * height_scale + kMountainSkirtOverlapPixels;
   /* Art already sitting on the ground has no wedge to close. */
-  if (north_z <= 0.0f) return;
+  if (north_z <= kMountainSkirtOverlapPixels) return;
 
   float local_x[4] = {
     north_wall_x, south_wall_x, south_wall_x, north_wall_x,
@@ -1115,9 +1131,15 @@ static void AddMountainSkirtTile(
     {(cell_u + profile->inner_first + 0.5f) / kSimTownCanvasPixels, v0},
   };
   const uint8_t opaque[4] = {255, 255, 255, 255};
+  /* Points 0 and 1 are the top edge against the mountain; 2 and 3 stand on
+   * the ground. */
+  const uint8_t brightness[4] = {
+    kMountainSkirtTopBrightness, kMountainSkirtTopBrightness,
+    kMountainSkirtBaseBrightness, kMountainSkirtBaseBrightness,
+  };
   AddProjectedMountainReliefFace(
       params, axis, origin_x, origin_y, local_x, local_y, local_z, uv,
-      kMountainSkirtBrightness, opaque, count);
+      brightness, opaque, count);
 }
 
 static bool MountainCellOccupied(const SimBackgroundMountainObject *object,
@@ -1337,8 +1359,8 @@ static void AppendProjectedMountainReliefFace(
     const ProjectedMountainReliefFace *face) {
   if (!Sim3DDepthPass_IsCollecting()) return;
   Sim3DDepthVertex vertices[4];
-  float shade = face->brightness / 255.0f;
-  for (int point = 0; point < 4; point++)
+  for (int point = 0; point < 4; point++) {
+    float shade = face->brightness[point] / 255.0f;
     vertices[point] = (Sim3DDepthVertex){
       .x = face->points[point].x,
       .y = face->points[point].y,
@@ -1346,6 +1368,7 @@ static void AppendProjectedMountainReliefFace(
       .color = {shade, shade, shade, face->alpha[point] / 255.0f},
       .uv = face->uv[point],
     };
+  }
   Sim3DDepthPass_AppendQuad(kSim3DDepthPass_Mountain, vertices);
 }
 
