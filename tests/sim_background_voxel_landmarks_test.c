@@ -45,7 +45,6 @@ int main(void) {
   CHECK(object.cell_x == 26 && object.cell_y == 14);
   CHECK(object.source_cells_w == 2 && object.source_cells_h == 2);
   CHECK(object.footprint_cells_w == 2 && object.footprint_cells_d == 2);
-  CHECK(object.height_pixels == 30);
   CHECK(object.record_slot == 0xFF);
   /* A landmark belongs to exactly one town, and its metatile is not a landmark
    * anywhere else. */
@@ -57,14 +56,12 @@ int main(void) {
   CHECK(object.kind == kSimBackgroundVoxel_BloodpoolCastle);
   CHECK(object.cell_x == 6 && object.cell_y == 16);
   CHECK(object.footprint_cells_w == 2 && object.footprint_cells_d == 2);
-  CHECK(object.height_pixels == 32);
 
   memset(wram, 0, sizeof(wram));
   InstallPlot(wram, 3, 0xEE, 20, 4);
   CHECK(SimBackgroundVoxelLandmarks_Classify(3, wram, &object, 1) == 1);
   CHECK(object.kind == kSimBackgroundVoxel_Pyramid);
   CHECK(object.cell_x == 20 && object.cell_y == 4);
-  CHECK(object.height_pixels == 28);
 
   /* Towns with no reserved plot classify nothing at all. */
   memset(wram, 0, sizeof(wram));

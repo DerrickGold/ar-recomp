@@ -733,6 +733,16 @@ static void BuildWindmill(const SimBackgroundVoxelObject *object,
   AddStandardBox(model, 14.3f, 14.6f, 19.3f, 17.7f, 16.0f, 22.7f,
                  kSimVoxelMaterial_Wood);
 
+  if (detail >= kSimBackgroundVoxelDetail_Balanced) {
+    /* Balanced gained nothing over Low here: the mill's only step between the
+     * two came from the Trim style, so a player on Basic style saw the same
+     * model at both quality levels. The stage door and its landing are the
+     * lowest-frequency thing the mill can add. */
+    AddStandardBox(model, 12.5f, 13.6f, 2.0f, 19.5f, 15.6f, 2.9f,
+                   kSimVoxelMaterial_Wood);
+    AddStandardBox(model, 8.5f, 3.2f, 17.4f, 23.5f, 14.6f, 18.4f,
+                   kSimVoxelMaterial_Trim);
+  }
   if (detail >= kSimBackgroundVoxelDetail_High) {
     AddBladeInlay(model, 16.0f, 15.0f, 21.0f, dx, dz);
     AddBladeInlay(model, 16.0f, 15.0f, 21.0f, -dz, dx);
@@ -1911,6 +1921,33 @@ static uint32_t ObjectStyleSeed(const SimBackgroundVoxelObject *object) {
       (uint32_t)object->group * 0x27D4EB2Fu;
 }
 
+/* Ultra geometry for the three families with no gable: the yurt, the white
+ * tent and the adobe block. Each gets a smoke hood at its own roof height
+ * plus a shaded doorway awning, so the level is not a no-op for the towns
+ * that use them. */
+static void AddRoundHouseUltraDetail(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelHouseStyle house_style,
+    SimBackgroundVoxelModel *model) {
+  float roof_z = SimBackgroundVoxelRegion_AuthoredHeight(object);
+  AddStandardBox(model, 7.0f, 7.0f, roof_z - 1.0f,
+                 9.0f, 9.0f, roof_z + 1.4f,
+                 kSimVoxelMaterial_Trim);
+  if (house_style == kSimBackgroundHouseStyle_Adobe) {
+    /* A flat roof takes a parapet rather than a canopy. */
+    AddStandardBox(model, 2.6f, 2.6f, roof_z - 0.6f,
+                   13.4f, 13.6f, roof_z + 0.4f,
+                   kSimVoxelMaterial_Trim);
+    return;
+  }
+  AddStandardBox(model, 5.4f, 14.6f, 6.0f, 10.6f, 16.0f, 6.8f,
+                 kSimVoxelMaterial_RoofLight);
+  AddStandardBox(model, 5.8f, 15.1f, 1.0f, 6.4f, 15.7f, 6.1f,
+                 kSimVoxelMaterial_Wood);
+  AddStandardBox(model, 9.6f, 15.1f, 1.0f, 10.2f, 15.7f, 6.1f,
+                 kSimVoxelMaterial_Wood);
+}
+
 static void BuildDeterministicVariation(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
@@ -1926,8 +1963,14 @@ static void BuildDeterministicVariation(
               object->town, object->development_level);
       if (house_style == kSimBackgroundHouseStyle_Yurt ||
           house_style == kSimBackgroundHouseStyle_WhiteTent ||
-          house_style == kSimBackgroundHouseStyle_Adobe)
+          house_style == kSimBackgroundHouseStyle_Adobe) {
+        /* These three have no gable to hang a dormer or porch from, so their
+         * Ultra tier is what a round or flat-roofed dwelling actually shows:
+         * a smoke hood over the roof opening and a shaded doorway awning. */
+        if (detail == kSimBackgroundVoxelDetail_Ultra)
+          AddRoundHouseUltraDetail(object, house_style, model);
         break;
+      }
       if (house_style != kSimBackgroundHouseStyle_Fillmore) {
         float eave = SimBackgroundVoxelRegion_AuthoredHeight(object) - 3.0f;
         if (eave > 8.0f) eave = 8.0f;
@@ -1955,6 +1998,19 @@ static void BuildDeterministicVariation(
                        eave - 0.5f, eave + 0.4f,
                        kSimVoxelMaterial_RoofLight,
                        kSimVoxelMaterial_WallLight);
+        }
+        /* Without this the regional families stop gaining geometry at High,
+         * so selecting Ultra changed nothing for the most numerous object in
+         * a developed town. A ridge cap and a flue are the smallest additions
+         * that read at native resolution on every gabled family. */
+        if (detail == kSimBackgroundVoxelDetail_Ultra) {
+          AddStandardBox(model, 4.0f, 4.6f, eave + 0.6f,
+                         12.0f, 11.4f, eave + 1.2f,
+                         kSimVoxelMaterial_RoofLight);
+          float flue_x = (seed & 4u) ? 10.6f : 3.6f;
+          AddStandardBox(model, flue_x, 6.4f, eave + 1.0f,
+                         flue_x + 1.8f, 8.2f, eave + 4.2f,
+                         kSimVoxelMaterial_Trim);
         }
         break;
       }

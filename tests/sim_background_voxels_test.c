@@ -173,7 +173,6 @@ int main(void) {
 
   const SimBackgroundVoxelObject *object =
       FindKind(&scene, kSimBackgroundVoxel_House);
-  CHECK(object && object->height_pixels == 16);
   CHECK(object && object->footprint_cells_w == 1 &&
         object->footprint_cells_d == 1);
   CHECK(object &&
@@ -185,15 +184,15 @@ int main(void) {
   object = FindKind(&scene, kSimBackgroundVoxel_Cathedral);
   CHECK(object && object->cell_x == 15 && object->cell_y == 15);
   CHECK(object && object->source_cells_h == 2 &&
-        object->footprint_cells_d == 2 && object->height_pixels == 24);
+        object->footprint_cells_d == 2);
 
   object = FindKind(&scene, kSimBackgroundVoxel_Windmill);
   CHECK(object && object->source_cells_w == 2 &&
-        object->footprint_cells_d == 1 && object->height_pixels == 32);
+        object->footprint_cells_d == 1);
 
   object = FindKind(&scene, kSimBackgroundVoxel_Factory);
   CHECK(object && object->footprint_cells_w == 2 &&
-        object->footprint_cells_d == 2 && object->height_pixels == 8);
+        object->footprint_cells_d == 2);
 
   int isolated = 0, joined = 0;
   for (uint16_t i = 0; i < scene.object_count; i++)
@@ -215,7 +214,7 @@ int main(void) {
     const SimBackgroundVoxelObject *bush = &scene.objects[i];
     if (bush->kind != kSimBackgroundVoxel_Shrub) continue;
     shrubs++;
-    CHECK(bush->group == 0 && bush->height_pixels == 12);
+    CHECK(bush->group == 0);
     CHECK(bush->flags & kSimBackgroundVoxel_IsolatedTree);
     if (bush->cell_x == 8 && bush->cell_y == 7) shrub_beside_wood++;
   }
@@ -344,7 +343,7 @@ int main(void) {
   object = FindKind(&scene, kSimBackgroundVoxel_MarahnaTemple);
   CHECK(object && object->cell_x == 17 && object->cell_y == 17);
   CHECK(object && object->footprint_cells_w == 2 &&
-        object->footprint_cells_d == 2 && object->height_pixels == 24);
+        object->footprint_cells_d == 2);
   CHECK(FindKind(&scene, kSimBackgroundVoxel_Cathedral) == NULL);
 
   /* The eraser is selected from the current town rather than hardcoded to

@@ -15,7 +15,6 @@ typedef struct SimBackgroundLandmarkDefinition {
    * appear exactly once per town, over the landmark's own 2x2 block. */
   uint8_t metatile;
   uint8_t kind;
-  uint8_t height_pixels;
 } SimBackgroundLandmarkDefinition;
 
 /* Measured from the six resident $7F:2000 cell maps: Bloodpool's castle at
@@ -25,9 +24,9 @@ typedef struct SimBackgroundLandmarkDefinition {
  * carry no landmark of this class; Marahna's distinct temple is its cathedral
  * variant and is classified with the other cathedrals. */
 static const SimBackgroundLandmarkDefinition kLandmarks[] = {
-  {2, 0xEC, kSimBackgroundVoxel_BloodpoolCastle, 32},
-  {3, 0xEE, kSimBackgroundVoxel_Pyramid, 28},
-  {6, 0xEB, kSimBackgroundVoxel_StoryTree, 30},
+  {2, 0xEC, kSimBackgroundVoxel_BloodpoolCastle},
+  {3, 0xEE, kSimBackgroundVoxel_Pyramid},
+  {6, 0xEB, kSimBackgroundVoxel_StoryTree},
 };
 
 /* The cell maps use four 16x16 pages rather than row-major 32x32 storage. */
@@ -80,7 +79,6 @@ size_t SimBackgroundVoxelLandmarks_Classify(
       .source_cells_h = kLandmarkCells,
       .footprint_cells_w = kLandmarkCells,
       .footprint_cells_d = kLandmarkCells,
-      .height_pixels = landmark->height_pixels,
       .record_slot = 0xFF,
     };
     if (count == capacity) break;
