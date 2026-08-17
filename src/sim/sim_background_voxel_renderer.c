@@ -1585,10 +1585,19 @@ static void DrawModel(
   SimBackgroundVoxelDetail detail = EffectiveDetail(
       object, params, axis, origin_x, origin_y, proportions,
       center_x, center_y);
+  /* Shading rides along with the geometry: none of its inputs move with the
+   * camera, so the cache resolves it once per model per lighting state. */
+  const SimBackgroundVoxelModelShadingKey shading_key = {
+    .light_azimuth_deg = params->light_azimuth_deg,
+    .light_elevation_deg = params->light_elevation_deg,
+    .shading = params->shading,
+    .biome = (uint8_t)g_renderer_state.biome,
+  };
+  const SimBackgroundVoxelModelShading *shading = NULL;
   const SimBackgroundVoxelModel *model = SimBackgroundVoxelModelCache_Get(
       object, detail, (SimBackgroundVoxelStyle)params->style,
-      g_renderer_state.cache_stamp);
-  if (!model || !model->face_count || model->overflow) return;
+      g_renderer_state.cache_stamp, &shading_key, &shading);
+  if (!model || !model->face_count || model->overflow || !shading) return;
   AppendGroundContact(object, palette, params, origin_x, origin_y,
                       proportions);
   /* Faces are submitted as they are projected. The depth pass resolves
@@ -1597,17 +1606,9 @@ static void DrawModel(
    * second pass over 21KB of stack. */
   for (uint16_t face_index = 0; face_index < model->face_count; face_index++) {
     const SimBackgroundVoxelModelFace *source = &model->faces[face_index];
-    ProjectedModelFace face = {
-      .material = (uint8_t)SimBackgroundVoxelBiome_SurfaceMaterial(
-          g_renderer_state.biome, detail,
-          (SimBackgroundVoxelMaterial)source->material, source),
-    };
-    uint8_t directional =
-        SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
-            source, (SimBackgroundVoxelShading)params->shading, light);
-    SimBackgroundVoxelLighting_VertexBrightnesses(
-        source, model, directional,
-        (SimBackgroundVoxelShading)params->shading, face.brightness);
+    ProjectedModelFace face = {.material = shading->material[face_index]};
+    memcpy(face.brightness, shading->brightness[face_index],
+           sizeof(face.brightness));
     bool valid = true;
     for (int point = 0; point < 4; point++) {
       float local_x = center_x +

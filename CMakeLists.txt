@@ -383,6 +383,9 @@ if(BUILD_TESTING)
         src/sim/sim_background_voxel_model_cache.c
         src/sim/sim_background_voxel_models.c
         src/sim/sim_background_voxel_region.c
+        src/sim/sim_background_voxel_lighting.c
+        src/sim/sim_background_voxel_surface.c
+        src/sim/sim_background_voxel_biome.c
     )
     target_include_directories(actraiser_sim_background_voxel_model_cache_test
         PRIVATE
