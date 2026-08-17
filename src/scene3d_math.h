@@ -63,6 +63,19 @@ float Scene3D_WrappedTextureOffset(uint64_t elapsed_ms,
  * this rather than assume every vertex is projectable. */
 float Scene3D_ClipDepth(const float matrix[16], float x, float y, float z);
 
+/* Unit direction across the ground, in authored source pixels, that leads
+ * AWAY from the camera, plus the length of the un-normalized gradient.
+ *
+ * Anything a tilted camera pushes "back" has to use this rather than a fixed
+ * map axis: the sim camera has yaw, a reactive lean and a manual orbit, so
+ * map north stops being away from the viewer the moment any of them moves.
+ * Returns false when the camera looks straight down and the ground has no
+ * gradient at all; callers pick their own fallback. */
+bool Scene3D_GroundDepthDirection(const float matrix[16], float aspect,
+                                  float source_width, float source_height,
+                                  float *out_x, float *out_y,
+                                  float *out_length);
+
 /* GPU depth for the same projection, normalized to SDL_GPU's portable [0, 1]
  * NDC convention (zero near, one far). This retains the Z component that the
  * legacy SDL_RenderGeometry projection discarded. */
