@@ -63,7 +63,6 @@ typedef struct SimBackgroundVoxelObject {
   uint8_t cell_x, cell_y;
   uint8_t source_cells_w, source_cells_h;
   uint8_t footprint_cells_w, footprint_cells_d;
-  uint8_t height_pixels;
   /* Tree-only adjacency. Joined cells retain one source cell apiece so their
    * height does not grow with a component's bounding box. */
   uint8_t tree_edges;

@@ -470,7 +470,11 @@ int main(void) {
     CHECK(low.face_count <= balanced.face_count);
     CHECK(balanced.face_count <= high.face_count);
     CHECK(high.face_count <= ultra.face_count);
-    CHECK(low.face_count < ultra.face_count);
+    /* Every step of the quality setting must buy something, or the level is a
+     * label the player can select for no effect. */
+    CHECK(low.face_count < balanced.face_count);
+    CHECK(balanced.face_count < high.face_count);
+    CHECK(high.face_count < ultra.face_count);
   }
 
   /* Every density/style boundary is a real hard budget. This exercises more
@@ -529,6 +533,32 @@ int main(void) {
                 SimBackgroundVoxelModel_FaceBudget(
                     (SimBackgroundVoxelDetail)detail));
         }
+
+  /* Houses are the most numerous object in a developed town, so a regional
+   * family that stops gaining geometry short of Ultra is where the quality
+   * setting most visibly does nothing. Sixteen of the eighteen identities
+   * were flat between High and Ultra. */
+  for (int town = 1; town <= 6; town++)
+    for (int level = 0; level < 3; level++) {
+      SimBackgroundVoxelObject object = {
+        .kind = kSimBackgroundVoxel_House,
+        .town = (uint8_t)town,
+        .development_level = (uint8_t)level,
+        .cell_x = (uint8_t)(town * 3),
+        .cell_y = (uint8_t)(level * 5),
+        .record_slot = (uint8_t)(town * 3 + level),
+      };
+      uint16_t previous = 0;
+      for (int detail = kSimBackgroundVoxelDetail_Low;
+           detail < kSimBackgroundVoxelDetail_Count; detail++) {
+        SimBackgroundVoxelModel step;
+        SimBackgroundVoxelModel_BuildStyled(
+            &object, (SimBackgroundVoxelDetail)detail,
+            kSimBackgroundVoxelStyle_Varied, &step);
+        CHECK(!step.overflow && step.face_count > previous);
+        previous = step.face_count;
+      }
+    }
 
   CHECK(UniqueVariedModels(kSimBackgroundVoxel_House,
                            kSimBackgroundVoxelDetail_High) >= 4);

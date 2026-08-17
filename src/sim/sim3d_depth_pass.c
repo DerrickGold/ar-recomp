@@ -564,6 +564,15 @@ static SDL_GPUTexture *TextureForLayer(
   }
 }
 
+/* Opaque geometry writes depth; transparent effects only test against it.
+ * Selecting per layer rather than switching once part-way through the loop
+ * keeps that a property of the layer instead of a property of where the layer
+ * happens to sit in the enum. */
+static SDL_GPUGraphicsPipeline *PipelineForLayer(Sim3DDepthPassLayer layer) {
+  return layer == kSim3DDepthPass_Effect
+      ? g_depth_pass.effect_pipeline : g_depth_pass.pipeline;
+}
+
 SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
                                    SDL_Texture *billboard_texture) {
   if (!g_depth_pass.collecting || renderer != g_depth_pass.renderer)
@@ -655,16 +664,20 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
     SDL_CancelGPUCommandBuffer(commands);
     return NULL;
   }
-  SDL_BindGPUGraphicsPipeline(pass, g_depth_pass.pipeline);
   SDL_GPUBufferBinding vertex_binding = {
     .buffer = g_depth_pass.vertex_buffer,
     .offset = 0,
   };
   SDL_BindGPUVertexBuffers(pass, 0, &vertex_binding, 1);
+  SDL_GPUGraphicsPipeline *bound = NULL;
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (!g_depth_pass.lists[i].count) continue;
-    if (i == kSim3DDepthPass_Effect)
-      SDL_BindGPUGraphicsPipeline(pass, g_depth_pass.effect_pipeline);
+    SDL_GPUGraphicsPipeline *pipeline =
+        PipelineForLayer((Sim3DDepthPassLayer)i);
+    if (pipeline != bound) {
+      SDL_BindGPUGraphicsPipeline(pass, pipeline);
+      bound = pipeline;
+    }
     SDL_GPUTexture *texture = TextureForLayer(
         (Sim3DDepthPassLayer)i, billboard_texture);
     SDL_GPUTextureSamplerBinding texture_binding = {

@@ -34,6 +34,11 @@ enum {
       kSimBackgroundMountainReliefMaxStackLayers,
 };
 
+/* Contact shading is a ground decal. It is lifted by a fraction of a source
+ * pixel so it wins the depth test against the ground plane it sits on without
+ * being separable from it at any supported zoom. */
+static const float kContactLiftPixels = 0.06f;
+
 typedef struct SimBackgroundGeometryBatch {
   SDL_Vertex vertices[kMaxVertices];
   int indices[kMaxIndices];
@@ -264,16 +269,25 @@ static void ResolveProjectionAxes(
             params, (SimBackgroundVoxelKind)kind));
 }
 
-static bool ProjectPoint(const SimBackgroundVoxelRenderParams *params,
-                         const SimBackgroundProjectionAxis *axis,
-                         float texture_x, float texture_y, float height_pixels,
-                         Scene3DPoint *out, float *clip_depth) {
-  float vertical_height = height_pixels * axis->height_scale;
-  texture_x += height_pixels * axis->x_per_height;
-  texture_y += height_pixels * axis->y_per_height;
-  float world_x, world_y, world_z;
-  TexturePointToWorld(params, texture_x, texture_y, vertical_height,
-                      &world_x, &world_y, &world_z);
+/* Leans a model-local point and maps it into world units. Kept separate so the
+ * screen position and the GPU depth of one vertex are derived from a single
+ * transform instead of repeating it per output. */
+static void LeanedPointToWorld(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis,
+    float texture_x, float texture_y, float height_pixels,
+    float *world_x, float *world_y, float *world_z) {
+  TexturePointToWorld(
+      params,
+      texture_x + height_pixels * axis->x_per_height,
+      texture_y + height_pixels * axis->y_per_height,
+      height_pixels * axis->height_scale,
+      world_x, world_y, world_z);
+}
+
+static bool ProjectWorldToScreen(
+    const SimBackgroundVoxelRenderParams *params,
+    float world_x, float world_y, float world_z, Scene3DPoint *out) {
   Scene3DPoint projected;
   if (!Scene3D_ProjectWorldPoint(
           params->matrix, world_x, world_y, world_z,
@@ -286,25 +300,39 @@ static bool ProjectPoint(const SimBackgroundVoxelRenderParams *params,
     projected.y = floorf(projected.y) + 0.5f;
   }
   *out = projected;
+  return true;
+}
+
+static bool ProjectPoint(const SimBackgroundVoxelRenderParams *params,
+                         const SimBackgroundProjectionAxis *axis,
+                         float texture_x, float texture_y, float height_pixels,
+                         Scene3DPoint *out, float *clip_depth) {
+  float world_x, world_y, world_z;
+  LeanedPointToWorld(params, axis, texture_x, texture_y, height_pixels,
+                     &world_x, &world_y, &world_z);
+  if (!ProjectWorldToScreen(params, world_x, world_y, world_z, out))
+    return false;
   if (clip_depth)
     *clip_depth = Scene3D_ClipDepth(
         params->matrix, world_x, world_y, world_z);
   return true;
 }
 
-static bool ProjectGpuDepth(
-    const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundProjectionAxis *axis,
-    float texture_x, float texture_y, float height_pixels,
-    float *gpu_depth) {
-  float vertical_height = height_pixels * axis->height_scale;
-  texture_x += height_pixels * axis->x_per_height;
-  texture_y += height_pixels * axis->y_per_height;
+/* Screen position and GPU depth for one submitted vertex. Every face vertex
+ * needs both; computing them from two entry points repeated the lean, the
+ * world mapping and the clip-W row of the matrix for every vertex of every
+ * face in the town. */
+static bool ProjectVertex(const SimBackgroundVoxelRenderParams *params,
+                          const SimBackgroundProjectionAxis *axis,
+                          float texture_x, float texture_y,
+                          float height_pixels,
+                          Scene3DPoint *out, float *gpu_depth) {
   float world_x, world_y, world_z;
-  TexturePointToWorld(params, texture_x, texture_y, vertical_height,
-                      &world_x, &world_y, &world_z);
-  return Scene3D_NormalizedDepth(
-      params->matrix, world_x, world_y, world_z, gpu_depth);
+  LeanedPointToWorld(params, axis, texture_x, texture_y, height_pixels,
+                     &world_x, &world_y, &world_z);
+  return ProjectWorldToScreen(params, world_x, world_y, world_z, out) &&
+      Scene3D_NormalizedDepth(
+          params->matrix, world_x, world_y, world_z, gpu_depth);
 }
 
 static SDL_FColor VertexColour(uint32_t argb, uint8_t brightness) {
@@ -333,12 +361,9 @@ static void FlushBatch(SDL_Renderer *renderer,
 }
 
 static void AppendProjectedFace(
-    SDL_Renderer *renderer, SimBackgroundGeometryBatch *batch,
     const ProjectedModelFace *face,
     const SimBackgroundVoxelPalette *palette,
     SimBackgroundVoxelShading shading) {
-  (void)renderer;
-  (void)batch;
   if (!Sim3DDepthPass_IsCollecting()) return;
   Sim3DDepthVertex vertices[4];
   for (int i = 0; i < 4; i++) {
@@ -407,14 +432,10 @@ static void AddProjectedMountainReliefFace(
   if (*count >= kMaxMountainReliefFaces) return;
   ProjectedMountainReliefFace face = {.brightness = brightness};
   for (int point = 0; point < 4; point++) {
-    if (!ProjectPoint(params, axis,
-                      origin_x + local_x[point],
-                      origin_y + local_y[point], local_z[point],
-                      &face.points[point], NULL) ||
-        !ProjectGpuDepth(params, axis,
-                         origin_x + local_x[point],
-                         origin_y + local_y[point], local_z[point],
-                         &face.gpu_depth[point]))
+    if (!ProjectVertex(params, axis,
+                       origin_x + local_x[point],
+                       origin_y + local_y[point], local_z[point],
+                       &face.points[point], &face.gpu_depth[point]))
       return;
     face.uv[point] = uv[point];
     face.alpha[point] = alpha[point];
@@ -437,14 +458,10 @@ static void AppendProjectedSolidEffectFace(
   };
   for (int point = 0; point < 4; point++) {
     float depth;
-    if (!ProjectPoint(params, axis,
-                      origin_x + local_x[point],
-                      origin_y + local_y[point], local_z[point],
-                      &points[point], NULL) ||
-        !ProjectGpuDepth(params, axis,
-                         origin_x + local_x[point],
-                         origin_y + local_y[point], local_z[point],
-                         &depth))
+    if (!ProjectVertex(params, axis,
+                       origin_x + local_x[point],
+                       origin_y + local_y[point], local_z[point],
+                       &points[point], &depth))
       return;
     vertices[point] = (Sim3DDepthVertex){
       .x = points[point].x,
@@ -994,10 +1011,7 @@ static int BuildProjectedMountainReliefFaces(
 }
 
 static void AppendProjectedMountainReliefFace(
-    SDL_Renderer *renderer, SimBackgroundGeometryBatch *batch,
     const ProjectedMountainReliefFace *face) {
-  (void)renderer;
-  (void)batch;
   if (!Sim3DDepthPass_IsCollecting()) return;
   Sim3DDepthVertex vertices[4];
   float shade = face->brightness / 255.0f;
@@ -1065,7 +1079,6 @@ static int ContactBounds(const SimBackgroundVoxelObject *object,
 }
 
 static void AppendGroundContact(
-    SDL_Renderer *renderer, SimBackgroundGeometryBatch *batch,
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelPalette *palette,
     const SimBackgroundVoxelRenderParams *params,
@@ -1096,22 +1109,17 @@ static void AppendGroundContact(
     };
     bool valid = true;
     for (int point = 0; point < 4; point++) {
-      if (!ProjectPoint(params, &kUprightProjectionAxis,
-                        origin_x + local_x[point],
-                        origin_y + local_y[point], 0.06f,
-                        &face.points[point], NULL) ||
-          !ProjectGpuDepth(params, &kUprightProjectionAxis,
-                           origin_x + local_x[point],
-                           origin_y + local_y[point], 0.06f,
-                           &face.gpu_depth[point])) {
+      if (!ProjectVertex(params, &kUprightProjectionAxis,
+                         origin_x + local_x[point],
+                         origin_y + local_y[point], kContactLiftPixels,
+                         &face.points[point], &face.gpu_depth[point])) {
         valid = false;
         break;
       }
     }
     if (valid && !IsDegenerate(face.points))
-      AppendProjectedFace(
-          renderer, batch, &face, palette,
-          (SimBackgroundVoxelShading)params->shading);
+      AppendProjectedFace(&face, palette,
+                          (SimBackgroundVoxelShading)params->shading);
   }
 }
 
@@ -1201,7 +1209,6 @@ static SimBackgroundVoxelDetail EffectiveDetail(
 }
 
 static void DrawModel(
-    SDL_Renderer *renderer, SimBackgroundGeometryBatch *batch,
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelPalette *palette,
     const SimBackgroundVoxelRenderParams *params,
@@ -1224,10 +1231,12 @@ static void DrawModel(
       object, detail, (SimBackgroundVoxelStyle)params->style,
       g_renderer_state.cache_stamp);
   if (!model || !model->face_count || model->overflow) return;
-  AppendGroundContact(renderer, batch, object, palette, params,
-                      origin_x, origin_y, proportions);
-  ProjectedModelFace projected[kSimBackgroundVoxelModelMaxFaces];
-  int projected_count = 0;
+  AppendGroundContact(object, palette, params, origin_x, origin_y,
+                      proportions);
+  /* Faces are submitted as they are projected. The depth pass resolves
+   * visibility per pixel, so there is nothing for an intermediate array to
+   * order, and staging a whole model's worth of projected faces only cost a
+   * second pass over 21KB of stack. */
   for (uint16_t face_index = 0; face_index < model->face_count; face_index++) {
     const SimBackgroundVoxelModelFace *source = &model->faces[face_index];
     ProjectedModelFace face = {
@@ -1251,26 +1260,17 @@ static void DrawModel(
               proportions->footprint_scale;
       float local_z = source->points[point].z *
           proportions->height_scale;
-      if (!ProjectPoint(params, axis,
-                        origin_x + local_x,
-                        origin_y + local_y,
-                        local_z,
-                        &face.points[point], NULL) ||
-          !ProjectGpuDepth(params, axis,
-                           origin_x + local_x,
-                           origin_y + local_y, local_z,
-                           &face.gpu_depth[point])) {
+      if (!ProjectVertex(params, axis,
+                         origin_x + local_x, origin_y + local_y, local_z,
+                         &face.points[point], &face.gpu_depth[point])) {
         valid = false;
         break;
       }
     }
     if (!valid || IsDegenerate(face.points)) continue;
-    projected[projected_count++] = face;
+    AppendProjectedFace(&face, palette,
+                        (SimBackgroundVoxelShading)params->shading);
   }
-  for (int i = 0; i < projected_count; i++)
-    AppendProjectedFace(
-        renderer, batch, &projected[i], palette,
-        (SimBackgroundVoxelShading)params->shading);
 }
 
 typedef struct SimBackgroundVisibleModel {
@@ -1313,25 +1313,22 @@ static void BuildVisibleModelList(
 }
 
 static void CollectDepthGeometry(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundVisibleModelList *list,
     int mountain_relief_count,
     const SimBackgroundVoxelLightDirection *light) {
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
-  SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
-  batch->vertex_count = 0;
-  batch->index_count = 0;
   /* Submission order is intentionally immaterial. One opaque mountain draw
    * and one solid-model draw share the same D32 attachment; the GPU resolves
    * visibility per pixel instead of relying on CPU object/face ordering. */
   for (int at = 0; at < mountain_relief_count; at++)
     AppendProjectedMountainReliefFace(
-        renderer, batch, &g_renderer_state.mountain_projected[at]);
+        &g_renderer_state.mountain_projected[at]);
   for (uint16_t at = 0; at < list->count; at++) {
     const SimBackgroundVisibleModel *entry = &list->entries[at];
     uint16_t index = entry->index;
     const SimBackgroundVoxelObject *object = &scene->objects[index];
-    DrawModel(renderer, batch, object, &g_renderer_state.palettes[index],
+    DrawModel(object, &g_renderer_state.palettes[index],
               params, &entry->axis, light);
   }
 }
@@ -1394,7 +1391,7 @@ static void DrawDepthLayers(
   SimBackgroundVoxelLighting_ResolveDirection(
       params->light_azimuth_deg, params->light_elevation_deg, &light);
   CollectDepthGeometry(
-      renderer, &draw_params, &list, mountain_relief_count, &light);
+      &draw_params, &list, mountain_relief_count, &light);
   SDL_Texture *depth_composite = Sim3DDepthPass_Submit(renderer, NULL);
   if (depth_composite) {
     SDL_FRect destination = {

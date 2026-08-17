@@ -13,6 +13,10 @@ enum {
   kTerrainDefinitionsWram = 0x2100,  /* flat $7E:2100 */
   kTerrainDefinitionBytes = 8,
   kTerrainMetatileCount = 256,
+  /* Each of the tilemap's four pages is a 32x32 run of 8x8 entries. */
+  kTilemapPageTiles = 32,
+  kTilemapPageWords = kTilemapPageTiles * kTilemapPageTiles,
+  kTilesPerCellSide = kSimBackgroundCellPixels / 8,
   /* Bit 9 is terrain traversal metadata cleared by $03:9B5A before a
    * definition becomes a live entry, and bit 13 is tile priority, which
    * changes painter order but not which pixels a cell shows. Neither may
@@ -40,12 +44,11 @@ enum {
 typedef struct SanctuarySignature {
   uint8_t top_left;
   uint8_t kind;
-  uint8_t height_pixels;
 } SanctuarySignature;
 
 static const SanctuarySignature kSanctuaries[] = {
-  {0xC2, kSimBackgroundVoxel_Cathedral, 24},
-  {0xC0, kSimBackgroundVoxel_MarahnaTemple, 24},
+  {0xC2, kSimBackgroundVoxel_Cathedral},
+  {0xC0, kSimBackgroundVoxel_MarahnaTemple},
 };
 
 static struct {
@@ -92,15 +95,17 @@ static uint16_t Read16(const uint8_t *wram, size_t address) {
 
 /* The town tilemap is quadrant-paged, 64x64 8x8 entries. */
 static uint16_t TownTilemapWord(const uint8_t *wram, int tile_x, int tile_y) {
-  int quadrant = (tile_y >= 32 ? 2 : 0) + (tile_x >= 32 ? 1 : 0);
-  size_t word = (size_t)quadrant * 1024 +
-      (size_t)(tile_y & 31) * 32 + (size_t)(tile_x & 31);
+  int quadrant = (tile_y >= kTilemapPageTiles ? 2 : 0) +
+      (tile_x >= kTilemapPageTiles ? 1 : 0);
+  size_t word = (size_t)quadrant * kTilemapPageWords +
+      (size_t)(tile_y & (kTilemapPageTiles - 1)) * kTilemapPageTiles +
+      (size_t)(tile_x & (kTilemapPageTiles - 1));
   return Read16(wram, kTownTilemapWram + word * 2) & kMetatileCompareMask;
 }
 
 static void LiveCellEntries(const uint8_t *wram, int x, int y,
                             uint16_t out[4]) {
-  int tile_x = x * 2, tile_y = y * 2;
+  int tile_x = x * kTilesPerCellSide, tile_y = y * kTilesPerCellSide;
   out[0] = TownTilemapWord(wram, tile_x, tile_y);
   out[1] = TownTilemapWord(wram, tile_x + 1, tile_y);
   out[2] = TownTilemapWord(wram, tile_x, tile_y + 1);
@@ -284,7 +289,6 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
       object.kind = kSimBackgroundVoxel_House;
       object.source_cells_w = object.source_cells_h = 1;
       object.footprint_cells_w = object.footprint_cells_d = 1;
-      object.height_pixels = 16;
     } else if (structure_class == kStructureClassWindmill) {
       if (flags & kStructureConstructionVariant)
         object.flags |= kSimBackgroundVoxel_UnderConstruction;
@@ -292,14 +296,12 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
       object.source_cells_w = object.source_cells_h = 2;
       object.footprint_cells_w = 2;
       object.footprint_cells_d = 1;
-      object.height_pixels = 32;
     } else if (structure_class == kStructureClassFactory) {
       if (flags & kStructureConstructionVariant)
         object.flags |= kSimBackgroundVoxel_UnderConstruction;
       object.kind = kSimBackgroundVoxel_Factory;
       object.source_cells_w = object.source_cells_h = 2;
       object.footprint_cells_w = object.footprint_cells_d = 2;
-      object.height_pixels = 8;
     } else {
       continue;
     }
@@ -331,7 +333,6 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
            * structure behind the sanctuary. The upper source row is therefore
            * both real depth and the perspective-compressed second tier. */
           .footprint_cells_d = 2,
-          .height_pixels = kSanctuaries[at].height_pixels,
           .record_slot = 0xFF,
         });
         MarkOccupied(occupied, x, y, 2, 2);
@@ -379,7 +380,6 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
               .source_cells_h = 1,
               .footprint_cells_w = 1,
               .footprint_cells_d = 1,
-              .height_pixels = foliage == kFoliage_Bush ? 12 : 16,
               .record_slot = 0xFF,
             }))
           return;
@@ -481,7 +481,6 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
               .source_cells_h = 1,
               .footprint_cells_w = 1,
               .footprint_cells_d = 1,
-              .height_pixels = 15,
               .tree_edges = edges,
               .record_slot = 0xFF,
             }))
