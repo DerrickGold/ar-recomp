@@ -874,7 +874,12 @@ enum {
    * alone shows green see-through streaks. Stretching the tile's own interior
    * across the quad is what makes it read as rock. */
   kMountainSkirtStretchPixels = 8,
+  /* A wall needs more than a couple of rows of outline to be worth standing. */
+  kMountainSkirtMinimumRows = 2,
 };
+/* How far a row's outline may sit inside the fitted line before that row is
+ * treated as dither fringe rather than part of the wall. */
+static const float kMountainSkirtStraightTolerance = 1.5f;
 static const uint8_t kMountainSkirtBrightness = 176;
 
 /* Where a tile's art meets the open side of its cell. Derived from the
@@ -884,10 +889,14 @@ typedef struct MountainSkirtProfile {
   bool resolved;
   bool present;
   uint8_t first_row, last_row;
-  /* Outermost opaque column on each end of the span, and the column the
-   * ground edge samples from. A wall tile's outline is vertical so these
-   * match; a shoulder tile's is a diagonal, and following it is what keeps
-   * the wall on the mountain instead of beside it. */
+  /* Where the wall stands, fitted to the tile's whole outline and then pushed
+   * outward until no row of art lies outside it. Taking the two end rows
+   * alone slants the line inward at a base tile, whose last row is the
+   * dithered fringe several pixels in, and the mountain then overhangs its
+   * own wall by three or four pixels. */
+  float wall_first, wall_last;
+  /* Columns the quad samples: the outline for the top edge so it joins the
+   * mountain without a seam, the interior for the ground edge. */
   uint8_t outer_first, outer_last;
   uint8_t inner_first, inner_last;
 } MountainSkirtProfile;
@@ -926,6 +935,34 @@ static bool MountainRowRun(uint8_t tile, int row, int edge, int step,
   return true;
 }
 
+/* Least-squares fit of the outline over a row span, as column = intercept +
+ * slope * (row - first_row). */
+static void MountainFitOutline(uint8_t tile, int edge, int step,
+                               int first_row, int last_row,
+                               float *slope, float *intercept) {
+  float rows = 0.0f, sum_row = 0.0f, sum_column = 0.0f;
+  float sum_row_column = 0.0f, sum_row_row = 0.0f;
+  for (int row = first_row; row <= last_row; row++) {
+    int outer, inner;
+    if (!MountainRowRun(tile, row, edge, step, &outer, &inner)) continue;
+    float offset = (float)(row - first_row);
+    rows += 1.0f;
+    sum_row += offset;
+    sum_column += (float)outer;
+    sum_row_column += offset * (float)outer;
+    sum_row_row += offset * offset;
+  }
+  if (rows <= 0.0f) {
+    *slope = 0.0f;
+    *intercept = 0.0f;
+    return;
+  }
+  float denominator = rows * sum_row_row - sum_row * sum_row;
+  *slope = denominator > 0.0001f
+      ? (rows * sum_row_column - sum_row * sum_column) / denominator : 0.0f;
+  *intercept = (sum_column - *slope * sum_row) / rows;
+}
+
 static const MountainSkirtProfile *MountainSkirtProfileFor(uint8_t tile,
                                                            bool right_edge) {
   MountainSkirtProfile *profile = &g_skirt_profiles[tile][right_edge ? 1 : 0];
@@ -933,24 +970,61 @@ static const MountainSkirtProfile *MountainSkirtProfileFor(uint8_t tile,
   profile->resolved = true;
   int step = right_edge ? -1 : 1;
   int edge = right_edge ? kSimBackgroundCellPixels - 1 : 0;
+
   int first_row = -1, last_row = -1;
-  int outer_first = 0, inner_first = 0, outer_last = 0, inner_last = 0;
   for (int row = 0; row < kSimBackgroundCellPixels; row++) {
     int outer, inner;
     if (!MountainRowRun(tile, row, edge, step, &outer, &inner)) continue;
-    if (first_row < 0) {
-      first_row = row;
-      outer_first = outer;
-      inner_first = inner;
-    }
+    if (first_row < 0) first_row = row;
     last_row = row;
-    outer_last = outer;
-    inner_last = inner;
   }
-  if (first_row < 0 || last_row == first_row) return profile;
+  if (first_row < 0 || last_row - first_row < kMountainSkirtMinimumRows)
+    return profile;
+
+  /* A mountain's foot dissolves into the lawn over two or three dithered
+   * rows whose outline sits several pixels inside the rest of the wall.
+   * Following them would either drag the wall into the mountain, leaving the
+   * art overhanging it, or leave the wall protruding past the art once it is
+   * biased back out. Ending the wall where the outline stops being straight
+   * avoids both, and costs nothing: those rows are within a pixel of the
+   * ground already. A genuine diagonal deviates from its own fit by nothing,
+   * so it is never trimmed. */
+  float slope, intercept;
+  while (last_row - first_row > kMountainSkirtMinimumRows) {
+    MountainFitOutline(tile, edge, step, first_row, last_row,
+                       &slope, &intercept);
+    int outer, inner;
+    if (!MountainRowRun(tile, last_row, edge, step, &outer, &inner)) break;
+    float line = intercept + slope * (float)(last_row - first_row);
+    float deviation = (float)step * ((float)outer - line);
+    if (deviation <= kMountainSkirtStraightTolerance) break;
+    last_row--;
+  }
+  MountainFitOutline(tile, edge, step, first_row, last_row,
+                     &slope, &intercept);
+
+  /* Push the fitted line outward until no row of art lies outside it. */
+  float bias = 0.0f;
+  for (int row = first_row; row <= last_row; row++) {
+    int outer, inner;
+    if (!MountainRowRun(tile, row, edge, step, &outer, &inner)) continue;
+    float line = intercept + slope * (float)(row - first_row);
+    float outside = (float)step * (line - (float)outer);
+    if (outside > bias) bias = outside;
+  }
+
+  int outer_first, inner_first, outer_last, inner_last;
+  if (!MountainRowRun(tile, first_row, edge, step,
+                      &outer_first, &inner_first) ||
+      !MountainRowRun(tile, last_row, edge, step, &outer_last, &inner_last))
+    return profile;
+
+  float span = (float)(last_row - first_row);
   profile->present = true;
   profile->first_row = (uint8_t)first_row;
   profile->last_row = (uint8_t)last_row;
+  profile->wall_first = intercept - (float)step * bias;
+  profile->wall_last = intercept + slope * span - (float)step * bias;
   profile->outer_first = (uint8_t)outer_first;
   profile->outer_last = (uint8_t)outer_last;
   profile->inner_first = (uint8_t)inner_first;
@@ -974,8 +1048,8 @@ static void AddMountainSkirtTile(
   float cell_top = destination_cell_y * (float)kSimBackgroundCellPixels;
   /* The wall's top edge is the outline itself, so it slants with a shoulder
    * tile's diagonal instead of standing at the cell boundary beside it. */
-  float north_x = cell_x + profile->outer_first;
-  float south_x = cell_x + profile->outer_last;
+  float north_x = cell_x + profile->wall_first;
+  float south_x = cell_x + profile->wall_last;
   float y0 = cell_top + (float)profile->first_row;
   float y1 = cell_top + (float)profile->last_row + 1.0f;
   float ignored_x, north_y, north_z, south_y, south_z;
