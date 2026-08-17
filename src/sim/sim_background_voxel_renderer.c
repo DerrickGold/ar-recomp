@@ -867,28 +867,95 @@ static void AddMountainStackTile(
  * the cell's own art, inset past the transparent outline margin the wall and
  * base tiles carry, and is shaded down so it reads as a side rather than a
  * second lit face. */
-enum { kMountainSkirtInsetPixels = 3 };
+enum {
+  /* How far into the tile the wall's ground edge samples. The mountain tiles
+   * carry a one-to-two pixel dither margin along their outline that is both
+   * grass-coloured and partly transparent, so a wall sampled from the outline
+   * alone shows green see-through streaks. Stretching the tile's own interior
+   * across the quad is what makes it read as rock. */
+  kMountainSkirtStretchPixels = 8,
+};
 static const uint8_t kMountainSkirtBrightness = 176;
 
-/* Vertical run of opaque pixels in one column of a tile's silhouette. The
- * skirt has to follow the art, not the cell: a shoulder tile's outline is a
- * diagonal across its cell, and a full-cell skirt beside one would hang a
- * rectangle out past the mountain it is supposed to be closing. */
-static bool MountainSilhouetteColumnSpan(uint8_t tile, int column,
-                                         int *first_row, int *last_row) {
+/* Where a tile's art meets the open side of its cell. Derived from the
+ * immutable silhouette table, so it is resolved once per tile/side and reused
+ * for every frame, object and town. */
+typedef struct MountainSkirtProfile {
+  bool resolved;
+  bool present;
+  uint8_t first_row, last_row;
+  /* Outermost opaque column on each end of the span, and the column the
+   * ground edge samples from. A wall tile's outline is vertical so these
+   * match; a shoulder tile's is a diagonal, and following it is what keeps
+   * the wall on the mountain instead of beside it. */
+  uint8_t outer_first, outer_last;
+  uint8_t inner_first, inner_last;
+} MountainSkirtProfile;
+
+static MountainSkirtProfile g_skirt_profiles[256][2];
+
+static bool MountainSilhouetteOpaque(uint8_t tile, int column, int row) {
+  bool opaque = false;
+  if (!SimBackgroundMountainSilhouette_Lookup(tile, column, row, &opaque))
+    return true;  /* Unknown tiles are treated as solid elsewhere too. */
+  return opaque;
+}
+
+/* Outermost and innermost opaque columns of one row, scanning from `edge`
+ * toward the far side of the tile. */
+static bool MountainRowRun(uint8_t tile, int row, int edge, int step,
+                           int *outer, int *inner) {
   int first = -1, last = -1;
-  for (int row = 0; row < kSimBackgroundCellPixels; row++) {
-    bool opaque = false;
-    if (!SimBackgroundMountainSilhouette_Lookup(tile, column, row, &opaque))
-      opaque = true;  /* Unknown tiles are treated as solid elsewhere too. */
-    if (!opaque) continue;
-    if (first < 0) first = row;
-    last = row;
+  for (int at = 0; at < kSimBackgroundCellPixels; at++) {
+    int column = edge + at * step;
+    if (!MountainSilhouetteOpaque(tile, column, row)) continue;
+    if (first < 0) first = column;
+    last = column;
   }
   if (first < 0) return false;
-  *first_row = first;
-  *last_row = last;
+  int reach = first + step * kMountainSkirtStretchPixels;
+  /* Never sample past the run: beyond it is the tile's other outline. */
+  if ((step > 0 && reach > last) || (step < 0 && reach < last)) reach = last;
+  /* The fringe rows where a mountain's foot meets grass are dithered, not
+   * solid runs, so the column that far in can still be a hole. Back off to
+   * the nearest opaque one rather than punching the wall through. */
+  while (reach != first && !MountainSilhouetteOpaque(tile, reach, row))
+    reach -= step;
+  *outer = first;
+  *inner = reach;
   return true;
+}
+
+static const MountainSkirtProfile *MountainSkirtProfileFor(uint8_t tile,
+                                                           bool right_edge) {
+  MountainSkirtProfile *profile = &g_skirt_profiles[tile][right_edge ? 1 : 0];
+  if (profile->resolved) return profile;
+  profile->resolved = true;
+  int step = right_edge ? -1 : 1;
+  int edge = right_edge ? kSimBackgroundCellPixels - 1 : 0;
+  int first_row = -1, last_row = -1;
+  int outer_first = 0, inner_first = 0, outer_last = 0, inner_last = 0;
+  for (int row = 0; row < kSimBackgroundCellPixels; row++) {
+    int outer, inner;
+    if (!MountainRowRun(tile, row, edge, step, &outer, &inner)) continue;
+    if (first_row < 0) {
+      first_row = row;
+      outer_first = outer;
+      inner_first = inner;
+    }
+    last_row = row;
+    outer_last = outer;
+    inner_last = inner;
+  }
+  if (first_row < 0 || last_row == first_row) return profile;
+  profile->present = true;
+  profile->first_row = (uint8_t)first_row;
+  profile->last_row = (uint8_t)last_row;
+  profile->outer_first = (uint8_t)outer_first;
+  profile->outer_last = (uint8_t)outer_last;
+  profile->inner_first = (uint8_t)inner_first;
+  profile->inner_last = (uint8_t)inner_last;
+  return profile;
 }
 
 static void AddMountainSkirtTile(
@@ -899,41 +966,47 @@ static void AddMountainSkirtTile(
     float baseline, int destination_cell_x, int destination_cell_y,
     int source_cell_x, int source_cell_y, uint8_t source_tile,
     bool right_edge, int *count) {
-  int column = right_edge
-      ? kSimBackgroundCellPixels - kMountainSkirtInsetPixels
-      : kMountainSkirtInsetPixels;
-  int first_row, last_row;
-  if (!MountainSilhouetteColumnSpan(source_tile, column,
-                                    &first_row, &last_row))
-    return;
+  const MountainSkirtProfile *profile =
+      MountainSkirtProfileFor(source_tile, right_edge);
+  if (!profile->present) return;
 
-  float edge_x = (destination_cell_x + (right_edge ? 1 : 0)) *
-      (float)kSimBackgroundCellPixels;
+  float cell_x = destination_cell_x * (float)kSimBackgroundCellPixels;
   float cell_top = destination_cell_y * (float)kSimBackgroundCellPixels;
-  float y0 = cell_top + (float)first_row;
-  float y1 = cell_top + (float)last_row + 1.0f;
-  float ignored_x, top_y, top_z, bottom_y, bottom_z;
-  MountainPlanePoint(edge_x, y0, baseline, relief, 0.0f, 0.0f,
-                     &ignored_x, &top_y, &top_z);
-  MountainPlanePoint(edge_x, y1, baseline, relief, 0.0f, 0.0f,
-                     &ignored_x, &bottom_y, &bottom_z);
-  top_z *= height_scale;
-  bottom_z *= height_scale;
+  /* The wall's top edge is the outline itself, so it slants with a shoulder
+   * tile's diagonal instead of standing at the cell boundary beside it. */
+  float north_x = cell_x + profile->outer_first;
+  float south_x = cell_x + profile->outer_last;
+  float y0 = cell_top + (float)profile->first_row;
+  float y1 = cell_top + (float)profile->last_row + 1.0f;
+  float ignored_x, north_y, north_z, south_y, south_z;
+  MountainPlanePoint(north_x, y0, baseline, relief, 0.0f, 0.0f,
+                     &ignored_x, &north_y, &north_z);
+  MountainPlanePoint(south_x, y1, baseline, relief, 0.0f, 0.0f,
+                     &ignored_x, &south_y, &south_z);
+  north_z *= height_scale;
+  south_z *= height_scale;
   /* Art already sitting on the ground has no wedge to close. */
-  if (top_z <= 0.0f) return;
+  if (north_z <= 0.0f) return;
 
-  float local_x[4] = {edge_x, edge_x, edge_x, edge_x};
-  float local_y[4] = {top_y, bottom_y, bottom_y, top_y};
-  float local_z[4] = {top_z, bottom_z, 0.0f, 0.0f};
-  float u = (source_cell_x * kSimBackgroundCellPixels + (float)column) /
+  float local_x[4] = {north_x, south_x, south_x, north_x};
+  float local_y[4] = {north_y, south_y, south_y, north_y};
+  float local_z[4] = {north_z, south_z, 0.0f, 0.0f};
+  float cell_u = source_cell_x * (float)kSimBackgroundCellPixels;
+  float cell_v = source_cell_y * (float)kSimBackgroundCellPixels;
+  /* Stretched down the wall rather than smeared along it: the top edge takes
+   * the outline so it joins the mountain without a seam, and the ground edge
+   * takes the interior, so the quad is the tile's own rock in the town's own
+   * palette. */
+  float v0 = (cell_v + profile->first_row + 0.5f) /
       (float)kSimTownCanvasPixels;
-  float v0 = (source_cell_y * kSimBackgroundCellPixels + (float)first_row) /
+  float v1 = (cell_v + profile->last_row + 0.5f) /
       (float)kSimTownCanvasPixels;
-  float v1 = (source_cell_y * kSimBackgroundCellPixels +
-              (float)last_row + 1.0f) / (float)kSimTownCanvasPixels;
-  /* The whole quad is one rock-coloured strip of the cell's own art, so it
-   * carries the town's palette without needing a colour of its own. */
-  SDL_FPoint uv[4] = {{u, v0}, {u, v1}, {u, v1}, {u, v0}};
+  SDL_FPoint uv[4] = {
+    {(cell_u + profile->outer_first + 0.5f) / kSimTownCanvasPixels, v0},
+    {(cell_u + profile->outer_last + 0.5f) / kSimTownCanvasPixels, v1},
+    {(cell_u + profile->inner_last + 0.5f) / kSimTownCanvasPixels, v1},
+    {(cell_u + profile->inner_first + 0.5f) / kSimTownCanvasPixels, v0},
+  };
   const uint8_t opaque[4] = {255, 255, 255, 255};
   AddProjectedMountainReliefFace(
       params, axis, origin_x, origin_y, local_x, local_y, local_z, uv,
