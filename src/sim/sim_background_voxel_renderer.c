@@ -10,6 +10,7 @@
 #include "sim3d_depth_pass.h"
 #include "sim_background_mountain_objects.h"
 #include "sim_background_mountain_relief.h"
+#include "sim_background_mountain_silhouette.h"
 #include "sim_background_voxel_biome.h"
 #include "sim_background_voxel_lighting.h"
 #include "sim_background_voxel_lod.h"
@@ -30,8 +31,14 @@ enum {
   /* Original cells plus the complete bounded set of reconstructed cap tiles. */
   kMaxMountainReliefCells = kSimBackgroundMountainCellCount +
       kSimBackgroundMountainMaxCapTiles,
+  /* Every stack layer of every cell, plus the two silhouette skirt faces a
+   * cell can contribute. The skirt is emitted once per cell rather than once
+   * per layer, but the budget has to cover a mountain whose every cell is on
+   * its own silhouette. */
+  kMountainSkirtFacesPerCell = 2,
   kMaxMountainReliefFaces = kMaxMountainReliefCells *
-      kSimBackgroundMountainReliefMaxStackLayers,
+      (kSimBackgroundMountainReliefMaxStackLayers +
+       kMountainSkirtFacesPerCell),
 };
 
 /* Contact shading is a ground decal. It is lifted by a fraction of a source
@@ -845,6 +852,100 @@ static void AddMountainStackTile(
   }
 }
 
+/* Each relief layer is a flat inclined plane with the authentic art painted on
+ * it: its cross-section is a straight line from the ground at the front up and
+ * back to the ridge. That reads as a mountain only from the canonical camera.
+ * The wedge between the plane and the ground is empty and open at the sides,
+ * so any other angle shows a tilted board whose upper half hangs in the air -
+ * and no amount of extra stack layers changes that, because the layers are
+ * parallel copies of the same plane and thicken it along the ground rather
+ * than filling underneath it.
+ *
+ * This closes the silhouette: wherever a mountain cell has no neighbour, a
+ * quad drops from that cell's edge of the plane straight down to z=0, giving
+ * the mass a visible side and a footprint. It samples a rock-coloured strip of
+ * the cell's own art, inset past the transparent outline margin the wall and
+ * base tiles carry, and is shaded down so it reads as a side rather than a
+ * second lit face. */
+enum { kMountainSkirtInsetPixels = 3 };
+static const uint8_t kMountainSkirtBrightness = 176;
+
+/* Vertical run of opaque pixels in one column of a tile's silhouette. The
+ * skirt has to follow the art, not the cell: a shoulder tile's outline is a
+ * diagonal across its cell, and a full-cell skirt beside one would hang a
+ * rectangle out past the mountain it is supposed to be closing. */
+static bool MountainSilhouetteColumnSpan(uint8_t tile, int column,
+                                         int *first_row, int *last_row) {
+  int first = -1, last = -1;
+  for (int row = 0; row < kSimBackgroundCellPixels; row++) {
+    bool opaque = false;
+    if (!SimBackgroundMountainSilhouette_Lookup(tile, column, row, &opaque))
+      opaque = true;  /* Unknown tiles are treated as solid elsewhere too. */
+    if (!opaque) continue;
+    if (first < 0) first = row;
+    last = row;
+  }
+  if (first < 0) return false;
+  *first_row = first;
+  *last_row = last;
+  return true;
+}
+
+static void AddMountainSkirtTile(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis,
+    const SimBackgroundMountainRelief *relief,
+    float height_scale, float origin_x, float origin_y,
+    float baseline, int destination_cell_x, int destination_cell_y,
+    int source_cell_x, int source_cell_y, uint8_t source_tile,
+    bool right_edge, int *count) {
+  int column = right_edge
+      ? kSimBackgroundCellPixels - kMountainSkirtInsetPixels
+      : kMountainSkirtInsetPixels;
+  int first_row, last_row;
+  if (!MountainSilhouetteColumnSpan(source_tile, column,
+                                    &first_row, &last_row))
+    return;
+
+  float edge_x = (destination_cell_x + (right_edge ? 1 : 0)) *
+      (float)kSimBackgroundCellPixels;
+  float cell_top = destination_cell_y * (float)kSimBackgroundCellPixels;
+  float y0 = cell_top + (float)first_row;
+  float y1 = cell_top + (float)last_row + 1.0f;
+  float ignored_x, top_y, top_z, bottom_y, bottom_z;
+  MountainPlanePoint(edge_x, y0, baseline, relief, 0.0f, 0.0f,
+                     &ignored_x, &top_y, &top_z);
+  MountainPlanePoint(edge_x, y1, baseline, relief, 0.0f, 0.0f,
+                     &ignored_x, &bottom_y, &bottom_z);
+  top_z *= height_scale;
+  bottom_z *= height_scale;
+  /* Art already sitting on the ground has no wedge to close. */
+  if (top_z <= 0.0f) return;
+
+  float local_x[4] = {edge_x, edge_x, edge_x, edge_x};
+  float local_y[4] = {top_y, bottom_y, bottom_y, top_y};
+  float local_z[4] = {top_z, bottom_z, 0.0f, 0.0f};
+  float u = (source_cell_x * kSimBackgroundCellPixels + (float)column) /
+      (float)kSimTownCanvasPixels;
+  float v0 = (source_cell_y * kSimBackgroundCellPixels + (float)first_row) /
+      (float)kSimTownCanvasPixels;
+  float v1 = (source_cell_y * kSimBackgroundCellPixels +
+              (float)last_row + 1.0f) / (float)kSimTownCanvasPixels;
+  /* The whole quad is one rock-coloured strip of the cell's own art, so it
+   * carries the town's palette without needing a colour of its own. */
+  SDL_FPoint uv[4] = {{u, v0}, {u, v1}, {u, v1}, {u, v0}};
+  const uint8_t opaque[4] = {255, 255, 255, 255};
+  AddProjectedMountainReliefFace(
+      params, axis, origin_x, origin_y, local_x, local_y, local_z, uv,
+      kMountainSkirtBrightness, opaque, count);
+}
+
+static bool MountainCellOccupied(const SimBackgroundMountainObject *object,
+                                 int row, int column) {
+  return column >= 0 && column < object->width_cells &&
+      (object->row_occupied_mask[row] & (1u << column)) != 0;
+}
+
 static int BuildProjectedMountainObjectFaces(
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis *axis,
@@ -894,6 +995,19 @@ static int BuildProjectedMountainObjectFaces(
             destination_x, destination_y,
             source_x, source_y, 0,
             &count);
+        /* Close the silhouette wherever the mass ends, so the raised part of
+         * the plane has a visible side reaching the ground instead of an open
+         * edge with the ground showing under it. */
+        for (int side = 0; side < 2; side++) {
+          bool right_edge = side != 0;
+          if (MountainCellOccupied(object, row,
+                                   column + (right_edge ? 1 : -1)))
+            continue;
+          AddMountainSkirtTile(
+              params, axis, relief, height_scale, origin_x, origin_y,
+              baseline, destination_x, destination_y,
+              source_x, source_y, source_tile, right_edge, &count);
+        }
       }
     AppendVolcanoEffects(
         params, axis, relief, object,
