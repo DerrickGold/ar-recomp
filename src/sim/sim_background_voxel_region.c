@@ -10,9 +10,9 @@
  *              civilization level 0       1                    2
  * Fillmore     tent                       timber               Fillmore
  * Bloodpool    tent                       timber               Bloodpool
- * Kasandora    tent                       early stone          developed stone
+ * Kasandora    brown yurt                 white tent           adobe
  * Aitos        tent                       timber               Aitos
- * Marahna      tent                       Marahna              timber
+ * Marahna      brown yurt                 stilt hut            log cabin
  * Northwall    tent                       timber               developed stone
  */
 static const uint8_t kHouseStyleByTownAndLevel[6][3] = {
@@ -22,18 +22,18 @@ static const uint8_t kHouseStyleByTownAndLevel[6][3] = {
   {kSimBackgroundHouseStyle_Tent,
    kSimBackgroundHouseStyle_Timber,
    kSimBackgroundHouseStyle_Bloodpool},
-  {kSimBackgroundHouseStyle_Tent,
-   kSimBackgroundHouseStyle_KasandoraEarlyStone,
-   kSimBackgroundHouseStyle_KasandoraStone},
+  {kSimBackgroundHouseStyle_Yurt,
+   kSimBackgroundHouseStyle_WhiteTent,
+   kSimBackgroundHouseStyle_Adobe},
   {kSimBackgroundHouseStyle_Tent,
    kSimBackgroundHouseStyle_Timber,
    kSimBackgroundHouseStyle_Aitos},
-  {kSimBackgroundHouseStyle_Tent,
-   kSimBackgroundHouseStyle_Marahna,
-   kSimBackgroundHouseStyle_Timber},
+  {kSimBackgroundHouseStyle_Yurt,
+   kSimBackgroundHouseStyle_MarahnaStilt,
+   kSimBackgroundHouseStyle_MarahnaLogCabin},
   {kSimBackgroundHouseStyle_Tent,
    kSimBackgroundHouseStyle_Timber,
-   kSimBackgroundHouseStyle_KasandoraStone},
+   kSimBackgroundHouseStyle_Stone},
 };
 
 SimBackgroundVoxelHouseStyle SimBackgroundVoxelRegion_HouseStyle(
@@ -77,13 +77,20 @@ SimBackgroundVoxelPaletteStyle SimBackgroundVoxelRegion_PaletteStyle(
       return kSimBackgroundPaletteStyle_Fillmore;
     case kSimBackgroundHouseStyle_Bloodpool:
       return kSimBackgroundPaletteStyle_Bloodpool;
-    case kSimBackgroundHouseStyle_KasandoraEarlyStone:
-    case kSimBackgroundHouseStyle_KasandoraStone:
-      return kSimBackgroundPaletteStyle_KasandoraStone;
+    case kSimBackgroundHouseStyle_Yurt:
+      return kSimBackgroundPaletteStyle_Yurt;
+    case kSimBackgroundHouseStyle_WhiteTent:
+      return kSimBackgroundPaletteStyle_WhiteCanvas;
+    case kSimBackgroundHouseStyle_Adobe:
+      return kSimBackgroundPaletteStyle_Adobe;
+    case kSimBackgroundHouseStyle_Stone:
+      return kSimBackgroundPaletteStyle_Stone;
     case kSimBackgroundHouseStyle_Aitos:
       return kSimBackgroundPaletteStyle_Aitos;
-    case kSimBackgroundHouseStyle_Marahna:
-      return kSimBackgroundPaletteStyle_Marahna;
+    case kSimBackgroundHouseStyle_MarahnaStilt:
+      return kSimBackgroundPaletteStyle_MarahnaStilt;
+    case kSimBackgroundHouseStyle_MarahnaLogCabin:
+      return kSimBackgroundPaletteStyle_MarahnaLogCabin;
     case kSimBackgroundHouseStyle_Count:
       break;
   }
@@ -103,10 +110,13 @@ float SimBackgroundVoxelRegion_AuthoredHeight(
         case kSimBackgroundHouseStyle_Timber: return 11.5f;
         case kSimBackgroundHouseStyle_Fillmore: return 15.6f;
         case kSimBackgroundHouseStyle_Bloodpool: return 15.0f;
-        case kSimBackgroundHouseStyle_KasandoraEarlyStone: return 10.5f;
-        case kSimBackgroundHouseStyle_KasandoraStone: return 13.5f;
+        case kSimBackgroundHouseStyle_Yurt: return 8.8f;
+        case kSimBackgroundHouseStyle_WhiteTent: return 10.0f;
+        case kSimBackgroundHouseStyle_Adobe: return 11.0f;
+        case kSimBackgroundHouseStyle_Stone: return 13.5f;
         case kSimBackgroundHouseStyle_Aitos: return 14.0f;
-        case kSimBackgroundHouseStyle_Marahna: return 12.5f;
+        case kSimBackgroundHouseStyle_MarahnaStilt: return 12.5f;
+        case kSimBackgroundHouseStyle_MarahnaLogCabin: return 12.0f;
         case kSimBackgroundHouseStyle_Count: return 15.6f;
       }
       break;
@@ -116,7 +126,15 @@ float SimBackgroundVoxelRegion_AuthoredHeight(
     case kSimBackgroundVoxel_Tree:
       return SimBackgroundVoxelRegion_TreeStyle(object->town) ==
           kSimBackgroundTreeStyle_SnowFir ? 16.0f : 15.0f;
+    case kSimBackgroundVoxel_BroadTree: return 14.0f;
     case kSimBackgroundVoxel_Palm: return 15.5f;
+    case kSimBackgroundVoxel_Shrub: return 12.0f;
+    /* The three unique landmarks each own a 2x2 plot, so their heights are
+     * measured against a 32-pixel base rather than the old oversized cover. */
+    case kSimBackgroundVoxel_StoryTree: return 30.0f;
+    case kSimBackgroundVoxel_BloodpoolCastle: return 32.0f;
+    case kSimBackgroundVoxel_MarahnaTemple: return 24.0f;
+    case kSimBackgroundVoxel_Pyramid: return 28.0f;
   }
   return 16.0f;
 }

@@ -302,6 +302,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_background_voxels_test
         tests/sim_background_voxels_test.c
         src/sim/sim_background_voxels.c
+        src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_background_mountains.c
         src/sim/sim_background_mountain_silhouette.c
         src/sim/sim_town_canvas.c
@@ -313,6 +314,18 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_sim_background_voxels
         COMMAND actraiser_sim_background_voxels_test)
+
+    add_executable(actraiser_sim_background_voxel_landmarks_test
+        tests/sim_background_voxel_landmarks_test.c
+        src/sim/sim_background_voxel_landmarks.c
+    )
+    target_include_directories(
+        actraiser_sim_background_voxel_landmarks_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+    )
+    add_test(NAME actraiser_sim_background_voxel_landmarks
+        COMMAND actraiser_sim_background_voxel_landmarks_test)
 
     add_executable(actraiser_sim_background_mountains_test
         tests/sim_background_mountains_test.c
@@ -827,6 +840,7 @@ if(BUILD_TESTING)
         src/sim/sim_world_navigation_capture.c
         src/sim/sim_town_canvas.c
         src/sim/sim_background_voxels.c
+        src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_background_mountains.c
         src/sim/sim_background_mountain_silhouette.c
         src/sim/sim_render_atlas.c

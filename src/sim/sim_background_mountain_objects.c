@@ -185,6 +185,8 @@ static bool Append(
     .cell_y = (int8_t)cell_y,
     .width_cells = stamp->width,
     .height_cells = stamp->height,
+    .flags = stamp == &kAitosVolcano
+        ? kSimBackgroundMountainObject_Volcano : 0,
   };
   memcpy(object->row_occupied_mask, stamp->rows, sizeof(stamp->rows));
   memcpy(object->source_tile, stamp->tiles, sizeof(stamp->tiles));

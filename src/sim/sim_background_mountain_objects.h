@@ -12,12 +12,17 @@ enum {
   kSimBackgroundMountainMaxObjects = 64,
 };
 
+typedef enum SimBackgroundMountainObjectFlags {
+  kSimBackgroundMountainObject_Volcano = 1u << 0,
+} SimBackgroundMountainObjectFlags;
+
 /* A mountain object is one complete transparent source stamp with an
  * independent ground contact. Ranges remain useful composition data, but do
  * not share transforms or depth anchors in the enhanced renderer. */
 typedef struct SimBackgroundMountainObject {
   int8_t cell_x, cell_y;
   uint8_t width_cells, height_cells;
+  uint8_t flags;
   uint8_t row_occupied_mask[kSimBackgroundMountainObjectMaxRows];
   /* Explicit terrain-metatile sources keep one object independent from the
    * already-composited range surrounding any on-map example. A zero entry is

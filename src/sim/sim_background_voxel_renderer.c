@@ -220,6 +220,14 @@ static SimBackgroundModelLean CameraFacingModelLean(
       [kSimBackgroundVoxel_Factory] = 0.38f,
       [kSimBackgroundVoxel_Tree] = 0.30f,
       [kSimBackgroundVoxel_Palm] = 0.32f,
+      [kSimBackgroundVoxel_BroadTree] = 0.30f,
+      [kSimBackgroundVoxel_Shrub] = 0.26f,
+      [kSimBackgroundVoxel_StoryTree] = 0.28f,
+      [kSimBackgroundVoxel_BloodpoolCastle] = 0.38f,
+      [kSimBackgroundVoxel_MarahnaTemple] = 0.38f,
+      /* A pyramid has no facade to hold upright; leaning it only shears the
+       * one silhouette the player recognizes it by. */
+      [kSimBackgroundVoxel_Pyramid] = 0.20f,
     };
     if (kind >= kSimBackgroundVoxel_House &&
         kind < kSimBackgroundVoxelKindCount)
@@ -415,6 +423,79 @@ static void AddProjectedMountainReliefFace(
   g_renderer_state.mountain_projected[(*count)++] = face;
 }
 
+static void AppendProjectedSolidEffectFace(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis,
+    float origin_x, float origin_y,
+    const float local_x[4], const float local_y[4],
+    const float local_z[4], SDL_FColor color) {
+  if (!Sim3DDepthPass_IsCollecting()) return;
+  Scene3DPoint points[4];
+  Sim3DDepthVertex vertices[4];
+  static const SDL_FPoint uv[4] = {
+    {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
+  };
+  for (int point = 0; point < 4; point++) {
+    float depth;
+    if (!ProjectPoint(params, axis,
+                      origin_x + local_x[point],
+                      origin_y + local_y[point], local_z[point],
+                      &points[point], NULL) ||
+        !ProjectGpuDepth(params, axis,
+                         origin_x + local_x[point],
+                         origin_y + local_y[point], local_z[point],
+                         &depth))
+      return;
+    vertices[point] = (Sim3DDepthVertex){
+      .x = points[point].x,
+      .y = points[point].y,
+      .depth = depth,
+      .color = color,
+      .uv = uv[point],
+    };
+  }
+  if (!IsDegenerate(points))
+    Sim3DDepthPass_AppendQuad(kSim3DDepthPass_Effect, vertices);
+}
+
+static void AppendProjectedSolidEffectBox(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis,
+    float origin_x, float origin_y,
+    float x0, float y0, float z0,
+    float x1, float y1, float z1,
+    SDL_FColor color) {
+  static const uint8_t face[5][4] = {
+    {4, 5, 6, 7},  /* top */
+    {1, 0, 4, 5},  /* north */
+    {2, 1, 5, 6},  /* east */
+    {3, 2, 6, 7},  /* south */
+    {0, 3, 7, 4},  /* west */
+  };
+  const float x[8] = {x0, x1, x1, x0, x0, x1, x1, x0};
+  const float y[8] = {y0, y0, y1, y1, y0, y0, y1, y1};
+  const float z[8] = {z0, z0, z0, z0, z1, z1, z1, z1};
+  for (int side = 0; side < 5; side++) {
+    float face_x[4], face_y[4], face_z[4];
+    SDL_FColor shaded = color;
+    if (side) {
+      float shade = side == 3 ? 0.92f : side == 2 ? 0.84f : 0.76f;
+      shaded.r *= shade;
+      shaded.g *= shade;
+      shaded.b *= shade;
+    }
+    for (int point = 0; point < 4; point++) {
+      int corner = face[side][point];
+      face_x[point] = x[corner];
+      face_y[point] = y[corner];
+      face_z[point] = z[corner];
+    }
+    AppendProjectedSolidEffectFace(
+        params, axis, origin_x, origin_y,
+        face_x, face_y, face_z, shaded);
+  }
+}
+
 static void MountainPlanePoint(
     float source_x, float source_y, float baseline,
     const SimBackgroundMountainRelief *relief,
@@ -435,6 +516,122 @@ static bool MountainCapSource(
   return (*source_cell_x >= 0 && *source_cell_y >= 0) ||
       SimBackgroundMountains_TileSource(
           field, tile->source_tile, source_cell_x, source_cell_y);
+}
+
+enum {
+  /* The lava blob authored into the $70/$71 crown occupies source pixels
+   * x 138-149, y 136-141. The stamp's own origin is cell (6,8), so the blob's
+   * centre is exactly the crown pair's shared edge, eleven pixels down. */
+  kCraterCentreOffsetY = 11,
+  kCraterSourceRadiusX = 6,
+  kCraterSourceRadiusY = 3,
+};
+
+/* One flat elliptical fan on the crater plane. Each quad spans two octagon
+ * segments so no submitted face collapses to a triangle, and the octagon
+ * matches the stepped-but-round language the voxel models already use. */
+static void AppendCraterGlowRing(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis,
+    float origin_x, float origin_y,
+    float centre_x, float centre_y, float z,
+    float radius_x, float radius_y, SDL_FColor colour) {
+  static const float unit[8][2] = {
+    {0.0f, -1.0f}, {0.7071f, -0.7071f}, {1.0f, 0.0f},
+    {0.7071f, 0.7071f}, {0.0f, 1.0f}, {-0.7071f, 0.7071f},
+    {-1.0f, 0.0f}, {-0.7071f, -0.7071f},
+  };
+  for (int segment = 0; segment < 8; segment += 2) {
+    float local_x[4] = {centre_x};
+    float local_y[4] = {centre_y};
+    float local_z[4] = {z, z, z, z};
+    for (int step = 0; step < 3; step++) {
+      const float *point = unit[(segment + step) & 7];
+      local_x[step + 1] = centre_x + point[0] * radius_x;
+      local_y[step + 1] = centre_y + point[1] * radius_y;
+    }
+    AppendProjectedSolidEffectFace(
+        params, axis, origin_x, origin_y,
+        local_x, local_y, local_z, colour);
+  }
+}
+
+static void AppendVolcanoEffects(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis,
+    const SimBackgroundMountainRelief *relief,
+    const SimBackgroundMountainObject *object,
+    float origin_x, float origin_y, float baseline, float height_scale) {
+  if (!(object->flags & kSimBackgroundMountainObject_Volcano) ||
+      params->detail < kSimBackgroundVoxelDetail_Balanced ||
+      params->style < kSimBackgroundVoxelStyle_Trim)
+    return;
+
+  /* The glow belongs on the authored blob's centre, not on the crown row's
+   * top edge: the old placement pushed it a full three pixels past the peak
+   * and left it hanging over the grass behind the mountain. */
+  float crater_x =
+      (object->cell_x + object->width_cells * 0.5f) *
+      kSimBackgroundCellPixels;
+  float crater_source_y =
+      object->cell_y * kSimBackgroundCellPixels + kCraterCentreOffsetY;
+  float crater_y, crater_z, ignored_x, rim_y, rim_z;
+  MountainPlanePoint(
+      crater_x, crater_source_y, baseline, relief, 0.0f, 0.0f,
+      &ignored_x, &crater_y, &crater_z);
+  /* Take the depth radius from the same plane mapping as the face it sits on,
+   * so the ellipse keeps hugging the blob whenever relief is retuned. */
+  MountainPlanePoint(
+      crater_x, crater_source_y - kCraterSourceRadiusY, baseline, relief,
+      0.0f, 0.0f, &ignored_x, &rim_y, &rim_z);
+  float radius_y = crater_y - rim_y;
+  if (radius_y < 0.5f) radius_y = 0.5f;
+  crater_z *= height_scale;
+
+  /* The source crater flashes on an eight-frame cadence. Match that cadence
+   * with two shallow depth-tested glow rings rather than a screen-space
+   * bloom, so nearby peaks still occlude the light correctly. Rings, not
+   * rectangles: a squared-off slab of lava is the one shape the 12x6 pixel
+   * blob never has. */
+  bool flash_on = ((params->game_frame >> 3) & 1u) == 0;
+  if (flash_on) {
+    AppendCraterGlowRing(
+        params, axis, origin_x, origin_y, crater_x, crater_y,
+        crater_z + 0.35f, (float)kCraterSourceRadiusX, radius_y,
+        (SDL_FColor){1.0f, 0.20f, 0.02f, 0.36f});
+    AppendCraterGlowRing(
+        params, axis, origin_x, origin_y, crater_x, crater_y,
+        crater_z + 0.55f, kCraterSourceRadiusX * 0.55f, radius_y * 0.55f,
+        (SDL_FColor){1.0f, 0.56f, 0.08f, 0.84f});
+  }
+
+  if (params->detail < kSimBackgroundVoxelDetail_High ||
+      params->style < kSimBackgroundVoxelStyle_Architectural)
+    return;
+  int puff_count = params->detail == kSimBackgroundVoxelDetail_Ultra ? 4 : 2;
+  for (int puff = 0; puff < puff_count; puff++) {
+    unsigned age = (params->game_frame + (unsigned)puff * 17u) % 48u;
+    if (age > 34u) continue;
+    float age_fraction = age / 34.0f;
+    float size = 2.4f + age_fraction * 2.8f;
+    float drift_x = ((puff & 1) ? 1.0f : -1.0f) * age_fraction * 5.0f;
+    float drift_y = -age_fraction * 4.0f;
+    float z0 = crater_z + 2.0f + age_fraction * 17.0f;
+    float opacity = 0.72f - age_fraction * 0.34f;
+    SDL_FColor smoke = {
+      0.66f + age_fraction * 0.10f,
+      0.63f + age_fraction * 0.10f,
+      0.58f + age_fraction * 0.10f,
+      opacity,
+    };
+    AppendProjectedSolidEffectBox(
+        params, axis, origin_x, origin_y,
+        crater_x + drift_x - size * 0.5f,
+        crater_y + drift_y - size * 0.5f, z0,
+        crater_x + drift_x + size * 0.5f,
+        crater_y + drift_y + size * 0.5f, z0 + size,
+        smoke);
+  }
 }
 
 static void RecordMountainPeakColumn(
@@ -549,6 +746,7 @@ static void AddMountainStackTile(
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis *axis,
     const SimBackgroundMountainRelief *relief,
+    float height_scale,
     float origin_x, float origin_y,
     float baseline_left, float baseline_right,
     float maximum_rise_left, float maximum_rise_right,
@@ -599,6 +797,7 @@ static void AddMountainStackTile(
           source_x[point], source_y[point], baseline, relief,
           0.0f, offset_y,
           &local_x[point], &local_y[point], &local_z[point]);
+      local_z[point] *= height_scale;
     }
     AddProjectedMountainReliefFace(
         params, axis, origin_x, origin_y,
@@ -617,6 +816,9 @@ static int BuildProjectedMountainObjectFaces(
   int count = 0;
   for (uint8_t at = 0; at < objects->count; at++) {
     const SimBackgroundMountainObject *object = &objects->objects[at];
+    float height_scale =
+        object->flags & kSimBackgroundMountainObject_Volcano
+            ? 1.12f : 1.0f;
     float baseline =
         (object->cell_y + object->height_cells) *
         (float)kSimBackgroundCellPixels;
@@ -646,12 +848,15 @@ static int BuildProjectedMountainObjectFaces(
                  field, source_tile, &source_x, &source_y)))
           continue;
         AddMountainStackTile(
-            params, axis, relief, origin_x, origin_y,
+            params, axis, relief, height_scale, origin_x, origin_y,
             baseline, baseline, maximum_rise, maximum_rise,
             destination_x, destination_y,
             source_x, source_y, 0,
             &count);
       }
+    AppendVolcanoEffects(
+        params, axis, relief, object,
+        origin_x, origin_y, baseline, height_scale);
   }
   return count;
 }
@@ -687,7 +892,7 @@ static void AddNorthMountainCaps(
     float baseline_right = MountainEdgeBaseline(
         component, tile->cell_x + 1, component_bottom[component]);
     AddMountainStackTile(
-        params, axis, relief, origin_x, origin_y,
+        params, axis, relief, 1.0f, origin_x, origin_y,
         baseline_left, baseline_right,
         maximum_rise_left, maximum_rise_right,
         tile->cell_x, tile->cell_y,
@@ -774,7 +979,7 @@ static int BuildProjectedMountainReliefFaces(
       float maximum_rise_right = MountainEdgeMaximumRise(
           component, cell_x + 1, baseline_right, component_top[component]);
       AddMountainStackTile(
-          params, &mountain_axis, &relief, origin_x, origin_y,
+          params, &mountain_axis, &relief, 1.0f, origin_x, origin_y,
           baseline_left, baseline_right,
           maximum_rise_left, maximum_rise_right,
           cell_x, cell_y, cell_x, cell_y, 0,
@@ -837,9 +1042,23 @@ static int ContactBounds(const SimBackgroundVoxelObject *object,
       return 3;
     case kSimBackgroundVoxel_Tree:
     case kSimBackgroundVoxel_Palm:
+    case kSimBackgroundVoxel_BroadTree:
       /* Contact belongs to the trunk, not the foliage footprint. This avoids
        * turning dense forests into one continuous dark carpet. */
       out[0] = (SimBackgroundContactBounds){5.4f, 5.4f, 10.6f, 10.6f};
+      return 1;
+    case kSimBackgroundVoxel_Shrub:
+      out[0] = (SimBackgroundContactBounds){5.8f, 5.8f, 10.2f, 10.2f};
+      return 1;
+    case kSimBackgroundVoxel_StoryTree:
+      out[0] = (SimBackgroundContactBounds){10.0f, 11.0f, 22.0f, 23.0f};
+      return 1;
+    case kSimBackgroundVoxel_BloodpoolCastle:
+    case kSimBackgroundVoxel_MarahnaTemple:
+      out[0] = (SimBackgroundContactBounds){1.0f, 3.0f, 31.0f, 31.5f};
+      return 1;
+    case kSimBackgroundVoxel_Pyramid:
+      out[0] = (SimBackgroundContactBounds){0.5f, 1.5f, 31.5f, 31.5f};
       return 1;
   }
   return 0;
@@ -1261,8 +1480,26 @@ static int ShadowBounds(const SimBackgroundVoxelObject *object,
       return 3;
     case kSimBackgroundVoxel_Tree:
     case kSimBackgroundVoxel_Palm:
+    case kSimBackgroundVoxel_BroadTree:
+    case kSimBackgroundVoxel_Shrub:
       out[0] = (SimBackgroundShadowBounds){
         0.0f, 0.0f, 16.0f, 16.0f,
+        SimBackgroundVoxelRegion_AuthoredHeight(object)};
+      return 1;
+    case kSimBackgroundVoxel_StoryTree:
+      out[0] = (SimBackgroundShadowBounds){
+        4.5f, 4.5f, 27.5f, 27.5f,
+        SimBackgroundVoxelRegion_AuthoredHeight(object)};
+      return 1;
+    case kSimBackgroundVoxel_BloodpoolCastle:
+    case kSimBackgroundVoxel_MarahnaTemple:
+      out[0] = (SimBackgroundShadowBounds){
+        1.0f, 3.0f, 31.0f, 31.5f,
+        SimBackgroundVoxelRegion_AuthoredHeight(object)};
+      return 1;
+    case kSimBackgroundVoxel_Pyramid:
+      out[0] = (SimBackgroundShadowBounds){
+        0.5f, 1.5f, 31.5f, 31.5f,
         SimBackgroundVoxelRegion_AuthoredHeight(object)};
       return 1;
   }

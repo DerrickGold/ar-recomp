@@ -34,6 +34,20 @@ static void MaterialXBounds(const SimBackgroundVoxelModel *model,
   }
 }
 
+/* Widest X extent of any geometry within half a pixel of the given height. */
+static float TopWidthAt(const SimBackgroundVoxelModel *model, float z) {
+  float min_x = 1000000.0f, max_x = -1000000.0f;
+  for (uint16_t face = 0; face < model->face_count; face++)
+    for (int point = 0; point < 4; point++) {
+      const SimBackgroundVoxelModelPoint *at =
+          &model->faces[face].points[point];
+      if (at->z < z - 0.5f || at->z > z + 0.5f) continue;
+      if (at->x < min_x) min_x = at->x;
+      if (at->x > max_x) max_x = at->x;
+    }
+  return max_x > min_x ? max_x - min_x : 0.0f;
+}
+
 static bool HorizontalFaceCovers(const SimBackgroundVoxelModel *model,
                                  float x, float y) {
   for (uint16_t i = 0; i < model->face_count; i++) {
@@ -166,13 +180,19 @@ int main(void) {
   CHECK(progression_hash[0][1] == progression_hash[1][1]);
   CHECK(progression_hash[0][1] == progression_hash[3][1]);
   CHECK(progression_hash[0][1] == progression_hash[5][1]);
-  /* Kasandora's explicitly requested progression grows from canvas to a low
-   * stone dwelling and then a taller developed stone house. */
-  SimBackgroundVoxelModel kasandora_tent = BuildRegionalHouse(3, 0);
-  SimBackgroundVoxelModel kasandora_early = BuildRegionalHouse(3, 1);
-  SimBackgroundVoxelModel kasandora_developed = BuildRegionalHouse(3, 2);
-  CHECK(kasandora_tent.max_z < kasandora_early.max_z);
-  CHECK(kasandora_early.max_z < kasandora_developed.max_z);
+  /* Kasandora's canonical progression remains readable by silhouette: a low
+   * round yurt, a taller white tent, then a flat-roofed adobe dwelling. */
+  SimBackgroundVoxelModel kasandora_yurt = BuildRegionalHouse(3, 0);
+  SimBackgroundVoxelModel kasandora_tent = BuildRegionalHouse(3, 1);
+  SimBackgroundVoxelModel kasandora_adobe = BuildRegionalHouse(3, 2);
+  CHECK(kasandora_yurt.max_z < kasandora_tent.max_z);
+  CHECK(kasandora_tent.max_z < kasandora_adobe.max_z);
+
+  /* Marahna deliberately shares only the yurt, then branches into its raised
+   * tropical hut and a lower, solid log cabin. */
+  CHECK(progression_hash[2][0] == progression_hash[4][0]);
+  CHECK(progression_hash[2][1] != progression_hash[4][1]);
+  CHECK(progression_hash[2][2] != progression_hash[4][2]);
 
   SimBackgroundVoxelObject alternate_house_object = {
     .kind = kSimBackgroundVoxel_House,
@@ -365,6 +385,61 @@ int main(void) {
   CHECK(MaterialFaces(&palm, kSimVoxelMaterial_Trunk) > 0);
   CHECK(MaterialFaces(&palm, kSimVoxelMaterial_Leaves) > 0);
   CHECK(ModelHash(&palm) != ModelHash(&isolated));
+
+  SimBackgroundVoxelObject shrub_object = {
+    .kind = kSimBackgroundVoxel_Shrub,
+    .flags = kSimBackgroundVoxel_IsolatedTree,
+    .cell_x = 5,
+    .cell_y = 9,
+    .record_slot = 0xFF,
+  };
+  SimBackgroundVoxelModel shrub;
+  SimBackgroundVoxelModel_Build(
+      &shrub_object, kSimBackgroundVoxelDetail_Balanced, &shrub);
+  CHECK(!shrub.overflow && shrub.face_count > 0);
+  CHECK(shrub.min_x >= 0.0f && shrub.max_x <= 16.0f);
+  CHECK(shrub.min_y >= 0.0f && shrub.max_y <= 16.0f);
+  /* The clearable bush is shorter and rounder than the permanent evergreen it
+   * used to be drawn as, and shares no geometry with it. */
+  CHECK(shrub.max_z < isolated.max_z);
+  CHECK(ModelHash(&shrub) != ModelHash(&isolated));
+  CHECK(MaterialFaces(&shrub, kSimVoxelMaterial_Leaves) > 0);
+
+  /* Every landmark lives inside its own 2x2 plot: 32x32 town pixels. */
+  SimBackgroundVoxelModel story_tree = Build(
+      kSimBackgroundVoxel_StoryTree, kSimBackgroundVoxelDetail_Balanced);
+  CHECK(story_tree.min_x >= 0.0f && story_tree.max_x <= 32.0f);
+  CHECK(story_tree.min_y >= 0.0f && story_tree.max_y <= 32.0f);
+  CHECK(story_tree.max_z <= 30.0f);
+  CHECK(MaterialFaces(&story_tree, kSimVoxelMaterial_Snow) > 0);
+  CHECK(ModelHash(&story_tree) != ModelHash(&snow_tree));
+
+  SimBackgroundVoxelModel bloodpool_castle = Build(
+      kSimBackgroundVoxel_BloodpoolCastle,
+      kSimBackgroundVoxelDetail_Balanced);
+  CHECK(bloodpool_castle.min_x >= 0.0f && bloodpool_castle.max_x <= 32.0f);
+  CHECK(bloodpool_castle.min_y >= 0.0f && bloodpool_castle.max_y <= 32.0f);
+  CHECK(bloodpool_castle.max_z <= 32.0f);
+  CHECK(MaterialFaces(&bloodpool_castle, kSimVoxelMaterial_Gold) > 0);
+
+  SimBackgroundVoxelModel marahna_temple = Build(
+      kSimBackgroundVoxel_MarahnaTemple,
+      kSimBackgroundVoxelDetail_Balanced);
+  CHECK(marahna_temple.min_x >= 0.0f && marahna_temple.max_x <= 32.0f);
+  CHECK(marahna_temple.min_y >= 0.0f && marahna_temple.max_y <= 32.0f);
+  CHECK(marahna_temple.max_z <= 24.0f);
+  CHECK(MaterialFaces(&marahna_temple, kSimVoxelMaterial_Gold) > 0);
+  CHECK(ModelHash(&marahna_temple) != ModelHash(&bloodpool_castle));
+
+  SimBackgroundVoxelModel pyramid = Build(
+      kSimBackgroundVoxel_Pyramid, kSimBackgroundVoxelDetail_Balanced);
+  CHECK(pyramid.min_x >= 0.0f && pyramid.max_x <= 32.0f);
+  CHECK(pyramid.min_y >= 0.0f && pyramid.max_y <= 32.0f);
+  CHECK(pyramid.max_z <= 28.0f);
+  /* A pyramid is a pyramid: its top must be far narrower than its base. */
+  CHECK(TopWidthAt(&pyramid, pyramid.max_z) <
+        TopWidthAt(&pyramid, 0.0f) * 0.4f);
+  CHECK(ModelHash(&pyramid) != ModelHash(&bloodpool_castle));
 
   SimBackgroundVoxelObject construction_object = {
     .kind = kSimBackgroundVoxel_House,

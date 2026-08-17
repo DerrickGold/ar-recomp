@@ -27,6 +27,7 @@ static struct {
   SDL_GPUShader *vertex_shader;
   SDL_GPUShader *fragment_shader;
   SDL_GPUGraphicsPipeline *pipeline;
+  SDL_GPUGraphicsPipeline *effect_pipeline;
   SDL_GPUSampler *nearest_sampler;
   SDL_GPUBuffer *vertex_buffer;
   SDL_GPUTransferBuffer *transfer_buffer;
@@ -198,6 +199,14 @@ static bool CreatePipeline(void) {
       g_depth_pass.device, &info);
   if (!g_depth_pass.pipeline) {
     fprintf(stderr, "[sim3d-depth] pipeline creation failed: %s\n",
+            SDL_GetError());
+    return false;
+  }
+  info.depth_stencil_state.enable_depth_write = false;
+  g_depth_pass.effect_pipeline = SDL_CreateGPUGraphicsPipeline(
+      g_depth_pass.device, &info);
+  if (!g_depth_pass.effect_pipeline) {
+    fprintf(stderr, "[sim3d-depth] effect pipeline creation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -548,6 +557,7 @@ static SDL_GPUTexture *TextureForLayer(
       return g_depth_pass.mountain_atlas;
     case kSim3DDepthPass_Billboard:
       return GpuTexture(billboard_texture);
+    case kSim3DDepthPass_Effect:
     case kSim3DDepthPass_Solid:
     default:
       return g_depth_pass.white_texture;
@@ -653,6 +663,8 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
   SDL_BindGPUVertexBuffers(pass, 0, &vertex_binding, 1);
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (!g_depth_pass.lists[i].count) continue;
+    if (i == kSim3DDepthPass_Effect)
+      SDL_BindGPUGraphicsPipeline(pass, g_depth_pass.effect_pipeline);
     SDL_GPUTexture *texture = TextureForLayer(
         (Sim3DDepthPassLayer)i, billboard_texture);
     SDL_GPUTextureSamplerBinding texture_binding = {
@@ -682,6 +694,9 @@ void Sim3DDepthPass_Reset(void) {
   if (g_depth_pass.pipeline)
     SDL_ReleaseGPUGraphicsPipeline(
         g_depth_pass.device, g_depth_pass.pipeline);
+  if (g_depth_pass.effect_pipeline)
+    SDL_ReleaseGPUGraphicsPipeline(
+        g_depth_pass.device, g_depth_pass.effect_pipeline);
   if (g_depth_pass.vertex_shader)
     SDL_ReleaseGPUShader(g_depth_pass.device, g_depth_pass.vertex_shader);
   if (g_depth_pass.fragment_shader)

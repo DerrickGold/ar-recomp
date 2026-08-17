@@ -8,6 +8,10 @@ typedef enum Sim3DDepthPassLayer {
   kSim3DDepthPass_Solid,
   kSim3DDepthPass_Mountain,
   kSim3DDepthPass_Billboard,
+  /* Transparent world effects are submitted after all opaque geometry. They
+   * still test against the shared depth target, but use a no-depth-write
+   * pipeline so smoke/glow cannot punch transparent holes through mountains. */
+  kSim3DDepthPass_Effect,
   kSim3DDepthPassLayerCount,
 } Sim3DDepthPassLayer;
 
