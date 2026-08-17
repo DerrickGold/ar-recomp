@@ -46,6 +46,11 @@ enum {
  * being separable from it at any supported zoom. */
 static const float kContactLiftPixels = 0.06f;
 
+/* Fully lit / fully opaque, for the relief faces that want neither shaped. */
+static const uint8_t kMountainFullIntensity[4] = {255, 255, 255, 255};
+/* The volcano stands taller than the ordinary peaks it shares a stamp with. */
+static const float kVolcanoHeightScale = 1.12f;
+
 typedef struct SimBackgroundGeometryBatch {
   SDL_Vertex vertices[kMaxVertices];
   int indices[kMaxIndices];
@@ -538,6 +543,19 @@ static SimBackgroundStackDirection MountainStackDirection(
   return direction;
 }
 
+/* What every tile of one mountain shares. Threading these seven values through
+ * each emitter individually pushed both of them past fifteen parameters, which
+ * is where the cell/source/baseline arguments that actually differ per tile
+ * stopped being visible at the call site. */
+typedef struct MountainTileContext {
+  const SimBackgroundVoxelRenderParams *params;
+  const SimBackgroundProjectionAxis *axis;
+  const SimBackgroundMountainRelief *relief;
+  SimBackgroundStackDirection stack_direction;
+  float height_scale;
+  float origin_x, origin_y;
+} MountainTileContext;
+
 static void MountainPlanePoint(
     float source_x, float source_y, float baseline,
     const SimBackgroundMountainRelief *relief,
@@ -785,12 +803,7 @@ static float MountainEdgeMaximumRise(
 }
 
 static void AddMountainStackTile(
-    const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundProjectionAxis *axis,
-    const SimBackgroundMountainRelief *relief,
-    SimBackgroundStackDirection stack_direction,
-    float height_scale,
-    float origin_x, float origin_y,
+    const MountainTileContext *context,
     float baseline_left, float baseline_right,
     float maximum_rise_left, float maximum_rise_right,
     int destination_cell_x, int destination_cell_y,
@@ -812,45 +825,52 @@ static void AddMountainStackTile(
       (float)kSimTownCanvasPixels;
   float source_x[4] = {x0, x1, x1, x0};
   float source_y[4] = {y0, y0, y1, y1};
-  const uint8_t opaque[4] = {255, 255, 255, 255};
-  const uint8_t lit[4] = {255, 255, 255, 255};
+  /* Every layer retains the exact front silhouette orientation. Flipping only
+   * the rear copy moves off-centre tip pixels across their tile and turns one
+   * peak into two visible horns, so the mapping does not vary by layer. */
+  const SDL_FPoint uv[4] = {
+    {mirror_x ? u1 : u0, v0},
+    {mirror_x ? u0 : u1, v0},
+    {mirror_x ? u0 : u1, v1},
+    {mirror_x ? u1 : u0, v1},
+  };
+  /* The displacement of the rearmost copy. Every nearer layer is a fixed
+   * fraction of it, so the taper is resolved once per corner instead of once
+   * per corner per layer. */
+  const SimBackgroundMountainRelief *relief = context->relief;
+  float corner_baseline[4], rearmost_depth[4];
+  for (int point = 0; point < 4; point++) {
+    bool left = point == 0 || point == 3;
+    corner_baseline[point] = left ? baseline_left : baseline_right;
+    float rise = corner_baseline[point] - source_y[point];
+    /* The relief module states the displacement as a signed northward offset,
+     * which is its magnitude along whichever way the camera says is back.
+     * Negating recovers that magnitude; the direction supplies the sign, so a
+     * zero-yaw camera lands on exactly the old northward value. */
+    rearmost_depth[point] = -SimBackgroundMountainRelief_StackOffsetY(
+        relief, (uint8_t)(relief->stack_layer_count - 1), rise,
+        left ? maximum_rise_left : maximum_rise_right);
+  }
+  float layers = (float)(relief->stack_layer_count - 1);
   /* Emit rear copies first for coherent material batching. Visibility is
    * resolved per fragment by the shared D32 target, so this loop order is not
    * a correctness dependency. */
   for (int layer = relief->stack_layer_count - 1; layer >= 0; layer--) {
-    /* Every layer retains the exact front silhouette orientation. Flipping
-     * only the rear copy moves off-centre tip pixels across their tile and
-     * turns one peak into two visible horns. */
-    bool layer_mirror_x = mirror_x;
-    SDL_FPoint uv[4] = {
-      {layer_mirror_x ? u1 : u0, v0},
-      {layer_mirror_x ? u0 : u1, v0},
-      {layer_mirror_x ? u0 : u1, v1},
-      {layer_mirror_x ? u1 : u0, v1},
-    };
+    float fraction = layers > 0.0f ? (float)layer / layers : 0.0f;
     float local_x[4], local_y[4], local_z[4];
     for (int point = 0; point < 4; point++) {
-      float baseline = point == 0 || point == 3
-          ? baseline_left : baseline_right;
-      float rise = baseline - source_y[point];
-      float maximum_rise = point == 0 || point == 3
-          ? maximum_rise_left : maximum_rise_right;
-      /* The relief module states the displacement as a signed northward
-       * offset, which is its magnitude along whichever way the camera says is
-       * back. Negating recovers that magnitude; the direction supplies the
-       * sign, so a zero-yaw camera lands on exactly the old northward value. */
-      float depth = -SimBackgroundMountainRelief_StackOffsetY(
-          relief, layer, rise, maximum_rise);
+      float depth = rearmost_depth[point] * fraction;
       MountainPlanePoint(
-          source_x[point], source_y[point], baseline, relief,
-          depth * stack_direction.x, depth * stack_direction.y,
+          source_x[point], source_y[point], corner_baseline[point], relief,
+          depth * context->stack_direction.x,
+          depth * context->stack_direction.y,
           &local_x[point], &local_y[point], &local_z[point]);
-      local_z[point] *= height_scale;
+      local_z[point] *= context->height_scale;
     }
     AddProjectedMountainReliefFace(
-        params, axis, origin_x, origin_y,
-        local_x, local_y, local_z, uv, lit, opaque,
-        count);
+        context->params, context->axis, context->origin_x, context->origin_y,
+        local_x, local_y, local_z, uv, kMountainFullIntensity,
+        kMountainFullIntensity, count);
   }
 }
 
@@ -865,10 +885,9 @@ static void AddMountainStackTile(
  *
  * This closes the silhouette: wherever a mountain cell has no neighbour, a
  * quad drops from that cell's edge of the plane straight down to z=0, giving
- * the mass a visible side and a footprint. It samples a rock-coloured strip of
- * the cell's own art, inset past the transparent outline margin the wall and
- * base tiles carry, and is shaded down so it reads as a side rather than a
- * second lit face. */
+ * the mass a visible side and a footprint. It follows the outline in both
+ * axes, stretches the tile's own art down the wall, and ramps its shading
+ * from the face's own value to a shaded base. */
 enum {
   /* How far into the tile the wall's ground edge samples. The mountain tiles
    * carry a one-to-two pixel dither margin along their outline that is both
@@ -914,6 +933,11 @@ typedef struct MountainSkirtProfile {
   uint8_t inner_first, inner_last;
 } MountainSkirtProfile;
 
+/* Resolved from the compile-time silhouette table, so an entry is the same
+ * value whenever it is computed and never needs invalidating - not on a town
+ * change, not on Reset. It is filled lazily from the present thread, which is
+ * the only thread that renders; a second renderer thread would need this
+ * built up front instead. */
 static MountainSkirtProfile g_skirt_profiles[256][2];
 
 static bool MountainSilhouetteOpaque(uint8_t tile, int column, int row) {
@@ -1066,11 +1090,7 @@ static void MountainStackOutwardOffset(
 }
 
 static void AddMountainSkirtTile(
-    const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundProjectionAxis *axis,
-    const SimBackgroundMountainRelief *relief,
-    SimBackgroundStackDirection stack_direction,
-    float height_scale, float origin_x, float origin_y,
+    const MountainTileContext *context,
     float baseline, float maximum_rise,
     int destination_cell_x, int destination_cell_y,
     int source_cell_x, int source_cell_y, uint8_t source_tile,
@@ -1091,21 +1111,21 @@ static void AddMountainSkirtTile(
   float y0 = cell_top + (float)profile->first_row;
   float y1 = cell_top + (float)profile->last_row + 1.0f;
   float north_offset_x, north_offset_y, south_offset_x, south_offset_y;
-  MountainStackOutwardOffset(relief, stack_direction, baseline - y0,
-                             maximum_rise, right_edge,
+  MountainStackOutwardOffset(context->relief, context->stack_direction,
+                             baseline - y0, maximum_rise, right_edge,
                              &north_offset_x, &north_offset_y);
-  MountainStackOutwardOffset(relief, stack_direction, baseline - y1,
-                             maximum_rise, right_edge,
+  MountainStackOutwardOffset(context->relief, context->stack_direction,
+                             baseline - y1, maximum_rise, right_edge,
                              &south_offset_x, &south_offset_y);
   float north_wall_x, north_y, north_z, south_wall_x, south_y, south_z;
-  MountainPlanePoint(north_x, y0, baseline, relief,
+  MountainPlanePoint(north_x, y0, baseline, context->relief,
                      north_offset_x, north_offset_y,
                      &north_wall_x, &north_y, &north_z);
-  MountainPlanePoint(south_x, y1, baseline, relief,
+  MountainPlanePoint(south_x, y1, baseline, context->relief,
                      south_offset_x, south_offset_y,
                      &south_wall_x, &south_y, &south_z);
-  north_z = north_z * height_scale + kMountainSkirtOverlapPixels;
-  south_z = south_z * height_scale + kMountainSkirtOverlapPixels;
+  north_z = north_z * context->height_scale + kMountainSkirtOverlapPixels;
+  south_z = south_z * context->height_scale + kMountainSkirtOverlapPixels;
   /* Art already sitting on the ground has no wedge to close. */
   if (north_z <= kMountainSkirtOverlapPixels) return;
 
@@ -1130,7 +1150,6 @@ static void AddMountainSkirtTile(
     {(cell_u + profile->inner_last + 0.5f) / kSimTownCanvasPixels, v1},
     {(cell_u + profile->inner_first + 0.5f) / kSimTownCanvasPixels, v0},
   };
-  const uint8_t opaque[4] = {255, 255, 255, 255};
   /* Points 0 and 1 are the top edge against the mountain; 2 and 3 stand on
    * the ground. */
   const uint8_t brightness[4] = {
@@ -1138,8 +1157,9 @@ static void AddMountainSkirtTile(
     kMountainSkirtBaseBrightness, kMountainSkirtBaseBrightness,
   };
   AddProjectedMountainReliefFace(
-      params, axis, origin_x, origin_y, local_x, local_y, local_z, uv,
-      brightness, opaque, count);
+      context->params, context->axis, context->origin_x, context->origin_y,
+      local_x, local_y, local_z, uv, brightness, kMountainFullIntensity,
+      count);
 }
 
 static bool MountainCellOccupied(const SimBackgroundMountainObject *object,
@@ -1149,19 +1169,17 @@ static bool MountainCellOccupied(const SimBackgroundMountainObject *object,
 }
 
 static int BuildProjectedMountainObjectFaces(
-    const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundProjectionAxis *axis,
-    const SimBackgroundMountainRelief *relief,
-    SimBackgroundStackDirection stack_direction,
+    const MountainTileContext *shared,
     const SimBackgroundMountainField *field,
-    const SimBackgroundMountainObjectList *objects,
-    float origin_x, float origin_y) {
+    const SimBackgroundMountainObjectList *objects) {
   int count = 0;
   for (uint8_t at = 0; at < objects->count; at++) {
     const SimBackgroundMountainObject *object = &objects->objects[at];
-    float height_scale =
+    /* Only the volcano's extra height varies between objects. */
+    MountainTileContext context = *shared;
+    context.height_scale =
         object->flags & kSimBackgroundMountainObject_Volcano
-            ? 1.12f : 1.0f;
+            ? kVolcanoHeightScale : 1.0f;
     float baseline =
         (object->cell_y + object->height_cells) *
         (float)kSimBackgroundCellPixels;
@@ -1191,12 +1209,8 @@ static int BuildProjectedMountainObjectFaces(
                  field, source_tile, &source_x, &source_y)))
           continue;
         AddMountainStackTile(
-            params, axis, relief, stack_direction, height_scale,
-            origin_x, origin_y,
-            baseline, baseline, maximum_rise, maximum_rise,
-            destination_x, destination_y,
-            source_x, source_y, 0,
-            &count);
+            &context, baseline, baseline, maximum_rise, maximum_rise,
+            destination_x, destination_y, source_x, source_y, 0, &count);
         /* Close the silhouette wherever the mass ends, so the raised part of
          * the plane has a visible side reaching the ground instead of an open
          * edge with the ground showing under it. */
@@ -1206,29 +1220,25 @@ static int BuildProjectedMountainObjectFaces(
                                    column + (right_edge ? 1 : -1)))
             continue;
           AddMountainSkirtTile(
-              params, axis, relief, stack_direction, height_scale,
-              origin_x, origin_y, baseline, maximum_rise,
+              &context, baseline, maximum_rise,
               destination_x, destination_y,
               source_x, source_y, source_tile, right_edge, &count);
         }
       }
     AppendVolcanoEffects(
-        params, axis, relief, object,
-        origin_x, origin_y, baseline, height_scale);
+        context.params, context.axis, context.relief, object,
+        context.origin_x, context.origin_y, baseline, context.height_scale);
   }
   return count;
 }
 
 static void AddNorthMountainCaps(
-    const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundProjectionAxis *axis,
-    const SimBackgroundMountainRelief *relief,
-    SimBackgroundStackDirection stack_direction,
+    const MountainTileContext *context,
     const SimBackgroundMountainField *field,
     const SimBackgroundMountainCaps *caps,
     const float component_bottom[kSimBackgroundMountainCellCount + 1],
     const float component_top[kSimBackgroundMountainCellCount + 1],
-    float origin_x, float origin_y, int *count) {
+    int *count) {
   for (uint8_t at = 0; at < caps->tile_count; at++) {
     const SimBackgroundMountainCapTile *tile = &caps->tiles[at];
     int source_cell_x, source_cell_y;
@@ -1251,8 +1261,7 @@ static void AddNorthMountainCaps(
     float baseline_right = MountainEdgeBaseline(
         component, tile->cell_x + 1, component_bottom[component]);
     AddMountainStackTile(
-        params, axis, relief, stack_direction, 1.0f, origin_x, origin_y,
-        baseline_left, baseline_right,
+        context, baseline_left, baseline_right,
         maximum_rise_left, maximum_rise_right,
         tile->cell_x, tile->cell_y,
         source_cell_x, source_cell_y, tile->flags,
@@ -1277,14 +1286,20 @@ static int BuildProjectedMountainReliefFaces(
           ? 0.44f : 0.35f);
   SimBackgroundProjectionAxis mountain_axis =
       ProjectionAxis(params, mountain_lean);
-  SimBackgroundStackDirection stack_direction =
-      MountainStackDirection(params);
+  MountainTileContext context = {
+    .params = params,
+    .axis = &mountain_axis,
+    .relief = &relief,
+    .stack_direction = MountainStackDirection(params),
+    .height_scale = 1.0f,
+    .origin_x = origin_x,
+    .origin_y = origin_y,
+  };
   SimBackgroundMountainObjectList mountain_objects;
   if (SimBackgroundMountainObjects_Build(
           field, &scene->mountain_caps, &mountain_objects)) {
     return BuildProjectedMountainObjectFaces(
-        params, &mountain_axis, &relief, stack_direction, field,
-        &mountain_objects, origin_x, origin_y);
+        &context, field, &mountain_objects);
   }
   /* Each connected range shares one baseline. Mapping source Y partly into
    * height and partly into ground depth turns the original pseudo-perspective
@@ -1340,18 +1355,15 @@ static int BuildProjectedMountainReliefFaces(
       float maximum_rise_right = MountainEdgeMaximumRise(
           component, cell_x + 1, baseline_right, component_top[component]);
       AddMountainStackTile(
-          params, &mountain_axis, &relief, stack_direction, 1.0f,
-          origin_x, origin_y,
-          baseline_left, baseline_right,
+          &context, baseline_left, baseline_right,
           maximum_rise_left, maximum_rise_right,
           cell_x, cell_y, cell_x, cell_y, 0,
           &count);
     }
   }
   AddNorthMountainCaps(
-      params, &mountain_axis, &relief, stack_direction, field,
-      &scene->mountain_caps, component_bottom, component_top,
-      origin_x, origin_y, &count);
+      &context, field, &scene->mountain_caps,
+      component_bottom, component_top, &count);
   return count;
 }
 
