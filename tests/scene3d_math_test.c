@@ -289,6 +289,46 @@ int main(void) {
   CHECK(isfinite(long_running));
   CHECK(long_running >= 0.0f && long_running < 1.0f);
 
+  /* The ground's away-from-camera direction. Anything a tilted camera pushes
+   * "back" - the mountain relief stack, the model lean - has to follow this
+   * rather than map north, or it fans out sideways as soon as the camera
+   * yaws and the pushed-back copies read as sliding off the ground. */
+  const float source = 512.0f;
+  float ground_aspect = (float)width / height;
+  camera.tilt_x = -0.575f;
+  camera.tilt_y = 0.0f;
+  Scene3D_BuildViewProjection(&camera, width, height, matrix);
+  float away_x = 1.0f, away_y = 0.0f, gradient = 0.0f;
+  CHECK(Scene3D_GroundDepthDirection(matrix, ground_aspect, source, source,
+                                     &away_x, &away_y, &gradient));
+  /* A camera with no yaw looks straight up the map, so the direction is due
+   * north and the old fixed northward offset is reproduced exactly. */
+  CHECK(Near(away_x, 0.0f) && Near(away_y, -1.0f));
+  CHECK(gradient > 0.0f);
+
+  /* Yaw rotates it, and it stays a unit vector pointing away from the
+   * camera in both directions. */
+  float previous_x = 0.0f;
+  for (int yaw_mrad = 150; yaw_mrad <= 600; yaw_mrad += 150) {
+    camera.tilt_y = yaw_mrad / 1000.0f;
+    Scene3D_BuildViewProjection(&camera, width, height, matrix);
+    float x = 0.0f, y = 0.0f;
+    CHECK(Scene3D_GroundDepthDirection(matrix, ground_aspect, source, source,
+                                       &x, &y, NULL));
+    CHECK(Near(sqrtf(x * x + y * y), 1.0f));
+    CHECK(y < 0.0f);
+    /* Turning further from north keeps moving the direction the same way. */
+    CHECK(x < previous_x);
+    previous_x = x;
+
+    camera.tilt_y = -yaw_mrad / 1000.0f;
+    Scene3D_BuildViewProjection(&camera, width, height, matrix);
+    float mirror_x = 0.0f, mirror_y = 0.0f;
+    CHECK(Scene3D_GroundDepthDirection(matrix, ground_aspect, source, source,
+                                       &mirror_x, &mirror_y, NULL));
+    CHECK(Near(mirror_x, -x) && Near(mirror_y, y));
+  }
+
   if (!failures) puts("scene3d math tests passed");
   return failures ? 1 : 0;
 }

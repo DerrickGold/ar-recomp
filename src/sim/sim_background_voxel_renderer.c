@@ -188,15 +188,11 @@ static SimBackgroundModelLean CameraFacingLean(
    * like the original upright SIM art. The cap keeps a nearly pitchless
    * camera from asking for an infinitely tilted billboard. */
   const float kMaximumLeanPerHeight = 1.15f;
-  /* Express the clip-depth gradient in authored texture pixels. Matrix X is
-   * in aspect-scaled world units while Y/Z each span one source height; using
-   * raw matrix coefficients made the lean change with window aspect ratio. */
   float aspect = (float)params->viewport.w / params->viewport.h;
-  float direction_x = params->matrix[3] * aspect / params->source.w;
-  float direction_y = -params->matrix[7] / params->source.h;
-  float ground_depth = sqrtf(direction_x * direction_x +
-                             direction_y * direction_y);
-  if (ground_depth < 0.0001f)
+  float direction_x, direction_y, ground_depth;
+  if (!Scene3D_GroundDepthDirection(
+          params->matrix, aspect, params->source.w, params->source.h,
+          &direction_x, &direction_y, &ground_depth))
     return (SimBackgroundModelLean){0.0f, 0.0f};
   float vertical_depth = params->matrix[11] / params->source.h;
   float full_billboard = -vertical_depth / ground_depth;
@@ -204,10 +200,7 @@ static SimBackgroundModelLean CameraFacingLean(
     return (SimBackgroundModelLean){0.0f, 0.0f};
   float lean = full_billboard * billboard_blend;
   if (lean > kMaximumLeanPerHeight) lean = kMaximumLeanPerHeight;
-  return (SimBackgroundModelLean){
-    direction_x / ground_depth * lean,
-    direction_y / ground_depth * lean,
-  };
+  return (SimBackgroundModelLean){direction_x * lean, direction_y * lean};
 }
 
 static SimBackgroundModelLean CameraFacingModelLean(
@@ -513,6 +506,30 @@ static void AppendProjectedSolidEffectBox(
   }
 }
 
+/* Unit direction, in town-texture pixels, that leads away from the camera
+ * across the ground. */
+typedef struct SimBackgroundStackDirection {
+  float x, y;
+} SimBackgroundStackDirection;
+
+/* The relief stack fakes a mountain's thickness with parallel copies of its
+ * art displaced behind the front one. "Behind" has to mean behind the CAMERA,
+ * not map north: the sim camera has a yaw axis, a reactive lean and a manual
+ * orbit, and a fixed northward displacement fans the copies out sideways as
+ * soon as any of them is non-zero, which reads as the rear copies sliding off
+ * the ground while the front one stays put. At yaw zero this resolves to
+ * (0,-1) and reproduces the original northward offset exactly. */
+static SimBackgroundStackDirection MountainStackDirection(
+    const SimBackgroundVoxelRenderParams *params) {
+  float aspect = (float)params->viewport.w / params->viewport.h;
+  SimBackgroundStackDirection direction;
+  if (!Scene3D_GroundDepthDirection(
+          params->matrix, aspect, params->source.w, params->source.h,
+          &direction.x, &direction.y, NULL))
+    return (SimBackgroundStackDirection){0.0f, -1.0f};
+  return direction;
+}
+
 static void MountainPlanePoint(
     float source_x, float source_y, float baseline,
     const SimBackgroundMountainRelief *relief,
@@ -763,6 +780,7 @@ static void AddMountainStackTile(
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis *axis,
     const SimBackgroundMountainRelief *relief,
+    SimBackgroundStackDirection stack_direction,
     float height_scale,
     float origin_x, float origin_y,
     float baseline_left, float baseline_right,
@@ -808,11 +826,15 @@ static void AddMountainStackTile(
       float rise = baseline - source_y[point];
       float maximum_rise = point == 0 || point == 3
           ? maximum_rise_left : maximum_rise_right;
-      float offset_y = SimBackgroundMountainRelief_StackOffsetY(
+      /* The relief module states the displacement as a signed northward
+       * offset, which is its magnitude along whichever way the camera says is
+       * back. Negating recovers that magnitude; the direction supplies the
+       * sign, so a zero-yaw camera lands on exactly the old northward value. */
+      float depth = -SimBackgroundMountainRelief_StackOffsetY(
           relief, layer, rise, maximum_rise);
       MountainPlanePoint(
           source_x[point], source_y[point], baseline, relief,
-          0.0f, offset_y,
+          depth * stack_direction.x, depth * stack_direction.y,
           &local_x[point], &local_y[point], &local_z[point]);
       local_z[point] *= height_scale;
     }
@@ -827,6 +849,7 @@ static int BuildProjectedMountainObjectFaces(
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis *axis,
     const SimBackgroundMountainRelief *relief,
+    SimBackgroundStackDirection stack_direction,
     const SimBackgroundMountainField *field,
     const SimBackgroundMountainObjectList *objects,
     float origin_x, float origin_y) {
@@ -865,7 +888,8 @@ static int BuildProjectedMountainObjectFaces(
                  field, source_tile, &source_x, &source_y)))
           continue;
         AddMountainStackTile(
-            params, axis, relief, height_scale, origin_x, origin_y,
+            params, axis, relief, stack_direction, height_scale,
+            origin_x, origin_y,
             baseline, baseline, maximum_rise, maximum_rise,
             destination_x, destination_y,
             source_x, source_y, 0,
@@ -882,6 +906,7 @@ static void AddNorthMountainCaps(
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis *axis,
     const SimBackgroundMountainRelief *relief,
+    SimBackgroundStackDirection stack_direction,
     const SimBackgroundMountainField *field,
     const SimBackgroundMountainCaps *caps,
     const float component_bottom[kSimBackgroundMountainCellCount + 1],
@@ -909,7 +934,7 @@ static void AddNorthMountainCaps(
     float baseline_right = MountainEdgeBaseline(
         component, tile->cell_x + 1, component_bottom[component]);
     AddMountainStackTile(
-        params, axis, relief, 1.0f, origin_x, origin_y,
+        params, axis, relief, stack_direction, 1.0f, origin_x, origin_y,
         baseline_left, baseline_right,
         maximum_rise_left, maximum_rise_right,
         tile->cell_x, tile->cell_y,
@@ -935,12 +960,14 @@ static int BuildProjectedMountainReliefFaces(
           ? 0.44f : 0.35f);
   SimBackgroundProjectionAxis mountain_axis =
       ProjectionAxis(params, mountain_lean);
+  SimBackgroundStackDirection stack_direction =
+      MountainStackDirection(params);
   SimBackgroundMountainObjectList mountain_objects;
   if (SimBackgroundMountainObjects_Build(
           field, &scene->mountain_caps, &mountain_objects)) {
     return BuildProjectedMountainObjectFaces(
-        params, &mountain_axis, &relief, field, &mountain_objects,
-        origin_x, origin_y);
+        params, &mountain_axis, &relief, stack_direction, field,
+        &mountain_objects, origin_x, origin_y);
   }
   /* Each connected range shares one baseline. Mapping source Y partly into
    * height and partly into ground depth turns the original pseudo-perspective
@@ -996,7 +1023,8 @@ static int BuildProjectedMountainReliefFaces(
       float maximum_rise_right = MountainEdgeMaximumRise(
           component, cell_x + 1, baseline_right, component_top[component]);
       AddMountainStackTile(
-          params, &mountain_axis, &relief, 1.0f, origin_x, origin_y,
+          params, &mountain_axis, &relief, stack_direction, 1.0f,
+          origin_x, origin_y,
           baseline_left, baseline_right,
           maximum_rise_left, maximum_rise_right,
           cell_x, cell_y, cell_x, cell_y, 0,
@@ -1004,8 +1032,8 @@ static int BuildProjectedMountainReliefFaces(
     }
   }
   AddNorthMountainCaps(
-      params, &mountain_axis, &relief, field, &scene->mountain_caps,
-      component_bottom, component_top,
+      params, &mountain_axis, &relief, stack_direction, field,
+      &scene->mountain_caps, component_bottom, component_top,
       origin_x, origin_y, &count);
   return count;
 }

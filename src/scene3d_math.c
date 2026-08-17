@@ -3,6 +3,9 @@
 #include <math.h>
 
 static const float kMinimumProjectionDepth = 0.0001f;
+/* Below this the camera is looking straight down and the ground has no depth
+ * gradient to take a direction from. */
+static const float kMinimumGroundDepthGradient = 0.0001f;
 
 static void Mat4Mul(const float a[16], const float b[16], float out[16]) {
   for (int column = 0; column < 4; column++) {
@@ -118,6 +121,25 @@ bool Scene3D_NormalizedDepth(const float matrix[16],
   float depth = clip_z / clip_w * 0.5f + 0.5f;
   if (!isfinite(depth)) return false;
   *out_depth = depth;
+  return true;
+}
+
+bool Scene3D_GroundDepthDirection(const float matrix[16], float aspect,
+                                  float source_width, float source_height,
+                                  float *out_x, float *out_y,
+                                  float *out_length) {
+  if (!matrix || source_width <= 0.0f || source_height <= 0.0f) return false;
+  /* Clip W is the depth gradient, so its X and Y rows are the direction in
+   * which the ground recedes. Expressing them in authored source pixels
+   * rather than raw matrix coefficients keeps the result independent of the
+   * window's aspect ratio, which matrix X carries and matrix Y does not. */
+  float x = matrix[3] * aspect / source_width;
+  float y = -matrix[7] / source_height;
+  float length = sqrtf(x * x + y * y);
+  if (!isfinite(length) || length < kMinimumGroundDepthGradient) return false;
+  if (out_x) *out_x = x / length;
+  if (out_y) *out_y = y / length;
+  if (out_length) *out_length = length;
   return true;
 }
 
