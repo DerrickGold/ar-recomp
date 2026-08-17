@@ -1032,12 +1032,34 @@ static const MountainSkirtProfile *MountainSkirtProfileFor(uint8_t tile,
   return profile;
 }
 
+/* Displacement of the outermost stack copy on one side of the mountain. The
+ * relief stack recedes along the camera's away axis, which under yaw has a
+ * sideways component - up to 2.8px at Ultra - so a wall standing at the front
+ * copy is overhung by the rear ones. Zero when the stack fans the other way,
+ * because then the front copy already is the outermost. */
+static void MountainStackOutwardOffset(
+    const SimBackgroundMountainRelief *relief,
+    SimBackgroundStackDirection direction, float rise, float maximum_rise,
+    bool right_edge, float *offset_x, float *offset_y) {
+  *offset_x = 0.0f;
+  *offset_y = 0.0f;
+  if (relief->stack_layer_count < 2) return;
+  float magnitude = -SimBackgroundMountainRelief_StackOffsetY(
+      relief, (uint8_t)(relief->stack_layer_count - 1), rise, maximum_rise);
+  float sideways = magnitude * direction.x;
+  if ((right_edge ? sideways : -sideways) <= 0.0f) return;
+  *offset_x = sideways;
+  *offset_y = magnitude * direction.y;
+}
+
 static void AddMountainSkirtTile(
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis *axis,
     const SimBackgroundMountainRelief *relief,
+    SimBackgroundStackDirection stack_direction,
     float height_scale, float origin_x, float origin_y,
-    float baseline, int destination_cell_x, int destination_cell_y,
+    float baseline, float maximum_rise,
+    int destination_cell_x, int destination_cell_y,
     int source_cell_x, int source_cell_y, uint8_t source_tile,
     bool right_edge, int *count) {
   const MountainSkirtProfile *profile =
@@ -1052,17 +1074,28 @@ static void AddMountainSkirtTile(
   float south_x = cell_x + profile->wall_last;
   float y0 = cell_top + (float)profile->first_row;
   float y1 = cell_top + (float)profile->last_row + 1.0f;
-  float ignored_x, north_y, north_z, south_y, south_z;
-  MountainPlanePoint(north_x, y0, baseline, relief, 0.0f, 0.0f,
-                     &ignored_x, &north_y, &north_z);
-  MountainPlanePoint(south_x, y1, baseline, relief, 0.0f, 0.0f,
-                     &ignored_x, &south_y, &south_z);
+  float north_offset_x, north_offset_y, south_offset_x, south_offset_y;
+  MountainStackOutwardOffset(relief, stack_direction, baseline - y0,
+                             maximum_rise, right_edge,
+                             &north_offset_x, &north_offset_y);
+  MountainStackOutwardOffset(relief, stack_direction, baseline - y1,
+                             maximum_rise, right_edge,
+                             &south_offset_x, &south_offset_y);
+  float north_wall_x, north_y, north_z, south_wall_x, south_y, south_z;
+  MountainPlanePoint(north_x, y0, baseline, relief,
+                     north_offset_x, north_offset_y,
+                     &north_wall_x, &north_y, &north_z);
+  MountainPlanePoint(south_x, y1, baseline, relief,
+                     south_offset_x, south_offset_y,
+                     &south_wall_x, &south_y, &south_z);
   north_z *= height_scale;
   south_z *= height_scale;
   /* Art already sitting on the ground has no wedge to close. */
   if (north_z <= 0.0f) return;
 
-  float local_x[4] = {north_x, south_x, south_x, north_x};
+  float local_x[4] = {
+    north_wall_x, south_wall_x, south_wall_x, north_wall_x,
+  };
   float local_y[4] = {north_y, south_y, south_y, north_y};
   float local_z[4] = {north_z, south_z, 0.0f, 0.0f};
   float cell_u = source_cell_x * (float)kSimBackgroundCellPixels;
@@ -1151,8 +1184,9 @@ static int BuildProjectedMountainObjectFaces(
                                    column + (right_edge ? 1 : -1)))
             continue;
           AddMountainSkirtTile(
-              params, axis, relief, height_scale, origin_x, origin_y,
-              baseline, destination_x, destination_y,
+              params, axis, relief, stack_direction, height_scale,
+              origin_x, origin_y, baseline, maximum_rise,
+              destination_x, destination_y,
               source_x, source_y, source_tile, right_edge, &count);
         }
       }
