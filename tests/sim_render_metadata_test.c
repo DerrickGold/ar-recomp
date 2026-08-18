@@ -1896,6 +1896,46 @@ static void TestCapturedWorldNavigationFixtures(const char *steady_path,
   free(steady);
 }
 
+/* The two terrain predicates look alike and answer different questions. They
+ * were once one function, and merging them produced two separate regressions:
+ * the angel and its arrows snapped upward crossing a peak's cells, and the
+ * Napper's pluck and the dragon's building strike -- which dip toward the
+ * ground but pass above the roofs they reach over -- were swallowed by
+ * buildings. This pins every class in both, so a future edit that
+ * re-merges them fails here rather than on screen. */
+static void TestTerrainHeightClassPredicates(void) {
+  struct { SimHeightClass height_class; bool raised; bool occludable; } cases[] = {
+    /* Standing on the ground: terrain raises them AND may hide them. */
+    { kSimHeightClass_Grounded,         true,  true  },
+    { kSimHeightClass_WaterPlane,       true,  true  },
+    /* Dipping toward the ground: terrain raises them, but they are above the
+     * roofs they reach over and must stay visible. */
+    { kSimHeightClass_GroundEffect,     true,  false },
+    { kSimHeightClass_SemiGrounded,     true,  false },
+    { kSimHeightClass_GroundStrike,     true,  false },
+    /* Absolute altitude above the town: neither raised nor hidden. */
+    { kSimHeightClass_Flying,           false, false },
+    { kSimHeightClass_FlyingProjectile, false, false },
+    { kSimHeightClass_MapPlane,         false, false },
+    { kSimHeightClass_None,             false, false },
+  };
+  bool covered[kSimHeightClass_Count] = {false};
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    CHECK(Sim3D_HeightClassStandsOnTerrain(cases[i].height_class) ==
+          cases[i].raised);
+    CHECK(Sim3D_HeightClassIsOccludable(cases[i].height_class) ==
+          cases[i].occludable);
+    /* Occludable must imply raised: anything terrain can hide is something
+     * terrain also lifts. The converse is the whole point of the split. */
+    CHECK(!Sim3D_HeightClassIsOccludable(cases[i].height_class) ||
+          Sim3D_HeightClassStandsOnTerrain(cases[i].height_class));
+    covered[cases[i].height_class] = true;
+  }
+  /* A new class must be classified deliberately, not inherit a default. */
+  for (int i = 0; i < kSimHeightClass_Count; i++)
+    CHECK(covered[i]);
+}
+
 int main(int argc, char **argv) {
   TestFeatureDependencies();
   TestLightningMiracleEffectCapture();
@@ -1916,6 +1956,7 @@ int main(int argc, char **argv) {
   TestOverheadTrait();
   TestSourceCullCover();
   TestVirtualHeightClassification();
+  TestTerrainHeightClassPredicates();
   TestGroundStrikeOverride();
   TestHeightSlew();
   TestObjColorMathPartition();

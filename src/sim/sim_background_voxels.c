@@ -996,9 +996,10 @@ bool SimBackgroundVoxels_MountainInFrontOf(int cell_x, int cell_y) {
    * H * (1 - face_depth_scale) cells -- about 0.38 * H. The towns' masses run
    * to roughly ten cells, so four covers them. Stated as a constant rather
    * than computed from face_depth_scale alone, because the other half of the
-   * product is the mass height, which is not known at this point; the test
-   * below pins the resulting split so a relief retune shows up as a failure
-   * rather than as actors quietly reappearing through peaks. */
+   * product is the mass height, which is not known at this point.
+   * CheckMountainOcclusionReach in the voxels test pins the resulting split,
+   * so widening or narrowing this shows up as a failure rather than as actors
+   * quietly reappearing through peaks. */
   enum { kMountainReachCells = 4 };
   int limit = cell_y + kMountainReachCells;
   if (limit >= kSimBackgroundTownCells) limit = kSimBackgroundTownCells - 1;

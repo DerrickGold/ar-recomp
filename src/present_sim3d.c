@@ -1207,16 +1207,46 @@ static bool SimObjectOnMountainTerrain(const SimRenderObject *object) {
       !SimBackgroundVoxels_MountainInFrontOf(cell_x, cell_y);
 }
 
+/* Sixteen positional arguments, four of them bare bools, was past the point
+ * where a call site could be read. The projection inputs travel together and
+ * never vary within a frame; the filters are what each call is actually
+ * choosing. */
+typedef struct SimObjectDrawScene {
+  const FrameSlot *slot;
+  SDL_Rect source;
+  SDL_Rect viewport;
+  const Scene3DCamera *camera;
+  const float *matrix;
+  bool project_world;
+  bool virtual_height;
+} SimObjectDrawScene;
+
+typedef struct SimObjectDrawFilters {
+  SimObjectTierFilter tier;
+  SimObjectOverheadFilter overhead;
+  SimObjectSelectionFilter selection;
+  SimObjectTerrainFilter terrain;
+  bool depth;
+  float minimum_depth, maximum_depth;
+} SimObjectDrawFilters;
+
 static void DrawSimObjectPriorityFiltered(
-    const FrameSlot *slot, int priority, SimObjectTierFilter tier_filter,
-    bool project_world,
-    bool virtual_height, SDL_Rect source, SDL_Rect viewport,
-    const Scene3DCamera *camera, const float matrix[16],
-    const SimBillboardPass *pass,
-    SimObjectOverheadFilter overhead_filter,
-    SimObjectSelectionFilter selection_filter,
-    SimObjectTerrainFilter terrain_filter,
-    bool depth_filter, float minimum_depth, float maximum_depth) {
+    const SimObjectDrawScene *scene, int priority,
+    const SimObjectDrawFilters *filters,
+    const SimBillboardPass *pass) {
+  const FrameSlot *slot = scene->slot;
+  SDL_Rect source = scene->source, viewport = scene->viewport;
+  const Scene3DCamera *camera = scene->camera;
+  const float *matrix = scene->matrix;
+  bool project_world = scene->project_world;
+  bool virtual_height = scene->virtual_height;
+  SimObjectTierFilter tier_filter = filters->tier;
+  SimObjectOverheadFilter overhead_filter = filters->overhead;
+  SimObjectSelectionFilter selection_filter = filters->selection;
+  SimObjectTerrainFilter terrain_filter = filters->terrain;
+  bool depth_filter = filters->depth;
+  float minimum_depth = filters->minimum_depth;
+  float maximum_depth = filters->maximum_depth;
   if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
   /* W4-2: a rejected blend mode means this pass cannot draw correctly, so bail
    * rather than draw with whatever mode happened to be set. */
@@ -1417,11 +1447,14 @@ static void DrawSimObjectPriorityTerrain(
     bool virtual_height, SDL_Rect source, SDL_Rect viewport,
     const Scene3DCamera *camera, const float matrix[16],
     const SimBillboardPass *pass) {
-  DrawSimObjectPriorityFiltered(
-      slot, priority, tier_filter, project_world, virtual_height,
-      source, viewport, camera, matrix, pass,
-      kSimObjectOverhead_All, kSimObjectSelection_Exclude,
-      terrain_filter, false, 0.0f, 0.0f);
+  SimObjectDrawScene scene = {
+    slot, source, viewport, camera, matrix, project_world, virtual_height,
+  };
+  SimObjectDrawFilters filters = {
+    tier_filter, kSimObjectOverhead_All, kSimObjectSelection_Exclude,
+    terrain_filter, false, 0.0f, 0.0f,
+  };
+  DrawSimObjectPriorityFiltered(&scene, priority, &filters, pass);
 }
 
 static void DrawSimObjectPriority(
@@ -1462,14 +1495,17 @@ static void DrawSimVoxelBillboardLayer(
       : (band == kSimBackgroundVoxelActorBand_Mountain
              ? kSimObjectTerrain_MountainOnly
              : kSimObjectTerrain_GroundOnly);
-  DrawSimObjectPriorityFiltered(
-      context->slot, context->priority, kSimTierFilter_World,
-      true, context->virtual_height,
-      params->source, params->viewport, context->camera, params->matrix,
-      NULL,
-      overhead ? kSimObjectOverhead_Only : kSimObjectOverhead_GroundOnly,
-      kSimObjectSelection_Exclude, terrain,
-      !overhead, minimum_depth, maximum_depth);
+  SimObjectDrawScene scene = {
+    context->slot, params->source, params->viewport, context->camera,
+    params->matrix, true, context->virtual_height,
+  };
+  SimObjectDrawFilters filters = {
+    kSimTierFilter_World,
+    overhead ? kSimObjectOverhead_Only : kSimObjectOverhead_GroundOnly,
+    kSimObjectSelection_Exclude, terrain,
+    !overhead, minimum_depth, maximum_depth,
+  };
+  DrawSimObjectPriorityFiltered(&scene, context->priority, &filters, NULL);
   /* Immediately after its own sprites, so the rim is covered by whatever
    * covers them. Overhead art keeps the whole-band rim it has always had. */
   if (context->rim_light && !overhead)
@@ -1504,11 +1540,14 @@ static void DrawSimSelectionOverlays(
   for (int priority = 0; priority < 4; priority++)
     for (size_t tier = 0; tier < sizeof(tiers) / sizeof(tiers[0]); tier++) {
       if (!(priority_masks[tier] & (1u << priority))) continue;
-      DrawSimObjectPriorityFiltered(
-          slot, priority, tiers[tier],
-          true, virtual_height, source, viewport, camera, matrix, NULL,
-          kSimObjectOverhead_All, kSimObjectSelection_Only,
-          kSimObjectTerrain_Any, false, 0.0f, 0.0f);
+      SimObjectDrawScene scene = {
+        slot, source, viewport, camera, matrix, true, virtual_height,
+      };
+      SimObjectDrawFilters filters = {
+        tiers[tier], kSimObjectOverhead_All, kSimObjectSelection_Only,
+        kSimObjectTerrain_Any, false, 0.0f, 0.0f,
+      };
+      DrawSimObjectPriorityFiltered(&scene, priority, &filters, NULL);
     }
 }
 
