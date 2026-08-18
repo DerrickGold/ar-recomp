@@ -109,6 +109,39 @@ static void SetStructureDefinition(uint8_t *wram, int metatile,
   }
 }
 
+/* A mountain hides only what is BEHIND it, and only within the reach of its
+ * own shear. The camera looks from the south, so a mass north of a cell cannot
+ * clip what stands there; a mass south of it can, but only for the few cells
+ * its raised art is displaced across. An unbounded scan put nearly every
+ * ground cell in Aitos behind a mountain, which is no split at all. */
+static void CheckMountainOcclusionReach(void) {
+  static uint8_t wram[kWramBytes];
+  memset(wram, 0, sizeof(wram));
+  /* One two-cell mass in column 10, occupying rows 20 and 21. */
+  wram[CellIndex(10, 20)] = 0x78;
+  wram[CellIndex(10, 21)] = 0x78;
+  /* The queries read the PUBLISHED scene, so this has to go through Build
+   * rather than Classify. */
+  static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  static uint16_t vram[kVramWords];
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, true);
+
+  CHECK(SimBackgroundVoxels_CellIsMountain(10, 20));
+  CHECK(SimBackgroundVoxels_CellIsMountain(10, 21));
+  CHECK(!SimBackgroundVoxels_CellIsMountain(10, 19));
+  /* Directly behind the mass: occluded. */
+  CHECK(SimBackgroundVoxels_MountainInFrontOf(10, 19));
+  CHECK(SimBackgroundVoxels_MountainInFrontOf(10, 17));
+  /* Beyond the shear's reach: the mass is too far south to overlap. */
+  CHECK(!SimBackgroundVoxels_MountainInFrontOf(10, 10));
+  /* In front of the mass: never occluded, however tall the art reaches. */
+  CHECK(!SimBackgroundVoxels_MountainInFrontOf(10, 22));
+  CHECK(!SimBackgroundVoxels_MountainInFrontOf(10, 31));
+  /* A different column is unaffected. */
+  CHECK(!SimBackgroundVoxels_MountainInFrontOf(11, 19));
+}
+
 /* A windmill's state comes from the frame its plot is drawing, not from the
  * record's `$40` flag - that bit is the "no wind" story state, and reading it
  * as construction put a scaffold over a standing mill for the whole event. */
@@ -540,6 +573,7 @@ int main(void) {
   CHECK((atlas[north_mountain_opaque] >> 24) == 0xFF);
 
   CheckWindmillFrames();
+  CheckMountainOcclusionReach();
 
   if (failures) {
     fprintf(stderr, "%d sim background voxel checks failed\n", failures);
