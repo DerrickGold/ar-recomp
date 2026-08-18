@@ -813,11 +813,13 @@ exit: PLB; PLP; RTS                           ; flag-transparent to the caller
 - Inner lists (packed at `$03:F5F9-$F620`, each `$FFFF`-terminated): per-town handler sets.
   14 unique handlers; code starts at `$F621, $F671, $F68A, $F6BF, $F6FF, $F791, $F7AE, $F7D1,
   $F7F8, $F822, $F857, $F870, $F8A5, $F8CC`.
-- The handlers are the town's **lair/event logic**: they test and maintain the per-town lair
-  bitmask state at `DB:$9107+` (4 bytes/town, "open lairs") and `DB:$911F+` ("spawned lairs")
-  via the helpers `$03:F46E` (test) / `$F479` (set) / `$F487` (clear), which use `$03:F497`
-  (bit compute, scratch `DB:$914F`) and the WRAM-pointer tables `$03:DCA2`/`$DCAE`. They also
-  drive the spawn-list engine (see #3) and post events.
+- The handlers are the town's **event logic**: they test and maintain the per-town
+  **story-event bitmaps** at `DB:$9107+` (prereq, 4 bytes = 32 event ids per town) and
+  `DB:$911F+` (fired) via the helpers `$03:F46E` (test) / `$F479` (set) / `$F487` (clear),
+  which use `$03:F497` (bit compute, scratch `DB:$914F`) and the WRAM-pointer tables
+  `$03:DCA2`/`$DCAE`/`$DCBA`. They also drive the spawn-list engine (see #3) and post events.
+  (These were called "open lairs"/"spawned lairs" here until 2026-08-17; see the story-event
+  VM chapter for the corrected model.)
 - **Recomp seam note:** the `PHY #ret; PHA handler; SEP; RTS` idiom is invisible to static
   decoding. Fixed 2026-07-02 with `indirect_dispatch F5DF 20 idx:A tables:F5F9 ret:F5E3 sep:20`
   (bank03.cfg) plus a new value-keyed `idx:A` + `sep:` form of the directive (cfg_loader/decoder/
@@ -1127,6 +1129,123 @@ draw followed by `$FD`, so the post-pass needs no persistent step-machine entry 
 consume a structure slot. The four hooks preserve their native register/flag/scratch
 contracts; all unrelated consumers retain the authentic 128-slot view.
 
+---
+
+### 8. Ambient scenery actors — the "town scene" spawner (bank $03/$01/$0A, mapped 2026-08-17)
+
+The decorative live actors attached to standing structures — farmers in fields, horses and
+sheep in ranch pens, boats, dogs, burning-house flames — are **not** part of the §3 spawn-list
+engine or the §6 actor-script tier. They come from a separate, fully data-driven "scene"
+system whose selection key is the *structure class* under a *fixed absolute map cell*. Mapped
+while explaining an empty Aitos ranch pen (see the closing note — the observed behavior is
+authentic).
+
+**The per-frame driver `$03:FCE8`** (single caller: `$03:82AD`, the town master-loop chain
+`$82DB/$84B9/$C07E/$8E10/$E414/$8612/$BA24` → here):
+
+```text
+LDX $7BFB                 ; town*2
+LDA $9222,X ; BEQ done    ; per-town ACTIVE SCENE INDEX — 0 = no ambient actors
+LDA $9F6B,X ; BEQ done    ; per-town development gate
+LDA $9222,X ; CMP $922E ; BEQ done   ; $922E is never written by any decoded code — dead compare
+ASL A ; TAX ; LDA $03:FD0E,X ; TAX   ; index the scene-script record table
+JSR $CA84
+```
+
+`$7F:9222 + town*2` is **session state**, written only by town story-event handlers (§ story-event
+VM). It is not in SRAM and is not rebuilt on load, so a freshly loaded save has no ambient
+actors until an event re-arms it. One town holds exactly **one** active scene index at a time.
+
+**Scene-script record table `$03:FD0E`** — 25 word pointers (index 0 unused, since 0 means
+"disabled") to 10-byte records `{op, x, y, class, scene}`:
+
+| Entries | op | class | scenes | Meaning |
+|---:|---:|---:|---|---|
+| 1–4 | 3/1 | 3,1,4,3 | `$03`,`$04`,`$1A`,`$1B` | early-town sets (incl. scene `$1B` = ranch horses on class-3 structures) |
+| 5–12 | 1 | 2 | `$1C`–`$23` | field workers on class-2 (crop) structures |
+| 13–24 | 1 | 5 | `$24`–`$2F` | **pen sheep on class-5 structures** |
+
+**Interpreter `$03:CA84` / `$03:CA93`** (`$CA84` stages `$7F:9220 = $CA79`, `$CA93` stages
+`$CA7E`; both fall into `$CAA0`) dispatches record `op` 0–3 to `$CAC7`/`$CAF1`/`$CB38`/`$CB67`.
+Every op stages the same four variables and then calls one of the two spawn loops:
+
+| WRAM | Meaning |
+|---|---|
+| `$7F:8F6F` | structure **class filter** (low nibble of structure record `+2`) |
+| `$7F:8F70` | **scene id** (index into `$03:CE5B`) |
+| `$7F:8F71` / `$8F73` | scene **base offset in pixels**; from record `+2`/`+4` via `XBA; LSR; LSR` = value × 64 px = value × 4 map cells. Zero for every `$FD0E` record, so those scenes use **absolute** cells |
+| `$7F:9220` | which pool allocator the spawn trampoline calls (below) |
+
+**The two spawn loops:**
+
+- `$03:CD39` — unfiltered: spawn every object in the scene list.
+- `$03:CDB0` — **structure-filtered** (`SEP #$20; STA $8F6F` on entry, called only from
+  `$03:CB19`, the op-1 handler). For each list item: compute the cell, `JSR $03:BD84`
+  (exact-cell structure lookup — walks the town's 128 records, carry clear = found, record
+  pointer in X→Y), `BCS` skip, then `LDA $0002,Y; AND #$0F; CMP $8F6F; BNE` skip. Only a
+  matching class spawns.
+
+Both end with the spawn trampoline
+`LDA #<continuation>; PHA; LDA $9220; PHA; RTS` — see the `$9220` correction in the
+story-event VM section below.
+
+**Scene-id table `$03:CE5B`** — 52 word pointers to `$FF`-terminated byte lists; each byte
+indexes **`$0A:C800`**, a 190-entry word table of offsets (relative to `$0A:C800`) to scenery
+object records `{cell X, cell Y, kind, …script}`. `kind` is always **even**.
+
+**Kind → actor.** `$01:CF0A` turns a spawned record into a visual: `record+$0F` (= the high
+byte of the pending-type word `$7F:7CA1`) indexes the 9-row × 12-byte table `$01:CF2B`
+**by byte**, so the row is `kind/2`; the selected byte is the variant, `ORA #$0600` packs it as
+spawn-list 6, and `JSR $01:CFF2` stages `$7F:033C/$033D`.
+
+| kind | `$01:CF2B` row | variants (`$01:A91C`) | Actor |
+|---:|---:|---|---|
+| 0 | `$CF3D` | 1–5, 9–11 | town people |
+| 2 | `$CF49` | `$0C`/`$0D` (+`$25`/`$26`) | horse (+ people/horse metatiles) |
+| 4 | `$CF55` | `$0E`/`$0F` (+`$27`/`$28`) | dog |
+| 6 | `$CF61` | `$10`/`$11` | **sheep** |
+| 8 | `$CF6D` | `$12`–`$15` | sailboat |
+| 10 | `$CF79` | `$16` | burning-house flame |
+| 12 | `$CF85` | `$17` | (`$DD3F`/`$DD45` family) |
+| 14 / 16 | `$CF91` / `$CF9D` | — | unclassified |
+
+**Pool allocators `$01:B778`–`$B7A8`.** Seven entry points, each `LDX #base; LDY #count`
+falling into the shared allocator at `$B7AE`: a free slot is one whose `record+$10` has bit 15
+set; the allocator seeds `+$0A/+$0C/+$0E/+$14` from `$7F:7C9D/$7C9F/$7CA1/$7CA3` and clears
+`+$10/$12/$16/$18/$20/$22/$24`.
+
+| Entry | Base | Slots | Notes |
+|---|---:|---:|---|
+| `$01:B778` | `$0A00` | 6 | world effects / miracles |
+| `$01:B780` | `$0CF8` | 6 | |
+| `$01:B788` | `$0DDC` | 8 | **superset** of the next pool |
+| `$01:B790` | `$0E02` | 7 | scenery/townspeople — the `$CA84` default |
+| `$01:B798` | `$0F0C` | 8 | the `$CA93` default |
+| `$01:B7A0` / `$B7A8` | `$103C` / `$1062` | 1 / 1 | |
+
+`$B788` and `$B790` deliberately overlap (`$0DDC` + 8 × `$26` = `$0F0C`), so a full people
+sweep can starve the scenery spawner: with all seven `$0E02` slots taken, a matching pen
+silently spawns nothing. Observed in `runs/20260817-184251/snapshots/snap_01_gf25962`.
+
+**⚠️ Authentic behavior — an empty pen is usually correct.** Pens (class-5 structures) are
+addressed by **fixed absolute cell**, by both the story events and the ambient scenes:
+
+- Aitos event 7 (`$03:EFD3`, the "our ranch has some horses" beat) spawns via script record
+  `$03:E628` → base (3,5) × 64 px → **cell (12,20)**, scene 6 = one horse.
+- Aitos event 8 (`$03:F00F`, Sheep's Fleece) spawns via `$03:E63C` → base (4,4) → **cells
+  (16,16)/(17,17)**, scene 5 = two sheep — and sets `$7F:9228 = $15`.
+- `$9228 = $15` selects `$FD0E` entry 21 → scene `$2C`, which checks exactly
+  (12,16) (13,17) (16,16) (17,17) (12,20) (13,21).
+
+The full pen lattice is {4,5,8,9,12,13,16,17,20,21,24,25}², partitioned into the twelve
+scenes `$24`–`$2F` (3 pens × 2 sheep each), but a town only ever has ONE active index — so a
+pen built outside the active group has no animals. Confirmed against a reference emulator
+(2026-08-17): the Aitos pen is empty for most of a normal playthrough. **Do not chase this as
+a dispatch-miss bug.** A registration audit of the whole chain came back clean: sim record-class
+state handlers, the `$01:CD12`/`$01:CD6F` actor tables, all 6 × 32 town event handlers, the
+7 × 8 per-class action tables (covered by `rts_dispatch 9EF3`), and every `$9220` trampoline
+target are all emitted.
+
 ## Sim-mode town-map GRAPHICS pipeline (VRAM seam, mapped 2026-07-05)
 
 The town map reaches the PPU through two WRAM→VRAM DMAs — **the seam an HD/replacement tile
@@ -1227,12 +1346,64 @@ it cannot be closed statically.
 
 **Resolved thread (2026-07-07):** the one-of-N cutscene actor sprites (DEBUG.md §7.17 —
 lair-seal attackers, Bloodpool lightning pair) were fixed by registering the **`$9220`
-coroutine-resume family**, NOT the `$9FCD` dispatcher family (which remains statically
-censused but symptom-free). The town-event code yields via a resume slot: a trampoline
-does `LDA #<resume-1>; PHA; LDA $9220; PHA; RTS` and the counterpart stores the next
-resume-1 into `$9220`. Three known members, all dispatch-only entries (no C fall-through):
-`$03:CA7A` (JSL $01B790; RTS), `$03:CDAD` and `$03:CE57` (PLX; BRL loop-resume). CE57 was
-found by tools/resolve_miss.py's first run, closing bug-ledger #13's untraced `$CE56`.
+trampoline family**, NOT the `$9FCD` dispatcher family (which remains statically
+censused but symptom-free). A trampoline does
+`LDA #<continuation-1>; PHA; LDA $9220; PHA; RTS` and a caller stores the callee-1 into
+`$9220`. CE57 was found by tools/resolve_miss.py's first run, closing bug-ledger #13's
+untraced `$CE56`.
+
+**Corrected 2026-08-17 — `$9220` holds the CALLEE, not a resume address.** The two halves
+were previously conflated. `$7F:9220` is a *late-bound subroutine pointer*: it selects which
+world-record **pool allocator** the scenery/cutscene spawner calls, and only three values are
+ever stored (`$03:CA8E` → `$CA79`, `$03:CA9D` → `$CA7E`, `$03:B617` → `$B67C`):
+
+| `$9220` value | Callee | Body |
+|---|---|---|
+| `$CA79` | `$03:CA7A` | `JSL $01:B790` (7-slot `$0E02` pool); `RTS` |
+| `$CA7E` | `$03:CA7F` | `JSL $01:B798` (8-slot `$0F0C` pool); `RTS` |
+| `$B67C` | `$03:B67D` | town-people spawn variant |
+
+`$03:CDAD` and `$03:CE57` are the *call-site continuations* pushed by the two spawn loops
+(`$03:CDA4` pushes `$CDAC`, `$03:CE4E` pushes `$CE56`) — they are return points, not `$9220`
+members. All six addresses still need registering; the distinction matters when reading
+`resolve_miss` output, because a miss at `$CB1C`/`$CB85`/`$CAEE` is the spawn loop *returning*
+(benign) and proves the loop ran, whereas a miss at a `$9220` value would mean it never
+allocated. See the town architecture chapter §8 for the full spawner.
+
+**Event selection state machine `$03:DFFB` (mapped 2026-08-17).** The town event handler
+tables (`$03:E66E` → 6 towns × 32 entries, dispatcher `$03:E1D2`) are indexed by a per-town
+32-bit event id chosen here:
+
+```text
+$920E & $80 ?  -> yes: return ($920E & $7F)   ; explicit pending-event latch
+               -> no : scan $9202 = 0..$1F for the first id with
+                       prereq($DCA2) set AND fired($DCAE) clear;
+                       mark it in $DCBA, return it; $FF if none
+$E045: STA $920E                              ; latched index (bit 7 stripped)
+```
+
+The three "bitmask" pointer tables are **story-event bitmaps, not lair state** (see the
+correction in the symbol map): `$03:DCA2`/`$DCAE`/`$DCBA` → per-town 4-byte arrays at
+`$7F:9107`/`$911F`/`$9137` (+ town × 4) = 32 event ids per town. Bit order is **MSB-first**:
+id `k` → byte `k >> 3`, mask `$80 >> (k & 7)`, from the mask table `$03:F4D7`
+(`80 40 20 10 08 04 02 01`) via `$03:F497` (scratch `$7F:914F`).
+
+| Table | WRAM | Meaning | Persisted |
+|---|---|---|---|
+| `$03:DCA2` | `$7F:9107` | **prereq/enabled** — the event may be selected | SRAM `0x120E` |
+| `$03:DCAE` | `$7F:911F` | **fired** — already run; never selected again | SRAM `0x1226` |
+| `$03:DCBA` | `$7F:9137` | **dispatched this session** (set by `$03:E02B` and `$03:E0B0`) | no |
+
+Dialogue is posted by `$03:E09B`: `JSL $01:B1C7`, `LDY #$8217; JSL $01:9314`, then
+`LDX #$0008; STX $1A; LDA #$01; STA $00:033E` (the COP event request). Handlers that need a
+follow-up beat self-latch with `LDA #$80|id; STA $7F:920E` (e.g. `$03:EFE5` = `$87`,
+`$03:FAE1` = `$88`).
+
+Several town events are **gated on a structure existing**: `$03:8B66` (callers `$8BC5`,
+`$03:EF9E` type 3, `$03:EFD3` type 5) scans the town's 128 structure records for the first
+active record of a given class, carry clear = found. `$03:EFD3` (`LDA #$0005; JSR $8B66;
+BCS $EFFA`) therefore skips the whole horse cutscene — dialogue, spawn and
+`$9228 = 4` — and just marks itself fired if no pen exists when the event comes up.
 
 ---
 
@@ -2274,7 +2445,7 @@ establishes or changes a semantic identity.
 | `$01:E7D9` (ROM data, not code) | **actor sprite-frame pointer table** (base corrected from `$E7E1`), parallel to `$E099`: per-type sprite/animation-frame pointers (frames list continues at `$01:E838`, e.g. `$E6CA/$E6D0/$E6D6...`). Read by the `$01:D0F5-D127` sprite-assign code. **The asset-identity seam for sim-mode actor sprites.** |
 | `$03:8193` | **sim-mode per-frame master loop** — see "Sim-mode town architecture" above. Sets DB=`$7F`, runs `$8238`, the `$F5BE` handler dispatch, the 720-frame periodic counter (`$7F:91FE` vs `#$02D0` → `$8271`), then the bank-01 object loops. |
 | `$03:F5BE` | **per-town handler dispatcher** (PHY/PHA/SEP/RTS trick; 6-town outer table `$03:F5ED`, packed inner lists `$F5F9-$F620`, 14 handlers `$F621+`). Was silently dead in the recomp until the `idx:A`/`sep:` `indirect_dispatch` fix (2026-07-02) — the town-corruption/freeze root cause. |
-| `$03:F46E`/`$F479`/`$F487`/`$F497` | **lair-bitmask helpers**: test / set / clear a per-town lair bit; `$F497` computes the bit + cell (scratch `DB:$914F`) from the WRAM-pointer tables `$03:DCA2` (open-lair masks `DB:$9107+`) / `$DCAE` (spawned masks `DB:$911F+`). |
+| `$03:F46E`/`$F479`/`$F487`/`$F497` | **story-event bitmap helpers**: test / set / clear one per-town event bit; `$F497` resolves the WRAM byte + mask (scratch `DB:$914F`, mask table `$03:F4D7`, MSB-first) from the WRAM-pointer tables `$03:DCA2` (prereq, `DB:$9107+`) / `$DCAE` (fired, `DB:$911F+`) / `$DCBA` (dispatched, `DB:$9137+`). **Corrected 2026-08-17** — these were labelled "open-lair"/"spawned-lair" masks while chasing the 2026-07-02 corruption bug. They are 32 event ids per town, consumed by the `$03:DFFB` event selector and by every town-event handler in `$03:E6xx-$F3xx`; monster-lair state lives in the parallel arrays at `$7F:9568+` (ram-map "Monster Lair Data"). |
 | `$01:AC36` | **process-script assigner**: `entry.+02/+06 = ROM[$01:A227[$033C*2] + $033D*2]`, `+04=0`, `+00=1`. The stride-12 tier's spawn primitive. |
 | `$01:CFF2` | thin wrapper: packed `A=(list<<8)|variant` → high byte `$033C`, low byte `$033D`, then `JSR $AC36`. The sweep's per-entry call. |
 | `$01:AA56` | **town-entry sweep driver**: staging restore (via `$03:813F`) + walk the stride-12 table calling `CFF2(entry.+0E)` per entry. |
