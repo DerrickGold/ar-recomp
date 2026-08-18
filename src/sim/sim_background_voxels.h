@@ -51,6 +51,42 @@ const SimBackgroundVoxelScene *SimBackgroundVoxels_Scene(void);
 const uint32_t *SimBackgroundVoxels_AtlasPixels(void);
 const uint32_t *SimBackgroundVoxels_GroundPixels(void);
 
+/* Is this town cell mountain terrain in the published scene?
+ *
+ * The 2D town already answers "is this actor on a mountain?" -- it stands on a
+ * mountain metatile or it stands on ground -- and that is exactly the question
+ * of whether a mountain drawn in front of it should hide it. Presentation uses
+ * this to split actors into the band drawn under the mountain art and the band
+ * drawn over it. Out-of-range cells and a town with no published scene answer
+ * false, so an actor defaults to the occluded band. */
+bool SimBackgroundVoxels_CellIsMountain(int cell_x, int cell_y);
+
+/* Is there mountain terrain BETWEEN this cell and the camera -- that is, south
+ * of it in the same column? Only such a mountain can hide what stands here.
+ * The camera looks from the south, so a mass north of an actor is behind it,
+ * and a mass the actor stands south of cannot occlude it however tall the art
+ * reaches up the screen. Without this test a villager standing in front of a
+ * peak keeps his feet but loses his head, because the sprite's upper rows
+ * reach into screen space the mountain's sheared art occupies. */
+bool SimBackgroundVoxels_MountainInFrontOf(int cell_x, int cell_y);
+
+/* Where the mountain art's surface sits at a town-map position, for placing an
+ * actor the 2D game draws standing on it. The renderer shears a mountain out of
+ * its own authentic art -- height is `(baseline - y) * face_height_scale` and
+ * the art is pulled toward its base by `face_depth_scale` -- so an actor put
+ * through the same transform lands exactly on the drawn slope instead of at
+ * the mass's foot. `out_map_y` is the displaced town-pixel Y, `out_height` the
+ * altitude in town pixels. False when the position is not mountain. */
+bool SimBackgroundVoxels_MountainSurface(int map_x, int map_y,
+                                         float *out_map_y, float *out_height);
+
+/* Height in town pixels of the structure model standing on a town-map
+ * position, for art the ROM anchors to a building's record cell. Zero when no
+ * structure covers it, so an unattached bubble simply stays put. Trees and
+ * foliage are excluded: nothing is anchored to them, and a bubble that drifted
+ * onto a forest cell should not climb it. */
+float SimBackgroundVoxels_StructureHeight(int map_x, int map_y);
+
 /* Resolves a clean terrain-metatile source synthesized in the mountain atlas.
  * Unlike SimBackgroundMountains_TileSource, this is independent of whether a
  * pristine instance happens to be visible in the town's composed cell map. */

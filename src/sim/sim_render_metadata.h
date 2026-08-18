@@ -141,6 +141,13 @@ typedef enum SimRenderObjectTrait {
    * Overhead: a cursor has no physical height and remains projected flat onto
    * its selected cells. */
   kSimObjectTrait_SelectionOverlay = 1u << 5,
+  /* Status and thought bubbles the ROM hangs on a structure record. In the
+   * flat view they sit at the record's own cell and simply paint over the
+   * building; projected, that cell is the building's FOOT, so the bubble ends
+   * up inside the model and behind whatever stands in front of it. These ride
+   * on top of the structure they belong to instead: the renderer adds the
+   * height of the model on that cell. */
+  kSimObjectTrait_StructureOverlay = 1u << 6,
 } SimRenderObjectTrait;
 
 /* D3c presentation planes.  These are art/presentation classes derived from
@@ -174,6 +181,24 @@ enum {
 /* True for classes whose ground contact is positioned by the ROM itself and
  * must therefore be exact on their very first frame. */
 bool Sim3D_HeightClassIsContactExact(SimHeightClass height_class);
+
+/* Does this class's height measure from the terrain under it, or from the town
+ * as a whole? Grounded art stands on whatever it is over, so a mountain raises
+ * it. The angel, enemies and the angel's arrows fly at an absolute altitude
+ * above the town -- adding terrain to those makes them jump the moment they
+ * cross a peak's cells, which is the opposite of flying over it. */
+bool Sim3D_HeightClassStandsOnTerrain(SimHeightClass height_class);
+
+/* Can the town's own geometry HIDE this class? Deliberately narrower than
+ * StandsOnTerrain above, which answers the different question of whether
+ * terrain RAISES the object. Only art genuinely resting on the ground can be
+ * occluded. Everything carrying altitude stays visible -- including the
+ * classes that merely dip toward the ground, the Napper's pluck and the
+ * dragon's building strike: they pass above the roofs they reach over, and
+ * letting a building swallow them reads as the effect vanishing mid-animation.
+ * Erring toward visible is the right bias here; a projectile that should have
+ * been hidden is a far smaller error than one that disappears. */
+bool Sim3D_HeightClassIsOccludable(SimHeightClass height_class);
 
 typedef struct SimObjectClassification {
   uint8_t height_class;

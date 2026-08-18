@@ -23,11 +23,25 @@ typedef struct SimBackgroundVoxelRenderParams {
   const float *matrix;
 } SimBackgroundVoxelRenderParams;
 
+/* Which actors the caller should draw at this point in the composite.
+ *
+ * Ground and Mountain are a TERRAIN split, not a depth split: in the authentic
+ * 2D town an actor either stands on a mountain metatile or it does not, and
+ * that is exactly the question of whether the terrain in front of it should
+ * hide it. Ground actors are drawn BEFORE the composite, so the town's own
+ * geometry covers them; mountain actors are drawn after it and lifted onto the
+ * surface, so a villager scripted to climb a peak stays visible on the slope. */
+typedef enum SimBackgroundVoxelActorBand {
+  kSimBackgroundVoxelActorBand_Ground,
+  kSimBackgroundVoxelActorBand_Mountain,
+  kSimBackgroundVoxelActorBand_Overhead,
+} SimBackgroundVoxelActorBand;
+
 typedef void (*SimBackgroundVoxelDepthLayerCallback)(
     void *userdata,
     const SimBackgroundVoxelRenderParams *params,
     float minimum_depth, float maximum_depth,
-    bool overhead_only);
+    SimBackgroundVoxelActorBand band);
 
 /* Render-thread half of sim_background_voxels. Texture ownership, projected
  * geometry and D32 visibility live here; the general SIM compositor owns only
@@ -37,9 +51,9 @@ bool SimBackgroundVoxelRenderer_Ready(uint32_t serial);
 SDL_Texture *SimBackgroundVoxelRenderer_GroundTexture(uint32_t serial);
 void SimBackgroundVoxelRenderer_Draw(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params);
-/* Draws the depth-tested background composite, then invokes the caller once
- * for grounded actors and once for authored overhead actors. These callbacks
- * are explicit priority bands, not a substitute for model depth testing. */
+/* Invokes the caller for ground actors, draws the depth-tested background
+ * composite over them, then invokes it again for mountain-standing and
+ * overhead actors. */
 void SimBackgroundVoxelRenderer_DrawInterleaved(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
     SimBackgroundVoxelDepthLayerCallback callback, void *userdata);

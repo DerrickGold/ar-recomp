@@ -305,6 +305,8 @@ if(BUILD_TESTING)
         src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_background_mountains.c
         src/sim/sim_background_mountain_silhouette.c
+        src/sim/sim_background_mountain_relief.c
+        src/sim/sim_background_voxel_region.c
         src/sim/sim_town_canvas.c
     )
     target_include_directories(actraiser_sim_background_voxels_test PRIVATE
@@ -846,6 +848,8 @@ if(BUILD_TESTING)
         src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_background_mountains.c
         src/sim/sim_background_mountain_silhouette.c
+        src/sim/sim_background_mountain_relief.c
+        src/sim/sim_background_voxel_region.c
         src/sim/sim_render_atlas.c
         src/action/action_obj_interpolation.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c

@@ -127,6 +127,21 @@ static bool IsMapPlaneCursorComposition(uint16_t composition) {
       composition == 0xD993;
 }
 
+/* The four 64x64 eight-part selector squares sharing the bubble range. They
+ * are the same shape as the $D233-$D302 cursor family and lie ON the map, so
+ * they must not be lifted onto a roof or promoted above the town. Listed by
+ * address because the classifier sees only a composition number -- the shape
+ * that distinguishes them lives in the ROM table, not in this input. */
+static bool IsMapSelectorSquareComposition(uint16_t composition) {
+  return composition == 0xD4E5 || composition == 0xD4FA ||
+      composition == 0xD538 || composition == 0xD576;
+}
+
+static bool IsTownStatusBubbleComposition(uint16_t composition) {
+  return composition >= 0xD32B && composition <= 0xD686 &&
+      !IsMapSelectorSquareComposition(composition);
+}
+
 static bool IsAngelArrowComposition(uint16_t composition) {
   return composition == 0xD967 || composition == 0xD972 ||
       composition == 0xD97D || composition == 0xD988;
@@ -692,6 +707,32 @@ SimObjectClassification Sim3D_ClassifyObject(
     result.traits = kSimObjectTrait_NoShadow;
     return result;
   }
+  /* Town status and thought bubbles. The ROM draws them at the owning
+   * structure's record cell, which projects to the building's FOOT -- so they
+   * need both the structure's own height and a pass the building cannot
+   * occlude. Fixed-tier art in the same range is menu furniture and keeps the
+   * flat treatment.
+   *
+   * The range is not uniform, and the object catalog's "$D32B-$D6xx" label
+   * hides that. Crawling the ROM's own composition table (tools/
+   * sim_object_catalog.py crawl) reports 79 entries in it: 75 are the 16x16
+   * bubbles, and FOUR are 64x64 eight-part selector squares of exactly the
+   * shape the $D233-$D302 cursor family uses. Those lie ON the map and must
+   * not be lifted or promoted overhead, and IsMapPlaneCursorComposition does
+   * not reach them, so they are excluded by address here.
+   *
+   * Note the catalog's "$D4F6/$D4F8/$D4FA destroyed-house marker" is NOT a
+   * composition triple: those are bank-$03 step-PROGRAM addresses held in a
+   * record's visual slot. They have nothing to do with bank-$01 composition
+   * numbering, and $D4FA in this table is one of the selector squares. */
+  if (tier == kSimRecordTier_World &&
+      IsTownStatusBubbleComposition(composition)) {
+    result.height_class = kSimHeightClass_Grounded;
+    result.traits = kSimObjectTrait_RecordOriginAnchor |
+        kSimObjectTrait_NoShadow | kSimObjectTrait_Overhead |
+        kSimObjectTrait_StructureOverlay;
+    return result;
+  }
   /* Miracle cloud family. $D9E5 is the cloud alone; $DA4B/$DAA1/$DAF7/$DB5C
    * extend it with a lightning bolt and $DC77/$DBC1/$DC1C/$DCD2 with rain
    * streaks, so one composition's art already spans cloud to ground. $DA22 is
@@ -751,6 +792,42 @@ SimObjectClassification Sim3D_ClassifyObject(
   }
   result.height_class = kSimHeightClass_Grounded;
   return result;
+}
+
+bool Sim3D_HeightClassStandsOnTerrain(SimHeightClass height_class) {
+  switch (height_class) {
+    case kSimHeightClass_Grounded:
+    case kSimHeightClass_WaterPlane:
+    case kSimHeightClass_GroundEffect:
+    case kSimHeightClass_SemiGrounded:
+    case kSimHeightClass_GroundStrike:
+      return true;
+    case kSimHeightClass_None:
+    case kSimHeightClass_Flying:
+    case kSimHeightClass_FlyingProjectile:
+    case kSimHeightClass_MapPlane:
+    case kSimHeightClass_Count:
+      break;
+  }
+  return false;
+}
+
+bool Sim3D_HeightClassIsOccludable(SimHeightClass height_class) {
+  switch (height_class) {
+    case kSimHeightClass_Grounded:
+    case kSimHeightClass_WaterPlane:
+      return true;
+    case kSimHeightClass_GroundEffect:
+    case kSimHeightClass_SemiGrounded:
+    case kSimHeightClass_GroundStrike:
+    case kSimHeightClass_None:
+    case kSimHeightClass_Flying:
+    case kSimHeightClass_FlyingProjectile:
+    case kSimHeightClass_MapPlane:
+    case kSimHeightClass_Count:
+      break;
+  }
+  return false;
 }
 
 const char *Sim3D_HeightClassName(SimHeightClass height_class) {
