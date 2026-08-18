@@ -192,6 +192,26 @@ still need the manual §6.3 game round trip even though their addresses,
 encodings, range validation, checksum repair, and transactional writes are now
 covered by `actraiser_save_system` tests.
 
+### 3.3.2 Story-event bitmaps ✅ — `0x120E`–`0x123D` (decoded 2026-08-17)
+
+Two 24-byte blocks the third-party map does not cover, sitting between the Death Heim byte
+(`$120C`) and the region act-2 flags (`$13B6`). Each is 6 towns × 4 bytes = **32 story-event
+ids per town**, bit order **MSB-first** (id `k` → byte `k>>3`, mask `$80 >> (k&7)`):
+
+| SRAM | WRAM live copy | Contents |
+|---|---|---|
+| `0x120E + town*4` | `$7F:9107 + town*4` | event **prereq/enabled** bitmap |
+| `0x1226 + town*4` | `$7F:911F + town*4` | event **fired** bitmap |
+
+The third runtime bitmap (`$7F:9137`, "dispatched this session") is **not** saved, and neither
+is the ambient scene index `$7F:9222 + town*2` — so a freshly loaded save has no ambient
+scenery actors until a town event re-arms it. See ram-map "Story-event bitmaps" and SEAMS
+town §8.
+
+Evidence: in two independent runs (`runs/20260817-180830`, `runs/20260817-184251`) the 48-byte
+SRAM block matches the WRAM block byte-exactly for every town except the one being played,
+which differs only in the bits for events that fired after the last in-game save.
+
 ### 3.4 Town simulation block ✅ — `0x0000`–`0x11ff` (decoded 2026-07-17)
 
 The third-party map starts at `0x1200` and documents nothing below it. The

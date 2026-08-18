@@ -143,6 +143,13 @@ The sailboat frame order is:
 | Right | `$E9B4` | `$E9BA` |
 | Left | `$E9C0` | `$E9C6` |
 
+**Who picks these frames.** For scenery actors the selector is `$01:CF0A`: world-record
+`+$0F` (the scenery *kind*, high byte of the pending-type word `$7F:7CA1`) indexes the 9-row
+table `$01:CF2B` **by byte**, so the row is `kind/2` — kind 0 people, 2 horse, 4 dog,
+**6 sheep**, 8 boat, 10 burning-house flame, 12 the `$DD3F` family. The chosen byte is a
+variant index into the spawn-list-6 array `$01:A91C`, packed as `ORA #$0600` and staged
+through `$01:CFF2`. Kinds come from the `$0A:C800` scenery records; see SEAMS town §8.
+
 The animal frame order is:
 
 | Animal | Right frame 1 | Right frame 2 | Left frame 1 | Left frame 2 |
