@@ -4,6 +4,8 @@
 #include "sim_background_voxel_landmarks.h"
 
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum {
@@ -11,6 +13,11 @@ enum {
   kTownCellMapBytes = 0x400,
   kTownTilemapWram = 0x10000,        /* flat $7F:0000 */
   kTerrainDefinitionsWram = 0x2100,  /* flat $7E:2100 */
+  /* Structure art is a second metatile atlas with the same four-word entry
+   * shape, copied into the live tilemap by $03:9C43 exactly as $03:9B5A
+   * copies terrain. Structure frames are not in the terrain atlas, which is
+   * why DisplayedCellMetatile has to fall back to the recorded cell value. */
+  kStructureDefinitionsWram = 0x3100,  /* flat $7E:3100 */
   kTerrainDefinitionBytes = 8,
   kTerrainMetatileCount = 256,
   /* Each of the tilemap's four pages is a 32x32 run of 8x8 entries. */
@@ -23,6 +30,10 @@ enum {
    * take part in matching a live cell against its definition. */
   kMetatileCompareMask = 0xDDFF,
   kStructureRecordsWram = 0x16BE7,  /* flat $7F:6BE7 */
+  /* Per-record visual step-machine slots, $7F:77E7 + slot*8. Diagnostics only:
+   * classification reads the drawn frame, never this. */
+  kStepSlotsWram = 0x177E7,
+  kStepSlotBytes = 8,
   kStructureRecordsPerTownBytes = 0x200,
   kStructureRecordBytes = 4,
   kStructureRecordCount = 128,
@@ -54,6 +65,7 @@ static const SanctuarySignature kSanctuaries[] = {
 static struct {
   uint32_t serial;
   uint32_t canvas_serial;
+  bool wind_stops_all;
   SimBackgroundVoxelScene scene;
   uint32_t atlas[kCanvasPixelCount];
   uint32_t ground[kCanvasPixelCount];
@@ -112,15 +124,102 @@ static void LiveCellEntries(const uint8_t *wram, int x, int y,
   out[3] = TownTilemapWord(wram, tile_x + 1, tile_y + 1);
 }
 
+static bool MetatileMatches(const uint8_t *wram, size_t definitions,
+                            uint8_t metatile, const uint16_t live[4]) {
+  size_t at = definitions + (size_t)metatile * kTerrainDefinitionBytes;
+  uint16_t defined = 0;
+  for (int entry = 0; entry < 4; entry++) {
+    uint16_t word = Read16(wram, at + (size_t)entry * 2) & kMetatileCompareMask;
+    if (word != live[entry]) return false;
+    defined |= word;
+  }
+  /* An all-zero definition is an empty atlas slot, not a metatile. Without
+   * this a town whose tilemap has not been built yet matches every candidate
+   * at once, and the first one wins. */
+  return defined != 0;
+}
+
 static bool TerrainMetatileMatches(const uint8_t *wram, uint8_t metatile,
                                    const uint16_t live[4]) {
-  size_t at = kTerrainDefinitionsWram +
-      (size_t)metatile * kTerrainDefinitionBytes;
-  for (int entry = 0; entry < 4; entry++)
-    if ((Read16(wram, at + (size_t)entry * 2) & kMetatileCompareMask) !=
-        live[entry])
-      return false;
-  return true;
+  return MetatileMatches(wram, kTerrainDefinitionsWram, metatile, live);
+}
+
+/* One frame of an animated or progressing structure, identified by the
+ * structure metatile its top-left cell draws.
+ *
+ * The record's `$40` flag deliberately takes no part in this. For a windmill
+ * record (class 3) that bit is the "the wind has died" story state set by
+ * $03:E2BB and cleared by the Wind miracle's action 6 at $03:A1F4 - it selects
+ * visual variant 4 over variant 0, both of which draw a FINISHED mill. Reading
+ * it as "under construction" put a scaffold over a standing windmill for the
+ * whole event, which is the bug this replaces. Class 4 never has the bit set
+ * by any ROM path at all: the allocator ($03:9D9F) only ever ORs `$80`.
+ *
+ * The frames themselves come from the class-6 and class-8 visual step programs
+ * ($03:D4D2 construction / $03:D4E2 rebuild families, draw lists decoded by
+ * $03:A591). Only the top-left metatile is needed to tell them apart. */
+typedef struct StructureFrame {
+  uint8_t metatile;
+  uint8_t phase;
+  bool construction;
+} StructureFrame;
+
+/* Windmill (record class 3, visual class 6). Construction plays $04/$06/$14
+ * and lands on $16; the built mill then cycles $24 -> $26 -> $16, three blade
+ * positions 30 degrees apart in the wheel's 90-degree period. The construction
+ * program's last frame draws the same art as cycle position 2, so it is that
+ * position and not a scaffold. */
+static const StructureFrame kWindmillFrames[] = {
+  {0x04, 0, true}, {0x06, 1, true}, {0x14, 2, true},
+  {0x24, 0, false}, {0x26, 1, false}, {0x16, 2, false},
+};
+
+/* Factory tier (record class 4, visual class 8). Two frames, no cycle. */
+static const StructureFrame kFactoryFrames[] = {
+  {0x34, 0, true}, {0x36, 0, false},
+};
+
+/* Is this town in the "the wind has died" story event?
+ *
+ * `$03:E2BB` is the only site that parks a windmill, and it stamps `$40` on
+ * whichever class-3 records exist at the moment the event fires. A mill the
+ * town builds later is never stamped, so the ROM leaves it turning through an
+ * event whose whole premise is that nothing turns - visible in
+ * runs/20260817-194701 as record 7 parked on the static program while record
+ * 20 ran the spin loop. The enhanced view takes the event at its word and
+ * holds every mill in the town, which is a deliberate divergence from the flat
+ * art for the one mill the ROM missed. The Wind miracle clears the bit on
+ * every record it stamped ($03:A1F4), so this releases with the event. */
+static bool TownWindStopped(const uint8_t *records) {
+  for (int slot = 0; slot < kStructureRecordCount; slot++) {
+    uint8_t flags = records[slot * kStructureRecordBytes + 2];
+    if ((flags & kStructureActive) &&
+        (flags & kStructureClassMask) == kStructureClassWindmill &&
+        (flags & kStructureConstructionVariant))
+      return true;
+  }
+  return false;
+}
+
+/* Resolves the frame a 2x2 structure plot is displaying. Leaves `object`
+ * untouched when nothing matches - a half-drawn or not-yet-reconstructed plot
+ * keeps the finished model rather than dropping back to a scaffold, because
+ * un-building something the town has already finished is the louder error. */
+static void ApplyStructureFrame(const uint8_t *wram,
+                                const StructureFrame *frames, size_t count,
+                                int cell_x, int cell_y,
+                                SimBackgroundVoxelObject *object) {
+  uint16_t live[4];
+  LiveCellEntries(wram, cell_x, cell_y, live);
+  for (size_t at = 0; at < count; at++) {
+    if (!MetatileMatches(wram, kStructureDefinitionsWram,
+                         frames[at].metatile, live))
+      continue;
+    object->animation_phase = frames[at].phase;
+    if (frames[at].construction)
+      object->flags |= kSimBackgroundVoxel_UnderConstruction;
+    return;
+  }
 }
 
 /* The metatile a cell is currently DISPLAYING, which is not always the one its
@@ -239,6 +338,7 @@ static int CellTreePixelCount(const uint32_t *pixels, int cell_x, int cell_y) {
 }
 
 void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
+                                  bool wind_stops_all,
                                   SimBackgroundVoxelScene *out) {
   if (!out) return;
   memset(out, 0, sizeof(*out));
@@ -255,6 +355,7 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
         occupied[CellIndex(x, y)] = true;
   const uint8_t *records = wram + kStructureRecordsWram +
       (size_t)(town - 1) * kStructureRecordsPerTownBytes;
+  bool wind_stopped = wind_stops_all && TownWindStopped(records);
   for (int slot = 0; slot < kStructureRecordCount; slot++) {
     const uint8_t *record = records + slot * kStructureRecordBytes;
     uint8_t flags = record[2];
@@ -290,18 +391,26 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
       object.source_cells_w = object.source_cells_h = 1;
       object.footprint_cells_w = object.footprint_cells_d = 1;
     } else if (structure_class == kStructureClassWindmill) {
-      if (flags & kStructureConstructionVariant)
-        object.flags |= kSimBackgroundVoxel_UnderConstruction;
       object.kind = kSimBackgroundVoxel_Windmill;
       object.source_cells_w = object.source_cells_h = 2;
       object.footprint_cells_w = 2;
       object.footprint_cells_d = 1;
+      ApplyStructureFrame(wram, kWindmillFrames,
+                          sizeof(kWindmillFrames) / sizeof(kWindmillFrames[0]),
+                          x, y, &object);
+      /* Parked on the same blade position the ROM's own stopped program draws,
+       * so a stamped mill and an unstamped one hold together. Construction is
+       * not wind-driven and keeps its own progress. */
+      if (wind_stopped &&
+          !(object.flags & kSimBackgroundVoxel_UnderConstruction))
+        object.animation_phase = 0;
     } else if (structure_class == kStructureClassFactory) {
-      if (flags & kStructureConstructionVariant)
-        object.flags |= kSimBackgroundVoxel_UnderConstruction;
       object.kind = kSimBackgroundVoxel_Factory;
       object.source_cells_w = object.source_cells_h = 2;
       object.footprint_cells_w = object.footprint_cells_d = 2;
+      ApplyStructureFrame(wram, kFactoryFrames,
+                          sizeof(kFactoryFrames) / sizeof(kFactoryFrames[0]),
+                          x, y, &object);
     } else {
       continue;
     }
@@ -759,23 +868,67 @@ static void ExtractEnhancedReplacements(
     }
 }
 
+/* AR_WINDMILL_DEBUG=1: one line per windmill whenever any of their state
+ * changes. Prints the record, its visual step slot and the phase we resolved,
+ * which is everything needed to tell "the ROM never restarted this mill" from
+ * "we failed to follow it". Transition-only, so a still town is silent. */
+static void LogWindmills(uint8_t town, const uint8_t *wram,
+                         const SimBackgroundVoxelScene *scene) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_WINDMILL_DEBUG");
+    enabled = (value && *value && *value != '0') ? 1 : 0;
+  }
+  if (!enabled) return;
+  const uint8_t *records = wram + kStructureRecordsWram +
+      (size_t)(town - 1) * kStructureRecordsPerTownBytes;
+  static char previous[512];
+  char line[512];
+  size_t at = 0;
+  for (uint16_t i = 0; i < scene->object_count && at + 96 < sizeof(line); i++) {
+    const SimBackgroundVoxelObject *object = &scene->objects[i];
+    if (object->kind != kSimBackgroundVoxel_Windmill) continue;
+    const uint8_t *record = records + object->record_slot * kStructureRecordBytes;
+    const uint8_t *step = wram + kStepSlotsWram +
+        (size_t)object->record_slot * kStepSlotBytes;
+    at += (size_t)snprintf(line + at, sizeof(line) - at,
+        "slot=%u flags=$%02X act=$%02X step=%u/%u cursor=$%04X entry=$%04X "
+        "phase=%u constr=%u | ",
+        object->record_slot, record[2], record[3], step[0], step[1],
+        (unsigned)(step[2] | step[3] << 8), (unsigned)(step[6] | step[7] << 8),
+        object->animation_phase,
+        (object->flags & kSimBackgroundVoxel_UnderConstruction) ? 1u : 0u);
+  }
+  if (!at || !strcmp(line, previous)) return;
+  memcpy(previous, line, at + 1);
+  fprintf(stderr, "[windmill] town=%u %s\n", town, line);
+}
+
 void SimBackgroundVoxels_Reset(void) { memset(&g_background, 0, sizeof(g_background)); }
 
 void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                const uint32_t *canvas_pixels,
                                const uint16_t *vram,
-                               uint32_t canvas_serial) {
+                               uint32_t canvas_serial,
+                               bool wind_stops_all) {
   if (!town || !wram || !canvas_pixels || !vram || !canvas_serial) return;
+  /* The policy takes part in the gate: toggled in a still town, nothing else
+   * would ask for a rebuild and the mills would keep their old behaviour until
+   * something happened to move the canvas. */
   if (g_background.scene.town == town &&
-      g_background.canvas_serial == canvas_serial)
+      g_background.canvas_serial == canvas_serial &&
+      g_background.wind_stops_all == wind_stops_all)
     return;
   uint32_t next_serial = NextSerial();
   memset(g_background.atlas, 0, sizeof(g_background.atlas));
   memset(g_background.mountain_source_cell, 0,
          sizeof(g_background.mountain_source_cell));
   memcpy(g_background.ground, canvas_pixels, sizeof(g_background.ground));
-  SimBackgroundVoxels_Classify(town, wram, &g_background.scene);
+  g_background.wind_stops_all = wind_stops_all;
+  SimBackgroundVoxels_Classify(town, wram, wind_stops_all,
+                               &g_background.scene);
   ExtractEnhancedReplacements(wram, vram, canvas_pixels, &g_background.scene);
+  LogWindmills(town, wram, &g_background.scene);
   g_background.canvas_serial = canvas_serial;
   g_background.serial = next_serial;
 }

@@ -184,8 +184,50 @@ ram-map "Road Construction Encoding" for the bit layout):
 | `$03:DC74-$03:DC7F` | `0x1DC74` | Per-town structure-record array base pointers (`$7F:6BE7 + town*0x200`, 128 × 4-byte records each) |
 | `$03:AB6C+` | `0x12B6C` | Per-town pointers to initial structure-record images (`$FF`-terminated 4-byte records, copied at new-game init `$03:AA51`) |
 | `$03:A017/$A364/$A0D1/$A1A1/$A23D/$A29C/$A2F5` | `0x12017+` | Per-type-class 8-entry action tables (pushed-address−1): house/bridge/field/factory-tier/4/5/6 × actions 0-7. Bridge rows 2-6 all point at the `$A435` no-op — the bridge-indestructibility row |
-| `$03:D4D2+/$03:D4E2+` | `0x1D4D2/0x1D4E2` | Construction/rebuild structure-visual class table bases (class `$7D1F` + variant `$7D21` → step-program pointer, armed into `$7F:77E7+rec*8` by the `$03:A4B8/$03:A4A8` HLE pair) |
+| `$03:D4D2+/$03:D4E2+` | `0x1D4D2/0x1D4E2` | Construction/rebuild structure-visual class table bases (class `$7D1F` + variant `$7D21` → step-program pointer, armed into `$7F:77E7+rec*8` by the `$03:A4B8/$03:A4A8` HLE pair). Two indirections: `program = word[ word[base + class] + variant ]`, both operands byte offsets, so classes and variants step by 2 |
+| `$03:D591/$D5A5/$D5B9`, `$03:D716/$D73A/$D74E` | `0x1D591`, `0x1D716` | **Windmill (visual class 6)** rebuild and construction programs, variants 0/2/4 = turning / restarting / stopped. Record class 3 selects class 6 at `$03:9F37` (rebuild) and `$03:A21A` (construction) |
+| `$03:D70C`, `$03:D58B` | `0x1D70C` | **Factory tier (visual class 8)** construction and rebuild programs, from record class 4 (`$03:A24D`, `$03:9F44`) |
+| `$03:D5EF+`/`$D784+` | `0x1D5EF` | **House (visual class 0)** rebuild/construction programs, variants `$00`-`$0E` by development level and `$10`-`$1E` for the same levels with record flag `$40` set. A `+$10` pair shares both scaffold frames with its base and differs only in the finished metatile it lands on (`$02` vs `$03` at level 0) — which is why `$40` on a house is a finished-art variant, not a construction marker |
+| `$03:DBBD/$DBCA/$DBD7/$DBE4` | `0x1DBBD` | Windmill construction draw lists: top-left metatiles `$04`/`$06`/`$14`/`$16`. The fourth draws the finished mill, identical to blade frame 2 |
+| `$03:DBF1/$DBFE/$DC0B` | `0x1DBF1` | Windmill blade cycle, top-left metatiles `$24`/`$26`/`$16` — three positions 30° apart in the wheel's 90° visual period. The lower row (`$1E`/`$1F`) is the static mill body in all three |
+| `$03:DC38/$DC45` | `0x1DC38` | Factory-tier draw lists: scaffold `$34`, finished `$36` |
 | `$03:D2FA/$03:D306` | `0x1D2FA` | Development target-site coordinate tables (per SEAMS §5) |
+
+**Step-program format** (interpreter `$03:A4F7`, decoded 2026-08-17). A program is a
+sequence of 4-byte entries, each two words. An entry whose first word is `$FD`/`$FE`/`$FF`
+is an opcode; anything else is `{duration_in_ticks, draw_list_pointer}` and draws that list
+through `$03:A591`:
+
+| First word | Meaning |
+|---|---|
+| `$FF` | begin loop: store the following word as the repeat count in slot `+1`, and the cursor as the restart address in slot `+4`. The shipped programs all pass `0`, which the `$FE` pre-decrement turns into 256 iterations |
+| `$FE` | end loop: decrement slot `+1`, jump to slot `+4` unless it reached zero |
+| `$FD` | end. The slot stops advancing and the last drawn frame persists |
+
+Draw lists are a **one-byte** count followed by that many `{dx, dy, metatile}` triples, added
+to the record's cell X/Y. This is why a windmill's animation is not tile animation: the town
+has exactly one animated CHR page and it is water (see rendering §7). A mill turns because
+its step program rewrites its own 2×2 block in the BG1 tilemap.
+
+### Town scenery / ambient-actor tables (banks $03/$01/$0A, mapped 2026-08-17 — SEAMS town §8)
+
+The data behind field workers, pen animals, boats and burning-house flames. Everything is
+keyed by *structure class under a fixed absolute map cell*, so these tables are a clean mod
+seam: moving an animal is a byte edit, not a code change.
+
+| SNES address | File offset | Meaning |
+|---|---:|---|
+| `$03:FD0E-$03:FD3F` | `0x1FD0E` | Ambient scene-script pointer table, 25 entries indexed by `$7F:9222 + town*2` (index 0 unused). Entries 5-12 = class-2 field workers, 13-24 = class-5 pen sheep |
+| `$03:FD40-$03:FE2F` | `0x1FD40` | The 10-byte scene-script records themselves: `{op, x, y, class, scene}`, all words. `x`/`y` are base offsets in units of 4 map cells (`XBA; LSR; LSR` = ×64 px); zero in every ambient record, so those scenes address cells absolutely |
+| `$03:E54C-$03:E66D` | `0x1E54C` | Cutscene scene-script records, same 10-byte layout, invoked by story-event handlers via `LDX #record; JSR $CA93`. `$E628` = Aitos ranch horse (base 3,5 → cell 12,20), `$E63C` = Aitos fleece sheep (base 4,4 → cells 16,16 / 17,17) |
+| `$03:CE5B-$03:CEC2` | `0x1CE5B` | Scene-id → object-list pointer table, **52 scenes**. Scenes `$24`-`$2F` are the twelve 6-cell sheep-pen groups covering the {4,5,8,9,12,13,16,17,20,21,24,25}² pen lattice |
+| `$03:CEC3+` | `0x1CEC3` | The scene object lists: `$FF`-terminated bytes, each an index into `$0A:C800` |
+| `$0A:C800-$0A:C95E` | `0x54800` | Scenery-object index: **190 words**, each an offset from `$0A:C800` to a record `{cell X, cell Y, kind, …script}`. `kind` is always even |
+| `$03:E66E-$03:E679` | `0x1E66E` | Per-town story-event handler tables (`$E67A/$E93C/$EBC2/$EE3E/$F049/$F2D7`, exactly 32 entries each), dispatched by `$03:E1D2` |
+| `$03:DCA2/$DCAE/$DCBA` | `0x1DCA2` | Story-event bitmap base pointers → `$7F:9107`/`$911F`/`$9137` (prereq / fired / dispatched), 4 bytes = 32 event ids per town. **Not** lair masks — corrected 2026-08-17 |
+| `$03:F4D7-$03:F4DE` | `0x1F4D7` | Event-bit mask table `80 40 20 10 08 04 02 01` — the bitmaps are **MSB-first** |
+| `$01:CF2B-$01:CFA8` | `0x0CF2B` | Kind → variant table: 9 row pointers followed by 9 × 12 variant bytes. Indexed **by byte** with the raw `kind`, so the row is `kind/2`. kind 0 people, 2 horse, 4 dog, **6 sheep**, 8 boat, 10 flame, 12 `$DD3F` family |
+| `$01:A91C-$01:A96D` | `0x0A91C` | Spawn-list 6 variant array (41 entries, reached via `$01:A227[6]`); variants `$0C`/`$0D` horse, `$0E`/`$0F` dog, `$10`/`$11` sheep, `$12`-`$15` boat. Compositions follow at `$01:A96E+` |
 
 ### Town OBJ composition landmarks (bank $01, classified 2026-07-22)
 

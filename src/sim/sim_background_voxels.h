@@ -24,8 +24,16 @@ typedef struct SimBackgroundVoxelScene {
 /* Pure classification seam, used by the game-thread builder and ROM-free
  * tests. Every object comes from town state - structure records, the cell map's
  * terrain metatile identities and its reserved landmark plots - so the result
- * does not depend on the current palette, brightness or fade. */
+ * does not depend on the current palette, brightness or fade.
+ *
+ * `wind_stops_all` is the Extras enhancement: the "no wind" story event stills
+ * only the windmills that existed when it fired, so a mill the town builds
+ * afterwards keeps turning through it. True holds every mill in the town for
+ * the duration; false reproduces the original game. It changes nothing else -
+ * a windmill's built-versus-scaffold state always comes from the frame its
+ * plot is drawing, under either setting. */
 void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
+                                  bool wind_stops_all,
                                   SimBackgroundVoxelScene *out);
 
 void SimBackgroundVoxels_Reset(void);
@@ -35,7 +43,8 @@ void SimBackgroundVoxels_Reset(void);
 void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                const uint32_t *canvas_pixels,
                                const uint16_t *vram,
-                               uint32_t canvas_serial);
+                               uint32_t canvas_serial,
+                               bool wind_stops_all);
 
 uint32_t SimBackgroundVoxels_Serial(void);
 const SimBackgroundVoxelScene *SimBackgroundVoxels_Scene(void);

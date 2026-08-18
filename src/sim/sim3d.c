@@ -1138,7 +1138,8 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
                        PPU_brightness(ppu), g_sim3d.backdrop_argb);
   if (frame->background_voxel_enabled) {
     SimBackgroundVoxels_Build(frame->town, wram, SimTownCanvas_Pixels(),
-                              ppu->vram, SimTownCanvas_Serial());
+                              ppu->vram, SimTownCanvas_Serial(),
+                              frame->background_voxel_wind_hold != 0);
   } else if (SimBackgroundVoxels_Serial()) {
     SimBackgroundVoxels_Reset();
   }
@@ -1191,6 +1192,8 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
                 kSimBackgroundVoxelRenderScale_PixelClean),
           });
   frame->background_voxel_enabled = voxel_config.enabled;
+  frame->background_voxel_wind_hold =
+      (uint8_t)(tuning->windmill_wind_stops_all ? 1 : 0);
   frame->background_voxel_detail = (uint8_t)voxel_config.detail;
   frame->background_voxel_lod = (uint8_t)voxel_config.lod;
   frame->background_voxel_shading = (uint8_t)voxel_config.shading;

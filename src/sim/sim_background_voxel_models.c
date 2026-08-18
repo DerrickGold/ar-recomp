@@ -699,13 +699,24 @@ static void AddBladeInlay(SimBackgroundVoxelModel *model,
                 cz + dz * inner - pz * half_width));
 }
 
+enum {
+  /* $DBF1 / $DBFE / $DC0B for the built mill, $DBBD / $DBCA / $DBD7 while it
+   * is going up. Both cycles are three frames long; see the windmill note on
+   * SimBackgroundVoxelObject::animation_phase. */
+  kWindmillFrameCount = 3,
+};
+
 static void BuildWindmill(const SimBackgroundVoxelObject *object,
                           SimBackgroundVoxelDetail detail,
                           SimBackgroundVoxelModel *model) {
+  int phase = object->animation_phase % kWindmillFrameCount;
   if (object->flags & kSimBackgroundVoxel_UnderConstruction) {
-    AddStandardBox(model, 8.0f, 3.0f, 0.0f, 24.0f, 15.0f, 12.0f,
-                   kSimVoxelMaterial_Wall);
-    BuildConstructionFrame(model, 32.0f, 16.0f, 24.0f);
+    /* The authentic scaffold grows across its three frames rather than
+     * standing at full height from the first one. */
+    float progress = (float)(phase + 1) / (float)kWindmillFrameCount;
+    AddStandardBox(model, 8.0f, 3.0f, 0.0f, 24.0f, 15.0f,
+                   4.0f + 8.0f * progress, kSimVoxelMaterial_Wall);
+    BuildConstructionFrame(model, 32.0f, 16.0f, 8.0f + 16.0f * progress);
     return;
   }
 
@@ -722,10 +733,16 @@ static void BuildWindmill(const SimBackgroundVoxelObject *object,
   AddStandardBox(model, 14.0f, 14.1f, 18.0f, 18.0f, 15.2f, 22.0f,
                  kSimVoxelMaterial_Wood);
 
-  const float diagonal = 0.70710678f;
+  /* The wheel is four-fold symmetric, so its whole visual period is the 90
+   * degrees the authentic art divides into three steps. The per-record offset
+   * that used to be the only variation stays as a fixed phase difference
+   * between neighbouring mills. */
+  const float quarter_turn = 1.57079633f;
   const bool alternate = (object->record_slot & 1u) != 0;
-  const float dx = alternate ? 1.0f : diagonal;
-  const float dz = alternate ? 0.0f : diagonal;
+  float angle = (alternate ? quarter_turn * 0.5f : 0.0f) +
+      quarter_turn * (float)phase / (float)kWindmillFrameCount;
+  const float dx = cosf(angle);
+  const float dz = sinf(angle);
   AddBlade(model, 16.0f, 15.0f, 21.0f, dx, dz);
   AddBlade(model, 16.0f, 15.0f, 21.0f, -dz, dx);
   AddBlade(model, 16.0f, 15.0f, 21.0f, -dx, -dz);

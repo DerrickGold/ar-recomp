@@ -247,6 +247,7 @@ Sim3DTuning BuildSim3DTuning(void) {
       .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
       .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
       .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
+      .windmill_wind_stops_all = g_settings.fix_windmill_wind_stop,
       .sprite_margin_left = sim_margin_left,
       .sprite_margin_right = sim_margin_right,
       .sprite_margin_top = sim_margin_top,

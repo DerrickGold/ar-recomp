@@ -129,6 +129,9 @@ typedef struct Sim3DTuning {
   int cull_lift_inset;
   int backdrop_strength_pct;
   int backdrop_horizon_pct;
+  /* Extras > "Wind stops every windmill". Passed in for the same reason as the
+   * margins below: sim3d.c must stay linkable without the settings unit. */
+  int windmill_wind_stops_all;
   /* Sprite-drawable margins either side of the authentic window, from
    * ActRaiser_SimSpriteMargins. Passed in rather than queried here so sim3d.c
    * stays linkable without the widescreen sprite unit, which the focused
