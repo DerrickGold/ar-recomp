@@ -118,8 +118,8 @@ They contain these broad groups:
 | `$A627-$A792` | Angel directional and pose frames | flying, fixed altitude |
 | `$D128-$D22D` | Miracle/menu icons | UI/overlay |
 | `$D233-$D302` | Direction and position cursors | map-plane OBJ (no billboard); switch to authentic top-down selection view while `$7F:9215` is active |
-| `$D32B-$D6xx` | Town status/thought icons, including disabled variants | UI/overlay |
-| `$D4F6/$D4F8/$D4FA` | ↑ the **destroyed-house** status icon specifically (identified 2026-07-22 via the stuck-bubble bug, ledger §22): a structure record whose visual step-machine slot at `$7F:77E7 + idx*8` holds these is showing the destroyed marker; healthy houses hold `$D5EF`/`$D61F`-range compositions | UI/overlay |
+| `$D32B-$D686` | Town status/thought icons, including disabled variants. **Crawled 2026-08-18** (`sim_object_catalog.py crawl`): the range holds 79 entries, of which **75 are the 16x16 bubbles** (63 single-part, 12 four-part) and **four are 64x64 eight-part map selector squares** — `$D4E5`, `$D4FA`, `$D538`, `$D576` — structurally identical to the `$D233-$D302` cursor family. Those four lie ON the map; `IsMapPlaneCursorComposition` does not reach them, so `IsTownStatusBubbleComposition` excludes them by address. Measured from OAM, a bubble is a 16x32 stack anchored at its TOP and the ROM bounces it about 3px | overlay, lifted onto the owning structure (SEAMS "Structure-anchored overlays") |
+| `$D4F6/$D4F8/$D4FA` | **NOT compositions — bank-`$03` step-PROGRAM addresses.** A structure record whose visual step-machine slot at `$7F:77E7 + idx*8` holds one of these is showing the destroyed-house marker; healthy houses hold `$D5EF`/`$D61F`-range programs. Identified 2026-07-22 via the stuck-bubble bug (ledger §22). They share no numbering with the bank-`$01` composition table above, and the collision with `$D4FA` there — which is one of the selector squares — is a coincidence that cost a wrong classifier rule in 2026-08-18 | structure state, not art |
 | `$D687-$D988` | Angel action, arrow, cloud, fire, and hourglass effects | split actor/attached effect/overlay by script; the arrow override below is authoritative |
 | `$D967/$D972/$D97D/$D988` | Angel-arrow vertical A/B and horizontal A/B compositions | flying projectile at angel height; record-origin anchor; no shadow |
 | `$E85C-$E93x` | Town-person animation frames | grounded at map height |
@@ -208,6 +208,23 @@ need a depth curve or attachment rule:
   red/blue `$E6CA` family. The screen-upright glow and ember source are lifted four authentic
   pixels to `(8,12)` so both center within the flame silhouette without changing its semantic
   ground contact.
+- The volcanic eruption story event (fires once a town's region has no lairs left) is packed
+  world identity `$0E01` over three adjacent spawn scripts, measured in run `20260818-070141`.
+  `$01:A853` holds `$E7D0` and `$01:A857` holds `$E7A6` — both are the same two 8x8 tiles
+  `$11C`/`$035` in palette 1, one V-flipped against the other, and both are the *same fireball*:
+  record `$1016` walks `$E7D0`→`$E7A6` and records `$0FA4/$0FCA/$0FF0` walk `$E7A6`→ground fire,
+  each at a fixed `world_x` with increasing `world_y`. A fireball still in the air is
+  `flying_projectile`/`RecordOriginAnchor`/`NoShadow`: terrain must neither raise it nor hide it,
+  and its art is centred on the record origin rather than standing on a foot.
+- **The eruption's ground fire is the burning house's animation, and needs no new art.**
+  `$01:A85B` cycles `$DD9F/$DDA5/$DDAB` at four ticks a frame, and those are tiles
+  `$086/$088/$08A` in palette 1 — the exact frames `$01:A838` draws a burning building with. The
+  only differences are the anchor (part `x = -8`, so the record-local ground contact is `(0,16)`
+  rather than the house's `(8,16)`) and the cadence. They therefore classify into the house
+  fire's own `HouseFireA/B/C` phase family so both share one lighting ramp; the kind stays
+  separate only so a trace can tell burning ground from a burning house. Counting the palette-2
+  `$E6CA/$E6D0/$E6D6` blue variant, these three tiles have three distinct users — the composition
+  triple, not the tile, is what identifies a family.
 - Selection cursors and miracle targeting are screen/world overlays and should
   trigger the top-down camera transition rather than participate in shadows.
 - All non-enemy world graphics—people, groups of people, animals, boats, and
