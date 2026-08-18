@@ -345,8 +345,8 @@ stager) requires all six words == 2 for the all-bosses-done path.
 |---------|-------------|
 | $7F:3800-$7F:53FF | Per-cell flag maps, `$400` per town (32×32 cells; bit0 set at road/build commit `$03:9623`, bit1 at `$03:8E48`, transient pathfinder visited bit2 set at `$03:9A50` and tested by the `$03:96EF` HLE) |
 | $7F:6B26+2N | Per-town population **support capacity** (census `$03:C07F` sum: 32/48/72 per completed support structure, bridges 32) |
-| $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, bit6 under construction, bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
-| $7F:77E7-$7F:7BE6 | Per-record visual step-machine slots, 128 × 8 bytes (armed by the construction `$03:A4B8` / rebuild `$03:A4A8` HLE pair through one shared resolver/armer, then walked by the `$89F7`/`$8A7E` 8-frame stepper). Completed sidecar bridges bypass this pool: the `$89F0` HLE resolves and replays their single native rebuild draw through the same model |
+| $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, **bit6 not-yet-contributing / per-class visual variant — NOT a construction flag** (the allocator never sets it; on a class-3 windmill it is the "no wind" story state — see SEAMS town §7 and ledger §61), bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
+| $7F:77E7-$7F:7BE6 | Per-record visual step-machine slots, 128 × 8 bytes (armed by the construction `$03:A4B8` / rebuild `$03:A4A8` HLE pair through one shared resolver/armer, then walked by the `$89F7`/`$8A7E` 8-frame stepper). Completed sidecar bridges bypass this pool: the `$89F0` HLE resolves and replays their single native rebuild draw through the same model. Slot layout, from interpreter `$03:A4F7` (decoded 2026-08-17): `+0` countdown, decremented once per tick, entry executes when it hits 0; `+1` loop repeat counter; `+2` program cursor (bank-`$03` address of the NEXT entry); `+4` loop restart address, set by the program's `$FF` opcode; `+6` address of the CURRENT entry's draw-list pointer word, which `$03:A591` dereferences to redraw. The armer initialises `+0`/`+1`/`+2`/`+4` only, so `+6` is stale until the first tick |
 | $7F:7BE7 | Step/tick scratch variable (record index during scanner passes) |
 | $7F:7BE9 | Scanner gate: nonzero makes `$03:A4A8/$03:A4B8` (arm rebuild/construction visual step) and `$03:A4F7` early-out |
 
@@ -417,7 +417,45 @@ through SRAM by `$03:A850`. Corrected 2026-08-02 — the arrays are **not** 16 l
 | Address | Description |
 |---------|-------------|
 | $7F:9101 | World-state flags. `$02:865C` tests bit 0 before preserving an 8x8 block at world-tilemap offset `$0660`; when clear, that block is zeroed before town development is stamped. `$01:B6CA` also uses bit 0 to decide whether its location scan includes the seventh (Death Heim) rectangle. Bit 1 remains Death Heim-related but is not consumed by the host world-map composer. |
-| $7F:910B | Bloodpool bridge technology (bit 0x20) |
+| $7F:910B | Bloodpool's story-event **prereq** bitmap, byte 0 (= `$9107 + 1*4`). The PAR-derived "bridge technology (bit 0x20)" label is event id 2 of that town — see the event-bitmap table below |
+
+### Story-event bitmaps ($7F:9107-$7F:914E, corrected 2026-08-17 — SEAMS story-event VM)
+
+Three parallel per-town arrays, 4 bytes = **32 event ids** per town, base pointers in ROM at
+`$03:DCA2`/`$DCAE`/`$DCBA`. Bit order is **MSB-first**: id `k` → byte `k>>3`, mask
+`$80 >> (k&7)` (mask table `$03:F4D7`). Helpers `$03:F46E` test / `$F479` set / `$F487` clear,
+resolver `$F497` (scratch `$7F:914F`).
+
+| Address | Description |
+|---------|-------------|
+| $7F:9107 + town*4 | **prereq/enabled** — the event may be selected. Persisted at SRAM `0x120E` |
+| $7F:911F + town*4 | **fired** — already run; never selected again. Persisted at SRAM `0x1226` |
+| $7F:9137 + town*4 | **dispatched this session** (set by `$03:E02B`/`$E0B0`); not persisted |
+| $7F:914F | scratch byte holding the resolved bit mask (`$03:F497`) |
+
+These were labelled "open lairs"/"spawned lairs" until 2026-08-17. Monster-lair state is the
+separate `$7F:9568+` block above; these bits are consumed by the `$03:DFFB` event selector and
+by every town-event handler in `$03:E6xx-$F3xx` (32 ids/town matches the 32-entry handler
+tables at `$03:E66E`, not 4 lairs/town).
+
+### Story-event and scenery-spawner state ($7F:9202-$7F:9228, mapped 2026-08-17 — SEAMS town §8)
+
+| Address | Description |
+|---------|-------------|
+| $7F:9202 | event-selector scan cursor, `0..$1F` (`$03:E015` loop) |
+| $7F:920E | pending-event latch. Bit 7 set = "run id `& $7F` next"; `$03:DFFB` strips the bit and returns the id. Handlers self-latch, e.g. `$03:EFE5` writes `$87`, `$03:FAE1` writes `$88` |
+| $7F:9220 | late-bound **pool-allocator pointer** (callee−1) for the scenery/cutscene spawn trampoline `LDA #cont; PHA; LDA $9220; PHA; RTS`. Only three values: `$CA79`→`$03:CA7A` (`$01:B790`, 7-slot `$0E02` pool), `$CA7E`→`$03:CA7F` (`$01:B798`, `$0F0C` pool), `$B67C`→`$03:B67D` |
+| $7F:9222 + town*2 | **active ambient scene index** into `$03:FD0E`; 0 = no ambient actors. Session-only — written solely by story-event handlers (Aitos `$9228`: `$03:EFF6` writes 4, `$03:F030` writes `$15`), never restored from SRAM |
+| $7F:922E | compared against the active index by `$03:FCE8`; no decoded code ever writes it (dead compare) |
+| $7F:8F6F | structure **class filter** for the filtered spawn loop `$03:CDB0` |
+| $7F:8F70 | scene id, index into `$03:CE5B` |
+| $7F:8F71 / $7F:8F73 | scene base offset in pixels (script record `+2`/`+4` × 64) |
+| $7F:7C11 / $7F:7C13 | query cell for the exact-cell structure lookup `$03:BD84` |
+| $7F:9F6B + town*2 | per-town development gate; `$03:FCE8` bails when zero |
+
+World-record `+$0F` (high byte of the pending-type word `$7F:7CA1`, stored to `+$0E` by the
+`$01:B778` allocator family) is the scenery **kind**, and `$01:CF0A` indexes `$01:CF2B` by it —
+kind 0 people, 2 horse, 4 dog, 6 sheep, 8 boat, 10 flame.
 
 ### Town Growth Points ($7F:9EFA+)
 Two-byte entries per town tracking accumulated growth from monster defeats and lair seals.

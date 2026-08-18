@@ -12,6 +12,9 @@ typedef struct SimBackgroundVoxelModelCacheKey {
   uint8_t cell_x, cell_y;
   uint8_t tree_edges, record_slot;
   uint8_t detail, style;
+  /* Animated families compile one model per frame. Leaving this out of the
+   * key froze a windmill on whichever blade position compiled first. */
+  uint8_t animation_phase;
 } SimBackgroundVoxelModelCacheKey;
 
 typedef struct SimBackgroundVoxelModelCacheEntry {
@@ -52,6 +55,7 @@ static SimBackgroundVoxelModelCacheKey MakeKey(
     .record_slot = object->record_slot,
     .detail = (uint8_t)detail,
     .style = (uint8_t)style,
+    .animation_phase = object->animation_phase,
   };
 }
 
@@ -63,7 +67,8 @@ static bool KeyEquals(const SimBackgroundVoxelModelCacheKey *left,
       left->development_level == right->development_level &&
       left->cell_y == right->cell_y && left->tree_edges == right->tree_edges &&
       left->record_slot == right->record_slot && left->detail == right->detail &&
-      left->style == right->style;
+      left->style == right->style &&
+      left->animation_phase == right->animation_phase;
 }
 
 static bool ShadingKeyEquals(const SimBackgroundVoxelModelShadingKey *left,
@@ -120,6 +125,7 @@ static uint32_t HashKey(const SimBackgroundVoxelModelCacheKey *key) {
   hash = HashByte(hash, key->record_slot);
   hash = HashByte(hash, key->detail);
   hash = HashByte(hash, key->style);
+  hash = HashByte(hash, key->animation_phase);
   /* The set count is a power of two, so avalanche the structured coordinates
    * before selecting its low bits. This keeps adjacent town cells and the new
    * regional identity bytes from clustering into a handful of four-way sets. */

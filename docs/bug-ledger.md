@@ -2029,6 +2029,98 @@ if archaeology is ever needed. The distilled outcomes:
 
 ## Methodology learnings (wrong turns worth remembering)
 
+61. **Aitos's 3D windmills stood as scaffolding through the "no wind" event, and
+    never turned — FIXED 2026-08-17.** The voxel classifier read structure-record
+    flag bit 6 (`$40`) as "under construction" for record classes 3 (windmill)
+    and 4 (factory tier), the same way it reads bit 6 on a house as an art
+    variant. For a windmill that bit is not construction at all: the scripted
+    "the wind has died" event `$03:E2BB` walks all 128 records of the current
+    town, ORs `$40` into every class-3 record, and arms visual class 6 **variant
+    4** — a one-frame program (`$03:D74E` → draw list `$DBF1`) that draws a
+    **finished** mill with its blades parked. The Wind miracle queues record
+    action 6, and `$03:A1F4` arms variant 2, clears `$40` with `AND #$BF`, and
+    re-queues action 1 so the blade cycle resumes. So the bit marked exactly the
+    interval the mill was standing still, and the enhanced view answered it by
+    tearing the mill down to a timber frame.
+
+    `runs/20260817-194701/snapshots/snap_00_gf15863` is the frame, and it decodes
+    cleanly: Aitos record slot 7 at cell (12,24) has `flags=$C3` with its step
+    slot freshly armed on `$D74E`, while slot 20 at (8,20) has `flags=$83` and is
+    mid-loop in the spin program `$D595`. Both plots draw finished art — `$24`
+    and `$16` in the structure metatile atlas at `$7E:3100`.
+
+    Two conclusions, one fix. Bit 6 is set on a live record by exactly four ROM
+    sites — `$03:BD66` (house), `$03:B25B` and `$03:E27B` (fields), `$03:E2BB`
+    (windmills) — and the allocator `$03:9D9F` only ever ORs `$80`, so **no class
+    ever gets bit 6 as a construction marker**; the house `+$10` variant pair
+    proves the same thing from the art side, since variants `$00` and `$10` share
+    both scaffold frames and differ only in the finished metatile they land on
+    (`$02` vs `$03`). And the ROM already publishes the true state per frame: the
+    step machine copies one 2x2 structure metatile set into the live tilemap, so
+    the plot's top-left metatile *is* the answer. Windmill and factory state now
+    comes from matching that cell against `$7E:3100` — `$04/$06/$14` scaffold and
+    `$24/$26/$16` the three blade positions for class 6, `$34`/`$36` for class 8
+    — and an unmatched plot keeps the finished model, because un-building
+    something the town has already finished is the louder error. The same read
+    supplies `animation_phase`, so the 3D blades turn on the authentic cadence
+    and stop and restart with the event instead of on a host clock.
+
+    One deliberate divergence came out of play-testing the fix. `$03:E2BB` is
+    the only site that parks a mill and it stamps only the class-3 records that
+    exist when the event fires, so a mill the town builds afterwards keeps
+    turning through an event whose premise is that nothing turns - visible in
+    the same run as record 7 parked on the static program while record 20 ran
+    the spin loop. The enhanced view holds every mill in a town while any of its
+    windmill records carries the bit, releasing when the Wind miracle clears
+    them. That is the one place the 3D mills disagree with the flat art, so it
+    is a setting rather than a silent change: **System > Game > "Wind stops
+    every windmill"** (`AR_FIX_WINDMILL_WIND_STOP`, on by default) picks between
+    it and the ROM's own per-record behaviour. The scaffold fix above is not
+    part of that choice - it was our misreading, not the game's, so it applies
+    unconditionally.
+
+    Lesson: **a record bit that correlates with an unfinished-looking state is
+    not a progress bit.** The art program is the ROM's own statement of what a
+    structure looks like right now; derive presentation from what the game is
+    drawing, not from a flag that merely happens to be set while it draws it.
+
+62. **The Wind miracle never restarted Aitos's windmills — FIXED 2026-08-17.**
+    Reported against the new 3D mills, but the flat art was dead too: this is
+    the ledger §22 misdecode family again, on three more leaves of the same
+    record-scanner web. `runs/20260817-201256` catches it exactly.
+    `snap_00_gf951` is mid-event (record 7 `flags=$C3`, parked program `$D74E`);
+    `snap_01_gf1431` is after the cast, with `$90EB=$0005` confirming Wind is
+    kind 5 and therefore whole-map (`$03:B274` gates `CMP #$0004 / BCC`). Both
+    records are back to `flags=$83` with the restart program `$D73A` armed — so
+    `$03:A1F4` ran — yet `rec[3]` still holds **action 6**, and both step slots
+    sit at `countdown=1 / cursor=$D73A` in the exit dump too. Armed, never
+    stepped.
+
+    `$A1F4` ends `LDA #$00 / JSR $9EF5` (progress) then `LDA #$01 / JSR $9F05`
+    (re-queue action 1), and action 1 is what makes the scanner TICK the step
+    machine through `$A1D2 -> $A4F7`. `$9EF5` had no `exit_mx_at`, so the
+    decoder resumed `$A214` at m=0, where `a9 01 20 05 9f` reads `LDA #$2001 /
+    ORA $9F` — **the requeue's `JSR` opcode is eaten by the 16-bit immediate**.
+    Visible in `src/gen` with no runtime data, exactly as §22 was.
+
+    A ROM-wide sweep for the shape (a `JSR` to a width-neutral record leaf whose
+    continuation opens with an m-dependent immediate) found the same wound in
+    five places across three unpinned leaves. `exit_mx_at 039EF5 / 039F8D /
+    039FA5`, all `1 0`, fixes them together: `$A214` (wind restart), `$A428`
+    (bridge) and `$A138` (house) get their action requeue back, and `$E2F0`
+    (the no-wind event's own rebuild arm) stops emitting a phantom `STA $209F`
+    instead of `JSR $9F8D`. All three leaves are width-neutral — `$9EF5` is a
+    balanced `PHA`/`PLA` byte edit, `$9F8D`/`$9FA5` a matched `REP`/`SEP` around
+    `JSR $A4A8` — and every one of their 24 entry sites is the m=1/x=0 scanner,
+    with no branch entries, so the pins are unambiguous.
+
+    Lesson: **`$9F05` already carried this pin (§ Kasandora, 2026-08-10) and its
+    identical sibling `$9EF5` did not.** When one leaf of a web needs an exit
+    pin, sweep the whole web for the same shape rather than fixing the one that
+    happened to be reported — the same five-minute ROM scan that found these
+    would have found them then. `AR_WINDMILL_DEBUG=1` prints the record plus
+    step slot plus resolved phase per mill and is the first tool for any repeat.
+
 Process lessons folded out of statement-then-correction text elsewhere; the docs now state final
 truths, and the journey that earned them lives here.
 

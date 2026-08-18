@@ -697,6 +697,9 @@ typedef struct SimFrameData {
   /* Resolved false for the Off preset. The game thread then skips extraction
    * and publishes serial zero, preserving the authentic background tiles. */
   uint8_t background_voxel_enabled;
+  /* Holds every windmill in the town for the "no wind" event rather than only
+   * the ones the event stamped. Extras enhancement; see ledger §61. */
+  uint8_t background_voxel_wind_hold;
   /* Player-selected procedural background-model performance target. */
   uint8_t background_voxel_detail;
   /* Fixed keeps that detail for every model. Adaptive treats it as a ceiling

@@ -4,9 +4,11 @@ WRAM dump (saves/dump_wram.bin or dump_f<N>_wram.bin: raw 128 KiB g_ram,
 $7E at 0x00000, $7F at 0x10000).
 
 Record format (SEAMS.md town §7): base $7F:6BE7 + town*0x200, 128 x 4 bytes
-{cell X, cell Y, flags/type, action|progress}. Flags: bit7 active, bit6 under
-construction, bits 4-5 subtype, low nibble type class (0 house, 1 bridge,
-2 field, 3/4 factory tier).
+{cell X, cell Y, flags/type, action|progress}. Flags: bit7 active, bit6
+not-yet-contributing / per-class visual variant (NOT a construction flag - on a
+class-3 windmill it is the "no wind" story state; see SEAMS town §7 and ledger
+§61), bits 4-5 subtype, low nibble type class (0 house, 1 bridge, 2 field,
+3/4 factory tier).
 
 Usage:
   tools/town_structs.py saves/dump_wram.bin            # current town ($7F:7BF9)
@@ -51,7 +53,7 @@ def summarize(data, town, verbose):
         by_class[cls] = by_class.get(cls, 0) + 1
         if verbose:
             name = CLASSES.get(cls, f"class{cls}")
-            building = " building" if flags & 0x40 else ""
+            building = " bit6" if flags & 0x40 else ""
             sub = (flags >> 4) & 0x3
             act = f" action={action & 0x0F}" if action & 0x0F else ""
             prog = f" prog={(action >> 4) & 0x7}" if action & 0x70 else ""

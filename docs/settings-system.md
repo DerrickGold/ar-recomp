@@ -758,6 +758,7 @@ structure allocation).
 | Audio freq | `AudioFreq` / `AR_AUDIO_FREQ` | enum 32.04/44.1/48 kHz | 44.1 kHz | RESTART; numeric `32040`/`44100`/`48000` remain accepted |
 | Audio samples | `AudioSamples` / `AR_AUDIO_SAMPLES` | int | 2048 | RESTART |
 | Bridge-free limit | `AR_FIX_BRIDGE_LIMIT` | bool | off (sticky) | PASSIVE; Extras category; completed bridges migrate to the checksummed SRAM extension and stop consuming structure records |
+| Wind stops every windmill | `AR_FIX_WINDMILL_WIND_STOP` | bool | on | PASSIVE; System > Game; Aitos's no-wind event (`$03:E2BB`) stills only the windmills that exist when it fires, so a mill built during it keeps turning. On holds every mill in the town until the Wind miracle; off reproduces the original game. Enhanced town view only - it never changes a mill's built-versus-scaffold state, which always follows the frame the plot is drawing (ledger §61) |
 | Turbo multiplier | `AR_TURBO_MULT` | int | 8 | Persistent ACTION parameter; consumed live by T and Toggle turbo |
 | Warp target | `AR_WARP` | custom hex | `0101` | Persistent ACTION parameter; direct text editor accepts the raw region/map target used by F6 and Warp now |
 | Scene inspector | `AR_SCENE_INSPECTOR` | bool | off | PASSIVE; F3/left-click freezes and identifies live BG/OAM/Mode-7 assets; panel auto-avoids the sample and is draggable; clear restores inspector-owned pause |

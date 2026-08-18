@@ -1998,6 +1998,14 @@ const SettingDesc g_setting_descs[] = {
                "population cap; they migrate to spare save space and keep "
                "their tiles, crossing, and support.",
                kSettingCat_Enhancements, 0, true, NULL, NULL),
+  BOOL_SETTING(fix_windmill_wind_stop, "AR_FIX_WINDMILL_WIND_STOP",
+               "Wind stops every windmill",
+               "Aitos's no-wind event only stills the windmills that already "
+               "existed, so one the town builds during it keeps turning. On, "
+               "every windmill in the town holds until the Wind miracle "
+               "restores them. Off reproduces the original game. Affects the "
+               "enhanced town view only.",
+               kSettingCat_Enhancements, 1, false, NULL, NULL),
   INT_SETTING(turbo_multiplier, "AR_TURBO_MULT", "Turbo multiplier",
               "Number of game frames advanced per rendered frame while turbo is active.",
               kSettingCat_Enhancements, 8, 2, 64, ParseTurboMultiplier, NULL),

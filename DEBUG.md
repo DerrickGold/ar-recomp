@@ -48,6 +48,19 @@ the report is cosmetic. If they differ, inspect the emitted block for a
 swallowed instruction. Unexpected `g_cpu_brk_hook` or `g_cpu_cop_hook` calls in
 `src/gen` are a common signal.
 
+**When one leaf of a web needs an `exit_mx_at`, sweep the whole web for the same
+shape.** `$03:9F05` was pinned in August; its identical sibling `$03:9EF5` was
+not, and the same swallowed-`JSR` wound sat in five places for four months
+(ledger §62). The sweep is a five-minute ROM scan — for every `JSR` to a
+width-neutral leaf, check whether the continuation opens with an m-dependent
+immediate opcode (`A9 89 29 09 49 C9 69 E9`); if it does, the m=0 decode eats
+the next opcode:
+
+```python
+# for each JSR site in a bank: does the following byte start an m-dependent immediate?
+risky = rom[o] == 0x20 and rom[o+3] in (0xA9, 0x89, 0x29, 0x09, 0x49, 0xC9, 0x69, 0xE9)
+```
+
 Before diagnosing flag inference, rule out stack-pointer drift with `AR_STRACE`.
 A one-byte `S` error can make a later `PLP` look like an M/X leak. This was the
 root cause of the act-to-sim cascade: an unconverted RTS-trick lost one stack
@@ -1706,6 +1719,7 @@ quintet_lzss.py        independent Python oracle for the shared C decoder (`src/
 act_content.py         static dump of the CONTENT tables a rebalance/randomizer touches: `--tables` per-region object-type records (ATK `+7` / HP `+8` / score `+9` / flags / handler), `--levels` the bank-$0A level layout streams (player start, terrain damage boxes, 4-byte object placements + `$FC/$FD/$FE/$FF` opcodes), `--census` per-stage type + statue-drop summary, `--lairs` the 24-entry sim monster-lair seed table. Read SEAMS "Content / randomizer seams" first — several handlers overwrite HP at runtime, so a table edit is not the whole story
 town_structs.py        decode a town's 128-slot structure-record array from any WRAM dump (F2 snapshot / exit dump): per-slot type/cell/state, bridge count, TABLE FULL marker (--all = all six towns; SEAMS town §7). Same 4-byte layout sits in SRAM at 0x600+town*0x200 (save-format §3.4)
 AR_BRIDGEFIX_DEBUG=1   [bridgefix] structure-system observability via the hle'd allocator+miracle hooks: bridge allocations, table-full events, slot steals, miracle hits on bridges; =2 = every allocation + every miracle record hit (src/actraiser/actraiser_bugfixes.c)
+AR_WINDMILL_DEBUG=1    [windmill] one line whenever any windmill's state changes: record flags/action, its visual step slot (countdown/loop/cursor/entry) and the phase + construction flag the enhanced view resolved from the drawn frame. First tool for "the mill will not spin / will not restart" (ledger 61, SEAMS town 7)
 find_yield_helpers.py  yield-helper census BY SHAPE (pull/peek of caller frame -> object-field store) + every JSR site's continuation vs cfg; exit!=0 = unregistered = future silent soft-lock (§7.20). Run after ANY bank00.cfg handler work; --lines = paste-ready fixes
 AR_RTSDISP_MISS=1      names any continuation a `rts_dispatch` list doesn't cover (site + popped target); benign JSR-return fall-throughs also print — check the popped value before adding a mapping
 AR_GARBAGE_HIST=<n>    garbage-trap block-ring depth (default 24, max 1000) incl. per-block S — 1000 spans a whole sim frame; how the dev-cycle m-leak origin was found (§7.13)

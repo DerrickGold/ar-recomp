@@ -91,8 +91,10 @@ static void TestDefaultsAndMetadata(void) {
    * cycle then added three: the Cheats-tab toggle that arms it, plus its
    * keyboard and gamepad binding rows. The sim synthetic-part work added one
    * measured, gameplay-affecting actor-range row. Background voxel polish then
-   * added five independent performance boundaries. */
-  CHECK(g_setting_desc_count == 266);
+   * added five independent performance boundaries, and the Aitos wind event
+   * one Extras row for whether it stills every windmill or only the ones the
+   * ROM stamped. */
+  CHECK(g_setting_desc_count == 267);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);

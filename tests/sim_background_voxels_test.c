@@ -96,6 +96,149 @@ static const SimBackgroundVoxelObject *FindKind(
   return NULL;
 }
 
+enum { kStructureDefinitions = 0x3100 };
+
+static void SetStructureDefinition(uint8_t *wram, int metatile,
+                                   uint16_t a, uint16_t b,
+                                   uint16_t c, uint16_t d) {
+  const uint16_t entries[4] = {a, b, c, d};
+  size_t at = kStructureDefinitions + (size_t)metatile * 8;
+  for (int entry = 0; entry < 4; entry++) {
+    wram[at + entry * 2] = (uint8_t)entries[entry];
+    wram[at + entry * 2 + 1] = (uint8_t)(entries[entry] >> 8);
+  }
+}
+
+/* A windmill's state comes from the frame its plot is drawing, not from the
+ * record's `$40` flag - that bit is the "no wind" story state, and reading it
+ * as construction put a scaffold over a standing mill for the whole event. */
+static void CheckWindmillFrames(void) {
+  static uint8_t wram[kWramBytes];
+  /* The six class-6 top-left frames: three scaffold steps, then the three
+   * blade positions of the finished mill. */
+  static const uint8_t kFrames[6] = {0x04, 0x06, 0x14, 0x24, 0x26, 0x16};
+  static const int kConstruction[6] = {1, 1, 1, 0, 0, 0};
+  static const uint8_t kPhase[6] = {0, 1, 2, 0, 1, 2};
+
+  for (int stopped = 0; stopped < 2; stopped++)
+    for (int frame = 0; frame < 6; frame++) {
+      memset(wram, 0, sizeof(wram));
+      for (int at = 0; at < 6; at++)
+        SetStructureDefinition(wram, kFrames[at],
+                               (uint16_t)(0x0100 + at * 4),
+                               (uint16_t)(0x0101 + at * 4),
+                               (uint16_t)(0x0102 + at * 4),
+                               (uint16_t)(0x0103 + at * 4));
+      uint8_t *record = wram + kRecords;
+      record[0] = 10;
+      record[1] = 11;
+      record[2] = (uint8_t)(stopped ? 0xC3 : 0x83);
+      SetCanvasCell(wram, 10, 11,
+                    (uint16_t)(0x0100 + frame * 4),
+                    (uint16_t)(0x0101 + frame * 4),
+                    (uint16_t)(0x0102 + frame * 4),
+                    (uint16_t)(0x0103 + frame * 4));
+
+      SimBackgroundVoxelScene scene;
+      SimBackgroundVoxels_Classify(1, wram, true, &scene);
+      const SimBackgroundVoxelObject *mill =
+          FindKind(&scene, kSimBackgroundVoxel_Windmill);
+      CHECK(mill != NULL);
+      if (!mill) continue;
+      CHECK(((mill->flags & kSimBackgroundVoxel_UnderConstruction) != 0) ==
+            (kConstruction[frame] != 0));
+      /* `$C3` is the parked "no wind" record, so a built mill holds phase 0
+       * however far round its plot happens to be drawn. A scaffold keeps its
+       * own build step - construction is not wind-driven. */
+      uint8_t expected = (stopped && !kConstruction[frame])
+          ? 0 : kPhase[frame];
+      CHECK(mill->animation_phase == expected);
+    }
+
+  /* One stamped record parks every mill in the town, including one the event
+   * never reached because it was built afterwards. The ROM leaves that mill
+   * spinning; the enhanced view holds it with the rest. */
+  memset(wram, 0, sizeof(wram));
+  SetStructureDefinition(wram, 0x24, 0x0100, 0x0101, 0x0102, 0x0103);
+  SetStructureDefinition(wram, 0x26, 0x0104, 0x0105, 0x0106, 0x0107);
+  uint8_t *stamped = wram + kRecords;
+  stamped[0] = 10; stamped[1] = 11; stamped[2] = 0xC3;
+  uint8_t *unstamped = stamped + 4;
+  unstamped[0] = 4; unstamped[1] = 5; unstamped[2] = 0x83;
+  SetCanvasCell(wram, 10, 11, 0x0100, 0x0101, 0x0102, 0x0103);
+  SetCanvasCell(wram, 4, 5, 0x0104, 0x0105, 0x0106, 0x0107);
+  SimBackgroundVoxelScene stopped_scene;
+  SimBackgroundVoxels_Classify(1, wram, true, &stopped_scene);
+  int mills = 0;
+  for (uint16_t i = 0; i < stopped_scene.object_count; i++) {
+    const SimBackgroundVoxelObject *o = &stopped_scene.objects[i];
+    if (o->kind != kSimBackgroundVoxel_Windmill) continue;
+    mills++;
+    CHECK(!(o->flags & kSimBackgroundVoxel_UnderConstruction));
+    CHECK(o->animation_phase == 0);
+  }
+  CHECK(mills == 2);
+  /* With the enhancement off, each mill just follows its own plot: the ROM
+   * parked the stamped one by drawing a static frame, and left the other
+   * turning. That is the authentic behaviour the setting restores. */
+  SimBackgroundVoxels_Classify(1, wram, false, &stopped_scene);
+  int authentic_parked = 0, authentic_turning = 0;
+  for (uint16_t i = 0; i < stopped_scene.object_count; i++) {
+    const SimBackgroundVoxelObject *o = &stopped_scene.objects[i];
+    if (o->kind != kSimBackgroundVoxel_Windmill) continue;
+    CHECK(!(o->flags & kSimBackgroundVoxel_UnderConstruction));
+    if (o->animation_phase == 0) authentic_parked++;
+    if (o->animation_phase == 1) authentic_turning++;
+  }
+  CHECK(authentic_parked == 1);
+  CHECK(authentic_turning == 1);
+
+  /* Clearing the event releases both: the unstamped mill goes back to the
+   * blade position its plot is drawing. */
+  stamped[2] = 0x83;
+  SimBackgroundVoxels_Classify(1, wram, true, &stopped_scene);
+  int released = 0;
+  for (uint16_t i = 0; i < stopped_scene.object_count; i++) {
+    const SimBackgroundVoxelObject *o = &stopped_scene.objects[i];
+    if (o->kind == kSimBackgroundVoxel_Windmill && o->animation_phase == 1)
+      released++;
+  }
+  CHECK(released == 1);
+
+  /* No recognisable frame on the plot - a town whose tilemap has not been
+   * rebuilt yet - keeps the finished mill rather than dropping to a scaffold. */
+  memset(wram, 0, sizeof(wram));
+  uint8_t *record = wram + kRecords;
+  record[0] = 10;
+  record[1] = 11;
+  record[2] = 0xC3;
+  SimBackgroundVoxelScene scene;
+  SimBackgroundVoxels_Classify(1, wram, true, &scene);
+  const SimBackgroundVoxelObject *mill =
+      FindKind(&scene, kSimBackgroundVoxel_Windmill);
+  CHECK(mill && !(mill->flags & kSimBackgroundVoxel_UnderConstruction));
+  CHECK(mill && mill->animation_phase == 0);
+
+  /* Same rule for the factory tier: $34 is its scaffold and $36 the finished
+   * building. Its record never carries `$40` on any ROM path at all. */
+  memset(wram, 0, sizeof(wram));
+  SetStructureDefinition(wram, 0x34, 0x0200, 0x0201, 0x0202, 0x0203);
+  SetStructureDefinition(wram, 0x36, 0x0204, 0x0205, 0x0206, 0x0207);
+  record = wram + kRecords;
+  record[0] = 20;
+  record[1] = 20;
+  record[2] = 0x84;
+  SetCanvasCell(wram, 20, 20, 0x0200, 0x0201, 0x0202, 0x0203);
+  SimBackgroundVoxels_Classify(1, wram, true, &scene);
+  const SimBackgroundVoxelObject *factory =
+      FindKind(&scene, kSimBackgroundVoxel_Factory);
+  CHECK(factory && (factory->flags & kSimBackgroundVoxel_UnderConstruction));
+  SetCanvasCell(wram, 20, 20, 0x0204, 0x0205, 0x0206, 0x0207);
+  SimBackgroundVoxels_Classify(1, wram, true, &scene);
+  factory = FindKind(&scene, kSimBackgroundVoxel_Factory);
+  CHECK(factory && !(factory->flags & kSimBackgroundVoxel_UnderConstruction));
+}
+
 int main(void) {
   static uint8_t wram[kWramBytes];
   static uint16_t vram[kVramWords];
@@ -161,7 +304,7 @@ int main(void) {
   SetCanvasTile(wram, 13, 13, 1);
 
   SimBackgroundVoxelScene scene;
-  SimBackgroundVoxels_Classify(1, wram, &scene);
+  SimBackgroundVoxels_Classify(1, wram, true, &scene);
   CHECK(scene.town == 1);
   CHECK(!scene.overflow);
   /* Four structures, four tree cells and two bushes. */
@@ -221,7 +364,7 @@ int main(void) {
   CHECK(shrubs == 2);
   CHECK(shrub_beside_wood == 1);
 
-  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1);
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, true);
   const uint32_t *atlas = SimBackgroundVoxels_AtlasPixels();
   const uint32_t *ground = SimBackgroundVoxels_GroundPixels();
   size_t house_corner = (size_t)(5 * 16) * kSimTownCanvasPixels + 4 * 16;
@@ -248,7 +391,7 @@ int main(void) {
   uint32_t first_serial = SimBackgroundVoxels_Serial();
   SimBackgroundVoxels_Reset();
   CHECK(SimBackgroundVoxels_Serial() == 0);
-  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1);
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, true);
   CHECK(SimBackgroundVoxels_Serial() != 0);
   CHECK(SimBackgroundVoxels_Serial() != first_serial);
 
@@ -266,7 +409,7 @@ int main(void) {
   /* Two palms, one of them touching the mangrove block. */
   wram[TownCellIndex(4, 4, 2)] = kTilePalm;
   wram[TownCellIndex(4, 20, 20)] = kTilePalm;
-  SimBackgroundVoxels_Classify(5, wram, &scene);
+  SimBackgroundVoxels_Classify(5, wram, true, &scene);
   CHECK(scene.tree_cell_count == 3);
   CHECK(scene.tree_group_count == 2);
   CHECK(scene.brush_cell_count == 2);
@@ -297,19 +440,19 @@ int main(void) {
   wram[CellIndex(9, 9)] = kTileGrass;
   SetCanvasCell(wram, 3, 3, 0x0DC8, 0x0DC9, 0x0DD8, 0x0DD9);
   SetCanvasCell(wram, 9, 9, 0x0DE1, 0x0DE1, 0x0DE1, 0x0DE1);
-  SimBackgroundVoxels_Classify(1, wram, &scene);
+  SimBackgroundVoxels_Classify(1, wram, true, &scene);
   CHECK(scene.brush_cell_count == 1);
   object = FindKind(&scene, kSimBackgroundVoxel_Shrub);
   CHECK(object && object->cell_x == 3 && object->cell_y == 3);
   /* Tile priority and the definition's traversal bit differ between a
    * definition and a live entry, and must not defeat the match. */
   SetCanvasCell(wram, 3, 3, 0x2DC8, 0x0DC9, 0x0DD8, 0x0DD9);
-  SimBackgroundVoxels_Classify(1, wram, &scene);
+  SimBackgroundVoxels_Classify(1, wram, true, &scene);
   CHECK(scene.brush_cell_count == 1);
   /* Once the art is repainted the object goes, without waiting for anything
    * else to change. */
   SetCanvasCell(wram, 3, 3, 0x0DE1, 0x0DE1, 0x0DE1, 0x0DE1);
-  SimBackgroundVoxels_Classify(1, wram, &scene);
+  SimBackgroundVoxels_Classify(1, wram, true, &scene);
   CHECK(scene.brush_cell_count == 0);
 
   /* Kasandora carries both permanent families at once, so the model cannot be
@@ -317,7 +460,7 @@ int main(void) {
   memset(wram, 0, sizeof(wram));
   wram[TownCellIndex(2, 4, 4)] = kTileForest;
   wram[TownCellIndex(2, 10, 10)] = kTileBroadleaf;
-  SimBackgroundVoxels_Classify(3, wram, &scene);
+  SimBackgroundVoxels_Classify(3, wram, true, &scene);
   CHECK(FindKind(&scene, kSimBackgroundVoxel_Tree) != NULL);
   CHECK(FindKind(&scene, kSimBackgroundVoxel_BroadTree) != NULL);
 
@@ -326,7 +469,7 @@ int main(void) {
   memset(wram, 0, sizeof(wram));
   wram[TownCellIndex(4, 6, 6)] = kTileBroadleaf;
   wram[TownCellIndex(4, 7, 6)] = kTileForestEdge;
-  SimBackgroundVoxels_Classify(5, wram, &scene);
+  SimBackgroundVoxels_Classify(5, wram, true, &scene);
   CHECK(scene.tree_cell_count == 2);
   for (uint16_t i = 0; i < scene.object_count; i++)
     CHECK(scene.objects[i].kind == kSimBackgroundVoxel_BroadTree);
@@ -339,7 +482,7 @@ int main(void) {
   wram[TownCellIndex(4, 18, 17)] = 0xC1;
   wram[TownCellIndex(4, 17, 18)] = 0xC8;
   wram[TownCellIndex(4, 18, 18)] = 0xC9;
-  SimBackgroundVoxels_Classify(5, wram, &scene);
+  SimBackgroundVoxels_Classify(5, wram, true, &scene);
   object = FindKind(&scene, kSimBackgroundVoxel_MarahnaTemple);
   CHECK(object && object->cell_x == 17 && object->cell_y == 17);
   CHECK(object && object->footprint_cells_w == 2 &&
@@ -369,7 +512,7 @@ int main(void) {
   wram[TownCellIndex(5, 15, 14)] = 0xC3;
   wram[TownCellIndex(5, 14, 15)] = 0xCA;
   wram[TownCellIndex(5, 15, 15)] = 0xCB;
-  SimBackgroundVoxels_Build(6, wram, pixels, vram, 2);
+  SimBackgroundVoxels_Build(6, wram, pixels, vram, 2, true);
   ground = SimBackgroundVoxels_GroundPixels();
   CHECK(ground[tree_center] == 0xFFFFFFFF);
   CHECK(ground[house_center] == 0xFFFFFFFF);
@@ -389,12 +532,14 @@ int main(void) {
   FillCell(pixels, 6, 6, 0xFFFFFFFF);
   SetSolidColourOneTile(vram, 1);
   SetCanvasTile(wram, 13, 13, 1);
-  SimBackgroundVoxels_Build(6, wram, pixels, vram, 3);
+  SimBackgroundVoxels_Build(6, wram, pixels, vram, 3, true);
   atlas = SimBackgroundVoxels_AtlasPixels();
   size_t north_mountain_opaque =
       (size_t)(6 * 16 + 3) * kSimTownCanvasPixels + 6 * 16 + 12;
   CHECK((atlas[mountain_corner] >> 24) == 0);
   CHECK((atlas[north_mountain_opaque] >> 24) == 0xFF);
+
+  CheckWindmillFrames();
 
   if (failures) {
     fprintf(stderr, "%d sim background voxel checks failed\n", failures);
