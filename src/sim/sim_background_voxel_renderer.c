@@ -22,10 +22,11 @@
 #include "sim_background_voxels.h"
 
 enum {
-  /* Authored tree clusters remain under 100 faces at Ultra. This batch normally
-   * covers an entire viewport in one call, while retaining a safe flush path
-   * for unusually broad views. */
-  kMaxGeometryQuads = 8192,
+  /* Staging for the shadow mask, the one path that still batches through
+   * SDL_RenderGeometry rather than the depth pass. Sized to hold a real
+   * town's casters in a single draw - Bloodpool's 168 objects come to about
+   * 1200 quads - and to flush cleanly rather than truncate beyond that. */
+  kMaxGeometryQuads = 2048,
   kMaxVertices = kMaxGeometryQuads * 4,
   kMaxIndices = kMaxGeometryQuads * 6,
   /* Original cells plus the complete bounded set of reconstructed cap tiles. */
@@ -1799,7 +1800,16 @@ typedef struct SimBackgroundShadowBounds {
   float x0, y0, x1, y1, height;
 } SimBackgroundShadowBounds;
 
-enum { kSimBackgroundMaxShadowVolumes = 3 };
+enum {
+  kSimBackgroundMaxShadowVolumes = 3,
+  /* A volume emits its base and offset caps plus one bridge per edge. */
+  kShadowQuadsPerVolume = 6,
+  kMaxShadowQuadsPerObject =
+      kSimBackgroundMaxShadowVolumes * kShadowQuadsPerVolume,
+};
+
+_Static_assert(kMaxGeometryQuads >= kMaxShadowQuadsPerObject,
+               "the shadow batch must hold one caster's volumes outright");
 
 static int ShadowBounds(const SimBackgroundVoxelObject *object,
                         SimBackgroundShadowBounds *out) {
@@ -1943,6 +1953,16 @@ void SimBackgroundVoxelRenderer_DrawShadowMask(
     if (!ObjectMayBeVisible(object, params, axis)) continue;
     SimBackgroundShadowBounds bounds[kSimBackgroundMaxShadowVolumes];
     int volume_count = ShadowBounds(object, bounds);
+    /* Flush ahead of the caster that would not fit. AppendSolidQuad drops
+     * silently when full, and a developed town can ask for more than this
+     * batch holds - 1160 objects at three volumes is 20880 quads - so
+     * without this the shadows nearest the end of the scene simply stop
+     * appearing. Splitting the mask across draws is free: it is opaque black
+     * into an offscreen target, so overlap is idempotent and order does not
+     * matter, and the OBJ caster pass already issues one draw apiece. */
+    if (batch->vertex_count + kMaxShadowQuadsPerObject * 4 > kMaxVertices ||
+        batch->index_count + kMaxShadowQuadsPerObject * 6 > kMaxIndices)
+      FlushBatch(renderer, batch);
     for (int volume = 0; volume < volume_count; volume++)
       AppendShadowVolume(batch, params, object, bounds[volume],
                          axis->height_scale,
