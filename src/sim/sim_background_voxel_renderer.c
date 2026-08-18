@@ -1753,6 +1753,17 @@ static void DrawDepthLayers(
   CollectDepthGeometry(
       &draw_params, &list, mountain_relief_count, &light);
   SDL_Texture *depth_composite = Sim3DDepthPass_Submit(renderer, NULL);
+  /* Actors standing on ordinary ground go UNDER the composite, so the town's
+   * own geometry hides them: a villager behind a peak or behind a house is
+   * covered by it. The overhead camera means anything merely beside a building
+   * still shows, because a model only occludes what is behind it on screen.
+   *
+   * Actors standing on a mountain cell go over it instead, lifted onto the
+   * surface -- that is the town event that sends a villager up a peak, and the
+   * authentic 2D map already says which case an actor is in. */
+  if (callback && interleaved)
+    callback(userdata, params, visible_minimum, visible_maximum,
+             kSimBackgroundVoxelActorBand_Ground);
   if (depth_composite) {
     SDL_FRect destination = {
       (float)params->viewport.x, (float)params->viewport.y,
@@ -1760,13 +1771,11 @@ static void DrawDepthLayers(
     };
     SDL_RenderTexture(renderer, depth_composite, NULL, &destination);
   }
-  /* Ground actors remain a separate authored priority band for now; the GPU
-   * pass replaces the face/range painter sorter that caused roof leakage.
-   * The callback no longer slices geometry, so camera motion cannot move a
-   * model across an arbitrary CPU bucket boundary. */
   if (callback && interleaved) {
-    callback(userdata, params, visible_minimum, visible_maximum, false);
-    callback(userdata, params, 0.0f, 0.0f, true);
+    callback(userdata, params, visible_minimum, visible_maximum,
+             kSimBackgroundVoxelActorBand_Mountain);
+    callback(userdata, params, 0.0f, 0.0f,
+             kSimBackgroundVoxelActorBand_Overhead);
   }
 }
 

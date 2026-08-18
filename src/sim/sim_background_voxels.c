@@ -2,6 +2,8 @@
 
 #include "sim_background_mountain_silhouette.h"
 #include "sim_background_voxel_landmarks.h"
+#include "sim_background_mountain_relief.h"
+#include "sim_background_voxel_region.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -71,6 +73,11 @@ static struct {
   uint32_t ground[kCanvasPixelCount];
   /* One-based atlas cells for clean raw terrain-metatile sources. */
   uint16_t mountain_source_cell[256];
+  /* Bottom cell row of the mountain mass each cell belongs to, one-based so
+   * zero means "not mountain". This is the `baseline` the relief shear is
+   * stated against, so an actor standing on a mountain can be placed on the
+   * same surface the geometry draws. */
+  uint8_t mountain_baseline_row[kCellCount];
 } g_background;
 /* Scene rebuild scratch. Every classified source rectangle, including static
  * terrain, is marked before a replacement tile is selected, so authentic art
@@ -793,6 +800,34 @@ static void BuildCleanMountainSources(const uint8_t *wram) {
   }
 }
 
+/* One pass over the field: each component's lowest occupied row becomes the
+ * baseline for every cell in it. Components are four-connected, so this is the
+ * same bottom edge the renderer derives when it reconstructs a mountain mass. */
+static void BuildMountainBaselines(const SimBackgroundVoxelScene *scene) {
+  memset(g_background.mountain_baseline_row, 0,
+         sizeof(g_background.mountain_baseline_row));
+  uint8_t bottom_by_component[kCellCount + 1] = {0};
+  for (int y = 0; y < kSimBackgroundTownCells; y++)
+    for (int x = 0; x < kSimBackgroundTownCells; x++) {
+      if (!SimBackgroundMountains_CellOccupied(&scene->mountains, x, y))
+        continue;
+      uint16_t component = scene->mountains.component[CellIndex(x, y)];
+      if (component > kCellCount) continue;
+      if ((uint8_t)(y + 1) > bottom_by_component[component])
+        bottom_by_component[component] = (uint8_t)(y + 1);
+    }
+  for (int y = 0; y < kSimBackgroundTownCells; y++)
+    for (int x = 0; x < kSimBackgroundTownCells; x++) {
+      size_t cell = CellIndex(x, y);
+      if (!SimBackgroundMountains_CellOccupied(&scene->mountains, x, y))
+        continue;
+      uint16_t component = scene->mountains.component[cell];
+      if (component > kCellCount) continue;
+      g_background.mountain_baseline_row[cell] =
+          bottom_by_component[component];
+    }
+}
+
 static void ExtractEnhancedReplacements(
     const uint8_t *wram, const uint16_t *vram,
     const uint32_t *pixels, const SimBackgroundVoxelScene *scene) {
@@ -928,6 +963,7 @@ void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
   SimBackgroundVoxels_Classify(town, wram, wind_stops_all,
                                &g_background.scene);
   ExtractEnhancedReplacements(wram, vram, canvas_pixels, &g_background.scene);
+  BuildMountainBaselines(&g_background.scene);
   LogWindmills(town, wram, &g_background.scene);
   g_background.canvas_serial = canvas_serial;
   g_background.serial = next_serial;
@@ -942,6 +978,109 @@ const uint32_t *SimBackgroundVoxels_AtlasPixels(void) {
 }
 const uint32_t *SimBackgroundVoxels_GroundPixels(void) {
   return g_background.ground;
+}
+
+bool SimBackgroundVoxels_CellIsMountain(int cell_x, int cell_y) {
+  return SimBackgroundMountains_CellOccupied(
+      &g_background.scene.mountains, cell_x, cell_y);
+}
+
+bool SimBackgroundVoxels_MountainInFrontOf(int cell_x, int cell_y) {
+  /* Bounded by how far the art can actually reach, not by the map. A mountain
+   * displaces its raised pixels south by `rise * (1 - face_depth_scale)`, so
+   * the tallest mass in the game covers about four cells beyond its own base;
+   * past that it cannot overlap anything. Scanning the whole column instead
+   * put 598 of Aitos's 626 ground cells "behind a mountain" -- the south rim
+   * alone claimed the entire town, which is no split at all. */
+  /* A mass H cells tall displaces its highest pixels south by
+   * H * (1 - face_depth_scale) cells -- about 0.38 * H. The towns' masses run
+   * to roughly ten cells, so four covers them. Stated as a constant rather
+   * than computed from face_depth_scale alone, because the other half of the
+   * product is the mass height, which is not known at this point; the test
+   * below pins the resulting split so a relief retune shows up as a failure
+   * rather than as actors quietly reappearing through peaks. */
+  enum { kMountainReachCells = 4 };
+  int limit = cell_y + kMountainReachCells;
+  if (limit >= kSimBackgroundTownCells) limit = kSimBackgroundTownCells - 1;
+  for (int y = cell_y + 1; y <= limit; y++)
+    if (SimBackgroundMountains_CellOccupied(
+            &g_background.scene.mountains, cell_x, y))
+      return true;
+  return false;
+}
+
+bool SimBackgroundVoxels_MountainSurface(int map_x, int map_y,
+                                         float *out_map_y, float *out_height) {
+  int cell_x = map_x / kSimBackgroundCellPixels;
+  int cell_y = map_y / kSimBackgroundCellPixels;
+  if (cell_x < 0 || cell_x >= kSimBackgroundTownCells ||
+      cell_y < 0 || cell_y >= kSimBackgroundTownCells)
+    return false;
+  uint8_t baseline_row = g_background.mountain_baseline_row[
+      CellIndex(cell_x, cell_y)];
+  if (!baseline_row) return false;
+  SimBackgroundMountainRelief relief;
+  /* Both scales are detail-independent, so the surface an actor stands on does
+   * not move when the player changes model detail. */
+  SimBackgroundMountainRelief_Resolve(
+      kSimBackgroundVoxelDetail_High, &relief);
+  float baseline = (float)baseline_row * (float)kSimBackgroundCellPixels;
+  float rise = baseline - (float)map_y;
+  if (rise < 0.0f) rise = 0.0f;
+  /* The same shear the geometry uses: the art is pulled toward its base by
+   * face_depth_scale and raised by face_height_scale, so a point standing on
+   * it moves south by the part of the rise the shear did not consume. */
+  if (out_map_y) *out_map_y = (float)map_y + rise * (1.0f - relief.face_depth_scale);
+  if (out_height) *out_height = rise * relief.face_height_scale;
+  return true;
+}
+
+static float StructureHeightAtCell(int cell_x, int cell_y) {
+  const SimBackgroundVoxelScene *scene = &g_background.scene;
+  for (uint16_t i = 0; i < scene->object_count; i++) {
+    const SimBackgroundVoxelObject *object = &scene->objects[i];
+    switch ((SimBackgroundVoxelKind)object->kind) {
+      case kSimBackgroundVoxel_House:
+      case kSimBackgroundVoxel_Cathedral:
+      case kSimBackgroundVoxel_Windmill:
+      case kSimBackgroundVoxel_Factory:
+      case kSimBackgroundVoxel_BloodpoolCastle:
+      case kSimBackgroundVoxel_MarahnaTemple:
+      case kSimBackgroundVoxel_Pyramid:
+        break;
+      default:
+        continue;
+    }
+    if (cell_x < object->cell_x ||
+        cell_x >= object->cell_x + object->source_cells_w ||
+        cell_y < object->cell_y ||
+        cell_y >= object->cell_y + object->source_cells_h)
+      continue;
+    return SimBackgroundVoxelRegion_AuthoredHeight(object);
+  }
+  return 0.0f;
+}
+
+float SimBackgroundVoxels_StructureHeight(int map_x, int map_y) {
+  /* Search downward rather than sampling one cell.
+   *
+   * Structure height is a step function at every cell boundary -- measured on
+   * Aitos it is 0 at map_y 382 and 9.5 at 384 -- and the ROM gives these
+   * bubbles a two-or-three pixel bounce. Sampling a single cell therefore
+   * flips the lift between nothing and a whole storey on alternate frames
+   * whenever the bounce straddles an edge, which reads as the bubble leaping.
+   * Scanning down from the art's own bottom edge lands on the structure the
+   * bubble is sitting on and keeps answering the same height through the
+   * whole bounce, so the ROM's motion shows through unchanged. One cell of
+   * reach is enough for a bubble resting on a roof and short enough that it
+   * cannot borrow the height of some unrelated building further south. */
+  int cell_x = map_x / kSimBackgroundCellPixels;
+  for (int offset = 0; offset <= kSimBackgroundCellPixels; offset += 4) {
+    float height = StructureHeightAtCell(
+        cell_x, (map_y + offset) / kSimBackgroundCellPixels);
+    if (height > 0.0f) return height;
+  }
+  return 0.0f;
 }
 
 bool SimBackgroundVoxels_MountainTileSource(

@@ -31,6 +31,7 @@
 #include "render_capabilities.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim_background_voxel_renderer.h"
+#include "sim/sim_background_voxels.h"
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim_world_navigation_capture.h"
@@ -1182,6 +1183,30 @@ static float SimObjectGroundDepth(
       matrix, (fx - 0.5f) * aspect, 0.5f - fy, 0.0f);
 }
 
+/* Which terrain an actor is standing on, from the authentic 2D cell map. */
+typedef enum SimObjectTerrainFilter {
+  kSimObjectTerrain_Any,
+  kSimObjectTerrain_GroundOnly,
+  kSimObjectTerrain_MountainOnly,
+} SimObjectTerrainFilter;
+
+/* An actor's foot is already in town-map space -- SimObjectGroundDepth uses
+ * foot_x/foot_y interchangeably with world_x/world_y -- so its cell is one
+ * shift away, and the published scene answers whether that cell is mountain. */
+static bool SimObjectOnMountainTerrain(const SimRenderObject *object) {
+  bool foot_anchor = object->tier == kSimRecordTier_World &&
+      !(object->traits & kSimObjectTrait_RecordOriginAnchor);
+  int map_x = foot_anchor ? object->foot_x : (int)object->world_x;
+  int map_y = foot_anchor ? object->foot_y : (int)object->world_y;
+  int cell_x = map_x / kSimTownCellPixels;
+  int cell_y = map_y / kSimTownCellPixels;
+  /* Draw above the terrain art when standing ON a mountain, and also when no
+   * mountain lies between this cell and the camera: a mass north of the actor
+   * is behind it and must not clip the top of its sprite. */
+  return SimBackgroundVoxels_CellIsMountain(cell_x, cell_y) ||
+      !SimBackgroundVoxels_MountainInFrontOf(cell_x, cell_y);
+}
+
 static void DrawSimObjectPriorityFiltered(
     const FrameSlot *slot, int priority, SimObjectTierFilter tier_filter,
     bool project_world,
@@ -1190,6 +1215,7 @@ static void DrawSimObjectPriorityFiltered(
     const SimBillboardPass *pass,
     SimObjectOverheadFilter overhead_filter,
     SimObjectSelectionFilter selection_filter,
+    SimObjectTerrainFilter terrain_filter,
     bool depth_filter, float minimum_depth, float maximum_depth) {
   if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
   /* W4-2: a rejected blend mode means this pass cannot draw correctly, so bail
@@ -1220,7 +1246,16 @@ static void DrawSimObjectPriorityFiltered(
         fixed != (tier_filter == kSimTierFilter_Fixed) ||
         SimObjectIsPromotedHud(slot, object))
       continue;
-    bool overhead = (object->traits & kSimObjectTrait_Overhead) != 0;
+    /* Only art that actually STANDS on terrain belongs in the bands terrain is
+     * allowed to hide. The Overhead trait covers authored overhead art, but it
+     * is not the whole set: angel arrows and thrown orbs fly over the town
+     * without carrying it, and putting them under the composite let evergreens
+     * and mountains swallow a projectile passing in front of them. Height
+     * class is the ROM-derived answer to "is this on the ground", so the two
+     * together decide the band. */
+    bool overhead = (object->traits & kSimObjectTrait_Overhead) != 0 ||
+        !Sim3D_HeightClassIsOccludable(
+            (SimHeightClass)object->height_class);
     if (overhead_filter == kSimObjectOverhead_GroundOnly && overhead)
       continue;
     if (overhead_filter == kSimObjectOverhead_Only && !overhead)
@@ -1231,6 +1266,11 @@ static void DrawSimObjectPriorityFiltered(
       continue;
     if (selection_filter == kSimObjectSelection_Only && !selection)
       continue;
+    if (terrain_filter != kSimObjectTerrain_Any) {
+      bool on_mountain = SimObjectOnMountainTerrain(object);
+      if ((terrain_filter == kSimObjectTerrain_MountainOnly) != on_mountain)
+        continue;
+    }
     depth[i] = project_world
         ? SimObjectGroundDepth(slot, object, source, viewport, matrix)
         : 0.0f;
@@ -1306,6 +1346,33 @@ static void DrawSimObjectPriorityFiltered(
           ? SimHeightWorldUnits(source, object->virtual_height,
                                 slot->sim.height_scale_x100)
           : 0.0f;
+      /* An actor the 2D map puts on a mountain is standing on art the renderer
+       * shears upward, so it has to take the same shear or it is drawn at the
+       * mass's foot with the slope rising behind it. Terrain altitude is NOT
+       * scaled by the player's object-height setting: it has to agree with the
+       * mountain geometry, which converts its own pixels straight through
+       * `height / source.h`. */
+      /* A bubble the ROM pins to a structure's record cell rides on top of
+       * that structure's model instead of sitting inside its foot. */
+      if ((object->traits & kSimObjectTrait_StructureOverlay) && source.h > 0)
+        /* From the BOTTOM of the bubble art, not its anchor. These
+         * compositions are a 16x32 stack anchored at the top, so the record
+         * origin sits a good two cells above the roof the bubble is resting
+         * on -- sampling there finds empty ground. */
+        height_world += SimBackgroundVoxels_StructureHeight(
+            (int)object->world_x,
+            (int)object->world_y + object->local_y1) / (float)source.h;
+      float surface_map_y = 0.0f, surface_height = 0.0f;
+      if (Sim3D_HeightClassStandsOnTerrain(
+              (SimHeightClass)object->height_class) &&
+          SimBackgroundVoxels_MountainSurface(
+              foot_anchor ? object->foot_x : (int)object->world_x,
+              foot_anchor ? object->foot_y : (int)object->world_y,
+              &surface_map_y, &surface_height) && source.h > 0) {
+        int map_y = foot_anchor ? object->foot_y : (int)object->world_y;
+        texture_anchor_y += surface_map_y - (float)map_y;
+        height_world += surface_height / (float)source.h;
+      }
       if (!ProjectSimAnchorAndScale(
               matrix, source, viewport, texture_anchor_x, texture_anchor_y,
               height_world, Scene3D_AutoFitDistance(camera->fov_y),
@@ -1343,8 +1410,9 @@ static void DrawSimObjectPriorityFiltered(
   SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, 255);
 }
 
-static void DrawSimObjectPriority(
+static void DrawSimObjectPriorityTerrain(
     const FrameSlot *slot, int priority, SimObjectTierFilter tier_filter,
+    SimObjectTerrainFilter terrain_filter,
     bool project_world,
     bool virtual_height, SDL_Rect source, SDL_Rect viewport,
     const Scene3DCamera *camera, const float matrix[16],
@@ -1353,31 +1421,61 @@ static void DrawSimObjectPriority(
       slot, priority, tier_filter, project_world, virtual_height,
       source, viewport, camera, matrix, pass,
       kSimObjectOverhead_All, kSimObjectSelection_Exclude,
-      false, 0.0f, 0.0f);
+      terrain_filter, false, 0.0f, 0.0f);
+}
+
+static void DrawSimObjectPriority(
+    const FrameSlot *slot, int priority, SimObjectTierFilter tier_filter,
+    bool project_world,
+    bool virtual_height, SDL_Rect source, SDL_Rect viewport,
+    const Scene3DCamera *camera, const float matrix[16],
+    const SimBillboardPass *pass) {
+  DrawSimObjectPriorityTerrain(
+      slot, priority, tier_filter, kSimObjectTerrain_Any, project_world,
+      virtual_height, source, viewport, camera, matrix, pass);
 }
 
 typedef struct SimVoxelBillboardLayerContext {
   const FrameSlot *slot;
   int priority;
   bool virtual_height;
+  bool rim_light;
   const Scene3DCamera *camera;
 } SimVoxelBillboardLayerContext;
+
+static void DrawSimRimLight(
+    const FrameSlot *slot, int priority, bool virtual_height,
+    SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
+    const float matrix[16], SimObjectTerrainFilter terrain_filter);
 
 static void DrawSimVoxelBillboardLayer(
     void *userdata,
     const SimBackgroundVoxelRenderParams *params,
     float minimum_depth, float maximum_depth,
-    bool overhead_only) {
+    SimBackgroundVoxelActorBand band) {
   SimVoxelBillboardLayerContext *context = userdata;
+  bool overhead = band == kSimBackgroundVoxelActorBand_Overhead;
+  /* Overhead art hangs above the row its record sits on and is authored to
+   * clear the terrain, so it takes no terrain split. */
+  SimObjectTerrainFilter terrain = overhead
+      ? kSimObjectTerrain_Any
+      : (band == kSimBackgroundVoxelActorBand_Mountain
+             ? kSimObjectTerrain_MountainOnly
+             : kSimObjectTerrain_GroundOnly);
   DrawSimObjectPriorityFiltered(
       context->slot, context->priority, kSimTierFilter_World,
       true, context->virtual_height,
       params->source, params->viewport, context->camera, params->matrix,
       NULL,
-      overhead_only ? kSimObjectOverhead_Only
-                    : kSimObjectOverhead_GroundOnly,
-      kSimObjectSelection_Exclude,
-      !overhead_only, minimum_depth, maximum_depth);
+      overhead ? kSimObjectOverhead_Only : kSimObjectOverhead_GroundOnly,
+      kSimObjectSelection_Exclude, terrain,
+      !overhead, minimum_depth, maximum_depth);
+  /* Immediately after its own sprites, so the rim is covered by whatever
+   * covers them. Overhead art keeps the whole-band rim it has always had. */
+  if (context->rim_light && !overhead)
+    DrawSimRimLight(context->slot, context->priority, context->virtual_height,
+                    params->source, params->viewport, context->camera,
+                    params->matrix, terrain);
 }
 
 /* Selection art is projected onto the map like any other MapPlane object, but
@@ -1410,7 +1508,7 @@ static void DrawSimSelectionOverlays(
           slot, priority, tiers[tier],
           true, virtual_height, source, viewport, camera, matrix, NULL,
           kSimObjectOverhead_All, kSimObjectSelection_Only,
-          false, 0.0f, 0.0f);
+          kSimObjectTerrain_Any, false, 0.0f, 0.0f);
     }
 }
 
@@ -1508,10 +1606,16 @@ static void SimRimOffset(const FrameSlot *slot, float distance,
   *offset_y = y / length * distance;
 }
 
+/* `terrain_filter` matters as much as the sprite draw it accompanies. The rim
+ * is composited from its own full-viewport target, so a band built from every
+ * actor and added after the town composite paints the outlines of actors the
+ * composite has just hidden -- sprite silhouettes glowing through a mountain.
+ * Each band builds and composites only its own actors, at its own point in the
+ * painter order. */
 static void DrawSimRimLight(
     const FrameSlot *slot, int priority, bool virtual_height,
     SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
-    const float matrix[16]) {
+    const float matrix[16], SimObjectTerrainFilter terrain_filter) {
   if (!slot->sim.rim_strength_pct) return;
   if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
   bool any_rim = false;
@@ -1519,7 +1623,10 @@ static void DrawSimRimLight(
     const SimRenderObject *object = &slot->sim.objects[i];
     if (object->atlas_valid && object->priority == priority &&
         object->tier == kSimRecordTier_World &&
-        !(object->traits & kSimObjectTrait_MapPlane)) {
+        !(object->traits & kSimObjectTrait_MapPlane) &&
+        (terrain_filter == kSimObjectTerrain_Any ||
+         (terrain_filter == kSimObjectTerrain_MountainOnly) ==
+             SimObjectOnMountainTerrain(object))) {
       any_rim = true;
       break;
     }
@@ -1565,12 +1672,12 @@ static void DrawSimRimLight(
   SDL_SetTextureColorMod(g_sim_obj_atlas_texture, kSimRimColor.r,
                          kSimRimColor.g, kSimRimColor.b);
   SDL_Rect local_viewport = { 0, 0, viewport.w, viewport.h };
-  DrawSimObjectPriority(slot, priority, kSimTierFilter_World, true,
-                        virtual_height, source,
-                        local_viewport, camera, matrix, &fill);
-  DrawSimObjectPriority(slot, priority, kSimTierFilter_World, true,
-                        virtual_height, source,
-                        local_viewport, camera, matrix, &mask);
+  DrawSimObjectPriorityTerrain(slot, priority, kSimTierFilter_World,
+                               terrain_filter, true, virtual_height, source,
+                               local_viewport, camera, matrix, &fill);
+  DrawSimObjectPriorityTerrain(slot, priority, kSimTierFilter_World,
+                               terrain_filter, true, virtual_height, source,
+                               local_viewport, camera, matrix, &mask);
   /* Restore the shared atlas state this function borrowed. The blend mode is
    * left at the ordinary draw mode rather than whatever the mask pass used. */
   SDL_SetTextureColorMod(g_sim_obj_atlas_texture, 255, 255, 255);
@@ -2858,6 +2965,7 @@ static void RenderSimProfile(const FrameSlot *slot,
             .slot = slot,
             .priority = object_priority,
             .virtual_height = virtual_height,
+            .rim_light = rim_light,
             .camera = &camera,
           };
           SimBackgroundVoxelRenderParams voxel_params =
@@ -2870,10 +2978,11 @@ static void RenderSimProfile(const FrameSlot *slot,
                                 kSimTierFilter_World,
                                 true, virtual_height,
                                 source, viewport, &camera, matrix, NULL);
+          if (rim_light)
+            DrawSimRimLight(slot, object_priority, virtual_height, source,
+                            viewport, &camera, matrix,
+                            kSimObjectTerrain_Any);
         }
-        if (rim_light)
-          DrawSimRimLight(slot, object_priority, virtual_height, source,
-                          viewport, &camera, matrix);
         continue;
       }
     }
