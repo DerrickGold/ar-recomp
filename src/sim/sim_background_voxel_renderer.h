@@ -62,6 +62,26 @@ void SimBackgroundVoxelRenderer_DrawInterleaved(
 void SimBackgroundVoxelRenderer_DrawShadowMask(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
     float light_x, float light_y);
+/* Where the volcano's crater mouth was drawn on the frame just rendered, in
+ * the mountain models' own local space: the exact point the crater glow ring
+ * and the smoke plume are placed on, already leaned by the camera-facing
+ * transform the models use.
+ *
+ * Published so a presentation stage that wants to emit from the crater --
+ * the volcanic eruption's fireball arcs -- can ask the model where its mouth
+ * is instead of re-deriving it from the stamp's authored geometry and then
+ * drifting away from it whenever the relief is retuned. Local x maps to a
+ * town map column by adding `town_screen_x0` and subtracting the widescreen
+ * margin; local y IS the map row, because the models' y origin is
+ * `-camera_y`. `false` when no volcano was drawn. */
+typedef struct SimBackgroundCraterAnchor {
+  bool valid;
+  float local_x, local_y;
+  float height_pixels;
+} SimBackgroundCraterAnchor;
+
+bool SimBackgroundVoxelRenderer_CraterAnchor(SimBackgroundCraterAnchor *out);
+
 void SimBackgroundVoxelRenderer_Reset(void);
 
 #endif  /* SIM_BACKGROUND_VOXEL_RENDERER_H */

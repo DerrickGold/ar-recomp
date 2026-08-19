@@ -216,6 +216,19 @@ need a depth curve or attachment rule:
   each at a fixed `world_x` with increasing `world_y`. A fireball still in the air is
   `flying_projectile`/`RecordOriginAnchor`/`NoShadow`: terrain must neither raise it nor hide it,
   and its art is centred on the record origin rather than standing on a foot.
+- **The eruption has no authentic altitude at all.** Record `+$00` is the **animation frame
+  timer** — it decrements once per game frame and cycles `+1..+4` on the ground fire's four-tick
+  frames — and is emphatically not a height; the drawn position is exactly `world - camera`. The
+  enhanced view supplies the altitude outright, in `UpdateProjectileArc`.
+- **`+$1C` named the ROM's three phases, and no longer drives anything.** Run `20260818-073455`
+  pins the record's per-tick map velocity across sixteen frames: `-8` is the crater jet at map
+  column 144 climbing up-map, `+8` is a fireball raining back onto the town (always entering at
+  `y = -16` and descending at constant speed), and `0` is a record staged offscreen running its
+  `+$22` release countdown. `$E7A6` always carries `+8` and `$E7D0` never does, so the two
+  authored frames are the falling and not-falling poses. One record walks all three phases in
+  turn — climb, staged wait, descent — so this is a state machine, not two populations. Velocity
+  says which state a record is in but not where it is going, which is why the arc is keyed on
+  the script instead and the field is documented here rather than plumbed through the producer.
 - **The eruption's ground fire is the burning house's animation, and needs no new art.**
   `$01:A85B` cycles `$DD9F/$DDA5/$DDAB` at four ticks a frame, and those are tiles
   `$086/$088/$08A` in palette 1 — the exact frames `$01:A838` draws a burning building with. The

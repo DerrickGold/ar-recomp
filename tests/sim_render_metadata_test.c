@@ -876,6 +876,24 @@ static void TestVirtualHeightClassification(void) {
       kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow },
     { "scripted house fire", kSimRecordTier_World, 0x0A01, 2, world, 0xDD33,
       kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow },
+    /* Eruption ground fire burns on the map exactly as the house fire does;
+     * its centre-anchored art is the only difference. */
+    { "eruption ground fire", kSimRecordTier_World, 0x0E01, 2, world, 0xDDA5,
+      kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow },
+    /* A fireball still in the air: terrain may neither raise nor hide it, and
+     * its art is centred on the record origin rather than standing on a foot. */
+    { "eruption fireball high", kSimRecordTier_World, 0x0E01, 2, world, 0xE7D0,
+      kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
+      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow |
+      kSimObjectTrait_Overhead },
+    { "eruption fireball low", kSimRecordTier_World, 0x0E01, 3, world, 0xE7A6,
+      kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
+      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow |
+      kSimObjectTrait_Overhead },
+    /* Neighbouring bytes inside each authored composition are part records,
+     * not further identities. */
+    { "eruption ground fire interior", kSimRecordTier_World, 0x0E01, 2, world,
+      0xDDA6, kSimHeightClass_Grounded, 0, 0 },
     { "napper pluck", kSimRecordTier_World, 0x13, 11, world, 0xE73A,
       kSimHeightClass_SemiGrounded, kSimVirtualHeight_SemiGrounded, 0 },
     { "map cursor", kSimRecordTier_World, 0x11, 0, world, 0xD2C4,
@@ -1936,11 +1954,897 @@ static void TestTerrainHeightClassPredicates(void) {
     CHECK(covered[i]);
 }
 
+
+static const SimEffectInstance *FindEruptionEffect(const SimFrameData *frame,
+                                                  uint16_t record_address) {
+  for (unsigned i = 0; i < frame->effect_count; i++)
+    if (frame->effects[i].record_address == record_address)
+      return &frame->effects[i];
+  return NULL;
+}
+
+/* The volcanic eruption story event that fires once a town's last lair is
+ * cleared. Every fact asserted here is transcribed from run 20260818-070141:
+ * world records $0F0C-$1016 all publish packed identity $0E01 and run one of
+ * three adjacent spawn scripts, and record continuity between the two
+ * captures walks one slot from fireball art to ground fire at a fixed
+ * world_x. */
+static void TestVolcanicEruptionEffectCapture(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  SimFrameData frame;
+  const uint16_t record = kActRaiserWram_SimWorldRecords;
+
+  #define CAPTURE_ERUPTION_V(record_, composition_, x_, y_, vy_) do {       \
+    SimRenderMetadata_BeginRecord(                                          \
+        (record_), true, false, (composition_), (x_), (y_),                 \
+        0x0E01, 2, 0, 0);                                                   \
+    SimRenderMetadata_RecordPart(0, 1u << 9);                               \
+    SimRenderMetadata_EndRecord(4);                                         \
+    SimRenderMetadata_CaptureFrame(                                         \
+        &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);    \
+  } while (0)
+  #define CAPTURE_ERUPTION_FLAT(composition_, y_, vy_) do {                 \
+    SimRenderMetadata_BeginRecord(                                          \
+        record, true, false, (composition_), 0x0090, (y_),                  \
+        0x0E01, 2, 0, 0);                                                   \
+    SimRenderMetadata_RecordPart(0, 1u << 9);                               \
+    SimRenderMetadata_EndRecord(4);                                         \
+    SimRenderMetadata_CaptureFrame(                                         \
+        &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);   \
+  } while (0)
+
+  /* Defaults to a falling fireball. A fireball at zero velocity is the
+   * ROM's unlaunched spawn queue, which the ballistic path deliberately
+   * withholds, so it is never the right default for a visibility test. */
+  #define CAPTURE_ERUPTION(record_, composition_, x_, y_)                   \
+    CAPTURE_ERUPTION_V(record_, composition_, x_, y_, 8)
+
+  /* The ground-impact frames are the burning house's own animation: tiles
+   * $086/$088/$08A in palette 1, re-anchored to the sprite centre. They keep
+   * that phase family so both share one lighting ramp, and differ only in
+   * the contact point their centred art implies. */
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION(record, 0xDD9F, 0x00D0, 0x0060);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effect_visible_count == 1);
+  CHECK(frame.effects[0].kind == kSimEffect_VolcanoGroundFire);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_HouseFireA);
+  CHECK(frame.effects[0].color_family == kSimEffectColor_FireRed);
+  CHECK(frame.effects[0].geometry.data.point.x == 0);
+  CHECK(frame.effects[0].geometry.data.point.y == 16);
+  CHECK(frame.effects[0].geometry.data.point.height == 0);
+  /* Burning ground does not travel, so it publishes no path to smear. */
+  CHECK(frame.effects[0].trail_count == 0);
+  uint32_t ground_generation = frame.effects[0].generation;
+  CAPTURE_ERUPTION(record, 0xDDA5, 0x00D0, 0x0060);
+  CHECK(frame.effects[0].generation == ground_generation);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_HouseFireB);
+  CHECK(frame.effects[0].pulse_ticks == 1);
+  CAPTURE_ERUPTION(record, 0xDDAB, 0x00D0, 0x0060);
+  CHECK(frame.effects[0].generation == ground_generation);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_HouseFireC);
+
+  /* Both airborne frames classify, each at its own art centre. Asserted in
+   * the FLAT view because classification is view-independent while the
+   * emitter's withholding is not: in the projected town everything airborne
+   * it is not flying is withheld, so there would be no effect to inspect. */
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION_FLAT(0xE7D0, 0x0080, -8);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].kind == kSimEffect_VolcanoFireball);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_VolcanoFireballA);
+  CHECK(frame.effects[0].geometry.data.point.x == 0);
+  CHECK(frame.effects[0].geometry.data.point.y == 8);
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION_FLAT(0xE7A6, 0x0018, 8);
+  CHECK(frame.effects[0].phase == kSimEffectPhase_VolcanoFireballB);
+  CHECK(frame.effects[0].geometry.data.point.y == 4);
+
+  /* Trail bookkeeping: newest-first, HEAD LIVE EVERY BUILD but the array only
+   * shifting every kSimEffectTrailStride builds, bounded by the published
+   * capacity. That pairing is the whole design -- the flame end has to stay
+   * exactly on the fireball, while the smoke behind it has to reach back far
+   * enough to show the trajectory, and a bounded array cannot do both at one
+   * sample a build: 32 samples would cover 32 of a 130-build flight. Flat
+   * again, so the retained positions are the record's own and the assertions
+   * are about the ring rather than about the emitter's track. */
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION_FLAT(0xE7A6, 0x0010, 8);
+  CHECK(frame.effects[0].trail_count == 1);
+  CHECK(frame.effects[0].trail[0].world_x == 0x0090);
+  CHECK(frame.effects[0].trail[0].world_y == 0x0010);
+  uint32_t flight_generation = frame.effects[0].generation;
+  const unsigned kSpan = kSimEffectTrailSamples * kSimEffectTrailStride;
+  for (unsigned i = 1; i < kSpan + 8u; i++) {
+    CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(0x0010 + i * 8), 8);
+    CHECK(frame.effects[0].generation == flight_generation);
+    /* One shift every stride builds, capped at the capacity. */
+    unsigned shifts = i / kSimEffectTrailStride;
+    unsigned expected = 1 + shifts < kSimEffectTrailSamples
+        ? 1 + shifts : kSimEffectTrailSamples;
+    CHECK(frame.effects[0].trail_count == expected);
+    /* Index 0 is ALWAYS this tick, whatever the stride is doing. */
+    CHECK(frame.effects[0].trail[0].world_y == (uint16_t)(0x0010 + i * 8));
+    /* And index 1 is the tick the last shift captured, which is a whole
+     * stride behind the most recent shift rather than one build behind now. */
+    if (shifts)
+      CHECK(frame.effects[0].trail[1].world_y ==
+            (uint16_t)(0x0010 + (shifts * kSimEffectTrailStride - 1) * 8));
+    for (unsigned n = 0; n < frame.effects[0].trail_count; n++)
+      CHECK(frame.effects[0].trail[n].world_x == 0x0090);
+  }
+  CHECK(frame.effects[0].trail_count == kSimEffectTrailSamples);
+  /* The point of the stride: the oldest sample is most of a throw behind the
+   * head, not a couple of dozen builds. */
+  CHECK((uint16_t)(frame.effects[0].trail[0].world_y -
+                   frame.effects[0].trail[kSimEffectTrailSamples - 1].world_y)
+        >= (kSpan - kSimEffectTrailStride) * 8);
+
+  /* Landing in the same record slot changes kind, which breaks lifetime
+   * continuity: the new ground fire starts its own generation and must not
+   * inherit the flight path it arrived on. */
+  CAPTURE_ERUPTION_FLAT(0xDD9F, 0x0090, 0);
+  CHECK(frame.effects[0].kind == kSimEffect_VolcanoGroundFire);
+  CHECK(frame.effects[0].generation != flight_generation);
+  CHECK(frame.effects[0].trail_count == 0);
+
+  /* A capture repeated against the same immutable producer build is not
+   * another tick and must not lengthen the path. */
+  SimRenderMetadata_Reset();
+  for (unsigned i = 0; i <= kSimEffectTrailStride; i++)
+    CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(0x0010 + i * 8), 8);
+  CHECK(frame.effects[0].trail_count == 2);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effects[0].trail_count == 2);
+  CHECK(frame.effects[0].trail[0].world_y ==
+        (uint16_t)(0x0010 + kSimEffectTrailStride * 8));
+
+  /* Three simultaneous fireballs keep independent paths, as the capture's
+   * three co-live records do. */
+  static const uint16_t erupt_records[] = { 0x0FA4, 0x0FCA, 0x0FF0 };
+  static const uint16_t erupt_x[] = { 0x00D0, 0x00A0, 0x0110 };
+  SimRenderMetadata_Reset();
+  const unsigned kSharedTicks = 2 * kSimEffectTrailStride + 1;
+  for (unsigned tick = 0; tick < kSharedTicks; tick++) {
+    for (size_t i = 0; i < 3; i++) {
+      SimRenderMetadata_BeginRecord(
+          erupt_records[i], true, false, 0xE7A6, erupt_x[i],
+          (uint16_t)(0x0040 + tick * 16), 0x0E01, 1, 0, (uint16_t)(i * 4));
+      SimRenderMetadata_RecordPart((uint16_t)(i * 4), 1u << 9);
+      SimRenderMetadata_EndRecord((uint16_t)((i + 1) * 4));
+    }
+    SimRenderMetadata_CaptureFrame(
+        &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
+  }
+  CHECK(frame.effect_count == 3);
+  for (size_t i = 0; i < 3; i++) {
+    CHECK(frame.effects[i].kind == kSimEffect_VolcanoFireball);
+    CHECK(frame.effects[i].trail_count == 3);
+    CHECK(frame.effects[i].trail[0].world_y ==
+          (uint16_t)(0x0040 + (kSharedTicks - 1) * 16));
+    for (unsigned n = 0; n < 3; n++)
+      CHECK(frame.effects[i].trail[n].world_x == erupt_x[i]);
+  }
+  CHECK(frame.effects[0].generation != frame.effects[1].generation);
+  CHECK(frame.effects[1].generation != frame.effects[2].generation);
+
+  /* Neither half of the gate is sufficient alone, and the bytes between two
+   * authored compositions are part records rather than further frames. */
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION(record, 0xDD2D, 0x00D0, 0x0060);
+  CHECK(frame.effect_count == 0);
+  CAPTURE_ERUPTION(record, 0xE7A7, 0x00D0, 0x0060);
+  CHECK(frame.effect_count == 0);
+  CAPTURE_ERUPTION(record, 0xDDA0, 0x00D0, 0x0060);
+  CHECK(frame.effect_count == 0);
+  SimRenderMetadata_Reset();
+  SimRenderMetadata_BeginRecord(
+      record, true, false, 0xDD9F, 0x00D0, 0x0060, 0x0A01, 2, 0, 0);
+  SimRenderMetadata_RecordPart(0, 1u << 9);
+  SimRenderMetadata_EndRecord(4);
+  SimRenderMetadata_CaptureFrame(
+      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.effect_count == 0);
+
+  /* The flight. There is no authentic altitude in this family, so the whole
+   * airborne visual belongs to this pass -- and nothing about it is guessed:
+   * the crater, the impact cell and the time between them are all authored in
+   * the fireball's own script.
+   *
+   * ONE parabola replaces the ROM's THREE phases, and the test drives all
+   * three exactly as record $0FA4 was measured running them: a crater
+   * placement at (144,128), a climb up the crater column to y = -16, a
+   * staging teleport sideways to the landing column, a 76-frame countdown,
+   * and a descent to the landing row. The clock is FRAMES TO LANDING, which
+   * is the only quantity that spans all three -- the record's own position
+   * freezes for the whole countdown, and an arc driven by it has to hide the
+   * fireball there and bring it back at the apex.
+   *
+   * Drives plans directly; the resolver that reads them out of real ROM bytes
+   * is covered by TestEruptionScriptWalk. */
+  #define CAPTURE_ERUPTION_FLIGHT(x_, y_, vy_, plan_) do {                  \
+    SimRenderMetadata_BeginRecord(                                          \
+        record, true, false, 0xE7A6, (x_), (y_), 0x0E01, 2, 0, 0);          \
+    SimRenderMetadata_RecordFlightPlan(plan_);                              \
+    SimRenderMetadata_RecordPart(0, 1u << 9);                               \
+    SimRenderMetadata_EndRecord(4);                                         \
+    SimRenderMetadata_CaptureFrame(                                         \
+        &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);    \
+  } while (0)
+
+  /* What the script says while the staging teleport is still ahead of the
+   * cursor -- the crater placement and the whole climb. */
+  #define ERUPTION_PLAN(landing_x_, landing_y_, frames_)                     \
+      ((SimEruptionFlightPlan){                                              \
+        .fall_pixels = (landing_y_) + 16, .crater_x = 144, .crater_y = 128,  \
+        .landing_x = (landing_x_), .landing_y = (landing_y_),                \
+        .entry_y = -16, .frames_to_land = (frames_), .valid = 1,             \
+        .crater_valid = 1, .landing_valid = 1 })
+  /* And what it says once that teleport has executed: the clock still runs,
+   * the destination is no longer readable. The arc must fly the snapshot it
+   * took during the climb rather than lose the throw here. */
+  #define ERUPTION_PLAN_FLYING(frames_) ((SimEruptionFlightPlan){            \
+      .crater_x = 144, .crater_y = 128, .frames_to_land = (frames_),         \
+      .valid = 1, .crater_valid = 1 })
+  enum { kCraterX = 144, kCraterY = 128, kEntryRow = -16,
+         kLandX = 208, kLandY = 96, kThrowFrames = 93 };
+
+  /* A record still parked out of play resolves a perfectly good flight -- its
+   * script walks to a landing from wherever the cursor is -- so the throw
+   * cannot be opened on the plan alone. Position is what says it is in the
+   * event, and the parking spot is neither the crater column nor the landing
+   * column. Opening here would fly the arc while nobody could see it and
+   * deliver the fireball to the crater already half way through its throw. */
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION_FLIGHT(640, 640, 0, ERUPTION_PLAN(kLandX, kLandY, 176));
+  CHECK(frame.effect_count == 0);
+  CHECK(frame.objects[0].hidden);
+
+  /* The launch: at the volcano's MOUTH, which is neither the map cell the
+   * script names nor the ground. The relief that raises the summit pushes it
+   * down-map by the same rise, so both offsets apply or the fireball leaves
+   * from behind the mountain it is coming out of. */
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION_FLIGHT(kCraterX, kCraterY, 0,
+                          ERUPTION_PLAN(kLandX, kLandY, kThrowFrames));
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].world_x == kCraterX);
+  CHECK(frame.effects[0].world_y == kCraterY + kSimEruptionCraterDrop);
+  CHECK(frame.effects[0].geometry.data.point.height ==
+        kSimEruptionCraterLift);
+
+  /* Now fly the rest of the measured life cycle. The record climbs its own
+   * column, teleports sideways, sits out the countdown and drops; the throw
+   * ignores all of it and walks its own ground track on the frame clock. */
+  int16_t apex = 0, previous_h = kSimEruptionCraterLift;
+  int previous_x = kCraterX, min_step = 1 << 20, max_step = 0;
+  bool rising = true, ever_hidden = false;
+  for (int frames = kThrowFrames - 1; frames >= 0; frames--) {
+    int16_t x, y;
+    SimEruptionFlightPlan plan;
+    if (frames > kThrowFrames - 10) {          /* climbing the crater column */
+      x = kCraterX;
+      y = (int16_t)(kCraterY - (kThrowFrames - 1 - frames) * 16);
+      plan = ERUPTION_PLAN(kLandX, kLandY, frames);
+    } else {
+      /* Staged and then descending. Position is the ROM's; the arc is not. */
+      x = kLandX;
+      y = frames > 8 ? (int16_t)kEntryRow
+                     : (int16_t)(kLandY - frames * 12);
+      if (y > kLandY) y = kLandY;
+      plan = ERUPTION_PLAN_FLYING(frames);
+    }
+    CAPTURE_ERUPTION_FLIGHT((uint16_t)x, (uint16_t)y, frames > 8 ? 0 : 8,
+                            plan);
+    /* THE POINT OF THE WHOLE CLOCK: never withheld between launch and
+     * landing. The countdown is two thirds of the flight, and an arc driven
+     * by the record's position has to hide the fireball for all of it. */
+    /* The EFFECT is the throw while the art is suppressed, so this asks
+     * whether the fireball exists at all, not whether its billboard drew. */
+    if (frame.effect_count == 0) { ever_hidden = true; continue; }
+    int16_t h = frame.effects[0].geometry.data.point.height;
+    if (h > apex) apex = h;
+    if (rising) { if (h < previous_h) rising = false; }
+    else CHECK(h <= previous_h);   /* one apex, not a sawtooth */
+    previous_h = h;
+    int here = (int)frame.effects[0].world_x, step = here - previous_x;
+    if (step < min_step) min_step = step;
+    if (step > max_step) max_step = step;
+    previous_x = here;
+  }
+  CHECK(!ever_hidden);
+  CHECK(!rising);                            /* came back down */
+  CHECK(apex > kSimEruptionCraterLift);      /* actually thrown, not dropped */
+  CHECK(apex <= kSimEruptionArcApexMax);
+  /* A steady ground track is the whole difference between a throw and the
+   * sideways lerp this replaces: a decaying correction covers most of its
+   * ground in the first few frames and then stops, so every step must be
+   * within one pixel of every other -- the integer remainder and no more. */
+  CHECK(min_step >= 0);
+  CHECK(max_step - min_step <= 1);
+  /* Arrives exactly on the authored cell, on the ground. Structural, not
+   * tuned: the crater lift decays to zero over the same clock the parabola
+   * does, so the ground fire can never appear where the fireball was not. */
+  CHECK(frame.effects[0].world_x == kLandX);
+  CHECK(frame.effects[0].world_y == kLandY);
+  CHECK(frame.effects[0].geometry.data.point.height == 0);
+  CHECK(frame.objects[0].offset_x == 0);
+  CHECK(frame.objects[0].offset_y == 0);
+
+  /* While kSimEruptionSuppressFireballArt stands, the throw is carried by its
+   * trail alone: the effect is published on the arc and the billboard is
+   * withheld. Everything the billboard needs is still published, so this is
+   * one flag, not a branch -- and asserting it here is what stops the flag
+   * being flipped back by accident. */
+  CHECK(kSimEruptionSuppressFireballArt);
+  CHECK(frame.objects[0].hidden);
+  CHECK(frame.objects[0].travel_valid);
+
+  /* A throw with more time to fill is thrown higher, because that is the only
+   * way to fill it: with gravity fixed the apex sets the flight time and the
+   * flight time sets the apex. Distance plays no part -- both of these land
+   * on the same cell. */
+  {
+    int16_t slow_apex = 0;
+    SimRenderMetadata_Reset();
+    for (int frames = kThrowFrames + 40; frames >= 0; frames--) {
+      CAPTURE_ERUPTION_FLIGHT(kLandX, (uint16_t)(int16_t)kEntryRow, 0,
+                              frames == kThrowFrames + 40
+                                  ? ERUPTION_PLAN(kLandX, kLandY, frames)
+                                  : ERUPTION_PLAN_FLYING(frames));
+      int16_t h = frame.effects[0].geometry.data.point.height;
+      if (h > slow_apex) slow_apex = h;
+    }
+    CHECK(slow_apex > apex);
+  }
+
+  /* The ground fire is NOT the emitter's, and stays exactly as the ROM has
+   * it: an authored cell, the burning house's own art, no height and no
+   * offset. */
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION_V(record, 0xDD9F, 0x0090, 0x0060, 0);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].kind == kSimEffect_VolcanoGroundFire);
+  CHECK(frame.effects[0].world_x == 0x0090);
+  CHECK(frame.effects[0].world_y == 0x0060);
+  CHECK(frame.effects[0].geometry.data.point.height == 0);
+  CHECK(!frame.objects[0].hidden);
+
+  /* Every view that presents the ROM's own framebuffer gets the ROM's own
+   * flat path, and that is decided by the view rather than by a setting: a
+   * flat path drawn inside a projected town is faithful to nothing, while in
+   * these views it IS the picture. Nothing is lifted, nothing is offset, and
+   * the spawn queue the fountain withholds is visible again exactly where the
+   * ROM parks it -- because here the authentic window is what clips it.
+   *
+   * Driven by turning the enhanced town off, which is the real condition, not
+   * by poking a strategy in behind the renderer's back. */
+
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION_FLAT(0xE7D0, 0xFFF0, 0);
+  /* A town frame stays eligible for the enhanced view; what the master switch
+   * turns off is whether that view is actually running. Both have to be true
+   * before any presentation stage may alter the picture, which is the same
+   * pair ApplyHeightSlew tests. */
+  CHECK(frame.view == kSimView_Enhanced);
+  CHECK(!frame.master_enabled);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].geometry.data.point.height ==
+        kSimVirtualHeight_Flying);
+  CHECK(frame.effects[0].world_x == 0x0090);
+  CHECK(frame.effects[0].world_y == 0xFFF0);
+
+  SimRenderMetadata_Reset();
+  CAPTURE_ERUPTION_FLAT(0xE7A6, 0xFFF0, 8);
+  for (unsigned tick = 1; tick <= 12; tick++) {
+    CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(0xFFF0 + tick * 8), 8);
+    /* The plane never moves and the published position is the record's own,
+     * however far it travels. */
+    CHECK(frame.effects[0].geometry.data.point.height ==
+          kSimVirtualHeight_Flying);
+    CHECK(frame.effects[0].world_x == 0x0090);
+    CHECK(frame.effects[0].world_y == (uint16_t)(0xFFF0 + tick * 8));
+  }
+  /* And no object is withheld or displaced in a view that is showing the
+   * ROM's own output. */
+  for (uint16_t i = 0; i < frame.object_count; i++) {
+    CHECK(!frame.objects[i].hidden);
+    CHECK(frame.objects[i].offset_x == 0);
+    CHECK(frame.objects[i].offset_y == 0);
+  }
+
+  /* A change of publishing rule invalidates the retained path: half of it
+   * would be authentic map positions and half arc ones. */
+  {
+    SimRenderMetadata_Reset();
+    const int kBuilds = 3 * kSimEffectTrailStride + 1;
+    for (int n = 0; n < kBuilds; n++)
+      CAPTURE_ERUPTION_FLIGHT(
+          kCraterX, (uint16_t)(kCraterY - n * 16), 0,
+          ERUPTION_PLAN(kLandX, kLandY, kThrowFrames - n));
+    CHECK(frame.effects[0].trail_count == 4);
+    CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(kCraterY - kBuilds * 16), -8);
+    CHECK(frame.effects[0].trail_count == 1);
+  }
+
+  /* Landing exactness over every landing row measured across runs
+   * 20260818-070141/073137/073455/080109. */
+  static const uint16_t kMeasuredLandingRows[] = {
+    64, 96, 112, 144, 160, 192, 208, 224, 256, 272, 288, 320, 336, 352,
+  };
+  for (size_t n = 0;
+       n < sizeof(kMeasuredLandingRows) / sizeof(kMeasuredLandingRows[0]);
+       n++) {
+    const int row = (int)kMeasuredLandingRows[n];
+    SimRenderMetadata_Reset();
+    CAPTURE_ERUPTION_FLIGHT(kCraterX, kCraterY, 0,
+                            ERUPTION_PLAN(64, row, kThrowFrames));
+    for (int frames = kThrowFrames - 1; frames >= 0; frames--)
+      CAPTURE_ERUPTION_FLIGHT(64, (uint16_t)(int16_t)(frames > 8 ? kEntryRow
+                                                                 : row),
+                              8, ERUPTION_PLAN_FLYING(frames));
+    CHECK(frame.effects[0].world_x == 64);
+    CHECK(frame.effects[0].world_y == kMeasuredLandingRows[n]);
+    CHECK(frame.effects[0].geometry.data.point.height == 0);
+    CHECK(frame.objects[0].offset_x == 0);
+    CHECK(frame.objects[0].offset_y == 0);
+  }
+
+  /* Toggling the enhanced town off mid-throw and back on must resume the
+   * throw, never relaunch it. The flight is stepped on every build in town,
+   * drawn or not: a fireball is still in the air whether or not anyone is
+   * looking at it. */
+  {
+    SimRenderMetadata_Reset();
+    CAPTURE_ERUPTION_FLIGHT(kCraterX, kCraterY, 0,
+                            ERUPTION_PLAN(kLandX, kLandY, kThrowFrames));
+    for (int frames = kThrowFrames - 1; frames >= 60; frames--)
+      CAPTURE_ERUPTION_FLIGHT(kLandX, (uint16_t)(int16_t)kEntryRow, 0,
+                              ERUPTION_PLAN_FLYING(frames));
+    int16_t before = frame.effects[0].geometry.data.point.height;
+    uint16_t before_x = frame.effects[0].world_x;
+    CHECK(before > kSimEruptionCraterLift);
+    CHECK(before_x > kCraterX);              /* already left the crater */
+    for (int frames = 59; frames >= 40; frames--) {
+      SimRenderMetadata_BeginRecord(
+          record, true, false, 0xE7A6, kLandX,
+          (uint16_t)(int16_t)kEntryRow, 0x0E01, 2, 0, 0);
+      SimRenderMetadata_RecordFlightPlan(ERUPTION_PLAN_FLYING(frames));
+      SimRenderMetadata_RecordPart(0, 1u << 9);
+      SimRenderMetadata_EndRecord(4);
+      SimRenderMetadata_CaptureFrame(
+          &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
+    }
+    CAPTURE_ERUPTION_FLIGHT(kLandX, (uint16_t)(int16_t)kEntryRow, 0,
+                            ERUPTION_PLAN_FLYING(39));
+    /* Resumed further along the ground track, not back at the crater. */
+    CHECK(frame.effects[0].world_x > before_x);
+  }
+
+  #undef ERUPTION_PLAN_FLYING
+  #undef ERUPTION_PLAN
+  #undef CAPTURE_ERUPTION_FLIGHT
+  #undef CAPTURE_ERUPTION_FLAT
+  #undef CAPTURE_ERUPTION
+  #undef CAPTURE_ERUPTION_V
+}
+
+
+/* Captured eruption records, copied byte for byte out of run
+ * 20260818-070141. These are the eight live world records $0F0C-$1016 at the
+ * two captured frames, in address order and at the real stride, so the field
+ * offsets this test decodes are asserted against the ROM's own layout rather
+ * than against a hand-written record that agrees with the code by
+ * construction. gf20723 catches four fireballs on each authored frame; by
+ * gf20744 three of them ($0FA4/$0FCA/$0FF0) have landed and switched to the
+ * ground fire script at the same world_x. */
+static const uint8 kEruptionRecordsGf20723[8 * kActRaiserSimWorldRecordStride] = {
+    /* $0F0C */
+    0x00, 0x00, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
+    0xA6, 0xE7, 0xB0, 0x00, 0x30, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x03, 0x00, 0x37, 0xD1, 0x74, 0xD1,
+    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* $0F32 */
+    0xE4, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
+    0xD0, 0xE7, 0xC0, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
+    0x01, 0x00, 0x02, 0x00, 0xB9, 0xD1, 0xF7, 0xD1,
+    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x24, 0x00, 0x00, 0x00,
+    /* $0F58 */
+    0xE6, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
+    0xD0, 0xE7, 0x70, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
+    0x01, 0x00, 0x02, 0x00, 0x2B, 0xD2, 0x6D, 0xD2,
+    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+    /* $0F7E */
+    0x00, 0x00, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
+    0xD0, 0xE7, 0x90, 0x00, 0x50, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x03, 0x00, 0xB6, 0xD2, 0xE8, 0xD2,
+    0xFF, 0xFF, 0x00, 0x00, 0xF8, 0xFF, 0x02, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* $0FA4 */
+    0xFE, 0xFF, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
+    0xA6, 0xE7, 0xD0, 0x00, 0x40, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x01, 0x00, 0x30, 0xD3, 0x4E, 0xD3,
+    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* $0FCA */
+    0x00, 0x00, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
+    0xA6, 0xE7, 0xA0, 0x00, 0x90, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x03, 0x00, 0xA8, 0xD3, 0xCC, 0xD3,
+    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* $0FF0 */
+    0xFE, 0xFF, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
+    0xA6, 0xE7, 0x10, 0x01, 0xC0, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x01, 0x00, 0x19, 0xD4, 0x3F, 0xD4,
+    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* $1016 */
+    0xC1, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
+    0xD0, 0xE7, 0x50, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
+    0x01, 0x00, 0x02, 0x00, 0x98, 0xD4, 0xB1, 0xD4,
+    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x0D, 0x00, 0x00, 0x00,
+};
+
+static const uint8 kEruptionRecordsGf20744[8 * kActRaiserSimWorldRecordStride] = {
+    /* $0F0C */
+    0x00, 0x00, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
+    0xA6, 0xE7, 0xB0, 0x00, 0xA0, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x03, 0x00, 0x37, 0xD1, 0x7B, 0xD1,
+    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* $0F32 */
+    0xCF, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
+    0xD0, 0xE7, 0xC0, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
+    0x01, 0x00, 0x02, 0x00, 0xB9, 0xD1, 0xF7, 0xD1,
+    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x0F, 0x00, 0x00, 0x00,
+    /* $0F58 */
+    0xFE, 0xFF, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
+    0xA6, 0xE7, 0x70, 0x00, 0x40, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x01, 0x00, 0x2B, 0xD2, 0x72, 0xD2,
+    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* $0F7E */
+    0xFA, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
+    0xD0, 0xE7, 0x80, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
+    0x01, 0x00, 0x02, 0x00, 0xB6, 0xD2, 0xF3, 0xD2,
+    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x2E, 0x00, 0x00, 0x00,
+    /* $0FA4 */
+    0x02, 0x00, 0x5E, 0xA8, 0xFF, 0xFF, 0x5B, 0xA8,
+    0x9F, 0xDD, 0xD0, 0x00, 0x60, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x02, 0x00, 0x30, 0xD3, 0x54, 0xD3,
+    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
+    /* $0FCA */
+    0x04, 0x00, 0x5E, 0xA8, 0xFF, 0xFF, 0x5B, 0xA8,
+    0x9F, 0xDD, 0xA0, 0x00, 0xC0, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x02, 0x00, 0xA8, 0xD3, 0xD2, 0xD3,
+    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x09, 0x00, 0x00, 0x00,
+    /* $0FF0 */
+    0x02, 0x00, 0x5E, 0xA8, 0x00, 0x00, 0x5B, 0xA8,
+    0x9F, 0xDD, 0x10, 0x01, 0x20, 0x01, 0x01, 0x0E,
+    0x01, 0x00, 0x02, 0x00, 0x19, 0xD4, 0x49, 0xD4,
+    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x13, 0x00, 0x00, 0x00,
+    /* $1016 */
+    0xFF, 0xFF, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
+    0xA6, 0xE7, 0x50, 0x00, 0x18, 0x00, 0x01, 0x0E,
+    0x01, 0x00, 0x03, 0x00, 0x98, 0xD4, 0xB4, 0xD4,
+    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+static uint16_t EruptionField(const uint8 *records, unsigned slot,
+                              unsigned offset) {
+  const uint8 *record = records + slot * kActRaiserSimWorldRecordStride;
+  return (uint16_t)(record[offset] | (record[offset + 1] << 8));
+}
+
+/* Replay one captured frame through the producer exactly as the sprite
+ * builder does, reading each field at its documented record offset. */
+static void CaptureEruptionFixture(SimFrameData *frame, uint8 *wram,
+                                   const uint8 *records) {
+  enum {
+    kOffsetActorFlags = 0x06, kOffsetComposition = 0x08,
+    kOffsetWorldX = 0x0A, kOffsetWorldY = 0x0C,
+    kOffsetType = 0x0E, kOffsetStatus = 0x10, kOffsetState = 0x12,
+    kOffsetVelocityX = 0x1A, kOffsetVelocityY = 0x1C,
+  };
+  for (unsigned slot = 0; slot < 8; slot++) {
+    uint16_t address = (uint16_t)(0x0F0C +
+                                  slot * kActRaiserSimWorldRecordStride);
+    SimRenderMetadata_BeginRecord(
+        address, true, false,
+        EruptionField(records, slot, kOffsetComposition),
+        EruptionField(records, slot, kOffsetWorldX),
+        EruptionField(records, slot, kOffsetWorldY),
+        EruptionField(records, slot, kOffsetType),
+        (uint16_t)(EruptionField(records, slot, kOffsetState) & 0x7FFF),
+        EruptionField(records, slot, kOffsetStatus),
+        (uint16_t)(slot * 4));
+    SimRenderMetadata_RecordWord06(
+        EruptionField(records, slot, kOffsetActorFlags));
+    SimRenderMetadata_RecordPart((uint16_t)(slot * 4), 1u << 9);
+    SimRenderMetadata_EndRecord((uint16_t)((slot + 1) * 4));
+  }
+  /* Flat, deliberately. What this fixture pins is that REAL captured records
+   * classify and carry the velocities they do; the projected town's emitter
+   * withholds everything airborne it is not flying, which would leave nothing
+   * here to inspect and is covered by the synthetic flight tests instead. */
+  SimRenderMetadata_CaptureFrame(
+      frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
+}
+
+static void TestCapturedEruptionRecords(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  SimFrameData frame;
+
+  /* Every live eruption record publishes the packed identity the classifier
+   * gates on. Three of the eight are the ROM's unlaunched spawn queue, parked
+   * one row above the map with their release countdowns running. Captured
+   * flat, so all eight classify: the withholding the projected town does is
+   * presentation, and is covered separately.
+   *
+   * The records also carry a per-tick map velocity at +$1A/+$1C, and it is
+   * what first separated the ROM's three phases -- -8 climbing, +8 falling, 0
+   * staged. Nothing reads it now: the throw is placed by the script's own
+   * clock and by which column the record is standing in, so the field and its
+   * plumbing were removed rather than left as an observation with no
+   * observer. The measurement itself lives in docs/ram-map.md. */
+  SimRenderMetadata_Reset();
+  CaptureEruptionFixture(&frame, wram, kEruptionRecordsGf20723);
+  CHECK(frame.source_count == 8);
+  CHECK(frame.effect_count == 8);
+  CHECK(frame.effect_visible_count == 8);
+  for (unsigned i = 0; i < frame.source_count; i++) {
+    CHECK(frame.sources[i].type == 0x0E01);
+    const SimEffectInstance *effect =
+        FindEruptionEffect(&frame, frame.sources[i].record_address);
+    CHECK(effect != NULL);
+    if (!effect) continue;
+    CHECK(effect->kind == kSimEffect_VolcanoFireball);
+    /* Flat: on the classified plane, on the record's own cell. */
+    CHECK(effect->geometry.data.point.height == kSimVirtualHeight_Flying);
+    CHECK(effect->world_x == frame.sources[i].world_x);
+  }
+  /* $0F7E is the one climbing jet in this capture, and it wears $E7D0 --
+   * the frame a record carries while it is climbing or staged, never while
+   * it falls. */
+  CHECK(frame.sources[3].record_address == 0x0F7E);
+  CHECK(frame.sources[3].composition == 0xE7D0);
+
+  /* The second capture is the same eight slots later in the same event. The
+   * three that landed move to the ground fire's own kind and to the house
+   * fire's phase family, at the same world_x they fell down. */
+  CaptureEruptionFixture(&frame, wram, kEruptionRecordsGf20744);
+  static const uint16_t kLanded[] = { 0x0FA4, 0x0FCA, 0x0FF0 };
+  for (size_t n = 0; n < sizeof(kLanded) / sizeof(kLanded[0]); n++) {
+    const SimEffectInstance *fire = FindEruptionEffect(&frame, kLanded[n]);
+    CHECK(fire != NULL);
+    if (!fire) continue;
+    CHECK(fire->kind == kSimEffect_VolcanoGroundFire);
+    CHECK(fire->composition == 0xDD9F);
+    CHECK(fire->phase == kSimEffectPhase_HouseFireA);
+    CHECK(fire->geometry.data.point.x == 0);
+    CHECK(fire->geometry.data.point.y == 16);
+    CHECK(fire->geometry.data.point.height == 0);
+    /* Burning ground publishes no path for the renderer to smear. */
+    CHECK(fire->trail_count == 0);
+  }
+
+  /* $0F0C is the same slot in both captures: same world_x, greater world_y,
+   * and a fresh generation because the kind changed under the three that
+   * landed. It is also the only record that was falling in both captures, so
+   * it is the only one whose arc could have advanced -- and it did not,
+   * because the two captures are 21 game frames apart and are replayed as
+   * adjacent builds, which reads as a 112-pixel one-tick step. That is an
+   * impossible move for an actor whose authentic speed is 8, and re-anchoring
+   * on it is exactly what stops a recycled record slot from inheriting a
+   * stranger's trajectory. The arc's per-tick shape is asserted against
+   * authentic 8-pixel steps in TestVolcanicEruptionEffectCapture; what this
+   * fixture pins is that real captured records drive it and that a gap fails
+   * safe. */
+  const SimEffectInstance *flier = FindEruptionEffect(&frame, 0x0F0C);
+  CHECK(flier != NULL);
+  if (flier) {
+    CHECK(flier->kind == kSimEffect_VolcanoFireball);
+    /* Flat: the record's own cell, untouched. Nothing here is moved, lifted
+     * or withheld -- the emitter's whole contribution belongs to the
+     * projected town and is asserted against synthetic flights, where the
+     * plan can be stated exactly rather than inferred from two captures 21
+     * frames apart. */
+    CHECK(frame.sources[0].record_address == 0x0F0C);
+    CHECK(frame.sources[0].world_x == 176);
+    CHECK(frame.sources[0].world_y == 160);
+    CHECK(flier->world_x == 176);
+    CHECK(flier->world_y == 160);
+  }
+}
+
+/* $0A:D330, record $0FA4 */
+static const uint8 kEruptScript0FA4[64] = {
+    0x09, 0x50, 0x00, 0x0E, 0xFF, 0x11, 0x10, 0x10,
+    0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x10, 0x0D, 0xFF, 0x09, 0x4C,
+    0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+    0x0F, 0x09, 0x14, 0x00, 0x10, 0x09, 0x08, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x10, 0x0E, 0xFF, 0x09, 0x14, 0x00, 0x03, 0x03,
+    0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+};
+
+/* $0A:D419, record $0FF0 */
+static const uint8 kEruptScript0FF0[64] = {
+    0x09, 0x68, 0x00, 0x0E, 0xFF, 0x11, 0x10, 0x10,
+    0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x10, 0x11, 0xFF, 0x09, 0x1C,
+    0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+    0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+    0x03, 0x03, 0x03, 0x03, 0x0F, 0x09, 0x14, 0x00,
+    0x10, 0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x10, 0x03, 0xFF, 0x09,
+};
+
+/* $0A:D498, record $1016 */
+static const uint8 kEruptScript1016[64] = {
+    0x09, 0x70, 0x00, 0x0E, 0xFF, 0x11, 0x10, 0x10,
+    0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x10, 0x05, 0xFF, 0x09, 0x48,
+    0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+    0x03, 0x0F, 0x09, 0x14, 0x00, 0x10, 0x09, 0x08,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x10, 0x04, 0xFF, 0x09, 0x38, 0x00, 0x03,
+    0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+};
+
+/* The walker is driven over a byte fetch so a test can supply captured script
+ * bytes directly; here the base address is folded away and the cursor is a
+ * plain index into the array. */
+typedef struct EruptScriptFixture { const uint8 *bytes; uint16_t base; } EruptScriptFixture;
+
+static uint8_t EruptScriptFetch(void *context, uint16_t address) {
+  const EruptScriptFixture *f = (const EruptScriptFixture *)context;
+  uint16_t index = (uint16_t)(address - f->base);
+  return index < 64 ? f->bytes[index] : 0x7F;
+}
+
+/* Class-$01 actor scripts are static bank-$0A ROM, so a falling fireball's
+ * remaining descent is readable at launch rather than being a runtime
+ * decision -- the fact the arc previously compensated for with a split span.
+ * These are the real bytes behind three captured records. */
+static void TestEruptionScriptWalk(void) {
+  struct { const char *label; const uint8 *bytes; uint16_t base; int cursor_at; int expect; } cases[] = {
+    /* Cursor placed on the first $03 of the descent: seven downs then $0F. */
+    { "$0FA4 descent", kEruptScript0FA4, 0xD330, 25, 7 * 16 },
+    { "$0FF0 descent", kEruptScript0FF0, 0xD419, 25, 19 * 16 },
+    { "$1016 descent", kEruptScript1016, 0xD498, 25, 8 * 16 },
+    /* From the very start the walk crosses the wait, the speed modifier, the
+     * trap, the crater teleport, the nine climbing commands and the staging
+     * teleport -- operand skipping has to be right for all of them or the
+     * count lands somewhere else entirely. */
+    { "$0FA4 from launch", kEruptScript0FA4, 0xD330, 0, 7 * 16 },
+    { "$0FF0 from launch", kEruptScript0FF0, 0xD419, 0, 19 * 16 },
+    { "$1016 from launch", kEruptScript1016, 0xD498, 0, 8 * 16 },
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    EruptScriptFixture fixture = { cases[i].bytes, cases[i].base };
+    int got = SimEruptionScript_ResolveFlight(
+        EruptScriptFetch, &fixture, cases[i].base,
+        (uint16_t)(cases[i].base + cases[i].cursor_at), 0).fall_pixels;
+    if (got != cases[i].expect) {
+      fprintf(stderr, "erupt script %s: got %d expected %d\n",
+              cases[i].label, got, cases[i].expect);
+      failures++;
+    }
+  }
+  /* $0FA4's descent is 7 x 16 = 112 map pixels from the staging row at -16,
+   * which lands it on row 96 -- the row that record was captured burning on
+   * in run 20260818-073455. */
+  EruptScriptFixture fixture = { kEruptScript0FA4, 0xD330 };
+  CHECK(-16 + SimEruptionScript_ResolveFlight(
+                  EruptScriptFetch, &fixture, 0xD330, 0xD330 + 25, 0)
+                  .fall_pixels == 96);
+
+  /* The full plan: replaying the script from its base to the record's cursor
+   * also recovers the launch point. Every eruption script places the actor at
+   * cell (9,8) = world (144,128) before the climb -- the crater -- and then
+   * teleports it to a negative row to stage the fall, so requiring a
+   * non-negative row is what tells the two apart. THE CRATER IS AUTHORED:
+   * nothing about it needs learning from watching jets. */
+  static const struct { const char *label; const uint8 *bytes; uint16_t base;
+                        int cursor_at; int fall; } plans[] = {
+    { "$0FA4", kEruptScript0FA4, 0xD330, 25, 7 * 16 },
+    { "$0FF0", kEruptScript0FF0, 0xD419, 25, 19 * 16 },
+    { "$1016", kEruptScript1016, 0xD498, 25, 8 * 16 },
+  };
+  for (size_t i = 0; i < sizeof(plans) / sizeof(plans[0]); i++) {
+    EruptScriptFixture f = { plans[i].bytes, plans[i].base };
+    SimEruptionFlightPlan plan = SimEruptionScript_ResolveFlight(
+        EruptScriptFetch, &f, plans[i].base,
+        (uint16_t)(plans[i].base + plans[i].cursor_at), 0);
+    if (!plan.valid || !plan.crater_valid ||
+        plan.fall_pixels != plans[i].fall ||
+        plan.crater_x != 144 || plan.crater_y != 128) {
+      fprintf(stderr,
+              "erupt plan %s: valid=%u crater=%u (%d,%d) fall=%d "
+              "expected crater (144,128) fall %d\n",
+              plans[i].label, plan.valid, plan.crater_valid,
+              plan.crater_x, plan.crater_y, plan.fall_pixels, plans[i].fall);
+      failures++;
+    }
+  }
+
+  /* The frame clock, against the same real bytes. From the very start
+   * $0FA4's script runs 80 wait + 1 speed + 1 trap + 1 crater teleport +
+   * 9 climbs + 1 staging teleport + 76 wait + 7 descents = 176 frames to the
+   * landing, which is exactly what the live record reports while it is still
+   * parked out of play. A wait ALREADY RUNNING is not on the walk at all --
+   * the cursor steps past the $09 before its countdown starts -- so it comes
+   * in as the +$22 argument and is added on top. */
+  {
+    EruptScriptFixture f = { kEruptScript0FA4, 0xD330 };
+    SimEruptionFlightPlan whole = SimEruptionScript_ResolveFlight(
+        EruptScriptFetch, &f, 0xD330, 0xD330, 0);
+    CHECK(whole.frames_to_land == 176);
+    /* Sitting on the second wait with 40 of its 76 frames left: everything
+     * from the cursor on is 7 descents, so 47. */
+    SimEruptionFlightPlan waiting = SimEruptionScript_ResolveFlight(
+        EruptScriptFetch, &f, 0xD330, 0xD330 + 25, 40);
+    CHECK(waiting.frames_to_land == 40 + 7);
+  }
+
+  /* A cursor that is not on a command at all -- inside the wait's operands --
+   * resolves nothing rather than counting whatever those bytes decode to. */
+  {
+    EruptScriptFixture f = { kEruptScript0FA4, 0xD330 };
+    SimEruptionFlightPlan plan = SimEruptionScript_ResolveFlight(
+        EruptScriptFetch, &f, 0xD330, 0xD330 + 1, 0);
+    CHECK(!plan.valid);
+  }
+
+  /* The two halves fail INDEPENDENTLY, which is the property the arc relies
+   * on. A base the walk cannot be replayed from -- the jump that makes the
+   * script loop, or a desynchronised start like this one -- costs the plan
+   * its crater and nothing else. The record still knows where it is landing,
+   * so it still gets a throw, launched from the crater the arc learned by
+   * watching. Tying the descent to the crater's success is what once left a
+   * fountain of thirty fireballs with six arcs. */
+  {
+    EruptScriptFixture f = { kEruptScript0FA4, 0xD330 };
+    SimEruptionFlightPlan plan = SimEruptionScript_ResolveFlight(
+        EruptScriptFetch, &f, 0xD330 + 1, 0xD330 + 25, 0);
+    CHECK(plan.valid);
+    CHECK(plan.fall_pixels == 7 * 16);
+    CHECK(!plan.crater_valid);
+  }
+
+  /* Fails closed rather than returning a plausible number: a walk that runs
+   * off the end of what is readable, and a missing fetch. */
+  CHECK(!SimEruptionScript_ResolveFlight(
+             EruptScriptFetch, &fixture, 0xD330, 0xD330 + 33, 0).valid);
+  CHECK(!SimEruptionScript_ResolveFlight(
+             NULL, &fixture, 0xD330, 0xD330, 0).valid);
+}
+
 int main(int argc, char **argv) {
   TestFeatureDependencies();
   TestLightningMiracleEffectCapture();
   TestTownCreationLightningEffectCapture();
   TestEnemyLightningAndFireEffectCapture();
+  TestVolcanicEruptionEffectCapture();
+  TestCapturedEruptionRecords();
+  TestEruptionScriptWalk();
   TestEffectOverflowFailsClosed();
   TestResolvedPartOverflowFailsClosed();
   TestResolvedPartContractFailsClosed();

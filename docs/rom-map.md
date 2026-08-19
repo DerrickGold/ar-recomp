@@ -247,9 +247,131 @@ to mistake for their neighbours.
 | `$DA4B/$DAA1/$DAF7/$DB5C` | Cloud + lightning bolt | one composition spanning cloud to ground (64x76-80) |
 | `$DC77/$DBC1/$DC1C/$DCD2` | Cloud + rain streaks | one composition spanning cloud to ground (64x72) |
 | `$E1BD/$E209/$E255` | Blue Dragon building-zap bolt | emitted on the dragon's own record, alternating with flight frames; the ROM drops the record onto the target |
-| `$E6CA/$E6D0/$E6D6` | Ground fire | |
+| `$DD2D/$DD33/$DD39` | Burning-house fire | tiles `$086/$088/$08A` palette 1, 16x16, corner-anchored (part x=0); spawn script `$01:A838`, one tick a frame |
+| `$DD9F/$DDA5/$DDAB` | Volcanic-eruption ground fire | **the same three tiles and palette** as the burning house, re-anchored to the sprite centre (part x=-8); spawn script `$01:A85B`, four ticks a frame |
+| `$E6CA/$E6D0/$E6D6` | Ground fire | the same three tiles again, in palette 2 — **the composition triple identifies a family here, not the tile** |
+| `$E7D0` | Eruption fireball, not-falling frame | tiles `$11C/$035` palette 1, two 8x8 parts, V-flipped, bounds y 0..16; spawn script `$01:A853`. Worn while climbing out of the crater (`+$1C = -8`) or staged for release (`+$1C = 0`) |
+| `$E7A6` | Eruption fireball, falling frame | the same two tiles unflipped, bounds y -4..12; spawn script `$01:A857`. Carries `+$1C = +8` in every observation |
 | `$E71B/$E73A/$E75E` | Napper ground-pluck frames | the near-ground phase of class `$13` state 5 |
 | `$E99C-$E9C6` | Sailboat frames | water plane |
+
+### Town spawn scripts (bank $01, volcanic eruption mapped 2026-08-18)
+
+Animation scripts held in world record `+$06` (base) and `+$02` (cursor), each
+a run of `duration, composition` frames terminated by a `loop`/`cycle` or
+`hide` control. Crawlable with `tools/sim_object_catalog.py crawl`; only the
+entries this work needed are listed. All four sit in spawn list 6 alongside
+the rest of the town's ambient art.
+
+| Address | Frames | Role |
+|---|---|---|
+| `$01:A838` | `$DD2D/$DD33/$DD39`, 1 tick each, looping | burning house |
+| `$01:A849` | `$E6CA/$E6D0/$E6D6`, 4 ticks each, looping | ground fire (palette-2 blue variant of the same art) |
+| `$01:A853` | `$E7D0` held, `hide` | eruption fireball while climbing or staged |
+| `$01:A857` | `$E7A6` held, `hide` | eruption fireball while falling |
+| `$01:A85B` | `$DD9F/$DDA5/$DDAB`, 4 ticks each, looping | eruption ground fire |
+
+The eruption's three scripts are consecutive and are run by records that all
+publish packed identity `$0E01` in `+$0E`; see `docs/ram-map.md`. One record
+walks `$A853 -> $A857 -> $A85B` across a single flight, so these are phases of
+one fireball rather than three actors.
+
+### Town actor scripts (bank $0A, class-$01 VM decoded 2026-08-18)
+
+Motion and lifecycle for stride-`$26` world actors are a **byte-code script**,
+not a table. `$01:CFC7` fetches one command per frame from `+$16` and
+post-increments it; `+$0E & $00FF` picks the bank — class 0 reads `$7F` RAM
+(generated townspeople paths), anything else reads `$0A:0000,X`, so class-`$01`
+actors including the whole volcanic eruption run **static ROM scripts**.
+`$01:CD35` zeroes `+$1A/+$1C/+$1E`, fetches a byte, treats `$7F` as end-of-script
+(`BRL $B891`) and otherwise dispatches through the 18-entry table `$01:CD6F`.
+The table stores *target - 1* (`PHA`/`RTS` idiom), and each handler tail-jumps
+to `$01:AC70` via `$CD6C` — which is what makes it exactly one command a frame.
+
+| Cmd | Handler | Operands | Effect |
+|---|---|---|---|
+| `$01` | `$CD94` | – | `+$1C = -1` (up-map) |
+| `$03` | `$CDCC` | – | `+$1C = +1` (down-map), `+$1E = $10`, state 3 — **16 map pixels per command** |
+| `$04` | `$CDE8` | – | scales `+$1A/+$1C` by 8; one branch sets `+$1E = 2`, the other `+$1E = 8` |
+| `$09` | `$CE5F` | 2 (LE16) | wait N frames — writes `+$22`, state 2 |
+| `$0A` | `$CE74` | – | end actor (`JSR $B891`) |
+| `$0B` | `$CE78` | 2 (LE16) | relative jump: `+$16 += operand` |
+| `$05`-`$08`, `$0C`, `$0D` | `$CE43`/`$CE4A`/`$CE51`/`$CE58`/`$CE8F`/`$CE96` | – | select visual 4-9 via `$CF0A` |
+| `$0E` | `$CE9D` | 1 | speed modifier: stores the byte to **both** `+$18` and `+$19`. `$CE04` then reads `+$19` — `$FF` scales `+$1A/+$1C` by 8 (`+$1E = 2`), `$FE` by 2. `0E FF` is what gives the eruption its ±8. |
+| `$0F` | `$CEAB` | – | land: `$03:AF65(2)` result + 10 into `$CF0A` |
+| `$10` | `$CEC0` | 2 | set position from **cell** coordinates: each byte sign-extended and shifted left four, into `+$0A`/`+$0C` |
+| `$11` | `$CEE5` | 1 | trap (`BRK`) — request with a byte selector |
+| `$02` | `$CDB0` | – | `+$1A = +1` (right) |
+| `$04` | `$CDE8` | – | `+$1A = -1` (left) |
+| `$7F` | — | – | end of script |
+
+`$00` is a bare `RTS`. Every command tail-jumps to `$01:AC70` via `$CD6C`, and
+`$CF0A` resolves a visual index through the per-class table at `$01:CF2B` into
+a composition pointer — which is how one script selects `$E7D0`, `$E7A6` and
+the ground-fire frames in turn.
+
+A complete eruption fireball, from record `$0FA4`'s script at `$0A:D330`:
+
+```
+09 50 00        wait 80 frames
+0E FF           speed modifier $FF -- from here velocities scale by 8
+11 10           trap, selector $10
+10 09 08        set position to cell (9,8) = world (144,128) -- THE CRATER
+01 x9           nine up commands   -- the jet climbing out of it
+10 0D FF        set position to cell (13,-1) = world (208,-16) -- staging
+09 4C 00        wait 76 frames     -- matches the +$22 = 76 seen on this record
+03 x7           seven down commands -- the fall: 7 x 16 = 112 px
+0F              land               -- hand over to the ground fire
+```
+
+**The crater is authored too** -- `10 09 08` = world (144,128), identical in
+every eruption script, so nothing about the launch point needs learning at
+runtime. And the staging columns match the captured records exactly: cell 13
+-> 208, cell 17 -> 272, cell 5 -> 80.
+
+**The landing row is therefore static ROM data**, not a runtime decision:
+`fall = (length of the $03 run) x 16` map pixels from the entry row of -16.
+Checked against captured landings — record `$0FA4` 7x16 = 112 px against an
+observed 112, and `$1016` 8x16 = 128 against 128. Scripts loop, so a run must
+be matched to the right cycle.
+
+Watching that same record execute (run `20260818-190000`-era replay of
+`saves/aitos-eruption.rec`, sim build serials):
+
+| builds | record position | `+$1C` | phase |
+|--------|-----------------|--------|-------|
+| 718 | `(144,128)` | 0 | crater placement |
+| 720–745 | `(144,120)` → `(144,-16)` | −8 | climb, 144 px at 8 a build |
+| 746 | `(208,-16)` | 0 | **staging teleport, sideways** |
+| 746–823 | `(208,-16)` | 0 | wait, 77 builds |
+| 824–844 | `(208,-16)` → `(208,96)` | +8 | descent, 112 px |
+
+**One record is a fireball OR its fire, never both.** `$0F` hands the record
+over to the ground-fire script `$01:A85B`, and the next cycle of the throw
+script takes it straight back — so the eight eruption records cap the combined
+population of airborne fireballs and burning cells at eight. Measured across
+the captured eruption: 45 throws, every one landing on a cell that catches
+fire, but with 7 air/1 fire and 8 air/0 fire as the two commonest instants.
+A projected view that draws the whole flight therefore shows far more arcs
+than flames, and that is the ROM's arithmetic rather than a dropped landing.
+
+**The wait is legible only from the record.** `$01:CE5C` stores a `$09`
+operand into `+$22` and then advances the cursor PAST the command, so during a
+countdown the cursor is already on whatever follows and the script alone
+cannot say how much of the wait is left. Traced on `$0FA4`: cursor parks at
+`$D349` for all 76 frames while `+$22` counts 76 down to 0, and the same holds
+for the 80-frame `09 50 00` at the top (cursor `$D333`). Total frames to the
+landing is therefore **`+$22` plus one frame per remaining command plus the
+full operand of every wait not yet reached** — 176 from a cursor at the script
+base, which is exactly what a parked record reports.
+
+Two more things worth pinning. The climb happens **in the crater column** and
+only crosses `y = 0` on its way out of the map — so "above the map" alone does not
+mean "staged", and a presentation that opens a throw on a negative row catches
+the climber and throws every fireball to the crater's own column. And the
+sideways move is the teleport at build 746, not a gradual drift; the landing
+column is knowable at the crater placement (the `$10` operand is ahead of the
+cursor) and unreadable afterwards (it is behind it).
 
 ### Text Data (Bank $04: 0x20000-0x27FFF)
 | Range | Content |

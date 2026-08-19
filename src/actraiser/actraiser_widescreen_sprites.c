@@ -50,7 +50,22 @@ typedef enum SimRecordField {
   kSimRecord_Type = 0x0E,
   kSimRecord_Status = 0x10,
   kSimRecord_State = 0x12,
+  /* Actor-script base and cursor. `$01:CFC7` picks the bank from the class
+   * byte: class 0 reads $7F RAM, anything else reads $0A ROM. */
+  kSimRecord_ScriptBase = 0x14,
+  kSimRecord_ScriptCursorByte = 0x16,
+  /* Frames left of the script wait currently running. Measured on record
+   * $0FA4: the cursor parks at $D349 for the whole `09 4C 00` and this
+   * counts 76 down to 0. */
+  kSimRecord_ReleaseCountdown = 0x22,
 } SimRecordField;
+
+/* Reads one class-$01 actor-script byte out of bank $0A for the flight
+ * resolver. Read-only: the resolver never writes, and the record's own
+ * execution is left entirely to the recompiled ROM code. */
+static uint8_t ws_sim_script_fetch(void *context, uint16 address) {
+  return cpu_read8((CpuState *)context, 0x0A, address);
+}
 
 enum {
   kSpriteDp_ComponentCount = 0x0C,
@@ -1504,6 +1519,25 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
   }
   SimRenderMetadata_RecordWord06(cpu_read16(
       cpu, cpu->DB, (uint16)(record + kSimRecord_ActorFlags)));
+  /* Resolve the flight an eruption fireball is on, straight out of the script
+   * that authors it. Gated on the packed identity so no other class-$01
+   * actor's script is walked, and on nothing else: the record's own velocity
+   * says which of the ROM's three phases it is in, but the presentation draws
+   * none of them, so every phase needs its plan. */
+  if (world_record &&
+      cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_Type)) == 0x0E01) {
+    SimRenderMetadata_RecordFlightPlan(SimEruptionScript_ResolveFlight(
+        ws_sim_script_fetch, cpu,
+        cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_ScriptBase)),
+        cpu_read16(cpu, cpu->DB,
+                   (uint16)(record + kSimRecord_ScriptCursorByte)),
+        /* The wait already running. The cursor steps PAST a $09 before its
+         * countdown begins, so this is the only place the remaining frames of
+         * an in-progress wait exist -- and that wait is most of a fireball's
+         * flight. */
+        (int)cpu_read16(cpu, cpu->DB,
+                        (uint16)(record + kSimRecord_ReleaseCountdown))));
+  }
   /* The biased origin the window predicate below is about to be applied to,
    * handed over rather than re-derived: see SimRenderMetadata_RecordAnchor. */
   SimRenderMetadata_RecordAnchor((int16_t)base_x, (int16_t)base_y);

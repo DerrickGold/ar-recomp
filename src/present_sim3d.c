@@ -282,16 +282,20 @@ static bool ProjectSimAnchorAndScale(
 static float SimBillboardHeightPop(SDL_Rect source, float height_world,
                                    unsigned height_pop_pct);
 
-static bool ProjectSimEffectPoint(
+/* The world origin is a parameter rather than a field read, so a caller
+ * walking an effect's retained path can project each earlier position without
+ * copying the whole instance to move two numbers. */
+static bool ProjectSimEffectPointAt(
     const FrameSlot *slot, const SimEffectInstance *effect,
+    uint16_t world_x, uint16_t world_y,
     const SimEffectLocalPoint *local, SDL_Rect source, SDL_Rect viewport,
     const Scene3DCamera *camera, const float matrix[16],
     Scene3DPoint *point, float *scale_x, float *scale_y) {
   if (!local || effect->geometry.kind != kSimEffectGeometry_Point) return false;
   int record_screen_x = (int16_t)(uint16_t)(
-      effect->world_x - slot->sim.camera_x);
+      world_x - slot->sim.camera_x);
   int record_screen_y = (int16_t)(uint16_t)(
-      effect->world_y - slot->sim.camera_y);
+      world_y - slot->sim.camera_y);
   float texture_x = slot->ws_extra + record_screen_x;
   float texture_y = record_screen_y;
   float height_world = SimHeightWorldUnits(
@@ -333,11 +337,36 @@ static bool ProjectSimEffectPoint(
   return true;
 }
 
-enum { kSimMaxParticlesPerEffect = 12 };
+static bool ProjectSimEffectPoint(
+    const FrameSlot *slot, const SimEffectInstance *effect,
+    const SimEffectLocalPoint *local, SDL_Rect source, SDL_Rect viewport,
+    const Scene3DCamera *camera, const float matrix[16],
+    Scene3DPoint *point, float *scale_x, float *scale_y) {
+  return ProjectSimEffectPointAt(
+      slot, effect, effect->world_x, effect->world_y, local, source, viewport,
+      camera, matrix, point, scale_x, scale_y);
+}
+
+enum {
+  kSimMaxParticlesPerEffect = 12,
+  /* A trail spends its budget along the retained path instead of around one
+   * point, so it is sized separately and the batch is cut to whichever of the
+   * two is larger. */
+  kSimMaxTrailPuffsPerSample = 2,
+  kSimMaxTrailPuffsPerEffect =
+      kSimEffectTrailSamples * kSimMaxTrailPuffsPerSample,
+  kSimMaxEffectQuadsPerEffect =
+      kSimMaxParticlesPerEffect > kSimMaxTrailPuffsPerEffect
+          ? kSimMaxParticlesPerEffect : kSimMaxTrailPuffsPerEffect,
+};
 
 typedef enum SimEffectParticleMotion {
   kSimEffectParticle_Burst,
   kSimEffectParticle_Flame,
+  /* Embers that stream off a moving body rather than rising from a fixed
+   * one. Placed along the effect's own retained path, so the tail follows the
+   * authentic trajectory instead of a guessed heading. */
+  kSimEffectParticle_Trail,
 } SimEffectParticleMotion;
 
 typedef struct SimEffectStyle {
@@ -361,6 +390,15 @@ typedef struct SimEffectStyle {
   uint8_t particle_count;
   uint8_t particle_motion;
   bool scene_flash;
+  /* Trail styling. Ignored unless particle_motion is kSimEffectParticle_Trail.
+   * The tail fades from flame to smoke along the retained path: samples up to
+   * trail_flame_samples old keep particle_color, older ones cross into
+   * trail_smoke_color, and every puff grows as it cools. */
+  SDL_FColor trail_smoke_color;
+  float trail_flame_samples;
+  float trail_puff_radius;
+  float trail_spread;
+  uint8_t trail_puffs_per_sample;
 } SimEffectStyle;
 
 static SimEffectStyle SimLightningBaseStyle(float strength,
@@ -456,6 +494,11 @@ static bool SimEffectStyleFor(const SimEffectInstance *effect,
       }
       return false;
     }
+    /* One style for one animation. The eruption's ground fire is the burning
+     * house's own three frames -- same tiles, same palette, same phase family
+     * -- so it shares the ramp rather than restating it; the kinds stay
+     * distinct only so a trace can tell burning ground from a burning house. */
+    case kSimEffect_VolcanoGroundFire:
     case kSimEffect_HouseFire: {
       float strength = phase == kSimEffectPhase_HouseFireA ? 0.78f :
           phase == kSimEffectPhase_HouseFireB ? 0.90f : 1.0f;
@@ -475,6 +518,34 @@ static bool SimEffectStyleFor(const SimEffectInstance *effect,
         .particle_origin_lift = 4.0f,
         .particle_count = 10,
         .particle_motion = kSimEffectParticle_Flame,
+      };
+      return true;
+    }
+    case kSimEffect_VolcanoFireball: {
+      /* Both authored frames are one blob of the same two tiles, so the two
+       * phases differ only in how hot the head reads. */
+      float strength =
+          phase == kSimEffectPhase_VolcanoFireballA ? 0.88f : 1.0f;
+      *style = (SimEffectStyle){
+        .strength = strength,
+        .glow_center = { 1.0f, 0.52f, 0.10f, 0.52f },
+        .glow_edge = { 1.0f, 0.14f, 0.01f, 0.0f },
+        .particle_color = { 1.0f, 0.74f, 0.22f, 1.0f },
+        .glow_radius_x = 16.0f,
+        .glow_radius_y = 16.0f,
+        /* Trail motion spends its budget along the retained path, so the
+         * per-point particle_count does not apply; trail_puffs_per_sample is
+         * what sizes it. */
+        .particle_motion = kSimEffectParticle_Trail,
+        .trail_smoke_color = { 0.40f, 0.35f, 0.34f, 0.85f },
+        /* Flame for the first few samples, smoke for the long tail behind
+         * it. At kSimEffectTrailStride these three samples are about a
+         * dozen builds -- long enough to read as a burning head, short
+         * enough that the rest of the throw is a smoke path. */
+        .trail_flame_samples = 3.0f,
+        .trail_puff_radius = 3.0f,
+        .trail_spread = 2.6f,
+        .trail_puffs_per_sample = 2,
       };
       return true;
     }
@@ -565,12 +636,133 @@ static uint32_t EffectHash(uint32_t value) {
   return value ^ (value >> 16);
 }
 
+static void AppendEffectQuad(EffectBatch *batch, float x, float y,
+                             float size, SDL_FColor color) {
+  int base_vertex = batch->vertex_count;
+  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    { x, y - size }, color, { 0.0f, 0.0f } };
+  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    { x + size, y }, color, { 0.0f, 0.0f } };
+  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    { x, y + size }, color, { 0.0f, 0.0f } };
+  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    { x - size, y }, color, { 0.0f, 0.0f } };
+  static const int diamond[] = { 0, 1, 2, 0, 2, 3 };
+  for (int n = 0; n < 6; n++)
+    batch->indices[batch->index_count++] = base_vertex + diamond[n];
+}
+
+/* Flame and smoke streaming off a body that is actually moving.
+ *
+ * The tail is laid along the effect's own retained world path rather than
+ * behind a heading derived from one frame: a lobbed fireball curves, and a
+ * straight tail pinned to an instantaneous velocity separates from the arc at
+ * exactly the moment the arc is most visible. Sample 0 is where the sprite is
+ * now and is left alone -- the glow already sits there -- so the tail starts
+ * one tick back and cools toward the oldest retained sample.
+ *
+ * Jitter is keyed on each sample's own world position, never on the array
+ * index or the pulse clock. A sample slides one slot further down the array
+ * every tick, so index-keyed noise would make the whole plume appear to crawl
+ * forward through itself while the fireball flew. Keyed on the position, a
+ * given puff of smoke keeps the offset it was born with and simply ages. */
+static bool AppendSimEffectTrail(
+    EffectBatch *batch, const FrameSlot *slot,
+    const SimEffectInstance *effect, const SimEffectStyle *style,
+    SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
+    const float matrix[16]) {
+  if (effect->trail_count < 2) return true;
+  unsigned puffs = style->trail_puffs_per_sample;
+  if (puffs > kSimMaxTrailPuffsPerSample)
+    puffs = kSimMaxTrailPuffsPerSample;
+  if (!puffs) return true;
+
+  unsigned samples = effect->trail_count;
+  if (samples > kSimEffectTrailSamples) samples = kSimEffectTrailSamples;
+
+  for (unsigned i = 1; i < samples; i++) {
+    /* Project this sample by moving the instance's world origin onto it; the
+     * local point, height and space all stay exactly as classified. */
+    /* Each sample carries the altitude the emitter had when it was taken, so
+     * a tail left by something in flight hangs in the air along the arc
+     * instead of being painted onto the ground beneath it. */
+    SimEffectLocalPoint local = effect->geometry.data.point;
+    local.height = effect->trail[i].height;
+    Scene3DPoint point;
+    float scale_x, scale_y;
+    if (!ProjectSimEffectPointAt(
+            slot, effect, effect->trail[i].world_x, effect->trail[i].world_y,
+            &local, source, viewport,
+            camera, matrix, &point, &scale_x, &scale_y))
+      continue;
+    float output_scale = (fabsf(scale_x) + fabsf(scale_y)) * 0.5f;
+    if (output_scale < 0.5f) output_scale = 0.5f;
+
+    /* Age along the tail, 0 at the head, normalised against the CAPACITY
+     * rather than against how much of it is filled. Absolute age is what a
+     * smoke plume needs: with the live count as the denominator a given puff
+     * would slide back toward 0 as the trail lengthened behind it, so the
+     * whole plume brightened while the fireball flew. It also keeps the
+     * oldest sample below 1, so a full trail still ends on something rather
+     * than on a wasted transparent quad. */
+    float t = (float)i / (float)kSimEffectTrailSamples;
+    /* How far this sample has crossed from flame to smoke. */
+    float cool = style->trail_flame_samples > 0.0f
+        ? (float)i / style->trail_flame_samples : 1.0f;
+    if (cool > 1.0f) cool = 1.0f;
+
+    SDL_FColor color;
+    color.r = style->particle_color.r +
+        (style->trail_smoke_color.r - style->particle_color.r) * cool;
+    color.g = style->particle_color.g +
+        (style->trail_smoke_color.g - style->particle_color.g) * cool;
+    color.b = style->particle_color.b +
+        (style->trail_smoke_color.b - style->particle_color.b) * cool;
+    color.a = style->particle_color.a +
+        (style->trail_smoke_color.a - style->particle_color.a) * cool;
+    /* Held, then dropped. A linear fade over a path this long makes the
+     * middle of the trajectory -- the part that shows where the fireball
+     * actually went -- the faintest thing on screen; 1 - t^2 keeps the first
+     * half close to full and spends the fade at the far end where the smoke
+     * is meant to be dissipating anyway. */
+    color.a *= (1.0f - t * t) * style->strength;
+
+    for (unsigned p = 0; p < puffs; p++) {
+      if (!EffectBatchReserve(batch, 4, 6)) return false;
+      uint32_t seed = EffectHash(
+          (uint32_t)effect->trail[i].world_x * 0x9E3779B9u ^
+          (uint32_t)effect->trail[i].world_y * 0x85EBCA6Bu ^
+          effect->generation * 0xC2B2AE35u ^ p * 0x27D4EB2Fu);
+      const float *direction = kEffectCircle32[(seed >> 16) & 31u];
+      /* Smoke swells and drifts outward as it cools; the flame end stays
+       * tight against the path. */
+      /* Smoke billows as it cools, and over a full throw's worth of path it
+       * has time to: the tail spreads several times as wide as the flame end
+       * rather than the little under twice a short tail managed. */
+      float spread = style->trail_spread * (0.25f + 3.2f * t) * output_scale;
+      float x = point.x + direction[0] * spread;
+      float y = point.y + direction[1] * spread * 0.5f -
+          /* Screen-upright buoyancy, so the plume lifts off the arc instead
+           * of tracing it exactly. */
+          (1.5f + 5.0f * t) * output_scale;
+      float size = style->trail_puff_radius * (0.5f + 2.8f * t) *
+          output_scale;
+      if (size < 0.75f) size = 0.75f;
+      AppendEffectQuad(batch, x, y, size, color);
+    }
+  }
+  return true;
+}
+
 static bool AppendSimEffectParticles(
     EffectBatch *batch, const FrameSlot *slot,
     const SimEffectInstance *effect, const SimEffectStyle *style,
     SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
     const float matrix[16]) {
   if (!effect->pulse_generation || effect->ticks_since_visible > 5) return true;
+  if (style->particle_motion == kSimEffectParticle_Trail)
+    return AppendSimEffectTrail(batch, slot, effect, style, source, viewport,
+                                camera, matrix);
   Scene3DPoint strike;
   float scale_x, scale_y;
   if (!ProjectSimEffectPoint(
@@ -625,18 +817,7 @@ static bool AppendSimEffectParticles(
     if (size < 0.75f) size = 0.75f;
     SDL_FColor color = style->particle_color;
     color.a *= (1.0f - t) * style->strength;
-    int base_vertex = batch->vertex_count;
-    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
-      { x, y - size }, color, { 0.0f, 0.0f } };
-    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
-      { x + size, y }, color, { 0.0f, 0.0f } };
-    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
-      { x, y + size }, color, { 0.0f, 0.0f } };
-    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
-      { x - size, y }, color, { 0.0f, 0.0f } };
-    static const int diamond[] = { 0, 1, 2, 0, 2, 3 };
-    for (int n = 0; n < 6; n++)
-      batch->indices[batch->index_count++] = base_vertex + diamond[n];
+    AppendEffectQuad(batch, x, y, size, color);
   }
   return true;
 }
@@ -709,11 +890,16 @@ static void DrawSimEffectParticles(
       !EffectRendererAvailable())
     return;
   enum {
-    kVertices = kSimMaxEffectInstances * kSimMaxParticlesPerEffect * 4,
-    kIndices = kSimMaxEffectInstances * kSimMaxParticlesPerEffect * 6,
+    kVertices = kSimMaxEffectInstances * kSimMaxEffectQuadsPerEffect * 4,
+    kIndices = kSimMaxEffectInstances * kSimMaxEffectQuadsPerEffect * 6,
   };
-  SDL_Vertex vertices[kVertices];
-  int indices[kIndices];
+  /* Static, not automatic. A trail long enough to show a whole eruption throw
+   * makes the worst case a third of a megabyte, which is more than a render
+   * thread's stack should be asked for -- and sizing the visual to fit a
+   * stack frame is the wrong trade. Safe because this runs only on the
+   * present thread, once per frame, and the batch does not outlive the call. */
+  static SDL_Vertex vertices[kVertices];
+  static int indices[kIndices];
   EffectBatch batch = {
     .vertices = vertices, .indices = indices,
     .vertex_capacity = kVertices, .index_capacity = kIndices,
@@ -959,6 +1145,24 @@ static void BlurSimShadowMask(SDL_Texture *mask, int w, int h,
   BlurSimShadowAxis(s_sim_shadow_scratch, mask, w, h, radius, false);
 }
 
+/* Where an object is actually DRAWN, in authentic map pixels.
+ *
+ * A presentation stage may hold art away from the record's own cell for part
+ * of its life (the eruption fountain launches a fireball from the crater and
+ * converges it home), and every consumer that asks "where is this" has to get
+ * the same answer -- above all the depth sort. Sorting on the record's
+ * position while drawing somewhere else puts the art in front of geometry it
+ * is visually behind, and the error grows with the offset. */
+static void SimObjectDrawnWorld(const SimRenderObject *object,
+                                int *world_x, int *world_y) {
+  bool foot_anchor = object->tier == kSimRecordTier_World &&
+      !(object->traits & kSimObjectTrait_RecordOriginAnchor);
+  *world_x = (foot_anchor ? object->foot_x : object->world_x) +
+      object->offset_x;
+  *world_y = (foot_anchor ? object->foot_y : object->world_y) +
+      object->offset_y;
+}
+
 /* Silhouettes are accumulated into a transparent mask and composited once, so
  * overlapping casters cannot double-darken the ground and the darkened result
  * can never touch sky, dialogs, HUD, or settings. */
@@ -1005,15 +1209,18 @@ static void DrawSimShadowMask(
 
   for (size_t i = 0; i < slot->sim.object_count; i++) {
     const SimRenderObject *object = &slot->sim.objects[i];
-    if (!Sim3D_ObjectCastsShadow(object)) continue;
+    if (object->hidden || !Sim3D_ObjectCastsShadow(object)) continue;
 
+    /* foot_dx/foot_dy are needed below for the silhouette's own local
+     * coordinates, so this keeps the split form rather than collapsing to
+     * SimObjectDrawnWorld -- but it applies the same presentation offset. */
     bool foot_anchor = !(object->traits & kSimObjectTrait_RecordOriginAnchor);
     int foot_dx = foot_anchor ? object->foot_x - (int)object->world_x : 0;
     int foot_dy = foot_anchor ? object->foot_y - (int)object->world_y : 0;
     int screen_anchor_x = (int16_t)(uint16_t)(
-        object->world_x + foot_dx - slot->sim.camera_x);
+        object->world_x + object->offset_x + foot_dx - slot->sim.camera_x);
     int screen_anchor_y = (int16_t)(uint16_t)(
-        object->world_y + foot_dy - slot->sim.camera_y);
+        object->world_y + object->offset_y + foot_dy - slot->sim.camera_y);
     float texture_anchor_x = slot->ws_extra + screen_anchor_x;
     float texture_anchor_y = screen_anchor_y;
     float anchor_world_x =
@@ -1165,13 +1372,12 @@ typedef enum SimObjectSelectionFilter {
   kSimObjectSelection_Only,
 } SimObjectSelectionFilter;
 
+
 static float SimObjectGroundDepth(
     const FrameSlot *slot, const SimRenderObject *object,
     SDL_Rect source, SDL_Rect viewport, const float matrix[16]) {
-  bool foot_anchor = object->tier == kSimRecordTier_World &&
-      !(object->traits & kSimObjectTrait_RecordOriginAnchor);
-  int world_x = foot_anchor ? object->foot_x : object->world_x;
-  int world_y = foot_anchor ? object->foot_y : object->world_y;
+  int world_x, world_y;
+  SimObjectDrawnWorld(object, &world_x, &world_y);
   int screen_x = (int16_t)(uint16_t)(world_x - slot->sim.camera_x);
   int screen_y = (int16_t)(uint16_t)(world_y - slot->sim.camera_y);
   float texture_x = slot->ws_extra + screen_x;
@@ -1194,10 +1400,11 @@ typedef enum SimObjectTerrainFilter {
  * foot_x/foot_y interchangeably with world_x/world_y -- so its cell is one
  * shift away, and the published scene answers whether that cell is mountain. */
 static bool SimObjectOnMountainTerrain(const SimRenderObject *object) {
-  bool foot_anchor = object->tier == kSimRecordTier_World &&
-      !(object->traits & kSimObjectTrait_RecordOriginAnchor);
-  int map_x = foot_anchor ? object->foot_x : (int)object->world_x;
-  int map_y = foot_anchor ? object->foot_y : (int)object->world_y;
+  /* The DRAWN cell, for the same reason the depth sort uses it: this decides
+   * which side of the terrain art the sprite composes on, and art held away
+   * from its record's cell has to be tested where it actually appears. */
+  int map_x, map_y;
+  SimObjectDrawnWorld(object, &map_x, &map_y);
   int cell_x = map_x / kSimTownCellPixels;
   int cell_y = map_y / kSimTownCellPixels;
   /* Draw above the terrain art when standing ON a mountain, and also when no
@@ -1341,14 +1548,16 @@ static void DrawSimObjectPriorityFiltered(
      * colour-math alpha, and map-plane art lies on the ground rather than
      * standing up, so it has no silhouette to light. */
     if (pass && (object->traits & kSimObjectTrait_MapPlane)) continue;
+    /* Art the ROM emits that this view must not draw. */
+    if (object->hidden) continue;
     bool half_add = !pass && slot->sim.object_half_add &&
         object->color_math_eligible;
     SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, half_add ? 128 : 255);
 
     int record_screen_x = (int16_t)(uint16_t)(
-        object->world_x - slot->sim.camera_x);
+        object->world_x + object->offset_x - slot->sim.camera_x);
     int record_screen_y = (int16_t)(uint16_t)(
-        object->world_y - slot->sim.camera_y);
+        object->world_y + object->offset_y - slot->sim.camera_y);
     if (project_world && (object->traits & kSimObjectTrait_MapPlane)) {
       DrawSimMapPlaneObject(object, slot->ws_extra + record_screen_x,
                             record_screen_y, source, viewport, matrix);
@@ -1370,9 +1579,12 @@ static void DrawSimObjectPriorityFiltered(
     float texture_anchor_y = screen_anchor_y;
     float scale_x = flat_scale_x;
     float scale_y = flat_scale_y;
+    /* Hoisted so the trajectory sample below can start from the same altitude
+     * the billboard was placed at. */
+    float height_world = 0.0f;
     Scene3DPoint anchor;
     if (project_world && object->tier == kSimRecordTier_World) {
-      float height_world = virtual_height
+      height_world = virtual_height
           ? SimHeightWorldUnits(source, object->virtual_height,
                                 slot->sim.height_scale_x100)
           : 0.0f;
@@ -1433,9 +1645,46 @@ static void DrawSimObjectPriorityFiltered(
       destination.x += pass->offset_x;
       destination.y += pass->offset_y;
     }
-    if (destination.w > 0.0f && destination.h > 0.0f)
-      SDL_RenderTexture(g_renderer, g_sim_obj_atlas_texture,
-                        &atlas, &destination);
+    if (destination.w <= 0.0f || destination.h <= 0.0f) continue;
+
+    /* Art that is travelling points along its own trajectory. The direction
+     * has to be resolved in SCREEN space, not map space: the same throw leans
+     * differently under yaw and pitch, so the published travel vector is
+     * projected through the live camera and the angle read off the result. A
+     * fireball drawn upright while flying a ballistic arc reads as a sprite
+     * being slid around rather than something thrown. */
+    if (project_world && object->travel_valid) {
+      Scene3DPoint ahead;
+      float ignored_x, ignored_y;
+      /* A short step along the tangent: near enough that this is the tangent
+       * rather than a chord, far enough to survive the projection's rounding. */
+      const float kStep = 0.25f;
+      float ahead_height = height_world +
+          object->travel_height * kStep / (float)source.h;
+      if (ProjectSimAnchorAndScale(
+              matrix, source, viewport,
+              texture_anchor_x + object->travel_x * kStep,
+              texture_anchor_y + object->travel_y * kStep,
+              ahead_height, Scene3D_AutoFitDistance(camera->fov_y),
+              &ahead, &ignored_x, &ignored_y)) {
+        float dx = ahead.x - anchor.x, dy = ahead.y - anchor.y;
+        if (dx * dx + dy * dy > 0.0001f) {
+          /* The art LEADS with its bright head and trails its flame behind,
+           * and in the authored falling frame the head is the LOWER of the
+           * two tiles -- so the sprite's forward is +Y, not -Y. Mapping +Y
+           * onto the heading is a quarter turn the other way; taking -Y as
+           * forward points every fireball backwards along its own arc. SDL
+           * rotates clockwise about the destination's centre. */
+          double degrees = atan2((double)dy, (double)dx) * 57.29577951 - 90.0;
+          SDL_RenderTextureRotated(g_renderer, g_sim_obj_atlas_texture,
+                                   &atlas, &destination, degrees, NULL,
+                                   SDL_FLIP_NONE);
+          continue;
+        }
+      }
+    }
+    SDL_RenderTexture(g_renderer, g_sim_obj_atlas_texture,
+                      &atlas, &destination);
   }
   SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, 255);
 }
@@ -2838,6 +3087,36 @@ static bool SimPlaneIsMenu(int plane) {
       plane == kSim3DPlane_Bg2High;
 }
 
+/* Hand the volcano's drawn crater mouth to the metadata producer, so the
+ * eruption's fireball arcs launch from the point the player sees smoking.
+ *
+ * Two conversions, both of which have to happen HERE because this is the only
+ * place both conventions are in scope. The models' local x is relative to
+ * `underlay_screen_x0` while an effect's world x is relative to the
+ * widescreen margin, so the difference is the column offset between them;
+ * local y needs none, because the models' y origin is `-camera_y`, exactly
+ * what an effect's world y is measured against. And the models put a height
+ * straight into world z while SimHeightWorldUnits scales one by the user's
+ * sim3d height setting first, so the published height is pre-divided by it --
+ * without that, raising the setting would lift the fireballs off the crater
+ * they are supposed to be coming out of. */
+static void PublishSimCraterAnchor(const FrameSlot *slot) {
+  SimBackgroundCraterAnchor anchor;
+  if (!SimBackgroundVoxelRenderer_CraterAnchor(&anchor) || !anchor.valid) {
+    SimRenderMetadata_SetEruptionCraterAnchor(false, 0, 0, 0);
+    return;
+  }
+  unsigned scale = slot->sim.height_scale_x100;
+  if (!scale) scale = kPercentScale;
+  float height = anchor.height_pixels * (float)kPercentScale / (float)scale;
+  SimRenderMetadata_SetEruptionCraterAnchor(
+      true,
+      (int16_t)lroundf(anchor.local_x +
+                       (float)slot->sim.underlay_screen_x0 - slot->ws_extra),
+      (int16_t)lroundf(anchor.local_y),
+      (int16_t)lroundf(height));
+}
+
 static void RenderSimProfile(const FrameSlot *slot,
                              SimRenderFeatureMask features,
                              SDL_Rect source, SDL_Rect viewport,
@@ -3129,6 +3408,7 @@ void PresentSim3D(const FrameSlot *slot) {
   RenderSimProfile(slot, slot->sim.effective_features, source, viewport,
                    &viewport);
   SDL_SetRenderClipRect(g_renderer, NULL);
+  PublishSimCraterAnchor(slot);
 
   /* A full SIM capture temporarily supersedes the normal widescreen town-HUD
    * owners. sim3d.c republishes their exact buffers and removes those pixels
